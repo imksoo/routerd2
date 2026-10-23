@@ -1,0 +1,306 @@
+// Package control is the single writer of committed configuration. All network
+// changes pass through its revision check; the network worker owns kernel objects.
+package control
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"path/filepath"
+	"sync"
+	"time"
+
+	"github.com/imksoo/routerd2/internal/config"
+	"github.com/imksoo/routerd2/internal/localapi"
+	"github.com/imksoo/routerd2/internal/network"
+)
+
+const SocketName = "control.sock"
+const NetworkSocketName = "network.sock"
+
+type ApplyRequest struct {
+	Revision uint64          `json:"revision"`
+	Desired  network.Desired `json:"desired"`
+}
+
+type CommitRequest struct {
+	ExpectedRevision      uint64          `json:"expected_revision"`
+	RequestID             string          `json:"request_id"`
+	Config                config.Document `json:"config"`
+	ConfirmTimeoutSeconds int             `json:"confirm_timeout_seconds,omitempty"`
+}
+
+type ConfirmRequest struct {
+	Revision  uint64 `json:"revision"`
+	RequestID string `json:"request_id"`
+}
+
+type State struct {
+	config.Committed
+	Healthy       bool   `json:"healthy"`
+	LastError     string `json:"last_error,omitempty"`
+	ProducerEpoch string `json:"producer_epoch"`
+	Sequence      uint64 `json:"sequence"`
+}
+
+type Event struct {
+	ProducerEpoch string `json:"producer_epoch"`
+	Sequence      uint64 `json:"sequence"`
+	Revision      uint64 `json:"config_revision"`
+	RequestID     string `json:"request_id,omitempty"`
+	Type          string `json:"type"`
+}
+
+type Changes struct {
+	ProducerEpoch string  `json:"producer_epoch"`
+	Sequence      uint64  `json:"sequence"`
+	Reset         bool    `json:"reset"`
+	Events        []Event `json:"events"`
+}
+
+type Network interface {
+	Apply(context.Context, uint64, network.Desired) error
+	Snapshot(context.Context) (network.Snapshot, error)
+}
+
+type NetworkClient struct{ client *localapi.Client }
+
+func NewNetworkClient(dir string) *NetworkClient {
+	return &NetworkClient{localapi.NewClient(filepath.Join(dir, NetworkSocketName))}
+}
+func (n *NetworkClient) Apply(ctx context.Context, rev uint64, d network.Desired) error {
+	return n.client.Do(ctx, http.MethodPost, "/v1/apply", ApplyRequest{rev, d}, nil)
+}
+func (n *NetworkClient) Snapshot(ctx context.Context) (s network.Snapshot, err error) {
+	err = n.client.Do(ctx, http.MethodGet, "/v1/snapshot", nil, &s)
+	return
+}
+
+type Engine struct {
+	mu      sync.Mutex
+	store   *config.Store
+	network Network
+	state   State
+	events  []Event
+}
+
+func New(store *config.Store, current config.Committed, n Network) *Engine {
+	var epoch [16]byte
+	if _, err := rand.Read(epoch[:]); err != nil {
+		panic(err)
+	}
+	return &Engine{store: store, network: n, state: State{Committed: current, ProducerEpoch: hex.EncodeToString(epoch[:])}}
+}
+
+func (e *Engine) State() State { e.mu.Lock(); defer e.mu.Unlock(); return e.state }
+
+// Reconcile deliberately restores only the durable committed revision. A pending
+// revision left by a crash is not evidence that its kernel mutations completed.
+func (e *Engine) Reconcile(ctx context.Context) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.state.Confirmation != nil {
+		return e.rollbackConfirmation(ctx, "restart")
+	}
+	if err := e.network.Apply(ctx, e.state.Revision, e.state.Config.Network); err != nil {
+		e.state.Healthy = false
+		e.state.LastError = err.Error()
+		return err
+	}
+	if err := e.store.ClearPending(); err != nil {
+		return err
+	}
+	e.state.Healthy = true
+	e.state.LastError = ""
+	e.record("reconciled", "")
+	return nil
+}
+
+var ErrConflict = errors.New("configuration revision conflict")
+var ErrInvalid = errors.New("invalid configuration request")
+
+func (e *Engine) Commit(ctx context.Context, r CommitRequest) (State, error) {
+	if len(r.RequestID) < 1 || len(r.RequestID) > 128 {
+		return State{}, fmt.Errorf("%w: request_id must contain 1..128 bytes", ErrInvalid)
+	}
+	if err := config.Validate(r.Config); err != nil {
+		return State{}, fmt.Errorf("%w: %v", ErrInvalid, err)
+	}
+	if r.ConfirmTimeoutSeconds != 0 && (r.ConfirmTimeoutSeconds < 5 || r.ConfirmTimeoutSeconds > 3600) {
+		return State{}, fmt.Errorf("%w: confirmation timeout must be 5..3600 seconds", ErrInvalid)
+	}
+	b, _ := json.Marshal(struct {
+		Config  config.Document
+		Timeout int
+	}{r.Config, r.ConfirmTimeoutSeconds})
+	hash := sha256.Sum256(b)
+	digest := hex.EncodeToString(hash[:])
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if r.RequestID == e.state.LastRequestID {
+		if digest != e.state.LastRequestHash {
+			return e.state, fmt.Errorf("%w: request_id reused with different configuration", ErrConflict)
+		}
+		return e.state, nil
+	}
+	if e.state.Confirmation != nil {
+		return e.state, fmt.Errorf("%w: confirm or roll back the pending revision before another commit", ErrConflict)
+	}
+	if r.ExpectedRevision != e.state.Revision {
+		return e.state, fmt.Errorf("%w: have %d, expected %d", ErrConflict, e.state.Revision, r.ExpectedRevision)
+	}
+	if e.state.Revision == ^uint64(0) {
+		return e.state, errors.New("configuration revision exhausted")
+	}
+	previous := e.state.Committed
+	next := config.Committed{Revision: previous.Revision + 1, Config: r.Config, LastRequestID: r.RequestID, LastRequestHash: digest}
+	if r.ConfirmTimeoutSeconds > 0 {
+		next.Confirmation = &config.Confirmation{Previous: previous.Config, PreviousRevision: previous.Revision, Deadline: time.Now().Add(time.Duration(r.ConfirmTimeoutSeconds) * time.Second).UTC(), RequestID: r.RequestID}
+	}
+	if err := e.store.Stage(next); err != nil {
+		return e.state, fmt.Errorf("stage configuration: %w", err)
+	}
+	if err := e.network.Apply(ctx, next.Revision, next.Config.Network); err != nil {
+		return e.state, e.restore(previous, r.RequestID, fmt.Errorf("apply candidate: %w", err))
+	}
+	if err := e.store.Save(next); err != nil {
+		// An fsync error may follow a successful rename. Rewrite the previous
+		// committed record as well as its kernel projection before declaring a rollback.
+		return e.state, e.restore(previous, r.RequestID, fmt.Errorf("persist candidate: %w", err))
+	}
+	e.state.Committed = next
+	e.state.Healthy = true
+	e.state.LastError = ""
+	e.record("committed", r.RequestID)
+	if err := e.store.ClearPending(); err != nil {
+		// The committed record is authoritative. Recovery will reconcile it,
+		// so stale pending metadata must not cause a successful commit to be repeated.
+		e.state.LastError = "committed; pending journal cleanup: " + err.Error()
+	}
+	return e.state, nil
+}
+
+// Confirm makes an already-applied candidate durable across future restarts.
+// Revision and request ID tie the acknowledgement to that exact candidate.
+func (e *Engine) Confirm(r ConfirmRequest) (State, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if r.Revision != e.state.Revision || r.RequestID == "" || r.RequestID != e.state.LastRequestID {
+		return e.state, fmt.Errorf("%w: confirmation does not identify the current revision", ErrConflict)
+	}
+	if !e.state.Healthy {
+		return e.state, errors.New("cannot confirm while the applied state is degraded")
+	}
+	if e.state.Confirmation == nil {
+		return e.state, nil
+	}
+	if !time.Now().Before(e.state.Confirmation.Deadline) {
+		return e.state, fmt.Errorf("%w: confirmation deadline expired", ErrConflict)
+	}
+	next := e.state.Committed
+	next.Confirmation = nil
+	if err := e.store.Save(next); err != nil {
+		e.state.Healthy = false
+		e.state.LastError = err.Error()
+		return e.state, err
+	}
+	e.state.Committed = next
+	e.record("confirmed", r.RequestID)
+	return e.state, nil
+}
+
+// Expire runs in the control worker, independent of an SSH session. Failure is
+// retried; no new commits/confirmations may hide an unsuccessful rollback.
+func (e *Engine) Expire(ctx context.Context, now time.Time) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.state.Confirmation == nil || now.Before(e.state.Confirmation.Deadline) {
+		return nil
+	}
+	return e.rollbackConfirmation(ctx, "timeout")
+}
+
+func (e *Engine) rollbackConfirmation(ctx context.Context, reason string) error {
+	p := e.state.Confirmation
+	if p == nil {
+		return nil
+	}
+	if e.state.Revision == ^uint64(0) {
+		return errors.New("configuration revision exhausted")
+	}
+	// Rollback is itself a new public revision, so a candidate opened during
+	// the trial cannot overwrite the recovered configuration using a stale token.
+	next := config.Committed{Revision: e.state.Revision + 1, Config: p.Previous}
+	if err := e.network.Apply(ctx, next.Revision, next.Config.Network); err != nil {
+		e.state.Healthy = false
+		e.state.LastError = "confirmation rollback: " + err.Error()
+		return err
+	}
+	if err := e.store.Save(next); err != nil {
+		e.state.Healthy = false
+		e.state.LastError = "persist confirmation rollback: " + err.Error()
+		return err
+	}
+	e.state.Committed = next
+	e.state.Healthy = true
+	e.state.LastError = ""
+	e.record("rolled_back_"+reason, p.RequestID)
+	if err := e.store.ClearPending(); err != nil {
+		e.state.LastError = err.Error()
+	}
+	return nil
+}
+
+func (e *Engine) restore(previous config.Committed, id string, cause error) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	rollbackErr := e.network.Apply(ctx, previous.Revision, previous.Config.Network)
+	persistErr := e.store.Save(previous)
+	e.state.Healthy = rollbackErr == nil && persistErr == nil
+	if e.state.Healthy {
+		if err := e.store.ClearPending(); err != nil {
+			persistErr = err
+			e.state.Healthy = false
+		}
+	}
+	if rollbackErr != nil {
+		cause = errors.Join(cause, fmt.Errorf("kernel rollback failed: %w", rollbackErr))
+	}
+	if persistErr != nil {
+		cause = errors.Join(cause, fmt.Errorf("configuration rollback persistence failed: %w", persistErr))
+	}
+	e.state.LastError = cause.Error()
+	e.record("rejected", id)
+	return cause
+}
+
+func (e *Engine) record(kind, id string) {
+	e.state.Sequence++
+	e.events = append(e.events, Event{e.state.ProducerEpoch, e.state.Sequence, e.state.Revision, id, kind})
+	if len(e.events) > 256 {
+		e.events = append([]Event(nil), e.events[len(e.events)-256:]...)
+	}
+}
+
+// Changes is bounded and epoch-aware. Consumers take /v1/config again on Reset,
+// including after producer restart. Events are hints, never the source of truth.
+func (e *Engine) Changes(epoch string, after uint64) Changes {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	c := Changes{ProducerEpoch: e.state.ProducerEpoch, Sequence: e.state.Sequence, Events: []Event{}}
+	if epoch != e.state.ProducerEpoch || after > e.state.Sequence || (len(e.events) > 0 && after < e.events[0].Sequence-1) {
+		c.Reset = true
+		return c
+	}
+	for _, event := range e.events {
+		if event.Sequence > after {
+			c.Events = append(c.Events, event)
+		}
+	}
+	return c
+}

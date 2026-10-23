@@ -1,0 +1,9 @@
+/bin/
+/dist/
+/out/
+/.cache/
+*.test
+*.cover
+coverage.out
+__pycache__/
+*.pyc

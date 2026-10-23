@@ -1,0 +1,853 @@
+package network
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"sync"
+)
+
+var errLinkNotFound = errors.New("link not found")
+
+const tunnelAlias = "routerd2:ds-lite:v1"
+
+type settingKey struct {
+	Kind      string `json:"kind"`
+	Interface string `json:"interface,omitempty"`
+}
+type ownedSetting struct {
+	Key    settingKey `json:"key"`
+	Before int        `json:"before"`
+	Last   int        `json:"last"`
+}
+type ownedAddress struct {
+	Interface string `json:"interface"`
+	Address   string `json:"address"`
+}
+type journal struct {
+	Version           int            `json:"version"`
+	Revision          uint64         `json:"revision"`
+	AttemptedRevision uint64         `json:"attempted_revision"`
+	Desired           Desired        `json:"desired"`
+	Attempted         *Desired       `json:"attempted,omitempty"`
+	Status            string         `json:"status"`
+	LastError         string         `json:"last_error,omitempty"`
+	Addresses         []ownedAddress `json:"addresses,omitempty"`
+	Routes            []Route        `json:"routes,omitempty"`
+	Tunnels           []DSLite       `json:"tunnels,omitempty"`
+	Settings          []ownedSetting `json:"settings,omitempty"`
+	FirewallOwned     bool           `json:"firewall_owned"`
+}
+
+// kernel is private: protocol modules use Desired, never netlink objects or
+// shell fragments. A fake implementation exercises ownership without root.
+type kernel interface {
+	Interface(string) (InterfaceState, error)
+	AddAddress(string, string) error
+	DeleteAddress(string, string) error
+	Routes(int) ([]RouteState, error)
+	AddRoute(Route) error
+	DeleteRoute(Route) error
+	CreateDSLite(DSLite) error
+	UpdateDSLite(DSLite) error
+	DeleteDSLite(string) error
+	ReadSetting(settingKey) (int, error)
+	WriteSetting(settingKey, int) error
+	Firewall() (FirewallState, error)
+	ReplaceFirewall(*Firewall) error
+}
+
+type Engine struct {
+	mu     sync.Mutex
+	opts   Options
+	kernel kernel
+	state  journal
+	lock   *os.File
+}
+
+// New locks the ownership journal and reads it. It makes no kernel changes.
+// Call Close when the worker stops. Kernel operations use the worker's network
+// namespace; the process must not switch namespaces while the engine is active.
+func New(opts Options) (*Engine, error) {
+	k, err := newKernel()
+	if err != nil {
+		return nil, err
+	}
+	return newEngine(opts, k)
+}
+
+func newEngine(opts Options, k kernel) (*Engine, error) {
+	if opts.StatePath == "" || !filepath.IsAbs(opts.StatePath) {
+		return nil, errors.New("network: StatePath must be absolute and persistent")
+	}
+	if err := os.MkdirAll(filepath.Dir(opts.StatePath), 0700); err != nil {
+		return nil, fmt.Errorf("network state directory: %w", err)
+	}
+	f, err := os.OpenFile(opts.StatePath+".lock", os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return nil, err
+	}
+	if err = lockJournal(f); err != nil {
+		f.Close()
+		return nil, fmt.Errorf("network journal already in use or cannot be locked: %w", err)
+	}
+	e := &Engine{opts: opts, kernel: k, lock: f, state: journal{Version: 1, Status: "unapplied"}}
+	b, err := os.ReadFile(opts.StatePath)
+	if err == nil {
+		if err = json.Unmarshal(b, &e.state); err != nil {
+			f.Close()
+			return nil, fmt.Errorf("network ownership journal: %w", err)
+		}
+		if e.state.Version != 1 {
+			f.Close()
+			return nil, fmt.Errorf("unsupported network journal version %d", e.state.Version)
+		}
+		if err = validateJournal(e.state); err != nil {
+			f.Close()
+			return nil, fmt.Errorf("invalid network ownership journal: %w", err)
+		}
+		if e.state.Status == "applying" {
+			e.state.Status = "degraded"
+			e.state.LastError = "previous apply was interrupted; reconcile the committed configuration"
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		f.Close()
+		return nil, err
+	}
+	return e, nil
+}
+
+func validateJournal(s journal) error {
+	if err := Validate(s.Desired); err != nil {
+		return err
+	}
+	if s.Attempted != nil {
+		if err := Validate(*s.Attempted); err != nil {
+			return err
+		}
+	}
+	for _, a := range s.Addresses {
+		if err := Validate(Desired{Interfaces: []Interface{{Name: a.Interface, Addresses: []string{a.Address}}}}); err != nil {
+			return err
+		}
+	}
+	if err := Validate(Desired{Routes: s.Routes, DSLite: s.Tunnels}); err != nil {
+		return err
+	}
+	for _, v := range s.Settings {
+		switch v.Key.Kind {
+		case "mtu":
+			if !validName(v.Key.Interface) || v.Before < 68 || v.Before > 65535 || v.Last < 68 || v.Last > 65535 {
+				return fmt.Errorf("invalid saved MTU")
+			}
+		case "up":
+			if !validName(v.Key.Interface) || v.Before < 0 || v.Before > 1 || v.Last < 0 || v.Last > 1 {
+				return fmt.Errorf("invalid saved link state")
+			}
+		case "forwarding4", "forwarding6":
+			if v.Key.Interface != "" || v.Before < 0 || v.Before > 1 || v.Last < 0 || v.Last > 1 {
+				return fmt.Errorf("invalid saved forwarding setting")
+			}
+		default:
+			return fmt.Errorf("unknown setting kind %q", v.Key.Kind)
+		}
+	}
+	return nil
+}
+
+func (e *Engine) Close() error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.lock == nil {
+		return nil
+	}
+	err := e.lock.Close()
+	e.lock = nil
+	return err
+}
+
+func cloneDesired(d Desired) Desired {
+	b, _ := json.Marshal(d)
+	var out Desired
+	_ = json.Unmarshal(b, &out)
+	return out
+}
+
+// Apply accepts older and equal revisions so the control plane can reconcile a
+// committed revision after a failed candidate or worker restart. The caller is
+// responsible for revision concurrency. A failure never implies rollback.
+func (e *Engine) Apply(ctx context.Context, revision uint64, desired Desired) (Snapshot, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.lock == nil {
+		return Snapshot{}, errors.New("network engine is closed")
+	}
+	if err := Validate(desired); err != nil {
+		return e.snapshotLocked(ctx), err
+	}
+	if err := ctx.Err(); err != nil {
+		return e.snapshotLocked(ctx), err
+	}
+	d := normalized(cloneDesired(desired))
+	e.state.AttemptedRevision, e.state.Attempted = revision, &d
+	e.state.Status, e.state.LastError = "applying", ""
+	if err := e.save(); err != nil {
+		return e.snapshotLocked(ctx), &ApplyError{Stage: "journal", Err: err}
+	}
+	p := &apply{e: e, ctx: ctx}
+	err := p.reconcile(d)
+	if err == nil {
+		previousRevision, previousDesired := e.state.Revision, e.state.Desired
+		e.state.Revision, e.state.Desired = revision, d
+		e.state.Status, e.state.Attempted = "applied", nil
+		if saveErr := e.save(); saveErr != nil {
+			e.state.Revision, e.state.Desired = previousRevision, previousDesired
+			e.state.Attempted = &d
+			err = &ApplyError{Stage: "journal finalization", Partial: p.changed > 0, Err: saveErr}
+		}
+	}
+	if err != nil {
+		e.state.Status, e.state.LastError = "degraded", err.Error()
+		if saveErr := e.save(); saveErr != nil {
+			err = errors.Join(err, fmt.Errorf("persist degraded state: %w", saveErr))
+		}
+	}
+	return e.snapshotLocked(ctx), err
+}
+
+func (e *Engine) Snapshot(ctx context.Context) (Snapshot, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.lock == nil {
+		return Snapshot{}, errors.New("network engine is closed")
+	}
+	s := e.snapshotLocked(ctx)
+	if len(s.ObservationErrors) != 0 {
+		return s, fmt.Errorf("network observation incomplete: %v", s.ObservationErrors)
+	}
+	return s, nil
+}
+
+func (e *Engine) snapshotLocked(ctx context.Context) Snapshot {
+	s := Snapshot{Revision: e.state.Revision, AttemptedRevision: e.state.AttemptedRevision, Status: e.state.Status, Desired: cloneDesired(e.state.Desired), LastError: e.state.LastError, Firewall: FirewallState{Table: FirewallTable}}
+	problem := func(err error) {
+		if err != nil {
+			s.ObservationErrors = append(s.ObservationErrors, err.Error())
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		problem(err)
+		return s
+	}
+	names, tables := map[string]bool{}, map[int]bool{}
+	collect := func(d Desired) {
+		for _, l := range d.Interfaces {
+			names[l.Name] = true
+		}
+		for _, t := range d.DSLite {
+			names[t.Name] = true
+			names[t.Underlay] = true
+		}
+		for _, r := range d.Routes {
+			names[r.Interface] = true
+			tables[routeTable(r)] = true
+		}
+	}
+	collect(e.state.Desired)
+	if e.state.Attempted != nil {
+		collect(*e.state.Attempted)
+	}
+	for _, a := range e.state.Addresses {
+		names[a.Interface] = true
+	}
+	for _, t := range e.state.Tunnels {
+		names[t.Name] = true
+	}
+	for _, r := range e.state.Routes {
+		tables[routeTable(r)] = true
+	}
+	ordered := make([]string, 0, len(names))
+	for n := range names {
+		ordered = append(ordered, n)
+	}
+	sort.Strings(ordered)
+	for _, n := range ordered {
+		l, err := e.kernel.Interface(n)
+		if err != nil {
+			problem(fmt.Errorf("interface %s: %w", n, err))
+			continue
+		}
+		for i := range l.Addresses {
+			l.Addresses[i].Owned = e.ownsAddress(ownedAddress{n, l.Addresses[i].Address})
+		}
+		s.Interfaces = append(s.Interfaces, l)
+	}
+	tableIDs := make([]int, 0, len(tables))
+	for t := range tables {
+		tableIDs = append(tableIDs, t)
+	}
+	sort.Ints(tableIDs)
+	for _, t := range tableIDs {
+		rs, err := e.kernel.Routes(t)
+		problem(err)
+		for _, r := range rs {
+			r.Owned = e.ownsRoute(r)
+			s.Routes = append(s.Routes, r)
+		}
+	}
+	v, err := e.kernel.ReadSetting(settingKey{Kind: "forwarding4"})
+	problem(err)
+	s.Forwarding.IPv4 = v == 1
+	v, err = e.kernel.ReadSetting(settingKey{Kind: "forwarding6"})
+	problem(err)
+	s.Forwarding.IPv6 = v == 1
+	fw, err := e.kernel.Firewall()
+	problem(err)
+	if err == nil {
+		fw.Owned = fw.Owned && e.state.FirewallOwned
+		s.Firewall = fw
+	}
+	return s
+}
+
+func (e *Engine) save() error {
+	dir := filepath.Dir(e.opts.StatePath)
+	f, err := os.CreateTemp(dir, ".network-state-*")
+	if err != nil {
+		return err
+	}
+	name := f.Name()
+	defer os.Remove(name)
+	enc := json.NewEncoder(f)
+	enc.SetIndent("", "  ")
+	if err = enc.Encode(e.state); err == nil {
+		err = f.Sync()
+	}
+	closeErr := f.Close()
+	if err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return err
+	}
+	if err = os.Rename(name, e.opts.StatePath); err != nil {
+		return err
+	}
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return d.Sync()
+}
+
+func (e *Engine) ownsAddress(a ownedAddress) bool {
+	for _, v := range e.state.Addresses {
+		if v == a {
+			return true
+		}
+	}
+	return false
+}
+func routeMatches(live RouteState, want Route) bool {
+	return live.Route == want && live.Protocol == RouteProtocol && live.Type == 1 && live.Source == "" && !live.Multipath && !live.Advanced
+}
+func (e *Engine) ownsRoute(r RouteState) bool {
+	for _, v := range e.state.Routes {
+		if routeMatches(r, v) {
+			return true
+		}
+	}
+	return false
+}
+
+type apply struct {
+	e       *Engine
+	ctx     context.Context
+	changed int
+}
+
+func (p *apply) failure(stage string, err error) error {
+	return &ApplyError{Stage: stage, Partial: p.changed > 0, Err: err}
+}
+func (p *apply) change(stage string, fn func() error, record func()) error {
+	if err := p.ctx.Err(); err != nil {
+		return p.failure(stage, err)
+	}
+	if err := fn(); err != nil {
+		return p.failure(stage, err)
+	}
+	p.changed++
+	if record != nil {
+		record()
+	}
+	if err := p.e.save(); err != nil {
+		return p.failure(stage+" journal", err)
+	}
+	return nil
+}
+func (p *apply) checkpoint(stage string) error {
+	if err := p.e.save(); err != nil {
+		return p.failure(stage, err)
+	}
+	return nil
+}
+
+func (p *apply) reconcile(d Desired) error {
+	wantedSettings := map[settingKey]int{}
+	for _, l := range d.Interfaces {
+		wantedSettings[settingKey{Kind: "up", Interface: l.Name}] = 1
+		if l.MTU != 0 {
+			wantedSettings[settingKey{Kind: "mtu", Interface: l.Name}] = l.MTU
+		}
+	}
+	for _, t := range d.DSLite {
+		wantedSettings[settingKey{Kind: "up", Interface: t.Name}] = 1
+	}
+	if d.Forwarding.IPv4 != nil {
+		wantedSettings[settingKey{Kind: "forwarding4"}] = boolInt(*d.Forwarding.IPv4)
+	}
+	if d.Forwarding.IPv6 != nil {
+		wantedSettings[settingKey{Kind: "forwarding6"}] = boolInt(*d.Forwarding.IPv6)
+	}
+	if err := p.restoreSettings(wantedSettings); err != nil {
+		return err
+	}
+	// Explicit disables run before any network policy changes; enables run only
+	// after the new firewall transaction has been acknowledged.
+	for _, kind := range []string{"forwarding4", "forwarding6"} {
+		key := settingKey{Kind: kind}
+		if v, ok := wantedSettings[key]; ok && v == 0 {
+			if err := p.set(key, v); err != nil {
+				return err
+			}
+		}
+	}
+	if err := p.removeAddresses(d); err != nil {
+		return err
+	}
+	tunnels := map[string]bool{}
+	for _, t := range d.DSLite {
+		tunnels[t.Name] = true
+	}
+	for _, l := range d.Interfaces {
+		if !tunnels[l.Name] {
+			if err := p.interfaceConfig(l); err != nil {
+				return err
+			}
+		}
+	}
+	if err := p.tunnels(d.DSLite); err != nil {
+		return err
+	}
+	for _, t := range d.DSLite {
+		if err := p.set(settingKey{Kind: "up", Interface: t.Name}, 1); err != nil {
+			return err
+		}
+	}
+	for _, l := range d.Interfaces {
+		if tunnels[l.Name] {
+			if err := p.interfaceConfig(l); err != nil {
+				return err
+			}
+		}
+	}
+	if err := p.routes(d.Routes); err != nil {
+		return err
+	}
+	if err := p.removeTunnels(d); err != nil {
+		return err
+	}
+	if err := p.firewall(d.Firewall); err != nil {
+		return err
+	}
+	for _, kind := range []string{"forwarding4", "forwarding6"} {
+		key := settingKey{Kind: kind}
+		if v, ok := wantedSettings[key]; ok && v == 1 {
+			if err := p.set(key, v); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func boolInt(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
+}
+func (p *apply) set(key settingKey, value int) error {
+	live, err := p.e.kernel.ReadSetting(key)
+	if err != nil {
+		return p.failure("read "+key.Kind, err)
+	}
+	if live == value {
+		for i := range p.e.state.Settings {
+			if p.e.state.Settings[i].Key == key && p.e.state.Settings[i].Last != value {
+				p.e.state.Settings[i].Last = value
+				return p.checkpoint("setting ownership")
+			}
+		}
+		return nil
+	}
+	return p.change("set "+key.Kind, func() error { return p.e.kernel.WriteSetting(key, value) }, func() {
+		for i := range p.e.state.Settings {
+			if p.e.state.Settings[i].Key == key {
+				p.e.state.Settings[i].Last = value
+				return
+			}
+		}
+		p.e.state.Settings = append(p.e.state.Settings, ownedSetting{Key: key, Before: live, Last: value})
+	})
+}
+
+func (p *apply) restoreSettings(want map[settingKey]int) error {
+	for i := 0; i < len(p.e.state.Settings); {
+		s := p.e.state.Settings[i]
+		if _, ok := want[s.Key]; ok {
+			i++
+			continue
+		}
+		live, err := p.e.kernel.ReadSetting(s.Key)
+		if errors.Is(err, errLinkNotFound) {
+			p.e.state.Settings = append(p.e.state.Settings[:i], p.e.state.Settings[i+1:]...)
+			if err := p.checkpoint("forget missing link setting"); err != nil {
+				return err
+			}
+			continue
+		}
+		if err != nil {
+			return p.failure("restore "+s.Key.Kind, err)
+		}
+		if live != s.Last && live != s.Before {
+			return p.failure("restore "+s.Key.Kind, fmt.Errorf("%s changed outside routerd2: have %d, last set %d; refusing to overwrite", s.Key.Interface, live, s.Last))
+		}
+		forget := func() { p.e.state.Settings = append(p.e.state.Settings[:i], p.e.state.Settings[i+1:]...) }
+		if live != s.Before {
+			if err := p.change("restore "+s.Key.Kind, func() error { return p.e.kernel.WriteSetting(s.Key, s.Before) }, forget); err != nil {
+				return err
+			}
+		} else {
+			forget()
+			if err := p.checkpoint("restore setting journal"); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (p *apply) interfaceConfig(l Interface) error {
+	if l.MTU != 0 {
+		if err := p.set(settingKey{Kind: "mtu", Interface: l.Name}, l.MTU); err != nil {
+			return err
+		}
+	}
+	if err := p.set(settingKey{Kind: "up", Interface: l.Name}, 1); err != nil {
+		return err
+	}
+	for _, a := range l.Addresses {
+		owned := ownedAddress{l.Name, a}
+		live, err := p.e.kernel.Interface(l.Name)
+		if err != nil {
+			return p.failure("address read", err)
+		}
+		found := false
+		for _, x := range live.Addresses {
+			if x.Address == a {
+				found = true
+				break
+			}
+		}
+		if found {
+			if !p.e.ownsAddress(owned) {
+				return p.failure("address ownership", fmt.Errorf("%s on %s already exists without ownership journal; refusing to adopt", a, l.Name))
+			}
+			continue
+		}
+		if err := p.change("address add", func() error { return p.e.kernel.AddAddress(l.Name, a) }, func() {
+			if !p.e.ownsAddress(owned) {
+				p.e.state.Addresses = append(p.e.state.Addresses, owned)
+			}
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p *apply) removeAddresses(d Desired) error {
+	want := map[ownedAddress]bool{}
+	for _, l := range d.Interfaces {
+		for _, a := range l.Addresses {
+			want[ownedAddress{l.Name, a}] = true
+		}
+	}
+	// Remove secondaries first. Linux may otherwise implicitly remove them when
+	// deleting their primary IPv4 address; the backend refuses that operation.
+	secondary := map[ownedAddress]bool{}
+	for _, a := range p.e.state.Addresses {
+		if want[a] {
+			continue
+		}
+		l, err := p.e.kernel.Interface(a.Interface)
+		if err != nil && !errors.Is(err, errLinkNotFound) {
+			return p.failure("address removal order", err)
+		}
+		for _, live := range l.Addresses {
+			if live.Address == a.Address {
+				secondary[a] = live.Flags&1 != 0
+			}
+		}
+	}
+	sort.SliceStable(p.e.state.Addresses, func(i, j int) bool { return secondary[p.e.state.Addresses[i]] && !secondary[p.e.state.Addresses[j]] })
+	for i := 0; i < len(p.e.state.Addresses); {
+		a := p.e.state.Addresses[i]
+		if want[a] {
+			i++
+			continue
+		}
+		l, err := p.e.kernel.Interface(a.Interface)
+		if err != nil && !errors.Is(err, errLinkNotFound) {
+			return p.failure("address remove read", err)
+		}
+		found := false
+		for _, v := range l.Addresses {
+			if v.Address == a.Address {
+				found = true
+			}
+		}
+		forget := func() { p.e.state.Addresses = append(p.e.state.Addresses[:i], p.e.state.Addresses[i+1:]...) }
+		if found {
+			if err := p.change("address remove", func() error { return p.e.kernel.DeleteAddress(a.Interface, a.Address) }, forget); err != nil {
+				return err
+			}
+		} else {
+			forget()
+			if err := p.checkpoint("forget absent address"); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (p *apply) routes(want []Route) error {
+	for i := 0; i < len(p.e.state.Routes); {
+		r := p.e.state.Routes[i]
+		keep := false
+		for _, v := range want {
+			if r == v {
+				keep = true
+				break
+			}
+		}
+		if keep {
+			i++
+			continue
+		}
+		live, err := p.e.kernel.Routes(routeTable(r))
+		if err != nil {
+			return p.failure("route remove read", err)
+		}
+		found := false
+		for _, v := range live {
+			if routeMatches(v, r) {
+				found = true
+				break
+			}
+		}
+		forget := func() { p.e.state.Routes = append(p.e.state.Routes[:i], p.e.state.Routes[i+1:]...) }
+		if found {
+			if err := p.change("route remove", func() error { return p.e.kernel.DeleteRoute(r) }, forget); err != nil {
+				return err
+			}
+		} else {
+			forget()
+			if err := p.checkpoint("forget absent route"); err != nil {
+				return err
+			}
+		}
+	}
+	for _, r := range want {
+		live, err := p.e.kernel.Routes(routeTable(r))
+		if err != nil {
+			return p.failure("route read", err)
+		}
+		found := false
+		for _, v := range live {
+			if routeSlot(v.Route) != routeSlot(r) {
+				continue
+			}
+			if routeMatches(v, r) && p.e.ownsRoute(v) {
+				found = true
+				continue
+			}
+			return p.failure("route ownership", fmt.Errorf("route %s table %d metric %d conflicts with an unowned or changed route", r.Destination, r.Table, r.Metric))
+		}
+		if found {
+			continue
+		}
+		if err := p.change("route add", func() error { return p.e.kernel.AddRoute(r) }, func() {
+			for _, v := range p.e.state.Routes {
+				if v == r {
+					return
+				}
+			}
+			p.e.state.Routes = append(p.e.state.Routes, r)
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p *apply) tunnels(want []DSLite) error {
+	for _, t := range want {
+		parent, err := p.e.kernel.Interface(t.Underlay)
+		if err != nil {
+			return p.failure("DS-Lite underlay", err)
+		}
+		if t.MTU == 0 {
+			t.MTU = parent.MTU - 40
+		}
+		if t.MTU < 68 || t.MTU > 65495 || t.MTU > parent.MTU-40 {
+			return p.failure("DS-Lite MTU", fmt.Errorf("%s inner MTU %d exceeds supported range or underlay MTU %d minus 40", t.Name, t.MTU, parent.MTU))
+		}
+		localPresent := false
+		for _, a := range parent.Addresses {
+			if addressIP(a.Address) == t.Local {
+				localPresent = true
+			}
+		}
+		if !localPresent {
+			return p.failure("DS-Lite local address", fmt.Errorf("%s is not assigned to underlay %s", t.Local, t.Underlay))
+		}
+		live, err := p.e.kernel.Interface(t.Name)
+		if errors.Is(err, errLinkNotFound) {
+			if err := p.change("DS-Lite create", func() error { return p.e.kernel.CreateDSLite(t) }, func() { p.recordTunnel(t) }); err != nil {
+				return err
+			}
+			continue
+		}
+		if err != nil {
+			return p.failure("DS-Lite read", err)
+		}
+		owned := false
+		for _, old := range p.e.state.Tunnels {
+			if old.Name == t.Name {
+				owned = true
+				break
+			}
+		}
+		if !owned || live.Alias != tunnelAlias || live.DSLite == nil {
+			return p.failure("DS-Lite ownership", fmt.Errorf("link %s exists without matching ownership", t.Name))
+		}
+		if *live.DSLite == t {
+			continue
+		}
+		if err := p.change("DS-Lite update", func() error { return p.e.kernel.UpdateDSLite(t) }, func() { p.recordTunnel(t) }); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+func (p *apply) recordTunnel(t DSLite) {
+	for i := range p.e.state.Tunnels {
+		if p.e.state.Tunnels[i].Name == t.Name {
+			p.e.state.Tunnels[i] = t
+			return
+		}
+	}
+	p.e.state.Tunnels = append(p.e.state.Tunnels, t)
+}
+
+func (p *apply) removeTunnels(d Desired) error {
+	for i := 0; i < len(p.e.state.Tunnels); {
+		t := p.e.state.Tunnels[i]
+		keep := false
+		for _, v := range d.DSLite {
+			if v.Name == t.Name {
+				keep = true
+			}
+		}
+		if keep {
+			i++
+			continue
+		}
+		for _, v := range d.Interfaces {
+			if v.Name == t.Name {
+				return p.failure("DS-Lite remove", fmt.Errorf("remove interface declaration %s before deleting its tunnel", t.Name))
+			}
+		}
+		l, err := p.e.kernel.Interface(t.Name)
+		forget := func() { p.e.state.Tunnels = append(p.e.state.Tunnels[:i], p.e.state.Tunnels[i+1:]...) }
+		if errors.Is(err, errLinkNotFound) {
+			forget()
+			if err := p.checkpoint("forget absent DS-Lite tunnel"); err != nil {
+				return err
+			}
+			continue
+		}
+		if err != nil {
+			return p.failure("DS-Lite remove read", err)
+		}
+		if l.Alias != tunnelAlias || l.DSLite == nil {
+			return p.failure("DS-Lite remove ownership", fmt.Errorf("link %s has changed ownership", t.Name))
+		}
+		if len(l.Addresses) != 0 {
+			return p.failure("DS-Lite remove", fmt.Errorf("link %s still has addresses; refusing to delete them implicitly", t.Name))
+		}
+		rs, err := p.e.kernel.Routes(0)
+		if err != nil {
+			return p.failure("DS-Lite route references", err)
+		}
+		for _, r := range rs {
+			if r.Interface == t.Name {
+				return p.failure("DS-Lite remove", fmt.Errorf("link %s still has routes; refusing to delete them implicitly", t.Name))
+			}
+		}
+		if err := p.change("DS-Lite remove", func() error { return p.e.kernel.DeleteDSLite(t.Name) }, forget); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p *apply) firewall(want *Firewall) error {
+	if want == nil && !p.e.state.FirewallOwned {
+		return nil
+	}
+	live, err := p.e.kernel.Firewall()
+	if err != nil {
+		return p.failure("firewall read", err)
+	}
+	if live.Present && (!live.Owned || !p.e.state.FirewallOwned) {
+		return p.failure("firewall ownership", fmt.Errorf("inet table %s exists without matching ownership journal and marker", FirewallTable))
+	}
+	if want == nil && !live.Present {
+		p.e.state.FirewallOwned = false
+		return p.checkpoint("forget absent firewall")
+	}
+	if want != nil {
+		for _, f := range want.Forward {
+			for _, name := range []string{f.From, f.To} {
+				if _, err := p.e.kernel.Interface(name); err != nil {
+					return p.failure("firewall interface", err)
+				}
+			}
+		}
+		for _, n := range want.Masquerade {
+			if _, err := p.e.kernel.Interface(n.OutInterface); err != nil {
+				return p.failure("masquerade interface", err)
+			}
+		}
+	}
+	return p.change("firewall atomic replace", func() error { return p.e.kernel.ReplaceFirewall(want) }, func() { p.e.state.FirewallOwned = want != nil })
+}

@@ -1,0 +1,81 @@
+GO ?= go
+DOCKER ?= docker
+PYTHON ?= python3
+RELEASE_ID ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || printf 'dev')
+GO_VERSION ?= 1.27.3
+ALPINE_VERSION ?= 3.24.3
+IMAGE_CONFIG ?= empty
+IMAGE_DIR ?= dist/image
+CONTAINER_TAG ?= routerd2:dev
+QEMU_TIMEOUT ?= 90
+QEMU_SSH_KEY ?=
+
+LDFLAGS = -s -w -X github.com/imksoo/routerd2/internal/buildinfo.ReleaseID=$(RELEASE_ID)
+BUILD_ARGS = --build-arg GO_VERSION=$(GO_VERSION) --build-arg ALPINE_VERSION=$(ALPINE_VERSION) --build-arg RELEASE_ID=$(RELEASE_ID)
+
+.PHONY: help fmt fmt-check test race vet check build build-linux container container-multi container-smoke apk image qemu-smoke clean
+
+help:
+	@printf '%s\n' \
+	  'make check             Format, unit tests, race detector, and vet' \
+	  'make build             Build both binaries for the current platform' \
+	  'make build-linux       Build static linux/amd64 and linux/arm64 binaries' \
+	  'make apk               Test and build the Alpine package with abuild' \
+	  'make image             Export Alpine kernel + routerd initramfs' \
+	  'make qemu-smoke        Boot the image in QEMU; optionally verify SSH' \
+	  'make container         Build the scratch OCI runtime image' \
+	  'make container-smoke   Run the container and query its control API' \
+	  'make container-multi   Export an amd64/arm64 OCI archive'
+
+fmt:
+	$(GO) fmt ./...
+
+fmt-check:
+	@set -eu; formatter="$$($(GO) env GOROOT)/bin/gofmt"; \
+	  unformatted=$$(find . -type f -name '*.go' -not -path './dist/*' -exec "$$formatter" -l '{}' +); \
+	  if [ -n "$$unformatted" ]; then printf '%s\n' "$$unformatted"; printf '%s\n' 'Run make fmt.'; exit 1; fi
+
+test:
+	$(GO) test ./...
+
+race:
+	CGO_ENABLED=1 $(GO) test -race ./...
+
+vet:
+	$(GO) vet ./...
+
+check: fmt-check test race vet
+
+build:
+	mkdir -p dist/bin
+	CGO_ENABLED=0 $(GO) build -trimpath -buildvcs=false -ldflags '$(LDFLAGS)' -o dist/bin/routerd ./cmd/routerd
+	CGO_ENABLED=0 $(GO) build -trimpath -buildvcs=false -ldflags '$(LDFLAGS)' -o dist/bin/routerd-modules ./cmd/routerd-modules
+
+build-linux:
+	@set -eu; for arch in amd64 arm64; do \
+	  mkdir -p "dist/bin/linux-$$arch"; \
+	  CGO_ENABLED=0 GOOS=linux GOARCH=$$arch $(GO) build -trimpath -buildvcs=false -ldflags '$(LDFLAGS)' -o "dist/bin/linux-$$arch/routerd" ./cmd/routerd; \
+	  CGO_ENABLED=0 GOOS=linux GOARCH=$$arch $(GO) build -trimpath -buildvcs=false -ldflags '$(LDFLAGS)' -o "dist/bin/linux-$$arch/routerd-modules" ./cmd/routerd-modules; \
+	done
+
+container:
+	$(DOCKER) build $(BUILD_ARGS) -t $(CONTAINER_TAG) .
+
+container-multi:
+	mkdir -p dist
+	$(DOCKER) buildx build $(BUILD_ARGS) --platform linux/amd64,linux/arm64 --output type=oci,dest=dist/routerd2.oci.tar .
+
+container-smoke: container
+	$(PYTHON) images/container-smoke.py --engine $(DOCKER) --image $(CONTAINER_TAG)
+
+apk:
+	$(DOCKER) build $(BUILD_ARGS) -f packaging/alpine/Dockerfile --target apk-output --output type=local,dest=dist/apk .
+
+image:
+	$(DOCKER) build $(BUILD_ARGS) --build-arg IMAGE_CONFIG=$(IMAGE_CONFIG) --build-arg SSH_AUTHORIZED_KEY -f packaging/alpine/Dockerfile --target appliance-output --output type=local,dest=$(IMAGE_DIR) .
+
+qemu-smoke:
+	$(PYTHON) scripts/qemu-smoke.py --image-dir $(IMAGE_DIR) --timeout $(QEMU_TIMEOUT) $(if $(QEMU_SSH_KEY),--ssh-key $(QEMU_SSH_KEY),)
+
+clean:
+	rm -rf dist

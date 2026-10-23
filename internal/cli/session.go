@@ -1,0 +1,98 @@
+// Package cli is a typed management shell shared by local and SSH entry points.
+// It deliberately has no escape to a POSIX shell, execve, forwarding, or SFTP.
+package cli
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"path/filepath"
+	"strings"
+
+	"github.com/imksoo/routerd2/internal/buildinfo"
+	"github.com/imksoo/routerd2/internal/config"
+	"github.com/imksoo/routerd2/internal/control"
+	"github.com/imksoo/routerd2/internal/localapi"
+)
+
+type Session struct{ RuntimeDir string }
+
+func WriteJSON(w io.Writer, v any) error {
+	e := json.NewEncoder(w)
+	e.SetIndent("", "  ")
+	return e.Encode(v)
+}
+
+func (s Session) Execute(ctx context.Context, command string, input io.Reader, out io.Writer) error {
+	a := strings.Fields(command)
+	if len(a) == 0 {
+		return nil
+	}
+	if len(a) == 1 && a[0] == "help" {
+		_, err := fmt.Fprintln(out, "show status\nshow network\nshow config\nshow running-config\nshow version\nrestart <module>\nconfigure (exec: CommitRequest YAML/JSON on stdin; shell: candidate mode)\nconfirm\nhelp\nexit")
+		return err
+	}
+	var result json.RawMessage
+	super := localapi.NewClient(filepath.Join(s.RuntimeDir, "supervisor.sock"))
+	ctl := localapi.NewClient(filepath.Join(s.RuntimeDir, control.SocketName))
+	var err error
+	switch {
+	case len(a) == 2 && a[0] == "show":
+		switch a[1] {
+		case "status":
+			err = super.Do(ctx, http.MethodGet, "/v1/status", nil, &result)
+		case "network":
+			err = ctl.Do(ctx, http.MethodGet, "/v1/network", nil, &result)
+		case "config":
+			err = ctl.Do(ctx, http.MethodGet, "/v1/config", nil, &result)
+		case "running-config":
+			var state control.State
+			if err := ctl.Do(ctx, http.MethodGet, "/v1/config", nil, &state); err != nil {
+				return err
+			}
+			y, err := config.YAML(state.Config)
+			if err != nil {
+				return err
+			}
+			_, err = out.Write(y)
+			return err
+		case "version":
+			return WriteJSON(out, buildinfo.Current())
+		default:
+			return errors.New("unknown show command; use help")
+		}
+	case len(a) == 2 && a[0] == "restart":
+		if strings.ContainsAny(a[1], "/\\.?") {
+			return errors.New("invalid module name")
+		}
+		err = super.Do(ctx, http.MethodPost, "/v1/modules/"+url.PathEscape(a[1])+"/restart", struct{}{}, &result)
+	case len(a) == 1 && a[0] == "configure":
+		if input == nil {
+			return errors.New("configure requires an exec request with JSON on stdin")
+		}
+		var r control.CommitRequest
+		if err := config.Decode(input, &r); err != nil {
+			return err
+		}
+		err = ctl.Do(ctx, http.MethodPost, "/v1/config/commit", r, &result)
+	case len(a) == 1 && a[0] == "confirm":
+		var state control.State
+		if err := ctl.Do(ctx, http.MethodGet, "/v1/config", nil, &state); err != nil {
+			return err
+		}
+		if state.Confirmation == nil {
+			return errors.New("no revision is awaiting confirmation")
+		}
+		err = ctl.Do(ctx, http.MethodPost, "/v1/config/confirm", control.ConfirmRequest{Revision: state.Revision, RequestID: state.Confirmation.RequestID}, &result)
+	default:
+		return errors.New("unknown command; use help")
+	}
+	if err != nil {
+		return err
+	}
+	return WriteJSON(out, result)
+}

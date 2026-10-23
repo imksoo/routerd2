@@ -1,0 +1,73 @@
+// Package supervisor manages routerd's child workers. It is the sole owner of
+// process creation and wait/reaping in its process: callers must not concurrently
+// launch and wait for unrelated children with os/exec.
+package supervisor
+
+import "time"
+
+const SocketName = "supervisor.sock"
+
+type RestartPolicy string
+
+const (
+	RestartAlways    RestartPolicy = "always"
+	RestartOnFailure RestartPolicy = "on-failure"
+	RestartNever     RestartPolicy = "never"
+)
+
+type Spec struct {
+	Name             string
+	Role             string
+	Args             []string
+	Required         bool
+	Restart          RestartPolicy
+	StartupTimeout   time.Duration
+	HeartbeatTimeout time.Duration
+	StopTimeout      time.Duration
+	BackoffMin       time.Duration
+	BackoffMax       time.Duration
+}
+
+type Options struct {
+	ModulePath string
+	ReleaseID  string
+	RuntimeDir string
+	StateDir   string
+	ConfigPath string
+	Platform   string
+	Modules    []Spec
+	// Env overrides inherited environment entries for all workers.
+	Env []string
+}
+
+type Status struct {
+	ReleaseID string         `json:"release_id"`
+	Platform  string         `json:"platform"`
+	PID       int            `json:"pid"`
+	StartedAt time.Time      `json:"started_at"`
+	Ready     bool           `json:"ready"`
+	Stopping  bool           `json:"stopping"`
+	Modules   []ModuleStatus `json:"modules"`
+}
+
+type ModuleStatus struct {
+	Name          string      `json:"name"`
+	Role          string      `json:"role"`
+	State         string      `json:"state"`
+	Required      bool        `json:"required"`
+	PID           int         `json:"pid,omitempty"`
+	ReleaseID     string      `json:"release_id,omitempty"`
+	Ready         bool        `json:"ready"`
+	Generation    uint64      `json:"generation"`
+	Restarts      uint64      `json:"restarts"`
+	StartedAt     *time.Time  `json:"started_at,omitempty"`
+	LastHeartbeat *time.Time  `json:"last_heartbeat,omitempty"`
+	LastExit      *ExitStatus `json:"last_exit,omitempty"`
+	LastError     string      `json:"last_error,omitempty"`
+}
+
+type ExitStatus struct {
+	At     time.Time `json:"at"`
+	Code   int       `json:"code"`
+	Signal string    `json:"signal,omitempty"`
+}

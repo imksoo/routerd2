@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.3'
+          cache: true
+      - name: Format, test, race detector, and vet
+        run: make check
+      - name: Native Linux networking in an isolated namespace
+        run: |
+          CGO_ENABLED=0 go test -tags integration -c -o /tmp/routerd2-network.test ./internal/network
+          sudo env ROUTERD2_INTEGRATION_REQUIRED=1 /tmp/routerd2-network.test -test.v
+      - name: Static Linux builds
+        run: make build-linux RELEASE_ID="${GITHUB_SHA}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-binaries
+          path: dist/bin/
+          if-no-files-found: error
+
+  images:
+    needs: go
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@v3
+      - name: Install QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y qemu-system-x86 openssh-client
+      - name: Build and exercise the scratch container
+        run: make container-smoke CONTAINER_TAG=routerd2:ci RELEASE_ID="${GITHUB_SHA}"
+      - name: Build amd64 and arm64 OCI archive
+        run: make container-multi RELEASE_ID="${GITHUB_SHA}"
+      - name: Build APK with abuild and its test suite
+        run: make apk RELEASE_ID="${GITHUB_SHA}"
+      - name: Generate temporary guest credentials
+        run: |
+          ssh-keygen -q -t ed25519 -N '' -C routerd2-ci -f "${RUNNER_TEMP}/routerd2-qemu"
+          printf 'SSH_AUTHORIZED_KEY=%s\n' "$(cat "${RUNNER_TEMP}/routerd2-qemu.pub")" >> "${GITHUB_ENV}"
+      - name: Assemble Linux appliance fixture
+        run: make image IMAGE_CONFIG=qemu RELEASE_ID="${GITHUB_SHA}"
+      - name: Boot real Linux and query the embedded SSH CLI
+        run: make qemu-smoke QEMU_TIMEOUT=120 QEMU_SSH_KEY="${RUNNER_TEMP}/routerd2-qemu"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: image-validation
+          path: |
+            dist/apk/
+            dist/image/
+            dist/routerd2.oci.tar
+          if-no-files-found: warn
+          retention-days: 7

@@ -1,0 +1,13 @@
+{
+  "platform": "appliance",
+  "config": "/etc/routerd/config.json",
+  "module_path": "/usr/libexec/routerd-modules",
+  "runtime_dir": "/run/routerd",
+  "state_dir": "/var/lib/routerd",
+  "kernel_modules": ["virtio_pci", "virtio_net", "nf_tables", "nft_ct", "nft_chain_nat", "nft_masq", "ip6_tunnel"],
+  "ssh": {
+    "listen": "0.0.0.0:22",
+    "user": "admin",
+    "authorized_keys": []
+  }
+}
