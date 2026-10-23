@@ -1,0 +1,14 @@
+{
+  "module": "github.com/google/nftables",
+  "version": "v0.3.0",
+  "commit": "6f574e7fd1b4d07006d1c598cdb9b22789e5e541",
+  "repository": "https://github.com/google/nftables",
+  "module_sum": "h1:bkyZ0cbpVeMHXOrtlFc8ISmfVqq5gPJukoYieyVmITg=",
+  "module_archive": "https://proxy.golang.org/github.com/google/nftables/@v/v0.3.0.zip",
+  "module_archive_sha256": "70c243170b087a106d2635674d012d12eafa93c3972a1c96f61460693faf418f",
+  "selection": "Production Go packages (excluding test-only integration helpers), expr unit tests, go.mod, go.sum, README.md and LICENSE.",
+  "changes": [
+    "expr/expr.go: preserve masquerade flags with translated ports; set NF_NAT_RANGE_PROTO_SPECIFIED when ToPorts is true.",
+    "expr/masq_routerd2_test.go: regressions for exact kernel flags and round trips with port ranges."
+  ]
+}

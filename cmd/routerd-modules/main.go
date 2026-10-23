@@ -11,13 +11,17 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
+	"time"
 
 	"github.com/imksoo/routerd2/internal/buildinfo"
 	"github.com/imksoo/routerd2/internal/cli"
 	"github.com/imksoo/routerd2/internal/control"
+	"github.com/imksoo/routerd2/internal/logging"
 	"github.com/imksoo/routerd2/internal/management"
 	"github.com/imksoo/routerd2/internal/runtimeconfig"
+	"github.com/imksoo/routerd2/internal/serviceruntime"
 	"github.com/imksoo/routerd2/internal/worker"
 )
 
@@ -40,6 +44,8 @@ func run(args []string) error {
 	role := f.String("role", "", "module role")
 	name := f.String("name", "", "instance name")
 	managementPath := f.String("management-config", "", "private SSH configuration")
+	instancePath := f.String("instance-config", "", "immutable private protocol configuration")
+	configDigest := f.String("config-digest", "", "immutable configuration SHA-256")
 	if err := f.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -52,8 +58,29 @@ func run(args []string) error {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
+	generation, generationErr := strconv.ParseUint(os.Getenv("ROUTERD_GENERATION"), 10, 64)
+	if generationErr != nil || generation == 0 {
+		return errors.New("invalid supervisor generation")
+	}
+	if *role != "logging" {
+		handler, err := logging.NewHandler(logging.HandlerOptions{RuntimeDir: dir, Module: *name, Generation: generation, Fallback: os.Stderr})
+		if err != nil {
+			return err
+		}
+		slog.SetDefault(slog.New(handler))
+		defer func() {
+			flushCtx, stop := context.WithTimeout(context.Background(), time.Second)
+			defer stop()
+			_ = handler.Close(flushCtx)
+			slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
+		}()
+	}
 	return worker.Run(ctx, *role, buildinfo.ReleaseID, func(ctx context.Context, ready func()) error {
 		switch *role {
+		case "dhcp4", "dhcp6pd", "dhcp_server", "ra", "dns", "vrrp", "bgp":
+			return serviceruntime.Run(ctx, dir, *name, *role, *instancePath, *configDigest, generation, ready)
+		case "logging":
+			return logging.Run(ctx, logging.Options{RuntimeDir: dir, StateDir: state, ReleaseID: buildinfo.ReleaseID, CaptureKernel: os.Getenv("ROUTERD_PLATFORM") == "appliance"}, ready)
 		case "network":
 			return control.ServeNetwork(ctx, dir, state, ready)
 		case "control":

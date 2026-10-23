@@ -7,7 +7,7 @@ FROM golang:${GO_VERSION}-alpine3.24 AS toolchain
 FROM alpine:${ALPINE_VERSION} AS package-build
 COPY --from=toolchain /usr/local/go /usr/local/go
 ENV PATH=/usr/local/go/bin:$PATH GOTOOLCHAIN=local
-RUN apk add --no-cache alpine-sdk ca-certificates tar \
+RUN apk add --no-cache alpine-sdk ca-certificates tar python3 \
  && adduser -D -G abuild builder \
  && mkdir -p /out \
  && chown builder:abuild /out

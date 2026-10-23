@@ -10,13 +10,16 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 type fakeKernel struct {
 	links              map[string]InterfaceState
 	routes             []RouteState
+	rules              []PolicyRuleState
 	forward4, forward6 int
 	firewall           FirewallState
+	guard              FirewallState
 	fail               string
 	writes             []string
 }
@@ -39,7 +42,7 @@ func (f *fakeKernel) Interface(name string) (InterfaceState, error) {
 	l.Addresses = append([]AddressState(nil), l.Addresses...)
 	return l, nil
 }
-func (f *fakeKernel) AddAddress(name, address string) error {
+func (f *fakeKernel) AddAddress(name, address string, options AddressOptions) error {
 	if err := f.op("address-add"); err != nil {
 		return err
 	}
@@ -49,17 +52,51 @@ func (f *fakeKernel) AddAddress(name, address string) error {
 			return errors.New("duplicate address")
 		}
 	}
-	l.Addresses = append(l.Addresses, AddressState{Address: address})
+	now := time.Now()
+	a := AddressState{Address: address, Peer: options.Peer, PreferredLifetime: lifetimeRemaining(options.PreferredUntil, now), ValidLifetime: lifetimeRemaining(options.ValidUntil, now)}
+	if options.NoDAD {
+		a.Flags |= addressNoDADFlag
+	}
+	l.Addresses = append(l.Addresses, a)
 	f.links[name] = l
 	return nil
 }
-func (f *fakeKernel) DeleteAddress(name, address string) error {
+
+func (f *fakeKernel) UpdateAddress(name, address string, options AddressOptions) error {
+	if err := f.op("address-update"); err != nil {
+		return err
+	}
+	l, ok := f.links[name]
+	if !ok {
+		return errLinkNotFound
+	}
+	for i := range l.Addresses {
+		if l.Addresses[i].Address == address {
+			l.Addresses[i].Peer = options.Peer
+			now := time.Now()
+			l.Addresses[i].PreferredLifetime = lifetimeRemaining(options.PreferredUntil, now)
+			l.Addresses[i].ValidLifetime = lifetimeRemaining(options.ValidUntil, now)
+			if options.NoDAD {
+				l.Addresses[i].Flags |= addressNoDADFlag
+			} else {
+				l.Addresses[i].Flags &^= addressNoDADFlag
+			}
+			f.links[name] = l
+			return nil
+		}
+	}
+	return errors.New("address missing")
+}
+func (f *fakeKernel) DeleteAddress(name, address string, options AddressOptions) error {
 	if err := f.op("address-delete"); err != nil {
 		return err
 	}
 	l := f.links[name]
 	for i, a := range l.Addresses {
 		if a.Address == address {
+			if a.Peer != options.Peer {
+				return errors.New("address peer mismatch")
+			}
 			l.Addresses = append(l.Addresses[:i], l.Addresses[i+1:]...)
 			break
 		}
@@ -71,6 +108,7 @@ func (f *fakeKernel) Routes(table int) ([]RouteState, error) {
 	var out []RouteState
 	for _, r := range f.routes {
 		if table == 0 || r.Table == table {
+			r.Route = normalizeRoute(r.Route)
 			out = append(out, r)
 		}
 	}
@@ -80,7 +118,8 @@ func (f *fakeKernel) AddRoute(r Route) error {
 	if err := f.op("route-add"); err != nil {
 		return err
 	}
-	f.routes = append(f.routes, RouteState{Route: r, Protocol: RouteProtocol, Type: 1})
+	r = normalizeRoute(r)
+	f.routes = append(f.routes, RouteState{Route: r, Protocol: RouteProtocol, Type: 1, Multipath: len(r.NextHops) > 0})
 	return nil
 }
 func (f *fakeKernel) DeleteRoute(r Route) error {

@@ -11,6 +11,8 @@ The APK installs:
 - `/etc/routerd/config.json` with an empty network configuration
 - `/etc/routerd/boot.json` for explicit appliance startup
 - `/usr/share/licenses/routerd2/LICENSE`
+- `/usr/share/licenses/routerd2/dependencies/` with dependency license texts,
+  notices, and their manifest
 
 It has no runtime package dependencies or init scripts and does not replace an
 existing host's init. Only the custom appliance assembly creates `/init`.
@@ -23,7 +25,11 @@ update trust root.
 
 The build wrapper generates the source archive and runs `abuild checksum`
 before `abuild -d -r`. The `-d` switch skips dependency installation because the
-Docker build explicitly provides alpine-sdk and the pinned official Go
-toolchain. The source APKBUILD still declares its Go build requirement for
-native Alpine use. The generated archive and APKBUILD can be used together in
+Docker build explicitly provides alpine-sdk, Python 3, and the pinned official
+Go toolchain. The source APKBUILD still declares its Go and Python requirements
+for native Alpine use. The generated archive and APKBUILD can be used together in
 an Alpine package build environment.
+
+The package build runs `scripts/licenses.py` against its source module graph;
+failure to collect a dependency license fails the build. These collected texts
+are carried into the appliance instead of adding a runtime package manager.

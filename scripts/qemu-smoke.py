@@ -38,6 +38,9 @@ def main():
 
     port = free_port()
     log_path = image / "qemu-serial.log"
+    # QEMU opens this file after Popen returns. Stale readiness/panic markers
+    # must not satisfy or fail a new boot attempt.
+    log_path.unlink(missing_ok=True)
     command = [
         args.qemu, "-machine", "q35", "-accel", "tcg", "-cpu", "max",
         "-m", "512M", "-smp", "2", "-display", "none", "-monitor", "none",

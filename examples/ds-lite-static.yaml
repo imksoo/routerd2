@@ -1,0 +1,29 @@
+# The remote AFTR and local globally routable IPv6 address are explicit here.
+# AFTR-name acquisition/resolution is a separate dependency, not inferred.
+schema_version: 1
+network:
+  interfaces:
+    - name: eth0
+      addresses: ['2001:db8:100::2/64']
+    - name: eth1
+      addresses: [192.168.10.1/24]
+    - name: ds0
+      addresses: [192.0.0.2/32]
+      address_options:
+        192.0.0.2/32:
+          peer: 192.0.0.1/32
+  ds_lite:
+    - name: ds0
+      underlay: eth0
+      local: '2001:db8:100::2'
+      remote: '2001:db8:200::1'
+      mtu: 1460
+  routes:
+    - {destination: '::/0', gateway: '2001:db8:100::1', interface: eth0}
+    - {destination: 0.0.0.0/0, interface: ds0}
+  forwarding:
+    ipv4: true
+    ipv6: true
+  firewall:
+    forward:
+      - {from: eth1, to: ds0}

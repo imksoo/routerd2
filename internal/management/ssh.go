@@ -14,14 +14,12 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/imksoo/routerd2/internal/cli"
 	"github.com/imksoo/routerd2/internal/runtimeconfig"
 	"golang.org/x/crypto/ssh"
-	"golang.org/x/term"
 )
 
 func HostKey(path string) (ssh.Signer, error) {
@@ -107,6 +105,8 @@ func ServerConfig(opts runtimeconfig.SSH, signer ssh.Signer) (*ssh.ServerConfig,
 }
 
 func Serve(ctx context.Context, opts runtimeconfig.SSH, runtimeDir, stateDir string, ready func()) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	if opts.Listen == "" || len(opts.AuthorizedKeys) == 0 {
 		slog.Info("SSH disabled", "reason", "listener and authorized keys are required")
 		ready()
@@ -140,7 +140,7 @@ func Serve(ctx context.Context, opts runtimeconfig.SSH, runtimeDir, stateDir str
 		case <-closed:
 		}
 	}()
-	defer wg.Wait()
+	defer func() { cancel(); wg.Wait() }()
 	slog.Info("SSH management listening", "address", l.Addr().String(), "host_key", ssh.FingerprintSHA256(signer.PublicKey()))
 	ready()
 	for {
@@ -240,21 +240,8 @@ func serveSession(ctx context.Context, ch ssh.Channel, requests <-chan *ssh.Requ
 			}
 			_ = r.Reply(true, nil)
 			go ssh.DiscardRequests(requests)
-			t := term.NewTerminal(ch, "routerd> ")
-			_, _ = t.Write([]byte("routerd2 management CLI; type help.\n"))
-			for {
-				line, err := t.ReadLine()
-				if err != nil {
-					return
-				}
-				if strings.TrimSpace(line) == "exit" {
-					exit(ch, nil)
-					return
-				}
-				if err := session.Execute(ctx, line, nil, t); err != nil {
-					_, _ = fmt.Fprintln(t, err)
-				}
-			}
+			exit(ch, session.Interactive(ctx, ch))
+			return
 		default:
 			_ = r.Reply(false, nil)
 		}

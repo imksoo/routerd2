@@ -1,0 +1,270 @@
+# routerd feature parity inventory
+
+Baseline: `imksoo/routerd@1329ef54f296507eda79bbbc3b853783dd27251e` (source checkout audited 2026-10-23). Machine-readable companion: [parity.json](parity.json).
+
+The target is the complete Linux routerd product, including cloud/SAM, control and operations. Homert is an initial proving ground. This inventory records the migration scope and its source evidence; **it does not claim that the listed features are implemented in routerd2**. A source import, new worker process or passing build is not a parity result.
+
+## What the baseline contains
+
+- **87 public config kinds**, declared by [pkg/api/resource_kinds.go:11](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/resource_kinds.go#L11).
+- **94 kinds accepted by the resource decoder**. The seven extra kinds are `Bridge`, `IPv4StaticRoute`, `IPv6StaticRoute`, `Inventory`, `SAMPeerGroup`, `SAMRRSet` and `VXLANSegment`. They include internal/generated forms; decoder acceptance alone does not mean public config acceptance.
+- **18 explicitly removed legacy kinds**. `SystemdUnit`, `KernelModule` and `NetworkAdoption` are already rejected public inputs. Their derived controller work still exists and must move into native modules.
+- **49 framework controller registrations**, plus six separately started auxiliary engines; **18 command binaries**; **22 control HTTP operations** and **27 explicit WebConsole routes**.
+- Complete original schemas are fingerprinted in `parity.json`; the per-resource direct field list is an index, not a replacement schema.
+
+## Native implementation currently available
+
+The native implementation is integrated into the two-binary runtime: `routerd` supervises core and protocol processes; `routerd-modules` selects a bundled worker role. Protocol facts carry configuration digests, process generations, producer epochs and sequences. A single coordinator projects accepted facts into one kernel writer. These implemented capabilities are narrower than complete original-resource compatibility.
+
+| Capability | Recorded acceptance evidence |
+| --- | --- |
+| Linux data plane | QEMU Linux packet tests for IPv4/IPv6 forwarding, masquerade, DS-Lite TCP/peer addressing, scalar/ECMP routes, policy rules, virtual links, address lifetimes, VRRP input guards, IPv4/IPv6 INPUT/OUTPUT/FORWARD ACLs and DNAT/SNAT/masquerade port ranges |
+| DHCPv4 client | Independent live server acquisition/renewal/expiry in a verified new network namespace; journal and runtime projection/fencing/rollback tests |
+| DHCPv4 server | Live native client DORA/T1 renewal, restart INIT-REBOOT, independent NAK/RELEASE/DECLINE and pre-address unicast tests; durable lease before client ACK; full two-binary DHCP-to-DNS ownership-expiry and recovery gate |
+| DHCPv6 PD/information | Live protocol interoperability, stable DUID/IAID, current and deprecated prefix lifetime projection, derived /64 and RA configuration tests |
+| Router advertisements | Actual RS/multicast traffic; live updates preserve the socket and withdraw only removed prefixes/options; finite lifetime and shutdown tests |
+| VRRPv3 | Independent IPv4/IPv6 peer elections and failover, explicit VMAC/NoDAD projection, monotonic ownership expiry and native input guards |
+| DNS | UDP/TCP server and UDP/TCP/DoT/DoH/DoQ upstream tests; real SSH edits alter DNS answers through the full daemon; typed source-scoped DHCP A/PTR updates, finite TTL and producer ownership expiration keep existing TCP connections open |
+| BGP | Independent TCP dual-stack peer, policy/withdrawal and durable path journal tests; real two-binary route installation/withdrawal in the kernel, unresolved next-hop repair and ownership expiry while the worker is stopped; recursive/ECMP/VRF projection tests |
+| Configuration and recovery | Real SSH candidate commit/confirm; timeout rollback; SIGKILL/restart of control and logging; protocol removal releases the listener |
+| Logging | Structured queue bounds, rotation/recovery, disk failure and blocked fallback tests; no journald dependency |
+| Legacy input | Strict partial compiler, compatibility diagnostics and parser fuzz; unsupported input fails before producing output |
+
+The namespace fixtures now run successfully in this workspace with the required isolation capability. Native kernel tests also run in a separate QEMU guest with no external network attachment. Required CI sets `ROUTERD2_INTEGRATION_REQUIRED=1`, so unavailable isolation cannot silently turn required acceptance into a skipped test. Test implementation and exact limitations are in the corresponding `internal/network`, `internal/protocol/*` and `internal/integration` packages.
+
+The public legacy resource register below deliberately remains incomplete. WAN RA/AFTR and broader routing/cloud/SAM contracts still have separate acceptance work. The native firewall and DHCP server gates cover the documented subsets. Neither a callable protocol engine nor a migrated subset establishes full resource parity.
+
+## Reuse the model and engines; replace the side effects
+
+The practical migration seam is **typed resource → semantic plan → native kernel/module operations**. Preserve `pkg/api`, the generated schemas, semantic validators/defaults, lifecycle identities, dependency and `when` semantics, status/event contracts, state journals, dynamic merge/provenance, and domain planners. Extract native protocol implementations from `cmd/...` into callable engines and run them as fine-grained self-reexec workers under PID 1.
+
+A global command interceptor is not a complete seam. `chain.Options` has selected binary paths and runner ports but no universal kernel/supervisor dependency; the framework constructor instantiates many controllers directly. Network backends return files, the firewall backend stores nft text and compares files, and service managers return argv plans. Emulating `ip`, `nft`, `wg` and `systemctl` text/output would preserve an incidental operating-system command language inside the new product. The new effectors should accept typed operations and return typed observations instead.
+
+Existing local runner injection remains useful while extracting a particular controller, and old planners/renderers can serve as semantic fixtures. It is not sufficient to report success for skipped commands. Do not wire the old full `chain.Runner` into PID 1 until every active effect path is replaced or blocked with an explicit capability error.
+
+### Concrete source seams
+
+| Seam | Evidence | Migration consequence |
+| --- | --- | --- |
+| `file-shaped-network-backend` | [pkg/netconfigbackend/backend.go:36](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/netconfigbackend/backend.go#L36) | Render returns []render.File. Retain declaration extraction; replace file rendering with typed link/address/route effects. |
+| `text-shaped-firewall-backend` | [pkg/firewallbackend/backend.go:25](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/firewallbackend/backend.go#L25) | Ruleset stores Path/Data; Diff compares file bytes and Reload invokes nft -c/-f. Replace with semantic rule IR and netlink compilation. |
+| `command-shaped-service-manager` | [pkg/servicemgr/servicemgr.go:25](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/servicemgr/servicemgr.go#L25) | Service manager returns executable/argv plans. Replace with module desired instances, not a fake systemctl command parser. |
+| `chain-wiring` | [pkg/controller/chain/chain.go:1224](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/chain.go#L1224) | Options injects selected external binary paths/runners and dry-run flags, not a universal kernel or supervisor interface. Many effects bypass any global runner. |
+| `client-spec-reuse` | [pkg/controller/chain/chain.go:3122](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/chain.go#L3122) | Reuse resource-to-service spec knowledge for DNS, DHCPv4, DHCPv6, PPPoE and ARP worker compilation. Existing specs still name separate binaries and can contain secrets in argv. |
+| `manageddaemon-is-descriptor` | [pkg/manageddaemon/manageddaemon.go:13](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/manageddaemon/manageddaemon.go#L13) | Spec validation/socket readiness helper only. The actual existing supervision logic lives in chain.go. |
+| `wireguard-command-port` | [pkg/controller/chain/wireguard.go:29](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/wireguard.go#L29) | Local Command and CommandStdin test ports exist; chain wiring does not populate them. Replace backend operations at typed configuration boundary. |
+| `unknown-field-handling` | [pkg/config/load.go:22](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/config/load.go#L22) | Plain yaml.Unmarshal plus custom resource Decode is not strict unknown-field validation. Add strict recursive typed validation before compilation and preserve raw input/provenance. |
+| `explicitly-removed-kinds` | [pkg/api/legacy.go:10](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/legacy.go#L10) | Keep explicit migration errors for removed input kinds. Do not reintroduce SystemdUnit as a compatibility escape hatch. |
+| `external-plugin-execution` | [pkg/plugin/runner.go:96](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/plugin/runner.go#L96) | Arbitrary external plugin executable behavior needs explicit module conversion, a supported packaged engine, or a compatibility error. |
+| `external-provider-execution` | [pkg/provideraction/executor.go:92](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/provideraction/executor.go#L92) | Preserve approval, verification, journal and rollback semantics while replacing executable provider adapters with owned typed adapters. |
+| `ppp-engine-gap` | [pkg/pppoeclient/client.go:171](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/pppoeclient/client.go#L171) | The current PPPoE client builds a pppd/ppp command; it is not a native PPP protocol engine. |
+| `ipsec-engine-gap` | [pkg/ipsec/ipsec.go:94](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/ipsec/ipsec.go#L94) | Connection application depends on strongSwan swanctl; native XFRM plumbing alone cannot replace IKE. |
+| `bfd-engine-gap` | [pkg/controller/bfd/controller.go:535](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/bfd/controller.go#L535) | BFD currently depends on FRR/vtysh. |
+| `vrrp-engine-gap` | [pkg/controller/vrrp/backend.go:61](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/vrrp/backend.go#L61) | Linux VRRP uses keepalived backend; controller reuse does not provide protocol execution. |
+| `wireguard-engine-boundary` | [pkg/wireguard/wireguard.go:333](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/wireguard/wireguard.go#L333) | The kernel provides the data plane; replace wg tool with generic netlink control while retaining peer-resolution policy. |
+| `tailscale-engine-gap` | [pkg/tailscale/tailscale.go:73](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/tailscale/tailscale.go#L73) | Current operational status invokes tailscale; full control and forwarding behavior still requires an integrated engine. |
+| `embedded-web-assets` | [pkg/webconsole/console.go:60](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/webconsole/console.go#L60) | WebConsole already embeds built frontend assets; Node/npm are build-time dependencies, not necessary runtime utilities. |
+
+## Module ownership and implementation scope
+
+All rows below remain `not_integrated` for complete original behavior until acceptance evidence is added. A module may reuse native components without its entire resource family being complete.
+
+| Module | Resource kinds | Reuse and native replacement |
+| --- | --- | --- |
+| `config.dynamic` | `Plugin`, `DynamicConfigSource`, `DynamicOverridePolicy` | Reuse `pkg/api`, `pkg/config`, `pkg/dynamicconfig`, `pkg/plugin`, `pkg/lifecycle`, `pkg/resource`. Keep typed resources, merge/override/provenance and validation. Compile bundled plugin capabilities to explicit module calls. An arbitrary executable is an explicit compatibility boundary, never silently ignored. **Remaining boundary:** PluginSpec.Executable and plugin.Runner currently launch external programs. A generic arbitrary executable cannot be made equivalent merely by mapping its path to routerd. |
+| `system` | `Sysctl`, `SysctlProfile`, `Package`, `Hostname`, `Inventory` | Reuse `pkg/sysctlprofile`, `pkg/hostdeps`, `pkg/controller/chain/sysctl.go`, `pkg/controller/chain/package.go`, `pkg/api`. Read/write validated procfs settings, use hostname syscall, and satisfy package intent through versioned image/module capabilities. Preserve original intent and return a compatibility error for an unmapped package. **Remaining boundary:** Package is still public input; SystemdUnit, KernelModule and NetworkAdoption are already removed public kinds. Their derived internal jobs must become supervisor/kernel-module operations. |
+| `observability` | `LogSink`, `Telemetry`, `ObservabilityPipeline`, `LogRetention`, `TrafficFlowLog`, `FirewallEventLog` | Reuse `pkg/logstore`, `pkg/otel`, `pkg/observabilitypipeline`, `pkg/eventlog`, `pkg/nflog`, `pkg/dpi`, `pkg/controller/chain/logretention.go`. Retain structured event/log storage, OTLP exporters and retention; feed them from owned worker pipes, netlink/NFLOG and typed diagnostics. Embed optional DPI engine with explicit build and license metadata. **Remaining boundary:** Independent journald-free structured logging is implemented. Original LogSink/Telemetry/OTLP/flow/NFLOG/DPI contracts and full retention/export APIs remain incomplete. nDPI is an optional C/CGO engine. |
+| `management` | `WebConsole`, `ControlAPI`, `ManagementAccess` | Reuse `pkg/controlapi`, `pkg/webconsole`, `pkg/resourcequery`, `cmd/routerctl`, `pkg/config/management.go`. Preserve control operation semantics and inspection views; serve embedded static assets and use native kernel/module observations. Add SSH command sessions to the same typed control interface. **Remaining boundary:** A working narrow revision API or SSH login alone is not parity with resource apply/delete, probes, logs, federation or operational views. |
+| `ha` | `RouterdCluster`, `VirtualAddress`, `DHCPv4ServerLeaseSync`, `DHCPv6ServerLeaseSync`, `DHCPv6PrefixDelegationLeaseSync`, `NAT44SessionSync` | Reuse `pkg/ha`, `pkg/controller/vrrp`, `pkg/controller/chain/filesync.go`, `pkg/controller/chain/nat44sessionsync.go`. Retain HA policy and lifecycle; implement VRRP worker with native packet/socket/VIP effects and transfer typed lease/session snapshots and deltas over authenticated peer transport. **Remaining boundary:** Native VRRPv3 IPv4/IPv6 is implemented. Original VRRPv2/auth/tracking, cluster dependency gating, lease replication and NAT session replication remain incomplete. |
+| `network.links` | `Interface`, `Bridge`, `VXLANSegment`, `VRF`, `VXLANTunnel` | Reuse `pkg/controller/chain/bridge.go`, `pkg/controller/chain/vxlan_tunnel.go`, `pkg/vrf`, `pkg/vxlan`, `pkg/inventory`. Compile interface alias, bridge membership, VLAN/VXLAN and VRF intent to typed rtnetlink operations with per-resource ownership. **Remaining boundary:** Native bridge/VLAN/VRF/VXLAN/macvlan, alias and membership ownership are implemented. Full legacy lifecycle, link options, dependency and adoption semantics still need per-resource acceptance. |
+| `network.addresses` | `IPv4StaticAddress`, `IPv6DelegatedAddress`, `SelfAddressPolicy` | Reuse `pkg/lan`, `pkg/controller/chain/chain.go`, `pkg/api/provides.go`. Retain address selection, PD suffix calculation, dependencies and lifetime policy; feed typed address desired state to the native engine. **Remaining boundary:** Native static, DHCP/PD finite/deprecated addresses and VRRP VMAC address ownership are implemented. Full SelfAddressPolicy and legacy dependency semantics remain incomplete. |
+| `network.routes` | `IPv4Route`, `IPv4StaticRoute`, `IPv6StaticRoute`, `ClusterNetworkRoute`, `EgressRoutePolicy` | Reuse `pkg/egressroute`, `pkg/controller/chain/policyroute.go`, `pkg/controller/chain/mtu.go`, `pkg/api/cluster_routes.go`. Retain candidate selection and health policy; emit typed routes, rule priorities, marks, multipath/source-hash selectors and MTU/MSS effects. **Remaining boundary:** Native scalar/ECMP routes, policy rules and BGP next-hop projection are implemented. Cluster/egress health selection, MTU/MSS and force-fragment behavior remain incomplete. |
+| `health` | `HealthCheck` | Reuse `pkg/healthcheck`, `cmd/routerd-healthcheck`. Retain native probes, interface/DS-Lite binding, timers and status events as supervised workers. |
+| `wan.dhcp4` | `DHCPv4Client` | Reuse `pkg/dhcpv4client`, `pkg/controller/dhcpv4client`, `cmd/routerd-dhcpv4-client`. Reuse native DHCPv4 protocol engine and lease journal; replace command-line process entry with self-reexec worker and netlink lease effects. |
+| `wan.dhcp6` | `DHCPv6PrefixDelegation`, `DHCPv6Information` | Reuse `pkg/pdclient`, `pkg/controller/chain/phase2.go`, `cmd/routerd-dhcpv6-client`. Reuse native DHCPv6 PD/information engine and durable lease behavior; route results through typed address/route modules. |
+| `wan.pppoe` | `PPPoESession` | Reuse `pkg/pppoeclient`, `pkg/controller/pppoesession`, `cmd/routerd-pppoe-client`. Retain config/status/event behavior; provide discovery, PPP authentication/LCP/IPCP/IPv6CP and kernel PPP attachment in an owned protocol worker. **Remaining boundary:** The existing client constructs pppd/FreeBSD ppp commands. Wrapping that client in a self-reexec worker does not replace the PPP engine. |
+| `wan.dslite` | `DSLiteTunnel` | Reuse `pkg/controller/chain/phase2.go`, `pkg/healthcheck/dslite_binding.go`. Retain AFTR resolution and self-address selection; emit native ip6tnl, tunnel-address, policy-route and MTU plans. **Remaining boundary:** Native fixed-endpoint B4, point-to-point peer and MTU are implemented. Dynamic AFTR/WAN RA dependency and multi-AFTR source-routing policy remain incomplete. |
+| `lan.dhcp_ra` | `DHCPv4Server`, `DHCPv4Reservation`, `DHCPv6Address`, `IPv6RAAddress`, `IPv6RouterAdvertisement`, `DHCPv6Server`, `DHCPv4Relay` | Reuse `pkg/render/dnsmasq.go`, `pkg/lan`, `pkg/dhcpeventqueue`, `pkg/dhcpfingerprint`, `pkg/raobserver`, `pkg/controller/chain/dhcp_profile_leases.go`. Preserve all declared scopes, reservations, options, profiles, sticky assignments, lease events and RA lifetimes; implement server/relay/RA workers and typed lease store. **Remaining boundary:** Native RA and delegated-prefix updates are implemented. Full DHCP server/relay/profile/sticky/lease-sync resource semantics are not yet accepted. |
+| `dns` | `DNSZone`, `DNSResolver`, `DNSForwarder`, `DNSUpstream` | Reuse `pkg/dnsresolver`, `pkg/controller/dnsresolver`, `cmd/routerd-dns-resolver`. Extract the native resolver main package into an engine worker while preserving zone/forward/upstream behavior, binding, failover, aliases, cache and query logging. |
+| `routing.bgp` | `BGPRouter`, `BGPPeer`, `BGPDynamicPeer` | Reuse `pkg/bgp`, `pkg/bgpdaemon`, `pkg/controller/bgp`, `cmd/routerd-bgp`. Reuse GoBGP v4 engine, policies, EVPN processing and native Linux FIB adapter; supervise worker and preserve route ownership/withdrawal and status semantics. **Remaining boundary:** Extracted GoBGP v4 engine, dual-stack policy, route effects and durable dynamic-path API are integrated. Original BFD and SAM controller orchestration, EVPN data-plane effects and resource conversion are incomplete. |
+| `routing.bfd` | `BFD` | Reuse `pkg/controller/bfd`. Retain BFD config and peer integration; replace vtysh/FRR execution with an owned BFD protocol engine and typed session events. **Remaining boundary:** Existing BFD controller invokes vtysh, so protocol implementation or a deliberately integrated engine is still required. |
+| `vpn.wireguard` | `WireGuardInterface`, `WireGuardPeer` | Reuse `pkg/wireguard`, `pkg/controller/chain/wireguard.go`. Keep peer resolution and enrollment policy; use kernel WireGuard generic netlink/wgctrl semantics plus rtnetlink routes instead of wg setconf. |
+| `vpn.ipsec` | `IPsecConnection` | Reuse `pkg/ipsec`, `cmd/routerd/ipsec_apply.go`. Retain connection/secret policy; select and integrate an IKE engine with native XFRM programming, SA lifecycle and operational status. **Remaining boundary:** Current implementation invokes strongSwan swanctl. XFRM alone does not implement IKE negotiation, authentication, rekey or interoperability. |
+| `vpn.tailscale` | `TailscaleNode` | Reuse `pkg/tailscale`, `pkg/controller/chain/system.go`. Integrate a compatible Tailscale engine/control client and preserve routing/auth/state behavior through a dedicated module API. **Remaining boundary:** Current code invokes tailscaled/tailscale. A userspace proxy or basic tsnet connection is not automatically exit-node, subnet-router and CLI feature parity. |
+| `hybrid` | `TunnelInterface`, `OverlayPeer`, `HybridRoute`, `CloudProviderProfile`, `ProviderActionPolicy` | Reuse `pkg/hybrid`, `pkg/provideraction`, `pkg/providercontract`, `pkg/providerinventory`, `pkg/controller/provideraction`, `pkg/controller/chain/tunnel.go`, `pkg/controller/chain/hybrid.go`. Reuse provider action policy, approval/journal model and tunnel planners; implement native tunnel effects and provider HTTP/SDK adapters behind typed contracts. **Remaining boundary:** Provider executors are external programs. Preserve cloud-specific operation idempotency, verification, rollback and credentials; replacing CLI invocation with an SDK call alone is insufficient. |
+| `mobility` | `MobilityPool`, `SAMNodeSet`, `SAMEnrollmentPolicy`, `SAMEnrollmentClaim`, `SAMEnrollmentClient`, `SAMTransportProfile`, `SAMSubnetPolicy`, `SAMPeerGroup`, `SAMRRSet` | Reuse `pkg/sam`, `pkg/samenrollment`, `pkg/mobilityconfig`, `pkg/controller/mobility`, `pkg/controller/mobilityfib`, `pkg/controller/chain/sam.go`, `pkg/controller/chain/mobility_dataplane.go`. Reuse SAM discovery/ownership, enrollment, transport generation, shard planning and BGP delivery logic; translate typed dataplane plans to owned Linux effectors. **Remaining boundary:** Include cloud capture, ARP fanout, leases, fencing, enrollment revocation, route convergence, retry/outbox and diagnostics; do not reduce SAM to tunnel creation. |
+| `federation` | `EventGroup`, `EventPeer`, `EventSubscription`, `FederationSLO` | Reuse `pkg/federation`, `pkg/federationguard`, `pkg/controller/eventfederation`, `pkg/controller/eventsubscription`, `pkg/eventconsumer`, `pkg/eventd`. Reuse authenticated transport, durable outbox/consumer state, replay/idempotency and subscription semantics; use module capability calls for generated actions. |
+| `events` | `EventRule`, `DerivedEvent` | Reuse `pkg/eventrule`, `pkg/derived`, `pkg/bus`, `pkg/daemonapi`. Reuse event operators, durable consumption, dependency evaluation and resource status publication; preserve event schemas and timing behavior. |
+| `firewall` | `NAT44Rule`, `NAT44FlowDNATPinhole`, `PortForward`, `IngressService`, `IPAddressSet`, `LocalServiceRedirect`, `FirewallFlowPinhole`, `FirewallZone`, `FirewallPolicy`, `ClientPolicy`, `FirewallRule` | Reuse `pkg/render/nftables.go`, `pkg/controller/firewall`, `pkg/controller/nat44`, `pkg/controller/ingressservice`, `pkg/ingressdrain`, `pkg/controller/chain/ipaddressset.go`. Preserve semantic rule/policy decisions, automatic service holes, source selection, TTL sets, DNAT/SNAT, ingress health/drain and pinholes; compile typed expressions into owned nftables batches. **Remaining boundary:** Baseline native filter and masquerade do not cover full legacy stateful, L2, policy, ingress, set, logging or NAT semantics. Do not translate arbitrary nft text into partial rules silently. |
+| `time` | `NTPClient`, `NTPServer` | Reuse `pkg/controller/chain/ntp.go`, `pkg/render/timesyncd.go`. Preserve static/DHCP time-source selection and server policy; implement or integrate a time discipline engine with adjtimex/clock operations and supervised NTP service. **Remaining boundary:** One-shot SNTP clock setting is not chrony/timesyncd client/server behavior or oscillator discipline parity. |
+
+## Resource-by-resource register
+
+`Public` means present in `ConfigResourceKinds`; `decoder` means accepted by the decoder but not in that public registry. Every row remains in scope. Original typed spec references include all nested structures through their source definitions.
+
+| Kind | Input | Module | Typed spec | Status |
+| --- | --- | --- | --- | --- |
+| `Plugin` | Public | `config.dynamic` | [PluginSpec:122](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L122) | Not integrated |
+| `DynamicConfigSource` | Public | `config.dynamic` | [DynamicConfigSourceSpec:153](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L153) | Not integrated |
+| `DynamicOverridePolicy` | Public | `config.dynamic` | [DynamicOverridePolicySpec:167](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L167) | Not integrated |
+| `LogSink` | Public | `observability` | [LogSinkSpec:13](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L13) | Not integrated |
+| `Telemetry` | Public | `observability` | [TelemetrySpec:24](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L24) | Not integrated |
+| `ObservabilityPipeline` | Public | `observability` | [ObservabilityPipelineSpec:36](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L36) | Not integrated |
+| `LogRetention` | Public | `observability` | [LogRetentionSpec:99](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L99) | Not integrated |
+| `Sysctl` | Public | `system` | [SysctlSpec:209](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L209) | Not integrated |
+| `SysctlProfile` | Public | `system` | [SysctlProfileSpec:219](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L219) | Not integrated |
+| `Package` | Public | `system` | [PackageSpec:234](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L234) | Not integrated |
+| `NTPClient` | Public | `time` | [NTPClientSpec:308](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L308) | Not integrated |
+| `NTPServer` | Public | `time` | [NTPServerSpec:319](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L319) | Not integrated |
+| `WebConsole` | Public | `management` | [WebConsoleSpec:333](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L333) | Not integrated |
+| `ControlAPI` | Public | `management` | [ControlAPISpec:343](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L343) | Not integrated |
+| `ManagementAccess` | Public | `management` | [ManagementAccessSpec:364](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L364) | Not integrated |
+| `RouterdCluster` | Public | `ha` | [RouterdClusterSpec:91](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L91) | Not integrated |
+| `Inventory` | Decoder | `system` | [InventorySpec:370](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L370) | Not integrated |
+| `Interface` | Public | `network.links` | [InterfaceSpec:372](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L372) | Not integrated; native primitive only |
+| `Bridge` | Decoder | `network.links` | [BridgeSpec:385](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L385) | Not integrated |
+| `VXLANSegment` | Decoder | `network.links` | [VXLANSegmentSpec:397](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L397) | Not integrated |
+| `WireGuardInterface` | Public | `vpn.wireguard` | [WireGuardInterfaceSpec:410](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L410) | Not integrated |
+| `TunnelInterface` | Public | `hybrid` | [TunnelInterfaceSpec:432](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L432) | Not integrated |
+| `WireGuardPeer` | Public | `vpn.wireguard` | [WireGuardPeerSpec:457](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L457) | Not integrated |
+| `TailscaleNode` | Public | `vpn.tailscale` | [TailscaleNodeSpec:467](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L467) | Not integrated |
+| `IPsecConnection` | Public | `vpn.ipsec` | [IPsecConnectionSpec:486](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L486) | Not integrated |
+| `VRF` | Public | `network.links` | [VRFSpec:498](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L498) | Not integrated |
+| `VXLANTunnel` | Public | `network.links` | [VXLANTunnelSpec:504](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L504) | Not integrated |
+| `PPPoESession` | Public | `wan.pppoe` | [PPPoESessionSpec:523](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L523) | Not integrated |
+| `IPv4StaticAddress` | Public | `network.addresses` | [IPv4StaticAddressSpec:548](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L548) | Not integrated; native primitive only |
+| `VirtualAddress` | Public | `ha` | [VirtualAddressSpec:559](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L559) | Not integrated |
+| `BGPRouter` | Public | `routing.bgp` | [BGPRouterSpec:618](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L618) | Not integrated |
+| `BGPPeer` | Public | `routing.bgp` | [BGPPeerSpec:695](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L695) | Not integrated |
+| `BGPDynamicPeer` | Public | `routing.bgp` | [BGPDynamicPeerSpec:718](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L718) | Not integrated |
+| `SAMEnrollmentPolicy` | Public | `mobility` | [SAMEnrollmentPolicySpec:811](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L811) | Not integrated |
+| `SAMRRSet` | Decoder | `mobility` | [SAMRRSetSpec:802](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L802) | Not integrated |
+| `SAMEnrollmentClaim` | Public | `mobility` | [SAMEnrollmentClaimSpec:858](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L858) | Not integrated |
+| `SAMEnrollmentClient` | Public | `mobility` | [SAMEnrollmentClientSpec:899](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L899) | Not integrated |
+| `BFD` | Public | `routing.bfd` | [BFDSpec:1029](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L1029) | Not integrated |
+| `DHCPv4Client` | Public | `wan.dhcp4` | [DHCPv4ClientSpec:1045](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L1045) | Not integrated |
+| `IPv4StaticRoute` | Decoder | `network.routes` | [IPv4StaticRouteSpec:1057](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L1057) | Not integrated; native primitive only |
+| `ClusterNetworkRoute` | Public | `network.routes` | [ClusterNetworkRouteSpec:1064](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L1064) | Not integrated |
+| `IPv6StaticRoute` | Decoder | `network.routes` | [IPv6StaticRouteSpec:1081](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L1081) | Not integrated; native primitive only |
+| `DHCPv4Server` | Public | `lan.dhcp_ra` | [DHCPv4ServerSpec:1088](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L1088) | Not integrated |
+| `DHCPv4Reservation` | Public | `lan.dhcp_ra` | [DHCPv4ReservationSpec:1175](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L1175) | Not integrated |
+| `DHCPv6Address` | Public | `lan.dhcp_ra` | [DHCPv6AddressSpec:1186](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L1186) | Not integrated |
+| `IPv6RAAddress` | Public | `lan.dhcp_ra` | [IPv6RAAddressSpec:1192](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L1192) | Not integrated |
+| `DHCPv6PrefixDelegation` | Public | `wan.dhcp6` | [DHCPv6PrefixDelegationSpec:1198](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L1198) | Not integrated |
+| `IPv6DelegatedAddress` | Public | `network.addresses` | [IPv6DelegatedAddressSpec:1280](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L1280) | Not integrated |
+| `DHCPv6Information` | Public | `wan.dhcp6` | [DHCPv6InformationSpec:1299](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L1299) | Not integrated |
+| `IPv6RouterAdvertisement` | Public | `lan.dhcp_ra` | [IPv6RouterAdvertisementSpec:1478](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L1478) | Not integrated |
+| `DHCPv6Server` | Public | `lan.dhcp_ra` | [DHCPv6ServerSpec:1500](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L1500) | Not integrated |
+| `DHCPv4ServerLeaseSync` | Public | `ha` | [DHCPv4ServerLeaseSyncSpec:1542](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L1542) | Not integrated |
+| `DHCPv6ServerLeaseSync` | Public | `ha` | [DHCPv6ServerLeaseSyncSpec:1554](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L1554) | Not integrated |
+| `DHCPv6PrefixDelegationLeaseSync` | Public | `ha` | [DHCPv6PrefixDelegationLeaseSyncSpec:1566](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L1566) | Not integrated |
+| `DHCPv4Relay` | Public | `lan.dhcp_ra` | [DHCPv4RelaySpec:1611](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L1611) | Not integrated |
+| `DNSZone` | Public | `dns` | [DNSZoneSpec:1307](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L1307) | Not integrated |
+| `SelfAddressPolicy` | Public | `network.addresses` | [SelfAddressPolicySpec:1633](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L1633) | Not integrated |
+| `DNSResolver` | Public | `dns` | [DNSResolverSpec:1350](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L1350) | Not integrated |
+| `DNSForwarder` | Public | `dns` | [DNSForwarderSpec:1388](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L1388) | Not integrated |
+| `DNSUpstream` | Public | `dns` | [DNSUpstreamSpec:1399](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L1399) | Not integrated |
+| `TrafficFlowLog` | Public | `observability` | [TrafficFlowLogSpec:1429](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L1429) | Not integrated |
+| `DSLiteTunnel` | Public | `wan.dslite` | [DSLiteTunnelSpec:1658](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L1658) | Not integrated; native primitive only |
+| `OverlayPeer` | Public | `hybrid` | [OverlayPeerSpec:1704](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L1704) | Not integrated |
+| `HybridRoute` | Public | `hybrid` | [HybridRouteSpec:1723](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L1723) | Not integrated |
+| `SAMPeerGroup` | Decoder | `mobility` | [SAMPeerGroupSpec:776](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L776) | Not integrated |
+| `SAMNodeSet` | Public | `mobility` | [SAMNodeSetSpec:949](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L949) | Not integrated |
+| `SAMTransportProfile` | Public | `mobility` | [SAMTransportProfileSpec:740](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L740) | Not integrated |
+| `SAMSubnetPolicy` | Public | `mobility` | [SAMSubnetPolicySpec:925](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L925) | Not integrated |
+| `CloudProviderProfile` | Public | `hybrid` | [CloudProviderProfileSpec:2140](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L2140) | Not integrated |
+| `ProviderActionPolicy` | Public | `hybrid` | [ProviderActionPolicySpec:2162](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L2162) | Not integrated |
+| `IPv4Route` | Public | `network.routes` | [IPv4RouteSpec:1688](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L1688) | Not integrated; native primitive only |
+| `HealthCheck` | Public | `health` | [HealthCheckSpec:2194](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L2194) | Not integrated |
+| `EgressRoutePolicy` | Public | `network.routes` | [EgressRoutePolicySpec:2218](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L2218) | Not integrated |
+| `EventRule` | Public | `events` | [EventRuleSpec:2331](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L2331) | Not integrated |
+| `DerivedEvent` | Public | `events` | [DerivedEventSpec:2358](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L2358) | Not integrated |
+| `EventGroup` | Public | `federation` | [EventGroupSpec:1741](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L1741) | Not integrated |
+| `EventPeer` | Public | `federation` | [EventPeerSpec:1801](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L1801) | Not integrated |
+| `EventSubscription` | Public | `federation` | [EventSubscriptionSpec:1822](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L1822) | Not integrated |
+| `FederationSLO` | Public | `federation` | [FederationSLOSpec:1862](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L1862) | Not integrated |
+| `MobilityPool` | Public | `mobility` | [MobilityPoolSpec:1900](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L1900) | Not integrated |
+| `NAT44Rule` | Public | `firewall` | [NAT44RuleSpec:2367](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L2367) | Not integrated; native primitive only |
+| `NAT44FlowDNATPinhole` | Public | `firewall` | [NAT44FlowDNATPinholeSpec:2386](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L2386) | Not integrated |
+| `NAT44SessionSync` | Public | `ha` | [NAT44SessionSyncSpec:1578](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L1578) | Not integrated |
+| `PortForward` | Public | `firewall` | [PortForwardSpec:2420](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L2420) | Not integrated |
+| `IngressService` | Public | `firewall` | [IngressServiceSpec:2433](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L2433) | Not integrated |
+| `IPAddressSet` | Public | `firewall` | [IPAddressSetSpec:2476](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L2476) | Not integrated |
+| `LocalServiceRedirect` | Public | `firewall` | [LocalServiceRedirectSpec:2483](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L2483) | Not integrated |
+| `FirewallFlowPinhole` | Public | `firewall` | [FirewallFlowPinholeSpec:2497](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L2497) | Not integrated |
+| `FirewallZone` | Public | `firewall` | [FirewallZoneSpec:2537](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L2537) | Not integrated |
+| `FirewallPolicy` | Public | `firewall` | [FirewallPolicySpec:2542](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L2542) | Not integrated; native primitive only |
+| `FirewallEventLog` | Public | `observability` | [FirewallEventLogSpec:2547](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L2547) | Not integrated |
+| `ClientPolicy` | Public | `firewall` | [ClientPolicySpec:2570](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L2570) | Not integrated |
+| `FirewallRule` | Public | `firewall` | [FirewallRuleSpec:2605](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L2605) | Not integrated |
+| `Hostname` | Public | `system` | [HostnameSpec:2674](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go#L2674) | Not integrated |
+
+## Controller coverage
+
+Registered controllers are executable responsibilities; they are not interchangeable with display owner names such as `address` or `route`. Registration source: [pkg/controller/chain/chain.go:2441](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/chain.go#L2441). The exact list and source lines are in JSON.
+
+`observability-pipeline`, `daemon-status`, `dhcp-lease-sync`, `nat44-session-sync`, `package`, `kernel-module`, `sysctl`, `network-adoption`, `bridge`, `vxlan-tunnel`, `service-unit`, `log-retention`, `ntp-client`, `ntp-server`, `link`, `sam-enrollment-client`, `sam-transport`, `tunnel`, `wireguard`, `ipv4-static-address`, `dhcpv6-information`, `lan-address`, `dslite`, `ipv4-policy-route`, `ipv4-route`, `hybrid-route`, `sam`, `path-mtu`, `dhcpv6-server`, `dhcpv4-lease`, `pppoe-session`, `dns-resolver`, `event-federation`, `event-subscription`, `mobility-discovery`, `mobility-arp-request`, `mobility`, `mobility-shard`, `provider-action-execution`, `egress-route-policy`, `ingress-service`, `nat44`, `bfd`, `bgp`, `vrrp`, `daemon-supervisor`, `ip-address-set`, `firewall`, `daemon-supervisor-reconcile`.
+
+Separately started hooks: `event-rule`, `derived-event`, `observability-pipeline`, `health-check`, `conntrack-observer`, `bgp`. Preserve their generation cancellation, fencing, durable event cursors and resource status behavior. Do not accidentally drop them when porting only the framework registration table.
+
+## API and command coverage
+
+### Control HTTP operations
+
+| Method | Path |
+| --- | --- |
+| `GET` | `/api/control.routerd.net/v1alpha1/status` |
+| `GET` | `/api/control.routerd.net/v1alpha1/controllers` |
+| `GET` | `/api/control.routerd.net/v1alpha1/runtime` |
+| `GET` | `/api/control.routerd.net/v1alpha1/connections` |
+| `GET` | `/api/control.routerd.net/v1alpha1/dns-queries` |
+| `GET` | `/api/control.routerd.net/v1alpha1/dns-queries/aggregate` |
+| `GET` | `/api/control.routerd.net/v1alpha1/traffic-flows` |
+| `GET` | `/api/control.routerd.net/v1alpha1/traffic-flows/aggregate` |
+| `GET` | `/api/control.routerd.net/v1alpha1/firewall-logs` |
+| `GET` | `/api/control.routerd.net/v1alpha1/get` |
+| `GET` | `/api/control.routerd.net/v1alpha1/describe` |
+| `GET` | `/api/control.routerd.net/v1alpha1/probe` |
+| `POST` | `/api/control.routerd.net/v1alpha1/apply` |
+| `POST` | `/api/control.routerd.net/v1alpha1/plan` |
+| `POST` | `/api/control.routerd.net/v1alpha1/delete` |
+| `POST` | `/api/control.routerd.net/v1alpha1/validate` |
+| `POST` | `/api/control.routerd.net/v1alpha1/sam-enrollment-claims` |
+| `POST` | `/api/control.routerd.net/v1alpha1/sam-enrollment-claims/{name}/revoke` |
+| `GET` | `/api/control.routerd.net/v1alpha1/sam-enrollment-topologies/{name}` |
+| `POST` | `/api/control.routerd.net/v1alpha1/log-level` |
+| `POST` | `/api/control.routerd.net/v1alpha1/dhcpv6-event` |
+| `POST` | `/api/control.routerd.net/v1alpha1/dhcp-lease-event` |
+
+These include resource validation/plan/apply/delete, status and runtime/controller observation, connection/DNS/flow/firewall inspection, SAM enrollment submit/revoke/topology, log levels, and DHCP event ingress. Preserve response models, errors, concurrency and authorization semantics, not just path names. Source: [pkg/controlapi/server.go:51](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controlapi/server.go#L51).
+
+### WebConsole
+
+Existing WebConsole already embeds built static assets with `go:embed`. Its API includes summary/resources/controllers, events and stream aliases, connections, DNS/flow aggregation, firewall logs/deny timeline, clients, VPN, routes, SAM, BGP, VRRP, ingress, config and generation history/detail. Its current handler accepts GET/HEAD only. A runtime Node/npm process is unnecessary. All explicit paths and source lines are recorded in JSON.
+
+### Command binaries and CLI surfaces
+
+`routerctl`, `routerd`, `routerd-arp-observer`, `routerd-bgp`, `routerd-dhcp-event-relay`, `routerd-dhcp-fingerprint-watcher`, `routerd-dhcpv4-client`, `routerd-dhcpv6-client`, `routerd-dns-resolver`, `routerd-dpi-classifier`, `routerd-eventd`, `routerd-firewall-logger`, `routerd-healthcheck`, `routerd-ndpi-agent`, `routerd-pppoe-client`, `routerd-ra-observer`, `routerd-schema`, `routerd-vrrp-vmac`.
+
+Runtime daemons become `routerd worker <module>` entry points in the same binary. `routerd-schema` remains a build/development tool. `routerctl` operations become local and SSH-safe command dispatch over the same control layer. The complete discovered dispatch table, command handler symbols and advertised syntax are recorded in JSON; compare these before removing or renaming commands.
+
+CLI scope includes federation emit/list/delivery summaries, ledger integrity/vacuum/backup/pruning, get/describe, firewall simulation, dynamic parts/render/diff, SAM ownership/path/trap/enrollment, plugin discovery/run, action approval/execution/rollback journal, VPN inspection, doctor/probes, ingress drain/undrain, validate/plan/apply/delete/rollback/adopt and runtime log level/restarts. Provider action approval is a product behavior to preserve, not an implementation tool confirmation.
+
+## Removed inputs and compatibility errors
+
+The following kinds are already rejected by the baseline and should retain clear migration diagnostics, rather than being reintroduced as an OS-command escape hatch:
+
+`DHCPv4Lease`, `DHCPv4Scope`, `DHCPv6Scope`, `FirewallLog`, `IPv4DefaultRoutePolicy`, `IPv4PolicyRoute`, `IPv4PolicyRouteSet`, `IPv4ReversePathFilter`, `IPv4SourceNAT`, `KernelModule`, `Link`, `NetworkAdoption`, `PPPoEInterface`, `PathMTUPolicy`, `StatePolicy`, `SystemdUnit`, `VirtualIPv4Address`, `VirtualIPv6Address`.
+
+`Package` remains public. Map known package intent to explicit image/module capabilities with versions and license records. An unmapped package must fail validation with a useful migration reason. External `PluginSpec.Executable` and provider executor programs likewise need a named conversion or supported packaged engine. There is no sound generic translation from any arbitrary executable to a module.
+
+## Acceptance gates for complete parity
+
+1. **Input preservation:** every public kind and every nested declared field is understood, validated and preserved in a canonical round trip. Reject unknown keys and unsupported capabilities before mutation. Plain upstream `yaml.Unmarshal` is not sufficient for strict unknown-field handling, especially across custom `UnmarshalYAML`/node decoders.
+2. **Behavior:** defaults, dependency order, dynamic generation, policy selection, events, status and control/CLI outputs match the declared compatibility contract. Preserve secrets/provenance without leaking argv or raw credentials.
+3. **Native execution:** active modules own their Linux sockets, netlink/XFRM/nftables operations and worker lifecycle. No runtime systemd/networkd/journald or Ubuntu package-manager delegation is required.
+4. **Ownership and recovery:** observe, update, delete, drift repair, restart and interrupted-operation behavior are tested. Partial failures remain visible. Cross-kernel operations must not be presented as one atomic transaction.
+5. **Protocol and packet validation:** exercise isolated client/server/peer behavior, failure, expiry/rekey, MTU and failover, then qualify Homert and cloud deployments. Compilation, fixture rendering and a skipped kernel test are not packet acceptance.
+6. **Distribution:** dependency/license inventory, reproducible binary/image build, kernel feature/module matrix, boot/recovery and provider-specific provisioning are verified. C engines or multiple bundled engines may require a deliberate build profile; do not call a missing engine implemented.
+
+The original schema, policy and protocol work is an asset. Keep it as a compatibility specification and reuse the pure implementation pieces, while making every Linux effect and worker an explicit routerd responsibility.

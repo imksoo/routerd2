@@ -23,10 +23,13 @@ import (
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/control"
 	"github.com/imksoo/routerd2/internal/kmod"
+	"github.com/imksoo/routerd2/internal/legacyconfig"
 	"github.com/imksoo/routerd2/internal/localapi"
+	"github.com/imksoo/routerd2/internal/logging"
 	"github.com/imksoo/routerd2/internal/runtimeconfig"
 	"github.com/imksoo/routerd2/internal/supervisor"
 	"golang.org/x/sys/unix"
+	"golang.org/x/term"
 )
 
 var applianceRuntime bool
@@ -95,6 +98,25 @@ func run(args []string) error {
 		return serve(b)
 	case "status":
 		return remote(args[1:], "show status")
+	case "logs":
+		return logs(args[1:])
+	case "cli":
+		f := flags("cli")
+		dir := f.String("runtime-dir", "/run/routerd", "runtime directory")
+		if err := f.Parse(args[1:]); err != nil {
+			return err
+		}
+		if f.NArg() != 0 {
+			return errors.New("unexpected cli arguments")
+		}
+		if term.IsTerminal(int(os.Stdin.Fd())) {
+			previous, err := term.MakeRaw(int(os.Stdin.Fd()))
+			if err != nil {
+				return err
+			}
+			defer term.Restore(int(os.Stdin.Fd()), previous)
+		}
+		return (cli.Session{RuntimeDir: *dir}).Interactive(context.Background(), stdio{})
 	case "network":
 		if len(args) > 1 && args[1] == "show" {
 			return remote(args[2:], "show network")
@@ -116,11 +138,16 @@ func usage() error {
   routerd boot --file /etc/routerd/boot.json
   routerd run --platform host|container|appliance [--config ... --module-path ...]
   routerd status [--runtime-dir /run/routerd]
+  routerd cli [--runtime-dir /run/routerd]
+  routerd logs [--module NAME --level INFO --limit 100 --runtime-dir ...]
   routerd network show [--runtime-dir /run/routerd]
   routerd modules restart NAME [--runtime-dir /run/routerd]
   routerd config show [--runtime-dir /run/routerd]
+  routerd config export [--runtime-dir /run/routerd]
+  routerd config confirm [--runtime-dir /run/routerd]
   routerd config validate FILE
-  routerd config apply --file FILE --expected-revision N [--request-id ID] [--runtime-dir ...]
+  routerd config migrate FILE
+  routerd config apply --file FILE --expected-revision N [--request-id ID --confirmed SECONDS --runtime-dir ...]
   routerd version
 
 Platform selection is explicit. Use host mode only for isolated development.
@@ -145,11 +172,25 @@ func serve(b runtimeconfig.Boot) error {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
-	err := supervisor.Run(ctx, supervisor.Options{
+	logger, err := logging.NewHandler(logging.HandlerOptions{RuntimeDir: b.RuntimeDir, Module: "supervisor", Fallback: os.Stderr})
+	if err != nil {
+		return err
+	}
+	slog.SetDefault(slog.New(logger))
+	closeLogger := func() {
+		flushCtx, stop := context.WithTimeout(context.Background(), time.Second)
+		defer stop()
+		_ = logger.Close(flushCtx)
+		slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
+	}
+	defer closeLogger()
+	err = supervisor.Run(ctx, supervisor.Options{
 		ModulePath: b.ModulePath, ReleaseID: buildinfo.ReleaseID, RuntimeDir: b.RuntimeDir, StateDir: b.StateDir, ConfigPath: b.Config, Platform: b.Platform,
+		DynamicRoles: []string{"dhcp4", "dhcp6pd", "dhcp_server", "ra", "dns", "vrrp", "bgp"},
 		Modules: []supervisor.Spec{
+			{Name: "logging", Role: "logging", Required: false},
 			{Name: "network", Role: "network", Required: true},
-			{Name: "control", Role: "control", Required: true},
+			{Name: "control", Role: "control", Required: true, StartupTimeout: 60 * time.Second},
 			{Name: "management", Role: "management", Required: true, Args: []string{"--management-config=" + managementConfig}},
 		},
 	})
@@ -157,9 +198,34 @@ func serve(b runtimeconfig.Boot) error {
 		if err != nil {
 			slog.Error("appliance runtime failed", "error", err)
 		}
+		closeLogger()
 		halt(err != nil)
 	}
 	return err
+}
+
+type stdio struct{}
+
+func (stdio) Read(p []byte) (int, error)  { return os.Stdin.Read(p) }
+func (stdio) Write(p []byte) (int, error) { return os.Stdout.Write(p) }
+
+func logs(args []string) error {
+	f := flags("logs")
+	dir := f.String("runtime-dir", "/run/routerd", "runtime directory")
+	module := f.String("module", "", "filter module")
+	level := f.String("level", "INFO", "minimum level")
+	limit := f.Int("limit", 100, "maximum records (1..200)")
+	if err := f.Parse(args); err != nil {
+		return err
+	}
+	if f.NArg() != 0 {
+		return errors.New("unexpected logs arguments")
+	}
+	command := fmt.Sprintf("show logs level %s limit %d", *level, *limit)
+	if *module != "" {
+		command += " module " + *module
+	}
+	return (cli.Session{RuntimeDir: *dir}).Execute(context.Background(), command, nil, os.Stdout)
 }
 
 func halt(restart bool) {
@@ -190,7 +256,7 @@ func remote(args []string, command string) error {
 
 func configure(args []string) error {
 	if len(args) == 0 {
-		return errors.New("config requires show, validate, or apply")
+		return errors.New("config requires show, export, validate, migrate, apply, or confirm")
 	}
 	if args[0] == "show" {
 		return remote(args[1:], "show config")
@@ -200,6 +266,33 @@ func configure(args []string) error {
 	}
 	if args[0] == "confirm" {
 		return remote(args[1:], "confirm")
+	}
+	if args[0] == "migrate" {
+		if len(args) != 2 {
+			return errors.New("usage: routerd config migrate FILE")
+		}
+		file, err := os.Open(args[1])
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+		data, err := io.ReadAll(io.LimitReader(file, config.MaxSize+1))
+		if err != nil {
+			return err
+		}
+		if len(data) > config.MaxSize {
+			return errors.New("configuration exceeds 2 MiB")
+		}
+		converted, err := legacyconfig.Migrate(data)
+		if err != nil {
+			return err
+		}
+		output, err := config.YAML(converted)
+		if err != nil {
+			return err
+		}
+		_, err = os.Stdout.Write(output)
+		return err
 	}
 	if args[0] == "validate" {
 		if len(args) != 2 {

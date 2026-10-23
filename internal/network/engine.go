@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"time"
 )
 
 var errLinkNotFound = errors.New("link not found")
@@ -25,33 +26,49 @@ type ownedSetting struct {
 	Last   int        `json:"last"`
 }
 type ownedAddress struct {
-	Interface string `json:"interface"`
-	Address   string `json:"address"`
+	Interface string          `json:"interface"`
+	Address   string          `json:"address"`
+	Index     int             `json:"index,omitempty"`
+	Options   AddressOptions  `json:"options,omitzero"`
+	Attempted *AddressOptions `json:"attempted,omitempty"`
 }
 type journal struct {
-	Version           int            `json:"version"`
-	Revision          uint64         `json:"revision"`
-	AttemptedRevision uint64         `json:"attempted_revision"`
-	Desired           Desired        `json:"desired"`
-	Attempted         *Desired       `json:"attempted,omitempty"`
-	Status            string         `json:"status"`
-	LastError         string         `json:"last_error,omitempty"`
-	Addresses         []ownedAddress `json:"addresses,omitempty"`
-	Routes            []Route        `json:"routes,omitempty"`
-	Tunnels           []DSLite       `json:"tunnels,omitempty"`
-	Settings          []ownedSetting `json:"settings,omitempty"`
-	FirewallOwned     bool           `json:"firewall_owned"`
+	Version           int              `json:"version"`
+	Revision          uint64           `json:"revision"`
+	AttemptedRevision uint64           `json:"attempted_revision"`
+	Desired           Desired          `json:"desired"`
+	Attempted         *Desired         `json:"attempted,omitempty"`
+	Status            string           `json:"status"`
+	LastError         string           `json:"last_error,omitempty"`
+	Addresses         []ownedAddress   `json:"addresses,omitempty"`
+	Routes            []Route          `json:"routes,omitempty"`
+	PolicyRules       []PolicyRule     `json:"policy_rules,omitempty"`
+	Tunnels           []DSLite         `json:"tunnels,omitempty"`
+	Links             []ownedLink      `json:"links,omitempty"`
+	Attributes        []ownedAttribute `json:"attributes,omitempty"`
+	Settings          []ownedSetting   `json:"settings,omitempty"`
+	FirewallOwned     bool             `json:"firewall_owned"`
+	VRRPGuardOwned    bool             `json:"vrrp_guard_owned"`
 }
 
 // kernel is private: protocol modules use Desired, never netlink objects or
 // shell fragments. A fake implementation exercises ownership without root.
 type kernel interface {
 	Interface(string) (InterfaceState, error)
-	AddAddress(string, string) error
-	DeleteAddress(string, string) error
+	Interfaces() ([]InterfaceState, error)
+	CreateLink(Link, string) error
+	UpdateLink(Link, string) error
+	DeleteLink(string) error
+	WriteAttribute(settingKey, string) error
+	AddAddress(string, string, AddressOptions) error
+	UpdateAddress(string, string, AddressOptions) error
+	DeleteAddress(string, string, AddressOptions) error
 	Routes(int) ([]RouteState, error)
 	AddRoute(Route) error
 	DeleteRoute(Route) error
+	PolicyRules() ([]PolicyRuleState, error)
+	AddPolicyRule(PolicyRule) error
+	DeletePolicyRule(PolicyRule) error
 	CreateDSLite(DSLite) error
 	UpdateDSLite(DSLite) error
 	DeleteDSLite(string) error
@@ -59,6 +76,8 @@ type kernel interface {
 	WriteSetting(settingKey, int) error
 	Firewall() (FirewallState, error)
 	ReplaceFirewall(*Firewall) error
+	VRRPGuard() (FirewallState, error)
+	ReplaceVRRPGuard([]VRRPGuard) error
 }
 
 type Engine struct {
@@ -122,6 +141,12 @@ func newEngine(opts Options, k kernel) (*Engine, error) {
 }
 
 func validateJournal(s journal) error {
+	if err := validatePolicyRules(s.PolicyRules); err != nil {
+		return err
+	}
+	if err := validateLinkJournal(s); err != nil {
+		return err
+	}
 	if err := Validate(s.Desired); err != nil {
 		return err
 	}
@@ -131,8 +156,16 @@ func validateJournal(s journal) error {
 		}
 	}
 	for _, a := range s.Addresses {
-		if err := Validate(Desired{Interfaces: []Interface{{Name: a.Interface, Addresses: []string{a.Address}}}}); err != nil {
+		if a.Index < 0 {
+			return fmt.Errorf("invalid saved address interface index")
+		}
+		if err := Validate(Desired{Interfaces: []Interface{{Name: a.Interface, Addresses: []string{a.Address}, AddressOptions: map[string]AddressOptions{a.Address: a.Options}}}}); err != nil {
 			return err
+		}
+		if a.Attempted != nil {
+			if err := Validate(Desired{Interfaces: []Interface{{Name: a.Interface, Addresses: []string{a.Address}, AddressOptions: map[string]AddressOptions{a.Address: *a.Attempted}}}}); err != nil {
+				return err
+			}
 		}
 	}
 	if err := Validate(Desired{Routes: s.Routes, DSLite: s.Tunnels}); err != nil {
@@ -192,7 +225,7 @@ func (e *Engine) Apply(ctx context.Context, revision uint64, desired Desired) (S
 	if err := ctx.Err(); err != nil {
 		return e.snapshotLocked(ctx), err
 	}
-	d := normalized(cloneDesired(desired))
+	d := projectAddressExpiry(normalized(cloneDesired(desired)), time.Now())
 	e.state.AttemptedRevision, e.state.Attempted = revision, &d
 	e.state.Status, e.state.LastError = "applying", ""
 	if err := e.save(); err != nil {
@@ -245,15 +278,41 @@ func (e *Engine) snapshotLocked(ctx context.Context) Snapshot {
 	}
 	names, tables := map[string]bool{}, map[int]bool{}
 	collect := func(d Desired) {
+		for _, name := range firewallInterfaces(d.Firewall) {
+			names[name] = true
+		}
+		for _, r := range d.PolicyRules {
+			tables[r.Table] = true
+			if r.InInterface != "" {
+				names[r.InInterface] = true
+			}
+			if r.OutInterface != "" {
+				names[r.OutInterface] = true
+			}
+		}
+		for _, l := range d.Links {
+			names[l.Name] = true
+			if l.Parent != "" {
+				names[l.Parent] = true
+			}
+		}
 		for _, l := range d.Interfaces {
 			names[l.Name] = true
+			if l.Master != nil && *l.Master != "" {
+				names[*l.Master] = true
+			}
 		}
 		for _, t := range d.DSLite {
 			names[t.Name] = true
 			names[t.Underlay] = true
 		}
 		for _, r := range d.Routes {
-			names[r.Interface] = true
+			if r.Interface != "" {
+				names[r.Interface] = true
+			}
+			for _, h := range r.NextHops {
+				names[h.Interface] = true
+			}
 			tables[routeTable(r)] = true
 		}
 	}
@@ -267,8 +326,17 @@ func (e *Engine) snapshotLocked(ctx context.Context) Snapshot {
 	for _, t := range e.state.Tunnels {
 		names[t.Name] = true
 	}
+	for _, l := range e.state.Links {
+		names[l.Definition.Name] = true
+	}
+	for _, a := range e.state.Attributes {
+		names[a.Key.Interface] = true
+	}
 	for _, r := range e.state.Routes {
 		tables[routeTable(r)] = true
+	}
+	for _, r := range e.state.PolicyRules {
+		tables[r.Table] = true
 	}
 	ordered := make([]string, 0, len(names))
 	for n := range names {
@@ -282,8 +350,11 @@ func (e *Engine) snapshotLocked(ctx context.Context) Snapshot {
 			continue
 		}
 		for i := range l.Addresses {
-			l.Addresses[i].Owned = e.ownsAddress(ownedAddress{n, l.Addresses[i].Address})
+			a := &l.Addresses[i]
+			o := e.addressRecord(addressKey{n, a.Address})
+			a.Owned = o != nil && (o.Index == 0 || o.Index == l.Index) && (addressOptionsMatch(*a, o.Options, time.Now()) || o.Attempted != nil && addressOptionsMatch(*a, *o.Attempted, time.Now()))
 		}
+		l.Owned = e.ownsLink(l)
 		s.Interfaces = append(s.Interfaces, l)
 	}
 	tableIDs := make([]int, 0, len(tables))
@@ -300,6 +371,14 @@ func (e *Engine) snapshotLocked(ctx context.Context) Snapshot {
 		}
 	}
 	v, err := e.kernel.ReadSetting(settingKey{Kind: "forwarding4"})
+	if len(e.state.PolicyRules) > 0 || len(e.state.Desired.PolicyRules) > 0 || e.state.Attempted != nil && len(e.state.Attempted.PolicyRules) > 0 {
+		rules, readErr := e.kernel.PolicyRules()
+		problem(readErr)
+		for _, r := range rules {
+			r.Owned = e.ownsPolicyRule(r)
+			s.PolicyRules = append(s.PolicyRules, r)
+		}
+	}
 	problem(err)
 	s.Forwarding.IPv4 = v == 1
 	v, err = e.kernel.ReadSetting(settingKey{Kind: "forwarding6"})
@@ -310,6 +389,12 @@ func (e *Engine) snapshotLocked(ctx context.Context) Snapshot {
 	if err == nil {
 		fw.Owned = fw.Owned && e.state.FirewallOwned
 		s.Firewall = fw
+	}
+	guard, guardErr := e.kernel.VRRPGuard()
+	problem(guardErr)
+	if guardErr == nil {
+		guard.Owned = guard.Owned && e.state.VRRPGuardOwned
+		s.VRRPGuard = guard
 	}
 	return s
 }
@@ -345,16 +430,16 @@ func (e *Engine) save() error {
 	return d.Sync()
 }
 
-func (e *Engine) ownsAddress(a ownedAddress) bool {
+func (e *Engine) ownsAddress(a addressKey) bool {
 	for _, v := range e.state.Addresses {
-		if v == a {
+		if v.key() == a {
 			return true
 		}
 	}
 	return false
 }
 func routeMatches(live RouteState, want Route) bool {
-	return live.Route == want && live.Protocol == RouteProtocol && live.Type == 1 && live.Source == "" && !live.Multipath && !live.Advanced
+	return sameRoute(live.Route, want) && live.Protocol == RouteProtocol && live.Type == 1 && live.Source == "" && live.Multipath == (len(live.NextHops) > 0) && !live.Advanced
 }
 func (e *Engine) ownsRoute(r RouteState) bool {
 	for _, v := range e.state.Routes {
@@ -371,6 +456,10 @@ type apply struct {
 	changed int
 }
 
+// A native multi-attribute update may fail after changing some attributes.
+// Propagate that uncertainty instead of reporting an untouched kernel.
+type partialMutationError struct{ error }
+
 func (p *apply) failure(stage string, err error) error {
 	return &ApplyError{Stage: stage, Partial: p.changed > 0, Err: err}
 }
@@ -379,6 +468,10 @@ func (p *apply) change(stage string, fn func() error, record func()) error {
 		return p.failure(stage, err)
 	}
 	if err := fn(); err != nil {
+		var partial *partialMutationError
+		if errors.As(err, &partial) {
+			p.changed++
+		}
 		return p.failure(stage, err)
 	}
 	p.changed++
@@ -398,6 +491,18 @@ func (p *apply) checkpoint(stage string) error {
 }
 
 func (p *apply) reconcile(d Desired) error {
+	if err := p.preflightFirewall(d.Firewall); err != nil {
+		return err
+	}
+	if err := p.preflightVRRPGuards(d.VRRPGuards); err != nil {
+		return err
+	}
+	if err := p.preflightPolicyRules(d.PolicyRules); err != nil {
+		return err
+	}
+	if err := p.preflightLinks(d); err != nil {
+		return err
+	}
 	wantedSettings := map[settingKey]int{}
 	for _, l := range d.Interfaces {
 		wantedSettings[settingKey{Kind: "up", Interface: l.Name}] = 1
@@ -417,6 +522,9 @@ func (p *apply) reconcile(d Desired) error {
 	if err := p.restoreSettings(wantedSettings); err != nil {
 		return err
 	}
+	if err := p.restoreAttributes(d); err != nil {
+		return err
+	}
 	// Explicit disables run before any network policy changes; enables run only
 	// after the new firewall transaction has been acknowledged.
 	for _, kind := range []string{"forwarding4", "forwarding6"} {
@@ -428,6 +536,9 @@ func (p *apply) reconcile(d Desired) error {
 		}
 	}
 	if err := p.removeAddresses(d); err != nil {
+		return err
+	}
+	if err := p.links(d.Links); err != nil {
 		return err
 	}
 	tunnels := map[string]bool{}
@@ -456,13 +567,25 @@ func (p *apply) reconcile(d Desired) error {
 			}
 		}
 	}
+	if err := p.removePolicyRules(d.PolicyRules); err != nil {
+		return err
+	}
 	if err := p.routes(d.Routes); err != nil {
+		return err
+	}
+	if err := p.policyRules(d.PolicyRules); err != nil {
 		return err
 	}
 	if err := p.removeTunnels(d); err != nil {
 		return err
 	}
+	if err := p.removeLinks(d); err != nil {
+		return err
+	}
 	if err := p.firewall(d.Firewall); err != nil {
+		return err
+	}
+	if err := p.vrrpGuards(d.VRRPGuards); err != nil {
 		return err
 	}
 	for _, kind := range []string{"forwarding4", "forwarding6"} {
@@ -544,6 +667,16 @@ func (p *apply) restoreSettings(want map[settingKey]int) error {
 }
 
 func (p *apply) interfaceConfig(l Interface) error {
+	for _, field := range []struct {
+		kind  string
+		value *string
+	}{{"master", l.Master}, {"alias", l.Alias}} {
+		if field.value != nil {
+			if err := p.attribute(settingKey{Kind: field.kind, Interface: l.Name}, *field.value); err != nil {
+				return err
+			}
+		}
+	}
 	if l.MTU != 0 {
 		if err := p.set(settingKey{Kind: "mtu", Interface: l.Name}, l.MTU); err != nil {
 			return err
@@ -553,29 +686,7 @@ func (p *apply) interfaceConfig(l Interface) error {
 		return err
 	}
 	for _, a := range l.Addresses {
-		owned := ownedAddress{l.Name, a}
-		live, err := p.e.kernel.Interface(l.Name)
-		if err != nil {
-			return p.failure("address read", err)
-		}
-		found := false
-		for _, x := range live.Addresses {
-			if x.Address == a {
-				found = true
-				break
-			}
-		}
-		if found {
-			if !p.e.ownsAddress(owned) {
-				return p.failure("address ownership", fmt.Errorf("%s on %s already exists without ownership journal; refusing to adopt", a, l.Name))
-			}
-			continue
-		}
-		if err := p.change("address add", func() error { return p.e.kernel.AddAddress(l.Name, a) }, func() {
-			if !p.e.ownsAddress(owned) {
-				p.e.state.Addresses = append(p.e.state.Addresses, owned)
-			}
-		}); err != nil {
+		if err := p.addressConfig(l, a); err != nil {
 			return err
 		}
 	}
@@ -583,17 +694,17 @@ func (p *apply) interfaceConfig(l Interface) error {
 }
 
 func (p *apply) removeAddresses(d Desired) error {
-	want := map[ownedAddress]bool{}
+	want := map[addressKey]bool{}
 	for _, l := range d.Interfaces {
 		for _, a := range l.Addresses {
-			want[ownedAddress{l.Name, a}] = true
+			want[addressKey{l.Name, a}] = true
 		}
 	}
 	// Remove secondaries first. Linux may otherwise implicitly remove them when
 	// deleting their primary IPv4 address; the backend refuses that operation.
-	secondary := map[ownedAddress]bool{}
+	secondary := map[addressKey]bool{}
 	for _, a := range p.e.state.Addresses {
-		if want[a] {
+		if want[a.key()] {
 			continue
 		}
 		l, err := p.e.kernel.Interface(a.Interface)
@@ -602,14 +713,16 @@ func (p *apply) removeAddresses(d Desired) error {
 		}
 		for _, live := range l.Addresses {
 			if live.Address == a.Address {
-				secondary[a] = live.Flags&1 != 0
+				secondary[a.key()] = live.Flags&1 != 0
 			}
 		}
 	}
-	sort.SliceStable(p.e.state.Addresses, func(i, j int) bool { return secondary[p.e.state.Addresses[i]] && !secondary[p.e.state.Addresses[j]] })
+	sort.SliceStable(p.e.state.Addresses, func(i, j int) bool {
+		return secondary[p.e.state.Addresses[i].key()] && !secondary[p.e.state.Addresses[j].key()]
+	})
 	for i := 0; i < len(p.e.state.Addresses); {
 		a := p.e.state.Addresses[i]
-		if want[a] {
+		if want[a.key()] {
 			i++
 			continue
 		}
@@ -617,15 +730,21 @@ func (p *apply) removeAddresses(d Desired) error {
 		if err != nil && !errors.Is(err, errLinkNotFound) {
 			return p.failure("address remove read", err)
 		}
+		if err == nil && a.Index > 0 && a.Index != l.Index {
+			return p.failure("address removal ownership", fmt.Errorf("interface %s was replaced", a.Interface))
+		}
 		found := false
 		for _, v := range l.Addresses {
 			if v.Address == a.Address {
+				if !addressOptionsMatch(v, a.Options, time.Now()) && (a.Attempted == nil || !addressOptionsMatch(v, *a.Attempted, time.Now())) {
+					return p.failure("address removal ownership", fmt.Errorf("options for %s on %s changed outside routerd2; refusing to delete", a.Address, a.Interface))
+				}
 				found = true
 			}
 		}
 		forget := func() { p.e.state.Addresses = append(p.e.state.Addresses[:i], p.e.state.Addresses[i+1:]...) }
 		if found {
-			if err := p.change("address remove", func() error { return p.e.kernel.DeleteAddress(a.Interface, a.Address) }, forget); err != nil {
+			if err := p.change("address remove", func() error { return p.e.kernel.DeleteAddress(a.Interface, a.Address, a.Options) }, forget); err != nil {
 				return err
 			}
 		} else {
@@ -643,7 +762,7 @@ func (p *apply) routes(want []Route) error {
 		r := p.e.state.Routes[i]
 		keep := false
 		for _, v := range want {
-			if r == v {
+			if sameRoute(r, v) {
 				keep = true
 				break
 			}
@@ -696,7 +815,7 @@ func (p *apply) routes(want []Route) error {
 		}
 		if err := p.change("route add", func() error { return p.e.kernel.AddRoute(r) }, func() {
 			for _, v := range p.e.state.Routes {
-				if v == r {
+				if sameRoute(v, r) {
 					return
 				}
 			}
@@ -820,6 +939,20 @@ func (p *apply) removeTunnels(d Desired) error {
 	return nil
 }
 
+func (p *apply) preflightFirewall(want *Firewall) error {
+	if want == nil && !p.e.state.FirewallOwned {
+		return nil
+	}
+	live, err := p.e.kernel.Firewall()
+	if err != nil {
+		return p.failure("firewall read", err)
+	}
+	if live.Present && (!live.Owned || !p.e.state.FirewallOwned) {
+		return p.failure("firewall ownership", fmt.Errorf("inet table %s exists without matching ownership journal and marker", FirewallTable))
+	}
+	return nil
+}
+
 func (p *apply) firewall(want *Firewall) error {
 	if want == nil && !p.e.state.FirewallOwned {
 		return nil
@@ -836,16 +969,9 @@ func (p *apply) firewall(want *Firewall) error {
 		return p.checkpoint("forget absent firewall")
 	}
 	if want != nil {
-		for _, f := range want.Forward {
-			for _, name := range []string{f.From, f.To} {
-				if _, err := p.e.kernel.Interface(name); err != nil {
-					return p.failure("firewall interface", err)
-				}
-			}
-		}
-		for _, n := range want.Masquerade {
-			if _, err := p.e.kernel.Interface(n.OutInterface); err != nil {
-				return p.failure("masquerade interface", err)
+		for _, name := range firewallInterfaces(want) {
+			if _, err := p.e.kernel.Interface(name); err != nil {
+				return p.failure("firewall interface", err)
 			}
 		}
 	}

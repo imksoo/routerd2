@@ -1,0 +1,106 @@
+apiVersion: routerd.net/v1alpha1
+kind: Router
+metadata: {name: migration-firewall}
+spec:
+  resources:
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: Interface
+      metadata: {name: wan}
+      spec: {ifname: eth0, managed: true, adminUp: true}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: Interface
+      metadata: {name: lan}
+      spec: {ifname: eth1, managed: true, adminUp: true}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: Interface
+      metadata: {name: mgmt}
+      spec: {ifname: eth2, managed: true, adminUp: true}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: Interface
+      metadata: {name: peer}
+      spec: {ifname: eth3, managed: true, adminUp: true}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: IPv4StaticAddress
+      metadata: {name: source}
+      spec: {interface: wan, address: 203.0.113.9/32}
+    - apiVersion: firewall.routerd.net/v1alpha1
+      kind: FirewallZone
+      metadata: {name: z-wan}
+      spec: {role: untrust, interfaces: [Interface/wan]}
+    - apiVersion: firewall.routerd.net/v1alpha1
+      kind: FirewallZone
+      metadata: {name: b-lan}
+      spec: {role: trust, interfaces: [Interface/lan]}
+    - apiVersion: firewall.routerd.net/v1alpha1
+      kind: FirewallZone
+      metadata: {name: a-mgmt}
+      spec: {role: mgmt, interfaces: [Interface/mgmt]}
+    - apiVersion: firewall.routerd.net/v1alpha1
+      kind: FirewallZone
+      metadata: {name: y-peer}
+      spec: {role: untrust, interfaces: [Interface/peer]}
+    - apiVersion: firewall.routerd.net/v1alpha1
+      kind: FirewallPolicy
+      metadata: {name: policy}
+      spec: {logDeny: true, sameRoleAccept: true}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: DHCPv4Client
+      metadata: {name: wan-client}
+      spec: {interface: wan, useDNS: false}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: DHCPv4Client
+      metadata: {name: lan-client}
+      spec: {interface: lan, useDNS: false}
+    - apiVersion: firewall.routerd.net/v1alpha1
+      kind: FirewallRule
+      metadata: {name: z-block-http}
+      spec: {fromZone: b-lan, toZone: z-wan, protocol: tcp, port: 80, action: drop}
+    - apiVersion: firewall.routerd.net/v1alpha1
+      kind: FirewallRule
+      metadata: {name: a-http-exception}
+      spec:
+        fromZone: b-lan
+        toZone: z-wan
+        protocol: tcp
+        srcCIDRs: [192.0.2.42/32]
+        destinationCIDRs: [203.0.113.100/24]
+        sourcePorts: [1234]
+        destinationPorts: [80, "443-444"]
+        action: accept
+    - apiVersion: firewall.routerd.net/v1alpha1
+      kind: FirewallRule
+      metadata: {name: management}
+      spec: {fromZone: z-wan, toZone: self, protocol: tcp, port: 22, srcCIDRs: [198.51.100.0/24], action: accept, log: true}
+    - apiVersion: firewall.routerd.net/v1alpha1
+      kind: FirewallRule
+      metadata: {name: deny-wan-dhcp}
+      spec: {fromZone: z-wan, toZone: self, protocol: udp, port: 68, action: drop}
+    - apiVersion: firewall.routerd.net/v1alpha1
+      kind: FirewallRule
+      metadata: {name: deny-lan-dhcp}
+      spec: {fromZone: b-lan, toZone: self, protocol: udp, port: 68, action: drop}
+    - apiVersion: firewall.routerd.net/v1alpha1
+      kind: FirewallRule
+      metadata: {name: echo}
+      spec: {fromZone: z-wan, toZone: self, protocol: icmp, icmp-type: echo-request, srcCIDRs: [198.51.100.0/24], action: accept}
+    - apiVersion: firewall.routerd.net/v1alpha1
+      kind: FirewallRule
+      metadata: {name: outer-ipip}
+      spec: {fromZone: z-wan, toZone: self, protocol: ipip, action: accept}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: NAT44Rule
+      metadata: {name: z-masquerade}
+      spec:
+        type: masquerade
+        egressInterface: wan
+        sourceRanges: [192.0.2.1/24]
+        excludeDestinationCIDRs: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16]
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: NAT44Rule
+      metadata: {name: a-fixed-source}
+      spec:
+        type: snat
+        egressInterface: wan
+        sourceRanges: [192.0.2.42/32]
+        destinationCIDRs: [198.51.100.0/24]
+        snatAddressFrom: {resource: IPv4StaticAddress/source, field: address}

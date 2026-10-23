@@ -18,6 +18,7 @@ import (
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/network"
+	"github.com/imksoo/routerd2/internal/runtimeplan"
 )
 
 const SocketName = "control.sock"
@@ -42,10 +43,11 @@ type ConfirmRequest struct {
 
 type State struct {
 	config.Committed
-	Healthy       bool   `json:"healthy"`
-	LastError     string `json:"last_error,omitempty"`
-	ProducerEpoch string `json:"producer_epoch"`
-	Sequence      uint64 `json:"sequence"`
+	Healthy       bool                `json:"healthy"`
+	LastError     string              `json:"last_error,omitempty"`
+	ProducerEpoch string              `json:"producer_epoch"`
+	Sequence      uint64              `json:"sequence"`
+	Services      *runtimeplan.Status `json:"services,omitempty"`
 }
 
 type Event struct {
@@ -87,6 +89,7 @@ type Engine struct {
 	network Network
 	state   State
 	events  []Event
+	runtime *runtimeplan.Runtime
 }
 
 func New(store *config.Store, current config.Committed, n Network) *Engine {
@@ -97,7 +100,26 @@ func New(store *config.Store, current config.Committed, n Network) *Engine {
 	return &Engine{store: store, network: n, state: State{Committed: current, ProducerEpoch: hex.EncodeToString(epoch[:])}}
 }
 
-func (e *Engine) State() State { e.mu.Lock(); defer e.mu.Unlock(); return e.state }
+func (e *Engine) State() State {
+	e.mu.Lock()
+	s := e.state
+	e.mu.Unlock()
+	if e.runtime != nil {
+		v := e.runtime.State()
+		s.Services = &v
+		if v.Phase == "degraded" {
+			s.Healthy = false
+			s.LastError = v.LastError
+		}
+	}
+	return s
+}
+func (e *Engine) apply(ctx context.Context, revision uint64, doc config.Document) error {
+	if e.runtime != nil {
+		return e.runtime.ApplyConfig(ctx, revision, doc)
+	}
+	return e.network.Apply(ctx, revision, doc.Network)
+}
 
 // Reconcile deliberately restores only the durable committed revision. A pending
 // revision left by a crash is not evidence that its kernel mutations completed.
@@ -107,7 +129,7 @@ func (e *Engine) Reconcile(ctx context.Context) error {
 	if e.state.Confirmation != nil {
 		return e.rollbackConfirmation(ctx, "restart")
 	}
-	if err := e.network.Apply(ctx, e.state.Revision, e.state.Config.Network); err != nil {
+	if err := e.apply(ctx, e.state.Revision, e.state.Config); err != nil {
 		e.state.Healthy = false
 		e.state.LastError = err.Error()
 		return err
@@ -165,7 +187,7 @@ func (e *Engine) Commit(ctx context.Context, r CommitRequest) (State, error) {
 	if err := e.store.Stage(next); err != nil {
 		return e.state, fmt.Errorf("stage configuration: %w", err)
 	}
-	if err := e.network.Apply(ctx, next.Revision, next.Config.Network); err != nil {
+	if err := e.apply(ctx, next.Revision, next.Config); err != nil {
 		return e.state, e.restore(previous, r.RequestID, fmt.Errorf("apply candidate: %w", err))
 	}
 	if err := e.store.Save(next); err != nil {
@@ -195,6 +217,17 @@ func (e *Engine) Confirm(r ConfirmRequest) (State, error) {
 	}
 	if !e.state.Healthy {
 		return e.state, errors.New("cannot confirm while the applied state is degraded")
+	}
+	if e.runtime != nil && e.runtime.State().Phase != "ready" {
+		return e.state, errors.New("cannot confirm while protocol projection is degraded or applying")
+	}
+	if e.runtime != nil {
+		ctx, stop := context.WithTimeout(context.Background(), 2*time.Second)
+		err := e.runtime.CheckReady(ctx)
+		stop()
+		if err != nil {
+			return e.state, fmt.Errorf("cannot confirm: %w", err)
+		}
 	}
 	if e.state.Confirmation == nil {
 		return e.state, nil
@@ -236,7 +269,7 @@ func (e *Engine) rollbackConfirmation(ctx context.Context, reason string) error 
 	// Rollback is itself a new public revision, so a candidate opened during
 	// the trial cannot overwrite the recovered configuration using a stale token.
 	next := config.Committed{Revision: e.state.Revision + 1, Config: p.Previous}
-	if err := e.network.Apply(ctx, next.Revision, next.Config.Network); err != nil {
+	if err := e.apply(ctx, next.Revision, next.Config); err != nil {
 		e.state.Healthy = false
 		e.state.LastError = "confirmation rollback: " + err.Error()
 		return err
@@ -259,7 +292,7 @@ func (e *Engine) rollbackConfirmation(ctx context.Context, reason string) error 
 func (e *Engine) restore(previous config.Committed, id string, cause error) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	rollbackErr := e.network.Apply(ctx, previous.Revision, previous.Config.Network)
+	rollbackErr := e.apply(ctx, previous.Revision, previous.Config)
 	persistErr := e.store.Save(previous)
 	e.state.Healthy = rollbackErr == nil && persistErr == nil
 	if e.state.Healthy {
@@ -269,7 +302,7 @@ func (e *Engine) restore(previous config.Committed, id string, cause error) erro
 		}
 	}
 	if rollbackErr != nil {
-		cause = errors.Join(cause, fmt.Errorf("kernel rollback failed: %w", rollbackErr))
+		cause = errors.Join(cause, fmt.Errorf("kernel/protocol rollback failed: %w", rollbackErr))
 	}
 	if persistErr != nil {
 		cause = errors.Join(cause, fmt.Errorf("configuration rollback persistence failed: %w", persistErr))

@@ -13,6 +13,7 @@ import (
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/network"
+	"github.com/imksoo/routerd2/internal/runtimeplan"
 )
 
 func ServeNetwork(ctx context.Context, dir, stateDir string, ready func()) error {
@@ -52,6 +53,11 @@ func ServeNetwork(ctx context.Context, dir, stateDir string, ready func()) error
 
 func (e *Engine) Handler() http.Handler {
 	mux := http.NewServeMux()
+	if e.runtime != nil {
+		h := e.runtime.Handler()
+		mux.Handle("/v1/services", h)
+		mux.Handle("/v1/services/", h)
+	}
 	mux.HandleFunc("GET /v1/version", func(w http.ResponseWriter, r *http.Request) { localapi.JSON(w, 200, buildinfo.Current()) })
 	mux.HandleFunc("GET /v1/config", func(w http.ResponseWriter, r *http.Request) { localapi.JSON(w, 200, e.State()) })
 	mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, r *http.Request) {
@@ -118,11 +124,30 @@ func (e *Engine) Handler() http.Handler {
 }
 
 func Serve(ctx context.Context, dir, stateDir, bootstrap string, ready func()) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	store, current, err := config.Open(stateDir, bootstrap)
 	if err != nil {
 		return err
 	}
-	e := New(store, current, NewNetworkClient(dir))
+	networkClient := NewNetworkClient(dir)
+	e := New(store, current, networkClient)
+	e.runtime = runtimeplan.New(dir, stateDir, networkClient)
+	// Protocol readiness may require an effects acknowledgement. Start the
+	// private API before reconciliation, while public health remains false.
+	listening := make(chan struct{})
+	serverDone := make(chan error, 1)
+	go func() {
+		serverDone <- localapi.Serve(ctx, filepath.Join(dir, SocketName), e.Handler(), func() { close(listening) })
+	}()
+	select {
+	case <-listening:
+	case err := <-serverDone:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	go e.runtime.Monitor(ctx)
 	// The network worker may still be starting. Reconcile before marking control
 	// ready; the supervisor's own status API remains available during this wait.
 	timer := time.NewTimer(0)
@@ -158,5 +183,11 @@ func Serve(ctx context.Context, dir, stateDir, bootstrap string, ready func()) e
 			}
 		}
 	}()
-	return localapi.Serve(ctx, filepath.Join(dir, SocketName), e.Handler(), ready)
+	ready()
+	select {
+	case err := <-serverDone:
+		return err
+	case <-ctx.Done():
+		return nil
+	}
 }

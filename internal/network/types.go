@@ -10,7 +10,8 @@ import (
 )
 
 const (
-	// FirewallTable is the only nftables table this package may modify.
+	// FirewallTable is the primary owned nftables table. HA receive guards have
+	// their own separately journaled table, VRRPGuardTable.
 	FirewallTable = "routerd2"
 	// RouteProtocol labels our routes. The journal, not this value alone, is
 	// required to establish ownership; other routing software can use it too.
@@ -18,11 +19,14 @@ const (
 )
 
 type Desired struct {
-	Interfaces []Interface `json:"interfaces,omitempty"`
-	Routes     []Route     `json:"routes,omitempty"`
-	Forwarding Forwarding  `json:"forwarding,omitempty"`
-	Firewall   *Firewall   `json:"firewall,omitempty"`
-	DSLite     []DSLite    `json:"ds_lite,omitempty"`
+	Links       []Link       `json:"links,omitempty"`
+	Interfaces  []Interface  `json:"interfaces,omitempty"`
+	Routes      []Route      `json:"routes,omitempty"`
+	PolicyRules []PolicyRule `json:"policy_rules,omitempty"`
+	Forwarding  Forwarding   `json:"forwarding,omitempty"`
+	Firewall    *Firewall    `json:"firewall,omitempty"`
+	DSLite      []DSLite     `json:"ds_lite,omitempty"`
+	VRRPGuards  []VRRPGuard  `json:"vrrp_guards,omitempty"`
 }
 
 // Interface brings an existing link up. MTU zero leaves its MTU unchanged.
@@ -32,17 +36,40 @@ type Interface struct {
 	Name      string   `json:"name"`
 	MTU       int      `json:"mtu,omitempty"`
 	Addresses []string `json:"addresses,omitempty"`
+	// AddressOptions keys are entries in Addresses. Omitted options mean an
+	// infinite static address with normal duplicate-address detection.
+	AddressOptions map[string]AddressOptions `json:"address_options,omitempty"`
+	// Master nil leaves membership unmanaged; an empty value detaches it.
+	// Only bridge and VRF masters are supported. Previous membership is restored
+	// when the field becomes nil, provided no other actor has changed it.
+	Master *string `json:"master,omitempty"`
+	// Alias is for preexisting interfaces. A created Link uses Link.Alias so its
+	// ownership marker cannot be accidentally overwritten.
+	Alias *string `json:"alias,omitempty"`
 }
 
 type Route struct {
 	Destination string `json:"destination"`
 	Gateway     string `json:"gateway,omitempty"`
-	Interface   string `json:"interface"`
+	Interface   string `json:"interface,omitempty"`
+	// NextHops installs one weighted multipath route. It is mutually exclusive
+	// with Gateway/Interface. A single next hop has no relative weight and is
+	// normalized to a scalar route, matching Linux's IPv6 representation.
+	NextHops []NextHop `json:"next_hops,omitempty"`
 	// Metric zero uses Linux's default: 0 for IPv4, 1024 for IPv6.
 	Metric int `json:"metric,omitempty"`
-	// Table zero means the main table (254). Policy routing rules are not yet
-	// part of this API; using another table does not install an ip rule.
+	// Table zero means the main table (254). Use PolicyRules to select a different
+	// table; creating a route in a table does not install a policy rule implicitly.
 	Table int `json:"table,omitempty"`
+}
+
+// NextHop is an already resolved, directly reachable next hop. Weight is 1..256
+// (Linux rtnh_hops + 1). Gateway may be empty for a directly connected path;
+// Interface is always explicit. Recursive routing belongs to the control plane.
+type NextHop struct {
+	Gateway   string `json:"gateway,omitempty"`
+	Interface string `json:"interface"`
+	Weight    int    `json:"weight"`
 }
 
 // Forwarding is opt-in. Nil leaves an unmanaged sysctl unchanged. When a setting
@@ -53,13 +80,20 @@ type Forwarding struct {
 	IPv6 *bool `json:"ipv6,omitempty"`
 }
 
-// Firewall manages the routerd2 inet table. Its forward base chain has policy
-// drop, accepts established/related traffic, and permits the explicit pairs.
-// It installs no input/output filter, so this is not a management-plane ACL.
-// Nil removes a previously owned table, but never removes an unowned table.
+// Firewall manages only the routerd2 inet table. A nil Firewall removes a
+// previously owned table, but never removes an unowned table. Input and Output
+// are opt-in; their nil values install no hooks. The legacy Forward pairs use
+// a default-drop forward chain unless ForwardChain overrides its policy.
 type Firewall struct {
-	Forward    []Forward    `json:"forward,omitempty"`
-	Masquerade []Masquerade `json:"masquerade,omitempty"`
+	Forward      []Forward      `json:"forward,omitempty"`
+	Masquerade   []Masquerade   `json:"masquerade,omitempty"`
+	Input        *FirewallChain `json:"input,omitempty"`
+	Output       *FirewallChain `json:"output,omitempty"`
+	ForwardChain *FirewallChain `json:"forward_chain,omitempty"`
+	// DisableForward installs no forward hook, for example for NAT-only use.
+	// It cannot be combined with Forward pairs or ForwardChain.
+	DisableForward bool      `json:"disable_forward,omitempty"`
+	NAT            []NATRule `json:"nat,omitempty"`
 }
 
 type Forward struct {
@@ -93,20 +127,29 @@ type Options struct {
 }
 
 type AddressState struct {
-	Address string `json:"address"`
-	Flags   int    `json:"flags,omitempty"`
-	Owned   bool   `json:"owned"`
+	Address           string `json:"address"`
+	Peer              string `json:"peer,omitempty"`
+	Flags             int    `json:"flags,omitempty"`
+	Owned             bool   `json:"owned"`
+	PreferredLifetime uint32 `json:"preferred_lifetime_seconds"`
+	ValidLifetime     uint32 `json:"valid_lifetime_seconds"`
 }
 
 type InterfaceState struct {
-	Name      string         `json:"name"`
-	Index     int            `json:"index"`
-	Kind      string         `json:"kind"`
-	MTU       int            `json:"mtu"`
-	Up        bool           `json:"up"`
-	Alias     string         `json:"alias,omitempty"`
-	Addresses []AddressState `json:"addresses,omitempty"`
-	DSLite    *DSLite        `json:"ds_lite,omitempty"`
+	Name         string         `json:"name"`
+	Index        int            `json:"index"`
+	Kind         string         `json:"kind"`
+	MTU          int            `json:"mtu"`
+	Up           bool           `json:"up"`
+	Alias        string         `json:"alias,omitempty"`
+	HardwareAddr string         `json:"hardware_addr,omitempty"`
+	Parent       string         `json:"parent,omitempty"`
+	Master       string         `json:"master,omitempty"`
+	MasterIndex  int            `json:"master_index,omitempty"`
+	Link         *Link          `json:"link,omitempty"`
+	Owned        bool           `json:"owned"`
+	Addresses    []AddressState `json:"addresses,omitempty"`
+	DSLite       *DSLite        `json:"ds_lite,omitempty"`
 }
 
 type RouteState struct {
@@ -131,16 +174,18 @@ type FirewallState struct {
 }
 
 type Snapshot struct {
-	Revision          uint64           `json:"revision"`
-	AttemptedRevision uint64           `json:"attempted_revision"`
-	Status            string           `json:"status"`
-	Desired           Desired          `json:"desired"`
-	LastError         string           `json:"last_error,omitempty"`
-	Interfaces        []InterfaceState `json:"interfaces,omitempty"`
-	Routes            []RouteState     `json:"routes,omitempty"`
-	Forwarding        ForwardingState  `json:"forwarding"`
-	Firewall          FirewallState    `json:"firewall"`
-	ObservationErrors []string         `json:"observation_errors,omitempty"`
+	Revision          uint64            `json:"revision"`
+	AttemptedRevision uint64            `json:"attempted_revision"`
+	Status            string            `json:"status"`
+	Desired           Desired           `json:"desired"`
+	LastError         string            `json:"last_error,omitempty"`
+	Interfaces        []InterfaceState  `json:"interfaces,omitempty"`
+	Routes            []RouteState      `json:"routes,omitempty"`
+	PolicyRules       []PolicyRuleState `json:"policy_rules,omitempty"`
+	Forwarding        ForwardingState   `json:"forwarding"`
+	Firewall          FirewallState     `json:"firewall"`
+	VRRPGuard         FirewallState     `json:"vrrp_guard"`
+	ObservationErrors []string          `json:"observation_errors,omitempty"`
 }
 
 // ApplyError reports partial application. Netlink, sysctl and nftables are not
@@ -164,6 +209,21 @@ func validName(s string) bool { return interfaceName.MatchString(s) && s != "." 
 // Validate is side-effect free and does not require Linux or privileges.
 func Validate(d Desired) error {
 	var errs []error
+	if err := validateLinks(d); err != nil {
+		errs = append(errs, err)
+	}
+	if err := validatePolicyRules(d.PolicyRules); err != nil {
+		errs = append(errs, err)
+	}
+	if err := validateAddressOptions(d); err != nil {
+		errs = append(errs, err)
+	}
+	if err := validateVRRPGuards(d); err != nil {
+		errs = append(errs, err)
+	}
+	if err := validateFirewall(d.Firewall); err != nil {
+		errs = append(errs, err)
+	}
 	add := func(format string, args ...any) { errs = append(errs, fmt.Errorf(format, args...)) }
 	links := map[string]Interface{}
 	for _, l := range d.Interfaces {
@@ -193,36 +253,8 @@ func Validate(d Desired) error {
 			seen[p.String()] = true
 		}
 	}
-	seenRoutes := map[string]bool{}
-	for _, r := range d.Routes {
-		p, err := netip.ParsePrefix(r.Destination)
-		if err != nil || !p.IsValid() || p.Addr().Is4In6() {
-			add("route: invalid destination %q", r.Destination)
-			continue
-		}
-		if p != p.Masked() {
-			add("route %s: destination must be a network prefix", r.Destination)
-		}
-		if !validName(r.Interface) {
-			add("route %s: invalid interface %q", r.Destination, r.Interface)
-		}
-		if r.Metric < 0 || uint64(r.Metric) > uint64(^uint32(0)) {
-			add("route %s: invalid metric", r.Destination)
-		}
-		if r.Table < 0 || uint64(r.Table) > uint64(^uint32(0)) || r.Table == 255 {
-			add("route %s: invalid/reserved route table", r.Destination)
-		}
-		if r.Gateway != "" {
-			g, err := netip.ParseAddr(r.Gateway)
-			if err != nil || !g.IsValid() || g.Is4In6() || g.Zone() != "" || g.IsUnspecified() || g.IsMulticast() || g.Is4() != p.Addr().Is4() {
-				add("route %s: gateway must be a same-family unicast address", r.Destination)
-			}
-		}
-		key := routeSlot(r)
-		if seenRoutes[key] {
-			add("route %s: duplicate destination/table/metric; ECMP is not implemented", r.Destination)
-		}
-		seenRoutes[key] = true
+	if err := validateRoutes(d.Routes); err != nil {
+		errs = append(errs, err)
 	}
 	seenTunnels := map[string]bool{}
 	for _, t := range d.DSLite {
@@ -308,24 +340,34 @@ func addressIP(s string) string {
 }
 
 func normalized(d Desired) Desired {
+	for i := range d.VRRPGuards {
+		for j, s := range d.VRRPGuards[i].Addresses {
+			a, _ := netip.ParseAddr(s)
+			d.VRRPGuards[i].Addresses[j] = a.String()
+		}
+	}
+	for i := range d.PolicyRules {
+		d.PolicyRules[i] = normalizePolicyRule(d.PolicyRules[i])
+	}
+	for i := range d.Links {
+		d.Links[i] = normalizeLink(d.Links[i])
+	}
 	for i := range d.Interfaces {
+		if len(d.Interfaces[i].AddressOptions) > 0 {
+			options := map[string]AddressOptions{}
+			for address, value := range d.Interfaces[i].AddressOptions {
+				p, _ := netip.ParsePrefix(address)
+				options[p.String()] = normalizeAddressOptions(value)
+			}
+			d.Interfaces[i].AddressOptions = options
+		}
 		for j, a := range d.Interfaces[i].Addresses {
 			p, _ := netip.ParsePrefix(a)
 			d.Interfaces[i].Addresses[j] = p.String()
 		}
 	}
 	for i := range d.Routes {
-		r := &d.Routes[i]
-		p, _ := netip.ParsePrefix(r.Destination)
-		r.Destination = p.Masked().String()
-		r.Table = routeTable(*r)
-		if p.Addr().Is6() && r.Metric == 0 {
-			r.Metric = 1024
-		}
-		if r.Gateway != "" {
-			g, _ := netip.ParseAddr(r.Gateway)
-			r.Gateway = g.String()
-		}
+		d.Routes[i] = normalizeRoute(d.Routes[i])
 	}
 	for i := range d.DSLite {
 		t := &d.DSLite[i]
@@ -334,6 +376,7 @@ func normalized(d Desired) Desired {
 		t.Local, t.Remote = l.String(), r.String()
 	}
 	if d.Firewall != nil {
+		normalizeFirewall(d.Firewall)
 		for i := range d.Firewall.Masquerade {
 			p, _ := netip.ParsePrefix(d.Firewall.Masquerade[i].Source)
 			d.Firewall.Masquerade[i].Source = p.Masked().String()

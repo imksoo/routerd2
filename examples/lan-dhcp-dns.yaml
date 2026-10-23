@@ -1,0 +1,42 @@
+# The example LAN address range is for a dedicated test router namespace.
+schema_version: 1
+network:
+  interfaces:
+    - name: eth0
+      addresses: [192.0.2.1/24]
+services:
+  - name: leases
+    dhcp_server:
+      interface: eth0
+      server_address: 192.0.2.1
+      authoritative: true
+      max_leases: 200
+      primary:
+        prefix: 192.0.2.0/24
+        start: 192.0.2.50
+        end: 192.0.2.200
+        router: 192.0.2.1
+        dns_servers: [192.0.2.1]
+        domain: lab.example
+        lease_seconds: 3600
+  - name: resolver
+    dns:
+      spec:
+        listen:
+          - name: lan
+            addresses: [192.0.2.1, 127.0.0.1]
+            port: 53
+        sources:
+          - name: local
+            kind: zone
+            match: [lab.example]
+            zoneRef: [DNSZone/lan]
+      zones:
+        - name: lan
+          spec:
+            zone: lab.example
+            records:
+              - hostname: router
+                ipv4: 192.0.2.1
+            dhcpDerived:
+              sources: [DHCPv4Server/leases]

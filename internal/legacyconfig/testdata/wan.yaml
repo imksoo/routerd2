@@ -1,0 +1,45 @@
+apiVersion: routerd.net/v1alpha1
+kind: Router
+metadata: {name: migration-wan}
+spec:
+  resources:
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: Interface
+      metadata: {name: wan}
+      spec: {ifname: eth0, managed: true, adminUp: true}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: Interface
+      metadata: {name: lan}
+      spec: {ifname: eth1, managed: true, adminUp: true}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: DHCPv4Client
+      metadata: {name: ipv4-provider}
+      spec:
+        interface: wan
+        hostname: gateway
+        requestedAddress: 192.0.2.50
+        classID: router
+        clientID: "01020000000001"
+        useRoutes: false
+        useDNS: false
+        routeMetric: 80
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: DHCPv6PrefixDelegation
+      metadata: {name: ipv6-provider}
+      spec:
+        interface: wan
+        client: routerd
+        profile: ntt-hgw-lan-pd
+        prefixLength: 56
+        clientDUID: "00030001020000000001"
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: IPv6DelegatedAddress
+      metadata: {name: lan-network}
+      spec:
+        prefixDelegation: DHCPv6PrefixDelegation/ipv6-provider
+        interface: lan
+        subnetID: "10"
+        addressSuffix: "::1234"
+        prefixLength: 64
+        sendRA: false
+        announce: false

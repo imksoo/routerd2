@@ -8,21 +8,34 @@ Alpineのパッケージをビルドとイメージ組み立てに利用しま�
 移植元の基準は `1329ef54f296507eda79bbbc3b853783dd27251e` です。
 既存のhomert02/03を置き換える前に、WAN取得・HA・既存設定との互換試験が必要です。
 
-## 実装されている基盤
+## 実装されている機能
 
 | 層 | 実装 |
 | --- | --- |
-| init / supervisor | 明示的なappliance・container・hostモード、PID 1、子プロセス回収、終了処理、再起動backoff、heartbeat、同一releaseの検証 |
-| worker runtime | 一つの `routerd-modules` 実行ファイルを役割別のプロセスとして起動。親との専用FD、世代ごとの状態 |
-| network | NetlinkによるIPv4/IPv6アドレス・静的経路・MTU・リンク状態、forwarding sysctl、nftablesによるforward filterとmasquerade |
-| DS-Lite | 固定IPv6 endpointを使うカーネルIPv4-in-IPv6トンネル。AFTR探索・DHCPv6取得は別途移植 |
-| configuration | YAML / JSON、厳密な検証、楽観的世代管理、冪等リクエスト、永続journal、失敗時の旧desiredへのreconcile |
-| confirmed commit | 時間内に確認しない変更を戻す。未確認のままcontrolが再起動した場合も戻す |
-| management | 内蔵SSH、公開鍵認証、永続host key、OSシェルを呼ばないtyped CLI、Unix socket API |
-| images | static amd64/arm64バイナリ、scratch OCI image、Alpine APK、Linux kernel + initramfs、QEMU検証スクリプト |
+| init / supervisor | 明示的な appliance・container・host モード、PID 1、子プロセス回収、終了処理、backoff、heartbeat、同一 release 検証、設定に応じたプロトコルプロセスの追加・置換・停止 |
+| worker runtime | `routerd-modules` を役割とインスタンスごとの別プロセスで起動。専用 lifecycle FD、世代・設定 SHA-256・producer epoch による古い通知の拒否 |
+| logging | journald を使わない独立ログプロセス、構造化ログ、回転・復旧、bounded queue、console fallback、appliance の `/dev/kmsg` 収集。ログ障害を必須ルーティングプロセスの停止条件にしない |
+| network | Netlink による IPv4/IPv6、有限アドレス寿命、静的経路・ECMP、policy routing、bridge/VLAN/VRF/VXLAN/macvlan、MTU・リンク・forwarding。nftables の INPUT/OUTPUT/FORWARD ACL、DNAT/SNAT/masquerade とポート範囲 |
+| WAN | native DHCPv4、DHCPv6 IA_PD / Information-request、DUID/IAID とリースの永続化、renew/rebind/失効。PD から LAN /64 を割り当て、旧 prefix を deprecated で維持 |
+| DHCP server | native DHCPv4、scope・予約・sticky lease、ARP conflict probe、信頼する relay の限定、永続 journal を保存してから ACK。worker 再起動後の INIT-REBOOT / renew に対応 |
+| RA | native ICMPv6、RS 応答、RDNSS/DNSSL、絶対寿命、PD 更新時に同じプロセス・socket で prefix を変更。削除した prefix だけを withdraw |
+| DS-Lite | 固定 endpoint の kernel IPv4-in-IPv6、B4 の point-to-point アドレス。動的 AFTR 名の解決・WAN RA 依存の接続は未完成 |
+| VRRPv3 | native IPv4/IPv6 election、VMAC、GARP/NA、preempt、優先度、有限 ownership lease、NoDAD の明示 VIP、Accept_Mode の入力制御 |
+| DNS | 現行 routerd の resolver engine を再利用。UDP/TCP サーバー、cache、zones、query log、UDP/TCP/TLS/HTTPS/QUIC upstream。型付き DHCP リースによる A/PTR を、listener 再起動なしで更新・失効。虚偽の AD bit を防ぐため未実装の local DNSSEC signing は拒否 |
+| BGP | GoBGP v4 を独立 worker に統合。IPv4/IPv6 unicast、policy、選択経路の kernel 投影、recursive next hop、ECMP、期限付き FIB ownership。未解決 next hop は状態に表示し、未解決のまま FIB に入れない |
+| configuration | YAML / JSON の厳密な検証、candidate、revision・冪等 request ID、永続 journal、プロセス構成と kernel projection の適用、失敗時の旧設定への reconcile |
+| confirmed commit | 確認期限で rollback。未確認のまま control が再起動した場合も復元。復元失敗を成功として扱わない |
+| management | 内蔵 SSH、公開鍵認証、永続 host key、Tab / history 付き候補編集、YAML 一括編集、diff、validate、commit confirmed、ログ参照。OS シェルを呼ばない |
+| migration | `routerd config migrate FILE` で旧 resource YAML の対応部分を変換。未対応・意味が変わる入力は理由を列挙し、部分的な設定を出力しない |
+| distribution | static amd64/arm64 の 2 バイナリ、依存ライセンス manifest、scratch OCI、Alpine APK、kernel + initramfs、QEMU と namespace 統合試験 |
 
-アプライアンスの通常起動には、systemd、journald、sshd、OpenRC、`ip`、`nft`、シェルを使いません。
-パケット転送はLinuxカーネルが行います。ユーザーランドでIPv4/IPv6スタックを独自再実装する設計ではありません。
+アプライアンスの通常起動には systemd、journald、sshd、OpenRC、`ip`、`nft`、シェルを使いません。
+パケット転送と IPv4/IPv6、conntrack、NAT、トンネルは Linux カーネルが処理します。
+routerd は設定、プロトコル、監視、ログ、管理とその整合性を受け持ちます。
+
+詳細は [アーキテクチャ](docs/architecture.md)、[現行 routerd の機能棚卸し](docs/parity.md)、
+[設定例](examples/) を参照してください。機能棚卸しの `semantic_parity` は個々の旧 resource 契約の互換性を示し、
+プロトコル実装やビルドの成功だけでは true にしません。
 
 ## Build and test
 
@@ -94,9 +107,36 @@ ssh admin@ROUTER show version
 ssh admin@ROUTER restart network
 ```
 
-実行中設定の変更はcontrol APIのトランザクションを通します。
-`schema_version` はrouterd2の初期モデルであり、元のrouterdのresource YAMLをそのまま受理する意味ではありません。
-全resourceモデルの移植と互換性は明示的に追跡します。
+対話セッションでは候補設定を編集します。実行中設定は commit まで変わりません。
+
+```text
+routerd> configure
+routerd(config)# edit network.interfaces[eth0]
+routerd(config:network.interfaces[eth0])# set mtu 1500
+routerd(config:network.interfaces[eth0])# top
+routerd(config)# diff
+routerd(config)# validate
+routerd(config)# commit confirmed 60
+routerd(config)# confirm
+routerd(config)# exit
+routerd> show services
+routerd> show logs module service.wan limit 50
+```
+
+`set` の値は JSON、パスのリスト要素は名前または番号で指定します。
+`edit running-config.yaml` は候補全体の YAML を表示し、置換文書を貼り付けて `.end` で検証します。
+`.abort` で編集を取り消せます。Vim や OS shell の起動ではありません。
+Tab 補完、矢印キーによる履歴、`delete`、`up`、`top`、`abort` も使用できます。
+YAML のコメント・元の整形は保持しません。ローカルの TTY では `routerd cli` が同じ編集機能を使います。
+
+```sh
+routerd config export > running-config.yaml
+routerd config migrate old-routerd.yaml > candidate-routerd2.yaml
+routerd config validate candidate-routerd2.yaml
+```
+
+`schema_version: 1` は routerd2 のモデルです。旧 resource YAML の無条件な互換ではありません。
+移行器は未実装の暗黙依存や権限・入力制御の意味変更を拒否します。
 
 ## Architecture constraints
 
@@ -111,5 +151,10 @@ ssh admin@ROUTER restart network
 ## License
 
 新規コードは [BSD-3-Clause](LICENSE) です。
-Linux、Alpineパッケージ、Goライブラリ、今後移植する既存routerdコードは、それぞれのライセンスと表示義務を維持します。
+Linux、Alpineパッケージ、Goライブラリ、移植した既存 routerd コードは、それぞれのライセンスと表示義務を維持します。
 独立プロセスであることだけを理由に、結合・配布に関する義務がなくなるとは扱いません。
+
+`make licenses` は実際に使用する import graph と module graph を分け、各依存の
+version/checksum、LICENSE/COPYING/COPYRIGHT/NOTICE/PATENTS とファイル hash を保存します。
+選択コピーした元 routerd の DNS/BGP 実装にはその NOTICE を残します。
+カーネルや追加 APK を配布するときの source 提供義務は、この manifest だけで完結しません。

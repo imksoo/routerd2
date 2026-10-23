@@ -11,12 +11,14 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/imksoo/routerd2/internal/buildinfo"
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/control"
 	"github.com/imksoo/routerd2/internal/localapi"
+	"github.com/imksoo/routerd2/internal/logging"
 )
 
 type Session struct{ RuntimeDir string }
@@ -33,20 +35,52 @@ func (s Session) Execute(ctx context.Context, command string, input io.Reader, o
 		return nil
 	}
 	if len(a) == 1 && a[0] == "help" {
-		_, err := fmt.Fprintln(out, "show status\nshow network\nshow config\nshow running-config\nshow version\nrestart <module>\nconfigure (exec: CommitRequest YAML/JSON on stdin; shell: candidate mode)\nconfirm\nhelp\nexit")
+		_, err := fmt.Fprintln(out, "show status\nshow network\nshow services\nshow config\nshow running-config\nshow logs [module NAME] [level INFO] [limit 100]\nshow logging\nshow version\nrestart <module>\nconfigure (exec: CommitRequest YAML/JSON on stdin; shell: candidate mode)\nconfirm\nhelp\nexit")
 		return err
 	}
 	var result json.RawMessage
 	super := localapi.NewClient(filepath.Join(s.RuntimeDir, "supervisor.sock"))
 	ctl := localapi.NewClient(filepath.Join(s.RuntimeDir, control.SocketName))
+	logClient := localapi.NewClient(filepath.Join(s.RuntimeDir, logging.SocketName))
 	var err error
 	switch {
+	case len(a) >= 2 && a[0] == "show" && a[1] == "logs":
+		q := url.Values{"tail": {"true"}, "limit": {"100"}}
+		if len(a)%2 != 0 {
+			return errors.New("usage: show logs [module NAME] [level LEVEL] [limit 1..200]")
+		}
+		seen := map[string]bool{}
+		for i := 2; i < len(a); i += 2 {
+			if seen[a[i]] {
+				return errors.New("duplicate log filter")
+			}
+			seen[a[i]] = true
+			switch a[i] {
+			case "module":
+				q.Set("module", a[i+1])
+			case "level":
+				q.Set("level", strings.ToUpper(a[i+1]))
+			case "limit":
+				n, e := strconv.Atoi(a[i+1])
+				if e != nil || n < 1 || n > logging.MaxQuery {
+					return errors.New("log limit must be 1..200")
+				}
+				q.Set("limit", a[i+1])
+			default:
+				return errors.New("unknown log filter")
+			}
+		}
+		err = logClient.Do(ctx, http.MethodGet, "/v1/logs?"+q.Encode(), nil, &result)
 	case len(a) == 2 && a[0] == "show":
 		switch a[1] {
 		case "status":
 			err = super.Do(ctx, http.MethodGet, "/v1/status", nil, &result)
 		case "network":
 			err = ctl.Do(ctx, http.MethodGet, "/v1/network", nil, &result)
+		case "services":
+			err = ctl.Do(ctx, http.MethodGet, "/v1/services", nil, &result)
+		case "logging":
+			err = logClient.Do(ctx, http.MethodGet, "/v1/status", nil, &result)
 		case "config":
 			err = ctl.Do(ctx, http.MethodGet, "/v1/config", nil, &result)
 		case "running-config":
@@ -66,7 +100,7 @@ func (s Session) Execute(ctx context.Context, command string, input io.Reader, o
 			return errors.New("unknown show command; use help")
 		}
 	case len(a) == 2 && a[0] == "restart":
-		if strings.ContainsAny(a[1], "/\\.?") {
+		if strings.ContainsAny(a[1], "/\\?") {
 			return errors.New("invalid module name")
 		}
 		err = super.Do(ctx, http.MethodPost, "/v1/modules/"+url.PathEscape(a[1])+"/restart", struct{}{}, &result)

@@ -19,14 +19,18 @@ const ownerChain = "ownership"
 var firewallMarker = []byte("routerd2:owned-table:v1")
 
 func (k *linuxKernel) Firewall() (FirewallState, error) {
-	s := FirewallState{Table: FirewallTable}
+	return ownedNftTable(FirewallTable, firewallMarker)
+}
+
+func ownedNftTable(name string, marker []byte) (FirewallState, error) {
+	s := FirewallState{Table: name}
 	c := &nftables.Conn{}
 	tables, err := c.ListTablesOfFamily(nftables.TableFamilyINet)
 	if err != nil {
 		return s, err
 	}
 	for _, t := range tables {
-		if t.Name != FirewallTable {
+		if t.Name != name {
 			continue
 		}
 		s.Present = true
@@ -35,7 +39,7 @@ func (k *linuxKernel) Firewall() (FirewallState, error) {
 			return s, nil
 		}
 		for _, r := range rs {
-			if bytes.Equal(r.UserData, firewallMarker) {
+			if bytes.Equal(r.UserData, marker) {
 				s.Owned = true
 				break
 			}
@@ -48,6 +52,9 @@ func (k *linuxKernel) Firewall() (FirewallState, error) {
 // ReplaceFirewall queues deletion and recreation in one nftables batch. No
 // FlushRuleset or other table's operation is ever queued. Conntrack survives.
 func (k *linuxKernel) ReplaceFirewall(f *Firewall) error {
+	if err := validateFirewall(f); err != nil {
+		return err
+	}
 	c := &nftables.Conn{}
 	tables, err := c.ListTablesOfFamily(nftables.TableFamilyINet)
 	if err != nil {
@@ -69,29 +76,92 @@ func buildFirewall(c *nftables.Conn, f *Firewall) {
 	t := c.CreateTable(&nftables.Table{Name: FirewallTable, Family: nftables.TableFamilyINet})
 	marker := c.AddChain(&nftables.Chain{Name: ownerChain, Table: t})
 	c.AddRule(&nftables.Rule{Table: t, Chain: marker, Exprs: []expr.Any{&expr.Counter{}}, UserData: firewallMarker})
-	drop := nftables.ChainPolicyDrop
-	forward := c.AddChain(&nftables.Chain{Name: "forward", Table: t, Type: nftables.ChainTypeFilter, Hooknum: nftables.ChainHookForward, Priority: nftables.ChainPriorityFilter, Policy: &drop})
-	add := func(expressions []expr.Any) { c.AddRule(&nftables.Rule{Table: t, Chain: forward, Exprs: expressions}) }
-	add(stateVerdict(expr.CtStateBitINVALID, expr.VerdictDrop))
-	add(stateVerdict(expr.CtStateBitESTABLISHED|expr.CtStateBitRELATED, expr.VerdictAccept))
-	for _, pair := range f.Forward {
-		es := interfaceMatch(expr.MetaKeyIIFNAME, pair.From)
-		es = append(es, interfaceMatch(expr.MetaKeyOIFNAME, pair.To)...)
-		es = append(es, &expr.Counter{}, &expr.Verdict{Kind: expr.VerdictAccept})
-		add(es)
+	if f.Input != nil {
+		buildFilterChain(c, t, "input", nftables.ChainHookInput, f.Input, nil)
 	}
-	if len(f.Masquerade) == 0 {
-		return
+	if f.Output != nil {
+		buildFilterChain(c, t, "output", nftables.ChainHookOutput, f.Output, nil)
 	}
+	if !f.DisableForward {
+		policy := f.ForwardChain
+		if policy == nil {
+			policy = &FirewallChain{Policy: "drop"}
+		}
+		buildFilterChain(c, t, "forward", nftables.ChainHookForward, policy, f.Forward)
+	}
+	var pre, post *nftables.Chain
 	accept := nftables.ChainPolicyAccept
-	nat := c.AddChain(&nftables.Chain{Name: "postrouting", Table: t, Type: nftables.ChainTypeNAT, Hooknum: nftables.ChainHookPostrouting, Priority: nftables.ChainPriorityNATSource, Policy: &accept})
+	for _, rule := range f.NAT {
+		chain := post
+		if rule.Type == "dnat" {
+			if pre == nil {
+				pre = c.AddChain(&nftables.Chain{Name: "prerouting", Table: t, Type: nftables.ChainTypeNAT, Hooknum: nftables.ChainHookPrerouting, Priority: nftables.ChainPriorityNATDest, Policy: &accept})
+			}
+			chain = pre
+		} else {
+			if post == nil {
+				post = c.AddChain(&nftables.Chain{Name: "postrouting", Table: t, Type: nftables.ChainTypeNAT, Hooknum: nftables.ChainHookPostrouting, Priority: nftables.ChainPriorityNATSource, Policy: &accept})
+			}
+			chain = post
+		}
+		for _, match := range packetExpressions(rule.Match) {
+			es := append(match, &expr.Counter{})
+			es = append(es, natExpressions(rule)...)
+			c.AddRule(&nftables.Rule{Table: t, Chain: chain, Exprs: es})
+		}
+	}
+	if len(f.Masquerade) > 0 && post == nil {
+		post = c.AddChain(&nftables.Chain{Name: "postrouting", Table: t, Type: nftables.ChainTypeNAT, Hooknum: nftables.ChainHookPostrouting, Priority: nftables.ChainPriorityNATSource, Policy: &accept})
+	}
 	for _, rule := range f.Masquerade {
 		prefix, _ := netip.ParsePrefix(rule.Source)
 		es := prefixMatch(prefix)
 		es = append(es, interfaceMatch(expr.MetaKeyOIFNAME, rule.OutInterface)...)
 		es = append(es, &expr.Counter{}, &expr.Masq{})
-		c.AddRule(&nftables.Rule{Table: t, Chain: nat, Exprs: es})
+		c.AddRule(&nftables.Rule{Table: t, Chain: post, Exprs: es})
 	}
+}
+
+func buildFilterChain(c *nftables.Conn, table *nftables.Table, name string, hook *nftables.ChainHook, config *FirewallChain, pairs []Forward) {
+	policy, verdict := nftables.ChainPolicyDrop, expr.VerdictDrop
+	if config.Policy == "accept" {
+		policy, verdict = nftables.ChainPolicyAccept, expr.VerdictAccept
+	}
+	chain := c.AddChain(&nftables.Chain{Name: name, Table: table, Type: nftables.ChainTypeFilter, Hooknum: hook, Priority: nftables.ChainPriorityFilter, Policy: &policy})
+	add := func(es []expr.Any) { c.AddRule(&nftables.Rule{Table: table, Chain: chain, Exprs: es}) }
+	add(stateVerdict(expr.CtStateBitINVALID, expr.VerdictDrop))
+	add(stateVerdict(expr.CtStateBitESTABLISHED|expr.CtStateBitRELATED, expr.VerdictAccept))
+	for _, rule := range config.Rules {
+		for _, es := range packetExpressions(rule.Match) {
+			es = append(es, logExpressions(rule.LogPrefix)...)
+			es = append(es, &expr.Counter{})
+			switch rule.Action {
+			case "accept":
+				es = append(es, &expr.Verdict{Kind: expr.VerdictAccept})
+			case "drop":
+				es = append(es, &expr.Verdict{Kind: expr.VerdictDrop})
+			case "reject":
+				es = append(es, &expr.Reject{Type: unix.NFT_REJECT_ICMPX_UNREACH, Code: unix.NFT_REJECT_ICMPX_PORT_UNREACH})
+			}
+			add(es)
+		}
+	}
+	for _, pair := range pairs {
+		es := interfaceMatch(expr.MetaKeyIIFNAME, pair.From)
+		es = append(es, interfaceMatch(expr.MetaKeyOIFNAME, pair.To)...)
+		es = append(es, &expr.Counter{}, &expr.Verdict{Kind: expr.VerdictAccept})
+		add(es)
+	}
+	es := logExpressions(config.LogPrefix)
+	es = append(es, &expr.Counter{}, &expr.Verdict{Kind: verdict})
+	add(es)
+}
+
+func logExpressions(prefix string) []expr.Any {
+	if prefix == "" {
+		return nil
+	}
+	return []expr.Any{&expr.Log{Key: 1<<unix.NFTA_LOG_PREFIX | 1<<unix.NFTA_LOG_LEVEL, Level: expr.LogLevelInfo, Data: []byte(prefix)}}
 }
 
 func stateVerdict(mask uint32, verdict expr.VerdictKind) []expr.Any {
@@ -108,9 +178,15 @@ func interfaceMatch(key expr.MetaKey, name string) []expr.Any {
 	return []expr.Any{&expr.Meta{Key: key, Register: 1}, &expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: b}}
 }
 func prefixMatch(prefix netip.Prefix) []expr.Any {
+	return prefixFieldMatch(prefix, true)
+}
+func prefixFieldMatch(prefix netip.Prefix, source bool) []expr.Any {
 	proto, offset, length := byte(unix.NFPROTO_IPV6), uint32(8), uint32(16)
 	if prefix.Addr().Is4() {
 		proto, offset, length = unix.NFPROTO_IPV4, 12, 4
+	}
+	if !source {
+		offset += length
 	}
 	mask := []byte(net.CIDRMask(prefix.Bits(), int(length)*8))
 	address := prefix.Masked().Addr().AsSlice()

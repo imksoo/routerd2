@@ -13,16 +13,18 @@ QEMU_SSH_KEY ?=
 LDFLAGS = -s -w -X github.com/imksoo/routerd2/internal/buildinfo.ReleaseID=$(RELEASE_ID)
 BUILD_ARGS = --build-arg GO_VERSION=$(GO_VERSION) --build-arg ALPINE_VERSION=$(ALPINE_VERSION) --build-arg RELEASE_ID=$(RELEASE_ID)
 
-.PHONY: help fmt fmt-check test race vet check build build-linux container container-multi container-smoke apk image qemu-smoke clean
+.PHONY: help fmt fmt-check test test-dependencies test-tools race vet check licenses build build-linux container container-multi container-smoke apk image qemu-smoke qemu-network clean
 
 help:
 	@printf '%s\n' \
 	  'make check             Format, unit tests, race detector, and vet' \
+	  'make licenses          Collect dependency licenses and their manifest' \
 	  'make build             Build both binaries for the current platform' \
 	  'make build-linux       Build static linux/amd64 and linux/arm64 binaries' \
 	  'make apk               Test and build the Alpine package with abuild' \
 	  'make image             Export Alpine kernel + routerd initramfs' \
 	  'make qemu-smoke        Boot the image in QEMU; optionally verify SSH' \
+	  'make qemu-network      Run native network tests in a separate QEMU guest' \
 	  'make container         Build the scratch OCI runtime image' \
 	  'make container-smoke   Run the container and query its control API' \
 	  'make container-multi   Export an amd64/arm64 OCI archive'
@@ -38,20 +40,29 @@ fmt-check:
 test:
 	$(GO) test ./...
 
+test-dependencies:
+	$(GO) test github.com/google/nftables/expr
+
+test-tools:
+	$(PYTHON) -m unittest discover -s scripts -p '*_test.py'
+
 race:
 	CGO_ENABLED=1 $(GO) test -race ./...
 
 vet:
 	$(GO) vet ./...
 
-check: fmt-check test race vet
+check: fmt-check test test-dependencies test-tools race vet
 
-build:
+licenses:
+	$(PYTHON) scripts/licenses.py --go '$(GO)' --output dist/licenses
+
+build: licenses
 	mkdir -p dist/bin
 	CGO_ENABLED=0 $(GO) build -trimpath -buildvcs=false -ldflags '$(LDFLAGS)' -o dist/bin/routerd ./cmd/routerd
 	CGO_ENABLED=0 $(GO) build -trimpath -buildvcs=false -ldflags '$(LDFLAGS)' -o dist/bin/routerd-modules ./cmd/routerd-modules
 
-build-linux:
+build-linux: licenses
 	@set -eu; for arch in amd64 arm64; do \
 	  mkdir -p "dist/bin/linux-$$arch"; \
 	  CGO_ENABLED=0 GOOS=linux GOARCH=$$arch $(GO) build -trimpath -buildvcs=false -ldflags '$(LDFLAGS)' -o "dist/bin/linux-$$arch/routerd" ./cmd/routerd; \
@@ -76,6 +87,9 @@ image:
 
 qemu-smoke:
 	$(PYTHON) scripts/qemu-smoke.py --image-dir $(IMAGE_DIR) --timeout $(QEMU_TIMEOUT) $(if $(QEMU_SSH_KEY),--ssh-key $(QEMU_SSH_KEY),)
+
+qemu-network:
+	$(PYTHON) scripts/qemu-network.py --go '$(GO)' --image-dir $(IMAGE_DIR) --timeout $(QEMU_TIMEOUT)
 
 clean:
 	rm -rf dist

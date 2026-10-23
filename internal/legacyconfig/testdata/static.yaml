@@ -1,0 +1,60 @@
+apiVersion: routerd.net/v1alpha1
+kind: Router
+metadata: {name: migration-static}
+spec:
+  reconcile: {mode: strict}
+  resources:
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: Interface
+      metadata: {name: wan}
+      spec: {ifname: eth0, managed: true, adminUp: true, mtu: 1500}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: Interface
+      metadata: {name: access}
+      spec: {ifname: eth1, managed: true, adminUp: true}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: Interface
+      metadata: {name: extra}
+      spec: {ifname: eth2, managed: true, adminUp: true}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: VRF
+      metadata: {name: blue}
+      spec: {ifname: vrf-blue, routeTable: 1001, members: [access]}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: Bridge
+      metadata: {name: fabric}
+      spec:
+        ifname: br0
+        members: [extra]
+        stp: false
+        rstp: false
+        macAddress: "02:00:00:00:00:01"
+        multicastSnooping: false
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: IPv4StaticAddress
+      metadata: {name: blue-ipv4}
+      spec: {interface: access, address: 192.0.2.1/24, exclusive: false}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: IPv4StaticAddress
+      metadata: {name: bridge-ipv4}
+      spec: {interface: fabric, address: 198.51.100.1/24}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: VirtualAddress
+      metadata: {name: local-v6}
+      spec: {interface: wan, family: ipv6, address: "2001:db8::1/128", mode: static}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: IPv4StaticRoute
+      metadata: {name: edge4}
+      spec: {destination: 203.0.113.0/24, via: 192.0.2.254, interface: access, metric: 42}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: IPv6StaticRoute
+      metadata: {name: edge6}
+      spec: {destination: "::/0", via: "fe80::1", interface: wan, metric: 100}
+    - apiVersion: system.routerd.net/v1alpha1
+      kind: Sysctl
+      metadata: {name: forward4}
+      spec: {key: net.ipv4.ip_forward, value: "1", runtime: true}
+    - apiVersion: system.routerd.net/v1alpha1
+      kind: Sysctl
+      metadata: {name: forward6}
+      spec: {key: net.ipv6.conf.all.forwarding, value: "0"}

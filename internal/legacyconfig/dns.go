@@ -1,0 +1,285 @@
+// SPDX-License-Identifier: BSD-3-Clause
+//
+// DNS resource composition and URL defaults are adapted from
+// routerd/pkg/controller/dnsresolver at SourceRevision; see NOTICE.
+
+package legacyconfig
+
+import (
+	"net"
+	"net/netip"
+	"net/url"
+	"strconv"
+	"strings"
+
+	"github.com/imksoo/routerd/pkg/api"
+	"github.com/imksoo/routerd/pkg/dnsresolver"
+	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
+	"github.com/imksoo/routerd2/internal/serviceconfig"
+)
+
+func (c *compiler) dns() {
+	var resolvers, forwarders, zones []resource
+	upstreams := map[string]resource{}
+	usedForwarders, usedUpstreams := map[string]bool{}, map[string]bool{}
+	for _, r := range c.resources {
+		switch r.Kind {
+		case "DNSResolver":
+			c.allow(r, "listen", "cache", "metrics", "queryLog")
+			resolvers = append(resolvers, r)
+		case "DNSForwarder":
+			c.allow(r, "resolver", "match", "zoneRefs", "upstreams", "dnssecValidate", "queryTimeout", "healthcheck")
+			forwarders = append(forwarders, r)
+		case "DNSUpstream":
+			c.allow(r, "protocol", "address", "addressFrom", "port", "path", "tlsName", "bootstrap", "bootstrapFrom", "sourceInterface")
+			s := r.Spec.(api.DNSUpstreamSpec)
+			if len(s.AddressFrom) > 0 || len(s.BootstrapFrom) > 0 {
+				c.reject(r, "addressFrom", "unsupported_semantics", "learned DNS/bootstrap sources require runtime resource subscriptions, not a frozen upstream list")
+			}
+			upstreams[r.Metadata.Name] = r
+		case "DNSZone":
+			c.allow(r, "zone", "ttl", "dnssec", "records", "dhcpDerived", "reverseZones", "ownerRefs")
+			zones = append(zones, r)
+		}
+	}
+	for _, r := range resolvers {
+		spec := r.Spec.(api.DNSResolverSpec)
+		spec.Listen = append([]api.DNSResolverListenSpec(nil), spec.Listen...)
+		if spec.QueryLog.Path != "" {
+			c.reject(r, "queryLog.path", "unsupported_semantics", "query-log storage is owned by the native service state directory; an explicit legacy file path cannot be retained")
+		}
+		for i := range spec.Listen {
+			listen := &spec.Listen[i]
+			if len(listen.AddressSources) != 0 {
+				c.reject(r, "listen["+strconv.Itoa(i)+"].addressSources", "unsupported_semantics", "deprecated address expressions must be replaced by explicit static addresses")
+			}
+			listen.Addresses = append([]string(nil), listen.Addresses...)
+			for j, source := range listen.AddressFrom {
+				path := "listen[" + strconv.Itoa(i) + "].addressFrom[" + strconv.Itoa(j) + "]"
+				if address := c.dnsStaticAddress(r, path, source); address != "" {
+					listen.Addresses = append(listen.Addresses, address)
+				}
+			}
+			listen.Addresses = uniqueStrings(listen.Addresses)
+			listen.AddressFrom = nil
+			listen.AddressSources = nil
+		}
+		for _, forward := range forwarders {
+			fs := forward.Spec.(api.DNSForwarderSpec)
+			resolver := c.getRef(forward, "resolver", fs.Resolver, "DNSResolver")
+			if resolver == nil || resolver.Metadata.Name != r.Metadata.Name {
+				continue
+			}
+			usedForwarders[forward.ID()] = true
+			source := api.DNSResolverSourceSpec{
+				Name: forward.Metadata.Name, Match: append([]string(nil), fs.Match...),
+				DNSSECValidate: fs.DNSSECValidate, QueryTimeout: fs.QueryTimeout,
+				Healthcheck: fs.Healthcheck,
+			}
+			if len(fs.ZoneRefs) > 0 {
+				source.Kind = "zone"
+				if len(fs.Upstreams) > 0 {
+					c.reject(forward, "upstreams", "invalid_value", "one forwarder cannot select both local zones and upstreams")
+				}
+				for _, ref := range fs.ZoneRefs {
+					if zone := c.getRef(forward, "zoneRefs", ref, "DNSZone"); zone != nil {
+						source.ZoneRef = append(source.ZoneRef, zone.Metadata.Name)
+					}
+				}
+			} else {
+				source.Kind = "forward"
+				for _, match := range fs.Match {
+					if strings.TrimSpace(match) == "." {
+						source.Kind = "upstream"
+					}
+				}
+				for _, ref := range fs.Upstreams {
+					upstream := c.getRef(forward, "upstreams", ref, "DNSUpstream")
+					if upstream == nil {
+						continue
+					}
+					usedUpstreams[upstream.Metadata.Name] = true
+					us := upstream.Spec.(api.DNSUpstreamSpec)
+					if raw := c.dnsUpstreamURL(*upstream, us); raw != "" {
+						source.Upstreams = append(source.Upstreams, raw)
+					}
+					source.BootstrapResolver = append(source.BootstrapResolver, us.Bootstrap...)
+					if us.SourceInterface != "" {
+						ifname := c.interfaceName(*upstream, "sourceInterface", us.SourceInterface, true)
+						if source.ViaInterface != "" && source.ViaInterface != ifname {
+							c.reject(forward, "upstreams", "unsupported_semantics", "one native DNS source cannot bind its upstreams to different interfaces")
+						} else {
+							source.ViaInterface = ifname
+						}
+					}
+					c.target(*upstream, "services/"+c.serviceName(r, "dns")+"/dns/sources/"+source.Name)
+				}
+			}
+			spec.Sources = append(spec.Sources, source)
+			c.target(forward, "services/"+c.serviceName(r, "dns")+"/dns/sources/"+source.Name)
+		}
+		normalized := dnsresolver.NormalizeSpec(spec)
+		// Public intent leaves private storage paths to the native compiler.
+		// The old normalizer otherwise inserts one process-global database path.
+		normalized.QueryLog.Path = spec.QueryLog.Path
+		runtime := dnsconfig.RuntimeConfig{Resource: c.serviceName(r, "dns"), Spec: normalized}
+		for _, zone := range zones {
+			zs := zone.Spec.(api.DNSZoneSpec)
+			zs.Records = append([]api.DNSZoneRecordSpec(nil), zs.Records...)
+			if len(zs.OwnerRefs) > 0 {
+				c.reject(zone, "ownerRefs", "unsupported_semantics", "zone owner lifecycle cannot be carried into a static runtime snapshot")
+			}
+			if zs.DNSSEC.Enabled || zs.DNSSEC.Mode != "" {
+				c.reject(zone, "dnssec", "unsupported_semantics", "native local zones do not sign or validate DNSSEC and will not assert unverified AD")
+			}
+			if len(zs.DHCPDerived.Sources) != 0 || zs.DHCPDerived.LeaseFile != "" || zs.DHCPDerived.DDNS || zs.DHCPDerived.HostnameSuffix != "" || zs.DHCPDerived.TTL != 0 {
+				c.reject(zone, "dhcpDerived", "unsupported_semantics", "DHCP hostname recovery and source-specific lease subscriptions require a migrated lease producer; a static snapshot cannot preserve them")
+			}
+			for i := range zs.Records {
+				record := &zs.Records[i]
+				path := "records[" + strconv.Itoa(i) + "]"
+				if record.IPv4From.Resource == "" && (record.IPv4From.Field != "" || record.IPv4From.Optional) ||
+					record.IPv6From.Resource == "" && (record.IPv6From.Field != "" || record.IPv6From.Optional) {
+					c.reject(zone, path, "required", "an address source must name its resource")
+				}
+				if record.IPv4Source.Field != "" || record.IPv4Source.Optional || record.IPv6Source.Field != "" || record.IPv6Source.Optional {
+					c.reject(zone, path, "unsupported_semantics", "deprecated record source expressions are not interpreted")
+				}
+				if record.IPv4From.Resource != "" {
+					if record.IPv4 != "" {
+						c.reject(zone, path+".ipv4From", "unsupported_semantics", "literal plus status-source fallback must be made explicit before migration")
+					}
+					record.IPv4 = c.resolveStaticAddress(zone, path+".ipv4From", record.IPv4From, true)
+					record.IPv4From = api.StatusValueSourceSpec{}
+				}
+				if record.IPv6From.Resource != "" {
+					if record.IPv6 != "" {
+						c.reject(zone, path+".ipv6From", "unsupported_semantics", "literal plus status-source fallback must be made explicit before migration")
+					}
+					record.IPv6 = c.resolveStaticAddress(zone, path+".ipv6From", record.IPv6From, false)
+					record.IPv6From = api.StatusValueSourceSpec{}
+				}
+			}
+			runtime.Zones = append(runtime.Zones, dnsconfig.RuntimeZone{Name: zone.Metadata.Name, Spec: zs})
+			c.target(zone, "services/"+runtime.Resource+"/dns/zones/"+zone.Metadata.Name)
+		}
+		service := serviceconfig.Service{Name: runtime.Resource, DNS: &runtime}
+		if err := serviceconfig.Validate([]serviceconfig.Service{service}); err != nil {
+			c.reject(r, "", "native_validation", "composed DNS listeners, sources, zones or cache settings fail native DNS validation")
+		}
+		c.addService(r, service)
+	}
+	for _, r := range forwarders {
+		if !usedForwarders[r.ID()] {
+			c.reject(r, "resolver", "reference", "forwarder has no compiled resolver")
+		}
+	}
+	for name, r := range upstreams {
+		if !usedUpstreams[name] {
+			c.reject(r, "", "unreferenced_resource", "upstream is not referenced by a compiled forwarder and would disappear from native intent")
+		}
+	}
+	if len(resolvers) == 0 {
+		for _, r := range zones {
+			c.reject(r, "", "unreferenced_resource", "zone has no compiled DNS resolver")
+		}
+	}
+}
+
+func uniqueStrings(values []string) []string {
+	seen := map[string]bool{}
+	var result []string
+	for _, value := range values {
+		if !seen[value] {
+			result = append(result, value)
+			seen[value] = true
+		}
+	}
+	return result
+}
+
+func (c *compiler) dnsStaticAddress(r resource, path string, source api.StatusValueSourceSpec) string {
+	ref := c.byRef[source.Resource]
+	if ref == nil {
+		c.reject(r, path, "reference", "listener source must name an explicit static address resource")
+		return ""
+	}
+	ipv4 := true
+	if value, ok := ref.Spec.(api.VirtualAddressSpec); ok {
+		ipv4 = value.Family != "ipv6"
+	}
+	return c.resolveStaticAddress(r, path, source, ipv4)
+}
+
+func (c *compiler) dnsUpstreamURL(r resource, s api.DNSUpstreamSpec) string {
+	address := strings.TrimSpace(s.Address)
+	if !validServerName(address) {
+		c.reject(r, "address", "invalid_value", "upstream address must be an IP address or DNS hostname without URL credentials")
+		return ""
+	}
+	if s.Port < 0 || s.Port > 65535 {
+		c.reject(r, "port", "invalid_value", "upstream port must be 1..65535, or omitted for its protocol default")
+		return ""
+	}
+	protocol := strings.ToLower(strings.TrimSpace(s.Protocol))
+	if protocol == "" {
+		protocol = "udp"
+	}
+	port := s.Port
+	query := url.Values{}
+	if s.TLSName != "" {
+		if !validServerName(s.TLSName) {
+			c.reject(r, "tlsName", "invalid_value", "TLS name must be a certificate hostname or IP address")
+			return ""
+		}
+		query.Set("serverName", s.TLSName)
+	}
+	raw := ""
+	switch protocol {
+	case "udp", "tcp":
+		if s.TLSName != "" || s.Path != "" {
+			c.reject(r, "", "unsupported_semantics", "TLS name and HTTP path have no meaning for an unencrypted DNS transport")
+		}
+		if port == 0 {
+			port = 53
+		}
+		raw = protocol + "://" + net.JoinHostPort(address, strconv.Itoa(port))
+	case "dot":
+		if s.Path != "" {
+			c.reject(r, "path", "unsupported_semantics", "HTTP path cannot be applied to DNS over TLS")
+		}
+		if port == 0 {
+			port = 853
+		}
+		raw = "tls://" + net.JoinHostPort(address, strconv.Itoa(port))
+	case "doh":
+		if port == 0 {
+			port = 443
+		}
+		path := first(strings.TrimSpace(s.Path), "/dns-query")
+		if strings.ContainsAny(path, "?#\r\n") {
+			c.reject(r, "path", "invalid_value", "HTTP path must not include a query, fragment or newline")
+			return ""
+		}
+		if !strings.HasPrefix(path, "/") {
+			path = "/" + path
+		}
+		raw = "https://" + net.JoinHostPort(address, strconv.Itoa(port)) + path
+	default:
+		c.reject(r, "protocol", "invalid_value", "the pinned public resource schema supports udp, tcp, dot and doh")
+		return ""
+	}
+	if encoded := query.Encode(); encoded != "" && (protocol == "dot" || protocol == "doh") {
+		raw += "?" + encoded
+	}
+	return raw
+}
+
+func validServerName(value string) bool {
+	if addr, err := netip.ParseAddr(value); err == nil {
+		return addr.Zone() == "" && !addr.IsUnspecified() && !addr.IsMulticast()
+	}
+	// DNS wire-label validation alone permits characters such as @ and :.
+	// They must not turn an address into URL userinfo, a port, or a query.
+	return dnsconfig.ValidHostname(value) && !strings.ContainsAny(value, "@/\\?#[]:%")
+}

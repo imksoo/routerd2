@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/localapi"
 	"golang.org/x/sys/unix"
 )
 
@@ -22,16 +23,21 @@ type restartRequest struct {
 	name  string
 	reply chan error
 }
+type reconcileRequest struct {
+	request ReconcileModules
+	reply   chan error
+}
 
 type api struct {
-	mu       sync.RWMutex
-	status   Status
-	restarts chan restartRequest
-	ctx      context.Context
-	server   *http.Server
-	listener *net.UnixListener
-	lock     *os.File
-	path     string
+	mu         sync.RWMutex
+	status     Status
+	restarts   chan restartRequest
+	reconciles chan reconcileRequest
+	ctx        context.Context
+	server     *http.Server
+	listener   *net.UnixListener
+	lock       *os.File
+	path       string
 }
 
 func openAPI(ctx context.Context, dir string, initial Status) (*api, error) {
@@ -93,7 +99,7 @@ func openAPI(ctx context.Context, dir string, initial Status) (*api, error) {
 		_ = lock.Close()
 		return nil, err
 	}
-	a := &api{status: initial, restarts: make(chan restartRequest), ctx: ctx, listener: listener, lock: lock, path: path}
+	a := &api{status: initial, restarts: make(chan restartRequest), reconciles: make(chan reconcileRequest), ctx: ctx, listener: listener, lock: lock, path: path}
 	a.server = &http.Server{
 		Handler: a, ReadHeaderTimeout: 2 * time.Second, ReadTimeout: 3 * time.Second,
 		WriteTimeout: 3 * time.Second, IdleTimeout: 10 * time.Second, MaxHeaderBytes: 8192,
@@ -116,6 +122,39 @@ func (a *api) publish(s Status) {
 
 func (a *api) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+	if r.URL.Path == "/v1/modules/reconcile" {
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", "POST")
+			localapi.Fail(w, 405, errors.New("method not allowed"))
+			return
+		}
+		var request ReconcileModules
+		if err := localapi.Decode(w, r, &request); err != nil {
+			localapi.Fail(w, 400, err)
+			return
+		}
+		req := reconcileRequest{request: request, reply: make(chan error, 1)}
+		select {
+		case a.reconciles <- req:
+		case <-a.ctx.Done():
+			localapi.Fail(w, 503, errors.New("supervisor is stopping"))
+			return
+		case <-r.Context().Done():
+			return
+		}
+		select {
+		case err := <-req.reply:
+			if err != nil {
+				localapi.Fail(w, 422, err)
+			} else {
+				localapi.JSON(w, 202, map[string]bool{"accepted": true})
+			}
+		case <-a.ctx.Done():
+			localapi.Fail(w, 503, errors.New("supervisor is stopping"))
+		case <-r.Context().Done():
+		}
+		return
+	}
 	if r.URL.Path == "/v1/status" {
 		if r.Method != http.MethodGet {
 			w.Header().Set("Allow", "GET")

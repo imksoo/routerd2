@@ -1,0 +1,67 @@
+apiVersion: routerd.net/v1alpha1
+kind: Router
+metadata: {name: migration-dns}
+spec:
+  resources:
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: Interface
+      metadata: {name: wan}
+      spec: {ifname: eth0, managed: true, adminUp: true}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: Interface
+      metadata: {name: lan}
+      spec: {ifname: eth1, managed: true, adminUp: true}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: IPv4StaticAddress
+      metadata: {name: gateway}
+      spec: {interface: lan, address: 192.0.2.1/24}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: DNSResolver
+      metadata: {name: resolver}
+      spec:
+        listen:
+          - name: lan
+            addressFrom:
+              - {resource: IPv4StaticAddress/gateway, field: address}
+            port: 53
+            sources: [local, public]
+        cache: {enabled: true, maxEntries: 1234, minTTL: 0s, maxTTL: 1h, negativeTTL: 30s}
+        metrics: {perUpstream: true}
+        queryLog: {enabled: true}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: DNSZone
+      metadata: {name: home}
+      spec:
+        zone: home.arpa
+        ttl: 60
+        records:
+          - hostname: gateway
+            ipv4From: {resource: IPv4StaticAddress/gateway, field: address}
+          - {hostname: "*.lab", ipv4: 192.0.2.25, ttl: 90}
+        reverseZones: [{name: 2.0.192.in-addr.arpa}]
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: DNSForwarder
+      metadata: {name: local}
+      spec: {resolver: DNSResolver/resolver, match: [home.arpa], zoneRefs: [DNSZone/home]}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: DNSForwarder
+      metadata: {name: public}
+      spec:
+        resolver: resolver
+        match: ["."]
+        upstreams: [DNSUpstream/tls, DNSUpstream/plain]
+        queryTimeout: 2s
+        healthcheck: {interval: 30s, timeout: 2s, failThreshold: 3, passThreshold: 2}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: DNSUpstream
+      metadata: {name: tls}
+      spec:
+        protocol: dot
+        address: 192.0.2.53
+        tlsName: resolver.example
+        sourceInterface: wan
+        bootstrap: [198.51.100.53]
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: DNSUpstream
+      metadata: {name: plain}
+      spec: {protocol: udp, address: 198.51.100.53, port: 5353, sourceInterface: wan}

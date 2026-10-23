@@ -3,6 +3,7 @@
 package supervisor
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -67,6 +68,7 @@ func helperMain() int {
 		_, _ = fmt.Fprintln(file, time.Now().UnixNano())
 		_ = file.Close()
 	}
+	_ = os.WriteFile(filepath.Join(state, "generation."+name), []byte(os.Getenv("ROUTERD_GENERATION")), 0600)
 	if role == "nohello" {
 		signal.Ignore(syscall.SIGTERM)
 		for {
@@ -129,6 +131,9 @@ type testSupervisor struct {
 }
 
 func startTestSupervisor(t *testing.T, modules []Spec) *testSupervisor {
+	return startTestSupervisorRoles(t, modules, nil)
+}
+func startTestSupervisorRoles(t *testing.T, modules []Spec, roles []string) *testSupervisor {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "routerd-sup-")
 	if err != nil {
@@ -146,7 +151,7 @@ func startTestSupervisor(t *testing.T, modules []Spec) *testSupervisor {
 	if err := os.Mkdir(state, 0700); err != nil {
 		t.Fatal(err)
 	}
-	o := Options{ModulePath: image, ReleaseID: testRelease, RuntimeDir: filepath.Join(dir, "run"), StateDir: state, Platform: "host", Modules: modules, Env: []string{"ROUTERD_SUPERVISOR_HELPER=1"}}
+	o := Options{ModulePath: image, ReleaseID: testRelease, RuntimeDir: filepath.Join(dir, "run"), StateDir: state, Platform: "host", Modules: modules, DynamicRoles: roles, Env: []string{"ROUTERD_SUPERVISOR_HELPER=1"}}
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &testSupervisor{options: o, cancel: cancel, done: make(chan error, 1)}
 	s.client = &http.Client{Timeout: time.Second, Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
@@ -230,6 +235,9 @@ func TestSupervisorReadinessRestartIsolationAndPinnedImage(t *testing.T) {
 		if module.ReleaseID != testRelease || module.Generation != 1 || !module.Ready {
 			t.Fatalf("unexpected initial worker: %+v", module)
 		}
+		if generation, err := os.ReadFile(filepath.Join(s.options.StateDir, "generation."+module.Name)); err != nil || string(generation) != "1" {
+			t.Fatalf("worker generation environment: %q %v", generation, err)
+		}
 	}
 	for path, want := range map[string]os.FileMode{s.options.RuntimeDir: 0750, filepath.Join(s.options.RuntimeDir, SocketName): 0600} {
 		info, err := os.Stat(path)
@@ -256,6 +264,9 @@ func TestSupervisorReadinessRestartIsolationAndPinnedImage(t *testing.T) {
 	second := s.wait(t, func(status Status) bool { return status.Ready && status.Modules[0].Generation == 2 })
 	if second.Modules[0].PID == first.Modules[0].PID || second.Modules[1].PID != first.Modules[1].PID {
 		t.Fatalf("restart was not isolated: before=%+v after=%+v", first.Modules, second.Modules)
+	}
+	if generation, err := os.ReadFile(filepath.Join(s.options.StateDir, "generation.network")); err != nil || string(generation) != "2" {
+		t.Fatalf("restart did not export the new generation: %q %v", generation, err)
 	}
 	s.stop(t)
 	for _, module := range second.Modules {
@@ -444,4 +455,57 @@ func TestParentDeathSignalKillsWorkerAndSIGTERMDrainsTree(t *testing.T) {
 			t.Fatal("worker survived supervisor death")
 		})
 	}
+}
+
+func TestDynamicModulesReconcileFencesCoreAndReplacesProcesses(t *testing.T) {
+	s := startTestSupervisorRoles(t, []Spec{{Name: "network", Role: "ready", Required: true}}, []string{"ready"})
+	first := s.wait(t, func(v Status) bool { return v.Ready && len(v.Modules) == 1 })
+	corePID := first.Modules[0].PID
+	submit := func(modules []DynamicModule, want int) {
+		t.Helper()
+		b, _ := json.Marshal(ReconcileModules{Modules: modules})
+		response, err := s.client.Post("http://routerd/v1/modules/reconcile", "application/json", bytes.NewReader(b))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		body, _ := io.ReadAll(response.Body)
+		if response.StatusCode != want {
+			t.Fatalf("reconcile status %d want %d: %s", response.StatusCode, want, body)
+		}
+	}
+	a := DynamicModule{Name: "service.wan", Role: "ready", ConfigDigest: strings.Repeat("a", 64)}
+	submit([]DynamicModule{a}, 202)
+	active := s.wait(t, func(v Status) bool {
+		return v.Ready && len(v.Modules) == 2 && v.Modules[1].ConfigDigest == a.ConfigDigest
+	})
+	pid, gen := active.Modules[1].PID, active.Modules[1].Generation
+	submit([]DynamicModule{a}, 202)
+	unchanged := s.wait(t, func(v Status) bool { return v.Ready && len(v.Modules) == 2 })
+	if unchanged.Modules[1].PID != pid || unchanged.Modules[1].Generation != gen {
+		t.Fatal("unchanged instance restarted")
+	}
+	a.ConfigDigest = strings.Repeat("b", 64)
+	submit([]DynamicModule{a}, 202)
+	replaced := s.wait(t, func(v Status) bool {
+		return v.Ready && len(v.Modules) == 2 && v.Modules[1].PID != pid && v.Modules[1].Generation > gen
+	})
+	if replaced.Modules[0].PID != corePID || replaced.Modules[1].ConfigDigest != a.ConfigDigest {
+		t.Fatalf("wrong replacement: %+v", replaced)
+	}
+	for _, bad := range []DynamicModule{
+		{Name: "network", Role: "ready", ConfigDigest: a.ConfigDigest},
+		{Name: "service.x", Role: "control", ConfigDigest: a.ConfigDigest},
+		{Name: "service.x", Role: "ready", ConfigDigest: "../x"},
+	} {
+		submit([]DynamicModule{bad}, 422)
+	}
+	submit(nil, 202)
+	removed := s.wait(t, func(v Status) bool { return v.Ready && len(v.Modules) == 1 })
+	if removed.Modules[0].PID != corePID {
+		t.Fatal("core process was restarted")
+	}
+	// Name reuse must ignore lifecycle frames from the reaped child object.
+	submit([]DynamicModule{a}, 202)
+	s.wait(t, func(v Status) bool { return v.Ready && len(v.Modules) == 2 })
 }

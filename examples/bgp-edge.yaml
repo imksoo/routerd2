@@ -1,0 +1,28 @@
+# Documentation prefixes and private ASNs: replace them for your environment.
+schema_version: 1
+network:
+  interfaces:
+    - name: eth0
+      addresses: [192.0.2.2/24]
+  forwarding:
+    ipv4: true
+services:
+  - name: edge-bgp
+    bgp:
+      fib_interface: eth0
+      table: 254
+      route_metric: 200
+      max_routes: 4096
+      runtime:
+        version: 1
+        global:
+          asn: 65002
+          routerID: 192.0.2.2
+          listenPort: 179
+          families: [ipv4-unicast]
+        peers:
+          192.0.2.1:
+            address: 192.0.2.1
+            asn: 65001
+            importPolicy:
+              allowedPrefixes: [198.51.100.0/24]

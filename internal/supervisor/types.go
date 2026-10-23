@@ -36,6 +36,9 @@ type Options struct {
 	ConfigPath string
 	Platform   string
 	Modules    []Spec
+	// DynamicRoles is the allowlist of bundled protocol workers that the
+	// control service can instantiate. Core workers cannot be replaced by IPC.
+	DynamicRoles []string
 	// Env overrides inherited environment entries for all workers.
 	Env []string
 }
@@ -64,6 +67,21 @@ type ModuleStatus struct {
 	LastHeartbeat *time.Time  `json:"last_heartbeat,omitempty"`
 	LastExit      *ExitStatus `json:"last_exit,omitempty"`
 	LastError     string      `json:"last_error,omitempty"`
+	ConfigDigest  string      `json:"config_digest,omitempty"`
+}
+
+type DynamicModule struct {
+	Name         string `json:"name"`
+	Role         string `json:"role"`
+	ConfigDigest string `json:"config_digest"`
+}
+
+// ReconcileModules replaces only the dynamic module set. Each configuration
+// lives at RuntimeDir/instances/NAME/DIGEST.json, mode 0600, and is verified by
+// the child before decoding. Neither arbitrary executable paths nor argv can
+// cross this management API.
+type ReconcileModules struct {
+	Modules []DynamicModule `json:"modules"`
 }
 
 type ExitStatus struct {

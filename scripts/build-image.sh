@@ -48,6 +48,11 @@ else
   cp "$binary_dir/routerd" "$package_root/usr/sbin/routerd"
   cp "$binary_dir/routerd-modules" "$package_root/usr/libexec/routerd-modules"
   cp "$project_dir/LICENSE" "$package_root/usr/share/licenses/routerd2/LICENSE"
+  if [ ! -f "$project_dir/dist/licenses/manifest.json" ]; then
+    printf '%s\n' 'Development images require dependency notices; run make licenses first.' >&2
+    exit 1
+  fi
+  cp -a "$project_dir/dist/licenses" "$package_root/usr/share/licenses/routerd2/dependencies"
 fi
 
 mkdir -p "$rootfs/usr/sbin" "$rootfs/usr/libexec" "$rootfs/etc/routerd" \
@@ -58,6 +63,7 @@ chmod 1777 "$rootfs/tmp"
 cp "$package_root/usr/sbin/routerd" "$rootfs/usr/sbin/routerd"
 cp "$package_root/usr/libexec/routerd-modules" "$rootfs/usr/libexec/routerd-modules"
 cp "$package_root/usr/share/licenses/routerd2/LICENSE" "$rootfs/usr/share/licenses/routerd2/LICENSE"
+cp -a "$package_root/usr/share/licenses/routerd2/dependencies" "$rootfs/usr/share/licenses/routerd2/"
 cp "$config_file" "$rootfs/etc/routerd/config.json"
 cp "$boot_file" "$rootfs/etc/routerd/boot.json"
 cp /etc/ssl/certs/ca-certificates.crt "$rootfs/etc/ssl/certs/ca-certificates.crt"
@@ -71,7 +77,7 @@ fi
 kernel_version=${1##*/}
 cp -a "$1" "$rootfs/lib/modules/"
 module_dir="$rootfs/lib/modules/$kernel_version"
-rm -f "$module_dir/build" "$module_dir/source"
+rm -f "$module_dir/build" "$module_dir/source" "$module_dir/vmlinuz"
 # routerd's native loader consumes raw .ko files and modules.dep. All external
 # decompressors and depmod remain build-time tools.
 find "$module_dir" -type f -name '*.ko.gz' -exec gzip -d '{}' \;
@@ -80,11 +86,12 @@ find "$module_dir" -type f -name '*.ko.zst' -exec zstd -q -d --rm '{}' \;
 depmod -b "$rootfs" "$kernel_version"
 cp "$kernel_root/boot/vmlinuz-virt" "$output_dir/vmlinuz"
 
-python3 - "$rootfs" "$output_dir" "$kernel_version" "$package_file" <<'PY'
+python3 - "$rootfs" "$output_dir" "$kernel_version" "$package_file" "$kernel_root" <<'PY'
 import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import sys
 
 root, output = Path(sys.argv[1]), Path(sys.argv[2])
@@ -98,6 +105,26 @@ if key:
 boot_path.write_text(json.dumps(boot, indent=2) + "\n")
 config = json.loads((root / "etc/routerd/config.json").read_text())
 release = os.environ.get("ROUTERD_RELEASE_ID", "dev")
+kernel_package = None
+database = Path(sys.argv[5]) / "lib/apk/db/installed"
+for block in database.read_text().split("\n\n"):
+    fields = dict(line.split(":", 1) for line in block.splitlines() if ":" in line)
+    if fields.get("P") == "linux-virt":
+        commit = fields.get("c", "")
+        origin = fields.get("o", "")
+        if not re.fullmatch(r"[0-9a-f]{40}", commit) or not re.fullmatch(r"[a-z0-9_-]+", origin):
+            raise SystemExit("kernel APK metadata has no valid pinned source origin")
+        kernel_package = {
+            "name": fields["P"], "version": fields.get("V"),
+            "license_expression_from_apk": fields.get("L"),
+            "origin": origin, "aports_commit": commit,
+            "source_recipe_url": f"https://github.com/alpinelinux/aports/blob/{commit}/main/{origin}/APKBUILD",
+            "source_recipe_directory_url": f"https://github.com/alpinelinux/aports/tree/{commit}/main/{origin}",
+            "corresponding_source_archive_included": False,
+        }
+        break
+if kernel_package is None:
+    raise SystemExit("linux-virt package provenance is absent from the kernel root")
 (root / "etc/os-release").write_text(
     'NAME="routerd2"\nID=routerd2\nID_LIKE=alpine\n'
     'PRETTY_NAME="routerd2 appliance"\nBUILD_ID=' + json.dumps(release) + "\n"
@@ -107,6 +134,7 @@ manifest = {
     "release_id": release,
     "alpine_release": Path("/etc/alpine-release").read_text().strip(),
     "kernel_release": sys.argv[3],
+    "kernel_package": kernel_package,
     "input_type": "apk" if sys.argv[4] else "development-binaries",
     "package": Path(sys.argv[4]).name if sys.argv[4] else None,
     "package_sha256": hashlib.sha256(Path(sys.argv[4]).read_bytes()).hexdigest() if sys.argv[4] else None,
@@ -114,6 +142,9 @@ manifest = {
         name: hashlib.sha256((root / name.lstrip("/")).read_bytes()).hexdigest()
         for name in ("/usr/sbin/routerd", "/usr/libexec/routerd-modules")
     },
+    "dependency_license_manifest_sha256": hashlib.sha256(
+        (root / "usr/share/licenses/routerd2/dependencies/manifest.json").read_bytes()
+    ).hexdigest(),
     "init": "/usr/sbin/routerd",
     "programs": ["/usr/sbin/routerd", "/usr/libexec/routerd-modules"],
     "platform": boot["platform"],

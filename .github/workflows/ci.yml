@@ -33,10 +33,28 @@ jobs:
           sudo env ROUTERD2_INTEGRATION_REQUIRED=1 /tmp/routerd2-network.test -test.v
       - name: Static Linux builds
         run: make build-linux RELEASE_ID="${GITHUB_SHA}"
+      - name: Integrated daemon, SSH, DHCP-to-DNS, BGP FIB and ownership expiry
+        run: |
+          CGO_ENABLED=0 go test -tags integration -c -o /tmp/routerd2-daemon.test ./internal/integration
+          sudo env ROUTERD2_INTEGRATION_REQUIRED=1 ROUTERD2_TEST_BIN_DIR="$PWD/dist/bin/linux-amd64" /tmp/routerd2-daemon.test -test.v
+      - name: Native DHCPv4, DHCPv6-PD and router advertisements
+        run: |
+          CGO_ENABLED=0 go test -tags integration -c -o /tmp/routerd2-dhcp.test ./internal/protocol/dhcp4
+          sudo env ROUTERD2_INTEGRATION_REQUIRED=1 /tmp/routerd2-dhcp.test -test.v
+      - name: Native DHCP server leases, renewal, release, decline and recovery
+        run: |
+          CGO_ENABLED=0 go test -tags integration -c -o /tmp/routerd2-dhcpserver.test ./internal/protocol/dhcpserver
+          sudo env ROUTERD2_INTEGRATION_REQUIRED=1 /tmp/routerd2-dhcpserver.test -test.v
+      - name: Native IPv4 and IPv6 VRRP elections and failover
+        run: |
+          CGO_ENABLED=0 go test -tags integration -c -o /tmp/routerd2-vrrp.test ./internal/protocol/vrrp
+          sudo env ROUTERD2_INTEGRATION_REQUIRED=1 /tmp/routerd2-vrrp.test -test.v
       - uses: actions/upload-artifact@v4
         with:
           name: linux-binaries
-          path: dist/bin/
+          path: |
+            dist/bin/
+            dist/licenses/
           if-no-files-found: error
 
   images:
@@ -47,6 +65,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.3'
+          cache: true
       - uses: docker/setup-buildx-action@v3
       - name: Install QEMU
         run: |
@@ -66,6 +88,8 @@ jobs:
         run: make image IMAGE_CONFIG=qemu RELEASE_ID="${GITHUB_SHA}"
       - name: Boot real Linux and query the embedded SSH CLI
         run: make qemu-smoke QEMU_TIMEOUT=120 QEMU_SSH_KEY="${RUNNER_TEMP}/routerd2-qemu"
+      - name: Verify native forwarding, ACL, NAT, DS-Lite, ECMP, links and HA guards
+        run: make qemu-network QEMU_TIMEOUT=120
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -73,6 +97,7 @@ jobs:
           path: |
             dist/apk/
             dist/image/
+            dist/network-test/
             dist/routerd2.oci.tar
           if-no-files-found: warn
           retention-days: 7

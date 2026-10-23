@@ -11,14 +11,16 @@ import (
 	"time"
 
 	"github.com/imksoo/routerd2/internal/network"
+	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
 
 const SchemaVersion = 1
 const MaxSize = 2 << 20
 
 type Document struct {
-	SchemaVersion int             `json:"schema_version"`
-	Network       network.Desired `json:"network"`
+	SchemaVersion int                     `json:"schema_version"`
+	Network       network.Desired         `json:"network"`
+	Services      []serviceconfig.Service `json:"services,omitempty"`
 }
 
 type Committed struct {
@@ -42,7 +44,40 @@ func Validate(d Document) error {
 	if d.SchemaVersion != SchemaVersion {
 		return fmt.Errorf("unsupported config schema %d (expected %d)", d.SchemaVersion, SchemaVersion)
 	}
-	return network.Validate(d.Network)
+	if err := network.Validate(d.Network); err != nil {
+		return err
+	}
+	if err := serviceconfig.Validate(d.Services); err != nil {
+		return err
+	}
+	// Generated HA interfaces have a lifetime controlled by an election. A
+	// static resource must not accidentally keep the same interface or VIP up.
+	reserved := map[string]string{}
+	for _, s := range d.Services {
+		if s.VRRP != nil {
+			name := s.VRRPConfig().VIPInterface
+			if previous, ok := reserved[name]; ok {
+				return fmt.Errorf("VRRP services %s and %s share VIP interface %s", previous, s.Name, name)
+			}
+			reserved[name] = s.Name
+		}
+	}
+	for _, link := range d.Network.Links {
+		if owner, ok := reserved[link.Name]; ok {
+			return fmt.Errorf("static link %s conflicts with VRRP service %s", link.Name, owner)
+		}
+	}
+	for _, link := range d.Network.Interfaces {
+		if owner, ok := reserved[link.Name]; ok {
+			return fmt.Errorf("static interface %s conflicts with VRRP service %s", link.Name, owner)
+		}
+	}
+	for _, s := range d.Services {
+		if owner, ok := reserved[s.Interface()]; ok {
+			return fmt.Errorf("service %s cannot use election-owned interface of %s without an HA dependency", s.Name, owner)
+		}
+	}
+	return nil
 }
 
 func Decode(r io.Reader, v any) error {

@@ -4,6 +4,7 @@ package supervisor
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -43,6 +45,8 @@ type child struct {
 	failed           bool
 	restartAfterExit bool
 	permanentFailure bool
+	dynamic          bool
+	retired          bool
 }
 
 type childEvent struct {
@@ -50,6 +54,7 @@ type childEvent struct {
 	generation uint64
 	message    worker.Message
 	err        error
+	origin     *child
 }
 
 // Run supervises the module process tree until canceled. Worker failures are
@@ -130,13 +135,16 @@ func Run(parent context.Context, options Options) error {
 		s.Modules = make([]ModuleStatus, 0, len(children))
 		for _, c := range children {
 			s.Modules = append(s.Modules, c.status)
-			if c.spec.Required && !c.status.Ready {
+			if !c.retired && c.spec.Required && !c.status.Ready {
 				s.Ready = false
 			}
 		}
 		a.publish(s)
 		if s.Ready && !wasReady {
 			slog.Info("ROUTERD_READY", "release", o.ReleaseID, "platform", o.Platform)
+			// Keep a boot-console marker even when structured diagnostics are
+			// delivered to the independent logging worker.
+			_, _ = fmt.Fprintln(os.Stdout, "ROUTERD_READY")
 		}
 		wasReady = s.Ready
 	}
@@ -160,7 +168,7 @@ func Run(parent context.Context, options Options) error {
 	for {
 		now := time.Now()
 		for _, c := range children {
-			if !stopping && c.process == nil && !c.permanentFailure && !c.nextStart.IsZero() && !now.Before(c.nextStart) {
+			if !stopping && !c.retired && c.process == nil && !c.permanentFailure && !c.nextStart.IsZero() && !now.Before(c.nextStart) {
 				if err := startChild(ctx, o, image, c, events); err != nil {
 					c.status.LastError = err.Error()
 					c.failures++
@@ -195,6 +203,18 @@ func Run(parent context.Context, options Options) error {
 			fatalErr = err
 			beginShutdown()
 		}
+		// A removed worker is retained until wait4 has reaped it, then its
+		// identity is retired. Late events carry the child pointer, so reusing
+		// a name cannot mistake an old lifecycle frame for a new generation.
+		kept := children[:0]
+		for _, c := range children {
+			if c.retired && c.process == nil {
+				delete(byName, c.spec.Name)
+				continue
+			}
+			kept = append(kept, c)
+		}
+		children = kept
 		publish()
 		if stopping && len(byPID) == 0 {
 			return fatalErr
@@ -211,13 +231,13 @@ func Run(parent context.Context, options Options) error {
 			}
 		case event := <-events:
 			c := byName[event.name]
-			if c == nil || c.process == nil || c.status.Generation != event.generation || !c.stopDeadline.IsZero() {
+			if c == nil || (event.origin != nil && event.origin != c) || c.retired || c.process == nil || c.status.Generation != event.generation || !c.stopDeadline.IsZero() {
 				continue
 			}
 			handleEvent(c, event, o.ReleaseID, time.Now())
 		case request := <-a.restarts:
 			c := byName[request.name]
-			if c == nil || stopping {
+			if c == nil || c.retired || stopping {
 				request.reply <- fmt.Errorf("module %q is not available", request.name)
 				continue
 			}
@@ -229,6 +249,56 @@ func Run(parent context.Context, options Options) error {
 			} else {
 				stopChild(c, "", false, true, time.Now())
 			}
+			request.reply <- nil
+		case request := <-a.reconciles:
+			if stopping {
+				request.reply <- errors.New("supervisor is stopping")
+				continue
+			}
+			specs, err := dynamicSpecs(o, request.request)
+			if err != nil {
+				request.reply <- err
+				continue
+			}
+			desired := map[string]DynamicModule{}
+			for _, s := range request.request.Modules {
+				desired[s.Name] = s
+			}
+			for _, c := range children {
+				if !c.dynamic {
+					continue
+				}
+				if _, ok := desired[c.spec.Name]; !ok {
+					c.retired = true
+					stopChild(c, "", true, false, time.Now())
+				}
+			}
+			for _, spec := range specs {
+				digest := desired[spec.Name].ConfigDigest
+				c := byName[spec.Name]
+				if c == nil {
+					c = &child{spec: spec, dynamic: true, status: ModuleStatus{Name: spec.Name, Role: spec.Role, Required: true, State: "pending", ConfigDigest: digest}, nextStart: time.Now()}
+					children = append(children, c)
+					byName[spec.Name] = c
+					continue
+				}
+				if !c.retired && c.spec.Role == spec.Role && c.status.ConfigDigest == digest {
+					continue
+				}
+				stopChild(c, "", false, true, time.Now())
+				c.spec = spec
+				c.retired = false
+				c.failures = 0
+				c.permanentFailure = false
+				c.status.Role = spec.Role
+				c.status.Required = true
+				c.status.ConfigDigest = digest
+				if c.process == nil {
+					c.nextStart = time.Now()
+					c.status.State = "pending"
+				}
+			}
+			publish()
 			request.reply <- nil
 		}
 	}
@@ -315,6 +385,7 @@ func startChild(ctx context.Context, o Options, image *os.File, c *child, events
 		"ROUTERD_RELEASE_ID=" + o.ReleaseID, "ROUTERD_RUNTIME_DIR=" + o.RuntimeDir,
 		"ROUTERD_STATE_DIR=" + o.StateDir, "ROUTERD_CONFIG_PATH=" + o.ConfigPath,
 		"ROUTERD_PLATFORM=" + o.Platform,
+		"ROUTERD_GENERATION=" + strconv.FormatUint(c.status.Generation+1, 10),
 	})
 	// fd 4 is the open module image, pinned at supervisor startup. Replacing
 	// ModulePath or its symlink cannot mix another generation into this tree.
@@ -346,7 +417,7 @@ func startChild(ctx context.Context, o Options, image *os.File, c *child, events
 		for {
 			message, err := worker.ReadMessage(conn)
 			select {
-			case events <- childEvent{name: name, generation: generation, message: message, err: err}:
+			case events <- childEvent{name: name, generation: generation, message: message, err: err, origin: c}:
 			case <-ctx.Done():
 				return
 			}
@@ -357,6 +428,47 @@ func startChild(ctx context.Context, o Options, image *os.File, c *child, events
 	}()
 	slog.Info("worker started", "module", name, "pid", process.Pid, "generation", generation)
 	return nil
+}
+
+func dynamicSpecs(o Options, request ReconcileModules) ([]Spec, error) {
+	if len(request.Modules) > 128 {
+		return nil, errors.New("at most 128 dynamic module instances are supported")
+	}
+	allowed := map[string]bool{}
+	for _, role := range o.DynamicRoles {
+		allowed[role] = true
+	}
+	core := map[string]bool{}
+	for _, s := range o.Modules {
+		core[s.Name] = true
+	}
+	seen := map[string]bool{}
+	var specs []Spec
+	for _, m := range request.Modules {
+		if !validName.MatchString(m.Name) || !strings.HasPrefix(m.Name, "service.") || core[m.Name] || seen[m.Name] {
+			return nil, fmt.Errorf("invalid, duplicate or core module name %q", m.Name)
+		}
+		if !allowed[m.Role] {
+			return nil, fmt.Errorf("dynamic role %q is not enabled", m.Role)
+		}
+		b, err := hex.DecodeString(m.ConfigDigest)
+		if err != nil || len(b) != 32 || strings.ToLower(m.ConfigDigest) != m.ConfigDigest {
+			return nil, errors.New("module config_digest must be a lowercase SHA-256")
+		}
+		seen[m.Name] = true
+		path := filepath.Join(o.RuntimeDir, "instances", m.Name, m.ConfigDigest+".json")
+		specs = append(specs, Spec{Name: m.Name, Role: m.Role, Required: true, Args: []string{"--instance-config=" + path, "--config-digest=" + m.ConfigDigest}})
+	}
+	if len(specs) == 0 {
+		return specs, nil
+	}
+	copy := o
+	copy.Modules = append(append([]Spec(nil), o.Modules...), specs...)
+	normal, err := normalize(copy)
+	if err != nil {
+		return nil, err
+	}
+	return normal.Modules[len(o.Modules):], nil
 }
 
 func handleEvent(c *child, event childEvent, releaseID string, now time.Time) {

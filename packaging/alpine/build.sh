@@ -13,6 +13,7 @@ pkgver=$(sed -n 's/^pkgver=//p' APKBUILD)
 tar --sort=name --format=posix --pax-option=delete=atime,delete=ctime \
   --mtime="@${SOURCE_DATE_EPOCH:-0}" --owner=0 --group=0 --numeric-owner \
   --exclude='./.git' --exclude='./dist' --exclude='./coverage*' \
+  --exclude='*/__pycache__' --exclude='*.pyc' \
   --transform="s,^\.,routerd2-$pkgver," \
   -czf "routerd2-$pkgver.tar.gz" -C "$source_dir" .
 

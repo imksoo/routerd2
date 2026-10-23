@@ -1,0 +1,36 @@
+routerd2 local changes to github.com/google/nftables
+================================================
+
+Upstream: https://github.com/google/nftables
+Version: v0.3.0
+Commit: 6f574e7fd1b4d07006d1c598cdb9b22789e5e541
+Go module sum: h1:bkyZ0cbpVeMHXOrtlFc8ISmfVqq5gPJukoYieyVmITg=
+Original archive: https://proxy.golang.org/github.com/google/nftables/@v/v0.3.0.zip
+Original archive SHA256:
+70c243170b087a106d2635674d012d12eafa93c3972a1c96f61460693faf418f
+
+The existing upstream LICENSE and copyright headers are preserved. This tree
+contains production Go packages, expr unit tests, and module metadata. Unrelated
+upstream integration tests and their test-only helpers are omitted. UPSTREAM.json records the exact source and selection.
+
+Modified file: expr/expr.go
+New regression tests: expr/masq_routerd2_test.go
+
+The local patch sets NF_NAT_RANGE_PROTO_SPECIFIED when Masq.ToPorts is true,
+and preserves Random, FullyRandom and Persistent flags alongside port ranges.
+Linux nft_masq does not infer the flag from protocol-register attributes; the
+unmodified library therefore encodes a port range that the kernel ignores.
+The public API and all other production source files remain unchanged.
+
+Reference for the kernel interface:
+https://github.com/torvalds/linux/blob/v6.18/net/netfilter/nft_masq.c
+
+Run the library regressions from the routerd2 module with:
+    go test github.com/google/nftables/expr
+The routerd2 isolated network integration test also exercises real IPv4/IPv6
+UDP masquerade port ranges, DNAT/SNAT and atomic nftables table replacement.
+
+The original module checksum identifies upstream, not this modified tree.
+routerd2's generated license manifest records the local source tree digest
+separately. This narrow replacement can be removed when a pinned upstream
+release provides the same behavior and passes both regression gates.

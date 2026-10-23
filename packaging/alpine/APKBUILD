@@ -7,7 +7,7 @@ url="https://github.com/imksoo/routerd2"
 arch="x86_64 aarch64"
 license="BSD-3-Clause"
 depends=""
-makedepends="go>=1.27.3"
+makedepends="go>=1.27.3 python3"
 options="net !strip"
 source="$pkgname-$pkgver.tar.gz"
 builddir="$srcdir/$pkgname-$pkgver"
@@ -19,11 +19,13 @@ build() {
 	# Override Alpine's default -buildmode=pie: the appliance has no ELF loader.
 	go build -buildmode=exe -trimpath -buildvcs=false -ldflags "$ldflags" -o routerd ./cmd/routerd || return 1
 	go build -buildmode=exe -trimpath -buildvcs=false -ldflags "$ldflags" -o routerd-modules ./cmd/routerd-modules || return 1
+	python3 scripts/licenses.py --output dist/licenses || return 1
 }
 
 check() {
 	local binary headers dynamic
 	CGO_ENABLED=0 go test ./... || return 1
+	CGO_ENABLED=0 go test github.com/google/nftables/expr || return 1
 	for binary in routerd routerd-modules; do
 		headers=$(readelf -l "$binary") || return 1
 		dynamic=$(readelf -d "$binary") || return 1
@@ -38,4 +40,6 @@ package() {
 	install -Dm644 images/config-empty.json "$pkgdir/etc/routerd/config.json"
 	install -Dm644 images/boot.json "$pkgdir/etc/routerd/boot.json"
 	install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+	mkdir -p "$pkgdir/usr/share/licenses/$pkgname/dependencies"
+	cp -a dist/licenses/. "$pkgdir/usr/share/licenses/$pkgname/dependencies/"
 }

@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
@@ -36,19 +37,35 @@ func (k *linuxKernel) Interface(name string) (InterfaceState, error) {
 		return InterfaceState{}, err
 	}
 	a := l.Attrs()
-	out := InterfaceState{Name: a.Name, Index: a.Index, Kind: l.Type(), MTU: a.MTU, Up: a.Flags&net.FlagUp != 0, Alias: a.Alias}
+	out, err := nativeLinkState(l)
+	if err != nil {
+		return out, err
+	}
 	as, err := netlink.AddrList(l, netlink.FAMILY_ALL)
 	if err != nil {
 		return out, err
 	}
 	for _, addr := range as {
 		if addr.IPNet != nil {
-			out.Addresses = append(out.Addresses, AddressState{Address: addr.IPNet.String(), Flags: addr.Flags})
+			peer := ""
+			if addr.Peer != nil && !addr.Peer.IP.Equal(addr.IP) {
+				peer = addr.Peer.String()
+			}
+			out.Addresses = append(out.Addresses, AddressState{Address: addr.IPNet.String(), Peer: peer, Flags: addr.Flags, PreferredLifetime: uint32(addr.PreferedLft), ValidLifetime: uint32(addr.ValidLft)})
 		}
 	}
 	sort.Slice(out.Addresses, func(i, j int) bool { return out.Addresses[i].Address < out.Addresses[j].Address })
 	if t, ok := l.(*netlink.Ip6tnl); ok && t.Proto == unix.IPPROTO_IPIP {
-		parent, err := netlink.LinkByIndex(int(t.Link))
+		underlay := int(t.Link)
+		if underlay == 0 {
+			// netlink v1.3.1 omits IFLA_IPTUN_LINK when decoding Ip6tnl.
+			// Linux also reports the bound underlay in IFLA_LINK.
+			underlay = a.ParentIndex
+		}
+		if underlay == 0 {
+			return out, nil
+		}
+		parent, err := netlink.LinkByIndex(underlay)
 		if err != nil {
 			return out, fmt.Errorf("tunnel underlay: %w", err)
 		}
@@ -57,24 +74,71 @@ func (k *linuxKernel) Interface(name string) (InterfaceState, error) {
 	return out, nil
 }
 
-func (k *linuxKernel) AddAddress(name, address string) error {
+func nativeAddressIdentity(address string, options AddressOptions) (*netlink.Addr, error) {
+	a, err := netlink.ParseAddr(address)
+	if err != nil {
+		return nil, err
+	}
+	if options.Peer != "" {
+		peer, err := netlink.ParseAddr(options.Peer)
+		if err != nil {
+			return nil, err
+		}
+		a.Peer = peer.IPNet
+	}
+	return a, nil
+}
+
+func nativeAddress(address string, options AddressOptions) (*netlink.Addr, error) {
+	a, err := nativeAddressIdentity(address, options)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now()
+	preferred, valid := lifetimeRemaining(options.PreferredUntil, now), lifetimeRemaining(options.ValidUntil, now)
+	if valid == 0 {
+		return nil, fmt.Errorf("address %s valid lifetime has expired", address)
+	}
+	a.PreferedLft = int(preferred)
+	a.ValidLft = int(valid)
+	if options.NoDAD {
+		a.Flags |= unix.IFA_F_NODAD
+	}
+	return a, nil
+}
+
+func (k *linuxKernel) AddAddress(name, address string, options AddressOptions) error {
 	l, err := linuxLink(name)
 	if err != nil {
 		return err
 	}
-	a, err := netlink.ParseAddr(address)
+	a, err := nativeAddress(address, options)
 	if err != nil {
 		return err
 	}
 	// AddrAdd is exclusive. AddrReplace could overwrite an unowned address.
 	return netlink.AddrAdd(l, a)
 }
-func (k *linuxKernel) DeleteAddress(name, address string) error {
+
+func (k *linuxKernel) UpdateAddress(name, address string, options AddressOptions) error {
 	l, err := linuxLink(name)
 	if err != nil {
 		return err
 	}
-	a, err := netlink.ParseAddr(address)
+	a, err := nativeAddress(address, options)
+	if err != nil {
+		return err
+	}
+	// The engine calls replace only after verifying the address journal, link
+	// identity and previous lifetime/DAD options. It never adopts a collision.
+	return netlink.AddrReplace(l, a)
+}
+func (k *linuxKernel) DeleteAddress(name, address string, options AddressOptions) error {
+	l, err := linuxLink(name)
+	if err != nil {
+		return err
+	}
+	a, err := nativeAddressIdentity(address, options)
 	if err != nil {
 		return err
 	}
@@ -93,11 +157,18 @@ func (k *linuxKernel) DeleteAddress(name, address string) error {
 		}
 		if primary {
 			target, _ := netip.ParsePrefix(address)
+			if options.Peer != "" {
+				target, _ = netip.ParsePrefix(options.Peer)
+			}
 			for _, v := range all {
 				if v.IPNet == nil || v.IPNet.String() == address {
 					continue
 				}
-				other, err := netip.ParsePrefix(v.IPNet.String())
+				peer := v.IPNet.String()
+				if v.Peer != nil {
+					peer = v.Peer.String()
+				}
+				other, err := netip.ParsePrefix(peer)
 				if err == nil && target.Masked() == other.Masked() {
 					return fmt.Errorf("removing primary %s could remove other address %s on %s", address, v.IPNet, name)
 				}
@@ -125,22 +196,7 @@ func (k *linuxKernel) Routes(table int) ([]RouteState, error) {
 		if r.Family != netlink.FAMILY_V4 && r.Family != netlink.FAMILY_V6 {
 			continue
 		}
-		dst := "0.0.0.0/0"
-		if r.Family == netlink.FAMILY_V6 {
-			dst = "::/0"
-		}
-		if r.Dst != nil {
-			dst = r.Dst.String()
-		}
-		g, src := "", ""
-		if len(r.Gw) > 0 {
-			g = r.Gw.String()
-		}
-		if len(r.Src) > 0 {
-			src = r.Src.String()
-		}
-		advanced := r.ILinkIndex != 0 || r.Tos != 0 || r.Flags != 0 || r.MPLSDst != nil || r.NewDst != nil || r.Encap != nil || r.Via != nil || r.Realm != 0 || r.MTU != 0 || r.MTULock || r.Window != 0 || r.Rtt != 0 || r.RttVar != 0 || r.Ssthresh != 0 || r.Cwnd != 0 || r.AdvMSS != 0 || r.Reordering != 0 || r.Hoplimit != 0 || r.InitCwnd != 0 || r.Features != 0 || r.RtoMin != 0 || r.RtoMinLock || r.InitRwnd != 0 || r.QuickACK != 0 || r.Congctl != "" || r.FastOpenNoCookie != 0
-		out = append(out, RouteState{Route: Route{Destination: dst, Gateway: g, Interface: names[r.LinkIndex], Metric: r.Priority, Table: r.Table}, Protocol: int(r.Protocol), Type: r.Type, Source: src, Multipath: len(r.MultiPath) > 0, Advanced: advanced})
+		out = append(out, nativeRouteState(r, names))
 	}
 	sort.Slice(out, func(i, j int) bool {
 		a, b := out[i], out[j]
@@ -152,25 +208,83 @@ func (k *linuxKernel) Routes(table int) ([]RouteState, error) {
 	return out, nil
 }
 
-func linuxRoute(r Route) (*netlink.Route, error) {
-	l, err := linuxLink(r.Interface)
-	if err != nil {
-		return nil, err
+func nativeRouteState(r netlink.Route, names map[int]string) RouteState {
+	dst := "0.0.0.0/0"
+	if r.Family == netlink.FAMILY_V6 {
+		dst = "::/0"
 	}
+	if r.Dst != nil {
+		dst = r.Dst.String()
+	}
+	g, src := "", ""
+	if len(r.Gw) > 0 {
+		g = r.Gw.String()
+	}
+	if len(r.Src) > 0 {
+		src = r.Src.String()
+	}
+	// DEAD/LINKDOWN reflect current link health, not an externally supplied
+	// forwarding policy. ONLINK and all other unmodeled flags remain foreign.
+	const healthFlags = unix.RTNH_F_DEAD | unix.RTNH_F_LINKDOWN
+	advanced := r.ILinkIndex != 0 || r.Tos != 0 || r.Flags & ^healthFlags != 0 || r.MPLSDst != nil || r.NewDst != nil || r.Encap != nil || r.Via != nil || r.Realm != 0 || r.MTU != 0 || r.MTULock || r.Window != 0 || r.Rtt != 0 || r.RttVar != 0 || r.Ssthresh != 0 || r.Cwnd != 0 || r.AdvMSS != 0 || r.Reordering != 0 || r.Hoplimit != 0 || r.InitCwnd != 0 || r.Features != 0 || r.RtoMin != 0 || r.RtoMinLock || r.InitRwnd != 0 || r.QuickACK != 0 || r.Congctl != "" || r.FastOpenNoCookie != 0
+	definition := Route{Destination: dst, Gateway: g, Interface: names[r.LinkIndex], Metric: r.Priority, Table: r.Table}
+	for _, h := range r.MultiPath {
+		if h == nil {
+			advanced = true
+			continue
+		}
+		next := NextHop{Interface: names[h.LinkIndex], Weight: h.Hops + 1}
+		if len(h.Gw) > 0 {
+			next.Gateway = h.Gw.String()
+		}
+		if next.Interface == "" || h.Hops < 0 || h.Hops > 255 || h.Flags & ^healthFlags != 0 || h.NewDst != nil || h.Encap != nil || h.Via != nil {
+			advanced = true
+		}
+		definition.NextHops = append(definition.NextHops, next)
+	}
+	if len(r.MultiPath) > 0 && (g != "" || r.LinkIndex != 0) {
+		advanced = true
+	}
+	definition = normalizeRoute(definition)
+	return RouteState{Route: definition, Protocol: int(r.Protocol), Type: r.Type, Source: src, Multipath: len(definition.NextHops) > 0, Advanced: advanced}
+}
+
+func linuxRoute(r Route) (*netlink.Route, error) {
+	r = normalizeRoute(r)
 	_, dst, err := net.ParseCIDR(r.Destination)
 	if err != nil {
 		return nil, err
 	}
-	result := &netlink.Route{LinkIndex: l.Attrs().Index, Dst: dst, Table: routeTable(r), Priority: r.Metric, Protocol: netlink.RouteProtocol(RouteProtocol), Type: unix.RTN_UNICAST}
+	result := &netlink.Route{Dst: dst, Table: routeTable(r), Priority: r.Metric, Protocol: netlink.RouteProtocol(RouteProtocol), Type: unix.RTN_UNICAST}
 	if dst.IP.To4() != nil {
 		result.Family = netlink.FAMILY_V4
 	} else {
 		result.Family = netlink.FAMILY_V6
 	}
-	if r.Gateway != "" {
-		result.Gw = net.ParseIP(r.Gateway)
+	result.Scope = netlink.SCOPE_LINK
+	if len(r.NextHops) > 0 {
+		for _, h := range r.NextHops {
+			l, err := linuxLink(h.Interface)
+			if err != nil {
+				return nil, err
+			}
+			next := &netlink.NexthopInfo{LinkIndex: l.Attrs().Index, Hops: h.Weight - 1}
+			if h.Gateway != "" {
+				next.Gw = net.ParseIP(h.Gateway)
+				result.Scope = netlink.SCOPE_UNIVERSE
+			}
+			result.MultiPath = append(result.MultiPath, next)
+		}
 	} else {
-		result.Scope = netlink.SCOPE_LINK
+		l, err := linuxLink(r.Interface)
+		if err != nil {
+			return nil, err
+		}
+		result.LinkIndex = l.Attrs().Index
+		if r.Gateway != "" {
+			result.Gw = net.ParseIP(r.Gateway)
+			result.Scope = netlink.SCOPE_UNIVERSE
+		}
 	}
 	return result, nil
 }
@@ -201,7 +315,13 @@ func (k *linuxKernel) CreateDSLite(t DSLite) error {
 	if err != nil {
 		return err
 	}
-	return netlink.LinkAdd(v)
+	if err := netlink.LinkAdd(v); err != nil {
+		return err
+	}
+	if err := netlink.LinkSetAlias(v, tunnelAlias); err != nil {
+		return errors.Join(err, netlink.LinkDel(v))
+	}
+	return nil
 }
 func (k *linuxKernel) UpdateDSLite(t DSLite) error {
 	l, err := linuxLink(t.Name)
