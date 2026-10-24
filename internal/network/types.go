@@ -28,6 +28,7 @@ type Desired struct {
 	Firewall    *Firewall    `json:"firewall,omitempty"`
 	DSLite      []DSLite     `json:"ds_lite,omitempty"`
 	VRRPGuards  []VRRPGuard  `json:"vrrp_guards,omitempty"`
+	WireGuard   []WireGuard  `json:"wireguard,omitempty"`
 }
 
 // Interface brings an existing link up. MTU zero leaves its MTU unchanged.
@@ -198,6 +199,7 @@ type Snapshot struct {
 	Forwarding        ForwardingState   `json:"forwarding"`
 	Firewall          FirewallState     `json:"firewall"`
 	VRRPGuard         FirewallState     `json:"vrrp_guard"`
+	WireGuard         []WireGuardState  `json:"wireguard,omitempty"`
 	ObservationErrors []string          `json:"observation_errors,omitempty"`
 }
 
@@ -223,6 +225,9 @@ func validName(s string) bool { return interfaceName.MatchString(s) && s != "." 
 func Validate(d Desired) error {
 	var errs []error
 	if err := validateLinks(d); err != nil {
+		errs = append(errs, err)
+	}
+	if err := validateWireGuard(d); err != nil {
 		errs = append(errs, err)
 	}
 	if err := validatePolicyRules(d.PolicyRules); err != nil {
@@ -359,6 +364,9 @@ func addressIP(s string) string {
 }
 
 func normalized(d Desired) Desired {
+	for i := range d.WireGuard {
+		d.WireGuard[i] = normalizeWireGuard(d.WireGuard[i])
+	}
 	for i := range d.VRRPGuards {
 		for j, s := range d.VRRPGuards[i].Addresses {
 			a, _ := netip.ParseAddr(s)

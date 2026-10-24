@@ -1,0 +1,24 @@
+# Every entry names one original resource. These are deliberate native choices,
+# not assertions about a particular host's former networkd/kernel defaults.
+schema_version: 1
+ra_clients:
+  IPv6RAAddress/wan-ra:
+    interface: eth0
+    source_address: fe80::2
+    interface_id: "::2"
+    slaac: true
+    default_route: true
+    on_link: true
+    route_information: true
+    dns: true
+    allowed_routers: [fe80::1]
+    table: 254
+    metric: 200
+ds_lite:
+  DSLiteTunnel/provider:
+    source_from: IPv6RAAddress/wan-ra
+    dns_from: [DHCPv6Information/wan-info, IPv6RAAddress/wan-ra]
+    resolvers: [{address: "2001:db8::53", port: 53}]
+    selection: first
+    timeout_seconds: 2
+    retry_seconds: 10

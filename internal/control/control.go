@@ -29,6 +29,17 @@ type ApplyRequest struct {
 	Desired  network.Desired `json:"desired"`
 }
 
+// ApplyResult acknowledges a durable kernel projection without returning its
+// full desired state and observations. Those can be much larger than the apply
+// request (for example WireGuard peers appear in both forms). A successful
+// mutation must not become an apparent failure solely because its response
+// exceeds the internal API's message bound.
+type ApplyResult struct {
+	Revision          uint64 `json:"revision"`
+	AttemptedRevision uint64 `json:"attempted_revision"`
+	Status            string `json:"status"`
+}
+
 type CommitRequest struct {
 	ExpectedRevision      uint64          `json:"expected_revision"`
 	RequestID             string          `json:"request_id"`

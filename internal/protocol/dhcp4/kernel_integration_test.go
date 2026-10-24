@@ -109,7 +109,7 @@ func pair(t *testing.T, local, peer string) (netns.NsHandle, *netlink.Handle, ne
 	if err = netlink.LinkSetNsFd(server, int(ns)); err != nil {
 		t.Fatal(err)
 	}
-	h, err := netlink.NewHandleAt(ns)
+	h, err := netlink.NewHandleAt(ns, unix.NETLINK_ROUTE)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,6 +185,9 @@ func nativeDHCP4(t *testing.T) {
 		for serverCtx.Err() == nil {
 			poll := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
 			if _, err := unix.Poll(poll, 100); err != nil {
+				if err == unix.EINTR {
+					continue
+				}
 				serverDone <- err
 				return
 			}
@@ -192,6 +195,9 @@ func nativeDHCP4(t *testing.T) {
 				continue
 			}
 			n, _, err := unix.Recvfrom(fd, buf, 0)
+			if err == unix.EINTR {
+				continue
+			}
 			if err != nil {
 				serverDone <- err
 				return
@@ -425,12 +431,18 @@ func nativeRA(t *testing.T) {
 		for time.Now().Before(deadline) {
 			poll := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
 			if _, err := unix.Poll(poll, 100); err != nil {
+				if err == unix.EINTR {
+					continue
+				}
 				t.Fatal(err)
 			}
 			if poll[0].Revents&unix.POLLIN == 0 {
 				continue
 			}
 			n, count, _, _, err := unix.Recvmsg(fd, payload, oob, 0)
+			if err == unix.EINTR {
+				continue
+			}
 			if err != nil {
 				t.Fatal(err)
 			}

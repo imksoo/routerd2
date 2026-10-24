@@ -22,6 +22,15 @@ func ServeNetwork(ctx context.Context, dir, stateDir string, ready func()) error
 		return err
 	}
 	defer e.Close()
+	return localapi.Serve(ctx, filepath.Join(dir, NetworkSocketName), networkHandler(e), ready)
+}
+
+type nativeNetwork interface {
+	Apply(context.Context, uint64, network.Desired) (network.Snapshot, error)
+	Snapshot(context.Context) (network.Snapshot, error)
+}
+
+func networkHandler(e nativeNetwork) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/snapshot", func(w http.ResponseWriter, r *http.Request) {
 		s, err := e.Snapshot(r.Context())
@@ -46,9 +55,9 @@ func ServeNetwork(ctx context.Context, dir, stateDir string, ready func()) error
 			localapi.Fail(w, 422, err)
 			return
 		}
-		localapi.JSON(w, 200, s)
+		localapi.JSON(w, 200, ApplyResult{Revision: s.Revision, AttemptedRevision: s.AttemptedRevision, Status: s.Status})
 	})
-	return localapi.Serve(ctx, filepath.Join(dir, NetworkSocketName), mux, ready)
+	return mux
 }
 
 func (e *Engine) Handler() http.Handler {

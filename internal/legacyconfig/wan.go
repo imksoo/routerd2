@@ -58,6 +58,76 @@ func (c *compiler) dhcp6(r resource) {
 	c.note(r, "DUID-LL and IAID 1 defaults are retained; historical leases and resource status are not imported.")
 }
 
+func (c *compiler) raClient(r resource) {
+	c.allow(r, "interface", "managed", "required")
+	s := r.Spec.(api.IPv6RAAddressSpec)
+	policy, exists := c.options.RAClients[r.Kind+"/"+r.Metadata.Name]
+	if !exists {
+		c.reject(r, "", "unsupported_semantics", "legacy managed RA delegates SLAAC, route metrics, DNS, MTU and DHCPv6 triggers to host-network-manager defaults; an explicit resource-scoped ra_clients migration policy is required")
+		return
+	}
+	c.usePolicy(r, "ra_clients")
+	if s.Managed != nil && !*s.Managed {
+		c.reject(r, "managed", "unsupported_semantics", "an observe-only RA resource cannot become a native socket/address/route owner through migration policy")
+	}
+	if s.Required {
+		c.reject(r, "required", "unsupported_semantics", "legacy required-address readiness is not represented by native socket readiness")
+	}
+	name := c.interfaceName(r, "interface", s.Interface, false)
+	c.ensureInterface(r, "interface", name)
+	if policy.Interface != name {
+		c.policyIssue(r, "ra_clients", "interface", "policy_interface", "RA policy interface must equal the kernel interface resolved from this legacy resource")
+	}
+	if policy.SLAAC == nil || policy.DefaultRoute == nil || policy.OnLink == nil || policy.RouteInformation == nil || policy.DNS == nil {
+		c.policyIssue(r, "ra_clients", "", "policy_required", "RA policy must explicitly set slaac, default_route, on_link, route_information and dns; OS defaults are not inferred")
+	}
+	if policy.Table <= 0 || policy.Metric <= 0 {
+		c.policyIssue(r, "ra_clients", "", "policy_required", "RA policy must explicitly select positive table and metric values; host route priorities are not inferred")
+	}
+	service := serviceconfig.Service{Name: c.serviceName(r, "ra-wan"), RAClient: &policy}
+	if err := serviceconfig.Validate([]serviceconfig.Service{service}); err != nil {
+		c.policyIssue(r, "ra_clients", "", "policy_validation", "RA policy does not satisfy the native address, interface-ID, router-filter or route restrictions")
+	}
+	for _, index := range c.raClients {
+		if c.document.Services[index].Interface() == name {
+			c.reject(r, "interface", "socket_owner", "one native RA client must own each interface; multiple legacy RA resources cannot acquire independent sockets there")
+		}
+	}
+	c.raClients[r.Kind+"/"+r.Metadata.Name] = len(c.document.Services)
+	c.addService(r, service)
+	c.note(r, "Explicit migration policy replaces host-network-manager RA defaults with native SLAAC, default/on-link/RIO route, DNS and route-metric/table intent; this is a deliberate behavior change, not automatic legacy parity.")
+	c.note(r, "The sole network writer disables kernel RA/autoconf before the native receiver starts. Learned DNS remains bounded typed state; it does not update resolv.conf. RA MTU/hop-limit application and automatic IA_NA/DHCPv6 triggering are not enabled.")
+	c.note(r, "An omitted native interface_id uses EUI-64; an omitted source_address selects the interface link-local address. Required-address readiness and legacy observed addresses are not imported.")
+}
+
+func (c *compiler) dhcp6Information(r resource) {
+	c.allow(r, "interface", "request")
+	s := r.Spec.(api.DHCPv6InformationSpec)
+	if len(s.Request) != 0 {
+		c.reject(r, "request", "unsupported_semantics", "the pinned Linux information controller ignores request and always exposes its PD client's fixed option set; nonempty selection intent must be resolved explicitly before migration")
+	}
+	c.interfaceName(r, "interface", s.Interface, false)
+	var providers []int
+	for _, candidate := range c.resources {
+		pd, ok := candidate.Spec.(api.DHCPv6PrefixDelegationSpec)
+		if !ok || pd.Interface != s.Interface {
+			continue
+		}
+		if index, ok := c.pd[candidate.Kind+"/"+candidate.Metadata.Name]; ok {
+			providers = append(providers, index)
+		}
+	}
+	if len(providers) != 1 {
+		c.reject(r, "interface", "information_provider", "information requires exactly one compiled PD resource with the same literal interface reference, matching the pinned Linux controller; standalone information and ambiguous PD ownership are not activated")
+		return
+	}
+	index := providers[0]
+	c.information[r.Kind+"/"+r.Metadata.Name] = index
+	c.target(r, "services/"+c.document.Services[index].Name)
+	c.note(r, "Information is an alias of the matching PD service: one DUID/IAID identity and one UDP 546 socket perform IA_PD and supplementary Information-Request; no second information-only service is created.")
+	c.note(r, "DNS, domain-search, SNTP and AFTR options retain the fixed client request set. Native freshness additionally requests and obeys the information-refresh option, bounded by the active PD lease; legacy status and lease files are not imported.")
+}
+
 func (c *compiler) delegation(r resource) {
 	c.allow(r, "prefixDelegation", "prefixSource", "interface", "subnetID", "addressSuffix", "prefixLength", "sendRA", "announce")
 	s := r.Spec.(api.IPv6DelegatedAddressSpec)

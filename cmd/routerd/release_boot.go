@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/imksoo/routerd2/internal/boot"
 	"github.com/imksoo/routerd2/internal/buildinfo"
 	"github.com/imksoo/routerd2/internal/release"
 	"github.com/imksoo/routerd2/internal/releaseboot"
@@ -23,10 +22,7 @@ func bootConfigured(path string, b runtimeconfig.Boot) error {
 		return serve(b)
 	}
 	applianceRuntime = true
-	if err := b.Validate(); err != nil {
-		return err
-	}
-	if err := boot.Bootstrap(boot.Options{Platform: b.Platform, RuntimeDir: b.RuntimeDir, StateDir: b.StateDir}); err != nil {
+	if err := bootstrapRuntime(context.Background(), b); err != nil {
 		return err
 	}
 	keys, err := release.LoadTrustFile(b.Release.TrustFile)

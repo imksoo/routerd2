@@ -485,6 +485,7 @@ func (p *apply) removeLinks(d Desired) error {
 			continue
 		}
 		forget := func() {
+			p.forgetWireGuard(name)
 			for i := range p.e.state.Links {
 				if p.e.state.Links[i].Definition.Name == name {
 					p.e.state.Links = append(p.e.state.Links[:i], p.e.state.Links[i+1:]...)

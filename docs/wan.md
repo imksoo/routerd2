@@ -51,13 +51,22 @@ Firewall rules may match its name before it exists.
 | `resolvers` | Explicit `{address, port}` IPv6 DNS servers; port defaults to 53 |
 | `selection` | `first` preserves the original Linux controller's DNS answer order; `ordinal` / `ordinalModulo` explicitly sort and select |
 | `b4_address` | Inner IPv4 host/prefix; default `192.0.0.2/32` |
+| `b4_peer` | Optional inner IPv4 peer as a canonical `/32`, different from the local address; the local address must also use `/32` |
 | `default_route` | Default true; route metric/table are independently configurable |
+| `route_gateway` | Optional IPv4 default gateway, equal to the explicitly configured `b4_peer` IP; forbidden with `default_route: false` |
 
 Exactly one of `source_from` and `local_address` is required. The coordinator
 also observes the installed address through the network worker: it must be
 owned, preferred and neither tentative nor DAD-failed. The deterministic source
 selection currently chooses the lexically first eligible RA address; this is
 not complete legacy `SelfAddressPolicy` compatibility.
+
+With no peer or gateway, the existing native default is an inner address and a
+device route. To preserve the original Linux B4 point-to-point convention, set
+`b4_peer: 192.0.0.1/32` and `route_gateway: 192.0.0.1`. Peer, address and route
+belong to the same dynamic service and are withdrawn together. Changing them
+changes the private instance digest; a result from the previous producer cannot
+reinstall the old projection.
 
 DNS queries bind their source and device to the IPv6 underlay. Resolver
 addresses must be explicit IPv6 literals, including scoped link-local servers
@@ -117,3 +126,30 @@ The protocol implementations and their source/RFC notes live in
 an independent packet/DNS peer and the actual two-ELF process tree. These tests
 do not establish full original-resource compatibility or verify a particular
 ISP/homert deployment.
+
+## Migrating original WAN resource graphs
+
+`routerd config migrate` refuses to guess a replacement for host-managed RA
+defaults or the original process-local AFTR resolver. Supply a strict policy
+document when intentionally replacing those behaviors:
+
+```sh
+routerd config migrate --policy wan-policy.yaml original-router.yaml > candidate.yaml
+routerd config validate candidate.yaml
+```
+
+The policy names exact original resources such as `IPv6RAAddress/wan-address`.
+RA feature booleans, metric/table, AFTR source selection and bootstrap DNS must
+be explicit. Unused or unknown entries, incompatible dependencies and unsupported
+fields fail the entire migration. The native YAML goes to stdout only after
+validation; quoted review notes go to stderr. Keep those notes with the proposed
+configuration because an explicit policy records a deliberate change of
+semantics, not automatic compatibility.
+
+A same-interface `DHCPv6Information` resource can share the original PD client's
+socket and lease context. The compiler preserves the original B4 peer and the
+independent IPv4 default route when it can represent the complete graph. It
+rejects unsupported HA and delegated-source selection rather than dropping them.
+See the [migration contract](../internal/legacyconfig/README.md) and its
+[source](../internal/legacyconfig/testdata/wan-dynamic.yaml) and
+[policy](../internal/legacyconfig/testdata/wan-dynamic-policy.yaml) fixtures.

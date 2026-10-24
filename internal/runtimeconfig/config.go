@@ -8,23 +8,38 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/imksoo/routerd2/internal/storage"
 )
 
 // Boot is intentionally separate from the transactional network configuration.
 // Changing boot paths, platform, or SSH keys/listeners requires a system restart.
 type Boot struct {
-	Platform      string   `json:"platform"`
-	Config        string   `json:"config"`
-	ModulePath    string   `json:"module_path"`
-	RuntimeDir    string   `json:"runtime_dir"`
-	StateDir      string   `json:"state_dir"`
-	KernelModules []string `json:"kernel_modules,omitempty"`
-	SSH           SSH      `json:"ssh"`
-	Release       *Release `json:"release,omitempty"`
+	Platform      string       `json:"platform"`
+	Config        string       `json:"config"`
+	ModulePath    string       `json:"module_path"`
+	RuntimeDir    string       `json:"runtime_dir"`
+	StateDir      string       `json:"state_dir"`
+	KernelModules []string     `json:"kernel_modules,omitempty"`
+	SSH           SSH          `json:"ssh"`
+	Release       *Release     `json:"release,omitempty"`
+	StateVolume   *StateVolume `json:"state_volume,omitempty"`
 }
 
-// Release selects signed userland pairs from a separately mounted persistent
-// store. Kernel/rootfs selection and configuration schema migrations are not
+// StateVolume mounts an explicitly selected, existing ext4 device at StateDir.
+// Only appliance PID 1 may mount it. The image must include and explicitly load
+// the device and filesystem drivers through KernelModules. Zero wait uses the
+// storage package's bounded default; no disk is discovered, formatted or repaired.
+type StateVolume struct {
+	Device             string `json:"device"`
+	WaitTimeoutSeconds int    `json:"wait_timeout_seconds,omitempty"`
+}
+
+// Release selects signed userland pairs from a persistent store. StateVolume,
+// when configured, is mounted before the selector opens this store or trust
+// file. Kernel/rootfs selection and configuration schema migrations are not
 // performed by this userland selector.
 type Release struct {
 	Root                string `json:"root"`
@@ -95,6 +110,24 @@ func (b Boot) Validate() error {
 	if b.RuntimeDir == b.StateDir {
 		return errors.New("runtime_dir and state_dir must be separate")
 	}
+	if b.StateVolume != nil {
+		v := b.StateVolume
+		// Bound the integer before converting it to time.Duration, so a very
+		// large JSON number cannot wrap into an apparently valid timeout.
+		if v.WaitTimeoutSeconds < 0 || v.WaitTimeoutSeconds > int(storage.MaxWaitTimeout/time.Second) {
+			return errors.New("state_volume.wait_timeout_seconds must be zero (default) or 1..300")
+		}
+		opts := storage.Options{Platform: b.Platform, Device: v.Device, Target: b.StateDir, WaitTimeout: time.Duration(v.WaitTimeoutSeconds) * time.Second}
+		if err := opts.Validate(); err != nil {
+			return fmt.Errorf("state_volume: %w", err)
+		}
+		if b.RuntimeDir == "/" || filepath.Clean(b.RuntimeDir) != b.RuntimeDir {
+			return errors.New("state_volume requires a clean, absolute, non-root runtime_dir")
+		}
+		if pathContains(b.StateDir, b.RuntimeDir) || pathContains(b.RuntimeDir, b.StateDir) {
+			return errors.New("state_volume requires runtime_dir and state_dir to have no ancestor or descendant overlap")
+		}
+	}
 	if b.Platform != "appliance" && len(b.KernelModules) > 0 {
 		return errors.New("only appliance mode may load kernel modules")
 	}
@@ -107,4 +140,8 @@ func (b Boot) Validate() error {
 		return errors.New("ssh.user must not be empty")
 	}
 	return nil
+}
+
+func pathContains(parent, child string) bool {
+	return parent == child || strings.HasPrefix(child, parent+"/")
 }

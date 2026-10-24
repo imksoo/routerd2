@@ -35,22 +35,24 @@ type ownedAddress struct {
 	Attempted *AddressOptions `json:"attempted,omitempty"`
 }
 type journal struct {
-	Version           int              `json:"version"`
-	Revision          uint64           `json:"revision"`
-	AttemptedRevision uint64           `json:"attempted_revision"`
-	Desired           Desired          `json:"desired"`
-	Attempted         *Desired         `json:"attempted,omitempty"`
-	Status            string           `json:"status"`
-	LastError         string           `json:"last_error,omitempty"`
-	Addresses         []ownedAddress   `json:"addresses,omitempty"`
-	Routes            []Route          `json:"routes,omitempty"`
-	PolicyRules       []PolicyRule     `json:"policy_rules,omitempty"`
-	Tunnels           []DSLite         `json:"tunnels,omitempty"`
-	Links             []ownedLink      `json:"links,omitempty"`
-	Attributes        []ownedAttribute `json:"attributes,omitempty"`
-	Settings          []ownedSetting   `json:"settings,omitempty"`
-	FirewallOwned     bool             `json:"firewall_owned"`
-	VRRPGuardOwned    bool             `json:"vrrp_guard_owned"`
+	Version           int                      `json:"version"`
+	Revision          uint64                   `json:"revision"`
+	AttemptedRevision uint64                   `json:"attempted_revision"`
+	Desired           Desired                  `json:"desired"`
+	Attempted         *Desired                 `json:"attempted,omitempty"`
+	Status            string                   `json:"status"`
+	LastError         string                   `json:"last_error,omitempty"`
+	Addresses         []ownedAddress           `json:"addresses,omitempty"`
+	Routes            []Route                  `json:"routes,omitempty"`
+	PolicyRules       []PolicyRule             `json:"policy_rules,omitempty"`
+	Tunnels           []DSLite                 `json:"tunnels,omitempty"`
+	Links             []ownedLink              `json:"links,omitempty"`
+	Attributes        []ownedAttribute         `json:"attributes,omitempty"`
+	Settings          []ownedSetting           `json:"settings,omitempty"`
+	FirewallOwned     bool                     `json:"firewall_owned"`
+	VRRPGuardOwned    bool                     `json:"vrrp_guard_owned"`
+	WireGuard         []ownedWireGuard         `json:"wireguard,omitempty"`
+	WireGuardSecrets  []wireGuardSecretBinding `json:"wireguard_secrets,omitempty"`
 }
 
 // kernel is private: protocol modules use Desired, never netlink objects or
@@ -143,6 +145,9 @@ func newEngine(opts Options, k kernel) (*Engine, error) {
 }
 
 func validateJournal(s journal) error {
+	if err := validateWireGuardJournal(s); err != nil {
+		return err
+	}
 	if err := validatePolicyRules(s.PolicyRules); err != nil {
 		return err
 	}
@@ -268,6 +273,9 @@ func (e *Engine) snapshotLocked(ctx context.Context) Snapshot {
 	}
 	names, tables := map[string]bool{}, map[int]bool{}
 	collect := func(d Desired) {
+		for _, wireguard := range d.WireGuard {
+			names[wireguard.Interface] = true
+		}
 		for _, name := range firewallInterfaces(d.Firewall) {
 			names[name] = true
 		}
@@ -346,6 +354,18 @@ func (e *Engine) snapshotLocked(ctx context.Context) Snapshot {
 		}
 		l.Owned = e.ownsLink(l)
 		s.Interfaces = append(s.Interfaces, l)
+		if record := e.wireGuardRecord(n); record != nil && l.Kind == "wireguard" {
+			if backend, ok := e.kernel.(wireGuardKernel); ok {
+				device, err := backend.ReadWireGuard(l.Index)
+				problem(err)
+				if err == nil {
+					s.WireGuard = append(s.WireGuard, publicWireGuardState(n, device, l.Owned && wireGuardOwned(device, *record), record.Quarantined))
+				}
+				clearWireGuardDevice(&device)
+			} else {
+				problem(errors.New("WireGuard backend is unavailable for observation"))
+			}
+		}
 	}
 	tableIDs := make([]int, 0, len(tables))
 	for t := range tables {
@@ -446,9 +466,10 @@ func (e *Engine) ownsRoute(r RouteState) bool {
 }
 
 type apply struct {
-	e       *Engine
-	ctx     context.Context
-	changed int
+	e               *Engine
+	ctx             context.Context
+	changed         int
+	wireGuardWanted map[string]wireGuardRecorded
 }
 
 // A native multi-attribute update may fail after changing some attributes.
@@ -496,6 +517,9 @@ func (p *apply) reconcile(d Desired) error {
 		return err
 	}
 	if err := p.preflightLinks(d); err != nil {
+		return err
+	}
+	if err := p.preflightWireGuard(d); err != nil {
 		return err
 	}
 	wantedSettings := map[settingKey]int{}
@@ -567,6 +591,9 @@ func (p *apply) reconcile(d Desired) error {
 		return err
 	}
 	if err := p.links(d.Links); err != nil {
+		return err
+	}
+	if err := p.wireGuard(d); err != nil {
 		return err
 	}
 	tunnels := map[string]bool{}

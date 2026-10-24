@@ -112,6 +112,7 @@ func TestDaemonAFTRResolutionAndExpiry(t *testing.T) {
 			Interface: "wan0", Tunnel: "dslite0", LocalAddress: "2001:db8:42::1", Candidates: []string{"aftr.test"},
 			Resolvers:      []serviceconfig.AFTRResolver{{Address: "2001:db8:42::53", Port: uint16(socket.LocalAddr().(*net.UDPAddr).Port)}},
 			TimeoutSeconds: 1, RetrySeconds: 1, MTU: 1460, Metric: 200,
+			B4Peer: "192.0.0.1/32", RouteGateway: "192.0.0.1",
 		}}},
 	}
 	f := startFixtureDaemon(t, doc)
@@ -167,9 +168,9 @@ func TestDaemonAFTRResolutionAndExpiry(t *testing.T) {
 		}
 		b4 := false
 		for _, address := range addresses {
-			b4 = b4 || address.IPNet.String() == "192.0.0.2/32"
+			b4 = b4 || address.IPNet.String() == "192.0.0.2/32" && address.Peer != nil && address.Peer.String() == "192.0.0.1/32"
 		}
-		return link.Attrs().Index, b4 && fixtureRoute(t, "0.0.0.0/0", "", link.Attrs().Index)
+		return link.Attrs().Index, b4 && fixtureRoute(t, "0.0.0.0/0", "192.0.0.1", link.Attrs().Index)
 	}
 	underlay := func() {
 		t.Helper()
@@ -194,7 +195,7 @@ func TestDaemonAFTRResolutionAndExpiry(t *testing.T) {
 	if !ok || initialWorker.PID == 0 || initialWorker.Role != "aftr" {
 		t.Fatal("initial native AFTR worker or kernel projection missing")
 	}
-	t.Log("DNS AAAA -> AFTR worker -> coordinator -> native ip6tnl, B4 address and IPv4 route")
+	t.Log("DNS AAAA -> AFTR worker -> coordinator -> native ip6tnl, B4 /32 peer and IPv4 gateway route")
 
 	dnsMu.Lock()
 	remote = "2001:db8:42::3"
@@ -236,7 +237,7 @@ func TestDaemonAFTRResolutionAndExpiry(t *testing.T) {
 		if time.Now().Before(expires.Add(-200 * time.Millisecond)) {
 			t.Fatal("last-good endpoint was removed before its original DNS TTL")
 		}
-		return !snapshot.Available && !fixtureRoute(t, "0.0.0.0/0", "", 0)
+		return !snapshot.Available && !fixtureRoute(t, "0.0.0.0/0", "192.0.0.1", 0)
 	})
 	if time.Now().After(expires.Add(3 * time.Second)) {
 		t.Fatal("expired DNS endpoint survived beyond the coordinator reconciliation interval")
@@ -266,7 +267,7 @@ func TestDaemonAFTRResolutionAndExpiry(t *testing.T) {
 	until(t, 5*time.Second, func() bool {
 		_, err := netlink.LinkByName("dslite0")
 		var missing netlink.LinkNotFoundError
-		return errors.As(err, &missing) && worker().PID == 0 && !fixtureRoute(t, "0.0.0.0/0", "", 0)
+		return errors.As(err, &missing) && worker().PID == 0 && !fixtureRoute(t, "0.0.0.0/0", "192.0.0.1", 0)
 	})
 	underlay()
 	t.Log("DNS recovery recreated the projection in the same AFTR process; configuration removal released all DS-Lite resources")

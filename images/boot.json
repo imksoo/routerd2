@@ -4,7 +4,7 @@
   "module_path": "/usr/libexec/routerd-modules",
   "runtime_dir": "/run/routerd",
   "state_dir": "/var/lib/routerd",
-  "kernel_modules": ["virtio_pci", "virtio_net", "bridge", "8021q", "vrf", "vxlan", "macvlan", "nf_tables", "nft_ct", "nft_chain_nat", "nft_masq", "nft_nat", "nft_reject_inet", "nft_log", "nf_log_syslog", "ip6_tunnel"],
+  "kernel_modules": ["virtio_pci", "virtio_net", "af_packet", "bridge", "8021q", "vrf", "vxlan", "macvlan", "wireguard", "nf_tables", "nft_ct", "nft_chain_nat", "nft_masq", "nft_nat", "nft_reject_inet", "nft_log", "nf_log_syslog", "ip6_tunnel"],
   "ssh": {
     "listen": "0.0.0.0:22",
     "user": "admin",

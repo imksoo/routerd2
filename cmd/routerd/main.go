@@ -17,13 +17,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/imksoo/routerd2/internal/boot"
 	"github.com/imksoo/routerd2/internal/buildinfo"
 	"github.com/imksoo/routerd2/internal/cli"
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/control"
-	"github.com/imksoo/routerd2/internal/kmod"
-	"github.com/imksoo/routerd2/internal/legacyconfig"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/logging"
 	"github.com/imksoo/routerd2/internal/release"
@@ -151,7 +148,7 @@ func usage() error {
   routerd config export [--runtime-dir /run/routerd]
   routerd config confirm [--runtime-dir /run/routerd]
   routerd config validate FILE
-  routerd config migrate FILE
+  routerd config migrate [--policy FILE] FILE
   routerd config apply --file FILE --expected-revision N [--request-id ID --confirmed SECONDS --runtime-dir ...]
   routerd release help
   routerd version
@@ -165,21 +162,15 @@ func serve(b runtimeconfig.Boot) error { return serveWithTrial(b, nil) }
 
 func serveWithTrial(b runtimeconfig.Boot, trial *releaseboot.Trial) error {
 	applianceRuntime = b.Platform == "appliance"
-	if err := b.Validate(); err != nil {
-		return err
-	}
-	if err := boot.Bootstrap(boot.Options{Platform: b.Platform, RuntimeDir: b.RuntimeDir, StateDir: b.StateDir}); err != nil {
-		return err
-	}
-	if err := kmod.Load(b.KernelModules); err != nil {
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
+	if err := bootstrapRuntime(ctx, b); err != nil {
 		return err
 	}
 	managementConfig := filepath.Join(b.RuntimeDir, "management.json")
 	if err := config.AtomicJSON(managementConfig, b.SSH); err != nil {
 		return err
 	}
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer cancel()
 	logger, err := logging.NewHandler(logging.HandlerOptions{RuntimeDir: b.RuntimeDir, Module: "supervisor", Fallback: os.Stderr})
 	if err != nil {
 		return err
@@ -297,31 +288,7 @@ func configure(args []string) error {
 		return remote(args[1:], "confirm")
 	}
 	if args[0] == "migrate" {
-		if len(args) != 2 {
-			return errors.New("usage: routerd config migrate FILE")
-		}
-		file, err := os.Open(args[1])
-		if err != nil {
-			return err
-		}
-		defer file.Close()
-		data, err := io.ReadAll(io.LimitReader(file, config.MaxSize+1))
-		if err != nil {
-			return err
-		}
-		if len(data) > config.MaxSize {
-			return errors.New("configuration exceeds 2 MiB")
-		}
-		converted, err := legacyconfig.Migrate(data)
-		if err != nil {
-			return err
-		}
-		output, err := config.YAML(converted)
-		if err != nil {
-			return err
-		}
-		_, err = os.Stdout.Write(output)
-		return err
+		return migrate(args[1:], os.Stdout, os.Stderr)
 	}
 	if args[0] == "validate" {
 		if len(args) != 2 {

@@ -1,0 +1,94 @@
+# Synthetic, non-secret graph derived from the public WAN tutorial's
+# PD + supplementary information + DS-Lite topology at source pin 1329ef54.
+# This is not a deployed homert02/03 configuration. This separate fixture uses
+# interface source discovery; the companion policy explicitly binds it to RA.
+# The public tutorial's PD-derived source remains unsupported and is tested as
+# a rejection rather than being silently rewritten into RA source intent.
+apiVersion: routerd.net/v1alpha1
+kind: Router
+metadata: {name: migration-dynamic-wan}
+spec:
+  resources:
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: IPv4Route
+      metadata: {name: ipv4-default}
+      spec:
+        destination: 0.0.0.0/0
+        deviceFrom: {resource: DSLiteTunnel/provider, field: device}
+        gateway: 192.0.0.1
+        metric: 50
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: DSLiteTunnel
+      metadata: {name: provider}
+      spec:
+        interface: wan
+        tunnelName: ds0
+        localAddressSource: interface
+        aftrFrom: {resource: DHCPv6Information/wan-info, field: aftrName}
+        aftrFQDN: aftr.example
+        aftrIPv6: 2001:db8:ffff::1
+        remoteAddress: 2001:db8:ffff::2
+        encapsulationLimit: none
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: DHCPv6Information
+      metadata: {name: wan-info}
+      spec: {interface: wan}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: IPv6RAAddress
+      metadata: {name: wan-ra}
+      spec: {interface: wan, managed: true, required: false}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: Interface
+      metadata: {name: wan}
+      spec: {ifname: eth0, managed: true, adminUp: true, mtu: 1500}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: Interface
+      metadata: {name: lan}
+      spec: {ifname: eth1, managed: true, adminUp: true, mtu: 1500}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: DHCPv6PrefixDelegation
+      metadata: {name: wan-pd}
+      spec:
+        interface: wan
+        client: routerd
+        prefixLength: 56
+        clientDUID: "00030001020000000001"
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: IPv6DelegatedAddress
+      metadata: {name: lan-prefix}
+      spec:
+        prefixDelegation: DHCPv6PrefixDelegation/wan-pd
+        interface: lan
+        subnetID: "10"
+        addressSuffix: "::1"
+        prefixLength: 64
+        sendRA: false
+        announce: false
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: IPv4StaticAddress
+      metadata: {name: lan-ipv4}
+      spec: {interface: lan, address: 192.0.2.1/24}
+    - apiVersion: system.routerd.net/v1alpha1
+      kind: Sysctl
+      metadata: {name: route-v4}
+      spec: {key: net.ipv4.ip_forward, value: "1"}
+    - apiVersion: system.routerd.net/v1alpha1
+      kind: Sysctl
+      metadata: {name: route-v6}
+      spec: {key: net.ipv6.conf.all.forwarding, value: "1"}
+    - apiVersion: firewall.routerd.net/v1alpha1
+      kind: FirewallZone
+      metadata: {name: wan-zone}
+      spec: {role: untrust, interfaces: [Interface/wan, DSLiteTunnel/provider]}
+    - apiVersion: firewall.routerd.net/v1alpha1
+      kind: FirewallZone
+      metadata: {name: lan-zone}
+      spec: {role: trust, interfaces: [Interface/lan]}
+    - apiVersion: firewall.routerd.net/v1alpha1
+      kind: FirewallPolicy
+      metadata: {name: routing-policy}
+      spec: {sameRoleAccept: true}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: NAT44Rule
+      metadata: {name: lan-nat}
+      spec: {type: masquerade, egressInterface: provider, sourceRanges: [192.0.2.0/24]}

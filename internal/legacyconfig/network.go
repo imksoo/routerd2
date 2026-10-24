@@ -264,6 +264,10 @@ func (c *compiler) route(r resource, destination, gateway, dev string, metric, f
 		gateway = a.String()
 	}
 	name := c.interfaceName(r, "interface", dev, literal)
+	if index, ok := c.dynamicTunnels[name]; ok {
+		c.dynamicDSLiteRoute(r, index, prefix, gateway, metric, family)
+		return
+	}
 	c.document.Network.Routes = append(c.document.Network.Routes, network.Route{Destination: prefix.String(), Gateway: gateway, Interface: name, Metric: metric})
 	c.target(r, "network.routes")
 }
@@ -333,16 +337,27 @@ func (c *compiler) sysctl(r resource) {
 }
 
 func (c *compiler) dslite(r resource) {
+	if policy, ok := c.options.DSLite[r.Kind+"/"+r.Metadata.Name]; ok {
+		c.dynamicDSLite(r, policy)
+		return
+	}
+	c.staticDSLite(r)
+}
+
+func (c *compiler) staticDSLite(r resource) {
 	c.allow(r, "interface", "tunnelName", "enabled", "aftrFQDN", "aftrIPv6", "aftrDNSServers", "aftrAddressOrdinal", "aftrAddressSelection", "remoteAddress", "localAddress", "localAddressFrom", "localIPv6Source", "aftrFrom", "aftrSource", "localAddressSource", "localDelegatedAddress", "localAddressSuffix", "defaultRoute", "routeMetric", "mtu", "encapsulationLimit")
 	s := r.Spec.(api.DSLiteTunnelSpec)
 	if s.Enabled != nil && !*s.Enabled {
 		c.reject(r, "enabled", "unsupported_semantics", "disabled legacy tunnels are not equivalent to removing native owned tunnel intent")
 	}
 	if s.AFTRFQDN != "" || len(s.AFTRDNSServers) > 0 || s.AFTRAddressOrdinal != 0 || s.AFTRAddressSelection != "" || meaningful(child(r.node, "aftrFrom")) || s.AFTRSource != "" {
-		c.reject(r, "aftrFQDN", "unsupported_semantics", "native AFTR requires explicit IPv6 bootstrap dependencies and bounded endpoint expiry; conversion from legacy local-DNS, source-selection and indefinite pending-tunnel semantics is not implemented")
+		c.reject(r, "aftrFQDN", "unsupported_semantics", "legacy local-DNS, source-selection and indefinite pending-tunnel behavior requires explicit resource-scoped ds_lite migration policy; native bootstrap and expiry are not inferred")
 	}
 	if s.LocalAddressSource != "" && s.LocalAddressSource != "static" && s.LocalAddressSource != "interface" || s.LocalDelegatedAddress != "" || s.LocalIPv6Source != "" || s.LocalAddressSuffix != "" {
 		c.reject(r, "localAddressSource", "unsupported_semantics", "only a literal outer IPv6 endpoint is supported; delegated, observed and suffix-derived sources are not frozen")
+	}
+	if s.LocalAddress == "" && (s.LocalAddressSource == "" || s.LocalAddressSource == "interface") {
+		c.reject(r, "localAddressSource", "unsupported_semantics", "kernel-observed outer source selection requires explicit ds_lite policy naming an owned native RA source; external addresses are not adopted")
 	}
 	if s.EncapsulationLimit != "" && s.EncapsulationLimit != "none" {
 		c.reject(r, "encapsulationLimit", "unsupported_semantics", "native DS-Lite suppresses the IPv6 encapsulation-limit option")
@@ -355,9 +370,6 @@ func (c *compiler) dslite(r resource) {
 		c.reject(r, "remoteAddress", "unsupported_semantics", "multiple differing remote candidates are not represented by a fixed native endpoint")
 	}
 	local := s.LocalAddress
-	if p, err := netip.ParsePrefix(local); err == nil {
-		local = p.Addr().String()
-	}
 	for field, value := range map[string]string{"localAddress": local, "aftrIPv6": remote} {
 		a, err := netip.ParseAddr(value)
 		if err != nil || !a.Is6() || a.Is4In6() || !a.IsGlobalUnicast() || a.IsLoopback() || a.IsLinkLocalUnicast() {
@@ -368,7 +380,7 @@ func (c *compiler) dslite(r resource) {
 	if meaningful(child(r.node, "localAddressFrom")) {
 		// Despite its name, this source selects the inner IPv4 endpoint in
 		// the pinned Linux controller; it is not the outer IPv6 source.
-		inner = c.resolveStaticAddress(r, "localAddressFrom", s.LocalAddressFrom, true)
+		inner = c.dsliteInnerAddress(r, s.LocalAddressFrom)
 	}
 	innerIP, err := netip.ParseAddr(inner)
 	if err != nil || !innerIP.Is4() || innerIP.IsUnspecified() || innerIP.IsMulticast() || innerIP.IsLoopback() {
@@ -380,6 +392,9 @@ func (c *compiler) dslite(r resource) {
 	mtu := s.MTU
 	if mtu == 0 {
 		mtu = 1460 // The old Linux controller default is not underlay-dependent.
+	}
+	if s.MTU != 0 && (s.MTU < 1280 || s.MTU > 65495) {
+		c.reject(r, "mtu", "invalid_value", "MTU must satisfy both the pinned DSLiteTunnel range and the native IPv6 encapsulation limit")
 	}
 	c.document.Network.DSLite = append(c.document.Network.DSLite, network.DSLite{Name: name, Underlay: underlay, Local: local, Remote: remote, MTU: mtu})
 	if iface := c.ensureInterface(r, "tunnelName", name); iface != nil {

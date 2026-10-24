@@ -18,6 +18,17 @@ import (
 const SchemaVersion = 1
 const MaxSize = 2 << 20
 
+// Leave room for revision, request ID, confirmation controls and JSON framing
+// when an individual document is carried by a bounded module API request.
+const MaxDocumentSize = MaxSize - (4 << 10)
+
+// A durable record can contain both the candidate and the previous document
+// during confirmed commit. Its limit is separate from the public input limit.
+// New records are compact. The larger read bound accepts previous indented
+// records while retaining a finite allocation limit.
+const MaxRecordSize = 2*MaxSize + (64 << 10)
+const MaxStoredReadSize = 16 << 20
+
 type Document struct {
 	SchemaVersion int                     `json:"schema_version"`
 	Network       network.Desired         `json:"network"`
@@ -44,6 +55,16 @@ type Confirmation struct {
 func Validate(d Document) error {
 	if d.SchemaVersion != SchemaVersion {
 		return fmt.Errorf("unsupported config schema %d (expected %d)", d.SchemaVersion, SchemaVersion)
+	}
+	canonical, err := json.Marshal(d)
+	if err != nil {
+		return fmt.Errorf("encode configuration: %w", err)
+	}
+	if len(canonical) > MaxDocumentSize {
+		return errors.New("canonical JSON configuration exceeds its 2 MiB budget including the 4 KiB protocol envelope reserve")
+	}
+	if err := checkJSONShape(canonical, maxDocumentNodes); err != nil {
+		return err
 	}
 	if err := network.Validate(d.Network); err != nil {
 		return err
@@ -187,25 +208,53 @@ func (s *Store) Load() (Committed, error) {
 		return c, err
 	}
 	defer f.Close()
-	if err = Decode(f, &c); err != nil {
+	data, err := io.ReadAll(io.LimitReader(f, MaxStoredReadSize+1))
+	if err != nil {
 		return c, err
 	}
-	if c.Revision == 0 {
-		return c, errors.New("invalid committed revision zero")
+	if len(data) > MaxStoredReadSize {
+		return c, errors.New("stored configuration record exceeds 16 MiB")
 	}
-	if c.Confirmation != nil {
-		if c.Confirmation.PreviousRevision == 0 || c.Confirmation.PreviousRevision >= c.Revision || c.Confirmation.RequestID != c.LastRequestID || c.Confirmation.Deadline.IsZero() {
-			return c, errors.New("invalid confirmation recovery record")
-		}
-		if err := Validate(c.Confirmation.Previous); err != nil {
-			return c, fmt.Errorf("invalid rollback configuration: %w", err)
-		}
+	if err := decodeRecord(data, &c); err != nil {
+		return c, err
 	}
-	return c, Validate(c.Config)
+	return c, validateRecord(c)
 }
 
-func (s *Store) Save(c Committed) error  { return AtomicJSON(filepath.Join(s.Dir, "config.json"), c) }
-func (s *Store) Stage(c Committed) error { return AtomicJSON(filepath.Join(s.Dir, "pending.json"), c) }
+func validateRecord(c Committed) error {
+	if c.Revision == 0 {
+		return errors.New("invalid committed revision zero")
+	}
+	if len(c.LastRequestID) > 128 || len(c.LastRequestHash) > 128 {
+		return errors.New("committed request metadata exceeds its bound")
+	}
+	if c.Confirmation != nil {
+		if c.Confirmation.PreviousRevision == 0 || c.Confirmation.PreviousRevision >= c.Revision || c.Confirmation.RequestID == "" || c.Confirmation.RequestID != c.LastRequestID || c.Confirmation.Deadline.IsZero() {
+			return errors.New("invalid confirmation recovery record")
+		}
+		if err := Validate(c.Confirmation.Previous); err != nil {
+			return fmt.Errorf("invalid rollback configuration: %w", err)
+		}
+	}
+	return Validate(c.Config)
+}
+
+func (s *Store) Save(c Committed) error  { return s.writeRecord("config.json", c) }
+func (s *Store) Stage(c Committed) error { return s.writeRecord("pending.json", c) }
+func (s *Store) writeRecord(name string, c Committed) error {
+	if err := validateRecord(c); err != nil {
+		return err
+	}
+	b, err := json.Marshal(c)
+	if err != nil {
+		return err
+	}
+	b = append(b, '\n')
+	if len(b) > MaxRecordSize {
+		return errors.New("committed configuration record exceeds its encoded size limit")
+	}
+	return atomicBytes(filepath.Join(s.Dir, name), b)
+}
 func (s *Store) ClearPending() error {
 	err := os.Remove(filepath.Join(s.Dir, "pending.json"))
 	if os.IsNotExist(err) {
@@ -225,6 +274,10 @@ func AtomicJSON(path string, v any) error {
 		return err
 	}
 	b = append(b, '\n')
+	return atomicBytes(path, b)
+}
+
+func atomicBytes(path string, b []byte) error {
 	f, err := os.CreateTemp(filepath.Dir(path), ".routerd-txn-")
 	if err != nil {
 		return err

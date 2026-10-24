@@ -90,6 +90,133 @@ func TestAFTRObservedSourceGenerationAndProjection(t *testing.T) {
 	}
 }
 
+func TestAFTRPeerAndGatewayChangesFenceOldProjection(t *testing.T) {
+	ctx := context.Background()
+	n := &aftrNetwork{observed: network.Snapshot{Interfaces: []network.InterfaceState{{Name: "wan0", Up: true, Addresses: []network.AddressState{{Address: "2001:db8:42::1/64", Owned: true, PreferredLifetime: ^uint32(0), ValidLifetime: ^uint32(0)}}}}}}
+	r := New(t.TempDir(), t.TempDir(), n)
+	r.manager = &memoryManager{}
+	no := false
+	var priorDigest string
+	var priorUpdate serviceconfig.Update
+	steps := []struct {
+		name, peer, gateway string
+		defaultRoute        *bool
+	}{
+		{name: "original-default"},
+		{name: "peer-only", peer: "192.0.0.1/32"},
+		{name: "peer-gateway", peer: "192.0.0.1/32", gateway: "192.0.0.1"},
+		{name: "peer-change", peer: "192.0.0.9/32", gateway: "192.0.0.9"},
+		{name: "remove-default-route", peer: "192.0.0.9/32", defaultRoute: &no},
+		{name: "remove-peer", defaultRoute: &no},
+	}
+	for i, step := range steps {
+		t.Run(step.name, func(t *testing.T) {
+			doc := aftrDocument()
+			doc.Services[0].DSLite.B4Peer = step.peer
+			doc.Services[0].DSLite.RouteGateway = step.gateway
+			doc.Services[0].DSLite.DefaultRoute = step.defaultRoute
+			if err := r.ApplyConfig(ctx, uint64(i+1), doc); err != nil {
+				t.Fatal(err)
+			}
+			if len(n.applied.DSLite) != 0 || len(n.applied.Routes) != 0 || len(n.applied.Interfaces) != 1 {
+				t.Fatal("changed B4 intent retained old address/route ownership before new facts arrived", n.applied)
+			}
+			input, err := r.AFTRInput(ctx, "service.dslite")
+			if err != nil || input.ConfigDigest == priorDigest || input.Generation != 1 {
+				t.Fatal("B4 intent change did not create a new fenced instance", input, err)
+			}
+			if priorDigest != "" && !errors.Is(r.Accept(ctx, priorUpdate), ErrStale) {
+				t.Fatal("an old AFTR producer could recreate the prior peer or route")
+			}
+			snapshot := aftr.Snapshot{Resource: "dslite", Interface: "wan0", ConfigDigest: input.ConfigDigest, Generation: input.Generation, Active: true, Available: true, Local: input.Source.Address, Remote: "2001:db8:42::2", CandidateIndex: 0, ResolverIndex: -1, UpdatedAt: time.Now().UTC()}
+			current := update(t, r, "service.dslite", 1, snapshot)
+			if err := r.Accept(ctx, current); err != nil {
+				t.Fatal(err)
+			}
+			if err := network.Validate(n.applied); err != nil {
+				t.Fatal("public service produced invalid point-to-point kernel intent", err)
+			}
+			if len(n.applied.DSLite) != 1 || len(n.applied.Interfaces) != 2 {
+				t.Fatal("new AFTR producer did not acquire its complete B4 projection", n.applied)
+			}
+			var b4 network.Interface
+			for _, iface := range n.applied.Interfaces {
+				if iface.Name == "dslite0" {
+					b4 = iface
+				}
+			}
+			if !reflect.DeepEqual(b4.Addresses, []string{"192.0.0.2/32"}) || b4.AddressOptions["192.0.0.2/32"].Peer != step.peer {
+				t.Fatal("explicit peer or original default address was lost", b4)
+			}
+			if step.defaultRoute != nil && !*step.defaultRoute {
+				if len(n.applied.Routes) != 0 {
+					t.Fatal("peer alone invented a forbidden default route", n.applied.Routes)
+				}
+			} else if len(n.applied.Routes) != 1 || n.applied.Routes[0].Destination != "0.0.0.0/0" || n.applied.Routes[0].Interface != "dslite0" || n.applied.Routes[0].Gateway != step.gateway {
+				t.Fatal("explicit gateway or original device-route behavior was lost", n.applied.Routes)
+			}
+			priorDigest, priorUpdate = input.ConfigDigest, current
+		})
+	}
+	if err := r.ApplyConfig(ctx, uint64(len(steps)+1), config.Document{SchemaVersion: config.SchemaVersion}); err != nil {
+		t.Fatal(err)
+	}
+	if len(n.applied.DSLite)+len(n.applied.Interfaces)+len(n.applied.Routes) != 0 || len(r.bindings) != 0 || len(r.aftrInputs) != 0 {
+		t.Fatal("configuration removal retained B4 resources or an authorized producer", n.applied)
+	}
+	if !errors.Is(r.Accept(ctx, priorUpdate), ErrStale) {
+		t.Fatal("removed AFTR producer reacquired ownership")
+	}
+}
+
+func TestAFTRFinitePeerAddressAndGatewayWithdrawTogether(t *testing.T) {
+	now := time.Unix(1700000000, 0).UTC()
+	expiry := now.Add(30 * time.Second)
+	doc := aftrDocument()
+	doc.Services[0].DSLite.B4Peer = "192.0.0.1/32"
+	doc.Services[0].DSLite.RouteGateway = "192.0.0.1"
+	doc.Network.Interfaces[0].AddressOptions = map[string]network.AddressOptions{"2001:db8:42::1/64": {PreferredUntil: expiry, ValidUntil: expiry}}
+	instance, err := doc.Services[0].Instance("/run/routerd", "/var/lib/routerd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, digest, err := encodeInstance(instance)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in, err := aftrDependencies(doc, doc.Services[0], nil, digest, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := aftr.Snapshot{Resource: "dslite", Interface: "wan0", ConfigDigest: digest, Generation: in.Generation, Active: true, Available: true, Local: in.Source.Address, Remote: "2001:db8:42::2", CandidateIndex: 0, ResolverIndex: -1, UpdatedAt: now, ValidUntil: expiry}
+	raw, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	records := map[string]serviceconfig.Update{instance.Name: {Role: "aftr", Snapshot: raw}}
+	inputs := map[string]aftr.Input{instance.Name: in}
+	p, err := project(doc, "/run/routerd", "/var/lib/routerd", records, now, inputs)
+	if err != nil || len(p.network.DSLite) != 1 || len(p.network.Routes) != 1 || p.network.Routes[0].Gateway != "192.0.0.1" {
+		t.Fatal("finite source did not project its peer route", p.network, err)
+	}
+	if err := network.Validate(p.network); err != nil {
+		t.Fatal(err)
+	}
+	var options network.AddressOptions
+	for _, iface := range p.network.Interfaces {
+		if iface.Name == "dslite0" {
+			options = iface.AddressOptions["192.0.0.2/32"]
+		}
+	}
+	if options.Peer != "192.0.0.1/32" || !options.PreferredUntil.Equal(expiry) || !options.ValidUntil.Equal(expiry) {
+		t.Fatal("peer addressing changed the finite address lifetime", options)
+	}
+	p, err = project(doc, "/run/routerd", "/var/lib/routerd", records, expiry, inputs)
+	if err != nil || len(p.network.DSLite) != 0 || len(p.network.Routes) != 0 || len(p.network.Interfaces) != 1 || p.network.Interfaces[0].Name != "wan0" {
+		t.Fatal("source expiry retained peer address, tunnel or gateway route", p.network, err)
+	}
+}
+
 func TestAFTRFiniteDependencyInvalidatesPriorResolution(t *testing.T) {
 	now := time.Now().UTC()
 	doc := aftrDocument()

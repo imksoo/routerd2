@@ -435,7 +435,7 @@
         "wireguard"
       ],
       "parity_status": "not_integrated",
-      "known_gap": ""
+      "known_gap": "Native kernel generic-netlink WireGuard, complete peer sets, encrypted traffic, immutable key snapshots, endpoint roaming and failure quarantine are implemented. Original peer hostname resolution, SAM/enrollment, implicit firewall/routing policy and complete resource lifecycle conversion remain incomplete."
     },
     {
       "id": "vpn.ipsec",
@@ -12176,7 +12176,7 @@
     {
       "package": "internal/network",
       "status": "integrated_native_kernel_writer",
-      "validation": "Unit and race tests passed. QEMU Linux packet gates passed for IPv4/IPv6 forwarding, NAT44/NAT66 masquerade, DS-Lite TCP and peer addresses, ECMP, policy routes, bridge/VLAN/VRF/VXLAN/macvlan, finite/deprecated address lifetimes and VRRP input guards. QEMU packet gates also passed IPv4/IPv6 INPUT/OUTPUT/FORWARD ACLs, ICMP rejection, established-flow preservation and DNAT/SNAT/masquerade with translated port ranges.",
+      "validation": "Unit and race tests passed. QEMU Linux packet gates passed for IPv4/IPv6 forwarding, NAT44/NAT66 masquerade, DS-Lite TCP and peer addresses, ECMP, policy routes, bridge/VLAN/VRF/VXLAN/macvlan, finite/deprecated address lifetimes and VRRP input guards. QEMU packet gates also passed IPv4/IPv6 INPUT/OUTPUT/FORWARD ACLs, ICMP rejection, established-flow preservation and DNAT/SNAT/masquerade with translated port ranges. Native WireGuard no-NIC QEMU passed encrypted IPv4/IPv6 traffic and outer endpoints, handshake/counters, roaming, multipart replacement and partial failure, journal rollback, PSK/peer removal, foreign-state preservation, UP acknowledgement loss and independent cancellation quarantine. Private key publication passed abrupt-process-exit/retry tests at five durability boundaries. The network API acknowledges apply without echoing oversized observation snapshots.",
       "resource_parity": false
     },
     {
@@ -12230,7 +12230,7 @@
     {
       "package": "internal/legacyconfig",
       "status": "strict_partial_compiler",
-      "validation": "Pinned legacy schema decoding, supported resource fixtures, unknown/unsupported input rejection, deterministic conversion and parser fuzz tested. It emits no partial result when any input capability is unsupported.",
+      "validation": "Pinned legacy schema decoding, strict field/reference rejection, deterministic conversion and parser fuzz passed. Explicit WAN policies carry replacement notes; PD/information aliasing and dynamic RA/AFTR/B4 peer/gateway graphs passed the public Runtime boundary with expiry and fencing. CLI policy migration writes no configuration on compile failure. Unsupported inputs still reject the entire graph.",
       "resource_parity": false
     },
     {
@@ -12242,7 +12242,7 @@
     {
       "package": "internal/protocol/aftr",
       "status": "integrated_supervised_worker",
-      "validation": "Pure/race, parser fuzz and isolated UDP/TCP tests passed. Actual two-binary no-NIC QEMU gate passed independent DNS AAAA resolution, in-place ip6tnl update, exact original TTL retention during DNS outage, expiry withdrawal, underlay preservation, recovery without worker restart and configuration removal.",
+      "validation": "Pure/race, parser fuzz and isolated UDP/TCP tests passed. Actual two-binary no-NIC QEMU gate passed independent DNS AAAA resolution, in-place ip6tnl update, B4 /32 peer and IPv4 gateway route, exact original TTL retention during DNS outage, expiry withdrawal, underlay preservation, recovery without worker restart and configuration removal.",
       "resource_parity": false
     },
     {
@@ -12254,7 +12254,13 @@
     {
       "package": "internal/releaseboot",
       "status": "appliance_pid1_selector",
-      "validation": "Unit/race tests passed continuous health window reset, busy confirmation, deadline enforcement, slow payload verification and stale/cancelled attempt handling. A separate no-NIC QEMU gate passed signed baseline-to-trial descriptor execution as actual PID 1, all four worker executable inode checks, committed control health and automatic confirmation followed by clean guest poweroff. A persistent disk across two boots is not covered.",
+      "validation": "Unit/race tests passed continuous health window reset, busy confirmation, deadline enforcement, slow payload verification and stale/cancelled attempt handling. No-NIC QEMU passed signed descriptor execution as actual PID 1, all four worker executable inode checks and automatic confirmation. A separate real two-boot ext4 fixture passed pending-trial fallback to baseline, revision 2 SSH configuration and host-key persistence, distinct kernel boot IDs and kernel reapplication.",
+      "resource_parity": false
+    },
+    {
+      "package": "internal/storage",
+      "status": "appliance_persistent_state_volume",
+      "validation": "Pure injected-backend tests/race/vet passed explicit block-device and ext4 validation, nofollow path walks, mountinfo/FD identity, foreign mount rejection, retry bounds and post-mount error reporting. Real no-NIC QEMU with one private regular-file disk passed production fresh mounts and verified idempotent reentry across signed PID 1 exec, then persistent settings/key/release fallback across a second kernel boot. No disk formatting or discovery is performed by production code.",
       "resource_parity": false
     }
   ]

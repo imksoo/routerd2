@@ -88,7 +88,7 @@ func nativeServerFixture(t *testing.T) {
 		}
 		c.VRF = "dhcpblue"
 		t.Log("native UDP67 serving interface is in VRF dhcpblue")
-	} else if errors.Is(err, unix.EOPNOTSUPP) || errors.Is(err, unix.ENOENT) {
+	} else if (errors.Is(err, unix.EOPNOTSUPP) || errors.Is(err, unix.ENOENT)) && os.Getenv("ROUTERD2_INTEGRATION_REQUIRED") != "1" {
 		t.Logf("VRF driver unavailable; ordinary namespace path still tested: %v", err)
 	} else {
 		t.Fatal(err)
@@ -258,7 +258,7 @@ func serverPair(t *testing.T, serverName, clientName string) (netns.NsHandle, ne
 	if err := netlink.LinkSetNsFd(client, int(ns)); err != nil {
 		t.Fatal(err)
 	}
-	h, err := netlink.NewHandleAt(ns)
+	h, err := netlink.NewHandleAt(ns, unix.NETLINK_ROUTE)
 	if err != nil {
 		t.Fatal(err)
 	}

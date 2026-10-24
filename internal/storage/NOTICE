@@ -1,0 +1,9 @@
+The native state-volume implementation in this directory is original routerd2
+code, distributed under the repository's BSD-3-Clause license.
+
+It uses Linux syscall interfaces through golang.org/x/sys/unix and reads the
+documented Linux mountinfo, fdinfo, and ext4 superblock formats. No util-linux,
+e2fsprogs, systemd, or Linux kernel implementation code is copied or linked into
+this package. Linux filesystem and block drivers remain kernel components under
+their respective licenses. The separate QEMU test fixture may use a host
+e2fsprogs formatter only on a newly created private regular-file test image.

@@ -116,6 +116,76 @@ skipped tests fail the gate.
 `TestDaemonAFTRResolutionAndExpiry`. It uses the same binary build and guest
 isolation path; its independent artifacts are under `dist/aftr-daemon-test`.
 
+`make qemu-ra-dns` requires `TestIsolatedLearnedDNSLifetimes`. Actual RA packets
+must show static DNS precedence, learned RDNSS/DNSSL countdown, live renewal and
+removal, expiry after the update stream closes, and shutdown withdrawal. The
+worker keeps the same process while its configuration generation changes.
+Artifacts are under `dist/ra-dns-test`.
+
+`make qemu-wireguard` selects the fixed native WireGuard suite. It verifies
+IPv4/IPv6 encrypted TCP over both UDP address families, kernel handshake/counters,
+authenticated endpoint roaming, a 2050-prefix multipart peer update, a real
+partial-set interruption with restart rollback, wrong-PSK and peer-removal
+rejection, foreign-peer preservation and cleanup. It uses the same no-NIC guest
+builder and records independent artifacts under
+`dist/wireguard-test`.
+
+## Protocol and process integration gates
+
+```sh
+make qemu-protocols
+```
+
+This target runs eight fixed suites in separate no-NIC guests, using the same
+Alpine kernel and module tree as the appliance. CI runs these packet and
+namespace checks in the `images` job: a hosted runner's kernel may omit VRF or
+other drivers even when it provides root access. The host `go` job still runs
+formatting, unit tests, race detection, vet, both static architecture builds,
+and actual signed-bundle validation.
+
+| Suite | Required test | What it verifies |
+| --- | --- | --- |
+| `daemon-management` | `TestDaemonConfigurationAndRecovery` | Embedded SSH editing, commit and process recovery |
+| `daemon-dhcp-dns` | `TestDaemonDHCPDNSAndOwnershipExpiry` | DHCP leases projected into DNS and ownership expiry |
+| `daemon-bgp` | `TestDaemonBGPFIBAndOwnershipExpiry` | Real BGP workers, kernel FIB and ownership expiry |
+| `dhcp` | `TestIsolatedNativeDHCPAndRA` | DHCPv4, DHCPv6-PD and native router advertisements |
+| `dhcp-server` | `TestIsolatedNativeDHCPServer` | DHCP server VRF binding, lease lifecycle and restart |
+| `vrrp` | `TestIsolatedNativeVRRP` | IPv4/IPv6 VRRP elections and failover |
+| `ra-client` | `TestIsolatedNativeRAClient` | RA learning, independent lifetimes, DAD and restart |
+| `aftr` | `TestIsolatedNativeAFTR` | AFTR resolution over native IPv6 DNS transport |
+
+The three `daemon-*` suites each build and execute the actual `routerd` and
+`routerd-modules` pair. Every suite still uses fresh namespaces inside its
+guest. Missing drivers, namespace failures, skipped tests, renamed or missing
+test functions, incorrect PASS markers and nonzero QEMU exits fail the gate.
+Required DHCP server validation also requires its VRF path; it cannot fall back
+silently to an ordinary interface.
+
+Each suite writes its serial log, test image and hash manifest under
+`dist/<suite>-test/`. To run a single fixed suite, use
+`python3 scripts/qemu-network.py --suite <suite> --image-dir dist/image`.
+These fixtures add no programs or test commands to the production userland.
+
+## Signed release validation
+
+After `make build-linux RELEASE_ID=<id>`, run
+`make release-built-test RELEASE_ID=<id>`. The required integration test inspects
+both actual amd64 and arm64 executable pairs, builds signed bundles and stages
+them through the release store. It verifies ELF identity without executing the
+incoming payload. This gate does not itself boot either architecture.
+
+`make qemu-release-boot` runs the release-boot package's dedicated fixture using
+the same source image kernel/module artifacts. It freshly builds baseline and
+trial binary pairs, then exercises signed selection and confirmation while the
+selected routerd is actual guest PID 1. The independent witness records the
+trial release identity, pinned executable verification, supervisor generation,
+configuration revision and four worker names. The runner requires its exact
+PASS marker, witness and a clean guest poweroff with QEMU exit zero. It writes
+logs, hashes and the manifest to `dist/release-boot-test`.
+
+This PID 1 fixture demonstrates selection and confirmation. It does not certify
+bootloader A/B recovery across two physical boots or provision persistent media.
+
 ## Dependency notices
 
 `make licenses` collects original license, notice, copyright and patent files

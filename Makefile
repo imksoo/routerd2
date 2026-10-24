@@ -10,13 +10,14 @@ CONTAINER_TAG ?= routerd2:dev
 QEMU_TIMEOUT ?= 90
 QEMU_DAEMON_TIMEOUT ?= 180
 QEMU_RELEASE_TIMEOUT ?= 240
+QEMU_STORAGE_TIMEOUT ?= 240
 RELEASE_BUILT_DIR ?= dist/bin
 QEMU_SSH_KEY ?=
 
 LDFLAGS = -s -w -X github.com/imksoo/routerd2/internal/buildinfo.Identity=ROUTERD2-RELEASE-V1:$(RELEASE_ID):END
 BUILD_ARGS = --build-arg GO_VERSION=$(GO_VERSION) --build-arg ALPINE_VERSION=$(ALPINE_VERSION) --build-arg RELEASE_ID=$(RELEASE_ID)
 
-.PHONY: help fmt fmt-check test test-dependencies test-tools race vet check licenses build build-linux release-built-test container container-multi container-smoke apk image qemu-smoke qemu-network qemu-ra-dns qemu-daemon qemu-daemon-aftr qemu-release-boot clean
+.PHONY: help fmt fmt-check test test-dependencies test-tools race vet check licenses build build-linux release-built-test container container-multi container-smoke apk image qemu-smoke qemu-network qemu-wireguard qemu-ra-dns qemu-daemon qemu-daemon-aftr qemu-protocols qemu-release-boot qemu-storage clean
 
 help:
 	@printf '%s\n' \
@@ -29,10 +30,13 @@ help:
 	  'make image             Export Alpine kernel + routerd initramfs' \
 	  'make qemu-smoke        Boot the image in QEMU; optionally verify SSH' \
 	  'make qemu-network      Run native network tests in a separate QEMU guest' \
+	  'make qemu-wireguard    Verify kernel WireGuard encrypted traffic and ownership' \
 	  'make qemu-ra-dns       Verify learned RA DNS expiry and live updates in QEMU' \
 	  'make qemu-daemon       Run the two-binary RA daemon gate in QEMU' \
 	  'make qemu-daemon-aftr  Run the two-binary AFTR daemon gate in QEMU' \
+	  'make qemu-protocols    Verify native protocols and real daemon recovery in QEMU' \
 	  'make qemu-release-boot Verify signed PID 1 selection and confirmation in QEMU' \
+	  'make qemu-storage      Verify persistent state and signed fallback across two boots' \
 	  'make container         Build the scratch OCI runtime image' \
 	  'make container-smoke   Run the container and query its control API' \
 	  'make container-multi   Export an amd64/arm64 OCI archive'
@@ -102,6 +106,9 @@ qemu-smoke:
 qemu-network:
 	$(PYTHON) scripts/qemu-network.py --go '$(GO)' --image-dir $(IMAGE_DIR) --timeout $(QEMU_TIMEOUT)
 
+qemu-wireguard:
+	$(PYTHON) scripts/qemu-network.py --suite wireguard --go '$(GO)' --image-dir $(IMAGE_DIR) --timeout 120
+
 qemu-ra-dns:
 	$(PYTHON) scripts/qemu-network.py --suite ra-dns --go '$(GO)' --image-dir $(IMAGE_DIR) --timeout 75
 
@@ -111,8 +118,16 @@ qemu-daemon:
 qemu-daemon-aftr:
 	$(PYTHON) scripts/qemu-network.py --suite daemon-aftr --go '$(GO)' --image-dir $(IMAGE_DIR) --timeout $(QEMU_DAEMON_TIMEOUT)
 
+qemu-protocols:
+	@set -eu; for suite in daemon-management daemon-dhcp-dns daemon-bgp dhcp dhcp-server vrrp ra-client aftr; do \
+	  $(PYTHON) scripts/qemu-network.py --suite "$$suite" --go '$(GO)' --image-dir $(IMAGE_DIR); \
+	done
+
 qemu-release-boot:
 	$(PYTHON) internal/releaseboot/testdata/qemu-release-boot.py --go '$(GO)' --image-dir $(IMAGE_DIR) --output dist/release-boot-test --timeout $(QEMU_RELEASE_TIMEOUT)
+
+qemu-storage:
+	$(PYTHON) scripts/qemu-storage.py --go '$(GO)' --image-dir $(IMAGE_DIR) --output dist/storage-test --timeout $(QEMU_STORAGE_TIMEOUT)
 
 clean:
 	rm -rf dist

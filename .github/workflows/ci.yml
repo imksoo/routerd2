@@ -27,43 +27,10 @@ jobs:
           cache: true
       - name: Format, test, race detector, and vet
         run: make check
-      - name: Native Linux networking in an isolated namespace
-        run: |
-          # A child user namespace cannot request every host kernel module.
-          # Load each required driver in the runner's initial user namespace;
-          # a missing driver is a hard failure with its module name in the log.
-          uname -r
-          for module in veth bridge 8021q vrf vxlan macvlan nf_tables nft_ct nft_chain_nat nft_masq nft_nat nft_reject_inet nft_log nf_log_syslog ip6_tunnel; do
-            sudo modprobe --verbose "$module"
-          done
-          CGO_ENABLED=0 go test -tags integration -c -o /tmp/routerd2-network.test ./internal/network
-          sudo env ROUTERD2_INTEGRATION_REQUIRED=1 /tmp/routerd2-network.test -test.v
       - name: Static Linux builds
         run: make build-linux RELEASE_ID="${GITHUB_SHA}"
       - name: Signed release bundles from actual amd64 and arm64 binary pairs
         run: make release-built-test RELEASE_ID="${GITHUB_SHA}"
-      - name: Integrated daemon, SSH, DHCP-to-DNS, BGP FIB and ownership expiry
-        run: |
-          CGO_ENABLED=0 go test -tags integration -c -o /tmp/routerd2-daemon.test ./internal/integration
-          sudo env ROUTERD2_INTEGRATION_REQUIRED=1 ROUTERD2_TEST_BIN_DIR="$PWD/dist/bin/linux-amd64" /tmp/routerd2-daemon.test -test.v
-      - name: Native DHCPv4, DHCPv6-PD and router advertisements
-        run: |
-          CGO_ENABLED=0 go test -tags integration -c -o /tmp/routerd2-dhcp.test ./internal/protocol/dhcp4
-          sudo env ROUTERD2_INTEGRATION_REQUIRED=1 /tmp/routerd2-dhcp.test -test.v
-      - name: Native RA lifetimes and AFTR DNS transport
-        run: |
-          for protocol in ra raclient aftr; do
-            CGO_ENABLED=0 go test -tags integration -c -o "/tmp/routerd2-$protocol.test" "./internal/protocol/$protocol"
-            sudo env ROUTERD2_INTEGRATION_REQUIRED=1 "/tmp/routerd2-$protocol.test" -test.v
-          done
-      - name: Native DHCP server leases, renewal, release, decline and recovery
-        run: |
-          CGO_ENABLED=0 go test -tags integration -c -o /tmp/routerd2-dhcpserver.test ./internal/protocol/dhcpserver
-          sudo env ROUTERD2_INTEGRATION_REQUIRED=1 /tmp/routerd2-dhcpserver.test -test.v
-      - name: Native IPv4 and IPv6 VRRP elections and failover
-        run: |
-          CGO_ENABLED=0 go test -tags integration -c -o /tmp/routerd2-vrrp.test ./internal/protocol/vrrp
-          sudo env ROUTERD2_INTEGRATION_REQUIRED=1 /tmp/routerd2-vrrp.test -test.v
       - uses: actions/upload-artifact@v4
         with:
           name: linux-binaries
@@ -88,7 +55,7 @@ jobs:
       - name: Install QEMU
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y qemu-system-x86 openssh-client
+          sudo apt-get install --no-install-recommends -y qemu-system-x86 openssh-client e2fsprogs
       - name: Build and exercise the scratch container
         run: make container-smoke CONTAINER_TAG=routerd2:ci RELEASE_ID="${GITHUB_SHA}"
       - name: Build amd64 and arm64 OCI archive
@@ -105,14 +72,22 @@ jobs:
         run: make qemu-smoke QEMU_TIMEOUT=120 QEMU_SSH_KEY="${RUNNER_TEMP}/routerd2-qemu"
       - name: Verify native forwarding, ACL, NAT, DS-Lite, ECMP, links and HA guards
         run: make qemu-network QEMU_TIMEOUT=120
+      - name: Verify kernel WireGuard IPv4/IPv6 traffic, peer replacement and ownership
+        run: make qemu-wireguard
       - name: Verify learned RA DNS expiry and live updates
         run: make qemu-ra-dns
       - name: Verify RA client configuration and expiry through the real daemon
         run: make qemu-daemon
       - name: Verify AFTR resolution and expiry through the real daemon
         run: make qemu-daemon-aftr
+      - name: Verify native protocols, SSH recovery, DHCP-to-DNS and BGP on the appliance kernel
+        # Run the required packet/namespace gates on our Alpine kernel. Hosted
+        # runner kernels may omit drivers such as VRF; no check is skipped.
+        run: make qemu-protocols
       - name: Verify signed PID 1 release selection and confirmation
         run: make qemu-release-boot
+      - name: Verify persistent configuration, SSH keys and release fallback across two boots
+        run: make qemu-storage
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -121,10 +96,20 @@ jobs:
             dist/apk/
             dist/image/
             dist/network-test/
+            dist/wireguard-test/
             dist/ra-dns-test/
             dist/daemon-test/
             dist/aftr-daemon-test/
+            dist/daemon-management-test/
+            dist/daemon-dhcp-dns-test/
+            dist/daemon-bgp-test/
+            dist/dhcp-test/
+            dist/dhcp-server-test/
+            dist/vrrp-test/
+            dist/ra-client-test/
+            dist/aftr-test/
             dist/release-boot-test/
+            dist/storage-test/
             dist/routerd2.oci.tar
           if-no-files-found: warn
           retention-days: 7

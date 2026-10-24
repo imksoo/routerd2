@@ -17,6 +17,12 @@ import time
 
 PROJECT = Path(__file__).resolve().parent.parent
 SUITES = {
+    "wireguard": {
+        "package": "./internal/network", "binary": "network.test",
+        "test": "TestIsolatedKernelWireGuardOwnershipAndTraffic",
+        "marker": "ROUTERD_WIREGUARD_TEST", "timeout": 120,
+        "description": "native WireGuard encrypted traffic, ownership and recovery",
+    },
     "network": {
         "package": "./internal/network", "binary": "network.test",
         "test": "TestIsolatedKernelForwardingNATAndDSLite",
@@ -42,6 +48,57 @@ SUITES = {
         "marker": "ROUTERD_AFTR_DAEMON_TEST", "timeout": 180,
         "commands": True, "output": "dist/aftr-daemon-test",
         "description": "two-binary daemon AFTR resolution and expiry",
+    },
+    "daemon-management": {
+        "package": "./internal/integration", "binary": "daemon.test",
+        "test": "TestDaemonConfigurationAndRecovery",
+        "marker": "ROUTERD_MANAGEMENT_DAEMON_TEST", "timeout": 180,
+        "commands": True,
+        "description": "two-binary daemon SSH configuration and recovery",
+    },
+    "daemon-dhcp-dns": {
+        "package": "./internal/integration", "binary": "daemon.test",
+        "test": "TestDaemonDHCPDNSAndOwnershipExpiry",
+        "marker": "ROUTERD_DHCP_DNS_DAEMON_TEST", "timeout": 180,
+        "commands": True,
+        "description": "two-binary daemon DHCP-to-DNS and ownership expiry",
+    },
+    "daemon-bgp": {
+        "package": "./internal/integration", "binary": "daemon.test",
+        "test": "TestDaemonBGPFIBAndOwnershipExpiry",
+        "marker": "ROUTERD_BGP_DAEMON_TEST", "timeout": 180,
+        "commands": True,
+        "description": "two-binary daemon BGP FIB and ownership expiry",
+    },
+    "dhcp": {
+        "package": "./internal/protocol/dhcp4", "binary": "dhcp.test",
+        "test": "TestIsolatedNativeDHCPAndRA",
+        "marker": "ROUTERD_DHCP_NATIVE_TEST", "timeout": 110,
+        "description": "native DHCPv4, DHCPv6-PD and router advertisements",
+    },
+    "dhcp-server": {
+        "package": "./internal/protocol/dhcpserver", "binary": "dhcp-server.test",
+        "test": "TestIsolatedNativeDHCPServer",
+        "marker": "ROUTERD_DHCP_SERVER_TEST", "timeout": 140,
+        "description": "native DHCP server leases and recovery",
+    },
+    "vrrp": {
+        "package": "./internal/protocol/vrrp", "binary": "vrrp.test",
+        "test": "TestIsolatedNativeVRRP",
+        "marker": "ROUTERD_VRRP_NATIVE_TEST", "timeout": 110,
+        "description": "native IPv4 and IPv6 VRRP elections and failover",
+    },
+    "ra-client": {
+        "package": "./internal/protocol/raclient", "binary": "ra-client.test",
+        "test": "TestIsolatedNativeRAClient",
+        "marker": "ROUTERD_RA_CLIENT_TEST", "timeout": 100,
+        "description": "native RA client lifetimes, DAD and restart",
+    },
+    "aftr": {
+        "package": "./internal/protocol/aftr", "binary": "aftr.test",
+        "test": "TestIsolatedNativeAFTR",
+        "marker": "ROUTERD_AFTR_NATIVE_TEST", "timeout": 90,
+        "description": "native AFTR DNS transport and expiry",
     },
 }
 
@@ -214,6 +271,21 @@ def publish_artifact(source, destination):
             name.unlink(missing_ok=True)
 
 
+def require_guest_pass(text, suite, exit_status):
+    """A clean exit without this exact executed test is never a passing gate."""
+    lines = [line.strip() for line in text.splitlines()]
+    if exit_status != 0:
+        raise RuntimeError(f"QEMU exited with status {exit_status}")
+    if suite["marker"] + "_PASS" not in lines:
+        raise RuntimeError("guest did not emit its exact PASS marker")
+    if not any(line.startswith("--- PASS: " + suite["test"] + " (") for line in lines):
+        raise RuntimeError("required integration test did not report PASS")
+    if "--- SKIP:" in text or "--- FAIL:" in text or "Kernel panic" in text:
+        raise RuntimeError("guest reported a skipped or failed test")
+    if suite["marker"] + "_FAIL" in text or "ROUTERD_KERNEL_TEST_FAIL" in text:
+        raise RuntimeError("guest initializer reported failure")
+
+
 def run_guest(args, suite, output, manifest, timeout, kernel, archive):
     log_path = archive.parent / "qemu-serial.log"
     command = [
@@ -235,15 +307,18 @@ def run_guest(args, suite, output, manifest, timeout, kernel, archive):
                 # Re-read after exit: the final UART writes may have arrived
                 # between this iteration's read and the process-state check.
                 text = log_path.read_text(errors="replace") if log_path.exists() else ""
-                if process.returncode == 0 and suite["marker"] + "_PASS" in text and suite["marker"] + "_FAIL" not in text and "Kernel panic" not in text:
-                    if hashlib.sha256(archive.read_bytes()).hexdigest() != manifest["initramfs_sha256"]:
-                        raise RuntimeError("private boot archive changed while the guest was running")
-                    manifest["result"] = "passed"
-                    manifest["duration_seconds"] = round(time.monotonic() - started, 2)
-                    print(text[text.find("=== RUN"):])
-                    print(f"QEMU {suite['description']}: PASS ({manifest['duration_seconds']}s)")
-                    break
-                raise RuntimeError(f"QEMU exited with status {process.returncode} without a passing test: {process.stderr.read().decode(errors='replace')}")
+                try:
+                    require_guest_pass(text, suite, process.returncode)
+                except RuntimeError as error:
+                    detail = process.stderr.read().decode(errors="replace")
+                    raise RuntimeError(f"{error}: {detail}") from error
+                if hashlib.sha256(archive.read_bytes()).hexdigest() != manifest["initramfs_sha256"]:
+                    raise RuntimeError("private boot archive changed while the guest was running")
+                manifest["result"] = "passed"
+                manifest["duration_seconds"] = round(time.monotonic() - started, 2)
+                print(text[text.find("=== RUN"):])
+                print(f"QEMU {suite['description']}: PASS ({manifest['duration_seconds']}s)")
+                break
             time.sleep(0.2)
         else:
             raise RuntimeError(f"{args.suite} test exceeded guest timeout")

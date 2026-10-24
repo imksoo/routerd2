@@ -31,6 +31,8 @@ func selectedSuite() (suite, error) {
 		return suite{}, fmt.Errorf("read test suite: %w", err)
 	}
 	switch strings.TrimSpace(string(data)) {
+	case "wireguard":
+		return suite{"/network.test", "TestIsolatedKernelWireGuardOwnershipAndTraffic", "ROUTERD_WIREGUARD_TEST", 75 * time.Second}, nil
 	case "network":
 		return suite{"/network.test", "TestIsolatedKernelForwardingNATAndDSLite", "ROUTERD_NETWORK_TEST", 55 * time.Second}, nil
 	case "ra-dns":
@@ -39,6 +41,22 @@ func selectedSuite() (suite, error) {
 		return suite{"/daemon.test", "TestDaemonRAClientConfigurationAndExpiry", "ROUTERD_DAEMON_TEST", 150 * time.Second}, nil
 	case "daemon-aftr":
 		return suite{"/daemon.test", "TestDaemonAFTRResolutionAndExpiry", "ROUTERD_AFTR_DAEMON_TEST", 150 * time.Second}, nil
+	case "daemon-management":
+		return suite{"/daemon.test", "TestDaemonConfigurationAndRecovery", "ROUTERD_MANAGEMENT_DAEMON_TEST", 150 * time.Second}, nil
+	case "daemon-dhcp-dns":
+		return suite{"/daemon.test", "TestDaemonDHCPDNSAndOwnershipExpiry", "ROUTERD_DHCP_DNS_DAEMON_TEST", 150 * time.Second}, nil
+	case "daemon-bgp":
+		return suite{"/daemon.test", "TestDaemonBGPFIBAndOwnershipExpiry", "ROUTERD_BGP_DAEMON_TEST", 150 * time.Second}, nil
+	case "dhcp":
+		return suite{"/dhcp.test", "TestIsolatedNativeDHCPAndRA", "ROUTERD_DHCP_NATIVE_TEST", 75 * time.Second}, nil
+	case "dhcp-server":
+		return suite{"/dhcp-server.test", "TestIsolatedNativeDHCPServer", "ROUTERD_DHCP_SERVER_TEST", 100 * time.Second}, nil
+	case "vrrp":
+		return suite{"/vrrp.test", "TestIsolatedNativeVRRP", "ROUTERD_VRRP_NATIVE_TEST", 75 * time.Second}, nil
+	case "ra-client":
+		return suite{"/ra-client.test", "TestIsolatedNativeRAClient", "ROUTERD_RA_CLIENT_TEST", 60 * time.Second}, nil
+	case "aftr":
+		return suite{"/aftr.test", "TestIsolatedNativeAFTR", "ROUTERD_AFTR_NATIVE_TEST", 50 * time.Second}, nil
 	default:
 		return suite{}, fmt.Errorf("unrecognized fixed test suite")
 	}
@@ -51,7 +69,7 @@ func run(s suite) error {
 	if err := boot.Bootstrap(boot.Options{Platform: boot.Appliance, RuntimeDir: "/run/routerd", StateDir: "/var/lib/routerd"}); err != nil {
 		return err
 	}
-	if err := kmod.Load([]string{"veth", "bridge", "8021q", "vrf", "vxlan", "macvlan", "nf_tables", "nft_ct", "nft_chain_nat", "nft_masq", "nft_nat", "nft_reject_inet", "nft_log", "nf_log_syslog", "ip6_tunnel"}); err != nil {
+	if err := kmod.Load([]string{"af_packet", "veth", "bridge", "8021q", "vrf", "vxlan", "macvlan", "wireguard", "nf_tables", "nft_ct", "nft_chain_nat", "nft_masq", "nft_nat", "nft_reject_inet", "nft_log", "nf_log_syslog", "ip6_tunnel"}); err != nil {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), s.timeout+5*time.Second)
@@ -76,6 +94,10 @@ func run(s suite) error {
 }
 
 func main() {
+	if os.Getpid() != 1 {
+		fmt.Fprintln(os.Stderr, "kernel fixture initializer requires PID 1; refusing bootstrap or poweroff")
+		os.Exit(1)
+	}
 	s, err := selectedSuite()
 	if err == nil {
 		err = run(s)

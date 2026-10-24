@@ -23,10 +23,12 @@ Alpineのパッケージをビルドとイメージ組み立てに利用しま�
 | VRRPv3 | native IPv4/IPv6 election、VMAC、GARP/NA、preempt、優先度、有限 ownership lease、NoDAD の明示 VIP、Accept_Mode の入力制御 |
 | DNS | 現行 routerd の resolver engine を再利用。UDP/TCP サーバー、cache、zones、query log、UDP/TCP/TLS/HTTPS/QUIC upstream。型付き DHCP リースによる A/PTR を、listener 再起動なしで更新・失効。虚偽の AD bit を防ぐため未実装の local DNSSEC signing は拒否 |
 | BGP | GoBGP v4 を独立 worker に統合。IPv4/IPv6 unicast、policy、選択経路の kernel 投影、recursive next hop、ECMP、期限付き FIB ownership。未解決 next hop は状態に表示し、未解決のまま FIB に入れない |
+| WireGuard | kernel WireGuard を generic netlink で設定。完全な peer set、IPv4/IPv6 endpoint、roaming、公開 handshake/counter 状態。秘密鍵は versioned file と immutable snapshot で管理し、失敗時は所有リンクを DOWN にして復旧 |
 | configuration | YAML / JSON の厳密な検証、candidate、revision・冪等 request ID、永続 journal、プロセス構成と kernel projection の適用、失敗時の旧設定への reconcile |
 | confirmed commit | 確認期限で rollback。未確認のまま control が再起動した場合も復元。復元失敗を成功として扱わない |
 | management | 内蔵 SSH、公開鍵認証、永続 host key、Tab / history 付き候補編集、YAML 一括編集、diff、validate、commit confirmed、ログ参照。OS シェルを呼ばない |
-| migration | `routerd config migrate FILE` で旧 resource YAML の対応部分を変換。未対応・意味が変わる入力は理由を列挙し、部分的な設定を出力しない |
+| migration | `routerd config migrate [--policy FILE] FILE` で旧 resource YAML を変換。WAN の動作変更は resource ごとの明示 policy と review notes で扱う。未対応入力は理由を列挙し、部分的な設定を出力しない |
+| persistent state | appliance PID 1 が明示された既存 ext4 データ領域を mount・検証し、設定・SSH host key・署名付きリリース履歴を保存。起動時にディスクを検出・初期化する処理は含めない |
 | distribution | static amd64/arm64 の 2 バイナリ、依存ライセンス manifest、scratch OCI、Alpine APK、kernel + initramfs、QEMU と namespace 統合試験 |
 | release | Ed25519 署名・SHA-256・ELF/architecture/release identity の検証、immutable な二つの実行ファイルの世代保存、next-boot selection、試行回数・health confirmation・rollback journal。kernel/rootfs の A/B 更新は別の未実装範囲 |
 
@@ -35,7 +37,7 @@ Alpineのパッケージをビルドとイメージ組み立てに利用しま�
 routerd は設定、プロトコル、監視、ログ、管理とその整合性を受け持ちます。
 
 詳細は [アーキテクチャ](docs/architecture.md)、[現行 routerd の機能棚卸し](docs/parity.md)、
-[WAN と AFTR の契約](docs/wan.md)、[署名付きユーザーランド更新](docs/releases.md)、[設定例](examples/) を参照してください。機能棚卸しの `semantic_parity` は個々の旧 resource 契約の互換性を示し、
+[WAN と AFTR の契約](docs/wan.md)、[WireGuard](docs/wireguard.md)、[署名付きユーザーランド更新](docs/releases.md)、[設定例](examples/) を参照してください。機能棚卸しの `semantic_parity` は個々の旧 resource 契約の互換性を示し、
 プロトコル実装やビルドの成功だけでは true にしません。
 
 ## Build and test
@@ -88,8 +90,10 @@ make qemu-smoke
 
 詳細は [images/README.md](images/README.md) と
 [packaging/alpine/README.md](packaging/alpine/README.md) を参照してください。
-現行のQEMUイメージはdirect boot用initramfsです。A/B bootloader、永続state partitionのセットアップ、AMIや各クラウドのGolden Imageはまだ含みません。
-initramfsだけで動かす場合、設定journalとSSH host keyは再起動で消えます。
+現行のQEMUイメージはdirect boot用initramfsです。事前に用意した ext4 データ領域を
+[`boot.state_volume`](internal/runtimeconfig/README.md) で選び、設定 journal・SSH host key・リリース履歴を永続化できます。
+データ領域を指定せず initramfs だけで動かす場合、設定と SSH host key は再起動で消えます。
+A/B bootloader、データ領域の作成、AMIや各クラウドのGolden Imageはまだ含みません。
 コンテナでは `/var/lib/routerd` を永続volumeに置いてください。
 
 Alpineのmuslがカーネル転送経路に挟まるわけではありません。両Goバイナリは `CGO_ENABLED=0` でビルドします。

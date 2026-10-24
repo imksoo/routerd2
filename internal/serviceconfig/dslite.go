@@ -27,10 +27,14 @@ type DSLite struct {
 	TimeoutSeconds int            `json:"timeout_seconds,omitempty"`
 	RetrySeconds   int            `json:"retry_seconds,omitempty"`
 	B4Address      string         `json:"b4_address,omitempty"`
-	MTU            int            `json:"mtu,omitempty"`
-	DefaultRoute   *bool          `json:"default_route,omitempty"`
-	Table          int            `json:"table,omitempty"`
-	Metric         int            `json:"metric,omitempty"`
+	// B4Peer explicitly requests point-to-point addressing. Omitting it keeps
+	// the existing address-only behavior; it never implies a default route.
+	B4Peer       string `json:"b4_peer,omitempty"`
+	MTU          int    `json:"mtu,omitempty"`
+	DefaultRoute *bool  `json:"default_route,omitempty"`
+	RouteGateway string `json:"route_gateway,omitempty"`
+	Table        int    `json:"table,omitempty"`
+	Metric       int    `json:"metric,omitempty"`
 }
 
 type AFTRResolver struct {
@@ -68,10 +72,32 @@ func validateDSLite(s Service) error {
 	if c.MTU != 0 && (c.MTU < 68 || c.MTU > 65495) || c.Table < 0 || uint64(c.Table) > 1<<32-1 || c.Metric < 0 || uint64(c.Metric) > 1<<32-1 {
 		return errors.New("DS-Lite MTU/table/metric is invalid")
 	}
+	b4 := netip.MustParsePrefix("192.0.0.2/32")
 	if c.B4Address != "" {
 		p, err := netip.ParsePrefix(c.B4Address)
 		if err != nil || !p.Addr().Is4() || !p.Addr().IsGlobalUnicast() || p.String() != c.B4Address {
 			return errors.New("DS-Lite b4_address must be a canonical IPv4 host/prefix")
+		}
+		b4 = p
+	}
+	var peer netip.Prefix
+	if c.B4Peer != "" {
+		p, err := netip.ParsePrefix(c.B4Peer)
+		if err != nil || !p.Addr().Is4() || !p.Addr().IsGlobalUnicast() || p.Bits() != 32 || p.String() != c.B4Peer || p.Addr() == b4.Addr() {
+			return errors.New("DS-Lite b4_peer must be a canonical IPv4 unicast /32 distinct from b4_address")
+		}
+		if b4.Bits() != 32 {
+			return errors.New("DS-Lite point-to-point b4_address must use /32 when b4_peer is configured")
+		}
+		peer = p
+	}
+	if c.RouteGateway != "" {
+		gateway, err := netip.ParseAddr(c.RouteGateway)
+		if err != nil || !gateway.Is4() || gateway.String() != c.RouteGateway || !peer.IsValid() || gateway != peer.Addr() {
+			return errors.New("DS-Lite route_gateway must be the canonical IPv4 address of the explicit b4_peer")
+		}
+		if c.DefaultRoute != nil && !*c.DefaultRoute {
+			return errors.New("DS-Lite route_gateway requires default_route to be enabled")
 		}
 	}
 	config := s.AFTRConfig()

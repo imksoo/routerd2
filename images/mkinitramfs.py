@@ -46,7 +46,12 @@ def write_archive(root, output, epoch, compresslevel=9):
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("wb") as raw:
         with gzip.GzipFile(fileobj=raw, filename="", mode="wb", mtime=epoch, compresslevel=compresslevel) as archive:
-            for inode, name in enumerate(sorted(set(paths) | set(devices)), 1):
+            # The kernel's initial rootfs can start with mode 01777. Include
+            # the root directory itself so secure absolute-path traversal is
+            # valid before PID 1 opens a persistent state device or trust file.
+            # Ownership is explicitly root, as for every image entry.
+            entry(archive, 1, ".", stat.S_IFDIR | 0o755, epoch)
+            for inode, name in enumerate(sorted(set(paths) | set(devices)), 2):
                 if name in devices:
                     entry(archive, inode, name, stat.S_IFCHR | 0o600, epoch, rdev=devices[name])
                     continue
@@ -63,7 +68,7 @@ def write_archive(root, output, epoch, compresslevel=9):
                         entry(archive, inode, name, mode, epoch, data=source, size=metadata.st_size)
                 else:
                     raise ValueError(f"unsupported filesystem entry: {name}")
-            entry(archive, len(paths) + len(devices) + 1, "TRAILER!!!", 0, epoch)
+            entry(archive, len(paths) + len(devices) + 2, "TRAILER!!!", 0, epoch)
 
 
 def main():

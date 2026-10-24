@@ -274,11 +274,11 @@ func projectDSLite(p *projection, doc config.Document, runtimeDir, stateDir stri
 		if address == "" {
 			address = "192.0.0.2/32"
 		}
-		if err := addAddressWithOptions(&p.network, c.Tunnel, address, network.AddressOptions{PreferredUntil: snap.ValidUntil, ValidUntil: snap.ValidUntil}); err != nil {
+		if err := addAddressWithOptions(&p.network, c.Tunnel, address, network.AddressOptions{Peer: c.B4Peer, PreferredUntil: snap.ValidUntil, ValidUntil: snap.ValidUntil}); err != nil {
 			return err
 		}
 		if c.DefaultRoute == nil || *c.DefaultRoute {
-			p.network.Routes = append(p.network.Routes, network.Route{Destination: "0.0.0.0/0", Interface: c.Tunnel, Metric: c.Metric, Table: c.Table})
+			p.network.Routes = append(p.network.Routes, network.Route{Destination: "0.0.0.0/0", Interface: c.Tunnel, Gateway: c.RouteGateway, Metric: c.Metric, Table: c.Table})
 		}
 	}
 	return nil

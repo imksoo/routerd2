@@ -41,6 +41,18 @@ func Migrate(data []byte) (config.Document, error) {
 // Compile additionally returns the source-to-native identity mapping. On any
 // issue, the entire Result is zero; callers cannot accidentally apply a subset.
 func Compile(data []byte) (Result, error) {
+	return compile(data, Options{}, false)
+}
+
+// CompileWithOptions accepts explicit, resource-scoped replacement policies for
+// legacy behavior that depended on the host OS. Those replacements are recorded
+// in Mapping.Notes; they are not evidence of automatic semantic compatibility.
+// A policy may not suppress a diagnostic or drop any legacy resource or field.
+func CompileWithOptions(data []byte, options Options) (Result, error) {
+	return compile(data, options, true)
+}
+
+func compile(data []byte, options Options, explicit bool) (Result, error) {
 	raw, resources, d := decode(data)
 	c := &compiler{
 		decoder: d, resources: resources,
@@ -48,13 +60,21 @@ func Compile(data []byte) (Result, error) {
 		byRef:    map[string]*resource{}, aliases: map[string]string{},
 		aliasOwner: map[string]string{}, upAllowed: map[string]bool{},
 		interfaces: map[string]*network.Interface{}, names: map[string]string{},
-		pd: map[string]int{}, mappings: map[string]*Mapping{},
+		pd: map[string]int{}, raClients: map[string]int{}, information: map[string]int{},
+		dynamicTunnels: map[string]int{}, dynamicRoutes: map[string]bool{},
+		mappings: map[string]*Mapping{},
 	}
 	for i := range resources {
 		r := &resources[i]
-		c.byRef[r.Kind+"/"+r.Metadata.Name] = r
+		ref := r.Kind + "/" + r.Metadata.Name
+		if c.byRef[ref] != nil {
+			c.issue(r.node, r.path+".metadata.name", "ambiguous_reference", "kind/name must identify exactly one legacy resource across all API versions")
+		} else {
+			c.byRef[ref] = r
+		}
 		c.mappings[r.ID()] = &Mapping{Resource: r.Kind + "/" + r.Metadata.Name}
 	}
+	c.initOptions(options, explicit)
 	c.collectAliases()
 	for _, r := range resources {
 		switch r.Kind {
@@ -79,6 +99,31 @@ func Compile(data []byte) (Result, error) {
 			c.static4(r)
 		case "VirtualAddress":
 			c.virtualAddress(r)
+		case "DHCPv4Client":
+			c.dhcp4(r)
+		case "DHCPv6PrefixDelegation":
+			c.dhcp6(r)
+		case "IPv6RAAddress":
+			c.raClient(r)
+		}
+	}
+	for _, r := range resources {
+		switch r.Kind {
+		case "IPv6DelegatedAddress":
+			c.delegation(r)
+		case "DHCPv6Information":
+			c.dhcp6Information(r)
+		}
+	}
+	// AFTR references may point to a PD information alias declared later in
+	// the source. Compile all aliases before resolving the tunnel graph.
+	for _, r := range resources {
+		if r.Kind == "DSLiteTunnel" {
+			c.dslite(r)
+		}
+	}
+	for _, r := range resources {
+		switch r.Kind {
 		case "IPv4StaticRoute":
 			s := r.Spec.(api.IPv4StaticRouteSpec)
 			c.allow(r, "destination", "via", "interface", "metric")
@@ -89,22 +134,10 @@ func Compile(data []byte) (Result, error) {
 			c.route(r, s.Destination, s.Via, s.Interface, s.Metric, 6, false)
 		case "IPv4Route":
 			c.ipv4Route(r)
-		case "DHCPv4Client":
-			c.dhcp4(r)
-		case "DHCPv6PrefixDelegation":
-			c.dhcp6(r)
-		}
-	}
-	for _, r := range resources {
-		switch r.Kind {
-		case "IPv6DelegatedAddress":
-			c.delegation(r)
 		case "DSLiteTunnel":
-			c.dslite(r)
+			// Compiled before routes so dynamic tunnel ownership can be joined.
 		case "IPv6RouterAdvertisement":
 			c.reject(r, "", "unsupported_semantics", "legacy dnsmasq RA uses interface address constructors and validLifetime as router lifetime; explicit native PIO/router/DNS lifetime intent is required")
-		case "DHCPv6Information":
-			c.reject(r, "", "unsupported_semantics", "legacy information resources supplement a bound PD client's socket; the equivalent supplementary request lifecycle is not represented by a second standalone native service")
 		case "FirewallZone", "FirewallPolicy", "FirewallRule", "NAT44Rule":
 			// Compiled together to preserve ordered zone jumps and NAT-only hooks.
 		case "EgressRoutePolicy":
@@ -114,14 +147,15 @@ func Compile(data []byte) (Result, error) {
 		case "DNSResolver", "DNSForwarder", "DNSUpstream", "DNSZone":
 			// Compiled together below so graph references are checked.
 		case "Interface", "Link", "VRF", "Bridge", "Sysctl", "IPv4StaticAddress",
-			"VirtualAddress", "IPv4StaticRoute", "IPv6StaticRoute", "IPv4Route",
-			"DHCPv4Client", "DHCPv6PrefixDelegation":
+			"VirtualAddress", "DHCPv4Client", "DHCPv6PrefixDelegation",
+			"IPv6RAAddress", "IPv6DelegatedAddress", "DHCPv6Information":
 		default:
 			c.reject(r, "", "unsupported_kind", "no native migration is implemented for this resource kind; the resource was not discarded")
 		}
 	}
 	c.dns()
 	c.firewall()
+	c.checkOptionsUsed()
 	c.checkAddressOverlap()
 	for _, iface := range c.interfaces {
 		c.document.Network.Interfaces = append(c.document.Network.Interfaces, *iface)
@@ -160,17 +194,24 @@ type staticPrefix struct {
 
 type compiler struct {
 	*decoder
-	resources  []resource
-	document   config.Document
-	byRef      map[string]*resource
-	aliases    map[string]string
-	aliasOwner map[string]string
-	upAllowed  map[string]bool
-	interfaces map[string]*network.Interface
-	names      map[string]string
-	pd         map[string]int
-	mappings   map[string]*Mapping
-	static     []staticPrefix
+	resources      []resource
+	document       config.Document
+	byRef          map[string]*resource
+	aliases        map[string]string
+	aliasOwner     map[string]string
+	upAllowed      map[string]bool
+	interfaces     map[string]*network.Interface
+	names          map[string]string
+	pd             map[string]int
+	raClients      map[string]int
+	information    map[string]int
+	dynamicTunnels map[string]int
+	dynamicRoutes  map[string]bool
+	options        Options
+	policyPaths    map[string]string
+	policyUsed     map[string]bool
+	mappings       map[string]*Mapping
+	static         []staticPrefix
 }
 
 func (c *compiler) reject(r resource, field, code, message string) {

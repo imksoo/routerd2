@@ -205,6 +205,9 @@ func readSolicitation(t *testing.T, fd int) {
 	for time.Now().Before(deadline) {
 		p := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
 		if _, err := unix.Poll(p, 100); err != nil {
+			if err == unix.EINTR {
+				continue
+			}
 			t.Fatal(err)
 		}
 		if p[0].Revents&unix.POLLIN == 0 {
@@ -212,6 +215,9 @@ func readSolicitation(t *testing.T, fd int) {
 		}
 		b, oob := make([]byte, 2048), make([]byte, 256)
 		n, cn, _, from, err := unix.Recvmsg(fd, b, oob, 0)
+		if err == unix.EINTR {
+			continue
+		}
 		if err != nil {
 			t.Fatal(err)
 		}
