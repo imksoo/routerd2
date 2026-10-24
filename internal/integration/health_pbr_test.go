@@ -353,7 +353,13 @@ func TestDaemonHealthPBRFailoverAndRecovery(t *testing.T) {
 	if err := f.control.Do(ctx, "POST", "/v1/services/state", expiring, nil); err != nil {
 		t.Fatal(err)
 	}
-	waitPrimary(false)
+	until(t, 12*time.Second, func() bool {
+		clock, err := bfd.ReadClock()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return uint64(clock.BoottimeNanoseconds) >= observation.ExpiresNanos && !primary()
+	})
 	if m := module("service.health-a"); !m.Ready || m.PID != victim.PID || m.Generation != victim.Generation {
 		t.Fatal("heartbeat loss masked finite fact expiry", m)
 	}
@@ -389,7 +395,13 @@ func TestDaemonHealthPBRFailoverAndRecovery(t *testing.T) {
 	if err := json.Unmarshal(stale.Snapshot, &observation); err != nil || !observation.Active {
 		t.Fatal("missing real healthy sample", err)
 	}
-	waitPrimary(false)
+	until(t, 12*time.Second, func() bool {
+		clock, err := bfd.ReadClock()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return uint64(clock.BoottimeNanoseconds) > observation.ObservedNanos+uint64(2500*time.Millisecond) && !primary()
+	})
 	clock, err = bfd.ReadClock()
 	if err != nil || uint64(clock.BoottimeNanoseconds) >= observation.ExpiresNanos || uint64(clock.BoottimeNanoseconds)-observation.ObservedNanos <= uint64(2500*time.Millisecond) {
 		t.Fatal("max_age withdrawal was not independent of the producer lease", observation, clock, err)
