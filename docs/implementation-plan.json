@@ -10990,8 +10990,9 @@
         "hold/maxAge",
         "durable events",
         "full protocol readiness",
-        "real daemon and kernel acceptance"
-      ]
+        "remaining per-resource lifecycle and protocol acceptance"
+      ],
+      "additional_evidence": "docs/evidence/2026-10-24-pve-health-pbr.md"
     },
     {
       "id": "health-pbr-runtime",
@@ -11001,12 +11002,95 @@
         "NET-02"
       ],
       "status": "partial_implementation",
-      "evidence": "docs/pve-codex-handoff.md",
+      "evidence": "docs/evidence/2026-10-24-pve-health-pbr.md",
       "remaining": [
         "dynamic targetSource",
         "full EgressRoutePolicy",
-        "required real daemon two-WAN packet gate"
+        "natural two-minute sample silence acceptance"
       ]
+    },
+    {
+      "id": "pve-health-pbr-acceptance",
+      "date": "2026-10-24",
+      "status": "minimal_slice_implemented_and_packet_verified",
+      "code_checkpoint": "7046fd5ab23d8860e0a8d70b3d8f47c52ae6da4f",
+      "work_packages": [
+        "CORE-03",
+        "CORE-04",
+        "NET-01",
+        "NET-02"
+      ],
+      "evidence": "docs/evidence/2026-10-24-pve-health-pbr.md",
+      "implemented": [
+        "Required isolated real-supervisor/control/network/health two-WAN TCP/UDP failover gate with PCAP and socket mark counters",
+        "Snapshot-pinned bounded resource state/reason API and operational show resources CLI",
+        "Generation watermark across dynamic worker removal/re-addition and control recovery",
+        "Routing-only Netlink lookup for minimal kernels; nsfs mount roots; cancellation-safe VRRP withdrawal"
+      ],
+      "validation": [
+        {
+          "command": "umask 022; make check",
+          "result": "pass",
+          "covers": [
+            "unit",
+            "dependency expr",
+            "Python tools",
+            "race",
+            "vet"
+          ]
+        },
+        {
+          "suite": "TestScoped TCP/HTTP/DNS/ICMP",
+          "result": "pass",
+          "environment": "Linux VM, required raw socket privilege"
+        },
+        {
+          "command": "make build-linux",
+          "result": "pass",
+          "architectures": [
+            "linux/amd64",
+            "linux/arm64"
+          ],
+          "cgo_enabled": false
+        },
+        {
+          "command": "make check-health-pbr",
+          "result": "pass",
+          "clean_code_checkpoint": true,
+          "manifest": "docs/evidence/2026-10-24-pve-health-pbr/result.json"
+        },
+        {
+          "suite": "daemon-health-pbr",
+          "result": "pass",
+          "environment": "QEMU no external NIC",
+          "covers": [
+            "independent WANs",
+            "real TCP/UDP",
+            "packet capture assertions",
+            "socket mark counters",
+            "health/control/network restart",
+            "old control-generation notification rejection",
+            "finite observation expiry with duplicate replay",
+            "confirmed rollback",
+            "resource status vs kernel routes"
+          ]
+        },
+        {
+          "suites": "QEMU network and 13 protocol suites",
+          "result": "individual_suite_passes",
+          "aggregate_first_run": "failed_then_fixed",
+          "manifests": "docs/evidence/2026-10-24-pve-health-pbr/qemu-manifests.json"
+        }
+      ],
+      "remaining": [
+        "Natural two-minute silence expiry (current gate injects a shorter real observation lifetime)",
+        "CORE-03 hold/maxAge, general status references and remaining protocol lifecycle",
+        "CORE-04 durable journal/outbox/cursor and supervisor-lifetime authority",
+        "NET-01 dynamic targetSource and legacy HealthCheck import",
+        "NET-02 complete priority/mark/hash/hysteresis and IPv6/source policies",
+        "Final same-tree aggregate QEMU run and release/storage/hardware/cloud profile qualification"
+      ],
+      "parity_flags_unchanged": true
     }
   ]
 }

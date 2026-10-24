@@ -2,6 +2,15 @@
 
 更新日: 2026-10-24（Asia/Tokyo）
 対象: `https://github.com/imksoo/routerd2`
+
+**PVE検証後の追記:** コードcheckpointは `7046fd5` へ進んだ。
+`make check`、権限付きHealth実ソケット（raw ICMP含む）、二WANの実daemon/TCP/UDP/PCAP、
+worker再起動・古い通知・fact expiry・confirmed rollbackを検証した。
+`make check-health-pbr` とresource条件・保留理由のAPI/CLIを追加し、
+最小kernelのNetlink lookup、generation再利用、nsfs mountinfo、VRRP停止を修正した。
+詳細・未検証・残作業は [PVE検証証跡](evidence/2026-10-24-pve-health-pbr.md) と実装計画を参照。
+以下は前環境からの引き継ぎ時点の履歴である。
+
 実装コードのチェックポイント: **`834038edc7a9bf50e36f4f06fcf125f0aa2d88ff`**（mainへ反映済み）
 
 ## 1. 依頼と進め方

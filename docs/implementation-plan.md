@@ -16,10 +16,20 @@ CORE-01 / CORE-02 と CORE-03 の static graph 部分に着手した。
 
 仕様・制約は [resource-program.md](resource-program.md)、比較根拠は [feature-contracts.md](feature-contracts.md) に記録した。
 三値論理と有限 protocol fact の基本型・epoch/期限チェック、SSH candidate の owner cascade を実装した。`when` / `ready_when` の runtime 投影、supervisor / 既存 protocol snapshot の有限 fact 変換、依存 subtree の停止・再開を追加した。詳細と検証範囲は [runtime conditions evidence](evidence/2026-10-24-runtime-conditions.md) を参照。hold/maxAge、全 protocol の readiness、durable event は CORE-03 / CORE-04 の残作業とする。
-startup store/revision の boot 選択、独立 projection generation、多 binary runtime manifest も残っている。
+startup store/revision の boot 選択、projection generation の永続復元、多 binary runtime manifest も残っている。
 CORE-01 / CORE-02 / CORE-03 の全受入条件を完了扱いにはせず、既存 `parity.json` の判定を上げない。
 
-Health worker（ICMP/TCP/DNS/HTTP）と最小 Health→PBR 投影を追加した。TCP/HTTP/DNS の実 loopback probe と coordinator の障害・復旧 fixture は local PASS。二 WAN の実 daemon / packet gate は未完了。続行手順は [PVE Codex handoff](pve-codex-handoff.md) に保存した。
+Health worker（ICMP/TCP/DNS/HTTP）と最小 Health→PBR 投影を追加した。
+PVE VMではraw ICMPを含む実socket、二WANの実supervisor/control/network/health worker、
+実TCP/UDP・PCAP、worker再起動、旧通知、有限fact expiry、confirmed rollbackがPASS。
+必須local targetは `make check-health-pbr`。同じ最小構成は外部NICなしQEMUでもPASS。
+resourceごとの条件・保留理由を `show resources` / snapshot固定のbounded APIへ公開した。
+generation再利用、最小kernelのNetlink lookup、nsfs mountinfo、VRRP停止の不具合も修正した。
+コードcheckpointは `7046fd5`。
+[PVE検証証跡](evidence/2026-10-24-pve-health-pbr.md) に実装済み・検証済み・未検証を区別して記録する。
+これは完全なEgressRoutePolicyやNET-01/NET-02全体の合格ではない。
+targetSource、full priority/mark/hash/hysteresis、hold/maxAge、durable event等の残作業は継続する。
+続行手順は [PVE Codex handoff](pve-codex-handoff.md) を参照。
 
 ## 1. 基準と到達点
 
