@@ -90,6 +90,7 @@ func (e *Engine) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/version", func(w http.ResponseWriter, r *http.Request) { localapi.JSON(w, 200, buildinfo.Current()) })
 	e.configurationViewRoutes(mux)
 	e.observationRoutes(mux)
+	e.eventStoreRoutes(mux)
 	e.derivedRoutes(mux)
 	e.protocolEventRoutes(mux)
 	mux.HandleFunc("GET /v1/config", func(w http.ResponseWriter, r *http.Request) { e.writeConfigurationState(w, e.State(), false) })
@@ -177,6 +178,9 @@ func Serve(ctx context.Context, dir, stateDir, bootstrap string, ready func()) e
 		return fmt.Errorf("open durable event journal: %w", err)
 	}
 	defer e.journal.Close()
+	if err := e.RefreshEventStore(ctx); err != nil {
+		return fmt.Errorf("inspect durable event journal: %w", err)
+	}
 	e.runtime = runtimeplan.New(dir, stateDir, networkClient, instanceID)
 	// Protocol readiness may require an effects acknowledgement. Start the
 	// private API before reconciliation, while public health remains false.
@@ -214,6 +218,9 @@ func Serve(ctx context.Context, dir, stateDir, bootstrap string, ready func()) e
 	}
 	monitorCtx, stop := context.WithCancel(ctx)
 	defer stop()
+	storageDone := make(chan struct{})
+	go func() { defer close(storageDone); e.monitorEventStore(monitorCtx) }()
+	defer func() { stop(); <-storageDone }()
 	eventDone := make(chan struct{})
 	go func() {
 		defer close(eventDone)

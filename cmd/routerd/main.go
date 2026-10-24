@@ -99,6 +99,8 @@ func run(args []string) error {
 		return serve(b)
 	case "status":
 		return remote(args[1:], "show status")
+	case "events":
+		return eventCommand(args[1:], os.Stdout)
 	case "logs":
 		return logs(args[1:])
 	case "cli":
@@ -141,6 +143,8 @@ func usage() error {
   routerd status [--runtime-dir /run/routerd]
   routerd cli [--runtime-dir /run/routerd]
   routerd logs [--module NAME --level INFO --limit 100 --runtime-dir ...]
+  routerd events export --output FILE [--runtime-dir DIR --timeout 2m]
+  routerd events verify FILE
   routerd network show [--runtime-dir /run/routerd]
   routerd modules restart NAME [--runtime-dir /run/routerd]
   routerd config show [--runtime-dir /run/routerd]

@@ -59,8 +59,9 @@ type RuleHealth struct {
 }
 
 type JournalHealth struct {
-	Pending   int    `json:"pending"`
-	LastError string `json:"last_error,omitempty"`
+	Pending   int              `json:"pending"`
+	LastError string           `json:"last_error,omitempty"`
+	Storage   EventStoreHealth `json:"storage"`
 }
 
 // ConfigurationMetadata is also the bounded success response for a commit or
@@ -95,6 +96,10 @@ func (e *Engine) healthForState(s State) Health {
 	h.Derived.LastError = s.DerivedError
 	h.ProtocolEvents.LastError = s.ProtocolEventError
 	e.mu.Lock()
+	h.EventJournal.Storage = e.eventStore
+	if e.eventStore.LastError != "" {
+		h.Healthy = false
+	}
 	if e.protocolRelays != nil {
 		h.ProtocolEvents.RetirementStatus = e.protocolRelays.Status()
 	}
@@ -121,6 +126,9 @@ func (e *Engine) healthForState(s State) Health {
 		h.Healthy = false
 	}
 	if s.EventJournalError != "" {
+		h.Healthy = false
+	}
+	if s.EventStoreError != "" {
 		h.Healthy = false
 	}
 	if c := s.Confirmation; c != nil {
@@ -201,7 +209,7 @@ func (e *Engine) configurationViewRoutes(mux *http.ServeMux) {
 }
 
 func (e *Engine) writeConfigurationState(w http.ResponseWriter, s State, mutation bool) {
-	if s.EventJournalError != "" || s.EventRuleError != "" || s.DerivedError != "" || s.ProtocolEventError != "" {
+	if s.EventJournalError != "" || s.EventStoreError != "" || s.EventRuleError != "" || s.DerivedError != "" || s.ProtocolEventError != "" {
 		s.Healthy = false
 	}
 	encoded, err := json.Marshal(s)

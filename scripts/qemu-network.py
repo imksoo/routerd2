@@ -76,6 +76,13 @@ SUITES = {
         "commands": True,
         "description": "durable health events, finite DerivedEvent/EventRule and retired queue recovery",
     },
+    "daemon-event-archive": {
+        "package": "./internal/integration", "binary": "daemon.test",
+        "test": "TestDaemonEventArchiveAndCapacity",
+        "marker": "ROUTERD_EVENT_ARCHIVE_DAEMON_TEST", "timeout": 150,
+        "commands": True,
+        "description": "live event capacity inspection and private verified CLI history export",
+    },
     "daemon-stopped-health": {
         "package": "./internal/integration", "binary": "daemon.test",
         "test": "TestDaemonStoppedHealthHistoryWithoutReactivation",

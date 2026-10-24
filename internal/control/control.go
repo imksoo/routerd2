@@ -73,6 +73,7 @@ type State struct {
 	ConfigDigest                string `json:"config_digest,omitempty"`
 	ConfigBytes                 int    `json:"config_bytes,omitempty"`
 	EventJournalError           string `json:"event_journal_error,omitempty"`
+	EventStoreError             string `json:"event_store_error,omitempty"`
 	EventRuleError              string `json:"event_rule_error,omitempty"`
 	DerivedError                string `json:"derived_error,omitempty"`
 	ProtocolEventError          string `json:"protocol_event_error,omitempty"`
@@ -125,6 +126,7 @@ type Engine struct {
 	events         []Event
 	runtime        *runtimeplan.Runtime
 	journal        *events.Store
+	eventStore     EventStoreHealth
 	eventFlushMu   sync.Mutex
 	rules          *eventcontroller.Controller
 	derived        *derivedcontroller.Controller
@@ -144,7 +146,7 @@ func (e *Engine) State() State {
 	e.mu.Lock()
 	s := e.state
 	e.mu.Unlock()
-	if s.EventJournalError != "" || s.EventRuleError != "" || s.DerivedError != "" || s.ProtocolEventError != "" {
+	if s.EventJournalError != "" || s.EventStoreError != "" || s.EventRuleError != "" || s.DerivedError != "" || s.ProtocolEventError != "" {
 		s.Healthy = false
 	}
 	if e.runtime != nil {
@@ -270,12 +272,15 @@ func (e *Engine) Commit(ctx context.Context, r CommitRequest) (State, error) {
 // Confirm makes an already-applied candidate durable across future restarts.
 // Revision and request ID tie the acknowledgement to that exact candidate.
 func (e *Engine) Confirm(r ConfirmRequest) (State, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	_ = e.RefreshEventStore(ctx)
+	cancel()
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if r.Revision != e.state.Revision || r.RequestID == "" || r.RequestID != e.state.LastRequestID {
 		return e.state, fmt.Errorf("%w: confirmation does not identify the current revision", ErrConflict)
 	}
-	if !e.state.Healthy || e.state.EventRuleError != "" || e.state.DerivedError != "" || e.state.ProtocolEventError != "" {
+	if !e.state.Healthy || e.state.EventStoreError != "" || e.state.EventRuleError != "" || e.state.DerivedError != "" || e.state.ProtocolEventError != "" {
 		return e.state, errors.New("cannot confirm while the applied state is degraded")
 	}
 	if e.runtime != nil && e.runtime.Health().Phase != "ready" {
