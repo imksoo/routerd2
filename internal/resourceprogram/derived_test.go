@@ -21,6 +21,11 @@ func TestDerivedEventValidatesTypedReferencesBeforeProjection(t *testing.T) {
 	if len(p.Native.DerivedEvents[0].References) != 1 || p.Native.DerivedEvents[0].References[0].Resource != "service/wan" {
 		t.Fatal("status references did not bind the stable resource ID", p.Native.DerivedEvents)
 	}
+	source.Resources[0].When = &FactCondition{Fact: "service.wan.ready"}
+	projected, _, err := Project(source, FactSnapshot{})
+	if err != nil || len(projected.Native.DerivedEvents) != 1 || len(projected.Native.Services) != 0 {
+		t.Fatal("inactive provider became an invalid configuration reference", projected, err)
+	}
 	for _, field := range []string{"${HealthCheck/missing.status.phase}", "${HealthCheck/service/wan.status.unknown}", "${Interface/service/wan.status.phase}"} {
 		spec.Inputs[0].Field = field
 		if _, err = Compile(source); err == nil {
