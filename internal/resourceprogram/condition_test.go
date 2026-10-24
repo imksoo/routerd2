@@ -1,7 +1,9 @@
 package resourceprogram
 
 import (
+	"encoding/json"
 	"testing"
+	"time"
 )
 
 func TestConditionValidationRejectsAmbiguousAndUnbounded(t *testing.T) {
@@ -26,6 +28,56 @@ func TestConditionValidationRejectsAmbiguousAndUnbounded(t *testing.T) {
 	}
 	if err := ValidateFactCondition(FactCondition{Fact: "health/wan/up"}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestConditionMaxAgeUsesObservationClockAndRemainsUnknownUnderNot(t *testing.T) {
+	s := newTestStore(t)
+	second := uint64(time.Second)
+	if err := s.Publish(observation(1, second, 20*second, true), second); err != nil {
+		t.Fatal(err)
+	}
+	var condition FactCondition
+	if err := json.Unmarshal([]byte(`{"fact":"health/wan/up","max_age":"2s"}`), &condition); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		now  uint64
+		want Truth
+	}{{second, True}, {3 * second, True}, {3*second + 1, Indeterminate}, {20 * second, Indeterminate}} {
+		value, err := s.EvaluateCondition(condition, tc.now)
+		if err != nil || value != tc.want {
+			t.Fatalf("max_age at %d: got %v/%v, want %v", tc.now, value, err, tc.want)
+		}
+	}
+	negated := FactCondition{Not: &condition}
+	if value, err := s.EvaluateCondition(negated, 4*second); err != nil || value != Indeterminate {
+		t.Fatalf("stale negation authorized work: %v/%v", value, err)
+	}
+	snapshot := s.Snapshot(4 * second)
+	if err := s.Publish(observation(2, 4*second, 20*second, true), 4*second); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.evaluate(&condition) != Indeterminate || s.Snapshot(4*second).evaluate(&condition) != True {
+		t.Fatal("max_age snapshot mixed old and renewed observations")
+	}
+}
+
+func TestConditionMaxAgeValidation(t *testing.T) {
+	for _, raw := range []string{
+		`{"fact":"health/up","max_age":"0s"}`,
+		`{"fact":"health/up","max_age":"-1s"}`,
+		`{"fact":"health/up","max_age":"forever"}`,
+		`{"fact":"health/up","max_age":"999999999999999999h"}`,
+		`{"not":{"fact":"health/up"},"max_age":"1s"}`,
+	} {
+		var condition FactCondition
+		if err := json.Unmarshal([]byte(raw), &condition); err != nil {
+			t.Fatal(err)
+		}
+		if err := ValidateFactCondition(condition); err == nil {
+			t.Fatal("invalid max_age accepted", raw)
+		}
 	}
 }
 

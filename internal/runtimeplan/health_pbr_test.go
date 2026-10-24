@@ -2,6 +2,7 @@ package runtimeplan
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -102,4 +103,70 @@ func TestHealthPBRProjectionFailureFallbackAndRecovery(t *testing.T) {
 	}
 	r = recovered
 	assertPath(false)
+}
+
+func TestHealthPBRMaxAgeDoesNotRenewOnProjectionOrTransportReplay(t *testing.T) {
+	source, err := config.Read("../../examples/health-pbr.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range source.Resources {
+		if source.Resources[i].ID == "primary" {
+			if err := json.Unmarshal([]byte(`{"fact":"service.health-a.active","max_age":"200ms"}`), source.Resources[i].When); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	n := &memoryNetwork{}
+	r := New(t.TempDir(), t.TempDir(), n)
+	r.manager = &observedManager{generation: 1}
+	ctx := context.Background()
+	if err := r.ApplyConfig(ctx, 1, source); err != nil {
+		t.Fatal(err)
+	}
+	clock, err := bfd.ReadClock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := source.Resources[5].Service.HealthConfig()
+	snapshot := health.Snapshot{Resource: cfg.Resource, Interface: cfg.Interface, BootID: clock.BootID, ObservedNanos: uint64(clock.BoottimeNanoseconds), ExpiresNanos: uint64(clock.BoottimeNanoseconds) + uint64(cfg.Freshness()), Active: true, State: old.State{Phase: old.PhaseHealthy, ConsecutivePassed: cfg.HealthyThreshold}}
+	u := update(t, r, "service.health-a", 1, snapshot)
+	if err := r.Accept(ctx, u); err != nil {
+		t.Fatal(err)
+	}
+	reconcileConditions(t, r)
+	hasPrimary := func() bool {
+		for _, route := range n.applied.Routes {
+			if route.Table == 100 && route.Metric == 100 {
+				return true
+			}
+		}
+		return false
+	}
+	if !hasPrimary() {
+		t.Fatal("fresh sample did not activate primary")
+	}
+	time.Sleep(250 * time.Millisecond)
+	u.Sequence++
+	if err := r.Accept(ctx, u); err != nil {
+		t.Fatal(err)
+	}
+	reconcileConditions(t, r)
+	if hasPrimary() {
+		t.Fatal("projection or replay renewed the original observation time")
+	}
+	clock, err = bfd.ReadClock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot.ObservedNanos = uint64(clock.BoottimeNanoseconds)
+	snapshot.ExpiresNanos = snapshot.ObservedNanos + uint64(cfg.Freshness())
+	u = update(t, r, "service.health-a", 3, snapshot)
+	if err := r.Accept(ctx, u); err != nil {
+		t.Fatal(err)
+	}
+	reconcileConditions(t, r)
+	if !hasPrimary() {
+		t.Fatal("new probe observation did not recover primary")
+	}
 }
