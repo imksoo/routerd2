@@ -14,6 +14,7 @@ import (
 type FactCondition struct {
 	Fact   string          `json:"fact,omitempty"`
 	MaxAge string          `json:"max_age,omitempty"`
+	For    string          `json:"for,omitempty"`
 	All    []FactCondition `json:"all,omitempty"`
 	Any    []FactCondition `json:"any,omitempty"`
 	Not    *FactCondition  `json:"not,omitempty"`
@@ -66,6 +67,12 @@ func ValidateFactCondition(c FactCondition) error {
 				return errors.New("max_age requires a fact and a positive finite duration")
 			}
 		}
+		if node.For != "" {
+			hold, err := time.ParseDuration(node.For)
+			if err != nil || hold <= 0 {
+				return errors.New("for requires a positive finite duration")
+			}
+		}
 		for _, operand := range node.All {
 			if err := walk(operand, depth+1); err != nil {
 				return err
@@ -87,6 +94,8 @@ func ValidateFactCondition(c FactCondition) error {
 // EvaluateCondition uses a single fact-store read lock for the entire tree:
 // concurrent worker updates cannot mix multiple projection snapshots within
 // one readiness decision. Missing or expired facts remain indeterminate.
+// Holds require ConditionTimeline.Observe before evaluating the snapshot;
+// this stateless convenience method leaves unevaluated holds indeterminate.
 func (s *FactStore) EvaluateCondition(c FactCondition, nowNanos uint64) (Truth, error) {
 	if err := ValidateFactCondition(c); err != nil {
 		return Indeterminate, err

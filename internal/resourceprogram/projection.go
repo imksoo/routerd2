@@ -7,16 +7,22 @@ import "time"
 type FactSnapshot struct {
 	values   map[string]Truth
 	observed map[string]uint64
+	expires  map[string]uint64
+	origins  map[string]factOrigin
+	held     map[string]timedTruth
+	scope    FactScope
 	nowNanos uint64
 }
 
 func (s *FactStore) Snapshot(nowNanos uint64) FactSnapshot {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	out := FactSnapshot{values: make(map[string]Truth, len(s.facts)), observed: make(map[string]uint64, len(s.facts)), nowNanos: nowNanos}
+	out := FactSnapshot{values: make(map[string]Truth, len(s.facts)), observed: make(map[string]uint64, len(s.facts)), expires: make(map[string]uint64, len(s.facts)), origins: make(map[string]factOrigin, len(s.facts)), scope: s.scope, nowNanos: nowNanos}
 	for key := range s.facts {
 		out.values[key] = s.factValueLocked(key, nowNanos)
 		out.observed[key] = s.facts[key].ObservedNanos
+		out.expires[key] = s.facts[key].ExpiresNanos
+		out.origins[key] = factOrigin{s.facts[key].Producer, s.facts[key].Epoch}
 	}
 	return out
 }
@@ -26,6 +32,9 @@ func (s FactSnapshot) Value(key string) Truth { return s.values[key] }
 func (s FactSnapshot) evaluate(c *FactCondition) Truth {
 	if c == nil {
 		return True
+	}
+	if c.For != "" {
+		return s.held[conditionIdentity(c)].value
 	}
 	if c.Fact != "" {
 		if c.MaxAge != "" {
@@ -84,6 +93,9 @@ func Project(source Program, facts FactSnapshot) (Plan, map[string]ResourceState
 		gate := state.When
 		if gate != True {
 			state.Reason = conditionReason("when", gate)
+			if facts.pendingHold(r.When) {
+				state.Reason = "when_hold"
+			}
 		}
 		for _, dep := range full.Dependencies[id] {
 			gate = All(gate, states[dep].Ready)
@@ -100,6 +112,9 @@ func Project(source Program, facts FactSnapshot) (Plan, map[string]ResourceState
 			state.Ready = facts.evaluate(r.ReadyWhen)
 			if state.Ready != True {
 				state.Reason = conditionReason("ready_when", state.Ready)
+				if facts.pendingHold(r.ReadyWhen) {
+					state.Reason = "ready_when_hold"
+				}
 			}
 			selected.Resources = append(selected.Resources, r)
 		}

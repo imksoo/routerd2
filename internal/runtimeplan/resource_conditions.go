@@ -170,7 +170,7 @@ func (r *Runtime) conditionFactsLocked(source config.Document, revision uint64, 
 			return resourceprogram.FactSnapshot{}, err
 		}
 	}
-	return store.Snapshot(ticks), nil
+	return r.conditionTimeline.Observe(source, store.Snapshot(ticks))
 }
 
 func (r *Runtime) projectProgramLocked(source config.Document, revision uint64, full config.Native, records map[string]serviceconfig.Update, now time.Time) (projection, error) {

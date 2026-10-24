@@ -102,6 +102,7 @@ type Runtime struct {
 	guardBootID          string
 	guardUntilNanos      uint64
 	guardGrants          map[string]guardGrant
+	conditionTimeline    resourceprogram.ConditionTimeline
 	projectionGeneration uint64
 	revision             uint64
 	configured           bool
@@ -554,6 +555,11 @@ func (r *Runtime) Accept(ctx context.Context, u serviceconfig.Update) error {
 		}
 		r.recordGuardGrantLocked(u, time.Now())
 		r.records[u.Name] = u
+		// Observe every accepted transition, including flaps that finish between
+		// monitor ticks. This updates only temporal condition state, not effects.
+		if _, err := r.conditionFactsLocked(r.source, r.revision, time.Now()); err != nil {
+			return err
+		}
 		// The serialized reconcile loop stops dependent workers before withdrawing
 		// their network prerequisites. A protocol callback must never do that work.
 		return nil
