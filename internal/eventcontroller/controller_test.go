@@ -195,3 +195,44 @@ func TestPublishedOutputRetryDeduplicatesBeforeCompletion(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestAbsenceOrdersQueuedObservationsAgainstTheirOriginalDeadline(t *testing.T) {
+	for _, late := range []bool{false, true} {
+		t.Run(map[bool]string{false: "expected-before-deadline", true: "expected-after-deadline"}[late], func(t *testing.T) {
+			ctx := context.Background()
+			s, err := events.Open(events.Options{Directory: filepath.Join(t.TempDir(), "events")})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s.Close()
+			rule := declaration(t, "absence", 0)
+			rule.Spec.Pattern.Trigger = "fixture.input"
+			rule.Spec.Pattern.Expected = "fixture.expected"
+			c := New(s)
+			if err = c.Sync(ctx, 1, []resourceprogram.EventRule{rule}); err != nil {
+				t.Fatal(err)
+			}
+			appendInput(t, s, "trigger")
+			if err = c.Step(ctx, epoch); err != nil {
+				t.Fatal(err)
+			}
+			at := epoch.Add(500 * time.Millisecond)
+			if late {
+				at = epoch.Add(2 * time.Second)
+			}
+			if _, err = s.Append(ctx, events.Event{ID: "expected", Topic: "fixture.expected", Source: "fixture", ObservedAt: at}); err != nil {
+				t.Fatal(err)
+			}
+			if err = c.Step(ctx, epoch.Add(3*time.Second)); err != nil {
+				t.Fatal(err)
+			}
+			want := 0
+			if late {
+				want = 1
+			}
+			if got := outputCount(t, s); got != want {
+				t.Fatalf("absence emissions %d, want %d", got, want)
+			}
+		})
+	}
+}
