@@ -12,6 +12,54 @@ import (
 	"github.com/imksoo/routerd2/internal/events"
 )
 
+func TestProducerInitialEmissionNeedsNoHistoricalInputCursor(t *testing.T) {
+	ctx := context.Background()
+	opts := events.Options{Directory: filepath.Join(t.TempDir(), "events")}
+	s, err := events.Open(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	cp, err := s.ProducerCheckpoint(ctx, "derived")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := compile(t, "0s", true)
+	r, err := p.Advance(cp.State, snapshot(t, "boot/config", "worker", "Up", true, second, 5*second), false)
+	if err != nil || len(r.Emissions) != 1 {
+		t.Fatal(r, err)
+	}
+	body, err := json.Marshal(r.Emissions[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.ProducerTransition(ctx, "derived", cp, r.State, []events.Job{{Key: r.Emissions[0].ID, Payload: body}}); err != nil {
+		t.Fatal(err)
+	}
+	if records, err := s.List(ctx, 0, 10); err != nil || len(records) != 0 {
+		t.Fatal("current evaluation fabricated input history", records, err)
+	}
+	if err = s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = events.Open(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cp, err = s.ProducerCheckpoint(ctx, "derived")
+	if err != nil {
+		t.Fatal(err)
+	}
+	work, err := s.ProducerPending(ctx, "derived", 10)
+	if err != nil || len(work) != 1 || work[0].Key != r.Emissions[0].ID || !bytes.Equal(work[0].Payload, body) {
+		t.Fatal("initial output lost across reopen", work, err)
+	}
+	current, err := p.Advance(cp.State, snapshot(t, "boot/config", "worker", "Up", true, 5*second, 5*second), false)
+	if err != nil || current.Status.Asserted != nil || len(current.Emissions) != 0 {
+		t.Fatal("initial historical output restored current Up", current, err)
+	}
+}
+
 func TestDurableHoldTimerRetriesAtomicallyAndRequiresCurrentInput(t *testing.T) {
 	ctx := context.Background()
 	options := events.Options{Directory: filepath.Join(t.TempDir(), "journal")}

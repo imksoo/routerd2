@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -83,6 +84,46 @@ func TestProducerBootstrapIsIndependentOfHistoricalInput(t *testing.T) {
 	job.Payload = json.RawMessage(`{"asserted":false}`)
 	if err = s.ProducerTransition(ctx, "derived", next, state, []Job{job}); !errors.Is(err, ErrConflict) {
 		t.Fatal("changed output identity accepted", err)
+	}
+}
+
+func TestProducerSQLiteFullRollsBackStateAndOutput(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(Options{Directory: filepath.Join(t.TempDir(), "events")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	cp, err := s.ProducerCheckpoint(ctx, "producer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pages int64
+	if err = s.db.QueryRow(`PRAGMA page_count`).Scan(&pages); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.db.Exec(fmt.Sprintf(`PRAGMA max_page_count=%d`, pages)); err != nil {
+		t.Fatal(err)
+	}
+	state, _ := json.Marshal(map[string]string{"large": strings.Repeat("x", 32000)})
+	job := Job{Key: "output-before-state", Payload: json.RawMessage(`{}`)}
+	err = s.ProducerTransition(ctx, "producer", cp, state, []Job{job})
+	var code interface{ Code() int }
+	if !errors.As(err, &code) || code.Code()&255 != 13 {
+		t.Fatal("expected actual SQLITE_FULL", err)
+	}
+	current, err := s.ProducerCheckpoint(ctx, "producer")
+	if err != nil || current.Version != cp.Version || !bytes.Equal(current.State, cp.State) {
+		t.Fatal("disk full committed partial state", current, err)
+	}
+	if work, err := s.ProducerPending(ctx, "producer", 10); err != nil || len(work) != 0 {
+		t.Fatal("disk full leaked output", work, err)
+	}
+	if _, err = s.db.Exec(`PRAGMA max_page_count=2147483646`); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.ProducerTransition(ctx, "producer", current, state, []Job{job}); err != nil {
+		t.Fatal("disk recovery left producer writer or accounting poisoned", err)
 	}
 }
 
