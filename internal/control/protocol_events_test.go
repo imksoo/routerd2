@@ -2,6 +2,8 @@ package control
 
 import (
 	"context"
+	"errors"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +17,25 @@ import (
 
 func protocolProbe(id string) events.Event {
 	return events.FromDaemon("health/wan/"+strings.Repeat(id, 32), daemonapi.DaemonEvent{Time: time.Date(2026, 10, 24, 0, 0, 0, 0, time.UTC), Type: "routerd.healthcheck.wan.passed", Daemon: daemonapi.DaemonRef{Name: old.DaemonKind + "-wan", Kind: old.DaemonKind, Instance: "wan"}, Resource: &daemonapi.ResourceRef{APIVersion: api.NetAPIVersion, Kind: "HealthCheck", Name: "wan"}, Reason: "HealthCheckProbe", Severity: daemonapi.SeverityInfo})
+}
+
+func TestProtocolDeliveryFailureIsVisibleAndDoesNotClearAnotherProducer(t *testing.T) {
+	e, _ := fixture(t)
+	e.setProtocolErrorLocked("service.wan", errors.New("injected journal failure"))
+	e.setProtocolErrorLocked("service.lan", errors.New("injected second failure"))
+	e.setProtocolErrorLocked("service.wan", nil)
+	if e.State().Healthy {
+		t.Fatal("unrecovered producer was hidden")
+	}
+	w := httptest.NewRecorder()
+	e.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/v1/health", nil))
+	if w.Code != 503 || !strings.Contains(w.Body.String(), "protocol_events") || !strings.Contains(w.Body.String(), "injected second failure") {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	e.setProtocolErrorLocked("service.lan", nil)
+	if !e.State().Healthy {
+		t.Fatal("completed recovery left control unhealthy")
+	}
 }
 
 func TestProtocolBatchRetriesPartialStorageWithoutDuplicatingOrAcceptingForeignEvents(t *testing.T) {
