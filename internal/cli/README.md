@@ -79,7 +79,12 @@ previous document bodies.
 data not present in an output. The CLI removes omitted zero-value placeholders
 from its JSON output. A reassembled current document is present as `config`;
 an omitted rollback document remains omitted. Service state is available
-separately through `show services` and `show services NAME`. A confirmation
+separately through `show services` and `show services NAME`. In operational
+mode, `show resources` reports each resource's active/readiness conditions,
+blocking reason and prerequisite together with the operator revision and
+projection generation. It follows bounded pages under a single observation
+digest and refuses mixed snapshots. In candidate mode, `show resources`
+continues to display the candidate's source declarations. A confirmation
 acknowledgment may contain metadata only; `show config` retrieves its document.
 
 ## Network observations

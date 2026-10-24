@@ -172,7 +172,12 @@ func (r *Runtime) projectProgramLocked(source config.Document, revision uint64, 
 	// Preserve the existing static fast path. Runtime readiness edges are opt-in
 	// through ready_when; process readiness is not protocol readiness.
 	if !conditionalProgram(source) {
-		return r.projectLocked(full, records, now)
+		p, err := r.projectLocked(full, records, now)
+		p.resources = make(map[string]resourceprogram.ResourceState, len(source.Resources))
+		for _, resource := range source.Resources {
+			p.resources[resource.ID] = resourceprogram.ResourceState{Active: true, Ready: resourceprogram.True, When: resourceprogram.True}
+		}
+		return p, err
 	}
 	facts, err := r.conditionFactsLocked(source, revision, now)
 	if err != nil {

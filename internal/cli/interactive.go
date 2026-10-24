@@ -755,7 +755,7 @@ func (s *interactiveShell) complete(line string, pos int, key rune) (string, int
 	case 1:
 		switch words[0] {
 		case "show":
-			choices = []string{"status", "network", "services", "route-issues", "logging", "logs", "version", "config", "running-config"}
+			choices = []string{"status", "network", "resources", "services", "route-issues", "logging", "logs", "version", "config", "running-config"}
 			if s.candidate != nil {
 				choices = append(choices, "candidate")
 				choices = append(choices, s.pathChoices(token)...)

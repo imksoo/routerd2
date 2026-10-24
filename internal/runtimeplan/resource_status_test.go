@@ -1,12 +1,15 @@
 package runtimeplan
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/localapi"
+	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
 )
 
@@ -28,11 +31,12 @@ func TestResourceObservationPagesRejectMixedSnapshots(t *testing.T) {
 		return w.Body.Bytes()
 	}
 	var page struct {
-		Revision, ProjectionGeneration uint64
-		ObservationID                  string `json:"observation_id"`
-		Total, Offset                  int
-		NextOffset                     *int `json:"next_offset"`
-		Resources                      []struct {
+		Revision             uint64 `json:"revision"`
+		ProjectionGeneration uint64 `json:"projection_generation"`
+		ObservationID        string `json:"observation_id"`
+		Total, Offset        int
+		NextOffset           *int `json:"next_offset"`
+		Resources            []struct {
 			ID    string
 			State resourceprogram.ResourceState
 		}
@@ -40,7 +44,7 @@ func TestResourceObservationPagesRejectMixedSnapshots(t *testing.T) {
 	if err := json.Unmarshal(get("/v1/services/resources", 200), &page); err != nil {
 		t.Fatal(err)
 	}
-	if page.Total != 3000 || page.NextOffset == nil || *page.NextOffset != 128 || len(page.Resources) != 128 || page.Resources[0].ID != "resource-0000" || len(page.ObservationID) != 64 {
+	if page.Revision != 7 || page.ProjectionGeneration != 12 || page.Total != 3000 || page.NextOffset == nil || *page.NextOffset != 128 || len(page.Resources) != 128 || page.Resources[0].ID != "resource-0000" || len(page.ObservationID) != 64 {
 		t.Fatalf("invalid bounded page: %+v", page)
 	}
 	continuation := fmt.Sprintf("/v1/services/resources?offset=128&observation_id=%s", page.ObservationID)
@@ -56,5 +60,23 @@ func TestResourceObservationPagesRejectMixedSnapshots(t *testing.T) {
 	}
 	if len(r.resourceStates) != 3000 || r.revision != 7 || r.projectionGeneration != 12 {
 		t.Fatal("status read mutated source or projection")
+	}
+}
+
+func TestStaticResourcesHaveObservationStates(t *testing.T) {
+	r := New(t.TempDir(), t.TempDir(), &memoryNetwork{})
+	r.manager = &memoryManager{}
+	source := config.FromNative(config.Native{Network: network.Desired{Interfaces: []network.Interface{{Name: "lan0", Addresses: []string{"192.0.2.1/24"}}}}})
+	if err := r.ApplyConfig(context.Background(), 3, source); err != nil {
+		t.Fatal(err)
+	}
+	page, err := r.resourceObservation(0, "")
+	if err != nil || page.Total != len(source.Resources) || page.Total == 0 || page.Revision != 3 {
+		t.Fatalf("missing static projection: %+v %v", page, err)
+	}
+	for _, item := range page.Resources {
+		if !item.State.Active || item.State.Ready != resourceprogram.True || item.State.When != resourceprogram.True || item.State.Reason != "" {
+			t.Fatal("static resource incorrectly withheld", item)
+		}
 	}
 }

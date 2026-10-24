@@ -43,9 +43,11 @@ func (s FactSnapshot) evaluate(c *FactCondition) Truth {
 // ResourceState describes the desired projection, not a kernel acknowledgement.
 // ready_when gates dependents; it never prevents its own resource from starting.
 type ResourceState struct {
-	Active bool  `json:"active"`
-	Ready  Truth `json:"ready"`
-	When   Truth `json:"when"`
+	Active     bool   `json:"active"`
+	Ready      Truth  `json:"ready"`
+	When       Truth  `json:"when"`
+	Reason     string `json:"reason,omitempty"`
+	Dependency string `json:"dependency,omitempty"`
 }
 
 // Project validates every declaration, including inactive ones, before
@@ -66,13 +68,25 @@ func Project(source Program, facts FactSnapshot) (Plan, map[string]ResourceState
 		r := byID[id]
 		state := ResourceState{When: facts.evaluate(r.When)}
 		gate := state.When
+		if gate != True {
+			state.Reason = conditionReason("when", gate)
+		}
 		for _, dep := range full.Dependencies[id] {
 			gate = All(gate, states[dep].Ready)
+			// Explain a false prerequisite ahead of an indeterminate one,
+			// consistent with the three-valued conjunction. Own guards keep
+			// precedence; dependency order is deterministic in the compiler.
+			if state.When == True && states[dep].Ready != True && (state.Dependency == "" || state.Reason == "dependency_indeterminate" && states[dep].Ready == False) {
+				state.Reason, state.Dependency = conditionReason("dependency", states[dep].Ready), dep
+			}
 		}
 		state.Active = gate == True
 		state.Ready = gate
 		if state.Active {
 			state.Ready = facts.evaluate(r.ReadyWhen)
+			if state.Ready != True {
+				state.Reason = conditionReason("ready_when", state.Ready)
+			}
 			selected.Resources = append(selected.Resources, r)
 		}
 		states[id] = state
@@ -82,4 +96,11 @@ func Project(source Program, facts FactSnapshot) (Plan, map[string]ResourceState
 		return Plan{}, nil, err
 	}
 	return plan, states, nil
+}
+
+func conditionReason(prefix string, value Truth) string {
+	if value == False {
+		return prefix + "_false"
+	}
+	return prefix + "_indeterminate"
 }

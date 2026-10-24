@@ -83,9 +83,25 @@ active は DHCP4 / DHCP6-PD / VRRP / BGP / DHCP server の受理済み snapshot 
 Health の有限 sample も同じ active fact に変換する。
 operator revision、boot ID、producer generation / epoch / sequence と CLOCK_BOOTTIME の期限を照合する。
 未観測、期限切れ、worker 世代違いは indeterminate であり、`not` でも成功へ変換しない。
+supervisorの生存中は、削除・再追加したworkerにも以前より大きいgenerationを割り当てる。
+control workerの再起動によるserviceの停止・再取得でもgenerationを再利用せず、古い通知が新しい観測を上書きしない。
 条件付き設定では protocol callback は観測の保存を行い、250ms の coordinator loop が
 変更 worker の停止→network ACK→新 worker 起動の順で適用する。
 確認付き commit は ready_when と適用済み projection の一致も検査する。
+
+`show resources` で、coordinator が最後に選択したresourceごとの `active`、
+三値の `when` / `ready`、保留理由と依存先を確認できる。
+`when_false` / `when_indeterminate`、`dependency_false` / `dependency_indeterminate`、
+`ready_when_false` / `ready_when_indeterminate` を区別する。三値のJSON表現は
+`0=indeterminate`、`1=false`、`2=true`。`ready` は条件の評価値であり、独立したkernel readbackではない。
+併記する `phase` / `last_error` と `show network` で適用結果を確認する。
+
+APIは `GET /v1/services/resources`。ID順の最大128件と全件数、operator revision、
+projection generation、`observation_id`、`next_offset` を返す。
+継続ページには `offset=N&observation_id=DIGEST` を指定する。
+readinessだけが変わってnetwork generationが同じ場合も、観測が変われば409で拒否する。
+CLIは全ページを同じ観測で取得してから表示し、途中の409で混在した結果を出力しない。
+source payload、provenance、秘密鍵、protocol snapshot本体はこのAPIに含めない。
 
 source の inactive 部分も完全に検証する。hold time / maxAge、一般 status reference、
 Health の動的 targetSource、全 protocol の個別 readiness 契約はまだ残っている。

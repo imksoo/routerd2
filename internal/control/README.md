@@ -41,6 +41,23 @@ observations therefore cannot overflow a health response.
 
 ## Network summaries
 
+`GET /v1/services/resources` exposes the coordinator's selected resource
+projection in ID order, 128 resources per page. Each item has `id` and
+`state.{active,ready,when,reason,dependency}`; optional reason/dependency explain
+false or indeterminate guards, readiness and prerequisites. Truth values are
+0 (indeterminate), 1 (false), 2 (true). These are policy conditions, not an
+independent kernel acknowledgement. The page includes runtime `phase`, bounded
+`last_error` with `last_error_truncated`, operator `revision`,
+`projection_generation`, `total`, `offset`, `observation_id` and optional
+`next_offset`. Empty/static programs are supported.
+
+Continuations require `offset=N&observation_id=DIGEST`. The digest covers the
+whole sorted state and phase, including readiness changes that leave the
+network generation unchanged. A changed observation returns 409; invalid,
+unknown or duplicate query parameters return 400. No source payloads,
+provenance or protocol snapshots are exposed. `show resources` assembles the
+pages before writing output and rejects mixed observations.
+
 The network worker's `GET /v1/snapshot` and control's `GET /v1/network` return
 `network.ObservationView`. Small complete observations retain the existing
 Snapshot fields. Every response additionally supplies:
