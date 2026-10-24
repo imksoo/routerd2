@@ -254,7 +254,13 @@ func TestDaemonHealthPBRFailoverAndRecovery(t *testing.T) {
 	}
 	old := healthPBRUpdate(instance("service.health-a"))
 	probeA.Close()
-	waitPrimary(false)
+	// A consumer freshness deadline can withdraw before the producer's third
+	// failed probe, especially under TCG scheduling. Wait for both observations
+	// to prove threshold failure rather than assuming simultaneous publication.
+	until(t, 12*time.Second, func() bool {
+		var sample health.Snapshot
+		return json.Unmarshal(instance("service.health-a").Snapshot, &sample) == nil && sample.State.Phase == "Unhealthy" && !sample.Active && !primary()
+	})
 	traffic("B")
 	record("wan-a-failed")
 	var down health.Snapshot
@@ -329,7 +335,8 @@ func TestDaemonHealthPBRFailoverAndRecovery(t *testing.T) {
 	if err := syscall.Kill(victim.PID, syscall.SIGSTOP); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = syscall.Kill(victim.PID, syscall.SIGCONT) })
+	expiryPID := victim.PID
+	t.Cleanup(func() { _ = syscall.Kill(expiryPID, syscall.SIGCONT) })
 	expiring := healthPBRUpdate(instance("service.health-a"))
 	var observation health.Snapshot
 	if err := json.Unmarshal(expiring.Snapshot, &observation); err != nil {
