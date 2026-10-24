@@ -61,7 +61,7 @@ func validSnapshot(t *testing.T) (Config, Snapshot) {
 	c := testConfig()
 	s := testSession()
 	receiveTest(t, s, peerPacket(wireInit, s.local), int64(time.Second))
-	snapshot := Snapshot{Resource: c.Resource, Interface: c.Interface, SourceAddress: c.SourceAddress, BootID: testBootID, Active: true, UpdatedAt: sampleClock(int64(time.Second)).WallTime, Peers: []PeerState{s.snapshot(true)}}
+	snapshot := Snapshot{Resource: c.Resource, Interface: c.Interface, SourceAddress: c.SourceAddress, BootID: testBootID, Active: true, ObservedNanos: uint64(time.Second), ExpiresNanos: uint64(time.Second) + uint64(StatusLifetime), UpdatedAt: sampleClock(int64(time.Second)).WallTime, Peers: []PeerState{s.snapshot(true)}}
 	if err := ValidateSnapshot(c, snapshot); err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +152,7 @@ func TestExpiredRemoteFactsAndInactiveSnapshotAreValid(t *testing.T) {
 	s := testSession()
 	receiveTest(t, s, peerPacket(wireInit, s.local), int64(time.Second))
 	s.expire(int64(2 * time.Second))
-	snapshot := Snapshot{Resource: c.Resource, Interface: c.Interface, SourceAddress: c.SourceAddress, BootID: testBootID, Active: true, UpdatedAt: sampleClock(int64(2 * time.Second)).WallTime, Peers: []PeerState{s.snapshot(true)}}
+	snapshot := Snapshot{Resource: c.Resource, Interface: c.Interface, SourceAddress: c.SourceAddress, BootID: testBootID, Active: true, ObservedNanos: uint64(2 * time.Second), ExpiresNanos: uint64(2*time.Second) + uint64(StatusLifetime), UpdatedAt: sampleClock(int64(2 * time.Second)).WallTime, Peers: []PeerState{s.snapshot(true)}}
 	if err := ValidateSnapshot(c, snapshot); err != nil {
 		t.Fatalf("expired discriminator should retain remote historical facts: %v", err)
 	}

@@ -84,3 +84,48 @@ func TestCurrentDownStatusNeedsFiniteProducerObservation(t *testing.T) {
 		t.Fatal("old Down was renewed by a read")
 	}
 }
+
+func TestCurrentStatusAtMaximumPeersAndMixedLegacyPhases(t *testing.T) {
+	cfg := Config{Resource: "edge", Interface: "eth0", SourceAddress: "192.0.2.1"}
+	for i := 0; i < MaxPeers; i++ {
+		cfg.Peers = append(cfg.Peers, Peer{Address: fmt.Sprintf("192.0.2.%d", i+2)})
+	}
+	cfg = Normalize(cfg)
+	at := sampleClock(int64(10 * time.Second))
+	sample := Snapshot{Resource: cfg.Resource, Interface: cfg.Interface, SourceAddress: cfg.SourceAddress, BootID: testBootID, Active: true, UpdatedAt: at.WallTime, ObservedNanos: uint64(at.BoottimeNanoseconds), ExpiresNanos: uint64(at.BoottimeNanoseconds) + uint64(StatusLifetime)}
+	states := make([]*session, len(cfg.Peers))
+	for i, peer := range cfg.Peers {
+		s := newSession(peer, uint32(i+1), uint16(49152+i), at.BoottimeNanoseconds, func(uint32) uint32 { return 0 })
+		for _, state := range []uint8{wireDown, wireInit} {
+			if _, _, err := s.receive(control{state: state, multiplier: 3, my: uint32(1000 + i), your: uint32(i + 1), minTx: 300000, minRx: 300000}, peer.Address, at, at.BoottimeNanoseconds); err != nil {
+				t.Fatal(err)
+			}
+		}
+		states[i] = s
+		sample.Peers = append(sample.Peers, s.snapshot(true))
+	}
+	text, known := CurrentStatus(cfg, sample, "peers", at)
+	var decoded []string
+	if !known || len(text.Text) <= 4096 || len(text.Text) > 64<<10 || json.Unmarshal([]byte(text.Text), &decoded) != nil || len(decoded) != MaxPeers {
+		t.Fatal("bounded maximum peer field lost entries", len(text.Text), len(decoded), known)
+	}
+	for _, test := range []struct {
+		state uint8
+		phase string
+	}{{wireUp, "Up"}, {wireDown, "Degraded"}, {wireInit, "Pending"}} {
+		s := *states[0]
+		if test.state == wireInit {
+			s = *newSession(cfg.Peers[0], 1, 49152, at.BoottimeNanoseconds, func(uint32) uint32 { return 0 })
+			if _, _, err := s.receive(control{state: wireDown, multiplier: 3, my: 1000, minTx: 300000, minRx: 300000}, cfg.Peers[0].Address, at, at.BoottimeNanoseconds); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			s.enter(test.state, 0, at.BoottimeNanoseconds)
+		}
+		sample.Peers[0] = s.snapshot(true)
+		got, known := CurrentStatus(cfg, sample, "phase", at)
+		if !known || got.Text != test.phase {
+			t.Fatal(test, got, known)
+		}
+	}
+}

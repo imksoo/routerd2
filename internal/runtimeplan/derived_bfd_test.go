@@ -45,6 +45,7 @@ func bfdDerivedSample(t *testing.T, r *Runtime, up bool, cycle uint64) bfd.Snaps
 		s.Peers[0].UpTransitions = 1 + cycle
 		s.Peers[0].DownTransitions = cycle
 	} else {
+		s.Peers[0].Received = 1
 		s.Peers[0].State = bfd.StateDown
 		s.Peers[0].RemoteState = bfd.StateDown
 		s.Peers[0].DesiredMinTxMicroseconds = 1000000
