@@ -17,7 +17,7 @@ QEMU_SSH_KEY ?=
 LDFLAGS = -s -w -X github.com/imksoo/routerd2/internal/buildinfo.Identity=ROUTERD2-RELEASE-V1:$(RELEASE_ID):END
 BUILD_ARGS = --build-arg GO_VERSION=$(GO_VERSION) --build-arg ALPINE_VERSION=$(ALPINE_VERSION) --build-arg RELEASE_ID=$(RELEASE_ID)
 
-.PHONY: help fmt fmt-check test test-dependencies test-tools race vet check check-health-pbr licenses build build-linux release-built-test container container-multi container-smoke apk image qemu-smoke qemu-network qemu-wireguard qemu-ra-dns qemu-daemon qemu-daemon-aftr qemu-eventrule qemu-derived qemu-protocols qemu-release-boot qemu-storage clean
+.PHONY: help fmt fmt-check test test-dependencies test-tools race vet check check-health-pbr licenses build build-linux release-built-test container container-multi container-smoke apk image qemu-smoke qemu-network qemu-wireguard qemu-ra-dns qemu-daemon qemu-daemon-aftr qemu-eventrule qemu-derived qemu-protocols qemu-release-boot qemu-storage qemu-health-power clean
 
 help:
 	@printf '%s\n' \
@@ -40,6 +40,7 @@ help:
 	  'make qemu-derived      Verify finite live status, derived output and recovery' \
 	  'make qemu-release-boot Verify signed PID 1 selection and confirmation in QEMU' \
 	  'make qemu-storage      Verify persistent state and signed fallback across two boots' \
+	  'make qemu-health-power Verify live queue/ACK recovery after two VM power cuts' \
 	  'make container         Build the scratch OCI runtime image' \
 	  'make container-smoke   Run the container and query its control API' \
 	  'make container-multi   Export an amd64/arm64 OCI archive'
@@ -140,6 +141,9 @@ qemu-release-boot:
 
 qemu-storage:
 	$(PYTHON) scripts/qemu-storage.py --go '$(GO)' --image-dir $(IMAGE_DIR) --output dist/storage-test --timeout $(QEMU_STORAGE_TIMEOUT)
+
+qemu-health-power:
+	$(PYTHON) scripts/qemu-health-power.py --go '$(GO)' --image-dir $(IMAGE_DIR) --output dist/health-power-test --timeout $(QEMU_STORAGE_TIMEOUT)
 
 clean:
 	rm -rf dist
