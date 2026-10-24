@@ -19,7 +19,7 @@ CORE-01 / CORE-02 と CORE-03 の static graph 部分に着手した。
 - 元 routerd の条件16件・依存6件と複数依存・所有権6件を、固定 source に対する実行 fixture にした。
 
 仕様・制約は [resource-program.md](resource-program.md)、比較根拠は [feature-contracts.md](feature-contracts.md) に記録した。
-三値論理と有限 protocol fact の基本型・epoch/期限チェック、SSH candidate の owner cascade を実装した。`when` / `ready_when` の runtime 投影、supervisor / 既存 protocol snapshot の有限 fact 変換、依存 subtree の停止・再開を追加した。詳細と検証範囲は [runtime conditions evidence](evidence/2026-10-24-runtime-conditions.md) を参照。hold/maxAge、全 protocol の readiness、durable event は CORE-03 / CORE-04 の残作業とする。
+三値論理と有限 protocol fact の基本型・epoch/期限チェック、SSH candidate の owner cascade を実装した。`when` / `ready_when` の runtime 投影、supervisor / 既存 protocol snapshot の有限 fact 変換、依存 subtree の停止・再開を追加した。詳細と検証範囲は [runtime conditions evidence](evidence/2026-10-24-runtime-conditions.md) を参照。一般status reference、全 protocol の readiness、durable event は CORE-03 / CORE-04 の残作業とする。`for` / `max_age` は後述のcheckpointで追加した。
 startup store/revision の boot 選択、projection generation の永続復元、多 binary runtime manifest も残っている。
 CORE-01 / CORE-02 / CORE-03 の全受入条件を完了扱いにはせず、既存 `parity.json` の判定を上げない。
 
@@ -32,7 +32,7 @@ generation再利用、最小kernelのNetlink lookup、nsfs mountinfo、VRRP停�
 コードcheckpointは `7046fd5`。
 [PVE検証証跡](evidence/2026-10-24-pve-health-pbr.md) に実装済み・検証済み・未検証を区別して記録する。
 これは完全なEgressRoutePolicyやNET-01/NET-02全体の合格ではない。
-targetSource、full priority/mark/hash/hysteresis、hold/maxAge、durable event等の残作業は継続する。
+targetSource、full priority/mark/hash/hysteresis、durable event等の残作業は継続する。
 続行手順は [PVE Codex handoff](pve-codex-handoff.md) を参照。
 
 ## 1. 基準と到達点
@@ -41,7 +41,12 @@ CORE-03のfact leafに `max_age` を追加した。producerの観測時刻を保
 鮮度を延長しない。2分のproducer期限が残ったHealthy sampleを利用側の2.5秒制限で失効させ、
 実daemon・独立2 WANのTCP/UDP/PCAPとQEMUで切替・復旧を確認した。
 コードcheckpointは `e46ce22`。[鮮度制限の証跡](evidence/2026-10-24-condition-max-age.md) を参照。
-上記の旧checkpointに記載したhold/maxAgeのうちmax_ageのみ進んだ。hold time等と全体の受入は残る。
+このcheckpointではmax_ageのみを実装し、その後のcheckpointで安定時間を追加した。
+
+さらに `for` の安定時間と `when_hold` / `ready_when_hold` を実装した。
+投影の間に終わる障害も通知受理時に検出し、同値更新では保持、未知・期限・authority変更では数え直す。
+コードcheckpointは `cb550a9`。全体check・static buildと、実daemon二WANの復旧待ちTCP/UDP・QEMUでPASS。
+[安定時間の証跡](evidence/2026-10-24-condition-hold.md) を参照。一般status reference等のCORE-03残作業は継続する。
 
 **routerd と routerd2 は別製品である。** routerd は稼働中の機能参照元、routerd2 は未リリースの開発対象。
 現在の routerd2 の二バイナリー構成・設定書式・内部API・保存形式には利用者がいないため、後方互換性を要求しない。

@@ -11118,6 +11118,34 @@
         "full implementation plan and physical deployment qualification"
       ],
       "parity_flags_unchanged": true
+    },
+    {
+      "id": "condition-hold",
+      "date": "2026-10-24",
+      "status": "implemented_and_packet_verified",
+      "code_checkpoint": "cb550a9e9c325281eb17da38624bfbf236a549af",
+      "work_packages": [
+        "CORE-03"
+      ],
+      "evidence": "docs/evidence/2026-10-24-condition-hold.md",
+      "implemented": [
+        "Positive finite for on fact and composite conditions with immutable timeline snapshots",
+        "Observe accepted transitions between kernel projections; reset on false, unknown, freshness gap and changed authority",
+        "Timer-only release; snapshot-pinned when_hold and ready_when_hold reasons"
+      ],
+      "validation": [
+        "make check and make build-linux: pass",
+        "nested and disjunction witness race tests: pass",
+        "clean make check-health-pbr: pass; held recovery uses backup TCP/UDP before primary restoration",
+        "QEMU daemon-health-pbr: pass, 83.05 seconds"
+      ],
+      "remaining": [
+        "general status references",
+        "remaining protocol readiness and lifecycle",
+        "CORE-04 durable event and lifetime authority",
+        "whole implementation plan and physical hardware qualification"
+      ],
+      "parity_flags_unchanged": true
     }
   ],
   "delivery_goal": {

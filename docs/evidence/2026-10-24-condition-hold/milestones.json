@@ -1,0 +1,215 @@
+[
+  {
+    "stage": "initial-primary",
+    "operator_revision": 1,
+    "projection_generation": 3,
+    "phase": "ready",
+    "health": [
+      {
+        "name": "service.health-a",
+        "generation": 1,
+        "sequence": 5,
+        "phase": "Healthy",
+        "last_observed_active": true,
+        "observed_nanos": 7343893751758249,
+        "expires_nanos": 7344013751758249
+      },
+      {
+        "name": "service.health-b",
+        "generation": 1,
+        "sequence": 5,
+        "phase": "Healthy",
+        "last_observed_active": true,
+        "observed_nanos": 7343893750953817,
+        "expires_nanos": 7344013750953817
+      }
+    ],
+    "kernel_table_100": [
+      {
+        "gateway": "192.0.2.1",
+        "metric": 100,
+        "interface_index": 3
+      },
+      {
+        "gateway": "203.0.113.1",
+        "metric": 200,
+        "interface_index": 5
+      }
+    ]
+  },
+  {
+    "stage": "wan-a-failed",
+    "operator_revision": 1,
+    "projection_generation": 4,
+    "phase": "ready",
+    "health": [
+      {
+        "name": "service.health-a",
+        "generation": 1,
+        "sequence": 8,
+        "phase": "Unhealthy",
+        "last_observed_active": false,
+        "observed_nanos": 7343895262870237,
+        "expires_nanos": 7344015262870237
+      },
+      {
+        "name": "service.health-b",
+        "generation": 1,
+        "sequence": 8,
+        "phase": "Healthy",
+        "last_observed_active": true,
+        "observed_nanos": 7343895264209322,
+        "expires_nanos": 7344015264209322
+      }
+    ],
+    "kernel_table_100": [
+      {
+        "gateway": "203.0.113.1",
+        "metric": 200,
+        "interface_index": 5
+      }
+    ]
+  },
+  {
+    "stage": "recovery-held",
+    "operator_revision": 1,
+    "projection_generation": 4,
+    "phase": "ready",
+    "health": [
+      {
+        "name": "service.health-a",
+        "generation": 1,
+        "sequence": 10,
+        "phase": "Healthy",
+        "last_observed_active": true,
+        "observed_nanos": 7343896273172556,
+        "expires_nanos": 7344016273172556
+      },
+      {
+        "name": "service.health-b",
+        "generation": 1,
+        "sequence": 10,
+        "phase": "Healthy",
+        "last_observed_active": true,
+        "observed_nanos": 7343896275540575,
+        "expires_nanos": 7344016275540575
+      }
+    ],
+    "kernel_table_100": [
+      {
+        "gateway": "203.0.113.1",
+        "metric": 200,
+        "interface_index": 5
+      }
+    ]
+  },
+  {
+    "stage": "wan-a-recovered",
+    "operator_revision": 1,
+    "projection_generation": 5,
+    "phase": "ready",
+    "health": [
+      {
+        "name": "service.health-a",
+        "generation": 1,
+        "sequence": 13,
+        "phase": "Healthy",
+        "last_observed_active": true,
+        "observed_nanos": 7343897788076308,
+        "expires_nanos": 7344017788076308
+      },
+      {
+        "name": "service.health-b",
+        "generation": 1,
+        "sequence": 13,
+        "phase": "Healthy",
+        "last_observed_active": true,
+        "observed_nanos": 7343897790221659,
+        "expires_nanos": 7344017790221659
+      }
+    ],
+    "kernel_table_100": [
+      {
+        "gateway": "192.0.2.1",
+        "metric": 100,
+        "interface_index": 3
+      },
+      {
+        "gateway": "203.0.113.1",
+        "metric": 200,
+        "interface_index": 5
+      }
+    ]
+  },
+  {
+    "stage": "consumer-max-age",
+    "operator_revision": 1,
+    "projection_generation": 6,
+    "phase": "ready",
+    "health": [
+      {
+        "name": "service.health-a",
+        "generation": 4,
+        "sequence": 6,
+        "phase": "Healthy",
+        "last_observed_active": true,
+        "observed_nanos": 7343904382109553,
+        "expires_nanos": 7344024382109553
+      },
+      {
+        "name": "service.health-b",
+        "generation": 3,
+        "sequence": 20,
+        "phase": "Healthy",
+        "last_observed_active": true,
+        "observed_nanos": 7343907872590667,
+        "expires_nanos": 7344027872590667
+      }
+    ],
+    "kernel_table_100": [
+      {
+        "gateway": "203.0.113.1",
+        "metric": 200,
+        "interface_index": 5
+      }
+    ]
+  },
+  {
+    "stage": "confirmed-rollback",
+    "operator_revision": 3,
+    "projection_generation": 13,
+    "phase": "ready",
+    "health": [
+      {
+        "name": "service.health-a",
+        "generation": 5,
+        "sequence": 21,
+        "phase": "Healthy",
+        "last_observed_active": true,
+        "observed_nanos": 7343918213036453,
+        "expires_nanos": 7344038213036453
+      },
+      {
+        "name": "service.health-b",
+        "generation": 3,
+        "sequence": 40,
+        "phase": "Healthy",
+        "last_observed_active": true,
+        "observed_nanos": 7343917978882080,
+        "expires_nanos": 7344037978882080
+      }
+    ],
+    "kernel_table_100": [
+      {
+        "gateway": "192.0.2.1",
+        "metric": 100,
+        "interface_index": 3
+      },
+      {
+        "gateway": "203.0.113.1",
+        "metric": 200,
+        "interface_index": 5
+      }
+    ]
+  }
+]

@@ -99,6 +99,17 @@ Healthの観測時刻はproducerのCLOCK_BOOTTIME、その他の対応済みacti
 `not` の内側でもstaleはindeterminateを保つ。
 [実daemon・packet受入](evidence/2026-10-24-condition-max-age.md) を参照。
 
+`for` は条件式が連続してtrueだった時間を指定する。
+例えば `when: {fact: service.health-a.active, max_age: 3s, for: 2s}` は、
+有効な観測を継続して得た状態で2秒経過してからresourceを起動する。
+`for` は `all` / `any` / `not` のnodeにも指定でき、正の有限durationを必須とする。
+待機中はindeterminate、既知falseは直ちにfalseであり、NOTでも待機を成功にしない。
+偽や未確定、観測の期限切れ、producer・boot・source・operator revisionの交代で数え直す。
+同値の観測更新や成功したkernel投影だけでは数え直さない。
+protocol callback間に短いfalseを挟む場合も履歴に反映し、新しい通知なしでもtimerで解除する。
+`when_hold` / `ready_when_hold` をstatusに表示する。
+[安定時間の実daemon・packet受入](evidence/2026-10-24-condition-hold.md) を参照。
+
 `show resources` で、coordinator が最後に選択したresourceごとの `active`、
 三値の `when` / `ready`、保留理由と依存先を確認できる。
 `when_false` / `when_indeterminate`、`dependency_false` / `dependency_indeterminate`、
@@ -113,7 +124,7 @@ readinessだけが変わってnetwork generationが同じ場合も、観測が�
 CLIは全ページを同じ観測で取得してから表示し、途中の409で混在した結果を出力しない。
 source payload、provenance、秘密鍵、protocol snapshot本体はこのAPIに含めない。
 
-source の inactive 部分も完全に検証する。hold time、一般 status reference、
+source の inactive 部分も完全に検証する。一般 status reference、
 Health の動的 targetSource、全 protocol の個別 readiness 契約はまだ残っている。
 unknown field と再利用 DNS 型の非空 `when` は引き続き拒否する。
 SSH candidate で `delete resources[OWNER]` を実行すると、明示 owner の子・孫 resource を連鎖削除する。残存 resource から削除先への `depends_on` があれば変更を拒否する。YAML 全体編集と API の任意の更新に同じ自動削除はまだ適用しない。

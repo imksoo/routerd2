@@ -1,0 +1,37 @@
+{
+  "test": "TestDaemonHealthPBRFailoverAndRecovery",
+  "result": "pass",
+  "scope": "Linux namespaces, real daemon and kernel packets",
+  "commit": "cb550a9e9c325281eb17da38624bfbf236a549af",
+  "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "dirty": false,
+  "kernel": "6.8.0-136-generic",
+  "go": "go version go1.27.3 linux/amd64",
+  "race_detector": true,
+  "sources": {
+    "internal/integration/health_pbr_test.go": "ccf3caeaccbe070ac7ddb37534fa65ef24af9b7aa1302c7cbca2409118ff8ce0",
+    "internal/integration/bgp_test.go": "6e8c4538d28ee5ae05ea86dafc2e4c80897846780100e3f60395d124b42323ed",
+    "scripts/health-pbr.py": "cb4e9594c53d9e4812e781f2731123d50db55431e34a1f64a84ee8419aba99f6"
+  },
+  "executables": {
+    "routerd": "20eb7e1209aae6815310073702f5330d8bf29f7d64ed12b61c9f2bd230cbdcef",
+    "routerd-modules": "496c480de9bb409646d91c8ab43a1d9be32d900d2a4a360649f44334254d38a3",
+    "integration.test": "d3baf861a43dfc6f8cdc31a99a2f0b91ca2151271cdc5d46b6fcff1af2253097"
+  },
+  "artifacts": {
+    "confirmed-rollback.json": "83ac97f7b566f1d131f50bf29c8fbe29614043f84ff9cc9573dc1fbf28b6f7e5",
+    "confirmed-trial.json": "9c1d9ae50c62fe2edd1ed90a0a14b5d4b4f384b92e8cf37e57c209737367d524",
+    "consumer-max-age.json": "dcacab9824681e31f456f22213af5e23d27c79d3caa04801a15ef423b70934d2",
+    "fact-expired.json": "cd626188043689a41f10fcb6dfbeb401ae04b302c5107d2f5229a92131fafc56",
+    "initial-primary.json": "d7f87b4395a1bdc2a7a98321ef03d9f6df87f6ceb174df31c5c73328833c88d8",
+    "recovery-held.json": "e58565334791a25f9650fdd254bfaf1f0f7e1734a4a82ecd9d74245a255ed700",
+    "restart-control.json": "56cdffbd9404a0d4d538b48c09b684b0b731a322ef9970f20867ca8e71d000ad",
+    "restart-network.json": "ed1d85e637878f8cab62be7a73c991a2bd6d6931c57ed6e1057703dcb2f128c1",
+    "restart-service.health-a.json": "6b2657b7357ea0cd1085033bca5a143842250aa802c8f0ee378182137e57d6c3",
+    "test.log": "a0c632a32258fbea0f968f202e4ce1c12b968c4465bd944fa149df3d5f18b414",
+    "wan-a-failed.json": "9f071e7e604e5138e7e861dba30fe2ec6bf02be528c664937fb62a7c7679255a",
+    "wan-a-recovered.json": "1b7b2280b931dddb408fcdb62b2bb4cfe2e345cb4d27f4b347a8a928259dcd05",
+    "wan0.pcap": "628b7edbe22853988a365d074ac87df7fc7ee3a04b3fadb36a1e5c1ae737a30e",
+    "wan1.pcap": "6e33c2173f1e0154c26f9b75b870b1042345b6c736b1f77b903edfb3fda45736"
+  }
+}

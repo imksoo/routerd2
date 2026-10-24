@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "purpose": "isolated-daemon-health-pbr-integration",
+  "suite": "daemon-health-pbr",
+  "required_test": "TestDaemonHealthPBRFailoverAndRecovery",
+  "kernel_release": "6.18.58-0-virt",
+  "kernel_sha256": "17fbd3efd16f2e7cb1b945f06423b37399ba7d5ac8cdd3665e7f13f363500e85",
+  "initializer_sha256": "353ff3f22263886ef20bb38ebaaaf8b697d2b69e5fcdf1255a619c72149ad1fb",
+  "test_binary_sha256": "5e907c1828d8c5470f2cfb7e3febe651ec017d09c25cd6662facddbebef0dd78",
+  "binary_sha256": {
+    "/test/bin/routerd": "9ba28dafc0b82e8ba801e143d02745ee4a611abfa893caa7961269d67cd3f0d7",
+    "/test/bin/routerd-modules": "b61894c9c328adecd77d680d516c84f1d6500389db44ea28e086a2fa272b7483"
+  },
+  "source_image_manifest_sha256": "a1df58dc193d6f6f5a361b9b630e9fb106b76a3e3089239da2185f812d265b43",
+  "source_initramfs_sha256": "c6b0ac5a7e6dc64a186ab595586f27bed87440083dc7a13cf0db9df8a3d2c729",
+  "host_network_access": false,
+  "result": "passed",
+  "initramfs_sha256": "7225e991adf02dfdcb52f30d46b72dec5268afa5bb92daafd0077faf645ea64f",
+  "duration_seconds": 83.05,
+  "qemu_exit_status_before_cleanup": 0
+}

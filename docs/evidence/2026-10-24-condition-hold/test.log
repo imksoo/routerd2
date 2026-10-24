@@ -1,0 +1,22 @@
+=== RUN   TestDaemonHealthPBRFailoverAndRecovery
+    health_pbr_test.go:41: === RUN   TestDaemonHealthPBRFailoverAndRecovery
+            health_pbr_test.go:292: two independent health workers: primary -> outage -> backup -> threshold recovery -> consumer hold -> primary; operator revision stays 1
+            health_pbr_test.go:322: recovered actual worker service.health-a
+            health_pbr_test.go:322: recovered actual worker control
+            health_pbr_test.go:322: recovered actual worker network
+            health_pbr_test.go:370: finite observation expired while producer stayed supervisor-ready; duplicate and resequenced replay did not renew it
+            health_pbr_test.go:410: consumer max_age withdrew a still-valid healthy sample; transport replay stayed stale and fresh worker observation restored TCP/UDP
+            health_pbr_test.go:462: capture 192.0.2.2 -> 198.51.100.10 protocol=6 port=18080 packets=167
+            health_pbr_test.go:462: capture 198.18.0.2 -> 198.51.100.20 protocol=6 port=18081 packets=36
+            health_pbr_test.go:462: capture 198.18.0.2 -> 198.51.100.20 protocol=17 port=18081 packets=8
+            health_pbr_test.go:463: capture 203.0.113.2 -> 198.51.100.11 protocol=6 port=18080 packets=208
+            health_pbr_test.go:463: capture 198.18.0.2 -> 198.51.100.20 protocol=6 port=18081 packets=22
+            health_pbr_test.go:463: capture 198.18.0.2 -> 198.51.100.20 protocol=17 port=18081 packets=5
+            health_pbr_test.go:464: OUTPUT wan0 probe SYN packets=45 all carry socket mark 42; foreign nft table preserved
+            health_pbr_test.go:464: OUTPUT wan1 probe SYN packets=53 all carry socket mark 42; foreign nft table preserved
+            health_pbr_test.go:468: confirmed rollback restored source and primary TCP/UDP; foreign objects and probe paths survived every transition
+            health_pbr_test.go:469: ROUTERD_HEALTH_PBR_DAEMON_TEST_PASS
+        --- PASS: TestDaemonHealthPBRFailoverAndRecovery (27.28s)
+        PASS
+--- PASS: TestDaemonHealthPBRFailoverAndRecovery (28.32s)
+PASS
