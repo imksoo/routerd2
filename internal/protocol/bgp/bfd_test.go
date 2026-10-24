@@ -307,6 +307,33 @@ func TestBFDAdminAcknowledgmentPropagatesFailure(t *testing.T) {
 	}
 }
 
+func TestBFDAdminReceiptDeadlineIsIndependentOfConsumerScheduling(t *testing.T) {
+	second := int64(time.Second)
+	for _, tc := range []struct {
+		name, boot string
+		received   int64
+		wantError  bool
+	}{
+		{"timely-receipt-delayed-consumer", "boot", 2*second - 1, false},
+		{"deadline-boundary", "boot", 2 * second, true},
+		{"late-receipt", "boot", 2*second + 1, true},
+		{"wrong-boot", "other-boot", second, true},
+		{"future-receipt", "boot", 4 * second, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := &bfdPeerGate{address: gatePeer, enabled: true, forceReset: true, operation: "disable", operationDeadline: 2 * second, operationCancel: func() {}}
+			result := bfdAdminResult{address: gatePeer, operation: "disable", received: bfd.Clock{BootID: tc.boot, BoottimeNanoseconds: tc.received}}
+			err := g.completeAdmin(result, bfd.Clock{BootID: "boot", BoottimeNanoseconds: 3 * second})
+			if (err != nil) != tc.wantError {
+				t.Fatal("ACK validity depended on when the consumer ran", err)
+			}
+			if !tc.wantError && (g.enabled || g.forceReset || g.operation != "" || g.minReceive != 3*second) {
+				t.Fatal("disable ACK did not fence recovery to a fresh receive", g)
+			}
+		})
+	}
+}
+
 func TestBFDGrantFutureReceiveNeverBecomesAuthorizedByTimer(t *testing.T) {
 	h := newGateHarness(t)
 	g := gateGrant(h.clock.Load()+int64(100*time.Millisecond), 1, 0)
