@@ -1,0 +1,210 @@
+package events
+
+import (
+	"bytes"
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"io"
+	"math"
+)
+
+func (s *Store) Append(ctx context.Context, e Event) (Record, error) {
+	body, err := encodeEvent(e)
+	if err != nil {
+		return Record{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return Record{}, ErrClosed
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Record{}, err
+	}
+	defer tx.Rollback()
+	var cursor uint64
+	var previous []byte
+	err = tx.QueryRowContext(ctx, `SELECT cursor,body FROM events WHERE event_id=?`, e.ID).Scan(&cursor, &previous)
+	if err == nil {
+		if !bytes.Equal(body, previous) {
+			return Record{}, ErrConflict
+		}
+		return decodeEvent(cursor, previous)
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return Record{}, err
+	}
+	if err = s.reserve(ctx, tx, "events", int64(len(body)), s.options.MaxEvents, s.options.MaxEventBytes); err != nil {
+		return Record{}, err
+	}
+	result, err := tx.ExecContext(ctx, `INSERT INTO events(event_id,body) VALUES(?,?)`, e.ID, body)
+	if err != nil {
+		return Record{}, err
+	}
+	id, err := result.LastInsertId()
+	if err != nil {
+		return Record{}, err
+	}
+	if err = tx.Commit(); err != nil {
+		return Record{}, err
+	}
+	return decodeEvent(uint64(id), body)
+}
+
+func (s *Store) reserve(ctx context.Context, tx *sql.Tx, kind string, size, maxRows, maxBytes int64) error {
+	var rows, used int64
+	if err := tx.QueryRowContext(ctx, `SELECT rows_count,bytes_count FROM usage WHERE kind=?`, kind).Scan(&rows, &used); err != nil {
+		return err
+	}
+	if rows >= maxRows || size > maxBytes-used {
+		return ErrCapacity
+	}
+	_, err := tx.ExecContext(ctx, `UPDATE usage SET rows_count=rows_count+1,bytes_count=bytes_count+? WHERE kind=?`, size, kind)
+	return err
+}
+
+func decodeEvent(cursor uint64, body []byte) (Record, error) {
+	var event Event
+	if len(body) > maxBody {
+		return Record{}, errors.New("stored event exceeds its bound")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&event); err != nil {
+		return Record{}, err
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return Record{}, errors.New("stored event contains trailing data")
+	}
+	if _, err := encodeEvent(event); err != nil {
+		return Record{}, err
+	}
+	return Record{Cursor: cursor, Event: event}, nil
+}
+
+func pageLimit(limit int) bool { return limit >= 1 && limit <= 256 }
+
+func (s *Store) List(ctx context.Context, after uint64, limit int) ([]Record, error) {
+	if !pageLimit(limit) || after > math.MaxInt64 {
+		return nil, errors.New("invalid event page")
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return nil, ErrClosed
+	}
+	var tip uint64
+	if err := s.db.QueryRowContext(ctx, `SELECT coalesce(max(cursor),0) FROM events`).Scan(&tip); err != nil {
+		return nil, err
+	}
+	if after > tip {
+		return nil, ErrConflict
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT cursor,event_id,body FROM events WHERE cursor>? ORDER BY cursor LIMIT ?`, after, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]Record, 0)
+	for rows.Next() {
+		var cursor uint64
+		var id string
+		var body []byte
+		if err := rows.Scan(&cursor, &id, &body); err != nil {
+			return nil, err
+		}
+		record, err := decodeEvent(cursor, body)
+		if err != nil {
+			return nil, err
+		}
+		if record.Event.ID != id {
+			return nil, errors.New("stored event identity mismatch")
+		}
+		result = append(result, record)
+	}
+	return result, rows.Err()
+}
+
+// Cursor initializes a new consumer at the current tip in the same write
+// transaction. An existing consumer resumes exactly its durable position.
+func (s *Store) Cursor(ctx context.Context, name string) (uint64, error) {
+	if !token(name, 128) {
+		return 0, errors.New("invalid event consumer")
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return 0, ErrClosed
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	var cursor uint64
+	err = tx.QueryRowContext(ctx, `SELECT cursor FROM consumers WHERE name=?`, name).Scan(&cursor)
+	if err == nil {
+		var tip uint64
+		if err := tx.QueryRowContext(ctx, `SELECT coalesce(max(cursor),0) FROM events`).Scan(&tip); err != nil {
+			return 0, err
+		}
+		if cursor > tip {
+			return 0, ErrConflict
+		}
+		return cursor, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return 0, err
+	}
+	var count int64
+	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM consumers`).Scan(&count); err != nil {
+		return 0, err
+	}
+	if count >= s.options.MaxConsumers {
+		return 0, ErrCapacity
+	}
+	if err = tx.QueryRowContext(ctx, `SELECT coalesce(max(cursor),0) FROM events`).Scan(&cursor); err != nil {
+		return 0, err
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO consumers(name,cursor) VALUES(?,?)`, name, cursor); err != nil {
+		return 0, err
+	}
+	return cursor, tx.Commit()
+}
+
+// Drain preserves at-least-once delivery: a callback followed by a failed
+// cursor save is repeated. External effects must use the stable event ID for
+// their own durable idempotency; journal cursors cannot make them exactly once.
+func (s *Store) Drain(ctx context.Context, name string, process func(context.Context, Record) error) error {
+	if process == nil {
+		return errors.New("event consumer callback is required")
+	}
+	cursor, err := s.Cursor(ctx, name)
+	if err != nil {
+		return err
+	}
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		rows, err := s.List(ctx, cursor, 256)
+		if err != nil {
+			return err
+		}
+		for _, record := range rows {
+			if err = process(ctx, record); err != nil {
+				return err
+			}
+			if err = s.Schedule(ctx, name, cursor, record.Cursor, nil); err != nil {
+				return err
+			}
+			cursor = record.Cursor
+		}
+		if len(rows) < 256 {
+			return nil
+		}
+	}
+}
