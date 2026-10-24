@@ -149,6 +149,46 @@ func TestConditionHoldValidation(t *testing.T) {
 	}
 }
 
+func TestConditionHoldNestedAndChangingDisjunctionWitness(t *testing.T) {
+	s := newTestStore(t)
+	second := uint64(time.Second)
+	sequence := uint64(0)
+	publish := func(key string, now uint64, value bool) {
+		t.Helper()
+		sequence++
+		f := observation(sequence, now, 10*second, value)
+		f.Key = key
+		if err := s.Publish(f, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c := holdCondition(t, `{"any":[{"fact":"health/wan/up"},{"fact":"other"}],"for":"1s"}`)
+	p := Program{Resources: []Resource{{When: &c}}}
+	var timeline ConditionTimeline
+	read := func(now uint64, want Truth) {
+		t.Helper()
+		view, err := timeline.Observe(p, s.Snapshot(now))
+		if err != nil || view.evaluate(&c) != want {
+			t.Fatal("continuous disjunction restarted or skipped its hold", view.evaluate(&c), err)
+		}
+	}
+	publish("health/wan/up", second, true)
+	publish("other", second, false)
+	read(second, Indeterminate)
+	publish("other", second+second/4, true)
+	read(second+second/4, Indeterminate)
+	publish("health/wan/up", second+second/2, false)
+	read(second+second/2, Indeterminate)
+	read(2*second, True)
+
+	c = holdCondition(t, `{"not":{"not":{"fact":"other","for":"500ms"}},"for":"500ms"}`)
+	p = Program{Resources: []Resource{{When: &c}}}
+	timeline = ConditionTimeline{}
+	read(2*second, Indeterminate)
+	read(2*second+second/2, Indeterminate) // inner hold finishes; outer begins
+	read(3*second, True)
+}
+
 func TestConditionHoldProducerExpiryAndProjectionReasons(t *testing.T) {
 	s := newTestStore(t)
 	c := holdCondition(t, `{"fact":"health/wan/up","for":"1s"}`)
