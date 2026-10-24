@@ -20,6 +20,7 @@ import (
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/control"
 	"github.com/imksoo/routerd2/internal/localapi"
+	"github.com/imksoo/routerd2/internal/resourceprogram"
 	"golang.org/x/term"
 )
 
@@ -590,7 +591,12 @@ func (c *candidate) mutate(path, value string, remove bool) error {
 	if err != nil {
 		return err
 	}
-	if err = mutatePath(reflect.ValueOf(&copy).Elem(), parts, value, remove); err != nil {
+	if remove && len(parts) == 1 && parts[0].field == "resources" && parts[0].selected {
+		copy, _, err = resourceprogram.RemoveOwned(copy, parts[0].selector)
+	} else {
+		err = mutatePath(reflect.ValueOf(&copy).Elem(), parts, value, remove)
+	}
+	if err != nil {
 		return err
 	}
 	if err = checkCandidateSize(copy); err != nil {
