@@ -89,7 +89,7 @@ func TestFirewallDHCPServerExceptionsPreserveOrderedPacketDecisions(t *testing.T
 				if err != nil {
 					t.Fatal(err)
 				}
-				f, old := result.Document.Network.Firewall, baseline.Document.Network.Firewall
+				f, old := nativeProgram(t, result.Document).Network.Firewall, nativeProgram(t, baseline.Document).Network.Firewall
 				if f.Input.Policy != old.Input.Policy || !reflect.DeepEqual(f.Output, old.Output) || !reflect.DeepEqual(f.ForwardChain, old.ForwardChain) || !reflect.DeepEqual(f.Input.Rules[:2], old.Input.Rules[:2]) {
 					t.Fatal("service exception changed other hooks, defaults or global precedence")
 				}
@@ -181,7 +181,7 @@ func TestFirewallDHCPServerZoneLookupDoesNotInventResourceAliases(t *testing.T) 
 				t.Fatal(err)
 			}
 			packet := testPacket{in: "eth1", source: "192.0.2.20", destination: "192.0.2.1", protocol: "udp", sport: 68, dport: 67}
-			if got := packetVerdict(result.Document.Network.Firewall.Input, packet); got != "accept" {
+			if got := packetVerdict(nativeProgram(t, result.Document).Network.Firewall.Input, packet); got != "accept" {
 				t.Fatalf("zone resource %q: %s, want accept", tc.ref, got)
 			}
 		})
@@ -230,7 +230,7 @@ func TestFirewallDNSLiteralAndResolvedListenersNeverBypassACLs(t *testing.T) {
 						for _, port := range []int{53, 5353} {
 							for _, source := range []string{"192.0.2.20", "2001:db8::20"} {
 								p := testPacket{in: in, source: source, destination: source, protocol: proto, dport: port}
-								if got := packetVerdict(result.Document.Network.Firewall.Input, p); got != "drop" {
+								if got := packetVerdict(nativeProgram(t, result.Document).Network.Firewall.Input, p); got != "drop" {
 									t.Fatalf("DNS listener bypassed ACL for %+v: %s", p, got)
 								}
 							}
@@ -288,7 +288,7 @@ func TestFirewallServiceExceptionsDoNotCreateFilteringHooks(t *testing.T) {
 			if err != nil || len(holes) != 0 || len(rendered) != 0 {
 				t.Fatal("standalone fixture unexpectedly enables the legacy filter", err, holes)
 			}
-			f := result.Document.Network.Firewall
+			f := nativeProgram(t, result.Document).Network.Firewall
 			if !nat && f != nil || nat && (f == nil || !f.DisableForward || f.Input != nil || f.Output != nil || f.ForwardChain != nil || len(f.NAT) != 1) {
 				t.Fatal("standalone service migration invented a filtering hook")
 			}

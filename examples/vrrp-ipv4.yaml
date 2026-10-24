@@ -1,20 +1,31 @@
 # Peer: use a different real address (for example .3) and lower priority (100).
 # The virtual MAC interface exists only while this router owns the active lease.
-schema_version: 1
-network:
-  interfaces:
-    - name: eth1
-      addresses: [192.168.10.2/24]
-  forwarding:
-    ipv4: true
-services:
-  - name: lan-ha
-    vrrp:
+schema_version: 2
+resources:
+  - id: address/eth1/0cc363e75ed15fdc5428b948
+    depends_on:
+      - interface/eth1
+    address:
       interface: eth1
-      family: ipv4
-      virtual_router_id: 10
-      priority: 150
-      preempt: true
-      advert_interval_centiseconds: 100
-      addresses: [192.168.10.1/24]
-      accept_mode: false
+      cidr: 192.168.10.2/24
+  - id: forwarding
+    forwarding:
+      ipv4: true
+  - id: interface/eth1
+    interface:
+      name: eth1
+  - id: service/lan-ha
+    depends_on:
+      - interface/eth1
+    service:
+      name: lan-ha
+      vrrp:
+        resource: ""
+        interface: eth1
+        family: ipv4
+        virtual_router_id: 10
+        priority: 150
+        advert_interval_centiseconds: 100
+        addresses:
+          - 192.168.10.1/24
+        preempt: true

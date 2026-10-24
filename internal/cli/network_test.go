@@ -79,15 +79,15 @@ func (f *networkAPIFixture) DesiredObservation(_ context.Context, projection str
 }
 
 func newNetworkAPIClient(f *networkAPIFixture) (*localapi.Client, *handlerTransport) {
-	engine := control.New(nil, config.Committed{Revision: 1, Config: config.Document{SchemaVersion: 1}}, f)
+	engine := control.New(nil, config.Committed{Revision: 1, Config: config.Document{SchemaVersion: config.SchemaVersion}}, f)
 	transport := &handlerTransport{handler: engine.Handler()}
 	return &localapi.Client{HTTP: &http.Client{Transport: transport}}, transport
 }
 
 func TestNetworkPublicAPITruncationPagesAndDesired(t *testing.T) {
-	doc := cliLargeDocument(12000)
-	f := &networkAPIFixture{snapshot: network.Snapshot{Revision: 3, Status: "applied", Desired: doc.Network}}
-	for _, route := range doc.Network.Routes {
+	desired := cliLargeNetwork(12000)
+	f := &networkAPIFixture{snapshot: network.Snapshot{Revision: 3, Status: "applied", Desired: desired}}
+	for _, route := range desired.Routes {
 		f.snapshot.Routes = append(f.snapshot.Routes, network.RouteState{Route: route, Owned: true})
 	}
 	client, transport := newNetworkAPIClient(f)
@@ -134,7 +134,7 @@ func TestNetworkPublicAPITruncationPagesAndDesired(t *testing.T) {
 		TotalBytes int             `json:"total_bytes"`
 		Desired    network.Desired `json:"desired"`
 	}
-	if err := json.Unmarshal(out.Bytes(), &full); err != nil || len(full.Desired.Routes) != 12000 || !reflect.DeepEqual(full.Desired, doc.Network) || full.TotalBytes != summary.Counts.DesiredBytes {
+	if err := json.Unmarshal(out.Bytes(), &full); err != nil || len(full.Desired.Routes) != 12000 || !reflect.DeepEqual(full.Desired, desired) || full.TotalBytes != summary.Counts.DesiredBytes {
 		t.Fatal("large desired document was not reconstructed exactly", err)
 	}
 	if want := (full.TotalBytes + network.DesiredObservationChunk - 1) / network.DesiredObservationChunk; len(transport.requests) != want || want < 2 {
@@ -220,7 +220,7 @@ func TestNetworkPageRejectsInconsistentContinuation(t *testing.T) {
 }
 
 func TestNetworkDesiredRejectsChangedOrMalformedPagesWithoutPartialOutput(t *testing.T) {
-	desired := cliLargeDocument(1500).Network
+	desired := cliLargeNetwork(1500)
 	encoded, err := json.Marshal(desired)
 	if err != nil || len(encoded) < 2*network.DesiredObservationChunk {
 		t.Fatal("fixture must need multiple chunks", err, len(encoded))

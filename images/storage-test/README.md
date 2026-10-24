@@ -34,7 +34,7 @@ release store. It then preserves PID 1 while selecting the trial pair.
 An independent guest process verifies the actual supervisor and all four core
 workers against the verified release inodes. It authenticates to the embedded
 SSH server on guest loopback, edits the candidate configuration, and commits
-`network.interfaces[lo].alias = "persistent-two-boot"`. It checks committed
+`resources[interface/lo].interface.alias = "persistent-two-boot"`. It checks committed
 revision 2 and the actual kernel alias, records hashes of the committed config,
 SSH host key and state sentinel, and powers off while the release trial is
 still pending. The health confirmation window is deliberately longer than the

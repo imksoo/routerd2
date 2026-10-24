@@ -53,10 +53,11 @@ func callView(t *testing.T, handler http.Handler, method, path string, body any)
 
 func largeViewDocument(t *testing.T) config.Document {
 	t.Helper()
-	d := config.Document{SchemaVersion: config.SchemaVersion, Network: network.Desired{Interfaces: []network.Interface{{Name: "wan0"}}}}
-	for i := range 12000 {
-		d.Network.Routes = append(d.Network.Routes, network.Route{Destination: fmt.Sprintf("10.%d.%d.%d/32", i>>16, i>>8&255, i&255), Gateway: "192.0.2.1", Interface: "wan0", Metric: 100, Table: 254})
+	native := config.Native{Network: network.Desired{Interfaces: []network.Interface{{Name: "wan0"}}}}
+	for i := range 7000 {
+		native.Network.Routes = append(native.Network.Routes, network.Route{Destination: fmt.Sprintf("10.%d.%d.%d/32", i>>16, i>>8&255, i&255), Gateway: "192.0.2.1", Interface: "wan0", Metric: 100, Table: 254})
 	}
+	d := config.FromNative(native)
 	if err := config.Validate(d); err != nil {
 		t.Fatal(err)
 	}
@@ -153,16 +154,16 @@ func TestConfigurationLargeConfirmedACKDocumentFenceAndLightHealth(t *testing.T)
 	}
 }
 
-func TestConfigurationSmallLegacyResponseAndHealthFailureFields(t *testing.T) {
+func TestConfigurationSmallResponseAndHealthFailureFields(t *testing.T) {
 	e, _ := fixture(t)
 	h := e.Handler()
 	get := callView(t, h, http.MethodGet, "/v1/config", nil)
 	var state State
-	if err := json.Unmarshal(get.Body.Bytes(), &state); err != nil || get.Code != http.StatusOK || state.ConfigOmitted || state.Config.SchemaVersion != 1 || state.Revision != 1 {
-		t.Fatal("small legacy response changed", get.Code, state, err)
+	if err := json.Unmarshal(get.Body.Bytes(), &state); err != nil || get.Code != http.StatusOK || state.ConfigOmitted || state.Config.SchemaVersion != config.SchemaVersion || state.Revision != 1 {
+		t.Fatal("small source response changed", get.Code, state, err)
 	}
 	commit := callView(t, h, http.MethodPost, "/v1/config/commit", request(e, "small"))
-	if err := json.Unmarshal(commit.Body.Bytes(), &state); err != nil || commit.Code != http.StatusOK || state.ConfigOmitted || state.Config.SchemaVersion != 1 || state.Revision != 2 {
+	if err := json.Unmarshal(commit.Body.Bytes(), &state); err != nil || commit.Code != http.StatusOK || state.ConfigOmitted || state.Config.SchemaVersion != config.SchemaVersion || state.Revision != 2 {
 		t.Fatal("small mutation response changed", commit.Code, state, err)
 	}
 	e.runtime = runtimeplan.New(t.TempDir(), t.TempDir(), &fakeNetwork{})

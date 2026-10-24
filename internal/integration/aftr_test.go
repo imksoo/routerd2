@@ -106,7 +106,7 @@ func TestDaemonAFTRResolutionAndExpiry(t *testing.T) {
 		t.Fatal("DNS fixture startup timeout")
 	}
 
-	doc := config.Document{SchemaVersion: 1,
+	doc := config.Native{
 		Network: network.Desired{Interfaces: []network.Interface{{Name: "wan0", Addresses: []string{"2001:db8:42::1/64"}, AddressOptions: map[string]network.AddressOptions{"2001:db8:42::1/64": {NoDAD: true}}}}},
 		Services: []serviceconfig.Service{{Name: "dslite", DSLite: &serviceconfig.DSLite{
 			Interface: "wan0", Tunnel: "dslite0", LocalAddress: "2001:db8:42::1", Candidates: []string{"aftr.test"},
@@ -115,7 +115,7 @@ func TestDaemonAFTRResolutionAndExpiry(t *testing.T) {
 			B4Peer: "192.0.0.1/32", RouteGateway: "192.0.0.1",
 		}}},
 	}
-	f := startFixtureDaemon(t, doc)
+	f := startFixtureDaemon(t, config.FromNative(doc))
 	wan, err := netlink.LinkByName("wan0")
 	if err != nil {
 		t.Fatal(err)
@@ -261,7 +261,7 @@ func TestDaemonAFTRResolutionAndExpiry(t *testing.T) {
 	}
 	doc.Services = nil
 	var committed control.State
-	if err := f.control.Do(context.Background(), "POST", "/v1/config/commit", control.CommitRequest{ExpectedRevision: 1, RequestID: "remove-aftr", Config: doc}, &committed); err != nil {
+	if err := f.control.Do(context.Background(), "POST", "/v1/config/commit", control.CommitRequest{ExpectedRevision: 1, RequestID: "remove-aftr", Config: config.FromNative(doc)}, &committed); err != nil {
 		t.Fatal(err)
 	}
 	until(t, 5*time.Second, func() bool {

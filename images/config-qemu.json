@@ -1,11 +1,32 @@
 {
-  "schema_version": 1,
-  "network": {
-    "interfaces": [
-      {"name": "eth0", "addresses": ["10.0.2.15/24"]}
-    ],
-    "routes": [
-      {"destination": "0.0.0.0/0", "gateway": "10.0.2.2", "interface": "eth0"}
-    ]
-  }
+  "schema_version": 2,
+  "resources": [
+    {
+      "id": "address/eth0/754e45ec22096623a2d0f405",
+      "depends_on": [
+        "interface/eth0"
+      ],
+      "address": {
+        "interface": "eth0",
+        "cidr": "10.0.2.15/24"
+      }
+    },
+    {
+      "id": "interface/eth0",
+      "interface": {
+        "name": "eth0"
+      }
+    },
+    {
+      "id": "route/bc170f6fa3d79751ce344c25",
+      "depends_on": [
+        "interface/eth0"
+      ],
+      "route": {
+        "destination": "0.0.0.0/0",
+        "gateway": "10.0.2.2",
+        "interface": "eth0"
+      }
+    }
+  ]
 }

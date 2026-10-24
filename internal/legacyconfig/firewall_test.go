@@ -75,7 +75,7 @@ func TestFirewallMigrationPreservesActualPacketDecisions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := result.Document.Network.Firewall
+	f := nativeProgram(t, result.Document).Network.Firewall
 	if f == nil || f.Input == nil || f.ForwardChain == nil || f.DisableForward || f.Output != nil || f.Input.LogPrefix != "routerd firewall input deny " || f.ForwardChain.LogPrefix != "routerd firewall forward deny " {
 		t.Fatal("filter hooks/default logging changed")
 	}
@@ -140,7 +140,7 @@ func TestNATOnlyDoesNotInventFilterPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := d.Network.Firewall
+	f := nativeProgram(t, d).Network.Firewall
 	if f == nil || !f.DisableForward || f.Input != nil || f.Output != nil || f.ForwardChain != nil || len(f.NAT) != 1 {
 		t.Fatal("NAT-only configuration acquired a filtering hook")
 	}

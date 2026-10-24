@@ -81,11 +81,11 @@ func TestDaemonBGPFIBAndOwnershipExpiry(t *testing.T) {
 		PeerTransports: map[string]bgpconfig.PeerTransport{"127.0.0.1": {LocalAddress: "127.0.0.1", RemotePort: listener.Addr().(*net.TCPAddr).Port}},
 		RouteMetric:    200,
 	}
-	doc := config.Document{SchemaVersion: 1,
+	doc := config.Native{
 		Network:  network.Desired{Interfaces: []network.Interface{{Name: "wan0", Addresses: []string{"192.0.2.1/24", "2001:db8::1/64"}, AddressOptions: map[string]network.AddressOptions{"2001:db8::1/64": {NoDAD: true}}}}},
 		Services: []serviceconfig.Service{{Name: "edge", BGP: &c}},
 	}
-	fixture := startFixtureDaemon(t, doc)
+	fixture := startFixtureDaemon(t, config.FromNative(doc))
 	var peer *fixtureBGPPeer
 	select {
 	case peer = <-peerReady:

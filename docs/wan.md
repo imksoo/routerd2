@@ -1,6 +1,6 @@
 # Native WAN ownership
 
-`services[].ra_client`, `services[].dhcp6` and `services[].ds_lite` are separate
+`resources[].service.ra_client`, `resources[].service.dhcp6` and `resources[].service.ds_lite` are separate
 supervised processes. The example [wan-dslite.yaml](../examples/wan-dslite.yaml)
 combines them. LAN DHCP, DNS and prefix advertisements are separate services;
 the example does not implicitly enable them.
@@ -44,7 +44,7 @@ Firewall rules may match its name before it exists.
 | `interface` | IPv6 underlay, shared by all referenced WAN sources |
 | `tunnel` | Dynamically owned kernel ip6tnl interface |
 | `source_from` | Named RA client providing an eligible global IPv6 address |
-| `local_address` | Alternative explicit source, already declared on that underlay in `network.interfaces` |
+| `local_address` | Alternative explicit source, already declared on that underlay by an `address` resource |
 | `aftr_from` | Named DHCPv6 service supplying the preferred AFTR candidate |
 | `candidates` | Ordered configured hostname or IPv6 fallbacks |
 | `dns_from` | Explicit RA/DHCPv6 service names supplying IPv6 DNS servers |

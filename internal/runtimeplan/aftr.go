@@ -34,7 +34,7 @@ func deadlineMinimum(values ...time.Time) time.Time {
 
 // Dependency construction is pure and uses only explicitly authorized facts.
 // The caller additionally gates Source against the acknowledged kernel view.
-func aftrDependencies(doc config.Document, s serviceconfig.Service, records map[string]serviceconfig.Update, digest string, now time.Time) (aftr.Input, error) {
+func aftrDependencies(doc config.Native, s serviceconfig.Service, records map[string]serviceconfig.Update, digest string, now time.Time) (aftr.Input, error) {
 	c := s.DSLite
 	in := aftr.Input{Resource: s.Name, Interface: c.Interface, ConfigDigest: digest, Generation: 1, UpdatedAt: now.UTC(), Active: true}
 	if c.LocalAddress != "" {
@@ -218,7 +218,7 @@ func (r *Runtime) aftrRoutes(mux *http.ServeMux) {
 	})
 }
 
-func projectDSLite(p *projection, doc config.Document, runtimeDir, stateDir string, records map[string]serviceconfig.Update, inputs map[string]aftr.Input, now time.Time) error {
+func projectDSLite(p *projection, doc config.Native, runtimeDir, stateDir string, records map[string]serviceconfig.Update, inputs map[string]aftr.Input, now time.Time) error {
 	for _, service := range doc.Services {
 		if service.DSLite == nil {
 			continue

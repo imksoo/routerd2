@@ -13,10 +13,10 @@ import (
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
 
-func leaseServerDocument() config.Document {
+func leaseServerDocument() config.Native {
 	server := serviceconfig.DHCPServer{Interface: "lan0", ServerAddress: "192.0.2.1", Primary: dhcpserverconfig.Scope{Prefix: "192.0.2.0/24", Start: "192.0.2.100", End: "192.0.2.200", LeaseSeconds: 600}}
 	dns := dnsconfig.RuntimeConfig{Spec: api.DNSResolverSpec{Listen: []api.DNSResolverListenSpec{{Name: "local", Addresses: []string{"127.0.0.1"}, Port: 1053}}, Sources: []api.DNSResolverSourceSpec{{Name: "zones", Kind: "zone", Match: []string{"lab.example"}, ZoneRef: []string{"lan"}}}}, Zones: []dnsconfig.RuntimeZone{{Name: "lan", Spec: api.DNSZoneSpec{Zone: "lab.example", DHCPDerived: api.DNSZoneDHCPDerivedSpec{Sources: []string{"DHCPv4Server/leases"}}}}}}
-	return config.Document{SchemaVersion: 1, Services: []serviceconfig.Service{{Name: "leases", DHCPServer: &server}, {Name: "dns", DNS: &dns}}}
+	return config.Native{Services: []serviceconfig.Service{{Name: "leases", DHCPServer: &server}, {Name: "dns", DNS: &dns}}}
 }
 
 func TestDHCPServerDNSProjectionFencesSourcesAndExpiresReplays(t *testing.T) {
@@ -62,7 +62,7 @@ func TestDHCPServerDNSProjectionFencesSourcesAndExpiresReplays(t *testing.T) {
 func TestDNSLeaseSourceDependenciesAreValidatedBeforeApply(t *testing.T) {
 	doc := leaseServerDocument()
 	doc.Services[1].DNS.Zones[0].Spec.DHCPDerived.Sources = []string{"missing"}
-	if err := config.Validate(doc); err == nil || !strings.Contains(err.Error(), "unresolved reference") {
+	if err := config.Validate(config.FromNative(doc)); err == nil || !strings.Contains(err.Error(), "unresolved reference") {
 		t.Fatalf("unresolved source was not rejected: %v", err)
 	}
 	doc = leaseServerDocument()
@@ -70,7 +70,7 @@ func TestDNSLeaseSourceDependenciesAreValidatedBeforeApply(t *testing.T) {
 	for _, zoneName := range []string{"extra-a", "extra-b"} {
 		doc.Services[1].DNS.Zones = append(doc.Services[1].DNS.Zones, dnsconfig.RuntimeZone{Name: zoneName, Spec: api.DNSZoneSpec{Zone: zoneName + ".example", DHCPDerived: api.DNSZoneDHCPDerivedSpec{Sources: []string{"leases"}}}})
 	}
-	if err := config.Validate(doc); err == nil || !strings.Contains(err.Error(), "4096") {
+	if err := config.Validate(config.FromNative(doc)); err == nil || !strings.Contains(err.Error(), "4096") {
 		t.Fatalf("unbounded combined lease projection was accepted: %v", err)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"reflect"
@@ -17,6 +18,7 @@ import (
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/control"
 	"github.com/imksoo/routerd2/internal/network"
+	"github.com/imksoo/routerd2/internal/resourceprogram"
 	"golang.org/x/term"
 )
 
@@ -89,9 +91,23 @@ func jsonCopy(out, in any) error {
 }
 
 func fixtureShell() (*interactiveShell, *fakeConfigurationClient) {
-	d := config.Document{SchemaVersion: 1, Network: network.Desired{Interfaces: []network.Interface{{Name: "eth0", MTU: 1500, Addresses: []string{"192.0.2.1/24"}}}}}
+	d := config.Document{SchemaVersion: config.SchemaVersion, Resources: []resourceprogram.Resource{
+		{ID: "lan", Interface: &network.Interface{Name: "eth0", MTU: 1500}},
+		{ID: "lan-address", DependsOn: []string{"lan"}, Owner: "lan", Address: &resourceprogram.Address{Interface: "eth0", CIDR: "192.0.2.1/24"}},
+	}}
 	f := &fakeConfigurationClient{state: control.State{Committed: config.Committed{Revision: 4, Config: d}, Healthy: true}}
 	return &interactiveShell{client: f}, f
+}
+
+func cliResource(t *testing.T, doc config.Document, id string) resourceprogram.Resource {
+	t.Helper()
+	for _, resource := range doc.Resources {
+		if resource.ID == id {
+			return resource
+		}
+	}
+	t.Fatalf("resource %q is missing", id)
+	return resourceprogram.Resource{}
 }
 
 func command(t *testing.T, shell *interactiveShell, line string) string {
@@ -116,24 +132,26 @@ func commandError(t *testing.T, shell *interactiveShell, line string) error {
 func TestCandidateIsolationNamedPathsAndCommit(t *testing.T) {
 	s, f := fixtureShell()
 	command(t, s, "configure")
-	command(t, s, `set network.interfaces[eth0].addresses ["192.0.2.5/24","2001:db8::5/64"]`)
-	command(t, s, "edit network.interfaces[eth0]")
+	command(t, s, `set resources[lan-address].address.cidr "192.0.2.5/24"`)
+	command(t, s, `set resources[lan-v6] {"depends_on":["lan"],"address":{"interface":"eth0","cidr":"2001:db8::5/64"}}`)
+	command(t, s, "edit resources[lan].interface")
 	command(t, s, "set mtu 1400")
-	if s.prompt() != "routerd(config:network.interfaces[eth0])# " {
+	if s.prompt() != "routerd(config:resources[lan].interface)# " {
 		t.Fatalf("wrong context prompt: %q", s.prompt())
 	}
-	command(t, s, "set /network.forwarding.ipv4 true")
-	command(t, s, "delete addresses[0]")
+	command(t, s, "set /resources[forwarding].forwarding.ipv4 true")
+	command(t, s, "delete /resources[lan-address]")
 	command(t, s, "top")
-	command(t, s, `set network.interfaces[eth1] {"mtu":1500,"addresses":["198.51.100.1/24"]}`)
-	if f.state.Config.Network.Interfaces[0].MTU != 1500 || len(f.commits) != 0 {
+	command(t, s, `set resources[wan] {"interface":{"name":"eth1","mtu":1500}}`)
+	command(t, s, `set resources[wan-address] {"address":{"interface":"eth1","cidr":"198.51.100.1/24"}}`)
+	if cliResource(t, f.state.Config, "lan").Interface.MTU != 1500 || len(f.commits) != 0 {
 		t.Fatal("candidate edits escaped into the running configuration")
 	}
-	if s.candidate.base.Network.Interfaces[0].Addresses[0] != "192.0.2.1/24" {
+	if cliResource(t, s.candidate.base, "lan-address").Address.CIDR != "192.0.2.1/24" {
 		t.Fatal("candidate changed its base snapshot")
 	}
-	if got := s.candidate.document.Network.Interfaces[1].Name; got != "eth1" {
-		t.Fatalf("named entry did not get its selector key: %q", got)
+	if got := cliResource(t, s.candidate.document, "wan"); got.ID != "wan" || got.Interface.Name != "eth1" {
+		t.Fatalf("resource selector did not preserve separate resource and interface identities: %+v", got)
 	}
 	commandError(t, s, "exit")
 	command(t, s, "validate")
@@ -141,7 +159,7 @@ func TestCandidateIsolationNamedPathsAndCommit(t *testing.T) {
 	if f.state.Revision != 5 || s.candidate.revision != 5 || documentsDiffer(s.candidate.base, s.candidate.document) {
 		t.Fatal("successful commit did not advance and reset the candidate snapshot")
 	}
-	if *f.state.Config.Network.Forwarding.IPv4 != true || f.state.Config.Network.Interfaces[0].MTU != 1400 {
+	if *cliResource(t, f.state.Config, "forwarding").Forwarding.IPv4 != true || cliResource(t, f.state.Config, "lan").Interface.MTU != 1400 {
 		t.Fatal("typed candidate was not submitted")
 	}
 	command(t, s, "exit")
@@ -155,17 +173,17 @@ func TestTypedMutationRejectsInvalidValuesAtomically(t *testing.T) {
 	command(t, s, "configure")
 	before, _ := cloneDocument(s.candidate.document)
 	for _, line := range []string{
-		`set network.unknown true`,
-		`set network.interfaces[eth0].mtu "1500"`,
-		`set network.interfaces[eth0].mtu null`,
-		`set network.interfaces[eth1] {"name":"eth2"}`,
-		`set network.interfaces[eth1] {"unknown":3}`,
-		`set network.interfaces[eth1] {"mtu":1400,"mtu":1500}`,
-		`set network.firewall.forward[0].from true`,
-		`set network.routes[2].interface "eth0"`,
-		`set network.interfaces[eth0].addresses[4] "192.0.2.2/24"`,
-		`set network.forwarding.ipv4 true false`,
-		`delete network.interfaces[missing]`,
+		`set unknown true`,
+		`set resources[lan].interface.mtu "1500"`,
+		`set resources[lan].interface.mtu null`,
+		`set resources[wan] {"id":"other","interface":{"name":"eth1"}}`,
+		`set resources[wan] {"unknown":3}`,
+		`set resources[wan] {"interface":{"mtu":1400,"mtu":1500}}`,
+		`set resources[filter].firewall.forward[0].from true`,
+		`set resources[default].route.next_hops[2].interface "eth0"`,
+		`set resources[lan-address].depends_on[4] "lan"`,
+		`set resources[forwarding].forwarding.ipv4 true false`,
+		`delete resources[missing]`,
 	} {
 		t.Run(line, func(t *testing.T) {
 			commandError(t, s, line)
@@ -174,23 +192,58 @@ func TestTypedMutationRejectsInvalidValuesAtomically(t *testing.T) {
 			}
 		})
 	}
-	command(t, s, `set network.routes[0] {"destination":"0.0.0.0/0","interface":"eth0","gateway":"192.0.2.254"}`)
-	command(t, s, `set network.firewall.forward[0] {"from":"eth0","to":"eth1"}`)
-	command(t, s, "set network.forwarding.ipv6 false")
-	if s.candidate.document.Network.Firewall == nil || s.candidate.document.Network.Forwarding.IPv6 == nil || *s.candidate.document.Network.Forwarding.IPv6 {
+	command(t, s, `set resources[default] {"route":{"destination":"0.0.0.0/0","interface":"eth0","gateway":"192.0.2.254"}}`)
+	command(t, s, `set resources[filter].firewall.forward[0] {"from":"eth0","to":"eth1"}`)
+	command(t, s, "set resources[forwarding].forwarding.ipv6 false")
+	forwarding := cliResource(t, s.candidate.document, "forwarding").Forwarding
+	if cliResource(t, s.candidate.document, "filter").Firewall == nil || forwarding.IPv6 == nil || *forwarding.IPv6 {
 		t.Fatal("pointer and list values were not initialized correctly")
 	}
-	command(t, s, "delete network.forwarding.ipv6")
-	command(t, s, "delete network.routes[0]")
-	if s.candidate.document.Network.Forwarding.IPv6 != nil || len(s.candidate.document.Network.Routes) != 0 {
+	command(t, s, "delete resources[forwarding].forwarding.ipv6")
+	command(t, s, "delete resources[default]")
+	if cliResource(t, s.candidate.document, "forwarding").Forwarding.IPv6 != nil {
 		t.Fatal("delete did not restore the unset representation")
+	}
+	for _, resource := range s.candidate.document.Resources {
+		if resource.ID == "default" {
+			t.Fatal("delete retained the selected resource")
+		}
+	}
+}
+
+func TestResourceIDsAndNestedNamesUseTheirOwnSelectors(t *testing.T) {
+	s, f := fixtureShell()
+	f.state.Config = config.Document{SchemaVersion: config.SchemaVersion, Resources: []resourceprogram.Resource{
+		{ID: "interface/eth0.100", Interface: &network.Interface{Name: "eth0.100", MTU: 1500}},
+	}}
+	command(t, s, "configure")
+	command(t, s, "edit resources[interface/eth0.100].interface")
+	command(t, s, "set mtu 1400")
+	if got := strings.TrimSpace(command(t, s, "show mtu")); got != "1400" {
+		t.Fatalf("resource ID containing slash and dot selected the wrong value: %q", got)
+	}
+	command(t, s, "top")
+	input := "set resources[interface/eth0.100].interface.mt"
+	if line, _, ok := s.complete(input, len(input), '\t'); !ok || line != input+"u " {
+		t.Fatalf("resource ID completion: %q, handled=%t", line, ok)
+	}
+	command(t, s, `set resources[service/pd] {"service":{"name":"pd","dhcp6":{"interface":"eth0.100","iaid":1}}}`)
+	command(t, s, `set resources[service/pd].service.dhcp6.delegations[lan] {"interface":"eth1","subnet_id":1}`)
+	resource := cliResource(t, s.candidate.document, "service/pd")
+	if resource.Service.Name != "pd" || len(resource.Service.DHCP6.Delegations) != 1 || resource.Service.DHCP6.Delegations[0].Name != "lan" {
+		t.Fatalf("resource ID overwrote a service or delegation name: %+v", resource)
+	}
+	before, _ := cloneDocument(s.candidate.document)
+	commandError(t, s, `set resources[service/pd].service.dhcp6.delegations[lan] {"name":"other","interface":"eth1"}`)
+	if documentsDiffer(before, s.candidate.document) {
+		t.Fatal("mismatched nested name partially changed the candidate")
 	}
 }
 
 func TestInvalidIntermediateCandidateCannotCommit(t *testing.T) {
 	s, f := fixtureShell()
 	command(t, s, "configure")
-	command(t, s, `set network.interfaces[eth0].addresses ["not-a-prefix"]`)
+	command(t, s, `set resources[lan-address].address.cidr "not-a-prefix"`)
 	if !strings.Contains(command(t, s, "show candidate"), "not-a-prefix") {
 		t.Fatal("invalid intermediate candidate must remain inspectable")
 	}
@@ -208,13 +261,13 @@ func TestInvalidIntermediateCandidateCannotCommit(t *testing.T) {
 func TestCommitConflictRetainsCandidateAndRevision(t *testing.T) {
 	s, f := fixtureShell()
 	command(t, s, "configure")
-	command(t, s, "set network.interfaces[eth0].mtu 1400")
+	command(t, s, "set resources[lan].interface.mtu 1400")
 	f.state.Revision++ // Another administrator commits after this snapshot.
 	err := commandError(t, s, "commit")
-	if !strings.Contains(err.Error(), "candidate retained") || s.candidate.revision != 4 || s.candidate.document.Network.Interfaces[0].MTU != 1400 {
+	if !strings.Contains(err.Error(), "candidate retained") || s.candidate.revision != 4 || cliResource(t, s.candidate.document, "lan").Interface.MTU != 1400 {
 		t.Fatalf("conflict lost the candidate: %v", err)
 	}
-	if f.commits[0].ExpectedRevision != 4 || f.state.Config.Network.Interfaces[0].MTU != 1500 {
+	if f.commits[0].ExpectedRevision != 4 || cliResource(t, f.state.Config, "lan").Interface.MTU != 1500 {
 		t.Fatal("optimistic revision guard was bypassed")
 	}
 }
@@ -222,7 +275,7 @@ func TestCommitConflictRetainsCandidateAndRevision(t *testing.T) {
 func TestLostCommitResponseReusesRequestIdentity(t *testing.T) {
 	s, f := fixtureShell()
 	command(t, s, "configure")
-	command(t, s, "set network.interfaces[eth0].mtu 1400")
+	command(t, s, "set resources[lan].interface.mtu 1400")
 	f.loseCommitResponse = true
 	commandError(t, s, "commit")
 	if f.state.Revision != 5 || s.candidate.revision != 4 {
@@ -240,7 +293,7 @@ func TestLostCommitResponseReusesRequestIdentity(t *testing.T) {
 func TestConfirmedCommitUsesOriginalTransactionIdentity(t *testing.T) {
 	s, f := fixtureShell()
 	command(t, s, "configure")
-	command(t, s, "set network.interfaces[eth0].mtu 1400")
+	command(t, s, "set resources[lan].interface.mtu 1400")
 	commandError(t, s, "commit confirmed 4")
 	commandError(t, s, "commit confirmed 3601")
 	command(t, s, "commit confirmed 60")
@@ -269,12 +322,12 @@ func TestYAMLEditPreservesCandidateOnErrorAndAbort(t *testing.T) {
 		_, err := s.execute(context.Background(), "edit running-config.yaml", io.Discard, func() (string, error) { return text, pasteErr })
 		return err
 	}
-	yamlText := "schema_version: 1\nnetwork:\n  forwarding:\n    ipv4: true\n"
+	yamlText := fmt.Sprintf("schema_version: %d\nresources:\n  - id: forwarding\n    forwarding:\n      ipv4: true\n", config.SchemaVersion)
 	if err := runPaste(yamlText, nil); err != nil {
 		t.Fatal(err)
 	}
 	accepted, _ := cloneDocument(s.candidate.document)
-	for _, text := range []string{"network: [", "schema_version: 1\nnetwork:\n  mystery: true\n"} {
+	for _, text := range []string{"resources: [", fmt.Sprintf("schema_version: %d\nresources:\n  - id: forwarding\n    mystery: true\n", config.SchemaVersion)} {
 		if err := runPaste(text, nil); err == nil || documentsDiffer(accepted, s.candidate.document) {
 			t.Fatalf("invalid paste changed candidate: %q, error=%v", text, err)
 		}
@@ -285,7 +338,7 @@ func TestYAMLEditPreservesCandidateOnErrorAndAbort(t *testing.T) {
 	if err := runPaste(strings.Repeat("a", interactiveDocumentLimit+1), nil); !errors.Is(err, errInputLimit) || documentsDiffer(accepted, s.candidate.document) {
 		t.Fatal("oversized paste was not rejected atomically")
 	}
-	if f.state.Config.Network.Forwarding.IPv4 != nil || len(f.commits) != 0 {
+	if len(f.state.Config.Resources) != 2 || cliResource(t, f.state.Config, "lan-address").Address.CIDR != "192.0.2.1/24" || len(f.commits) != 0 {
 		t.Fatal("YAML paste bypassed commit")
 	}
 }
@@ -294,8 +347,8 @@ func TestCandidateSizeLimitIsAtomic(t *testing.T) {
 	s, _ := fixtureShell()
 	command(t, s, "configure")
 	before, _ := cloneDocument(s.candidate.document)
-	value, _ := json.Marshal([]string{strings.Repeat("x", interactiveDocumentLimit)})
-	if err := s.candidate.mutate("network.interfaces[eth0].addresses", string(value), false); err == nil {
+	value, _ := json.Marshal(strings.Repeat("x", interactiveDocumentLimit))
+	if err := s.candidate.mutate("resources[lan-address].address.cidr", string(value), false); err == nil {
 		t.Fatal("oversized candidate accepted")
 	}
 	if documentsDiffer(before, s.candidate.document) {
@@ -309,7 +362,7 @@ func TestCandidateDiffAndContextNavigation(t *testing.T) {
 	if got := command(t, s, "diff"); got != "No changes.\n" {
 		t.Fatalf("unexpected empty diff %q", got)
 	}
-	command(t, s, "edit network.interfaces[eth0]")
+	command(t, s, "edit resources[lan].interface")
 	command(t, s, "set mtu 1400")
 	if got := command(t, s, "show mtu"); strings.TrimSpace(got) != "1400" {
 		t.Fatalf("relative show returned %q", got)
@@ -327,14 +380,14 @@ func TestCandidateDiffAndContextNavigation(t *testing.T) {
 		t.Fatalf("diff omitted changed value: %s", diff)
 	}
 	command(t, s, "up")
-	if s.candidate.path != "network" {
+	if s.candidate.path != "resources[lan]" {
 		t.Fatalf("wrong parent context %q", s.candidate.path)
 	}
 	command(t, s, "exit")
 	if s.candidate.path != "" || s.candidate == nil {
 		t.Fatal("exit did not leave only the current context")
 	}
-	commandError(t, s, "edit network.interfaces")
+	commandError(t, s, "edit resources")
 }
 
 func TestCompletionRespectsContextAndUTF8CursorBoundaries(t *testing.T) {
@@ -344,18 +397,18 @@ func TestCompletionRespectsContextAndUTF8CursorBoundaries(t *testing.T) {
 		t.Fatalf("command completion: %q %d %v", line, pos, ok)
 	}
 	command(t, s, "configure")
-	input := "set network.interfaces[eth0].mt"
+	input := "set resources[lan].interface.mt"
 	line, pos, ok = s.complete(input, len(input), '\t')
-	if !ok || line != "set network.interfaces[eth0].mtu " || pos != len(line) {
+	if !ok || line != "set resources[lan].interface.mtu " || pos != len(line) {
 		t.Fatalf("path completion: %q %d %v", line, pos, ok)
 	}
-	command(t, s, "edit network.interfaces[eth0]")
+	command(t, s, "edit resources[lan].interface")
 	line, _, _ = s.complete("set mt", len("set mt"), '\t')
 	if line != "set mtu " {
 		t.Fatalf("relative completion: %q", line)
 	}
-	line, _, _ = s.complete("set /network.forw", len("set /network.forw"), '\t')
-	if line != "set /network.forwarding" {
+	line, _, _ = s.complete("set /resources[lan].prov", len("set /resources[lan].prov"), '\t')
+	if line != "set /resources[lan].provenance" {
 		t.Fatalf("absolute completion: %q", line)
 	}
 	for _, pos := range []int{-1, 1, 3} {
@@ -369,18 +422,18 @@ func TestCompletionRespectsContextAndUTF8CursorBoundaries(t *testing.T) {
 }
 
 func TestPathGrammarAndReadErrors(t *testing.T) {
-	for _, path := range []string{"", ".network", "network.", "network..interfaces", "network.interfaces[]", "network.interfaces[eth0", "network.interfaces[../x]", "network.interfaces[eth 0]", "network.interfaces[eth0]junk"} {
+	for _, path := range []string{"", ".resources", "resources.", "resources..interface", "resources[]", "resources[lan", "resources[lan$]", "resources[lan 0]", "resources[lan]junk"} {
 		if _, err := parsePath(path); err == nil {
 			t.Errorf("accepted invalid path %q", path)
 		}
 	}
-	parts, err := parsePath("network.interfaces[eth0.100].addresses[0]")
-	if err != nil || len(parts) != 3 || parts[1].selector != "eth0.100" {
-		t.Fatalf("dot in interface selector split the path: %v %v", parts, err)
+	parts, err := parsePath("resources[interface/eth0.100].interface.mtu")
+	if err != nil || len(parts) != 3 || parts[0].selector != "interface/eth0.100" {
+		t.Fatalf("slash or dot in resource identity split the path: %v %v", parts, err)
 	}
 	s, _ := fixtureShell()
 	command(t, s, "configure")
-	for _, path := range []string{"network.firewall.forward", "network.interfaces[absent].mtu", "network.interfaces[eth0].mtu[0]", "network.interfaces[eth0].mtu.value"} {
+	for _, path := range []string{"resources[lan].firewall.forward", "resources[absent].interface.mtu", "resources[lan].interface.mtu[0]", "resources[lan].interface.mtu.value"} {
 		parts, _ := parsePath(path)
 		if _, err := readPath(reflect.ValueOf(s.candidate.document), parts); err == nil {
 			t.Errorf("read of missing/invalid path %q succeeded", path)
@@ -442,14 +495,15 @@ func TestYAMLPasteTerminators(t *testing.T) {
 		if cancel {
 			end = ".abort"
 		}
-		rw := &scriptedTerminal{input: strings.NewReader("schema_version: 1\rnetwork: {}\r" + end + "\r")}
+		yamlText := fmt.Sprintf("schema_version: %d\nresources: []\n", config.SchemaVersion)
+		rw := &scriptedTerminal{input: strings.NewReader(strings.ReplaceAll(yamlText, "\n", "\r") + end + "\r")}
 		terminal := term.NewTerminal(rw, "")
 		text, err := readYAMLPaste(context.Background(), terminal)
 		if cancel {
 			if !errors.Is(err, errPasteAborted) {
 				t.Fatalf("abort terminator: %v", err)
 			}
-		} else if err != nil || text != "schema_version: 1\nnetwork: {}\n" {
+		} else if err != nil || text != yamlText {
 			t.Fatalf("end terminator: text=%q error=%v", text, err)
 		}
 	}

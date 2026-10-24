@@ -25,7 +25,7 @@ Alpineのパッケージをビルドとイメージ組み立てに利用しま�
 | BGP | GoBGP v4 を独立 worker に統合。IPv4/IPv6 unicast、policy、選択経路の kernel 投影、recursive next hop、ECMP、期限付き FIB ownership。未解決 next hop は状態に表示し、未解決のまま FIB に入れない |
 | BFD | native IPv4/IPv6 single-hop asynchronous BFD。BGP の明示した隣接 peer を管理し、受信期限・producer 世代・Down counter で実セッションと学習経路を制御。旧 BFD profile、multihop、認証・echo は別の未実装範囲 |
 | WireGuard | kernel WireGuard を generic netlink で設定。完全な peer set、IPv4/IPv6 endpoint、roaming、公開 handshake/counter 状態。秘密鍵は versioned file と immutable snapshot で管理し、失敗時は所有リンクを DOWN にして復旧 |
-| configuration | YAML / JSON の厳密な検証、candidate、revision・冪等 request ID、永続 journal、プロセス構成と kernel projection の適用、失敗時の旧設定への reconcile |
+| configuration | ResourceProgram（schema 2）の ID・依存 graph・owner・provenance、YAML / JSON の厳密な検証、read-only `config plan`、candidate、revision・冪等 request ID、永続 journal、プロセス構成と kernel projection の適用、失敗時の旧設定への reconcile |
 | confirmed commit | 確認期限で rollback。未確認のまま control が再起動した場合も復元。復元失敗を成功として扱わない |
 | management | 内蔵 SSH、公開鍵認証、永続 host key、Tab / history 付き候補編集、YAML 一括編集、diff、validate、commit confirmed、ログ参照。OS シェルを呼ばない |
 | large observations | 大きな設定の revision 固定読取・確認応答、軽量 health、network summary と詳細ページ。経路・WireGuard の大きな観測を省略するときは件数・省略フラグを明示し、CLI から詳細を取得 |
@@ -125,9 +125,9 @@ ssh admin@ROUTER restart network
 
 ```text
 routerd> configure
-routerd(config)# edit network.interfaces[eth0]
-routerd(config:network.interfaces[eth0])# set mtu 1500
-routerd(config:network.interfaces[eth0])# top
+routerd(config)# edit resources[interface/eth0].interface
+routerd(config:resources[interface/eth0].interface)# set mtu 1500
+routerd(config:resources[interface/eth0].interface)# top
 routerd(config)# diff
 routerd(config)# validate
 routerd(config)# commit confirmed 60
@@ -141,7 +141,7 @@ routerd> show network wireguard-peers interface wg0
 routerd> show logs module service.wan limit 50
 ```
 
-`set` の値は JSON、パスのリスト要素は名前または番号で指定します。
+`set` の値は JSON、resource は ID、内部のリスト要素は名前または番号で指定します。
 `edit running-config.yaml` は候補全体の YAML を表示し、置換文書を貼り付けて `.end` で検証します。
 `.abort` で編集を取り消せます。Vim や OS shell の起動ではありません。
 Tab 補完、矢印キーによる履歴、`delete`、`up`、`top`、`abort` も使用できます。
@@ -153,9 +153,12 @@ YAML のコメント・元の整形は保持しません。ローカルの TTY �
 routerd config export > running-config.yaml
 routerd config migrate old-routerd.yaml > candidate-routerd2.yaml
 routerd config validate candidate-routerd2.yaml
+routerd config plan candidate-routerd2.yaml
 ```
 
-`schema_version: 1` は routerd2 のモデルです。旧 resource YAML の無条件な互換ではありません。
+`schema_version: 2` の [ResourceProgram](docs/resource-program.md) を正本として保存・編集します。
+interface と address は独立した resource です。試作 schema 1 の reader は持ちません。
+`depends_on` は現在はコンパイル graph で、三値条件と任意 worker の readiness 待機は次の実装範囲です。
 移行器は未実装の暗黙依存や権限・入力制御の意味変更を拒否します。
 
 ## Architecture constraints

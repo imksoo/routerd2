@@ -103,7 +103,7 @@ func editDS(options *Options, edit func(*DSLitePolicy)) {
 func TestExplicitWANPolicyJoinsRAInformationAFTRAndRoute(t *testing.T) {
 	result := compiledPolicy(t, fixture(t, "wan-dynamic"), wanPolicy(t))
 	d := result.Document
-	if len(d.Services) != 3 || len(d.Network.Interfaces) != 2 || len(d.Network.DSLite) != 0 || len(d.Network.Routes) != 0 {
+	if len(nativeProgram(t, d).Services) != 3 || len(nativeProgram(t, d).Network.Interfaces) != 2 || len(nativeProgram(t, d).Network.DSLite) != 0 || len(nativeProgram(t, d).Network.Routes) != 0 {
 		t.Fatal("dynamic ownership leaked into static network intent or created an extra socket owner")
 	}
 	raService, pd, ds := service(t, d, "ra_client"), service(t, d, "dhcp6pd"), service(t, d, "aftr")
@@ -126,7 +126,7 @@ func TestExplicitWANPolicyJoinsRAInformationAFTRAndRoute(t *testing.T) {
 	if got.B4Address != "192.0.0.2/32" || got.B4Peer != "192.0.0.1/32" || got.MTU != 1460 || got.DefaultRoute == nil || !*got.DefaultRoute || got.RouteGateway != "192.0.0.1" || got.Metric != 50 {
 		t.Fatal("B4 peer, fixed MTU or independently declared route was lost")
 	}
-	if d.Network.Firewall == nil || len(d.Network.Firewall.NAT) != 1 || d.Network.Firewall.NAT[0].Match.OutInterface != "ds0" {
+	if nativeProgram(t, d).Network.Firewall == nil || len(nativeProgram(t, d).Network.Firewall.NAT) != 1 || nativeProgram(t, d).Network.Firewall.NAT[0].Match.OutInterface != "ds0" {
 		t.Fatal("NAT did not retain its separately declared dynamic tunnel interface match")
 	}
 	for _, ref := range []string{"IPv6RAAddress/wan-ra", "DSLiteTunnel/provider"} {
@@ -156,7 +156,7 @@ func TestPDInformationUsesOneIdentityAndExactLegacyInterfaceMatch(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Document.Services) != 2 {
+	if len(nativeProgram(t, result.Document).Services) != 2 {
 		t.Fatal("information resource opened a second DHCPv6 socket")
 	}
 	pd := service(t, result.Document, "dhcp6pd")

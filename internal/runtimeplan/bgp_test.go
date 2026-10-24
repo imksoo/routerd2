@@ -16,7 +16,7 @@ import (
 func TestBGPRecursiveResolutionECMPAndUnreachableAccounting(t *testing.T) {
 	now := time.Now()
 	service := serviceconfig.Service{Name: "edge", BGP: &serviceconfig.BGP{Runtime: bgpconfig.AppliedConfig{Global: bgpconfig.AppliedGlobal{ASN: 65001, RouterID: "192.0.2.10"}}}}
-	d := config.Document{SchemaVersion: 1, Services: []serviceconfig.Service{service}, Network: network.Desired{Interfaces: []network.Interface{{Name: "wan0", Addresses: []string{"192.0.2.10/24"}}, {Name: "wan1", Addresses: []string{"198.51.100.10/24"}}}, Routes: []network.Route{{Destination: "10.8.0.0/16", Gateway: "192.0.2.1", Interface: "wan0"}}}}
+	d := config.Native{Services: []serviceconfig.Service{service}, Network: network.Desired{Interfaces: []network.Interface{{Name: "wan0", Addresses: []string{"192.0.2.10/24"}}, {Name: "wan1", Addresses: []string{"198.51.100.10/24"}}}, Routes: []network.Route{{Destination: "10.8.0.0/16", Gateway: "192.0.2.1", Interface: "wan0"}}}}
 	routes := []bgpconfig.Route{
 		{Prefix: "203.0.113.0/24", NextHop: "192.0.2.2", Interface: "wan0"},
 		{Prefix: "203.0.113.0/24", NextHop: "198.51.100.2", Interface: "wan1"},

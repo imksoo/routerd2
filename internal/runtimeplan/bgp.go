@@ -60,7 +60,7 @@ func routeMetric(metric int, ip netip.Addr) int {
 // visible as a pending RouteIssue; it never installs a speculative onlink route
 // or kills a healthy BGP session. Kernel apply errors still fail the ACK.
 // Resolution uses this complete committed projection, excluding foreign routes.
-func projectBGP(p *projection, doc config.Document, records map[string]serviceconfig.Update, now time.Time, clock bfd.Clock) error {
+func projectBGP(p *projection, doc config.Native, records map[string]serviceconfig.Update, now time.Time, clock bfd.Clock) error {
 	groups := map[string]*routeGroup{}
 	sources := collectBFD(doc.Services, records)
 	for _, service := range doc.Services {

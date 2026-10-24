@@ -172,7 +172,7 @@ func TestDHCPDNSPolicyMustCoverEachResolverReceivingLeaseZones(t *testing.T) {
 	options.DHCPDNS["DNSResolver/second"] = DHCPDNSPolicy{SourceScopedFiniteLeases: &yes}
 	result := compiledPolicy(t, data, options)
 	consumers := 0
-	for _, s := range result.Document.Services {
+	for _, s := range nativeProgram(t, result.Document).Services {
 		if s.DNS != nil && s.HasDNSLeaseSources() {
 			consumers++
 		}

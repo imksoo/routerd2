@@ -52,8 +52,8 @@ func (n *aftrNetwork) SourceAddress(_ context.Context, name, requested string) (
 	return value, nil
 }
 
-func aftrDocument() config.Document {
-	return config.Document{SchemaVersion: 1, Network: network.Desired{Interfaces: []network.Interface{{Name: "wan0", Addresses: []string{"2001:db8:42::1/64"}}}}, Services: []serviceconfig.Service{{Name: "dslite", DSLite: &serviceconfig.DSLite{Interface: "wan0", Tunnel: "dslite0", LocalAddress: "2001:db8:42::1", Candidates: []string{"2001:db8:42::2"}}}}}
+func aftrDocument() config.Native {
+	return config.Native{Network: network.Desired{Interfaces: []network.Interface{{Name: "wan0", Addresses: []string{"2001:db8:42::1/64"}}}}, Services: []serviceconfig.Service{{Name: "dslite", DSLite: &serviceconfig.DSLite{Interface: "wan0", Tunnel: "dslite0", LocalAddress: "2001:db8:42::1", Candidates: []string{"2001:db8:42::2"}}}}}
 }
 
 func TestAFTRObservedSourceGenerationAndProjection(t *testing.T) {
@@ -62,7 +62,7 @@ func TestAFTRObservedSourceGenerationAndProjection(t *testing.T) {
 	n := &aftrNetwork{observed: network.Snapshot{Interfaces: []network.InterfaceState{{Name: "wan0", Index: 42, Up: true, Addresses: []network.AddressState{{Address: "2001:db8:42::1/64", Owned: true, PreferredLifetime: ^uint32(0), ValidLifetime: ^uint32(0), Flags: unix.IFA_F_TENTATIVE}}}}}}
 	r := New(t.TempDir(), t.TempDir(), n)
 	r.manager = &memoryManager{}
-	if err := r.ApplyConfig(ctx, 1, doc); err != nil {
+	if err := r.ApplyConfig(ctx, 1, config.FromNative(doc)); err != nil {
 		t.Fatal(err)
 	}
 	input, err := r.AFTRInput(ctx, "service.dslite")
@@ -110,7 +110,7 @@ func TestAFTRObservedSourceGenerationAndProjection(t *testing.T) {
 	}
 	prior := r.bindings["service.dslite"].digest
 	doc.Services[0].DSLite.Candidates = []string{"2001:db8:42::3"}
-	if err := r.ApplyConfig(ctx, 2, doc); err != nil {
+	if err := r.ApplyConfig(ctx, 2, config.FromNative(doc)); err != nil {
 		t.Fatal(err)
 	}
 	if r.bindings["service.dslite"].digest == prior || len(r.aftrInputs) != 0 || len(n.applied.DSLite) != 0 {
@@ -143,7 +143,7 @@ func TestAFTRPeerAndGatewayChangesFenceOldProjection(t *testing.T) {
 			doc.Services[0].DSLite.B4Peer = step.peer
 			doc.Services[0].DSLite.RouteGateway = step.gateway
 			doc.Services[0].DSLite.DefaultRoute = step.defaultRoute
-			if err := r.ApplyConfig(ctx, uint64(i+1), doc); err != nil {
+			if err := r.ApplyConfig(ctx, uint64(i+1), config.FromNative(doc)); err != nil {
 				t.Fatal(err)
 			}
 			if len(n.applied.DSLite) != 0 || len(n.applied.Routes) != 0 || len(n.applied.Interfaces) != 1 {
@@ -186,7 +186,7 @@ func TestAFTRPeerAndGatewayChangesFenceOldProjection(t *testing.T) {
 			priorDigest, priorUpdate = input.ConfigDigest, current
 		})
 	}
-	if err := r.ApplyConfig(ctx, uint64(len(steps)+1), config.Document{SchemaVersion: config.SchemaVersion}); err != nil {
+	if err := r.ApplyConfig(ctx, uint64(len(steps)+1), config.FromNative(config.Native{})); err != nil {
 		t.Fatal(err)
 	}
 	if len(n.applied.DSLite)+len(n.applied.Interfaces)+len(n.applied.Routes) != 0 || len(r.bindings) != 0 || len(r.aftrInputs) != 0 {
@@ -331,37 +331,37 @@ func TestAFTRExplicitInfiniteInformationRefresh(t *testing.T) {
 }
 
 func TestDSLiteRejectsUnownedAndCyclicDependencies(t *testing.T) {
-	cases := map[string]func(*config.Document){
-		"uncommitted source": func(d *config.Document) { d.Network.Interfaces[0].Addresses = nil },
-		"unscoped resolver": func(d *config.Document) {
+	cases := map[string]func(*config.Native){
+		"uncommitted source": func(d *config.Native) { d.Network.Interfaces[0].Addresses = nil },
+		"unscoped resolver": func(d *config.Native) {
 			d.Services[0].DSLite.Resolvers = []serviceconfig.AFTRResolver{{Address: "::1"}}
 		},
-		"host resolver hostname": func(d *config.Document) {
+		"host resolver hostname": func(d *config.Native) {
 			d.Services[0].DSLite.Resolvers = []serviceconfig.AFTRResolver{{Address: "resolver.example"}}
 		},
-		"source kind": func(d *config.Document) {
+		"source kind": func(d *config.Native) {
 			d.Services[0].DSLite.LocalAddress = ""
 			d.Services[0].DSLite.SourceFrom = "dslite"
 		},
-		"static tunnel collision": func(d *config.Document) {
+		"static tunnel collision": func(d *config.Native) {
 			d.Network.Interfaces = append(d.Network.Interfaces, network.Interface{Name: "dslite0"})
 		},
-		"route keeps dynamic tunnel": func(d *config.Document) {
+		"route keeps dynamic tunnel": func(d *config.Native) {
 			d.Network.Routes = []network.Route{{Destination: "192.0.2.0/24", Interface: "dslite0"}}
 		},
-		"underlay cycle": func(d *config.Document) { d.Services[0].DSLite.Interface = "dslite0" },
+		"underlay cycle": func(d *config.Native) { d.Services[0].DSLite.Interface = "dslite0" },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
 			d := aftrDocument()
 			mutate(&d)
-			if err := config.Validate(d); err == nil {
+			if err := config.Validate(config.FromNative(d)); err == nil {
 				t.Fatal("unsafe configuration accepted")
 			}
 		})
 	}
 	d := aftrDocument()
-	if err := config.Validate(d); err != nil {
+	if err := config.Validate(config.FromNative(d)); err != nil {
 		t.Fatal(err)
 	}
 }

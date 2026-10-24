@@ -62,13 +62,13 @@ func (m *memoryManager) Status(_ context.Context) (supervisor.Status, error) {
 	}
 	return s, nil
 }
-func fixture(t *testing.T, doc config.Document) (*Runtime, *memoryNetwork, *memoryManager) {
+func fixture(t *testing.T, doc config.Native) (*Runtime, *memoryNetwork, *memoryManager) {
 	t.Helper()
 	n := &memoryNetwork{}
 	m := &memoryManager{}
 	r := New(t.TempDir(), t.TempDir(), n)
 	r.manager = m
-	if e := r.ApplyConfig(context.Background(), 1, doc); e != nil {
+	if e := r.ApplyConfig(context.Background(), 1, config.FromNative(doc)); e != nil {
 		t.Fatal(e)
 	}
 	return r, n, m
@@ -82,8 +82,8 @@ func update(t *testing.T, r *Runtime, name string, seq uint64, snapshot any) ser
 	}
 	return serviceconfig.Update{Name: name, Role: b.instance.Role, ConfigDigest: b.digest, Generation: 1, ProducerEpoch: strings.Repeat("a", 32), Sequence: seq, Snapshot: raw}
 }
-func wanDoc() config.Document {
-	return config.Document{SchemaVersion: 1, Services: []serviceconfig.Service{{Name: "wan", DHCP4: &serviceconfig.DHCP4{Interface: "wan0"}}}}
+func wanDoc() config.Native {
+	return config.Native{Services: []serviceconfig.Service{{Name: "wan", DHCP4: &serviceconfig.DHCP4{Interface: "wan0"}}}}
 }
 func lease4(expires time.Time) dhcp4.Snapshot {
 	return dhcp4.Snapshot{Active: true, Snapshot: old4.Snapshot{Resource: "wan", Interface: "wan0", CurrentAddress: "192.0.2.10", PrefixLength: 24, DefaultGateway: "192.0.2.1", ExpiresAt: expires}}
@@ -150,7 +150,7 @@ func TestConcurrentRenewalSurvivesConfigurationCutover(t *testing.T) {
 			t.Fatal(e)
 		}
 	}
-	if e := r.ApplyConfig(context.Background(), 2, next); e != nil {
+	if e := r.ApplyConfig(context.Background(), 2, config.FromNative(next)); e != nil {
 		t.Fatal(e)
 	}
 	if !fired || !n.applied.Interfaces[0].AddressOptions["192.0.2.10/24"].ValidUntil.Equal(expires.Add(time.Hour)) {
@@ -160,7 +160,7 @@ func TestConcurrentRenewalSurvivesConfigurationCutover(t *testing.T) {
 
 func TestPDProjectionKeepsDeprecatedAddressesAndStableRAIdentity(t *testing.T) {
 	now := time.Now()
-	doc := config.Document{SchemaVersion: 1, Services: []serviceconfig.Service{{Name: "pd", DHCP6: &serviceconfig.DHCP6{Interface: "wan0", IAID: 7, Delegations: []serviceconfig.Delegation{{Name: "lan", Interface: "lan0", SubnetID: 3, Advertise: true}}}}}}
+	doc := config.Native{Services: []serviceconfig.Service{{Name: "pd", DHCP6: &serviceconfig.DHCP6{Interface: "wan0", IAID: 7, Delegations: []serviceconfig.Delegation{{Name: "lan", Interface: "lan0", SubnetID: 3, Advertise: true}}}}}}
 	snapshot := dhcp6pd.Snapshot{Active: true, Snapshot: old6.Snapshot{Resource: "pd", Interface: "wan0", IAID: 7, CurrentPrefix: "2001:db8:100::/56", AcquiredAt: now, Preferred: 100, Valid: 200, ExpiresAt: now.Add(200 * time.Second), PreviousPrefixes: []old6.PreviousPrefixSnapshot{{Prefix: "2001:db8:200::/56", ExpiresAt: now.Add(80 * time.Second)}}}}
 	raw, _ := json.Marshal(snapshot)
 	records := map[string]serviceconfig.Update{"service.pd": {Snapshot: raw}}
@@ -211,7 +211,7 @@ func TestPDProjectionKeepsDeprecatedAddressesAndStableRAIdentity(t *testing.T) {
 
 func TestVRRPOwnershipExpiresOnMonotonicReceiptAndRejectsPolicySpoof(t *testing.T) {
 	c := vrrp.Config{Interface: "lan0", Family: "ipv6", VirtualRouterID: 42, AcceptMode: true, Addresses: []string{"fe80::42/64", "2001:db8:42::1/64"}}
-	doc := config.Document{SchemaVersion: 1, Services: []serviceconfig.Service{{Name: "ha", VRRP: &c}}}
+	doc := config.Native{Services: []serviceconfig.Service{{Name: "ha", VRRP: &c}}}
 	r, n, _ := fixture(t, doc)
 	c = doc.Services[0].VRRPConfig()
 	s := vrrp.Snapshot{Resource: c.Resource, Interface: c.Interface, VIPInterface: c.VIPInterface, Family: c.Family, VirtualRouterID: c.VirtualRouterID, Priority: c.Priority, AcceptMode: true, Addresses: c.Addresses, VirtualMAC: vrrp.VirtualMAC(c.Family, c.VirtualRouterID).String(), Active: true, State: vrrp.StateActive, ValidUntil: time.Now().Add(3 * time.Second)}

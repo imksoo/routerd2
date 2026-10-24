@@ -13,12 +13,14 @@ import (
 )
 
 type fakeNetwork struct {
-	calls []uint64
-	fail  map[uint64]bool
+	calls   []uint64
+	fail    map[uint64]bool
+	desired []network.Desired
 }
 
-func (f *fakeNetwork) Apply(_ context.Context, rev uint64, _ network.Desired) error {
+func (f *fakeNetwork) Apply(_ context.Context, rev uint64, desired network.Desired) error {
 	f.calls = append(f.calls, rev)
+	f.desired = append(f.desired, desired)
 	if f.fail[rev] {
 		return errors.New("injected netlink failure")
 	}
@@ -31,7 +33,7 @@ func fixture(t *testing.T) (*Engine, *fakeNetwork) {
 	t.Helper()
 	d := t.TempDir()
 	p := filepath.Join(d, "bootstrap.json")
-	if err := config.AtomicJSON(p, config.Document{SchemaVersion: 1}); err != nil {
+	if err := config.AtomicJSON(p, config.Document{SchemaVersion: config.SchemaVersion}); err != nil {
 		t.Fatal(err)
 	}
 	s, c, err := config.Open(filepath.Join(d, "state"), p)
@@ -46,7 +48,7 @@ func fixture(t *testing.T) (*Engine, *fakeNetwork) {
 	return e, f
 }
 func request(e *Engine, id string) CommitRequest {
-	return CommitRequest{ExpectedRevision: e.State().Revision, RequestID: id, Config: config.Document{SchemaVersion: 1}}
+	return CommitRequest{ExpectedRevision: e.State().Revision, RequestID: id, Config: config.Document{SchemaVersion: config.SchemaVersion}}
 }
 
 func TestDurableCommitReplayAndConflict(t *testing.T) {
@@ -79,7 +81,7 @@ func TestDurableCommitReplayAndConflict(t *testing.T) {
 		t.Fatalf("want stale revision rejection, got %v", err)
 	}
 	r = request(e, "one")
-	r.Config.Network.Interfaces = []network.Interface{{Name: "eth0"}}
+	r.Config = config.FromNative(config.Native{Network: network.Desired{Interfaces: []network.Interface{{Name: "eth0"}}}})
 	if _, err = e.Commit(context.Background(), r); !errors.Is(err, ErrConflict) {
 		t.Fatalf("request ID reused: %v", err)
 	}

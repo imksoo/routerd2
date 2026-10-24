@@ -56,7 +56,7 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 	raw, resources, d := decode(data)
 	c := &compiler{
 		decoder: d, resources: resources,
-		document: config.Document{SchemaVersion: config.SchemaVersion},
+		document: config.Native{},
 		byRef:    map[string]*resource{}, aliases: map[string]string{},
 		aliasOwner: map[string]string{}, upAllowed: map[string]bool{},
 		interfaces: map[string]*network.Interface{}, names: map[string]string{},
@@ -171,8 +171,9 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 		return c.document.Network.Interfaces[i].Name < c.document.Network.Interfaces[j].Name
 	})
 	sort.Slice(c.document.Services, func(i, j int) bool { return c.document.Services[i].Name < c.document.Services[j].Name })
+	program := config.FromNative(c.document)
 	if len(c.issues) == 0 {
-		if err := config.Validate(c.document); err != nil {
+		if err := config.Validate(program); err != nil {
 			// Native validators sometimes include the invalid value. The
 			// compatibility boundary must not print a URL credential or key.
 			c.issue(nil, "$", "native_validation", "translated intent does not satisfy native validation; inspect the field restrictions in the migration documentation")
@@ -181,7 +182,7 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 	if err := c.err(); err != nil {
 		return Result{}, err
 	}
-	result := Result{Document: c.document, SourceRouter: raw.Metadata.Name, SourceRevision: SourceRevision}
+	result := Result{Document: program, SourceRouter: raw.Metadata.Name, SourceRevision: SourceRevision}
 	for _, r := range resources {
 		m := c.mappings[r.ID()]
 		if len(m.Targets) == 0 {
@@ -202,7 +203,7 @@ type staticPrefix struct {
 type compiler struct {
 	*decoder
 	resources      []resource
-	document       config.Document
+	document       config.Native
 	byRef          map[string]*resource
 	aliases        map[string]string
 	aliasOwner     map[string]string

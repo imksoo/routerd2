@@ -62,6 +62,13 @@ SUITES = {
         "commands": True,
         "description": "two-binary daemon SSH configuration and recovery",
     },
+    "daemon-resource-program": {
+        "package": "./internal/integration", "binary": "daemon.test",
+        "test": "TestDaemonResourceProgramLifecycleAndRecovery",
+        "marker": "ROUTERD_RESOURCE_PROGRAM_DAEMON_TEST", "timeout": 180,
+        "commands": True,
+        "description": "ResourceProgram daemon ownership, traffic, validation and recovery",
+    },
     "daemon-dhcp-dns": {
         "package": "./internal/integration", "binary": "daemon.test",
         "test": "TestDaemonDHCPDNSAndOwnershipExpiry",

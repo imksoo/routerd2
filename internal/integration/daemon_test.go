@@ -85,7 +85,7 @@ func TestDaemonConfigurationAndRecovery(t *testing.T) {
 	runDir, stateDir := filepath.Join(dir, "run"), filepath.Join(dir, "state")
 	dnsPort, sshPort := port(t), port(t)
 	dns := dnsconfig.RuntimeConfig{Resource: "dns", Spec: api.DNSResolverSpec{Listen: []api.DNSResolverListenSpec{{Name: "local", Addresses: []string{"127.0.0.1"}, Port: dnsPort}}, Sources: []api.DNSResolverSourceSpec{{Name: "zones", Kind: "zone", Match: []string{"lab.example"}, ZoneRef: []string{"DNSZone/lan-zone"}}}}, Zones: []dnsconfig.RuntimeZone{{Name: "lan-zone", Spec: api.DNSZoneSpec{Zone: "lab.example", Records: []api.DNSZoneRecordSpec{{Hostname: "router", IPv4: "192.0.2.1"}}}}}}
-	doc := config.Document{SchemaVersion: 1, Services: []serviceconfig.Service{{Name: "dns", DNS: &dns}}}
+	doc := config.FromNative(config.Native{Services: []serviceconfig.Service{{Name: "dns", DNS: &dns}}})
 	configPath := filepath.Join(dir, "config.json")
 	if err = config.AtomicJSON(configPath, doc); err != nil {
 		t.Fatal(err)
@@ -177,7 +177,7 @@ func TestDaemonConfigurationAndRecovery(t *testing.T) {
 	if err = session.Shell(); err != nil {
 		t.Fatal(err)
 	}
-	_, err = io.WriteString(input, "configure\rset services[dns].dns.zones[lan-zone].spec.records[0].ipv4 \"192.0.2.2\"\rvalidate\rcommit confirmed 5\rconfirm\rexit\rexit\r")
+	_, err = io.WriteString(input, "configure\rset resources[service/dns].service.dns.zones[lan-zone].spec.records[0].ipv4 \"192.0.2.2\"\rvalidate\rcommit confirmed 5\rconfirm\rexit\rexit\r")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +206,7 @@ func TestDaemonConfigurationAndRecovery(t *testing.T) {
 	changedBytes, _ := json.Marshal(state.Config)
 	var changed config.Document
 	_ = json.Unmarshal(changedBytes, &changed)
-	changed.Services[0].DNS.Zones[0].Spec.Records[0].IPv4 = "192.0.2.3"
+	changed.Resources[0].Service.DNS.Zones[0].Spec.Records[0].IPv4 = "192.0.2.3"
 	request := control.CommitRequest{ExpectedRevision: 2, RequestID: "fixture-rollback", Config: changed, ConfirmTimeoutSeconds: 5}
 	if err = ctl.Do(ctx, "POST", "/v1/config/commit", request, &state); err != nil {
 		t.Fatal(err)
@@ -256,7 +256,7 @@ func TestDaemonConfigurationAndRecovery(t *testing.T) {
 	if err = ctl.Do(ctx, "GET", "/v1/config", nil, &state); err != nil {
 		t.Fatal(err)
 	}
-	request = control.CommitRequest{ExpectedRevision: state.Revision, RequestID: "fixture-remove", Config: config.Document{SchemaVersion: 1}}
+	request = control.CommitRequest{ExpectedRevision: state.Revision, RequestID: "fixture-remove", Config: config.Document{SchemaVersion: config.SchemaVersion}}
 	if err = ctl.Do(ctx, "POST", "/v1/config/commit", request, nil); err != nil {
 		t.Fatal(err)
 	}

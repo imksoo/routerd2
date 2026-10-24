@@ -249,7 +249,7 @@ func seedDisk(ctx context.Context) error {
 	if err := writePrivate(sentinelPath, sentinel[:]); err != nil {
 		return err
 	}
-	if err := config.AtomicJSON(seedPath, config.Document{SchemaVersion: config.SchemaVersion, Network: network.Desired{Interfaces: []network.Interface{{Name: "lo"}}}}); err != nil {
+	if err := config.AtomicJSON(seedPath, config.FromNative(config.Native{Network: network.Desired{Interfaces: []network.Interface{{Name: "lo"}}}})); err != nil {
 		return err
 	}
 	bootID, err := kernelBootID()

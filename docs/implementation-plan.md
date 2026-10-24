@@ -1,7 +1,23 @@
 # 現行 routerd と同等の製品にするための実装計画
 
 作成日: **2026-10-24（Asia/Tokyo）**
-状態: **計画。ここに列挙した残作業を、この文書の作成によって実装済みとはしない。**
+状態: **実装中。最初の ResourceProgram checkpoint を追加した。作業単位全体の完了とは区別する。**
+
+## 最初の実装 checkpoint
+
+CORE-01 / CORE-02 と CORE-03 の static graph 部分に着手した。
+新しい入力は `schema_version: 2` の ResourceProgram だけとし、未公開 schema 1 の reader は追加していない。
+
+- source の ID・owner・provenance・依存 graph を保存し、既存 native engine への plan を純粋関数で生成する。
+- source 全体を candidate / pending / authoritative journal / confirmed rollback で一貫して扱う。
+- Interface/address/route の更新・削除・worker 復旧を source から実行し、graph の不正を副作用より前に拒否する。
+- SSH editor を resource ID に対応させ、`routerd config plan FILE` で実行 graph と ownership を確認できるようにした。
+- 元 routerd の条件16件・依存6件と複数依存・所有権6件を、固定 source に対する実行 fixture にした。
+
+仕様・制約は [resource-program.md](resource-program.md)、比較根拠は [feature-contracts.md](feature-contracts.md) に記録した。
+三値 `when`、finite fact、個別 readiness、owner cascade は未実装で、CORE-03 / CORE-04 の次の作業とする。
+startup store/revision の boot 選択、独立 projection generation、多 binary runtime manifest も残っている。
+CORE-01 / CORE-02 / CORE-03 の全受入条件を完了扱いにはせず、既存 `parity.json` の判定を上げない。
 
 ## 1. 基準と到達点
 
@@ -52,10 +68,11 @@ WireGuard、内蔵 SSH、設定 journal、署名付き userland 更新を引き�
 
 ### ResourceProgram を既存 runtime の上に置く
 
-現 `config.Document` は、ネットワークの desired state と service 設定を保持する。
+計画開始時点の `config.Document` は、ネットワークの desired state と service 設定を保持していた。
 旧 resource の条件・生成元・依存関係を、静的な YAML 変換だけで表現し続ける方式には限界がある。
-[現在の設定モデル](https://github.com/imksoo/routerd2/blob/8dfbf615b01e9da57a06196b4069b9d8713f9ab5/internal/config/config.go)
-の上に、元の宣言を保持する `ResourceProgram` と coordinator を追加する。
+[計画開始時の設定モデル](https://github.com/imksoo/routerd2/blob/8dfbf615b01e9da57a06196b4069b9d8713f9ab5/internal/config/config.go)
+を内部の engine intent に分離し、元の宣言を保持する `ResourceProgram` と coordinator を段階的に追加する。
+ResourceProgram の初期実装は上記 checkpoint を参照。
 
 - **operator revision**: 人が commit した source program の版。
 - **projection generation**: 同じ source から、DHCP・health・VRRP 等の観測に応じて作った実行計画の版。

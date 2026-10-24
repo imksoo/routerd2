@@ -25,7 +25,7 @@ transmission is no faster than once per second before jitter. Linux scheduling
 and control-plane load still matter; this is not a real-time convergence bound.
 
 `source_address` must be a canonical unicast address explicitly committed on
-the configured interface in `network.interfaces`. A worker does not choose a
+the configured interface by an `address` resource. A worker does not choose a
 DHCP/RA source implicitly. It checks continuing ownership of the interface and
 source address. Separate IPv4/IPv6 workers may use one interface; two workers
 of the same family on that interface are rejected. The runtime also claims

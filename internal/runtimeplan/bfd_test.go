@@ -17,11 +17,11 @@ import (
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
 
-func bfdDocument() config.Document {
-	return config.Document{SchemaVersion: 1, Network: network.Desired{Interfaces: []network.Interface{{Name: "wan0", Addresses: []string{"192.0.2.1/24"}}}}, Services: []serviceconfig.Service{{Name: "edge", BFD: &bfd.Config{Interface: "wan0", SourceAddress: "192.0.2.1", Peers: []bfd.Peer{{Address: "192.0.2.2"}}}}}}
+func bfdDocument() config.Native {
+	return config.Native{Network: network.Desired{Interfaces: []network.Interface{{Name: "wan0", Addresses: []string{"192.0.2.1/24"}}}}, Services: []serviceconfig.Service{{Name: "edge", BFD: &bfd.Config{Interface: "wan0", SourceAddress: "192.0.2.1", Peers: []bfd.Peer{{Address: "192.0.2.2"}}}}}}
 }
 
-func bfdBGPDocument() config.Document {
+func bfdBGPDocument() config.Native {
 	doc := bfdDocument()
 	doc.Services = append(doc.Services, serviceconfig.Service{Name: "router", BGP: &serviceconfig.BGP{Runtime: bgpconfig.AppliedConfig{Global: bgpconfig.AppliedGlobal{ASN: 65001, RouterID: "192.0.2.1", ListenPort: -1}, Peers: map[string]bgpconfig.AppliedPeer{"192.0.2.2": {Address: "192.0.2.2", ASN: 65002}}}, FIBInterface: "wan0", PeerTransports: map[string]bgpconfig.PeerTransport{"192.0.2.2": {LocalAddress: "192.0.2.1", BindInterface: "wan0"}}, PeerBFD: map[string]bgpconfig.BFDReference{"192.0.2.2": {Service: "edge"}}}})
 	return doc

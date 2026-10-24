@@ -54,11 +54,15 @@ func (configurationNetwork) Snapshot(context.Context) (network.Snapshot, error) 
 }
 
 func cliLargeDocument(routes int) config.Document {
-	doc := config.Document{SchemaVersion: 1, Network: network.Desired{Interfaces: []network.Interface{{Name: "eth0"}}}}
+	return config.FromNative(config.Native{Network: cliLargeNetwork(routes)})
+}
+
+func cliLargeNetwork(routes int) network.Desired {
+	desired := network.Desired{Interfaces: []network.Interface{{Name: "eth0"}}}
 	for i := 0; i < routes; i++ {
-		doc.Network.Routes = append(doc.Network.Routes, network.Route{Destination: fmt.Sprintf("10.%d.%d.%d/32", i>>16, i>>8&255, i&255), Gateway: "192.0.2.1", Interface: "eth0", Metric: 100, Table: 254})
+		desired.Routes = append(desired.Routes, network.Route{Destination: fmt.Sprintf("10.%d.%d.%d/32", i>>16, i>>8&255, i&255), Gateway: "192.0.2.1", Interface: "eth0", Metric: 100, Table: 254})
 	}
-	return doc
+	return desired
 }
 
 func cliMetadata(t *testing.T, revision uint64, doc config.Document) control.State {
@@ -72,7 +76,7 @@ func cliMetadata(t *testing.T, revision uint64, doc config.Document) control.Sta
 
 func TestLargeConfigurationPublicAPIRoundTrip(t *testing.T) {
 	ctx := context.Background()
-	baseline := cliLargeDocument(12000)
+	baseline := cliLargeDocument(7500)
 	if err := config.Validate(baseline); err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +96,12 @@ func TestLargeConfigurationPublicAPIRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	candidate.Network.Interfaces[0].MTU = 1400
+	for i := range candidate.Resources {
+		if candidate.Resources[i].Interface != nil {
+			candidate.Resources[i].Interface.MTU = 1400
+			break
+		}
+	}
 	request := control.CommitRequest{ExpectedRevision: 1, RequestID: "large-cli-confirmed", Config: candidate, ConfirmTimeoutSeconds: 60}
 	state, err := commitConfiguration(ctx, client, request)
 	if err != nil || state.Revision != 2 || state.ConfigOmitted || !state.ConfirmationPreviousOmitted || documentsDiffer(state.Config, candidate) {
@@ -145,7 +154,7 @@ func TestLargeConfigurationPublicAPIRoundTrip(t *testing.T) {
 }
 
 func TestConfigurationReadRevisionFenceRetries(t *testing.T) {
-	doc := config.Document{SchemaVersion: 1}
+	doc := config.Document{SchemaVersion: config.SchemaVersion}
 	for _, conflicts := range []int{0, 1, 3} {
 		t.Run(strconv.Itoa(conflicts), func(t *testing.T) {
 			metadataReads, documentReads := 0, 0
@@ -183,7 +192,7 @@ func TestConfigurationReadRevisionFenceRetries(t *testing.T) {
 }
 
 func TestConfigurationReadRejectsCorruptOrUnmarkedMetadata(t *testing.T) {
-	doc := config.Document{SchemaVersion: 1}
+	doc := config.Document{SchemaVersion: config.SchemaVersion}
 	cases := map[string]func(*control.State){
 		"missing omission flag": func(s *control.State) { s.ConfigOmitted = false },
 		"wrong digest":          func(s *control.State) { s.ConfigDigest = strings.Repeat("0", 64) },
@@ -232,7 +241,7 @@ func TestConfigurationReadDoesNotHideTransportOrOtherHTTPFailures(t *testing.T) 
 }
 
 func TestMutationAcknowledgmentIdentityAndOmission(t *testing.T) {
-	doc := config.Document{SchemaVersion: 1}
+	doc := config.Document{SchemaVersion: config.SchemaVersion}
 	request := control.CommitRequest{ExpectedRevision: 4, RequestID: "bounded-commit", Config: doc}
 	for name, mutate := range map[string]func(*control.State){
 		"valid":            func(*control.State) {},
@@ -245,7 +254,7 @@ func TestMutationAcknowledgmentIdentityAndOmission(t *testing.T) {
 		},
 		"wrong full document": func(s *control.State) {
 			s.ConfigOmitted = false
-			s.Config = config.Document{SchemaVersion: 1, Network: network.Desired{Interfaces: []network.Interface{{Name: "wrong0"}}}}
+			s.Config = config.FromNative(config.Native{Network: network.Desired{Interfaces: []network.Interface{{Name: "wrong0"}}}})
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -294,8 +303,8 @@ func TestInvalidLocalMutationDoesNotReachAPI(t *testing.T) {
 		return nil
 	})
 	for _, request := range []control.CommitRequest{
-		{RequestID: "missing-revision", Config: config.Document{SchemaVersion: 1}},
-		{ExpectedRevision: 1, Config: config.Document{SchemaVersion: 1}},
+		{RequestID: "missing-revision", Config: config.Document{SchemaVersion: config.SchemaVersion}},
+		{ExpectedRevision: 1, Config: config.Document{SchemaVersion: config.SchemaVersion}},
 		{ExpectedRevision: 1, RequestID: "invalid-document", Config: config.Document{SchemaVersion: 9}},
 		{ExpectedRevision: 1, RequestID: "oversized-document", Config: cliLargeDocument(30000)},
 	} {

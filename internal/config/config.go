@@ -11,11 +11,10 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/imksoo/routerd2/internal/network"
-	"github.com/imksoo/routerd2/internal/serviceconfig"
+	"github.com/imksoo/routerd2/internal/resourceprogram"
 )
 
-const SchemaVersion = 1
+const SchemaVersion = resourceprogram.SchemaVersion
 const MaxSize = 2 << 20
 
 // Leave room for revision, request ID, confirmation controls and JSON framing
@@ -24,16 +23,20 @@ const MaxDocumentSize = MaxSize - (4 << 10)
 
 // A durable record can contain both the candidate and the previous document
 // during confirmed commit. Its limit is separate from the public input limit.
-// New records are compact. The larger read bound accepts previous indented
-// records while retaining a finite allocation limit.
+// Read and write use the same finite budget; prototype journals are not an
+// input format of the ResourceProgram store.
 const MaxRecordSize = 2*MaxSize + (64 << 10)
-const MaxStoredReadSize = 16 << 20
+const MaxStoredReadSize = MaxRecordSize
 
-type Document struct {
-	SchemaVersion int                     `json:"schema_version"`
-	Network       network.Desired         `json:"network"`
-	Services      []serviceconfig.Service `json:"services,omitempty"`
-}
+// Document is the operator's source program. Only this source is persisted and
+// edited. Native is a derived in-memory input for the existing kernel/protocol
+// engines and is never accepted as an alternative configuration format.
+type Document = resourceprogram.Program
+type Native = resourceprogram.Native
+
+// FromNative constructs a source program for internal importers and fixtures.
+// It does not decode the discarded routerd2 prototype configuration format.
+func FromNative(native Native) Document { return resourceprogram.FromNative(native) }
 
 type Committed struct {
 	Revision        uint64        `json:"revision"`
@@ -53,25 +56,34 @@ type Confirmation struct {
 }
 
 func Validate(d Document) error {
-	if d.SchemaVersion != SchemaVersion {
-		return fmt.Errorf("unsupported config schema %d (expected %d)", d.SchemaVersion, SchemaVersion)
-	}
+	_, err := Compile(d)
+	return err
+}
+
+// Compile is pure. Source validation and cross-worker ownership checks complete
+// before a caller changes the journal, kernel or supervised process set.
+func Compile(d Document) (resourceprogram.Plan, error) {
 	canonical, err := json.Marshal(d)
 	if err != nil {
-		return fmt.Errorf("encode configuration: %w", err)
+		return resourceprogram.Plan{}, fmt.Errorf("encode configuration: %w", err)
 	}
 	if len(canonical) > MaxDocumentSize {
-		return errors.New("canonical JSON configuration exceeds its 2 MiB budget including the 4 KiB protocol envelope reserve")
+		return resourceprogram.Plan{}, errors.New("canonical JSON configuration exceeds its 2 MiB budget including the 4 KiB protocol envelope reserve")
 	}
 	if err := checkJSONShape(canonical, maxDocumentNodes); err != nil {
-		return err
+		return resourceprogram.Plan{}, err
 	}
-	if err := network.Validate(d.Network); err != nil {
-		return err
+	plan, err := resourceprogram.Compile(d)
+	if err != nil {
+		return resourceprogram.Plan{}, err
 	}
-	if err := serviceconfig.Validate(d.Services); err != nil {
-		return err
+	if err := validateNative(plan.Native); err != nil {
+		return resourceprogram.Plan{}, err
 	}
+	return plan, nil
+}
+
+func validateNative(d Native) error {
 	for _, service := range d.Services {
 		if service.BFD == nil {
 			continue
@@ -233,7 +245,7 @@ func (s *Store) Load() (Committed, error) {
 		return c, err
 	}
 	if len(data) > MaxStoredReadSize {
-		return c, errors.New("stored configuration record exceeds 16 MiB")
+		return c, fmt.Errorf("stored configuration record exceeds %d bytes", MaxStoredReadSize)
 	}
 	if err := decodeRecord(data, &c); err != nil {
 		return c, err

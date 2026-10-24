@@ -126,7 +126,11 @@ func runProbe(phase string) error {
 			return errors.New("SSH did not return the persisted committed revision")
 		}
 	}
-	if health.Revision != 2 || health.Confirmation != nil || len(health.Config.Network.Interfaces) != 1 || health.Config.Network.Interfaces[0].Name != "lo" || health.Config.Network.Interfaces[0].Alias == nil || *health.Config.Network.Interfaces[0].Alias != persistentAlias {
+	plan, err := config.Compile(health.Config)
+	if err != nil {
+		return err
+	}
+	if health.Revision != 2 || health.Confirmation != nil || len(plan.Native.Network.Interfaces) != 1 || plan.Native.Network.Interfaces[0].Name != "lo" || plan.Native.Network.Interfaces[0].Alias == nil || *plan.Native.Network.Interfaces[0].Alias != persistentAlias {
 		return errors.New("committed SSH alias edit did not persist in the control state")
 	}
 	loopback, err := netlink.LinkByName("lo")
@@ -357,7 +361,7 @@ func commitThroughSSH(ctx context.Context, client *ssh.Client) error {
 	if err := session.Shell(); err != nil {
 		return err
 	}
-	if _, err := io.WriteString(input, "configure\rset network.interfaces[lo].alias \""+persistentAlias+"\"\rvalidate\rcommit\rexit\rexit\r"); err != nil {
+	if _, err := io.WriteString(input, "configure\rset resources[interface/lo].interface.alias \""+persistentAlias+"\"\rvalidate\rcommit\rexit\rexit\r"); err != nil {
 		return err
 	}
 	done := make(chan error, 1)

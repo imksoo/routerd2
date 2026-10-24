@@ -89,7 +89,7 @@ type Runtime struct {
 	dir, stateDir    string
 	network          Network
 	manager          moduleManager
-	current          config.Document
+	current          config.Native
 	revision         uint64
 	configured       bool
 	initialized      bool
@@ -145,10 +145,15 @@ func (r *Runtime) failure(err error) error {
 	return err
 }
 
-func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, doc config.Document) error {
-	if err := config.Validate(doc); err != nil {
+// ApplyConfig accepts only a source ResourceProgram. Compilation is pure and
+// completes before process reconciliation, instance-file writes, or kernel I/O.
+// Protocol facts can change its projection, but cannot replace operator intent.
+func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source config.Document) error {
+	plan, err := config.Compile(source)
+	if err != nil {
 		return err
 	}
+	doc := plan.Native
 	r.op.Lock()
 	defer r.op.Unlock()
 	if !r.initialized {
@@ -235,7 +240,7 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, doc config.D
 }
 
 // Caller holds mu. Configuration equality includes all protocol-owned paths.
-func (r *Runtime) retainedLocked(doc config.Document) (map[string]serviceconfig.Update, error) {
+func (r *Runtime) retainedLocked(doc config.Native) (map[string]serviceconfig.Update, error) {
 	retained := map[string]serviceconfig.Update{}
 	effective := r.effectiveRecordsLocked(time.Now())
 	for _, service := range doc.Services {

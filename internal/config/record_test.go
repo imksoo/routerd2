@@ -15,18 +15,18 @@ import (
 )
 
 func largeDocument(routes int) Document {
-	d := Document{SchemaVersion: 1, Network: network.Desired{Interfaces: []network.Interface{{Name: "eth0"}}}}
+	d := Native{Network: network.Desired{Interfaces: []network.Interface{{Name: "eth0"}}}}
 	for i := 0; i < routes; i++ {
 		d.Network.Routes = append(d.Network.Routes, network.Route{
 			Destination: fmt.Sprintf("10.%d.%d.%d/32", i>>16, i>>8&255, i&255),
 			Gateway:     "192.0.2.1", Interface: "eth0", Metric: 100, Table: 254,
 		})
 	}
-	return d
+	return FromNative(d)
 }
 
-func TestLargeConfirmedRecordSurvivesSaveLoadAndLegacyIndentation(t *testing.T) {
-	doc := largeDocument(12000)
+func TestLargeConfirmedRecordSurvivesSaveLoad(t *testing.T) {
+	doc := largeDocument(7000)
 	if err := Validate(doc); err != nil {
 		t.Fatal(err)
 	}
@@ -55,20 +55,12 @@ func TestLargeConfirmedRecordSurvivesSaveLoadAndLegacyIndentation(t *testing.T) 
 	if err != nil || !bytes.Equal(stored, pending) {
 		t.Fatal("pending and committed record encodings disagree", err)
 	}
-	// Accept a prior version's indented JSON even when whitespace alone takes
-	// it beyond the new compact write limit. Each embedded document is bounded.
-	if err := AtomicJSON(filepath.Join(store.Dir, "config.json"), record); err != nil {
-		t.Fatal(err)
-	}
-	got, err = store.Load()
-	if err != nil || !reflect.DeepEqual(got, record) {
-		t.Fatalf("previous indented record cannot be recovered: %v", err)
-	}
+
 }
 
 func TestRecordRefusesUnrecoverableWritesBeforeReplacement(t *testing.T) {
 	store := &Store{Dir: t.TempDir()}
-	baseline := Committed{Revision: 1, Config: Document{SchemaVersion: 1}}
+	baseline := Committed{Revision: 1, Config: Document{SchemaVersion: SchemaVersion}}
 	if err := store.Save(baseline); err != nil {
 		t.Fatal(err)
 	}
@@ -101,10 +93,10 @@ func TestRecordRefusesUnrecoverableWritesBeforeReplacement(t *testing.T) {
 func TestRecordStrictJSONAndReadBound(t *testing.T) {
 	store := &Store{Dir: t.TempDir()}
 	for _, data := range []string{
-		`{"revision":1,"revision":2,"config":{"schema_version":1,"network":{}}}`,
-		`{"revision":1,"config":{"schema_version":1,"network":{"interfaces":[],"interfaces":[]}}}`,
-		`{"revision":1,"typo":true,"config":{"schema_version":1,"network":{}}}`,
-		`{"revision":1,"config":{"schema_version":1,"network":{}}} {}`,
+		`{"revision":1,"revision":2,"config":{"schema_version":2,"resources":[]}}`,
+		`{"revision":1,"config":{"schema_version":2,"resources":[],"resources":[]}}`,
+		`{"revision":1,"typo":true,"config":{"schema_version":2,"resources":[]}}`,
+		`{"revision":1,"config":{"schema_version":2,"resources":[]}} {}`,
 		`revision: 1`,
 		strings.Repeat(" ", MaxStoredReadSize+1),
 	} {

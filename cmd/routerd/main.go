@@ -147,12 +147,14 @@ func usage() error {
   routerd config export [--runtime-dir /run/routerd]
   routerd config confirm [--runtime-dir /run/routerd]
   routerd config validate FILE
+  routerd config plan FILE
   routerd config migrate [--policy FILE] FILE
   routerd config apply --file FILE --expected-revision N [--request-id ID --confirmed SECONDS --runtime-dir ...]
   routerd release help
   routerd version
 
 Platform selection is explicit. Use host mode only for isolated development.
+Config plan prints dependency order, output ownership, and compiled engine intent.
 The boot configuration enables SSH; no shell or system service is launched.`)
 	return err
 }
@@ -275,7 +277,7 @@ func remote(args []string, command string) error {
 
 func configure(args []string) error {
 	if len(args) == 0 {
-		return errors.New("config requires show, export, validate, migrate, apply, or confirm")
+		return errors.New("config requires show, export, validate, plan, migrate, apply, or confirm")
 	}
 	if args[0] == "show" {
 		return remote(args[1:], "show config")
@@ -288,6 +290,9 @@ func configure(args []string) error {
 	}
 	if args[0] == "migrate" {
 		return migrate(args[1:], os.Stdout, os.Stderr)
+	}
+	if args[0] == "plan" {
+		return planConfig(args[1:], os.Stdout)
 	}
 	if args[0] == "validate" {
 		if len(args) != 2 {

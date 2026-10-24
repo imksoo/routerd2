@@ -2,9 +2,14 @@
 
 This package is a pure compiler from the Linux resource schema at
 **imksoo/routerd commit 1329ef54f296507eda79bbbc3b853783dd27251e** to
-`config.Document`. It neither invokes the original controllers nor runs commands,
+the schema-2 ResourceProgram (`config.Document`). It neither invokes the original controllers nor runs commands,
 reads host state, contacts an upstream, modifies a network, or imports a lease
 database. It is not a compatibility implementation of every original resource.
+
+The output is the new source graph, with separate interface and address resources.
+Review mapping targets beginning with `network.*` or `services/*` describe the
+derived engine input; `routerd config plan FILE` shows its new resource ownership.
+This importer reads the original **routerd** product, not a previous routerd2 prototype format.
 
 ## API
 

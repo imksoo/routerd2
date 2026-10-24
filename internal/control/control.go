@@ -144,7 +144,11 @@ func (e *Engine) apply(ctx context.Context, revision uint64, doc config.Document
 	if e.runtime != nil {
 		return e.runtime.ApplyConfig(ctx, revision, doc)
 	}
-	return e.network.Apply(ctx, revision, doc.Network)
+	plan, err := config.Compile(doc)
+	if err != nil {
+		return err
+	}
+	return e.network.Apply(ctx, revision, plan.Native.Network)
 }
 
 // Reconcile deliberately restores only the durable committed revision. A pending

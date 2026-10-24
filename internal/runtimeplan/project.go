@@ -30,7 +30,7 @@ type projection struct {
 
 // project is pure: protocol facts and the committed intent produce a complete
 // kernel projection. No producer can submit arbitrary addresses or routes.
-func project(doc config.Document, runtimeDir, stateDir string, records map[string]serviceconfig.Update, now time.Time, dynamicInputs ...map[string]aftr.Input) (projection, error) {
+func project(doc config.Native, runtimeDir, stateDir string, records map[string]serviceconfig.Update, now time.Time, dynamicInputs ...map[string]aftr.Input) (projection, error) {
 	facts := projectionFacts{}
 	if len(dynamicInputs) > 0 {
 		facts.aftr = dynamicInputs[0]
@@ -43,7 +43,7 @@ type projectionFacts struct {
 	bfdClock bfd.Clock
 }
 
-func (r *Runtime) projectLocked(doc config.Document, records map[string]serviceconfig.Update, now time.Time) (projection, error) {
+func (r *Runtime) projectLocked(doc config.Native, records map[string]serviceconfig.Update, now time.Time) (projection, error) {
 	facts := projectionFacts{aftr: r.aftrInputs}
 	for _, service := range doc.Services {
 		if service.BGP != nil && len(service.BGP.PeerBFD) > 0 {
@@ -56,7 +56,7 @@ func (r *Runtime) projectLocked(doc config.Document, records map[string]servicec
 	return projectWithFacts(doc, r.dir, r.stateDir, records, now, facts)
 }
 
-func projectWithFacts(doc config.Document, runtimeDir, stateDir string, records map[string]serviceconfig.Update, now time.Time, facts projectionFacts) (projection, error) {
+func projectWithFacts(doc config.Native, runtimeDir, stateDir string, records map[string]serviceconfig.Update, now time.Time, facts projectionFacts) (projection, error) {
 	b, _ := json.Marshal(doc.Network)
 	p := projection{liveRA: map[string]ra.Config{}}
 	if err := json.Unmarshal(b, &p.network); err != nil {

@@ -1,26 +1,36 @@
 # This acquires IA_PD, allocates a LAN /64 and advertises it with finite lifetimes.
 # WAN global addressing/default-router learning must be configured separately.
-schema_version: 1
-network:
-  interfaces:
-    - name: eth0
-    - name: eth1
-  forwarding:
-    ipv6: true
-  firewall:
-    forward:
-      - {from: eth1, to: eth0}
-services:
-  - name: uplink-pd
-    dhcp6:
-      interface: eth0
-      iaid: 1
-      prefix_length: 56
-      delegations:
-        - name: lan
-          interface: eth1
-          subnet_id: 1
-          host_id: 1
-          advertise: true
-          router_lifetime_seconds: 1800
-          use_learned_dns: true
+schema_version: 2
+resources:
+  - id: firewall
+    firewall:
+      forward:
+        - from: eth1
+          to: eth0
+  - id: forwarding
+    forwarding:
+      ipv6: true
+  - id: interface/eth0
+    interface:
+      name: eth0
+  - id: interface/eth1
+    interface:
+      name: eth1
+  - id: service/uplink-pd
+    depends_on:
+      - interface/eth0
+      - interface/eth1
+    service:
+      name: uplink-pd
+      dhcp6:
+        interface: eth0
+        iaid: 1
+        prefix_length: 56
+        delegations:
+          - name: lan
+            interface: eth1
+            subnet_id: 1
+            host_id: 1
+            advertise: true
+            router_lifetime_seconds: 1800
+            use_learned_dns: true

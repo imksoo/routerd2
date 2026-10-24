@@ -15,7 +15,7 @@ import (
 
 func TestPDLearnedDNSDeadlineAndStableRAIdentity(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
-	doc := config.Document{SchemaVersion: 1, Services: []serviceconfig.Service{{Name: "pd", DHCP6: &serviceconfig.DHCP6{Interface: "wan0", IAID: 7, Delegations: []serviceconfig.Delegation{{Name: "lan", Interface: "lan0", SubnetID: 3, Advertise: true, UseLearnedDNS: true, RDNSS: []string{"2001:db8::1"}, DNSSL: []string{"static.example"}}}}}}}
+	doc := config.Native{Services: []serviceconfig.Service{{Name: "pd", DHCP6: &serviceconfig.DHCP6{Interface: "wan0", IAID: 7, Delegations: []serviceconfig.Delegation{{Name: "lan", Interface: "lan0", SubnetID: 3, Advertise: true, UseLearnedDNS: true, RDNSS: []string{"2001:db8::1"}, DNSSL: []string{"static.example"}}}}}}}
 	snapshot := dhcp6pd.Snapshot{Active: true, InformationRefreshSeconds: 600, InformationRefreshAt: now.Add(180 * time.Second), Snapshot: old6.Snapshot{Resource: "pd", Interface: "wan0", IAID: 7, CurrentPrefix: "2001:db8:100::/56", AcquiredAt: now, Preferred: 400, Valid: 600, ExpiresAt: now.Add(600 * time.Second), InfoUpdatedAt: now, DNSServers: []string{"2001:db8::1", "2001:db8::53"}, DomainSearch: []string{"static.example", "learned.example"}}}
 	projectAt := func(value dhcp6pd.Snapshot, at time.Time) (ra.Config, string) {
 		t.Helper()

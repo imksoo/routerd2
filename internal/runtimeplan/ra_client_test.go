@@ -11,8 +11,8 @@ import (
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
 
-func raClientFixture(now time.Time) (config.Document, raclient.Snapshot) {
-	doc := config.Document{SchemaVersion: 1,
+func raClientFixture(now time.Time) (config.Native, raclient.Snapshot) {
+	doc := config.Native{
 		Services: []serviceconfig.Service{{Name: "wan-ra", RAClient: &serviceconfig.RAClient{Interface: "wan0", SourceAddress: "fe80::1", InterfaceID: "::1234"}}},
 	}
 	s := raclient.Snapshot{Resource: "wan-ra", Interface: "wan0", SourceAddress: "fe80::1", InterfaceID: "::1234", Active: true, UpdatedAt: now,
@@ -28,7 +28,7 @@ func raClientFixture(now time.Time) (config.Document, raclient.Snapshot) {
 	return doc, s
 }
 
-func projectRAFixture(t *testing.T, doc config.Document, s raclient.Snapshot, now time.Time) projection {
+func projectRAFixture(t *testing.T, doc config.Native, s raclient.Snapshot, now time.Time) projection {
 	t.Helper()
 	instance, err := doc.Services[0].Instance(t.TempDir(), t.TempDir())
 	if err != nil {
@@ -135,7 +135,7 @@ func TestRAClientRejectsKernelCompetitionAndInvalidSnapshotIdentity(t *testing.T
 	doc, s := raClientFixture(now)
 	on := 2
 	doc.Network.Interfaces = []network.Interface{{Name: "wan0", IPv6AcceptRA: &on}}
-	if err := config.Validate(doc); err == nil {
+	if err := config.Validate(config.FromNative(doc)); err == nil {
 		t.Fatal("competing kernel RA accepted")
 	}
 	doc.Network.Interfaces = []network.Interface{{Name: "wan0", Addresses: []string{"2001:db8:1::1234/64"}}}

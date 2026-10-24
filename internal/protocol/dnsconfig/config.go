@@ -93,6 +93,9 @@ func ValidHostname(name string) bool {
 }
 
 func ValidateRuntime(c dnsresolver.RuntimeConfig) error {
+	if len(c.Spec.When.State) != 0 || len(c.Spec.When.All) != 0 || len(c.Spec.When.Any) != 0 {
+		return errors.New("DNS when conditions require the resource lifecycle coordinator and are not implemented")
+	}
 	c = NormalizeRuntime(c, "")
 	if strings.TrimSpace(c.Resource) == "" {
 		return errors.New("DNS resource is required")

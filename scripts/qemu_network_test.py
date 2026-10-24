@@ -11,6 +11,22 @@ SPEC.loader.exec_module(GATE)
 
 
 class GuestResultTest(unittest.TestCase):
+    def test_resource_program_requires_its_real_daemon_test(self):
+        suite = GATE.SUITES["daemon-resource-program"]
+        self.assertEqual(suite["test"], "TestDaemonResourceProgramLifecycleAndRecovery")
+        self.assertEqual(suite["marker"], "ROUTERD_RESOURCE_PROGRAM_DAEMON_TEST")
+        self.assertEqual(suite["package"], "./internal/integration")
+        self.assertTrue(suite["commands"])
+        marker = suite["marker"] + "_PASS\n"
+        for output in (
+            marker,
+            "PASS\n" + marker,
+            "--- SKIP: " + suite["test"] + " (0.00s)\n" + marker,
+            "--- PASS: TestDaemonConfigurationAndRecovery (1.00s)\n" + marker,
+        ):
+            with self.subTest(output=output), self.assertRaises(RuntimeError):
+                GATE.require_guest_pass(output, suite, 0)
+
     def test_each_exact_suite_pass(self):
         for name, suite in GATE.SUITES.items():
             with self.subTest(suite=name):

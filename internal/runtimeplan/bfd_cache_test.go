@@ -68,7 +68,7 @@ func fastBFDCall(t *testing.T, call func() error) {
 	}
 }
 
-func nextBFDUpdate(t *testing.T, r *Runtime, doc config.Document, sequence uint64, coalesced bool) serviceconfig.Update {
+func nextBFDUpdate(t *testing.T, r *Runtime, doc config.Native, sequence uint64, coalesced bool) serviceconfig.Update {
 	t.Helper()
 	clock, err := bfd.ReadClock()
 	if err != nil {
@@ -270,7 +270,7 @@ func TestBFDCacheCutoverPreservesNewerUnchangedSourceAndFencesChangedSources(t *
 	}
 	changed := bfdBGPDocument()
 	changed.Services[0].BFD.EffectTimeoutMilliseconds = 2000
-	if err := r.ApplyConfig(ctx, 2, changed); err != nil {
+	if err := r.ApplyConfig(ctx, 2, config.FromNative(changed)); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.Accept(ctx, newer); !errors.Is(err, ErrStale) {
@@ -286,7 +286,7 @@ func TestBFDCacheCutoverPreservesNewerUnchangedSourceAndFencesChangedSources(t *
 	if view, err := r.BFDProjection("service.router", digest, 1); err != nil || !view.Peers["192.0.2.2"].Up || view.Peers["192.0.2.2"].ConfigDigest != newSource.ConfigDigest {
 		t.Fatal("new source did not acquire its independent binding", view, err)
 	}
-	if err := r.ApplyConfig(ctx, 3, config.Document{SchemaVersion: 1}); err != nil {
+	if err := r.ApplyConfig(ctx, 3, config.FromNative(config.Native{})); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.Accept(ctx, newSource); !errors.Is(err, ErrStale) {

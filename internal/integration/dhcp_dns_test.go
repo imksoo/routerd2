@@ -60,15 +60,20 @@ func testDaemonDHCPDNSOwnership(t *testing.T, migrated bool) {
 		Spec:  api.DNSResolverSpec{Listen: []api.DNSResolverListenSpec{{Name: "local", Addresses: []string{"127.0.0.1"}, Port: dnsPort}}, Sources: []api.DNSResolverSourceSpec{{Name: "zones", Kind: "zone", Match: []string{"lab.example"}, ZoneRef: []string{"DNSZone/lan"}}}},
 		Zones: []dnsconfig.RuntimeZone{{Name: "lan", Spec: api.DNSZoneSpec{Zone: "lab.example", Records: []api.DNSZoneRecordSpec{{Hostname: "router", IPv4: "192.0.2.1"}}, DHCPDerived: api.DNSZoneDHCPDerivedSpec{Sources: []string{"DHCPv4Server/leases"}}}}},
 	}
-	doc := config.Document{SchemaVersion: 1,
+	native := config.Native{
 		Network:  network.Desired{Interfaces: []network.Interface{{Name: "lan0", Addresses: []string{"192.0.2.1/24"}}}},
 		Services: []serviceconfig.Service{{Name: "leases", DHCPServer: &server}, {Name: "dns", DNS: &dns}},
 	}
+	doc := config.FromNative(native)
 	if migrated {
 		doc = migratedDHCPDNSFixtureDocument(t, dnsPort)
 	}
 	serverName, dnsName := "", ""
-	for _, service := range doc.Services {
+	plan, err := config.Compile(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, service := range plan.Native.Services {
 		if service.DHCPServer != nil {
 			if serverName != "" {
 				t.Fatal("fixture has more than one DHCP server")

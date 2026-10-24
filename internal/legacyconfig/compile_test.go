@@ -58,9 +58,19 @@ func compiled(t *testing.T, name string) Result {
 	return result
 }
 
+// nativeProgram checks the execution projection of a newly imported source.
+func nativeProgram(t *testing.T, program config.Document) config.Native {
+	t.Helper()
+	plan, err := config.Compile(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return plan.Native
+}
+
 func iface(t *testing.T, d config.Document, name string) network.Interface {
 	t.Helper()
-	for _, item := range d.Network.Interfaces {
+	for _, item := range nativeProgram(t, d).Network.Interfaces {
 		if item.Name == name {
 			return item
 		}
@@ -71,7 +81,7 @@ func iface(t *testing.T, d config.Document, name string) network.Interface {
 
 func service(t *testing.T, d config.Document, role string) serviceconfig.Service {
 	t.Helper()
-	for _, s := range d.Services {
+	for _, s := range nativeProgram(t, d).Services {
 		if s.Role() == role {
 			return s
 		}
@@ -86,7 +96,7 @@ func TestStaticAddressRouteAndLinkMigration(t *testing.T) {
 	if result.SourceRevision != SourceRevision || result.SourceRouter != "migration-static" || len(result.Mappings) != 12 {
 		t.Fatal("migration provenance or resource mappings are incomplete")
 	}
-	if len(d.Network.Links) != 2 || len(d.Network.Interfaces) != 5 || len(d.Network.Routes) != 2 {
+	if len(nativeProgram(t, d).Network.Links) != 2 || len(nativeProgram(t, d).Network.Interfaces) != 5 || len(nativeProgram(t, d).Network.Routes) != 2 {
 		t.Fatal("network topology was not preserved")
 	}
 	wan := iface(t, d, "eth0")
@@ -101,16 +111,16 @@ func TestStaticAddressRouteAndLinkMigration(t *testing.T) {
 	if bridgePort.Master == nil || *bridgePort.Master != "br0" {
 		t.Fatal("bridge membership was lost")
 	}
-	if !reflect.DeepEqual(d.Network.Routes[0], network.Route{Destination: "203.0.113.0/24", Gateway: "192.0.2.254", Interface: "eth1", Metric: 42}) {
+	if !reflect.DeepEqual(nativeProgram(t, d).Network.Routes[0], network.Route{Destination: "203.0.113.0/24", Gateway: "192.0.2.254", Interface: "eth1", Metric: 42}) {
 		t.Fatal("static IPv4 route changed")
 	}
-	if d.Network.Routes[1].Gateway != "fe80::1" || d.Network.Routes[1].Interface != "eth0" || d.Network.Routes[1].Metric != 100 {
+	if nativeProgram(t, d).Network.Routes[1].Gateway != "fe80::1" || nativeProgram(t, d).Network.Routes[1].Interface != "eth0" || nativeProgram(t, d).Network.Routes[1].Metric != 100 {
 		t.Fatal("IPv6 next-hop scope or metric was lost")
 	}
-	if d.Network.Forwarding.IPv4 == nil || !*d.Network.Forwarding.IPv4 || d.Network.Forwarding.IPv6 == nil || *d.Network.Forwarding.IPv6 {
+	if nativeProgram(t, d).Network.Forwarding.IPv4 == nil || !*nativeProgram(t, d).Network.Forwarding.IPv4 || nativeProgram(t, d).Network.Forwarding.IPv6 == nil || *nativeProgram(t, d).Network.Forwarding.IPv6 {
 		t.Fatal("explicit forwarding enable/disable settings changed")
 	}
-	if d.Network.Firewall != nil {
+	if nativeProgram(t, d).Network.Firewall != nil {
 		t.Fatal("migration invented a firewall")
 	}
 }
@@ -160,10 +170,10 @@ func TestDNSResourceGraphAndStaticReferences(t *testing.T) {
 
 func TestDSLitePreservesPeerAndOldMTUDefault(t *testing.T) {
 	d := compiled(t, "dslite").Document
-	if len(d.Network.DSLite) != 1 {
+	if len(nativeProgram(t, d).Network.DSLite) != 1 {
 		t.Fatal("DS-Lite tunnel missing")
 	}
-	tunnel := d.Network.DSLite[0]
+	tunnel := nativeProgram(t, d).Network.DSLite[0]
 	if tunnel.Name != "ds0" || tunnel.Underlay != "eth0" || tunnel.Local != "2001:db8::2" || tunnel.Remote != "2001:db8:ffff::1" || tunnel.MTU != 1460 {
 		t.Fatal("tunnel endpoint or fixed legacy MTU changed")
 	}
@@ -171,12 +181,12 @@ func TestDSLitePreservesPeerAndOldMTUDefault(t *testing.T) {
 	if !reflect.DeepEqual(inner.Addresses, []string{"192.0.0.2/32"}) || inner.AddressOptions["192.0.0.2/32"].Peer != "192.0.0.1/32" {
 		t.Fatal("inner point-to-point address semantics were lost")
 	}
-	if len(d.Network.Routes) != 1 || d.Network.Routes[0].Interface != "ds0" || d.Network.Routes[0].Gateway != "192.0.0.1" {
+	if len(nativeProgram(t, d).Network.Routes) != 1 || nativeProgram(t, d).Network.Routes[0].Interface != "ds0" || nativeProgram(t, d).Network.Routes[0].Gateway != "192.0.0.1" {
 		t.Fatal("explicit static route device reference changed")
 	}
 	data := strings.Replace(string(fixture(t, "dslite")), "        tunnelName: ds0\n", "", 1)
 	withoutName, err := Migrate([]byte(data))
-	if err != nil || withoutName.Network.DSLite[0].Name != "wan" {
+	if err != nil || nativeProgram(t, withoutName).Network.DSLite[0].Name != "wan" {
 		t.Fatalf("legacy tunnel name fallback was not preserved: %v", err)
 	}
 }
@@ -189,7 +199,7 @@ func TestDSLiteLocalAddressFromMeansInnerIPv4(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d.Network.DSLite[0].Local != "2001:db8::2" {
+	if nativeProgram(t, d).Network.DSLite[0].Local != "2001:db8::2" {
 		t.Fatal("IPv4 inner source was incorrectly used as outer IPv6 source")
 	}
 	inner := iface(t, d, "ds0")
@@ -321,7 +331,7 @@ func TestObserverOnlyInterfaceDoesNotBecomeOwned(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Document.Network.Interfaces) != 0 || len(result.Mappings) != 1 || len(result.Mappings[0].Notes) == 0 {
+	if len(nativeProgram(t, result.Document).Network.Interfaces) != 0 || len(result.Mappings) != 1 || len(result.Mappings[0].Notes) == 0 {
 		t.Fatal("observe-only alias silently acquired administrative ownership or disappeared from the mapping report")
 	}
 }

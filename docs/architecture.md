@@ -38,8 +38,9 @@ PID 1 に通常のプロトコル socket や DNS/BGP engine を置かない。�
 
 ## 設定と動的な状態
 
-`config.Document` は永続する意図であり、DHCP の取得アドレスを直接書き戻す場所ではない。
-control は設定と protocol facts から完全な `network.Desired` を生成する。
+`config.Document` は [ResourceProgram](resource-program.md) の source で、ID・依存・owner・provenance を永続する。
+compiler は source を変更せず、型付きの内部 `Native` と graph/ownership の plan を作る。
+DHCP の取得アドレスを source に直接書き戻さず、control は compiled intent と protocol facts から完全な `network.Desired` を生成する。
 network だけが netlink/sysctl/nftables を変更する。protocol worker は native socket を
 所有し、設定 identity と世代・epoch・sequence を付けた typed snapshot を送る。
 

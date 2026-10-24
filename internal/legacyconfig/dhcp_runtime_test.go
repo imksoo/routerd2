@@ -34,7 +34,7 @@ func TestMigratedDHCPDNSGraphThroughPublicRuntimeOwnership(t *testing.T) {
 	doc := result.Document
 	dns := service(t, doc, "dns")
 	var dhcp, guest serviceconfig.Service
-	for _, s := range doc.Services {
+	for _, s := range nativeProgram(t, doc).Services {
 		if s.DHCPServer != nil {
 			if s.DHCPServer.Interface == "eth1" {
 				dhcp = s
@@ -130,9 +130,9 @@ func TestMigratedDHCPDNSGraphThroughPublicRuntimeOwnership(t *testing.T) {
 	if err := json.Unmarshal(raw, &changed); err != nil {
 		t.Fatal(err)
 	}
-	for i := range changed.Services {
-		if changed.Services[i].DNS != nil {
-			changed.Services[i].DNS.Zones[0].Spec.DHCPDerived.Sources = nil
+	for _, resource := range changed.Resources {
+		if resource.Service != nil && resource.Service.DNS != nil {
+			resource.Service.DNS.Zones[0].Spec.DHCPDerived.Sources = nil
 		}
 	}
 	if err := runtime.ApplyConfig(ctx, 2, changed); err != nil {

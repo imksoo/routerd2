@@ -3,7 +3,7 @@
   "document_type": "implementation_plan",
   "as_of": "2026-10-24",
   "timezone": "Asia/Tokyo",
-  "status": "planned_not_implemented",
+  "status": "implementation_in_progress",
   "baselines": {
     "routerd": {
       "commit": "1329ef54f296507eda79bbbc3b853783dd27251e",
@@ -19,7 +19,7 @@
   "policy": {
     "scope": "Complete Linux routing product including cloud/SAM and operational contracts; homert is one acceptance profile.",
     "parity_flags_unchanged": true,
-    "all_new_work_packages_are_planned": true,
+    "all_new_work_packages_are_planned": false,
     "source_inventory_is_not_runtime_acceptance": true,
     "rejected_input_is_not_equivalent_implementation": true,
     "milestones_are_acceptance_groups_not_global_serial_barriers": true,
@@ -105,7 +105,7 @@
     {
       "id": "M1",
       "title": "resource 実行基盤と早期risk gate",
-      "status": "planned",
+      "status": "in_progress",
       "exit": "source program→依存評価→既存worker→状態→reconcileが一本通る。journal rollbackとengine/profile ADRの選択基準を持つ。",
       "work_packages": [
         "CORE-01",
@@ -199,7 +199,7 @@
       "title": "基準環境と field 単位の互換契約",
       "milestone": "M1",
       "track": "resource",
-      "status": "planned",
+      "status": "in_progress",
       "scope": "shared_infrastructure",
       "risk": "medium",
       "depends_on": [],
@@ -231,7 +231,7 @@
       "title": "ResourceProgram と単一の設定 transaction",
       "milestone": "M1",
       "track": "resource",
-      "status": "planned",
+      "status": "in_progress",
       "scope": "shared_infrastructure",
       "risk": "high",
       "depends_on": [
@@ -270,7 +270,7 @@
       "title": "依存・条件・resource lifecycle の coordinator",
       "milestone": "M1",
       "track": "resource",
-      "status": "planned",
+      "status": "in_progress",
       "scope": "shared_infrastructure",
       "risk": "high",
       "depends_on": [
@@ -10900,5 +10900,82 @@
       "config_format_may_change": true
     },
     "goal": "Reconstruct the required routerd features as routerd2; do not preserve unreleased routerd2 interfaces or serialized formats."
-  }
+  },
+  "implementation_checkpoints": [
+    {
+      "id": "resource-program-foundation",
+      "date": "2026-10-24",
+      "status": "implemented_locally_verified",
+      "work_packages": [
+        "CORE-01",
+        "CORE-02",
+        "CORE-03"
+      ],
+      "specification": "resource-program.md",
+      "source_evidence": "feature-contracts.md",
+      "implemented": [
+        "ResourceProgram schema 2 source and deterministic typed compiler",
+        "Named resources, explicit and inferred static dependencies, owner and provenance attribution",
+        "Source-preserving configuration journal and confirmed/restart rollback",
+        "Existing native runtime consumes derived intent after pure validation",
+        "Resource ID SSH editing and read-only config plan",
+        "Pinned source condition/dependency/ownership fixtures"
+      ],
+      "remaining": [
+        "Full CORE-01 field/default/status/event coverage and engine reference manifest",
+        "Runtime three-valued conditions and per-resource readiness",
+        "Finite shared facts and boot/producer/config fencing",
+        "Dynamic owner cascade and resource-scoped reconcile",
+        "Explicit boot-selected startup store/revision",
+        "Independent derived projection generation",
+        "Extracted multi-binary runtime catalog and boot ABI"
+      ],
+      "parity_flags_unchanged": true,
+      "validation": [
+        {
+          "command": "make check",
+          "result": "pass",
+          "covers": [
+            "format",
+            "unit",
+            "dependency regression",
+            "Python tooling",
+            "race",
+            "vet"
+          ]
+        },
+        {
+          "command": "make build-linux",
+          "result": "pass",
+          "architectures": [
+            "linux/amd64",
+            "linux/arm64"
+          ],
+          "cgo_enabled": false
+        },
+        {
+          "suite": "daemon-resource-program",
+          "result": "pass",
+          "environment": "QEMU no external NIC",
+          "required_test": "TestDaemonResourceProgramLifecycleAndRecovery"
+        },
+        {
+          "suite": "daemon-management",
+          "result": "pass",
+          "environment": "QEMU no external NIC",
+          "required_test": "TestDaemonConfigurationAndRecovery"
+        },
+        {
+          "suite": "storage",
+          "result": "pass",
+          "environment": "QEMU two kernel boots with private regular-file ext4 disk",
+          "covers": [
+            "source journal",
+            "SSH edit and host key",
+            "signed trial runtime fallback"
+          ]
+        }
+      ]
+    }
+  ]
 }

@@ -45,6 +45,8 @@ func selectedSuite() (suite, error) {
 		return suite{"/daemon.test", "TestDaemonAFTRResolutionAndExpiry", "ROUTERD_AFTR_DAEMON_TEST", 150 * time.Second}, nil
 	case "daemon-management":
 		return suite{"/daemon.test", "TestDaemonConfigurationAndRecovery", "ROUTERD_MANAGEMENT_DAEMON_TEST", 150 * time.Second}, nil
+	case "daemon-resource-program":
+		return suite{"/daemon.test", "TestDaemonResourceProgramLifecycleAndRecovery", "ROUTERD_RESOURCE_PROGRAM_DAEMON_TEST", 150 * time.Second}, nil
 	case "daemon-dhcp-dns":
 		return suite{"/daemon.test", "TestDaemonDHCPDNSAndOwnershipExpiry", "ROUTERD_DHCP_DNS_DAEMON_TEST", 150 * time.Second}, nil
 	case "daemon-legacy-dhcp-dns":

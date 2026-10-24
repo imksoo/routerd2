@@ -40,14 +40,12 @@ func decodeYAML(b []byte, v any) error {
 	if err != nil {
 		return err
 	}
-	d := json.NewDecoder(bytes.NewReader(j))
-	d.DisallowUnknownFields()
-	return d.Decode(v)
+	return decodeStrictJSON(j, v, maxDocumentNodes)
 }
 
 func plain(n *yaml.Node, depth int, count *int) (any, error) {
 	*count++
-	if depth > 64 || *count > 100000 {
+	if depth > 64 || *count > maxDocumentNodes {
 		return nil, errors.New("configuration is too deeply nested or complex")
 	}
 	if n.Anchor != "" || n.Kind == yaml.AliasNode {

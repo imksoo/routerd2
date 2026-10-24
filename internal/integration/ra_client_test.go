@@ -75,11 +75,11 @@ func TestDaemonRAClientConfigurationAndExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer unix.Close(fd)
-	doc := config.Document{SchemaVersion: 1,
+	doc := config.Native{
 		Network:  network.Desired{Interfaces: []network.Interface{{Name: "wan0", Addresses: []string{"fe80::1/64"}, AddressOptions: map[string]network.AddressOptions{"fe80::1/64": {NoDAD: true}}}}},
 		Services: []serviceconfig.Service{{Name: "wan-ra", RAClient: &serviceconfig.RAClient{Interface: "wan0", SourceAddress: "fe80::1", InterfaceID: "::1234", AllowedRouters: []string{"fe80::2"}}}},
 	}
-	f := startFixtureDaemon(t, doc)
+	f := startFixtureDaemon(t, config.FromNative(doc))
 	for key := range prior {
 		value, err := os.ReadFile("/proc/sys/net/ipv6/conf/wan0/" + key)
 		if err != nil || strings.TrimSpace(string(value)) != "0" {
@@ -177,7 +177,7 @@ func TestDaemonRAClientConfigurationAndExpiry(t *testing.T) {
 	})
 	doc.Services = nil
 	var committed control.State
-	if err := f.control.Do(context.Background(), "POST", "/v1/config/commit", control.CommitRequest{ExpectedRevision: 1, RequestID: "remove-ra-client", Config: doc}, &committed); err != nil {
+	if err := f.control.Do(context.Background(), "POST", "/v1/config/commit", control.CommitRequest{ExpectedRevision: 1, RequestID: "remove-ra-client", Config: config.FromNative(doc)}, &committed); err != nil {
 		t.Fatal(err)
 	}
 	for key, want := range prior {

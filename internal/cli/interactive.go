@@ -433,8 +433,8 @@ func parsePath(path string) ([]pathPart, error) {
 			start = i
 			for i < len(path) && path[i] != ']' {
 				ch := path[i]
-				if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || strings.ContainsRune("_.:-", rune(ch))) {
-					return nil, errors.New("list selectors allow letters, digits, underscore, dot, colon and hyphen")
+				if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || strings.ContainsRune("_.:/-", rune(ch))) {
+					return nil, errors.New("list selectors allow letters, digits, underscore, dot, colon, slash and hyphen")
 				}
 				i++
 			}
@@ -509,11 +509,13 @@ func jsonField(t reflect.Type, name string) (int, error) {
 }
 
 func namedList(t reflect.Type) (int, bool) {
-	index, err := jsonField(t, "name")
-	if err != nil {
-		return 0, false
+	for _, key := range []string{"id", "name"} {
+		index, err := jsonField(t, key)
+		if err == nil && dereferenceType(t).Field(index).Type.Kind() == reflect.String {
+			return index, true
+		}
 	}
-	return index, dereferenceType(t).Field(index).Type.Kind() == reflect.String
+	return 0, false
 }
 
 func pathType(t reflect.Type, parts []pathPart) (reflect.Type, error) {
@@ -650,7 +652,7 @@ func mutatePath(v reflect.Value, parts []pathPart, value string, remove bool) er
 		if key, named := namedList(target.Type()); named {
 			name := decoded.Elem().Field(key)
 			if name.String() != "" && name.String() != part.selector {
-				return errors.New("entry name must match its list selector")
+				return errors.New("entry identity must match its list selector")
 			}
 			name.SetString(part.selector)
 		}
@@ -972,11 +974,11 @@ Configuration commands:
   abort                      discard the candidate and leave configuration mode
   exit                       leave context, then configuration mode if unchanged
 Examples:
-  set network.interfaces[eth0].addresses ["192.0.2.1/24"]
-  set network.forwarding.ipv4 true
-  edit network.interfaces[eth0]
+  set resources[lan-address].address.cidr "192.0.2.1/24"
+  set resources[forwarding].forwarding.ipv4 true
+  edit resources[lan].interface
   set mtu 1500
-Lists use [name] when entries have a name, otherwise [0], [1], etc.
+Resources use [id]; other lists use [name] when present, otherwise [0], [1], etc.
 Prefix a path with / to address it from the configuration root.
 YAML export is canonical; comments and original formatting are not retained.
 Input limits: 4 KiB per line and 100 KiB per interactive candidate/YAML paste.

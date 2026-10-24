@@ -83,14 +83,14 @@ func TestDaemonBFDControlsBGPSessionAndExpiry(t *testing.T) {
 		PeerBFD:        map[string]bgpconfig.BFDReference{"192.0.2.2": {Service: "link-watch"}},
 		RouteMetric:    200,
 	}
-	doc := config.Document{SchemaVersion: 1, Network: network.Desired{Interfaces: []network.Interface{{Name: "wan0", Addresses: []string{"192.0.2.1/24"}}}}, Services: []serviceconfig.Service{
+	doc := config.Native{Network: network.Desired{Interfaces: []network.Interface{{Name: "wan0", Addresses: []string{"192.0.2.1/24"}}}}, Services: []serviceconfig.Service{
 		{Name: "link-watch", BFD: &bfd.Config{Interface: "wan0", SourceAddress: "192.0.2.1", Peers: []bfd.Peer{{Address: "192.0.2.2", MinTxMilliseconds: 200, MinRxMilliseconds: 200, DetectMultiplier: 5}}}},
 		{Name: "edge", BGP: &bgp},
 	}}
-	if err := config.Validate(doc); err != nil {
+	if err := config.Validate(config.FromNative(doc)); err != nil {
 		t.Fatal(err)
 	}
-	fixture := startFixtureDaemon(t, doc)
+	fixture := startFixtureDaemon(t, config.FromNative(doc))
 	serviceStatus := func() (runtimeplan.InstanceStatus, bfd.Snapshot) {
 		t.Helper()
 		call, stop := context.WithTimeout(ctx, time.Second)

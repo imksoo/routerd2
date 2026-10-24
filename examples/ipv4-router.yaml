@@ -1,39 +1,73 @@
 # Interface names are examples. Apply within the target router namespace.
-schema_version: 1
-network:
-  links:
-    - name: br-lan
+schema_version: 2
+resources:
+  - id: address/br-lan/794a8a605904a90653b471c4
+    depends_on:
+      - interface/br-lan
+    address:
+      interface: br-lan
+      cidr: 192.168.10.1/24
+  - id: firewall
+    firewall:
+      forward:
+        - from: br-lan
+          to: eth0
+      masquerade:
+        - source: 192.168.10.0/24
+          out_interface: eth0
+  - id: forwarding
+    forwarding:
+      ipv4: true
+  - id: interface/br-lan
+    depends_on:
+      - link/br-lan
+    interface:
+      name: br-lan
+  - id: interface/eth0
+    interface:
+      name: eth0
+  - id: interface/eth1
+    depends_on:
+      - link/br-lan
+    interface:
+      name: eth1
+      master: br-lan
+  - id: link/br-lan
+    link:
+      name: br-lan
       kind: bridge
       bridge_multicast_snooping: false
-  interfaces:
-    - name: eth0
-    - name: eth1
-      master: br-lan
-    - name: br-lan
-      addresses: [192.168.10.1/24]
-  forwarding:
-    ipv4: true
-  firewall:
-    forward:
-      - {from: br-lan, to: eth0}
-    masquerade:
-      - {source: 192.168.10.0/24, out_interface: eth0}
-services:
-  - name: wan
-    dhcp4:
-      interface: eth0
-      hostname: routerd2
-      default_route: true
-      metric: 100
-  - name: resolver
-    dns:
-      spec:
-        listen:
-          - name: lan
-            addresses: [192.168.10.1, 127.0.0.1]
-            port: 53
-        sources:
-          - name: upstream
-            kind: forward
-            match: ['.']
-            upstreams: ['udp://9.9.9.9:53']
+  - id: service/resolver
+    service:
+      name: resolver
+      dns:
+        resource: ""
+        spec:
+          listen:
+            - name: lan
+              addresses:
+                - 192.168.10.1
+                - 127.0.0.1
+              port: 53
+          sources:
+            - name: upstream
+              kind: forward
+              match:
+                - .
+              upstreams:
+                - udp://9.9.9.9:53
+              healthcheck: {}
+          cache: {}
+          metrics: {}
+          queryLog: {}
+          when: {}
+  - id: service/wan
+    depends_on:
+      - interface/eth0
+    service:
+      name: wan
+      dhcp4:
+        interface: eth0
+        hostname: routerd2
+        default_route: true
+        metric: 100

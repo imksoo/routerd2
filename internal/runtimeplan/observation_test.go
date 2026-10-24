@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/aftr"
@@ -20,7 +21,7 @@ func TestAFTRSourceIndependentOfUnrelatedLargeNetworkObservations(t *testing.T) 
 	n := &aftrNetwork{observed: network.Snapshot{Interfaces: []network.InterfaceState{{Name: "wan0", Index: 42, Up: true, Addresses: []network.AddressState{{Address: "2001:db8:42::1/64", Owned: true, PreferredLifetime: ^uint32(0), ValidLifetime: ^uint32(0)}}}}}}
 	r := New(t.TempDir(), t.TempDir(), n)
 	r.manager = &memoryManager{}
-	if err := r.ApplyConfig(context.Background(), 1, aftrDocument()); err != nil {
+	if err := r.ApplyConfig(context.Background(), 1, config.FromNative(aftrDocument())); err != nil {
 		t.Fatal(err)
 	}
 	first, err := r.AFTRInput(context.Background(), "service.dslite")

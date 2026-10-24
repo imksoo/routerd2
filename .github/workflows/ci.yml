@@ -100,6 +100,7 @@ jobs:
             dist/ra-dns-test/
             dist/daemon-test/
             dist/aftr-daemon-test/
+            dist/daemon-resource-program-test/
             dist/daemon-management-test/
             dist/daemon-dhcp-dns-test/
             dist/daemon-legacy-dhcp-dns-test/

@@ -73,11 +73,18 @@ func TestWireGuardStaticMigrationPreservesPinnedEngineIntent(t *testing.T) {
 	if err := config.Validate(result.Document); err != nil {
 		t.Fatal(err)
 	}
-	n := result.Document.Network
+	n := nativeProgram(t, result.Document).Network
 	if len(n.WireGuard) != 1 || len(n.Links) != 1 || n.Links[0].Name != "wg-site" || n.Links[0].Kind != "wireguard" || len(n.WireGuard[0].Peers) != 2 {
 		t.Fatal("interface or complete peer set missing")
 	}
-	if len(n.Routes) != 2 || len(n.PolicyRules) != 0 || n.Routes[0].Destination != "203.0.113.0/24" || n.Routes[0].Interface != "wg-site" || n.Routes[0].Metric != 42 || n.Routes[1].Interface != "wg-site" {
+	// Routes are a keyed set; resource declaration order cannot select a path.
+	routes := map[string]network.Route{}
+	for _, route := range n.Routes {
+		routes[route.Destination] = route
+	}
+	if len(n.Routes) != 2 || len(n.PolicyRules) != 0 ||
+		!reflect.DeepEqual(routes["203.0.113.0/24"], network.Route{Destination: "203.0.113.0/24", Interface: "wg-site", Metric: 42}) ||
+		!reflect.DeepEqual(routes["2001:db8:90::/64"], network.Route{Destination: "2001:db8:90::/64", Interface: "wg-site", Metric: 43}) {
 		t.Fatal("explicit route intent changed or AllowedIPs synthesized routing")
 	}
 	if got := iface(t, result.Document, "wg-site"); got.MTU != 1412 || !reflect.DeepEqual(got.Addresses, []string{"10.80.0.1/24"}) {
@@ -123,7 +130,7 @@ func TestWireGuardMigrationDefaultsArePureAndDoNotInventSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	n := result.Document.Network
+	n := nativeProgram(t, result.Document).Network
 	if len(n.WireGuard) != 1 || !n.WireGuard[0].GeneratePrivateKey || n.WireGuard[0].PrivateKeyFile != path || n.WireGuard[0].ListenPort != 0 || n.WireGuard[0].FirewallMark != 0 || n.Firewall != nil || len(n.Routes) != 0 || len(n.PolicyRules) != 0 {
 		t.Fatal("automatic port, absent peers, or explicit key path changed")
 	}
@@ -145,7 +152,7 @@ func TestWireGuardMigrationNumericIPv6EndpointAndPassivePeer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	peers := result.Document.Network.WireGuard[0].Peers
+	peers := nativeProgram(t, result.Document).Network.WireGuard[0].Peers
 	if peers[0].Endpoint != "[fe80::2%eth9]:51821" || peers[1].Endpoint != "" || peers[1].PersistentKeepalive != 0 {
 		t.Fatal("numeric scoped endpoint or passive default changed")
 	}
@@ -302,7 +309,7 @@ func TestWireGuardMigrationListenerPreservesZoneOrderAndFamily(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := result.Document.Network.Firewall
+	f := nativeProgram(t, result.Document).Network.Firewall
 	for _, family := range []int{4, 6} {
 		for _, in := range []string{"eth5", "eth1", "eth9", "wg-site", "unknown0"} {
 			packet := testPacket{in: in, source: "192.0.2.2", destination: "192.0.2.1", protocol: "udp", dport: 51820}
@@ -339,7 +346,7 @@ func TestWireGuardMigrationStandaloneListenerDoesNotInventStatefulFilter(t *test
 			if err != nil {
 				t.Fatal("automatic listen port should preserve absent filtering", err)
 			}
-			f := result.Document.Network.Firewall
+			f := nativeProgram(t, result.Document).Network.Firewall
 			if nat {
 				if f == nil || f.Input != nil || f.Output != nil || f.ForwardChain != nil || !f.DisableForward || len(f.NAT) != 1 {
 					t.Fatal("automatic-port WireGuard changed the NAT-only hook contract")
@@ -405,7 +412,7 @@ func TestWireGuardMigrationListenerPreservesOriginalBridgeHoleIndex(t *testing.T
 					if scoped && in == "eth9" {
 						want = "accept"
 					}
-					if got := packetVerdict(result.Document.Network.Firewall.Input, packet); got != want {
+					if got := packetVerdict(nativeProgram(t, result.Document).Network.Firewall.Input, packet); got != want {
 						t.Fatalf("scoped=%t interface=%s source=%s got=%s want=%s", scoped, in, source, got, want)
 					}
 				}
@@ -425,7 +432,7 @@ func TestWireGuardMigrationWithoutUntrustZonePreservesExplicitDeny(t *testing.T)
 	}
 	for _, source := range []string{"192.0.2.2", "2001:db8::2"} {
 		packet := testPacket{in: "wg-site", source: source, destination: source, protocol: "udp", dport: 51820}
-		if got := packetVerdict(result.Document.Network.Firewall.Input, packet); got != "drop" {
+		if got := packetVerdict(nativeProgram(t, result.Document).Network.Firewall.Input, packet); got != "drop" {
 			t.Fatal("WireGuard listener bypassed explicit management-zone denial")
 		}
 	}

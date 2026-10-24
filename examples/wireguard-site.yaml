@@ -1,62 +1,108 @@
 # Example routed site-to-site link. Replace all interface names, addresses and
 # the peer public key with the intended deployment's values before applying.
 # The example public key is a placeholder, not an enrolled remote peer.
-schema_version: 1
-network:
-  links:
-    - name: wg0
-      kind: wireguard
-  interfaces:
-    - name: wan0
-      addresses: [192.0.2.2/24]
-    - name: lan0
-      addresses: [10.10.1.1/24]
-    - name: wg0
+schema_version: 2
+resources:
+  - id: address/lan0/46235fae08634a889f7de7eb
+    depends_on:
+      - interface/lan0
+    address:
+      interface: lan0
+      cidr: 10.10.1.1/24
+  - id: address/wan0/13a2d17797cb46e73b5d2e53
+    depends_on:
+      - interface/wan0
+    address:
+      interface: wan0
+      cidr: 192.0.2.2/24
+  - id: address/wg0/6f45a558797f148232b12ff5
+    depends_on:
+      - interface/wg0
+    address:
+      interface: wg0
+      cidr: 10.255.0.1/32
+  - id: firewall
+    firewall:
+      forward:
+        - from: lan0
+          to: wg0
+        - from: wg0
+          to: lan0
+      input:
+        policy: drop
+        rules:
+          - match:
+              in_interface: lo
+            action: accept
+          - match:
+              in_interface: wan0
+              protocol: udp
+              destination_ports:
+                - start: 51820
+            action: accept
+          - match:
+              source: 10.10.1.0/24
+              in_interface: lan0
+              protocol: tcp
+              destination_ports:
+                - start: 22
+            action: accept
+          - match:
+              protocol: icmp
+            action: accept
+          - match:
+              protocol: icmpv6
+            action: accept
+  - id: forwarding
+    forwarding:
+      ipv4: true
+  - id: interface/lan0
+    interface:
+      name: lan0
+  - id: interface/wan0
+    interface:
+      name: wan0
+  - id: interface/wg0
+    depends_on:
+      - link/wg0
+    interface:
+      name: wg0
       mtu: 1420
-      addresses: [10.255.0.1/32]
-  wireguard:
-    - interface: wg0
-      # The existing state directory must be private and persistent. On first
-      # apply, routerd can generate the key here without a shell or wg utility.
+  - id: link/wg0
+    link:
+      name: wg0
+      kind: wireguard
+  - id: route/83432f61582715ee37ebc8b8
+    depends_on:
+      - interface/wg0
+    route:
+      destination: 10.10.2.0/24
+      interface: wg0
+  - id: route/b3f5238dc08738d41e837b4d
+    depends_on:
+      - interface/wg0
+    route:
+      destination: 10.255.0.2/32
+      interface: wg0
+  - id: route/bc170f6fa3d79751ce344c25
+    depends_on:
+      - interface/wan0
+    route:
+      destination: 0.0.0.0/0
+      gateway: 192.0.2.1
+      interface: wan0
+  - id: wireguard/wg0
+    depends_on:
+      - link/wg0
+    wireguard:
+      interface: wg0
       private_key_file: /var/lib/routerd/wg0-v1.key
       generate_private_key: true
       listen_port: 51820
       peers:
         - public_key: QkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkI=
+          allowed_ips:
+            - 10.255.0.2/32
+            - 10.10.2.0/24
           endpoint: 198.51.100.2:51820
-          allowed_ips: [10.255.0.2/32, 10.10.2.0/24]
           persistent_keepalive: 25
-  routes:
-    - destination: 0.0.0.0/0
-      gateway: 192.0.2.1
-      interface: wan0
-    - destination: 10.255.0.2/32
-      interface: wg0
-    - destination: 10.10.2.0/24
-      interface: wg0
-  forwarding:
-    ipv4: true
-  firewall:
-    input:
-      policy: drop
-      rules:
-        - match: {in_interface: lo}
-          action: accept
-        - match:
-            in_interface: wan0
-            protocol: udp
-            destination_ports: [{start: 51820}]
-          action: accept
-        - match:
-            in_interface: lan0
-            source: 10.10.1.0/24
-            protocol: tcp
-            destination_ports: [{start: 22}]
-          action: accept
-        - match: {protocol: icmp}
-          action: accept
-        - match: {protocol: icmpv6}
-          action: accept
-    forward:
-      - {from: lan0, to: wg0}
-      - {from: wg0, to: lan0}

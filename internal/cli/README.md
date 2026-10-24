@@ -10,7 +10,7 @@ For interactive edits:
 
 ```text
 configure
-set network.interfaces[eth0].mtu 1400
+set resources[interface/eth0].interface.mtu 1400
 diff
 validate
 commit confirmed 60
@@ -19,7 +19,9 @@ confirm
 
 `edit running-config.yaml` accepts a complete YAML replacement ending in `.end`;
 `.abort` keeps the candidate unchanged. Typed paths and `edit` contexts also have
-Tab completion. YAML exports preserve the document's values, not its comments
+Tab completion. Resource lists use `id`; nested named lists use `name`. Slash
+and dot characters inside resource selectors are part of that identity.
+YAML exports preserve the document's values, not its comments
 or original whitespace. Interactive input remains limited to 4 KiB per line
 and 100 KiB per candidate/paste. Reading or exporting a larger current document
 does not require entering candidate mode.
@@ -30,6 +32,7 @@ transaction API:
 ```sh
 routerd config export > running-config.yaml
 routerd config validate running-config.yaml
+routerd config plan running-config.yaml
 routerd config apply --file running-config.yaml \
   --expected-revision 42 --request-id change-2026-001 --confirmed 60
 routerd config confirm

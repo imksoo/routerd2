@@ -178,7 +178,7 @@ func initializeAndExec() error {
 	if err := writeJSON(bootPath, b, 0600); err != nil {
 		return err
 	}
-	if err := writeJSON(b.Config, config.Document{SchemaVersion: 1}, 0600); err != nil {
+	if err := writeJSON(b.Config, config.Document{SchemaVersion: config.SchemaVersion}, 0600); err != nil {
 		return err
 	}
 	image, err := store.Verify(ctx, base)

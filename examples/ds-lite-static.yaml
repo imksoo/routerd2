@@ -1,29 +1,66 @@
 # The remote AFTR and local globally routable IPv6 address are explicit here.
 # AFTR-name acquisition/resolution is a separate dependency, not inferred.
-schema_version: 1
-network:
-  interfaces:
-    - name: eth0
-      addresses: ['2001:db8:100::2/64']
-    - name: eth1
-      addresses: [192.168.10.1/24]
-    - name: ds0
-      addresses: [192.0.0.2/32]
-      address_options:
-        192.0.0.2/32:
-          peer: 192.0.0.1/32
-  ds_lite:
-    - name: ds0
+schema_version: 2
+resources:
+  - id: address/ds0/cc120ab1a8cf2da03bab6955
+    depends_on:
+      - interface/ds0
+    address:
+      interface: ds0
+      cidr: 192.0.0.2/32
+      options:
+        peer: 192.0.0.1/32
+  - id: address/eth0/87283367212f106bd4f9e887
+    depends_on:
+      - interface/eth0
+    address:
+      interface: eth0
+      cidr: 2001:db8:100::2/64
+  - id: address/eth1/794a8a605904a90653b471c4
+    depends_on:
+      - interface/eth1
+    address:
+      interface: eth1
+      cidr: 192.168.10.1/24
+  - id: ds_lite/ds0
+    depends_on:
+      - interface/eth0
+    ds_lite:
+      name: ds0
       underlay: eth0
-      local: '2001:db8:100::2'
-      remote: '2001:db8:200::1'
+      local: 2001:db8:100::2
+      remote: 2001:db8:200::1
       mtu: 1460
-  routes:
-    - {destination: '::/0', gateway: '2001:db8:100::1', interface: eth0}
-    - {destination: 0.0.0.0/0, interface: ds0}
-  forwarding:
-    ipv4: true
-    ipv6: true
-  firewall:
-    forward:
-      - {from: eth1, to: ds0}
+  - id: firewall
+    firewall:
+      forward:
+        - from: eth1
+          to: ds0
+  - id: forwarding
+    forwarding:
+      ipv4: true
+      ipv6: true
+  - id: interface/ds0
+    depends_on:
+      - ds_lite/ds0
+    interface:
+      name: ds0
+  - id: interface/eth0
+    interface:
+      name: eth0
+  - id: interface/eth1
+    interface:
+      name: eth1
+  - id: route/bc170f6fa3d79751ce344c25
+    depends_on:
+      - interface/ds0
+    route:
+      destination: 0.0.0.0/0
+      interface: ds0
+  - id: route/c4a37d996f7d6424db0d5485
+    depends_on:
+      - interface/eth0
+    route:
+      destination: ::/0
+      gateway: 2001:db8:100::1
+      interface: eth0
