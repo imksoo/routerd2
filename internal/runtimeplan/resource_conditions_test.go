@@ -17,7 +17,7 @@ import (
 func TestConditionHoldTimerAndFlapBetweenProjections(t *testing.T) {
 	ctx := context.Background()
 	source := conditionSource()
-	if err := json.Unmarshal([]byte(`{"fact":"service.wan.active","for":"40ms","max_age":"1s"}`), source.Resources[1].When); err != nil {
+	if err := json.Unmarshal([]byte(`{"fact":"service.wan.active","for":"200ms","max_age":"1s"}`), source.Resources[1].When); err != nil {
 		t.Fatal(err)
 	}
 	n := &memoryNetwork{}
@@ -41,7 +41,7 @@ func TestConditionHoldTimerAndFlapBetweenProjections(t *testing.T) {
 	if conditionalRoute(n) {
 		t.Fatal("route activated before hold time")
 	}
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(250 * time.Millisecond)
 	reconcileConditions(t, r) // timer, without a new observation
 	if !conditionalRoute(n) {
 		t.Fatal("hold never released without a new protocol message")
@@ -54,7 +54,7 @@ func TestConditionHoldTimerAndFlapBetweenProjections(t *testing.T) {
 	if conditionalRoute(n) {
 		t.Fatal("flap between projections did not reset hold")
 	}
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(250 * time.Millisecond)
 	reconcileConditions(t, r)
 	if !conditionalRoute(n) {
 		t.Fatal("continuous recovery failed after flap")

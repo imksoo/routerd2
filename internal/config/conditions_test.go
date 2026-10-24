@@ -13,7 +13,7 @@ import (
 
 func TestConditionMaxAgeSurvivesSourceRoundTripAndInvalidInputIsRejected(t *testing.T) {
 	source := Document{SchemaVersion: SchemaVersion, Resources: []resourceprogram.Resource{{
-		ID: "dns", When: &resourceprogram.FactCondition{Fact: "service.wan.ready", MaxAge: "1500ms"},
+		ID: "dns", When: &resourceprogram.FactCondition{Fact: "service.wan.ready", MaxAge: "1500ms", For: "375ms"},
 		Service: &serviceconfig.Service{Name: "dns", DNS: &dnsconfig.RuntimeConfig{
 			Spec: api.DNSResolverSpec{
 				Listen:  []api.DNSResolverListenSpec{{Addresses: []string{"127.0.0.1"}, Port: 5353}},
@@ -26,12 +26,15 @@ func TestConditionMaxAgeSurvivesSourceRoundTripAndInvalidInputIsRejected(t *test
 		t.Fatal(err)
 	}
 	parsed, err := Parse(encoded)
-	if err != nil || parsed.Resources[0].When.MaxAge != "1500ms" {
-		t.Fatal("max_age lost during source serialization", parsed, err)
+	if err != nil || parsed.Resources[0].When.MaxAge != "1500ms" || parsed.Resources[0].When.For != "375ms" {
+		t.Fatal("temporal modifiers lost during source serialization", parsed, err)
 	}
 	for _, invalid := range []string{"0s", "-1s", "forever", "999999999999999999999h"} {
 		if _, err := Parse(bytes.Replace(encoded, []byte("1500ms"), []byte(invalid), 1)); err == nil {
 			t.Fatal("invalid max_age accepted", invalid)
+		}
+		if _, err := Parse(bytes.Replace(encoded, []byte("375ms"), []byte(invalid), 1)); err == nil {
+			t.Fatal("invalid for accepted", invalid)
 		}
 	}
 }

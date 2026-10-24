@@ -272,10 +272,24 @@ func TestDaemonHealthPBRFailoverAndRecovery(t *testing.T) {
 		t.Fatal("delayed old result was not fenced", err)
 	}
 	probeA = healthPBRListener(t, a, "198.51.100.10:18080", "A")
+	until(t, 6*time.Second, func() bool {
+		var page runtimeplan.ResourceObservationPage
+		if f.control.Do(ctx, "GET", "/v1/services/resources", nil, &page) != nil {
+			return false
+		}
+		for _, resource := range page.Resources {
+			if resource.ID == "primary" {
+				return resource.State.Reason == "when_hold" && !resource.State.Active
+			}
+		}
+		return false
+	})
+	traffic("B")
+	record("recovery-held")
 	waitPrimary(true)
 	traffic("A")
 	record("wan-a-recovered")
-	t.Log("two independent health workers: primary -> outage -> backup -> threshold recovery; operator revision stays 1")
+	t.Log("two independent health workers: primary -> outage -> backup -> threshold recovery -> consumer hold -> primary; operator revision stays 1")
 
 	for _, name := range []string{"service.health-a", "control", "network"} {
 		victim := module(name)
@@ -777,7 +791,7 @@ resources:
       health: {resource: health-b, interface: wan1, source_address: 203.0.113.2, target: 198.51.100.11, mark: 42, protocol: tcp, port: 18080, interval_ms: 500, timeout_ms: 500, healthy_threshold: 2, unhealthy_threshold: 3}
   - id: primary
     depends_on: [address-a]
-    when: {fact: service.health-a.active, max_age: 2500ms}
+    when: {fact: service.health-a.active, max_age: 2500ms, for: 1500ms}
     route: {destination: 0.0.0.0/0, gateway: 192.0.2.1, interface: wan0, table: 100, metric: 100}
   - id: backup
     depends_on: [address-b]
