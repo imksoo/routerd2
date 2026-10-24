@@ -76,6 +76,9 @@ func TestRetiredRelaySurvivesControlRestartAndDoesNotTouchActiveOrUnregisteredSt
 	if err = NewOutbox(foreign, "foreign").Enqueue(ctx, probeEvent("foreign")); err != nil {
 		t.Fatal(err)
 	}
+	if err = foreign.Close(); err != nil {
+		t.Fatal(err)
+	} // an unregistered, unlocked store must still be ignored
 	if err = c.Recover(ctx, []string{"wan"}, func(context.Context, []string, func(map[string]bool) error) error {
 		t.Fatal("active relay was selected")
 		return nil
@@ -102,6 +105,11 @@ func TestRetiredRelaySurvivesControlRestartAndDoesNotTouchActiveOrUnregisteredSt
 	if c.Status().Registered != 0 || c.Status().Retiring != 0 {
 		t.Fatal("empty retired queue kept registration", c.Status())
 	}
+	foreign, err = events.OpenExisting(events.Options{Directory: serviceconfig.HealthEventDirectory(root, "foreign")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer foreign.Close()
 	pending, err := NewOutbox(foreign, "foreign").Pending(ctx)
 	if err != nil || len(pending) != 1 {
 		t.Fatal("unregistered state was adopted", pending, err)
