@@ -3,6 +3,10 @@
 作成日: **2026-10-24（Asia/Tokyo）**
 状態: **実装中。最初の ResourceProgram checkpoint を追加した。作業単位全体の完了とは区別する。**
 
+ユーザー指定の継続ゴールは、全残実装と必要な試験を完了し、対象実機で利用可能と判断できる状態まで進めること。
+部分checkpointでゴールを完了にせず、実装・検証・未検証と証跡を更新する。
+対象機種・NIC・性能条件の確認と並行して、独立して進められる実装・隔離VM検証を続ける。
+
 ## 最初の実装 checkpoint
 
 CORE-01 / CORE-02 と CORE-03 の static graph 部分に着手した。
@@ -32,6 +36,12 @@ targetSource、full priority/mark/hash/hysteresis、hold/maxAge、durable event�
 続行手順は [PVE Codex handoff](pve-codex-handoff.md) を参照。
 
 ## 1. 基準と到達点
+
+CORE-03のfact leafに `max_age` を追加した。producerの観測時刻を保持し、投影やtransport再送で
+鮮度を延長しない。2分のproducer期限が残ったHealthy sampleを利用側の2.5秒制限で失効させ、
+実daemon・独立2 WANのTCP/UDP/PCAPとQEMUで切替・復旧を確認した。
+コードcheckpointは `e46ce22`。[鮮度制限の証跡](evidence/2026-10-24-condition-max-age.md) を参照。
+上記の旧checkpointに記載したhold/maxAgeのうちmax_ageのみ進んだ。hold time等と全体の受入は残る。
 
 **routerd と routerd2 は別製品である。** routerd は稼働中の機能参照元、routerd2 は未リリースの開発対象。
 現在の routerd2 の二バイナリー構成・設定書式・内部API・保存形式には利用者がいないため、後方互換性を要求しない。

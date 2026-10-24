@@ -89,6 +89,16 @@ control workerの再起動によるserviceの停止・再取得でもgeneration�
 変更 worker の停止→network ACK→新 worker 起動の順で適用する。
 確認付き commit は ready_when と適用済み projection の一致も検査する。
 
+fact leafには `max_age` を指定できる。
+例えば `when: {fact: service.health-a.active, max_age: 3s}` は、producer期限と世代が有効でも
+観測から3秒を超えたsampleをindeterminateにする。ちょうど3秒は有効。
+正の有限durationのみを受理し、`all` / `any` / `not` 自身への指定は拒否する。
+Healthの観測時刻はproducerのCLOCK_BOOTTIME、その他の対応済みactive factは
+新しいleaseを受理した単調時刻、ready factはsupervisorのpoll時刻である。
+同じlease・sampleの再送や投影の再実行では観測時刻を更新しない。
+`not` の内側でもstaleはindeterminateを保つ。
+[実daemon・packet受入](evidence/2026-10-24-condition-max-age.md) を参照。
+
 `show resources` で、coordinator が最後に選択したresourceごとの `active`、
 三値の `when` / `ready`、保留理由と依存先を確認できる。
 `when_false` / `when_indeterminate`、`dependency_false` / `dependency_indeterminate`、
@@ -103,7 +113,7 @@ readinessだけが変わってnetwork generationが同じ場合も、観測が�
 CLIは全ページを同じ観測で取得してから表示し、途中の409で混在した結果を出力しない。
 source payload、provenance、秘密鍵、protocol snapshot本体はこのAPIに含めない。
 
-source の inactive 部分も完全に検証する。hold time / maxAge、一般 status reference、
+source の inactive 部分も完全に検証する。hold time、一般 status reference、
 Health の動的 targetSource、全 protocol の個別 readiness 契約はまだ残っている。
 unknown field と再利用 DNS 型の非空 `when` は引き続き拒否する。
 SSH candidate で `delete resources[OWNER]` を実行すると、明示 owner の子・孫 resource を連鎖削除する。残存 resource から削除先への `depends_on` があれば変更を拒否する。YAML 全体編集と API の任意の更新に同じ自動削除はまだ適用しない。

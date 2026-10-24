@@ -1,0 +1,36 @@
+{
+  "test": "TestDaemonHealthPBRFailoverAndRecovery",
+  "result": "pass",
+  "scope": "Linux namespaces, real daemon and kernel packets",
+  "commit": "e46ce226d683450e7411f91bbba4cdf7e5f7538f",
+  "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "dirty": false,
+  "kernel": "6.8.0-136-generic",
+  "go": "go version go1.27.3 linux/amd64",
+  "race_detector": true,
+  "sources": {
+    "internal/integration/health_pbr_test.go": "e4ba069873cf698dbc9112489184770352908583ee8c4c506f9f03ebe83eaf73",
+    "internal/integration/bgp_test.go": "6e8c4538d28ee5ae05ea86dafc2e4c80897846780100e3f60395d124b42323ed",
+    "scripts/health-pbr.py": "cb4e9594c53d9e4812e781f2731123d50db55431e34a1f64a84ee8419aba99f6"
+  },
+  "executables": {
+    "routerd": "999ed4178efec84c66b583656e151565e6f8f587655e1223c29ee9ab32ec0f46",
+    "routerd-modules": "efa0eb5d61d5372b269d39ef8dd76bf588f5b74281a036f6e965eb73e0129712",
+    "integration.test": "81513cf20bd3e54bddbae37d98608ba9d712c52134c6b08321e3cc44d34d2f34"
+  },
+  "artifacts": {
+    "confirmed-rollback.json": "5a4f796714a7b5288912fc66631530ade50d837959bc5b9e772402f7ad6468e4",
+    "confirmed-trial.json": "6cb746a7ae008a92bb9405c464940a601ae6480f0b984584938467cebc612d02",
+    "consumer-max-age.json": "500b9ca60dcd60bea15c58b88810d2d00f40786f3719e2aef35c41a7961c073a",
+    "fact-expired.json": "b2a842834bae6c24e5e0a27377f0c0cb863ef1541e8b4b79da73c4c656d8bbc4",
+    "initial-primary.json": "4792df2b27841efe472599ea60094cea682b0115fa31d60539309bb9dc1fc8cd",
+    "restart-control.json": "73f40a0e077882749d94b480ac125c0703c4a8d42767067d25619132bb2b7c72",
+    "restart-network.json": "1e5d0b1f00909023762dd100ca97d475960a95fa1240a0f1360688cd4481e818",
+    "restart-service.health-a.json": "8dac499b60cf6930aad7352491f6e268e69fdac15f23722e1da08dbcf2d6114f",
+    "test.log": "4c7f9c848d5853fc31db3389626c08bdb79547bba6b04148aacba91907867cf0",
+    "wan-a-failed.json": "6ac6c3cf3dec8188346d2e92abb409d029cb947ce7d9389e9f0accbc5d6ffb5c",
+    "wan-a-recovered.json": "812bb62a272d08c8559e7bc47f57fde9148c79490e4375090b1f243fb8d309d0",
+    "wan0.pcap": "7a2fd89db29457a8fb257ce8c39e56f4b939e125d4628d3a52bedce620b61bb1",
+    "wan1.pcap": "51bcbf397508dfc95aa8f26892bbe98990576f01feb7dbf685d29b5288fe6156"
+  }
+}

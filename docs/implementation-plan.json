@@ -11091,6 +11091,45 @@
         "Final same-tree aggregate QEMU run and release/storage/hardware/cloud profile qualification"
       ],
       "parity_flags_unchanged": true
+    },
+    {
+      "id": "condition-max-age",
+      "date": "2026-10-24",
+      "status": "implemented_and_packet_verified",
+      "code_checkpoint": "e46ce226d683450e7411f91bbba4cdf7e5f7538f",
+      "work_packages": [
+        "CORE-03"
+      ],
+      "evidence": "docs/evidence/2026-10-24-condition-max-age.md",
+      "implemented": [
+        "Positive finite max_age on fact leaves; observation clock kept distinct from projection and transport clocks",
+        "Stale observations remain indeterminate under not",
+        "Same generic lease and identical inactive notification cannot refresh their observation time"
+      ],
+      "validation": [
+        "make check and make build-linux: pass",
+        "clean make check-health-pbr: pass, including still-valid producer lease versus expired consumer max_age",
+        "QEMU daemon-health-pbr without external NIC: pass"
+      ],
+      "remaining": [
+        "for hold time",
+        "general status references",
+        "remaining protocol readiness and lifecycle",
+        "full implementation plan and physical deployment qualification"
+      ],
+      "parity_flags_unchanged": true
     }
-  ]
+  ],
+  "delivery_goal": {
+    "status": "active",
+    "requested_on": "2026-10-24",
+    "completion_criteria": [
+      "Complete all remaining implementation-plan work packages",
+      "Pass required local, real-daemon, packet, update/recovery and deployment acceptance gates",
+      "Qualify the selected physical hardware and performance profile before declaring it usable"
+    ],
+    "evidence_required": true,
+    "do_not_complete_at_partial_checkpoint": true,
+    "physical_target_profile": "awaiting user target hardware/NIC and performance requirements; independent implementation and isolated VM tests continue"
+  }
 }

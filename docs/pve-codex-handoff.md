@@ -3,6 +3,13 @@
 更新日: 2026-10-24（Asia/Tokyo）
 対象: `https://github.com/imksoo/routerd2`
 
+**継続ゴール:** 全残実装・必要試験・対象実機での利用可能性の受入まで進める。
+部分checkpointでは完了しない。最新コードcheckpointは `e46ce22`。
+fact leafの `max_age` と元の観測時刻の保持を実装し、producer期限と独立した失効を
+実daemon二WAN TCP/UDP/PCAPとQEMUで確認した。
+[追加証跡](evidence/2026-10-24-condition-max-age.md) を参照。
+次は `for` の安定時間、一般status reference等のCORE-03残作業を進める。
+
 **PVE検証後の追記:** コードcheckpointは `7046fd5` へ進んだ。
 `make check`、権限付きHealth実ソケット（raw ICMP含む）、二WANの実daemon/TCP/UDP/PCAP、
 worker再起動・古い通知・fact expiry・confirmed rollbackを検証した。
