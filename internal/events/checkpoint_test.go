@@ -1,10 +1,15 @@
 package events
 
 import (
+	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -103,5 +108,78 @@ func TestConsumerStateCapacityRejectsWithoutAdvancingOrDroppingWork(t *testing.T
 	}
 	if jobs, err := s.Pending(ctx, "small", 10); err != nil || len(jobs) != 0 {
 		t.Fatal("capacity leaked work", jobs, err)
+	}
+}
+
+func TestConcurrentTimersCommitOnlyOneStateVersion(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(Options{Directory: filepath.Join(t.TempDir(), "events")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if _, err = s.Append(ctx, testEvent("timer-input")); err != nil {
+		t.Fatal(err)
+	}
+	before, err := s.Checkpoint(ctx, "timers")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var won atomic.Int32
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			err := s.Transition(ctx, "timers", before, before.Cursor, json.RawMessage(`{"fired":true}`), []Job{{Key: "one-fire", Payload: json.RawMessage(`{}`)}})
+			if err == nil {
+				won.Add(1)
+			} else if !errors.Is(err, ErrConflict) {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	after, err := s.Checkpoint(ctx, "timers")
+	if err != nil || won.Load() != 1 || after.Version != before.Version+1 {
+		t.Fatal("competing timer versions committed", won.Load(), after, err)
+	}
+	jobs, err := s.Pending(ctx, "timers", 10)
+	if err != nil || len(jobs) != 1 {
+		t.Fatal(jobs, err)
+	}
+}
+
+func TestUnreleasedPrototypeSchemaIsRejectedReadOnly(t *testing.T) {
+	options := Options{Directory: filepath.Join(t.TempDir(), "events")}
+	s, err := Open(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(options.Directory, "journal.sqlite3")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(`PRAGMA journal_mode=DELETE; PRAGMA user_version=1;`); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reopened, err := Open(options); err == nil {
+		reopened.Close()
+		t.Fatal("silently imported discarded prototype schema")
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatal("unsupported schema rejection modified database", err)
 	}
 }

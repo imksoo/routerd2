@@ -38,6 +38,14 @@ func TestMain(m *testing.M) {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
+		checkpoint, err := s.Checkpoint(ctx, "stateful")
+		if err == nil {
+			err = s.Transition(ctx, "stateful", checkpoint, checkpoint.Cursor, json.RawMessage(`{"count":1}`), []Job{{Key: "stateful-work", Payload: json.RawMessage(`{}`)}})
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
 		fmt.Fprintln(os.Stdout, "EVENTS_COMMIT_SYNCED")
 		var wait [1]byte
 		_, _ = os.Stdin.Read(wait[:]) // parent SIGKILLs without SQLite/Store.Close
@@ -121,6 +129,14 @@ func TestCommittedJournalCursorAndWorkSurviveSIGKILL(t *testing.T) {
 	work, err := s.Pending(context.Background(), "consumer", 256)
 	if err != nil || len(work) != 1 || work[0].EventCursor != cursor {
 		t.Fatal("work lost after committed cursor", work, err)
+	}
+	state, err := s.Checkpoint(context.Background(), "stateful")
+	if err != nil || state.Cursor != cursor || state.Version != 1 || string(state.State) != `{"count":1}` {
+		t.Fatal("state lost across SIGKILL", state, err)
+	}
+	work, err = s.Pending(context.Background(), "stateful", 10)
+	if err != nil || len(work) != 1 || work[0].Key != "stateful-work" {
+		t.Fatal("stateful work lost across SIGKILL", work, err)
 	}
 }
 
