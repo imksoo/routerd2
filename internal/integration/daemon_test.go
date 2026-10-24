@@ -25,6 +25,7 @@ import (
 	"github.com/imksoo/routerd/pkg/api"
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/control"
+	"github.com/imksoo/routerd2/internal/events"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
 	"github.com/imksoo/routerd2/internal/runtimeconfig"
@@ -220,6 +221,22 @@ func TestDaemonConfigurationAndRecovery(t *testing.T) {
 	answer(t, dnsPort, "192.0.2.2")
 	// Killing logging cannot interrupt DNS. Killing control reacquires workers
 	// from the committed revision and does not lose the confirmed configuration.
+	var durableBefore []events.Record
+	until(t, 5*time.Second, func() bool {
+		var page struct {
+			Records []events.Record `json:"records"`
+		}
+		if ctl.Do(ctx, "GET", "/v1/observations?after_cursor=0&limit=16", nil, &page) != nil || len(page.Records) != 4 {
+			return false
+		}
+		durableBefore = page.Records
+		return true
+	})
+	for i, kind := range []string{"committed", "confirmed", "committed", "rolled_back_timeout"} {
+		if durableBefore[i].Event.Topic != "configuration."+kind {
+			t.Fatalf("unexpected durable lifecycle: %+v", durableBefore)
+		}
+	}
 	for _, name := range []string{"logging", "control"} {
 		old := status()
 		var victim supervisor.ModuleStatus
@@ -251,6 +268,18 @@ func TestDaemonConfigurationAndRecovery(t *testing.T) {
 		})
 		answer(t, dnsPort, "192.0.2.2")
 	}
+	var durableAfter struct {
+		Records []events.Record `json:"records"`
+	}
+	if err := ctl.Do(ctx, "GET", "/v1/observations?after_cursor=0&limit=16", nil, &durableAfter); err != nil {
+		t.Fatal(err)
+	}
+	a, _ := json.Marshal(durableBefore)
+	b2, _ := json.Marshal(durableAfter.Records)
+	if !bytes.Equal(a, b2) {
+		t.Fatal("control SIGKILL changed or duplicated durable lifecycle history")
+	}
+	t.Log("durable commit/confirm/rollback observations survived control SIGKILL with stable IDs/cursors")
 	// Removal must release the actual bound sockets, not merely hide status.
 	state = control.State{}
 	if err = ctl.Do(ctx, "GET", "/v1/config", nil, &state); err != nil {
