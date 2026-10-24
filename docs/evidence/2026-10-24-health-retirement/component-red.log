@@ -1,0 +1,22 @@
+# github.com/imksoo/routerd2/internal/protocolevents [github.com/imksoo/routerd2/internal/protocolevents.test]
+internal/protocolevents/retirement_test.go:31:7: undefined: NewRetirement
+internal/protocolevents/retirement_test.go:35:24: undefined: events.OpenExisting
+internal/protocolevents/retirement_test.go:35:77: undefined: serviceconfig.HealthEventDirectory
+internal/protocolevents/retirement_test.go:43:70: undefined: serviceconfig.HealthEventDirectory
+internal/protocolevents/retirement_test.go:66:6: undefined: NewRetirement
+internal/protocolevents/retirement_test.go:77:48: NewOutbox(foreign, "foreign").Pending undefined (type *Outbox has no field or method Pending)
+internal/protocolevents/retirement_test.go:82:23: undefined: events.OpenExisting
+internal/protocolevents/retirement_test.go:82:76: undefined: serviceconfig.HealthEventDirectory
+internal/protocolevents/retirement_test.go:87:42: NewOutbox(worker, "wan").Pending undefined (type *Outbox has no field or method Pending)
+internal/protocolevents/retirement_test.go:101:7: undefined: NewRetirement
+internal/protocolevents/retirement_test.go:101:7: too many errors
+# github.com/imksoo/routerd2/internal/events [github.com/imksoo/routerd2/internal/events.test]
+internal/events/existing_test.go:14:15: undefined: OpenExisting
+internal/events/existing_test.go:24:14: undefined: OpenExisting
+internal/events/existing_test.go:24:70: undefined: ErrOwned
+internal/events/existing_test.go:30:11: undefined: OpenExisting
+internal/events/existing_test.go:44:24: s.LookupProducer undefined (type *Store has no field or method LookupProducer)
+internal/events/existing_test.go:51:24: s.LookupProducer undefined (type *Store has no field or method LookupProducer)
+FAIL	github.com/imksoo/routerd2/internal/events [build failed]
+FAIL	github.com/imksoo/routerd2/internal/protocolevents [build failed]
+FAIL

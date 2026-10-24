@@ -1,0 +1,47 @@
+{
+  "purpose": "persistent-state-and-signed-userland-two-boot-fallback",
+  "product_checkpoint": "238bc589283399808e36a68d14fb50f4ae981d5b",
+  "result": "passed",
+  "duration_seconds": 120.84,
+  "kernel_release": "6.18.58-0-virt",
+  "kernel_sha256": "17fbd3efd16f2e7cb1b945f06423b37399ba7d5ac8cdd3665e7f13f363500e85",
+  "initializer_sha256": "90ca1c1da03b6fc94d186c01d9e13f1638f360c3fee1aba27babf45fbd66f41e",
+  "initramfs_sha256": "ea790cdbf4e11a6ea39ef89b6348794fa23571badfc2edb51f8cf9028e6dab1d",
+  "binary_sha256": {
+    "/test/bin/baseline/routerd": "647fb3e8e43ad8809b7c241fb49bd386678b32b81adb1838699fb7b59aa1bf78",
+    "/test/bin/baseline/routerd-modules": "d81cd1bf436a8e483ccd9903de41f4355ae72397ac06c337a616476a2632bdf0",
+    "/test/bin/trial/routerd": "fd0491b6ed3b5854fa2f2bb3ecfd3b86fe78c92a2fddeda44d86913a8c50bb27",
+    "/test/bin/trial/routerd-modules": "f2f43e31b4dbff92d533a03554f24192aebab64c5f5323ad27b602bf8b6b6e77"
+  },
+  "host_block_devices_used": false,
+  "host_filesystem_mounts_used": false,
+  "guest_external_network_interfaces": false,
+  "kernel_rootfs_updates": false,
+  "two_boot_disk_fallback_tested": true,
+  "phases": [
+    {
+      "phase": "first",
+      "result": "passed",
+      "seconds": 71.54
+    },
+    {
+      "phase": "second",
+      "result": "passed",
+      "seconds": 49.3
+    }
+  ],
+  "verified_comparisons": {
+    "distinct_boot_ids": true,
+    "trial_first": true,
+    "baseline_fallback_second": true,
+    "failed_trial_boot_matches_first": true,
+    "config_preserved": true,
+    "journal_id_cursor_preserved": true,
+    "ssh_key_preserved": true,
+    "sentinel_preserved": true,
+    "pinned_pid1_both": true,
+    "ext4_both": true
+  },
+  "scope": "Existing signed fallback/config/journal/SSH retention regression; not abrupt power-loss acceptance for the new relay queue",
+  "redactions": "SSH key identifiers and boot IDs omitted; verified comparison booleans retained"
+}

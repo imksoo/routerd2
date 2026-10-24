@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "purpose": "isolated-daemon-derived-integration",
+  "suite": "daemon-derived",
+  "required_test": "TestDaemonDerivedHealthCurrentStatusAndDurability",
+  "kernel_release": "6.18.58-0-virt",
+  "kernel_sha256": "17fbd3efd16f2e7cb1b945f06423b37399ba7d5ac8cdd3665e7f13f363500e85",
+  "initializer_sha256": "37e0e2f412cd551b56c1a20a898892bb38d1875b4037bec853fa9040a9cbb915",
+  "test_binary_sha256": "5174fca77c57d609410b7aae35bb8ecde695de2162937f5326014d8b71f624c4",
+  "binary_sha256": {
+    "/test/bin/routerd": "e49c36bcea462e03134ee7b765af2ec904e4610409b0b4223899006478d9e17e",
+    "/test/bin/routerd-modules": "c8588f383e0283bac165ccb649b5f8486e3ff1f984fd16b85058a82169c26155"
+  },
+  "source_image_manifest_sha256": "a1df58dc193d6f6f5a361b9b630e9fb106b76a3e3089239da2185f812d265b43",
+  "source_initramfs_sha256": "c6b0ac5a7e6dc64a186ab595586f27bed87440083dc7a13cf0db9df8a3d2c729",
+  "host_network_access": false,
+  "result": "failed",
+  "initramfs_sha256": "910542fa4ae78b34fe28ea7331ef6229f1e1371202c48209e0f6bc193a9e3926",
+  "error": "daemon-derived test failed in guest",
+  "duration_seconds": 66.21,
+  "qemu_exit_status_before_cleanup": 0
+}

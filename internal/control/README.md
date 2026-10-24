@@ -199,6 +199,22 @@ renew facts or execute effects. `health.protocol_events.last_error` and
 `State.protocol_event_error` report bounded per-producer storage failures.
 Failures make health unhealthy and prevent trial confirmation; another
 producer's success cannot clear them. Authoritative config remains committed.
+Before worker creation, control initializes and durably registers that health
+queue's generated ownership. Registration failure rejects the candidate before
+starting its worker. Failed candidate application keeps its registered queues
+visible against the restored source.
+
+Permanent removal starts control-owned retirement recovery. Only registered,
+no-longer-declared queues whose health worker is absent from a fresh supervisor
+observation are considered. An exclusive store lock is also mandatory. Recovery
+retries original historical IDs, commits the local ACK, and removes registration
+only after the queue is empty. Missing/foreign stores are errors; there is no
+filesystem discovery/deletion or current-fact restoration.
+`health.protocol_events.{registered_relays,retiring_relays}` reports bounded
+counts. Pending retirement and failed recovery make health unhealthy and block
+confirmation until local and registry ACKs complete. Commit can succeed while
+reporting this unhealthy status. The loop rotates eight queues per pass and
+processes one bounded publication page per queue.
 See [relay durability and limits](../protocolevents/README.md).
 
 ## Current DerivedEvent observations

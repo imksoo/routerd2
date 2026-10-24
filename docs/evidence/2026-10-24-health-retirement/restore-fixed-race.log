@@ -1,0 +1,8 @@
+=== RUN   TestRetirementPendingSurvivesSourceErrorPruningAndMakesSuccessfulACKUnhealthy
+--- PASS: TestRetirementPendingSurvivesSourceErrorPruningAndMakesSuccessfulACKUnhealthy (0.02s)
+=== RUN   TestNoHealthSourceDoesNotAllocateARelayRegistry
+--- PASS: TestNoHealthSourceDoesNotAllocateARelayRegistry (0.14s)
+=== RUN   TestRejectedCandidateRelayIsDeclaredRetiringAfterConfigurationRestore
+--- PASS: TestRejectedCandidateRelayIsDeclaredRetiringAfterConfigurationRestore (0.26s)
+PASS
+ok  	github.com/imksoo/routerd2/internal/control	1.450s

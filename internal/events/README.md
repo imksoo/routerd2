@@ -15,6 +15,9 @@ amd64/arm64 builds. FULL synchronous mode and foreign keys apply to every
 connection, including replacement connections. An existing database is inspected
 read-only before any write or recovery is allowed. Symlinks, hard links, FIFOs,
 foreign database identity and directories writable by other users are rejected.
+`OpenExisting` additionally refuses to create a missing directory/database;
+retirement recovery cannot disguise lost state as an empty store. `ErrOwned`
+distinguishes a live exclusive owner from corruption/path errors.
 
 `Append` records a bounded event with a stable ID. An identical retry returns
 the existing cursor; changed content under the same ID fails. Observed time is
@@ -64,6 +67,8 @@ The caller must fence current source authority and use target-side durable
 idempotency when publishing or executing output. Configuration's existing
 authoritative-file outbox remains separate because it must be atomic with the
 configuration file itself.
+`LookupProducer` reads an existing registration without allocating one, allowing
+an unused optional component to discover retained state without registry writes.
 
 Defaults cap the journal and outbox at 100,000 rows and 64 MiB of encoded payload
 each, plus 1,024 consumer/producer registrations combined. The existing

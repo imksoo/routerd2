@@ -7,7 +7,21 @@
 部分checkpointでゴールを完了にせず、実装・検証・未検証と証跡を更新する。
 対象機種・NIC・性能条件の確認と並行して、独立して進められる実装・隔離VM検証を続ける。
 
-最新product checkpoint `205f02f` ではHealthCheckのprobeごとの元eventをworker側のprivateな
+最新product checkpoint `238bc58` では、Health queueの所有登録をworker起動前に永続化し、
+永久削除後に登録済みqueueだけを実controlが回収する経路を追加した。
+source削除・supervisorでのworker不在・排他store lockを要求し、target保存→local ACK→空queueの登録解除を行う。
+missing/foreign状態を空で置換/採用せず、元の観測時刻/ID/内容を保ち、現在factを復元しない。
+候補失敗後の元設定復旧でも残登録をhealthへ出し、回収/登録解除まではtrial確定を防ぐ。
+clean全体check/Race/vet/static両arch build131.74秒、実daemon11.79秒、
+fixture期限修正後の実daemon12.15秒と新旧比較の小さな実配送試験1.68秒がPASS。
+QEMU拡張gate113.66秒PASS。初回の75秒子fixture期限とrootfs容量不足のFAILを保持し、
+150秒child/170秒parentとtest-only 64MiB scratchへ修正した。製品の容量・durability・鮮度とVM RAMは維持した。
+関連QEMUは二WAN Health/PBR97.30秒・管理/実SSH41.82秒・EventRule63.62秒・BFD/BGP59.82秒がPASS。
+既存の設定/journal/SSH保持と2回起動署名fallbackも120.84秒PASS。新queueの強制電源断とは別に扱う。
+[回収経路・失敗の証跡](evidence/2026-10-24-health-retirement.md) を参照。
+他protocol/status provider、条件inactive時の全回収、live queueのQEMU電源断、retention/規模/実機受入は残る。
+
+先行product checkpoint `205f02f` ではHealthCheckのprobeごとの元eventをworker側のprivateな
 WAL/FULL queueへ保存し、source-fencedな実control受付からdurable journal/EventRuleへ接続した。
 履歴の元時刻/内容/IDを保ち、現在factやkernel権限へ変換しない。
 ACK消失、target保存後local SQLite ACK失敗、同時enqueue、64件/64KiB上限、partial target retryを検証した。
@@ -16,7 +30,7 @@ QEMU拡張gate67.82秒・二WAN Health/PBR88.85秒・管理/実SSH36.55秒がPAS
 同じproduct/integration sourceで既存EventRule62.06秒・BFD/BGP53.44秒のQEMUもPASS。
 実DB拒否中の4件がhealth/controlのSIGKILL後も同じID/内容で一度だけ履歴へ公開された。
 [証跡と未完了範囲](evidence/2026-10-24-health-protocol-events.md) を参照。
-他protocol producer、service永久削除後の残queue回収、retention/容量運用と全計画の受入は残る。
+当時のservice永久削除後の回収は後続で追加した。他protocol producer、retention/容量運用と全計画の受入は継続する。
 
 先行product checkpoint `1ba9020` ではHealthCheckの有限なtyped statusからDerivedEvent resource、
 durable journal、EventRuleまでを実control workerへ接続した。元の観測時刻・producer/source/control

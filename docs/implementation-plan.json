@@ -11512,6 +11512,46 @@
       ],
       "parity_flags_unchanged": true,
       "additional_test_checkpoint": "3082946258497e7c9dbfdb59a783935efc45ced2"
+    },
+    {
+      "id": "health-relay-retirement-recovery",
+      "date": "2026-10-24",
+      "status": "partial_core_implementation_with_live_daemon_acceptance",
+      "code_checkpoint": "238bc589283399808e36a68d14fb50f4ae981d5b",
+      "work_packages": [
+        "CORE-03",
+        "CORE-04",
+        "NET-01"
+      ],
+      "evidence": "docs/evidence/2026-10-24-health-retirement.md",
+      "implemented": [
+        "Durable registered queue ownership before worker creation; permanent source removal recovers only registered health relays after supervisor absence and exclusive local store ownership",
+        "Original event publication then local ACK then empty-registry ACK; retries/restart preserve target deduplication and never restore current facts or worker/Derived instances",
+        "OpenExisting refuses missing replacement/foreign state; LookupProducer does not allocate absent registrations; no filesystem scanning or deletion",
+        "Bounded 1024 registrations and rotating eight-queue recovery batch; pending/error health and confirmation fencing survive source error pruning and failed-candidate restoration"
+      ],
+      "validation": [
+        "Clean 238bc58 make check build-linux: unit/Python14/Race/vet/static amd64-arm64 pass 131.74s",
+        "Actual SQLite ownership, partial target capacity failure and reopen, registry ACK failure/retry, missing queue preservation, busy-queue rotation and unregistered state preservation pass Race",
+        "Related control/runtime Race proves source absence plus fresh supervisor absence, no fact registration, successful unhealthy ACK and rejected-candidate retirement visibility",
+        "Real daemon 11.79s; timeout-corrected full sequence 12.15s: permanent deletion retains two original observations through target/registry failure and two control restarts without reactivation; new registration failure precedes worker creation",
+        "Direct actually-unpublished-ID counterfactual: prior hash-verified 205f02f ELF pair fails delivery after deletion in 10s; product 238bc58 passes 1.68s",
+        "QEMU failed original 75s child budget preserved; child 150s within existing parent 170s, with freshness/per-operation deadlines unchanged",
+        "QEMU rootfs quota exhaustion observed before cleanup; native working-set reproduces actual SQLITE_FULL at item 175 under 6MiB and passes 400 items under 64MiB; fast full daemon also passes 6MiB and is not counted as a failure reproduction",
+        "Dedicated test-only scratch 64MiB, unchanged VM RAM512MiB and product durability/capacity; corrected expanded QEMU gate passes 113.66s",
+        "Corrected same-product QEMU related gates: Health/PBR real TCP/UDP/packet capture/recovery 97.30s, management/actual SSH 41.82s, EventRule 63.62s, BFD/BGP 59.82s all pass; five suites are not a full aggregate",
+        "Existing two-boot ext4/signed PID 1 fallback/config/journal/SSH retention regression passes 120.84s; not abrupt power-loss qualification of the new queue"
+      ],
+      "remaining": [
+        "Declared conditional-inactive queue drainage, other raw protocol producers and complete lifecycle/scale qualification",
+        "Live queue abrupt QEMU power-loss/reboot acceptance, cross-version migration and complete database rollback contract",
+        "Other status providers, structured fields and DerivedEvent chaining; privileged effects and federation",
+        "Retention/archive/capacity alarms, total filesystem budgets and performance qualification",
+        "All work-package acceptance and selected physical/NIC/performance profile"
+      ],
+      "fixture_checkpoint": "301d8a03c7f2aaf879e62a269c14fbb1b09c6fa4",
+      "additional_unit_checkpoint": "4467c384042eb896eca8149730fed810dc56deec",
+      "parity_flags_unchanged": true
     }
   ],
   "delivery_goal": {

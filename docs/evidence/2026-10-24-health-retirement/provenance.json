@@ -1,0 +1,230 @@
+{
+  "product_checkpoint": "238bc589283399808e36a68d14fb50f4ae981d5b",
+  "capture_head": "4467c384042eb896eca8149730fed810dc56deec",
+  "fixture_checkpoint": "301d8a0",
+  "additional_unit_checkpoint": "4467c38",
+  "as_of_utc": "2026-10-24T19:58:11.421910+00:00",
+  "product_matches_clean_build": true,
+  "build_command": [
+    "make",
+    "check",
+    "build-linux"
+  ],
+  "native_harness_sha256": "9f50f3145c052be34efa4e2e90959fdc7a9bed560efced0b3104cf6634d8dd3d",
+  "budget_harness_sha256": "21bde0d608f9cf304fcf231ccfcfce4c43490354a1d46e27090966182993a228",
+  "counterfactual_harness_sha256": "c9fdb4b924e96599b6accfbca47bde53250870a8de031ba9112fc4c8c41bec89",
+  "working_set_harness_sha256": "54b5110b017d7ca22d1b3a75ed939c20b19aacc9df915f0720a7a1b9bda7dbde",
+  "native_execution": "sudo-installed fresh static ELFs and Race integration harness in root-owned 0700 staging; required isolated namespaces",
+  "native_result": "passed",
+  "native_seconds": 11.79,
+  "budget_native_seconds": 12.15,
+  "direct_native_seconds": 1.68,
+  "quota_execution": "sudo unshare --mount --propagation private; private tmpfs size=6m or 64m; TMPDIR points to that mount; Race TestHealthRelayScratchWorkingSet",
+  "quota_results": {
+    "6m": "expected actual SQLITE_FULL at flush 175",
+    "64m": "400 relays passed; queue one item at a time"
+  },
+  "qemu_command_template": "python3 scripts/qemu-network.py --suite SUITE --output dist/goal-validation/health-retirement-scratch-SUITE-qemu",
+  "storage_command": "python3 scripts/qemu-storage.py --output dist/goal-validation/health-retirement-storage-qemu",
+  "source_note": "Product matches 238bc58. Later code changes are test fixtures, test-only PID 1 scratch and runner metadata; no product IO durability/capacity/freshness or VM RAM increase.",
+  "original_logs": [
+    {
+      "published": "check-build.log",
+      "private_source": "health-retirement-check-build.log",
+      "original_sha256": "0bb95a6515ca622fe86e9e0bdc2a1065b61c30fae99ac557b7b366d0f9da2fc8"
+    },
+    {
+      "published": "build-manifest.json",
+      "private_source": "health-retirement-build-manifest.json",
+      "original_sha256": "3b8555636b0adfe5e58ee6897cc30d695f843bbd57a34e2e94430ff0de36fa7f"
+    },
+    {
+      "published": "wired-race.log",
+      "private_source": "health-retirement-wired-race.log",
+      "original_sha256": "50f40bf44999a2af832a20130ae4eb5284b16bc4570a28e746b506961a665a34"
+    },
+    {
+      "published": "relay-race.log",
+      "private_source": "health-retirement-final-relay-race.log",
+      "original_sha256": "37d6a6af0b6a1575f629f8c76e2448d3046193466d7445283368c3b02d9a3b59"
+    },
+    {
+      "published": "restore-fixed-race.log",
+      "private_source": "health-retirement-restore-fixed-race.log",
+      "original_sha256": "8fdd9adb0b4862b63f2c1149edd7fc9cb7c7c1993c141432ac779a7651734f8e"
+    },
+    {
+      "published": "component-red.log",
+      "private_source": "health-retirement-red.log",
+      "original_sha256": "f6fbe88e0cb944672a84a1534e8e7a0bed2b4c66502c12e56ec8637e8bd00ede"
+    },
+    {
+      "published": "control-red.log",
+      "private_source": "health-retirement-control-red.log",
+      "original_sha256": "a53cfea934d70cb10a49b7fd7705c9d95f294c9258d051106810a8ddf1222ae1"
+    },
+    {
+      "published": "restore-red.log",
+      "private_source": "health-retirement-restore-red.log",
+      "original_sha256": "bcdff87056ae5e8f55bd5e2a61918cf071e3817a875bf6d3c86f7261e8b253d4"
+    },
+    {
+      "published": "native.log",
+      "private_source": "health-retirement-native.log",
+      "original_sha256": "d17d0d153da50a72e6c0e374ffe75acebed826f8442bf1b1c5e6606e8306078c"
+    },
+    {
+      "published": "native-budget.log",
+      "private_source": "health-retirement-budget-native.log",
+      "original_sha256": "3cf226a732aee82efea378c19910a1a3f0ae13e06a85e8b815fdb1910c1c9160"
+    },
+    {
+      "published": "direct.log",
+      "private_source": "health-retirement-direct-final.log",
+      "original_sha256": "35fb070a2079a504ea099871673815b56d0078246ce3879e86fff1e310bd78d3"
+    },
+    {
+      "published": "before-binaries.json",
+      "private_source": "health-retirement-before-bin/manifest.json",
+      "original_sha256": "92319dc17a6e2cbdfb8b4699b7299684c96604b33abcfc3cf60d72a54eea4316"
+    },
+    {
+      "published": "working-set-6m.log",
+      "private_source": "health-retirement-working-set-6m.log",
+      "original_sha256": "d8608ae09d66ba1cf8e2e097511a9430ac61f62d72a0c4cac9bbbb78d578b682"
+    },
+    {
+      "published": "working-set-64m.log",
+      "private_source": "health-retirement-working-set-64m.log",
+      "original_sha256": "b3192d322f39275b2c017bc2b73564e7851a8f7d688a67a1dab71656dbfb054a"
+    },
+    {
+      "published": "quota-fast-6m.log",
+      "private_source": "health-retirement-quota-6m-short.log",
+      "original_sha256": "a3530db3bcd6a911d47ac1ff2c7dd5f624ca20c3cf3104a32b0a72a1221d34c7",
+      "extraction": "fixture host memory counters omitted; controlled filesystem quota remains"
+    },
+    {
+      "published": "quota-fast-64m.log",
+      "private_source": "health-retirement-quota-64m-short.log",
+      "original_sha256": "df30003eb14c854b258eea47d05f3ed0c7abf0bd48007174e46c36138e5f9823",
+      "extraction": "fixture host memory counters omitted; controlled filesystem quota remains"
+    },
+    {
+      "published": "tools.log",
+      "private_source": "health-retirement-tools.log",
+      "original_sha256": "3b82a5edb3bd49215f35f4dc7214845621b4788fb7d7ded298f1465ff900db15"
+    },
+    {
+      "published": "direct-red-excerpt.log",
+      "private_source": "health-retirement-direct-final-red.log",
+      "original_sha256": "2a049142b6ecc47149495516c3fdf5de8bdb017ee7cfc944aca67d701bd319a0",
+      "extraction": "first five and final four lines, excluding private diagnostic dump"
+    },
+    {
+      "published": "ack-red-excerpt.log",
+      "private_source": "health-retirement-native-red.log",
+      "original_sha256": "dcc96ac530f28ed2a51a7a77f73a7bc07067af02ee761e81c99b44d0241b4117",
+      "extraction": "first five and final four lines, excluding private diagnostic dump"
+    },
+    {
+      "published": "quota-setup-failed-excerpt.log",
+      "private_source": "health-retirement-quota-6m.log",
+      "original_sha256": "583e7232d96dcad2f8f7fc1a14d7451dce0b7159b8043143bfd5ae116694d7fc",
+      "extraction": "first five and final four lines, excluding private diagnostic dump"
+    },
+    {
+      "published": "qemu-derived.log",
+      "private_source": "health-retirement-scratch-daemon-derived-qemu/qemu-serial.log",
+      "original_sha256": "6329a42d0270449d10d25cd0c21d5a8a70d4a497b5d45fd6eb4c2c2eaa3f60ee"
+    },
+    {
+      "published": "qemu-derived-manifest.json",
+      "private_source": "health-retirement-scratch-daemon-derived-qemu/manifest.json",
+      "original_sha256": "64eb049ec9dc9fc799e5ae792e2a397e2da33f2d47657ad72a67deac033d4327"
+    },
+    {
+      "published": "qemu-health-pbr.log",
+      "private_source": "health-retirement-scratch-daemon-health-pbr-qemu/qemu-serial.log",
+      "original_sha256": "604a62b9ed73674c27358918358d2aa1512c5ce226f3177298b1cd5142ff5629"
+    },
+    {
+      "published": "qemu-health-pbr-manifest.json",
+      "private_source": "health-retirement-scratch-daemon-health-pbr-qemu/manifest.json",
+      "original_sha256": "97186c6566aed9f494f103ecc920947e0d2692f3664464ee1104ce3aa14b4185"
+    },
+    {
+      "published": "qemu-management.log",
+      "private_source": "health-retirement-scratch-daemon-management-qemu/qemu-serial.log",
+      "original_sha256": "7d877b6b8684476ab410d194d91da5cfe02a21ac7901a3d7e732c069a32c31d1"
+    },
+    {
+      "published": "qemu-management-manifest.json",
+      "private_source": "health-retirement-scratch-daemon-management-qemu/manifest.json",
+      "original_sha256": "5b77f7c73b81bdf004ee33129dae26acea7685048a1a18f93a6d24b93ab3f6b8"
+    },
+    {
+      "published": "qemu-eventrule.log",
+      "private_source": "health-retirement-scratch-daemon-eventrule-qemu/qemu-serial.log",
+      "original_sha256": "637336b9bc3b97c9ed8d4328ccea0bc4174ecac1b0084b60358aafb6ebd14e7c"
+    },
+    {
+      "published": "qemu-eventrule-manifest.json",
+      "private_source": "health-retirement-scratch-daemon-eventrule-qemu/manifest.json",
+      "original_sha256": "0f3c579eaac2827cf9f94f2ce02f8907c093d3f0267c7200c02ef96b1f998e54"
+    },
+    {
+      "published": "qemu-bfd.log",
+      "private_source": "health-retirement-scratch-daemon-bfd-qemu/qemu-serial.log",
+      "original_sha256": "464a655ca2134c6cdc00e8c8a8efa6d4679831bbc82c506259f2e83ddc35064d"
+    },
+    {
+      "published": "qemu-bfd-manifest.json",
+      "private_source": "health-retirement-scratch-daemon-bfd-qemu/manifest.json",
+      "original_sha256": "c4af5315ff602623cff7ca4b88ff0b66a1ec3565de52684428978cfe8f5ef328"
+    },
+    {
+      "published": "failed-child-budget.log",
+      "private_source": "health-retirement-daemon-derived-qemu/qemu-serial.log",
+      "original_sha256": "e49667365dfa5bc349ae1bb00e6e1c781a651bab4d4382cf90819d24fa395fec"
+    },
+    {
+      "published": "failed-child-budget-manifest.json",
+      "private_source": "health-retirement-daemon-derived-qemu/manifest.json",
+      "original_sha256": "5ffa6c5eeace8a53e2a4cd2ebdea191f19c93172b67656d8c682ea06063415a0"
+    },
+    {
+      "published": "failed-root-full.log",
+      "private_source": "health-retirement-final-daemon-derived-qemu/qemu-serial.log",
+      "original_sha256": "debaf2d93fd27ab832d0d219a56cae11a2afd54d1eed768fe6cdb186e9a4a5af"
+    },
+    {
+      "published": "failed-root-full-manifest.json",
+      "private_source": "health-retirement-final-daemon-derived-qemu/manifest.json",
+      "original_sha256": "2c4fa26e912b89068df8c3cb2b94c07af9c783d13b86e6aa1e9cbe0b842552da"
+    },
+    {
+      "published": "failed-root-observed.log",
+      "private_source": "health-retirement-storage-observed-qemu/qemu-serial.log",
+      "original_sha256": "2e9fd66e9fd9ae4f682ded56bd9744528f6e1cc865e7d9ae3695c190144b3683"
+    },
+    {
+      "published": "failed-root-observed-manifest.json",
+      "private_source": "health-retirement-storage-observed-qemu/manifest.json",
+      "original_sha256": "5e96578bd872d834dc7425a7ed4de4f6fe1beb53a9668508786d1707ea0dcc11"
+    },
+    {
+      "published": "storage-summary.json",
+      "private_source": "health-retirement-storage-qemu/manifest.json",
+      "original_sha256": "04fe0c7718e78924929d4b304e969007bab91c31108f5656c5d15c05781da5c3",
+      "extraction": "selected environment/hash/result fields and verified witness comparisons; no key identifiers or boot IDs"
+    }
+  ],
+  "normalizations": [
+    "workspace/private stage paths",
+    "Go addresses",
+    "public kernel certificate identifier",
+    "trailing serial whitespace",
+    "explicit excerpts and host memory/key identifier omissions as recorded"
+  ]
+}

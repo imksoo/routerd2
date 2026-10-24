@@ -24,7 +24,7 @@ Alpineのパッケージをビルドとイメージ組み立てに利用しま�
 | DNS | 現行 routerd の resolver engine を再利用。UDP/TCP サーバー、cache、zones、query log、UDP/TCP/TLS/HTTPS/QUIC upstream。型付き DHCP リースによる A/PTR を、listener 再起動なしで更新・失効。虚偽の AD bit を防ぐため未実装の local DNSSEC signing は拒否 |
 | BGP | GoBGP v4 を独立 worker に統合。IPv4/IPv6 unicast、policy、選択経路の kernel 投影、recursive next hop、ECMP、期限付き FIB ownership。未解決 next hop は状態に表示し、未解決のまま FIB に入れない |
 | BFD | native IPv4/IPv6 single-hop asynchronous BFD。BGP の明示した隣接 peer を管理し、受信期限・producer 世代・Down counter で実セッションと学習経路を制御。旧 BFD profile、multihop、認証・echo は別の未実装範囲 |
-| Health / events | ICMP/TCP/DNS/HTTPの有限Health snapshotと最小Health→PBR。probe履歴のworker側永続queue・安定ID再送、EventRule、Health参照DerivedEventと現在値表示。retention・他producer/providerは未完了 |
+| Health / events | ICMP/TCP/DNS/HTTPの有限Health snapshotと最小Health→PBR。probe履歴の永続queue・安定ID再送・永久削除後の回収、EventRule、Health参照DerivedEventと現在値表示。retention・他producer/providerは未完了 |
 | WireGuard | kernel WireGuard を generic netlink で設定。完全な peer set、IPv4/IPv6 endpoint、roaming、公開 handshake/counter 状態。秘密鍵は versioned file と immutable snapshot で管理し、失敗時は所有リンクを DOWN にして復旧 |
 | configuration | ResourceProgram（schema 2）の ID・依存 graph・owner・provenance、YAML / JSON の厳密な検証、read-only `config plan`、candidate、revision・冪等 request ID、永続 journal、プロセス構成と kernel projection の適用、失敗時の旧設定への reconcile |
 | confirmed commit | 確認期限で rollback。未確認のまま control が再起動した場合も復元。復元失敗を成功として扱わない |

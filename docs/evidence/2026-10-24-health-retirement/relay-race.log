@@ -1,0 +1,12 @@
+=== RUN   TestMissingRegisteredQueueIsNotReplacedByAnInventedEmptyStore
+--- PASS: TestMissingRegisteredQueueIsNotReplacedByAnInventedEmptyStore (0.56s)
+=== RUN   TestRetiredRelaySurvivesControlRestartAndDoesNotTouchActiveOrUnregisteredStores
+--- PASS: TestRetiredRelaySurvivesControlRestartAndDoesNotTouchActiveOrUnregisteredStores (0.74s)
+=== RUN   TestRetirementPartialTargetFailureKeepsRegistryAndOriginalPendingPrefix
+--- PASS: TestRetirementPartialTargetFailureKeepsRegistryAndOriginalPendingPrefix (0.57s)
+=== RUN   TestRegistryRemovalFailureRetainsRecoveryWithoutReplayingAnAcknowledgedQueue
+--- PASS: TestRegistryRemovalFailureRetainsRecoveryWithoutReplayingAnAcknowledgedQueue (0.49s)
+=== RUN   TestRetirementRotatesPastBusyQueuesWithinItsBatchBound
+--- PASS: TestRetirementRotatesPastBusyQueuesWithinItsBatchBound (2.28s)
+PASS
+ok  	github.com/imksoo/routerd2/internal/protocolevents	5.687s

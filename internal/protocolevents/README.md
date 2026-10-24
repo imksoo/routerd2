@@ -34,15 +34,41 @@ between workers sharing a UID.
 History may originate in an earlier boot/configuration and is marked with its
 original producer metadata. Replayed history never registers a current producer,
 renews fact freshness or grants permission for kernel effects. A removed or
-stopped worker cannot send; retained pending work can resume when that service
-is enabled again and has published a fresh current snapshot. Late history is
-not a current Up observation or authorization to execute a privileged effect.
+stopped worker cannot send through this API. Late history is not a current Up
+observation or authorization to execute a privileged effect.
+
+The control worker registers each health queue in durable producer state before
+starting its worker, including candidate workers. Newly registered queues are
+initialized before the registry commit; failed registration starts no worker.
+Only these registered service names may be recovered. There is no filesystem
+scan or adoption of other stores. The registry holds at most 1,024 names.
+
+After permanent source removal, control observes the fresh supervisor state and
+requires that no health worker for that service remains. It then acquires the
+queue exclusively with `OpenExisting`, retries one page with its original IDs,
+and durably acknowledges the queue. Only an empty queue may lose its registry
+entry, while its store lock is still held. Missing/foreign state is an error,
+never a newly invented empty queue. Files and history are not deleted.
+Eight retiring queues are considered per pass, rotating past busy owners.
+The store lock also fences a worker that is still exiting or whose role is
+being replaced. Recovery does not hold the runtime mutex during disk IO.
+
+Target or local ACK failure retains the original queue. Registry-removal failure
+retains discoverability even after local ACK has completed; retry/restart can
+remove an empty registration without publishing again. Rejected candidate
+application declares its registered queues against the restored authoritative
+source, so their pending retirement remains visible. Current workers for still
+declared services remain the sole queue owners.
 
 Control reports per-producer storage failures through bounded
 `health.protocol_events.last_error` and `State.protocol_event_error`. One
 producer's success cannot clear another's failure. Health is unhealthy and
-trial confirmation is blocked until recovery; configuration removal prunes the
-removed producer's error. Transient unauthorized/not-yet-registered sends do not
+trial confirmation is blocked until recovery. Configuration removal prunes the
+active producer error, while retirement remains unhealthy until drainage and
+registry ACK complete. `health.protocol_events` adds `registered_relays` and
+`retiring_relays`. A successful commit can return healthy=false while its old
+history is still recovering; this does not undo the committed source.
+Transient unauthorized/not-yet-registered sends do not
 create storage-failure alarms. The worker logs changed delivery errors and
 recovery independently of the durable transport.
 
@@ -53,4 +79,5 @@ one hardware transaction: a crash before enqueue commits has no recorded probe.
 The global journal still has its finite row/byte capacity; retention/archive,
 capacity alarms, scale/latency and abrupt QEMU power-loss acceptance remain
 required for long-running production use. See the
-[evidence and remaining scope](../../docs/evidence/2026-10-24-health-protocol-events.md).
+[initial relay evidence](../../docs/evidence/2026-10-24-health-protocol-events.md) and
+[retirement evidence](../../docs/evidence/2026-10-24-health-retirement.md).

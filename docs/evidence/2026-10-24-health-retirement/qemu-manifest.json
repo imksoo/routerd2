@@ -1,0 +1,40 @@
+{
+  "product_checkpoint": "238bc589283399808e36a68d14fb50f4ae981d5b",
+  "fixture_checkpoint": "301d8a0",
+  "scope": "related five-suite run, not a complete aggregate",
+  "sequential": true,
+  "guest_ram_mib": 512,
+  "scratch_bytes": 67108864,
+  "suites": [
+    {
+      "suite": "daemon-derived",
+      "result": "passed",
+      "seconds": 113.66,
+      "manifest": "qemu-derived-manifest.json"
+    },
+    {
+      "suite": "daemon-health-pbr",
+      "result": "passed",
+      "seconds": 97.3,
+      "manifest": "qemu-health-pbr-manifest.json"
+    },
+    {
+      "suite": "daemon-management",
+      "result": "passed",
+      "seconds": 41.82,
+      "manifest": "qemu-management-manifest.json"
+    },
+    {
+      "suite": "daemon-eventrule",
+      "result": "passed",
+      "seconds": 63.62,
+      "manifest": "qemu-eventrule-manifest.json"
+    },
+    {
+      "suite": "daemon-bfd",
+      "result": "passed",
+      "seconds": 59.82,
+      "manifest": "qemu-bfd-manifest.json"
+    }
+  ]
+}

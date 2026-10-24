@@ -106,7 +106,16 @@ control側の部分保存はACKせず、再送時に保存済みprefixをdedup�
 `health.protocol_events.last_error` はproducerごとの保存失敗を集約し、不健全/trial確定不可として返す。
 現在のproducerを登録したりfact期限を延長したりする経路ではない。
 過去のboot/configの履歴には元のproducer metadataを保持する。履歴の遅延配信を現在のUpとして扱わない。
+queueの所有登録はworker起動前に保存する。Health resourceを永久削除した後は、登録済みのqueueだけを
+controlが回収する。fresh supervisorから当該health workerが消え、storeの排他lockも取得できることが必要。
+target保存とlocal ACK後、queueが空になったことを確認して所有登録を外す。登録解除が失敗しても
+control再起動後に再試行し、元eventを重複公開しない。missing storeを空で置換したり、未登録の状態を
+走査・採用・削除したりしない。現在のworker/fact/Derived現在値を復元する経路ではない。
+`health.protocol_events` の `registered_relays` / `retiring_relays` は件数を返す。
+回収待ちと保存失敗は不健全でtrial確定不可となるが、削除のcommit自体は成立したrevisionを保持する。
+候補適用失敗から元設定へ戻した場合も、候補の残queueを回収待ちとして扱う。
 [実TCP・再起動・DB失敗の証跡](evidence/2026-10-24-health-protocol-events.md) を参照。
+[永久削除後の回収と新旧比較](evidence/2026-10-24-health-retirement.md) に後続の検証を記録する。
 
 `/v1/health` の `event_rules` はrevision、ruleごとのid/lifetime/cursor/versionと
 出力outboxのpending有無、bounded errorを返す。保存/publication失敗時はhealthを不健全にし、

@@ -4,9 +4,26 @@
 対象: `https://github.com/imksoo/routerd2`
 
 **継続ゴール:** 全残実装・必要試験・対象実機での利用可能性の受入まで進める。
-部分checkpointでは完了しない。最新product checkpointは `205f02f`。
+部分checkpointでは完了しない。最新product checkpointは `238bc58`。
 
-HealthCheckのprobeごとの元eventをworker側のprivate WAL/FULL queueへ保存し、
+Health queueの所有登録をworker起動前に永続化し、永久削除後に実controlが回収する経路を追加した。
+登録済みの名前だけを扱い、sourceからの削除・fresh supervisorでのworker不在・queueの排他lockを要求する。
+元ID/内容をtargetへ保存しlocal ACKを完了してから登録を外す。missing storeを空で置換せず、
+未登録・foreign状態は採用/削除しない。候補適用失敗後の元設定復旧でも残登録をhealthへ出す。
+clean全体check/Race/vet/static両arch build131.74秒、実daemon11.79秒がPASS。
+fixture期限修正後の実daemon12.15秒、未配信IDを対象にした小さな新旧比較1.68秒もPASS。
+旧205f02fのdaemonでは永久削除後の配信が10秒timeoutでFAILし、差分を実配送で固定した。
+QEMU拡張gateは113.66秒PASS。初回75秒の子fixture期限と、imageと同居するrootfsの容量不足は
+別々に記録し、子150秒/親170秒とtest-only scratch 64MiBへ修正した。
+6MiBのWAL作業領域不足をlocalで175件目のSQLITE_FULLとして再現し、同じ処理の64MiB/400件を確認した。
+製品のdurability/容量/鮮度やVM RAM512MiBは変えていない。
+関連QEMUは二WAN Health/PBR97.30秒、管理/実SSH41.82秒、EventRule63.62秒、BFD/BGP59.82秒がPASS。
+既存の設定/journal/SSH保持・2回起動署名fallbackも120.84秒PASS。新queueの強制電源断合格とはしない。
+[永久削除後の回収・失敗・残作業](evidence/2026-10-24-health-retirement.md) を参照。
+他protocol/status provider、条件inactive時の全回収、実queueのQEMU電源断、retention/容量運用と
+全計画・対象実機受入は残る。部分checkpointでゴールやparityを完了扱いにしない。
+
+先行 `205f02f` ではHealthCheckのprobeごとの元eventをworker側のprivate WAL/FULL queueへ保存し、
 実controlの限定APIからdurable journal/EventRuleへ接続した。
 現在のsupervisor/config/generation/登録済みepochへfenceし、履歴で現在factを登録・更新しない。
 ACK消失、実SQLiteのtarget保存後local ACK失敗、同時enqueue、64件/64KiB上限をRaceで検証した。
@@ -15,8 +32,8 @@ DB拒否中のqueue4件がhealth/controlのSIGKILL後も同じID・内容で一�
 QEMU拡張gate67.82秒、二WAN Health/PBR88.85秒、管理/実SSH36.55秒もPASS。
 既存EventRule62.06秒・BFD/BGP53.44秒も同じproduct/integration sourceのQEMUでPASS。
 [probe履歴の証跡と残作業](evidence/2026-10-24-health-protocol-events.md) を参照。
-他protocol producer、service永久削除後の残queue回収、retention/容量運用、他status providerと
-全計画・対象実機受入は残る。部分checkpointでゴールやparityを完了扱いにしない。
+当時残っていたservice永久削除後の残queue回収は上記後続で追加した。
+他protocol producer、retention/容量運用、他status providerと全計画・対象実機受入は継続する。
 
 先行 `1ba9020` ではHealthCheckの有限なtyped current statusからDerivedEvent、durable journal、EventRuleまでを接続した。
 `derived_event` resource、producer state/outbox、元観測時刻とauthorityのfence、sample間の
@@ -86,7 +103,7 @@ read-onlyのbounded `/v1/observations` とhealthのpending/errorを追加した�
 BFD admin watchdogは2秒、control freshnessは500ms。
 [保存部・BFD方針の証跡](evidence/2026-10-24-events-clock.md) に変更経緯を保持する。
 
-未完了は他raw protocol event producer、永久削除後の残queue回収、EventRuleの規模/全条件受入、他Derived status provider、consumer作用、federation、
+未完了は他raw protocol event producer、条件inactive時の全queue回収、EventRuleの規模/全条件受入、他Derived status provider、consumer作用、federation、
 retention/archive/容量alarm、一般status reference、多binary runtime/startup handoff等の全計画。
 対象機種・NIC・性能条件も未確定で、実機利用可能とはまだ判定しない。
 完了したdetached worktreeは証跡を回収して削除した。private原log/manifest・診断patchは

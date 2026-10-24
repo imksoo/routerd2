@@ -1,0 +1,14 @@
+=== RUN   TestDaemonDerivedHealthCurrentStatusAndDurability
+    derived_test.go:41: === RUN   TestDaemonDerivedHealthCurrentStatusAndDurability
+            derived_test.go:45: isolated lifecycle deadline remaining: 2m30s
+            derived_test.go:385: raw probe events and EventRule count passed; 4 queued stable observations survived worker/control SIGKILL and journal failure without duplicate or renewed facts
+            derived_test.go:517: permanent health removal recovered 2 original observations through target failure, registry ACK failure and two control restarts without reactivation
+            derived_test.go:539: registry persistence failure rejected candidate before health worker launch and preserved authoritative source
+            derived_test.go:540: real TCP probes -> finite typed current status -> durable DerivedEvent -> EventRule; producer/control/logging restart, old notification, max_age and SQL failure recovery passed
+            derived_test.go:541: ROUTERD_DERIVED_DAEMON_TEST_PASS
+            derived_test.go:102: fixture filesystem type=16914836 total_bytes=67108864 available_bytes=62529536
+            derived_test.go:102: fixture file_bytes=4553839 allocated_bytes=4579328 largest_files=[{state/events/journal.sqlite3-wal 4120032 4120576} {state/events/journal.sqlite3 229376 229376} {state/services/wan/health-events/journal.sqlite3 81920 81920} {state/services/wan2/health-events/journal.sqlite3 65536 65536} {state/events/journal.sqlite3-shm 32768 32768} {state/logs/log.0.ndjson 16892 20480} {console.log 3019 4096} {config.json 2085 4096} {state/config.json 614 4096} {state/network.json 579 4096} {boot.json 494 4096} {run/instances/service.wan/1b71934d9abc8d7b9a8d5241b12e3f79ca46a613d7bf7414944e09dbefd0dc29.json 459 4096}]
+        --- PASS: TestDaemonDerivedHealthCurrentStatusAndDurability (9.67s)
+        PASS
+--- PASS: TestDaemonDerivedHealthCurrentStatusAndDurability (10.71s)
+PASS

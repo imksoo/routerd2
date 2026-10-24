@@ -1,0 +1,5 @@
+--- FAIL: TestRejectedCandidateRelayIsDeclaredRetiringAfterConfigurationRestore (0.34s)
+    protocol_retirement_test.go:58: restored config hid candidate relay ownership {{1 {2 []}   <nil> []} true injected candidate failure false 6e577936211aa259afa1636bff509e1c 2 <nil> false false false  0    } {1 1}
+FAIL
+FAIL	github.com/imksoo/routerd2/internal/control	0.350s
+FAIL
