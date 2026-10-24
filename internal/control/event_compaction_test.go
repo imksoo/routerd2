@@ -76,6 +76,9 @@ func TestBackgroundStorageMonitorCompactsCompletedWorkWithoutAnOperatorRequest(t
 	j := attachJournal(t, e, 0)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	if _, err := j.Append(ctx, protocolProbe("archived")); err != nil {
+		t.Fatal(err)
+	}
 	cp, err := j.ProducerCheckpoint(ctx, "fixture")
 	if err != nil {
 		t.Fatal(err)
@@ -99,7 +102,7 @@ func TestBackgroundStorageMonitorCompactsCompletedWorkWithoutAnOperatorRequest(t
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		h := e.health()
-		if c := h.EventJournal.Storage.Capacity; c != nil && c.Tombstones.Rows == 1 && c.Jobs.Rows == 0 {
+		if c := h.EventJournal.Storage.Capacity; c != nil && c.Tombstones.Rows == 1 && c.Jobs.Rows == 0 && c.ArchivedEvents.Rows == 1 && c.History.Rows == 1 {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)

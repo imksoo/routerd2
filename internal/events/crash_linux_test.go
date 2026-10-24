@@ -60,6 +60,9 @@ func TestMain(m *testing.M) {
 			}
 			if err == nil {
 				_, err = s.CompactCompleted(ctx, 16)
+				if err == nil {
+					_, err = s.ArchiveEvents(ctx, 16)
+				}
 			}
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
@@ -251,7 +254,7 @@ func TestCompactedWorkIdentitySurvivesSIGKILLWithoutClose(t *testing.T) {
 	}
 	defer s.Close()
 	c, err := s.Capacity(ctx)
-	if err != nil || c.Tombstones.Rows != 2 || c.Jobs.Rows != 1 {
+	if err != nil || c.Tombstones.Rows != 2 || c.Jobs.Rows != 1 || c.History.Rows != 1 || c.ArchivedEvents.Rows != 1 || c.Events.Rows != 0 {
 		t.Fatal(c, err)
 	}
 	if rows, err := s.Pending(ctx, "stateful", 10); err != nil || len(rows) != 1 {
