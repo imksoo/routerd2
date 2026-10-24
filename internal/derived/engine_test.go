@@ -227,3 +227,42 @@ func TestZeroExpiryFutureAndMissingValuesStayIndeterminate(t *testing.T) {
 		}
 	}
 }
+
+func TestPollingDoesNotRenewInputObservationTime(t *testing.T) {
+	p := compile(t, "0s", false)
+	values := map[string]Value{ref: {Text: "Up", Known: true, Scope: "boot/config", Origin: "worker", ObservedNanos: second, ExpiresNanos: 10 * second}}
+	s, err := NewSnapshot("first", "boot/config", second, wall, values)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := p.Advance(nil, s, false)
+	if err != nil || r.ObservedNanos != second {
+		t.Fatal(r, err)
+	}
+	s, err = NewSnapshot("poll", "boot/config", 5*second, wall, values)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err = p.Advance(r.State, s, false)
+	if err != nil || r.ObservedNanos != second {
+		t.Fatal("polling renewed old Up evidence", r, err)
+	}
+}
+
+func TestAnyTrueKeepsFreshnessAndExpiryFromTheSameWitness(t *testing.T) {
+	p, err := Compile("witness", api.DerivedEventSpec{Topic: "routerd.witness", EmitWhen: "any_true", Inputs: []api.ReadyWhenSpec{{Field: "${Interface/a.status.phase}", Equals: "Up"}, {Field: "${Interface/b.status.phase}", Equals: "Up"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := NewSnapshot("one", "boot/config", 3*second, wall, map[string]Value{
+		"Interface/a.status.phase": {Text: "Up", Known: true, Scope: "boot/config", Origin: "a", ObservedNanos: second, ExpiresNanos: 10 * second},
+		"Interface/b.status.phase": {Text: "Up", Known: true, Scope: "boot/config", Origin: "b", ObservedNanos: 3 * second, ExpiresNanos: 4 * second},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := p.Advance(nil, s, false)
+	if err != nil || r.ObservedNanos != 3*second || r.ValidUntilNanos != 4*second {
+		t.Fatal("freshness and expiry mixed different witnesses", r, err)
+	}
+}
