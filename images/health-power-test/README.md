@@ -74,3 +74,15 @@ running host. It does not power off the PVE host, discard host filesystem caches
 qualify a physical storage controller, or prove recovery from every possible
 write boundary. Physical/NIC/performance qualification, full version migration,
 retention and other implementation-plan work remain separate requirements.
+
+## Completed work identity
+
+The gate also witnesses completed consumer/producer identities compacted by the
+actual control worker. Before the first cut it waits for a real Derived output;
+before the second cut it requires both a real producer and an EventRule output.
+A bounded read-only query captures kind/name/key, original cursor/state version
+and payload SHA256. Each later boot independently compares every previous
+identity, allowing newly completed work while rejecting any missing/changed key,
+position/hash or duplicate. The host verifier repeats these comparisons.
+Witnesses still travel over UART/next test initramfs without a guest disk write,
+checkpoint or fsync at a cut. This does not qualify physical host power loss.

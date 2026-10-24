@@ -4,9 +4,23 @@
 対象: `https://github.com/imksoo/routerd2`
 
 **継続ゴール:** 全残実装・必要試験・対象実機での利用可能性の受入まで進める。
-部分checkpointでは完了しない。最新product checkpointは `6006090`。
+部分checkpointでは完了しない。最新product checkpointは `0b4bb28`。
 
-最新productはevent journalの件数/byte/DB/WAL/filesystem容量を可視化し、warning/exhaustedと
+完了したconsumer/producer outboxを、小さなSHA-256重複抑止記録へ置き換えて枠を自動回収する。
+元key・cursor/初回state versionを保存し、待機中job・state・event履歴は変更しない。
+同一再送/ACKは成功し、内容変更・元cursor変更・cursor巻き戻し後の再実行を拒否する。
+独立した100万件/256MiBのtombstone予算と容量表示を設け、満杯で元記録を忘れない。
+保存失敗はread-only inspectionで消さず、次の回収成功でhealth/confirmを回復する。
+最終clean `b197c17` の全体check/Race/vet/static両arch build22.47秒、
+実daemonの自動回収/保存失敗/復旧/control SIGKILL4.70秒、Derived11.93秒・二WAN Health/PBR29.85秒がPASS。
+大きなpayloadの24 SQLite pageを解放し、新jobが16 pageをDB拡大なしで再利用した。
+QEMU archive/自動回収35.54秒・Derived121.51秒・二WAN Health/PBR96.05秒、実8MiB quota4.41秒がPASS。
+三boot/二SIGKILLは75.27秒PASS。完了回収記録1→3→3件と、元履歴4件/cursor4/5/6/7を保持した。
+DB schemaは5、未公開1/2/3/4はread-only拒否。
+[契約](event-storage.md) と [検証・残作業](evidence/2026-10-24-job-compaction.md) を参照。
+event履歴のarchive/回収、dedupの長期運用、他残計画と対象実機受入は未完了。
+
+先行product `6006090` はevent journalの件数/byte/DB/WAL/filesystem容量を可視化し、warning/exhaustedと
 freshなtrial confirm拒否を追加した。`show event-store`、private API、localの
 `routerd events export/verify` で、固定tipまでの完全な履歴prefixを0600の新規ファイルへ公開・検証する。
 既存ファイルと競合作成先を上書きせず、元ID/内容/cursorを保持し、producerを止めない。

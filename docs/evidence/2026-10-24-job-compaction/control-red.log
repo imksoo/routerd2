@@ -1,0 +1,10 @@
+# github.com/imksoo/routerd2/internal/control [github.com/imksoo/routerd2/internal/control.test]
+internal/control/event_compaction_test.go:44:13: e.MaintainEventStore undefined (type *Engine has no field or method MaintainEventStore)
+internal/control/event_compaction_test.go:47:58: h.EventJournal.Storage.CompactionError undefined (type EventStoreHealth has no field or method CompactionError)
+internal/control/event_compaction_test.go:53:58: h.EventJournal.Storage.CompactionError undefined (type EventStoreHealth has no field or method CompactionError)
+internal/control/event_compaction_test.go:62:13: e.MaintainEventStore undefined (type *Engine has no field or method MaintainEventStore)
+internal/control/event_compaction_test.go:66:42: h.EventJournal.Storage.CompactionError undefined (type EventStoreHealth has no field or method CompactionError)
+internal/control/event_compaction_test.go:66:141: h.EventJournal.Storage.Capacity.Tombstones undefined (type *events.Capacity has no field or method Tombstones)
+internal/control/event_compaction_test.go:102:58: c.Tombstones undefined (type *events.Capacity has no field or method Tombstones)
+FAIL    github.com/imksoo/routerd2/internal/control [build failed]
+FAIL

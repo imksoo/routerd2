@@ -1,0 +1,149 @@
+.FFFFFFFFFFFFFFFFFF......
+======================================================================
+FAIL: test_completed_identity_cannot_be_forgotten_changed_or_duplicated (qemu_health_power_test.PowerWitnessTests.test_completed_identity_cannot_be_forgotten_changed_or_duplicated) (index=1, mutate=<function PowerWitnessTests.test_completed_identity_cannot_be_forgotten_changed_or_duplicated.<locals>.<lambda> at <address>>)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_health_power_test.py", line 124, in test_completed_identity_cannot_be_forgotten_changed_or_duplicated
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_completed_identity_cannot_be_forgotten_changed_or_duplicated (qemu_health_power_test.PowerWitnessTests.test_completed_identity_cannot_be_forgotten_changed_or_duplicated) (index=1, mutate=<function PowerWitnessTests.test_completed_identity_cannot_be_forgotten_changed_or_duplicated.<locals>.<lambda> at <address>>)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_health_power_test.py", line 124, in test_completed_identity_cannot_be_forgotten_changed_or_duplicated
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_completed_identity_cannot_be_forgotten_changed_or_duplicated (qemu_health_power_test.PowerWitnessTests.test_completed_identity_cannot_be_forgotten_changed_or_duplicated) (index=1, mutate=<function PowerWitnessTests.test_completed_identity_cannot_be_forgotten_changed_or_duplicated.<locals>.<lambda> at <address>>)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_health_power_test.py", line 124, in test_completed_identity_cannot_be_forgotten_changed_or_duplicated
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_completed_identity_cannot_be_forgotten_changed_or_duplicated (qemu_health_power_test.PowerWitnessTests.test_completed_identity_cannot_be_forgotten_changed_or_duplicated) (index=1, mutate=<function PowerWitnessTests.test_completed_identity_cannot_be_forgotten_changed_or_duplicated.<locals>.<lambda> at <address>>)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_health_power_test.py", line 124, in test_completed_identity_cannot_be_forgotten_changed_or_duplicated
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_completed_identity_cannot_be_forgotten_changed_or_duplicated (qemu_health_power_test.PowerWitnessTests.test_completed_identity_cannot_be_forgotten_changed_or_duplicated) (index=1, mutate=<function PowerWitnessTests.test_completed_identity_cannot_be_forgotten_changed_or_duplicated.<locals>.<lambda> at <address>>)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_health_power_test.py", line 124, in test_completed_identity_cannot_be_forgotten_changed_or_duplicated
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_completed_identity_cannot_be_forgotten_changed_or_duplicated (qemu_health_power_test.PowerWitnessTests.test_completed_identity_cannot_be_forgotten_changed_or_duplicated) (index=1, mutate=<function PowerWitnessTests.test_completed_identity_cannot_be_forgotten_changed_or_duplicated.<locals>.<lambda> at <address>>)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_health_power_test.py", line 124, in test_completed_identity_cannot_be_forgotten_changed_or_duplicated
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_completed_identity_cannot_be_forgotten_changed_or_duplicated (qemu_health_power_test.PowerWitnessTests.test_completed_identity_cannot_be_forgotten_changed_or_duplicated) (index=1, mutate=<function PowerWitnessTests.test_completed_identity_cannot_be_forgotten_changed_or_duplicated.<locals>.<lambda> at <address>>)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_health_power_test.py", line 124, in test_completed_identity_cannot_be_forgotten_changed_or_duplicated
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_completed_identity_cannot_be_forgotten_changed_or_duplicated (qemu_health_power_test.PowerWitnessTests.test_completed_identity_cannot_be_forgotten_changed_or_duplicated) (index=1, mutate=<function PowerWitnessTests.test_completed_identity_cannot_be_forgotten_changed_or_duplicated.<locals>.<lambda> at <address>>)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_health_power_test.py", line 124, in test_completed_identity_cannot_be_forgotten_changed_or_duplicated
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_completed_identity_cannot_be_forgotten_changed_or_duplicated (qemu_health_power_test.PowerWitnessTests.test_completed_identity_cannot_be_forgotten_changed_or_duplicated) (index=1, mutate=<function PowerWitnessTests.test_completed_identity_cannot_be_forgotten_changed_or_duplicated.<locals>.<lambda> at <address>>)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_health_power_test.py", line 124, in test_completed_identity_cannot_be_forgotten_changed_or_duplicated
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_completed_identity_cannot_be_forgotten_changed_or_duplicated (qemu_health_power_test.PowerWitnessTests.test_completed_identity_cannot_be_forgotten_changed_or_duplicated) (index=2, mutate=<function PowerWitnessTests.test_completed_identity_cannot_be_forgotten_changed_or_duplicated.<locals>.<lambda> at <address>>)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_health_power_test.py", line 124, in test_completed_identity_cannot_be_forgotten_changed_or_duplicated
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_completed_identity_cannot_be_forgotten_changed_or_duplicated (qemu_health_power_test.PowerWitnessTests.test_completed_identity_cannot_be_forgotten_changed_or_duplicated) (index=2, mutate=<function PowerWitnessTests.test_completed_identity_cannot_be_forgotten_changed_or_duplicated.<locals>.<lambda> at <address>>)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_health_power_test.py", line 124, in test_completed_identity_cannot_be_forgotten_changed_or_duplicated
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_completed_identity_cannot_be_forgotten_changed_or_duplicated (qemu_health_power_test.PowerWitnessTests.test_completed_identity_cannot_be_forgotten_changed_or_duplicated) (index=2, mutate=<function PowerWitnessTests.test_completed_identity_cannot_be_forgotten_changed_or_duplicated.<locals>.<lambda> at <address>>)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_health_power_test.py", line 124, in test_completed_identity_cannot_be_forgotten_changed_or_duplicated
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_completed_identity_cannot_be_forgotten_changed_or_duplicated (qemu_health_power_test.PowerWitnessTests.test_completed_identity_cannot_be_forgotten_changed_or_duplicated) (index=2, mutate=<function PowerWitnessTests.test_completed_identity_cannot_be_forgotten_changed_or_duplicated.<locals>.<lambda> at <address>>)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_health_power_test.py", line 124, in test_completed_identity_cannot_be_forgotten_changed_or_duplicated
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_completed_identity_cannot_be_forgotten_changed_or_duplicated (qemu_health_power_test.PowerWitnessTests.test_completed_identity_cannot_be_forgotten_changed_or_duplicated) (index=2, mutate=<function PowerWitnessTests.test_completed_identity_cannot_be_forgotten_changed_or_duplicated.<locals>.<lambda> at <address>>)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_health_power_test.py", line 124, in test_completed_identity_cannot_be_forgotten_changed_or_duplicated
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_completed_identity_cannot_be_forgotten_changed_or_duplicated (qemu_health_power_test.PowerWitnessTests.test_completed_identity_cannot_be_forgotten_changed_or_duplicated) (index=2, mutate=<function PowerWitnessTests.test_completed_identity_cannot_be_forgotten_changed_or_duplicated.<locals>.<lambda> at <address>>)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_health_power_test.py", line 124, in test_completed_identity_cannot_be_forgotten_changed_or_duplicated
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_completed_identity_cannot_be_forgotten_changed_or_duplicated (qemu_health_power_test.PowerWitnessTests.test_completed_identity_cannot_be_forgotten_changed_or_duplicated) (index=2, mutate=<function PowerWitnessTests.test_completed_identity_cannot_be_forgotten_changed_or_duplicated.<locals>.<lambda> at <address>>)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_health_power_test.py", line 124, in test_completed_identity_cannot_be_forgotten_changed_or_duplicated
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_completed_identity_cannot_be_forgotten_changed_or_duplicated (qemu_health_power_test.PowerWitnessTests.test_completed_identity_cannot_be_forgotten_changed_or_duplicated) (index=2, mutate=<function PowerWitnessTests.test_completed_identity_cannot_be_forgotten_changed_or_duplicated.<locals>.<lambda> at <address>>)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_health_power_test.py", line 124, in test_completed_identity_cannot_be_forgotten_changed_or_duplicated
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_completed_identity_cannot_be_forgotten_changed_or_duplicated (qemu_health_power_test.PowerWitnessTests.test_completed_identity_cannot_be_forgotten_changed_or_duplicated) (index=2, mutate=<function PowerWitnessTests.test_completed_identity_cannot_be_forgotten_changed_or_duplicated.<locals>.<lambda> at <address>>)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_health_power_test.py", line 124, in test_completed_identity_cannot_be_forgotten_changed_or_duplicated
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+----------------------------------------------------------------------
+Ran 8 tests in 0.018s
+
+FAILED (failures=18)

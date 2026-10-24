@@ -180,6 +180,12 @@ old healthy cache. Expired trial rollback still restores its authoritative
 source and retains an undelivered observation in the reserved file outbox.
 Health polling does not query SQLite. The background capacity query and fresh
 inspection do not hold the configuration lock across storage I/O.
+The same background monitor reclaims a maximum of 64 completed job payloads per
+pass into bounded durable SHA256 identities, sharing consumer and producer work.
+`compaction_error` persists across successful read-only inspections until a
+maintenance pass succeeds. It degrades health and blocks confirmation without
+changing source/cursors or dropping pending work. This recovers hot job capacity
+and reusable SQLite pages, not event history or filesystem free space.
 See [capacity and immutable export](../../docs/event-storage.md); these do not
 reclaim journal space or guarantee an externally durable alarm.
 

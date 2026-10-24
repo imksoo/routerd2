@@ -1,0 +1,14 @@
+# github.com/imksoo/routerd2/internal/events [github.com/imksoo/routerd2/internal/events.test]
+internal/events/compaction_test.go:16:79: unknown field MaxTombstones in struct literal of type Options
+internal/events/compaction_test.go:53:14: s.CompactCompleted undefined (type *Store has no field or method CompactCompleted)
+internal/events/compaction_test.go:57:13: s.CompactCompleted undefined (type *Store has no field or method CompactCompleted)
+internal/events/compaction_test.go:62:75: after.Tombstones undefined (type Capacity has no field or method Tombstones)
+internal/events/compaction_test.go:118:16: s.CompactCompleted undefined (type *Store has no field or method CompactCompleted)
+internal/events/compaction_test.go:148:17: s.CompactCompleted undefined (type *Store has no field or method CompactCompleted)
+internal/events/compaction_test.go:171:10: opts.MaxTombstones undefined (type Options has no field or method MaxTombstones)
+internal/events/compaction_test.go:174:10: opts.MaxTombstoneBytes undefined (type Options has no field or method MaxTombstoneBytes)
+internal/events/compaction_test.go:212:16: s.CompactCompleted undefined (type *Store has no field or method CompactCompleted)
+internal/events/compaction_test.go:217:16: s.CompactCompleted undefined (type *Store has no field or method CompactCompleted)
+internal/events/compaction_test.go:217:16: too many errors
+FAIL    github.com/imksoo/routerd2/internal/events [build failed]
+FAIL

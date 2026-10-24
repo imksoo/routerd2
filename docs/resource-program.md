@@ -136,7 +136,9 @@ callbackでsource lockを取れない場合は次回へ回し、設定更新と�
 一つのsourceは最大128 rule。schedulerは200ms周期・bounded batchで、規模・遅延の性能受入や
 長期運用用のretention/領域回収は未完了。
 容量観測・warning/confirm guard・固定tipの履歴export/verifyは実装したが、
-exportだけではsource/dedup領域を空けない。[操作と保存契約](event-storage.md) を参照。
+exportだけではevent履歴本体の領域を空けない。完了outbox payloadは別予算のSHA-256記録へ自動回収し、
+元の重複抑止を保って枠/SQLite pageを再利用する。event本体の回収・長期dedupは未完了。
+[操作と保存契約](event-storage.md) を参照。
 
 ## DerivedEvent
 

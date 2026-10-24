@@ -1,0 +1,5 @@
+=== RUN   TestCompactedPayloadPagesAreReusedByNewWork
+    compaction_test.go:472: large completed payloads freed 24 SQLite pages; new pending jobs reused 16 pages without DB growth
+--- PASS: TestCompactedPayloadPagesAreReusedByNewWork (0.42s)
+PASS
+ok      github.com/imksoo/routerd2/internal/events      1.435s

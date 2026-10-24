@@ -80,7 +80,18 @@ deduplication tombstones. It still acknowledges existing identical events.
 `Capacity` reads transactional usage counters, cursor bounds, file allocation and
 filesystem availability without scanning payloads. Logical budget pressure is
 visible at 80%/100%; low available filesystem space is also reported. Completed
-jobs count toward these budgets because they retain idempotency tombstones.
+jobs retain their hot budget charge until `CompactCompleted` moves their
+identity to the separately bounded tombstone budget.
+`CompactCompleted` atomically replaces only completed consumer/producer work
+with kind/name/key, original cursor/state version and normalized payload SHA256.
+The hot row/byte charge is released, and freed SQLite pages can be reused.
+Pending jobs, state/version/cursors and event bodies remain untouched. Stable
+retries consult retained identities; changed content or consumer source cursor
+conflicts. Completion remains idempotent. Batches share consumer/producer work;
+failed writes preserve the complete original transaction. Default retained
+identity limits are one million records/256MiB of encoded identity bytes.
+No identities expire, and full identity capacity refuses reclamation rather
+than forgetting deduplication. Physical filesystem limits still apply.
 `ExportHistory` copies an immutable prefix through a captured tip in bounded
 pages without holding a store lock across output I/O. `VerifyHistory` checks
 frames, complete event content, ordered cursors, unique IDs, byte/count totals
@@ -98,8 +109,8 @@ The live Health relay has a dedicated three-boot/two-SIGKILL
 Other protocol event producers, exhaustive cut points and physical power-loss
 acceptance remain implementation-plan work.
 
-The database schema is now version 4. Accepted design D-09 deliberately does
-not import discarded, unreleased version-1/2/3 prototype state. Unsupported schema
+The database schema is now version 5. Accepted design D-09 deliberately does
+not import discarded, unreleased version-1/2/3/4 prototype state. Unsupported schema
 identity is rejected through the read-only probe before SQLite recovery/writes.
 This is not a promise that different released versions can share or roll back
 this database. A production migration/fallback contract remains DIST-01 work.

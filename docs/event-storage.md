@@ -5,7 +5,8 @@ global event journalの容量を読み取る。event、job、consumer/producer�
 最初/最後のcursor、最も遅いconsumer cursor、DB/WALのsize、DB/WAL/SHMの実割当量、
 state filesystem全体の容量と使用可能byteを返す。登録やcursorを変更する操作ではない。
 
-jobの完了記録も重複抑止に必要な容量として数える。`pending=0` と容量が空いていることは同じではない。
+jobは待機中と未回収の完了payloadを `jobs` に数え、回収済みの完了記録は別の `tombstones` に数える。
+`pending=0` と容量が空いていることは同じではない。
 件数/byte上限の80%以上で `pressure: warning`、上限以上で `exhausted` となり、
 `events_rows`、`jobs_bytes`、`registrations_rows` 等の理由を併記する。
 filesystemは使用可能領域が16 MiB未満または全体の10%未満でwarning、0でexhaustedとする。
@@ -22,6 +23,28 @@ warningだけでは健全性を落とさず、状態変化をlogへ出す。exha
 満杯の状態でtrialを確定しない。容量不足があっても、期限切れrollbackのsource復元を妨げず、
 その履歴はauthoritative file outboxに保持して後で配信する。
 警告logは既存logging経路を使うため、別filesystem/外部collectorへの永続alert保証ではない。
+
+## 完了jobの枠を自動回収する
+
+controlは約1秒周期で、consumer/producerそれぞれ最大32件、合計64件の完了jobを回収する。
+同じ周期の設定排他は保持せず、完了flagのindexからbounded batchを読み取る。待機中payload、
+consumer cursor/state/version、producer state/version、event履歴と現在factは変更しない。
+
+完了jobの名前空間・名前・key・元event cursorまたは初回state versionと、正規化payloadのSHA-256を
+`completed_jobs` へ保存してから元outbox payloadを削除し、両方の容量counterを同じWAL/FULL transactionで更新する。
+失敗時はそのbatchをrollbackする。tombstone予算に収まるprefixだけを確定でき、1件も収まらない場合は
+元の完了payloadを保持して容量errorを返す。同一内容の再送とACKは引き続き成功し、
+同じkeyの内容変更・consumerの元cursor変更は拒否する。古いcursorだけを戻しても作用を再実行しない。
+作用成功後から完了ACKまでのcrashには、引き続き作用先の冪等性が必要である。
+
+重複抑止記録は自動で忘れない。既定上限は100万件/256MiBで、`tombstones_rows/bytes` の80/100%を表示する。
+byte予算はUTF-8のname/key長と41byte（kind・position・SHA）で、SQLiteの物理size予算とは別である。
+元payloadは回収後にこの表から復元できず、SHAは内容照合用であって署名ではない。
+解放したSQLite pageは後続jobへ再利用するが、DBファイルを縮小したり、filesystemへ即座に空きを返したりする処理ではない。
+
+回収失敗は `event_journal.storage.compaction_error` と `last_error` に残し、不健全/confirm拒否へ反映する。
+read-onlyのfresh inspectionが成功しただけではwrite失敗の警告を消さず、次の回収成功で解除する。
+小さな重複抑止記録も有限なので、この上限やevent履歴の上限に達すれば運用継続はできない。
 
 ## 新規の履歴archiveを作る
 
@@ -55,9 +78,10 @@ archiveは履歴を含むprivate dataなので、必要な保護を維持して�
 exportもverifyもsourceのeventを削除せず、consumer cursorやoutboxをACKしない。
 archiveはevent履歴のprefix copyで、consumer/producer state・outbox・設定journalのbackupではない。
 importやrollback、現在のUp・kernel権限の復元にも使わない。
-DB schemaは4のままで、旧prototype向けの互換readerは追加していない。
+DB schemaは5。D-09に従って未リリースprototypeの1/2/3/4はread-onlyで拒否し、互換readerや移行は追加しない。
 
-この実装だけでは満杯のjournalの領域は空かない。archiveの自動退避、hot領域の回収、
-dedup用記録の保持契約、retention policy、総filesystem予算、外部alert、規模・長時間受入は残る。
-完了済みjobを無条件で消したり、既存IDの再送を新規eventに変えたりする回収は行わない。
+exportだけでは満杯のevent journalは空かない。完了jobのpayload枠回収は追加したが、
+event履歴本体のarchive退避/回収、dedup記録の長期保持と世代終了契約、retention policy、
+総filesystem予算、外部alert、規模・長時間受入は残る。重複抑止記録を無条件で消したり、
+既存IDの再送を新規eventに変えたりする回収は行わない。
 workerごとの送信待ちqueueの容量と、ここで表示するglobal journalの容量は別である。

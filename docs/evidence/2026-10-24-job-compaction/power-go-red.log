@@ -1,0 +1,14 @@
+# github.com/imksoo/routerd2/images/health-power-test/guest [github.com/imksoo/routerd2/images/health-power-test/guest.test]
+images/health-power-test/guest/completed_test.go:11:13: undefined: completedObservation
+images/health-power-test/guest/completed_test.go:12:28: undefined: completedObservation
+images/health-power-test/guest/completed_test.go:13:12: undefined: verifyCompleted
+images/health-power-test/guest/completed_test.go:16:12: undefined: verifyCompleted
+images/health-power-test/guest/completed_test.go:19:46: undefined: completedObservation
+images/health-power-test/guest/completed_test.go:20:32: undefined: completedObservation
+images/health-power-test/guest/completed_test.go:21:32: undefined: completedObservation
+images/health-power-test/guest/completed_test.go:22:32: undefined: completedObservation
+images/health-power-test/guest/completed_test.go:23:32: undefined: completedObservation
+images/health-power-test/guest/completed_test.go:24:32: undefined: completedObservation
+images/health-power-test/guest/completed_test.go:24:32: too many errors
+FAIL    github.com/imksoo/routerd2/images/health-power-test/guest [build failed]
+FAIL

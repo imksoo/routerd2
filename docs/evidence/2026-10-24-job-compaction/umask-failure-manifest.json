@@ -1,0 +1,14 @@
+{
+  "source_commit": "0b4bb2885a73dd9b1620d8caf602c6db5fde1aff",
+  "source_dirty": false,
+  "started_at_utc": "2026-10-24T21:57:56.231385+00:00",
+  "command": [
+    "make",
+    "check",
+    "build-linux",
+    "RELEASE_ID=0b4bb2885a73"
+  ],
+  "exit_code": 2,
+  "elapsed_seconds": 13.51,
+  "completed_commit": "0b4bb2885a73dd9b1620d8caf602c6db5fde1aff"
+}

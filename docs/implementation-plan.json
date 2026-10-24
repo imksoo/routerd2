@@ -11659,6 +11659,42 @@
         "Product-version migration/full DB rollback, all remaining work packages and selected physical hardware/NIC/performance acceptance"
       ],
       "parity_flags_unchanged": true
+    },
+    {
+      "id": "completed-outbox-compaction",
+      "date": "2026-10-24",
+      "status": "partial_retention_implementation_verified",
+      "code_checkpoint": "0b4bb2885a73dd9b1620d8caf602c6db5fde1aff",
+      "fixture_checkpoint": "b197c17dddaf1cddbb61e4507db6f1f3b6a9da17",
+      "work_packages": [
+        "CORE-04"
+      ],
+      "evidence": "docs/evidence/2026-10-24-job-compaction.md",
+      "operator_contract": "docs/event-storage.md",
+      "implemented": [
+        "Atomic bounded completed consumer/producer payload reclamation into kind/name/key, original event cursor/state version and normalized SHA256; releases hot row/byte budgets without touching pending work, state, history or authority",
+        "Retries and completion ACK consult retained identities, reject changed payload/source cursor, and do not reactivate completed work after cursor-only rollback; distinct consumer/producer namespace and fair bounded batches",
+        "Independent one-million-row/256MiB tombstone budget and visible80/100 percent pressure; full budget preserves original payload rather than forgetting identity",
+        "Actual control performs maximum64 completed jobs per one-second maintenance pass outside configuration lock; compaction failure degrades health/blocks confirm until successful maintenance, not merely a successful read",
+        "Internal schema5 with read-only rejection of unreleased1/2/3/4; no prototype import or physical file shrink",
+        "Expanded real three-boot/two-SIGKILL gate: read-only UART witness of original compacted consumer/producer key/position/hash, independent strict Go and host prefix comparison without guest witness fsync"
+      ],
+      "validation": [
+        "Test-first component failures and actual pinned old6006090 ELF timeout; Race covers insert/delete/counter failure, actual SQLite FULL, capacity boundaries, concurrent completion/compaction, Unicode accounting, stable retries and SIGKILL/WAL recovery",
+        "Actual large payload compaction frees24 SQLite pages; new pending jobs reuse16 without DB growth; separate meaningful Race fixture passes1.435s",
+        "Initial unmasked check fails13.51s on private ancestor permissions; same product with umask0022 passes95.91s; final clean b197c17 make check build-linux with fixed product identity passes22.47s including Python22/unit/Race/vet/static amd64+arm64",
+        "Fresh native ELF hashes match final checked pair: new actual output compaction/failure/inspection/recovery/control SIGKILL4.70s, Derived11.93s, two-WAN TCP/UDP/PCAP PBR29.85s pass; initial archive fixture JSON reuse timeout retained separately, not counted as aggregate pass",
+        "Actual8MiB private tmpfs warning and full new archive/compaction/control restart fixture pass4.41s",
+        "No-NIC QEMU archive35.54s, Derived121.51s, two-WAN Health/PBR96.05s pass; related gates, not a new all-suite aggregate",
+        "First expanded QEMU power run passes75.27s: producer1 completed identity survives first cut, consumer1+producer2 identities survive second cut unchanged, all four accepted events retain cursors4/5/6/7; registry recovery/current authority fences preserved.1GiB/private256MiB ext4/no NIC; not physical host power loss"
+      ],
+      "remaining": [
+        "Event body durable archive offload and safe reclamation; long-term dedup retention/lifetime sealing and retention policy",
+        "Aggregate filesystem budget, externally durable alert, workload rate/scale/latency and long-running acceptance; no physical filesystem free-space or unbounded-lifetime claim",
+        "Other raw producers/providers, structured fields/Derived chaining, privileged effects/idempotency and federation",
+        "Product-version migration/full database rollback and signed runtime lifecycle, all remaining work-package and physical/NIC/performance acceptance"
+      ],
+      "parity_flags_unchanged": true
     }
   ],
   "delivery_goal": {
