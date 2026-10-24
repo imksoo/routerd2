@@ -22,6 +22,7 @@ import (
 	"github.com/imksoo/routerd2/internal/events"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/network"
+	"github.com/imksoo/routerd2/internal/protocol/bfd"
 	"github.com/imksoo/routerd2/internal/protocol/health"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
@@ -214,6 +215,16 @@ func TestDaemonDerivedHealthCurrentStatusAndDurability(t *testing.T) {
 		}
 		return true
 	})
+	clock, err := bfd.ReadClock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current := module("service.wan"); !current.Ready || current.PID != victim.PID || current.Generation != victim.Generation {
+		t.Fatal("process readiness loss masked max_age", current)
+	}
+	if now := uint64(clock.BoottimeNanoseconds); now <= frozen.ObservedNanos+uint64(time.Second) || now >= frozen.ExpiresNanos {
+		t.Fatal("consumer age was not independent of producer expiry", frozen, now)
+	}
 	if err := syscall.Kill(victim.PID, syscall.SIGCONT); err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +232,10 @@ func TestDaemonDerivedHealthCurrentStatusAndDurability(t *testing.T) {
 	until(t, 10*time.Second, func() bool { v := view("fresh"); return v.State.Asserted != nil && *v.State.Asserted })
 	stale := healthPBRUpdate(instance())
 	restart("service.wan")
-	until(t, 15*time.Second, func() bool { return instance().Generation > stale.Generation && view("derived").State.Asserted != nil })
+	until(t, 15*time.Second, func() bool {
+		v := view("derived")
+		return instance().Generation > stale.Generation && v.State.Asserted != nil && *v.State.Asserted
+	})
 	if err = f.control.Do(ctx, "POST", "/v1/services/state", stale, nil); !localapi.IsHTTPStatus(err, 409) {
 		t.Fatal("old health notification was accepted", err)
 	}
