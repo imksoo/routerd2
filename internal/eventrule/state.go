@@ -65,7 +65,7 @@ func (p Program) load(body []byte) (state, error) {
 			}
 		}
 		if c.Pending != nil {
-			if p.spec.Pattern.Operator != "absence" && p.spec.Pattern.Operator != "debounce" || c.Pending.Due.IsZero() {
+			if p.spec.Pattern.Operator != "absence" && p.spec.Pattern.Operator != "debounce" || !c.Pending.Due.Equal(c.Pending.Input.Event.Time.Add(p.delay)) {
 				return s, errors.New("unexpected rule timer state")
 			}
 			if err := validInput(c.Pending.Input); err != nil {

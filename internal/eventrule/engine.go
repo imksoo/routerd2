@@ -69,15 +69,15 @@ func (p Program) correlation(in Input) (string, bool) {
 		switch path {
 		case "resource.name":
 			if in.Event.Resource != nil {
-				value = in.Event.Resource.Name
+				return in.Event.Resource.Name, true
 			}
 		case "resource.kind":
 			if in.Event.Resource != nil {
-				value = in.Event.Resource.Kind
+				return in.Event.Resource.Kind, true
 			}
 		case "resource.apiVersion":
 			if in.Event.Resource != nil {
-				value = in.Event.Resource.APIVersion
+				return in.Event.Resource.APIVersion, true
 			}
 		case "daemon.instance":
 			value = in.Event.Daemon.Instance
@@ -269,10 +269,11 @@ func (p Program) emit(s *state, key string, in Input, count int, at time.Time) (
 	digest := sha256.Sum256(body)
 	event := daemonapi.DaemonEvent{TypeMeta: daemonapi.TypeMeta{APIVersion: daemonapi.APIVersion, Kind: daemonapi.KindDaemonEvent}, Time: at.UTC(), Daemon: daemonapi.DaemonRef{Name: "routerd-eventrule", Kind: "routerd-eventrule", Instance: p.name}, Resource: &daemonapi.ResourceRef{APIVersion: api.NetAPIVersion, Kind: "EventRule", Name: p.name}, Type: p.spec.Emit.Topic, Severity: daemonapi.SeverityInfo, Reason: "EventRuleFired", Message: "event rule fired", Attributes: map[string]string{}}
 	for k, v := range p.spec.Emit.Attributes {
-		event.Attributes[k] = render(v, in, key, count)
-		if len(event.Attributes[k]) > 4096 {
-			return Emission{}, ErrCapacity
+		value, err := render(v, in, key, count)
+		if err != nil {
+			return Emission{}, err
 		}
+		event.Attributes[k] = value
 	}
 	if count > 0 {
 		event.Attributes["count"] = strconv.Itoa(count)
@@ -292,19 +293,32 @@ func (p Program) emit(s *state, key string, in Input, count int, at time.Time) (
 
 // Interpolation is one pass. A value supplied by an input cannot introduce a
 // second expression whose expansion depends on Go map iteration order.
-func render(template string, in Input, correlation string, count int) string {
+func render(template string, in Input, correlation string, count int) (string, error) {
 	var out strings.Builder
+	write := func(value string) bool {
+		if len(value) > 4096-out.Len() {
+			return false
+		}
+		out.WriteString(value)
+		return true
+	}
 	for {
 		start := strings.Index(template, "${")
 		if start < 0 {
-			out.WriteString(template)
+			if !write(template) {
+				return "", ErrCapacity
+			}
 			break
 		}
-		out.WriteString(template[:start])
+		if !write(template[:start]) {
+			return "", ErrCapacity
+		}
 		template = template[start:]
 		end := strings.IndexByte(template, '}')
 		if end < 0 {
-			out.WriteString(template)
+			if !write(template) {
+				return "", ErrCapacity
+			}
 			break
 		}
 		expression := template[2:end]
@@ -337,11 +351,15 @@ func render(template string, in Input, correlation string, count int) string {
 			}
 		}
 		if known {
-			out.WriteString(value)
+			if !write(value) {
+				return "", ErrCapacity
+			}
 		} else {
-			out.WriteString(template[:end+1])
+			if !write(template[:end+1]) {
+				return "", ErrCapacity
+			}
 		}
 		template = template[end+1:]
 	}
-	return out.String()
+	return out.String(), nil
 }

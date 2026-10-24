@@ -53,15 +53,19 @@ func Compile(name string, spec api.EventRuleSpec) (Program, error) {
 	if !token(name, 128) || !token(spec.Emit.Topic, 128) || len(spec.Emit.Attributes) > 64 || spec.Pattern.Threshold < 0 || spec.Pattern.Rate < 0 {
 		return Program{}, errors.New("invalid event rule name, output or threshold")
 	}
+	if len(spec.Pattern.Topics) > 64 || len(spec.Pattern.Operator) > 32 {
+		return Program{}, errors.New("event rule input pattern exceeds bounds")
+	}
 	for key, value := range spec.Emit.Attributes {
 		if !token(key, 128) || len(value) > 4096 || !utf8.ValidString(value) {
 			return Program{}, errors.New("invalid event rule attribute template")
 		}
 	}
-	switch spec.Pattern.CorrelateBy {
+	correlate := strings.TrimSpace(spec.Pattern.CorrelateBy)
+	switch correlate {
 	case "", "resource.name", "resource.kind", "resource.apiVersion", "daemon.instance", "daemon.kind":
 	default:
-		if !strings.HasPrefix(spec.Pattern.CorrelateBy, "attributes.") || !token(strings.TrimPrefix(spec.Pattern.CorrelateBy, "attributes."), 128) {
+		if !strings.HasPrefix(correlate, "attributes.") || !token(strings.TrimPrefix(correlate, "attributes."), 128) {
 			return Program{}, errors.New("unsupported event rule correlation")
 		}
 	}
@@ -82,6 +86,7 @@ func Compile(name string, spec api.EventRuleSpec) (Program, error) {
 	}
 	digest := sha256.Sum256(body)
 	p := Program{name: name, spec: owned.Spec, digest: hex.EncodeToString(digest[:]), threshold: spec.Pattern.Threshold}
+	p.spec.Pattern.CorrelateBy = correlate
 	if p.threshold == 0 {
 		p.threshold = 1
 	}
@@ -126,7 +131,7 @@ func Compile(name string, spec api.EventRuleSpec) (Program, error) {
 	case "throttle":
 		p.delay = fallback(p.spec.Pattern.Interval, p.spec.Pattern.Duration)
 	case "absence":
-		if !token(p.spec.Pattern.Expected, 128) {
+		if !token(p.spec.Pattern.Expected, 128) || p.spec.Pattern.Trigger == "" && p.spec.Pattern.Topic == "" {
 			return Program{}, errors.New("absence needs an expected topic")
 		}
 		p.delay = fallback(p.spec.Pattern.Duration)
