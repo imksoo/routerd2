@@ -117,6 +117,19 @@ control再起動後に再試行し、元eventを重複公開しない。missing 
 [実TCP・再起動・DB失敗の証跡](evidence/2026-10-24-health-protocol-events.md) を参照。
 [永久削除後の回収と新旧比較](evidence/2026-10-24-health-retirement.md) に後続の検証を記録する。
 
+宣言を残した条件inactiveのHealth queueも、workerの選択bindingとfresh supervisor上のhealth processが
+両方ない場合に回収する。回収中はruntimeのmodule reconcile排他を保持して再有効化を防ぎ、
+現在factを受理する状態mutexは保持しない。既にreconcile中ならcontextの期限まで待ち、
+期限切れは回収失敗として可視化する。毎回TryLockで黙って回収を飛ばす経路は使わない。
+宣言済みqueueは空になっても所有登録を保持し、将来のworkerが同じqueueを使える。
+全候補にhealth bindingが選択されている場合は回収を明示的に拒否して終了し、reconcile排他や
+supervisor IOを使わない。停止候補がある場合だけ、期限付きの所有確認と排他回収を行う。
+`stopped_pending_relays` は検出済みの未回収件数を返し、複数pageの途中は不健全表示を維持する。
+排他回収で空を確認したqueueだけが元workerの配送errorを解除する。reconcile排他の待機・supervisor照会中はcontrolのsource lockも解放し、通常の履歴送信を止めない。
+callbackでsource lockを取れない場合は次回へ回し、設定更新との逆順ロックを防ぐ。両方を取った後に
+正本とregistryを再読し、所有観測にない名前のpendingは解除しない。設定/revisionは変更せず、
+停止中の現在instanceは不在、Derived入力はunknownのまま。新しい現在値は再有効化したworkerから受理する。
+
 `/v1/health` の `event_rules` はrevision、ruleごとのid/lifetime/cursor/versionと
 出力outboxのpending有無、bounded errorを返す。保存/publication失敗時はhealthを不健全にし、
 正本の設定と未処理状態を保持して再試行する。API応答が503でも、設定がrollbackされたと解釈しない。

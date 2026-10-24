@@ -215,6 +215,21 @@ counts. Pending retirement and failed recovery make health unhealthy and block
 confirmation until local and registry ACKs complete. Commit can succeed while
 reporting this unhealthy status. The loop rotates eight queues per pass and
 processes one bounded publication page per queue.
+Still-declared conditional-inactive health queues are recovered under the
+runtime's module reconciliation guard, without holding its current-fact mutex.
+A selected health binding or a remaining health process blocks recovery.
+If every candidate is selected, explicit denials require no runtime operation
+guard or supervisor IO, avoiding competition with normal freshness renewal.
+An empty declared queue keeps registration for the next activation.
+`stopped_pending_relays` counts discovered stopped queues still awaiting durable
+delivery; they remain unhealthy between pages. Only an exclusively emptied
+queue clears that worker's prior delivery alarm. No other producer's alarm is
+cleared. Source/revision and unknown Derived inputs remain unchanged. The ownership
+wait and supervisor query release control source authority, so current history
+publication is not queued behind those waits. Recovery only tries the source
+lock while owning runtime reconciliation; a busy source defers that pass to
+avoid lock inversion. It reloads the registry/source under both guards, and an
+unobserved name cannot clear pending work.
 See [relay durability and limits](../protocolevents/README.md).
 
 ## Current DerivedEvent observations

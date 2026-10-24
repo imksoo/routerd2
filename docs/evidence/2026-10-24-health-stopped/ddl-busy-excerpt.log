@@ -1,0 +1,15 @@
+=== RUN   TestDaemonRetiredHealthHistoryWithoutReactivation
+    bgp_test.go:192: === RUN   TestDaemonRetiredHealthHistoryWithoutReactivation
+            health_retirement_test.go:264: 1 accepted observations delivered once after permanent removal, without producer reactivation
+        --- PASS: TestDaemonRetiredHealthHistoryWithoutReactivation (0.54s)
+        PASS
+--- PASS: TestDaemonRetiredHealthHistoryWithoutReactivation (1.57s)
+=== RUN   TestDaemonStoppedHealthHistoryWithoutReactivation
+    bgp_test.go:192: isolated protocol fixture: exit status 1
+        === RUN   TestDaemonStoppedHealthHistoryWithoutReactivation
+            health_retirement_test.go:90: database is locked (5) (SQLITE_BUSY)
+[private fixture diagnostic dump omitted]
+        --- FAIL: TestDaemonStoppedHealthHistoryWithoutReactivation (0.56s)
+        FAIL
+--- FAIL: TestDaemonStoppedHealthHistoryWithoutReactivation (0.59s)
+FAIL

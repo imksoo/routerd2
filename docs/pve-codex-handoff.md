@@ -4,7 +4,21 @@
 対象: `https://github.com/imksoo/routerd2`
 
 **継続ゴール:** 全残実装・必要試験・対象実機での利用可能性の受入まで進める。
-部分checkpointでは完了しない。最新product checkpointは `238bc58`。
+部分checkpointでは完了しない。最新product checkpointは `f5e9cc5`。
+
+宣言を残した条件inactiveのHealth queueを、workerの再有効化と排他的に回収する。
+選択binding・fresh supervisor・queue lockを確認し、宣言済みの所有登録は空になっても保持する。
+`stopped_pending_relays` は途中のpageと保存失敗を可視化し、現在instance/Derived入力を復活させない。
+所有権の待機中はcontrol source lockを解放し、設定更新と競合したcallbackは次回へ回す。
+全体check/Race/vet/static両arch build100.37秒、最終nativeは条件停止4.41秒・永久削除1.58秒・
+Derived11.88秒・二WAN Health/PBR29.89秒がPASS。固定harnessの実配送は旧238bc58が10秒timeout FAIL、
+最終f5e9cc5が2.72秒PASS。2回の停止/回収/再有効化とcontrol SIGKILL、元event内容の一致を確認した。
+最終QEMUは条件停止48.37秒・Derived97.76秒・二WAN Health/PBR91.65秒がPASS。
+関連3系統の再検証であり、全suiteの新aggregate合格とはしない。
+途中で検出したTryLockの回収見送り、control排他中の通常送信deadline、test用DDL競合の失敗と修正も保存する。
+[条件停止回収・検証・残作業](evidence/2026-10-24-health-stopped.md) を参照。全計画・実機受入は未完了。
+
+先行 `238bc58` は永久削除後の回収を追加したcheckpoint。
 
 Health queueの所有登録をworker起動前に永続化し、永久削除後に実controlが回収する経路を追加した。
 登録済みの名前だけを扱い、sourceからの削除・fresh supervisorでのworker不在・queueの排他lockを要求する。
@@ -20,7 +34,7 @@ QEMU拡張gateは113.66秒PASS。初回75秒の子fixture期限と、imageと同
 関連QEMUは二WAN Health/PBR97.30秒、管理/実SSH41.82秒、EventRule63.62秒、BFD/BGP59.82秒がPASS。
 既存の設定/journal/SSH保持・2回起動署名fallbackも120.84秒PASS。新queueの強制電源断合格とはしない。
 [永久削除後の回収・失敗・残作業](evidence/2026-10-24-health-retirement.md) を参照。
-他protocol/status provider、条件inactive時の全回収、実queueのQEMU電源断、retention/容量運用と
+当時の条件inactive回収は後続f5e9cc5で追加した。他protocol/status provider、実queueのQEMU電源断、retention/容量運用と
 全計画・対象実機受入は残る。部分checkpointでゴールやparityを完了扱いにしない。
 
 先行 `205f02f` ではHealthCheckのprobeごとの元eventをworker側のprivate WAL/FULL queueへ保存し、
@@ -103,7 +117,7 @@ read-onlyのbounded `/v1/observations` とhealthのpending/errorを追加した�
 BFD admin watchdogは2秒、control freshnessは500ms。
 [保存部・BFD方針の証跡](evidence/2026-10-24-events-clock.md) に変更経緯を保持する。
 
-未完了は他raw protocol event producer、条件inactive時の全queue回収、EventRuleの規模/全条件受入、他Derived status provider、consumer作用、federation、
+未完了は他raw protocol event producer、Health回収の全規模/遅延受入、EventRuleの規模/全条件受入、他Derived status provider、consumer作用、federation、
 retention/archive/容量alarm、一般status reference、多binary runtime/startup handoff等の全計画。
 対象機種・NIC・性能条件も未確定で、実機利用可能とはまだ判定しない。
 完了したdetached worktreeは証跡を回収して削除した。private原log/manifest・診断patchは

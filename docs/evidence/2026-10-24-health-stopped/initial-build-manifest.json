@@ -1,0 +1,44 @@
+{
+  "started_at_utc": "2026-10-24T20:13:24.825138+00:00",
+  "command": [
+    "make",
+    "check",
+    "build-linux"
+  ],
+  "exit_code": 0,
+  "elapsed_seconds": 94.04,
+  "artifacts": [
+    {
+      "architecture": "amd64",
+      "binary": "routerd",
+      "sha256": "e16b56683b78de2708b175d1e0ce21710f4671f4ca9dad6097a98e35363709d4",
+      "embedded_identity": "ROUTERD2-RELEASE-V1:c3097d412df4:END"
+    },
+    {
+      "architecture": "amd64",
+      "binary": "routerd-modules",
+      "sha256": "c5588f375360cba1b0ca53a2f50e89de9585d26a1352ff1365fd7da5e6587d7e",
+      "embedded_identity": "ROUTERD2-RELEASE-V1:c3097d412df4:END"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd",
+      "sha256": "4ec073e5c2638443086c2f97b85249b74a269d151bbf62dfb0a1d0484b4404a0",
+      "embedded_identity": "ROUTERD2-RELEASE-V1:c3097d412df4:END"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd-modules",
+      "sha256": "c6b8fdda767871563dc9922eeedbae8c938e1447362b7447340829b4326907b0",
+      "embedded_identity": "ROUTERD2-RELEASE-V1:c3097d412df4:END"
+    }
+  ],
+  "check_started_commit": "df8e93a74f5c35aca5b6e793f56e08655851e774",
+  "check_started_dirty": false,
+  "completed_commit": "c3097d412df4784c0e46985c82d5651a4fbe1d79",
+  "completed_dirty": false,
+  "changes_during_check": [
+    "internal/integration/health_retirement_test.go"
+  ],
+  "source_note": "Only the integration fixture TCP accept helper changed during the command; unit/Race/vet product sources were unchanged. Final integration harness and guest are rebuilt separately."
+}

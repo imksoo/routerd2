@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "purpose": "isolated-daemon-derived-integration",
+  "suite": "daemon-derived",
+  "required_test": "TestDaemonDerivedHealthCurrentStatusAndDurability",
+  "kernel_release": "6.18.58-0-virt",
+  "kernel_sha256": "17fbd3efd16f2e7cb1b945f06423b37399ba7d5ac8cdd3665e7f13f363500e85",
+  "initializer_sha256": "c1183a8700324916d763a72705432811c6dc3dfea15004c62cae8bebfc022126",
+  "test_binary_sha256": "f49bce2c2821d67db870379d89dd307e32cd220afc72a2157f4f6075212e8a41",
+  "binary_sha256": {
+    "/test/bin/routerd": "5bd689cd0dfbbf17f9a904abc092fd154ceb1e54056a689c89dd24f6147d41df",
+    "/test/bin/routerd-modules": "9f5d33d1d7984621d07829df4b29c9c4b40292a089f91a047f9dfe633f9c4a1d"
+  },
+  "source_image_manifest_sha256": "a1df58dc193d6f6f5a361b9b630e9fb106b76a3e3089239da2185f812d265b43",
+  "source_initramfs_sha256": "c6b0ac5a7e6dc64a186ab595586f27bed87440083dc7a13cf0db9df8a3d2c729",
+  "host_network_access": false,
+  "result": "failed",
+  "guest_memory_mib": 512,
+  "test_scratch": {
+    "mountpoint": "/tmp",
+    "filesystem": "tmpfs",
+    "size_bytes": 67108864
+  },
+  "initramfs_sha256": "a68f46661abbeaf369398f0041b2c02a00eedc69c35e85fd46c472a365447735",
+  "error": "daemon-derived test failed in guest",
+  "duration_seconds": 51.55,
+  "qemu_exit_status_before_cleanup": null
+}

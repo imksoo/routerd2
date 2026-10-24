@@ -1,0 +1,43 @@
+{
+  "source_commit": "675ab37962ef789d635240cac6ccbf0c91ac2d13",
+  "dirty_document_paths": [
+    "docs/implementation-plan.md",
+    "docs/pve-codex-handoff.md",
+    "docs/resource-program.md",
+    "internal/control/README.md",
+    "internal/protocolevents/README.md"
+  ],
+  "product_sources_clean": true,
+  "started_at_utc": "2026-10-24T20:21:43.816419+00:00",
+  "command": [
+    "make",
+    "check",
+    "build-linux",
+    "RELEASE_ID=675ab37962ef"
+  ],
+  "exit_code": 0,
+  "elapsed_seconds": 99.04,
+  "completed_commit": "675ab37962ef789d635240cac6ccbf0c91ac2d13",
+  "artifacts": [
+    {
+      "architecture": "amd64",
+      "binary": "routerd",
+      "sha256": "b3e75cd8c1fc76e1c4aafbf765033fdcbad17edbb8eb1c55a482e77b85f5166f"
+    },
+    {
+      "architecture": "amd64",
+      "binary": "routerd-modules",
+      "sha256": "2c4a54cc318c9f30b1510c6bd84cce983f2d8b55b670ed5209c805487265848b"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd",
+      "sha256": "39098cecdca133d6bd6f1f54b8719a907c74ed069fe3ab39bf71ff93e2ab3b47"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd-modules",
+      "sha256": "12e4412b2ca2c1227f671d17e21c34dd8dcce7ae83053a5bead8579f6427f9f7"
+    }
+  ]
+}

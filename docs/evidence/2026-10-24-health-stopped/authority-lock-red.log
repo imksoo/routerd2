@@ -1,0 +1,8 @@
+--- FAIL: TestRecoveryOwnershipWaitDoesNotBlockControlAuthority (0.77s)
+    --- FAIL: TestRecoveryOwnershipWaitDoesNotBlockControlAuthority/available_source (0.48s)
+        protocol_recovery_lock_test.go:73: ownership wait holds control authority and blocks current history publication
+    --- FAIL: TestRecoveryOwnershipWaitDoesNotBlockControlAuthority/busy_source (0.30s)
+        protocol_recovery_lock_test.go:73: ownership wait holds control authority and blocks current history publication
+FAIL
+FAIL    github.com/imksoo/routerd2/internal/control     0.803s
+FAIL

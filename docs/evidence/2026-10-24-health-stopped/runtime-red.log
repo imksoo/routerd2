@@ -1,0 +1,5 @@
+# github.com/imksoo/routerd2/internal/runtimeplan [github.com/imksoo/routerd2/internal/runtimeplan.test]
+internal/runtimeplan/stopped_health_test.go:32:12: r.WithStoppedHealthRelays undefined (type *Runtime has no field or method WithStoppedHealthRelays)
+internal/runtimeplan/stopped_health_test.go:62:14: r.WithStoppedHealthRelays undefined (type *Runtime has no field or method WithStoppedHealthRelays)
+FAIL    github.com/imksoo/routerd2/internal/runtimeplan [build failed]
+FAIL

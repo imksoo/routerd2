@@ -11552,6 +11552,47 @@
       "fixture_checkpoint": "301d8a03c7f2aaf879e62a269c14fbb1b09c6fa4",
       "additional_unit_checkpoint": "4467c384042eb896eca8149730fed810dc56deec",
       "parity_flags_unchanged": true
+    },
+    {
+      "id": "health-declared-stopped-relay-recovery",
+      "date": "2026-10-24",
+      "status": "partial_core_implementation_with_live_daemon_acceptance",
+      "code_checkpoint": "f5e9cc5f500bc77003d19d73267cfaa9b7455942",
+      "work_packages": [
+        "CORE-03",
+        "CORE-04",
+        "NET-01"
+      ],
+      "evidence": "docs/evidence/2026-10-24-health-stopped.md",
+      "implemented": [
+        "Registered conditional-inactive Health queues drain under module reconciliation ownership, selected-binding and fresh supervisor absence plus exclusive store lock; declared ownership survives empty drainage for future activation",
+        "Original historical event content and IDs never restore current facts, change source/revision or authorize effects; stale current notifications remain fenced",
+        "Bounded stopped_pending_relays health preserves unfinished pages and storage errors, and only an exclusively emptied queue clears its own former worker alarm",
+        "Context-bounded semaphore acquisition queues recovery behind reconciliation rather than silently skipping busy ownership checks; fact mutex stays free during historical IO",
+        "Runtime ownership wait and supervisor observation release control source authority; callback only tries source authority and reloads registry/current source, avoiding both publication blockage and inverse lock order; unobserved names retain pending errors",
+        "When every candidate has a selected health binding, return explicit denials without taking module ownership or querying supervisor; potential stopped owners retain bounded acquisition and all fences"
+      ],
+      "validation": [
+        "Old registered-but-declared queue delivery unit FAIL and hash-verified 238bc58 real daemon missing-delivery timeout in 10s; same minimal harness passes df8e93a in 2.65s",
+        "Initial df8e93a full check/build passed 94.04s but first stopped QEMU failed 37.48s at stopped health count observation; preserved separately from final acceptance",
+        "Local contention tests reproduce silent TryLock skip as FAIL, then prove bounded acquisition, deadline and fact mutex availability under Race",
+        "Intermediate 675ab37 new stopped QEMU passes 56.81s, but existing Derived QEMU fails 51.55s with repeated normal publication deadlines; not accepted as final product success",
+        "Local actual Unix supervisor contention test reproduces source authority held across ownership wait; source-available and source-busy cases both FAIL then pass under Race; unobserved ownership error-clearing FAIL fixed",
+        "Intermediate 04a4d12 full check/native passed but Derived QEMU failed 63.54s at post-SIGCONT freshness recovery; selected-worker contention was reproduced locally as FAIL before adding denial without ownership competition",
+        "Final f5e9cc5 make check build-linux with fixed release ID: unit/Python14/Race/vet/static amd64-arm64 pass 100.37s; only documentation paths dirty and start/end commit identical; native ELF pair exactly matches final checked amd64 artifacts",
+        "Final real-daemon Race harness: stopped/recovery/reactivation twice across control SIGKILL 4.41s, permanent removal 1.58s, full Derived 11.88s, independent two-WAN real TCP/UDP/PCAP failover and rollback 29.89s all pass",
+        "Same minimal actually-unpublished-ID counterfactual harness: prior 238bc58 fails delivery in 10s, final f5e9cc5 passes 2.72s",
+        "Final Derived QEMU passes 97.76s including protocol/Derived/EventRule durability, worker/control recovery, stale notices, freshness expiry/recovery, target/registry failure and permanent retirement",
+        "Final independent two-WAN Health/PBR QEMU passes 91.65s with real TCP/UDP, packet capture, worker recovery, stale notices, expiry and confirmed rollback",
+        "Final stopped Health QEMU passes 48.37s: declared source unchanged, original contents/IDs delivered exactly once across control SIGKILL and two stop/recovery/reactivation cycles, no old current assertion; three related suites are not a full aggregate"
+      ],
+      "remaining": [
+        "Other raw protocol producers and status providers, structured fields and DerivedEvent chaining",
+        "Abrupt QEMU power loss/reboot of the live relay queue, product-version migration and full database rollback contract",
+        "Retention/archive/capacity alarms, filesystem-wide budgets, scale/latency and long-running durability qualification",
+        "Privileged effects, idempotency, federation, full work-package and physical/NIC/performance acceptance"
+      ],
+      "parity_flags_unchanged": true
     }
   ],
   "delivery_goal": {

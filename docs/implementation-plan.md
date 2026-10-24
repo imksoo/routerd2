@@ -7,7 +7,20 @@
 部分checkpointでゴールを完了にせず、実装・検証・未検証と証跡を更新する。
 対象機種・NIC・性能条件の確認と並行して、独立して進められる実装・隔離VM検証を続ける。
 
-最新product checkpoint `238bc58` では、Health queueの所有登録をworker起動前に永続化し、
+最新product checkpointは `f5e9cc5`。
+宣言を残した条件inactiveのHealth queueを、workerの再有効化と排他的に回収する。
+選択binding・fresh supervisor・queue lockを確認し、宣言済みの所有登録は空になっても保持する。
+`stopped_pending_relays` は途中のpageと保存失敗を可視化し、現在instance/Derived入力を復活させない。
+所有権の待機中はcontrol source lockを解放し、設定更新と競合したcallbackは次回へ回す。
+全体check/Race/vet/static両arch build100.37秒、最終nativeは条件停止4.41秒・永久削除1.58秒・
+Derived11.88秒・二WAN Health/PBR29.89秒がPASS。固定harnessの実配送は旧238bc58が10秒timeout FAIL、
+最終f5e9cc5が2.72秒PASS。2回の停止/回収/再有効化とcontrol SIGKILL、元event内容の一致を確認した。
+最終QEMUは条件停止48.37秒・Derived97.76秒・二WAN Health/PBR91.65秒がPASS。
+関連3系統の再検証であり、全suiteの新aggregate合格とはしない。
+途中で検出したTryLockの回収見送り、control排他中の通常送信deadline、test用DDL競合の失敗と修正も保存する。
+[条件停止回収・検証・残作業](evidence/2026-10-24-health-stopped.md) を参照。全計画・実機受入は未完了。
+
+先行product checkpoint `238bc58` では、Health queueの所有登録をworker起動前に永続化し、
 永久削除後に登録済みqueueだけを実controlが回収する経路を追加した。
 source削除・supervisorでのworker不在・排他store lockを要求し、target保存→local ACK→空queueの登録解除を行う。
 missing/foreign状態を空で置換/採用せず、元の観測時刻/ID/内容を保ち、現在factを復元しない。
@@ -19,7 +32,7 @@ QEMU拡張gate113.66秒PASS。初回の75秒子fixture期限とrootfs容量不�
 関連QEMUは二WAN Health/PBR97.30秒・管理/実SSH41.82秒・EventRule63.62秒・BFD/BGP59.82秒がPASS。
 既存の設定/journal/SSH保持と2回起動署名fallbackも120.84秒PASS。新queueの強制電源断とは別に扱う。
 [回収経路・失敗の証跡](evidence/2026-10-24-health-retirement.md) を参照。
-他protocol/status provider、条件inactive時の全回収、live queueのQEMU電源断、retention/規模/実機受入は残る。
+当時の条件inactive回収は後続f5e9cc5で追加した。他protocol/status provider、live queueのQEMU電源断、retention/規模/実機受入は残る。
 
 先行product checkpoint `205f02f` ではHealthCheckのprobeごとの元eventをworker側のprivateな
 WAL/FULL queueへ保存し、source-fencedな実control受付からdurable journal/EventRuleへ接続した。

@@ -1,0 +1,9 @@
+=== RUN   TestDaemonStoppedHealthHistoryWithoutReactivation
+    bgp_test.go:192: isolated protocol fixture: exit status 1
+        === RUN   TestDaemonStoppedHealthHistoryWithoutReactivation
+            health_retirement_test.go:169: condition timed out after 10s
+[private fixture diagnostic dump omitted]
+        --- FAIL: TestDaemonStoppedHealthHistoryWithoutReactivation (11.10s)
+        FAIL
+--- FAIL: TestDaemonStoppedHealthHistoryWithoutReactivation (11.13s)
+FAIL

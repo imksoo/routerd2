@@ -1,0 +1,30 @@
+{
+  "scope": "three related suites, not a full aggregate",
+  "product_checkpoint": "f5e9cc5f500bc77003d19d73267cfaa9b7455942",
+  "passed": [
+    {
+      "suite": "daemon-stopped-health",
+      "result": "passed",
+      "duration_seconds": 48.37,
+      "manifest": "qemu-stopped-health-manifest.json"
+    },
+    {
+      "suite": "daemon-derived",
+      "result": "passed",
+      "duration_seconds": 97.76,
+      "manifest": "qemu-derived-manifest.json"
+    },
+    {
+      "suite": "daemon-health-pbr",
+      "result": "passed",
+      "duration_seconds": 91.65,
+      "manifest": "qemu-health-pbr-manifest.json"
+    }
+  ],
+  "failed_separately": [
+    "failed-trylock-qemu-manifest.json",
+    "failed-authority-qemu-manifest.json",
+    "failed-scheduling-qemu-manifest.json"
+  ],
+  "intermediate_only": "intermediate-stopped-qemu-manifest.json"
+}

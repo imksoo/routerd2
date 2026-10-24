@@ -1,0 +1,3 @@
+ok      github.com/imksoo/routerd2/internal/runtimeplan 7.465s
+ok      github.com/imksoo/routerd2/internal/control     45.502s
+ok      github.com/imksoo/routerd2/internal/protocolevents      (cached)
