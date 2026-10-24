@@ -32,9 +32,9 @@ def phases():
     third = dict(copy.deepcopy(second), phase="recovered", boot_id="1f7b18d0-0fbb-4c40-b281-ddac308491ce",
                  registered=0, retiring=0, health_error=False)
     return [
-        {"phase": "produce", "termination": "SIGKILL", "qemu_exit_status": -9, "witness": first},
-        {"phase": "registry", "termination": "SIGKILL", "qemu_exit_status": -9, "witness": second},
-        {"phase": "recovered", "termination": "poweroff", "qemu_exit_status": 0, "witness": third},
+        {"phase": "produce", "result": "passed", "termination": "SIGKILL", "qemu_exit_status": -9, "witness": first},
+        {"phase": "registry", "result": "passed", "termination": "SIGKILL", "qemu_exit_status": -9, "witness": second},
+        {"phase": "recovered", "result": "passed", "termination": "poweroff", "qemu_exit_status": 0, "witness": third},
     ]
 
 
@@ -59,6 +59,13 @@ class PowerWitnessTests(unittest.TestCase):
                         POWER.check_phases(data)
         for data in (phases()[:2], phases()[1:], phases()[::-1]):
             with self.assertRaises(RuntimeError):
+                POWER.check_phases(data)
+
+    def test_failed_phase_cannot_be_hidden_by_a_valid_witness(self):
+        for index in range(3):
+            data = phases()
+            data[index]["result"] = "failed"
+            with self.subTest(index=index), self.assertRaises(RuntimeError):
                 POWER.check_phases(data)
 
     def test_current_authority_boot_or_pending_work_cannot_be_forged(self):
