@@ -157,6 +157,19 @@ func TestDaemonHealthPBRFailoverAndRecovery(t *testing.T) {
 		}
 	}
 	primary := func() bool { return healthPBRPrimary(t) }
+	inactiveReason := func(want string) bool {
+		t.Helper()
+		var page runtimeplan.ResourceObservationPage
+		if err := f.control.Do(ctx, "GET", "/v1/services/resources", nil, &page); err != nil {
+			t.Fatal(err)
+		}
+		for _, resource := range page.Resources {
+			if resource.ID == "primary" {
+				return !resource.State.Active && resource.State.Reason == want
+			}
+		}
+		return false
+	}
 	waitPrimary := func(want bool) {
 		t.Helper()
 		until(t, 12*time.Second, func() bool { return primary() == want })
@@ -358,7 +371,7 @@ func TestDaemonHealthPBRFailoverAndRecovery(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return uint64(clock.BoottimeNanoseconds) >= observation.ExpiresNanos && !primary()
+		return uint64(clock.BoottimeNanoseconds) >= observation.ExpiresNanos && !primary() && inactiveReason("when_indeterminate")
 	})
 	if m := module("service.health-a"); !m.Ready || m.PID != victim.PID || m.Generation != victim.Generation {
 		t.Fatal("heartbeat loss masked finite fact expiry", m)
@@ -400,7 +413,7 @@ func TestDaemonHealthPBRFailoverAndRecovery(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return uint64(clock.BoottimeNanoseconds) > observation.ObservedNanos+uint64(2500*time.Millisecond) && !primary()
+		return uint64(clock.BoottimeNanoseconds) > observation.ObservedNanos+uint64(2500*time.Millisecond) && !primary() && inactiveReason("when_indeterminate")
 	})
 	clock, err = bfd.ReadClock()
 	if err != nil || uint64(clock.BoottimeNanoseconds) >= observation.ExpiresNanos || uint64(clock.BoottimeNanoseconds)-observation.ObservedNanos <= uint64(2500*time.Millisecond) {
