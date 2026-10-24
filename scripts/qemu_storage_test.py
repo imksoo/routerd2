@@ -18,6 +18,7 @@ def witnesses():
         "release_id": STORAGE.IDENTITIES["trial"], "release_operation": "begin-boot", "pending": True,
         "config_sha256": "config", "host_key_sha256": "host", "host_key_fingerprint": "fingerprint",
         "sentinel_sha256": "sentinel",
+        "event_id": "d7b3f753ee2a52bb24261bf44a508688", "event_cursor": 1,
     }
     second = dict(first, boot_id="7bbe264e-57c0-4ee6-aa19-67c3a1d244fb",
                   release_id=STORAGE.IDENTITIES["baseline"], release_operation="boot-rollback",
@@ -47,6 +48,7 @@ class TwoBootWitnessTests(unittest.TestCase):
             "failed_boot_id": "unrelated", "pending": True, "pid": 2, "revision": 1,
             "pinned_exec_verified": False, "config_sha256": "changed",
             "host_key_sha256": "changed", "host_key_fingerprint": "changed", "sentinel_sha256": "changed",
+            "event_id": "changed", "event_cursor": 2,
         }
         for field, value in changes.items():
             with self.subTest(field=field):
@@ -54,6 +56,16 @@ class TwoBootWitnessTests(unittest.TestCase):
                 data[1]["witness"][field] = value
                 with self.assertRaises(RuntimeError):
                     STORAGE.check_witnesses(data)
+
+    def test_missing_or_malformed_publication_cannot_pass(self):
+        for phase in (0, 1):
+            for field, values in {"event_id": [None, "", "not-an-event-id"], "event_cursor": [None, 0, -1, True]}.items():
+                for value in values:
+                    with self.subTest(phase=phase, field=field, value=value):
+                        data = witnesses()
+                        data[phase]["witness"][field] = value
+                        with self.assertRaises(RuntimeError):
+                            STORAGE.check_witnesses(data)
 
 
 if __name__ == "__main__":
