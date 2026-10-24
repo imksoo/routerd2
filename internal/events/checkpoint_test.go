@@ -183,3 +183,38 @@ func TestUnreleasedPrototypeSchemaIsRejectedReadOnly(t *testing.T) {
 		t.Fatal("unsupported schema rejection modified database", err)
 	}
 }
+
+func TestStatefulCursorRollbackCannotReuseNewerRuleState(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(Options{Directory: filepath.Join(t.TempDir(), "events")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	start, err := s.Checkpoint(ctx, "bound-state")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := s.Append(ctx, testEvent("already-counted"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Transition(ctx, "bound-state", start, r.Cursor, json.RawMessage(`{"count":1}`), nil); err != nil {
+		t.Fatal(err)
+	}
+	// Recovering only a cursor must not make an old input advance a newer
+	// aggregation state. A complete DB restore still needs target deduplication.
+	if _, err = s.db.Exec(`UPDATE consumers SET cursor=0 WHERE name='bound-state'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Checkpoint(ctx, "bound-state"); !errors.Is(err, ErrConflict) {
+		t.Fatal("cursor rollback exposed newer state for replay", err)
+	}
+	if err = s.Transition(ctx, "bound-state", Checkpoint{Cursor: 0, Version: 1}, r.Cursor, json.RawMessage(`{"count":2}`), []Job{{Key: "false-threshold", Payload: json.RawMessage(`{}`)}}); !errors.Is(err, ErrConflict) {
+		t.Fatal("rolled-back input advanced state", err)
+	}
+	jobs, err := s.Pending(ctx, "bound-state", 10)
+	if err != nil || len(jobs) != 0 {
+		t.Fatal("rollback emitted an incorrect aggregate", jobs, err)
+	}
+}
