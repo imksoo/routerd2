@@ -19,7 +19,11 @@ import (
 )
 
 const BFDControlFreshness = 500 * time.Millisecond
-const bfdAdminTimeout = 500 * time.Millisecond
+
+// Forwarding eligibility is revoked before requesting the admin operation.
+// This watchdog bounds an unresponsive GoBGP operation, independently of the
+// packet/control freshness deadlines. Admin observation can lag the TCP close.
+const bfdAdminTimeout = 2 * time.Second
 
 // BFDUpdate is local transport metadata, not the control API's JSON document.
 // Received is stamped when the HTTP response completes, before any queueing.
@@ -425,6 +429,11 @@ func runBFDGate(ctx context.Context, cfg Config, input bfdInput, server peerAdmi
 	var incoming *BFDUpdate
 	var completed *bfdAdminResult
 	completions := make([]bfdAdminResult, 0, len(peers))
+	type pendingAdmin struct {
+		gate      *bfdPeerGate
+		operation string
+	}
+	operations := make([]pendingAdmin, 0, len(peers))
 	for {
 		if ctx.Err() != nil {
 			return nil
@@ -494,6 +503,7 @@ func runBFDGate(ctx context.Context, cfg Config, input bfdInput, server peerAdmi
 			}
 		}
 		control := available && now < controlDeadline
+		operations = operations[:0]
 		next := now + int64(10*time.Millisecond)
 		if controlDeadline > now {
 			next = min(next, controlDeadline)
@@ -513,14 +523,14 @@ func runBFDGate(ctx context.Context, cfg Config, input bfdInput, server peerAdmi
 				case g.enabled && (!healthy || g.forceReset):
 					g.needsWithdrawal = true
 					g.withdrawalVersion = 0
-					startBFDAdmin(ctx, server, g, "disable", now, results, readClock)
+					operations = append(operations, pendingAdmin{g, "disable"})
 				case !g.enabled && g.forceReset:
 					g.forceReset = false
 					g.minReceive = max(g.minReceive, now)
 				case !g.enabled && healthy && (!g.needsWithdrawal || view.withdrawalAccepted(address, g.withdrawalVersion)):
 					g.needsWithdrawal = false
 					g.withdrawalVersion = 0
-					startBFDAdmin(ctx, server, g, "enable", now, results, readClock)
+					operations = append(operations, pendingAdmin{g, "enable"})
 				}
 			}
 			if g.operationDeadline > now {
@@ -528,6 +538,14 @@ func runBFDGate(ctx context.Context, cfg Config, input bfdInput, server peerAdmi
 			}
 			if g.grant.Up && g.grant.DeadlineBootNanoseconds > now {
 				next = min(next, g.grant.DeadlineBootNanoseconds)
+			}
+		}
+		if len(operations) > 0 {
+			// Revoke all affected proofs in one bounded publication before any
+			// asynchronous management call can run. Avoid per-peer O(N²) walks.
+			view.publish(peers)
+			for _, operation := range operations {
+				startBFDAdmin(ctx, server, operation.gate, operation.operation, now, results, readClock)
 			}
 		}
 		view.publish(peers)

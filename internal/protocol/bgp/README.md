@@ -167,8 +167,11 @@ only enqueues Enable/Disable requests and may return success when its admin
 channel is full. The gate therefore waits for explicit `ADMIN_STATE_DOWN` and
 `SESSION_STATE_IDLE`, which follows old TCP closure in the
 [FSM](https://github.com/osrg/gobgp/blob/v4.7.0/pkg/server/fsm.go), before it can
-reenable a peer. Each admin request/acknowledgment has a 500ms context and
-BOOTTIME bound. A missing, late or failed acknowledgment aborts the worker;
+reenable a peer. Forwarding proof is revoked before the admin call is issued.
+Each admin request/acknowledgment has a separate 2s context and BOOTTIME watchdog;
+the control freshness limit remains 500ms. The ACK carries its observation time,
+so queueing after observation does not change its validity. A missing, late or
+failed acknowledgment aborts the worker;
 opposite requests are never stacked onto the asynchronous channel. BFD-bound
 peers reject multihop and enabled global/peer graceful restart, whose stale
 route behavior would conflict with the required immediate withdrawal.

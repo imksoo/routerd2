@@ -11,26 +11,69 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/netip"
 	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 )
 
-func ReadClock() (Clock, error) {
-	value, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
+type processClockReader struct {
+	identity atomic.Pointer[string]
+	mu       sync.Mutex
+	load     func() (string, error)
+}
+
+var processClock = processClockReader{load: loadKernelBootID}
+
+// ReadClock observes BOOTTIME on every call. Boot identity is immutable for
+// this process's lifetime: a kernel reboot replaces the process, including its
+// cache. Avoid filesystem I/O and allocations in BFD/admin deadline hot paths.
+func ReadClock() (Clock, error) { return processClock.Read() }
+
+func (r *processClockReader) Read() (Clock, error) {
+	id := r.identity.Load()
+	if id == nil {
+		r.mu.Lock()
+		id = r.identity.Load()
+		if id == nil {
+			value, err := r.load()
+			if err == nil && !validBootID(value) {
+				err = errors.New("invalid kernel boot ID")
+			}
+			if err != nil {
+				r.mu.Unlock()
+				return Clock{}, err
+			}
+			r.identity.Store(&value)
+			id = &value
+		}
+		r.mu.Unlock()
+	}
+	return clockForBoot(*id)
+}
+
+func loadKernelBootID() (string, error) {
+	f, err := os.Open("/proc/sys/kernel/random/boot_id")
 	if err != nil {
-		return Clock{}, err
+		return "", err
+	}
+	defer f.Close()
+	value, err := io.ReadAll(io.LimitReader(f, 65))
+	if err != nil {
+		return "", err
 	}
 	id := strings.TrimSpace(string(value))
-	if !validBootID(id) {
-		return Clock{}, errors.New("invalid kernel boot ID")
+	if len(value) > 64 || !validBootID(id) {
+		return "", errors.New("invalid kernel boot ID")
 	}
-	return clockForBoot(id)
+	return id, nil
 }
 
 func clockForBoot(id string) (Clock, error) {

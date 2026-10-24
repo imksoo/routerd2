@@ -88,6 +88,12 @@ loss of successful control observations for 500 milliseconds also removes the
 grant. This is bounded local IPC polling, not an Internet probe. A BGP worker
 can bind at most 64 peers to BFD in this version.
 
+Forwarding proof is revoked before requesting the asynchronous GoBGP admin
+operation. Its acknowledgment has a separate 2-second watchdog; this does not
+renew either the packet deadline or the 500-millisecond control freshness.
+Recovery waits for Down/Idle, accepted withdrawal, and a new packet after the
+close. A missing or failed admin acknowledgment still terminates the worker.
+
 The BGP route snapshot records which BFD source identity and Down counter the
 session gate actually acknowledged. The controller requires a matching proof
 and live BFD receive deadline before projecting a learned route. A coalesced
