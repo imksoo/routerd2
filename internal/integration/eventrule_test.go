@@ -4,10 +4,12 @@ package integration
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"syscall"
 	"testing"
 	"time"
@@ -27,7 +29,8 @@ func TestDaemonEventRuleDurabilityAndLifecycle(t *testing.T) {
 	ctx := context.Background()
 	count := api.EventRuleSpec{Pattern: api.EventRulePatternSpec{Operator: "count", Topic: "configuration.committed", Threshold: 2}, Emit: api.EventRuleEmitSpec{Topic: "routerd.fixture.count", Attributes: map[string]string{"count": "${count}"}}}
 	doc := config.Document{SchemaVersion: config.SchemaVersion, Resources: []resourceprogram.Resource{{ID: "count", EventRule: &count}}}
-	f := startFixtureDaemon(t, doc)
+	stateRoot := t.TempDir()
+	f := startFixtureDaemonAt(t, doc, stateRoot)
 	read := func() control.Health {
 		t.Helper()
 		var h control.Health
@@ -210,5 +213,31 @@ func TestDaemonEventRuleDurabilityAndLifecycle(t *testing.T) {
 			t.Fatal("history identity changed")
 		}
 	}
+	injector, err := sql.Open("sqlite", filepath.Join(stateRoot, "state", "events", "journal.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer injector.Close()
+	if _, err = injector.Exec(`PRAGMA busy_timeout=1000; CREATE TRIGGER fail_live_registry BEFORE UPDATE ON producers WHEN NEW.name='control-eventrule-lifecycles' BEGIN SELECT RAISE(ABORT,'injected live registry failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	revision := read().Revision
+	var ack control.State
+	if err = f.control.Do(ctx, "POST", "/v1/config/commit", control.CommitRequest{ExpectedRevision: revision, RequestID: "committed-with-controller-backpressure", Config: doc}, &ack); err != nil {
+		t.Fatal(err)
+	}
+	if ack.Revision != revision+1 || ack.Healthy || ack.EventRuleError == "" {
+		t.Fatal("live commit hid post-save controller failure", ack)
+	}
+	if h := read(); h.Healthy || h.EventRules.LastError == "" {
+		t.Fatal("live health hid controller failure", h)
+	}
+	if _, err = injector.Exec(`DROP TRIGGER fail_live_registry`); err != nil {
+		t.Fatal(err)
+	}
+	until(t, 10*time.Second, func() bool { return read().Healthy })
+	waitConsumed("count")
+	until(t, 10*time.Second, func() bool { return len(outputs("routerd.fixture.count")) == 3 })
+	t.Log("actual SQLite lifecycle write failure preserved the committed revision, returned unhealthy ACK/health and recovered without losing or duplicating inputs")
 	t.Log("ROUTERD_EVENTRULE_DAEMON_TEST_PASS")
 }
