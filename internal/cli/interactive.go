@@ -262,7 +262,7 @@ func (s *interactiveShell) execute(ctx context.Context, line string, out io.Writ
 		if rest == "" || rest == "candidate" {
 			return false, writeYAML(out, c.document)
 		}
-		if rest == "observations" || strings.HasPrefix(rest, "observations ") {
+		if rest == "observations" || strings.HasPrefix(rest, "observations ") || rest == "derived" || strings.HasPrefix(rest, "derived ") {
 			return false, s.session.Execute(ctx, "show "+rest, nil, out)
 		}
 		if rest == "status" || rest == "network" || strings.HasPrefix(rest, "network ") || rest == "version" || rest == "config" || rest == "services" || strings.HasPrefix(rest, "services ") || rest == "route-issues" || strings.HasPrefix(rest, "route-issues ") || rest == "logging" || rest == "running-config" || rest == "logs" || strings.HasPrefix(rest, "logs ") {
@@ -759,7 +759,7 @@ func (s *interactiveShell) complete(line string, pos int, key rune) (string, int
 	case 1:
 		switch words[0] {
 		case "show":
-			choices = []string{"status", "network", "resources", "observations", "services", "route-issues", "logging", "logs", "version", "config", "running-config"}
+			choices = []string{"status", "network", "resources", "derived", "observations", "services", "route-issues", "logging", "logs", "version", "config", "running-config"}
 			if s.candidate != nil {
 				choices = append(choices, "candidate")
 				choices = append(choices, s.pathChoices(token)...)
@@ -990,6 +990,7 @@ const interactiveHelp = `Operational commands:
   show status | network | version | config | running-config
   show network help           list paged network observation commands
   show observations [after CURSOR] [limit 1..16]
+  show derived RESOURCE_ID
   restart <module>
   configure                  start a private candidate from the current revision
   confirm                    confirm a pending confirmed commit

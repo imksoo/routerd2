@@ -22,6 +22,8 @@ import (
 
 var resourceID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$`)
 
+func ValidResourceID(id string) bool { return resourceID.MatchString(id) }
+
 // Compile validates the entire program before returning any executable output.
 // Dependency order is deterministic for the same declarations regardless of
 // their order in YAML. Payload order inside a resource (e.g. firewall rules) is
