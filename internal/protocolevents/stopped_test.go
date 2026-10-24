@@ -51,6 +51,14 @@ func TestStoppedDeclaredRelayDrainsWithoutDiscardingFutureWorkerOwnership(t *tes
 	if c.Status().StoppedPending != 1 || len(c.Recovered()) != 0 {
 		t.Fatal("partial delivery claimed complete recovery", c.Status(), c.Recovered())
 	}
+	// Ownership can have been observed before another source application adds
+	// this name. Absence from that older snapshot is unknown, not a live-worker
+	// grant, and cannot erase an already known delivery failure.
+	if err = c.Recover(ctx, []string{"wan"}, func(_ context.Context, _ []string, drain func(map[string]bool) error) error {
+		return drain(map[string]bool{})
+	}); !errors.Is(err, events.ErrCapacity) || c.Status().StoppedPending != 1 {
+		t.Fatal("unobserved ownership hid stopped pending work", c.Status(), err)
+	}
 	if err = journal.Close(); err != nil {
 		t.Fatal(err)
 	}
