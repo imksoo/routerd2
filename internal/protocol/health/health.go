@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/imksoo/routerd/pkg/api"
+	"github.com/imksoo/routerd/pkg/daemonapi"
 	old "github.com/imksoo/routerd/pkg/healthcheck"
 	"github.com/imksoo/routerd2/internal/protocol/bfd"
 )
@@ -95,14 +96,17 @@ func (c Config) Freshness() time.Duration {
 }
 
 type Snapshot struct {
-	Resource      string    `json:"resource"`
-	Interface     string    `json:"interface"`
-	BootID        string    `json:"boot_id"`
-	ObservedNanos uint64    `json:"observed_nanos"`
-	ExpiresNanos  uint64    `json:"expires_nanos"`
-	Active        bool      `json:"active"`
-	Stopped       bool      `json:"stopped,omitempty"`
-	State         old.State `json:"state"`
+	// ProbeEvent belongs to the durable observation channel, never the finite
+	// status RPC. Shutdown carries no invented probe result.
+	ProbeEvent    *daemonapi.DaemonEvent `json:"-"`
+	Resource      string                 `json:"resource"`
+	Interface     string                 `json:"interface"`
+	BootID        string                 `json:"boot_id"`
+	ObservedNanos uint64                 `json:"observed_nanos"`
+	ExpiresNanos  uint64                 `json:"expires_nanos"`
+	Active        bool                   `json:"active"`
+	Stopped       bool                   `json:"stopped,omitempty"`
+	State         old.State              `json:"state"`
 }
 
 func eligible(phase string) bool { return phase == old.PhaseHealthy || phase == old.PhaseFailing }
@@ -168,13 +172,13 @@ func RunWithProbe(ctx context.Context, raw Config, effects Effects, ready func()
 		return errors.New("health effects and probe are required")
 	}
 	var state old.State
-	publish := func(ctx context.Context, stopped bool) error {
+	publish := func(ctx context.Context, stopped bool, event *daemonapi.DaemonEvent) error {
 		clock, err := bfd.ReadClock()
 		if err != nil {
 			return err
 		}
 		ticks := uint64(clock.BoottimeNanoseconds)
-		return effects(ctx, Snapshot{Resource: c.Resource, Interface: c.Interface, BootID: clock.BootID, ObservedNanos: ticks, ExpiresNanos: ticks + uint64(c.Freshness()), Active: !stopped && eligible(state.Phase), Stopped: stopped, State: state})
+		return effects(ctx, Snapshot{ProbeEvent: event, Resource: c.Resource, Interface: c.Interface, BootID: clock.BootID, ObservedNanos: ticks, ExpiresNanos: ticks + uint64(c.Freshness()), Active: !stopped && eligible(state.Phase), Stopped: stopped, State: state})
 	}
 	if _, err := bfd.ReadClock(); err != nil {
 		return err
@@ -185,7 +189,7 @@ func RunWithProbe(ctx context.Context, raw Config, effects Effects, ready func()
 	defer func() {
 		stop, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
-		_ = publish(stop, true)
+		_ = publish(stop, true, nil)
 	}()
 	for {
 		if ctx.Err() != nil {
@@ -200,12 +204,15 @@ func RunWithProbe(ctx context.Context, raw Config, effects Effects, ready func()
 		if len(result.Message) > 4096 {
 			result.Message = result.Message[:4096]
 		}
-		evaluation := old.ApplyResult(api.Resource{}, c.spec(), state, result, time.Now())
+		resource := api.Resource{}
+		resource.Metadata.Name = c.Resource
+		evaluation := old.ApplyResult(resource, c.spec(), state, result, time.Now())
+		evaluation.Event.Time = evaluation.State.LastCheckedAt
 		state = evaluation.State
 		if len(state.History) > 20 {
 			state.History = append([]old.ProbeRecord(nil), state.History[len(state.History)-20:]...)
 		}
-		if err := publish(ctx, false); err != nil {
+		if err := publish(ctx, false, &evaluation.Event); err != nil {
 			return fmt.Errorf("health publication: %w", err)
 		}
 		timer := time.NewTimer(time.Duration(c.IntervalMillis) * time.Millisecond)

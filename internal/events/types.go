@@ -107,6 +107,13 @@ func token(value string, maximum int) bool {
 	return value != "" && len(value) <= maximum && utf8.ValidString(value) && strings.IndexFunc(value, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) < 0
 }
 
+// Validate checks the historical envelope without appending it or granting
+// authority. Relays use the same byte/field limits before durable acceptance.
+func Validate(e Event) error {
+	_, err := encodeEvent(e)
+	return err
+}
+
 func encodeEvent(e Event) ([]byte, error) {
 	if !token(e.ID, 256) || !token(e.Topic, 128) || !token(e.Source, 128) || e.ObservedAt.IsZero() || len(e.Attributes) > 64 || !e.ExpiresAt.IsZero() && e.ExpiresAt.Before(e.ObservedAt) {
 		return nil, errors.New("invalid durable event envelope")
