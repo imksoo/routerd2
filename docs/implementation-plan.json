@@ -11146,6 +11146,39 @@
         "whole implementation plan and physical hardware qualification"
       ],
       "parity_flags_unchanged": true
+    },
+    {
+      "id": "supervisor-lifetime-and-recovery",
+      "date": "2026-10-24",
+      "status": "partial_implementation_and_acceptance",
+      "code_checkpoint": "9a07f1a9a6eac386e7441a7e6448b57ba1b3049d",
+      "work_packages": [
+        "CORE-04",
+        "DIST-01"
+      ],
+      "evidence": "docs/evidence/2026-10-24-supervisor-authority.md",
+      "implemented": [
+        "Opaque supervisor process-tree identity fences protocol publications across complete supervisor replacement, before regular or independent BFD caches are seeded",
+        "Clock and resource-reason predicates distinguish producer expiry, consumer max_age and pending hold in packet acceptance",
+        "Release/storage test builders resolve go.mod-selected toolchain before GOTOOLCHAIN=local"
+      ],
+      "validation": [
+        "make check and static amd64/arm64 builds: pass",
+        "clean namespace real-daemon two-WAN gate including complete supervisor restart: pass",
+        "fixed-commit QEMU health/PBR with same scope: pass",
+        "signed PID-1 trial automatic confirmation: pass",
+        "two real QEMU boots on private ext4 disk; config/SSH/sentinel persistence and unconfirmed trial fallback: pass",
+        "actual amd64/arm64 signed pairs and CLI publication/runtime staging: pass from hash-verified private input copies; group-writable workspace rejected as designed"
+      ],
+      "remaining": [
+        "Full same-commit aggregate of all QEMU gates is running; earlier attempts stopped on toolchain selection and causal-wait assumptions",
+        "CORE-04 durable event/outbox/cursor",
+        "CORE-03 general status and remaining lifecycle",
+        "CORE-06 per-worker authority, role/peer credentials and privileged request authorization",
+        "multibinary runtime/startup store handoff and full update design",
+        "physical target and performance qualification"
+      ],
+      "parity_flags_unchanged": true
     }
   ],
   "delivery_goal": {

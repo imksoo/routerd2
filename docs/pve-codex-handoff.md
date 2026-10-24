@@ -4,13 +4,17 @@
 対象: `https://github.com/imksoo/routerd2`
 
 **継続ゴール:** 全残実装・必要試験・対象実機での利用可能性の受入まで進める。
-部分checkpointでは完了しない。最新コードcheckpointは `cb550a9`。
+部分checkpointでは完了しない。最新コードcheckpointは `9a07f1a`。
 fact leafの `max_age` と元の観測時刻の保持、条件式の `for` を実装した。
 producer期限と独立した失効、通知間のflap、timer解除、authority変更を検証し、
 `when_hold` / `ready_when_hold` と復旧待ち中のbackup TCP/UDPも実daemon・QEMUでPASS。
 [鮮度制限](evidence/2026-10-24-condition-max-age.md) と
 [安定時間の証跡](evidence/2026-10-24-condition-hold.md) を参照。
-全QEMU群・release/storageは固定commitの別worktreeで実行中。一般status reference等の残作業を継続する。
+supervisor全体の再起動にもprotocol通知をfenceする起動ごとのIDを追加した。
+実daemonで低いgenerationへの再利用・旧通知409・revision保持・TCP/UDP復旧を確認済み。
+署名trialのPID 1自動確認と、private ext4の2回起動・設定/SSH保持・未確認trial fallbackもPASS。
+[最新の証跡・制約](evidence/2026-10-24-supervisor-authority.md) を参照。
+全20 QEMU gateの同一commit aggregateは固定worktreeで実行中。一般status reference等の残作業を継続する。
 
 **PVE検証後の追記:** コードcheckpointは `7046fd5` へ進んだ。
 `make check`、権限付きHealth実ソケット（raw ICMP含む）、二WANの実daemon/TCP/UDP/PCAP、

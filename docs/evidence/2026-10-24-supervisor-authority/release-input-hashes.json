@@ -1,0 +1,18 @@
+{
+  "linux-amd64/routerd": {
+    "sha256": "1ba875725769b55e764a574685bf2cb35abded9b1cbe17e9ecd2bb0df5956149",
+    "mode": "0600"
+  },
+  "linux-amd64/routerd-modules": {
+    "sha256": "a165d4d63c26a85862de7a2e65ec2135d9589f45f6f37b16f049b18cc2c10c1a",
+    "mode": "0600"
+  },
+  "linux-arm64/routerd": {
+    "sha256": "e21eb9315b72dc9a068f15599b867ab3def300519a45d19cb29f3decc1d3c8c1",
+    "mode": "0600"
+  },
+  "linux-arm64/routerd-modules": {
+    "sha256": "6ba6af11d4defa253f7e1006575932eeac2cd80bd41afef62230817839654f2a",
+    "mode": "0600"
+  }
+}

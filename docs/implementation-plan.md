@@ -48,6 +48,12 @@ CORE-03のfact leafに `max_age` を追加した。producerの観測時刻を保
 コードcheckpointは `cb550a9`。全体check・static buildと、実daemon二WANの復旧待ちTCP/UDP・QEMUでPASS。
 [安定時間の証跡](evidence/2026-10-24-condition-hold.md) を参照。一般status reference等のCORE-03残作業は継続する。
 
+`9a07f1a` ではsupervisor起動ごとのIDで、全体再起動後の低いgenerationへ旧通知が混入するのを防ぐ。
+実daemonとQEMUの二WAN TCP/UDP、署名trialのPID 1自動確認、ext4の2回起動・fallbackを検証した。
+Go自動toolchain選択を妨げる試験builderも修正し、実amd64/arm64署名・CLI作成・runtime受理を確認した。
+[最新の証跡・未完了](evidence/2026-10-24-supervisor-authority.md) を参照。
+durable event、worker単位のauthority/権限分離、多binary runtime等を完了扱いにしない。
+
 **routerd と routerd2 は別製品である。** routerd は稼働中の機能参照元、routerd2 は未リリースの開発対象。
 現在の routerd2 の二バイナリー構成・設定書式・内部API・保存形式には利用者がいないため、後方互換性を要求しない。
 routerd2 の設定書式も新設計に合わせて変更できる。引き継ぐ routerd の機能範囲は維持する。
