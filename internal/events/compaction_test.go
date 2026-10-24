@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -418,4 +419,55 @@ func TestCompactionSharesBatchesAndAccountsUTF8IdentityBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal("reopen accounting", err)
 	}
+}
+
+func TestCompactedPayloadPagesAreReusedByNewWork(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(Options{Directory: filepath.Join(t.TempDir(), "events"), MaxJobs: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	p, err := s.ProducerCheckpoint(ctx, "producer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	large := json.RawMessage(`"` + strings.Repeat("x", 48000) + `"`)
+	if err = s.ProducerTransition(ctx, "producer", p, p.State, []Job{{Key: "old-a", Payload: large}, {Key: "old-b", Payload: large}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"old-a", "old-b"} {
+		if err = s.ProducerComplete(ctx, "producer", key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var originalPages, freeBefore, freeAfter int64
+	if err = s.db.QueryRow(`PRAGMA page_count`).Scan(&originalPages); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.db.QueryRow(`PRAGMA freelist_count`).Scan(&freeBefore); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := s.CompactCompleted(ctx, 16); err != nil || n != 2 {
+		t.Fatal(n, err)
+	}
+	if err = s.db.QueryRow(`PRAGMA freelist_count`).Scan(&freeAfter); err != nil || freeAfter <= freeBefore {
+		t.Fatal("completed payload pages were not reusable", freeBefore, freeAfter, err)
+	}
+	p, err = s.ProducerCheckpoint(ctx, "producer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	smaller := json.RawMessage(`"` + strings.Repeat("y", 32000) + `"`)
+	if err = s.ProducerTransition(ctx, "producer", p, p.State, []Job{{Key: "new-a", Payload: smaller}, {Key: "new-b", Payload: smaller}}); err != nil {
+		t.Fatal(err)
+	}
+	var newPages, freeFinal int64
+	if err = s.db.QueryRow(`PRAGMA page_count`).Scan(&newPages); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.db.QueryRow(`PRAGMA freelist_count`).Scan(&freeFinal); err != nil || newPages > originalPages || freeFinal >= freeAfter {
+		t.Fatal("new payload did not reuse reclaimed SQLite pages", originalPages, newPages, freeAfter, freeFinal, err)
+	}
+	t.Logf("large completed payloads freed %d SQLite pages; new pending jobs reused %d pages without DB growth", freeAfter-freeBefore, freeAfter-freeFinal)
 }

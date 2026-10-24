@@ -153,6 +153,7 @@ func verifyDaemonCompletedCompaction(t *testing.T, f daemonFixture, root string)
 	ctx := context.Background()
 	var storage control.EventStoreHealth
 	until(t, 12*time.Second, func() bool {
+		storage = control.EventStoreHealth{}
 		return f.control.Do(ctx, "GET", "/v1/event-store", nil, &storage) == nil && storage.Capacity != nil && storage.Capacity.Tombstones.Rows >= 2
 	})
 	db, err := sql.Open("sqlite", filepath.Join(root, "state", "events", "journal.sqlite3"))
@@ -185,6 +186,7 @@ func verifyDaemonCompletedCompaction(t *testing.T, f daemonFixture, root string)
 		t.Fatal(err)
 	}
 	until(t, 10*time.Second, func() bool {
+		storage = control.EventStoreHealth{}
 		return f.control.Do(ctx, "GET", "/v1/event-store", nil, &storage) == nil && storage.CompactionError != "" && storage.LastError != ""
 	})
 	var h control.Health
@@ -195,6 +197,7 @@ func verifyDaemonCompletedCompaction(t *testing.T, f daemonFixture, root string)
 		t.Fatal(err)
 	}
 	until(t, 10*time.Second, func() bool {
+		storage = control.EventStoreHealth{}
 		return f.control.Do(ctx, "GET", "/v1/event-store", nil, &storage) == nil && storage.CompactionError == "" && f.control.Do(ctx, "GET", "/v1/health", nil, &h) == nil && h.Healthy
 	})
 	var before supervisor.Status
