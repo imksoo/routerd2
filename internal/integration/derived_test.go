@@ -188,18 +188,36 @@ func TestDaemonDerivedHealthCurrentStatusAndDurability(t *testing.T) {
 	if err := syscall.Kill(victim.PID, syscall.SIGSTOP); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = syscall.Kill(victim.PID, syscall.SIGCONT) }()
+	healthStopped := true
+	defer func() {
+		if healthStopped {
+			_ = syscall.Kill(victim.PID, syscall.SIGCONT)
+		}
+	}()
 	var frozen health.Snapshot
 	if err := json.Unmarshal(instance().Snapshot, &frozen); err != nil {
 		t.Fatal(err)
 	}
 	until(t, 10*time.Second, func() bool { v := view("fresh"); return v.State.Asserted == nil && v.State.Phase == "Inactive" })
-	if v := view("derived"); v.ObservedNanos != 0 && v.ObservedNanos != frozen.ObservedNanos {
-		t.Fatal("polling manufactured a new observation time", v.ObservedNanos, frozen.ObservedNanos)
-	}
+	until(t, 5*time.Second, func() bool {
+		before := instance()
+		v := view("derived")
+		after := instance()
+		if before.Sequence != after.Sequence {
+			return false
+		}
+		if err := json.Unmarshal(after.Snapshot, &frozen); err != nil {
+			t.Fatal(err)
+		}
+		if v.ObservedNanos != 0 && v.ObservedNanos != frozen.ObservedNanos {
+			t.Fatal("polling manufactured a new observation time", v.ObservedNanos, frozen.ObservedNanos)
+		}
+		return true
+	})
 	if err := syscall.Kill(victim.PID, syscall.SIGCONT); err != nil {
 		t.Fatal(err)
 	}
+	healthStopped = false
 	until(t, 10*time.Second, func() bool { v := view("fresh"); return v.State.Asserted != nil && *v.State.Asserted })
 	stale := healthPBRUpdate(instance())
 	restart("service.wan")
