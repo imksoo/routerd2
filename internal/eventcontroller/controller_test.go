@@ -18,6 +18,10 @@ var epoch = time.Date(2026, 10, 24, 0, 0, 0, 0, time.UTC)
 func declaration(t *testing.T, operator string, threshold int) resourceprogram.EventRule {
 	t.Helper()
 	spec := api.EventRuleSpec{Pattern: api.EventRulePatternSpec{Operator: operator, Topic: "fixture.input", Threshold: threshold, Duration: "1s"}, Emit: api.EventRuleEmitSpec{Topic: "fixture.output", Attributes: map[string]string{"count": "${count}"}}}
+	if operator == "absence" {
+		spec.Pattern.Trigger = "fixture.input"
+		spec.Pattern.Expected = "fixture.expected"
+	}
 	p, err := resourceprogram.Compile(resourceprogram.Program{SchemaVersion: resourceprogram.SchemaVersion, Resources: []resourceprogram.Resource{{ID: "rule", EventRule: &spec}}})
 	if err != nil {
 		t.Fatal(err)
