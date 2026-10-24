@@ -117,7 +117,12 @@ func (r *Runtime) recordGuardGrantLocked(u serviceconfig.Update, now time.Time) 
 // conditionFactsLocked adapts already validated protocol messages and a fresh
 // supervisor observation into one finite fact snapshot. Workers cannot select
 // their keys, activate producers, or publish generic arbitrary facts.
-func (r *Runtime) conditionFactsLocked(source config.Document, revision uint64, now time.Time) (resourceprogram.FactSnapshot, error) {
+func (r *Runtime) conditionFactsLocked(source config.Document, revision uint64, now time.Time) (result resourceprogram.FactSnapshot, resultErr error) {
+	defer func() {
+		if resultErr == nil {
+			resultErr = r.observeEventRulesLocked(source, result)
+		}
+	}()
 	if revision != r.revision || !now.Before(r.guardUntil) {
 		return resourceprogram.FactSnapshot{}, nil
 	}

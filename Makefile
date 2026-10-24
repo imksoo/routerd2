@@ -17,7 +17,7 @@ QEMU_SSH_KEY ?=
 LDFLAGS = -s -w -X github.com/imksoo/routerd2/internal/buildinfo.Identity=ROUTERD2-RELEASE-V1:$(RELEASE_ID):END
 BUILD_ARGS = --build-arg GO_VERSION=$(GO_VERSION) --build-arg ALPINE_VERSION=$(ALPINE_VERSION) --build-arg RELEASE_ID=$(RELEASE_ID)
 
-.PHONY: help fmt fmt-check test test-dependencies test-tools race vet check check-health-pbr licenses build build-linux release-built-test container container-multi container-smoke apk image qemu-smoke qemu-network qemu-wireguard qemu-ra-dns qemu-daemon qemu-daemon-aftr qemu-protocols qemu-release-boot qemu-storage clean
+.PHONY: help fmt fmt-check test test-dependencies test-tools race vet check check-health-pbr licenses build build-linux release-built-test container container-multi container-smoke apk image qemu-smoke qemu-network qemu-wireguard qemu-ra-dns qemu-daemon qemu-daemon-aftr qemu-eventrule qemu-protocols qemu-release-boot qemu-storage clean
 
 help:
 	@printf '%s\n' \
@@ -36,6 +36,7 @@ help:
 	  'make qemu-daemon       Run the two-binary RA daemon gate in QEMU' \
 	  'make qemu-daemon-aftr  Run the two-binary AFTR daemon gate in QEMU' \
 	  'make qemu-protocols    Verify native protocols and real daemon recovery in QEMU' \
+	  'make qemu-eventrule    Verify durable rules and worker/source recovery in QEMU' \
 	  'make qemu-release-boot Verify signed PID 1 selection and confirmation in QEMU' \
 	  'make qemu-storage      Verify persistent state and signed fallback across two boots' \
 	  'make container         Build the scratch OCI runtime image' \
@@ -123,9 +124,12 @@ qemu-daemon-aftr:
 	$(PYTHON) scripts/qemu-network.py --suite daemon-aftr --go '$(GO)' --image-dir $(IMAGE_DIR) --timeout $(QEMU_DAEMON_TIMEOUT)
 
 qemu-protocols:
-	@set -eu; for suite in daemon-resource-program daemon-health-pbr daemon-management daemon-dhcp-dns daemon-legacy-dhcp-dns daemon-bgp daemon-bfd dhcp dhcp-server vrrp ra-client aftr bfd; do \
+	@set -eu; for suite in daemon-resource-program daemon-health-pbr daemon-management daemon-eventrule daemon-dhcp-dns daemon-legacy-dhcp-dns daemon-bgp daemon-bfd dhcp dhcp-server vrrp ra-client aftr bfd; do \
 	  $(PYTHON) scripts/qemu-network.py --suite "$$suite" --go '$(GO)' --image-dir $(IMAGE_DIR); \
 	done
+
+qemu-eventrule:
+	$(PYTHON) scripts/qemu-network.py --suite daemon-eventrule --go '$(GO)' --image-dir $(IMAGE_DIR)
 
 qemu-release-boot:
 	$(PYTHON) internal/releaseboot/testdata/qemu-release-boot.py --go '$(GO)' --image-dir $(IMAGE_DIR) --output dist/release-boot-test --timeout $(QEMU_RELEASE_TIMEOUT)

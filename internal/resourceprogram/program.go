@@ -4,6 +4,7 @@
 package resourceprogram
 
 import (
+	"github.com/imksoo/routerd/pkg/api"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
@@ -49,6 +50,7 @@ type Resource struct {
 	VRRPGuard  *network.VRRPGuard     `json:"vrrp_guard,omitempty"`
 	WireGuard  *network.WireGuard     `json:"wireguard,omitempty"`
 	Service    *serviceconfig.Service `json:"service,omitempty"`
+	EventRule  *api.EventRuleSpec     `json:"event_rule,omitempty"`
 }
 
 // Address owns one host/prefix and its options independently of interface
@@ -63,8 +65,17 @@ type Address struct {
 // Native is an internal engine input, not a serialized configuration accepted
 // by the configuration API. It separates source declarations from projections.
 type Native struct {
-	Network  network.Desired         `json:"network"`
-	Services []serviceconfig.Service `json:"services,omitempty"`
+	Network    network.Desired         `json:"network"`
+	Services   []serviceconfig.Service `json:"services,omitempty"`
+	EventRules []EventRule             `json:"event_rules,omitempty"`
+}
+
+// EventRule is an internal, owned declaration. Identity binds its complete
+// resource lifecycle controls, rather than unrelated source revisions.
+type EventRule struct {
+	ID       string            `json:"id"`
+	Identity string            `json:"identity"`
+	Spec     api.EventRuleSpec `json:"spec"`
 }
 
 type Plan struct {
@@ -105,6 +116,7 @@ func (r Resource) kind() (string, int) {
 		{"firewall", r.Firewall != nil}, {"ds_lite", r.DSLite != nil},
 		{"vrrp_guard", r.VRRPGuard != nil}, {"wireguard", r.WireGuard != nil},
 		{"service", r.Service != nil},
+		{"event_rule", r.EventRule != nil},
 	} {
 		if v.set {
 			kind, count = v.name, count+1

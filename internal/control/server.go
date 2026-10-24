@@ -215,7 +215,7 @@ func Serve(ctx context.Context, dir, stateDir, bootstrap string, ready func()) e
 	eventDone := make(chan struct{})
 	go func() {
 		defer close(eventDone)
-		ticker := time.NewTicker(time.Second)
+		ticker := time.NewTicker(200 * time.Millisecond)
 		defer ticker.Stop()
 		for {
 			flushCtx, cancel := context.WithTimeout(monitorCtx, 2*time.Second)
@@ -223,6 +223,12 @@ func Serve(ctx context.Context, dir, stateDir, bootstrap string, ready func()) e
 			cancel()
 			if err != nil && monitorCtx.Err() == nil {
 				slog.Error("durable configuration event delivery failed", "error", err)
+			}
+			ruleCtx, cancelRules := context.WithTimeout(monitorCtx, 2*time.Second)
+			ruleErr := e.ProcessEventRules(ruleCtx, time.Now())
+			cancelRules()
+			if ruleErr != nil && monitorCtx.Err() == nil {
+				slog.Error("durable event rule processing failed", "error", ruleErr)
 			}
 			select {
 			case <-monitorCtx.Done():

@@ -20,6 +20,10 @@ import (
 func FromNative(native Native) Program {
 	program := Program{SchemaVersion: SchemaVersion, Resources: []Resource{}}
 	add := func(r Resource) { program.Resources = append(program.Resources, r) }
+	for _, rule := range native.EventRules {
+		spec := rule.Spec
+		add(Resource{ID: rule.ID, EventRule: &spec})
+	}
 	for _, original := range native.Network.Links {
 		v := original
 		add(Resource{ID: "link/" + v.Name, Link: &v})

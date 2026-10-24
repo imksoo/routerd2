@@ -62,6 +62,13 @@ SUITES = {
         "commands": True,
         "description": "two-binary daemon SSH configuration and recovery",
     },
+    "daemon-eventrule": {
+        "package": "./internal/integration", "binary": "daemon.test",
+        "test": "TestDaemonEventRuleDurabilityAndLifecycle",
+        "marker": "ROUTERD_EVENTRULE_DAEMON_TEST", "timeout": 180,
+        "commands": True,
+        "description": "durable EventRule count/timer, worker recovery and source lifecycle",
+    },
     "daemon-resource-program": {
         "package": "./internal/integration", "binary": "daemon.test",
         "test": "TestDaemonResourceProgramLifecycleAndRecovery",

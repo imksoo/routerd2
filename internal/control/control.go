@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/imksoo/routerd2/internal/config"
+	"github.com/imksoo/routerd2/internal/eventcontroller"
 	"github.com/imksoo/routerd2/internal/events"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/network"
@@ -70,6 +71,7 @@ type State struct {
 	ConfigDigest                string `json:"config_digest,omitempty"`
 	ConfigBytes                 int    `json:"config_bytes,omitempty"`
 	EventJournalError           string `json:"event_journal_error,omitempty"`
+	EventRuleError              string `json:"event_rule_error,omitempty"`
 }
 
 type Event struct {
@@ -120,6 +122,7 @@ type Engine struct {
 	runtime      *runtimeplan.Runtime
 	journal      *events.Store
 	eventFlushMu sync.Mutex
+	rules        *eventcontroller.Controller
 }
 
 func New(store *config.Store, current config.Committed, n Network) *Engine {
@@ -134,7 +137,7 @@ func (e *Engine) State() State {
 	e.mu.Lock()
 	s := e.state
 	e.mu.Unlock()
-	if s.EventJournalError != "" {
+	if s.EventJournalError != "" || s.EventRuleError != "" {
 		s.Healthy = false
 	}
 	if e.runtime != nil {
@@ -177,6 +180,7 @@ func (e *Engine) Reconcile(ctx context.Context) error {
 	e.state.Healthy = true
 	e.state.LastError = ""
 	e.record("reconciled", "")
+	e.committedRuleLifecycleLocked(ctx)
 	return nil
 }
 
@@ -244,6 +248,7 @@ func (e *Engine) Commit(ctx context.Context, r CommitRequest) (State, error) {
 	e.state.Healthy = true
 	e.state.LastError = ""
 	e.record("committed", r.RequestID)
+	e.committedRuleLifecycleLocked(ctx)
 	if err := e.store.ClearPending(); err != nil {
 		// The committed record is authoritative. Recovery will reconcile it,
 		// so stale pending metadata must not cause a successful commit to be repeated.
@@ -260,7 +265,7 @@ func (e *Engine) Confirm(r ConfirmRequest) (State, error) {
 	if r.Revision != e.state.Revision || r.RequestID == "" || r.RequestID != e.state.LastRequestID {
 		return e.state, fmt.Errorf("%w: confirmation does not identify the current revision", ErrConflict)
 	}
-	if !e.state.Healthy {
+	if !e.state.Healthy || e.state.EventRuleError != "" {
 		return e.state, errors.New("cannot confirm while the applied state is degraded")
 	}
 	if e.runtime != nil && e.runtime.Health().Phase != "ready" {
@@ -336,6 +341,7 @@ func (e *Engine) rollbackConfirmation(ctx context.Context, reason string) error 
 	e.state.Healthy = true
 	e.state.LastError = ""
 	e.record("rolled_back_"+reason, p.RequestID)
+	e.committedRuleLifecycleLocked(ctx)
 	if err := e.store.ClearPending(); err != nil {
 		e.state.LastError = err.Error()
 	}

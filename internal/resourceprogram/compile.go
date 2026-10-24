@@ -2,6 +2,8 @@ package resourceprogram
 
 import (
 	"container/heap"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +13,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/imksoo/routerd2/internal/eventrule"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
@@ -165,6 +168,16 @@ func Compile(source Program) (Plan, error) {
 		case r.Service != nil:
 			err = claim(r, "service", r.Service.ModuleName())
 			plan.Native.Services = append(plan.Native.Services, *r.Service)
+		case r.EventRule != nil:
+			if len(plan.Native.EventRules) >= 128 {
+				return Plan{}, errors.New("event rule resource count exceeds 128")
+			}
+			if _, err = eventrule.Compile(r.ID, *r.EventRule); err == nil {
+				err = claim(r, "event_rule", r.ID)
+			}
+			body, _ := json.Marshal(r)
+			digest := sha256.Sum256(body)
+			plan.Native.EventRules = append(plan.Native.EventRules, EventRule{ID: r.ID, Identity: hex.EncodeToString(digest[:]), Spec: *r.EventRule})
 		}
 		if err != nil {
 			return Plan{}, err

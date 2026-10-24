@@ -9,6 +9,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/imksoo/routerd/pkg/daemonapi"
 )
 
 var (
@@ -35,6 +37,33 @@ type Event struct {
 	ObservedAt time.Time         `json:"observed_at"`
 	ExpiresAt  time.Time         `json:"expires_at,omitempty"`
 	Attributes map[string]string `json:"attributes,omitempty"`
+	Detail     *Detail           `json:"detail,omitempty"`
+}
+
+// Detail preserves bounded historical daemon/resource metadata for rules.
+// It does not carry protocol freshness or permission to execute an action.
+type Detail struct {
+	Daemon   daemonapi.DaemonRef    `json:"daemon"`
+	Resource *daemonapi.ResourceRef `json:"resource,omitempty"`
+	Severity string                 `json:"severity,omitempty"`
+	Reason   string                 `json:"reason,omitempty"`
+	Message  string                 `json:"message,omitempty"`
+}
+
+func FromDaemon(id string, d daemonapi.DaemonEvent) Event {
+	return Event{ID: id, Topic: d.Type, Source: d.Daemon.Kind, ObservedAt: d.Time, Attributes: d.Attributes, Detail: &Detail{Daemon: d.Daemon, Resource: d.Resource, Severity: d.Severity, Reason: d.Reason, Message: d.Message}}
+}
+
+func (e Event) DaemonEvent() daemonapi.DaemonEvent {
+	d := daemonapi.DaemonEvent{TypeMeta: daemonapi.TypeMeta{APIVersion: daemonapi.APIVersion, Kind: daemonapi.KindDaemonEvent}, Time: e.ObservedAt, Type: e.Topic, Attributes: e.Attributes, Daemon: daemonapi.DaemonRef{Name: e.Source, Kind: e.Source}}
+	if e.Detail != nil {
+		d.Daemon = e.Detail.Daemon
+		d.Resource = e.Detail.Resource
+		d.Severity = e.Detail.Severity
+		d.Reason = e.Detail.Reason
+		d.Message = e.Detail.Message
+	}
+	return d
 }
 
 func (e Event) IsExpired(now time.Time) bool { return !e.ExpiresAt.IsZero() && now.After(e.ExpiresAt) }
@@ -81,6 +110,23 @@ func token(value string, maximum int) bool {
 func encodeEvent(e Event) ([]byte, error) {
 	if !token(e.ID, 256) || !token(e.Topic, 128) || !token(e.Source, 128) || e.ObservedAt.IsZero() || len(e.Attributes) > 64 || !e.ExpiresAt.IsZero() && e.ExpiresAt.Before(e.ObservedAt) {
 		return nil, errors.New("invalid durable event envelope")
+	}
+	if d := e.Detail; d != nil {
+		if d.Daemon.Kind != e.Source || !token(d.Daemon.Name, 128) || len(d.Daemon.Instance) > 128 || !utf8.ValidString(d.Daemon.Instance) {
+			return nil, errors.New("invalid historical daemon identity")
+		}
+		for _, value := range []string{d.Severity, d.Reason, d.Message} {
+			if len(value) > 4096 || !utf8.ValidString(value) {
+				return nil, errors.New("historical detail exceeds its bound")
+			}
+		}
+		if d.Resource != nil {
+			for _, value := range []string{d.Resource.APIVersion, d.Resource.Kind, d.Resource.Name} {
+				if len(value) > 128 || !utf8.ValidString(value) {
+					return nil, errors.New("invalid historical resource reference")
+				}
+			}
+		}
 	}
 	for key, value := range e.Attributes {
 		if !token(key, 128) || len(value) > 4096 || !utf8.ValidString(value) {

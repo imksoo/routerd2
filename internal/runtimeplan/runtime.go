@@ -105,6 +105,8 @@ type Runtime struct {
 	guardUntilNanos      uint64
 	guardGrants          map[string]guardGrant
 	conditionTimeline    resourceprogram.ConditionTimeline
+	ruleContinuity       map[string]ruleContinuity
+	ruleIncarnation      string
 	projectionGeneration uint64
 	revision             uint64
 	configured           bool

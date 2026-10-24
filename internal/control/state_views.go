@@ -11,6 +11,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/imksoo/routerd2/internal/eventcontroller"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
 )
@@ -35,6 +36,12 @@ type Health struct {
 	Confirmation       *ConfirmationMetadata     `json:"confirmation,omitempty"`
 	Services           *runtimeplan.HealthStatus `json:"services,omitempty"`
 	EventJournal       JournalHealth             `json:"event_journal"`
+	EventRules         RuleHealth                `json:"event_rules"`
+}
+
+type RuleHealth struct {
+	eventcontroller.Status
+	LastError string `json:"last_error,omitempty"`
 }
 
 type JournalHealth struct {
@@ -70,6 +77,18 @@ func stateText(value string, maximum int) string {
 func (e *Engine) healthForState(s State) Health {
 	h := Health{Revision: s.Revision, Healthy: s.Healthy, LastError: stateText(s.LastError, 4096), LastErrorTruncated: len(s.LastError) > 4096, ProducerEpoch: s.ProducerEpoch, Sequence: s.Sequence}
 	h.EventJournal = JournalHealth{Pending: len(s.EventOutbox), LastError: s.EventJournalError}
+	h.EventRules.LastError = s.EventRuleError
+	e.mu.Lock()
+	if e.rules != nil {
+		h.EventRules.Status = e.rules.Status()
+		if h.EventRules.Revision != s.Revision {
+			h.Healthy = false
+		}
+	}
+	e.mu.Unlock()
+	if s.EventRuleError != "" {
+		h.Healthy = false
+	}
 	if s.EventJournalError != "" {
 		h.Healthy = false
 	}
