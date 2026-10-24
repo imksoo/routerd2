@@ -174,3 +174,45 @@ func TestJournalCapacityBackpressureDoesNotEraseUnconsumedHistory(t *testing.T) 
 		t.Fatal("unconsumed journal was silently pruned", rows, err)
 	}
 }
+
+func TestInvalidUTF8CannotChangeEventIdentityDuringEncoding(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(Options{Directory: filepath.Join(t.TempDir(), "events")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	invalid := string([]byte{0xff})
+	for _, field := range []string{"id", "topic", "source", "attribute"} {
+		e := testEvent("invalid-" + field)
+		switch field {
+		case "id":
+			e.ID = invalid
+		case "topic":
+			e.Topic = invalid
+		case "source":
+			e.Source = invalid
+		case "attribute":
+			e.Attributes["value"] = invalid
+		}
+		if _, err := s.Append(ctx, e); err == nil {
+			t.Fatal("invalid UTF-8 accepted", field)
+		}
+	}
+	rows, err := s.List(ctx, 0, 256)
+	if err != nil || len(rows) != 0 {
+		t.Fatal("invalid encoding changed journal", rows, err)
+	}
+}
+
+func TestEventExpiryBoundaryRetainsFederationZeroExpiryContract(t *testing.T) {
+	e := testEvent("finite")
+	e.ExpiresAt = time.Unix(200, 0)
+	if e.IsExpired(e.ExpiresAt) || !e.IsExpired(e.ExpiresAt.Add(time.Nanosecond)) {
+		t.Fatal("event expiry boundary changed")
+	}
+	e.ExpiresAt = time.Time{}
+	if e.IsExpired(time.Unix(1<<40, 0)) {
+		t.Fatal("non-expiring event became a finite protocol lease")
+	}
+}
