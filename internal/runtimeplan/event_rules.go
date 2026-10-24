@@ -68,7 +68,7 @@ func (r *Runtime) ActiveEventRules(source config.Document, revision uint64) ([]r
 	sum := sha256.Sum256(encoded)
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if !r.configured || r.phase != "ready" || r.revision != revision || r.sourceDigest != hex.EncodeToString(sum[:]) {
+	if !r.configured || r.revision != revision || r.sourceDigest != hex.EncodeToString(sum[:]) {
 		return nil, nil
 	}
 	facts, err := r.conditionFactsLocked(source, revision, time.Now())
