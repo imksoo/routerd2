@@ -12,6 +12,7 @@ import (
 	"io"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -260,6 +261,9 @@ func (s *interactiveShell) execute(ctx context.Context, line string, out io.Writ
 	case "show":
 		if rest == "" || rest == "candidate" {
 			return false, writeYAML(out, c.document)
+		}
+		if rest == "observations" || strings.HasPrefix(rest, "observations ") {
+			return false, s.session.Execute(ctx, "show "+rest, nil, out)
 		}
 		if rest == "status" || rest == "network" || strings.HasPrefix(rest, "network ") || rest == "version" || rest == "config" || rest == "services" || strings.HasPrefix(rest, "services ") || rest == "route-issues" || strings.HasPrefix(rest, "route-issues ") || rest == "logging" || rest == "running-config" || rest == "logs" || strings.HasPrefix(rest, "logs ") {
 			return false, s.session.Execute(ctx, "show "+rest, nil, out)
@@ -755,7 +759,7 @@ func (s *interactiveShell) complete(line string, pos int, key rune) (string, int
 	case 1:
 		switch words[0] {
 		case "show":
-			choices = []string{"status", "network", "resources", "services", "route-issues", "logging", "logs", "version", "config", "running-config"}
+			choices = []string{"status", "network", "resources", "observations", "services", "route-issues", "logging", "logs", "version", "config", "running-config"}
 			if s.candidate != nil {
 				choices = append(choices, "candidate")
 				choices = append(choices, s.pathChoices(token)...)
@@ -775,6 +779,17 @@ func (s *interactiveShell) complete(line string, pos int, key rune) (string, int
 	}
 	if len(words) >= 2 && words[0] == "show" && words[1] == "network" {
 		choices = networkCompletions(words)
+	}
+	if len(words) >= 2 && len(words)%2 == 0 && words[0] == "show" && words[1] == "observations" {
+		choices = []string{"after", "limit"}
+		for i := 2; i < len(words); i += 2 {
+			if words[i] == "after" {
+				choices = slices.DeleteFunc(choices, func(v string) bool { return v == "after" })
+			}
+			if words[i] == "limit" {
+				choices = slices.DeleteFunc(choices, func(v string) bool { return v == "limit" })
+			}
+		}
 	}
 	var matches []string
 	for _, choice := range choices {
@@ -974,6 +989,7 @@ func (r *terminalInput) Write(p []byte) (int, error) { return r.writer.Write(p) 
 const interactiveHelp = `Operational commands:
   show status | network | version | config | running-config
   show network help           list paged network observation commands
+  show observations [after CURSOR] [limit 1..16]
   restart <module>
   configure                  start a private candidate from the current revision
   confirm                    confirm a pending confirmed commit

@@ -141,3 +141,14 @@ event log or a transactionally consistent dump of all kernel state.
 `show network help` lists the complete syntax; Tab completes section and filter
 names in operational and candidate modes. Unknown, duplicate or inapplicable
 filters are rejected before issuing an API request.
+
+## Durable observations
+
+`show observations [after CURSOR] [limit 1..16]` reads one bounded page of
+durable configuration commit/confirm/rollback history. Defaults are cursor 0
+and limit 16. Continue with the returned `next_cursor` while `more` is true.
+The cursor survives control-worker replacement within the same journal.
+Use the command in either operational or candidate mode; it does not edit the
+candidate. Unknown/duplicate filters and invalid bounds fail before an API
+request. A failed read prints no partial history. This history is separate from
+the lossy `show logs` transport and grants no permission to mutate the kernel.

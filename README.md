@@ -139,6 +139,7 @@ routerd> show route-issues
 routerd> show network routes table 254 limit 64
 routerd> show network wireguard-peers interface wg0
 routerd> show logs module service.wan limit 50
+routerd> show observations after 0 limit 16
 ```
 
 `set` の値は JSON、resource は ID、内部のリスト要素は名前または番号で指定します。

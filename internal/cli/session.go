@@ -35,7 +35,7 @@ func (s Session) Execute(ctx context.Context, command string, input io.Reader, o
 		return nil
 	}
 	if len(a) == 1 && a[0] == "help" {
-		_, err := fmt.Fprintln(out, "show status\nshow network [SECTION [FILTER VALUE ...]] (show network help for details)\nshow resources\nshow services [NAME]\nshow route-issues [offset N]\nshow config\nshow running-config\nshow logs [module NAME] [level INFO] [limit 100]\nshow logging\nshow version\nrestart <module>\nconfigure (exec: CommitRequest YAML/JSON on stdin; shell: candidate mode)\nconfirm\nhelp\nexit")
+		_, err := fmt.Fprintln(out, "show status\nshow network [SECTION [FILTER VALUE ...]] (show network help for details)\nshow resources\nshow observations [after CURSOR] [limit 1..16]\nshow services [NAME]\nshow route-issues [offset N]\nshow config\nshow running-config\nshow logs [module NAME] [level INFO] [limit 100]\nshow logging\nshow version\nrestart <module>\nconfigure (exec: CommitRequest YAML/JSON on stdin; shell: candidate mode)\nconfirm\nhelp\nexit")
 		return err
 	}
 	var result json.RawMessage
@@ -44,6 +44,8 @@ func (s Session) Execute(ctx context.Context, command string, input io.Reader, o
 	logClient := localapi.NewClient(filepath.Join(s.RuntimeDir, logging.SocketName))
 	var err error
 	switch {
+	case len(a) >= 2 && a[0] == "show" && a[1] == "observations":
+		return showObservations(ctx, ctl, a[2:], out)
 	case len(a) == 2 && a[0] == "show" && a[1] == "resources":
 		return showResources(ctx, ctl, out)
 	case len(a) >= 2 && a[0] == "show" && a[1] == "network":
