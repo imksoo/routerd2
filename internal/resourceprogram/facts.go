@@ -217,6 +217,12 @@ func (s *FactStore) Publish(f ProtocolFact, nowNanos uint64) error {
 func (s *FactStore) FactValue(key string, nowNanos uint64) Truth {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	return s.factValueLocked(key, nowNanos)
+}
+
+// factValueLocked permits a whole condition tree to read one consistent scope.
+// The caller must hold s.mu.RLock or s.mu.Lock.
+func (s *FactStore) factValueLocked(key string, nowNanos uint64) Truth {
 	fact, ok := s.facts[key]
 	if !ok || nowNanos < fact.ObservedNanos || nowNanos >= fact.ExpiresNanos || fact.Scope != s.scope {
 		return Indeterminate

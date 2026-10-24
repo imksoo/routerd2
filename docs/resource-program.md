@@ -75,9 +75,9 @@ compiler は明示された辺に加え、program 内で管理する link/interf
 現段階の graph は **コンパイルの依存グラフ**である。
 一つの network transaction が成功した後に worker を起動する境界は維持するが、
 任意の service の readiness を `depends_on` で待つ coordinator はまだない。
-`when`、`ready_when`、三値条件、hold time/freshness、動的な owner cascade は CORE-03 / CORE-04 の残作業である。
+三値演算・finite fact store・`FactCondition` の独立評価は実装済みで、boot/config/projection/producer 世代の変化・期限切れ・重複通知を fail closed に扱う。ただし source の `when` / `ready_when` はまだ解釈しない。hold time/maxAge、個別 readiness と実 worker からの fact 配信、動的 reconcile は CORE-03 / CORE-04 の残作業である。
 resource の未実装 field は unknown field として拒否し、再利用した DNS 型の非空 `when` も明示的に拒否する。
-owner を削除するときは、その owner を参照する resource も candidate から明示的に削除する。
+SSH candidate で `delete resources[OWNER]` を実行すると、明示 owner の子・孫 resource を連鎖削除する。残存 resource から削除先への `depends_on` があれば変更を拒否する。YAML 全体編集と API の任意の更新に同じ自動削除はまだ適用しない。
 
 compiler の ownership 表は、生成された intent がどの resource に帰属するかを示す。
 kernel に元から存在した object を採用する権限は与えない。
@@ -143,7 +143,7 @@ routerd2 の試作 `schema_version: 1` とその保存 record は読み込まな
 
 ## 試験対象
 
-- `internal/resourceprogram`: graph、owner、正規化した二重所有、決定性、native intent 全種、8,192 routes、入力を変更しないこと。
+- `internal/resourceprogram`: graph、owner、正規化した二重所有、決定性、native intent 全種、8,192 routes、入力を変更しないこと。finite fact / 三値式の局所試験（boot/config/projection、epoch、sequence、expiry、欠落、並行アクセス）。
 - `internal/config` / `internal/control`: source 保存、pending、request ID、確認期限、再起動 rollback、大きな record、prototype 拒否。
 - `internal/runtimeplan`: source からの address/route 更新・削除、別 owner の保持、network ACK 前に worker を開始しないこと、worker 復旧。
 - `internal/cli` / `cmd/routerd`: ID selector、typed edit、候補の分離、確認付き commit、plan の出力と失敗時の無出力。

@@ -15,7 +15,7 @@ CORE-01 / CORE-02 と CORE-03 の static graph 部分に着手した。
 - 元 routerd の条件16件・依存6件と複数依存・所有権6件を、固定 source に対する実行 fixture にした。
 
 仕様・制約は [resource-program.md](resource-program.md)、比較根拠は [feature-contracts.md](feature-contracts.md) に記録した。
-三値 `when`、finite fact、個別 readiness、owner cascade は未実装で、CORE-03 / CORE-04 の次の作業とする。
+三値論理と有限 protocol fact の基本型・epoch/期限チェック、SSH candidate の owner cascade を実装した。`when` / `ready_when` の ResourceProgram 適用、実 worker からの fact 発行、個別 readiness、動的 reconcile は CORE-03 / CORE-04 の残作業とする。
 startup store/revision の boot 選択、独立 projection generation、多 binary runtime manifest も残っている。
 CORE-01 / CORE-02 / CORE-03 の全受入条件を完了扱いにはせず、既存 `parity.json` の判定を上げない。
 
