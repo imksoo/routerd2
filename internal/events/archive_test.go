@@ -263,6 +263,9 @@ func TestArchivedCorruptionCannotBeReadOrAcknowledgedAsDurable(t *testing.T) {
 			if _, err = s.ArchiveEvents(ctx, 16); err != nil {
 				t.Fatal(err)
 			}
+			if rows, err := s.List(ctx, 0, 16); err != nil || len(rows) != 1 {
+				t.Fatal("cache warmup", rows, err)
+			}
 			var body []byte
 			if err = s.db.QueryRow(`SELECT body FROM event_archive`).Scan(&body); err != nil {
 				t.Fatal(err)
