@@ -143,24 +143,33 @@ func (f *fakeAdmin) log() []string {
 }
 
 type gateHarness struct {
-	clock   atomic.Int64
-	updates chan BFDUpdate
-	admin   *fakeAdmin
-	view    *bfdGateView
-	done    chan error
-	cancel  context.CancelFunc
+	clock     atomic.Int64
+	readClock func() (bfd.Clock, error)
+	updates   chan BFDUpdate
+	admin     *fakeAdmin
+	view      *bfdGateView
+	done      chan error
+	cancel    context.CancelFunc
 }
 
 func newGateHarness(t *testing.T) *gateHarness {
+	return newGateHarnessPrepared(t, nil)
+}
+
+func newGateHarnessPrepared(t *testing.T, prepare func(*gateHarness)) *gateHarness {
 	t.Helper()
 	h := &gateHarness{updates: make(chan BFDUpdate, 8), admin: newFakeAdmin(), view: &bfdGateView{}, done: make(chan error, 1)}
 	h.clock.Store(int64(time.Second))
+	h.readClock = func() (bfd.Clock, error) {
+		return bfd.Clock{BootID: gateBoot, BoottimeNanoseconds: h.clock.Load()}, nil
+	}
+	if prepare != nil {
+		prepare(h)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	h.cancel = cancel
 	go func() {
-		h.done <- runBFDGate(ctx, gateConfig(), bfdInput{digest: strings.Repeat("a", 64), generation: 9, updates: h.updates}, h.admin, nil, h.view, func() (bfd.Clock, error) {
-			return bfd.Clock{BootID: gateBoot, BoottimeNanoseconds: h.clock.Load()}, nil
-		})
+		h.done <- runBFDGate(ctx, gateConfig(), bfdInput{digest: strings.Repeat("a", 64), generation: 9, updates: h.updates}, h.admin, nil, h.view, h.readClock)
 	}()
 	t.Cleanup(func() {
 		cancel()
@@ -315,13 +324,14 @@ func TestBFDAdminReceiptDeadlineIsIndependentOfConsumerScheduling(t *testing.T) 
 		wantError  bool
 	}{
 		{"timely-receipt-delayed-consumer", "boot", 2*second - 1, false},
+		{"receipt-before-operation", "boot", second - 1, true},
 		{"deadline-boundary", "boot", 2 * second, true},
 		{"late-receipt", "boot", 2*second + 1, true},
 		{"wrong-boot", "other-boot", second, true},
 		{"future-receipt", "boot", 4 * second, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			g := &bfdPeerGate{address: gatePeer, enabled: true, forceReset: true, operation: "disable", operationDeadline: 2 * second, operationCancel: func() {}}
+			g := &bfdPeerGate{address: gatePeer, enabled: true, forceReset: true, operation: "disable", operationStarted: second, operationDeadline: 2 * second, operationCancel: func() {}}
 			result := bfdAdminResult{address: gatePeer, operation: "disable", received: bfd.Clock{BootID: tc.boot, BoottimeNanoseconds: tc.received}}
 			err := g.completeAdmin(result, bfd.Clock{BootID: "boot", BoottimeNanoseconds: 3 * second})
 			if (err != nil) != tc.wantError {
@@ -331,6 +341,54 @@ func TestBFDAdminReceiptDeadlineIsIndependentOfConsumerScheduling(t *testing.T) 
 				t.Fatal("disable ACK did not fence recovery to a fresh receive", g)
 			}
 		})
+	}
+}
+
+func TestBFDGateConsumesQueuedTimelyAckAfterConsumerPause(t *testing.T) {
+	blocked, receipt, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var paused atomic.Bool
+	var blockOnce, receiptOnce, releaseOnce sync.Once
+	h := newGateHarnessPrepared(t, func(h *gateHarness) {
+		h.admin.holdDown = true
+		h.view.changed = func() {
+			if h.view.snapshotWithVersion()[gatePeer].state.operation == "disable" {
+				blockOnce.Do(func() { paused.Store(true); close(blocked); <-release; paused.Store(false) })
+			}
+		}
+		h.readClock = func() (bfd.Clock, error) {
+			now := h.clock.Load()
+			if paused.Load() {
+				receiptOnce.Do(func() { close(receipt) })
+			}
+			return bfd.Clock{BootID: gateBoot, BoottimeNanoseconds: now}, nil
+		}
+	})
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+	h.send(gateGrant(h.clock.Load(), 1, 0), true, 0)
+	gateWait(t, func() bool { return h.view.snapshot()[gatePeer].Enabled }, "initial source did not enable")
+	h.clock.Add(int64(20 * time.Millisecond))
+	h.send(gateGrant(h.clock.Load(), 2, 1), true, 0)
+	select {
+	case <-blocked:
+	case <-time.After(time.Second):
+		t.Fatal("consumer did not pause after requesting disable")
+	}
+	h.admin.mu.Lock()
+	h.admin.state = api.PeerState_SESSION_STATE_IDLE
+	h.admin.mu.Unlock()
+	select {
+	case <-receipt:
+	case <-time.After(time.Second):
+		t.Fatal("disable acknowledgment was not observed while consumer paused")
+	}
+	// The result has a timely monotonic receipt; give its goroutine time to
+	// enqueue it while the consumer is deliberately blocked in publish.
+	time.Sleep(20 * time.Millisecond)
+	h.clock.Add(int64(bfdAdminTimeout + time.Millisecond))
+	releaseOnce.Do(func() { close(release) })
+	gateWait(t, func() bool { return h.view.snapshotWithVersion()[gatePeer].state.operation == "" }, "queued timely ACK was discarded after the consumer deadline")
+	if h.view.snapshot()[gatePeer].Enabled {
+		t.Fatal("delayed ACK reused pre-close receive evidence")
 	}
 }
 
