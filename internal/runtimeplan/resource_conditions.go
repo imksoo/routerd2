@@ -1,6 +1,7 @@
 package runtimeplan
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -23,6 +24,7 @@ type guardGrant struct {
 	value                          bool
 	deadline                       time.Time
 	untilNanos                     uint64
+	observedNanos                  uint64
 }
 
 func conditionalProgram(source config.Document) bool {
@@ -65,7 +67,7 @@ func (r *Runtime) recordGuardGrantLocked(u serviceconfig.Update, now time.Time) 
 		if r.guardGrants == nil {
 			r.guardGrants = make(map[string]guardGrant)
 		}
-		r.guardGrants[u.Name] = guardGrant{revision: r.revision, generation: u.Generation, sequence: u.Sequence, epoch: u.ProducerEpoch, bootID: snapshot.BootID, value: snapshot.Active, untilNanos: snapshot.ExpiresNanos}
+		r.guardGrants[u.Name] = guardGrant{revision: r.revision, generation: u.Generation, sequence: u.Sequence, epoch: u.ProducerEpoch, bootID: snapshot.BootID, value: snapshot.Active, untilNanos: snapshot.ExpiresNanos, observedNanos: snapshot.ObservedNanos}
 		return
 	}
 	var snapshot struct {
@@ -99,13 +101,16 @@ func (r *Runtime) recordGuardGrantLocked(u serviceconfig.Update, now time.Time) 
 		return
 	}
 	until := uint64(clock.BoottimeNanoseconds) + uint64(remaining)
-	if old, ok := r.guardGrants[u.Name]; ok && old.revision == r.revision && old.generation == u.Generation && old.epoch == u.ProducerEpoch && old.bootID == clock.BootID && old.value == snapshot.Active && old.deadline.Equal(deadline) {
+	observed := uint64(clock.BoottimeNanoseconds)
+	if old, ok := r.guardGrants[u.Name]; ok && old.revision == r.revision && old.generation == u.Generation && old.epoch == u.ProducerEpoch && old.bootID == clock.BootID && old.value == snapshot.Active && (old.deadline.Equal(deadline) || bytes.Equal(r.records[u.Name].Snapshot, u.Snapshot)) {
 		until = old.untilNanos
+		observed = old.observedNanos
+		deadline = old.deadline
 	}
 	if r.guardGrants == nil {
 		r.guardGrants = make(map[string]guardGrant)
 	}
-	r.guardGrants[u.Name] = guardGrant{revision: r.revision, generation: u.Generation, sequence: u.Sequence, epoch: u.ProducerEpoch, bootID: clock.BootID, value: snapshot.Active, deadline: deadline, untilNanos: until}
+	r.guardGrants[u.Name] = guardGrant{revision: r.revision, generation: u.Generation, sequence: u.Sequence, epoch: u.ProducerEpoch, bootID: clock.BootID, value: snapshot.Active, deadline: deadline, untilNanos: until, observedNanos: observed}
 
 }
 
@@ -146,13 +151,13 @@ func (r *Runtime) conditionFactsLocked(source config.Document, revision uint64, 
 		if err := store.ActivateProducer(scope, name, epoch); err != nil {
 			return resourceprogram.FactSnapshot{}, err
 		}
-		publish := func(key string, sequence uint64, value bool, until uint64) error {
+		publish := func(key string, sequence uint64, value bool, observed, until uint64) error {
 			if until <= ticks {
 				return nil
 			}
-			return store.Publish(resourceprogram.ProtocolFact{Key: key, Producer: name, Scope: scope, Epoch: epoch, Sequence: sequence, ObservedNanos: ticks, ExpiresNanos: until, Value: value}, ticks)
+			return store.Publish(resourceprogram.ProtocolFact{Key: key, Producer: name, Scope: scope, Epoch: epoch, Sequence: sequence, ObservedNanos: observed, ExpiresNanos: until, Value: value}, ticks)
 		}
-		if err := publish(name+".ready", 1, module.Ready, r.guardUntilNanos); err != nil {
+		if err := publish(name+".ready", 1, module.Ready, r.guardUntilNanos-uint64(time.Second), r.guardUntilNanos); err != nil {
 			return resourceprogram.FactSnapshot{}, err
 		}
 		grant, ok := r.guardGrants[name]
@@ -161,7 +166,7 @@ func (r *Runtime) conditionFactsLocked(source config.Document, revision uint64, 
 			continue
 		}
 		until := min(grant.untilNanos, r.guardUntilNanos)
-		if err := publish(name+".active", 2, grant.value, until); err != nil {
+		if err := publish(name+".active", 2, grant.value, grant.observedNanos, until); err != nil {
 			return resourceprogram.FactSnapshot{}, err
 		}
 	}

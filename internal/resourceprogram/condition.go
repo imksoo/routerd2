@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 	"unicode"
 )
 
@@ -11,10 +12,11 @@ import (
 // Exactly one of Fact, All, Any or Not must be present. The ResourceProgram
 // planner must not accept a when declaration until it uses this evaluator.
 type FactCondition struct {
-	Fact string          `json:"fact,omitempty"`
-	All  []FactCondition `json:"all,omitempty"`
-	Any  []FactCondition `json:"any,omitempty"`
-	Not  *FactCondition  `json:"not,omitempty"`
+	Fact   string          `json:"fact,omitempty"`
+	MaxAge string          `json:"max_age,omitempty"`
+	All    []FactCondition `json:"all,omitempty"`
+	Any    []FactCondition `json:"any,omitempty"`
+	Not    *FactCondition  `json:"not,omitempty"`
 }
 
 const (
@@ -58,6 +60,12 @@ func ValidateFactCondition(c FactCondition) error {
 		if fields != 1 {
 			return fmt.Errorf("fact condition requires exactly one expression, found %d", fields)
 		}
+		if node.MaxAge != "" {
+			age, err := time.ParseDuration(node.MaxAge)
+			if node.Fact == "" || err != nil || age <= 0 {
+				return errors.New("max_age requires a fact and a positive finite duration")
+			}
+		}
 		for _, operand := range node.All {
 			if err := walk(operand, depth+1); err != nil {
 				return err
@@ -83,28 +91,5 @@ func (s *FactStore) EvaluateCondition(c FactCondition, nowNanos uint64) (Truth, 
 	if err := ValidateFactCondition(c); err != nil {
 		return Indeterminate, err
 	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	var evaluate func(FactCondition) Truth
-	evaluate = func(node FactCondition) Truth {
-		if node.Fact != "" {
-			return s.factValueLocked(node.Fact, nowNanos)
-		}
-		if node.Not != nil {
-			return evaluate(*node.Not).Not()
-		}
-		if node.All != nil {
-			values := make([]Truth, 0, len(node.All))
-			for _, operand := range node.All {
-				values = append(values, evaluate(operand))
-			}
-			return All(values...)
-		}
-		values := make([]Truth, 0, len(node.Any))
-		for _, operand := range node.Any {
-			values = append(values, evaluate(operand))
-		}
-		return Any(values...)
-	}
-	return evaluate(c), nil
+	return s.Snapshot(nowNanos).evaluate(&c), nil
 }

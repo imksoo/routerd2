@@ -1,15 +1,22 @@
 package resourceprogram
 
+import "time"
+
 // FactSnapshot is an immutable, single-instant view. All resources in one
 // projection see the same producer epochs, scope and expiration boundary.
-type FactSnapshot struct{ values map[string]Truth }
+type FactSnapshot struct {
+	values   map[string]Truth
+	observed map[string]uint64
+	nowNanos uint64
+}
 
 func (s *FactStore) Snapshot(nowNanos uint64) FactSnapshot {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	out := FactSnapshot{values: make(map[string]Truth, len(s.facts))}
+	out := FactSnapshot{values: make(map[string]Truth, len(s.facts)), observed: make(map[string]uint64, len(s.facts)), nowNanos: nowNanos}
 	for key := range s.facts {
 		out.values[key] = s.factValueLocked(key, nowNanos)
+		out.observed[key] = s.facts[key].ObservedNanos
 	}
 	return out
 }
@@ -21,6 +28,13 @@ func (s FactSnapshot) evaluate(c *FactCondition) Truth {
 		return True
 	}
 	if c.Fact != "" {
+		if c.MaxAge != "" {
+			age, err := time.ParseDuration(c.MaxAge)
+			observed, ok := s.observed[c.Fact]
+			if err != nil || age <= 0 || !ok || s.nowNanos < observed || s.nowNanos-observed > uint64(age) {
+				return Indeterminate
+			}
+		}
 		return s.Value(c.Fact)
 	}
 	if c.Not != nil {
