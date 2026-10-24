@@ -116,29 +116,43 @@ func (s *Store) List(ctx context.Context, after uint64, limit int) ([]Record, er
 		return nil, err
 	}
 	defer rows.Close()
-	result := make([]Record, 0)
+	type pageBody struct {
+		id string
+		archivedRead
+	}
+	page := make([]pageBody, 0, limit)
 	for rows.Next() {
-		var cursor uint64
-		var id string
-		var body, packed, digest []byte
-		var originalBytes int64
-		if err := rows.Scan(&cursor, &id, &body, &packed, &originalBytes, &digest); err != nil {
+		var item pageBody
+		if err := rows.Scan(&item.cursor, &item.id, &item.body, &item.packed, &item.size, &item.digest); err != nil {
 			return nil, err
 		}
-		body, err := s.loadBody(cursor, body, packed, originalBytes, digest)
+		page = append(page, item)
+	}
+	if err = errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
+	// Materialize only this bounded immutable page, then release the single
+	// database connection before gzip/JSON validation. A slow archive reader
+	// must not stall live publication or consumer/producer checkpoints.
+	result := make([]Record, 0, len(page))
+	for _, item := range page {
+		if err = ctx.Err(); err != nil {
+			return nil, err
+		}
+		body, err := s.loadBody(item.cursor, item.body, item.packed, item.size, item.digest)
 		if err != nil {
 			return nil, err
 		}
-		record, err := decodeEvent(cursor, body)
+		record, err := decodeEvent(item.cursor, body)
 		if err != nil {
 			return nil, err
 		}
-		if record.Event.ID != id {
+		if record.Event.ID != item.id {
 			return nil, errors.New("stored event identity mismatch")
 		}
 		result = append(result, record)
 	}
-	return result, rows.Err()
+	return result, nil
 }
 
 // Cursor initializes a new consumer at the current tip in the same write
