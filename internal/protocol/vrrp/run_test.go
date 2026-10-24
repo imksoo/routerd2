@@ -115,6 +115,27 @@ func TestShutdownDuringActionsWithdrawsWithoutHidingCleanupFailure(t *testing.T)
 	}
 }
 
+func TestActionFailureJoinedWithCancellationIsPreserved(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cfg := config4()
+	cfg.AddressOwner, cfg.Priority = true, 255
+	failure := errors.New("independent action failure")
+	withdrawn := false
+	effects := EffectsFunc(func(_ context.Context, s Snapshot) error {
+		if !s.Active {
+			withdrawn = true
+			return nil
+		}
+		cancel()
+		return errors.Join(ctx.Err(), failure)
+	})
+	err := run(ctx, cfg, netip.MustParseAddr(cfg.SourceAddress), strings.Repeat("a", 32), newFakeTransport(), effects, nil)
+	if !withdrawn || !errors.Is(err, failure) {
+		t.Fatal("cancellation hid an independent failure", err)
+	}
+}
+
 func TestRuntimeWaitsForOwnershipAndWithdrawsGracefully(t *testing.T) {
 	c := config4()
 	c.AddressOwner, c.Priority = true, 255
