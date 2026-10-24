@@ -10,13 +10,29 @@ import (
 )
 
 // WithStoppedHealthRelays fences conditional reactivation through historical
-// recovery without renewing any fact. The caller also holds source authority.
-// Acquisition waits behind reconciliation within the supplied context. The
-// callback holds op, never mu, so current fact acceptance remains available.
+// recovery without renewing any fact. The callback must acquire source
+// authority without blocking. A granting callback holds op, never mu; a denial
+// for every selected worker needs neither an ownership wait nor supervisor IO.
+// Acquisition for possible stopped owners respects the supplied context.
 // The queue's exclusive store lock is independently mandatory.
 func (r *Runtime) WithStoppedHealthRelays(ctx context.Context, names []string, drain func(map[string]bool) error) error {
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	// A selected worker is sufficient to deny collection. If every candidate
+	// is selected, no supervisor observation or operation ownership is needed:
+	// callbacks only see explicit denials and cannot perform historical IO.
+	// Avoid competing with normal reconciliation/freshness for active workers.
+	r.mu.Lock()
+	denied := map[string]bool{}
+	for _, name := range names {
+		if b, ok := r.bindings["service."+name]; ok && b.instance.Role == "health" {
+			denied[name] = false
+		}
+	}
+	r.mu.Unlock()
+	if len(denied) == len(names) {
+		return drain(denied)
 	}
 	if err := r.op.Acquire(ctx, 1); err != nil {
 		return err
