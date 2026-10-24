@@ -11205,6 +11205,35 @@
         "Full NET-07 and deployment qualification remain open"
       ],
       "parity_flags_unchanged": true
+    },
+    {
+      "id": "durable-events-storage-and-bfd-watchdog",
+      "date": "2026-10-24",
+      "status": "partial_implementation_and_individual_acceptance",
+      "code_checkpoint": "c2f3612fa96bd66e89f4d190d06d90e6b37fbc6d",
+      "work_packages": [
+        "CORE-04",
+        "NET-07"
+      ],
+      "evidence": "docs/evidence/2026-10-24-events-clock.md",
+      "implemented": [
+        "Private WAL/FULL durable event journal, stable-ID deduplication, consumer cursor and transactional consumer outbox storage",
+        "Process-scoped immutable boot identity cache; clocks remain live on each read",
+        "Revoke forwarding proof before asynchronous BGP admin operations; separate 2s admin watchdog from unchanged 500ms BFD control freshness"
+      ],
+      "validation": [
+        "Actual SQLite FULL, failed cursor persistence, foreign DB preservation, connection replacement and SIGKILL WAL recovery: pass under Race Detector",
+        "Clean make check and static amd64/arm64 build: pass",
+        "CGO-disabled arm64 event test compile: pass",
+        "Real QEMU BFD/BGP recovery in the same BGP worker: pass"
+      ],
+      "remaining": [
+        "Event storage is not connected to daemon, producer state, EventRule/DerivedEvent or federation",
+        "Retention/archive/capacity alarms and QEMU power-loss event acceptance",
+        "Full same-commit 20-suite QEMU aggregate is running; previous 500ms admin attempts failed even after receipt fix and after cache alone",
+        "Full work-package contracts and physical/NIC/performance qualification"
+      ],
+      "parity_flags_unchanged": true
     }
   ],
   "delivery_goal": {

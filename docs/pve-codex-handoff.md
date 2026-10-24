@@ -4,7 +4,18 @@
 対象: `https://github.com/imksoo/routerd2`
 
 **継続ゴール:** 全残実装・必要試験・対象実機での利用可能性の受入まで進める。
-部分checkpointでは完了しない。最新コードcheckpointは `959ba98`。
+部分checkpointでは完了しない。最新コードcheckpointは `c2f3612`。
+durable eventのWAL/FULL journal・consumer cursor・transactional consumer outboxを追加した。
+実SQLite FULL・cursor保存失敗・foreign DB保護・SIGKILL復元をRace Detector付きで検証済み。
+保存componentまでで、daemonとproducer stateには未接続。
+BFDの先行ACK修正後もaggregateでtimeoutが再発したため、boot IDをprocess内でcacheし、
+admin watchdogを2秒へ分離した。control freshnessは500msを保持し、admin呼出し前にproofを失効させる。
+clean checkpointの全体check/static build、QEMU BFD単独はPASS。
+[最新の証跡・制約](evidence/2026-10-24-events-clock.md) を参照。
+全20系統は `/home/imksoo/routerd2-acceptance-clock` の固定commit `c2f3612` で実行中。
+`dist/all-qemu-clock.log` と各suiteのmanifestを確認する。未完走のaggregateを全体PASSにしない。
+
+以下は先行checkpointの履歴。
 fact leafの `max_age` と元の観測時刻の保持、条件式の `for` を実装した。
 producer期限と独立した失効、通知間のflap、timer解除、authority変更を検証し、
 `when_hold` / `ready_when_hold` と復旧待ち中のbackup TCP/UDPも実daemon・QEMUでPASS。
@@ -19,8 +30,8 @@ supervisor全体の再起動にもprotocol通知をfenceする起動ごとのID�
 ACK観測時刻を保持して遅い消費と区別し、受信済みACKを先に処理する修正を追加した。
 500ms制限は保持し、consumer停止の再現・negative control・Race Detector・QEMU単独で検証した。
 [BFD ACKの証跡](evidence/2026-10-24-bfd-admin-ack.md) を参照。
-修正後のaggregateは `959ba98` の別worktreeで実行中。
-実行先の `dist/all-qemu-bfd-receipt.log` に進行と結果を保持する。
+当時の修正後aggregateは `959ba98` の別worktreeで実行し、admin timeoutで停止した。
+その結果は `dist/all-qemu-bfd-receipt.log` に保持する。
 
 **PVE検証後の追記:** コードcheckpointは `7046fd5` へ進んだ。
 `make check`、権限付きHealth実ソケット（raw ICMP含む）、二WANの実daemon/TCP/UDP/PCAP、

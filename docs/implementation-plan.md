@@ -59,6 +59,15 @@ durable event、worker単位のauthority/権限分離、多binary runtime等を�
 consumer停止の再現・negative control・Race DetectorとQEMU単独で検証し、aggregateを再実行中。
 [BFD ACKの証跡](evidence/2026-10-24-bfd-admin-ack.md) を参照。
 
+`c2f3612` ではCORE-04のdurable journal/cursor/consumer outbox保存部を追加した。
+実SQLite FULL・保存失敗の再配信・SIGKILL/WAL復元・private path保護を検証した。
+daemon、producer state、EventRule/DerivedEvent、federationには未接続である。
+BFD ACK観測時刻の修正だけではaggregate timeoutが残ったため、boot IDのprocess cacheと
+admin watchdogの2秒への分離、admin呼出し前のproof失効を追加した。
+control freshnessは500msを保持する。全体check/static buildとQEMU BFD単独はPASS。
+[保存部・BFDの証跡](evidence/2026-10-24-events-clock.md) を参照。
+全20 QEMU系統の固定commit aggregateは実行中。全作業単位の判定は据え置く。
+
 **routerd と routerd2 は別製品である。** routerd は稼働中の機能参照元、routerd2 は未リリースの開発対象。
 現在の routerd2 の二バイナリー構成・設定書式・内部API・保存形式には利用者がいないため、後方互換性を要求しない。
 routerd2 の設定書式も新設計に合わせて変更できる。引き継ぐ routerd の機能範囲は維持する。
