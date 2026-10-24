@@ -1,7 +1,9 @@
 package control
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -176,5 +178,43 @@ func TestFailedProducerAcknowledgementSaveRetainsReplayablePrefix(t *testing.T) 
 	rows, err = j.List(ctx, 0, 10)
 	if err != nil || len(rows) != 1 || len(recovered.State().EventOutbox) != 0 || recovered.health().EventJournal.LastError != "" {
 		t.Fatalf("ACK retry duplicated/lost history: %v %v", rows, err)
+	}
+}
+
+func TestProducerAcknowledgementChangesMetadataWithoutChangingConfigIntent(t *testing.T) {
+	ctx := context.Background()
+	e, _ := fixture(t)
+	attachJournal(t, e, 0)
+	if _, err := e.Commit(ctx, request(e, "separate-intent-and-ack")); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(e.store.Dir, "config.json")
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c1, err := e.store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = e.FlushEvents(ctx); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c2, err := e.store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(before, after) || len(c1.EventOutbox) != 1 || len(c2.EventOutbox) != 0 {
+		t.Fatal("fixture did not exercise persistent producer ACK metadata")
+	}
+	c1.EventOutbox = nil
+	b1, _ := json.Marshal(c1)
+	b2, _ := json.Marshal(c2)
+	if !bytes.Equal(b1, b2) {
+		t.Fatal("producer ACK changed authoritative configuration intent")
 	}
 }
