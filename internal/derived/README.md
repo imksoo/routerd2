@@ -67,11 +67,11 @@ hold, fails its timer checkpoint after outbox insertion, retries atomically,
 rejects a stale timer claim, reopens the historical emission and verifies that
 the restored asserted value is unknown when its current input has expired.
 
-The SQLite fixture already has a real input cursor. A live DerivedEvent can
-also emit at bootstrap without any journal input. The store currently rejects
-jobs at cursor zero; a producer state/outbox path independent of historical
-input cursors is still required. Do not fabricate a historical input event to
-turn a current observation into authority. Other remaining work includes
+The original SQLite consumer fixture already has a real input cursor. A second
+fixture uses `events.ProducerCheckpoint` / `ProducerTransition` to commit the
+initial output in an empty journal and reopen it without inventing an input
+cursor or treating its historical output as current authority. These producer
+APIs are not yet wired to a live controller. Other remaining work includes
 typed resource compilation/lifecycle/status, accepted live status providers,
 daemon scheduling and publication, source fencing, effect idempotency,
 federation and physical/performance acceptance. CORE-04 remains in progress.

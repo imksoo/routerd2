@@ -43,8 +43,24 @@ The persisted state is bound to its processed cursor. Restoring only an older
 cursor while retaining newer state is rejected instead of counting history twice.
 A complete database rollback still requires target-side effect deduplication.
 
+`ProducerCheckpoint` / `ProducerTransition` provide separate versioned producer
+state and output jobs without requiring a historical input cursor. This permits
+an initial DerivedEvent observation in an empty journal without manufacturing
+an input event. Producer and consumer names occupy separate API namespaces;
+`ProducerPending` / `ProducerComplete` access only producer work. Jobs are
+ordered by their first committed state version and key. An identical stable
+key/payload retains its original version and completion tombstone; changed
+content under an existing key is rejected. A stale state version cannot commit.
+These APIs do not append history, publish outputs or authenticate live sources.
+The caller must fence current source authority and use target-side durable
+idempotency when publishing or executing output. Configuration's existing
+authoritative-file outbox remains separate because it must be atomic with the
+configuration file itself.
+
 Defaults cap the journal and outbox at 100,000 rows and 64 MiB of encoded payload
-each, plus 1,024 consumer registrations. Individual event/job bodies are at most
+each, plus 1,024 consumer/producer registrations combined. The existing
+`MaxConsumers` and `MaxConsumerStateBytes` limits cover both APIs together;
+producer jobs also share the outbox row/byte limits. Individual bodies are at most
 64 KiB. These are payload/row budgets, not a bound on SQLite's total filesystem
 size. Capacity exhaustion refuses growth and preserves unconsumed history and
 deduplication tombstones. It still acknowledges existing identical events.
@@ -57,8 +73,8 @@ connection replacement, and SIGKILL followed by WAL recovery. Configuration
 producer state/outbox atomicity and worker recovery have separate control tests.
 Protocol event producers and QEMU power-loss acceptance remain implementation-plan work.
 
-The database schema is now version 3. Accepted design D-09 deliberately does
-not import discarded, unreleased version-1/2 prototype state. Unsupported schema
+The database schema is now version 4. Accepted design D-09 deliberately does
+not import discarded, unreleased version-1/2/3 prototype state. Unsupported schema
 identity is rejected through the read-only probe before SQLite recovery/writes.
 This is not a promise that different released versions can share or roll back
 this database. A production migration/fallback contract remains DIST-01 work.

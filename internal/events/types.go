@@ -62,6 +62,18 @@ type Checkpoint struct {
 	State   json.RawMessage `json:"state"`
 }
 
+// ProducerState is a versioned observation producer's durable state. It has
+// no historical input cursor and does not authenticate a live producer.
+type ProducerState struct {
+	Version uint64          `json:"version"`
+	State   json.RawMessage `json:"state"`
+}
+
+type ProducerDelivery struct {
+	Job
+	StateVersion uint64 `json:"state_version"`
+}
+
 func token(value string, maximum int) bool {
 	return value != "" && len(value) <= maximum && utf8.ValidString(value) && strings.IndexFunc(value, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) < 0
 }

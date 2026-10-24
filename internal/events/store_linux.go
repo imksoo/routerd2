@@ -26,16 +26,19 @@ type Store struct {
 }
 
 const applicationID = 0x52443245 // RD2E; separate from every other product store
-const schemaVersion = 3          // unreleased prototypes v1/v2 are deliberately not imported
+const schemaVersion = 4          // discarded unreleased prototype formats are not imported
 
 const schema = `
 CREATE TABLE events(cursor INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL UNIQUE, body BLOB NOT NULL);
 CREATE TABLE consumers(name TEXT PRIMARY KEY, cursor INTEGER NOT NULL CHECK(cursor>=0), version INTEGER NOT NULL DEFAULT 0 CHECK(version>=0), stateful INTEGER NOT NULL DEFAULT 0 CHECK(stateful IN (0,1)), state_cursor INTEGER NOT NULL DEFAULT 0 CHECK(state_cursor>=0), body BLOB NOT NULL DEFAULT X'7b7d');
 CREATE TABLE outbox(consumer TEXT NOT NULL REFERENCES consumers(name), key TEXT NOT NULL, event_cursor INTEGER NOT NULL REFERENCES events(cursor), payload BLOB NOT NULL, done INTEGER NOT NULL DEFAULT 0 CHECK(done IN (0,1)), PRIMARY KEY(consumer,key));
 CREATE INDEX pending_work ON outbox(consumer,done,event_cursor,key);
+CREATE TABLE producers(name TEXT PRIMARY KEY, version INTEGER NOT NULL DEFAULT 0 CHECK(version>=0), body BLOB NOT NULL DEFAULT X'7b7d');
+CREATE TABLE producer_outbox(producer TEXT NOT NULL REFERENCES producers(name), key TEXT NOT NULL, state_version INTEGER NOT NULL CHECK(state_version>0), payload BLOB NOT NULL, done INTEGER NOT NULL DEFAULT 0 CHECK(done IN (0,1)), PRIMARY KEY(producer,key));
+CREATE INDEX pending_producer_work ON producer_outbox(producer,done,state_version,key);
 CREATE TABLE usage(kind TEXT PRIMARY KEY, rows_count INTEGER NOT NULL, bytes_count INTEGER NOT NULL);
 INSERT INTO usage VALUES('events',0,0),('outbox',0,0),('consumer_state',0,0);
-PRAGMA user_version=3;
+PRAGMA user_version=4;
 `
 
 func Open(options Options) (_ *Store, result error) {
@@ -190,11 +193,13 @@ func Open(options Options) (_ *Store, result error) {
 	if err = s.db.QueryRow(`PRAGMA quick_check`).Scan(&integrity); err != nil || integrity != "ok" {
 		return nil, fmt.Errorf("event database integrity: %s %w", integrity, err)
 	}
-	for _, entry := range []struct{ kind, table, column string }{
-		{"events", "events", "body"}, {"outbox", "outbox", "payload"}, {"consumer_state", "consumers", "body"},
+	for _, entry := range []struct{ kind, query string }{
+		{"events", `SELECT count(*),coalesce(sum(length(body)),0) FROM events`},
+		{"outbox", `SELECT count(*),coalesce(sum(size),0) FROM (SELECT length(payload) AS size FROM outbox UNION ALL SELECT length(payload) FROM producer_outbox)`},
+		{"consumer_state", `SELECT count(*),coalesce(sum(size),0) FROM (SELECT length(body) AS size FROM consumers UNION ALL SELECT length(body) FROM producers)`},
 	} {
 		var rows, bytes, storedRows, storedBytes int64
-		if err = s.db.QueryRow(`SELECT count(*),coalesce(sum(length(`+entry.column+`)),0) FROM `+entry.table).Scan(&rows, &bytes); err != nil {
+		if err = s.db.QueryRow(entry.query).Scan(&rows, &bytes); err != nil {
 			return nil, err
 		}
 		if err = s.db.QueryRow(`SELECT rows_count,bytes_count FROM usage WHERE kind=?`, entry.kind).Scan(&storedRows, &storedBytes); err != nil {

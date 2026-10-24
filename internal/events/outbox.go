@@ -10,6 +10,26 @@ import (
 	"unicode/utf8"
 )
 
+func normalizeJobs(jobs []Job) ([]Job, error) {
+	if len(jobs) > 64 {
+		return nil, errors.New("outbox batch exceeds 64 jobs")
+	}
+	normalized := make([]Job, len(jobs))
+	seen := map[string]bool{}
+	for i, job := range jobs {
+		if !token(job.Key, 256) || seen[job.Key] || len(job.Payload) > maxBody || !utf8.Valid(job.Payload) || !json.Valid(job.Payload) {
+			return nil, errors.New("invalid bounded outbox job")
+		}
+		seen[job.Key] = true
+		var body bytes.Buffer
+		if err := json.Compact(&body, job.Payload); err != nil {
+			return nil, err
+		}
+		normalized[i] = Job{Key: job.Key, Payload: body.Bytes()}
+	}
+	return normalized, nil
+}
+
 // Schedule commits work and its source cursor together. Completed work remains
 // a deduplication tombstone, including after a restored/rolled-back cursor.
 // A crash between an external effect and Complete still requires idempotency
@@ -22,18 +42,9 @@ func (s *Store) schedule(ctx context.Context, name string, expected, eventCursor
 	if !token(name, 128) || expected > math.MaxInt64 || eventCursor > math.MaxInt64 || eventCursor < expected || checkpoint == nil && eventCursor == expected || eventCursor == 0 && len(jobs) > 0 || len(jobs) > 64 {
 		return ErrConflict
 	}
-	normalized := make([]Job, len(jobs))
-	seen := map[string]bool{}
-	for i, job := range jobs {
-		if !token(job.Key, 256) || seen[job.Key] || len(job.Payload) > maxBody || !utf8.Valid(job.Payload) || !json.Valid(job.Payload) {
-			return errors.New("invalid bounded outbox job")
-		}
-		seen[job.Key] = true
-		var body bytes.Buffer
-		if err := json.Compact(&body, job.Payload); err != nil {
-			return err
-		}
-		normalized[i] = Job{Key: job.Key, Payload: body.Bytes()}
+	normalized, err := normalizeJobs(jobs)
+	if err != nil {
+		return err
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
