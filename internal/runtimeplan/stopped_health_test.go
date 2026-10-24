@@ -36,7 +36,7 @@ func TestStoppedHealthRecoveryFencesReactivationWithoutHoldingFactMutex(t *testi
 			if allowed["switch"] || allowed["wan"] != want {
 				t.Fatal("active ownership or inactive eligibility lost", allowed)
 			}
-			if r.op.TryAcquire(1) {
+			if allowed["wan"] && r.op.TryAcquire(1) {
 				r.op.Release(1)
 				t.Fatal("conditional worker reactivation can race disk recovery")
 			}
@@ -60,6 +60,9 @@ func TestStoppedHealthRecoveryFencesReactivationWithoutHoldingFactMutex(t *testi
 	r.bindings["service.wan"] = r.bindings["service.switch"]
 	r.mu.Unlock()
 	check(false)
+	r.mu.Lock()
+	delete(r.bindings, "service.wan")
+	r.mu.Unlock()
 	if err := r.op.Acquire(ctx, 1); err != nil {
 		t.Fatal(err)
 	}
@@ -79,6 +82,35 @@ func TestStoppedHealthRecoveryFencesReactivationWithoutHoldingFactMutex(t *testi
 		return nil
 	}); err == nil {
 		t.Fatal("missing supervisor was hidden")
+	}
+}
+
+func TestSelectedHealthRelayDenialDoesNotQueueRecoveryOrQuerySupervisor(t *testing.T) {
+	ctx := context.Background()
+	r := New(t.TempDir(), t.TempDir(), &memoryNetwork{}, testSupervisorInstance)
+	m := &observedManager{generation: 1}
+	r.manager = m
+	source := config.Document{SchemaVersion: config.SchemaVersion, Resources: []resourceprogram.Resource{{ID: "wan", Service: &serviceconfig.Service{Name: "wan", Health: &health.Config{Interface: "wan0", Target: "192.0.2.1"}}}}}
+	if err := r.ApplyConfig(ctx, 1, source); err != nil {
+		t.Fatal(err)
+	}
+	m.unavailable = true // denial never needs to grant stopped ownership
+	if err := r.op.Acquire(ctx, 1); err != nil {
+		t.Fatal(err)
+	}
+	defer r.op.Release(1)
+	deadline, cancel := context.WithTimeout(ctx, 25*time.Millisecond)
+	defer cancel()
+	called := false
+	err := r.WithStoppedHealthRelays(deadline, []string{"wan"}, func(allowed map[string]bool) error {
+		called = true
+		if permitted, observed := allowed["wan"]; permitted || !observed {
+			t.Fatal("selected worker was not explicitly denied", allowed)
+		}
+		return nil
+	})
+	if err != nil || !called {
+		t.Fatal("selected worker needlessly competed with current reconciliation", called, err)
 	}
 }
 
