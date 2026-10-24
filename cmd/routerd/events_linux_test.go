@@ -126,3 +126,30 @@ func TestFailedEventExportPublishesNothingAndDoesNotAcknowledgeHistory(t *testin
 		t.Fatal("missing archive reported verified", err, out.String())
 	}
 }
+
+func TestConcurrentOutputCreationIsNotOverwrittenAtArchivePublication(t *testing.T) {
+	client, _ := archiveClient(t, false)
+	root := t.TempDir()
+	path := filepath.Join(root, "contested.jsonl")
+	original := client.HTTP.Transport
+	created := false
+	client.HTTP.Transport = archiveTransport(func(r *http.Request) (*http.Response, error) {
+		if !created && r.URL.Path == "/v1/observations" {
+			created = true
+			if err := os.WriteFile(path, []byte("competing operator output"), 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return original.RoundTrip(r)
+	})
+	if _, err := exportEventHistory(context.Background(), client, path); err == nil || !created {
+		t.Fatal("archive publication replaced a concurrent output", err, created)
+	}
+	if body, err := os.ReadFile(path); err != nil || string(body) != "competing operator output" {
+		t.Fatal("competing output changed", string(body), err)
+	}
+	entries, _ := os.ReadDir(root)
+	if len(entries) != 1 {
+		t.Fatal("failed publication leaked partial file", entries)
+	}
+}
