@@ -24,6 +24,7 @@ import (
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/bfd"
 	"github.com/imksoo/routerd2/internal/protocol/health"
+	"github.com/imksoo/routerd2/internal/protocolevents"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
@@ -79,6 +80,7 @@ func TestDaemonDerivedHealthCurrentStatusAndDurability(t *testing.T) {
 	freshSpec := api.DerivedEventSpec{Topic: "routerd.fixture.fresh", Inputs: derivedSpec.Inputs}
 	fresh := &resourceprogram.FactCondition{Any: []resourceprogram.FactCondition{{Fact: "service.wan.active", MaxAge: "1s"}, {Not: &resourceprogram.FactCondition{Fact: "service.wan.active", MaxAge: "1s"}}}}
 	rule := api.EventRuleSpec{Pattern: api.EventRulePatternSpec{Operator: "count", Topic: "routerd.fixture.health.asserted", Threshold: 2}, Emit: api.EventRuleEmitSpec{Topic: "routerd.fixture.twice"}}
+	probeRule := api.EventRuleSpec{Pattern: api.EventRulePatternSpec{Operator: "count", Topic: "routerd.healthcheck.wan.passed", Threshold: 2}, Emit: api.EventRuleEmitSpec{Topic: "routerd.fixture.probes"}}
 	doc := config.Document{SchemaVersion: config.SchemaVersion, Resources: []resourceprogram.Resource{
 		{ID: "port", Interface: &network.Interface{Name: "wan0"}},
 		{ID: "address", Address: &resourceprogram.Address{Interface: "wan0", CIDR: "192.0.2.2/24"}},
@@ -86,6 +88,7 @@ func TestDaemonDerivedHealthCurrentStatusAndDurability(t *testing.T) {
 		{ID: "derived", DerivedEvent: &derivedSpec},
 		{ID: "fresh", DerivedEvent: &freshSpec, When: fresh},
 		{ID: "twice", EventRule: &rule},
+		{ID: "probe-count", EventRule: &probeRule},
 	}}
 	root := t.TempDir()
 	f := startFixtureDaemonAt(t, doc, root)
@@ -169,11 +172,13 @@ func TestDaemonDerivedHealthCurrentStatusAndDurability(t *testing.T) {
 		v := view("derived")
 		return v.State.Asserted != nil && !*v.State.Asserted && count("routerd.fixture.health.retracted") == 1
 	})
+	until(t, 10*time.Second, func() bool { return count("routerd.healthcheck.wan.failed") > 0 })
 	startPeer()
 	until(t, 15*time.Second, func() bool {
 		v := view("derived")
 		return v.State.Asserted != nil && *v.State.Asserted && count("routerd.fixture.health.asserted") == 1
 	})
+	until(t, 10*time.Second, func() bool { return count("routerd.fixture.probes") > 0 })
 	restart("logging")
 	stopPeer()
 	until(t, 15*time.Second, func() bool {
@@ -280,6 +285,96 @@ func TestDaemonDerivedHealthCurrentStatusAndDurability(t *testing.T) {
 		}
 		return h.Healthy && count("routerd.fixture.health.retracted") == 3
 	})
+	// Raw observations have an independent worker-side durable queue. Journal
+	// failure must preserve them across worker and control SIGKILL while live
+	// protocol facts keep their original, separate freshness contract.
+	startPeer()
+	until(t, 10*time.Second, func() bool {
+		current := view("derived")
+		return current.State.Asserted != nil && *current.State.Asserted
+	})
+	if _, err = injector.Exec(`CREATE TRIGGER fail_health_history BEFORE INSERT ON events WHEN json_extract(CAST(NEW.body AS TEXT),'$.source')='routerd-healthcheck' BEGIN SELECT RAISE(ABORT,'injected raw health journal failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	waitHistoryError := func() {
+		t.Helper()
+		until(t, 10*time.Second, func() bool {
+			req, _ := http.NewRequestWithContext(ctx, "GET", "http://routerd/v1/health", nil)
+			response, err := f.control.HTTP.Do(req)
+			if err != nil {
+				return false
+			}
+			defer response.Body.Close()
+			var h control.Health
+			return response.StatusCode == 503 && json.NewDecoder(response.Body).Decode(&h) == nil && h.ProtocolEvents.LastError != ""
+		})
+	}
+	waitHistoryError()
+	sequenceBefore := instance().Sequence
+	until(t, 5*time.Second, func() bool { return instance().Sequence > sequenceBefore })
+	pendingDB, err := sql.Open("sqlite", filepath.Join(root, "state", "services", "wan", "health-events", "journal.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pendingBody []byte
+	err = pendingDB.QueryRow(`SELECT body FROM producers WHERE name='health-probe-relay'`).Scan(&pendingBody)
+	_ = pendingDB.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var queued struct {
+		Pending []events.Event `json:"pending"`
+	}
+	if json.Unmarshal(pendingBody, &queued) != nil || len(queued.Pending) == 0 {
+		t.Fatal("journal failure lost the worker queue")
+	}
+	expected := map[string]events.Event{}
+	for _, event := range queued.Pending {
+		expected[event.ID] = event
+	}
+	for _, record := range history() {
+		if _, exists := expected[record.Event.ID]; exists {
+			t.Fatal("failed journal acknowledged a pending observation")
+		}
+	}
+	restart("service.wan")
+	restart("control")
+	waitHistoryError()
+	oldProducer := stale
+	oldProducer.Sequence = 0
+	oldProducer.Snapshot = nil
+	if err = f.control.Do(ctx, "POST", "/v1/protocol-events", protocolevents.Batch{Producer: oldProducer, Events: queued.Pending[:1]}, nil); !localapi.IsHTTPStatus(err, 409) {
+		t.Fatal("stale worker published historical output", err)
+	}
+	if _, err = injector.Exec(`DROP TRIGGER fail_health_history`); err != nil {
+		t.Fatal(err)
+	}
+	until(t, 20*time.Second, func() bool {
+		var h control.Health
+		if f.control.Do(ctx, "GET", "/v1/health", nil, &h) != nil || !h.Healthy {
+			return false
+		}
+		seen := map[string]int{}
+		for _, record := range history() {
+			original, exists := expected[record.Event.ID]
+			if !exists {
+				continue
+			}
+			seen[record.Event.ID]++
+			before, _ := json.Marshal(original)
+			after, _ := json.Marshal(record.Event)
+			if string(before) != string(after) {
+				t.Fatal("retry changed original health evidence")
+			}
+		}
+		for id := range expected {
+			if seen[id] != 1 {
+				return false
+			}
+		}
+		return true
+	})
+	t.Logf("raw probe events and EventRule count passed; %d queued stable observations survived worker/control SIGKILL and journal failure without duplicate or renewed facts", len(expected))
 	t.Log("real TCP probes -> finite typed current status -> durable DerivedEvent -> EventRule; producer/control/logging restart, old notification, max_age and SQL failure recovery passed")
 	t.Log("ROUTERD_DERIVED_DAEMON_TEST_PASS")
 }
