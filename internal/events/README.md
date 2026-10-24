@@ -3,9 +3,10 @@
 The control worker uses this storage component for durable configuration
 commit/confirm/rollback observations through its authoritative producer outbox.
 EventRule resources also consume this journal and publish historical results
-through their atomic state/cursor/outbox. DerivedEvent resources, federation
-and a privileged effect executor are not connected yet.
-It does not publish protocol health or restore permission to change the kernel.
+through their atomic state/cursor/outbox. DerivedEvent resources publish sampled
+assertion transitions through their atomic producer state/outbox. Federation
+and a privileged effect executor are not connected yet. Raw protocol events
+are not published, and historical output never restores kernel authority.
 
 `Open` owns a private Linux directory through one exclusive process lock and a
 SQLite WAL database. The existing pinned pure Go SQLite driver supports static

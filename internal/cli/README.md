@@ -152,3 +152,14 @@ Use the command in either operational or candidate mode; it does not edit the
 candidate. Unknown/duplicate filters and invalid bounds fail before an API
 request. A failed read prints no partial history. This history is separate from
 the lossy `show logs` transport and grants no permission to mutate the kernel.
+
+## Current DerivedEvent status
+
+`show derived RESOURCE_ID` reads one finite current observation through
+`GET /v1/derived/{id}`. It works in operational and candidate modes, supports
+IDs containing `/`, and never edits the candidate. Invalid IDs/arguments fail
+before any request; an unsuccessful read prints no partial output. Unknown or
+inactive resources expose no asserted boolean. Historical last-transition
+times are not proof of current Up, and there is no journal/file fallback when
+the current evaluator is unavailable. See the
+[resource contract](../../docs/resource-program.md#derivedevent).

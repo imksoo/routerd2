@@ -1,0 +1,27 @@
+{
+  "source_commit": "1ba902025d2f14a42eb5378efa57fa2322725855",
+  "product_test_source_matches_commit": true,
+  "uncommitted_changes": "documentation only",
+  "commands_run_sequentially": true,
+  "scope": "related regression suites, not a full aggregate",
+  "suites": [
+    {
+      "suite": "daemon-eventrule",
+      "result": "passed",
+      "duration_seconds": 56.57,
+      "manifest": "qemu-eventrule-manifest.json"
+    },
+    {
+      "suite": "daemon-health-pbr",
+      "result": "passed",
+      "duration_seconds": 70.8,
+      "manifest": "qemu-health-pbr-manifest.json"
+    },
+    {
+      "suite": "daemon-bfd",
+      "result": "passed",
+      "duration_seconds": 50.96,
+      "manifest": "qemu-bfd-manifest.json"
+    }
+  ]
+}

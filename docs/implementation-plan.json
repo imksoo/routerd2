@@ -11438,6 +11438,41 @@
       ],
       "parity_flags_unchanged": true,
       "prior_regression_checkpoint": "259380d"
+    },
+    {
+      "id": "live-health-derived-event-resource-controller",
+      "date": "2026-10-24",
+      "status": "partial_core_implementation_with_live_daemon_acceptance",
+      "code_checkpoint": "1ba902025d2f14a42eb5378efa57fa2322725855",
+      "work_packages": [
+        "CORE-03",
+        "CORE-04"
+      ],
+      "evidence": "docs/evidence/2026-10-24-live-derived.md",
+      "implemented": [
+        "Typed derived_event payload with validated HealthCheck scalar references keyed by resource ID, including slash-containing native IDs",
+        "Finite current producer observations retain original age; source/control/worker fencing, inactive provider handling and accepted-transition predicate continuity",
+        "Durable producer lifecycle/state/outbox and stable journal publication; sampled current evaluation with read-only finite current-status API",
+        "Operational and candidate show derived RESOURCE_ID; bounded derived health/error and committed-configuration acknowledgement",
+        "Source restore nonce prevents A-to-B-to-A authority reuse; replacement producers and control scopes cannot inherit historical Up retraction grace"
+      ],
+      "validation": [
+        "Reproduced pre-implementation compile failures, restored source scope reuse, inactive provider old Up and replacement-authority old Up before fixes",
+        "Related source/controller/control/CLI Race tests pass; final 1ba9020 make check build-linux passes from a clean source tree: unit, 14 Python tests, Race Detector, vet, static amd64/arm64",
+        "Final real-daemon namespace Race harness: management and actual SSH current DerivedEvent 8.21s; TCP HealthCheck to DerivedEvent to EventRule and failure recovery 7.25s pass",
+        "Final QEMU current DerivedEvent 37.17s and management/actual SSH 31.72s pass with fresh ELFs from 1ba9020",
+        "Actual same-ready-PID SIGSTOP and max_age expiry, producer/control/logging restart, stale update 409, SQLite producer checkpoint failure with unhealthy 503 and no partial current view, recovery without duplicate/lost publication",
+        "Documented DerivedEvent YAML validates through the built CLI",
+        "Same final 1ba9020 product/test source related QEMU regressions, fresh builds run sequentially: EventRule 56.57s, two-WAN Health/PBR real TCP/UDP/packet capture and recovery 70.80s, BFD/BGP 50.96s pass; not a complete 22-suite aggregate"
+      ],
+      "remaining": [
+        "Other status provider kinds, structured fields, DerivedEvent chaining and complete general status-reference contracts",
+        "Raw durable protocol event producers and complete conditional event/derived acceptance; sampled predicate evaluation does not promise every short transition",
+        "New live producer QEMU abrupt-power-loss/reboot acceptance and lifecycle/capacity qualification",
+        "Privileged effect authorization/idempotency, federation, retention/archive/capacity operations and scale/latency qualification",
+        "All outstanding implementation work-package acceptance and selected physical/NIC/performance profile"
+      ],
+      "parity_flags_unchanged": true
     }
   ],
   "delivery_goal": {

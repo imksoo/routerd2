@@ -1,8 +1,11 @@
 # Derived assertion evaluator
 
-This is a pure component. DerivedEvent resources are not accepted by
-ResourceProgram or executed by a daemon controller yet. It publishes no events,
-executes no effects and grants no kernel authority.
+This package is the pure evaluator used by the live control-worker
+`derivedcontroller`. ResourceProgram accepts typed `derived_event` payloads.
+The runtime supplies finite current HealthCheck scalar observations; the
+controller atomically saves producer state/output jobs and publishes stable
+historical events to the journal. Neither package executes external effects or
+grants kernel authority.
 
 `Compile` owns a typed copy of the pinned routerd DerivedEvent spec.
 `NewSnapshot` copies a bounded set of current scalar observations. `Advance`
@@ -17,7 +20,9 @@ an original observation time no later than the current BOOTTIME, and a finite
 expiry strictly after that time and the current BOOTTIME. Missing, expired,
 future, unknown and old-scope values are indeterminate. Zero expiry is unknown
 here; it is not the event journal's non-expiring historical-delivery convention.
-Persisted asserted=true cannot replace these checks. Indeterminate input
+Persisted asserted=true cannot replace these checks. A replacement producer or
+control/source scope cannot inherit the previous assertion's retraction grace;
+current status omits its boolean until fresh input establishes it. Indeterminate input
 cancels a pending hold, exposes no asserted boolean and emits no retraction.
 Historical last-transition timestamps remain historical.
 
@@ -41,6 +46,11 @@ Unlike the legacy empty-string fallback, missing status is explicitly unknown.
 Hysteresis holds both transition directions using BOOTTIME. Same-value
 renewals preserve the due time. Value reversal, unknown input, lease gaps,
 producer replacement and scope changes cancel or restart the pending hold.
+The live runtime may attach `WithContinuity` proof after observing every accepted
+input transition. It bridges coalesced same-predicate renewals, even when the
+previous sampled lease has elapsed, without extending the current input lease.
+Without this trusted proof, a lease gap always resets the hold. Predicate truth,
+rather than irrelevant scalar text changes, defines this continuity.
 Wall-clock jumps cannot complete a hold; its event timestamp is fixed at the
 original observation wall time plus the duration. No goroutines or volatile
 wall timers run in this package. Restored holds still require a current
@@ -71,7 +81,17 @@ The original SQLite consumer fixture already has a real input cursor. A second
 fixture uses `events.ProducerCheckpoint` / `ProducerTransition` to commit the
 initial output in an empty journal and reopen it without inventing an input
 cursor or treating its historical output as current authority. These producer
-APIs are not yet wired to a live controller. Other remaining work includes
-typed resource compilation/lifecycle/status, accepted live status providers,
-daemon scheduling and publication, source fencing, effect idempotency,
-federation and physical/performance acceptance. CORE-04 remains in progress.
+APIs now back the live `derivedcontroller`. Evaluation samples current status;
+it is not a lossless journal of every short protocol transition. Continuity
+tracking prevents a missed flap from falsely completing a hold. The scheduler
+processes bounded batches every 200 ms. Read-only current views require matching
+input/producer authority and a five-second evaluator lease, further bounded by
+input expiry and the resource's own active condition. GET cannot renew this lease.
+
+`show derived RESOURCE_ID` reads `/v1/derived/{id}`. Inactive/unknown status and
+storage failure never fall back to an old asserted value. Health exposes bounded
+revision/count/pending/error metadata. Remaining work includes other status
+provider kinds, structured fields and DerivedEvent chaining, raw protocol event
+producers, effect idempotency/authorization, federation, retention and physical/
+performance acceptance. CORE-04 remains in progress. See
+[live evidence](../../docs/evidence/2026-10-24-live-derived.md).

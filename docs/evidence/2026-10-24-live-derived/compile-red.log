@@ -1,0 +1,18 @@
+# github.com/imksoo/routerd2/internal/derived [github.com/imksoo/routerd2/internal/derived.test]
+internal/derived/reference_path_test.go:14:12: p.References undefined (type Program has no field or method References)
+internal/derived/reference_path_test.go:19:7: p.References undefined (type Program has no field or method References)
+# github.com/imksoo/routerd2/internal/resourceprogram [github.com/imksoo/routerd2/internal/resourceprogram.test]
+internal/resourceprogram/derived_test.go:15:19: unknown field DerivedEvent in struct literal of type Resource
+internal/resourceprogram/derived_test.go:18:32: p.Native.DerivedEvents undefined (type Native has no field or method DerivedEvents)
+internal/resourceprogram/derived_test.go:21:18: p.Native.DerivedEvents undefined (type Native has no field or method DerivedEvents)
+internal/resourceprogram/derived_test.go:22:77: p.Native.DerivedEvents undefined (type Native has no field or method DerivedEvents)
+FAIL	github.com/imksoo/routerd2/internal/resourceprogram [build failed]
+FAIL	github.com/imksoo/routerd2/internal/derived [build failed]
+# github.com/imksoo/routerd2/internal/runtimeplan [github.com/imksoo/routerd2/internal/runtimeplan.test]
+internal/runtimeplan/derived_inputs_test.go:25: unknown field DerivedEvent in struct literal of type resourceprogram.Resource
+internal/runtimeplan/derived_inputs_test.go:50:17: r.DerivedInputs undefined (type *Runtime has no field or method DerivedInputs)
+internal/runtimeplan/derived_inputs_test.go:63:16: r.DerivedInputs undefined (type *Runtime has no field or method DerivedInputs)
+internal/runtimeplan/derived_inputs_test.go:77:16: r.DerivedInputs undefined (type *Runtime has no field or method DerivedInputs)
+internal/runtimeplan/derived_inputs_test.go:91:16: r.DerivedInputs undefined (type *Runtime has no field or method DerivedInputs)
+FAIL	github.com/imksoo/routerd2/internal/runtimeplan [build failed]
+FAIL

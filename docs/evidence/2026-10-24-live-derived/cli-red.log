@@ -1,0 +1,6 @@
+# github.com/imksoo/routerd2/internal/cli [github.com/imksoo/routerd2/internal/cli.test]
+internal/cli/derived_test.go:29:12: undefined: showDerived
+internal/cli/derived_test.go:35:13: undefined: showDerived
+internal/cli/derived_test.go:41:12: undefined: showDerived
+FAIL	github.com/imksoo/routerd2/internal/cli [build failed]
+FAIL

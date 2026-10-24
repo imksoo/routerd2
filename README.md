@@ -140,6 +140,7 @@ routerd> show network routes table 254 limit 64
 routerd> show network wireguard-peers interface wg0
 routerd> show logs module service.wan limit 50
 routerd> show observations after 0 limit 16
+routerd> show derived derived/wan
 ```
 
 `set` の値は JSON、resource は ID、内部のリスト要素は名前または番号で指定します。
@@ -159,7 +160,9 @@ routerd config plan candidate-routerd2.yaml
 
 `schema_version: 2` の [ResourceProgram](docs/resource-program.md) を正本として保存・編集します。
 interface と address は独立した resource です。試作 schema 1 の reader は持ちません。
-`depends_on` は現在はコンパイル graph で、三値条件と任意 worker の readiness 待機は次の実装範囲です。
+`depends_on` と三値条件によってresourceの起動・保留・停止を投影します。
+対応する有限fact、`for` / `max_age`、HealthCheckを参照する `derived_event` の契約と制約は
+[ResourceProgram](docs/resource-program.md) に記載しています。全status providerの同等性は未完了です。
 移行器は未実装の暗黙依存や権限・入力制御の意味変更を拒否します。
 
 ## Architecture constraints

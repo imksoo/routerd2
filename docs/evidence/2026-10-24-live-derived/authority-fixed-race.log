@@ -1,0 +1,66 @@
+=== RUN   TestHistoricalUpCannotGrantRetractionGraceUnderNewAuthority
+=== RUN   TestHistoricalUpCannotGrantRetractionGraceUnderNewAuthority/same-producer-grace
+=== RUN   TestHistoricalUpCannotGrantRetractionGraceUnderNewAuthority/new-producer
+=== RUN   TestHistoricalUpCannotGrantRetractionGraceUnderNewAuthority/new-control-scope
+--- PASS: TestHistoricalUpCannotGrantRetractionGraceUnderNewAuthority (0.01s)
+    --- PASS: TestHistoricalUpCannotGrantRetractionGraceUnderNewAuthority/same-producer-grace (0.00s)
+    --- PASS: TestHistoricalUpCannotGrantRetractionGraceUnderNewAuthority/new-producer (0.00s)
+    --- PASS: TestHistoricalUpCannotGrantRetractionGraceUnderNewAuthority/new-control-scope (0.00s)
+=== RUN   TestProducerInitialEmissionNeedsNoHistoricalInputCursor
+--- PASS: TestProducerInitialEmissionNeedsNoHistoricalInputCursor (0.17s)
+=== RUN   TestDurableHoldTimerRetriesAtomicallyAndRequiresCurrentInput
+--- PASS: TestDurableHoldTimerRetriesAtomicallyAndRequiresCurrentInput (0.31s)
+=== RUN   TestTrustedContinuityBridgesCoalescedRenewalsWithoutExtendingCurrentLease
+--- PASS: TestTrustedContinuityBridgesCoalescedRenewalsWithoutExtendingCurrentLease (0.00s)
+=== RUN   TestContinuityTracksPredicateTruthRatherThanEveryScalarValue
+--- PASS: TestContinuityTracksPredicateTruthRatherThanEveryScalarValue (0.00s)
+=== RUN   TestKnownAssertRetractAndInitialEmission
+=== RUN   TestKnownAssertRetractAndInitialEmission/no_initial
+=== RUN   TestKnownAssertRetractAndInitialEmission/initial
+--- PASS: TestKnownAssertRetractAndInitialEmission (0.00s)
+    --- PASS: TestKnownAssertRetractAndInitialEmission/no_initial (0.00s)
+    --- PASS: TestKnownAssertRetractAndInitialEmission/initial (0.00s)
+=== RUN   TestHysteresisFreshnessAuthorityAndFlipBack
+--- PASS: TestHysteresisFreshnessAuthorityAndFlipBack (0.00s)
+=== RUN   TestUnknownBootstrapAndLeaseGapRequireFreshHold
+--- PASS: TestUnknownBootstrapAndLeaseGapRequireFreshHold (0.00s)
+=== RUN   TestSnapshotOwnershipAndOldScopeFailClosed
+--- PASS: TestSnapshotOwnershipAndOldScopeFailClosed (0.00s)
+=== RUN   TestGroupedInputAndKnownFalseDominateUnknown
+--- PASS: TestGroupedInputAndKnownFalseDominateUnknown (0.00s)
+=== RUN   TestHysteresisUsesBoottimeAndBoundsCurrentStatusAtItsDeadline
+--- PASS: TestHysteresisUsesBoottimeAndBoundsCurrentStatusAtItsDeadline (0.00s)
+=== RUN   TestZeroExpiryFutureAndMissingValuesStayIndeterminate
+--- PASS: TestZeroExpiryFutureAndMissingValuesStayIndeterminate (0.00s)
+=== RUN   TestPollingDoesNotRenewInputObservationTime
+--- PASS: TestPollingDoesNotRenewInputObservationTime (0.00s)
+=== RUN   TestAnyTrueKeepsFreshnessAndExpiryFromTheSameWitness
+--- PASS: TestAnyTrueKeepsFreshnessAndExpiryFromTheSameWitness (0.00s)
+=== RUN   TestReferencesPreserveNativeResourceIDsAndOwnTheirResults
+--- PASS: TestReferencesPreserveNativeResourceIDsAndOwnTheirResults (0.00s)
+=== RUN   TestKnownImmediateOutputsMatchPinnedReference
+=== RUN   TestKnownImmediateOutputsMatchPinnedReference/all_true/any_false/false
+=== RUN   TestKnownImmediateOutputsMatchPinnedReference/all_true/any_false/true
+=== RUN   TestKnownImmediateOutputsMatchPinnedReference/all_true/all_false/false
+=== RUN   TestKnownImmediateOutputsMatchPinnedReference/all_true/all_false/true
+=== RUN   TestKnownImmediateOutputsMatchPinnedReference/any_true/any_false/false
+=== RUN   TestKnownImmediateOutputsMatchPinnedReference/any_true/any_false/true
+=== RUN   TestKnownImmediateOutputsMatchPinnedReference/any_true/all_false/false
+=== RUN   TestKnownImmediateOutputsMatchPinnedReference/any_true/all_false/true
+--- PASS: TestKnownImmediateOutputsMatchPinnedReference (0.02s)
+    --- PASS: TestKnownImmediateOutputsMatchPinnedReference/all_true/any_false/false (0.00s)
+    --- PASS: TestKnownImmediateOutputsMatchPinnedReference/all_true/any_false/true (0.00s)
+    --- PASS: TestKnownImmediateOutputsMatchPinnedReference/all_true/all_false/false (0.00s)
+    --- PASS: TestKnownImmediateOutputsMatchPinnedReference/all_true/all_false/true (0.00s)
+    --- PASS: TestKnownImmediateOutputsMatchPinnedReference/any_true/any_false/false (0.00s)
+    --- PASS: TestKnownImmediateOutputsMatchPinnedReference/any_true/any_false/true (0.00s)
+    --- PASS: TestKnownImmediateOutputsMatchPinnedReference/any_true/all_false/false (0.00s)
+    --- PASS: TestKnownImmediateOutputsMatchPinnedReference/any_true/all_false/true (0.00s)
+PASS
+ok  	github.com/imksoo/routerd2/internal/derived	1.550s
+=== RUN   TestInitialOutputRetriesThroughActualSQLiteAndRestoredStateNeverGrantsCurrentUp
+--- PASS: TestInitialOutputRetriesThroughActualSQLiteAndRestoredStateNeverGrantsCurrentUp (0.21s)
+=== RUN   TestCurrentViewRejectsChangedInputAndExpiredEvaluatorLease
+--- PASS: TestCurrentViewRejectsChangedInputAndExpiredEvaluatorLease (0.14s)
+PASS
+ok  	github.com/imksoo/routerd2/internal/derivedcontroller	1.372s

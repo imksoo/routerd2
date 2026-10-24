@@ -7,26 +7,39 @@
 部分checkpointでゴールを完了にせず、実装・検証・未検証と証跡を更新する。
 対象機種・NIC・性能条件の確認と並行して、独立して進められる実装・隔離VM検証を続ける。
 
-最新product checkpoint `6185ba8` ではEventRule resourceを実control workerへ接続した。
+最新product checkpoint `1ba9020` ではHealthCheckの有限なtyped statusからDerivedEvent resource、
+durable journal、EventRuleまでを実control workerへ接続した。元の観測時刻・producer/source/control
+authority、sample間のpredicate continuity、producer state/outbox、`show derived RESOURCE_ID` を実装した。
+source復旧時のscope再利用・inactive providerの旧Up・新authorityへの旧Up grace継承をFAILで固定し修正した。
+全体check/Race/vet/static両arch build、実daemonの管理8.21秒・Derived7.25秒、
+QEMU Derived37.17秒・管理/実SSH31.72秒がPASS。
+関連QEMU EventRule56.57秒・二WAN Health/PBR70.80秒・BFD50.96秒も同じproduct/test sourceでPASS。
+worker/control/logging再起動、旧通知409、同じReady health processのmax_age失効、実SQLite失敗の
+503と回復を検証した。[証跡と未検証範囲](evidence/2026-10-24-live-derived.md) を参照。
+評価はsampled current statusであり、全raw protocol遷移のlossless journalではない。
+他status provider、Derived連鎖、作用/federation、retention/規模/実機受入等は残る。
+作業単位・parityの完了判定は据え置く。
+
+先行product checkpoint `6185ba8` ではEventRule resourceを実control workerへ接続した。
 条件/lifecycleにfenceしたdurable consumer・timer・履歴publicationとbounded healthを追加し、
 全体check/Race/vet/両arch build、実daemon29.09秒、新QEMU59.42秒がPASS。
 実DBの保存失敗、不健全なcommit応答/health、解除後の欠落・重複なしの回復も検証した。
 関連management・二WAN Health/PBR・BFDは先行259380dで再検証した。
 期限一致の入力優先と未観測revision gapも追加testで検証した。
 [証跡・検出した失敗・未完了範囲](evidence/2026-10-24-live-eventrule.md) を参照。
-protocol event、DerivedEventの実行経路、作用/federation、規模/実機受入等は残る。
+当時のDerivedEvent実行経路の残作業は上記のHealthCheck範囲を追加した。全providerや作用の完了ではない。
 
 先行component checkpoint `cb2bc11` では履歴cursorなしのproducer state/outboxを
 追加し、空journalのDerived初回出力、実SQLite失敗/FULL/SIGKILL、clean check/buildと
 QEMUの既存control・二回起動保持がPASSした。
 [producer保存の証跡と残作業](evidence/2026-10-24-producer-state.md) を参照。
-live controllerへの接続と新producerのQEMU電源断受入は残る。
+live controllerへの接続は後続checkpointで追加した。新producerのQEMU電源断受入は残る。
 
 先行 `8342440` ではDerivedEventの有限snapshot評価と
 永続化可能なhysteresisを追加し、固定routerd比較、実SQLiteのtimer復元/失敗/retry、
 期限切れ時のunknown、clean check/Race/vet/static両arch buildがPASSした。
 当時の残作業のうち、input cursorなしproducer保存は後続で追加した。
-resource/daemon接続、作用/federation等は残る。
+当時はresource/daemon接続も未完了だった。後続でHealthCheck範囲を追加したが、作用/federation等は残る。
 [証跡と未検証範囲](evidence/2026-10-24-derived-evaluator.md) を参照。作業単位全体や実機利用可能性の合格とはしない。
 
 ## 最初の実装 checkpoint

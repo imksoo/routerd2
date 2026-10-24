@@ -1,0 +1,6 @@
+=== RUN   TestLiteralDerivedBootstrapPublishesWithoutInputHistoryAndSurvivesControlRecovery
+--- PASS: TestLiteralDerivedBootstrapPublishesWithoutInputHistoryAndSurvivesControlRecovery (0.42s)
+=== RUN   TestLifecycleSaveFailureKeepsCommittedSourceButReturnsUnhealthyAcknowledgment
+--- PASS: TestLifecycleSaveFailureKeepsCommittedSourceButReturnsUnhealthyAcknowledgment (0.28s)
+PASS
+ok  	github.com/imksoo/routerd2/internal/control	1.729s

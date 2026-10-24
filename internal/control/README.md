@@ -178,7 +178,39 @@ a cursor beyond the tip returns 409, and storage errors return 503. The page
 contains records, next_cursor and more. Each event is at most 64 KiB, keeping
 responses below the API byte limit. This is read-only history, not an effect
 execution or consumer registration API. Journal retention/capacity handling,
-protocol producers beyond configuration, DerivedEvent and federation remain open work.
+raw protocol event producers and federation remain open work. DerivedEvent
+assertion transitions are also connected through their producer state/outbox.
+
+## Current DerivedEvent observations
+
+`GET /v1/derived/{id}` reads one declared resource's finite current observation.
+Resource IDs containing `/` are supported. The response includes ID, lifetime,
+checkpoint version, state, original `observed_nanos`, `valid_until_nanos` and
+publication pending status. `show derived RESOURCE_ID` uses this endpoint in
+operational and candidate CLI sessions; it never reads historical assertions as
+a fallback. Missing resources return 404; persistence/evaluation errors return
+503 without a partial current view.
+
+The control worker accepts typed `derived_event` specs. Initially supported
+references are HealthCheck scalar fields, keyed by ResourceProgram resource ID,
+not service name. Missing/inactive/stale providers are unknown. Own `when` and
+dependency conditions fence activation immediately; old source/worker/control
+authority cannot grant current asserted status. Views also require a live
+evaluator lease of at most five seconds and cannot renew it themselves.
+
+Producer state and output jobs commit atomically before historical publication.
+Stable IDs make retries after failed completion ACKs idempotent in this journal.
+Unchanged unconditional definitions survive control restart without re-emitting
+their initial value; fresh current input is still mandatory. Definition/removal/
+activation changes fence older jobs. Evaluation samples current predicates;
+accepted between-poll transitions are tracked for hold continuity, not replayed
+as a lossless protocol event stream.
+
+`health.derived` contains revision, active count, pending flag and bounded error.
+Errors also set `State.derived_error`, make health unhealthy and prevent trial
+confirmation. Committed source remains authoritative when post-save registry
+work fails. An unused DerivedEvent component performs no registry writes.
+Other providers, chaining, retention, effects and federation remain open work.
 
 ## Durable EventRule resources
 

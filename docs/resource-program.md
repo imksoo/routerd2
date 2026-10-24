@@ -54,6 +54,7 @@ resources:
 | `vrrp_guard` | VIP の既存 input guard intent |
 | `service` | 既存 DHCP4/6、RA、DNS、VRRP、DS-Lite discovery、BGP、BFD の typed worker 設定 |
 | `event_rule` | durable journalの履歴pattern評価と、同journalへの安定ID付き出力 |
+| `derived_event` | 有限な現在statusのpredicate評価、安定時間とdurableなassert/retract履歴 |
 
 `interface.addresses` と `interface.address_options` には設定しない。
 アドレスは独立した `address` resource とし、options は `address.options` に置く。
@@ -80,7 +81,8 @@ resources:
 
 `event_rule` は固定routerdのtyped pattern/emitを使う。all_of、any_of、sequence、window、
 absence、throttle、debounce、countをcompile時に検証し、inactiveな不正定義も副作用前に拒否する。
-現時点のlive input producerは設定commit/confirm/rollbackである。Health等のprotocolイベントは未接続。
+live input producerは設定commit/confirm/rollbackとDerivedEventのassert/retractである。
+Health等のraw protocolイベントは未接続。
 新規activationはjournal末尾から始め、過去の履歴を初期集計へ取り込まない。
 集計状態・入力cursor・出力jobは同時保存し、control再起動後に再開する。
 出力は `show observations` で確認でき、作用実行やprotocol leaseにはならない。
@@ -99,7 +101,71 @@ timerを評価し、期限と同時の入力を優先する。保存済みtimer�
 出力outboxのpending有無、bounded errorを返す。保存/publication失敗時はhealthを不健全にし、
 正本の設定と未処理状態を保持して再試行する。API応答が503でも、設定がrollbackされたと解釈しない。
 一つのsourceは最大128 rule。schedulerは200ms周期・bounded batchで、規模・遅延の性能受入や
-長期運用用のretention/archiveは未完了。DerivedEvent resourceもまだ受け付けない。
+長期運用用のretention/archiveは未完了。
+
+## DerivedEvent
+
+```yaml
+schema_version: 2
+resources:
+  - id: wan-check
+    service:
+      name: wan
+      health:
+        interface: eth0
+        source_address: 192.0.2.2
+        protocol: tcp
+        target: 192.0.2.1
+        port: 443
+        interval_ms: 1000
+        timeout_ms: 500
+  - id: wan-derived
+    derived_event:
+      topic: routerd.operator.wan
+      inputs:
+        - field: "${HealthCheck/wan-check.status.phase}"
+          equals: Healthy
+      emitInitial: true
+      hysteresis: 2s
+```
+
+`derived_event` は固定routerdのtyped specを使う。参照のresource名は `service.name` ではなく
+ResourceProgramの `id` である。`service/wan` のような `/` を含むIDも使える。
+上の例では対象への経路とアドレスは別resourceまたは既存の管理経路で用意する。
+status参照だけでは暗黙のstart/readiness依存辺を作らない。停止中のproviderはunknownになる。
+
+現在対応するproviderはHealthCheckで、scalar fieldは `active`、`phase`、`lastResult`、
+`lastCheckedAt`、`lastTransitionAt`、`consecutivePassed`、`consecutiveFailed`、`failureCount`、
+`message`、`lastSuccessTime`、`lastFailureTime`、`firstFailureTime`。
+観測済みの空optional fieldと観測なしは区別する。他Kind、構造化field、DerivedEvent連鎖は
+compile時に拒否し、対応済みとは数えない。inactiveな宣言も全sourceで型検証する。
+
+現在のboot/source/control、worker generation、producer epoch、sequenceと一致し、元の観測時刻が
+未来でなく、producer期限・supervisor観測期限が残るsampleだけを読む。pollやHTTP GETでは
+観測時刻や期限を延長しない。unknownは保留中のholdを取り消し、asserted booleanを返さず、
+retractionを捏造しない。保存済みUpは現在の有限観測の代用にならない。worker/controlの
+authorityが変わった後は、古いUpをretraction待ちとして表示しない。
+
+hysteresisはBOOTTIMEで両方向に適用する。runtimeは受理した通知ごとにpredicate truthと
+authorityの連続性を記録し、投影間のflapやlease gapをまたいだhold成立を防ぐ。
+同じtruthの連続更新は期限を保つ。評価は現在statusのsampled reconciliationであり、
+すべての短いprotocol遷移を漏れなく履歴化する契約ではない。
+
+producer stateと出力jobは同時保存する。新activationは初回出力を空journalにも保存できる。
+無条件かつ同じ定義の宣言はcontrol再起動で初回eventを重複させず、現在値だけは取得し直す。
+定義変更・削除・条件失効では旧activationの出力を公開しない。
+自身の `when` / 依存条件の有効期限も現在値を制限する。
+
+`show derived wan-derived` はread-onlyの `GET /v1/derived/{id}` を読み、state、元の観測時刻、
+有効期限とpublication待ちを返す。inactive/unknownではassertedを省略する。
+現在のinput identityと最大5秒のevaluator leaseも必要で、GETはleaseを更新しない。
+保存/評価失敗は503、未宣言IDは404。履歴へのfallbackはしない。
+`/v1/health` の `derived` はrevision、active件数、pending有無とbounded errorを持つ。
+エラー時は不健全にし、confirmed trialの確定を防ぐが、commit済みsourceを捨てない。
+
+最大128 DerivedEvent、全体で参照1,024個、1回の評価16宣言・publication8件のbounded処理である。
+他provider、raw protocol event、作用の権限/idempotency、federation、retention、規模・性能受入は残る。
+[実daemon・QEMUの証跡と範囲](evidence/2026-10-24-live-derived.md) を参照。
 
 ## graph、owner と検証
 

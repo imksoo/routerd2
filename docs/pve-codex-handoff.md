@@ -4,9 +4,22 @@
 対象: `https://github.com/imksoo/routerd2`
 
 **継続ゴール:** 全残実装・必要試験・対象実機での利用可能性の受入まで進める。
-部分checkpointでは完了しない。最新product checkpointは `6185ba8`。
+部分checkpointでは完了しない。最新product checkpointは `1ba9020`。
 
-EventRuleを `event_rule` resourceから実control workerへ接続した。新activationのtip開始、
+HealthCheckの有限なtyped current statusからDerivedEvent、durable journal、EventRuleまでを接続した。
+`derived_event` resource、producer state/outbox、元観測時刻とauthorityのfence、sample間の
+predicate continuity、read-onlyの `show derived RESOURCE_ID` を実装した。
+source A→B→Aのscope再利用、inactive providerの旧Up、新authorityへの旧assertionのgrace継承を
+local FAILで再現して修正した。全体check/Race/vet/static両arch buildと、実daemonの
+管理8.21秒・Derived7.25秒、QEMU Derived37.17秒・管理/実SSH31.72秒がPASS。
+同じproduct/test sourceの関連QEMU EventRule56.57秒、二WAN Health/PBR70.80秒、BFD50.96秒もPASS。
+SIGSTOPした同じReady health processの観測をconsumer max_ageで失効させ、旧通知409、
+control/health/logging再起動、実SQLite書込失敗の503と解除後の回復を検証した。
+[live DerivedEventの証跡と残作業](evidence/2026-10-24-live-derived.md) を参照。
+他status provider・構造化field・Derived連鎖・raw protocol event・作用/federation・長期運用と
+規模/対象実機受入は残る。次は他のtyped status providerとprotocol event producerを進める。
+
+先行 `6185ba8` ではEventRuleを `event_rule` resourceから実control workerへ接続した。新activationのtip開始、
 state/cursor/outbox・timer復元、定義/条件/source fencing、安定ID付き履歴publication、
 bounded healthを実装した。無条件ruleはlogging停止・control再起動でも集計を保持する。
 timer/input順序、投影間flap、無関係なdegradedでの誤停止をlocal FAILで固定して修正した。
@@ -15,20 +28,20 @@ timer/input順序、投影間flap、無関係なdegradedでの誤停止をlocal 
 先行259380dの関連QEMU management34.13秒、二WAN Health/PBR75.02秒、BFD52.17秒もPASS。
 初回QEMUのhealth503による失敗は保存し、合格へ含めない。
 [live EventRuleの証跡と残作業](evidence/2026-10-24-live-eventrule.md) を参照。
-次はprotocol event producerとDerivedEventのresource/live status接続を進める。
+その時点の残作業だったHealthCheck→DerivedEventの接続は、上記後続checkpointで実装した。
 
 履歴cursorに依存しないproducer state/outboxを追加した。空journalでDerived初回出力を
 保存する実SQLite fixture、state保存失敗、SQLITE_FULL、16競合、SIGKILL/WALがPASS。
 schemaは4で未公開1/2/3をread-only拒否。clean check/Race/vet/static両arch buildと、
 QEMU実SSH/control再起動45.74秒、既存config/event/SSH保持の二回起動137.18秒がPASS。
 同じclean ELFで実daemon二WAN TCP/UDP/PCAP・全復旧sequenceもRace込み30.09秒PASS。
-live producer/controllerには未接続。新producerのQEMU電源断受入とも区別する。
+当時はlive producer/controllerに未接続。後続で接続したが、新producerのQEMU電源断受入とは区別する。
 [producer保存の証跡と残作業](evidence/2026-10-24-producer-state.md) を参照。
 
 DerivedEventのpure evaluatorを追加した。有限snapshot、明示的unknown、BOOTTIME hysteresis、
 元の観測時刻と同じwitnessの期限、安定出力IDを実装した。固定routerdとの直接比較、
 実SQLiteのhold復元/保存失敗/retry/期限切れ、clean check/Race/vet/両arch buildがPASS。
-resource/daemonには未接続。空journalのbootstrap保存部は上記の後続checkpointで追加した。
+当時はresource/daemonに未接続。空journalのbootstrap保存部とlive HealthCheck接続は後続で追加した。
 [Derived componentの証跡と残作業](evidence/2026-10-24-derived-evaluator.md) を参照。
 
 state/cursor/outboxの同時保存、timer version CAS、cursorだけの巻き戻し拒否を追加した。
@@ -61,7 +74,7 @@ read-onlyのbounded `/v1/observations` とhealthのpending/errorを追加した�
 BFD admin watchdogは2秒、control freshnessは500ms。
 [保存部・BFD方針の証跡](evidence/2026-10-24-events-clock.md) に変更経緯を保持する。
 
-未完了はprotocol event producer、EventRuleの規模/実packet条件受入、DerivedEvent、consumer作用、federation、
+未完了はraw protocol event producer、EventRuleの規模/全条件受入、他Derived status provider、consumer作用、federation、
 retention/archive/容量alarm、一般status reference、多binary runtime/startup handoff等の全計画。
 対象機種・NIC・性能条件も未確定で、実機利用可能とはまだ判定しない。
 完了したdetached worktreeは証跡を回収して削除した。private原log/manifest・診断patchは
