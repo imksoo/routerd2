@@ -19,7 +19,7 @@
 [    0.000000] tsc: Detected 3293.784 MHz processor
 [    0.008831] last_pfn = 0x1ffe0 max_arch_pfn = 0x10000000000
 [    0.010192] MTRR map: 4 entries (3 fixed + 1 variable; max 19), built from 8 variable MTRRs
-[    0.010650] x86/PAT: Configuration [0-7]: WB  WC  UC- UC  WB  WP  UC- WT  
+[    0.010650] x86/PAT: Configuration [0-7]: WB  WC  UC- UC  WB  WP  UC- WT
 [    0.043733] found SMP MP-table at [mem 0x000f5480-0x000f548f]
 [    0.047275] Using GB pages for direct mapping
 [    0.053566] RAMDISK: [mem 0x1bcd3000-0x1ffdffff]
@@ -82,7 +82,7 @@
 [    0.123887] printk: log buffer data + meta data: 131072 + 458752 = 589824 bytes
 [    0.124514] Dentry cache hash table entries: 65536 (order: 7, 524288 bytes, linear)
 [    0.124827] Inode-cache hash table entries: 32768 (order: 6, 262144 bytes, linear)
-[    0.130411] Fallback order for Node 0: 0 
+[    0.130411] Fallback order for Node 0: 0
 [    0.131058] Built 1 zonelists, mobility grouping on.  Total pages: 130942
 [    0.131129] Policy zone: DMA32
 [    0.133457] mem auto-init: stack:all(zero), heap alloc:on, heap free:off
@@ -264,7 +264,7 @@
 [    2.168001] ACPI: \_SB_.GSIA: Enabled at IRQ 16
 [    2.190443] ahci 0000:00:1f.2: AHCI vers 0001.0000, 32 command slots, 1.5 Gbps, SATA mode
 [    2.190782] ahci 0000:00:1f.2: 6/6 ports implemented (port mask 0x3f)
-[    2.191130] ahci 0000:00:1f.2: flags: 64bit ncq only 
+[    2.191130] ahci 0000:00:1f.2: flags: 64bit ncq only
 [    2.226125] scsi host0: ahci
 [    2.240151] scsi host1: ahci
 [    2.248647] scsi host2: ahci

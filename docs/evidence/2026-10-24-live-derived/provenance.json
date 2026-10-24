@@ -130,6 +130,7 @@
   "normalizations": [
     "workspace/private staging paths",
     "Go pointer addresses",
-    "public kernel certificate identifier"
+    "public kernel certificate identifier",
+    "trailing whitespace from kernel serial lines"
   ]
 }
