@@ -51,6 +51,32 @@ func TestProjectionGuardReadinessAndOwnerClosure(t *testing.T) {
 	}
 }
 
+func TestProjectionExplainsInactiveAndUnreadyResources(t *testing.T) {
+	for _, tc := range []struct {
+		values     map[string]Truth
+		wan, route string
+	}{
+		{nil, "when_indeterminate", "dependency_indeterminate"},
+		{map[string]Truth{"health": False}, "when_false", "dependency_false"},
+		{map[string]Truth{"health": True}, "ready_when_indeterminate", "dependency_indeterminate"},
+		{map[string]Truth{"health": True, "address": False}, "ready_when_false", "dependency_false"},
+		{map[string]Truth{"health": True, "address": True}, "", ""},
+	} {
+		_, states, err := Project(guardedProgram(), FactSnapshot{values: tc.values})
+		if err != nil {
+			t.Fatal(err)
+		}
+		encoded, _ := json.Marshal(states)
+		var view map[string]struct{ Reason, Dependency string }
+		if err := json.Unmarshal(encoded, &view); err != nil {
+			t.Fatal(err)
+		}
+		if view["wan"].Reason != tc.wan || view["route"].Reason != tc.route || tc.route != "" && view["route"].Dependency != "wan" || view["other"].Reason != "" {
+			t.Fatalf("unexplained projection: %s", encoded)
+		}
+	}
+}
+
 func TestProjectionValidatesInactiveDeclarations(t *testing.T) {
 	p := guardedProgram()
 	p.Resources[0].When = &FactCondition{Fact: "health", All: []FactCondition{}}
