@@ -326,6 +326,10 @@ func recoverAndCut(ctx context.Context, client, manager *localapi.Client, state 
 	if err = captureCompleted(ctx, &w, true); err != nil {
 		return err
 	}
+	if err = await(ctx, "all original raw events durably archived", func() error { return requireArchivedObservations(ctx, &w) }); err != nil {
+		return err
+	}
+
 	return emitAndWait(w, true)
 }
 
@@ -405,6 +409,9 @@ func finishRecovery(ctx context.Context, client, manager *localapi.Client, w wit
 	}
 	w.Revision = 2
 	if err = captureCompleted(ctx, &w, true); err != nil {
+		return err
+	}
+	if err = requireArchivedObservations(ctx, &w); err != nil {
 		return err
 	}
 	return emitAndWait(w, false)

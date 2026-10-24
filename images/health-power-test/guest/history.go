@@ -137,3 +137,28 @@ func history(ctx context.Context, client *localapi.Client) ([]events.Record, err
 		after = page.NextCursor
 	}
 }
+
+// This assertion runs after verified logical publication but before the second
+// host cut. Every original raw record must already be in the cold table, not
+// merely readable from a still-hot body. The later boot repeats the assertion.
+func requireArchivedObservations(ctx context.Context, w *witness) error {
+	uri := url.URL{Scheme: "file", Path: filepath.Join(stateDir, "events", "journal.sqlite3"), RawQuery: url.Values{"mode": {"ro"}, "_pragma": {"busy_timeout(2000)"}}.Encode()}
+	db, err := sql.Open("sqlite", uri.String())
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	for _, o := range w.Observations {
+		var cursor uint64
+		var hot, size int
+		var digest []byte
+		if err = db.QueryRowContext(ctx, `SELECT e.cursor,length(e.body),a.original_bytes,a.digest FROM events e JOIN event_archive a ON a.cursor=e.cursor WHERE e.event_id=?`, o.ID).Scan(&cursor, &hot, &size, &digest); err != nil {
+			return err
+		}
+		if cursor != o.Cursor || hot != 0 || size <= 0 || hex.EncodeToString(digest) != o.SHA256 {
+			return errors.New("raw history is not identically archived before power cut")
+		}
+	}
+	w.ArchivedObservations = len(w.Observations)
+	return nil
+}

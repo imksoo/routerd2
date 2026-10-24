@@ -99,6 +99,9 @@ def validate_witness(w, phase):
     pending = len(items) if phase == "produce" else 0
     if type(w.get("pending_count")) is not int or w["pending_count"] != pending:
         raise RuntimeError("pending local ACK does not match the cut point")
+    archived = 0 if phase == "produce" else len(items)
+    if type(w.get("archived_observations")) is not int or w["archived_observations"] != archived:
+        raise RuntimeError("raw history must be cold before second cut and after recovery")
     completed = completed_map(w.get("completed"))
     if phase != "produce" and {key[0] for key in completed} != {0, 1}:
         raise RuntimeError("both consumer and producer completed identities are required")
