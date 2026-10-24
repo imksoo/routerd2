@@ -280,6 +280,20 @@ func TestDaemonConfigurationAndRecovery(t *testing.T) {
 		t.Fatal("control SIGKILL changed or duplicated durable lifecycle history")
 	}
 	t.Log("durable commit/confirm/rollback observations survived control SIGKILL with stable IDs/cursors")
+	observationSession, err := client.NewSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	observationOutput, err := observationSession.CombinedOutput("show observations after 0 limit 16")
+	_ = observationSession.Close()
+	var operatorHistory control.ObservationPage
+	if err != nil || json.Unmarshal(observationOutput, &operatorHistory) != nil {
+		t.Fatalf("SSH observation history: %v %s", err, observationOutput)
+	}
+	c2, _ := json.Marshal(operatorHistory.Records)
+	if !bytes.Equal(a, c2) {
+		t.Fatal("SSH observations differ from durable API history after control recovery")
+	}
 	// Removal must release the actual bound sockets, not merely hide status.
 	state = control.State{}
 	if err = ctl.Do(ctx, "GET", "/v1/config", nil, &state); err != nil {
