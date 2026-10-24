@@ -11288,6 +11288,31 @@
         "Full work-package and physical/NIC/performance qualification"
       ],
       "parity_flags_unchanged": true
+    },
+    {
+      "id": "durable-observation-cli",
+      "date": "2026-10-24",
+      "status": "implemented_with_local_and_real_ssh_acceptance",
+      "code_checkpoint": "39f52e0",
+      "work_packages": [
+        "CORE-04",
+        "MGMT-01"
+      ],
+      "evidence": "docs/evidence/2026-10-24-observations-cli.md",
+      "implemented": [
+        "Bounded show observations command in operational/candidate modes, explicit cursor continuation and strict option validation",
+        "Command/filter completion and help"
+      ],
+      "validation": [
+        "CLI/management Race Detector and completion tests: pass",
+        "Clean make check and static amd64/arm64 builds: pass",
+        "Real SSH command after control SIGKILL matches persistent API records in QEMU: pass 36.76s"
+      ],
+      "remaining": [
+        "CORE-04 EventRule/DerivedEvent and consumer effects, protocol producers, federation and retention",
+        "Remaining implementation plan and physical target qualification"
+      ],
+      "parity_flags_unchanged": true
     }
   ],
   "delivery_goal": {

@@ -81,6 +81,10 @@ strict bounded履歴API、healthのdelivery errorを実装した。
 [設定イベント接続の証跡](evidence/2026-10-24-config-events.md) を参照。
 protocol event、EventRule/DerivedEvent、consumer作用、federation、retention等は残る。
 
+`39f52e0` で `show observations` のbounded cursor読み取りと補完を追加した。
+全体check/static buildと、control再起動後に実SSHから永続APIと同じ履歴を読むQEMUがPASS。
+[CLI証跡](evidence/2026-10-24-observations-cli.md) を参照。全計画の判定は据え置く。
+
 **routerd と routerd2 は別製品である。** routerd は稼働中の機能参照元、routerd2 は未リリースの開発対象。
 現在の routerd2 の二バイナリー構成・設定書式・内部API・保存形式には利用者がいないため、後方互換性を要求しない。
 routerd2 の設定書式も新設計に合わせて変更できる。引き継ぐ routerd の機能範囲は維持する。

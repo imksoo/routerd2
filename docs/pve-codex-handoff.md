@@ -4,7 +4,11 @@
 対象: `https://github.com/imksoo/routerd2`
 
 **継続ゴール:** 全残実装・必要試験・対象実機での利用可能性の受入まで進める。
-部分checkpointでは完了しない。最新コードcheckpointは `7bdf27f`。
+部分checkpointでは完了しない。最新コードcheckpointは `39f52e0`。
+
+`show observations [after CURSOR] [limit 1..16]` を運用/candidateモードと補完へ追加した。
+全体check/static buildと、control SIGKILL後に実SSHでAPIと同じ履歴を読むQEMU試験がPASS。
+[CLIの証跡](evidence/2026-10-24-observations-cli.md) を参照。
 
 設定commit/confirm/confirmed rollbackのproducer outboxを設定本体と同時保存し、
 control workerからWAL/FULL journalへ転送する。再送は同じIDでdedupし、容量不足では
