@@ -2,6 +2,7 @@ package runtimeplan
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -12,6 +13,53 @@ import (
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 	"github.com/imksoo/routerd2/internal/supervisor"
 )
+
+func TestConditionHoldTimerAndFlapBetweenProjections(t *testing.T) {
+	ctx := context.Background()
+	source := conditionSource()
+	if err := json.Unmarshal([]byte(`{"fact":"service.wan.active","for":"40ms","max_age":"1s"}`), source.Resources[1].When); err != nil {
+		t.Fatal(err)
+	}
+	n := &memoryNetwork{}
+	r := New(t.TempDir(), t.TempDir(), n)
+	r.manager = &observedManager{generation: 1}
+	if err := r.ApplyConfig(ctx, 1, source); err != nil {
+		t.Fatal(err)
+	}
+	lease := lease4(time.Now().Add(time.Hour))
+	sequence := uint64(0)
+	publish := func(active bool) {
+		t.Helper()
+		sequence++
+		lease.Active = active
+		if err := r.Accept(ctx, update(t, r, "service.wan", sequence, lease)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	publish(true)
+	reconcileConditions(t, r)
+	if conditionalRoute(n) {
+		t.Fatal("route activated before hold time")
+	}
+	time.Sleep(50 * time.Millisecond)
+	reconcileConditions(t, r) // timer, without a new observation
+	if !conditionalRoute(n) {
+		t.Fatal("hold never released without a new protocol message")
+	}
+	// Both callbacks arrive before the next projection. The false sample must
+	// break continuity even though the projected snapshots would both be true.
+	publish(false)
+	publish(true)
+	reconcileConditions(t, r)
+	if conditionalRoute(n) {
+		t.Fatal("flap between projections did not reset hold")
+	}
+	time.Sleep(50 * time.Millisecond)
+	reconcileConditions(t, r)
+	if !conditionalRoute(n) {
+		t.Fatal("continuous recovery failed after flap")
+	}
+}
 
 type observedManager struct {
 	memoryManager
