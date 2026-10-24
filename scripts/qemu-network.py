@@ -132,6 +132,13 @@ SUITES = {
         "commands": True,
         "description": "two-binary daemon BFD-controlled BGP sessions and expiry",
     },
+    "daemon-bfd-derived": {
+        "package": "./internal/integration", "binary": "daemon.test",
+        "test": "TestDaemonBFDDerivedCurrentStatus",
+        "marker": "ROUTERD_BFD_DERIVED_DAEMON_TEST", "timeout": 200,
+        "commands": True,
+        "description": "finite BFD status to durable DerivedEvent/EventRule and process recovery",
+    },
     "dhcp": {
         "package": "./internal/protocol/dhcp4", "binary": "dhcp.test",
         "test": "TestIsolatedNativeDHCPAndRA",

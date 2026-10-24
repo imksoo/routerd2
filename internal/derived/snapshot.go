@@ -26,6 +26,7 @@ type Value struct {
 	Text                        string
 	Known                       bool
 	Scope, Origin               string
+	Continuity                  string
 	ObservedNanos, ExpiresNanos uint64
 }
 
@@ -52,10 +53,10 @@ func NewSnapshot(id, scope string, now uint64, wall time.Time, values map[string
 	s := Snapshot{id: id, scope: scope, now: now, wall: wall.UTC(), values: make(map[string]Value, len(values))}
 	bytes := 0
 	for key, value := range values {
-		if !token(key, 512) || len(value.Text) > 4096 || !utf8.ValidString(value.Text) || len(value.Scope) > 1024 || len(value.Origin) > 256 || !utf8.ValidString(value.Scope) || !utf8.ValidString(value.Origin) {
+		if !token(key, 512) || len(value.Text) > 64<<10 || !utf8.ValidString(value.Text) || len(value.Scope) > 1024 || len(value.Origin) > 256 || len(value.Continuity) > 128 || !utf8.ValidString(value.Continuity) || !utf8.ValidString(value.Scope) || !utf8.ValidString(value.Origin) {
 			return Snapshot{}, errors.New("invalid bounded derived observation")
 		}
-		bytes += len(key) + len(value.Text) + len(value.Scope) + len(value.Origin)
+		bytes += len(key) + len(value.Text) + len(value.Scope) + len(value.Origin) + len(value.Continuity)
 		if bytes > 2<<20 {
 			return Snapshot{}, errors.New("derived snapshot exceeds 2 MiB")
 		}
@@ -87,7 +88,11 @@ func (s Snapshot) read(field string) (string, bool, uint64, uint64) {
 }
 
 func (s Snapshot) authority(refs []string) string {
-	body, _ := json.Marshal([]any{s.producerAuthority(refs), s.continuity, s.continuousSince})
+	tokens := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		tokens = append(tokens, s.values[ref].Continuity)
+	}
+	body, _ := json.Marshal([]any{s.producerAuthority(refs), s.continuity, s.continuousSince, tokens})
 	sum := sha256.Sum256(body)
 	return hex.EncodeToString(sum[:])
 }

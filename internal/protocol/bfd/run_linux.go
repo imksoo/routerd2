@@ -70,7 +70,7 @@ func newWorker(cfg Config, device transport, clock Clock, jitter func(uint32) ui
 }
 
 func (w *worker) snapshot(active bool, dropped uint64) Snapshot {
-	s := Snapshot{Resource: w.config.Resource, Interface: w.config.Interface, SourceAddress: w.config.SourceAddress, BootID: w.clock.BootID, Active: active, UpdatedAt: w.clock.WallTime, Rejected: w.rejected, ReceiveDropped: dropped, LastError: w.lastError, Peers: make([]PeerState, len(w.sessions))}
+	s := Snapshot{Resource: w.config.Resource, Interface: w.config.Interface, SourceAddress: w.config.SourceAddress, BootID: w.clock.BootID, Active: active, ObservedNanos: uint64(w.clock.BoottimeNanoseconds), ExpiresNanos: uint64(w.clock.BoottimeNanoseconds) + uint64(StatusLifetime), UpdatedAt: w.clock.WallTime, Rejected: w.rejected, ReceiveDropped: dropped, LastError: w.lastError, Peers: make([]PeerState, len(w.sessions))}
 	for i, peer := range w.sessions {
 		s.Peers[i] = peer.snapshot(active)
 	}

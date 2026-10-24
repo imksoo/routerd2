@@ -16,6 +16,7 @@ import (
 	"github.com/imksoo/routerd2/internal/derived"
 	"github.com/imksoo/routerd2/internal/eventrule"
 	"github.com/imksoo/routerd2/internal/network"
+	"github.com/imksoo/routerd2/internal/protocol/bfd"
 	"github.com/imksoo/routerd2/internal/protocol/health"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
@@ -203,7 +204,8 @@ func compile(source Program, referenceTargets map[string]Resource) (Plan, error)
 			}
 			for _, ref := range compiled.References() {
 				target, exists := referenceTargets[ref.Resource]
-				if !exists || ref.Kind != "HealthCheck" || target.Service == nil || target.Service.Health == nil || !health.ScalarFieldSupported(ref.Field) {
+				supported := exists && target.Service != nil && ((ref.Kind == "HealthCheck" && target.Service.Health != nil && health.ScalarFieldSupported(ref.Field)) || (ref.Kind == "BFD" && target.Service.BFD != nil && bfd.StatusFieldSupported(ref.Field)))
+				if !supported {
 					return Plan{}, fmt.Errorf("derived event %s has unsupported or missing typed reference %s", r.ID, ref.Key())
 				}
 				derivedRefs[ref.Key()] = true

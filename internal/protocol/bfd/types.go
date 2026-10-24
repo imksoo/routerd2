@@ -60,6 +60,8 @@ type Snapshot struct {
 	SourceAddress  string      `json:"source_address"`
 	BootID         string      `json:"boot_id"`
 	Active         bool        `json:"active"`
+	ObservedNanos  uint64      `json:"observed_nanos"`
+	ExpiresNanos   uint64      `json:"expires_nanos"`
 	UpdatedAt      time.Time   `json:"updated_at"`
 	Peers          []PeerState `json:"peers"`
 	Rejected       uint64      `json:"rejected"`
@@ -203,7 +205,7 @@ func ValidateSnapshot(c Config, s Snapshot) error {
 	if err := Validate(c); err != nil {
 		return err
 	}
-	if s.Resource != c.Resource || s.Interface != c.Interface || s.SourceAddress != c.SourceAddress || !validBootID(s.BootID) || !validWall(s.UpdatedAt) || len(s.Peers) != len(c.Peers) || len(s.LastError) > 256 {
+	if s.ObservedNanos == 0 || s.ObservedNanos > math.MaxInt64 || s.ExpiresNanos != s.ObservedNanos+uint64(StatusLifetime) || s.Resource != c.Resource || s.Interface != c.Interface || s.SourceAddress != c.SourceAddress || !validBootID(s.BootID) || !validWall(s.UpdatedAt) || len(s.Peers) != len(c.Peers) || len(s.LastError) > 256 {
 		return errors.New("BFD snapshot scope or bounded metadata is invalid")
 	}
 	seenDiscriminators := map[uint32]bool{}
@@ -216,7 +218,7 @@ func ValidateSnapshot(c Config, s Snapshot) error {
 		// Both counters saturate. Once both reached MaxUint64 an additional
 		// Up transition cannot be represented, but every unsaturated state must
 		// retain the exact outstanding Up/down balance.
-		if p.Address != cfg.Address || !validState(p.State) || !validState(p.RemoteState) || p.Diagnostic > 31 || p.RemoteDiagnostic > 31 || p.LocalDiscriminator == 0 || seenDiscriminators[p.LocalDiscriminator] || p.SourcePort < 49152 || p.RequiredMinRxMicroseconds != uint32(cfg.MinRxMilliseconds)*1000 || p.UpTransitions > p.Transitions || p.DownTransitions > p.UpTransitions || !balanced {
+		if p.LastReceivedBootNanoseconds > int64(s.ObservedNanos) || p.Address != cfg.Address || !validState(p.State) || !validState(p.RemoteState) || p.Diagnostic > 31 || p.RemoteDiagnostic > 31 || p.LocalDiscriminator == 0 || seenDiscriminators[p.LocalDiscriminator] || p.SourcePort < 49152 || p.RequiredMinRxMicroseconds != uint32(cfg.MinRxMilliseconds)*1000 || p.UpTransitions > p.Transitions || p.DownTransitions > p.UpTransitions || !balanced {
 			return errors.New("BFD peer snapshot identity, state or counters are invalid")
 		}
 		seenDiscriminators[p.LocalDiscriminator] = true

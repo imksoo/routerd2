@@ -28,6 +28,15 @@ func identity(parts ...any) string {
 }
 
 func (r *Runtime) rawDerivedSnapshotLocked(facts resourceprogram.FactSnapshot) (derived.Snapshot, error) {
+	// BFD publishes independently of mu. Capture its immutable evidence before
+	// the clock, so a newer receive cannot appear to come from the future after
+	// waiting for the cache lock. Never hold bfdMu during clock I/O/evaluation.
+	r.bfdMu.Lock()
+	bfdSources := make(map[string]bfdBinding, len(r.bfdSources))
+	for name, owner := range r.bfdSources {
+		bfdSources[name] = owner
+	}
+	r.bfdMu.Unlock()
 	clock, err := bfd.ReadClock()
 	if err != nil {
 		return derived.Snapshot{}, err
@@ -56,10 +65,13 @@ func (r *Runtime) rawDerivedSnapshotLocked(facts resourceprogram.FactSnapshot) (
 		byID[resource.ID] = resource
 	}
 	type observed struct {
-		known    bool
-		snapshot health.Snapshot
-		origin   string
-		until    uint64
+		known       bool
+		snapshot    health.Snapshot
+		bfdSnapshot bfd.Snapshot
+		bfdConfig   bfd.Config
+		isBFD       bool
+		origin      string
+		until       uint64
 	}
 	providers := map[string]observed{}
 	values := map[string]derived.Value{}
@@ -81,10 +93,28 @@ func (r *Runtime) rawDerivedSnapshotLocked(facts resourceprogram.FactSnapshot) (
 					}
 				}
 			}
+			if target.Service != nil && target.Service.BFD != nil && lifecycles[ref.Resource].Active {
+				name := target.Service.ModuleName()
+				binding, exists := r.bindings[name]
+				module, managed := r.guardStatus[name]
+				owner, cached := bfdSources[name]
+				record := owner.source.update
+				if exists && cached && owner.source.valid && managed && module.Ready && module.Generation == record.Generation && module.ConfigDigest == binding.digest && record.ConfigDigest == binding.digest && owner.binding.digest == binding.digest && clock.BootID == r.guardBootID && now < r.guardUntilNanos {
+					provider.isBFD = true
+					provider.bfdConfig = owner.source.config
+					provider.bfdSnapshot = owner.source.snapshot
+					provider.until = r.guardUntilNanos
+					provider.known = true
+					provider.origin = identity(clock.BootID, binding.digest, module.Generation, record.ProducerEpoch)
+				}
+			}
 			providers[ref.Resource] = provider
 		}
 		value := derived.Value{Scope: scope}
-		if provider.known {
+		if provider.known && provider.isBFD {
+			field, known := bfd.CurrentStatus(provider.bfdConfig, provider.bfdSnapshot, ref.Field, clock)
+			value = derived.Value{Text: field.Text, Known: known, Scope: scope, Origin: provider.origin, Continuity: field.Continuity, ObservedNanos: field.ObservedNanos, ExpiresNanos: min(field.ExpiresNanos, provider.until)}
+		} else if provider.known {
 			text, known := health.ScalarStatus(provider.snapshot, ref.Field)
 			value = derived.Value{Text: text, Known: known, Scope: scope, Origin: provider.origin, ObservedNanos: provider.snapshot.ObservedNanos, ExpiresNanos: provider.until}
 		}

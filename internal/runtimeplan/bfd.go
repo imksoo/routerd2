@@ -196,7 +196,7 @@ func validateBFDTransition(previous, update serviceconfig.Update, clock bfd.Cloc
 }
 
 func validateBFDTransitionSnapshots(previous, update serviceconfig.Update, old, next bfd.Snapshot, clock bfd.Clock) error {
-	if next.BootID != clock.BootID || clock.BoottimeNanoseconds <= 0 {
+	if next.BootID != clock.BootID || clock.BoottimeNanoseconds <= 0 || next.ObservedNanos > uint64(clock.BoottimeNanoseconds) {
 		return errors.New("BFD observation belongs to a different kernel boot")
 	}
 	for _, p := range next.Peers {
@@ -207,7 +207,7 @@ func validateBFDTransitionSnapshots(previous, update serviceconfig.Update, old, 
 	if previous.Generation != update.Generation || previous.ProducerEpoch != update.ProducerEpoch || len(previous.Snapshot) == 0 {
 		return nil
 	}
-	if old.BootID != next.BootID || len(old.Peers) != len(next.Peers) || next.Rejected < old.Rejected || next.ReceiveDropped < old.ReceiveDropped || !old.Active && next.Active {
+	if next.ObservedNanos < old.ObservedNanos || old.BootID != next.BootID || len(old.Peers) != len(next.Peers) || next.Rejected < old.Rejected || next.ReceiveDropped < old.ReceiveDropped || !old.Active && next.Active {
 		return errors.New("BFD producer rewound its identity, final fence or counters")
 	}
 	for i, p := range next.Peers {
