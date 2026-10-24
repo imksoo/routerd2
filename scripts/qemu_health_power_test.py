@@ -112,6 +112,13 @@ class PowerWitnessTests(unittest.TestCase):
             with self.subTest(log=log), self.assertRaises(RuntimeError):
                 POWER.parse_witness(log, "produce", True)
 
+    def test_live_partial_uart_line_is_not_a_cut_point(self):
+        prefix = POWER.MARKER + "_CUT "
+        line = prefix + json.dumps(phases()[0]["witness"])
+        for partial in (prefix, line[:100], line):
+            self.assertFalse(POWER.has_complete_marker(partial, prefix))
+        self.assertTrue(POWER.has_complete_marker(line + "\n", prefix))
+
 
 if __name__ == "__main__":
     unittest.main()

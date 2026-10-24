@@ -32,7 +32,7 @@ func TestHistoryWitnessPreservesFullContentAndStableCursor(t *testing.T) {
 			v[0].Event.ObservedAt = v[0].Event.ObservedAt.Add(time.Second)
 			return v
 		},
-		"changed cursor":   func(v []events.Record) []events.Record { v[0].Cursor++; return v },
+		"changed cursor":   func(v []events.Record) []events.Record { v[0].Cursor += 10; return v },
 		"zero cursor":      func(v []events.Record) []events.Record { v[0].Cursor = 0; return v },
 		"duplicate cursor": func(v []events.Record) []events.Record { v[0].Cursor = v[1].Cursor; return v },
 	} {
