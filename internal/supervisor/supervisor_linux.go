@@ -114,6 +114,10 @@ func Run(parent context.Context, options Options) error {
 	children := make([]*child, 0, len(o.Modules))
 	byName := make(map[string]*child, len(o.Modules))
 	byPID := make(map[int]*child, len(o.Modules))
+	// Keep one bounded watermark, rather than an unbounded per-name tombstone
+	// map. A worker recreated after removal must exceed every retired generation
+	// so delayed protocol reports cannot outrank its replacement's first report.
+	var retiredGeneration uint64
 	for _, spec := range o.Modules {
 		c := &child{spec: spec, status: ModuleStatus{Name: spec.Name, Role: spec.Role, Required: spec.Required, State: "pending"}, nextStart: started}
 		children = append(children, c)
@@ -209,6 +213,7 @@ func Run(parent context.Context, options Options) error {
 		kept := children[:0]
 		for _, c := range children {
 			if c.retired && c.process == nil {
+				retiredGeneration = max(retiredGeneration, c.status.Generation)
 				delete(byName, c.spec.Name)
 				continue
 			}
@@ -277,7 +282,7 @@ func Run(parent context.Context, options Options) error {
 				digest := desired[spec.Name].ConfigDigest
 				c := byName[spec.Name]
 				if c == nil {
-					c = &child{spec: spec, dynamic: true, status: ModuleStatus{Name: spec.Name, Role: spec.Role, Required: true, State: "pending", ConfigDigest: digest}, nextStart: time.Now()}
+					c = &child{spec: spec, dynamic: true, status: ModuleStatus{Name: spec.Name, Role: spec.Role, Required: true, State: "pending", ConfigDigest: digest, Generation: retiredGeneration}, nextStart: time.Now()}
 					children = append(children, c)
 					byName[spec.Name] = c
 					continue
@@ -367,6 +372,9 @@ func normalize(o Options) (Options, error) {
 }
 
 func startChild(ctx context.Context, o Options, image *os.File, c *child, events chan<- childEvent) error {
+	if c.status.Generation == ^uint64(0) {
+		return errors.New("worker generation exhausted")
+	}
 	fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM|unix.SOCK_CLOEXEC, 0)
 	if err != nil {
 		return err

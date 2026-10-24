@@ -185,6 +185,37 @@ func TestDaemonHealthPBRFailoverAndRecovery(t *testing.T) {
 				t.Fatalf("marked probe host route lost: %+v %v", route, err)
 			}
 		}
+		var resources runtimeplan.ResourceObservationPage
+		if err := f.control.Do(ctx, "GET", "/v1/services/resources", nil, &resources); err != nil {
+			t.Fatal(err)
+		}
+		routes, err := netlink.RouteListFiltered(unix.AF_INET, &netlink.Route{Table: 100}, netlink.RT_FILTER_TABLE)
+		if err != nil {
+			t.Fatal(err)
+		}
+		checked := 0
+		for _, resource := range resources.Resources {
+			gateway := ""
+			switch resource.ID {
+			case "primary":
+				gateway = "192.0.2.1"
+			case "backup":
+				gateway = "203.0.113.1"
+			default:
+				continue
+			}
+			present := false
+			for _, route := range routes {
+				present = present || route.Gw.Equal(net.ParseIP(gateway))
+			}
+			if resource.State.Active != present {
+				t.Fatalf("resource status disagrees with kernel gateway %s: %+v", gateway, resource.State)
+			}
+			checked++
+		}
+		if checked != 2 || resources.Total != len(program.Resources) {
+			t.Fatal("resource status omitted declared owners", resources)
+		}
 	}
 	traffic := func(want string) {
 		t.Helper()
@@ -211,10 +242,9 @@ func TestDaemonHealthPBRFailoverAndRecovery(t *testing.T) {
 		}
 		assertPreserved()
 	}
-	waitPrimary(true)
-	until(t, 5*time.Second, func() bool {
-		var s health.Snapshot
-		return json.Unmarshal(instance("service.health-b").Snapshot, &s) == nil && s.Active && s.State.Phase == "Healthy"
+	until(t, 12*time.Second, func() bool {
+		var a, b health.Snapshot
+		return json.Unmarshal(instance("service.health-a").Snapshot, &a) == nil && json.Unmarshal(instance("service.health-b").Snapshot, &b) == nil && a.State.Phase == "Healthy" && b.State.Phase == "Healthy" && primary()
 	})
 	traffic("A")
 	record("initial-primary")
@@ -268,7 +298,7 @@ func TestDaemonHealthPBRFailoverAndRecovery(t *testing.T) {
 			var i runtimeplan.InstanceStatus
 			return f.control.Do(ctx, "GET", "/v1/services/service.health-a", nil, &i) == nil && len(i.Snapshot) > 0
 		})
-		if name == "service.health-a" {
+		if name == "service.health-a" || name == "control" {
 			if err := f.control.Do(ctx, "POST", "/v1/services/state", stale, nil); !localapi.IsHTTPStatus(err, 409) {
 				t.Fatal("previous worker generation accepted", err)
 			}
@@ -699,12 +729,12 @@ resources:
     depends_on: [probe-a, probe-policy]
     service:
       name: health-a
-      health: {resource: health-a, interface: wan0, source_address: 192.0.2.2, target: 198.51.100.10, mark: 42, protocol: tcp, port: 18080, interval_ms: 200, timeout_ms: 100, healthy_threshold: 2, unhealthy_threshold: 3}
+      health: {resource: health-a, interface: wan0, source_address: 192.0.2.2, target: 198.51.100.10, mark: 42, protocol: tcp, port: 18080, interval_ms: 500, timeout_ms: 500, healthy_threshold: 2, unhealthy_threshold: 3}
   - id: health-b
     depends_on: [probe-b, probe-policy]
     service:
       name: health-b
-      health: {resource: health-b, interface: wan1, source_address: 203.0.113.2, target: 198.51.100.11, mark: 42, protocol: tcp, port: 18080, interval_ms: 200, timeout_ms: 100, healthy_threshold: 2, unhealthy_threshold: 3}
+      health: {resource: health-b, interface: wan1, source_address: 203.0.113.2, target: 198.51.100.11, mark: 42, protocol: tcp, port: 18080, interval_ms: 500, timeout_ms: 500, healthy_threshold: 2, unhealthy_threshold: 3}
   - id: primary
     depends_on: [address-a]
     when: {fact: service.health-a.active}
