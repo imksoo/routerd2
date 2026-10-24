@@ -67,7 +67,11 @@ the authenticated worker generation, config digest, producer epoch and
 sequence to fence stale publishers. Convert the accepted bounded remaining
 duration to a local monotonic deadline. A failed or expired acknowledgment, or
 a missing/tentative VIP, prevents a positive advertisement and triggers
-withdrawal. A normal shutdown sends priority zero before withdrawing. Kernel
+withdrawal. A normal shutdown sends priority zero before withdrawing.
+Parent cancellation during effects, active verification, advertisement or
+neighbor announcement is also a normal stop; independent action errors and
+withdrawal failures remain errors. Cleanup uses a fresh bounded context.
+Kernel
 ownership cannot rely only on a process's graceful exit: SIGKILL cannot execute
 cleanup, and expiry belongs to the surviving single writer.
 

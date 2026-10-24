@@ -131,7 +131,22 @@ func withdraw(m *machine, device transport, effects Effects) error {
 
 func run(ctx context.Context, cfg Config, source netip.Addr, epoch string, device transport, effects Effects, ready func()) (result error) {
 	m := newMachine(cfg, source, epoch)
-	defer func() { result = errors.Join(result, withdraw(m, device, effects)) }()
+	defer func() {
+		// Shutdown can interrupt an ownership action or neighbor announcement,
+		// as well as the select below. Report normal parent cancellation as a
+		// clean stop, then independently preserve any withdrawal failure.
+		if cause := ctx.Err(); cause != nil {
+			// Only a single wrapping chain ending at parent cancellation is
+			// normal shutdown. A joined error can contain an independent failure.
+			for err := result; err != nil; err = errors.Unwrap(err) {
+				if err == cause {
+					result = nil
+					break
+				}
+			}
+		}
+		result = errors.Join(result, withdraw(m, device, effects))
+	}()
 	rxContext, cancelReceive := context.WithCancel(ctx)
 	frames := make(chan []byte, 64)
 	rxError, rxDone := make(chan error, 1), make(chan struct{})
