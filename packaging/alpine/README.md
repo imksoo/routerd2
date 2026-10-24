@@ -3,8 +3,10 @@
 `make apk` builds `routerd2-0.1.0-r0.apk` in an Alpine 3.24.3 build environment
 using the official Go 1.27.3 toolchain. `abuild` runs as the unprivileged
 `builder` user; its `check()` phase runs `CGO_ENABLED=0 go test ./...`.
-The check phase uses `/tmp` as its temporary-directory root so Go's private
+The check phase sets both `TMPDIR` and `GOTMPDIR` to `/tmp` so Go's private
 test directories keep Unix socket paths within the kernel's length limit.
+Go 1.27's `testing.TempDir` uses `GOTMPDIR`; changing `TMPDIR` alone does not
+override abuild's nested `aports` directory.
 Alpine's `-trimpath` and PIE defaults remain in the test environment: release
 tests locate the supplied Go toolchain through `PATH` when trimmed binaries
 have no compiled-in GOROOT, and build their signed ELF fixtures explicitly with
