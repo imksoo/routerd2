@@ -26,7 +26,7 @@ type Store struct {
 }
 
 const applicationID = 0x52443245 // RD2E; separate from every other product store
-const schemaVersion = 4          // discarded unreleased prototype formats are not imported
+const schemaVersion = 5          // discarded unreleased prototype formats are not imported
 
 const schema = `
 CREATE TABLE events(cursor INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL UNIQUE, body BLOB NOT NULL);
@@ -38,7 +38,11 @@ CREATE TABLE producer_outbox(producer TEXT NOT NULL REFERENCES producers(name), 
 CREATE INDEX pending_producer_work ON producer_outbox(producer,done,state_version,key);
 CREATE TABLE usage(kind TEXT PRIMARY KEY, rows_count INTEGER NOT NULL, bytes_count INTEGER NOT NULL);
 INSERT INTO usage VALUES('events',0,0),('outbox',0,0),('consumer_state',0,0);
-PRAGMA user_version=4;
+CREATE INDEX completed_work ON outbox(done,consumer,key);
+CREATE INDEX completed_producer_work ON producer_outbox(done,producer,key);
+CREATE TABLE completed_jobs(kind INTEGER NOT NULL CHECK(kind IN(0,1)),name TEXT NOT NULL,key TEXT NOT NULL,position INTEGER NOT NULL CHECK(position>0),digest BLOB NOT NULL CHECK(length(digest)=32),PRIMARY KEY(kind,name,key));
+INSERT INTO usage VALUES('dedup',0,0);
+PRAGMA user_version=5;
 `
 
 func Open(options Options) (*Store, error) { return openStore(options, false) }
@@ -65,6 +69,15 @@ func openStore(options Options, existingOnly bool) (_ *Store, result error) {
 	}
 	if options.MaxConsumerStateBytes == 0 {
 		options.MaxConsumerStateBytes = 64 << 20
+	}
+	if options.MaxTombstones == 0 {
+		options.MaxTombstones = 1000000
+	}
+	if options.MaxTombstoneBytes == 0 {
+		options.MaxTombstoneBytes = 256 << 20
+	}
+	if options.MaxTombstones < 1 || options.MaxTombstones > 10000000 || options.MaxTombstoneBytes < 1 || options.MaxTombstoneBytes > 1<<30 {
+		return nil, errors.New("invalid completed work identity capacity")
 	}
 	if options.MaxEvents < 1 || options.MaxEvents > 1000000 || options.MaxJobs < 1 || options.MaxJobs > 1000000 || options.MaxConsumers < 1 || options.MaxConsumers > 100000 || options.MaxEventBytes < 1 || options.MaxEventBytes > 1<<30 || options.MaxJobBytes < 1 || options.MaxJobBytes > 1<<30 {
 		return nil, errors.New("invalid durable event store limits")
@@ -214,6 +227,7 @@ func openStore(options Options, existingOnly bool) (_ *Store, result error) {
 	for _, entry := range []struct{ kind, query string }{
 		{"events", `SELECT count(*),coalesce(sum(length(body)),0) FROM events`},
 		{"outbox", `SELECT count(*),coalesce(sum(size),0) FROM (SELECT length(payload) AS size FROM outbox UNION ALL SELECT length(payload) FROM producer_outbox)`},
+		{"dedup", `SELECT count(*),coalesce(sum(41+length(CAST(name AS BLOB))+length(CAST(key AS BLOB))),0) FROM completed_jobs`},
 		{"consumer_state", `SELECT count(*),coalesce(sum(size),0) FROM (SELECT length(body) AS size FROM consumers UNION ALL SELECT length(body) FROM producers)`},
 	} {
 		var rows, bytes, storedRows, storedBytes int64
@@ -226,6 +240,10 @@ func openStore(options Options, existingOnly bool) (_ *Store, result error) {
 		if rows != storedRows || bytes != storedBytes {
 			return nil, errors.New("event store usage counters do not match durable rows")
 		}
+	}
+	var invalid int
+	if err = s.db.QueryRow(`SELECT count(*) FROM completed_jobs d WHERE (kind=0 AND (NOT EXISTS(SELECT 1 FROM consumers c WHERE c.name=d.name) OR EXISTS(SELECT 1 FROM outbox o WHERE o.consumer=d.name AND o.key=d.key))) OR (kind=1 AND (NOT EXISTS(SELECT 1 FROM producers p WHERE p.name=d.name) OR EXISTS(SELECT 1 FROM producer_outbox o WHERE o.producer=d.name AND o.key=d.key)))`).Scan(&invalid); err != nil || invalid != 0 {
+		return nil, errors.Join(errors.New("invalid completed work ownership or duplicate payload"), err)
 	}
 	if err = dir.Sync(); err != nil {
 		return nil, err

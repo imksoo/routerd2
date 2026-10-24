@@ -27,6 +27,7 @@ type Options struct {
 	MaxEvents, MaxJobs, MaxConsumers int64
 	MaxEventBytes, MaxJobBytes       int64
 	MaxConsumerStateBytes            int64
+	MaxTombstones, MaxTombstoneBytes int64
 }
 
 // Event is historical evidence, never a command or permission to mutate the

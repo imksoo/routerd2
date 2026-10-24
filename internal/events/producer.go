@@ -116,6 +116,16 @@ func (s *Store) ProducerTransition(ctx context.Context, name string, expected Pr
 		if !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
+		_, digest, lookupErr := completedIdentity(ctx, tx, 1, name, job.Key)
+		if lookupErr == nil {
+			if !sameCompletedPayload(digest, job.Payload) {
+				return ErrConflict
+			}
+			continue
+		}
+		if !errors.Is(lookupErr, sql.ErrNoRows) {
+			return lookupErr
+		}
 		if err = s.reserve(ctx, tx, "outbox", int64(len(job.Payload)), s.options.MaxJobs, s.options.MaxJobBytes); err != nil {
 			return err
 		}
@@ -197,7 +207,11 @@ func (s *Store) ProducerComplete(ctx context.Context, name, key string) error {
 		return nil
 	}
 	var done bool
-	if err = s.db.QueryRowContext(ctx, `SELECT done FROM producer_outbox WHERE producer=? AND key=?`, name, key).Scan(&done); err != nil || !done {
+	err = s.db.QueryRowContext(ctx, `SELECT done FROM producer_outbox WHERE producer=? AND key=?`, name, key).Scan(&done)
+	if errors.Is(err, sql.ErrNoRows) {
+		return s.completedAcknowledged(ctx, 1, name, key)
+	}
+	if err != nil || !done {
 		return errors.Join(ErrConflict, err)
 	}
 	return nil

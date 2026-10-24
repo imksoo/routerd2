@@ -20,6 +20,7 @@ type Budget struct {
 // Capacity is a bounded observation. Completed jobs retain their charges and
 // are deliberately included; this API neither registers nor acknowledges work.
 type Capacity struct {
+	Tombstones               Budget   `json:"tombstones"`
 	Events                   Budget   `json:"events"`
 	Jobs                     Budget   `json:"jobs"`
 	Registrations            Budget   `json:"registrations"`
@@ -41,17 +42,17 @@ func (s *Store) Capacity(ctx context.Context) (Capacity, error) {
 	if s.closed {
 		return Capacity{}, ErrClosed
 	}
-	c := Capacity{Events: Budget{RowLimit: s.options.MaxEvents, ByteLimit: s.options.MaxEventBytes}, Jobs: Budget{RowLimit: s.options.MaxJobs, ByteLimit: s.options.MaxJobBytes}, Registrations: Budget{RowLimit: s.options.MaxConsumers, ByteLimit: s.options.MaxConsumerStateBytes}, Pressure: "ok", Reasons: []string{}}
+	c := Capacity{Tombstones: Budget{RowLimit: s.options.MaxTombstones, ByteLimit: s.options.MaxTombstoneBytes}, Events: Budget{RowLimit: s.options.MaxEvents, ByteLimit: s.options.MaxEventBytes}, Jobs: Budget{RowLimit: s.options.MaxJobs, ByteLimit: s.options.MaxJobBytes}, Registrations: Budget{RowLimit: s.options.MaxConsumers, ByteLimit: s.options.MaxConsumerStateBytes}, Pressure: "ok", Reasons: []string{}}
 	// One statement gives a coherent cut without scanning event/job payloads or
 	// allocating a producer. Cursor aggregates use their existing primary keys.
-	err := s.db.QueryRowContext(ctx, `SELECT e.rows_count,e.bytes_count,j.rows_count,j.bytes_count,c.rows_count,c.bytes_count,
+	err := s.db.QueryRowContext(ctx, `SELECT e.rows_count,e.bytes_count,j.rows_count,j.bytes_count,c.rows_count,c.bytes_count,d.rows_count,d.bytes_count,
 coalesce((SELECT min(cursor) FROM events),0),coalesce((SELECT max(cursor) FROM events),0),
 coalesce((SELECT min(cursor) FROM consumers),(SELECT coalesce(max(cursor),0) FROM events))
-FROM usage e,usage j,usage c WHERE e.kind='events' AND j.kind='outbox' AND c.kind='consumer_state'`).Scan(&c.Events.Rows, &c.Events.Bytes, &c.Jobs.Rows, &c.Jobs.Bytes, &c.Registrations.Rows, &c.Registrations.Bytes, &c.FirstCursor, &c.TipCursor, &c.SlowestConsumerCursor)
+FROM usage e,usage j,usage c,usage d WHERE e.kind='events' AND j.kind='outbox' AND c.kind='consumer_state' AND d.kind='dedup'`).Scan(&c.Events.Rows, &c.Events.Bytes, &c.Jobs.Rows, &c.Jobs.Bytes, &c.Registrations.Rows, &c.Registrations.Bytes, &c.Tombstones.Rows, &c.Tombstones.Bytes, &c.FirstCursor, &c.TipCursor, &c.SlowestConsumerCursor)
 	if err != nil {
 		return Capacity{}, err
 	}
-	for _, b := range []Budget{c.Events, c.Jobs, c.Registrations} {
+	for _, b := range []Budget{c.Events, c.Jobs, c.Registrations, c.Tombstones} {
 		if b.Rows < 0 || b.Bytes < 0 {
 			return Capacity{}, errors.New("negative durable usage counter")
 		}
@@ -95,6 +96,7 @@ FROM usage e,usage j,usage c WHERE e.kind='events' AND j.kind='outbox' AND c.kin
 		{"events_rows", c.Events.Rows, c.Events.RowLimit}, {"events_bytes", c.Events.Bytes, c.Events.ByteLimit},
 		{"jobs_rows", c.Jobs.Rows, c.Jobs.RowLimit}, {"jobs_bytes", c.Jobs.Bytes, c.Jobs.ByteLimit},
 		{"registrations_rows", c.Registrations.Rows, c.Registrations.RowLimit}, {"state_bytes", c.Registrations.Bytes, c.Registrations.ByteLimit},
+		{"tombstones_rows", c.Tombstones.Rows, c.Tombstones.RowLimit}, {"tombstones_bytes", c.Tombstones.Bytes, c.Tombstones.ByteLimit},
 	} {
 		if item.used >= item.limit {
 			c.Pressure = "exhausted"

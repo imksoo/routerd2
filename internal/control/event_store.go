@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -13,9 +14,10 @@ import (
 )
 
 type EventStoreHealth struct {
-	Capacity   *events.Capacity `json:"capacity,omitempty"`
-	ObservedAt time.Time        `json:"observed_at,omitempty"`
-	LastError  string           `json:"last_error,omitempty"`
+	Capacity        *events.Capacity `json:"capacity,omitempty"`
+	ObservedAt      time.Time        `json:"observed_at,omitempty"`
+	CompactionError string           `json:"compaction_error,omitempty"`
+	LastError       string           `json:"last_error,omitempty"`
 }
 
 // RefreshEventStore never holds control authority while querying SQLite or
@@ -36,13 +38,42 @@ func (e *Engine) RefreshEventStore(ctx context.Context) error {
 	if err != nil {
 		e.eventStore.LastError = stateText(err.Error(), 1024)
 	} else {
-		e.eventStore = EventStoreHealth{Capacity: &capacity, ObservedAt: time.Now().UTC()}
+		e.eventStore = EventStoreHealth{Capacity: &capacity, ObservedAt: time.Now().UTC(), CompactionError: e.eventStore.CompactionError}
 		if capacity.Pressure == "exhausted" {
 			e.eventStore.LastError = "event store capacity exhausted: " + strings.Join(capacity.Reasons, ",")
 		}
 	}
+	if e.eventStore.CompactionError != "" {
+		if e.eventStore.LastError == "" {
+			e.eventStore.LastError = e.eventStore.CompactionError
+		} else if e.eventStore.LastError != e.eventStore.CompactionError {
+			e.eventStore.LastError = stateText(e.eventStore.LastError+"; "+e.eventStore.CompactionError, 1024)
+		}
+	}
 	e.state.EventStoreError = e.eventStore.LastError
 	return err
+}
+
+// MaintainEventStore runs bounded completed-work reclamation outside control's
+// configuration lock, then refreshes the public observation. A fresh read alone
+// cannot clear a failed write alarm; a successful maintenance pass can.
+func (e *Engine) MaintainEventStore(ctx context.Context) error {
+	e.mu.Lock()
+	journal := e.journal
+	e.mu.Unlock()
+	if journal == nil {
+		return nil
+	}
+	_, compactErr := journal.CompactCompleted(ctx, 64)
+	e.mu.Lock()
+	if e.journal == journal {
+		e.eventStore.CompactionError = ""
+		if compactErr != nil {
+			e.eventStore.CompactionError = stateText("completed work compaction: "+compactErr.Error(), 1024)
+		}
+	}
+	e.mu.Unlock()
+	return errors.Join(compactErr, e.RefreshEventStore(ctx))
 }
 
 func (e *Engine) eventStoreRoutes(mux *http.ServeMux) {
@@ -78,7 +109,7 @@ func (e *Engine) monitorEventStore(ctx context.Context) {
 	previous := ""
 	for {
 		call, cancel := context.WithTimeout(ctx, 2*time.Second)
-		err := e.RefreshEventStore(call)
+		err := e.MaintainEventStore(call)
 		cancel()
 		e.mu.Lock()
 		status := e.eventStore

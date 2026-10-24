@@ -89,6 +89,16 @@ func (s *Store) schedule(ctx context.Context, name string, expected, eventCursor
 		if !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
+		position, digest, lookupErr := completedIdentity(ctx, tx, 0, name, job.Key)
+		if lookupErr == nil {
+			if position != eventCursor || !sameCompletedPayload(digest, job.Payload) {
+				return ErrConflict
+			}
+			continue
+		}
+		if !errors.Is(lookupErr, sql.ErrNoRows) {
+			return lookupErr
+		}
 		if err = s.reserve(ctx, tx, "outbox", int64(len(job.Payload)), s.options.MaxJobs, s.options.MaxJobBytes); err != nil {
 			return err
 		}
@@ -175,7 +185,11 @@ func (s *Store) Complete(ctx context.Context, name, key string) error {
 		return nil
 	}
 	var done bool
-	if err = s.db.QueryRowContext(ctx, `SELECT done FROM outbox WHERE consumer=? AND key=?`, name, key).Scan(&done); err != nil || !done {
+	err = s.db.QueryRowContext(ctx, `SELECT done FROM outbox WHERE consumer=? AND key=?`, name, key).Scan(&done)
+	if errors.Is(err, sql.ErrNoRows) {
+		return s.completedAcknowledged(ctx, 0, name, key)
+	}
+	if err != nil || !done {
 		return errors.Join(ErrConflict, err)
 	}
 	return nil
