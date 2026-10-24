@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/imksoo/routerd/pkg/api"
+	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
 )
 
@@ -42,5 +43,23 @@ func TestEventRuleLifetimeSeesFlapBetweenControllerPolls(t *testing.T) {
 	}
 	if before[0].Identity == after[0].Identity {
 		t.Fatal("rule inherited pending timer across an unpolled inactive interval")
+	}
+}
+
+func TestUnconditionalHistoricalRuleDoesNotDependOnUnrelatedWorkerReadiness(t *testing.T) {
+	r := New(t.TempDir(), t.TempDir(), &memoryNetwork{}, testSupervisorInstance)
+	r.manager = &memoryManager{}
+	spec := api.EventRuleSpec{Pattern: api.EventRulePatternSpec{Operator: "count", Topic: "configuration.committed", Threshold: 2}, Emit: api.EventRuleEmitSpec{Topic: "fixture.output"}}
+	source := config.Document{SchemaVersion: config.SchemaVersion, Resources: []resourceprogram.Resource{{ID: "rule", EventRule: &spec}}}
+	if err := r.ApplyConfig(context.Background(), 1, source); err != nil {
+		t.Fatal(err)
+	}
+	r.mu.Lock()
+	r.phase = "degraded"
+	r.lastError = "unrelated logging worker is restarting"
+	r.mu.Unlock()
+	rules, err := r.ActiveEventRules(source, 1)
+	if err != nil || len(rules) != 1 {
+		t.Fatal("unrelated readiness revoked durable historical consumer", rules, err)
 	}
 }
