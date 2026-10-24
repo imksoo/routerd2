@@ -7,7 +7,18 @@
 部分checkpointでゴールを完了にせず、実装・検証・未検証と証跡を更新する。
 対象機種・NIC・性能条件の確認と並行して、独立して進められる実装・隔離VM検証を続ける。
 
-最新product checkpoint `1ba9020` ではHealthCheckの有限なtyped statusからDerivedEvent resource、
+最新product checkpoint `205f02f` ではHealthCheckのprobeごとの元eventをworker側のprivateな
+WAL/FULL queueへ保存し、source-fencedな実control受付からdurable journal/EventRuleへ接続した。
+履歴の元時刻/内容/IDを保ち、現在factやkernel権限へ変換しない。
+ACK消失、target保存後local SQLite ACK失敗、同時enqueue、64件/64KiB上限、partial target retryを検証した。
+clean全体check/Race/vet/static両arch build110.66秒、実daemon9.61秒、
+QEMU拡張gate67.82秒・二WAN Health/PBR88.85秒・管理/実SSH36.55秒がPASS。
+同じproduct/integration sourceで既存EventRule62.06秒・BFD/BGP53.44秒のQEMUもPASS。
+実DB拒否中の4件がhealth/controlのSIGKILL後も同じID/内容で一度だけ履歴へ公開された。
+[証跡と未完了範囲](evidence/2026-10-24-health-protocol-events.md) を参照。
+他protocol producer、service永久削除後の残queue回収、retention/容量運用と全計画の受入は残る。
+
+先行product checkpoint `1ba9020` ではHealthCheckの有限なtyped statusからDerivedEvent resource、
 durable journal、EventRuleまでを実control workerへ接続した。元の観測時刻・producer/source/control
 authority、sample間のpredicate continuity、producer state/outbox、`show derived RESOURCE_ID` を実装した。
 source復旧時のscope再利用・inactive providerの旧Up・新authorityへの旧Up grace継承をFAILで固定し修正した。

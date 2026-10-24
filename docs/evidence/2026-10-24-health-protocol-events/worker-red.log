@@ -1,0 +1,20 @@
+# github.com/imksoo/routerd2/internal/serviceconfig [github.com/imksoo/routerd2/internal/serviceconfig.test]
+internal/serviceconfig/health_events_test.go:13:21: i.EventDirectory undefined (type Instance has no field or method EventDirectory)
+internal/serviceconfig/health_events_test.go:20:24: next.EventDirectory undefined (type Instance has no field or method EventDirectory)
+internal/serviceconfig/health_events_test.go:20:44: i.EventDirectory undefined (type Instance has no field or method EventDirectory)
+# github.com/imksoo/routerd2/internal/serviceruntime [github.com/imksoo/routerd2/internal/serviceruntime.test]
+internal/serviceruntime/protocol_events_test.go:42:14: c.sendProtocolEvents undefined (type *effectsClient has no field or method sendProtocolEvents)
+internal/serviceruntime/protocol_events_test.go:46:14: c.sendProtocolEvents undefined (type *effectsClient has no field or method sendProtocolEvents)
+FAIL	github.com/imksoo/routerd2/internal/serviceruntime [build failed]
+FAIL	github.com/imksoo/routerd2/internal/serviceconfig [build failed]
+# github.com/imksoo/routerd2/internal/control [github.com/imksoo/routerd2/internal/control.test]
+internal/control/protocol_events_test.go:24:4: e.setProtocolErrorLocked undefined (type *Engine has no field or method setProtocolErrorLocked)
+internal/control/protocol_events_test.go:25:4: e.setProtocolErrorLocked undefined (type *Engine has no field or method setProtocolErrorLocked)
+internal/control/protocol_events_test.go:26:4: e.setProtocolErrorLocked undefined (type *Engine has no field or method setProtocolErrorLocked)
+internal/control/protocol_events_test.go:35:4: e.setProtocolErrorLocked undefined (type *Engine has no field or method setProtocolErrorLocked)
+internal/control/protocol_events_test.go:46:15: undefined: appendProtocolBatch
+internal/control/protocol_events_test.go:53:14: undefined: appendProtocolBatch
+internal/control/protocol_events_test.go:60:14: undefined: appendProtocolBatch
+internal/control/protocol_events_test.go:69:15: undefined: appendProtocolBatch
+FAIL	github.com/imksoo/routerd2/internal/control [build failed]
+FAIL

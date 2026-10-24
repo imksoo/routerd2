@@ -1,0 +1,9 @@
+=== RUN   TestDaemonDerivedHealthCurrentStatusAndDurability
+    bgp_test.go:192: isolated protocol fixture: exit status 1
+        === RUN   TestDaemonDerivedHealthCurrentStatusAndDurability
+            derived_test.go:175: condition timed out after 10s
+[private diagnostic dump omitted; original SHA recorded in provenance]
+        --- FAIL: TestDaemonDerivedHealthCurrentStatusAndDurability (10.56s)
+        FAIL
+--- FAIL: TestDaemonDerivedHealthCurrentStatusAndDurability (10.59s)
+FAIL

@@ -92,6 +92,6 @@ input expiry and the resource's own active condition. GET cannot renew this leas
 storage failure never fall back to an old asserted value. Health exposes bounded
 revision/count/pending/error metadata. Remaining work includes other status
 provider kinds, structured fields and DerivedEvent chaining, raw protocol event
-producers, effect idempotency/authorization, federation, retention and physical/
+producers beyond HealthCheck, effect idempotency/authorization, federation, retention and physical/
 performance acceptance. CORE-04 remains in progress. See
 [live evidence](../../docs/evidence/2026-10-24-live-derived.md).

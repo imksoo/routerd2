@@ -5,8 +5,9 @@ commit/confirm/rollback observations through its authoritative producer outbox.
 EventRule resources also consume this journal and publish historical results
 through their atomic state/cursor/outbox. DerivedEvent resources publish sampled
 assertion transitions through their atomic producer state/outbox. Federation
-and a privileged effect executor are not connected yet. Raw protocol events
-are not published, and historical output never restores kernel authority.
+and a privileged effect executor are not connected yet. Raw HealthCheck probe
+events arrive through the source-fenced private relay; other raw protocol event
+producers remain open work. Historical output never restores kernel authority.
 
 `Open` owns a private Linux directory through one exclusive process lock and a
 SQLite WAL database. The existing pinned pure Go SQLite driver supports static
@@ -78,7 +79,7 @@ Tests use actual SQLite transactions, write-failure triggers, SQLITE_FULL,
 concurrent publishers, private path attacks, foreign database preservation,
 connection replacement, and SIGKILL followed by WAL recovery. Configuration
 producer state/outbox atomicity and worker recovery have separate control tests.
-Protocol event producers and QEMU power-loss acceptance remain implementation-plan work.
+Other protocol event producers and QEMU power-loss acceptance remain implementation-plan work.
 
 The database schema is now version 4. Accepted design D-09 deliberately does
 not import discarded, unreleased version-1/2/3 prototype state. Unsupported schema

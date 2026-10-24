@@ -1,0 +1,8 @@
+=== RUN   TestProtocolDeliveryFailureIsVisibleAndDoesNotClearAnotherProducer
+--- PASS: TestProtocolDeliveryFailureIsVisibleAndDoesNotClearAnotherProducer (0.02s)
+=== RUN   TestProtocolFailureBlocksConfirmationButNotRollbackRemovingItsProducer
+--- PASS: TestProtocolFailureBlocksConfirmationButNotRollbackRemovingItsProducer (0.05s)
+=== RUN   TestProtocolBatchRetriesPartialStorageWithoutDuplicatingOrAcceptingForeignEvents
+--- PASS: TestProtocolBatchRetriesPartialStorageWithoutDuplicatingOrAcceptingForeignEvents (0.23s)
+PASS
+ok  	github.com/imksoo/routerd2/internal/control	1.337s

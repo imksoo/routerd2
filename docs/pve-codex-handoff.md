@@ -4,9 +4,21 @@
 対象: `https://github.com/imksoo/routerd2`
 
 **継続ゴール:** 全残実装・必要試験・対象実機での利用可能性の受入まで進める。
-部分checkpointでは完了しない。最新product checkpointは `1ba9020`。
+部分checkpointでは完了しない。最新product checkpointは `205f02f`。
 
-HealthCheckの有限なtyped current statusからDerivedEvent、durable journal、EventRuleまでを接続した。
+HealthCheckのprobeごとの元eventをworker側のprivate WAL/FULL queueへ保存し、
+実controlの限定APIからdurable journal/EventRuleへ接続した。
+現在のsupervisor/config/generation/登録済みepochへfenceし、履歴で現在factを登録・更新しない。
+ACK消失、実SQLiteのtarget保存後local ACK失敗、同時enqueue、64件/64KiB上限をRaceで検証した。
+clean全体check/Race/vet/static両arch build110.66秒、実daemon9.61秒がPASS。
+DB拒否中のqueue4件がhealth/controlのSIGKILL後も同じID・内容で一度だけ公開された。
+QEMU拡張gate67.82秒、二WAN Health/PBR88.85秒、管理/実SSH36.55秒もPASS。
+既存EventRule62.06秒・BFD/BGP53.44秒も同じproduct/integration sourceのQEMUでPASS。
+[probe履歴の証跡と残作業](evidence/2026-10-24-health-protocol-events.md) を参照。
+他protocol producer、service永久削除後の残queue回収、retention/容量運用、他status providerと
+全計画・対象実機受入は残る。部分checkpointでゴールやparityを完了扱いにしない。
+
+先行 `1ba9020` ではHealthCheckの有限なtyped current statusからDerivedEvent、durable journal、EventRuleまでを接続した。
 `derived_event` resource、producer state/outbox、元観測時刻とauthorityのfence、sample間の
 predicate continuity、read-onlyの `show derived RESOURCE_ID` を実装した。
 source A→B→Aのscope再利用、inactive providerの旧Up、新authorityへの旧assertionのgrace継承を
@@ -16,8 +28,8 @@ local FAILで再現して修正した。全体check/Race/vet/static両arch build
 SIGSTOPした同じReady health processの観測をconsumer max_ageで失効させ、旧通知409、
 control/health/logging再起動、実SQLite書込失敗の503と解除後の回復を検証した。
 [live DerivedEventの証跡と残作業](evidence/2026-10-24-live-derived.md) を参照。
-他status provider・構造化field・Derived連鎖・raw protocol event・作用/federation・長期運用と
-規模/対象実機受入は残る。次は他のtyped status providerとprotocol event producerを進める。
+他status provider・構造化field・Derived連鎖・他raw protocol event・作用/federation・長期運用と
+規模/対象実機受入は残る。HealthCheckのraw eventは上記後続で接続した。
 
 先行 `6185ba8` ではEventRuleを `event_rule` resourceから実control workerへ接続した。新activationのtip開始、
 state/cursor/outbox・timer復元、定義/条件/source fencing、安定ID付き履歴publication、
@@ -74,7 +86,7 @@ read-onlyのbounded `/v1/observations` とhealthのpending/errorを追加した�
 BFD admin watchdogは2秒、control freshnessは500ms。
 [保存部・BFD方針の証跡](evidence/2026-10-24-events-clock.md) に変更経緯を保持する。
 
-未完了はraw protocol event producer、EventRuleの規模/全条件受入、他Derived status provider、consumer作用、federation、
+未完了は他raw protocol event producer、永久削除後の残queue回収、EventRuleの規模/全条件受入、他Derived status provider、consumer作用、federation、
 retention/archive/容量alarm、一般status reference、多binary runtime/startup handoff等の全計画。
 対象機種・NIC・性能条件も未確定で、実機利用可能とはまだ判定しない。
 完了したdetached worktreeは証跡を回収して削除した。private原log/manifest・診断patchは

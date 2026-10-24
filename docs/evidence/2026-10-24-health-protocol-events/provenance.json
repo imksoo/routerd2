@@ -1,0 +1,181 @@
+{
+  "product_checkpoint": "205f02fc9abd5689d1a9543af5104f16c1e3d2ea",
+  "additional_unit_test_commit": "3082946258497e7c9dbfdb59a783935efc45ced2",
+  "as_of_utc": "2026-10-24T18:34:50.041262+00:00",
+  "build_command": [
+    "make",
+    "check",
+    "build-linux"
+  ],
+  "additional_commands": [
+    [
+      "go",
+      "test",
+      "-race",
+      "-count=1",
+      "-v",
+      "./internal/protocolevents"
+    ],
+    [
+      "go",
+      "vet",
+      "./internal/protocolevents"
+    ],
+    [
+      "python3",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      "scripts",
+      "-p",
+      "*_test.py"
+    ],
+    [
+      "go",
+      "test",
+      "-race",
+      "-count=1",
+      "-v",
+      "./internal/control",
+      "-run",
+      "^TestProtocol"
+    ],
+    [
+      "go",
+      "vet",
+      "./internal/control"
+    ]
+  ],
+  "additional_commands_exit_code": 0,
+  "qemu_command_template": "python3 scripts/qemu-network.py --suite SUITE --output dist/goal-validation/health-protocol-events-SUITE-qemu",
+  "original_logs": [
+    {
+      "published": "check-build.log",
+      "private_source": "health-protocol-events-check-build.log",
+      "original_sha256": "544fa2b104476a65c5d9c582ea44807505f24b3b0b0f33eb0b092f4e29b2d479"
+    },
+    {
+      "published": "build-manifest.json",
+      "private_source": "health-protocol-events-build-manifest.json",
+      "original_sha256": "a3b5eca302be18cd495a98177febcf29786bad77a1701a5a25c099e4fe3c4b95"
+    },
+    {
+      "published": "native.log",
+      "private_source": "health-protocol-events-native.log",
+      "original_sha256": "90e12c783c8a11241966375dfa9e5b018477ecc8f8f40d15158dfd0dbdf80b4d"
+    },
+    {
+      "published": "sockets.log",
+      "private_source": "health-protocol-events-sockets.log",
+      "original_sha256": "48b622affb57f287a00fbbd250a1aba8c3791957ae7f2362dcb7c26a938f6974"
+    },
+    {
+      "published": "relay-race.log",
+      "private_source": "health-protocol-events-final-relay-race.log",
+      "original_sha256": "ec6c19fab53d67c76e2f6fa2bb3515395675b03dcc27291d54f802f85e1f0d94"
+    },
+    {
+      "published": "wiring-first-race.log",
+      "private_source": "health-protocol-events-wired-race.log",
+      "original_sha256": "d08adeefd313a2df0e94f8484654da987640e3cd1bcfd4e1790e9e2fa3c05a94"
+    },
+    {
+      "published": "ack-fixed-race.log",
+      "private_source": "health-protocol-events-ack-fixed.log",
+      "original_sha256": "fec9ab793265219d518b37af94353ed7c74636db512cd50a55f4f3280bb2377b"
+    },
+    {
+      "published": "compile-red.log",
+      "private_source": "health-protocol-events-red.log",
+      "original_sha256": "e87b4fa6a528902f7b877a6b5ad09bbb3100d4004928ddada570a036a99b54a6"
+    },
+    {
+      "published": "receiver-red.log",
+      "private_source": "health-protocol-events-receiver-red.log",
+      "original_sha256": "fbac74f3cf4116a5fb6971f280500107f4b4344dfd23eddf4836ee9f807310d1"
+    },
+    {
+      "published": "worker-red.log",
+      "private_source": "health-protocol-events-worker-red.log",
+      "original_sha256": "761ee5b30d3fa6c41b3f8726d3ca178f5e9c7a8c90e0652654567b145ea0a74e"
+    },
+    {
+      "published": "tools.log",
+      "private_source": "health-protocol-events-tools.log",
+      "original_sha256": "88938a4e6dacae447005887560cdc1b05b801080fbba3f2f9f3b92c87e74d7b0"
+    },
+    {
+      "published": "before-build-manifest.json",
+      "private_source": "derived-authority-build-manifest.json",
+      "original_sha256": "0d467a85dc169fe763b18b2f99b78d1bcae14a7f46aa6b5d09f3d8613701004c"
+    },
+    {
+      "published": "native-red-excerpt.log",
+      "private_source": "health-protocol-events-native-red.log",
+      "original_sha256": "2fabb79b4dcfa35462dba83579f9464a55471c8885d7945dfa1a39a689d75a0c",
+      "extraction": "first four and final four test lines; omitted private diagnostic dump"
+    },
+    {
+      "published": "qemu-derived.log",
+      "private_source": "health-protocol-events-daemon-derived-qemu/qemu-serial.log",
+      "original_sha256": "52a5695ffa057b1b1e7e8ef4b6bd80f6929429bb53d436379a1ef76ad8ef21ec"
+    },
+    {
+      "published": "qemu-derived-manifest.json",
+      "private_source": "health-protocol-events-daemon-derived-qemu/manifest.json",
+      "original_sha256": "d88c1fc32b6d9adb7267c6137cee5ab3de6b4c3c04a92d7f29b20a443b0c8e7f"
+    },
+    {
+      "published": "qemu-health-pbr.log",
+      "private_source": "health-protocol-events-daemon-health-pbr-qemu/qemu-serial.log",
+      "original_sha256": "175644319362fa50c067c566272393d823dbe5c1eca58af27e69e7430f3d129b"
+    },
+    {
+      "published": "qemu-health-pbr-manifest.json",
+      "private_source": "health-protocol-events-daemon-health-pbr-qemu/manifest.json",
+      "original_sha256": "dc0bb391f75133e259c9ad4978ec7b4664a398ce55ed337787f914b46f765979"
+    },
+    {
+      "published": "qemu-management.log",
+      "private_source": "health-protocol-events-daemon-management-qemu/qemu-serial.log",
+      "original_sha256": "a6c585b46b2e517d0de80ca5bed9ba53ff34d9f95b6740e462bc35b2d5a2a5e1"
+    },
+    {
+      "published": "qemu-management-manifest.json",
+      "private_source": "health-protocol-events-daemon-management-qemu/manifest.json",
+      "original_sha256": "9c1b631e2bc415ffce6ede9a52ef833ad835f73c39e0bc234feba37b18141145"
+    },
+    {
+      "published": "qemu-eventrule.log",
+      "private_source": "health-protocol-events-daemon-eventrule-qemu/qemu-serial.log",
+      "original_sha256": "c796d3d037f02f3969788cfd6d454ec742e5e5d7ecb475411f4c9ef980ae8134"
+    },
+    {
+      "published": "qemu-eventrule-manifest.json",
+      "private_source": "health-protocol-events-daemon-eventrule-qemu/manifest.json",
+      "original_sha256": "44c727876ef1b4dc876447806c4aac5a6bfe1fbefa02eddcf7e351524e1824df"
+    },
+    {
+      "published": "qemu-bfd.log",
+      "private_source": "health-protocol-events-daemon-bfd-qemu/qemu-serial.log",
+      "original_sha256": "33d8957146b1aba15e0084cd914e336cb2795ba27df55fd369465ce14240737d"
+    },
+    {
+      "published": "qemu-bfd-manifest.json",
+      "private_source": "health-protocol-events-daemon-bfd-qemu/manifest.json",
+      "original_sha256": "1ff152dd6f357a210f1669dfcf116dad5b61e0289f39fa5781c95afc241911c8"
+    },
+    {
+      "published": "control-race.log",
+      "private_source": "health-protocol-events-final-control-race.log",
+      "original_sha256": "8a346034b934f965407bea1d93ea3d6ce454254ffec83e512118634b8c71903e"
+    }
+  ],
+  "normalizations": [
+    "workspace/private stage paths",
+    "public kernel certificate identifier",
+    "serial trailing whitespace",
+    "excerpt private failed-run dump as described per log"
+  ]
+}

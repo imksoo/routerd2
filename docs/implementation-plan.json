@@ -11473,6 +11473,45 @@
         "All outstanding implementation work-package acceptance and selected physical/NIC/performance profile"
       ],
       "parity_flags_unchanged": true
+    },
+    {
+      "id": "durable-health-probe-event-relay",
+      "date": "2026-10-24",
+      "status": "partial_core_implementation_with_live_daemon_acceptance",
+      "code_checkpoint": "205f02fc9abd5689d1a9543af5104f16c1e3d2ea",
+      "work_packages": [
+        "CORE-03",
+        "CORE-04",
+        "NET-01"
+      ],
+      "evidence": "docs/evidence/2026-10-24-health-protocol-events.md",
+      "implemented": [
+        "Every completed HealthCheck probe retains the pinned typed passed/failed/timeout event and original observation time, separately from finite current snapshots",
+        "Private per-service WAL/FULL relay queue uses versioned producer state; 64 pending events and 64 KiB encoded capacity; acknowledged prefix releases local space without deleting existing job tombstones",
+        "One-second bounded publication pages of 16, explicit matching stable-ID ACK, original evidence retry through lost ACK/local ACK commit failure and concurrent enqueue",
+        "Narrow control intake fenced by current supervisor/config/generation/registered epoch and ready process; historical delivery cannot register or renew protocol facts",
+        "Per-producer delivery errors make bounded health unhealthy and block confirmation; success cannot clear another producer and configuration removal prunes removed producer errors"
+      ],
+      "validation": [
+        "Missing raw history reproduced with new real TCP fixture against prior 1ba9020 ELFs before product implementation",
+        "Clean 205f02f make check build-linux passes in 110.66s: unit, Python14, Race Detector, vet, static amd64/arm64",
+        "Related compiler/runtime/control/worker/relay Race tests pass after correcting absent-snapshot JSON framing",
+        "Additional actual SQLite target-save/local-ACK-failure/reopen/dedup and pending byte-capacity Race fixtures pass; local rolling queue does not exhaust MaxJobs=1 over 80 acknowledged observations",
+        "Actual namespace daemon Race harness 9.61s: TCP raw events and EventRule count, logger/worker/control restart, stale publisher 409, finite facts continue during target failure, four original queued events survive health/control SIGKILL and recover once",
+        "Fresh QEMU raw-health/DerivedEvent/EventRule gate 67.82s and two-WAN Health/PBR TCP/UDP/packet capture/recovery 88.85s pass; management/actual SSH 36.55s pass",
+        "Same product/integration source QEMU regressions: EventRule 62.06s and BFD/BGP 53.44s pass; related five-suite run is not a full aggregate",
+        "PVE root-owned Race harness actual scoped TCP/HTTP/DNS/raw ICMP sockets pass; added relay fixtures pass related Race and vet; tools14 pass",
+        "Additional control Race/vet: protocol delivery failure blocks confirmation but does not block expiry rollback removing that producer; removed producer error is pruned and health recovers"
+      ],
+      "remaining": [
+        "Other raw protocol event producers, source-cutover and permanent service retirement drainage of retained pending history, and complete lifecycle/capacity qualification",
+        "Abrupt QEMU power-loss/reboot acceptance for live queues, cross-version storage migration and full database rollback contract",
+        "Other status providers/structured fields/DerivedEvent chaining and complete conditional event/derived acceptance",
+        "Privileged effect authorization/idempotency, federation, retention/archive/capacity alarms and scale/latency qualification",
+        "All remaining work-package acceptance and selected physical/NIC/performance profile"
+      ],
+      "parity_flags_unchanged": true,
+      "additional_test_checkpoint": "3082946258497e7c9dbfdb59a783935efc45ced2"
     }
   ],
   "delivery_goal": {

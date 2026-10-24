@@ -74,7 +74,7 @@ SUITES = {
         "test": "TestDaemonDerivedHealthCurrentStatusAndDurability",
         "marker": "ROUTERD_DERIVED_DAEMON_TEST", "timeout": 200,
         "commands": True,
-        "description": "finite health status to durable DerivedEvent/EventRule and recovery",
+        "description": "durable raw health events, finite DerivedEvent/EventRule and crash recovery",
     },
     "daemon-resource-program": {
         "package": "./internal/integration", "binary": "daemon.test",

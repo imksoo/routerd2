@@ -1,0 +1,32 @@
+{
+  "product_checkpoint": "205f02fc9abd5689d1a9543af5104f16c1e3d2ea",
+  "test": "TestDaemonDerivedHealthCurrentStatusAndDurability",
+  "result": "passed",
+  "seconds": 9.61,
+  "child_seconds": 8.57,
+  "recovered_original_pending": 4,
+  "harness_race": true,
+  "harness_sha256": "f006d000a4af0d47de3104f6a878999b1cdf14a3ada1e0ffbf98017a56310826",
+  "elf_manifest": "build-manifest.json",
+  "execution": "fresh static ELFs and Race harness installed by sudo into its root-owned 0700 staging directory; integration creates isolated namespaces",
+  "required": true,
+  "arguments": [
+    "-test.run=^TestDaemonDerivedHealthCurrentStatusAndDurability$",
+    "-test.count=1",
+    "-test.v",
+    "-test.timeout=180s"
+  ],
+  "environment": {
+    "ROUTERD2_TEST_BIN_DIR": "<private-root-stage>",
+    "ROUTERD2_INTEGRATION_REQUIRED": "1"
+  },
+  "exit_code": 0,
+  "socket_harness_sha256": "87b97cc8b4878d04dc2aed6d8736af9bc156722ebf39b9a62b2e259c9e41c552",
+  "socket_arguments": [
+    "-test.run=^TestScoped(TCPAndHTTPProbes|DNSProbe|ICMPProbe)$",
+    "-test.v",
+    "-test.count=1",
+    "-test.timeout=20s"
+  ],
+  "socket_result": "passed"
+}

@@ -81,8 +81,8 @@ resources:
 
 `event_rule` は固定routerdのtyped pattern/emitを使う。all_of、any_of、sequence、window、
 absence、throttle、debounce、countをcompile時に検証し、inactiveな不正定義も副作用前に拒否する。
-live input producerは設定commit/confirm/rollbackとDerivedEventのassert/retractである。
-Health等のraw protocolイベントは未接続。
+live input producerは設定commit/confirm/rollback、DerivedEventのassert/retract、HealthCheckの
+probeごとのpassed/failed/timeoutである。他のraw protocolイベントは未接続。
 新規activationはjournal末尾から始め、過去の履歴を初期集計へ取り込まない。
 集計状態・入力cursor・出力jobは同時保存し、control再起動後に再開する。
 出力は `show observations` で確認でき、作用実行やprotocol leaseにはならない。
@@ -96,6 +96,17 @@ Health等のraw protocolイベントは未接続。
 timer期限は元の観測時刻から計算する。未処理入力との比較では、期限より後の入力の前に
 timerを評価し、期限と同時の入力を優先する。保存済みtimerも現在の定義・activationにfenceする。
 外部作用の権限判定は別契約であり、historical eventだけでは許可しない。
+
+HealthCheckのprobe eventは `routerd.healthcheck.SERVICE_NAME.passed` / `.failed` / `.timeout`。
+phaseが同じでもprobeごとに記録する。worker側のprivateな送信待ちqueueへ保存してから送信し、
+logging停止、ACK消失、worker/control再起動で同じID・元の観測時刻・内容を再送する。
+queueは最大64件かつencoded state 64KiBで、保存済み分を捨てずに容量不足を返す。
+local保存に失敗した結果を現在のfactとして公開せず、workerを停止する。
+control側の部分保存はACKせず、再送時に保存済みprefixをdedupする。
+`health.protocol_events.last_error` はproducerごとの保存失敗を集約し、不健全/trial確定不可として返す。
+現在のproducerを登録したりfact期限を延長したりする経路ではない。
+過去のboot/configの履歴には元のproducer metadataを保持する。履歴の遅延配信を現在のUpとして扱わない。
+[実TCP・再起動・DB失敗の証跡](evidence/2026-10-24-health-protocol-events.md) を参照。
 
 `/v1/health` の `event_rules` はrevision、ruleごとのid/lifetime/cursor/versionと
 出力outboxのpending有無、bounded errorを返す。保存/publication失敗時はhealthを不健全にし、

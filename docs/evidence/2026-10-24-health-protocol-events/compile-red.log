@@ -1,0 +1,15 @@
+# github.com/imksoo/routerd2/internal/protocolevents [github.com/imksoo/routerd2/internal/protocolevents.test]
+internal/protocolevents/outbox_test.go:27:12: undefined: NewOutbox
+internal/protocolevents/outbox_test.go:49:11: undefined: NewOutbox
+internal/protocolevents/outbox_test.go:78:12: undefined: NewOutbox
+internal/protocolevents/outbox_test.go:92:18: undefined: MaxPending
+internal/protocolevents/outbox_test.go:100:18: undefined: MaxPending
+internal/protocolevents/outbox_test.go:100:29: undefined: PageSize
+internal/protocolevents/outbox_test.go:102:20: undefined: PageSize
+# github.com/imksoo/routerd2/internal/protocol/health [github.com/imksoo/routerd2/internal/protocol/health.test]
+internal/protocol/health/events_test.go:19:9: s.ProbeEvent undefined (type Snapshot has no field or method ProbeEvent)
+internal/protocol/health/events_test.go:24:8: s.ProbeEvent undefined (type Snapshot has no field or method ProbeEvent)
+internal/protocol/health/events_test.go:27:10: s.ProbeEvent undefined (type Snapshot has no field or method ProbeEvent)
+FAIL	github.com/imksoo/routerd2/internal/protocol/health [build failed]
+FAIL	github.com/imksoo/routerd2/internal/protocolevents [build failed]
+FAIL

@@ -1,0 +1,10 @@
+=== RUN   TestTargetSavedProbeSurvivesActualLocalACKTransactionFailure
+--- PASS: TestTargetSavedProbeSurvivesActualLocalACKTransactionFailure (0.48s)
+=== RUN   TestRelayByteCapacityPreservesEveryAcceptedObservation
+--- PASS: TestRelayByteCapacityPreservesEveryAcceptedObservation (0.49s)
+=== RUN   TestPendingProbeSurvivesRestartFailedACKAndConcurrentEnqueue
+--- PASS: TestPendingProbeSurvivesRestartFailedACKAndConcurrentEnqueue (0.18s)
+=== RUN   TestRelayBoundsOnlyPendingWorkAndRejectsOtherResources
+--- PASS: TestRelayBoundsOnlyPendingWorkAndRejectsOtherResources (3.28s)
+PASS
+ok  	github.com/imksoo/routerd2/internal/protocolevents	5.462s

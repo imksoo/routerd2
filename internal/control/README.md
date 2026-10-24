@@ -178,8 +178,28 @@ a cursor beyond the tip returns 409, and storage errors return 503. The page
 contains records, next_cursor and more. Each event is at most 64 KiB, keeping
 responses below the API byte limit. This is read-only history, not an effect
 execution or consumer registration API. Journal retention/capacity handling,
-raw protocol event producers and federation remain open work. DerivedEvent
+other raw protocol event producers and federation remain open work. HealthCheck
+probe events use the narrow durable relay described below. DerivedEvent
 assertion transitions are also connected through their producer state/outbox.
+
+## Historical protocol input
+
+`POST /v1/protocol-events` accepts up to 16 stable-ID HealthCheck probe events
+from a current registered, supervisor-ready worker. Its producer identity binds
+the supervisor lifetime, immutable config digest, generation and producer epoch.
+Only that HealthCheck's passed/failed/timeout topics and typed resource detail
+are accepted. Validation covers the entire page before any append; success
+returns `accepted_ids` in exactly the page order. A partially stored page is
+retried whole and deduplicates by ID. This is not a generic public append API.
+
+The worker saves pending observations before sending current facts and retains
+their original time/content/producer metadata across restart and source changes.
+History can predate current authority, but delivery cannot register a producer,
+renew facts or execute effects. `health.protocol_events.last_error` and
+`State.protocol_event_error` report bounded per-producer storage failures.
+Failures make health unhealthy and prevent trial confirmation; another
+producer's success cannot clear them. Authoritative config remains committed.
+See [relay durability and limits](../protocolevents/README.md).
 
 ## Current DerivedEvent observations
 

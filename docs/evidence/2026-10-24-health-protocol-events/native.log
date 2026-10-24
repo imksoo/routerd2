@@ -1,0 +1,9 @@
+=== RUN   TestDaemonDerivedHealthCurrentStatusAndDurability
+    bgp_test.go:192: === RUN   TestDaemonDerivedHealthCurrentStatusAndDurability
+            derived_test.go:377: raw probe events and EventRule count passed; 4 queued stable observations survived worker/control SIGKILL and journal failure without duplicate or renewed facts
+            derived_test.go:378: real TCP probes -> finite typed current status -> durable DerivedEvent -> EventRule; producer/control/logging restart, old notification, max_age and SQL failure recovery passed
+            derived_test.go:379: ROUTERD_DERIVED_DAEMON_TEST_PASS
+        --- PASS: TestDaemonDerivedHealthCurrentStatusAndDurability (8.57s)
+        PASS
+--- PASS: TestDaemonDerivedHealthCurrentStatusAndDurability (9.61s)
+PASS
