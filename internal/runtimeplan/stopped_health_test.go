@@ -2,7 +2,9 @@ package runtimeplan
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/protocol/health"
@@ -59,13 +61,15 @@ func TestStoppedHealthRecoveryFencesReactivationWithoutHoldingFactMutex(t *testi
 	r.mu.Unlock()
 	check(false)
 	r.op.Lock()
-	err := r.WithStoppedHealthRelays(ctx, []string{"wan"}, func(map[string]bool) error {
-		t.Fatal("busy reconciliation was bypassed")
+	deadline, cancel := context.WithTimeout(ctx, 25*time.Millisecond)
+	err := r.WithStoppedHealthRelays(deadline, []string{"wan"}, func(map[string]bool) error {
+		t.Fatal("owned reconciliation was bypassed")
 		return nil
 	})
+	cancel()
 	r.op.Unlock()
-	if err != nil {
-		t.Fatal("busy reconcile should defer without creating a delivery fault", err)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal("busy recovery silently skipped its ownership observation", err)
 	}
 	m.unavailable = true
 	if err := r.WithStoppedHealthRelays(ctx, []string{"wan"}, func(map[string]bool) error {
@@ -73,5 +77,39 @@ func TestStoppedHealthRecoveryFencesReactivationWithoutHoldingFactMutex(t *testi
 		return nil
 	}); err == nil {
 		t.Fatal("missing supervisor was hidden")
+	}
+}
+
+func TestStoppedHealthRecoveryWaitsForReconcileAndThenObservesOwnership(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	r := New(t.TempDir(), t.TempDir(), &memoryNetwork{}, testSupervisorInstance)
+	r.manager = &observedManager{generation: 1}
+	if err := r.ApplyConfig(ctx, 1, config.Document{SchemaVersion: config.SchemaVersion}); err != nil {
+		t.Fatal(err)
+	}
+	r.op.Lock()
+	done := make(chan error, 1)
+	called := false
+	go func() {
+		done <- r.WithStoppedHealthRelays(ctx, []string{"wan"}, func(allowed map[string]bool) error {
+			called = allowed["wan"]
+			return nil
+		})
+	}()
+	select {
+	case err := <-done:
+		r.op.Unlock()
+		t.Fatal("contention silently discarded the recovery pass", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+	r.op.Unlock()
+	select {
+	case err := <-done:
+		if err != nil || !called {
+			t.Fatal("recovery did not acquire ownership after reconcile completed", called, err)
+		}
+	case <-ctx.Done():
+		t.Fatal("recovery starved behind reconcile")
 	}
 }
