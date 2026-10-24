@@ -30,6 +30,16 @@ only an older cursor cannot reactivate it. A crash after an external effect but
 before `Complete` can repeat that effect: the consumer/key pair must also fence
 duplicates in the target. No exactly-once execution claim is made.
 
+`Checkpoint` registers a stateful consumer at the current tip and reads its
+cursor, version and JSON state consistently. `Transition` commits a next input
+cursor, new state and work together. It may keep the cursor unchanged for a
+timer, but still requires the current version. A competing or stale transition
+cannot advance state or produce work. A stateful consumer cannot switch to
+`Drain`, `Cursor` or `Schedule` and bypass this transaction. Timer deadlines,
+rule semantics and authority are the caller's responsibility; a checkpoint is
+not a protocol lease. State is at most 64 KiB per consumer and 64 MiB in total
+by default; replacing state releases its previous byte charge.
+
 Defaults cap the journal and outbox at 100,000 rows and 64 MiB of encoded payload
 each, plus 1,024 consumer registrations. Individual event/job bodies are at most
 64 KiB. These are payload/row budgets, not a bound on SQLite's total filesystem
@@ -43,3 +53,9 @@ concurrent publishers, private path attacks, foreign database preservation,
 connection replacement, and SIGKILL followed by WAL recovery. Configuration
 producer state/outbox atomicity and worker recovery have separate control tests.
 Protocol event producers and QEMU power-loss acceptance remain implementation-plan work.
+
+The database schema is now version 2. Accepted design D-09 deliberately does
+not import discarded, unreleased version-1 prototype state. Unsupported schema
+identity is rejected through the read-only probe before SQLite recovery/writes.
+This is not a promise that different released versions can share or roll back
+this database. A production migration/fallback contract remains DIST-01 work.

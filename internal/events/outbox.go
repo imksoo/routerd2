@@ -15,7 +15,11 @@ import (
 // A crash between an external effect and Complete still requires idempotency
 // in that effect's target, using this stable consumer/key pair.
 func (s *Store) Schedule(ctx context.Context, name string, expected, eventCursor uint64, jobs []Job) error {
-	if !token(name, 128) || expected > math.MaxInt64 || eventCursor > math.MaxInt64 || eventCursor <= expected || len(jobs) > 64 {
+	return s.schedule(ctx, name, expected, eventCursor, jobs, nil, nil)
+}
+
+func (s *Store) schedule(ctx context.Context, name string, expected, eventCursor uint64, jobs []Job, checkpoint *Checkpoint, state json.RawMessage) error {
+	if !token(name, 128) || expected > math.MaxInt64 || eventCursor > math.MaxInt64 || eventCursor < expected || checkpoint == nil && eventCursor == expected || eventCursor == 0 && len(jobs) > 0 || len(jobs) > 64 {
 		return ErrConflict
 	}
 	normalized := make([]Job, len(jobs))
@@ -42,18 +46,23 @@ func (s *Store) Schedule(ctx context.Context, name string, expected, eventCursor
 	}
 	defer tx.Rollback()
 	var current uint64
-	if err = tx.QueryRowContext(ctx, `SELECT cursor FROM consumers WHERE name=?`, name).Scan(&current); err != nil {
+	var version uint64
+	var stateful bool
+	var stateBytes int64
+	if err = tx.QueryRowContext(ctx, `SELECT cursor,version,stateful,length(body) FROM consumers WHERE name=?`, name).Scan(&current, &version, &stateful, &stateBytes); err != nil {
 		return errors.Join(ErrConflict, err)
 	}
-	if current != expected {
+	if current != expected || version >= math.MaxInt64 || stateful != (checkpoint != nil) || checkpoint != nil && checkpoint.Version != version {
 		return ErrConflict
 	}
-	var next sql.NullInt64
-	if err = tx.QueryRowContext(ctx, `SELECT min(cursor) FROM events WHERE cursor>?`, expected).Scan(&next); err != nil {
-		return err
-	}
-	if !next.Valid || uint64(next.Int64) != eventCursor {
-		return ErrConflict
+	if eventCursor != expected {
+		var next sql.NullInt64
+		if err = tx.QueryRowContext(ctx, `SELECT min(cursor) FROM events WHERE cursor>?`, expected).Scan(&next); err != nil {
+			return err
+		}
+		if !next.Valid || uint64(next.Int64) != eventCursor {
+			return ErrConflict
+		}
 	}
 	for _, job := range normalized {
 		var priorCursor uint64
@@ -75,7 +84,23 @@ func (s *Store) Schedule(ctx context.Context, name string, expected, eventCursor
 			return err
 		}
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE consumers SET cursor=? WHERE name=? AND cursor=?`, eventCursor, name, expected)
+	var result sql.Result
+	if checkpoint != nil {
+		var used int64
+		if err = tx.QueryRowContext(ctx, `SELECT bytes_count FROM usage WHERE kind='consumer_state'`).Scan(&used); err != nil {
+			return err
+		}
+		delta := int64(len(state)) - stateBytes
+		if delta > s.options.MaxConsumerStateBytes-used {
+			return ErrCapacity
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE usage SET bytes_count=bytes_count+? WHERE kind='consumer_state'`, delta); err != nil {
+			return err
+		}
+		result, err = tx.ExecContext(ctx, `UPDATE consumers SET cursor=?,version=version+1,body=? WHERE name=? AND cursor=? AND version=?`, eventCursor, []byte(state), name, expected, version)
+	} else {
+		result, err = tx.ExecContext(ctx, `UPDATE consumers SET cursor=?,version=version+1 WHERE name=? AND cursor=? AND version=?`, eventCursor, name, expected, version)
+	}
 	if err != nil {
 		return err
 	}

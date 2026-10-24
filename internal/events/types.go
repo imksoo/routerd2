@@ -23,6 +23,7 @@ type Options struct {
 	Directory                        string
 	MaxEvents, MaxJobs, MaxConsumers int64
 	MaxEventBytes, MaxJobBytes       int64
+	MaxConsumerStateBytes            int64
 }
 
 // Event is historical evidence, never a command or permission to mutate the
@@ -51,6 +52,14 @@ type Job struct {
 type Delivery struct {
 	Job
 	EventCursor uint64 `json:"event_cursor"`
+}
+
+// Checkpoint is one consistent durable consumer state. Version also fences
+// timer-driven changes which do not advance the source event cursor.
+type Checkpoint struct {
+	Cursor  uint64          `json:"cursor"`
+	Version uint64          `json:"version"`
+	State   json.RawMessage `json:"state"`
 }
 
 func token(value string, maximum int) bool {

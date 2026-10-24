@@ -26,15 +26,16 @@ type Store struct {
 }
 
 const applicationID = 0x52443245 // RD2E; separate from every other product store
+const schemaVersion = 2          // unreleased prototype v1 is deliberately not imported
 
 const schema = `
 CREATE TABLE events(cursor INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL UNIQUE, body BLOB NOT NULL);
-CREATE TABLE consumers(name TEXT PRIMARY KEY, cursor INTEGER NOT NULL CHECK(cursor>=0));
+CREATE TABLE consumers(name TEXT PRIMARY KEY, cursor INTEGER NOT NULL CHECK(cursor>=0), version INTEGER NOT NULL DEFAULT 0 CHECK(version>=0), stateful INTEGER NOT NULL DEFAULT 0 CHECK(stateful IN (0,1)), body BLOB NOT NULL DEFAULT X'7b7d');
 CREATE TABLE outbox(consumer TEXT NOT NULL REFERENCES consumers(name), key TEXT NOT NULL, event_cursor INTEGER NOT NULL REFERENCES events(cursor), payload BLOB NOT NULL, done INTEGER NOT NULL DEFAULT 0 CHECK(done IN (0,1)), PRIMARY KEY(consumer,key));
 CREATE INDEX pending_work ON outbox(consumer,done,event_cursor,key);
 CREATE TABLE usage(kind TEXT PRIMARY KEY, rows_count INTEGER NOT NULL, bytes_count INTEGER NOT NULL);
-INSERT INTO usage VALUES('events',0,0),('outbox',0,0);
-PRAGMA user_version=1;
+INSERT INTO usage VALUES('events',0,0),('outbox',0,0),('consumer_state',0,0);
+PRAGMA user_version=2;
 `
 
 func Open(options Options) (_ *Store, result error) {
@@ -53,8 +54,14 @@ func Open(options Options) (_ *Store, result error) {
 	if options.MaxJobBytes == 0 {
 		options.MaxJobBytes = 64 << 20
 	}
+	if options.MaxConsumerStateBytes == 0 {
+		options.MaxConsumerStateBytes = 64 << 20
+	}
 	if options.MaxEvents < 1 || options.MaxEvents > 1000000 || options.MaxJobs < 1 || options.MaxJobs > 1000000 || options.MaxConsumers < 1 || options.MaxConsumers > 100000 || options.MaxEventBytes < 1 || options.MaxEventBytes > 1<<30 || options.MaxJobBytes < 1 || options.MaxJobBytes > 1<<30 {
 		return nil, errors.New("invalid durable event store limits")
+	}
+	if options.MaxConsumerStateBytes < 2 || options.MaxConsumerStateBytes > 1<<30 {
+		return nil, errors.New("invalid consumer state capacity")
 	}
 	dir, err := privateDirectory(options.Directory)
 	if err != nil {
@@ -112,7 +119,7 @@ func Open(options Options) (_ *Store, result error) {
 		if err != nil {
 			return nil, err
 		}
-		if id != applicationID && !(id == 0 && version == 0 && objects == 0) || id == applicationID && version != 1 {
+		if id != applicationID && !(id == 0 && version == 0 && objects == 0) || id == applicationID && version != schemaVersion {
 			return nil, errors.New("foreign or unsupported event database")
 		}
 	}
@@ -145,7 +152,7 @@ func Open(options Options) (_ *Store, result error) {
 		}
 	} else if id != applicationID {
 		return nil, errors.New("foreign event database application identity")
-	} else if version != 1 {
+	} else if version != schemaVersion {
 		return nil, errors.New("unsupported event database schema")
 	}
 	// Inspect ownership/schema before any pragma that can modify the database.
@@ -176,23 +183,21 @@ func Open(options Options) (_ *Store, result error) {
 	if err = s.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		return nil, err
 	}
-	if version != 1 {
+	if version != schemaVersion {
 		return nil, errors.New("unsupported event database schema")
 	}
 	var integrity string
 	if err = s.db.QueryRow(`PRAGMA quick_check`).Scan(&integrity); err != nil || integrity != "ok" {
 		return nil, fmt.Errorf("event database integrity: %s %w", integrity, err)
 	}
-	for _, table := range []string{"events", "outbox"} {
+	for _, entry := range []struct{ kind, table, column string }{
+		{"events", "events", "body"}, {"outbox", "outbox", "payload"}, {"consumer_state", "consumers", "body"},
+	} {
 		var rows, bytes, storedRows, storedBytes int64
-		column := "body"
-		if table == "outbox" {
-			column = "payload"
-		}
-		if err = s.db.QueryRow(`SELECT count(*),coalesce(sum(length(`+column+`)),0) FROM `+table).Scan(&rows, &bytes); err != nil {
+		if err = s.db.QueryRow(`SELECT count(*),coalesce(sum(length(`+entry.column+`)),0) FROM `+entry.table).Scan(&rows, &bytes); err != nil {
 			return nil, err
 		}
-		if err = s.db.QueryRow(`SELECT rows_count,bytes_count FROM usage WHERE kind=?`, table).Scan(&storedRows, &storedBytes); err != nil {
+		if err = s.db.QueryRow(`SELECT rows_count,bytes_count FROM usage WHERE kind=?`, entry.kind).Scan(&storedRows, &storedBytes); err != nil {
 			return nil, err
 		}
 		if rows != storedRows || bytes != storedBytes {

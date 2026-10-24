@@ -131,48 +131,8 @@ func (s *Store) List(ctx context.Context, after uint64, limit int) ([]Record, er
 // Cursor initializes a new consumer at the current tip in the same write
 // transaction. An existing consumer resumes exactly its durable position.
 func (s *Store) Cursor(ctx context.Context, name string) (uint64, error) {
-	if !token(name, 128) {
-		return 0, errors.New("invalid event consumer")
-	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.closed {
-		return 0, ErrClosed
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, err
-	}
-	defer tx.Rollback()
-	var cursor uint64
-	err = tx.QueryRowContext(ctx, `SELECT cursor FROM consumers WHERE name=?`, name).Scan(&cursor)
-	if err == nil {
-		var tip uint64
-		if err := tx.QueryRowContext(ctx, `SELECT coalesce(max(cursor),0) FROM events`).Scan(&tip); err != nil {
-			return 0, err
-		}
-		if cursor > tip {
-			return 0, ErrConflict
-		}
-		return cursor, nil
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return 0, err
-	}
-	var count int64
-	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM consumers`).Scan(&count); err != nil {
-		return 0, err
-	}
-	if count >= s.options.MaxConsumers {
-		return 0, ErrCapacity
-	}
-	if err = tx.QueryRowContext(ctx, `SELECT coalesce(max(cursor),0) FROM events`).Scan(&cursor); err != nil {
-		return 0, err
-	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO consumers(name,cursor) VALUES(?,?)`, name, cursor); err != nil {
-		return 0, err
-	}
-	return cursor, tx.Commit()
+	checkpoint, err := s.consumer(ctx, name, false)
+	return checkpoint.Cursor, err
 }
 
 // Drain preserves at-least-once delivery: a callback followed by a failed
