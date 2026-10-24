@@ -89,9 +89,9 @@
 [    0.162461] SLUB: HWalign=64, Order=0-3, MinObjects=0, CPUs=2, Nodes=1
 [    0.192571] Dynamic Preempt: none
 [    0.199828] rcu: Preemptible hierarchical RCU implementation.
-[    0.199918] rcu: 	RCU restricting CPUs from NR_CPUS=256 to nr_cpu_ids=2.
-[    0.200442] 	Trampoline variant of Tasks RCU enabled.
-[    0.200481] 	Tracing variant of Tasks RCU enabled.
+[    0.199918] rcu:     RCU restricting CPUs from NR_CPUS=256 to nr_cpu_ids=2.
+[    0.200442]  Trampoline variant of Tasks RCU enabled.
+[    0.200481]  Tracing variant of Tasks RCU enabled.
 [    0.200694] rcu: RCU calculated value of scheduler-enlistment delay is 100 jiffies.
 [    0.200757] rcu: Adjusting geometry for rcu_fanout_leaf=16, nr_cpu_ids=2
 [    0.203334] RCU Tasks: Setting shift to 1 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=2.
@@ -136,7 +136,7 @@
 [    1.011197] Performance Events: PMU not available due to virtualization, using software events only.
 [    1.014205] signal: max sigframe size: 2032
 [    1.023199] rcu: Hierarchical SRCU implementation.
-[    1.023536] rcu: 	Max phase no-delay instances is 400.
+[    1.023536] rcu:     Max phase no-delay instances is 400.
 [    1.027532] Timer migration: 1 hierarchy levels; 8 children per group; 1 crossnode level
 [    1.040864] NMI watchdog: Perf NMI watchdog permanently disabled
 [    1.050221] smp: Bringing up secondary CPUs ...
@@ -329,90 +329,90 @@
         === RUN   TestDaemonDerivedHealthCurrentStatusAndDurability
             derived_test.go:378: raw probe events and EventRule count passed; 7 queued stable observations survived worker/control SIGKILL and journal failure without duplicate or renewed facts
         panic: test timed out after 1m15s
-        	running tests:
-        		TestDaemonDerivedHealthCurrentStatusAndDurability (1m15s)
+                running tests:
+                        TestDaemonDerivedHealthCurrentStatusAndDurability (1m15s)
 
         goroutine 1313 [running]:
         testing.(*M).startAlarm.func1()
-        	<go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/testing/testing.go:2961 +<address>
+                <go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/testing/testing.go:2961 +<address>
         created by time.goFunc
-        	<go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/time/sleep.go:182 +<address>
+                <go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/time/sleep.go:182 +<address>
 
         goroutine 1 [chan receive, 1 minutes]:
         testing.(*T).Run(<address>, {<address>?, <address>?}, <address>)
-        	<go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/testing/testing.go:2268 +<address>
+                <go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/testing/testing.go:2268 +<address>
         testing.runTests.func1(<address>)
-        	<go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/testing/testing.go:2744 +<address>
+                <go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/testing/testing.go:2744 +<address>
         testing.tRunner(<address>, <address>)
-        	<go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/testing/testing.go:2195 +<address>
+                <go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/testing/testing.go:2195 +<address>
         testing.runTests({<address>, <address>}, {<address>, <address>}, <address>, {<address>, <address>, <address>}, {<address>, <address>, ...})
-        	<go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/testing/testing.go:2742 +<address>
+                <go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/testing/testing.go:2742 +<address>
         testing.(*M).Run(<address>)
-        	<go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/testing/testing.go:2602 +<address>
+                <go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/testing/testing.go:2602 +<address>
         main.main()
-        	_testmain.go:68 +<address>
+                _testmain.go:68 +<address>
 
         goroutine 6 [sleep]:
         time.Sleep(<address>)
-        	<go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/runtime/time.go:368 +<address>
+                <go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/runtime/time.go:368 +<address>
         github.com/imksoo/routerd2/internal/integration.until(<address>, <address>, <address>)
-        	<workspace>/internal/integration/daemon_test.go:365 +<address>
+                <workspace>/internal/integration/daemon_test.go:365 +<address>
         github.com/imksoo/routerd2/internal/integration.TestDaemonDerivedHealthCurrentStatusAndDurability.func8({<address>, <address>})
-        	<workspace>/internal/integration/derived_test.go:159 +<address>
+                <workspace>/internal/integration/derived_test.go:159 +<address>
         github.com/imksoo/routerd2/internal/integration.TestDaemonDerivedHealthCurrentStatusAndDurability(<address>)
-        	<workspace>/internal/integration/derived_test.go:439 +<address>
+                <workspace>/internal/integration/derived_test.go:439 +<address>
         testing.tRunner(<address>, <address>)
-        	<go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/testing/testing.go:2195 +<address>
+                <go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/testing/testing.go:2195 +<address>
         created by testing.(*T).Run in goroutine 1
-        	<go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/testing/testing.go:2260 +<address>
+                <go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/testing/testing.go:2260 +<address>
 
         goroutine 19 [syscall, 1 minutes]:
         syscall.Syscall6(<address>, <address>, <address>, <address>, <address>, <address>, <address>)
-        	<go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/syscall/syscall_linux.go:96 +<address>
+                <go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/syscall/syscall_linux.go:96 +<address>
         internal/syscall/unix.Waitid(<address>?, <address>?, <address>?, <address>?, <address>?)
-        	<go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/internal/syscall/unix/waitid_linux.go:18 +<address>
+                <go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/internal/syscall/unix/waitid_linux.go:18 +<address>
         os.(*Process).pidfdWait.func1(...)
-        	<go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/os/pidfd_linux.go:108
+                <go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/os/pidfd_linux.go:108
         os.ignoringEINTR(...)
-        	<go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/os/file_posix.go:263
+                <go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/os/file_posix.go:263
         os.(*Process).pidfdWait(<address>)
-        	<go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/os/pidfd_linux.go:107 +<address>
+                <go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/os/pidfd_linux.go:107 +<address>
         os.(*Process).wait(<address>?)
-        	<go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/os/exec_unix.go:25 +<address>
+                <go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/os/exec_unix.go:25 +<address>
         os.(*Process).Wait(...)
-        	<go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/os/exec.go:347
+                <go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/os/exec.go:347
         os/exec.(*Cmd).Wait(<address>)
-        	<go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/os/exec/exec.go:944 +<address>
+                <go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/os/exec/exec.go:944 +<address>
         github.com/imksoo/routerd2/internal/integration.startFixtureDaemonAt.func2()
-        	<workspace>/internal/integration/bgp_test.go:282 +<address>
+                <workspace>/internal/integration/bgp_test.go:282 +<address>
         created by github.com/imksoo/routerd2/internal/integration.startFixtureDaemonAt in goroutine 6
-        	<workspace>/internal/integration/bgp_test.go:282 +<address>
+                <workspace>/internal/integration/bgp_test.go:282 +<address>
 
         goroutine 840 [select]:
         database/sql.(*DB).connectionOpener(<address>, {<address>, <address>})
-        	<go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/database/sql/sql.go:1266 +<address>
+                <go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/database/sql/sql.go:1266 +<address>
         created by database/sql.OpenDB in goroutine 6
-        	<go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/database/sql/sql.go:846 +<address>
+                <go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/database/sql/sql.go:846 +<address>
 
         goroutine 901 [IO wait]:
         internal/poll.runtime_pollWait(<address>, <address>)
-        	<go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/runtime/netpoll.go:351 +<address>
+                <go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/runtime/netpoll.go:351 +<address>
         internal/poll.(*pollDesc).wait(<address>?, <address>?, <address>)
-        	<go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/internal/poll/fd_poll_runtime.go:84 +<address>
+                <go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/internal/poll/fd_poll_runtime.go:84 +<address>
         internal/poll.(*pollDesc).waitRead(...)
-        	<go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/internal/poll/fd_poll_runtime.go:89
+                <go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/internal/poll/fd_poll_runtime.go:89
         internal/poll.(*FD).Accept(<address>)
-        	<go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/internal/poll/fd_unix.go:618 +<address>
+                <go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/internal/poll/fd_unix.go:618 +<address>
         net.(*netFD).accept(<address>)
-        	<go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/net/fd_unix.go:149 +<address>
+                <go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/net/fd_unix.go:149 +<address>
         net.(*TCPListener).accept(<address>)
-        	<go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/net/tcpsock_posix.go:159 +<address>
+                <go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/net/tcpsock_posix.go:159 +<address>
         net.(*TCPListener).Accept(<address>)
-        	<go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/net/tcpsock.go:387 +<address>
+                <go-module-cache>/golang.org/toolchain@v0.0.1-go1.27.3.linux-amd64/src/net/tcpsock.go:387 +<address>
         github.com/imksoo/routerd2/internal/integration.TestDaemonDerivedHealthCurrentStatusAndDurability.func1.2()
-        	<workspace>/internal/integration/derived_test.go:64 +<address>
+                <workspace>/internal/integration/derived_test.go:64 +<address>
         created by github.com/imksoo/routerd2/internal/integration.TestDaemonDerivedHealthCurrentStatusAndDurability.func1 in goroutine 6
-        	<workspace>/internal/integration/derived_test.go:62 +<address>
+                <workspace>/internal/integration/derived_test.go:62 +<address>
 --- FAIL: TestDaemonDerivedHealthCurrentStatusAndDurability (75.38s)
 FAIL
 ROUTERD_DERIVED_DAEMON_TEST_FAIL: exit status 1

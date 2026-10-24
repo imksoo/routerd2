@@ -225,6 +225,7 @@
     "Go addresses",
     "public kernel certificate identifier",
     "trailing serial whitespace",
-    "explicit excerpts and host memory/key identifier omissions as recorded"
+    "explicit excerpts and host memory/key identifier omissions as recorded",
+    "failed child timeout log tabs expanded to eight-column spaces"
   ]
 }
