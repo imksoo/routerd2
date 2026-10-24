@@ -136,7 +136,7 @@ builder and records independent artifacts under
 make qemu-protocols
 ```
 
-This target runs eight fixed suites in separate no-NIC guests, using the same
+This target runs eleven fixed suites in separate no-NIC guests, using the same
 Alpine kernel and module tree as the appliance. CI runs these packet and
 namespace checks in the `images` job: a hosted runner's kernel may omit VRF or
 other drivers even when it provides root access. The host `go` job still runs
@@ -147,14 +147,17 @@ and actual signed-bundle validation.
 | --- | --- | --- |
 | `daemon-management` | `TestDaemonConfigurationAndRecovery` | Embedded SSH editing, commit and process recovery |
 | `daemon-dhcp-dns` | `TestDaemonDHCPDNSAndOwnershipExpiry` | DHCP leases projected into DNS and ownership expiry |
+| `daemon-legacy-dhcp-dns` | `TestDaemonMigratedDHCPDNSAndOwnershipExpiry` | Original resource YAML migration, explicit finite-source DNS policy, DHCP acquisition, scoped INPUT exception, producer expiry and journal recovery |
 | `daemon-bgp` | `TestDaemonBGPFIBAndOwnershipExpiry` | Real BGP workers, kernel FIB and ownership expiry |
+| `daemon-bfd` | `TestDaemonBFDControlsBGPSessionAndExpiry` | BFD startup gating, UDP-only loss, suspended-producer expiry and fresh BGP/FIB recovery |
 | `dhcp` | `TestIsolatedNativeDHCPAndRA` | DHCPv4, DHCPv6-PD and native router advertisements |
 | `dhcp-server` | `TestIsolatedNativeDHCPServer` | DHCP server VRF binding, lease lifecycle and restart |
 | `vrrp` | `TestIsolatedNativeVRRP` | IPv4/IPv6 VRRP elections and failover |
 | `ra-client` | `TestIsolatedNativeRAClient` | RA learning, independent lifetimes, DAD and restart |
 | `aftr` | `TestIsolatedNativeAFTR` | AFTR resolution over native IPv6 DNS transport |
+| `bfd` | `TestIsolatedNativeBFD` | Native single-hop IPv4/IPv6 BFD wire sessions and failure detection |
 
-The three `daemon-*` suites each build and execute the actual `routerd` and
+The five `daemon-*` suites each build and execute the actual `routerd` and
 `routerd-modules` pair. Every suite still uses fresh namespaces inside its
 guest. Missing drivers, namespace failures, skipped tests, renamed or missing
 test functions, incorrect PASS markers and nonzero QEMU exits fail the gate.
