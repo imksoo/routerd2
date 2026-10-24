@@ -87,7 +87,13 @@ func (s Snapshot) read(field string) (string, bool, uint64, uint64) {
 }
 
 func (s Snapshot) authority(refs []string) string {
-	parts := []any{s.scope, s.continuity, s.continuousSince}
+	body, _ := json.Marshal([]any{s.producerAuthority(refs), s.continuity, s.continuousSince})
+	sum := sha256.Sum256(body)
+	return hex.EncodeToString(sum[:])
+}
+
+func (s Snapshot) producerAuthority(refs []string) string {
+	parts := []any{s.scope}
 	for _, ref := range refs {
 		value := s.values[ref]
 		parts = append(parts, ref, value.Scope, value.Origin)

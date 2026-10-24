@@ -38,16 +38,18 @@ type Result struct {
 }
 
 type state struct {
-	Digest          string    `json:"digest"`
-	Scope           string    `json:"scope"`
-	Initialized     bool      `json:"initialized"`
-	InitialEmission bool      `json:"initial_emission"`
-	Asserted        bool      `json:"asserted"`
-	Counter         uint64    `json:"counter"`
-	LastNow         uint64    `json:"last_now"`
-	LastAssertedAt  time.Time `json:"last_asserted_at,omitempty"`
-	LastRetractedAt time.Time `json:"last_retracted_at,omitempty"`
-	Pending         *pending  `json:"pending,omitempty"`
+	Digest              string `json:"digest"`
+	Scope               string `json:"scope"`
+	Initialized         bool   `json:"initialized"`
+	InitialEmission     bool   `json:"initial_emission"`
+	Asserted            bool   `json:"asserted"`
+	AssertedAuthority   string `json:"asserted_authority,omitempty"`
+	evaluationAuthority string
+	Counter             uint64    `json:"counter"`
+	LastNow             uint64    `json:"last_now"`
+	LastAssertedAt      time.Time `json:"last_asserted_at,omitempty"`
+	LastRetractedAt     time.Time `json:"last_retracted_at,omitempty"`
+	Pending             *pending  `json:"pending,omitempty"`
 }
 type pending struct {
 	Target            bool `json:"target"`
@@ -109,6 +111,7 @@ func (p Program) Advance(previous json.RawMessage, snapshot Snapshot, forceIniti
 		return Result{}, errors.New("derived monotonic clock moved backwards")
 	}
 	s.LastNow = snapshot.now
+	s.evaluationAuthority = snapshot.producerAuthority(p.refs)
 	input := p.target(snapshot)
 	first := !s.Initialized
 	if first {
@@ -127,6 +130,7 @@ func (p Program) Advance(previous json.RawMessage, snapshot Snapshot, forceIniti
 		}
 		s.Counter++
 		s.Asserted = target
+		s.AssertedAuthority = s.evaluationAuthority
 		s.Pending = nil
 		if target {
 			s.LastAssertedAt = at
@@ -138,6 +142,7 @@ func (p Program) Advance(previous json.RawMessage, snapshot Snapshot, forceIniti
 	}
 	if first || s.InitialEmission {
 		s.Asserted = target
+		s.AssertedAuthority = s.evaluationAuthority
 		if target {
 			s.LastAssertedAt = snapshot.wall
 		} else {
@@ -152,6 +157,7 @@ func (p Program) Advance(previous json.RawMessage, snapshot Snapshot, forceIniti
 		return finish(s, out, input.truth, input.proofUntil, input.observed)
 	}
 	if target == s.Asserted {
+		s.AssertedAuthority = s.evaluationAuthority
 		s.Pending = nil
 		if target && s.LastAssertedAt.IsZero() {
 			s.LastAssertedAt = snapshot.wall
@@ -227,7 +233,9 @@ func finish(s state, out []Emission, inputs Truth, until, observed uint64) (Resu
 		status.Phase = "Indeterminate"
 	} else {
 		asserted := s.Asserted
-		status.Asserted = &asserted
+		if s.AssertedAuthority == s.evaluationAuthority {
+			status.Asserted = &asserted
+		}
 		if s.Pending != nil {
 			status.Phase = "Pending"
 			status.PendingTransition = "Retracting"
