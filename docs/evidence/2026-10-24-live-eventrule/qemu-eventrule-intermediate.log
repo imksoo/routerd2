@@ -1,0 +1,15 @@
+Extracting appliance kernel modules for the isolated test image...
+Building the test-only init and daemon-eventrule test binary...
+Booting the daemon-eventrule test guest (no external network interface)...
+=== RUN   TestDaemonEventRuleDurabilityAndLifecycle
+    bgp_test.go:192: === RUN   TestDaemonEventRuleDurabilityAndLifecycle
+            eventrule_test.go:213: ROUTERD_EVENTRULE_DAEMON_TEST_PASS
+        --- PASS: TestDaemonEventRuleDurabilityAndLifecycle (37.35s)
+        PASS
+--- PASS: TestDaemonEventRuleDurabilityAndLifecycle (37.56s)
+PASS
+ROUTERD_EVENTRULE_DAEMON_TEST_PASS
+[   56.462725] ACPI: PM: Preparing to enter system sleep state S5
+[   56.468390] reboot: Power down
+
+QEMU durable EventRule count/timer, worker recovery and source lifecycle: PASS (58.87s)

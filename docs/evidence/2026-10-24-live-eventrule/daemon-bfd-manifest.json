@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "purpose": "isolated-daemon-bfd-integration",
+  "suite": "daemon-bfd",
+  "required_test": "TestDaemonBFDControlsBGPSessionAndExpiry",
+  "kernel_release": "6.18.58-0-virt",
+  "kernel_sha256": "17fbd3efd16f2e7cb1b945f06423b37399ba7d5ac8cdd3665e7f13f363500e85",
+  "initializer_sha256": "3986a8197e4691da2f72cc24970908a0d7e21f8b1f6a49056863e06e423672a8",
+  "test_binary_sha256": "d757e8ad0160ed28378ade7324fbf09d88d0cfea4a0f0a55e450d708b59b44d3",
+  "binary_sha256": {
+    "/test/bin/routerd": "f6d38f66b9246b2b70c96cfb6c70ebcdecc135bfe25e5af2970238de2abdeb42",
+    "/test/bin/routerd-modules": "23559ac958f579aed571774208075fc2655dc13bba06a7723af79752436a3603"
+  },
+  "source_image_manifest_sha256": "a1df58dc193d6f6f5a361b9b630e9fb106b76a3e3089239da2185f812d265b43",
+  "source_initramfs_sha256": "c6b0ac5a7e6dc64a186ab595586f27bed87440083dc7a13cf0db9df8a3d2c729",
+  "host_network_access": false,
+  "result": "passed",
+  "initramfs_sha256": "f6c78ec9d252dd7061af2b3c2ed0e9080903e32b36f6a6460898ae4d47fd0666",
+  "duration_seconds": 52.17,
+  "qemu_exit_status_before_cleanup": 0
+}

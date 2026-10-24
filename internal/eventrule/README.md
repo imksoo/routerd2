@@ -1,8 +1,9 @@
 # Historical event patterns
 
-This is a pure evaluator, not a daemon controller. EventRule resources are not
-accepted by ResourceProgram yet. The implementation does not publish events,
-execute jobs, mutate the kernel, or turn historical events into protocol leases.
+This is a pure evaluator. ResourceProgram accepts typed `event_rule` resources;
+`internal/eventcontroller` connects them to the control worker's durable journal
+and publishes historical outputs. This package itself performs no I/O, executes
+no jobs, mutates no kernel state and grants no protocol authority.
 
 `Compile` owns a typed copy of the pinned routerd EventRule spec. `Advance`
 evaluates one durable input and returns serialized state plus stable emissions.
@@ -48,7 +49,18 @@ combines the evaluator with the durable consumer store, fails a checkpoint
 write after outbox insertion, retries without recounting or changing identity,
 and reopens the committed state and work. This is not a privileged effect test.
 
-Remaining work includes typed resource compilation/lifecycle/readiness/status,
-producer envelopes, daemon consumers and output publication with current-source
-fencing, timer scheduling, effect authorization/idempotency, federation and
+The live controller registers new lifetimes at the journal tip, serializes
+state/cursor/output commits and publishes stable IDs through the same journal.
+Resource removal, definition changes and conditional activation gaps fence old
+timers/output jobs. Unchanged unconditional definitions preserve aggregation
+across control restart and unrelated source revisions. Explicitly conditioned
+rules reacquire current observations; unrelated logging readiness is not a
+gate for unconditional historical consumers. Timer batches run before queued
+observations strictly later than their original deadlines; an observation at
+the deadline wins. Control calls the scheduler every 200 ms, with bounded pages
+and rotating rule order, rather than a promise of exact delivery latency.
+
+Remaining work includes protocol event producers beyond configuration events,
+DerivedEvent live integration, general typed status references, privileged
+effect authorization/idempotency, federation, scale qualification and
 capacity/retention operations. CORE-04 remains in progress.

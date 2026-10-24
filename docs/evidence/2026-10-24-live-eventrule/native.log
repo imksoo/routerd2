@@ -1,0 +1,14 @@
+=== RUN   TestDaemonEventRuleDurabilityAndLifecycle
+    bgp_test.go:192: === RUN   TestDaemonEventRuleDurabilityAndLifecycle
+            eventrule_test.go:232: health during convergence: services=&{ProjectionGeneration:2 Revision:8 Phase:ready LastError: LastErrorTruncated:false InstanceCount:0 RouteIssueCount:0} event_rules=constraint failed: injected live registry failure (1811) journal=
+            eventrule_test.go:238: health during convergence: services=&{ProjectionGeneration:2 Revision:8 Phase:ready LastError: LastErrorTruncated:false InstanceCount:0 RouteIssueCount:0} event_rules=constraint failed: injected live registry failure (1811) journal=
+            eventrule_test.go:238: health during convergence: services=&{ProjectionGeneration:2 Revision:8 Phase:ready LastError: LastErrorTruncated:false InstanceCount:0 RouteIssueCount:0} event_rules=constraint failed: injected live registry failure (1811) journal=
+            eventrule_test.go:238: health during convergence: services=&{ProjectionGeneration:2 Revision:8 Phase:ready LastError: LastErrorTruncated:false InstanceCount:0 RouteIssueCount:0} event_rules=constraint failed: injected live registry failure (1811) journal=
+            eventrule_test.go:238: health during convergence: services=&{ProjectionGeneration:2 Revision:8 Phase:ready LastError: LastErrorTruncated:false InstanceCount:0 RouteIssueCount:0} event_rules=constraint failed: injected live registry failure (1811) journal=
+            eventrule_test.go:238: health during convergence: services=&{ProjectionGeneration:2 Revision:8 Phase:ready LastError: LastErrorTruncated:false InstanceCount:0 RouteIssueCount:0} event_rules=constraint failed: injected live registry failure (1811) journal=
+            eventrule_test.go:241: actual SQLite lifecycle write failure preserved the committed revision, returned unhealthy ACK/health and recovered without losing or duplicating inputs
+            eventrule_test.go:242: ROUTERD_EVENTRULE_DAEMON_TEST_PASS
+        --- PASS: TestDaemonEventRuleDurabilityAndLifecycle (28.05s)
+        PASS
+--- PASS: TestDaemonEventRuleDurabilityAndLifecycle (29.09s)
+PASS

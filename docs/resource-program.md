@@ -53,12 +53,53 @@ resources:
 | `wireguard` | 既存 WireGuard device/peer/key-file intent |
 | `vrrp_guard` | VIP の既存 input guard intent |
 | `service` | 既存 DHCP4/6、RA、DNS、VRRP、DS-Lite discovery、BGP、BFD の typed worker 設定 |
+| `event_rule` | durable journalの履歴pattern評価と、同journalへの安定ID付き出力 |
 
 `interface.addresses` と `interface.address_options` には設定しない。
 アドレスは独立した `address` resource とし、options は `address.options` に置く。
 これにより同じ interface の設定と複数のアドレスを別の宣言へ帰属させられる。
 明示的な `interface` resource がないアドレスは、必要最小限の UP 設定を生成する。
 ほかの native field と protocol の制約は引き続き検証する。
+
+## EventRule
+
+```yaml
+schema_version: 2
+resources:
+  - id: commits
+    event_rule:
+      pattern:
+        operator: count
+        topic: configuration.committed
+        threshold: 2
+      emit:
+        topic: routerd.operator.commits
+        attributes:
+          count: "${count}"
+```
+
+`event_rule` は固定routerdのtyped pattern/emitを使う。all_of、any_of、sequence、window、
+absence、throttle、debounce、countをcompile時に検証し、inactiveな不正定義も副作用前に拒否する。
+現時点のlive input producerは設定commit/confirm/rollbackである。Health等のprotocolイベントは未接続。
+新規activationはjournal末尾から始め、過去の履歴を初期集計へ取り込まない。
+集計状態・入力cursor・出力jobは同時保存し、control再起動後に再開する。
+出力は `show observations` で確認でき、作用実行やprotocol leaseにはならない。
+
+定義が変わらない無条件ruleは、無関係な設定更新やlogging worker停止で集計を失わない。
+削除・定義変更・明示した `when` / 依存条件の失効では旧timer/outputを公開しない。
+条件のfalse→trueがcontrolの確認間隔内に終わっても、新しいactivationとして扱う。
+条件付きruleはcontrol再起動後に現在の有限観測から取得し直す。
+自身の `ready_when` は他resourceの依存条件であり、自分のstart条件ではない。
+
+timer期限は元の観測時刻から計算する。未処理入力との比較では、期限より後の入力の前に
+timerを評価し、期限と同時の入力を優先する。保存済みtimerも現在の定義・activationにfenceする。
+外部作用の権限判定は別契約であり、historical eventだけでは許可しない。
+
+`/v1/health` の `event_rules` はrevision、ruleごとのid/lifetime/cursor/versionと
+出力outboxのpending有無、bounded errorを返す。保存/publication失敗時はhealthを不健全にし、
+正本の設定と未処理状態を保持して再試行する。API応答が503でも、設定がrollbackされたと解釈しない。
+一つのsourceは最大128 rule。schedulerは200ms周期・bounded batchで、規模・遅延の性能受入や
+長期運用用のretention/archiveは未完了。DerivedEvent resourceもまだ受け付けない。
 
 ## graph、owner と検証
 

@@ -11403,6 +11403,41 @@
         "Production release migration contract and complete implementation-plan/physical acceptance"
       ],
       "parity_flags_unchanged": true
+    },
+    {
+      "id": "live-eventrule-resource-controller",
+      "date": "2026-10-24",
+      "status": "partial_core_implementation_with_live_daemon_acceptance",
+      "code_checkpoint": "6185ba8",
+      "work_packages": [
+        "CORE-03",
+        "CORE-04"
+      ],
+      "evidence": "docs/evidence/2026-10-24-live-eventrule.md",
+      "implemented": [
+        "Typed event_rule ResourceProgram payload, pure validation and resource ownership/lifecycle projection",
+        "Durable activation registry, new consumers at journal tip, state/cursor/outbox processing and idempotent historical publication",
+        "Original-deadline timer ordering, source/definition/activation fencing and continuity tracking across accepted conditional flaps",
+        "Bounded event detail and rule health status; logging readiness does not revoke unconditional consumers",
+        "Successful small configuration responses report unhealthy when post-save rule lifecycle persistence fails, while retaining the committed revision"
+      ],
+      "validation": [
+        "Actual SQLite failed completion ACK retries without duplicate publication; controller restart, source changes, removal/re-addition and missed revision gap handling",
+        "Timer ordering and conditional-flap regressions reproduced before fixes; unrelated worker readiness rejection reproduced locally",
+        "Final 6185ba8 make check build-linux: pass; product/test source matches commit with documentation-only changes; exact-deadline and revision-gap controller Race tests: pass",
+        "Real daemon namespace count/timer, logging/control SIGKILL, removal and confirmed-restart rollback: pass 29.09s, including actual lifecycle SQLite backpressure and recovery",
+        "New QEMU EventRule suite: initial f85f3c7 first-health 503 failure preserved; corrected fixture/readiness policy and actual lifecycle SQLite backpressure pass at 6185ba8 59.42s",
+        "Prior 259380d product source QEMU management 34.13s, Health/PBR 75.02s and BFD 52.17s: pass",
+        "Small committed response incorrectly returned healthy=true after registry failure: reproduced both with actual SQLite unit and 259380d real daemon; fixed at 6185ba8 with Race/native/QEMU recovery proof"
+      ],
+      "remaining": [
+        "Protocol event producers and real-packet conditional EventRule acceptance",
+        "DerivedEvent resource/daemon/live typed status provider integration",
+        "Privileged effects, federation, retention/archive/capacity operations and scale/latency qualification",
+        "All work-package acceptance and selected physical/NIC/performance profile"
+      ],
+      "parity_flags_unchanged": true,
+      "prior_regression_checkpoint": "259380d"
     }
   ],
   "delivery_goal": {

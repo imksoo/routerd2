@@ -178,4 +178,41 @@ a cursor beyond the tip returns 409, and storage errors return 503. The page
 contains records, next_cursor and more. Each event is at most 64 KiB, keeping
 responses below the API byte limit. This is read-only history, not an effect
 execution or consumer registration API. Journal retention/capacity handling,
-protocol producers, EventRule and federation remain open work.
+protocol producers beyond configuration, DerivedEvent and federation remain open work.
+
+## Durable EventRule resources
+
+The control worker accepts ResourceProgram `event_rule` payloads using the
+pinned typed pattern/emit spec. A new activation registers at the current
+journal tip; historical input is not replayed into a newly created rule.
+State, exact next input cursor and output jobs commit atomically. Timer updates
+also require the current checkpoint version. Output publication uses stable
+identities in the observation journal, so retrying after a failed completion
+ACK cannot insert a duplicate record. A completed job retains its tombstone.
+This is historical publication, not an external-effect exactly-once promise.
+
+Committed source changes and rule processing share the configuration authority
+lock. The lifecycle registry persists each activation before processing.
+Definition changes, removal/re-addition and conditional activation gaps obtain
+new consumers and cannot publish old timers/jobs. Conditions are evaluated from
+fresh finite snapshots; the runtime observes accepted flaps between controller
+polls and fences producer replacement/lease gaps. Conditional lifetimes reset
+after a new control incarnation. Unchanged unconditional definitions retain
+their aggregate across restart and unrelated source revisions, including while
+the logging worker is unavailable. A revision gap in the lifecycle registry
+conservatively starts new lifetimes because an inactive interval may be missing.
+
+The delivery loop runs every 200 ms. Each pass visits at most sixteen rules,
+rotating the start, with four input records and eight output publications per
+visited rule, and at most 64 due timer emissions per transaction. Original
+observation deadlines order timers before later queued inputs; an input at the
+deadline wins. These bounds are not throughput or latency qualification.
+
+`GET /v1/health` includes `event_rules.{revision,rules,last_error}`. Each bounded
+rule entry exposes id, lifetime, cursor, version and a `pending` boolean for
+queued output work (not future timers). Errors make public health unhealthy;
+the authoritative configuration remains saved and processing retries. A
+post-commit lifecycle save failure must not report that the committed source
+was rolled back. At most 128 live rule declarations are accepted before any
+effects; durable registrations/tombstones still share store capacity limits.
+Retention/archive/capacity operations remain required for long-running use.

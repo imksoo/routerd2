@@ -2,8 +2,9 @@
 
 The control worker uses this storage component for durable configuration
 commit/confirm/rollback observations through its authoritative producer outbox.
-It is not connected to EventRule/DerivedEvent resources, federation, or a
-privileged effect executor yet.
+EventRule resources also consume this journal and publish historical results
+through their atomic state/cursor/outbox. DerivedEvent resources, federation
+and a privileged effect executor are not connected yet.
 It does not publish protocol health or restore permission to change the kernel.
 
 `Open` owns a private Linux directory through one exclusive process lock and a
@@ -17,6 +18,11 @@ foreign database identity and directories writable by other users are rejected.
 the existing cursor; changed content under the same ID fails. Observed time is
 explicit, and zero event expiry remains non-expiring. Events are historical
 evidence; they are never finite protocol authority leases.
+Optional bounded `detail` preserves daemon/resource references, severity,
+reason and message for historical rule correlation. Its daemon kind must match
+the envelope's source. Missing detail keeps configuration-event envelopes
+readable; source is adapted as daemon name/kind. There is no public append API,
+and this metadata is not producer authentication or a live protocol lease.
 
 `Cursor` initializes a new consumer at the current journal tip. Existing
 consumers resume their saved position. `Drain` calls the handler before saving

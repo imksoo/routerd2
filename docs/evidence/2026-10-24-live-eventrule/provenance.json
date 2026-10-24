@@ -1,0 +1,160 @@
+{
+  "product_checkpoint": "6185ba897938678759d351dd52313d50a91ef64d",
+  "supplemental_exact_deadline_test": "861c26c",
+  "qemu_eventrule_product_source_dirty_at_start": false,
+  "test_first_commits": [
+    "7dff5e6",
+    "41b27c3",
+    "b06b375",
+    "ddb38e7",
+    "fd755a2",
+    "ea11bb0",
+    "c14ee4b",
+    "203c389",
+    "7d17213",
+    "9a7102b"
+  ],
+  "fixed_eventrule_qemu_seconds": 58.87,
+  "fixed_eventrule_native_seconds": 28.81,
+  "regressions_qemu_seconds": {
+    "management": 34.13,
+    "health_pbr": 75.02,
+    "bfd": 52.17
+  },
+  "normalizations": [
+    "workspace paths",
+    "private root stage paths",
+    "ephemeral producer epochs in failure console",
+    "public kernel certificate identifier",
+    "trailing whitespace",
+    "ephemeral Go pointer addresses",
+    "text-format producer epochs in failed unit diagnostics"
+  ],
+  "scope": "Real EventRule controller via configuration events; not protocol event producers, DerivedEvent daemon, effect execution/federation or hardware acceptance. Conditional flaps are local runtime tests, not a new real-packet EventRule condition gate.",
+  "original_artifacts": [
+    {
+      "artifact": "ack-before-fix.log",
+      "sha256": "18d67a390baf54d646eb4d8dbe6fbe4229d16cb040ceea88c67bc2a8d0802d35"
+    },
+    {
+      "artifact": "ack-fixed-race.log",
+      "sha256": "c78d85e3003c0235cffa50b6864cefeb393913359ab412e135a930fcc5909a34"
+    },
+    {
+      "artifact": "build-manifest.json",
+      "sha256": "c06789d115f090309f8c398ce62aabae8d8568fb49c3768c4bc0cf472eb05e59"
+    },
+    {
+      "artifact": "check-build.log",
+      "sha256": "5418be788548ed742bc40c540754fd3065b39169fc2089ad435ac7dd6d6d7efe"
+    },
+    {
+      "artifact": "continuity-race.log",
+      "sha256": "565dd892042dc6efc74e0c3b98039c8215d04a153b8d684c1fd86b4ed0d8711f"
+    },
+    {
+      "artifact": "controller-race.log",
+      "sha256": "b711083215415ddcf41beddc52c7ddcadf21408a1c88c221a10eed0c309b62e8"
+    },
+    {
+      "artifact": "daemon-bfd-manifest.json",
+      "sha256": "0bb4182ebc87d3c33ee47083a658582be5e881b6cfef7c113bf91b773ea61f9d"
+    },
+    {
+      "artifact": "daemon-bfd.log",
+      "sha256": "382da07e7609417c145c9332563feabf76678c32b9493e7a81a95ddcbe935e44"
+    },
+    {
+      "artifact": "daemon-health-pbr-manifest.json",
+      "sha256": "99e92e28a80df0ff8c5bf81132c833d8a228d96c395edef4aeb22efbb5938380"
+    },
+    {
+      "artifact": "daemon-health-pbr.log",
+      "sha256": "e27e9576c568ad355797343de5a42da92d1c94d49e07f67ef082e61f86403ef3"
+    },
+    {
+      "artifact": "daemon-management-manifest.json",
+      "sha256": "e87a128562fc381c4e099584e0f16b5b6e03380ab7072533ba9ef383ac968ed1"
+    },
+    {
+      "artifact": "daemon-management.log",
+      "sha256": "d8852d41b1833b008488e0174e2250a62ce6450f9e08883a13dbe622a510894b"
+    },
+    {
+      "artifact": "example-plan.log",
+      "sha256": "d7c9c2e34e5a979cb84b5b490a1c7406f86188820421c434bd1c41fa061323b3"
+    },
+    {
+      "artifact": "flap-before-fix.log",
+      "sha256": "3dcbfb17d828956726bd716dcc75537750ba467d99caf15585a4fb2293abbc7f"
+    },
+    {
+      "artifact": "intermediate-build-manifest.json",
+      "sha256": "c0ae269bfb3e38e0bf93ee82926e498d35a6e94a0f04832cb2be05a5cc8be1ef"
+    },
+    {
+      "artifact": "intermediate-check-build.log",
+      "sha256": "30de013d2295e6fb26a534c46af7a9fb19ca1684c3aae473bbb5156466cde68d"
+    },
+    {
+      "artifact": "native-ack-before-fix.log",
+      "sha256": "1ef24089b63ac6b157f532f63c240addbabfe69a9274f5d674cbc52590f0a97a"
+    },
+    {
+      "artifact": "native.log",
+      "sha256": "5a39f0e584e3273c41f08b9a41058d4d55d370597846c2b482537dccda1ff582"
+    },
+    {
+      "artifact": "qemu-eventrule-intermediate-manifest.json",
+      "sha256": "ec4c9e15c1b41bd69a8225f8bf93d9de12d240cc71ae09c3ebe96fb8b0269c91"
+    },
+    {
+      "artifact": "qemu-eventrule-intermediate.log",
+      "sha256": "ce77a7b518bf162fb71c0e1cde658cc3fba331045ab27f9aefd5a6bf85e94eea"
+    },
+    {
+      "artifact": "qemu-eventrule-manifest.json",
+      "sha256": "7e37b9f8d6a4bacf8ebb785ddfa692f32da46ffc1d94bff2aff8f3b783f497f9"
+    },
+    {
+      "artifact": "qemu-eventrule.log",
+      "sha256": "e897bb53e7100192aea229e09fa207949e523ad19a3b00126c9ead300dfa21cb"
+    },
+    {
+      "artifact": "qemu-failed-before-fix-manifest.json",
+      "sha256": "03951b7c3cf2a6efd3d510a8192d6c5b40eb1a470b555d5876d71fe78abc094b"
+    },
+    {
+      "artifact": "qemu-failed-before-fix.log",
+      "sha256": "8a2c6d63bfe574a2c4004f3fbda8256238a1c60c4f4c39cf145f46c1494db42f"
+    },
+    {
+      "artifact": "readiness-before-fix.log",
+      "sha256": "2b3baf1109628e8eaafe236c63f35789a419b39c41c32bdd7a68c5c0d78c65f1"
+    },
+    {
+      "artifact": "readiness-fix-race.log",
+      "sha256": "4cad8b09aca7756f47023c0e0c80c64e6dd2dc1d0d69a0bb991d459253981850"
+    },
+    {
+      "artifact": "regression-manifest.json",
+      "sha256": "ac2baf1cf73777dfe4896184a0bc6d6c271312383ba5a842a28ef94d108ce285"
+    },
+    {
+      "artifact": "timer-order-before-fix.log",
+      "sha256": "51c074407854f026ed6db0484f9ed24422ed5eff379463bdeadb3a2695cf694a"
+    },
+    {
+      "artifact": "wired-race.log",
+      "sha256": "304dad1b4d524598cd36c02c35cc0602cd6881f6854c9dc3cde962c7227811ff"
+    }
+  ],
+  "regression_product_checkpoint": "259380d",
+  "supplemental_gap_test": "25b2693",
+  "final_check_product_and_test_source_matches_commit": true,
+  "final_check_documentation_only_changes": true,
+  "final_eventrule_qemu_seconds": 59.42,
+  "final_eventrule_native_seconds": 29.09,
+  "prior_full_check_source_dirty_at_start": false,
+  "native_harness_sha256": "d6250b91c8097347b4eab265ac5bd99900738b2bce73e7f31cb757be78c90e1b"
+}

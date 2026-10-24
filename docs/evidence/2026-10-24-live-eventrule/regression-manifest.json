@@ -1,0 +1,53 @@
+{
+  "code_checkpoint": "259380d00a31f04b74d3b16cc106fedcd38bce0c",
+  "product_source_dirty": false,
+  "started_at_utc": "2026-10-24T16:26:04.768294+00:00",
+  "suites": [
+    {
+      "suite": "daemon-management",
+      "command": [
+        "python3",
+        "scripts/qemu-network.py",
+        "--suite",
+        "daemon-management",
+        "--image-dir",
+        "dist/image",
+        "--output",
+        "dist/goal-validation/eventrule-regression-daemon-management"
+      ],
+      "exit_code": 0,
+      "elapsed_with_build_seconds": 46.69
+    },
+    {
+      "suite": "daemon-health-pbr",
+      "command": [
+        "python3",
+        "scripts/qemu-network.py",
+        "--suite",
+        "daemon-health-pbr",
+        "--image-dir",
+        "dist/image",
+        "--output",
+        "dist/goal-validation/eventrule-regression-daemon-health-pbr"
+      ],
+      "exit_code": 0,
+      "elapsed_with_build_seconds": 86.91
+    },
+    {
+      "suite": "daemon-bfd",
+      "command": [
+        "python3",
+        "scripts/qemu-network.py",
+        "--suite",
+        "daemon-bfd",
+        "--image-dir",
+        "dist/image",
+        "--output",
+        "dist/goal-validation/eventrule-regression-daemon-bfd"
+      ],
+      "exit_code": 0,
+      "elapsed_with_build_seconds": 64.06
+    }
+  ],
+  "result": "passed"
+}

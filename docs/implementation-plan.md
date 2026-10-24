@@ -7,7 +7,16 @@
 部分checkpointでゴールを完了にせず、実装・検証・未検証と証跡を更新する。
 対象機種・NIC・性能条件の確認と並行して、独立して進められる実装・隔離VM検証を続ける。
 
-CORE-04の最新component checkpointは `cb2bc11`。履歴cursorなしのproducer state/outboxを
+最新product checkpoint `6185ba8` ではEventRule resourceを実control workerへ接続した。
+条件/lifecycleにfenceしたdurable consumer・timer・履歴publicationとbounded healthを追加し、
+全体check/Race/vet/両arch build、実daemon29.09秒、新QEMU59.42秒がPASS。
+実DBの保存失敗、不健全なcommit応答/health、解除後の欠落・重複なしの回復も検証した。
+関連management・二WAN Health/PBR・BFDは先行259380dで再検証した。
+期限一致の入力優先と未観測revision gapも追加testで検証した。
+[証跡・検出した失敗・未完了範囲](evidence/2026-10-24-live-eventrule.md) を参照。
+protocol event、DerivedEventの実行経路、作用/federation、規模/実機受入等は残る。
+
+先行component checkpoint `cb2bc11` では履歴cursorなしのproducer state/outboxを
 追加し、空journalのDerived初回出力、実SQLite失敗/FULL/SIGKILL、clean check/buildと
 QEMUの既存control・二回起動保持がPASSした。
 [producer保存の証跡と残作業](evidence/2026-10-24-producer-state.md) を参照。

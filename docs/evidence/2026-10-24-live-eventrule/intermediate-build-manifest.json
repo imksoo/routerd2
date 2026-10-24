@@ -1,0 +1,34 @@
+{
+  "source_commit": "259380d",
+  "check_log": "eventrule-fixed-check-build.log",
+  "command": [
+    "make",
+    "check",
+    "build-linux"
+  ],
+  "exit_code": 0,
+  "source_dirty_at_start": false,
+  "note": "Documentation changes were made only after the clean check/build finished. QEMU fixed EventRule and regression helpers build fresh ELFs from the same product source.",
+  "artifacts": [
+    {
+      "architecture": "amd64",
+      "binary": "routerd",
+      "sha256": "387b64391a2d0335477e959950302c33538595378e226d2c62b08325dbe26fbe"
+    },
+    {
+      "architecture": "amd64",
+      "binary": "routerd-modules",
+      "sha256": "5b136b789a6b0bdb095da5a735a34fa622abd5e952f27b5af7d6ea233d4cd84c"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd",
+      "sha256": "bd969c70e6a0b4b766e8d41fc02cf636823d64b4aab249c47ecbd81de13e9b89"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd-modules",
+      "sha256": "1b9aadacd426232dd5583e79e4a5b3dfc0e136a7d1396aeac939916102179b1f"
+    }
+  ]
+}
