@@ -5,6 +5,7 @@ package vrrp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/netip"
 	"strings"
 	"sync"
@@ -51,6 +52,68 @@ func (f *fakeTransport) VerifyActive(_ context.Context, s Snapshot) error {
 	return nil
 }
 func (*fakeTransport) Close() error { return nil }
+
+type canceledActionTransport struct {
+	*fakeTransport
+	cancel context.CancelFunc
+	mode   string
+	sends  int
+}
+
+func (d *canceledActionTransport) Send(ctx context.Context, frame []byte) error {
+	d.sends++
+	if d.mode == "send" && d.sends == 1 || d.mode == "notify" && d.sends == 2 {
+		d.cancel()
+		return ctx.Err()
+	}
+	return d.fakeTransport.Send(ctx, frame)
+}
+
+func (d *canceledActionTransport) VerifyActive(ctx context.Context, s Snapshot) error {
+	if d.mode == "verify" {
+		d.cancel()
+		return ctx.Err()
+	}
+	return d.fakeTransport.VerifyActive(ctx, s)
+}
+
+func TestShutdownDuringActionsWithdrawsWithoutHidingCleanupFailure(t *testing.T) {
+	for _, mode := range []string{"apply", "verify", "send", "notify"} {
+		for _, cleanupFails := range []bool{false, true} {
+			t.Run(mode+fmt.Sprint(cleanupFails), func(t *testing.T) {
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				device := &canceledActionTransport{fakeTransport: newFakeTransport(), cancel: cancel, mode: mode}
+				cfg := config4()
+				cfg.AddressOwner, cfg.Priority = true, 255
+				withdrawn := false
+				cleanupError := errors.New("withdrawal failed")
+				effects := EffectsFunc(func(call context.Context, s Snapshot) error {
+					if !s.Active {
+						withdrawn = true
+						if call.Err() != nil {
+							t.Error("withdrawal inherited canceled context")
+						}
+						if cleanupFails {
+							return cleanupError
+						}
+						return nil
+					}
+					device.active = true
+					if mode == "apply" {
+						cancel()
+						return call.Err()
+					}
+					return nil
+				})
+				err := run(ctx, cfg, netip.MustParseAddr(cfg.SourceAddress), strings.Repeat("a", 32), device, effects, func() { t.Error("canceled activation became ready") })
+				if !withdrawn || cleanupFails && !errors.Is(err, cleanupError) || !cleanupFails && err != nil || errors.Is(err, context.Canceled) {
+					t.Fatalf("shutdown result: withdrawn=%v cleanupFails=%v err=%v", withdrawn, cleanupFails, err)
+				}
+			})
+		}
+	}
+}
 
 func TestRuntimeWaitsForOwnershipAndWithdrawsGracefully(t *testing.T) {
 	c := config4()
