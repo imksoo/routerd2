@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/url"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 
@@ -28,6 +29,17 @@ func TestDaemonRetiredHealthHistoryWithoutReactivation(t *testing.T) {
 	if !isolateFixture(t, "TestDaemonRetiredHealthHistoryWithoutReactivation") {
 		return
 	}
+	testDaemonHealthHistoryWithoutReactivation(t, false)
+}
+
+func TestDaemonStoppedHealthHistoryWithoutReactivation(t *testing.T) {
+	if !isolateFixture(t, "TestDaemonStoppedHealthHistoryWithoutReactivation") {
+		return
+	}
+	testDaemonHealthHistoryWithoutReactivation(t, true)
+}
+
+func testDaemonHealthHistoryWithoutReactivation(t *testing.T, conditional bool) {
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -44,6 +56,18 @@ func TestDaemonRetiredHealthHistoryWithoutReactivation(t *testing.T) {
 	}()
 	root := t.TempDir()
 	doc := config.Document{SchemaVersion: config.SchemaVersion, Resources: []resourceprogram.Resource{{ID: "wan", Service: &serviceconfig.Service{Name: "wan", Health: &health.Config{Interface: "lo", SourceAddress: "127.0.0.1", Target: "127.0.0.1", Protocol: "tcp", Port: listener.Addr().(*net.TCPAddr).Port, IntervalMillis: 100, TimeoutMillis: 100}}}}}
+	var prerequisite net.Listener
+	var prerequisiteAddress string
+	if conditional {
+		prerequisite, err = net.Listen("tcp4", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = prerequisite.Close() }()
+		prerequisiteAddress = prerequisite.Addr().String()
+		doc.Resources[0].When = &resourceprogram.FactCondition{Fact: "service.switch.active"}
+		doc.Resources = append(doc.Resources, resourceprogram.Resource{ID: "switch", Service: &serviceconfig.Service{Name: "switch", Health: &health.Config{Interface: "lo", SourceAddress: "127.0.0.1", Target: "127.0.0.1", Protocol: "tcp", Port: prerequisite.Addr().(*net.TCPAddr).Port, IntervalMillis: 100, TimeoutMillis: 100, UnhealthyThreshold: 1}}})
+	}
 	f := startFixtureDaemonAt(t, doc, root)
 	ctx := context.Background()
 	injector, err := sql.Open("sqlite", filepath.Join(root, "state", "events", "journal.sqlite3"))
@@ -51,7 +75,7 @@ func TestDaemonRetiredHealthHistoryWithoutReactivation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer injector.Close()
-	if _, err = injector.Exec(`CREATE TRIGGER fail_retired_delivery BEFORE INSERT ON events WHEN json_extract(CAST(NEW.body AS TEXT),'$.source')='routerd-healthcheck' BEGIN SELECT RAISE(ABORT,'injected stopped relay target failure'); END`); err != nil {
+	if _, err = injector.Exec(`CREATE TRIGGER fail_retired_delivery BEFORE INSERT ON events WHEN json_extract(CAST(NEW.body AS TEXT),'$.topic') LIKE 'routerd.healthcheck.wan.%' BEGIN SELECT RAISE(ABORT,'injected stopped relay target failure'); END`); err != nil {
 		t.Fatal(err)
 	}
 	var pending struct {
@@ -85,8 +109,14 @@ func TestDaemonRetiredHealthHistoryWithoutReactivation(t *testing.T) {
 	if err = f.control.Do(ctx, "GET", "/v1/config", nil, &state); err != nil {
 		t.Fatal(err)
 	}
-	if err = f.control.Do(ctx, "POST", "/v1/config/commit", control.CommitRequest{ExpectedRevision: state.Revision, RequestID: "retire-without-reactivation", Config: config.Document{SchemaVersion: config.SchemaVersion}}, nil); err != nil {
-		t.Fatal(err)
+	if conditional {
+		if err = prerequisite.Close(); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		if err = f.control.Do(ctx, "POST", "/v1/config/commit", control.CommitRequest{ExpectedRevision: state.Revision, RequestID: "retire-without-reactivation", Config: config.Document{SchemaVersion: config.SchemaVersion}}, nil); err != nil {
+			t.Fatal(err)
+		}
 	}
 	noWorker := func() bool {
 		var status supervisor.Status
@@ -94,13 +124,45 @@ func TestDaemonRetiredHealthHistoryWithoutReactivation(t *testing.T) {
 			return false
 		}
 		for _, m := range status.Modules {
-			if m.Role == "health" {
+			if m.Name == "service.wan" {
 				return false
 			}
 		}
 		return true
 	}
 	until(t, 5*time.Second, noWorker)
+	if conditional {
+		// Recovery must rediscover stopped declared ownership from durable
+		// state after a real control-worker replacement, with no source edit.
+		var status supervisor.Status
+		if err = f.supervisor.Do(ctx, "GET", "/v1/status", nil, &status); err != nil {
+			t.Fatal(err)
+		}
+		var old supervisor.ModuleStatus
+		for _, m := range status.Modules {
+			if m.Name == "control" {
+				old = m
+			}
+		}
+		if old.PID <= 0 {
+			t.Fatal("control worker missing")
+		}
+		if err = syscall.Kill(old.PID, syscall.SIGKILL); err != nil {
+			t.Fatal(err)
+		}
+		until(t, 20*time.Second, func() bool {
+			if f.supervisor.Do(ctx, "GET", "/v1/status", nil, &status) != nil || !noWorker() {
+				return false
+			}
+			for _, m := range status.Modules {
+				if m.Name == "control" && m.Ready && m.PID != old.PID && m.Generation > old.Generation {
+					var restored control.State
+					return f.control.Do(ctx, "GET", "/v1/config", nil, &restored) == nil && restored.Revision == state.Revision && len(restored.Config.Resources) == len(doc.Resources)
+				}
+			}
+			return false
+		})
+	}
 	if _, err = injector.Exec(`DROP TRIGGER fail_retired_delivery`); err != nil {
 		t.Fatal(err)
 	}
@@ -132,5 +194,30 @@ func TestDaemonRetiredHealthHistoryWithoutReactivation(t *testing.T) {
 	if !noWorker() {
 		t.Fatal("queue drainage reactivated the removed producer")
 	}
-	t.Logf("%d accepted observations delivered once after permanent removal, without producer reactivation", len(expected))
+	if conditional {
+		until(t, 5*time.Second, func() bool {
+			var h control.Health
+			return f.control.Do(ctx, "GET", "/v1/health", nil, &h) == nil && h.Healthy && h.ProtocolEvents.Registered == 2 && h.ProtocolEvents.Retiring == 0
+		})
+		// Resume only after proving historical delivery while wan was stopped.
+		prerequisite, err = net.Listen("tcp4", prerequisiteAddress)
+		if err != nil {
+			t.Fatal(err)
+		}
+		until(t, 10*time.Second, func() bool {
+			var status supervisor.Status
+			if f.supervisor.Do(ctx, "GET", "/v1/status", nil, &status) != nil {
+				return false
+			}
+			for _, m := range status.Modules {
+				if m.Name == "service.wan" && m.Ready {
+					return true
+				}
+			}
+			return false
+		})
+		t.Logf("%d accepted observations delivered once while source stayed declared and producer stayed stopped, across control SIGKILL; ownership retained for reactivation", len(expected))
+	} else {
+		t.Logf("%d accepted observations delivered once after permanent removal, without producer reactivation", len(expected))
+	}
 }
