@@ -72,11 +72,24 @@ compiler は明示された辺に加え、program 内で管理する link/interf
 `provenance` は任意の `source`、`resource`、`revision`、`path` を持つ記録である。
 これらをファイル読み出しや executable 指定として解釈しない。
 
-現段階の graph は **コンパイルの依存グラフ**である。
-一つの network transaction が成功した後に worker を起動する境界は維持するが、
-任意の service の readiness を `depends_on` で待つ coordinator はまだない。
-三値演算・finite fact store・`FactCondition` の独立評価は実装済みで、boot/config/projection/producer 世代の変化・期限切れ・重複通知を fail closed に扱う。ただし source の `when` / `ready_when` はまだ解釈しない。hold time/maxAge、個別 readiness と実 worker からの fact 配信、動的 reconcile は CORE-03 / CORE-04 の残作業である。
-resource の未実装 field は unknown field として拒否し、再利用した DNS 型の非空 `when` も明示的に拒否する。
+`when` と `ready_when` は `{fact: service.wan.active}`、`all`、`any`、`not` の型付き三値条件式を受け付ける。
+`when` が true の resource だけを投影し、false / indeterminate の resource とその依存・owner subtree は保留する。
+`ready_when` は自身の起動を止めず、依存先への準備完了を制御する。省略時は network transaction の成功が境界になる。
+サービスのプロセス準備完了を依存条件にするときは、明示的に `ready_when: {fact: service.NAME.ready}` を指定する。
+
+現在の実行時 fact は `service.NAME.ready` と `service.NAME.active`。
+ready は supervisor の現在 generation / config digest と有限の観測期限を検査する。
+active は DHCP4 / DHCP6-PD / VRRP / BGP / DHCP server の受理済み snapshot から作り、
+Health の有限 sample も同じ active fact に変換する。
+operator revision、boot ID、producer generation / epoch / sequence と CLOCK_BOOTTIME の期限を照合する。
+未観測、期限切れ、worker 世代違いは indeterminate であり、`not` でも成功へ変換しない。
+条件付き設定では protocol callback は観測の保存を行い、250ms の coordinator loop が
+変更 worker の停止→network ACK→新 worker 起動の順で適用する。
+確認付き commit は ready_when と適用済み projection の一致も検査する。
+
+source の inactive 部分も完全に検証する。hold time / maxAge、一般 status reference、
+Health の動的 targetSource、全 protocol の個別 readiness 契約はまだ残っている。
+unknown field と再利用 DNS 型の非空 `when` は引き続き拒否する。
 SSH candidate で `delete resources[OWNER]` を実行すると、明示 owner の子・孫 resource を連鎖削除する。残存 resource から削除先への `depends_on` があれば変更を拒否する。YAML 全体編集と API の任意の更新に同じ自動削除はまだ適用しない。
 
 compiler の ownership 表は、生成された intent がどの resource に帰属するかを示す。
@@ -134,7 +147,7 @@ pending record が残っているだけでは、その candidate が適用済み
 rollback 自体が失敗した場合は degraded を残す。
 
 初回 seed は journal がない場合にだけ取り込む。既存 journal の破損や未知 schema を seed で上書きしない。
-boot entry による任意 startup store/revision の選択、独立した projection generation の公開、
+boot entry による任意 startup store/revision の選択、projection generation の永続復元、
 多 binary runtime manifest の選択は別の残作業であり、この checkpoint では追加していない。
 
 routerd2 の試作 `schema_version: 1` とその保存 record は読み込まない。

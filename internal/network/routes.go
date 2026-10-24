@@ -31,7 +31,7 @@ func validateRoutes(routes []Route) error {
 			if !p.Addr().Is6() {
 				add("route %s: valid_until is supported only for IPv6", r.Destination)
 			}
-			if r.ValidUntil.Year() < 1970 || r.ValidUntil.Year() > 9999 || r.ValidUntil.Sub(time.Now()) > MaxRouteLifetime {
+			if r.ValidUntil.Unix() < 0 || r.ValidUntil.UTC().Year() > 9999 || r.ValidUntil.Sub(time.Now()) > MaxRouteLifetime {
 				add("route %s: valid_until must be a valid absolute deadline within %s", r.Destination, MaxRouteLifetime)
 			}
 		}

@@ -24,6 +24,7 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserver"
 	"github.com/imksoo/routerd2/internal/protocol/dns"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
+	"github.com/imksoo/routerd2/internal/protocol/health"
 	"github.com/imksoo/routerd2/internal/protocol/ra"
 	"github.com/imksoo/routerd2/internal/protocol/raclient"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
@@ -88,6 +89,12 @@ func Run(ctx context.Context, runtimeDir, name, role, path, digest string, gener
 		go func() { defer close(done); c.replay(runCtx) }()
 	}
 	switch role {
+	case "health":
+		var cfg health.Config
+		if err := decode(instance.Config, &cfg); err != nil {
+			return err
+		}
+		return c.runHealth(runCtx, runtimeDir, cfg, ready)
 	case "bfd":
 		var cfg bfd.Config
 		if err := decode(instance.Config, &cfg); err != nil {

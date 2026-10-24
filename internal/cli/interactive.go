@@ -813,7 +813,11 @@ func (s *interactiveShell) complete(line string, pos int, key rune) (string, int
 
 func (s *interactiveShell) pathChoices(token string) []string {
 	var paths []string
-	collectPaths(reflect.TypeOf(s.candidate.document), reflect.ValueOf(s.candidate.document), "", 0, &paths)
+	target := strings.TrimPrefix(token, "/")
+	if !strings.HasPrefix(token, "/") && s.candidate.path != "" {
+		target = s.candidate.path + "." + token
+	}
+	collectPaths(reflect.TypeOf(s.candidate.document), reflect.ValueOf(s.candidate.document), "", 0, &paths, target)
 	var choices []string
 	for _, path := range paths {
 		if strings.HasPrefix(token, "/") {
@@ -827,7 +831,7 @@ func (s *interactiveShell) pathChoices(token string) []string {
 	return choices
 }
 
-func collectPaths(t reflect.Type, v reflect.Value, prefix string, depth int, out *[]string) {
+func collectPaths(t reflect.Type, v reflect.Value, prefix string, depth int, out *[]string, target string) {
 	if depth > 8 || len(*out) >= 2000 {
 		return
 	}
@@ -849,13 +853,16 @@ func collectPaths(t reflect.Type, v reflect.Value, prefix string, depth int, out
 			continue
 		}
 		path := prefix + name
+		if !strings.HasPrefix(target, path) && !strings.HasPrefix(path, target) {
+			continue
+		}
 		*out = append(*out, path)
 		value := reflect.Zero(field.Type)
 		if v.IsValid() {
 			value = v.Field(i)
 		}
 		if field.Type.Kind() != reflect.Slice {
-			collectPaths(field.Type, value, path+".", depth+1, out)
+			collectPaths(field.Type, value, path+".", depth+1, out, target)
 			continue
 		}
 		key, named := namedList(field.Type.Elem())
@@ -865,17 +872,20 @@ func collectPaths(t reflect.Type, v reflect.Value, prefix string, depth int, out
 				selector = value.Index(j).Field(key).String()
 			}
 			entry := path + "[" + selector + "]"
+			if !strings.HasPrefix(target, entry) && !strings.HasPrefix(entry, target) {
+				continue
+			}
 			if _, err := parsePath(entry); err != nil {
 				continue
 			}
 			*out = append(*out, entry)
-			collectPaths(field.Type.Elem(), value.Index(j), entry+".", depth+1, out)
+			collectPaths(field.Type.Elem(), value.Index(j), entry+".", depth+1, out, target)
 		}
 		if !named && len(*out) < 2000 {
 			// The first unused index creates a new entry; sparse lists are forbidden.
 			entry := path + "[" + strconv.Itoa(value.Len()) + "]"
 			*out = append(*out, entry)
-			collectPaths(field.Type.Elem(), reflect.Zero(field.Type.Elem()), entry+".", depth+1, out)
+			collectPaths(field.Type.Elem(), reflect.Zero(field.Type.Elem()), entry+".", depth+1, out, target)
 		}
 	}
 }

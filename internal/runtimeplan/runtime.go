@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -28,9 +29,11 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/dhcp4"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6pd"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
+	"github.com/imksoo/routerd2/internal/protocol/health"
 	"github.com/imksoo/routerd2/internal/protocol/ra"
 	"github.com/imksoo/routerd2/internal/protocol/raclient"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
+	"github.com/imksoo/routerd2/internal/resourceprogram"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 	"github.com/imksoo/routerd2/internal/supervisor"
 )
@@ -57,12 +60,13 @@ type binding struct {
 	digest   string
 }
 type Status struct {
-	RouteIssueCount int              `json:"route_issue_count"`
-	RouteIssues     []RouteIssue     `json:"route_issues,omitempty"`
-	Revision        uint64           `json:"revision"`
-	Phase           string           `json:"phase"`
-	LastError       string           `json:"last_error,omitempty"`
-	Instances       []InstanceStatus `json:"instances"`
+	ProjectionGeneration uint64           `json:"projection_generation"`
+	RouteIssueCount      int              `json:"route_issue_count"`
+	RouteIssues          []RouteIssue     `json:"route_issues,omitempty"`
+	Revision             uint64           `json:"revision"`
+	Phase                string           `json:"phase"`
+	LastError            string           `json:"last_error,omitempty"`
+	Instances            []InstanceStatus `json:"instances"`
 }
 type InstanceStatus struct {
 	BFD               *BFDHealthStatus `json:"bfd_health,omitempty"`
@@ -83,26 +87,35 @@ type Runtime struct {
 	// BFD observations and recipient grants never acquire mu: the network
 	// writer can hold it across a long apply. Configuration takes mu -> bfdMu;
 	// no path may acquire these locks in the opposite order.
-	bfdMu            sync.Mutex
-	bfdSources       map[string]bfdBinding
-	bfdRecipients    map[string]bfdRecipient
-	dir, stateDir    string
-	network          Network
-	manager          moduleManager
-	current          config.Native
-	revision         uint64
-	configured       bool
-	initialized      bool
-	bindings         map[string]binding
-	records          map[string]serviceconfig.Update
-	liveRA           map[string]ra.Config
-	aftrInputs       map[string]aftr.Input
-	installed        []supervisor.DynamicModule
-	appliedHash      string
-	lastNetworkApply time.Time
-	leases           map[string]time.Time
-	routeIssues      []RouteIssue
-	phase, lastError string
+	bfdMu                sync.Mutex
+	bfdSources           map[string]bfdBinding
+	bfdRecipients        map[string]bfdRecipient
+	dir, stateDir        string
+	network              Network
+	manager              moduleManager
+	current              config.Native
+	source               config.Document
+	sourceDigest         string
+	resourceStates       map[string]resourceprogram.ResourceState
+	guardStatus          map[string]supervisor.ModuleStatus
+	guardUntil           time.Time
+	guardBootID          string
+	guardUntilNanos      uint64
+	guardGrants          map[string]guardGrant
+	projectionGeneration uint64
+	revision             uint64
+	configured           bool
+	initialized          bool
+	bindings             map[string]binding
+	records              map[string]serviceconfig.Update
+	liveRA               map[string]ra.Config
+	aftrInputs           map[string]aftr.Input
+	installed            []supervisor.DynamicModule
+	appliedHash          string
+	lastNetworkApply     time.Time
+	leases               map[string]time.Time
+	routeIssues          []RouteIssue
+	phase, lastError     string
 }
 
 func New(dir, stateDir string, n Network) *Runtime {
@@ -135,6 +148,23 @@ func (r *Runtime) CheckReady(ctx context.Context) error {
 			return fmt.Errorf("protocol %s is not ready for the committed configuration", name)
 		}
 	}
+	if conditionalProgram(r.source) {
+		r.installGuardStatusLocked(s, nil)
+		p, err := r.projectProgramLocked(r.source, r.revision, r.current, r.effectiveRecordsLocked(time.Now()), time.Now())
+		if err != nil {
+			return err
+		}
+		for id, state := range p.resources {
+			if state.Active && state.Ready != resourceprogram.True {
+				return fmt.Errorf("resource %s ready_when is not true", id)
+			}
+		}
+		// A new prerequisite may have released dependents since the last
+		// network ACK. Confirmation waits until that projection is applied.
+		if !reflect.DeepEqual(p.resources, r.resourceStates) {
+			return errors.New("resource projection has not converged")
+		}
+	}
 	return nil
 }
 func (r *Runtime) failure(err error) error {
@@ -154,6 +184,11 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 		return err
 	}
 	doc := plan.Native
+	encoded, _ := json.Marshal(source)
+	var ownedSource config.Document
+	if err := json.Unmarshal(encoded, &ownedSource); err != nil {
+		return err
+	}
 	r.op.Lock()
 	defer r.op.Unlock()
 	if !r.initialized {
@@ -172,7 +207,7 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 	retained, err := r.retainedLocked(doc)
 	var p projection
 	if err == nil {
-		p, err = r.projectLocked(doc, retained, time.Now())
+		p, err = r.projectProgramLocked(ownedSource, revision, doc, retained, time.Now())
 	}
 	r.mu.Unlock()
 	if err != nil {
@@ -190,7 +225,7 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 	// their latest acknowledged facts at cutover; never restore an older lease.
 	retained, err = r.retainedLocked(doc)
 	if err == nil {
-		p, err = r.projectLocked(doc, retained, time.Now())
+		p, err = r.projectProgramLocked(ownedSource, revision, doc, retained, time.Now())
 	}
 	var bindings map[string]binding
 	if err == nil {
@@ -206,6 +241,15 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 		return r.failure(err)
 	}
 	r.current = doc
+	r.source = ownedSource
+	sourceSum := sha256.Sum256(encoded)
+	sourceDigest := hex.EncodeToString(sourceSum[:])
+	if r.revision != revision || r.sourceDigest != sourceDigest {
+		r.guardGrants = nil
+		r.guardStatus = nil
+		r.guardUntil = time.Time{}
+	}
+	r.sourceDigest = sourceDigest
 	r.revision = revision
 	r.configured = true
 	r.records = retained
@@ -216,6 +260,7 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 			delete(r.aftrInputs, name)
 		}
 	}
+	r.resourceStates = p.resources
 	r.liveRA = p.liveRA
 	r.routeIssues = p.routeIssues
 	r.phase = "applying"
@@ -346,7 +391,11 @@ func (r *Runtime) quiesceChanged(ctx context.Context, next []supervisor.DynamicM
 	if err := r.manager.Reconcile(ctx, keep); err != nil {
 		return err
 	}
-	return r.wait(ctx, nil, removed, false)
+	if err := r.wait(ctx, nil, removed, false); err != nil {
+		return err
+	}
+	r.installed = keep
+	return nil
 }
 func (r *Runtime) wait(ctx context.Context, wanted []supervisor.DynamicModule, removed map[string]bool, allRemoved bool) error {
 	ctx, stop := context.WithTimeout(ctx, 20*time.Second)
@@ -397,6 +446,9 @@ func (r *Runtime) applyNetworkLocked(ctx context.Context, d network.Desired) err
 	}
 	if err := r.network.Apply(ctx, r.revision, d); err != nil {
 		return err
+	}
+	if digest != r.appliedHash {
+		r.projectionGeneration++
 	}
 	r.appliedHash = digest
 	r.lastNetworkApply = time.Now()
@@ -489,8 +541,25 @@ func (r *Runtime) Accept(ctx context.Context, u serviceconfig.Update) error {
 			return err
 		}
 	}
+	if conditionalProgram(r.source) {
+		candidateRecords := r.effectiveRecordsLocked(time.Now())
+		candidateRecords[u.Name] = u
+		if _, err := r.projectLocked(r.current, candidateRecords, time.Now()); err != nil {
+			if oldLease.IsZero() {
+				delete(r.leases, u.Name)
+			} else {
+				r.leases[u.Name] = oldLease
+			}
+			return err
+		}
+		r.recordGuardGrantLocked(u, time.Now())
+		r.records[u.Name] = u
+		// The serialized reconcile loop stops dependent workers before withdrawing
+		// their network prerequisites. A protocol callback must never do that work.
+		return nil
+	}
 	r.records[u.Name] = u
-	p, err := r.projectLocked(r.current, r.effectiveRecordsLocked(time.Now()), time.Now())
+	p, err := r.projectProgramLocked(r.source, r.revision, r.current, r.effectiveRecordsLocked(time.Now()), time.Now())
 	if err == nil {
 		err = r.applyNetworkLocked(ctx, p.network)
 	}
@@ -505,7 +574,7 @@ func (r *Runtime) Accept(ctx context.Context, u serviceconfig.Update) error {
 		} else {
 			delete(r.records, u.Name)
 		}
-		old, compileErr := r.projectLocked(r.current, r.effectiveRecordsLocked(time.Now()), time.Now())
+		old, compileErr := r.projectProgramLocked(r.source, r.revision, r.current, r.effectiveRecordsLocked(time.Now()), time.Now())
 		if compileErr == nil {
 			restoreCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			compileErr = r.network.Apply(restoreCtx, r.revision, old.network)
@@ -516,6 +585,7 @@ func (r *Runtime) Accept(ctx context.Context, u serviceconfig.Update) error {
 		r.lastError = errors.Join(err, compileErr).Error()
 		return err
 	}
+	r.resourceStates = p.resources
 	r.liveRA = p.liveRA
 	r.routeIssues = p.routeIssues
 	if u.Role == "bgp" {
@@ -539,6 +609,20 @@ func strict(b []byte, v any) error {
 }
 func validateSnapshot(instance serviceconfig.Instance, b json.RawMessage) error {
 	switch instance.Role {
+	case "health":
+		var cfg health.Config
+		var snapshot health.Snapshot
+		if err := strict(instance.Config, &cfg); err != nil {
+			return err
+		}
+		if err := strict(b, &snapshot); err != nil {
+			return err
+		}
+		clock, err := bfd.ReadClock()
+		if err != nil {
+			return err
+		}
+		return health.ValidateSnapshot(cfg, snapshot, clock)
 	case "bfd":
 		var cfg bfd.Config
 		var snapshot bfd.Snapshot
@@ -736,19 +820,13 @@ func (r *Runtime) Monitor(ctx context.Context) {
 	}
 }
 func (r *Runtime) reconcileDynamic(ctx context.Context) error {
+	r.refreshGuardStatus(ctx)
 	r.mu.Lock()
 	if !r.configured {
 		r.mu.Unlock()
 		return nil
 	}
-	p, err := r.projectLocked(r.current, r.effectiveRecordsLocked(time.Now()), time.Now())
-	if err == nil {
-		err = r.applyNetworkLocked(ctx, p.network)
-	}
-	if err == nil {
-		r.liveRA = p.liveRA
-		r.routeIssues = p.routeIssues
-	}
+	p, err := r.projectProgramLocked(r.source, r.revision, r.current, r.effectiveRecordsLocked(time.Now()), time.Now())
 	r.mu.Unlock()
 	if err != nil {
 		return err
@@ -757,54 +835,90 @@ func (r *Runtime) reconcileDynamic(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if bindings == nil {
-		if err := r.CheckReady(ctx); err != nil {
+	if bindings != nil {
+		if err := r.quiesceChanged(ctx, modules); err != nil {
 			return err
 		}
-		r.mu.Lock()
-		r.phase = "ready"
-		r.lastError = ""
+	}
+	r.mu.Lock()
+	// Quiescing may take time. Never use an expired conditional authorization.
+	// Retry with a fresh supervisor observation before applying or starting work.
+	if conditionalProgram(r.source) && !time.Now().Before(r.guardUntil) {
 		r.mu.Unlock()
 		return nil
 	}
-	if err := r.quiesceChanged(ctx, modules); err != nil {
-		return err
+	latest, projectionErr := r.projectProgramLocked(r.source, r.revision, r.current, r.effectiveRecordsLocked(time.Now()), time.Now())
+	if projectionErr != nil {
+		r.mu.Unlock()
+		return projectionErr
 	}
-	r.mu.Lock()
-	bfdSources, bfdRecipients, err := compileBFDCache(bindings)
-	if err != nil {
+	if !reflect.DeepEqual(latest, p) {
+		r.mu.Unlock()
+		return nil
+	}
+	if err = r.applyNetworkLocked(ctx, p.network); err != nil {
 		r.mu.Unlock()
 		return err
 	}
-	r.bindings = bindings
-	r.installBFDCacheLocked(bfdSources, bfdRecipients)
-	for name, input := range r.aftrInputs {
-		if b, ok := bindings[name]; !ok || b.digest != input.ConfigDigest {
-			delete(r.aftrInputs, name)
+	r.liveRA, r.routeIssues = p.liveRA, p.routeIssues
+	r.resourceStates = p.resources
+	if conditionalProgram(r.source) {
+		for _, record := range r.records {
+			if record.Role == "bgp" {
+				r.acceptBFDRecipientLocked(record)
+			}
 		}
 	}
-	for name := range r.records {
-		if _, ok := bindings[name]; !ok {
-			delete(r.records, name)
+	if bindings != nil {
+		bfdSources, bfdRecipients, cacheErr := compileBFDCache(bindings)
+		if cacheErr != nil {
+			r.mu.Unlock()
+			return cacheErr
+		}
+		r.bindings = bindings
+		r.installBFDCacheLocked(bfdSources, bfdRecipients)
+		for name, input := range r.aftrInputs {
+			if b, ok := bindings[name]; !ok || b.digest != input.ConfigDigest {
+				delete(r.aftrInputs, name)
+			}
+		}
+		for name := range r.records {
+			if _, ok := bindings[name]; !ok {
+				delete(r.records, name)
+				delete(r.guardGrants, name)
+			}
 		}
 	}
 	r.mu.Unlock()
-	if err := r.manager.Reconcile(ctx, modules); err != nil {
+	if bindings != nil {
+		if err := r.manager.Reconcile(ctx, modules); err != nil {
+			return err
+		}
+		r.installed = modules
+		return nil
+	}
+	if err := r.CheckReady(ctx); err != nil {
 		return err
 	}
-	r.installed = modules
-	return nil // readiness is visible through the supervisor's required modules
+	r.mu.Lock()
+	r.phase, r.lastError = "ready", ""
+	r.mu.Unlock()
+	return nil
 }
 func (r *Runtime) prepareIfChanged(v []serviceconfig.Instance) (map[string]binding, []supervisor.DynamicModule, error) {
 	r.mu.Lock()
-	same := len(v) == len(r.bindings)
+	same := len(v) == len(r.bindings) && len(v) == len(r.installed)
+	installed := make(map[string]string, len(r.installed))
+	for _, module := range r.installed {
+		installed[module.Name] = module.ConfigDigest
+	}
 	for _, instance := range v {
 		_, digest, err := encodeInstance(instance)
 		if err != nil {
 			r.mu.Unlock()
 			return nil, nil, err
 		}
-		if b, ok := r.bindings[instance.Name]; !ok || b.digest != digest {
+		if b, ok := r.bindings[instance.Name]; !ok || b.digest != digest || installed[instance.Name] != digest {
 			same = false
 		}
 	}

@@ -17,12 +17,14 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6pd"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
+	"github.com/imksoo/routerd2/internal/protocol/health"
 	"github.com/imksoo/routerd2/internal/protocol/ra"
 	"github.com/imksoo/routerd2/internal/protocol/raclient"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
 )
 
 type Service struct {
+	Health     *health.Config           `json:"health,omitempty"`
 	BFD        *bfd.Config              `json:"bfd,omitempty"`
 	DSLite     *DSLite                  `json:"ds_lite,omitempty"`
 	RAClient   *RAClient                `json:"ra_client,omitempty"`
@@ -87,6 +89,9 @@ var safeName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,23}$`)
 var interfaceName = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]{0,14}$`)
 
 func (s Service) Role() string {
+	if s.Health != nil {
+		return "health"
+	}
 	if s.BFD != nil {
 		return "bfd"
 	}
@@ -121,6 +126,9 @@ func (s Service) Role() string {
 }
 func (s Service) ModuleName() string { return "service." + s.Name }
 func (s Service) Interface() string {
+	if s.Health != nil {
+		return s.Health.Interface
+	}
 	if s.BFD != nil {
 		return s.BFD.Interface
 	}
@@ -162,7 +170,7 @@ func Validate(services []Service) error {
 		}
 		names[s.Name] = true
 		n := 0
-		for _, set := range []bool{s.BFD != nil, s.DSLite != nil, s.RAClient != nil, s.DHCPServer != nil, s.DHCP4 != nil, s.DHCP6 != nil, s.RA != nil, s.DNS != nil, s.VRRP != nil, s.BGP != nil} {
+		for _, set := range []bool{s.Health != nil, s.BFD != nil, s.DSLite != nil, s.RAClient != nil, s.DHCPServer != nil, s.DHCP4 != nil, s.DHCP6 != nil, s.RA != nil, s.DNS != nil, s.VRRP != nil, s.BGP != nil} {
 			if set {
 				n++
 			}
@@ -174,7 +182,7 @@ func Validate(services []Service) error {
 			return fmt.Errorf("service %s has an invalid interface", s.Name)
 		}
 		key := s.Role() + ":" + s.Interface()
-		if s.DNS != nil || s.BGP != nil || s.DSLite != nil {
+		if s.DNS != nil || s.BGP != nil || s.DSLite != nil || s.Health != nil {
 			key = s.Role() + ":" + s.Name
 		}
 		if s.VRRP != nil {
@@ -193,6 +201,13 @@ func Validate(services []Service) error {
 		}
 		sockets[key] = s.Name
 		switch s.Role() {
+		case "health":
+			if s.Health.Resource != "" && s.Health.Resource != s.Name {
+				return errors.New("health resource is managed by service name")
+			}
+			if err := health.Validate(s.HealthConfig()); err != nil {
+				return err
+			}
 		case "bfd":
 			if s.BFD.Resource != "" && s.BFD.Resource != s.Name {
 				return errors.New("BFD resource is managed by the service name")
@@ -345,6 +360,8 @@ func (s Service) DNSConfig(runtimeDir, stateDir string) dnsconfig.Config {
 func (s Service) Instance(runtimeDir, stateDir string) (Instance, error) {
 	var c any
 	switch s.Role() {
+	case "health":
+		c = s.HealthConfig()
 	case "bfd":
 		c = s.BFDConfig()
 	case "aftr":
@@ -372,4 +389,10 @@ func (s Service) Instance(runtimeDir, stateDir string) (Instance, error) {
 	}
 	b, err := json.Marshal(c)
 	return Instance{Name: s.ModuleName(), Role: s.Role(), Config: b, DynamicDNS: s.HasDNSLeaseSources()}, err
+}
+
+func (s Service) HealthConfig() health.Config {
+	c := *s.Health
+	c.Resource = s.Name
+	return health.Normalize(c)
 }

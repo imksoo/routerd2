@@ -135,3 +135,18 @@ func TestFiniteNativeRequestEncodesIPv6MultipathExpiry(t *testing.T) {
 		t.Fatal("expired route became an infinite route")
 	}
 }
+
+func TestDeadlineValidationIndependentOfTimezone(t *testing.T) {
+	for _, offset := range []int{-12 * 3600, 0, 9 * 3600, 14 * 3600} {
+		zone := time.FixedZone("test", offset)
+		deadline := time.Unix(-1, 0).In(zone)
+		route := Route{Destination: "2001:db8::/64", Interface: "wan0", ValidUntil: deadline}
+		if err := Validate(Desired{Routes: []Route{route}}); err == nil {
+			t.Fatalf("route accepted negative Unix timestamp at offset %d", offset)
+		}
+		iface := Interface{Name: "wan0", Addresses: []string{"2001:db8::1/64"}, AddressOptions: map[string]AddressOptions{"2001:db8::1/64": {PreferredUntil: deadline, ValidUntil: deadline}}}
+		if err := Validate(Desired{Interfaces: []Interface{iface}}); err == nil {
+			t.Fatalf("address accepted negative Unix timestamp at offset %d", offset)
+		}
+	}
+}

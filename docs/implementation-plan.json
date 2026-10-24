@@ -304,7 +304,7 @@
       "title": "durable event と有限 protocol fact の契約",
       "milestone": "M1",
       "track": "resource",
-      "status": "planned",
+      "status": "in_progress",
       "scope": "shared_infrastructure",
       "risk": "high",
       "depends_on": [
@@ -555,7 +555,7 @@
       "title": "HealthCheck の native worker と経路証跡",
       "milestone": "M2",
       "track": "network",
-      "status": "planned",
+      "status": "in_progress",
       "scope": "baseline_parity",
       "risk": "high",
       "depends_on": [
@@ -589,7 +589,7 @@
       "title": "EgressRoutePolicy・PBR・経路選択",
       "milestone": "M2",
       "track": "network",
-      "status": "planned",
+      "status": "in_progress",
       "scope": "baseline_parity",
       "risk": "high",
       "depends_on": [
@@ -10975,6 +10975,37 @@
             "signed trial runtime fallback"
           ]
         }
+      ]
+    },
+    {
+      "id": "runtime-conditions",
+      "date": "2026-10-24",
+      "work_packages": [
+        "CORE-03",
+        "CORE-04"
+      ],
+      "status": "partial_implementation",
+      "evidence": "docs/evidence/2026-10-24-runtime-conditions.md",
+      "remaining": [
+        "hold/maxAge",
+        "durable events",
+        "full protocol readiness",
+        "real daemon and kernel acceptance"
+      ]
+    },
+    {
+      "id": "health-pbr-runtime",
+      "date": "2026-10-24",
+      "work_packages": [
+        "NET-01",
+        "NET-02"
+      ],
+      "status": "partial_implementation",
+      "evidence": "docs/pve-codex-handoff.md",
+      "remaining": [
+        "dynamic targetSource",
+        "full EgressRoutePolicy",
+        "required real daemon two-WAN packet gate"
       ]
     }
   ]

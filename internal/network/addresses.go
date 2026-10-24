@@ -66,7 +66,7 @@ func validateAddressOptions(d Desired) error {
 				errs = append(errs, fmt.Errorf("interface %s address %s: preferred lifetime must not exceed valid lifetime", l.Name, p))
 			}
 			for _, deadline := range []time.Time{o.PreferredUntil, o.ValidUntil} {
-				if !deadline.IsZero() && (deadline.Year() < 1970 || deadline.Year() > 9999) {
+				if !deadline.IsZero() && (deadline.Unix() < 0 || deadline.UTC().Year() > 9999) {
 					errs = append(errs, fmt.Errorf("interface %s address %s: invalid lifetime deadline", l.Name, p))
 				}
 			}

@@ -18,10 +18,12 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/ra"
 	"github.com/imksoo/routerd2/internal/protocol/raclient"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
+	"github.com/imksoo/routerd2/internal/resourceprogram"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
 
 type projection struct {
+	resources   map[string]resourceprogram.ResourceState
 	routeIssues []RouteIssue
 	network     network.Desired
 	instances   []serviceconfig.Instance

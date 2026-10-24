@@ -197,7 +197,7 @@ func serveWithTrial(b runtimeconfig.Boot, trial *releaseboot.Trial) error {
 	}
 	err = supervisor.Run(ctx, supervisor.Options{
 		ModulePath: b.ModulePath, ReleaseID: buildinfo.ReleaseID, RuntimeDir: b.RuntimeDir, StateDir: b.StateDir, ConfigPath: b.Config, Platform: b.Platform,
-		DynamicRoles: []string{"dhcp4", "dhcp6pd", "dhcp_server", "ra", "ra_client", "aftr", "dns", "vrrp", "bgp", "bfd"},
+		DynamicRoles: []string{"health", "dhcp4", "dhcp6pd", "dhcp_server", "ra", "ra_client", "aftr", "dns", "vrrp", "bgp", "bfd"},
 		Modules: []supervisor.Spec{
 			{Name: "logging", Role: "logging", Required: false},
 			{Name: "network", Role: "network", Required: true},

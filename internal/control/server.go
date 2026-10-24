@@ -32,6 +32,19 @@ type nativeNetwork interface {
 
 func networkHandler(e nativeNetwork) http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("POST /v1/routes/lookup", func(w http.ResponseWriter, r *http.Request) {
+		var req network.RouteLookupRequest
+		if err := localapi.Decode(w, r, &req); err != nil {
+			localapi.Fail(w, 400, err)
+			return
+		}
+		result, err := network.LookupRoute(req)
+		if err != nil {
+			localapi.Fail(w, 422, err)
+			return
+		}
+		localapi.JSON(w, 200, result)
+	})
 	mux.HandleFunc("GET /v1/snapshot", func(w http.ResponseWriter, r *http.Request) {
 		s, err := networkObservation(r.Context(), e)
 		if err != nil {

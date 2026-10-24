@@ -29,12 +29,14 @@ type Provenance struct {
 // Resource has one typed payload. IDs are stable operator identities, separate
 // from an interface name or a generated worker's private instance name. Owner
 // defaults to ID; another owner must name a resource in this same program.
-// Dependencies constrain compilation order, not future protocol readiness.
+// Dependencies constrain both compilation order and runtime readiness.
 type Resource struct {
-	ID         string      `json:"id"`
-	DependsOn  []string    `json:"depends_on,omitempty"`
-	Owner      string      `json:"owner,omitempty"`
-	Provenance *Provenance `json:"provenance,omitempty"`
+	ID         string         `json:"id"`
+	DependsOn  []string       `json:"depends_on,omitempty"`
+	Owner      string         `json:"owner,omitempty"`
+	Provenance *Provenance    `json:"provenance,omitempty"`
+	When       *FactCondition `json:"when,omitempty"`
+	ReadyWhen  *FactCondition `json:"ready_when,omitempty"`
 
 	Interface  *network.Interface     `json:"interface,omitempty"`
 	Address    *Address               `json:"address,omitempty"`

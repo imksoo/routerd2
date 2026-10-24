@@ -1,0 +1,43 @@
+# Isolated-lab example. Replace interface/address assignments before use.
+# The probe's host route is independent of the application policy table, so
+# removing the primary default route cannot redirect its probe to the backup.
+schema_version: 2
+resources:
+  - id: wan-a
+    interface: {name: wan0}
+  - id: wan-b
+    interface: {name: wan1}
+  - id: address-a
+    owner: wan-a
+    address: {interface: wan0, cidr: 192.0.2.2/24}
+  - id: address-b
+    owner: wan-b
+    address: {interface: wan1, cidr: 203.0.113.2/24}
+  - id: probe-path
+    depends_on: [address-a]
+    route: {destination: 198.51.100.10/32, gateway: 192.0.2.1, interface: wan0, table: 254}
+  - id: health-a
+    depends_on: [probe-path]
+    service:
+      name: health-a
+      health:
+        interface: wan0
+        source_address: 192.0.2.2
+        target: 198.51.100.10
+        protocol: tcp
+        port: 443
+        interval_ms: 1000
+        timeout_ms: 500
+        healthy_threshold: 2
+        unhealthy_threshold: 3
+  - id: primary
+    depends_on: [address-a]
+    when: {fact: service.health-a.active}
+    route: {destination: 0.0.0.0/0, gateway: 192.0.2.1, interface: wan0, table: 100, metric: 100}
+  - id: backup
+    depends_on: [address-b]
+    route: {destination: 0.0.0.0/0, gateway: 203.0.113.1, interface: wan1, table: 100, metric: 200}
+  - id: application-policy
+    policy_rule: {family: 4, priority: 1000, table: 100, source: 192.168.10.0/24}
+  - id: ipv4-forwarding
+    forwarding: {ipv4: true}

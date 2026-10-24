@@ -22,6 +22,18 @@ var resourceID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$`)
 // their order in YAML. Payload order inside a resource (e.g. firewall rules) is
 // preserved. Source and returned values never share mutable slices or pointers.
 func Compile(source Program) (Plan, error) {
+	for _, r := range source.Resources {
+		for _, guard := range []struct {
+			name  string
+			value *FactCondition
+		}{{"when", r.When}, {"ready_when", r.ReadyWhen}} {
+			if guard.value != nil {
+				if err := ValidateFactCondition(*guard.value); err != nil {
+					return Plan{}, fmt.Errorf("resource %s %s: %w", r.ID, guard.name, err)
+				}
+			}
+		}
+	}
 	if source.SchemaVersion != SchemaVersion {
 		return Plan{}, fmt.Errorf("unsupported config schema %d (expected %d)", source.SchemaVersion, SchemaVersion)
 	}
