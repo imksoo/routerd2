@@ -69,21 +69,23 @@ type Status struct {
 	Instances            []InstanceStatus `json:"instances"`
 }
 type InstanceStatus struct {
-	BFD               *BFDHealthStatus `json:"bfd_health,omitempty"`
-	SnapshotBytes     int              `json:"snapshot_bytes,omitempty"`
-	SnapshotTruncated bool             `json:"snapshot_truncated,omitempty"`
-	OwnershipExpired  bool             `json:"ownership_expired,omitempty"`
-	Name              string           `json:"name"`
-	Role              string           `json:"role"`
-	ConfigDigest      string           `json:"config_digest"`
-	Generation        uint64           `json:"generation,omitempty"`
-	ProducerEpoch     string           `json:"producer_epoch,omitempty"`
-	Sequence          uint64           `json:"sequence,omitempty"`
-	Snapshot          json.RawMessage  `json:"snapshot,omitempty"`
+	SupervisorInstance string           `json:"supervisor_instance,omitempty"`
+	BFD                *BFDHealthStatus `json:"bfd_health,omitempty"`
+	SnapshotBytes      int              `json:"snapshot_bytes,omitempty"`
+	SnapshotTruncated  bool             `json:"snapshot_truncated,omitempty"`
+	OwnershipExpired   bool             `json:"ownership_expired,omitempty"`
+	Name               string           `json:"name"`
+	Role               string           `json:"role"`
+	ConfigDigest       string           `json:"config_digest"`
+	Generation         uint64           `json:"generation,omitempty"`
+	ProducerEpoch      string           `json:"producer_epoch,omitempty"`
+	Sequence           uint64           `json:"sequence,omitempty"`
+	Snapshot           json.RawMessage  `json:"snapshot,omitempty"`
 }
 type Runtime struct {
-	op sync.Mutex // module-set reconciliation; never held by protocol callbacks
-	mu sync.Mutex // complete projection and protocol acceptance are serialized
+	supervisorInstance string     // immutable authority inherited by the control worker
+	op                 sync.Mutex // module-set reconciliation; never held by protocol callbacks
+	mu                 sync.Mutex // complete projection and protocol acceptance are serialized
 	// BFD observations and recipient grants never acquire mu: the network
 	// writer can hold it across a long apply. Configuration takes mu -> bfdMu;
 	// no path may acquire these locks in the opposite order.
@@ -119,8 +121,8 @@ type Runtime struct {
 	phase, lastError     string
 }
 
-func New(dir, stateDir string, n Network) *Runtime {
-	return &Runtime{dir: dir, stateDir: stateDir, network: n, manager: managerClient{localapi.NewClient(filepath.Join(dir, supervisor.SocketName))}, bindings: map[string]binding{}, records: map[string]serviceconfig.Update{}, liveRA: map[string]ra.Config{}, leases: map[string]time.Time{}, phase: "starting"}
+func New(dir, stateDir string, n Network, supervisorInstance string) *Runtime {
+	return &Runtime{supervisorInstance: supervisorInstance, dir: dir, stateDir: stateDir, network: n, manager: managerClient{localapi.NewClient(filepath.Join(dir, supervisor.SocketName))}, bindings: map[string]binding{}, records: map[string]serviceconfig.Update{}, liveRA: map[string]ra.Config{}, leases: map[string]time.Time{}, phase: "starting"}
 }
 
 // CheckReady queries the process manager at confirmation time. A previously
@@ -490,6 +492,11 @@ func (r *Runtime) recordOwnershipLocked(u serviceconfig.Update, maximum time.Dur
 }
 
 func (r *Runtime) Accept(ctx context.Context, u serviceconfig.Update) error {
+	// This check precedes both the main mutex and the independent BFD path.
+	// Old counters cannot seed an empty cache after a supervisor restart.
+	if !serviceconfig.ValidSupervisorInstance(r.supervisorInstance) || u.SupervisorInstance != r.supervisorInstance {
+		return ErrStale
+	}
 	if u.Generation == 0 || u.Sequence == 0 || len(u.ProducerEpoch) != 32 {
 		return errors.New("invalid producer generation, sequence or epoch")
 	}

@@ -9,10 +9,11 @@ import (
 )
 
 const (
-	ProtocolVersion = 1
-	MaxFrameSize    = 64 << 10
-	ControlFDEnv    = "ROUTERD_CONTROL_FD"
-	ModuleNameEnv   = "ROUTERD_MODULE_NAME"
+	ProtocolVersion       = 1
+	MaxFrameSize          = 64 << 10
+	ControlFDEnv          = "ROUTERD_CONTROL_FD"
+	SupervisorInstanceEnv = "ROUTERD_SUPERVISOR_INSTANCE"
+	ModuleNameEnv         = "ROUTERD_MODULE_NAME"
 )
 
 // Message is a lifecycle message, not a forwarding or configuration API.

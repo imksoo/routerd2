@@ -29,6 +29,7 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/raclient"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
+	"github.com/imksoo/routerd2/internal/worker"
 )
 
 func decode(b []byte, v any) error {
@@ -47,6 +48,10 @@ func decode(b []byte, v any) error {
 func Run(ctx context.Context, runtimeDir, name, role, path, digest string, generation uint64, ready func()) error {
 	if generation == 0 {
 		return errors.New("service generation is required")
+	}
+	instanceID := os.Getenv(worker.SupervisorInstanceEnv)
+	if !serviceconfig.ValidSupervisorInstance(instanceID) {
+		return errors.New("supervisor instance is required")
 	}
 	if path != filepath.Join(runtimeDir, "instances", name, digest+".json") {
 		return errors.New("unexpected instance configuration path")
@@ -78,7 +83,7 @@ func Run(ctx context.Context, runtimeDir, name, role, path, digest string, gener
 	if _, err := rand.Read(epoch[:]); err != nil {
 		return err
 	}
-	c := &effectsClient{client: localapi.NewClient(filepath.Join(runtimeDir, "control.sock")), identity: serviceconfig.Update{Name: name, Role: role, ConfigDigest: digest, Generation: generation, ProducerEpoch: hex.EncodeToString(epoch[:])}}
+	c := &effectsClient{client: localapi.NewClient(filepath.Join(runtimeDir, "control.sock")), identity: serviceconfig.Update{SupervisorInstance: instanceID, Name: name, Role: role, ConfigDigest: digest, Generation: generation, ProducerEpoch: hex.EncodeToString(epoch[:])}}
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	// Lease-owning HA engines refresh their own acknowledged deadline. A

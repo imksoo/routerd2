@@ -47,7 +47,7 @@ func (r *Runtime) instanceStatusLocked(name string, b binding, v serviceconfig.U
 }
 
 func instanceStatus(name string, b binding, v serviceconfig.Update, detail bool) InstanceStatus {
-	out := InstanceStatus{Name: name, Role: b.instance.Role, ConfigDigest: b.digest, Generation: v.Generation, ProducerEpoch: v.ProducerEpoch, Sequence: v.Sequence, SnapshotBytes: len(v.Snapshot)}
+	out := InstanceStatus{SupervisorInstance: v.SupervisorInstance, Name: name, Role: b.instance.Role, ConfigDigest: b.digest, Generation: v.Generation, ProducerEpoch: v.ProducerEpoch, Sequence: v.Sequence, SnapshotBytes: len(v.Snapshot)}
 	if b.instance.Role == "bfd" {
 		out.BFD = bfdHealth(b.instance, v)
 	}

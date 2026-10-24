@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"time"
@@ -14,6 +15,8 @@ import (
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
+	"github.com/imksoo/routerd2/internal/serviceconfig"
+	"github.com/imksoo/routerd2/internal/worker"
 )
 
 func ServeNetwork(ctx context.Context, dir, stateDir string, ready func()) error {
@@ -150,6 +153,10 @@ func (e *Engine) Handler() http.Handler {
 }
 
 func Serve(ctx context.Context, dir, stateDir, bootstrap string, ready func()) error {
+	instanceID := os.Getenv(worker.SupervisorInstanceEnv)
+	if !serviceconfig.ValidSupervisorInstance(instanceID) {
+		return errors.New("supervisor instance is required")
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	store, current, err := config.Open(stateDir, bootstrap)
@@ -158,7 +165,7 @@ func Serve(ctx context.Context, dir, stateDir, bootstrap string, ready func()) e
 	}
 	networkClient := NewNetworkClient(dir)
 	e := New(store, current, networkClient)
-	e.runtime = runtimeplan.New(dir, stateDir, networkClient)
+	e.runtime = runtimeplan.New(dir, stateDir, networkClient, instanceID)
 	// Protocol readiness may require an effects acknowledgement. Start the
 	// private API before reconciliation, while public health remains false.
 	listening := make(chan struct{})

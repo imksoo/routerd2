@@ -4,6 +4,7 @@ package supervisor
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -70,6 +71,11 @@ func Run(parent context.Context, options Options) error {
 	if err != nil {
 		return err
 	}
+	var instance [16]byte
+	if _, err := rand.Read(instance[:]); err != nil {
+		return fmt.Errorf("create supervisor instance: %w", err)
+	}
+	o.instanceID = hex.EncodeToString(instance[:])
 	image, err := os.Open(o.ModulePath)
 	if err != nil {
 		return fmt.Errorf("open module image: %w", err)
@@ -102,7 +108,7 @@ func Run(parent context.Context, options Options) error {
 	apiCtx, apiCancel := context.WithCancel(context.Background())
 	defer apiCancel()
 	started := time.Now()
-	initial := Status{ReleaseID: o.ReleaseID, Platform: o.Platform, PID: os.Getpid(), StartedAt: started}
+	initial := Status{InstanceID: o.instanceID, ReleaseID: o.ReleaseID, Platform: o.Platform, PID: os.Getpid(), StartedAt: started}
 	a, err := openAPI(apiCtx, o.RuntimeDir, initial)
 	if err != nil {
 		return fmt.Errorf("supervisor API: %w", err)
@@ -389,6 +395,7 @@ func startChild(ctx context.Context, o Options, image *os.File, c *child, events
 	}
 	args := append([]string{o.ModulePath, "worker", "--role=" + c.spec.Role, "--name=" + c.spec.Name}, c.spec.Args...)
 	env := mergeEnv(os.Environ(), o.Env, []string{
+		worker.SupervisorInstanceEnv + "=" + o.instanceID,
 		worker.ControlFDEnv + "=3", worker.ModuleNameEnv + "=" + c.spec.Name,
 		"ROUTERD_RELEASE_ID=" + o.ReleaseID, "ROUTERD_RUNTIME_DIR=" + o.RuntimeDir,
 		"ROUTERD_STATE_DIR=" + o.StateDir, "ROUTERD_CONFIG_PATH=" + o.ConfigPath,

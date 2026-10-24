@@ -21,6 +21,7 @@ import (
 	"github.com/imksoo/routerd2/internal/logging"
 	"github.com/imksoo/routerd2/internal/management"
 	"github.com/imksoo/routerd2/internal/runtimeconfig"
+	"github.com/imksoo/routerd2/internal/serviceconfig"
 	"github.com/imksoo/routerd2/internal/serviceruntime"
 	"github.com/imksoo/routerd2/internal/worker"
 )
@@ -61,6 +62,9 @@ func run(args []string) error {
 	generation, generationErr := strconv.ParseUint(os.Getenv("ROUTERD_GENERATION"), 10, 64)
 	if generationErr != nil || generation == 0 {
 		return errors.New("invalid supervisor generation")
+	}
+	if !serviceconfig.ValidSupervisorInstance(os.Getenv(worker.SupervisorInstanceEnv)) {
+		return errors.New("invalid supervisor instance")
 	}
 	if *role != "logging" {
 		handler, err := logging.NewHandler(logging.HandlerOptions{RuntimeDir: dir, Module: *name, Generation: generation, Fallback: os.Stderr})
