@@ -60,7 +60,7 @@ func TestAFTRObservedSourceGenerationAndProjection(t *testing.T) {
 	ctx := context.Background()
 	doc := aftrDocument()
 	n := &aftrNetwork{observed: network.Snapshot{Interfaces: []network.InterfaceState{{Name: "wan0", Index: 42, Up: true, Addresses: []network.AddressState{{Address: "2001:db8:42::1/64", Owned: true, PreferredLifetime: ^uint32(0), ValidLifetime: ^uint32(0), Flags: unix.IFA_F_TENTATIVE}}}}}}
-	r := New(t.TempDir(), t.TempDir(), n)
+	r := New(t.TempDir(), t.TempDir(), n, testSupervisorInstance)
 	r.manager = &memoryManager{}
 	if err := r.ApplyConfig(ctx, 1, config.FromNative(doc)); err != nil {
 		t.Fatal(err)
@@ -121,7 +121,7 @@ func TestAFTRObservedSourceGenerationAndProjection(t *testing.T) {
 func TestAFTRPeerAndGatewayChangesFenceOldProjection(t *testing.T) {
 	ctx := context.Background()
 	n := &aftrNetwork{observed: network.Snapshot{Interfaces: []network.InterfaceState{{Name: "wan0", Index: 42, Up: true, Addresses: []network.AddressState{{Address: "2001:db8:42::1/64", Owned: true, PreferredLifetime: ^uint32(0), ValidLifetime: ^uint32(0)}}}}}}
-	r := New(t.TempDir(), t.TempDir(), n)
+	r := New(t.TempDir(), t.TempDir(), n, testSupervisorInstance)
 	r.manager = &memoryManager{}
 	no := false
 	var priorDigest string

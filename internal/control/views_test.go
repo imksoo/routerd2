@@ -166,7 +166,7 @@ func TestConfigurationSmallResponseAndHealthFailureFields(t *testing.T) {
 	if err := json.Unmarshal(commit.Body.Bytes(), &state); err != nil || commit.Code != http.StatusOK || state.ConfigOmitted || state.Config.SchemaVersion != config.SchemaVersion || state.Revision != 2 {
 		t.Fatal("small mutation response changed", commit.Code, state, err)
 	}
-	e.runtime = runtimeplan.New(t.TempDir(), t.TempDir(), &fakeNetwork{})
+	e.runtime = runtimeplan.New(t.TempDir(), t.TempDir(), &fakeNetwork{}, "11111111111111111111111111111111")
 	bad := callView(t, e.Handler(), http.MethodGet, "/v1/health", nil)
 	var health Health
 	if err := json.Unmarshal(bad.Body.Bytes(), &health); err != nil || bad.Code != http.StatusServiceUnavailable || health.Healthy || health.Services == nil || health.Services.Phase != "starting" || health.Services.Revision != 0 {

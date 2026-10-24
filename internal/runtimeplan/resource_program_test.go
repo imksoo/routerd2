@@ -48,7 +48,7 @@ func TestResourceProgramUpdateRemovalAndWorkerRecovery(t *testing.T) {
 	n := &memoryNetwork{}
 	m := &memoryManager{}
 	runtimeDir, stateDir := t.TempDir(), t.TempDir()
-	r := New(runtimeDir, stateDir, n)
+	r := New(runtimeDir, stateDir, n, testSupervisorInstance)
 	r.manager = m
 	wantAddress, wantGateway := "192.0.2.1/24", "192.0.2.2"
 	starts := 0
@@ -97,7 +97,7 @@ func TestResourceProgramUpdateRemovalAndWorkerRecovery(t *testing.T) {
 		}
 		previousHook(modules)
 	}
-	recovered := New(runtimeDir, stateDir, n)
+	recovered := New(runtimeDir, stateDir, n, testSupervisorInstance)
 	recovered.manager = m
 	if err := recovered.ApplyConfig(ctx, 2, source); err != nil {
 		t.Fatal(err)
@@ -134,7 +134,7 @@ func TestInvalidResourceGraphHasNoRuntimeSideEffects(t *testing.T) {
 			n := &memoryNetwork{}
 			m := &memoryManager{}
 			dir := t.TempDir()
-			r := New(dir, t.TempDir(), n)
+			r := New(dir, t.TempDir(), n, testSupervisorInstance)
 			r.manager = m
 			if initialized {
 				if err := r.ApplyConfig(ctx, 1, sourceProgram("192.0.2.1/24", "192.0.2.2")); err != nil {
@@ -172,7 +172,7 @@ func TestResourceProgramDoesNotStartWorkerWithoutNetworkAcknowledgement(t *testi
 			starts++
 		}
 	}
-	r := New(t.TempDir(), t.TempDir(), n)
+	r := New(t.TempDir(), t.TempDir(), n, testSupervisorInstance)
 	r.manager = m
 	source := sourceProgram("192.0.2.1/24", "192.0.2.2")
 	if err := r.ApplyConfig(ctx, 1, source); !errors.Is(err, injected) {

@@ -241,6 +241,8 @@ func isolateFixtureTimeout(t *testing.T, name string, timeout time.Duration) boo
 type daemonFixture struct {
 	pid                 int
 	control, supervisor *localapi.Client
+	stop                func()
+	restart             func() daemonFixture
 }
 
 func startFixtureDaemon(t *testing.T, doc config.Document) daemonFixture {
@@ -250,6 +252,11 @@ func startFixtureDaemon(t *testing.T, doc config.Document) daemonFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return startFixtureDaemonAt(t, doc, dir)
+}
+
+func startFixtureDaemonAt(t *testing.T, doc config.Document, dir string) daemonFixture {
+	t.Helper()
 	runDir, stateDir := filepath.Join(dir, "run"), filepath.Join(dir, "state")
 	configPath := filepath.Join(dir, "config.json")
 	if err := config.AtomicJSON(configPath, doc); err != nil {
@@ -273,7 +280,12 @@ func startFixtureDaemon(t *testing.T, doc config.Document) daemonFixture {
 	}
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
-	t.Cleanup(func() {
+	stopped := false
+	stop := func() {
+		if stopped {
+			return
+		}
+		stopped = true
 		_ = cmd.Process.Signal(syscall.SIGTERM)
 		select {
 		case err := <-done:
@@ -285,6 +297,9 @@ func startFixtureDaemon(t *testing.T, doc config.Document) daemonFixture {
 			<-done
 			t.Error("daemon failed to drain workers")
 		}
+	}
+	t.Cleanup(func() {
+		stop()
 		if t.Failed() {
 			b, _ := os.ReadFile(logPath)
 			t.Logf("console: %s", b)
@@ -298,7 +313,8 @@ func startFixtureDaemon(t *testing.T, doc config.Document) daemonFixture {
 			}
 		}
 	})
-	f := daemonFixture{pid: cmd.Process.Pid, control: localapi.NewClient(filepath.Join(runDir, control.SocketName)), supervisor: localapi.NewClient(filepath.Join(runDir, supervisor.SocketName))}
+	f := daemonFixture{pid: cmd.Process.Pid, control: localapi.NewClient(filepath.Join(runDir, control.SocketName)), supervisor: localapi.NewClient(filepath.Join(runDir, supervisor.SocketName)), stop: stop}
+	f.restart = func() daemonFixture { stop(); return startFixtureDaemonAt(t, doc, dir) }
 	until(t, 20*time.Second, func() bool {
 		var s supervisor.Status
 		return f.supervisor.Do(context.Background(), "GET", "/v1/status", nil, &s) == nil && s.Ready

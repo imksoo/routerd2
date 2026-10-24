@@ -22,6 +22,8 @@ import (
 	"github.com/imksoo/routerd2/internal/supervisor"
 )
 
+const testSupervisorInstance = "11111111111111111111111111111111"
+
 type memoryNetwork struct {
 	mu      sync.Mutex
 	applied network.Desired
@@ -66,7 +68,7 @@ func fixture(t *testing.T, doc config.Native) (*Runtime, *memoryNetwork, *memory
 	t.Helper()
 	n := &memoryNetwork{}
 	m := &memoryManager{}
-	r := New(t.TempDir(), t.TempDir(), n)
+	r := New(t.TempDir(), t.TempDir(), n, testSupervisorInstance)
 	r.manager = m
 	if e := r.ApplyConfig(context.Background(), 1, config.FromNative(doc)); e != nil {
 		t.Fatal(e)
@@ -80,7 +82,7 @@ func update(t *testing.T, r *Runtime, name string, seq uint64, snapshot any) ser
 	if e != nil {
 		t.Fatal(e)
 	}
-	return serviceconfig.Update{Name: name, Role: b.instance.Role, ConfigDigest: b.digest, Generation: 1, ProducerEpoch: strings.Repeat("a", 32), Sequence: seq, Snapshot: raw}
+	return serviceconfig.Update{SupervisorInstance: r.supervisorInstance, Name: name, Role: b.instance.Role, ConfigDigest: b.digest, Generation: 1, ProducerEpoch: strings.Repeat("a", 32), Sequence: seq, Snapshot: raw}
 }
 func wanDoc() config.Native {
 	return config.Native{Services: []serviceconfig.Service{{Name: "wan", DHCP4: &serviceconfig.DHCP4{Interface: "wan0"}}}}

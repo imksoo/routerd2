@@ -69,6 +69,7 @@ func helperMain() int {
 		_ = file.Close()
 	}
 	_ = os.WriteFile(filepath.Join(state, "generation."+name), []byte(os.Getenv("ROUTERD_GENERATION")), 0600)
+	_ = os.WriteFile(filepath.Join(state, "instance."+name), []byte(os.Getenv(worker.SupervisorInstanceEnv)), 0600)
 	if role == "nohello" {
 		signal.Ignore(syscall.SIGTERM)
 		for {
@@ -151,7 +152,7 @@ func startTestSupervisorRoles(t *testing.T, modules []Spec, roles []string) *tes
 	if err := os.Mkdir(state, 0700); err != nil {
 		t.Fatal(err)
 	}
-	o := Options{ModulePath: image, ReleaseID: testRelease, RuntimeDir: filepath.Join(dir, "run"), StateDir: state, Platform: "host", Modules: modules, DynamicRoles: roles, Env: []string{"ROUTERD_SUPERVISOR_HELPER=1"}}
+	o := Options{ModulePath: image, ReleaseID: testRelease, RuntimeDir: filepath.Join(dir, "run"), StateDir: state, Platform: "host", Modules: modules, DynamicRoles: roles, Env: []string{"ROUTERD_SUPERVISOR_HELPER=1", worker.SupervisorInstanceEnv + "=inherited-value-must-not-choose-authority"}}
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &testSupervisor{options: o, cancel: cancel, done: make(chan error, 1)}
 	s.client = &http.Client{Timeout: time.Second, Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
@@ -231,12 +232,18 @@ func (s *testSupervisor) request(t *testing.T, method, path string) int {
 func TestSupervisorReadinessRestartIsolationAndPinnedImage(t *testing.T) {
 	s := startTestSupervisor(t, []Spec{{Name: "network", Role: "ready"}, {Name: "management", Role: "ready"}})
 	first := s.wait(t, func(status Status) bool { return status.Ready && len(status.Modules) == 2 })
+	if len(first.InstanceID) != 32 || strings.Contains(first.InstanceID, "inherited") {
+		t.Fatal("supervisor did not create its own instance identity")
+	}
 	for _, module := range first.Modules {
 		if module.ReleaseID != testRelease || module.Generation != 1 || !module.Ready {
 			t.Fatalf("unexpected initial worker: %+v", module)
 		}
 		if generation, err := os.ReadFile(filepath.Join(s.options.StateDir, "generation."+module.Name)); err != nil || string(generation) != "1" {
 			t.Fatalf("worker generation environment: %q %v", generation, err)
+		}
+		if instance, err := os.ReadFile(filepath.Join(s.options.StateDir, "instance."+module.Name)); err != nil || string(instance) != first.InstanceID {
+			t.Fatalf("worker did not inherit the supervisor's instance: %q %v", instance, err)
 		}
 	}
 	for path, want := range map[string]os.FileMode{s.options.RuntimeDir: 0750, filepath.Join(s.options.RuntimeDir, SocketName): 0600} {
@@ -262,6 +269,9 @@ func TestSupervisorReadinessRestartIsolationAndPinnedImage(t *testing.T) {
 		t.Fatalf("restart status: %d", got)
 	}
 	second := s.wait(t, func(status Status) bool { return status.Ready && status.Modules[0].Generation == 2 })
+	if second.InstanceID != first.InstanceID {
+		t.Fatal("worker restart changed the supervisor's instance identity")
+	}
 	if second.Modules[0].PID == first.Modules[0].PID || second.Modules[1].PID != first.Modules[1].PID {
 		t.Fatalf("restart was not isolated: before=%+v after=%+v", first.Modules, second.Modules)
 	}

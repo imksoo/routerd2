@@ -448,6 +448,28 @@ func TestDaemonHealthPBRFailoverAndRecovery(t *testing.T) {
 		hstatus = control.Health{}
 		return f.control.Do(ctx, "GET", "/v1/health", nil, &hstatus) == nil && hstatus.Healthy && hstatus.Services != nil && hstatus.Services.Revision == 3 && hstatus.Services.ProjectionGeneration == read().ProjectionGeneration
 	})
+	// A completely new supervisor legitimately starts generation 1 again.
+	// The former tree's larger counters must not overwrite its first reports.
+	oldTree := healthPBRUpdate(instance("service.health-a"))
+	f = f.restart()
+	waitPrimary(true)
+	fresh := healthPBRUpdate(instance("service.health-a"))
+	var tree supervisor.Status
+	if err := f.supervisor.Do(ctx, "GET", "/v1/status", nil, &tree); err != nil {
+		t.Fatal(err)
+	}
+	if !serviceconfig.ValidSupervisorInstance(fresh.SupervisorInstance) || fresh.SupervisorInstance == oldTree.SupervisorInstance || tree.InstanceID != fresh.SupervisorInstance || fresh.Generation >= oldTree.Generation {
+		t.Fatal("fixture did not replace the supervisor authority and reuse lower generation counters")
+	}
+	if err := f.control.Do(ctx, "POST", "/v1/services/state", oldTree, nil); !localapi.IsHTTPStatus(err, 409) {
+		t.Fatal("previous supervisor notification was accepted", err)
+	}
+	if read().Revision != 3 {
+		t.Fatal("complete supervisor restart lost the committed rollback revision")
+	}
+	traffic("A")
+	record("restart-supervisor")
+	t.Log("complete supervisor restart reused lower worker generations; new process-tree instance fenced delayed former-tree observations and preserved revision 3 and TCP/UDP")
 	for _, name := range []string{"service.health-a", "service.health-b"} {
 		pid := module(name).PID
 		if pid <= 0 {
@@ -537,7 +559,7 @@ func healthPBRMarkCounters(t *testing.T) func() {
 }
 
 func healthPBRUpdate(i runtimeplan.InstanceStatus) serviceconfig.Update {
-	return serviceconfig.Update{Name: i.Name, Role: i.Role, ConfigDigest: i.ConfigDigest, Generation: i.Generation, ProducerEpoch: i.ProducerEpoch, Sequence: i.Sequence, Snapshot: i.Snapshot}
+	return serviceconfig.Update{SupervisorInstance: i.SupervisorInstance, Name: i.Name, Role: i.Role, ConfigDigest: i.ConfigDigest, Generation: i.Generation, ProducerEpoch: i.ProducerEpoch, Sequence: i.Sequence, Snapshot: i.Snapshot}
 }
 
 func healthPBRPrimary(t *testing.T) bool {

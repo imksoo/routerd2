@@ -21,7 +21,7 @@ func TestConditionHoldTimerAndFlapBetweenProjections(t *testing.T) {
 		t.Fatal(err)
 	}
 	n := &memoryNetwork{}
-	r := New(t.TempDir(), t.TempDir(), n)
+	r := New(t.TempDir(), t.TempDir(), n, testSupervisorInstance)
 	r.manager = &observedManager{generation: 1}
 	if err := r.ApplyConfig(ctx, 1, source); err != nil {
 		t.Fatal(err)
@@ -101,7 +101,7 @@ func conditionalFixture(t *testing.T) (*Runtime, *memoryNetwork, *observedManage
 	t.Helper()
 	n := &memoryNetwork{}
 	m := &observedManager{generation: 1}
-	r := New(t.TempDir(), t.TempDir(), n)
+	r := New(t.TempDir(), t.TempDir(), n, testSupervisorInstance)
 	r.manager = m
 	if err := r.ApplyConfig(context.Background(), 1, conditionSource()); err != nil {
 		t.Fatal(err)

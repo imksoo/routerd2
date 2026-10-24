@@ -146,7 +146,7 @@ func runtimeMigrationFixture(t *testing.T, document config.Document) (*runtimepl
 		}
 	})
 	n := &migrationNetwork{}
-	r := runtimeplan.New(runtimeDir, stateDir, n)
+	r := runtimeplan.New(runtimeDir, stateDir, n, "11111111111111111111111111111111")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := r.ApplyConfig(ctx, 1, document); err != nil {
@@ -163,7 +163,7 @@ func migrationUpdate(t *testing.T, runtime *runtimeplan.Runtime, service service
 	}
 	for _, instance := range runtime.State().Instances {
 		if instance.Name == service.ModuleName() {
-			return serviceconfig.Update{Name: instance.Name, Role: instance.Role, ConfigDigest: instance.ConfigDigest, Generation: 1, ProducerEpoch: strings.Repeat("a", 32), Sequence: sequence, Snapshot: data}
+			return serviceconfig.Update{SupervisorInstance: "11111111111111111111111111111111", Name: instance.Name, Role: instance.Role, ConfigDigest: instance.ConfigDigest, Generation: 1, ProducerEpoch: strings.Repeat("a", 32), Sequence: sequence, Snapshot: data}
 		}
 	}
 	t.Fatal("native runtime instance missing")

@@ -19,7 +19,7 @@ func TestHealthPBRProjectionFailureFallbackAndRecovery(t *testing.T) {
 	}
 	n := &memoryNetwork{}
 	m := &observedManager{generation: 1}
-	r := New(t.TempDir(), t.TempDir(), n)
+	r := New(t.TempDir(), t.TempDir(), n, testSupervisorInstance)
 	r.manager = m
 	ctx := context.Background()
 	if err := r.ApplyConfig(ctx, 1, source); err != nil {
@@ -96,7 +96,7 @@ func TestHealthPBRProjectionFailureFallbackAndRecovery(t *testing.T) {
 	assertPath(false)
 	// A control restart must reacquire health, retaining the independent probe
 	// and backup route while withholding the stale primary.
-	recovered := New(t.TempDir(), t.TempDir(), n)
+	recovered := New(t.TempDir(), t.TempDir(), n, testSupervisorInstance)
 	recovered.manager = m
 	if err := recovered.ApplyConfig(ctx, 1, source); err != nil {
 		t.Fatal(err)
@@ -118,7 +118,7 @@ func TestHealthPBRMaxAgeDoesNotRenewOnProjectionOrTransportReplay(t *testing.T) 
 		}
 	}
 	n := &memoryNetwork{}
-	r := New(t.TempDir(), t.TempDir(), n)
+	r := New(t.TempDir(), t.TempDir(), n, testSupervisorInstance)
 	r.manager = &observedManager{generation: 1}
 	ctx := context.Background()
 	if err := r.ApplyConfig(ctx, 1, source); err != nil {

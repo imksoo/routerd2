@@ -19,7 +19,7 @@ import (
 
 func TestAFTRSourceIndependentOfUnrelatedLargeNetworkObservations(t *testing.T) {
 	n := &aftrNetwork{observed: network.Snapshot{Interfaces: []network.InterfaceState{{Name: "wan0", Index: 42, Up: true, Addresses: []network.AddressState{{Address: "2001:db8:42::1/64", Owned: true, PreferredLifetime: ^uint32(0), ValidLifetime: ^uint32(0)}}}}}}
-	r := New(t.TempDir(), t.TempDir(), n)
+	r := New(t.TempDir(), t.TempDir(), n, testSupervisorInstance)
 	r.manager = &memoryManager{}
 	if err := r.ApplyConfig(context.Background(), 1, config.FromNative(aftrDocument())); err != nil {
 		t.Fatal(err)
@@ -94,7 +94,7 @@ func TestAFTRSourceObservationRequiresExactUsableOwnedAddress(t *testing.T) {
 }
 
 func TestRuntimeHealthDoesNotEncodeOrCopyProtocolSnapshots(t *testing.T) {
-	r := New(t.TempDir(), t.TempDir(), &memoryNetwork{})
+	r := New(t.TempDir(), t.TempDir(), &memoryNetwork{}, testSupervisorInstance)
 	r.revision, r.phase, r.lastError = 17, "degraded", strings.Repeat("<診断>", 10000)
 	payload := json.RawMessage(`{"private_observation":"` + strings.Repeat("x", 64<<10) + `"}`)
 	for i := range 1000 {

@@ -14,7 +14,7 @@ import (
 )
 
 func TestResourceObservationPagesRejectMixedSnapshots(t *testing.T) {
-	r := New(t.TempDir(), t.TempDir(), &memoryNetwork{})
+	r := New(t.TempDir(), t.TempDir(), &memoryNetwork{}, testSupervisorInstance)
 	r.revision, r.projectionGeneration, r.phase = 7, 12, "ready"
 	r.resourceStates = map[string]resourceprogram.ResourceState{}
 	for i := 2999; i >= 0; i-- {
@@ -64,7 +64,7 @@ func TestResourceObservationPagesRejectMixedSnapshots(t *testing.T) {
 }
 
 func TestStaticResourcesHaveObservationStates(t *testing.T) {
-	r := New(t.TempDir(), t.TempDir(), &memoryNetwork{})
+	r := New(t.TempDir(), t.TempDir(), &memoryNetwork{}, testSupervisorInstance)
 	r.manager = &memoryManager{}
 	source := config.FromNative(config.Native{Network: network.Desired{Interfaces: []network.Interface{{Name: "lan0", Addresses: []string{"192.0.2.1/24"}}}}})
 	if err := r.ApplyConfig(context.Background(), 3, source); err != nil {
