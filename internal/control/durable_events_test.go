@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -123,5 +124,52 @@ func TestFailedCandidateAndPendingJournalNeverPublishCommitEvent(t *testing.T) {
 	c, err := e.store.Load()
 	if err != nil || len(c.EventOutbox) != 0 {
 		t.Fatalf("failed candidate became a committed observation: %+v %v", c.EventOutbox, err)
+	}
+}
+
+func TestFailedProducerAcknowledgementSaveRetainsReplayablePrefix(t *testing.T) {
+	ctx := context.Background()
+	e, n := fixture(t)
+	j := attachJournal(t, e, 0)
+	if _, err := e.Commit(ctx, request(e, "ack-save-fails")); err != nil {
+		t.Fatal(err)
+	}
+	c, err := e.store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(e.store.Dir, "config.json")
+	backup := path + ".saved"
+	if err := os.Rename(path, backup); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(path, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(path); _ = os.Rename(backup, path) })
+	if err := e.FlushEvents(ctx); err == nil {
+		t.Fatal("producer ACK unexpectedly persisted over a directory")
+	}
+	if e.health().Healthy || e.health().EventJournal.Pending != 1 || e.health().EventJournal.LastError == "" {
+		t.Fatal("delivery failure hidden from health")
+	}
+	rows, err := j.List(ctx, 0, 10)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("journal ACK was not committed: %v %v", rows, err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(backup, path); err != nil {
+		t.Fatal(err)
+	}
+	recovered := New(e.store, c, n)
+	recovered.journal = j
+	if err := recovered.FlushEvents(ctx); err != nil {
+		t.Fatal(err)
+	}
+	rows, err = j.List(ctx, 0, 10)
+	if err != nil || len(rows) != 1 || len(recovered.State().EventOutbox) != 0 || recovered.health().EventJournal.LastError != "" {
+		t.Fatalf("ACK retry duplicated/lost history: %v %v", rows, err)
 	}
 }
