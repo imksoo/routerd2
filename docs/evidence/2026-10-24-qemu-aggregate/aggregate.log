@@ -1,0 +1,433 @@
+python3 scripts/qemu-network.py --go 'go' --image-dir <workspace>/dist/image --timeout 90
+Extracting appliance kernel modules for the isolated test image...
+Building the test-only init and network test binary...
+Booting the network test guest (no external network interface)...
+=== RUN   TestIsolatedKernelForwardingNATAndDSLite
+[   33.405493] brtest: entered promiscuous mode
+[   33.495889] brtest: port 1(member0) entered blocking state
+[   33.496436] brtest: port 1(member0) entered disabled state
+[   33.497317] member0: entered allmulticast mode
+[   33.501667] member0: entered promiscuous mode
+[   33.568500] brtest: port 1(member0) entered blocking state
+[   33.569408] brtest: port 1(member0) entered forwarding state
+[   33.609485] brtest: port 2(uplink0) entered blocking state
+[   33.609823] brtest: port 2(uplink0) entered disabled state
+[   33.610405] uplink0: entered allmulticast mode
+[   33.612375] uplink0: entered promiscuous mode
+[   33.638422] brtest: port 2(uplink0) entered blocking state
+[   33.638752] brtest: port 2(uplink0) entered forwarding state
+[   36.955433] brtest: port 2(uplink0) entered disabled state
+[   36.956657] brtest: port 1(member0) entered disabled state
+[   37.129620] member0: left allmulticast mode
+[   37.130158] member0: left promiscuous mode
+[   37.130521] brtest: port 1(member0) entered disabled state
+[   37.167495] uplink0: left allmulticast mode
+[   37.167805] uplink0: left promiscuous mode
+[   37.168394] brtest: port 2(uplink0) entered disabled state
+    kernel_integration_test.go:76: === RUN   TestIsolatedKernelForwardingNATAndDSLite
+            kernel_integration_test.go:216: IPv4/IPv6 source-policy TCP and marked table lookup passed; foreign policy rule preserved
+            kernel_integration_test.go:217: IPv4/IPv6 ECMP TCP over both NICs, IPv6 kernel expiry, weights 256/3, reapply, rollback and foreign route preservation passed
+            kernel_integration_test.go:218: INPUT/OUTPUT IPv4/IPv6 CIDR/interface/TCP/UDP port-range ACLs, drop/reject, ordered FORWARD rules and established-flow preservation passed
+            kernel_integration_test.go:218: IPv4/IPv6 DNAT+SNAT TCP, translated source port ranges, UDP masquerade ranges, NAT-only hooks and existing NAT-session preservation passed
+            kernel_integration_test.go:219: RA/SLAAC writer ownership/restoration, finite IPv6 on-link and gateway routes, renewal, autonomous FIB expiry and foreign finite route preservation passed
+            kernel_integration_test.go:220: native preferred/valid lifetime update, deprecation, expiry and static restoration passed
+            kernel_integration_test.go:250: native DS-Lite B4 /32 peer /32 TCP, reapply and removal passed
+            kernel_integration_test.go:283: VRRP Accept_Mode=false drops IPv4/IPv6 VIP TCP; NS/NA, protocol112 and bridge traffic remain allowed; removal restores VIP TCP
+            kernel_integration_test.go:283: native bridge TCP, VLAN/VRF/VXLAN/macvlan create/update/reapply/remove and foreign-child preservation passed
+        --- PASS: TestIsolatedKernelForwardingNATAndDSLite (25.47s)
+        PASS
+--- PASS: TestIsolatedKernelForwardingNATAndDSLite (25.65s)
+PASS
+ROUTERD_NETWORK_TEST_PASS
+[   37.750891] ACPI: PM: Preparing to enter system sleep state S5
+[   37.752463] reboot: Power down
+
+QEMU native routes/ACL/NAT/DS-Lite/links/HA/RA expiry: PASS (39.46s)
+Extracting appliance kernel modules for the isolated test image...
+Building the test-only init and daemon-resource-program test binary...
+Booting the daemon-resource-program test guest (no external network interface)...
+=== RUN   TestDaemonResourceProgramLifecycleAndRecovery
+    bgp_test.go:192: === RUN   TestDaemonResourceProgramLifecycleAndRecovery
+            resource_program_test.go:148: source graph applied by real workers; dependent route carried a UDP round trip
+            resource_program_test.go:164: source commit updated the interface, address and next hop; traffic uses the new address
+            resource_program_test.go:185: cyclic and missing dependencies left committed revision and kernel state unchanged
+            resource_program_test.go:239: replacement control worker reloaded committed source and repaired deleted kernel objects
+            resource_program_test.go:257: owner subtree removal preserved another owner and foreign address/route using protocol 242
+        --- PASS: TestDaemonResourceProgramLifecycleAndRecovery (6.53s)
+        PASS
+--- PASS: TestDaemonResourceProgramLifecycleAndRecovery (6.77s)
+PASS
+ROUTERD_RESOURCE_PROGRAM_DAEMON_TEST_PASS
+[   22.110480] ACPI: PM: Preparing to enter system sleep state S5
+[   22.112289] reboot: Power down
+
+QEMU ResourceProgram daemon ownership, traffic, validation and recovery: PASS (23.9s)
+Extracting appliance kernel modules for the isolated test image...
+Building the test-only init and daemon-health-pbr test binary...
+Booting the daemon-health-pbr test guest (no external network interface)...
+=== RUN   TestDaemonHealthPBRFailoverAndRecovery
+    health_pbr_test.go:41: === RUN   TestDaemonHealthPBRFailoverAndRecovery
+            health_pbr_test.go:311: two independent health workers: primary -> outage -> backup -> threshold recovery -> consumer hold -> primary; operator revision stays 1
+            health_pbr_test.go:341: recovered actual worker service.health-a
+            health_pbr_test.go:341: recovered actual worker control
+            health_pbr_test.go:341: recovered actual worker network
+            health_pbr_test.go:396: finite observation expired while producer stayed supervisor-ready; duplicate and resequenced replay did not renew it
+            health_pbr_test.go:442: consumer max_age withdrew a still-valid healthy sample; transport replay stayed stale and fresh worker observation restored TCP/UDP
+            health_pbr_test.go:504: complete supervisor restart reused lower worker generations; new process-tree instance fenced delayed former-tree observations and preserved revision 3 and TCP/UDP
+            health_pbr_test.go:516: capture 192.0.2.2 -> 198.51.100.10 protocol=6 port=18080 packets=194
+            health_pbr_test.go:516: capture 198.18.0.2 -> 198.51.100.20 protocol=6 port=18081 packets=36
+            health_pbr_test.go:516: capture 198.18.0.2 -> 198.51.100.20 protocol=17 port=18081 packets=9
+            health_pbr_test.go:517: capture 203.0.113.2 -> 198.51.100.11 protocol=6 port=18080 packets=249
+            health_pbr_test.go:517: capture 198.18.0.2 -> 198.51.100.20 protocol=6 port=18081 packets=20
+            health_pbr_test.go:517: capture 198.18.0.2 -> 198.51.100.20 protocol=17 port=18081 packets=5
+            health_pbr_test.go:518: OUTPUT wan0 probe SYN packets=52 all carry socket mark 42; foreign nft table preserved
+            health_pbr_test.go:518: OUTPUT wan1 probe SYN packets=62 all carry socket mark 42; foreign nft table preserved
+            health_pbr_test.go:522: confirmed rollback restored source and primary TCP/UDP; foreign objects and probe paths survived every transition
+            health_pbr_test.go:523: ROUTERD_HEALTH_PBR_DAEMON_TEST_PASS
+        --- PASS: TestDaemonHealthPBRFailoverAndRecovery (57.46s)
+        PASS
+--- PASS: TestDaemonHealthPBRFailoverAndRecovery (57.76s)
+PASS
+ROUTERD_HEALTH_PBR_DAEMON_TEST_PASS
+[   72.780068] ACPI: PM: Preparing to enter system sleep state S5
+[   72.786043] reboot: Power down
+
+QEMU two-WAN health/PBR TCP/UDP failover, marks, capture and worker recovery: PASS (74.42s)
+Extracting appliance kernel modules for the isolated test image...
+Building the test-only init and daemon-management test binary...
+Booting the daemon-management test guest (no external network interface)...
+=== RUN   TestDaemonConfigurationAndRecovery
+    daemon_test.go:66: === RUN   TestDaemonConfigurationAndRecovery
+        --- PASS: TestDaemonConfigurationAndRecovery (14.42s)
+        PASS
+--- PASS: TestDaemonConfigurationAndRecovery (14.62s)
+PASS
+ROUTERD_MANAGEMENT_DAEMON_TEST_PASS
+[   30.010834] ACPI: PM: Preparing to enter system sleep state S5
+[   30.013423] reboot: Power down
+
+QEMU two-binary daemon SSH configuration and recovery: PASS (31.72s)
+Extracting appliance kernel modules for the isolated test image...
+Building the test-only init and daemon-dhcp-dns test binary...
+Booting the daemon-dhcp-dns test guest (no external network interface)...
+=== RUN   TestDaemonDHCPDNSAndOwnershipExpiry
+    bgp_test.go:192: === RUN   TestDaemonDHCPDNSAndOwnershipExpiry
+        --- PASS: TestDaemonDHCPDNSAndOwnershipExpiry (12.73s)
+        PASS
+--- PASS: TestDaemonDHCPDNSAndOwnershipExpiry (12.91s)
+PASS
+ROUTERD_DHCP_DNS_DAEMON_TEST_PASS
+[   28.810141] ACPI: PM: Preparing to enter system sleep state S5
+[   28.812632] reboot: Power down
+
+QEMU two-binary daemon DHCP-to-DNS and ownership expiry: PASS (30.57s)
+Extracting appliance kernel modules for the isolated test image...
+Building the test-only init and daemon-legacy-dhcp-dns test binary...
+Booting the daemon-legacy-dhcp-dns test guest (no external network interface)...
+=== RUN   TestDaemonMigratedDHCPDNSAndOwnershipExpiry
+    bgp_test.go:192: === RUN   TestDaemonMigratedDHCPDNSAndOwnershipExpiry
+            dhcp_dns_test.go:49: legacy resource YAML and explicit finite-source policy: real DHCP ACK, DNS publication, stopped-producer expiry and journal recovery passed
+        --- PASS: TestDaemonMigratedDHCPDNSAndOwnershipExpiry (13.97s)
+        PASS
+--- PASS: TestDaemonMigratedDHCPDNSAndOwnershipExpiry (14.17s)
+PASS
+ROUTERD_LEGACY_DHCP_DNS_DAEMON_TEST_PASS
+[   29.525195] ACPI: PM: Preparing to enter system sleep state S5
+[   29.526975] reboot: Power down
+
+QEMU legacy DHCP/DNS migration through the real two-binary daemon: PASS (31.33s)
+Extracting appliance kernel modules for the isolated test image...
+Building the test-only init and daemon-bgp test binary...
+Booting the daemon-bgp test guest (no external network interface)...
+=== RUN   TestDaemonBGPFIBAndOwnershipExpiry
+    bgp_test.go:192: === RUN   TestDaemonBGPFIBAndOwnershipExpiry
+        --- PASS: TestDaemonBGPFIBAndOwnershipExpiry (13.10s)
+        PASS
+--- PASS: TestDaemonBGPFIBAndOwnershipExpiry (13.30s)
+PASS
+ROUTERD_BGP_DAEMON_TEST_PASS
+[   28.696300] ACPI: PM: Preparing to enter system sleep state S5
+[   28.698162] reboot: Power down
+
+QEMU two-binary daemon BGP FIB and ownership expiry: PASS (30.32s)
+Extracting appliance kernel modules for the isolated test image...
+Building the test-only init and daemon-bfd test binary...
+Booting the daemon-bfd test guest (no external network interface)...
+=== RUN   TestDaemonBFDControlsBGPSessionAndExpiry
+    bgp_test.go:192: === RUN   TestDaemonBFDControlsBGPSessionAndExpiry
+            bfd_test.go:148: BFD initially Down: no TCP connection or advertisement
+            bfd_test.go:190: BFD Up: BGP established, outbound advertisement observed, learned route installed
+            bfd_test.go:205: UDP BFD stopped while TCP KEEPALIVE continued: connection closed and learned route withdrawn
+            bfd_test.go:207: BFD resumed: new BGP session, advertisement and route restored
+            bfd_test.go:233: SIGSTOP BFD worker: last snapshot remains UP, monotonic receive deadline expires, BGP closes and route disappears
+            bfd_test.go:264: SIGSTOP hold exceeded the latest possible unpublished receive deadline; producer and frozen UP snapshot remained unchanged
+            bfd_test.go:285: SIGCONT recovery: same BFD producer PID 591 generation 1 recorded a loss transition and fresh receive
+            bfd_test.go:296: SIGCONT: fresh BFD health recreates BGP session and restores advertisements and learned route
+        --- PASS: TestDaemonBFDControlsBGPSessionAndExpiry (33.80s)
+        PASS
+--- PASS: TestDaemonBFDControlsBGPSessionAndExpiry (34.06s)
+PASS
+ROUTERD_BFD_DAEMON_TEST_PASS
+[   49.745004] ACPI: PM: Preparing to enter system sleep state S5
+[   49.747266] reboot: Power down
+
+QEMU two-binary daemon BFD-controlled BGP sessions and expiry: PASS (51.6s)
+Extracting appliance kernel modules for the isolated test image...
+Building the test-only init and dhcp test binary...
+Booting the dhcp test guest (no external network interface)...
+=== RUN   TestIsolatedNativeDHCPAndRA
+    kernel_integration_test.go:65: === RUN   TestIsolatedNativeDHCPAndRA
+        === RUN   TestIsolatedNativeDHCPAndRA/DHCPv4
+        === RUN   TestIsolatedNativeDHCPAndRA/DHCPv6PD
+        === RUN   TestIsolatedNativeDHCPAndRA/RouterAdvertisement
+        --- PASS: TestIsolatedNativeDHCPAndRA (17.02s)
+            --- PASS: TestIsolatedNativeDHCPAndRA/DHCPv4 (5.54s)
+            --- PASS: TestIsolatedNativeDHCPAndRA/DHCPv6PD (2.23s)
+            --- PASS: TestIsolatedNativeDHCPAndRA/RouterAdvertisement (9.23s)
+        PASS
+--- PASS: TestIsolatedNativeDHCPAndRA (17.17s)
+PASS
+ROUTERD_DHCP_NATIVE_TEST_PASS
+[   29.349536] ACPI: PM: Preparing to enter system sleep state S5
+[   29.351197] reboot: Power down
+
+QEMU native DHCPv4, DHCPv6-PD and router advertisements: PASS (31.02s)
+Extracting appliance kernel modules for the isolated test image...
+Building the test-only init and dhcp-server test binary...
+Booting the dhcp-server test guest (no external network interface)...
+=== RUN   TestIsolatedNativeDHCPServer
+    kernel_integration_test.go:65: === RUN   TestIsolatedNativeDHCPServer
+            kernel_integration_test.go:90: native UDP67 serving interface is in VRF dhcpblue
+            kernel_integration_test.go:179: native client dora-renew:
+                === RUN   TestDHCPServerClientChild
+                    kernel_integration_test.go:357: native DHCP client reached 2 BOUND acknowledgments at 192.0.2.102
+                --- PASS: TestDHCPServerClientChild (30.53s)
+                PASS
+            kernel_integration_test.go:179: native client reboot:
+                === RUN   TestDHCPServerClientChild
+                    kernel_integration_test.go:357: native DHCP client reached 1 BOUND acknowledgments at 192.0.2.102
+                --- PASS: TestDHCPServerClientChild (0.08s)
+                PASS
+            kernel_integration_test.go:179: native client wire-lifecycle:
+                === RUN   TestDHCPServerClientChild
+                    kernel_integration_test.go:463: native NAK, RELEASE, DECLINE, quarantine and pre-address Ethernet unicast passed
+                --- PASS: TestDHCPServerClientChild (0.32s)
+                PASS
+        --- PASS: TestIsolatedNativeDHCPServer (31.86s)
+        PASS
+--- PASS: TestIsolatedNativeDHCPServer (32.06s)
+PASS
+ROUTERD_DHCP_SERVER_TEST_PASS
+[   44.118279] ACPI: PM: Preparing to enter system sleep state S5
+[   44.120221] reboot: Power down
+
+QEMU native DHCP server leases and recovery: PASS (45.67s)
+Extracting appliance kernel modules for the isolated test image...
+Building the test-only init and vrrp test binary...
+Booting the vrrp test guest (no external network interface)...
+=== RUN   TestIsolatedNativeVRRP
+[   11.976002] vrrp-lan: port 1(up1) entered blocking state
+[   11.976568] vrrp-lan: port 1(up1) entered disabled state
+[   11.977538] up1: entered allmulticast mode
+[   11.982198] up1: entered promiscuous mode
+[   12.009925] vrrp-lan: port 1(up1) entered blocking state
+[   12.010441] vrrp-lan: port 1(up1) entered forwarding state
+[   12.137260] vrrp-lan: port 2(up2) entered blocking state
+[   12.137501] vrrp-lan: port 2(up2) entered disabled state
+[   12.137724] up2: entered allmulticast mode
+[   12.138807] up2: entered promiscuous mode
+[   12.149766] vrrp-lan: port 2(up2) entered blocking state
+[   12.150279] vrrp-lan: port 2(up2) entered forwarding state
+[   13.821394] peer1: entered promiscuous mode
+[   15.537995] peer1: left promiscuous mode
+[   16.674532] peer2: entered promiscuous mode
+[   16.874959] peer2: left promiscuous mode
+[   16.914389] vrrp-lan: port 2(up2) entered disabled state
+[   16.920292] up2 (unregistering): left allmulticast mode
+[   16.920529] up2 (unregistering): left promiscuous mode
+[   16.920696] vrrp-lan: port 2(up2) entered disabled state
+[   16.952583] vrrp-lan: port 1(up1) entered disabled state
+[   16.954879] up1 (unregistering): left allmulticast mode
+[   16.955433] up1 (unregistering): left promiscuous mode
+[   16.955628] vrrp-lan: port 1(up1) entered disabled state
+[   17.050643] vrrp-lan: port 1(up1) entered blocking state
+[   17.050895] vrrp-lan: port 1(up1) entered disabled state
+[   17.051463] up1: entered allmulticast mode
+[   17.052573] up1: entered promiscuous mode
+[   17.063639] vrrp-lan: port 1(up1) entered blocking state
+[   17.064023] vrrp-lan: port 1(up1) entered forwarding state
+[   17.129281] vrrp-lan: port 2(up2) entered blocking state
+[   17.129508] vrrp-lan: port 2(up2) entered disabled state
+[   17.129740] up2: entered allmulticast mode
+[   17.130580] up2: entered promiscuous mode
+[   17.139403] vrrp-lan: port 2(up2) entered blocking state
+[   17.139703] vrrp-lan: port 2(up2) entered forwarding state
+[   18.798563] peer1: entered promiscuous mode
+[   20.502053] peer1: left promiscuous mode
+[   21.647345] peer2: entered promiscuous mode
+[   21.847344] peer2: left promiscuous mode
+[   21.875211] vrrp-lan: port 2(up2) entered disabled state
+[   21.878496] up2 (unregistering): left allmulticast mode
+[   21.878810] up2 (unregistering): left promiscuous mode
+[   21.878961] vrrp-lan: port 2(up2) entered disabled state
+[   21.904262] vrrp-lan: port 1(up1) entered disabled state
+[   21.907048] up1 (unregistering): left allmulticast mode
+[   21.907563] up1 (unregistering): left promiscuous mode
+[   21.907877] vrrp-lan: port 1(up1) entered disabled state
+    kernel_integration_test.go:93: === RUN   TestIsolatedNativeVRRP
+        === RUN   TestIsolatedNativeVRRP/ipv4
+            kernel_integration_test.go:380: ipv4 native raw-socket election, advertisement reception, VIP/VMAC verification and failover passed
+        === RUN   TestIsolatedNativeVRRP/ipv6
+            kernel_integration_test.go:380: ipv6 native raw-socket election, advertisement reception, VIP/VMAC verification and failover passed
+        --- PASS: TestIsolatedNativeVRRP (10.13s)
+            --- PASS: TestIsolatedNativeVRRP/ipv4 (5.17s)
+            --- PASS: TestIsolatedNativeVRRP/ipv6 (4.94s)
+        PASS
+--- PASS: TestIsolatedNativeVRRP (10.29s)
+PASS
+ROUTERD_VRRP_NATIVE_TEST_PASS
+[   21.991020] ACPI: PM: Preparing to enter system sleep state S5
+[   21.992415] reboot: Power down
+
+QEMU native IPv4 and IPv6 VRRP elections and failover: PASS (23.61s)
+Extracting appliance kernel modules for the isolated test image...
+Building the test-only init and ra-client test binary...
+Booting the ra-client test guest (no external network interface)...
+=== RUN   TestIsolatedNativeRAClient
+    kernel_integration_test.go:89: === RUN   TestIsolatedNativeRAClient
+        --- PASS: TestIsolatedNativeRAClient (9.44s)
+        PASS
+--- PASS: TestIsolatedNativeRAClient (9.63s)
+PASS
+ROUTERD_RA_CLIENT_TEST_PASS
+[   21.635866] ACPI: PM: Preparing to enter system sleep state S5
+[   21.637840] reboot: Power down
+
+QEMU native RA client lifetimes, DAD and restart: PASS (23.21s)
+Extracting appliance kernel modules for the isolated test image...
+Building the test-only init and aftr test binary...
+Booting the aftr test guest (no external network interface)...
+=== RUN   TestIsolatedNativeAFTR
+    kernel_integration_test.go:59: === RUN   TestIsolatedNativeAFTR
+        --- PASS: TestIsolatedNativeAFTR (5.64s)
+        PASS
+--- PASS: TestIsolatedNativeAFTR (5.82s)
+PASS
+ROUTERD_AFTR_NATIVE_TEST_PASS
+[   17.582395] ACPI: PM: Preparing to enter system sleep state S5
+[   17.584322] reboot: Power down
+
+QEMU native AFTR DNS transport and expiry: PASS (19.2s)
+Extracting appliance kernel modules for the isolated test image...
+Building the test-only init and bfd test binary...
+Booting the bfd test guest (no external network interface)...
+=== RUN   TestIsolatedNativeBFD
+    kernel_integration_test.go:89: === RUN   TestIsolatedNativeBFD
+        === RUN   TestIsolatedNativeBFD/ipv4
+        === RUN   TestIsolatedNativeBFD/ipv6
+        --- PASS: TestIsolatedNativeBFD (3.28s)
+            --- PASS: TestIsolatedNativeBFD/ipv4 (1.72s)
+            --- PASS: TestIsolatedNativeBFD/ipv6 (1.55s)
+        PASS
+--- PASS: TestIsolatedNativeBFD (3.65s)
+PASS
+ROUTERD_BFD_NATIVE_TEST_PASS
+[   15.388106] ACPI: PM: Preparing to enter system sleep state S5
+[   15.389930] reboot: Power down
+
+QEMU native IPv4 and IPv6 BFD sessions and failure detection: PASS (17.1s)
+python3 scripts/qemu-network.py --suite wireguard --go 'go' --image-dir <workspace>/dist/image --timeout 120
+Extracting appliance kernel modules for the isolated test image...
+Building the test-only init and wireguard test binary...
+Booting the wireguard test guest (no external network interface)...
+=== RUN   TestIsolatedKernelWireGuardOwnershipAndTraffic
+    wireguard_integration_test.go:88: === RUN   TestIsolatedKernelWireGuardOwnershipAndTraffic
+            wireguard_integration_test.go:158: Linux WireGuard IPv4/IPv6 encrypted TCP, public status, handshake and counters passed
+            wireguard_integration_test.go:225: interrupted actual kernel peer subset stayed DOWN; a fresh engine rolled back and restored IPv4/IPv6 traffic
+            wireguard_integration_test.go:250: lost UP acknowledgment and canceled apply both triggered independent native quarantine; rollback restored both families
+            wireguard_integration_test.go:286: authenticated roaming survived 2050-prefix multipart replacement, idempotent apply and engine restart; no implicit FIB routes
+            wireguard_integration_test.go:311: explicit IPv6 UDP endpoints carried both IPv4 and IPv6 encrypted TCP
+            wireguard_integration_test.go:345: PSK mismatch and peer removal prevented traffic; immutable-secret rollback and peer recreation restored both IP families
+            wireguard_integration_test.go:395: foreign peer remained untouched and UP; owned device, addresses and journal entries removed after explicit cleanup
+        --- PASS: TestIsolatedKernelWireGuardOwnershipAndTraffic (10.24s)
+        PASS
+--- PASS: TestIsolatedKernelWireGuardOwnershipAndTraffic (10.39s)
+PASS
+ROUTERD_WIREGUARD_TEST_PASS
+[   22.053734] ACPI: PM: Preparing to enter system sleep state S5
+[   22.055635] reboot: Power down
+
+QEMU native WireGuard encrypted traffic, ownership and recovery: PASS (23.6s)
+python3 scripts/qemu-network.py --suite ra-dns --go 'go' --image-dir <workspace>/dist/image --timeout 75
+Extracting appliance kernel modules for the isolated test image...
+Building the test-only init and ra-dns test binary...
+Booting the ra-dns test guest (no external network interface)...
+=== RUN   TestIsolatedLearnedDNSLifetimes
+    kernel_integration_test.go:66: === RUN   TestIsolatedLearnedDNSLifetimes
+        --- PASS: TestIsolatedLearnedDNSLifetimes (12.91s)
+        PASS
+--- PASS: TestIsolatedLearnedDNSLifetimes (13.12s)
+PASS
+ROUTERD_RA_DNS_TEST_PASS
+[   24.685670] ACPI: PM: Preparing to enter system sleep state S5
+[   24.687565] reboot: Power down
+
+QEMU RA learned DNS lifetimes and live updates: PASS (26.22s)
+python3 scripts/qemu-network.py --suite daemon --go 'go' --image-dir <workspace>/dist/image --timeout 180
+Extracting appliance kernel modules for the isolated test image...
+Building the test-only init and daemon test binary...
+Booting the daemon test guest (no external network interface)...
+=== RUN   TestDaemonRAClientConfigurationAndExpiry
+    bgp_test.go:192: === RUN   TestDaemonRAClientConfigurationAndExpiry
+            ra_client_test.go:192: actual RA worker -> typed coordinator -> finite kernel address/route; autonomous expiry with control/supervisor stopped; configuration removal restored RA sysctls
+        --- PASS: TestDaemonRAClientConfigurationAndExpiry (15.80s)
+        PASS
+--- PASS: TestDaemonRAClientConfigurationAndExpiry (16.09s)
+PASS
+ROUTERD_DAEMON_TEST_PASS
+[   33.297689] ACPI: PM: Preparing to enter system sleep state S5
+[   33.299887] reboot: Power down
+
+QEMU two-binary daemon RA configuration and expiry: PASS (35.15s)
+python3 scripts/qemu-network.py --suite daemon-aftr --go 'go' --image-dir <workspace>/dist/image --timeout 180
+Extracting appliance kernel modules for the isolated test image...
+Building the test-only init and daemon-aftr test binary...
+Booting the daemon-aftr test guest (no external network interface)...
+=== RUN   TestDaemonAFTRResolutionAndExpiry
+    bgp_test.go:192: === RUN   TestDaemonAFTRResolutionAndExpiry
+            aftr_test.go:198: DNS AAAA -> AFTR worker -> coordinator -> native ip6tnl, B4 /32 peer and IPv4 gateway route
+            aftr_test.go:208: new DNS answer updated the native tunnel without replacing its identity
+            aftr_test.go:246: DNS outage preserved the original TTL, then removed the tunnel and IPv4 route while retaining the IPv6 underlay
+            aftr_test.go:273: DNS recovery recreated the projection in the same AFTR process; configuration removal released all DS-Lite resources
+        --- PASS: TestDaemonAFTRResolutionAndExpiry (21.62s)
+        PASS
+--- PASS: TestDaemonAFTRResolutionAndExpiry (21.86s)
+PASS
+ROUTERD_AFTR_DAEMON_TEST_PASS
+[   38.401878] ACPI: PM: Preparing to enter system sleep state S5
+[   38.403474] reboot: Power down
+
+QEMU two-binary daemon AFTR resolution and expiry: PASS (40.65s)
+python3 internal/releaseboot/testdata/qemu-release-boot.py --go 'go' --image-dir <workspace>/dist/image --output dist/release-boot-test --timeout 240
+Copying appliance modules into an isolated release-boot image...
+Building the guest-only initializer and independent health probe...
+Building the actual routerd command pair for release-gate-baseline...
+Building the actual routerd command pair for release-gate-trial...
+Booting real PID-1 trial in QEMU (no NIC, no host ports or shared disk)...
+ROUTERD_RELEASE_BOOT_SETUP baseline=release-gate-baseline trial=release-gate-trial generation=2
+ROUTERD_RELEASE_BOOT_WITNESS pid=1 release=release-gate-trial generation=4 operation=confirm revision=1 modules=control,logging,management,network pinned_exec=verified
+ROUTERD_RELEASE_BOOT_PASS
+QEMU signed pair PID-1 exec and automatic health confirmation: PASS (102.99s)
+python3 scripts/qemu-storage.py --go 'go' --image-dir <workspace>/dist/image --output dist/storage-test --timeout 240
+Copying appliance modules for the two-boot storage guest...
+Building the guest initializer and fresh signed command pairs...
+Formatting only the newly created private regular-file disk...
+Booting storage phase first (no NIC, one private regular-file disk)...
+ROUTERD_STORAGE_TEST_SETUP phase=first seed_unmounted=true uuid=<ephemeral-uuid>
+ROUTERD_STORAGE_TEST_WITNESS {"phase":"first","boot_id":"<ephemeral-uuid>","pid":1,"release_id":"storage-gate-trial","release_operation":"begin-boot","release_generation":3,"pending":true,"revision":2,"config_sha256":"e86415dc46dc5d82f880d6ef0d8084338aa2b1e7b730437167e5ba0d5fb925da","host_key_sha256":"<private-identity-omitted>","host_key_fingerprint":"<private-identity-omitted>","sentinel_sha256":"41ef325d2617ae3306f3fbab9e9c231c60e9a5f541d6a0312506a1752b36f6ac","modules":["control","logging","management","network"],"pinned_exec_verified":true,"filesystem":"ext4"}
+ROUTERD_STORAGE_TEST_FIRST_PASS
+Booting storage phase second (no NIC, one private regular-file disk)...
+ROUTERD_STORAGE_TEST_SETUP phase=second seed_unmounted=true uuid=<ephemeral-uuid>
+ROUTERD_STORAGE_TEST_WITNESS {"phase":"second","boot_id":"<ephemeral-uuid>","pid":1,"release_id":"storage-gate-baseline","release_operation":"boot-rollback","release_generation":4,"pending":false,"failed_boot_id":"<ephemeral-uuid>","revision":2,"config_sha256":"e86415dc46dc5d82f880d6ef0d8084338aa2b1e7b730437167e5ba0d5fb925da","host_key_sha256":"<private-identity-omitted>","host_key_fingerprint":"<private-identity-omitted>","sentinel_sha256":"41ef325d2617ae3306f3fbab9e9c231c60e9a5f541d6a0312506a1752b36f6ac","modules":["control","logging","management","network"],"pinned_exec_verified":true,"filesystem":"ext4"}
+ROUTERD_STORAGE_TEST_SECOND_PASS
+QEMU persistent config/SSH state and two-boot signed fallback: PASS (147.70s)

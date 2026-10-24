@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "purpose": "isolated-bfd-integration",
+  "suite": "bfd",
+  "required_test": "TestIsolatedNativeBFD",
+  "kernel_release": "6.18.58-0-virt",
+  "kernel_sha256": "17fbd3efd16f2e7cb1b945f06423b37399ba7d5ac8cdd3665e7f13f363500e85",
+  "initializer_sha256": "353ff3f22263886ef20bb38ebaaaf8b697d2b69e5fcdf1255a619c72149ad1fb",
+  "test_binary_sha256": "a4c5b68250a9519991395bdc348737b386cc9e7a1e26f8eb4c8d2b0eccfa0594",
+  "binary_sha256": {},
+  "source_image_manifest_sha256": "a1df58dc193d6f6f5a361b9b630e9fb106b76a3e3089239da2185f812d265b43",
+  "source_initramfs_sha256": "c6b0ac5a7e6dc64a186ab595586f27bed87440083dc7a13cf0db9df8a3d2c729",
+  "host_network_access": false,
+  "result": "passed",
+  "initramfs_sha256": "4866c23c4973792019d60a3e40e40efa1c5fcba1d0c68fb00fea0c18106e50d6",
+  "duration_seconds": 17.1,
+  "qemu_exit_status_before_cleanup": 0
+}

@@ -15,6 +15,10 @@ clean checkpointの全体check/static build、QEMU BFD単独はPASS。
 全20系統は `/home/imksoo/routerd2-acceptance-clock` の固定commit `c2f3612` で実行中。
 `dist/all-qemu-clock.log` と各suiteのmanifestを確認する。未完走のaggregateを全体PASSにしない。
 
+`c2f3612` の全20 QEMU系統は一度のMake実行でexit 0、全manifest PASSとなった。
+[一括試験の証跡](evidence/2026-10-24-qemu-aggregate.md) を参照。
+後続の設定producer outbox接続は別checkpointとして検証中。全計画の完了ではない。
+
 以下は先行checkpointの履歴。
 fact leafの `max_age` と元の観測時刻の保持、条件式の `for` を実装した。
 producer期限と独立した失効、通知間のflap、timer解除、authority変更を検証し、

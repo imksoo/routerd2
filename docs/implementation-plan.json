@@ -11234,6 +11234,31 @@
         "Full work-package contracts and physical/NIC/performance qualification"
       ],
       "parity_flags_unchanged": true
+    },
+    {
+      "id": "same-commit-full-qemu-aggregate",
+      "date": "2026-10-24",
+      "status": "existing_20_gates_passed",
+      "code_checkpoint": "c2f3612fa96bd66e89f4d190d06d90e6b37fbc6d",
+      "work_packages": [
+        "CORE-03",
+        "CORE-04",
+        "NET-01",
+        "NET-02",
+        "NET-07",
+        "DIST-01",
+        "DIST-02"
+      ],
+      "evidence": "docs/evidence/2026-10-24-qemu-aggregate.md",
+      "validation": [
+        "One clean fixed-worktree Make invocation: exit 0; all 20 individual manifests passed",
+        "Includes real two-WAN TCP/UDP Health-PBR, BFD-BGP same-worker recovery, signed PID-1 automatic confirmation and two-boot ext4 persistence/fallback"
+      ],
+      "remaining": [
+        "Later configuration producer-outbox integration is a separate checkpoint",
+        "Existing gate coverage does not close unimplemented contracts, hardware/NIC/performance or all platform qualification"
+      ],
+      "parity_flags_unchanged": true
     }
   ],
   "delivery_goal": {

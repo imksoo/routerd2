@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "purpose": "persistent-state-and-signed-userland-two-boot-fallback",
+  "go": "go version go1.27.3 linux/amd64",
+  "target": "linux/amd64",
+  "kernel_release": "6.18.58-0-virt",
+  "kernel_sha256": "17fbd3efd16f2e7cb1b945f06423b37399ba7d5ac8cdd3665e7f13f363500e85",
+  "initramfs_sha256": "b0ad10121c53083864d86a1fbe440c554c936fe4622c1028cb7d5ba8c060d5f3",
+  "source_image_manifest_sha256": "a1df58dc193d6f6f5a361b9b630e9fb106b76a3e3089239da2185f812d265b43",
+  "source_initramfs_sha256": "c6b0ac5a7e6dc64a186ab595586f27bed87440083dc7a13cf0db9df8a3d2c729",
+  "initializer_sha256": "b38aa51f46067a195aa38d26da019c62c7655b38d3f6e2880dc0e85551a7e26f",
+  "binary_sha256": {
+    "/test/bin/baseline/routerd": "772a7b31a2d95888a3075b4e0518cbdac9e3ba1385e2a1ed1c6c5a05d94e6a7f",
+    "/test/bin/baseline/routerd-modules": "4981fabbf31fd595d5a60d10c83451bfdfbbe7397788a3d73c6893189434db1e",
+    "/test/bin/trial/routerd": "63ce975f5a29f18ebb3e6d5eb9bbe87ba1a847b2653084e7698d003e3f65f085",
+    "/test/bin/trial/routerd-modules": "5e8da858361741bd983725f74e3e7779052632090f9c48a96a3aa56e32b10320"
+  },
+  "release_ids": {
+    "baseline": "storage-gate-baseline",
+    "trial": "storage-gate-trial"
+  },
+  "state_persistence": "ext4-virtio-block-regular-file",
+  "disk_bytes": 268435456,
+  "host_block_devices_used": false,
+  "host_filesystem_mounts_used": false,
+  "guest_external_network_interfaces": false,
+  "kernel_rootfs_updates": false,
+  "two_boot_disk_fallback_tested": true,
+  "phases": [
+    {
+      "phase": "first",
+      "result": "passed",
+      "witness": {
+        "phase": "first",
+        "boot_id": "boot-1",
+        "pid": 1,
+        "release_id": "storage-gate-trial",
+        "release_operation": "begin-boot",
+        "release_generation": 3,
+        "pending": true,
+        "revision": 2,
+        "config_sha256": "e86415dc46dc5d82f880d6ef0d8084338aa2b1e7b730437167e5ba0d5fb925da",
+        "sentinel_sha256": "41ef325d2617ae3306f3fbab9e9c231c60e9a5f541d6a0312506a1752b36f6ac",
+        "modules": [
+          "control",
+          "logging",
+          "management",
+          "network"
+        ],
+        "pinned_exec_verified": true,
+        "filesystem": "ext4"
+      },
+      "duration_seconds": 88.26,
+      "qemu_exit_status_before_cleanup": 0
+    },
+    {
+      "phase": "second",
+      "result": "passed",
+      "witness": {
+        "phase": "second",
+        "boot_id": "boot-2",
+        "pid": 1,
+        "release_id": "storage-gate-baseline",
+        "release_operation": "boot-rollback",
+        "release_generation": 4,
+        "pending": false,
+        "failed_boot_id": "boot-1",
+        "revision": 2,
+        "config_sha256": "e86415dc46dc5d82f880d6ef0d8084338aa2b1e7b730437167e5ba0d5fb925da",
+        "sentinel_sha256": "41ef325d2617ae3306f3fbab9e9c231c60e9a5f541d6a0312506a1752b36f6ac",
+        "modules": [
+          "control",
+          "logging",
+          "management",
+          "network"
+        ],
+        "pinned_exec_verified": true,
+        "filesystem": "ext4"
+      },
+      "duration_seconds": 59.44,
+      "qemu_exit_status_before_cleanup": 0
+    }
+  ],
+  "result": "passed",
+  "mke2fs_version": "mke2fs 1.47.0 (5-Feb-2023)\n\tUsing EXT2FS Library version 1.47.0",
+  "identity_comparisons": {
+    "same_ssh_identity": true,
+    "same_configuration": true,
+    "same_sentinel": true,
+    "different_boot_ids": true,
+    "failed_boot_identifies_first_boot": true
+  }
+}

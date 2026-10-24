@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "purpose": "isolated-daemon-integration",
+  "suite": "daemon",
+  "required_test": "TestDaemonRAClientConfigurationAndExpiry",
+  "kernel_release": "6.18.58-0-virt",
+  "kernel_sha256": "17fbd3efd16f2e7cb1b945f06423b37399ba7d5ac8cdd3665e7f13f363500e85",
+  "initializer_sha256": "353ff3f22263886ef20bb38ebaaaf8b697d2b69e5fcdf1255a619c72149ad1fb",
+  "test_binary_sha256": "94fbbd6b733105951c7e89c9c415b7242a5160711e9c39fdabe8c75bb8d2c1e6",
+  "binary_sha256": {
+    "/test/bin/routerd": "daddba3698ef755efa0e3f2f95647d0a8aee2c0dfa1c14aa5149e8df3a75e116",
+    "/test/bin/routerd-modules": "aba14089cd3de83e0d471c994a27ba0e122533e0d68c9ce296da6121a7bb8c26"
+  },
+  "source_image_manifest_sha256": "a1df58dc193d6f6f5a361b9b630e9fb106b76a3e3089239da2185f812d265b43",
+  "source_initramfs_sha256": "c6b0ac5a7e6dc64a186ab595586f27bed87440083dc7a13cf0db9df8a3d2c729",
+  "host_network_access": false,
+  "result": "passed",
+  "initramfs_sha256": "ddadfe7102aa12b93b24cac406c5fd92eff8945d052c078417dbd3dee25ebe65",
+  "duration_seconds": 35.15,
+  "qemu_exit_status_before_cleanup": 0
+}

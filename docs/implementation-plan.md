@@ -68,6 +68,11 @@ control freshnessは500msを保持する。全体check/static buildとQEMU BFD�
 [保存部・BFDの証跡](evidence/2026-10-24-events-clock.md) を参照。
 全20 QEMU系統の固定commit aggregateは実行中。全作業単位の判定は据え置く。
 
+同じclean `c2f3612` のMake一括実行がexit 0で完走し、**全20 QEMU系統がPASS**した。
+二WAN Health/PBR、BFD/BGP、署名PID 1自動確認、ext4二回起動・設定/SSH保持・fallbackを含む。
+[一括試験の証跡](evidence/2026-10-24-qemu-aggregate.md) に全manifestと範囲を保存した。
+これは既存gateの合格であり、全作業単位や後続の設定outbox接続の合格を意味しない。
+
 **routerd と routerd2 は別製品である。** routerd は稼働中の機能参照元、routerd2 は未リリースの開発対象。
 現在の routerd2 の二バイナリー構成・設定書式・内部API・保存形式には利用者がいないため、後方互換性を要求しない。
 routerd2 の設定書式も新設計に合わせて変更できる。引き継ぐ routerd の機能範囲は維持する。

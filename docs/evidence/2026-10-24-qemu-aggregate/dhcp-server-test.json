@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "purpose": "isolated-dhcp-server-integration",
+  "suite": "dhcp-server",
+  "required_test": "TestIsolatedNativeDHCPServer",
+  "kernel_release": "6.18.58-0-virt",
+  "kernel_sha256": "17fbd3efd16f2e7cb1b945f06423b37399ba7d5ac8cdd3665e7f13f363500e85",
+  "initializer_sha256": "353ff3f22263886ef20bb38ebaaaf8b697d2b69e5fcdf1255a619c72149ad1fb",
+  "test_binary_sha256": "96a5cb3198d05bb46c44dba0f4492d6f669f114312f68023c04788ec75cec746",
+  "binary_sha256": {},
+  "source_image_manifest_sha256": "a1df58dc193d6f6f5a361b9b630e9fb106b76a3e3089239da2185f812d265b43",
+  "source_initramfs_sha256": "c6b0ac5a7e6dc64a186ab595586f27bed87440083dc7a13cf0db9df8a3d2c729",
+  "host_network_access": false,
+  "result": "passed",
+  "initramfs_sha256": "2a363837c82bc2a72124c0cf8578c28d5a0c33384ca049993cc798c3848ca9a7",
+  "duration_seconds": 45.67,
+  "qemu_exit_status_before_cleanup": 0
+}
