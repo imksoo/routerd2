@@ -57,6 +57,7 @@ func TestDaemonRetiredHealthHistoryWithoutReactivation(t *testing.T) {
 	var pending struct {
 		Pending []events.Event `json:"pending"`
 	}
+	expected := map[string]bool{}
 	until(t, 5*time.Second, func() bool {
 		uri := url.URL{Scheme: "file", Path: filepath.Join(root, "state", "services", "wan", "health-events", "journal.sqlite3"), RawQuery: "mode=ro"}
 		db, err := sql.Open("sqlite", uri.String())
@@ -65,12 +66,21 @@ func TestDaemonRetiredHealthHistoryWithoutReactivation(t *testing.T) {
 		}
 		defer db.Close()
 		var body []byte
-		return db.QueryRow(`SELECT body FROM producers WHERE name='health-probe-relay'`).Scan(&body) == nil && json.Unmarshal(body, &pending) == nil && len(pending.Pending) > 0
+		if db.QueryRow(`SELECT body FROM producers WHERE name='health-probe-relay'`).Scan(&body) != nil || json.Unmarshal(body, &pending) != nil {
+			return false
+		}
+		expected = map[string]bool{}
+		for _, event := range pending.Pending {
+			var saved int
+			if injector.QueryRow(`SELECT count(*) FROM events WHERE event_id=?`, event.ID).Scan(&saved) != nil {
+				return false
+			}
+			if saved == 0 {
+				expected[event.ID] = true
+			}
+		}
+		return len(expected) > 0 // already-saved/unACKed prefixes cannot satisfy this proof
 	})
-	expected := map[string]bool{}
-	for _, e := range pending.Pending {
-		expected[e.ID] = true
-	}
 	var state control.State
 	if err = f.control.Do(ctx, "GET", "/v1/config", nil, &state); err != nil {
 		t.Fatal(err)
