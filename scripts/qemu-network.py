@@ -69,6 +69,13 @@ SUITES = {
         "commands": True,
         "description": "durable EventRule count/timer, worker recovery and source lifecycle",
     },
+    "daemon-derived": {
+        "package": "./internal/integration", "binary": "daemon.test",
+        "test": "TestDaemonDerivedHealthCurrentStatusAndDurability",
+        "marker": "ROUTERD_DERIVED_DAEMON_TEST", "timeout": 200,
+        "commands": True,
+        "description": "finite health status to durable DerivedEvent/EventRule and recovery",
+    },
     "daemon-resource-program": {
         "package": "./internal/integration", "binary": "daemon.test",
         "test": "TestDaemonResourceProgramLifecycleAndRecovery",
