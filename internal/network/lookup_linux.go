@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
 )
 
 // RouteLookupRequest scopes a read-only FIB lookup to the exact probe path.
@@ -46,7 +47,9 @@ func LookupRoute(r RouteLookupRequest) (RouteLookupResult, error) {
 	if err != nil {
 		return RouteLookupResult{}, err
 	}
-	handle, err := netlink.NewHandle()
+	// Only routing is needed. Opening every supported Netlink family also
+	// requests XFRM, which may be absent in minimal appliance kernels.
+	handle, err := netlink.NewHandle(unix.NETLINK_ROUTE)
 	if err != nil {
 		return RouteLookupResult{}, err
 	}
