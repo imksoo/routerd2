@@ -149,3 +149,33 @@ observations cannot withdraw it through a transport-size failure.
 All these API changes are pure observation or response shaping. They do not
 raise the global message limit, modify foreign state, change WireGuard key
 ownership, or introduce shell commands.
+
+## Durable configuration observations
+
+Successful commit, confirmation and confirmed rollback save a stable random
+event ID, operation, revision and observation time in `config.json` together
+with the authoritative configuration. The pending candidate is never a source
+of observations. Rejected candidates and periodic reconciliation remain
+transient hints on the existing `/v1/events` endpoint.
+
+The control worker delivers this producer outbox to the private `events`
+SQLite WAL/FULL journal. It performs journal I/O outside the configuration lock,
+then atomically removes only the acknowledged prefix from the current record.
+A crash or failed acknowledgement save retries identical event IDs. Concurrent
+commits carry the pending prefix forward. No configuration body, caller request
+text or credential is included in an observation.
+
+At most 64 observations may remain pending. A confirmed trial reserves its
+confirmation/rollback slot before any effects. Capacity exhaustion rejects new
+commits with 503 before staging or kernel changes. `health.event_journal`
+reports pending count and delivery error; delivery errors make public health
+unhealthy without discarding authoritative configuration or pending history.
+
+`GET /v1/observations?after_cursor=N&limit=L` reads persistent, append-only
+history independently of the control worker epoch. `after_cursor` is required;
+limit defaults to 16 and must be 1..16. Duplicate/unknown fields return 400,
+a cursor beyond the tip returns 409, and storage errors return 503. The page
+contains records, next_cursor and more. Each event is at most 64 KiB, keeping
+responses below the API byte limit. This is read-only history, not an effect
+execution or consumer registration API. Journal retention/capacity handling,
+protocol producers, EventRule and federation remain open work.

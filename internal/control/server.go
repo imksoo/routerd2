@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/imksoo/routerd2/internal/buildinfo"
 	"github.com/imksoo/routerd2/internal/config"
+	"github.com/imksoo/routerd2/internal/events"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
@@ -87,6 +89,7 @@ func (e *Engine) Handler() http.Handler {
 	}
 	mux.HandleFunc("GET /v1/version", func(w http.ResponseWriter, r *http.Request) { localapi.JSON(w, 200, buildinfo.Current()) })
 	e.configurationViewRoutes(mux)
+	e.observationRoutes(mux)
 	mux.HandleFunc("GET /v1/config", func(w http.ResponseWriter, r *http.Request) { e.writeConfigurationState(w, e.State(), false) })
 	mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, r *http.Request) {
 		s := e.health()
@@ -118,6 +121,8 @@ func (e *Engine) Handler() http.Handler {
 				code = 409
 			} else if errors.Is(err, ErrInvalid) {
 				code = 400
+			} else if errors.Is(err, events.ErrCapacity) {
+				code = 503
 			}
 			localapi.Fail(w, code, err)
 			return
@@ -165,6 +170,11 @@ func Serve(ctx context.Context, dir, stateDir, bootstrap string, ready func()) e
 	}
 	networkClient := NewNetworkClient(dir)
 	e := New(store, current, networkClient)
+	e.journal, err = events.Open(events.Options{Directory: filepath.Join(stateDir, "events")})
+	if err != nil {
+		return fmt.Errorf("open durable event journal: %w", err)
+	}
+	defer e.journal.Close()
 	e.runtime = runtimeplan.New(dir, stateDir, networkClient, instanceID)
 	// Protocol readiness may require an effects acknowledgement. Start the
 	// private API before reconciliation, while public health remains false.
@@ -202,6 +212,26 @@ func Serve(ctx context.Context, dir, stateDir, bootstrap string, ready func()) e
 	}
 	monitorCtx, stop := context.WithCancel(ctx)
 	defer stop()
+	eventDone := make(chan struct{})
+	go func() {
+		defer close(eventDone)
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for {
+			flushCtx, cancel := context.WithTimeout(monitorCtx, 2*time.Second)
+			err := e.FlushEvents(flushCtx)
+			cancel()
+			if err != nil && monitorCtx.Err() == nil {
+				slog.Error("durable configuration event delivery failed", "error", err)
+			}
+			select {
+			case <-monitorCtx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+	defer func() { stop(); <-eventDone }()
 	go func() {
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()

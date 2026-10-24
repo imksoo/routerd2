@@ -34,6 +34,12 @@ type Health struct {
 	Sequence           uint64                    `json:"sequence"`
 	Confirmation       *ConfirmationMetadata     `json:"confirmation,omitempty"`
 	Services           *runtimeplan.HealthStatus `json:"services,omitempty"`
+	EventJournal       JournalHealth             `json:"event_journal"`
+}
+
+type JournalHealth struct {
+	Pending   int    `json:"pending"`
+	LastError string `json:"last_error,omitempty"`
 }
 
 // ConfigurationMetadata is also the bounded success response for a commit or
@@ -63,6 +69,10 @@ func stateText(value string, maximum int) string {
 
 func (e *Engine) healthForState(s State) Health {
 	h := Health{Revision: s.Revision, Healthy: s.Healthy, LastError: stateText(s.LastError, 4096), LastErrorTruncated: len(s.LastError) > 4096, ProducerEpoch: s.ProducerEpoch, Sequence: s.Sequence}
+	h.EventJournal = JournalHealth{Pending: len(s.EventOutbox), LastError: s.EventJournalError}
+	if s.EventJournalError != "" {
+		h.Healthy = false
+	}
 	if c := s.Confirmation; c != nil {
 		h.Confirmation = &ConfirmationMetadata{PreviousRevision: c.PreviousRevision, Deadline: c.Deadline, RequestID: c.RequestID}
 	}
@@ -141,6 +151,9 @@ func (e *Engine) configurationViewRoutes(mux *http.ServeMux) {
 }
 
 func (e *Engine) writeConfigurationState(w http.ResponseWriter, s State, mutation bool) {
+	if s.EventJournalError != "" {
+		s.Healthy = false
+	}
 	encoded, err := json.Marshal(s)
 	if err != nil {
 		localapi.Fail(w, http.StatusInternalServerError, err)

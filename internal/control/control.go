@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/imksoo/routerd2/internal/config"
+	"github.com/imksoo/routerd2/internal/events"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
@@ -68,6 +69,7 @@ type State struct {
 	ServicesOmitted             bool   `json:"services_omitted,omitempty"`
 	ConfigDigest                string `json:"config_digest,omitempty"`
 	ConfigBytes                 int    `json:"config_bytes,omitempty"`
+	EventJournalError           string `json:"event_journal_error,omitempty"`
 }
 
 type Event struct {
@@ -110,12 +112,14 @@ func (n *NetworkClient) Snapshot(ctx context.Context) (s network.Snapshot, err e
 }
 
 type Engine struct {
-	mu      sync.Mutex
-	store   *config.Store
-	network Network
-	state   State
-	events  []Event
-	runtime *runtimeplan.Runtime
+	mu           sync.Mutex
+	store        *config.Store
+	network      Network
+	state        State
+	events       []Event
+	runtime      *runtimeplan.Runtime
+	journal      *events.Store
+	eventFlushMu sync.Mutex
 }
 
 func New(store *config.Store, current config.Committed, n Network) *Engine {
@@ -130,6 +134,9 @@ func (e *Engine) State() State {
 	e.mu.Lock()
 	s := e.state
 	e.mu.Unlock()
+	if s.EventJournalError != "" {
+		s.Healthy = false
+	}
 	if e.runtime != nil {
 		v := e.runtime.State()
 		s.Services = &v
@@ -214,6 +221,14 @@ func (e *Engine) Commit(ctx context.Context, r CommitRequest) (State, error) {
 	if r.ConfirmTimeoutSeconds > 0 {
 		next.Confirmation = &config.Confirmation{Previous: previous.Config, PreviousRevision: previous.Revision, Deadline: time.Now().Add(time.Duration(r.ConfirmTimeoutSeconds) * time.Second).UTC(), RequestID: r.RequestID}
 	}
+	reserve := 1
+	if next.Confirmation != nil {
+		reserve = 2
+	}
+	next, err := e.withChange(next, "committed", reserve)
+	if err != nil {
+		return e.state, err
+	}
 	if err := e.store.Stage(next); err != nil {
 		return e.state, fmt.Errorf("stage configuration: %w", err)
 	}
@@ -267,6 +282,10 @@ func (e *Engine) Confirm(r ConfirmRequest) (State, error) {
 	}
 	next := e.state.Committed
 	next.Confirmation = nil
+	next, err := e.withChange(next, "confirmed", 1)
+	if err != nil {
+		return e.state, err
+	}
 	if err := e.store.Save(next); err != nil {
 		e.state.Healthy = false
 		e.state.LastError = err.Error()
@@ -299,6 +318,10 @@ func (e *Engine) rollbackConfirmation(ctx context.Context, reason string) error 
 	// Rollback is itself a new public revision, so a candidate opened during
 	// the trial cannot overwrite the recovered configuration using a stale token.
 	next := config.Committed{Revision: e.state.Revision + 1, Config: p.Previous}
+	next, err := e.withChange(next, "rolled_back_"+reason, 1)
+	if err != nil {
+		return err
+	}
 	if err := e.apply(ctx, next.Revision, next.Config); err != nil {
 		e.state.Healthy = false
 		e.state.LastError = "confirmation rollback: " + err.Error()

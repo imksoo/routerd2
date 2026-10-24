@@ -44,7 +44,20 @@ type Committed struct {
 	LastRequestID   string        `json:"last_request_id,omitempty"`
 	LastRequestHash string        `json:"last_request_hash,omitempty"`
 	Confirmation    *Confirmation `json:"confirmation,omitempty"`
+	EventOutbox     []ChangeEvent `json:"event_outbox,omitempty"`
 }
+
+// ChangeEvent is persisted atomically with the authoritative configuration.
+// It contains no configuration bodies, credentials or caller-controlled text.
+// Delivery to the observation journal may retry after a process crash.
+type ChangeEvent struct {
+	ID         string    `json:"id"`
+	Type       string    `json:"type"`
+	Revision   uint64    `json:"revision"`
+	ObservedAt time.Time `json:"observed_at"`
+}
+
+const MaxEventOutbox = 64
 
 // Confirmation is persisted with the candidate revision before it is acknowledged.
 // A control-worker restart rolls an unconfirmed revision back immediately.
@@ -259,6 +272,9 @@ func validateRecord(c Committed) error {
 	}
 	if len(c.LastRequestID) > 128 || len(c.LastRequestHash) > 128 {
 		return errors.New("committed request metadata exceeds its bound")
+	}
+	if err := validateEventOutbox(c); err != nil {
+		return err
 	}
 	if c.Confirmation != nil {
 		if c.Confirmation.PreviousRevision == 0 || c.Confirmation.PreviousRevision >= c.Revision || c.Confirmation.RequestID == "" || c.Confirmation.RequestID != c.LastRequestID || c.Confirmation.Deadline.IsZero() {

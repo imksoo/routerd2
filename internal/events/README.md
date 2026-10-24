@@ -1,7 +1,9 @@
 # Durable observations, cursors and consumer work
 
-This package is a storage component. It is not connected to the daemon,
-EventRule/DerivedEvent resources, federation, or a privileged effect executor yet.
+The control worker uses this storage component for durable configuration
+commit/confirm/rollback observations through its authoritative producer outbox.
+It is not connected to EventRule/DerivedEvent resources, federation, or a
+privileged effect executor yet.
 It does not publish protocol health or restore permission to change the kernel.
 
 `Open` owns a private Linux directory through one exclusive process lock and a
@@ -38,6 +40,6 @@ before this component can serve a long-running production event workload.
 
 Tests use actual SQLite transactions, write-failure triggers, SQLITE_FULL,
 concurrent publishers, private path attacks, foreign database preservation,
-connection replacement, and SIGKILL followed by WAL recovery. Daemon wiring,
-producer state/outbox atomicity, worker recovery and QEMU power-loss acceptance
-remain separate implementation-plan work.
+connection replacement, and SIGKILL followed by WAL recovery. Configuration
+producer state/outbox atomicity and worker recovery have separate control tests.
+Protocol event producers and QEMU power-loss acceptance remain implementation-plan work.
