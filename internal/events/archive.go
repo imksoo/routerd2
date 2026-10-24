@@ -81,11 +81,6 @@ func (s *Store) ArchiveEvents(ctx context.Context, limit int) (int, error) {
 	if err = errors.Join(err, rows.Err(), rows.Close()); err != nil {
 		return 0, err
 	}
-	var buffer bytes.Buffer
-	writer, err := gzip.NewWriterLevel(&buffer, gzip.BestSpeed)
-	if err != nil {
-		return 0, err
-	}
 	for i := range batch {
 		c := &batch[i]
 		if err = ctx.Err(); err != nil {
@@ -98,21 +93,11 @@ func (s *Store) ArchiveEvents(ctx context.Context, limit int) (int, error) {
 		if record.Event.ID != c.id {
 			return 0, errors.New("event archive source identity mismatch")
 		}
-		buffer.Reset()
-		writer.Reset(&buffer)
-		_, err = writer.Write(c.body)
-		err = errors.Join(err, writer.Close())
+		c.packed, err = s.archiveCodec.encode(c.body)
 		if err != nil {
 			return 0, err
 		}
-		packed := buffer.Bytes()
-		sum := sha256.Sum256(c.body)
-		verified, err := archivedBody(packed, int64(len(c.body)), sum[:])
-		if err != nil || !bytes.Equal(verified, c.body) {
-			return 0, errors.Join(errors.New("event archive round trip failed"), err)
-		}
-		c.packed = bytes.Clone(packed)
-		c.digest = sum
+		c.digest = sha256.Sum256(c.body)
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

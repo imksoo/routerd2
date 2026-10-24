@@ -24,6 +24,7 @@ type Store struct {
 	dir, lock    *os.File
 	options      Options
 	archiveCache archivedReadCache
+	archiveCodec archiveCodec
 }
 
 const applicationID = 0x52443245 // RD2E; separate from every other product store
@@ -291,6 +292,7 @@ func (s *Store) Close() error {
 	}
 	s.closed = true
 	s.archiveCache.clear()
+	s.archiveCodec.clear()
 	var result error
 	if s.db != nil {
 		result = errors.Join(result, s.db.Close())
