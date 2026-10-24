@@ -4,7 +4,10 @@ package integration
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"syscall"
 	"testing"
 	"time"
@@ -28,8 +31,23 @@ func TestDaemonEventRuleDurabilityAndLifecycle(t *testing.T) {
 	read := func() control.Health {
 		t.Helper()
 		var h control.Health
-		if err := f.control.Do(ctx, "GET", "/v1/health", nil, &h); err != nil {
+		request, err := http.NewRequestWithContext(ctx, "GET", "http://routerd/v1/health", nil)
+		if err != nil {
 			t.Fatal(err)
+		}
+		response, err := f.control.HTTP.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		if response.StatusCode != 200 && response.StatusCode != 503 {
+			t.Fatal("unexpected health status", response.StatusCode)
+		}
+		if err = json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&h); err != nil {
+			t.Fatal(err)
+		}
+		if !h.Healthy {
+			t.Logf("health during convergence: services=%+v event_rules=%s journal=%s", h.Services, h.EventRules.LastError, h.EventJournal.LastError)
 		}
 		return h
 	}
@@ -61,10 +79,11 @@ func TestDaemonEventRuleDurabilityAndLifecycle(t *testing.T) {
 	}
 	commit := func(id string, d config.Document, confirmed bool) {
 		t.Helper()
-		h := read()
+		var h control.Health
+		until(t, 10*time.Second, func() bool { h = read(); return h.Healthy })
 		request := control.CommitRequest{ExpectedRevision: h.Revision, RequestID: id, Config: d}
 		if confirmed {
-			request.ConfirmTimeoutSeconds = 5
+			request.ConfirmTimeoutSeconds = 30
 		}
 		if err := f.control.Do(ctx, "POST", "/v1/config/commit", request, nil); err != nil {
 			t.Fatal(err)
@@ -126,13 +145,16 @@ func TestDaemonEventRuleDurabilityAndLifecycle(t *testing.T) {
 	}
 	restart("logging")
 	restart("control")
-	timer := api.EventRuleSpec{Pattern: api.EventRulePatternSpec{Operator: "debounce", Topic: "configuration.committed", Duration: "3s"}, Emit: api.EventRuleEmitSpec{Topic: "routerd.fixture.timer"}}
+	timer := api.EventRuleSpec{Pattern: api.EventRulePatternSpec{Operator: "debounce", Topic: "configuration.committed", Duration: "8s"}, Emit: api.EventRuleEmitSpec{Topic: "routerd.fixture.timer"}}
 	withTimer := config.Document{SchemaVersion: config.SchemaVersion, Resources: append(append([]resourceprogram.Resource(nil), doc.Resources...), resourceprogram.Resource{ID: "timer", EventRule: &timer})}
 	commit("two", withTimer, false)
 	waitConsumed("timer")
 	until(t, 10*time.Second, func() bool { return len(outputs("routerd.fixture.count")) == 1 })
+	if len(outputs("routerd.fixture.timer")) != 0 {
+		t.Fatal("timer fired before the intended control interruption")
+	}
 	restart("control")
-	until(t, 10*time.Second, func() bool { return len(outputs("routerd.fixture.timer")) == 1 })
+	until(t, 15*time.Second, func() bool { return len(outputs("routerd.fixture.timer")) == 1 })
 	for _, r := range outputs("routerd.fixture.count") {
 		if r.Event.Detail == nil || r.Event.Detail.Resource == nil || r.Event.Detail.Resource.Kind != "EventRule" || r.Event.Attributes["count"] != "2" {
 			t.Fatal("typed output lost", r)
@@ -153,12 +175,15 @@ func TestDaemonEventRuleDurabilityAndLifecycle(t *testing.T) {
 		return false
 	})
 	commit("remove", doc, false)
-	time.Sleep(3300 * time.Millisecond)
+	time.Sleep(8300 * time.Millisecond)
 	if len(outputs("routerd.fixture.timer")) != 1 {
 		t.Fatal("removed timer published")
 	}
 	commit("confirmed-trial", withTimer, true)
 	waitConsumed("timer")
+	if len(outputs("routerd.fixture.timer")) != 1 {
+		t.Fatal("trial timer was not pending before interruption")
+	}
 	restart("control")
 	until(t, 10*time.Second, func() bool {
 		var state control.State
@@ -167,7 +192,10 @@ func TestDaemonEventRuleDurabilityAndLifecycle(t *testing.T) {
 		}
 		return state.Confirmation == nil && len(state.Config.Resources) == 1
 	})
-	time.Sleep(3300 * time.Millisecond)
+	if len(outputs("configuration.rolled_back_restart")) != 1 {
+		t.Fatal("trial did not take the control-restart rollback path")
+	}
+	time.Sleep(8300 * time.Millisecond)
 	if len(outputs("routerd.fixture.timer")) != 1 {
 		t.Fatal("confirmed rollback revived trial timer")
 	}
