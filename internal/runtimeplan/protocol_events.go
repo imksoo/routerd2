@@ -11,17 +11,17 @@ import (
 
 // WithStoppedHealthRelays fences conditional reactivation through historical
 // recovery without renewing any fact. The caller also holds source authority.
-// Reconciliation takes precedence: a busy operation defers this pass. The
+// Acquisition waits behind reconciliation within the supplied context. The
 // callback holds op, never mu, so current fact acceptance remains available.
 // The queue's exclusive store lock is independently mandatory.
 func (r *Runtime) WithStoppedHealthRelays(ctx context.Context, names []string, drain func(map[string]bool) error) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if !r.op.TryLock() {
-		return nil
+	if err := r.op.Acquire(ctx, 1); err != nil {
+		return err
 	}
-	defer r.op.Unlock()
+	defer r.op.Release(1)
 	status, err := r.manager.Status(ctx)
 	if err != nil {
 		return fmt.Errorf("observe stopped health workers: %w", err)

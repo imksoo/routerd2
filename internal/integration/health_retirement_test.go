@@ -198,6 +198,13 @@ func testDaemonHealthHistoryWithoutReactivation(t *testing.T, conditional bool) 
 			})
 		}
 		if conditional {
+			var last control.Health
+			lastCode := 0
+			t.Cleanup(func() {
+				if t.Failed() {
+					t.Logf("stopped recovery observation: status=%d healthy=%t registered=%d retiring=%d stopped_pending=%d error=%q", lastCode, last.Healthy, last.ProtocolEvents.Registered, last.ProtocolEvents.Retiring, last.ProtocolEvents.StoppedPending, last.ProtocolEvents.LastError)
+				}
+			})
 			until(t, 5*time.Second, func() bool {
 				req, _ := http.NewRequestWithContext(ctx, "GET", "http://routerd/v1/health", nil)
 				response, err := f.control.HTTP.Do(req)
@@ -205,8 +212,8 @@ func testDaemonHealthHistoryWithoutReactivation(t *testing.T, conditional bool) 
 					return false
 				}
 				defer response.Body.Close()
-				var h control.Health
-				return response.StatusCode == 503 && json.NewDecoder(response.Body).Decode(&h) == nil && h.ProtocolEvents.StoppedPending == 1 && h.ProtocolEvents.LastError != ""
+				lastCode = response.StatusCode
+				return response.StatusCode == 503 && json.NewDecoder(response.Body).Decode(&last) == nil && last.ProtocolEvents.StoppedPending == 1 && last.ProtocolEvents.LastError != ""
 			})
 		}
 		if _, err = injector.Exec(`DROP TRIGGER fail_retired_delivery`); err != nil {

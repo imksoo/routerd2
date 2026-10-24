@@ -21,6 +21,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sync/semaphore"
+
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/network"
@@ -84,9 +86,9 @@ type InstanceStatus struct {
 	Snapshot           json.RawMessage  `json:"snapshot,omitempty"`
 }
 type Runtime struct {
-	supervisorInstance string     // immutable authority inherited by the control worker
-	op                 sync.Mutex // module-set reconciliation; never held by protocol callbacks
-	mu                 sync.Mutex // complete projection and protocol acceptance are serialized
+	supervisorInstance string              // immutable authority inherited by the control worker
+	op                 *semaphore.Weighted // module-set reconciliation; never held by protocol callbacks
+	mu                 sync.Mutex          // complete projection and protocol acceptance are serialized
 	// BFD observations and recipient grants never acquire mu: the network
 	// writer can hold it across a long apply. Configuration takes mu -> bfdMu;
 	// no path may acquire these locks in the opposite order.
@@ -127,7 +129,7 @@ type Runtime struct {
 }
 
 func New(dir, stateDir string, n Network, supervisorInstance string) *Runtime {
-	return &Runtime{supervisorInstance: supervisorInstance, dir: dir, stateDir: stateDir, network: n, manager: managerClient{localapi.NewClient(filepath.Join(dir, supervisor.SocketName))}, bindings: map[string]binding{}, records: map[string]serviceconfig.Update{}, liveRA: map[string]ra.Config{}, leases: map[string]time.Time{}, phase: "starting"}
+	return &Runtime{op: semaphore.NewWeighted(1), supervisorInstance: supervisorInstance, dir: dir, stateDir: stateDir, network: n, manager: managerClient{localapi.NewClient(filepath.Join(dir, supervisor.SocketName))}, bindings: map[string]binding{}, records: map[string]serviceconfig.Update{}, liveRA: map[string]ra.Config{}, leases: map[string]time.Time{}, phase: "starting"}
 }
 
 // CheckReady queries the process manager at confirmation time. A previously
@@ -197,8 +199,10 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 	if err := json.Unmarshal(encoded, &ownedSource); err != nil {
 		return err
 	}
-	r.op.Lock()
-	defer r.op.Unlock()
+	if err := r.op.Acquire(ctx, 1); err != nil {
+		return r.failure(err)
+	}
+	defer r.op.Release(1)
 	if !r.initialized {
 		// Control-worker recovery is deliberately explicit: quiesce previous
 		// dynamic workers, then reacquire their protocol state. Continuing an
@@ -838,11 +842,11 @@ func (r *Runtime) Monitor(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if !r.op.TryLock() {
+			if !r.op.TryAcquire(1) {
 				continue
 			}
 			err := r.reconcileDynamic(ctx)
-			r.op.Unlock()
+			r.op.Release(1)
 			if err != nil {
 				r.failure(err)
 			}

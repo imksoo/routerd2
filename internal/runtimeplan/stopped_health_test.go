@@ -36,8 +36,8 @@ func TestStoppedHealthRecoveryFencesReactivationWithoutHoldingFactMutex(t *testi
 			if allowed["switch"] || allowed["wan"] != want {
 				t.Fatal("active ownership or inactive eligibility lost", allowed)
 			}
-			if r.op.TryLock() {
-				r.op.Unlock()
+			if r.op.TryAcquire(1) {
+				r.op.Release(1)
 				t.Fatal("conditional worker reactivation can race disk recovery")
 			}
 			if !r.mu.TryLock() {
@@ -60,14 +60,16 @@ func TestStoppedHealthRecoveryFencesReactivationWithoutHoldingFactMutex(t *testi
 	r.bindings["service.wan"] = r.bindings["service.switch"]
 	r.mu.Unlock()
 	check(false)
-	r.op.Lock()
+	if err := r.op.Acquire(ctx, 1); err != nil {
+		t.Fatal(err)
+	}
 	deadline, cancel := context.WithTimeout(ctx, 25*time.Millisecond)
 	err := r.WithStoppedHealthRelays(deadline, []string{"wan"}, func(map[string]bool) error {
 		t.Fatal("owned reconciliation was bypassed")
 		return nil
 	})
 	cancel()
-	r.op.Unlock()
+	r.op.Release(1)
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatal("busy recovery silently skipped its ownership observation", err)
 	}
@@ -88,7 +90,9 @@ func TestStoppedHealthRecoveryWaitsForReconcileAndThenObservesOwnership(t *testi
 	if err := r.ApplyConfig(ctx, 1, config.Document{SchemaVersion: config.SchemaVersion}); err != nil {
 		t.Fatal(err)
 	}
-	r.op.Lock()
+	if err := r.op.Acquire(ctx, 1); err != nil {
+		t.Fatal(err)
+	}
 	done := make(chan error, 1)
 	called := false
 	go func() {
@@ -99,11 +103,11 @@ func TestStoppedHealthRecoveryWaitsForReconcileAndThenObservesOwnership(t *testi
 	}()
 	select {
 	case err := <-done:
-		r.op.Unlock()
+		r.op.Release(1)
 		t.Fatal("contention silently discarded the recovery pass", err)
 	case <-time.After(25 * time.Millisecond):
 	}
-	r.op.Unlock()
+	r.op.Release(1)
 	select {
 	case err := <-done:
 		if err != nil || !called {
