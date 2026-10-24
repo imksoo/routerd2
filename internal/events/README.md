@@ -70,7 +70,7 @@ configuration file itself.
 `LookupProducer` reads an existing registration without allocating one, allowing
 an unused optional component to discover retained state without registry writes.
 
-Defaults cap the journal and outbox at 100,000 rows and 64 MiB of encoded payload
+Defaults cap hot event bodies and the outbox at 100,000 rows and 64 MiB of encoded payload
 each, plus 1,024 consumer/producer registrations combined. The existing
 `MaxConsumers` and `MaxConsumerStateBytes` limits cover both APIs together;
 producer jobs also share the outbox row/byte limits. Individual bodies are at most
@@ -92,13 +92,30 @@ failed writes preserve the complete original transaction. Default retained
 identity limits are one million records/256MiB of encoded identity bytes.
 No identities expire, and full identity capacity refuses reclamation rather
 than forgetting deduplication. Physical filesystem limits still apply.
+`ArchiveEvents` moves at most a bounded batch of hot bodies to gzip storage in
+the same WAL/FULL transaction, after independently checking the round trip/SHA outside the writer transaction
+and rechecking the original body at commit.
+It retains each original event row/ID/cursor, so unconsumed history, pending work
+and timers keep valid source references. List and retry reads verify bounded
+decompression, complete framing, CRC, original length, SHA and event identity.
+Repeated archive reads use a four-MiB-payload/4096-entry LRU cache. Every hit
+still compares the current SQL compressed bytes, size and digest. Corruption
+invalidates the hit; eviction and Close discard only the decoded cache. No
+producer authority, cursor or other durable state is cached here.
+Hot payload pages/row budgets can be reused without skipping any observation.
+The compressed tier has a separate one-million-row/256MiB encoded budget; all
+history retains a one-million-row/1GiB original-byte budget. No IDs expire and
+no external durability, database file shrink or unlimited retention is claimed.
+Capacity reports `events` (hot), `archived_events` and `history` separately;
+first/tip/cursors and export snapshots always describe complete logical history.
 `ExportHistory` copies an immutable prefix through a captured tip in bounded
 pages without holding a store lock across output I/O. `VerifyHistory` checks
 frames, complete event content, ordered cursors, unique IDs, byte/count totals
 and SHA-256. This does not delete source rows, advance consumers or renew leases.
 See [operator commands and the archive contract](../../docs/event-storage.md).
-Retention, durable archive offload/reclamation and capacity alarms outside this
-filesystem remain required before a long-running production event workload.
+External durable offload, expiry/lifetime policy, restore/integrity qualification
+and capacity alarms outside this filesystem remain required before a
+long-running production event workload.
 
 Tests use actual SQLite transactions, write-failure triggers, SQLITE_FULL,
 concurrent publishers, private path attacks, foreign database preservation,
@@ -109,8 +126,8 @@ The live Health relay has a dedicated three-boot/two-SIGKILL
 Other protocol event producers, exhaustive cut points and physical power-loss
 acceptance remain implementation-plan work.
 
-The database schema is now version 5. Accepted design D-09 deliberately does
-not import discarded, unreleased version-1/2/3/4 prototype state. Unsupported schema
+The database schema is now version 6. Accepted design D-09 deliberately does
+not import discarded, unreleased version-1/2/3/4/5 prototype state. Unsupported schema
 identity is rejected through the read-only probe before SQLite recovery/writes.
 This is not a promise that different released versions can share or roll back
 this database. A production migration/fallback contract remains DIST-01 work.

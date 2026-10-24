@@ -11695,6 +11695,42 @@
         "Product-version migration/full database rollback and signed runtime lifecycle, all remaining work-package and physical/NIC/performance acceptance"
       ],
       "parity_flags_unchanged": true
+    },
+    {
+      "id": "lossless-compressed-event-archive",
+      "date": "2026-10-24",
+      "status": "partial_retention_implementation_verified",
+      "code_checkpoint": "3bca14b5bd6b9351c67967299d693afc73dce80d",
+      "initial_product_checkpoint": "721000433d23a05db84711a28ce4401b5f721154",
+      "work_packages": [
+        "CORE-04"
+      ],
+      "evidence": "docs/evidence/2026-10-24-event-archive-tier.md",
+      "operator_contract": "docs/event-storage.md",
+      "implemented": [
+        "Bounded automatic event body gzip archival in the same WAL/FULL database, with round-trip/SHA validation outside writer transaction and original-body recheck at commit; atomic body release/usage updates without removing source event rows, IDs or cursors",
+        "List, stable retry/ACK, slow consumers, pending outbox foreign keys, timers and fixed-tip export read complete mixed hot/compressed history; bounded decompression rejects missing/corrupt/trailing/multistream/oversized data and changed identity",
+        "Separate hot, compressed one-million-row/256MiB and whole-history one-million-row/1GiB original-byte budgets, pressure observations and archive write-error health/confirmation fencing; no identity expiry or filesystem file shrink",
+        "Four-MiB-payload/4096-entry LRU for verified bodies; every hit matches current SQL compressed bytes/size/digest, eviction/Close/restart lose only cache, and cold corruption cannot be hidden",
+        "Schema6 with read-only rejection of unreleased1/2/3/4/5; no prototype import; power fixture requires every original raw body cold before second cut and after recovery"
+      ],
+      "validation": [
+        "Test-first API failures and pinned old0b4bb28 actual-daemon10.40s failure; Race covers exact full data/cursors, retry/changed identity, unconsumed/timer/pending references, concurrent Append/archive/export, counters and actual SQLite FULL/reopen/SIGKILL",
+        "Large event releases7 SQLite pages and new event reuses2 without DB growth; independent page fixture1.370s pass",
+        "Initial product clean check106.88s passes but QEMU Derived53.11s fails with deadlines; local warm16-record allocation test fails736221bytes/page; bounded verified cache reduces71755bytes/page and compression leaves writer transaction, without raising guest RAM/CPU/deadlines",
+        "Cache and primed-corruption Race6.729s; 80-large-record eviction/Close plus memory bound7.458s; final clean3bca14b make check build-linux106.40s includes unit/Python23/Race/vet/static amd64+arm64",
+        "Final native pair hashes equal checked build: archive/independent gzip/live/export comparison/write failure/recovery/control SIGKILL6.75s, Derived11.76s, two-WAN TCP/UDP/PCAP PBR30.12s pass",
+        "Final real8MiB private tmpfs warning and complete archive/compaction/worker crash fixture6.45s pass",
+        "Final no-NIC QEMU gates: archive41.97s, fixed Derived110.31s, two-WAN Health/PBR90.25s pass; initial failure retained, not counted as final aggregate success",
+        "Final expanded three-boot/two-SIGKILL gate72.91s pass: raw2 accepted locally before first cut, all raw4 demonstrably compressed before second cut and after reboot, exact content/cursors4/5/6/7; completed identities1/3/3, registry recovery and current-authority fences preserved.1GiB/private256MiB ext4/no NIC; not physical host power loss"
+      ],
+      "remaining": [
+        "External durable archive/backup offload; event/ID and consumer/producer lifetime sealing, retention expiry and safe deletion; whole history is still finite",
+        "Aggregate filesystem budget, externally durable alerts, rate/scale/latency/RSS and long-running qualification, physical host/controller power-loss acceptance",
+        "Other raw producers/status providers, structured fields/Derived chaining, privileged effects/idempotency and federation",
+        "Product-version migration/full database rollback/signed runtime lifecycle, all remaining work-package and selected physical/NIC/performance acceptance"
+      ],
+      "parity_flags_unchanged": true
     }
   ],
   "delivery_goal": {

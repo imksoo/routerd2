@@ -4,9 +4,26 @@
 対象: `https://github.com/imksoo/routerd2`
 
 **継続ゴール:** 全残実装・必要試験・対象実機での利用可能性の受入まで進める。
-部分checkpointでは完了しない。最新product checkpointは `0b4bb28`。
+部分checkpointでは完了しない。最新product checkpointは `3bca14b`。
 
-完了したconsumer/producer outboxを、小さなSHA-256重複抑止記録へ置き換えて枠を自動回収する。
+eventの元payloadを、同じWAL/FULL transaction内のgzip領域へ自動退避し、hot枠/pageを回収する。
+元event row・ID・cursorを残すため、未読consumer・pending outbox・timerの参照と再送ACKを維持する。
+読取時はgzip/CRC・長さ・SHA・event IDを検証し、破損や余分なstream、展開量超過を拒否する。
+`events` はhot、`archived_events` は圧縮、`history` は全履歴を表示し、exportは両領域を含む。
+圧縮領域100万件/256MiB、全履歴100万件/元byte1GiBの上限を持ち、IDを忘れない。
+最終clean全体check/Race/vet/static両arch build106.40秒、checked ELFと同じnativeは
+archive6.75秒・Derived11.76秒・二WAN Health/PBR30.12秒がPASS。修正後QEMU archive41.97秒・Derived110.31秒・二WAN Health/PBR90.25秒もPASS。
+実8MiB quotaでも保存失敗/回復/control SIGKILL6.45秒PASS。
+三boot/二SIGKILLは72.91秒PASS。二度目のcut前後ともraw全4件が圧縮領域にあり、
+元内容/cursor4/5/6/7と完了job記録3件を保持した。
+初回QEMU Derivedは53.11秒FAILを保存した。繰り返し読取の再展開割当を736,221→71,755byte/16件へ減らし、
+4MiB/4,096件以下のcacheと、圧縮をDB書込transaction外へ移す修正を加えた。期限/RAM/vCPUは変えていない。
+大きなeventで7 SQLite pageを解放し、新eventが2 pageをDB拡大なしで再利用した。
+DB schemaは6で、未公開1/2/3/4/5はread-only拒否。外部archive退避・保持期限/世代終了・
+総filesystem予算・規模/長時間と全計画/対象実機の受入は未完了。
+[契約](event-storage.md) と [検証・残作業](evidence/2026-10-24-event-archive-tier.md) を参照。
+
+先行 `0b4bb28` では、完了したconsumer/producer outboxを、小さなSHA-256重複抑止記録へ置き換えて枠を自動回収する。
 元key・cursor/初回state versionを保存し、待機中job・state・event履歴は変更しない。
 同一再送/ACKは成功し、内容変更・元cursor変更・cursor巻き戻し後の再実行を拒否する。
 独立した100万件/256MiBのtombstone予算と容量表示を設け、満杯で元記録を忘れない。

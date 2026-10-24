@@ -184,8 +184,14 @@ The same background monitor reclaims a maximum of 64 completed job payloads per
 pass into bounded durable SHA256 identities, sharing consumer and producer work.
 `compaction_error` persists across successful read-only inspections until a
 maintenance pass succeeds. It degrades health and blocks confirmation without
-changing source/cursors or dropping pending work. This recovers hot job capacity
-and reusable SQLite pages, not event history or filesystem free space.
+changing source/cursors or dropping pending work. Completed-job reclamation recovers hot job capacity
+and reusable SQLite pages.
+It also moves up to sixteen hot event bodies per pass into bounded gzip storage
+inside the same WAL/FULL database transaction. Logical IDs/cursors/history and
+pending/timer references remain readable. `archive_error` survives successful
+read-only inspection until a successful maintenance pass; errors degrade health
+and prevent confirmation. `events`, `archived_events` and `history` report hot,
+compressed and complete logical budgets. History export uses the complete budget.
 See [capacity and immutable export](../../docs/event-storage.md); these do not
 reclaim journal space or guarantee an externally durable alarm.
 

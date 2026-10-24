@@ -1,0 +1,69 @@
+........FFFFFFFF
+======================================================================
+FAIL: test_raw_history_must_be_cold_before_second_cut_and_after_recovery (qemu_health_power_test.PowerWitnessTests.test_raw_history_must_be_cold_before_second_cut_and_after_recovery) (index=1, value=0)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_health_power_test.py", line 135, in test_raw_history_must_be_cold_before_second_cut_and_after_recovery
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_raw_history_must_be_cold_before_second_cut_and_after_recovery (qemu_health_power_test.PowerWitnessTests.test_raw_history_must_be_cold_before_second_cut_and_after_recovery) (index=1, value=1)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_health_power_test.py", line 135, in test_raw_history_must_be_cold_before_second_cut_and_after_recovery
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_raw_history_must_be_cold_before_second_cut_and_after_recovery (qemu_health_power_test.PowerWitnessTests.test_raw_history_must_be_cold_before_second_cut_and_after_recovery) (index=1, value=True)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_health_power_test.py", line 135, in test_raw_history_must_be_cold_before_second_cut_and_after_recovery
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_raw_history_must_be_cold_before_second_cut_and_after_recovery (qemu_health_power_test.PowerWitnessTests.test_raw_history_must_be_cold_before_second_cut_and_after_recovery) (index=1, value=100)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_health_power_test.py", line 135, in test_raw_history_must_be_cold_before_second_cut_and_after_recovery
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_raw_history_must_be_cold_before_second_cut_and_after_recovery (qemu_health_power_test.PowerWitnessTests.test_raw_history_must_be_cold_before_second_cut_and_after_recovery) (index=2, value=0)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_health_power_test.py", line 135, in test_raw_history_must_be_cold_before_second_cut_and_after_recovery
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_raw_history_must_be_cold_before_second_cut_and_after_recovery (qemu_health_power_test.PowerWitnessTests.test_raw_history_must_be_cold_before_second_cut_and_after_recovery) (index=2, value=1)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_health_power_test.py", line 135, in test_raw_history_must_be_cold_before_second_cut_and_after_recovery
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_raw_history_must_be_cold_before_second_cut_and_after_recovery (qemu_health_power_test.PowerWitnessTests.test_raw_history_must_be_cold_before_second_cut_and_after_recovery) (index=2, value=True)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_health_power_test.py", line 135, in test_raw_history_must_be_cold_before_second_cut_and_after_recovery
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_raw_history_must_be_cold_before_second_cut_and_after_recovery (qemu_health_power_test.PowerWitnessTests.test_raw_history_must_be_cold_before_second_cut_and_after_recovery) (index=2, value=100)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_health_power_test.py", line 135, in test_raw_history_must_be_cold_before_second_cut_and_after_recovery
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+----------------------------------------------------------------------
+Ran 9 tests in 0.021s
+
+FAILED (failures=8)

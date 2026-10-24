@@ -1,0 +1,37 @@
+{
+  "source_commit": "721000433d23a05db84711a28ce4401b5f721154",
+  "source_dirty": false,
+  "umask": "0022",
+  "started_at_utc": "2026-10-24T22:28:11.000265+00:00",
+  "command": [
+    "make",
+    "check",
+    "build-linux",
+    "RELEASE_ID=721000433d23"
+  ],
+  "exit_code": 0,
+  "elapsed_seconds": 106.88,
+  "completed_commit": "721000433d23a05db84711a28ce4401b5f721154",
+  "artifacts": [
+    {
+      "architecture": "amd64",
+      "binary": "routerd",
+      "sha256": "9c9b44c3b082464f61684fa543f9d740d2903e65c36cec77bdd6a5cbfec4cd28"
+    },
+    {
+      "architecture": "amd64",
+      "binary": "routerd-modules",
+      "sha256": "0768ba599c52c13225d334c249a6f71496fb62718ecfa44b3d6c5f49b5f34358"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd",
+      "sha256": "176fe5b02d93f39c4b7c5314524046809f6340f3968497ee68b68911c46d854c"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd-modules",
+      "sha256": "21d2f2cecaa0f02c6bbbf21de8e241e0f82dca93ea5ac4fab8776e31a0684123"
+    }
+  ]
+}

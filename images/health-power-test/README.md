@@ -86,3 +86,13 @@ identity, allowing newly completed work while rejecting any missing/changed key,
 position/hash or duplicate. The host verifier repeats these comparisons.
 Witnesses still travel over UART/next test initramfs without a guest disk write,
 checkpoint or fsync at a cut. This does not qualify physical host power loss.
+
+## Archived raw bodies
+
+Before the second cut, the probe requires every accepted raw observation to have
+an empty hot body and a matching compressed archive entry with its original
+cursor, byte count and full-content SHA. Logical history is verified before and
+after the move. The third boot repeats both the metadata assertion and complete
+logical content/cursor comparison. `archived_observations` must equal the full
+accepted set on the second and third boot; the host rejects partial counts.
+Queries are read-only, and witnesses still do not write/fsync product storage.

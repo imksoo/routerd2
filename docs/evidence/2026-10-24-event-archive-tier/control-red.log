@@ -1,0 +1,8 @@
+# github.com/imksoo/routerd2/internal/control [github.com/imksoo/routerd2/internal/control.test]
+internal/control/event_archive_test.go:39:41: h.EventJournal.Storage.ArchiveError undefined (type EventStoreHealth has no field or method ArchiveError)
+internal/control/event_archive_test.go:55:42: h.EventJournal.Storage.ArchiveError undefined (type EventStoreHealth has no field or method ArchiveError)
+internal/control/event_archive_test.go:55:96: h.EventJournal.Storage.Capacity.ArchivedEvents undefined (type *events.Capacity has no field or method ArchivedEvents)
+internal/control/event_compaction_test.go:105:104: c.ArchivedEvents undefined (type *events.Capacity has no field or method ArchivedEvents)
+internal/control/event_compaction_test.go:105:134: c.History undefined (type *events.Capacity has no field or method History)
+FAIL    github.com/imksoo/routerd2/internal/control [build failed]
+FAIL

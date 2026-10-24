@@ -1,0 +1,46 @@
+=== RUN   TestWarmArchivedPageHasBoundedDecodeAllocation
+    archive_cache_test.go:45: warm sixteen-record page allocated 71755 bytes
+--- PASS: TestWarmArchivedPageHasBoundedDecodeAllocation (0.47s)
+=== RUN   TestArchiveReusesHotBudgetWhileAllHistoryAndSourceCursorsRemainReadable
+--- PASS: TestArchiveReusesHotBudgetWhileAllHistoryAndSourceCursorsRemainReadable (0.33s)
+=== RUN   TestArchiveExportKeepsSnapshotDuringConcurrentTierMovement
+--- PASS: TestArchiveExportKeepsSnapshotDuringConcurrentTierMovement (0.19s)
+=== RUN   TestArchiveFailureAndSeparateBudgetsPreserveEveryAcceptedBody
+=== RUN   TestArchiveFailureAndSeparateBudgetsPreserveEveryAcceptedBody/insert
+=== RUN   TestArchiveFailureAndSeparateBudgetsPreserveEveryAcceptedBody/clear
+=== RUN   TestArchiveFailureAndSeparateBudgetsPreserveEveryAcceptedBody/counter
+=== RUN   TestArchiveFailureAndSeparateBudgetsPreserveEveryAcceptedBody/row-capacity
+=== RUN   TestArchiveFailureAndSeparateBudgetsPreserveEveryAcceptedBody/byte-capacity
+=== RUN   TestArchiveFailureAndSeparateBudgetsPreserveEveryAcceptedBody/sqlite-full
+--- PASS: TestArchiveFailureAndSeparateBudgetsPreserveEveryAcceptedBody (1.42s)
+    --- PASS: TestArchiveFailureAndSeparateBudgetsPreserveEveryAcceptedBody/insert (0.25s)
+    --- PASS: TestArchiveFailureAndSeparateBudgetsPreserveEveryAcceptedBody/clear (0.25s)
+    --- PASS: TestArchiveFailureAndSeparateBudgetsPreserveEveryAcceptedBody/counter (0.25s)
+    --- PASS: TestArchiveFailureAndSeparateBudgetsPreserveEveryAcceptedBody/row-capacity (0.21s)
+    --- PASS: TestArchiveFailureAndSeparateBudgetsPreserveEveryAcceptedBody/byte-capacity (0.22s)
+    --- PASS: TestArchiveFailureAndSeparateBudgetsPreserveEveryAcceptedBody/sqlite-full (0.24s)
+=== RUN   TestArchivedCorruptionCannotBeReadOrAcknowledgedAsDurable
+=== RUN   TestArchivedCorruptionCannotBeReadOrAcknowledgedAsDurable/gzip
+=== RUN   TestArchivedCorruptionCannotBeReadOrAcknowledgedAsDurable/hash
+=== RUN   TestArchivedCorruptionCannotBeReadOrAcknowledgedAsDurable/length
+=== RUN   TestArchivedCorruptionCannotBeReadOrAcknowledgedAsDurable/trailing
+=== RUN   TestArchivedCorruptionCannotBeReadOrAcknowledgedAsDurable/multistream
+=== RUN   TestArchivedCorruptionCannotBeReadOrAcknowledgedAsDurable/bomb
+--- PASS: TestArchivedCorruptionCannotBeReadOrAcknowledgedAsDurable (1.09s)
+    --- PASS: TestArchivedCorruptionCannotBeReadOrAcknowledgedAsDurable/gzip (0.15s)
+    --- PASS: TestArchivedCorruptionCannotBeReadOrAcknowledgedAsDurable/hash (0.15s)
+    --- PASS: TestArchivedCorruptionCannotBeReadOrAcknowledgedAsDurable/length (0.16s)
+    --- PASS: TestArchivedCorruptionCannotBeReadOrAcknowledgedAsDurable/trailing (0.15s)
+    --- PASS: TestArchivedCorruptionCannotBeReadOrAcknowledgedAsDurable/multistream (0.16s)
+    --- PASS: TestArchivedCorruptionCannotBeReadOrAcknowledgedAsDurable/bomb (0.31s)
+=== RUN   TestArchiveConcurrentAppendRetryAndBounds
+--- PASS: TestArchiveConcurrentAppendRetryAndBounds (1.56s)
+=== RUN   TestWholeHistoryByteLimitIsAtomicAfterTierMovement
+--- PASS: TestWholeHistoryByteLimitIsAtomicAfterTierMovement (0.15s)
+=== RUN   TestArchivedBodyPagesCanBeReusedByNewEvents
+    archive_test.go:442: archive released 7 pages; new event reused 2 without DB growth
+--- PASS: TestArchivedBodyPagesCanBeReusedByNewEvents (0.16s)
+=== RUN   TestCompactedWorkIdentitySurvivesSIGKILLWithoutClose
+--- PASS: TestCompactedWorkIdentitySurvivesSIGKILLWithoutClose (0.33s)
+PASS
+ok      github.com/imksoo/routerd2/internal/events      6.729s

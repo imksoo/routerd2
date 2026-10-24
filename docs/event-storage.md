@@ -1,7 +1,7 @@
 # Event journalの容量確認と履歴export
 
 管理shellの `show event-store` とprivate control APIの `GET /v1/event-store` は、
-global event journalの容量を読み取る。event、job、consumer/producer登録の件数・payload byteと上限、
+global event journalの容量を読み取る。hot event、圧縮済みevent、履歴全体、job、consumer/producer登録の件数・byteと上限、
 最初/最後のcursor、最も遅いconsumer cursor、DB/WALのsize、DB/WAL/SHMの実割当量、
 state filesystem全体の容量と使用可能byteを返す。登録やcursorを変更する操作ではない。
 
@@ -46,6 +46,34 @@ byte予算はUTF-8のname/key長と41byte（kind・position・SHA）で、SQLite
 read-onlyのfresh inspectionが成功しただけではwrite失敗の警告を消さず、次の回収成功で解除する。
 小さな重複抑止記録も有限なので、この上限やevent履歴の上限に達すれば運用継続はできない。
 
+## Event payloadを圧縮領域へ自動退避する
+
+controlは約1秒周期に最大16 eventを、同じSQLite WAL/FULL内の圧縮領域へ移す。
+元のevent row・ID・cursorを残す。gzipのround tripとSHA-256の確認中はDB接続/書込transactionを保持せず、
+確定時に元bodyを再確認し、圧縮bodyの保存、
+元payloadの解放、両容量counterの更新を一つのtransactionで確定する。
+失敗ではbatchをrollbackし、元payloadを保持する。圧縮予算に収まるprefixだけを確定でき、
+1件も収まらない場合は容量errorとなる。期限による削除やcursorのACKではない。
+
+未読consumerも同じ履歴APIから全内容を読める。pending outboxとtimer用の元cursor参照も維持する。
+同一IDの再送は圧縮先を検証して同じcursorでACKし、内容変更は拒否する。
+圧縮bodyの欠損、CRC/長さ/SHA不一致、追加streamや展開量超過は読取と再送ACKを拒否する。
+検証済みの展開bodyは4MiB payload/4,096件以下のLRU cacheに保管し、同じ履歴のpollingで毎回再展開しない。
+cacheを使う際も、SQLiteから読んだ圧縮byte・元size・SHAが全て一致することを確認する。
+cacheはcheckpointやauthorityではなく、eviction/Close/restartで消え、欠損や破損を隠さない。
+現在のUpやproducer authority、設定意図を履歴から復元しない。
+
+容量表示は `events` が元payloadを持つhot領域、`archived_events` が圧縮領域、
+`history` が両方を含む全履歴である。first/tip/slowest cursorは全履歴上の位置を保つ。
+圧縮領域の既定上限は100万件/256MiBで、byte予算はgzip長+48byte（cursor・元size・SHA）となる。
+全履歴は100万件/1GiBの元event byteを上限にし、export format1の検証上限内に保つ。
+両方に80/100% warning/exhaustedを設け、archiveへ移しても全履歴のchargeを解除しない。
+`events` の枠とSQLite pageは再利用できるが、DBファイルを縮小したり、別媒体へbackupしたりする処理ではない。
+
+失敗は `event_journal.storage.archive_error` と `last_error`、不健全/confirm拒否に反映する。
+read-only inspectionだけではwrite失敗の警告を消さず、次の退避成功で解除する。
+保存領域と履歴全体の予算は有限で、外部退避・保持期限/世代終了・filesystem全体の運用は引き続き必要である。
+
 ## 新規の履歴archiveを作る
 
 appliance上のlocal commandで、既存のdirectory内に新しいファイルを指定する。
@@ -56,7 +84,8 @@ routerd events verify /path/to/history.jsonl
 ```
 
 必要なら `--runtime-dir DIR` と `--timeout 10m` をexportに指定できる。既定の期限は2分、最大1時間。
-exportはprivate APIから容量と上端cursorを一度取得し、1 page最大16件でそのcursorまでを取り出す。
+exportはprivate APIから全履歴の件数/元byteと上端cursorを一度取得し、1 page最大16件でそのcursorまでを取り出す。
+元payloadと圧縮payloadの混在、出力中の退避でも、同じ論理prefixを保存する。
 新しいAppendは継続でき、exportの開始後のeventは次回分となる。
 長いSQLite transactionやread snapshotを保持せず、遅い出力の間もstore lockを保持しない。
 途中で履歴が欠けた場合は失敗し、黙ってcursorを飛ばさない。
@@ -78,10 +107,10 @@ archiveは履歴を含むprivate dataなので、必要な保護を維持して�
 exportもverifyもsourceのeventを削除せず、consumer cursorやoutboxをACKしない。
 archiveはevent履歴のprefix copyで、consumer/producer state・outbox・設定journalのbackupではない。
 importやrollback、現在のUp・kernel権限の復元にも使わない。
-DB schemaは5。D-09に従って未リリースprototypeの1/2/3/4はread-onlyで拒否し、互換readerや移行は追加しない。
+DB schemaは6。D-09に従って未リリースprototypeの1/2/3/4/5はread-onlyで拒否し、互換readerや移行は追加しない。
 
-exportだけでは満杯のevent journalは空かない。完了jobのpayload枠回収は追加したが、
-event履歴本体のarchive退避/回収、dedup記録の長期保持と世代終了契約、retention policy、
+exportは履歴のcopyである。完了jobとevent payloadのhot枠回収は追加した。
+外部archive退避、履歴/IDの世代終了と保持期限、retention policy、
 総filesystem予算、外部alert、規模・長時間受入は残る。重複抑止記録を無条件で消したり、
 既存IDの再送を新規eventに変えたりする回収は行わない。
 workerごとの送信待ちqueueの容量と、ここで表示するglobal journalの容量は別である。

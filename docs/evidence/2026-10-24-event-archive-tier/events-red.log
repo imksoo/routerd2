@@ -1,0 +1,14 @@
+# github.com/imksoo/routerd2/internal/events [github.com/imksoo/routerd2/internal/events.test]
+internal/events/archive_test.go:19:81: unknown field MaxHistoryEvents in struct literal of type Options
+internal/events/archive_test.go:48:17: s.ArchiveEvents undefined (type *Store has no field or method ArchiveEvents)
+internal/events/archive_test.go:52:78: after.History undefined (type Capacity has no field or method History)
+internal/events/archive_test.go:52:96: before.History undefined (type Capacity has no field or method History)
+internal/events/archive_test.go:52:113: after.ArchivedEvents undefined (type Capacity has no field or method ArchivedEvents)
+internal/events/archive_test.go:52:177: after.History undefined (type Capacity has no field or method History)
+internal/events/archive_test.go:85:17: s.ArchiveEvents undefined (type *Store has no field or method ArchiveEvents)
+internal/events/archive_test.go:126:18: s.ArchiveEvents undefined (type *Store has no field or method ArchiveEvents)
+internal/events/archive_test.go:152:10: opts.MaxArchivedEvents undefined (type Options has no field or method MaxArchivedEvents)
+internal/events/archive_test.go:155:10: opts.MaxArchivedEventBytes undefined (type Options has no field or method MaxArchivedEventBytes)
+internal/events/archive_test.go:155:10: too many errors
+FAIL    github.com/imksoo/routerd2/internal/events [build failed]
+FAIL
