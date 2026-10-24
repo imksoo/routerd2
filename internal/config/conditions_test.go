@@ -1,13 +1,40 @@
 package config
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 
 	"github.com/imksoo/routerd/pkg/api"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
+	"github.com/imksoo/routerd2/internal/resourceprogram"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
+
+func TestConditionMaxAgeSurvivesSourceRoundTripAndInvalidInputIsRejected(t *testing.T) {
+	source := Document{SchemaVersion: SchemaVersion, Resources: []resourceprogram.Resource{{
+		ID: "dns", When: &resourceprogram.FactCondition{Fact: "service.wan.ready", MaxAge: "1500ms"},
+		Service: &serviceconfig.Service{Name: "dns", DNS: &dnsconfig.RuntimeConfig{
+			Spec: api.DNSResolverSpec{
+				Listen:  []api.DNSResolverListenSpec{{Addresses: []string{"127.0.0.1"}, Port: 5353}},
+				Sources: []api.DNSResolverSourceSpec{{Name: "default", Kind: "forward", Match: []string{"."}, Upstreams: []string{"udp://192.0.2.53:53"}}},
+			},
+		}},
+	}}}
+	encoded, err := YAML(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := Parse(encoded)
+	if err != nil || parsed.Resources[0].When.MaxAge != "1500ms" {
+		t.Fatal("max_age lost during source serialization", parsed, err)
+	}
+	for _, invalid := range []string{"0s", "-1s", "forever", "999999999999999999999h"} {
+		if _, err := Parse(bytes.Replace(encoded, []byte("1500ms"), []byte(invalid), 1)); err == nil {
+			t.Fatal("invalid max_age accepted", invalid)
+		}
+	}
+}
 
 // The reused DNS engine exposes source fields that its worker cannot evaluate.
 // A gate must never be accepted and then discarded during native compilation.

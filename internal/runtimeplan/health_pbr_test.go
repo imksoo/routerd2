@@ -128,7 +128,12 @@ func TestHealthPBRMaxAgeDoesNotRenewOnProjectionOrTransportReplay(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := source.Resources[5].Service.HealthConfig()
+	var cfg health.Config
+	for _, res := range source.Resources {
+		if res.Service != nil && res.Service.Name == "health-a" {
+			cfg = res.Service.HealthConfig()
+		}
+	}
 	snapshot := health.Snapshot{Resource: cfg.Resource, Interface: cfg.Interface, BootID: clock.BootID, ObservedNanos: uint64(clock.BoottimeNanoseconds), ExpiresNanos: uint64(clock.BoottimeNanoseconds) + uint64(cfg.Freshness()), Active: true, State: old.State{Phase: old.PhaseHealthy, ConsecutivePassed: cfg.HealthyThreshold}}
 	u := update(t, r, "service.health-a", 1, snapshot)
 	if err := r.Accept(ctx, u); err != nil {

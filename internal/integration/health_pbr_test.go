@@ -355,6 +355,46 @@ func TestDaemonHealthPBRFailoverAndRecovery(t *testing.T) {
 	traffic("A")
 	t.Log("finite observation expired while producer stayed supervisor-ready; duplicate and resequenced replay did not renew it")
 
+	// A real healthy observation still has its two-minute producer lease, but
+	// this consumer requires a sample no older than 2.5 seconds. Keep the worker
+	// supervisor-ready so only max_age can cause this independent withdrawal.
+	victim = module("service.health-a")
+	if err := syscall.Kill(victim.PID, syscall.SIGSTOP); err != nil {
+		t.Fatal(err)
+	}
+	stoppedPID := victim.PID
+	t.Cleanup(func() { _ = syscall.Kill(stoppedPID, syscall.SIGCONT) })
+	stale := healthPBRUpdate(instance("service.health-a"))
+	if err := json.Unmarshal(stale.Snapshot, &observation); err != nil || !observation.Active {
+		t.Fatal("missing real healthy sample", err)
+	}
+	waitPrimary(false)
+	clock, err = bfd.ReadClock()
+	if err != nil || uint64(clock.BoottimeNanoseconds) >= observation.ExpiresNanos || uint64(clock.BoottimeNanoseconds)-observation.ObservedNanos <= uint64(2500*time.Millisecond) {
+		t.Fatal("max_age withdrawal was not independent of the producer lease", observation, clock, err)
+	}
+	if m := module("service.health-a"); !m.Ready || m.PID != victim.PID || m.Generation != victim.Generation {
+		t.Fatal("heartbeat loss masked max_age", m)
+	}
+	stale.Sequence++
+	if err := f.control.Do(ctx, "POST", "/v1/services/state", stale, nil); err != nil {
+		t.Fatal("valid producer lease should be accepted without renewing sample age", err)
+	}
+	// Observe at least two monitor ticks after acceptance, rather than just
+	// checking the forwarding state left over from before the replay.
+	time.Sleep(500 * time.Millisecond)
+	traffic("B")
+	record("consumer-max-age")
+	if primary() {
+		t.Fatal("resequenced replay renewed consumer sample age")
+	}
+	if err := syscall.Kill(victim.PID, syscall.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	waitPrimary(true)
+	traffic("A")
+	t.Log("consumer max_age withdrew a still-valid healthy sample; transport replay stayed stale and fresh worker observation restored TCP/UDP")
+
 	// A confirmed trial deliberately swaps priority. Timeout must restore both
 	// the durable source and the actual TCP/UDP path without operator repair.
 	trial := resourceProgramClone(t, program)
@@ -737,7 +777,7 @@ resources:
       health: {resource: health-b, interface: wan1, source_address: 203.0.113.2, target: 198.51.100.11, mark: 42, protocol: tcp, port: 18080, interval_ms: 500, timeout_ms: 500, healthy_threshold: 2, unhealthy_threshold: 3}
   - id: primary
     depends_on: [address-a]
-    when: {fact: service.health-a.active}
+    when: {fact: service.health-a.active, max_age: 2500ms}
     route: {destination: 0.0.0.0/0, gateway: 192.0.2.1, interface: wan0, table: 100, metric: 100}
   - id: backup
     depends_on: [address-b]

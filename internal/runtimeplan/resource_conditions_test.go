@@ -165,6 +165,47 @@ func TestConditionalFactExpiryReplayAndRevisionFence(t *testing.T) {
 		t.Fatal("previous operator revision authorized route")
 	}
 }
+
+func TestConditionalLeaseObservationDoesNotRefreshOnTransportReplay(t *testing.T) {
+	ctx := context.Background()
+	r, _, _ := conditionalFixture(t)
+	lease := lease4(time.Now().Add(time.Hour))
+	u := update(t, r, "service.wan", 1, lease)
+	if err := r.Accept(ctx, u); err != nil {
+		t.Fatal(err)
+	}
+	original := r.guardGrants[u.Name]
+	u.Sequence++
+	if err := r.Accept(ctx, u); err != nil {
+		t.Fatal(err)
+	}
+	replayed := r.guardGrants[u.Name]
+	if replayed.observedNanos != original.observedNanos || replayed.untilNanos != original.untilNanos {
+		t.Fatal("same lease acquired a new observation or expiration on replay")
+	}
+	lease.ExpiresAt = time.Now().Add(2 * time.Hour)
+	u = update(t, r, "service.wan", 3, lease)
+	if err := r.Accept(ctx, u); err != nil {
+		t.Fatal(err)
+	}
+	renewed := r.guardGrants[u.Name]
+	if renewed.observedNanos <= original.observedNanos || renewed.untilNanos <= original.untilNanos {
+		t.Fatal("new lease failed to renew observation and expiration")
+	}
+	lease.Active = false
+	u = update(t, r, "service.wan", 4, lease)
+	if err := r.Accept(ctx, u); err != nil {
+		t.Fatal(err)
+	}
+	inactive := r.guardGrants[u.Name]
+	u.Sequence++
+	if err := r.Accept(ctx, u); err != nil {
+		t.Fatal(err)
+	}
+	if replayed := r.guardGrants[u.Name]; replayed.observedNanos != inactive.observedNanos || replayed.untilNanos != inactive.untilNanos {
+		t.Fatal("identical inactive lease renewed its synthetic finite grant")
+	}
+}
 func TestConditionalNetworkFailureDoesNotStartWorker(t *testing.T) {
 	ctx := context.Background()
 	r, n, m := conditionalFixture(t)
