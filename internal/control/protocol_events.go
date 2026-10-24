@@ -65,18 +65,50 @@ func (e *Engine) updateRetirementHealthLocked(err error) {
 
 func (e *Engine) ProcessRetiredProtocolEvents(ctx context.Context) error {
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	if e.journal == nil || e.runtime == nil {
+		e.mu.Unlock()
 		return nil
 	}
 	if e.protocolRelays == nil {
 		e.protocolRelays = protocolevents.NewRetirement(e.journal, e.store.Dir)
 	}
-	err := e.protocolRelays.Recover(ctx, healthRelayNames(e.state.Config), e.runtime.WithStoppedHealthRelays)
-	for _, name := range e.protocolRelays.Recovered() {
-		e.setProtocolErrorLocked("service."+name, nil)
+	relays, runtime := e.protocolRelays, e.runtime
+	names, err := relays.RegisteredNames(ctx)
+	if err != nil || len(names) == 0 {
+		e.updateRetirementHealthLocked(err)
+		e.mu.Unlock()
+		return err
 	}
-	e.updateRetirementHealthLocked(err)
+	e.mu.Unlock()
+	// Waiting for runtime ownership must not block normal protocol publication
+	// on source authority. ApplyConfig takes source -> runtime, so the callback
+	// must try source authority and defer if busy, never invert that lock order.
+	processed := false
+	err = runtime.WithStoppedHealthRelays(ctx, names, func(allowed map[string]bool) error {
+		if !e.mu.TryLock() {
+			return nil
+		}
+		defer e.mu.Unlock()
+		if e.runtime != runtime || e.protocolRelays != relays {
+			return nil
+		}
+		processed = true
+		err := relays.Recover(ctx, healthRelayNames(e.state.Config), func(_ context.Context, _ []string, drain func(map[string]bool) error) error {
+			return drain(allowed)
+		})
+		for _, name := range relays.Recovered() {
+			e.setProtocolErrorLocked("service."+name, nil)
+		}
+		e.updateRetirementHealthLocked(err)
+		return err
+	})
+	if err != nil && !processed {
+		e.mu.Lock()
+		if e.runtime == runtime && e.protocolRelays == relays {
+			e.updateRetirementHealthLocked(err)
+		}
+		e.mu.Unlock()
+	}
 	return err
 }
 

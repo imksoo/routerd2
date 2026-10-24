@@ -55,6 +55,17 @@ func (r *Retirement) Status() RetirementStatus { return r.status }
 // in the latest pass. Only these may clear a former worker's delivery alarm.
 func (r *Retirement) Recovered() []string { return slices.Clone(r.recovered) }
 
+// RegisteredNames snapshots durable candidates before the caller releases
+// source authority to wait for runtime ownership. Recovery reloads the registry
+// after reacquiring source authority; a newly registered name is never granted
+// stopped ownership by an older snapshot.
+func (r *Retirement) RegisteredNames(ctx context.Context) ([]string, error) {
+	if _, _, err := r.load(ctx); err != nil {
+		return nil, err
+	}
+	return slices.Clone(r.names), nil
+}
+
 func (r *Retirement) Declare(names []string) {
 	r.declared = map[string]bool{}
 	for _, name := range names {
@@ -254,8 +265,9 @@ func (r *Retirement) Recover(ctx context.Context, declared []string, withStopped
 	r.next = (r.next + len(selected)) % len(r.names)
 	if err := withStopped(ctx, selected, func(allowed map[string]bool) error {
 		for _, name := range selected {
-			if !allowed[name] {
-				if r.declared[name] {
+			permitted, observed := allowed[name]
+			if !permitted {
+				if observed && r.declared[name] {
 					delete(r.pending, name)
 					delete(r.errors, name)
 				} // live worker resumes delivery; its own alarm is not cleared
