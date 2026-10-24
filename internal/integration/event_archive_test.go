@@ -4,10 +4,14 @@ package integration
 
 import (
 	"bufio"
+	"bytes"
+	"compress/gzip"
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -64,7 +68,7 @@ func TestDaemonEventArchiveAndCapacity(t *testing.T) {
 		if f.control.Do(ctx, "GET", "/v1/event-store", nil, &storage) != nil {
 			return false
 		}
-		return storage.Capacity != nil && storage.Capacity.Events.Rows >= 3
+		return storage.Capacity != nil && storage.Capacity.History.Rows >= 3 && storage.Capacity.ArchivedEvents.Rows >= 1
 	})
 	var before runtimeplan.InstanceStatus
 	if err = f.control.Do(ctx, "GET", "/v1/services/service.wan", nil, &before); err != nil {
@@ -143,12 +147,12 @@ func TestDaemonEventArchiveAndCapacity(t *testing.T) {
 		})
 		t.Log("actual low-space warning visible while real Health producer and control remain healthy")
 	}
-	verifyDaemonCompletedCompaction(t, f, root)
+	verifyDaemonCompletedCompaction(t, f, root, actual)
 	t.Logf("actual CLI exported and independently matched %d complete records through cursor %d, verified offline and preserved source producer authority", exported.Records, exported.Header.TipCursor)
 }
 
 // This uses actual consumer and producer outputs, not injected completed rows.
-func verifyDaemonCompletedCompaction(t *testing.T, f daemonFixture, root string) {
+func verifyDaemonCompletedCompaction(t *testing.T, f daemonFixture, root string, prefix map[uint64]events.Event) {
 	t.Helper()
 	ctx := context.Background()
 	var storage control.EventStoreHealth
@@ -200,6 +204,41 @@ func verifyDaemonCompletedCompaction(t *testing.T, f daemonFixture, root string)
 		storage = control.EventStoreHealth{}
 		return f.control.Do(ctx, "GET", "/v1/event-store", nil, &storage) == nil && storage.CompactionError == "" && f.control.Do(ctx, "GET", "/v1/health", nil, &h) == nil && h.Healthy
 	})
+	if _, err = db.Exec(`CREATE TRIGGER fail_archive BEFORE INSERT ON event_archive BEGIN SELECT RAISE(ABORT,'injected cold event failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	until(t, 10*time.Second, func() bool {
+		storage = control.EventStoreHealth{}
+		return f.control.Do(ctx, "GET", "/v1/event-store", nil, &storage) == nil && storage.ArchiveError != "" && storage.LastError != ""
+	})
+	if err = f.control.Do(ctx, "GET", "/v1/health", nil, &h); !localapi.IsHTTPStatus(err, 503) {
+		t.Fatal("archive failure was healthy", err)
+	}
+	if _, err = db.Exec(`DROP TRIGGER fail_archive`); err != nil {
+		t.Fatal(err)
+	}
+	until(t, 10*time.Second, func() bool {
+		storage = control.EventStoreHealth{}
+		return f.control.Do(ctx, "GET", "/v1/event-store", nil, &storage) == nil && storage.ArchiveError == "" && f.control.Do(ctx, "GET", "/v1/health", nil, &h) == nil && h.Healthy
+	})
+	var archivedCursor uint64
+	var archivedID string
+	var originalBytes, hotBytes int
+	var compressed, digest []byte
+	if err = db.QueryRow(`SELECT e.cursor,e.event_id,length(e.body),a.original_bytes,a.body,a.digest FROM events e JOIN event_archive a ON a.cursor=e.cursor ORDER BY e.cursor LIMIT 1`).Scan(&archivedCursor, &archivedID, &hotBytes, &originalBytes, &compressed, &digest); err != nil || hotBytes != 0 {
+		t.Fatal("actual payload not moved to archive", err)
+	}
+	reader, err := gzip.NewReader(bytes.NewReader(compressed))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(io.LimitReader(reader, 65537))
+	closeErr := reader.Close()
+	sum := sha256.Sum256(body)
+	expected, marshalErr := json.Marshal(prefix[archivedCursor])
+	if err != nil || closeErr != nil || marshalErr != nil || len(body) != originalBytes || !bytes.Equal(sum[:], digest) || !bytes.Equal(body, expected) || prefix[archivedCursor].ID != archivedID {
+		t.Fatal("archive differs from independent live/export prefix", archivedCursor, err)
+	}
 	var before supervisor.Status
 	if err = f.supervisor.Do(ctx, "GET", "/v1/status", nil, &before); err != nil {
 		t.Fatal(err)
@@ -235,5 +274,11 @@ func verifyDaemonCompletedCompaction(t *testing.T, f daemonFixture, root string)
 			t.Fatal("SIGKILL changed completed identity", err)
 		}
 	}
+	var recoveredBody, recoveredDigest []byte
+	var recoveredBytes int
+	if err = db.QueryRow(`SELECT body,original_bytes,digest FROM event_archive WHERE cursor=?`, archivedCursor).Scan(&recoveredBody, &recoveredBytes, &recoveredDigest); err != nil || recoveredBytes != originalBytes || !bytes.Equal(recoveredBody, compressed) || !bytes.Equal(recoveredDigest, digest) {
+		t.Fatal("SIGKILL changed archived body or identity", err)
+	}
+	t.Log("actual cold gzip independently matches complete live/export content; archive write failure and recovery exposed; control SIGKILL preserved original compressed body/digest/cursor")
 	t.Log("actual EventRule and Derived outputs compacted; injected write failure stayed unhealthy across inspection; recovery and control SIGKILL preserved original dedup identity")
 }

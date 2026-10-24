@@ -21,13 +21,13 @@ def phases():
         "phase": "produce", "boot_id": "50695aa4-d7d3-48c1-abab-14e150fae427",
         "origin_boot_id": "50695aa4-d7d3-48c1-abab-14e150fae427",
         "pid": 1, "exec_verified": True, "filesystem": "ext4", "revision": 1,
-        "pending_count": 2, "registered": 1, "retiring": 0, "health_worker": True,
+        "archived_observations": 0, "pending_count": 2, "registered": 1, "retiring": 0, "health_worker": True,
         "health_error": True, "original_supervisor": "c" * 32, "original_epoch": "d" * 32,
         "original_generation": 1, "original_digest": "e" * 64, "observations": origins,
         "completed": [{"kind": 1, "name": "producer", "key": "original", "position": 1, "sha256": "a" * 64}],
     }
     second = dict(copy.deepcopy(first), phase="registry", boot_id="7bbe264e-57c0-4ee6-aa19-67c3a1d244fb",
-                  revision=2, pending_count=0, retiring=1, health_worker=False)
+                  revision=2, archived_observations=2, pending_count=0, retiring=1, health_worker=False)
     for cursor, event in enumerate(second["observations"], 11):
         event["cursor"] = cursor
     second["completed"].append({"kind": 0, "name": "consumer", "key": "rule", "position": 12, "sha256": "b" * 64})
@@ -49,6 +49,8 @@ class PowerWitnessTests(unittest.TestCase):
         extra = {"id": "health/wan/" + "f" * 32, "sha256": "3" * 64, "cursor": 13}
         data[1]["witness"]["observations"].append(extra)
         data[2]["witness"]["observations"].append(copy.deepcopy(extra))
+        for phase in data[1:]:
+            phase["witness"]["archived_observations"] += 1
         POWER.check_phases(data)
 
     def test_orderly_exit_missing_boot_or_wrong_cut_is_rejected(self):
@@ -121,6 +123,15 @@ class PowerWitnessTests(unittest.TestCase):
                 with self.subTest(index=index, mutate=mutate):
                     data = phases()
                     mutate(data[index]["witness"]["completed"])
+                    with self.assertRaises(RuntimeError):
+                        POWER.check_phases(data)
+
+    def test_raw_history_must_be_cold_before_second_cut_and_after_recovery(self):
+        for index in (1, 2):
+            for value in (0, 1, True, 100):
+                with self.subTest(index=index, value=value):
+                    data = phases()
+                    data[index]["witness"]["archived_observations"] = value
                     with self.assertRaises(RuntimeError):
                         POWER.check_phases(data)
 
