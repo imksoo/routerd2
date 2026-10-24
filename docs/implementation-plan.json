@@ -11179,6 +11179,32 @@
         "physical target and performance qualification"
       ],
       "parity_flags_unchanged": true
+    },
+    {
+      "id": "bfd-admin-ack-receipt",
+      "date": "2026-10-24",
+      "status": "implemented_with_regression_and_individual_qemu_acceptance",
+      "code_checkpoint": "959ba98",
+      "work_packages": [
+        "NET-07"
+      ],
+      "evidence": "docs/evidence/2026-10-24-bfd-admin-ack.md",
+      "implemented": [
+        "Stamp finite BFD admin ACK completion with CLOCK_BOOTTIME and bind it to the operation start/deadline",
+        "Drain ready admin ACKs before control updates and timeout evaluation; keep post-close recovery receive fence",
+        "Keep existing 500ms admin and control freshness bounds"
+      ],
+      "validation": [
+        "make check and static amd64/arm64 builds: pass",
+        "paused-consumer queued ACK regression with Race Detector: pass",
+        "negative control with consumer-time deadline policy: expected failure",
+        "QEMU real BFD/BGP Down/recovery and frozen-source expiry: pass without BGP worker replacement"
+      ],
+      "remaining": [
+        "Repeat full same-commit QEMU aggregate after preceding run stopped on BFD admin timeout",
+        "Full NET-07 and deployment qualification remain open"
+      ],
+      "parity_flags_unchanged": true
     }
   ],
   "delivery_goal": {

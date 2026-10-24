@@ -54,6 +54,11 @@ Go自動toolchain選択を妨げる試験builderも修正し、実amd64/arm64署
 [最新の証跡・未完了](evidence/2026-10-24-supervisor-authority.md) を参照。
 durable event、worker単位のauthority/権限分離、多binary runtime等を完了扱いにしない。
 
+固定commitのaggregateでBFD admin ACK timeoutによるBGP worker再起動を検出した。
+`959ba98` ではACKの観測時刻と消費時刻を分け、500ms制限を保持したまま受信済みACKを先に処理する。
+consumer停止の再現・negative control・Race DetectorとQEMU単独で検証し、aggregateを再実行中。
+[BFD ACKの証跡](evidence/2026-10-24-bfd-admin-ack.md) を参照。
+
 **routerd と routerd2 は別製品である。** routerd は稼働中の機能参照元、routerd2 は未リリースの開発対象。
 現在の routerd2 の二バイナリー構成・設定書式・内部API・保存形式には利用者がいないため、後方互換性を要求しない。
 routerd2 の設定書式も新設計に合わせて変更できる。引き継ぐ routerd の機能範囲は維持する。

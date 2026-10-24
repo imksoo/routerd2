@@ -4,7 +4,7 @@
 対象: `https://github.com/imksoo/routerd2`
 
 **継続ゴール:** 全残実装・必要試験・対象実機での利用可能性の受入まで進める。
-部分checkpointでは完了しない。最新コードcheckpointは `9a07f1a`。
+部分checkpointでは完了しない。最新コードcheckpointは `959ba98`。
 fact leafの `max_age` と元の観測時刻の保持、条件式の `for` を実装した。
 producer期限と独立した失効、通知間のflap、timer解除、authority変更を検証し、
 `when_hold` / `ready_when_hold` と復旧待ち中のbackup TCP/UDPも実daemon・QEMUでPASS。
@@ -15,6 +15,12 @@ supervisor全体の再起動にもprotocol通知をfenceする起動ごとのID�
 署名trialのPID 1自動確認と、private ext4の2回起動・設定/SSH保持・未確認trial fallbackもPASS。
 [最新の証跡・制約](evidence/2026-10-24-supervisor-authority.md) を参照。
 全20 QEMU gateの同一commit aggregateは固定worktreeで実行中。一般status reference等の残作業を継続する。
+先行aggregateはBFDのadmin ACK timeoutで停止した。
+ACK観測時刻を保持して遅い消費と区別し、受信済みACKを先に処理する修正を追加した。
+500ms制限は保持し、consumer停止の再現・negative control・Race Detector・QEMU単独で検証した。
+[BFD ACKの証跡](evidence/2026-10-24-bfd-admin-ack.md) を参照。
+修正後のaggregateは `959ba98` の別worktreeで実行中。
+実行先の `dist/all-qemu-bfd-receipt.log` に進行と結果を保持する。
 
 **PVE検証後の追記:** コードcheckpointは `7046fd5` へ進んだ。
 `make check`、権限付きHealth実ソケット（raw ICMP含む）、二WANの実daemon/TCP/UDP/PCAP、
