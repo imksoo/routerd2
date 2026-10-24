@@ -55,7 +55,7 @@ func TestDerivedInputKeepsOriginalAgeAndBreaksUnpolledFlapContinuity(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	v, err := p.Advance(nil, s, false)
+	v, err := p.Advance(nil, s["derived"], false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestDerivedInputKeepsOriginalAgeAndBreaksUnpolledFlapContinuity(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	v, err = p.Advance(v.State, s, false)
+	v, err = p.Advance(v.State, s["derived"], false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestDerivedInputKeepsOriginalAgeAndBreaksUnpolledFlapContinuity(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	v, err = p.Advance(v.State, s, false)
+	v, err = p.Advance(v.State, s["derived"], false)
 	if err != nil || len(v.Emissions) != 0 || v.Status.PendingTransition != "Asserting" {
 		t.Fatal("unpolled flap inherited pending hold", v, err)
 	}
@@ -92,7 +92,7 @@ func TestDerivedInputKeepsOriginalAgeAndBreaksUnpolledFlapContinuity(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	v, err = p.Advance(json.RawMessage(v.State), s, false)
+	v, err = p.Advance(json.RawMessage(v.State), s["derived"], false)
 	if err != nil || v.Status.Asserted != nil || v.Status.Inputs != derived.Indeterminate {
 		t.Fatal("expired observation remained current", v, err)
 	}
