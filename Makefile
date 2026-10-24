@@ -17,11 +17,12 @@ QEMU_SSH_KEY ?=
 LDFLAGS = -s -w -X github.com/imksoo/routerd2/internal/buildinfo.Identity=ROUTERD2-RELEASE-V1:$(RELEASE_ID):END
 BUILD_ARGS = --build-arg GO_VERSION=$(GO_VERSION) --build-arg ALPINE_VERSION=$(ALPINE_VERSION) --build-arg RELEASE_ID=$(RELEASE_ID)
 
-.PHONY: help fmt fmt-check test test-dependencies test-tools race vet check licenses build build-linux release-built-test container container-multi container-smoke apk image qemu-smoke qemu-network qemu-wireguard qemu-ra-dns qemu-daemon qemu-daemon-aftr qemu-protocols qemu-release-boot qemu-storage clean
+.PHONY: help fmt fmt-check test test-dependencies test-tools race vet check check-health-pbr licenses build build-linux release-built-test container container-multi container-smoke apk image qemu-smoke qemu-network qemu-wireguard qemu-ra-dns qemu-daemon qemu-daemon-aftr qemu-protocols qemu-release-boot qemu-storage clean
 
 help:
 	@printf '%s\n' \
 	  'make check             Format, unit tests, race detector, and vet' \
+	  'make check-health-pbr  Required two-WAN real-daemon TCP/UDP failover gate' \
 	  'make licenses          Collect dependency licenses and their manifest' \
 	  'make build             Build both binaries for the current platform' \
 	  'make build-linux       Build static linux/amd64 and linux/arm64 binaries' \
@@ -65,6 +66,9 @@ vet:
 	$(GO) vet ./...
 
 check: fmt-check test test-dependencies test-tools race vet
+
+check-health-pbr: build
+	$(PYTHON) scripts/health-pbr.py --go '$(GO)'
 
 licenses:
 	$(PYTHON) scripts/licenses.py --go '$(GO)' --output dist/licenses
@@ -119,7 +123,7 @@ qemu-daemon-aftr:
 	$(PYTHON) scripts/qemu-network.py --suite daemon-aftr --go '$(GO)' --image-dir $(IMAGE_DIR) --timeout $(QEMU_DAEMON_TIMEOUT)
 
 qemu-protocols:
-	@set -eu; for suite in daemon-resource-program daemon-management daemon-dhcp-dns daemon-legacy-dhcp-dns daemon-bgp daemon-bfd dhcp dhcp-server vrrp ra-client aftr bfd; do \
+	@set -eu; for suite in daemon-resource-program daemon-health-pbr daemon-management daemon-dhcp-dns daemon-legacy-dhcp-dns daemon-bgp daemon-bfd dhcp dhcp-server vrrp ra-client aftr bfd; do \
 	  $(PYTHON) scripts/qemu-network.py --suite "$$suite" --go '$(GO)' --image-dir $(IMAGE_DIR); \
 	done
 

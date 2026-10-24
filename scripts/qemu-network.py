@@ -69,6 +69,13 @@ SUITES = {
         "commands": True,
         "description": "ResourceProgram daemon ownership, traffic, validation and recovery",
     },
+    "daemon-health-pbr": {
+        "package": "./internal/integration", "binary": "daemon.test",
+        "test": "TestDaemonHealthPBRFailoverAndRecovery",
+        "marker": "ROUTERD_HEALTH_PBR_DAEMON_TEST", "timeout": 240,
+        "commands": True,
+        "description": "two-WAN health/PBR TCP/UDP failover, marks, capture and worker recovery",
+    },
     "daemon-dhcp-dns": {
         "package": "./internal/integration", "binary": "daemon.test",
         "test": "TestDaemonDHCPDNSAndOwnershipExpiry",

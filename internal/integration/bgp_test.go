@@ -189,6 +189,10 @@ func fixtureRoute(t *testing.T, prefix, hop string, index int) bool {
 }
 
 func isolateFixture(t *testing.T, name string) bool {
+	return isolateFixtureTimeout(t, name, 75*time.Second)
+}
+
+func isolateFixtureTimeout(t *testing.T, name string, timeout time.Duration) bool {
 	t.Helper()
 	const child = "ROUTERD2_PROTOCOL_FIXTURE"
 	const parentKey = "ROUTERD2_PROTOCOL_PARENT"
@@ -207,7 +211,7 @@ func isolateFixture(t *testing.T, name string) bool {
 		if err != nil {
 			t.Fatal(err)
 		}
-		cmd := exec.Command(exe, "-test.run=^"+name+"$", "-test.v", "-test.timeout=75s")
+		cmd := exec.Command(exe, "-test.run=^"+name+"$", "-test.v", "-test.timeout="+timeout.String())
 		cmd.Env = append(os.Environ(), child+"="+name, parentKey+"="+parent)
 		cmd.SysProcAttr = &syscall.SysProcAttr{Cloneflags: unix.CLONE_NEWUSER | unix.CLONE_NEWNET, UidMappings: []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getuid(), Size: 1}}, GidMappings: []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getgid(), Size: 1}}, GidMappingsEnableSetgroups: false}
 		out, err := cmd.CombinedOutput()

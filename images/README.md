@@ -136,7 +136,7 @@ builder and records independent artifacts under
 make qemu-protocols
 ```
 
-This target runs eleven fixed suites in separate no-NIC guests, using the same
+This target runs thirteen fixed suites in separate no-NIC guests, using the same
 Alpine kernel and module tree as the appliance. CI runs these packet and
 namespace checks in the `images` job: a hosted runner's kernel may omit VRF or
 other drivers even when it provides root access. The host `go` job still runs
@@ -147,6 +147,7 @@ and actual signed-bundle validation.
 | --- | --- | --- |
 | `daemon-management` | `TestDaemonConfigurationAndRecovery` | Embedded SSH editing, commit and process recovery |
 | `daemon-resource-program` | `TestDaemonResourceProgramLifecycleAndRecovery` | Source graph address/route update, real UDP traffic, rejected graph nonmutation, killed control recovery and foreign ownership preservation |
+| `daemon-health-pbr` | `TestDaemonHealthPBRFailoverAndRecovery` | Two independent WAN peers and a LAN, marked/scoped health probes, Ethernet capture, real TCP/UDP failover and recovery, worker restart, delayed results, finite fact expiry and confirmed rollback |
 | `daemon-dhcp-dns` | `TestDaemonDHCPDNSAndOwnershipExpiry` | DHCP leases projected into DNS and ownership expiry |
 | `daemon-legacy-dhcp-dns` | `TestDaemonMigratedDHCPDNSAndOwnershipExpiry` | Original resource YAML migration, explicit finite-source DNS policy, DHCP acquisition, scoped INPUT exception, producer expiry and journal recovery |
 | `daemon-bgp` | `TestDaemonBGPFIBAndOwnershipExpiry` | Real BGP workers, kernel FIB and ownership expiry |
