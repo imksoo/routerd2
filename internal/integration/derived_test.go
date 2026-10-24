@@ -99,6 +99,7 @@ func TestDaemonDerivedHealthCurrentStatusAndDurability(t *testing.T) {
 	}}
 	root := t.TempDir()
 	f := startFixtureDaemonAt(t, doc, root)
+	t.Cleanup(func() { fixtureStorageDiagnostics(t, root) })
 	ctx := context.Background()
 	view := func(id string) derivedcontroller.Observation {
 		t.Helper()
