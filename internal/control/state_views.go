@@ -170,7 +170,7 @@ func (e *Engine) configurationViewRoutes(mux *http.ServeMux) {
 }
 
 func (e *Engine) writeConfigurationState(w http.ResponseWriter, s State, mutation bool) {
-	if s.EventJournalError != "" {
+	if s.EventJournalError != "" || s.EventRuleError != "" {
 		s.Healthy = false
 	}
 	encoded, err := json.Marshal(s)
