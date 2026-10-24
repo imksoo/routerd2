@@ -1,0 +1,107 @@
+package events
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"path/filepath"
+	"testing"
+)
+
+func TestStatefulConsumerCommitsStateCursorAndWorkTogether(t *testing.T) {
+	ctx := context.Background()
+	options := Options{Directory: filepath.Join(t.TempDir(), "events")}
+	s, err := Open(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	old, err := s.Append(ctx, testEvent("historical"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	start, err := s.Checkpoint(ctx, "rule")
+	if err != nil || start.Cursor != old.Cursor || string(start.State) != "{}" {
+		t.Fatalf("initial checkpoint: %+v %v", start, err)
+	}
+	r, err := s.Append(ctx, testEvent("counted-once"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := json.RawMessage(`{"count":1}`)
+	jobs := []Job{{Key: "fire-one", Payload: json.RawMessage(`{}`)}}
+	if _, err = s.db.Exec(`CREATE TRIGGER fail_state BEFORE UPDATE ON consumers BEGIN SELECT RAISE(ABORT,'injected state write failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Transition(ctx, "rule", start, r.Cursor, state, jobs); err == nil {
+		t.Fatal("expected transaction failure")
+	}
+	unchanged, err := s.Checkpoint(ctx, "rule")
+	if err != nil || unchanged.Cursor != start.Cursor || unchanged.Version != start.Version || string(unchanged.State) != "{}" {
+		t.Fatalf("state survived failed transaction: %+v %v", unchanged, err)
+	}
+	if pending, err := s.Pending(ctx, "rule", 10); err != nil || len(pending) != 0 {
+		t.Fatal("work escaped rolled-back state", pending, err)
+	}
+	if _, err = s.db.Exec(`DROP TRIGGER fail_state`); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Transition(ctx, "rule", start, r.Cursor, state, jobs); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Transition(ctx, "rule", start, r.Cursor, state, jobs); !errors.Is(err, ErrConflict) {
+		t.Fatal("repeated input counted twice", err)
+	}
+	if err = s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, err := s.Checkpoint(ctx, "rule")
+	if err != nil || next.Cursor != r.Cursor || next.Version != start.Version+1 || string(next.State) != string(state) {
+		t.Fatalf("checkpoint lost on reopen: %+v %v", next, err)
+	}
+	// Timer-driven transitions keep the input cursor but still require a fresh
+	// version. A stale timer or a competing consumer cannot emit twice.
+	if err = s.Transition(ctx, "rule", next, next.Cursor, json.RawMessage(`{"count":0}`), []Job{{Key: "timer", Payload: json.RawMessage(`{}`)}}); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Transition(ctx, "rule", next, next.Cursor, json.RawMessage(`{"count":0}`), nil); !errors.Is(err, ErrConflict) {
+		t.Fatal("stale timer advanced checkpoint", err)
+	}
+	if _, err = s.Cursor(ctx, "rule"); !errors.Is(err, ErrConflict) {
+		t.Fatal("stateless cursor accepted stateful consumer", err)
+	}
+	if err = s.Schedule(ctx, "rule", next.Cursor, next.Cursor+1, nil); !errors.Is(err, ErrConflict) {
+		t.Fatal("stateless scheduler bypassed state", err)
+	}
+}
+
+func TestConsumerStateCapacityRejectsWithoutAdvancingOrDroppingWork(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(Options{Directory: filepath.Join(t.TempDir(), "events"), MaxConsumerStateBytes: 8})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	checkpoint, err := s.Checkpoint(ctx, "small")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := s.Append(ctx, testEvent("capacity"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Transition(ctx, "small", checkpoint, r.Cursor, json.RawMessage(`{"count":100}`), []Job{{Key: "must-not-escape", Payload: json.RawMessage(`{}`)}}); !errors.Is(err, ErrCapacity) {
+		t.Fatal("expected state byte capacity", err)
+	}
+	after, err := s.Checkpoint(ctx, "small")
+	if err != nil || after.Cursor != checkpoint.Cursor || after.Version != checkpoint.Version || string(after.State) != "{}" {
+		t.Fatal("capacity advanced checkpoint", after, err)
+	}
+	if jobs, err := s.Pending(ctx, "small", 10); err != nil || len(jobs) != 0 {
+		t.Fatal("capacity leaked work", jobs, err)
+	}
+}
