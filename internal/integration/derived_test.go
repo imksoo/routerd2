@@ -35,8 +35,14 @@ import (
 )
 
 func TestDaemonDerivedHealthCurrentStatusAndDurability(t *testing.T) {
-	if !isolateFixture(t, "TestDaemonDerivedHealthCurrentStatusAndDurability") {
+	// The full sequence now includes permanent retirement and two more control
+	// restarts. Keep the child inside the existing 170s QEMU parent budget;
+	// individual freshness and operation deadlines remain unchanged.
+	if !isolateFixtureTimeout(t, "TestDaemonDerivedHealthCurrentStatusAndDurability", 150*time.Second) {
 		return
+	}
+	if deadline, ok := t.Deadline(); ok {
+		t.Logf("isolated lifecycle deadline remaining: %s", time.Until(deadline).Round(time.Second))
 	}
 	peerNS := fixturePeerNamespace(t, "wan0", "peer0")
 	peer, err := netlink.NewHandleAt(peerNS, unix.NETLINK_ROUTE)
