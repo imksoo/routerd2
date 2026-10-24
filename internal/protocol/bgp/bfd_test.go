@@ -98,6 +98,7 @@ type fakeAdmin struct {
 	commands               []string
 	holdDown, ignoreEnable bool
 	afterList              func(api.PeerState_AdminState)
+	beforeDisable          func()
 }
 
 func newFakeAdmin() *fakeAdmin {
@@ -113,6 +114,9 @@ func (f *fakeAdmin) EnablePeer(_ context.Context, _ *api.EnablePeerRequest) erro
 	return nil
 }
 func (f *fakeAdmin) DisablePeer(_ context.Context, _ *api.DisablePeerRequest) error {
+	if f.beforeDisable != nil {
+		f.beforeDisable()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.commands = append(f.commands, "disable")
@@ -121,6 +125,41 @@ func (f *fakeAdmin) DisablePeer(_ context.Context, _ *api.DisablePeerRequest) er
 		f.state = api.PeerState_SESSION_STATE_IDLE
 	}
 	return nil
+}
+
+func TestBFDAdminWatchdogIsSeparateFromImmediateProofRevocation(t *testing.T) {
+	revoked := make(chan bool, 1)
+	h := newGateHarnessPrepared(t, func(h *gateHarness) {
+		h.admin.holdDown = true
+		h.admin.beforeDisable = func() { revoked <- !h.view.snapshot()[gatePeer].Enabled }
+	})
+	h.send(gateGrant(h.clock.Load(), 1, 0), true, 0)
+	gateWait(t, func() bool { return h.view.snapshot()[gatePeer].Enabled }, "initial source did not enable")
+	h.clock.Add(int64(20 * time.Millisecond))
+	h.send(gateGrant(h.clock.Load(), 2, 1), true, 0)
+	select {
+	case ok := <-revoked:
+		if !ok {
+			t.Fatal("admin operation started before proof revocation")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("disable not requested")
+	}
+	// GoBGP may take longer to acknowledge its admin state than the control
+	// freshness window. Fresh control does not revive an in-progress disable.
+	h.clock.Add(int64(800 * time.Millisecond))
+	h.send(gateGrant(h.clock.Load(), 3, 1), true, 0)
+	gateWait(t, func() bool { return h.view.snapshotWithVersion()[gatePeer].state.operation == "disable" }, "bounded admin operation was aborted too early")
+	if h.view.snapshot()[gatePeer].Enabled {
+		t.Fatal("pending disable retained forwarding proof")
+	}
+	h.admin.mu.Lock()
+	h.admin.state = api.PeerState_SESSION_STATE_IDLE
+	h.admin.mu.Unlock()
+	gateWait(t, func() bool { return h.view.snapshotWithVersion()[gatePeer].state.operation == "" }, "delayed admin state was not acknowledged within watchdog")
+	if h.view.snapshot()[gatePeer].Enabled {
+		t.Fatal("admin ACK reused pre-close packet evidence")
+	}
 }
 func (f *fakeAdmin) ListPeer(ctx context.Context, _ *api.ListPeerRequest, fn func(*api.Peer)) error {
 	if err := ctx.Err(); err != nil {
