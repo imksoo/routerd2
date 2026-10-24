@@ -72,10 +72,15 @@ def build_guest(args, temporary, common):
         if module not in module_names:
             raise RuntimeError(f"source kernel is missing required storage module {module}")
     environment = dict(os.environ, CGO_ENABLED="0", GOOS="linux", GOARCH="amd64",
-                       GOAMD64="v1", GOFLAGS="", GOTOOLCHAIN="local")
+                       GOAMD64="v1", GOFLAGS="")
+    # Keep the project-selected toolchain, even when the system go launcher is
+    # older and relies on Go's automatic toolchain download/cache.
+    go_root = subprocess.check_output([args.go, "env", "GOROOT"], cwd=PROJECT, env=environment, text=True).strip()
+    go_binary = str(Path(go_root) / "bin/go")
+    environment["GOTOOLCHAIN"] = "local"
     print("Building the guest initializer and fresh signed command pairs...", flush=True)
     subprocess.run([
-        args.go, "build", "-mod=readonly", "-trimpath", "-buildvcs=false",
+        go_binary, "build", "-mod=readonly", "-trimpath", "-buildvcs=false",
         "-ldflags", "-s -w", "-o", str(root / "init"), "./images/storage-test/guest",
     ], check=True, cwd=PROJECT, env=environment)
     hashes = {}
@@ -85,7 +90,7 @@ def build_guest(args, temporary, common):
         for name in ("routerd", "routerd-modules"):
             binary = target / name
             subprocess.run([
-                args.go, "build", "-mod=readonly", "-trimpath", "-buildvcs=false",
+                go_binary, "build", "-mod=readonly", "-trimpath", "-buildvcs=false",
                 "-ldflags", "-s -w -X github.com/imksoo/routerd2/internal/buildinfo.Identity="
                 f"ROUTERD2-RELEASE-V1:{identity}:END",
                 "-o", str(binary), f"./cmd/{name}",
@@ -97,6 +102,7 @@ def build_guest(args, temporary, common):
     verify_gzip(archive)
     manifest = {
         "schema_version": 1, "purpose": "persistent-state-and-signed-userland-two-boot-fallback",
+        "go": subprocess.check_output([go_binary, "version"], env=environment, text=True).strip(),
         "target": "linux/amd64", "kernel_release": kernel_manifest["kernel_release"],
         "kernel_sha256": sha256(kernel), "initramfs_sha256": sha256(archive),
         "source_image_manifest_sha256": hashlib.sha256(source_manifest).hexdigest(),

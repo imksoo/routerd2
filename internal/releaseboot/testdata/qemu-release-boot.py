@@ -123,7 +123,12 @@ def write_initramfs(root, output):
 def build_image(args, image, output):
     source_manifest = json.loads((image / "manifest.json").read_text())
     environment = dict(os.environ, CGO_ENABLED="0", GOOS="linux", GOARCH="amd64",
-                       GOAMD64="v1", GOFLAGS="", GOTOOLCHAIN="local")
+                       GOAMD64="v1", GOFLAGS="")
+    # Resolve go.mod's selected toolchain before disabling automatic selection.
+    # The system launcher may be older than the downloaded project toolchain.
+    go_root = subprocess.check_output([args.go, "env", "GOROOT"], cwd=PROJECT, env=environment, text=True).strip()
+    go_binary = str(Path(go_root) / "bin/go")
+    environment["GOTOOLCHAIN"] = "local"
     with tempfile.TemporaryDirectory(prefix="routerd2-release-boot-") as temporary:
         root = Path(temporary)
         for directory in ("dev", "proc", "sys", "run", "tmp", "var/lib", "test"):
@@ -133,7 +138,7 @@ def build_image(args, image, output):
         extract_modules(image / "initramfs.cpio.gz", root)
         print("Building the guest-only initializer and independent health probe...", flush=True)
         subprocess.run([
-            args.go, "build", "-mod=readonly", "-trimpath", "-buildvcs=false",
+            go_binary, "build", "-mod=readonly", "-trimpath", "-buildvcs=false",
             "-ldflags", "-s -w", "-o", str(root / "init"),
             "./internal/releaseboot/testdata/guest",
         ], check=True, cwd=PROJECT, env=environment)
@@ -145,7 +150,7 @@ def build_image(args, image, output):
             for name in ("routerd", "routerd-modules"):
                 binary = target / name
                 subprocess.run([
-                    args.go, "build", "-mod=readonly", "-trimpath", "-buildvcs=false",
+                    go_binary, "build", "-mod=readonly", "-trimpath", "-buildvcs=false",
                     "-ldflags", "-s -w -X github.com/imksoo/routerd2/internal/buildinfo.Identity="
                     f"ROUTERD2-RELEASE-V1:{identity}:END",
                     "-o", str(binary), f"./cmd/{name}",
@@ -153,6 +158,7 @@ def build_image(args, image, output):
                 hashes[f"/test/bin/{directory}/{name}"] = sha256(binary)
         manifest = {
             "schema_version": 1,
+            "go": subprocess.check_output([go_binary, "version"], env=environment, text=True).strip(),
             "purpose": "real-pid1-signed-userland-selection-and-health-confirmation",
             "target": "linux/amd64",
             "kernel_release": source_manifest["kernel_release"],
