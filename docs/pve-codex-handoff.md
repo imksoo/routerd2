@@ -6,6 +6,15 @@
 **継続ゴール:** 全残実装・必要試験・対象実機での利用可能性の受入まで進める。
 部分checkpointでは完了しない。最新product checkpointは `f5e9cc5`。
 
+最新の検証checkpointでは、製品コードf5e9cc5を変更せず、専用fixture `9e14ce8` で三回の実kernel bootを追加した。
+未配信queue保存後と、target保存/local ACK後の登録解除失敗中に、hostからQEMUをSIGKILLした。
+同じ256 MiB ext4 diskで、最初の2件と次bootの追加2件が一度ずつ配信され、二度目のcut後も内容・cursor 4/5/6/7が一致した。
+登録待ちが再発見され、障害解除後は健全に戻り、Health/Derived現在値は復活しない。旧通知と履歴POSTは409。
+全体check/Race/vet/static両arch build17.24秒、三boot QEMU合計74.36秒PASS。
+これはguest VMの二境界の強制終了試験であり、host/物理storage電源断・全cut点・全計画の受入ではない。
+[電源断試験の証跡と残作業](evidence/2026-10-24-health-power.md) と
+[専用fixture](../images/health-power-test/README.md) を参照。再現targetは `make qemu-health-power`。
+
 宣言を残した条件inactiveのHealth queueを、workerの再有効化と排他的に回収する。
 選択binding・fresh supervisor・queue lockを確認し、宣言済みの所有登録は空になっても保持する。
 `stopped_pending_relays` は途中のpageと保存失敗を可視化し、現在instance/Derived入力を復活させない。

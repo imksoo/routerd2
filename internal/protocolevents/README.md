@@ -106,10 +106,17 @@ worker before publishing the unpersisted result as a current fact. Previously
 accepted entries remain intact. Probe execution and durable acceptance are not
 one hardware transaction: a crash before enqueue commits has no recorded probe.
 The global journal still has its finite row/byte capacity; retention/archive,
-capacity alarms, scale/latency and abrupt QEMU power-loss acceptance remain
-required for long-running production use. See the
+capacity alarms and scale/latency remain required for long-running production
+use. Dedicated guest power-cut acceptance is linked below. See the
 [initial relay evidence](../../docs/evidence/2026-10-24-health-protocol-events.md) and
 [retirement evidence](../../docs/evidence/2026-10-24-health-retirement.md).
 
 [Stopped declared queue acceptance](../../docs/evidence/2026-10-24-health-stopped.md)
 records the final native/guest paths, contention failures and remaining work.
+
+[Two abrupt guest cuts across three boots](../../docs/evidence/2026-10-24-health-power.md)
+verify frozen queue acceptance and target/local ACK before registry ACK. The
+fixture uses the real product to mount/recover one ext4 disk and supplies its
+expected witness through UART and the next test initramfs. This covers those
+guest loss boundaries; physical host/controller loss, every write boundary,
+retention and scale qualification remain separate.

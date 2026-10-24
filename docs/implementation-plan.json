@@ -11593,6 +11593,38 @@
         "Privileged effects, idempotency, federation, full work-package and physical/NIC/performance acceptance"
       ],
       "parity_flags_unchanged": true
+    },
+    {
+      "id": "health-queue-qemu-abrupt-power-cuts",
+      "date": "2026-10-24",
+      "status": "partial_recovery_acceptance_verified",
+      "code_checkpoint": "f5e9cc5f500bc77003d19d73267cfaa9b7455942",
+      "fixture_checkpoint": "9e14ce820f06740972c9b7df834c2393ee169107",
+      "work_packages": [
+        "CORE-04",
+        "NET-01"
+      ],
+      "evidence": "docs/evidence/2026-10-24-health-power.md",
+      "implemented": [
+        "Dedicated no-NIC three-boot real appliance PID 1/supervisor/control/network/health fixture on one private 256MiB ext4 virtio disk; no host disk selection or host mounts",
+        "Host SIGKILL after frozen worker queue acceptance and again after target publication/local ACK with registry ACK failure; UART witness and next-boot test initramfs avoid guest witness fsync",
+        "Strict host phase/witness verifier rejects orderly exits, failed phases, incomplete UART, reused boots/authority, missing/changed/duplicate events and recursored history; guest compares complete content and stable cursor"
+      ],
+      "validation": [
+        "Host negative tests committed before implementation; actual failed-phase false acceptance fixed; Go history comparison covers independent content/cursor/duplication failures under Race",
+        "All Python21 tests, related Go Race/vet and final clean 1fbb2d5 make check build-linux pass 17.24s (cached suites reported as cached); static amd64/arm64 artifacts recorded separately from guest ELF identity",
+        "First three-boot QEMU run passes 74.36s: produce 24.65s SIGKILL/-9, registry 26.61s SIGKILL/-9, recovered 23.10s poweroff/0; three distinct kernel boot IDs",
+        "All two first-boot accepted observations survive; two newly accepted second-boot observations also included; four complete events retain single publication and cursors 4/5/6/7 through second cut",
+        "Local queue ACK remains empty after restart; registry failure remains visible until removed; committed revision2 persists, old history/current authority returns409, no health worker/current Derived instance returns, retained EventRule consumes recovered history",
+        "Actual product performs disk mounts on all boots; later fixture initializers do not pre-mount/recover/repair; guest 1024MiB RAM/two vCPU and fixed command pair scope recorded"
+      ],
+      "remaining": [
+        "Host/physical storage power loss, exhaustive cut boundaries and selected hardware/NIC/performance profile",
+        "Retention/archive/capacity alarms, aggregate filesystem budget, scale and long-running qualification",
+        "Other raw producers/status providers, structured fields/Derived chaining, privileged effects and federation",
+        "Product-version migration/full database rollback, signed runtime lifecycle and all remaining work-package acceptance"
+      ],
+      "parity_flags_unchanged": true
     }
   ],
   "delivery_goal": {
