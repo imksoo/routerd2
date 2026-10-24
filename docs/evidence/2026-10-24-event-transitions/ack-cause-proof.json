@@ -1,0 +1,8 @@
+{
+  "disk_inspection": "debugfs read-only on private regular-file disk; no host mount",
+  "journal_events": 1,
+  "revision": 2,
+  "current_pending": 0,
+  "current_file_matches_first_witness": false,
+  "reconstructed_pending_record_matches_first_witness": true
+}

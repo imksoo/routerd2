@@ -85,6 +85,14 @@ protocol event、EventRule/DerivedEvent、consumer作用、federation、retentio
 全体check/static buildと、control再起動後に実SSHから永続APIと同じ履歴を読むQEMUがPASS。
 [CLI証跡](evidence/2026-10-24-observations-cli.md) を参照。全計画の判定は据え置く。
 
+`12f9be6` ではstateful consumerの状態/cursor/job transactionとtimer version CAS、
+cursorのみのrollback拒否、EventRule全8演算のpure componentを追加した。
+固定routerdとの直接比較、実SQLite FULL/保存失敗/SIGKILL復元、全体check/static buildがPASS。
+二回起動で検出したoutbox ACKとraw file hashの競合は、実diskで原因を証明してfixtureを修正した。
+元のhash比較を保持し、設定event ID/cursorの二kernel起動保持も追加してPASS。
+[詳細・scope](evidence/2026-10-24-event-transitions.md) を参照。
+EventRule resource/daemon接続、DerivedEvent、consumer作用等は残る。
+
 **routerd と routerd2 は別製品である。** routerd は稼働中の機能参照元、routerd2 は未リリースの開発対象。
 現在の routerd2 の二バイナリー構成・設定書式・内部API・保存形式には利用者がいないため、後方互換性を要求しない。
 routerd2 の設定書式も新設計に合わせて変更できる。引き継ぐ routerd の機能範囲は維持する。

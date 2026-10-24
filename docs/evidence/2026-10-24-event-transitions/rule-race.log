@@ -1,0 +1,50 @@
+=== RUN   TestPinnedImmediateOperatorContracts
+=== RUN   TestPinnedImmediateOperatorContracts/any_of
+=== RUN   TestPinnedImmediateOperatorContracts/all_of
+=== RUN   TestPinnedImmediateOperatorContracts/sequence
+=== RUN   TestPinnedImmediateOperatorContracts/strict_sequence
+=== RUN   TestPinnedImmediateOperatorContracts/count
+=== RUN   TestPinnedImmediateOperatorContracts/window_inclusive_boundary
+=== RUN   TestPinnedImmediateOperatorContracts/throttle_inclusive_boundary
+--- PASS: TestPinnedImmediateOperatorContracts (0.02s)
+    --- PASS: TestPinnedImmediateOperatorContracts/any_of (0.00s)
+    --- PASS: TestPinnedImmediateOperatorContracts/all_of (0.00s)
+    --- PASS: TestPinnedImmediateOperatorContracts/sequence (0.00s)
+    --- PASS: TestPinnedImmediateOperatorContracts/strict_sequence (0.00s)
+    --- PASS: TestPinnedImmediateOperatorContracts/count (0.00s)
+    --- PASS: TestPinnedImmediateOperatorContracts/window_inclusive_boundary (0.00s)
+    --- PASS: TestPinnedImmediateOperatorContracts/throttle_inclusive_boundary (0.00s)
+=== RUN   TestDurableAbsenceDebounceAndSpecReplacement
+=== RUN   TestDurableAbsenceDebounceAndSpecReplacement/absence
+=== RUN   TestDurableAbsenceDebounceAndSpecReplacement/debounce
+--- PASS: TestDurableAbsenceDebounceAndSpecReplacement (0.01s)
+    --- PASS: TestDurableAbsenceDebounceAndSpecReplacement/absence (0.00s)
+    --- PASS: TestDurableAbsenceDebounceAndSpecReplacement/debounce (0.00s)
+=== RUN   TestCorrelationAndLiteralTemplateExpansion
+--- PASS: TestCorrelationAndLiteralTemplateExpansion (0.00s)
+=== RUN   TestInvalidRulesAndExpiredInputsNeverEmit
+--- PASS: TestInvalidRulesAndExpiredInputsNeverEmit (0.00s)
+=== RUN   TestDueTimerBatchesAreBoundedAndStable
+--- PASS: TestDueTimerBatchesAreBoundedAndStable (1.38s)
+=== RUN   TestStateBudgetFailsBeforeReturningAnyPartialEmission
+--- PASS: TestStateBudgetFailsBeforeReturningAnyPartialEmission (4.14s)
+=== RUN   TestImmediateOutputsMatchPinnedRouterdReference
+=== RUN   TestImmediateOutputsMatchPinnedRouterdReference/all_of/
+=== RUN   TestImmediateOutputsMatchPinnedRouterdReference/any_of/
+=== RUN   TestImmediateOutputsMatchPinnedRouterdReference/sequence/
+=== RUN   TestImmediateOutputsMatchPinnedRouterdReference/count/
+=== RUN   TestImmediateOutputsMatchPinnedRouterdReference/window/
+=== RUN   TestImmediateOutputsMatchPinnedRouterdReference/throttle/
+=== RUN   TestImmediateOutputsMatchPinnedRouterdReference/all_of/resource.name
+=== RUN   TestImmediateOutputsMatchPinnedRouterdReference/all_of/_resource.name_
+--- PASS: TestImmediateOutputsMatchPinnedRouterdReference (0.02s)
+    --- PASS: TestImmediateOutputsMatchPinnedRouterdReference/all_of/ (0.00s)
+    --- PASS: TestImmediateOutputsMatchPinnedRouterdReference/any_of/ (0.00s)
+    --- PASS: TestImmediateOutputsMatchPinnedRouterdReference/sequence/ (0.00s)
+    --- PASS: TestImmediateOutputsMatchPinnedRouterdReference/count/ (0.00s)
+    --- PASS: TestImmediateOutputsMatchPinnedRouterdReference/window/ (0.00s)
+    --- PASS: TestImmediateOutputsMatchPinnedRouterdReference/throttle/ (0.00s)
+    --- PASS: TestImmediateOutputsMatchPinnedRouterdReference/all_of/resource.name (0.00s)
+    --- PASS: TestImmediateOutputsMatchPinnedRouterdReference/all_of/_resource.name_ (0.00s)
+PASS
+ok  	github.com/imksoo/routerd2/internal/eventrule	6.591s

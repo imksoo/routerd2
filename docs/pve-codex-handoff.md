@@ -4,7 +4,19 @@
 対象: `https://github.com/imksoo/routerd2`
 
 **継続ゴール:** 全残実装・必要試験・対象実機での利用可能性の受入まで進める。
-部分checkpointでは完了しない。最新コードcheckpointは `39f52e0`。
+部分checkpointでは完了しない。最新コードcheckpointは `12f9be6`。
+
+state/cursor/outboxの同時保存、timer version CAS、cursorだけの巻き戻し拒否を追加した。
+event DB schemaは3。未公開1/2はD-09に従いread-only拒否し、互換readerは作らない。
+EventRule全8演算のpure componentと安定ID/永続timer/budgetを追加し、固定routerdとの
+直接比較、実SQLite保存失敗後のretry/reopen、Race/full check/static buildがPASS。
+ResourceProgram/daemonのEventRule resourceへは未接続。
+
+`03cac87` の二回起動はoutbox ACK前にconfig.jsonのhashを採ったためFAILした。
+private diskのread-only抽出・未ACKレコード復元で初回hashと完全一致を確認した。
+fixtureをpublicationとACKの両方を待つ形へ修正し、file全体hash比較を保持したまま
+設定event ID/cursor一致も追加した。固定 `f4f6140` の二回起動は124.67秒でPASS。
+[最新証跡・明示した残作業](evidence/2026-10-24-event-transitions.md) を参照。
 
 `show observations [after CURSOR] [limit 1..16]` を運用/candidateモードと補完へ追加した。
 全体check/static buildと、control SIGKILL後に実SSHでAPIと同じ履歴を読むQEMU試験がPASS。
@@ -24,7 +36,7 @@ read-onlyのbounded `/v1/observations` とhealthのpending/errorを追加した�
 BFD admin watchdogは2秒、control freshnessは500ms。
 [保存部・BFD方針の証跡](evidence/2026-10-24-events-clock.md) に変更経緯を保持する。
 
-未完了はprotocol event producer、EventRule/DerivedEvent、consumer作用、federation、
+未完了はprotocol event producer、EventRuleのresource/daemon接続、DerivedEvent、consumer作用、federation、
 retention/archive/容量alarm、一般status reference、多binary runtime/startup handoff等の全計画。
 対象機種・NIC・性能条件も未確定で、実機利用可能とはまだ判定しない。
 完了したdetached worktreeは証跡を回収して削除した。private原log/manifest・診断patchは

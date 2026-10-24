@@ -11313,6 +11313,39 @@
         "Remaining implementation plan and physical target qualification"
       ],
       "parity_flags_unchanged": true
+    },
+    {
+      "id": "stateful-consumer-and-native-eventrule-evaluator",
+      "date": "2026-10-24",
+      "status": "partial_implementation_with_storage_and_component_acceptance",
+      "code_checkpoint": "12f9be6",
+      "work_packages": [
+        "CORE-04",
+        "DIST-01",
+        "DIST-02"
+      ],
+      "evidence": "docs/evidence/2026-10-24-event-transitions.md",
+      "implemented": [
+        "Atomic consumer state/cursor/outbox checkpoints, version fences for timers and cursor-to-state binding against partial rollback",
+        "Bounded state bytes and schema-3 read-only rejection of discarded prototype formats",
+        "Pure EventRule evaluator for all eight operators with stable emissions, serialized timers and output/state budgets",
+        "Storage witness waits for durable config event and producer ACK, retains complete file hash checks and compares event identity across two boots"
+      ],
+      "validation": [
+        "Clean make check/static amd64 and arm64 at final checkpoint: pass",
+        "Actual SQLite FULL, failed state/cursor write, concurrent timer CAS and SIGKILL WAL state recovery: pass under Race Detector",
+        "Pinned routerd immediate-output comparison, deterministic timer/budget fixtures, real evaluator+SQLite checkpoint retry and reopen: pass",
+        "Pinned schema-3 QEMU management at 03cac87: pass 37.97s",
+        "Storage at 03cac87 failed on hash sampled before outbox ACK; actual disk reconstruction proved exact metadata cause",
+        "Fixed storage at f4f6140: pass 124.67s with config/SSH/sentinel and event ID/cursor retained; original whole-file hash comparison kept"
+      ],
+      "remaining": [
+        "EventRule resource compilation/lifecycle/readiness/status, daemon consumers and source-fenced output publication",
+        "DerivedEvent, protocol event producers, federation and privileged effect idempotency/authorization",
+        "Retention/archive/capacity alarms and rule checkpoint QEMU power-loss acceptance",
+        "Complete implementation plan and physical/NIC/performance acceptance"
+      ],
+      "parity_flags_unchanged": true
     }
   ],
   "delivery_goal": {
