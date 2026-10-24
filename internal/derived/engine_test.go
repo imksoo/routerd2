@@ -181,3 +181,49 @@ func TestGroupedInputAndKnownFalseDominateUnknown(t *testing.T) {
 		t.Fatal("known false did not dominate conjunction", r, err)
 	}
 }
+
+func TestHysteresisUsesBoottimeAndBoundsCurrentStatusAtItsDeadline(t *testing.T) {
+	p := compile(t, "1s", false)
+	r, err := p.Advance(nil, snapshot(t, "boot/config", "worker", "Pending", true, second, 10*second), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err = p.Advance(r.State, snapshot(t, "boot/config", "worker", "Up", true, 2*second, 10*second), false)
+	if err != nil || r.ValidUntilNanos != 3*second {
+		t.Fatal("pending status can outlive its timer", r, err)
+	}
+	jump, err := NewSnapshot("wall-jump", "boot/config", 2500*uint64(time.Millisecond), wall.Add(24*time.Hour), map[string]Value{ref: {Text: "Up", Known: true, Scope: "boot/config", Origin: "worker", ObservedNanos: 2 * second, ExpiresNanos: 10 * second}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err = p.Advance(r.State, jump, false)
+	if err != nil || len(r.Emissions) != 0 {
+		t.Fatal("wall jump completed monotonic hold", r, err)
+	}
+	r, err = p.Advance(r.State, snapshot(t, "boot/config", "worker", "Up", true, 3*second, 10*second), false)
+	if err != nil || len(r.Emissions) != 1 || !r.Emissions[0].Event.Time.Equal(wall.Add(3*time.Second)) {
+		t.Fatal("timer changed its original event time", r, err)
+	}
+	r, err = p.Advance(r.State, snapshot(t, "boot/config", "worker", "Pending", true, 4*second, 10*second), false)
+	if err != nil || r.ValidUntilNanos != 5*second || r.Status.Asserted == nil || !*r.Status.Asserted {
+		t.Fatal("retracting true status has no bounded deadline", r, err)
+	}
+}
+
+func TestZeroExpiryFutureAndMissingValuesStayIndeterminate(t *testing.T) {
+	p := compile(t, "0s", true)
+	for _, value := range []Value{
+		{Text: "Up", Known: true, Scope: "boot/config", Origin: "worker", ObservedNanos: second, ExpiresNanos: 0},
+		{Text: "Up", Known: true, Scope: "boot/config", Origin: "worker", ObservedNanos: 3 * second, ExpiresNanos: 5 * second},
+		{Text: "Up", Known: false, Scope: "boot/config", Origin: "worker", ObservedNanos: second, ExpiresNanos: 5 * second},
+	} {
+		s, err := NewSnapshot("invalid-value", "boot/config", 2*second, wall, map[string]Value{ref: value})
+		if err != nil {
+			t.Fatal(err)
+		}
+		r, err := p.Advance(nil, s, false)
+		if err != nil || len(r.Emissions) != 0 || r.Status.Asserted != nil || r.ValidUntilNanos != 0 {
+			t.Fatal("invalid observation produced current assertion", r, err)
+		}
+	}
+}
