@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 	"path/filepath"
 	"syscall"
@@ -22,6 +23,7 @@ import (
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/protocol/health"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
+	"github.com/imksoo/routerd2/internal/runtimeplan"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 	"github.com/imksoo/routerd2/internal/supervisor"
 )
@@ -115,6 +117,18 @@ func testDaemonHealthHistoryWithoutReactivation(t *testing.T, conditional bool) 
 			return len(expected) > 0 // already-saved/unACKed prefixes cannot satisfy this proof
 		})
 		var state control.State
+		var oldProducer serviceconfig.Update
+		if conditional {
+			until(t, 5*time.Second, func() bool {
+				var current derivedcontroller.Observation
+				var instance runtimeplan.InstanceStatus
+				if f.control.Do(ctx, "GET", "/v1/derived/wan-current", nil, &current) != nil || current.State.Asserted == nil || !*current.State.Asserted || f.control.Do(ctx, "GET", "/v1/services/service.wan", nil, &instance) != nil || instance.Sequence == 0 {
+					return false
+				}
+				oldProducer = healthPBRUpdate(instance)
+				return true
+			})
+		}
 		if err = f.control.Do(ctx, "GET", "/v1/config", nil, &state); err != nil {
 			t.Fatal(err)
 		}
@@ -172,6 +186,18 @@ func testDaemonHealthHistoryWithoutReactivation(t *testing.T, conditional bool) 
 				return false
 			})
 		}
+		if conditional {
+			until(t, 5*time.Second, func() bool {
+				req, _ := http.NewRequestWithContext(ctx, "GET", "http://routerd/v1/health", nil)
+				response, err := f.control.HTTP.Do(req)
+				if err != nil {
+					return false
+				}
+				defer response.Body.Close()
+				var h control.Health
+				return response.StatusCode == 503 && json.NewDecoder(response.Body).Decode(&h) == nil && h.ProtocolEvents.StoppedPending == 1 && h.ProtocolEvents.LastError != ""
+			})
+		}
 		if _, err = injector.Exec(`DROP TRIGGER fail_retired_delivery`); err != nil {
 			t.Fatal(err)
 		}
@@ -207,6 +233,10 @@ func testDaemonHealthHistoryWithoutReactivation(t *testing.T, conditional bool) 
 			t.Fatal("history recovered a current worker instance", err)
 		}
 		if conditional {
+			oldProducer.Sequence++
+			if err = f.control.Do(ctx, "POST", "/v1/services/state", oldProducer, nil); !localapi.IsHTTPStatus(err, 409) {
+				t.Fatal("stopped history producer renewed a current fact", err)
+			}
 			until(t, 5*time.Second, func() bool {
 				var h control.Health
 				var current derivedcontroller.Observation
