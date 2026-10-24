@@ -18,6 +18,7 @@ import (
 
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/control"
+	"github.com/imksoo/routerd2/internal/events"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/release"
 	"github.com/imksoo/routerd2/internal/supervisor"
@@ -37,6 +38,8 @@ type executionWitness struct {
 	FailedBootID       string   `json:"failed_boot_id,omitempty"`
 	Revision           uint64   `json:"revision"`
 	ConfigSHA256       string   `json:"config_sha256"`
+	EventID            string   `json:"event_id"`
+	EventCursor        uint64   `json:"event_cursor"`
 	HostKeySHA256      string   `json:"host_key_sha256"`
 	HostKeyFingerprint string   `json:"host_key_fingerprint"`
 	SentinelSHA256     string   `json:"sentinel_sha256"`
@@ -126,6 +129,16 @@ func runProbe(phase string) error {
 			return errors.New("SSH did not return the persisted committed revision")
 		}
 	}
+	// An acknowledged configuration can still contain a durable producer
+	// outbox. Its later ACK changes config.json metadata without changing the
+	// operator's intent. Witness the file only after publication and ACK settle.
+	health, published, err := awaitPublishedConfigEvent(ctx)
+	if err != nil {
+		return err
+	}
+	if phase == "second" && (published.Event.ID != expected.EventID || published.Cursor != expected.EventCursor) {
+		return errors.New("durable configuration event changed or was duplicated across kernel reboot")
+	}
 	plan, err := config.Compile(health.Config)
 	if err != nil {
 		return err
@@ -138,7 +151,7 @@ func runProbe(phase string) error {
 		return errors.New("persisted configuration was not projected onto the new kernel")
 	}
 	committed, err := (&config.Store{Dir: stateDir}).Load()
-	if err != nil || committed.Revision != 2 || committed.Confirmation != nil {
+	if err != nil || committed.Revision != 2 || committed.Confirmation != nil || len(committed.EventOutbox) != 0 {
 		return errors.New("persistent committed configuration record is missing")
 	}
 	configHash, err := fileHash(filepath.Join(stateDir, "config.json"))
@@ -177,6 +190,7 @@ func runProbe(phase string) error {
 			return errors.New("first boot no longer has its bounded unconfirmed trial")
 		}
 		expected.Revision, expected.ConfigSHA256 = health.Revision, configHash
+		expected.EventID, expected.EventCursor = published.Event.ID, published.Cursor
 		expected.HostKeySHA256, expected.HostKeyFingerprint = hostHash, fingerprint
 		expected.SentinelSHA256, expected.ReleaseGeneration = sentinelHash, state.Generation
 		if err := config.AtomicJSON(witnessPath, expected); err != nil {
@@ -190,6 +204,7 @@ func runProbe(phase string) error {
 		ReleaseOperation: state.Operation, ReleaseGeneration: state.Generation,
 		Pending: state.Pending != nil, Revision: health.Revision,
 		ConfigSHA256: configHash, HostKeySHA256: hostHash, HostKeyFingerprint: fingerprint,
+		EventID: published.Event.ID, EventCursor: published.Cursor,
 		SentinelSHA256: sentinelHash, Modules: names, PinnedExecVerified: true, Filesystem: "ext4",
 	}
 	if state.LastFailure != nil {
@@ -201,6 +216,36 @@ func runProbe(phase string) error {
 	}
 	fmt.Printf("%s_WITNESS %s\n", marker, data)
 	return nil
+}
+
+func settledConfigEvent(s control.State, page control.ObservationPage) (events.Record, bool) {
+	if !s.Healthy || s.Revision != 2 || s.Confirmation != nil || len(s.EventOutbox) != 0 || s.EventJournalError != "" || len(page.Records) != 1 || page.More {
+		return events.Record{}, false
+	}
+	r := page.Records[0]
+	return r, r.Cursor > 0 && r.Event.ID != "" && r.Event.Topic == "configuration.committed" && r.Event.Source == "control" && r.Event.Attributes["revision"] == "2" && !r.Event.ObservedAt.IsZero() && r.Event.ExpiresAt.IsZero()
+}
+
+func awaitPublishedConfigEvent(ctx context.Context) (control.State, events.Record, error) {
+	timer := time.NewTimer(0)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return control.State{}, events.Record{}, fmt.Errorf("configuration publication/ACK did not settle: %w", ctx.Err())
+		case <-timer.C:
+		}
+		s, err := readHealthyConfig(ctx)
+		if err == nil {
+			var page control.ObservationPage
+			if err = localapi.NewClient(filepath.Join(runtimeDir, control.SocketName)).Do(ctx, "GET", "/v1/observations?after_cursor=0&limit=16", nil, &page); err == nil {
+				if record, ok := settledConfigEvent(s, page); ok {
+					return s, record, nil
+				}
+			}
+		}
+		timer.Reset(100 * time.Millisecond)
+	}
 }
 
 func awaitReady(ctx context.Context, phase string) (supervisor.Status, control.State, error) {

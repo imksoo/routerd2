@@ -9,6 +9,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import stat
 import subprocess
@@ -183,13 +184,17 @@ def check_witnesses(phases):
     for witness in (first, second):
         if witness.get("pid") != 1 or witness.get("revision") != 2 or not witness.get("pinned_exec_verified"):
             raise RuntimeError("guest witness did not verify actual PID 1, committed config and pinned executables")
+        if not isinstance(witness.get("event_id"), str) or not re.fullmatch(r"[0-9a-f]{32}", witness["event_id"]):
+            raise RuntimeError("guest witness lacks a canonical durable configuration event ID")
+        if type(witness.get("event_cursor")) is not int or witness["event_cursor"] <= 0:
+            raise RuntimeError("guest witness lacks a positive durable event cursor")
     if first.get("release_id") != IDENTITIES["trial"] or first.get("release_operation") != "begin-boot" or not first.get("pending"):
         raise RuntimeError("first boot did not leave a real unconfirmed trial")
     if second.get("release_id") != IDENTITIES["baseline"] or second.get("release_operation") != "boot-rollback" or second.get("pending"):
         raise RuntimeError("second boot did not fall back to the baseline")
     if second.get("failed_boot_id") != first["boot_id"]:
         raise RuntimeError("fallback was not caused by the first boot's unconfirmed trial")
-    for field in ("config_sha256", "host_key_sha256", "host_key_fingerprint", "sentinel_sha256"):
+    for field in ("config_sha256", "host_key_sha256", "host_key_fingerprint", "sentinel_sha256", "event_id", "event_cursor"):
         if not first.get(field) or first[field] != second.get(field):
             raise RuntimeError(f"persistent {field} changed across boots")
 

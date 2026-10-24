@@ -56,6 +56,8 @@ type diskWitness struct {
 	FirstBootID        string      `json:"first_boot_id"`
 	Revision           uint64      `json:"revision"`
 	ConfigSHA256       string      `json:"config_sha256"`
+	EventID            string      `json:"event_id"`
+	EventCursor        uint64      `json:"event_cursor"`
 	HostKeySHA256      string      `json:"host_key_sha256"`
 	HostKeyFingerprint string      `json:"host_key_fingerprint"`
 	SentinelSHA256     string      `json:"sentinel_sha256"`
