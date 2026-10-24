@@ -49,6 +49,7 @@ func (e *Engine) committedRuleLifecycleLocked(ctx context.Context) {
 	bounded, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	_ = e.syncEventRulesLocked(bounded) // authoritative config is already saved
+	_, _ = e.syncDerivedLocked(bounded)
 }
 
 func (e *Engine) ProcessEventRules(ctx context.Context, now time.Time) (err error) {

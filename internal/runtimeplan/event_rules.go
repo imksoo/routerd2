@@ -21,7 +21,7 @@ type ruleContinuity struct {
 func (r *Runtime) observeEventRulesLocked(source config.Document, facts resourceprogram.FactSnapshot) error {
 	hasRules := false
 	for _, v := range source.Resources {
-		if v.EventRule != nil {
+		if v.EventRule != nil || v.DerivedEvent != nil {
 			hasRules = true
 			break
 		}
@@ -39,7 +39,7 @@ func (r *Runtime) observeEventRulesLocked(source config.Document, facts resource
 	}
 	next := map[string]ruleContinuity{}
 	for _, v := range source.Resources {
-		if v.EventRule == nil {
+		if v.EventRule == nil && v.DerivedEvent == nil {
 			continue
 		}
 		proof := proofs[v.ID]
@@ -88,7 +88,7 @@ func (r *Runtime) ActiveEventRules(source config.Document, revision uint64) ([]r
 					}
 					r.ruleIncarnation = hex.EncodeToString(id[:])
 				}
-				body, _ := json.Marshal([]any{rule.Identity, r.ruleIncarnation, proof.epoch})
+				body, _ := json.Marshal([]any{rule.Identity, r.ruleIncarnation, proof.epoch, r.sourceEpoch})
 				sum := sha256.Sum256(body)
 				rule.Identity = hex.EncodeToString(sum[:])
 			}

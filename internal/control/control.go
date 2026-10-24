@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/imksoo/routerd2/internal/config"
+	"github.com/imksoo/routerd2/internal/derivedcontroller"
 	"github.com/imksoo/routerd2/internal/eventcontroller"
 	"github.com/imksoo/routerd2/internal/events"
 	"github.com/imksoo/routerd2/internal/localapi"
@@ -72,6 +73,7 @@ type State struct {
 	ConfigBytes                 int    `json:"config_bytes,omitempty"`
 	EventJournalError           string `json:"event_journal_error,omitempty"`
 	EventRuleError              string `json:"event_rule_error,omitempty"`
+	DerivedError                string `json:"derived_error,omitempty"`
 }
 
 type Event struct {
@@ -123,6 +125,7 @@ type Engine struct {
 	journal      *events.Store
 	eventFlushMu sync.Mutex
 	rules        *eventcontroller.Controller
+	derived      *derivedcontroller.Controller
 }
 
 func New(store *config.Store, current config.Committed, n Network) *Engine {
@@ -137,7 +140,7 @@ func (e *Engine) State() State {
 	e.mu.Lock()
 	s := e.state
 	e.mu.Unlock()
-	if s.EventJournalError != "" || s.EventRuleError != "" {
+	if s.EventJournalError != "" || s.EventRuleError != "" || s.DerivedError != "" {
 		s.Healthy = false
 	}
 	if e.runtime != nil {
@@ -265,7 +268,7 @@ func (e *Engine) Confirm(r ConfirmRequest) (State, error) {
 	if r.Revision != e.state.Revision || r.RequestID == "" || r.RequestID != e.state.LastRequestID {
 		return e.state, fmt.Errorf("%w: confirmation does not identify the current revision", ErrConflict)
 	}
-	if !e.state.Healthy || e.state.EventRuleError != "" {
+	if !e.state.Healthy || e.state.EventRuleError != "" || e.state.DerivedError != "" {
 		return e.state, errors.New("cannot confirm while the applied state is degraded")
 	}
 	if e.runtime != nil && e.runtime.Health().Phase != "ready" {

@@ -44,10 +44,8 @@ func Compile(name string, spec api.DerivedEventSpec) (Program, error) {
 		}
 		field := normalize(p.Field)
 		if strings.Contains(field, ".status.") {
-			parts := strings.SplitN(field, ".status.", 2)
-			left := strings.Split(parts[0], "/")
-			if len(left) != 2 || !token(left[0], 128) || !token(left[1], 128) || !token(parts[1], 128) {
-				return errors.New("invalid derived status reference")
+			if _, _, err := ParseReference(field); err != nil {
+				return err
 			}
 			refs[field] = true
 		}

@@ -120,7 +120,7 @@ func Project(source Program, facts FactSnapshot) (Plan, map[string]ResourceState
 		}
 		states[id] = state
 	}
-	plan, err := Compile(selected)
+	plan, err := compile(selected, byID)
 	if err != nil {
 		return Plan{}, nil, err
 	}

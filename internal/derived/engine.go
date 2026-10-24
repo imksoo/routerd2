@@ -168,7 +168,8 @@ func (p Program) Advance(previous json.RawMessage, snapshot Snapshot, forceIniti
 		return finish(s, out, input.truth, input.proofUntil, input.observed)
 	}
 	origin := snapshot.authority(p.refs)
-	if s.Pending == nil || s.Pending.Target != target || s.Pending.Origin != origin || snapshot.now >= s.Pending.Until {
+	continuous := s.Pending != nil && snapshot.continuity != "" && snapshot.continuousSince <= s.Pending.Since
+	if s.Pending == nil || s.Pending.Target != target || s.Pending.Origin != origin || snapshot.now >= s.Pending.Until && !continuous {
 		if p.hold > math.MaxUint64-snapshot.now {
 			return Result{}, ErrCapacity
 		}
@@ -183,6 +184,31 @@ func (p Program) Advance(previous json.RawMessage, snapshot Snapshot, forceIniti
 		}
 	}
 	return finish(s, out, input.truth, input.proofUntil, input.observed)
+}
+
+// CheckpointChanged ignores the evaluation clock alone. Stable live previews
+// need not fsync a duplicate state; pending deadlines and all transitions still
+// require the atomic state/output commit.
+func (p Program) CheckpointChanged(previous, next json.RawMessage) (bool, error) {
+	a, err := p.load(previous)
+	if err != nil {
+		return false, err
+	}
+	b, err := p.load(next)
+	if err != nil {
+		return false, err
+	}
+	a.LastNow = 0
+	b.LastNow = 0
+	x, err := json.Marshal(a)
+	if err != nil {
+		return false, err
+	}
+	y, err := json.Marshal(b)
+	if err != nil {
+		return false, err
+	}
+	return !bytes.Equal(x, y), nil
 }
 
 func finish(s state, out []Emission, inputs Truth, until, observed uint64) (Result, error) {

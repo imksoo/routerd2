@@ -13,8 +13,10 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/imksoo/routerd2/internal/derived"
 	"github.com/imksoo/routerd2/internal/eventrule"
 	"github.com/imksoo/routerd2/internal/network"
+	"github.com/imksoo/routerd2/internal/protocol/health"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
 
@@ -25,6 +27,13 @@ var resourceID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$`)
 // their order in YAML. Payload order inside a resource (e.g. firewall rules) is
 // preserved. Source and returned values never share mutable slices or pointers.
 func Compile(source Program) (Plan, error) {
+	return compile(source, nil)
+}
+
+// referenceTargets is supplied only by Project after validating the complete
+// source. An inactive provider stays a declared, currently unknown observation;
+// it is not a missing configuration reference or an implicit start dependency.
+func compile(source Program, referenceTargets map[string]Resource) (Plan, error) {
 	for _, r := range source.Resources {
 		for _, guard := range []struct {
 			name  string
@@ -71,6 +80,9 @@ func Compile(source Program) (Plan, error) {
 		}
 		byID[r.ID] = r
 	}
+	if referenceTargets == nil {
+		referenceTargets = byID
+	}
 	dependencies, err := dependencyGraph(program.Resources, byID)
 	if err != nil {
 		return Plan{}, err
@@ -82,6 +94,7 @@ func Compile(source Program) (Plan, error) {
 	plan := Plan{Order: order, Dependencies: dependencies}
 	interfaces := map[string]int{}
 	claimed := map[string]string{}
+	derivedRefs := map[string]bool{}
 	claim := func(r Resource, kind, key string) error {
 		identity := kind + "\x00" + key
 		if previous, exists := claimed[identity]; exists {
@@ -178,6 +191,28 @@ func Compile(source Program) (Plan, error) {
 			body, _ := json.Marshal(r)
 			digest := sha256.Sum256(body)
 			plan.Native.EventRules = append(plan.Native.EventRules, EventRule{ID: r.ID, Identity: hex.EncodeToString(digest[:]), Spec: *r.EventRule})
+		case r.DerivedEvent != nil:
+			if len(plan.Native.DerivedEvents) >= 128 {
+				return Plan{}, errors.New("derived event resource count exceeds 128")
+			}
+			compiled, compileErr := derived.Compile(r.ID, *r.DerivedEvent)
+			if compileErr != nil {
+				return Plan{}, fmt.Errorf("derived event %s: %w", r.ID, compileErr)
+			}
+			for _, ref := range compiled.References() {
+				target, exists := referenceTargets[ref.Resource]
+				if !exists || ref.Kind != "HealthCheck" || target.Service == nil || target.Service.Health == nil || !health.ScalarFieldSupported(ref.Field) {
+					return Plan{}, fmt.Errorf("derived event %s has unsupported or missing typed reference %s", r.ID, ref.Key())
+				}
+				derivedRefs[ref.Key()] = true
+				if len(derivedRefs) > 1024 {
+					return Plan{}, errors.New("derived status references exceed 1024")
+				}
+			}
+			err = claim(r, "derived_event", r.ID)
+			body, _ := json.Marshal(r)
+			sum := sha256.Sum256(body)
+			plan.Native.DerivedEvents = append(plan.Native.DerivedEvents, DerivedEvent{ID: r.ID, Identity: hex.EncodeToString(sum[:]), Spec: *r.DerivedEvent, References: compiled.References(), Compiled: compiled})
 		}
 		if err != nil {
 			return Plan{}, err

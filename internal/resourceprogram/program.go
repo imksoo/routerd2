@@ -5,6 +5,7 @@ package resourceprogram
 
 import (
 	"github.com/imksoo/routerd/pkg/api"
+	"github.com/imksoo/routerd2/internal/derived"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
@@ -39,18 +40,19 @@ type Resource struct {
 	When       *FactCondition `json:"when,omitempty"`
 	ReadyWhen  *FactCondition `json:"ready_when,omitempty"`
 
-	Interface  *network.Interface     `json:"interface,omitempty"`
-	Address    *Address               `json:"address,omitempty"`
-	Link       *network.Link          `json:"link,omitempty"`
-	Route      *network.Route         `json:"route,omitempty"`
-	PolicyRule *network.PolicyRule    `json:"policy_rule,omitempty"`
-	Forwarding *network.Forwarding    `json:"forwarding,omitempty"`
-	Firewall   *network.Firewall      `json:"firewall,omitempty"`
-	DSLite     *network.DSLite        `json:"ds_lite,omitempty"`
-	VRRPGuard  *network.VRRPGuard     `json:"vrrp_guard,omitempty"`
-	WireGuard  *network.WireGuard     `json:"wireguard,omitempty"`
-	Service    *serviceconfig.Service `json:"service,omitempty"`
-	EventRule  *api.EventRuleSpec     `json:"event_rule,omitempty"`
+	Interface    *network.Interface     `json:"interface,omitempty"`
+	Address      *Address               `json:"address,omitempty"`
+	Link         *network.Link          `json:"link,omitempty"`
+	Route        *network.Route         `json:"route,omitempty"`
+	PolicyRule   *network.PolicyRule    `json:"policy_rule,omitempty"`
+	Forwarding   *network.Forwarding    `json:"forwarding,omitempty"`
+	Firewall     *network.Firewall      `json:"firewall,omitempty"`
+	DSLite       *network.DSLite        `json:"ds_lite,omitempty"`
+	VRRPGuard    *network.VRRPGuard     `json:"vrrp_guard,omitempty"`
+	WireGuard    *network.WireGuard     `json:"wireguard,omitempty"`
+	Service      *serviceconfig.Service `json:"service,omitempty"`
+	EventRule    *api.EventRuleSpec     `json:"event_rule,omitempty"`
+	DerivedEvent *api.DerivedEventSpec  `json:"derived_event,omitempty"`
 }
 
 // Address owns one host/prefix and its options independently of interface
@@ -65,9 +67,19 @@ type Address struct {
 // Native is an internal engine input, not a serialized configuration accepted
 // by the configuration API. It separates source declarations from projections.
 type Native struct {
-	Network    network.Desired         `json:"network"`
-	Services   []serviceconfig.Service `json:"services,omitempty"`
-	EventRules []EventRule             `json:"event_rules,omitempty"`
+	Network       network.Desired         `json:"network"`
+	Services      []serviceconfig.Service `json:"services,omitempty"`
+	EventRules    []EventRule             `json:"event_rules,omitempty"`
+	DerivedEvents []DerivedEvent          `json:"derived_events,omitempty"`
+}
+
+type DerivedEvent struct {
+	ID               string               `json:"id"`
+	Identity         string               `json:"identity"`
+	Spec             api.DerivedEventSpec `json:"spec"`
+	References       []derived.Reference  `json:"references"`
+	Compiled         derived.Program      `json:"-"`
+	ActiveUntilNanos uint64               `json:"-"`
 }
 
 // EventRule is an internal, owned declaration. Identity binds its complete
@@ -117,6 +129,7 @@ func (r Resource) kind() (string, int) {
 		{"vrrp_guard", r.VRRPGuard != nil}, {"wireguard", r.WireGuard != nil},
 		{"service", r.Service != nil},
 		{"event_rule", r.EventRule != nil},
+		{"derived_event", r.DerivedEvent != nil},
 	} {
 		if v.set {
 			kind, count = v.name, count+1

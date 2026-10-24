@@ -90,6 +90,7 @@ func (e *Engine) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/version", func(w http.ResponseWriter, r *http.Request) { localapi.JSON(w, 200, buildinfo.Current()) })
 	e.configurationViewRoutes(mux)
 	e.observationRoutes(mux)
+	e.derivedRoutes(mux)
 	mux.HandleFunc("GET /v1/config", func(w http.ResponseWriter, r *http.Request) { e.writeConfigurationState(w, e.State(), false) })
 	mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, r *http.Request) {
 		s := e.health()
@@ -223,6 +224,12 @@ func Serve(ctx context.Context, dir, stateDir, bootstrap string, ready func()) e
 			cancel()
 			if err != nil && monitorCtx.Err() == nil {
 				slog.Error("durable configuration event delivery failed", "error", err)
+			}
+			derivedCtx, cancelDerived := context.WithTimeout(monitorCtx, 2*time.Second)
+			derivedErr := e.ProcessDerivedEvents(derivedCtx)
+			cancelDerived()
+			if derivedErr != nil && monitorCtx.Err() == nil {
+				slog.Error("durable derived evaluation failed", "error", derivedErr)
 			}
 			ruleCtx, cancelRules := context.WithTimeout(monitorCtx, 2*time.Second)
 			ruleErr := e.ProcessEventRules(ruleCtx, time.Now())

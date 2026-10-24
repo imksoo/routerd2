@@ -11,6 +11,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/imksoo/routerd2/internal/derivedcontroller"
 	"github.com/imksoo/routerd2/internal/eventcontroller"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
@@ -37,6 +38,12 @@ type Health struct {
 	Services           *runtimeplan.HealthStatus `json:"services,omitempty"`
 	EventJournal       JournalHealth             `json:"event_journal"`
 	EventRules         RuleHealth                `json:"event_rules"`
+	Derived            DerivedHealth             `json:"derived"`
+}
+
+type DerivedHealth struct {
+	derivedcontroller.Health
+	LastError string `json:"last_error,omitempty"`
 }
 
 type RuleHealth struct {
@@ -78,6 +85,7 @@ func (e *Engine) healthForState(s State) Health {
 	h := Health{Revision: s.Revision, Healthy: s.Healthy, LastError: stateText(s.LastError, 4096), LastErrorTruncated: len(s.LastError) > 4096, ProducerEpoch: s.ProducerEpoch, Sequence: s.Sequence}
 	h.EventJournal = JournalHealth{Pending: len(s.EventOutbox), LastError: s.EventJournalError}
 	h.EventRules.LastError = s.EventRuleError
+	h.Derived.LastError = s.DerivedError
 	e.mu.Lock()
 	if e.rules != nil {
 		h.EventRules.Status = e.rules.Status()
@@ -85,7 +93,16 @@ func (e *Engine) healthForState(s State) Health {
 			h.Healthy = false
 		}
 	}
+	if e.derived != nil {
+		h.Derived.Health = e.derived.Health()
+		if h.Derived.Revision != s.Revision {
+			h.Healthy = false
+		}
+	}
 	e.mu.Unlock()
+	if s.DerivedError != "" {
+		h.Healthy = false
+	}
 	if s.EventRuleError != "" {
 		h.Healthy = false
 	}
@@ -170,7 +187,7 @@ func (e *Engine) configurationViewRoutes(mux *http.ServeMux) {
 }
 
 func (e *Engine) writeConfigurationState(w http.ResponseWriter, s State, mutation bool) {
-	if s.EventJournalError != "" || s.EventRuleError != "" {
+	if s.EventJournalError != "" || s.EventRuleError != "" || s.DerivedError != "" {
 		s.Healthy = false
 	}
 	encoded, err := json.Marshal(s)

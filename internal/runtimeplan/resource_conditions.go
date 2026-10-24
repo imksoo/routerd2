@@ -56,6 +56,9 @@ func (r *Runtime) installGuardStatusLocked(status supervisor.Status, err error) 
 	r.guardUntil = time.Now().Add(time.Second)
 	r.guardBootID = clock.BootID
 	r.guardUntilNanos = uint64(clock.BoottimeNanoseconds) + uint64(time.Second)
+	if len(r.current.DerivedEvents) > 0 {
+		_, _ = r.conditionFactsLocked(r.source, r.revision, time.Now())
+	} // clock failure remains unknown
 }
 
 func (r *Runtime) recordGuardGrantLocked(u serviceconfig.Update, now time.Time) {
@@ -121,6 +124,9 @@ func (r *Runtime) conditionFactsLocked(source config.Document, revision uint64, 
 	defer func() {
 		if resultErr == nil {
 			resultErr = r.observeEventRulesLocked(source, result)
+		}
+		if resultErr == nil {
+			resultErr = r.observeDerivedLocked(result)
 		}
 	}()
 	if revision != r.revision || !now.Before(r.guardUntil) {

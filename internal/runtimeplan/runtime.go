@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -98,6 +99,7 @@ type Runtime struct {
 	current              config.Native
 	source               config.Document
 	sourceDigest         string
+	sourceEpoch          uint64
 	resourceStates       map[string]resourceprogram.ResourceState
 	guardStatus          map[string]supervisor.ModuleStatus
 	guardUntil           time.Time
@@ -107,6 +109,7 @@ type Runtime struct {
 	conditionTimeline    resourceprogram.ConditionTimeline
 	ruleContinuity       map[string]ruleContinuity
 	ruleIncarnation      string
+	derivedContinuity    map[string]derivedContinuity
 	projectionGeneration uint64
 	revision             uint64
 	configured           bool
@@ -245,15 +248,20 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 		r.mu.Unlock()
 		return r.failure(err)
 	}
-	r.current = doc
-	r.source = ownedSource
 	sourceSum := sha256.Sum256(encoded)
 	sourceDigest := hex.EncodeToString(sourceSum[:])
 	if r.revision != revision || r.sourceDigest != sourceDigest {
+		if r.sourceEpoch == math.MaxUint64 {
+			r.mu.Unlock()
+			return r.failure(errors.New("source cutover epoch exhausted"))
+		}
+		r.sourceEpoch++
 		r.guardGrants = nil
 		r.guardStatus = nil
 		r.guardUntil = time.Time{}
 	}
+	r.current = doc
+	r.source = ownedSource
 	r.sourceDigest = sourceDigest
 	r.revision = revision
 	r.configured = true
@@ -574,6 +582,9 @@ func (r *Runtime) Accept(ctx context.Context, u serviceconfig.Update) error {
 		return nil
 	}
 	r.records[u.Name] = u
+	if len(r.current.DerivedEvents) > 0 {
+		r.recordGuardGrantLocked(u, time.Now())
+	}
 	p, err := r.projectProgramLocked(r.source, r.revision, r.current, r.effectiveRecordsLocked(time.Now()), time.Now())
 	if err == nil {
 		err = r.applyNetworkLocked(ctx, p.network)
@@ -607,6 +618,10 @@ func (r *Runtime) Accept(ctx context.Context, u serviceconfig.Update) error {
 		// A newly started recipient may read grants only after this first
 		// publication has completed the existing network ACK boundary.
 		r.acceptBFDRecipientLocked(u)
+	}
+	if len(r.current.DerivedEvents) > 0 {
+		_, err := r.conditionFactsLocked(r.source, r.revision, time.Now())
+		return err
 	}
 	return nil
 }

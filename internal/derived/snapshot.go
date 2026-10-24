@@ -30,10 +30,12 @@ type Value struct {
 }
 
 type Snapshot struct {
-	id, scope string
-	now       uint64
-	wall      time.Time
-	values    map[string]Value
+	id, scope       string
+	now             uint64
+	wall            time.Time
+	values          map[string]Value
+	continuity      string
+	continuousSince uint64
 }
 
 func token(value string, maximum int) bool {
@@ -85,7 +87,7 @@ func (s Snapshot) read(field string) (string, bool, uint64, uint64) {
 }
 
 func (s Snapshot) authority(refs []string) string {
-	parts := []string{s.scope}
+	parts := []any{s.scope, s.continuity, s.continuousSince}
 	for _, ref := range refs {
 		value := s.values[ref]
 		parts = append(parts, ref, value.Scope, value.Origin)
@@ -93,6 +95,22 @@ func (s Snapshot) authority(refs []string) string {
 	body, _ := json.Marshal(parts)
 	digest := sha256.Sum256(body)
 	return hex.EncodeToString(digest[:])
+}
+
+// WithContinuity attaches a trusted evaluator's proof that the predicate and
+// producer authority remained continuous between sampled evaluations. This
+// cannot authenticate a caller or extend the current observation's lease.
+// The immutable value map is shared, never exposed to the caller.
+func (s Snapshot) WithContinuity(identity string, since uint64) (Snapshot, error) {
+	if !token(identity, 128) || since > s.now {
+		return Snapshot{}, errors.New("invalid derived continuity proof")
+	}
+	s.continuity = identity
+	s.continuousSince = since
+	body, _ := json.Marshal([]any{s.id, identity, since})
+	sum := sha256.Sum256(body)
+	s.id = hex.EncodeToString(sum[:])
+	return s, nil
 }
 
 func combine(values []evaluated, all bool, now uint64) evaluated {
