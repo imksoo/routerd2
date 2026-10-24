@@ -4,20 +4,27 @@
 対象: `https://github.com/imksoo/routerd2`
 
 **継続ゴール:** 全残実装・必要試験・対象実機での利用可能性の受入まで進める。
-部分checkpointでは完了しない。最新コードcheckpointは `c2f3612`。
-durable eventのWAL/FULL journal・consumer cursor・transactional consumer outboxを追加した。
-実SQLite FULL・cursor保存失敗・foreign DB保護・SIGKILL復元をRace Detector付きで検証済み。
-保存componentまでで、daemonとproducer stateには未接続。
-BFDの先行ACK修正後もaggregateでtimeoutが再発したため、boot IDをprocess内でcacheし、
-admin watchdogを2秒へ分離した。control freshnessは500msを保持し、admin呼出し前にproofを失効させる。
-clean checkpointの全体check/static build、QEMU BFD単独はPASS。
-[最新の証跡・制約](evidence/2026-10-24-events-clock.md) を参照。
-全20系統は `/home/imksoo/routerd2-acceptance-clock` の固定commit `c2f3612` で実行中。
-`dist/all-qemu-clock.log` と各suiteのmanifestを確認する。未完走のaggregateを全体PASSにしない。
+部分checkpointでは完了しない。最新コードcheckpointは `7bdf27f`。
 
-`c2f3612` の全20 QEMU系統は一度のMake実行でexit 0、全manifest PASSとなった。
+設定commit/confirm/confirmed rollbackのproducer outboxを設定本体と同時保存し、
+control workerからWAL/FULL journalへ転送する。再送は同じIDでdedupし、容量不足では
+履歴を捨てず、rollback枠を予約して新commitを副作用前に拒否する。
+read-onlyのbounded `/v1/observations` とhealthのpending/errorを追加した。
+全体check/static amd64/arm64、実SSH・control SIGKILLの履歴保持、
+新コードの二WAN TCP/UDP/PCAP、QEMU management/Health-PBR/BFDはPASS。
+[設定イベントの証跡・実行条件・残作業](evidence/2026-10-24-config-events.md) を参照。
+
+先行clean `c2f3612` は一度のMake実行で**全20 QEMU系統PASS、exit 0**。
 [一括試験の証跡](evidence/2026-10-24-qemu-aggregate.md) を参照。
-後続の設定producer outbox接続は別checkpointとして検証中。全計画の完了ではない。
+後続 `7bdf27f` の関連3 QEMU gateを旧aggregateへ混ぜて全20再合格とはしない。
+BFD admin watchdogは2秒、control freshnessは500ms。
+[保存部・BFD方針の証跡](evidence/2026-10-24-events-clock.md) に変更経緯を保持する。
+
+未完了はprotocol event producer、EventRule/DerivedEvent、consumer作用、federation、
+retention/archive/容量alarm、一般status reference、多binary runtime/startup handoff等の全計画。
+対象機種・NIC・性能条件も未確定で、実機利用可能とはまだ判定しない。
+完了したdetached worktreeは証跡を回収して削除した。private原log/manifest・診断patchは
+`dist/goal-validation/retired-worktrees/`、公開証跡は `docs/evidence/` にある。
 
 以下は先行checkpointの履歴。
 fact leafの `max_age` と元の観測時刻の保持、条件式の `for` を実装した。

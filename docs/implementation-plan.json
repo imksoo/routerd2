@@ -329,7 +329,7 @@
         "pkg/federation/event.go"
       ],
       "planned_targets": [
-        "internal/events (新設予定)",
+        "internal/events",
         "internal/serviceconfig",
         "internal/runtimeplan"
       ]
@@ -11257,6 +11257,35 @@
       "remaining": [
         "Later configuration producer-outbox integration is a separate checkpoint",
         "Existing gate coverage does not close unimplemented contracts, hardware/NIC/performance or all platform qualification"
+      ],
+      "parity_flags_unchanged": true
+    },
+    {
+      "id": "configuration-producer-outbox",
+      "date": "2026-10-24",
+      "status": "partial_implementation_with_daemon_acceptance",
+      "code_checkpoint": "7bdf27fc2f1b8d060c248e3abf540a19f2d826b7",
+      "work_packages": [
+        "CORE-04",
+        "CORE-02"
+      ],
+      "evidence": "docs/evidence/2026-10-24-config-events.md",
+      "implemented": [
+        "Commit/confirm/confirmed rollback observations atomically persisted with authoritative configuration, stable IDs on retry",
+        "Control journal delivery outside configuration lock; acknowledged immutable-prefix removal under single writer",
+        "Bounded producer backpressure before effects and reserved confirmed rollback/confirmation slot",
+        "Strict read-only durable observation pages and delivery pending/error health"
+      ],
+      "validation": [
+        "Clean make check and static amd64/arm64 build: pass",
+        "Real journal capacity and producer ACK rename failure; recovery and dedup: pass under Race Detector",
+        "Actual SSH lifecycle and control SIGKILL preserve observation IDs/cursors in namespace and QEMU: pass",
+        "Related real namespace two-WAN TCP/UDP/PCAP and QEMU Health-PBR/BFD recovery: pass"
+      ],
+      "remaining": [
+        "Protocol event producers, EventRule/DerivedEvent, consumer effects, federation",
+        "Retention/archive/capacity alarms and QEMU event power-loss acceptance",
+        "Full work-package and physical/NIC/performance qualification"
       ],
       "parity_flags_unchanged": true
     }

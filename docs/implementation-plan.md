@@ -73,6 +73,14 @@ control freshnessは500msを保持する。全体check/static buildとQEMU BFD�
 [一括試験の証跡](evidence/2026-10-24-qemu-aggregate.md) に全manifestと範囲を保存した。
 これは既存gateの合格であり、全作業単位や後続の設定outbox接続の合格を意味しない。
 
+`7bdf27f` で設定lifecycleのproducer outboxを設定本体と同時保存し、control workerから
+WAL/FULL journalへ接続した。64件のbackpressureとconfirmed rollback予約枠、
+strict bounded履歴API、healthのdelivery errorを実装した。
+全体check/static build、実SSH・control SIGKILL、二WAN TCP/UDP/PCAP、
+関連QEMU management/Health-PBR/BFDがPASS。
+[設定イベント接続の証跡](evidence/2026-10-24-config-events.md) を参照。
+protocol event、EventRule/DerivedEvent、consumer作用、federation、retention等は残る。
+
 **routerd と routerd2 は別製品である。** routerd は稼働中の機能参照元、routerd2 は未リリースの開発対象。
 現在の routerd2 の二バイナリー構成・設定書式・内部API・保存形式には利用者がいないため、後方互換性を要求しない。
 routerd2 の設定書式も新設計に合わせて変更できる。引き継ぐ routerd の機能範囲は維持する。
