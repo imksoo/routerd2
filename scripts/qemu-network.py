@@ -74,7 +74,7 @@ SUITES = {
         "test": "TestDaemonDerivedHealthCurrentStatusAndDurability",
         "marker": "ROUTERD_DERIVED_DAEMON_TEST", "timeout": 200,
         "commands": True,
-        "description": "durable raw health events, finite DerivedEvent/EventRule and crash recovery",
+        "description": "durable health events, finite DerivedEvent/EventRule and retired queue recovery",
     },
     "daemon-resource-program": {
         "package": "./internal/integration", "binary": "daemon.test",
@@ -283,6 +283,8 @@ def main():
             "source_image_manifest_sha256": hashlib.sha256(source_manifest_bytes).hexdigest(),
             "source_initramfs_sha256": hashlib.sha256(source_archive.read_bytes()).hexdigest(),
             "host_network_access": False, "result": "not-run",
+            "guest_memory_mib": 512,
+            "test_scratch": {"mountpoint": "/tmp", "filesystem": "tmpfs", "size_bytes": 64 << 20},
         }
         spec = importlib.util.spec_from_file_location("mkinitramfs", PROJECT / "images/mkinitramfs.py")
         packer = importlib.util.module_from_spec(spec)

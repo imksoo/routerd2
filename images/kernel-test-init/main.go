@@ -83,6 +83,28 @@ func run(s suite) error {
 	if err := boot.Bootstrap(boot.Options{Platform: boot.Appliance, RuntimeDir: "/run/routerd", StateDir: "/var/lib/routerd"}); err != nil {
 		return err
 	}
+	// The immutable image already occupies most of the small default rootfs
+	// quota. SQLite needs writable space for both source and target WALs even
+	// when their retained payload is small. Provision test scratch explicitly;
+	// production boot/storage and the VM's RAM size are not changed here.
+	if err := os.MkdirAll("/tmp", 0755); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir("/tmp")
+	if err != nil {
+		return err
+	}
+	if len(entries) != 0 {
+		return fmt.Errorf("test scratch mountpoint is not empty")
+	}
+	if err = unix.Mount("tmpfs", "/tmp", "tmpfs", unix.MS_NOSUID|unix.MS_NODEV, "mode=1777,size=64m"); err != nil {
+		return fmt.Errorf("mount test scratch: %w", err)
+	}
+	var scratch unix.Statfs_t
+	if err = unix.Statfs("/tmp", &scratch); err != nil {
+		return err
+	}
+	fmt.Printf("ROUTERD_FIXTURE_SCRATCH total_bytes=%d available_bytes=%d\n", scratch.Blocks*uint64(scratch.Bsize), scratch.Bavail*uint64(scratch.Bsize))
 	if err := kmod.Load([]string{"af_packet", "veth", "bridge", "8021q", "vrf", "vxlan", "macvlan", "wireguard", "nf_tables", "nft_ct", "nft_chain_nat", "nft_masq", "nft_nat", "nft_reject_inet", "nft_log", "nf_log_syslog", "ip6_tunnel"}); err != nil {
 		return err
 	}
