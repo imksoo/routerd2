@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"reflect"
 	"syscall"
 	"testing"
 	"time"
@@ -81,6 +82,12 @@ func testDaemonHealthHistoryWithoutReactivation(t *testing.T, conditional bool) 
 		t.Fatal(err)
 	}
 	defer injector.Close()
+	injector.SetMaxOpenConns(1)
+	// Fault DDL competes with two live producers and Derived writes. Give this
+	// test-only connection a bounded wait for the real SQLite writer lock.
+	if _, err = injector.Exec(`PRAGMA busy_timeout=2000`); err != nil {
+		t.Fatal(err)
+	}
 	cycles := 1
 	if conditional {
 		cycles = 2
@@ -92,7 +99,7 @@ func testDaemonHealthHistoryWithoutReactivation(t *testing.T, conditional bool) 
 		var pending struct {
 			Pending []events.Event `json:"pending"`
 		}
-		expected := map[string]bool{}
+		expected := map[string]events.Event{}
 		until(t, 5*time.Second, func() bool {
 			uri := url.URL{Scheme: "file", Path: filepath.Join(root, "state", "services", "wan", "health-events", "journal.sqlite3"), RawQuery: "mode=ro"}
 			db, err := sql.Open("sqlite", uri.String())
@@ -104,14 +111,14 @@ func testDaemonHealthHistoryWithoutReactivation(t *testing.T, conditional bool) 
 			if db.QueryRow(`SELECT body FROM producers WHERE name='health-probe-relay'`).Scan(&body) != nil || json.Unmarshal(body, &pending) != nil {
 				return false
 			}
-			expected = map[string]bool{}
+			expected = map[string]events.Event{}
 			for _, event := range pending.Pending {
 				var saved int
 				if injector.QueryRow(`SELECT count(*) FROM events WHERE event_id=?`, event.ID).Scan(&saved) != nil {
 					return false
 				}
 				if saved == 0 {
-					expected[event.ID] = true
+					expected[event.ID] = event
 				}
 			}
 			return len(expected) > 0 // already-saved/unACKed prefixes cannot satisfy this proof
@@ -180,7 +187,7 @@ func testDaemonHealthHistoryWithoutReactivation(t *testing.T, conditional bool) 
 				for _, m := range status.Modules {
 					if m.Name == "control" && m.Ready && m.PID != old.PID && m.Generation > old.Generation {
 						var restored control.State
-						return f.control.Do(ctx, "GET", "/v1/config", nil, &restored) == nil && restored.Revision == state.Revision && len(restored.Config.Resources) == len(doc.Resources)
+						return f.control.Do(ctx, "GET", "/v1/config", nil, &restored) == nil && restored.Revision == state.Revision && reflect.DeepEqual(restored.Config, state.Config)
 					}
 				}
 				return false
@@ -210,7 +217,10 @@ func testDaemonHealthHistoryWithoutReactivation(t *testing.T, conditional bool) 
 					return false
 				}
 				for _, record := range page.Records {
-					if expected[record.Event.ID] {
+					if want, ok := expected[record.Event.ID]; ok {
+						if !reflect.DeepEqual(record.Event, want) {
+							t.Fatal("stopped delivery changed original event content", record.Event.ID)
+						}
 						seen[record.Event.ID]++
 					}
 				}
@@ -233,6 +243,10 @@ func testDaemonHealthHistoryWithoutReactivation(t *testing.T, conditional bool) 
 			t.Fatal("history recovered a current worker instance", err)
 		}
 		if conditional {
+			var after control.State
+			if err = f.control.Do(ctx, "GET", "/v1/config", nil, &after); err != nil || after.Revision != state.Revision || !reflect.DeepEqual(after.Config, state.Config) {
+				t.Fatal("historical recovery changed source intent", err)
+			}
 			oldProducer.Sequence++
 			if err = f.control.Do(ctx, "POST", "/v1/services/state", oldProducer, nil); !localapi.IsHTTPStatus(err, 409) {
 				t.Fatal("stopped history producer renewed a current fact", err)
@@ -254,12 +268,14 @@ func testDaemonHealthHistoryWithoutReactivation(t *testing.T, conditional bool) 
 				}
 				for _, m := range status.Modules {
 					if m.Name == "service.wan" && m.Ready {
-						return true
+						var instance runtimeplan.InstanceStatus
+						var current derivedcontroller.Observation
+						return f.control.Do(ctx, "GET", "/v1/services/service.wan", nil, &instance) == nil && instance.Sequence > 0 && instance.ProducerEpoch != oldProducer.ProducerEpoch && f.control.Do(ctx, "GET", "/v1/derived/wan-current", nil, &current) == nil && current.State.Asserted != nil && *current.State.Asserted
 					}
 				}
 				return false
 			})
-			t.Logf("%d accepted observations delivered once while source stayed declared and producer stayed stopped, across control SIGKILL; ownership retained for reactivation", len(expected))
+			t.Logf("cycle %d: %d original observations delivered once while source stayed declared and producer stayed stopped; control replaced=%t; ownership retained for fresh reactivation", cycle+1, len(expected), cycle == 0)
 		} else {
 			t.Logf("%d accepted observations delivered once after permanent removal, without producer reactivation", len(expected))
 		}
