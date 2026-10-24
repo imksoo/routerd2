@@ -77,7 +77,9 @@ directories are not accepted as production ancestors.
 
 The bounded mountinfo parser limits the table to 2 MiB, 4096 mounts, and 32 KiB
 per line. It decodes the kernel's pathname escapes and permits future optional
-fields. It rejects ambiguous stacked mounts, mounts below the state target,
+fields, including synthetic `nsfs` roots such as `net:[4026532741]` for pinned
+network namespaces. Targets must still be canonical absolute paths, and an
+`nsfs` mount can never qualify as the selected ext4 volume. It rejects ambiguous stacked mounts, mounts below the state target,
 another mount of the selected device elsewhere in this mount namespace, and
 shared/slave propagation on the target's covering mount.
 

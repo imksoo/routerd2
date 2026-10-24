@@ -92,10 +92,15 @@ func parseMountLine(line string) (mountInfo, error) {
 	if m.target, err = unescapeMount(f[4]); err != nil {
 		return m, err
 	}
-	for _, path := range []string{m.root, m.target} {
-		if !filepath.IsAbs(path) || filepath.Clean(path) != path || len(path) > maxPathBytes {
-			return m, errors.New("mount root and target must be canonical absolute paths")
-		}
+	m.filesystem = f[separator+1]
+	canonical := func(path string) bool {
+		return filepath.IsAbs(path) && filepath.Clean(path) == path && len(path) <= maxPathBytes
+	}
+	// nsfs uses synthetic dentry names (e.g. net:[4026532741]) as mount
+	// roots. Only the root has this exception; targets remain real paths,
+	// and selectMount still considers these mounts for conflict detection.
+	if !canonical(m.target) || !canonical(m.root) && !(m.filesystem == "nsfs" && namespaceMountRoot(m.root)) {
+		return m, errors.New("mount root and target must be canonical absolute paths or a valid nsfs root")
 	}
 	if m.options, err = parseOptions(f[5]); err != nil {
 		return m, err
@@ -115,7 +120,6 @@ func parseMountLine(line string) (mountInfo, error) {
 		default: // The kernel ABI explicitly permits future optional fields.
 		}
 	}
-	m.filesystem = f[separator+1]
 	if m.source, err = unescapeMount(f[separator+2]); err != nil {
 		return m, err
 	}
@@ -123,6 +127,20 @@ func parseMountLine(line string) (mountInfo, error) {
 		return m, err
 	}
 	return m, nil
+}
+
+func namespaceMountRoot(root string) bool {
+	kind, inode, ok := strings.Cut(root, ":[")
+	if !ok || kind == "" || !strings.HasSuffix(inode, "]") {
+		return false
+	}
+	for _, c := range kind {
+		if c < 'a' || c > 'z' {
+			return false
+		}
+	}
+	_, err := parsePositive(strings.TrimSuffix(inode, "]"))
+	return err == nil
 }
 
 func decimal(s string) bool {
