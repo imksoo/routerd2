@@ -57,12 +57,9 @@ func (s *Store) ArchiveEvents(ctx context.Context, limit int) (int, error) {
 	if s.closed {
 		return 0, ErrClosed
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, err
-	}
-	defer tx.Rollback()
-	rows, err := tx.QueryContext(ctx, `SELECT cursor,event_id,body FROM events WHERE length(body)>0 ORDER BY cursor LIMIT ?`, limit)
+	// Compression/verification runs without a SQLite writer transaction or
+	// pooled connection, so live publication can continue during CPU work.
+	rows, err := s.db.QueryContext(ctx, `SELECT cursor,event_id,body FROM events WHERE length(body)>0 ORDER BY cursor LIMIT ?`, limit)
 	if err != nil {
 		return 0, err
 	}
@@ -70,6 +67,8 @@ func (s *Store) ArchiveEvents(ctx context.Context, limit int) (int, error) {
 		cursor uint64
 		id     string
 		body   []byte
+		packed []byte
+		digest [32]byte
 	}
 	batch := make([]candidate, 0, limit)
 	for rows.Next() {
@@ -87,8 +86,8 @@ func (s *Store) ArchiveEvents(ctx context.Context, limit int) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	count := 0
-	for _, c := range batch {
+	for i := range batch {
+		c := &batch[i]
 		if err = ctx.Err(); err != nil {
 			return 0, err
 		}
@@ -112,13 +111,38 @@ func (s *Store) ArchiveEvents(ctx context.Context, limit int) (int, error) {
 		if err != nil || !bytes.Equal(verified, c.body) {
 			return 0, errors.Join(errors.New("event archive round trip failed"), err)
 		}
-		if err = s.reserve(ctx, tx, "event_archive", int64(len(packed))+archivedEventOverhead, s.options.MaxArchivedEvents, s.options.MaxArchivedEventBytes); err != nil {
+		c.packed = bytes.Clone(packed)
+		c.digest = sum
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	count := 0
+	for _, c := range batch {
+		var hot, packed, digest []byte
+		var size int64
+		if err = tx.QueryRowContext(ctx, `SELECT e.body,coalesce(a.body,X''),coalesce(a.original_bytes,0),coalesce(a.digest,X'') FROM events e LEFT JOIN event_archive a ON a.cursor=e.cursor WHERE e.cursor=? AND e.event_id=?`, c.cursor, c.id).Scan(&hot, &packed, &size, &digest); err != nil {
+			return 0, err
+		}
+		current, err := s.loadBody(c.cursor, hot, packed, size, digest)
+		if err != nil {
+			return 0, err
+		}
+		if !bytes.Equal(current, c.body) {
+			return 0, ErrConflict
+		}
+		if len(hot) == 0 {
+			continue
+		} // A concurrent archive already moved it.
+		if err = s.reserve(ctx, tx, "event_archive", int64(len(c.packed))+archivedEventOverhead, s.options.MaxArchivedEvents, s.options.MaxArchivedEventBytes); err != nil {
 			if errors.Is(err, ErrCapacity) && count > 0 {
 				break
 			}
 			return 0, err
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO event_archive(cursor,body,original_bytes,digest) VALUES(?,?,?,?)`, c.cursor, packed, len(c.body), sum[:]); err != nil {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO event_archive(cursor,body,original_bytes,digest) VALUES(?,?,?,?)`, c.cursor, c.packed, len(c.body), c.digest[:]); err != nil {
 			return 0, err
 		}
 		result, err := tx.ExecContext(ctx, `UPDATE events SET body=X'' WHERE cursor=? AND body=?`, c.cursor, c.body)

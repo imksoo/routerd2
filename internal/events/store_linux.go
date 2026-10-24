@@ -18,11 +18,12 @@ import (
 )
 
 type Store struct {
-	mu        sync.RWMutex
-	closed    bool
-	db        *sql.DB
-	dir, lock *os.File
-	options   Options
+	mu           sync.RWMutex
+	closed       bool
+	db           *sql.DB
+	dir, lock    *os.File
+	options      Options
+	archiveCache archivedReadCache
 }
 
 const applicationID = 0x52443245 // RD2E; separate from every other product store
@@ -289,6 +290,7 @@ func (s *Store) Close() error {
 		return nil
 	}
 	s.closed = true
+	s.archiveCache.clear()
 	var result error
 	if s.db != nil {
 		result = errors.Join(result, s.db.Close())

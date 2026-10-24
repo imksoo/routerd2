@@ -30,7 +30,7 @@ func (s *Store) Append(ctx context.Context, e Event) (Record, error) {
 	var originalBytes int64
 	err = tx.QueryRowContext(ctx, `SELECT e.cursor,e.body,coalesce(a.body,X''),coalesce(a.original_bytes,0),coalesce(a.digest,X'') FROM events e LEFT JOIN event_archive a ON a.cursor=e.cursor WHERE e.event_id=?`, e.ID).Scan(&cursor, &previous, &packed, &originalBytes, &digest)
 	if err == nil {
-		previous, err = storedBody(previous, packed, originalBytes, digest)
+		previous, err = s.loadBody(cursor, previous, packed, originalBytes, digest)
 		if err != nil {
 			return Record{}, err
 		}
@@ -125,7 +125,7 @@ func (s *Store) List(ctx context.Context, after uint64, limit int) ([]Record, er
 		if err := rows.Scan(&cursor, &id, &body, &packed, &originalBytes, &digest); err != nil {
 			return nil, err
 		}
-		body, err := storedBody(body, packed, originalBytes, digest)
+		body, err := s.loadBody(cursor, body, packed, originalBytes, digest)
 		if err != nil {
 			return nil, err
 		}
