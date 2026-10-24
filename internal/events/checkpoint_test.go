@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -151,36 +152,41 @@ func TestConcurrentTimersCommitOnlyOneStateVersion(t *testing.T) {
 }
 
 func TestUnreleasedPrototypeSchemaIsRejectedReadOnly(t *testing.T) {
-	options := Options{Directory: filepath.Join(t.TempDir(), "events")}
-	s, err := Open(options)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = s.Close(); err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(options.Directory, "journal.sqlite3")
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = db.Exec(`PRAGMA journal_mode=DELETE; PRAGMA user_version=1;`); err != nil {
-		t.Fatal(err)
-	}
-	if err = db.Close(); err != nil {
-		t.Fatal(err)
-	}
-	before, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if reopened, err := Open(options); err == nil {
-		reopened.Close()
-		t.Fatal("silently imported discarded prototype schema")
-	}
-	after, err := os.ReadFile(path)
-	if err != nil || !bytes.Equal(before, after) {
-		t.Fatal("unsupported schema rejection modified database", err)
+	for _, version := range []int{1, 2} {
+		t.Run(fmt.Sprint(version), func(t *testing.T) {
+			options := Options{Directory: filepath.Join(t.TempDir(), "events")}
+			s, err := Open(options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = s.Close(); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(options.Directory, "journal.sqlite3")
+			db, err := sql.Open("sqlite", path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = db.Exec(fmt.Sprintf(`PRAGMA journal_mode=DELETE; PRAGMA user_version=%d;`, version)); err != nil {
+				t.Fatal(err)
+			}
+			if err = db.Close(); err != nil {
+				t.Fatal(err)
+			}
+			before, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if reopened, err := Open(options); err == nil {
+				reopened.Close()
+				t.Fatal("silently imported discarded prototype schema")
+			}
+			after, err := os.ReadFile(path)
+			if err != nil || !bytes.Equal(before, after) {
+				t.Fatal("unsupported schema rejection modified database", err)
+			}
+
+		})
 	}
 }
 
