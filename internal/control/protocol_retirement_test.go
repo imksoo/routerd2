@@ -41,3 +41,20 @@ func TestNoHealthSourceDoesNotAllocateARelayRegistry(t *testing.T) {
 		t.Fatal("unused component allocated registry", found, err)
 	}
 }
+
+func TestRejectedCandidateRelayIsDeclaredRetiringAfterConfigurationRestore(t *testing.T) {
+	e, _ := fixture(t)
+	journal := attachJournal(t, e, 0)
+	e.protocolRelays = protocolevents.NewRetirement(journal, e.store.Dir)
+	// Registration precedes candidate worker/effect creation. Even if later
+	// application fails, this retained ownership must not disappear from health.
+	if err := e.protocolRelays.Register(context.Background(), []string{"candidate"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.restore(e.state.Committed, "rejected", errors.New("injected candidate failure")); err == nil {
+		t.Fatal("failure was hidden")
+	}
+	if e.State().Healthy || e.protocolRelays.Status().Retiring != 1 {
+		t.Fatal("restored config hid candidate relay ownership", e.State(), e.protocolRelays.Status())
+	}
+}
