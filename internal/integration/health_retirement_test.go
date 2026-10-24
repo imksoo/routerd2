@@ -51,15 +51,18 @@ func testDaemonHealthHistoryWithoutReactivation(t *testing.T, conditional bool) 
 		t.Fatal(err)
 	}
 	defer listener.Close()
-	go func() {
-		for {
-			c, err := listener.Accept()
-			if err != nil {
-				return
+	serve := func(listener net.Listener) {
+		go func() {
+			for {
+				c, err := listener.Accept()
+				if err != nil {
+					return
+				}
+				_ = c.Close()
 			}
-			_ = c.Close()
-		}
-	}()
+		}()
+	}
+	serve(listener)
 	root := t.TempDir()
 	doc := config.Document{SchemaVersion: config.SchemaVersion, Resources: []resourceprogram.Resource{{ID: "wan", Service: &serviceconfig.Service{Name: "wan", Health: &health.Config{Interface: "lo", SourceAddress: "127.0.0.1", Target: "127.0.0.1", Protocol: "tcp", Port: listener.Addr().(*net.TCPAddr).Port, IntervalMillis: 100, TimeoutMillis: 100}}}}}
 	var prerequisite net.Listener
@@ -70,6 +73,7 @@ func testDaemonHealthHistoryWithoutReactivation(t *testing.T, conditional bool) 
 			t.Fatal(err)
 		}
 		defer func() { _ = prerequisite.Close() }()
+		serve(prerequisite)
 		prerequisiteAddress = prerequisite.Addr().String()
 		doc.Resources[0].When = &resourceprogram.FactCondition{Fact: "service.switch.active"}
 		doc.Resources = append(doc.Resources, resourceprogram.Resource{ID: "switch", Service: &serviceconfig.Service{Name: "switch", Health: &health.Config{Interface: "lo", SourceAddress: "127.0.0.1", Target: "127.0.0.1", Protocol: "tcp", Port: prerequisite.Addr().(*net.TCPAddr).Port, IntervalMillis: 100, TimeoutMillis: 100, UnhealthyThreshold: 1}}})
@@ -261,6 +265,7 @@ func testDaemonHealthHistoryWithoutReactivation(t *testing.T, conditional bool) 
 			if err != nil {
 				t.Fatal(err)
 			}
+			serve(prerequisite)
 			until(t, 10*time.Second, func() bool {
 				var status supervisor.Status
 				if f.supervisor.Do(ctx, "GET", "/v1/status", nil, &status) != nil {
