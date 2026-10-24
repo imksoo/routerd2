@@ -25,9 +25,11 @@ import (
 	"github.com/imksoo/routerd/pkg/api"
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/control"
+	"github.com/imksoo/routerd2/internal/derivedcontroller"
 	"github.com/imksoo/routerd2/internal/events"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
+	"github.com/imksoo/routerd2/internal/resourceprogram"
 	"github.com/imksoo/routerd2/internal/runtimeconfig"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 	"github.com/imksoo/routerd2/internal/supervisor"
@@ -294,6 +296,32 @@ func TestDaemonConfigurationAndRecovery(t *testing.T) {
 	if !bytes.Equal(a, c2) {
 		t.Fatal("SSH observations differ from durable API history after control recovery")
 	}
+	// The operator reads current finite DerivedEvent state through real SSH;
+	// it must not fetch the producer's durable historical asserted value.
+	state = control.State{}
+	if err = ctl.Do(ctx, "GET", "/v1/config", nil, &state); err != nil {
+		t.Fatal(err)
+	}
+	literal := api.DerivedEventSpec{Topic: "routerd.fixture.literal", Inputs: []api.ReadyWhenSpec{{Field: "literal", NotEmpty: true}}, EmitInitial: true}
+	state.Config.Resources = append(state.Config.Resources, resourceprogram.Resource{ID: "derived/literal", DerivedEvent: &literal})
+	if err = ctl.Do(ctx, "POST", "/v1/config/commit", control.CommitRequest{ExpectedRevision: state.Revision, RequestID: "fixture-live-derived", Config: state.Config}, nil); err != nil {
+		t.Fatal(err)
+	}
+	until(t, 10*time.Second, func() bool {
+		var view derivedcontroller.Observation
+		return ctl.Do(ctx, "GET", "/v1/derived/derived%2Fliteral", nil, &view) == nil && view.State.Asserted != nil && *view.State.Asserted
+	})
+	derivedSession, err := client.NewSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	derivedOutput, err := derivedSession.CombinedOutput("show derived derived/literal")
+	_ = derivedSession.Close()
+	var derivedView derivedcontroller.Observation
+	if err != nil || json.Unmarshal(derivedOutput, &derivedView) != nil || derivedView.ID != "derived/literal" || derivedView.State.Asserted == nil || !*derivedView.State.Asserted {
+		t.Fatalf("SSH current derived view: %v %s", err, derivedOutput)
+	}
+	t.Log("real SSH show derived returned current finite status for a resource ID containing slash")
 	// Removal must release the actual bound sockets, not merely hide status.
 	state = control.State{}
 	if err = ctl.Do(ctx, "GET", "/v1/config", nil, &state); err != nil {
