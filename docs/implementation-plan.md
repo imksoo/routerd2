@@ -1,0 +1,1236 @@
+# 現行 routerd と同等の製品にするための実装計画
+
+作成日: **2026-10-24（Asia/Tokyo）**
+状態: **計画。ここに列挙した残作業を、この文書の作成によって実装済みとはしない。**
+
+## 1. 基準と到達点
+
+現行 routerd の Linux 上の機能・設定・運用契約を、PID 1 の `routerd` と役割別 worker に再構成する。
+homert02/03 は WAN/LAN/HA の受け入れプロファイルとして使い、BGP/RR、SAM、クラウド間接続、
+federation、管理・観測も製品の範囲に含める。
+
+| 対象 | 固定した基準 |
+| --- | --- |
+| 移植元 routerd | [1329ef54f296507eda79bbbc3b853783dd27251e](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e) |
+| routerd2 実装チェックポイント | [8dfbf615b01e9da57a06196b4069b9d8713f9ab5](https://github.com/imksoo/routerd2/tree/8dfbf615b01e9da57a06196b4069b9d8713f9ab5) |
+| 実装チェックポイントの CI | [run 40060123092 / success](https://github.com/imksoo/routerd2/actions/runs/40060123092) |
+| 既存の互換性台帳 | [parity.md](parity.md) / [parity.json](parity.json) |
+| 作業単位・依存・全項目の対応表 | [implementation-plan.json](implementation-plan.json) |
+
+計画開始時点で、チェックポイントの local HEAD と GitHub main は一致し、作業ツリーに未コミット差分はなかった。
+この計画の commit は、上記の実装チェックポイントとは別である。CI の成功は現在の実装範囲の証拠であり、
+旧 resource 全体の互換性や未作成の OS イメージの検証結果ではない。
+
+既存の PID 1、supervisor、native network writer、DHCP/RA/DS-Lite、DNS、VRRP、BGP/BFD、
+WireGuard、内蔵 SSH、設定 journal、署名付き userland 更新を引き続き利用する。
+残作業の中心は、各 protocol engine を旧 resource の依存・状態・生成・所有権へ接続することである。
+現在の実装範囲は [README](../README.md) と [architecture.md](architecture.md) を参照する。
+
+### 「同等」を閉じる判定
+
+各 field / default / validation / lifecycle / status / event / 失敗動作を、次のいずれかに分類する。
+
+| 判定 | 意味 |
+| --- | --- |
+| `equivalent` | 固定した旧契約と同じ観測可能な動作を、比較ケースと実行証拠で確認した |
+| `explicit_replacement` | 新しい製品方針による変更。入力単位の説明・移行方法・受入条件を明記した |
+| `unsupported` | 代替を含めて提供しない。対応済み件数には入れない |
+| `not_yet_implemented` | 計画はあるが、実装または受入が終わっていない |
+
+`explicit_replacement` を strict semantic parity に算入しない。
+任意の apt/dnf/pkg 操作や journald sink を capability / native logging に置き換える場合、
+製品としての移行完了と旧動作の完全一致は別の結果として報告する。
+明示変更が残る場合は「完全に同一の動作」とは表示しない。
+既存 `parity.json` の `semantic_parity` は、この計画の作成では変更しない。
+
+## 2. 中心となる設計
+
+### ResourceProgram を既存 runtime の上に置く
+
+現 `config.Document` は、ネットワークの desired state と service 設定を保持する。
+旧 resource の条件・生成元・依存関係を、静的な YAML 変換だけで表現し続ける方式には限界がある。
+[現在の設定モデル](https://github.com/imksoo/routerd2/blob/8dfbf615b01e9da57a06196b4069b9d8713f9ab5/internal/config/config.go)
+の上に、元の宣言を保持する `ResourceProgram` と coordinator を追加する。
+
+- **operator revision**: 人が commit した source program の版。
+- **projection generation**: 同じ source から、DHCP・health・VRRP 等の観測に応じて作った実行計画の版。
+- **worker generation / producer epoch**: 実際に動かす子プロセスと、その通知の有効範囲。
+
+source、dynamic parts、compiled plan、確認付き commit の rollback を、一つの正本と transaction で管理する。
+source YAML と生成済み runtime 設定を独立した二つの正本にしない。
+現在の native schema v1 は入力 adapter として維持し、旧 journal record と既存の復旧契約を継続する。
+動的状態が変わるたびに operator の設定 revision を書き換えることも避ける。
+
+`when` は true / false / indeterminate を扱い、未確定の観測を成功として使用しない。
+owner、provenance、依存、期限、観測済み世代から reconcile し、既存の `runtimeplan` に
+型付き intent を渡す。network worker は Netlink / nftables / kernel API によって適用し、
+適用結果を再観測する。カーネル転送路は維持する。
+
+旧 validator の一部は file/env の secret を読むため、純粋な設定検証と secret の解決を分離する。
+planner は入力・観測 snapshot・時刻を明示的に受け取り、ホスト状態を隠れて参照しない。
+
+### event・protocol fact・log は保持契約を分ける
+
+| データ | 必要な性質 |
+| --- | --- |
+| durable event / outbox / cursor | 再起動後の再送、at-least-once、作用側の idempotency、追跡できる結果 |
+| protocol fact / ownership lease | producer、boot、設定世代、鮮度と失効。古い Up の復活を防止 |
+| log / telemetry | bounded queue、drop の可視化、遅い consumer の分離。必要に応じた永続化 |
+
+旧 event consumer は作用成功後に cursor を保存し、新規 consumer は journal tip から開始する。
+cursor 保存失敗で再配送されるため、「exactly once の bus」を前提にしない。
+federation の `ExpiresAt == zero` は失効しない event の契約として扱い、
+kernel を変更する権限の有限 lease と混同しない。
+参照: [eventconsumer](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/eventconsumer/consumer.go) /
+[federation event](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/federation/event.go)。
+
+### PID 1 とモジュールの責務
+
+`routerd` は boot selection、supervision、reaping、shutdown/reboot を小さく保持する。
+resource coordinator、network、protocol、管理、logging、cloud adapter は個別 worker とする。
+追加 engine の採用によって、systemd / journald / sshd を製品の必須条件へ戻さない。
+
+現在のプロセス分離には equal-UID の信頼モデルがある。
+UID/GID/capability の分離は、UDS の role 認可・peer credential・state 所有権と同じ変更で実装する。
+network writer、時計調整、release 操作、reboot を別の権限にする。
+コンテナから host の時計・watchdog・reboot を操作しない。
+参照: [logging の現在の信頼モデル](https://github.com/imksoo/routerd2/blob/8dfbf615b01e9da57a06196b4069b9d8713f9ab5/internal/logging/README.md)。
+
+## 3. 優先順位と並行作業
+
+番号は受入マイルストーンであり、全作業を直列に並べる指示ではない。
+正確な依存は JSON の `depends_on` と `depends_on_gates` で管理する。
+前者は作業全体、後者は名前を付けた component gate のみを必要とする。
+`related_work_packages` は横断する契約の参照であり、実行順の edge ではない。
+早期 PoC、read-only API の骨格、provider simulator、運用画面の準備は、
+必要な契約が決まった範囲で並行着手できる。
+
+| 段階 | 主な作業 | 出口条件 |
+| --- | --- | --- |
+| M0 実装チェックポイント | 既存実装の保存 | routerd2 8dfbf615、local/remote一致・clean。既存実装CI全成功。今回の計画作成前に確認。 |
+| M1 resource 実行基盤と早期risk gate | CORE-01, CORE-02, CORE-03, CORE-04, CORE-06 | source program→依存評価→既存worker→状態→reconcileが一本通る。journal rollbackとengine/profile ADRの選択基準を持つ。 |
+| M2 単一ノードの WAN/LAN・経路切替 | SYS-01, SYS-02, NET-01, NET-02, NET-03, NET-04, NET-05, NET-06, OPS-01 | Health→PBR/FIB→実packet、DS-Lite+第二経路/PPPoE、MSS、PD/LAN/DNS、基本resource APIを受入する。 |
+| M3 二台 HA と routing resource | NET-07, NET-08, HA-01, HA-02, HA-03 | VRRP readiness、DHCP/PD継続、既存TCP/UDP NAT session維持、BGP/BFD/WG resource契約を別々に合格させて統合する。 |
+| M4 SAM・federation・cloud mobility | CORE-05, CLOUD-01, CLOUD-02, CLOUD-03, CLOUD-04 | RR/leaf複数nodeとproviderごとの実captureで、所有権移動、/32、NATなし通信、revoke/drain/復旧を確認する。 |
+| M5 全運用surface と追加engine | SYS-03, OPS-02, OPS-03, EXT-01, EXT-02 | 旧API/CLI/Web/観測、選定engineの必要機能、権限分離をprofile別に受入する。 |
+| M6 更新・OSイメージ・配備先 | DIST-01, DIST-02, DIST-03, DIST-04 | SSHからの安全な更新、state付きfallback、kernel/rootfs A/B、物理機/arm64/cloud/K8sを個別にqualificationする。 |
+| M7 互換性台帳と製品受入の確定 | QUAL-01 | 未対応・明示変更を隠さず、承認した契約集合の全ケースと性能・移行・戻し手順を証跡付きで閉じる。 |
+
+### 最初の実動作
+
+**HealthCheck → EgressRoutePolicy → native FIB / nftables → 実パケットの経路切替**を最初の縦方向の実装にする。
+
+1. 既存 Interface / address / route を resource coordinator から操作する。
+2. 二つの経路を分離して probe し、片方を遮断するとその経路の health だけが失敗することを確認する。
+3. priority / PBR の切替と回復を、source / mark / table と packet capture で確認する。
+4. worker / control の再起動と確認付き rollback でも、経路と所有者が整合することを確認する。
+
+これで WAN 切替に直結する機能を完成させながら、HA と SAM に共通する依存・状態・所有権を検証できる。
+NET-02 が必要とする NET-03 / NET-05 の primitive は、この最小実装に必要な範囲から提供する。
+各 work package 全体の完了を待って最小経路切替まで止める必要はない。
+
+```mermaid
+flowchart TD
+    A["契約と ResourceProgram"] --> B["依存・所有権・状態"]
+    A --> C["永続 event"]
+    A --> D["engine と配布方式の PoC"]
+    B --> E["Health・PBR・WAN/LAN"]
+    C --> E
+    E --> F["HA・lease・conntrack 同期"]
+    B --> G["dynamic config・provider・federation"]
+    C --> G
+    G --> H["SAM・BGP/WireGuard 連携"]
+    E --> H
+    D --> I["追加 engine・署名 profile"]
+    I --> J["更新・OS image・配備検証"]
+    F --> K["プロファイル別受入"]
+    H --> K
+    J --> K
+```
+
+この図は契約の流れの概略であり、全 edge を表すものではない。
+API / CLI / Web / 観測の実装は各 feature と並行し、最後に表面だけを接続する作業にしない。
+NTP は cloud/TLS に必要な基盤として前半に置く。
+PPPoE・IKE・Tailscale・nDPI の選定も CORE-06 で早期に着手する。
+
+### 最初の五つの変更単位
+
+以下は着手順の案であり、既に作成済みの PR や実装ではない。
+
+| 順 | 担当 | 具体的な変更 |
+| --- | --- | --- |
+| 1 | CORE-01 | field/default/status/event fixturesと旧実行環境のmanifest。新native機能を作る前に互換判定を再現する。 |
+| 2 | CORE-02 | ResourceProgram、native v1 adapter、単一journal transaction、旧record読込とconfirmed rollback。 |
+| 3 | CORE-03 | 三値条件・依存・ownerの最小coordinator。既存Interface/address/routeでstart/update/remove/recoveryを通す。 CORE-04のprotocol fact/freshnessと再起動時失効の最小契約を並行して定義し、次のHealth workerへ渡す。 |
+| 4 | NET-01 | Health workerとscoped Netlink route lookup。二つの独立pathのprobeを実packetで識別する。 |
+| 5 | NET-02 | NET-03/05の必要なprimitiveを接続し、priority/PBRの障害→fallback→復旧を実daemonで通す。 |
+
+CORE-04 の protocol fact / freshness 契約は Health worker の前に最小限を提供する。
+durable federation 全体の完成を先行条件にはしない。
+CORE-06 の engine PoC も最初の五つと並行する。
+各変更に移行用 fixture と必要な実動作 gate を対応させる。
+日付だけの見積りは置かず、最初の経路切替と engine PoC の結果から残量を再評価する。
+
+### 依存を過剰に広げない境界
+
+SYS-03 は runtime 権限 gate と appliance watchdog gate に分ける。
+SSH 更新と Kubernetes は権限 gate を必要とし、実機 watchdog の検証完了は待たない。
+DIST-02 も image / boot / state の共通契約と物理機別 qualification を分ける。
+cloud image は前者と対象 provider の boot/update 方式を必要とし、別の mini-PC / arm64 機の受入は待たない。
+
+CLOUD-03 は enrollment / revoke と生成 resource の component 契約を閉じる。
+実 BGP/WireGuard との統合は CLOUD-04 が受け持ち、CLOUD-03 と CLOUD-04 の相互完了待ちを作らない。
+
+## 4. engine の取り込みと配布方式
+
+**core は現在の二つの static ELF を維持する案**とする。
+必要な機能が外部 engine を要求する場合は、署名・版・依存を固定した profile に収容する。
+利用者が置く更新物は一つの archive にできるため、内部ファイル数と更新操作の簡単さを同一視しない。
+
+「optional」は搭載する profile を選べるという意味である。
+IPsec / Tailscale / native DPI を設定したのに engine がない状態を正常適用とはしない。
+設定が要求する capability を事前検査し、全機能プロファイルで必要な旧契約を受け入れる。
+
+| 機能 | 先行して評価する方式 | 選定で実証すること |
+| --- | --- | --- |
+| PPPoE | native PPP/PPPoE と固定 pppd 系 engine の比較 | 認証・session・IPv4/IPv6・再接続、shell hook の除去、address/route/DNS の所有権 |
+| NTP | foreground chronyd と型付き status/control adapter | 継続した時刻調整、client/server、DHCP 系 source、drift/state、未同期時の方針 |
+| IPsec/IKE | charon + private VICI | aggregate connection、rekey/DPD/NAT-T、secret、kernel SA/policy/route/VIP の責務 |
+| Tailscale | embedded backend と固定 daemon + typed local API の比較 | identity、subnet/exit-node、route/DNS、relay、公開 SSH field、revoke |
+| nDPI | 隔離した CGO worker と固定 library / dissector 集合 | 実 backend の load、実分類、容量・障害分離、選択 component の配布条件 |
+
+chronyd は foreground 運用が可能であり、一回の時刻取得は継続した clock discipline と別の契約である。
+VICI は charon の設定・制御・監視に使えるが、プロトコル自身に認証・暗号化の保護はないため、
+private UDS と認可境界を必要とする。charon の kernel interface は SA / policy に加え route / VIP も操作する。
+そのまま組み込んで「network worker だけが全 kernel object を変更する」とは表現できない。
+broker 化、または範囲・所有権・衝突回避を定めた限定委譲を PoC の合格条件にする。
+出典: [chronyd manual](https://chrony-project.org/doc/4.8/chronyd.html) /
+[VICI](https://docs.strongswan.org/docs/latest/plugins/vici.html) /
+[charon](https://docs.strongswan.org/docs/latest/daemons/charon.html)。
+
+tsnet の組込み listener が動くことだけでは、旧 TailscaleNode の subnet router / exit-node / DNS /
+Tailscale SSH の全契約を証明しない。routerd 自身の管理 SSH と Tailscale SSH を別に扱う。
+出典: [tsnet API](https://tailscale.com/docs/reference/tsnet-server-api) /
+[旧 Tailscale 実装](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/tailscale)。
+
+### 署名する範囲
+
+現在の release は `manifest.json`、`manifest.sig`、`routerd`、`routerd-modules` の四ファイル構成である。
+追加 engine を APK で置くだけでは、その集合の互換性や atomic な切替は保証されない。
+参照: [releases.md](releases.md)。
+
+新しい形式が必要になった場合は、次を profile manifest の対象とする。
+
+- executable、依存する .so、plugin、必要 data、固定 entry point と architecture。
+- kernel feature / module、IPC と設定・state schema の互換範囲。
+- 各 artifact の digest、source version、build flags、capability、配布資料。
+- userland の一組を選ぶ更新と、旧版でも安全に解釈できる state migration 方針。
+
+config snapshot、identity/鍵、rotation/revocation、durable event/cursor、有限 lease/fact の戻し方を分ける。
+旧 snapshot の復元で、失効済みの credential や古い所有権を復活させない。
+安全に変換できない state では downgrade を事前に拒否する。
+
+core の既存形式との読取互換を明示し、old bootstrap が未対応形式を予測可能に拒否できるようにする。
+userland の切替と kernel / rootfs / bootloader A/B は別段階で検証する。
+whole-OS 更新では kernel / modules / rootfs / boot selector metadata も署名と書込前検証の対象にする。
+
+### license の判断
+
+旧インストーラは外部 engine の package 名を選ぶが、正確な版や build option を固定していない。
+移植元の source SHA だけで全依存の license / 実行動作が固定したとは扱わない。
+[旧 install.sh](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/packaging/install.sh)
+を参考に、選択する source・依存・plugin ごとに版と条件を記録する。
+
+特に nDPI は 2026-08-23 に component 別の license 変更が告知されている。
+現行 library 全体を無条件に一つの LGPL 表記で扱わず、採用版・dissector・利用モードの条件を確認する。
+process 分離だけで license の結論を出さない。SBOM/notices と、採用条件で必要な対応 source・変更・build 資料を
+release と対応づけて生成し、取得可能性まで確認する。kernel、engine、library/plugin、firmware は個別に棚卸しする。
+出典: [ntop の告知](https://www.ntop.org/announcing-ndpi-dual-license-change/) /
+[component terms](https://github.com/ntop/nDPI/blob/dev/README.license.md)。
+
+## 5. 先に明文化する設計判断
+
+以下は採用済み仕様ではなく、最初の実装・PoC で確定させる提案である。
+OS 固有の旧契約を変える場合は入力単位の migration policy に結びつける。
+
+| ID | 判断 | 提案 |
+| --- | --- | --- |
+| D-01 | OS固有契約と任意executable | Packageの任意apt/dnf/pkg、journald sink、任意Plugin/provider executable、OS shell依存機能は、署名付きcapabilityとrouterdの管理面へ明示的に置換する案。未対応を拒否するだけでは旧契約全体のparityにならない。各inputごとに移行policy・理由・代替・受入を記録する。 |
+| D-02 | core二つのELFと全機能profile | coreは現状を維持。PoCで外部engineを採用したprofileのみ、engine/library/plugin/dataを含む署名形式とstate互換性を追加する案。単一archiveによる一組の更新を保ち、任意のhost packageへ依存しない。 |
+| D-03 | kernel書換権限 | network writerへのbrokerを優先する。engineが直接XFRM等を管理する必要がある場合は、object namespace/owner/reconcile/foreign-state保護を限定した委譲ADRを先に合格させる。一般route/firewallの二重writerを黙認しない。 |
+| D-04 | 旧動作互換とnativeの改善 | BFD bootstrap/reset、health鮮度、IPv6 known-good rule、sticky、DNS finite ownership等は、legacy互換modeと明示replacementを分ける。現在のnative defaultsへ直接写して同等と数えない。 |
+| D-05 | HAと移行方式 | RouterdClusterはfile/flock/TTLの旧契約を基準にする。新旧node混在によるrolling migrationか、検証済みsnapshotを伴うmaintenance切替かを決め、選択した方式を二台で受入する。 |
+| D-06 | 基準機能と追加配備先 | baselineのIPv4 /32 SAMとAWS/Azure/Oracle Cloud executorをまず復元する。GCPの具体的adapter、Golden Images、K8s運用は個別にqualificationする。EVPN、独自CNI、FreeBSD portは今回のbaseline完了条件に追加しない。 |
+| D-07 | engine版・license・配布資料 | OS package名だけでなく正確なsource/build flags/dependencies/enabled componentsを固定する。nDPIの現在のcomponent別条件を確認し、process分離をlicense上の結論として扱わない。 |
+
+## 6. 互換性上の重要な差
+
+機能名だけのチェックリストでは見落とすため、以下を独立した受入ケースとして保持する。
+
+| 項目 | 基準実装の動作と実装計画への影響 |
+| --- | --- |
+| Health / Egress | advisory selection と priority/mark/hash の実適用を分ける。Failing でも閾値未到達なら healthy、鮮度は `max(2分, 3×interval+timeout)`。候補の probe が別 WAN へ迂回して成功しないことを検証する |
+| route evidence | `ip -j route get` を typed Netlink query へ置換する。証跡取得の失敗を、成功した probe の失敗に変更しない |
+| weighted-ecmp | 旧 advisory selector は reserved / not implemented を Pending として返す。既存の完了機能とは数えない |
+| IPv6 / DS-Lite | IPv6 host-only rule を IPv4 DS-Lite から分離する。RA 未取得時の known-good 保持と native 有限寿命の差を明示する |
+| IA_NA / RA | DHCPv6Address は IA_NA client を要する。旧 networkd 等が担った RA trigger、managed/required/observe-only、MTU/hop-limit、useDNS の効果を確定し、PD/information と UDP 546 / DUID / IAID の所有権を整理する |
+| BFD | interface 省略の multihop は baseline に含まれる。旧 fast/省略=300 ms×3、normal=500 ms×3、slow=1,000 ms×5 と明示 override を維持する |
+| BFD と BGP | 旧実装は BFD の初回 Up 前でも BGP を構成し、既知の Up→Down で hard reset する。現在の strict startup gating と同一ではない。互換 mode または明示変更を設ける |
+| VRRP | graceful activation timeout は状態報告を変えるだけで、ReadyWhen 未成立の VIP を強制公開しない。選出と公開 readiness を分ける |
+| RouterdCluster | 旧方式は LeasePath の file/flock/TTL。ネットワーク quorum / consensus が既存機能であるとは扱わない |
+| NAT sync | event-stream と conntrackd を区別する。既存 TCP 継続には tuple だけでなく TCP state / timeout / NAT mapping 等を要する |
+| DHCP / DNS | active chain と standalone renderer の差、global sticky 最大値・固定 12h 再生、動的 DNS の優先順位・owner・withdraw を fixture にする |
+| BGP の容量 | 現在の selected paths 4,096 件という bound を暗黙の製品上限にしない。whole-generation publication、chunking、backpressure、超過時状態と容量試験を設ける |
+| SAM | IPv4 unicast /32 mobility、FOU/WireGuard、capture、所有権、NAT なし通信が baseline。延期されている EVPN を移植必須へ追加しない |
+| cloud provider | 具体的な AWS/Azure/Oracle Cloud executor と GCP の enum を区別する。GCP adapter は別の実装・qualification とする |
+| native DPI | fallback の全 unknown は実 nDPI backend ではない。loaded 状態と既知の分類を証明する |
+| HA 移行 | native 同士の sync と旧 SSH/conntrackd 方式との wire compatibility は別要求。混在 rolling か maintenance 切替かを決めたうえで検証する |
+
+根拠となる主な旧 source:
+
+- [pkg/egressroute/selection.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/egressroute/selection.go) / [pkg/healthcheck/route_lookup_linux.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/healthcheck/route_lookup_linux.go) / [pkg/controller/chain/policyroute.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/policyroute.go).
+
+- [pkg/render/netplan.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/render/netplan.go) / [pkg/apply/engine.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/apply/engine.go) / [pkg/hostdeps/hostdeps.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/hostdeps/hostdeps.go).
+
+- [pkg/controller/bfd](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/bfd) / [pkg/controller/vrrp](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/vrrp) / [pkg/ha](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/ha).
+
+- [pkg/controller/chain/nat44sessionsync.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/nat44sessionsync.go) / [pkg/controller/chain/dhcp_profile_leases.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/dhcp_profile_leases.go).
+
+- [pkg/controller/mobility/pool_plan.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/mobility/pool_plan.go) / [pkg/controller/mobility/reconcile_effects.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/mobility/reconcile_effects.go) / [pkg/sam/sam.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/sam/sam.go) / [pkg/hybrid/hybrid.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/hybrid/hybrid.go).
+
+- [docs/adr/0012-bgp-address-mobility.md](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/docs/adr/0012-bgp-address-mobility.md) / [pkg/providercontract](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/providercontract) / [cmd/routerd-ndpi-agent](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/cmd/routerd-ndpi-agent).
+
+SAM は `PoolRuntimeSnapshot → ReconcilePool → PoolPlan` と effect 適用の境界、
+`PlanLocalCaptureIntents`、owner refs を持つ HybridRoute lowering を再利用する。
+旧 Runner や shell command 文字列の互換実行層を作るのではなく、決定ロジックと副作用を分離して
+native writer / provider adapter に接続する。
+
+## 7. 作業一覧と依存・受入条件
+
+34 作業単位を以下に定義する。すべて `planned` である。
+予定 package は設計上の配置案であり、既に存在する実装とは限らない。
+`depends_on` は作業全体の受入に必要な契約を表し、`depends_on_gates` は部分成果物への依存を表す。
+早期 PoC や最小実装を直ちに禁止するものではない。
+各項目の主担当は track と module で割り当て、未定の個人名や実施済み日付は記載しない。
+
+### M1 — resource 実行基盤と早期risk gate
+
+#### CORE-01 — 基準環境と field 単位の互換契約
+
+範囲: 共通基盤 / track: resource / risk: medium。
+前提: なし。
+
+**成果物**
+
+- 既存の87 public kind／94 decoder kindの台帳を、default・validation・lifecycle・status・event・失敗時動作のcaseへ展開する。
+- 旧コードのactive controllerと実際のOSエンジンを参照環境で固定する。旧install.shはengine版を固定していないため、source SHAだけを動作基準としない。
+- 判定を equivalent／explicit_replacement／unsupported／not_yet_implemented に分け、意味変更のdecision IDと試験証跡を持つ。
+
+**受入条件**
+
+- 同じ入力・観測時系列に対する旧実装と新plannerの比較が再現できる。
+- 既知のrenderer/controller差と削除済み18 kindの拒否をfixture化する。任意の未知入力を成功扱いで省略しない。
+- API／CLI／controllerの全台帳に担当と受入caseがあり、追加upstream差分を固定基準と分けて扱える。
+
+再利用・比較元: [pkg/api](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api), [pkg/config](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/config), [pkg/controller/chain](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain), [packaging/install.sh](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/packaging/install.sh)。
+
+実装先の案: `docs/parity.json`, `internal/legacyconfig`, `internal/compatibility (新設予定)`。
+
+#### CORE-02 — ResourceProgram と単一の設定 transaction
+
+範囲: 共通基盤 / track: resource / risk: high。
+前提: CORE-01。
+
+**成果物**
+
+- 元resource、identity、owner、provenanceを保持するResourceProgramと、実行用planを導入する。現在のnative schema v1は明示的な入力adapterとして維持する。
+- operator revision、derived projection generation、worker generationを区別し、sourceと実行planを一つの正本・transactionで管理する。
+- journalのschema移行、失敗時復旧、confirmed commitのrollbackにsource graphとworker構成を含める。secret解決をpure validationから分離する。
+
+**受入条件**
+
+- native v1の既存入力と永続recordを読み、既存試験を維持できる。
+- crash／重複request／同時更新／確認期限切れでsourceと実行planが別世代にならない。
+- 旧readerへ戻る場合の互換性をpreflightし、必要な設定snapshotを保持する。planner単体はhost file/env/networkを読まない。
+
+再利用・比較元: [pkg/api](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api), [pkg/resource](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/resource), [pkg/config/cluster_secret_validate.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/config/cluster_secret_validate.go)。
+
+実装先の案: `internal/resourceprogram (新設予定)`, `internal/config`, `internal/control`, `internal/runtimeplan`。
+
+#### CORE-03 — 依存・条件・resource lifecycle の coordinator
+
+範囲: 共通基盤 / track: resource / risk: high。
+前提: CORE-02。
+
+**成果物**
+
+- when／dependsOn／ready_when／status reference、for/maxAge、true/false/indeterminate、循環検出を実装する。
+- resourceごとのstart/update/stop/delete、owner GC、対象を絞ったreconcile、再起動時の再評価を扱う。
+- 既存runtimeplanへ型付きintentを渡す。未解決resourceを静的Documentへ無理に変換せず、待機理由を状態に残す。
+
+**受入条件**
+
+- 不明なVRRP roleでBACKUPがDHCP/PD sessionを開始しない。条件除外後の参照整理も旧契約と一致する。
+- dependency loss／source cutover／再起動／遅延した旧通知でforeign stateを消さず、新しい所有者を取り消さない。
+- 中断された適用を再観測して復旧し、kernel未反映をReadyとして返さない。rollback失敗はdegradedで残す。
+
+再利用・比較元: [pkg/resourcequery/when.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/resourcequery/when.go), [pkg/api/provides.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/provides.go), [pkg/lifecycle](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/lifecycle), [pkg/resource](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/resource)。
+
+実装先の案: `internal/resourceprogram (新設予定)`, `internal/runtimeplan`, `internal/supervisor`。
+
+#### CORE-04 — durable event と有限 protocol fact の契約
+
+範囲: 共通基盤 / track: resource / risk: high。
+前提: CORE-02。
+
+**成果物**
+
+- EventRule／DerivedEvent、durable journal、consumer cursor、outbox、再送・dedup・期限を移植する。
+- durable event、freshnessを持つprotocol fact、欠落を許容するlogを別のchannelと保持契約にする。
+- boot ID／単調時計／config digest／generation／producer epochを共有するが、古いUp状態を再起動後に復活させない。
+
+**受入条件**
+
+- 旧consumerのat-least-onceと「新規consumerはjournal tipから開始」を保つ。作用成功後のcursor保存失敗でも作用側で重複を抑止できる。
+- 重複／順序逆転／peer再起動／disk full／cursor rollbackを検証する。
+- federationのExpiresAt=zeroと、side effect権限の有限なleaseを混同しない。ログworker停止でdurable eventを失わない。
+
+再利用・比較元: [pkg/eventconsumer](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/eventconsumer), [pkg/eventrule](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/eventrule), [pkg/derived](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/derived), [pkg/bus](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/bus), [pkg/federation/event.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/federation/event.go)。
+
+実装先の案: `internal/events (新設予定)`, `internal/serviceconfig`, `internal/runtimeplan`。
+
+#### CORE-06 — capability profile・engine 選定・署名形式
+
+範囲: 共通基盤 / track: platform / risk: high。
+前提: CORE-01。 設計判断: D-02, D-03, D-07。
+
+完了範囲: 共通manifest/authority/IPC契約とcore profileの受入をここで閉じる。各engineの採否・実装受入はSYS-02/NET-04/EXT-01/EXT-02/OPS-03で個別に閉じ、未解決の別engineでnative system等を一括して止めない。
+
+**成果物**
+
+- core二つのstatic ELFを維持し、追加engineを必要とするprofileのartifact集合・固定entry point・IPC・state schema・権限をADRで定義する。
+- PPPoE／NTP／IKE／Tailscale／nDPIの選定PoCを各担当と開始する。版・build flags・plugin・依存.so/data・licenseを固定する。
+- 選んだengineに必要なら、現在の四ファイルbundle形式を明示的にversion upする。APK追加だけでupdate整合性が保てるとは扱わない。
+- manifestに必要kernel feature/module/ABIの対応範囲を記載する。exact source/build/component inventory、SBOM/noticesと採用条件で必要なsource/build資料をreleaseへ対応づけ、取得可能性を検証する。
+
+**受入条件**
+
+- 標準profileで二つのELFのみの既存起動・更新が通る。
+- profile validatorが欠落library/plugin、architecture/IPC/schema/kernel feature不一致、改竄をapply前に拒否することをfixtureで確認する。実engine artifactごとの受入は各engine担当作業で行う。
+- engineのkernel書換範囲を申告する契約と、broker化または限定委譲の判定基準を確定する。実engineごとの決定・検証は個別作業の前提とし、未解決engineをcapabilityとして広告しない。
+
+再利用・比較元: [packaging/install.sh](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/packaging/install.sh), [pkg/hostdeps](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/hostdeps), [pkg/manageddaemon](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/manageddaemon)。
+
+実装先の案: `internal/release`, `internal/supervisor`, `internal/runtimeconfig`, `packaging/alpine`, `docs/adr (新設予定)`。
+
+### M2 — 単一ノードの WAN/LAN・経路切替
+
+#### SYS-01 — system resource と capability 要求
+
+範囲: 旧 routerd 互換 / track: platform / risk: medium。
+前提: CORE-03, CORE-06。 設計判断: D-01。
+
+**成果物**
+
+- Sysctl／SysctlProfileのexact/atLeast/optional、Hostname、Inventoryをnative effectとtyped observationで実装する。
+- general sysctlとforwarding/RAなど専用moduleの要求を衝突検出し、設定journalから再起動時に再適用する。
+- Packageの既知依存をversioned capabilityへ対応させ、任意apt/dnf/pkg要求との差を明示する。内部service-unit/kernel-module jobsもsupervisor/bootstrapへ移す。
+
+**受入条件**
+
+- 設定・更新・削除・rebootで各resourceのstatusと値が旧契約に一致する。
+- 管理外sysctl/link/packageを黙示採用しない。必要capability不在はmutation前に診断する。
+- container/hostモードでappliance専用mount/module loadを行わない。
+
+再利用・比較元: [pkg/sysctlprofile](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/sysctlprofile), [pkg/controller/chain/sysctl.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/sysctl.go), [pkg/controller/chain/package.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/package.go), [pkg/inventory](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/inventory)。
+
+実装先の案: `internal/system (新設予定)`, `internal/network`, `internal/boot`, `internal/kmod`, `internal/legacyconfig`。
+
+#### SYS-02 — NTP client/server と時刻品質
+
+範囲: 旧 routerd 互換 / track: platform / risk: high。
+前提: CORE-03, CORE-06。 設計判断: D-02, D-07。
+
+**成果物**
+
+- 継続したclock disciplineを提供するengineを選定・監視し、static/auto/DHCP/DHCPv6 sourceとserverのlisten/allow/source referenceを扱う。
+- 起動時未同期、source切替、slew/step、drift保存、server access、状態照会をtyped APIへ接続する。
+- 内部deadlineをboot/monotonic時計で保ち、TLS等の時刻依存処理には未同期方針を持つ。containerにはhost時計の調整権限を与えない。
+
+**受入条件**
+
+- 独立NTP peerとのclient/server、source変更、network断、clock step、rebootを確認する。
+- 時刻の進み／巻戻りでlease・BFD・confirmed commitの所有権が不当に延長されない。
+- 固定serverへの一回のSNTP取得だけで合格にしない。採用engineの稼働・discipline・公開statusを確認する。
+
+再利用・比較元: [pkg/controller/chain/ntp.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/ntp.go), [pkg/render/timesyncd.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/render/timesyncd.go), [pkg/api/specs.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go)。
+
+実装先の案: `internal/protocol/ntp (新設予定)`, `internal/serviceconfig`, `internal/runtimeplan`, `packaging/alpine`。
+
+#### NET-01 — HealthCheck の native worker と経路証跡
+
+範囲: 旧 routerd 互換 / track: network / risk: high。
+前提: CORE-03, CORE-04。
+
+**成果物**
+
+- ICMP/TCP/DNS/HTTP probe、targetSource、source/interface/mark、threshold/history/statusを再利用する。
+- ip -j route getをnetwork workerのscoped Netlink lookupへ置換する。経路証跡取得は旧のbest-effort契約を保つ。
+- 別WANへ迂回して成功する誤判定を防ぎ、取得元・設定世代・freshnessをstatusへ含める。
+
+**受入条件**
+
+- 独立peerとpacket captureでprobeの送信interface/source/markが対象候補に対応する。
+- Healthy/Failing/Unhealthyのthreshold境界、回復、停止、古いresultの再送を比較する。
+- 経路証跡だけの失敗をprobe失敗へ変えず、停止したproducerを現行のHealthyとして使い続けない。
+
+再利用・比較元: [pkg/healthcheck](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/healthcheck), [cmd/routerd-healthcheck](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/cmd/routerd-healthcheck)。
+
+実装先の案: `internal/protocol/health (新設予定)`, `internal/serviceconfig`, `internal/runtimeplan`, `internal/network`。
+
+#### NET-02 — EgressRoutePolicy・PBR・経路選択
+
+範囲: 旧 routerd 互換 / track: network / risk: high。
+前提: CORE-03, NET-01, NET-03, NET-05。 設計判断: D-04。
+
+**成果物**
+
+- advisory selectionとpriority/mark/hashの実適用を別planにし、候補のpriority/weight、条件、health、hysteresis、gateway/deviceを保持する。
+- nft mark/connmark、rule/table、hash selection、probe用経路、hostTraffic、IPv6 source ruleをowner付きintentへ落とす。
+- IPv6 source未取得時のknown-good rule保持とnative有限寿命の差を明示し、IPv4 DS-Liteの正常経路を巻き戻さない。
+
+**受入条件**
+
+- 実TCP/UDPがtraffic classごとのWANへ流れ、障害→fallback→回復で選択・status・実経路が一致する。
+- Failing閾値とmax(2分,3×interval+timeout)の旧鮮度判定をfixture化する。
+- advisoryはFIBを書かず、reserved weighted-ecmpを既存の実装済み機能として扱わない。foreign rule/tableを保持する。
+
+再利用・比較元: [pkg/egressroute/selection.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/egressroute/selection.go), [pkg/controller/chain/policyroute.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/policyroute.go), [pkg/api/cluster_routes.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/cluster_routes.go)。
+
+実装先の案: `internal/policy/egress (新設予定)`, `internal/network`, `internal/runtimeplan`, `internal/legacyconfig`。
+
+#### NET-03 — Firewall・ingress・MTU/MSS・fragment policy
+
+範囲: 旧 routerd 互換 / track: network / risk: high。
+前提: CORE-03, CORE-04。
+
+**成果物**
+
+- dynamic/timed IP sets、mark/connmark、ordered ACL、flow pinholes、health/drain、limits/logging、DNAT/SNATをtyped nft intentへ追加する。
+- TCP MSS clamp、bridge-family clamp、IPv4 force-fragment、MTUの世代・所有権・quarantineを移植する。
+- 旧service holeの実効範囲、host traffic、L2/L3、全resourceのownerと観測を保持する。
+
+**受入条件**
+
+- 旧active rendererとの判定比較と配布kernel上の実packet試験を両方実施する。
+- SYN/SYN-ACK、小さいMSS、UDP/QUIC、DF/PTB/fragment、DS-Lite/PPP/WG path変更を確認する。
+- TTL/owner削除、既存conntrack、途中失敗、foreign table保護を確認する。nft batch以外を一括atomicと呼ばない。
+
+再利用・比較元: [pkg/render/nftables.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/render/nftables.go), [pkg/controller/firewall](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/firewall), [pkg/controller/nat44](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/nat44), [pkg/controller/chain/ipaddressset.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/ipaddressset.go), [pkg/controller/chain/mtu.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/mtu.go), [pkg/controller/ingressservice](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/ingressservice), [pkg/ingressdrain](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/ingressdrain)。
+
+実装先の案: `internal/network`, `internal/policy/firewall (新設予定)`, `internal/runtimeplan`, `internal/legacyconfig`。
+
+#### NET-04 — PPPoE の engine 選定と session 運用
+
+範囲: 旧 routerd 互換 / track: network / risk: high。
+前提: CORE-03, CORE-06, NET-03, NET-05。 設計判断: D-02, D-03, D-07。
+
+**成果物**
+
+- native PPP engineと固定版foreground pppd等の統合をPoCし、全fieldの実効動作・保守・license・サイズで選定する。
+- discovery、PAP/CHAP、LCP、IPCP、必要なIPv6動作、AC/service名、MTU/MRU、echo、再接続をworker化する。
+- shell hookを使わず、秘密をargvへ出さず、negotiated address/peer/DNS/routeをtyped ownerへ渡す。
+
+**受入条件**
+
+- 独立ACとのPADO/PADS/PADT、認証失敗、LCP途絶、重複応答、link flap、再起動で相互接続する。
+- 旧childが生きている間に二重sessionを開始せず、stale address/routeを撤去する。
+- PPPoEとDS-Liteを持つ二経路でPBR、MSS、回復probeを統合確認する。
+
+再利用・比較元: [pkg/pppoeclient](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/pppoeclient), [pkg/controller/pppoesession](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/pppoesession), [cmd/routerd-pppoe-client](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/cmd/routerd-pppoe-client)。
+
+実装先の案: `internal/protocol/pppoe (新設予定)`, `internal/network`, `internal/serviceconfig`, `internal/runtimeplan`。
+
+#### NET-05 — link・address・WAN resource の完全化
+
+範囲: 旧 routerd 互換 / track: network / risk: high。
+前提: CORE-03, CORE-04。 設計判断: D-04。
+
+**成果物**
+
+- link/Bridge/VRF/VXLANの残りのoption/lifecycleとSelfAddressPolicyのcandidate/suffix/ordinal/fallbackをtyped selectionへ移す。
+- DHCP4/PD/information/RA、DAD、preferred/valid、DS-Lite source/AFTR/multi-source、独立routeの依存を結ぶ。
+- explicit adoption/exclusive等の意図と管理外状態の保護を両立する所有権移行を設計し、曖昧な黙示採用は拒否する。
+- DHCPv6AddressのIA_NA clientを所有する。RAのmanaged/required/observe-only、RAによるDHCP起動、MTU/hop-limit、useDNSによるsystem resolver効果を旧host engine版ごとに確定し、native実装または明示replacementとする。
+
+**受入条件**
+
+- PD再番号付け、旧prefix deprecated、DAD失敗、source/router消失、AFTR/DNS失敗と回復を確認する。
+- 1-based ordinal、prefix suffix、情報sourceとAFTRの選択を旧active codeと比較する。
+- worker停止・control停止・kernel rebootを区別し、古いsourceで所有資源が復活しない。
+- 独立DHCPv6 serverとのIA_NA取得/renew/rebind/expiry/restartを確認する。同一interfaceのPD/informationとUDP 546 socket・DUID/IAIDの所有権を共有でき、RA trigger/MTU/hop-limitとresolver効果も対応方針どおりに動く。
+
+再利用・比較元: [pkg/api/provides.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/provides.go), [pkg/lan](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/lan), [pkg/controller/chain/phase2.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/phase2.go), [pkg/controller/chain/bridge.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/bridge.go), [pkg/controller/chain/vxlan_tunnel.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/vxlan_tunnel.go), [pkg/vrf](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/vrf), [pkg/vxlan](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/vxlan), [pkg/render/netplan.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/render/netplan.go), [pkg/apply/engine.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/apply/engine.go), [pkg/hostdeps/hostdeps.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/hostdeps/hostdeps.go)。
+
+実装先の案: `internal/network`, `internal/runtimeplan`, `internal/protocol/raclient`, `internal/protocol/aftr`, `internal/legacyconfig`, `internal/protocol/dhcp6 (新設予定)`。
+
+#### NET-06 — LAN・DHCPv6・relay・DNS の resource 完全化
+
+範囲: 旧 routerd 互換 / track: network / risk: high。
+前提: CORE-03, CORE-04, NET-05。 設計判断: D-04。
+
+**成果物**
+
+- DHCPv6 serverのstateful/stateless/both/RA-only、Rapid Commit、動的pool/optionsとDHCPv4 relayを実装する。
+- v4 scope/profile/reservation/options、旧global sticky、fingerprint、lease importをowned journalへ接続する。
+- DNS listener/zoneのdynamic addressFrom、VirtualAddress hostname、v4/v6 lease由来record、source優先順位、削除を既存resolverへ通知する。
+
+**受入条件**
+
+- 独立client/relayでDORA/renew、v6、decline/release、renumbering、restart/INIT-REBOOTを確認する。
+- active chainとstandalone rendererの差、global sticky hold/replay、予約競合と複数serverをfixture化する。
+- DNS TCP接続とlistenerを維持しつつ、静的record優先・source消失・revocation・再取得を検証する。
+
+再利用・比較元: [pkg/controller/chain/chain.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/chain.go), [pkg/controller/chain/dhcp_profile_leases.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/dhcp_profile_leases.go), [pkg/controller/dnsresolver](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/dnsresolver), [pkg/dhcpeventqueue](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/dhcpeventqueue), [pkg/dhcpfingerprint](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/dhcpfingerprint), [pkg/raobserver](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/raobserver)。
+
+実装先の案: `internal/protocol/dhcpserver`, `internal/protocol/dhcp6server (新設予定)`, `internal/protocol/dhcprelay (新設予定)`, `internal/protocol/dns`, `internal/runtimeplan`, `internal/legacyconfig`。
+
+#### OPS-01 — resource ControlAPI と基本 CLI
+
+範囲: 旧 routerd 互換 / track: operations / risk: high。
+前提: CORE-03, CORE-04。
+
+**成果物**
+
+- 旧22 HTTP operationsとresource validate/plan/apply/delete/get/describe、revision競合、認可を移植する。
+- native v1とresource programの入口を明示し、SSH/local/HTTPの共通typed handlerを用意する。
+- 各featureのstatus/probe/log/イベント入口をmoduleに接続し、大きな結果はboundedかつcomplete generationで取得する。
+
+**受入条件**
+
+- URLだけでなく成功/失敗response、認可、dry-run、副作用、secret非表示を比較する。
+- 同時操作、旧revision、timeout、再送で誤った設定をcommitしない。
+- 未実装moduleのendpointを成功の空responseで置き換えない。基本APIの完成と全featureの完成を分けて記録する。
+
+再利用・比較元: [pkg/controlapi](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controlapi), [pkg/resourcequery](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/resourcequery), [pkg/config/management.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/config/management.go), [cmd/routerctl](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/cmd/routerctl)。
+
+実装先の案: `internal/control`, `internal/cli`, `internal/management`, `internal/resourceprogram (新設予定)`。
+
+### M3 — 二台 HA と routing resource
+
+#### NET-07 — BGP/BFD resource と大規模経路の契約
+
+範囲: 旧 routerd 互換 / track: network / risk: high。
+前提: CORE-03, CORE-04, NET-05。 設計判断: D-04。
+
+**成果物**
+
+- BGPRouter/BGPPeer/BGPDynamicPeerのpolicy/source/VRF/redistribution/eligibilityとBFD参照・profileを接続する。
+- interface無しで元が生成するmultihop BFDを実装し、local address解決、legacy reset modeとnative strict modeを分ける。
+- 全世代単位のRIB snapshot、分割転送/backpressure/上限超過の状態を定義し、現在の4096 selected pathsを無条件の互換上限にしない。
+
+**受入条件**
+
+- 独立BGP/BFD peerとのIPv4/v6、RR/dynamic peer、VRF/recursive/ECMP、single/multihopを確認する。
+- BFD never-upでのBGP起動、既知Up→Downのhard reset、再起動とstrict gatingを別fixtureで試験する。
+- 大量更新/切替中の部分RIBを完全snapshotと解釈せず、withdraw/owner期限切れとSAM /32 deliveryを確認する。
+
+再利用・比較元: [pkg/bgp](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/bgp), [pkg/bgpdaemon](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/bgpdaemon), [pkg/controller/bgp](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/bgp), [pkg/controller/bfd](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/bfd)。
+
+実装先の案: `internal/protocol/bgp`, `internal/protocol/bfd`, `internal/runtimeplan`, `internal/network`, `internal/legacyconfig`。
+
+#### NET-08 — WireGuard の動的 peer・endpoint・identity
+
+範囲: 旧 routerd 互換 / track: network / risk: high。
+前提: CORE-03, CORE-04, NET-05, NET-06。
+
+**成果物**
+
+- hostname endpointの再解決とroamingの優先関係、peersFrom、enrollment由来identity/keyをtyped complete-peer-setへ変換する。
+- key/PSK rotation、撤去、SAMからのpeer更新をsource generationでfenceする。
+- 旧listener例外とstandalone fixed-listenerの未対応境界を正確なhook契約で解消する。
+
+**受入条件**
+
+- 再解決・roaming・key rotation・失効で旧peerが復活しない。
+- multipart updateの中断、rollback、foreign link/peer保護を確認する。
+- SAM連携はCLOUD-03/04の受入で追加確認し、それまで動的SAM featureを完了にしない。
+
+再利用・比較元: [pkg/wireguard](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/wireguard), [pkg/controller/chain/wireguard.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/wireguard.go)。
+
+実装先の案: `internal/network`, `internal/runtimeplan`, `internal/legacyconfig`, `internal/protocol/wireguard-control (新設予定)`。
+
+#### HA-01 — VRRP・VirtualAddress・RouterdCluster
+
+範囲: 旧 routerd 互換 / track: network / risk: high。
+前提: CORE-03, NET-01, NET-05。 設計判断: D-04, D-05。
+
+**成果物**
+
+- track penalty/連続回数、preempt、unicast peers、旧version/authの実効動作、動的VIPとGARPを移植する。
+- electionとVIP公開を分離し、ready_whenとgraceful activation、WAN/LAN VMAC、RA withdrawalを同じrole authorityで扱う。
+- RouterdClusterのfile/flock/TTL協調を維持するか、異なるfencing方式への置換を明示する。
+
+**受入条件**
+
+- 二台と独立peerで選出、track、preempt、分断、worker/control crash、再起動を確認する。
+- MASTERでもready_when未成立ならVIPを出さず、graceful timeoutで強制公開しない。
+- WAN/LAN VMAC、GARP/NA/RA順序、foreign VIP保護、未確定roleでのsession開始禁止を検証する。
+
+再利用・比較元: [pkg/controller/vrrp](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/vrrp), [pkg/ha](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/ha), [pkg/api/specs.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go)。
+
+実装先の案: `internal/protocol/vrrp`, `internal/runtimeplan`, `internal/network`, `internal/cluster (新設予定)`, `internal/legacyconfig`。
+
+#### HA-02 — DHCP/PD lease の認証付き同期
+
+範囲: 旧 routerd 互換 / track: network / risk: high。
+前提: CORE-04, NET-06, HA-01。 設計判断: D-05。
+
+**成果物**
+
+- v4/v6 server leaseとPD client identity/leaseのsnapshot+delta、cursor、owner epoch、再同期を実装する。
+- rsync/SSH/shでのファイル移送からsemantic journal同期へ移す。旧nodeとの混在期間の要否と変換方式を先に決める。
+- complete snapshot cutover、gap検出、expiry、永続化とACKの順序を保持する。
+
+**受入条件**
+
+- 二台切替時にleaseを再配布せず、DUID/IAID/PDと予約・stickyの意味を維持する。
+- 重複/逆順/replay、peer再起動、同期link断、snapshot途中の切替で二重ownerを作らない。
+- 混在移行を採用した場合は実際の旧/新ペアで検証し、未対応ならmaintenance切替として明記する。
+
+再利用・比較元: [pkg/controller/chain/filesync.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/filesync.go), [pkg/ha](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/ha)。
+
+実装先の案: `internal/ha/leasesync (新設予定)`, `internal/protocol/dhcpserver`, `internal/protocol/dhcp6pd`, `internal/runtimeplan`。
+
+#### HA-03 — NAT conntrack の同期と既存通信継続
+
+範囲: 旧 routerd 互換 / track: network / risk: high。
+前提: CORE-04, NET-03, HA-01。 設計判断: D-05。
+
+**成果物**
+
+- ctnetlink dump/event/importを使い、NAT mapping、TCP状態、timeout、必要なprotocol metadataを同期する。
+- 旧event-streamとconntrackd modeの能力差を保持し、tuple登録だけをfull state同期と呼ばない。
+- lease同期とは別の状態機械・欠落検出・再同期・観測を持ち、同じ認証と世代fencing契約を再利用する。
+
+**受入条件**
+
+- 既にESTABLISHEDのTCPで連続データを流し、VRRP切替後も接続を維持する。UDP NAT mappingも確認する。
+- 再起動、sync link断、event gap、逆順、古いpeer、混雑時に不正なmappingを復活させない。
+- 新しいTCP接続が通るだけの試験は不合格とする。kernel/conntrack feature対応をprofile別に検証する。
+
+再利用・比較元: [pkg/controller/chain/nat44sessionsync.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/nat44sessionsync.go), [pkg/api/specs.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go)。
+
+実装先の案: `internal/ha/conntracksync (新設予定)`, `internal/network`, `internal/runtimeplan`。
+
+### M4 — SAM・federation・cloud mobility
+
+#### CORE-05 — dynamic config・provenance・plugin 呼出し
+
+範囲: 旧 routerd 互換 / track: resource / risk: high。
+前提: CORE-03, CORE-04, CORE-06。 設計判断: D-01。
+
+**成果物**
+
+- merge／mask／override／TTL／生成元／owner refsを維持し、DynamicConfigSourceとDynamicOverridePolicyを実装する。
+- 旧pure mergerを抽出し、host依存validatorと外部executable runnerを切り離す。
+- 既知pluginをtyped module呼出しに移し、任意executableは承認されたextension契約との対応を個別に記録する。
+
+**受入条件**
+
+- 部分reconcileで対象外pool/sourceの生成resourceをGCしない。
+- override競合、sourceの期限切れ、削除、生成失敗、replayでprovenanceと最終意図が再現できる。
+- 対応しない任意pluginを受理したふりをせず、必要capabilityと移行理由を変換前に表示する。
+
+再利用・比較元: [pkg/dynamicconfig](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/dynamicconfig), [pkg/plugin](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/plugin), [pkg/lifecycle](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/lifecycle)。
+
+実装先の案: `internal/resourceprogram (新設予定)`, `internal/extensions (新設予定)`, `internal/legacyconfig`。
+
+#### CLOUD-01 — provider inventory/action の native adapter
+
+範囲: 旧 routerd 互換 / track: cloud / risk: high。
+前提: CORE-03, CORE-04, CORE-06。 設計判断: D-01, D-06。
+
+**成果物**
+
+- 既存承認・検証・journal・idempotency・rollbackを再利用し、AWS/Azure/Oracle Cloudのexecutorをtyped HTTP/SDK adapterへ置換する。
+- 不明な結果のtimeoutでは現在状態を再観測してからretryし、assignment generationと所有権を検証する。
+- GCPはschema宣言と具体的executorの実績を区別し、追加provider qualificationとして実装・受入する。
+
+**受入条件**
+
+- providercontract simulatorでapply/verify/undo、遅延/timeout/重複/権限不足/誤ownerを確認する。
+- 遅い旧apply/undoが新holderのsecondary IP/routeを奪わず、dry-runと承認待ちで外部変更しない。
+- providerごとの使い捨て実環境で捕捉・転送・復旧・cleanupを確認するまでlive-qualifiedにしない。
+
+再利用・比較元: [pkg/provideraction](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/provideraction), [pkg/providerinventory](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/providerinventory), [pkg/providercontract](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/providercontract), [pkg/controller/provideraction](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/provideraction), [pkg/hybrid](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/hybrid)。
+
+実装先の案: `internal/provider (新設予定)`, `internal/resourceprogram (新設予定)`, `internal/control`。
+
+#### CLOUD-02 — federation と subscription
+
+範囲: 旧 routerd 互換 / track: cloud / risk: high。
+前提: CORE-03, CORE-04。
+
+**成果物**
+
+- 認証付きpeer transport、event envelope、outbox/cursor、再送、subscription、SLOとguardを移植する。
+- eventの公開寿命と実行権限のfreshnessを区別し、受信eventから任意コマンドを起動しない。
+- revoke、partition、追い付き、状態表示、delivery summaryを管理APIへ出す。
+
+**受入条件**
+
+- 分断・重複・順序逆転・peer再起動・revoke・clock変化後も正しい作用とcursorになる。
+- ExpiresAt=zeroを黙って短寿命eventへ変えず、無効なproducerが権限を保持しない。
+- 新consumerの開始位置、重複作用、self-capture guardを旧fixtureと比較する。
+
+再利用・比較元: [pkg/federation](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/federation), [pkg/federationguard](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/federationguard), [pkg/controller/eventfederation](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/eventfederation), [pkg/controller/eventsubscription](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/eventsubscription), [pkg/eventconsumer](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/eventconsumer)。
+
+実装先の案: `internal/federation (新設予定)`, `internal/events (新設予定)`, `internal/control`。
+
+#### CLOUD-03 — SAM enrollment・topology・placement
+
+範囲: 旧 routerd 互換 / track: cloud / risk: high。
+前提: CORE-03, CORE-04, CORE-05, CLOUD-02。
+
+**成果物**
+
+- SAMNodeSet/PeerGroup/RRSet、enrollment policy/claim/client、認証identity、placementとtransport生成を移植する。
+- claimの有効期限・revoke、発行元、generation、生成resourceのowner/provenanceを保持する。
+- 申請/取消/topology/診断APIをtyped管理面へ接続する。
+
+**受入条件**
+
+- 重複claim、expired/revoked identity、旧epoch、分断復旧で無効なpeer/経路/権限を復活させない。
+- RR/leaf変更時に生成元と対象poolだけをreconcileし、別poolをGCしない。
+- claim/revoke、identity、生成resourceのowner/provenanceと取消をcomponent contractとして受入する。実WG/BGPの統合結果はCLOUD-04/QUAL-01で別途確認し、この作業の完了前提へ逆向きに追加しない。
+
+再利用・比較元: [pkg/samenrollment](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/samenrollment), [pkg/mobilityconfig](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/mobilityconfig), [pkg/controller/chain/sam.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/sam.go), [pkg/sam](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/sam)。
+
+実装先の案: `internal/sam (新設予定)`, `internal/resourceprogram (新設予定)`, `internal/control`。
+
+#### CLOUD-04 — SAM mobility・hybrid と native capture
+
+範囲: 旧 routerd 互換 / track: cloud / risk: high。
+前提: CLOUD-01, CLOUD-02, CLOUD-03, NET-03, NET-05, NET-07, NET-08, NET-02。 設計判断: D-06。
+
+**成果物**
+
+- PoolRuntimeSnapshot→ReconcilePool→PoolPlan、PlanLocalCaptureIntents、HybridRoute loweringを抽出再利用する。
+- ARP/GARP/Proxy ARP、provider secondary-IP/route-table capture、FOU/WG等のtransport、BGP /32 delivery、drain/handoffをnative effectへ接続する。
+- desired/previous holder、lease、assignment generation、outbox、rollbackと説明可能な状態を一貫させる。
+
+**受入条件**
+
+- RR2＋leaf4相当の独立nodeで、NATなしの双方向通信、移動、広告/FIB/捕捉ownerの一致を確認する。
+- OS local addressで対象IPを吸い込まず、古い観測、遅いprovider結果、BGP欠落、crashで二重captureを作らない。
+- planned drainはtakeover観測より先にcaptureを外さず、peer revokeでtransport/route/権限を撤去する。providerごとの実証を別々に記録する。
+
+再利用・比較元: [pkg/controller/mobility/pool_plan.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/mobility/pool_plan.go), [pkg/controller/mobility/reconcile_effects.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/mobility/reconcile_effects.go), [pkg/sam/sam.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/sam/sam.go), [pkg/hybrid/hybrid.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/hybrid/hybrid.go), [pkg/controller/chain/mobility_dataplane.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/mobility_dataplane.go)。
+
+実装先の案: `internal/sam (新設予定)`, `internal/provider (新設予定)`, `internal/network`, `internal/protocol/bgp`, `internal/runtimeplan`。
+
+### M5 — 全運用surface と追加engine
+
+#### SYS-03 — worker 権限分離と watchdog
+
+範囲: 新しい製品・配備要件 / track: platform / risk: high。
+前提: CORE-03, CORE-06。 設計判断: D-03。
+
+**成果物**
+
+- UID/GID/capability、writable directory、resource limitsとUDSのrole/peer credential認可を同時に実装する。
+- network変更、clock調整、release操作、rebootを別権限にし、旧generationからのprivileged requestを拒否する。
+- appliance専用の明示watchdogをboot attemptと接続する。containerではruntime/orchestratorの再起動契約を使う。
+
+**受入条件**
+
+- logging/DNS/telemetry workerからnetwork/release操作ができず、再起動後の古いcredentialも無効になる。
+- disk full／遅いexporter／worker OOMがforwardingを停止させない。
+- PID1 hang→watchdog reset→未確認trialのfallbackをVM/実機で確認し、containerからhost reset/clock変更ができない。
+
+**部分成果物の境界**
+
+- `runtime-authority`: role/peer credential、UID/GID/capabilityとstate ownershipを同時導入する。 network/clock/release/rebootの権限とgeneration fencingを分離する。 containerからhost clock/watchdog/rebootを操作できない。
+- `appliance-watchdog`: 対象VM/実機でPID1 hangからwatchdog resetとtrial fallbackを確認する。
+
+再利用・比較元: [pkg/lifecycle](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/lifecycle), [pkg/manageddaemon](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/manageddaemon)。
+
+実装先の案: `internal/supervisor`, `internal/localapi`, `internal/control`, `internal/logging`, `internal/boot`, `internal/releaseboot`。
+
+#### OPS-02 — WebConsole と運用 CLI の全 surface
+
+範囲: 旧 routerd 互換 / track: operations / risk: medium。
+前提: OPS-01, CORE-05, NET-01, NET-03, NET-06, NET-07, NET-08, HA-01, CLOUD-01, CLOUD-02, CLOUD-04, OPS-03, EXT-01, EXT-02, NET-02, SYS-01。
+
+**成果物**
+
+- 27 Web routesと全CLI dispatch/handler/advertised syntaxを対応表に従って実装する。
+- resource/connection/DNS/flow/firewall/SAM/provider/ledger/probe/drain等の操作を共通APIへ載せ、静的Web assetsを同梱する。
+- YAML編集の改善、コメント保持の要否、全画面editorは既存契約と追加UXを分けて扱う。
+
+**受入条件**
+
+- 画面表示だけでなくmodule操作、authorization、error/状態遷移、pagination/stream再開をE2E確認する。
+- CLIのexit code、output mode、flag/default、ledger保全・バックアップ・復元をfixture化する。
+- API/CLI/UIの表示と実kernel/module状態が同じrevision/ownerを指す。
+
+再利用・比較元: [pkg/webconsole](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/webconsole), [cmd/routerctl](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/cmd/routerctl), [pkg/resourcequery](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/resourcequery)。
+
+実装先の案: `internal/control`, `internal/cli`, `internal/management`, `internal/web (新設予定)`。
+
+#### OPS-03 — 観測・retention・export・native DPI
+
+範囲: 旧 routerd 互換 / track: operations / risk: high。
+前提: CORE-04, CORE-06, NET-03。 設計判断: D-01, D-02, D-07。
+
+**成果物**
+
+- LogSink/Telemetry/ObservabilityPipeline/LogRetention/TrafficFlowLog/FirewallEventLogをnative loggerの上へ移植する。
+- NFLOG/flow ingest、分類、保持/query、retention、OTLP/syslog/webhook/Loki/Kafka等を独立した障害単位にする。
+- nDPIは版・dissector集合・利用モード・配布条件を固定し、実backendとfallbackを明示する。journald sinkは個別の移行契約を持つ。
+- OTLP logs/metrics/traces、TLS/headers、sampling、DNS/DHCP fingerprint等のretention/queryを旧field単位のcaseで追跡する。
+
+**受入条件**
+
+- 実nft/NFLOG packetが分類・保持・query・exportへ到達し、既知positive/negative分類が得られる。
+- libndpiLoaded相当の実engine証跡を確認する。全unknownのfallback起動はnative DPI合格にしない。
+- 遅いexporter/満杯disk/再起動/replay/retentionでforwardingを止めず、drop・durability契約・redactionを検証する。
+
+再利用・比較元: [pkg/logstore](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/logstore), [pkg/otel](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/otel), [pkg/observabilitypipeline](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/observabilitypipeline), [pkg/eventlog](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/eventlog), [pkg/nflog](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/nflog), [pkg/dpi](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/dpi), [cmd/routerd-ndpi-agent](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/cmd/routerd-ndpi-agent), [Makefile](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/Makefile)。
+
+実装先の案: `internal/logging`, `internal/observability (新設予定)`, `internal/control`, `packaging/alpine`。
+
+#### EXT-01 — IPsec/IKE の owned engine 統合
+
+範囲: 旧 routerd 互換 / track: engines / risk: high。
+前提: CORE-03, CORE-06, SYS-02, NET-03, NET-05。 設計判断: D-02, D-03, D-07。
+
+**成果物**
+
+- charon＋private VICI等の候補を評価し、全connection aggregate、secret/certificate、SA/rekey/DPD/NAT-Tとstatusを実装する。
+- broker化したkernel interfaceまたは限定したXFRM所有権委譲を決定する。engineとnetwork workerの二重writerを放置しない。
+- engine/library/pluginをprofile単位で監視・更新し、swanctlやupdown shellへ依存しない。
+
+**受入条件**
+
+- 独立peerとの認証・rekey・DPD・NAT-T・再起動・変更/削除を実通信で確認する。
+- 一connectionの変更で無関係のconnectionをunloadせず、foreign SA/policy/routeを保護する。
+- VICI等の制御channelをprivate/role認可に限定し、古いgenerationや不正secretを拒否する。
+
+再利用・比較元: [pkg/ipsec](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/ipsec), [cmd/routerd/ipsec_apply.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/cmd/routerd/ipsec_apply.go)。
+
+実装先の案: `internal/protocol/ipsec (新設予定)`, `internal/network`, `internal/runtimeplan`, `packaging/alpine`。
+
+#### EXT-02 — Tailscale routing product の統合
+
+範囲: 旧 routerd 互換 / track: engines / risk: high。
+前提: CORE-03, CORE-06, SYS-02, NET-03, NET-05, NET-06。 設計判断: D-01, D-02, D-03, D-07。
+
+**成果物**
+
+- embedded backendと固定daemon＋typed local interfaceを比較し、旧TailscaleNode各fieldの実効経路を対応させる。
+- persistent identity、advertise/accept routes、exit-node広告、DNS、tags、shieldsUpとSSHを明示的に扱う。
+- tailnet由来route/firewall/DNSとrouterdの所有権を統合する。tsnet listenerの成功だけでrouter機能の実装済み判定をしない。
+
+**受入条件**
+
+- 独立tailnet peerとのsubnet/exit-node、route更新、再認証、relay/直通、再起動後identityを確認する。
+- acceptDNSやfirewall変更が他moduleと競合せず、revoke後に古い権限が復活しない。
+- Tailscale SSHとrouterd管理SSHを同じものと扱わない。旧OS shell契約との相違は個別に診断・記録する。
+
+再利用・比較元: [pkg/tailscale](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/tailscale), [pkg/controller/chain/system.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/system.go), [pkg/api/specs.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go)。
+
+実装先の案: `internal/protocol/tailscale (新設予定)`, `internal/network`, `internal/runtimeplan`, `internal/management`, `packaging/alpine`。
+
+### M6 — 更新・OSイメージ・配備先
+
+#### DIST-01 — SSH 経由の更新と state/schema 移行
+
+範囲: 新しい製品・配備要件 / track: platform / risk: high。
+前提: CORE-02, CORE-06, OPS-01, CORE-04。 設計判断: D-02。
+
+部分成果物の前提: SYS-03/runtime-authority。
+
+**成果物**
+
+- boundedなupload session、streaming hash、quota/timeout、stage/status/prepare/reboot/rollbackを内蔵SSH/APIへ接続する。
+- core/engine/profileのstate schema範囲をpreflightし、fallback用state snapshotとtrust policyを別々に保護する。
+- 現在の小さいcontrol envelopeへ巨大bundleを一括送信せず、中断・再送・cleanupをidempotentにする。
+- 永続stateをconfig snapshot、identity/鍵、rotation/revocation、durable event/cursor、有限lease/factへ分類し、各migration/fallback/再観測方針を定義する。権限失効やlease期限を旧snapshotへ巻き戻さない。
+
+**受入条件**
+
+- 実SSH upload→署名検証→prepare→明示reboot→confirmationまで実機相当の起動試験で通す。
+- 不正署名、upload中断、disk full、並行operator、trial失敗でactive release/stateを破壊しない。
+- config schemaが旧版互換でも、鍵rotation/失効、provider所有権移動、lease失効の後のfallbackで古いcredential/owner/Upが復活しない。安全に変換できないstateはdowngradeをpreflightで拒否し、bundleが自身のtrust policyを書き換えない。
+
+再利用・比較元: routerd2 の既存 boot / release / control 基盤。旧 source の機能復元とは別の製品要件。
+
+実装先の案: `internal/release`, `internal/releaseboot`, `internal/releasecli`, `internal/control`, `internal/cli`, `internal/management`。
+
+#### DIST-02 — kernel/rootfs A/B・installer・実機
+
+範囲: 新しい製品・配備要件 / track: platform / risk: high。
+前提: DIST-01, SYS-01, SYS-03。
+
+**成果物**
+
+- kernel/modules/rootfs/bootloader/state互換性を一組として扱い、明示したdisk layoutとinstallerを作る。
+- disk初期化はinstallerで行い、通常bootに自動検出・formatを持ち込まない。
+- amd64 mini-PCとarm64のboot方法、driver/firmware、watchdogとfallbackを個別に検証する。
+- whole-OS profileのkernel/modules/rootfsとboot selector metadataを署名対象にし、書込・slot選択前の検証と認可されたtrust key rotation/revocationを実装する。
+- kernel、engine、依存library/plugin、firmwareのexact source/build/component inventoryとSBOM/noticesをreleaseに対応づける。採用条件で必要な対応source・変更・build資料を生成し、取得可能性を検証する。
+
+**受入条件**
+
+- 電源断、wrong kernel/modules、読めないstate、PID1 hangで既知正常な組へ戻る。
+- 対象のUEFI/U-Boot等のboot方式とpersistent stateの二回以上の起動を、実機driverを含めて確認する。
+- cross compileだけでarm64 applianceを合格にせず、read-only rootfsと必要な書込領域が分離されている。
+- 未検証artifactをactive/trial slotへ選ばず、欠けたkernel feature/module/ABIと改竄を準備段階で拒否する。
+
+**部分成果物の境界**
+
+- `image-boot-contract`: kernel/modules/rootfs/profile/state互換性とimage assemblyを対象boot方式で定義する。 artifactとboot selector metadataを署名検証してからstage/slotを選択する。 共通のpersistent state/初回identityと対象providerのboot/update契約を受入する。
+- `hardware-qualification`: 対象のUEFI/U-Boot等のboot方式、driver/firmware、電源断、watchdog、persistent stateを物理機別に受入する。
+
+再利用・比較元: routerd2 の既存 boot / release / control 基盤。旧 source の機能復元とは別の製品要件。
+
+実装先の案: `images`, `packaging/alpine`, `internal/boot`, `internal/releaseboot`, `internal/storage`, `installer (新設予定)`。
+
+#### DIST-03 — 各クラウドの OS image と provisioning
+
+範囲: 新しい製品・配備要件 / track: platform / risk: high。
+前提: SYS-02, NET-05。 設計判断: D-06。
+
+部分成果物の前提: DIST-02/image-boot-contract。
+
+**成果物**
+
+- AWS/Azure/GCP/Oracle Cloud別のimage build/import recipe、metadata、初回identity/key、multi-NIC/IPv6/MTUと永続stateを実装する。
+- Alpine等のbase imageをbuildに使い、最終boot lifecycleと必要なprovider機能を明示する。
+- OCI container formatとOracle Cloudのmachine imageを別artifactとして扱う。
+
+**受入条件**
+
+- providerごとの使い捨てVMで起動、routing、reboot、host key/state持続、修復とcleanupを確認する。
+- 共有したhost key/secretをGolden Imageへ焼き込まず、metadata異常・複数NIC・再登録を検証する。
+- buildやAPI mockの成功だけでlive cloud-qualifiedにしない。
+- 実VMの最終bootでrouterdがPID 1、管理は内蔵SSH、engineは署名profileから起動する。init/cloud-init/service managerに残したruntime依存がないことを確認する。
+
+再利用・比較元: routerd2 の既存 boot / release / control 基盤。旧 source の機能復元とは別の製品要件。
+
+実装先の案: `images/cloud (新設予定)`, `internal/provisioning (新設予定)`, `packaging/alpine`。
+
+#### DIST-04 — Kubernetes router workload と管理連携
+
+範囲: 新しい製品・配備要件 / track: platform / risk: high。
+前提: OPS-01, NET-05, NET-07, NET-08。 設計判断: D-06。
+
+部分成果物の前提: SYS-03/runtime-authority。
+
+**成果物**
+
+- Pod/host network namespaceを明示し、既存CNIとの共存、capabilities/sysctl、永続state、readiness/drainを持つ配布manifestを作る。
+- 必要なcontroller/operatorをtyped revision/ownership APIに接続する。イメージ更新はorchestratorに任せる。
+- 独自CNI pluginは追加製品として切り分け、ルータPodを動かすための必須作業へ追加しない。
+
+**受入条件**
+
+- reschedule/node failureで旧ownerが広告や権限を維持せず、経路撤去と管理到達性を確認する。
+- Pod netns profileはhost networkを変更しない。hostNetwork profileは明示委譲されたobjectのみ管理し、既存CNIの資源を採用/削除しない。両profileともhost clock/watchdog/rebootを操作しない。
+- controller Readyだけでなく実traffic、永続identity、update/rollbackと切替中の状態を検証する。
+
+再利用・比較元: routerd2 の既存 boot / release / control 基盤。旧 source の機能復元とは別の製品要件。
+
+実装先の案: `deploy/kubernetes (新設予定)`, `internal/control`, `internal/runtimeconfig`, `Dockerfile`。
+
+### M7 — 互換性台帳と製品受入の確定
+
+#### QUAL-01 — 全体互換・移行・性能の製品受入
+
+範囲: 共通基盤 / track: qualification / risk: high。
+前提: CORE-01, CORE-02, CORE-03, CORE-04, CORE-05, CORE-06, SYS-01, SYS-02, NET-01, NET-02, NET-03, NET-04, NET-05, NET-06, NET-07, NET-08, HA-01, HA-02, HA-03, CLOUD-01, CLOUD-02, CLOUD-03, CLOUD-04, OPS-01, OPS-02, OPS-03, EXT-01, EXT-02。
+
+新しい配備先の受入では、別途 SYS-03, DIST-01, DIST-02, DIST-03, DIST-04 の該当項目を必要とする。これらを旧機能互換の完了条件へ一律に追加しない。
+
+**成果物**
+
+- 全resource/surfaceのcaseをequivalent／承認済みreplacement／unsupported／未完了へ確定し、未完了を残してfull parityを名乗らない。
+- homert単体/二台、RR/leafとcloud SAM、optional engine、appliance/cloud/K8sを別profileで受入する。
+- 同条件の旧routerd比較、packet loss/convergence、throughput/pps/latency、CPU、RSS/PSS、起動時間、route/peer/conntrack容量を測る。
+
+**受入条件**
+
+- field/default/lifecycle/status/event、実protocol、実daemon/recovery、migration/rollbackの全証跡が揃う。
+- 既存native gateを維持し、新gateはrequired testとPASS markerを要求する。環境不足をskip成功にしない。
+- 旧/新node混在や本番切替は、選んだ方式の独立受入と戻し手順がある。実機/クラウド未検証profileをqualifiedと表示しない。
+
+再利用・比較元: [docs/adr](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/docs/adr), [pkg/api](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api)。
+
+実装先の案: `docs/parity.json`, `docs/parity.md`, `internal/integration`, `scripts`, `images`。
+
+## 8. 棚卸し項目の割当と網羅性
+
+以下の数字は **旧 source の入口・契約の数**であり、「未実装の protocol がこの数ある」という意味ではない。
+既存の native engine と静的移行器は活用しつつ、各 resource 全体の契約を完成させる。
+全項目の個別割当・元 source・行番号は JSON に保存する。
+
+| 対象 | 件数 |
+| --- | ---: |
+| 作業単位 | 34 |
+| module group | 26 |
+| decoder が扱う resource kind | 94 |
+| 公開設定 schema の kind | 87 |
+| framework controller | 49 |
+| 補助 start hook | 6 |
+| 旧 command binary | 18 |
+| Control API operation | 22 |
+| Web route | 27 |
+| CLI dispatch | 91 |
+| CLI handler | 78 |
+| CLI advertised syntax | 123 |
+
+91 dispatch / 78 handler / 123 syntax は別々の静的 inventory であり、足して独立 command 数にはしない。
+CLI の advertised syntax は出力や分岐の漏れを探す補助であり、文法全体を自動的に証明するものではない。
+API / CLI の割当は対応 feature の実装受入も必要とする。
+旧 binary 18 個をそのまま 18 個の実行ファイルとして再配布する指示でもない。
+
+削除済みの 18 kind は、移植元でも廃止された入力として拒否を保つ。
+内部的に必要な service-unit / kernel-module 等の仕事は、supervisor / bootstrap の owned job として実装する。
+
+| module group | 主担当 | 関連作業 |
+| --- | --- | --- |
+| config.dynamic | CORE-05 | CORE-02, CORE-03, CORE-04, CORE-06 |
+| system | SYS-01 | CORE-03, CORE-06 |
+| observability | OPS-03 | CORE-04, SYS-03 |
+| management | OPS-02 | OPS-01, DIST-01 |
+| ha | HA-01 | HA-02, HA-03, NET-05 |
+| network.links | NET-05 | CORE-03, NET-03 |
+| network.addresses | NET-05 | CORE-03 |
+| network.routes | NET-02 | NET-01, NET-03, NET-05, NET-07 |
+| health | NET-01 | CORE-03, CORE-04 |
+| wan.dhcp4 | NET-05 | CORE-03 |
+| wan.dhcp6 | NET-05 | CORE-03, NET-06, HA-02 |
+| wan.pppoe | NET-04 | CORE-06, NET-02, NET-03 |
+| wan.dslite | NET-05 | NET-01, NET-02, NET-03 |
+| lan.dhcp_ra | NET-06 | NET-05, HA-02 |
+| dns | NET-06 | CORE-03, CORE-04 |
+| routing.bgp | NET-07 | CLOUD-04 |
+| routing.bfd | NET-07 | CORE-03 |
+| vpn.wireguard | NET-08 | CLOUD-03, CLOUD-04 |
+| vpn.ipsec | EXT-01 | CORE-06, NET-03 |
+| vpn.tailscale | EXT-02 | CORE-06, NET-03, NET-06 |
+| hybrid | CLOUD-04 | CLOUD-01, CORE-05 |
+| mobility | CLOUD-04 | CLOUD-01, CLOUD-02, CLOUD-03, NET-07, NET-08 |
+| federation | CLOUD-02 | CORE-04 |
+| events | CORE-04 | CORE-03 |
+| firewall | NET-03 | NET-02, HA-03, OPS-03 |
+| time | SYS-02 | CORE-03, CORE-06 |
+
+たとえば HA group の主担当は HA-01 だが、DHCP / PD lease sync は HA-02、
+NAT44SessionSync は HA-03 に個別割当している。CloudProviderProfile / ProviderActionPolicy は CLOUD-01、
+SAM の enrollment/topology は CLOUD-03、DHCPv6Address client は NET-05 であり、
+group の名前だけで作業を閉じない。
+JSON の `inventory_sha256` と pinned baseline を使用し、元台帳が変わったら差分を再割当する。
+
+## 9. 受け入れ環境と完了証拠
+
+既存 CI の単体・race・vet・static build・APK/OCI・QEMU・kernel packet gate を維持する。
+新機能は、旧宣言の parse 成功、文字列 renderer の一致、worker Ready のいずれかだけでは完了にしない。
+各機能のリスクに対応する次の証拠を揃える。
+
+1. 旧 public field/default/validation/status/event の contract fixture。
+2. 同じ入力・観測系列に対する pure planner の比較と、意図的差の記録。
+3. 独立 peer / wire encoder との相互接続と、kernel 上の実パケット。
+4. 実 `routerd` + `routerd-modules` の起動・変更・再起動・期限切れ・rollback。
+5. crash、重複、旧 generation、観測遅延、途中失敗時の所有権と再観測。
+6. 対象 profile の build / state migration / 更新・戻し手順。
+
+環境のない試験を skip して「合格」と扱わない。required suite と明示的な成功 marker を設け、
+実施環境・source/artifact digest・結果・既知の制約を evidence に記録する。
+この計画の docs-only commit 自体では protocol や cloud を追加実装・実行したと主張しない。
+
+| 受入 profile | 主な条件 |
+| --- | --- |
+| baseline-contracts | 全public resourceと非resource surfaceの契約をcaseごとに閉じる。equivalentとexplicit replacementを別集計し、後者をstrict semantic parityへ算入しない。 |
+| homert-single | DS-Lite/PPPoE、二経路probe/PBR、MTU/MSS、PD/RA、DHCP/DNSが実daemonと独立peerで動き、障害後に復旧する。 |
+| homert-ha | 二台切替でVIP readiness、WAN/LAN identity、DHCP/PDと既存TCP/UDP NAT sessionを継続する。選択したmigration方式も受入する。 |
+| sam-rr-leaf | 独立した2 RR＋4 leafのlabを初期目標とし、/32、NATなし双方向通信、所有権移動、capture/revoke/drain、障害復旧を検証する。node数は容量上限ではない。 |
+| engine-full | 選択した外部engineの全必要機能、artifact closure、実backend、state/upgradeとlicense資料をprofile単位で確認する。 |
+| appliance-hardware | 対象amd64/arm64 hardware別にboot/update、電源断、persistent state、driver/firmwareを検証する。 SYS-03のruntime-authorityとappliance-watchdog、および対象のhardware-qualificationを要求する。 |
+| cloud-images | AWS/Azure/GCP/Oracle Cloudごとに実VMのboot/reboot/routing/state/cleanupを受入する。provider操作のparityとは別判定。 DIST-02のimage-boot-contractを必要とし、別機種のhardware-qualificationは待たない。 |
+| kubernetes-router | 既存CNIと共存したrouter workloadでtraffic、reschedule/drain、identity/state、namespaceと更新を受入する。独自CNIは含めない。 SYS-03のruntime-authorityを必要とし、appliance-watchdogは待たない。 |
+
+`baseline-contracts` は旧機能の契約閉鎖であり、新しい Golden Image や Kubernetes 配備先の
+qualification を待たずに別判定できる。逆に cloud image が boot しても SAM/provider 操作の合格にはならない。
+各 profile の必要作業と継承関係は JSON の `acceptance_profiles` に記録する。
+
+### 性能・容量
+
+Alpine 採用だけで Ubuntu と同一性能と断定しない。
+同じ NIC、CPU、kernel 設定、offload、IRQ、MTU、conntrack 条件、traffic を揃え、
+旧 routerd と新 profile の throughput / pps / p50・p99 latency / packet loss / convergence /
+CPU / RSS・PSS / boot time を比較する。
+NAT、DS-Lite、PPPoE、WireGuard、IPsec、DPI の有効・無効も分ける。
+
+経路数・peer 数・conntrack 数・DHCP lease 数・DNS cache / QPS の容量目標を事前に宣言する。
+最小 lab の node 数や現在の内部 bound を製品の最終上限としない。
+大きな RIB は「部分 snapshot を完全な世代として扱わない」ことを先に守り、伝送 chunk と backpressure を実装する。
+容量超過時の応答・drop・degraded 状態まで受入する。
+
+### 更新と HA を組み合わせる
+
+旧版と新版の混在を支える場合は、sync protocol / state schema / owner generation が互換であることを
+実際のペアで確認する。maintenance 切替を選ぶ場合は、事前 snapshot、切替手順、検証と戻しを用意する。
+どちらも、既存 TCP session の継続と新規接続成功を別の検査にする。
+PID 1 の userland 選択、kernel/rootfs A/B、cloud image replacement、Kubernetes rollout は
+それぞれの更新主体と受入条件を持つ。
+
+## 10. 実装を進めるための入力
+
+source fixture、isolated lab、engine PoC、provider simulator の実装は現時点の材料で進められる。
+実環境の次の gate に入る時点で、以下を必要とする。
+
+| 使用する段階 | 必要な入力 |
+| --- | --- |
+| CORE-01 / QUAL-01 | サニタイズしたhomert02/03の最新設定、使用中の外部engine版、期待するWAN/PBR/HA動作。未入手でもsource fixtureとisolated labの実装は進める。 |
+| CORE-06 | 各engineの正確な版・plugin・配布条件。用途に必要な機能集合をPoCの合否にする。 |
+| HA-02 / HA-03 | 新旧node混在を必要とするか、maintenance切替を許すか。選んだ方式のfixtureと戻し手順を用意する。 |
+| CLOUD-01 / DIST-03 | 使い捨てcloud環境、許可範囲、費用/cleanup条件。実credentialをrepositoryやimageへ保存しない。 |
+| DIST-02 / QUAL-01 | 対象mini-PC/arm64、NIC/firmware、route/peer/pps/latency等の受入目標。 |
+
+将来の cloud 操作や本番切替のための情報が未入手でも、共通基盤の実装着手は止めない。
+有料環境の操作、本番 WAN/HA の切替、disk 初期化は、その具体的な対象と手順を扱う段階で実施条件を確認する。
+
+## 11. 文書と台帳の更新方法
+
+- 新しい旧 source を取り込むときは baseline SHA を変更する前に inventory 差分を確認し、作業と case を追加する。
+- 作業の着手・完了は JSON の status と evidence に反映し、対応する本書の範囲・依存も更新する。
+- source の項目があることと実行済み証拠を混同しない。関連 module が未完成なら API/UI だけを full parity としない。
+- `semantic_parity` を true にする変更には、その resource 全体の合格 case と証拠を対応させる。
+- 明示変更、未対応、未検証 profile を release notes と migration report に残す。
+- 新設予定 path の変更は通常の実装判断で行い、作業 ID と受入条件を安定した追跡単位にする。
+
+## 12. 外部の一次資料
+
+確認日: 2026-10-24。実装時には、採用する正確な版に対応する資料・source・license を固定する。
+
+- [strongSwan VICI](https://docs.strongswan.org/docs/latest/plugins/vici.html)。
+
+- [strongSwan charon](https://docs.strongswan.org/docs/latest/daemons/charon.html)。
+
+- [chronyd manual](https://chrony-project.org/doc/4.8/chronyd.html)。
+
+- [chrony introduction/license](https://chrony-project.org/)。
+
+- [Tailscale tsnet API](https://tailscale.com/docs/reference/tsnet-server-api)。
+
+- [Tailscale license](https://github.com/tailscale/tailscale/blob/main/LICENSE)。
+
+- [nDPI license change](https://www.ntop.org/announcing-ndpi-dual-license-change/)。
+
+- [nDPI component terms](https://github.com/ntop/nDPI/blob/dev/README.license.md)。
+
+移植元 source の参照はすべて pinned SHA を使用する。
+外部 engine の方式は選定候補であり、掲載した upstream の機能説明を routerd2 への統合完了証拠として扱わない。
