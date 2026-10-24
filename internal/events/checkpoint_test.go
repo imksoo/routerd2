@@ -152,7 +152,7 @@ func TestConcurrentTimersCommitOnlyOneStateVersion(t *testing.T) {
 }
 
 func TestUnreleasedPrototypeSchemaIsRejectedReadOnly(t *testing.T) {
-	for _, version := range []int{1, 2, 3} {
+	for _, version := range []int{1, 2, 3, 4} {
 		t.Run(fmt.Sprint(version), func(t *testing.T) {
 			options := Options{Directory: filepath.Join(t.TempDir(), "events")}
 			s, err := Open(options)

@@ -54,6 +54,18 @@ func TestMain(m *testing.M) {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
+		if os.Getenv("ROUTERD2_EVENTS_COMPACT_HELPER") == "1" {
+			if err = s.Complete(ctx, "consumer", "committed-work"); err == nil {
+				err = s.ProducerComplete(ctx, "derived", "producer-work")
+			}
+			if err == nil {
+				_, err = s.CompactCompleted(ctx, 16)
+			}
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(2)
+			}
+		}
 		fmt.Fprintln(os.Stdout, "EVENTS_COMMIT_SYNCED")
 		var wait [1]byte
 		_, _ = os.Stdin.Read(wait[:]) // parent SIGKILLs without SQLite/Store.Close
@@ -186,5 +198,82 @@ func TestForeignDatabaseIsRejectedWithoutChangingItsBytes(t *testing.T) {
 	after, err := os.ReadFile(path)
 	if err != nil || !bytes.Equal(before, after) {
 		t.Fatal("foreign database changed during rejected open", err)
+	}
+}
+
+func TestCompactedWorkIdentitySurvivesSIGKILLWithoutClose(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	dir := filepath.Join(t.TempDir(), "events")
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.CommandContext(ctx, exe, "-test.run=^$")
+	cmd.Env = append(os.Environ(), "ROUTERD2_EVENTS_CRASH_HELPER="+dir, "ROUTERD2_EVENTS_COMPACT_HELPER=1")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	input, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer input.Close()
+	output, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	waited := false
+	defer func() {
+		if !waited {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+		}
+	}()
+	scanner := bufio.NewScanner(output)
+	if !scanner.Scan() || scanner.Text() != "EVENTS_COMMIT_SYNCED" {
+		t.Fatal("child did not finish compaction", stderr.String())
+	}
+	if err = cmd.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	err = cmd.Wait()
+	waited = true
+	status, ok := cmd.ProcessState.Sys().(syscall.WaitStatus)
+	if err == nil || !ok || !status.Signaled() || status.Signal() != syscall.SIGKILL {
+		t.Fatal("child was not SIGKILLed", err)
+	}
+	s, err := Open(Options{Directory: dir})
+	if err != nil {
+		t.Fatal("compaction WAL recovery", err)
+	}
+	defer s.Close()
+	c, err := s.Capacity(ctx)
+	if err != nil || c.Tombstones.Rows != 2 || c.Jobs.Rows != 1 {
+		t.Fatal(c, err)
+	}
+	if rows, err := s.Pending(ctx, "stateful", 10); err != nil || len(rows) != 1 {
+		t.Fatal("pending work lost", rows, err)
+	}
+	if _, err = s.db.Exec(`UPDATE consumers SET cursor=0 WHERE name='consumer'`); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Schedule(ctx, "consumer", 0, 1, []Job{{Key: "committed-work", Payload: json.RawMessage(`{}`)}}); err != nil {
+		t.Fatal(err)
+	}
+	p, err := s.ProducerCheckpoint(ctx, "derived")
+	if err != nil || p.Version != 1 || string(p.State) != `{"asserted":true}` {
+		t.Fatal(p, err)
+	}
+	if err = s.ProducerTransition(ctx, "derived", p, p.State, []Job{{Key: "producer-work", Payload: json.RawMessage(`{}`)}}); err != nil {
+		t.Fatal(err)
+	}
+	if rows, err := s.Pending(ctx, "consumer", 10); err != nil || len(rows) != 0 {
+		t.Fatal("consumer effect resurrected", rows, err)
+	}
+	if rows, err := s.ProducerPending(ctx, "derived", 10); err != nil || len(rows) != 0 {
+		t.Fatal("producer output resurrected", rows, err)
 	}
 }
