@@ -29,7 +29,7 @@ Alpineのパッケージをビルドとイメージ組み立てに利用しま�
 | confirmed commit | 確認期限で rollback。未確認のまま control が再起動した場合も復元。復元失敗を成功として扱わない |
 | management | 内蔵 SSH、公開鍵認証、永続 host key、Tab / history 付き候補編集、YAML 一括編集、diff、validate、commit confirmed、ログ参照。OS シェルを呼ばない |
 | large observations | 大きな設定の revision 固定読取・確認応答、軽量 health、network summary と詳細ページ。経路・WireGuard の大きな観測を省略するときは件数・省略フラグを明示し、CLI から詳細を取得 |
-| migration | `routerd config migrate [--policy FILE] FILE` で旧 resource YAML を変換。WAN の動作変更は resource ごとの明示 policy と review notes で扱う。未対応入力は理由を列挙し、部分的な設定を出力しない |
+| migration | `routerd config migrate [--policy FILE] FILE` で旧 resource YAML を変換。静的 DHCPv4 server/reservation、DHCP-derived DNS、静的 WireGuard も対応範囲を検証して変換。WAN と DHCP DNS の動作変更は resource ごとの明示 policy と review notes で扱う。未対応入力は理由を列挙し、部分的な設定を出力しない |
 | persistent state | appliance PID 1 が明示された既存 ext4 データ領域を mount・検証し、設定・SSH host key・署名付きリリース履歴を保存。起動時にディスクを検出・初期化する処理は含めない |
 | distribution | static amd64/arm64 の 2 バイナリ、依存ライセンス manifest、scratch OCI、Alpine APK、kernel + initramfs、QEMU と namespace 統合試験 |
 | release | Ed25519 署名・SHA-256・ELF/architecture/release identity の検証、immutable な二つの実行ファイルの世代保存、next-boot selection、試行回数・health confirmation・rollback journal。kernel/rootfs の A/B 更新は別の未実装範囲 |

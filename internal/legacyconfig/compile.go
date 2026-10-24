@@ -76,6 +76,7 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 	}
 	c.initOptions(options, explicit)
 	c.collectAliases()
+	c.wireguard()
 	for _, r := range resources {
 		switch r.Kind {
 		case "Interface":
@@ -146,15 +147,21 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 			c.reject(r, "", "unsupported_semantics", "legacy VXLAN FDB peers, L2 filtering and outer-DF defaults require explicit native conversion; a single remote is not a lossless substitute")
 		case "DNSResolver", "DNSForwarder", "DNSUpstream", "DNSZone":
 			// Compiled together below so graph references are checked.
+		case "DHCPv4Server", "DHCPv4Reservation":
+			// Compile the complete static server/reservation graph before DNS.
 		case "Interface", "Link", "VRF", "Bridge", "Sysctl", "IPv4StaticAddress",
+			"WireGuardInterface", "WireGuardPeer",
 			"VirtualAddress", "DHCPv4Client", "DHCPv6PrefixDelegation",
 			"IPv6RAAddress", "IPv6DelegatedAddress", "DHCPv6Information":
 		default:
 			c.reject(r, "", "unsupported_kind", "no native migration is implemented for this resource kind; the resource was not discarded")
 		}
 	}
+	c.dhcpServers()
 	c.dns()
 	c.firewall()
+	c.firewallServices()
+	c.wireguardFirewall()
 	c.checkOptionsUsed()
 	c.checkAddressOverlap()
 	for _, iface := range c.interfaces {

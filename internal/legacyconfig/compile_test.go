@@ -222,7 +222,7 @@ func TestRefusalNeverReturnsPartialIntentOrSecrets(t *testing.T) {
 	}{
 		{"unknown-field", "    - apiVersion: net.routerd.net/v1alpha1\n      kind: Interface\n      metadata: {name: wan}\n      spec: {ifname: eth0, managed: true, adminup: true}\n", "adminup", "unknown_field"},
 		{"internal-json-field", "    - apiVersion: net.routerd.net/v1alpha1\n      kind: DNSResolver\n      metadata: {name: dns}\n      spec: {listen: [], sources: []}\n", "sources", "unknown_field"},
-		{"wireguard", "    - apiVersion: net.routerd.net/v1alpha1\n      kind: WireGuardInterface\n      metadata: {name: wg}\n      spec: {privateKey: " + secret + "}\n", "resources[0].spec", "unsupported_kind"},
+		{"wireguard", "    - apiVersion: net.routerd.net/v1alpha1\n      kind: WireGuardInterface\n      metadata: {name: wg}\n      spec: {privateKey: " + secret + "}\n", "resources[0].spec.privateKey", "unsupported_semantics"},
 		{"vrrp-version", "    - apiVersion: net.routerd.net/v1alpha1\n      kind: VirtualAddress\n      metadata: {name: ha}\n      spec: {family: ipv4, interface: lan, address: 192.0.2.1/32, mode: vrrp, vrrp: {virtualRouterID: 1, authentication: " + secret + "}}\n", "mode", "unsupported_semantics"},
 		{"firewall-input", "    - apiVersion: firewall.routerd.net/v1alpha1\n      kind: FirewallPolicy\n      metadata: {name: protect}\n      spec: {sameRoleAccept: true}\n", "resources[0].spec", "unsupported_semantics"},
 		{"nat-dynamic-egress", "    - apiVersion: net.routerd.net/v1alpha1\n      kind: NAT44Rule\n      metadata: {name: nat}\n      spec: {type: masquerade, egressPolicyRef: default, sourceRanges: [192.0.2.0/24]}\n", "egressPolicyRef", "unsupported_field"},

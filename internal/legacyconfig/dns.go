@@ -123,6 +123,7 @@ func (c *compiler) dns() {
 		// The old normalizer otherwise inserts one process-global database path.
 		normalized.QueryLog.Path = spec.QueryLog.Path
 		runtime := dnsconfig.RuntimeConfig{Resource: c.serviceName(r, "dns"), Spec: normalized}
+		hasDHCP := false
 		for _, zone := range zones {
 			zs := zone.Spec.(api.DNSZoneSpec)
 			zs.Records = append([]api.DNSZoneRecordSpec(nil), zs.Records...)
@@ -132,9 +133,8 @@ func (c *compiler) dns() {
 			if zs.DNSSEC.Enabled || zs.DNSSEC.Mode != "" {
 				c.reject(zone, "dnssec", "unsupported_semantics", "native local zones do not sign or validate DNSSEC and will not assert unverified AD")
 			}
-			if len(zs.DHCPDerived.Sources) != 0 || zs.DHCPDerived.LeaseFile != "" || zs.DHCPDerived.DDNS || zs.DHCPDerived.HostnameSuffix != "" || zs.DHCPDerived.TTL != 0 {
-				c.reject(zone, "dhcpDerived", "unsupported_semantics", "DHCP hostname recovery and source-specific lease subscriptions require a migrated lease producer; a static snapshot cannot preserve them")
-			}
+			zs.DHCPDerived = c.dnsDHCPDerived(zone, zs.DHCPDerived)
+			hasDHCP = hasDHCP || len(zs.DHCPDerived.Sources) > 0
 			for i := range zs.Records {
 				record := &zs.Records[i]
 				path := "records[" + strconv.Itoa(i) + "]"
@@ -163,8 +163,21 @@ func (c *compiler) dns() {
 			runtime.Zones = append(runtime.Zones, dnsconfig.RuntimeZone{Name: zone.Metadata.Name, Spec: zs})
 			c.target(zone, "services/"+runtime.Resource+"/dns/zones/"+zone.Metadata.Name)
 		}
+		if hasDHCP {
+			policy, ok := c.options.DHCPDNS[r.Kind+"/"+r.Metadata.Name]
+			if !ok {
+				c.reject(r, "", "explicit_policy_required", "DHCP-derived DNS requires an explicit dhcp_dns policy replacing global legacy lease/sticky events with source-scoped finite lease ownership")
+			} else {
+				c.usePolicy(r, "dhcp_dns")
+				if policy.SourceScopedFiniteLeases == nil || !*policy.SourceScopedFiniteLeases {
+					c.policyIssue(r, "dhcp_dns", "source_scoped_finite_leases", "explicit_policy_required", "the DHCP DNS replacement must explicitly enable source-scoped finite lease ownership")
+				}
+				c.note(r, "Explicit DHCP DNS replacement: only leases from each zone's named native DHCP sources are published. Producer loss or lease expiry removes records; global lease events, sticky host recovery and lease-file import are not retained.")
+			}
+		}
 		service := serviceconfig.Service{Name: runtime.Resource, DNS: &runtime}
-		if err := serviceconfig.Validate([]serviceconfig.Service{service}); err != nil {
+		services := append(append([]serviceconfig.Service(nil), c.document.Services...), service)
+		if err := serviceconfig.Validate(services); err != nil {
 			c.reject(r, "", "native_validation", "composed DNS listeners, sources, zones or cache settings fail native DNS validation")
 		}
 		c.addService(r, service)
@@ -184,6 +197,43 @@ func (c *compiler) dns() {
 			c.reject(r, "", "unreferenced_resource", "zone has no compiled DNS resolver")
 		}
 	}
+}
+
+func (c *compiler) dnsDHCPDerived(zone resource, spec api.DNSZoneDHCPDerivedSpec) api.DNSZoneDHCPDerivedSpec {
+	if spec.LeaseFile != "" {
+		c.reject(zone, "dhcpDerived.leaseFile", "unsupported_semantics", "legacy lease and sticky-host files cannot be imported as native source-owned records")
+	}
+	if spec.DDNS || spec.HostnameSuffix != "" {
+		c.reject(zone, "dhcpDerived", "unsupported_semantics", "DDNS and hostnameSuffix are not implemented by the pinned active resolver; the migration will not silently ignore or activate them")
+	}
+	if len(spec.Sources) == 0 && spec.TTL != 0 {
+		c.reject(zone, "dhcpDerived.ttl", "unreferenced_resource", "DHCP-derived TTL requires a declared lease producer")
+	}
+	var resolved []string
+	seen := map[string]bool{}
+	for i, ref := range spec.Sources {
+		path := "dhcpDerived.sources[" + strconv.Itoa(i) + "]"
+		server := c.getRef(zone, path, ref, "DHCPv4Server")
+		if server == nil {
+			continue
+		}
+		name := c.serviceName(*server, "dhcp")
+		found := false
+		for _, service := range c.document.Services {
+			found = found || service.Name == name && service.DHCPServer != nil
+		}
+		if !found || seen[name] {
+			c.reject(zone, path, "reference", "lease sources must name distinct successfully compiled native DHCPv4Server resources")
+			continue
+		}
+		seen[name] = true
+		resolved = append(resolved, "DHCPv4Server/"+name)
+	}
+	if len(spec.Sources) != 0 {
+		c.note(zone, "Declared DHCPv4Server references become native lease-source identities; active lease records remain dynamic and are never frozen into static DNS records.")
+	}
+	spec.Sources = resolved
+	return spec
 }
 
 func uniqueStrings(values []string) []string {

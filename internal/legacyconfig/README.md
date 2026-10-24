@@ -12,7 +12,7 @@ database. It is not a compatibility implementation of every original resource.
 document, err := legacyconfig.Migrate(inputYAML)
 result, err := legacyconfig.Compile(inputYAML)
 
-// Deliberate native replacements for implicit legacy WAN behavior:
+// Deliberate native replacements for legacy WAN and DHCP-derived DNS behavior:
 options, err := legacyconfig.DecodeOptions(policyReader)
 result, err = legacyconfig.CompileWithOptions(inputYAML, options)
 ```
@@ -24,9 +24,10 @@ from the original kind/name. Cross-kind name collisions therefore do not silentl
 merge services.
 
 `Compile` never guesses a host network manager's RA defaults or silently adopts
-the new AFTR lifetime contract. `CompileWithOptions` permits **explicit replacement
-intent** for individual `IPv6RAAddress` and `DSLiteTunnel` resources. Each such
-mapping says which behavior changes; a successful replacement is not a claim of
+the new AFTR or DHCP-derived DNS lifetime contracts. `CompileWithOptions` permits
+**explicit replacement intent** for individual `IPv6RAAddress`, `DSLiteTunnel`
+and DHCP-consuming `DNSResolver` resources. Each such mapping says which behavior
+changes; a successful replacement is not a claim of
 automatic semantic parity. There is no global permissive mode. Policy cannot
 discard an unsupported field, resource, HA condition or ownership requirement.
 
@@ -42,7 +43,7 @@ The CLI can print the list for an operator to resolve. A successful result still
 needs the normal native candidate/validation/commit process; this compiler never
 adopts live resources from the old daemon.
 
-The CLI entry point is `routerd config migrate FILE`. It emits native YAML on
+The CLI entry point is `routerd config migrate [--policy FILE] FILE`. It emits native YAML on
 success. Code that also needs the mapping report should use `Compile`.
 
 ## Implemented conversions
@@ -53,19 +54,21 @@ success. Code that also needs the mapping report should use `Compile`.
 | `Link` | Existing-link alias only; no link type, ownership or administrative state is invented. |
 | `VRF` | A native VRF link with the same route table and explicit member masters. Members must independently authorize administrative management. |
 | `Bridge` | A native bridge with explicit members, MAC, MTU and the original multicast-snooping default of false. Requires `stp: false` and `rstp: false`. Custom timers are rejected; dormant timing attributes use kernel defaults. |
+| `WireGuardInterface` + `WireGuardPeer` | Static interfaces with explicit private-key file paths and complete peer sets. Preserves MTU, numeric/scoped endpoints, passive peers, keepalive, AllowedIPs and explicit routes without inferring routes or marks. Fixed listen ports require an owned INPUT filter so the original service-hole policy can be preserved; see the static WireGuard section. |
 | `IPv4StaticAddress` | Preserves host/prefix bits. `exclusive: true` is rejected because it removes addresses owned by other managers. Explicit overlap policy and its justification are checked. |
 | `VirtualAddress` in static mode | IPv4 /32 or IPv6 /128, including a provably static resource address reference. Runtime tracking, automatic hostname publication and gratuitous-ARP intent are rejected. |
 | `IPv4StaticRoute`, `IPv6StaticRoute` | Same destination, gateway, device and metric; interface aliases are resolved. |
 | `IPv4Route` | Static unicast routes. A static DS-Lite device reference and explicit static address gateway reference can be resolved. Blackhole, preferred-source and dynamic references are rejected in this compiler. |
 | `Sysctl` | Required runtime `net.ipv4.ip_forward` and `net.ipv6.conf.all.forwarding` with exact 0/1 values. No implicit forwarding is enabled. Other sysctls, optional/non-exact policies and persistent host files are rejected. |
 | `DHCPv4Client` | Native wire identity, requested address, hostname/class/client ID, default-route policy and metric. Requires `useDNS: false` because the old default of true changes the host resolver. Native learned DNS is status data rather than a substitute for that side effect. |
+| `DHCPv4Server` + `DHCPv4Reservation` | Static local servers become separate native DHCP workers with owned journals. Retains finite pool leases, disjoint MAC/OUI profile scopes, explicit/static-source gateway/DNS/NTP/domain options, and MAC/IP/hostname reservations with typed options. Requires one owned static IPv4 address per interface; no live lease import, HA conditions or ambiguous backend directives. The active-chain/default distinctions are detailed below. |
 | `DHCPv6PrefixDelegation` | Native IA_PD service, pinned DUID-LL/IAID 1 defaults, explicit DUID, provider profile and prefix-length preference. Explicit external clients and required-prefix readiness semantics are rejected. |
 | `DHCPv6Information` with one matching PD | An alias of that PD service, sharing its DUID/IAID, UDP 546 socket and supplementary Information-Request. The original **literal interface reference** must match exactly; merely resolving two different aliases to the same NIC does not reproduce the old association. Standalone, ambiguous and nonempty `request` declarations are rejected. |
 | `IPv6RAAddress` with explicit policy | One native `ra_client`, using the policy's same-interface SLAAC/default-route/on-link/RIO/DNS flags, source/IID/router filters and explicit route table/metric. Requires managed RA, independently managed/admin-up underlay, and `required: false`. Host defaults and learned state are not imported. |
 | `IPv6DelegatedAddress` | A /64 allocation under its PD service, retaining the suffix and **hexadecimal** subnet ID. In the old schema, `subnetID: "10"` means hexadecimal 0x10, not decimal 10. IDs must fit within the provider prefix. /128 installation, zero host ID and implicit advertisement flags are rejected. |
 | `DSLiteTunnel` | Fixed outer IPv6 endpoints, inner IPv4 /32 **peer 192.0.0.1/32**, explicit tunnel identity, no encapsulation-limit option and original fixed default MTU of **1460**. The default inner address is 192.0.0.2. `localAddressFrom` means the **inner IPv4** source in the pinned controller, not the outer IPv6 endpoint. |
 | `DSLiteTunnel` with explicit policy | One native `ds_lite` service, preserving candidate precedence and B4/MTU identity while explicitly changing DNS bootstrap, source ownership/selection and endpoint expiry. Accepts an owned static IPv6 source or the policy's compiled RA source. Information references map to their existing PD service. One independently declared IPv4 default route can join the dynamic tunnel's lifetime owner. PD-derived/HA/suffix sources remain rejected. |
-| `DNSResolver` + `DNSForwarder` + `DNSUpstream` + `DNSZone` | Resolves the static resource graph into native DNS runtime intent. Preserves source order, listener selection, transport/TLS identity, bootstrap servers, interface binding, cache/timeouts/health checks, query-log enablement, zones and static records/reverse zones. Statically known address references are resolved; learned/delegated references are rejected. |
+| `DNSResolver` + `DNSForwarder` + `DNSUpstream` + `DNSZone` | Resolves the static resource graph into native DNS runtime intent. Preserves source order, listener selection, transport/TLS identity, bootstrap servers, interface binding, cache/timeouts/health checks, query-log enablement, zones and static records/reverse zones. Statically known address references are resolved; learned/delegated references are rejected. DHCP-derived zones require successfully migrated DHCP producers and an explicit per-resolver `dhcp_dns` replacement policy. |
 | `FirewallZone` + `FirewallPolicy` + `FirewallRule` | Native INPUT/FORWARD hooks with the original conntrack precedence, loopback/ICMPv6 acceptance, explicit ordered ACLs and role-based terminal actions. Retains source/destination CIDRs, TCP/UDP port sets/ranges, ICMP types, accept/drop/reject and unsampled kernel logging. Does not invent an OUTPUT hook. Overlapping zones, dynamic sets, rate/connection limits and NFLOG are rejected. |
 | `NAT44Rule` in standard form | Explicit `type: masquerade` or `snat`, `egressInterface`, `sourceRanges`, positive destination CIDRs and destination exclusions. Resolves provably static SNAT address references. NAT-only configurations retain **no filter hook**. Exclusions are compiled to bounded positive CIDR sets. |
 
@@ -87,6 +90,163 @@ the pinned configuration validator. The controller's historical fallback for an
 omitted field is not imported, because that would accept a configuration which
 the original public validator rejects. This applies to both fixed tunnels and
 policy-managed dynamic tunnels.
+
+## Static DHCP server migration
+
+The behavioral source is the pinned active
+[`dnsmasqLANServiceLines` controller](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/chain.go),
+with its reservation host-file and profile handling. The older standalone
+[`pkg/render/dnsmasq.go`](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/render/dnsmasq.go)
+interprets several fields differently. The compiler does not choose one of those
+conflicting interpretations silently.
+
+A server requires a managed, administratively UP interface and exactly one
+unconditional owned `IPv4StaticAddress` with a `/1` through `/30` subnet. Additional
+IPv4 addresses, a DHCP client on that interface, bridge-port/VRF-master bindings
+and inferred relay topology are rejected. A bridge interface itself can be the
+owned local interface when its kernel name equals its original resource name.
+The server's interface reference must be the bare `Interface` or `Bridge` resource
+name understood by the active chain, rather than a generic `Kind/name` or kernel
+alias. A `listenInterfaces` declaration may contain only the
+identical single interface reference. Separate servers require distinct
+interfaces and disjoint subnets.
+
+`addressPool` takes the old `rangeStart`/`rangeEnd`/`leaseTime` aliases when absent;
+conflicting duplicate declarations are errors. The omitted lease duration remains
+12 hours. The local address is materialized as the default gateway and DNS server
+when the active legacy renderer would emit no override; the subnet broadcast
+option is also explicit. These are the documented
+[dnsmasq DHCP defaults](https://dnsmasq.org/docs/dnsmasq-man.html), rather than the
+native worker's omission semantics. A single worker retains dnsmasq's default
+1000-lease limit. Multiple workers are accepted only when the combined configured
+pool/reservation capacity is at most 1000, so splitting the shared daemon does not
+increase its possible total lease budget.
+
+Static gateway, DNS and NTP address sources require explicit `Kind/name` and
+`field: address`; optional fallbacks and live status dependencies are rejected.
+`domainFrom` accepts a required static `DNSZone/name` with `field: zone`. Inline
+domain and domain-source declarations cannot both be present. A primary domain
+retains both domain-name and default domain-search options; an explicit
+domain-search option retains its override.
+
+Profiles are expanded into their selected native scopes. Their omitted lease
+duration inherits the primary duration, as in the active chain. The primary
+domain is **not** inherited by selector scopes. Each scope must use the same
+owned subnet, nonoverlapping pools and disjoint selectors. Overlapping OUI/exact
+MAC matches are rejected instead of assigning a new preference order. Unused
+profiles, profile-plus-inline shadowing, and collisions in the original shared
+dnsmasq range/selector/reservation tag namespace are errors.
+
+Reservations retain their MAC, address, hostname and per-host options, including
+usable addresses outside the dynamic pool. `server` is the original bare server
+name; omission is accepted only with one unambiguous server. Reservation `scope`
+is rejected by the pinned public validator and skipped by the active controller.
+Reservation `leaseTime` is ignored by that active renderer. Neither is silently
+activated as a new native feature.
+
+Options use the shared typed name/number encoding: exactly one name or code and
+a nonempty value, retaining list order and per-reservation overrides. Protocol
+owned options, unsupported names/codes, backend quoting, raw bytes, native-only
+`hex:` syntax and textual boolean aliases are rejected. Native configuration can
+express additional wire intent, but it is not inferred from legacy backend text.
+
+Nonempty `managed`, `authoritative`, `logDHCP`, `routerSource`, `router`, `dnsSource`
+and `dnsInterface` settings have inconsistent or ignored behavior in the pinned
+active chain, so they require explicit native configuration. `authoritative:
+false` remains non-authoritative. Transit/relay roles, kea/dhcpd selection,
+embedded DNS settings, conditions and custom `leaseFile` declarations are also
+rejected. Positive `stickyHoldDays` is rejected: the old daemon applies the
+maximum hold across all servers and later recovers sticky hosts with a fixed
+12-hour lease, while native holds belong to a specific worker/scope. Copying that
+number would change behavior even without importing an existing database.
+The compiler does not read the old lease/sticky databases, adopt their
+live allocations or import HA replication state. The native journal and future
+lease lifecycle belong to the new worker; the mapping report states this boundary.
+
+The static example is [`testdata/dhcp-server.yaml`](testdata/dhcp-server.yaml).
+Tests cover its native config round trip, DHCP option bytes, profile inheritance,
+reservation ownership, and explicit rejection paths.
+
+## Explicit DHCP-derived DNS replacement
+
+The pinned resolver treats a nonempty `DNSZone.dhcpDerived.sources` list as an
+enable switch for global lease events and recovered host-file entries. It does
+not filter those events by producer identity or give them the native producer's
+finite ownership deadline. Consequently ordinary `Compile` rejects this graph.
+`CompileWithOptions` requires the following explicit replacement for **each DNS
+resolver** that receives DHCP-derived zones:
+
+```yaml
+schema_version: 1
+dhcp_dns:
+  DNSResolver/resolver:
+    source_scoped_finite_leases: true
+```
+
+The flag must be present and true. A policy key must be an exact existing
+`DNSResolver/name`; an unused policy, wrong-kind reference, null object or extra
+field is an error. The policy cannot alter the source list, invent a producer or
+override a validation failure. Each zone's declared source must resolve to a
+distinct successfully compiled `DHCPv4Server`. The compiler rewrites it to that
+worker's deterministic native identity and records the intentional semantic
+replacement in `Mapping.Notes`.
+
+Current lease records remain dynamic. The runtime verifies the committed source
+digest/generation and producer ownership before returning a source-scoped DNS
+projection. Producer loss, withdrawal, expired leases and removed subscriptions
+remove records; replaying an old grant does not renew its authority. The existing
+native DNS implementation retains explicit static record/PTR priority and zone
+TTL policy. The replacement does not import a global lease file or recover sticky
+hostnames without a currently authorized lease. Nonempty `hostnameSuffix` and
+`ddns` are rejected because the pinned resolver does not implement them; merely
+carrying those fields would claim a feature neither runtime supplies.
+
+The complete synthetic graph and policy are
+[`testdata/dhcp-dns.yaml`](testdata/dhcp-dns.yaml) and
+[`testdata/dhcp-dns-policy.yaml`](testdata/dhcp-dns-policy.yaml). The public-runtime
+boundary test verifies source isolation, digest fencing, finite producer expiry,
+withdrawal, recovery and subscription removal while applying network intent only
+to an in-memory fixture. The real-daemon integration gate reuses the independent
+DHCP client/DNS query fixture with a migrated document.
+
+## Static WireGuard migration
+
+The compiler joins `WireGuardPeer.interface` to the exact metadata name of its
+`WireGuardInterface`, as the pinned engine does. It creates a native WireGuard
+link and complete peer set, retaining explicit addresses, routes, MTU, listen
+port, keepalive and preshared-key file references. AllowedIPs selects and
+validates peers; it does not synthesize FIB routes or routing marks. Prefixes are
+canonicalized and duplicate owners are rejected. Interface aliases that omit
+MTU do not erase an explicit WireGuard MTU; conflicting values fail compilation.
+
+A clean absolute `privateKeyFile` is required. If that explicit file is absent,
+the native missing-only generator retains the old engine's first-apply behavior.
+The compiler never reads or creates the file. To retain an existing identity,
+provision that existing key before applying the configuration. Native apply
+requires a private, worker-owned regular file and trusted nonsymlink parents,
+then pins an immutable snapshot. Rotation uses a new versioned path. Inline
+private keys and PSKs, implicit key locations, hostname endpoints, dynamic SAM
+peer sources and enrollment identities are rejected. Numeric IPv4/IPv6 endpoints
+and passive peers are supported; IPv6 link-local endpoints require a zone.
+
+The original controller inserts an IPv4 iptables listener exception, while its
+owned nftables filter separately limits the effective dual-family exception to
+the name-sorted first untrust zone. The compiler retains the latter's exact
+interface-selection and pre-ACL placement, including the original Bridge index
+behavior. A first untrust zone containing only bridges produced an ineffective
+empty-interface match; migration retains that zone's ACL decisions and adds no
+listener accept there. Trust/mgmt ACLs remain authoritative. A nonzero listen port without
+an owned INPUT filter is rejected: creating a native filter there would also
+introduce its conntrack-invalid drop, which was absent from a standalone old
+listener exception. Omitted/zero listen ports keep automatic-port behavior and
+do not create a filter or a listener exception. No foreign rules or existing
+WireGuard links/peers are adopted.
+
+The synthetic [WireGuard source fixture](testdata/wireguard.yaml) can be converted
+with `routerd config migrate`. Its public key and addresses are test values.
+See [native WireGuard ownership](../../docs/wireguard.md) for the runtime key,
+rollback and quarantine contract. Limits remain 64 devices, 1024 peers per
+device and 16384 allowed prefixes per device; exceeding them fails atomically.
 
 ## Resource-scoped WAN policy
 
@@ -220,9 +380,11 @@ zones without a resolver produce diagnostics.
 Firewall rules retain the original **metadata-name ordering**, independent of
 their order in YAML. Zone-to-self and zone-to-zone chains are flattened with
 terminal decisions; they do not fall through to another zone's policy. DHCPv4
-and PD client exceptions are placed before ACLs only for untrusted ingress,
+client/server and PD client exceptions are placed before ACLs only for untrusted ingress,
 matching the original service-hole policy. On trust/mgmt zones, explicit ACLs
-can still deny those ports. The original `ipip` matcher is IPv6 outer protocol 4;
+can still deny those ports. Automatic DNS candidates do not bypass explicit
+ACLs in any zone role; address-source resolution creates no additional hole.
+The original `ipip` matcher is IPv6 outer protocol 4;
 the projection keeps that family restriction.
 
 The running Linux NAT controller and the combined configuration exporter are
@@ -272,8 +434,9 @@ kernel log events and do not imply NFLOG sampling or old log-retention behavior.
   election-owned VMACs require an explicit peer-aware transition. Authentication,
   unicast peers, tracking, graceful activation and additional failover VMACs are
   not erased.
-- VXLAN FDB peers, L2 filtering, outer-DF defaults, PPPoE, DHCP servers/relays,
-  dynamic route protocols, tunnels/VPNs, cluster synchronization, plugins,
+- VXLAN FDB peers, L2 filtering, outer-DF defaults, PPPoE, DHCPv6 servers/relays
+  and unsupported DHCPv4 server modes, dynamic route protocols, other
+  tunnel/VPN types, cluster synchronization, plugins,
   cloud/federation/mobility resources, logging/retention/system services and
   other unmapped kinds are rejected with a resource path.
 

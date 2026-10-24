@@ -119,7 +119,7 @@ qemu-daemon-aftr:
 	$(PYTHON) scripts/qemu-network.py --suite daemon-aftr --go '$(GO)' --image-dir $(IMAGE_DIR) --timeout $(QEMU_DAEMON_TIMEOUT)
 
 qemu-protocols:
-	@set -eu; for suite in daemon-management daemon-dhcp-dns daemon-bgp daemon-bfd dhcp dhcp-server vrrp ra-client aftr bfd; do \
+	@set -eu; for suite in daemon-management daemon-dhcp-dns daemon-legacy-dhcp-dns daemon-bgp daemon-bfd dhcp dhcp-server vrrp ra-client aftr bfd; do \
 	  $(PYTHON) scripts/qemu-network.py --suite "$$suite" --go '$(GO)' --image-dir $(IMAGE_DIR); \
 	done
 

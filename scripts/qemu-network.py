@@ -69,6 +69,13 @@ SUITES = {
         "commands": True,
         "description": "two-binary daemon DHCP-to-DNS and ownership expiry",
     },
+    "daemon-legacy-dhcp-dns": {
+        "package": "./internal/integration", "binary": "daemon.test",
+        "test": "TestDaemonMigratedDHCPDNSAndOwnershipExpiry",
+        "marker": "ROUTERD_LEGACY_DHCP_DNS_DAEMON_TEST", "timeout": 180,
+        "commands": True,
+        "description": "legacy DHCP/DNS migration through the real two-binary daemon",
+    },
     "daemon-bgp": {
         "package": "./internal/integration", "binary": "daemon.test",
         "test": "TestDaemonBGPFIBAndOwnershipExpiry",

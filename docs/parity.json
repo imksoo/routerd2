@@ -363,7 +363,7 @@
         "ra"
       ],
       "parity_status": "not_integrated",
-      "known_gap": "Native RA server/client, delegated-prefix updates and DHCPv4 server are implemented. Complete DHCPv6 server, relay, profile and lease-sync resource semantics remain incomplete."
+      "known_gap": "Native RA server/client, delegated-prefix updates and DHCPv4 server are implemented. Strict static DHCPv4 server/profile/reservation conversion and explicit DHCP-derived DNS replacement are available. DHCPv6 server, relay, dynamic dependencies, original global sticky behavior and lease-sync resource semantics remain incomplete."
     },
     {
       "id": "dns",
@@ -435,7 +435,7 @@
         "wireguard"
       ],
       "parity_status": "not_integrated",
-      "known_gap": "Native kernel generic-netlink WireGuard, complete peer sets, encrypted traffic, immutable key snapshots, endpoint roaming and failure quarantine are implemented. Original peer hostname resolution, SAM/enrollment, implicit firewall/routing policy and complete resource lifecycle conversion remain incomplete."
+      "known_gap": "Native kernel generic-netlink WireGuard, complete peer sets, encrypted traffic, immutable key snapshots, endpoint roaming and failure quarantine are implemented. Strict static peer/file-key conversion and supported original listener-firewall policy are available. Peer hostname resolution, SAM/enrollment, standalone fixed-listener conversion without an owned INPUT filter and complete resource lifecycle semantics remain incomplete."
     },
     {
       "id": "vpn.ipsec",
@@ -12218,7 +12218,7 @@
     {
       "package": "internal/protocol/bgp",
       "status": "integrated_supervised_worker",
-      "validation": "Unit/race plus independent TCP peers passed IPv4/IPv6 policy, advertisement and withdrawal. Real two-binary daemon tests install and withdraw protocol242 kernel FIB routes, report unresolved next hops without speculative onlink routes, repair them, and expire ownership while the BGP worker is SIGSTOPped. Recursive/ECMP/VRF/link-local resolution tests also passed. The explicit native peer_bfd consumer passed pure/race identity, deadline, actual admin-ACK, RIB-version and per-reset withdrawal-ACK fences. TestBFDWireExpiryClosesActualTCPWhileRouteEffectsBlocked passed actual TCP closure while route effects were blocked. Final two-binary daemon-bfd acceptance is pending; this does not establish original BGPPeer.bfd/profile or BFD resource compatibility.",
+      "validation": "Unit/race plus independent TCP peers passed IPv4/IPv6 policy, advertisement and withdrawal. Real two-binary daemon tests install and withdraw protocol242 kernel FIB routes, report unresolved next hops without speculative onlink routes, repair them, and expire ownership while the BGP worker is SIGSTOPped. Recursive/ECMP/VRF/link-local resolution tests also passed. The explicit native peer_bfd consumer passed pure/race identity, deadline, actual admin-ACK, RIB-version and per-reset withdrawal-ACK fences. TestBFDWireExpiryClosesActualTCPWhileRouteEffectsBlocked passed actual TCP closure while route effects were blocked. The real two-binary daemon-bfd QEMU gate passed startup suppression, UDP-only loss, suspended-worker receive expiry and fresh BGP/FIB recovery; this does not establish original BGPPeer.bfd/profile or BFD resource compatibility.",
       "resource_parity": false
     },
     {
@@ -12293,8 +12293,54 @@
     {
       "package": "internal/legacyconfig",
       "status": "strict_partial_compiler",
-      "validation": "Pinned legacy schema decoding, strict field/reference rejection, deterministic conversion and parser fuzz passed. Explicit WAN policies carry replacement notes; PD/information aliasing and dynamic RA/AFTR/B4 peer/gateway graphs passed the public Runtime boundary with expiry and fencing. CLI policy migration writes no configuration on compile failure. Unsupported inputs still reject the entire graph.",
-      "resource_parity": false
+      "validation": "Pinned legacy schema decoding, strict field/reference rejection, deterministic conversion and parser fuzz passed. Explicit WAN policies carry replacement notes; PD/information aliasing and dynamic RA/AFTR/B4 peer/gateway graphs passed the public Runtime boundary with expiry and fencing. CLI policy migration writes no configuration on compile failure. Unsupported inputs still reject the entire graph. Static DHCPv4Server/DHCPv4Reservation and WireGuardInterface/WireGuardPeer subsets are compiled with complete-failure diagnostics, explicit static ownership and supported original defaults. DHCP-derived DNS requires each resolver to authorize source-scoped finite lease behavior; public Runtime.Accept-to-DNSLeases tests cover source isolation, digest fencing, producer expiry, replay, recovery and removal. Packet-decision fixtures preserve untrust DHCP server UDP/67 ordering, WireGuard listener scoping and authoritative DNS/trust/mgmt ACLs. These are partial resource contracts, not full semantic parity. The actual two-binary daemon-legacy-dhcp-dns QEMU gate passed migrated DHCP ACK and DNS publication, stopped-producer expiry, durable restart recovery and preservation of the existing DNS process/TCP connection; the untrust fixture retained the original scoped UDP/67 exception before its explicit deny ACL.",
+      "resource_parity": false,
+      "limitations": [
+        "Original resource lifecycle, when/dependsOn/ready_when, dynamic config/SAM/HA and arbitrary external ownership remain unsupported.",
+        "Positive legacy stickyHoldDays and lease-file import are rejected; native per-worker sticky behavior does not reproduce the original family-wide sticky contract.",
+        "Static WireGuard requires explicit file-key paths and numeric/passive endpoints; nonzero listenPort without an owned INPUT filter is rejected instead of adding an unrelated conntrack drop."
+      ],
+      "acceptance_gates": [
+        {
+          "name": "static-migration-full-check",
+          "status": "passed",
+          "source_tree": "ad4cc526106cfb89d25240f18021695e5c0b6308",
+          "command": "make check",
+          "scope": "Format, all unit tests, nftables expression tests, 11 Python tool tests, all-package race detector and vet"
+        },
+        {
+          "name": "daemon-legacy-dhcp-dns-qemu",
+          "status": "passed",
+          "source_tree": "ad4cc526106cfb89d25240f18021695e5c0b6308",
+          "suite": "daemon-legacy-dhcp-dns",
+          "required_test": "TestDaemonMigratedDHCPDNSAndOwnershipExpiry",
+          "environment": "No-external-NIC Alpine QEMU; actual static routerd/routerd-modules pair, independent native DHCP client and existing DNS TCP session",
+          "duration_seconds": 9.14,
+          "guest_total_seconds": 18.76,
+          "scope": "Resource YAML plus explicit per-resolver finite-source policy; DHCP acquisition, source expiry, journal recovery and scoped service firewall exception"
+        },
+        {
+          "name": "native-dhcp-dns-shared-fixture-regression",
+          "status": "passed",
+          "source_tree": "ad4cc526106cfb89d25240f18021695e5c0b6308",
+          "suite": "daemon-dhcp-dns",
+          "required_test": "TestDaemonDHCPDNSAndOwnershipExpiry",
+          "duration_seconds": 7.62,
+          "guest_total_seconds": 15.3
+        },
+        {
+          "name": "static-migration-signed-release-pairs",
+          "status": "passed",
+          "source_tree": "ad4cc526106cfb89d25240f18021695e5c0b6308",
+          "release_id": "migration-ad4cc526106c",
+          "command": "make build-linux release-built-test",
+          "architectures": [
+            "amd64",
+            "arm64"
+          ],
+          "scope": "Actual stripped static runtime ELF pairs, dependency license manifest and signed pack/stage/lookup/publication validation"
+        }
+      ]
     },
     {
       "package": "internal/protocol/raclient",

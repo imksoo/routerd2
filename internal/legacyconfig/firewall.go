@@ -223,7 +223,13 @@ func legacyRefName(value string) string {
 // their differences visible rather than allowing the migration to fix a wrong
 // interface name by silently changing packet policy.
 func (c *compiler) filterInterface(r resource, field, ref string) string {
-	name := legacyRefName(ref)
+	// nftFirewallZones uses the exact alias (or the suffix after '/'). It
+	// does not trim that suffix: accepting a normalized name here could turn
+	// an invalid old zone into an active filtering or service-exception rule.
+	name := ref
+	if _, suffix, qualified := strings.Cut(ref, "/"); qualified {
+		name = suffix
+	}
 	owner := c.byRef[c.aliasOwner[name]]
 	if owner == nil {
 		// aliasOwner stores the full API resource ID; resolve by kind/name too.
@@ -246,6 +252,8 @@ func (c *compiler) filterInterface(r resource, field, ref string) string {
 	case api.InterfaceSpec:
 		return s.IfName
 	case api.BridgeSpec:
+		return first(s.IfName, owner.Metadata.Name)
+	case api.WireGuardInterfaceSpec:
 		return first(s.IfName, owner.Metadata.Name)
 	case api.DSLiteTunnelSpec:
 		old := first(s.TunnelName, owner.Metadata.Name)

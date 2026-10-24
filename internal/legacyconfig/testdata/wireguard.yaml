@@ -1,0 +1,41 @@
+# Synthetic static migration fixture, not a deployed peer or production policy.
+# Provision the existing private key at the declared path to retain its identity.
+apiVersion: routerd.net/v1alpha1
+kind: Router
+metadata: {name: wireguard-migration}
+spec:
+  resources:
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: Interface
+      metadata: {name: wan}
+      spec: {ifname: eth0, managed: false}
+    - apiVersion: firewall.routerd.net/v1alpha1
+      kind: FirewallZone
+      metadata: {name: wan}
+      spec: {role: untrust, interfaces: [Interface/wan]}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: WireGuardInterface
+      metadata: {name: vpn}
+      spec:
+        ifname: wg-site
+        privateKeyFile: /var/lib/routerd/wg-site-v1.key
+        listenPort: 51820
+        mtu: 1412
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: WireGuardPeer
+      metadata: {name: remote-site}
+      spec:
+        interface: vpn
+        # A syntactically valid test public key; replace with the real peer key.
+        publicKey: ERERERERERERERERERERERERERERERERERERERERERE=
+        allowedIPs: [10.80.0.2/32, 203.0.113.0/24]
+        endpoint: 198.51.100.2:51820
+        persistentKeepalive: 25
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: IPv4StaticAddress
+      metadata: {name: tunnel-address}
+      spec: {interface: vpn, address: 10.80.0.1/24}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: IPv4StaticRoute
+      metadata: {name: remote-prefix}
+      spec: {destination: 203.0.113.0/24, interface: WireGuardInterface/vpn, metric: 200}

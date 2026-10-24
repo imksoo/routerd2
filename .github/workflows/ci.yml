@@ -102,6 +102,7 @@ jobs:
             dist/aftr-daemon-test/
             dist/daemon-management-test/
             dist/daemon-dhcp-dns-test/
+            dist/daemon-legacy-dhcp-dns-test/
             dist/daemon-bgp-test/
             dist/daemon-bfd-test/
             dist/dhcp-test/

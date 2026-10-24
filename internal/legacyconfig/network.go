@@ -100,7 +100,9 @@ func (c *compiler) iface(r resource) {
 		if iface.MTU != 0 && s.MTU != 0 && iface.MTU != s.MTU {
 			c.reject(r, "mtu", "conflict", "conflicting MTU declarations for the same kernel interface")
 		}
-		iface.MTU = s.MTU
+		if s.MTU != 0 {
+			iface.MTU = s.MTU
+		}
 		c.target(r, "network.interfaces/"+s.IfName)
 	}
 }

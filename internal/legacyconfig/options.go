@@ -24,6 +24,14 @@ type Options struct {
 	SchemaVersion int                               `json:"schema_version"`
 	RAClients     map[string]serviceconfig.RAClient `json:"ra_clients,omitempty"`
 	DSLite        map[string]DSLitePolicy           `json:"ds_lite,omitempty"`
+	DHCPDNS       map[string]DHCPDNSPolicy          `json:"dhcp_dns,omitempty"`
+}
+
+// DHCPDNSPolicy explicitly replaces the old resolver's global lease-event and
+// sticky-file behavior with configured source allowlists and finite producer/
+// lease ownership. Source names and zone TTLs still come from the legacy graph.
+type DHCPDNSPolicy struct {
+	SourceScopedFiniteLeases *bool `json:"source_scoped_finite_leases"`
 }
 
 // DSLitePolicy replaces the old process-local DNS dependency and indefinitely
@@ -120,7 +128,7 @@ func validateOptionsShape(d *decoder, options Options, explicit bool) {
 	if explicit && options.SchemaVersion != OptionsSchemaVersion {
 		d.issue(nil, "$policy.schema_version", "policy_version", "migration policy schema_version must be 1")
 	}
-	if len(options.RAClients)+len(options.DSLite) > 4096 {
+	if len(options.RAClients)+len(options.DSLite)+len(options.DHCPDNS) > 4096 {
 		d.issue(nil, "$policy", "policy_limit", "migration policy accepts at most 4096 resource entries")
 	}
 }
@@ -128,11 +136,11 @@ func validateOptionsShape(d *decoder, options Options, explicit bool) {
 func (c *compiler) initOptions(options Options, explicit bool) {
 	validateOptionsShape(c.decoder, options, explicit)
 	c.policyPaths, c.policyUsed = map[string]string{}, map[string]bool{}
-	if len(options.RAClients)+len(options.DSLite) > 4096 {
+	if len(options.RAClients)+len(options.DSLite)+len(options.DHCPDNS) > 4096 {
 		return
 	}
 	// Do not let a caller's later edit mutate a successfully compiled document.
-	c.options = Options{SchemaVersion: options.SchemaVersion, RAClients: map[string]serviceconfig.RAClient{}, DSLite: map[string]DSLitePolicy{}}
+	c.options = Options{SchemaVersion: options.SchemaVersion, RAClients: map[string]serviceconfig.RAClient{}, DSLite: map[string]DSLitePolicy{}, DHCPDNS: map[string]DHCPDNSPolicy{}}
 	for key, value := range options.RAClients {
 		value.SLAAC, value.DefaultRoute = copyBool(value.SLAAC), copyBool(value.DefaultRoute)
 		value.OnLink, value.RouteInformation = copyBool(value.OnLink), copyBool(value.RouteInformation)
@@ -144,6 +152,10 @@ func (c *compiler) initOptions(options Options, explicit bool) {
 		value.DNSFrom = append([]string(nil), value.DNSFrom...)
 		value.Resolvers = append([]serviceconfig.AFTRResolver(nil), value.Resolvers...)
 		c.options.DSLite[key] = value
+	}
+	for key, value := range options.DHCPDNS {
+		value.SourceScopedFiniteLeases = copyBool(value.SourceScopedFiniteLeases)
+		c.options.DHCPDNS[key] = value
 	}
 	check := func(section, kind string, keys []string) {
 		sort.Strings(keys)
@@ -168,6 +180,11 @@ func (c *compiler) initOptions(options Options, explicit bool) {
 		keys = append(keys, key)
 	}
 	check("ds_lite", "DSLiteTunnel", keys)
+	keys = make([]string, 0, len(options.DHCPDNS))
+	for key := range options.DHCPDNS {
+		keys = append(keys, key)
+	}
+	check("dhcp_dns", "DNSResolver", keys)
 }
 
 func copyBool(value *bool) *bool {

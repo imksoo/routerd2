@@ -19,6 +19,7 @@ import (
 
 	"github.com/imksoo/routerd/pkg/api"
 	"github.com/imksoo/routerd2/internal/config"
+	"github.com/imksoo/routerd2/internal/legacyconfig"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp4"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
@@ -38,6 +39,18 @@ func TestDaemonDHCPDNSAndOwnershipExpiry(t *testing.T) {
 	if !isolateFixture(t, "TestDaemonDHCPDNSAndOwnershipExpiry") {
 		return
 	}
+	testDaemonDHCPDNSOwnership(t, false)
+}
+
+func TestDaemonMigratedDHCPDNSAndOwnershipExpiry(t *testing.T) {
+	if !isolateFixture(t, "TestDaemonMigratedDHCPDNSAndOwnershipExpiry") {
+		return
+	}
+	testDaemonDHCPDNSOwnership(t, true)
+}
+
+func testDaemonDHCPDNSOwnership(t *testing.T, migrated bool) {
+	t.Helper()
 	clientNS := fixturePeerNamespace(t, "lan0", "client0")
 	dnsPort := port(t)
 	server := serviceconfig.DHCPServer{Interface: "lan0", ServerAddress: "192.0.2.1", Authoritative: true, ProbeTimeoutMilliseconds: 50,
@@ -50,6 +63,27 @@ func TestDaemonDHCPDNSAndOwnershipExpiry(t *testing.T) {
 	doc := config.Document{SchemaVersion: 1,
 		Network:  network.Desired{Interfaces: []network.Interface{{Name: "lan0", Addresses: []string{"192.0.2.1/24"}}}},
 		Services: []serviceconfig.Service{{Name: "leases", DHCPServer: &server}, {Name: "dns", DNS: &dns}},
+	}
+	if migrated {
+		doc = migratedDHCPDNSFixtureDocument(t, dnsPort)
+	}
+	serverName, dnsName := "", ""
+	for _, service := range doc.Services {
+		if service.DHCPServer != nil {
+			if serverName != "" {
+				t.Fatal("fixture has more than one DHCP server")
+			}
+			serverName = "service." + service.Name
+		}
+		if service.DNS != nil {
+			if dnsName != "" {
+				t.Fatal("fixture has more than one DNS resolver")
+			}
+			dnsName = "service." + service.Name
+		}
+	}
+	if serverName == "" || dnsName == "" {
+		t.Fatal("fixture did not compile a DHCP server and DNS resolver")
 	}
 	f := startFixtureDaemon(t, doc)
 	work := t.TempDir()
@@ -147,7 +181,7 @@ func TestDaemonDHCPDNSAndOwnershipExpiry(t *testing.T) {
 		return 0
 	}
 	before := status()
-	serverPID, dnsPID := pid(before, "service.leases"), pid(before, "service.dns")
+	serverPID, dnsPID := pid(before, serverName), pid(before, dnsName)
 	if serverPID == 0 || dnsPID == 0 {
 		t.Fatalf("native service processes missing: %+v", before)
 	}
@@ -156,7 +190,7 @@ func TestDaemonDHCPDNSAndOwnershipExpiry(t *testing.T) {
 	}
 	defer syscall.Kill(serverPID, syscall.SIGKILL)
 	wait(7*time.Second, func() bool { return !hasAddress("workstation.lab.example.", lease.CurrentAddress) })
-	if !hasAddress("router.lab.example.", "192.0.2.1") || pid(status(), "service.dns") != dnsPID {
+	if !hasAddress("router.lab.example.", "192.0.2.1") || pid(status(), dnsName) != dnsPID {
 		t.Fatal("DHCP ownership loss interrupted static DNS or restarted the listener")
 	}
 	if err := syscall.Kill(serverPID, 0); err != nil {
@@ -167,17 +201,79 @@ func TestDaemonDHCPDNSAndOwnershipExpiry(t *testing.T) {
 	}
 	wait(8*time.Second, func() bool {
 		s := status()
-		return pid(s, "service.leases") != 0 && pid(s, "service.leases") != serverPID && hasAddress("workstation.lab.example.", lease.CurrentAddress)
+		return pid(s, serverName) != 0 && pid(s, serverName) != serverPID && hasAddress("workstation.lab.example.", lease.CurrentAddress)
 	})
 	// The client uses INIT-REBOOT from its independent durable journal. Server
 	// recovery must ACK the same address and preserve the original DNS process.
 	recovered := acquire()
-	if recovered.CurrentAddress != lease.CurrentAddress || pid(status(), "service.dns") != dnsPID {
+	if recovered.CurrentAddress != lease.CurrentAddress || pid(status(), dnsName) != dnsPID {
 		t.Fatal("DHCP/DNS restart did not preserve the lease and unaffected worker")
 	}
 	if !hasAddress("workstation.lab.example.", lease.CurrentAddress) {
 		t.Fatal("renewed lease disappeared from the existing DNS TCP connection")
 	}
+	if migrated {
+		t.Log("legacy resource YAML and explicit finite-source policy: real DHCP ACK, DNS publication, stopped-producer expiry and journal recovery passed")
+	}
+}
+
+func migratedDHCPDNSFixtureDocument(t *testing.T, dnsPort int) config.Document {
+	t.Helper()
+	input := fmt.Sprintf(`apiVersion: routerd.net/v1alpha1
+kind: Router
+metadata: {name: legacy-dhcp-dns-fixture}
+spec:
+  resources:
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: Interface
+      metadata: {name: lan}
+      spec: {ifname: lan0, managed: true, adminUp: true}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: IPv4StaticAddress
+      metadata: {name: gateway}
+      spec: {interface: lan, address: 192.0.2.1/24}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: DHCPv4Server
+      metadata: {name: leases}
+      spec:
+        interface: lan
+        addressPool: {start: 192.0.2.100, end: 192.0.2.102, leaseTime: 60s}
+        gateway: 192.0.2.1
+        dnsServers: [192.0.2.1]
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: DNSResolver
+      metadata: {name: dns}
+      spec:
+        listen: [{name: local, addresses: [127.0.0.1], port: %d, sources: [local-zone]}]
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: DNSZone
+      metadata: {name: lan-zone}
+      spec:
+        zone: lab.example
+        records: [{hostname: router, ipv4: 192.0.2.1}]
+        dhcpDerived: {sources: [DHCPv4Server/leases]}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: DNSForwarder
+      metadata: {name: local-zone}
+      spec: {resolver: DNSResolver/dns, match: [lab.example], zoneRefs: [DNSZone/lan-zone]}
+    - apiVersion: firewall.routerd.net/v1alpha1
+      kind: FirewallZone
+      metadata: {name: isolated-lan}
+      spec: {role: untrust, interfaces: [lan]}
+    - apiVersion: firewall.routerd.net/v1alpha1
+      kind: FirewallRule
+      metadata: {name: explicit-dhcp-deny}
+      spec: {fromZone: isolated-lan, toZone: self, protocol: udp, port: 67, action: drop}
+`, dnsPort)
+	consent := true
+	result, err := legacyconfig.CompileWithOptions([]byte(input), legacyconfig.Options{
+		SchemaVersion: legacyconfig.OptionsSchemaVersion,
+		DHCPDNS:       map[string]legacyconfig.DHCPDNSPolicy{"DNSResolver/dns": {SourceScopedFiniteLeases: &consent}},
+	})
+	if err != nil {
+		t.Fatal("compile legacy DHCP/DNS fixture", err)
+	}
+	return result.Document
 }
 
 func fixtureInsideNamespace(ns netns.NsHandle, fn func() error) (result error) {
@@ -244,7 +340,9 @@ func TestDaemonDHCPClientChild(t *testing.T) {
 		t.Skip("only runs inside the daemon fixture's dedicated client namespace")
 	}
 	current, err := os.Readlink("/proc/self/ns/net")
-	if err != nil || current != expected || current == os.Getenv("ROUTERD2_DAEMON_DHCP_SERVER") || current == os.Getenv("ROUTERD2_PROTOCOL_PARENT") || os.Getenv("ROUTERD2_PROTOCOL_FIXTURE") != "TestDaemonDHCPDNSAndOwnershipExpiry" {
+	fixtureName := os.Getenv("ROUTERD2_PROTOCOL_FIXTURE")
+	knownFixture := fixtureName == "TestDaemonDHCPDNSAndOwnershipExpiry" || fixtureName == "TestDaemonMigratedDHCPDNSAndOwnershipExpiry"
+	if err != nil || current != expected || current == os.Getenv("ROUTERD2_DAEMON_DHCP_SERVER") || current == os.Getenv("ROUTERD2_PROTOCOL_PARENT") || !knownFixture {
 		t.Fatal("refusing DHCP client outside a verified dedicated namespace")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
