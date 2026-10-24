@@ -238,3 +238,39 @@ func TestAbsenceOrdersQueuedObservationsAgainstTheirOriginalDeadline(t *testing.
 		})
 	}
 }
+
+func TestUnobservedRevisionGapStartsFreshAtJournalTip(t *testing.T) {
+	ctx := context.Background()
+	s, err := events.Open(events.Options{Directory: filepath.Join(t.TempDir(), "events")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	c := New(s)
+	rule := declaration(t, "count", 2)
+	if err = c.Sync(ctx, 1, []resourceprogram.EventRule{rule}); err != nil {
+		t.Fatal(err)
+	}
+	appendInput(t, s, "old-count")
+	if err = c.Step(ctx, epoch); err != nil {
+		t.Fatal(err)
+	}
+	appendInput(t, s, "during-unobserved-interval")
+	if err = c.Sync(ctx, 3, []resourceprogram.EventRule{rule}); err != nil {
+		t.Fatal(err)
+	}
+	appendInput(t, s, "fresh-one")
+	if err = c.Step(ctx, epoch); err != nil {
+		t.Fatal(err)
+	}
+	if outputCount(t, s) != 0 {
+		t.Fatal("unobserved revision gap inherited aggregate or replayed past input")
+	}
+	appendInput(t, s, "fresh-two")
+	if err = c.Step(ctx, epoch); err != nil {
+		t.Fatal(err)
+	}
+	if outputCount(t, s) != 1 {
+		t.Fatal("fresh lifetime did not count its own inputs")
+	}
+}
