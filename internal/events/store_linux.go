@@ -41,7 +41,13 @@ INSERT INTO usage VALUES('events',0,0),('outbox',0,0),('consumer_state',0,0);
 PRAGMA user_version=4;
 `
 
-func Open(options Options) (_ *Store, result error) {
+func Open(options Options) (*Store, error) { return openStore(options, false) }
+
+// OpenExisting authenticates and acquires an established store. Missing state
+// is an error, never an empty replacement for potentially lost observations.
+func OpenExisting(options Options) (*Store, error) { return openStore(options, true) }
+
+func openStore(options Options, existingOnly bool) (_ *Store, result error) {
 	if options.MaxEvents == 0 {
 		options.MaxEvents = 100000
 	}
@@ -66,7 +72,7 @@ func Open(options Options) (_ *Store, result error) {
 	if options.MaxConsumerStateBytes < 2 || options.MaxConsumerStateBytes > 1<<30 {
 		return nil, errors.New("invalid consumer state capacity")
 	}
-	dir, err := privateDirectory(options.Directory)
+	dir, err := privateDirectory(options.Directory, !existingOnly)
 	if err != nil {
 		return nil, err
 	}
@@ -76,12 +82,24 @@ func Open(options Options) (_ *Store, result error) {
 			_ = s.Close()
 		}
 	}()
+	if existingOnly {
+		var stat unix.Stat_t
+		if err = unix.Fstatat(int(dir.Fd()), "journal.sqlite3", &stat, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+			return nil, err
+		}
+		if err = checkExistingFile(dir, "journal.sqlite3"); err != nil {
+			return nil, err
+		}
+		if stat.Size == 0 {
+			return nil, errors.New("event store has no initialized database")
+		}
+	}
 	s.lock, err = privateFile(dir, "store.lock")
 	if err != nil {
 		return nil, err
 	}
 	if err = unix.Flock(int(s.lock.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
-		return nil, fmt.Errorf("event store already owned: %w", err)
+		return nil, fmt.Errorf("%w: %w", ErrOwned, err)
 	}
 	for _, name := range []string{"journal.sqlite3", "journal.sqlite3-wal", "journal.sqlite3-shm", "journal.sqlite3-journal"} {
 		if err = checkExistingFile(dir, name); err != nil {
@@ -238,7 +256,7 @@ func (s *Store) Close() error {
 	return result
 }
 
-func privateDirectory(path string) (*os.File, error) {
+func privateDirectory(path string, create bool) (*os.File, error) {
 	if !filepath.IsAbs(path) || filepath.Clean(path) != path || path == "/" || len(path) > 4096 {
 		return nil, errors.New("event directory must be a clean absolute private path")
 	}
@@ -253,7 +271,7 @@ func privateDirectory(path string) (*os.File, error) {
 	current := os.NewFile(uintptr(fd), "/")
 	for i, part := range parts {
 		next, err := unix.Openat(int(current.Fd()), part, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
-		if errors.Is(err, unix.ENOENT) {
+		if create && errors.Is(err, unix.ENOENT) {
 			if err = unix.Mkdirat(int(current.Fd()), part, 0700); err == nil || errors.Is(err, unix.EEXIST) {
 				next, err = unix.Openat(int(current.Fd()), part, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 			}

@@ -393,9 +393,15 @@ func (s Service) Instance(runtimeDir, stateDir string) (Instance, error) {
 	b, err := json.Marshal(c)
 	instance := Instance{Name: s.ModuleName(), Role: s.Role(), Config: b, DynamicDNS: s.HasDNSLeaseSources()}
 	if s.Health != nil {
-		instance.EventDirectory = filepath.Join(stateDir, "services", s.Name, "health-events")
+		instance.EventDirectory = HealthEventDirectory(stateDir, s.Name)
 	}
 	return instance, err
+}
+
+// HealthEventDirectory is generated ownership, not an operator-selected path.
+// Callers must validate the service name before using this reserved location.
+func HealthEventDirectory(stateDir, name string) string {
+	return filepath.Join(stateDir, "services", name, "health-events")
 }
 
 func (s Service) HealthConfig() health.Config {

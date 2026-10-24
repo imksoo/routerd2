@@ -17,6 +17,7 @@ var (
 	ErrConflict = errors.New("event identity or consumer cursor conflict")
 	ErrCapacity = errors.New("durable event storage capacity exhausted")
 	ErrClosed   = errors.New("durable event store is closed")
+	ErrOwned    = errors.New("event store already owned")
 )
 
 const maxBody = 64 << 10

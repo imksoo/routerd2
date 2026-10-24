@@ -10,6 +10,31 @@ import (
 	"unicode/utf8"
 )
 
+// LookupProducer observes a registration without allocating one. Inactive
+// optional components can discover retained state without creating new work.
+func (s *Store) LookupProducer(ctx context.Context, name string) (ProducerState, bool, error) {
+	if !token(name, 128) {
+		return ProducerState{}, false, errors.New("invalid observation producer")
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return ProducerState{}, false, ErrClosed
+	}
+	var result ProducerState
+	err := s.db.QueryRowContext(ctx, `SELECT version,body FROM producers WHERE name=?`, name).Scan(&result.Version, &result.State)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ProducerState{}, false, nil
+	}
+	if err != nil {
+		return ProducerState{}, false, err
+	}
+	if !validState(result.State) || result.Version > math.MaxInt64 {
+		return ProducerState{}, false, errors.New("invalid durable producer state")
+	}
+	return result, true, nil
+}
+
 // ProducerCheckpoint registers or reads a producer independently of journal
 // cursors. Producer and consumer names occupy separate API namespaces, while
 // registrations, state bytes and jobs share the store's capacity budgets.

@@ -51,6 +51,12 @@ type Outbox struct {
 
 func NewOutbox(store *events.Store, name string) *Outbox { return &Outbox{store: store, name: name} }
 
+// Pending returns an owned observation copy without acknowledging any entry.
+func (o *Outbox) Pending(ctx context.Context) ([]events.Event, error) {
+	_, q, err := o.read(ctx)
+	return q.Pending, err
+}
+
 // ValidateHealth binds history to this worker's HealthCheck. The envelope is
 // intentionally narrower than a generic journal append API. Its original
 // timestamp may predate this boot/configuration; it is never a finite lease.
