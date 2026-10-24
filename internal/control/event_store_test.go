@@ -7,8 +7,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/imksoo/routerd2/internal/events"
 )
 
 func TestEventStoreWarningIsVisibleBeforeFullAndDoesNotDegradeUsableControl(t *testing.T) {
@@ -39,6 +37,9 @@ func TestEventStoreWarningIsVisibleBeforeFullAndDoesNotDegradeUsableControl(t *t
 	}
 	if err := j.Close(); err != nil {
 		t.Fatal(err)
+	}
+	if cached := e.health(); !cached.Healthy || cached.EventJournal.Storage.Capacity == nil || cached.EventJournal.Storage.Capacity.Events.Rows != 4 {
+		t.Fatal("health attempted storage IO instead of returning its last bounded observation", cached)
 	}
 	if err := e.RefreshEventStore(context.Background()); err == nil || e.State().Healthy || e.health().EventJournal.Storage.LastError == "" {
 		t.Fatal("failed monitoring hid unavailable storage")
@@ -72,7 +73,10 @@ func TestFreshEventCapacityBlocksConfirmationBeforeAWriteFailure(t *testing.T) {
 	if retry, err := j.Append(ctx, protocolProbe("e")); err != nil || retry.Cursor == 0 {
 		t.Fatal("alarm broke stable-ID ACK", retry, err)
 	}
-	if err = e.Expire(ctx, time.Now().Add(2*time.Minute)); err != nil && !strings.Contains(err.Error(), events.ErrCapacity.Error()) {
+	if err = e.Expire(ctx, time.Now().Add(2*time.Minute)); err != nil {
 		t.Fatal(err)
+	}
+	if restored := e.State(); restored.Confirmation != nil || restored.Revision != s.Revision+1 || len(restored.EventOutbox) != 1 || restored.EventStoreError == "" {
+		t.Fatal("full journal blocked rollback or lost its durable pending observation", restored)
 	}
 }

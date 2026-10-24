@@ -3,6 +3,8 @@ package events
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"io"
 	"path/filepath"
@@ -101,3 +103,29 @@ func TestHistoryVerificationRejectsTruncationModificationAndTrailingData(t *test
 type failingArchiveWriter struct{}
 
 func (failingArchiveWriter) Write([]byte) (int, error) { return 0, io.ErrClosedPipe }
+
+func TestHistoryVerifierRejectsDuplicateIDsEvenWithCorrectCountsAndDigest(t *testing.T) {
+	ctx := context.Background()
+	event := testEvent("same")
+	body, err := encodeEvent(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	header := ArchiveHeader{Kind: "header", Format: "routerd-event-history", Version: 1, FirstCursor: 1, TipCursor: 2, Records: 2, EventBytes: int64(2 * len(body))}
+	var file bytes.Buffer
+	if err = writeArchiveLine(&file, header); err != nil {
+		t.Fatal(err)
+	}
+	for _, cursor := range []uint64{1, 2} {
+		if err = writeArchiveLine(&file, archiveRecord{Kind: "event", Cursor: cursor, Event: event}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	digest := sha256.Sum256(file.Bytes())
+	if err = writeArchiveLine(&file, archiveFooter{Kind: "footer", Records: 2, EventBytes: header.EventBytes, SHA256: hex.EncodeToString(digest[:])}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = VerifyHistory(ctx, bytes.NewReader(file.Bytes())); err == nil {
+		t.Fatal("duplicate event ID passed a recomputed archive digest")
+	}
+}
