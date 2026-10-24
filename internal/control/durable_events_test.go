@@ -146,7 +146,12 @@ func TestFailedProducerAcknowledgementSaveRetainsReplayablePrefix(t *testing.T) 
 	if err := os.Mkdir(path, 0700); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.Remove(path); _ = os.Rename(backup, path) })
+	t.Cleanup(func() {
+		if _, err := os.Stat(backup); err == nil {
+			_ = os.Remove(path)
+			_ = os.Rename(backup, path)
+		}
+	})
 	if err := e.FlushEvents(ctx); err == nil {
 		t.Fatal("producer ACK unexpectedly persisted over a directory")
 	}

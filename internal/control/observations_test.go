@@ -36,7 +36,7 @@ func TestDurableObservationPagesAndStrictCursorQueries(t *testing.T) {
 	if second.Code != 200 || json.Unmarshal(second.Body.Bytes(), &page) != nil || len(page.Records) != 1 || page.More || page.NextCursor != 2 {
 		t.Fatalf("second page: %d %s", second.Code, second.Body.String())
 	}
-	for _, query := range []string{"", "?after_cursor=-1", "?after_cursor=0&limit=17", "?after_cursor=0&limit=0", "?after_cursor=0&after_cursor=1", "?after_cursor=0&other=1", "?after_cursor=0&limit=1&limit=2"} {
+	for _, query := range []string{"", "?after_cursor=-1", "?after_cursor=18446744073709551615", "?after_cursor=0&limit=17", "?after_cursor=0&limit=0", "?after_cursor=0&after_cursor=1", "?after_cursor=0&other=1", "?after_cursor=0&limit=1&limit=2"} {
 		w := httptest.NewRecorder()
 		e.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/v1/observations"+query, nil))
 		if w.Code != 400 {
