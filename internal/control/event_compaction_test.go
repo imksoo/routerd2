@@ -76,7 +76,7 @@ func TestBackgroundStorageMonitorCompactsCompletedWorkWithoutAnOperatorRequest(t
 	j := attachJournal(t, e, 0)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	if _, err := j.Append(ctx, protocolProbe("archived")); err != nil {
+	if _, err := j.Append(ctx, protocolProbe("a")); err != nil {
 		t.Fatal(err)
 	}
 	cp, err := j.ProducerCheckpoint(ctx, "fixture")
