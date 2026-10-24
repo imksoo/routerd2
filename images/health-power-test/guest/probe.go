@@ -112,6 +112,14 @@ func runProbe(phase string) error {
 	w.OriginalGeneration = expected.OriginalGeneration
 	w.OriginalDigest = expected.OriginalDigest
 	w.Observations = expected.Observations
+	currentCompleted, err := readCompleted(ctx)
+	if err != nil {
+		return err
+	}
+	if err = verifyCompleted(expected.Completed, currentCompleted); err != nil {
+		return err
+	}
+	w.Completed = currentCompleted
 	if phase == "registry" {
 		return recoverAndCut(ctx, client, manager, state, w)
 	}
@@ -221,6 +229,9 @@ func produce(ctx context.Context, client, manager *localapi.Client, w witness) e
 	w.Retiring = h.ProtocolEvents.Retiring
 	w.HealthWorker = true
 	w.HealthError = h.ProtocolEvents.LastError != ""
+	if err = captureCompleted(ctx, &w, false); err != nil {
+		return err
+	}
 	return emitAndWait(w, true)
 }
 
@@ -312,6 +323,9 @@ func recoverAndCut(ctx context.Context, client, manager *localapi.Client, state 
 	if err = requireOldHistoryRejected(ctx, client, w); err != nil {
 		return err
 	}
+	if err = captureCompleted(ctx, &w, true); err != nil {
+		return err
+	}
 	return emitAndWait(w, true)
 }
 
@@ -390,6 +404,9 @@ func finishRecovery(ctx context.Context, client, manager *localapi.Client, w wit
 		return err
 	}
 	w.Revision = 2
+	if err = captureCompleted(ctx, &w, true); err != nil {
+		return err
+	}
 	return emitAndWait(w, false)
 }
 

@@ -38,6 +38,28 @@ def require_uuid(value):
         raise RuntimeError("missing canonical kernel boot ID")
 
 
+def completed_map(items):
+    if not isinstance(items, list) or not 1 <= len(items) <= 128:
+        raise RuntimeError("empty or unbounded completed identity witness")
+    result = {}
+    for item in items:
+        if not isinstance(item, dict) or type(item.get("kind")) is not int or item["kind"] not in (0, 1):
+            raise RuntimeError("invalid completed output namespace")
+        for field, maximum in (("name", 128), ("key", 256)):
+            value = item.get(field)
+            if not isinstance(value, str) or not 1 <= len(value.encode("utf-8")) <= maximum:
+                raise RuntimeError("invalid completed output identity")
+        if type(item.get("position")) is not int or not 1 <= item["position"] <= 2**63-1:
+            raise RuntimeError("invalid completed output source position")
+        if not isinstance(item.get("sha256"), str) or not re.fullmatch(r"[0-9a-f]{64}", item["sha256"]):
+            raise RuntimeError("invalid completed output payload hash")
+        key = (item["kind"], item["name"], item["key"])
+        if key in result:
+            raise RuntimeError("duplicate completed output identity")
+        result[key] = (item["position"], item["sha256"])
+    return result
+
+
 def validate_witness(w, phase):
     if not isinstance(w, dict) or w.get("phase") != phase:
         raise RuntimeError("wrong power-cut witness phase")
@@ -77,6 +99,9 @@ def validate_witness(w, phase):
     pending = len(items) if phase == "produce" else 0
     if type(w.get("pending_count")) is not int or w["pending_count"] != pending:
         raise RuntimeError("pending local ACK does not match the cut point")
+    completed = completed_map(w.get("completed"))
+    if phase != "produce" and {key[0] for key in completed} != {0, 1}:
+        raise RuntimeError("both consumer and producer completed identities are required")
     return {item["id"]: (item["sha256"], item["cursor"]) for item in items}
 
 
@@ -127,6 +152,11 @@ def check_phases(phases):
             raise RuntimeError("first cut lost or changed accepted history")
     if maps[1] != maps[2]:
         raise RuntimeError("second cut lost, changed, duplicated or recursored acknowledged history")
+
+    for earlier, later in zip(witnesses, witnesses[1:]):
+        current = completed_map(later["completed"])
+        if any(current.get(key) != value for key, value in completed_map(earlier["completed"]).items()):
+            raise RuntimeError("power cut lost or changed compacted work identity")
 
 
 def build_guest(args, temporary, storage, common):

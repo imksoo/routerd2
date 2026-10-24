@@ -51,23 +51,24 @@ type observation struct {
 }
 
 type witness struct {
-	Phase              string        `json:"phase"`
-	BootID             string        `json:"boot_id"`
-	OriginBootID       string        `json:"origin_boot_id"`
-	PID                int           `json:"pid"`
-	ExecVerified       bool          `json:"exec_verified"`
-	Filesystem         string        `json:"filesystem"`
-	Revision           uint64        `json:"revision"`
-	PendingCount       int           `json:"pending_count"`
-	Registered         int           `json:"registered"`
-	Retiring           int           `json:"retiring"`
-	HealthWorker       bool          `json:"health_worker"`
-	HealthError        bool          `json:"health_error"`
-	OriginalSupervisor string        `json:"original_supervisor"`
-	OriginalEpoch      string        `json:"original_epoch"`
-	OriginalGeneration uint64        `json:"original_generation"`
-	OriginalDigest     string        `json:"original_digest"`
-	Observations       []observation `json:"observations"`
+	Phase              string                 `json:"phase"`
+	BootID             string                 `json:"boot_id"`
+	OriginBootID       string                 `json:"origin_boot_id"`
+	PID                int                    `json:"pid"`
+	ExecVerified       bool                   `json:"exec_verified"`
+	Filesystem         string                 `json:"filesystem"`
+	Revision           uint64                 `json:"revision"`
+	PendingCount       int                    `json:"pending_count"`
+	Registered         int                    `json:"registered"`
+	Retiring           int                    `json:"retiring"`
+	HealthWorker       bool                   `json:"health_worker"`
+	HealthError        bool                   `json:"health_error"`
+	OriginalSupervisor string                 `json:"original_supervisor"`
+	OriginalEpoch      string                 `json:"original_epoch"`
+	OriginalGeneration uint64                 `json:"original_generation"`
+	OriginalDigest     string                 `json:"original_digest"`
+	Observations       []observation          `json:"observations"`
+	Completed          []completedObservation `json:"completed"`
 }
 
 func main() {
