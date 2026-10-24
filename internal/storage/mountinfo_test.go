@@ -24,6 +24,38 @@ func TestMountInfoEscapesAndFutureFields(t *testing.T) {
 	}
 }
 
+func TestMountInfoNamespaceRoots(t *testing.T) {
+	// nsfs dentries are emitted as TYPE:[inode], rather than filesystem paths.
+	// They must not make an otherwise usable mount table unreadable, but also
+	// must never qualify as a whole ext4 state volume or hide child mounts.
+	for _, kind := range []string{"net", "mnt", "user", "pid", "uts", "ipc", "cgroup", "time"} {
+		line := fmt.Sprintf("2 1 0:4 %s:[4026532741] /run/netns/test rw - nsfs nsfs rw\n", kind)
+		entries, err := parseMountInfo([]byte(line))
+		if err != nil || len(entries) != 1 {
+			t.Fatalf("valid nsfs root rejected: %s: %v", kind, err)
+		}
+		if err := validateMounted(entries[0], 0, 4); !errors.Is(err, ErrConflict) {
+			t.Fatal("namespace mount qualified as state volume", err)
+		}
+		if _, err := selectMount(append([]mountInfo{rootMount()}, entries...), "/run", 252, 0); !errors.Is(err, ErrConflict) {
+			t.Fatal("namespace child mount escaped conflict detection", err)
+		}
+	}
+	for _, bad := range []string{
+		"2 1 0:4 net:[4026532741] /run/netns/test rw - ext4 /dev/vda rw\n",
+		"2 1 0:4 arbitrary /run/netns/test rw - nsfs nsfs rw\n",
+		"2 1 0:4 net:[0] /run/netns/test rw - nsfs nsfs rw\n",
+		"2 1 0:4 net:[-1] /run/netns/test rw - nsfs nsfs rw\n",
+		"2 1 0:4 net:[abc] /run/netns/test rw - nsfs nsfs rw\n",
+		"2 1 0:4 net:[42]/../x /run/netns/test rw - nsfs nsfs rw\n",
+		"2 1 0:4 / net:[42] rw - nsfs nsfs rw\n",
+	} {
+		if _, err := parseMountInfo([]byte(bad)); err == nil {
+			t.Fatalf("malformed namespace root or target accepted: %s", bad)
+		}
+	}
+}
+
 func TestMountInfoRejectsMalformedAndBoundedInput(t *testing.T) {
 	good := "2 1 252:0 / /state rw,nosuid,nodev - ext4 /dev/vda rw\n"
 	cases := map[string]string{
