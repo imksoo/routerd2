@@ -3,7 +3,10 @@ package eventrule
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -166,4 +169,51 @@ func TestInvalidRulesAndExpiredInputsNeverEmit(t *testing.T) {
 	if r, err := p.Advance(nil, event, event.ExpiresAt.Add(time.Nanosecond)); err != nil || len(r.Emissions) != 0 {
 		t.Fatal("expired input emitted", r, err)
 	}
+}
+
+func TestDueTimerBatchesAreBoundedAndStable(t *testing.T) {
+	p := program(t, api.EventRulePatternSpec{Operator: "debounce", Topic: "routerd.a", Quiet: "1s", CorrelateBy: "attributes.interface"})
+	var state json.RawMessage
+	for i := 0; i < 100; i++ {
+		r, err := p.Advance(state, input(fmt.Sprint(i), "routerd.a", fmt.Sprintf("wan-%03d", i), 0), epoch)
+		if err != nil {
+			t.Fatal(err)
+		}
+		state = r.State
+	}
+	first, err := p.Tick(state, epoch.Add(time.Second))
+	if err != nil || len(first.Emissions) != 64 {
+		t.Fatal("timer batch is unbounded or lost", len(first.Emissions), err)
+	}
+	second, err := p.Tick(first.State, epoch.Add(time.Second))
+	if err != nil || len(second.Emissions) != 36 {
+		t.Fatal("remaining timers lost", len(second.Emissions), err)
+	}
+	seen := map[string]bool{}
+	for _, e := range append(first.Emissions, second.Emissions...) {
+		if seen[e.ID] {
+			t.Fatal("duplicate timer identity", e.ID)
+		}
+		seen[e.ID] = true
+	}
+}
+
+func TestStateBudgetFailsBeforeReturningAnyPartialEmission(t *testing.T) {
+	p := program(t, api.EventRulePatternSpec{Operator: "count", Topic: "routerd.a", Threshold: 2, CorrelateBy: "attributes.interface"})
+	var state json.RawMessage
+	for i := 0; i < 2000; i++ {
+		before := bytes.Clone(state)
+		r, err := p.Advance(state, input(fmt.Sprint(i), "routerd.a", strings.Repeat("x", 80)+fmt.Sprint(i), 0), epoch)
+		if errors.Is(err, ErrCapacity) {
+			if len(r.State) != 0 || len(r.Emissions) != 0 || !bytes.Equal(before, state) {
+				t.Fatal("capacity returned partial output or mutated checkpoint")
+			}
+			return
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		state = r.State
+	}
+	t.Fatal("state grew without its checkpoint budget")
 }
