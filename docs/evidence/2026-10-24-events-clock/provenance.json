@@ -6,7 +6,8 @@
   "normalizations": [
     "workspace path",
     "ephemeral UUIDs in test logs",
-    "public Alpine kernel certificate identifier (scanner false positive)"
+    "public Alpine kernel certificate identifier (scanner false positive)",
+    "trailing whitespace"
   ],
   "original_sha256": {
     "make-check-build.log": "530a566ba3458b1984c26a93077875d6b71257dad852df9f98545129e5100b81",
