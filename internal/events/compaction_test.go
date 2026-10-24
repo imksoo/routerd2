@@ -313,3 +313,109 @@ func TestCompactionConcurrencyBoundsAndClosedStore(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestCompactionSQLiteFullRollsBackPayloadAndCounters(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(Options{Directory: filepath.Join(t.TempDir(), "events")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	p, err := s.ProducerCheckpoint(ctx, "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.ProducerTransition(ctx, "p", p, p.State, []Job{{Key: "a", Payload: json.RawMessage(`{"work":true}`)}}); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.ProducerComplete(ctx, "p", "a"); err != nil {
+		t.Fatal(err)
+	}
+	// Force an actual SQLite page allocation failure inside the same write
+	// transaction, rather than returning a synthetic error from the API.
+	if _, err = s.db.Exec(`CREATE TABLE compaction_space(value BLOB);CREATE TRIGGER full_compaction BEFORE INSERT ON completed_jobs BEGIN INSERT INTO compaction_space VALUES(zeroblob(1048576)); END`); err != nil {
+		t.Fatal(err)
+	}
+	var pages int64
+	if err = s.db.QueryRow(`PRAGMA page_count`).Scan(&pages); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.db.Exec(fmt.Sprintf(`PRAGMA max_page_count=%d`, pages)); err != nil {
+		t.Fatal(err)
+	}
+	before, err := s.Capacity(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, err := s.CompactCompleted(ctx, 16)
+	var code interface{ Code() int }
+	if n != 0 || !errors.As(err, &code) || code.Code()&255 != 13 {
+		t.Fatal("expected actual SQLITE_FULL", n, err)
+	}
+	after, err := s.Capacity(ctx)
+	if err != nil || after.Jobs != before.Jobs || after.Tombstones != before.Tombstones {
+		t.Fatal("full transaction lost rows or identity", after, err)
+	}
+	if _, err = s.db.Exec(`PRAGMA max_page_count=2147483646;DROP TRIGGER full_compaction`); err != nil {
+		t.Fatal(err)
+	}
+	if n, err = s.CompactCompleted(ctx, 16); err != nil || n != 1 {
+		t.Fatal("full recovery failed", n, err)
+	}
+}
+
+func TestCompactionSharesBatchesAndAccountsUTF8IdentityBytes(t *testing.T) {
+	ctx := context.Background()
+	opts := Options{Directory: filepath.Join(t.TempDir(), "events")}
+	s, err := Open(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { s.Close() }()
+	if _, err = s.Cursor(ctx, "消費"); err != nil {
+		t.Fatal(err)
+	}
+	r, err := s.Append(ctx, testEvent("event"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobs := []Job{{Key: "一", Payload: json.RawMessage(`{}`)}, {Key: "二", Payload: json.RawMessage(`{}`)}, {Key: "三", Payload: json.RawMessage(`{}`)}}
+	if err = s.Schedule(ctx, "消費", 0, r.Cursor, jobs); err != nil {
+		t.Fatal(err)
+	}
+	p, err := s.ProducerCheckpoint(ctx, "生成")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.ProducerTransition(ctx, "生成", p, p.State, jobs); err != nil {
+		t.Fatal(err)
+	}
+	for _, j := range jobs {
+		if err = s.Complete(ctx, "消費", j.Key); err != nil {
+			t.Fatal(err)
+		}
+		if err = s.ProducerComplete(ctx, "生成", j.Key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n, err := s.CompactCompleted(ctx, 4); err != nil || n != 4 {
+		t.Fatal(n, err)
+	}
+	for _, kind := range []int{0, 1} {
+		var count int
+		if err = s.db.QueryRow(`SELECT count(*) FROM completed_jobs WHERE kind=?`, kind).Scan(&count); err != nil || count != 2 {
+			t.Fatal("one namespace starved", kind, count, err)
+		}
+	}
+	c, err := s.Capacity(ctx)
+	if err != nil || c.Tombstones.Bytes != 200 {
+		t.Fatal("UTF8 bytes counted as characters", c, err)
+	}
+	if err = s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(opts)
+	if err != nil {
+		t.Fatal("reopen accounting", err)
+	}
+}
