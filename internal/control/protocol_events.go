@@ -9,12 +9,76 @@ import (
 	"strings"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/events"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/protocolevents"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
+
+const protocolRetirementError = "retired-health-relays"
+
+func healthRelayNames(source config.Document) []string {
+	names := []string{}
+	for _, r := range source.Resources {
+		if r.Service != nil && r.Service.Health != nil {
+			names = append(names, r.Service.Name)
+		}
+	}
+	return names
+}
+
+func (e *Engine) registerProtocolRelaysLocked(ctx context.Context, source config.Document) error {
+	names := healthRelayNames(source)
+	// Removing health never needs a new registry write before withdrawal.
+	// Recovery will independently load retained registrations after apply.
+	if len(names) == 0 {
+		return nil
+	}
+	if e.journal == nil {
+		return errors.New("health relays require the durable journal")
+	}
+	if e.protocolRelays == nil {
+		e.protocolRelays = protocolevents.NewRetirement(e.journal, e.store.Dir)
+	}
+	return e.protocolRelays.Register(ctx, names)
+}
+
+func (e *Engine) declareProtocolRelaysLocked() {
+	if e.protocolRelays == nil {
+		return
+	}
+	e.protocolRelays.Declare(healthRelayNames(e.state.Config))
+	e.updateRetirementHealthLocked(nil)
+}
+
+func (e *Engine) updateRetirementHealthLocked(err error) {
+	if err == nil && e.protocolRelays != nil && e.protocolRelays.Status().Retiring > 0 {
+		err = fmt.Errorf("%d retired health relays awaiting durable recovery", e.protocolRelays.Status().Retiring)
+	}
+	e.setProtocolErrorLocked(protocolRetirementError, err)
+}
+
+func (e *Engine) ProcessRetiredProtocolEvents(ctx context.Context) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.journal == nil || e.runtime == nil {
+		return nil
+	}
+	if e.protocolRelays == nil {
+		e.protocolRelays = protocolevents.NewRetirement(e.journal, e.store.Dir)
+	}
+	err := e.protocolRelays.Recover(ctx, healthRelayNames(e.state.Config), func(ctx context.Context, names []string, drain func(map[string]bool) error) error {
+		allowed, err := e.runtime.RetiredHealthRelays(ctx, names)
+		if err != nil {
+			return err
+		}
+		return drain(allowed)
+	})
+	e.updateRetirementHealthLocked(err)
+	return err
+}
 
 func validateProtocolPage(name string, page []events.Event) error {
 	if len(page) == 0 || len(page) > protocolevents.PageSize {
@@ -81,7 +145,7 @@ func (e *Engine) pruneProtocolErrorsLocked() {
 		}
 	}
 	for name := range e.protocolErrors {
-		if !declared[name] {
+		if name != protocolRetirementError && !declared[name] {
 			e.setProtocolErrorLocked(name, nil)
 		}
 	}

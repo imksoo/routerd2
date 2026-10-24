@@ -226,6 +226,12 @@ func Serve(ctx context.Context, dir, stateDir, bootstrap string, ready func()) e
 			if err != nil && monitorCtx.Err() == nil {
 				slog.Error("durable configuration event delivery failed", "error", err)
 			}
+			recoveryCtx, cancelRecovery := context.WithTimeout(monitorCtx, 2*time.Second)
+			recoveryErr := e.ProcessRetiredProtocolEvents(recoveryCtx)
+			cancelRecovery()
+			if recoveryErr != nil && monitorCtx.Err() == nil {
+				slog.Error("retired protocol history recovery failed", "error", recoveryErr)
+			}
 			derivedCtx, cancelDerived := context.WithTimeout(monitorCtx, 2*time.Second)
 			derivedErr := e.ProcessDerivedEvents(derivedCtx)
 			cancelDerived()

@@ -14,6 +14,7 @@ import (
 	"github.com/imksoo/routerd2/internal/derivedcontroller"
 	"github.com/imksoo/routerd2/internal/eventcontroller"
 	"github.com/imksoo/routerd2/internal/localapi"
+	"github.com/imksoo/routerd2/internal/protocolevents"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
 )
 
@@ -43,6 +44,7 @@ type Health struct {
 }
 
 type ProtocolHealth struct {
+	protocolevents.RetirementStatus
 	LastError string `json:"last_error,omitempty"`
 }
 
@@ -93,6 +95,9 @@ func (e *Engine) healthForState(s State) Health {
 	h.Derived.LastError = s.DerivedError
 	h.ProtocolEvents.LastError = s.ProtocolEventError
 	e.mu.Lock()
+	if e.protocolRelays != nil {
+		h.ProtocolEvents.RetirementStatus = e.protocolRelays.Status()
+	}
 	if e.rules != nil {
 		h.EventRules.Status = e.rules.Status()
 		if h.EventRules.Revision != s.Revision {

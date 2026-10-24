@@ -9,6 +9,42 @@ import (
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
 
+// RetiredHealthRelays observes stopped ownership without renewing any fact.
+// The control caller holds its source-authority lock through recovery. Full
+// source absence prevents a conditional reconcile from starting these health
+// workers; the queue's exclusive store lock remains independently mandatory.
+// Historical disk IO must not hold the runtime mutex or delay current facts.
+func (r *Runtime) RetiredHealthRelays(ctx context.Context, names []string) (map[string]bool, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	status, err := r.manager.Status(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("observe retired health workers: %w", err)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.configured || status.Stopping {
+		return nil, ErrStale
+	}
+	blocked := map[string]bool{}
+	for _, service := range r.current.Services {
+		if service.Health != nil {
+			blocked[service.Name] = true
+		}
+	}
+	for _, module := range status.Modules {
+		if module.Role == "health" {
+			blocked[module.Name] = true
+		}
+	}
+	allowed := map[string]bool{}
+	for _, name := range names {
+		allowed[name] = !blocked[name] && !blocked["service."+name]
+	}
+	return allowed, nil
+}
+
 // WithProtocolProducer fences historical delivery to a currently registered,
 // supervisor-ready worker. Its observations may predate this producer, but
 // they neither register a producer nor renew a current protocol fact. The

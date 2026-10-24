@@ -21,6 +21,7 @@ import (
 	"github.com/imksoo/routerd2/internal/events"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/network"
+	"github.com/imksoo/routerd2/internal/protocolevents"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
 )
 
@@ -128,6 +129,7 @@ type Engine struct {
 	rules          *eventcontroller.Controller
 	derived        *derivedcontroller.Controller
 	protocolErrors map[string]string
+	protocolRelays *protocolevents.Retirement
 }
 
 func New(store *config.Store, current config.Committed, n Network) *Engine {
@@ -157,6 +159,9 @@ func (e *Engine) State() State {
 }
 func (e *Engine) apply(ctx context.Context, revision uint64, doc config.Document) error {
 	if e.runtime != nil {
+		if err := e.registerProtocolRelaysLocked(ctx, doc); err != nil {
+			return err
+		}
 		return e.runtime.ApplyConfig(ctx, revision, doc)
 	}
 	plan, err := config.Compile(doc)
@@ -371,6 +376,7 @@ func (e *Engine) restore(previous config.Committed, id string, cause error) erro
 	if persistErr != nil {
 		cause = errors.Join(cause, fmt.Errorf("configuration rollback persistence failed: %w", persistErr))
 	}
+	e.declareProtocolRelaysLocked()
 	e.state.LastError = cause.Error()
 	e.record("rejected", id)
 	return cause
