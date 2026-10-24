@@ -81,6 +81,7 @@ type bfdPeerGate struct {
 	needsWithdrawal                       bool
 	withdrawalVersion                     uint64
 	operation                             string
+	operationStarted                      int64
 	operationDeadline                     int64
 	operationCancel                       context.CancelFunc
 	acknowledged, pendingProof            bgpconfig.BFDAcknowledgement
@@ -293,6 +294,34 @@ func (g *bfdPeerGate) healthy(clock bfd.Clock, control bool) bool {
 type bfdAdminResult struct {
 	address, operation string
 	err                error
+	received           bfd.Clock
+}
+
+func (g *bfdPeerGate) completeAdmin(result bfdAdminResult, clock bfd.Clock) error {
+	if g.address != result.address || g.operation != result.operation {
+		return errors.New("BGP BFD admin acknowledgment lost its operation identity")
+	}
+	if result.err != nil {
+		return fmt.Errorf("BGP BFD %s acknowledgment for %s: %w", result.operation, result.address, result.err)
+	}
+	// Judge the observed ACK, not how long its buffered delivery waited for
+	// this consumer to run. The receive deadline for recovery still uses now.
+	received := result.received.BoottimeNanoseconds
+	if result.received.BootID != clock.BootID || received <= 0 || received < g.operationStarted || received > clock.BoottimeNanoseconds || received >= g.operationDeadline {
+		return fmt.Errorf("BGP BFD %s acknowledgment outside its deadline for %s (received=%d deadline=%d processing=%d); worker process exit is required", g.operation, result.address, received, g.operationDeadline, clock.BoottimeNanoseconds)
+	}
+	g.operationCancel()
+	g.operationCancel = nil
+	g.operation, g.operationStarted, g.operationDeadline = "", 0, 0
+	g.enabled = result.operation == "enable"
+	if g.enabled {
+		g.acknowledged = g.pendingProof
+	}
+	if result.operation == "disable" {
+		g.forceReset = false
+		g.minReceive = max(g.minReceive, clock.BoottimeNanoseconds)
+	}
+	return nil
 }
 
 // GoBGP Enable/Disable only enqueue an adminStateCh message; a full channel can
@@ -348,16 +377,17 @@ func acknowledgedAdmin(ctx context.Context, server peerAdminAPI, address, operat
 	}
 }
 
-func startBFDAdmin(ctx context.Context, server peerAdminAPI, g *bfdPeerGate, operation string, now int64, results chan<- bfdAdminResult) {
+func startBFDAdmin(ctx context.Context, server peerAdminAPI, g *bfdPeerGate, operation string, now int64, results chan<- bfdAdminResult, readClock func() (bfd.Clock, error)) {
 	call, cancel := context.WithTimeout(ctx, bfdAdminTimeout)
-	g.operation, g.operationDeadline, g.operationCancel = operation, now+int64(bfdAdminTimeout), cancel
+	g.operation, g.operationStarted, g.operationDeadline, g.operationCancel = operation, now, now+int64(bfdAdminTimeout), cancel
 	if operation == "enable" {
 		g.pendingProof = bgpconfig.BFDAcknowledgement{ConfigDigest: g.grant.ConfigDigest, Generation: g.grant.Generation, ProducerEpoch: g.grant.ProducerEpoch, DownTransitions: g.grant.DownTransitions}
 	}
 	go func() {
 		err := acknowledgedAdmin(call, server, g.address, operation)
+		received, clockErr := readClock()
 		cancel()
-		results <- bfdAdminResult{g.address, operation, err}
+		results <- bfdAdminResult{address: g.address, operation: operation, err: errors.Join(err, clockErr), received: received}
 	}()
 }
 
@@ -386,7 +416,7 @@ func runBFDGate(ctx context.Context, cfg Config, input bfdInput, server peerAdmi
 	bootID, previousNow := clock.BootID, clock.BoottimeNanoseconds
 	for _, address := range order {
 		if !peers[address].withheld {
-			startBFDAdmin(ctx, server, peers[address], "initial", previousNow, results)
+			startBFDAdmin(ctx, server, peers[address], "initial", previousNow, results, readClock)
 		}
 	}
 	var controlDeadline, receivedAt int64
@@ -394,9 +424,26 @@ func runBFDGate(ctx context.Context, cfg Config, input bfdInput, server peerAdmi
 	available := false
 	var incoming *BFDUpdate
 	var completed *bfdAdminResult
+	completions := make([]bfdAdminResult, 0, len(peers))
 	for {
 		if ctx.Err() != nil {
 			return nil
+		}
+		// Ready ACKs take precedence over control-update traffic and the timeout
+		// check. There is at most one outstanding operation per bound peer.
+		completions = completions[:0]
+		if completed != nil {
+			completions = append(completions, *completed)
+			completed = nil
+		}
+	drain:
+		for len(completions) < len(peers) {
+			select {
+			case result := <-results:
+				completions = append(completions, result)
+			default:
+				break drain
+			}
 		}
 		clock, err = readClock()
 		if err != nil {
@@ -407,6 +454,15 @@ func runBFDGate(ctx context.Context, cfg Config, input bfdInput, server peerAdmi
 			return errors.New("BGP BFD clock identity changed")
 		}
 		previousNow = now
+		for _, result := range completions {
+			g := peers[result.address]
+			if g == nil {
+				return errors.New("BGP BFD admin acknowledgment lost its peer")
+			}
+			if err := g.completeAdmin(result, clock); err != nil {
+				return err
+			}
+		}
 		if incoming != nil {
 			update := *incoming
 			incoming = nil
@@ -437,32 +493,6 @@ func runBFDGate(ctx context.Context, cfg Config, input bfdInput, server peerAdmi
 				}
 			}
 		}
-		if completed != nil {
-			result := *completed
-			completed = nil
-			g := peers[result.address]
-			if g == nil || g.operation != result.operation {
-				return errors.New("BGP BFD admin acknowledgment lost its operation identity")
-			}
-			if now >= g.operationDeadline {
-				return fmt.Errorf("BGP BFD %s acknowledgment arrived after its deadline for %s; worker process exit is required", g.operation, result.address)
-			}
-			g.operationCancel()
-			g.operationCancel = nil
-			if result.err != nil {
-				return fmt.Errorf("BGP BFD %s acknowledgment for %s: %w", result.operation, result.address, result.err)
-			}
-			g.operation, g.operationDeadline = "", 0
-			g.enabled = result.operation == "enable"
-			if g.enabled {
-				g.acknowledged = g.pendingProof
-			}
-			if result.operation == "disable" {
-				g.forceReset = false
-				// Recovery needs a packet newer than the completed TCP close.
-				g.minReceive = max(g.minReceive, now)
-			}
-		}
 		control := available && now < controlDeadline
 		next := now + int64(10*time.Millisecond)
 		if controlDeadline > now {
@@ -483,14 +513,14 @@ func runBFDGate(ctx context.Context, cfg Config, input bfdInput, server peerAdmi
 				case g.enabled && (!healthy || g.forceReset):
 					g.needsWithdrawal = true
 					g.withdrawalVersion = 0
-					startBFDAdmin(ctx, server, g, "disable", now, results)
+					startBFDAdmin(ctx, server, g, "disable", now, results, readClock)
 				case !g.enabled && g.forceReset:
 					g.forceReset = false
 					g.minReceive = max(g.minReceive, now)
 				case !g.enabled && healthy && (!g.needsWithdrawal || view.withdrawalAccepted(address, g.withdrawalVersion)):
 					g.needsWithdrawal = false
 					g.withdrawalVersion = 0
-					startBFDAdmin(ctx, server, g, "enable", now, results)
+					startBFDAdmin(ctx, server, g, "enable", now, results, readClock)
 				}
 			}
 			if g.operationDeadline > now {
