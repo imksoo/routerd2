@@ -12,7 +12,10 @@ import (
 	"github.com/imksoo/routerd/pkg/daemonapi"
 	old "github.com/imksoo/routerd/pkg/healthcheck"
 	"github.com/imksoo/routerd2/internal/events"
+	"github.com/imksoo/routerd2/internal/protocol/health"
 	"github.com/imksoo/routerd2/internal/protocolevents"
+	"github.com/imksoo/routerd2/internal/resourceprogram"
+	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
 
 func protocolProbe(id string) events.Event {
@@ -35,6 +38,29 @@ func TestProtocolDeliveryFailureIsVisibleAndDoesNotClearAnotherProducer(t *testi
 	e.setProtocolErrorLocked("service.lan", nil)
 	if !e.State().Healthy {
 		t.Fatal("completed recovery left control unhealthy")
+	}
+}
+
+func TestProtocolFailureBlocksConfirmationButNotRollbackRemovingItsProducer(t *testing.T) {
+	ctx := context.Background()
+	e, _ := fixture(t)
+	r := request(e, "health-trial")
+	r.Config.Resources = []resourceprogram.Resource{{ID: "wan", Service: &serviceconfig.Service{Name: "wan", Health: &health.Config{Interface: "wan0", Target: "192.0.2.1"}}}}
+	r.ConfirmTimeoutSeconds = 60
+	s, err := e.Commit(ctx, r)
+	if err != nil || s.Confirmation == nil {
+		t.Fatal(s, err)
+	}
+	e.setProtocolErrorLocked("service.wan", errors.New("injected protocol delivery failure"))
+	if _, err = e.Confirm(ConfirmRequest{Revision: s.Revision, RequestID: r.RequestID}); err == nil {
+		t.Fatal("unhealthy delivery was confirmed")
+	}
+	if err = e.Expire(ctx, s.Confirmation.Deadline.Add(time.Second)); err != nil {
+		t.Fatal("delivery failure blocked rollback", err)
+	}
+	s = e.State()
+	if s.Confirmation != nil || len(s.Config.Resources) != 0 || !s.Healthy || s.ProtocolEventError != "" {
+		t.Fatal("removed producer's failure survived rollback", s)
 	}
 }
 
