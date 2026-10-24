@@ -26,7 +26,7 @@ type Store struct {
 }
 
 const applicationID = 0x52443245 // RD2E; separate from every other product store
-const schemaVersion = 5          // discarded unreleased prototype formats are not imported
+const schemaVersion = 6          // discarded unreleased prototype formats are not imported
 
 const schema = `
 CREATE TABLE events(cursor INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL UNIQUE, body BLOB NOT NULL);
@@ -42,7 +42,10 @@ CREATE INDEX completed_work ON outbox(done,consumer,key);
 CREATE INDEX completed_producer_work ON producer_outbox(done,producer,key);
 CREATE TABLE completed_jobs(kind INTEGER NOT NULL CHECK(kind IN(0,1)),name TEXT NOT NULL,key TEXT NOT NULL,position INTEGER NOT NULL CHECK(position>0),digest BLOB NOT NULL CHECK(length(digest)=32),PRIMARY KEY(kind,name,key));
 INSERT INTO usage VALUES('dedup',0,0);
-PRAGMA user_version=5;
+CREATE TABLE event_archive(cursor INTEGER PRIMARY KEY REFERENCES events(cursor),body BLOB NOT NULL,original_bytes INTEGER NOT NULL CHECK(original_bytes BETWEEN 1 AND 65536),digest BLOB NOT NULL CHECK(length(digest)=32));
+CREATE INDEX hot_events ON events(cursor) WHERE length(body)>0;
+INSERT INTO usage VALUES('event_archive',0,0),('history',0,0);
+PRAGMA user_version=6;
 `
 
 func Open(options Options) (*Store, error) { return openStore(options, false) }
@@ -78,6 +81,28 @@ func openStore(options Options, existingOnly bool) (_ *Store, result error) {
 	}
 	if options.MaxTombstones < 1 || options.MaxTombstones > 10000000 || options.MaxTombstoneBytes < 1 || options.MaxTombstoneBytes > 1<<30 {
 		return nil, errors.New("invalid completed work identity capacity")
+	}
+	if options.MaxArchivedEvents == 0 {
+		options.MaxArchivedEvents = 1000000
+	}
+	if options.MaxArchivedEventBytes == 0 {
+		options.MaxArchivedEventBytes = 256 << 20
+	}
+	if options.MaxHistoryEvents == 0 {
+		options.MaxHistoryEvents = 1000000
+	}
+	if options.MaxHistoryBytes == 0 {
+		options.MaxHistoryBytes = 1 << 30
+	}
+	for _, n := range []int64{options.MaxArchivedEvents, options.MaxHistoryEvents} {
+		if n < 1 || n > 1000000 {
+			return nil, errors.New("invalid event archive/history row capacity")
+		}
+	}
+	for _, n := range []int64{options.MaxArchivedEventBytes, options.MaxHistoryBytes} {
+		if n < 1 || n > 1<<30 {
+			return nil, errors.New("invalid event archive/history byte capacity")
+		}
 	}
 	if options.MaxEvents < 1 || options.MaxEvents > 1000000 || options.MaxJobs < 1 || options.MaxJobs > 1000000 || options.MaxConsumers < 1 || options.MaxConsumers > 100000 || options.MaxEventBytes < 1 || options.MaxEventBytes > 1<<30 || options.MaxJobBytes < 1 || options.MaxJobBytes > 1<<30 {
 		return nil, errors.New("invalid durable event store limits")
@@ -225,7 +250,9 @@ func openStore(options Options, existingOnly bool) (_ *Store, result error) {
 		return nil, fmt.Errorf("event database integrity: %s %w", integrity, err)
 	}
 	for _, entry := range []struct{ kind, query string }{
-		{"events", `SELECT count(*),coalesce(sum(length(body)),0) FROM events`},
+		{"events", `SELECT count(*),coalesce(sum(length(body)),0) FROM events WHERE length(body)>0`},
+		{"event_archive", `SELECT count(*),coalesce(sum(length(body)+48),0) FROM event_archive`},
+		{"history", `SELECT count(*),coalesce(sum(CASE WHEN length(e.body)>0 THEN length(e.body) ELSE a.original_bytes END),0) FROM events e LEFT JOIN event_archive a ON a.cursor=e.cursor`},
 		{"outbox", `SELECT count(*),coalesce(sum(size),0) FROM (SELECT length(payload) AS size FROM outbox UNION ALL SELECT length(payload) FROM producer_outbox)`},
 		{"dedup", `SELECT count(*),coalesce(sum(41+length(CAST(name AS BLOB))+length(CAST(key AS BLOB))),0) FROM completed_jobs`},
 		{"consumer_state", `SELECT count(*),coalesce(sum(size),0) FROM (SELECT length(body) AS size FROM consumers UNION ALL SELECT length(body) FROM producers)`},
@@ -240,6 +267,10 @@ func openStore(options Options, existingOnly bool) (_ *Store, result error) {
 		if rows != storedRows || bytes != storedBytes {
 			return nil, errors.New("event store usage counters do not match durable rows")
 		}
+	}
+	var brokenArchive int
+	if err = s.db.QueryRow(`SELECT count(*) FROM events e LEFT JOIN event_archive a ON a.cursor=e.cursor WHERE (length(e.body)=0 AND a.cursor IS NULL) OR (length(e.body)>0 AND a.cursor IS NOT NULL)`).Scan(&brokenArchive); err != nil || brokenArchive != 0 {
+		return nil, errors.Join(errors.New("invalid event archive linkage"), err)
 	}
 	var invalid int
 	if err = s.db.QueryRow(`SELECT count(*) FROM completed_jobs d WHERE (kind=0 AND (NOT EXISTS(SELECT 1 FROM consumers c WHERE c.name=d.name) OR EXISTS(SELECT 1 FROM outbox o WHERE o.consumer=d.name AND o.key=d.key))) OR (kind=1 AND (NOT EXISTS(SELECT 1 FROM producers p WHERE p.name=d.name) OR EXISTS(SELECT 1 FROM producer_outbox o WHERE o.producer=d.name AND o.key=d.key)))`).Scan(&invalid); err != nil || invalid != 0 {

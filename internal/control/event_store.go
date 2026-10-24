@@ -16,6 +16,7 @@ import (
 type EventStoreHealth struct {
 	Capacity        *events.Capacity `json:"capacity,omitempty"`
 	ObservedAt      time.Time        `json:"observed_at,omitempty"`
+	ArchiveError    string           `json:"archive_error,omitempty"`
 	CompactionError string           `json:"compaction_error,omitempty"`
 	LastError       string           `json:"last_error,omitempty"`
 }
@@ -38,7 +39,7 @@ func (e *Engine) RefreshEventStore(ctx context.Context) error {
 	if err != nil {
 		e.eventStore.LastError = stateText(err.Error(), 1024)
 	} else {
-		e.eventStore = EventStoreHealth{Capacity: &capacity, ObservedAt: time.Now().UTC(), CompactionError: e.eventStore.CompactionError}
+		e.eventStore = EventStoreHealth{Capacity: &capacity, ObservedAt: time.Now().UTC(), CompactionError: e.eventStore.CompactionError, ArchiveError: e.eventStore.ArchiveError}
 		if capacity.Pressure == "exhausted" {
 			e.eventStore.LastError = "event store capacity exhausted: " + strings.Join(capacity.Reasons, ",")
 		}
@@ -48,6 +49,13 @@ func (e *Engine) RefreshEventStore(ctx context.Context) error {
 			e.eventStore.LastError = e.eventStore.CompactionError
 		} else if e.eventStore.LastError != e.eventStore.CompactionError {
 			e.eventStore.LastError = stateText(e.eventStore.LastError+"; "+e.eventStore.CompactionError, 1024)
+		}
+	}
+	if e.eventStore.ArchiveError != "" {
+		if e.eventStore.LastError == "" {
+			e.eventStore.LastError = e.eventStore.ArchiveError
+		} else if e.eventStore.LastError != e.eventStore.ArchiveError {
+			e.eventStore.LastError = stateText(e.eventStore.LastError+"; "+e.eventStore.ArchiveError, 1024)
 		}
 	}
 	e.state.EventStoreError = e.eventStore.LastError
@@ -65,15 +73,20 @@ func (e *Engine) MaintainEventStore(ctx context.Context) error {
 		return nil
 	}
 	_, compactErr := journal.CompactCompleted(ctx, 64)
+	_, archiveErr := journal.ArchiveEvents(ctx, 16)
 	e.mu.Lock()
 	if e.journal == journal {
 		e.eventStore.CompactionError = ""
+		e.eventStore.ArchiveError = ""
+		if archiveErr != nil {
+			e.eventStore.ArchiveError = stateText("event archive: "+archiveErr.Error(), 1024)
+		}
 		if compactErr != nil {
 			e.eventStore.CompactionError = stateText("completed work compaction: "+compactErr.Error(), 1024)
 		}
 	}
 	e.mu.Unlock()
-	return errors.Join(compactErr, e.RefreshEventStore(ctx))
+	return errors.Join(compactErr, archiveErr, e.RefreshEventStore(ctx))
 }
 
 func (e *Engine) eventStoreRoutes(mux *http.ServeMux) {

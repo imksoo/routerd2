@@ -44,7 +44,7 @@ type archiveFooter struct {
 }
 
 func (c Capacity) HistoryHeader() ArchiveHeader {
-	return ArchiveHeader{Kind: "header", Format: "routerd-event-history", Version: 1, FirstCursor: c.FirstCursor, TipCursor: c.TipCursor, Records: c.Events.Rows, EventBytes: c.Events.Bytes}
+	return ArchiveHeader{Kind: "header", Format: "routerd-event-history", Version: 1, FirstCursor: c.FirstCursor, TipCursor: c.TipCursor, Records: c.History.Rows, EventBytes: c.History.Bytes}
 }
 
 func validHeader(h ArchiveHeader) bool {

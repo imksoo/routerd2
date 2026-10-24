@@ -26,9 +26,14 @@ func (s *Store) Append(ctx context.Context, e Event) (Record, error) {
 	}
 	defer tx.Rollback()
 	var cursor uint64
-	var previous []byte
-	err = tx.QueryRowContext(ctx, `SELECT cursor,body FROM events WHERE event_id=?`, e.ID).Scan(&cursor, &previous)
+	var previous, packed, digest []byte
+	var originalBytes int64
+	err = tx.QueryRowContext(ctx, `SELECT e.cursor,e.body,coalesce(a.body,X''),coalesce(a.original_bytes,0),coalesce(a.digest,X'') FROM events e LEFT JOIN event_archive a ON a.cursor=e.cursor WHERE e.event_id=?`, e.ID).Scan(&cursor, &previous, &packed, &originalBytes, &digest)
 	if err == nil {
+		previous, err = storedBody(previous, packed, originalBytes, digest)
+		if err != nil {
+			return Record{}, err
+		}
 		if !bytes.Equal(body, previous) {
 			return Record{}, ErrConflict
 		}
@@ -38,6 +43,9 @@ func (s *Store) Append(ctx context.Context, e Event) (Record, error) {
 		return Record{}, err
 	}
 	if err = s.reserve(ctx, tx, "events", int64(len(body)), s.options.MaxEvents, s.options.MaxEventBytes); err != nil {
+		return Record{}, err
+	}
+	if err = s.reserve(ctx, tx, "history", int64(len(body)), s.options.MaxHistoryEvents, s.options.MaxHistoryBytes); err != nil {
 		return Record{}, err
 	}
 	result, err := tx.ExecContext(ctx, `INSERT INTO events(event_id,body) VALUES(?,?)`, e.ID, body)
@@ -103,7 +111,7 @@ func (s *Store) List(ctx context.Context, after uint64, limit int) ([]Record, er
 	if after > tip {
 		return nil, ErrConflict
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT cursor,event_id,body FROM events WHERE cursor>? ORDER BY cursor LIMIT ?`, after, limit)
+	rows, err := s.db.QueryContext(ctx, `SELECT e.cursor,e.event_id,e.body,coalesce(a.body,X''),coalesce(a.original_bytes,0),coalesce(a.digest,X'') FROM events e LEFT JOIN event_archive a ON a.cursor=e.cursor WHERE e.cursor>? ORDER BY e.cursor LIMIT ?`, after, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -112,8 +120,13 @@ func (s *Store) List(ctx context.Context, after uint64, limit int) ([]Record, er
 	for rows.Next() {
 		var cursor uint64
 		var id string
-		var body []byte
-		if err := rows.Scan(&cursor, &id, &body); err != nil {
+		var body, packed, digest []byte
+		var originalBytes int64
+		if err := rows.Scan(&cursor, &id, &body, &packed, &originalBytes, &digest); err != nil {
+			return nil, err
+		}
+		body, err := storedBody(body, packed, originalBytes, digest)
+		if err != nil {
 			return nil, err
 		}
 		record, err := decodeEvent(cursor, body)
