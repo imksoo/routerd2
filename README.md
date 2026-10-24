@@ -40,8 +40,14 @@ routerd は設定、プロトコル、監視、ログ、管理とその整合性
 
 詳細は [アーキテクチャ](docs/architecture.md)、[現行 routerd の機能棚卸し](docs/parity.md)、
 [全機能移植の実装計画](docs/implementation-plan.md)、
+[boot・展開済み runtime・startup-config の分離方針](docs/adr/0001-boot-runtime-startup-config.md)、
 [WAN と AFTR の契約](docs/wan.md)、[WireGuard](docs/wireguard.md)、[BFD と BGP](docs/bfd.md)、[署名付きユーザーランド更新](docs/releases.md)、[設定例](examples/) を参照してください。機能棚卸しの `semantic_parity` は個々の旧 resource 契約の互換性を示し、
 プロトコル実装やビルドの成功だけでは true にしません。
+
+今後の配布は、一つのイメージファイルを filesystem へ展開した複数バイナリーの束を runtime とし、
+`boot config → load runtime → load startup-config` の順に起動する方針です。
+実行ファイル数は二つに固定しません。上表の二つの ELF と現在の release コマンドは、未リリースの試作仕様です。
+利用者のいない試作形式との後方互換は要求せず、新しい形式へ直接置換します。
 
 ## Build and test
 

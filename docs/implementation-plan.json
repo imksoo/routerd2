@@ -27,7 +27,16 @@
     "baseline_parity_does_not_require_new_deployment_qualification": true,
     "related_work_packages_are_cross_references_not_dag_edges": true,
     "gate_dependencies_require_only_the_named_component_gate": true,
-    "full_work_package_depends_on_is_distinct_from_component_gate_dependencies": true
+    "full_work_package_depends_on_is_distinct_from_component_gate_dependencies": true,
+    "binary_count_is_not_a_product_constraint": true,
+    "runtime_is_an_extracted_filesystem_bundle": true,
+    "boot_config_runtime_and_startup_config_are_separate_contracts": true,
+    "routerd2_is_unreleased_without_deployed_users": true,
+    "pre_release_routerd2_formats_need_no_backward_compatibility": true,
+    "breaking_changes_to_prototype_internal_formats_are_allowed": true,
+    "supported_update_compatibility_starts_at_first_public_release": true,
+    "routerd_and_routerd2_are_distinct_products": true,
+    "routerd2_configuration_format_is_free_to_redesign": true
   },
   "decisions": [
     {
@@ -38,9 +47,9 @@
     },
     {
       "id": "D-02",
-      "title": "core二つのELFと全機能profile",
-      "status": "proposed",
-      "proposal": "coreは現状を維持。PoCで外部engineを採用したprofileのみ、engine/library/plugin/dataを含む署名形式とstate互換性を追加する案。単一archiveによる一組の更新を保ち、任意のhost packageへ依存しない。"
+      "title": "単一配布イメージと展開済み多binary runtime",
+      "status": "accepted_direction",
+      "proposal": "配布イメージは対象architecture/profileごとに一つとし、filesystemへ展開した複数binary/library/plugin/dataの束をruntime environmentにする。native moduleも独立binaryへ分割でき、二つのELFに固定しない。manifest digestでruntime全体を選択・固定・復旧し、個別componentの互換未確認な混在を許さない。"
     },
     {
       "id": "D-03",
@@ -71,6 +80,18 @@
       "title": "engine版・license・配布資料",
       "status": "proposed",
       "proposal": "OS package名だけでなく正確なsource/build flags/dependencies/enabled componentsを固定する。nDPIの現在のcomponent別条件を確認し、process分離をlicense上の結論として扱わない。"
+    },
+    {
+      "id": "D-08",
+      "title": "boot config → runtime → startup-config",
+      "status": "accepted_direction",
+      "proposal": "イメージの検証・展開、次回runtime選択、起動を分ける。小さなboot層はruntimeとstartup-configの参照を選び、選択runtimeが設定schemaを検証・適用する。設定journalとYAMLを独立した正本にせず、boot attemptの可変状態も設定意図と分離する。最初の実装方式はverified runtimeへのexecによるPID 1引継ぎを推奨する。"
+    },
+    {
+      "id": "D-09",
+      "title": "未リリース routerd2 の形式互換は不要",
+      "status": "accepted_direction",
+      "proposal": "routerdは稼働中の機能参照元、routerd2は未リリースの別製品。routerd2の二binary形式、manifest、boot schema、設定書式、journal、内部APIは破壊的に置換でき、互換reader・v1 bridge・prototype state移行は作らない。routerdから引き継ぐ機能の範囲は減らさず、routerd2の製品版間更新/復旧保証は初回リリースの新形式を基準に始める。"
     }
   ],
   "milestones": [
@@ -216,16 +237,21 @@
       "depends_on": [
         "CORE-01"
       ],
-      "decision_dependencies": [],
+      "decision_dependencies": [
+        "D-08",
+        "D-09"
+      ],
       "deliverables": [
-        "元resource、identity、owner、provenanceを保持するResourceProgramと、実行用planを導入する。現在のnative schema v1は明示的な入力adapterとして維持する。",
+        "元resource、identity、owner、provenanceを保持するResourceProgramと実行planを導入する。未公開のnative schema v1やDocument表現に互換制約を置かず、新しい入力・保存形式へ置換する。",
         "operator revision、derived projection generation、worker generationを区別し、sourceと実行planを一つの正本・transactionで管理する。",
-        "journalのschema移行、失敗時復旧、confirmed commitのrollbackにsource graphとworker構成を含める。secret解決をpure validationから分離する。"
+        "新しいjournalのtransaction、失敗時復旧、confirmed commitのrollbackにsource graphとworker構成を含める。secret解決をpure validationから分離する。prototype永続recordの読取互換は不要。",
+        "boot entryが選ぶstartup-config store/revisionとrunning/candidateを区別する。startupの選択・保存を一つのauthoritative journalのtransactionとして定義し、初回seedは空storeだけに取り込む新仕様とする。"
       ],
       "acceptance_gates": [
-        "native v1の既存入力と永続recordを読み、既存試験を維持できる。",
+        "新ResourceProgram/schema/journalで設定の適用・永続化・再起動を確認する。機能を検証する既存fixtureは新形式へ更新し、未公開native v1のbyte互換を要求しない。",
         "crash／重複request／同時更新／確認期限切れでsourceと実行planが別世代にならない。",
-        "旧readerへ戻る場合の互換性をpreflightし、必要な設定snapshotを保持する。planner単体はhost file/env/networkを読まない。"
+        "初回リリース以降の対応済み製品版へ戻す場合に必要なconfig snapshotとschema互換方針を定義する。planner単体はhost file/env/networkを読まない。",
+        "bootで選択したstartup revisionを正しく採用し、通常bootでseedが保存済み設定を上書きしない。runtime/configの実際の組合せをhealth witnessへ渡す。"
       ],
       "upstream_reuse": [
         "pkg/api",
@@ -347,7 +373,7 @@
     },
     {
       "id": "CORE-06",
-      "title": "capability profile・engine 選定・署名形式",
+      "title": "展開済み runtime・module catalog・boot ABI・engine 選定",
       "milestone": "M1",
       "track": "platform",
       "status": "planned",
@@ -359,18 +385,22 @@
       "decision_dependencies": [
         "D-02",
         "D-03",
-        "D-07"
+        "D-07",
+        "D-08",
+        "D-09"
       ],
       "deliverables": [
-        "core二つのstatic ELFを維持し、追加engineを必要とするprofileのartifact集合・固定entry point・IPC・state schema・権限をADRで定義する。",
+        "単一配布イメージから展開する可変個数のnative/engine artifact集合、role→component、固定entry point、boot/runtime ABI、IPC/state schemaと権限をADRで定義する。binary数は固定せず、versioned runtime rootの全構成物をmanifest digestで選択する。",
         "PPPoE／NTP／IKE／Tailscale／nDPIの選定PoCを各担当と開始する。版・build flags・plugin・依存.so/data・licenseを固定する。",
-        "選んだengineに必要なら、現在の四ファイルbundle形式を明示的にversion upする。APK追加だけでupdate整合性が保てるとは扱わない。",
-        "manifestに必要kernel feature/module/ABIの対応範囲を記載する。exact source/build/component inventory、SBOM/noticesと採用条件で必要なsource/build資料をreleaseへ対応づけ、取得可能性を検証する。"
+        "可変component数の新manifest/展開形式とverified runtime catalogへ一本化する。未公開の二ELF・四ファイル形式は置換し、互換readerや移行bridgeを作らない。APK追加だけでupdate整合性を成立させない。",
+        "manifestに必要kernel feature/module/ABIの対応範囲を記載する。exact source/build/component inventory、SBOM/noticesと採用条件で必要なsource/build資料をreleaseへ対応づけ、取得可能性を検証する。",
+        "boot config、image stager、startup-config参照、boot stateを別契約にする。runtime選択と設定revisionを同じ起動transactionで識別し、filesystemへ展開したrootを固定してworkerを起動する。"
       ],
       "acceptance_gates": [
-        "標準profileで二つのELFのみの既存起動・更新が通る。",
+        "新形式で三つ以上の独立native executableを持つruntime catalogの検証・起動契約を試験する。旧二binary形式の受入を要求せず、全機能のbinary分割完了もこの共通gateの前提にしない。",
         "profile validatorが欠落library/plugin、architecture/IPC/schema/kernel feature不一致、改竄をapply前に拒否することをfixtureで確認する。実engine artifactごとの受入は各engine担当作業で行う。",
-        "engineのkernel書換範囲を申告する契約と、broker化または限定委譲の判定基準を確定する。実engineごとの決定・検証は個別作業の前提とし、未解決engineをcapabilityとして広告しない。"
+        "engineのkernel書換範囲を申告する契約と、broker化または限定委譲の判定基準を確定する。実engineごとの決定・検証は個別作業の前提とし、未解決engineをcapabilityとして広告しない。",
+        "roleごとのrestartで他runtimeへ解決先が変わらない。dynamic profileはloader/library/plugin/dataもbundleに固定し、host依存の解決を拒否する。実bootでの選択・fallback受入はDIST-01/02へ接続する。"
       ],
       "upstream_reuse": [
         "packaging/install.sh",
@@ -382,9 +412,11 @@
         "internal/supervisor",
         "internal/runtimeconfig",
         "packaging/alpine",
-        "docs/adr (新設予定)"
+        "docs/adr",
+        "internal/releaseboot",
+        "cmd/routerd-boot (新設予定)"
       ],
-      "completion_boundary": "共通manifest/authority/IPC契約とcore profileの受入をここで閉じる。各engineの採否・実装受入はSYS-02/NET-04/EXT-01/EXT-02/OPS-03で個別に閉じ、未解決の別engineでnative system等を一括して止めない。"
+      "completion_boundary": "共通manifest/authority/IPC、boot/runtime ABI、startup参照とverified role catalogの契約・最小実証をここで閉じる。全moduleのbinary分割や全boot媒体の更新は待たず、実runtime展開/起動はDIST-01/02、各engineはSYS-02/NET-04/EXT-01/EXT-02/OPS-03で個別に受入する。"
     },
     {
       "id": "SYS-01",
@@ -481,7 +513,8 @@
       "deliverables": [
         "UID/GID/capability、writable directory、resource limitsとUDSのrole/peer credential認可を同時に実装する。",
         "network変更、clock調整、release操作、rebootを別権限にし、旧generationからのprivileged requestを拒否する。",
-        "appliance専用の明示watchdogをboot attemptと接続する。containerではruntime/orchestratorの再起動契約を使う。"
+        "appliance専用の明示watchdogをboot attemptと接続する。containerではruntime/orchestratorの再起動契約を使う。",
+        "bootstrap、runtime supervisor、stager、workerが持つ権限と書込先を分離する。binaryの分割だけを権限分離の完了と扱わない。"
       ],
       "acceptance_gates": [
         "logging/DNS/telemetry workerからnetwork/release操作ができず、再起動後の古いcredentialも無効になる。",
@@ -1121,10 +1154,12 @@
         "CORE-03",
         "CORE-04"
       ],
-      "decision_dependencies": [],
+      "decision_dependencies": [
+        "D-09"
+      ],
       "deliverables": [
         "旧22 HTTP operationsとresource validate/plan/apply/delete/get/describe、revision競合、認可を移植する。",
-        "native v1とresource programの入口を明示し、SSH/local/HTTPの共通typed handlerを用意する。",
+        "新ResourceProgramを入力の共通入口とし、SSH/local/HTTPの共通typed handlerを用意する。未公開native v1用の別入口は維持しない。",
         "各featureのstatus/probe/log/イベント入口をmoduleに接続し、大きな結果はboundedかつcomplete generationで取得する。"
       ],
       "acceptance_gates": [
@@ -1328,7 +1363,7 @@
     },
     {
       "id": "DIST-01",
-      "title": "SSH 経由の更新と state/schema 移行",
+      "title": "イメージ展開・boot 選択・SSH 更新・state 移行",
       "milestone": "M6",
       "track": "platform",
       "status": "planned",
@@ -1341,18 +1376,24 @@
         "CORE-04"
       ],
       "decision_dependencies": [
-        "D-02"
+        "D-02",
+        "D-08",
+        "D-09"
       ],
       "deliverables": [
-        "boundedなupload session、streaming hash、quota/timeout、stage/status/prepare/reboot/rollbackを内蔵SSH/APIへ接続する。",
+        "bounded uploadとstreaming hash、署名検証、未公開directoryへの展開・全artifact検証・同期・公開を実装する。stageとboot configのprepare、実rebootを別操作として内蔵SSH/APIへ接続する。",
         "core/engine/profileのstate schema範囲をpreflightし、fallback用state snapshotとtrust policyを別々に保護する。",
         "現在の小さいcontrol envelopeへ巨大bundleを一括送信せず、中断・再送・cleanupをidempotentにする。",
-        "永続stateをconfig snapshot、identity/鍵、rotation/revocation、durable event/cursor、有限lease/factへ分類し、各migration/fallback/再観測方針を定義する。権限失効やlease期限を旧snapshotへ巻き戻さない。"
+        "永続stateをconfig snapshot、identity/鍵、rotation/revocation、durable event/cursor、有限lease/factへ分類し、各migration/fallback/再観測方針を定義する。権限失効やlease期限を旧snapshotへ巻き戻さない。",
+        "小さなboot selectorから選択runtime supervisorへverified handle/catalogを引き継ぐ。boot config→runtime→startup-configの実bootをfixtureで確認し、boot/runtime/configurationの実際の組合せを記録する。",
+        "runtime rootをin-place更新せず、running/next/trial/fallback/migration参照をpruneから保護する。boot configの意図とattempt/confirmation状態を別にし、generation付きtransactionで整合させる。"
       ],
       "acceptance_gates": [
-        "実SSH upload→署名検証→prepare→明示reboot→confirmationまで実機相当の起動試験で通す。",
+        "実SSH upload→新directoryへ展開/検証→runtimeとstartup-config参照のprepare→明示reboot→組合せのhealth confirmationを通す。stage/prepareが稼働中runtimeを変更しない。",
         "不正署名、upload中断、disk full、並行operator、trial失敗でactive release/stateを破壊しない。",
-        "config schemaが旧版互換でも、鍵rotation/失効、provider所有権移動、lease失効の後のfallbackで古いcredential/owner/Upが復活しない。安全に変換できないstateはdowngradeをpreflightで拒否し、bundleが自身のtrust policyを書き換えない。"
+        "config schemaが旧版互換でも、鍵rotation/失効、provider所有権移動、lease失効の後のfallbackで古いcredential/owner/Upが復活しない。安全に変換できないstateはdowngradeをpreflightで拒否し、bundleが自身のtrust policyを書き換えない。",
+        "path traversal/重複entry/link escape/展開容量超過を拒否する。worker restart、runtime切替、pruneが競合しても稼働中binary/library/dataを混在・削除しない。",
+        "選択runtimeのmanifest/entrypoint ABIがboot層の対応範囲内であることをprepare前に確認する。初回リリース以降の対応版間更新とbootstrap更新はDIST-02と統合して受入する。prototype形式からの移行試験は不要。"
       ],
       "upstream_reuse": [],
       "planned_targets": [
@@ -1361,7 +1402,10 @@
         "internal/releasecli",
         "internal/control",
         "internal/cli",
-        "internal/management"
+        "internal/management",
+        "internal/runtimeconfig",
+        "internal/supervisor",
+        "cmd/routerd-boot (新設予定)"
       ],
       "depends_on_gates": [
         {
@@ -1383,19 +1427,24 @@
         "SYS-01",
         "SYS-03"
       ],
-      "decision_dependencies": [],
+      "decision_dependencies": [
+        "D-08",
+        "D-09"
+      ],
       "deliverables": [
         "kernel/modules/rootfs/bootloader/state互換性を一組として扱い、明示したdisk layoutとinstallerを作る。",
         "disk初期化はinstallerで行い、通常bootに自動検出・formatを持ち込まない。",
         "amd64 mini-PCとarm64のboot方法、driver/firmware、watchdogとfallbackを個別に検証する。",
         "whole-OS profileのkernel/modules/rootfsとboot selector metadataを署名対象にし、書込・slot選択前の検証と認可されたtrust key rotation/revocationを実装する。",
-        "kernel、engine、依存library/plugin、firmwareのexact source/build/component inventoryとSBOM/noticesをreleaseに対応づける。採用条件で必要な対応source・変更・build資料を生成し、取得可能性を検証する。"
+        "kernel、engine、依存library/plugin、firmwareのexact source/build/component inventoryとSBOM/noticesをreleaseに対応づける。採用条件で必要な対応source・変更・build資料を生成し、取得可能性を検証する。",
+        "bootstrapとruntimeを新manifest/boot ABIに合わせて同時に構築する。初回リリースからboot側自身の更新・復旧方式を定義し、未公開selectorの先行更新やv1 shim bridgeは作らない。"
       ],
       "acceptance_gates": [
         "電源断、wrong kernel/modules、読めないstate、PID1 hangで既知正常な組へ戻る。",
         "対象のUEFI/U-Boot等のboot方式とpersistent stateの二回以上の起動を、実機driverを含めて確認する。",
         "cross compileだけでarm64 applianceを合格にせず、read-only rootfsと必要な書込領域が分離されている。",
-        "未検証artifactをactive/trial slotへ選ばず、欠けたkernel feature/module/ABIと改竄を準備段階で拒否する。"
+        "未検証artifactをactive/trial slotへ選ばず、欠けたkernel feature/module/ABIと改竄を準備段階で拒否する。",
+        "新形式のknown-good runtimeと更新候補を使い、初回リリース以降に支えるbootstrap/runtime組合せとfallbackを実bootで検証する。非対応ABIを選択前に拒否し、boot層更新失敗でも正常な入口を保持する。"
       ],
       "upstream_reuse": [],
       "planned_targets": [
@@ -1412,7 +1461,8 @@
           "criteria": [
             "kernel/modules/rootfs/profile/state互換性とimage assemblyを対象boot方式で定義する。",
             "artifactとboot selector metadataを署名検証してからstage/slotを選択する。",
-            "共通のpersistent state/初回identityと対象providerのboot/update契約を受入する。"
+            "共通のpersistent state/初回identityと対象providerのboot/update契約を受入する。",
+            "新形式のbootstrap/runtime ABIとruntime/config参照のhandoffを受入し、初回リリース以降の対応版間更新・fallbackを定義する。未公開形式の移行は含めない。"
           ]
         },
         {
@@ -1436,12 +1486,14 @@
         "NET-05"
       ],
       "decision_dependencies": [
-        "D-06"
+        "D-06",
+        "D-08"
       ],
       "deliverables": [
         "AWS/Azure/GCP/Oracle Cloud別のimage build/import recipe、metadata、初回identity/key、multi-NIC/IPv6/MTUと永続stateを実装する。",
         "Alpine等のbase imageをbuildに使い、最終boot lifecycleと必要なprovider機能を明示する。",
-        "OCI container formatとOracle Cloudのmachine imageを別artifactとして扱う。"
+        "OCI container formatとOracle Cloudのmachine imageを別artifactとして扱う。",
+        "cloud imageへboot層とfilesystemに展開したruntimeを用意し、装置固有startup-config/identityをruntime root外で初期化する。provider別にboot configと実runtime/configの選択を検証する。"
       ],
       "acceptance_gates": [
         "providerごとの使い捨てVMで起動、routing、reboot、host key/state持続、修復とcleanupを確認する。",
@@ -1477,12 +1529,14 @@
         "NET-08"
       ],
       "decision_dependencies": [
-        "D-06"
+        "D-06",
+        "D-08"
       ],
       "deliverables": [
         "Pod/host network namespaceを明示し、既存CNIとの共存、capabilities/sysctl、永続state、readiness/drainを持つ配布manifestを作る。",
         "必要なcontroller/operatorをtyped revision/ownership APIに接続する。イメージ更新はorchestratorに任せる。",
-        "独自CNI pluginは追加製品として切り分け、ルータPodを動かすための必須作業へ追加しない。"
+        "独自CNI pluginは追加製品として切り分け、ルータPodを動かすための必須作業へ追加しない。",
+        "同じmanifestのruntime集合をOCI image内に展開して配る。Pod内にappliance用installer/boot selectorを必須として重ねず、image選択はorchestrator、startup-config/stateは明示volumeとする。"
       ],
       "acceptance_gates": [
         "reschedule/node failureで旧ownerが広告や権限を維持せず、経路撤去と管理到達性を確認する。",
@@ -1541,7 +1595,9 @@
         "EXT-01",
         "EXT-02"
       ],
-      "decision_dependencies": [],
+      "decision_dependencies": [
+        "D-09"
+      ],
       "deliverables": [
         "全resource/surfaceのcaseをequivalent／承認済みreplacement／unsupported／未完了へ確定し、未完了を残してfull parityを名乗らない。",
         "homert単体/二台、RR/leafとcloud SAM、optional engine、appliance/cloud/K8sを別profileで受入する。",
@@ -1549,8 +1605,9 @@
       ],
       "acceptance_gates": [
         "field/default/lifecycle/status/event、実protocol、実daemon/recovery、migration/rollbackの全証跡が揃う。",
-        "既存native gateを維持し、新gateはrequired testとPASS markerを要求する。環境不足をskip成功にしない。",
-        "旧/新node混在や本番切替は、選んだ方式の独立受入と戻し手順がある。実機/クラウド未検証profileをqualifiedと表示しない。"
+        "既存の機能・通信・障害回復テストを新構成へ更新し、新gateはrequired testとPASS markerを要求する。環境不足をskip成功にせず、旧prototype形式の維持も要求しない。",
+        "旧/新node混在や本番切替は、選んだ方式の独立受入と戻し手順がある。実機/クラウド未検証profileをqualifiedと表示しない。",
+        "runtime binary数に依存せず、manifestが宣言したsupervisor/required workersとstartup-configの組合せを受入する。未公開二ELF形式との互換試験は不要で、既存の機能試験は新構成へ適応する。"
       ],
       "upstream_reuse": [
         "docs/adr",
@@ -10622,7 +10679,7 @@
     {
       "order": 2,
       "work_package": "CORE-02",
-      "deliverable": "ResourceProgram、native v1 adapter、単一journal transaction、旧record読込とconfirmed rollback。"
+      "deliverable": "ResourceProgramと新schema/journal transaction、confirmed rollback、startup-config選択を実装する。未公開native v1 adapterや旧record読取互換は作らず、既存fixtureを新形式に更新する。"
     },
     {
       "order": 3,
@@ -10757,7 +10814,7 @@
         "EXT-02",
         "OPS-03"
       ],
-      "criterion": "選択した外部engineの全必要機能、artifact closure、実backend、state/upgradeとlicense資料をprofile単位で確認する。"
+      "criterion": "選択した外部engineの全必要機能、artifact closure、実backend、state/upgradeとlicense資料をprofile単位で確認する。 native moduleも任意個数のbinaryへ分割でき、runtime全体のmanifestと依存解決を検証する。"
     },
     {
       "id": "appliance-hardware",
@@ -10767,7 +10824,7 @@
         "DIST-01",
         "DIST-02"
       ],
-      "criterion": "対象amd64/arm64 hardware別にboot/update、電源断、persistent state、driver/firmwareを検証する。 SYS-03のruntime-authorityとappliance-watchdog、および対象のhardware-qualificationを要求する。"
+      "criterion": "対象amd64/arm64 hardware別にboot/update、電源断、persistent state、driver/firmwareを検証する。 SYS-03のruntime-authorityとappliance-watchdog、および対象のhardware-qualificationを要求する。 boot config→展開済みruntime→startup-config、初回リリース以降のbootstrap更新/復旧を含める。"
     },
     {
       "id": "cloud-images",
@@ -10799,5 +10856,49 @@
     "cli_dispatch": 91,
     "cli_command_handlers": 78,
     "cli_advertised_syntax": 123
+  },
+  "runtime_delivery": {
+    "status": "accepted_requirement",
+    "adr": "adr/0001-boot-runtime-startup-config.md",
+    "distribution_unit": "One signed distribution image per target architecture/profile.",
+    "runtime_environment": "Multiple binaries and declared runtime dependencies extracted onto the filesystem into an immutable directory identified by the manifest digest.",
+    "binary_count": "Not fixed; native modules and upstream engines may use independent or explicitly grouped multicall executables.",
+    "boot_flow": [
+      "read_boot_config",
+      "select_and_load_extracted_runtime",
+      "resolve_and_load_startup_config",
+      "start_manifest_declared_workers",
+      "confirm_runtime_configuration_health"
+    ],
+    "separate_operations": [
+      "receive",
+      "stage_extract_verify",
+      "prepare_boot_selection",
+      "boot",
+      "confirm",
+      "rollback",
+      "prune"
+    ],
+    "startup_config_authority": "Selected authoritative config store/revision in the new schema, with explicit selection/save transactions and initial seed only for an empty store. Prototype serialized formats may be replaced.",
+    "recommended_handoff": "Small bootstrap execs the verified runtime supervisor, which inherits PID 1; bootstrap does not remain a watchdog after exec.",
+    "mutable_state": "Outside immutable runtime roots; boot intent, attempt state, configuration, identities, revocations, leases and cursors have separate contracts.",
+    "implementation_status": "planned_not_implemented",
+    "prototype_compatibility": "None. Replace unreleased two-binary, boot, manifest and journal formats directly; no compatibility reader, shim bridge or prototype migration gate.",
+    "first_supported_format": "The new extracted multi-binary runtime format."
+  },
+  "project_identity": {
+    "routerd": {
+      "role": "Existing source product and feature reference",
+      "repository": "imksoo/routerd"
+    },
+    "routerd2": {
+      "role": "Distinct new product under development",
+      "repository": "imksoo/routerd2",
+      "released": false,
+      "prototype_users": 0,
+      "prototype_backward_compatibility_required": false,
+      "config_format_may_change": true
+    },
+    "goal": "Reconstruct the required routerd features as routerd2; do not preserve unreleased routerd2 interfaces or serialized formats."
   }
 }

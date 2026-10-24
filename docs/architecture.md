@@ -1,5 +1,10 @@
 # routerd2 の責務とプロセス構成
 
+この文書は現在の未リリース実装を説明する。今後は、単一配布イメージから filesystem へ展開した
+多 binary の runtime と、小さな boot 層、startup-config を分離する。
+実行ファイル数を二つに固定せず、試作形式との後方互換も要求しない。採用した設計と置換方針は
+[ADR 0001](adr/0001-boot-runtime-startup-config.md) を参照。
+
 ## Linux と routerd の境界
 
 appliance は Linux の起動後に `/init` から routerd を PID 1 として開始する。
@@ -12,7 +17,7 @@ IP の転送は Linux、ルーティングプロトコルと設定制御は rout
 Alpine は kernel/firmware/パッケージと image assembly の供給元として利用する。
 apk/OpenRC をパケットの処理経路や daemon の起動管理に挟まない。
 
-## 2 つの ELF と複数の障害単位
+## 現在の実装: 2 つの ELF と複数の障害単位
 
 - `routerd`: init/supervisor と運用 CLI。構成をまとめて読み、固定の worker ELF を開く。
 - `routerd-modules`: logging/network/control/management と protocol worker を選択起動する。

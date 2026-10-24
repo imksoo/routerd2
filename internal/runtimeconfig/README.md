@@ -4,6 +4,15 @@ The boot document is separate from transactional router configuration. Paths,
 platform selection, kernel drivers, release selection, and SSH listeners take
 effect at process startup.
 
+This describes the current unreleased boot schema. The accepted next architecture separates
+image extraction, selection of a versioned runtime directory, and loading its
+startup configuration; see [ADR 0001](../../docs/adr/0001-boot-runtime-startup-config.md).
+The current `config` field seeds an empty config store. An existing committed
+record remains authoritative; the new explicit startup-revision selection and
+multi-binary runtime catalog are not implemented by this schema yet.
+This prototype has no deployed users: its boot and serialized configuration
+formats may be replaced directly, without a compatibility reader or migration.
+
 ## Persistent state volume
 
 An appliance may mount one explicitly provisioned ext4 block device at its

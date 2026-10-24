@@ -1,5 +1,16 @@
 # Signed userland releases
 
+This document describes the **unreleased prototype** format. There are no
+deployed users of this format, and backward compatibility is not required.
+The accepted next
+architecture uses one distribution image extracted into a versioned runtime
+directory containing multiple executables and declared dependencies. Binary
+count is not fixed. Image staging, boot selection and startup configuration
+are separate contracts; see [ADR 0001](adr/0001-boot-runtime-startup-config.md).
+That new layout and boot schema are planned, not supported by the commands below.
+The prototype reader, archive and state formats may be replaced directly;
+no compatibility bridge or prototype migration path is required.
+
 routerd2 updates the two runtime executables as one signed release:
 `routerd` and `routerd-modules`. The current appliance boot path can select a
 pending pair, execute the verified routerd inode as PID 1, pin the matching
