@@ -17,7 +17,7 @@ import (
 )
 
 func TestSQLiteFullRollsBackEventUsageAndCursorOutbox(t *testing.T) {
-	for _, mode := range []string{"journal", "outbox"} {
+	for _, mode := range []string{"journal", "outbox", "stateful"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := context.Background()
 			s, err := Open(Options{Directory: filepath.Join(t.TempDir(), "events")})
@@ -25,11 +25,17 @@ func TestSQLiteFullRollsBackEventUsageAndCursorOutbox(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer s.Close()
-			if _, err = s.Cursor(ctx, "consumer"); err != nil {
+			var checkpoint Checkpoint
+			if mode == "stateful" {
+				checkpoint, err = s.Checkpoint(ctx, "consumer")
+			} else {
+				_, err = s.Cursor(ctx, "consumer")
+			}
+			if err != nil {
 				t.Fatal(err)
 			}
 			var record Record
-			if mode == "outbox" {
+			if mode != "journal" {
 				record, err = s.Append(ctx, testEvent("source"))
 				if err != nil {
 					t.Fatal(err)
@@ -49,6 +55,9 @@ func TestSQLiteFullRollsBackEventUsageAndCursorOutbox(t *testing.T) {
 					event.Attributes[fmt.Sprint(i)] = strings.Repeat("x", 4000)
 				}
 				_, err = s.Append(ctx, event)
+			} else if mode == "stateful" {
+				state, _ := json.Marshal(map[string]string{"data": strings.Repeat("x", 32000)})
+				err = s.Transition(ctx, "consumer", checkpoint, record.Cursor, state, []Job{{Key: "work", Payload: json.RawMessage(`{}`)}})
 			} else {
 				payload, _ := json.Marshal(map[string]string{"data": strings.Repeat("x", 32000)})
 				err = s.Schedule(ctx, "consumer", 0, record.Cursor, []Job{{Key: "work", Payload: payload}})
@@ -57,7 +66,17 @@ func TestSQLiteFullRollsBackEventUsageAndCursorOutbox(t *testing.T) {
 			if !errors.As(err, &code) || code.Code()&255 != 13 {
 				t.Fatalf("expected actual SQLITE_FULL, got %v", err)
 			}
-			cursor, err := s.Cursor(ctx, "consumer")
+			var cursor uint64
+			if mode == "stateful" {
+				recovered, queryErr := s.Checkpoint(ctx, "consumer")
+				err = queryErr
+				cursor = recovered.Cursor
+				if recovered.Version != checkpoint.Version || string(recovered.State) != "{}" {
+					t.Fatal("SQLITE_FULL changed state/version", recovered)
+				}
+			} else {
+				cursor, err = s.Cursor(ctx, "consumer")
+			}
 			if err != nil || cursor != 0 {
 				t.Fatal("failed write advanced cursor", cursor, err)
 			}
@@ -70,6 +89,11 @@ func TestSQLiteFullRollsBackEventUsageAndCursorOutbox(t *testing.T) {
 			}
 			if _, err = s.Append(ctx, testEvent("after-recovery")); err != nil {
 				t.Fatal("disk recovery left usage or writer poisoned", err)
+			}
+			if mode == "stateful" {
+				if err = s.Transition(ctx, "consumer", checkpoint, record.Cursor, json.RawMessage(`{"recovered":true}`), nil); err != nil {
+					t.Fatal("state recovery left usage poisoned", err)
+				}
 			}
 		})
 	}
