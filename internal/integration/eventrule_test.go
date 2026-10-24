@@ -74,8 +74,14 @@ func TestDaemonEventRuleDurabilityAndLifecycle(t *testing.T) {
 		t.Helper()
 		until(t, 10*time.Second, func() bool {
 			h := read()
+			cursor := uint64(0)
+			for _, record := range history() {
+				if record.Event.Topic == "configuration.committed" && record.Event.Attributes["revision"] == fmt.Sprint(h.Revision) {
+					cursor = record.Cursor
+				}
+			}
 			for _, r := range h.EventRules.Rules {
-				if r.ID == name && r.Cursor > 0 {
+				if r.ID == name && cursor > 0 && r.Cursor >= cursor {
 					return true
 				}
 			}
