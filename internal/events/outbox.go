@@ -48,11 +48,12 @@ func (s *Store) schedule(ctx context.Context, name string, expected, eventCursor
 	var current uint64
 	var version uint64
 	var stateful bool
+	var stateCursor uint64
 	var stateBytes int64
-	if err = tx.QueryRowContext(ctx, `SELECT cursor,version,stateful,length(body) FROM consumers WHERE name=?`, name).Scan(&current, &version, &stateful, &stateBytes); err != nil {
+	if err = tx.QueryRowContext(ctx, `SELECT cursor,version,stateful,state_cursor,length(body) FROM consumers WHERE name=?`, name).Scan(&current, &version, &stateful, &stateCursor, &stateBytes); err != nil {
 		return errors.Join(ErrConflict, err)
 	}
-	if current != expected || version >= math.MaxInt64 || stateful != (checkpoint != nil) || checkpoint != nil && checkpoint.Version != version {
+	if current != expected || version >= math.MaxInt64 || stateful != (checkpoint != nil) || checkpoint != nil && (checkpoint.Version != version || stateCursor != current) {
 		return ErrConflict
 	}
 	if eventCursor != expected {
@@ -97,7 +98,7 @@ func (s *Store) schedule(ctx context.Context, name string, expected, eventCursor
 		if _, err = tx.ExecContext(ctx, `UPDATE usage SET bytes_count=bytes_count+? WHERE kind='consumer_state'`, delta); err != nil {
 			return err
 		}
-		result, err = tx.ExecContext(ctx, `UPDATE consumers SET cursor=?,version=version+1,body=? WHERE name=? AND cursor=? AND version=?`, eventCursor, []byte(state), name, expected, version)
+		result, err = tx.ExecContext(ctx, `UPDATE consumers SET cursor=?,state_cursor=?,version=version+1,body=? WHERE name=? AND cursor=? AND version=?`, eventCursor, eventCursor, []byte(state), name, expected, version)
 	} else {
 		result, err = tx.ExecContext(ctx, `UPDATE consumers SET cursor=?,version=version+1 WHERE name=? AND cursor=? AND version=?`, eventCursor, name, expected, version)
 	}

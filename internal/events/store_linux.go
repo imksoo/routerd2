@@ -26,16 +26,16 @@ type Store struct {
 }
 
 const applicationID = 0x52443245 // RD2E; separate from every other product store
-const schemaVersion = 2          // unreleased prototype v1 is deliberately not imported
+const schemaVersion = 3          // unreleased prototypes v1/v2 are deliberately not imported
 
 const schema = `
 CREATE TABLE events(cursor INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL UNIQUE, body BLOB NOT NULL);
-CREATE TABLE consumers(name TEXT PRIMARY KEY, cursor INTEGER NOT NULL CHECK(cursor>=0), version INTEGER NOT NULL DEFAULT 0 CHECK(version>=0), stateful INTEGER NOT NULL DEFAULT 0 CHECK(stateful IN (0,1)), body BLOB NOT NULL DEFAULT X'7b7d');
+CREATE TABLE consumers(name TEXT PRIMARY KEY, cursor INTEGER NOT NULL CHECK(cursor>=0), version INTEGER NOT NULL DEFAULT 0 CHECK(version>=0), stateful INTEGER NOT NULL DEFAULT 0 CHECK(stateful IN (0,1)), state_cursor INTEGER NOT NULL DEFAULT 0 CHECK(state_cursor>=0), body BLOB NOT NULL DEFAULT X'7b7d');
 CREATE TABLE outbox(consumer TEXT NOT NULL REFERENCES consumers(name), key TEXT NOT NULL, event_cursor INTEGER NOT NULL REFERENCES events(cursor), payload BLOB NOT NULL, done INTEGER NOT NULL DEFAULT 0 CHECK(done IN (0,1)), PRIMARY KEY(consumer,key));
 CREATE INDEX pending_work ON outbox(consumer,done,event_cursor,key);
 CREATE TABLE usage(kind TEXT PRIMARY KEY, rows_count INTEGER NOT NULL, bytes_count INTEGER NOT NULL);
 INSERT INTO usage VALUES('events',0,0),('outbox',0,0),('consumer_state',0,0);
-PRAGMA user_version=2;
+PRAGMA user_version=3;
 `
 
 func Open(options Options) (_ *Store, result error) {

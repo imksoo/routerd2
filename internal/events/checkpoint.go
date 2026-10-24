@@ -32,7 +32,8 @@ func (s *Store) consumer(ctx context.Context, name string, stateful bool) (Check
 	defer tx.Rollback()
 	var result Checkpoint
 	var registered bool
-	err = tx.QueryRowContext(ctx, `SELECT cursor,version,stateful,body FROM consumers WHERE name=?`, name).Scan(&result.Cursor, &result.Version, &registered, &result.State)
+	var stateCursor uint64
+	err = tx.QueryRowContext(ctx, `SELECT cursor,version,stateful,state_cursor,body FROM consumers WHERE name=?`, name).Scan(&result.Cursor, &result.Version, &registered, &stateCursor, &result.State)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return result, err
 	}
@@ -41,14 +42,14 @@ func (s *Store) consumer(ctx context.Context, name string, stateful bool) (Check
 		return result, queryErr
 	}
 	if err == nil {
-		if result.Cursor > tip || registered && !stateful {
+		if result.Cursor > tip || registered && (!stateful || result.Cursor != stateCursor) {
 			return result, ErrConflict
 		}
 		if len(result.State) > maxBody || !utf8.Valid(result.State) || !json.Valid(result.State) {
 			return result, errors.New("invalid durable consumer state")
 		}
 		if stateful && !registered {
-			if _, err = tx.ExecContext(ctx, `UPDATE consumers SET stateful=1 WHERE name=?`, name); err != nil {
+			if _, err = tx.ExecContext(ctx, `UPDATE consumers SET stateful=1,state_cursor=cursor WHERE name=?`, name); err != nil {
 				return result, err
 			}
 		}
@@ -57,7 +58,7 @@ func (s *Store) consumer(ctx context.Context, name string, stateful bool) (Check
 			return result, err
 		}
 		result = Checkpoint{Cursor: tip, State: json.RawMessage(`{}`)}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO consumers(name,cursor,stateful) VALUES(?,?,?)`, name, tip, stateful); err != nil {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO consumers(name,cursor,stateful,state_cursor) VALUES(?,?,?,?)`, name, tip, stateful, tip); err != nil {
 			return result, err
 		}
 	}

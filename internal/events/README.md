@@ -39,6 +39,9 @@ cannot advance state or produce work. A stateful consumer cannot switch to
 rule semantics and authority are the caller's responsibility; a checkpoint is
 not a protocol lease. State is at most 64 KiB per consumer and 64 MiB in total
 by default; replacing state releases its previous byte charge.
+The persisted state is bound to its processed cursor. Restoring only an older
+cursor while retaining newer state is rejected instead of counting history twice.
+A complete database rollback still requires target-side effect deduplication.
 
 Defaults cap the journal and outbox at 100,000 rows and 64 MiB of encoded payload
 each, plus 1,024 consumer registrations. Individual event/job bodies are at most
@@ -54,8 +57,8 @@ connection replacement, and SIGKILL followed by WAL recovery. Configuration
 producer state/outbox atomicity and worker recovery have separate control tests.
 Protocol event producers and QEMU power-loss acceptance remain implementation-plan work.
 
-The database schema is now version 2. Accepted design D-09 deliberately does
-not import discarded, unreleased version-1 prototype state. Unsupported schema
+The database schema is now version 3. Accepted design D-09 deliberately does
+not import discarded, unreleased version-1/2 prototype state. Unsupported schema
 identity is rejected through the read-only probe before SQLite recovery/writes.
 This is not a promise that different released versions can share or roll back
 this database. A production migration/fallback contract remains DIST-01 work.
