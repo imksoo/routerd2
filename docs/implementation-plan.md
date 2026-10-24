@@ -7,10 +7,17 @@
 部分checkpointでゴールを完了にせず、実装・検証・未検証と証跡を更新する。
 対象機種・NIC・性能条件の確認と並行して、独立して進められる実装・隔離VM検証を続ける。
 
-CORE-04の最新component checkpointは `8342440`。DerivedEventの有限snapshot評価と
+CORE-04の最新component checkpointは `cb2bc11`。履歴cursorなしのproducer state/outboxを
+追加し、空journalのDerived初回出力、実SQLite失敗/FULL/SIGKILL、clean check/buildと
+QEMUの既存control・二回起動保持がPASSした。
+[producer保存の証跡と残作業](evidence/2026-10-24-producer-state.md) を参照。
+live controllerへの接続と新producerのQEMU電源断受入は残る。
+
+先行 `8342440` ではDerivedEventの有限snapshot評価と
 永続化可能なhysteresisを追加し、固定routerd比較、実SQLiteのtimer復元/失敗/retry、
 期限切れ時のunknown、clean check/Race/vet/static両arch buildがPASSした。
-resource/daemon接続、input cursorなしproducer保存、作用/federation等は残る。
+当時の残作業のうち、input cursorなしproducer保存は後続で追加した。
+resource/daemon接続、作用/federation等は残る。
 [証跡と未検証範囲](evidence/2026-10-24-derived-evaluator.md) を参照。作業単位全体や実機利用可能性の合格とはしない。
 
 ## 最初の実装 checkpoint

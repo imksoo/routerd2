@@ -1,0 +1,14 @@
+# github.com/imksoo/routerd2/internal/events [github.com/imksoo/routerd2/internal/events.test]
+internal/events/producer_test.go:21:15: s.ProducerCheckpoint undefined (type *Store has no field or method ProducerCheckpoint)
+internal/events/producer_test.go:25:13: s.ProducerTransition undefined (type *Store has no field or method ProducerTransition)
+internal/events/producer_test.go:27:17: s.ProducerPending undefined (type *Store has no field or method ProducerPending)
+internal/events/producer_test.go:35:13: s.ProducerComplete undefined (type *Store has no field or method ProducerComplete)
+internal/events/producer_test.go:36:13: s.ProducerComplete undefined (type *Store has no field or method ProducerComplete)
+internal/events/producer_test.go:40:17: s.ProducerCheckpoint undefined (type *Store has no field or method ProducerCheckpoint)
+internal/events/producer_test.go:42:13: s.ProducerTransition undefined (type *Store has no field or method ProducerTransition)
+internal/events/producer_test.go:45:13: s.ProducerTransition undefined (type *Store has no field or method ProducerTransition)
+internal/events/producer_test.go:46:20: s.ProducerPending undefined (type *Store has no field or method ProducerPending)
+internal/events/producer_test.go:47:16: s.ProducerCheckpoint undefined (type *Store has no field or method ProducerCheckpoint)
+internal/events/producer_test.go:47:16: too many errors
+FAIL	github.com/imksoo/routerd2/internal/events [build failed]
+FAIL

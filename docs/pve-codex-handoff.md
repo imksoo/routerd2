@@ -1,19 +1,27 @@
 # routerd2 開発・PVE VM検証 引き継ぎ
 
-更新日: 2026-10-24（Asia/Tokyo）
+更新日: 2026-10-25（Asia/Tokyo）
 対象: `https://github.com/imksoo/routerd2`
 
 **継続ゴール:** 全残実装・必要試験・対象実機での利用可能性の受入まで進める。
-部分checkpointでは完了しない。最新コードcheckpointは `8342440`。
+部分checkpointでは完了しない。最新コードcheckpointは `cb2bc11`。
+
+履歴cursorに依存しないproducer state/outboxを追加した。空journalでDerived初回出力を
+保存する実SQLite fixture、state保存失敗、SQLITE_FULL、16競合、SIGKILL/WALがPASS。
+schemaは4で未公開1/2/3をread-only拒否。clean check/Race/vet/static両arch buildと、
+QEMU実SSH/control再起動45.74秒、既存config/event/SSH保持の二回起動137.18秒がPASS。
+同じclean ELFで実daemon二WAN TCP/UDP/PCAP・全復旧sequenceもRace込み30.09秒PASS。
+live producer/controllerには未接続。新producerのQEMU電源断受入とも区別する。
+[producer保存の証跡と残作業](evidence/2026-10-24-producer-state.md) を参照。
 
 DerivedEventのpure evaluatorを追加した。有限snapshot、明示的unknown、BOOTTIME hysteresis、
 元の観測時刻と同じwitnessの期限、安定出力IDを実装した。固定routerdとの直接比較、
 実SQLiteのhold復元/保存失敗/retry/期限切れ、clean check/Race/vet/両arch buildがPASS。
-resource/daemonには未接続。空journalのbootstrap出力に使うproducer state/outboxも必要。
+resource/daemonには未接続。空journalのbootstrap保存部は上記の後続checkpointで追加した。
 [Derived componentの証跡と残作業](evidence/2026-10-24-derived-evaluator.md) を参照。
 
 state/cursor/outboxの同時保存、timer version CAS、cursorだけの巻き戻し拒否を追加した。
-event DB schemaは3。未公開1/2はD-09に従いread-only拒否し、互換readerは作らない。
+当時のevent DB schemaは3。未公開1/2はD-09に従いread-only拒否し、互換readerは作らない。
 EventRule全8演算のpure componentと安定ID/永続timer/budgetを追加し、固定routerdとの
 直接比較、実SQLite保存失敗後のretry/reopen、Race/full check/static buildがPASS。
 ResourceProgram/daemonのEventRule resourceへは未接続。

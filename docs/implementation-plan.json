@@ -11372,6 +11372,37 @@
         "Effects/federation, all remaining work packages and physical/NIC/performance acceptance"
       ],
       "parity_flags_unchanged": true
+    },
+    {
+      "id": "cursor-independent-producer-state-outbox",
+      "date": "2026-10-24",
+      "status": "partial_implementation_with_component_and_existing_daemon_regression_acceptance",
+      "code_checkpoint": "cb2bc11",
+      "work_packages": [
+        "CORE-04",
+        "DIST-01",
+        "DIST-02"
+      ],
+      "evidence": "docs/evidence/2026-10-24-producer-state.md",
+      "implemented": [
+        "Separate versioned producer state and atomic output jobs without historical input cursors",
+        "Shared consumer/producer registration, state byte and output capacity budgets",
+        "Schema 4 with read-only rejection of discarded unreleased prototype versions 1/2/3"
+      ],
+      "validation": [
+        "Empty-journal DerivedEvent initial emission and current-input expiry across reopen: pass",
+        "Actual SQLite state-write failure, SQLITE_FULL, 16 competing version claims, stable tombstones and SIGKILL/WAL producer recovery: pass under Race Detector",
+        "Clean cb2bc11 make check build-linux: pass; static amd64/arm64",
+        "QEMU existing real SSH/control recovery: pass 45.74s",
+        "QEMU schema-4 existing config/event/SSH/sentinel persistence and signed userland fallback over two kernels: pass 137.18s",
+        "Actual supervisor/control/network/health, independent two-WAN TCP/UDP/PCAP and full recovery sequence with clean cb2bc11 daemon ELFs: pass under Race Detector 30.09s"
+      ],
+      "remaining": [
+        "EventRule/DerivedEvent resource compilation, daemon lifecycle, typed live status providers and source-fenced publication",
+        "Producer checkpoint QEMU power-loss acceptance, effects/federation and retention operations",
+        "Production release migration contract and complete implementation-plan/physical acceptance"
+      ],
+      "parity_flags_unchanged": true
     }
   ],
   "delivery_goal": {
