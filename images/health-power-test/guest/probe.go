@@ -375,14 +375,19 @@ func finishRecovery(ctx context.Context, client, manager *localapi.Client, w wit
 	if _, err = verifyHistory(w.Observations, records, true); err != nil {
 		return err
 	}
-	outputs := 0
-	for _, r := range records {
-		if r.Event.Topic == "routerd.fixture.power.samples" {
-			outputs++
+	if err = await(ctx, "retained EventRule output", func() error {
+		records, err := history(ctx, client)
+		if err != nil {
+			return err
 		}
-	}
-	if outputs == 0 {
+		for _, r := range records {
+			if r.Event.Topic == "routerd.fixture.power.samples" {
+				return nil
+			}
+		}
 		return errors.New("retained EventRule did not consume recovered raw history")
+	}); err != nil {
+		return err
 	}
 	w.Revision = 2
 	return emitAndWait(w, false)
