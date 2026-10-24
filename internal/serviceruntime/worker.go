@@ -99,7 +99,7 @@ func Run(ctx context.Context, runtimeDir, name, role, path, digest string, gener
 		if err := decode(instance.Config, &cfg); err != nil {
 			return err
 		}
-		return c.runHealth(runCtx, runtimeDir, cfg, ready)
+		return c.runHealth(runCtx, runtimeDir, instance.EventDirectory, cfg, ready)
 	case "bfd":
 		var cfg bfd.Config
 		if err := decode(instance.Config, &cfg); err != nil {

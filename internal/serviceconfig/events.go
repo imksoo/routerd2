@@ -16,7 +16,7 @@ type Update struct {
 	Generation         uint64          `json:"generation"`
 	ProducerEpoch      string          `json:"producer_epoch"`
 	Sequence           uint64          `json:"sequence"`
-	Snapshot           json.RawMessage `json:"snapshot"`
+	Snapshot           json.RawMessage `json:"snapshot,omitempty"`
 }
 
 // ValidSupervisorInstance validates an opaque, nonpersistent process-tree ID.

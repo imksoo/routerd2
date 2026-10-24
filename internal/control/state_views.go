@@ -39,6 +39,11 @@ type Health struct {
 	EventJournal       JournalHealth             `json:"event_journal"`
 	EventRules         RuleHealth                `json:"event_rules"`
 	Derived            DerivedHealth             `json:"derived"`
+	ProtocolEvents     ProtocolHealth            `json:"protocol_events"`
+}
+
+type ProtocolHealth struct {
+	LastError string `json:"last_error,omitempty"`
 }
 
 type DerivedHealth struct {
@@ -86,6 +91,7 @@ func (e *Engine) healthForState(s State) Health {
 	h.EventJournal = JournalHealth{Pending: len(s.EventOutbox), LastError: s.EventJournalError}
 	h.EventRules.LastError = s.EventRuleError
 	h.Derived.LastError = s.DerivedError
+	h.ProtocolEvents.LastError = s.ProtocolEventError
 	e.mu.Lock()
 	if e.rules != nil {
 		h.EventRules.Status = e.rules.Status()
@@ -100,6 +106,9 @@ func (e *Engine) healthForState(s State) Health {
 		}
 	}
 	e.mu.Unlock()
+	if s.ProtocolEventError != "" {
+		h.Healthy = false
+	}
 	if s.DerivedError != "" {
 		h.Healthy = false
 	}
@@ -187,7 +196,7 @@ func (e *Engine) configurationViewRoutes(mux *http.ServeMux) {
 }
 
 func (e *Engine) writeConfigurationState(w http.ResponseWriter, s State, mutation bool) {
-	if s.EventJournalError != "" || s.EventRuleError != "" || s.DerivedError != "" {
+	if s.EventJournalError != "" || s.EventRuleError != "" || s.DerivedError != "" || s.ProtocolEventError != "" {
 		s.Healthy = false
 	}
 	encoded, err := json.Marshal(s)

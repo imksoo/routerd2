@@ -46,6 +46,7 @@ func (e *Engine) syncEventRulesLocked(ctx context.Context) (err error) {
 }
 
 func (e *Engine) committedRuleLifecycleLocked(ctx context.Context) {
+	e.pruneProtocolErrorsLocked()
 	bounded, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	_ = e.syncEventRulesLocked(bounded) // authoritative config is already saved

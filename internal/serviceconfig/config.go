@@ -76,9 +76,12 @@ type Delegation struct {
 // Instance is the immutable private configuration received by a child. Its
 // exact JSON bytes are addressed by SHA-256 and verified before execution.
 type Instance struct {
-	Name   string          `json:"name"`
-	Role   string          `json:"role"`
-	Config json.RawMessage `json:"config"`
+	// EventDirectory is generated private worker storage, never an operator
+	// executable/path capability or a current protocol lease.
+	EventDirectory string          `json:"event_directory,omitempty"`
+	Name           string          `json:"name"`
+	Role           string          `json:"role"`
+	Config         json.RawMessage `json:"config"`
 	// DynamicRA obtains its prefix/lifetime data from the control service;
 	// the immutable config contains only the interface/template identity.
 	DynamicRA  bool `json:"dynamic_ra,omitempty"`
@@ -388,7 +391,11 @@ func (s Service) Instance(runtimeDir, stateDir string) (Instance, error) {
 		return Instance{}, errors.New("unsupported service")
 	}
 	b, err := json.Marshal(c)
-	return Instance{Name: s.ModuleName(), Role: s.Role(), Config: b, DynamicDNS: s.HasDNSLeaseSources()}, err
+	instance := Instance{Name: s.ModuleName(), Role: s.Role(), Config: b, DynamicDNS: s.HasDNSLeaseSources()}
+	if s.Health != nil {
+		instance.EventDirectory = filepath.Join(stateDir, "services", s.Name, "health-events")
+	}
+	return instance, err
 }
 
 func (s Service) HealthConfig() health.Config {

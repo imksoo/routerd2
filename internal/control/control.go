@@ -74,6 +74,7 @@ type State struct {
 	EventJournalError           string `json:"event_journal_error,omitempty"`
 	EventRuleError              string `json:"event_rule_error,omitempty"`
 	DerivedError                string `json:"derived_error,omitempty"`
+	ProtocolEventError          string `json:"protocol_event_error,omitempty"`
 }
 
 type Event struct {
@@ -116,16 +117,17 @@ func (n *NetworkClient) Snapshot(ctx context.Context) (s network.Snapshot, err e
 }
 
 type Engine struct {
-	mu           sync.Mutex
-	store        *config.Store
-	network      Network
-	state        State
-	events       []Event
-	runtime      *runtimeplan.Runtime
-	journal      *events.Store
-	eventFlushMu sync.Mutex
-	rules        *eventcontroller.Controller
-	derived      *derivedcontroller.Controller
+	mu             sync.Mutex
+	store          *config.Store
+	network        Network
+	state          State
+	events         []Event
+	runtime        *runtimeplan.Runtime
+	journal        *events.Store
+	eventFlushMu   sync.Mutex
+	rules          *eventcontroller.Controller
+	derived        *derivedcontroller.Controller
+	protocolErrors map[string]string
 }
 
 func New(store *config.Store, current config.Committed, n Network) *Engine {
@@ -140,7 +142,7 @@ func (e *Engine) State() State {
 	e.mu.Lock()
 	s := e.state
 	e.mu.Unlock()
-	if s.EventJournalError != "" || s.EventRuleError != "" || s.DerivedError != "" {
+	if s.EventJournalError != "" || s.EventRuleError != "" || s.DerivedError != "" || s.ProtocolEventError != "" {
 		s.Healthy = false
 	}
 	if e.runtime != nil {
@@ -268,7 +270,7 @@ func (e *Engine) Confirm(r ConfirmRequest) (State, error) {
 	if r.Revision != e.state.Revision || r.RequestID == "" || r.RequestID != e.state.LastRequestID {
 		return e.state, fmt.Errorf("%w: confirmation does not identify the current revision", ErrConflict)
 	}
-	if !e.state.Healthy || e.state.EventRuleError != "" || e.state.DerivedError != "" {
+	if !e.state.Healthy || e.state.EventRuleError != "" || e.state.DerivedError != "" || e.state.ProtocolEventError != "" {
 		return e.state, errors.New("cannot confirm while the applied state is degraded")
 	}
 	if e.runtime != nil && e.runtime.Health().Phase != "ready" {
