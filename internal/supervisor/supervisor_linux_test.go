@@ -507,5 +507,8 @@ func TestDynamicModulesReconcileFencesCoreAndReplacesProcesses(t *testing.T) {
 	}
 	// Name reuse must ignore lifecycle frames from the reaped child object.
 	submit([]DynamicModule{a}, 202)
-	s.wait(t, func(v Status) bool { return v.Ready && len(v.Modules) == 2 })
+	readded := s.wait(t, func(v Status) bool { return v.Ready && len(v.Modules) == 2 })
+	if readded.Modules[1].Generation <= replaced.Modules[1].Generation {
+		t.Fatal("removed/re-added worker reused an old protocol generation", readded.Modules[1].Generation, replaced.Modules[1].Generation)
+	}
 }
