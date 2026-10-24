@@ -37,7 +37,7 @@ func TestShowEventStoreIsBoundedReadOnlyAndDoesNotPrintFailedResponses(t *testin
 		t.Fatal(err, output.String())
 	}
 	s := &interactiveShell{}
-	if got := s.complete("show event"); got != "show event-store " {
+	if got, _, ok := s.complete("show event", len("show event"), '\t'); !ok || got != "show event-store " {
 		t.Fatal(got)
 	}
 }
