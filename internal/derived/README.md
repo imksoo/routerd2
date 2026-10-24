@@ -1,0 +1,77 @@
+# Derived assertion evaluator
+
+This is a pure component. DerivedEvent resources are not accepted by
+ResourceProgram or executed by a daemon controller yet. It publishes no events,
+executes no effects and grants no kernel authority.
+
+`Compile` owns a typed copy of the pinned routerd DerivedEvent spec.
+`NewSnapshot` copies a bounded set of current scalar observations. `Advance`
+returns proposed serialized state, historical emissions and current status.
+State and output jobs must be committed atomically with a version fence; an
+uncommitted result must not be published. Output IDs bind the program digest,
+evaluation scope, triggering input ID, transition counter and asserted value.
+Retrying the same frozen input against the same state produces identical IDs.
+
+Status references require a known value from the current scope and producer,
+an original observation time no later than the current BOOTTIME, and a finite
+expiry strictly after that time and the current BOOTTIME. Missing, expired,
+future, unknown and old-scope values are indeterminate. Zero expiry is unknown
+here; it is not the event journal's non-expiring historical-delivery convention.
+Persisted asserted=true cannot replace these checks. Indeterminate input
+cancels a pending hold, exposes no asserted boolean and emits no retraction.
+Historical last-transition timestamps remain historical.
+
+Scopes and producer origins must come from the accepted current-producer
+registry. Caller-supplied strings are not authentication. The scope must bind
+the boot, source/revision and evaluator incarnation. The caller must serialize
+every accepted producer transition with timer evaluation, including flaps that
+occur between projections. It must reset the evaluator incarnation after a
+missed interval and fence producer authority when committing/publishing output.
+This component cannot detect an omitted, unexpired producer transition.
+
+Input groups use three-valued conjunction/disjunction, preserving a known
+false conjunction or true disjunction despite unrelated unknown values.
+Literal fields and known immediate predicates follow the pinned reference at
+`1329ef54f296507eda79bbbc3b853783dd27251e`. Direct comparison covers both
+emit_when policies, both retract_when values and emit_initial. The pinned
+engine ignores retract_when and retracts on target negation; this component
+preserves that behavior rather than introducing a latch policy.
+Unlike the legacy empty-string fallback, missing status is explicitly unknown.
+
+Hysteresis holds both transition directions using BOOTTIME. Same-value
+renewals preserve the due time. Value reversal, unknown input, lease gaps,
+producer replacement and scope changes cancel or restart the pending hold.
+Wall-clock jumps cannot complete a hold; its event timestamp is fixed at the
+original observation wall time plus the duration. No goroutines or volatile
+wall timers run in this package. Restored holds still require a current
+snapshot; same-scope backwards BOOTTIME is rejected.
+
+`ObservedNanos` preserves input evidence age across evaluator polls. For an OR
+witness, its freshness and expiry come from the same witness, even when a
+different witness has a longer lease. `ValidUntilNanos` also bounds current
+status at a pending transition deadline. A caller must bound the returned
+status further by its own liveness and current authority, especially for a
+literal-only program, whose logical proof has no producer expiry. These
+metadata fields are not persisted authority or transport credentials.
+
+Limits are 64 top-level inputs, 64 groups/terms per input, 1,024 predicates,
+1 MiB compiled source, 1,024 snapshot values and 2 MiB snapshot text. Individual
+fields/values are bounded; serialized state is at most 64 KiB. Limits fail
+without partial state or emissions. Large-scale performance is not qualified.
+
+Tests cover known assertion/retraction, initial policy, immutable snapshots,
+stable retry identity, finite freshness, old scopes, source replacement,
+unknown bootstrap, expiry gaps, hold boundaries, wall jumps and coherent
+witness age/expiry. An actual SQLite consumer fixture restores a pending
+hold, fails its timer checkpoint after outbox insertion, retries atomically,
+rejects a stale timer claim, reopens the historical emission and verifies that
+the restored asserted value is unknown when its current input has expired.
+
+The SQLite fixture already has a real input cursor. A live DerivedEvent can
+also emit at bootstrap without any journal input. The store currently rejects
+jobs at cursor zero; a producer state/outbox path independent of historical
+input cursors is still required. Do not fabricate a historical input event to
+turn a current observation into authority. Other remaining work includes
+typed resource compilation/lifecycle/status, accepted live status providers,
+daemon scheduling and publication, source fencing, effect idempotency,
+federation and physical/performance acceptance. CORE-04 remains in progress.
