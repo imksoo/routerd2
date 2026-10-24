@@ -4,7 +4,13 @@
 対象: `https://github.com/imksoo/routerd2`
 
 **継続ゴール:** 全残実装・必要試験・対象実機での利用可能性の受入まで進める。
-部分checkpointでは完了しない。最新コードcheckpointは `12f9be6`。
+部分checkpointでは完了しない。最新コードcheckpointは `8342440`。
+
+DerivedEventのpure evaluatorを追加した。有限snapshot、明示的unknown、BOOTTIME hysteresis、
+元の観測時刻と同じwitnessの期限、安定出力IDを実装した。固定routerdとの直接比較、
+実SQLiteのhold復元/保存失敗/retry/期限切れ、clean check/Race/vet/両arch buildがPASS。
+resource/daemonには未接続。空journalのbootstrap出力に使うproducer state/outboxも必要。
+[Derived componentの証跡と残作業](evidence/2026-10-24-derived-evaluator.md) を参照。
 
 state/cursor/outboxの同時保存、timer version CAS、cursorだけの巻き戻し拒否を追加した。
 event DB schemaは3。未公開1/2はD-09に従いread-only拒否し、互換readerは作らない。

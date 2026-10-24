@@ -7,6 +7,12 @@
 部分checkpointでゴールを完了にせず、実装・検証・未検証と証跡を更新する。
 対象機種・NIC・性能条件の確認と並行して、独立して進められる実装・隔離VM検証を続ける。
 
+CORE-04の最新component checkpointは `8342440`。DerivedEventの有限snapshot評価と
+永続化可能なhysteresisを追加し、固定routerd比較、実SQLiteのtimer復元/失敗/retry、
+期限切れ時のunknown、clean check/Race/vet/static両arch buildがPASSした。
+resource/daemon接続、input cursorなしproducer保存、作用/federation等は残る。
+[証跡と未検証範囲](evidence/2026-10-24-derived-evaluator.md) を参照。作業単位全体や実機利用可能性の合格とはしない。
+
 ## 最初の実装 checkpoint
 
 CORE-01 / CORE-02 と CORE-03 の static graph 部分に着手した。

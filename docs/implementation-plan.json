@@ -11346,6 +11346,32 @@
         "Complete implementation plan and physical/NIC/performance acceptance"
       ],
       "parity_flags_unchanged": true
+    },
+    {
+      "id": "native-derived-finite-snapshot-evaluator",
+      "date": "2026-10-24",
+      "status": "partial_implementation_with_component_acceptance",
+      "code_checkpoint": "8342440",
+      "work_packages": [
+        "CORE-04"
+      ],
+      "evidence": "docs/evidence/2026-10-24-derived-evaluator.md",
+      "implemented": [
+        "Pure DerivedEvent assertions, retractions, initial policy and durable BOOTTIME hysteresis",
+        "Immutable finite current observations, explicit unknown values and original observation age",
+        "Coherent witness freshness/expiry, pending-deadline bound and stable output identities"
+      ],
+      "validation": [
+        "Pinned routerd immediate status/output comparison across emit/retract/initial policies: pass",
+        "Actual SQLite hold restoration, failed timer transaction, stable retry, stale-version rejection and reopened expired input: pass under Race Detector",
+        "Clean 8342440 make check build-linux: pass; unit/Python/Race/vet/static amd64 and arm64"
+      ],
+      "remaining": [
+        "ResourceProgram/daemon integration, accepted typed live status providers and publication fencing",
+        "Producer state/outbox independent of journal input cursors, including empty-journal bootstrap",
+        "Effects/federation, all remaining work packages and physical/NIC/performance acceptance"
+      ],
+      "parity_flags_unchanged": true
     }
   ],
   "delivery_goal": {

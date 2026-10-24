@@ -1,0 +1,13 @@
+{
+  "code_checkpoint": "83424407a808948575e2cea37e696bced0e9d27f",
+  "test_commits": [
+    "f4d4be3",
+    "f211c24",
+    "f07f1e1",
+    "09146f2"
+  ],
+  "make_source_dirty": false,
+  "targeted_race_source": "same implementation bytes before source commit; README/comments added afterwards",
+  "redaction": "workspace prefix only",
+  "scope": "pure evaluator plus actual SQLite consumer fixture; no live DerivedEvent daemon integration or hardware acceptance"
+}
