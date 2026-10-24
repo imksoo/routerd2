@@ -46,6 +46,14 @@ func TestMain(m *testing.M) {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
+		producer, err := s.ProducerCheckpoint(ctx, "derived")
+		if err == nil {
+			err = s.ProducerTransition(ctx, "derived", producer, json.RawMessage(`{"asserted":true}`), []Job{{Key: "producer-work", Payload: json.RawMessage(`{}`)}})
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
 		fmt.Fprintln(os.Stdout, "EVENTS_COMMIT_SYNCED")
 		var wait [1]byte
 		_, _ = os.Stdin.Read(wait[:]) // parent SIGKILLs without SQLite/Store.Close
@@ -137,6 +145,14 @@ func TestCommittedJournalCursorAndWorkSurviveSIGKILL(t *testing.T) {
 	work, err = s.Pending(context.Background(), "stateful", 10)
 	if err != nil || len(work) != 1 || work[0].Key != "stateful-work" {
 		t.Fatal("stateful work lost across SIGKILL", work, err)
+	}
+	producer, err := s.ProducerCheckpoint(context.Background(), "derived")
+	if err != nil || producer.Version != 1 || string(producer.State) != `{"asserted":true}` {
+		t.Fatal("producer state lost across SIGKILL", producer, err)
+	}
+	producerWork, err := s.ProducerPending(context.Background(), "derived", 10)
+	if err != nil || len(producerWork) != 1 || producerWork[0].Key != "producer-work" || producerWork[0].StateVersion != 1 {
+		t.Fatal("producer work lost across SIGKILL", producerWork, err)
 	}
 }
 
