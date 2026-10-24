@@ -4,6 +4,12 @@
 There is no POSIX shell escape. The shell supports private candidate editing,
 revision-checked commits, confirmed commits, operational queries and completion.
 
+`show event-store` reads fresh global event-journal capacity without changing
+configuration or allocating a consumer. Local command
+`routerd events export --output FILE` publishes a new private immutable history
+archive; `routerd events verify FILE` checks it offline. See the [storage contract](../../docs/event-storage.md)
+for warning thresholds, atomic publication and remaining retention work.
+
 ## Configuration editing and larger documents
 
 For interactive edits:

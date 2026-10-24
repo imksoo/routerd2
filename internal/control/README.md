@@ -171,13 +171,25 @@ commits with 503 before staging or kernel changes. `health.event_journal`
 reports pending count and delivery error; delivery errors make public health
 unhealthy without discarding authoritative configuration or pending history.
 
+`GET /v1/event-store` performs fresh read-only capacity inspection (no query
+parameters); `GET /v1/health` returns `event_journal.storage`, a bounded cache
+updated about once per second. Warning pressure remains healthy; exhaustion or query
+failure sets `State.event_store_error` and prevents trial confirmation. Confirm
+refreshes storage before taking the configuration lock, so it does not trust an
+old healthy cache. Expired trial rollback still restores its authoritative
+source and retains an undelivered observation in the reserved file outbox.
+Health polling does not query SQLite. The background capacity query and fresh
+inspection do not hold the configuration lock across storage I/O.
+See [capacity and immutable export](../../docs/event-storage.md); these do not
+reclaim journal space or guarantee an externally durable alarm.
+
 `GET /v1/observations?after_cursor=N&limit=L` reads persistent, append-only
 history independently of the control worker epoch. `after_cursor` is required;
 limit defaults to 16 and must be 1..16. Duplicate/unknown fields return 400,
 a cursor beyond the tip returns 409, and storage errors return 503. The page
 contains records, next_cursor and more. Each event is at most 64 KiB, keeping
 responses below the API byte limit. This is read-only history, not an effect
-execution or consumer registration API. Journal retention/capacity handling,
+execution or consumer registration API. Journal retention/reclamation and externally durable alarms,
 other raw protocol event producers and federation remain open work. HealthCheck
 probe events use the narrow durable relay described below. DerivedEvent
 assertion transitions are also connected through their producer state/outbox.

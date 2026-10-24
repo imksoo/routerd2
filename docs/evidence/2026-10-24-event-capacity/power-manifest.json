@@ -1,0 +1,156 @@
+{
+  "schema_version": 1,
+  "purpose": "health-queue-three-boot-two-SIGKILL-recovery",
+  "product_commit": "1a63d9238150ebcb24bb6620d06fe60965d5ec12",
+  "initializer_sha256": "6c9964f70793286aab63c50e323446235fc474c491a857aaa7551a99406684ec",
+  "binary_sha256": {
+    "/test/bin/routerd": "1779e051aeeed0760d23f8f1dd3ddb41c676b384497fd6df763beba4bdd40ce4",
+    "/test/bin/routerd-modules": "77f93d9f6d3ffc330c287524eb6806b15bcd4fe6adfef6c8cbaf37fb141fadf5"
+  },
+  "kernel_sha256": "17fbd3efd16f2e7cb1b945f06423b37399ba7d5ac8cdd3665e7f13f363500e85",
+  "source_initramfs_sha256": "c6b0ac5a7e6dc64a186ab595586f27bed87440083dc7a13cf0db9df8a3d2c729",
+  "source_image_manifest_sha256": "a1df58dc193d6f6f5a361b9b630e9fb106b76a3e3089239da2185f812d265b43",
+  "guest_memory_mib": 1024,
+  "guest_vcpus": 2,
+  "disk_bytes": 268435456,
+  "state_persistence": "ext4-virtio-block-regular-file",
+  "host_block_devices_used": false,
+  "host_filesystem_mounts_used": false,
+  "guest_external_network_interfaces": false,
+  "power_loss_scope": "guest VM process/device memory only; host filesystem and physical power loss are not emulated",
+  "witness_transport": "UART to host, then test-only initramfs file; no guest witness fsync at cut points",
+  "phases": [
+    {
+      "phase": "produce",
+      "result": "passed",
+      "termination": "SIGKILL",
+      "qemu_exit_status": -9,
+      "witness": {
+        "phase": "produce",
+        "boot_id": "576e0795-cc1a-40ae-974f-5d585c01b096",
+        "origin_boot_id": "576e0795-cc1a-40ae-974f-5d585c01b096",
+        "pid": 1,
+        "exec_verified": true,
+        "filesystem": "ext4",
+        "revision": 1,
+        "pending_count": 2,
+        "registered": 1,
+        "retiring": 0,
+        "health_worker": true,
+        "health_error": true,
+        "original_supervisor": "10575a6d29e8212054fdbd73771283d2",
+        "original_epoch": "3e8294be9c0575caf00cfb945dd31bd0",
+        "original_generation": 1,
+        "original_digest": "739bcf1289c8b806b951abc756d99e279b18aebbbe912949f18d73774cdd4ee3",
+        "observations": [
+          {
+            "id": "health/wan/e508b63e4fda3ba685d44e6ffd2a9da7",
+            "sha256": "3e6bfd7876513eb849bab155bfca7b56df547a7e602dfc649997cff892e15160",
+            "cursor": 0
+          },
+          {
+            "id": "health/wan/a241c48d482d4a5e94ac9cc4eee2d3a5",
+            "sha256": "7127c5cf938ed26dfe01202913532cb616f888875249d50c3239856f85e5548d",
+            "cursor": 0
+          }
+        ]
+      },
+      "duration_seconds": 24.73,
+      "qemu_exit_status_before_cleanup": -9,
+      "initramfs_sha256": "dda6e380d41aafd0fbb9a8dd049c4fba63cc30d579fe6ebe81d9a50ed2fed85a",
+      "disk_sha256_after_boot": "fcdfb449a6f20f1e0a9012cd9a5a89fac16b1ee4444ffebb6e90d559e1f56f37"
+    },
+    {
+      "phase": "registry",
+      "result": "passed",
+      "termination": "SIGKILL",
+      "qemu_exit_status": -9,
+      "witness": {
+        "phase": "registry",
+        "boot_id": "0c64e2f6-3b4c-4372-abc9-d4b9553c2a99",
+        "origin_boot_id": "576e0795-cc1a-40ae-974f-5d585c01b096",
+        "pid": 1,
+        "exec_verified": true,
+        "filesystem": "ext4",
+        "revision": 2,
+        "pending_count": 0,
+        "registered": 1,
+        "retiring": 1,
+        "health_worker": false,
+        "health_error": true,
+        "original_supervisor": "10575a6d29e8212054fdbd73771283d2",
+        "original_epoch": "3e8294be9c0575caf00cfb945dd31bd0",
+        "original_generation": 1,
+        "original_digest": "739bcf1289c8b806b951abc756d99e279b18aebbbe912949f18d73774cdd4ee3",
+        "observations": [
+          {
+            "id": "health/wan/e508b63e4fda3ba685d44e6ffd2a9da7",
+            "sha256": "3e6bfd7876513eb849bab155bfca7b56df547a7e602dfc649997cff892e15160",
+            "cursor": 4
+          },
+          {
+            "id": "health/wan/a241c48d482d4a5e94ac9cc4eee2d3a5",
+            "sha256": "7127c5cf938ed26dfe01202913532cb616f888875249d50c3239856f85e5548d",
+            "cursor": 5
+          },
+          {
+            "id": "health/wan/6692992badd2f47657e36e5f311c4da6",
+            "sha256": "05d10bfed2a21de4bb5e5c6bee7c581a4466bbfce6d0426abad175efdb5e7545",
+            "cursor": 6
+          }
+        ]
+      },
+      "duration_seconds": 24.12,
+      "qemu_exit_status_before_cleanup": -9,
+      "initramfs_sha256": "a50f496e05322383de5b597c64a33f76d954d3a9ba394ca29a586d10a601ead3",
+      "disk_sha256_after_boot": "cb5c07c0f7c66dd07495283d7760f435fb251f724429b348772a7493e34958c8"
+    },
+    {
+      "phase": "recovered",
+      "result": "passed",
+      "termination": "poweroff",
+      "qemu_exit_status": 0,
+      "witness": {
+        "phase": "recovered",
+        "boot_id": "36b0a16c-d676-402c-bc58-d590ef81467d",
+        "origin_boot_id": "576e0795-cc1a-40ae-974f-5d585c01b096",
+        "pid": 1,
+        "exec_verified": true,
+        "filesystem": "ext4",
+        "revision": 2,
+        "pending_count": 0,
+        "registered": 0,
+        "retiring": 0,
+        "health_worker": false,
+        "health_error": false,
+        "original_supervisor": "10575a6d29e8212054fdbd73771283d2",
+        "original_epoch": "3e8294be9c0575caf00cfb945dd31bd0",
+        "original_generation": 1,
+        "original_digest": "739bcf1289c8b806b951abc756d99e279b18aebbbe912949f18d73774cdd4ee3",
+        "observations": [
+          {
+            "id": "health/wan/e508b63e4fda3ba685d44e6ffd2a9da7",
+            "sha256": "3e6bfd7876513eb849bab155bfca7b56df547a7e602dfc649997cff892e15160",
+            "cursor": 4
+          },
+          {
+            "id": "health/wan/a241c48d482d4a5e94ac9cc4eee2d3a5",
+            "sha256": "7127c5cf938ed26dfe01202913532cb616f888875249d50c3239856f85e5548d",
+            "cursor": 5
+          },
+          {
+            "id": "health/wan/6692992badd2f47657e36e5f311c4da6",
+            "sha256": "05d10bfed2a21de4bb5e5c6bee7c581a4466bbfce6d0426abad175efdb5e7545",
+            "cursor": 6
+          }
+        ]
+      },
+      "duration_seconds": 23.8,
+      "qemu_exit_status_before_cleanup": 0,
+      "initramfs_sha256": "023c4c2056e091c97f5acf958ae07800f73f2a99eceebbd5d36a1fcf8c3baa9f",
+      "disk_sha256_after_boot": "134e2e1cb3c72fef7cda9a429f90d82202e4ca5e4b50bf98c9ddba718f6c06b9"
+    }
+  ],
+  "result": "passed",
+  "final_disk_sha256": "134e2e1cb3c72fef7cda9a429f90d82202e4ca5e4b50bf98c9ddba718f6c06b9"
+}

@@ -1,0 +1,9 @@
+{
+  "product_code_checkpoint": "f5e9cc5f500bc77003d19d73267cfaa9b7455942",
+  "build_checkpoint": "1fbb2d57f01ced823a33978393e2261b665cb8fb",
+  "sha256": {
+    "routerd": "b4f56ba9825cf7f43961b7118d32fbba75b2df39ea993bf20a33ae0a0d2870bc",
+    "routerd-modules": "175e16491a6748383f64fe9608d8b8c971a0d363de8f56142751ddb43b6cdb82"
+  },
+  "verified_against": "docs/evidence/2026-10-24-health-power/build-manifest.json"
+}

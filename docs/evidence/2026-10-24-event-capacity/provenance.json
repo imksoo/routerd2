@@ -1,0 +1,167 @@
+{
+  "product_code_checkpoint": "6006090751ea2cd7ddd83a23906b53ff2f96a7fe",
+  "capture_head": "1a63d92",
+  "additional_publication_test_only_checkpoint": "1a63d92",
+  "as_of_utc": "2026-10-24T21:46:55.833949+00:00",
+  "full_check_clean_product_source": true,
+  "native_binary_identity": "SHA256 of both native ELF files matched clean build manifest; integration harness uses Race Detector",
+  "quota_scope": "sudo private mount namespace; 8MiB tmpfs and root-owned 0700 stage; mandatory actual warning plus healthy control/producer",
+  "qemu_scope": "fresh fixed test-image ELF identity; 512MiB/two vCPU/no external NIC; actual internal two-WAN namespace topology",
+  "normalizations": [
+    "workspace/module-cache/private temporary stage paths",
+    "Go/kernel hex addresses",
+    "public kernel certificate identifier",
+    "trailing whitespace and eight-column tab expansion"
+  ],
+  "original_logs": [
+    {
+      "published": "check-build.log",
+      "private_source": "event-capacity-check-build.log",
+      "original_sha256": "5b7f626c8180fb732a260673d609ed77e7a468f62d33178099dc9408f4216950"
+    },
+    {
+      "published": "build-manifest.json",
+      "private_source": "event-capacity-build-manifest.json",
+      "original_sha256": "0acbb3081398eab8024c07968a53db1e233d6e85ce20319d8dfab7cfa1f175d2"
+    },
+    {
+      "published": "before-binaries.json",
+      "private_source": "event-capacity-before-binaries.json",
+      "original_sha256": "5df803ad20de5c0066729381e29c39048c611a45397726f4b9a97c9625f20959"
+    },
+    {
+      "published": "events-red.log",
+      "private_source": "event-capacity-history-red.log",
+      "original_sha256": "1cd1569d3838d53a4bb8634f60474b781a8e406729a6050440db3698b9b05a76"
+    },
+    {
+      "published": "control-red.log",
+      "private_source": "event-store-control-red.log",
+      "original_sha256": "60410d0768a841ce3391853cb0e1cfa0bb1c0f18f17ea1dee8c2c61f3798bded"
+    },
+    {
+      "published": "cli-red.log",
+      "private_source": "event-history-cli-red.log",
+      "original_sha256": "a19807fd2ea514fe267174b4957f16d6e36fa96e6820e13d6c7a896a72b4acf9"
+    },
+    {
+      "published": "events-race.log",
+      "private_source": "event-capacity-history-race.log",
+      "original_sha256": "535bba32ccbb67ae3339d82622ed104ff98a5b87c2523d5b39e638569a13736a"
+    },
+    {
+      "published": "control-race.log",
+      "private_source": "event-store-control-race.log",
+      "original_sha256": "96989e7b50ef8525d1c8efcdb99e91185f2fe911cdc7611794539a96613e0431"
+    },
+    {
+      "published": "cli-race.log",
+      "private_source": "event-history-cli-race.log",
+      "original_sha256": "0074306ac0198e9539fb6d34c6e6a5c5a589a5e900355e998c3f73788c118839"
+    },
+    {
+      "published": "shell-race.log",
+      "private_source": "event-store-shell-fixed-race.log",
+      "original_sha256": "cf665190469869d4b2c62474d81a827ec898908353fca1b9788f9cf3fd16509e"
+    },
+    {
+      "published": "final-local-race.log",
+      "private_source": "event-capacity-final-local-race.log",
+      "original_sha256": "0a0e3c47db4638749a65e4680062359a8bfe850a1939121dfd964777bcef9a13"
+    },
+    {
+      "published": "confirm-race.log",
+      "private_source": "event-store-final-confirm-race.log",
+      "original_sha256": "d4d66dbab4a7f67004acadea9d1357f02a47235a4c7fdd746e0354587d6ae1b4"
+    },
+    {
+      "published": "archive-final-race.log",
+      "private_source": "event-history-final-race.log",
+      "original_sha256": "577054859ccf71df259dc8eb4002775550841259d87a848569b5d936a402080c"
+    },
+    {
+      "published": "publication-race.log",
+      "private_source": "event-history-publication-race.log",
+      "original_sha256": "081b60d78aa33728def7fc9363b57ba237a90403915f9b42520d89c2e8649a68"
+    },
+    {
+      "published": "python-tools.log",
+      "private_source": "event-capacity-tools.log",
+      "original_sha256": "596176ed66970d05afcc7b2477ee59aea5cc4add3be4533f8356d5257f421f8a"
+    },
+    {
+      "published": "native.log",
+      "private_source": "event-capacity-native.log",
+      "original_sha256": "5c601eb8b53bb09e92b3ad5c12d5e155c644fe92e9be2f1ea3b4cacbd78e0e72",
+      "extraction": "native host filesystem/memory diagnostics omitted"
+    },
+    {
+      "published": "native-warning.log",
+      "private_source": "event-capacity-native-warning.log",
+      "original_sha256": "650705937044c45db6d4bb1cac5fd0cafb9acac236966a44c0697d1bcc434019"
+    },
+    {
+      "published": "native-old-red-excerpt.log",
+      "private_source": "event-capacity-native-red.log",
+      "original_sha256": "d15c283022846938e387964aa17832f2e1ff415a789b789fe131ef89abe29330",
+      "extraction": "first4+last4lines; private fixture console omitted"
+    },
+    {
+      "published": "daemon-event-archive-manifest.json",
+      "private_source": "event-capacity-daemon-event-archive-qemu/manifest.json",
+      "original_sha256": "7d24449105e9f5dc5990cab7bfd3d3d59b25545f13c6520c7c02c818bc37e519"
+    },
+    {
+      "published": "daemon-event-archive-serial.log",
+      "private_source": "event-capacity-daemon-event-archive-qemu/qemu-serial.log",
+      "original_sha256": "629e47ac92e0e4171c6a32b245da0e8b42ecc134deb38f20cf0d177f0e6e7aa4"
+    },
+    {
+      "published": "daemon-derived-manifest.json",
+      "private_source": "event-capacity-daemon-derived-qemu/manifest.json",
+      "original_sha256": "1a2d5bc17643911e6d821309f32c89474d47986d9e601949fd46bf400947107b"
+    },
+    {
+      "published": "daemon-derived-serial.log",
+      "private_source": "event-capacity-daemon-derived-qemu/qemu-serial.log",
+      "original_sha256": "7c6bb0c26176e59595d1a465800ed1d2297a0e8ef7026c07cc98185e35388cb2"
+    },
+    {
+      "published": "daemon-health-pbr-manifest.json",
+      "private_source": "event-capacity-daemon-health-pbr-qemu/manifest.json",
+      "original_sha256": "d960f02f86426380e11c41f00e96ad5d8f983447d7af3b933827b879d00d0770"
+    },
+    {
+      "published": "daemon-health-pbr-serial.log",
+      "private_source": "event-capacity-daemon-health-pbr-qemu/qemu-serial.log",
+      "original_sha256": "2bcf4fe4b064a52cf2c8dcf2f5533706258609e5f139f13e2fc4ef35188c6d9c"
+    },
+    {
+      "published": "power-manifest.json",
+      "private_source": "event-capacity-power-qemu/manifest.json",
+      "original_sha256": "c9d632062a81a7cbece4b12e07f5da4cfbdaf5eed828cbccae445d7881fbb4af"
+    },
+    {
+      "published": "power-produce.log",
+      "private_source": "event-capacity-power-qemu/qemu-produce.log",
+      "original_sha256": "f172eb9c8dc5461fc7a0b419d6ecac890a5c46bbe9bee373a1f3f356b6d73c7f"
+    },
+    {
+      "published": "power-registry.log",
+      "private_source": "event-capacity-power-qemu/qemu-registry.log",
+      "original_sha256": "ddf542b7dfd53874fe8b3751b1d7fe98ed6ff013a3566877bbacbc0239316e59"
+    },
+    {
+      "published": "power-recovered.log",
+      "private_source": "event-capacity-power-qemu/qemu-recovered.log",
+      "original_sha256": "43ddea42bf9742a15ed496337de56899bd54e201e898e5af903bcf07edae5041"
+    }
+  ],
+  "power_regression": {
+    "build_head": "1a63d9238150ebcb24bb6620d06fe60965d5ec12",
+    "product_sources_unchanged_since": "6006090751ea2cd7ddd83a23906b53ff2f96a7fe",
+    "duration_seconds": 72.65,
+    "scope": "three actual boots/two SIGKILL, one private 256MiB ext4 regular file, 1GiB/two vCPU/no external NIC; not physical host/cache loss",
+    "observations": "two accepted before first cut plus one second-boot event; all three exact events with cursors4/5/6 survive second cut"
+  }
+}

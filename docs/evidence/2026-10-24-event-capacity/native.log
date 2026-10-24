@@ -1,0 +1,41 @@
+=== RUN   TestDaemonDerivedHealthCurrentStatusAndDurability
+    derived_test.go:41: === RUN   TestDaemonDerivedHealthCurrentStatusAndDurability
+            derived_test.go:45: isolated lifecycle deadline remaining: 2m30s
+            derived_test.go:385: raw probe events and EventRule count passed; 4 queued stable observations survived worker/control SIGKILL and journal failure without duplicate or renewed facts
+            derived_test.go:517: permanent health removal recovered 2 original observations through target failure, registry ACK failure and two control restarts without reactivation
+            derived_test.go:539: registry persistence failure rejected candidate before health worker launch and preserved authoritative source
+            derived_test.go:540: real TCP probes -> finite typed current status -> durable DerivedEvent -> EventRule; producer/control/logging restart, old notification, max_age and SQL failure recovery passed
+            derived_test.go:541: ROUTERD_DERIVED_DAEMON_TEST_PASS
+            derived_test.go:102: fixture file_bytes=4284367 allocated_bytes=4321280 largest_files=[{state/events/journal.sqlite3-wal 4074712 4079616} {state/services/wan/health-events/journal.sqlite3 81920 81920} {state/services/wan2/health-events/journal.sqlite3 65536 65536} {state/events/journal.sqlite3-shm 32768 32768} {state/logs/log.0.ndjson 17183 24576} {state/events/journal.sqlite3 4096 4096} {console.log 3289 4096} {config.json 2085 4096} {state/.routerd-txn-755552494 614 4096} {state/config.json 614 4096} {state/network.json 579 4096} {boot.json 457 4096}]
+        --- PASS: TestDaemonDerivedHealthCurrentStatusAndDurability (10.89s)
+        PASS
+--- PASS: TestDaemonDerivedHealthCurrentStatusAndDurability (11.92s)
+=== RUN   TestDaemonEventArchiveAndCapacity
+    bgp_test.go:192: === RUN   TestDaemonEventArchiveAndCapacity
+            event_archive_test.go:137: actual CLI exported and independently matched 4 complete records through cursor 4, verified offline and preserved source producer authority
+        --- PASS: TestDaemonEventArchiveAndCapacity (0.96s)
+        PASS
+--- PASS: TestDaemonEventArchiveAndCapacity (1.99s)
+=== RUN   TestDaemonHealthPBRFailoverAndRecovery
+    health_pbr_test.go:41: === RUN   TestDaemonHealthPBRFailoverAndRecovery
+            health_pbr_test.go:311: two independent health workers: primary -> outage -> backup -> threshold recovery -> consumer hold -> primary; operator revision stays 1
+            health_pbr_test.go:341: recovered actual worker service.health-a
+            health_pbr_test.go:341: recovered actual worker control
+            health_pbr_test.go:341: recovered actual worker network
+            health_pbr_test.go:396: finite observation expired while producer stayed supervisor-ready; duplicate and resequenced replay did not renew it
+            health_pbr_test.go:442: consumer max_age withdrew a still-valid healthy sample; transport replay stayed stale and fresh worker observation restored TCP/UDP
+            health_pbr_test.go:504: complete supervisor restart reused lower worker generations; new process-tree instance fenced delayed former-tree observations and preserved revision 3 and TCP/UDP
+            health_pbr_test.go:516: capture 192.0.2.2 -> 198.51.100.10 protocol=6 port=18080 packets=180
+            health_pbr_test.go:516: capture 198.18.0.2 -> 198.51.100.20 protocol=6 port=18081 packets=36
+            health_pbr_test.go:516: capture 198.18.0.2 -> 198.51.100.20 protocol=17 port=18081 packets=9
+            health_pbr_test.go:517: capture 203.0.113.2 -> 198.51.100.11 protocol=6 port=18080 packets=217
+            health_pbr_test.go:517: capture 198.18.0.2 -> 198.51.100.20 protocol=6 port=18081 packets=23
+            health_pbr_test.go:517: capture 198.18.0.2 -> 198.51.100.20 protocol=17 port=18081 packets=5
+            health_pbr_test.go:518: OUTPUT wan0 probe SYN packets=48 all carry socket mark 42; foreign nft table preserved
+            health_pbr_test.go:518: OUTPUT wan1 probe SYN packets=55 all carry socket mark 42; foreign nft table preserved
+            health_pbr_test.go:522: confirmed rollback restored source and primary TCP/UDP; foreign objects and probe paths survived every transition
+            health_pbr_test.go:523: ROUTERD_HEALTH_PBR_DAEMON_TEST_PASS
+        --- PASS: TestDaemonHealthPBRFailoverAndRecovery (28.52s)
+        PASS
+--- PASS: TestDaemonHealthPBRFailoverAndRecovery (29.56s)
+PASS

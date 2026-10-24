@@ -4,9 +4,20 @@
 対象: `https://github.com/imksoo/routerd2`
 
 **継続ゴール:** 全残実装・必要試験・対象実機での利用可能性の受入まで進める。
-部分checkpointでは完了しない。最新product checkpointは `f5e9cc5`。
+部分checkpointでは完了しない。最新product checkpointは `6006090`。
 
-最新の検証checkpointでは、製品コードf5e9cc5を変更せず、専用fixture `9e14ce8` で三回の実kernel bootを追加した。
+最新productはevent journalの件数/byte/DB/WAL/filesystem容量を可視化し、warning/exhaustedと
+freshなtrial confirm拒否を追加した。`show event-store`、private API、localの
+`routerd events export/verify` で、固定tipまでの完全な履歴prefixを0600の新規ファイルへ公開・検証する。
+既存ファイルと競合作成先を上書きせず、元ID/内容/cursorを保持し、producerを止めない。
+clean全体check/Race/vet/static両arch build102.77秒、実daemonのarchive1.99秒・Derived11.92秒・
+二WAN Health/PBR29.56秒、実8MiB quotaでのhealthy容量警告1.65秒がPASS。
+QEMU archive26.13秒・Derived89.26秒・二WAN Health/PBR87.25秒もPASS。
+同じ新productの三boot/二SIGKILL回帰は72.65秒PASS。元2件と追加1件の内容/cursor 4/5/6を保持した。
+これは容量観測と履歴copyであり、archive後もsource/dedup/cursorを削除しない。領域回収は未実装。
+[操作と保存契約](event-storage.md) と [検証・残作業](evidence/2026-10-24-event-capacity.md) を参照。
+
+先行の検証checkpointでは、製品コードf5e9cc5を変更せず、専用fixture `9e14ce8` で三回の実kernel bootを追加した。
 未配信queue保存後と、target保存/local ACK後の登録解除失敗中に、hostからQEMUをSIGKILLした。
 同じ256 MiB ext4 diskで、最初の2件と次bootの追加2件が一度ずつ配信され、二度目のcut後も内容・cursor 4/5/6/7が一致した。
 登録待ちが再発見され、障害解除後は健全に戻り、Health/Derived現在値は復活しない。旧通知と履歴POSTは409。

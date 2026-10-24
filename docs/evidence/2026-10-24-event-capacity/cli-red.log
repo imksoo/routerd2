@@ -1,0 +1,8 @@
+# github.com/imksoo/routerd2/cmd/routerd [github.com/imksoo/routerd2/cmd/routerd.test]
+cmd/routerd/events_linux_test.go:70:18: undefined: exportEventHistory
+cmd/routerd/events_linux_test.go:90:14: undefined: exportEventHistory
+cmd/routerd/events_linux_test.go:101:14: undefined: exportEventHistory
+cmd/routerd/events_linux_test.go:114:15: undefined: exportEventHistory
+cmd/routerd/events_linux_test.go:126:12: undefined: eventCommand
+FAIL    github.com/imksoo/routerd2/cmd/routerd [build failed]
+FAIL

@@ -11625,6 +11625,40 @@
         "Product-version migration/full database rollback, signed runtime lifecycle and all remaining work-package acceptance"
       ],
       "parity_flags_unchanged": true
+    },
+    {
+      "id": "event-capacity-and-history-export",
+      "date": "2026-10-24",
+      "status": "partial_implementation_verified",
+      "code_checkpoint": "6006090751ea2cd7ddd83a23906b53ff2f96a7fe",
+      "additional_test_checkpoint": "1a63d92",
+      "work_packages": [
+        "CORE-04"
+      ],
+      "evidence": "docs/evidence/2026-10-24-event-capacity.md",
+      "operator_contract": "docs/event-storage.md",
+      "implemented": [
+        "Coherent transactional event/job/registration budgets, cursor bounds, DB/WAL allocation and filesystem availability; 80/100 percent logical pressure and low-space reasons without payload scans",
+        "Fresh read-only event-store API and management command, background bounded health cache outside configuration lock, fresh exhausted/query-failure trial confirm fencing with authoritative rollback/outbox preservation",
+        "Version1 bounded JSONL immutable prefix export and independent offline integrity verification with exact event content/cursors, unique IDs, counts/bytes and SHA256; no source deletion, ACK, import or authority restoration",
+        "Local private 0600 temporary output, complete file fsync and atomic no-clobber publication/directory fsync; existing symlink and concurrent destination preservation",
+        "Required actual-daemon archive/capacity QEMU gate and actual private 8MiB filesystem warning fixture"
+      ],
+      "validation": [
+        "Test-first unit failures and actual old binary HTTP404 failure; related Race fixtures cover concurrent append, corrupt/truncated/duplicate history with recomputed checksums, write failures and destination races",
+        "Clean make check build-linux at6006090 passes102.77s: unit/Python21/Race/vet/static amd64+arm64; later additional publication-race unit passes separately",
+        "Fresh hash-matched actual daemons with Race harness: archive1.99s, Derived11.92s and two-WAN TCP/UDP/PCAP health-PBR29.56s pass",
+        "Private 8MiB quota: mandatory actual low-space warning while control and Health producer remain healthy, archive complete records and original authority preserved;1.65s pass",
+        "No-NIC QEMU gates pass: archive26.13s, Derived89.26s, two-WAN Health/PBR87.25s; related gates only, not a new all-suite aggregate",
+        "New product three-boot/two-SIGKILL regression passes72.65s: first accepted2 plus second-boot1 event retain exact content/cursors4/5/6, pending registry survives and clears; 1GiB/private256MiB ext4/no NIC, not physical power loss"
+      ],
+      "remaining": [
+        "Export does not reclaim source space: automatic durable archive offload, safe hot reclamation, dedup retention policy and consumer/timer reachability contract",
+        "Aggregate filesystem budget, externally durable alerts, scale/latency and long-running capacity/durability qualification",
+        "Other raw producers/status providers, structured fields/Derived chaining, privileged effects and federation",
+        "Product-version migration/full DB rollback, all remaining work packages and selected physical hardware/NIC/performance acceptance"
+      ],
+      "parity_flags_unchanged": true
     }
   ],
   "delivery_goal": {

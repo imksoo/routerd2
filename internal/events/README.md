@@ -77,14 +77,26 @@ producer jobs also share the outbox row/byte limits. Individual bodies are at mo
 64 KiB. These are payload/row budgets, not a bound on SQLite's total filesystem
 size. Capacity exhaustion refuses growth and preserves unconsumed history and
 deduplication tombstones. It still acknowledges existing identical events.
-Retention/archiving and capacity alarms outside this filesystem remain required
-before this component can serve a long-running production event workload.
+`Capacity` reads transactional usage counters, cursor bounds, file allocation and
+filesystem availability without scanning payloads. Logical budget pressure is
+visible at 80%/100%; low available filesystem space is also reported. Completed
+jobs count toward these budgets because they retain idempotency tombstones.
+`ExportHistory` copies an immutable prefix through a captured tip in bounded
+pages without holding a store lock across output I/O. `VerifyHistory` checks
+frames, complete event content, ordered cursors, unique IDs, byte/count totals
+and SHA-256. This does not delete source rows, advance consumers or renew leases.
+See [operator commands and the archive contract](../../docs/event-storage.md).
+Retention, durable archive offload/reclamation and capacity alarms outside this
+filesystem remain required before a long-running production event workload.
 
 Tests use actual SQLite transactions, write-failure triggers, SQLITE_FULL,
 concurrent publishers, private path attacks, foreign database preservation,
 connection replacement, and SIGKILL followed by WAL recovery. Configuration
 producer state/outbox atomicity and worker recovery have separate control tests.
-Other protocol event producers and QEMU power-loss acceptance remain implementation-plan work.
+The live Health relay has a dedicated three-boot/two-SIGKILL
+[recovery gate](../../docs/evidence/2026-10-24-health-power.md).
+Other protocol event producers, exhaustive cut points and physical power-loss
+acceptance remain implementation-plan work.
 
 The database schema is now version 4. Accepted design D-09 deliberately does
 not import discarded, unreleased version-1/2/3 prototype state. Unsupported schema
