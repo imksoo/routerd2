@@ -42,3 +42,19 @@ func TestShowObservationsBoundsAndStorageFailureDoNotPrintPartialHistory(t *test
 		t.Fatalf("storage failure leaked output: %v %s", err, output.String())
 	}
 }
+
+func TestObservationCompletionDoesNotRepeatUsedFilters(t *testing.T) {
+	s := &interactiveShell{}
+	for input, want := range map[string]string{
+		"show obs":                           "show observations ",
+		"show observations a":                "show observations after ",
+		"show observations after 7 l":        "show observations after 7 limit ",
+		"show observations limit 2 a":        "show observations limit 2 after ",
+		"show observations after 7 limit 2 ": "show observations after 7 limit 2 ",
+	} {
+		got, _, ok := s.complete(input, len(input), '\t')
+		if !ok || got != want {
+			t.Fatalf("%q: %q, want %q", input, got, want)
+		}
+	}
+}
