@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "purpose": "isolated-daemon-bfd-derived-integration",
+  "suite": "daemon-bfd-derived",
+  "required_test": "TestDaemonBFDDerivedCurrentStatus",
+  "kernel_release": "6.18.58-0-virt",
+  "kernel_sha256": "17fbd3efd16f2e7cb1b945f06423b37399ba7d5ac8cdd3665e7f13f363500e85",
+  "initializer_sha256": "28d967c7fb9b28c2f79148421270805b5b897f54dd9351c4801d78e773aa6018",
+  "test_binary_sha256": "edb1336711a8e67d2273fbb1dc9d094452e389b6099a449622fbc43b689d06f5",
+  "binary_sha256": {
+    "/test/bin/routerd": "4845d1818acc1fbc320c46c73b083aec0ebfc42d755ea04d7f8268c6014b9627",
+    "/test/bin/routerd-modules": "a6b6b1116d9df0e471b6a29c2830ae7dd62e06ba3db0af7a6ef0d3c8080af776"
+  },
+  "source_image_manifest_sha256": "a1df58dc193d6f6f5a361b9b630e9fb106b76a3e3089239da2185f812d265b43",
+  "source_initramfs_sha256": "c6b0ac5a7e6dc64a186ab595586f27bed87440083dc7a13cf0db9df8a3d2c729",
+  "host_network_access": false,
+  "result": "passed",
+  "guest_memory_mib": 512,
+  "test_scratch": {
+    "mountpoint": "/tmp",
+    "filesystem": "tmpfs",
+    "size_bytes": 67108864
+  },
+  "initramfs_sha256": "a8aaa5f0a889d0c5a4f23b279a1785d8db0648c5cc506827aa8ade618db0cf8b",
+  "duration_seconds": 42.37,
+  "qemu_exit_status_before_cleanup": 0
+}

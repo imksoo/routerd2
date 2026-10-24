@@ -1,0 +1,6 @@
+=== RUN   TestSteadyArchiveBatchesHaveBoundedCodecAllocation
+    archive_cache_test.go:83: steady sixteen-record archive batch allocated 2098093 bytes; limit512KiB
+--- FAIL: TestSteadyArchiveBatchesHaveBoundedCodecAllocation (2.59s)
+FAIL
+FAIL    github.com/imksoo/routerd2/internal/events      2.611s
+FAIL

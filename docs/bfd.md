@@ -65,6 +65,45 @@ calculated `bfd_health` section. A last observed `UP` state may remain visible
 after a suspended worker has missed its deadline; `healthy_peers` reflects
 current validity rather than the old display state.
 
+## Current status in DerivedEvent
+
+A `derived_event` can read the native BFD provider using its ResourceProgram
+ID, including an ID containing `/`. For the service in the example above,
+append this resource to observe the aggregate phase:
+
+```yaml
+  - id: edge-bfd-up
+    derived_event:
+      topic: routerd.operator.bfd
+      inputs:
+        - field: "${BFD/service/edge-bfd.status.phase}"
+          equals: Up
+      emitInitial: true
+      hysteresis: 100ms
+```
+
+The supported top-level fields are `phase`, `peerStates`, `peers` and
+`observedAt`, retaining the original BFD status field representations. Phase
+is `Up`, `Down`, `Degraded` or `Pending`; nested selectors are unsupported.
+The [DerivedEvent contract](resource-program.md#derivedevent) describes the
+map/array text representations and the bounded current observations.
+
+Current values require the active declaration, current ready worker identity
+and a fresh supervisor observation. A local status observation expires after
+five seconds. Up/Init is further capped by the original packet detection
+deadline; redisplay, periodic publication and identical notification retries
+cannot renew it. Expired raw Up becomes unknown without fabricating a Down
+transition. Durable asserted/retracted outputs can feed an EventRule, but
+stored output cannot restore current Up after worker/control recovery.
+
+Peer transition counters prevent a coalesced Up→Down→Up from inheriting a
+pending hysteresis hold. A peer change can conservatively restart a hold
+even if the aggregate phase stayed unchanged. Saturated transition counters
+cannot certify continuity and produce unknown. The BFD callback retains its
+independent short cache lock; this consumer does not make it wait for network
+apply. This is sampled current-state evaluation, not a lossless durable raw
+BFD packet/transition producer or full legacy BFD resource parity.
+
 ## Explicit BGP dependency
 
 The public BGP setting is `peer_bfd`, keyed by the exact BGP neighbor address.

@@ -1,0 +1,4 @@
+# github.com/imksoo/routerd2/internal/derived [github.com/imksoo/routerd2/internal/derived.test]
+internal/derived/provider_continuity_test.go:19:162: unknown field Continuity in struct literal of type Value
+FAIL    github.com/imksoo/routerd2/internal/derived [build failed]
+FAIL

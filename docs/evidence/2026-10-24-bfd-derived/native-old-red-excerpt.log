@@ -1,0 +1,15 @@
+=== RUN   TestDaemonBFDDerivedCurrentStatus
+    bgp_test.go:192: isolated protocol fixture: exit status 1
+        === RUN   TestDaemonBFDDerivedCurrentStatus
+            derived_bfd_test.go:39: condition timed out after 20s
+            bgp_test.go:305: console: {"timestamp":"2026-10-24T23:22:55.22583566Z","module":"supervisor","pid":1606741,"generation":0,"level":"INFO","message":"worker started","attributes":{"generation":1,"module":"logging","pid":1606752},"producer_epoch":"d0409cf11e4adecb66bd4825946cb52c","producer_sequence":1,"delivery":"console_fallback"}
+                {"timestamp":"2026-10-24T23:22:55.226385102Z","module":"supervisor","pid":1606741,"generation":0,"level":"INFO","message":"worker started","attributes":{"generation":1,"module":"network","pid":1606753},"producer_epoch":"d0409cf11e4adecb66bd4825946cb52c","producer_sequence":2,"producer_dropped":1,"delivery":"console_fallback"}
+                {"timestamp":"2026-10-24T23:22:55.226916501Z","module":"supervisor","pid":1606741,"generation":0,"level":"INFO","message":"worker started","attributes":{"generation":1,"module":"control","pid":1606754},"producer_epoch":"d0409cf11e4adecb66bd4825946cb52c","producer_sequence":3,"producer_dropped":2,"delivery":"console_fallback"}
+                {"timestamp":"2026-10-24T23:22:55.22737411Z","module":"supervisor","pid":1606741,"generation":0,"level":"INFO","message":"worker started","attributes":{"generation":1,"module":"management","pid":1606755},"producer_epoch":"d0409cf11e4adecb66bd4825946cb52c","producer_sequence":4,"producer_dropped":2,"delivery":"console_fallback"}
+                {"time":"2026-10-24T23:22:55.238403873Z","level":"ERROR","msg":"worker stopped","error":"bootstrap config: derived event bfd-derived has unsupported or missing typed reference BFD/service/watch.status.observedAt"}
+                {"time":"2026-10-24T23:22:55.360217925Z","level":"ERROR","msg":"worker stopped","error":"bootstrap config: derived event bfd-derived has unsupported or missing typed reference BFD/service/watch.status.observedAt"}
+[... repeated baseline startup rejection omitted; full raw SHA in provenance ...]
+        --- FAIL: TestDaemonBFDDerivedCurrentStatus (20.06s)
+        FAIL
+--- FAIL: TestDaemonBFDDerivedCurrentStatus (20.10s)
+FAIL

@@ -1,0 +1,8 @@
+ok      github.com/imksoo/routerd2/internal/protocol/bfd        1.044s
+ok      github.com/imksoo/routerd2/internal/derived     1.055s
+ok      github.com/imksoo/routerd2/internal/resourceprogram     1.058s
+--- FAIL: TestDerivedBFDCoalescedFailureBreaksUnpolledHoldAndWorkerIdentity (0.03s)
+    derived_bfd_test.go:111: BFD producer changed receive-derived evidence without a packet
+FAIL
+FAIL    github.com/imksoo/routerd2/internal/runtimeplan 1.267s
+FAIL

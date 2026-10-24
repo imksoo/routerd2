@@ -49,13 +49,15 @@ read-onlyのfresh inspectionが成功しただけではwrite失敗の警告を�
 ## Event payloadを圧縮領域へ自動退避する
 
 controlは約1秒周期に最大16 eventを、同じSQLite WAL/FULL内の圧縮領域へ移す。
-元のevent row・ID・cursorを残す。gzipのround tripとSHA-256の確認中はDB接続/書込transactionを保持せず、
+元のevent row・ID・cursorを残す。圧縮/検証codecはstoreごとの有限workspaceを再利用し、Closeで解放する。
+workspaceの排他中にDB接続/書込transactionを保持せず、gzipのround tripとSHA-256を確認する。
 確定時に元bodyを再確認し、圧縮bodyの保存、
 元payloadの解放、両容量counterの更新を一つのtransactionで確定する。
 失敗ではbatchをrollbackし、元payloadを保持する。圧縮予算に収まるprefixだけを確定でき、
 1件も収まらない場合は容量errorとなる。期限による削除やcursorのACKではない。
 
 未読consumerも同じ履歴APIから全内容を読める。pending outboxとtimer用の元cursor参照も維持する。
+有限なpageを読み取った後はSQL接続を返してからgzip/JSONを検証する。
 同一IDの再送は圧縮先を検証して同じcursorでACKし、内容変更は拒否する。
 圧縮bodyの欠損、CRC/長さ/SHA不一致、追加streamや展開量超過は読取と再送ACKを拒否する。
 検証済みの展開bodyは4MiB payload/4,096件以下のLRU cacheに保管し、同じ履歴のpollingで毎回再展開しない。

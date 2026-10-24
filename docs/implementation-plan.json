@@ -11731,6 +11731,44 @@
         "Product-version migration/full database rollback/signed runtime lifecycle, all remaining work-package and selected physical/NIC/performance acceptance"
       ],
       "parity_flags_unchanged": true
+    },
+    {
+      "id": "bfd-current-derived-status",
+      "date": "2026-10-24",
+      "status": "partial_provider_implementation_verified",
+      "code_checkpoint": "d37648960abb374f7366bc792b7007bb02d6cfb5",
+      "initial_product_checkpoint": "e848fbec6ecd404bb29b7b478f427199b8331309",
+      "work_packages": [
+        "CORE-04"
+      ],
+      "evidence": "docs/evidence/2026-10-24-bfd-derived.md",
+      "operator_contract": "docs/resource-program.md#derivedevent",
+      "implemented": [
+        "Typed BFD current phase/peerStates/peers/observedAt with original status text representations and active declaration/binding/worker/supervisor identity fences",
+        "Five-second BOOTTIME local observation lease capped by original Up/Init packet detection deadlines and supervisor freshness; replay/redisplay cannot renew current Up and stored assertions cannot restore authority",
+        "Independent short BFD cache callback path retained; capture immutable cache before clock; peer transition/discriminator continuity breaks pending holds across coalesced flaps without replacing producer authority; saturated continuity becomes unknown",
+        "Bounded64KiB field and2MiB whole snapshot; large text excluded from durable state; existing atomic Derived output and durable EventRule reuse",
+        "One compression/validation workspace per store to reduce repeated maintenance DEFLATE allocations; full round-trip/CRC/framing/content checks outside SQLite writer retained, cleared on Close",
+        "Materialize a bounded immutable journal page and release its single SQLite connection before gzip/JSON validation, preserving source ID/body checks while allowing concurrent publication"
+      ],
+      "validation": [
+        "Test-first missing API/compiler failures, actual pinned3bca14b ELF20.19s unsupported-reference failure, finite-status/hold/type/maximum64-peer and derived4-package Race pass",
+        "Initial clean e848fbe check/Race/vet/static both architectures120.40s and four native passes; initial QEMU BFD-derived42.37s/BFD57.38s pass but existing Health-Derived52.11s fails with deadline errors",
+        "Local added archive batch allocation test fails2098093bytes/16records; reused codec reduces467666bytes; relevant archive corruption/capacity/concurrency/Close Race14.195s passes without raising guest RAM/CPU/deadlines",
+        "Codec-only896b61a check/Race/vet/static build106.63s passes but QEMU Health-Derived51.51s still fails; both failed runs retained rather than counted as acceptance",
+        "Local new read stall test reproduces live publication timeout1s; release connection before decode fixes it, full event store Race24.008s passes",
+        "Final clean d376489 full check/Race/vet/static amd64+arm64 build104.86s passes; hashes match actual native archive7.84s, Health-Derived13.11s, BFD-Derived11.70s, BFD/BGP22.87s and two-WAN TCP/UDP/PCAP PBR31.18s; all pass",
+        "Actual8MiB private tmpfs healthy filesystem warning, archive write failure/recovery/control SIGKILL7.50s passes",
+        "Final no-NIC512MiB/2CPU/64MiB-scratch QEMU Health-Derived92.09s, BFD-Derived41.76s, BFD/BGP56.19s, two-WAN TCP/UDP/PCAP PBR89.46s and archive38.73s all pass; guest limits/deadlines unchanged; all five ELF/test/init/kernel hashes agree; related gates, not a new all-suite aggregate"
+      ],
+      "remaining": [
+        "BFD durable raw producer/queue and complete raw transition history, stopped/deleted source recovery; current Derived remains sampled",
+        "Other typed providers, nested/structured selectors and Derived chaining; complete legacy BFD/BGP resource/profile contracts; wall-clock-change predicate continuity and multi-peer real-packet acceptance",
+        "Archive off-device durability, retention and identity lifetime sealing, aggregate filesystem/operational budgets and scale/performance acceptance",
+        "All remaining work packages, hardware/NIC qualification, privileged effects/idempotency and federation"
+      ],
+      "parity_flags_unchanged": true,
+      "intermediate_codec_checkpoint": "896b61ac499085c1779bce51382439e6e75260c7"
     }
   ],
   "delivery_goal": {

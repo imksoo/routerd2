@@ -7,8 +7,23 @@
 部分checkpointでゴールを完了にせず、実装・検証・未検証と証跡を更新する。
 対象機種・NIC・性能条件の確認と並行して、独立して進められる実装・隔離VM検証を続ける。
 
-最新product checkpointは `3bca14b`。
-eventの元payloadを、同じWAL/FULL transaction内のgzip領域へ自動退避し、hot枠/pageを回収する。
+最新product checkpointは `d376489`（BFD初回 `e848fbe`）。
+BFDの `phase` / `peerStates` / `peers` / `observedAt` を有限な現在状態としてDerivedEventへ渡し、durable EventRuleへ接続した。
+Up/Initは元packet受信期限を超えず、通知再送や表示で期限を延長しない。通知集約中のflapはcounterでholdをリセットする。
+実UDP peerを使い、期限切れ・同一再送・worker/control再起動・旧通知409・過去Upを復活させない経路を追加した。
+初回QEMUの既存Health/Derivedは52.11秒FAILで保存。localの圧縮保存16件/batchは2,098,093byteを割り当て、
+store内codec workspace再利用で467,666byteへ減った。期限/RAM/vCPUは変更していない。
+codec修正だけのQEMUも51.51秒FAIL。localで読取中のbody検証が新規保存まで1秒timeoutさせることを再現し、
+有限pageを取得してSQL接続を返した後にgzip/JSONを検証するよう修正した。
+event store全体Race24.008秒と最終clean check/Race/vet/static両arch build104.86秒PASS。
+最終nativeはBFD-derived11.70秒・BFD/BGP22.87秒・Health/Derived13.11秒・二WAN/PBR31.18秒・archive7.84秒PASS。
+最終QEMUはHealth/Derived92.09秒・BFD-derived41.76秒・BFD/BGP56.19秒・二WAN/PBR89.46秒・archive38.73秒がPASS。
+実8MiB tmpfsのmandatory容量警告/保存失敗/回復/control SIGKILLも7.50秒PASS。
+これはCORE-04のprovider部分実装であり、BFD raw producer、他provider/構造化selector/Derived連鎖、
+全残計画と対象実機/NIC/性能受入は未完了。parityとwork package全体の完了状態は変更しない。
+[契約](resource-program.md#derivedevent) と [検証・残作業](evidence/2026-10-24-bfd-derived.md) を参照。
+
+先行product `3bca14b`では、eventの元payloadを、同じWAL/FULL transaction内のgzip領域へ自動退避し、hot枠/pageを回収する。
 元event row・ID・cursorを残すため、未読consumer・pending outbox・timerの参照と再送ACKを維持する。
 読取時はgzip/CRC・長さ・SHA・event IDを検証し、破損や余分なstream、展開量超過を拒否する。
 `events` はhot、`archived_events` は圧縮、`history` は全履歴を表示し、exportは両領域を含む。

@@ -172,11 +172,23 @@ ResourceProgramの `id` である。`service/wan` のような `/` を含むID�
 上の例では対象への経路とアドレスは別resourceまたは既存の管理経路で用意する。
 status参照だけでは暗黙のstart/readiness依存辺を作らない。停止中のproviderはunknownになる。
 
-現在対応するproviderはHealthCheckで、scalar fieldは `active`、`phase`、`lastResult`、
+対応するproviderはHealthCheckとBFD。HealthCheckのscalar fieldは `active`、`phase`、`lastResult`、
 `lastCheckedAt`、`lastTransitionAt`、`consecutivePassed`、`consecutiveFailed`、`failureCount`、
 `message`、`lastSuccessTime`、`lastFailureTime`、`firstFailureTime`。
-観測済みの空optional fieldと観測なしは区別する。他Kind、構造化field、DerivedEvent連鎖は
-compile時に拒否し、対応済みとは数えない。inactiveな宣言も全sourceで型検証する。
+観測済みの空optional fieldと観測なしは区別する。
+BFDは `phase`、`peerStates`、`peers`、`observedAt` の4 fieldを読み、例えば
+`${BFD/service/edge-bfd.status.phase}` に `equals: Up` を指定する。
+`phase` は `Up` / `Down` / `Degraded` / `Pending`、`peerStates` は旧形式のmap文字列、
+`peers` は旧形式のpeer map文字列を要素とするJSON配列、`observedAt` はUTC RFC3339Nanoである。
+peerごとの構造化selector、他Kind、DerivedEvent連鎖はcompile時に拒否する。
+inactiveな宣言も全sourceで型検証する。
+
+BFDのlocal状態観測は元のBOOTTIMEから最大5秒で失効する。Up/Initを含む観測はさらに
+全該当peerの元パケット受信期限で制限し、現在のsupervisor観測期限も超えない。
+古いraw `UP` の失効はunknownとなり、Down eventを捏造しない。
+通知を集約した間のflapはpeer遷移counterでholdをリセットする。全peerのcounterを使うため、
+集約phaseが同じでもpeerの変化で保守的にholdをやり直す。counterが飽和した観測はunknownになる。
+値は1 field最大64KiB・snapshot全体2MiBに制限し、元の大きな値をdurable producer stateへコピーしない。
 
 現在のboot/source/control、worker generation、producer epoch、sequenceと一致し、元の観測時刻が
 未来でなく、producer期限・supervisor観測期限が残るsampleだけを読む。pollやHTTP GETでは
@@ -184,8 +196,8 @@ compile時に拒否し、対応済みとは数えない。inactiveな宣言も�
 retractionを捏造しない。保存済みUpは現在の有限観測の代用にならない。worker/controlの
 authorityが変わった後は、古いUpをretraction待ちとして表示しない。
 
-hysteresisはBOOTTIMEで両方向に適用する。runtimeは受理した通知ごとにpredicate truthと
-authorityの連続性を記録し、投影間のflapやlease gapをまたいだhold成立を防ぐ。
+hysteresisはBOOTTIMEで両方向に適用する。runtimeはHealth通知ごとのpredicate truthと
+authorityの連続性、およびBFDの独立cacheの遷移counterを記録し、投影間のflapやlease gapをまたいだhold成立を防ぐ。
 同じtruthの連続更新は期限を保つ。評価は現在statusのsampled reconciliationであり、
 すべての短いprotocol遷移を漏れなく履歴化する契約ではない。
 
@@ -204,6 +216,7 @@ producer stateと出力jobは同時保存する。新activationは初回出力�
 最大128 DerivedEvent、全体で参照1,024個、1回の評価16宣言・publication8件のbounded処理である。
 他provider、raw protocol event、作用の権限/idempotency、federation、retention、規模・性能受入は残る。
 [実daemon・QEMUの証跡と範囲](evidence/2026-10-24-live-derived.md) を参照。
+BFDのraw packet/遷移をすべて永続履歴へ保存するproducerは別の未実装範囲である。
 
 ## graph、owner と検証
 

@@ -1,0 +1,47 @@
+=== RUN   TestWarmArchivedPageHasBoundedDecodeAllocation
+    archive_cache_test.go:47: warm sixteen-record page allocated 73263 bytes
+--- PASS: TestWarmArchivedPageHasBoundedDecodeAllocation (0.44s)
+=== RUN   TestSteadyArchiveBatchesHaveBoundedCodecAllocation
+    archive_cache_test.go:85: steady sixteen-record archive batch allocated 467666 bytes
+--- PASS: TestSteadyArchiveBatchesHaveBoundedCodecAllocation (2.42s)
+=== RUN   TestArchivedReadCacheEvictsWithoutLosingLogicalHistory
+--- PASS: TestArchivedReadCacheEvictsWithoutLosingLogicalHistory (5.66s)
+=== RUN   TestArchiveReusesHotBudgetWhileAllHistoryAndSourceCursorsRemainReadable
+--- PASS: TestArchiveReusesHotBudgetWhileAllHistoryAndSourceCursorsRemainReadable (0.32s)
+=== RUN   TestArchiveExportKeepsSnapshotDuringConcurrentTierMovement
+--- PASS: TestArchiveExportKeepsSnapshotDuringConcurrentTierMovement (0.18s)
+=== RUN   TestArchiveFailureAndSeparateBudgetsPreserveEveryAcceptedBody
+=== RUN   TestArchiveFailureAndSeparateBudgetsPreserveEveryAcceptedBody/insert
+=== RUN   TestArchiveFailureAndSeparateBudgetsPreserveEveryAcceptedBody/clear
+=== RUN   TestArchiveFailureAndSeparateBudgetsPreserveEveryAcceptedBody/counter
+=== RUN   TestArchiveFailureAndSeparateBudgetsPreserveEveryAcceptedBody/row-capacity
+=== RUN   TestArchiveFailureAndSeparateBudgetsPreserveEveryAcceptedBody/byte-capacity
+=== RUN   TestArchiveFailureAndSeparateBudgetsPreserveEveryAcceptedBody/sqlite-full
+--- PASS: TestArchiveFailureAndSeparateBudgetsPreserveEveryAcceptedBody (1.38s)
+    --- PASS: TestArchiveFailureAndSeparateBudgetsPreserveEveryAcceptedBody/insert (0.23s)
+    --- PASS: TestArchiveFailureAndSeparateBudgetsPreserveEveryAcceptedBody/clear (0.23s)
+    --- PASS: TestArchiveFailureAndSeparateBudgetsPreserveEveryAcceptedBody/counter (0.24s)
+    --- PASS: TestArchiveFailureAndSeparateBudgetsPreserveEveryAcceptedBody/row-capacity (0.21s)
+    --- PASS: TestArchiveFailureAndSeparateBudgetsPreserveEveryAcceptedBody/byte-capacity (0.21s)
+    --- PASS: TestArchiveFailureAndSeparateBudgetsPreserveEveryAcceptedBody/sqlite-full (0.25s)
+=== RUN   TestArchivedCorruptionCannotBeReadOrAcknowledgedAsDurable
+=== RUN   TestArchivedCorruptionCannotBeReadOrAcknowledgedAsDurable/gzip
+=== RUN   TestArchivedCorruptionCannotBeReadOrAcknowledgedAsDurable/hash
+=== RUN   TestArchivedCorruptionCannotBeReadOrAcknowledgedAsDurable/length
+=== RUN   TestArchivedCorruptionCannotBeReadOrAcknowledgedAsDurable/trailing
+=== RUN   TestArchivedCorruptionCannotBeReadOrAcknowledgedAsDurable/multistream
+=== RUN   TestArchivedCorruptionCannotBeReadOrAcknowledgedAsDurable/bomb
+--- PASS: TestArchivedCorruptionCannotBeReadOrAcknowledgedAsDurable (1.08s)
+    --- PASS: TestArchivedCorruptionCannotBeReadOrAcknowledgedAsDurable/gzip (0.15s)
+    --- PASS: TestArchivedCorruptionCannotBeReadOrAcknowledgedAsDurable/hash (0.15s)
+    --- PASS: TestArchivedCorruptionCannotBeReadOrAcknowledgedAsDurable/length (0.15s)
+    --- PASS: TestArchivedCorruptionCannotBeReadOrAcknowledgedAsDurable/trailing (0.16s)
+    --- PASS: TestArchivedCorruptionCannotBeReadOrAcknowledgedAsDurable/multistream (0.15s)
+    --- PASS: TestArchivedCorruptionCannotBeReadOrAcknowledgedAsDurable/bomb (0.31s)
+=== RUN   TestArchiveConcurrentAppendRetryAndBounds
+--- PASS: TestArchiveConcurrentAppendRetryAndBounds (1.52s)
+=== RUN   TestArchivedBodyPagesCanBeReusedByNewEvents
+    archive_test.go:442: archive released 7 pages; new event reused 2 without DB growth
+--- PASS: TestArchivedBodyPagesCanBeReusedByNewEvents (0.17s)
+PASS
+ok      github.com/imksoo/routerd2/internal/events      14.195s

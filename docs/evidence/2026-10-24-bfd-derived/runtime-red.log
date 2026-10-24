@@ -1,0 +1,11 @@
+--- FAIL: TestDerivedBFDUsesOriginalPacketAgeAndExpiresWithoutInventingDown (0.00s)
+    derived_bfd_test.go:71: derived event derived has unsupported or missing typed reference BFD/service/edge.status.phase
+--- FAIL: TestDerivedBFDCoalescedFailureBreaksUnpolledHoldAndWorkerIdentity (0.00s)
+    derived_bfd_test.go:101: derived event derived has unsupported or missing typed reference BFD/service/edge.status.phase
+FAIL
+FAIL    github.com/imksoo/routerd2/internal/runtimeplan 0.010s
+--- FAIL: TestDerivedBFDReferencesValidateAgainstAllDeclaredTypedProviders (0.00s)
+    derived_test.go:44: phase {{{[] [] [] [] {<nil> <nil>} <nil> [] [] []} [] [] []} [] map[] []} derived event derived has unsupported or missing typed reference BFD/bfd/source.status.phase
+FAIL
+FAIL    github.com/imksoo/routerd2/internal/resourceprogram     0.008s
+FAIL
