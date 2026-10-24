@@ -24,11 +24,13 @@ def phases():
         "pending_count": 2, "registered": 1, "retiring": 0, "health_worker": True,
         "health_error": True, "original_supervisor": "c" * 32, "original_epoch": "d" * 32,
         "original_generation": 1, "original_digest": "e" * 64, "observations": origins,
+        "completed": [{"kind": 1, "name": "producer", "key": "original", "position": 1, "sha256": "a" * 64}],
     }
     second = dict(copy.deepcopy(first), phase="registry", boot_id="7bbe264e-57c0-4ee6-aa19-67c3a1d244fb",
                   revision=2, pending_count=0, retiring=1, health_worker=False)
     for cursor, event in enumerate(second["observations"], 11):
         event["cursor"] = cursor
+    second["completed"].append({"kind": 0, "name": "consumer", "key": "rule", "position": 12, "sha256": "b" * 64})
     third = dict(copy.deepcopy(second), phase="recovered", boot_id="1f7b18d0-0fbb-4c40-b281-ddac308491ce",
                  registered=0, retiring=0, health_error=False)
     return [
@@ -102,6 +104,25 @@ class PowerWitnessTests(unittest.TestCase):
         data[2]["witness"]["observations"][0]["cursor"] += 10
         with self.assertRaises(RuntimeError):
             POWER.check_phases(data)
+
+    def test_completed_identity_cannot_be_forgotten_changed_or_duplicated(self):
+        for index in (1, 2):
+            for mutate in (
+                lambda e: e.clear(),
+                lambda e: e.pop(0),
+                lambda e: e.append(copy.deepcopy(e[0])),
+                lambda e: e[0].update(sha256="0" * 64),
+                lambda e: e[0].update(position=2),
+                lambda e: e[0].update(position=True),
+                lambda e: e[0].update(kind=0),
+                lambda e: e[0].update(name="changed"),
+                lambda e: e[0].update(key="changed"),
+            ):
+                with self.subTest(index=index, mutate=mutate):
+                    data = phases()
+                    mutate(data[index]["witness"]["completed"])
+                    with self.assertRaises(RuntimeError):
+                        POWER.check_phases(data)
 
     def test_exact_single_witness_and_no_shutdown_before_cut(self):
         witness = phases()[0]["witness"]
