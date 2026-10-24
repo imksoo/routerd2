@@ -235,6 +235,7 @@ func isolateFixture(t *testing.T, name string) bool {
 }
 
 type daemonFixture struct {
+	pid                 int
 	control, supervisor *localapi.Client
 }
 
@@ -293,7 +294,7 @@ func startFixtureDaemon(t *testing.T, doc config.Document) daemonFixture {
 			}
 		}
 	})
-	f := daemonFixture{control: localapi.NewClient(filepath.Join(runDir, control.SocketName)), supervisor: localapi.NewClient(filepath.Join(runDir, supervisor.SocketName))}
+	f := daemonFixture{pid: cmd.Process.Pid, control: localapi.NewClient(filepath.Join(runDir, control.SocketName)), supervisor: localapi.NewClient(filepath.Join(runDir, supervisor.SocketName))}
 	until(t, 20*time.Second, func() bool {
 		var s supervisor.Status
 		return f.supervisor.Do(context.Background(), "GET", "/v1/status", nil, &s) == nil && s.Ready

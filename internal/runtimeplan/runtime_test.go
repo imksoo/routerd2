@@ -171,6 +171,10 @@ func TestPDProjectionKeepsDeprecatedAddressesAndStableRAIdentity(t *testing.T) {
 	if len(first.liveRA["service.pd-lan-ra"].Prefixes) != 2 {
 		t.Fatal("renumbering prefixes lost")
 	}
+	oldAdvertisement := first.liveRA["service.pd-lan-ra"].Prefixes[1]
+	if oldAdvertisement.ValidLifetimeSeconds == 0 || !oldAdvertisement.ValidUntil.Equal(snapshot.PreviousPrefixes[0].ExpiresAt) || oldAdvertisement.PreferredLifetimeSeconds != 0 {
+		t.Fatal("retained prefix must remain valid but deprecated on the LAN", oldAdvertisement)
+	}
 	var lan network.Interface
 	for _, v := range first.network.Interfaces {
 		if v.Name == "lan0" {

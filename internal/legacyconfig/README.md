@@ -60,9 +60,14 @@ DS-Lite retains the old tunnel-name fallback order: `tunnelName`, then the liter
 underlay MTU differs from 1500; substituting underlay-minus-40 would change the old
 configuration. The pinned **Linux** tunnel controller does not apply
 `defaultRoute`/`routeMetric` itself; the migration rejects those settings instead
-of inventing routes. Declare an independent `IPv4Route`. AFTR DNS discovery,
-provider DNS fallback and PD-derived outer endpoints need a dynamic controller
-and are not frozen into guessed addresses.
+of inventing routes. Declare an independent `IPv4Route`. The native `ds_lite`
+service provides dynamic AFTR resolution, but this compiler does not yet map
+legacy DNS discovery, provider fallback or PD-derived outer endpoints into it.
+Those inputs are not frozen into guessed addresses. Native AFTR uses explicit
+IPv6 bootstrap dependencies and finite last-good expiry; the old Linux
+controller used local DNS and could retain a pending tunnel indefinitely.
+That change, its local-source selection, and the old inner IPv4 peer require an
+explicit semantic migration. See [the native AFTR contract](../protocol/aftr/README.md).
 
 DNS uses the same original resource composition rules and transport defaults:
 UDP/TCP 53, DoT 853, DoH 443 and `/dns-query`. A path omitted from a query-log
@@ -115,6 +120,10 @@ kernel log events and do not imply NFLOG sampling or old log-retention behavior.
   Its `validLifetime` sets the router lifetime in `ra-param`, not merely a PIO
   valid lifetime. Router, PIO and DNS lifetimes must be selected explicitly for
   native RA; the compiler does not copy a duration into a different field.
+- The native WAN `ra_client` receives RA/SLAAC/default-router/DNS lifetimes,
+  but the old `IPv6RAAddress` resource's managed/kernel-RA ownership and
+  required-address readiness have no automatic conversion here. Native
+  availability does not make those implicit policies interchangeable.
 - Original `DHCPv6Information` supplements an existing bound PD client.
   Creating a second independent native process on UDP 546 is not equivalent.
 - Legacy IPv4 VRRP leaves the wire version to Keepalived defaults, puts VIPs on
@@ -171,9 +180,11 @@ checkout. The homert02 notes mention PD/information services, DNS, firewall zone
 and policies, health checks, DS-Lite/PPPoE failover, egress selection and NAT.
 The notes are deployment evidence, not complete desired configurations. Therefore
 this compiler has **not** established migration or runtime parity for those
-machines. In particular, WAN RA/SLAAC/default-router handling, dynamic AFTR
-resolution, HA gating/VMAC transitions, policy failover and DHCP-server/lease
-integration need their actual configuration and protocol integration tests.
+machines. Native WAN RA/SLAAC/default-router, AFTR and DHCP-to-DNS modules have
+their own protocol/integration gates. Applying them to these deployments still
+requires the actual configurations, explicit migration of their dependencies
+and lifetimes, and deployment-specific tests. HA gating/VMAC transitions and
+policy failover also remain outside this compiler's supported conversion.
 
 The package fixtures contain synthetic documentation addresses and no production
 configuration or credentials.

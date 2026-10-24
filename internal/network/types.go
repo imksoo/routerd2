@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/netip"
 	"regexp"
+	"time"
 )
 
 const (
@@ -46,6 +47,12 @@ type Interface struct {
 	// Alias is for preexisting interfaces. A created Link uses Link.Alias so its
 	// ownership marker cannot be accidentally overwritten.
 	Alias *string `json:"alias,omitempty"`
+	// IPv6AcceptRA and IPv6Autoconf control the kernel's competing RA/SLAAC
+	// writers. Nil leaves each setting unmanaged. A native RA client requests
+	// accept_ra=0 and autoconf=false; 1/2 retain Linux accept_ra semantics.
+	// Changed settings are restored only on the same interface instance.
+	IPv6AcceptRA *int  `json:"ipv6_accept_ra,omitempty"`
+	IPv6Autoconf *bool `json:"ipv6_autoconf,omitempty"`
 }
 
 type Route struct {
@@ -61,6 +68,10 @@ type Route struct {
 	// Table zero means the main table (254). Use PolicyRules to select a different
 	// table; creating a route in a table does not install a policy rule implicitly.
 	Table int `json:"table,omitempty"`
+	// ValidUntil is an absolute IPv6 route expiry; zero means infinite. The
+	// kernel expires finite routes even while the control plane is unavailable.
+	// IPv4 and deadlines more than MaxRouteLifetime ahead are rejected.
+	ValidUntil time.Time `json:"valid_until,omitzero"`
 }
 
 // NextHop is an already resolved, directly reachable next hop. Weight is 1..256
@@ -150,6 +161,8 @@ type InterfaceState struct {
 	Owned        bool           `json:"owned"`
 	Addresses    []AddressState `json:"addresses,omitempty"`
 	DSLite       *DSLite        `json:"ds_lite,omitempty"`
+	IPv6AcceptRA *int           `json:"ipv6_accept_ra,omitempty"`
+	IPv6Autoconf *bool          `json:"ipv6_autoconf,omitempty"`
 }
 
 type RouteState struct {
@@ -236,6 +249,12 @@ func Validate(d Desired) error {
 		links[l.Name] = l
 		if l.MTU != 0 && (l.MTU < 68 || l.MTU > 65535) {
 			add("interface %s: MTU must be 68..65535 or zero", l.Name)
+		}
+		if l.IPv6AcceptRA != nil && (*l.IPv6AcceptRA < 0 || *l.IPv6AcceptRA > 2) {
+			add("interface %s: ipv6_accept_ra must be 0, 1 or 2", l.Name)
+		}
+		if (l.IPv6AcceptRA != nil || l.IPv6Autoconf != nil) && (l.Name == "all" || l.Name == "default") {
+			add("interface %s: reserved IPv6 sysctl name", l.Name)
 		}
 		seen := map[string]bool{}
 		for _, s := range l.Addresses {

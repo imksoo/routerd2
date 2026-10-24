@@ -16,10 +16,10 @@ Alpineのパッケージをビルドとイメージ組み立てに利用しま�
 | worker runtime | `routerd-modules` を役割とインスタンスごとの別プロセスで起動。専用 lifecycle FD、世代・設定 SHA-256・producer epoch による古い通知の拒否 |
 | logging | journald を使わない独立ログプロセス、構造化ログ、回転・復旧、bounded queue、console fallback、appliance の `/dev/kmsg` 収集。ログ障害を必須ルーティングプロセスの停止条件にしない |
 | network | Netlink による IPv4/IPv6、有限アドレス寿命、静的経路・ECMP、policy routing、bridge/VLAN/VRF/VXLAN/macvlan、MTU・リンク・forwarding。nftables の INPUT/OUTPUT/FORWARD ACL、DNAT/SNAT/masquerade とポート範囲 |
-| WAN | native DHCPv4、DHCPv6 IA_PD / Information-request、DUID/IAID とリースの永続化、renew/rebind/失効。PD から LAN /64 を割り当て、旧 prefix を deprecated で維持 |
+| WAN | native DHCPv4、DHCPv6 IA_PD / Information-request、DUID/IAID とリースの永続化、renew/rebind/失効。WAN RA クライアント、SLAAC、default/RIO/on-link routes、RDNSS/DNSSL。PD から LAN /64 を割り当て、旧 prefix を deprecated で維持 |
 | DHCP server | native DHCPv4、scope・予約・sticky lease、ARP conflict probe、信頼する relay の限定、永続 journal を保存してから ACK。worker 再起動後の INIT-REBOOT / renew に対応 |
 | RA | native ICMPv6、RS 応答、RDNSS/DNSSL、絶対寿命、PD 更新時に同じプロセス・socket で prefix を変更。削除した prefix だけを withdraw |
-| DS-Lite | 固定 endpoint の kernel IPv4-in-IPv6、B4 の point-to-point アドレス。動的 AFTR 名の解決・WAN RA 依存の接続は未完成 |
+| DS-Lite | kernel IPv4-in-IPv6、B4 アドレス、IPv4 route。明示した RA/DHCPv6 依存から AFTR を IPv6 DNS で解決し、source・情報・DNS TTL の期限に従って接続・更新・撤去 |
 | VRRPv3 | native IPv4/IPv6 election、VMAC、GARP/NA、preempt、優先度、有限 ownership lease、NoDAD の明示 VIP、Accept_Mode の入力制御 |
 | DNS | 現行 routerd の resolver engine を再利用。UDP/TCP サーバー、cache、zones、query log、UDP/TCP/TLS/HTTPS/QUIC upstream。型付き DHCP リースによる A/PTR を、listener 再起動なしで更新・失効。虚偽の AD bit を防ぐため未実装の local DNSSEC signing は拒否 |
 | BGP | GoBGP v4 を独立 worker に統合。IPv4/IPv6 unicast、policy、選択経路の kernel 投影、recursive next hop、ECMP、期限付き FIB ownership。未解決 next hop は状態に表示し、未解決のまま FIB に入れない |
@@ -28,13 +28,14 @@ Alpineのパッケージをビルドとイメージ組み立てに利用しま�
 | management | 内蔵 SSH、公開鍵認証、永続 host key、Tab / history 付き候補編集、YAML 一括編集、diff、validate、commit confirmed、ログ参照。OS シェルを呼ばない |
 | migration | `routerd config migrate FILE` で旧 resource YAML の対応部分を変換。未対応・意味が変わる入力は理由を列挙し、部分的な設定を出力しない |
 | distribution | static amd64/arm64 の 2 バイナリ、依存ライセンス manifest、scratch OCI、Alpine APK、kernel + initramfs、QEMU と namespace 統合試験 |
+| release | Ed25519 署名・SHA-256・ELF/architecture/release identity の検証、immutable な二つの実行ファイルの世代保存、next-boot selection、試行回数・health confirmation・rollback journal。kernel/rootfs の A/B 更新は別の未実装範囲 |
 
 アプライアンスの通常起動には systemd、journald、sshd、OpenRC、`ip`、`nft`、シェルを使いません。
 パケット転送と IPv4/IPv6、conntrack、NAT、トンネルは Linux カーネルが処理します。
 routerd は設定、プロトコル、監視、ログ、管理とその整合性を受け持ちます。
 
 詳細は [アーキテクチャ](docs/architecture.md)、[現行 routerd の機能棚卸し](docs/parity.md)、
-[設定例](examples/) を参照してください。機能棚卸しの `semantic_parity` は個々の旧 resource 契約の互換性を示し、
+[WAN と AFTR の契約](docs/wan.md)、[署名付きユーザーランド更新](docs/releases.md)、[設定例](examples/) を参照してください。機能棚卸しの `semantic_parity` は個々の旧 resource 契約の互換性を示し、
 プロトコル実装やビルドの成功だけでは true にしません。
 
 ## Build and test
@@ -120,6 +121,8 @@ routerd(config)# commit confirmed 60
 routerd(config)# confirm
 routerd(config)# exit
 routerd> show services
+routerd> show services wan-ra
+routerd> show route-issues
 routerd> show logs module service.wan limit 50
 ```
 
@@ -145,7 +148,7 @@ routerd config validate candidate-routerd2.yaml
 - 管理対象外のアドレス・経路・nftables tableは採用・削除しません。ownership journalの喪失は自動採用の根拠になりません。
 - nftablesの一括更新以外は、複数のカーネル操作を一つのatomic transactionにはできません。復元失敗はdegradedとして残します。
 - `commit confirmed` のrollbackも通信の無停止を保証しません。接続・conntrackの状態は設定のrollbackとは別です。
-- 同じrelease IDの2バイナリを一組として配布します。現段階にlive image switchや署名済みA/B更新はありません。
+- 同じ release ID の 2 バイナリを署名した一組として保存・選択します。`routerd release help` がローカル管理入口です。boot の release 設定がある appliance は検証済み FD から PID 1 を引き継ぎ、連続した module/config readiness で確定します。live process tree の無停止置換、kernel/rootfs/設定 schema の移行は含みません。
 - 初期実装のworkerは同じUIDで動きます。プロセス分離は最小権限化や完全なセキュリティ境界の完成を意味しません。
 
 ## License

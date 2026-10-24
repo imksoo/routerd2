@@ -6,7 +6,13 @@ import (
 	"net/netip"
 	"slices"
 	"sort"
+	"time"
 )
+
+// MaxRouteLifetime bounds finite IPv6 lifetimes to the signed 32-bit USER_HZ
+// expiry field in Linux RTA_CACHEINFO (100 ticks/second on amd64 and arm64).
+// Longer lifetimes cannot be read back unambiguously for ownership checks.
+const MaxRouteLifetime = time.Duration((1<<31-1)/100-1) * time.Second
 
 func validateRoutes(routes []Route) error {
 	var errs []error
@@ -20,6 +26,14 @@ func validateRoutes(routes []Route) error {
 		}
 		if p != p.Masked() {
 			add("route %s: destination must be a network prefix", r.Destination)
+		}
+		if !r.ValidUntil.IsZero() {
+			if !p.Addr().Is6() {
+				add("route %s: valid_until is supported only for IPv6", r.Destination)
+			}
+			if r.ValidUntil.Year() < 1970 || r.ValidUntil.Year() > 9999 || r.ValidUntil.Sub(time.Now()) > MaxRouteLifetime {
+				add("route %s: valid_until must be a valid absolute deadline within %s", r.Destination, MaxRouteLifetime)
+			}
 		}
 		if r.Metric < 0 || uint64(r.Metric) > uint64(^uint32(0)) {
 			add("route %s: invalid metric", r.Destination)
@@ -71,6 +85,9 @@ func validateRoutes(routes []Route) error {
 }
 
 func normalizeRoute(r Route) Route {
+	if !r.ValidUntil.IsZero() {
+		r.ValidUntil = r.ValidUntil.UTC()
+	}
 	if p, err := netip.ParsePrefix(r.Destination); err == nil {
 		r.Destination = p.Masked().String()
 		if p.Addr().Is6() && r.Metric == 0 {
@@ -108,7 +125,27 @@ func normalizeRoute(r Route) Route {
 
 func sameRoute(a, b Route) bool {
 	a, b = normalizeRoute(a), normalizeRoute(b)
-	return a.Destination == b.Destination && a.Gateway == b.Gateway && a.Interface == b.Interface && a.Metric == b.Metric && a.Table == b.Table && slices.Equal(a.NextHops, b.NextHops)
+	return a.Destination == b.Destination && a.Gateway == b.Gateway && a.Interface == b.Interface && a.Metric == b.Metric && a.Table == b.Table && slices.Equal(a.NextHops, b.NextHops) && a.ValidUntil.Equal(b.ValidUntil)
+}
+
+func routeLifetimeMatches(actual, expected time.Time) bool {
+	if actual.IsZero() || expected.IsZero() {
+		return actual.IsZero() && expected.IsZero()
+	}
+	// The write rounds up to seconds; the kernel dump rounds to USER_HZ.
+	// A static route never matches a finite route, even near its expiry.
+	return actual.Sub(expected).Abs() <= 2*time.Second
+}
+
+func projectRouteExpiry(d Desired, now time.Time) Desired {
+	kept := d.Routes[:0]
+	for _, r := range d.Routes {
+		if r.ValidUntil.IsZero() || r.ValidUntil.After(now) {
+			kept = append(kept, r)
+		}
+	}
+	d.Routes = kept
+	return d
 }
 
 func routeUsesInterface(r Route, name string) bool {

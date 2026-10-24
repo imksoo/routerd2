@@ -47,7 +47,7 @@ def main():
         "-no-reboot", "-nodefaults", "-serial", f"file:{log_path}",
         "-kernel", str(image / "vmlinuz"),
         "-initrd", str(image / "initramfs.cpio.gz"),
-        "-append", "console=ttyS0 panic=-1",
+        "-append", "console=ttyS0,115200 panic=-1",
         "-netdev", f"user,id=wan,hostfwd=tcp:127.0.0.1:{port}-:22",
         "-device", "virtio-net-pci,netdev=wan,mac=52:54:00:12:34:56",
     ]

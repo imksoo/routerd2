@@ -90,6 +90,10 @@ user and network namespaces inside the guest, then exchanges real packets:
 - A symmetric IPv4-in-IPv6 DS-Lite tunnel with a B4 point-to-point peer.
 - Bridge forwarding, VLAN/VRF/VXLAN/macvlan create/update/removal, explicit
   IPv6 address lifetimes and deprecation, and foreign-child preservation.
+- RA/SLAAC kernel writer settings applied before interface activation, exact
+  restoration of their prior values, and finite IPv6 routes that expire in
+  the kernel even when no reconciliation runs. Renewal and weighted ECMP
+  route expiry are covered as well.
 - VRRP virtual MAC/NoDAD configuration and Accept_Mode=false VIP guards,
   including ND/VRRP exceptions and unaffected forwarded traffic.
 
@@ -98,6 +102,19 @@ survives, and owned state is removed/restored. A namespace failure is a test
 failure, never a passing skip. `dist/network-test` retains the serial log,
 result manifest and test initramfs. The test initializer and test binary are
 not included in the production appliance or OCI image.
+
+`make qemu-daemon` uses the same initializer and archive builder, with a fixed
+`daemon` suite. It freshly builds both commands and the integration test
+executable, puts the commands at `/test/bin` inside a guest with no external
+NIC, and requires `TestDaemonRAClientConfigurationAndExpiry` to report PASS.
+The suite checks RA configuration and expiry through the real supervised
+process tree. `dist/daemon-test` records the selected test, all executable
+hashes, the kernel hash and the serial log. Renamed tests, missing tests and
+skipped tests fail the gate.
+
+`make qemu-daemon-aftr` selects the fixed `daemon-aftr` suite and requires
+`TestDaemonAFTRResolutionAndExpiry`. It uses the same binary build and guest
+isolation path; its independent artifacts are under `dist/aftr-daemon-test`.
 
 ## Dependency notices
 

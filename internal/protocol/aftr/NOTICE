@@ -1,0 +1,22 @@
+routerd2 native DS-Lite endpoint resolver
+
+This package is original routerd2 code under the repository's BSD-3-Clause
+license. Protocol references are RFC 6333, RFC 1035, RFC 2181 and RFC 3596.
+No external AFTR client daemon, old command runner, or shell implementation is
+copied or executed by this package.
+
+The comparative routerd source used to identify legacy Linux behavior is:
+  repository: https://github.com/imksoo/routerd
+  revision: 1329ef54f296507eda79bbbc3b853783dd27251e
+
+In particular, the active Linux controller and the separate FreeBSD apply
+helper have different AFTR selection behavior. The README records the audit
+and the intentional bounded-lifetime/bootstrap differences. This notice does
+not claim full legacy feature compatibility.
+
+The miekg/dns library supplies DNS message encoding and UDP/TCP exchange.
+golang.org/x/sys supplies Linux socket options and boot-clock access. Their
+licenses are distributed through the repository's dependency license-manifest
+process. Network namespace and netlink operations in integration tests are
+fixture-only; the production resolver never mutates or inspects host network
+configuration.

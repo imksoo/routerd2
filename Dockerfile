@@ -18,10 +18,10 @@ ARG TARGETOS=linux
 ARG TARGETARCH
 ARG RELEASE_ID=dev
 RUN GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -buildvcs=false \
-      -ldflags "-s -w -X github.com/imksoo/routerd2/internal/buildinfo.ReleaseID=$RELEASE_ID" \
+      -ldflags "-s -w -X github.com/imksoo/routerd2/internal/buildinfo.Identity=ROUTERD2-RELEASE-V1:$RELEASE_ID:END" \
       -o /out/routerd ./cmd/routerd \
  && GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -buildvcs=false \
-      -ldflags "-s -w -X github.com/imksoo/routerd2/internal/buildinfo.ReleaseID=$RELEASE_ID" \
+      -ldflags "-s -w -X github.com/imksoo/routerd2/internal/buildinfo.Identity=ROUTERD2-RELEASE-V1:$RELEASE_ID:END" \
       -o /out/routerd-modules ./cmd/routerd-modules \
  && GOOS=$TARGETOS GOARCH=$TARGETARCH python3 scripts/licenses.py --output dist/licenses
 

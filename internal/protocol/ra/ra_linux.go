@@ -20,20 +20,22 @@ import (
 )
 
 type Config struct {
-	Resource              string   `json:"resource"`
-	Interface             string   `json:"interface"`
-	SourceAddress         string   `json:"source_address,omitempty"`
-	Prefixes              []Prefix `json:"prefixes,omitempty"`
-	RDNSS                 []string `json:"rdnss,omitempty"`
-	DNSSL                 []string `json:"dnssl,omitempty"`
-	MinIntervalSeconds    int      `json:"min_interval_seconds,omitempty"`
-	MaxIntervalSeconds    int      `json:"max_interval_seconds,omitempty"`
-	RouterLifetimeSeconds int      `json:"router_lifetime_seconds"`
-	DNSSLifetimeSeconds   int      `json:"dns_lifetime_seconds"`
-	MTU                   int      `json:"mtu,omitempty"`
-	Managed               bool     `json:"managed,omitempty"`
-	OtherConfig           bool     `json:"other_config,omitempty"`
-	RouterPreference      string   `json:"router_preference,omitempty"`
+	Resource              string         `json:"resource"`
+	Interface             string         `json:"interface"`
+	SourceAddress         string         `json:"source_address,omitempty"`
+	Prefixes              []Prefix       `json:"prefixes,omitempty"`
+	RDNSS                 []string       `json:"rdnss,omitempty"`
+	DNSSL                 []string       `json:"dnssl,omitempty"`
+	LearnedRDNSS          []DNSServer    `json:"learned_rdnss,omitempty"`
+	LearnedDNSSL          []SearchDomain `json:"learned_dnssl,omitempty"`
+	MinIntervalSeconds    int            `json:"min_interval_seconds,omitempty"`
+	MaxIntervalSeconds    int            `json:"max_interval_seconds,omitempty"`
+	RouterLifetimeSeconds int            `json:"router_lifetime_seconds"`
+	DNSSLifetimeSeconds   int            `json:"dns_lifetime_seconds"`
+	MTU                   int            `json:"mtu,omitempty"`
+	Managed               bool           `json:"managed,omitempty"`
+	OtherConfig           bool           `json:"other_config,omitempty"`
+	RouterPreference      string         `json:"router_preference,omitempty"`
 }
 type Prefix struct {
 	Prefix                   string `json:"prefix"`
@@ -70,6 +72,8 @@ func normalized(c Config) Config {
 	c.Prefixes = append([]Prefix(nil), c.Prefixes...)
 	c.RDNSS = append([]string(nil), c.RDNSS...)
 	c.DNSSL = append([]string(nil), c.DNSSL...)
+	c.LearnedRDNSS = append([]DNSServer(nil), c.LearnedRDNSS...)
+	c.LearnedDNSSL = append([]SearchDomain(nil), c.LearnedDNSSL...)
 	if source, err := netip.ParseAddr(c.SourceAddress); err == nil {
 		c.SourceAddress = source.String()
 	}
@@ -87,6 +91,16 @@ func normalized(c Config) Config {
 	}
 	for i := range c.DNSSL {
 		c.DNSSL[i] = strings.TrimSuffix(strings.ToLower(c.DNSSL[i]), ".")
+	}
+	for i := range c.LearnedRDNSS {
+		if a, err := netip.ParseAddr(c.LearnedRDNSS[i].Address); err == nil {
+			c.LearnedRDNSS[i].Address = a.String()
+		}
+		c.LearnedRDNSS[i].ValidUntil = c.LearnedRDNSS[i].ValidUntil.UTC()
+	}
+	for i := range c.LearnedDNSSL {
+		c.LearnedDNSSL[i].Domain = strings.TrimSuffix(strings.ToLower(c.LearnedDNSSL[i].Domain), ".")
+		c.LearnedDNSSL[i].ValidUntil = c.LearnedDNSSL[i].ValidUntil.UTC()
 	}
 	if c.MaxIntervalSeconds == 0 {
 		c.MaxIntervalSeconds = 600
@@ -147,22 +161,24 @@ func Validate(c Config) error {
 		}
 		seen[p.String()] = true
 	}
-	for _, s := range c.RDNSS {
+	servers, domains := dnsEntries(c)
+	for _, entry := range servers {
+		s := entry.Name
 		a, err := netip.ParseAddr(s)
 		if err != nil || !a.Is6() || a.Is4In6() || a.IsUnspecified() || a.IsMulticast() || a.Zone() != "" {
 			return fmt.Errorf("invalid RA RDNSS %q", s)
 		}
 	}
-	for _, s := range c.DNSSL {
-		if _, err := domain(s); err != nil {
+	for _, entry := range domains {
+		if _, err := domain(entry.Name); err != nil {
 			return err
 		}
 	}
-	p, err := encode(c, nil, time.Now(), false)
+	maximum, err := maximumPacketSize(c, true)
 	if err != nil {
 		return err
 	}
-	if len(p)+8 > 1240 {
+	if maximum > 1240 {
 		return errors.New("RA options exceed the minimum IPv6 MTU; split prefix/DNS intent")
 	}
 	return nil
@@ -176,7 +192,7 @@ func lifetime(value uint32, until, now time.Time) uint32 {
 		return 0
 	}
 	if uint64(seconds) > uint64(^uint32(0)) {
-		return ^uint32(0)
+		return value
 	}
 	if uint32(seconds) < value {
 		return uint32(seconds)
@@ -264,48 +280,7 @@ func encode(c Config, hardware net.HardwareAddr, now time.Time, withdraw bool) (
 		copy(opt[16:], n.Addr().AsSlice())
 		p = append(p, opt...)
 	}
-	dnsLifetime := uint32(c.DNSSLifetimeSeconds)
-	if withdraw {
-		dnsLifetime = 0
-	}
-	if len(c.RDNSS) > 0 {
-		if len(c.RDNSS) > 127 {
-			return nil, errors.New("too many RDNSS addresses")
-		}
-		opt := make([]byte, 8+16*len(c.RDNSS))
-		opt[0] = 25
-		opt[1] = byte(len(opt) / 8)
-		binary.BigEndian.PutUint32(opt[4:], dnsLifetime)
-		for i, s := range c.RDNSS {
-			a, err := netip.ParseAddr(s)
-			if err != nil {
-				return nil, err
-			}
-			copy(opt[8+i*16:], a.AsSlice())
-		}
-		p = append(p, opt...)
-	}
-	if len(c.DNSSL) > 0 {
-		opt := make([]byte, 8)
-		opt[0] = 31
-		binary.BigEndian.PutUint32(opt[4:], dnsLifetime)
-		for _, s := range c.DNSSL {
-			b, err := domain(s)
-			if err != nil {
-				return nil, err
-			}
-			opt = append(opt, b...)
-		}
-		for len(opt)%8 != 0 {
-			opt = append(opt, 0)
-		}
-		if len(opt)/8 > 255 {
-			return nil, errors.New("DNSSL option exceeds wire limit")
-		}
-		opt[1] = byte(len(opt) / 8)
-		p = append(p, opt...)
-	}
-	return p, nil
+	return appendDNSOptions(p, c, now, withdraw)
 }
 
 func solicitation(payload []byte, source netip.Addr, hopLimit, ifindex, wantIndex int) bool {
@@ -377,6 +352,9 @@ func RunWithUpdates(ctx context.Context, cfg Config, updates <-chan Config, effe
 		payload, err := encodeWithWithdrawals(cfg, pending, ifi.HardwareAddr, time.Now(), withdraw)
 		if err != nil {
 			return err
+		}
+		if len(payload) > 1240 {
+			return errors.New("RA advertisement exceeds the minimum IPv6 MTU")
 		}
 		if _, err = unix.SendmsgN(fd, payload, packetInfo, destination, 0); err != nil {
 			return fmt.Errorf("send RA: %w", err)

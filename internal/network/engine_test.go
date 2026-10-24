@@ -172,6 +172,18 @@ func (f *fakeKernel) ReadSetting(k settingKey) (int, error) {
 	if k.Kind == "mtu" {
 		return l.MTU, nil
 	}
+	if k.Kind == "accept_ra" {
+		if l.IPv6AcceptRA == nil {
+			return 1, nil
+		}
+		return *l.IPv6AcceptRA, nil
+	}
+	if k.Kind == "autoconf" {
+		if l.IPv6Autoconf == nil {
+			return 1, nil
+		}
+		return boolInt(*l.IPv6Autoconf), nil
+	}
 	return boolInt(l.Up), nil
 }
 func (f *fakeKernel) WriteSetting(k settingKey, v int) error {
@@ -185,9 +197,15 @@ func (f *fakeKernel) WriteSetting(k settingKey, v int) error {
 		f.forward6 = v
 	default:
 		l := f.links[k.Interface]
-		if k.Kind == "mtu" {
+		switch k.Kind {
+		case "mtu":
 			l.MTU = v
-		} else {
+		case "accept_ra":
+			l.IPv6AcceptRA = &v
+		case "autoconf":
+			enabled := v != 0
+			l.IPv6Autoconf = &enabled
+		default:
 			l.Up = v == 1
 		}
 		f.links[k.Interface] = l

@@ -261,7 +261,7 @@ func (s *interactiveShell) execute(ctx context.Context, line string, out io.Writ
 		if rest == "" || rest == "candidate" {
 			return false, writeYAML(out, c.document)
 		}
-		if rest == "status" || rest == "network" || rest == "version" || rest == "config" || rest == "services" || rest == "logging" || rest == "running-config" || rest == "logs" || strings.HasPrefix(rest, "logs ") {
+		if rest == "status" || rest == "network" || rest == "version" || rest == "config" || rest == "services" || strings.HasPrefix(rest, "services ") || rest == "route-issues" || strings.HasPrefix(rest, "route-issues ") || rest == "logging" || rest == "running-config" || rest == "logs" || strings.HasPrefix(rest, "logs ") {
 			return false, s.session.Execute(ctx, "show "+rest, nil, out)
 		}
 		parts, err := parsePath(c.absolutePath(rest))
@@ -748,7 +748,7 @@ func (s *interactiveShell) complete(line string, pos int, key rune) (string, int
 	case 1:
 		switch words[0] {
 		case "show":
-			choices = []string{"status", "network", "services", "logging", "logs", "version", "config", "running-config"}
+			choices = []string{"status", "network", "services", "route-issues", "logging", "logs", "version", "config", "running-config"}
 			if s.candidate != nil {
 				choices = append(choices, "candidate")
 				choices = append(choices, s.pathChoices(token)...)

@@ -334,7 +334,7 @@
         "network"
       ],
       "parity_status": "not_integrated",
-      "known_gap": "Native fixed-endpoint B4, point-to-point peer and MTU are implemented. Dynamic AFTR/WAN RA dependency and multi-AFTR source-routing policy remain incomplete."
+      "known_gap": "Native B4, dynamic AFTR resolution, explicit RA/DHCPv6 dependencies and finite DNS/source lifetime projection are implemented. Strict migration of original SelfAddressPolicy, multi-AFTR source routing, when/dependency and full resource lifecycle semantics remains incomplete."
     },
     {
       "id": "lan.dhcp_ra",
@@ -363,7 +363,7 @@
         "ra"
       ],
       "parity_status": "not_integrated",
-      "known_gap": "Native RA and delegated-prefix updates are implemented. Full DHCP server/relay/profile/sticky/lease-sync resource semantics are not yet accepted."
+      "known_gap": "Native RA server/client, delegated-prefix updates and DHCPv4 server are implemented. Complete DHCPv6 server, relay, profile and lease-sync resource semantics remain incomplete."
     },
     {
       "id": "dns",
@@ -12231,6 +12231,30 @@
       "package": "internal/legacyconfig",
       "status": "strict_partial_compiler",
       "validation": "Pinned legacy schema decoding, supported resource fixtures, unknown/unsupported input rejection, deterministic conversion and parser fuzz tested. It emits no partial result when any input capability is unsupported.",
+      "resource_parity": false
+    },
+    {
+      "package": "internal/protocol/raclient",
+      "status": "integrated_supervised_worker",
+      "validation": "Pure/race and parser fuzz tests passed. No-NIC QEMU raw RS/RA gate passed. Actual two-binary daemon RA-to-SLAAC/FIB projection, autonomous finite kernel expiry with supervisor/control/producer SIGSTOP, and configuration removal restoring prior RA sysctls passed.",
+      "resource_parity": false
+    },
+    {
+      "package": "internal/protocol/aftr",
+      "status": "integrated_supervised_worker",
+      "validation": "Pure/race, parser fuzz and isolated UDP/TCP tests passed. Actual two-binary no-NIC QEMU gate passed independent DNS AAAA resolution, in-place ip6tnl update, exact original TTL retention during DNS outage, expiry withdrawal, underlay preservation, recovery without worker restart and configuration removal.",
+      "resource_parity": false
+    },
+    {
+      "package": "internal/release",
+      "status": "signed_userland_pair_store",
+      "validation": "Unit/race tests passed signature/archive/ELF/identity validation, generation fences, boot attempt/confirm/rollback, capacity/prune, nonblocking writer locking and abrupt-process-exit crash boundaries. Actual amd64 and arm64 pairs passed signed pack, stage, Lookup, baseline initialization and pinned selection. Kernel/rootfs/bootloader/persistent storage and config-schema migration are outside this bundle contract.",
+      "resource_parity": false
+    },
+    {
+      "package": "internal/releaseboot",
+      "status": "appliance_pid1_selector",
+      "validation": "Unit/race tests passed continuous health window reset, busy confirmation, deadline enforcement, slow payload verification and stale/cancelled attempt handling. A separate no-NIC QEMU gate passed signed baseline-to-trial descriptor execution as actual PID 1, all four worker executable inode checks, committed control health and automatic confirmation followed by clean guest poweroff. A persistent disk across two boots is not covered.",
       "resource_parity": false
     }
   ]

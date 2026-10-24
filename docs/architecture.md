@@ -17,7 +17,7 @@ apk/OpenRC をパケットの処理経路や daemon の起動管理に挟まな�
 - `routerd`: init/supervisor と運用 CLI。構成をまとめて読み、固定の worker ELF を開く。
 - `routerd-modules`: logging/network/control/management と protocol worker を選択起動する。
 
-core 4 プロセスに加え、DHCP4 client/server、PD、RA、DNS、VRRP、BGP をインスタンスごとの
+core 4 プロセスに加え、DHCP4 client/server、PD、RA server/client、AFTR、DNS、VRRP、BGP をインスタンスごとの
 プロセスとして追加する。GoBGP/QUIC/SQLite は worker ELF に置き、PID 1 の import
 graph へ入れない。ELF の数は fault isolation の単位ではない。同じ ELF の読み取り専用
 text page は Linux が共有でき、プロセスごとの heap・goroutine・socket は独立する。
@@ -72,6 +72,18 @@ learned intent と VRF table に従う。未解決 path は `show services` の 
 worker の snapshot transport が bounded JSON のため、bundled BGP は現状 4096 selected
 paths までを受理する。100 万経路や無停止 FIB 更新を検証済みとは扱わない。
 
+## WAN RA と AFTR
+
+WAN RA は kernel RA/autoconf を制御して一つのアドレス・経路所有者を維持し、
+有限 lifetime を kernel address/IPv6 route にも反映する。DAD は通常どおり Linux が実行する。
+RA の prefix、default/RIO、DNS はそれぞれ独立した期限を持つ。
+
+AFTR worker は明示された RA/DHCPv6 の typed input だけを受け取り、IPv6 underlay に
+source/device を固定して DNS を問い合わせる。DHCPv6 の情報更新期限、source preferred/valid
+lifetime、DNS chain TTL を超えて古い endpoint を残さない。config digest と dependency
+generation で古い応答を拒否し、kernel の投影だけを network worker に依頼する。
+詳細な意味と制約は [WAN 契約](wan.md) に記す。
+
 ## 設定編集と rollback
 
 SSH は x/crypto/ssh の公開鍵認証と routerd CLI だけを提供する。OS shell、forwarding、
@@ -113,7 +125,27 @@ HTTP の ACK は memory への受信であり、すべての行を fsync 済み�
 APK、OCI、initramfs に依存ライセンスと provenance manifest を同梱する。
 
 現在の appliance artifact は kernel と initramfs の direct boot fixture である。
-ディスクの A/B bootloader、署名付き update engine、永続 partition の自動作成、
+ディスクの A/B bootloader、永続 partition の自動作成、
 AMI/OCI/Azure/GCP image の登録は未実装。Tailscale/strongSwan 等の外部 daemon もまだ
 起動できると偽装しない。暗号・IKE・overlay controller を新規自作して機能の存在だけを
 合わせる方針にはせず、module contract とパッケージ/license の単位を個別に実装する。
+
+## 署名付き userland の世代選択
+
+`internal/release` は Ed25519 manifest と両 ELF のサイズ・hash・architecture・static build・
+一意な release identity を検証して保存する。新しいバイナリを検証のために実行しない。
+active/pending/previous と状態 journal を同じ generation に置き、current symlink の atomic
+rename で選択を変える。stage と prepare は動作中の process tree を置換しない。
+
+appliance の `boot.release` が有効な場合、同じ kernel boot ID の選択を一度だけ記録し、
+検証済み routerd の FD から exec する。PID 1 は変わらず、選択された modules FD も supervisor
+が pin する。試行世代の必須 process の release/generation、control の revision/health が
+連続して安定した後だけ Confirm する。期限超過は失敗記録・旧世代選択・再起動につながる。
+監視開始前の PID 1 hang や kernel failure を検出・reset する hardware watchdog は別途必要。
+ここでの readiness は process と設定投影の健全性であり、ISP への疎通や外部サービスの
+到達性までは検証しない。プロトコルの依存待ちと、起動できないプロセスは区別する。
+
+これは署名付き userland pair の切り替えである。kernel/rootfs/bootloader の更新、rollback
+可能な設定 schema migration、永続 disk の初期化、SSH 経由の bundle upload は含まない。
+state が initramfs の RAM にしかない場合、選択 journal も次の電源投入には残らない。
+release と config/host-key の保存先を永続 filesystem に配置する責任は image 側にある。

@@ -117,13 +117,26 @@ func planUpdate(current, candidate Config, pending withdrawals, hardware net.Har
 			}
 		}
 	}
-	updateNames(current.RDNSS, candidate.RDNSS, updated.RDNSS)
-	updateNames(current.DNSSL, candidate.DNSSL, updated.DNSSL)
-	payload, err := encodeWithWithdrawals(candidate, updated, hardware, now, false)
+	currentServers, currentDomains := dnsEntries(current)
+	nextServers, nextDomains := dnsEntries(candidate)
+	updateNames(dnsNames(currentServers), dnsNames(nextServers), updated.RDNSS)
+	updateNames(dnsNames(currentDomains), dnsNames(nextDomains), updated.DNSSL)
+	maximum, err := maximumPacketSize(candidate, len(hardware) == 6)
 	if err != nil {
 		return current, pending, false, err
 	}
-	if len(payload) > 1240 {
+	removed := Config{RDNSS: make([]string, 0, len(updated.RDNSS)), DNSSL: make([]string, 0, len(updated.DNSSL))}
+	for name := range updated.RDNSS {
+		removed.RDNSS = append(removed.RDNSS, name)
+	}
+	for name := range updated.DNSSL {
+		removed.DNSSL = append(removed.DNSSL, name)
+	}
+	withdrawnDNS, err := maximumDNSSize(removed)
+	if err != nil {
+		return current, pending, false, err
+	}
+	if maximum+32*len(updated.Prefixes)+withdrawnDNS > 1240 {
 		return current, pending, false, errors.New("RA update plus withdrawal options exceed minimum IPv6 MTU; reduce the transition size")
 	}
 	return candidate, updated, true, nil

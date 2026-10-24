@@ -26,6 +26,9 @@ import (
 	"github.com/imksoo/routerd2/internal/legacyconfig"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/logging"
+	"github.com/imksoo/routerd2/internal/release"
+	"github.com/imksoo/routerd2/internal/releaseboot"
+	"github.com/imksoo/routerd2/internal/releasecli"
 	"github.com/imksoo/routerd2/internal/runtimeconfig"
 	"github.com/imksoo/routerd2/internal/supervisor"
 	"golang.org/x/sys/unix"
@@ -65,6 +68,8 @@ func run(args []string) error {
 		return usage()
 	}
 	switch args[0] {
+	case "release":
+		return releasecli.Run(context.Background(), args[1:], os.Stdout, os.Stderr)
 	case "version":
 		return cli.WriteJSON(os.Stdout, buildinfo.Current())
 	case "boot":
@@ -80,7 +85,7 @@ func run(args []string) error {
 		if err != nil {
 			return err
 		}
-		return serve(b)
+		return bootConfigured(*path, b)
 	case "run":
 		b := runtimeconfig.Default()
 		f := flags("run")
@@ -148,6 +153,7 @@ func usage() error {
   routerd config validate FILE
   routerd config migrate FILE
   routerd config apply --file FILE --expected-revision N [--request-id ID --confirmed SECONDS --runtime-dir ...]
+  routerd release help
   routerd version
 
 Platform selection is explicit. Use host mode only for isolated development.
@@ -155,7 +161,9 @@ The boot configuration enables SSH; no shell or system service is launched.`)
 	return err
 }
 
-func serve(b runtimeconfig.Boot) error {
+func serve(b runtimeconfig.Boot) error { return serveWithTrial(b, nil) }
+
+func serveWithTrial(b runtimeconfig.Boot, trial *releaseboot.Trial) error {
 	applianceRuntime = b.Platform == "appliance"
 	if err := b.Validate(); err != nil {
 		return err
@@ -184,9 +192,20 @@ func serve(b runtimeconfig.Boot) error {
 		slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
 	}
 	defer closeLogger()
+	var trialDone chan error
+	if trial != nil {
+		trialDone = make(chan error, 1)
+		go func() {
+			trialErr := trial.Watch(ctx)
+			trialDone <- trialErr
+			if trialErr != nil {
+				cancel()
+			}
+		}()
+	}
 	err = supervisor.Run(ctx, supervisor.Options{
 		ModulePath: b.ModulePath, ReleaseID: buildinfo.ReleaseID, RuntimeDir: b.RuntimeDir, StateDir: b.StateDir, ConfigPath: b.Config, Platform: b.Platform,
-		DynamicRoles: []string{"dhcp4", "dhcp6pd", "dhcp_server", "ra", "dns", "vrrp", "bgp"},
+		DynamicRoles: []string{"dhcp4", "dhcp6pd", "dhcp_server", "ra", "ra_client", "aftr", "dns", "vrrp", "bgp"},
 		Modules: []supervisor.Spec{
 			{Name: "logging", Role: "logging", Required: false},
 			{Name: "network", Role: "network", Required: true},
@@ -194,6 +213,16 @@ func serve(b runtimeconfig.Boot) error {
 			{Name: "management", Role: "management", Required: true, Args: []string{"--management-config=" + managementConfig}},
 		},
 	})
+	if trialDone != nil {
+		cancel()
+		err = errors.Join(err, <-trialDone)
+		if err != nil {
+			failure := trial.Fail(context.Background(), "selected userland failed during startup")
+			if !errors.Is(failure, release.ErrStale) {
+				err = errors.Join(err, failure)
+			}
+		}
+	}
 	if b.Platform == "appliance" {
 		if err != nil {
 			slog.Error("appliance runtime failed", "error", err)

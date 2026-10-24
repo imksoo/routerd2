@@ -172,10 +172,10 @@ func nativeLink(l Link, alias string) (netlink.Link, error) {
 func (k *linuxKernel) CreateLink(l Link, alias string) error {
 	native, err := nativeLink(l, alias)
 	if err != nil {
-		return err
+		return fmt.Errorf("prepare %s link %s: %w", l.Kind, l.Name, err)
 	}
 	if err := netlink.LinkAdd(native); err != nil {
-		return err
+		return fmt.Errorf("create %s link %s: %w", l.Kind, l.Name, err)
 	}
 	if l.IPv6AddrGenMode != "" {
 		mode := 0
@@ -183,14 +183,14 @@ func (k *linuxKernel) CreateLink(l Link, alias string) error {
 			mode = 1
 		}
 		if err := netlink.LinkSetIP6AddrGenMode(native, mode); err != nil {
-			return errors.Join(err, netlink.LinkDel(native))
+			return errors.Join(fmt.Errorf("%s link %s IPv6 address generation: %w", l.Kind, l.Name, err), netlink.LinkDel(native))
 		}
 	}
 	// LinkAdd does not consistently serialize IFLA_IFALIAS across link types.
 	// Set and verify it before recording ownership. A failed marker write rolls
 	// back only the just-created, exclusively named device.
 	if err := netlink.LinkSetAlias(native, alias); err != nil {
-		return errors.Join(err, netlink.LinkDel(native))
+		return errors.Join(fmt.Errorf("%s link %s ownership alias: %w", l.Kind, l.Name, err), netlink.LinkDel(native))
 	}
 	return nil
 }

@@ -77,7 +77,7 @@ func run(args []string) error {
 	}
 	return worker.Run(ctx, *role, buildinfo.ReleaseID, func(ctx context.Context, ready func()) error {
 		switch *role {
-		case "dhcp4", "dhcp6pd", "dhcp_server", "ra", "dns", "vrrp", "bgp":
+		case "dhcp4", "dhcp6pd", "dhcp_server", "ra", "ra_client", "aftr", "dns", "vrrp", "bgp":
 			return serviceruntime.Run(ctx, dir, *name, *role, *instancePath, *configDigest, generation, ready)
 		case "logging":
 			return logging.Run(ctx, logging.Options{RuntimeDir: dir, StateDir: state, ReleaseID: buildinfo.ReleaseID, CaptureKernel: os.Getenv("ROUTERD_PLATFORM") == "appliance"}, ready)

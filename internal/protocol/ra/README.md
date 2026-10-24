@@ -17,6 +17,19 @@ remaining lifetime renewed by every advertisement. Autonomous prefixes must be
 /64. The worker does not configure the interface, enable forwarding, allocate
 DHCPv6 addresses or install routes.
 
+Configured DNS uses `RDNSS []string` and `DNSSL []string`. Learned DNS uses
+`LearnedRDNSS []DNSServer{Address, ValidUntil}` and
+`LearnedDNSSL []SearchDomain{Domain, ValidUntil}`. The sender caps each learned
+wire lifetime by both `DNSSLifetimeSeconds` and the remaining absolute source
+lifetime, rounded down. A passed deadline produces lifetime zero even when the
+controller stops sending updates. Zero `ValidUntil` means an explicitly
+unlimited source, not a missing source; the controller must omit missing data.
+An identical configured address/domain takes precedence, so expiration of its
+learned copy cannot withdraw static intent. Duplicate learned sources use the
+longest deadline, and each canonical name appears only once in an advertisement.
+Validation reserves space for different deadline groups even when their
+initial capped lifetimes happen to be equal.
+
 Shutdown attempts one final advertisement with router, prefix and DNS lifetimes
 zero before closing the socket, and reports the withdrawing status. It is a
 bounded best-effort network transmission; there is no acknowledgment from every
@@ -47,7 +60,18 @@ update stream retains the final configuration; absolute deadlines still decay.
 test verifies renewal, partial prefix replacement, rejection of an interface
 change, continued RS responses after stream closure, and final shutdown.
 
+`TestIsolatedLearnedDNSLifetimes` in this package additionally re-executes into
+verified fresh user/network namespaces and captures real ICMPv6 over private
+veth peers. It checks learned RDNSS/DNSSL countdown, configured duplicate
+precedence, renewal without withdrawal, removed-name withdrawal, deadline
+expiration with a closed update stream, and final shutdown. Set
+`ROUTERD2_INTEGRATION_REQUIRED=1` with `go test -tags integration` to fail if
+isolation is unavailable instead of skipping the packet test.
+
 The bundled controller uses this API for PD-derived LAN advertisements. Its
 immutable instance identity contains the LAN template; a lease renewal changes
-live prefix data rather than restarting the worker. Kernel addresses include
+live prefix and learned DNS data rather than restarting the worker. Learned
+DNS is usable only after an information reply and until the controller's
+DHCPv6 information freshness deadline, additionally capped by the PD lease.
+Explicit infinite information refresh still has that PD cap. Kernel addresses include
 both current and still-valid deprecated prefixes, with finite Linux lifetimes.

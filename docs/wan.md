@@ -1,0 +1,119 @@
+# Native WAN ownership
+
+`services[].ra_client`, `services[].dhcp6` and `services[].ds_lite` are separate
+supervised processes. The example [wan-dslite.yaml](../examples/wan-dslite.yaml)
+combines them. LAN DHCP, DNS and prefix advertisements are separate services;
+the example does not implicitly enable them.
+
+## RA client
+
+The RA client opens an ICMPv6 socket and sends router solicitations. It checks
+link-local source, hop limit 255, checksum and the complete option structure
+before accepting an advertisement. `allowed_routers` can narrow the accepted
+link-local sources; it does not authenticate an IPv6 neighbor.
+
+The network worker sets the interface's `accept_ra=0` and `autoconf=0` before
+starting the client. A conflicting explicit kernel configuration is rejected.
+Removing the service restores the saved values, subject to ownership/drift
+checks. This prevents a second kernel RA owner from silently creating routes
+and addresses outside the routerd journal. Link-local address generation and
+normal DAD remain kernel responsibilities.
+
+Autonomous /64 prefixes generate /128 SLAAC addresses; on-link prefixes are
+separate routes. The A and L bits do not substitute for each other. Preferred
+and valid lifetimes, the RFC 4862 two-hour rule, route preference, default/RIO
+routes, RDNSS and DNSSL are tracked independently. DAD-failed or deprecated
+addresses cannot become a new DS-Lite source. The default IID is derived from
+the interface MAC; `interface_id` can explicitly select its lower 64 bits.
+
+Finite address and IPv6 route lifetimes are installed in Linux, so they expire
+even if the supervisor, controller and RA producer stop together. Extremely
+long finite routes use a renewable 6–7 day kernel grant; the protocol's complete
+advertised lifetime remains in its snapshot. Explicit infinite lifetimes stay
+infinite. The state journal is scoped to the kernel boot ID; previous-boot
+advertisements are not silently restored as current router authorization.
+
+## AFTR resolution and DS-Lite
+
+The DS-Lite service owns its generated tunnel, B4 address and optional IPv4
+default route. No static interface or route may also own that generated tunnel.
+Firewall rules may match its name before it exists.
+
+| Field | Meaning |
+| --- | --- |
+| `interface` | IPv6 underlay, shared by all referenced WAN sources |
+| `tunnel` | Dynamically owned kernel ip6tnl interface |
+| `source_from` | Named RA client providing an eligible global IPv6 address |
+| `local_address` | Alternative explicit source, already declared on that underlay in `network.interfaces` |
+| `aftr_from` | Named DHCPv6 service supplying the preferred AFTR candidate |
+| `candidates` | Ordered configured hostname or IPv6 fallbacks |
+| `dns_from` | Explicit RA/DHCPv6 service names supplying IPv6 DNS servers |
+| `resolvers` | Explicit `{address, port}` IPv6 DNS servers; port defaults to 53 |
+| `selection` | `first` preserves the original Linux controller's DNS answer order; `ordinal` / `ordinalModulo` explicitly sort and select |
+| `b4_address` | Inner IPv4 host/prefix; default `192.0.0.2/32` |
+| `default_route` | Default true; route metric/table are independently configurable |
+
+Exactly one of `source_from` and `local_address` is required. The coordinator
+also observes the installed address through the network worker: it must be
+owned, preferred and neither tentative nor DAD-failed. The deterministic source
+selection currently chooses the lexically first eligible RA address; this is
+not complete legacy `SelfAddressPolicy` compatibility.
+
+DNS queries bind their source and device to the IPv6 underlay. Resolver
+addresses must be explicit IPv6 literals, including scoped link-local servers
+on that interface. Host DNS configuration, loopback DNS and IPv4 resolver
+fallbacks are not used. This avoids requiring the DS-Lite tunnel to resolve the
+AFTR needed to create that same tunnel. Direct IPv6 AFTR candidates need no DNS.
+
+DHCPv6 information stops authorizing candidates and DNS servers at its refresh
+deadline, and PD-mode information is additionally bounded by the lease. DHCPv6
+option 32's explicit `0xffffffff` permits no refresh deadline only after an
+information reply has actually been received; a missing timestamp or default
+zero value does not imply infinity. Infinite refresh remains bounded by the PD
+lease when PD is enabled, and it does not make an AFTR DNS answer's TTL infinite.
+RA DNS options keep their own deadlines. Inputs carry a configuration digest and an
+increasing dependency generation; polls do not renew lifetimes, and a result
+from an older generation cannot install a tunnel.
+
+The resolver validates DNS response source, ID, question and bounded CNAME
+chains, and uses TCP after truncated UDP. DNSSEC validation is not implemented
+by this bootstrap resolver. Endpoint validity is bounded by source preferred/
+valid lifetime, candidate/resolver lifetime and minimum DNS chain TTL. A failed
+refresh retains the last good endpoint only until those original deadlines.
+This deliberately differs from retaining a stale AFTR forever while pending.
+
+The controller withdraws expired DS-Lite projections. Unlike finite IPv6
+routes, Linux ip6tnl has no autonomous DNS TTL timer; controller-independent
+removal of a tunnel with a static source is not guaranteed. Source address
+expiry, kernel forwarding, tunnel creation and DNS TTL are distinct lifecycles.
+
+## Learned DNS in LAN advertisements
+
+A DHCPv6 delegation with `use_learned_dns: true` keeps configured `rdnss` and
+`dnssl` entries separate from learned DNS. Learned entries carry the earlier of
+the information freshness deadline and the PD lease expiry into the RA worker.
+Each outgoing RDNSS/DNSSL lifetime is capped by that absolute deadline. Closing
+the controller update stream therefore cannot refresh learned DNS indefinitely;
+expired entries advertise lifetime zero. This is an explicit stale-information
+policy, not a claim that the DHCPv6 refresh timer itself is a prefix lease.
+
+An identical configured entry wins over its learned copy. Renewing a retained
+entry never sends a conflicting zero lifetime, and removing one name does not
+withdraw the others. Prefix and DNS renewals update the running RA worker's
+live configuration without changing its immutable template or restarting its
+socket. Static DNS continues to use its configured advertisement lifetime.
+
+## Inspection
+
+Use `show services` for a bounded summary, `show services wan-ra` or
+`show services internet` for the complete individual snapshot, and `show
+network` for kernel observations. Large service snapshots are omitted from the
+summary with `snapshot_truncated` / `snapshot_bytes`, not silently shortened.
+`show route-issues` and `show route-issues offset N` paginate routing diagnostics.
+
+The protocol implementations and their source/RFC notes live in
+[`internal/protocol/raclient`](../internal/protocol/raclient) and
+[`internal/protocol/aftr`](../internal/protocol/aftr). The required QEMU tests use
+an independent packet/DNS peer and the actual two-ELF process tree. These tests
+do not establish full original-resource compatibility or verify a particular
+ISP/homert deployment.

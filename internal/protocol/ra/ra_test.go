@@ -82,6 +82,45 @@ func TestSolicitationValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestDeprecatedPrefixUsesFiniteDeadlineAndDNSRetainsItsCap(t *testing.T) {
+	now := time.Unix(1700000000, 0).UTC()
+	cfg := example()
+	cfg.Prefixes[0].ValidLifetimeSeconds = ^uint32(0)
+	cfg.Prefixes[0].PreferredLifetimeSeconds = 0
+	cfg.Prefixes[0].ValidUntil = now.Add(80 * time.Second)
+	cfg.Prefixes[0].PreferredUntil = time.Unix(1, 0).UTC()
+	for _, elapsed := range []time.Duration{10 * time.Second, 81 * time.Second} {
+		packet, err := encode(cfg, nil, now.Add(elapsed), false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for at := 16; at < len(packet); at += int(packet[at+1]) * 8 {
+			if packet[at] != 3 {
+				continue
+			}
+			found = true
+			want := uint32(70)
+			if elapsed > 80*time.Second {
+				want = 0
+			}
+			if valid, preferred := binary.BigEndian.Uint32(packet[at+4:]), binary.BigEndian.Uint32(packet[at+8:]); valid != want || preferred != 0 {
+				t.Fatalf("deprecated prefix on wire has lifetime %d/%d, wanted %d/0", valid, preferred, want)
+			}
+		}
+		if !found {
+			t.Fatal("retained prefix is absent from advertisement")
+		}
+	}
+	farFuture := now.AddDate(200, 0, 0)
+	if value := lifetime(1800, farFuture, now); value != 1800 {
+		t.Fatal("distant absolute deadline removed the configured DNS cap", value)
+	}
+	if value := lifetime(0, farFuture, now); value != 0 {
+		t.Fatal("distant absolute deadline undid explicit withdrawal", value)
+	}
+}
 func TestValidateRejectsUnrepresentableAdvertisements(t *testing.T) {
 	bad := example()
 	bad.Prefixes[0].Prefix = "2001:db8::1/64"

@@ -41,6 +41,17 @@ func (k *linuxKernel) Interface(name string) (InterfaceState, error) {
 	if err != nil {
 		return out, err
 	}
+	if value, readErr := k.ReadSetting(settingKey{Kind: "accept_ra", Interface: name}); readErr == nil {
+		out.IPv6AcceptRA = &value
+	} else if !errors.Is(readErr, os.ErrNotExist) {
+		return out, readErr
+	}
+	if value, readErr := k.ReadSetting(settingKey{Kind: "autoconf", Interface: name}); readErr == nil {
+		enabled := value != 0
+		out.IPv6Autoconf = &enabled
+	} else if !errors.Is(readErr, os.ErrNotExist) {
+		return out, readErr
+	}
 	as, err := netlink.AddrList(l, netlink.FAMILY_ALL)
 	if err != nil {
 		return out, err
@@ -179,7 +190,7 @@ func (k *linuxKernel) DeleteAddress(name, address string, options AddressOptions
 }
 
 func (k *linuxKernel) Routes(table int) ([]RouteState, error) {
-	rs, err := netlink.RouteListFiltered(netlink.FAMILY_ALL, &netlink.Route{Table: table}, netlink.RT_FILTER_TABLE)
+	rs, err := nativeRouteDump()
 	if err != nil {
 		return nil, err
 	}
@@ -192,11 +203,16 @@ func (k *linuxKernel) Routes(table int) ([]RouteState, error) {
 		names[l.Attrs().Index] = l.Attrs().Name
 	}
 	out := make([]RouteState, 0, len(rs))
-	for _, r := range rs {
-		if r.Family != netlink.FAMILY_V4 && r.Family != netlink.FAMILY_V6 {
+	observedAt := time.Now()
+	for _, raw := range rs {
+		r, err := decodeNativeRoute(raw, names, observedAt)
+		if err != nil {
+			return nil, err
+		}
+		if r.Destination == "" || table != 0 && r.Table != table {
 			continue
 		}
-		out = append(out, nativeRouteState(r, names))
+		out = append(out, r)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		a, b := out[i], out[j]
@@ -293,6 +309,14 @@ func (k *linuxKernel) AddRoute(r Route) error {
 	if err != nil {
 		return err
 	}
+	if !r.ValidUntil.IsZero() {
+		req, err := expiringRouteRequest(v, r.ValidUntil, time.Now())
+		if err != nil {
+			return err
+		}
+		_, err = req.Execute(unix.NETLINK_ROUTE, 0)
+		return err
+	}
 	return netlink.RouteAdd(v)
 }
 func (k *linuxKernel) DeleteRoute(r Route) error {
@@ -349,6 +373,11 @@ func settingPath(key settingKey) (string, error) {
 		return "/proc/sys/net/ipv4/ip_forward", nil
 	case "forwarding6":
 		return "/proc/sys/net/ipv6/conf/all/forwarding", nil
+	case "accept_ra", "autoconf":
+		if !validName(key.Interface) || key.Interface == "all" || key.Interface == "default" {
+			return "", fmt.Errorf("invalid per-interface IPv6 sysctl identity %q", key.Interface)
+		}
+		return "/proc/sys/net/ipv6/conf/" + key.Interface + "/" + key.Kind, nil
 	}
 	return "", fmt.Errorf("unknown sysctl setting %q", key.Kind)
 }

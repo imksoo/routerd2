@@ -11,9 +11,11 @@ import (
 
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/network"
+	"github.com/imksoo/routerd2/internal/protocol/aftr"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp4"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6pd"
 	"github.com/imksoo/routerd2/internal/protocol/ra"
+	"github.com/imksoo/routerd2/internal/protocol/raclient"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
@@ -27,7 +29,7 @@ type projection struct {
 
 // project is pure: protocol facts and the committed intent produce a complete
 // kernel projection. No producer can submit arbitrary addresses or routes.
-func project(doc config.Document, runtimeDir, stateDir string, records map[string]serviceconfig.Update, now time.Time) (projection, error) {
+func project(doc config.Document, runtimeDir, stateDir string, records map[string]serviceconfig.Update, now time.Time, dynamicInputs ...map[string]aftr.Input) (projection, error) {
 	b, _ := json.Marshal(doc.Network)
 	p := projection{liveRA: map[string]ra.Config{}}
 	if err := json.Unmarshal(b, &p.network); err != nil {
@@ -55,6 +57,16 @@ func project(doc config.Document, runtimeDir, stateDir string, records map[strin
 		}
 		record, has := records[s.ModuleName()]
 		switch s.Role() {
+		case "ra_client":
+			var snapshot raclient.Snapshot
+			if has {
+				if err := json.Unmarshal(record.Snapshot, &snapshot); err != nil {
+					return p, err
+				}
+			}
+			if err := projectRAClient(&p, s, snapshot, has, now); err != nil {
+				return p, err
+			}
 		case "dhcp4":
 			if !has {
 				continue
@@ -123,7 +135,9 @@ func project(doc config.Document, runtimeDir, stateDir string, records map[strin
 					if err := addAddressWithOptions(&p.network, lan.Interface, addr, network.AddressOptions{PreferredUntil: time.Unix(1, 0).UTC(), ValidUntil: old.ExpiresAt}); err != nil {
 						return p, err
 					}
-					prefixes = append(prefixes, ra.Prefix{Prefix: prefix, OnLink: true, Autonomous: true, ValidUntil: old.ExpiresAt, PreferredUntil: time.Unix(1, 0).UTC()})
+					// The absolute deadline bounds the retained prefix. A zero
+					// relative cap would instead withdraw it immediately on wire.
+					prefixes = append(prefixes, ra.Prefix{Prefix: prefix, OnLink: true, Autonomous: true, ValidLifetimeSeconds: ^uint32(0), ValidUntil: old.ExpiresAt, PreferredUntil: time.Unix(1, 0).UTC()})
 				}
 				if !lan.Advertise || len(prefixes) == 0 {
 					continue
@@ -136,8 +150,14 @@ func project(doc config.Document, runtimeDir, stateDir string, records map[strin
 				}
 				c := ra.Config{Resource: name, Interface: lan.Interface, Prefixes: prefixes, RouterLifetimeSeconds: lifetime, DNSSLifetimeSeconds: 1800, MinIntervalSeconds: 3, MaxIntervalSeconds: 10, RDNSS: append([]string(nil), lan.RDNSS...), DNSSL: append([]string(nil), lan.DNSSL...)}
 				if lan.UseLearnedDNS {
-					c.RDNSS = append(c.RDNSS, snap.DNSServers...)
-					c.DNSSL = append(c.DNSSL, snap.DomainSearch...)
+					if until, usable := informationDeadline(snap, now); usable {
+						for _, server := range unique(snap.DNSServers) {
+							c.LearnedRDNSS = append(c.LearnedRDNSS, ra.DNSServer{Address: server, ValidUntil: until})
+						}
+						for _, name := range unique(snap.DomainSearch) {
+							c.LearnedDNSSL = append(c.LearnedDNSSL, ra.SearchDomain{Domain: name, ValidUntil: until})
+						}
+					}
 				}
 				c.RDNSS = unique(c.RDNSS)
 				c.DNSSL = unique(c.DNSSL)
@@ -149,6 +169,8 @@ func project(doc config.Document, runtimeDir, stateDir string, records map[strin
 				template.Prefixes = nil
 				template.RDNSS = nil
 				template.DNSSL = nil
+				template.LearnedRDNSS = nil
+				template.LearnedDNSSL = nil
 				b, _ := json.Marshal(template)
 				if err := addInstance(serviceconfig.Instance{Name: module, Role: "ra", Config: b, DynamicRA: true}); err != nil {
 					return p, err
@@ -196,6 +218,11 @@ func project(doc config.Document, runtimeDir, stateDir string, records map[strin
 	}
 	if err := projectBGP(&p, doc, records, now); err != nil {
 		return p, err
+	}
+	if len(dynamicInputs) > 0 {
+		if err := projectDSLite(&p, doc, runtimeDir, stateDir, records, dynamicInputs[0], now); err != nil {
+			return p, err
+		}
 	}
 	if len(p.instances) > 128 {
 		return p, errors.New("runtime instance limit exceeded")

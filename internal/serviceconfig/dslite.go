@@ -1,0 +1,148 @@
+package serviceconfig
+
+import (
+	"errors"
+	"fmt"
+	"net/netip"
+	"strings"
+	"time"
+
+	"github.com/imksoo/routerd2/internal/protocol/aftr"
+)
+
+// DSLite owns the complete dynamic B4 projection. References are service names,
+// never arbitrary status paths. A DNS server must be reachable over the IPv6
+// underlay before this tunnel exists.
+type DSLite struct {
+	Interface      string         `json:"interface"`
+	Tunnel         string         `json:"tunnel"`
+	LocalAddress   string         `json:"local_address,omitempty"`
+	SourceFrom     string         `json:"source_from,omitempty"`
+	AFTRFrom       string         `json:"aftr_from,omitempty"`
+	Candidates     []string       `json:"candidates,omitempty"`
+	DNSFrom        []string       `json:"dns_from,omitempty"`
+	Resolvers      []AFTRResolver `json:"resolvers,omitempty"`
+	Selection      string         `json:"selection,omitempty"`
+	Ordinal        int            `json:"ordinal,omitempty"`
+	TimeoutSeconds int            `json:"timeout_seconds,omitempty"`
+	RetrySeconds   int            `json:"retry_seconds,omitempty"`
+	B4Address      string         `json:"b4_address,omitempty"`
+	MTU            int            `json:"mtu,omitempty"`
+	DefaultRoute   *bool          `json:"default_route,omitempty"`
+	Table          int            `json:"table,omitempty"`
+	Metric         int            `json:"metric,omitempty"`
+}
+
+type AFTRResolver struct {
+	Address string `json:"address"`
+	Port    uint16 `json:"port,omitempty"`
+}
+
+// The private instance includes dependency and kernel policy so changing either
+// changes the immutable configuration digest, even though the resolver engine
+// itself only needs Protocol.
+type DSLiteInstance struct {
+	Protocol aftr.Config `json:"protocol"`
+	Intent   DSLite      `json:"intent"`
+}
+
+func (s Service) AFTRConfig() aftr.Config {
+	c := s.DSLite
+	return aftr.Config{Resource: s.Name, Interface: c.Interface, Selection: c.Selection, Ordinal: c.Ordinal, TimeoutSeconds: c.TimeoutSeconds, RetrySeconds: c.RetrySeconds}
+}
+
+func validateDSLite(s Service) error {
+	c := s.DSLite
+	if !interfaceName.MatchString(c.Tunnel) || c.Tunnel == c.Interface {
+		return errors.New("DS-Lite tunnel must be a distinct valid interface name")
+	}
+	if (c.SourceFrom == "") == (c.LocalAddress == "") {
+		return errors.New("DS-Lite requires exactly one of source_from and local_address")
+	}
+	if len(c.Candidates) == 0 && c.AFTRFrom == "" {
+		return errors.New("DS-Lite requires candidates or aftr_from")
+	}
+	if len(c.Candidates)+boolInt(c.AFTRFrom != "") > aftr.MaxCandidates || len(c.DNSFrom) > 8 || len(c.Resolvers) > aftr.MaxResolvers {
+		return errors.New("DS-Lite candidate or DNS source limit exceeded")
+	}
+	if c.MTU != 0 && (c.MTU < 68 || c.MTU > 65495) || c.Table < 0 || uint64(c.Table) > 1<<32-1 || c.Metric < 0 || uint64(c.Metric) > 1<<32-1 {
+		return errors.New("DS-Lite MTU/table/metric is invalid")
+	}
+	if c.B4Address != "" {
+		p, err := netip.ParsePrefix(c.B4Address)
+		if err != nil || !p.Addr().Is4() || !p.Addr().IsGlobalUnicast() || p.String() != c.B4Address {
+			return errors.New("DS-Lite b4_address must be a canonical IPv4 host/prefix")
+		}
+	}
+	config := s.AFTRConfig()
+	config.ConfigDigest = strings.Repeat("0", 64)
+	in := aftr.Input{Resource: s.Name, Interface: c.Interface, ConfigDigest: config.ConfigDigest, Generation: 1, UpdatedAt: time.Now().UTC(), Active: true, Source: aftr.Source{Address: c.LocalAddress}}
+	for _, candidate := range c.Candidates {
+		in.Candidates = append(in.Candidates, aftr.Candidate{Value: candidate, Origin: "configured"})
+	}
+	for _, resolver := range c.Resolvers {
+		in.Resolvers = append(in.Resolvers, aftr.Resolver{Address: resolver.Address, Port: resolver.Port, Interface: c.Interface})
+	}
+	if err := aftr.ValidateInput(config, in); err != nil {
+		return err
+	}
+	return nil
+}
+
+func boolInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}
+
+func validateDSLiteSources(services []Service) error {
+	byName := map[string]Service{}
+	tunnels := map[string]string{}
+	for _, s := range services {
+		byName[s.Name] = s
+	}
+	for _, s := range services {
+		if s.DSLite == nil {
+			continue
+		}
+		c := s.DSLite
+		if prior := tunnels[c.Tunnel]; prior != "" {
+			return fmt.Errorf("DS-Lite services %s and %s share tunnel %s", prior, s.Name, c.Tunnel)
+		}
+		tunnels[c.Tunnel] = s.Name
+		check := func(name, role string) error {
+			other, ok := byName[name]
+			if !ok || other.Interface() != c.Interface || role != "" && other.Role() != role || role == "" && other.Role() != "ra_client" && other.Role() != "dhcp6pd" {
+				return fmt.Errorf("DS-Lite %s references unavailable or incompatible underlay service %q", s.Name, name)
+			}
+			return nil
+		}
+		if c.SourceFrom != "" {
+			if err := check(c.SourceFrom, "ra_client"); err != nil {
+				return err
+			}
+		}
+		if c.AFTRFrom != "" {
+			if err := check(c.AFTRFrom, "dhcp6pd"); err != nil {
+				return err
+			}
+		}
+		seen := map[string]bool{}
+		for _, name := range c.DNSFrom {
+			if seen[name] {
+				return fmt.Errorf("DS-Lite %s duplicates DNS source %q", s.Name, name)
+			}
+			seen[name] = true
+			if err := check(name, ""); err != nil {
+				return err
+			}
+		}
+	}
+	for _, s := range services {
+		if owner := tunnels[s.Interface()]; owner != "" {
+			return fmt.Errorf("service %s cannot use dynamically owned DS-Lite tunnel of %s as its underlay", s.Name, owner)
+		}
+	}
+	return nil
+}

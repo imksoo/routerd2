@@ -1,6 +1,6 @@
 //go:build linux
 
-// The network integration image has its own test-only PID 1. It is never copied
+// The kernel integration image has its own test-only PID 1. It is never copied
 // into the production appliance: no production management command can execute
 // the test binary or an arbitrary program.
 package main
@@ -20,7 +20,31 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func run() error {
+type suite struct {
+	binary, test, marker string
+	timeout              time.Duration
+}
+
+func selectedSuite() (suite, error) {
+	data, err := os.ReadFile("/test-suite")
+	if err != nil {
+		return suite{}, fmt.Errorf("read test suite: %w", err)
+	}
+	switch strings.TrimSpace(string(data)) {
+	case "network":
+		return suite{"/network.test", "TestIsolatedKernelForwardingNATAndDSLite", "ROUTERD_NETWORK_TEST", 55 * time.Second}, nil
+	case "ra-dns":
+		return suite{"/ra.test", "TestIsolatedLearnedDNSLifetimes", "ROUTERD_RA_DNS_TEST", 45 * time.Second}, nil
+	case "daemon":
+		return suite{"/daemon.test", "TestDaemonRAClientConfigurationAndExpiry", "ROUTERD_DAEMON_TEST", 150 * time.Second}, nil
+	case "daemon-aftr":
+		return suite{"/daemon.test", "TestDaemonAFTRResolutionAndExpiry", "ROUTERD_AFTR_DAEMON_TEST", 150 * time.Second}, nil
+	default:
+		return suite{}, fmt.Errorf("unrecognized fixed test suite")
+	}
+}
+
+func run(s suite) error {
 	if os.Getpid() != 1 {
 		return fmt.Errorf("test init requires PID 1 in its dedicated virtual machine")
 	}
@@ -30,10 +54,13 @@ func run() error {
 	if err := kmod.Load([]string{"veth", "bridge", "8021q", "vrf", "vxlan", "macvlan", "nf_tables", "nft_ct", "nft_chain_nat", "nft_masq", "nft_nat", "nft_reject_inet", "nft_log", "nf_log_syslog", "ip6_tunnel"}); err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), s.timeout+5*time.Second)
 	defer cancel()
-	command := exec.CommandContext(ctx, "/network.test", "-test.run=^TestIsolatedKernelForwardingNATAndDSLite$", "-test.v", "-test.timeout=55s")
+	command := exec.CommandContext(ctx, s.binary, "-test.run=^"+s.test+"$", "-test.v", "-test.timeout="+s.timeout.String())
 	command.Env = []string{"PATH=/", "TMPDIR=/tmp", "ROUTERD2_INTEGRATION_REQUIRED=1"}
+	if s.binary == "/daemon.test" {
+		command.Env = append(command.Env, "ROUTERD2_TEST_BIN_DIR=/test/bin")
+	}
 	var output bytes.Buffer
 	writer := io.MultiWriter(os.Stdout, &output)
 	command.Stdout, command.Stderr = writer, writer
@@ -42,18 +69,30 @@ func run() error {
 	}
 	// A renamed test or a mismatched -test.run pattern must not produce a
 	// false pass merely because the Go test executable exits successfully.
-	if !strings.Contains(output.String(), "--- PASS: TestIsolatedKernelForwardingNATAndDSLite") {
+	if !strings.Contains(output.String(), "--- PASS: "+s.test+" (") || strings.Contains(output.String(), "--- SKIP:") {
 		return fmt.Errorf("required integration test did not report PASS")
 	}
 	return nil
 }
 
 func main() {
-	err := run()
+	s, err := selectedSuite()
 	if err == nil {
-		fmt.Println("ROUTERD_NETWORK_TEST_PASS")
+		err = run(s)
+	}
+	if s.marker == "" {
+		s.marker = "ROUTERD_KERNEL_TEST"
+	}
+	if err == nil {
+		fmt.Println(s.marker + "_PASS")
 	} else {
-		fmt.Println("ROUTERD_NETWORK_TEST_FAIL:", err)
+		fmt.Println(s.marker+"_FAIL:", err)
+	}
+	// Filesystem Sync does not drain a UART. Wait for the terminal's queued
+	// test output before cutting power, otherwise a fast guest can shut down
+	// while the host serial log still contains only early boot messages.
+	if err := unix.IoctlSetInt(int(os.Stdout.Fd()), unix.TCSBRK, 1); err != nil {
+		fmt.Fprintln(os.Stderr, "test console drain failed:", err)
 	}
 	unix.Sync()
 	if err := unix.Reboot(unix.LINUX_REBOOT_CMD_POWER_OFF); err != nil {

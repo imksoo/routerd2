@@ -21,9 +21,11 @@ type settingKey struct {
 	Interface string `json:"interface,omitempty"`
 }
 type ownedSetting struct {
-	Key    settingKey `json:"key"`
-	Before int        `json:"before"`
-	Last   int        `json:"last"`
+	Key       settingKey `json:"key"`
+	Before    int        `json:"before"`
+	Last      int        `json:"last"`
+	Index     int        `json:"index,omitempty"`
+	Attempted *int       `json:"attempted,omitempty"`
 }
 type ownedAddress struct {
 	Interface string          `json:"interface"`
@@ -172,21 +174,8 @@ func validateJournal(s journal) error {
 		return err
 	}
 	for _, v := range s.Settings {
-		switch v.Key.Kind {
-		case "mtu":
-			if !validName(v.Key.Interface) || v.Before < 68 || v.Before > 65535 || v.Last < 68 || v.Last > 65535 {
-				return fmt.Errorf("invalid saved MTU")
-			}
-		case "up":
-			if !validName(v.Key.Interface) || v.Before < 0 || v.Before > 1 || v.Last < 0 || v.Last > 1 {
-				return fmt.Errorf("invalid saved link state")
-			}
-		case "forwarding4", "forwarding6":
-			if v.Key.Interface != "" || v.Before < 0 || v.Before > 1 || v.Last < 0 || v.Last > 1 {
-				return fmt.Errorf("invalid saved forwarding setting")
-			}
-		default:
-			return fmt.Errorf("unknown setting kind %q", v.Key.Kind)
+		if err := validateSettingRecord(v); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -225,7 +214,8 @@ func (e *Engine) Apply(ctx context.Context, revision uint64, desired Desired) (S
 	if err := ctx.Err(); err != nil {
 		return e.snapshotLocked(ctx), err
 	}
-	d := projectAddressExpiry(normalized(cloneDesired(desired)), time.Now())
+	now := time.Now()
+	d := projectRouteExpiry(projectAddressExpiry(normalized(cloneDesired(desired)), now), now)
 	e.state.AttemptedRevision, e.state.Attempted = revision, &d
 	e.state.Status, e.state.LastError = "applying", ""
 	if err := e.save(); err != nil {
@@ -439,7 +429,12 @@ func (e *Engine) ownsAddress(a addressKey) bool {
 	return false
 }
 func routeMatches(live RouteState, want Route) bool {
-	return sameRoute(live.Route, want) && live.Protocol == RouteProtocol && live.Type == 1 && live.Source == "" && live.Multipath == (len(live.NextHops) > 0) && !live.Advanced
+	observed := live.Route
+	if !routeLifetimeMatches(observed.ValidUntil, want.ValidUntil) {
+		return false
+	}
+	observed.ValidUntil = want.ValidUntil
+	return sameRoute(observed, want) && live.Protocol == RouteProtocol && live.Type == 1 && live.Source == "" && live.Multipath == (len(live.NextHops) > 0) && !live.Advanced
 }
 func (e *Engine) ownsRoute(r RouteState) bool {
 	for _, v := range e.state.Routes {
@@ -509,6 +504,12 @@ func (p *apply) reconcile(d Desired) error {
 		if l.MTU != 0 {
 			wantedSettings[settingKey{Kind: "mtu", Interface: l.Name}] = l.MTU
 		}
+		if l.IPv6AcceptRA != nil {
+			wantedSettings[settingKey{Kind: "accept_ra", Interface: l.Name}] = *l.IPv6AcceptRA
+		}
+		if l.IPv6Autoconf != nil {
+			wantedSettings[settingKey{Kind: "autoconf", Interface: l.Name}] = boolInt(*l.IPv6Autoconf)
+		}
 	}
 	for _, t := range d.DSLite {
 		wantedSettings[settingKey{Kind: "up", Interface: t.Name}] = 1
@@ -519,8 +520,35 @@ func (p *apply) reconcile(d Desired) error {
 	if d.Forwarding.IPv6 != nil {
 		wantedSettings[settingKey{Kind: "forwarding6"}] = boolInt(*d.Forwarding.IPv6)
 	}
-	if err := p.restoreSettings(wantedSettings); err != nil {
+	// Keep the kernel RA/SLAAC writers disabled while removing the client-owned
+	// routes and addresses. Restore these settings after reconciliation finishes.
+	earlySettings := make(map[settingKey]int, len(wantedSettings))
+	for key, value := range wantedSettings {
+		earlySettings[key] = value
+	}
+	for _, old := range p.e.state.Settings {
+		if raSetting(old.Key) {
+			earlySettings[old.Key] = old.Last
+		}
+	}
+	if err := p.restoreSettings(earlySettings); err != nil {
 		return err
+	}
+	// Existing interfaces may already be UP. Stop their competing writers
+	// before changing addresses, links or routes. Newly created links receive
+	// these settings in interfaceConfig, before their first UP transition.
+	for _, l := range d.Interfaces {
+		if l.IPv6AcceptRA == nil && l.IPv6Autoconf == nil {
+			continue
+		}
+		if _, err := p.e.kernel.Interface(l.Name); errors.Is(err, errLinkNotFound) {
+			continue
+		} else if err != nil {
+			return p.failure("RA setting interface", err)
+		}
+		if err := p.interfaceRASettings(l); err != nil {
+			return err
+		}
 	}
 	if err := p.restoreAttributes(d); err != nil {
 		return err
@@ -556,6 +584,13 @@ func (p *apply) reconcile(d Desired) error {
 		return err
 	}
 	for _, t := range d.DSLite {
+		configured := false
+		for _, l := range d.Interfaces {
+			configured = configured || l.Name == t.Name
+		}
+		if configured {
+			continue // interfaceConfig applies sysctls before UP.
+		}
 		if err := p.set(settingKey{Kind: "up", Interface: t.Name}, 1); err != nil {
 			return err
 		}
@@ -596,7 +631,7 @@ func (p *apply) reconcile(d Desired) error {
 			}
 		}
 	}
-	return nil
+	return p.restoreSettings(wantedSettings)
 }
 
 func boolInt(v bool) int {
@@ -605,68 +640,10 @@ func boolInt(v bool) int {
 	}
 	return 0
 }
-func (p *apply) set(key settingKey, value int) error {
-	live, err := p.e.kernel.ReadSetting(key)
-	if err != nil {
-		return p.failure("read "+key.Kind, err)
-	}
-	if live == value {
-		for i := range p.e.state.Settings {
-			if p.e.state.Settings[i].Key == key && p.e.state.Settings[i].Last != value {
-				p.e.state.Settings[i].Last = value
-				return p.checkpoint("setting ownership")
-			}
-		}
-		return nil
-	}
-	return p.change("set "+key.Kind, func() error { return p.e.kernel.WriteSetting(key, value) }, func() {
-		for i := range p.e.state.Settings {
-			if p.e.state.Settings[i].Key == key {
-				p.e.state.Settings[i].Last = value
-				return
-			}
-		}
-		p.e.state.Settings = append(p.e.state.Settings, ownedSetting{Key: key, Before: live, Last: value})
-	})
-}
-
-func (p *apply) restoreSettings(want map[settingKey]int) error {
-	for i := 0; i < len(p.e.state.Settings); {
-		s := p.e.state.Settings[i]
-		if _, ok := want[s.Key]; ok {
-			i++
-			continue
-		}
-		live, err := p.e.kernel.ReadSetting(s.Key)
-		if errors.Is(err, errLinkNotFound) {
-			p.e.state.Settings = append(p.e.state.Settings[:i], p.e.state.Settings[i+1:]...)
-			if err := p.checkpoint("forget missing link setting"); err != nil {
-				return err
-			}
-			continue
-		}
-		if err != nil {
-			return p.failure("restore "+s.Key.Kind, err)
-		}
-		if live != s.Last && live != s.Before {
-			return p.failure("restore "+s.Key.Kind, fmt.Errorf("%s changed outside routerd2: have %d, last set %d; refusing to overwrite", s.Key.Interface, live, s.Last))
-		}
-		forget := func() { p.e.state.Settings = append(p.e.state.Settings[:i], p.e.state.Settings[i+1:]...) }
-		if live != s.Before {
-			if err := p.change("restore "+s.Key.Kind, func() error { return p.e.kernel.WriteSetting(s.Key, s.Before) }, forget); err != nil {
-				return err
-			}
-		} else {
-			forget()
-			if err := p.checkpoint("restore setting journal"); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
 func (p *apply) interfaceConfig(l Interface) error {
+	if err := p.interfaceRASettings(l); err != nil {
+		return err
+	}
 	for _, field := range []struct {
 		kind  string
 		value *string

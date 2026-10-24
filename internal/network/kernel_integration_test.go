@@ -216,6 +216,7 @@ func runKernelFixture(t *testing.T) {
 	runNativePolicyFixture(t, e, d, clientNS, serverNS)
 	runNativeECMPFixture(t, e, d, clientNS, serverNS)
 	runNativeACLNATFixture(t, e, d, clientNS, serverNS)
+	runNativeRAStateFixture(t, e, d, clientNS, serverNS)
 	runNativeAddressLifetimeFixture(t, e, d)
 	peerRoute(t, server, "server0", "192.0.2.0/24", "198.51.100.1")
 	assertNewReverseConnectionDropped(t, serverNS, clientNS)
@@ -303,6 +304,7 @@ func runNativeECMPFixture(t *testing.T, e *Engine, base Desired, clientNS, serve
 	d.Routes[0].NextHops = []NextHop{{Gateway: "198.51.100.2", Interface: "wan0", Weight: 1}, {Gateway: "198.51.101.2", Interface: "wan1", Weight: 1}}
 	d.Routes[1].Gateway, d.Routes[1].Interface = "", ""
 	d.Routes[1].NextHops = []NextHop{{Gateway: "2001:db8:2::2", Interface: "wan0", Weight: 1}, {Gateway: "2001:db8:22::2", Interface: "wan1", Weight: 1}}
+	d.Routes[1].ValidUntil = time.Now().Add(time.Minute)
 	if _, err := e.Apply(context.Background(), 20, d); err != nil {
 		t.Fatalf("ECMP install: %v", err)
 	}
@@ -388,7 +390,115 @@ func runNativeECMPFixture(t *testing.T, e *Engine, base Desired, clientNS, serve
 	if !found {
 		t.Fatal("foreign ECMP route was removed")
 	}
-	t.Log("IPv4/IPv6 ECMP TCP over both NICs, weights 256/3, reapply, rollback and foreign route preservation passed")
+	t.Log("IPv4/IPv6 ECMP TCP over both NICs, IPv6 kernel expiry, weights 256/3, reapply, rollback and foreign route preservation passed")
+}
+
+func runNativeRAStateFixture(t *testing.T, e *Engine, base Desired, clientNS, serverNS netns.NsHandle) {
+	t.Helper()
+	acceptKey := settingKey{Kind: "accept_ra", Interface: "wan0"}
+	autoconfKey := settingKey{Kind: "autoconf", Interface: "wan0"}
+	beforeAccept, err := e.kernel.ReadSetting(acceptKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeAutoconf, err := e.kernel.ReadSetting(autoconfKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := cloneDesired(base)
+	zero, disabled := 0, false
+	d.Interfaces[1].IPv6AcceptRA, d.Interfaces[1].IPv6Autoconf = &zero, &disabled
+	d.Links = append(d.Links, Link{Name: "rabr0", Kind: "bridge", IPv6AddrGenMode: "none"})
+	d.Interfaces = append(d.Interfaces, Interface{Name: "rabr0", IPv6AcceptRA: &zero, IPv6Autoconf: &disabled})
+	d.Routes[1].ValidUntil = time.Now().Add(4 * time.Second)
+	d.Routes = append(d.Routes, Route{Destination: "2001:db8:77::/64", Interface: "wan0", ValidUntil: time.Now().Add(time.Minute)})
+	if _, err := e.Apply(context.Background(), 40, d); err != nil {
+		t.Fatalf("RA writer settings and finite routes: %v", err)
+	}
+	for _, name := range []string{"wan0", "rabr0"} {
+		l, err := e.kernel.Interface(name)
+		if err != nil || l.IPv6AcceptRA == nil || *l.IPv6AcceptRA != 0 || l.IPv6Autoconf == nil || *l.IPv6Autoconf || !l.Up {
+			t.Fatalf("kernel RA/SLAAC writers were not disabled on %s: %+v %v", name, l, err)
+		}
+	}
+	tcpExchange(t, clientNS, serverNS, "tcp6", "2001:db8:3::2", "2001:db8:2::1")
+	d.Routes[1].ValidUntil = time.Now().Add(5 * time.Second)
+	if _, err := e.Apply(context.Background(), 41, d); err != nil {
+		t.Fatalf("finite route renewal: %v", err)
+	}
+	if _, err := e.Apply(context.Background(), 41, d); err != nil {
+		t.Fatalf("finite route reapply: %v", err)
+	}
+	observed, err := e.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range d.Routes {
+		found := false
+		for _, live := range observed.Routes {
+			found = found || routeMatches(live, want) && live.Owned
+		}
+		if !found {
+			t.Fatalf("finite route deadline or ownership not read back: want %+v; live %+v", want, observed.Routes)
+		}
+	}
+	foreign := Route{Destination: "2001:db8:99::/64", Interface: "wan0", Metric: 177, ValidUntil: time.Now().Add(time.Hour)}
+	if err := e.kernel.AddRoute(foreign); err != nil {
+		t.Fatal(err)
+	}
+	defer e.kernel.DeleteRoute(foreign)
+	// No Apply call runs while this deadline passes. FIB lookup must stop
+	// selecting the expired route without depending on the control process.
+	target := net.ParseIP("2001:db8:3::2")
+	if _, err := netlink.RouteGet(target); err != nil {
+		t.Fatalf("finite route expired before its deadline: %v", err)
+	}
+	limit := d.Routes[1].ValidUntil.Add(2 * time.Second)
+	for {
+		_, err := netlink.RouteGet(target)
+		if errors.Is(err, unix.ENETUNREACH) {
+			break
+		}
+		if err != nil || time.Now().After(limit) {
+			t.Fatalf("kernel FIB retained expired IPv6 route without controller: %v", err)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if _, err := e.Apply(context.Background(), 42, d); err != nil {
+		t.Fatalf("expired route projection: %v", err)
+	}
+	for _, r := range e.state.Desired.Routes {
+		if r.Destination == "2001:db8:3::/64" {
+			t.Fatal("expired route retained in desired projection")
+		}
+	}
+	if _, err := e.Apply(context.Background(), 1, base); err != nil {
+		t.Fatalf("restore RA writer settings: %v", err)
+	}
+	if value, err := e.kernel.ReadSetting(acceptKey); err != nil || value != beforeAccept {
+		t.Fatalf("original accept_ra not restored: %d %v", value, err)
+	}
+	if value, err := e.kernel.ReadSetting(autoconfKey); err != nil || value != beforeAutoconf {
+		t.Fatalf("original autoconf not restored: %d %v", value, err)
+	}
+	routes, err := e.kernel.Routes(254)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, r := range routes {
+		if routeMatches(r, foreign) {
+			found = true
+			if e.ownsRoute(r) {
+				t.Fatal("foreign finite route with matching protocol adopted")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("foreign finite route was removed")
+	}
+	tcpExchange(t, clientNS, serverNS, "tcp6", "2001:db8:3::2", "2001:db8:2::1")
+	t.Log("RA/SLAAC writer ownership/restoration, finite IPv6 on-link and gateway routes, renewal, autonomous FIB expiry and foreign finite route preservation passed")
 }
 
 func runNativeAddressLifetimeFixture(t *testing.T, e *Engine, base Desired) {

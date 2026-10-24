@@ -8,12 +8,15 @@ IMAGE_CONFIG ?= empty
 IMAGE_DIR ?= dist/image
 CONTAINER_TAG ?= routerd2:dev
 QEMU_TIMEOUT ?= 90
+QEMU_DAEMON_TIMEOUT ?= 180
+QEMU_RELEASE_TIMEOUT ?= 240
+RELEASE_BUILT_DIR ?= dist/bin
 QEMU_SSH_KEY ?=
 
-LDFLAGS = -s -w -X github.com/imksoo/routerd2/internal/buildinfo.ReleaseID=$(RELEASE_ID)
+LDFLAGS = -s -w -X github.com/imksoo/routerd2/internal/buildinfo.Identity=ROUTERD2-RELEASE-V1:$(RELEASE_ID):END
 BUILD_ARGS = --build-arg GO_VERSION=$(GO_VERSION) --build-arg ALPINE_VERSION=$(ALPINE_VERSION) --build-arg RELEASE_ID=$(RELEASE_ID)
 
-.PHONY: help fmt fmt-check test test-dependencies test-tools race vet check licenses build build-linux container container-multi container-smoke apk image qemu-smoke qemu-network clean
+.PHONY: help fmt fmt-check test test-dependencies test-tools race vet check licenses build build-linux release-built-test container container-multi container-smoke apk image qemu-smoke qemu-network qemu-ra-dns qemu-daemon qemu-daemon-aftr qemu-release-boot clean
 
 help:
 	@printf '%s\n' \
@@ -21,10 +24,15 @@ help:
 	  'make licenses          Collect dependency licenses and their manifest' \
 	  'make build             Build both binaries for the current platform' \
 	  'make build-linux       Build static linux/amd64 and linux/arm64 binaries' \
+	  'make release-built-test Verify actual amd64/arm64 release bundle identities' \
 	  'make apk               Test and build the Alpine package with abuild' \
 	  'make image             Export Alpine kernel + routerd initramfs' \
 	  'make qemu-smoke        Boot the image in QEMU; optionally verify SSH' \
 	  'make qemu-network      Run native network tests in a separate QEMU guest' \
+	  'make qemu-ra-dns       Verify learned RA DNS expiry and live updates in QEMU' \
+	  'make qemu-daemon       Run the two-binary RA daemon gate in QEMU' \
+	  'make qemu-daemon-aftr  Run the two-binary AFTR daemon gate in QEMU' \
+	  'make qemu-release-boot Verify signed PID 1 selection and confirmation in QEMU' \
 	  'make container         Build the scratch OCI runtime image' \
 	  'make container-smoke   Run the container and query its control API' \
 	  'make container-multi   Export an amd64/arm64 OCI archive'
@@ -69,6 +77,9 @@ build-linux: licenses
 	  CGO_ENABLED=0 GOOS=linux GOARCH=$$arch $(GO) build -trimpath -buildvcs=false -ldflags '$(LDFLAGS)' -o "dist/bin/linux-$$arch/routerd-modules" ./cmd/routerd-modules; \
 	done
 
+release-built-test:
+	ROUTERD2_INTEGRATION_REQUIRED=1 ROUTERD2_RELEASE_BUILT_DIR='$(abspath $(RELEASE_BUILT_DIR))' ROUTERD2_RELEASE_BUILT_ID='$(RELEASE_ID)' $(GO) test -race -tags integration -run '^Test(BuiltReleasePairs|PublishBuiltRelease)$$' -count=1 -v ./internal/release ./internal/releasepublish
+
 container:
 	$(DOCKER) build $(BUILD_ARGS) -t $(CONTAINER_TAG) .
 
@@ -90,6 +101,18 @@ qemu-smoke:
 
 qemu-network:
 	$(PYTHON) scripts/qemu-network.py --go '$(GO)' --image-dir $(IMAGE_DIR) --timeout $(QEMU_TIMEOUT)
+
+qemu-ra-dns:
+	$(PYTHON) scripts/qemu-network.py --suite ra-dns --go '$(GO)' --image-dir $(IMAGE_DIR) --timeout 75
+
+qemu-daemon:
+	$(PYTHON) scripts/qemu-network.py --suite daemon --go '$(GO)' --image-dir $(IMAGE_DIR) --timeout $(QEMU_DAEMON_TIMEOUT)
+
+qemu-daemon-aftr:
+	$(PYTHON) scripts/qemu-network.py --suite daemon-aftr --go '$(GO)' --image-dir $(IMAGE_DIR) --timeout $(QEMU_DAEMON_TIMEOUT)
+
+qemu-release-boot:
+	$(PYTHON) internal/releaseboot/testdata/qemu-release-boot.py --go '$(GO)' --image-dir $(IMAGE_DIR) --output dist/release-boot-test --timeout $(QEMU_RELEASE_TIMEOUT)
 
 clean:
 	rm -rf dist

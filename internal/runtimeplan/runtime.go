@@ -15,7 +15,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -23,11 +22,13 @@ import (
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/network"
+	"github.com/imksoo/routerd2/internal/protocol/aftr"
 	"github.com/imksoo/routerd2/internal/protocol/bgpconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp4"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6pd"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/ra"
+	"github.com/imksoo/routerd2/internal/protocol/raclient"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 	"github.com/imksoo/routerd2/internal/supervisor"
@@ -55,20 +56,24 @@ type binding struct {
 	digest   string
 }
 type Status struct {
-	RouteIssues []RouteIssue     `json:"route_issues,omitempty"`
-	Revision    uint64           `json:"revision"`
-	Phase       string           `json:"phase"`
-	LastError   string           `json:"last_error,omitempty"`
-	Instances   []InstanceStatus `json:"instances"`
+	RouteIssueCount int              `json:"route_issue_count"`
+	RouteIssues     []RouteIssue     `json:"route_issues,omitempty"`
+	Revision        uint64           `json:"revision"`
+	Phase           string           `json:"phase"`
+	LastError       string           `json:"last_error,omitempty"`
+	Instances       []InstanceStatus `json:"instances"`
 }
 type InstanceStatus struct {
-	Name          string          `json:"name"`
-	Role          string          `json:"role"`
-	ConfigDigest  string          `json:"config_digest"`
-	Generation    uint64          `json:"generation,omitempty"`
-	ProducerEpoch string          `json:"producer_epoch,omitempty"`
-	Sequence      uint64          `json:"sequence,omitempty"`
-	Snapshot      json.RawMessage `json:"snapshot,omitempty"`
+	SnapshotBytes     int             `json:"snapshot_bytes,omitempty"`
+	SnapshotTruncated bool            `json:"snapshot_truncated,omitempty"`
+	OwnershipExpired  bool            `json:"ownership_expired,omitempty"`
+	Name              string          `json:"name"`
+	Role              string          `json:"role"`
+	ConfigDigest      string          `json:"config_digest"`
+	Generation        uint64          `json:"generation,omitempty"`
+	ProducerEpoch     string          `json:"producer_epoch,omitempty"`
+	Sequence          uint64          `json:"sequence,omitempty"`
+	Snapshot          json.RawMessage `json:"snapshot,omitempty"`
 }
 type Runtime struct {
 	op               sync.Mutex // module-set reconciliation; never held by protocol callbacks
@@ -83,6 +88,7 @@ type Runtime struct {
 	bindings         map[string]binding
 	records          map[string]serviceconfig.Update
 	liveRA           map[string]ra.Config
+	aftrInputs       map[string]aftr.Input
 	installed        []supervisor.DynamicModule
 	appliedHash      string
 	lastNetworkApply time.Time
@@ -93,17 +99,6 @@ type Runtime struct {
 
 func New(dir, stateDir string, n Network) *Runtime {
 	return &Runtime{dir: dir, stateDir: stateDir, network: n, manager: managerClient{localapi.NewClient(filepath.Join(dir, supervisor.SocketName))}, bindings: map[string]binding{}, records: map[string]serviceconfig.Update{}, liveRA: map[string]ra.Config{}, leases: map[string]time.Time{}, phase: "starting"}
-}
-func (r *Runtime) State() Status {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	s := Status{RouteIssues: append([]RouteIssue(nil), r.routeIssues...), Revision: r.revision, Phase: r.phase, LastError: r.lastError, Instances: []InstanceStatus{}}
-	for name, b := range r.bindings {
-		v := r.records[name]
-		s.Instances = append(s.Instances, InstanceStatus{Name: name, Role: b.instance.Role, ConfigDigest: b.digest, Generation: v.Generation, ProducerEpoch: v.ProducerEpoch, Sequence: v.Sequence, Snapshot: append(json.RawMessage(nil), v.Snapshot...)})
-	}
-	sort.Slice(s.Instances, func(i, j int) bool { return s.Instances[i].Name < s.Instances[j].Name })
-	return s
 }
 
 // CheckReady queries the process manager at confirmation time. A previously
@@ -164,7 +159,7 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, doc config.D
 	retained, err := r.retainedLocked(doc)
 	var p projection
 	if err == nil {
-		p, err = project(doc, r.dir, r.stateDir, retained, time.Now())
+		p, err = project(doc, r.dir, r.stateDir, retained, time.Now(), r.aftrInputs)
 	}
 	r.mu.Unlock()
 	if err != nil {
@@ -182,7 +177,7 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, doc config.D
 	// their latest acknowledged facts at cutover; never restore an older lease.
 	retained, err = r.retainedLocked(doc)
 	if err == nil {
-		p, err = project(doc, r.dir, r.stateDir, retained, time.Now())
+		p, err = project(doc, r.dir, r.stateDir, retained, time.Now(), r.aftrInputs)
 	}
 	var bindings map[string]binding
 	if err == nil {
@@ -197,6 +192,11 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, doc config.D
 	r.configured = true
 	r.records = retained
 	r.bindings = bindings
+	for name, input := range r.aftrInputs {
+		if b, ok := bindings[name]; !ok || b.digest != input.ConfigDigest {
+			delete(r.aftrInputs, name)
+		}
+	}
 	r.liveRA = p.liveRA
 	r.routeIssues = p.routeIssues
 	r.phase = "applying"
@@ -445,7 +445,11 @@ func (r *Runtime) Accept(ctx context.Context, u serviceconfig.Update) error {
 			}
 		}
 	}
-	if err := validateSnapshot(b.instance, u.Snapshot); err != nil {
+	if u.Role == "aftr" {
+		if err := r.validateAFTRSnapshotLocked(b, u.Snapshot); err != nil {
+			return err
+		}
+	} else if err := validateSnapshot(b.instance, u.Snapshot); err != nil {
 		return err
 	}
 	previous, had := r.records[u.Name]
@@ -463,7 +467,7 @@ func (r *Runtime) Accept(ctx context.Context, u serviceconfig.Update) error {
 		}
 	}
 	r.records[u.Name] = u
-	p, err := project(r.current, r.dir, r.stateDir, r.effectiveRecordsLocked(time.Now()), time.Now())
+	p, err := project(r.current, r.dir, r.stateDir, r.effectiveRecordsLocked(time.Now()), time.Now(), r.aftrInputs)
 	if err == nil {
 		err = r.applyNetworkLocked(ctx, p.network)
 	}
@@ -478,7 +482,7 @@ func (r *Runtime) Accept(ctx context.Context, u serviceconfig.Update) error {
 		} else {
 			delete(r.records, u.Name)
 		}
-		old, compileErr := project(r.current, r.dir, r.stateDir, r.effectiveRecordsLocked(time.Now()), time.Now())
+		old, compileErr := project(r.current, r.dir, r.stateDir, r.effectiveRecordsLocked(time.Now()), time.Now(), r.aftrInputs)
 		if compileErr == nil {
 			restoreCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			compileErr = r.network.Apply(restoreCtx, r.revision, old.network)
@@ -507,6 +511,16 @@ func strict(b []byte, v any) error {
 }
 func validateSnapshot(instance serviceconfig.Instance, b json.RawMessage) error {
 	switch instance.Role {
+	case "ra_client":
+		var cfg raclient.Config
+		var snapshot raclient.Snapshot
+		if err := strict(instance.Config, &cfg); err != nil {
+			return err
+		}
+		if err := strict(b, &snapshot); err != nil {
+			return err
+		}
+		return raclient.ValidateSnapshot(cfg, snapshot)
 	case "dhcp_server":
 		var c dhcpserverconfig.Config
 		var s dhcpserverconfig.Snapshot
@@ -617,6 +631,8 @@ func validateSnapshot(instance serviceconfig.Instance, b json.RawMessage) error 
 
 func (r *Runtime) Handler() http.Handler {
 	mux := http.NewServeMux()
+	r.observationRoutes(mux)
+	r.aftrRoutes(mux)
 	mux.HandleFunc("GET /v1/services", func(w http.ResponseWriter, req *http.Request) { localapi.JSON(w, 200, r.State()) })
 	mux.HandleFunc("POST /v1/services/state", func(w http.ResponseWriter, req *http.Request) {
 		var u serviceconfig.Update
@@ -683,7 +699,7 @@ func (r *Runtime) reconcileDynamic(ctx context.Context) error {
 		r.mu.Unlock()
 		return nil
 	}
-	p, err := project(r.current, r.dir, r.stateDir, r.effectiveRecordsLocked(time.Now()), time.Now())
+	p, err := project(r.current, r.dir, r.stateDir, r.effectiveRecordsLocked(time.Now()), time.Now(), r.aftrInputs)
 	if err == nil {
 		err = r.applyNetworkLocked(ctx, p.network)
 	}
@@ -714,6 +730,11 @@ func (r *Runtime) reconcileDynamic(ctx context.Context) error {
 	}
 	r.mu.Lock()
 	r.bindings = bindings
+	for name, input := range r.aftrInputs {
+		if b, ok := bindings[name]; !ok || b.digest != input.ConfigDigest {
+			delete(r.aftrInputs, name)
+		}
+	}
 	for name := range r.records {
 		if _, ok := bindings[name]; !ok {
 			delete(r.records, name)

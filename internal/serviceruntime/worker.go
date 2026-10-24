@@ -25,6 +25,7 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/dns"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
 	"github.com/imksoo/routerd2/internal/protocol/ra"
+	"github.com/imksoo/routerd2/internal/protocol/raclient"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
@@ -81,12 +82,20 @@ func Run(ctx context.Context, runtimeDir, name, role, path, digest string, gener
 	defer cancel()
 	// Lease-owning HA engines refresh their own acknowledged deadline. A
 	// generic replay must never keep a dead election alive.
-	if role == "dhcp4" || role == "dhcp6pd" || role == "ra" {
+	if role == "dhcp4" || role == "dhcp6pd" || role == "ra" || role == "ra_client" {
 		done := make(chan struct{})
 		defer func() { cancel(); <-done }()
 		go func() { defer close(done); c.replay(runCtx) }()
 	}
 	switch role {
+	case "aftr":
+		return c.runAFTR(runCtx, instance, digest, ready)
+	case "ra_client":
+		var cfg raclient.Config
+		if err := decode(instance.Config, &cfg); err != nil {
+			return err
+		}
+		return raclient.Run(runCtx, cfg, raclient.EffectsFunc(func(ctx context.Context, snapshot raclient.Snapshot) error { return c.update(ctx, snapshot) }), ready)
 	case "dhcp_server":
 		var cfg dhcpserver.Config
 		if err := decode(instance.Config, &cfg); err != nil {

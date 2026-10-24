@@ -339,7 +339,7 @@ func (c *compiler) dslite(r resource) {
 		c.reject(r, "enabled", "unsupported_semantics", "disabled legacy tunnels are not equivalent to removing native owned tunnel intent")
 	}
 	if s.AFTRFQDN != "" || len(s.AFTRDNSServers) > 0 || s.AFTRAddressOrdinal != 0 || s.AFTRAddressSelection != "" || meaningful(child(r.node, "aftrFrom")) || s.AFTRSource != "" {
-		c.reject(r, "aftrFQDN", "unsupported_semantics", "AFTR discovery, fallback selection and dynamic sources require a runtime tunnel controller")
+		c.reject(r, "aftrFQDN", "unsupported_semantics", "native AFTR requires explicit IPv6 bootstrap dependencies and bounded endpoint expiry; conversion from legacy local-DNS, source-selection and indefinite pending-tunnel semantics is not implemented")
 	}
 	if s.LocalAddressSource != "" && s.LocalAddressSource != "static" && s.LocalAddressSource != "interface" || s.LocalDelegatedAddress != "" || s.LocalIPv6Source != "" || s.LocalAddressSuffix != "" {
 		c.reject(r, "localAddressSource", "unsupported_semantics", "only a literal outer IPv6 endpoint is supported; delegated, observed and suffix-derived sources are not frozen")

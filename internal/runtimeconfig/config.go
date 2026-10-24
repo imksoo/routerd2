@@ -20,6 +20,17 @@ type Boot struct {
 	StateDir      string   `json:"state_dir"`
 	KernelModules []string `json:"kernel_modules,omitempty"`
 	SSH           SSH      `json:"ssh"`
+	Release       *Release `json:"release,omitempty"`
+}
+
+// Release selects signed userland pairs from a separately mounted persistent
+// store. Kernel/rootfs selection and configuration schema migrations are not
+// performed by this userland selector.
+type Release struct {
+	Root                string `json:"root"`
+	TrustFile           string `json:"trust_file"`
+	ReadyTimeoutSeconds int    `json:"ready_timeout_seconds,omitempty"`
+	StableSeconds       int    `json:"stable_seconds,omitempty"`
 }
 
 type SSH struct {
@@ -52,6 +63,25 @@ func Read(path string) (Boot, error) {
 }
 
 func (b Boot) Validate() error {
+	if b.Release != nil {
+		r := b.Release
+		if b.Platform != "appliance" {
+			return errors.New("boot release selection requires explicit appliance mode; containers pin their OCI image")
+		}
+		if !filepath.IsAbs(r.Root) || filepath.Clean(r.Root) == "/" || !filepath.IsAbs(r.TrustFile) {
+			return errors.New("release root and trust_file must be absolute paths")
+		}
+		timeout, stable := r.ReadyTimeoutSeconds, r.StableSeconds
+		if timeout == 0 {
+			timeout = 120
+		}
+		if stable == 0 {
+			stable = 10
+		}
+		if timeout < 5 || timeout > 900 || stable < 1 || stable > 300 || stable >= timeout {
+			return errors.New("release readiness timeout must be 5..900 seconds and stability 1..300 seconds below the timeout")
+		}
+	}
 	switch b.Platform {
 	case "appliance", "container", "host":
 	default:

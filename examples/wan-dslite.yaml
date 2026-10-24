@@ -1,0 +1,41 @@
+# Replace wan0/lan0 with the appliance's actual interfaces before use.
+# This illustrates RA + DHCPv6 Information-request + DS-Lite B4. It is not a
+# captured homert02/03 configuration and makes no provider-specific assumptions.
+schema_version: 1
+network:
+  interfaces:
+    - name: wan0
+    - name: lan0
+      addresses: [192.0.2.1/24]
+  forwarding:
+    ipv4: true
+    ipv6: true
+  firewall:
+    forward:
+      - from: lan0
+        to: dslite0
+services:
+  - name: wan-ra
+    ra_client:
+      interface: wan0
+      slaac: true
+      default_route: true
+      on_link: true
+      route_information: true
+      dns: true
+  - name: wan-info
+    dhcp6:
+      interface: wan0
+      iaid: 1
+      information_only: true
+  - name: internet
+    ds_lite:
+      interface: wan0
+      tunnel: dslite0
+      source_from: wan-ra
+      aftr_from: wan-info
+      dns_from: [wan-info, wan-ra]
+      selection: first
+      b4_address: 192.0.0.2/32
+      default_route: true
+      metric: 200

@@ -221,7 +221,7 @@ func fixturePeerNamespace(t *testing.T, localName, peerName string) netns.NsHand
 	if err := netlink.LinkSetNsFd(peer, int(ns)); err != nil {
 		t.Fatal(err)
 	}
-	h, err := netlink.NewHandleAt(ns)
+	h, err := netlink.NewHandleAt(ns, syscall.NETLINK_ROUTE)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"time"
@@ -50,31 +51,81 @@ func Validate(d Document) error {
 	if err := serviceconfig.Validate(d.Services); err != nil {
 		return err
 	}
-	// Generated HA interfaces have a lifetime controlled by an election. A
-	// static resource must not accidentally keep the same interface or VIP up.
-	reserved := map[string]string{}
-	for _, s := range d.Services {
-		if s.VRRP != nil {
-			name := s.VRRPConfig().VIPInterface
-			if previous, ok := reserved[name]; ok {
-				return fmt.Errorf("VRRP services %s and %s share VIP interface %s", previous, s.Name, name)
+	for _, service := range d.Services {
+		if service.RAClient == nil {
+			continue
+		}
+		for _, link := range d.Network.Interfaces {
+			if link.Name == service.Interface() && (link.IPv6AcceptRA != nil && *link.IPv6AcceptRA != 0 || link.IPv6Autoconf != nil && *link.IPv6Autoconf) {
+				return fmt.Errorf("RA client %s requires exclusive RA/SLAAC ownership; disable kernel ipv6_accept_ra and ipv6_autoconf", service.Name)
 			}
-			reserved[name] = s.Name
 		}
 	}
+	// Dynamically created links have exactly one owner. Firewall interface
+	// matches may refer to them before creation; static links/routes/services
+	// must not keep them alive while their protocol dependency is unavailable.
+	reserved := map[string]string{}
+	for _, service := range d.Services {
+		name := ""
+		if service.VRRP != nil {
+			name = service.VRRPConfig().VIPInterface
+		}
+		if service.DSLite != nil {
+			name = service.DSLite.Tunnel
+			if service.DSLite.LocalAddress != "" {
+				found := false
+				for _, iface := range d.Network.Interfaces {
+					if iface.Name != service.Interface() {
+						continue
+					}
+					for _, address := range iface.Addresses {
+						prefix, err := netip.ParsePrefix(address)
+						if err == nil && prefix.Addr().String() == service.DSLite.LocalAddress {
+							found = true
+						}
+					}
+				}
+				if !found {
+					return fmt.Errorf("DS-Lite %s local_address must be committed on its underlay interface", service.Name)
+				}
+			}
+		}
+		if name == "" {
+			continue
+		}
+		if owner := reserved[name]; owner != "" {
+			return fmt.Errorf("services %s and %s share dynamic interface %s", owner, service.Name, name)
+		}
+		reserved[name] = service.Name
+	}
 	for _, link := range d.Network.Links {
-		if owner, ok := reserved[link.Name]; ok {
-			return fmt.Errorf("static link %s conflicts with VRRP service %s", link.Name, owner)
+		if owner := reserved[link.Name]; owner != "" {
+			return fmt.Errorf("static link %s conflicts with dynamic service %s", link.Name, owner)
 		}
 	}
 	for _, link := range d.Network.Interfaces {
-		if owner, ok := reserved[link.Name]; ok {
-			return fmt.Errorf("static interface %s conflicts with VRRP service %s", link.Name, owner)
+		if owner := reserved[link.Name]; owner != "" {
+			return fmt.Errorf("static interface %s conflicts with dynamic service %s", link.Name, owner)
 		}
 	}
-	for _, s := range d.Services {
-		if owner, ok := reserved[s.Interface()]; ok {
-			return fmt.Errorf("service %s cannot use election-owned interface of %s without an HA dependency", s.Name, owner)
+	for _, link := range d.Network.DSLite {
+		if owner := reserved[link.Name]; owner != "" {
+			return fmt.Errorf("static DS-Lite %s conflicts with dynamic service %s", link.Name, owner)
+		}
+	}
+	for _, route := range d.Network.Routes {
+		if owner := reserved[route.Interface]; owner != "" {
+			return fmt.Errorf("static route cannot use dynamic interface owned by %s", owner)
+		}
+		for _, hop := range route.NextHops {
+			if owner := reserved[hop.Interface]; owner != "" {
+				return fmt.Errorf("static route cannot use dynamic interface owned by %s", owner)
+			}
+		}
+	}
+	for _, service := range d.Services {
+		if owner := reserved[service.Interface()]; owner != "" {
+			return fmt.Errorf("service %s cannot use dynamic interface of %s without a dependency", service.Name, owner)
 		}
 	}
 	return nil

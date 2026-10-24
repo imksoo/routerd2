@@ -1,0 +1,16 @@
+routerd2 native IPv6 Router Advertisement client
+
+This package is original routerd2 code, released under the repository's
+BSD-3-Clause license. Its protocol behavior is implemented from RFC 4861,
+RFC 4862, RFC 4191 and RFC 8106. It does not copy a separate RA client daemon.
+
+The comparative routerd source used during this migration is pinned at:
+  repository: https://github.com/imksoo/routerd
+  revision: 1329ef54f296507eda79bbbc3b853783dd27251e
+
+The original routerd reference is used to identify migration requirements;
+no old routerd controller or external command runner is linked by this package.
+The netlink library is used for read-only interface/address inspection.
+Kernel and dependency licenses remain distributed by the repository's existing
+license-manifest process. Test fixture mutations run only in isolated namespaces
+or a no-NIC QEMU guest and are not part of the production worker.

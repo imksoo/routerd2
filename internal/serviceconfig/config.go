@@ -17,10 +17,13 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
 	"github.com/imksoo/routerd2/internal/protocol/ra"
+	"github.com/imksoo/routerd2/internal/protocol/raclient"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
 )
 
 type Service struct {
+	DSLite     *DSLite                  `json:"ds_lite,omitempty"`
+	RAClient   *RAClient                `json:"ra_client,omitempty"`
 	DHCPServer *DHCPServer              `json:"dhcp_server,omitempty"`
 	BGP        *BGP                     `json:"bgp,omitempty"`
 	Name       string                   `json:"name"`
@@ -82,6 +85,12 @@ var safeName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,23}$`)
 var interfaceName = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]{0,14}$`)
 
 func (s Service) Role() string {
+	if s.DSLite != nil {
+		return "aftr"
+	}
+	if s.RAClient != nil {
+		return "ra_client"
+	}
 	if s.DHCPServer != nil {
 		return "dhcp_server"
 	}
@@ -107,6 +116,12 @@ func (s Service) Role() string {
 }
 func (s Service) ModuleName() string { return "service." + s.Name }
 func (s Service) Interface() string {
+	if s.DSLite != nil {
+		return s.DSLite.Interface
+	}
+	if s.RAClient != nil {
+		return s.RAClient.Interface
+	}
 	if s.DHCPServer != nil {
 		return s.DHCPServer.Interface
 	}
@@ -139,7 +154,7 @@ func Validate(services []Service) error {
 		}
 		names[s.Name] = true
 		n := 0
-		for _, set := range []bool{s.DHCPServer != nil, s.DHCP4 != nil, s.DHCP6 != nil, s.RA != nil, s.DNS != nil, s.VRRP != nil, s.BGP != nil} {
+		for _, set := range []bool{s.DSLite != nil, s.RAClient != nil, s.DHCPServer != nil, s.DHCP4 != nil, s.DHCP6 != nil, s.RA != nil, s.DNS != nil, s.VRRP != nil, s.BGP != nil} {
 			if set {
 				n++
 			}
@@ -151,7 +166,7 @@ func Validate(services []Service) error {
 			return fmt.Errorf("service %s has an invalid interface", s.Name)
 		}
 		key := s.Role() + ":" + s.Interface()
-		if s.DNS != nil || s.BGP != nil {
+		if s.DNS != nil || s.BGP != nil || s.DSLite != nil {
 			key = s.Role() + ":" + s.Name
 		}
 		if s.VRRP != nil {
@@ -162,6 +177,17 @@ func Validate(services []Service) error {
 		}
 		sockets[key] = s.Name
 		switch s.Role() {
+		case "aftr":
+			if err := validateDSLite(s); err != nil {
+				return err
+			}
+		case "ra_client":
+			if s.RAClient.Metric < 0 || uint64(s.RAClient.Metric) > 1<<32-1 || s.RAClient.Table < 0 || uint64(s.RAClient.Table) > 1<<32-1 {
+				return errors.New("invalid RA client route metric/table")
+			}
+			if err := raclient.Validate(s.RAClientConfig("/var/lib/routerd")); err != nil {
+				return err
+			}
 		case "dhcp_server":
 			if err := dhcpserverconfig.Validate(s.DHCPServerConfig("/run/routerd", "/var/lib/routerd")); err != nil {
 				return err
@@ -263,6 +289,9 @@ func Validate(services []Service) error {
 	if count > 128 {
 		return errors.New("services plus delegated RA instances exceed 128")
 	}
+	if err := validateDSLiteSources(services); err != nil {
+		return err
+	}
 	return validateDNSLeaseSources(services)
 }
 
@@ -290,6 +319,10 @@ func (s Service) DNSConfig(runtimeDir, stateDir string) dnsconfig.Config {
 func (s Service) Instance(runtimeDir, stateDir string) (Instance, error) {
 	var c any
 	switch s.Role() {
+	case "aftr":
+		c = DSLiteInstance{Protocol: s.AFTRConfig(), Intent: *s.DSLite}
+	case "ra_client":
+		c = s.RAClientConfig(stateDir)
 	case "dhcp_server":
 		c = s.DHCPServerConfig(runtimeDir, stateDir)
 	case "bgp":

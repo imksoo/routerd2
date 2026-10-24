@@ -17,9 +17,10 @@ import (
 )
 
 type RouteIssue struct {
-	Service string `json:"service"`
-	Prefix  string `json:"prefix"`
-	Reason  string `json:"reason"`
+	ReasonTruncated bool   `json:"reason_truncated,omitempty"`
+	Service         string `json:"service"`
+	Prefix          string `json:"prefix"`
+	Reason          string `json:"reason"`
 }
 type routeGroup struct {
 	service       string

@@ -35,7 +35,7 @@ func (s Session) Execute(ctx context.Context, command string, input io.Reader, o
 		return nil
 	}
 	if len(a) == 1 && a[0] == "help" {
-		_, err := fmt.Fprintln(out, "show status\nshow network\nshow services\nshow config\nshow running-config\nshow logs [module NAME] [level INFO] [limit 100]\nshow logging\nshow version\nrestart <module>\nconfigure (exec: CommitRequest YAML/JSON on stdin; shell: candidate mode)\nconfirm\nhelp\nexit")
+		_, err := fmt.Fprintln(out, "show status\nshow network\nshow services [NAME]\nshow route-issues [offset N]\nshow config\nshow running-config\nshow logs [module NAME] [level INFO] [limit 100]\nshow logging\nshow version\nrestart <module>\nconfigure (exec: CommitRequest YAML/JSON on stdin; shell: candidate mode)\nconfirm\nhelp\nexit")
 		return err
 	}
 	var result json.RawMessage
@@ -71,6 +71,26 @@ func (s Session) Execute(ctx context.Context, command string, input io.Reader, o
 			}
 		}
 		err = logClient.Do(ctx, http.MethodGet, "/v1/logs?"+q.Encode(), nil, &result)
+	case len(a) == 3 && a[0] == "show" && a[1] == "services":
+		name := a[2]
+		if strings.ContainsAny(name, "/\\?%") || len(name) > 100 {
+			return errors.New("invalid service name")
+		}
+		if !strings.HasPrefix(name, "service.") {
+			name = "service." + name
+		}
+		err = ctl.Do(ctx, http.MethodGet, "/v1/services/"+url.PathEscape(name), nil, &result)
+	case len(a) >= 2 && a[0] == "show" && a[1] == "route-issues":
+		offset := 0
+		if len(a) == 4 && a[2] == "offset" {
+			offset, err = strconv.Atoi(a[3])
+		} else if len(a) != 2 {
+			return errors.New("usage: show route-issues [offset N]")
+		}
+		if err != nil || offset < 0 {
+			return errors.New("route issue offset must be a nonnegative integer")
+		}
+		err = ctl.Do(ctx, http.MethodGet, "/v1/services/route-issues?offset="+strconv.Itoa(offset), nil, &result)
 	case len(a) == 2 && a[0] == "show":
 		switch a[1] {
 		case "status":
