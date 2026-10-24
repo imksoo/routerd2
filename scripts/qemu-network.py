@@ -76,6 +76,13 @@ SUITES = {
         "commands": True,
         "description": "durable health events, finite DerivedEvent/EventRule and retired queue recovery",
     },
+    "daemon-stopped-health": {
+        "package": "./internal/integration", "binary": "daemon.test",
+        "test": "TestDaemonStoppedHealthHistoryWithoutReactivation",
+        "marker": "ROUTERD_STOPPED_HEALTH_DAEMON_TEST", "timeout": 150,
+        "commands": True,
+        "description": "declared inactive health queue recovery, control restart and conditional reactivation",
+    },
     "daemon-resource-program": {
         "package": "./internal/integration", "binary": "daemon.test",
         "test": "TestDaemonResourceProgramLifecycleAndRecovery",

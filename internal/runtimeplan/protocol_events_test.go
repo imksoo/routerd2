@@ -71,7 +71,11 @@ func TestRetirementGuardRequiresSourceRemovalAndNoRemainingHealthWorker(t *testi
 	if err := r.ApplyConfig(ctx, 1, source); err != nil {
 		t.Fatal(err)
 	}
-	allowed, err := r.RetiredHealthRelays(ctx, []string{"wan"})
+	observe := func() (allowed map[string]bool, err error) {
+		err = r.WithStoppedHealthRelays(ctx, []string{"wan"}, func(v map[string]bool) error { allowed = v; return nil })
+		return
+	}
+	allowed, err := observe()
 	if err != nil || allowed["wan"] {
 		t.Fatal("declared health relay collected", allowed, err)
 	}
@@ -80,12 +84,12 @@ func TestRetirementGuardRequiresSourceRemovalAndNoRemainingHealthWorker(t *testi
 		t.Fatal(err)
 	}
 	m.modules = oldModules // supervisor still reports the old process while stopping
-	allowed, err = r.RetiredHealthRelays(ctx, []string{"wan"})
+	allowed, err = observe()
 	if err != nil || allowed["wan"] {
 		t.Fatal("stopping health worker was bypassed", allowed, err)
 	}
 	m.modules = nil
-	allowed, err = r.RetiredHealthRelays(ctx, []string{"wan"})
+	allowed, err = observe()
 	if err != nil || !allowed["wan"] {
 		t.Fatal(allowed, err)
 	}
@@ -93,7 +97,7 @@ func TestRetirementGuardRequiresSourceRemovalAndNoRemainingHealthWorker(t *testi
 		t.Fatal("history recovery registered current protocol facts")
 	}
 	m.unavailable = true
-	if _, err = r.RetiredHealthRelays(ctx, []string{"wan"}); err == nil {
+	if _, err = observe(); err == nil {
 		t.Fatal("unknown supervisor granted recovery")
 	}
 }

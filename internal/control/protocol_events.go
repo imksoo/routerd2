@@ -54,8 +54,11 @@ func (e *Engine) declareProtocolRelaysLocked() {
 }
 
 func (e *Engine) updateRetirementHealthLocked(err error) {
-	if err == nil && e.protocolRelays != nil && e.protocolRelays.Status().Retiring > 0 {
-		err = fmt.Errorf("%d retired health relays awaiting durable recovery", e.protocolRelays.Status().Retiring)
+	if err == nil && e.protocolRelays != nil {
+		status := e.protocolRelays.Status()
+		if status.Retiring+status.StoppedPending > 0 {
+			err = fmt.Errorf("%d retired and %d stopped health relays awaiting durable recovery", status.Retiring, status.StoppedPending)
+		}
 	}
 	e.setProtocolErrorLocked(protocolRetirementError, err)
 }
@@ -69,13 +72,10 @@ func (e *Engine) ProcessRetiredProtocolEvents(ctx context.Context) error {
 	if e.protocolRelays == nil {
 		e.protocolRelays = protocolevents.NewRetirement(e.journal, e.store.Dir)
 	}
-	err := e.protocolRelays.Recover(ctx, healthRelayNames(e.state.Config), func(ctx context.Context, names []string, drain func(map[string]bool) error) error {
-		allowed, err := e.runtime.RetiredHealthRelays(ctx, names)
-		if err != nil {
-			return err
-		}
-		return drain(allowed)
-	})
+	err := e.protocolRelays.Recover(ctx, healthRelayNames(e.state.Config), e.runtime.WithStoppedHealthRelays)
+	for _, name := range e.protocolRelays.Recovered() {
+		e.setProtocolErrorLocked("service."+name, nil)
+	}
 	e.updateRetirementHealthLocked(err)
 	return err
 }

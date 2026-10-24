@@ -24,28 +24,36 @@ type relayRegistry struct {
 }
 
 type RetirementStatus struct {
-	Registered int `json:"registered_relays"`
-	Retiring   int `json:"retiring_relays"`
+	Registered     int `json:"registered_relays"`
+	Retiring       int `json:"retiring_relays"`
+	StoppedPending int `json:"stopped_pending_relays"`
 }
 
 // Retirement is serialized by the caller's configuration authority lock.
-// Only registered, no-longer-declared relays may be collected. A supervisor
-// guard and the local store's exclusive lock independently fence ownership.
+// Only registered relays with no selected or remaining worker may be collected.
+// The runtime's module reconciliation guard and the local store's exclusive
+// lock independently fence ownership. Declared relays retain registration.
 type Retirement struct {
-	journal  *events.Store
-	root     string
-	names    []string
-	declared map[string]bool
-	status   RetirementStatus
-	errors   map[string]error
-	next     int
+	journal   *events.Store
+	root      string
+	names     []string
+	declared  map[string]bool
+	status    RetirementStatus
+	errors    map[string]error
+	pending   map[string]bool
+	recovered []string
+	next      int
 }
 
 func NewRetirement(journal *events.Store, root string) *Retirement {
-	return &Retirement{journal: journal, root: root, errors: map[string]error{}}
+	return &Retirement{journal: journal, root: root, errors: map[string]error{}, pending: map[string]bool{}}
 }
 
 func (r *Retirement) Status() RetirementStatus { return r.status }
+
+// Recovered returns the queues proven empty under exclusive stopped ownership
+// in the latest pass. Only these may clear a former worker's delivery alarm.
+func (r *Retirement) Recovered() []string { return slices.Clone(r.recovered) }
 
 func (r *Retirement) Declare(names []string) {
 	r.declared = map[string]bool{}
@@ -60,6 +68,8 @@ func (r *Retirement) refreshStatus() {
 	for _, name := range r.names {
 		if !r.declared[name] {
 			r.status.Retiring++
+		} else if r.pending[name] {
+			r.status.StoppedPending++
 		}
 	}
 }
@@ -91,6 +101,11 @@ func (r *Retirement) load(ctx context.Context) (events.ProducerState, bool, erro
 	for name := range r.errors {
 		if !slices.Contains(r.names, name) {
 			delete(r.errors, name)
+		}
+	}
+	for name := range r.pending {
+		if !slices.Contains(r.names, name) {
+			delete(r.pending, name)
 		}
 	}
 	r.refreshStatus()
@@ -188,13 +203,13 @@ func (r *Retirement) remove(ctx context.Context, name string) error {
 	return r.save(ctx, cp, next)
 }
 
-func (r *Retirement) recoverOne(ctx context.Context, name string) error {
+func (r *Retirement) recoverOne(ctx context.Context, name string) (bool, error) {
 	store, err := events.OpenExisting(events.Options{Directory: serviceconfig.HealthEventDirectory(r.root, name)})
 	if errors.Is(err, events.ErrOwned) {
-		return nil
+		return false, nil
 	} // still owned; retain registration
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer store.Close()
 	box := NewOutbox(store, name)
@@ -207,50 +222,60 @@ func (r *Retirement) recoverOne(ctx context.Context, name string) error {
 		return nil
 	})
 	if err != nil {
-		return err
+		return false, err
 	}
 	pending, err := box.Pending(ctx)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if len(pending) > 0 {
-		return nil
+		return false, nil
+	}
+	if r.declared[name] {
+		return true, nil // a later conditional worker still owns this registration
 	}
 	// Keep the queue exclusively owned until the registry ACK is durable.
-	return r.remove(ctx, name)
+	return true, r.remove(ctx, name)
 }
 
 func (r *Retirement) Recover(ctx context.Context, declared []string, withStopped func(context.Context, []string, func(map[string]bool) error) error) error {
+	r.recovered = nil
 	if _, _, err := r.load(ctx); err != nil {
 		return err
 	}
 	r.Declare(declared)
-	retiring := []string{}
-	for _, name := range r.names {
-		if !r.declared[name] {
-			retiring = append(retiring, name)
-		}
-	}
-	if len(retiring) == 0 {
+	if len(r.names) == 0 {
 		return nil
 	}
 	selected := []string{}
-	for i := 0; i < min(recoveryBatch, len(retiring)); i++ {
-		selected = append(selected, retiring[(r.next+i)%len(retiring)])
+	for i := 0; i < min(recoveryBatch, len(r.names)); i++ {
+		selected = append(selected, r.names[(r.next+i)%len(r.names)])
 	}
-	r.next = (r.next + len(selected)) % len(retiring)
+	r.next = (r.next + len(selected)) % len(r.names)
 	if err := withStopped(ctx, selected, func(allowed map[string]bool) error {
 		for _, name := range selected {
 			if !allowed[name] {
+				if r.declared[name] {
+					delete(r.pending, name)
+					delete(r.errors, name)
+				} // live worker resumes delivery; its own alarm is not cleared
 				continue
 			}
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			if err := r.recoverOne(ctx, name); err != nil {
+			empty, err := r.recoverOne(ctx, name)
+			if err != nil {
 				r.errors[name] = err
+				r.pending[name] = true
 			} else {
 				delete(r.errors, name)
+				if empty {
+					delete(r.pending, name)
+					r.recovered = append(r.recovered, name)
+				} else {
+					r.pending[name] = true
+				}
 			}
 		}
 		return nil

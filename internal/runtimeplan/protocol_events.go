@@ -9,28 +9,32 @@ import (
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
 
-// RetiredHealthRelays observes stopped ownership without renewing any fact.
-// The control caller holds its source-authority lock through recovery. Full
-// source absence prevents a conditional reconcile from starting these health
-// workers; the queue's exclusive store lock remains independently mandatory.
-// Historical disk IO must not hold the runtime mutex or delay current facts.
-func (r *Runtime) RetiredHealthRelays(ctx context.Context, names []string) (map[string]bool, error) {
+// WithStoppedHealthRelays fences conditional reactivation through historical
+// recovery without renewing any fact. The caller also holds source authority.
+// Reconciliation takes precedence: a busy operation defers this pass. The
+// callback holds op, never mu, so current fact acceptance remains available.
+// The queue's exclusive store lock is independently mandatory.
+func (r *Runtime) WithStoppedHealthRelays(ctx context.Context, names []string, drain func(map[string]bool) error) error {
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return err
 	}
+	if !r.op.TryLock() {
+		return nil
+	}
+	defer r.op.Unlock()
 	status, err := r.manager.Status(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("observe retired health workers: %w", err)
+		return fmt.Errorf("observe stopped health workers: %w", err)
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	if !r.configured || status.Stopping {
-		return nil, ErrStale
+		r.mu.Unlock()
+		return ErrStale
 	}
 	blocked := map[string]bool{}
-	for _, service := range r.current.Services {
-		if service.Health != nil {
-			blocked[service.Name] = true
+	for name, binding := range r.bindings {
+		if binding.instance.Role == "health" {
+			blocked[name] = true
 		}
 	}
 	for _, module := range status.Modules {
@@ -40,9 +44,10 @@ func (r *Runtime) RetiredHealthRelays(ctx context.Context, names []string) (map[
 	}
 	allowed := map[string]bool{}
 	for _, name := range names {
-		allowed[name] = !blocked[name] && !blocked["service."+name]
+		allowed[name] = !blocked["service."+name]
 	}
-	return allowed, nil
+	r.mu.Unlock()
+	return drain(allowed)
 }
 
 // WithProtocolProducer fences historical delivery to a currently registered,
