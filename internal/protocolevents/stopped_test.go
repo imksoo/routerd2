@@ -48,6 +48,9 @@ func TestStoppedDeclaredRelayDrainsWithoutDiscardingFutureWorkerOwnership(t *tes
 	if err = c.Recover(ctx, []string{"wan"}, stoppedRelays); !errors.Is(err, events.ErrCapacity) {
 		t.Fatal("stopped declared relay did not attempt actual history delivery", err)
 	}
+	if c.Status().StoppedPending != 1 || len(c.Recovered()) != 0 {
+		t.Fatal("partial delivery claimed complete recovery", c.Status(), c.Recovered())
+	}
 	if err = journal.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -59,6 +62,9 @@ func TestStoppedDeclaredRelayDrainsWithoutDiscardingFutureWorkerOwnership(t *tes
 	c = NewRetirement(journal, root) // both source and queue survive control replacement
 	if err = c.Recover(ctx, []string{"wan"}, stoppedRelays); err != nil {
 		t.Fatal(err)
+	}
+	if c.Status().StoppedPending != 0 || !reflect.DeepEqual(c.Recovered(), []string{"wan"}) {
+		t.Fatal("completed recovery did not release the stopped delivery alarm", c.Status(), c.Recovered())
 	}
 	rows, err := journal.List(ctx, 0, 16)
 	if err != nil || len(rows) != 2 || !reflect.DeepEqual(rows[0].Event, original[0]) || !reflect.DeepEqual(rows[1].Event, original[1]) {
@@ -87,5 +93,39 @@ func TestStoppedDeclaredRelayDrainsWithoutDiscardingFutureWorkerOwnership(t *tes
 	rows, err = journal.List(ctx, 0, 16)
 	if err != nil || len(rows) != 3 {
 		t.Fatal(rows, err)
+	}
+}
+
+func TestStoppedDeclaredRecoveryRemainsPendingBetweenBoundedPages(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	journal, err := events.Open(events.Options{Directory: filepath.Join(root, "events")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer journal.Close()
+	c := NewRetirement(journal, root)
+	if err = c.Register(ctx, []string{"wan"}); err != nil {
+		t.Fatal(err)
+	}
+	worker, err := events.OpenExisting(events.Options{Directory: serviceconfig.HealthEventDirectory(root, "wan")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range PageSize + 1 {
+		if err = NewOutbox(worker, "wan").Enqueue(ctx, probeEvent("wan")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	worker.Close()
+	if err = c.Recover(ctx, []string{"wan"}, stoppedRelays); err != nil || c.Status().StoppedPending != 1 || len(c.Recovered()) != 0 {
+		t.Fatal("one page hid pending history", c.Status(), c.Recovered(), err)
+	}
+	rows, err := journal.List(ctx, 0, 64)
+	if err != nil || len(rows) != PageSize {
+		t.Fatal("recovery ignored its per-queue page bound", len(rows), err)
+	}
+	if err = c.Recover(ctx, []string{"wan"}, stoppedRelays); err != nil || c.Status().StoppedPending != 0 || len(c.Recovered()) != 1 {
+		t.Fatal(c.Status(), c.Recovered(), err)
 	}
 }

@@ -58,6 +58,15 @@ func TestStoppedHealthRecoveryFencesReactivationWithoutHoldingFactMutex(t *testi
 	r.bindings["service.wan"] = r.bindings["service.switch"]
 	r.mu.Unlock()
 	check(false)
+	r.op.Lock()
+	err := r.WithStoppedHealthRelays(ctx, []string{"wan"}, func(map[string]bool) error {
+		t.Fatal("busy reconciliation was bypassed")
+		return nil
+	})
+	r.op.Unlock()
+	if err != nil {
+		t.Fatal("busy reconcile should defer without creating a delivery fault", err)
+	}
 	m.unavailable = true
 	if err := r.WithStoppedHealthRelays(ctx, []string{"wan"}, func(map[string]bool) error {
 		t.Fatal("unknown supervisor granted disk ownership")
