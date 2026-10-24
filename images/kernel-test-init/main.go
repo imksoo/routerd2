@@ -31,6 +31,8 @@ func selectedSuite() (suite, error) {
 		return suite{}, fmt.Errorf("read test suite: %w", err)
 	}
 	switch strings.TrimSpace(string(data)) {
+	case "bfd":
+		return suite{"/bfd.test", "TestIsolatedNativeBFD", "ROUTERD_BFD_NATIVE_TEST", 60 * time.Second}, nil
 	case "wireguard":
 		return suite{"/network.test", "TestIsolatedKernelWireGuardOwnershipAndTraffic", "ROUTERD_WIREGUARD_TEST", 75 * time.Second}, nil
 	case "network":
@@ -47,6 +49,8 @@ func selectedSuite() (suite, error) {
 		return suite{"/daemon.test", "TestDaemonDHCPDNSAndOwnershipExpiry", "ROUTERD_DHCP_DNS_DAEMON_TEST", 150 * time.Second}, nil
 	case "daemon-bgp":
 		return suite{"/daemon.test", "TestDaemonBGPFIBAndOwnershipExpiry", "ROUTERD_BGP_DAEMON_TEST", 150 * time.Second}, nil
+	case "daemon-bfd":
+		return suite{"/daemon.test", "TestDaemonBFDControlsBGPSessionAndExpiry", "ROUTERD_BFD_DAEMON_TEST", 150 * time.Second}, nil
 	case "dhcp":
 		return suite{"/dhcp.test", "TestIsolatedNativeDHCPAndRA", "ROUTERD_DHCP_NATIVE_TEST", 75 * time.Second}, nil
 	case "dhcp-server":

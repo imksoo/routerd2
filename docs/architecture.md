@@ -17,7 +17,7 @@ apk/OpenRC をパケットの処理経路や daemon の起動管理に挟まな�
 - `routerd`: init/supervisor と運用 CLI。構成をまとめて読み、固定の worker ELF を開く。
 - `routerd-modules`: logging/network/control/management と protocol worker を選択起動する。
 
-core 4 プロセスに加え、DHCP4 client/server、PD、RA server/client、AFTR、DNS、VRRP、BGP をインスタンスごとの
+core 4 プロセスに加え、DHCP4 client/server、PD、RA server/client、AFTR、DNS、VRRP、BFD、BGP をインスタンスごとの
 プロセスとして追加する。GoBGP/QUIC/SQLite は worker ELF に置き、PID 1 の import
 graph へ入れない。ELF の数は fault isolation の単位ではない。同じ ELF の読み取り専用
 text page は Linux が共有でき、プロセスごとの heap・goroutine・socket は独立する。
@@ -44,7 +44,9 @@ worker 自身が exact bytes を検証する。設定由来の journal/socket �
 
 変更した worker は停止・reap を待って置換する。変更していない protocol config の取得状態は
 維持する。停止中に DHCP が更新した場合も、cutover 時点で最後に ACK したリースを採用する。
-ACK は kernel projection の適用完了後に返す。変更途中の失敗時は前の設定を再投影する。
+アドレス・経路などの所有権を更新する ACK は kernel projection の適用完了後に返す。
+BFD の受信観測は専用の状態経路で受理し、大きな kernel projection の lock や fsync を待たない。
+変更途中の失敗時は前の設定を再投影する。
 nftables batch は atomic だが netlink/sysctl/プロセス全体は一つの atomic transaction ではない。
 
 control crash の復旧は前世代の dynamic worker を一度停止してから再構成する。
@@ -72,6 +74,13 @@ learned intent と VRF table に従う。未解決 path は `show services` の 
 worker の snapshot transport が bounded JSON のため、bundled BGP は現状 4096 selected
 paths までを受理する。100 万経路や無停止 FIB 更新を検証済みとは扱わない。
 
+BFD は packet receive の `CLOCK_BOOTTIME` と boot ID で有限の正常判定を行う。
+各 BGP peer は明示した BFD service に依存し、startup も含めて正常通知がある場合だけ
+接続を許す。Down counter と source identity は Up→Down→Up をまとめた通知でも保持する。
+GoBGP の disable/enable 呼び出しは非同期なので、実際の Down/Idle を確認し、旧経路の
+撤去 ACK と新しい受信証跡を得てから再接続する。RIB walk 前後の gate 世代も照合し、
+古い経路に新しいセッションの証跡を付けない。詳細と制約は [BFD 契約](bfd.md) に記す。
+
 ## WAN RA と AFTR
 
 WAN RA は kernel RA/autoconf を制御して一つのアドレス・経路所有者を維持し、
@@ -96,6 +105,13 @@ SSH 切断に依存せず control がタイマーで復元する。未確認状�
 `confirm` は現在の revision/request ID、projection、required worker readiness を確認する。
 復元に失敗した場合は degraded を残し、成功したことにしない。
 YAML 文書編集は全置換・検証付き paste editor であり、Vim 互換の full-screen editor ではない。
+
+health には設定全体や各 protocol snapshot を含めない。大きな confirmed commit の
+成功応答は、revision・request ID・candidate digest を含む bounded ACK に切り替える。
+設定全体の読取は metadata と revision を固定した document API で行う。network の
+summary と詳細ページは省略・件数を明示し、AFTR の source address 依存は別の小さい
+native query で取得する。大量の経路や WireGuard peers がこの依存の応答サイズを
+押し上げることはない。[API の契約](../internal/control/README.md) を参照。
 
 ## DHCP と DNS の連携
 

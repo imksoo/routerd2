@@ -32,6 +32,13 @@ builder key signs development packages. Release builds need a separately
 managed signing key and trust policy; a development key is not a production
 update trust root.
 
+The wrapper creates its signing key and abuild configuration in a private
+temporary directory. It gives `apk index` a private trust directory containing
+the generated public key and Alpine's existing public keys, preserving package
+verification and index signing without changing the host's `/etc/apk/keys` or
+requiring privilege escalation. Only the public key is exported; the temporary
+private key and configuration are removed when the build finishes.
+
 The build wrapper generates the source archive and runs `abuild checksum`
 before `abuild -d -r`. The `-d` switch skips dependency installation because the
 Docker build explicitly provides alpine-sdk, Python 3, and the pinned official

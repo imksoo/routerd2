@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 
+	"github.com/imksoo/routerd2/internal/protocol/bfd"
 	"github.com/imksoo/routerd2/internal/protocol/bgpconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp4"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6pd"
@@ -22,6 +23,7 @@ import (
 )
 
 type Service struct {
+	BFD        *bfd.Config              `json:"bfd,omitempty"`
 	DSLite     *DSLite                  `json:"ds_lite,omitempty"`
 	RAClient   *RAClient                `json:"ra_client,omitempty"`
 	DHCPServer *DHCPServer              `json:"dhcp_server,omitempty"`
@@ -85,6 +87,9 @@ var safeName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,23}$`)
 var interfaceName = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]{0,14}$`)
 
 func (s Service) Role() string {
+	if s.BFD != nil {
+		return "bfd"
+	}
 	if s.DSLite != nil {
 		return "aftr"
 	}
@@ -116,6 +121,9 @@ func (s Service) Role() string {
 }
 func (s Service) ModuleName() string { return "service." + s.Name }
 func (s Service) Interface() string {
+	if s.BFD != nil {
+		return s.BFD.Interface
+	}
 	if s.DSLite != nil {
 		return s.DSLite.Interface
 	}
@@ -154,7 +162,7 @@ func Validate(services []Service) error {
 		}
 		names[s.Name] = true
 		n := 0
-		for _, set := range []bool{s.DSLite != nil, s.RAClient != nil, s.DHCPServer != nil, s.DHCP4 != nil, s.DHCP6 != nil, s.RA != nil, s.DNS != nil, s.VRRP != nil, s.BGP != nil} {
+		for _, set := range []bool{s.BFD != nil, s.DSLite != nil, s.RAClient != nil, s.DHCPServer != nil, s.DHCP4 != nil, s.DHCP6 != nil, s.RA != nil, s.DNS != nil, s.VRRP != nil, s.BGP != nil} {
 			if set {
 				n++
 			}
@@ -172,11 +180,26 @@ func Validate(services []Service) error {
 		if s.VRRP != nil {
 			key = fmt.Sprintf("vrrp:%s:%s:%s:%d", s.VRRP.VRF, s.VRRP.Interface, s.VRRP.Family, s.VRRP.VirtualRouterID)
 		}
+		if s.BFD != nil {
+			address, _ := netip.ParseAddr(s.BFD.SourceAddress)
+			family := "ipv6"
+			if address.Is4() {
+				family = "ipv4"
+			}
+			key = "bfd:" + s.BFD.Interface + ":" + family
+		}
 		if other, ok := sockets[key]; ok {
 			return fmt.Errorf("services %s and %s compete for %s", other, s.Name, key)
 		}
 		sockets[key] = s.Name
 		switch s.Role() {
+		case "bfd":
+			if s.BFD.Resource != "" && s.BFD.Resource != s.Name {
+				return errors.New("BFD resource is managed by the service name")
+			}
+			if err := bfd.Validate(s.BFDConfig()); err != nil {
+				return err
+			}
 		case "aftr":
 			if err := validateDSLite(s); err != nil {
 				return err
@@ -292,6 +315,9 @@ func Validate(services []Service) error {
 	if err := validateDSLiteSources(services); err != nil {
 		return err
 	}
+	if err := validateBFDReferences(services); err != nil {
+		return err
+	}
 	return validateDNSLeaseSources(services)
 }
 
@@ -319,6 +345,8 @@ func (s Service) DNSConfig(runtimeDir, stateDir string) dnsconfig.Config {
 func (s Service) Instance(runtimeDir, stateDir string) (Instance, error) {
 	var c any
 	switch s.Role() {
+	case "bfd":
+		c = s.BFDConfig()
 	case "aftr":
 		c = DSLiteInstance{Protocol: s.AFTRConfig(), Intent: *s.DSLite}
 	case "ra_client":

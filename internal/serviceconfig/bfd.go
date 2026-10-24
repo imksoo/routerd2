@@ -1,0 +1,71 @@
+package serviceconfig
+
+import (
+	"fmt"
+	"net/netip"
+
+	"github.com/imksoo/routerd2/internal/protocol/bfd"
+)
+
+func (s Service) BFDConfig() bfd.Config {
+	c := *s.BFD
+	c.Resource = s.Name
+	return bfd.Normalize(c)
+}
+
+func validateBFDReferences(services []Service) error {
+	sources := map[string]Service{}
+	for _, service := range services {
+		if service.BFD != nil {
+			sources[service.Name] = service
+		}
+	}
+	for _, service := range services {
+		if service.BGP == nil {
+			continue
+		}
+		for address, ref := range service.BGP.PeerBFD {
+			if service.BGP.Runtime.Peers[address].EbgpMultihop > 1 {
+				return fmt.Errorf("BGP %s peer %s cannot bind a multihop session to single-hop BFD", service.Name, address)
+			}
+			source, ok := sources[ref.Service]
+			if !ok {
+				return fmt.Errorf("BGP %s peer %s refers to unconfigured BFD service %s", service.Name, address, ref.Service)
+			}
+			peer := ref.Address
+			if peer == "" {
+				peer = address
+			}
+			found := false
+			for _, configured := range source.BFD.Peers {
+				found = found || configured.Address == peer
+			}
+			if !found {
+				return fmt.Errorf("BGP %s peer %s has no matching BFD peer %s in service %s", service.Name, address, peer, ref.Service)
+			}
+			bgpAddress, _ := netip.ParseAddr(address)
+			bfdAddress, _ := netip.ParseAddr(peer)
+			if bgpAddress.Is4() != bfdAddress.Is4() {
+				return fmt.Errorf("BGP %s peer %s must use a BFD session of the same address family", service.Name, address)
+			}
+			// The explicit dependency protects this exact adjacent BGP path.
+			// Monitoring an unrelated router requires a separate conditional
+			// policy contract and must not silently become BFD session binding.
+			if peer != address {
+				return fmt.Errorf("BGP %s BFD reference must monitor the BGP peer address", service.Name)
+			}
+			transport := service.BGP.PeerTransports[address]
+			if transport.LocalAddress != source.BFD.SourceAddress {
+				return fmt.Errorf("BGP %s BFD-bound peer %s requires explicit local_address %s", service.Name, address, source.BFD.SourceAddress)
+			}
+			binding := transport.BindInterface
+			if binding == "" {
+				binding = service.BGP.BindInterface
+			}
+			if binding != source.BFD.Interface {
+				return fmt.Errorf("BGP %s BFD-bound peer %s requires bind_interface %s", service.Name, address, source.BFD.Interface)
+			}
+		}
+	}
+	return nil
+}

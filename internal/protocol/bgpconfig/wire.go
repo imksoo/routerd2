@@ -32,17 +32,18 @@ type Peer struct {
 // withdraws all previously owned routes. The writer must fence old worker
 // epochs and expire Active ownership at ValidUntil, including after SIGKILL.
 type Snapshot struct {
-	Resource      string    `json:"resource"`
-	Epoch         string    `json:"epoch"`
-	Sequence      uint64    `json:"sequence"`
-	Active        bool      `json:"active"`
-	ObservedAt    time.Time `json:"observed_at"`
-	ValidUntil    time.Time `json:"valid_until,omitempty"`
-	Routes        []Route   `json:"routes"`
-	Peers         []Peer    `json:"peers"`
-	RejectedPaths uint64    `json:"rejected_paths"`
-	WatchEvents   uint64    `json:"watch_events"`
-	Error         string    `json:"error,omitempty"`
+	Resource      string                        `json:"resource"`
+	Epoch         string                        `json:"epoch"`
+	Sequence      uint64                        `json:"sequence"`
+	Active        bool                          `json:"active"`
+	ObservedAt    time.Time                     `json:"observed_at"`
+	ValidUntil    time.Time                     `json:"valid_until,omitempty"`
+	Routes        []Route                       `json:"routes"`
+	Peers         []Peer                        `json:"peers"`
+	BFD           map[string]BFDAcknowledgement `json:"bfd,omitempty"`
+	RejectedPaths uint64                        `json:"rejected_paths"`
+	WatchEvents   uint64                        `json:"watch_events"`
+	Error         string                        `json:"error,omitempty"`
 }
 
 // Event records bounded transition metadata. It intentionally omits passwords,

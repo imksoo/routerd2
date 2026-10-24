@@ -23,6 +23,7 @@ import (
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/aftr"
+	"github.com/imksoo/routerd2/internal/protocol/bfd"
 	"github.com/imksoo/routerd2/internal/protocol/bgpconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp4"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6pd"
@@ -64,20 +65,27 @@ type Status struct {
 	Instances       []InstanceStatus `json:"instances"`
 }
 type InstanceStatus struct {
-	SnapshotBytes     int             `json:"snapshot_bytes,omitempty"`
-	SnapshotTruncated bool            `json:"snapshot_truncated,omitempty"`
-	OwnershipExpired  bool            `json:"ownership_expired,omitempty"`
-	Name              string          `json:"name"`
-	Role              string          `json:"role"`
-	ConfigDigest      string          `json:"config_digest"`
-	Generation        uint64          `json:"generation,omitempty"`
-	ProducerEpoch     string          `json:"producer_epoch,omitempty"`
-	Sequence          uint64          `json:"sequence,omitempty"`
-	Snapshot          json.RawMessage `json:"snapshot,omitempty"`
+	BFD               *BFDHealthStatus `json:"bfd_health,omitempty"`
+	SnapshotBytes     int              `json:"snapshot_bytes,omitempty"`
+	SnapshotTruncated bool             `json:"snapshot_truncated,omitempty"`
+	OwnershipExpired  bool             `json:"ownership_expired,omitempty"`
+	Name              string           `json:"name"`
+	Role              string           `json:"role"`
+	ConfigDigest      string           `json:"config_digest"`
+	Generation        uint64           `json:"generation,omitempty"`
+	ProducerEpoch     string           `json:"producer_epoch,omitempty"`
+	Sequence          uint64           `json:"sequence,omitempty"`
+	Snapshot          json.RawMessage  `json:"snapshot,omitempty"`
 }
 type Runtime struct {
-	op               sync.Mutex // module-set reconciliation; never held by protocol callbacks
-	mu               sync.Mutex // complete projection and protocol acceptance are serialized
+	op sync.Mutex // module-set reconciliation; never held by protocol callbacks
+	mu sync.Mutex // complete projection and protocol acceptance are serialized
+	// BFD observations and recipient grants never acquire mu: the network
+	// writer can hold it across a long apply. Configuration takes mu -> bfdMu;
+	// no path may acquire these locks in the opposite order.
+	bfdMu            sync.Mutex
+	bfdSources       map[string]bfdBinding
+	bfdRecipients    map[string]bfdRecipient
 	dir, stateDir    string
 	network          Network
 	manager          moduleManager
@@ -159,7 +167,7 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, doc config.D
 	retained, err := r.retainedLocked(doc)
 	var p projection
 	if err == nil {
-		p, err = project(doc, r.dir, r.stateDir, retained, time.Now(), r.aftrInputs)
+		p, err = r.projectLocked(doc, retained, time.Now())
 	}
 	r.mu.Unlock()
 	if err != nil {
@@ -177,11 +185,16 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, doc config.D
 	// their latest acknowledged facts at cutover; never restore an older lease.
 	retained, err = r.retainedLocked(doc)
 	if err == nil {
-		p, err = project(doc, r.dir, r.stateDir, retained, time.Now(), r.aftrInputs)
+		p, err = r.projectLocked(doc, retained, time.Now())
 	}
 	var bindings map[string]binding
 	if err == nil {
 		bindings, modules, err = r.prepare(p.instances)
+	}
+	var bfdSources map[string]bfdBinding
+	var bfdRecipients map[string]bfdRecipient
+	if err == nil {
+		bfdSources, bfdRecipients, err = compileBFDCache(bindings)
 	}
 	if err != nil {
 		r.mu.Unlock()
@@ -192,6 +205,7 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, doc config.D
 	r.configured = true
 	r.records = retained
 	r.bindings = bindings
+	r.installBFDCacheLocked(bfdSources, bfdRecipients)
 	for name, input := range r.aftrInputs {
 		if b, ok := bindings[name]; !ok || b.digest != input.ConfigDigest {
 			delete(r.aftrInputs, name)
@@ -273,6 +287,7 @@ func (r *Runtime) effectiveRecordsLocked(now time.Time) map[string]serviceconfig
 		}
 		out[name] = record
 	}
+	r.mergeBFDRecordsLocked(out)
 	return out
 }
 
@@ -423,6 +438,9 @@ func (r *Runtime) Accept(ctx context.Context, u serviceconfig.Update) error {
 	if b, err := hex.DecodeString(u.ProducerEpoch); err != nil || len(b) != 16 {
 		return errors.New("invalid producer epoch")
 	}
+	if u.Role == "bfd" {
+		return r.acceptBFD(ctx, u)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	b, ok := r.bindings[u.Name]
@@ -467,7 +485,7 @@ func (r *Runtime) Accept(ctx context.Context, u serviceconfig.Update) error {
 		}
 	}
 	r.records[u.Name] = u
-	p, err := project(r.current, r.dir, r.stateDir, r.effectiveRecordsLocked(time.Now()), time.Now(), r.aftrInputs)
+	p, err := r.projectLocked(r.current, r.effectiveRecordsLocked(time.Now()), time.Now())
 	if err == nil {
 		err = r.applyNetworkLocked(ctx, p.network)
 	}
@@ -482,7 +500,7 @@ func (r *Runtime) Accept(ctx context.Context, u serviceconfig.Update) error {
 		} else {
 			delete(r.records, u.Name)
 		}
-		old, compileErr := project(r.current, r.dir, r.stateDir, r.effectiveRecordsLocked(time.Now()), time.Now(), r.aftrInputs)
+		old, compileErr := r.projectLocked(r.current, r.effectiveRecordsLocked(time.Now()), time.Now())
 		if compileErr == nil {
 			restoreCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			compileErr = r.network.Apply(restoreCtx, r.revision, old.network)
@@ -495,6 +513,11 @@ func (r *Runtime) Accept(ctx context.Context, u serviceconfig.Update) error {
 	}
 	r.liveRA = p.liveRA
 	r.routeIssues = p.routeIssues
+	if u.Role == "bgp" {
+		// A newly started recipient may read grants only after this first
+		// publication has completed the existing network ACK boundary.
+		r.acceptBFDRecipientLocked(u)
+	}
 	return nil
 }
 func strict(b []byte, v any) error {
@@ -511,6 +534,16 @@ func strict(b []byte, v any) error {
 }
 func validateSnapshot(instance serviceconfig.Instance, b json.RawMessage) error {
 	switch instance.Role {
+	case "bfd":
+		var cfg bfd.Config
+		var snapshot bfd.Snapshot
+		if err := strict(instance.Config, &cfg); err != nil {
+			return err
+		}
+		if err := strict(b, &snapshot); err != nil {
+			return err
+		}
+		return bfd.ValidateSnapshot(cfg, snapshot)
 	case "ra_client":
 		var cfg raclient.Config
 		var snapshot raclient.Snapshot
@@ -585,6 +618,9 @@ func validateSnapshot(instance serviceconfig.Instance, b json.RawMessage) error 
 		if !s.Active && (!s.ValidUntil.IsZero() || len(s.Routes) > 0) {
 			return errors.New("inactive BGP cannot retain route ownership")
 		}
+		if err := validateBFDAcknowledgements(c, s); err != nil {
+			return err
+		}
 		for _, route := range s.Routes {
 			if route.Table != c.Table || route.Metric != c.RouteMetric {
 				return errors.New("BGP route changed configured table or metric")
@@ -633,6 +669,7 @@ func (r *Runtime) Handler() http.Handler {
 	mux := http.NewServeMux()
 	r.observationRoutes(mux)
 	r.aftrRoutes(mux)
+	r.bfdRoutes(mux)
 	mux.HandleFunc("GET /v1/services", func(w http.ResponseWriter, req *http.Request) { localapi.JSON(w, 200, r.State()) })
 	mux.HandleFunc("POST /v1/services/state", func(w http.ResponseWriter, req *http.Request) {
 		var u serviceconfig.Update
@@ -699,7 +736,7 @@ func (r *Runtime) reconcileDynamic(ctx context.Context) error {
 		r.mu.Unlock()
 		return nil
 	}
-	p, err := project(r.current, r.dir, r.stateDir, r.effectiveRecordsLocked(time.Now()), time.Now(), r.aftrInputs)
+	p, err := r.projectLocked(r.current, r.effectiveRecordsLocked(time.Now()), time.Now())
 	if err == nil {
 		err = r.applyNetworkLocked(ctx, p.network)
 	}
@@ -729,7 +766,13 @@ func (r *Runtime) reconcileDynamic(ctx context.Context) error {
 		return err
 	}
 	r.mu.Lock()
+	bfdSources, bfdRecipients, err := compileBFDCache(bindings)
+	if err != nil {
+		r.mu.Unlock()
+		return err
+	}
 	r.bindings = bindings
+	r.installBFDCacheLocked(bfdSources, bfdRecipients)
 	for name, input := range r.aftrInputs {
 		if b, ok := bindings[name]; !ok || b.digest != input.ConfigDigest {
 			delete(r.aftrInputs, name)

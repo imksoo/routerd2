@@ -12,6 +12,7 @@ import (
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/aftr"
+	"github.com/imksoo/routerd2/internal/protocol/bfd"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp4"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6pd"
 	"github.com/imksoo/routerd2/internal/protocol/ra"
@@ -30,6 +31,32 @@ type projection struct {
 // project is pure: protocol facts and the committed intent produce a complete
 // kernel projection. No producer can submit arbitrary addresses or routes.
 func project(doc config.Document, runtimeDir, stateDir string, records map[string]serviceconfig.Update, now time.Time, dynamicInputs ...map[string]aftr.Input) (projection, error) {
+	facts := projectionFacts{}
+	if len(dynamicInputs) > 0 {
+		facts.aftr = dynamicInputs[0]
+	}
+	return projectWithFacts(doc, runtimeDir, stateDir, records, now, facts)
+}
+
+type projectionFacts struct {
+	aftr     map[string]aftr.Input
+	bfdClock bfd.Clock
+}
+
+func (r *Runtime) projectLocked(doc config.Document, records map[string]serviceconfig.Update, now time.Time) (projection, error) {
+	facts := projectionFacts{aftr: r.aftrInputs}
+	for _, service := range doc.Services {
+		if service.BGP != nil && len(service.BGP.PeerBFD) > 0 {
+			// A clock read failure withholds BFD-dependent paths. It must not
+			// manufacture a new lease or disturb unrelated routing intent.
+			facts.bfdClock, _ = bfd.ReadClock()
+			break
+		}
+	}
+	return projectWithFacts(doc, r.dir, r.stateDir, records, now, facts)
+}
+
+func projectWithFacts(doc config.Document, runtimeDir, stateDir string, records map[string]serviceconfig.Update, now time.Time, facts projectionFacts) (projection, error) {
 	b, _ := json.Marshal(doc.Network)
 	p := projection{liveRA: map[string]ra.Config{}}
 	if err := json.Unmarshal(b, &p.network); err != nil {
@@ -216,11 +243,11 @@ func project(doc config.Document, runtimeDir, stateDir string, records map[strin
 			}
 		}
 	}
-	if err := projectBGP(&p, doc, records, now); err != nil {
+	if err := projectBGP(&p, doc, records, now, facts.bfdClock); err != nil {
 		return p, err
 	}
-	if len(dynamicInputs) > 0 {
-		if err := projectDSLite(&p, doc, runtimeDir, stateDir, records, dynamicInputs[0], now); err != nil {
+	if facts.aftr != nil {
+		if err := projectDSLite(&p, doc, runtimeDir, stateDir, records, facts.aftr, now); err != nil {
 			return p, err
 		}
 	}

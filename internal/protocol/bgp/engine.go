@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/imksoo/routerd/pkg/bgpdaemon"
+	"github.com/imksoo/routerd2/internal/protocol/bgpconfig"
 	gobgpapi "github.com/osrg/gobgp/v4/api"
 	gobgpapiutil "github.com/osrg/gobgp/v4/pkg/apiutil"
 	gobgp "github.com/osrg/gobgp/v4/pkg/packet/bgp"
@@ -213,6 +214,9 @@ func restoreApplied(ctx context.Context, server *gobgpserver.BgpServer, paths po
 	if err := bgpdaemon.Validate(applied); err != nil {
 		return fmt.Errorf("validate applied BGP state: %w", err)
 	}
+	if err := bgpconfig.ValidateBFDReferences(Config{Runtime: applied, PeerBFD: cfg.PeerBFD}); err != nil {
+		return fmt.Errorf("persisted BGP BFD intent is incompatible: %w", err)
+	}
 	global := appliedGlobal(applied.Global)
 	global.BindToDevice = cfg.BindInterface
 	if err := server.StartBgp(ctx, &gobgpapi.StartBgpRequest{Global: global}); err != nil {
@@ -231,7 +235,13 @@ func restoreApplied(ctx context.Context, server *gobgpserver.BgpServer, paths po
 		if transport.BindInterface == "" {
 			transport.BindInterface = cfg.BindInterface
 		}
-		if err := server.AddPeer(ctx, &gobgpapi.AddPeerRequest{Peer: configuredPeer(peer, applied.Global, transport)}); err != nil {
+		nativePeer := configuredPeer(peer, applied.Global, transport)
+		if _, gated := cfg.PeerBFD[peer.Address]; gated {
+			// The FSM is born administratively down. Disabling after AddPeer
+			// would leave a window for an initial TCP OPEN or advertisement.
+			nativePeer.Conf.AdminDown = true
+		}
+		if err := server.AddPeer(ctx, &gobgpapi.AddPeerRequest{Peer: nativePeer}); err != nil {
 			return fmt.Errorf("restore BGP peer %s: %w", peer.Address, err)
 		}
 	}

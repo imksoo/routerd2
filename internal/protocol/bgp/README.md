@@ -122,6 +122,82 @@ need a suitable snapshot transport or a future streaming protocol. Full route
 walks are currently performed once per second and on coalesced events; Internet
 full-table scale and convergence throughput have not been benchmarked.
 
+## Native BFD session gating
+
+`peer_bfd` explicitly maps a configured BGP peer to a native BFD service:
+
+```json
+{
+  "peer_bfd": {
+    "192.0.2.2": {"service": "uplink-health", "address": "192.0.2.2"}
+  }
+}
+```
+
+An omitted reference address defaults to the BGP peer address. The bundled
+service compiler requires the exact same remote address, explicit BGP local
+transport address matching the BFD source, and matching socket interface. Its
+dependency must name an existing native BFD service. At most 64 BFD-bound peers
+are accepted per BGP worker; an event/long-poll transport and scale measurements
+are needed before increasing that limit. Legacy `AppliedPeer.BFD` profile names
+remain rejected: they are not implicitly converted into these service references.
+
+The service runner uses `RunWithBFD`, not ordinary `Run`, for this configuration.
+Every bound GoBGP peer is created with `AdminDown` already set, before its FSM
+can connect or accept a session. The first Down/no-route snapshot establishes
+the worker's recipient generation. A separate watcher then polls
+`/v1/services/{moduleName}/bfd?config_digest=...&generation=...` every 20ms, with
+a 200ms request deadline. A startup 409 while the initial status is unaccepted
+leaves peers down. A stopped/missing watcher never permits ungated BGP.
+
+Each source grant binds its configuration digest, generation, producer epoch,
+packet publication sequence, boot ID, cumulative Down counter and finite
+receive-derived BOOTTIME deadline. The separate gate loop checks expiry at most
+10ms apart and requires a control response received within 500ms on that same
+boot. It does not use wall-clock timestamps for health. Fresh HTTP responses
+cannot extend a replayed packet deadline. A response with receive evidence
+newer than its own receipt is rejected. Missing/failed sources, control failure,
+expiry, source replacement and coalesced Down counter increments close the
+actual BGP session. Retired source identities and regressing evidence are
+rejected; the bounded retired-source set requires worker restart after 128
+source replacements.
+
+The pinned GoBGP [server](https://github.com/osrg/gobgp/blob/v4.7.0/pkg/server/server.go)
+only enqueues Enable/Disable requests and may return success when its admin
+channel is full. The gate therefore waits for explicit `ADMIN_STATE_DOWN` and
+`SESSION_STATE_IDLE`, which follows old TCP closure in the
+[FSM](https://github.com/osrg/gobgp/blob/v4.7.0/pkg/server/fsm.go), before it can
+reenable a peer. Each admin request/acknowledgment has a 500ms context and
+BOOTTIME bound. A missing, late or failed acknowledgment aborts the worker;
+opposite requests are never stacked onto the asynchronous channel. BFD-bound
+peers reject multihop and enabled global/peer graceful restart, whose stale
+route behavior would conflict with the required immediate withdrawal.
+
+`Snapshot.BFD` contains the acknowledged source identity/Down counter for each
+bound peer and an `Enabled` proof. The kernel writer requires both this proof
+and current finite BFD health before using the peer's learned paths. Packet
+sequence equality is intentionally unnecessary: a route snapshot can outlive
+several healthy BFD packet observations. A source replacement or coalesced
+Down→Up therefore cannot validate a route snapshot from the old session.
+
+Per-peer internal versions additionally fence each RIB walk. If the gate changes
+during a walk, that publication withholds the affected peer's routes and enable
+proof; unrelated peers remain intact. These versions retain a complete
+disable/enable cycle even when its final source/Down counter is unchanged.
+Ordinary packet refreshes do not advance them. After any enabled session is
+disabled, recovery also waits asynchronously for the kernel writer to acknowledge
+a disabled snapshot belonging to that reset, and for a BFD receipt newer than
+the completed TCP close. An old in-flight publication or an acknowledgment from
+a previous reset cannot release this fence. Slow Effects can delay recovery but
+cannot delay TCP shutdown, wire-deadline checks or control failure processing.
+
+The native BFD worker follows [RFC 5880](https://www.rfc-editor.org/rfc/rfc5880.html)
+and the supported single-hop scope in
+[RFC 5881](https://www.rfc-editor.org/rfc/rfc5881.html). The consumer separation
+and withdrawal decision follow the application model in
+[RFC 5882](https://www.rfc-editor.org/rfc/rfc5882.html). This implementation is
+userspace scheduling with finite failure bounds, not a hard realtime guarantee.
+
 ## Private APIs and state
 
 HTTP and optional GoBGP gRPC APIs use Unix sockets, mode 0600, in a worker-owned
@@ -175,7 +251,9 @@ durable protocol command log. Secrets are absent from status and event records.
 ## Lifecycle and supported scope
 
 Cancellation stops control mutations, publishes withdrawal, stops GoBGP and
-closes sockets. HTTP draining, Effects calls and GoBGP shutdown have bounds.
+closes sockets. BFD-gated workers stop GoBGP before the final Effects withdrawal
+so an ownership callback cannot delay protocol shutdown. HTTP draining, Effects
+calls and GoBGP shutdown have bounds.
 The outer cancellation guard returns after 16 seconds even if an upstream
 management call hangs. On that exceptional error the supervisor must terminate
 the worker process; do not reuse a GoBGP instance with surviving goroutines.
@@ -187,10 +265,11 @@ multihop, iBGP route-reflector clients, the original timer profiles, resolved
 graceful restart options, prefix/community/next-hop/local-preference policy,
 local static origination and SAM mobility path APIs. It is not by itself full
 BGPRouter/BGPPeer/BGPDynamicPeer resource-controller parity. Dynamic admission,
-redistribution discovery, topology/when/health integration and migration from
-the original resource graph belong to the compiler/controllers. BFD profile
-references are rejected pending an owned native BFD integration; EVPN/VPN/FlowSpec
-and other family intent is rejected rather than ignored. Convergence-profile
+redistribution discovery, topology/when integration and migration from
+the original resource graph belong to the compiler/controllers. Explicit native
+BFD service references are supported as described above; legacy BFD profile
+references, EVPN/VPN/FlowSpec and other unsupported family intent are rejected
+rather than ignored. Convergence-profile
 defaults must arrive as resolved timer and graceful-restart settings.
 
 ## Verification
@@ -209,3 +288,12 @@ Both mixed-family import and export policies are applied to real GoBGP. These
 tests do not modify host interfaces, routes or firewall state. They do not
 substitute for the parent writer's namespace/QEMU FIB and ECMP tests, appliance
 boot tests or performance measurements.
+
+BFD tests cover finite deadline/control freshness independently, source replay,
+future receive evidence, coalesced failure, asynchronous admin acknowledgments,
+late ACK rejection, RIB walk ABA races, and matching withdrawal acknowledgment
+before recovery. A separate real TCP wire test verifies initial Down suppression,
+actual export/import and TCP closure on source expiry while route Effects are
+blocked and successful HTTP responses continue replaying the expired evidence.
+The appliance BFD integration fixture adds an independent UDP BFD speaker and
+native TCP BGP speaker, kernel routes, worker SIGSTOP expiry and recovery.

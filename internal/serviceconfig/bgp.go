@@ -12,6 +12,7 @@ import (
 type BGP struct {
 	Runtime                   bgpconfig.AppliedConfig            `json:"runtime"`
 	PeerTransports            map[string]bgpconfig.PeerTransport `json:"peer_transports,omitempty"`
+	PeerBFD                   map[string]bgpconfig.BFDReference  `json:"peer_bfd,omitempty"`
 	FIBInterface              string                             `json:"fib_interface,omitempty"`
 	BindInterface             string                             `json:"bind_interface,omitempty"`
 	Table                     int                                `json:"table,omitempty"`
@@ -27,5 +28,5 @@ func (s Service) BGPConfig(runtimeDir, stateDir string) bgpconfig.Config {
 		maxRoutes = 4096
 	}
 	private := filepath.Join(runtimeDir, "services", s.Name)
-	return bgpconfig.Normalize(bgpconfig.Config{Resource: s.Name, Runtime: c.Runtime, PeerTransports: c.PeerTransports, FIBInterface: c.FIBInterface, BindInterface: c.BindInterface, Table: c.Table, RouteMetric: c.RouteMetric, MaxRoutes: maxRoutes, EffectTimeoutMilliseconds: c.EffectTimeoutMilliseconds, SocketPath: filepath.Join(private, "bgp.sock"), GRPCSocketPath: filepath.Join(private, "bgp-grpc.sock"), StatePath: filepath.Join(stateDir, "services", s.Name, "bgp.json"), StatusPath: filepath.Join(private, "status.json"), EventPath: filepath.Join(stateDir, "services", s.Name, "bgp-events.jsonl")})
+	return bgpconfig.Normalize(bgpconfig.Config{Resource: s.Name, Runtime: c.Runtime, PeerTransports: c.PeerTransports, PeerBFD: c.PeerBFD, FIBInterface: c.FIBInterface, BindInterface: c.BindInterface, Table: c.Table, RouteMetric: c.RouteMetric, MaxRoutes: maxRoutes, EffectTimeoutMilliseconds: c.EffectTimeoutMilliseconds, SocketPath: filepath.Join(private, "bgp.sock"), GRPCSocketPath: filepath.Join(private, "bgp-grpc.sock"), StatePath: filepath.Join(stateDir, "services", s.Name, "bgp.json"), StatusPath: filepath.Join(private, "status.json"), EventPath: filepath.Join(stateDir, "services", s.Name, "bgp-events.jsonl")})
 }

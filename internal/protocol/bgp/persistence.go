@@ -47,7 +47,8 @@ func committedDigest(c Config) string {
 		BindInterface string
 		Table         int
 		Metric        int
-	}{c.Runtime, c.PeerTransports, c.FIBInterface, c.BindInterface, c.Table, c.RouteMetric})
+		PeerBFD       map[string]bgpconfig.BFDReference `json:"PeerBFD,omitempty"`
+	}{c.Runtime, c.PeerTransports, c.FIBInterface, c.BindInterface, c.Table, c.RouteMetric, c.PeerBFD})
 	d := sha256.Sum256(b)
 	return hex.EncodeToString(d[:])
 }

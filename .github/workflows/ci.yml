@@ -80,7 +80,7 @@ jobs:
         run: make qemu-daemon
       - name: Verify AFTR resolution and expiry through the real daemon
         run: make qemu-daemon-aftr
-      - name: Verify native protocols, SSH recovery, DHCP-to-DNS and BGP on the appliance kernel
+      - name: Verify native protocols, SSH recovery, DHCP-to-DNS and BGP with BFD on the appliance kernel
         # Run the required packet/namespace gates on our Alpine kernel. Hosted
         # runner kernels may omit drivers such as VRF; no check is skipped.
         run: make qemu-protocols
@@ -103,9 +103,11 @@ jobs:
             dist/daemon-management-test/
             dist/daemon-dhcp-dns-test/
             dist/daemon-bgp-test/
+            dist/daemon-bfd-test/
             dist/dhcp-test/
             dist/dhcp-server-test/
             dist/vrrp-test/
+            dist/bfd-test/
             dist/ra-client-test/
             dist/aftr-test/
             dist/release-boot-test/

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/protocol/bgpconfig"
 	gobgpapi "github.com/osrg/gobgp/v4/api"
 	gobgpapiutil "github.com/osrg/gobgp/v4/pkg/apiutil"
 	gobgp "github.com/osrg/gobgp/v4/pkg/packet/bgp"
@@ -140,6 +141,13 @@ func readSnapshot(ctx context.Context, server *gobgpserver.BgpServer, cfg Config
 func cloneSnapshot(s Snapshot) Snapshot {
 	s.Routes = append([]Route{}, s.Routes...)
 	s.Peers = append([]Peer{}, s.Peers...)
+	if s.BFD != nil {
+		copy := make(map[string]bgpconfig.BFDAcknowledgement, len(s.BFD))
+		for address, proof := range s.BFD {
+			copy[address] = proof
+		}
+		s.BFD = copy
+	}
 	return s
 }
 

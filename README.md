@@ -23,10 +23,12 @@ Alpineのパッケージをビルドとイメージ組み立てに利用しま�
 | VRRPv3 | native IPv4/IPv6 election、VMAC、GARP/NA、preempt、優先度、有限 ownership lease、NoDAD の明示 VIP、Accept_Mode の入力制御 |
 | DNS | 現行 routerd の resolver engine を再利用。UDP/TCP サーバー、cache、zones、query log、UDP/TCP/TLS/HTTPS/QUIC upstream。型付き DHCP リースによる A/PTR を、listener 再起動なしで更新・失効。虚偽の AD bit を防ぐため未実装の local DNSSEC signing は拒否 |
 | BGP | GoBGP v4 を独立 worker に統合。IPv4/IPv6 unicast、policy、選択経路の kernel 投影、recursive next hop、ECMP、期限付き FIB ownership。未解決 next hop は状態に表示し、未解決のまま FIB に入れない |
+| BFD | native IPv4/IPv6 single-hop asynchronous BFD。BGP の明示した隣接 peer を管理し、受信期限・producer 世代・Down counter で実セッションと学習経路を制御。旧 BFD profile、multihop、認証・echo は別の未実装範囲 |
 | WireGuard | kernel WireGuard を generic netlink で設定。完全な peer set、IPv4/IPv6 endpoint、roaming、公開 handshake/counter 状態。秘密鍵は versioned file と immutable snapshot で管理し、失敗時は所有リンクを DOWN にして復旧 |
 | configuration | YAML / JSON の厳密な検証、candidate、revision・冪等 request ID、永続 journal、プロセス構成と kernel projection の適用、失敗時の旧設定への reconcile |
 | confirmed commit | 確認期限で rollback。未確認のまま control が再起動した場合も復元。復元失敗を成功として扱わない |
 | management | 内蔵 SSH、公開鍵認証、永続 host key、Tab / history 付き候補編集、YAML 一括編集、diff、validate、commit confirmed、ログ参照。OS シェルを呼ばない |
+| large observations | 大きな設定の revision 固定読取・確認応答、軽量 health、network summary と詳細ページ。経路・WireGuard の大きな観測を省略するときは件数・省略フラグを明示し、CLI から詳細を取得 |
 | migration | `routerd config migrate [--policy FILE] FILE` で旧 resource YAML を変換。WAN の動作変更は resource ごとの明示 policy と review notes で扱う。未対応入力は理由を列挙し、部分的な設定を出力しない |
 | persistent state | appliance PID 1 が明示された既存 ext4 データ領域を mount・検証し、設定・SSH host key・署名付きリリース履歴を保存。起動時にディスクを検出・初期化する処理は含めない |
 | distribution | static amd64/arm64 の 2 バイナリ、依存ライセンス manifest、scratch OCI、Alpine APK、kernel + initramfs、QEMU と namespace 統合試験 |
@@ -37,7 +39,7 @@ Alpineのパッケージをビルドとイメージ組み立てに利用しま�
 routerd は設定、プロトコル、監視、ログ、管理とその整合性を受け持ちます。
 
 詳細は [アーキテクチャ](docs/architecture.md)、[現行 routerd の機能棚卸し](docs/parity.md)、
-[WAN と AFTR の契約](docs/wan.md)、[WireGuard](docs/wireguard.md)、[署名付きユーザーランド更新](docs/releases.md)、[設定例](examples/) を参照してください。機能棚卸しの `semantic_parity` は個々の旧 resource 契約の互換性を示し、
+[WAN と AFTR の契約](docs/wan.md)、[WireGuard](docs/wireguard.md)、[BFD と BGP](docs/bfd.md)、[署名付きユーザーランド更新](docs/releases.md)、[設定例](examples/) を参照してください。機能棚卸しの `semantic_parity` は個々の旧 resource 契約の互換性を示し、
 プロトコル実装やビルドの成功だけでは true にしません。
 
 ## Build and test
@@ -127,6 +129,8 @@ routerd(config)# exit
 routerd> show services
 routerd> show services wan-ra
 routerd> show route-issues
+routerd> show network routes table 254 limit 64
+routerd> show network wireguard-peers interface wg0
 routerd> show logs module service.wan limit 50
 ```
 
@@ -135,6 +139,8 @@ routerd> show logs module service.wan limit 50
 `.abort` で編集を取り消せます。Vim や OS shell の起動ではありません。
 Tab 補完、矢印キーによる履歴、`delete`、`up`、`top`、`abort` も使用できます。
 YAML のコメント・元の整形は保持しません。ローカルの TTY では `routerd cli` が同じ編集機能を使います。
+大きな設定のファイル適用、network の詳細・ページ継続、読取中の revision 競合の扱いは
+[CLI の契約](internal/cli/README.md) に記載しています。ページごとの観測はカーネル全体の atomic snapshot ではありません。
 
 ```sh
 routerd config export > running-config.yaml

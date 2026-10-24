@@ -31,21 +31,32 @@ func (r *Runtime) State() Status {
 }
 
 func (r *Runtime) instanceStatusLocked(name string, b binding, v serviceconfig.Update, detail bool) InstanceStatus {
-	out := InstanceStatus{Name: name, Role: b.instance.Role, ConfigDigest: b.digest, Generation: v.Generation, ProducerEpoch: v.ProducerEpoch, Sequence: v.Sequence, SnapshotBytes: len(v.Snapshot)}
-	encoded, err := json.Marshal(v.Snapshot) // accounts for JSON/HTML escaping
-	if len(v.Snapshot) > 0 && err == nil {
-		if detail || len(encoded) <= statusSnapshotLimit {
-			out.Snapshot = encoded
-		} else {
-			out.SnapshotTruncated = true
-		}
+	if b.instance.Role == "bfd" {
+		v = r.bfdRecord(name, b.digest)
 	}
+	out := instanceStatus(name, b, v, detail)
 	if v.Role == "bgp" || v.Role == "vrrp" || v.Role == "dhcp_server" {
 		var grant struct {
 			Active bool `json:"active"`
 		}
 		if json.Unmarshal(v.Snapshot, &grant) == nil && grant.Active {
 			out.OwnershipExpired = !time.Now().Before(r.leases[name])
+		}
+	}
+	return out
+}
+
+func instanceStatus(name string, b binding, v serviceconfig.Update, detail bool) InstanceStatus {
+	out := InstanceStatus{Name: name, Role: b.instance.Role, ConfigDigest: b.digest, Generation: v.Generation, ProducerEpoch: v.ProducerEpoch, Sequence: v.Sequence, SnapshotBytes: len(v.Snapshot)}
+	if b.instance.Role == "bfd" {
+		out.BFD = bfdHealth(b.instance, v)
+	}
+	encoded, err := json.Marshal(v.Snapshot) // accounts for JSON/HTML escaping
+	if len(v.Snapshot) > 0 && err == nil {
+		if detail || len(encoded) <= statusSnapshotLimit {
+			out.Snapshot = encoded
+		} else {
+			out.SnapshotTruncated = true
 		}
 	}
 	return out
@@ -86,8 +97,12 @@ type RouteIssuePage struct {
 
 func (r *Runtime) observationRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/services/{name}", func(w http.ResponseWriter, req *http.Request) {
-		r.mu.Lock()
 		name := req.PathValue("name")
+		if out, exists := r.bfdInstanceStatus(name, true); exists {
+			localapi.JSON(w, http.StatusOK, out)
+			return
+		}
+		r.mu.Lock()
 		b, ok := r.bindings[name]
 		var out InstanceStatus
 		if ok {

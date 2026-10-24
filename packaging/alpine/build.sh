@@ -3,7 +3,9 @@ set -eu
 
 source_dir=${1:-/src}
 output_dir=${2:-/out}
-work_dir=$(mktemp -d)
+# abuild expands $APK as a command plus arguments, so keep this path free of
+# whitespace even when the caller uses a different TMPDIR.
+work_dir=$(mktemp -d /tmp/routerd2-abuild.XXXXXX)
 trap 'rm -rf "$work_dir"' EXIT HUP INT TERM
 mkdir -p "$work_dir/aports/main/routerd2" "$output_dir"
 cd "$work_dir/aports/main/routerd2"
@@ -19,10 +21,20 @@ tar --sort=name --format=posix --pax-option=delete=atime,delete=ctime \
 
 export REPODEST="$work_dir/packages"
 export SRCDEST="$work_dir/distfiles"
+export ABUILD_USERDIR="$work_dir/abuild"
+export ABUILD_USERCONF="$ABUILD_USERDIR/abuild.conf"
 mkdir -p "$SRCDEST"
 # This builder supplies the pinned official Go toolchain in /usr/local/go.
 # -d skips apk's dependency resolver; alpine-sdk provides the other build tools.
 abuild-keygen -a -n
+# apk index verifies the freshly signed package. Trust the development key
+# only in this private build directory, alongside Alpine's existing keys.
+mkdir -p "$work_dir/apk-keys"
+for key in /etc/apk/keys/*.pub "$ABUILD_USERDIR"/*.pub; do
+  [ -f "$key" ] || continue
+  cp "$key" "$work_dir/apk-keys/"
+done
+export APK="apk --keys-dir $work_dir/apk-keys"
 abuild -P "$REPODEST" -s "$SRCDEST" checksum
 abuild -P "$REPODEST" -s "$SRCDEST" -d -r
 
@@ -30,5 +42,5 @@ find "$REPODEST" -type f -name 'routerd2-*.apk' -exec cp '{}' "$output_dir/" \;
 find "$output_dir" -maxdepth 1 -type f -name 'routerd2-*.apk' | grep -q .
 cp APKBUILD "$output_dir/APKBUILD"
 cp "$work_dir/aports/main/routerd2/routerd2-$pkgver.tar.gz" "$output_dir/"
-find "$HOME/.abuild" -maxdepth 1 -type f -name '*.pub' -exec cp '{}' "$output_dir/" \;
+find "$ABUILD_USERDIR" -maxdepth 1 -type f -name '*.pub' -exec cp '{}' "$output_dir/" \;
 go version > "$output_dir/toolchain.txt"

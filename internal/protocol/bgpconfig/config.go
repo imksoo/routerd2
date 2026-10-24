@@ -36,6 +36,7 @@ type Config struct {
 	StatusPath                string                   `json:"status_path,omitempty"`
 	EventPath                 string                   `json:"event_path,omitempty"`
 	PeerTransports            map[string]PeerTransport `json:"peer_transports,omitempty"`
+	PeerBFD                   map[string]BFDReference  `json:"peer_bfd,omitempty"`
 	BindInterface             string                   `json:"bind_interface,omitempty"`
 	FIBInterface              string                   `json:"fib_interface,omitempty"`
 	Table                     int                      `json:"table,omitempty"`
@@ -78,6 +79,12 @@ func Normalize(c Config) Config {
 	}
 	if out.EffectTimeoutMilliseconds == 0 {
 		out.EffectTimeoutMilliseconds = 2000
+	}
+	for peer, ref := range out.PeerBFD {
+		if ref.Address == "" {
+			ref.Address = peer
+			out.PeerBFD[peer] = ref
+		}
 	}
 	return out
 }
@@ -151,6 +158,9 @@ func Validate(c Config) error {
 			}
 		}
 	}
+	if err := ValidateBFDReferences(c); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -209,7 +219,7 @@ func ValidateRuntime(c bgpdaemon.AppliedConfig) error {
 			return errors.New("BGP TCP MD5 password must be at most 80 bytes without NUL")
 		}
 		if p.BFD != "" {
-			return errors.New("BGP BFD profile references require a native BFD controller")
+			return errors.New("legacy BGP BFD profile references require explicit migration to peer_bfd service references")
 		}
 		if p.TimersProfile != "" && p.TimersProfile != "default" && p.TimersProfile != "fast" && p.TimersProfile != "slow" {
 			return errors.New("unknown BGP timersProfile")

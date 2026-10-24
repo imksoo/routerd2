@@ -17,6 +17,12 @@ import time
 
 PROJECT = Path(__file__).resolve().parent.parent
 SUITES = {
+    "bfd": {
+        "package": "./internal/protocol/bfd", "binary": "bfd.test",
+        "test": "TestIsolatedNativeBFD",
+        "marker": "ROUTERD_BFD_NATIVE_TEST", "timeout": 100,
+        "description": "native IPv4 and IPv6 BFD sessions and failure detection",
+    },
     "wireguard": {
         "package": "./internal/network", "binary": "network.test",
         "test": "TestIsolatedKernelWireGuardOwnershipAndTraffic",
@@ -69,6 +75,13 @@ SUITES = {
         "marker": "ROUTERD_BGP_DAEMON_TEST", "timeout": 180,
         "commands": True,
         "description": "two-binary daemon BGP FIB and ownership expiry",
+    },
+    "daemon-bfd": {
+        "package": "./internal/integration", "binary": "daemon.test",
+        "test": "TestDaemonBFDControlsBGPSessionAndExpiry",
+        "marker": "ROUTERD_BFD_DAEMON_TEST", "timeout": 200,
+        "commands": True,
+        "description": "two-binary daemon BFD-controlled BGP sessions and expiry",
     },
     "dhcp": {
         "package": "./internal/protocol/dhcp4", "binary": "dhcp.test",

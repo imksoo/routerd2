@@ -12,6 +12,7 @@ import (
 
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/network"
+	"github.com/imksoo/routerd2/internal/protocol/bfd"
 	"github.com/imksoo/routerd2/internal/protocol/bgpconfig"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
@@ -59,8 +60,9 @@ func routeMetric(metric int, ip netip.Addr) int {
 // visible as a pending RouteIssue; it never installs a speculative onlink route
 // or kills a healthy BGP session. Kernel apply errors still fail the ACK.
 // Resolution uses this complete committed projection, excluding foreign routes.
-func projectBGP(p *projection, doc config.Document, records map[string]serviceconfig.Update, now time.Time) error {
+func projectBGP(p *projection, doc config.Document, records map[string]serviceconfig.Update, now time.Time, clock bfd.Clock) error {
 	groups := map[string]*routeGroup{}
+	sources := collectBFD(doc.Services, records)
 	for _, service := range doc.Services {
 		if service.BGP == nil {
 			continue
@@ -81,6 +83,17 @@ func projectBGP(p *projection, doc config.Document, records map[string]serviceco
 			return errors.New("BGP selected routes exceed configured limit")
 		}
 		for _, route := range s.Routes {
+			if ref, required := c.PeerBFD[route.PeerAddress]; required {
+				if ref.Address == "" {
+					ref.Address = route.PeerAddress
+				}
+				if !acknowledgedBFD(sources[ref.Service].grant(ref, clock), s.BFD[route.PeerAddress]) {
+					// Independently withdraw the FIB path while the BGP worker
+					// closes its session. The route's own ownership heartbeat
+					// cannot extend a BFD receive deadline.
+					continue
+				}
+			}
 			prefix, err := netip.ParsePrefix(route.Prefix)
 			if err != nil || prefix != prefix.Masked() {
 				return fmt.Errorf("BGP %s has an invalid selected prefix", service.Name)

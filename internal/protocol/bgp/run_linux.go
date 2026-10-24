@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/protocol/bfd"
 	gobgpapi "github.com/osrg/gobgp/v4/api"
 	gobgpapiutil "github.com/osrg/gobgp/v4/pkg/apiutil"
 	gobgpserver "github.com/osrg/gobgp/v4/pkg/server"
@@ -33,10 +34,17 @@ var running atomic.Bool
 // its context. On that exceptional deadline the caller must exit this worker
 // process: surviving library goroutines cannot safely be reused in-process.
 func Run(ctx context.Context, cfg Config, effects Effects, ready func()) error {
+	if len(cfg.PeerBFD) != 0 {
+		return errors.New("BFD-bound BGP requires RunWithBFD and a fenced input stream")
+	}
+	return runBounded(ctx, cfg, effects, ready, nil)
+}
+
+func runBounded(ctx context.Context, cfg Config, effects Effects, ready func(), input *bfdInput) error {
 	workerCtx, abort := context.WithCancelCause(ctx)
 	defer abort(context.Canceled)
 	done := make(chan error, 1)
-	go func() { done <- runWorker(workerCtx, cfg, effects, ready, abort) }()
+	go func() { done <- runWorker(workerCtx, cfg, effects, ready, abort, input) }()
 	finish := func(err error) error {
 		cause := context.Cause(workerCtx)
 		if cause != nil && !errors.Is(cause, context.Canceled) && !errors.Is(cause, context.DeadlineExceeded) {
@@ -59,7 +67,7 @@ func Run(ctx context.Context, cfg Config, effects Effects, ready func()) error {
 	}
 }
 
-func runWorker(ctx context.Context, cfg Config, effects Effects, ready func(), abort context.CancelCauseFunc) (result error) {
+func runWorker(ctx context.Context, cfg Config, effects Effects, ready func(), abort context.CancelCauseFunc, input *bfdInput) (result error) {
 	if err := Validate(cfg); err != nil {
 		return err
 	}
@@ -132,8 +140,13 @@ func runWorker(ctx context.Context, cfg Config, effects Effects, ready func(), a
 	api := httpServer(controlHandler(cfg.StatePath, paths, &appliedMu, monitor))
 	apiDone := make(chan error, 1)
 	apiStarted := false
+	gateView := &bfdGateView{}
+	var gateDone chan struct{}
 	defer func() {
 		cancel()
+		if gateDone != nil {
+			<-gateDone
+		}
 		// Stop new control mutations before withdrawing the worker's FIB lease.
 		if apiStarted {
 			stop, stopCancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -141,14 +154,22 @@ func runWorker(ctx context.Context, cfg Config, effects Effects, ready func(), a
 			stopCancel()
 			_ = api.Close()
 		}
+		var stopErr error
+		if input != nil {
+			// On gate failure close actual protocol sessions before any slow
+			// route-effect withdrawal can delay shutdown.
+			stopErr = stopEngine(server.Stop, serveDone, 5*time.Second)
+		}
 		withdraw, withdrawCancel := context.WithTimeout(context.Background(), time.Duration(cfg.EffectTimeoutMilliseconds)*time.Millisecond)
-		inactive := Snapshot{Peers: []Peer{}, Routes: []Route{}}
+		inactive := Snapshot{Peers: []Peer{}, Routes: []Route{}, BFD: gateView.snapshot()}
 		if result != nil {
 			inactive.Error = "BGP worker stopped after an error"
 		}
 		result = errors.Join(result, monitor.publish(withdraw, inactive))
 		withdrawCancel()
-		stopErr := stopEngine(server.Stop, serveDone, 5*time.Second)
+		if input == nil {
+			stopErr = stopEngine(server.Stop, serveDone, 5*time.Second)
+		}
 		result = errors.Join(result, stopErr)
 		if cfg.GRPCSocketPath != "" && stopErr == nil {
 			// GoBGP's Unix listener normally unlinks itself; never remove a path
@@ -175,21 +196,44 @@ func runWorker(ctx context.Context, cfg Config, effects Effects, ready func(), a
 		default:
 		}
 	}
+	gateView.changed = func() {
+		select {
+		case dirty <- struct{}{}:
+		default:
+		}
+	}
 	if err := server.WatchEvent(runCtx, gobgpserver.WatchEventMessageCallbacks{
 		OnBestPath:   func([]*gobgpapiutil.Path, time.Time) { changed() },
 		OnPeerUpdate: func(*gobgpapiutil.WatchEventMessage_PeerEvent, time.Time) { changed() },
 	}, gobgpserver.WatchBestPath(true), gobgpserver.WatchPeer()); err != nil {
 		return err
 	}
+	if input != nil {
+		applied, _, err := readApplied(cfg.StatePath)
+		if err != nil {
+			return err
+		}
+		gateDone = make(chan struct{})
+		go func() {
+			defer close(gateDone)
+			if err := runBFDGate(runCtx, cfg, *input, server, pendingDirectPeerTransitions(applied), gateView, bfd.ReadClock); err != nil {
+				monitor.fail(err)
+			}
+		}()
+	}
 	publish := func() error {
 		observe, observeCancel := context.WithTimeout(runCtx, time.Duration(cfg.EffectTimeoutMilliseconds)*time.Millisecond)
-		snapshot, err := readSnapshot(observe, server, cfg)
+		snapshot, disabled, err := gateView.readSnapshot(func() (Snapshot, error) { return readSnapshot(observe, server, cfg) })
 		observeCancel()
 		if err != nil {
 			return err
 		}
 		snapshot.WatchEvents = watchEvents.Load()
-		return monitor.publish(runCtx, snapshot)
+		if err := monitor.publish(runCtx, snapshot); err != nil {
+			return err
+		}
+		gateView.acknowledge(disabled)
+		return nil
 	}
 	if err := publish(); err != nil {
 		return err

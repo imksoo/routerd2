@@ -228,16 +228,27 @@ deployment simply by building this OCI image.
 
 ## Current persistence and boot limits
 
-This image boots directly with a kernel plus initramfs. Its state directory is
-in RAM: generated SSH host keys and other state are lost on reboot. Persistent
-storage provisioning, mounting a data partition, firmware-specific boot,
-Secure Boot enrollment, a bootloader, A/B slot selection, boot-success marking,
-and rollback are not implemented by this image builder.
+This image boots directly with a kernel plus initramfs. The default boot document
+has no state volume, so its state directory is in RAM and generated SSH host keys
+and other state are lost on reboot. A custom boot document can select an existing
+ext4 block device with [`state_volume`](../internal/runtimeconfig/README.md).
+The real PID 1 loads the configured storage drivers, mounts and verifies that
+device before opening state, and refuses startup if the volume cannot be used.
+The builder neither provisions nor formats the device.
 
-No disk image, installer ISO, cloud image, or cloud-provider integration is
-produced. The manifest records `volatile-initramfs` and
-`bootloader_ab_updates: false` so direct-boot smoke success is not confused with
-an update-safe physical appliance.
+The manifest distinguishes `volatile-initramfs` from
+`configured-ext4-state-volume`, records the declared volume and boot-document
+digest, and explicitly says it did not provision that volume. A declaration
+does not prove the device was attached or successfully mounted. The independent
+[two-boot storage gate](storage-test/README.md) verifies persisted configuration,
+SSH keys and fallback between signed userland generations. Configured signed
+userland selection includes trial/health confirmation and rollback; it is not
+a bootloader or kernel/rootfs A/B update.
+
+No disk image, installer ISO, cloud image or cloud-provider integration is
+produced. Firmware-specific boot, Secure Boot enrollment, bootloader slot
+selection and physical power-loss guarantees remain outside this builder.
+`bootloader_ab_updates` remains false for both state-volume profiles.
 
 Alpine and Go patch versions are pinned in the build arguments. The kernel
 package is resolved from the pinned Alpine release branch and its exact version

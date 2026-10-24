@@ -1,0 +1,13 @@
+The native BFD implementation in this directory is original routerd2 code under
+the repository's BSD-3-Clause license. Protocol behavior was implemented from
+RFC 5880 and RFC 5881; RFC 5883 identifies the separately unsupported multihop
+application. No FRR, bfdd, vtysh, other BFD implementation, or RFC code component
+is copied or linked into this package.
+
+The original routerd BFDSpec and FRR bridge were inspected at source commit
+1329ef54f296507eda79bbbc3b853783dd27251e to identify migration boundaries. The
+native implementation uses existing repository dependencies for Linux syscall
+and read-only netlink access (golang.org/x/sys/unix and
+github.com/vishvananda/netlink). The integration-only fixture also uses the
+already declared github.com/vishvananda/netns dependency. Their applicable
+license notices remain in the project's dependency distribution.

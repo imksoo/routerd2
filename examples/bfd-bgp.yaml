@@ -1,0 +1,42 @@
+# Documentation prefixes and private ASNs. Replace addresses and interface.
+# Both ends need matching single-hop BFD and BGP configuration.
+schema_version: 1
+network:
+  interfaces:
+    - name: eth0
+      addresses: [192.0.2.2/24]
+  forwarding:
+    ipv4: true
+services:
+  - name: edge-bfd
+    bfd:
+      interface: eth0
+      source_address: 192.0.2.2
+      peers:
+        - address: 192.0.2.1
+          min_tx_milliseconds: 300
+          min_rx_milliseconds: 300
+          detect_multiplier: 3
+  - name: edge-bgp
+    bgp:
+      fib_interface: eth0
+      peer_transports:
+        192.0.2.1:
+          local_address: 192.0.2.2
+          bind_interface: eth0
+      peer_bfd:
+        192.0.2.1:
+          service: edge-bfd
+      runtime:
+        version: 1
+        global:
+          asn: 65002
+          routerID: 192.0.2.2
+          listenPort: 179
+          families: [ipv4-unicast]
+        peers:
+          192.0.2.1:
+            address: 192.0.2.1
+            asn: 65001
+            importPolicy:
+              allowedPrefixes: [198.51.100.0/24]

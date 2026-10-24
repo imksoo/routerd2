@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/imksoo/routerd2/internal/localapi"
-	"github.com/imksoo/routerd2/internal/protocol/bgp"
+	"github.com/imksoo/routerd2/internal/protocol/bfd"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp4"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6pd"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserver"
@@ -88,6 +88,12 @@ func Run(ctx context.Context, runtimeDir, name, role, path, digest string, gener
 		go func() { defer close(done); c.replay(runCtx) }()
 	}
 	switch role {
+	case "bfd":
+		var cfg bfd.Config
+		if err := decode(instance.Config, &cfg); err != nil {
+			return err
+		}
+		return bfd.Run(runCtx, cfg, bfd.EffectsFunc(func(ctx context.Context, snapshot bfd.Snapshot) error { return c.update(ctx, snapshot) }), ready)
 	case "aftr":
 		return c.runAFTR(runCtx, instance, digest, ready)
 	case "ra_client":
@@ -103,11 +109,7 @@ func Run(ctx context.Context, runtimeDir, name, role, path, digest string, gener
 		}
 		return dhcpserver.Run(runCtx, cfg, dhcpserver.EffectsFunc(func(ctx context.Context, s dhcpserver.Snapshot) error { return c.update(ctx, s) }), ready)
 	case "bgp":
-		var cfg bgp.Config
-		if err := decode(instance.Config, &cfg); err != nil {
-			return err
-		}
-		return bgp.Run(runCtx, cfg, bgp.EffectsFunc(func(ctx context.Context, s bgp.Snapshot) error { return c.update(ctx, s) }), ready)
+		return c.runBGP(runCtx, instance, digest, ready)
 	case "dhcp4":
 		var cfg dhcp4.Config
 		if err := decode(instance.Config, &cfg); err != nil {

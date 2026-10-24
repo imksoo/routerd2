@@ -159,7 +159,7 @@
         "web"
       ],
       "parity_status": "not_integrated",
-      "known_gap": "A working narrow revision API or SSH login alone is not parity with resource apply/delete, probes, logs, federation or operational views."
+      "known_gap": "Native revisioned configuration/SSH, bounded mutation acknowledgements, lightweight health and explicit paged observations are integrated. Original resource apply/delete, probes, logs, federation and complete operational views remain incomplete."
     },
     {
       "id": "ha",
@@ -398,12 +398,12 @@
         "pkg/controller/bgp",
         "cmd/routerd-bgp"
       ],
-      "native_replacement": "Reuse GoBGP v4 engine, policies, EVPN processing and native Linux FIB adapter; supervise worker and preserve route ownership/withdrawal and status semantics.",
+      "native_replacement": "Reuse GoBGP v4 engine, policies, IPv4 unicast mobility path handling and native Linux FIB adapter; supervise worker and preserve route ownership/withdrawal and status semantics.",
       "target_workers": [
         "bgp"
       ],
       "parity_status": "not_integrated",
-      "known_gap": "Extracted GoBGP v4 engine, dual-stack policy, route effects and durable dynamic-path API are integrated. Original BFD and SAM controller orchestration, EVPN data-plane effects and resource conversion are incomplete."
+      "known_gap": "Extracted GoBGP v4 engine, dual-stack policy, route effects and durable dynamic-path API are integrated. An explicit native BFD dependency passed consumer and real two-binary QEMU failure/recovery gates. Original BFD profile/resource and SAM controller orchestration, mobility ownership policy and resource conversion remain incomplete. EVPN is deferred in the original baseline and is not a prerequisite for parity with it."
     },
     {
       "id": "routing.bfd",
@@ -418,7 +418,7 @@
         "bfd"
       ],
       "parity_status": "not_integrated",
-      "known_gap": "Existing BFD controller invokes vtysh, so protocol implementation or a deliberately integrated engine is still required."
+      "known_gap": "Native active single-hop IPv4/IPv6 BFD is implemented without FRR/vtysh; its wire and real two-binary BFD/BGP failure/recovery gates passed. Original resource profiles, when, controller/status/lifecycle compatibility and unsupported protocol modes remain incomplete."
     },
     {
       "id": "vpn.wireguard",
@@ -12176,7 +12176,7 @@
     {
       "package": "internal/network",
       "status": "integrated_native_kernel_writer",
-      "validation": "Unit and race tests passed. QEMU Linux packet gates passed for IPv4/IPv6 forwarding, NAT44/NAT66 masquerade, DS-Lite TCP and peer addresses, ECMP, policy routes, bridge/VLAN/VRF/VXLAN/macvlan, finite/deprecated address lifetimes and VRRP input guards. QEMU packet gates also passed IPv4/IPv6 INPUT/OUTPUT/FORWARD ACLs, ICMP rejection, established-flow preservation and DNAT/SNAT/masquerade with translated port ranges. Native WireGuard no-NIC QEMU passed encrypted IPv4/IPv6 traffic and outer endpoints, handshake/counters, roaming, multipart replacement and partial failure, journal rollback, PSK/peer removal, foreign-state preservation, UP acknowledgement loss and independent cancellation quarantine. Private key publication passed abrupt-process-exit/retry tests at five durability boundaries. The network API acknowledges apply without echoing oversized observation snapshots.",
+      "validation": "Unit and race tests passed. QEMU Linux packet gates passed for IPv4/IPv6 forwarding, NAT44/NAT66 masquerade, DS-Lite TCP and peer addresses, ECMP, policy routes, bridge/VLAN/VRF/VXLAN/macvlan, finite/deprecated address lifetimes and VRRP input guards. QEMU packet gates also passed IPv4/IPv6 INPUT/OUTPUT/FORWARD ACLs, ICMP rejection, established-flow preservation and DNAT/SNAT/masquerade with translated port ranges. Native WireGuard no-NIC QEMU passed encrypted IPv4/IPv6 traffic and outer endpoints, handshake/counters, roaming, multipart replacement and partial failure, journal rollback, PSK/peer removal, foreign-state preservation, UP acknowledgement loss and independent cancellation quarantine. Private key publication passed abrupt-process-exit/retry tests at five durability boundaries. The network API acknowledges apply without echoing oversized observation snapshots. Capacity fixtures passed with 16,000 routes and 30,000 WireGuard allowed IPs, including exact scoped counts, explicit truncation, escaped JSON byte bounds, nested detail pages, indexed route ownership and intent projection fences. Network summaries/pages are bounded to 256 KiB; desired chunks are bounded to 64 KiB with a 2 MiB complete-document bound. Detail pages are fresh observations, not an atomic cross-page kernel snapshot. These synthetic counts are response-capacity evidence, not a packet-throughput qualification.",
       "resource_parity": false
     },
     {
@@ -12218,7 +12218,70 @@
     {
       "package": "internal/protocol/bgp",
       "status": "integrated_supervised_worker",
-      "validation": "Unit/race plus independent TCP peers passed IPv4/IPv6 policy, advertisement and withdrawal. Real two-binary daemon tests install and withdraw protocol242 kernel FIB routes, report unresolved next hops without speculative onlink routes, repair them, and expire ownership while the BGP worker is SIGSTOPped. Recursive/ECMP/VRF/link-local resolution tests also passed.",
+      "validation": "Unit/race plus independent TCP peers passed IPv4/IPv6 policy, advertisement and withdrawal. Real two-binary daemon tests install and withdraw protocol242 kernel FIB routes, report unresolved next hops without speculative onlink routes, repair them, and expire ownership while the BGP worker is SIGSTOPped. Recursive/ECMP/VRF/link-local resolution tests also passed. The explicit native peer_bfd consumer passed pure/race identity, deadline, actual admin-ACK, RIB-version and per-reset withdrawal-ACK fences. TestBFDWireExpiryClosesActualTCPWhileRouteEffectsBlocked passed actual TCP closure while route effects were blocked. Final two-binary daemon-bfd acceptance is pending; this does not establish original BGPPeer.bfd/profile or BFD resource compatibility.",
+      "resource_parity": false
+    },
+    {
+      "package": "internal/protocol/bfd",
+      "status": "integrated_supervised_worker",
+      "scope": "Native active single-hop asynchronous IPv4/IPv6 BFD, up to 64 peers per explicitly bound interface/address-family worker; native UDP sockets without FRR/vtysh. An explicit BGP peer_bfd dependency consumes typed finite health; BFD itself does not write routes.",
+      "validation": "Unit/race/vet and independent native wire tests cover Poll/Final negotiation, TTL/interface/destination and packet validation, silent expiry, remote restart, point-to-point source behavior, source/interface loss, coalesced transition counters and inactive final fencing. No-external-NIC Alpine QEMU passed TestIsolatedNativeBFD in 9.06 seconds. Controller tests cover source/recipient binding, frozen receive evidence, replay/future rejection, current BOOTTIME health, source cutover and BFD ingress/query progress while the network writer is blocked. Scoped immutable evidence is captured before its evaluation clock. The BGP consumer requires current source proof and health, TCP Down/Idle acknowledgement, fresh receive evidence after close and a matching successful withdrawal acknowledgement before recovery. The real two-binary daemon-bfd QEMU gate also passed startup suppression, UDP-only loss, frozen published-UP expiry, a full producer receive-deadline stop and fresh BGP/FIB recovery without restarting the BGP worker.",
+      "acceptance_gates": [
+        {
+          "name": "native-bfd-qemu",
+          "status": "passed",
+          "suite": "bfd",
+          "required_test": "TestIsolatedNativeBFD",
+          "environment": "No-external-NIC Alpine QEMU; independent IPv4/IPv6 wire peers in a private network namespace",
+          "duration_seconds": 9.06
+        },
+        {
+          "name": "bgp-bfd-blocked-route-effects",
+          "status": "passed",
+          "required_test": "TestBFDWireExpiryClosesActualTCPWhileRouteEffectsBlocked",
+          "test_source": "internal/protocol/bgp/bfd_wire_test.go"
+        },
+        {
+          "name": "bfd-publication-source-full-check",
+          "status": "passed",
+          "command": "make check",
+          "source_tree": "f930b242b95d5555f7bface527074d4269cec91a",
+          "scope": "All packages, race detector, vet, nftables expression tests and 11 Python tool tests, including the immutable-evidence-before-clock correction"
+        },
+        {
+          "name": "bfd-runtime-cache-clock-order",
+          "status": "passed",
+          "validation": "runtimeplan race/vet and deterministic TestBFDCacheProjectionCapturesEvidenceBeforeEvaluationClock regression passed after the intermediate tree",
+          "test_source": "internal/runtimeplan/bfd_cache_test.go"
+        },
+        {
+          "name": "daemon-bfd-qemu",
+          "status": "passed",
+          "suite": "daemon-bfd",
+          "required_test": "TestDaemonBFDControlsBGPSessionAndExpiry",
+          "source_tree": "4155eb9d48bb8f35d1933f761928773dbf566d8b",
+          "environment": "No-external-NIC Alpine QEMU; real routerd/routerd-modules ELF pair and independent UDP BFD/TCP BGP peers",
+          "duration_seconds": 22.68,
+          "guest_total_seconds": 30.12,
+          "validation": "Startup suppression, UDP-only receive loss while TCP keepalives continue, frozen published-UP deadline expiry during SIGSTOP, full unpublished receive deadline expiry, same-producer Down counter and fresh receive, then BGP connection/export/FIB recovery without restarting BGP. Recovery validation also supports a strictly newer fenced BFD worker generation."
+        },
+        {
+          "name": "bfd-actual-static-release-pairs",
+          "status": "passed",
+          "architectures": [
+            "amd64",
+            "arm64"
+          ],
+          "source_tree": "8b607b42fe335d795ef62431991273d1eb223482",
+          "release_id": "bfd-8b607b42fe335d79",
+          "validation": "make build-linux release-built-test built the actual static runtime ELF pairs and passed signature, immutable staging and CLI publication validation. Later daemon-bfd fixture and inventory-only changes do not modify the production binaries."
+        }
+      ],
+      "limitations": [
+        "Authentication, echo execution, demand/passive mode and multihop BFD are not implemented; BFD-bound BGP rejects graceful restart.",
+        "The original BFD resource profiles, BGPPeer.bfd string, when/dependency/controller orchestration and status/lifecycle semantics are not compatible merely because a native session engine exists.",
+        "FIB withdrawal remains subject to the single network writer and reconciliation schedule; no hard realtime convergence guarantee is made."
+      ],
       "resource_parity": false
     },
     {
@@ -12242,8 +12305,18 @@
     {
       "package": "internal/protocol/aftr",
       "status": "integrated_supervised_worker",
-      "validation": "Pure/race, parser fuzz and isolated UDP/TCP tests passed. Actual two-binary no-NIC QEMU gate passed independent DNS AAAA resolution, in-place ip6tnl update, B4 /32 peer and IPv4 gateway route, exact original TTL retention during DNS outage, expiry withdrawal, underlay preservation, recovery without worker restart and configuration removal.",
-      "resource_parity": false
+      "validation": "Pure/race, parser fuzz and isolated UDP/TCP tests passed. Actual two-binary no-NIC QEMU gate passed independent DNS AAAA resolution, in-place ip6tnl update, B4 /32 peer and IPv4 gateway route, exact original TTL retention during DNS outage, expiry withdrawal, underlay preservation, recovery without worker restart and configuration removal. The capacity-regression daemon-aftr QEMU gate passed in 23.14 seconds after replacing full-snapshot dependency reads with an exact native interface/source-address query and no full-snapshot fallback. Pure tests prove unrelated large route/WireGuard observations are not queried by this dependency.",
+      "resource_parity": false,
+      "acceptance_gates": [
+        {
+          "name": "capacity-regression-daemon-aftr",
+          "status": "passed",
+          "suite": "daemon-aftr",
+          "required_test": "TestDaemonAFTRResolutionAndExpiry",
+          "environment": "No-external-NIC QEMU with the actual routerd/routerd-modules ELF pair",
+          "duration_seconds": 23.14
+        }
+      ]
     },
     {
       "package": "internal/release",
@@ -12261,6 +12334,46 @@
       "package": "internal/storage",
       "status": "appliance_persistent_state_volume",
       "validation": "Pure injected-backend tests/race/vet passed explicit block-device and ext4 validation, nofollow path walks, mountinfo/FD identity, foreign mount rejection, retry bounds and post-mount error reporting. Real no-NIC QEMU with one private regular-file disk passed production fresh mounts and verified idempotent reentry across signed PID 1 exec, then persistent settings/key/release fallback across a second kernel boot. No disk formatting or discovery is performed by production code.",
+      "resource_parity": false
+    },
+    {
+      "package": "internal/config",
+      "status": "bounded_durable_configuration_store",
+      "validation": "Published capacity checkpoint 5c76ba121db9c78cb6501a487cb1f96a94b80705 passed full checks. Canonical current documents are limited to 2 MiB minus a 4 KiB request-envelope reserve; confirmed current/previous records use separately bounded compact JSON (4 MiB plus 64 KiB). The legacy indented-record read limit remains finite at 16 MiB with strict duplicate/depth/node validation. Unit/race tests passed 12,000-route confirmed record save/load, old-indentation compatibility and rejection before replacing the old durable record. These are native document/store contracts, not original resource semantic parity.",
+      "resource_parity": false
+    },
+    {
+      "package": "internal/control",
+      "status": "bounded_native_management_api",
+      "validation": "Published capacity checkpoint 5c76ba121db9c78cb6501a487cb1f96a94b80705 passed full checks. The global local API request/response limit remains 2 MiB. Small legacy-shaped responses are preserved; oversized GET config returns explicit 413 with metadata/document alternatives, and successful large commit/confirm returns a bounded 200 acknowledgement with explicit omission flags. Revision-fenced compact document reads and CLI digest/size/request-identity checks passed, including bounded conflict retries. Lightweight health keeps boot-watcher fields without materializing current/previous configurations or full service observations. Network summary/detail forwarding preserves scoped counts, truncation and projection fences. The daemon-management QEMU gate passed actual SSH configuration and recovery in 15.49 seconds after the capacity changes.",
+      "acceptance_gates": [
+        {
+          "name": "capacity-checkpoint-full-check",
+          "status": "passed",
+          "source_commit": "5c76ba121db9c78cb6501a487cb1f96a94b80705",
+          "command": "make check"
+        },
+        {
+          "name": "capacity-configuration-and-observation-regressions",
+          "status": "passed",
+          "test_sources": [
+            "internal/control/views_test.go",
+            "internal/network/observation_test.go",
+            "internal/cli/configuration_test.go",
+            "internal/cli/network_test.go",
+            "internal/config/record_test.go"
+          ],
+          "scope": "12,000-route confirmed configuration, 16,000-route/30,000-allowed-IP synthetic observations, bounded acknowledgements/health, explicit omission and revision/digest fences; not a throughput qualification"
+        },
+        {
+          "name": "capacity-regression-daemon-management",
+          "status": "passed",
+          "suite": "daemon-management",
+          "required_test": "TestDaemonConfigurationAndRecovery",
+          "environment": "No-external-NIC QEMU with the actual routerd/routerd-modules ELF pair and embedded SSH",
+          "duration_seconds": 15.49
+        }
+      ],
       "resource_parity": false
     }
   ]

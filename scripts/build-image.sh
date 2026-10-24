@@ -151,7 +151,11 @@ manifest = {
     "kernel_modules": boot["kernel_modules"],
     "ssh_enabled": bool(boot.get("ssh", {}).get("authorized_keys")),
     "config_sha256": hashlib.sha256((root / "etc/routerd/config.json").read_bytes()).hexdigest(),
-    "state_persistence": "volatile-initramfs",
+    "boot_config_sha256": hashlib.sha256(boot_path.read_bytes()).hexdigest(),
+    "state_persistence": "configured-ext4-state-volume" if boot.get("state_volume") is not None else "volatile-initramfs",
+    "state_volume": boot.get("state_volume"),
+    "state_volume_provisioned_by_builder": False,
+    "userland_release_selection_configured": boot.get("release") is not None,
     "boot_method": "direct-kernel-initramfs",
     "bootloader_ab_updates": False,
 }

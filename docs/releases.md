@@ -67,11 +67,13 @@ image distribution.
 
 ## Install a baseline and queue an update
 
-The appliance must already have a persistent filesystem mounted at the chosen
-store location. The current direct-boot development initramfs is volatile and
-does not provision or mount a data disk. An installer stages and explicitly
-initializes its known-good baseline using the local release commands. Merely
-initializing it does not prove that the baseline boots.
+The appliance needs a provisioned persistent filesystem at the chosen store
+location. A boot document can use [`state_volume`](../internal/runtimeconfig/README.md)
+to mount an existing ext4 device before PID 1 opens the release store. The default
+direct-boot initramfs has no volume configured and remains volatile. Neither the
+image builder nor routerd formats or provisions a data disk. An installer stages
+and explicitly initializes its known-good baseline using the local release
+commands. Merely initializing it does not prove that the baseline boots.
 
 ```sh
 routerd release stage \
@@ -160,7 +162,10 @@ An independent probe checks each worker's executing inode, local health and the
 final confirmation record before clean guest poweroff. The fixture retains
 hashes and serial evidence under `dist/release-boot-test`.
 
-That gate uses a temporary in-memory store. A persistent disk across two boots,
-bootloader fallback, power-loss durability and kernel/rootfs switching are not
-established by its success. See the [release store contract](../internal/release/README.md)
-and [PID 1 gate](../internal/releaseboot/testdata/README.md) for exact boundaries.
+That gate uses a temporary in-memory store. The separate
+[`qemu-storage` gate](../images/storage-test/README.md) exercises an actual ext4
+disk across two kernel boots, persisted SSH edits/host keys and automatic fallback
+from an unconfirmed signed userland attempt to its baseline. Neither gate proves
+bootloader fallback, physical power-loss durability or kernel/rootfs switching.
+See the [release store contract](../internal/release/README.md) and
+[PID 1 gate](../internal/releaseboot/testdata/README.md) for exact boundaries.
