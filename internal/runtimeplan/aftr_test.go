@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/netip"
 	"reflect"
 	"testing"
 	"time"
@@ -19,10 +20,37 @@ import (
 
 type aftrNetwork struct {
 	memoryNetwork
-	observed network.Snapshot
+	observed    network.Snapshot
+	sourceErr   error
+	sourceCalls int
 }
 
-func (n *aftrNetwork) Snapshot(context.Context) (network.Snapshot, error) { return n.observed, nil }
+func (n *aftrNetwork) Snapshot(context.Context) (network.Snapshot, error) {
+	panic("AFTR must not query the full operator snapshot")
+}
+
+func (n *aftrNetwork) SourceAddress(_ context.Context, name, requested string) (network.SourceObservation, error) {
+	n.sourceCalls++
+	value := network.SourceObservation{Interface: name, RequestedAddress: requested}
+	if n.sourceErr != nil {
+		return value, n.sourceErr
+	}
+	for _, iface := range n.observed.Interfaces {
+		if iface.Name != name {
+			continue
+		}
+		value.InterfacePresent, value.Index, value.Up = true, iface.Index, iface.Up
+		for _, address := range iface.Addresses {
+			prefix, err := netip.ParsePrefix(address.Address)
+			if err == nil && prefix.Addr().String() == requested {
+				copy := address
+				value.Found, value.Address = true, &copy
+				return value, nil
+			}
+		}
+	}
+	return value, nil
+}
 
 func aftrDocument() config.Document {
 	return config.Document{SchemaVersion: 1, Network: network.Desired{Interfaces: []network.Interface{{Name: "wan0", Addresses: []string{"2001:db8:42::1/64"}}}}, Services: []serviceconfig.Service{{Name: "dslite", DSLite: &serviceconfig.DSLite{Interface: "wan0", Tunnel: "dslite0", LocalAddress: "2001:db8:42::1", Candidates: []string{"2001:db8:42::2"}}}}}
@@ -31,7 +59,7 @@ func aftrDocument() config.Document {
 func TestAFTRObservedSourceGenerationAndProjection(t *testing.T) {
 	ctx := context.Background()
 	doc := aftrDocument()
-	n := &aftrNetwork{observed: network.Snapshot{Interfaces: []network.InterfaceState{{Name: "wan0", Up: true, Addresses: []network.AddressState{{Address: "2001:db8:42::1/64", Owned: true, PreferredLifetime: ^uint32(0), ValidLifetime: ^uint32(0), Flags: unix.IFA_F_TENTATIVE}}}}}}
+	n := &aftrNetwork{observed: network.Snapshot{Interfaces: []network.InterfaceState{{Name: "wan0", Index: 42, Up: true, Addresses: []network.AddressState{{Address: "2001:db8:42::1/64", Owned: true, PreferredLifetime: ^uint32(0), ValidLifetime: ^uint32(0), Flags: unix.IFA_F_TENTATIVE}}}}}}
 	r := New(t.TempDir(), t.TempDir(), n)
 	r.manager = &memoryManager{}
 	if err := r.ApplyConfig(ctx, 1, doc); err != nil {
@@ -92,7 +120,7 @@ func TestAFTRObservedSourceGenerationAndProjection(t *testing.T) {
 
 func TestAFTRPeerAndGatewayChangesFenceOldProjection(t *testing.T) {
 	ctx := context.Background()
-	n := &aftrNetwork{observed: network.Snapshot{Interfaces: []network.InterfaceState{{Name: "wan0", Up: true, Addresses: []network.AddressState{{Address: "2001:db8:42::1/64", Owned: true, PreferredLifetime: ^uint32(0), ValidLifetime: ^uint32(0)}}}}}}
+	n := &aftrNetwork{observed: network.Snapshot{Interfaces: []network.InterfaceState{{Name: "wan0", Index: 42, Up: true, Addresses: []network.AddressState{{Address: "2001:db8:42::1/64", Owned: true, PreferredLifetime: ^uint32(0), ValidLifetime: ^uint32(0)}}}}}}
 	r := New(t.TempDir(), t.TempDir(), n)
 	r.manager = &memoryManager{}
 	no := false

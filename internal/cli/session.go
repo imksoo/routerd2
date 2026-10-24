@@ -35,7 +35,7 @@ func (s Session) Execute(ctx context.Context, command string, input io.Reader, o
 		return nil
 	}
 	if len(a) == 1 && a[0] == "help" {
-		_, err := fmt.Fprintln(out, "show status\nshow network\nshow services [NAME]\nshow route-issues [offset N]\nshow config\nshow running-config\nshow logs [module NAME] [level INFO] [limit 100]\nshow logging\nshow version\nrestart <module>\nconfigure (exec: CommitRequest YAML/JSON on stdin; shell: candidate mode)\nconfirm\nhelp\nexit")
+		_, err := fmt.Fprintln(out, "show status\nshow network [SECTION [FILTER VALUE ...]] (show network help for details)\nshow services [NAME]\nshow route-issues [offset N]\nshow config\nshow running-config\nshow logs [module NAME] [level INFO] [limit 100]\nshow logging\nshow version\nrestart <module>\nconfigure (exec: CommitRequest YAML/JSON on stdin; shell: candidate mode)\nconfirm\nhelp\nexit")
 		return err
 	}
 	var result json.RawMessage
@@ -44,6 +44,8 @@ func (s Session) Execute(ctx context.Context, command string, input io.Reader, o
 	logClient := localapi.NewClient(filepath.Join(s.RuntimeDir, logging.SocketName))
 	var err error
 	switch {
+	case len(a) >= 2 && a[0] == "show" && a[1] == "network":
+		return showNetwork(ctx, ctl, a[2:], out)
 	case len(a) >= 2 && a[0] == "show" && a[1] == "logs":
 		q := url.Values{"tail": {"true"}, "limit": {"100"}}
 		if len(a)%2 != 0 {
@@ -95,17 +97,19 @@ func (s Session) Execute(ctx context.Context, command string, input io.Reader, o
 		switch a[1] {
 		case "status":
 			err = super.Do(ctx, http.MethodGet, "/v1/status", nil, &result)
-		case "network":
-			err = ctl.Do(ctx, http.MethodGet, "/v1/network", nil, &result)
 		case "services":
 			err = ctl.Do(ctx, http.MethodGet, "/v1/services", nil, &result)
 		case "logging":
 			err = logClient.Do(ctx, http.MethodGet, "/v1/status", nil, &result)
 		case "config":
-			err = ctl.Do(ctx, http.MethodGet, "/v1/config", nil, &result)
+			state, err := readConfiguration(ctx, ctl, true)
+			if err != nil {
+				return err
+			}
+			return WriteConfigurationState(out, state)
 		case "running-config":
-			var state control.State
-			if err := ctl.Do(ctx, http.MethodGet, "/v1/config", nil, &state); err != nil {
+			state, err := readConfiguration(ctx, ctl, true)
+			if err != nil {
 				return err
 			}
 			y, err := config.YAML(state.Config)
@@ -132,16 +136,24 @@ func (s Session) Execute(ctx context.Context, command string, input io.Reader, o
 		if err := config.Decode(input, &r); err != nil {
 			return err
 		}
-		err = ctl.Do(ctx, http.MethodPost, "/v1/config/commit", r, &result)
+		state, err := commitConfiguration(ctx, ctl, r)
+		if err != nil {
+			return fmt.Errorf("request_id=%s: %w", r.RequestID, err)
+		}
+		return WriteConfigurationState(out, state)
 	case len(a) == 1 && a[0] == "confirm":
-		var state control.State
-		if err := ctl.Do(ctx, http.MethodGet, "/v1/config", nil, &state); err != nil {
+		state, err := readConfiguration(ctx, ctl, false)
+		if err != nil {
 			return err
 		}
 		if state.Confirmation == nil {
 			return errors.New("no revision is awaiting confirmation")
 		}
-		err = ctl.Do(ctx, http.MethodPost, "/v1/config/confirm", control.ConfirmRequest{Revision: state.Revision, RequestID: state.Confirmation.RequestID}, &result)
+		confirmed, err := confirmConfiguration(ctx, ctl, control.ConfirmRequest{Revision: state.Revision, RequestID: state.Confirmation.RequestID})
+		if err != nil {
+			return err
+		}
+		return WriteConfigurationState(out, confirmed)
 	default:
 		return errors.New("unknown command; use help")
 	}

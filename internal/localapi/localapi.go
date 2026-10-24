@@ -22,6 +22,25 @@ type Error struct {
 	Error string `json:"error"`
 }
 
+// HTTPError keeps the status available to bounded retry/fallback clients. Its
+// text remains compatible with the previous string-only client errors.
+type HTTPError struct {
+	StatusCode int
+	Message    string
+}
+
+func (e *HTTPError) Error() string {
+	if e.Message == "" {
+		return fmt.Sprintf("module returned HTTP %d", e.StatusCode)
+	}
+	return fmt.Sprintf("HTTP %d: %s", e.StatusCode, e.Message)
+}
+
+func IsHTTPStatus(err error, code int) bool {
+	var status *HTTPError
+	return errors.As(err, &status) && status.StatusCode == code
+}
+
 func JSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -135,9 +154,9 @@ func (c *Client) Do(ctx context.Context, method, path string, in, out any) error
 	if r.StatusCode < 200 || r.StatusCode >= 300 {
 		var e Error
 		if json.Unmarshal(b, &e) == nil && e.Error != "" {
-			return fmt.Errorf("HTTP %d: %s", r.StatusCode, e.Error)
+			return &HTTPError{StatusCode: r.StatusCode, Message: e.Error}
 		}
-		return fmt.Errorf("module returned HTTP %d", r.StatusCode)
+		return &HTTPError{StatusCode: r.StatusCode}
 	}
 	if out != nil {
 		return json.Unmarshal(b, out)

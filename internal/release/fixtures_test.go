@@ -37,6 +37,17 @@ func testKey() ed25519.PrivateKey {
 func fixtureBinaries(t *testing.T) map[string][]byte {
 	t.Helper()
 	fixtureOnce.Do(func() {
+		goExecutable := filepath.Join(runtime.GOROOT(), "bin", "go")
+		if runtime.GOROOT() == "" {
+			// abuild enables -trimpath, which clears the compiled-in GOROOT.
+			// Locate the same supplied toolchain through the build environment.
+			var err error
+			goExecutable, err = exec.LookPath("go")
+			if err != nil {
+				fixtureError = fmt.Errorf("locate Go fixture toolchain: %w", err)
+				return
+			}
+		}
 		dir, err := os.MkdirTemp("", "routerd-release-elf-fixture-")
 		if err != nil {
 			fixtureError = err
@@ -61,7 +72,7 @@ func fixtureBinaries(t *testing.T) map[string][]byte {
 			}
 			output := filepath.Join(dir, name)
 			ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-			command := exec.CommandContext(ctx, filepath.Join(runtime.GOROOT(), "bin", "go"), "build", "-mod=readonly", "-trimpath", "-buildvcs=false", "-ldflags=-s -w -X main.Identity="+buildinfo.IdentityPrefix+fixtureRelease+buildinfo.IdentitySuffix, "-o", output, "./cmd/"+name)
+			command := exec.CommandContext(ctx, goExecutable, "build", "-buildmode=exe", "-mod=readonly", "-trimpath", "-buildvcs=false", "-ldflags=-s -w -X main.Identity="+buildinfo.IdentityPrefix+fixtureRelease+buildinfo.IdentitySuffix, "-o", output, "./cmd/"+name)
 			command.Dir = dir
 			command.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux", "GOARCH="+runtime.GOARCH, "GOAMD64=v1", "GOARM64=v8.0", "GOTOOLCHAIN=local", "GOENV=off")
 			log, buildErr := command.CombinedOutput()

@@ -33,13 +33,15 @@ type nativeNetwork interface {
 func networkHandler(e nativeNetwork) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/snapshot", func(w http.ResponseWriter, r *http.Request) {
-		s, err := e.Snapshot(r.Context())
+		s, err := networkObservation(r.Context(), e)
 		if err != nil {
-			localapi.Fail(w, 503, err)
+			observationFailure(w, err)
 			return
 		}
-		localapi.JSON(w, 200, s)
+		writeObservation(w, s)
 	})
+	networkObservationRoutes(mux, "/v1/observations/", e)
+	networkSourceRoute(mux, e)
 	mux.HandleFunc("POST /v1/apply", func(w http.ResponseWriter, r *http.Request) {
 		var req ApplyRequest
 		if err := localapi.Decode(w, r, &req); err != nil {
@@ -68,9 +70,10 @@ func (e *Engine) Handler() http.Handler {
 		mux.Handle("/v1/services/", h)
 	}
 	mux.HandleFunc("GET /v1/version", func(w http.ResponseWriter, r *http.Request) { localapi.JSON(w, 200, buildinfo.Current()) })
-	mux.HandleFunc("GET /v1/config", func(w http.ResponseWriter, r *http.Request) { localapi.JSON(w, 200, e.State()) })
+	e.configurationViewRoutes(mux)
+	mux.HandleFunc("GET /v1/config", func(w http.ResponseWriter, r *http.Request) { e.writeConfigurationState(w, e.State(), false) })
 	mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, r *http.Request) {
-		s := e.State()
+		s := e.health()
 		code := 200
 		if !s.Healthy {
 			code = 503
@@ -78,13 +81,14 @@ func (e *Engine) Handler() http.Handler {
 		localapi.JSON(w, code, s)
 	})
 	mux.HandleFunc("GET /v1/network", func(w http.ResponseWriter, r *http.Request) {
-		s, err := e.network.Snapshot(r.Context())
+		s, err := networkObservation(r.Context(), e.network)
 		if err != nil {
-			localapi.Fail(w, 503, err)
+			observationFailure(w, err)
 			return
 		}
-		localapi.JSON(w, 200, s)
+		writeObservation(w, s)
 	})
+	networkObservationRoutes(mux, "/v1/network/", e.network)
 	mux.HandleFunc("POST /v1/config/commit", func(w http.ResponseWriter, r *http.Request) {
 		var req CommitRequest
 		if err := config.Decode(http.MaxBytesReader(w, r.Body, config.MaxSize), &req); err != nil {
@@ -102,7 +106,7 @@ func (e *Engine) Handler() http.Handler {
 			localapi.Fail(w, code, err)
 			return
 		}
-		localapi.JSON(w, 200, s)
+		e.writeConfigurationState(w, s, true)
 	})
 	mux.HandleFunc("POST /v1/config/confirm", func(w http.ResponseWriter, r *http.Request) {
 		var req ConfirmRequest
@@ -119,7 +123,7 @@ func (e *Engine) Handler() http.Handler {
 			localapi.Fail(w, code, err)
 			return
 		}
-		localapi.JSON(w, 200, s)
+		e.writeConfigurationState(w, s, true)
 	})
 	mux.HandleFunc("GET /v1/events", func(w http.ResponseWriter, r *http.Request) {
 		after, err := strconv.ParseUint(r.URL.Query().Get("after_sequence"), 10, 64)

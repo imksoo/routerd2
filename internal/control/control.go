@@ -54,11 +54,20 @@ type ConfirmRequest struct {
 
 type State struct {
 	config.Committed
-	Healthy       bool                `json:"healthy"`
-	LastError     string              `json:"last_error,omitempty"`
-	ProducerEpoch string              `json:"producer_epoch"`
-	Sequence      uint64              `json:"sequence"`
-	Services      *runtimeplan.Status `json:"services,omitempty"`
+	Healthy            bool                `json:"healthy"`
+	LastError          string              `json:"last_error,omitempty"`
+	LastErrorTruncated bool                `json:"last_error_truncated,omitempty"`
+	ProducerEpoch      string              `json:"producer_epoch"`
+	Sequence           uint64              `json:"sequence"`
+	Services           *runtimeplan.Status `json:"services,omitempty"`
+	// Metadata and large successful mutation acknowledgments deliberately omit
+	// document bodies. Clients must inspect these flags before using Config or
+	// Confirmation.Previous; zero values are never partial configurations.
+	ConfigOmitted               bool   `json:"config_omitted,omitempty"`
+	ConfirmationPreviousOmitted bool   `json:"confirmation_previous_omitted,omitempty"`
+	ServicesOmitted             bool   `json:"services_omitted,omitempty"`
+	ConfigDigest                string `json:"config_digest,omitempty"`
+	ConfigBytes                 int    `json:"config_bytes,omitempty"`
 }
 
 type Event struct {
@@ -90,8 +99,14 @@ func (n *NetworkClient) Apply(ctx context.Context, rev uint64, d network.Desired
 	return n.client.Do(ctx, http.MethodPost, "/v1/apply", ApplyRequest{rev, d}, nil)
 }
 func (n *NetworkClient) Snapshot(ctx context.Context) (s network.Snapshot, err error) {
-	err = n.client.Do(ctx, http.MethodGet, "/v1/snapshot", nil, &s)
-	return
+	v, err := n.Observe(ctx)
+	if err != nil {
+		return s, err
+	}
+	if v.Truncated || !v.Complete {
+		return s, errors.New("network observation is incomplete; use bounded observation detail queries")
+	}
+	return v.Snapshot, nil
 }
 
 type Engine struct {
@@ -229,7 +244,7 @@ func (e *Engine) Confirm(r ConfirmRequest) (State, error) {
 	if !e.state.Healthy {
 		return e.state, errors.New("cannot confirm while the applied state is degraded")
 	}
-	if e.runtime != nil && e.runtime.State().Phase != "ready" {
+	if e.runtime != nil && e.runtime.Health().Phase != "ready" {
 		return e.state, errors.New("cannot confirm while protocol projection is degraded or applying")
 	}
 	if e.runtime != nil {

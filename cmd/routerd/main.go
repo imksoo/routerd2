@@ -21,7 +21,6 @@ import (
 	"github.com/imksoo/routerd2/internal/cli"
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/control"
-	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/logging"
 	"github.com/imksoo/routerd2/internal/release"
 	"github.com/imksoo/routerd2/internal/releaseboot"
@@ -327,10 +326,9 @@ func configure(args []string) error {
 		*id = hex.EncodeToString(b[:])
 	}
 	r := control.CommitRequest{ExpectedRevision: *revision, RequestID: *id, Config: d, ConfirmTimeoutSeconds: *confirmed}
-	var s control.State
-	c := localapi.NewClient(filepath.Join(*dir, control.SocketName))
-	if err = c.Do(context.Background(), "POST", "/v1/config/commit", r, &s); err != nil {
+	s, err := (cli.Session{RuntimeDir: *dir}).CommitConfiguration(context.Background(), r)
+	if err != nil {
 		return fmt.Errorf("request_id=%s: %w", *id, err)
 	}
-	return cli.WriteJSON(os.Stdout, s)
+	return cli.WriteConfigurationState(os.Stdout, s)
 }

@@ -24,6 +24,9 @@ build() {
 
 check() {
 	local binary headers dynamic
+	# abuild's nested temporary path can exceed AF_UNIX's path budget once
+	# Go appends a test name. Tests still allocate private random directories.
+	export TMPDIR=/tmp
 	CGO_ENABLED=0 go test ./... || return 1
 	CGO_ENABLED=0 go test github.com/google/nftables/expr || return 1
 	for binary in routerd routerd-modules; do

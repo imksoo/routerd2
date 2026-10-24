@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -133,8 +132,8 @@ func (s *interactiveShell) execute(ctx context.Context, line string, out io.Writ
 		if s.candidate != nil {
 			return false, errors.New("already configuring; use commit or abort before loading another snapshot")
 		}
-		var current control.State
-		if err := s.client.Do(ctx, http.MethodGet, "/v1/config", nil, &current); err != nil {
+		current, err := readConfiguration(ctx, s.client, true)
+		if err != nil {
 			return false, err
 		}
 		doc, err := cloneDocument(current.Config)
@@ -152,8 +151,8 @@ func (s *interactiveShell) execute(ctx context.Context, line string, out io.Writ
 		return false, s.confirm(ctx, out)
 	}
 	if command == "show" && rest == "running-config" {
-		var current control.State
-		if err := s.client.Do(ctx, http.MethodGet, "/v1/config", nil, &current); err != nil {
+		current, err := readConfiguration(ctx, s.client, true)
+		if err != nil {
 			return false, err
 		}
 		return false, writeYAML(out, current.Config)
@@ -261,7 +260,7 @@ func (s *interactiveShell) execute(ctx context.Context, line string, out io.Writ
 		if rest == "" || rest == "candidate" {
 			return false, writeYAML(out, c.document)
 		}
-		if rest == "status" || rest == "network" || rest == "version" || rest == "config" || rest == "services" || strings.HasPrefix(rest, "services ") || rest == "route-issues" || strings.HasPrefix(rest, "route-issues ") || rest == "logging" || rest == "running-config" || rest == "logs" || strings.HasPrefix(rest, "logs ") {
+		if rest == "status" || rest == "network" || strings.HasPrefix(rest, "network ") || rest == "version" || rest == "config" || rest == "services" || strings.HasPrefix(rest, "services ") || rest == "route-issues" || strings.HasPrefix(rest, "route-issues ") || rest == "logging" || rest == "running-config" || rest == "logs" || strings.HasPrefix(rest, "logs ") {
 			return false, s.session.Execute(ctx, "show "+rest, nil, out)
 		}
 		parts, err := parsePath(c.absolutePath(rest))
@@ -324,8 +323,8 @@ func (s *interactiveShell) commit(ctx context.Context, seconds int, out io.Write
 		c.pendingHash = hash
 	}
 	request := control.CommitRequest{ExpectedRevision: c.revision, RequestID: c.pendingID, Config: c.document, ConfirmTimeoutSeconds: seconds}
-	var result control.State
-	if err := s.client.Do(ctx, http.MethodPost, "/v1/config/commit", request, &result); err != nil {
+	result, err := commitConfiguration(ctx, s.client, request)
+	if err != nil {
 		return fmt.Errorf("candidate retained; retry the unchanged commit to reuse request %s: %w", c.pendingID, err)
 	}
 	doc, err := cloneDocument(result.Config)
@@ -346,8 +345,8 @@ func (s *interactiveShell) commit(ctx context.Context, seconds int, out io.Write
 
 func (s *interactiveShell) confirm(ctx context.Context, out io.Writer) error {
 	if s.confirmRevision == 0 {
-		var current control.State
-		if err := s.client.Do(ctx, http.MethodGet, "/v1/config", nil, &current); err != nil {
+		current, err := readConfiguration(ctx, s.client, false)
+		if err != nil {
 			return err
 		}
 		if current.Confirmation == nil {
@@ -356,7 +355,7 @@ func (s *interactiveShell) confirm(ctx context.Context, out io.Writer) error {
 		s.confirmRevision, s.confirmID = current.Revision, current.Confirmation.RequestID
 	}
 	request := control.ConfirmRequest{Revision: s.confirmRevision, RequestID: s.confirmID}
-	if err := s.client.Do(ctx, http.MethodPost, "/v1/config/confirm", request, nil); err != nil {
+	if _, err := confirmConfiguration(ctx, s.client, request); err != nil {
 		return err
 	}
 	_, err := fmt.Fprintf(out, "Confirmed revision %d.\n", s.confirmRevision)
@@ -766,6 +765,9 @@ func (s *interactiveShell) complete(line string, pos int, key rune) (string, int
 			}
 		}
 	}
+	if len(words) >= 2 && words[0] == "show" && words[1] == "network" {
+		choices = networkCompletions(words)
+	}
 	var matches []string
 	for _, choice := range choices {
 		if strings.HasPrefix(choice, token) {
@@ -953,6 +955,7 @@ func (r *terminalInput) Write(p []byte) (int, error) { return r.writer.Write(p) 
 
 const interactiveHelp = `Operational commands:
   show status | network | version | config | running-config
+  show network help           list paged network observation commands
   restart <module>
   configure                  start a private candidate from the current revision
   confirm                    confirm a pending confirmed commit

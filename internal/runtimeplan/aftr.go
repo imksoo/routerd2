@@ -144,22 +144,13 @@ func sameAFTRInput(a, b aftr.Input) bool {
 	return reflect.DeepEqual(a, b)
 }
 
-func sourceInstalled(in aftr.Input, observed network.Snapshot) bool {
-	if in.Source.Address == "" || len(observed.ObservationErrors) != 0 {
+func sourceInstalled(in aftr.Input, observed network.SourceObservation) bool {
+	if in.Source.Address == "" || observed.Interface != in.Interface || observed.RequestedAddress != in.Source.Address || !observed.InterfacePresent || observed.Index <= 0 || !observed.Up || !observed.Found || observed.Address == nil {
 		return false
 	}
-	for _, iface := range observed.Interfaces {
-		if iface.Name != in.Interface || !iface.Up {
-			continue
-		}
-		for _, address := range iface.Addresses {
-			p, err := netip.ParsePrefix(address.Address)
-			if err == nil && p.Addr().String() == in.Source.Address && address.Owned && address.PreferredLifetime > 0 && address.ValidLifetime > 0 && address.Flags&(unix.IFA_F_TENTATIVE|unix.IFA_F_DADFAILED|unix.IFA_F_DEPRECATED) == 0 {
-				return true
-			}
-		}
-	}
-	return false
+	address := observed.Address
+	p, err := netip.ParsePrefix(address.Address)
+	return err == nil && p.Addr().String() == in.Source.Address && address.Owned && address.PreferredLifetime > 0 && address.ValidLifetime > 0 && address.Flags&(unix.IFA_F_TENTATIVE|unix.IFA_F_DADFAILED|unix.IFA_F_DEPRECATED) == 0
 }
 
 // AFTRInput increments a dependency generation only on a content change. A
@@ -187,14 +178,18 @@ func (r *Runtime) AFTRInput(ctx context.Context, name string) (aftr.Input, error
 		return in, err
 	}
 	observer, ok := r.network.(interface {
-		Snapshot(context.Context) (network.Snapshot, error)
+		SourceAddress(context.Context, string, string) (network.SourceObservation, error)
 	})
 	if !ok {
-		return in, errors.New("AFTR requires native network observation")
+		return in, errors.New("AFTR requires native source address observation")
 	}
-	observed, err := observer.Snapshot(ctx)
-	if err != nil || !sourceInstalled(in, observed) {
-		in.Source = aftr.Source{}
+	if in.Source.Address != "" {
+		// Unrelated routing tables and WireGuard peers cannot invalidate this
+		// dependency merely by exceeding the operator observation response cap.
+		observed, err := observer.SourceAddress(ctx, in.Interface, in.Source.Address)
+		if err != nil || !sourceInstalled(in, observed) {
+			in.Source = aftr.Source{}
+		}
 	}
 	if previous, ok := r.aftrInputs[name]; ok && previous.ConfigDigest == in.ConfigDigest {
 		if sameAFTRInput(previous, in) {

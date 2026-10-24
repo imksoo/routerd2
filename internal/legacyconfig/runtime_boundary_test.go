@@ -10,6 +10,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -60,21 +61,33 @@ func (n *migrationNetwork) state() network.Desired {
 }
 
 func (n *migrationNetwork) Snapshot(context.Context) (network.Snapshot, error) {
+	panic("AFTR source dependency must not retrieve the full network snapshot")
+}
+
+func (n *migrationNetwork) SourceAddress(_ context.Context, name, requested string) (network.SourceObservation, error) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	var snapshot network.Snapshot
-	for _, iface := range n.desired.Interfaces {
-		observed := network.InterfaceState{Name: iface.Name, Up: true, Owned: true}
+	observed := network.SourceObservation{Interface: name, RequestedAddress: requested}
+	for index, iface := range n.desired.Interfaces {
+		if iface.Name != name {
+			continue
+		}
+		observed.InterfacePresent, observed.Index, observed.Up = true, index+1, true
 		for _, address := range iface.Addresses {
+			prefix, err := netip.ParsePrefix(address)
+			if err != nil || prefix.Addr().String() != requested {
+				continue
+			}
 			flags := 0
 			if iface.Name == "eth0" && !n.dadReady {
 				flags = unix.IFA_F_TENTATIVE
 			}
-			observed.Addresses = append(observed.Addresses, network.AddressState{Address: address, Owned: true, PreferredLifetime: 600, ValidLifetime: 1200, Flags: flags})
+			observed.Found = true
+			observed.Address = &network.AddressState{Address: address, Owned: true, PreferredLifetime: 600, ValidLifetime: 1200, Flags: flags}
+			return observed, nil
 		}
-		snapshot.Interfaces = append(snapshot.Interfaces, observed)
 	}
-	return snapshot, nil
+	return observed, nil
 }
 
 type migrationSupervisor struct {

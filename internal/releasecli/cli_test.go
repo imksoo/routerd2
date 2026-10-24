@@ -110,6 +110,16 @@ var binaryErr error
 func cliBinaries(t *testing.T, id string) map[string][]byte {
 	t.Helper()
 	binaryOnce.Do(func() {
+		goExecutable := filepath.Join(runtime.GOROOT(), "bin", "go")
+		if runtime.GOROOT() == "" {
+			// Trimmed test binaries have no compiled-in toolchain path.
+			var err error
+			goExecutable, err = exec.LookPath("go")
+			if err != nil {
+				binaryErr = fmt.Errorf("locate Go fixture toolchain: %w", err)
+				return
+			}
+		}
 		dir, err := os.MkdirTemp("", "release-cli-build-")
 		if err != nil {
 			binaryErr = err
@@ -133,7 +143,7 @@ func cliBinaries(t *testing.T, id string) map[string][]byte {
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 			output := filepath.Join(dir, name)
-			command := exec.CommandContext(ctx, filepath.Join(runtime.GOROOT(), "bin", "go"), "build", "-mod=readonly", "-trimpath", "-buildvcs=false", "-ldflags=-s -w -X main.Identity="+buildinfo.IdentityPrefix+"fixture-c1"+buildinfo.IdentitySuffix, "-o", output, "./cmd/"+name)
+			command := exec.CommandContext(ctx, goExecutable, "build", "-buildmode=exe", "-mod=readonly", "-trimpath", "-buildvcs=false", "-ldflags=-s -w -X main.Identity="+buildinfo.IdentityPrefix+"fixture-c1"+buildinfo.IdentitySuffix, "-o", output, "./cmd/"+name)
 			command.Dir = dir
 			command.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux", "GOARCH="+runtime.GOARCH, "GOAMD64=v1", "GOARM64=v8.0", "GOENV=off", "GOTOOLCHAIN=local")
 			log, err := command.CombinedOutput()
