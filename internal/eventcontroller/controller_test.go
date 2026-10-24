@@ -201,8 +201,12 @@ func TestPublishedOutputRetryDeduplicatesBeforeCompletion(t *testing.T) {
 }
 
 func TestAbsenceOrdersQueuedObservationsAgainstTheirOriginalDeadline(t *testing.T) {
-	for _, late := range []bool{false, true} {
-		t.Run(map[bool]string{false: "expected-before-deadline", true: "expected-after-deadline"}[late], func(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		at   time.Duration
+		want int
+	}{{"expected-before-deadline", 500 * time.Millisecond, 0}, {"expected-at-deadline", time.Second, 0}, {"expected-after-deadline", 2 * time.Second, 1}} {
+		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
 			s, err := events.Open(events.Options{Directory: filepath.Join(t.TempDir(), "events")})
 			if err != nil {
@@ -220,20 +224,14 @@ func TestAbsenceOrdersQueuedObservationsAgainstTheirOriginalDeadline(t *testing.
 			if err = c.Step(ctx, epoch); err != nil {
 				t.Fatal(err)
 			}
-			at := epoch.Add(500 * time.Millisecond)
-			if late {
-				at = epoch.Add(2 * time.Second)
-			}
+			at := epoch.Add(tc.at)
 			if _, err = s.Append(ctx, events.Event{ID: "expected", Topic: "fixture.expected", Source: "fixture", ObservedAt: at}); err != nil {
 				t.Fatal(err)
 			}
 			if err = c.Step(ctx, epoch.Add(3*time.Second)); err != nil {
 				t.Fatal(err)
 			}
-			want := 0
-			if late {
-				want = 1
-			}
+			want := tc.want
 			if got := outputCount(t, s); got != want {
 				t.Fatalf("absence emissions %d, want %d", got, want)
 			}
