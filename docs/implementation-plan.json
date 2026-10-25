@@ -12223,6 +12223,34 @@
         "Current OCI/APK, arm64 execution, all plan work packages and selected physical hardware/NIC/performance/long-duration qualification"
       ],
       "full_goal_status": "active"
+    },
+    {
+      "id": "protected-ssh-identity-inspection",
+      "date": "2026-10-25",
+      "status": "partial_identity_inspection_atomic_publication_and_acceptance_verified",
+      "code_checkpoint": "cfced2eda357b7cb4e3c1d86b0e12035cff27453",
+      "work_packages": [
+        "CORE-06",
+        "DIST-01"
+      ],
+      "evidence": "docs/evidence/2026-10-25-identity-inspection.md",
+      "implemented": [
+        "Protected read-only actual SSH private-key inspection returns only presence/codec/public type/fingerprint; bounded64KiB owner0400/0600 singly-linked regular file, one supported unencrypted key, sanitized errors",
+        "Atomic no-replace initial publication after complete file fsync; concurrent creators return actual selected winner; post-publication uncertainty retains key, retries revalidate and sync, private crash orphans retained",
+        "Common protected descriptor path walker extracted from network to statefs without changing WireGuard directory policy; actual identity codec constant tied to ABI declaration; signed PID1 inspects explicit SSH-disabled absence and two-boot ext4 fixture inspects actual persistent identity/SSH peer"
+      ],
+      "validation": [
+        "Existing unsafe-reader RED1.47s, API compile RED0.40s and false storage identity-witness RED; focused/related Race pass",
+        "Read-only inode/mode/mtime/body, valid signer after scratch cleanup, existing OpenSSH/0400 preservation, absent leaf vs missing parent, canceled/special/oversize/corrupt input refusals",
+        "Deterministic concurrent creator and Exit73 at5 publication boundaries, before/after publication error classification, retry identity and orphan preservation; not actual write-time power cut or real fsync failure",
+        "Clean whole check/Race/vet/Python30/six static ELF build242.32s; native10 and QEMU signed PID1/ext4 two kernels/two-WAN PBR/WireGuard pass; no arm64 execution claim"
+      ],
+      "remaining": [
+        "Operator key rotation/revocation/owner policy, other actual state/absence inventory and target compiler/kernel/engine/profile qualification",
+        "Paired operator prepare/loader/exact tuple health and bounded fallback, corrupt runtime fallback before Open, write-time power-cut/ENOSPC/fsync and reference-aware pruning",
+        "Startup/ACK audit, independent bootstrap/full engine/ABI/privilege closure, current OCI/APK/arm64 execution, all remaining work packages and selected physical target acceptance"
+      ],
+      "full_goal_status": "active"
     }
   ],
   "delivery_goal": {

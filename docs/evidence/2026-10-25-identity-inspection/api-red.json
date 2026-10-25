@@ -1,0 +1,15 @@
+{
+  "source_commit": "bb9cbda690096ddef431cd1bf9b8270cf87570f1",
+  "source_dirty": true,
+  "command": [
+    "go",
+    "test",
+    "./internal/management",
+    "-run",
+    "^TestHostIdentity",
+    "-count=1"
+  ],
+  "exit_code": 1,
+  "expected_failure": true,
+  "elapsed_seconds": 0.4
+}

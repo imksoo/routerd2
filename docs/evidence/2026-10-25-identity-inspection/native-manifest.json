@@ -1,0 +1,148 @@
+{
+  "source_commit": "cfced2eda357b7cb4e3c1d86b0e12035cff27453",
+  "source_dirty": false,
+  "release_id": "identity-inspection-v1",
+  "build_artifacts": [
+    {
+      "architecture": "amd64",
+      "binary": "routerd",
+      "sha256": "e60dcc4a22693b7fc6de293afd0bc942a9cef9ab8d2889ffc92fceabae3a9892"
+    },
+    {
+      "architecture": "amd64",
+      "binary": "routerd-modules",
+      "sha256": "3a13e9f13956c422ec59d1a61d7ee5db4e6011b95acbe7ec8abbb9138a9b3985"
+    },
+    {
+      "architecture": "amd64",
+      "binary": "routerd-logging",
+      "sha256": "caefc7d00c34a2927f5edfb8c67fe5cd0b2189acfbc4ca58a29f59ce5e14d545"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd",
+      "sha256": "af8a276e0d9ff7005e5971986270796e7f17694de732089d0482bec7719da396"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd-modules",
+      "sha256": "a76150edd140f03e42b6b0a0f00de3dc0ca69c7df43603637044aff2cce29653"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd-logging",
+      "sha256": "842d25f86b46e428723e6e9bc25f13ad1112918c077f3ad6e77f255fb668bdd0"
+    }
+  ],
+  "race_harnesses": {
+    "release": {
+      "path": "dist/goal-validation/identity-inspection-release.test",
+      "sha256": "fce4ffc9cc37cd1a7a69ea99f0efae03fffb17dedc23443bef834b5c156543d0"
+    },
+    "publisher": {
+      "path": "dist/goal-validation/identity-inspection-publisher.test",
+      "sha256": "1ddffda660621f0fc3e29aba7c6d402e7438a2cc3ec839a26588535789a88228"
+    },
+    "daemon": {
+      "path": "dist/goal-validation/identity-inspection-daemon.test",
+      "sha256": "577c144514db571f07f641e0899dc694fcdc4a7f60b72e9851484903542655de"
+    },
+    "network": {
+      "path": "dist/goal-validation/identity-inspection-network.test",
+      "sha256": "510dba7a3d405caca0585a8edb14cdf260c20fea0fe08eec5bf54a2b56e0f662"
+    }
+  },
+  "scope": "root-owned0700 stage; real built amd64/arm64 signature/ELF/staging without foreign execution; actual daemon tests in fresh user/net namespaces; no host network or clock mutation",
+  "tests": [
+    {
+      "test": "TestBuiltRuntimeCatalog",
+      "harness": "release",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 27.26,
+      "log": "identity-inspection-native-TestBuiltRuntimeCatalog.log",
+      "sha256": "e611f1f41481aa63963076b5f26e04031611e475b1a5a73be5037eeedddf0698"
+    },
+    {
+      "test": "TestPublishBuiltRelease",
+      "harness": "publisher",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 12.66,
+      "log": "identity-inspection-native-TestPublishBuiltRelease.log",
+      "sha256": "a35bc2d66742d671414570a80c738ddb141bcaad3417ded1917df019b67d5540"
+    },
+    {
+      "test": "TestDaemonDHCPv4OriginalLeaseAuthority",
+      "harness": "daemon",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 11.0,
+      "log": "identity-inspection-native-TestDaemonDHCPv4OriginalLeaseAuthority.log",
+      "sha256": "5a25dc8595a661d5dc483f4918a24d61f8da8945debb6bbdf4a2ef5adc5c51e1"
+    },
+    {
+      "test": "TestDaemonConfigurationAndRecovery",
+      "harness": "daemon",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 9.35,
+      "log": "identity-inspection-native-TestDaemonConfigurationAndRecovery.log",
+      "sha256": "7b6a2ac188eea952a40b5d242936710aa08cd9a49f8e06dca5471c895ebc684a"
+    },
+    {
+      "test": "TestDaemonStartupSelectionAndRecovery",
+      "harness": "daemon",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 3.48,
+      "log": "identity-inspection-native-TestDaemonStartupSelectionAndRecovery.log",
+      "sha256": "d0e7380f622c98c0955450021b3d36285d4a55e3c98c74fe34ff224f2f23b4c9"
+    },
+    {
+      "test": "TestDaemonConditionalStartupRecovery",
+      "harness": "daemon",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 3.48,
+      "log": "identity-inspection-native-TestDaemonConditionalStartupRecovery.log",
+      "sha256": "3015b459e3d47c59516f262b2835fbfe018d2dad2336f0629cdc12ee1a905cfa"
+    },
+    {
+      "test": "TestDaemonHealthPBRFailoverAndRecovery",
+      "harness": "daemon",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 30.91,
+      "log": "identity-inspection-native-TestDaemonHealthPBRFailoverAndRecovery.log",
+      "sha256": "0d81878fac4dc0a4a87ca5921cc68e495d5dd533fc57cc93f729c81b5ab23c51"
+    },
+    {
+      "test": "TestIsolatedKernelForwardingNATAndDSLite",
+      "harness": "network",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 21.39,
+      "log": "identity-inspection-native-TestIsolatedKernelForwardingNATAndDSLite.log",
+      "sha256": "fd71b36bbaea861d94fa93cd46c4894f9a57d036f8b345ad6f9e0b2444d14da2"
+    },
+    {
+      "test": "TestIsolatedKernelWireGuardOwnershipAndTraffic",
+      "harness": "network",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 9.9,
+      "log": "identity-inspection-native-TestIsolatedKernelWireGuardOwnershipAndTraffic.log",
+      "sha256": "ed3b2443866803dfc91ed387bcf97aa2395b70e357c6bc9ac6ce36a873f92908"
+    },
+    {
+      "test": "TestIsolatedBootAddressLifetime",
+      "harness": "network",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 8.5,
+      "log": "identity-inspection-native-TestIsolatedBootAddressLifetime.log",
+      "sha256": "1a866593eb2752bcf83baf381f5727b7725de4b8a6dc8f9b4e8037b4cbb6f4d6"
+    }
+  ]
+}

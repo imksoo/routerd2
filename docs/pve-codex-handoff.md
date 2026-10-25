@@ -6,7 +6,14 @@
 **継続ゴール:** 全残実装・必要試験・対象実機での利用可能性の受入まで進める。
 部分checkpointでは完了しない。
 
-最新product checkpointは `e5971e6`。networkの実journalをread-only検査し、private worker APIとsigned PID1 prepare fixtureへ接続した。
+最新product checkpointは `cfced2e`。SSH host identityのread-only検査とatomic no-replace初回保存を実装した。
+owner-only0400/0600・単一link・64KiB以内・一つの非暗号化keyを要求する。新規keyはtemporary/file sync後に公開し、並行creatorも実winnerを返す。公開後errorでは正式fileを消さずuncertainとして扱う。
+networkで使う全component nofollow/trusted非writable ancestorのwalkを`internal/statefs`へ抽出し、双方で共有する。既存OpenSSH encodingは変換しない。private key hash/bodyはinspectionへ返さない。
+reader/APIとstorage witnessのRED、process-exit5境界、再実行、並行作成、実signer署名を検査。全体check/Race/vet/Python30/6 ELF build242.32秒、native10 gateとQEMU4 gateはPASS。
+signed PID1はSSH disabledの実absenceを検査し、ext4二bootは実management keyのpublic fingerprintを照合する。operator rotation/revocation、全state inventory/target policy、paired loader/health、全残計画・実機受入は未完了。
+[SSH identity保存・検査の証跡と残作業](evidence/2026-10-25-identity-inspection.md) を参照。全体ゴールはactive。
+
+前回product checkpointは `e5971e6`。networkの実journalをread-only検査し、private worker APIとsigned PID1 prepare fixtureへ接続した。
 reader/writerは64MiB・200万JSON値・深さ64を共有し、重複/alias/unknown JSONと不正所有権を拒否する。設定の厳密decoderをcompiler依存のない共通packageへ抽出した。
 journal/lockはowned0600・単一link、全ancestorはnofollow・trusted owner・非group/other writable（root sticky祖先を除く）。workerは同じdirectory descriptorで保存・検査し、元path差替えでもforeign directoryへ書かない。
 先行reader/API RED、初回directory条件の修正と元FAILを保存。関連Raceと最終全体check/Race/vet/Python30/6 ELF build233.27秒PASS。

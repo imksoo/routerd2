@@ -1,0 +1,13 @@
+=== RUN   TestIsolatedKernelWireGuardOwnershipAndTraffic
+    wireguard_integration_test.go:88: === RUN   TestIsolatedKernelWireGuardOwnershipAndTraffic
+            wireguard_integration_test.go:158: Linux WireGuard IPv4/IPv6 encrypted TCP, public status, handshake and counters passed
+            wireguard_integration_test.go:225: interrupted actual kernel peer subset stayed DOWN; a fresh engine rolled back and restored IPv4/IPv6 traffic
+            wireguard_integration_test.go:250: lost UP acknowledgment and canceled apply both triggered independent native quarantine; rollback restored both families
+            wireguard_integration_test.go:286: authenticated roaming survived 2050-prefix multipart replacement, idempotent apply and engine restart; no implicit FIB routes
+            wireguard_integration_test.go:311: explicit IPv6 UDP endpoints carried both IPv4 and IPv6 encrypted TCP
+            wireguard_integration_test.go:345: PSK mismatch and peer removal prevented traffic; immutable-secret rollback and peer recreation restored both IP families
+            wireguard_integration_test.go:395: foreign peer remained untouched and UP; owned device, addresses and journal entries removed after explicit cleanup
+        --- PASS: TestIsolatedKernelWireGuardOwnershipAndTraffic (7.81s)
+        PASS
+--- PASS: TestIsolatedKernelWireGuardOwnershipAndTraffic (8.84s)
+PASS

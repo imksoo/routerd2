@@ -1,0 +1,35 @@
+{
+  "source_commit": "cfced2eda357b7cb4e3c1d86b0e12035cff27453",
+  "source_dirty": false,
+  "scope": "runtime-only signed PID1/health and persistent ext4 two kernels, plus two-WAN real-daemon TCP/UDP/packet capture; paired boot remains refused; no host network/mount/clock changes",
+  "tests": [
+    {
+      "gate": "release-boot",
+      "exit_code": 0,
+      "passed": true,
+      "elapsed_seconds": 176.15,
+      "guest_seconds": 161.95
+    },
+    {
+      "gate": "storage",
+      "exit_code": 0,
+      "passed": true,
+      "elapsed_seconds": 222.33,
+      "guest_seconds": 186.38
+    },
+    {
+      "gate": "daemon-health-pbr",
+      "exit_code": 0,
+      "passed": true,
+      "elapsed_seconds": 99.09,
+      "guest_seconds": 82.74
+    },
+    {
+      "gate": "wireguard",
+      "exit_code": 0,
+      "passed": true,
+      "elapsed_seconds": 25.17,
+      "guest_seconds": 19.28
+    }
+  ]
+}

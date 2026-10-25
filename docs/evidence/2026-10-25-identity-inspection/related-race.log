@@ -1,0 +1,6 @@
+ok      github.com/imksoo/routerd2/internal/management  1.825s
+?       github.com/imksoo/routerd2/internal/statefs     [no test files]
+ok      github.com/imksoo/routerd2/internal/network     25.961s
+ok      github.com/imksoo/routerd2/internal/runtimeabi  1.263s
+ok      github.com/imksoo/routerd2/internal/releaseboot/testdata/guest  1.273s
+ok      github.com/imksoo/routerd2/images/storage-test/guest    1.294s

@@ -1,0 +1,8 @@
+=== RUN   TestIsolatedBootAddressLifetime
+    boot_address_kernel_integration_test.go:40: === RUN   TestIsolatedBootAddressLifetime
+            boot_address_kernel_integration_test.go:146: finite kernel IPv4 address expired autonomously while writers were closed; journal restart and replay preserved original BOOTTIME deadline and foreign static address
+            boot_address_kernel_integration_test.go:147: ROUTERD_BOOT_ADDRESS_TEST_PASS
+        --- PASS: TestIsolatedBootAddressLifetime (6.41s)
+        PASS
+--- PASS: TestIsolatedBootAddressLifetime (7.43s)
+PASS

@@ -1,0 +1,9 @@
+=== RUN   TestDaemonConfigurationAndRecovery
+    daemon_test.go:69: === RUN   TestDaemonConfigurationAndRecovery
+            daemon_test.go:306: durable commit/confirm/rollback observations survived control SIGKILL with stable IDs/cursors
+            daemon_test.go:320: ROUTERD_CONFIG_SNAPSHOT_DAEMON_TEST_PASS: actual CLI, confirmed-only capture, stable store identity, immutable snapshot after rollback and control SIGKILL
+            daemon_test.go:360: real SSH show derived returned current finite status for a resource ID containing slash
+        --- PASS: TestDaemonConfigurationAndRecovery (7.27s)
+        PASS
+--- PASS: TestDaemonConfigurationAndRecovery (8.30s)
+PASS

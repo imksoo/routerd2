@@ -1,0 +1,26 @@
+{
+  "release-boot": {
+    "memory_mib": 1024,
+    "vcpus": 2,
+    "source": "internal/releaseboot/testdata/qemu-release-boot.py",
+    "source_sha256": "ce749414a3b7a9288834364bc5209c031a54e6de39cfc228fe3b45d5eeec616a"
+  },
+  "storage": {
+    "memory_mib": 1024,
+    "vcpus": 2,
+    "source": "scripts/qemu-storage.py",
+    "source_sha256": "3b59f56b1a50201d00aa03a45a329f06ec0ccf360c23bac4f2d603a953be1645"
+  },
+  "daemon-health-pbr": {
+    "memory_mib": 512,
+    "vcpus": 2,
+    "source": "scripts/qemu-network.py",
+    "source_sha256": "a94c606836afa9324fb54994362d61de58cb37157cbc6714a59b77da41a2557e"
+  },
+  "wireguard": {
+    "memory_mib": 512,
+    "vcpus": 2,
+    "source": "scripts/qemu-network.py",
+    "source_sha256": "a94c606836afa9324fb54994362d61de58cb37157cbc6714a59b77da41a2557e"
+  }
+}

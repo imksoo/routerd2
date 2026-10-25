@@ -1,0 +1,14 @@
+# github.com/imksoo/routerd2/internal/management [github.com/imksoo/routerd2/internal/management.test]
+internal/management/identity_inspection_test.go:23:37: undefined: HostKeyName
+internal/management/identity_inspection_test.go:24:17: undefined: InspectHostKey
+internal/management/identity_inspection_test.go:25:30: undefined: HostKeyInspection
+internal/management/identity_inspection_test.go:32:15: undefined: InspectHostKey
+internal/management/identity_inspection_test.go:32:80: undefined: HostKeyName
+internal/management/identity_inspection_test.go:47:14: undefined: InspectHostKey
+internal/management/identity_inspection_test.go:48:50: undefined: IdentityVersion
+internal/management/identity_inspection_test.go:61:15: undefined: InspectHostKey
+internal/management/identity_inspection_test.go:69:39: undefined: HostKeyName
+internal/management/identity_inspection_test.go:80:27: undefined: MaxHostKeyBytes
+internal/management/identity_inspection_test.go:80:27: too many errors
+FAIL    github.com/imksoo/routerd2/internal/management [build failed]
+FAIL
