@@ -118,6 +118,7 @@ type Runtime struct {
 	initialized          bool
 	bindings             map[string]binding
 	records              map[string]serviceconfig.Update
+	vrrpEffects          map[string]*vrrpEffect
 	liveRA               map[string]ra.Config
 	aftrInputs           map[string]aftr.Input
 	installed            []supervisor.DynamicModule
@@ -259,6 +260,9 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 		if r.sourceEpoch == math.MaxUint64 {
 			r.mu.Unlock()
 			return r.failure(errors.New("source cutover epoch exhausted"))
+		}
+		for name := range r.vrrpEffects {
+			r.finishVRRPEffectLocked(name, ErrStale)
 		}
 		r.sourceEpoch++
 		r.guardGrants = nil
@@ -412,10 +416,10 @@ func (r *Runtime) quiesceChanged(ctx context.Context, next []supervisor.DynamicM
 	if err := r.manager.Reconcile(ctx, keep); err != nil {
 		return err
 	}
+	r.installed = keep
 	if err := r.wait(ctx, nil, removed, false); err != nil {
 		return err
 	}
-	r.installed = keep
 	return nil
 }
 func (r *Runtime) wait(ctx context.Context, wanted []supervisor.DynamicModule, removed map[string]bool, allRemoved bool) error {
@@ -428,6 +432,9 @@ func (r *Runtime) wait(ctx context.Context, wanted []supervisor.DynamicModule, r
 		if err != nil {
 			return err
 		}
+		if err := r.drainVRRPEffects(ctx, s, removed); err != nil {
+			return err
+		}
 		byName := map[string]supervisor.ModuleStatus{}
 		okay := true
 		for _, m := range s.Modules {
@@ -437,6 +444,17 @@ func (r *Runtime) wait(ctx context.Context, wanted []supervisor.DynamicModule, r
 			}
 		}
 		for _, v := range wanted {
+			// A prerequisite can withdraw while initial workers are starting.
+			stillWanted := false
+			for _, installed := range r.installed {
+				if installed == v {
+					stillWanted = true
+					break
+				}
+			}
+			if !stillWanted {
+				continue
+			}
 			m, ok := byName[v.Name]
 			if !ok || !m.Ready || m.ConfigDigest != v.ConfigDigest {
 				okay = false
@@ -597,6 +615,9 @@ func (r *Runtime) Accept(ctx context.Context, u serviceconfig.Update) error {
 			}
 			if u.Sequence == old.Sequence {
 				if bytes.Equal(u.Snapshot, old.Snapshot) {
+					if u.Role == "vrrp" && conditionalProgram(r.source) {
+						return r.waitVRRPEffectLocked(ctx, u)
+					}
 					return nil
 				}
 				return errors.New("protocol sequence reused with different snapshot")
@@ -650,6 +671,9 @@ func (r *Runtime) Accept(ctx context.Context, u serviceconfig.Update) error {
 		// monitor ticks. This updates only temporal condition state, not effects.
 		if _, err := r.conditionFactsLocked(r.source, r.revision, time.Now()); err != nil {
 			return err
+		}
+		if u.Role == "vrrp" {
+			return r.waitVRRPEffectLocked(ctx, u)
 		}
 		// The serialized reconcile loop stops dependent workers before withdrawing
 		// their network prerequisites. A protocol callback must never do that work.
@@ -915,6 +939,7 @@ func (r *Runtime) Monitor(ctx context.Context) {
 func (r *Runtime) reconcileDynamic(ctx context.Context) error {
 	r.refreshGuardStatus(ctx)
 	r.mu.Lock()
+	r.fenceVRRPEffectsLocked()
 	if !r.configured {
 		r.mu.Unlock()
 		return nil
@@ -950,9 +975,11 @@ func (r *Runtime) reconcileDynamic(ctx context.Context) error {
 		return nil
 	}
 	if err = r.applyNetworkLocked(ctx, p.network); err != nil {
+		r.finishVRRPEffectsLocked(p.network, err)
 		r.mu.Unlock()
 		return err
 	}
+	r.finishVRRPEffectsLocked(p.network, nil)
 	r.liveRA, r.routeIssues = p.liveRA, p.routeIssues
 	r.bgpApplied = p.bgpStatus
 	r.resourceStates = p.resources

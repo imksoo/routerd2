@@ -133,6 +133,13 @@ SUITES = {
         "commands": True,
         "description": "original VRRP BOOTTIME ownership, VMAC/VIP TCP/UDP/capture, expiry and worker/control recovery",
     },
+    "daemon-vrrp-conditional": {
+        "package": "./internal/integration", "binary": "daemon.test",
+        "test": "TestDaemonVRRPConditionalOwnership",
+        "marker": "ROUTERD_VRRP_CONDITIONAL_TEST", "timeout": 180,
+        "commands": True,
+        "description": "conditional VRRP effect ACK, real VIP traffic/recovery and dependent worker withdrawal",
+    },
     "daemon-vrrp-clock": {
         "package": "./internal/integration", "binary": "daemon.test",
         "test": "TestDaemonVRRPClockCorrections",
