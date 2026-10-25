@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"syscall"
 	"testing"
@@ -304,6 +305,14 @@ func TestDaemonDerivedHealthCurrentStatusAndDurability(t *testing.T) {
 	if _, err = injector.Exec(`CREATE TRIGGER fail_health_history BEFORE INSERT ON events WHEN json_extract(CAST(NEW.body AS TEXT),'$.source')='routerd-healthcheck' BEGIN SELECT RAISE(ABORT,'injected raw health journal failure'); END`); err != nil {
 		t.Fatal(err)
 	}
+	// Installing the trigger serializes with prior target writes. A target
+	// commit can precede a lost local ACK, so a pending prefix may already be
+	// present here. Only observations absent at this fault boundary must stay
+	// absent until the trigger is removed.
+	committedBeforeFailure := map[string]events.Record{}
+	for _, record := range history() {
+		committedBeforeFailure[record.Event.ID] = record
+	}
 	waitHistoryError := func() {
 		t.Helper()
 		until(t, 10*time.Second, func() bool {
@@ -325,24 +334,42 @@ func TestDaemonDerivedHealthCurrentStatusAndDurability(t *testing.T) {
 		t.Fatal(err)
 	}
 	var pendingBody []byte
-	err = pendingDB.QueryRow(`SELECT body FROM producers WHERE name='health-probe-relay'`).Scan(&pendingBody)
-	_ = pendingDB.Close()
-	if err != nil {
-		t.Fatal(err)
-	}
 	var queued struct {
 		Pending []events.Event `json:"pending"`
 	}
-	if json.Unmarshal(pendingBody, &queued) != nil || len(queued.Pending) == 0 {
-		t.Fatal("journal failure lost the worker queue")
-	}
+	uncommitted := 0
+	until(t, 5*time.Second, func() bool {
+		if err := pendingDB.QueryRow(`SELECT body FROM producers WHERE name='health-probe-relay'`).Scan(&pendingBody); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(pendingBody, &queued); err != nil {
+			t.Fatal(err)
+		}
+		uncommitted = 0
+		for _, event := range queued.Pending {
+			if _, exists := committedBeforeFailure[event.ID]; !exists {
+				uncommitted++
+			}
+		}
+		return uncommitted > 0
+	})
+	_ = pendingDB.Close()
 	expected := map[string]events.Event{}
 	for _, event := range queued.Pending {
 		expected[event.ID] = event
+		if before, exists := committedBeforeFailure[event.ID]; exists && !reflect.DeepEqual(before.Event, event) {
+			t.Fatal("pending retry changed an already committed observation")
+		}
 	}
 	for _, record := range history() {
 		if _, exists := expected[record.Event.ID]; exists {
-			t.Fatal("failed journal acknowledged a pending observation")
+			before, committed := committedBeforeFailure[record.Event.ID]
+			if !committed {
+				t.Fatal("failed journal stored a new pending observation")
+			}
+			if !reflect.DeepEqual(record, before) {
+				t.Fatal("pending retry changed committed content or cursor")
+			}
 		}
 	}
 	restart("service.wan")
@@ -374,6 +401,9 @@ func TestDaemonDerivedHealthCurrentStatusAndDurability(t *testing.T) {
 			if string(before) != string(after) {
 				t.Fatal("retry changed original health evidence")
 			}
+			if committed, exists := committedBeforeFailure[record.Event.ID]; exists && !reflect.DeepEqual(record, committed) {
+				t.Fatal("recovery changed committed content or cursor")
+			}
 		}
 		for id := range expected {
 			if seen[id] != 1 {
@@ -382,7 +412,7 @@ func TestDaemonDerivedHealthCurrentStatusAndDurability(t *testing.T) {
 		}
 		return true
 	})
-	t.Logf("raw probe events and EventRule count passed; %d queued stable observations survived worker/control SIGKILL and journal failure without duplicate or renewed facts", len(expected))
+	t.Logf("raw probe events and EventRule count passed; %d queued stable observations (%d absent at target failure) survived worker/control SIGKILL and journal failure without duplicate or renewed facts", len(expected), uncommitted)
 	// Permanently remove health while its accepted observations cannot reach
 	// the target. Control must remember and recover the stopped worker's queue
 	// even after another control incarnation, without re-enabling the service.
