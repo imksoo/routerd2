@@ -358,7 +358,8 @@ func TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn(t *testi
 		deadline := time.Now().Add(time.Second)
 		for {
 			r.mu.Lock()
-			accepted := sameVRRPUpdate(r.records[u.Name], u)
+			pending := r.vrrpEffects[u.Name]
+			accepted := sameVRRPUpdate(r.records[u.Name], u) && pending != nil && sameVRRPUpdate(pending.update, u)
 			r.mu.Unlock()
 			if accepted {
 				return result
