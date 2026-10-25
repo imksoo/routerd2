@@ -23,6 +23,9 @@
   前提がI/O中に変わったworkerは起動せず、最新の観測で再評価する。
 - instanceファイルは同じ準備済みbytesでdigestを計算し保存する。二重書込みは廃止した。
   ファイル準備・BFD解析は観測mutexの外で行い、停止中の更新をcutoverへ反映する。
+  設定切替の継続判定用identityもmutexの外で一度だけ生成する。停止待ち前後の判定は
+  digestと最新観測を突き合わせ、instance生成・JSON化・hash計算を繰り返さない。
+  継続判定から生成エラーの返却とその分岐も削除した。
 - VRRPのgrant発行・返送、仮VIP、期限昇格、受信時刻から作る別リース、失効JSON書換えを
   削除した。選挙観測から直接factを作り、成功したkernel適用の選挙keyだけを保持する。
   `Effects.Apply` と同じservice要求の応答で、実際にVIPを所有したかをworkerへ返す。
@@ -123,11 +126,17 @@ learned routeが元の前提routeの期限で消えることを確認した。�
 ローカル投影試験で確認し、同じ条件の実daemon試験は未実施。全体`make check`も成功した。
 以前のBFD再接続timeoutの直接原因が確定したという意味ではない。
 
+`RELEASE_ID=retention-identity` は、設定切替の継続判定を整理した版。
+runtimeplan/controlのRace Detectorとfmt・全体vet・amd64/arm64静的buildが成功した。
+実daemonの設定commit/confirm/rollback・control再起動と、source graphのUDP通信・設定更新・
+所有者削除も成功した。条件付きVRRPの起動停止順序・TCP/UDP・元の期限・worker/control交替も成功した。
+
 現在のログは `dist/link-authority-final-{check,readiness,build,native}.log`、
 `dist/link-authority-readiness-race.log`、`dist/link-authority-health-pbr.log`、
 `dist/link-authority-health-sockets.log`、`dist/health-pbr-test/{test.log,wan0.pcap,wan1.pcap}`、
 `dist/link-authority-release-built.log`、`dist/vrrp-unicast/*.log`、
 `dist/link-authority-original-authority.log`、`dist/bgp-prerequisite-{race,build,bfd-native,check}.log`。
+継続判定の変更は `dist/retention-identity-{race,build,native}.log`。
 過去の出力との一致を実装条件にしない。
 
 ## 続ける実装
@@ -137,7 +146,7 @@ learned routeが元の前提routeの期限で消えることを確認した。�
    writer自身が停止した間のlink fencing・IPv4 route失効は保証しない。
    finite linkを持たない条件付きaddress/route自身のfact期限もwriterへ渡す処理は残る。
 2. 残るprotocol snapshotの型付き保持、期限切れJSON書換えの削除、条件式の静的計算と、
-   retained判定で繰り返すinstance生成・digest計算を整理する。
+   通常投影で繰り返すinstance生成・digest計算を整理する。
 3. HA-01のHealth以外のtrack・neutral、外部secret参照・peer-aware移行、clusterを実装する。
    二native nodeの追加identity・RA・DHCP/PD/NAT継続を受け入れる。IPv6 multicast未受信と
    起動直後のND/DADを診断し、VRFと対象実機での相互接続を確認する。

@@ -236,7 +236,20 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 	sourceDigest := hex.EncodeToString(sourceSum[:])
 	next := configuration{source: source, plan: plan, digest: sourceDigest, revision: revision}
 	next.vrrp = make(map[string]vrrp.Config)
+	// Static identities depend only on this compiled configuration and our
+	// private paths. Prepare them once, outside the observation lock; retries
+	// after worker shutdown only need to select the latest matching records.
+	expected := make(map[string]string, len(doc.Services))
 	for _, service := range doc.Services {
+		instance, err := service.Instance(r.dir, r.stateDir)
+		if err != nil {
+			return err
+		}
+		_, digest, err := encodeInstance(instance)
+		if err != nil {
+			return err
+		}
+		expected[instance.Name] = digest
 		if service.VRRP != nil {
 			next.vrrp[service.ModuleName()] = service.VRRPConfig()
 		}
@@ -265,10 +278,8 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 			return r.failure(err)
 		}
 		r.mu.Lock()
-		retained, err = r.retainedLocked(doc)
-		if err == nil {
-			p, err = r.projectProgramLocked(next, retained, time.Now())
-		}
+		retained = r.retainedLocked(expected)
+		p, err = r.projectProgramLocked(next, retained, time.Now())
 		r.mu.Unlock()
 		if err != nil {
 			return r.failure(err)
@@ -296,11 +307,8 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 		r.mu.Lock()
 		// Preserve renewals received during preparation and stopping. Only a
 		// changed instance set needs new files and another stop pass.
-		retained, err = r.retainedLocked(doc)
-		var latest projection
-		if err == nil {
-			latest, err = r.projectProgramLocked(next, retained, time.Now())
-		}
+		retained = r.retainedLocked(expected)
+		latest, err := r.projectProgramLocked(next, retained, time.Now())
 		if err != nil {
 			r.mu.Unlock()
 			return r.failure(err)
@@ -345,25 +353,17 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 }
 
 // Caller holds mu. Configuration equality includes all protocol-owned paths.
-func (r *Runtime) retainedLocked(doc config.Native) (map[string]serviceconfig.Update, error) {
+func (r *Runtime) retainedLocked(expected map[string]string) map[string]serviceconfig.Update {
 	retained := map[string]serviceconfig.Update{}
 	effective := r.effectiveRecordsLocked(time.Now())
-	for _, service := range doc.Services {
-		instance, err := service.Instance(r.dir, r.stateDir)
-		if err != nil {
-			return nil, err
-		}
-		_, digest, err := encodeInstance(instance)
-		if err != nil {
-			return nil, err
-		}
-		if old, ok := r.bindings[instance.Name]; ok && old.digest == digest {
-			if value, ok := effective[instance.Name]; ok {
-				retained[instance.Name] = value
+	for name, digest := range expected {
+		if old, ok := r.bindings[name]; ok && old.digest == digest {
+			if value, ok := effective[name]; ok {
+				retained[name] = value
 			}
 		}
 	}
-	return retained, nil
+	return retained
 }
 
 // The local receipt deadline retains Go's monotonic clock. A backward wall
