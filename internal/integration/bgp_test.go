@@ -22,6 +22,7 @@ import (
 	"github.com/imksoo/routerd/pkg/bgpdaemon"
 	"github.com/imksoo/routerd2/internal/clocktest"
 	"github.com/imksoo/routerd2/internal/config"
+	"github.com/imksoo/routerd2/internal/configref"
 	"github.com/imksoo/routerd2/internal/control"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/network"
@@ -265,6 +266,10 @@ func startFixtureDaemon(t *testing.T, doc config.Document) daemonFixture {
 }
 
 func startFixtureDaemonAt(t *testing.T, doc config.Document, dir string) daemonFixture {
+	return startFixtureDaemonSelected(t, doc, dir, nil)
+}
+
+func startFixtureDaemonSelected(t *testing.T, doc config.Document, dir string, startup *configref.Selection) daemonFixture {
 	t.Helper()
 	runDir, stateDir := filepath.Join(dir, "run"), filepath.Join(dir, "state")
 	configPath := filepath.Join(dir, "config.json")
@@ -272,6 +277,7 @@ func startFixtureDaemonAt(t *testing.T, doc config.Document, dir string) daemonF
 		t.Fatal(err)
 	}
 	boot := runtimeconfig.Boot{Platform: "host", Config: configPath, Workers: runtimeconfig.NativeWorkers(filepath.Join(os.Getenv("ROUTERD2_TEST_BIN_DIR"), "routerd-modules")), RuntimeDir: runDir, StateDir: stateDir, SSH: runtimeconfig.SSH{User: "admin"}}
+	boot.Startup = startup
 	bootPath := filepath.Join(dir, "boot.json")
 	if err := config.AtomicJSON(bootPath, boot); err != nil {
 		t.Fatal(err)
@@ -323,7 +329,7 @@ func startFixtureDaemonAt(t *testing.T, doc config.Document, dir string) daemonF
 		}
 	})
 	f := daemonFixture{pid: cmd.Process.Pid, control: localapi.NewClient(filepath.Join(runDir, control.SocketName)), supervisor: localapi.NewClient(filepath.Join(runDir, supervisor.SocketName)), stop: stop}
-	f.restart = func() daemonFixture { stop(); return startFixtureDaemonAt(t, doc, dir) }
+	f.restart = func() daemonFixture { stop(); return startFixtureDaemonSelected(t, doc, dir, startup) }
 	until(t, 20*time.Second, func() bool {
 		var s supervisor.Status
 		return f.supervisor.Do(context.Background(), "GET", "/v1/status", nil, &s) == nil && s.Ready
