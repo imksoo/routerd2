@@ -56,7 +56,7 @@ func TestVRRPBootDeadlineReachesKernelWithoutUTCConversion(t *testing.T) {
 				}
 				found = true
 				opts := iface.AddressOptions[c.Addresses[0]]
-				if opts.BootID != s.BootID || opts.ValidNanos != s.ExpiresNanos || opts.PreferredNanos != s.ExpiresNanos || !opts.ValidUntil.IsZero() || !opts.PreferredUntil.IsZero() {
+				if opts.BootLifetime.BootID != s.BootID || opts.BootLifetime.ValidNanos != s.ExpiresNanos || opts.BootLifetime.PreferredNanos != s.ExpiresNanos || !opts.ValidUntil.IsZero() || !opts.PreferredUntil.IsZero() {
 					t.Fatal("network projection replaced original BOOTTIME authority", opts)
 				}
 			}

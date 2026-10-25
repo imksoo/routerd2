@@ -248,7 +248,7 @@ func TestVRRPOwnershipExpiresOnMonotonicReceiptAndRejectsPolicySpoof(t *testing.
 	doc := config.Native{Services: []serviceconfig.Service{{Name: "ha", VRRP: &c}}}
 	r, n, _ := fixture(t, doc)
 	c = doc.Services[0].VRRPConfig()
-	s := vrrp.Snapshot{Resource: c.Resource, Interface: c.Interface, VIPInterface: c.VIPInterface, Family: c.Family, VirtualRouterID: c.VirtualRouterID, Priority: c.Priority, AcceptMode: true, Addresses: c.Addresses, VirtualMAC: vrrp.VirtualMAC(c.Family, c.VirtualRouterID).String(), Active: true, State: vrrp.StateActive, ValidUntil: time.Now().Add(3 * time.Second)}
+	s := bootVRRPSnapshot(t, c)
 	if e := r.Accept(context.Background(), update(t, r, "service.ha", 1, s)); e != nil {
 		t.Fatal(e)
 	}
