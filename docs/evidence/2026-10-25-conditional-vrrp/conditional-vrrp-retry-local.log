@@ -1,0 +1,42 @@
+=== RUN   TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn
+--- PASS: TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn (0.06s)
+=== RUN   TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn
+--- PASS: TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn (0.05s)
+=== RUN   TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn
+--- PASS: TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn (0.05s)
+=== RUN   TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn
+--- PASS: TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn (0.05s)
+=== RUN   TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn
+--- PASS: TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn (0.05s)
+=== RUN   TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn
+--- PASS: TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn (0.05s)
+=== RUN   TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn
+--- PASS: TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn (0.06s)
+=== RUN   TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn
+--- PASS: TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn (0.05s)
+=== RUN   TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn
+--- PASS: TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn (0.05s)
+=== RUN   TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn
+--- PASS: TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn (0.05s)
+=== RUN   TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn
+--- PASS: TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn (0.05s)
+=== RUN   TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn
+--- PASS: TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn (0.05s)
+=== RUN   TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn
+--- PASS: TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn (0.05s)
+=== RUN   TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn
+--- PASS: TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn (0.05s)
+=== RUN   TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn
+--- PASS: TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn (0.05s)
+=== RUN   TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn
+--- PASS: TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn (0.05s)
+=== RUN   TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn
+--- PASS: TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn (0.05s)
+=== RUN   TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn
+--- PASS: TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn (0.06s)
+=== RUN   TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn
+--- PASS: TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn (0.05s)
+=== RUN   TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn
+--- PASS: TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn (0.05s)
+PASS
+ok      github.com/imksoo/routerd2/internal/runtimeplan 2.093s

@@ -1,0 +1,17 @@
+=== RUN   TestConditionalVRRPEffectFailureFences
+=== RUN   TestConditionalVRRPEffectFailureFences/network-error
+=== RUN   TestConditionalVRRPEffectFailureFences/retired-generation
+    vrrp_ack_test.go:337: invalid pending producer acquired kernel VIP
+=== RUN   TestConditionalVRRPEffectFailureFences/expired-active
+=== RUN   TestConditionalVRRPEffectFailureFences/cancelled-caller
+    vrrp_ack_test.go:331: failed effect did not complete
+=== RUN   TestConditionalVRRPEffectFailureFences/superseded
+--- FAIL: TestConditionalVRRPEffectFailureFences (0.47s)
+    --- PASS: TestConditionalVRRPEffectFailureFences/network-error (0.23s)
+    --- FAIL: TestConditionalVRRPEffectFailureFences/retired-generation (0.03s)
+    --- PASS: TestConditionalVRRPEffectFailureFences/expired-active (0.14s)
+    --- FAIL: TestConditionalVRRPEffectFailureFences/cancelled-caller (0.03s)
+    --- PASS: TestConditionalVRRPEffectFailureFences/superseded (0.03s)
+FAIL
+FAIL    github.com/imksoo/routerd2/internal/runtimeplan 0.495s
+FAIL

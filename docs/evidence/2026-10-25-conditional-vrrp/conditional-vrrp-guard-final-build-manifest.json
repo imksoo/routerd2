@@ -1,0 +1,47 @@
+{
+  "source_commit": "62bc99ba124f9008777af65be1eaf09cee5d8f66",
+  "source_dirty_paths": [],
+  "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "command": [
+    "make",
+    "check",
+    "build-linux",
+    "RELEASE_ID=conditional-vrrp-ack-v1"
+  ],
+  "started_at_utc": "2026-10-25T14:13:28.451036+00:00",
+  "umask": "0022",
+  "exit_code": 0,
+  "elapsed_seconds": 15.01,
+  "artifacts": [
+    {
+      "architecture": "amd64",
+      "binary": "routerd",
+      "sha256": "2e8b56beab95c65c7c9f16e1866a1f8c404dcbef23e853e3cd9b7da9d837c6ec"
+    },
+    {
+      "architecture": "amd64",
+      "binary": "routerd-modules",
+      "sha256": "6c681272f87b80f4928897dc1fa80bb20a204db0f0e702e650de761307ec4341"
+    },
+    {
+      "architecture": "amd64",
+      "binary": "routerd-logging",
+      "sha256": "6e3bd86762439c0fa3fa88d8c0eebdd376826072828a0850a65c7c9e08321bcb"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd",
+      "sha256": "4ece43ddbed478369c0355b1012ee4aaca43b8785129c34725107755d44e584d"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd-modules",
+      "sha256": "6c4fb9c4fca582628b10ec3817b5776d8fc3f70b5ce37ffd1bef832869268817"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd-logging",
+      "sha256": "3699ec330f81e48a8e284c45935373893e20cb565159ddcf7171f12020543544"
+    }
+  ]
+}

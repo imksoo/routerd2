@@ -1,0 +1,42 @@
+{
+  "source_commit": "62bc99ba124f9008777af65be1eaf09cee5d8f66",
+  "source_dirty": false,
+  "scope": "Real daemon conditional VRRP and health/PBR regression in separate no-NIC guests, fixed 512 MiB/2 CPU and existing deadlines; no host network/clock mutation",
+  "tests": [
+    {
+      "gate": "daemon-vrrp-conditional",
+      "exit_code": 0,
+      "passed": true,
+      "elapsed_seconds": 50.81,
+      "guest_seconds": 37.44
+    },
+    {
+      "gate": "daemon-health-pbr",
+      "exit_code": 0,
+      "passed": true,
+      "elapsed_seconds": 91.6,
+      "guest_seconds": 81.13
+    },
+    {
+      "gate": "daemon-vrrp-clock",
+      "exit_code": 0,
+      "passed": true,
+      "elapsed_seconds": 40.96,
+      "guest_seconds": 30.44
+    },
+    {
+      "gate": "release-boot",
+      "exit_code": 0,
+      "passed": true,
+      "elapsed_seconds": 175.68,
+      "guest_seconds": 161.33
+    },
+    {
+      "gate": "storage",
+      "exit_code": 0,
+      "passed": true,
+      "elapsed_seconds": 212.09,
+      "guest_seconds": 175.41
+    }
+  ]
+}

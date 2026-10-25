@@ -1,0 +1,130 @@
+{
+  "source_commit": "62bc99ba124f9008777af65be1eaf09cee5d8f66",
+  "source_dirty": false,
+  "release_id": "conditional-vrrp-ack-v1",
+  "build_artifacts": [
+    {
+      "architecture": "amd64",
+      "binary": "routerd",
+      "sha256": "2e8b56beab95c65c7c9f16e1866a1f8c404dcbef23e853e3cd9b7da9d837c6ec"
+    },
+    {
+      "architecture": "amd64",
+      "binary": "routerd-modules",
+      "sha256": "6c681272f87b80f4928897dc1fa80bb20a204db0f0e702e650de761307ec4341"
+    },
+    {
+      "architecture": "amd64",
+      "binary": "routerd-logging",
+      "sha256": "6e3bd86762439c0fa3fa88d8c0eebdd376826072828a0850a65c7c9e08321bcb"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd",
+      "sha256": "4ece43ddbed478369c0355b1012ee4aaca43b8785129c34725107755d44e584d"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd-modules",
+      "sha256": "6c4fb9c4fca582628b10ec3817b5776d8fc3f70b5ce37ffd1bef832869268817"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd-logging",
+      "sha256": "3699ec330f81e48a8e284c45935373893e20cb565159ddcf7171f12020543544"
+    }
+  ],
+  "race_harnesses": {
+    "release": {
+      "path": "dist/goal-validation/conditional-vrrp-guard-release.test",
+      "sha256": "45a7207218367c4c205434d7c67ac8db671452d2adec8139e8231eae48e445d1"
+    },
+    "publisher": {
+      "path": "dist/goal-validation/conditional-vrrp-guard-publisher.test",
+      "sha256": "e774338c33bf2e988185e9d997968046285a9c783edae944514d278ea3f819fa"
+    },
+    "daemon": {
+      "path": "dist/goal-validation/conditional-vrrp-guard-daemon.test",
+      "sha256": "9a027a239007d2d83c2ac2ba5e98febc27d0bdd47fa264832f7877fa2c4b13c3"
+    },
+    "vrrp": {
+      "path": "dist/goal-validation/conditional-vrrp-guard-vrrp.test",
+      "sha256": "9ec9caec8ed9a849f0c6c4901f22e775a1427c4e4c098b329562b311f7bf78c2"
+    }
+  },
+  "scope": "root-owned0700 stage; real built amd64/arm64 signature/ELF/staging without foreign execution; actual daemon tests in fresh user/net namespaces; no host network or clock mutation",
+  "tests": [
+    {
+      "test": "TestDaemonVRRPConditionalOwnership",
+      "harness": "daemon",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 14.16,
+      "log": "conditional-vrrp-guard-native-TestDaemonVRRPConditionalOwnership.log",
+      "sha256": "79e168a53588d6707ef3d7bcdd51301a0f63139555d98d00b0cd57ade86c8362"
+    },
+    {
+      "test": "TestBuiltRuntimeCatalog",
+      "harness": "release",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 26.86,
+      "log": "conditional-vrrp-guard-native-TestBuiltRuntimeCatalog.log",
+      "sha256": "76406e4414507759d734f33779a959172d4c4b12ffca618440e905e2428e1c9c"
+    },
+    {
+      "test": "TestPublishBuiltRelease",
+      "harness": "publisher",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 13.01,
+      "log": "conditional-vrrp-guard-native-TestPublishBuiltRelease.log",
+      "sha256": "b1548bd518b5b654c113cee7a984182dd19384876a35702f4ef8f97e16411684"
+    },
+    {
+      "test": "TestDaemonDHCPv4OriginalLeaseAuthority",
+      "harness": "daemon",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 10.8,
+      "log": "conditional-vrrp-guard-native-TestDaemonDHCPv4OriginalLeaseAuthority.log",
+      "sha256": "d6fd35534b4dfd33d3c23e3f6f7ab721b805a1a34f842436daad836316ebceab"
+    },
+    {
+      "test": "TestDaemonConfigurationAndRecovery",
+      "harness": "daemon",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 9.6,
+      "log": "conditional-vrrp-guard-native-TestDaemonConfigurationAndRecovery.log",
+      "sha256": "1286d2730baca159a899e58dad84c5db7d8f16f6c51e78ef11aac5178d95e1fa"
+    },
+    {
+      "test": "TestDaemonStartupSelectionAndRecovery",
+      "harness": "daemon",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 3.28,
+      "log": "conditional-vrrp-guard-native-TestDaemonStartupSelectionAndRecovery.log",
+      "sha256": "9a7fc4ec5d2541bf350ecf171f4e2c7cf26c0d956a3f2d86577226f4b55fec1b"
+    },
+    {
+      "test": "TestDaemonConditionalStartupRecovery",
+      "harness": "daemon",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 3.33,
+      "log": "conditional-vrrp-guard-native-TestDaemonConditionalStartupRecovery.log",
+      "sha256": "febb7051b0dac9f9681b6d5206e170f690f33a84b9eb03cd55eec39cc4b16ae2"
+    },
+    {
+      "test": "TestDaemonHealthPBRFailoverAndRecovery",
+      "harness": "daemon",
+      "passed": false,
+      "exit_code": 1,
+      "elapsed_seconds": 3.07,
+      "log": "conditional-vrrp-guard-native-TestDaemonHealthPBRFailoverAndRecovery.log",
+      "sha256": "17b46583e796149a6859ebc03a142e920228c40e20c97feaf730338070a5feb5"
+    }
+  ]
+}

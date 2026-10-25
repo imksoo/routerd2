@@ -6,7 +6,14 @@
 **継続ゴール:** 全残実装・必要試験・対象実機での利用可能性の受入まで進める。
 部分checkpointでは完了しない。
 
-最新product checkpointは `c0f214b`、fixtureは `521d151`。VRRP所有権の元boot ID/ObservedNanos/ExpiresNanosをworker→control→fact→kernel addressへ接続した。
+最新product checkpointは `62bc99b`、条件付きACK本体は `542c428`。VRRP通知を受理だけで成功にせず、serialized coordinatorが依存worker終了とnetworkのVIP/VMAC適用ACKを確認してから応答する。
+初回Ready・最終終了待ちでも処理を進め、再送・上書き・旧世代・期限切れ・cancel・適用失敗を成功にしない。撤去失敗で古いACTIVEを復元しない。
+VRRP所有interfaceのconsumerは直接dependency/ownerと正のactive条件を必須とする。compiler契約をnative-2へ変更し、旧native-1との未検証更新/fallbackを拒否する。
+全体check/Race/vet/Python33/6 ELF build284.16秒、clean最終15.01秒はPASS。native10の個別合格は二campaignを集約し、証跡directory不足の初回FAILを保持する。
+QEMU条件付きVRRP・二WAN・VRRP時計補正・署名付きPID1・ext4二kernelはPASS。依存workerを実SIGSTOPし、stopping中の実VIP保持と終了後撤去・commit完了を確認した。
+[条件付きVRRP kernel ACKの証跡・失敗・境界・残作業](evidence/2026-10-25-conditional-vrrp.md) を参照。ready_when/graceful activation、watchdog/権限分離、全残計画・実機受入は未完了。全体ゴールはactive。
+
+前回product checkpointは `c0f214b`、fixtureは `521d151`。VRRP所有権の元boot ID/ObservedNanos/ExpiresNanosをworker→control→fact→kernel addressへ接続した。
 UTCのvalid_untilは表示だけとし、同じ通知・projection再適用・UTC補正で期限を延長しない。controlのcold startからsupervisor現行世代を照合し、巻戻し・epoch変更・終了後Active・期限切れ選出の再生を拒否する。
 BACKUPは1秒ごとに有限false観測を更新し、INITIALIZEはゼロ期限で失効する。ACTIVEは期限切れ後に同じ選出transitionで再広告しない。
 全体check/Race/vet/Python32/6 ELF build287.23秒、native9はPASS。QEMU二peerはPASS、最初のclock試験は子execへのFD欠落でFAIL。

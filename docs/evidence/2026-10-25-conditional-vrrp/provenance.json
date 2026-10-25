@@ -1,0 +1,369 @@
+{
+  "recorded_at_utc": "2026-10-25T14:29:00.902631+00:00",
+  "ownership_ack_product": "542c428aa73422ef9274fef6e7dfada4d8fed8dc",
+  "qualified_product": "62bc99ba124f9008777af65be1eaf09cee5d8f66",
+  "configuration_contract": "resource-program-native-2",
+  "full_goal_status": "active",
+  "physical_target_qualified": false,
+  "scope": "Conditional VRRP serialized kernel effect ACK during startup and final withdrawal; guarded worker dependency on VRRP owned interface; no complete HA, watchdog/privilege split or paired loader qualification",
+  "normalizations": [
+    "workspace/toolchain paths",
+    "ANSI, CRLF, tab expansion and trailing whitespace",
+    "public kernel certificate identifier",
+    "ephemeral private SSH host-key hash omitted; public fingerprint retained"
+  ],
+  "raw_artifacts": [
+    {
+      "public_name": "conditional-vrrp-ack-red.log",
+      "private_source": "dist/goal-validation/conditional-vrrp-ack-red.log",
+      "raw_sha256": "e96af4f9f5b24ba2345f5a753f43ec1efcf41bceefd835f8993ff3c93b0c8911"
+    },
+    {
+      "public_name": "conditional-vrrp-ack-red.json",
+      "private_source": "dist/goal-validation/conditional-vrrp-ack-red.json",
+      "raw_sha256": "0b455499d5a05c5b54e743bcace30cc111b84ff4a6c5c0f14272d82647e8da85"
+    },
+    {
+      "public_name": "conditional-vrrp-clean-red.log",
+      "private_source": "dist/goal-validation/conditional-vrrp-clean-red.log",
+      "raw_sha256": "2fed7767192c3d255e80bc564fa95ad6f24293d1702c375fef197b2e2876c0cb"
+    },
+    {
+      "public_name": "conditional-vrrp-clean-red.json",
+      "private_source": "dist/goal-validation/conditional-vrrp-clean-red.json",
+      "raw_sha256": "8ccccaa4b1d4769517497fe3fdf5f719bdfe051d18ad05d1a5e2aa7bcda9b3e7"
+    },
+    {
+      "public_name": "conditional-vrrp-qemu-contract-red.log",
+      "private_source": "dist/goal-validation/conditional-vrrp-qemu-contract-red.log",
+      "raw_sha256": "0916c4505bb841a541eab26273722b77b67fa405f897aafa707ed9815aab7899"
+    },
+    {
+      "public_name": "conditional-vrrp-fences-red.log",
+      "private_source": "dist/goal-validation/conditional-vrrp-fences-red.log",
+      "raw_sha256": "c9495205b00c4e8ec686f61b18c9023d5bb0372eb3a6f6bb71c14495bfbf9544"
+    },
+    {
+      "public_name": "conditional-vrrp-focused-green.log",
+      "private_source": "dist/goal-validation/conditional-vrrp-focused-green.log",
+      "raw_sha256": "e86ce040c0fa0aecee1bf49606ab2e1c7a152caa669f9a7512a6686cb2dc0b13"
+    },
+    {
+      "public_name": "conditional-vrrp-runtime-race.log",
+      "private_source": "dist/goal-validation/conditional-vrrp-runtime-race.log",
+      "raw_sha256": "e9c3c1c701c7d453057f20362e67c8cd4c111adcd55e943a51e7239f1cd1a3e7"
+    },
+    {
+      "public_name": "conditional-vrrp-final-focused.log",
+      "private_source": "dist/goal-validation/conditional-vrrp-final-focused.log",
+      "raw_sha256": "6d4345012af6137d20d902fe422837702e32b344f5bc89181ae91d564c24df0f"
+    },
+    {
+      "public_name": "conditional-vrrp-retry-local.log",
+      "private_source": "dist/goal-validation/conditional-vrrp-retry-local.log",
+      "raw_sha256": "df0932349dcf28d914e2bd91d0161a0adb7fdf6237707bf9ef9052bc6f77f62a"
+    },
+    {
+      "public_name": "conditional-vrrp-dynamic-dependency-red.log",
+      "private_source": "dist/goal-validation/conditional-vrrp-dynamic-dependency-red.log",
+      "raw_sha256": "201b330b861a03694f81d323eff7cd335ad2a00af2163ae7c6ce733a9c5128f5"
+    },
+    {
+      "public_name": "conditional-vrrp-boolean-guard-red.log",
+      "private_source": "dist/goal-validation/conditional-vrrp-boolean-guard-red.log",
+      "raw_sha256": "9324ea52902dc6f4672fe2acb45a0878d7efd88489c17219726f90cf527306e3"
+    },
+    {
+      "public_name": "conditional-vrrp-dependency-local-green.log",
+      "private_source": "dist/goal-validation/conditional-vrrp-dependency-local-green.log",
+      "raw_sha256": "16a5a9eb01b2d6d22784cd5a376c59cb3d03bb6338105e39d5a8ffc29a15e2de"
+    },
+    {
+      "public_name": "conditional-vrrp-guard-green.log",
+      "private_source": "dist/goal-validation/conditional-vrrp-guard-green.log",
+      "raw_sha256": "443cf24f1ad8350f14ab9a0997d753c873dfa3af6f50380f2cf293921cfdca40"
+    },
+    {
+      "public_name": "conditional-vrrp-abi-red.log",
+      "private_source": "dist/goal-validation/conditional-vrrp-abi-red.log",
+      "raw_sha256": "18dba31efefb69fe89b4ca886818f41b55e356705532a50c89abb6744d422716"
+    },
+    {
+      "public_name": "conditional-vrrp-abi-local-green.log",
+      "private_source": "dist/goal-validation/conditional-vrrp-abi-local-green.log",
+      "raw_sha256": "ce3a3a406cfe964940f9b0fa5c1164206d055bd073dcb9d16eb5084b594766c3"
+    },
+    {
+      "public_name": "conditional-vrrp-evidence-dir-local.log",
+      "private_source": "dist/goal-validation/conditional-vrrp-evidence-dir-local.log",
+      "raw_sha256": "c832d4f89f1f42ae372e60a23cf701921df7d425a291cc85abbd1b50d686c164"
+    },
+    {
+      "public_name": "conditional-vrrp-ack-initial-check-build.log",
+      "private_source": "dist/goal-validation/conditional-vrrp-ack-initial-check-build.log",
+      "raw_sha256": "13dfe61a4b4d459a90ba7a8caba08a16e34444ce403057091facf133d93df09c"
+    },
+    {
+      "public_name": "conditional-vrrp-ack-initial-build-manifest.json",
+      "private_source": "dist/goal-validation/conditional-vrrp-ack-initial-build-manifest.json",
+      "raw_sha256": "cfe7e49b2931b6cb2f71d0fc276f8a823120fc08329aac8c80b6563749cb09f3"
+    },
+    {
+      "public_name": "conditional-vrrp-ack-check-build.log",
+      "private_source": "dist/goal-validation/conditional-vrrp-ack-check-build.log",
+      "raw_sha256": "ea856940b450067dcec73eca5ea9d6e69373125fe4a812c0c57d6641b07cd245"
+    },
+    {
+      "public_name": "conditional-vrrp-ack-build-manifest.json",
+      "private_source": "dist/goal-validation/conditional-vrrp-ack-build-manifest.json",
+      "raw_sha256": "30d2ed25a3a0a90c2ac478ca9bf75fe493e47a0bd7d7f77ed0e2f5f601ece953"
+    },
+    {
+      "public_name": "conditional-vrrp-ack-final-check-build.log",
+      "private_source": "dist/goal-validation/conditional-vrrp-ack-final-check-build.log",
+      "raw_sha256": "3b6a92006f1b4a83416730d0fd9cf2ec5c2aff9ec937fdf603e79d6a07743213"
+    },
+    {
+      "public_name": "conditional-vrrp-ack-final-build-manifest.json",
+      "private_source": "dist/goal-validation/conditional-vrrp-ack-final-build-manifest.json",
+      "raw_sha256": "151da687e593bb0c49c3f530a6720d0953a2663523a74f4365197150aafae0c5"
+    },
+    {
+      "public_name": "conditional-vrrp-dependency-check-build.log",
+      "private_source": "dist/goal-validation/conditional-vrrp-dependency-check-build.log",
+      "raw_sha256": "f2a2ca403286e4b1e78dca5900c35044b44babea7e907685d9f22d564f217a81"
+    },
+    {
+      "public_name": "conditional-vrrp-dependency-build-manifest.json",
+      "private_source": "dist/goal-validation/conditional-vrrp-dependency-build-manifest.json",
+      "raw_sha256": "f8948cdc3fff8cae93042bc35185d3eb3bf2772c8107b4cd82c2aed50aff07b2"
+    },
+    {
+      "public_name": "conditional-vrrp-guard-check-build.log",
+      "private_source": "dist/goal-validation/conditional-vrrp-guard-check-build.log",
+      "raw_sha256": "2da95d88ac242e05030992ef2b21b58c0a5354ec8fc6650a7394b382a1eb4e03"
+    },
+    {
+      "public_name": "conditional-vrrp-guard-build-manifest.json",
+      "private_source": "dist/goal-validation/conditional-vrrp-guard-build-manifest.json",
+      "raw_sha256": "28aeb18e6640d8048d1d20b2942de84ea955a43fe0a30dd856cb9d24380aeaa2"
+    },
+    {
+      "public_name": "conditional-vrrp-guard-final-check-build.log",
+      "private_source": "dist/goal-validation/conditional-vrrp-guard-final-check-build.log",
+      "raw_sha256": "3b6a92006f1b4a83416730d0fd9cf2ec5c2aff9ec937fdf603e79d6a07743213"
+    },
+    {
+      "public_name": "conditional-vrrp-guard-final-build-manifest.json",
+      "private_source": "dist/goal-validation/conditional-vrrp-guard-final-build-manifest.json",
+      "raw_sha256": "cc57a60979862e9c68ed4447bf53ef27876999f03507ec8f75cdada3571e998a"
+    },
+    {
+      "public_name": "conditional-vrrp-ack-native-manifest.json",
+      "private_source": "dist/goal-validation/conditional-vrrp-ack-native-manifest.json",
+      "raw_sha256": "d75dd3357088b296c0ff321daef1072d9fd41bd7bcc332e792bdea4d1256d075"
+    },
+    {
+      "public_name": "conditional-vrrp-ack-TestDaemonVRRPConditionalOwnership.log",
+      "private_source": "dist/goal-validation/conditional-vrrp-ack-native-TestDaemonVRRPConditionalOwnership.log",
+      "raw_sha256": "76d994af57c138bbb4028d71909930fb324e4204c44bce43a6b28d3af4e30648"
+    },
+    {
+      "public_name": "conditional-vrrp-guard-native-manifest.json",
+      "private_source": "dist/goal-validation/conditional-vrrp-guard-native-manifest.json",
+      "raw_sha256": "ba4efbcecf3d2fd5518078d5fa8dc68eceae510b1a4e50719256f6b7f04a2437"
+    },
+    {
+      "public_name": "conditional-vrrp-guard-TestDaemonVRRPConditionalOwnership.log",
+      "private_source": "dist/goal-validation/conditional-vrrp-guard-native-TestDaemonVRRPConditionalOwnership.log",
+      "raw_sha256": "79e168a53588d6707ef3d7bcdd51301a0f63139555d98d00b0cd57ade86c8362"
+    },
+    {
+      "public_name": "conditional-vrrp-guard-TestBuiltRuntimeCatalog.log",
+      "private_source": "dist/goal-validation/conditional-vrrp-guard-native-TestBuiltRuntimeCatalog.log",
+      "raw_sha256": "76406e4414507759d734f33779a959172d4c4b12ffca618440e905e2428e1c9c"
+    },
+    {
+      "public_name": "conditional-vrrp-guard-TestPublishBuiltRelease.log",
+      "private_source": "dist/goal-validation/conditional-vrrp-guard-native-TestPublishBuiltRelease.log",
+      "raw_sha256": "b1548bd518b5b654c113cee7a984182dd19384876a35702f4ef8f97e16411684"
+    },
+    {
+      "public_name": "conditional-vrrp-guard-TestDaemonDHCPv4OriginalLeaseAuthority.log",
+      "private_source": "dist/goal-validation/conditional-vrrp-guard-native-TestDaemonDHCPv4OriginalLeaseAuthority.log",
+      "raw_sha256": "d6fd35534b4dfd33d3c23e3f6f7ab721b805a1a34f842436daad836316ebceab"
+    },
+    {
+      "public_name": "conditional-vrrp-guard-TestDaemonConfigurationAndRecovery.log",
+      "private_source": "dist/goal-validation/conditional-vrrp-guard-native-TestDaemonConfigurationAndRecovery.log",
+      "raw_sha256": "1286d2730baca159a899e58dad84c5db7d8f16f6c51e78ef11aac5178d95e1fa"
+    },
+    {
+      "public_name": "conditional-vrrp-guard-TestDaemonStartupSelectionAndRecovery.log",
+      "private_source": "dist/goal-validation/conditional-vrrp-guard-native-TestDaemonStartupSelectionAndRecovery.log",
+      "raw_sha256": "9a7fc4ec5d2541bf350ecf171f4e2c7cf26c0d956a3f2d86577226f4b55fec1b"
+    },
+    {
+      "public_name": "conditional-vrrp-guard-TestDaemonConditionalStartupRecovery.log",
+      "private_source": "dist/goal-validation/conditional-vrrp-guard-native-TestDaemonConditionalStartupRecovery.log",
+      "raw_sha256": "febb7051b0dac9f9681b6d5206e170f690f33a84b9eb03cd55eec39cc4b16ae2"
+    },
+    {
+      "public_name": "conditional-vrrp-guard-TestDaemonHealthPBRFailoverAndRecovery.log",
+      "private_source": "dist/goal-validation/conditional-vrrp-guard-native-TestDaemonHealthPBRFailoverAndRecovery.log",
+      "raw_sha256": "17b46583e796149a6859ebc03a142e920228c40e20c97feaf730338070a5feb5"
+    },
+    {
+      "public_name": "conditional-vrrp-guard-resume-native-manifest.json",
+      "private_source": "dist/goal-validation/conditional-vrrp-guard-resume-native-manifest.json",
+      "raw_sha256": "5d30db26483a0d91b02306b99ae044c280b4aa80ea6b8868cb11cf32dfeba869"
+    },
+    {
+      "public_name": "conditional-vrrp-guard-resume-TestDaemonHealthPBRFailoverAndRecovery.log",
+      "private_source": "dist/goal-validation/conditional-vrrp-guard-resume-native-TestDaemonHealthPBRFailoverAndRecovery.log",
+      "raw_sha256": "bd549ad94d3e1a834a8ef5a0d2bb224b0c066d10eb807815876620bc2cf03067"
+    },
+    {
+      "public_name": "conditional-vrrp-guard-resume-TestDaemonVRRPOriginalOwnership.log",
+      "private_source": "dist/goal-validation/conditional-vrrp-guard-resume-native-TestDaemonVRRPOriginalOwnership.log",
+      "raw_sha256": "d6d2ad18eeef883b10dd8215db3e2041d0de232e4f377561878e8de3ec186eda"
+    },
+    {
+      "public_name": "conditional-vrrp-guard-resume-TestIsolatedNativeVRRP.log",
+      "private_source": "dist/goal-validation/conditional-vrrp-guard-resume-native-TestIsolatedNativeVRRP.log",
+      "raw_sha256": "6e472b2416cf6ba294e1ebf934340c0ec08d23ccd8879a8f739f690d136d8d7a"
+    },
+    {
+      "public_name": "native-acceptance.json",
+      "private_source": "dist/goal-validation/conditional-vrrp-guard-native-acceptance.json",
+      "raw_sha256": "84c3ba70f4ef14721a5440b9d19d9398b5ed6fb6a361f0c3709124cd95afdc37"
+    },
+    {
+      "public_name": "qemu-source.json",
+      "private_source": "dist/goal-validation/conditional-vrrp-guard-qemu/source.json",
+      "raw_sha256": "a0c3d1f203385c7488b51c348a77cf2fd70f03fd756f0a5696e461e7398d4eec"
+    },
+    {
+      "public_name": "daemon-vrrp-conditional-manifest.json",
+      "private_source": "dist/goal-validation/conditional-vrrp-guard-qemu/daemon-vrrp-conditional/manifest.json",
+      "raw_sha256": "a46144059f9e2372ff3e525c69817b98993a26085ce0af36955229ec9cf7a7d6"
+    },
+    {
+      "public_name": "daemon-vrrp-conditional-host.log",
+      "private_source": "dist/goal-validation/conditional-vrrp-guard-qemu/daemon-vrrp-conditional-host.log",
+      "raw_sha256": "c864c1181c7d891fe9ad300e466e03bce5db15e92d175b85a953023e44f5261e"
+    },
+    {
+      "public_name": "daemon-vrrp-conditional-qemu-serial.log",
+      "private_source": "dist/goal-validation/conditional-vrrp-guard-qemu/daemon-vrrp-conditional/qemu-serial.log",
+      "raw_sha256": "34815613ef47bf5e86c9afe6f2f408f76d92485725aa857e13ba0ce7472b6c31"
+    },
+    {
+      "public_name": "daemon-health-pbr-manifest.json",
+      "private_source": "dist/goal-validation/conditional-vrrp-guard-qemu/daemon-health-pbr/manifest.json",
+      "raw_sha256": "13d27de3ee4d81f1ad8ba9c9fa1cfbf97b39e58af4616c2b79cc655e92eea4c3"
+    },
+    {
+      "public_name": "daemon-health-pbr-host.log",
+      "private_source": "dist/goal-validation/conditional-vrrp-guard-qemu/daemon-health-pbr-host.log",
+      "raw_sha256": "175cac182b52c8520dd5bab25f1144e5526cda2a4bd35c65a4e2671dc61b2f2a"
+    },
+    {
+      "public_name": "daemon-health-pbr-qemu-serial.log",
+      "private_source": "dist/goal-validation/conditional-vrrp-guard-qemu/daemon-health-pbr/qemu-serial.log",
+      "raw_sha256": "c99e3dfa0d95a667d3a284b554045942045f88cd259c44b28e8c6b3ffb1f04e1"
+    },
+    {
+      "public_name": "daemon-vrrp-clock-manifest.json",
+      "private_source": "dist/goal-validation/conditional-vrrp-guard-qemu/daemon-vrrp-clock/manifest.json",
+      "raw_sha256": "17a74a3108369c5a53b56599be0c1261b8f53f0e6ad63e6bec89f4aecbb3f94d"
+    },
+    {
+      "public_name": "daemon-vrrp-clock-host.log",
+      "private_source": "dist/goal-validation/conditional-vrrp-guard-qemu/daemon-vrrp-clock-host.log",
+      "raw_sha256": "965f8ca5675b26d01672e7a49c93fd3166fb08acbc8dcbe1a4bf12eeada67943"
+    },
+    {
+      "public_name": "daemon-vrrp-clock-qemu-serial.log",
+      "private_source": "dist/goal-validation/conditional-vrrp-guard-qemu/daemon-vrrp-clock/qemu-serial.log",
+      "raw_sha256": "b14823bcc2afcda20d391f2537630018f06127fe7fcf5dc46279c0e9c226edc6"
+    },
+    {
+      "public_name": "release-boot-manifest.json",
+      "private_source": "dist/goal-validation/conditional-vrrp-guard-qemu/release-boot/manifest.json",
+      "raw_sha256": "66f40344456db875d48e10e2d9e318a45e57e67d5e6a9ec82d8c3ba16ec94313"
+    },
+    {
+      "public_name": "release-boot-host.log",
+      "private_source": "dist/goal-validation/conditional-vrrp-guard-qemu/release-boot-host.log",
+      "raw_sha256": "587eab6696cd5b9cdd43854dc2f20ccf9b3f3b9517b8f8320b7cbc59e2eb8ec4"
+    },
+    {
+      "public_name": "release-boot-qemu-serial.log",
+      "private_source": "dist/goal-validation/conditional-vrrp-guard-qemu/release-boot/qemu-serial.log",
+      "raw_sha256": "f3c72bd71c940ea550a5f4e68dd4c1ff73476da0df050ee1e4cb60f2c63dc055"
+    },
+    {
+      "public_name": "storage-manifest.json",
+      "private_source": "dist/goal-validation/conditional-vrrp-guard-qemu/storage/manifest.json",
+      "raw_sha256": "14033b801dd154016bc7c28659ee2cf751fd9a6221f213839493e75ca7f5aac2"
+    },
+    {
+      "public_name": "storage-host.log",
+      "private_source": "dist/goal-validation/conditional-vrrp-guard-qemu/storage-host.log",
+      "raw_sha256": "2ea5c12059632cedced9b11146613211147f451555cb6da524c292618e18716c"
+    },
+    {
+      "public_name": "storage-qemu-first.log",
+      "private_source": "dist/goal-validation/conditional-vrrp-guard-qemu/storage/qemu-first.log",
+      "raw_sha256": "4a59d42491a688249ae72b89ecfab7883afa87d1345952607f1ae79cfe9b4f5e"
+    },
+    {
+      "public_name": "storage-qemu-second.log",
+      "private_source": "dist/goal-validation/conditional-vrrp-guard-qemu/storage/qemu-second.log",
+      "raw_sha256": "1c2be1fabcc7c3eddfc746e60903f8ffe1dc253eda69adcb129ce19d311ca2eb"
+    }
+  ],
+  "private_packet_captures": [
+    {
+      "private_source": "dist/goal-validation/conditional-vrrp-ack-native-packets/TestDaemonVRRPConditionalOwnership/vrrp-authority/lan0.pcap",
+      "bytes": 5144,
+      "sha256": "66a97b7a54b801a06ef7462344f9681df78a9af156e583ea388abee435479890"
+    },
+    {
+      "private_source": "dist/goal-validation/conditional-vrrp-guard-native-packets/TestDaemonDHCPv4OriginalLeaseAuthority/dhcp4-authority/wan0.pcap",
+      "bytes": 9951,
+      "sha256": "5eb78af64b81439510d51b1fd749cec594a31d7638b6f6ebd73da65352e1432b"
+    },
+    {
+      "private_source": "dist/goal-validation/conditional-vrrp-guard-native-packets/TestDaemonHealthPBRFailoverAndRecovery/wan0.pcap",
+      "bytes": 3514,
+      "sha256": "1c097ea482143c93a736fb27219bc3cc4e7ab23af845721bebc598cba8224cd2"
+    },
+    {
+      "private_source": "dist/goal-validation/conditional-vrrp-guard-native-packets/TestDaemonHealthPBRFailoverAndRecovery/wan1.pcap",
+      "bytes": 2922,
+      "sha256": "74d7c633f3835ba8c27aef6bfe7ac28da1dbe7647e2d8d5328782a476b676f35"
+    },
+    {
+      "private_source": "dist/goal-validation/conditional-vrrp-guard-native-packets/TestDaemonVRRPConditionalOwnership/vrrp-authority/lan0.pcap",
+      "bytes": 7114,
+      "sha256": "3fd29e4b6228577fd552aa9aa32e4f61d34d48b3e2793dd129f178cf35e1ed76"
+    },
+    {
+      "private_source": "dist/goal-validation/conditional-vrrp-guard-resume-native-packets/TestDaemonHealthPBRFailoverAndRecovery/wan0.pcap",
+      "bytes": 31931,
+      "sha256": "39343c52d2ee1df5e83595295c51e36a36ff11d830ba202aba299ff96c5bc22a"
+    },
+    {
+      "private_source": "dist/goal-validation/conditional-vrrp-guard-resume-native-packets/TestDaemonHealthPBRFailoverAndRecovery/wan1.pcap",
+      "bytes": 33069,
+      "sha256": "7a474ec1069a12d044f69519e45ca85b93bd60d229c2a5f488396feda717f711"
+    },
+    {
+      "private_source": "dist/goal-validation/conditional-vrrp-guard-resume-native-packets/TestDaemonVRRPOriginalOwnership/vrrp-authority/lan0.pcap",
+      "bytes": 4682,
+      "sha256": "7972d07369944a21eac66327968e84bb4673221ec193413436716d76d92c12d0"
+    }
+  ]
+}

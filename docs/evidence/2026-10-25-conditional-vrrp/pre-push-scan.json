@@ -1,0 +1,21 @@
+{
+  "recorded_at_utc": "2026-10-25T14:30:24.980479+00:00",
+  "review_method": "Coding-agent source/witness review; exact rule/file/line multiset match to prior classifications and all matched files unchanged from origin/main; not a claim of human review",
+  "index_tree_before_adding_this_report": "40223e2f821bdbafab3d8a8624eab84e05f2327d",
+  "head_before_evidence_commit": "62bc99ba124f9008777af65be1eaf09cee5d8f66",
+  "index_finding_count": 15,
+  "credential_findings": 0,
+  "new_unknown_findings": 0,
+  "existing_noncredential_findings": {
+    "event_output_identity_sha256": 14,
+    "invalid_noncredential_PEM_parser_fixture": 1
+  },
+  "classification_source": "docs/evidence/2026-10-25-events-inspection/reviewed-scan-findings.json",
+  "new_commit_history_findings": 0,
+  "new_commit_history_scope": "origin/main..62bc99ba124f9008777af65be1eaf09cee5d8f66",
+  "rules_or_fixtures_modified_to_suppress_scanner_findings": false,
+  "scan_raw_sha256": {
+    "conditional-vrrp-index-gitleaks.json": "3c4e7430bc541de8dd73780e2128276479779550e8303d0f6a188a4b56e7bf5a",
+    "conditional-vrrp-history-gitleaks.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+  }
+}

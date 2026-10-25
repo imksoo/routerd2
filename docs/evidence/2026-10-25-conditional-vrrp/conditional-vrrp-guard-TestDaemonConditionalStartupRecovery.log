@@ -1,0 +1,7 @@
+=== RUN   TestDaemonConditionalStartupRecovery
+    bgp_test.go:194: === RUN   TestDaemonConditionalStartupRecovery
+            startup_recovery_test.go:109: ROUTERD_STARTUP_RECOVERY_DAEMON_TEST_PASS: exact post-adoption recovery, consumed recovery restart, later commit preserved, pre-adoption recovery and three stable lifecycle events
+        --- PASS: TestDaemonConditionalStartupRecovery (1.22s)
+        PASS
+--- PASS: TestDaemonConditionalStartupRecovery (2.26s)
+PASS

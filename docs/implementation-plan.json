@@ -12337,6 +12337,38 @@
         "All work packages, actual suspend/resume, current OCI/APK/arm64 execution and physical hardware/NIC/performance/long-duration qualification"
       ],
       "full_goal_status": "active"
+    },
+    {
+      "id": "conditional-vrrp-kernel-ack",
+      "date": "2026-10-25",
+      "status": "partial_conditional_vrrp_kernel_ack_and_guarded_worker_lifecycle_verified",
+      "code_checkpoint": "62bc99ba124f9008777af65be1eaf09cee5d8f66",
+      "ownership_ack_checkpoint": "542c428aa73422ef9274fef6e7dfada4d8fed8dc",
+      "work_packages": [
+        "CORE-03",
+        "CORE-04",
+        "HA-01"
+      ],
+      "evidence": "docs/evidence/2026-10-25-conditional-vrrp.md",
+      "implemented": [
+        "Per-producer bounded VRRP effect receipt, duplicate wait and actor-owned kernel ACK including initial Ready/final worker exit without callback module-set reconciliation",
+        "Dependent stop-before-network-withdrawal, current registry/source/sequence/boot fences and no obsolete Active restoration on withdrawal failure",
+        "Explicit dependency/owner plus positive active guard for services on VRRP owned interfaces, three-valued boolean implication checks and signed compiler contract native-2; native-1 transitions refused"
+      ],
+      "validation": [
+        "Clean whole check/Race/vet/Python33/six static ELF build15.01s after full284.16s pass with identical six SHA",
+        "Expected clean-source RED and focused failures retained; duplicate retry fixture enqueue correction with Race20, guarded compiler RED/boolean cases and ABI fixture fixes",
+        "Ten individual native Race gates on identical source/six ELF/four harnesses across initial and corrected private-runner campaigns; initial evidence directory ENOENT retained",
+        "Actual conditional VIP TCP/UDP/VMAC capture, original boot expiry/reapply, worker/control replacement and stale-generation refusal, real consumer stopped with VIP retained and final config withdrawal",
+        "Five QEMU gates pass: conditional VRRP, two WAN/PBR, actual VRRP UTC corrections, signed PID1 and persistent ext4 two kernels; fixed resources/deadlines"
+      ],
+      "remaining": [
+        "ready_when/graceful advertisement activation, full HA track/cluster/fencing and CORE-03/04/HA-01 completion",
+        "Supervisor/recipient watchdog and leases, privilege/capability/peer authorization, all protocol status/clock/resource dependency and state/engine policy",
+        "Operator paired prepare/loader/tuple health and complete update/recovery, all work packages and selected hardware/NIC/performance/long-duration qualification",
+        "Current OCI/APK, arm64 execution and actual suspend/resume remain unverified"
+      ],
+      "full_goal_status": "active"
     }
   ],
   "delivery_goal": {

@@ -1,0 +1,21 @@
+{
+  "source_commit": "a8a55f43ecb1f35b39ec6142e92ef670f222960f",
+  "source_dirty_paths": [
+    " M Makefile",
+    " M images/kernel-test-init/main.go",
+    " M internal/runtimeplan/runtime.go",
+    " M scripts/qemu-network.py",
+    "?? internal/runtimeplan/vrrp_ack.go"
+  ],
+  "tracked_diff_sha256": "5ea19b6779097ff3836ef4787cdf5c6f0c5138788b167bc7cc8dcd43d6aa991b",
+  "command": [
+    "make",
+    "check",
+    "build-linux",
+    "RELEASE_ID=conditional-vrrp-ack-v1"
+  ],
+  "started_at_utc": "2026-10-25T13:52:18.222764+00:00",
+  "umask": "0022",
+  "exit_code": 2,
+  "elapsed_seconds": 62.94
+}

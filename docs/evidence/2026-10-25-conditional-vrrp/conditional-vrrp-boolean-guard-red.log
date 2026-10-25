@@ -1,0 +1,29 @@
+=== RUN   TestVRRPDynamicInterfaceRequiresDependencyAndActiveGuard
+=== RUN   TestVRRPDynamicInterfaceRequiresDependencyAndActiveGuard/guarded
+=== RUN   TestVRRPDynamicInterfaceRequiresDependencyAndActiveGuard/missing-edge
+=== RUN   TestVRRPDynamicInterfaceRequiresDependencyAndActiveGuard/missing-guard
+=== RUN   TestVRRPDynamicInterfaceRequiresDependencyAndActiveGuard/negative-guard
+=== RUN   TestVRRPDynamicInterfaceRequiresDependencyAndActiveGuard/partial-any
+=== RUN   TestVRRPDynamicInterfaceRequiresDependencyAndActiveGuard/all-guard
+=== RUN   TestVRRPDynamicInterfaceRequiresDependencyAndActiveGuard/all-any-guard
+=== RUN   TestVRRPDynamicInterfaceRequiresDependencyAndActiveGuard/owner-readiness
+=== RUN   TestVRRPDynamicInterfaceRequiresDependencyAndActiveGuard/owner-edge
+=== RUN   TestVRRPDynamicInterfaceRequiresDependencyAndActiveGuard/double-negative
+    vrrp_dependency_test.go:47: explicitly guarded VRRP dependent rejected: service dependent cannot use dynamic interface of ha without a dependency
+=== RUN   TestVRRPDynamicInterfaceRequiresDependencyAndActiveGuard/de-morgan
+    vrrp_dependency_test.go:47: explicitly guarded VRRP dependent rejected: service dependent cannot use dynamic interface of ha without a dependency
+--- FAIL: TestVRRPDynamicInterfaceRequiresDependencyAndActiveGuard (0.00s)
+    --- PASS: TestVRRPDynamicInterfaceRequiresDependencyAndActiveGuard/guarded (0.00s)
+    --- PASS: TestVRRPDynamicInterfaceRequiresDependencyAndActiveGuard/missing-edge (0.00s)
+    --- PASS: TestVRRPDynamicInterfaceRequiresDependencyAndActiveGuard/missing-guard (0.00s)
+    --- PASS: TestVRRPDynamicInterfaceRequiresDependencyAndActiveGuard/negative-guard (0.00s)
+    --- PASS: TestVRRPDynamicInterfaceRequiresDependencyAndActiveGuard/partial-any (0.00s)
+    --- PASS: TestVRRPDynamicInterfaceRequiresDependencyAndActiveGuard/all-guard (0.00s)
+    --- PASS: TestVRRPDynamicInterfaceRequiresDependencyAndActiveGuard/all-any-guard (0.00s)
+    --- PASS: TestVRRPDynamicInterfaceRequiresDependencyAndActiveGuard/owner-readiness (0.00s)
+    --- PASS: TestVRRPDynamicInterfaceRequiresDependencyAndActiveGuard/owner-edge (0.00s)
+    --- FAIL: TestVRRPDynamicInterfaceRequiresDependencyAndActiveGuard/double-negative (0.00s)
+    --- FAIL: TestVRRPDynamicInterfaceRequiresDependencyAndActiveGuard/de-morgan (0.00s)
+FAIL
+FAIL    github.com/imksoo/routerd2/internal/config      0.011s
+FAIL

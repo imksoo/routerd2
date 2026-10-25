@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "go": "go version go1.27.3 linux/amd64",
+  "purpose": "real-pid1-signed-userland-selection-and-health-confirmation",
+  "target": "linux/amd64",
+  "kernel_release": "6.18.58-0-virt",
+  "kernel_sha256": "17fbd3efd16f2e7cb1b945f06423b37399ba7d5ac8cdd3665e7f13f363500e85",
+  "source_image_manifest_sha256": "a1df58dc193d6f6f5a361b9b630e9fb106b76a3e3089239da2185f812d265b43",
+  "initializer_sha256": "b1c6c9fbb330e27c708b842719cfae7b29fc9fc28a0dfe5d0646bc65bfd03537",
+  "binary_sha256": {
+    "/test/bin/baseline/routerd": "0f3a08e7a0f773aa5b97edd8ce19b245929388e005881bb725663b39fa0055c2",
+    "/test/bin/baseline/routerd-modules": "a1897c6f84e63d492897d31a6a1108f829f2263eaab369af0c2bcda703db6da1",
+    "/test/bin/baseline/routerd-logging": "0d346363e85769dc9d4bc4c1d2c855ecb97700436a7dfd06bfe6357ef7de1375",
+    "/test/bin/trial/routerd": "141dd5fe282c36dc738e94c7814003b00713c9c179db7d8537d2c4dc78cd509a",
+    "/test/bin/trial/routerd-modules": "6bde8a74c669fa32d98bb750a7d5b71030c88f81502659d25f8bf02831f7f2aa",
+    "/test/bin/trial/routerd-logging": "4efd2fe816c180265da1d7bd12bfa52c55c1a650a100ac1f00f7a9eb8cfc0628"
+  },
+  "release_ids": {
+    "baseline": "release-gate-baseline",
+    "trial": "release-gate-trial"
+  },
+  "host_network_access": false,
+  "guest_external_network_interfaces": false,
+  "state_persistence": "volatile-initramfs",
+  "kernel_rootfs_updates": false,
+  "two_boot_disk_fallback_tested": false,
+  "result": "passed",
+  "initramfs_sha256": "48629d74e0968cff4647b95b61211e3835202457ca2d7a65785b4e20b5f104be",
+  "witness": "ROUTERD_RELEASE_BOOT_WITNESS pid=1 release=release-gate-trial generation=4 operation=confirm revision=1 modules=control,logging,management,network pinned_exec=verified artifact_count=4 native_count=3 data_count=1 role_catalog=verified",
+  "commit_fence_witness": "ROUTERD_RELEASE_BOOT_COMMIT_FENCE_WITNESS before=1 committed=2 blocked_status=409 replay=2 after_cancel=3 reserved_generation=11 store_identity=matched preflight_race_status=503 stale_revision=rejected missing_snapshot=rejected target_descriptor=verified candidate_inspected=true fallback_inspected=true network_journal=verified ssh_identity=inspected_absent declared_state_formats=all_six",
+  "duration_seconds": 161.33,
+  "qemu_exit_status_before_cleanup": 0
+}

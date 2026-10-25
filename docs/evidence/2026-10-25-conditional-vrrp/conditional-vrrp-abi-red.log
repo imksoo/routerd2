@@ -1,0 +1,4 @@
+# github.com/imksoo/routerd2/internal/runtimeabi_test [github.com/imksoo/routerd2/internal/runtimeabi.test]
+internal/runtimeabi/implementation_test.go:41:53: cannot use nil as runtimeabi.Facts value in argument to runtimeabi.CheckTransition
+FAIL    github.com/imksoo/routerd2/internal/runtimeabi [build failed]
+FAIL
