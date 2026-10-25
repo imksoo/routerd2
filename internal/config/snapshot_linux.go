@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/imksoo/routerd2/internal/configref"
 	"io"
 	"os"
 
@@ -26,11 +27,7 @@ var ErrSnapshotConflict = errors.New("snapshot requires the current confirmed co
 var ErrSnapshotCapacity = errors.New("configuration snapshot capacity reached; existing snapshots are retained")
 var ErrSnapshotUncertain = errors.New("snapshot published but directory durability unconfirmed; retry the same revision")
 
-type SnapshotRef struct {
-	StoreID  string `json:"store_id"`
-	Revision uint64 `json:"revision"`
-	Digest   string `json:"digest"`
-}
+type SnapshotRef = configref.Ref
 
 type Snapshot struct {
 	Version  int      `json:"version"`
@@ -39,26 +36,7 @@ type Snapshot struct {
 	Config   Document `json:"config"`
 }
 
-func validHex(s string, length int) bool {
-	if len(s) != length {
-		return false
-	}
-	for _, c := range s {
-		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
-			return false
-		}
-	}
-	return true
-}
-
-func validStoreID(id string) bool { return validHex(id, 32) }
-
-func (r SnapshotRef) Validate() error {
-	if !validStoreID(r.StoreID) || r.Revision == 0 || !validHex(r.Digest, 64) {
-		return errors.New("invalid configuration snapshot reference")
-	}
-	return nil
-}
+func validStoreID(id string) bool { return configref.ValidHex(id, 32) }
 
 // Snapshot captures only the current confirmed revision. The control engine
 // holds its writer mutex across this operation, including the durable publish.

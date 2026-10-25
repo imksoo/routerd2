@@ -11,6 +11,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/imksoo/routerd2/internal/configref"
 	"github.com/imksoo/routerd2/internal/derivedcontroller"
 	"github.com/imksoo/routerd2/internal/eventcontroller"
 	"github.com/imksoo/routerd2/internal/localapi"
@@ -29,6 +30,7 @@ type ConfirmationMetadata struct {
 // Health preserves the field names consumed by releaseboot and old health
 // clients, while containing no configuration or protocol snapshot bodies.
 type Health struct {
+	Startup            *configref.Adoption       `json:"startup,omitempty"`
 	StoreID            string                    `json:"store_id"`
 	Revision           uint64                    `json:"revision"`
 	Healthy            bool                      `json:"healthy"`
@@ -91,7 +93,7 @@ func stateText(value string, maximum int) string {
 }
 
 func (e *Engine) healthForState(s State) Health {
-	h := Health{StoreID: s.StoreID, Revision: s.Revision, Healthy: s.Healthy, LastError: stateText(s.LastError, 4096), LastErrorTruncated: len(s.LastError) > 4096, ProducerEpoch: s.ProducerEpoch, Sequence: s.Sequence}
+	h := Health{Startup: s.Startup, StoreID: s.StoreID, Revision: s.Revision, Healthy: s.Healthy, LastError: stateText(s.LastError, 4096), LastErrorTruncated: len(s.LastError) > 4096, ProducerEpoch: s.ProducerEpoch, Sequence: s.Sequence}
 	h.EventJournal = JournalHealth{Pending: len(s.EventOutbox), LastError: s.EventJournalError}
 	h.EventRules.LastError = s.EventRuleError
 	h.Derived.LastError = s.DerivedError

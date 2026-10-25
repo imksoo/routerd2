@@ -226,6 +226,7 @@ func serveWithTrial(b runtimeconfig.Boot, trial *releaseboot.Trial) error {
 		}
 	}
 	err = supervisor.Run(ctx, supervisor.Options{
+		Startup:     b.Startup,
 		Executables: b.Workers, ReleaseID: buildinfo.ReleaseID, RuntimeDir: b.RuntimeDir, StateDir: b.StateDir, ConfigPath: b.Config, Platform: b.Platform,
 		DynamicRoles: dynamicRoles,
 		Modules: []supervisor.Spec{

@@ -48,9 +48,10 @@ routerd は設定、プロトコル、監視、ログ、管理とその整合性
 今後の配布は、一つのイメージファイルを filesystem へ展開した複数バイナリーの束を runtime とし、
 `boot config → load runtime → load startup-config` の順に起動する方針です。
 実行ファイル数は二つに固定しません。factoryの3 commandは最初の分割であり、全moduleの分割完了ではありません。
-manifest v2とverified role catalogを実装し、旧二ELF形式は受理しません。明示startup-config参照とengine/kernel ABIの完全化は残っています。
+manifest v2とverified role catalogを実装し、旧二ELF形式は受理しません。signed runtimeとstartup-configの同時選択、engine/kernel ABIの完全化は残っています。
 設定store identityと確定済みrevisionの不変snapshot保存・検証も実装しました。
-`routerd config snapshot --expected-revision N` は保存のみで、起動時の明示選択・採用transactionは未実装です。
+`routerd config snapshot --expected-revision N` は保存のみです。固定runtimeのboot `startup` 参照は一度だけ採用し、後続commitを再起動で上書きしません。
+signed runtimeとの同時選択・組のconfirmation/fallbackは未実装で、`startup`と`release`の同時指定は拒否します。
 [保存契約と残作業](docs/startup-config.md)を参照してください。
 利用者のいない試作形式との後方互換は要求せず、新しい形式へ直接置換します。
 

@@ -80,3 +80,17 @@ or kernel/rootfs A/B selection.
 The [two-boot integration fixture](../../images/storage-test/README.md) verifies
 the real production mount sequence, persisted SSH edits and host keys, and
 automatic fallback from an unconfirmed signed userland attempt.
+
+## Explicit startup snapshot
+
+A fixed-runtime boot may include a `startup` object with `generation`,
+`expected_revision`, and `snapshot` (`store_id`, `revision`, `digest`).
+The control worker adopts it once into the existing authoritative journal,
+then reconciles that new revision. Replaying the consumed selection preserves
+later commits and normal unconfirmed-restart rollback. Missing/corrupt stores
+are not initialized from the seed when an explicit selection is present.
+
+The selection is a bounded reference, not a ResourceProgram or executable path.
+A `startup` object together with `release` is rejected until selection and
+fallback for the runtime/configuration pair are implemented atomically. See
+[the startup contract](../../docs/startup-config.md).

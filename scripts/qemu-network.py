@@ -63,6 +63,13 @@ SUITES = {
         "commands": True,
         "description": "two-binary daemon SSH configuration and recovery",
     },
+    "daemon-startup": {
+        "package": "./internal/integration", "binary": "daemon.test",
+        "test": "TestDaemonStartupSelectionAndRecovery",
+        "marker": "ROUTERD_STARTUP_SELECTION_DAEMON_TEST", "timeout": 150,
+        "commands": True,
+        "description": "explicit startup adoption, generation fencing, later commits and restart rollback",
+    },
     "daemon-eventrule": {
         "package": "./internal/integration", "binary": "daemon.test",
         "test": "TestDaemonEventRuleDurabilityAndLifecycle",

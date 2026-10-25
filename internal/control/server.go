@@ -13,6 +13,7 @@ import (
 
 	"github.com/imksoo/routerd2/internal/buildinfo"
 	"github.com/imksoo/routerd2/internal/config"
+	"github.com/imksoo/routerd2/internal/configref"
 	"github.com/imksoo/routerd2/internal/events"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/network"
@@ -161,14 +162,14 @@ func (e *Engine) Handler() http.Handler {
 	return mux
 }
 
-func Serve(ctx context.Context, dir, stateDir, bootstrap string, ready func()) error {
+func Serve(ctx context.Context, dir, stateDir, bootstrap string, startup *configref.Selection, ready func()) error {
 	instanceID := os.Getenv(worker.SupervisorInstanceEnv)
 	if !serviceconfig.ValidSupervisorInstance(instanceID) {
 		return errors.New("supervisor instance is required")
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	store, current, err := config.Open(stateDir, bootstrap)
+	store, current, err := config.OpenSelected(stateDir, bootstrap, startup)
 	if err != nil {
 		return err
 	}

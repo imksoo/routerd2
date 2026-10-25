@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -24,6 +25,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/imksoo/routerd2/internal/configref"
 	"github.com/imksoo/routerd2/internal/worker"
 	"golang.org/x/sys/unix"
 )
@@ -329,6 +331,20 @@ func Run(parent context.Context, options Options) error {
 }
 
 func normalize(o Options) (Options, error) {
+	if o.Startup != nil {
+		selected := *o.Startup
+		if err := selected.Validate(); err != nil {
+			return o, err
+		}
+		o.Startup = &selected
+		raw, err := json.Marshal(selected)
+		if err != nil {
+			return o, err
+		}
+		o.startupJSON = string(raw)
+	} else {
+		o.startupJSON = ""
+	}
 	if o.Platform != "host" && o.Platform != "container" && o.Platform != "appliance" {
 		return o, errors.New("platform must explicitly be host, container, or appliance")
 	}
@@ -426,7 +442,12 @@ func startChild(ctx context.Context, o Options, image *os.File, c *child, events
 		return err
 	}
 	args := append([]string{o.Executables[c.spec.Role], "worker", "--role=" + c.spec.Role, "--name=" + c.spec.Name}, c.spec.Args...)
+	startup := ""
+	if c.spec.Role == "control" {
+		startup = o.startupJSON
+	}
 	env := mergeEnv(os.Environ(), o.Env, []string{
+		configref.SelectionEnv + "=" + startup,
 		worker.SupervisorInstanceEnv + "=" + o.instanceID,
 		worker.ControlFDEnv + "=3", worker.ModuleNameEnv + "=" + c.spec.Name,
 		"ROUTERD_RELEASE_ID=" + o.ReleaseID, "ROUTERD_RUNTIME_DIR=" + o.RuntimeDir,

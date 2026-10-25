@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/imksoo/routerd2/internal/configref"
 	"io"
 	"net"
 	"os"
@@ -17,15 +18,16 @@ import (
 // Boot is intentionally separate from the transactional network configuration.
 // Changing boot paths, platform, or SSH keys/listeners requires a system restart.
 type Boot struct {
-	Platform      string            `json:"platform"`
-	Config        string            `json:"config"`
-	Workers       map[string]string `json:"workers"`
-	RuntimeDir    string            `json:"runtime_dir"`
-	StateDir      string            `json:"state_dir"`
-	KernelModules []string          `json:"kernel_modules,omitempty"`
-	SSH           SSH               `json:"ssh"`
-	Release       *Release          `json:"release,omitempty"`
-	StateVolume   *StateVolume      `json:"state_volume,omitempty"`
+	Startup       *configref.Selection `json:"startup,omitempty"`
+	Platform      string               `json:"platform"`
+	Config        string               `json:"config"`
+	Workers       map[string]string    `json:"workers"`
+	RuntimeDir    string               `json:"runtime_dir"`
+	StateDir      string               `json:"state_dir"`
+	KernelModules []string             `json:"kernel_modules,omitempty"`
+	SSH           SSH                  `json:"ssh"`
+	Release       *Release             `json:"release,omitempty"`
+	StateVolume   *StateVolume         `json:"state_volume,omitempty"`
 }
 
 // StateVolume mounts an explicitly selected, existing ext4 device at StateDir.
@@ -79,6 +81,14 @@ func Read(path string) (Boot, error) {
 }
 
 func (b Boot) Validate() error {
+	if b.Startup != nil {
+		if err := b.Startup.Validate(); err != nil {
+			return err
+		}
+		if b.Release != nil {
+			return errors.New("signed release startup selection requires an atomic runtime/configuration boot transaction; standalone startup input is not accepted")
+		}
+	}
 	if b.Release != nil {
 		r := b.Release
 		if b.Platform != "appliance" {

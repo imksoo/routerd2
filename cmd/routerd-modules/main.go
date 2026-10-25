@@ -17,6 +17,7 @@ import (
 
 	"github.com/imksoo/routerd2/internal/buildinfo"
 	"github.com/imksoo/routerd2/internal/cli"
+	"github.com/imksoo/routerd2/internal/configref"
 	"github.com/imksoo/routerd2/internal/control"
 	"github.com/imksoo/routerd2/internal/logging"
 	"github.com/imksoo/routerd2/internal/management"
@@ -88,7 +89,11 @@ func run(args []string) error {
 		case "network":
 			return control.ServeNetwork(ctx, dir, state, ready)
 		case "control":
-			return control.Serve(ctx, dir, state, path, ready)
+			startup, err := configref.DecodeSelection([]byte(os.Getenv(configref.SelectionEnv)))
+			if err != nil {
+				return err
+			}
+			return control.Serve(ctx, dir, state, path, startup, ready)
 		case "management":
 			b, err := os.ReadFile(*managementPath)
 			if err != nil {

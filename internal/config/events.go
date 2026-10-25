@@ -17,7 +17,7 @@ func validateEventOutbox(c Committed) error {
 			return errors.New("invalid configuration event outbox identity or revision")
 		}
 		switch event.Type {
-		case "committed", "confirmed", "rolled_back_timeout", "rolled_back_restart":
+		case "committed", "confirmed", "rolled_back_timeout", "rolled_back_restart", "startup_selected":
 		default:
 			return errors.New("invalid configuration event type")
 		}

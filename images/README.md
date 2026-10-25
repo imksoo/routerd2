@@ -263,3 +263,10 @@ Alpine and Go patch versions are pinned in the build arguments. The kernel
 package is resolved from the pinned Alpine release branch and its exact version
 is recorded; fully frozen package mirrors and base-image digests are a later
 reproducible-release step.
+
+The fixed `daemon-startup` suite (`scripts/qemu-network.py --suite daemon-startup`)
+checks explicit snapshot adoption through real control/network workers, control
+SIGKILL, preservation of later commits across whole-daemon restarts, unconfirmed
+restart rollback, a subsequent selection and stable lifecycle events. It runs
+without an external NIC and does not qualify signed runtime/configuration-pair
+fallback or physical hardware.

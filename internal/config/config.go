@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/imksoo/routerd2/internal/configref"
 	"io"
 	"net/netip"
 	"os"
@@ -41,13 +42,14 @@ type Native = resourceprogram.Native
 func FromNative(native Native) Document { return resourceprogram.FromNative(native) }
 
 type Committed struct {
-	StoreID         string        `json:"store_id"`
-	Revision        uint64        `json:"revision"`
-	Config          Document      `json:"config"`
-	LastRequestID   string        `json:"last_request_id,omitempty"`
-	LastRequestHash string        `json:"last_request_hash,omitempty"`
-	Confirmation    *Confirmation `json:"confirmation,omitempty"`
-	EventOutbox     []ChangeEvent `json:"event_outbox,omitempty"`
+	Startup         *configref.Adoption `json:"startup,omitempty"`
+	StoreID         string              `json:"store_id"`
+	Revision        uint64              `json:"revision"`
+	Config          Document            `json:"config"`
+	LastRequestID   string              `json:"last_request_id,omitempty"`
+	LastRequestHash string              `json:"last_request_hash,omitempty"`
+	Confirmation    *Confirmation       `json:"confirmation,omitempty"`
+	EventOutbox     []ChangeEvent       `json:"event_outbox,omitempty"`
 }
 
 // ChangeEvent is persisted atomically with the authoritative configuration.
@@ -224,7 +226,10 @@ func Read(path string) (Document, error) {
 	return d, Validate(d)
 }
 
-type Store struct{ Dir string }
+type Store struct {
+	Dir        string
+	checkpoint func(string) error // test-only publication interruptions; nil in production
+}
 
 func Open(dir, bootstrap string) (*Store, Committed, error) {
 	s := &Store{Dir: dir}
@@ -274,6 +279,11 @@ func (s *Store) Load() (Committed, error) {
 }
 
 func validateRecord(c Committed) error {
+	if c.Startup != nil {
+		if err := c.Startup.Validate(c.StoreID, c.Revision); err != nil {
+			return err
+		}
+	}
 	if !validStoreID(c.StoreID) {
 		return errors.New("committed configuration requires a lower-case 128-bit store identity")
 	}
@@ -307,6 +317,12 @@ func (s *Store) writeRecord(name string, c Committed) error {
 	if err == nil && current.StoreID != c.StoreID {
 		return errors.New("configuration write cannot replace the durable store identity")
 	}
+	if err == nil && current.Startup != nil {
+		old := current.Startup
+		if c.Startup == nil || c.Startup.Selection.Generation < old.Selection.Generation || c.Startup.Selection.Generation == old.Selection.Generation && *c.Startup != *old {
+			return errors.New("configuration write cannot forget or alter adopted startup generation")
+		}
+	}
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
@@ -318,7 +334,7 @@ func (s *Store) writeRecord(name string, c Committed) error {
 	if len(b) > MaxRecordSize {
 		return errors.New("committed configuration record exceeds its encoded size limit")
 	}
-	return atomicBytes(filepath.Join(s.Dir, name), b)
+	return atomicBytesChecked(filepath.Join(s.Dir, name), b, s.checkpoint)
 }
 func (s *Store) ClearPending() error {
 	err := os.Remove(filepath.Join(s.Dir, "pending.json"))
@@ -343,6 +359,16 @@ func AtomicJSON(path string, v any) error {
 }
 
 func atomicBytes(path string, b []byte) error {
+	return atomicBytesChecked(path, b, nil)
+}
+
+func atomicBytesChecked(path string, b []byte, check func(string) error) error {
+	checkpoint := func(at string) error {
+		if check != nil {
+			return check(at)
+		}
+		return nil
+	}
 	f, err := os.CreateTemp(filepath.Dir(path), ".routerd-txn-")
 	if err != nil {
 		return err
@@ -362,10 +388,22 @@ func atomicBytes(path string, b []byte) error {
 	if err != nil {
 		return err
 	}
+	if err = checkpoint("file-synced"); err != nil {
+		return err
+	}
+	if err = checkpoint("before-rename"); err != nil {
+		return err
+	}
 	if err = os.Rename(name, path); err != nil {
 		return err
 	}
-	return syncDir(filepath.Dir(path))
+	if err = checkpoint("after-rename"); err != nil {
+		return err
+	}
+	if err = syncDir(filepath.Dir(path)); err != nil {
+		return err
+	}
+	return checkpoint("directory-synced")
 }
 
 func syncDir(path string) error {

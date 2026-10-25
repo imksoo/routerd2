@@ -233,7 +233,7 @@ func (e *Engine) Commit(ctx context.Context, r CommitRequest) (State, error) {
 		return e.state, errors.New("configuration revision exhausted")
 	}
 	previous := e.state.Committed
-	next := config.Committed{StoreID: previous.StoreID, Revision: previous.Revision + 1, Config: r.Config, LastRequestID: r.RequestID, LastRequestHash: digest}
+	next := config.Committed{Startup: previous.Startup, StoreID: previous.StoreID, Revision: previous.Revision + 1, Config: r.Config, LastRequestID: r.RequestID, LastRequestHash: digest}
 	if r.ConfirmTimeoutSeconds > 0 {
 		next.Confirmation = &config.Confirmation{Previous: previous.Config, PreviousRevision: previous.Revision, Deadline: time.Now().Add(time.Duration(r.ConfirmTimeoutSeconds) * time.Second).UTC(), RequestID: r.RequestID}
 	}
@@ -337,7 +337,7 @@ func (e *Engine) rollbackConfirmation(ctx context.Context, reason string) error 
 	}
 	// Rollback is itself a new public revision, so a candidate opened during
 	// the trial cannot overwrite the recovered configuration using a stale token.
-	next := config.Committed{StoreID: e.state.StoreID, Revision: e.state.Revision + 1, Config: p.Previous}
+	next := config.Committed{Startup: e.state.Startup, StoreID: e.state.StoreID, Revision: e.state.Revision + 1, Config: p.Previous}
 	next, err := e.withChange(next, "rolled_back_"+reason, 1)
 	if err != nil {
 		return err
