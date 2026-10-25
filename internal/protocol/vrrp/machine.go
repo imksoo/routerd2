@@ -18,7 +18,6 @@ type machine struct {
 	published              bool
 	activationStartedNanos uint64
 	activationState        string
-	activationGrant        ActivationGrant
 	bootID                 string
 	observedNanos          uint64
 	expiresNanos           uint64
@@ -59,7 +58,6 @@ func (m *machine) enter(state string, now time.Time) {
 	m.published = state == StateActive && m.config.GracefulActivation == nil
 	m.activationStartedNanos = 0
 	m.activationState = ""
-	m.activationGrant = ActivationGrant{}
 	switch state {
 	case StateActive:
 		m.deadline = now.Add(m.config.interval())
@@ -148,7 +146,7 @@ func (m *machine) snapshot() Snapshot {
 		peer = m.peer.String()
 	}
 	return Snapshot{
-		ActivationState: m.activationState, ActivationStartedNanos: m.activationStartedNanos, ActivationGrant: m.activationGrant,
+		ActivationState: m.activationState, ActivationStartedNanos: m.activationStartedNanos,
 		BootID: m.bootID, ObservedNanos: m.observedNanos, ExpiresNanos: m.expiresNanos,
 		Resource: m.config.Resource, Interface: m.config.Interface, VIPInterface: m.config.VIPInterface, VRF: m.config.VRF,
 		Family: m.config.Family, SourceAddress: m.source.String(), VirtualRouterID: m.config.VirtualRouterID,

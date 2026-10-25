@@ -35,4 +35,6 @@ type ObservationReceipt struct {
 // ApplicationReceipt acknowledges the coordinator's completed kernel projection.
 type ApplicationReceipt struct {
 	Applied bool `json:"applied"`
+	// Active reports the VRRP ownership actually installed by this operation.
+	Active bool `json:"active,omitempty"`
 }

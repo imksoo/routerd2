@@ -26,16 +26,12 @@ type transport interface {
 // Run owns only protocol sockets. Effects must synchronously reconcile kernel
 // ownership and must honor its context deadline. On activation, the native
 // transport verifies VMAC and non-tentative VIP presence after Effects returns;
-// no positive-priority advertisement is sent before that check succeeds.
+// Neighbor announcements follow that check. A graceful election may keep
+// advertising while VIP publication is pending.
 func Run(ctx context.Context, cfg Config, effects Effects, ready func()) error {
 	cfg = Normalize(cfg)
 	if err := Validate(cfg); err != nil {
 		return err
-	}
-	if cfg.GracefulActivation != nil {
-		if _, ok := effects.(ActivationAuthority); !ok {
-			return errors.New("graceful VRRP requires an activation authority")
-		}
 	}
 	if effects == nil {
 		return errors.New("VRRP requires an acknowledged ownership effects implementation")
@@ -54,19 +50,11 @@ func Run(ctx context.Context, cfg Config, effects Effects, ready func()) error {
 
 func applyActions(ctx context.Context, m *machine, a actions, device transport, effects Effects) error {
 	if a.update || a.advertise {
+		previouslyPublished := m.published
 		if err := publishOwnership(ctx, m, effects); err != nil {
 			return err
 		}
-		operation, cancel := context.WithTimeout(ctx, time.Duration(m.config.EffectTimeoutMilliseconds)*time.Millisecond)
-		activated, err := m.requestActivation(operation, effects)
-		cancel()
-		if err != nil {
-			return err
-		}
-		if activated {
-			if err := publishOwnership(ctx, m, effects); err != nil {
-				return err
-			}
+		if !previouslyPublished && m.published {
 			a.advertise, a.notify = true, true
 		}
 	}
@@ -116,8 +104,9 @@ func publishOwnership(ctx context.Context, m *machine, effects Effects) error {
 	m.activationStatus(clock)
 	operation, cancel := context.WithTimeout(ctx, time.Duration(m.config.EffectTimeoutMilliseconds)*time.Millisecond)
 	defer cancel()
+	var deadline time.Time
 	if m.state == StateActive {
-		deadline := time.Now().Add(time.Duration(m.expiresNanos - uint64(clock.BoottimeNanoseconds)))
+		deadline = time.Now().Add(time.Duration(m.expiresNanos - uint64(clock.BoottimeNanoseconds)))
 		if m.published {
 			m.validUntil = deadline
 		} else {
@@ -127,7 +116,8 @@ func publishOwnership(ctx context.Context, m *machine, effects Effects) error {
 		defer cancelLease()
 		operation = leased
 	}
-	if err := effects.Update(operation, m.snapshot()); err != nil {
+	published, err := effects.Apply(operation, m.snapshot())
+	if err != nil {
 		return fmt.Errorf("VRRP ownership %s: %w", m.state, err)
 	}
 	if m.state == StateActive {
@@ -135,6 +125,16 @@ func publishOwnership(ctx context.Context, m *machine, effects Effects) error {
 		if err != nil || !CurrentElection(m.snapshot(), clock) {
 			return errors.Join(errors.New("VRRP election expired before acknowledgement"), err)
 		}
+	}
+	if m.state == StateActive && m.config.GracefulActivation == nil && !published {
+		return errors.New("VRRP elected ownership was not installed")
+	}
+	m.published = published
+	m.activationStatus(clock)
+	if published {
+		m.validUntil = deadline
+	} else {
+		m.validUntil = time.Time{}
 	}
 	return nil
 }
@@ -195,7 +195,7 @@ func withdraw(m *machine, device transport, effects Effects) error {
 		// boot/time; a zero deadline never creates authority or a new lease.
 		m.expiresNanos = 0
 	}
-	applyErr := effects.Update(ctx, m.snapshot())
+	_, applyErr := effects.Apply(ctx, m.snapshot())
 	return errors.Join(sendErr, clockErr, applyErr)
 }
 

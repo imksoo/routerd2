@@ -137,50 +137,50 @@ type peerEffects struct {
 	last   Snapshot
 }
 
-func (p *peerEffects) Update(ctx context.Context, snapshot Snapshot) error {
+func (p *peerEffects) Apply(ctx context.Context, snapshot Snapshot) (bool, error) {
 	if err := ctx.Err(); err != nil {
-		return err
+		return false, err
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if snapshot.Active && !p.owned {
 		mac, err := net.ParseMAC(snapshot.VirtualMAC)
 		if err != nil {
-			return err
+			return false, err
 		}
 		link := &netlink.Macvlan{LinkAttrs: netlink.LinkAttrs{Name: snapshot.VIPInterface, ParentIndex: p.parent, HardwareAddr: mac}, Mode: netlink.MACVLAN_MODE_BRIDGE}
 		if err := p.handle.LinkAdd(link); err != nil {
-			return err
+			return false, err
 		}
 		p.owned = true
 		if err := p.handle.LinkSetIP6AddrGenMode(link, 1); err != nil {
-			return err
+			return false, err
 		}
 		if err := p.handle.LinkSetUp(link); err != nil {
-			return err
+			return false, err
 		}
 		for _, cidr := range snapshot.Addresses {
 			address, err := netlink.ParseAddr(cidr)
 			if err != nil {
-				return err
+				return false, err
 			}
 			address.Flags = unix.IFA_F_NODAD
 			if err := p.handle.AddrAdd(link, address); err != nil {
-				return err
+				return false, err
 			}
 		}
 	} else if !snapshot.Active && p.owned {
 		link, err := p.handle.LinkByName(snapshot.VIPInterface)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if err := p.handle.LinkDel(link); err != nil {
-			return err
+			return false, err
 		}
 		p.owned = false
 	}
 	p.last = snapshot
-	return nil
+	return snapshot.Active, nil
 }
 
 func (p *peerEffects) state() Snapshot {

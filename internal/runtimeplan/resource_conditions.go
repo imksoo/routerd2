@@ -64,18 +64,6 @@ func (r *Runtime) installGuardStatusLocked(status supervisor.Status, err error) 
 }
 
 func (r *Runtime) recordGuardGrantLocked(u serviceconfig.Update, now time.Time) {
-	if u.Role == "vrrp" {
-		var s vrrp.Snapshot
-		if json.Unmarshal(u.Snapshot, &s) != nil {
-			delete(r.guardGrants, u.Name)
-			return
-		}
-		if r.guardGrants == nil {
-			r.guardGrants = map[string]guardGrant{}
-		}
-		r.guardGrants[u.Name] = guardGrant{revision: r.config.revision, generation: u.Generation, sequence: u.Sequence, epoch: u.ProducerEpoch, bootID: s.BootID, value: s.Active, observedNanos: s.ObservedNanos, untilNanos: s.ExpiresNanos}
-		return
-	}
 	if u.Role == "dhcp4" {
 		var s dhcp4.Snapshot
 		if json.Unmarshal(u.Snapshot, &s) != nil {
@@ -201,38 +189,33 @@ func (r *Runtime) conditionFactsLocked(cfg configuration, now time.Time) (result
 			ready = resourceprogram.True
 		}
 		facts.Facts[name+".ready"] = resourceprogram.Fact{Value: ready, ObservedNanos: r.guardUntilNanos - uint64(time.Second), ExpiresNanos: r.guardUntilNanos, WorkerGeneration: module.Generation, ProducerEpoch: r.supervisorInstance}
-		grant, ok := r.guardGrants[name]
 		record := r.records[name]
+		if record.Role == "vrrp" {
+			var election vrrp.Snapshot
+			if !module.Ready || record.Generation != module.Generation || record.ConfigDigest != binding.digest || json.Unmarshal(record.Snapshot, &election) != nil || election.BootID != clock.BootID {
+				continue
+			}
+			fact := resourceprogram.Fact{Value: resourceprogram.False, ObservedNanos: election.ObservedNanos, ExpiresNanos: min(election.ExpiresNanos, r.guardUntilNanos), WorkerGeneration: module.Generation, ProducerEpoch: record.ProducerEpoch}
+			if r.ownsVRRPLocked(record, election) {
+				fact.Value = resourceprogram.True
+			}
+			facts.Facts[name+".active"] = fact
+			fact.Value = resourceprogram.False
+			if election.State == vrrp.StateActive {
+				fact.Value = resourceprogram.True
+			}
+			facts.Facts[name+".elected"] = fact
+			continue
+		}
+		grant, ok := r.guardGrants[name]
 		if !ok || !module.Ready || grant.revision != cfg.revision || grant.bootID != clock.BootID || grant.generation != module.Generation || grant.epoch != record.ProducerEpoch || grant.sequence != record.Sequence {
 			continue
 		}
-		until := min(grant.untilNanos, r.guardUntilNanos)
-		activeKnown := true
-		if record.Role == "vrrp" && grant.value {
-			if _, gated := r.gracefulVRRPConfigLocked(name); gated {
-				var observation vrrp.Snapshot
-				if json.Unmarshal(record.Snapshot, &observation) != nil || !r.publicationLatchedLocked(record, observation) {
-					activeKnown = false
-				}
-			}
+		value := resourceprogram.False
+		if grant.value {
+			value = resourceprogram.True
 		}
-		if activeKnown {
-			value := resourceprogram.False
-			if grant.value {
-				value = resourceprogram.True
-			}
-			facts.Facts[name+".active"] = resourceprogram.Fact{Value: value, ObservedNanos: grant.observedNanos, ExpiresNanos: until, WorkerGeneration: module.Generation, ProducerEpoch: record.ProducerEpoch}
-		}
-		if record.Role == "vrrp" {
-			var election vrrp.Snapshot
-			if json.Unmarshal(record.Snapshot, &election) == nil {
-				value := resourceprogram.False
-				if election.State == vrrp.StateActive {
-					value = resourceprogram.True
-				}
-				facts.Facts[name+".elected"] = resourceprogram.Fact{Value: value, ObservedNanos: election.ObservedNanos, ExpiresNanos: min(election.ExpiresNanos, r.guardUntilNanos), WorkerGeneration: module.Generation, ProducerEpoch: record.ProducerEpoch}
-			}
-		}
+		facts.Facts[name+".active"] = resourceprogram.Fact{Value: value, ObservedNanos: grant.observedNanos, ExpiresNanos: min(grant.untilNanos, r.guardUntilNanos), WorkerGeneration: module.Generation, ProducerEpoch: record.ProducerEpoch}
 	}
 	return r.conditionTimeline.Observe(cfg.source, facts)
 }
@@ -241,7 +224,7 @@ func (r *Runtime) projectProgramLocked(cfg configuration, records map[string]ser
 	// Preserve the existing static fast path. Runtime readiness edges are opt-in
 	// through ready_when; process readiness is not protocol readiness.
 	if !conditionalProgram(cfg.source) {
-		p, err := r.projectLocked(cfg.plan.Native, records, now)
+		p, err := r.projectLocked(cfg.plan.Native, records, now, resourceprogram.FactSnapshot{})
 		p.observationVersion = r.observationVersion
 		p.resources = make(map[string]resourceprogram.ResourceState, len(cfg.source.Resources))
 		for _, resource := range cfg.source.Resources {
@@ -254,7 +237,7 @@ func (r *Runtime) projectProgramLocked(cfg configuration, records map[string]ser
 		return projection{}, err
 	}
 	native, states := cfg.plan.Project(facts)
-	p, err := r.projectLocked(native, records, now)
+	p, err := r.projectLocked(native, records, now, facts)
 	p.observationVersion = r.observationVersion
 	p.resources = states
 	return p, err

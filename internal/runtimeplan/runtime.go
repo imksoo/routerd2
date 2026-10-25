@@ -133,9 +133,7 @@ type Runtime struct {
 	bindings             map[string]binding
 	records              map[string]serviceconfig.Update
 	applications         map[string]*pendingApplication
-	vrrpAdmissions       map[string]vrrpAdmission
-	vrrpPublications     map[string]vrrpPublication
-	vrrpAdmissionID      uint64
+	vrrpOwners           map[string]vrrpOwnership
 	liveRA               map[string]ra.Config
 	aftrInputs           map[string]aftr.Input
 	installed            []supervisor.DynamicModule
@@ -177,9 +175,9 @@ func (r *Runtime) CheckReady(ctx context.Context) error {
 		if !ok || !module.Ready || module.ConfigDigest != binding.digest {
 			return fmt.Errorf("protocol %s is not ready for the committed configuration", name)
 		}
-		if _, gated := r.gracefulVRRPConfigLocked(name); gated {
+		if binding.instance.Role == "vrrp" {
 			var ownership vrrp.Snapshot
-			if record, exists := r.records[name]; !exists || json.Unmarshal(record.Snapshot, &ownership) != nil || ownership.State == vrrp.StateActive && (!ownership.Active || !r.publicationLatchedLocked(record, ownership)) {
+			if record, exists := r.records[name]; !exists || json.Unmarshal(record.Snapshot, &ownership) != nil || ownership.State == vrrp.StateActive && !r.ownsVRRPLocked(record, ownership) {
 				return fmt.Errorf("%w: %s", ErrVRRPActivationPending, name)
 			}
 		}
@@ -300,7 +298,6 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 			r.finishApplicationLocked(name, ErrStale)
 		}
 		r.sourceEpoch++
-		r.vrrpAdmissions = nil
 		r.guardGrants = nil
 		r.guardStatus = nil
 		r.guardUntil = time.Time{}
@@ -309,27 +306,11 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 	r.configured = true
 	r.records = retained
 	r.bindings = bindings
-	r.pruneVRRPAuthoritiesLocked()
 	r.installBFDCacheLocked(bfdSources, bfdRecipients)
 	for name, input := range r.aftrInputs {
 		if b, ok := bindings[name]; !ok || b.digest != input.ConfigDigest {
 			delete(r.aftrInputs, name)
 		}
-	}
-	// The selected resource membership was compiled before cutover. Re-render
-	// its protocol effects under the installed authority: a pending old-source
-	// admission must not survive just because its earlier network plan exists.
-	for _, service := range p.native.Services {
-		if service.VRRP == nil || service.VRRP.GracefulActivation == nil {
-			continue
-		}
-		refreshed, refreshErr := r.projectLocked(p.native, r.effectiveRecordsLocked(time.Now()), time.Now())
-		if refreshErr != nil {
-			r.mu.Unlock()
-			return r.failure(refreshErr)
-		}
-		p.network, p.liveRA, p.routeIssues, p.bgpStatus = refreshed.network, refreshed.liveRA, refreshed.routeIssues, refreshed.bgpStatus
-		break
 	}
 	r.resourceStates = p.resources
 	r.liveRA = p.liveRA
@@ -348,10 +329,7 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 	if err := r.wait(ctx, modules, nil, false); err != nil {
 		return r.failure(err)
 	}
-	r.mu.Lock()
-	r.phase = "ready"
-	r.lastError = ""
-	r.mu.Unlock()
+	r.reportReadiness(ctx)
 	return nil
 }
 
@@ -389,13 +367,6 @@ func (r *Runtime) effectiveRecordsLocked(now time.Time) map[string]serviceconfig
 				snapshot.Active = false
 				snapshot.ValidUntil = time.Time{}
 				snapshot.Leases = nil
-				record.Snapshot, _ = json.Marshal(snapshot)
-			}
-		}
-		if record.Role == "vrrp" && !now.Before(r.leases[name]) {
-			var snapshot vrrp.Snapshot
-			if json.Unmarshal(record.Snapshot, &snapshot) == nil && snapshot.Active {
-				snapshot.Active = false
 				record.Snapshot, _ = json.Marshal(snapshot)
 			}
 		}
@@ -554,9 +525,6 @@ var ErrStale = errors.New("stale protocol producer or configuration")
 // still a replay of the same ownership grant. It must not extend monotonic
 // validity after a backward wall-clock adjustment.
 func (r *Runtime) recordOwnershipLocked(u serviceconfig.Update, maximum time.Duration) error {
-	if u.Role == "vrrp" {
-		return r.recordVRRPOwnershipLocked(u)
-	}
 	if u.Role == "dhcp4" {
 		var s dhcp4.Snapshot
 		if err := json.Unmarshal(u.Snapshot, &s); err != nil {
@@ -695,9 +663,6 @@ func (r *Runtime) Observe(ctx context.Context, u serviceconfig.Update) error {
 		if err := validateVRRPTransition(previous, u); err != nil {
 			return err
 		}
-		if err := r.validateVRRPAdmissionLocked(u); err != nil {
-			return err
-		}
 	}
 	if u.Role == "dhcp4" {
 		if err := validateDHCP4Transition(previous, u); err != nil {
@@ -711,14 +676,14 @@ func (r *Runtime) Observe(ctx context.Context, u serviceconfig.Update) error {
 	}
 	oldLease := r.leases[u.Name]
 	switch u.Role {
-	case "vrrp", "bgp", "dhcp_server", "dhcp4":
+	case "bgp", "dhcp_server", "dhcp4":
 		if err := r.recordOwnershipLocked(u, 5*time.Second); err != nil {
 			return err
 		}
 	}
 	candidateRecords := r.effectiveRecordsLocked(time.Now())
 	candidateRecords[u.Name] = u
-	if _, err := r.projectLocked(r.config.plan.Native, candidateRecords, time.Now()); err != nil {
+	if _, err := r.projectLocked(r.config.plan.Native, candidateRecords, time.Now(), resourceprogram.FactSnapshot{}); err != nil {
 		if oldLease.IsZero() {
 			delete(r.leases, u.Name)
 		} else {
@@ -729,7 +694,6 @@ func (r *Runtime) Observe(ctx context.Context, u serviceconfig.Update) error {
 	r.recordGuardGrantLocked(u, time.Now())
 	r.records[u.Name] = u
 	r.observationVersion++
-	r.revokeVRRPPublicationLocked(u)
 	// Observe flaps when accepted; a periodic projection must not hide them.
 	if _, err := r.conditionFactsLocked(r.config, time.Now()); err != nil {
 		return err
@@ -740,19 +704,19 @@ func (r *Runtime) Observe(ctx context.Context, u serviceconfig.Update) error {
 
 // Apply waits for the current BGP FIB or VRRP VIP projection. These protocols
 // require application completion before advancing their state machines.
-func (r *Runtime) Apply(ctx context.Context, u serviceconfig.Update) error {
+func (r *Runtime) Apply(ctx context.Context, u serviceconfig.Update) (serviceconfig.ApplicationReceipt, error) {
 	if u.Role != "vrrp" && u.Role != "bgp" {
-		return errors.New("application requests support only BGP and VRRP")
+		return serviceconfig.ApplicationReceipt{}, errors.New("application requests support only BGP and VRRP")
 	}
 	if err := r.Observe(ctx, u); err != nil {
-		return err
+		return serviceconfig.ApplicationReceipt{}, err
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	current, ok := r.records[u.Name]
 	binding, bound := r.bindings[u.Name]
 	if !ok || !bound || binding.digest != u.ConfigDigest || !sameUpdate(current, u) {
-		return ErrStale
+		return serviceconfig.ApplicationReceipt{}, ErrStale
 	}
 	return r.waitApplicationLocked(ctx, u)
 }
@@ -909,7 +873,6 @@ func (r *Runtime) Handler() http.Handler {
 	r.observationRoutes(mux)
 	r.aftrRoutes(mux)
 	r.bfdRoutes(mux)
-	r.vrrpActivationRoutes(mux)
 	mux.HandleFunc("GET /v1/services", func(w http.ResponseWriter, req *http.Request) { localapi.JSON(w, 200, r.State()) })
 	mux.HandleFunc("POST /v1/services/state", func(w http.ResponseWriter, req *http.Request) {
 		var u serviceconfig.Update
@@ -937,7 +900,8 @@ func (r *Runtime) Handler() http.Handler {
 			localapi.Fail(w, 400, err)
 			return
 		}
-		if err := r.Apply(req.Context(), u); err != nil {
+		receipt, err := r.Apply(req.Context(), u)
+		if err != nil {
 			code := 422
 			if errors.Is(err, ErrStale) {
 				code = 409
@@ -945,7 +909,7 @@ func (r *Runtime) Handler() http.Handler {
 			localapi.Fail(w, code, err)
 			return
 		}
-		localapi.JSON(w, 200, serviceconfig.ApplicationReceipt{Applied: true})
+		localapi.JSON(w, 200, receipt)
 	})
 	mux.HandleFunc("GET /v1/services/{name}/dns-leases", func(w http.ResponseWriter, req *http.Request) {
 		projection, err := r.DNSLeases(req.PathValue("name"))
@@ -1043,7 +1007,6 @@ func (r *Runtime) reconcileDynamic(ctx context.Context) error {
 			return cacheErr
 		}
 		r.bindings = bindings
-		r.pruneVRRPAuthoritiesLocked()
 		r.installBFDCacheLocked(bfdSources, bfdRecipients)
 		for name, input := range r.aftrInputs {
 			if b, ok := bindings[name]; !ok || b.digest != input.ConfigDigest {
@@ -1065,14 +1028,21 @@ func (r *Runtime) reconcileDynamic(ctx context.Context) error {
 		r.installed = modules
 		return nil
 	}
+	r.reportReadiness(ctx)
+	return nil
+}
+
+// Application completion and readiness differ: an elected graceful MASTER may
+// still be waiting for admission. Configuration and monitoring report the same
+// current readiness rather than advertising Ready from a successful write alone.
+func (r *Runtime) reportReadiness(ctx context.Context) {
 	if err := r.CheckReady(ctx); err != nil {
 		r.failure(err)
-		return nil // projection completed; readiness is reported separately
+		return
 	}
 	r.mu.Lock()
 	r.phase, r.lastError = "ready", ""
 	r.mu.Unlock()
-	return nil
 }
 func (r *Runtime) prepareIfChanged(v []serviceconfig.Instance) (map[string]binding, []supervisor.DynamicModule, error) {
 	r.mu.Lock()

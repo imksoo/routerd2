@@ -109,12 +109,12 @@ resources:
 		t.Fatal(err)
 	}
 	fixture := startFixtureDaemon(t, program)
-	readState := func() control.State {
+	readyState := func() control.State {
 		t.Helper()
 		var state control.State
-		if err := fixture.control.Do(context.Background(), "GET", "/v1/config", nil, &state); err != nil {
-			t.Fatal(err)
-		}
+		until(t, 5*time.Second, func() bool {
+			return fixture.control.Do(context.Background(), "GET", "/v1/config", nil, &state) == nil && state.Healthy
+		})
 		return state
 	}
 	assertSource := func(state control.State, revision uint64, source config.Document) {
@@ -142,7 +142,7 @@ resources:
 		}
 		assertPreserved()
 	}
-	assertSource(readState(), 1, program)
+	assertSource(readyState(), 1, program)
 	assertManaged("192.0.2.2/24", "192.0.2.1", 1440)
 	resourceProgramPacket(t, listener, "192.0.2.2")
 	t.Log("source graph applied by real workers; dependent route carried a UDP round trip")
@@ -155,7 +155,7 @@ resources:
 	if err := fixture.control.Do(context.Background(), "POST", "/v1/config/commit", request, nil); err != nil {
 		t.Fatal(err)
 	}
-	assertSource(readState(), 2, updated)
+	assertSource(readyState(), 2, updated)
 	assertManaged("192.0.3.2/24", "192.0.3.1", 1420)
 	if resourceProgramAddress(t, link, "192.0.2.2/24") || resourceProgramRoute(t, "203.0.113.0/24", "192.0.2.1", link.Attrs().Index, 200) {
 		t.Fatal("update retained the previous address or route next hop")
@@ -176,7 +176,7 @@ resources:
 		if !localapi.IsHTTPStatus(err, 400) || !strings.Contains(err.Error(), invalid.diagnostic) {
 			t.Fatalf("invalid %s graph did not fail before apply: %v", invalid.name, err)
 		}
-		assertSource(readState(), 2, updated)
+		assertSource(readyState(), 2, updated)
 		assertManaged("192.0.3.2/24", "192.0.3.1", 1420)
 		if resourceProgramAddress(t, link, "192.0.9.2/24") {
 			t.Fatal("invalid graph changed the kernel before validation")
@@ -233,7 +233,7 @@ resources:
 		}
 		return false
 	})
-	assertSource(readState(), 2, updated)
+	assertSource(readyState(), 2, updated)
 	assertManaged("192.0.3.2/24", "192.0.3.1", 1420)
 	resourceProgramPacket(t, listener, "192.0.3.2")
 	t.Log("replacement control worker reloaded committed source and repaired deleted kernel objects")
@@ -249,7 +249,7 @@ resources:
 	if err := fixture.control.Do(context.Background(), "POST", "/v1/config/commit", request, nil); err != nil {
 		t.Fatal(err)
 	}
-	assertSource(readState(), 3, remaining)
+	assertSource(readyState(), 3, remaining)
 	if resourceProgramAddress(t, link, "192.0.3.2/24") || resourceProgramRoute(t, "203.0.113.0/24", "", link.Attrs().Index, 200) {
 		t.Fatal("removed source owner retained its address or dependent route")
 	}

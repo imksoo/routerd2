@@ -9,7 +9,9 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/localapi"
+	"github.com/imksoo/routerd2/internal/protocol/vrrp"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
 
@@ -35,7 +37,14 @@ func (r *Runtime) instanceStatusLocked(name string, b binding, v serviceconfig.U
 		v = r.bfdRecord(name, b.digest)
 	}
 	out := instanceStatus(name, b, v, detail)
-	if v.Role == "bgp" || v.Role == "vrrp" || v.Role == "dhcp_server" {
+	if v.Role == "vrrp" {
+		var election vrrp.Snapshot
+		clock, err := boottime.Read()
+		if json.Unmarshal(v.Snapshot, &election) == nil && election.State == vrrp.StateActive {
+			out.OwnershipExpired = err != nil || !vrrp.CurrentElection(election, clock)
+		}
+	}
+	if v.Role == "bgp" || v.Role == "dhcp_server" {
 		var grant struct {
 			Active bool `json:"active"`
 		}

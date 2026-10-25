@@ -81,14 +81,13 @@ func ValidateSnapshot(raw Config, s Snapshot) error {
 			return errors.New("invalid graceful VRRP activation start")
 		}
 		if s.Active {
-			g := s.ActivationGrant
-			if s.ActivationState != "Ready" || g.ID == 0 || g.BootID != s.BootID || g.ElectionEpoch != s.Epoch || g.Transition != s.Transition || g.ObservedNanos > s.ObservedNanos || g.ExpiresNanos <= g.ObservedNanos {
+			if s.ActivationState != "Ready" {
 				return errors.New("invalid graceful VRRP publication metadata")
 			}
 		} else if s.ActivationState != "Preparing" && s.ActivationState != "ReadinessTimeout" {
 			return errors.New("invalid pending VRRP activation state")
 		}
-	} else if s.ActivationState != "" || s.ActivationStartedNanos != 0 || s.ActivationGrant != (ActivationGrant{}) {
+	} else if s.ActivationState != "" || s.ActivationStartedNanos != 0 {
 		return errors.New("unexpected VRRP activation metadata")
 	}
 	if !s.Active && !s.ValidUntil.IsZero() {

@@ -21,11 +21,11 @@ func TestProtocolApplicationRequiresAnApplicationReply(t *testing.T) {
 				}
 				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, nil
 			})}}}
-			if err := c.send(context.Background(), []byte(`{"active":false}`)); err == nil {
+			if _, err := c.send(context.Background(), []byte(`{"active":false}`)); err == nil {
 				t.Fatal("a plain observation receipt authorized protocol progress", err)
 			}
 			body = `{"applied":true}`
-			if err := c.send(context.Background(), []byte(`{"active":false}`)); err != nil {
+			if _, err := c.send(context.Background(), []byte(`{"active":false}`)); err != nil {
 				t.Fatal("explicit application reply was not accepted", err)
 			}
 		})

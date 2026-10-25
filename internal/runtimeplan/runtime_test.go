@@ -260,13 +260,13 @@ func TestPDProjectionKeepsDeprecatedAddressesAndStableRAIdentity(t *testing.T) {
 	}
 }
 
-func TestVRRPOwnershipExpiresOnMonotonicReceiptAndRejectsPolicySpoof(t *testing.T) {
+func TestVRRPVirtualOwnershipUsesNoDADAndRejectsPolicySpoof(t *testing.T) {
 	c := vrrp.Config{Interface: "lan0", Family: "ipv6", VirtualRouterID: 42, AcceptMode: true, Addresses: []string{"fe80::42/64", "2001:db8:42::1/64"}}
 	doc := config.Native{Services: []serviceconfig.Service{{Name: "ha", VRRP: &c}}}
 	r, n, _ := fixture(t, doc)
 	c = doc.Services[0].VRRPConfig()
 	s := bootVRRPSnapshot(t, c)
-	if e := acceptVRRPAndDrain(t, r, update(t, r, "service.ha", 1, s)); e != nil {
+	if _, e := applyAndDrain(t, r, update(t, r, "service.ha", 1, s)); e != nil {
 		t.Fatal(e)
 	}
 	if len(n.applied.Links) != 1 || n.applied.Links[0].IPv6AddrGenMode != "none" {
@@ -283,19 +283,10 @@ func TestVRRPOwnershipExpiresOnMonotonicReceiptAndRejectsPolicySpoof(t *testing.
 	}
 	bad := s
 	bad.AcceptMode = false
-	if acceptVRRPAndDrain(t, r, update(t, r, "service.ha", 2, bad)) == nil {
+	if _, err := applyAndDrain(t, r, update(t, r, "service.ha", 2, bad)); err == nil {
 		t.Fatal("producer changed configured acceptance policy")
 	}
-	// Simulate monotonic expiration while the absolute wall deadline is future.
-	r.mu.Lock()
-	r.leases["service.ha"] = time.Now().Add(-time.Second)
-	r.mu.Unlock()
-	if e := r.reconcileDynamic(context.Background()); e != nil {
-		t.Fatal(e)
-	}
-	if len(n.applied.Links) != 0 {
-		t.Fatal("expired ownership kept the VMAC interface")
-	}
+
 }
 
 func TestDHCPLeaseCannotReplaceStaticAddressOwnership(t *testing.T) {

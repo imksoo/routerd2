@@ -39,8 +39,8 @@ interface's VRF association and the active virtual interface's VRF membership.
 
 ## Single-writer effects and liveness contract
 
-`Effects.Update(ctx, Snapshot) error` is an acknowledgment of completed effects,
-not a queue submission. `Snapshot` includes resource identity, process epoch,
+`Effects.Apply(ctx, Snapshot) (bool, error)` returns completed kernel application
+and whether the VIP is actually owned. It does not acknowledge a queue submission. `Snapshot` includes resource identity, process epoch,
 transition number, active state, virtual MAC, virtual interface, host CIDRs,
 accept policy, peer observation and counters.
 
@@ -60,7 +60,8 @@ an input policy preventing local delivery to non-owner VIPs while retaining
 necessary IPv6 ND; this package does not install that policy. Returning success
 without these effects violates the module contract.
 
-Every positive advertisement is preceded by an acknowledged lease renewal.
+Every advertisement of published ownership follows an acknowledged renewal.
+A graceful election may advertise while withholding VIP publication.
 `BootID`, `ObservedNanos` and `ExpiresNanos` bind its original CLOCK_BOOTTIME
 observation and deadline. The bounded lifetime is three local advertisement
 intervals plus priority skew. `ValidUntil` is UTC display metadata only.
@@ -87,12 +88,10 @@ producer generation. Rewound observations, changed epochs or a later Active
 after Initialize are refused. A paused Active process whose lease already
 expired must not renew or advertise under its old election transition.
 
-The wire snapshot now requires boot evidence; the unreleased UTC-only prototype
-snapshot is refused. No persistent state codec is changed or restored. This
-does not implement all track/cluster/graceful-activation or resource-condition
-policies in HA-01. In particular, the real-daemon authority gate uses an
-unconditional VRRP declaration; conditional callback/kernel-ACK ordering still
-requires its own acceptance gate.
+The coordinator uses the original boot clock directly. It does not derive a
+second receipt lease or rewrite an expired election snapshot. Track policy,
+unicast peers, legacy version/authentication and cluster coordination remain
+separate HA-01 work.
 
 `make qemu-vrrp-daemon` exercises actual supervisor/control/network/VRRP workers,
 VIP TCP/UDP traffic and capture, original deadline expiry/reapply, worker/control
@@ -182,21 +181,24 @@ VRRP election advertisements but owns no VIP/VMAC and sends no VIP GARP/NA.
 `ActivationState` reports `Preparing` or `ReadinessTimeout`; timeout never forces
 publication and the same live election can retry when readiness recovers.
 
-The bundled effects client requests a control-issued admission permission tied
-to the boot, source, producer and election observation. Initial kernel ownership
-uses that original short deadline, then an acknowledged admission is promoted
-to the original election lifetime. No neighbor announcement precedes the final
-network ACK and existing netlink ownership verification. Linux address lifetimes
-use integer seconds; autonomous kernel expiry has that existing rounding
-resolution, not nanosecond precision. Permission validation and promotion use
-the original BOOTTIME boundary without renewal.
+Each election update uses the same application request. The coordinator checks
+finite `ready_when` evidence immediately before starting a new kernel activation.
+It installs the VIP with the election's original BOOTTIME deadline and replies
+with the ownership actually applied. There is no grant exchange, provisional VIP
+or lifetime promotion. Neighbor announcements follow the application reply and
+native netlink verification. Linux address lifetimes retain their integer-second
+rounding resolution.
 
-Readiness is an admission condition. Once the publication is acknowledged for
-that election, readiness degradation alone does not withdraw it or restart the
-admission timeout. Role loss, conditional exclusion, worker replacement and
-finite ownership expiry still fence it. A stopped/expired election cannot renew
-under its former transition. `service.NAME.elected` is a finite role fact;
-`service.NAME.active` remains unknown during unacknowledged initial publication.
+Readiness is consumed when that kernel operation begins. If the operation
+succeeds, later readiness loss—including loss during that I/O—does not withdraw
+the election. A failed initial activation creates no admission; retry needs current
+readiness. The coordinator retains only the successfully applied election key.
+Role loss, conditional exclusion, worker replacement and original finite expiry
+still fence ownership. A stopped or expired election cannot renew under its
+former transition. `service.NAME.elected` is a finite role fact;
+`service.NAME.active` reflects the coordinator's applied ownership, including
+when the worker's last submitted observation was still pending. Missing or
+expired producer evidence is unknown.
 
 This is not the complete legacy VirtualAddress/cluster/track/VMAC contract.
 General legacy status references, cluster fencing and all protocol/hardware

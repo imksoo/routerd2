@@ -46,39 +46,35 @@ type Config struct {
 	AcceptMode                 bool                `json:"accept_mode,omitempty"`
 }
 
-// Snapshot describes an ownership request. A successful Update must mean that
-// the requested state is applied, not merely queued. In Active state the
-// forwarding owner must install the VMAC link and all VIPs, gate RA producers,
-// and enforce AcceptMode (while preserving IPv6 ND). In inactive states it
-// must withdraw the owned VIPs and stop answering ARP/ND or forwarding frames
-// destined for the virtual MAC. The observer never owns those kernel writes.
+// Snapshot reports election state and the worker's requested publication state.
+// The coordinator decides admission, applies the VIP and returns its actual
+// ownership from Effects.Apply. Election messages cannot grant themselves a VIP.
 type Snapshot struct {
-	ActivationState        string          `json:"activation_state,omitempty"`
-	ActivationStartedNanos uint64          `json:"activation_started_nanos,omitempty"`
-	ActivationGrant        ActivationGrant `json:"activation_grant,omitempty"`
-	BootID                 string          `json:"boot_id"`
-	ObservedNanos          uint64          `json:"observed_nanos"`
-	ExpiresNanos           uint64          `json:"expires_nanos"`
-	Resource               string          `json:"resource"`
-	Interface              string          `json:"interface"`
-	VIPInterface           string          `json:"vip_interface"`
-	VRF                    string          `json:"vrf,omitempty"`
-	Family                 string          `json:"family"`
-	SourceAddress          string          `json:"source_address"`
-	VirtualRouterID        int             `json:"virtual_router_id"`
-	VirtualMAC             string          `json:"virtual_mac"`
-	Addresses              []string        `json:"addresses"`
-	Active                 bool            `json:"active"`
-	State                  string          `json:"state"`
-	AcceptMode             bool            `json:"accept_mode"`
-	AddressOwner           bool            `json:"address_owner"`
-	Epoch                  string          `json:"epoch"`
-	Transition             uint64          `json:"transition"`
-	Priority               int             `json:"priority"`
-	Peer                   string          `json:"peer,omitempty"`
-	PeerPriority           int             `json:"peer_priority,omitempty"`
-	ActiveIntervalCS       int             `json:"active_interval_centiseconds"`
-	Deadline               time.Time       `json:"deadline,omitempty"`
+	ActivationState        string    `json:"activation_state,omitempty"`
+	ActivationStartedNanos uint64    `json:"activation_started_nanos,omitempty"`
+	BootID                 string    `json:"boot_id"`
+	ObservedNanos          uint64    `json:"observed_nanos"`
+	ExpiresNanos           uint64    `json:"expires_nanos"`
+	Resource               string    `json:"resource"`
+	Interface              string    `json:"interface"`
+	VIPInterface           string    `json:"vip_interface"`
+	VRF                    string    `json:"vrf,omitempty"`
+	Family                 string    `json:"family"`
+	SourceAddress          string    `json:"source_address"`
+	VirtualRouterID        int       `json:"virtual_router_id"`
+	VirtualMAC             string    `json:"virtual_mac"`
+	Addresses              []string  `json:"addresses"`
+	Active                 bool      `json:"active"`
+	State                  string    `json:"state"`
+	AcceptMode             bool      `json:"accept_mode"`
+	AddressOwner           bool      `json:"address_owner"`
+	Epoch                  string    `json:"epoch"`
+	Transition             uint64    `json:"transition"`
+	Priority               int       `json:"priority"`
+	Peer                   string    `json:"peer,omitempty"`
+	PeerPriority           int       `json:"peer_priority,omitempty"`
+	ActiveIntervalCS       int       `json:"active_interval_centiseconds"`
+	Deadline               time.Time `json:"deadline,omitempty"`
 	// Display metadata only. ExpiresNanos in BootID defines actual authority.
 	ValidUntil       time.Time `json:"valid_until,omitempty"`
 	Advertisements   uint64    `json:"advertisements"`
@@ -89,13 +85,14 @@ type Snapshot struct {
 	LastError        string    `json:"last_error,omitempty"`
 }
 
+// Effects applies one election observation and reports whether the VIP is owned.
 type Effects interface {
-	Update(context.Context, Snapshot) error
+	Apply(context.Context, Snapshot) (bool, error)
 }
 
-type EffectsFunc func(context.Context, Snapshot) error
+type EffectsFunc func(context.Context, Snapshot) (bool, error)
 
-func (f EffectsFunc) Update(ctx context.Context, s Snapshot) error { return f(ctx, s) }
+func (f EffectsFunc) Apply(ctx context.Context, s Snapshot) (bool, error) { return f(ctx, s) }
 
 func Normalize(c Config) Config {
 	if c.GracefulActivation != nil {

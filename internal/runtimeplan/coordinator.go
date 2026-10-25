@@ -24,6 +24,7 @@ type pendingApplication struct {
 	sourceEpoch uint64
 	done        chan struct{}
 	err         error
+	receipt     serviceconfig.ApplicationReceipt
 }
 
 func sameUpdate(a, b serviceconfig.Update) bool {
@@ -31,30 +32,30 @@ func sameUpdate(a, b serviceconfig.Update) bool {
 }
 
 // Caller holds mu. Wait releases it so the actor can apply and acknowledge.
-func (r *Runtime) waitApplicationLocked(ctx context.Context, u serviceconfig.Update) error {
+func (r *Runtime) waitApplicationLocked(ctx context.Context, u serviceconfig.Update) (serviceconfig.ApplicationReceipt, error) {
 	if err := ctx.Err(); err != nil {
-		return err
+		return serviceconfig.ApplicationReceipt{}, err
 	}
 	clock, err := boottime.Read()
 	if err != nil {
-		return err
+		return serviceconfig.ApplicationReceipt{}, err
 	}
 	switch u.Role {
 	case "vrrp":
 		var s vrrp.Snapshot
 		if err := json.Unmarshal(u.Snapshot, &s); err != nil {
-			return err
+			return serviceconfig.ApplicationReceipt{}, err
 		}
-		if s.Active && !vrrp.CurrentOwnership(s, clock) {
-			return ErrStale
+		if s.State == vrrp.StateActive && !vrrp.CurrentElection(s, clock) {
+			return serviceconfig.ApplicationReceipt{}, ErrStale
 		}
 	case "bgp":
 		provider, err := bgpProviderFor(u)
 		if err != nil {
-			return err
+			return serviceconfig.ApplicationReceipt{}, err
 		}
 		if provider.snapshot.Active && !bgpconfig.CurrentObservation(provider.snapshot, clock) {
-			return ErrStale
+			return serviceconfig.ApplicationReceipt{}, ErrStale
 		}
 	}
 	if r.applications == nil {
@@ -79,9 +80,9 @@ func (r *Runtime) waitApplicationLocked(ctx context.Context, u serviceconfig.Upd
 	if err := ctx.Err(); err != nil {
 		// Other transport retries can still wait on this same observation. Dropping
 		// the caller does not revoke or renew a fact or manufacture a kernel ACK.
-		return err
+		return serviceconfig.ApplicationReceipt{}, err
 	}
-	return effect.err
+	return effect.receipt, effect.err
 }
 
 func (r *Runtime) finishApplicationLocked(name string, err error) {
@@ -98,9 +99,6 @@ func (r *Runtime) fenceApplicationsLocked() {
 	for name, effect := range r.applications {
 		module, ok := r.guardStatus[name]
 		valid := ok && effect.sourceEpoch == r.sourceEpoch && module.Role == effect.update.Role && module.Generation == effect.update.Generation && module.ConfigDigest == effect.update.ConfigDigest
-		if valid && effect.update.Role == "vrrp" {
-			valid = r.validateVRRPAdmissionLocked(effect.update) == nil
-		}
 		if valid {
 			continue
 		}
@@ -126,23 +124,26 @@ func (r *Runtime) finishApplicationsLocked(p projection, applyErr error) {
 		if err == nil {
 			switch effect.update.Role {
 			case "vrrp":
-				err = vrrpEffectApplied(effect.update, p.network)
+				_, active := p.vrrpOwners[name]
+				effect.receipt.Active = active
+				err = vrrpEffectApplied(effect.update, p.network, active)
 			case "bgp":
 				err = bgpApplicationApplied(effect.update, p)
 			}
 		}
+		effect.receipt.Applied = err == nil
 		r.finishApplicationLocked(name, err)
 	}
 }
 
-func vrrpEffectApplied(u serviceconfig.Update, d network.Desired) error {
+func vrrpEffectApplied(u serviceconfig.Update, d network.Desired, active bool) error {
 	var s vrrp.Snapshot
 	if err := json.Unmarshal(u.Snapshot, &s); err != nil {
 		return err
 	}
-	if s.Active {
+	if s.State == vrrp.StateActive {
 		clock, err := boottime.Read()
-		if err != nil || !vrrp.CurrentOwnership(s, clock) {
+		if err != nil || !vrrp.CurrentElection(s, clock) {
 			return errors.Join(ErrStale, err)
 		}
 	}
@@ -150,12 +151,12 @@ func vrrpEffectApplied(u serviceconfig.Update, d network.Desired) error {
 	for _, link := range d.Links {
 		if link.Name == s.VIPInterface {
 			linkPresent = true
-			if s.Active && (link.Kind != "macvlan" || link.Parent != s.Interface || link.HardwareAddr != s.VirtualMAC) {
+			if active && (link.Kind != "macvlan" || link.Parent != s.Interface || link.HardwareAddr != s.VirtualMAC) {
 				return errors.New("VRRP VMAC effect does not match publication")
 			}
 		}
 	}
-	if linkPresent != s.Active {
+	if linkPresent != active {
 		return errors.New("VRRP ownership is not in the applied resource projection")
 	}
 	for _, address := range s.Addresses {
@@ -170,12 +171,12 @@ func vrrpEffectApplied(u serviceconfig.Update, d network.Desired) error {
 				}
 				found = true
 				opts := iface.AddressOptions[address]
-				if s.Active && (opts.BootLifetime.BootID != s.BootID || opts.BootLifetime.ValidNanos != s.ExpiresNanos || opts.BootLifetime.PreferredNanos != s.ExpiresNanos) {
+				if active && (opts.BootLifetime.BootID != s.BootID || opts.BootLifetime.ValidNanos != s.ExpiresNanos || opts.BootLifetime.PreferredNanos != s.ExpiresNanos) {
 					return errors.New("VRRP VIP effect changed original authority")
 				}
 			}
 		}
-		if found != s.Active {
+		if found != active {
 			return errors.New("VRRP VIP effect does not match publication")
 		}
 	}
@@ -190,6 +191,10 @@ func (r *Runtime) pendingWithdrawalLocked(name string) bool {
 	current, ok := r.records[name]
 	if !ok || !sameUpdate(current, effect.update) {
 		return false
+	}
+	if current.Role == "vrrp" {
+		var s vrrp.Snapshot
+		return json.Unmarshal(current.Snapshot, &s) == nil && s.State != vrrp.StateActive
 	}
 	var s struct {
 		Active bool `json:"active"`
@@ -273,9 +278,20 @@ func (r *Runtime) wakeCoordinatorLocked() {
 // The operation owner holds op and mu. Protocol callbacks only record input;
 // network effects, published views and acknowledgements complete here.
 func (r *Runtime) applyProjectionLocked(ctx context.Context, p projection) (projection, error) {
-	p, err := r.applyVRRPProjectionLocked(ctx, p)
+	if p.activationUntil != 0 {
+		clock, err := boottime.Read()
+		if err != nil || uint64(clock.BoottimeNanoseconds) >= p.activationUntil {
+			err = errors.Join(ErrStale, err)
+			r.finishApplicationsLocked(p, err)
+			return p, err
+		}
+	}
+	// Admission is consumed at the start of this kernel operation. Subsequent
+	// readiness loss does not revoke a successfully applied election.
+	err := r.applyNetworkLocked(ctx, p.network)
 	if err == nil {
 		r.resourceStates, r.liveRA, r.routeIssues, r.bgpApplied = p.resources, p.liveRA, p.routeIssues, p.bgpStatus
+		r.vrrpOwners = p.vrrpOwners
 		r.applied.observationVersion = p.observationVersion
 		r.applied.sourceEpoch = r.sourceEpoch
 		if p.observationVersion != r.observationVersion {

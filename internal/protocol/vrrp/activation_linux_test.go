@@ -11,24 +11,16 @@ import (
 
 type activationEffects struct {
 	device    *fakeTransport
-	allowed   bool
-	queries   int
+	published bool
 	snapshots []Snapshot
 }
 
-func (e *activationEffects) Update(_ context.Context, s Snapshot) error {
+func (e *activationEffects) Apply(_ context.Context, s Snapshot) (bool, error) {
 	e.snapshots = append(e.snapshots, s)
 	e.device.mu.Lock()
-	e.device.active = s.Active
+	e.device.active = e.published
 	e.device.mu.Unlock()
-	return nil
-}
-func (e *activationEffects) GrantActivation(_ context.Context, s Snapshot) (ActivationGrant, error) {
-	e.queries++
-	if !e.allowed {
-		return ActivationGrant{}, nil
-	}
-	return ActivationGrant{ID: 1, BootID: s.BootID, ElectionEpoch: s.Epoch, Transition: s.Transition, ObservedNanos: s.ObservedNanos, ExpiresNanos: s.ObservedNanos + uint64(time.Second)}, nil
+	return e.published, nil
 }
 
 func TestGracefulTimeoutNeverPublishesAndReadinessIsAdmissionOnly(t *testing.T) {
@@ -58,36 +50,11 @@ func TestGracefulTimeoutNeverPublishesAndReadinessIsAdmissionOnly(t *testing.T) 
 			t.Fatal("unready role emitted neighbor announcement")
 		}
 	}
-	effects.allowed = true
+	effects.published = true
 	if err := applyActions(context.Background(), m, actions{update: true}, d, effects); err != nil {
 		t.Fatal(err)
 	}
 	if !m.published || m.snapshot().ActivationState != "Ready" {
 		t.Fatal("late readiness did not publish retryable election", m.snapshot())
-	}
-	queries := effects.queries
-	effects.allowed = false
-	if err := applyActions(context.Background(), m, actions{update: true, advertise: true}, d, effects); err != nil {
-		t.Fatal(err)
-	}
-	if !m.published || queries != effects.queries {
-		t.Fatal("readiness loss revoked previously published election")
-	}
-}
-
-func TestActivationGrantOriginalBootBoundary(t *testing.T) {
-	s := Snapshot{State: StateActive, BootID: bootClock(100).BootID, Epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Transition: 1, ObservedNanos: 100, ExpiresNanos: 1000}
-	g := ActivationGrant{ID: 1, BootID: s.BootID, ElectionEpoch: s.Epoch, Transition: 1, ObservedNanos: 100, ExpiresNanos: 500}
-	if !g.ValidFor(s, bootClock(499)) || g.ValidFor(s, bootClock(500)) {
-		t.Fatal("activation boundary was not exclusive")
-	}
-	clock := bootClock(499)
-	clock.WallTime = clock.WallTime.Add(-48 * time.Hour)
-	if !g.ValidFor(s, clock) {
-		t.Fatal("UTC changed admission authority")
-	}
-	clock.BootID = "7bbe264e-57c0-4ee6-aa19-67c3a1d244fb"
-	if g.ValidFor(s, clock) {
-		t.Fatal("another boot reused admission")
 	}
 }

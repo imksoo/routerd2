@@ -81,6 +81,12 @@ Active worker は広告ごとに有限の所有権を更新する。controller �
 受信時の monotonic deadline を持ち、clock の巻き戻りで所有権を延長しない。
 SIGKILL や停止した worker の replay だけで Active を維持しない。
 
+graceful activationはcoordinatorが適用開始時に有限の準備条件を評価する。
+同じ適用要求の応答でVIPの実所有状態を返し、grant往復・仮VIP・期限昇格は行わない。
+成功した選挙のkeyだけを保持し、その後の準備喪失では撤去しない。適用失敗は入場許可を
+残さず、再試行で現在の準備条件を使う。VRRPの鮮度と条件factは元の選挙観測を直接使い、
+受信時刻から作る別リースや、失効を表すJSON書換えを置かない。
+
 BGP の選択経路は full RIB snapshot から network に投影する。ECMP の複数経路を
 単一 RouteReplace の繰り返しで潰さない。next hop の再帰解決は committed connected/static/
 learned intent と VRF table に従う。未解決 path は `show services` の `route_issues` に

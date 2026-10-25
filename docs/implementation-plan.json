@@ -300,12 +300,11 @@
         "internal/supervisor"
       ],
       "implementation_notes": {
-        "implemented": "Compile static graph/programs once; direct finite facts; one coordinator-owned kernel application boundary for configuration, monitoring and startup/stop waits. Observation receipts are separate from explicit BGP/VRRP application completion. Kernel IO releases the observation mutex and completion fences newer input. Prepare instance files once outside the observation mutex, reuse canonical bytes for digest and write, and repeat preparation/quiescence only if instance membership changed during the wait.",
+        "implemented": "Compile static plans once and evaluate finite facts directly. One coordinator owns kernel application during configuration, monitoring and worker startup/stop. Observation receipts differ from BGP/VRRP application results. Instance preparation reuses canonical bytes outside the observation mutex. VRRP admission and actual ownership use one request, the original boot deadline and one applied-election map; no grant exchange, provisional promotion, receipt lease or expiry JSON rewrite.",
         "validation": "Current local/real-daemon results and untested scope are in docs/pve-codex-handoff.md; historical checkpoints are not acceptance authority.",
         "remaining": [
-          "Simplify VRRP admission and publication state; remove the grant round trip.",
           "Unify duplicated worker selection during normal reconciliation and startup/stop waits.",
-          "Keep accepted protocol data typed; remove JSON expiry rewrites and repeated instance compilation during retention checks."
+          "Keep remaining accepted protocol data typed; remove their JSON expiry rewrites and repeated instance compilation during retention checks."
         ]
       }
     },
@@ -886,7 +885,7 @@
       "title": "VRRP・VirtualAddress・RouterdCluster",
       "milestone": "M3",
       "track": "network",
-      "status": "planned",
+      "status": "in_progress",
       "scope": "baseline_parity",
       "risk": "high",
       "depends_on": [
@@ -919,7 +918,8 @@
         "internal/network",
         "internal/cluster (新設予定)",
         "internal/legacyconfig"
-      ]
+      ],
+      "implementation_notes": "Native VRRP election and coordinator-owned graceful admission implemented. Admission consumes finite readiness when kernel application begins; successful ownership survives readiness loss, while failed application creates no admission. Original boot expiry and producer fences remain. Track/unicast/legacy authentication, cluster policy, independent implementation interoperability and hardware qualification are incomplete."
     },
     {
       "id": "HA-02",

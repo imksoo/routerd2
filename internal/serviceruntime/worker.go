@@ -234,13 +234,13 @@ func (c *effectsClient) update(ctx context.Context, v any) error {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if err := c.send(ctx, b); err != nil {
+	if _, err := c.send(ctx, b); err != nil {
 		return err
 	}
 	c.latest = append(c.latest[:0], b...)
 	return nil
 }
-func (c *effectsClient) send(ctx context.Context, b json.RawMessage) error {
+func (c *effectsClient) send(ctx context.Context, b json.RawMessage) (serviceconfig.ApplicationReceipt, error) {
 	c.identity.Sequence++
 	r := c.identity
 	r.Snapshot = b
@@ -249,14 +249,14 @@ func (c *effectsClient) send(ctx context.Context, b json.RawMessage) error {
 	if c.identity.Role == "vrrp" || c.identity.Role == "bgp" {
 		var ack serviceconfig.ApplicationReceipt
 		if err := c.client.Do(callCtx, "POST", "/v1/services/effects", r, &ack); err != nil {
-			return err
+			return ack, err
 		}
 		if !ack.Applied {
-			return errors.New("protocol reply does not acknowledge kernel application")
+			return ack, errors.New("protocol reply does not acknowledge kernel application")
 		}
-		return nil
+		return ack, nil
 	}
-	return c.client.Do(callCtx, "POST", "/v1/services/state", r, nil)
+	return serviceconfig.ApplicationReceipt{}, c.client.Do(callCtx, "POST", "/v1/services/state", r, nil)
 }
 func (c *effectsClient) replay(ctx context.Context) {
 	ticker := time.NewTicker(time.Second)
@@ -268,7 +268,7 @@ func (c *effectsClient) replay(ctx context.Context) {
 		case <-ticker.C:
 			c.mu.Lock()
 			if len(c.latest) > 0 {
-				_ = c.send(ctx, c.latest)
+				_, _ = c.send(ctx, c.latest)
 			}
 			c.mu.Unlock()
 		}

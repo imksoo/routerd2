@@ -24,6 +24,8 @@ import (
 
 type projection struct {
 	observationVersion uint64
+	activationUntil    uint64
+	vrrpOwners         map[string]vrrpOwnership
 	native             config.Native
 	resources          map[string]resourceprogram.ResourceState
 	routeIssues        []RouteIssue
@@ -44,13 +46,15 @@ func project(doc config.Native, runtimeDir, stateDir string, records map[string]
 }
 
 type projectionFacts struct {
-	aftr            map[string]aftr.Input
-	bfdClock        bfd.Clock
-	vrrpPublication map[string]uint64
+	aftr     map[string]aftr.Input
+	bfdClock bfd.Clock
+	// A zero deadline means this election is already admitted.
+	vrrpActivation map[string]uint64
 }
 
-func (r *Runtime) projectLocked(doc config.Native, records map[string]serviceconfig.Update, now time.Time) (projection, error) {
-	facts := projectionFacts{aftr: r.aftrInputs, vrrpPublication: make(map[string]uint64)}
+func (r *Runtime) projectLocked(doc config.Native, records map[string]serviceconfig.Update, now time.Time, policy resourceprogram.FactSnapshot) (projection, error) {
+	facts := projectionFacts{aftr: r.aftrInputs, vrrpActivation: make(map[string]uint64)}
+	facts.bfdClock, _ = bfd.ReadClock()
 	ownedRecords := make(map[string]serviceconfig.Update, len(records))
 	for name, record := range records {
 		if record.Role != "vrrp" {
@@ -66,28 +70,32 @@ func (r *Runtime) projectLocked(doc config.Native, records map[string]servicecon
 			continue
 		}
 		ownedRecords[name] = record
-		var snapshot vrrp.Snapshot
-		if json.Unmarshal(record.Snapshot, &snapshot) == nil && snapshot.Active {
-			if err := r.validateVRRPAdmissionLocked(record); err == nil {
-				facts.vrrpPublication[name] = r.restrictVRRPPublicationLocked(name, record, snapshot)
-			}
-		}
 	}
 
 	for _, service := range doc.Services {
-		if service.BGP != nil || service.DHCP4 != nil || service.VRRP != nil {
-			// A clock read failure withholds DHCP/BGP/BFD-owned paths. It must not
-			// manufacture a new lease or disturb unrelated routing intent.
-			facts.bfdClock, _ = bfd.ReadClock()
-			break
+		if service.VRRP != nil && service.VRRP.GracefulActivation != nil {
+			name := service.ModuleName()
+			u := ownedRecords[name]
+			var election vrrp.Snapshot
+			if json.Unmarshal(u.Snapshot, &election) == nil {
+				if r.ownsVRRPLocked(u, election) {
+					facts.vrrpActivation[name] = 0
+				} else {
+					ready, until := policy.ConditionAuthority(service.VRRP.GracefulActivation.ReadyWhen)
+					if ready == resourceprogram.True && policy.NowNanos != 0 && policy.NowNanos < until {
+						facts.vrrpActivation[name] = until
+					}
+				}
+			}
 		}
+
 	}
 	return projectWithFacts(doc, r.dir, r.stateDir, ownedRecords, now, facts)
 }
 
 func projectWithFacts(doc config.Native, runtimeDir, stateDir string, records map[string]serviceconfig.Update, now time.Time, facts projectionFacts) (projection, error) {
 	b, _ := json.Marshal(doc.Network)
-	p := projection{liveRA: map[string]ra.Config{}, native: doc}
+	p := projection{liveRA: map[string]ra.Config{}, native: doc, vrrpOwners: make(map[string]vrrpOwnership)}
 	if err := json.Unmarshal(b, &p.network); err != nil {
 		return p, err
 	}
@@ -240,20 +248,19 @@ func projectWithFacts(doc config.Native, runtimeDir, stateDir string, records ma
 			if err := json.Unmarshal(record.Snapshot, &snap); err != nil {
 				return p, err
 			}
-			if !vrrp.CurrentOwnership(snap, facts.bfdClock) {
-				continue
-			}
 			c := s.VRRPConfig()
 			if c.GracefulActivation != nil {
-				expires, allowed := facts.vrrpPublication[s.ModuleName()]
-				if !allowed || expires == 0 {
+				until, allowed := facts.vrrpActivation[s.ModuleName()]
+				if !allowed || !vrrp.CurrentElection(snap, facts.bfdClock) {
 					continue
 				}
-				snap.ExpiresNanos = min(snap.ExpiresNanos, expires)
-				if !vrrp.CurrentOwnership(snap, facts.bfdClock) {
-					continue
+				if until != 0 && (p.activationUntil == 0 || until < p.activationUntil) {
+					p.activationUntil = until
 				}
+			} else if !vrrp.CurrentOwnership(snap, facts.bfdClock) {
+				continue
 			}
+			p.vrrpOwners[s.ModuleName()] = ownershipFor(record, snap)
 			p.network.Links = append(p.network.Links, network.Link{Name: c.VIPInterface, Kind: "macvlan", Parent: c.Interface, MACVLANMode: "bridge", HardwareAddr: vrrp.VirtualMAC(c.Family, c.VirtualRouterID).String(), IPv6AddrGenMode: "none"})
 			ensureInterface(&p.network, c.VIPInterface)
 			if c.VRF != "" {
