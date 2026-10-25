@@ -8,6 +8,8 @@ package main
 import (
 	"bytes"
 	"context"
+	_ "embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -20,6 +22,9 @@ import (
 	"github.com/imksoo/routerd2/internal/kmod"
 	"golang.org/x/sys/unix"
 )
+
+//go:embed modules.json
+var kernelModuleManifest []byte
 
 type suite struct {
 	binary, test, marker string
@@ -98,6 +103,11 @@ func run(s suite) (runErr error) {
 	if err := boot.Bootstrap(boot.Options{Platform: boot.Appliance, RuntimeDir: "/run/routerd", StateDir: "/var/lib/routerd"}); err != nil {
 		return err
 	}
+	var rootfs unix.Statfs_t
+	if err := unix.Statfs("/", &rootfs); err != nil {
+		return err
+	}
+	fmt.Printf("ROUTERD_FIXTURE_ROOTFS total_bytes=%d available_bytes=%d\n", rootfs.Blocks*uint64(rootfs.Bsize), rootfs.Bavail*uint64(rootfs.Bsize))
 	// The immutable image already occupies most of the small default rootfs
 	// quota. SQLite needs writable space for both source and target WALs even
 	// when their retained payload is small. Provision test scratch explicitly;
@@ -120,7 +130,11 @@ func run(s suite) (runErr error) {
 		return err
 	}
 	fmt.Printf("ROUTERD_FIXTURE_SCRATCH total_bytes=%d available_bytes=%d\n", scratch.Blocks*uint64(scratch.Bsize), scratch.Bavail*uint64(scratch.Bsize))
-	if err := kmod.Load([]string{"af_packet", "veth", "bridge", "8021q", "vrf", "vxlan", "macvlan", "wireguard", "nf_tables", "nft_ct", "nft_chain_nat", "nft_masq", "nft_nat", "nft_reject_inet", "nft_log", "nf_log_syslog", "ip6_tunnel"}); err != nil {
+	var kernelModules []string
+	if err := json.Unmarshal(kernelModuleManifest, &kernelModules); err != nil {
+		return err
+	}
+	if err := kmod.Load(kernelModules); err != nil {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), s.timeout+5*time.Second)

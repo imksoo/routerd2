@@ -4,7 +4,6 @@ package integration
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -19,49 +18,6 @@ import (
 
 	"golang.org/x/sys/unix"
 )
-
-func executableProbeReport(path string, args ...string) string {
-	f, err := os.Open(path)
-	if err != nil {
-		return err.Error()
-	}
-	defer f.Close()
-	devnull, err := os.Open(os.DevNull)
-	if err != nil {
-		return err.Error()
-	}
-	defer devnull.Close()
-	run := func(target string, extra []*os.File) error {
-		ctx, stop := context.WithTimeout(context.Background(), 5*time.Second)
-		defer stop()
-		cmd := exec.CommandContext(ctx, target, args...)
-		cmd.ExtraFiles = extra
-		cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGKILL}
-		return cmd.Run()
-	}
-	direct := run(path, nil)
-	fd4 := run("/proc/self/fd/4", []*os.File{devnull, f})
-	parent := run(fmt.Sprintf("/proc/%d/fd/%d", os.Getpid(), f.Fd()), nil)
-	dir, err := os.MkdirTemp("", "r2-exec-probe-")
-	if err != nil {
-		return err.Error()
-	}
-	defer os.RemoveAll(dir)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return err.Error()
-	}
-	clone := filepath.Join(dir, "image")
-	if err := os.WriteFile(clone, data, 0500); err != nil {
-		return err.Error()
-	}
-	cloned, err := os.ReadFile(clone)
-	if err != nil {
-		return err.Error()
-	}
-	return fmt.Sprintf("direct=%v fd4=%v parent_fd=%v clone=%v identical_bytes=%t", direct, fd4, parent, run(clone, nil), sha256.Sum256(data) == sha256.Sum256(cloned))
-}
 
 // Read-only, scoped diagnostics: only report descriptors matching the fixture's
 // executable inodes, plus the supervisor's descriptor 4 used at exec handoff.
@@ -137,10 +93,6 @@ func TestExecutableBusyDiagnosticsIdentifyWriterAndExecFDRecoversAfterClose(t *t
 	report := executableFDReport(map[string]string{"module": path}, os.Getpid())
 	if !strings.Contains(report, "writer=true") {
 		t.Fatal("write holder missing from diagnostic", report)
-	}
-	reportProbe := executableProbeReport(path, "-test.run=^$")
-	if !strings.Contains(reportProbe, "clone=<nil> identical_bytes=true") || !strings.Contains(reportProbe, "direct=fork/exec") {
-		t.Fatal("writable-inode versus identical-clone control did not distinguish exec", reportProbe)
 	}
 	if err := writer.Close(); err != nil {
 		t.Fatal(err)

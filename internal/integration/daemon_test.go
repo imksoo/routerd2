@@ -123,7 +123,6 @@ func TestDaemonConfigurationAndRecovery(t *testing.T) {
 	defer func() {
 		if t.Failed() {
 			t.Logf("executable FD diagnostics before shutdown:\n%s", executableFDReport(map[string]string{"modules": b.Workers["network"], "logging": b.Workers["logging"]}, daemon.Process.Pid))
-			t.Logf("read-only executable identity probes: %s", executableProbeReport(b.Workers["network"], "version"))
 		}
 		_ = daemon.Process.Signal(syscall.SIGTERM)
 		select {

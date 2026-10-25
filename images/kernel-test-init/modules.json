@@ -1,0 +1,19 @@
+[
+  "af_packet",
+  "veth",
+  "bridge",
+  "8021q",
+  "vrf",
+  "vxlan",
+  "macvlan",
+  "wireguard",
+  "nf_tables",
+  "nft_ct",
+  "nft_chain_nat",
+  "nft_masq",
+  "nft_nat",
+  "nft_reject_inet",
+  "nft_log",
+  "nf_log_syslog",
+  "ip6_tunnel"
+]

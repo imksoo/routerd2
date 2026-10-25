@@ -257,6 +257,74 @@ def extract_modules(archive, root):
         raise ValueError("source image has no kernel modules")
 
 
+def module_closure(dep_text, builtin_text, roots):
+    """Match the native kmod loader's names, builtins and dependency order."""
+    if len(dep_text) > 8 << 20 or len(builtin_text) > 8 << 20:
+        raise ValueError("module metadata exceeds fixture bounds")
+
+    def safe_path(value):
+        p = PurePosixPath(value)
+        if not value or p.is_absolute() or ".." in p.parts or str(p) != value or not value.endswith(".ko"):
+            raise ValueError("unsafe or compressed module metadata path")
+        return value
+
+    def name(value):
+        return PurePosixPath(value).name.removesuffix(".ko").replace("-", "_")
+
+    files, deps = {}, {}
+    for line in dep_text.splitlines():
+        path, separator, tail = line.partition(":")
+        if not separator:
+            raise ValueError("invalid modules.dep record")
+        path = safe_path(path)
+        module = name(path)
+        if module in files:
+            raise ValueError("ambiguous kernel module name")
+        files[module] = path
+        deps[module] = [name(safe_path(d)) for d in tail.split()]
+    builtin = {name(safe_path(p)) for p in builtin_text.splitlines() if p}
+    selected, visiting, done = set(), set(), set()
+
+    def visit(module):
+        module = module.replace("-", "_")
+        if module in builtin or module in done:
+            return
+        if module in visiting:
+            raise ValueError("kernel module dependency cycle")
+        if module not in files:
+            raise ValueError("required kernel module is missing: " + module)
+        visiting.add(module)
+        for dependency in deps[module]:
+            visit(dependency)
+        visiting.remove(module)
+        done.add(module)
+        selected.add(files[module])
+
+    for module in roots:
+        visit(module)
+    return selected
+
+
+def prune_modules(root, kernel_release, roots):
+    """Reduce only a fresh private guest tree, never the source image/evidence."""
+    if not isinstance(kernel_release, str) or PurePosixPath(kernel_release).name != kernel_release or kernel_release in (".", ".."):
+        raise ValueError("unsafe kernel release")
+    base = root / "lib/modules" / kernel_release
+    selected = module_closure((base / "modules.dep").read_text(),
+                             (base / "modules.builtin").read_text() if (base / "modules.builtin").exists() else "", roots)
+    for name in selected:
+        if not (base / name).is_file() or (base / name).is_symlink():
+            raise ValueError("selected module file missing from source image: " + name)
+    omitted, removed_bytes = 0, 0
+    for path in base.rglob("*.ko"):
+        if path.relative_to(base).as_posix() not in selected:
+            removed_bytes += path.stat().st_size
+            path.unlink()
+            omitted += 1
+    return {"roots": roots, "selected_files": sorted(selected), "omitted_module_count": omitted,
+            "omitted_bytes": removed_bytes}
+
+
 def clock_marker(root, suite_name):
     """Only the fixed clock-fault guest receives a per-boot kernel marker."""
     if suite_name != "daemon-dhcp4-clock":
@@ -274,6 +342,7 @@ def main():
     parser.add_argument("--go", default=os.environ.get("GO", "go"))
     parser.add_argument("--qemu", default="qemu-system-x86_64")
     parser.add_argument("--timeout", type=float)
+    parser.add_argument("--prepare-only", action="store_true", help="build verified guest inputs without executing any test")
     args = parser.parse_args()
     suite = SUITES[args.suite]
     timeout = args.timeout if args.timeout is not None else suite["timeout"]
@@ -286,7 +355,7 @@ def main():
     for name in ("vmlinuz", "initramfs.cpio.gz", "manifest.json"):
         if not (image / name).is_file():
             parser.error(f"missing appliance image artifact: {image / name}")
-    if not shutil.which(args.qemu):
+    if not args.prepare_only and not shutil.which(args.qemu):
         parser.error(f"missing QEMU executable: {args.qemu}")
     output.mkdir(parents=True, exist_ok=True)
     # A build failure must not leave an old passing manifest or serial log
@@ -308,6 +377,8 @@ def main():
         source_archive = Path(temporary) / "source-initramfs.cpio.gz"
         shutil.copyfile(image / "initramfs.cpio.gz", source_archive)
         extract_modules(source_archive, root)
+        module_roots = json.loads((PROJECT / "images/kernel-test-init/modules.json").read_text())
+        selected_modules = prune_modules(root, source_manifest["kernel_release"], module_roots)
         print(f"Building the test-only init and {args.suite} test binary...", flush=True)
         subprocess.run([
             args.go, "build", "-trimpath", "-buildvcs=false", "-o", str(root / "init"),
@@ -344,6 +415,8 @@ def main():
             "host_network_access": False, "result": "not-run",
             "guest_memory_mib": 512,
             "test_scratch": {"mountpoint": "/tmp", "filesystem": "tmpfs", "size_bytes": 64 << 20},
+            "kernel_modules": selected_modules,
+            "uncompressed_regular_payload_bytes": sum(p.stat().st_size for p in root.rglob("*") if p.is_file() and not p.is_symlink()),
             "clock_fault": {"enabled": bool(clock_argument), "scope": "guest-only" if clock_argument else "none"},
         }
         spec = importlib.util.spec_from_file_location("mkinitramfs", PROJECT / "images/mkinitramfs.py")
@@ -364,7 +437,13 @@ def main():
         shutil.copyfile(image / "vmlinuz", kernel)
         if hashlib.sha256(kernel.read_bytes()).hexdigest() != manifest["kernel_sha256"]:
             raise RuntimeError("source kernel changed while preparing the guest")
-        run_guest(args, suite, output, manifest, timeout, kernel, archive, clock_argument)
+        if args.prepare_only:
+            manifest["result"] = "prepared"
+            publish_artifact(archive, output / "initramfs.cpio.gz")
+            (output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+            print("Prepared fixed guest inputs; integration test was not executed.", flush=True)
+        else:
+            run_guest(args, suite, output, manifest, timeout, kernel, archive, clock_argument)
 
 
 def publish_artifact(source, destination):
@@ -390,7 +469,7 @@ def require_guest_pass(text, suite, exit_status):
         raise RuntimeError("guest did not emit its exact PASS marker")
     if not any(line.startswith("--- PASS: " + suite["test"] + " (") for line in lines):
         raise RuntimeError("required integration test did not report PASS")
-    if "--- SKIP:" in text or "--- FAIL:" in text or "Kernel panic" in text:
+    if "--- SKIP:" in text or "--- FAIL:" in text or "Kernel panic" in text or "Initramfs unpacking failed:" in text:
         raise RuntimeError("guest reported a skipped or failed test")
     if suite["marker"] + "_FAIL" in text or "ROUTERD_KERNEL_TEST_FAIL" in text:
         raise RuntimeError("guest initializer reported failure")
@@ -411,7 +490,7 @@ def run_guest(args, suite, output, manifest, timeout, kernel, archive, clock_arg
     try:
         while time.monotonic() - started < timeout:
             text = log_path.read_text(errors="replace") if log_path.exists() else ""
-            if suite["marker"] + "_FAIL" in text or "ROUTERD_KERNEL_TEST_FAIL" in text or "Kernel panic" in text:
+            if suite["marker"] + "_FAIL" in text or "ROUTERD_KERNEL_TEST_FAIL" in text or "Kernel panic" in text or "Initramfs unpacking failed:" in text:
                 raise RuntimeError(f"{args.suite} test failed in guest")
             if process.poll() is not None:
                 # Re-read after exit: the final UART writes may have arrived
