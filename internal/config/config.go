@@ -99,13 +99,13 @@ func Compile(d Document) (resourceprogram.Plan, error) {
 	if err != nil {
 		return resourceprogram.Plan{}, err
 	}
-	if err := validateNative(plan.Native); err != nil {
+	if err := validateNative(plan.Native, d); err != nil {
 		return resourceprogram.Plan{}, err
 	}
 	return plan, nil
 }
 
-func validateNative(d Native) error {
+func validateNative(d Native, source Document) error {
 	for _, service := range d.Services {
 		if service.BFD == nil {
 			continue
@@ -199,7 +199,7 @@ func validateNative(d Native) error {
 		}
 	}
 	for _, service := range d.Services {
-		if owner := reserved[service.Interface()]; owner != "" {
+		if owner := reserved[service.Interface()]; owner != "" && !guardedVRRPDependency(source, service.Name, owner) {
 			return fmt.Errorf("service %s cannot use dynamic interface of %s without a dependency", service.Name, owner)
 		}
 	}

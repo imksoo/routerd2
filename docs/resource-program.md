@@ -385,3 +385,23 @@ routerd2 の試作 `schema_version: 1` とその保存 record は読み込まな
 
 元 routerd の条件・依存・削除契約の根拠は [feature-contracts.md](feature-contracts.md) を参照。
 この checkpoint は ResourceProgram の初期実装で、全 resource 契約の同等性を完了したものではない。
+
+## VRRP所有interfaceを使うworker
+
+VRRPが作成するVIP interfaceを他のserviceで使う場合、consumerからVRRP
+resourceへの直接の`depends_on`または`owner`を指定する。
+さらにconsumerの`when`、または依存先の`ready_when`が、対応する
+`service.<name>.active`の真を必須にしなければならない。
+`ready`だけではBACKUPも含むため、interface所有権の条件にならない。
+`all`・`any`・`not`は三値論理で検査し、無関係なOR分岐だけで起動できる条件は拒否する。
+static link/interface/routeの所有権制限や、他protocolのdynamic interface制限は継続する。
+
+条件付きVRRPの通知は受理だけでは成功にならない。coordinatorは依存workerの
+終了を確認してからnetwork workerへVIP/VMACを適用・撤去し、そのACKを待って
+通知元へ応答する。初回Ready待ちと最終終了待ちの間もこの処理を進める。
+ACTIVE成功には元boot IDと絶対期限を保持するVIP投影が必要であり、期限切れ・
+旧世代・上書きされた通知や適用失敗を成功として返さない。
+
+このsource受入範囲の追加に伴い、署名されたconfiguration contractは
+`resource-program-native-2`とする。旧`resource-program-native-1`との更新・fallbackは
+既存のABI検査で拒否する。format migrationや旧compilerとの互換性を表す変更ではない。
