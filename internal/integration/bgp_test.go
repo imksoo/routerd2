@@ -402,6 +402,7 @@ func fixtureClockFiles(name string, forward func() (*os.File, error)) ([]*os.Fil
 type daemonFixture struct {
 	pid                 int
 	control, supervisor *localapi.Client
+	network             *localapi.Client
 	stop                func()
 	restart             func() daemonFixture
 }
@@ -479,7 +480,7 @@ func startFixtureDaemonSelected(t *testing.T, doc config.Document, dir string, s
 			}
 		}
 	})
-	f := daemonFixture{pid: cmd.Process.Pid, control: localapi.NewClient(filepath.Join(runDir, control.SocketName)), supervisor: localapi.NewClient(filepath.Join(runDir, supervisor.SocketName)), stop: stop}
+	f := daemonFixture{pid: cmd.Process.Pid, control: localapi.NewClient(filepath.Join(runDir, control.SocketName)), supervisor: localapi.NewClient(filepath.Join(runDir, supervisor.SocketName)), network: localapi.NewClient(filepath.Join(runDir, control.NetworkSocketName)), stop: stop}
 	f.restart = func() daemonFixture { stop(); return startFixtureDaemonSelected(t, doc, dir, startup) }
 	until(t, 20*time.Second, func() bool {
 		var s supervisor.Status

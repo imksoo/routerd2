@@ -10,7 +10,8 @@ import (
 )
 
 // MaintainAuthority runs in the network worker, independently of control requests.
-// It enforces original protocol deadlines, for routes and virtual links, including after a writer restart.
+// It enforces original protocol deadlines for routes, addresses and virtual
+// links, including after a writer restart.
 // A paused or unavailable writer cannot enforce IPv4 expiry; this is not a
 // kernel timer. The worker owner must cancel and join this loop before Close.
 func (e *Engine) MaintainAuthority(ctx context.Context) error {
@@ -140,13 +141,26 @@ func (e *Engine) expireAuthority(ctx context.Context) (time.Duration, error) {
 		}
 		expiredLinks[link.Name] = true
 	}
-	if len(expiredLinks) > 0 {
-		keep := make(map[addressKey]bool, len(e.state.Addresses))
-		for _, address := range e.state.Addresses {
-			if !expiredLinks[address.Interface] {
-				keep[address.key()] = true
+	keep := make(map[addressKey]bool, len(e.state.Addresses))
+	expiredAddresses := false
+	for _, address := range e.state.Addresses {
+		if expiredLinks[address.Interface] {
+			expiredAddresses = true
+			continue
+		}
+		if lifetime := address.Options.BootLifetime; lifetime.BootID != "" {
+			if lifetime.BootID != clock.BootID || lifetime.ValidNanos <= uint64(clock.BoottimeNanoseconds) {
+				expiredAddresses = true
+				continue
+			}
+			remaining := time.Duration(lifetime.ValidNanos - uint64(clock.BoottimeNanoseconds))
+			if delay == 0 || remaining < delay {
+				delay = remaining
 			}
 		}
+		keep[address.key()] = true
+	}
+	if expiredAddresses {
 		if err := p.removeAddresses(keep); err != nil {
 			e.state.Status, e.state.LastError = "degraded", err.Error()
 			return 0, errors.Join(err, e.save())

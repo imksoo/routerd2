@@ -9,6 +9,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/aftr"
@@ -54,7 +55,11 @@ type projectionFacts struct {
 
 func (r *Runtime) projectLocked(doc config.Native, records map[string]serviceconfig.Update, now time.Time, policy resourceprogram.FactSnapshot) (projection, error) {
 	facts := projectionFacts{aftr: r.aftrInputs, vrrpActivation: make(map[string]uint64)}
-	facts.bfdClock, _ = bfd.ReadClock()
+	var err error
+	facts.bfdClock, err = bfd.ReadClock()
+	if err != nil {
+		return projection{}, err
+	}
 	ownedRecords := make(map[string]serviceconfig.Update, len(records))
 	for name, record := range records {
 		if record.Role != "vrrp" {
@@ -90,7 +95,11 @@ func (r *Runtime) projectLocked(doc config.Native, records map[string]servicecon
 		}
 
 	}
-	return projectWithFacts(doc, r.dir, r.stateDir, ownedRecords, now, facts)
+	p, err := projectWithFacts(doc, r.dir, r.stateDir, ownedRecords, now, facts)
+	if err == nil {
+		p.network = network.ProjectLifetimes(p.network, boottime.Clock{BootID: facts.bfdClock.BootID, BoottimeNanoseconds: facts.bfdClock.BoottimeNanoseconds, WallTime: facts.bfdClock.WallTime})
+	}
+	return p, err
 }
 
 func projectWithFacts(doc config.Native, runtimeDir, stateDir string, records map[string]serviceconfig.Update, now time.Time, facts projectionFacts) (projection, error) {

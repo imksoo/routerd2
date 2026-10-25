@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"strings"
 	"time"
@@ -389,11 +390,27 @@ func (r *Runtime) applyProjectionLocked(ctx context.Context, p projection) (proj
 		r.vrrpOwners = p.vrrpOwners
 		r.applied.observationVersion = p.observationVersion
 		r.applied.sourceEpoch = r.sourceEpoch
-		r.applied.linkUntilNanos = 0
+		until := uint64(math.MaxUint64)
 		for _, link := range p.network.Links {
-			if link.ExpiresNanos != 0 && (r.applied.linkUntilNanos == 0 || link.ExpiresNanos < r.applied.linkUntilNanos) {
-				r.applied.linkUntilNanos = link.ExpiresNanos
+			if link.BootID != "" {
+				until = min(until, link.ExpiresNanos)
 			}
+		}
+		for _, route := range p.network.Routes {
+			if route.BootID != "" {
+				until = min(until, route.ExpiresNanos)
+			}
+		}
+		for _, iface := range p.network.Interfaces {
+			for _, address := range iface.Addresses {
+				if lifetime := iface.AddressOptions[address].BootLifetime; lifetime.BootID != "" {
+					until = min(until, lifetime.ValidNanos)
+				}
+			}
+		}
+		r.applied.untilNanos = 0
+		if until != math.MaxUint64 {
+			r.applied.untilNanos = until
 		}
 		if p.observationVersion != r.observationVersion {
 			r.wakeCoordinatorLocked()

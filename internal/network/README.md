@@ -84,7 +84,7 @@ cached memory. The signed boot preflight fixture compares this response with a
 direct inspection of the actual journal before preparing a pair; operator paired
 prepare/boot and qualification of other state families remain separate work.
 
-Ownership journal format 4 records controller-generated boot-scoped address
+Ownership journal format 5 records controller-generated boot-scoped address
 lifetimes, route deadlines and virtual-link activation deadlines. Earlier unreleased formats are refused without rewriting their contents; no
 prototype format migration or mixed-version rollback is supported. Operator
 configuration cannot declare `boot_lifetime` or link/route `boot_id` and
@@ -98,6 +98,15 @@ of UTC corrections. An expired/foreign-boot intent cannot recreate an address,
 and an externally lengthened live lifetime is not adopted or deleted. Linux
 relative address expiry is also checked with the writer closed. Physical
 suspend remains unqualified.
+
+Conditional address and route resources carry their original condition and
+dependency readiness bounds even on an ordinary physical interface. The writer
+expires owned addresses in the same loop as routes and links, sharing normal
+address-removal ownership checks and secondary ordering. Explicit IPv6 route
+`valid_until` remains a kernel timer alongside the tighter condition BOOTTIME
+bound; both constraints apply. No compatible reader for earlier journals is
+provided. Control and writer use the same pure lifetime projection so an
+intentionally expired address/route does not remain an unapplied requirement.
 
 BGP route deadlines use the source observation's boot ID and absolute expiry;
 neither receipt, writer restart nor reapply creates a new lease. Operator route

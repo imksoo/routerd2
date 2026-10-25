@@ -414,9 +414,10 @@ ACTIVE成功には元boot IDと絶対期限を保持するVIP投影が必要で�
 旧世代・上書きされた通知や適用失敗を成功として返さない。
 
 このsource受入範囲の追加に伴い、署名されたconfiguration contractは
-`resource-program-native-7`とする。条件付きvirtual linkと依存先の準備条件の
-元のboot期限をwriterへ渡し、期限切れのlinkをDOWNにして管理addressを撤去する。
-この内部期限はoperatorのlink resourceへ記述できない。network journalはformat 4とする。
+`resource-program-native-8`とする。条件付きlink・address・routeと依存先の準備条件の
+元のboot期限をwriterへ渡す。期限切れのowned linkをDOWNにし、管理address・routeを撤去する。
+address／routeを直接条件付きにした場合も物理interface上で失効する。
+この内部期限はoperator resourceへ記述できない。network journalはformat 5とする。
 VRRPの明示version、IPv4 v2の秒単位広告・
 任意のPASS認証、unicast peer、Health serviceを参照するtrackのpenalty・連続回数・
 元の観測のmax ageを受け入れる。tracking判定は実適用応答で返し、
@@ -437,6 +438,16 @@ writerは期限切れlinkをDOWNにして、そこで管理するaddressとlocal
 address自身の期限が短ければそちらを保持し、静的なaddressもlinkの所有期限を越えない。
 設定の再生成・worker再起動でこの期限を延長しない。実行中のnetwork workerを必要とし、
 writer停止中のlink fencingや物理suspendを保証するものではない。
+
+address／route自身の`when`と依存先の準備期限もwriterへ渡す。addressのpreferred/valid
+lifetimeを条件の元の期限で制限し、UTC指定は投影時の対応する時計でBOOTTIMEへ写す。
+自身のvalid期限も依存先へ渡し、期限切れは`lifetime_expired`として非activeにする。
+条件が現在もtrueでも、期限切れのaddressが後続routeやworkerを起動することはない。
+IPv6 routeの明示`valid_until`はkernel timerとしても残し、条件のBOOTTIME期限と両方を満たす。
+controlとwriterは同じlifetime投影を使い、意図した期限切れを適用待ちとして残さない。
+Ready/confirmed commitは実際にACKされたlink・address・routeの期限で判定し、
+新しい準備観測だけで古い実適用を成功扱いにしない。所有期限の更新もprojection generationを
+進めるが、operator revisionは変更しない。
 
 ## VRRPの選出とVIP公開のreadiness
 

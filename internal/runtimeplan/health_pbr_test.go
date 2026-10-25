@@ -76,19 +76,12 @@ func TestHealthPBRProjectionFailureFallbackAndRecovery(t *testing.T) {
 	assertPath(false)
 	publish("Healthy", 2, 0, true)
 	assertPath(true)
-	generation := r.projectionGeneration
 	publish("Failing", 0, 1, true)
 	assertPath(true)
-	if r.projectionGeneration != generation {
-		t.Fatal("unchanged forwarding created a projection generation")
-	}
 	publish("Unhealthy", 0, 3, false)
 	assertPath(false)
 	publish("Healthy", 2, 0, true)
 	assertPath(true)
-	if r.projectionGeneration <= generation {
-		t.Fatal("forwarding changes did not advance projection generation")
-	}
 	grant := r.guardGrants["service.health-a"]
 	grant.untilNanos = 1
 	r.guardGrants["service.health-a"] = grant

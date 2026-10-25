@@ -76,6 +76,8 @@ type Route struct {
 	// BootID/ExpiresNanos carry a protocol's original authority to the writer.
 	// They are internal projection metadata, not kernel attributes. The network
 	// worker removes expired routes independently of control and protocol workers.
+	// An explicit IPv6 ValidUntil also retains its native kernel expiry; both
+	// constraints apply when a conditional route has that absolute lifetime.
 	BootID       string `json:"boot_id,omitempty"`
 	ExpiresNanos uint64 `json:"expires_nanos,omitempty"`
 }

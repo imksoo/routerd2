@@ -3,10 +3,11 @@ package network
 import (
 	"errors"
 	"fmt"
-	"github.com/imksoo/routerd2/internal/boottime"
 	"math"
 	"net/netip"
 	"time"
+
+	"github.com/imksoo/routerd2/internal/boottime"
 )
 
 // AddressOptions are explicit per-address options. A zero deadline means
@@ -112,26 +113,6 @@ func lifetimeRemaining(deadline, now time.Time) uint32 {
 	return uint32(seconds)
 }
 
-func projectAddressExpiry(d Desired, now time.Time) Desired {
-	for i := range d.Interfaces {
-		l := &d.Interfaces[i]
-		kept := l.Addresses[:0]
-		for _, address := range l.Addresses {
-			o := l.AddressOptions[address]
-			if _, valid, err := addressLifetimes(o, now); err != nil || valid == 0 {
-				delete(l.AddressOptions, address)
-				continue
-			}
-			kept = append(kept, address)
-		}
-		l.Addresses = kept
-		if len(l.AddressOptions) == 0 {
-			l.AddressOptions = nil
-		}
-	}
-	return d
-}
-
 func (e *Engine) addressRecord(key addressKey) *ownedAddress {
 	for i := range e.state.Addresses {
 		if e.state.Addresses[i].key() == key {
@@ -223,16 +204,16 @@ func (p *apply) addressConfig(l Interface, address string) error {
 // A lease on a virtual link also bounds addresses managed on that link. Keep
 // the tighter protocol/UTC deadline; operator intent remains in the caller's
 // unmodified Desired. The writer can then revoke local routes as well as L2.
-func boundLinkAddresses(d *Desired, clock boottime.Clock, now time.Time) {
-	var lifetimes map[string]BootLifetime
+func boundLinkAddresses(d *Desired, clock boottime.Clock) {
+	var lifetimes map[string]uint64
 	for _, link := range d.Links {
 		if link.BootID == "" {
 			continue
 		}
 		if lifetimes == nil {
-			lifetimes = make(map[string]BootLifetime)
+			lifetimes = make(map[string]uint64)
 		}
-		lifetimes[link.Name] = BootLifetime{BootID: link.BootID, PreferredNanos: link.ExpiresNanos, ValidNanos: link.ExpiresNanos}
+		lifetimes[link.Name] = link.ExpiresNanos
 	}
 	for i := range d.Interfaces {
 		iface := &d.Interfaces[i]
@@ -244,30 +225,31 @@ func boundLinkAddresses(d *Desired, clock boottime.Clock, now time.Time) {
 			iface.AddressOptions = make(map[string]AddressOptions)
 		}
 		for _, address := range iface.Addresses {
-			options := iface.AddressOptions[address]
-			until := owner
-			if own := options.BootLifetime; own != (BootLifetime{}) {
-				until.ValidNanos = min(until.ValidNanos, own.ValidNanos)
-				until.PreferredNanos = min(until.PreferredNanos, own.PreferredNanos)
-			} else {
-				deadline := func(wall time.Time) uint64 {
-					if wall.IsZero() {
-						return owner.ValidNanos
-					}
-					remaining := wall.Sub(now)
-					if remaining <= 0 {
-						return 0
-					}
-					base := uint64(clock.BoottimeNanoseconds)
-					return base + min(uint64(remaining), owner.ValidNanos-base)
-				}
-				until.ValidNanos = deadline(options.ValidUntil)
-				until.PreferredNanos = deadline(options.PreferredUntil)
-				options.ValidUntil, options.PreferredUntil = time.Time{}, time.Time{}
-			}
-			until.PreferredNanos = min(until.PreferredNanos, until.ValidNanos)
-			options.BootLifetime = until
-			iface.AddressOptions[address] = options
+			iface.AddressOptions[address] = BoundAddressLifetime(iface.AddressOptions[address], clock, owner)
 		}
 	}
+}
+
+// BoundAddressLifetime intersects an address's validated lifetime with an
+// original condition or link deadline on the same boot clock. UTC intent is
+// converted at this projection's clock; the returned value owns no new lease.
+func BoundAddressLifetime(options AddressOptions, clock boottime.Clock, deadline uint64) AddressOptions {
+	until := BootLifetime{BootID: clock.BootID, PreferredNanos: deadline, ValidNanos: deadline}
+	if own := options.BootLifetime; own != (BootLifetime{}) {
+		until.ValidNanos = min(until.ValidNanos, own.ValidNanos)
+		until.PreferredNanos = min(until.PreferredNanos, own.PreferredNanos)
+	} else {
+		bound := func(wall time.Time) uint64 {
+			if wall.IsZero() {
+				return deadline
+			}
+			return min(deadline, uint64(clock.BoottimeNanoseconds)+uint64(max(0, wall.Sub(clock.WallTime))))
+		}
+		until.ValidNanos = bound(options.ValidUntil)
+		until.PreferredNanos = bound(options.PreferredUntil)
+		options.ValidUntil, options.PreferredUntil = time.Time{}, time.Time{}
+	}
+	until.PreferredNanos = min(until.PreferredNanos, until.ValidNanos)
+	options.BootLifetime = until
+	return options
 }

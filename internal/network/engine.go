@@ -18,7 +18,7 @@ var errLinkNotFound = errors.New("link not found")
 const tunnelAlias = "routerd2:ds-lite:v1"
 
 // JournalVersion is the persisted network ownership/BOOTTIME contract.
-const JournalVersion = 4
+const JournalVersion = 5
 
 type settingKey struct {
 	Kind      string `json:"kind"`
@@ -224,18 +224,17 @@ func (e *Engine) Apply(ctx context.Context, revision uint64, desired Desired) (S
 	if err := ctx.Err(); err != nil {
 		return e.snapshotLocked(ctx), err
 	}
-	now := time.Now()
 	clock, err := boottime.Read()
 	if err != nil {
 		return e.snapshotLocked(ctx), err
 	}
-	d := projectRouteExpiry(projectAddressExpiry(normalized(cloneDesired(desired)), now), now, clock)
+	d := ProjectLifetimes(normalized(cloneDesired(desired)), clock)
 	for _, link := range d.Links {
 		if link.BootID != "" && (link.BootID != clock.BootID || link.ExpiresNanos <= uint64(clock.BoottimeNanoseconds)) {
 			return e.snapshotLocked(ctx), &ApplyError{Stage: "link authority", Err: fmt.Errorf("link %s original authority expired", link.Name)}
 		}
 	}
-	boundLinkAddresses(&d, clock, now)
+	boundLinkAddresses(&d, clock)
 	e.state.AttemptedRevision, e.state.Attempted = revision, &d
 	e.state.Status, e.state.LastError = "applying", ""
 	if err := e.save(); err != nil {

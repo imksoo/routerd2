@@ -92,6 +92,12 @@ func TestDaemonHealthPBRFailoverAndRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := startFixtureDaemon(t, program)
+	routerNS, err := netns.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer routerNS.Close()
+	vrrpVIPResponders(t, routerNS, "4", []string{"192.0.2.42"}, "R")
 	capA, capB := healthPBRCapture(t, "wan0"), healthPBRCapture(t, "wan1")
 	t.Cleanup(func() {
 		if t.Failed() {
@@ -512,16 +518,145 @@ func TestDaemonHealthPBRFailoverAndRecovery(t *testing.T) {
 	traffic("A")
 	record("restart-supervisor")
 	t.Log("complete supervisor restart reused lower worker generations; new process-tree instance fenced delayed former-tree observations and preserved revision 3 and TCP/UDP")
+	identityTraffic := func() {
+		t.Helper()
+		for protocol, port := range map[string]string{"tcp4": "18093", "udp4": "18094"} {
+			var conn net.Conn
+			if err := fixtureInsideNamespace(a, func() error {
+				var err error
+				conn, err = net.DialTimeout(protocol, net.JoinHostPort("192.0.2.42", port), time.Second)
+				return err
+			}); err != nil {
+				t.Fatal("conditional address", protocol, err)
+			}
+			_ = conn.SetDeadline(time.Now().Add(time.Second))
+			_, err := conn.Write([]byte("identity?"))
+			var response [1]byte
+			if err == nil {
+				_, err = io.ReadFull(conn, response[:])
+			}
+			conn.Close()
+			if err != nil || string(response[:]) != "R" {
+				t.Fatal("conditional address did not serve TCP/UDP", protocol, response, err)
+			}
+		}
+	}
+	identityTraffic()
+	var frozen []supervisor.ModuleStatus
 	for _, name := range []string{"service.health-a", "service.health-b"} {
-		pid := module(name).PID
-		if pid <= 0 {
+		process := module(name)
+		if process.PID <= 0 {
 			t.Fatal("missing final probe worker", name)
 		}
-		if err := syscall.Kill(pid, syscall.SIGSTOP); err != nil {
+		if err := syscall.Kill(process.PID, syscall.SIGSTOP); err != nil {
 			t.Fatal(err)
 		}
-		t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGCONT) })
+		t.Cleanup(func() { _ = syscall.Kill(process.PID, syscall.SIGCONT) })
+		frozen = append(frozen, process)
 	}
+	var original health.Snapshot
+	if err := json.Unmarshal(instance("service.health-a").Snapshot, &original); err != nil {
+		t.Fatal(err)
+	}
+	controller, writer := module("control"), module("network")
+	if err := syscall.Kill(controller.PID, syscall.SIGSTOP); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = syscall.Kill(controller.PID, syscall.SIGCONT) })
+	frozen = append(frozen, controller)
+	var desiredPage network.DesiredPage
+	if err := f.network.Do(ctx, "GET", "/v1/observations/desired", nil, &desiredPage); err != nil || desiredPage.NextOffset != nil {
+		t.Fatal("cannot inspect frozen writer projection", err)
+	}
+	var desired network.Desired
+	if err := json.Unmarshal(desiredPage.Data, &desired); err != nil {
+		t.Fatal(err)
+	}
+	checked := 0
+	for _, iface := range desired.Interfaces {
+		if iface.Name == "wan0" {
+			deadline := iface.AddressOptions["192.0.2.42/32"].BootLifetime
+			if deadline.BootID != original.BootID || deadline.ValidNanos == 0 || deadline.ValidNanos > original.ObservedNanos+uint64(2500*time.Millisecond)+1 {
+				t.Fatal("address did not retain original consumer authority", deadline)
+			}
+			checked++
+		}
+	}
+	for _, route := range desired.Routes {
+		if route.Table == 100 && route.Metric == 100 {
+			if route.BootID != original.BootID || route.ExpiresNanos == 0 || route.ExpiresNanos > original.ObservedNanos+uint64(2500*time.Millisecond)+1 {
+				t.Fatal("PBR route did not retain original consumer authority", route)
+			}
+			checked++
+		}
+	}
+	if checked != 2 || len(desired.Links) != 0 {
+		t.Fatal("fixture did not use independent conditional address and route on a physical link", desired)
+	}
+	if err := syscall.Kill(writer.PID, syscall.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	until(t, 2*time.Second, func() bool {
+		current := module("network")
+		routes, err := netlink.RouteListFiltered(unix.AF_INET, &netlink.Route{Table: 100}, netlink.RT_FILTER_TABLE)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return current.Ready && current.Generation > writer.Generation && len(routes) == 0 && !resourceProgramAddress(t, wan, "192.0.2.42/32")
+	})
+	for _, before := range frozen {
+		if current := module(before.Name); current.PID != before.PID || current.Generation != before.Generation || !current.Ready {
+			t.Fatal("worker restart masked original authority expiry", before, current)
+		}
+	}
+	if current, err := netlink.LinkByName("wan0"); err != nil || current.Attrs().Flags&net.FlagUp == 0 || !resourceProgramAddress(t, wan, "192.0.2.2/24") || !resourceProgramAddress(t, wan, "192.0.2.99/24") {
+		t.Fatal("conditional expiry disturbed the physical link, probe address or foreign address", err)
+	}
+	for _, target := range []struct {
+		ns                netns.NsHandle
+		address, tcp, udp string
+	}{{lan, "198.51.100.20", "18081", "18081"}, {a, "192.0.2.42", "18093", "18094"}} {
+		for protocol, port := range map[string]string{"tcp4": target.tcp, "udp4": target.udp} {
+			var conn net.Conn
+			var dialErr error
+			if err := fixtureInsideNamespace(target.ns, func() error {
+				conn, dialErr = net.DialTimeout(protocol, net.JoinHostPort(target.address, port), 250*time.Millisecond)
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if dialErr != nil {
+				continue
+			}
+			_ = conn.SetDeadline(time.Now().Add(250 * time.Millisecond))
+			_, err := conn.Write([]byte("expired?"))
+			var response [1]byte
+			if err == nil {
+				_, err = conn.Read(response[:])
+			}
+			conn.Close()
+			if err == nil {
+				t.Fatal("expired address or route still forwarded application traffic", target.address, protocol)
+			}
+		}
+	}
+	for _, process := range frozen {
+		if err := syscall.Kill(process.PID, syscall.SIGCONT); err != nil {
+			t.Fatal(err)
+		}
+	}
+	waitPrimary(true)
+	until(t, 3*time.Second, func() bool { return resourceProgramAddress(t, wan, "192.0.2.42/32") })
+	var renewed health.Snapshot
+	if err := json.Unmarshal(instance("service.health-a").Snapshot, &renewed); err != nil || renewed.ObservedNanos <= original.ObservedNanos {
+		t.Fatal("recovery lacked a fresh real health observation", err)
+	}
+	traffic("A")
+	identityTraffic()
+	if capA.count("192.0.2.1", "192.0.2.42", 6, 18093) == 0 || capA.count("192.0.2.1", "192.0.2.42", 17, 18094) == 0 {
+		t.Fatal("missing conditional-address TCP/UDP capture")
+	}
+	t.Log("restarted writer revoked original conditional address/PBR authority with control and Health paused; expired TCP/UDP stopped, physical/foreign state survived and fresh probes restored both paths")
 	// Captures are bounded and retained as conventional Ethernet PCAP files.
 	capA.assertTraffic(t, "192.0.2.2", "198.51.100.10")
 	capB.assertTraffic(t, "203.0.113.2", "198.51.100.11")
@@ -859,6 +994,9 @@ resources:
     depends_on: [address-a]
     when: {fact: service.health-a.active, max_age: 2500ms, for: 1500ms}
     route: {destination: 0.0.0.0/0, gateway: 192.0.2.1, interface: wan0, table: 100, metric: 100}
+  - id: conditional-address
+    when: {fact: service.health-a.active, max_age: 2500ms}
+    address: {interface: wan0, cidr: 192.0.2.42/32}
   - id: backup
     depends_on: [address-b]
     when: {fact: service.health-b.active}

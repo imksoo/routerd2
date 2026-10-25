@@ -29,9 +29,12 @@ type guardGrant struct {
 	health                         *health.Snapshot
 }
 
-func conditionalProgram(source config.Document) bool {
+func dynamicProgram(source config.Document) bool {
 	for _, r := range source.Resources {
 		if r.When != nil || r.ReadyWhen != nil || r.Service != nil && r.Service.VRRP != nil && r.Service.VRRP.GracefulActivation != nil {
+			return true
+		}
+		if r.Address != nil && r.Address.Options != nil && !r.Address.Options.ValidUntil.IsZero() || r.Route != nil && !r.Route.ValidUntil.IsZero() {
 			return true
 		}
 	}
@@ -149,8 +152,15 @@ func (r *Runtime) recordGuardGrantLocked(u serviceconfig.Update, now time.Time) 
 // supervisor observation into one finite fact snapshot. Workers cannot select
 // their keys, activate producers, or publish generic arbitrary facts.
 func (r *Runtime) conditionFactsLocked(cfg configuration, now time.Time) (result resourceprogram.FactSnapshot, resultErr error) {
+	clock, err := bfd.ReadClock()
+	if err != nil {
+		return resourceprogram.FactSnapshot{}, err
+	}
+	scope := resourceprogram.FactScope{BootID: clock.BootID, ConfigDigest: cfg.digest, OperatorRevision: cfg.revision, ProjectionGeneration: r.projectionGeneration}
+	ticks := uint64(clock.BoottimeNanoseconds)
+	facts := resourceprogram.FactSnapshot{Scope: scope, NowNanos: ticks, WallTime: clock.WallTime}
 	if cfg.revision != r.config.revision || cfg.digest != r.config.digest {
-		return resourceprogram.FactSnapshot{}, nil
+		return facts, nil
 	}
 	defer func() {
 		if resultErr == nil {
@@ -161,18 +171,12 @@ func (r *Runtime) conditionFactsLocked(cfg configuration, now time.Time) (result
 		}
 	}()
 	if !now.Before(r.guardUntil) {
-		return resourceprogram.FactSnapshot{}, nil
+		return facts, nil
 	}
-	clock, err := bfd.ReadClock()
-	if err != nil {
-		return resourceprogram.FactSnapshot{}, nil
-	} // fail closed
-	scope := resourceprogram.FactScope{BootID: clock.BootID, ConfigDigest: cfg.digest, OperatorRevision: cfg.revision, ProjectionGeneration: r.projectionGeneration}
-	ticks := uint64(clock.BoottimeNanoseconds)
 	if r.guardBootID != clock.BootID || ticks >= r.guardUntilNanos {
-		return resourceprogram.FactSnapshot{}, nil
+		return facts, nil
 	}
-	facts := resourceprogram.FactSnapshot{Scope: scope, NowNanos: ticks, Facts: make(map[string]resourceprogram.Fact, 2*len(r.bindings))}
+	facts.Facts = make(map[string]resourceprogram.Fact, 2*len(r.bindings))
 	for name, binding := range r.bindings {
 		module, ok := r.guardStatus[name]
 		if !ok || module.Generation == 0 || module.ConfigDigest != binding.digest {
@@ -217,7 +221,7 @@ func (r *Runtime) conditionFactsLocked(cfg configuration, now time.Time) (result
 func (r *Runtime) projectProgramLocked(cfg configuration, records map[string]serviceconfig.Update, now time.Time) (projection, error) {
 	// Preserve the existing static fast path. Runtime readiness edges are opt-in
 	// through ready_when; process readiness is not protocol readiness.
-	if !conditionalProgram(cfg.source) {
+	if !dynamicProgram(cfg.source) {
 		p, err := r.projectLocked(cfg.plan.Native, records, now, resourceprogram.FactSnapshot{})
 		p.observationVersion = r.observationVersion
 		p.resources = make(map[string]resourceprogram.ResourceState, len(cfg.source.Resources))

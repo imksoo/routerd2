@@ -39,8 +39,8 @@ func validateRoutes(routes []Route) error {
 			}
 		}
 		if r.BootID != "" || r.ExpiresNanos != 0 {
-			if !boottime.ValidBootID(r.BootID) || r.ExpiresNanos == 0 || r.ExpiresNanos > math.MaxInt64 || !r.ValidUntil.IsZero() {
-				add("route %s: invalid or mixed boot deadline", r.Destination)
+			if !boottime.ValidBootID(r.BootID) || r.ExpiresNanos == 0 || r.ExpiresNanos > math.MaxInt64 {
+				add("route %s: invalid boot deadline", r.Destination)
 			}
 		}
 		if r.Metric < 0 || uint64(r.Metric) > uint64(^uint32(0)) {
@@ -144,17 +144,6 @@ func routeLifetimeMatches(actual, expected time.Time) bool {
 	// The write rounds up to seconds; the kernel dump rounds to USER_HZ.
 	// A static route never matches a finite route, even near its expiry.
 	return actual.Sub(expected).Abs() <= 2*time.Second
-}
-
-func projectRouteExpiry(d Desired, now time.Time, clock boottime.Clock) Desired {
-	kept := d.Routes[:0]
-	for _, r := range d.Routes {
-		if (r.ValidUntil.IsZero() || r.ValidUntil.After(now)) && (r.BootID == "" || r.BootID == clock.BootID && r.ExpiresNanos > uint64(clock.BoottimeNanoseconds)) {
-			kept = append(kept, r)
-		}
-	}
-	d.Routes = kept
-	return d
 }
 
 func routeUsesInterface(r Route, name string) bool {

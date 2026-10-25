@@ -94,7 +94,7 @@ type configuration struct {
 }
 
 type appliedProjection struct {
-	linkUntilNanos     uint64 // earliest original link deadline in the acknowledged projection
+	untilNanos         uint64 // earliest original network deadline in the acknowledged projection
 	hash               string
 	at                 time.Time
 	sourceEpoch        uint64
@@ -165,14 +165,14 @@ func (r *Runtime) CheckReady(ctx context.Context) error {
 	if r.applied.hash == "" || r.applied.sourceEpoch != r.sourceEpoch || r.applied.observationVersion != r.observationVersion {
 		return errors.New("accepted protocol observations await network application")
 	}
-	if r.applied.linkUntilNanos != 0 {
+	if r.applied.untilNanos != 0 {
 		clock, err := boottime.Read()
 		if err != nil {
 			return err
 		}
-		if uint64(clock.BoottimeNanoseconds) >= r.applied.linkUntilNanos {
+		if uint64(clock.BoottimeNanoseconds) >= r.applied.untilNanos {
 			r.wakeCoordinatorLocked()
-			return errors.New("applied link authority expired; current projection awaits application")
+			return errors.New("applied network authority expired; current projection awaits application")
 		}
 	}
 	if len(r.routeIssues) > 0 {
@@ -194,7 +194,7 @@ func (r *Runtime) CheckReady(ctx context.Context) error {
 			}
 		}
 	}
-	if conditionalProgram(r.config.source) {
+	if dynamicProgram(r.config.source) {
 		r.installGuardStatusLocked(s, nil)
 		p, err := r.projectProgramLocked(r.config, r.effectiveRecordsLocked(time.Now()), time.Now())
 		if err != nil {

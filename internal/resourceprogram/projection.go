@@ -4,6 +4,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/network"
 )
 
@@ -12,6 +13,7 @@ import (
 type FactSnapshot struct {
 	Scope    FactScope
 	NowNanos uint64
+	WallTime time.Time // paired with NowNanos for explicit UTC lifetime bounds
 	// Facts is owned by this snapshot. The caller transfers the map and
 	// must not mutate it while any evaluation uses this view.
 	Facts map[string]Fact
@@ -99,6 +101,20 @@ func (p Plan) Project(facts FactSnapshot) (Native, map[string]ResourceState) {
 				state.Reason, state.Dependency = conditionReason("dependency", states[dep].Ready), dep
 			}
 		}
+		var validUntil time.Time
+		if r.Address != nil && r.Address.Options != nil {
+			validUntil = r.Address.Options.ValidUntil
+		}
+		if r.Route != nil {
+			validUntil = r.Route.ValidUntil
+		}
+		if !validUntil.IsZero() {
+			untilNanos = min(untilNanos, facts.NowNanos+uint64(max(0, validUntil.Sub(facts.WallTime))))
+			if !facts.WallTime.Before(validUntil) {
+				gate = False
+				state.Reason, state.Dependency = "lifetime_expired", ""
+			}
+		}
 		state.Active = gate == True
 		state.Ready = gate
 		readyUntilNanos := untilNanos
@@ -120,17 +136,36 @@ func (p Plan) Project(facts FactSnapshot) (Native, map[string]ResourceState) {
 		bounds[r.ID] = deadline{active: untilNanos, ready: readyUntilNanos}
 	}
 	native := renderNative(selected)
-	linkIndex := 0
+	interfaces := make(map[string]*network.Interface, len(native.Network.Interfaces))
+	for i := range native.Network.Interfaces {
+		iface := &native.Network.Interfaces[i]
+		interfaces[iface.Name] = iface
+	}
+	clock := boottime.Clock{BootID: facts.Scope.BootID, BoottimeNanoseconds: int64(facts.NowNanos), WallTime: facts.WallTime}
+	linkIndex, routeIndex := 0, 0
 	for _, node := range selected {
-		if node.source.Link == nil {
-			continue
-		}
 		until := bounds[node.source.ID].active
-		if until != math.MaxUint64 {
-			native.Network.Links[linkIndex].BootID = facts.Scope.BootID
-			native.Network.Links[linkIndex].ExpiresNanos = until
+		switch {
+		case node.source.Link != nil:
+			if until != math.MaxUint64 {
+				native.Network.Links[linkIndex].BootID = facts.Scope.BootID
+				native.Network.Links[linkIndex].ExpiresNanos = until
+			}
+			linkIndex++
+		case node.source.Route != nil:
+			if until != math.MaxUint64 {
+				route := &native.Network.Routes[routeIndex]
+				route.BootID, route.ExpiresNanos = facts.Scope.BootID, until
+			}
+			routeIndex++
+		case node.source.Address != nil && until != math.MaxUint64:
+			address := node.source.Address
+			iface := interfaces[address.Interface]
+			if iface.AddressOptions == nil {
+				iface.AddressOptions = make(map[string]network.AddressOptions)
+			}
+			iface.AddressOptions[address.CIDR] = network.BoundAddressLifetime(iface.AddressOptions[address.CIDR], clock, until)
 		}
-		linkIndex++
 	}
 	return native, states
 }

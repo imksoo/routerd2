@@ -404,6 +404,8 @@ kernel書込みをcoordinatorへ集約した。I/O中も観測を受け取り、
 BGP経路の元の期限は、ACK済みBFD受信期限と再帰next-hopのaddress・route・link期限との
 短い方をnetwork workerへ渡し、controlと独立して撤去する。
 期限更新だけではkernel経路を置換せず、routing tableの観測も操作ごとに共有する。
+物理interface上の条件付きaddress／routeにも元の条件・依存期限を渡し、writer再起動後も
+独立して失効させる。controlとwriterのlifetime投影を共有し、ReadyはACK済み期限を確認する。
 現在の検証範囲と残作業は
 [引き継ぎ](pve-codex-handoff.md) を参照する。CORE-03全体の完了とはしない。
 

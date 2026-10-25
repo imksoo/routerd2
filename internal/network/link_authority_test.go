@@ -88,7 +88,7 @@ func TestLinkAddressBoundsPreserveTighterProtocolAndWallDeadlines(t *testing.T) 
 		}},
 		{Name: "wan0", Addresses: []string{"198.51.100.2/24"}},
 	}}
-	boundLinkAddresses(&d, clock, clock.WallTime)
+	boundLinkAddresses(&d, clock)
 	for _, want := range []struct {
 		address          string
 		preferred, valid time.Duration
