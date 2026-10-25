@@ -368,3 +368,67 @@ func TestGracefulSourceCutoverCannotApplyOldUnacknowledgedAdmission(t *testing.T
 		t.Fatal("source cutover applied stale pre-cutover VIP projection")
 	}
 }
+
+func TestGracefulConditionalReactivationCannotReuseWithdrawnPublication(t *testing.T) {
+	source := activationSource()
+	n := &memoryNetwork{}
+	m := &memoryManager{}
+	r := New(t.TempDir(), t.TempDir(), n, testSupervisorInstance)
+	r.manager = m
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := r.ApplyConfig(ctx, 1, source); err != nil {
+		t.Fatal(err)
+	}
+	c := source.Resources[0].Service.VRRPConfig()
+	s := bootVRRPSnapshot(t, c)
+	s.Active = false
+	s.ValidUntil = time.Time{}
+	s.ActivationState = "Preparing"
+	s.ActivationStartedNanos = s.ObservedNanos
+	pending := update(t, r, "service.ha", 1, s)
+	if err := acceptVRRPAndDrain(t, r, pending); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Accept(ctx, update(t, r, "service.wan", 1, lease4(time.Now().Add(time.Hour)))); err != nil {
+		t.Fatal(err)
+	}
+	grant, err := r.GrantVRRPActivation(ctx, pending)
+	if err != nil || grant.ID == 0 {
+		t.Fatal(grant, err)
+	}
+	active := bootVRRPSnapshot(t, c)
+	active.ActivationState = "Ready"
+	active.ActivationStartedNanos = s.ActivationStartedNanos
+	active.ActivationGrant = grant
+	if err := acceptVRRPAndDrain(t, r, update(t, r, pending.Name, 2, active)); err != nil {
+		t.Fatal(err)
+	}
+	lost := lease4(time.Now().Add(time.Hour))
+	lost.Active = false
+	if err := r.Accept(ctx, update(t, r, "service.wan", 2, lost)); err != nil {
+		t.Fatal(err)
+	}
+	source.Resources[0].When = &resourceprogram.FactCondition{Fact: "service.wan.active"}
+	// The manager retires the worker without a final observation, as SIGKILL can.
+	if err := r.ApplyConfig(ctx, 2, source); err != nil {
+		t.Fatal(err)
+	}
+	if len(n.applied.Links) != 0 {
+		t.Fatal("conditional removal kept VIP")
+	}
+	if err := r.Accept(ctx, update(t, r, "service.wan", 3, lease4(time.Now().Add(time.Hour)))); err != nil {
+		t.Fatal(err)
+	}
+	m.vrrpGeneration = 2
+	if err := r.reconcileDynamic(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(n.applied.Links) != 0 {
+		t.Fatal("unbound former role acquired VIP before new worker publication")
+	}
+	_ = r.reconcileDynamic(ctx)
+	if len(n.applied.Links) != 0 {
+		t.Fatal("new generation reused old publication")
+	}
+}
