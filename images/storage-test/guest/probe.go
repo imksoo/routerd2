@@ -78,7 +78,21 @@ func runProbe(phase string) error {
 	} else if bootID != expected.FirstBootID {
 		return errors.New("boot ID changed during first PID 1 handoff")
 	}
-	names, err := verifyExecutables(processes, selected)
+	keys, err := release.LoadTrustFile(trustPath)
+	if err != nil {
+		return err
+	}
+	store, err := release.Open(release.Options{Root: storeRoot, TrustedKeys: keys, TargetOS: "linux", TargetArch: "amd64"})
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	image, err := store.Verify(ctx, selected)
+	if err != nil {
+		return err
+	}
+	defer image.Close()
+	names, err := verifyExecutables(processes, selected, image)
 	if err != nil {
 		return err
 	}
@@ -169,15 +183,6 @@ func runProbe(phase string) error {
 	if phase == "second" && (configHash != expected.ConfigSHA256 || hostHash != expected.HostKeySHA256 || sentinelHash != expected.SentinelSHA256) {
 		return errors.New("persistent config, host key or state sentinel changed between kernels")
 	}
-	keys, err := release.LoadTrustFile(trustPath)
-	if err != nil {
-		return err
-	}
-	store, err := release.Open(release.Options{Root: storeRoot, TrustedKeys: keys, TargetOS: "linux", TargetArch: "amd64"})
-	if err != nil {
-		return err
-	}
-	defer store.Close()
 	state, err := store.Status(ctx)
 	if err != nil {
 		return err
@@ -291,23 +296,34 @@ func readHealthyConfig(ctx context.Context) (control.State, error) {
 	return health, err
 }
 
-func verifyExecutables(processes supervisor.Status, selected release.Ref) ([]string, error) {
+func verifyExecutables(processes supervisor.Status, selected release.Ref, image *release.Image) ([]string, error) {
+	return verifyExecutableCatalog(processes, selected, image, func(pid int) (os.FileInfo, error) { return os.Stat(fmt.Sprintf("/proc/%d/exe", pid)) })
+}
+func verifyExecutableCatalog(processes supervisor.Status, selected release.Ref, image *release.Image, stat func(int) (os.FileInfo, error)) ([]string, error) {
+	if image.Release != selected {
+		return nil, errors.New("verified catalog differs from selected runtime")
+	}
+
 	if len(processes.Modules) != 4 {
 		return nil, errors.New("unexpected supervised core process count")
 	}
-	if err := sameExecutable(1, filepath.Join(storeRoot, "releases", selected.Digest, "routerd")); err != nil {
+	if err := sameExecutableFile(1, image.Entrypoint(), stat); err != nil {
 		return nil, err
 	}
 	seen := map[string]bool{}
 	var names []string
 	for _, module := range processes.Modules {
 		if !module.Ready || module.PID <= 1 || module.ReleaseID != selected.ReleaseID || seen[module.Name] {
-			return nil, errors.New("selected command pair did not start each core module")
+			return nil, errors.New("selected runtime did not start each core module")
 		}
 		if module.Name != "logging" && !module.Required {
 			return nil, errors.New("required core module became optional")
 		}
-		if err := sameExecutable(module.PID, filepath.Join(storeRoot, "releases", selected.Digest, "routerd-modules")); err != nil {
+		file, err := image.Executable(module.Role)
+		if err != nil {
+			return nil, err
+		}
+		if err := sameExecutableFile(module.PID, file, stat); err != nil {
 			return nil, err
 		}
 		seen[module.Name] = true
@@ -322,12 +338,15 @@ func verifyExecutables(processes supervisor.Status, selected release.Ref) ([]str
 	return names, nil
 }
 
-func sameExecutable(pid int, path string) error {
-	current, err := os.Stat(fmt.Sprintf("/proc/%d/exe", pid))
+func sameExecutableFile(pid int, file *os.File, stat func(int) (os.FileInfo, error)) error {
+	if file == nil {
+		return errors.New("missing verified executable")
+	}
+	current, err := stat(pid)
 	if err != nil {
 		return err
 	}
-	expected, err := os.Stat(path)
+	expected, err := file.Stat()
 	if err != nil {
 		return err
 	}
