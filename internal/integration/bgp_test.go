@@ -144,21 +144,52 @@ func TestDaemonBGPFIBAndOwnershipExpiry(t *testing.T) {
 	if err := fixture.supervisor.Do(context.Background(), "GET", "/v1/status", nil, &status); err != nil {
 		t.Fatal(err)
 	}
-	pid := 0
+	pid, controlPID := 0, 0
+	var writer supervisor.ModuleStatus
 	for _, module := range status.Modules {
 		if module.Name == "service.edge" {
 			pid = module.PID
 		}
+		if module.Name == "control" {
+			controlPID = module.PID
+		}
+		if module.Name == "network" {
+			writer = module
+		}
 	}
-	if pid == 0 {
-		t.Fatal("missing BGP worker")
+	if pid == 0 || controlPID == 0 || writer.PID == 0 {
+		t.Fatal("missing BGP, control or network worker")
 	}
-	// A hung process cannot keep forwarding indefinitely: the coordinator's
-	// monotonic lease expires independently of process reaping or BGP timers.
-	if err := syscall.Kill(pid, syscall.SIGSTOP); err != nil {
-		t.Fatal(err)
+	// Only the network writer can progress. Neither protocol/control callbacks
+	// nor supervisor reaping can remove or renew the original route authority.
+	for _, stopped := range []int{controlPID, pid} {
+		if err := syscall.Kill(stopped, syscall.SIGSTOP); err != nil {
+			t.Fatal(err)
+		}
+		defer syscall.Kill(stopped, syscall.SIGCONT)
 	}
 	defer syscall.Kill(pid, syscall.SIGKILL)
+	// The writer must recover the same deadline from its ownership journal,
+	// without a control apply or a fresh BGP observation to authorize a route.
+	if err := syscall.Kill(writer.PID, syscall.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	until(t, 7*time.Second, func() bool {
+		var status supervisor.Status
+		if err := fixture.supervisor.Do(context.Background(), "GET", "/v1/status", nil, &status); err != nil {
+			return false
+		}
+		for _, module := range status.Modules {
+			if module.Name == "network" {
+				return module.Ready && module.PID != writer.PID && module.Generation > writer.Generation
+			}
+		}
+		return false
+	})
+	if err := syscall.Kill(fixture.pid, syscall.SIGSTOP); err != nil {
+		t.Fatal(err)
+	}
+	defer syscall.Kill(fixture.pid, syscall.SIGCONT)
 	until(t, 7*time.Second, func() bool { return !fixtureRoute(t, "203.0.113.0/24", "", 0) })
 	if err := syscall.Kill(pid, 0); err != nil {
 		t.Fatalf("worker exited before independent ownership-expiry proof: %v", err)
@@ -166,6 +197,7 @@ func TestDaemonBGPFIBAndOwnershipExpiry(t *testing.T) {
 	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
 		t.Fatal(err)
 	}
+	t.Log("restarted network writer expired the original BGP route while supervisor, control and BGP were suspended")
 }
 
 func fixtureRoute(t *testing.T, prefix, hop string, index int) bool {

@@ -28,6 +28,8 @@ type routeGroup struct {
 	prefix        netip.Prefix
 	table, metric int
 	paths         []bgpconfig.Route
+	bootID        string
+	expiresNanos  uint64
 }
 type fibCandidate struct {
 	prefix        netip.Prefix
@@ -111,7 +113,7 @@ func projectBGP(p *projection, doc config.Native, records map[string]serviceconf
 			key := fmt.Sprintf("%s/%d/%d", prefix, c.Table, c.RouteMetric)
 			group := groups[key]
 			if group == nil {
-				group = &routeGroup{service: service.Name, prefix: prefix, table: c.Table, metric: c.RouteMetric}
+				group = &routeGroup{service: service.Name, prefix: prefix, table: c.Table, metric: c.RouteMetric, bootID: s.BootID, expiresNanos: s.ExpiresNanos}
 				groups[key] = group
 			} else if group.service != service.Name {
 				return fmt.Errorf("BGP instances %s and %s compete for prefix/table/metric %s", group.service, service.Name, key)
@@ -185,7 +187,7 @@ func projectBGP(p *projection, doc config.Native, records map[string]serviceconf
 		if len(next) == 0 {
 			continue
 		}
-		route := network.Route{Destination: g.prefix.String(), Table: g.table, Metric: g.metric}
+		route := network.Route{Destination: g.prefix.String(), Table: g.table, Metric: g.metric, BootID: g.bootID, ExpiresNanos: g.expiresNanos}
 		if len(next) == 1 {
 			route.Gateway = next[0].Gateway
 			route.Interface = next[0].Interface

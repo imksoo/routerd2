@@ -45,7 +45,7 @@ func openNetworkJournalFile(dir *os.File, name string, lock bool) (*os.File, err
 	f := os.NewFile(uintptr(fd), name)
 	var st unix.Stat_t
 	if err = unix.Fstat(fd, &st); err == nil {
-		err = checkNetworkJournalFile(st)
+		err = checkNetworkJournalFile(st, lock)
 	}
 	if err != nil {
 		f.Close()
@@ -54,8 +54,11 @@ func openNetworkJournalFile(dir *os.File, name string, lock bool) (*os.File, err
 	return f, nil
 }
 
-func checkNetworkJournalFile(st unix.Stat_t) error {
-	if st.Mode&unix.S_IFMT != unix.S_IFREG || st.Mode&07777 != 0600 || st.Uid != uint32(os.Geteuid()) || st.Nlink != 1 {
+func checkNetworkJournalFile(st unix.Stat_t, requireLinked bool) error {
+	// A read descriptor can outlive atomic replacement of its pathname: the
+	// immutable old inode then has zero links. Locks and write targets must
+	// remain linked; multiple links are never allowed for either operation.
+	if st.Mode&unix.S_IFMT != unix.S_IFREG || st.Mode&07777 != 0600 || st.Uid != uint32(os.Geteuid()) || st.Nlink > 1 || requireLinked && st.Nlink != 1 {
 		return errors.New("network journal/lock must be an owned 0600 singly-linked regular file")
 	}
 	return nil
@@ -64,7 +67,7 @@ func checkNetworkJournalFile(st unix.Stat_t) error {
 func writeNetworkJournal(dir *os.File, name string, raw []byte) (bool, error) {
 	var st unix.Stat_t
 	if err := unix.Fstatat(int(dir.Fd()), name, &st, unix.AT_SYMLINK_NOFOLLOW); err == nil {
-		if err := checkNetworkJournalFile(st); err != nil {
+		if err := checkNetworkJournalFile(st, true); err != nil {
 			return false, err
 		}
 	} else if !errors.Is(err, unix.ENOENT) {

@@ -64,6 +64,9 @@ func Compile(source Program) (Plan, error) {
 		if r.Address != nil && r.Address.Options != nil && r.Address.Options.BootLifetime != (network.BootLifetime{}) {
 			return Plan{}, fmt.Errorf("resource %s: boot lifetime is internal projection authority", r.ID)
 		}
+		if r.Route != nil && (r.Route.BootID != "" || r.Route.ExpiresNanos != 0) {
+			return Plan{}, fmt.Errorf("resource %s: route boot deadline is internal projection authority", r.ID)
+		}
 		if p := r.Provenance; p != nil {
 			for _, s := range []string{p.Source, p.Resource, p.Revision, p.Path} {
 				if len(s) > 4096 || !utf8.ValidString(s) || strings.ContainsAny(s, "\x00\r\n") {

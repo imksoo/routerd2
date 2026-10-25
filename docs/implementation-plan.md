@@ -401,6 +401,8 @@ native writer / provider adapter に接続する。
 kernel書込みをcoordinatorへ集約した。I/O中も観測を受け取り、古い結果で新しい通知を
 完了扱いにしない。VRRP grantも廃止し、準備条件とVIP適用結果を同じ要求で扱う。
 通常更新・起動停止待ち・設定切替も同じ処理へ揃え、installedの重複保持を廃止した。
+BGP経路の元の期限はnetwork workerへ渡し、controlと独立して撤去する。
+期限更新だけではkernel経路を置換せず、routing tableの観測も操作ごとに共有する。
 現在の検証範囲と残作業は
 [引き継ぎ](pve-codex-handoff.md) を参照する。CORE-03全体の完了とはしない。
 

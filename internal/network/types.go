@@ -73,6 +73,11 @@ type Route struct {
 	// kernel expires finite routes even while the control plane is unavailable.
 	// IPv4 and deadlines more than MaxRouteLifetime ahead are rejected.
 	ValidUntil time.Time `json:"valid_until,omitzero"`
+	// BootID/ExpiresNanos carry a protocol's original authority to the writer.
+	// They are internal projection metadata, not kernel attributes. The network
+	// worker removes expired routes independently of control and protocol workers.
+	BootID       string `json:"boot_id,omitempty"`
+	ExpiresNanos uint64 `json:"expires_nanos,omitempty"`
 }
 
 // NextHop is an already resolved, directly reachable next hop. Weight is 1..256

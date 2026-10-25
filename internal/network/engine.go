@@ -9,6 +9,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/imksoo/routerd2/internal/boottime"
 )
 
 var errLinkNotFound = errors.New("link not found")
@@ -16,7 +18,7 @@ var errLinkNotFound = errors.New("link not found")
 const tunnelAlias = "routerd2:ds-lite:v1"
 
 // JournalVersion is the persisted network ownership/BOOTTIME contract.
-const JournalVersion = 2
+const JournalVersion = 3
 
 type settingKey struct {
 	Kind      string `json:"kind"`
@@ -95,6 +97,7 @@ type Engine struct {
 	directory      *os.File
 	journalName    string
 	journalPresent bool
+	routeWake      chan struct{}
 }
 
 // New locks the ownership journal and reads it. It makes no kernel changes.
@@ -133,7 +136,7 @@ func newEngine(opts Options, k kernel) (*Engine, error) {
 		state.Status = "degraded"
 		state.LastError = "previous apply was interrupted; reconcile the committed configuration"
 	}
-	e := &Engine{opts: opts, kernel: k, lock: f, directory: dir, journalName: name, journalPresent: inspection.Present, state: state}
+	e := &Engine{opts: opts, kernel: k, lock: f, directory: dir, journalName: name, journalPresent: inspection.Present, state: state, routeWake: make(chan struct{}, 1)}
 
 	return e, nil
 }
@@ -205,6 +208,12 @@ func cloneDesired(d Desired) Desired {
 func (e *Engine) Apply(ctx context.Context, revision uint64, desired Desired) (Snapshot, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	defer func() {
+		select {
+		case e.routeWake <- struct{}{}:
+		default:
+		}
+	}()
 	if e.lock == nil {
 		return Snapshot{}, errors.New("network engine is closed")
 	}
@@ -215,14 +224,18 @@ func (e *Engine) Apply(ctx context.Context, revision uint64, desired Desired) (S
 		return e.snapshotLocked(ctx), err
 	}
 	now := time.Now()
-	d := projectRouteExpiry(projectAddressExpiry(normalized(cloneDesired(desired)), now), now)
+	clock, err := boottime.Read()
+	if err != nil {
+		return e.snapshotLocked(ctx), err
+	}
+	d := projectRouteExpiry(projectAddressExpiry(normalized(cloneDesired(desired)), now), now, clock)
 	e.state.AttemptedRevision, e.state.Attempted = revision, &d
 	e.state.Status, e.state.LastError = "applying", ""
 	if err := e.save(); err != nil {
 		return e.snapshotLocked(ctx), &ApplyError{Stage: "journal", Err: err}
 	}
 	p := &apply{e: e, ctx: ctx}
-	err := p.reconcile(d)
+	err = p.reconcile(d)
 	if err == nil {
 		previousRevision, previousDesired := e.state.Revision, e.state.Desired
 		e.state.Revision, e.state.Desired = revision, d
@@ -428,7 +441,7 @@ func routeMatches(live RouteState, want Route) bool {
 		return false
 	}
 	observed.ValidUntil = want.ValidUntil
-	return sameRoute(observed, want) && live.Protocol == RouteProtocol && live.Type == 1 && live.Source == "" && live.Multipath == (len(live.NextHops) > 0) && !live.Advanced
+	return sameKernelRoute(observed, want) && live.Protocol == RouteProtocol && live.Type == 1 && live.Source == "" && live.Multipath == (len(live.NextHops) > 0) && !live.Advanced
 }
 func (e *Engine) ownsRoute(r RouteState) bool {
 	for _, v := range e.state.Routes {
@@ -444,6 +457,7 @@ type apply struct {
 	ctx             context.Context
 	changed         int
 	wireGuardWanted map[string]wireGuardRecorded
+	routeTables     map[int]map[string][]RouteState
 }
 
 // A native multi-attribute update may fail after changing some attributes.
@@ -736,71 +750,76 @@ func (p *apply) removeAddresses(d Desired) error {
 }
 
 func (p *apply) routes(want []Route) error {
+	wanted := make(map[string]Route, len(want))
+	for _, r := range want {
+		wanted[routeSlot(r)] = r
+	}
+	owned := make(map[string]bool, len(p.e.state.Routes))
 	for i := 0; i < len(p.e.state.Routes); {
 		r := p.e.state.Routes[i]
-		keep := false
-		for _, v := range want {
-			if sameRoute(r, v) {
-				keep = true
-				break
-			}
-		}
-		if keep {
+		key := routeSlot(r)
+		if next, ok := wanted[key]; ok && sameKernelRoute(r, next) {
+			// Authority-only refreshes need no kernel mutation. The final
+			// Apply journal write persists them together before its ACK.
+			p.e.state.Routes[i] = next
+			owned[key] = true
 			i++
 			continue
 		}
-		live, err := p.e.kernel.Routes(routeTable(r))
-		if err != nil {
-			return p.failure("route remove read", err)
-		}
-		found := false
-		for _, v := range live {
-			if routeMatches(v, r) {
-				found = true
-				break
-			}
-		}
-		forget := func() { p.e.state.Routes = append(p.e.state.Routes[:i], p.e.state.Routes[i+1:]...) }
-		if found {
-			if err := p.change("route remove", func() error { return p.e.kernel.DeleteRoute(r) }, forget); err != nil {
-				return err
-			}
-		} else {
-			forget()
-			if err := p.checkpoint("forget absent route"); err != nil {
-				return err
-			}
+		if err := p.removeRoute(i); err != nil {
+			return err
 		}
 	}
+	var additions []Route
 	for _, r := range want {
-		live, err := p.e.kernel.Routes(routeTable(r))
+		live, err := p.routeTable(routeTable(r))
 		if err != nil {
 			return p.failure("route read", err)
 		}
+		key := routeSlot(r)
 		found := false
-		for _, v := range live {
-			if routeSlot(v.Route) != routeSlot(r) {
-				continue
-			}
-			if routeMatches(v, r) && p.e.ownsRoute(v) {
+		for _, v := range live[key] {
+			if owned[key] && routeMatches(v, r) {
 				found = true
 				continue
 			}
 			return p.failure("route ownership", fmt.Errorf("route %s table %d metric %d conflicts with an unowned or changed route", r.Destination, r.Table, r.Metric))
 		}
-		if found {
-			continue
+		if !found {
+			additions = append(additions, r)
 		}
-		if err := p.change("route add", func() error { return p.e.kernel.AddRoute(r) }, func() {
-			for _, v := range p.e.state.Routes {
-				if sameRoute(v, r) {
-					return
-				}
+	}
+	if len(additions) > 0 {
+		// Absence was checked before claiming any new slot. Persist all add
+		// intentions before kernel mutations, so a killed writer can recover
+		// their ownership and original deadline without a control callback.
+		for _, r := range additions {
+			if !owned[routeSlot(r)] {
+				p.e.state.Routes = append(p.e.state.Routes, r)
 			}
-			p.e.state.Routes = append(p.e.state.Routes, r)
-		}); err != nil {
+		}
+		if err := p.checkpoint("route add intent"); err != nil {
 			return err
 		}
+	}
+	for _, r := range additions {
+		if err := p.ctx.Err(); err != nil {
+			return p.failure("route add", err)
+		}
+		if r.BootID != "" {
+			// Journal I/O or earlier additions may have consumed the lease.
+			clock, err := boottime.Read()
+			if err != nil {
+				return p.failure("route authority", err)
+			}
+			if r.BootID != clock.BootID || r.ExpiresNanos <= uint64(clock.BoottimeNanoseconds) {
+				continue
+			}
+		}
+		if err := p.e.kernel.AddRoute(r); err != nil {
+			return p.failure("route add", err)
+		}
+		p.changed++
 	}
 	return nil
 }

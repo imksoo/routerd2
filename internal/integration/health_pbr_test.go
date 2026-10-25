@@ -330,12 +330,16 @@ func TestDaemonHealthPBRFailoverAndRecovery(t *testing.T) {
 			return m.Ready && m.PID != victim.PID && m.Generation > victim.Generation
 		})
 		until(t, 12*time.Second, func() bool {
-			var s runtimeplan.Status
-			if f.control.Do(ctx, "GET", "/v1/services", nil, &s) != nil || !primary() {
+			// Ready can precede the replacement producer's first healthy
+			// sample. A retained old snapshot/route cannot prove recovery.
+			producer := module("service.health-a")
+			var i runtimeplan.InstanceStatus
+			var sample health.Snapshot
+			if !producer.Ready || f.control.Do(ctx, "GET", "/v1/services/service.health-a", nil, &i) != nil || i.Generation != producer.Generation || i.ConfigDigest != producer.ConfigDigest || json.Unmarshal(i.Snapshot, &sample) != nil || !sample.Active || sample.State.Phase != "Healthy" {
 				return false
 			}
-			var i runtimeplan.InstanceStatus
-			return f.control.Do(ctx, "GET", "/v1/services/service.health-a", nil, &i) == nil && len(i.Snapshot) > 0
+			var s runtimeplan.Status
+			return f.control.Do(ctx, "GET", "/v1/services", nil, &s) == nil && s.Phase == "ready" && primary()
 		})
 		if name == "service.health-a" || name == "control" {
 			if err := f.control.Do(ctx, "POST", "/v1/services/state", stale, nil); !localapi.IsHTTPStatus(err, 409) {

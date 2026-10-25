@@ -55,14 +55,22 @@ func TestECMPJournalRestartReorderPartialUpdateAndRollback(t *testing.T) {
 	if _, err := e.Apply(context.Background(), 2, changed); err == nil {
 		t.Fatal("injected ECMP replacement failure ignored")
 	}
-	if len(k.routes) != 0 || len(e.state.Routes) != 0 {
-		t.Fatal("removed route retained as installed after partial replacement")
+	if len(k.routes) != 0 {
+		t.Fatal("removed route remained installed after partial replacement")
 	}
+	if err := e.Close(); err != nil {
+		t.Fatal(err)
+	}
+	e, err = newEngine(opts, k)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
 	k.fail = ""
 	if _, err := e.Apply(context.Background(), 1, d); err != nil {
 		t.Fatal(err)
 	}
-	if len(k.routes) != 1 || !sameRoute(k.routes[0].Route, d.Routes[0]) {
+	if len(k.routes) != 1 || !sameKernelRoute(k.routes[0].Route, d.Routes[0]) {
 		t.Fatal("committed ECMP weights not restored")
 	}
 	if _, err := e.Apply(context.Background(), 0, Desired{}); err != nil {

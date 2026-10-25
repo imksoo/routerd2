@@ -40,6 +40,9 @@ func TestBGPRecursiveResolutionECMPAndUnreachableAccounting(t *testing.T) {
 	found := map[string]network.Route{}
 	for _, route := range p.network.Routes {
 		found[route.Destination] = route
+		if route.Destination != "10.8.0.0/16" && (route.BootID != snapshot.BootID || route.ExpiresNanos != snapshot.ExpiresNanos) {
+			t.Fatal("learned route did not carry its original observation deadline", route)
+		}
 	}
 	if len(found["203.0.113.0/24"].NextHops) != 2 {
 		t.Fatalf("ECMP paths were collapsed: %+v", p.network.Routes)

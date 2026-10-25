@@ -34,36 +34,53 @@
   Ready/confirmed commitの成功へ読み替えない。
 - Healthの現在監視と履歴配送は分離済み。保存先障害・queue満杯でprobeを止めず、欠落と
   保存エラーをsnapshotへ表示する。全probeの無欠落保存は保証しない。
+- BGP経路の元のboot IDとBOOTTIME期限をnetwork workerへ渡し、controlと独立して
+  期限切れ経路を撤去する。期限更新だけではkernel経路を置換せず、所有記録を更新する。
+  退役時も同じ所有権確認を使い、変更されたforeign経路を残す。table観測と経路選択は
+  操作内で索引化した。network journal/runtime宣言はformat 3に直接置換した。
+  経路追加は不在確認後に追加予定と元の期限をまとめて永続化し、kernel追加直後の
+  writer停止でも復旧側が撤去できるようにした。期限切れ撤去もまとめて保存する。
+  journal読取りはatomic置換でunlinkされた開いた旧inodeを許す。lock・書込み先は
+  引き続きlink必須で、hard linkは読取り・書込みとも拒否する。
 
 ## 今回の確認
 
-製品は `RELEASE_ID=worker-step`。最終修正で `make check`、runtimeplan/controlの個別Race Detector、
+製品は `RELEASE_ID=route-authority`。`make check`、networkの最終個別Race Detector、
 全体vet・fmt確認、amd64/arm64の静的ビルドが成功した。arm64は実行していない。
+専用0700ディレクトリへ6 ELFを配置し、`umask 022` で `make release-built-test` も成功した。
+両architectureのruntime宣言・署名bundle・publisher CLI出力を実receiverで確認した。
+group書込み可能な作業treeからの入力拒否を回避するために製品の権限検査は緩めていない。
 
-最終修正の実daemon試験は、設定復旧、条件付きresource lifecycle、BGP FIB/元の期限、
-BFDによるBGP停止復旧、VRRP条件付き/graceful、二WAN Health/PBRの7系統が成功した。
-実TCP/UDP・capture、worker/control交替、旧通知、期限切れ、confirmed rollbackを含む。
-隔離namespace内で実supervisor/control/network/protocol workerとLinux kernelを動かした。
+実BGP peerから学習した経路を使い、control/BGPを停止し、network workerをSIGKILLして
+再起動した。その後supervisorも停止したまま、元の期限で経路を撤去できた。
+追加前の所有予定保存により、kernel追加と保存の間に停止して期限情報を失う窓を除いた。
+再起動後の期限保持、期限更新時にkernel経路を置換しないこと、失効後・別bootの再適用で
+経路を復活させないこと、foreign置換を残すことはcomponent試験でも確認した。
 
-今回直したBGP期限切れの原因は、継続するworkerのstoppingまで退役待ちと扱ったこと。
-停止待ちを設定から外す・置き換えるworkerに限定し、failedもkernel適用後に報告する。
-通常監視が退役待ちで戻ること、実終了までVIPを残すこと、独立したWAN適用が進むこと、
-I/O中に前提を失ったworkerを起動しないこと、切替前にReadyを表示しないこと、
-準備失敗中も新設定をkernelへ適用できることをcomponent試験でも確認した。
+実daemonのBFD/BGP停止復旧と二WAN Health/PBRも成功した。後者はTCP/UDP・capture、
+worker/control/network交替、旧通知、期限切れ、confirmed rollbackを含む。
+Healthの再起動待ちは、新workerの世代・digestに一致するHealthy観測と適用済みReady、
+実primary経路を待つ。旧観測が残っているだけで復旧成功と判定していた試験を修正した。
 
-初回のBFD再接続timeoutは直接原因が未確定。その後の再試験では成功しているが、
-再現・診断と負荷下の受入は未完了。成功回数だけでこの問題を閉じない。
-DHCP/RA/AFTR/Derived/EventRuleの実daemon全系統、QEMU時計補正、native VRRP IPv4/IPv6 peerは
-最終修正後に再実行していない。対象実機・NIC・性能の検証も未実施。
+隔離namespaceで、実kernelのIPv4/IPv6 PBR・ECMP TCP、NAT/ACL、DS-Lite、bridge/VLAN/
+VRF/VXLAN/macvlan、IPv6経路期限、VRRP receive guardとforeign資源保護が成功した。
+全体チェックで再現したjournal置換中の読取り失敗も修正し、集中Race試験20回が成功した。
 
-現在のローカル出力は `dist/worker-step-cutover-{check,race,build,native}.log` と
-`dist/worker-step-cutover-native-*.log`。過去出力との一致を実装の条件にしない。
+初回BFD再接続timeoutの直接原因は未確定。現在の再試験成功だけでこの問題を閉じない。
+DHCP/RA/AFTR/Derived/EventRule/VRRPの実daemon全系統、QEMU時計補正、物理suspendは
+この変更後に再実行していない。対象実機・NIC・性能の検証も未実施。
+
+現在の出力は `dist/route-authority-final-check.log`、`dist/route-authority-checked-build.log`、
+`dist/route-authority-final-network-race.log`、`dist/route-authority-ready-native*.log`、
+`dist/route-authority-intent-kernel.log`、`dist/route-authority-journal-race.log`。
+配布物確認は `dist/route-authority-publish.log`。
+過去出力との一致を実装の条件にしない。
 
 ## 続ける実装
 
 1. 初回BFD再接続timeoutを再現・診断し、原因を確定する。成功回数で閉じない。
-   BGP IPv4経路の元の期限をnetwork writerにも接続する。他workerのdrainと重なる場合の
-   失効は追加検証が必要。現状はcontrolが経路撤去を判断する、というコードからの推論。
+   BGP観測期限は稼働中のnetwork writerが独立して失効させる。writer自身が停止した間の
+   IPv4失効と、BFD受信期限・再帰next-hopの前提期限を全てwriterへ渡す処理は未検証・未実装。
 2. 残るprotocol snapshotの型付き保持、期限切れJSON書換えの削除、条件式の静的計算と、
    retained判定で繰り返すinstance生成・digest計算を整理する。
 3. HA-01のtrack/unicast/旧version・auth/cluster方針と独立実装との相互接続を進める。

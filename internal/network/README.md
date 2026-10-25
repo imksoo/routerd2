@@ -17,6 +17,10 @@ arbitrary Linux networking command interface.
 - Manage unicast routes, weighted ECMP, policy rules, tables and metrics. Finite
   IPv6 routes expire in the kernel while the control plane is stopped. The
   control plane resolves recursive next hops before submitting native routes.
+- Carry each learned BGP route's original boot ID and BOOTTIME deadline into
+  the ownership journal. A loop in the network worker removes expired routes
+  even when supervisor, control and BGP cannot progress. Refreshing only that
+  authority updates the journal without deleting/readding the kernel route.
 - Enable or disable IPv4 and IPv6 forwarding only when requested explicitly.
 - Replace only the `inet routerd2` nftables table in one kernel batch. The
   legacy forwarding chain drops invalid connections, accepts established/related
@@ -49,6 +53,9 @@ The final directory belongs to the worker and permits no group/other writes;
 new directories use 0700. The engine pins this directory for reads and atomic
 temporary-file/fsync/rename/directory-fsync publication. Replacing its original
 pathname cannot redirect a running writer into a different directory.
+An already opened read descriptor may refer to an unlinked old inode during
+atomic replacement; it still yields one complete immutable record. Lock and
+write targets must remain linked. Hard links remain rejected in both cases.
 
 Reads and writes share a 64 MiB encoded limit and a two-million JSON-value limit
 with depth at most 64. Duplicate, unknown and case-aliased typed fields, trailing
@@ -77,8 +84,8 @@ cached memory. The signed boot preflight fixture compares this response with a
 direct inspection of the actual journal before preparing a pair; operator paired
 prepare/boot and qualification of other state families remain separate work.
 
-Ownership journal format 2 records controller-generated boot-scoped address
-lifetimes. Unreleased format 1 is refused without rewriting its contents; no
+Ownership journal format 3 records controller-generated boot-scoped address
+lifetimes and route deadlines. Earlier unreleased formats are refused without rewriting their contents; no
 prototype format migration or mixed-version rollback is supported. Operator
 configuration cannot declare `boot_lifetime`. It is the internal projection
 of an accepted finite protocol grant.
@@ -89,7 +96,25 @@ kernel relative lifetime calculation use that original clock, independently
 of UTC corrections. An expired/foreign-boot intent cannot recreate an address,
 and an externally lengthened live lifetime is not adopted or deleted. Linux
 relative address expiry is also checked with the writer closed. Physical
-suspend and an autonomous IPv4 route expiry contract are separate gates.
+suspend remains unqualified.
+
+BGP route deadlines use the source observation's boot ID and absolute expiry;
+neither receipt, writer restart nor reapply creates a new lease. Operator route
+resources cannot supply these internal fields. Expiry and configuration removal
+share the journal/live-route ownership check and leave changed foreign routes
+alone. Before creating routes the writer checks their absence and persists all
+add intentions, including original deadlines, in one batch. A crash after
+netlink creation therefore does not lose the ownership needed for withdrawal.
+Each operation reads a routing table once, rather than dumping the whole FIB
+for every refreshed or expired route. Expiry removals are persisted together.
+
+The route expiry loop requires a running network writer. It is independent of
+the control worker, but it is not a kernel IPv4 timer. A stopped/unavailable
+writer cannot remove IPv4 routes until it resumes or restarts. Linux's native
+[`expires` route option](https://man7.org/linux/man-pages/man8/ip-route.8.html)
+is IPv6-only. BFD receive deadlines and recursive next-hop dependencies are
+still evaluated by control; carrying all prerequisite lifetimes into the writer
+is not established by the BGP observation deadline alone.
 
 The state file is an ownership journal, not a configuration backup. Hold its
 directory in persistent storage and retain it across process and image upgrades.
@@ -111,10 +136,11 @@ single-writer design: cross-process races that occur between an observation and
 a netlink operation cannot be fenced using this journal.
 
 Only the nftables replacement is atomic. Interface, address, route, tunnel and
-sysctl operations may partially succeed. After each successful mutation the
-journal is synchronized, but a crash between the kernel operation and journal
-persistence can leave an unclaimed object. The engine fails conservatively on
-such a collision rather than inventing ownership. `ApplyError.Partial` and a
+sysctl operations may partially succeed. Route additions use the recorded
+intent described above. Other resource mutations synchronize ownership after
+each successful mutation; a crash before persistence can leave an unclaimed
+object. The engine fails conservatively on such a collision rather than
+inventing ownership. `ApplyError.Partial` and a
 `degraded` snapshot report failed reconciliation; they do not promise that the
 previous state has been restored.
 

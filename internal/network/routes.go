@@ -3,10 +3,13 @@ package network
 import (
 	"errors"
 	"fmt"
+	"math"
 	"net/netip"
 	"slices"
 	"sort"
 	"time"
+
+	"github.com/imksoo/routerd2/internal/boottime"
 )
 
 // MaxRouteLifetime bounds finite IPv6 lifetimes to the signed 32-bit USER_HZ
@@ -33,6 +36,11 @@ func validateRoutes(routes []Route) error {
 			}
 			if r.ValidUntil.Unix() < 0 || r.ValidUntil.UTC().Year() > 9999 || r.ValidUntil.Sub(time.Now()) > MaxRouteLifetime {
 				add("route %s: valid_until must be a valid absolute deadline within %s", r.Destination, MaxRouteLifetime)
+			}
+		}
+		if r.BootID != "" || r.ExpiresNanos != 0 {
+			if !boottime.ValidBootID(r.BootID) || r.ExpiresNanos == 0 || r.ExpiresNanos > math.MaxInt64 || !r.ValidUntil.IsZero() {
+				add("route %s: invalid or mixed boot deadline", r.Destination)
 			}
 		}
 		if r.Metric < 0 || uint64(r.Metric) > uint64(^uint32(0)) {
@@ -123,7 +131,8 @@ func normalizeRoute(r Route) Route {
 	return r
 }
 
-func sameRoute(a, b Route) bool {
+// Protocol authority can renew without replacing an unchanged kernel route.
+func sameKernelRoute(a, b Route) bool {
 	a, b = normalizeRoute(a), normalizeRoute(b)
 	return a.Destination == b.Destination && a.Gateway == b.Gateway && a.Interface == b.Interface && a.Metric == b.Metric && a.Table == b.Table && slices.Equal(a.NextHops, b.NextHops) && a.ValidUntil.Equal(b.ValidUntil)
 }
@@ -137,10 +146,10 @@ func routeLifetimeMatches(actual, expected time.Time) bool {
 	return actual.Sub(expected).Abs() <= 2*time.Second
 }
 
-func projectRouteExpiry(d Desired, now time.Time) Desired {
+func projectRouteExpiry(d Desired, now time.Time, clock boottime.Clock) Desired {
 	kept := d.Routes[:0]
 	for _, r := range d.Routes {
-		if r.ValidUntil.IsZero() || r.ValidUntil.After(now) {
+		if (r.ValidUntil.IsZero() || r.ValidUntil.After(now)) && (r.BootID == "" || r.BootID == clock.BootID && r.ExpiresNanos > uint64(clock.BoottimeNanoseconds)) {
 			kept = append(kept, r)
 		}
 	}

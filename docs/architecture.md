@@ -65,6 +65,9 @@ BGPとVRRPはプロトコルを次へ進める前に実適用が必要なため�
 設定から外すworkerの終了前に前提を撤去しない。自分のinactive適用を待つBGP/VRRPは、
 他の退役workerが終了した後に撤去ACKを返す。継続するworkerのstopping/failedは、
 経路の期限切れや独立した観測の適用を止める理由にしない。
+BGP経路は元のboot IDとBOOTTIME期限をnetwork workerの所有記録へ渡す。
+network workerはcontrolと独立して期限切れ経路を撤去する。期限だけの更新では
+kernel経路を置換しない。writer自身が停止した間のIPv4失効は保証しない。
 受理済み観測をkernel障害で巻き戻さず、coordinatorが最新の観測を再適用する。
 kernel I/O中は観測用mutexを解放する。適用開始後の新しい観測は、その古い結果で
 完了扱いにしない。未適用の観測や適用中の処理があればReady/confirmed commitを拒否する。

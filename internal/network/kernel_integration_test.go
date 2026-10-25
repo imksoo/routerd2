@@ -380,7 +380,7 @@ func runNativeECMPFixture(t *testing.T, e *Engine, base Desired, clientNS, serve
 	}
 	found := false
 	for _, route := range live {
-		if sameRoute(route.Route, foreign) {
+		if sameKernelRoute(route.Route, foreign) {
 			found = true
 			if e.ownsRoute(route) {
 				t.Fatal("foreign ECMP route with matching protocol was adopted")

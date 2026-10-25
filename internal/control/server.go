@@ -29,7 +29,16 @@ func ServeNetwork(ctx context.Context, dir, stateDir string, ready func()) error
 		return err
 	}
 	defer e.Close()
-	return localapi.Serve(ctx, filepath.Join(dir, NetworkSocketName), networkHandler(e), ready)
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	expiryDone := make(chan error, 1)
+	go func() {
+		expiryDone <- e.MaintainRoutes(runCtx)
+		cancel()
+	}()
+	err = localapi.Serve(runCtx, filepath.Join(dir, NetworkSocketName), networkHandler(e), ready)
+	cancel()
+	return errors.Join(err, <-expiryDone)
 }
 
 type nativeNetwork interface {
