@@ -2,6 +2,7 @@ package runtimeplan
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -31,7 +32,7 @@ func acceptVRRPAndDrain(t *testing.T, r *Runtime, u serviceconfig.Update) error 
 			return err
 		default:
 		}
-		if err := r.reconcileDynamic(ctx); err != nil {
+		if err := r.reconcileDynamic(ctx); err != nil && !errors.Is(err, ErrVRRPActivationPending) {
 			t.Fatal(err)
 		}
 		select {
