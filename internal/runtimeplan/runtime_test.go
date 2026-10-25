@@ -52,6 +52,7 @@ type memoryManager struct {
 	before          func([]supervisor.DynamicModule)
 	bgpGeneration   uint64
 	dhcp4Generation uint64
+	vrrpGeneration  uint64
 }
 
 func (m *memoryManager) Reconcile(_ context.Context, v []supervisor.DynamicModule) error {
@@ -70,6 +71,9 @@ func (m *memoryManager) Status(_ context.Context) (supervisor.Status, error) {
 		}
 		if v.Role == "bgp" {
 			generation = max(uint64(1), m.bgpGeneration)
+		}
+		if v.Role == "vrrp" {
+			generation = max(uint64(1), m.vrrpGeneration)
 		}
 		s.Modules = append(s.Modules, supervisor.ModuleStatus{Name: v.Name, Role: v.Role, Ready: true, State: "running", ConfigDigest: v.ConfigDigest, Generation: generation})
 	}
