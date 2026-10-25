@@ -41,7 +41,7 @@ func TestSignedManifestABIMustMatchEveryNativeArtifact(t *testing.T) {
 func stageDifferentABI(t *testing.T, s *Store, id string, sequence uint64) Ref {
 	t.Helper()
 	profile := runtimeabi.Current()
-	profile.ConfigurationContract = "resource-program-native-2"
+	profile.ConfigurationContract = "resource-program-native-x"
 	record, err := runtimeabi.EncodeRecord(profile)
 	if err != nil || len(record) != len(runtimeabi.CurrentRecord) {
 		t.Fatal("bad ABI mutation fixture", err)
@@ -171,7 +171,7 @@ func TestLegacyManifestV2AndMissingABIHaveNoCompatibilityReader(t *testing.T) {
 
 func TestOfflinePublisherRejectsMixedNativeABIsBeforeOutput(t *testing.T) {
 	profile := runtimeabi.Current()
-	profile.ConfigurationContract = "resource-program-native-2"
+	profile.ConfigurationContract = "resource-program-native-x"
 	record, err := runtimeabi.EncodeRecord(profile)
 	if err != nil {
 		t.Fatal(err)

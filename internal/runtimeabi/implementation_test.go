@@ -38,7 +38,15 @@ func TestGuardedVRRPDependencyRequiresNewCompilerContract(t *testing.T) {
 	}
 	old := current
 	old.ConfigurationContract = "resource-program-native-1"
-	if err := runtimeabi.CheckTransition(old, current, nil); err == nil {
+	facts := runtimeabi.Facts{Configuration: current.Configuration.Write, ConfigurationContract: current.ConfigurationContract}
+	for _, state := range current.State {
+		facts.State = append(facts.State, runtimeabi.StateVersion{Name: state.Name, Version: state.Format.Write})
+	}
+	if err := runtimeabi.CheckTransition(current, current, facts); err != nil {
+		t.Fatal("current contract failed its complete format observations:", err)
+	}
+	facts.ConfigurationContract = old.ConfigurationContract
+	if err := runtimeabi.CheckTransition(old, current, facts); err == nil {
 		t.Fatal("old compiler contract accepted new dynamic interface semantics")
 	}
 }

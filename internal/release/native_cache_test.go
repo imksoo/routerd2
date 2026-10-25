@@ -37,7 +37,7 @@ func TestNativeInspectionMemoRequiresFreshHashAndSignedManifest(t *testing.T) {
 	// The manifest digest, not just a payload digest, binds cached command,
 	// release, target and ABI expectations. A re-signed lie must miss the memo.
 	m, entries := entriesFor(t, "fixture-r1", 1)
-	m.RuntimeABI.ConfigurationContract = "resource-program-native-2"
+	m.RuntimeABI.ConfigurationContract = "resource-program-native-x"
 	raw, sig, err := SignManifest(m, testKey())
 	if err != nil {
 		t.Fatal(err)
