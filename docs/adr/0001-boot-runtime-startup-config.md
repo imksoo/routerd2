@@ -4,6 +4,11 @@
 
 状態: **設計方針として採用。native runtime catalogを部分実装。**
 
+2026-10-25追記: manifest v3でnative ELFのformat宣言を署名へ結び付ける。
+publisherは実readonly recordから宣言を導出し、全nativeとmanifestの一致をreceiverで再検証する。
+旧v1/v2 readerは置かない。現時点で異なる宣言のprepare/起動/fallbackは、移行policy未実装のため拒否する。
+観測versionの純粋比較だけでstate移行、失効policy、engine/kernel capabilityを受入済みとは扱わない。
+
 2026-10-25追記: manifest v2、可変static native/data、verified role catalogと独立logging commandを実装した。
 旧二ELF readerは置換済み。明示startup-config参照、独立した小さなbootstrap、engine/kernel/config/state ABIの完全化は未完了。
 [実装・個別受入と残作業](../evidence/2026-10-25-runtime-catalog.md) を参照。

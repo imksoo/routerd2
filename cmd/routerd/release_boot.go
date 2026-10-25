@@ -72,6 +72,9 @@ func bootConfigured(path string, b runtimeconfig.Boot) error {
 	if buildinfo.ReleaseID != selection.Image.Release.ReleaseID {
 		return errors.New("executing release identity differs from its verified manifest")
 	}
+	if !buildinfo.Current().RuntimeABI.Equal(selection.Image.Manifest.RuntimeABI) {
+		return errors.New("executing runtime ABI differs from its verified manifest")
+	}
 	b.Workers = map[string]string{}
 	for _, binding := range selection.Image.Manifest.Roles {
 		f, err := selection.Image.Executable(binding.Role)

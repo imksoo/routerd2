@@ -21,6 +21,7 @@ import (
 // authority. A future boot transaction must select a verified reference and
 // durably adopt it into the authoritative journal before applying its intent.
 const MaxSnapshots = 128
+const SnapshotVersion = 1
 const MaxSnapshotBytes = MaxDocumentSize + (4 << 10)
 
 var ErrSnapshotConflict = errors.New("snapshot requires the current confirmed configuration revision")
@@ -49,7 +50,7 @@ func (s *Store) Snapshot(expectedRevision uint64) (SnapshotRef, error) {
 	if expectedRevision == 0 || c.Revision != expectedRevision || c.Confirmation != nil {
 		return SnapshotRef{}, ErrSnapshotConflict
 	}
-	payload := Snapshot{Version: 1, StoreID: c.StoreID, Revision: c.Revision, Config: c.Config}
+	payload := Snapshot{Version: SnapshotVersion, StoreID: c.StoreID, Revision: c.Revision, Config: c.Config}
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return SnapshotRef{}, err
@@ -167,7 +168,7 @@ func readSnapshot(dir *os.File, ref SnapshotRef) (Snapshot, error) {
 	if err := decodeStrictJSON(raw, &snapshot, maxDocumentNodes+32); err != nil {
 		return Snapshot{}, err
 	}
-	if snapshot.Version != 1 || snapshot.StoreID != ref.StoreID || snapshot.Revision != ref.Revision {
+	if snapshot.Version != SnapshotVersion || snapshot.StoreID != ref.StoreID || snapshot.Revision != ref.Revision {
 		return Snapshot{}, errors.New("snapshot provenance differs from its reference")
 	}
 	canonical, err := json.Marshal(snapshot)

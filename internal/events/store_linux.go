@@ -28,7 +28,7 @@ type Store struct {
 }
 
 const applicationID = 0x52443245 // RD2E; separate from every other product store
-const schemaVersion = 6          // discarded unreleased prototype formats are not imported
+const SchemaVersion = 6          // discarded unreleased prototype formats are not imported
 
 const schema = `
 CREATE TABLE events(cursor INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL UNIQUE, body BLOB NOT NULL);
@@ -180,7 +180,7 @@ func openStore(options Options, existingOnly bool) (_ *Store, result error) {
 		if err != nil {
 			return nil, err
 		}
-		if id != applicationID && !(id == 0 && version == 0 && objects == 0) || id == applicationID && version != schemaVersion {
+		if id != applicationID && !(id == 0 && version == 0 && objects == 0) || id == applicationID && version != SchemaVersion {
 			return nil, errors.New("foreign or unsupported event database")
 		}
 	}
@@ -213,7 +213,7 @@ func openStore(options Options, existingOnly bool) (_ *Store, result error) {
 		}
 	} else if id != applicationID {
 		return nil, errors.New("foreign event database application identity")
-	} else if version != schemaVersion {
+	} else if version != SchemaVersion {
 		return nil, errors.New("unsupported event database schema")
 	}
 	// Inspect ownership/schema before any pragma that can modify the database.
@@ -244,7 +244,7 @@ func openStore(options Options, existingOnly bool) (_ *Store, result error) {
 	if err = s.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		return nil, err
 	}
-	if version != schemaVersion {
+	if version != SchemaVersion {
 		return nil, errors.New("unsupported event database schema")
 	}
 	var integrity string

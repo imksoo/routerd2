@@ -5,6 +5,8 @@ import (
 	"errors"
 	"runtime"
 	"strings"
+
+	"github.com/imksoo/routerd2/internal/runtimeabi"
 )
 
 const IdentityPrefix = "ROUTERD2-RELEASE-V1:"
@@ -52,13 +54,14 @@ func mustIdentity(record string) string {
 }
 
 type Info struct {
-	ReleaseID  string `json:"release_id"`
-	GoVersion  string `json:"go_version"`
-	GOOS       string `json:"goos"`
-	GOARCH     string `json:"goarch"`
-	APIVersion int    `json:"api_version"`
+	ReleaseID  string                `json:"release_id"`
+	GoVersion  string                `json:"go_version"`
+	GOOS       string                `json:"goos"`
+	GOARCH     string                `json:"goarch"`
+	APIVersion int                   `json:"api_version"`
+	RuntimeABI runtimeabi.Descriptor `json:"runtime_abi"`
 }
 
 func Current() Info {
-	return Info{ReleaseID, runtime.Version(), runtime.GOOS, runtime.GOARCH, 1}
+	return Info{ReleaseID: ReleaseID, GoVersion: runtime.Version(), GOOS: runtime.GOOS, GOARCH: runtime.GOARCH, APIVersion: 1, RuntimeABI: runtimeabi.Current()}
 }

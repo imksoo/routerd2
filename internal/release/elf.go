@@ -12,12 +12,36 @@ import (
 	"io"
 
 	"github.com/imksoo/routerd2/internal/buildinfo"
+	"github.com/imksoo/routerd2/internal/runtimeabi"
 )
 
 // InspectELF reads an executable without running it. The accepted build profile
 // deliberately matches the project's static Go -buildmode=exe output; a future
 // static PIE or a different CPU baseline requires an explicit format extension.
 func InspectELF(r io.ReaderAt, size int64, artifact, releaseID, targetOS, targetArch string) error {
+	_, err := InspectELFABI(r, size, artifact, releaseID, targetOS, targetArch)
+	return err
+}
+
+// InspectELFABI additionally reads the executable's complete ABI declaration
+// from the verified readonly section, without running incoming code.
+func InspectELFABI(r io.ReaderAt, size int64, artifact, releaseID, targetOS, targetArch string) (runtimeabi.Descriptor, error) {
+	if err := inspectELF(r, size, artifact, releaseID, targetOS, targetArch); err != nil {
+		return runtimeabi.Descriptor{}, err
+	}
+	f, err := elf.NewFile(r)
+	if err != nil {
+		return runtimeabi.Descriptor{}, err
+	}
+	defer f.Close()
+	section := f.Section(".rodata")
+	if section == nil {
+		return runtimeabi.Descriptor{}, errors.New("ELF has no readonly ABI declaration section")
+	}
+	return runtimeabi.ReadRecord(io.NewSectionReader(r, int64(section.Offset), int64(section.Size)))
+}
+
+func inspectELF(r io.ReaderAt, size int64, artifact, releaseID, targetOS, targetArch string) error {
 	if !componentName.MatchString(artifact) || size < 64 || size > MaxArtifactBytes {
 		return errors.New("invalid ELF artifact or size")
 	}

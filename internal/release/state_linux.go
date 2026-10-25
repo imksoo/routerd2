@@ -75,7 +75,7 @@ func validateState(state State) error {
 	if err := validateConfigurationState(state); err != nil {
 		return err
 	}
-	if state.Version != 1 || !validTime(state.ChangedAt) {
+	if state.Version != StateVersion || !validTime(state.ChangedAt) {
 		return errors.New("invalid release journal version or timestamp")
 	}
 	switch state.Operation {
@@ -430,6 +430,11 @@ func (s *Store) prepare(ctx context.Context, ref Ref, expectedGeneration uint64,
 	}
 	defer image.Close()
 	var current State
+	if state.Active != nil {
+		if err := s.requireSameABI(ctx, *state.Active, image.Manifest.RuntimeABI); err != nil {
+			return State{}, err
+		}
+	}
 	if check != nil {
 		// State contains nested pointers. A shallow callback copy must not be
 		// able to modify the state subsequently published by this transaction.
@@ -486,9 +491,14 @@ func (s *Store) BeginBoot(ctx context.Context, bootID string) (Selection, error)
 	}
 	changed, rolledBack, failed := false, false, false
 	if state.Pending != nil {
+		if state.Active != nil {
+			if err := s.requireSameSelectedABI(ctx, *state.Active, state.Pending.Release); err != nil {
+				return Selection{}, err
+			}
+		}
 		if state.Attempt == nil || state.Attempt.BootID != bootID {
 			if state.Attempt != nil && state.Attempt.Number >= state.Pending.MaxAttempts {
-				state, err = s.failBootState(state, "unconfirmed boot attempt limit reached")
+				state, err = s.failBootState(ctx, state, "unconfirmed boot attempt limit reached")
 				if err != nil {
 					return Selection{}, err
 				}
@@ -657,8 +667,11 @@ func (s *Store) Rollback(ctx context.Context, expectedGeneration uint64, reason 
 	if state.Active == nil || state.Previous == nil {
 		return State{}, ErrNoFallback
 	}
+	if err := s.requireSameSelectedABI(ctx, *state.Active, *state.Previous); err != nil {
+		return State{}, err
+	}
 	if state.Attempt != nil {
-		state, err = s.failBootState(state, reason)
+		state, err = s.failBootState(ctx, state, reason)
 	} else {
 		old := state.Active
 		state.Active = state.Previous
@@ -693,7 +706,7 @@ func (s *Store) FailBoot(ctx context.Context, bootID, token, reason string) (Sta
 	if state.Attempt == nil || state.Attempt.BootID != bootID || state.Attempt.Token != token {
 		return State{}, ErrStale
 	}
-	state, err = s.failBootState(state, reason)
+	state, err = s.failBootState(ctx, state, reason)
 	if err != nil {
 		return State{}, err
 	}
@@ -706,9 +719,14 @@ func (s *Store) FailBoot(ctx context.Context, bootID, token, reason string) (Sta
 	return state, nil
 }
 
-func (s *Store) failBootState(state State, reason string) (State, error) {
+func (s *Store) failBootState(ctx context.Context, state State, reason string) (State, error) {
 	if state.Active == nil || state.Attempt == nil || state.Pending == nil {
 		return state, ErrStale
+	}
+	if state.Previous != nil {
+		if err := s.requireSameSelectedABI(ctx, *state.Active, *state.Previous); err != nil {
+			return state, err
+		}
 	}
 	state.LastFailure = &Failure{Release: *state.Active, BootID: state.Attempt.BootID, Reason: reason, At: s.now().UTC()}
 	state.LastFailure.Startup = cloneStartup(state.Startup)

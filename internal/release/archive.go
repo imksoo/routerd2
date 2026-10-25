@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/imksoo/routerd2/internal/runtimeabi"
 )
 
 // This intentionally accepts a small USTAR subset rather than a generic
@@ -201,6 +203,9 @@ func WriteBundle(ctx context.Context, output io.Writer, options BundleOptions, k
 	// Validate the complete shape and bounds before reading any file. Hashes and
 	// lengths below replace these temporary validation values before signing.
 	shape := m
+	// Shape validation precedes input I/O. The real declaration is derived
+	// below from native bytes; this placeholder never enters signed output.
+	shape.RuntimeABI = runtimeabi.Current()
 	shape.Artifacts = append([]Artifact(nil), options.Artifacts...)
 	for i := range shape.Artifacts {
 		shape.Artifacts[i].Size = 64
@@ -232,8 +237,14 @@ func WriteBundle(ctx context.Context, output io.Writer, options BundleOptions, k
 			return m, err
 		}
 		if a.Kind == "native" {
-			if err := InspectELF(f, stat.Size(), a.Command, m.ReleaseID, m.GOOS, m.GOARCH); err != nil {
+			declared, err := InspectELFABI(f, stat.Size(), a.Command, m.ReleaseID, m.GOOS, m.GOARCH)
+			if err != nil {
 				return m, fmt.Errorf("%s: %w", name, err)
+			}
+			if m.RuntimeABI.Version == 0 {
+				m.RuntimeABI = declared
+			} else if !m.RuntimeABI.Equal(declared) {
+				return m, errors.New("native runtime ABI declarations differ within one artifact set")
 			}
 		}
 		m.Artifacts = append(m.Artifacts, Artifact{Name: name, Kind: a.Kind, Command: a.Command, Size: stat.Size(), SHA256: hex.EncodeToString(hash.Sum(nil))})

@@ -10,12 +10,14 @@ import (
 	"crypto/ed25519"
 	"errors"
 	"github.com/imksoo/routerd2/internal/configref"
+	"github.com/imksoo/routerd2/internal/runtimeabi"
 	"os"
 	"time"
 )
 
 const (
-	ManifestVersion               = 2
+	ManifestVersion               = 3
+	StateVersion                  = 1
 	MaxManifestBytes              = 64 << 10
 	MaxArtifacts                  = 64
 	MaxRoles                      = 64
@@ -55,17 +57,18 @@ type RoleBinding struct {
 // Sequence is a publisher-assigned, strictly increasing release counter. A
 // release ID is an opaque human-readable identity, never a version comparison.
 type Manifest struct {
-	Version    int           `json:"version"`
-	ReleaseID  string        `json:"release_id"`
-	Sequence   uint64        `json:"sequence"`
-	GOOS       string        `json:"goos"`
-	GOARCH     string        `json:"goarch"`
-	KeyID      string        `json:"key_id"`
-	BootABI    int           `json:"boot_abi"`
-	WorkerABI  int           `json:"worker_abi"`
-	Entrypoint string        `json:"entrypoint"`
-	Roles      []RoleBinding `json:"roles"`
-	Artifacts  []Artifact    `json:"artifacts"`
+	Version    int                   `json:"version"`
+	ReleaseID  string                `json:"release_id"`
+	Sequence   uint64                `json:"sequence"`
+	GOOS       string                `json:"goos"`
+	GOARCH     string                `json:"goarch"`
+	KeyID      string                `json:"key_id"`
+	BootABI    int                   `json:"boot_abi"`
+	WorkerABI  int                   `json:"worker_abi"`
+	RuntimeABI runtimeabi.Descriptor `json:"runtime_abi"`
+	Entrypoint string                `json:"entrypoint"`
+	Roles      []RoleBinding         `json:"roles"`
+	Artifacts  []Artifact            `json:"artifacts"`
 }
 
 type Ref struct {

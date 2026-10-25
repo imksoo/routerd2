@@ -16,6 +16,9 @@ var errLinkNotFound = errors.New("link not found")
 
 const tunnelAlias = "routerd2:ds-lite:v1"
 
+// JournalVersion is the persisted network ownership/BOOTTIME contract.
+const JournalVersion = 2
+
 type settingKey struct {
 	Kind      string `json:"kind"`
 	Interface string `json:"interface,omitempty"`
@@ -118,14 +121,14 @@ func newEngine(opts Options, k kernel) (*Engine, error) {
 		f.Close()
 		return nil, fmt.Errorf("network journal already in use or cannot be locked: %w", err)
 	}
-	e := &Engine{opts: opts, kernel: k, lock: f, state: journal{Version: 2, Status: "unapplied"}}
+	e := &Engine{opts: opts, kernel: k, lock: f, state: journal{Version: JournalVersion, Status: "unapplied"}}
 	b, err := os.ReadFile(opts.StatePath)
 	if err == nil {
 		if err = json.Unmarshal(b, &e.state); err != nil {
 			f.Close()
 			return nil, fmt.Errorf("network ownership journal: %w", err)
 		}
-		if e.state.Version != 2 {
+		if e.state.Version != JournalVersion {
 			f.Close()
 			return nil, fmt.Errorf("unsupported network journal version %d", e.state.Version)
 		}

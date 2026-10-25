@@ -2,13 +2,58 @@
 
 This document describes the **unreleased prototype** format. There are no
 deployed users of this format, and backward compatibility is not required.
-The signed manifest v2 now declares a variable artifact set, its native command
-identities, entrypoint and role bindings. Native static ELF and regular data are
-supported; the former v1 implicit two-ELF reader is removed. Appliance boot
+The signed manifest v3 declares a variable artifact set, its native command
+identities, entrypoint, role bindings and embedded runtime format declaration.
+Native static ELF and regular data are supported; former v1/v2 bytes are refused.
+Appliance boot
 executes the verified entrypoint inode and pins each declared worker role.
 Image staging, boot selection and explicit startup-configuration selection
 remain separate contracts; the latter is still pending. See
 [ADR 0001](adr/0001-boot-runtime-startup-config.md).
+
+## Native format declarations
+
+Every native executable contains one complete canonical
+`ROUTERD2-RUNTIME-ABI-V1:...:END` record in a readonly allocated ELF section.
+The publisher derives `runtime_abi` from those actual input bytes and requires
+all native members to agree. There is no layout flag that substitutes a claim.
+The receiver checks the signed declaration against each native artifact at
+stage and whenever the installed set is reopened. The executing supervisor also
+checks its own declaration against the selected signed manifest.
+
+The record describes profile/boot/worker contracts, configuration semantics and
+schema reader/writer versions, and named persistent-state reader/writer versions.
+It is bounded to 4KiB and 32 sorted unique state components; versions are positive
+and at most 65535, and each writer version must be readable by its own runtime.
+Scanning is streaming, rejects multiple complete valid records, caps malformed
+marker candidates, and bounds readers that stop making progress.
+The manifest signature domain is `routerd2 signed extracted runtime manifest v3\x00`.
+The release identity record remains V1; its format is independent of manifest
+version and the runtime ABI record envelope.
+
+The current declaration has configuration schema 2 and semantics contract
+`resource-program-native-1`. Its named formats are configuration journal 1,
+events SQLite 6, network journal 2, release journal 1, snapshot 1 and SSH identity
+1. Configuration journal and SSH identity numbers name codec contracts; they
+are not extra fields inserted into existing files. A persistent-format or
+breaking input-semantics change must update the declaration and qualification.
+Tests tie explicit format implementations to these claims without linking the
+configuration compiler into the declaration package or independent logger.
+
+Current prepare/boot/direct rollback/fallback require equal format declarations.
+Even a successful generic preflight callback cannot authorize a format-changing
+migration. Such runtimes can be staged for inspection; activation needs a
+qualified configuration/state migration workflow that is not implemented yet.
+The pure `runtimeabi.CheckTransition` helper additionally checks trusted observed
+versions, both runtimes' writers, required facts and configuration semantics.
+An explicit version zero fact means an inspected absent file, never an omitted
+observation. The helper neither collects facts nor restores identity, lease,
+owner or revocation state.
+
+These are publisher declarations bound to executable bytes, not a proof that
+code implements them correctly. Release qualification, actual state inspection,
+target compiler/kernel/engine capability checks and revocation policy remain
+required. No paired loader or operator migration workflow is activated here.
 
 This updates userland only. Kernel, root filesystem, bootloader, persistent
 data-partition provisioning and configuration-schema migration are separate

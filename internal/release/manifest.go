@@ -15,11 +15,12 @@ import (
 	"strings"
 
 	"github.com/imksoo/routerd2/internal/buildinfo"
+	"github.com/imksoo/routerd2/internal/runtimeabi"
 )
 
 var componentName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$`)
 
-const signatureDomain = "routerd2 signed extracted runtime manifest v2\x00"
+const signatureDomain = "routerd2 signed extracted runtime manifest v3\x00"
 
 func KeyID(public ed25519.PublicKey) string {
 	sum := sha256.Sum256(public)
@@ -39,7 +40,7 @@ func ValidateManifest(m Manifest, maxArtifact int64) error {
 		return errors.New("invalid artifact size policy")
 	}
 	if m.Version != ManifestVersion || m.Sequence == 0 {
-		return errors.New("manifest requires version 2 and a nonzero release sequence")
+		return errors.New("manifest requires version 3 and a nonzero release sequence")
 	}
 	if _, err := buildinfo.ParseIdentity(buildinfo.IdentityPrefix + m.ReleaseID + buildinfo.IdentitySuffix); err != nil {
 		return fmt.Errorf("release ID: %w", err)
@@ -52,6 +53,12 @@ func ValidateManifest(m Manifest, maxArtifact int64) error {
 	}
 	if m.BootABI != 1 || m.WorkerABI != 1 {
 		return errors.New("unsupported boot or worker ABI")
+	}
+	if _, err := runtimeabi.EncodeRecord(m.RuntimeABI); err != nil {
+		return fmt.Errorf("runtime ABI: %w", err)
+	}
+	if m.RuntimeABI.BootABI != uint32(m.BootABI) || m.RuntimeABI.WorkerABI != uint32(m.WorkerABI) {
+		return errors.New("manifest protocol ABI differs from the native declaration")
 	}
 	if len(m.Artifacts) == 0 || len(m.Artifacts) > MaxArtifacts || len(m.Roles) == 0 || len(m.Roles) > MaxRoles {
 		return errors.New("runtime artifact or role count exceeds supported bounds")

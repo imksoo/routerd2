@@ -98,7 +98,7 @@ func Open(options Options) (*Store, error) {
 		} else if len(names) != 0 {
 			err = fmt.Errorf("%w: missing current selector in nonempty journal", ErrCorrupt)
 		} else {
-			state := State{Version: 1, Generation: 0, ChangedAt: s.now().UTC(), Operation: "empty"}
+			state := State{Version: StateVersion, Generation: 0, ChangedAt: s.now().UTC(), Operation: "empty"}
 			err = s.commit(state)
 		}
 	}
@@ -415,8 +415,12 @@ func (s *Store) stageArtifact(ctx context.Context, dir *os.File, a Artifact, b b
 		return err
 	}
 	if a.Kind == "native" {
-		if err = InspectELF(f, a.Size, a.Command, m.ReleaseID, m.GOOS, m.GOARCH); err != nil {
-			return fmt.Errorf("%s: %w", a.Name, err)
+		declared, inspectErr := InspectELFABI(f, a.Size, a.Command, m.ReleaseID, m.GOOS, m.GOARCH)
+		if inspectErr != nil {
+			return fmt.Errorf("%s: %w", a.Name, inspectErr)
+		}
+		if !declared.Equal(m.RuntimeABI) {
+			return fmt.Errorf("%s: native ABI declaration differs from signed manifest", a.Name)
 		}
 	}
 	mode := os.FileMode(0400)
@@ -441,20 +445,9 @@ func (s *Store) openImage(ctx context.Context, ref Ref) (*Image, error) {
 		return nil, fmt.Errorf("%w: open release: %v", ErrCorrupt, err)
 	}
 	defer dir.Close()
-	raw, err := readFile(dir, "manifest.json", MaxManifestBytes)
+	m, err := s.readImageManifest(dir, ref)
 	if err != nil {
 		return nil, err
-	}
-	sig, err := readFile(dir, "manifest.sig", ed25519.SignatureSize)
-	if err != nil {
-		return nil, err
-	}
-	m, actual, err := VerifyManifest(raw, sig, s.options.TrustedKeys, s.options.TargetOS, s.options.TargetArch, s.options.MaxArtifactBytes)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrCorrupt, err)
-	}
-	if actual != ref {
-		return nil, fmt.Errorf("%w: release reference differs from its signed manifest", ErrCorrupt)
 	}
 	names, err := directoryNames(dir, MaxArtifacts+2)
 	if err != nil {
@@ -496,12 +489,37 @@ func (s *Store) openImage(ctx context.Context, ref Ref) (*Image, error) {
 			return fail(fmt.Errorf("%w: artifact digest changed", ErrCorrupt))
 		}
 		if a.Kind == "native" {
-			if err = InspectELF(f, a.Size, a.Command, m.ReleaseID, m.GOOS, m.GOARCH); err != nil {
-				return fail(fmt.Errorf("%w: %v", ErrCorrupt, err))
+			declared, inspectErr := InspectELFABI(f, a.Size, a.Command, m.ReleaseID, m.GOOS, m.GOARCH)
+			if inspectErr != nil {
+				return fail(fmt.Errorf("%w: %v", ErrCorrupt, inspectErr))
+			}
+			if !declared.Equal(m.RuntimeABI) {
+				return fail(fmt.Errorf("%w: native ABI differs from signed manifest", ErrCorrupt))
 			}
 		}
 	}
 	return image, nil
+}
+
+// readImageManifest is also used while holding the store lock after readState
+// has verified all selected payloads. It does not stand in for payload checks.
+func (s *Store) readImageManifest(dir *os.File, ref Ref) (Manifest, error) {
+	raw, err := readFile(dir, "manifest.json", MaxManifestBytes)
+	if err != nil {
+		return Manifest{}, err
+	}
+	sig, err := readFile(dir, "manifest.sig", ed25519.SignatureSize)
+	if err != nil {
+		return Manifest{}, err
+	}
+	m, actual, err := VerifyManifest(raw, sig, s.options.TrustedKeys, s.options.TargetOS, s.options.TargetArch, s.options.MaxArtifactBytes)
+	if err != nil {
+		return Manifest{}, fmt.Errorf("%w: %v", ErrCorrupt, err)
+	}
+	if actual != ref {
+		return Manifest{}, fmt.Errorf("%w: release reference differs from its signed manifest", ErrCorrupt)
+	}
+	return m, nil
 }
 
 // Verify returns the complete pinned, re-verified runtime artifact set for a staged reference. It

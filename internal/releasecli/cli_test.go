@@ -28,6 +28,7 @@ import (
 
 	"github.com/imksoo/routerd2/internal/buildinfo"
 	"github.com/imksoo/routerd2/internal/release"
+	"github.com/imksoo/routerd2/internal/runtimeabi"
 )
 
 type cliFixture struct {
@@ -137,7 +138,8 @@ func cliBinaries(t *testing.T, id string) map[string][]byte {
 				binaryErr = err
 				return
 			}
-			if err = os.WriteFile(filepath.Join(path, "main.go"), []byte("package main\nimport \"fmt\"\nvar Identity string\nfunc main(){fmt.Println(Identity)}\n"), 0600); err != nil {
+			source := fmt.Sprintf("package main\nimport \"fmt\"\nvar Identity string\nconst RuntimeABI=%q\nfunc main(){fmt.Println(Identity,RuntimeABI)}\n", runtimeabi.CurrentRecord)
+			if err = os.WriteFile(filepath.Join(path, "main.go"), []byte(source), 0600); err != nil {
 				binaryErr = err
 				return
 			}

@@ -34,10 +34,14 @@ they do not implement the policy, an operator workflow or paired boot by themsel
 
 An uncompressed USTAR bundle contains canonical `manifest.json`, raw 64-byte
 `manifest.sig`, then exactly the declared regular artifacts in manifest order.
-Manifest v2 signs release ID, publisher sequence, target, key ID, boot/worker
-ABI, entrypoint, role catalog, artifact kinds, native Go command identities,
-SHA-256 and sizes. The domain is
-`routerd2 signed extracted runtime manifest v2\x00`. Former v1 bytes are refused.
+Manifest v3 signs release ID, publisher sequence, target, key ID, boot/worker
+ABI, the native `runtime_abi` declaration, entrypoint, role catalog, artifact
+kinds, native Go command identities, SHA-256 and sizes. The domain is
+`routerd2 signed extracted runtime manifest v3\x00`. Former v1/v2 bytes are refused.
+Native ABI records are extracted from readonly ELF data without execution;
+all native members must agree and match the signed manifest. There is no
+publisher layout override for the declaration. See the
+[format declaration contract](../../docs/releases.md#native-format-declarations).
 
 The first extracted layout accepts bounded single filenames (no links or
 nested paths), static native Go ELF and non-executable regular data. Limits are
@@ -46,10 +50,16 @@ The receiving store defaults to a 512MiB per-artifact policy. Only boot/worker
 ABI 1 is accepted. Dynamic linking and external engines are not accepted yet.
 
 `WriteBundle` takes an explicit layout and map of already opened files, verifies
-native command identity, signs metadata and rechecks bytes while writing. Its
+native command/ABI identity, signs metadata and rechecks bytes while writing. Its
 caller publishes only after fsync/rename/directory fsync. The offline publisher
 uses `--layout`; see [releases](../../docs/releases.md). Private signing keys
 never enter the runtime or artifact set.
+
+Prepare, boot and fallback compare selected declarations under the store lock.
+Until a qualified migration workflow exists, a format-changing runtime can be
+staged but cannot be activated or selected by direct rollback. Callback success
+is not a migration authorization. Format ranges and publisher claims do not
+substitute for actual state, kernel/engine or revocation qualification.
 
 `ParseTrust` and `LoadTrustFile` accept a JSON object mapping full key IDs to
 canonical padded base64 Ed25519 public keys. The trust file may be formatted for
