@@ -13,7 +13,7 @@ import (
 // This gate uses the actual two command builds for both supported targets.
 // Unlike the small parser fixtures, these include the complete runtime modules.
 // Neither architecture's incoming binaries are executed.
-func TestBuiltReleasePairs(t *testing.T) {
+func TestBuiltRuntimeCatalog(t *testing.T) {
 	dir, id := os.Getenv("ROUTERD2_RELEASE_BUILT_DIR"), os.Getenv("ROUTERD2_RELEASE_BUILT_ID")
 	if dir == "" || id == "" {
 		if os.Getenv("ROUTERD2_INTEGRATION_REQUIRED") == "1" {
@@ -45,7 +45,7 @@ func TestBuiltReleasePairs(t *testing.T) {
 				t.Fatal(err)
 			}
 			path := bundle.Name()
-			manifest, err := WriteBundle(ctx, bundle, BundleOptions{ReleaseID: id, Sequence: 42, GOOS: "linux", GOARCH: arch}, testKey(), input[0], input[1])
+			manifest, err := WriteBundle(ctx, bundle, BundleOptions{ReleaseID: id, Sequence: 42, GOOS: "linux", GOARCH: arch, BootABI: 1, WorkerABI: 1, Entrypoint: "routerd", Artifacts: []Artifact{{Name: "routerd", Kind: "native", Command: "routerd"}, {Name: "routerd-modules", Kind: "native", Command: "routerd-modules"}}, Roles: []RoleBinding{{Role: "logging", Artifact: "routerd-modules"}, {Role: "network", Artifact: "routerd-modules"}, {Role: "control", Artifact: "routerd-modules"}, {Role: "management", Artifact: "routerd-modules"}, {Role: "health", Artifact: "routerd-modules"}, {Role: "dhcp4", Artifact: "routerd-modules"}, {Role: "dhcp6pd", Artifact: "routerd-modules"}, {Role: "dhcp_server", Artifact: "routerd-modules"}, {Role: "ra", Artifact: "routerd-modules"}, {Role: "ra_client", Artifact: "routerd-modules"}, {Role: "aftr", Artifact: "routerd-modules"}, {Role: "dns", Artifact: "routerd-modules"}, {Role: "vrrp", Artifact: "routerd-modules"}, {Role: "bgp", Artifact: "routerd-modules"}, {Role: "bfd", Artifact: "routerd-modules"}}}, testKey(), map[string]*os.File{"routerd": input[0], "routerd-modules": input[1]})
 			if err != nil {
 				bundle.Close()
 				t.Fatal(err)

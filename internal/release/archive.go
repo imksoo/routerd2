@@ -172,18 +172,22 @@ func (r contextReader) Read(p []byte) (int, error) {
 }
 
 type BundleOptions struct {
-	ReleaseID string
-	Sequence  uint64
-	GOOS      string
-	GOARCH    string
+	ReleaseID          string
+	Sequence           uint64
+	GOOS               string
+	GOARCH             string
+	BootABI, WorkerABI int
+	Entrypoint         string
+	Roles              []RoleBinding
+	Artifacts          []Artifact
 }
 
 // WriteBundle is the offline publication primitive. It reads from pinned local
-// files, inspects both executables without executing them, and signs the
+// files, inspects each native executable without executing them, and signs the
 // complete manifest. The caller must publish output only after a nil error,
 // normally using a temporary file + fsync + rename. No key is saved by this API.
-func WriteBundle(ctx context.Context, output io.Writer, options BundleOptions, key ed25519.PrivateKey, routerd, modules *os.File) (Manifest, error) {
-	m := Manifest{Version: ManifestVersion, ReleaseID: options.ReleaseID, Sequence: options.Sequence, GOOS: options.GOOS, GOARCH: options.GOARCH}
+func WriteBundle(ctx context.Context, output io.Writer, options BundleOptions, key ed25519.PrivateKey, files map[string]*os.File) (Manifest, error) {
+	m := Manifest{Version: ManifestVersion, ReleaseID: options.ReleaseID, Sequence: options.Sequence, GOOS: options.GOOS, GOARCH: options.GOARCH, BootABI: options.BootABI, WorkerABI: options.WorkerABI, Entrypoint: options.Entrypoint, Roles: append([]RoleBinding(nil), options.Roles...)}
 	if ctx == nil || output == nil {
 		return m, errors.New("bundle context and output are required")
 	}
@@ -191,27 +195,48 @@ func WriteBundle(ctx context.Context, output io.Writer, options BundleOptions, k
 		return m, errors.New("invalid Ed25519 signing key")
 	}
 	m.KeyID = KeyID(key.Public().(ed25519.PublicKey))
-	files := []*os.File{routerd, modules}
-	for i, name := range []string{"routerd", "routerd-modules"} {
-		f := files[i]
+	if len(files) != len(options.Artifacts) || len(files) == 0 || len(files) > MaxArtifacts {
+		return m, errors.New("runtime input file set must match the declared artifact set")
+	}
+	// Validate the complete shape and bounds before reading any file. Hashes and
+	// lengths below replace these temporary validation values before signing.
+	shape := m
+	shape.Artifacts = append([]Artifact(nil), options.Artifacts...)
+	for i := range shape.Artifacts {
+		shape.Artifacts[i].Size = 64
+		shape.Artifacts[i].SHA256 = strings.Repeat("0", 64)
+	}
+	if err := ValidateManifest(shape, MaxArtifactBytes); err != nil {
+		return m, err
+	}
+	var total int64
+	for _, a := range options.Artifacts {
+		name := a.Name
+		f := files[name]
 		if f == nil {
-			return m, errors.New("both executable files are required")
+			return m, errors.New("every declared runtime input file is required")
 		}
 		stat, err := f.Stat()
 		if err != nil {
 			return m, err
 		}
-		if !stat.Mode().IsRegular() || stat.Size() < 64 || stat.Size() > MaxArtifactBytes {
+		if !stat.Mode().IsRegular() || stat.Size() < 1 || stat.Size() > MaxArtifactBytes {
 			return m, errors.New("bundle input must be a bounded regular file")
 		}
+		if stat.Size() > MaxRuntimeBytes-total {
+			return m, errors.New("runtime aggregate size exceeds supported bound")
+		}
+		total += stat.Size()
 		hash := sha256.New()
 		if _, err := io.Copy(hash, contextReader{ctx, io.NewSectionReader(f, 0, stat.Size())}); err != nil {
 			return m, err
 		}
-		if err := InspectELF(f, stat.Size(), name, m.ReleaseID, m.GOOS, m.GOARCH); err != nil {
-			return m, fmt.Errorf("%s: %w", name, err)
+		if a.Kind == "native" {
+			if err := InspectELF(f, stat.Size(), a.Command, m.ReleaseID, m.GOOS, m.GOARCH); err != nil {
+				return m, fmt.Errorf("%s: %w", name, err)
+			}
 		}
-		m.Artifacts = append(m.Artifacts, Artifact{Name: name, Size: stat.Size(), SHA256: hex.EncodeToString(hash.Sum(nil))})
+		m.Artifacts = append(m.Artifacts, Artifact{Name: name, Kind: a.Kind, Command: a.Command, Size: stat.Size(), SHA256: hex.EncodeToString(hash.Sum(nil))})
 	}
 	raw, signature, err := SignManifest(m, key)
 	if err != nil {
@@ -232,12 +257,16 @@ func WriteBundle(ctx context.Context, output io.Writer, options BundleOptions, k
 			return m, err
 		}
 	}
-	for i, a := range m.Artifacts {
-		if err := header(a.Name, a.Size, 0500); err != nil {
+	for _, a := range m.Artifacts {
+		mode := int64(0400)
+		if a.Kind == "native" {
+			mode = 0500
+		}
+		if err := header(a.Name, a.Size, mode); err != nil {
 			return m, err
 		}
 		hash := sha256.New()
-		n, err := io.Copy(io.MultiWriter(tw, hash), contextReader{ctx, io.NewSectionReader(files[i], 0, a.Size)})
+		n, err := io.Copy(io.MultiWriter(tw, hash), contextReader{ctx, io.NewSectionReader(files[a.Name], 0, a.Size)})
 		if err != nil {
 			return m, err
 		}

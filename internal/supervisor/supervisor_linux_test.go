@@ -52,7 +52,7 @@ func helperMain() int {
 		if err != nil {
 			return 75
 		}
-		err = Run(context.Background(), Options{ModulePath: executable, ReleaseID: testRelease, RuntimeDir: os.Getenv("ROUTERD_TEST_RUNTIME"), StateDir: state, Platform: "host", Modules: []Spec{{Name: "network", Role: "ready"}}})
+		err = Run(context.Background(), Options{Executables: map[string]string{"ready": executable}, ReleaseID: testRelease, RuntimeDir: os.Getenv("ROUTERD_TEST_RUNTIME"), StateDir: state, Platform: "host", Modules: []Spec{{Name: "network", Role: "ready"}}})
 		if err != nil {
 			_, _ = fmt.Fprintln(os.Stderr, err)
 			return 76
@@ -135,6 +135,9 @@ func startTestSupervisor(t *testing.T, modules []Spec) *testSupervisor {
 	return startTestSupervisorRoles(t, modules, nil)
 }
 func startTestSupervisorRoles(t *testing.T, modules []Spec, roles []string) *testSupervisor {
+	return startTestSupervisorCatalog(t, modules, roles, false)
+}
+func startTestSupervisorCatalog(t *testing.T, modules []Spec, roles []string, split bool) *testSupervisor {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "routerd-sup-")
 	if err != nil {
@@ -152,7 +155,21 @@ func startTestSupervisorRoles(t *testing.T, modules []Spec, roles []string) *tes
 	if err := os.Mkdir(state, 0700); err != nil {
 		t.Fatal(err)
 	}
-	o := Options{ModulePath: image, ReleaseID: testRelease, RuntimeDir: filepath.Join(dir, "run"), StateDir: state, Platform: "host", Modules: modules, DynamicRoles: roles, Env: []string{"ROUTERD_SUPERVISOR_HELPER=1", worker.SupervisorInstanceEnv + "=inherited-value-must-not-choose-authority"}}
+	catalog := testRolePaths(image, modules, roles)
+	if split {
+		data, err := os.ReadFile(executable)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for role := range catalog {
+			path := filepath.Join(dir, "component-"+role)
+			if err := os.WriteFile(path, data, 0700); err != nil {
+				t.Fatal(err)
+			}
+			catalog[role] = path
+		}
+	}
+	o := Options{Executables: catalog, ReleaseID: testRelease, RuntimeDir: filepath.Join(dir, "run"), StateDir: state, Platform: "host", Modules: modules, DynamicRoles: roles, Env: []string{"ROUTERD_SUPERVISOR_HELPER=1", worker.SupervisorInstanceEnv + "=inherited-value-must-not-choose-authority"}}
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &testSupervisor{options: o, cancel: cancel, done: make(chan error, 1)}
 	s.client = &http.Client{Timeout: time.Second, Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
@@ -259,10 +276,10 @@ func TestSupervisorReadinessRestartIsolationAndPinnedImage(t *testing.T) {
 		t.Fatalf("unknown restart status: %d", got)
 	}
 	// A changed pathname must not make one restarted worker use another image.
-	if err := os.Remove(s.options.ModulePath); err != nil {
+	if err := os.Remove(s.options.Executables["ready"]); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink("/does-not-exist", s.options.ModulePath); err != nil {
+	if err := os.Symlink("/does-not-exist", s.options.Executables["ready"]); err != nil {
 		t.Fatal(err)
 	}
 	if got := s.request(t, http.MethodPost, "/v1/modules/network/restart"); got != http.StatusAccepted {
@@ -521,4 +538,19 @@ func TestDynamicModulesReconcileFencesCoreAndReplacesProcesses(t *testing.T) {
 	if readded.Modules[1].Generation <= replaced.Modules[1].Generation {
 		t.Fatal("removed/re-added worker reused an old protocol generation", readded.Modules[1].Generation, replaced.Modules[1].Generation)
 	}
+}
+
+func testRolePaths(path string, modules []Spec, roles []string) map[string]string {
+	paths := map[string]string{}
+	for _, s := range modules {
+		role := s.Role
+		if role == "" {
+			role = s.Name
+		}
+		paths[role] = path
+	}
+	for _, role := range roles {
+		paths[role] = path
+	}
+	return paths
 }

@@ -705,7 +705,11 @@ func (s *Store) Prune(ctx context.Context, expectedGeneration uint64, releaseDig
 		if err = s.checkContext(ctx); err != nil {
 			return result, err
 		}
-		if err = removeFlatDirectory(s.releases, name, releaseEntries); err != nil {
+		entries, entryErr := s.cleanupRuntimeEntries(name)
+		if entryErr != nil {
+			return result, entryErr
+		}
+		if err = removeFlatDirectory(s.releases, name, entries); err != nil {
 			return result, err
 		}
 		result.RemovedReleases = append(result.RemovedReleases, name)

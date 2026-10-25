@@ -76,17 +76,30 @@ func Run(parent context.Context, options Options) error {
 		return fmt.Errorf("create supervisor instance: %w", err)
 	}
 	o.instanceID = hex.EncodeToString(instance[:])
-	image, err := os.Open(o.ModulePath)
-	if err != nil {
-		return fmt.Errorf("open module image: %w", err)
-	}
-	defer image.Close()
-	info, err := image.Stat()
-	if err != nil {
-		return err
-	}
-	if !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
-		return errors.New("module image must be a regular executable file")
+	images := map[string]*os.File{}
+	opened := map[string]*os.File{}
+	defer func() {
+		for _, f := range opened {
+			_ = f.Close()
+		}
+	}()
+	for role, path := range o.Executables {
+		image := opened[path]
+		if image == nil {
+			image, err = os.Open(path)
+			if err != nil {
+				return fmt.Errorf("open role %s image: %w", role, err)
+			}
+			opened[path] = image
+			info, statErr := image.Stat()
+			if statErr != nil {
+				return statErr
+			}
+			if !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
+				return errors.New("role image must be a regular executable file")
+			}
+		}
+		images[role] = image
 	}
 	// Pdeathsig follows the creating OS thread. Pin the process manager to one
 	// thread until every managed child has exited, rather than starting workers
@@ -179,7 +192,7 @@ func Run(parent context.Context, options Options) error {
 		now := time.Now()
 		for _, c := range children {
 			if !stopping && !c.retired && c.process == nil && !c.permanentFailure && !c.nextStart.IsZero() && !now.Before(c.nextStart) {
-				if err := startChild(ctx, o, image, c, events); err != nil {
+				if err := startChild(ctx, o, images[c.spec.Role], c, events); err != nil {
 					c.status.LastError = err.Error()
 					c.failures++
 					c.status.State = "backoff"
@@ -322,13 +335,26 @@ func normalize(o Options) (Options, error) {
 	if o.Platform == "appliance" && os.Getpid() != 1 {
 		return o, errors.New("appliance supervision requires PID 1")
 	}
-	if o.ReleaseID == "" || o.ModulePath == "" || len(o.Modules) == 0 {
-		return o, errors.New("supervisor requires module path, release ID, and module specs")
+	if o.ReleaseID == "" || len(o.Executables) == 0 || len(o.Executables) > 64 || len(o.Modules) == 0 {
+		return o, errors.New("supervisor requires a bounded executable role catalog, release ID and module specs")
 	}
-	var err error
-	o.ModulePath, err = filepath.Abs(o.ModulePath)
-	if err != nil {
-		return o, err
+	paths := map[string]string{}
+	for role, path := range o.Executables {
+		if !validName.MatchString(role) || path == "" {
+			return o, errors.New("invalid executable role binding")
+		}
+		absolute, err := filepath.Abs(path)
+		if err != nil {
+			return o, err
+		}
+		paths[role] = absolute
+	}
+	o.Executables = paths
+	o.DynamicRoles = append([]string(nil), o.DynamicRoles...)
+	for _, role := range o.DynamicRoles {
+		if _, ok := paths[role]; !ok {
+			return o, fmt.Errorf("dynamic role %s has no executable binding", role)
+		}
 	}
 	if o.RuntimeDir == "" {
 		o.RuntimeDir = "/run/routerd"
@@ -343,6 +369,9 @@ func normalize(o Options) (Options, error) {
 		}
 		if !validName.MatchString(s.Name) || !validName.MatchString(s.Role) || names[s.Name] {
 			return o, fmt.Errorf("invalid or duplicate module name/role: %q/%q", s.Name, s.Role)
+		}
+		if _, ok := paths[s.Role]; !ok {
+			return o, fmt.Errorf("initial role %s has no executable binding", s.Role)
 		}
 		names[s.Name] = true
 		hasRequired = hasRequired || s.Required
@@ -378,6 +407,9 @@ func normalize(o Options) (Options, error) {
 }
 
 func startChild(ctx context.Context, o Options, image *os.File, c *child, events chan<- childEvent) error {
+	if image == nil {
+		return errors.New("role has no pinned executable")
+	}
 	if c.status.Generation == ^uint64(0) {
 		return errors.New("worker generation exhausted")
 	}
@@ -393,7 +425,7 @@ func startChild(ctx context.Context, o Options, image *os.File, c *child, events
 	if err != nil {
 		return err
 	}
-	args := append([]string{o.ModulePath, "worker", "--role=" + c.spec.Role, "--name=" + c.spec.Name}, c.spec.Args...)
+	args := append([]string{o.Executables[c.spec.Role], "worker", "--role=" + c.spec.Role, "--name=" + c.spec.Name}, c.spec.Args...)
 	env := mergeEnv(os.Environ(), o.Env, []string{
 		worker.SupervisorInstanceEnv + "=" + o.instanceID,
 		worker.ControlFDEnv + "=3", worker.ModuleNameEnv + "=" + c.spec.Name,
@@ -403,7 +435,7 @@ func startChild(ctx context.Context, o Options, image *os.File, c *child, events
 		"ROUTERD_GENERATION=" + strconv.FormatUint(c.status.Generation+1, 10),
 	})
 	// fd 4 is the open module image, pinned at supervisor startup. Replacing
-	// ModulePath or its symlink cannot mix another generation into this tree.
+	// A role path or its symlink cannot mix another generation into this tree.
 	process, err := os.StartProcess("/proc/self/fd/4", args, &os.ProcAttr{
 		Env: env, Files: []*os.File{os.Stdin, os.Stdout, os.Stderr, childFD, image},
 		Sys: &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGKILL},

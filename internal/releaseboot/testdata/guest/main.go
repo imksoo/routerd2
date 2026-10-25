@@ -169,7 +169,7 @@ func initializeAndExec() error {
 	b.StateDir = stateDir
 	// The actual boot integration must replace this path with the selected,
 	// verified modules FD before supervisor startup.
-	b.ModulePath = "/must-use-verified-module-descriptor"
+	b.Workers = runtimeconfig.NativeWorkers("/must-use-verified-role-descriptor")
 	b.KernelModules = []string{"nf_tables", "nft_ct", "nft_chain_nat", "nft_masq", "ip6_tunnel"}
 	b.Release = &runtimeconfig.Release{Root: storeRoot, TrustFile: trustPath, ReadyTimeoutSeconds: 90, StableSeconds: 2}
 	if err := b.Validate(); err != nil {
@@ -201,7 +201,7 @@ func initializeAndExec() error {
 	if err := probe.Release(); err != nil {
 		return err
 	}
-	return unix.Exec(fmt.Sprintf("/proc/self/fd/%d", image.Routerd.Fd()),
+	return unix.Exec(fmt.Sprintf("/proc/self/fd/%d", image.Entrypoint().Fd()),
 		[]string{"routerd", "boot", "--file", bootPath}, os.Environ())
 }
 
@@ -221,9 +221,29 @@ func stagePair(ctx context.Context, store *release.Store, key ed25519.PrivateKey
 	if err != nil {
 		return release.Ref{}, err
 	}
-	_, err = release.WriteBundle(ctx, out, release.BundleOptions{
-		ReleaseID: identity, Sequence: sequence, GOOS: "linux", GOARCH: "amd64",
-	}, key, first, second)
+	noticesPath := filepath.Join("/test", directory+"-notices.txt")
+	if err := os.WriteFile(noticesPath, []byte("test-only runtime catalog fixture notices\n"), 0600); err != nil {
+		return release.Ref{}, err
+	}
+	notices, err := os.Open(noticesPath)
+	if err != nil {
+		return release.Ref{}, err
+	}
+	defer notices.Close()
+	runtimeOptions := release.BundleOptions{ReleaseID: identity, Sequence: sequence, GOOS: "linux", GOARCH: "amd64", BootABI: 1, WorkerABI: 1, Entrypoint: "supervisor", Artifacts: []release.Artifact{{Name: "supervisor", Kind: "native", Command: "routerd"}, {Name: "coordinator", Kind: "native", Command: "routerd-modules"}, {Name: "kernel", Kind: "native", Command: "routerd-modules"}, {Name: "services", Kind: "native", Command: "routerd-modules"}, {Name: "notices", Kind: "data"}}}
+	roles := runtimeconfig.NativeWorkers("services")
+	roles["control"] = "coordinator"
+	roles["network"] = "kernel"
+	names := make([]string, 0, len(roles))
+	for role := range roles {
+		names = append(names, role)
+	}
+	sort.Strings(names)
+	for _, role := range names {
+		runtimeOptions.Roles = append(runtimeOptions.Roles, release.RoleBinding{Role: role, Artifact: roles[role]})
+	}
+	fmt.Println("ROUTERD_RUNTIME_CATALOG_FIXTURE artifacts=5 native=4 data=1 core_roles=separate_pinned_files")
+	_, err = release.WriteBundle(ctx, out, runtimeOptions, key, map[string]*os.File{"supervisor": first, "coordinator": second, "kernel": second, "services": second, "notices": notices})
 	if err == nil {
 		err = out.Sync()
 	}
@@ -299,8 +319,8 @@ func observe(ctx context.Context, store **release.Store, keys map[string]ed25519
 	if len(processes.Modules) != 4 {
 		return fmt.Errorf("unexpected number of core modules: %d", len(processes.Modules))
 	}
-	routerdPath := filepath.Join(storeRoot, "releases", expected.Trial.Digest, "routerd")
-	modulesPath := filepath.Join(storeRoot, "releases", expected.Trial.Digest, "routerd-modules")
+	routerdPath := filepath.Join(storeRoot, "releases", expected.Trial.Digest, "supervisor")
+
 	if err := sameExecutable(1, routerdPath); err != nil {
 		return err
 	}
@@ -309,6 +329,14 @@ func observe(ctx context.Context, store **release.Store, keys map[string]ed25519
 		if !module.Ready || module.PID <= 1 || module.ReleaseID != expected.Trial.ReleaseID {
 			return fmt.Errorf("module %s is not ready in selected pair: %+v", module.Name, module)
 		}
+		artifact := "services"
+		if module.Role == "control" {
+			artifact = "coordinator"
+		}
+		if module.Role == "network" {
+			artifact = "kernel"
+		}
+		modulesPath := filepath.Join(storeRoot, "releases", expected.Trial.Digest, artifact)
 		if err := sameExecutable(module.PID, modulesPath); err != nil {
 			return fmt.Errorf("module %s: %w", module.Name, err)
 		}
@@ -360,7 +388,7 @@ func observe(ctx context.Context, store **release.Store, keys map[string]ed25519
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	fmt.Printf("%s_WITNESS pid=1 release=%s generation=%d operation=%s revision=%d modules=%s pinned_exec=verified\n",
+	fmt.Printf("%s_WITNESS pid=1 release=%s generation=%d operation=%s revision=%d modules=%s pinned_exec=verified artifact_count=5 native_count=4 data_count=1 role_catalog=verified\n",
 		marker, state.Active.ReleaseID, state.Generation, state.Operation, health.Revision, strings.Join(names, ","))
 	return nil
 }

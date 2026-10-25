@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -277,7 +278,29 @@ func stagePair(ctx context.Context, store *release.Store, key ed25519.PrivateKey
 	if err != nil {
 		return release.Ref{}, err
 	}
-	_, err = release.WriteBundle(ctx, output, release.BundleOptions{ReleaseID: identity, Sequence: sequence, GOOS: "linux", GOARCH: "amd64"}, key, first, second)
+	noticesPath := filepath.Join(stateDir, directory+"-notices.txt")
+	if err := os.WriteFile(noticesPath, []byte("test-only runtime catalog fixture notices\n"), 0600); err != nil {
+		return release.Ref{}, err
+	}
+	notices, err := os.Open(noticesPath)
+	if err != nil {
+		return release.Ref{}, err
+	}
+	defer notices.Close()
+	runtimeOptions := release.BundleOptions{ReleaseID: identity, Sequence: sequence, GOOS: "linux", GOARCH: "amd64", BootABI: 1, WorkerABI: 1, Entrypoint: "supervisor", Artifacts: []release.Artifact{{Name: "supervisor", Kind: "native", Command: "routerd"}, {Name: "coordinator", Kind: "native", Command: "routerd-modules"}, {Name: "kernel", Kind: "native", Command: "routerd-modules"}, {Name: "services", Kind: "native", Command: "routerd-modules"}, {Name: "notices", Kind: "data"}}}
+	roles := runtimeconfig.NativeWorkers("services")
+	roles["control"] = "coordinator"
+	roles["network"] = "kernel"
+	names := make([]string, 0, len(roles))
+	for role := range roles {
+		names = append(names, role)
+	}
+	sort.Strings(names)
+	for _, role := range names {
+		runtimeOptions.Roles = append(runtimeOptions.Roles, release.RoleBinding{Role: role, Artifact: roles[role]})
+	}
+	fmt.Println("ROUTERD_RUNTIME_CATALOG_FIXTURE artifacts=5 native=4 data=1 core_roles=separate_pinned_files")
+	_, err = release.WriteBundle(ctx, output, runtimeOptions, key, map[string]*os.File{"supervisor": first, "coordinator": second, "kernel": second, "services": second, "notices": notices})
 	if err == nil {
 		err = output.Sync()
 	}
@@ -327,7 +350,7 @@ func writeBootConfig() error {
 	}
 	b := runtimeconfig.Default()
 	b.Platform, b.Config, b.RuntimeDir, b.StateDir = "appliance", seedPath, runtimeDir, stateDir
-	b.ModulePath = "/must-use-verified-module-descriptor"
+	b.Workers = runtimeconfig.NativeWorkers("/must-use-verified-role-descriptor")
 	b.KernelModules = []string{"virtio_pci", "virtio_blk", "ext4", "nf_tables", "nft_ct", "nft_chain_nat", "nft_masq", "ip6_tunnel"}
 	b.StateVolume = &runtimeconfig.StateVolume{Device: devicePath, WaitTimeoutSeconds: 10}
 	b.SSH = runtimeconfig.SSH{Listen: sshAddress, User: "admin", AuthorizedKeys: []string{string(ssh.MarshalAuthorizedKey(client.PublicKey()))}}

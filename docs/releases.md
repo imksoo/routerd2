@@ -2,21 +2,13 @@
 
 This document describes the **unreleased prototype** format. There are no
 deployed users of this format, and backward compatibility is not required.
-The accepted next
-architecture uses one distribution image extracted into a versioned runtime
-directory containing multiple executables and declared dependencies. Binary
-count is not fixed. Image staging, boot selection and startup configuration
-are separate contracts; see [ADR 0001](adr/0001-boot-runtime-startup-config.md).
-That new layout and boot schema are planned, not supported by the commands below.
-The prototype reader, archive and state formats may be replaced directly;
-no compatibility bridge or prototype migration path is required.
-
-routerd2 updates the two runtime executables as one signed release:
-`routerd` and `routerd-modules`. The current appliance boot path can select a
-pending pair, execute the verified routerd inode as PID 1, pin the matching
-modules inode, and confirm the trial after continuous process/configuration
-readiness. An explicit failure selects the last confirmed pair; unconfirmed
-boots have a bounded retry policy.
+The signed manifest v2 now declares a variable artifact set, its native command
+identities, entrypoint and role bindings. Native static ELF and regular data are
+supported; the former v1 implicit two-ELF reader is removed. Appliance boot
+executes the verified entrypoint inode and pins each declared worker role.
+Image staging, boot selection and explicit startup-configuration selection
+remain separate contracts; the latter is still pending. See
+[ADR 0001](adr/0001-boot-runtime-startup-config.md).
 
 This updates userland only. Kernel, root filesystem, bootloader, persistent
 data-partition provisioning and configuration-schema migration are separate
@@ -47,8 +39,7 @@ go run ./cmd/routerd-bundle trust \
 
 go run ./cmd/routerd-bundle pack \
   --private-key-file /secure/routerd-publisher.pem \
-  --routerd "$PWD/dist/bin/linux-amd64/routerd" \
-  --modules "$PWD/dist/bin/linux-amd64/routerd-modules" \
+  --layout /build/runtime-layout.json \
   --release-id "$release_id" --sequence 42 --target-arch amd64 \
   --output "$PWD/dist/routerd2-linux-amd64-42.tar"
 ```
@@ -59,7 +50,7 @@ comparison. Use the arm64 builds and `--target-arch arm64` for that target.
 
 All input/output paths must be clean absolute paths. The output directory must
 already exist. The publisher writes a temporary file, validates and signs the
-complete pair, synchronizes the file, then publishes with a no-overwrite rename
+complete artifact set, synchronizes the file, then publishes with a no-overwrite rename
 and synchronizes the directory. It refuses to replace an existing bundle. A
 post-publication reporting or directory-sync failure explicitly identifies the
 published path; do not infer that no file exists from a nonzero exit alone.
@@ -70,11 +61,23 @@ bundle cannot install its own trust key or change the trusted-key policy.
 The `pack` result contains the manifest digest, target, sequence and artifact
 hashes/sizes, with no private key material.
 
-The bounded update archive contains exactly four regular files:
-`manifest.json`, `manifest.sig`, `routerd` and `routerd-modules`. Distribute the
-project LICENSE and the exact build's `dist/licenses` alongside it. This archive
-format does not replace the license/source materials needed for a full Linux
-image distribution.
+Copy and edit [runtime-layout.json](../examples/runtime-layout.json) with the
+clean absolute source file paths for the chosen architecture. A layout has
+explicit `boot_abi`, `worker_abi`, entrypoint, artifact kind/command/source and
+role bindings. Source paths never enter the signed manifest. Multiple roles
+may share a native artifact; separate artifacts may use the same native command.
+No arbitrary argv or host package install hooks are accepted.
+
+The uncompressed USTAR archive starts with `manifest.json` and `manifest.sig`,
+then contains every declared artifact in manifest order. Names are bounded
+single relative filenames in this initial layout, without links or directories.
+The limits are 64 artifacts, 64 roles, 64KiB manifest, 1GiB per artifact and 4GiB
+aggregate payload. Receiver artifact policy defaults to 512MiB per artifact.
+Native files are static project Go executables; external engines, dynamic
+loaders/libraries/plugins and nested artifact layouts need further work and
+are refused by this format. Regular data may contain notices or inventory;
+this is not a claim of complete source/SBOM/license distribution qualification.
+Distribute all required exact-build license and source materials.
 
 ## Install a baseline and queue an update
 
@@ -130,9 +133,10 @@ Enable signed boot selection in the appliance's existing boot JSON:
 ```
 
 This is the `release` fragment, not a complete boot configuration. It requires
-explicit `platform: appliance`. The selected modules descriptor replaces the
-ordinary `module_path` for this boot. Normal appliance boots without the
-fragment retain their fixed image-provided pair.
+explicit `platform: appliance`. The signed entrypoint and role catalog replace the factory `workers` catalog
+for this boot. A direct factory boot supplies an explicit role-to-executable
+`workers` object. The old `module_path` field is refused; worker paths and argv
+cannot be supplied through dynamic configuration or the worker reconcile API.
 
 ## Health and failure boundaries
 

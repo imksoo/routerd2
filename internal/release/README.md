@@ -1,9 +1,9 @@
 # Signed userland releases
 
-The release store installs and selects a versioned pair of static Linux
-executables: `routerd` and `routerd-modules`. The two files share one signed
-manifest, one release identity, one target and one publisher sequence.
-Consumers receive both verified file descriptors together.
+The release store installs a signed, versioned runtime with a variable set of
+static native executables and regular data artifacts. Its manifest binds roles
+to native artifacts and names the supervisor entrypoint. Consumers receive all
+verified descriptors together, without re-resolving a mutable selector.
 
 This package performs local verification, storage and selection. The appliance
 boot integration executes the selected descriptor and uses the actual
@@ -13,25 +13,24 @@ process tree has already changed.
 
 ## Bundle and trust contract
 
-A bundle is an uncompressed USTAR archive containing exactly these regular
-files, in this order:
+An uncompressed USTAR bundle contains canonical `manifest.json`, raw 64-byte
+`manifest.sig`, then exactly the declared regular artifacts in manifest order.
+Manifest v2 signs release ID, publisher sequence, target, key ID, boot/worker
+ABI, entrypoint, role catalog, artifact kinds, native Go command identities,
+SHA-256 and sizes. The domain is
+`routerd2 signed extracted runtime manifest v2\x00`. Former v1 bytes are refused.
 
-1. `manifest.json`: bounded canonical JSON.
-2. `manifest.sig`: a raw 64-byte Ed25519 signature.
-3. `routerd`: the supervisor, init and management command.
-4. `routerd-modules`: the worker executable.
+The first extracted layout accepts bounded single filenames (no links or
+nested paths), static native Go ELF and non-executable regular data. Limits are
+64 artifacts, 64 roles, 64KiB manifest, 1GiB per artifact and 4GiB total payload.
+The receiving store defaults to a 512MiB per-artifact policy. Only boot/worker
+ABI 1 is accepted. Dynamic linking and external engines are not accepted yet.
 
-The manifest has version 1, an opaque release ID, a positive publisher sequence,
-`goos`, `goarch`, the signing key ID, and the SHA-256 digest and size of each
-executable. A key ID is the full lower-case SHA-256 of its Ed25519 public key.
-The signature covers the exact canonical manifest bytes preceded by the domain
-`routerd2 signed release manifest v1\x00`.
-
-`SignManifest` and `WriteBundle` produce this format. `WriteBundle` accepts two
-already open executable files and an offline private key; it checks the files
-before signing and checks the bytes again while writing. Its caller must only
-publish the output after success, file fsync, rename and directory fsync.
-The running appliance has no signing-key generation or signing command.
+`WriteBundle` takes an explicit layout and map of already opened files, verifies
+native command identity, signs metadata and rechecks bytes while writing. Its
+caller publishes only after fsync/rename/directory fsync. The offline publisher
+uses `--layout`; see [releases](../../docs/releases.md). Private signing keys
+never enter the runtime or artifact set.
 
 `ParseTrust` and `LoadTrustFile` accept a JSON object mapping full key IDs to
 canonical padded base64 Ed25519 public keys. The trust file may be formatted for
@@ -91,7 +90,7 @@ components. Directory-relative file operations retain anchored descriptors.
 Private directories, exclusive temporary files, no-follow opens and hard-link
 checks prevent path substitution within the local storage contract.
 
-`releases/<manifest-sha256>/` contains an immutable manifest, signature and pair
+`releases/<manifest-sha256>/` contains an immutable manifest, signature and complete artifact set
 of executable files. A journal generation contains `state.json` and its
 `active`, `pending` and `previous` links. The generation directory name binds the
 state checksum and a random nonce. One atomic `current` symlink replacement
@@ -102,7 +101,7 @@ the parent directory after rename. Cross-process nonblocking flock and an
 in-process guard reject concurrent operations with `ErrBusy`.
 
 Reading the selected state verifies its canonical JSON, checksum, links and
-referenced executable pairs. Corrupt state, missing payloads, revoked signing
+referenced runtime sets. Corrupt state, missing payloads, revoked signing
 keys and invalid link targets fail closed. The store does not search older
 generations and guess which one an operator intended. A missing selector in an
 otherwise nonempty journal also fails closed.
@@ -127,13 +126,13 @@ cancellation, failure and explicit rollback.
 
 | Operation | Preconditions and result |
 | --- | --- |
-| `Stage` / `StageFile` | Verify and install a pair; selection is unchanged. Repeating a valid staged bundle is idempotent, including at store capacity. |
+| `Stage` / `StageFile` | Verify and install a runtime; selection is unchanged. Repeating a valid staged bundle is idempotent, including at store capacity. |
 | `Lookup` / `Verify` | Re-verify an installed manifest digest or complete reference. |
 | `Initialize` | An empty store only: register an explicitly installer-approved baseline. This declares prior knowledge; it does not boot or health-test the binary. |
-| `Prepare` | Match the expected journal generation, have no outstanding trial and provide a sequence above the durable high watermark; queue the pending pair. |
+| `Prepare` | Match the expected journal generation, have no outstanding trial and provide a sequence above the durable high watermark; queue the pending runtime. |
 | `BeginBoot` | Choose and pin both executables. A queued trial records the old active release as fallback and creates a boot attempt token. |
 | `Confirm` | Match the current boot ID, token and selected manifest digest; clear the pending attempt and retain the previous confirmed release. |
-| `CancelPending` | Match the generation and cancel an untried pending pair. An already running trial cannot use this shortcut. |
+| `CancelPending` | Match the generation and cancel an untried pending runtime. An already running trial cannot use this shortcut. |
 | `FailBoot` | Match the active boot ID and token, record the failure and select the previously confirmed release. |
 | `Rollback` | Match the generation and give a reason; explicitly select a confirmed previous release. A failed trial never becomes a fallback. |
 | `Prune` | Match the generation; remove old journal generations, incomplete transactions and only explicitly named unused releases. Current active, pending and previous references are protected. |
@@ -152,7 +151,7 @@ tokens fence stale local callers; they do not make an untrusted root user safe.
 
 `BeginBoot` is appropriate only once the kernel boot ID is available. The
 appliance integration preserves PID 1 while execing the selected routerd file
-descriptor, pins the matching modules file, and runs a bounded health trial.
+descriptor, pins the declared role executables, and runs a bounded health trial.
 Only the actual required process tree plus a healthy committed configuration
 can confirm that trial. The release library itself has no health timer,
 hardware watchdog, payload execution or reboot mechanism.
@@ -165,7 +164,7 @@ filesystem sync and rename operations cannot be undone by context cancellation.
 Resetting a kernel or device stuck in I/O requires the separate watchdog/reset
 mechanism.
 
-## Scope of the two-executable bundle
+## Scope of the extracted runtime bundle
 
 This format updates userland code. It does not update or mount a persistent
 root filesystem, select a kernel, configure a bootloader, create disk
@@ -183,7 +182,7 @@ Each code update must preserve the stored configuration/state schemas needed by
 its fallback, or ship a separately designed reversible migration. A valid
 signature and matching executable identity do not prove schema compatibility.
 
-The four-entry wire bundle does not contain license documents. Distribute the
+Signed regular data may carry notices and inventory. Still distribute the
 project LICENSE and the dependency notices and licenses for the exact build in
 the accompanying release or image materials. The repository's distribution
 license inventory remains part of producing a redistributable release.
@@ -199,9 +198,9 @@ Process-crash fixtures exit abruptly without running defers at seven journal
 publication boundaries and five bundle staging boundaries. They reopen the
 store, verify the selected generation, and clean incomplete transactions.
 
-`TestBuiltReleasePairs` additionally checks the actual project build's four
+`TestBuiltRuntimeCatalog` additionally checks the actual project build's four
 ELFs (amd64 and arm64 pairs), writes signed bundles, stages them, looks them up,
-initializes the store and pins the selected pairs. It never executes a foreign
+initializes the store and pins the selected catalog. It never executes a foreign
 architecture payload.
 
 ```sh
@@ -210,7 +209,7 @@ go test -race ./internal/release ./internal/releasecli
 ROUTERD2_INTEGRATION_REQUIRED=1 \
 ROUTERD2_RELEASE_BUILT_DIR="$PWD/dist/bin" \
 ROUTERD2_RELEASE_BUILT_ID="<exact-built-release-id>" \
-go test -race -tags integration -run '^TestBuiltReleasePairs$' \
+go test -race -tags integration -run '^TestBuiltRuntimeCatalog$' \
   ./internal/release
 ```
 

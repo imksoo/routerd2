@@ -122,10 +122,10 @@ func signedFixture(t *testing.T, id string, sequence uint64, files map[string][]
 		files = binariesFor(t, id)
 	}
 	key := testKey()
-	m := Manifest{Version: 1, ReleaseID: id, Sequence: sequence, GOOS: "linux", GOARCH: runtime.GOARCH, KeyID: KeyID(key.Public().(ed25519.PublicKey))}
+	m := Manifest{Version: ManifestVersion, ReleaseID: id, Sequence: sequence, GOOS: "linux", GOARCH: runtime.GOARCH, KeyID: KeyID(key.Public().(ed25519.PublicKey)), BootABI: 1, WorkerABI: 1, Entrypoint: "routerd", Roles: []RoleBinding{{Role: "logging", Artifact: "routerd-modules"}, {Role: "network", Artifact: "routerd-modules"}, {Role: "control", Artifact: "routerd-modules"}, {Role: "management", Artifact: "routerd-modules"}, {Role: "health", Artifact: "routerd-modules"}, {Role: "dhcp4", Artifact: "routerd-modules"}, {Role: "dhcp6pd", Artifact: "routerd-modules"}, {Role: "dhcp_server", Artifact: "routerd-modules"}, {Role: "ra", Artifact: "routerd-modules"}, {Role: "ra_client", Artifact: "routerd-modules"}, {Role: "aftr", Artifact: "routerd-modules"}, {Role: "dns", Artifact: "routerd-modules"}, {Role: "vrrp", Artifact: "routerd-modules"}, {Role: "bgp", Artifact: "routerd-modules"}, {Role: "bfd", Artifact: "routerd-modules"}}}
 	for _, name := range []string{"routerd", "routerd-modules"} {
 		sum := sha256.Sum256(files[name])
-		m.Artifacts = append(m.Artifacts, Artifact{Name: name, Size: int64(len(files[name])), SHA256: hex.EncodeToString(sum[:])})
+		m.Artifacts = append(m.Artifacts, Artifact{Name: name, Kind: "native", Command: name, Size: int64(len(files[name])), SHA256: hex.EncodeToString(sum[:])})
 	}
 	raw, sig, err := SignManifest(m, key)
 	if err != nil {

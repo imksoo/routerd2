@@ -70,9 +70,15 @@ Unix socket・localhostのSSH・テスト用の子プロセスを利用するテ
 
 ```sh
 mkdir -p /tmp/routerd2-dev/run /tmp/routerd2-dev/state
+python3 - <<'PYWORKERS' > /tmp/routerd2-dev/workers.json
+import json, pathlib
+boot = json.load(open("images/boot.json"))
+print(json.dumps({role: str(pathlib.Path("dist/bin/routerd-modules").resolve())
+                  for role in boot["workers"]}))
+PYWORKERS
 ./dist/bin/routerd run \
   --platform host \
-  --module-path "$PWD/dist/bin/routerd-modules" \
+  --workers-file /tmp/routerd2-dev/workers.json \
   --config "$PWD/images/config-empty.json" \
   --runtime-dir /tmp/routerd2-dev/run \
   --state-dir /tmp/routerd2-dev/state

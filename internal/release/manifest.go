@@ -11,12 +11,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 
 	"github.com/imksoo/routerd2/internal/buildinfo"
 )
 
-const signatureDomain = "routerd2 signed release manifest v1\x00"
+var componentName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$`)
+
+const signatureDomain = "routerd2 signed extracted runtime manifest v2\x00"
 
 func KeyID(public ed25519.PublicKey) string {
 	sum := sha256.Sum256(public)
@@ -36,7 +39,7 @@ func ValidateManifest(m Manifest, maxArtifact int64) error {
 		return errors.New("invalid artifact size policy")
 	}
 	if m.Version != ManifestVersion || m.Sequence == 0 {
-		return errors.New("manifest requires version 1 and a nonzero release sequence")
+		return errors.New("manifest requires version 2 and a nonzero release sequence")
 	}
 	if _, err := buildinfo.ParseIdentity(buildinfo.IdentityPrefix + m.ReleaseID + buildinfo.IdentitySuffix); err != nil {
 		return fmt.Errorf("release ID: %w", err)
@@ -47,15 +50,52 @@ func ValidateManifest(m Manifest, maxArtifact int64) error {
 	if !validDigest(m.KeyID) {
 		return errors.New("manifest requires a full SHA256 signing key ID")
 	}
-	if len(m.Artifacts) != 2 {
-		return errors.New("manifest must contain exactly routerd and routerd-modules")
+	if m.BootABI != 1 || m.WorkerABI != 1 {
+		return errors.New("unsupported boot or worker ABI")
 	}
-	for i, name := range []string{"routerd", "routerd-modules"} {
-		a := m.Artifacts[i]
-		if a.Name != name || a.Size < 64 || a.Size > maxArtifact || !validDigest(a.SHA256) {
-			return fmt.Errorf("invalid %s artifact; names/order, finite size, and SHA256 are required", name)
+	if len(m.Artifacts) == 0 || len(m.Artifacts) > MaxArtifacts || len(m.Roles) == 0 || len(m.Roles) > MaxRoles {
+		return errors.New("runtime artifact or role count exceeds supported bounds")
+	}
+	artifacts := map[string]Artifact{}
+	var total int64
+	for _, a := range m.Artifacts {
+		if !componentName.MatchString(a.Name) || a.Name == "manifest.json" || a.Name == "manifest.sig" || a.Size < 1 || a.Size > maxArtifact || !validDigest(a.SHA256) {
+			return fmt.Errorf("invalid runtime artifact %q", a.Name)
 		}
+		if _, exists := artifacts[a.Name]; exists {
+			return errors.New("duplicate runtime artifact")
+		}
+		switch a.Kind {
+		case "native":
+			if a.Size < 64 || !componentName.MatchString(a.Command) {
+				return errors.New("native artifact requires a bounded static ELF and command identity")
+			}
+		case "data":
+			if a.Command != "" {
+				return errors.New("data artifact cannot declare an executable command")
+			}
+		default:
+			return errors.New("unsupported artifact kind; only static native and regular data are supported")
+		}
+		if a.Size > MaxRuntimeBytes-total {
+			return errors.New("runtime aggregate size exceeds supported bound")
+		}
+		total += a.Size
+		artifacts[a.Name] = a
 	}
+	entry, ok := artifacts[m.Entrypoint]
+	if !ok || entry.Kind != "native" || entry.Command != "routerd" {
+		return errors.New("runtime entrypoint must name the native routerd supervisor")
+	}
+	roles := map[string]bool{}
+	for _, binding := range m.Roles {
+		a, exists := artifacts[binding.Artifact]
+		if !componentName.MatchString(binding.Role) || roles[binding.Role] || !exists || a.Kind != "native" {
+			return errors.New("invalid, duplicate or non-executable runtime role binding")
+		}
+		roles[binding.Role] = true
+	}
+
 	return nil
 }
 

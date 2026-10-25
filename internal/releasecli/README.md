@@ -11,20 +11,20 @@ Every command requires explicit `--root`, `--trust-file` and
 
 | Command | Additional arguments | Effect |
 | --- | --- | --- |
-| `stage` | `--file /absolute/path/release.tar` | Verify and install the signed pair. This is the store creation entry. |
-| `verify` | `--digest SHA256` | Re-verify a previously installed pair and return its reference. |
+| `stage` | `--file /absolute/path/release.tar` | Verify and install the signed runtime. This is the store creation entry. |
+| `verify` | `--digest SHA256` | Re-verify a previously installed runtime and return its reference. |
 | `status` | None | Return verified selection and attempt state. |
 | `initialize` | `--digest SHA256` | Register an installer-approved baseline, only in an empty store. |
 | `prepare` | `--digest SHA256 --expected-generation N [--max-attempts 1..5]` | Queue a strictly newer publisher sequence for the next boot. |
 | `cancel` | `--expected-generation N` | Cancel a pending release that has not started a boot trial. |
-| `rollback` | `--expected-generation N --reason TEXT` | Select the previously confirmed pair. |
-| `prune` | `--expected-generation N [--digest SHA256 ...]` | Remove old generations, incomplete transactions and the named unselected pairs. |
+| `rollback` | `--expected-generation N --reason TEXT` | Select the previously confirmed runtime. |
+| `prune` | `--expected-generation N [--digest SHA256 ...]` | Remove old generations, incomplete transactions and the named unselected runtimes. |
 
 Use the full manifest digest returned by `stage`. Use the current generation
 returned by `status` for an intended state change. Omitting the generation is an
 error, even when its value would be zero. A stale value is rejected rather than
 applied to a newer selection. Initializing a baseline is an explicit installer
-declaration that the pair is already known good; it is not a health check.
+declaration that the runtime is already known good; it is not a health check.
 
 The trust file is a JSON object from full SHA-256 public-key IDs to canonical
 padded base64 Ed25519 public keys. The shared release trust loader verifies the
@@ -49,7 +49,7 @@ routerd release prepare \
 
 Preparing or rolling back changes durable selection. It does not replace
 running processes or trigger a reboot. Appliance boot integration selects and
-executes the pair and confirms health from its actual supervised services.
+executes the runtime and confirms health from its actual supervised services.
 There is intentionally no public `confirm` shortcut.
 
 Status and state-changing commands other than stage require an existing store

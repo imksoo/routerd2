@@ -37,4 +37,4 @@ COPY LICENSE /usr/share/licenses/routerd2/LICENSE
 COPY --from=build /src/dist/licenses/ /usr/share/licenses/routerd2/dependencies/
 STOPSIGNAL SIGTERM
 ENTRYPOINT ["/usr/sbin/routerd"]
-CMD ["run", "--platform", "container", "--config", "/etc/routerd/config.json", "--module-path", "/usr/libexec/routerd-modules", "--runtime-dir", "/run/routerd", "--state-dir", "/var/lib/routerd"]
+CMD ["run", "--platform", "container", "--config", "/etc/routerd/config.json", "--runtime-dir", "/run/routerd", "--state-dir", "/var/lib/routerd"]

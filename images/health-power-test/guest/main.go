@@ -171,7 +171,7 @@ func initializeAndExec(phase string) error {
 	b := runtimeconfig.Default()
 	b.Platform = "appliance"
 	b.Config = seedPath
-	b.ModulePath = "/test/bin/routerd-modules"
+	b.Workers = runtimeconfig.NativeWorkers("/test/bin/routerd-modules")
 	b.RuntimeDir = runtimeDir
 	b.StateDir = stateDir
 	b.KernelModules = modules

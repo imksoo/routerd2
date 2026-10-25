@@ -90,7 +90,7 @@ build-linux: licenses
 	done
 
 release-built-test:
-	ROUTERD2_INTEGRATION_REQUIRED=1 ROUTERD2_RELEASE_BUILT_DIR='$(abspath $(RELEASE_BUILT_DIR))' ROUTERD2_RELEASE_BUILT_ID='$(RELEASE_ID)' $(GO) test -race -tags integration -run '^Test(BuiltReleasePairs|PublishBuiltRelease)$$' -count=1 -v ./internal/release ./internal/releasepublish
+	ROUTERD2_INTEGRATION_REQUIRED=1 ROUTERD2_RELEASE_BUILT_DIR='$(abspath $(RELEASE_BUILT_DIR))' ROUTERD2_RELEASE_BUILT_ID='$(RELEASE_ID)' $(GO) test -race -tags integration -run '^Test(BuiltRuntimeCatalog|PublishBuiltRelease)$$' -count=1 -v ./internal/release ./internal/releasepublish
 
 container:
 	$(DOCKER) build $(BUILD_ARGS) -t $(CONTAINER_TAG) .

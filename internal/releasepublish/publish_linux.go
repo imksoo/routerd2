@@ -33,7 +33,7 @@ import (
 func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" {
 		_, err := fmt.Fprintln(stdout, `routerd-bundle (offline publisher; not part of the router runtime)
-  routerd-bundle pack --private-key-file FILE --routerd FILE --modules FILE --release-id ID --sequence N --target-arch amd64|arm64 --output FILE
+  routerd-bundle pack --private-key-file FILE --layout FILE --release-id ID --sequence N --target-arch amd64|arm64 --output FILE
   routerd-bundle trust --private-key-file FILE
 
 The key must be an owner-only PKCS#8 Ed25519 PEM file. All paths must be clean
@@ -48,11 +48,10 @@ The trust command prints only the public trust map, for explicit installation.`)
 	f := flag.NewFlagSet(command, flag.ContinueOnError)
 	f.SetOutput(stderr)
 	keyPath := f.String("private-key-file", "", "private PKCS#8 Ed25519 PEM file")
-	var routerdPath, modulesPath, output, id, arch string
+	var layoutPath, output, id, arch string
 	var sequence uint64
 	if command == "pack" {
-		f.StringVar(&routerdPath, "routerd", "", "compiled routerd ELF")
-		f.StringVar(&modulesPath, "modules", "", "compiled routerd-modules ELF")
+		f.StringVar(&layoutPath, "layout", "", "explicit runtime artifact sources, entrypoint and role catalog JSON")
 		f.StringVar(&output, "output", "", "new signed USTAR bundle")
 		f.StringVar(&id, "release-id", "", "embedded release identity")
 		f.StringVar(&arch, "target-arch", "", "amd64 or arm64")
@@ -76,20 +75,32 @@ The trust command prints only the public trust map, for explicit installation.`)
 	if sequence == 0 || id == "" || (arch != "amd64" && arch != "arm64") {
 		return errors.New("pack requires a release ID, positive sequence and explicit amd64 or arm64 target")
 	}
-	routerd, err := openInput(routerdPath, false, release.MaxArtifactBytes)
+	layout, err := readLayout(layoutPath)
 	if err != nil {
-		return fmt.Errorf("routerd input: %w", err)
+		return fmt.Errorf("runtime layout: %w", err)
 	}
-	defer routerd.Close()
-	modules, err := openInput(modulesPath, false, release.MaxArtifactBytes)
-	if err != nil {
-		return fmt.Errorf("modules input: %w", err)
+	files := map[string]*os.File{}
+	defer func() {
+		for _, f := range files {
+			_ = f.Close()
+		}
+	}()
+	options := release.BundleOptions{ReleaseID: id, Sequence: sequence, GOOS: "linux", GOARCH: arch, BootABI: layout.BootABI, WorkerABI: layout.WorkerABI, Entrypoint: layout.Entrypoint, Roles: layout.Roles}
+	for _, a := range layout.Artifacts {
+		if _, exists := files[a.Name]; exists || a.File == *keyPath {
+			return errors.New("duplicate artifact or signing key selected as runtime payload")
+		}
+		f, err := openInput(a.File, false, release.MaxArtifactBytes)
+		if err != nil {
+			return fmt.Errorf("artifact %s input: %w", a.Name, err)
+		}
+		files[a.Name] = f
+		options.Artifacts = append(options.Artifacts, release.Artifact{Name: a.Name, Kind: a.Kind, Command: a.Command})
 	}
-	defer modules.Close()
 	var manifest release.Manifest
 	err = publish(ctx, output, func(dst *os.File) error {
 		var err error
-		manifest, err = release.WriteBundle(ctx, dst, release.BundleOptions{ReleaseID: id, Sequence: sequence, GOOS: "linux", GOARCH: arch}, key, routerd, modules)
+		manifest, err = release.WriteBundle(ctx, dst, options, key, files)
 		return err
 	})
 	if err != nil {
@@ -109,6 +120,43 @@ The trust command prints only the public trust map, for explicit installation.`)
 		return fmt.Errorf("bundle published at %s but writing its result failed: %w", output, err)
 	}
 	return nil
+}
+
+// Layout is publisher input, not a runtime manifest. Local source paths never
+// enter the signed runtime, and neither arbitrary argv nor shell hooks exist.
+type Layout struct {
+	BootABI    int                   `json:"boot_abi"`
+	WorkerABI  int                   `json:"worker_abi"`
+	Entrypoint string                `json:"entrypoint"`
+	Roles      []release.RoleBinding `json:"roles"`
+	Artifacts  []ArtifactInput       `json:"artifacts"`
+}
+type ArtifactInput struct {
+	Name    string `json:"name"`
+	Kind    string `json:"kind"`
+	Command string `json:"command,omitempty"`
+	File    string `json:"file"`
+}
+
+func readLayout(path string) (Layout, error) {
+	var layout Layout
+	f, err := openInput(path, false, release.MaxManifestBytes)
+	if err != nil {
+		return layout, err
+	}
+	defer f.Close()
+	d := json.NewDecoder(io.LimitReader(f, release.MaxManifestBytes+1))
+	d.DisallowUnknownFields()
+	if err := d.Decode(&layout); err != nil {
+		return layout, err
+	}
+	if err := d.Decode(new(any)); err != io.EOF {
+		return layout, errors.New("trailing runtime layout data")
+	}
+	if len(layout.Artifacts) == 0 || len(layout.Artifacts) > release.MaxArtifacts || len(layout.Roles) == 0 || len(layout.Roles) > release.MaxRoles {
+		return layout, errors.New("runtime layout artifact or role count exceeds bounds")
+	}
+	return layout, nil
 }
 
 func readKey(path string) (ed25519.PrivateKey, error) {

@@ -1,0 +1,86 @@
+{
+  "boot_abi": 1,
+  "worker_abi": 1,
+  "entrypoint": "supervisor",
+  "roles": [
+    {
+      "role": "logging",
+      "artifact": "native-workers"
+    },
+    {
+      "role": "network",
+      "artifact": "native-workers"
+    },
+    {
+      "role": "control",
+      "artifact": "native-workers"
+    },
+    {
+      "role": "management",
+      "artifact": "native-workers"
+    },
+    {
+      "role": "health",
+      "artifact": "native-workers"
+    },
+    {
+      "role": "dhcp4",
+      "artifact": "native-workers"
+    },
+    {
+      "role": "dhcp6pd",
+      "artifact": "native-workers"
+    },
+    {
+      "role": "dhcp_server",
+      "artifact": "native-workers"
+    },
+    {
+      "role": "ra",
+      "artifact": "native-workers"
+    },
+    {
+      "role": "ra_client",
+      "artifact": "native-workers"
+    },
+    {
+      "role": "aftr",
+      "artifact": "native-workers"
+    },
+    {
+      "role": "dns",
+      "artifact": "native-workers"
+    },
+    {
+      "role": "vrrp",
+      "artifact": "native-workers"
+    },
+    {
+      "role": "bgp",
+      "artifact": "native-workers"
+    },
+    {
+      "role": "bfd",
+      "artifact": "native-workers"
+    }
+  ],
+  "artifacts": [
+    {
+      "name": "supervisor",
+      "kind": "native",
+      "command": "routerd",
+      "file": "/build/bin/routerd"
+    },
+    {
+      "name": "native-workers",
+      "kind": "native",
+      "command": "routerd-modules",
+      "file": "/build/bin/routerd-modules"
+    },
+    {
+      "name": "notices",
+      "kind": "data",
+      "file": "/build/licenses/manifest.json"
+    }
+  ]
+}

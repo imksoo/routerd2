@@ -167,11 +167,25 @@ func TestPackRejectsUnverifiedELFWithoutPublishing(t *testing.T) {
 		t.Fatal(err)
 	}
 	output := filepath.Join(dir, "release.tar")
-	err := Run(context.Background(), []string{"pack", "--private-key-file", path, "--routerd", input, "--modules", input, "--release-id", "test", "--sequence", "1", "--target-arch", "amd64", "--output", output}, io.Discard, io.Discard)
+	err := Run(context.Background(), []string{"pack", "--private-key-file", path, "--layout", testLayout(t, input, input), "--release-id", "test", "--sequence", "1", "--target-arch", "amd64", "--output", output}, io.Discard, io.Discard)
 	if err == nil {
 		t.Fatal("invalid incoming executables were signed")
 	}
 	if _, err := os.Stat(output); !os.IsNotExist(err) {
 		t.Fatal("invalid bundle was published", err)
 	}
+}
+
+func testLayout(t *testing.T, supervisor, modules string) string {
+	t.Helper()
+	l := Layout{BootABI: 1, WorkerABI: 1, Entrypoint: "routerd", Roles: []release.RoleBinding{{Role: "control", Artifact: "routerd-modules"}, {Role: "network", Artifact: "routerd-modules"}}, Artifacts: []ArtifactInput{{Name: "routerd", Kind: "native", Command: "routerd", File: supervisor}, {Name: "routerd-modules", Kind: "native", Command: "routerd-modules", File: modules}}}
+	raw, err := json.Marshal(l)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "layout.json")
+	if err := os.WriteFile(path, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }

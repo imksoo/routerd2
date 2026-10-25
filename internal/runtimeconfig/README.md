@@ -8,8 +8,8 @@ This describes the current unreleased boot schema. The accepted next architectur
 image extraction, selection of a versioned runtime directory, and loading its
 startup configuration; see [ADR 0001](../../docs/adr/0001-boot-runtime-startup-config.md).
 The current `config` field seeds an empty config store. An existing committed
-record remains authoritative; the new explicit startup-revision selection and
-multi-binary runtime catalog are not implemented by this schema yet.
+record remains authoritative; the new explicit startup-revision selection is not implemented by this schema yet. The worker catalog is now explicit;
+signed runtime selection replaces it with the verified manifest role bindings.
 This prototype has no deployed users: its boot and serialized configuration
 formats may be replaced directly, without a compatibility reader or migration.
 
@@ -23,7 +23,12 @@ release store:
 {
   "platform": "appliance",
   "config": "/etc/routerd/config.json",
-  "module_path": "/usr/libexec/routerd-modules",
+  "workers": {
+    "logging": "/usr/libexec/routerd-modules",
+    "network": "/usr/libexec/routerd-modules",
+    "control": "/usr/libexec/routerd-modules",
+    "management": "/usr/libexec/routerd-modules"
+  },
   "runtime_dir": "/run/routerd",
   "state_dir": "/var/lib/routerd",
   "kernel_modules": ["virtio_pci", "virtio_blk", "ext4"],
@@ -31,6 +36,10 @@ release store:
   "ssh": {"user": "admin"}
 }
 ```
+
+This example declares core workers only. Add protocol role bindings explicitly
+for a factory profile that uses them. The decoder does not merge factory
+worker defaults into a serialized catalog. `module_path` is no longer accepted.
 
 This is a boot-settings example, not a disk provisioning command. The device
 must already contain a supported ext4 filesystem. Include the actual machine's

@@ -271,7 +271,7 @@ func startFixtureDaemonAt(t *testing.T, doc config.Document, dir string) daemonF
 	if err := config.AtomicJSON(configPath, doc); err != nil {
 		t.Fatal(err)
 	}
-	boot := runtimeconfig.Boot{Platform: "host", Config: configPath, ModulePath: filepath.Join(os.Getenv("ROUTERD2_TEST_BIN_DIR"), "routerd-modules"), RuntimeDir: runDir, StateDir: stateDir, SSH: runtimeconfig.SSH{User: "admin"}}
+	boot := runtimeconfig.Boot{Platform: "host", Config: configPath, Workers: runtimeconfig.NativeWorkers(filepath.Join(os.Getenv("ROUTERD2_TEST_BIN_DIR"), "routerd-modules")), RuntimeDir: runDir, StateDir: stateDir, SSH: runtimeconfig.SSH{User: "admin"}}
 	bootPath := filepath.Join(dir, "boot.json")
 	if err := config.AtomicJSON(bootPath, boot); err != nil {
 		t.Fatal(err)

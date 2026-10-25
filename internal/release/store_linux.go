@@ -161,7 +161,7 @@ func (s *Store) Status(ctx context.Context) (State, error) {
 }
 
 func (s *Store) bundleLimit() int64 {
-	return 2*s.options.MaxArtifactBytes + MaxManifestBytes + MaxTrailerBytes + 8192
+	return min(int64(MaxArtifacts)*s.options.MaxArtifactBytes, MaxRuntimeBytes) + MaxManifestBytes + MaxTrailerBytes + int64(MaxArtifacts+4)*1024
 }
 
 // StageFile accepts only a bounded regular local file and never follows a final
@@ -273,7 +273,7 @@ func (s *Store) Stage(ctx context.Context, input io.Reader) (Ref, error) {
 	published := false
 	defer func() {
 		if !published {
-			_ = removeFlatDirectory(s.releases, tempName, releaseEntries)
+			_ = removeFlatDirectory(s.releases, tempName, runtimeEntries(m))
 		}
 	}()
 	if err = writeFile(dir, "manifest.json", raw, 0400); err != nil {
@@ -333,7 +333,38 @@ func (s *Store) Stage(ctx context.Context, input io.Reader) (Ref, error) {
 	return ref, nil
 }
 
-var releaseEntries = map[string]bool{"manifest.json": true, "manifest.sig": true, "routerd": true, "routerd-modules": true}
+func runtimeEntries(m Manifest) map[string]bool {
+	entries := map[string]bool{"manifest.json": true, "manifest.sig": true}
+	for _, a := range m.Artifacts {
+		entries[a.Name] = true
+	}
+	return entries
+}
+
+// An abandoned stage may contain only partially written metadata. Artifact
+// names come from a validated manifest, never from directory enumeration.
+func (s *Store) cleanupRuntimeEntries(name string) (map[string]bool, error) {
+	dir, err := openDirectory(s.releases, name)
+	if err != nil {
+		return nil, err
+	}
+	defer dir.Close()
+	raw, err := readFile(dir, "manifest.json", MaxManifestBytes)
+	if errors.Is(err, unix.ENOENT) {
+		return runtimeEntries(Manifest{}), nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var m Manifest
+	if err = decodeCanonical(raw, &m); err != nil {
+		return nil, err
+	}
+	if err = ValidateManifest(m, s.options.MaxArtifactBytes); err != nil {
+		return nil, err
+	}
+	return runtimeEntries(m), nil
+}
 
 func (s *Store) stageArtifact(ctx context.Context, dir *os.File, a Artifact, b bundleReader) error {
 	f, err := openRegular(dir, a.Name, unix.O_RDWR|unix.O_CREAT|unix.O_EXCL, 0600, a.Size)
@@ -362,10 +393,16 @@ func (s *Store) stageArtifact(ctx context.Context, dir *os.File, a Artifact, b b
 	if err = decodeCanonical(raw, &m); err != nil {
 		return err
 	}
-	if err = InspectELF(f, a.Size, a.Name, m.ReleaseID, m.GOOS, m.GOARCH); err != nil {
-		return fmt.Errorf("%s: %w", a.Name, err)
+	if a.Kind == "native" {
+		if err = InspectELF(f, a.Size, a.Command, m.ReleaseID, m.GOOS, m.GOARCH); err != nil {
+			return fmt.Errorf("%s: %w", a.Name, err)
+		}
 	}
-	if err = f.Chmod(0500); err != nil {
+	mode := os.FileMode(0400)
+	if a.Kind == "native" {
+		mode = 0500
+	}
+	if err = f.Chmod(mode); err != nil {
 		return err
 	}
 	if err = f.Sync(); err != nil {
@@ -383,18 +420,6 @@ func (s *Store) openImage(ctx context.Context, ref Ref) (*Image, error) {
 		return nil, fmt.Errorf("%w: open release: %v", ErrCorrupt, err)
 	}
 	defer dir.Close()
-	names, err := directoryNames(dir, 4)
-	if err != nil {
-		return nil, err
-	}
-	if len(names) != 4 {
-		return nil, fmt.Errorf("%w: incomplete release directory", ErrCorrupt)
-	}
-	for _, name := range names {
-		if !releaseEntries[name] {
-			return nil, fmt.Errorf("%w: unexpected release entry", ErrCorrupt)
-		}
-	}
 	raw, err := readFile(dir, "manifest.json", MaxManifestBytes)
 	if err != nil {
 		return nil, err
@@ -410,23 +435,36 @@ func (s *Store) openImage(ctx context.Context, ref Ref) (*Image, error) {
 	if actual != ref {
 		return nil, fmt.Errorf("%w: release reference differs from its signed manifest", ErrCorrupt)
 	}
-	image := &Image{Release: ref}
+	names, err := directoryNames(dir, MaxArtifacts+2)
+	if err != nil {
+		return nil, err
+	}
+	allowed := runtimeEntries(m)
+	if len(names) != len(allowed) {
+		return nil, fmt.Errorf("%w: incomplete runtime directory", ErrCorrupt)
+	}
+	for _, name := range names {
+		if !allowed[name] {
+			return nil, fmt.Errorf("%w: unexpected runtime entry", ErrCorrupt)
+		}
+	}
+	image := &Image{Release: ref, Manifest: m, Artifacts: map[string]*os.File{}}
 	fail := func(err error) (*Image, error) { image.Close(); return nil, err }
-	for i, a := range m.Artifacts {
+	for _, a := range m.Artifacts {
 		f, err := openRegular(dir, a.Name, unix.O_RDONLY, 0, a.Size)
 		if err != nil {
 			return fail(fmt.Errorf("%w: %v", ErrCorrupt, err))
 		}
-		if i == 0 {
-			image.Routerd = f
-		} else {
-			image.Modules = f
-		}
+		image.Artifacts[a.Name] = f
 		stat, err := f.Stat()
 		if err != nil {
 			return fail(err)
 		}
-		if stat.Size() != a.Size || stat.Mode().Perm() != 0500 {
+		mode := os.FileMode(0400)
+		if a.Kind == "native" {
+			mode = 0500
+		}
+		if stat.Size() != a.Size || stat.Mode().Perm() != mode {
 			return fail(fmt.Errorf("%w: artifact size or mode changed", ErrCorrupt))
 		}
 		hash := sha256.New()
@@ -436,14 +474,16 @@ func (s *Store) openImage(ctx context.Context, ref Ref) (*Image, error) {
 		if hex.EncodeToString(hash.Sum(nil)) != a.SHA256 {
 			return fail(fmt.Errorf("%w: artifact digest changed", ErrCorrupt))
 		}
-		if err = InspectELF(f, a.Size, a.Name, m.ReleaseID, m.GOOS, m.GOARCH); err != nil {
-			return fail(fmt.Errorf("%w: %v", ErrCorrupt, err))
+		if a.Kind == "native" {
+			if err = InspectELF(f, a.Size, a.Command, m.ReleaseID, m.GOOS, m.GOARCH); err != nil {
+				return fail(fmt.Errorf("%w: %v", ErrCorrupt, err))
+			}
 		}
 	}
 	return image, nil
 }
 
-// Verify returns two pinned, re-verified executables for a staged reference. It
+// Verify returns the complete pinned, re-verified runtime artifact set for a staged reference. It
 // does not select that release. The caller owns the returned descriptors.
 func (s *Store) Verify(ctx context.Context, ref Ref) (*Image, error) {
 	unlock, err := s.acquire(ctx)
@@ -458,7 +498,7 @@ func (s *Store) Verify(ctx context.Context, ref Ref) (*Image, error) {
 }
 
 // Lookup resolves a content digest to its signed reference and re-verifies the
-// complete installed pair. It is the CLI/API boundary for --digest arguments;
+// complete installed runtime. It is the CLI/API boundary for --digest arguments;
 // callers must never invent ReleaseID, Sequence, or architecture from a path.
 func (s *Store) Lookup(ctx context.Context, digest string) (Ref, error) {
 	if !validDigest(digest) {

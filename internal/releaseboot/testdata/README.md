@@ -47,7 +47,7 @@ separate initializer and probe, excluded from the ordinary production build.
    pending trial and execs its verified routerd descriptor. Re-entry uses the
    same boot attempt. It pins the matching modules descriptor.
 5. The real supervisor starts logging, network, control and management workers.
-   The boot configuration deliberately names a nonexistent `module_path`:
+   The boot configuration deliberately names a nonexistent `workers` catalog:
    startup succeeds only if the signed-release integration replaces it with
    the verified descriptor.
 6. Product health monitoring observes the required ready process tree and a

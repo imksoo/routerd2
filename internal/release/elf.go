@@ -18,7 +18,7 @@ import (
 // deliberately matches the project's static Go -buildmode=exe output; a future
 // static PIE or a different CPU baseline requires an explicit format extension.
 func InspectELF(r io.ReaderAt, size int64, artifact, releaseID, targetOS, targetArch string) error {
-	if artifact != "routerd" && artifact != "routerd-modules" || size < 64 || size > MaxArtifactBytes {
+	if !componentName.MatchString(artifact) || size < 64 || size > MaxArtifactBytes {
 		return errors.New("invalid ELF artifact or size")
 	}
 	var header [64]byte

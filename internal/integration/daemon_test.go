@@ -101,7 +101,7 @@ func TestDaemonConfigurationAndRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b := runtimeconfig.Boot{Platform: "host", Config: configPath, ModulePath: filepath.Join(os.Getenv("ROUTERD2_TEST_BIN_DIR"), "routerd-modules"), RuntimeDir: runDir, StateDir: stateDir, SSH: runtimeconfig.SSH{Listen: fmt.Sprintf("127.0.0.1:%d", sshPort), User: "admin", AuthorizedKeys: []string{string(ssh.MarshalAuthorizedKey(signer.PublicKey()))}}}
+	b := runtimeconfig.Boot{Platform: "host", Config: configPath, Workers: runtimeconfig.NativeWorkers(filepath.Join(os.Getenv("ROUTERD2_TEST_BIN_DIR"), "routerd-modules")), RuntimeDir: runDir, StateDir: stateDir, SSH: runtimeconfig.SSH{Listen: fmt.Sprintf("127.0.0.1:%d", sshPort), User: "admin", AuthorizedKeys: []string{string(ssh.MarshalAuthorizedKey(signer.PublicKey()))}}}
 	boot := filepath.Join(dir, "boot.json")
 	if err = config.AtomicJSON(boot, b); err != nil {
 		t.Fatal(err)

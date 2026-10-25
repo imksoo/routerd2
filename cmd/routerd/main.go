@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -87,7 +88,7 @@ func run(args []string) error {
 		f := flags("run")
 		f.StringVar(&b.Platform, "platform", "", "appliance, container, or host (required)")
 		f.StringVar(&b.Config, "config", b.Config, "initial network configuration")
-		f.StringVar(&b.ModulePath, "module-path", b.ModulePath, "worker executable")
+		workersFile := f.String("workers-file", "", "JSON role-to-executable catalog")
 		f.StringVar(&b.RuntimeDir, "runtime-dir", b.RuntimeDir, "private runtime directory")
 		f.StringVar(&b.StateDir, "state-dir", b.StateDir, "persistent state directory")
 		if err := f.Parse(args[1:]); err != nil {
@@ -95,6 +96,24 @@ func run(args []string) error {
 		}
 		if f.NArg() != 0 {
 			return errors.New("unexpected run arguments")
+		}
+		if *workersFile != "" {
+			file, err := os.Open(*workersFile)
+			if err != nil {
+				return err
+			}
+			raw, readErr := io.ReadAll(io.LimitReader(file, (64<<10)+1))
+			_ = file.Close()
+			if readErr != nil {
+				return readErr
+			}
+			if len(raw) > 64<<10 {
+				return errors.New("worker catalog exceeds size bound")
+			}
+			b.Workers = nil
+			if err := json.Unmarshal(raw, &b.Workers); err != nil {
+				return err
+			}
 		}
 		return serve(b)
 	case "status":
@@ -139,7 +158,7 @@ func run(args []string) error {
 func usage() error {
 	_, err := fmt.Fprintln(os.Stdout, `routerd2
   routerd boot --file /etc/routerd/boot.json
-  routerd run --platform host|container|appliance [--config ... --module-path ...]
+  routerd run --platform host|container|appliance [--config ... --workers-file ...]
   routerd status [--runtime-dir /run/routerd]
   routerd cli [--runtime-dir /run/routerd]
   routerd logs [--module NAME --level INFO --limit 100 --runtime-dir ...]
@@ -199,9 +218,15 @@ func serveWithTrial(b runtimeconfig.Boot, trial *releaseboot.Trial) error {
 			}
 		}()
 	}
+	var dynamicRoles []string
+	for _, role := range []string{"health", "dhcp4", "dhcp6pd", "dhcp_server", "ra", "ra_client", "aftr", "dns", "vrrp", "bgp", "bfd"} {
+		if _, ok := b.Workers[role]; ok {
+			dynamicRoles = append(dynamicRoles, role)
+		}
+	}
 	err = supervisor.Run(ctx, supervisor.Options{
-		ModulePath: b.ModulePath, ReleaseID: buildinfo.ReleaseID, RuntimeDir: b.RuntimeDir, StateDir: b.StateDir, ConfigPath: b.Config, Platform: b.Platform,
-		DynamicRoles: []string{"health", "dhcp4", "dhcp6pd", "dhcp_server", "ra", "ra_client", "aftr", "dns", "vrrp", "bgp", "bfd"},
+		Executables: b.Workers, ReleaseID: buildinfo.ReleaseID, RuntimeDir: b.RuntimeDir, StateDir: b.StateDir, ConfigPath: b.Config, Platform: b.Platform,
+		DynamicRoles: dynamicRoles,
 		Modules: []supervisor.Spec{
 			{Name: "logging", Role: "logging", Required: false},
 			{Name: "network", Role: "network", Required: true},

@@ -46,7 +46,7 @@ The three phases exercise different durability boundaries:
 Only the first initializer mounts the disk for fixture seeding, before any
 worker exists, and it unmounts before execing the product. Later initializers do
 not pre-mount, clean, repair, or recover the disk on the product's behalf. This
-test uses the explicit factory command pair in `Boot.ModulePath`; signed runtime
+test uses the explicit factory command pair in `Boot.Workers`; signed runtime
 selection and fallback remain the separate `qemu-storage.py` gate.
 
 Expected IDs/hashes/cursors leave the guest through UART. The host supplies the

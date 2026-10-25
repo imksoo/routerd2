@@ -44,7 +44,7 @@ func bootConfigured(path string, b runtimeconfig.Boot) error {
 		return err
 	}
 	defer selection.Image.Close()
-	selected, err := selection.Image.Routerd.Stat()
+	selected, err := selection.Image.Entrypoint().Stat()
 	if err != nil {
 		return err
 	}
@@ -56,7 +56,7 @@ func bootConfigured(path string, b runtimeconfig.Boot) error {
 		// Execute the verified open inode, preserving PID 1. All store handles
 		// are CLOEXEC. The next image re-enters BeginBoot with the same kernel
 		// boot ID, so this handoff does not consume another attempt or token.
-		image := fmt.Sprintf("/proc/self/fd/%d", selection.Image.Routerd.Fd())
+		image := fmt.Sprintf("/proc/self/fd/%d", selection.Image.Entrypoint().Fd())
 		err := unix.Exec(image, []string{"routerd", "boot", "--file", path}, os.Environ())
 		if selection.Trial {
 			cleanup, stop := context.WithTimeout(context.Background(), 30*time.Second)
@@ -69,7 +69,14 @@ func bootConfigured(path string, b runtimeconfig.Boot) error {
 	if buildinfo.ReleaseID != selection.Image.Release.ReleaseID {
 		return errors.New("executing release identity differs from its verified manifest")
 	}
-	b.ModulePath = fmt.Sprintf("/proc/self/fd/%d", selection.Image.Modules.Fd())
+	b.Workers = map[string]string{}
+	for _, binding := range selection.Image.Manifest.Roles {
+		f, err := selection.Image.Executable(binding.Role)
+		if err != nil {
+			return err
+		}
+		b.Workers[binding.Role] = fmt.Sprintf("/proc/self/fd/%d", f.Fd())
+	}
 	if !selection.Trial {
 		return serve(b)
 	}

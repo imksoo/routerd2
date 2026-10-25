@@ -17,15 +17,15 @@ import (
 // Boot is intentionally separate from the transactional network configuration.
 // Changing boot paths, platform, or SSH keys/listeners requires a system restart.
 type Boot struct {
-	Platform      string       `json:"platform"`
-	Config        string       `json:"config"`
-	ModulePath    string       `json:"module_path"`
-	RuntimeDir    string       `json:"runtime_dir"`
-	StateDir      string       `json:"state_dir"`
-	KernelModules []string     `json:"kernel_modules,omitempty"`
-	SSH           SSH          `json:"ssh"`
-	Release       *Release     `json:"release,omitempty"`
-	StateVolume   *StateVolume `json:"state_volume,omitempty"`
+	Platform      string            `json:"platform"`
+	Config        string            `json:"config"`
+	Workers       map[string]string `json:"workers"`
+	RuntimeDir    string            `json:"runtime_dir"`
+	StateDir      string            `json:"state_dir"`
+	KernelModules []string          `json:"kernel_modules,omitempty"`
+	SSH           SSH               `json:"ssh"`
+	Release       *Release          `json:"release,omitempty"`
+	StateVolume   *StateVolume      `json:"state_volume,omitempty"`
 }
 
 // StateVolume mounts an explicitly selected, existing ext4 device at StateDir.
@@ -55,11 +55,12 @@ type SSH struct {
 }
 
 func Default() Boot {
-	return Boot{Config: "/etc/routerd/config.json", ModulePath: "/usr/libexec/routerd-modules", RuntimeDir: "/run/routerd", StateDir: "/var/lib/routerd", SSH: SSH{User: "admin"}}
+	return Boot{Config: "/etc/routerd/config.json", Workers: NativeWorkers("/usr/libexec/routerd-modules"), RuntimeDir: "/run/routerd", StateDir: "/var/lib/routerd", SSH: SSH{User: "admin"}}
 }
 
 func Read(path string) (Boot, error) {
 	b := Default()
+	b.Workers = nil // serialized boot input must supply its own catalog, not merge default roles
 	f, err := os.Open(path)
 	if err != nil {
 		return b, err
@@ -102,9 +103,17 @@ func (b Boot) Validate() error {
 	default:
 		return errors.New("platform must explicitly be appliance, container, or host")
 	}
-	for name, path := range map[string]string{"config": b.Config, "module_path": b.ModulePath, "runtime_dir": b.RuntimeDir, "state_dir": b.StateDir} {
+	for name, path := range map[string]string{"config": b.Config, "runtime_dir": b.RuntimeDir, "state_dir": b.StateDir} {
 		if !filepath.IsAbs(path) {
 			return fmt.Errorf("%s must be an absolute path", name)
+		}
+	}
+	if (b.Release == nil && len(b.Workers) == 0) || len(b.Workers) > 64 {
+		return errors.New("boot requires an explicit bounded worker role catalog")
+	}
+	for role, path := range b.Workers {
+		if role == "" || !filepath.IsAbs(path) || filepath.Clean(path) != path {
+			return errors.New("worker roles require clean absolute executable paths")
 		}
 	}
 	if b.RuntimeDir == b.StateDir {
@@ -144,4 +153,15 @@ func (b Boot) Validate() error {
 
 func pathContains(parent, child string) bool {
 	return parent == child || strings.HasPrefix(child, parent+"/")
+}
+
+// NativeWorkers explicitly binds the current native multicall command to each
+// supported role for factory/development boot configuration. Serialized input
+// is a role catalog; there is no old module_path reader or implicit conversion.
+func NativeWorkers(path string) map[string]string {
+	out := map[string]string{}
+	for _, role := range []string{"logging", "network", "control", "management", "health", "dhcp4", "dhcp6pd", "dhcp_server", "ra", "ra_client", "aftr", "dns", "vrrp", "bgp", "bfd"} {
+		out[role] = path
+	}
+	return out
 }

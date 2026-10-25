@@ -92,7 +92,7 @@ func TestStaticELFIdentityAndOfflineBundle(t *testing.T) {
 		input = append(input, f)
 	}
 	var out bytes.Buffer
-	manifest, err := WriteBundle(context.Background(), &out, BundleOptions{ReleaseID: fixtureRelease, Sequence: 7, GOOS: "linux", GOARCH: runtime.GOARCH}, testKey(), input[0], input[1])
+	manifest, err := WriteBundle(context.Background(), &out, BundleOptions{ReleaseID: fixtureRelease, Sequence: 7, GOOS: "linux", GOARCH: runtime.GOARCH, BootABI: 1, WorkerABI: 1, Entrypoint: "routerd", Artifacts: []Artifact{{Name: "routerd", Kind: "native", Command: "routerd"}, {Name: "routerd-modules", Kind: "native", Command: "routerd-modules"}}, Roles: []RoleBinding{{Role: "logging", Artifact: "routerd-modules"}, {Role: "network", Artifact: "routerd-modules"}, {Role: "control", Artifact: "routerd-modules"}, {Role: "management", Artifact: "routerd-modules"}, {Role: "health", Artifact: "routerd-modules"}, {Role: "dhcp4", Artifact: "routerd-modules"}, {Role: "dhcp6pd", Artifact: "routerd-modules"}, {Role: "dhcp_server", Artifact: "routerd-modules"}, {Role: "ra", Artifact: "routerd-modules"}, {Role: "ra_client", Artifact: "routerd-modules"}, {Role: "aftr", Artifact: "routerd-modules"}, {Role: "dns", Artifact: "routerd-modules"}, {Role: "vrrp", Artifact: "routerd-modules"}, {Role: "bgp", Artifact: "routerd-modules"}, {Role: "bfd", Artifact: "routerd-modules"}}}, testKey(), map[string]*os.File{"routerd": input[0], "routerd-modules": input[1]})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestStaticELFIdentityAndOfflineBundle(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer image.Close()
-	for _, f := range []*os.File{image.Routerd, image.Modules} {
+	for _, f := range []*os.File{image.Entrypoint(), image.Artifacts["routerd-modules"]} {
 		stat, err := f.Stat()
 		if err != nil || stat.Mode().Perm() != 0500 {
 			t.Fatalf("installed mode: %v %v", stat, err)

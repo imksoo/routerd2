@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
-// Package release verifies and stages signed pairs of routerd executables and
+// Package release verifies and stages signed extracted runtime artifact sets and
 // durably selects their next boot. It never executes a payload, downloads a
 // release, changes the running process tree, or reboots the machine.
 package release
@@ -13,8 +13,11 @@ import (
 )
 
 const (
-	ManifestVersion               = 1
-	MaxManifestBytes              = 16 << 10
+	ManifestVersion               = 2
+	MaxManifestBytes              = 64 << 10
+	MaxArtifacts                  = 64
+	MaxRoles                      = 64
+	MaxRuntimeBytes         int64 = 4 << 30
 	MaxStateBytes                 = 32 << 10
 	DefaultMaxArtifactBytes int64 = 512 << 20
 	MaxArtifactBytes        int64 = 1 << 30
@@ -34,21 +37,32 @@ var (
 )
 
 type Artifact struct {
-	Name   string `json:"name"`
-	Size   int64  `json:"size"`
-	SHA256 string `json:"sha256"`
+	Name    string `json:"name"`
+	Kind    string `json:"kind"`
+	Command string `json:"command,omitempty"`
+	Size    int64  `json:"size"`
+	SHA256  string `json:"sha256"`
+}
+
+type RoleBinding struct {
+	Role     string `json:"role"`
+	Artifact string `json:"artifact"`
 }
 
 // Sequence is a publisher-assigned, strictly increasing release counter. A
 // release ID is an opaque human-readable identity, never a version comparison.
 type Manifest struct {
-	Version   int        `json:"version"`
-	ReleaseID string     `json:"release_id"`
-	Sequence  uint64     `json:"sequence"`
-	GOOS      string     `json:"goos"`
-	GOARCH    string     `json:"goarch"`
-	KeyID     string     `json:"key_id"`
-	Artifacts []Artifact `json:"artifacts"`
+	Version    int           `json:"version"`
+	ReleaseID  string        `json:"release_id"`
+	Sequence   uint64        `json:"sequence"`
+	GOOS       string        `json:"goos"`
+	GOARCH     string        `json:"goarch"`
+	KeyID      string        `json:"key_id"`
+	BootABI    int           `json:"boot_abi"`
+	WorkerABI  int           `json:"worker_abi"`
+	Entrypoint string        `json:"entrypoint"`
+	Roles      []RoleBinding `json:"roles"`
+	Artifacts  []Artifact    `json:"artifacts"`
 }
 
 type Ref struct {
@@ -113,29 +127,37 @@ type PrepareOptions struct {
 	MaxAttempts int
 }
 
-// Image pins both verified file descriptions. A launcher should use these
-// descriptors, not independently resolve two paths through a moving selector.
-// Close the descriptors after transferring ownership to the launcher.
+// Image pins every verified artifact and its signed role catalog. Callers must
+// not re-resolve mutable selector paths when launching or restarting workers.
 type Image struct {
-	Release Ref
-	Routerd *os.File
-	Modules *os.File
+	Release   Ref
+	Manifest  Manifest
+	Artifacts map[string]*os.File
 }
 
+func (i *Image) Entrypoint() *os.File { return i.Artifacts[i.Manifest.Entrypoint] }
+func (i *Image) Executable(role string) (*os.File, error) {
+	for _, binding := range i.Manifest.Roles {
+		if binding.Role == role {
+			if f := i.Artifacts[binding.Artifact]; f != nil {
+				return f, nil
+			}
+		}
+	}
+	return nil, errors.New("role is absent from the verified runtime catalog")
+}
 func (i *Image) Close() error {
 	if i == nil {
 		return nil
 	}
-	var a, b error
-	if i.Routerd != nil {
-		a = i.Routerd.Close()
-		i.Routerd = nil
+	var errs []error
+	for name, f := range i.Artifacts {
+		if f != nil {
+			errs = append(errs, f.Close())
+		}
+		delete(i.Artifacts, name)
 	}
-	if i.Modules != nil {
-		b = i.Modules.Close()
-		i.Modules = nil
-	}
-	return errors.Join(a, b)
+	return errors.Join(errs...)
 }
 
 type Selection struct {
