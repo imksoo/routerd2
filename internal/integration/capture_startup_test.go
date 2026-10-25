@@ -46,5 +46,14 @@ func TestPacketCaptureSurvivesLinkActivation(t *testing.T) {
 	if err := unix.Sendto(fd, frame, 0, &unix.SockaddrLinklayer{Ifindex: peer.Attrs().Index, Protocol: htons(0x88b5), Halen: 6}); err != nil {
 		t.Fatal(err)
 	}
-	until(t, time.Second, func() bool { capture.mu.Lock(); defer capture.mu.Unlock(); return len(capture.packets) > 0 })
+	until(t, time.Second, func() bool {
+		capture.mu.Lock()
+		defer capture.mu.Unlock()
+		for _, packet := range capture.packets {
+			if len(packet.data) >= 14 && binary.BigEndian.Uint16(packet.data[12:14]) == 0x88b5 {
+				return true
+			}
+		}
+		return false
+	})
 }
