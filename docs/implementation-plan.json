@@ -11839,6 +11839,38 @@
       ],
       "parity_flags_unchanged": true,
       "fixture_checkpoint": "544233ec51ba413547e8f9e2bebaf099e31b8117"
+    },
+    {
+      "id": "dhcp4-client-boot-clock",
+      "date": "2026-10-25",
+      "status": "partial_worker_clock_implementation_verified",
+      "code_checkpoint": "fa5792dbeee7f2abf23f9245751b5a37a3a6cb2d",
+      "work_packages": [
+        "CORE-03",
+        "NET-05"
+      ],
+      "evidence": "docs/evidence/2026-10-25-dhcp4-boot-clock.md",
+      "operator_contract": "internal/protocol/dhcp4/README.md",
+      "implemented": [
+        "Validated server ACK establishes original T1/T2/expiry once from CLOCK_BOOTTIME; retries, request timeout and packet secs use the same boot clock",
+        "Expired lease withdrawn and new discovery transaction begun before decoding a queued ACK; clock read failure, boot change/rewind and deadline overflow fatal without UTC fallback",
+        "Preserve original UTC lease timestamps and INIT-REBOOT MAC/client hints; no saved lease active until fresh ACK; Snapshot wire format unchanged"
+      ],
+      "validation": [
+        "Test-first clock-input API refusal and old65a01b6 unchanged timer logic with input-only adapter: backward UTC delays T1, forward UTC expires early, late ACK/reboot/retry failures reproduced; pure clock tests, not old daemon or actual clock mutation",
+        "Scope correction: old production retry/transaction/secs already used Go time.Now monotonic metadata and tolerated ordinary wall correction; their UTC-only fake-input RED does not prove a production retry NTP bug. Lease acquisition was converted to UTC, so T1/T2/expiry did lose monotonic metadata; new BOOTTIME includes suspend, not physically exercised.",
+        "Related DHCPv4 whole package Race1.042s passes including +/-24h UTC correction, renewal deadline, stalled reply, retry/secs and overflow",
+        "First full check23.34s failure preserved: own secret-scan partial source copies in dist were accidentally found by Go ./...; preserve copies under underscore-prefixed directories, no source/evidence deletion",
+        "Clean fa5792d full make check/Race/vet/Python23/static amd64+arm64 build96.59s passes; all four ELF hashes recorded",
+        "Matching checked native pair and clean compiled Race harnesses pass real AF_PACKET DHCPv4 acquire/renew/expiry + IPv6 PD/RA18.94s, native DHCP/DNS daemon10.70s and migrated-resource daemon10.90s",
+        "Related three QEMU gates pass: DHCPv4/IPv6-PD/RA30.22s, native DHCP/DNS31.56s, migrated-resource DHCP/DNS32.36s at original512MiB/2CPU/64MiB scratch and unchanged operation/fixture deadlines; not a new all-suite aggregate or physical qualification"
+      ],
+      "remaining": [
+        "Next required boundary: original DHCPv4 boot deadline in Snapshot/runtime/facts/network address lifetimes; current coordinator still uses UTC expiresAt, so stopped worker/control recovery and end-to-end clock correction safety not achieved",
+        "Live supervisor generation fence, replay/late callbacks and original-deadline recovery for DHCPv4; other protocol clocks/current providers and structured selectors",
+        "All work-package/resource parity, DHCPv6 IA_NA/server/relay/DAD/release, event storage/durability/effects/federation, scale/long-run/physical hardware/NIC/clock qualification remain"
+      ],
+      "parity_flags_unchanged": true
     }
   ],
   "delivery_goal": {

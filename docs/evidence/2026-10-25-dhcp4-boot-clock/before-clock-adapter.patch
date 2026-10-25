@@ -1,0 +1,20 @@
+--- baseline/client.go
++++ clock-input-only/client.go
+@@ -16,6 +16,7 @@
+        "time"
+
+        wire "github.com/imksoo/routerd/pkg/dhcpv4client"
++ "github.com/imksoo/routerd2/internal/protocol/bfd"
+ )
+
+ type Config struct {
+@@ -78,6 +79,7 @@
+        conn         packetConn
+        effects      Effects
+        now          func() time.Time
++ readClock func() (bfd.Clock,error)
+        xid          func() uint32
+        state        wire.State
+        lease        wire.Lease
+
+Test-only forwarding: c.now = func() time.Time { return clock.WallTime }

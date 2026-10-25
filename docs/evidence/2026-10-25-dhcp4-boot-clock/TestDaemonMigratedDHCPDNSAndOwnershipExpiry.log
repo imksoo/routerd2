@@ -1,0 +1,7 @@
+=== RUN   TestDaemonMigratedDHCPDNSAndOwnershipExpiry
+    bgp_test.go:192: === RUN   TestDaemonMigratedDHCPDNSAndOwnershipExpiry
+            dhcp_dns_test.go:49: legacy resource YAML and explicit finite-source policy: real DHCP ACK, DNS publication, stopped-producer expiry and journal recovery passed
+        --- PASS: TestDaemonMigratedDHCPDNSAndOwnershipExpiry (8.79s)
+        PASS
+--- PASS: TestDaemonMigratedDHCPDNSAndOwnershipExpiry (9.82s)
+PASS

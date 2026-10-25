@@ -25,6 +25,20 @@ inactive snapshots must not leave an old address/default route active. Restarted
 leases require an ACK before becoming active. Normal stop withdraws effects but
 retains the server lease record for the next INIT-REBOOT exchange.
 
+Within a running client, a validated server ACK establishes T1, T2 and expiry
+once from `CLOCK_BOOTTIME`. UTC corrections cannot change these deadlines.
+Retransmission, transaction timeout and the DHCP `secs` field also use boot
+time. An expired lease is withdrawn before processing a queued reply; the old
+transaction cannot renew it after a process stall. A clock read failure,
+boot identity change, rewind or deadline overflow stops the worker. UTC lease
+timestamps remain display and saved INIT-REBOOT hint metadata. A saved hint is
+never active until the server supplies a fresh ACK.
+
+This is the client timer boundary. The controller currently still projects
+DHCPv4 lease/address lifetimes from UTC `expiresAt`; propagation of the original
+boot deadline through the snapshot and network writer remains required before
+claiming end-to-end clock correction safety, including a stopped worker.
+
 The control-plane compiler owns `UseRoutes`, `UseDNS`, metric, dependency/when
 policy and merging this dynamic state with static declarations. Do not start
 multiple DHCP clients on the same interface. The state file is per resource and

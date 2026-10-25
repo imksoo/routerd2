@@ -1,0 +1,5 @@
+# github.com/imksoo/routerd2/internal/protocol/dhcp4 [github.com/imksoo/routerd2/internal/protocol/dhcp4.test]
+internal/protocol/dhcp4/lease_clock_test.go:19:4: c.readClock undefined (type *client has no field or method readClock)
+internal/protocol/dhcp4/lease_clock_test.go:128:7: c.readClock undefined (type *client has no field or method readClock)
+FAIL    github.com/imksoo/routerd2/internal/protocol/dhcp4 [build failed]
+FAIL

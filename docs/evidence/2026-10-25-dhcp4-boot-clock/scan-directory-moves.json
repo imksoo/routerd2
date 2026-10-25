@@ -1,0 +1,15 @@
+{
+  "as_of_utc": "2026-10-25T01:23:56.229946+00:00",
+  "moves": [
+    {
+      "source": "dist/goal-validation/bgp-derived-preliminary-scan",
+      "destination": "dist/goal-validation/_bgp-derived-preliminary-scan",
+      "reason": "Preserve private secret-scan source copies outside Go ./... discovery; no evidence/source deletion"
+    },
+    {
+      "source": "dist/goal-validation/bgp-derived-final-index-scan",
+      "destination": "dist/goal-validation/_bgp-derived-final-index-scan",
+      "reason": "Preserve private secret-scan source copies outside Go ./... discovery; no evidence/source deletion"
+    }
+  ]
+}

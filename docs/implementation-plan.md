@@ -7,7 +7,19 @@
 部分checkpointでゴールを完了にせず、実装・検証・未検証と証跡を更新する。
 対象機種・NIC・性能条件の確認と並行して、独立して進められる実装・隔離VM検証を続ける。
 
-最新product checkpointは `8887e75`。
+最新product checkpointは `fa5792d`。
+DHCPv4 clientのT1/T2/expiry、retry、transaction timeoutとpacket secsをBOOTTIMEで測る。
+UTC補正で元期限を変えず、更新ACKだけで新期限を確定する。失効後queued ACKは旧leaseを復活させない。
+旧timer処理の前後24時間補正FAILとclock入力adapterを保存し、関連package全体Race1.042秒PASS。
+最初の全体checkは私のprivate scan用source copyがGo探索対象に入って23.34秒FAIL。内容を保ち `_` directoryへ移した。
+clean全体check/Race/vet/Python23/static両arch build96.59秒PASS。
+checked pair/native Raceの実DHCPv4/v6/RA18.94秒・DHCP→DNS10.70秒・migrated DHCP→DNS10.90秒PASS。
+QEMUも実DHCP/v6/RA30.22秒・DHCP→DNS31.56秒・migrated DHCP→DNS32.36秒PASS。
+関連3 gateの個別回帰であり、Snapshot/runtime/network writerのDHCPv4期限はまだUTC依存で、end-to-endのclock safetyは未達。
+次に元BOOT期限をこの境界へ伝え、worker/control停止・旧通知・復旧を受入する。全計画・実機の完了は宣言しない。
+[証跡と次の境界](evidence/2026-10-25-dhcp4-boot-clock.md) を参照。
+
+先行product checkpointは `8887e75`。
 BGPRouterの `phase` / `establishedPeers` / `backend` / `observedAt` をDerivedEvent/EventRuleへ接続した。
 全peerの観測と同じ経路/BFD依存のnetwork ACKを要求し、未解決FIBならDegraded、適用待ちはunknownになる。
 同じ経路のheartbeatはACKを再利用する。engine walk前のBOOTTIMEで元の最大5秒を固定し、

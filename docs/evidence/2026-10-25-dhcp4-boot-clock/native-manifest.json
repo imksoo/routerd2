@@ -1,0 +1,59 @@
+{
+  "source_commit": "fa5792dbeee7f2abf23f9245751b5a37a3a6cb2d",
+  "source_dirty": false,
+  "race_harnesses": {
+    "protocol": {
+      "path": "dist/goal-validation/dhcp4-boot-clock-protocol.test",
+      "sha256": "99df87332466c4b587c5f00fa8a85d933e74c1cf1ce4c377ecdc3310d75e472a",
+      "package": "./internal/protocol/dhcp4"
+    },
+    "daemon": {
+      "path": "dist/goal-validation/dhcp4-boot-clock-daemon.test",
+      "sha256": "23843ef92e0f12702688f7fe03895d167e1624256a1242dbfa95fb31f166989e",
+      "package": "./internal/integration"
+    }
+  },
+  "binaries": [
+    {
+      "architecture": "amd64",
+      "binary": "routerd",
+      "sha256": "6146a81cd8c8cf74cd5bf5cde56902988abd082eebb1bdf87174547de550cb09"
+    },
+    {
+      "architecture": "amd64",
+      "binary": "routerd-modules",
+      "sha256": "33efb26d25cfffd1ab0062926dff323cbd15388512a7372bb023cf09de644d55"
+    }
+  ],
+  "scope": "root-owned0700 private stage, separate user/network namespaces, real AF_PACKET/UDP DHCP exchanges and DHCP/DNS daemons; no host clock mutation",
+  "tests": [
+    {
+      "test": "TestIsolatedNativeDHCPAndRA",
+      "harness": "protocol",
+      "exit_code": 0,
+      "passed": true,
+      "elapsed_seconds": 18.94,
+      "log": "dhcp4-boot-clock-native-TestIsolatedNativeDHCPAndRA.log",
+      "sha256": "c241649df91f9704d5736f61611aa1368ff19557b162e05d332ceced9e0b9026"
+    },
+    {
+      "test": "TestDaemonDHCPDNSAndOwnershipExpiry",
+      "harness": "daemon",
+      "exit_code": 0,
+      "passed": true,
+      "elapsed_seconds": 10.7,
+      "log": "dhcp4-boot-clock-native-TestDaemonDHCPDNSAndOwnershipExpiry.log",
+      "sha256": "d236afccb5c2cc6b76a60008bfa1899c9423d3b17b8d34adbdfda89af979c935"
+    },
+    {
+      "test": "TestDaemonMigratedDHCPDNSAndOwnershipExpiry",
+      "harness": "daemon",
+      "exit_code": 0,
+      "passed": true,
+      "elapsed_seconds": 10.9,
+      "log": "dhcp4-boot-clock-native-TestDaemonMigratedDHCPDNSAndOwnershipExpiry.log",
+      "sha256": "dfbaaf19860c166471ebdb3fd16b72365289b4d400a3817fe65637144804a6fc"
+    }
+  ],
+  "completed_commit": "fa5792dbeee7f2abf23f9245751b5a37a3a6cb2d"
+}
