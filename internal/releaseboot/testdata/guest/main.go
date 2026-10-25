@@ -295,9 +295,7 @@ func runProbe() error {
 		case <-ctx.Done():
 			return fmt.Errorf("real PID 1 did not confirm the trial: %w", last)
 		case <-timer.C:
-			call, stop := context.WithTimeout(ctx, 5*time.Second)
-			err := observe(call, &store, keys, expected)
-			stop()
+			err := observe(ctx, &store, keys, expected)
 			if err == nil {
 				return verifyLiveCommitFreeze(ctx, store)
 			}
@@ -426,87 +424,104 @@ func verifyLiveCommitFreeze(ctx context.Context, store *release.Store) error {
 }
 
 func observe(ctx context.Context, store **release.Store, keys map[string]ed25519.PublicKey, expected witness) error {
-	if err := requireNoNIC(); err != nil {
-		return err
-	}
 	var processes supervisor.Status
-	if err := localapi.NewClient(filepath.Join(runtimeDir, supervisor.SocketName)).Do(ctx, "GET", "/v1/status", nil, &processes); err != nil {
-		return err
-	}
-	if processes.PID != 1 || processes.Platform != "appliance" || !processes.Ready || processes.Stopping || processes.ReleaseID != expected.Trial.ReleaseID {
-		return fmt.Errorf("unexpected supervisor readiness: %+v", processes)
-	}
-	if len(processes.Modules) != 4 {
-		return fmt.Errorf("unexpected number of core modules: %d", len(processes.Modules))
-	}
-	routerdPath := filepath.Join(storeRoot, "releases", expected.Trial.Digest, "supervisor")
-
-	if err := sameExecutable(1, routerdPath); err != nil {
-		return err
-	}
-	seen := make(map[string]bool)
-	for _, module := range processes.Modules {
-		if !module.Ready || module.PID <= 1 || module.ReleaseID != expected.Trial.ReleaseID {
-			return fmt.Errorf("module %s is not ready in selected pair: %+v", module.Name, module)
-		}
-		artifact := "services"
-		if module.Role == "logging" {
-			artifact = "logger"
-		}
-		modulesPath := filepath.Join(storeRoot, "releases", expected.Trial.Digest, artifact)
-		if err := sameExecutable(module.PID, modulesPath); err != nil {
-			return fmt.Errorf("module %s: %w", module.Name, err)
-		}
-		if seen[module.Name] {
-			return fmt.Errorf("duplicate module %s", module.Name)
-		}
-		seen[module.Name] = true
-		if module.Name != "logging" && !module.Required {
-			return fmt.Errorf("core module %s is not required", module.Name)
-		}
-	}
-	for _, name := range []string{"logging", "network", "control", "management"} {
-		if !seen[name] {
-			return fmt.Errorf("missing core module %s", name)
-		}
-	}
 	var health control.State
-	if err := localapi.NewClient(filepath.Join(runtimeDir, control.SocketName)).Do(ctx, "GET", "/v1/health", nil, &health); err != nil {
-		return err
-	}
-	if !health.Healthy || health.Revision == 0 || health.Confirmation != nil || health.Services == nil ||
-		health.Services.Phase != "ready" || health.Services.Revision != health.Revision || health.Services.RouteIssueCount != 0 {
-		return fmt.Errorf("selected release control plane is not healthy: %+v", health)
-	}
-	// The probe must not acquire the store while PID 1 is doing its initial
-	// Open/BeginBoot/exec sequence. Once supervisor is ready, only the trial
-	// watcher can mutate it; that watcher explicitly retries ErrBusy.
-	if *store == nil {
-		opened, err := release.Open(release.Options{Root: storeRoot, TrustedKeys: keys, TargetOS: "linux", TargetArch: "amd64"})
+	var seen map[string]bool
+	return observeWithBudgets(ctx, 5*time.Second, func(ctx context.Context) error {
+		if err := requireNoNIC(); err != nil {
+			return err
+		}
+		if err := localapi.NewClient(filepath.Join(runtimeDir, supervisor.SocketName)).Do(ctx, "GET", "/v1/status", nil, &processes); err != nil {
+			return err
+		}
+		if processes.PID != 1 || processes.Platform != "appliance" || !processes.Ready || processes.Stopping || processes.ReleaseID != expected.Trial.ReleaseID {
+			return fmt.Errorf("unexpected supervisor readiness: %+v", processes)
+		}
+		if len(processes.Modules) != 4 {
+			return fmt.Errorf("unexpected number of core modules: %d", len(processes.Modules))
+		}
+		routerdPath := filepath.Join(storeRoot, "releases", expected.Trial.Digest, "supervisor")
+
+		if err := sameExecutable(1, routerdPath); err != nil {
+			return err
+		}
+		seen = make(map[string]bool)
+		for _, module := range processes.Modules {
+			if !module.Ready || module.PID <= 1 || module.ReleaseID != expected.Trial.ReleaseID {
+				return fmt.Errorf("module %s is not ready in selected pair: %+v", module.Name, module)
+			}
+			artifact := "services"
+			if module.Role == "logging" {
+				artifact = "logger"
+			}
+			modulesPath := filepath.Join(storeRoot, "releases", expected.Trial.Digest, artifact)
+			if err := sameExecutable(module.PID, modulesPath); err != nil {
+				return fmt.Errorf("module %s: %w", module.Name, err)
+			}
+			if seen[module.Name] {
+				return fmt.Errorf("duplicate module %s", module.Name)
+			}
+			seen[module.Name] = true
+			if module.Name != "logging" && !module.Required {
+				return fmt.Errorf("core module %s is not required", module.Name)
+			}
+		}
+		for _, name := range []string{"logging", "network", "control", "management"} {
+			if !seen[name] {
+				return fmt.Errorf("missing core module %s", name)
+			}
+		}
+		if err := localapi.NewClient(filepath.Join(runtimeDir, control.SocketName)).Do(ctx, "GET", "/v1/health", nil, &health); err != nil {
+			return err
+		}
+		if !health.Healthy || health.Revision == 0 || health.Confirmation != nil || health.Services == nil ||
+			health.Services.Phase != "ready" || health.Services.Revision != health.Revision || health.Services.RouteIssueCount != 0 {
+			return fmt.Errorf("selected release control plane is not healthy: %+v", health)
+		}
+		return nil
+	}, func(ctx context.Context) error {
+		// The probe must not acquire the store while PID 1 is doing its initial
+		// Open/BeginBoot/exec sequence. Once supervisor is ready, only the trial
+		// watcher can mutate it; that watcher explicitly retries ErrBusy.
+		if *store == nil {
+			opened, err := release.Open(release.Options{Root: storeRoot, TrustedKeys: keys, TargetOS: "linux", TargetArch: "amd64"})
+			if err != nil {
+				return err
+			}
+			*store = opened
+		}
+		state, err := (*store).Status(ctx)
 		if err != nil {
 			return err
 		}
-		*store = opened
+		if state.Active == nil || *state.Active != expected.Trial || state.Previous == nil || *state.Previous != expected.Baseline ||
+			state.Pending != nil || state.Attempt != nil || state.HighWatermark != expected.Trial.Sequence || state.Operation != "confirm" {
+			return fmt.Errorf("selected pair has not been automatically confirmed: %+v", state)
+		}
+		bootID, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
+		if err != nil || strings.TrimSpace(string(bootID)) != expected.BootID {
+			return errors.New("kernel boot ID changed during same-PID exec")
+		}
+		var names []string
+		for name := range seen {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		fmt.Printf("%s_WITNESS pid=1 release=%s generation=%d operation=%s revision=%d modules=%s pinned_exec=verified artifact_count=4 native_count=3 data_count=1 role_catalog=verified\n",
+			marker, state.Active.ReleaseID, state.Generation, state.Operation, health.Revision, strings.Join(names, ","))
+		return nil
+	})
+}
+
+func observeWithBudgets(ctx context.Context, socketBudget time.Duration, sockets, verifiedRuntime func(context.Context) error) error {
+	call, cancel := context.WithTimeout(ctx, socketBudget)
+	defer cancel()
+	if err := sockets(call); err != nil {
+		return fmt.Errorf("worker observation: %w", err)
 	}
-	state, err := (*store).Status(ctx)
-	if err != nil {
-		return err
+	if err := verifiedRuntime(call); err != nil {
+		return fmt.Errorf("verified runtime observation: %w", err)
 	}
-	if state.Active == nil || *state.Active != expected.Trial || state.Previous == nil || *state.Previous != expected.Baseline ||
-		state.Pending != nil || state.Attempt != nil || state.HighWatermark != expected.Trial.Sequence || state.Operation != "confirm" {
-		return fmt.Errorf("selected pair has not been automatically confirmed: %+v", state)
-	}
-	bootID, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
-	if err != nil || strings.TrimSpace(string(bootID)) != expected.BootID {
-		return errors.New("kernel boot ID changed during same-PID exec")
-	}
-	var names []string
-	for name := range seen {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	fmt.Printf("%s_WITNESS pid=1 release=%s generation=%d operation=%s revision=%d modules=%s pinned_exec=verified artifact_count=4 native_count=3 data_count=1 role_catalog=verified\n",
-		marker, state.Active.ReleaseID, state.Generation, state.Operation, health.Revision, strings.Join(names, ","))
 	return nil
 }
 

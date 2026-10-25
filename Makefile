@@ -56,6 +56,7 @@ fmt-check:
 
 test:
 	$(GO) test ./...
+	$(GO) test ./internal/releaseboot/testdata/guest
 
 test-dependencies:
 	$(GO) test github.com/google/nftables/expr
@@ -65,9 +66,11 @@ test-tools:
 
 race:
 	CGO_ENABLED=1 $(GO) test -race ./...
+	CGO_ENABLED=1 $(GO) test -race ./internal/releaseboot/testdata/guest
 
 vet:
 	$(GO) vet ./...
+	$(GO) vet ./internal/releaseboot/testdata/guest
 
 check: fmt-check test test-dependencies test-tools race vet
 
