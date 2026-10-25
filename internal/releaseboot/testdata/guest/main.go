@@ -515,11 +515,12 @@ func observe(ctx context.Context, store **release.Store, keys map[string]ed25519
 
 func observeWithBudgets(ctx context.Context, socketBudget time.Duration, sockets, verifiedRuntime func(context.Context) error) error {
 	call, cancel := context.WithTimeout(ctx, socketBudget)
-	defer cancel()
-	if err := sockets(call); err != nil {
+	err := sockets(call)
+	cancel()
+	if err != nil {
 		return fmt.Errorf("worker observation: %w", err)
 	}
-	if err := verifiedRuntime(call); err != nil {
+	if err := verifiedRuntime(ctx); err != nil {
 		return fmt.Errorf("verified runtime observation: %w", err)
 	}
 	return nil
