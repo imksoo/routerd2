@@ -340,3 +340,95 @@ func TestConditionalVRRPEffectFailureFences(t *testing.T) {
 		})
 	}
 }
+
+func TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn(t *testing.T) {
+	source := conditionalVRRPSource()
+	n := &memoryNetwork{}
+	r := New(t.TempDir(), t.TempDir(), n, testSupervisorInstance)
+	r.manager = &memoryManager{}
+	if err := r.ApplyConfig(context.Background(), 1, source); err != nil {
+		t.Fatal(err)
+	}
+	s := bootVRRPSnapshot(t, source.Resources[0].Service.VRRPConfig())
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	publish := func(u serviceconfig.Update) chan error {
+		result := make(chan error, 1)
+		go func() { result <- r.Accept(ctx, u) }()
+		deadline := time.Now().Add(time.Second)
+		for {
+			r.mu.Lock()
+			accepted := sameVRRPUpdate(r.records[u.Name], u)
+			r.mu.Unlock()
+			if accepted {
+				return result
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("publication not accepted")
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
+	u := update(t, r, "service.ha", 1, s)
+	first := publish(u)
+	duplicate := publish(u)
+	// A duplicate transport request cannot bypass the original network ACK.
+	select {
+	case err := <-duplicate:
+		t.Fatalf("duplicate completed before network ACK: %v", err)
+	case <-time.After(10 * time.Millisecond):
+	}
+	if err := r.reconcileDynamic(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, result := range []chan error{first, duplicate} {
+		select {
+		case err := <-result:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-ctx.Done():
+			t.Fatal("duplicate did not share effects completion")
+		}
+	}
+	s.Active = false
+	s.State = vrrp.StateInitialize
+	s.ExpiresNanos = 0
+	s.ValidUntil = time.Time{}
+	s.Transition++
+	withdrawn := update(t, r, u.Name, 2, s)
+	result := publish(withdrawn)
+	n.mu.Lock()
+	n.fail = errors.New("injected withdrawal error")
+	n.mu.Unlock()
+	if err := r.reconcileDynamic(ctx); err == nil {
+		t.Fatal("withdrawal failure hidden")
+	}
+	if err := <-result; err == nil {
+		t.Fatal("failed withdrawal acknowledged")
+	}
+	r.mu.Lock()
+	remembered := sameVRRPUpdate(r.records[u.Name], withdrawn)
+	r.mu.Unlock()
+	if !remembered {
+		t.Fatal("withdrawal failure restored obsolete active observation")
+	}
+	// The identical notification can retry its effects; it never renews authority.
+	retry := publish(withdrawn)
+	if err := r.reconcileDynamic(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-retry:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal("withdrawal retry not acknowledged")
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if len(n.applied.Links) != 0 {
+		t.Fatal("withdrawal retry retained VIP")
+	}
+}
