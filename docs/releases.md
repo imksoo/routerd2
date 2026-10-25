@@ -343,3 +343,14 @@ on parse failure. The signed fixture observes absence with SSH disabled; the
 two-boot storage fixture inspects the actual persistent management key and SSH
 peer. This is not key rotation/revocation or complete state qualification. See
 the [identity contract](../internal/management/README.md).
+
+The event store's `InspectFormat` and private `GET /v1/event-store/format` endpoint
+inspect the actual owned SQLite header/catalog without registration, migration
+or a second initializing store. Required DDL is authenticated before writable
+open; update qualification requires an exact catalog, including rejection of
+extra triggers/views. Its schema digest describes format, not event contents or
+lease freshness. The signed preparation fixture now checks observations for all
+six currently declared state families against both candidate and fallback input
+formats; it still cancels before boot. Protocol/engine-specific state, complete
+target policy and the operator paired workflow are separate unfinished work.
+See the [event store contract](../internal/events/README.md).

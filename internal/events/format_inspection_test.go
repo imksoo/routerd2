@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestFormatInspectionUsesLiveReadOnlySchemaAndDoesNotAdvanceState(t *testing.T) {
@@ -39,6 +40,12 @@ func TestFormatInspectionUsesLiveReadOnlySchemaAndDoesNotAdvanceState(t *testing
 	if err != nil || got.ApplicationID != applicationID || got.Version != SchemaVersion || got.JournalMode != "wal" || got.Objects < 10 || len(got.SchemaSHA256) != 64 {
 		t.Fatal("invalid actual schema observation", got, err)
 	}
+	t.Logf("actual event format=%d objects=%d schema_sha256=%s", got.Version, got.Objects, got.SchemaSHA256)
+	// Freeze the persisted contract independently of the DDL-derived expectation:
+	// changing required SQL cannot silently keep schema6 and its ABI claim.
+	if SchemaVersion != 6 || got.SchemaSHA256 != "2bc436d24ae4fcc8ce21c43419888b4619f7cd6199893e771c21342c860570e4" {
+		t.Fatal("schema definition changed without a new qualified version contract")
+	}
 	if err := s.db.QueryRow(`SELECT total_changes()`).Scan(&changesAfter); err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +73,7 @@ func TestFormatInspectionUsesLiveReadOnlySchemaAndDoesNotAdvanceState(t *testing
 }
 
 func TestFormatInspectionRefusesHeaderAndSchemaChangesWithSameLiveStore(t *testing.T) {
-	for _, ddl := range []string{`PRAGMA application_id=7`, `PRAGMA user_version=5`, `ALTER TABLE events ADD COLUMN foreign_owner TEXT`, `DROP INDEX pending_work`, `CREATE TRIGGER extra_effect AFTER INSERT ON events BEGIN SELECT 1; END`, `CREATE TABLE unrelated(value TEXT)`} {
+	for _, ddl := range []string{`PRAGMA application_id=7`, `PRAGMA user_version=5`, `ALTER TABLE events ADD COLUMN foreign_owner TEXT`, `DROP INDEX pending_work`, `CREATE TRIGGER extra_effect AFTER INSERT ON events BEGIN SELECT 1; END`, `CREATE TABLE unrelated(value TEXT)`, `CREATE TABLE sqlitex_unexpected(value TEXT)`} {
 		t.Run(ddl, func(t *testing.T) {
 			s, err := Open(Options{Directory: filepath.Join(t.TempDir(), "events")})
 			if err != nil {
@@ -143,6 +150,30 @@ func TestFormatInspectionSeesCoherentMetadataDuringEventWrites(t *testing.T) {
 	}
 	if err := <-finished; err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestFormatInspectionDeadlineWhileTheSQLiteConnectionIsBusy(t *testing.T) {
+	s, err := Open(Options{Directory: filepath.Join(t.TempDir(), "events")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	conn, err := s.db.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	_, inspectErr := s.InspectFormat(ctx)
+	if err := conn.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if !errors.Is(inspectErr, context.DeadlineExceeded) {
+		t.Fatal("busy read ignored its caller deadline", inspectErr)
+	}
+	if _, err := s.InspectFormat(context.Background()); err != nil {
+		t.Fatal("timed out read poisoned the actual store", err)
 	}
 }
 

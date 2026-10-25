@@ -18,13 +18,15 @@ import (
 )
 
 type Store struct {
-	mu           sync.RWMutex
-	closed       bool
-	db           *sql.DB
-	dir, lock    *os.File
-	options      Options
-	archiveCache archivedReadCache
-	archiveCodec archiveCodec
+	mu             sync.RWMutex
+	closed         bool
+	databaseDevice uint64
+	databaseInode  uint64
+	db             *sql.DB
+	dir, lock      *os.File
+	options        Options
+	archiveCache   archivedReadCache
+	archiveCodec   archiveCodec
 }
 
 const applicationID = 0x52443245 // RD2E; separate from every other product store
@@ -151,6 +153,11 @@ func openStore(options Options, existingOnly bool) (_ *Store, result error) {
 		return nil, err
 	}
 	info, err := file.Stat()
+	var databaseIdentity unix.Stat_t
+	if err == nil {
+		err = unix.Fstat(int(file.Fd()), &databaseIdentity)
+	}
+	s.databaseDevice, s.databaseInode = databaseIdentity.Dev, databaseIdentity.Ino
 	_ = file.Close()
 	if err != nil {
 		return nil, err
@@ -168,20 +175,10 @@ func openStore(options Options, existingOnly bool) (_ *Store, result error) {
 		if err != nil {
 			return nil, err
 		}
-		var id, version, objects int
-		err = probe.QueryRow(`PRAGMA application_id`).Scan(&id)
-		if err == nil {
-			err = probe.QueryRow(`PRAGMA user_version`).Scan(&version)
-		}
-		if err == nil {
-			err = probe.QueryRow(`SELECT count(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'`).Scan(&objects)
-		}
+		_, err = inspectDatabaseFormat(context.Background(), probe, !existingOnly, false, false)
 		err = errors.Join(err, probe.Close())
 		if err != nil {
 			return nil, err
-		}
-		if id != applicationID && !(id == 0 && version == 0 && objects == 0) || id == applicationID && version != SchemaVersion {
-			return nil, errors.New("foreign or unsupported event database")
 		}
 	}
 	// Reapply connection-local invariants if database/sql replaces a connection
@@ -205,7 +202,7 @@ func openStore(options Options, existingOnly bool) (_ *Store, result error) {
 	}
 	if id == 0 {
 		var tables int
-		if err = s.db.QueryRow(`SELECT count(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'`).Scan(&tables); err != nil {
+		if err = s.db.QueryRow(`SELECT count(*) FROM sqlite_schema WHERE name NOT GLOB 'sqlite_*'`).Scan(&tables); err != nil {
 			return nil, err
 		}
 		if tables != 0 || version != 0 {

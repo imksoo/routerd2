@@ -90,6 +90,34 @@ func (e *Engine) MaintainEventStore(ctx context.Context) error {
 }
 
 func (e *Engine) eventStoreRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /v1/event-store/format", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.RawQuery != "" {
+			localapi.Fail(w, 400, fmt.Errorf("event format accepts no query parameters"))
+			return
+		}
+		e.mu.Lock()
+		journal := e.journal
+		e.mu.Unlock()
+		if journal == nil {
+			localapi.Fail(w, 503, fmt.Errorf("durable event journal is unavailable"))
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		format, err := journal.InspectFormat(ctx)
+		if err != nil {
+			localapi.Fail(w, 503, err)
+			return
+		}
+		e.mu.Lock()
+		same := e.journal == journal
+		e.mu.Unlock()
+		if !same {
+			localapi.Fail(w, 503, fmt.Errorf("event store changed during inspection"))
+			return
+		}
+		localapi.JSON(w, 200, format)
+	})
 	mux.HandleFunc("GET /v1/event-store", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.RawQuery != "" {
 			localapi.Fail(w, 400, fmt.Errorf("event-store accepts no query parameters"))

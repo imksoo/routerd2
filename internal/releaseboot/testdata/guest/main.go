@@ -23,10 +23,12 @@ import (
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/configref"
 	"github.com/imksoo/routerd2/internal/control"
+	"github.com/imksoo/routerd2/internal/events"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/management"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/release"
+	"github.com/imksoo/routerd2/internal/runtimeabi"
 	"github.com/imksoo/routerd2/internal/runtimeconfig"
 	"github.com/imksoo/routerd2/internal/supervisor"
 	"golang.org/x/sys/unix"
@@ -380,6 +382,7 @@ func verifyLiveCommitFreeze(ctx context.Context, store *release.Store) error {
 			if checked.AlreadyAdopted || checked.Recovered {
 				return errors.New("preflight unexpectedly consumed candidate")
 			}
+			candidateChecked := checked
 			fallback := configref.Selection{Generation: selection.Generation + 1, ExpectedRevision: expectedRevision, Snapshot: snapshot, Recovery: &configref.Recovery{FailedGeneration: selection.Generation, FailedSnapshot: reference}}
 			checked, err = cfg.InspectStartup(fallback)
 			if err != nil {
@@ -407,6 +410,25 @@ func verifyLiveCommitFreeze(ctx context.Context, store *release.Store) error {
 			// valid; inspection must not create a key in order to report one.
 			if identity.Present {
 				return errors.New("disabled SSH fixture unexpectedly initialized an identity")
+			}
+			var eventFormat events.FormatInspection
+			if err := client.Do(call, "GET", "/v1/event-store/format", nil, &eventFormat); err != nil {
+				return err
+			}
+			activeABI := runtimeabi.Current()
+			for _, input := range []config.StartupInspection{candidateChecked, checked} {
+				facts := runtimeabi.Facts{Configuration: uint32(input.Snapshot.Config.SchemaVersion), ConfigurationContract: activeABI.ConfigurationContract,
+					State: []runtimeabi.StateVersion{
+						{Name: "configuration", Version: config.JournalVersion},
+						{Name: "events", Version: uint32(eventFormat.Version)},
+						{Name: "network", Version: uint32(workerJournal.Version)},
+						{Name: "release", Version: uint32(current.Version)},
+						{Name: "snapshot", Version: uint32(input.Snapshot.Version)},
+						{Name: "ssh_identity", Version: uint32(identity.Version)},
+					}}
+				if err := runtimeabi.CheckTransition(activeABI, target.Manifest.RuntimeABI, facts); err != nil {
+					return err
+				}
 			}
 			return nil
 		}
@@ -459,7 +481,7 @@ func verifyLiveCommitFreeze(ctx context.Context, store *release.Store) error {
 	if final.Revision != 3 || final.StoreID != snapshot.StoreID {
 		return errors.New("post-cancel commit did not preserve the live store")
 	}
-	fmt.Printf("%s_COMMIT_FENCE_WITNESS before=1 committed=2 blocked_status=409 replay=2 after_cancel=3 reserved_generation=11 store_identity=matched preflight_race_status=503 stale_revision=rejected missing_snapshot=rejected target_descriptor=verified candidate_inspected=true fallback_inspected=true network_journal=verified ssh_identity=inspected_absent\n", marker)
+	fmt.Printf("%s_COMMIT_FENCE_WITNESS before=1 committed=2 blocked_status=409 replay=2 after_cancel=3 reserved_generation=11 store_identity=matched preflight_race_status=503 stale_revision=rejected missing_snapshot=rejected target_descriptor=verified candidate_inspected=true fallback_inspected=true network_journal=verified ssh_identity=inspected_absent declared_state_formats=all_six\n", marker)
 	return nil
 }
 

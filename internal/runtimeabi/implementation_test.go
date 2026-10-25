@@ -20,7 +20,7 @@ func TestDeclarationTracksImplementedFormatVersions(t *testing.T) {
 	if d.Configuration.Write != uint32(config.SchemaVersion) {
 		t.Fatal("configuration schema changed without an ABI declaration")
 	}
-	formats := map[string]uint32{"configuration": 1, "events": events.SchemaVersion, "network": network.JournalVersion, "release": release.StateVersion, "snapshot": config.SnapshotVersion, "ssh_identity": management.IdentityVersion}
+	formats := map[string]uint32{"configuration": config.JournalVersion, "events": events.SchemaVersion, "network": network.JournalVersion, "release": release.StateVersion, "snapshot": config.SnapshotVersion, "ssh_identity": management.IdentityVersion}
 	if len(d.State) != len(formats) {
 		t.Fatal("current ABI omitted a persistent component")
 	}

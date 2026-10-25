@@ -18,6 +18,10 @@ import (
 )
 
 const SchemaVersion = resourceprogram.SchemaVersion
+
+// JournalVersion names the implicit store identity/adoption/outbox codec. It
+// does not add a version header or a reader for discarded prototype records.
+const JournalVersion = 1
 const MaxSize = 2 << 20
 
 // Leave room for revision, request ID, confirmation controls and JSON framing

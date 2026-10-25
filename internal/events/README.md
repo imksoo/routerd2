@@ -19,6 +19,39 @@ foreign database identity and directories writable by other users are rejected.
 retirement recovery cannot disguise lost state as an empty store. `ErrOwned`
 distinguishes a live exclusive owner from corruption/path errors.
 
+`InspectFormat(ctx)` queries the already-owned live connection for application
+ID, schema version, journal mode and the complete non-internal schema catalog in
+one SELECT/read snapshot. It checks the database and lock inode identities
+before and after reading, so a missing/replaced pathname cannot return cached
+success from an old connection. It returns only bounded format metadata and a
+catalog SHA-256, not event bodies, producer state or consumer cursors. It does not
+register work, checkpoint/compact, migrate, recover, initialize or open a second
+writable store. Reading SQLite may still perform its usual WAL shared-memory
+bookkeeping; this is not a claim that every filesystem byte remains unchanged.
+
+Operational open authenticates all required table/index definitions through its
+read-only probe before opening SQLite read/write, in addition to header checks.
+It retains its existing behavior with ancillary objects used to inject durable
+write failures in recovery tests. Update qualification is stricter:
+`InspectFormat` requires the whole catalog to match, and rejects additional
+tables/views/triggers as well as altered/missing required objects. This distinction
+is not an operator extension/migration feature. Internal `sqlite_` objects are
+excluded by a literal prefix, not SQL LIKE's wildcard underscore. The metadata
+read is limited to 64 objects, 8 KiB per DDL and 64 KiB total schema text. These
+bounds do not qualify all stored rows or guarantee bounded SQLite memory/CPU.
+Schema 6's catalog digest is frozen in a separate test to catch DDL changes that
+forget to change the format contract and its ABI declaration.
+
+The private control endpoint `GET /v1/event-store/format` performs this fresh
+inspection outside the configuration mutex. It accepts no query/path options,
+returns 503 for unavailable/closed/incompatible state and never substitutes the
+health cache. It identifies the persistent format, not an atomic snapshot of
+configuration, events, identity, other workers or protocol authority. The signed
+PID 1 preparation fixture combines the current six declared state-family
+observations for both candidate and fallback format checks. It still cancels the
+pair before boot; operator paired loading/health and other state policies remain
+unfinished.
+
 `Append` records a bounded event with a stable ID. An identical retry returns
 the existing cursor; changed content under the same ID fails. Observed time is
 explicit, and zero event expiry remains non-expiring. Events are historical
