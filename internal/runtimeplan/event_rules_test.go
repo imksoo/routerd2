@@ -24,6 +24,7 @@ func TestEventRuleLifetimeSeesFlapBetweenControllerPolls(t *testing.T) {
 	publish := func(active bool) {
 		t.Helper()
 		seq++
+		lease = lease4(time.Now().Add(time.Hour))
 		lease.Active = active
 		if err := r.Accept(ctx, update(t, r, "service.wan", seq, lease)); err != nil {
 			t.Fatal(err)

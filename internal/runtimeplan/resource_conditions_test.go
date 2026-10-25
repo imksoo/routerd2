@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
@@ -31,6 +32,7 @@ func TestConditionHoldTimerAndFlapBetweenProjections(t *testing.T) {
 	publish := func(active bool) {
 		t.Helper()
 		sequence++
+		lease = lease4(time.Now().Add(time.Hour))
 		lease.Active = active
 		if err := r.Accept(ctx, update(t, r, "service.wan", sequence, lease)); err != nil {
 			t.Fatal(err)
@@ -231,7 +233,7 @@ func TestConditionalLeaseObservationDoesNotRefreshOnTransportReplay(t *testing.T
 	if replayed.observedNanos != original.observedNanos || replayed.untilNanos != original.untilNanos {
 		t.Fatal("same lease acquired a new observation or expiration on replay")
 	}
-	lease.ExpiresAt = time.Now().Add(2 * time.Hour)
+	lease = lease4(time.Now().Add(2 * time.Hour))
 	u = update(t, r, "service.wan", 3, lease)
 	if err := r.Accept(ctx, u); err != nil {
 		t.Fatal(err)
@@ -240,6 +242,10 @@ func TestConditionalLeaseObservationDoesNotRefreshOnTransportReplay(t *testing.T
 	if renewed.observedNanos <= original.observedNanos || renewed.untilNanos <= original.untilNanos {
 		t.Fatal("new lease failed to renew observation and expiration")
 	}
+	clock, _ := boottime.Read()
+	lease.ObservedNanos = uint64(clock.BoottimeNanoseconds)
+	lease.Sequence = lease.ObservedNanos
+	lease.UpdatedAt = clock.WallTime
 	lease.Active = false
 	u = update(t, r, "service.wan", 4, lease)
 	if err := r.Accept(ctx, u); err != nil {

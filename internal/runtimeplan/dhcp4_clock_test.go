@@ -8,14 +8,13 @@ import (
 
 	wire "github.com/imksoo/routerd/pkg/dhcpv4client"
 	"github.com/imksoo/routerd2/internal/boottime"
-	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp4"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
 
 func bootLease4(clock boottime.Clock, lifetime time.Duration) dhcp4.Snapshot {
 	now := uint64(clock.BoottimeNanoseconds)
-	return dhcp4.Snapshot{BootID: clock.BootID, ObservedNanos: now, Active: true, HardwareAddress: "02:00:00:00:00:01", LeaseClock: dhcp4.LeaseClock{BootID: clock.BootID, AcquiredNanos: now, RenewNanos: now + uint64(lifetime/2), RebindNanos: now + uint64(lifetime*7/8), ExpiresNanos: now + uint64(lifetime)}, Snapshot: wire.Snapshot{Resource: "wan", Interface: "wan0", State: wire.StateBound, CurrentAddress: "192.0.2.10", PrefixLength: 24, DefaultGateway: "192.0.2.1", ServerID: "192.0.2.1", LeaseTimeSeconds: int64(lifetime / time.Second), AcquiredAt: clock.WallTime, RenewAt: clock.WallTime.Add(lifetime / 2), RebindAt: clock.WallTime.Add(lifetime * 7 / 8), ExpiresAt: clock.WallTime.Add(lifetime), UpdatedAt: clock.WallTime}}
+	return dhcp4.Snapshot{BootID: clock.BootID, Epoch: clock.BootID, Sequence: now, ObservedNanos: now, Active: true, HardwareAddress: "02:00:00:00:00:01", LeaseClock: dhcp4.LeaseClock{BootID: clock.BootID, Epoch: clock.BootID, Sequence: now, AcquiredNanos: now, RenewNanos: now + uint64(lifetime/2), RebindNanos: now + uint64(lifetime*7/8), ExpiresNanos: now + uint64(lifetime)}, Snapshot: wire.Snapshot{Resource: "wan", Interface: "wan0", State: wire.StateBound, CurrentAddress: "192.0.2.10", PrefixLength: 24, DefaultGateway: "192.0.2.1", ServerID: "192.0.2.1", LeaseTimeSeconds: int64(lifetime / time.Second), AcquiredAt: clock.WallTime, RenewAt: clock.WallTime.Add(lifetime / 2), RebindAt: clock.WallTime.Add(lifetime * 7 / 8), ExpiresAt: clock.WallTime.Add(lifetime), UpdatedAt: clock.WallTime}}
 }
 
 func TestDHCPv4ProjectionUsesOriginalBootExpiryAcrossUTCChanges(t *testing.T) {
@@ -104,5 +103,4 @@ func TestDHCPv4FactUsesSourceAgeWithoutReceiptRenewal(t *testing.T) {
 	if g.observedNanos != s.ObservedNanos || g.untilNanos != s.LeaseClock.ExpiresNanos || g.bootID != s.BootID {
 		t.Fatal("fact age was minted at receipt", g)
 	}
-	_ = config.SchemaVersion // source uses the normal resource coordinator.
 }

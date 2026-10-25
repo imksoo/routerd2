@@ -4,14 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	old4 "github.com/imksoo/routerd/pkg/dhcpv4client"
+	"math"
 	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	old4 "github.com/imksoo/routerd/pkg/dhcpv4client"
 	old6 "github.com/imksoo/routerd/pkg/pdclient"
+	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp4"
@@ -46,9 +48,10 @@ func (n *memoryNetwork) Apply(_ context.Context, _ uint64, d network.Desired) er
 }
 
 type memoryManager struct {
-	modules       []supervisor.DynamicModule
-	before        func([]supervisor.DynamicModule)
-	bgpGeneration uint64
+	modules         []supervisor.DynamicModule
+	before          func([]supervisor.DynamicModule)
+	bgpGeneration   uint64
+	dhcp4Generation uint64
 }
 
 func (m *memoryManager) Reconcile(_ context.Context, v []supervisor.DynamicModule) error {
@@ -62,6 +65,9 @@ func (m *memoryManager) Status(_ context.Context) (supervisor.Status, error) {
 	s := supervisor.Status{Ready: true, InstanceID: testSupervisorInstance}
 	for _, v := range m.modules {
 		generation := uint64(0)
+		if v.Role == "dhcp4" {
+			generation = max(uint64(1), m.dhcp4Generation)
+		}
 		if v.Role == "bgp" {
 			generation = max(uint64(1), m.bgpGeneration)
 		}
@@ -93,7 +99,17 @@ func wanDoc() config.Native {
 	return config.Native{Services: []serviceconfig.Service{{Name: "wan", DHCP4: &serviceconfig.DHCP4{Interface: "wan0"}}}}
 }
 func lease4(expires time.Time) dhcp4.Snapshot {
-	return dhcp4.Snapshot{Active: true, Snapshot: old4.Snapshot{Resource: "wan", Interface: "wan0", CurrentAddress: "192.0.2.10", PrefixLength: 24, DefaultGateway: "192.0.2.1", ExpiresAt: expires}}
+	clock, err := boottime.Read()
+	if err != nil {
+		panic(err)
+	}
+	lifetime := time.Duration(math.Ceil(expires.Sub(clock.WallTime).Seconds())) * time.Second
+	if lifetime <= 0 {
+		clock.BoottimeNanoseconds -= int64(2 * time.Second)
+		clock.WallTime = clock.WallTime.Add(-2 * time.Second)
+		lifetime = time.Second
+	}
+	return bootLease4(clock, lifetime)
 }
 
 func TestLeaseApplyFencingFailureRollbackAndExpiry(t *testing.T) {
@@ -104,7 +120,7 @@ func TestLeaseApplyFencingFailureRollbackAndExpiry(t *testing.T) {
 	if e := r.Accept(ctx, u); e != nil {
 		t.Fatal(e)
 	}
-	if len(n.applied.Routes) != 1 || n.applied.Routes[0].Gateway != "192.0.2.1" || !n.applied.Interfaces[0].AddressOptions["192.0.2.10/24"].ValidUntil.Equal(expires) {
+	if len(n.applied.Routes) != 1 || n.applied.Routes[0].Gateway != "192.0.2.1" || n.applied.Interfaces[0].AddressOptions["192.0.2.10/24"].BootLifetime.ValidNanos == 0 {
 		t.Fatalf("lease was not projected: %+v", n.applied)
 	}
 	calls := n.calls
@@ -126,10 +142,15 @@ func TestLeaseApplyFencingFailureRollbackAndExpiry(t *testing.T) {
 	if r.Accept(ctx, update(t, r, "service.wan", 2, renewed)) == nil {
 		t.Fatal("kernel failure was acknowledged")
 	}
-	if r.records["service.wan"].Sequence != 1 || !n.applied.Interfaces[0].AddressOptions["192.0.2.10/24"].ValidUntil.Equal(expires) {
+	var accepted dhcp4.Snapshot
+	_ = json.Unmarshal(u.Snapshot, &accepted)
+	if r.records["service.wan"].Sequence != 1 || n.applied.Interfaces[0].AddressOptions["192.0.2.10/24"].BootLifetime.ValidNanos != accepted.LeaseClock.ExpiresNanos {
 		t.Fatal("previous accepted intent was not restored")
 	}
-	expired := lease4(time.Now().Add(-time.Second))
+	expired := lease4(time.Now().Add(time.Hour))
+	expired.Active = false
+	expired.LeaseClock = dhcp4.LeaseClock{}
+	expired.Snapshot = old4.Snapshot{Resource: "wan", Interface: "wan0", State: old4.StateExpired, UpdatedAt: time.Now().UTC()}
 	if e := r.Accept(ctx, update(t, r, "service.wan", 3, expired)); e != nil {
 		t.Fatal(e)
 	}
@@ -148,19 +169,21 @@ func TestConcurrentRenewalSurvivesConfigurationCutover(t *testing.T) {
 	}
 	next := wanDoc() // removal of RA forces quiescence, while DHCP is unchanged.
 	fired := false
+	var renewal dhcp4.Snapshot
 	m.before = func(modules []supervisor.DynamicModule) {
 		if fired {
 			return
 		}
 		fired = true
-		if e := r.Accept(context.Background(), update(t, r, "service.wan", 2, lease4(expires.Add(time.Hour)))); e != nil {
+		renewal = lease4(expires.Add(time.Hour))
+		if e := r.Accept(context.Background(), update(t, r, "service.wan", 2, renewal)); e != nil {
 			t.Fatal(e)
 		}
 	}
 	if e := r.ApplyConfig(context.Background(), 2, config.FromNative(next)); e != nil {
 		t.Fatal(e)
 	}
-	if !fired || !n.applied.Interfaces[0].AddressOptions["192.0.2.10/24"].ValidUntil.Equal(expires.Add(time.Hour)) {
+	if !fired || n.applied.Interfaces[0].AddressOptions["192.0.2.10/24"].BootLifetime.ValidNanos != renewal.LeaseClock.ExpiresNanos || r.records["service.wan"].Sequence != 2 {
 		t.Fatal("cutover restored a lease older than its acknowledged renewal")
 	}
 }

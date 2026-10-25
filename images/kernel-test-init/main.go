@@ -37,6 +37,8 @@ func selectedSuite() (suite, error) {
 		return suite{"/network.test", "TestIsolatedKernelWireGuardOwnershipAndTraffic", "ROUTERD_WIREGUARD_TEST", 75 * time.Second}, nil
 	case "network":
 		return suite{"/network.test", "TestIsolatedKernelForwardingNATAndDSLite", "ROUTERD_NETWORK_TEST", 55 * time.Second}, nil
+	case "boot-address":
+		return suite{"/network.test", "TestIsolatedBootAddressLifetime", "ROUTERD_BOOT_ADDRESS_TEST", 45 * time.Second}, nil
 	case "ra-dns":
 		return suite{"/ra.test", "TestIsolatedLearnedDNSLifetimes", "ROUTERD_RA_DNS_TEST", 45 * time.Second}, nil
 	case "daemon":
@@ -59,6 +61,8 @@ func selectedSuite() (suite, error) {
 		return suite{"/daemon.test", "TestDaemonHealthPBRFailoverAndRecovery", "ROUTERD_HEALTH_PBR_DAEMON_TEST", 210 * time.Second}, nil
 	case "daemon-dhcp-dns":
 		return suite{"/daemon.test", "TestDaemonDHCPDNSAndOwnershipExpiry", "ROUTERD_DHCP_DNS_DAEMON_TEST", 150 * time.Second}, nil
+	case "daemon-dhcp4":
+		return suite{"/daemon.test", "TestDaemonDHCPv4OriginalLeaseAuthority", "ROUTERD_DHCP4_AUTHORITY_TEST", 210 * time.Second}, nil
 	case "daemon-legacy-dhcp-dns":
 		return suite{"/daemon.test", "TestDaemonMigratedDHCPDNSAndOwnershipExpiry", "ROUTERD_LEGACY_DHCP_DNS_DAEMON_TEST", 150 * time.Second}, nil
 	case "daemon-bgp":

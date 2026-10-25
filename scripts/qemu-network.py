@@ -104,6 +104,13 @@ SUITES = {
         "commands": True,
         "description": "two-WAN health/PBR TCP/UDP failover, marks, capture and worker recovery",
     },
+    "daemon-dhcp4": {
+        "package": "./internal/integration", "binary": "daemon.test",
+        "test": "TestDaemonDHCPv4OriginalLeaseAuthority",
+        "marker": "ROUTERD_DHCP4_AUTHORITY_TEST", "timeout": 250,
+        "commands": True,
+        "description": "original DHCPv4 BOOTTIME authority, kernel lease, TCP/UDP/capture and worker/control recovery",
+    },
     "daemon-dhcp-dns": {
         "package": "./internal/integration", "binary": "daemon.test",
         "test": "TestDaemonDHCPDNSAndOwnershipExpiry",
@@ -145,6 +152,12 @@ SUITES = {
         "marker": "ROUTERD_BFD_DERIVED_DAEMON_TEST", "timeout": 200,
         "commands": True,
         "description": "finite BFD status to durable DerivedEvent/EventRule and process recovery",
+    },
+    "boot-address": {
+        "package": "./internal/network", "binary": "network.test",
+        "test": "TestIsolatedBootAddressLifetime",
+        "marker": "ROUTERD_BOOT_ADDRESS_TEST", "timeout": 90,
+        "description": "boot-scoped kernel address lifetime, writer journal restart and autonomous expiry",
     },
     "dhcp": {
         "package": "./internal/protocol/dhcp4", "binary": "dhcp.test",

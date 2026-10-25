@@ -53,7 +53,11 @@ func (f *fakeKernel) AddAddress(name, address string, options AddressOptions) er
 		}
 	}
 	now := time.Now()
-	a := AddressState{Address: address, Peer: options.Peer, PreferredLifetime: lifetimeRemaining(options.PreferredUntil, now), ValidLifetime: lifetimeRemaining(options.ValidUntil, now)}
+	preferred, valid, err := addressLifetimes(options, now)
+	if err != nil {
+		return err
+	}
+	a := AddressState{Address: address, Peer: options.Peer, PreferredLifetime: preferred, ValidLifetime: valid}
 	if options.NoDAD {
 		a.Flags |= addressNoDADFlag
 	}
@@ -74,8 +78,12 @@ func (f *fakeKernel) UpdateAddress(name, address string, options AddressOptions)
 		if l.Addresses[i].Address == address {
 			l.Addresses[i].Peer = options.Peer
 			now := time.Now()
-			l.Addresses[i].PreferredLifetime = lifetimeRemaining(options.PreferredUntil, now)
-			l.Addresses[i].ValidLifetime = lifetimeRemaining(options.ValidUntil, now)
+			preferred, valid, err := addressLifetimes(options, now)
+			if err != nil {
+				return err
+			}
+			l.Addresses[i].PreferredLifetime = preferred
+			l.Addresses[i].ValidLifetime = valid
 			if options.NoDAD {
 				l.Addresses[i].Flags |= addressNoDADFlag
 			} else {
