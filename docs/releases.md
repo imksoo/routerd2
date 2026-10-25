@@ -326,3 +326,12 @@ an already consumed candidate rather than interpreting replay as new authority.
 The signed PID 1 fixture inspects both inputs before preparation and cancels the
 pair before boot. This does not activate the paired loader or inspect target
 compiler behavior and other persistent state. See [startup configuration](startup-config.md).
+
+The network writer now exposes bounded actual journal metadata through its
+private `GET /v1/journal` endpoint and `network.InspectJournal`. They share the
+startup reader's strict format/ownership checks, never renew stored deadlines or
+apply kernel state, and do not treat an unreadable journal as cached success.
+The signed boot fixture compares worker and direct disk observations under the
+preparation lock. This contributes a network format observation; it is not a
+complete state inventory, an atomic observation of other workers, or evidence
+that saved lease/ownership facts are fresh. See the [network journal contract](../internal/network/README.md).

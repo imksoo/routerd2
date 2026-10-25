@@ -39,6 +39,25 @@ type nativeNetwork interface {
 
 func networkHandler(e nativeNetwork) http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/journal", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.RawQuery != "" {
+			localapi.Fail(w, 400, errors.New("journal inspection accepts no query parameters"))
+			return
+		}
+		inspector, ok := e.(interface {
+			InspectJournal(context.Context) (network.JournalInspection, error)
+		})
+		if !ok {
+			localapi.Fail(w, 501, errors.New("network backend cannot inspect its persistent journal"))
+			return
+		}
+		value, err := inspector.InspectJournal(r.Context())
+		if err != nil {
+			localapi.Fail(w, 503, err)
+			return
+		}
+		localapi.JSON(w, 200, value)
+	})
 	mux.HandleFunc("POST /v1/routes/lookup", func(w http.ResponseWriter, r *http.Request) {
 		var req network.RouteLookupRequest
 		if err := localapi.Decode(w, r, &req); err != nil {

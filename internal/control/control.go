@@ -102,6 +102,11 @@ type Network interface {
 
 type NetworkClient struct{ client *localapi.Client }
 
+func (n *NetworkClient) InspectJournal(ctx context.Context) (value network.JournalInspection, err error) {
+	err = n.client.Do(ctx, "GET", "/v1/journal", nil, &value)
+	return value, err
+}
+
 func NewNetworkClient(dir string) *NetworkClient {
 	return &NetworkClient{localapi.NewClient(filepath.Join(dir, NetworkSocketName))}
 }

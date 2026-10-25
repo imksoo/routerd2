@@ -42,6 +42,41 @@ network namespace. The caller must ensure this is the intended router namespace.
 
 ## Ownership and failures
 
+The journal and lock are worker-owned 0600 singly linked regular files. Every
+ancestor is opened without following symlinks and must belong to root or the
+worker, with no group/other writes except a root-owned sticky temporary ancestor.
+The final directory belongs to the worker and permits no group/other writes;
+new directories use 0700. The engine pins this directory for reads and atomic
+temporary-file/fsync/rename/directory-fsync publication. Replacing its original
+pathname cannot redirect a running writer into a different directory.
+
+Reads and writes share a 64 MiB encoded limit and a two-million JSON-value limit
+with depth at most 64. Duplicate, unknown and case-aliased typed fields, trailing
+values, unsupported versions, invalid status and invalid ownership records are
+rejected. The configuration and network readers share the strict shape decoder;
+operator map keys and custom JSON types retain their own meaning. The writer
+checks the structural budget before publishing, so an oversized record cannot
+replace the previous journal. An I/O failure can still interrupt an apply;
+these bounds are not a complete power-loss or storage-failure qualification.
+
+`InspectJournal(ctx, path)` reads a pinned record without acquiring/creating a
+lock, initializing directories, syncing, projecting the kernel or adjusting a
+saved BOOTTIME deadline. Only a successful lookup in a checked existing parent
+can report `present:false`; an uninspectable parent is an error. Its bounded
+metadata contains presence, format version, revision, attempted revision,
+persisted status and the complete payload SHA-256, not ownership bodies or key
+references. This is one persisted record, not kernel health or a cross-worker
+snapshot. Readers may see either complete side of a concurrent atomic rename.
+
+The live engine method additionally fences its writer, fails immediately while
+busy, rejects a closed engine and treats disappearance of an established journal
+as an error. The private network socket exposes it as `GET /v1/journal`, with no
+caller-selected paths or query parameters. Read/ownership/busy errors return
+503; an unsupported backend returns 501. It re-reads disk rather than returning
+cached memory. The signed boot preflight fixture compares this response with a
+direct inspection of the actual journal before preparing a pair; operator paired
+prepare/boot and qualification of other state families remain separate work.
+
 Ownership journal format 2 records controller-generated boot-scoped address
 lifetimes. Unreleased format 1 is refused without rewriting its contents; no
 prototype format migration or mixed-version rollback is supported. Operator

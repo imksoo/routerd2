@@ -24,6 +24,7 @@ import (
 	"github.com/imksoo/routerd2/internal/configref"
 	"github.com/imksoo/routerd2/internal/control"
 	"github.com/imksoo/routerd2/internal/localapi"
+	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/release"
 	"github.com/imksoo/routerd2/internal/runtimeconfig"
 	"github.com/imksoo/routerd2/internal/supervisor"
@@ -386,6 +387,17 @@ func verifyLiveCommitFreeze(ctx context.Context, store *release.Store) error {
 			if checked.AlreadyAdopted || checked.Recovered {
 				return errors.New("preflight unexpectedly consumed fallback")
 			}
+			workerJournal, err := control.NewNetworkClient(runtimeDir).InspectJournal(call)
+			if err != nil {
+				return err
+			}
+			diskJournal, err := network.InspectJournal(call, filepath.Join(stateDir, "network.json"))
+			if err != nil {
+				return err
+			}
+			if !workerJournal.Present || workerJournal.Version != network.JournalVersion || workerJournal.Status != "applied" || diskJournal != workerJournal {
+				return errors.New("preflight network journal observation differs from the actual writer file")
+			}
 			return nil
 		}
 	}
@@ -437,7 +449,7 @@ func verifyLiveCommitFreeze(ctx context.Context, store *release.Store) error {
 	if final.Revision != 3 || final.StoreID != snapshot.StoreID {
 		return errors.New("post-cancel commit did not preserve the live store")
 	}
-	fmt.Printf("%s_COMMIT_FENCE_WITNESS before=1 committed=2 blocked_status=409 replay=2 after_cancel=3 reserved_generation=11 store_identity=matched preflight_race_status=503 stale_revision=rejected missing_snapshot=rejected target_descriptor=verified candidate_inspected=true fallback_inspected=true\n", marker)
+	fmt.Printf("%s_COMMIT_FENCE_WITNESS before=1 committed=2 blocked_status=409 replay=2 after_cancel=3 reserved_generation=11 store_identity=matched preflight_race_status=503 stale_revision=rejected missing_snapshot=rejected target_descriptor=verified candidate_inspected=true fallback_inspected=true network_journal=verified\n", marker)
 	return nil
 }
 

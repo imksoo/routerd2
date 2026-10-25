@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"sync"
 	"time"
@@ -88,11 +87,14 @@ type kernel interface {
 }
 
 type Engine struct {
-	mu     sync.Mutex
-	opts   Options
-	kernel kernel
-	state  journal
-	lock   *os.File
+	mu             sync.Mutex
+	opts           Options
+	kernel         kernel
+	state          journal
+	lock           *os.File
+	directory      *os.File
+	journalName    string
+	journalPresent bool
 }
 
 // New locks the ownership journal and reads it. It makes no kernel changes.
@@ -107,43 +109,32 @@ func New(opts Options) (*Engine, error) {
 }
 
 func newEngine(opts Options, k kernel) (*Engine, error) {
-	if opts.StatePath == "" || !filepath.IsAbs(opts.StatePath) {
-		return nil, errors.New("network: StatePath must be absolute and persistent")
-	}
-	if err := os.MkdirAll(filepath.Dir(opts.StatePath), 0700); err != nil {
-		return nil, fmt.Errorf("network state directory: %w", err)
-	}
-	f, err := os.OpenFile(opts.StatePath+".lock", os.O_CREATE|os.O_RDWR, 0600)
+	dir, name, err := openNetworkJournalParent(opts.StatePath, true)
 	if err != nil {
 		return nil, err
 	}
-	if err = lockJournal(f); err != nil {
-		f.Close()
-		return nil, fmt.Errorf("network journal already in use or cannot be locked: %w", err)
-	}
-	e := &Engine{opts: opts, kernel: k, lock: f, state: journal{Version: JournalVersion, Status: "unapplied"}}
-	b, err := os.ReadFile(opts.StatePath)
-	if err == nil {
-		if err = json.Unmarshal(b, &e.state); err != nil {
-			f.Close()
-			return nil, fmt.Errorf("network ownership journal: %w", err)
-		}
-		if e.state.Version != JournalVersion {
-			f.Close()
-			return nil, fmt.Errorf("unsupported network journal version %d", e.state.Version)
-		}
-		if err = validateJournal(e.state); err != nil {
-			f.Close()
-			return nil, fmt.Errorf("invalid network ownership journal: %w", err)
-		}
-		if e.state.Status == "applying" {
-			e.state.Status = "degraded"
-			e.state.LastError = "previous apply was interrupted; reconcile the committed configuration"
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		f.Close()
+	f, err := openNetworkJournalFile(dir, name+".lock", true)
+	if err != nil {
+		dir.Close()
 		return nil, err
 	}
+	fail := func(err error) (*Engine, error) { f.Close(); dir.Close(); return nil, err }
+	if err := lockJournal(f); err != nil {
+		return fail(fmt.Errorf("network journal already in use or cannot be locked: %w", err))
+	}
+	state, inspection, err := readNetworkJournal(context.Background(), dir, name)
+	if err != nil {
+		return fail(err)
+	}
+	if !inspection.Present {
+		state = journal{Version: JournalVersion, Status: "unapplied"}
+	}
+	if state.Status == "applying" {
+		state.Status = "degraded"
+		state.LastError = "previous apply was interrupted; reconcile the committed configuration"
+	}
+	e := &Engine{opts: opts, kernel: k, lock: f, directory: dir, journalName: name, journalPresent: inspection.Present, state: state}
+
 	return e, nil
 }
 
@@ -195,8 +186,9 @@ func (e *Engine) Close() error {
 	if e.lock == nil {
 		return nil
 	}
-	err := e.lock.Close()
+	err := errors.Join(e.lock.Close(), e.directory.Close())
 	e.lock = nil
+	e.directory = nil
 	return err
 }
 
@@ -413,34 +405,13 @@ func (e *Engine) snapshotLocked(ctx context.Context) Snapshot {
 }
 
 func (e *Engine) save() error {
-	dir := filepath.Dir(e.opts.StatePath)
-	f, err := os.CreateTemp(dir, ".network-state-*")
+	raw, err := encodeNetworkJournal(e.state)
 	if err != nil {
 		return err
 	}
-	name := f.Name()
-	defer os.Remove(name)
-	enc := json.NewEncoder(f)
-	enc.SetIndent("", "  ")
-	if err = enc.Encode(e.state); err == nil {
-		err = f.Sync()
-	}
-	closeErr := f.Close()
-	if err == nil {
-		err = closeErr
-	}
-	if err != nil {
-		return err
-	}
-	if err = os.Rename(name, e.opts.StatePath); err != nil {
-		return err
-	}
-	d, err := os.Open(dir)
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-	return d.Sync()
+	published, err := writeNetworkJournal(e.directory, e.journalName, raw)
+	e.journalPresent = e.journalPresent || published
+	return err
 }
 
 func (e *Engine) ownsAddress(a addressKey) bool {

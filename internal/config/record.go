@@ -1,5 +1,7 @@
 package config
 
+import "github.com/imksoo/routerd2/internal/strictjson"
+
 const maxDocumentNodes = 200000
 
 // Persisted records are JSON, independent of the operator-facing YAML parser.
@@ -11,5 +13,5 @@ func decodeRecord(data []byte, record *Committed) error {
 }
 
 func checkJSONShape(data []byte, maximum int) error {
-	return checkTypedJSONShape(data, maximum, nil)
+	return strictjson.Check(data, maximum)
 }
