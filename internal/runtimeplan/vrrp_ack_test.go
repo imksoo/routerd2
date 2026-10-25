@@ -3,6 +3,7 @@ package runtimeplan
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -234,5 +235,108 @@ func TestConditionalVRRPStartupAndStopACKCannotDeadlock(t *testing.T) {
 	defer n.mu.Unlock()
 	if len(n.applied.Links) != 0 {
 		t.Fatal("VIP remained after withdrawal ACK")
+	}
+}
+
+func TestConditionalVRRPEffectFailureFences(t *testing.T) {
+	for _, mode := range []string{"network-error", "retired-generation", "expired-active", "cancelled-caller", "superseded"} {
+		t.Run(mode, func(t *testing.T) {
+			source := conditionalVRRPSource()
+			n := &memoryNetwork{}
+			m := &memoryManager{}
+			r := New(t.TempDir(), t.TempDir(), n, testSupervisorInstance)
+			r.manager = m
+			if err := r.ApplyConfig(context.Background(), 1, source); err != nil {
+				t.Fatal(err)
+			}
+			s := bootVRRPSnapshot(t, source.Resources[0].Service.VRRPConfig())
+			if mode == "expired-active" {
+				s.ExpiresNanos = s.ObservedNanos + uint64(100*time.Millisecond)
+			}
+			u := update(t, r, "service.ha", 1, s)
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			result := make(chan error, 1)
+			go func() { result <- r.Accept(ctx, u) }()
+			deadline := time.Now().Add(time.Second)
+			for {
+				r.mu.Lock()
+				_, accepted := r.records[u.Name]
+				r.mu.Unlock()
+				if accepted {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("publication not accepted")
+				}
+				time.Sleep(time.Millisecond)
+			}
+			switch mode {
+			case "network-error":
+				n.mu.Lock()
+				n.fail = errors.New("injected network apply failure")
+				n.mu.Unlock()
+			case "retired-generation":
+				m.vrrpGeneration = 2
+			case "expired-active":
+				time.Sleep(110 * time.Millisecond)
+			case "cancelled-caller":
+				cancel()
+			case "superseded":
+				stopped := s
+				stopped.Active = false
+				stopped.State = vrrp.StateInitialize
+				stopped.ExpiresNanos = 0
+				stopped.ValidUntil = time.Time{}
+				stopped.Transition++
+				newer := update(t, r, u.Name, 2, stopped)
+				next := make(chan error, 1)
+				go func() { next <- r.Accept(ctx, newer) }()
+				for {
+					r.mu.Lock()
+					sequence := r.records[u.Name].Sequence
+					r.mu.Unlock()
+					if sequence == 2 {
+						break
+					}
+					if time.Now().After(deadline) {
+						t.Fatal("new withdrawal not accepted")
+					}
+					time.Sleep(time.Millisecond)
+				}
+				if err := r.reconcileDynamic(ctx); err != nil {
+					t.Fatal(err)
+				}
+				select {
+				case err := <-next:
+					if err != nil {
+						t.Fatal(err)
+					}
+				case <-ctx.Done():
+					t.Fatal("new withdrawal not acknowledged")
+				}
+			}
+			if mode != "superseded" {
+				err := r.reconcileDynamic(context.Background())
+				if mode == "network-error" && err == nil {
+					t.Fatal("network failure hidden")
+				}
+			}
+			select {
+			case err := <-result:
+				if err == nil {
+					t.Fatal("invalid effect was acknowledged")
+				}
+			case <-ctx.Done():
+				t.Fatal("failed effect did not complete")
+			}
+			if mode == "retired-generation" || mode == "expired-active" || mode == "superseded" {
+				n.mu.Lock()
+				defer n.mu.Unlock()
+				if len(n.applied.Links) != 0 {
+					t.Fatal("invalid pending producer acquired kernel VIP")
+				}
+			}
+		})
 	}
 }
