@@ -21,6 +21,7 @@ import (
 	"github.com/imksoo/routerd2/internal/control"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/network"
+	"github.com/imksoo/routerd2/internal/protocol/health"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
@@ -69,7 +70,18 @@ func TestDaemonVRRPConditionalOwnership(t *testing.T) {
 	runVRRPAuthority(t, nil, true)
 }
 
+func TestDaemonVRRPGracefulAdmission(t *testing.T) {
+	if !isolateFixtureTimeout(t, "TestDaemonVRRPGracefulAdmission", 100*time.Second) {
+		return
+	}
+	runVRRPAuthorityOptions(t, nil, true, true)
+}
+
 func runVRRPAuthority(t *testing.T, clockClient *clocktest.Client, conditional bool) {
+	t.Helper()
+	runVRRPAuthorityOptions(t, clockClient, conditional, false)
+}
+func runVRRPAuthorityOptions(t *testing.T, clockClient *clocktest.Client, conditional, graceful bool) {
 	t.Helper()
 	ctx := context.Background()
 	peerNS := fixturePeerNamespace(t, "lan0", "peer0")
@@ -100,7 +112,13 @@ func runVRRPAuthority(t *testing.T, clockClient *clocktest.Client, conditional b
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	c := vrrp.Config{Interface: "lan0", VIPInterface: "ha4", Family: "ipv4", SourceAddress: "192.0.2.2", VirtualRouterID: 42, Priority: 255, AddressOwner: true, AdvertIntervalCentiseconds: 200, Addresses: []string{"192.0.2.254/24"}}
+	if graceful {
+		c.GracefulActivation = &vrrp.GracefulActivation{ReadyWhen: resourceprogram.FactCondition{Fact: "service.probe.active"}, Timeout: "1s"}
+	}
 	source := config.FromNative(config.Native{Network: network.Desired{Interfaces: []network.Interface{{Name: "lan0", Addresses: []string{"192.0.2.2/24"}}}}, Services: []serviceconfig.Service{{Name: "ha", VRRP: &c}}})
+	if graceful {
+		source.Resources = append(source.Resources, resourceprogram.Resource{ID: "probe", Service: &serviceconfig.Service{Name: "probe", Health: &health.Config{Interface: "lan0", SourceAddress: "192.0.2.2", Target: "192.0.2.1", Protocol: "tcp", Port: 18097, IntervalMillis: 100, TimeoutMillis: 50, HealthyThreshold: 1, UnhealthyThreshold: 1}}})
+	}
 	if conditional {
 		for i := range source.Resources {
 			if source.Resources[i].Service != nil && source.Resources[i].Service.VRRP != nil {
@@ -108,11 +126,11 @@ func runVRRPAuthority(t *testing.T, clockClient *clocktest.Client, conditional b
 			}
 		}
 	}
+	capture := healthPBRCapture(t, "lan0")
 	f := startFixtureDaemonAt(t, source, dir)
 	if evidence := os.Getenv("ROUTERD2_TEST_EVIDENCE_DIR"); evidence != "" {
 		t.Setenv("ROUTERD2_TEST_EVIDENCE_DIR", filepath.Join(evidence, "vrrp-authority"))
 	}
-	capture := healthPBRCapture(t, "lan0")
 	nc := control.NewNetworkClient(filepath.Join(dir, "run"))
 	instance := func() runtimeplan.InstanceStatus {
 		var s runtimeplan.InstanceStatus
@@ -155,6 +173,41 @@ func runVRRPAuthority(t *testing.T, clockClient *clocktest.Client, conditional b
 			}
 		}
 		return false
+	}
+	var readinessListener net.Listener
+	if graceful {
+		until(t, 8*time.Second, func() bool {
+			s := snapshot()
+			return s.State == vrrp.StateActive && !s.Active && s.ActivationState == "ReadinessTimeout"
+		})
+		if hasVIP() {
+			t.Fatal("graceful timeout force-published actual VIP")
+		}
+		if _, err := netlink.LinkByName("ha4"); err == nil {
+			t.Fatal("unready MASTER acquired VMAC link")
+		}
+		var state control.State
+		if err := f.control.Do(ctx, "GET", "/v1/config", nil, &state); err != nil || state.Healthy {
+			t.Fatal("unpublished MASTER reported healthy", err)
+		}
+		capture.mu.Lock()
+		electionPackets := 0
+		earlyARP := false
+		for _, packet := range capture.packets {
+			b := packet.data
+			if len(b) >= 34 && b[12] == 8 && b[13] == 0 && b[23] == 112 {
+				electionPackets++
+			}
+			if len(b) >= 42 && b[12] == 8 && b[13] == 6 && bytes.Equal(b[28:32], net.ParseIP("192.0.2.254").To4()) {
+				earlyARP = true
+			}
+		}
+		capture.mu.Unlock()
+		if electionPackets == 0 || earlyARP {
+			t.Fatal("graceful election did not retain advertisements or announced VIP early", electionPackets, earlyARP)
+		}
+		readinessListener = healthPBRListener(t, peerNS, "192.0.2.1:18097", "H")
+		t.Log("elected MASTER remained unpublished/unhealthy after timeout, kept election advertisements and emitted no VIP ARP")
 	}
 	until(t, 8*time.Second, hasVIP)
 	link, err := netlink.LinkByName("ha4")
@@ -222,6 +275,31 @@ func runVRRPAuthority(t *testing.T, clockClient *clocktest.Client, conditional b
 		}
 	}
 	traffic(true)
+	if graceful {
+		_ = readinessListener.Close()
+		until(t, 5*time.Second, func() bool {
+			var observation runtimeplan.InstanceStatus
+			if err := f.control.Do(ctx, "GET", "/v1/services/service.probe", nil, &observation); err != nil {
+				return false
+			}
+			var sample health.Snapshot
+			return json.Unmarshal(observation.Snapshot, &sample) == nil && !sample.Active
+		})
+		if !hasVIP() {
+			t.Fatal("readiness degradation withdrew admitted MASTER VIP")
+		}
+		traffic(true)
+		readinessListener = healthPBRListener(t, peerNS, "192.0.2.1:18097", "H")
+		until(t, 5*time.Second, func() bool {
+			var observation runtimeplan.InstanceStatus
+			if err := f.control.Do(ctx, "GET", "/v1/services/service.probe", nil, &observation); err != nil {
+				return false
+			}
+			var sample health.Snapshot
+			return json.Unmarshal(observation.Snapshot, &sample) == nil && sample.Active
+		})
+		t.Log("late readiness admitted VIP, and later readiness loss preserved actual TCP/UDP until election withdrawal")
+	}
 	oldWorker := module("service.ha")
 	if oldWorker.PID <= 1 {
 		t.Fatal("actual VRRP worker missing")
