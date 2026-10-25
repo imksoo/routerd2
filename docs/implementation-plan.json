@@ -300,11 +300,12 @@
         "internal/supervisor"
       ],
       "implementation_notes": {
-        "implemented": "Compile static plans once and evaluate finite facts directly. One coordinator owns kernel application during configuration, monitoring and worker startup/stop. Observation receipts differ from BGP/VRRP application results. Instance preparation reuses canonical bytes outside the observation mutex. VRRP admission and actual ownership use one request, the original boot deadline and one applied-election map; no grant exchange, provisional promotion, receipt lease or expiry JSON rewrite.",
+        "implemented": "Compile static plans once and evaluate finite facts directly. One coordinator owns kernel application during configuration, monitoring and worker startup/stop. Observation receipts differ from BGP/VRRP application results. Instance preparation reuses canonical bytes outside the observation mutex. VRRP admission and actual ownership use one request, the original boot deadline and one applied-election map; no grant exchange, provisional promotion, receipt lease or expiry JSON rewrite. Configuration cutover, startup/stop waits and ordinary monitoring now advance one reconciliation step against actual supervisor registration; no duplicate installed set or recursive stop loop. Continuing failed/stopping workers do not block kernel expiry or independent observations. New workers are withheld if their prerequisites change during kernel IO. Source cutover waits for retired identities to exit; retained-worker readiness is checked after applying the new configuration so it cannot prevent a repair.",
         "validation": "Current local/real-daemon results and untested scope are in docs/pve-codex-handoff.md; historical checkpoints are not acceptance authority.",
         "remaining": [
-          "Unify duplicated worker selection during normal reconciliation and startup/stop waits.",
-          "Keep remaining accepted protocol data typed; remove their JSON expiry rewrites and repeated instance compilation during retention checks."
+          "Reproduce the first isolated BFD reconnection timeout; subsequent targeted and three concurrent-check runs passed, but the initial cause is not established.",
+          "Keep remaining accepted protocol data typed; remove their JSON expiry rewrites and repeated instance compilation during retention checks.",
+          "Verify and implement independently enforced BGP IPv4 route deadlines in the network writer, including overlap with unrelated worker drain; current control projection performs withdrawal."
         ]
       }
     },
@@ -10896,7 +10897,7 @@
     "implementation_status": "partial_signed_native_runtime_catalog_implemented",
     "prototype_compatibility": "None. Replace unreleased two-binary, boot, manifest and journal formats directly; no compatibility reader, shim bridge or prototype migration gate.",
     "first_supported_format": "The new extracted multi-binary runtime format.",
-    "implementation_evidence": "docs/evidence/2026-10-25-runtime-catalog.md",
+    "implementation_status_document": "docs/pve-codex-handoff.md",
     "startup_configuration_status": "conditional fixed-runtime recovery and internal atomic runtime/configuration release journal implemented; coordinated signed loader, live writer/trial fences, compatibility and health integration pending"
   },
   "project_identity": {

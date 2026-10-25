@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -202,64 +204,155 @@ func (r *Runtime) pendingWithdrawalLocked(name string) bool {
 	return json.Unmarshal(current.Snapshot, &s) == nil && !s.Active
 }
 
-// wait runs with op held during worker startup/stop. It must drain effects too:
-// BGP/VRRP initial Ready and final withdrawal can depend on an application ACK.
-// This path may stop workers, but never starts newly eligible dependents. All
-// other retiring workers must have exited before network withdrawal; a producer
-// waiting for its own inactive application ACK is the exception.
-func (r *Runtime) reconcileWhileWaiting(ctx context.Context, status supervisor.Status, removed map[string]bool) error {
+// One owner iteration handles both ordinary reconciliation and transaction
+// waits. Supervisor status is the process authority; no second installed set
+// predicts whether a worker has actually stopped.
+func (r *Runtime) reconcileStep(ctx context.Context, ceiling map[string]supervisor.DynamicModule) (bool, error) {
+	status, err := r.manager.Status(ctx)
 	r.mu.Lock()
-	if !r.configured {
-		r.mu.Unlock()
-		return nil
-	}
-	r.installGuardStatusLocked(status, nil)
-	r.fenceApplicationsLocked()
-	p, err := r.projectProgramLocked(r.config, r.effectiveRecordsLocked(time.Now()), time.Now())
+	r.installGuardStatusLocked(status, err)
 	if err != nil {
-		r.finishApplicationsLocked(projection{}, err)
 		r.mu.Unlock()
-		return err
+		return false, err
 	}
-	desired := make(map[string]string, len(p.instances))
-	for _, instance := range p.instances {
-		_, digest, encodeErr := encodeInstance(instance)
-		if encodeErr != nil {
-			r.mu.Unlock()
-			return encodeErr
-		}
-		desired[instance.Name] = digest
+	r.fenceApplicationsLocked()
+	var p projection
+	if r.configured {
+		p, err = r.projectProgramLocked(r.config, r.effectiveRecordsLocked(time.Now()), time.Now())
 	}
-	keep := make([]supervisor.DynamicModule, 0, len(r.installed))
-	for _, module := range r.installed {
-		if desired[module.Name] == module.ConfigDigest && !removed[module.Name] {
-			keep = append(keep, module)
-		}
-	}
-	if len(keep) != len(r.installed) {
+	if err != nil {
 		r.mu.Unlock()
-		if err := r.manager.Reconcile(ctx, keep); err != nil {
-			return err
-		}
-		r.installed = keep
-		return nil // obtain a new supervisor observation before applying effects
+		return false, err
 	}
-	installed := make(map[string]string, len(keep))
-	for _, module := range keep {
-		installed[module.Name] = module.ConfigDigest
+	set, err := compileInstances(p.instances, ceiling)
+	if err != nil {
+		r.mu.Unlock()
+		return false, err
+	}
+	changed := len(set.bindings) != len(r.bindings)
+	for name, b := range set.bindings {
+		if old, ok := r.bindings[name]; !ok || old.digest != b.digest {
+			changed = true
+		}
+	}
+	r.mu.Unlock()
+	var sources map[string]bfdBinding
+	var recipients map[string]bfdRecipient
+	if changed {
+		sources, recipients, err = compileBFDCache(set.bindings)
+		if err != nil {
+			return false, err
+		}
+		if err := r.prepare(set); err != nil {
+			return false, err
+		}
+		// Filesystem work can outlast the observation used to choose this set.
+		status, err = r.manager.Status(ctx)
+		if err != nil {
+			return false, err
+		}
+	}
+	keep := make([]supervisor.DynamicModule, 0, len(status.Modules))
+	retire, blocked, matching := false, false, true
+	ready := true
+	var moduleFailure error
+	r.mu.Lock()
+	if changed {
+		r.installGuardStatusLocked(status, nil)
+		r.fenceApplicationsLocked()
 	}
 	for _, module := range status.Modules {
 		if !strings.HasPrefix(module.Name, "service.") {
 			continue
 		}
-		if (removed[module.Name] || installed[module.Name] != module.ConfigDigest) && !r.pendingWithdrawalLocked(module.Name) {
+		actual := supervisor.DynamicModule{Name: module.Name, Role: module.Role, ConfigDigest: module.ConfigDigest}
+		if expected, ok := set.bindings[module.Name]; ok && expected.digest == module.ConfigDigest && expected.instance.Role == module.Role {
+			keep = append(keep, actual)
+			ready = ready && module.Ready
+			if module.State == "failed" {
+				moduleFailure = fmt.Errorf("%s failed: %s", module.Name, module.LastError)
+			}
+			continue
+		}
+		matching = false
+		retire = retire || module.State != "stopping"
+		blocked = blocked || !r.pendingWithdrawalLocked(module.Name)
+	}
+	if !matching || len(keep) != len(set.modules) || !ready {
+		r.phase = "applying"
+	}
+	r.mu.Unlock()
+	if retire {
+		if err := r.manager.Reconcile(ctx, keep); err != nil {
+			return false, err
+		}
+		return false, nil // consume a new supervisor observation before effects
+	}
+	if blocked {
+		return false, nil
+	}
+	r.mu.Lock()
+	if !r.configured {
+		r.mu.Unlock()
+		return matching, nil
+	}
+	latest, err := r.projectProgramLocked(r.config, r.effectiveRecordsLocked(time.Now()), time.Now())
+	if err != nil {
+		r.mu.Unlock()
+		return false, err
+	}
+	if !reflect.DeepEqual(latest.instances, p.instances) {
+		r.wakeCoordinatorLocked()
+		r.mu.Unlock()
+		return false, nil
+	}
+	p, err = r.applyProjectionLocked(ctx, latest)
+	if err != nil {
+		r.mu.Unlock()
+		return false, err
+	}
+	if p.observationVersion != r.observationVersion {
+		// New observations can arrive during kernel I/O. Do not start workers
+		// against a projection that no longer describes their prerequisites.
+		current, projectErr := r.projectProgramLocked(r.config, r.effectiveRecordsLocked(time.Now()), time.Now())
+		if projectErr != nil {
 			r.mu.Unlock()
-			return nil
+			return false, projectErr
+		}
+		if !reflect.DeepEqual(current.network, p.network) || !reflect.DeepEqual(current.instances, p.instances) {
+			r.wakeCoordinatorLocked()
+			r.mu.Unlock()
+			return false, nil
 		}
 	}
-	_, err = r.applyProjectionLocked(ctx, p)
+	if changed {
+		r.bindings = set.bindings
+		r.installBFDCacheLocked(sources, recipients)
+		for name, input := range r.aftrInputs {
+			if b, ok := r.bindings[name]; !ok || b.digest != input.ConfigDigest {
+				delete(r.aftrInputs, name)
+			}
+		}
+		for name := range r.records {
+			if _, ok := r.bindings[name]; !ok {
+				delete(r.records, name)
+				delete(r.guardGrants, name)
+			}
+		}
+	}
 	r.mu.Unlock()
-	return err
+	// Cutover waits for old identities to exit. Readiness of a retained worker
+	// can depend on the new configuration, so it cannot gate accepting it.
+	if ceiling != nil {
+		return matching, nil
+	}
+	if !matching || len(keep) != len(set.modules) {
+		if err := r.manager.Reconcile(ctx, set.modules); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+	return ready, moduleFailure
 }
 
 // Separate coalescing signals prevent Monitor from consuming a wake intended

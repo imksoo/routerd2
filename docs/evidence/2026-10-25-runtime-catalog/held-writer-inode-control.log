@@ -1,4 +1,0 @@
-=== RUN   TestExecutableBusyDiagnosticsIdentifyWriterAndExecFDRecoversAfterClose
---- PASS: TestExecutableBusyDiagnosticsIdentifyWriterAndExecFDRecoversAfterClose (4.06s)
-PASS
-ok      github.com/imksoo/routerd2/internal/integration 5.098s

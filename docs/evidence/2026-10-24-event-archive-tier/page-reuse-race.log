@@ -1,5 +1,0 @@
-=== RUN   TestArchivedBodyPagesCanBeReusedByNewEvents
-    archive_test.go:439: archive released 7 pages; new event reused 2 without DB growth
---- PASS: TestArchivedBodyPagesCanBeReusedByNewEvents (0.33s)
-PASS
-ok      github.com/imksoo/routerd2/internal/events      1.370s

@@ -1,8 +1,0 @@
-=== RUN   TestDaemonEventArchiveAndCapacity
-    bgp_test.go:192: === RUN   TestDaemonEventArchiveAndCapacity
-            event_archive_test.go:135: actual low-space warning visible while real Health producer and control remain healthy
-            event_archive_test.go:137: actual CLI exported and independently matched 4 complete records through cursor 4, verified offline and preserved source producer authority
-        --- PASS: TestDaemonEventArchiveAndCapacity (0.62s)
-        PASS
---- PASS: TestDaemonEventArchiveAndCapacity (1.65s)
-PASS

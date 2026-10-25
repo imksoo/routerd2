@@ -1,8 +1,0 @@
-=== RUN   TestDaemonVRRPConditionalOwnership
-    vrrp_authority_test.go:66: === RUN   TestDaemonVRRPConditionalOwnership
-            vrrp_authority_test.go:69: conditional VRRP startup/effect ACK, dependent activation on owned macvlan, VIP retained while dependent stopping, final worker withdrawal and config cutover passed
-            vrrp_authority_test.go:69: actual VIP TCP/UDP, 5 VMAC advertisements, original BOOT expiry/reapply, worker/control replacement and stale-generation refusal; foreign address retained
-        --- PASS: TestDaemonVRRPConditionalOwnership (12.05s)
-        PASS
---- PASS: TestDaemonVRRPConditionalOwnership (13.08s)
-PASS

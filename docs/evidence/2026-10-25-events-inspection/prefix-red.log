@@ -1,8 +1,0 @@
-=== RUN   TestFormatInspectionRefusesHeaderAndSchemaChangesWithSameLiveStore
-=== RUN   TestFormatInspectionRefusesHeaderAndSchemaChangesWithSameLiveStore/CREATE_TABLE_sqlitex_unexpected(value_TEXT)
-    format_inspection_test.go:84: source constants/cached result hid changed database format
---- FAIL: TestFormatInspectionRefusesHeaderAndSchemaChangesWithSameLiveStore (0.05s)
-    --- FAIL: TestFormatInspectionRefusesHeaderAndSchemaChangesWithSameLiveStore/CREATE_TABLE_sqlitex_unexpected(value_TEXT) (0.05s)
-FAIL
-FAIL    github.com/imksoo/routerd2/internal/events      0.058s
-FAIL

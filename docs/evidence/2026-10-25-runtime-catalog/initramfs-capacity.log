@@ -1,2 +1,0 @@
-{"label": "full-failed", "expected_success": false, "passed": true, "error": "ENOSPC", "extracted_regular_files": 913, "payload_bytes_before_result": 199027025, "elapsed_seconds": 1.33, "archive_sha256": "7343d7b987a41a43a2ad50821b219d6d8135d4636e9f3d6786f0dddee3dce849"}
-{"label": "selected-closure", "expected_success": true, "passed": true, "error": null, "extracted_regular_files": 57, "payload_bytes_before_result": 88543849, "elapsed_seconds": 0.66, "archive_sha256": "365581a13ee05c82f1bfcb5ce26d77d9689b2fd9d92391eb184fe125a726bf75"}

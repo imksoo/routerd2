@@ -1,5 +1,0 @@
---- FAIL: TestBootAndAutomaticFallbackRejectUnqualifiedFormatChange (1.12s)
-    runtime_abi_test.go:132: boot activated unqualified format change <nil>
-FAIL
-FAIL    github.com/imksoo/routerd2/internal/release     1.128s
-FAIL

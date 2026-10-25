@@ -1,5 +1,0 @@
-ok      github.com/imksoo/routerd2/internal/configref   0.012s
-ok      github.com/imksoo/routerd2/internal/config      8.236s
-ok      github.com/imksoo/routerd2/internal/control     11.745s
-ok      github.com/imksoo/routerd2/internal/runtimeconfig       0.217s
-ok      github.com/imksoo/routerd2/internal/supervisor  2.214s

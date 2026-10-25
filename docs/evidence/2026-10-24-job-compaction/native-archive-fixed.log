@@ -1,8 +1,0 @@
-=== RUN   TestDaemonEventArchiveAndCapacity
-    bgp_test.go:192: === RUN   TestDaemonEventArchiveAndCapacity
-            event_archive_test.go:146: actual EventRule and Derived outputs compacted; injected write failure stayed unhealthy across inspection; recovery and control SIGKILL preserved original dedup identity
-            event_archive_test.go:147: actual CLI exported and independently matched 4 complete records through cursor 4, verified offline and preserved source producer authority
-        --- PASS: TestDaemonEventArchiveAndCapacity (3.67s)
-        PASS
---- PASS: TestDaemonEventArchiveAndCapacity (4.70s)
-PASS

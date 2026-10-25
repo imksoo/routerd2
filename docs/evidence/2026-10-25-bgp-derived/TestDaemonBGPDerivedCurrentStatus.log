@@ -1,8 +1,0 @@
-=== RUN   TestDaemonBGPDerivedCurrentStatus
-    bgp_test.go:192: === RUN   TestDaemonBGPDerivedCurrentStatus
-            derived_bgp_test.go:270: real TCP BGP -> four current fields -> DerivedEvent/EventRule; unresolved FIB, original boot expiry, replay, worker/control restart and generation fence passed
-            derived_bgp_test.go:271: ROUTERD_BGP_DERIVED_DAEMON_TEST_PASS
-        --- PASS: TestDaemonBGPDerivedCurrentStatus (20.66s)
-        PASS
---- PASS: TestDaemonBGPDerivedCurrentStatus (21.69s)
-PASS

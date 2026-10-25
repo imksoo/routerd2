@@ -1,9 +1,0 @@
-=== RUN   TestDaemonEventArchiveAndCapacity
-    bgp_test.go:192: isolated protocol fixture: exit status 1
-        === RUN   TestDaemonEventArchiveAndCapacity
-            event_archive_test.go:146: condition timed out after 12s
-[private fixture console omitted]
-        --- FAIL: TestDaemonEventArchiveAndCapacity (12.65s)
-        FAIL
---- FAIL: TestDaemonEventArchiveAndCapacity (12.68s)
-FAIL

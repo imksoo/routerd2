@@ -1,8 +1,0 @@
-# github.com/imksoo/routerd2/images/health-power-test/guest [github.com/imksoo/routerd2/images/health-power-test/guest.test]
-images/health-power-test/guest/history_test.go:19:12: undefined: observation
-images/health-power-test/guest/history_test.go:19:47: undefined: eventHash
-images/health-power-test/guest/history_test.go:21:14: undefined: verifyHistory
-images/health-power-test/guest/history_test.go:25:22: undefined: verifyHistory
-images/health-power-test/guest/history_test.go:41:17: undefined: verifyHistory
-FAIL    github.com/imksoo/routerd2/images/health-power-test/guest [build failed]
-FAIL

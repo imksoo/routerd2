@@ -1,5 +1,0 @@
-=== RUN   TestHealthRelayScratchWorkingSet
-    working_set_integration_test.go:65: 400 raw observations durably relayed with only one pending item and retained target deduplication
-    working_set_integration_test.go:24: relay scratch total_bytes=67108864 available_bytes=66678784
---- PASS: TestHealthRelayScratchWorkingSet (7.67s)
-PASS

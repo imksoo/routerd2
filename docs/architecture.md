@@ -57,6 +57,14 @@ instanceファイルとBFD設定は観測用mutexの外で準備し、worker停�
 BGPとVRRPはプロトコルを次へ進める前に実適用が必要なため、
 `POST /v1/services/effects` の適用完了を待つ。起動・停止待ち中も同じ適用処理を進め、
 初回Readyや最終withdrawalと循環させない。条件の有無で通知の意味を変えない。
+通常監視・設定切替・起動停止待ちは同じ一回分のreconcileを進める。supervisorの実登録を
+使い、別のinstalled集合は保持しない。通常監視は停止要求後に戻り、次回に実際の終了を
+確認する。設定切替だけが次設定に残すworker集合を上限として期限付きで待つ。
+切替前は退役workerの実終了を待ち、継続workerのReadyは新設定の適用後に確認する。
+復旧に必要な新設定を、現在の準備失敗が妨げないようにする。
+設定から外すworkerの終了前に前提を撤去しない。自分のinactive適用を待つBGP/VRRPは、
+他の退役workerが終了した後に撤去ACKを返す。継続するworkerのstopping/failedは、
+経路の期限切れや独立した観測の適用を止める理由にしない。
 受理済み観測をkernel障害で巻き戻さず、coordinatorが最新の観測を再適用する。
 kernel I/O中は観測用mutexを解放する。適用開始後の新しい観測は、その古い結果で
 完了扱いにしない。未適用の観測や適用中の処理があればReady/confirmed commitを拒否する。

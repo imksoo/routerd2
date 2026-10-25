@@ -1,6 +1,0 @@
-=== RUN   TestArchivedPageDecodeDoesNotHoldThePublicationConnection
-    read_progress_test.go:52: blocked archive decode held the live publication connection context deadline exceeded
---- FAIL: TestArchivedPageDecodeDoesNotHoldThePublicationConnection (1.19s)
-FAIL
-FAIL    github.com/imksoo/routerd2/internal/events      1.214s
-FAIL

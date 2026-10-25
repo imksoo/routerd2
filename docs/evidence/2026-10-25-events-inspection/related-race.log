@@ -1,5 +1,0 @@
-ok      github.com/imksoo/routerd2/internal/events      30.281s
-ok      github.com/imksoo/routerd2/internal/control     57.247s
-ok      github.com/imksoo/routerd2/internal/config      32.734s
-ok      github.com/imksoo/routerd2/internal/runtimeabi  1.076s
-ok      github.com/imksoo/routerd2/internal/releaseboot/testdata/guest  1.085s

@@ -1,7 +1,0 @@
-{"test": "TestDaemonBFDDerivedCurrentStatus", "exit_code": 0, "passed": true, "elapsed_seconds": 11.65, "log": "bfd-derived-native-TestDaemonBFDDerivedCurrentStatus.log", "sha256": "28a3015e75c6f3abfdacdffb1f831f41239a4389b781487d06307e43a41c55e9"}
-{"test": "TestDaemonBFDControlsBGPSessionAndExpiry", "exit_code": 0, "passed": false, "elapsed_seconds": 22.77, "log": "bfd-derived-native-TestDaemonBFDControlsBGPSessionAndExpiry.log", "sha256": "fdaf0b33470460d2d3334318cbd1b6b32f94fac93e8e467bd3f4abc669cb849f"}
-Traceback (most recent call last):
-  File "/workspace/routerd2/dist/goal-validation/run-bfd-derived-native.py", line 30, in <module>
-    assert passed,name
-           ^^^^^^
-AssertionError: TestDaemonBFDControlsBGPSessionAndExpiry

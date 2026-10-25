@@ -1,7 +1,0 @@
-=== RUN   TestStoragePostCommitWaitRequiresHealthyProjectionAndSettledPublication
-    probe_test.go:67: one-shot health refusal reproduced: committed routing configuration is not healthy: revision=2 healthy=false services=applying service_revision=1 route_issues=0 last_error="" event_journal="" event_store="" event_rule="" derived="" protocol=""
---- PASS: TestStoragePostCommitWaitRequiresHealthyProjectionAndSettledPublication (0.11s)
-=== RUN   TestStorageUnhealthyPostCommitStopsAtDeadlineWithDiagnostics
---- PASS: TestStorageUnhealthyPostCommitStopsAtDeadlineWithDiagnostics (0.15s)
-PASS
-ok      github.com/imksoo/routerd2/images/storage-test/guest    1.292s

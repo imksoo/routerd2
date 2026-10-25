@@ -1,4 +1,0 @@
-            event_archive_test.go:146: condition timed out after 10s
-                {"timestamp":"2026-10-24T21:59:38.234016409Z","module":"control","pid":1587838,"generation":1,"level":"INFO","message":"durable event storage pressure recovered","producer_epoch":"727ba5321587c714b5a41cebea1732d5","producer_sequence":2,"version":1,"epoch":"285902e0dc958a8d618c475537c3f559","sequence":5}
-        --- FAIL: TestDaemonEventArchiveAndCapacity (12.61s)
---- FAIL: TestDaemonEventArchiveAndCapacity (12.64s)

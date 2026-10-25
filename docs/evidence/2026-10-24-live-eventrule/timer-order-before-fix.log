@@ -1,6 +1,0 @@
---- FAIL: TestAbsenceOrdersQueuedObservationsAgainstTheirOriginalDeadline (0.18s)
-    --- FAIL: TestAbsenceOrdersQueuedObservationsAgainstTheirOriginalDeadline/expected-after-deadline (0.08s)
-        controller_test.go:238: absence emissions 0, want 1
-FAIL
-FAIL	github.com/imksoo/routerd2/internal/eventcontroller	0.190s
-FAIL

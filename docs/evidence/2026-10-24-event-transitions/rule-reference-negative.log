@@ -1,8 +1,0 @@
---- FAIL: TestImmediateOutputsMatchPinnedRouterdReference (0.00s)
-    --- FAIL: TestImmediateOutputsMatchPinnedRouterdReference/all_of/resource.name (0.00s)
-        reference_test.go:56: native fires 1, pinned reference 2
-    --- FAIL: TestImmediateOutputsMatchPinnedRouterdReference/all_of/_resource.name_ (0.00s)
-        reference_test.go:35: unsupported event rule correlation
-FAIL
-FAIL	github.com/imksoo/routerd2/internal/eventrule	0.010s
-FAIL

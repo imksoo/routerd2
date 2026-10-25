@@ -1,5 +1,0 @@
---- FAIL: TestStoppedDeclaredRelayDrainsWithoutDiscardingFutureWorkerOwnership (0.16s)
-    stopped_test.go:60: unobserved ownership hid stopped pending work {1 0 0} <nil>
-FAIL
-FAIL    github.com/imksoo/routerd2/internal/protocolevents      0.170s
-FAIL

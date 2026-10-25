@@ -2,7 +2,6 @@ package runtimeplan
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"time"
 
@@ -36,13 +35,6 @@ func conditionalProgram(source config.Document) bool {
 		}
 	}
 	return false
-}
-
-func (r *Runtime) refreshGuardStatus(ctx context.Context) {
-	status, err := r.manager.Status(ctx)
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.installGuardStatusLocked(status, err)
 }
 
 func (r *Runtime) installGuardStatusLocked(status supervisor.Status, err error) {

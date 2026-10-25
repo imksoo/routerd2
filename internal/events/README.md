@@ -154,8 +154,8 @@ Tests use actual SQLite transactions, write-failure triggers, SQLITE_FULL,
 concurrent publishers, private path attacks, foreign database preservation,
 connection replacement, and SIGKILL followed by WAL recovery. Configuration
 producer state/outbox atomicity and worker recovery have separate control tests.
-The live Health relay has a dedicated three-boot/two-SIGKILL
-[recovery gate](../../docs/evidence/2026-10-24-health-power.md).
+The live Health relay recovery fixture is in
+[health-power-test](../../images/health-power-test/README.md).
 Other protocol event producers, exhaustive cut points and physical power-loss
 acceptance remain implementation-plan work.
 

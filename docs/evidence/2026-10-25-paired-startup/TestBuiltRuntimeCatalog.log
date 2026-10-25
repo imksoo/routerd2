@@ -1,9 +1,0 @@
-=== RUN   TestBuiltRuntimeCatalog
-=== RUN   TestBuiltRuntimeCatalog/amd64
-    built_integration_test.go:84: amd64 signed and staged: routerd=14491808 bytes, modules=32567456 bytes
-=== RUN   TestBuiltRuntimeCatalog/arm64
-    built_integration_test.go:84: arm64 signed and staged: routerd=13500576 bytes, modules=30277792 bytes
---- PASS: TestBuiltRuntimeCatalog (26.01s)
-    --- PASS: TestBuiltRuntimeCatalog/amd64 (12.92s)
-    --- PASS: TestBuiltRuntimeCatalog/arm64 (13.09s)
-PASS

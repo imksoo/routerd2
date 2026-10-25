@@ -1,7 +1,0 @@
-=== RUN   TestDaemonStartupSelectionAndRecovery
-    bgp_test.go:194: === RUN   TestDaemonStartupSelectionAndRecovery
-            startup_test.go:158: ROUTERD_STARTUP_SELECTION_DAEMON_TEST_PASS: explicit snapshot adoption, control SIGKILL, later-commit preservation across whole daemon restart, confirmed restart rollback, next selection and stable lifecycle events
-        --- PASS: TestDaemonStartupSelectionAndRecovery (1.48s)
-        PASS
---- PASS: TestDaemonStartupSelectionAndRecovery (2.52s)
-PASS

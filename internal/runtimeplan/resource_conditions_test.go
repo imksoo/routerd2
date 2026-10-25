@@ -112,8 +112,12 @@ func conditionalFixture(t *testing.T) (*Runtime, *memoryNetwork, *observedManage
 }
 func reconcileConditions(t *testing.T, r *Runtime) {
 	t.Helper()
-	if err := r.reconcileDynamic(context.Background()); err != nil {
-		t.Fatal(err)
+	// The in-memory supervisor reaps immediately. Give the owner a fresh
+	// observation after its stop request, as the real polling loop does.
+	for range 2 {
+		if err := r.reconcileDynamic(context.Background()); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 func TestConditionalRuntimeStartWithdrawRecover(t *testing.T) {
@@ -321,7 +325,9 @@ func TestConditionalChangedFactDuringStopRestartsQuiescedWorker(t *testing.T) {
 			r.guardGrants["service.wan"] = grant
 		}
 	}
-	reconcileConditions(t, r) // plan changed during quiescence; retry without applying stale plan
+	if err := r.reconcileDynamic(ctx); err != nil {
+		t.Fatal(err)
+	} // stop request only; observe exit before applying
 	if len(m.modules) != 1 {
 		t.Fatal("test did not quiesce dependent")
 	}
@@ -351,4 +357,11 @@ func TestConditionalSourceDigestCutoverRevokesSameRevisionFacts(t *testing.T) {
 	if conditionalRoute(n) {
 		t.Fatal("source digest cutover reused old fact")
 	}
+}
+
+func (r *Runtime) refreshGuardStatus(ctx context.Context) {
+	status, err := r.manager.Status(ctx)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.installGuardStatusLocked(status, err)
 }

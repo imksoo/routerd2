@@ -1,7 +1,0 @@
---- FAIL: TestSourceRestoreDoesNotReuseDerivedEvaluationScope (0.00s)
-    derived_inputs_test.go:127: candidate cutover and restore reused an older evaluator scope
---- FAIL: TestInactiveProviderIsUnknownBeforeItsWorkerHasStopped (0.24s)
-    derived_inputs_test.go:185: inactive provider leaked old Up before worker shutdown {7363455633910725 7363456635039637 {"digest":"4710b26fcd5ada34fab5d4414045ec3df748f0fb77df428a7f63b392790c496e","scope":"7d7c6161b718c9e97e79f6bc85071e2d1bc8786aa6d5a7fbac2b7628d0c5c605","initialized":true,"initial_emission":false,"asserted":true,"counter":1,"last_now":7363455636801287,"last_asserted_at":"2026-10-24T17:19:08.067664672Z","last_retracted_at":"0001-01-01T00:00:00Z"} [] {Asserted true <go-pointer> None 2026-10-24 17:19:08.067664672 +0000 UTC 0001-01-01 00:00:00 +0000 UTC}} <nil>
-FAIL
-FAIL	github.com/imksoo/routerd2/internal/runtimeplan	0.251s
-FAIL

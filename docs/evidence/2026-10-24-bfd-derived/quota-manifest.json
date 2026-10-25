@@ -1,8 +1,0 @@
-{
-  "source_commit": "d37648960abb374f7366bc792b7007bb02d6cfb5",
-  "exit_code": 0,
-  "passed": true,
-  "elapsed_seconds": 7.5,
-  "scope": "8MiB tmpfs in private mount namespace; mandatory healthy filesystem warning and full archive write-failure/recovery/control crash fixture",
-  "log_sha256": "6ce8afb866bbbd9b9c7db200576773412e7ad4f6948765b4a4455e702e4b4485"
-}

@@ -1,5 +1,0 @@
-=== RUN   TestHealthRelayScratchWorkingSet
-    working_set_integration_test.go:54: flush 175, below logical capacity: database or disk is full (13)
-    working_set_integration_test.go:24: relay scratch total_bytes=6291456 available_bytes=0
---- FAIL: TestHealthRelayScratchWorkingSet (3.73s)
-FAIL

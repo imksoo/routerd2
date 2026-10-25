@@ -1,5 +1,0 @@
---- FAIL: TestStatefulCursorRollbackCannotReuseNewerRuleState (0.07s)
-    checkpoint_test.go:211: cursor rollback exposed newer state for replay <nil>
-FAIL
-FAIL	github.com/imksoo/routerd2/internal/events	0.072s
-FAIL

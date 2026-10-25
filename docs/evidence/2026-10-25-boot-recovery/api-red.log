@@ -1,5 +1,0 @@
-FAIL    github.com/imksoo/routerd2/internal/release [build failed]
-FAIL
-# github.com/imksoo/routerd2/internal/release [github.com/imksoo/routerd2/internal/release.test]
-internal/release/boot_recovery_test.go:55:27: undefined: OpenForBoot
-internal/release/boot_recovery_test.go:125:29: undefined: OpenForBoot

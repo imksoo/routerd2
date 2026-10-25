@@ -1,9 +1,0 @@
-# github.com/imksoo/routerd2/internal/supervisor [github.com/imksoo/routerd2/internal/supervisor.test]
-internal/supervisor/catalog_test.go:8:55: unknown field Executables in struct literal of type Options
-internal/supervisor/catalog_test.go:13:7: base.Executables undefined (type Options has no field or method Executables)
-internal/supervisor/catalog_test.go:14:9: got.Executables undefined (type Options has no field or method Executables)
-internal/supervisor/catalog_test.go:19:7: bad.Executables undefined (type Options has no field or method Executables)
-internal/supervisor/catalog_test.go:20:25: got.Executables undefined (type Options has no field or method Executables)
-internal/supervisor/catalog_test.go:22:9: bad.Executables undefined (type Options has no field or method Executables)
-FAIL    github.com/imksoo/routerd2/internal/supervisor [build failed]
-FAIL

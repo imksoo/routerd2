@@ -1,6 +1,0 @@
-FAIL    github.com/imksoo/routerd2/internal/protocol/vrrp [build failed]
-FAIL    github.com/imksoo/routerd2/internal/runtimeplan [build failed]
-FAIL
-# github.com/imksoo/routerd2/internal/protocol/vrrp
-internal/protocol/vrrp/run_linux.go:66:7: no new variables on left side of :=
-internal/protocol/vrrp/run_linux.go:98:8: no new variables on left side of :=

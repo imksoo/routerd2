@@ -1,5 +1,0 @@
---- FAIL: TestSelectionDecoderRejectsAmbiguousAndUnboundedInput (0.00s)
-    ref_test.go:37: typed boot/journal decoder bypassed strict startup input
-FAIL
-FAIL    github.com/imksoo/routerd2/internal/configref   0.007s
-FAIL

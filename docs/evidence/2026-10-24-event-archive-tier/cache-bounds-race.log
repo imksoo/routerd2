@@ -1,7 +1,0 @@
-=== RUN   TestWarmArchivedPageHasBoundedDecodeAllocation
-    archive_cache_test.go:47: warm sixteen-record page allocated 68922 bytes
---- PASS: TestWarmArchivedPageHasBoundedDecodeAllocation (0.45s)
-=== RUN   TestArchivedReadCacheEvictsWithoutLosingLogicalHistory
---- PASS: TestArchivedReadCacheEvictsWithoutLosingLogicalHistory (5.98s)
-PASS
-ok      github.com/imksoo/routerd2/internal/events      7.458s

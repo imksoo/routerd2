@@ -1,5 +1,0 @@
---- FAIL: TestNativeInspectionMemoRequiresFreshHashAndSignedManifest (0.76s)
-    native_cache_test.go:27: first qualification inspected 0 native members, want 2
-FAIL
-FAIL    github.com/imksoo/routerd2/internal/release     0.770s
-FAIL

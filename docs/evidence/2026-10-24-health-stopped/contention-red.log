@@ -1,7 +1,0 @@
---- FAIL: TestStoppedHealthRecoveryFencesReactivationWithoutHoldingFactMutex (0.23s)
-    stopped_health_test.go:72: busy recovery silently skipped its ownership observation <nil>
---- FAIL: TestStoppedHealthRecoveryWaitsForReconcileAndThenObservesOwnership (0.00s)
-    stopped_health_test.go:103: contention silently discarded the recovery pass <nil>
-FAIL
-FAIL    github.com/imksoo/routerd2/internal/runtimeplan 0.257s
-FAIL

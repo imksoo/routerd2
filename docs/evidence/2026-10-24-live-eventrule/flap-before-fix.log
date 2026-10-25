@@ -1,5 +1,0 @@
---- FAIL: TestEventRuleLifetimeSeesFlapBetweenControllerPolls (0.04s)
-    event_rules_test.go:44: rule inherited pending timer across an unpolled inactive interval
-FAIL
-FAIL	github.com/imksoo/routerd2/internal/runtimeplan	0.051s
-FAIL

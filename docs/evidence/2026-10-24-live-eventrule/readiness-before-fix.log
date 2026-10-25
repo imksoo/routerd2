@@ -1,5 +1,0 @@
---- FAIL: TestUnconditionalHistoricalRuleDoesNotDependOnUnrelatedWorkerReadiness (0.00s)
-    event_rules_test.go:63: unrelated readiness revoked durable historical consumer [] <nil>
-FAIL
-FAIL	github.com/imksoo/routerd2/internal/runtimeplan	0.009s
-FAIL

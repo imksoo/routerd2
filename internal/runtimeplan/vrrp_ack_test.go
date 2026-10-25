@@ -146,6 +146,9 @@ func (m *vrrpACKManager) Reconcile(ctx context.Context, modules []supervisor.Dyn
 			continue
 		}
 		m.stopping[name] = true
+		module.State = "stopping"
+		module.Ready = false
+		m.modules[name] = module
 		switch name {
 		case "service.ha":
 			go func() {
@@ -457,5 +460,79 @@ func TestConditionalVRRPWakesCoordinatorBeforeShortOwnershipExpires(t *testing.T
 	defer n.mu.Unlock()
 	if len(n.applied.Links) == 0 {
 		t.Fatal("short ownership acknowledged before VIP application")
+	}
+}
+
+func TestMonitorKeepsProtocolProgressDuringWorkerDrainAndFailure(t *testing.T) {
+	source := conditionalVRRPSource()
+	source.Resources = append(source.Resources, resourceprogram.Resource{ID: "dependent", When: &resourceprogram.FactCondition{Fact: "service.ha.active"}, Service: &serviceconfig.Service{Name: "dependent", DHCP4: &serviceconfig.DHCP4{Interface: "other0"}}})
+	source.Resources = append(source.Resources, resourceprogram.Resource{ID: "wan", Service: &serviceconfig.Service{Name: "wan", DHCP4: &serviceconfig.DHCP4{Interface: "wan0"}}})
+	n := &memoryNetwork{}
+	r := New(t.TempDir(), t.TempDir(), n, testSupervisorInstance)
+	c := source.Resources[0].Service.VRRPConfig()
+	m := &vrrpACKManager{runtime: r, initial: make(chan error, 1), withdrawal: make(chan error, 1), dependentStopping: make(chan struct{}), releaseDependent: make(chan struct{}), snapshot: bootVRRPSnapshot(t, c)}
+	r.manager = m
+	release := sync.OnceFunc(func() { close(m.releaseDependent) })
+	defer release()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := r.ApplyConfig(ctx, 1, source); err != nil {
+		t.Fatal(err)
+	}
+	backup := bootVRRPSnapshot(t, c)
+	backup.State = vrrp.StateBackup
+	backup.Active = false
+	backup.ValidUntil = time.Time{}
+	backup.Transition++
+	backup.ExpiresNanos = backup.ObservedNanos + uint64(time.Second)
+	if err := r.Observe(ctx, update(t, r, "service.ha", 2, backup)); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- r.reconcileDynamic(ctx) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal("normal reconciliation waited for process exit")
+	}
+	select {
+	case <-m.dependentStopping:
+	default:
+		t.Fatal("dependent was not asked to stop")
+	}
+	n.mu.Lock()
+	hasVIP := len(n.applied.Links) > 0
+	n.mu.Unlock()
+	if !hasVIP {
+		t.Fatal("VIP disappeared before its dependent exited")
+	}
+	release()
+	if err := r.wait(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	n.mu.Lock()
+	hasVIP = len(n.applied.Links) != 0
+	n.mu.Unlock()
+	if hasVIP {
+		t.Fatal("VIP remained after dependent exit")
+	}
+	m.mu.Lock()
+	failed := m.modules["service.ha"]
+	failed.State, failed.Ready, failed.LastError = "failed", false, "worker exited permanently"
+	m.modules[failed.Name] = failed
+	m.mu.Unlock()
+	if err := r.Observe(ctx, update(t, r, "service.wan", 1, lease4(time.Now().Add(time.Hour)))); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.reconcileDynamic(ctx); err == nil {
+		t.Fatal("failed worker was reported ready")
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if len(n.applied.Routes) != 1 || n.applied.Routes[0].Gateway != "192.0.2.1" {
+		t.Fatal("a failed worker prevented an independent WAN observation from reaching the kernel")
 	}
 }

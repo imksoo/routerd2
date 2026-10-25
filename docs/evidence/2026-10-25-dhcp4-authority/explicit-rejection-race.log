@@ -1,8 +1,0 @@
-=== RUN   TestFormerJournalCannotIgnoreNewBootLifetimeAuthority
---- PASS: TestFormerJournalCannotIgnoreNewBootLifetimeAuthority (0.23s)
-PASS
-ok      github.com/imksoo/routerd2/internal/network     1.246s
-=== RUN   TestOperatorCannotDeclareInternalBootAddressAuthority
---- PASS: TestOperatorCannotDeclareInternalBootAddressAuthority (0.00s)
-PASS
-ok      github.com/imksoo/routerd2/internal/resourceprogram     1.026s

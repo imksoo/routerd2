@@ -1,2 +1,0 @@
-RED: absent per-test evidence directory gives ENOENT
-GREEN: required evidence directory created before oracle writes; no protocol or test deadline changed

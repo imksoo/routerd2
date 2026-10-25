@@ -97,7 +97,12 @@ func observeAndProject(ctx context.Context, r *Runtime, u serviceconfig.Update) 
 	if err := r.Observe(ctx, u); err != nil {
 		return err
 	}
-	return r.reconcileDynamic(ctx)
+	for range 2 {
+		if err := r.reconcileDynamic(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func update(t *testing.T, r *Runtime, name string, seq uint64, snapshot any) serviceconfig.Update {

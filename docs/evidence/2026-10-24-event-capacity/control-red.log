@@ -1,9 +1,0 @@
-# github.com/imksoo/routerd2/internal/control [github.com/imksoo/routerd2/internal/control.test]
-internal/control/event_store_test.go:22:14: e.RefreshEventStore undefined (type *Engine has no field or method RefreshEventStore)
-internal/control/event_store_test.go:26:34: h.EventJournal.Storage undefined (type JournalHealth has no field or method Storage)
-internal/control/event_store_test.go:31:13: undefined: EventStoreHealth
-internal/control/event_store_test.go:43:14: e.RefreshEventStore undefined (type *Engine has no field or method RefreshEventStore)
-internal/control/event_store_test.go:43:114: e.health().EventJournal.Storage undefined (type JournalHealth has no field or method Storage)
-internal/control/event_store_test.go:69:66: e.State().EventStoreError undefined (type State has no field or method EventStoreError)
-FAIL    github.com/imksoo/routerd2/internal/control [build failed]
-FAIL

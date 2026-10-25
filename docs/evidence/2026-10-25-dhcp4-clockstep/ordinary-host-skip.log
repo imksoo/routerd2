@@ -1,5 +1,0 @@
-=== RUN   TestDaemonDHCPv4ClockCorrections
-    dhcp4_authority_test.go:48: dedicated no-NIC QEMU clock broker required
---- SKIP: TestDaemonDHCPv4ClockCorrections (0.00s)
-PASS
-ok      github.com/imksoo/routerd2/internal/integration 0.008s

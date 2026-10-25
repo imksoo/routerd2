@@ -1,5 +1,0 @@
-ok  	github.com/imksoo/routerd2/internal/runtimeplan	7.707s
-ok  	github.com/imksoo/routerd2/internal/resourceprogram	2.508s
-ok  	github.com/imksoo/routerd2/internal/derived	1.683s
-ok  	github.com/imksoo/routerd2/internal/derivedcontroller	1.540s
-ok  	github.com/imksoo/routerd2/internal/control	43.937s

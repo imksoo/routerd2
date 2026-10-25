@@ -1,4 +1,0 @@
-# github.com/imksoo/routerd2/internal/runtimeplan [github.com/imksoo/routerd2/internal/runtimeplan.test]
-internal/runtimeplan/runtime_test.go:14:2: "github.com/imksoo/routerd/pkg/dhcpv4client" imported as old4 and not used
-FAIL    github.com/imksoo/routerd2/internal/runtimeplan [build failed]
-FAIL

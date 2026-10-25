@@ -1,7 +1,0 @@
-{
-  "source_commit": "6006090751ea2cd7ddd83a23906b53ff2f96a7fe",
-  "binaries": {
-    "routerd": "412958c9068647fa7834590f4e4361aaa163878255b8676b81037eae4e9359ec",
-    "routerd-modules": "4a143e650027042e860547a81398839ca0ef2bfb786faafaed3e03d106bce5fa"
-  }
-}

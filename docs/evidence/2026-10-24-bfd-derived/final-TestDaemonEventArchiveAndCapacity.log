@@ -1,9 +1,0 @@
-=== RUN   TestDaemonEventArchiveAndCapacity
-    bgp_test.go:192: === RUN   TestDaemonEventArchiveAndCapacity
-            event_archive_test.go:150: actual cold gzip independently matches complete live/export content; archive write failure and recovery exposed; control SIGKILL preserved original compressed body/digest/cursor
-            event_archive_test.go:150: actual EventRule and Derived outputs compacted; injected write failure stayed unhealthy across inspection; recovery and control SIGKILL preserved original dedup identity
-            event_archive_test.go:151: actual CLI exported and independently matched 15 complete records through cursor 15, verified offline and preserved source producer authority
-        --- PASS: TestDaemonEventArchiveAndCapacity (5.73s)
-        PASS
---- PASS: TestDaemonEventArchiveAndCapacity (6.76s)
-PASS

@@ -160,6 +160,11 @@ func TestDaemonBFDControlsBGPSessionAndExpiry(t *testing.T) {
 		case err := <-peerErrors:
 			t.Fatal(err)
 		case <-time.After(12 * time.Second):
+			var router runtimeplan.InstanceStatus
+			_ = fixture.control.Do(ctx, "GET", "/v1/services/service.edge", nil, &router)
+			_, source := serviceStatus()
+			sourceBytes, _ := json.Marshal(source)
+			t.Logf("BFD recovery source=%s BGP=%s", sourceBytes, router.Snapshot)
 			t.Fatal("healthy BFD did not enable the independent BGP session")
 		}
 		if err := session.wire.send(2, fixtureUpdate("203.0.113.0/24", "192.0.2.2", false)); err != nil {

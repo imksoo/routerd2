@@ -1,7 +1,0 @@
-=== RUN   TestDaemonConfigurationAndRecovery
-    daemon_test.go:67: === RUN   TestDaemonConfigurationAndRecovery
-            daemon_test.go:282: durable commit/confirm/rollback observations survived control SIGKILL with stable IDs/cursors
-        --- PASS: TestDaemonConfigurationAndRecovery (21.42s)
-        PASS
---- PASS: TestDaemonConfigurationAndRecovery (22.48s)
-PASS

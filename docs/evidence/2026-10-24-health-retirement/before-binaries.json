@@ -1,8 +1,0 @@
-{
-  "product_checkpoint": "205f02fc9abd5689d1a9543af5104f16c1e3d2ea",
-  "source_archive_sha256": "f237e36c55fd17e1a2461a28856cfefd14b2068d0147c13e73de381e9c46d1e2",
-  "binaries": {
-    "routerd": "385c382b58c182589eb9d6a555a04cab26d095804925b375eb76e997dd8da7ad",
-    "routerd-modules": "96520e8a54636d76ef67f0a72181987dfb9d944a8e4c45610b7d97ed20678847"
-  }
-}

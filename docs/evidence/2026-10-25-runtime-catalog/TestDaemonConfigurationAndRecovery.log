@@ -1,8 +1,0 @@
-=== RUN   TestDaemonConfigurationAndRecovery
-    daemon_test.go:69: === RUN   TestDaemonConfigurationAndRecovery
-            daemon_test.go:284: durable commit/confirm/rollback observations survived control SIGKILL with stable IDs/cursors
-            daemon_test.go:324: real SSH show derived returned current finite status for a resource ID containing slash
-        --- PASS: TestDaemonConfigurationAndRecovery (7.23s)
-        PASS
---- PASS: TestDaemonConfigurationAndRecovery (8.26s)
-PASS

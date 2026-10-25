@@ -1,6 +1,0 @@
-ok      github.com/imksoo/routerd2/internal/events      6.835s
---- FAIL: TestBackgroundStorageMonitorCompactsCompletedWorkWithoutAnOperatorRequest (0.13s)
-    event_compaction_test.go:80: invalid durable event envelope
-FAIL
-FAIL    github.com/imksoo/routerd2/internal/control     0.489s
-FAIL

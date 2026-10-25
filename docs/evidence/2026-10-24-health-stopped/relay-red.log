@@ -1,5 +1,0 @@
---- FAIL: TestStoppedDeclaredRelayDrainsWithoutDiscardingFutureWorkerOwnership (0.34s)
-    stopped_test.go:49: stopped declared relay did not attempt actual history delivery <nil>
-FAIL
-FAIL    github.com/imksoo/routerd2/internal/protocolevents      0.347s
-FAIL

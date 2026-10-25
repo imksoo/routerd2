@@ -1,6 +1,0 @@
-=== RUN   TestWarmArchivedPageHasBoundedDecodeAllocation
-    archive_cache_test.go:43: warm sixteen-record archive page allocated 736221 bytes; limit256KiB
---- FAIL: TestWarmArchivedPageHasBoundedDecodeAllocation (0.62s)
-FAIL
-FAIL    github.com/imksoo/routerd2/internal/events      0.640s
-FAIL

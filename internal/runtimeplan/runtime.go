@@ -17,7 +17,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"sync"
 	"time"
 
@@ -136,7 +135,6 @@ type Runtime struct {
 	vrrpOwners           map[string]vrrpOwnership
 	liveRA               map[string]ra.Config
 	aftrInputs           map[string]aftr.Input
-	installed            []supervisor.DynamicModule
 	leases               map[string]time.Time
 	routeIssues          []RouteIssue
 	bgpApplied           map[string]bgpProjectionStatus
@@ -231,10 +229,7 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 		// Control-worker recovery is deliberately explicit: quiesce previous
 		// dynamic workers, then reacquire their protocol state. Continuing an
 		// old master/lease without an accepted producer is not recovery.
-		if err := r.manager.Reconcile(ctx, nil); err != nil {
-			return r.failure(err)
-		}
-		if err := r.wait(ctx, nil, nil, true); err != nil {
+		if err := r.wait(ctx, map[string]supervisor.DynamicModule{}); err != nil {
 			return r.failure(err)
 		}
 		r.initialized = true
@@ -242,7 +237,7 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 	var retained map[string]serviceconfig.Update
 	var p projection
 	var bindings map[string]binding
-	var modules []supervisor.DynamicModule
+	var instances instanceSet
 	var bfdSources map[string]bfdBinding
 	var bfdRecipients map[string]bfdRecipient
 	for {
@@ -260,14 +255,22 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 		}
 		// Preparing immutable files and BFD bindings does not own observations.
 		// Finish it before stopping workers so a write error leaves them running.
-		bindings, modules, err = r.prepare(p.instances)
+		instances, err = compileInstances(p.instances, nil)
+		if err == nil {
+			err = r.prepare(instances)
+		}
+		bindings = instances.bindings
 		if err == nil {
 			bfdSources, bfdRecipients, err = compileBFDCache(bindings)
 		}
 		if err != nil {
 			return r.failure(err)
 		}
-		if err := r.quiesceChanged(ctx, modules); err != nil {
+		ceiling := make(map[string]supervisor.DynamicModule, len(instances.modules))
+		for _, module := range instances.modules {
+			ceiling[module.Name] = module
+		}
+		if err := r.wait(ctx, ceiling); err != nil {
 			return r.failure(err)
 		}
 		r.mu.Lock()
@@ -286,7 +289,6 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 			r.mu.Unlock()
 			continue
 		}
-		p = latest
 		break // cut over while still holding mu
 	}
 	if r.config.revision != revision || r.config.digest != sourceDigest {
@@ -312,21 +314,9 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 			delete(r.aftrInputs, name)
 		}
 	}
-	r.resourceStates = p.resources
-	r.liveRA = p.liveRA
-	r.routeIssues = p.routeIssues
-	r.phase = "applying"
-	r.lastError = ""
-	_, err = r.applyProjectionLocked(ctx, p)
+	r.phase, r.lastError = "applying", ""
 	r.mu.Unlock()
-	if err != nil {
-		return r.failure(err)
-	}
-	if err := r.manager.Reconcile(ctx, modules); err != nil {
-		return r.failure(err)
-	}
-	r.installed = modules
-	if err := r.wait(ctx, modules, nil, false); err != nil {
+	if err := r.wait(ctx, nil); err != nil {
 		return r.failure(err)
 	}
 	r.reportReadiness(ctx)
@@ -392,95 +382,65 @@ func encodeInstance(v serviceconfig.Instance) ([]byte, string, error) {
 	sum := sha256.Sum256(b)
 	return b, hex.EncodeToString(sum[:]), nil
 }
-func (r *Runtime) prepare(instances []serviceconfig.Instance) (map[string]binding, []supervisor.DynamicModule, error) {
-	bindings := map[string]binding{}
-	modules := []supervisor.DynamicModule{}
-	for _, v := range instances {
-		encoded, digest, err := encodeInstance(v)
-		if err != nil {
-			return nil, nil, err
-		}
-		dir := filepath.Join(r.dir, "instances", v.Name)
-		if err := os.MkdirAll(dir, 0700); err != nil {
-			return nil, nil, err
-		}
-		path := filepath.Join(dir, digest+".json")
-		if err := config.AtomicWrite(path, encoded); err != nil {
-			return nil, nil, err
-		}
-		bindings[v.Name] = binding{v, digest}
-		modules = append(modules, supervisor.DynamicModule{Name: v.Name, Role: v.Role, ConfigDigest: digest})
-	}
-	return bindings, modules, nil
+
+// An instance set keeps canonical wire bytes only through preparation. The
+// runtime retains typed bindings, not another serialized configuration cache.
+type instanceSet struct {
+	bindings map[string]binding
+	modules  []supervisor.DynamicModule
+	encoded  [][]byte
 }
-func (r *Runtime) quiesceChanged(ctx context.Context, next []supervisor.DynamicModule) error {
-	wanted := map[string]string{}
-	for _, v := range next {
-		wanted[v.Name] = v.ConfigDigest
-	}
-	keep := []supervisor.DynamicModule{}
-	removed := map[string]bool{}
-	for _, v := range r.installed {
-		if wanted[v.Name] == v.ConfigDigest {
-			keep = append(keep, v)
-		} else {
-			removed[v.Name] = true
+
+func compileInstances(instances []serviceconfig.Instance, ceiling map[string]supervisor.DynamicModule) (instanceSet, error) {
+	set := instanceSet{bindings: make(map[string]binding, len(instances))}
+	for _, instance := range instances {
+		if ceiling != nil {
+			if _, ok := ceiling[instance.Name]; !ok {
+				continue
+			}
 		}
+		encoded, digest, err := encodeInstance(instance)
+		if err != nil {
+			return instanceSet{}, err
+		}
+		module := supervisor.DynamicModule{Name: instance.Name, Role: instance.Role, ConfigDigest: digest}
+		if ceiling != nil && ceiling[instance.Name] != module {
+			continue
+		}
+		set.bindings[instance.Name] = binding{instance, digest}
+		set.modules = append(set.modules, module)
+		set.encoded = append(set.encoded, encoded)
 	}
-	if len(removed) == 0 {
-		return nil
-	}
-	if err := r.manager.Reconcile(ctx, keep); err != nil {
-		return err
-	}
-	r.installed = keep
-	if err := r.wait(ctx, nil, removed, false); err != nil {
-		return err
+	return set, nil
+}
+
+func (r *Runtime) prepare(set instanceSet) error {
+	for i, module := range set.modules {
+		dir := filepath.Join(r.dir, "instances", module.Name)
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			return err
+		}
+		if err := config.AtomicWrite(filepath.Join(dir, module.ConfigDigest+".json"), set.encoded[i]); err != nil {
+			return err
+		}
 	}
 	return nil
 }
-func (r *Runtime) wait(ctx context.Context, wanted []supervisor.DynamicModule, removed map[string]bool, allRemoved bool) error {
-	ctx, stop := context.WithTimeout(ctx, 20*time.Second)
-	defer stop()
+
+// A ceiling restricts the old source while a new configuration is preparing.
+// A nil ceiling runs the current source normally; an empty one drains recovery.
+// Startup and shutdown both advance the same step, including effect callbacks.
+func (r *Runtime) wait(ctx context.Context, ceiling map[string]supervisor.DynamicModule) error {
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		s, err := r.manager.Status(ctx)
+		done, err := r.reconcileStep(ctx, ceiling)
 		if err != nil {
 			return err
 		}
-		if err := r.reconcileWhileWaiting(ctx, s, removed); err != nil {
-			return err
-		}
-		byName := map[string]supervisor.ModuleStatus{}
-		okay := true
-		for _, m := range s.Modules {
-			byName[m.Name] = m
-			if removed[m.Name] || (allRemoved && strings.HasPrefix(m.Name, "service.")) {
-				okay = false
-			}
-		}
-		for _, v := range wanted {
-			// A prerequisite can withdraw while initial workers are starting.
-			stillWanted := false
-			for _, installed := range r.installed {
-				if installed == v {
-					stillWanted = true
-					break
-				}
-			}
-			if !stillWanted {
-				continue
-			}
-			m, ok := byName[v.Name]
-			if !ok || !m.Ready || m.ConfigDigest != v.ConfigDigest {
-				okay = false
-				if ok && m.State == "failed" {
-					return fmt.Errorf("%s failed: %s", m.Name, m.LastError)
-				}
-			}
-		}
-		if okay {
+		if done {
 			return nil
 		}
 		select {
@@ -957,76 +917,8 @@ func (r *Runtime) Monitor(ctx context.Context) {
 }
 
 func (r *Runtime) reconcileDynamic(ctx context.Context) error {
-	r.refreshGuardStatus(ctx)
-	r.mu.Lock()
-	r.fenceApplicationsLocked()
-	if !r.configured {
-		r.mu.Unlock()
-		return nil
-	}
-	p, err := r.projectProgramLocked(r.config, r.effectiveRecordsLocked(time.Now()), time.Now())
-	r.mu.Unlock()
-	if err != nil {
+	if _, err := r.reconcileStep(ctx, nil); err != nil {
 		return err
-	}
-	bindings, modules, err := r.prepareIfChanged(p.instances)
-	if err != nil {
-		return err
-	}
-	if bindings != nil {
-		if err := r.quiesceChanged(ctx, modules); err != nil {
-			return err
-		}
-	}
-	r.mu.Lock()
-	// Quiescing may take time. Never use an expired conditional authorization.
-	// Retry with a fresh supervisor observation before applying or starting work.
-	if conditionalProgram(r.config.source) && !time.Now().Before(r.guardUntil) {
-		r.mu.Unlock()
-		return nil
-	}
-	latest, projectionErr := r.projectProgramLocked(r.config, r.effectiveRecordsLocked(time.Now()), time.Now())
-	if projectionErr != nil {
-		r.mu.Unlock()
-		return projectionErr
-	}
-	if !reflect.DeepEqual(latest.instances, p.instances) {
-		r.wakeCoordinatorLocked()
-		r.mu.Unlock()
-		return nil
-	}
-	p, err = r.applyProjectionLocked(ctx, latest)
-	if err != nil {
-		r.mu.Unlock()
-		return err
-	}
-	if bindings != nil {
-		bfdSources, bfdRecipients, cacheErr := compileBFDCache(bindings)
-		if cacheErr != nil {
-			r.mu.Unlock()
-			return cacheErr
-		}
-		r.bindings = bindings
-		r.installBFDCacheLocked(bfdSources, bfdRecipients)
-		for name, input := range r.aftrInputs {
-			if b, ok := bindings[name]; !ok || b.digest != input.ConfigDigest {
-				delete(r.aftrInputs, name)
-			}
-		}
-		for name := range r.records {
-			if _, ok := bindings[name]; !ok {
-				delete(r.records, name)
-				delete(r.guardGrants, name)
-			}
-		}
-	}
-	r.mu.Unlock()
-	if bindings != nil {
-		if err := r.manager.Reconcile(ctx, modules); err != nil {
-			return err
-		}
-		r.installed = modules
-		return nil
 	}
 	r.reportReadiness(ctx)
 	return nil
@@ -1043,27 +935,4 @@ func (r *Runtime) reportReadiness(ctx context.Context) {
 	r.mu.Lock()
 	r.phase, r.lastError = "ready", ""
 	r.mu.Unlock()
-}
-func (r *Runtime) prepareIfChanged(v []serviceconfig.Instance) (map[string]binding, []supervisor.DynamicModule, error) {
-	r.mu.Lock()
-	same := len(v) == len(r.bindings) && len(v) == len(r.installed)
-	installed := make(map[string]string, len(r.installed))
-	for _, module := range r.installed {
-		installed[module.Name] = module.ConfigDigest
-	}
-	for _, instance := range v {
-		_, digest, err := encodeInstance(instance)
-		if err != nil {
-			r.mu.Unlock()
-			return nil, nil, err
-		}
-		if b, ok := r.bindings[instance.Name]; !ok || b.digest != digest || installed[instance.Name] != digest {
-			same = false
-		}
-	}
-	r.mu.Unlock()
-	if same {
-		return nil, nil, nil
-	}
-	return r.prepare(v)
 }

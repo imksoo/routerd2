@@ -1,6 +1,0 @@
-=== RUN   TestDaemonBGPFIBAndOwnershipExpiry
-    bgp_test.go:192: === RUN   TestDaemonBGPFIBAndOwnershipExpiry
-        --- PASS: TestDaemonBGPFIBAndOwnershipExpiry (7.60s)
-        PASS
---- PASS: TestDaemonBGPFIBAndOwnershipExpiry (8.63s)
-PASS

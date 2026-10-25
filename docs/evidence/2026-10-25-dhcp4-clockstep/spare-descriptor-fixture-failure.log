@@ -1,5 +1,0 @@
---- FAIL: TestClockBrokerOnlyRunsFixedActionsAndReportsOriginalClock (1.00s)
-    transport_linux_test.go:80: broker did not stop
-FAIL
-FAIL    github.com/imksoo/routerd2/internal/clocktest   1.025s
-FAIL

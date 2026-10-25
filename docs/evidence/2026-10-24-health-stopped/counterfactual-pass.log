@@ -1,7 +1,0 @@
-=== RUN   TestDaemonStoppedHealthHistoryWithoutReactivation
-    bgp_test.go:192: === RUN   TestDaemonStoppedHealthHistoryWithoutReactivation
-            health_retirement_test.go:219: 1 accepted observations delivered once while source stayed declared and producer stayed stopped, across control SIGKILL; ownership retained for reactivation
-        --- PASS: TestDaemonStoppedHealthHistoryWithoutReactivation (1.68s)
-        PASS
---- PASS: TestDaemonStoppedHealthHistoryWithoutReactivation (2.72s)
-PASS

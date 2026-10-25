@@ -1,8 +1,0 @@
---- FAIL: TestHistoricalUpCannotGrantRetractionGraceUnderNewAuthority (0.00s)
-    --- FAIL: TestHistoricalUpCannotGrantRetractionGraceUnderNewAuthority/new-producer (0.00s)
-        authority_status_test.go:25: historical Up was advertised under replacement authority {2000000000 3000000000 {"digest":"a7b595da819e9e6d1cb625d99bbdad37441b6ab4e243ffa227fa311096b0907e","scope":"boot/config","initialized":true,"initial_emission":false,"asserted":true,"counter":0,"last_now":2000000000,"last_asserted_at":"2026-10-24T00:00:01Z","last_retracted_at":"0001-01-01T00:00:00Z","pending":{"target":false,"Since":2000000000,"Due":3000000000,"Until":10000000000,"origin":"11123178cd27b32223a56601798ad46f6e1c6b82b73ac6885ee68a92f8688026","input_id":"sample","at":"2026-10-24T00:00:03Z"}} [] {Pending false <go-pointer> Retracting 2026-10-24 00:00:01 +0000 UTC 0001-01-01 00:00:00 +0000 UTC}}
-    --- FAIL: TestHistoricalUpCannotGrantRetractionGraceUnderNewAuthority/new-control-scope (0.00s)
-        authority_status_test.go:25: historical Up was advertised under replacement authority {2000000000 3000000000 {"digest":"a7b595da819e9e6d1cb625d99bbdad37441b6ab4e243ffa227fa311096b0907e","scope":"new-control/config","initialized":true,"initial_emission":false,"asserted":true,"counter":0,"last_now":2000000000,"last_asserted_at":"2026-10-24T00:00:01Z","last_retracted_at":"0001-01-01T00:00:00Z","pending":{"target":false,"Since":2000000000,"Due":3000000000,"Until":10000000000,"origin":"4ce3986a7943703231113e4797ca150cc21f8531c60b060d02583fa0666d5da1","input_id":"sample","at":"2026-10-24T00:00:03Z"}} [] {Pending false <go-pointer> Retracting 2026-10-24 00:00:01 +0000 UTC 0001-01-01 00:00:00 +0000 UTC}}
-FAIL
-FAIL	github.com/imksoo/routerd2/internal/derived	0.006s
-FAIL

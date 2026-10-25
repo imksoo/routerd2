@@ -1,7 +1,0 @@
-=== RUN   TestDaemonVRRPOriginalOwnership
-    vrrp_authority_test.go:33: === RUN   TestDaemonVRRPOriginalOwnership
-            vrrp_authority_test.go:36: actual VIP TCP/UDP, 3 VMAC advertisements, original BOOT expiry/reapply, worker/control replacement and stale-generation refusal; foreign address retained
-        --- PASS: TestDaemonVRRPOriginalOwnership (8.65s)
-        PASS
---- PASS: TestDaemonVRRPOriginalOwnership (9.69s)
-PASS

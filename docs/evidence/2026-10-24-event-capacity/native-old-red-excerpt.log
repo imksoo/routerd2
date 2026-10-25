@@ -1,9 +1,0 @@
-=== RUN   TestDaemonEventArchiveAndCapacity
-    bgp_test.go:192: isolated protocol fixture: exit status 1
-        === RUN   TestDaemonEventArchiveAndCapacity
-            event_archive_test.go:52: real event-store inspection unavailable module returned HTTP 404
-[console fixture detail omitted; original SHA in provenance]
-        --- FAIL: TestDaemonEventArchiveAndCapacity (0.29s)
-        FAIL
---- FAIL: TestDaemonEventArchiveAndCapacity (0.32s)
-FAIL

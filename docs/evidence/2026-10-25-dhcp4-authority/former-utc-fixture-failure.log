@@ -1,7 +1,0 @@
---- FAIL: TestLeaseApplyFencingFailureRollbackAndExpiry (0.03s)
-    runtime_test.go:151: DHCPv4 observation rewound or crossed final fence
---- FAIL: TestConcurrentRenewalSurvivesConfigurationCutover (0.08s)
-    runtime_test.go:181: cutover restored a lease older than its acknowledged renewal
-FAIL
-FAIL    github.com/imksoo/routerd2/internal/runtimeplan 16.025s
-FAIL

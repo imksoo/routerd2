@@ -1,5 +1,0 @@
-ok      github.com/imksoo/routerd2/internal/management  1.508s
-?       github.com/imksoo/routerd2/internal/statefs     [no test files]
-ok      github.com/imksoo/routerd2/internal/runtimeabi  (cached)
-ok      github.com/imksoo/routerd2/images/storage-test/guest    1.295s
-ok      github.com/imksoo/routerd2/internal/releaseboot/testdata/guest  (cached)

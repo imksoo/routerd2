@@ -1,5 +1,0 @@
-=== RUN   TestFormatInspectionUsesLiveReadOnlySchemaAndDoesNotAdvanceState
-    format_inspection_test.go:42: actual event format=6 objects=13 schema_sha256=2bc436d24ae4fcc8ce21c43419888b4619f7cd6199893e771c21342c860570e4
---- PASS: TestFormatInspectionUsesLiveReadOnlySchemaAndDoesNotAdvanceState (0.06s)
-PASS
-ok      github.com/imksoo/routerd2/internal/events      0.062s

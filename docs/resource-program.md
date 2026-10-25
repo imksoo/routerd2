@@ -130,8 +130,6 @@ control再起動後に再試行し、元eventを重複公開しない。missing 
 `health.protocol_events` の `registered_relays` / `retiring_relays` は件数を返す。
 回収待ちと保存失敗は不健全でtrial確定不可となるが、削除のcommit自体は成立したrevisionを保持する。
 候補適用失敗から元設定へ戻した場合も、候補の残queueを回収待ちとして扱う。
-[実TCP・再起動・DB失敗の証跡](evidence/2026-10-24-health-protocol-events.md) を参照。
-[永久削除後の回収と新旧比較](evidence/2026-10-24-health-retirement.md) に後続の検証を記録する。
 
 宣言を残した条件inactiveのHealth queueも、workerの選択bindingとfresh supervisor上のhealth processが
 両方ない場合に回収する。回収中はruntimeのmodule reconcile排他を保持して再有効化を防ぎ、
@@ -254,7 +252,6 @@ producer stateと出力jobは同時保存する。新activationは初回出力�
 
 最大128 DerivedEvent、全体で参照1,024個、1回の評価16宣言・publication8件のbounded処理である。
 他provider、raw protocol event、作用の権限/idempotency、federation、retention、規模・性能受入は残る。
-[実daemon・QEMUの証跡と範囲](evidence/2026-10-24-live-derived.md) を参照。
 BFDのraw packet/遷移をすべて永続履歴へ保存するproducerは別の未実装範囲である。
 
 ## graph、owner と検証
@@ -297,7 +294,6 @@ Healthの観測時刻はproducerのCLOCK_BOOTTIME、その他の対応済みacti
 新しいleaseを受理した単調時刻、ready factはsupervisorのpoll時刻である。
 同じlease・sampleの再送や投影の再実行では観測時刻を更新しない。
 `not` の内側でもstaleはindeterminateを保つ。
-[実daemon・packet受入](evidence/2026-10-24-condition-max-age.md) を参照。
 
 `for` は条件式が連続してtrueだった時間を指定する。
 例えば `when: {fact: service.health-a.active, max_age: 3s, for: 2s}` は、
@@ -308,7 +304,6 @@ Healthの観測時刻はproducerのCLOCK_BOOTTIME、その他の対応済みacti
 同値の観測更新や成功したkernel投影だけでは数え直さない。
 protocol callback間に短いfalseを挟む場合も履歴に反映し、新しい通知なしでもtimerで解除する。
 `when_hold` / `ready_when_hold` をstatusに表示する。
-[安定時間の実daemon・packet受入](evidence/2026-10-24-condition-hold.md) を参照。
 
 `show resources` で、coordinator が最後に選択したresourceごとの `active`、
 三値の `when` / `ready`、保留理由と依存先を確認できる。

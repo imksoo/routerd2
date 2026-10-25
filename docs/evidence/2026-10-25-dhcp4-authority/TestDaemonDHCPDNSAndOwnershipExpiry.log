@@ -1,6 +1,0 @@
-=== RUN   TestDaemonDHCPDNSAndOwnershipExpiry
-    bgp_test.go:192: === RUN   TestDaemonDHCPDNSAndOwnershipExpiry
-        --- PASS: TestDaemonDHCPDNSAndOwnershipExpiry (8.66s)
-        PASS
---- PASS: TestDaemonDHCPDNSAndOwnershipExpiry (9.69s)
-PASS

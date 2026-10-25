@@ -1,4 +1,0 @@
-ok      github.com/imksoo/routerd2/internal/protocol/vrrp       2.164s
-ok      github.com/imksoo/routerd2/internal/runtimeplan 17.401s
-ok      github.com/imksoo/routerd2/internal/clocktest   1.025s
-ok      github.com/imksoo/routerd2/images/kernel-test-init      1.021s

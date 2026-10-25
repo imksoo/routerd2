@@ -1,6 +1,0 @@
-=== RUN   TestDHCPv4OriginalBootGrantReplayMutationAndFinalFence
-    dhcp4_clock_test.go:80: empty control cache revived an expired original grant stale protocol producer or configuration {[] [{wan0 0 [] map[] <nil> <nil> <nil> <nil>}] [] [] {<nil> <nil>} <nil> [] [] []}
---- FAIL: TestDHCPv4OriginalBootGrantReplayMutationAndFinalFence (2.36s)
-FAIL
-FAIL    github.com/imksoo/routerd2/internal/runtimeplan 2.386s
-FAIL

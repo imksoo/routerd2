@@ -1,6 +1,0 @@
-=== RUN   TestCheckedPrepareValidatesPinnedTargetUnderFileLockBeforePublication
---- PASS: TestCheckedPrepareValidatesPinnedTargetUnderFileLockBeforePublication (2.80s)
-=== RUN   TestCheckedRollbackUsesVerifiedPreviousRuntimeAndFrozenPairIntent
---- PASS: TestCheckedRollbackUsesVerifiedPreviousRuntimeAndFrozenPairIntent (1.92s)
-PASS
-ok      github.com/imksoo/routerd2/internal/release     5.760s

@@ -4,6 +4,9 @@
 
 状態: **設計方針として採用。native runtime catalogを部分実装。**
 
+現在の実装範囲と残作業は [開発引き継ぎ](../pve-codex-handoff.md) と
+[実装計画](../implementation-plan.md) で管理する。過去の個別試験記録は削除した。
+
 2026-10-25追記: manifest v3でnative ELFのformat宣言を署名へ結び付ける。
 publisherは実readonly recordから宣言を導出し、全nativeとmanifestの一致をreceiverで再検証する。
 旧v1/v2 readerは置かない。現時点で異なる宣言のprepare/起動/fallbackは、移行policy未実装のため拒否する。
@@ -11,7 +14,6 @@ publisherは実readonly recordから宣言を導出し、全nativeとmanifestの
 
 2026-10-25追記: manifest v2、可変static native/data、verified role catalogと独立logging commandを実装した。
 旧二ELF readerは置換済み。明示startup-config参照、独立した小さなbootstrap、engine/kernel/config/state ABIの完全化は未完了。
-[実装・個別受入と残作業](../evidence/2026-10-25-runtime-catalog.md) を参照。
 
 routerd2 は未リリースで、現在の二バイナリー形式の利用者はいない。
 稼働中の routerd は機能を引き継ぐ参照元であり、未リリースの routerd2 とは別製品である。
@@ -32,15 +34,12 @@ prototype の配布形式・boot schema・設定/journal・内部APIに後方互
 
 2026-10-25追加: [永続store identityと不変snapshot](../startup-config.md) の保存・検証を実装した。
 現在のjournalを通常起動の正本とし、snapshotの明示startup採用とruntime/configurationを結ぶtransactionはまだ実装していない。
-[個別受入の証跡](../evidence/2026-10-25-config-snapshots.md) を参照。
 
 2026-10-25追加: 固定runtimeのstartup参照をjournalへ一度だけ採用する処理を実装した。
 同一選択の再実行で後続commitを上書きせず、採用世代とstable eventを保持する。
-[個別受入と初回失敗の記録](../evidence/2026-10-25-startup-adoption.md) を参照。
 signed runtime/configurationの組をprepare/attempt/confirmation/fallbackへ結ぶtransactionは引き続き未実装。
 
 2026-10-25追加: 候補の採用前後を区別する条件付き設定復旧と、runtime/config参照を同一世代で公開するrelease journalの内部APIを実装した。
-[証跡と未接続の境界](../evidence/2026-10-25-paired-startup.md) を参照。
 実snapshot/互換性検証・writer fence・paired loader/healthを結ぶcoordinatorは未実装で、現commandはpaired選択を起動しない。
 
 ## 1. 五つの対象を区別する

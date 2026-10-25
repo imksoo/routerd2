@@ -1,6 +1,0 @@
-=== RUN   TestBFDGateConsumesQueuedTimelyAckAfterConsumerPause
-    bfd_test.go:389: queued timely ACK was discarded after the consumer deadline
---- FAIL: TestBFDGateConsumesQueuedTimelyAckAfterConsumerPause (2.02s)
-FAIL
-FAIL	github.com/imksoo/routerd2/internal/protocol/bgp	2.033s
-FAIL

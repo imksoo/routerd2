@@ -1,9 +1,0 @@
---- FAIL: TestLifecycleSaveFailureKeepsCommittedSourceButReturnsUnhealthyAcknowledgment (0.32s)
-    eventrules_test.go:110: controller did not recover {2 false  false 42f13412d864bca1dce69902e04a7373 2 <go-pointer> <nil> {0 } {{2 [{rule 1 1 2 false}]} } {{0 0 false} constraint failed: injected lifecycle persistence failure (1811)}}
-FAIL
-FAIL	github.com/imksoo/routerd2/internal/control	44.388s
-ok  	github.com/imksoo/routerd2/internal/derivedcontroller	1.706s
-ok  	github.com/imksoo/routerd2/internal/runtimeplan	7.349s
-ok  	github.com/imksoo/routerd2/internal/resourceprogram	2.297s
-ok  	github.com/imksoo/routerd2/internal/derived	1.843s
-FAIL

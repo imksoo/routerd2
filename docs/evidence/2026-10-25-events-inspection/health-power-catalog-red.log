@@ -1,6 +1,0 @@
-=== RUN   TestPowerProbeChecksEachFactoryRoleInode
-    catalog_test.go:49: fresh command pair and independent logger rejected: process did not execute expected fresh ELF inode
---- FAIL: TestPowerProbeChecksEachFactoryRoleInode (0.00s)
-FAIL
-FAIL    github.com/imksoo/routerd2/images/health-power-test/guest       0.010s
-FAIL

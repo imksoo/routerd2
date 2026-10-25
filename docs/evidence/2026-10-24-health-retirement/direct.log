@@ -1,7 +1,0 @@
-=== RUN   TestDaemonRetiredHealthHistoryWithoutReactivation
-    bgp_test.go:192: === RUN   TestDaemonRetiredHealthHistoryWithoutReactivation
-            health_retirement_test.go:135: 1 accepted observations delivered once after permanent removal, without producer reactivation
-        --- PASS: TestDaemonRetiredHealthHistoryWithoutReactivation (0.65s)
-        PASS
---- PASS: TestDaemonRetiredHealthHistoryWithoutReactivation (1.68s)
-PASS

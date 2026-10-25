@@ -1,5 +1,0 @@
-ok  	github.com/imksoo/routerd2/internal/eventcontroller	2.449s
-ok  	github.com/imksoo/routerd2/internal/control	43.793s
-ok  	github.com/imksoo/routerd2/internal/runtimeplan	7.038s
-ok  	github.com/imksoo/routerd2/internal/resourceprogram	2.254s
-ok  	github.com/imksoo/routerd2/internal/events	5.891s

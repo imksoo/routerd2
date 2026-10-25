@@ -1,6 +1,0 @@
-=== RUN   TestConditionalVRRPWaitsForNetworkACK
-    vrrp_ack_test.go:53: VRRP callback returned before kernel effects were applied: <nil>
---- FAIL: TestConditionalVRRPWaitsForNetworkACK (0.22s)
-FAIL
-FAIL    github.com/imksoo/routerd2/internal/runtimeplan 0.225s
-FAIL
