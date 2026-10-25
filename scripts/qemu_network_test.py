@@ -13,6 +13,14 @@ SPEC.loader.exec_module(GATE)
 
 
 class GuestResultTest(unittest.TestCase):
+    def test_startup_suite_requires_actual_adoption_and_recovery_test(self):
+        suite = GATE.SUITES["daemon-startup"]
+        self.assertEqual(suite["test"], "TestDaemonStartupSelectionAndRecovery")
+        self.assertEqual(suite["marker"], "ROUTERD_STARTUP_SELECTION_DAEMON_TEST")
+        self.assertTrue(suite["commands"])
+        initializer = (GATE.PROJECT / "images/kernel-test-init/main.go").read_text()
+        self.assertIn('case "daemon-startup":', initializer)
+        self.assertIn('"TestDaemonStartupSelectionAndRecovery", "ROUTERD_STARTUP_SELECTION_DAEMON_TEST"', initializer)
     def test_resource_program_requires_its_real_daemon_test(self):
         suite = GATE.SUITES["daemon-resource-program"]
         self.assertEqual(suite["test"], "TestDaemonResourceProgramLifecycleAndRecovery")
