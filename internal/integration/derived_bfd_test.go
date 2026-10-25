@@ -32,7 +32,7 @@ func TestDaemonBFDDerivedCurrentStatus(t *testing.T) {
 	defer cancel()
 	failures := make(chan error, 4)
 	go peer.run(ctx, failures)
-	spec := api.DerivedEventSpec{Topic: "routerd.fixture.bfd", EmitInitial: true, Hysteresis: "100ms", Inputs: []api.ReadyWhenSpec{{Field: "${BFD/service/watch.status.phase}", Equals: "Up"}, {Field: "${BFD/service/watch.status.peers}", NotEmpty: true}, {Field: "${BFD/service/watch.status.peerStates}", NotEmpty: true}, {Field: "${BFD/service/watch.status.observedAt}", NotEmpty: true}}}
+	spec := api.DerivedEventSpec{Topic: "routerd.fixture.bfd", EmitInitial: true, Hysteresis: "650ms", Inputs: []api.ReadyWhenSpec{{Field: "${BFD/service/watch.status.phase}", Equals: "Up"}, {Field: "${BFD/service/watch.status.peers}", NotEmpty: true}, {Field: "${BFD/service/watch.status.peerStates}", NotEmpty: true}, {Field: "${BFD/service/watch.status.observedAt}", NotEmpty: true}}}
 	rule := api.EventRuleSpec{Pattern: api.EventRulePatternSpec{Operator: "count", Topic: "routerd.fixture.bfd.asserted", Threshold: 2}, Emit: api.EventRuleEmitSpec{Topic: "routerd.fixture.bfd.twice"}}
 	doc := config.FromNative(config.Native{Network: network.Desired{Interfaces: []network.Interface{{Name: "wan0", Addresses: []string{"192.0.2.1/24"}}}}, Services: []serviceconfig.Service{{Name: "watch", BFD: &bfd.Config{Interface: "wan0", SourceAddress: "192.0.2.1", Peers: []bfd.Peer{{Address: "192.0.2.2", MinTxMilliseconds: 200, MinRxMilliseconds: 200, DetectMultiplier: 5}}}}}})
 	doc.Resources = append(doc.Resources, resourceprogram.Resource{ID: "bfd-derived", DerivedEvent: &spec}, resourceprogram.Resource{ID: "bfd-rule", EventRule: &rule})
@@ -132,6 +132,15 @@ func TestDaemonBFDDerivedCurrentStatus(t *testing.T) {
 	assert(true)
 	until(t, 10*time.Second, func() bool { return count(spec.Topic+".asserted") == 2 && count("routerd.fixture.bfd.twice") == 1 })
 	before, raw := status()
+	// A real producer must carry timestamp continuity across more than one
+	// periodic status interval, without cancelling notEmpty's longer hold.
+	if raw.TimestampChanges == 0 {
+		t.Fatal("real BFD producer omitted timestamp continuity")
+	}
+	until(t, 5*time.Second, func() bool {
+		_, next := status()
+		return next.TimestampChanges > raw.TimestampChanges && next.Peers[0].State == bfd.StateUp
+	})
 	oldWorker := module("service.watch")
 	if raw.Peers[0].State != bfd.StateUp || peer.received.Load() == 0 {
 		t.Fatal("no actual Up exchange")
