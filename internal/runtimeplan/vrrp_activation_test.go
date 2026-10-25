@@ -8,6 +8,7 @@ import (
 
 	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/config"
+	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
@@ -199,5 +200,106 @@ func TestGracefulVRRPRejectsChangedOrExpiredAdmissionBeforeRecording(t *testing.
 				t.Fatal("invalid admission installed a VIP")
 			}
 		})
+	}
+}
+
+type activationPromotionNetwork struct {
+	memoryNetwork
+	failPromotion                     bool
+	provisionalExpiry, originalExpiry uint64
+}
+
+func (n *activationPromotionNetwork) Apply(ctx context.Context, revision uint64, d network.Desired) error {
+	for _, iface := range d.Interfaces {
+		for address, opts := range iface.AddressOptions {
+			if address != "192.0.2.254/24" {
+				continue
+			}
+			if n.failPromotion && opts.BootLifetime.ValidNanos == n.originalExpiry {
+				return errors.New("injected original-lifetime promotion failure")
+			}
+			if opts.BootLifetime.ValidNanos < n.originalExpiry {
+				n.provisionalExpiry = opts.BootLifetime.ValidNanos
+			}
+		}
+	}
+	return n.memoryNetwork.Apply(ctx, revision, d)
+}
+func TestGracefulVRRPFailedPromotionCannotBecomeUnsolicitedLongOwnership(t *testing.T) {
+	source := activationSource()
+	n := &activationPromotionNetwork{}
+	r := New(t.TempDir(), t.TempDir(), n, testSupervisorInstance)
+	r.manager = &memoryManager{}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := r.ApplyConfig(ctx, 1, source); err != nil {
+		t.Fatal(err)
+	}
+	c := source.Resources[0].Service.VRRPConfig()
+	s := bootVRRPSnapshot(t, c)
+	s.Active = false
+	s.ValidUntil = time.Time{}
+	s.ActivationState = "Preparing"
+	s.ActivationStartedNanos = s.ObservedNanos
+	pending := update(t, r, "service.ha", 1, s)
+	if err := acceptVRRPAndDrain(t, r, pending); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Accept(ctx, update(t, r, "service.wan", 1, lease4(time.Now().Add(time.Hour)))); err != nil {
+		t.Fatal(err)
+	}
+	grant, err := r.GrantVRRPActivation(ctx, pending)
+	if err != nil || grant.ID == 0 {
+		t.Fatal(grant, err)
+	}
+	active := bootVRRPSnapshot(t, c)
+	active.ActivationState = "Ready"
+	active.ActivationStartedNanos = s.ActivationStartedNanos
+	active.ActivationGrant = grant
+	n.failPromotion = true
+	n.originalExpiry = active.ExpiresNanos
+	u := update(t, r, pending.Name, 2, active)
+	result := make(chan error, 1)
+	go func() { result <- r.Accept(ctx, u) }()
+	deadline := time.Now().Add(time.Second)
+	for {
+		r.mu.Lock()
+		accepted := r.records[u.Name].Sequence == u.Sequence
+		r.mu.Unlock()
+		if accepted {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("publication not queued")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if err := r.reconcileDynamic(ctx); err == nil {
+		t.Fatal("promotion failure hidden")
+	}
+	select {
+	case err := <-result:
+		if err == nil {
+			t.Fatal("failed promotion acknowledged")
+		}
+	case <-ctx.Done():
+		t.Fatal("publisher not released")
+	}
+	if n.provisionalExpiry != grant.ExpiresNanos {
+		t.Fatal("provisional VIP did not use original admission expiry", n.provisionalExpiry, grant.ExpiresNanos)
+	}
+	r.mu.Lock()
+	_, latched := r.vrrpPublications[u.Name]
+	_, stillGranted := r.vrrpAdmissions[u.Name]
+	r.mu.Unlock()
+	if latched || stillGranted {
+		t.Fatal("failed promotion retained authority for later unsolicited publication")
+	}
+	n.failPromotion = false
+	_ = r.reconcileDynamic(ctx)
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if len(n.applied.Links) != 0 {
+		t.Fatal("failed publication was later applied without a new admission")
 	}
 }
