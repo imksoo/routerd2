@@ -13,6 +13,14 @@ SPEC.loader.exec_module(GATE)
 
 
 class GuestResultTest(unittest.TestCase):
+    def test_conditional_vrrp_requires_actual_ownership_and_shutdown_gate(self):
+        suite = GATE.SUITES["daemon-vrrp-conditional"]
+        self.assertEqual(suite["test"], "TestDaemonVRRPConditionalOwnership")
+        self.assertTrue(suite["commands"])
+        initializer = (GATE.PROJECT / "images/kernel-test-init/main.go").read_text()
+        self.assertIn('case "daemon-vrrp-conditional":', initializer)
+        self.assertIn('"TestDaemonVRRPConditionalOwnership", "ROUTERD_VRRP_CONDITIONAL_TEST"', initializer)
+
     def test_conditional_recovery_requires_its_actual_daemon_oracle(self):
         suite = GATE.SUITES["daemon-startup-recovery"]
         self.assertEqual(suite["test"], "TestDaemonConditionalStartupRecovery")
