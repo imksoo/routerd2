@@ -25,6 +25,10 @@ prototype の配布形式・boot schema・設定/journal・内部APIに後方互
 最初の boot 実装方式には、検証済み runtime へ exec して PID 1 を引き継ぐ方式を推奨する。
 具体的な disk layout、圧縮形式、最初に分割する binary 数は実装時に確定する。
 
+2026-10-25追加: [永続store identityと不変snapshot](../startup-config.md) の保存・検証を実装した。
+現在のjournalを通常起動の正本とし、snapshotの明示startup採用とruntime/configurationを結ぶtransactionはまだ実装していない。
+[個別受入の証跡](../evidence/2026-10-25-config-snapshots.md) を参照。
+
 ## 1. 五つの対象を区別する
 
 | 対象 | 責務・保持するもの | 更新の主体 |

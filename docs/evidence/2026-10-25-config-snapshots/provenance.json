@@ -1,0 +1,173 @@
+{
+  "recorded_at_utc": "2026-10-25T05:22:01.340664+00:00",
+  "code_checkpoint": "1fb91bc789a62845c68152c0b1ac495825a9882b",
+  "scope": "confirmed configuration identity and immutable capture/verification; native 5 and QEMU 3 individual gates; startup adoption and runtime/config tuple selection NOT implemented",
+  "normalization": [
+    "developer repository path replaced by /workspace/routerd2",
+    "developer Go cache path replaced by /toolchain",
+    "exact ephemeral test private-host-key SHA256 omitted; raw artifact hashes and public SSH key fingerprint retained",
+    "public Alpine kernel certificate subject identifier omitted after reviewing generic-api-key false positives",
+    "tabs expanded, trailing whitespace and CRLF normalized"
+  ],
+  "raw_artifacts": [
+    {
+      "public_name": "red.log",
+      "private_source": "dist/goal-validation/startup-snapshot-red.log",
+      "raw_sha256": "fde06c7f4b58dc9800b691dedcb91187be373b7f89ca59017e0519afc15922b5"
+    },
+    {
+      "public_name": "identity-red.log",
+      "private_source": "dist/goal-validation/startup-snapshot-identity-red.log",
+      "raw_sha256": "56a0ce2b114c3bd06e1c3789cd1ee31223ddd3bec53bf962cbaecb41a1632d07"
+    },
+    {
+      "public_name": "storage-witness-red.log",
+      "private_source": "dist/goal-validation/startup-snapshot-storage-witness-red.log",
+      "raw_sha256": "41599fb293dd7333c6b48b7ee4bc31fba70cfbb697a2d450e952328f7650d65c"
+    },
+    {
+      "public_name": "final-focused.log",
+      "private_source": "dist/goal-validation/startup-snapshot-final-focused.log",
+      "raw_sha256": "f54c3e2f10b751e4f56c61d621e6f1f5c93465d6c7f5ba4ffa61b578021b89c0"
+    },
+    {
+      "public_name": "final-focused-all.log",
+      "private_source": "dist/goal-validation/startup-snapshot-final-focused-all.log",
+      "raw_sha256": "4ba394c8e35d72b0f01f0e70b3b5a74cf6042ab701a49273238f40b59520cde3"
+    },
+    {
+      "public_name": "tools.log",
+      "private_source": "dist/goal-validation/startup-snapshot-tools.log",
+      "raw_sha256": "2e542158e2319da6a519b9d5f3fb023b5b2f27bb12bb8607dbe7f11b01324a57"
+    },
+    {
+      "public_name": "clean-check-build.log",
+      "private_source": "dist/goal-validation/startup-snapshot-clean-check-build.log",
+      "raw_sha256": "b4274bc185c065d86638af61e5789f7eea06c1ed04de15669ddc0b1bc6eb7f20"
+    },
+    {
+      "public_name": "clean-build-manifest.json",
+      "private_source": "dist/goal-validation/startup-snapshot-clean-build-manifest.json",
+      "raw_sha256": "92cee6f9d92c60e71ba75a62d2184f1f4221e8ef2c4e8c0e21d29acc9bf38613"
+    },
+    {
+      "public_name": "old-apk-red.log",
+      "private_source": "dist/goal-validation/startup-snapshot-old-apk-red.log",
+      "raw_sha256": "d6e465ff9549af14c16d74447cfa97892edb74223cc8117f69fdc0521ed14c36"
+    },
+    {
+      "public_name": "old-apk-red-manifest.json",
+      "private_source": "dist/goal-validation/startup-snapshot-old-apk-red-manifest.json",
+      "raw_sha256": "f38b7615764396f69fd0674e4f4cf22f4454e1c6086408cbfd0b90aebdd77d7d"
+    },
+    {
+      "public_name": "native-manifest.json",
+      "private_source": "dist/goal-validation/startup-snapshot-native-manifest.json",
+      "raw_sha256": "a0f7eb2659b17c6f736193bba0cd59f6c3eeb0e7061c5150bf4163e21de59a1a"
+    },
+    {
+      "public_name": "source-history-secrets.log",
+      "private_source": "dist/goal-validation/startup-snapshot-source-history-secrets.log",
+      "raw_sha256": "400ec0b19885ed4487457cf6c325c8e0f34107dbce6556db065f35c5625e5ab7"
+    },
+    {
+      "public_name": "TestBuiltRuntimeCatalog.log",
+      "private_source": "dist/goal-validation/startup-snapshot-native-TestBuiltRuntimeCatalog.log",
+      "raw_sha256": "e74ce547f302cb8d70d2f2fb04493893ad154513415de3ecc52eba1f12cc8662"
+    },
+    {
+      "public_name": "TestPublishBuiltRelease.log",
+      "private_source": "dist/goal-validation/startup-snapshot-native-TestPublishBuiltRelease.log",
+      "raw_sha256": "24c0a209f0377ef8b06e4048db59e8851c3f63219481ee298365ff8452a5daff"
+    },
+    {
+      "public_name": "TestDaemonDHCPv4OriginalLeaseAuthority.log",
+      "private_source": "dist/goal-validation/startup-snapshot-native-TestDaemonDHCPv4OriginalLeaseAuthority.log",
+      "raw_sha256": "fe5d18944dc2264547dd241253a78f7a6ca5b8a13dcd326b9ba826fa4faf71a0"
+    },
+    {
+      "public_name": "TestDaemonConfigurationAndRecovery.log",
+      "private_source": "dist/goal-validation/startup-snapshot-native-TestDaemonConfigurationAndRecovery.log",
+      "raw_sha256": "24e629596e5bc2a33261da86fcb10854b016d71328dd5989bfeebc7d21d48fa6"
+    },
+    {
+      "public_name": "TestDaemonHealthPBRFailoverAndRecovery.log",
+      "private_source": "dist/goal-validation/startup-snapshot-native-TestDaemonHealthPBRFailoverAndRecovery.log",
+      "raw_sha256": "ec449bb7df7453d06f08d97d9c1b56475152cf09468062b4f7c19cd9514a5f56"
+    },
+    {
+      "public_name": "qemu-source.json",
+      "private_source": "dist/goal-validation/startup-snapshot-qemu/source.json",
+      "raw_sha256": "a04ba77bca246e1ea33277c22718fac016291aba31007f52b639bd8f48889854"
+    },
+    {
+      "public_name": "storage-host.log",
+      "private_source": "dist/goal-validation/startup-snapshot-qemu/storage-host.log",
+      "raw_sha256": "2db88e637abd8fa10f3b36cbe03ba5d2fefc99b983d4b7942a85c4b93f4d337f"
+    },
+    {
+      "public_name": "storage-manifest.json",
+      "private_source": "dist/goal-validation/startup-snapshot-qemu/storage/manifest.json",
+      "raw_sha256": "3e58f19fba1a473319a35dd1e05c8d58db048a6b5b79d072d848e97b1e4c9a0b"
+    },
+    {
+      "public_name": "storage-qemu-first.log",
+      "private_source": "dist/goal-validation/startup-snapshot-qemu/storage/qemu-first.log",
+      "raw_sha256": "83161775ad6f2036b92fd24a3776345bce69cb5a911b2c3e84e43fd9d3ee38a4"
+    },
+    {
+      "public_name": "storage-qemu-second.log",
+      "private_source": "dist/goal-validation/startup-snapshot-qemu/storage/qemu-second.log",
+      "raw_sha256": "6e15854ecbbeaf49a8bf55c3e0a1ac0320b65dec435bdf73d96a249a47475e2c"
+    },
+    {
+      "public_name": "daemon-management-host.log",
+      "private_source": "dist/goal-validation/startup-snapshot-qemu/daemon-management-host.log",
+      "raw_sha256": "f5949302dd5b5ca94ce8ef413ddb65a68b693d5ccc36590d7ba2219d7bb24130"
+    },
+    {
+      "public_name": "daemon-management-manifest.json",
+      "private_source": "dist/goal-validation/startup-snapshot-qemu/daemon-management/manifest.json",
+      "raw_sha256": "dc672dc55c14fce09548b642d695eb84fe90fcae572d2e52228116ea528fc672"
+    },
+    {
+      "public_name": "daemon-management-qemu-serial.log",
+      "private_source": "dist/goal-validation/startup-snapshot-qemu/daemon-management/qemu-serial.log",
+      "raw_sha256": "cfbe08ddf4470ea715d8425cd65879485d8b9cb2acbcc17daf1623b872dfce36"
+    },
+    {
+      "public_name": "daemon-health-pbr-host.log",
+      "private_source": "dist/goal-validation/startup-snapshot-qemu/daemon-health-pbr-host.log",
+      "raw_sha256": "616ca7c5826cfc5191402f5cf1cf77760aadaf10e845418bd2ecbe4a57bc3a5a"
+    },
+    {
+      "public_name": "daemon-health-pbr-manifest.json",
+      "private_source": "dist/goal-validation/startup-snapshot-qemu/daemon-health-pbr/manifest.json",
+      "raw_sha256": "20e1465f45a06f921c72b983f57ee91f2cc03a66796222e3dba45eda01795933"
+    },
+    {
+      "public_name": "daemon-health-pbr-qemu-serial.log",
+      "private_source": "dist/goal-validation/startup-snapshot-qemu/daemon-health-pbr/qemu-serial.log",
+      "raw_sha256": "e77f1f8226fb570f2ccfc3c2d022ce2d8a03d7a03c4bd16c4be64c684993830a"
+    }
+  ],
+  "private_packet_captures": [
+    {
+      "private_source": "dist/goal-validation/startup-snapshot-native-packets/dhcp4-authority/wan0.pcap",
+      "bytes": 9042,
+      "sha256": "af1c6ce29dc4e60429fc7ee12fe6fba9ce878c7406b098f66afaf1d8a8b0ba4f"
+    },
+    {
+      "private_source": "dist/goal-validation/startup-snapshot-native-packets/wan0.pcap",
+      "bytes": 31361,
+      "sha256": "d200e85c0400cba6234697daf7bed82fe319d7b78db7c9052e98be6d9903b44c"
+    },
+    {
+      "private_source": "dist/goal-validation/startup-snapshot-native-packets/wan1.pcap",
+      "bytes": 33586,
+      "sha256": "03139db030bb21f4123da530351b8d4f208fdd9671474933fa161ce7d8081418"
+    }
+  ],
+  "physical_hardware_qualified": false,
+  "full_goal_status": "active"
+}

@@ -1,0 +1,36 @@
+{
+  "raw_findings": 4,
+  "actual_secrets": 0,
+  "suppressions_added": false,
+  "reviewed": [
+    {
+      "file": "docs/evidence/2026-10-25-config-snapshots/daemon-health-pbr-qemu-serial.log",
+      "line": 310,
+      "classification": "kernel-loaded public Alpine X.509 certificate subject identifier, not a private key or API credential",
+      "raw_public_artifact_sha256": "e77f1f8226fb570f2ccfc3c2d022ce2d8a03d7a03c4bd16c4be64c684993830a",
+      "public_subject_identifier": "d76a695f66ad9cd28f5c22a8508f36e91f521f7a"
+    },
+    {
+      "file": "docs/evidence/2026-10-25-config-snapshots/daemon-management-qemu-serial.log",
+      "line": 312,
+      "classification": "kernel-loaded public Alpine X.509 certificate subject identifier, not a private key or API credential",
+      "raw_public_artifact_sha256": "cfbe08ddf4470ea715d8425cd65879485d8b9cb2acbcc17daf1623b872dfce36",
+      "public_subject_identifier": "d76a695f66ad9cd28f5c22a8508f36e91f521f7a"
+    },
+    {
+      "file": "docs/evidence/2026-10-25-config-snapshots/storage-qemu-first.log",
+      "line": 316,
+      "classification": "kernel-loaded public Alpine X.509 certificate subject identifier, not a private key or API credential",
+      "raw_public_artifact_sha256": "54b5c0b058481fe5b30982f9c17127ab87a12b6fa4b46973ec7b77843dcc3c88",
+      "public_subject_identifier": "d76a695f66ad9cd28f5c22a8508f36e91f521f7a"
+    },
+    {
+      "file": "docs/evidence/2026-10-25-config-snapshots/storage-qemu-second.log",
+      "line": 316,
+      "classification": "kernel-loaded public Alpine X.509 certificate subject identifier, not a private key or API credential",
+      "raw_public_artifact_sha256": "61dcbc420a58fbe9d9905ff866d798b63d1f2890f61e451339a9158799a5265c",
+      "public_subject_identifier": "d76a695f66ad9cd28f5c22a8508f36e91f521f7a"
+    }
+  ],
+  "normalization": "omit only public kernel certificate subject identifier from copied logs; retain original log digests and all kernel/runtime hashes"
+}

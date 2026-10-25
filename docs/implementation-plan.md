@@ -7,7 +7,17 @@
 部分checkpointでゴールを完了にせず、実装・検証・未検証と証跡を更新する。
 対象機種・NIC・性能条件の確認と並行して、独立して進められる実装・隔離VM検証を続ける。
 
-最新product checkpointは `f7da1c2`。manifest v2で可変native/data artifact、entrypoint、role→artifactを署名し、全descriptorを固定する。
+最新product checkpointは `1fb91bc`。設定journalに永続store identityを持たせ、確定済み現在revisionを不変snapshotとして保存・SHA/provenance検証する。
+`routerd config snapshot --expected-revision N` とprivate control APIを実装し、commit/confirmed rollback/control再起動でidentityとsnapshotを保持する。
+別store・古いrevision・unconfirmed・改変・symlink/hardlink・容量超過を拒否し、既存snapshotを上書き・自動削除しない。
+未公開のstore identityなしjournalは拒否する。明示startup選択・authoritative journalへの採用・runtime/config組のboot transactionは未実装。
+clean全体check/Race/vet/Python28/amd64・arm64計6 ELF build99.04秒PASS。arm64の実行は未検証。
+実3 commandのnative Race harnessは署名catalog27.01秒・publisher12.66秒・DHCP10.35秒・snapshot CLI/SSH復旧9.30秒・二WAN/PBR31.17秒PASS。
+QEMUも永続ext4二boot150.12秒、snapshot CLI/SSH28.42秒、二WAN/PBR81.53秒PASS。store/revision/digest、設定、SSH公開identity、event ID/cursorの保持を確認した。
+snapshot書込中の電源断/disk full/fsync失敗、当版OCI/APK、対象実機・全計画の受入は未検証/未完了。継続ゴールはactive。
+[設定snapshotの証跡・受入境界・残作業](evidence/2026-10-25-config-snapshots.md) を参照。
+
+前回product checkpointは `f7da1c2`。manifest v2で可変native/data artifact、entrypoint、role→artifactを署名し、全descriptorを固定する。
 旧manifest v1／旧暗黙pair publisher／`module_path`は拒否し、互換readerを作らない。factoryはsupervisor・native multicall・独立loggingの3 command。
 loggingは約6.9MiBで他roleを拒否し、control/management/protocol engineをlinkしない。startup-config明示参照・全ABI/engine/権限分離は残る。
 最終6 ELFのclean全体check/Race/vet/build11.04秒、disk fixture `e6720b9` の11.37秒、kernel image fixture `c88a897` のPython27を含む11.43秒PASS。6 SHAは一致。

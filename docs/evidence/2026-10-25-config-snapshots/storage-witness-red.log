@@ -1,0 +1,221 @@
+.FFFFFFFFFFFFFFFFFFFFFFFF.FFF
+======================================================================
+FAIL: test_missing_or_invalid_snapshot_provenance_cannot_pass (qemu_storage_test.TwoBootWitnessTests.test_missing_or_invalid_snapshot_provenance_cannot_pass) (phase=0, field='store_id', value=None)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_storage_test.py", line 81, in test_missing_or_invalid_snapshot_provenance_cannot_pass
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_missing_or_invalid_snapshot_provenance_cannot_pass (qemu_storage_test.TwoBootWitnessTests.test_missing_or_invalid_snapshot_provenance_cannot_pass) (phase=0, field='store_id', value='')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_storage_test.py", line 81, in test_missing_or_invalid_snapshot_provenance_cannot_pass
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_missing_or_invalid_snapshot_provenance_cannot_pass (qemu_storage_test.TwoBootWitnessTests.test_missing_or_invalid_snapshot_provenance_cannot_pass) (phase=0, field='store_id', value='AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_storage_test.py", line 81, in test_missing_or_invalid_snapshot_provenance_cannot_pass
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_missing_or_invalid_snapshot_provenance_cannot_pass (qemu_storage_test.TwoBootWitnessTests.test_missing_or_invalid_snapshot_provenance_cannot_pass) (phase=0, field='snapshot_digest', value=None)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_storage_test.py", line 81, in test_missing_or_invalid_snapshot_provenance_cannot_pass
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_missing_or_invalid_snapshot_provenance_cannot_pass (qemu_storage_test.TwoBootWitnessTests.test_missing_or_invalid_snapshot_provenance_cannot_pass) (phase=0, field='snapshot_digest', value='')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_storage_test.py", line 81, in test_missing_or_invalid_snapshot_provenance_cannot_pass
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_missing_or_invalid_snapshot_provenance_cannot_pass (qemu_storage_test.TwoBootWitnessTests.test_missing_or_invalid_snapshot_provenance_cannot_pass) (phase=0, field='snapshot_digest', value='../config')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_storage_test.py", line 81, in test_missing_or_invalid_snapshot_provenance_cannot_pass
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_missing_or_invalid_snapshot_provenance_cannot_pass (qemu_storage_test.TwoBootWitnessTests.test_missing_or_invalid_snapshot_provenance_cannot_pass) (phase=0, field='snapshot_digest', value='CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_storage_test.py", line 81, in test_missing_or_invalid_snapshot_provenance_cannot_pass
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_missing_or_invalid_snapshot_provenance_cannot_pass (qemu_storage_test.TwoBootWitnessTests.test_missing_or_invalid_snapshot_provenance_cannot_pass) (phase=0, field='snapshot_revision', value=None)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_storage_test.py", line 81, in test_missing_or_invalid_snapshot_provenance_cannot_pass
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_missing_or_invalid_snapshot_provenance_cannot_pass (qemu_storage_test.TwoBootWitnessTests.test_missing_or_invalid_snapshot_provenance_cannot_pass) (phase=0, field='snapshot_revision', value=0)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_storage_test.py", line 81, in test_missing_or_invalid_snapshot_provenance_cannot_pass
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_missing_or_invalid_snapshot_provenance_cannot_pass (qemu_storage_test.TwoBootWitnessTests.test_missing_or_invalid_snapshot_provenance_cannot_pass) (phase=0, field='snapshot_revision', value=True)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_storage_test.py", line 81, in test_missing_or_invalid_snapshot_provenance_cannot_pass
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_missing_or_invalid_snapshot_provenance_cannot_pass (qemu_storage_test.TwoBootWitnessTests.test_missing_or_invalid_snapshot_provenance_cannot_pass) (phase=0, field='snapshot_revision', value=1)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_storage_test.py", line 81, in test_missing_or_invalid_snapshot_provenance_cannot_pass
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_missing_or_invalid_snapshot_provenance_cannot_pass (qemu_storage_test.TwoBootWitnessTests.test_missing_or_invalid_snapshot_provenance_cannot_pass) (phase=0, field='snapshot_revision', value=3)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_storage_test.py", line 81, in test_missing_or_invalid_snapshot_provenance_cannot_pass
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_missing_or_invalid_snapshot_provenance_cannot_pass (qemu_storage_test.TwoBootWitnessTests.test_missing_or_invalid_snapshot_provenance_cannot_pass) (phase=1, field='store_id', value=None)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_storage_test.py", line 81, in test_missing_or_invalid_snapshot_provenance_cannot_pass
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_missing_or_invalid_snapshot_provenance_cannot_pass (qemu_storage_test.TwoBootWitnessTests.test_missing_or_invalid_snapshot_provenance_cannot_pass) (phase=1, field='store_id', value='')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_storage_test.py", line 81, in test_missing_or_invalid_snapshot_provenance_cannot_pass
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_missing_or_invalid_snapshot_provenance_cannot_pass (qemu_storage_test.TwoBootWitnessTests.test_missing_or_invalid_snapshot_provenance_cannot_pass) (phase=1, field='store_id', value='AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_storage_test.py", line 81, in test_missing_or_invalid_snapshot_provenance_cannot_pass
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_missing_or_invalid_snapshot_provenance_cannot_pass (qemu_storage_test.TwoBootWitnessTests.test_missing_or_invalid_snapshot_provenance_cannot_pass) (phase=1, field='snapshot_digest', value=None)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_storage_test.py", line 81, in test_missing_or_invalid_snapshot_provenance_cannot_pass
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_missing_or_invalid_snapshot_provenance_cannot_pass (qemu_storage_test.TwoBootWitnessTests.test_missing_or_invalid_snapshot_provenance_cannot_pass) (phase=1, field='snapshot_digest', value='')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_storage_test.py", line 81, in test_missing_or_invalid_snapshot_provenance_cannot_pass
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_missing_or_invalid_snapshot_provenance_cannot_pass (qemu_storage_test.TwoBootWitnessTests.test_missing_or_invalid_snapshot_provenance_cannot_pass) (phase=1, field='snapshot_digest', value='../config')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_storage_test.py", line 81, in test_missing_or_invalid_snapshot_provenance_cannot_pass
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_missing_or_invalid_snapshot_provenance_cannot_pass (qemu_storage_test.TwoBootWitnessTests.test_missing_or_invalid_snapshot_provenance_cannot_pass) (phase=1, field='snapshot_digest', value='CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_storage_test.py", line 81, in test_missing_or_invalid_snapshot_provenance_cannot_pass
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_missing_or_invalid_snapshot_provenance_cannot_pass (qemu_storage_test.TwoBootWitnessTests.test_missing_or_invalid_snapshot_provenance_cannot_pass) (phase=1, field='snapshot_revision', value=None)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_storage_test.py", line 81, in test_missing_or_invalid_snapshot_provenance_cannot_pass
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_missing_or_invalid_snapshot_provenance_cannot_pass (qemu_storage_test.TwoBootWitnessTests.test_missing_or_invalid_snapshot_provenance_cannot_pass) (phase=1, field='snapshot_revision', value=0)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_storage_test.py", line 81, in test_missing_or_invalid_snapshot_provenance_cannot_pass
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_missing_or_invalid_snapshot_provenance_cannot_pass (qemu_storage_test.TwoBootWitnessTests.test_missing_or_invalid_snapshot_provenance_cannot_pass) (phase=1, field='snapshot_revision', value=True)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_storage_test.py", line 81, in test_missing_or_invalid_snapshot_provenance_cannot_pass
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_missing_or_invalid_snapshot_provenance_cannot_pass (qemu_storage_test.TwoBootWitnessTests.test_missing_or_invalid_snapshot_provenance_cannot_pass) (phase=1, field='snapshot_revision', value=1)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_storage_test.py", line 81, in test_missing_or_invalid_snapshot_provenance_cannot_pass
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_missing_or_invalid_snapshot_provenance_cannot_pass (qemu_storage_test.TwoBootWitnessTests.test_missing_or_invalid_snapshot_provenance_cannot_pass) (phase=1, field='snapshot_revision', value=3)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_storage_test.py", line 81, in test_missing_or_invalid_snapshot_provenance_cannot_pass
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_same_boot_wrong_fallback_or_changed_data_cannot_pass (qemu_storage_test.TwoBootWitnessTests.test_same_boot_wrong_fallback_or_changed_data_cannot_pass) (field='store_id')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_storage_test.py", line 59, in test_same_boot_wrong_fallback_or_changed_data_cannot_pass
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_same_boot_wrong_fallback_or_changed_data_cannot_pass (qemu_storage_test.TwoBootWitnessTests.test_same_boot_wrong_fallback_or_changed_data_cannot_pass) (field='snapshot_digest')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_storage_test.py", line 59, in test_same_boot_wrong_fallback_or_changed_data_cannot_pass
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_same_boot_wrong_fallback_or_changed_data_cannot_pass (qemu_storage_test.TwoBootWitnessTests.test_same_boot_wrong_fallback_or_changed_data_cannot_pass) (field='snapshot_revision')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_storage_test.py", line 59, in test_same_boot_wrong_fallback_or_changed_data_cannot_pass
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.011s
+
+FAILED (failures=27)

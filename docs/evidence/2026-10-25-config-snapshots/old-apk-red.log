@@ -1,0 +1,26 @@
+=== RUN   TestDaemonConfigurationAndRecovery
+    daemon_test.go:67: isolated daemon fixture: exit status 1
+        === RUN   TestDaemonConfigurationAndRecovery
+            daemon_test.go:217: actual snapshot CLI did not capture confirmed revision: exit status 1 {"time":"2026-10-25T05:11:23.252667859Z","level":"ERROR","msg":"routerd stopped","error":"unknown config command"}
+            daemon_test.go:125: executable FD diagnostics before shutdown:
+                image=modules pid=1726961 fd=7 flags=02100000 writer=false
+                image=modules pid=1726977 fd=4 flags=0100000 writer=false
+                image=modules pid=1726981 fd=4 flags=0100000 writer=false
+                image=modules pid=1726982 fd=4 flags=0100000 writer=false
+                image=modules pid=1727049 fd=4 flags=0100000 writer=false
+                image=logging pid=1726961 fd=4 flags=02100000 writer=false
+                image=logging pid=1726972 fd=4 flags=0100000 writer=false
+                supervisor_fd4="/tmp/routerd-startup-snapshot-red.aO90h4/bin/routerd-logging"
+            daemon_test.go:140: console: {"timestamp":"2026-10-25T05:11:22.414322822Z","module":"supervisor","pid":1726961,"generation":0,"level":"INFO","message":"worker started","attributes":{"generation":1,"module":"logging","pid":1726972},"producer_epoch":"fe9655d7a61a332da0bf5d22dfc1441d","producer_sequence":1,"delivery":"console_fallback"}
+                ROUTERD_READY
+                ROUTERD_READY
+                {"timestamp":"2026-10-25T05:11:23.350168291Z","module":"supervisor","pid":1726961,"generation":0,"level":"INFO","message":"worker exited","attributes":{"exit":0,"module":"network","pid":1726977,"signal":"","state":"stopped"},"producer_epoch":"fe9655d7a61a332da0bf5d22dfc1441d","producer_sequence":10,"producer_dropped":1,"delivery":"console_fallback"}
+                {"timestamp":"2026-10-25T05:11:23.351177507Z","module":"supervisor","pid":1726961,"generation":0,"level":"INFO","message":"worker exited","attributes":{"exit":0,"module":"management","pid":1726982,"signal":"","state":"stopped"},"producer_epoch":"fe9655d7a61a332da0bf5d22dfc1441d","producer_sequence":11,"producer_dropped":2,"delivery":"console_fallback"}
+                {"timestamp":"2026-10-25T05:11:23.357426664Z","module":"supervisor","pid":1726961,"generation":0,"level":"INFO","message":"worker exited","attributes":{"exit":0,"module":"logging","pid":1726972,"signal":"","state":"stopped"},"producer_epoch":"fe9655d7a61a332da0bf5d22dfc1441d","producer_sequence":12,"producer_dropped":3,"delivery":"console_fallback"}
+                {"timestamp":"2026-10-25T05:11:23.367112611Z","module":"supervisor","pid":1726961,"generation":0,"level":"INFO","message":"worker exited","attributes":{"exit":0,"module":"service.dns","pid":1727049,"signal":"","state":"stopped"},"producer_epoch":"fe9655d7a61a332da0bf5d22dfc1441d","producer_sequence":13,"producer_dropped":4,"delivery":"console_fallback"}
+                {"timestamp":"2026-10-25T05:11:23.371904919Z","module":"supervisor","pid":1726961,"generation":0,"level":"INFO","message":"worker exited","attributes":{"exit":0,"module":"control","pid":1726981,"signal":"","state":"stopped"},"producer_epoch":"fe9655d7a61a332da0bf5d22dfc1441d","producer_sequence":14,"producer_dropped":5,"delivery":"console_fallback"}
+            daemon_test.go:142: module log:
+        --- FAIL: TestDaemonConfigurationAndRecovery (1.17s)
+        FAIL
+--- FAIL: TestDaemonConfigurationAndRecovery (1.26s)
+FAIL

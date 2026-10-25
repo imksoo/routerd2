@@ -10885,7 +10885,8 @@
     "implementation_status": "partial_signed_native_runtime_catalog_implemented",
     "prototype_compatibility": "None. Replace unreleased two-binary, boot, manifest and journal formats directly; no compatibility reader, shim bridge or prototype migration gate.",
     "first_supported_format": "The new extracted multi-binary runtime format.",
-    "implementation_evidence": "docs/evidence/2026-10-25-runtime-catalog.md"
+    "implementation_evidence": "docs/evidence/2026-10-25-runtime-catalog.md",
+    "startup_configuration_status": "durable store identity and immutable confirmed snapshots implemented; explicit startup adoption and runtime/configuration boot transaction pending"
   },
   "project_identity": {
     "routerd": {
@@ -11976,6 +11977,38 @@
         "all remaining resource/surface/work-package parity and selected hardware/NIC/arm64 execution/scale/long-run qualification remain"
       ],
       "parity_flags_unchanged": true
+    },
+    {
+      "id": "confirmed-config-snapshots",
+      "date": "2026-10-25",
+      "status": "partial_snapshot_capture_and_individual_acceptance_verified",
+      "code_checkpoint": "1fb91bc789a62845c68152c0b1ac495825a9882b",
+      "work_packages": [
+        "CORE-02",
+        "CORE-06",
+        "DIST-01"
+      ],
+      "evidence": "docs/evidence/2026-10-25-config-snapshots.md",
+      "implemented": [
+        "Required durable 128-bit store identity, retained through commits, confirmation rollback, health/metadata and worker restart; former identity-less prototype journal refused without seed replacement",
+        "Canonical immutable confirmed snapshot format1, full-byte SHA256 and typed store/revision/digest provenance; bounded private no-overwrite fsync/rename publication and verified resolution",
+        "Explicit local snapshot CLI and private API serialized with configuration writer; stale/unconfirmed capture rejected without kernel apply; 2MiB/128-entry capacity retains existing snapshots and permits same-revision replay",
+        "Real daemon CLI/restart oracle and two-kernel ext4 snapshot witness; host acceptance rejects missing/malformed/changed provenance"
+      ],
+      "validation": [
+        "API compile RED, ordinary identity replacement RED and negative two-boot host gate tests preserved; source test-first commits precede implementation",
+        "Clean make check/Race/vet/Python28/six static amd64+arm64 ELF builds99.04s; arm64 not executed",
+        "Prior actual APK rejected by new real daemon snapshot oracle1.38s at missing CLI; not a prior-product regression",
+        "Native actual3-command Race harness: signed catalog27.01s, offline publisher12.66s, DHCP10.35s, snapshot CLI/SSH/confirmed rollback/control SIGKILL9.30s, independent-two-WAN TCP/UDP/PCAP31.17s pass",
+        "Related individual QEMU gates: persistent ext4 two kernels150.12s guest/184.44s host with runtime fallback, unchanged snapshot store/revision/digest/config/host public identity/event ID/cursor; ordinary512MiB/2CPU SSH/snapshot28.42s and two-WAN/PBR81.53s pass; existing deadlines/RAM/CPU unchanged"
+      ],
+      "remaining": [
+        "Explicit startup reference resolution/adoption transaction tied to runtime/configuration selection, attempt generation, confirmation and compatible fallback; immutable capture is not boot selection",
+        "Snapshot write-time power cuts, actual ENOSPC and fsync-failure acceptance; safe reference-aware pruning; no automatic snapshot eviction",
+        "Small independent bootstrap, full config/state/kernel ABI and engine/runtime dependency/privilege separation; all remaining work packages and selected physical target acceptance",
+        "Current checkpoint OCI/APK execution and arm64 execution; previous catalog packaging evidence belongs to earlier product"
+      ],
+      "full_goal_status": "active"
     }
   ],
   "delivery_goal": {

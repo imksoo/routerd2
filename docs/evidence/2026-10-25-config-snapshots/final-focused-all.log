@@ -1,0 +1,4 @@
+ok      github.com/imksoo/routerd2/images/storage-test/guest    0.010s
+ok      github.com/imksoo/routerd2/internal/config      7.638s
+ok      github.com/imksoo/routerd2/internal/control     11.548s
+ok      github.com/imksoo/routerd2/cmd/routerd  (cached)

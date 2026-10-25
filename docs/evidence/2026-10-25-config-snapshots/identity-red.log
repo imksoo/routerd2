@@ -1,0 +1,5 @@
+--- FAIL: TestJournalIdentityCannotBeReplacedByOrdinarySave (0.03s)
+    snapshot_test.go:208: save replaced store identity
+FAIL
+FAIL    github.com/imksoo/routerd2/internal/config      0.036s
+FAIL
