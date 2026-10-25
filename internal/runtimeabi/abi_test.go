@@ -23,7 +23,7 @@ func TestCurrentRecordIsCanonicalBoundedAndCopied(t *testing.T) {
 		t.Fatal("caller mutated shared ABI declaration")
 	}
 	for _, bad := range []string{
-		"", CurrentRecord + " ", strings.Replace(CurrentRecord, `"version":1`, `"version":1,"version":1`, 1),
+		"", Prefix + "END", Prefix + Suffix, CurrentRecord + " ", strings.Replace(CurrentRecord, `"version":1`, `"version":1,"version":1`, 1),
 		strings.Replace(CurrentRecord, `"version":1`, `"Version":1`, 1),
 		strings.Replace(CurrentRecord, `"version":1`, `"version":1,"unknown":0`, 1),
 		strings.Repeat(" ", MaxRecordBytes+1),

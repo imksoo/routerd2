@@ -7,6 +7,8 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/json"
+	"errors"
+	"reflect"
 	"runtime"
 	"testing"
 
@@ -30,6 +32,78 @@ func TestSignedManifestABIMustMatchEveryNativeArtifact(t *testing.T) {
 	}
 	if state := mustState(t, s); state.Generation != 0 || state.Active != nil {
 		t.Fatal("bad ABI changed boot authority")
+	}
+}
+
+func stageDifferentABI(t *testing.T, s *Store, id string, sequence uint64) Ref {
+	t.Helper()
+	profile := runtimeabi.Current()
+	profile.ConfigurationContract = "resource-program-native-2"
+	record, err := runtimeabi.EncodeRecord(profile)
+	if err != nil || len(record) != len(runtimeabi.CurrentRecord) {
+		t.Fatal("bad ABI mutation fixture", err)
+	}
+	files := map[string][]byte{}
+	for name, data := range binariesFor(t, id) {
+		if bytes.Count(data, []byte(runtimeabi.CurrentRecord)) != 1 {
+			t.Fatal("fixture needs one compiled ABI record")
+		}
+		files[name] = bytes.Replace(data, []byte(runtimeabi.CurrentRecord), []byte(record), 1)
+	}
+	m, _, _ := signedFixture(t, id, sequence, files)
+	m.RuntimeABI = profile
+	raw, sig, err := SignManifest(m, testKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := []archiveEntry{{name: "manifest.json", body: raw}, {name: "manifest.sig", body: sig}, {name: "routerd", body: files["routerd"]}, {name: "routerd-modules", body: files["routerd-modules"]}}
+	ref, err := s.Stage(context.Background(), bytes.NewReader(fixtureArchive(t, entries)))
+	if err != nil {
+		t.Fatal("valid different ABI should stage for inspection", err)
+	}
+	return ref
+}
+
+func TestFormatChangingPrepareNeedsQualifiedMigrationNotJustCallbackSuccess(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	initializeFixture(t, s)
+	target := stageDifferentABI(t, s, "fixture-r2", 2)
+	before := mustState(t, s)
+	if _, err := s.Prepare(ctx, target, before.Generation, PrepareOptions{}); !errors.Is(err, runtimeabi.ErrIncompatible) {
+		t.Fatal("raw prepare accepted changed formats", err)
+	}
+	called := false
+	if _, err := s.PrepareChecked(ctx, target, before.Generation, PrepareOptions{}, func(context.Context, State, *Image) error { called = true; return nil }); !errors.Is(err, runtimeabi.ErrIncompatible) || called {
+		t.Fatal("callback success bypassed missing migration policy", err)
+	}
+	if !reflect.DeepEqual(mustState(t, s), before) {
+		t.Fatal("refused ABI transition changed authority")
+	}
+}
+
+func TestConfirmedRollbackCannotSelectDifferentFormatContract(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	base := initializeFixture(t, s)
+	target := stageDifferentABI(t, s, "fixture-r2", 2)
+	// Simulate an installer's later, separately qualified state transition.
+	// A direct rollback still needs its own compatibility/migration policy.
+	state, err := s.next(mustState(t, s), "rollback")
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.Active = &target
+	state.Previous = &base
+	state.HighWatermark = 2
+	if err := s.commit(state); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Rollback(ctx, state.Generation, "changed format rollback"); !errors.Is(err, runtimeabi.ErrIncompatible) {
+		t.Fatal("rollback accepted changed formats", err)
+	}
+	if !reflect.DeepEqual(mustState(t, s), state) {
+		t.Fatal("refused rollback changed selector")
 	}
 }
 
