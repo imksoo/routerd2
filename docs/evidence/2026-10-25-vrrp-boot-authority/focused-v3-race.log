@@ -1,0 +1,36 @@
+=== RUN   TestOriginalBootOwnershipIgnoresUTCAndExpiresAtExactTick
+--- PASS: TestOriginalBootOwnershipIgnoresUTCAndExpiresAtExactTick (0.00s)
+=== RUN   TestObservationPublisherCannotResurrectExpiredOrRewoundAuthority
+--- PASS: TestObservationPublisherCannotResurrectExpiredOrRewoundAuthority (0.00s)
+=== RUN   TestSnapshotRejectsMalformedBootAuthorityAndOverlongLease
+--- PASS: TestSnapshotRejectsMalformedBootAuthorityAndOverlongLease (0.00s)
+=== RUN   TestRuntimeWaitsForOwnershipAndWithdrawsGracefully
+--- PASS: TestRuntimeWaitsForOwnershipAndWithdrawsGracefully (0.00s)
+=== RUN   TestFailedOrExpiredActivationNeverAdvertises
+=== RUN   TestFailedOrExpiredActivationNeverAdvertises/apply
+=== RUN   TestFailedOrExpiredActivationNeverAdvertises/verify
+=== RUN   TestFailedOrExpiredActivationNeverAdvertises/expired_acknowledgement
+--- PASS: TestFailedOrExpiredActivationNeverAdvertises (0.03s)
+    --- PASS: TestFailedOrExpiredActivationNeverAdvertises/apply (0.00s)
+    --- PASS: TestFailedOrExpiredActivationNeverAdvertises/verify (0.00s)
+    --- PASS: TestFailedOrExpiredActivationNeverAdvertises/expired_acknowledgement (0.03s)
+=== RUN   TestActiveAdvertisementsRenewAcknowledgedLease
+--- PASS: TestActiveAdvertisementsRenewAcknowledgedLease (0.10s)
+PASS
+ok      github.com/imksoo/routerd2/internal/protocol/vrrp       1.155s
+=== RUN   TestVRRPOwnershipExpiresOnMonotonicReceiptAndRejectsPolicySpoof
+--- PASS: TestVRRPOwnershipExpiresOnMonotonicReceiptAndRejectsPolicySpoof (0.03s)
+=== RUN   TestVRRPWallClockAloneCannotAuthorizeOwnership
+--- PASS: TestVRRPWallClockAloneCannotAuthorizeOwnership (0.02s)
+=== RUN   TestVRRPBootDeadlineReachesKernelWithoutUTCConversion
+=== RUN   TestVRRPBootDeadlineReachesKernelWithoutUTCConversion/-48h0m0s
+=== RUN   TestVRRPBootDeadlineReachesKernelWithoutUTCConversion/48h0m0s
+--- PASS: TestVRRPBootDeadlineReachesKernelWithoutUTCConversion (0.05s)
+    --- PASS: TestVRRPBootDeadlineReachesKernelWithoutUTCConversion/-48h0m0s (0.02s)
+    --- PASS: TestVRRPBootDeadlineReachesKernelWithoutUTCConversion/48h0m0s (0.03s)
+=== RUN   TestVRRPColdControlRejectsRetiredSupervisorGeneration
+--- PASS: TestVRRPColdControlRejectsRetiredSupervisorGeneration (0.02s)
+=== RUN   TestVRRPFinalWithdrawalAndClockCannotBeReplayedIntoOwnership
+--- PASS: TestVRRPFinalWithdrawalAndClockCannotBeReplayedIntoOwnership (0.03s)
+PASS
+ok      github.com/imksoo/routerd2/internal/runtimeplan 1.194s

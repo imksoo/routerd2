@@ -1,0 +1,10 @@
+=== RUN   TestClockFixtureSocketSurvivesNamespaceChildExec
+=== RUN   TestClockFixtureSocketSurvivesNamespaceChildExec/TestDaemonDHCPv4ClockCorrections
+=== RUN   TestClockFixtureSocketSurvivesNamespaceChildExec/TestDaemonVRRPClockCorrections
+    clock_forward_test.go:25: dedicated clock fixture omitted inherited socket TestDaemonVRRPClockCorrections <nil> 0
+--- FAIL: TestClockFixtureSocketSurvivesNamespaceChildExec (1.03s)
+    --- PASS: TestClockFixtureSocketSurvivesNamespaceChildExec/TestDaemonDHCPv4ClockCorrections (1.03s)
+    --- FAIL: TestClockFixtureSocketSurvivesNamespaceChildExec/TestDaemonVRRPClockCorrections (0.00s)
+FAIL
+FAIL    github.com/imksoo/routerd2/internal/integration 1.055s
+FAIL

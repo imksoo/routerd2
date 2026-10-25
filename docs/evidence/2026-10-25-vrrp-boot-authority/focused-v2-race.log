@@ -1,0 +1,26 @@
+=== RUN   TestOriginalBootOwnershipIgnoresUTCAndExpiresAtExactTick
+--- PASS: TestOriginalBootOwnershipIgnoresUTCAndExpiresAtExactTick (0.00s)
+=== RUN   TestObservationPublisherCannotResurrectExpiredOrRewoundAuthority
+--- PASS: TestObservationPublisherCannotResurrectExpiredOrRewoundAuthority (0.00s)
+=== RUN   TestSnapshotRejectsMalformedBootAuthorityAndOverlongLease
+--- PASS: TestSnapshotRejectsMalformedBootAuthorityAndOverlongLease (0.00s)
+=== RUN   TestRuntimeWaitsForOwnershipAndWithdrawsGracefully
+--- PASS: TestRuntimeWaitsForOwnershipAndWithdrawsGracefully (0.00s)
+=== RUN   TestFailedOrExpiredActivationNeverAdvertises
+=== RUN   TestFailedOrExpiredActivationNeverAdvertises/apply
+=== RUN   TestFailedOrExpiredActivationNeverAdvertises/verify
+=== RUN   TestFailedOrExpiredActivationNeverAdvertises/expired_acknowledgement
+--- PASS: TestFailedOrExpiredActivationNeverAdvertises (0.03s)
+    --- PASS: TestFailedOrExpiredActivationNeverAdvertises/apply (0.00s)
+    --- PASS: TestFailedOrExpiredActivationNeverAdvertises/verify (0.00s)
+    --- PASS: TestFailedOrExpiredActivationNeverAdvertises/expired_acknowledgement (0.03s)
+=== RUN   TestActiveAdvertisementsRenewAcknowledgedLease
+--- PASS: TestActiveAdvertisementsRenewAcknowledgedLease (0.10s)
+PASS
+ok      github.com/imksoo/routerd2/internal/protocol/vrrp       1.157s
+FAIL    github.com/imksoo/routerd2/internal/runtimeplan [build failed]
+FAIL
+# github.com/imksoo/routerd2/internal/runtimeplan [github.com/imksoo/routerd2/internal/runtimeplan.test]
+internal/runtimeplan/vrrp_clock_test.go:59:13: opts.BootID undefined (type network.AddressOptions has no field or method BootID)
+internal/runtimeplan/vrrp_clock_test.go:59:40: opts.ValidNanos undefined (type network.AddressOptions has no field or method ValidNanos)
+internal/runtimeplan/vrrp_clock_test.go:59:77: opts.PreferredNanos undefined (type network.AddressOptions has no field or method PreferredNanos)

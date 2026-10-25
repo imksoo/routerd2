@@ -1,0 +1,8 @@
+=== RUN   TestClockFixtureSocketSurvivesNamespaceChildExec
+=== RUN   TestClockFixtureSocketSurvivesNamespaceChildExec/TestDaemonDHCPv4ClockCorrections
+=== RUN   TestClockFixtureSocketSurvivesNamespaceChildExec/TestDaemonVRRPClockCorrections
+--- PASS: TestClockFixtureSocketSurvivesNamespaceChildExec (2.05s)
+    --- PASS: TestClockFixtureSocketSurvivesNamespaceChildExec/TestDaemonDHCPv4ClockCorrections (1.03s)
+    --- PASS: TestClockFixtureSocketSurvivesNamespaceChildExec/TestDaemonVRRPClockCorrections (1.03s)
+PASS
+ok      github.com/imksoo/routerd2/internal/integration 3.084s

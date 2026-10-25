@@ -1,0 +1,24 @@
+{
+  "source_commit": "521d1512c588b5578bd6fddb77c626e164b83d2f",
+  "source_dirty": false,
+  "product_commit": "c0f214bb65bfd7b7c15da9f2e76f05fa6a4950f9",
+  "same_six_product_elf": true,
+  "prior_failed_campaign_preserved": "dist/goal-validation/vrrp-boot-qemu",
+  "scope": "Fixture-only clock socket forwarding correction, no host mutation; no deadline/CPU/RAM increases; local inherited socket RED/fix/Race verified before new QEMU run",
+  "tests": [
+    {
+      "gate": "daemon-vrrp-clock",
+      "exit_code": 0,
+      "passed": true,
+      "elapsed_seconds": 45.07,
+      "guest_seconds": 33.3
+    },
+    {
+      "gate": "daemon-dhcp4-clock",
+      "exit_code": 0,
+      "passed": true,
+      "elapsed_seconds": 40.07,
+      "guest_seconds": 29.43
+    }
+  ]
+}

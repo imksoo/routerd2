@@ -1,0 +1,348 @@
+{
+  "recorded_at_utc": "2026-10-25T13:23:51.680663+00:00",
+  "product_checkpoint": "c0f214bb65bfd7b7c15da9f2e76f05fa6a4950f9",
+  "fixture_checkpoint": "521d1512c588b5578bd6fddb77c626e164b83d2f",
+  "same_six_product_elf": true,
+  "full_goal_status": "active",
+  "physical_target_qualified": false,
+  "scope": "Original VRRP boot ownership through real worker/control/kernel, registry and terminal fences, native peer elections, VIP traffic/expiry/reapply and actual guest UTC corrections; unconditional VRRP only, no full HA/privilege isolation claim",
+  "normalizations": [
+    "workspace/toolchain paths",
+    "ANSI, tabs, CRLF, trailing whitespace",
+    "public kernel certificate ID"
+  ],
+  "raw_artifacts": [
+    {
+      "public_name": "wall-only-red.log",
+      "private_source": "dist/goal-validation/vrrp-boot-wall-only-red.log",
+      "raw_sha256": "b1dadc26babe4397d9ee7fe3c8b46b97d2801f50ed7679d02d28f73de77b9257",
+      "stage": "local test-first/development; not clean acceptance"
+    },
+    {
+      "public_name": "wall-only-red.json",
+      "private_source": "dist/goal-validation/vrrp-boot-wall-only-red.json",
+      "raw_sha256": "10f991a6729c83e2d0e24db9534219c1e4a858b1fd7e8cdff52f49a89a628205",
+      "stage": "local test-first/development; not clean acceptance"
+    },
+    {
+      "public_name": "api-red.log",
+      "private_source": "dist/goal-validation/vrrp-boot-api-red.log",
+      "raw_sha256": "1b14b4c7ed5ae32a1354cc0ba04bae012a3979c20db2025730ab2e31345ca402",
+      "stage": "local test-first/development; not clean acceptance"
+    },
+    {
+      "public_name": "api-red.json",
+      "private_source": "dist/goal-validation/vrrp-boot-api-red.json",
+      "raw_sha256": "e6d3a3464f8077525134036a64975e715390e181afc76d76266cb5011c6cf3ce",
+      "stage": "local test-first/development; not clean acceptance"
+    },
+    {
+      "public_name": "clock-gate-red.log",
+      "private_source": "dist/goal-validation/vrrp-boot-clock-gate-red.log",
+      "raw_sha256": "db509570ac00d953da173b27e44889ad2c8580ca06a1ccab47de87b0b1cd8347",
+      "stage": "local test-first/development; not clean acceptance"
+    },
+    {
+      "public_name": "clock-gate-red.json",
+      "private_source": "dist/goal-validation/vrrp-boot-clock-gate-red.json",
+      "raw_sha256": "58c87629d2a845451d8dd4b4c3292ca7c070b9670bf642fad896e13cde2a2a41",
+      "stage": "local test-first/development; not clean acceptance"
+    },
+    {
+      "public_name": "focused-race.log",
+      "private_source": "dist/goal-validation/vrrp-boot-focused-race.log",
+      "raw_sha256": "d7f831a7844a7a2879b2ff15aa8ff7eea18fe066e86a2074fe2325f3850ba564",
+      "stage": "local test-first/development; not clean acceptance"
+    },
+    {
+      "public_name": "focused-race.json",
+      "private_source": "dist/goal-validation/vrrp-boot-focused-race.json",
+      "raw_sha256": "e77406494a0f152f8c5436d91115e615adde528d00e0d0c713fc2dec7fcb2982",
+      "stage": "local test-first/development; not clean acceptance"
+    },
+    {
+      "public_name": "focused-v2-race.log",
+      "private_source": "dist/goal-validation/vrrp-boot-focused-v2-race.log",
+      "raw_sha256": "229ed2acf641e34f317719f4ab87b8c33a760b6fda0912d012a3bbf4e9eaa31f",
+      "stage": "local test-first/development; not clean acceptance"
+    },
+    {
+      "public_name": "focused-v2-race.json",
+      "private_source": "dist/goal-validation/vrrp-boot-focused-v2-race.json",
+      "raw_sha256": "a4b19237801d04e18b412cde00db819e5e60577cc7bc84c9463bdd843be66756",
+      "stage": "local test-first/development; not clean acceptance"
+    },
+    {
+      "public_name": "focused-v3-race.log",
+      "private_source": "dist/goal-validation/vrrp-boot-focused-v3-race.log",
+      "raw_sha256": "48214517530f0281801593a47bd55e33876ef854d367d8059879c86dfabc0f2c",
+      "stage": "local test-first/development; not clean acceptance"
+    },
+    {
+      "public_name": "focused-v3-race.json",
+      "private_source": "dist/goal-validation/vrrp-boot-focused-v3-race.json",
+      "raw_sha256": "cf1d9d0e9d3083d8eec60fe592e408e0592ba5dd8942b0725bfa39623cda60ce",
+      "stage": "local test-first/development; not clean acceptance"
+    },
+    {
+      "public_name": "related-race.log",
+      "private_source": "dist/goal-validation/vrrp-boot-related-race.log",
+      "raw_sha256": "ab1b163e5525e99815814fec4d65ba13e7126e6d20321cfaa41651f73175e1ee",
+      "stage": "local test-first/development; not clean acceptance"
+    },
+    {
+      "public_name": "related-race.json",
+      "private_source": "dist/goal-validation/vrrp-boot-related-race.json",
+      "raw_sha256": "8b4a7aeae615ad8c5d2937aa69ad2d4c24658f399e99059cb663ae5f4bb15c72",
+      "stage": "local test-first/development; not clean acceptance"
+    },
+    {
+      "public_name": "final-focused-race.log",
+      "private_source": "dist/goal-validation/vrrp-boot-final-focused-race.log",
+      "raw_sha256": "5cf693d21e76d20eb51da14fdbf1b8e57536d751f9307e8731a79f3f13fc6af7",
+      "stage": "local test-first/development; not clean acceptance"
+    },
+    {
+      "public_name": "final-focused-race.json",
+      "private_source": "dist/goal-validation/vrrp-boot-final-focused-race.json",
+      "raw_sha256": "ec858b00d26c57fe5f0264012f415d3b402446d29c87d784d01056f18bdb728a",
+      "stage": "local test-first/development; not clean acceptance"
+    },
+    {
+      "public_name": "fd-forward-red.log",
+      "private_source": "dist/goal-validation/vrrp-boot-fd-forward-red.log",
+      "raw_sha256": "499549b474ae8f66c93b79079bd392023a74ce827685e5fcc3bd0395bdd06f9a",
+      "stage": "local test-first/development; not clean acceptance"
+    },
+    {
+      "public_name": "fd-forward-red.json",
+      "private_source": "dist/goal-validation/vrrp-boot-fd-forward-red.json",
+      "raw_sha256": "b677b5118439daa3939fddbee38ff754110daa97af63380aaaa15e361723a623",
+      "stage": "local test-first/development; not clean acceptance"
+    },
+    {
+      "public_name": "fd-forward-race.log",
+      "private_source": "dist/goal-validation/vrrp-boot-fd-forward-race.log",
+      "raw_sha256": "7b2bf261b155c9a2011b151644fa56992507c8250f0be4196da514243ae4daeb",
+      "stage": "local test-first/development; not clean acceptance"
+    },
+    {
+      "public_name": "fd-forward-race.json",
+      "private_source": "dist/goal-validation/vrrp-boot-fd-forward-race.json",
+      "raw_sha256": "28fb8467be72df7d4d0ea9a20b9c8b55ecfcad9006476fd85bc1dd9cef11bd38",
+      "stage": "local test-first/development; not clean acceptance"
+    },
+    {
+      "public_name": "diagnostic-build.log",
+      "private_source": "dist/goal-validation/vrrp-boot-diagnostic-build.log",
+      "raw_sha256": "cdd18bb923b778a6c50d8ce1f191ec65155780abff73dbeecc2ae0e91d4fe8e3",
+      "stage": "dirty development diagnostic, not clean acceptance"
+    },
+    {
+      "public_name": "native-diagnostic.log",
+      "private_source": "dist/goal-validation/vrrp-boot-native-diagnostic.log",
+      "raw_sha256": "fa8030b4135db3b3a959f13b2629b511060c61f8aaf0b945ac5bdcbf7fd35d2d",
+      "stage": "dirty development diagnostic, not clean acceptance"
+    },
+    {
+      "public_name": "check-build.log",
+      "private_source": "dist/goal-validation/vrrp-boot-check-build.log",
+      "raw_sha256": "14183bf22aaba2610355ac3e7a7fc9914cfbe95323da3cb27508828c6e2a78ec",
+      "stage": "clean source acceptance; source in manifest"
+    },
+    {
+      "public_name": "build-manifest.json",
+      "private_source": "dist/goal-validation/vrrp-boot-build-manifest.json",
+      "raw_sha256": "529040f8d9533bc5203db4a3e60b49f19c9edb4d05853291822e521f75b6eb72",
+      "stage": "clean source acceptance; source in manifest"
+    },
+    {
+      "public_name": "final-check-build.log",
+      "private_source": "dist/goal-validation/vrrp-boot-final-check-build.log",
+      "raw_sha256": "9f448f0e1fdd75d988acc90f95d02b0929aa315a2c32fbae568e38c8c0e5071d",
+      "stage": "clean source acceptance; source in manifest"
+    },
+    {
+      "public_name": "final-build-manifest.json",
+      "private_source": "dist/goal-validation/vrrp-boot-final-build-manifest.json",
+      "raw_sha256": "85eaf57de73396d09b30d2d1c4493bd2d054a7cbdac23e3288d2c96f7fb4cbe0",
+      "stage": "clean source acceptance; source in manifest"
+    },
+    {
+      "public_name": "native-manifest.json",
+      "private_source": "dist/goal-validation/vrrp-boot-native-manifest.json",
+      "raw_sha256": "49f6b640d6d710d1eb9c1b4486964f9f7cfe9298b741c30a54ae652adefd66fe",
+      "stage": "clean source acceptance; source in manifest"
+    },
+    {
+      "public_name": "TestBuiltRuntimeCatalog.log",
+      "private_source": "dist/goal-validation/vrrp-boot-native-TestBuiltRuntimeCatalog.log",
+      "raw_sha256": "10a7bf546243f092f05795625a6ee7f8f7d3d5bec3d2005d242fdbfecddfabef",
+      "stage": "clean product c0f214bb65bfd7b7c15da9f2e76f05fa6a4950f9"
+    },
+    {
+      "public_name": "TestPublishBuiltRelease.log",
+      "private_source": "dist/goal-validation/vrrp-boot-native-TestPublishBuiltRelease.log",
+      "raw_sha256": "831937b2becbc03020bbaa9999c51fad4282074549e1d550eb0cfd223edb74db",
+      "stage": "clean product c0f214bb65bfd7b7c15da9f2e76f05fa6a4950f9"
+    },
+    {
+      "public_name": "TestDaemonDHCPv4OriginalLeaseAuthority.log",
+      "private_source": "dist/goal-validation/vrrp-boot-native-TestDaemonDHCPv4OriginalLeaseAuthority.log",
+      "raw_sha256": "5a25dc8595a661d5dc483f4918a24d61f8da8945debb6bbdf4a2ef5adc5c51e1",
+      "stage": "clean product c0f214bb65bfd7b7c15da9f2e76f05fa6a4950f9"
+    },
+    {
+      "public_name": "TestDaemonConfigurationAndRecovery.log",
+      "private_source": "dist/goal-validation/vrrp-boot-native-TestDaemonConfigurationAndRecovery.log",
+      "raw_sha256": "70767e7b1c7dc830d31f5be28ebf50ca851d099c658c7d7868117a6dd9f9695e",
+      "stage": "clean product c0f214bb65bfd7b7c15da9f2e76f05fa6a4950f9"
+    },
+    {
+      "public_name": "TestDaemonStartupSelectionAndRecovery.log",
+      "private_source": "dist/goal-validation/vrrp-boot-native-TestDaemonStartupSelectionAndRecovery.log",
+      "raw_sha256": "7013592a18c9d7a325d21addb2fae95466970ad943892701d2172a2c4e7926ff",
+      "stage": "clean product c0f214bb65bfd7b7c15da9f2e76f05fa6a4950f9"
+    },
+    {
+      "public_name": "TestDaemonConditionalStartupRecovery.log",
+      "private_source": "dist/goal-validation/vrrp-boot-native-TestDaemonConditionalStartupRecovery.log",
+      "raw_sha256": "8db03f2df827c0a847c223aefa31f4a5d0ee464132b7043d1b2e8921fab21afa",
+      "stage": "clean product c0f214bb65bfd7b7c15da9f2e76f05fa6a4950f9"
+    },
+    {
+      "public_name": "TestDaemonHealthPBRFailoverAndRecovery.log",
+      "private_source": "dist/goal-validation/vrrp-boot-native-TestDaemonHealthPBRFailoverAndRecovery.log",
+      "raw_sha256": "34b5523cc2b72d722362b6de28757fa8e36da27d03d56aad4271e0f4aa5aa5e7",
+      "stage": "clean product c0f214bb65bfd7b7c15da9f2e76f05fa6a4950f9"
+    },
+    {
+      "public_name": "TestDaemonVRRPOriginalOwnership.log",
+      "private_source": "dist/goal-validation/vrrp-boot-native-TestDaemonVRRPOriginalOwnership.log",
+      "raw_sha256": "0d46e89f78b49a3e67bfc003bd5a8e91d9e7b5c35e2135334cfb857be2533d55",
+      "stage": "clean product c0f214bb65bfd7b7c15da9f2e76f05fa6a4950f9"
+    },
+    {
+      "public_name": "TestIsolatedNativeVRRP.log",
+      "private_source": "dist/goal-validation/vrrp-boot-native-TestIsolatedNativeVRRP.log",
+      "raw_sha256": "6e472b2416cf6ba294e1ebf934340c0ec08d23ccd8879a8f739f690d136d8d7a",
+      "stage": "clean product c0f214bb65bfd7b7c15da9f2e76f05fa6a4950f9"
+    },
+    {
+      "public_name": "initial-qemu-source.json",
+      "private_source": "dist/goal-validation/vrrp-boot-qemu/source.json",
+      "raw_sha256": "463ea439ba56303fc965b12513c30655966d77642f1b86f6297c58b7ba6e3e6e",
+      "stage": "campaign provenance including any failed run"
+    },
+    {
+      "public_name": "initial-vrrp-host.log",
+      "private_source": "dist/goal-validation/vrrp-boot-qemu/vrrp-host.log",
+      "raw_sha256": "a1aa8f39117e1368dd629e8cf06a5aba64fb02ac2c15e78115b916dbde4aa481",
+      "stage": "passed acceptance"
+    },
+    {
+      "public_name": "initial-vrrp-manifest.json",
+      "private_source": "dist/goal-validation/vrrp-boot-qemu/vrrp/manifest.json",
+      "raw_sha256": "1b72ddfbdfdb090f35bb845f5d8b54731ea2927b41e168bba6f13708055be980",
+      "stage": "passed acceptance"
+    },
+    {
+      "public_name": "initial-vrrp-qemu-serial.log",
+      "private_source": "dist/goal-validation/vrrp-boot-qemu/vrrp/qemu-serial.log",
+      "raw_sha256": "8e9e7ec3e2bad563cca619f95a7fe98399482398cacb8dc5fb4dc5b09275a10c",
+      "stage": "passed acceptance"
+    },
+    {
+      "public_name": "initial-daemon-vrrp-clock-host.log",
+      "private_source": "dist/goal-validation/vrrp-boot-qemu/daemon-vrrp-clock-host.log",
+      "raw_sha256": "380fda0cd9632a3ed97075c7bae1e99fc6db2822b651d24a16d67a414441ed82",
+      "stage": "failed guest fixture, not acceptance"
+    },
+    {
+      "public_name": "initial-daemon-vrrp-clock-manifest.json",
+      "private_source": "dist/goal-validation/vrrp-boot-qemu/daemon-vrrp-clock/manifest.json",
+      "raw_sha256": "08a9d5ef5aa6c30e07202269e10ebaf27f08a1201575765e017f86bbbb86fffd",
+      "stage": "failed guest fixture, not acceptance"
+    },
+    {
+      "public_name": "initial-daemon-vrrp-clock-qemu-serial.log",
+      "private_source": "dist/goal-validation/vrrp-boot-qemu/daemon-vrrp-clock/qemu-serial.log",
+      "raw_sha256": "d3611abf4550865ab647a549dd97b632cd6561a07a0c4c18a79779c56c5c517c",
+      "stage": "failed guest fixture, not acceptance"
+    },
+    {
+      "public_name": "final-qemu-source.json",
+      "private_source": "dist/goal-validation/vrrp-boot-qemu-final/source.json",
+      "raw_sha256": "dc333f3fbee30e4608503e04809e84b5342b8460852339a989e5835fcaf8b70f",
+      "stage": "campaign provenance including any failed run"
+    },
+    {
+      "public_name": "final-daemon-vrrp-clock-host.log",
+      "private_source": "dist/goal-validation/vrrp-boot-qemu-final/daemon-vrrp-clock-host.log",
+      "raw_sha256": "9bd94e10a8b380e867ae0fcd887d3b0cbc555454f6fd25ff724e5230c05ba1b7",
+      "stage": "passed acceptance"
+    },
+    {
+      "public_name": "final-daemon-vrrp-clock-manifest.json",
+      "private_source": "dist/goal-validation/vrrp-boot-qemu-final/daemon-vrrp-clock/manifest.json",
+      "raw_sha256": "f3edb316514a9c4ede687938311763ee30707708d611fc5bfe06407f9c238964",
+      "stage": "passed acceptance"
+    },
+    {
+      "public_name": "final-daemon-vrrp-clock-qemu-serial.log",
+      "private_source": "dist/goal-validation/vrrp-boot-qemu-final/daemon-vrrp-clock/qemu-serial.log",
+      "raw_sha256": "20835bd11852f7654dce7eb67dc6f5022e0eb73cda3a0cb793b615bdb4a3f8c7",
+      "stage": "passed acceptance"
+    },
+    {
+      "public_name": "final-daemon-dhcp4-clock-host.log",
+      "private_source": "dist/goal-validation/vrrp-boot-qemu-final/daemon-dhcp4-clock-host.log",
+      "raw_sha256": "1e9fcb2b5c1276c88db81c9508fd9ea07167b1ab81e22e58a9bb04ee212b03f4",
+      "stage": "passed acceptance"
+    },
+    {
+      "public_name": "final-daemon-dhcp4-clock-manifest.json",
+      "private_source": "dist/goal-validation/vrrp-boot-qemu-final/daemon-dhcp4-clock/manifest.json",
+      "raw_sha256": "722ab215abbef0ce97411c71f7088c6ccb8684233a358cbec33835b77ce47b84",
+      "stage": "passed acceptance"
+    },
+    {
+      "public_name": "final-daemon-dhcp4-clock-qemu-serial.log",
+      "private_source": "dist/goal-validation/vrrp-boot-qemu-final/daemon-dhcp4-clock/qemu-serial.log",
+      "raw_sha256": "1e944df121945dc5c4525cbcc31b2b22d43935d2fccbebefeb01d564ce8bc953",
+      "stage": "passed acceptance"
+    }
+  ],
+  "private_packet_captures": [
+    {
+      "stage": "clean_acceptance",
+      "private_source": "dist/goal-validation/vrrp-boot-native-packets/dhcp4-authority/wan0.pcap",
+      "bytes": 9148,
+      "sha256": "c9c89aaeda12bd1f375ff18c9bcc7d5c4883383828ed6acc1a1c583f73a1f061"
+    },
+    {
+      "stage": "clean_acceptance",
+      "private_source": "dist/goal-validation/vrrp-boot-native-packets/vrrp-authority/lan0.pcap",
+      "bytes": 4400,
+      "sha256": "7bef5d9db1b32e2e67d3572c05dc6083fef371eb308764a68803d691be8d37e4"
+    },
+    {
+      "stage": "clean_acceptance",
+      "private_source": "dist/goal-validation/vrrp-boot-native-packets/wan0.pcap",
+      "bytes": 32127,
+      "sha256": "c2e7e434e36c568847f3b6faa4823598a43c0ef349932f0423abe70bc19730be"
+    },
+    {
+      "stage": "clean_acceptance",
+      "private_source": "dist/goal-validation/vrrp-boot-native-packets/wan1.pcap",
+      "bytes": 33003,
+      "sha256": "a788612edf0a5546c785c7c29db57535a4a2d99588ec7c95f3b1d9aec8180804"
+    },
+    {
+      "stage": "dirty_diagnostic",
+      "private_source": "dist/goal-validation/vrrp-boot-native-diagnostic-packets/vrrp-authority/lan0.pcap",
+      "bytes": 5004,
+      "sha256": "ea32627aca0215a298836c64f2c2271473b72d2ee474a2572a0f939fe739284d"
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+=== RUN   TestClockControllerAcceptsOnlyTheTwoDedicatedClockFixtures
+    controller_test.go:24: fixed dedicated clock fixture rejected daemon-vrrp-clock clock correction requires the dedicated guest PID 1
+--- FAIL: TestClockControllerAcceptsOnlyTheTwoDedicatedClockFixtures (0.00s)
+FAIL
+FAIL    github.com/imksoo/routerd2/internal/clocktest   0.004s
+FAIL

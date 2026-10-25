@@ -7,7 +7,14 @@
 部分checkpointでゴールを完了にせず、実装・検証・未検証と証跡を更新する。
 対象機種・NIC・性能条件の確認と並行して、独立して進められる実装・隔離VM検証を続ける。
 
-最新product checkpointは `35c24d1`。applianceは`OpenForBoot`で既存journalの検査と起動選択を先に完了し、破損したpending payloadが通常openを妨げる前に検証済みbaselineへ戻す。
+最新product checkpointは `c0f214b`、fixtureは `521d151`。VRRP所有権の元boot ID/ObservedNanos/ExpiresNanosをworker→control→fact→kernel addressへ接続した。
+UTCのvalid_untilは表示だけとし、同じ通知・projection再適用・UTC補正で期限を延長しない。controlのcold startからsupervisor現行世代を照合し、巻戻し・epoch変更・終了後Active・期限切れ選出の再生を拒否する。
+BACKUPは1秒ごとに有限false観測を更新し、INITIALIZEはゼロ期限で失効する。ACTIVEは期限切れ後に同じ選出transitionで再広告しない。
+全体check/Race/vet/Python32/6 ELF build287.23秒、native9はPASS。QEMU二peerはPASS、最初のclock試験は子execへのFD欠落でFAIL。
+局所socket継承REDからfixtureを修正。最終check/build15.42秒PASS、製品6 SHAは不変。QEMU実VRRP UTC補正と既存DHCP clock回帰はPASS。失敗と各sourceを併記する。
+[元VRRP boot authorityの証跡・境界・残作業](evidence/2026-10-25-vrrp-boot-authority.md) を参照。無条件VRRPの受入であり、条件付きACK順序・HA-01/全残計画・実機受入は未完了。全体ゴールはactive。
+
+前回product checkpointは `35c24d1`。applianceは`OpenForBoot`で既存journalの検査と起動選択を先に完了し、破損したpending payloadが通常openを妨げる前に検証済みbaselineへ戻す。
 selector/checksum/世代/参照linkと全noncandidate payloadを検査する。untriedは現在startupを保持し、実行済みtrialは署名ABIの同一性を必須とする。旧版/journal/署名trial metadataが不明な場合は拒否する。
 失敗履歴・runtime/config watermarkを一つのgenerationへ保存し、準備済みrollback対象とPreviousが同じ場合も破損参照を残さない。通常open/statusのstrict検査とpaired commandの明示拒否を保持する。
 局所RED、I/O errorとprocess exit各7境界、cancel/no-fallback/paired参照を検証。全体check/Race/vet/Python32/6 ELF build273.18秒、native7、QEMU signed PID1とext4通常/破損trial各二bootはPASS。

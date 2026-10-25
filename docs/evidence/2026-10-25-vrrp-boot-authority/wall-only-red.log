@@ -1,0 +1,6 @@
+=== RUN   TestVRRPWallClockAloneCannotAuthorizeOwnership
+    vrrp_clock_test.go:21: UTC-only VRRP grant acquired VIP/VMAC ownership without boot-scoped evidence
+--- FAIL: TestVRRPWallClockAloneCannotAuthorizeOwnership (0.02s)
+FAIL
+FAIL    github.com/imksoo/routerd2/internal/runtimeplan 0.027s
+FAIL

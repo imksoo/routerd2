@@ -1,0 +1,134 @@
+go test ./...
+ok      github.com/imksoo/routerd2/cmd/routerd  0.704s
+?       github.com/imksoo/routerd2/cmd/routerd-bundle   [no test files]
+ok      github.com/imksoo/routerd2/cmd/routerd-logging  (cached)
+?       github.com/imksoo/routerd2/cmd/routerd-modules  [no test files]
+ok      github.com/imksoo/routerd2/images/health-power-test/guest       (cached)
+ok      github.com/imksoo/routerd2/images/kernel-test-init      0.012s
+ok      github.com/imksoo/routerd2/images/storage-test/guest    (cached)
+ok      github.com/imksoo/routerd2/internal/boot        (cached)
+ok      github.com/imksoo/routerd2/internal/boottime    (cached)
+?       github.com/imksoo/routerd2/internal/buildinfo   [no test files]
+ok      github.com/imksoo/routerd2/internal/cli 9.746s
+ok      github.com/imksoo/routerd2/internal/clocktest   0.013s
+ok      github.com/imksoo/routerd2/internal/config      13.855s
+ok      github.com/imksoo/routerd2/internal/configref   (cached)
+ok      github.com/imksoo/routerd2/internal/control     15.549s
+ok      github.com/imksoo/routerd2/internal/derived     (cached)
+ok      github.com/imksoo/routerd2/internal/derivedcontroller   (cached)
+ok      github.com/imksoo/routerd2/internal/engineprobe (cached)
+ok      github.com/imksoo/routerd2/internal/eventcontroller     2.084s
+ok      github.com/imksoo/routerd2/internal/eventrule   (cached)
+ok      github.com/imksoo/routerd2/internal/events      (cached)
+ok      github.com/imksoo/routerd2/internal/featurecontract     (cached)
+ok      github.com/imksoo/routerd2/internal/kmod        (cached)
+ok      github.com/imksoo/routerd2/internal/legacyconfig        3.484s
+ok      github.com/imksoo/routerd2/internal/localapi    (cached)
+ok      github.com/imksoo/routerd2/internal/logging     (cached)
+ok      github.com/imksoo/routerd2/internal/management  0.836s
+ok      github.com/imksoo/routerd2/internal/network     (cached)
+ok      github.com/imksoo/routerd2/internal/protocol/aftr       (cached)
+ok      github.com/imksoo/routerd2/internal/protocol/bfd        (cached)
+ok      github.com/imksoo/routerd2/internal/protocol/bgp        (cached)
+ok      github.com/imksoo/routerd2/internal/protocol/bgpconfig  (cached)
+ok      github.com/imksoo/routerd2/internal/protocol/dhcp4      (cached)
+ok      github.com/imksoo/routerd2/internal/protocol/dhcp6pd    (cached)
+ok      github.com/imksoo/routerd2/internal/protocol/dhcpserver (cached)
+ok      github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig   (cached)
+ok      github.com/imksoo/routerd2/internal/protocol/dns        (cached)
+?       github.com/imksoo/routerd2/internal/protocol/dnsconfig  [no test files]
+ok      github.com/imksoo/routerd2/internal/protocol/health     (cached)
+ok      github.com/imksoo/routerd2/internal/protocol/ra (cached)
+ok      github.com/imksoo/routerd2/internal/protocol/raclient   (cached)
+ok      github.com/imksoo/routerd2/internal/protocol/vrrp       1.153s
+ok      github.com/imksoo/routerd2/internal/protocolevents      (cached)
+ok      github.com/imksoo/routerd2/internal/release     54.467s
+ok      github.com/imksoo/routerd2/internal/releaseboot (cached)
+ok      github.com/imksoo/routerd2/internal/releasecli  (cached)
+ok      github.com/imksoo/routerd2/internal/releasepublish      (cached)
+ok      github.com/imksoo/routerd2/internal/resourceprogram     0.490s
+ok      github.com/imksoo/routerd2/internal/runtimeabi  (cached)
+ok      github.com/imksoo/routerd2/internal/runtimeconfig       (cached)
+ok      github.com/imksoo/routerd2/internal/runtimeplan 12.981s
+ok      github.com/imksoo/routerd2/internal/serviceconfig       0.018s
+ok      github.com/imksoo/routerd2/internal/serviceruntime      (cached)
+?       github.com/imksoo/routerd2/internal/statefs     [no test files]
+ok      github.com/imksoo/routerd2/internal/storage     (cached)
+ok      github.com/imksoo/routerd2/internal/strictjson  (cached)
+ok      github.com/imksoo/routerd2/internal/supervisor  (cached)
+ok      github.com/imksoo/routerd2/internal/worker      (cached)
+go test ./internal/releaseboot/testdata/guest
+ok      github.com/imksoo/routerd2/internal/releaseboot/testdata/guest  (cached)
+go test github.com/google/nftables/expr
+ok      github.com/google/nftables/expr (cached)
+python3 -m unittest discover -s scripts -p '*_test.py'
+................................
+----------------------------------------------------------------------
+Ran 32 tests in 0.104s
+
+OK
+CGO_ENABLED=1 go test -race ./...
+ok      github.com/imksoo/routerd2/cmd/routerd  2.289s
+?       github.com/imksoo/routerd2/cmd/routerd-bundle   [no test files]
+ok      github.com/imksoo/routerd2/cmd/routerd-logging  (cached)
+?       github.com/imksoo/routerd2/cmd/routerd-modules  [no test files]
+ok      github.com/imksoo/routerd2/images/health-power-test/guest       (cached)
+ok      github.com/imksoo/routerd2/images/kernel-test-init      (cached)
+ok      github.com/imksoo/routerd2/images/storage-test/guest    (cached)
+ok      github.com/imksoo/routerd2/internal/boot        (cached)
+ok      github.com/imksoo/routerd2/internal/boottime    (cached)
+?       github.com/imksoo/routerd2/internal/buildinfo   [no test files]
+ok      github.com/imksoo/routerd2/internal/cli 78.087s
+ok      github.com/imksoo/routerd2/internal/clocktest   (cached)
+ok      github.com/imksoo/routerd2/internal/config      38.891s
+ok      github.com/imksoo/routerd2/internal/configref   (cached)
+ok      github.com/imksoo/routerd2/internal/control     66.469s
+ok      github.com/imksoo/routerd2/internal/derived     (cached)
+ok      github.com/imksoo/routerd2/internal/derivedcontroller   (cached)
+ok      github.com/imksoo/routerd2/internal/engineprobe (cached)
+ok      github.com/imksoo/routerd2/internal/eventcontroller     4.905s
+ok      github.com/imksoo/routerd2/internal/eventrule   (cached)
+ok      github.com/imksoo/routerd2/internal/events      (cached)
+ok      github.com/imksoo/routerd2/internal/featurecontract     (cached)
+ok      github.com/imksoo/routerd2/internal/kmod        (cached)
+ok      github.com/imksoo/routerd2/internal/legacyconfig        12.178s
+ok      github.com/imksoo/routerd2/internal/localapi    (cached)
+ok      github.com/imksoo/routerd2/internal/logging     (cached)
+ok      github.com/imksoo/routerd2/internal/management  2.094s
+ok      github.com/imksoo/routerd2/internal/network     (cached)
+ok      github.com/imksoo/routerd2/internal/protocol/aftr       (cached)
+ok      github.com/imksoo/routerd2/internal/protocol/bfd        (cached)
+ok      github.com/imksoo/routerd2/internal/protocol/bgp        (cached)
+ok      github.com/imksoo/routerd2/internal/protocol/bgpconfig  (cached)
+ok      github.com/imksoo/routerd2/internal/protocol/dhcp4      (cached)
+ok      github.com/imksoo/routerd2/internal/protocol/dhcp6pd    (cached)
+ok      github.com/imksoo/routerd2/internal/protocol/dhcpserver (cached)
+ok      github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig   (cached)
+ok      github.com/imksoo/routerd2/internal/protocol/dns        (cached)
+?       github.com/imksoo/routerd2/internal/protocol/dnsconfig  [no test files]
+ok      github.com/imksoo/routerd2/internal/protocol/health     (cached)
+ok      github.com/imksoo/routerd2/internal/protocol/ra (cached)
+ok      github.com/imksoo/routerd2/internal/protocol/raclient   (cached)
+ok      github.com/imksoo/routerd2/internal/protocol/vrrp       2.191s
+ok      github.com/imksoo/routerd2/internal/protocolevents      (cached)
+ok      github.com/imksoo/routerd2/internal/release     183.395s
+ok      github.com/imksoo/routerd2/internal/releaseboot (cached)
+ok      github.com/imksoo/routerd2/internal/releasecli  (cached)
+ok      github.com/imksoo/routerd2/internal/releasepublish      (cached)
+ok      github.com/imksoo/routerd2/internal/resourceprogram     3.283s
+ok      github.com/imksoo/routerd2/internal/runtimeabi  (cached)
+ok      github.com/imksoo/routerd2/internal/runtimeconfig       (cached)
+ok      github.com/imksoo/routerd2/internal/runtimeplan 19.270s
+ok      github.com/imksoo/routerd2/internal/serviceconfig       1.064s
+ok      github.com/imksoo/routerd2/internal/serviceruntime      (cached)
+?       github.com/imksoo/routerd2/internal/statefs     [no test files]
+ok      github.com/imksoo/routerd2/internal/storage     (cached)
+ok      github.com/imksoo/routerd2/internal/strictjson  (cached)
+ok      github.com/imksoo/routerd2/internal/supervisor  (cached)
+ok      github.com/imksoo/routerd2/internal/worker      (cached)
+CGO_ENABLED=1 go test -race ./internal/releaseboot/testdata/guest
+ok      github.com/imksoo/routerd2/internal/releaseboot/testdata/guest  (cached)
+go vet ./...
+go vet ./internal/releaseboot/testdata/guest
+python3 scripts/licenses.py --go 'go' --output dist/licenses
+Collected source notices for 156 modules and the Go toolchain in /workspace/routerd2/dist/licenses

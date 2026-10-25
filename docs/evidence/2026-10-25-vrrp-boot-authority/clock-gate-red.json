@@ -1,0 +1,13 @@
+{
+  "command": [
+    "go",
+    "test",
+    "./internal/clocktest",
+    "-run",
+    "^TestClockControllerAcceptsOnlyTheTwoDedicatedClockFixtures$",
+    "-count=1",
+    "-v"
+  ],
+  "exit_code": 1,
+  "elapsed_seconds": 0.632
+}

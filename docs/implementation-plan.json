@@ -12307,6 +12307,36 @@
         "All work packages, current OCI/APK/arm64 execution and selected physical hardware/NIC/performance/long-duration qualification"
       ],
       "full_goal_status": "active"
+    },
+    {
+      "id": "original-vrrp-boot-authority",
+      "date": "2026-10-25",
+      "status": "partial_original_vrrp_boot_authority_and_actual_clock_vip_acceptance_verified",
+      "code_checkpoint": "c0f214bb65bfd7b7c15da9f2e76f05fa6a4950f9",
+      "fixture_checkpoint": "521d1512c588b5578bd6fddb77c626e164b83d2f",
+      "work_packages": [
+        "CORE-03",
+        "CORE-04",
+        "HA-01"
+      ],
+      "evidence": "docs/evidence/2026-10-25-vrrp-boot-authority.md",
+      "implemented": [
+        "Original boot ID/observed/expires authority from VRRP worker through current supervisor registry, control, condition facts and absolute kernel address lifetimes; UTC display only, no replay or projection-reapply renewal",
+        "Bounded finite BACKUP negative heartbeat, terminal INITIALIZE revocation, boot/epoch/transition/observation fencing and refusal to renew an expired Active election under its old transition",
+        "Dedicated guest-only VRRP fixed UTC clock gate, real daemon VIP/VMAC TCP/UDP/packet capture, kernel-only original expiry and old projection reapply, worker/control crash recovery and retired generation refusal"
+      ],
+      "validation": [
+        "Clean whole check/Race/vet/Python32/six static ELF build287.23s; fixture-only final check/build15.42s with identical six SHA",
+        "UTC-only grant RED, metadata API compile RED and clock-suite RED; focused/related Race pass; initial local compile failures retained",
+        "Native9 including actual VRRP daemon and IPv4/IPv6 native two-peer elections; QEMU native peer pass, initial FD failure retained, local socketpair/child-exec RED/fix/Race then VRRP+DHCP actual guest clock gates pass",
+        "Original absolute deadline through writer reapply and UTC steps, stale/terminal/unknown boot refusal and foreign address retention; no arm64 execution, physical or actual suspend qualification claim"
+      ],
+      "remaining": [
+        "Conditional VRRP callback/kernel ACK and stop ordering, ready_when/graceful activation, full track/cluster/fencing and HA-01/CORE-03/04 completion",
+        "All protocol/state clocks and inventory, UID/capability/peer authorization, paired loader and full engine/ABI/durability/OS distribution work",
+        "All work packages, actual suspend/resume, current OCI/APK/arm64 execution and physical hardware/NIC/performance/long-duration qualification"
+      ],
+      "full_goal_status": "active"
     }
   ],
   "delivery_goal": {

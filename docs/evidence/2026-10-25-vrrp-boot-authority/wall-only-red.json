@@ -1,0 +1,13 @@
+{
+  "command": [
+    "go",
+    "test",
+    "./internal/runtimeplan",
+    "-run",
+    "^TestVRRPWallClockAloneCannotAuthorizeOwnership$",
+    "-count=1",
+    "-v"
+  ],
+  "exit_code": 1,
+  "elapsed_seconds": 2.886
+}

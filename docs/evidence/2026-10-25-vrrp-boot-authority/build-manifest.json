@@ -1,0 +1,47 @@
+{
+  "source_commit": "c0f214bb65bfd7b7c15da9f2e76f05fa6a4950f9",
+  "source_dirty_paths": [],
+  "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "command": [
+    "make",
+    "check",
+    "build-linux",
+    "RELEASE_ID=vrrp-boot-v1"
+  ],
+  "started_at_utc": "2026-10-25T13:05:09.810167+00:00",
+  "umask": "0022",
+  "exit_code": 0,
+  "elapsed_seconds": 287.23,
+  "artifacts": [
+    {
+      "architecture": "amd64",
+      "binary": "routerd",
+      "sha256": "eaa9cf9e0698432d5d72c4654d0d55f40f76bc0df199b10e62226e3755530ffc"
+    },
+    {
+      "architecture": "amd64",
+      "binary": "routerd-modules",
+      "sha256": "39e61876a26e94ac529fd1d2bea8164ea831a00754f6fb418c66e034fa960d17"
+    },
+    {
+      "architecture": "amd64",
+      "binary": "routerd-logging",
+      "sha256": "ddfcb2abddd5d00b8874c9d121e829a783ead04c68a00237463ed2ac18cef795"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd",
+      "sha256": "e74a4899fdc86818d6fb37466ed79dee1f645aff384a2fa752f1a32abb9e26fd"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd-modules",
+      "sha256": "70c5cdff6291875b008d4a7bec048e34fc1c37eed3cde3db1010da2b76ec0536"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd-logging",
+      "sha256": "9dfa6cd63e6e185be90bda88138a275f6f046daa13b3c898e7262c772daa3e0f"
+    }
+  ]
+}

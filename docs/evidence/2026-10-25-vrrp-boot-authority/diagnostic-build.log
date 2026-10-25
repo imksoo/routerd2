@@ -1,0 +1,6 @@
+python3 scripts/licenses.py --go 'go' --output dist/licenses
+Collected source notices for 156 modules and the Go toolchain in /workspace/routerd2/dist/licenses
+mkdir -p dist/bin
+CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags '-s -w -X github.com/imksoo/routerd2/internal/buildinfo.Identity=ROUTERD2-RELEASE-V1:vrrp-boot-v1:END' -o dist/bin/routerd ./cmd/routerd
+CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags '-s -w -X github.com/imksoo/routerd2/internal/buildinfo.Identity=ROUTERD2-RELEASE-V1:vrrp-boot-v1:END' -o dist/bin/routerd-modules ./cmd/routerd-modules
+CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags '-s -w -X github.com/imksoo/routerd2/internal/buildinfo.Identity=ROUTERD2-RELEASE-V1:vrrp-boot-v1:END' -o dist/bin/routerd-logging ./cmd/routerd-logging

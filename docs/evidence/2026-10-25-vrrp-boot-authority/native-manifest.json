@@ -1,0 +1,139 @@
+{
+  "source_commit": "c0f214bb65bfd7b7c15da9f2e76f05fa6a4950f9",
+  "source_dirty": false,
+  "release_id": "vrrp-boot-v1",
+  "build_artifacts": [
+    {
+      "architecture": "amd64",
+      "binary": "routerd",
+      "sha256": "eaa9cf9e0698432d5d72c4654d0d55f40f76bc0df199b10e62226e3755530ffc"
+    },
+    {
+      "architecture": "amd64",
+      "binary": "routerd-modules",
+      "sha256": "39e61876a26e94ac529fd1d2bea8164ea831a00754f6fb418c66e034fa960d17"
+    },
+    {
+      "architecture": "amd64",
+      "binary": "routerd-logging",
+      "sha256": "ddfcb2abddd5d00b8874c9d121e829a783ead04c68a00237463ed2ac18cef795"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd",
+      "sha256": "e74a4899fdc86818d6fb37466ed79dee1f645aff384a2fa752f1a32abb9e26fd"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd-modules",
+      "sha256": "70c5cdff6291875b008d4a7bec048e34fc1c37eed3cde3db1010da2b76ec0536"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd-logging",
+      "sha256": "9dfa6cd63e6e185be90bda88138a275f6f046daa13b3c898e7262c772daa3e0f"
+    }
+  ],
+  "race_harnesses": {
+    "release": {
+      "path": "dist/goal-validation/vrrp-boot-release.test",
+      "sha256": "18b364f322b8bd88d57b677e8257290016a5a42f72d241b728bf0e8b64bb3789"
+    },
+    "publisher": {
+      "path": "dist/goal-validation/vrrp-boot-publisher.test",
+      "sha256": "d4782d25c55275390ae9c2bd59120aa4a148e3b9e67b79af1d66344954024841"
+    },
+    "daemon": {
+      "path": "dist/goal-validation/vrrp-boot-daemon.test",
+      "sha256": "c1e3862f7580a23a1bbe526e78337b514c27f5e130d05f4a1afd7791d41498e6"
+    },
+    "vrrp": {
+      "path": "dist/goal-validation/vrrp-boot-vrrp.test",
+      "sha256": "9ec9caec8ed9a849f0c6c4901f22e775a1427c4e4c098b329562b311f7bf78c2"
+    }
+  },
+  "scope": "root-owned0700 stage; real built amd64/arm64 signature/ELF/staging without foreign execution; actual daemon tests in fresh user/net namespaces; no host network or clock mutation",
+  "tests": [
+    {
+      "test": "TestBuiltRuntimeCatalog",
+      "harness": "release",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 27.66,
+      "log": "vrrp-boot-native-TestBuiltRuntimeCatalog.log",
+      "sha256": "10a7bf546243f092f05795625a6ee7f8f7d3d5bec3d2005d242fdbfecddfabef"
+    },
+    {
+      "test": "TestPublishBuiltRelease",
+      "harness": "publisher",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 12.91,
+      "log": "vrrp-boot-native-TestPublishBuiltRelease.log",
+      "sha256": "831937b2becbc03020bbaa9999c51fad4282074549e1d550eb0cfd223edb74db"
+    },
+    {
+      "test": "TestDaemonDHCPv4OriginalLeaseAuthority",
+      "harness": "daemon",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 11.0,
+      "log": "vrrp-boot-native-TestDaemonDHCPv4OriginalLeaseAuthority.log",
+      "sha256": "5a25dc8595a661d5dc483f4918a24d61f8da8945debb6bbdf4a2ef5adc5c51e1"
+    },
+    {
+      "test": "TestDaemonConfigurationAndRecovery",
+      "harness": "daemon",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 9.3,
+      "log": "vrrp-boot-native-TestDaemonConfigurationAndRecovery.log",
+      "sha256": "70767e7b1c7dc830d31f5be28ebf50ca851d099c658c7d7868117a6dd9f9695e"
+    },
+    {
+      "test": "TestDaemonStartupSelectionAndRecovery",
+      "harness": "daemon",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 3.48,
+      "log": "vrrp-boot-native-TestDaemonStartupSelectionAndRecovery.log",
+      "sha256": "7013592a18c9d7a325d21addb2fae95466970ad943892701d2172a2c4e7926ff"
+    },
+    {
+      "test": "TestDaemonConditionalStartupRecovery",
+      "harness": "daemon",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 3.48,
+      "log": "vrrp-boot-native-TestDaemonConditionalStartupRecovery.log",
+      "sha256": "8db03f2df827c0a847c223aefa31f4a5d0ee464132b7043d1b2e8921fab21afa"
+    },
+    {
+      "test": "TestDaemonHealthPBRFailoverAndRecovery",
+      "harness": "daemon",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 30.96,
+      "log": "vrrp-boot-native-TestDaemonHealthPBRFailoverAndRecovery.log",
+      "sha256": "34b5523cc2b72d722362b6de28757fa8e36da27d03d56aad4271e0f4aa5aa5e7"
+    },
+    {
+      "test": "TestDaemonVRRPOriginalOwnership",
+      "harness": "daemon",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 10.75,
+      "log": "vrrp-boot-native-TestDaemonVRRPOriginalOwnership.log",
+      "sha256": "0d46e89f78b49a3e67bfc003bd5a8e91d9e7b5c35e2135334cfb857be2533d55"
+    },
+    {
+      "test": "TestIsolatedNativeVRRP",
+      "harness": "vrrp",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 11.71,
+      "log": "vrrp-boot-native-TestIsolatedNativeVRRP.log",
+      "sha256": "6e472b2416cf6ba294e1ebf934340c0ec08d23ccd8879a8f739f690d136d8d7a"
+    }
+  ]
+}

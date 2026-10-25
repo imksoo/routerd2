@@ -1,0 +1,68 @@
+Extracting appliance kernel modules for the isolated test image...
+Building the test-only init and vrrp test binary...
+Booting the vrrp test guest (no external network interface)...
+=== RUN   TestIsolatedNativeVRRP
+[    5.172260] vrrp-lan: port 1(up1) entered blocking state
+[    5.172859] vrrp-lan: port 1(up1) entered disabled state
+[    5.173810] up1: entered allmulticast mode
+[    5.178665] up1: entered promiscuous mode
+[    5.210170] vrrp-lan: port 1(up1) entered blocking state
+[    5.210544] vrrp-lan: port 1(up1) entered forwarding state
+[    5.313587] vrrp-lan: port 2(up2) entered blocking state
+[    5.314197] vrrp-lan: port 2(up2) entered disabled state
+[    5.314628] up2: entered allmulticast mode
+[    5.316175] up2: entered promiscuous mode
+[    5.326684] vrrp-lan: port 2(up2) entered blocking state
+[    5.327192] vrrp-lan: port 2(up2) entered forwarding state
+[    7.002250] peer1: entered promiscuous mode
+[    8.712237] peer1: left promiscuous mode
+[    9.857767] peer2: entered promiscuous mode
+[   10.058302] peer2: left promiscuous mode
+[   10.095379] vrrp-lan: port 2(up2) entered disabled state
+[   10.101280] up2 (unregistering): left allmulticast mode
+[   10.101533] up2 (unregistering): left promiscuous mode
+[   10.102166] vrrp-lan: port 2(up2) entered disabled state
+[   10.128536] vrrp-lan: port 1(up1) entered disabled state
+[   10.132394] up1 (unregistering): left allmulticast mode
+[   10.132918] up1 (unregistering): left promiscuous mode
+[   10.133153] vrrp-lan: port 1(up1) entered disabled state
+[   10.254151] vrrp-lan: port 1(up1) entered blocking state
+[   10.254503] vrrp-lan: port 1(up1) entered disabled state
+[   10.254911] up1: entered allmulticast mode
+[   10.255989] up1: entered promiscuous mode
+[   10.267859] vrrp-lan: port 1(up1) entered blocking state
+[   10.268172] vrrp-lan: port 1(up1) entered forwarding state
+[   10.330613] vrrp-lan: port 2(up2) entered blocking state
+[   10.331085] vrrp-lan: port 2(up2) entered disabled state
+[   10.331379] up2: entered allmulticast mode
+[   10.332576] up2: entered promiscuous mode
+[   10.342131] vrrp-lan: port 2(up2) entered blocking state
+[   10.342451] vrrp-lan: port 2(up2) entered forwarding state
+[   12.005395] peer1: entered promiscuous mode
+[   13.709225] peer1: left promiscuous mode
+[   14.850296] peer2: entered promiscuous mode
+[   15.045378] peer2: left promiscuous mode
+[   15.069516] vrrp-lan: port 2(up2) entered disabled state
+[   15.071986] up2 (unregistering): left allmulticast mode
+[   15.072336] up2 (unregistering): left promiscuous mode
+[   15.072601] vrrp-lan: port 2(up2) entered disabled state
+[   15.099894] vrrp-lan: port 1(up1) entered disabled state
+[   15.102616] up1 (unregistering): left allmulticast mode
+[   15.103125] up1 (unregistering): left promiscuous mode
+[   15.103348] vrrp-lan: port 1(up1) entered disabled state
+    kernel_integration_test.go:93: === RUN   TestIsolatedNativeVRRP
+        === RUN   TestIsolatedNativeVRRP/ipv4
+            kernel_integration_test.go:380: ipv4 native raw-socket election, advertisement reception, VIP/VMAC verification and failover passed
+        === RUN   TestIsolatedNativeVRRP/ipv6
+            kernel_integration_test.go:380: ipv6 native raw-socket election, advertisement reception, VIP/VMAC verification and failover passed
+        --- PASS: TestIsolatedNativeVRRP (10.16s)
+            --- PASS: TestIsolatedNativeVRRP/ipv4 (5.19s)
+            --- PASS: TestIsolatedNativeVRRP/ipv6 (4.95s)
+        PASS
+--- PASS: TestIsolatedNativeVRRP (10.30s)
+PASS
+ROUTERD_VRRP_NATIVE_TEST_PASS
+[   15.193813] ACPI: PM: Preparing to enter system sleep state S5
+[   15.195434] reboot: Power down
+
+QEMU native IPv4 and IPv6 VRRP elections and failover: PASS (17.33s)
