@@ -126,11 +126,11 @@ func runVRRPAuthorityOptions(t *testing.T, clockClient *clocktest.Client, condit
 			}
 		}
 	}
-	capture := healthPBRCapture(t, "lan0")
-	f := startFixtureDaemonAt(t, source, dir)
 	if evidence := os.Getenv("ROUTERD2_TEST_EVIDENCE_DIR"); evidence != "" {
 		t.Setenv("ROUTERD2_TEST_EVIDENCE_DIR", filepath.Join(evidence, "vrrp-authority"))
 	}
+	capture := healthPBRCapture(t, "lan0")
+	f := startFixtureDaemonAt(t, source, dir)
 	nc := control.NewNetworkClient(filepath.Join(dir, "run"))
 	instance := func() runtimeplan.InstanceStatus {
 		var s runtimeplan.InstanceStatus
