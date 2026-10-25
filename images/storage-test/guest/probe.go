@@ -29,6 +29,9 @@ import (
 )
 
 type executionWitness struct {
+	CorruptTrial          bool     `json:"corrupt_trial"`
+	TrialAttemptLimit     int      `json:"trial_attempt_limit"`
+	FailureReason         string   `json:"failure_reason,omitempty"`
 	StoreID               string   `json:"store_id"`
 	SnapshotDigest        string   `json:"snapshot_digest"`
 	SnapshotRevision      uint64   `json:"snapshot_revision"`
@@ -223,7 +226,7 @@ func runProbe(phase string) error {
 		return errors.New("running signed release does not match persistent journal")
 	}
 	if phase == "first" {
-		if state.Operation != "begin-boot" || state.Pending == nil || state.Pending.Release != expected.Trial || state.Pending.MaxAttempts != 1 || state.Attempt == nil || state.Attempt.BootID != bootID || state.Attempt.Number != 1 || state.Previous == nil || *state.Previous != expected.Baseline {
+		if state.Operation != "begin-boot" || state.Pending == nil || state.Pending.Release != expected.Trial || state.Pending.MaxAttempts != trialAttemptLimit() || state.Attempt == nil || state.Attempt.BootID != bootID || state.Attempt.Number != 1 || state.Previous == nil || *state.Previous != expected.Baseline {
 			return errors.New("first boot no longer has its bounded unconfirmed trial")
 		}
 		expected.Revision, expected.ConfigSHA256 = health.Revision, configHash
@@ -237,6 +240,7 @@ func runProbe(phase string) error {
 		return errors.New("fresh kernel did not automatically fall back from its spent trial")
 	}
 	witness := executionWitness{
+		CorruptTrial: corruptTrial, TrialAttemptLimit: trialAttemptLimit(),
 		StoreID: committed.StoreID, SnapshotDigest: expected.Snapshot.Digest, SnapshotRevision: expected.Snapshot.Revision,
 		Phase: phase, BootID: bootID, PID: processes.PID, ReleaseID: selected.ReleaseID,
 		ReleaseOperation: state.Operation, ReleaseGeneration: state.Generation,
@@ -247,6 +251,7 @@ func runProbe(phase string) error {
 	}
 	if state.LastFailure != nil {
 		witness.FailedBootID = state.LastFailure.BootID
+		witness.FailureReason = state.LastFailure.Reason
 	}
 	data, err := json.Marshal(witness)
 	if err != nil {

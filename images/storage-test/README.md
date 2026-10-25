@@ -17,6 +17,27 @@ modules. Dependencies are loaded through routerd's native module loader. The
 host needs QEMU and `mke2fs`; it needs no loop device, host filesystem mount,
 privileged container, or real block device.
 
+For the distinct corrupted-payload gate, use a fresh output directory:
+
+```sh
+python3 scripts/qemu-storage.py --image-dir dist/image \
+  --output dist/storage-corrupt-trial --corrupt-trial
+```
+
+This variant permits two attempts. Before the second product startup, the
+test-only initializer re-verifies the first boot's signed trial and flips one
+byte in its entrypoint, retaining the signed manifest, size and executable
+mode. It reports the artifact and different before/after SHA256 values, with
+attempt 1 of 2 still available. It does not change the selector or choose a
+fallback. Production boot must reject that payload and select the verified
+baseline, preserving configuration, SSH identity, snapshot and event provenance.
+The independent host verifier requires the payload-verification failure reason;
+ordinary attempt exhaustion cannot satisfy this variant. Failed phases and
+valid-looking witnesses without changed bytes or an unspent attempt fail.
+CPU, memory and per-phase timeout are unchanged. This is deliberate on-disk
+payload corruption between boots, not physical power-loss or signed-metadata
+corruption recovery.
+
 ## What the two boots prove
 
 On the first boot, the test initializer mounts the dedicated disk only to

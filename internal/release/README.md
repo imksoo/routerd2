@@ -165,6 +165,7 @@ cancellation, failure and explicit rollback.
 | `Initialize` | An empty store only: register an explicitly installer-approved baseline. This declares prior knowledge; it does not boot or health-test the binary. |
 | `Prepare` | Match the expected journal generation, have no outstanding trial and provide a sequence above the durable high watermark; queue the pending runtime. |
 | `BeginBoot` | Choose and pin all runtime artifacts. A queued trial records the old active release as fallback and creates a boot attempt token. |
+| `OpenForBoot` | Open an existing selector and finish `BeginBoot` before exposing operational store access, so a damaged pending payload cannot prevent verified fallback. Never initialize a missing boot selector. |
 | `Confirm` | Match the current boot ID, token and selected manifest digest; clear the pending attempt and retain the previous confirmed release. |
 | `CancelPending` | Match the generation and cancel an untried pending runtime. An already running trial cannot use this shortcut. |
 | `FailBoot` | Match the active boot ID and token, record the failure and select the previously confirmed release. |
@@ -177,6 +178,28 @@ attempt, bounded by `MaxAttempts` (default 1, maximum 5). Exhaustion selects the
 confirmed fallback. If there is no fallback, the failure is recorded and
 `ErrNoFallback` is returned with no image; it is never reported as a successful
 rollback. Corruption is not treated as an excuse to bypass verification.
+
+Appliance startup uses `OpenForBoot` rather than ordinary `Open` followed by
+selection. It first checks the canonical, checksummed journal, generation and
+exact reference symlinks under the store lock. Every noncandidate reference
+must still pass its signature, complete payload hashes and native checks.
+If only the pending payload fails, one journal transaction rejects it and
+returns the fully verified baseline. An untried candidate preserves the current
+startup selection; a damaged trial uses its existing conditional fallback and
+requires the candidate's signed ABI metadata to remain authentic and equal to
+the fallback ABI. Recovery preserves runtime/configuration watermarks and stores
+the rejected reference as failure history, never as a future rollback target.
+The actual configuration adoption remains a separate coordinated-loader task.
+
+Ordinary `Open`, status and management operations remain strict. A corrupted
+selector/journal/link, an unverifiable baseline or incompatible/lost signed
+trial ABI is refused without changing the selector. There is no scan for an
+arbitrary older release and no factory-image shortcut. Damage to an already
+confirmed active runtime is also refused; this automatic recovery policy is
+limited to a pending/trial update. Before publication, cancellation or an I/O
+error leaves the old selector; after publication an unconfirmed directory sync
+returns `ErrUncertain`. Failed initial installation records `ErrNoFallback`
+without returning any executable. No boot call silently initializes a journal.
 
 All CLI state changes that use optimistic concurrency require the exact
 `expected-generation` from status. Health confirmation instead uses the

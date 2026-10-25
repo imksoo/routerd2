@@ -113,6 +113,7 @@ def build_guest(args, temporary, common):
         "disk_bytes": DISK_BYTES, "host_block_devices_used": False,
         "host_filesystem_mounts_used": False, "guest_external_network_interfaces": False,
         "kernel_rootfs_updates": False, "two_boot_disk_fallback_tested": False,
+        "corrupt_trial": args.corrupt_trial,
         "phases": [], "result": "not-run",
     }
     return kernel, archive, manifest
@@ -128,7 +129,8 @@ def run_boot(args, phase, kernel, archive, disk_fd, temporary):
         "-kernel", str(kernel), "-initrd", str(archive),
         "-drive", f"if=none,id=state,format=raw,file=/proc/self/fd/{disk_fd},cache=writeback",
         "-device", "virtio-blk-pci,drive=state",
-        "-append", f"console=ttyS0,115200 panic=-1 routerd2_storage_fixture=1 routerd2_storage_phase={phase}",
+        "-append", f"console=ttyS0,115200 panic=-1 routerd2_storage_fixture=1 routerd2_storage_phase={phase}"
+        + (" routerd2_storage_corrupt_trial=1" if args.corrupt_trial else ""),
     ]
     print(f"Booting storage phase {phase} (no NIC, one private regular-file disk)...", flush=True)
     process = subprocess.Popen(command, pass_fds=(disk_fd,), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
@@ -151,6 +153,11 @@ def run_boot(args, phase, kernel, archive, disk_fd, temporary):
                     raise RuntimeError(f"storage phase {phase} exited {status} without its exact marker and witness: {detail}")
                 if MARKER + "_FAIL" in log or "Kernel panic" in log:
                     raise RuntimeError(f"storage phase {phase} reported failure before exiting")
+                reports = [json.loads(line[len(MARKER + "_DAMAGE "):]) for line in lines if line.startswith(MARKER + "_DAMAGE ")]
+                if len(reports) != int(args.corrupt_trial and phase == "second"):
+                    raise RuntimeError("wrong number of actual trial payload corruption reports")
+                if reports:
+                    result["corruption"] = reports[0]
                 result["result"], result["witness"] = "passed", witnesses[0]
                 print("\n".join(line for line in lines if line.startswith(MARKER)), flush=True)
                 return result
@@ -169,9 +176,16 @@ def run_boot(args, phase, kernel, archive, disk_fd, temporary):
         process.stderr.close()
 
 
-def check_witnesses(phases):
+def check_witnesses(phases, corrupt_trial=False):
+    if len(phases) != 2:
+        raise RuntimeError("two completed kernel phases are required")
+    for result, phase in zip(phases, ("first", "second")):
+        if result.get("phase") != phase or result.get("result") != "passed" or result.get("qemu_exit_status_before_cleanup") != 0:
+            raise RuntimeError("kernel phase failed or did not complete in order")
     first, second = (phase["witness"] for phase in phases)
     for witness in (first, second):
+        if witness.get("corrupt_trial") is not corrupt_trial or type(witness.get("trial_attempt_limit")) is not int or witness["trial_attempt_limit"] != (2 if corrupt_trial else 1):
+            raise RuntimeError("witness does not bind the requested corruption and attempt policy")
         value = witness.get("boot_id")
         try:
             valid = isinstance(value, str) and str(uuid.UUID(value)) == value
@@ -201,6 +215,20 @@ def check_witnesses(phases):
         raise RuntimeError("second boot did not fall back to the baseline")
     if second.get("failed_boot_id") != first["boot_id"]:
         raise RuntimeError("fallback was not caused by the first boot's unconfirmed trial")
+    reason = "trial runtime payload failed verification before execution" if corrupt_trial else "unconfirmed boot attempt limit reached"
+    if second.get("failure_reason") != reason:
+        raise RuntimeError("fallback did not use the requested failure path")
+    if corrupt_trial:
+        report = phases[1].get("corruption")
+        if not isinstance(report, dict) or not isinstance(report.get("artifact"), str) or not re.fullmatch(r"[a-z][a-z0-9._-]{0,63}", report["artifact"]):
+            raise RuntimeError("missing exact trial payload corruption report")
+        for field in ("before_sha256", "after_sha256"):
+            if not isinstance(report.get(field), str) or not re.fullmatch(r"[0-9a-f]{64}", report[field]):
+                raise RuntimeError("trial corruption report lacks full payload digests")
+        if report["before_sha256"] == report["after_sha256"] or type(report.get("attempt")) is not int or report["attempt"] != 1 or type(report.get("max_attempts")) is not int or report["max_attempts"] != 2:
+            raise RuntimeError("trial payload was unchanged or its attempt policy was already exhausted")
+    elif any("corruption" in phase for phase in phases):
+        raise RuntimeError("ordinary attempt-limit gate unexpectedly corrupted a payload")
     for field in ("config_sha256", "host_key_sha256", "host_key_fingerprint", "sentinel_sha256", "event_id", "event_cursor", "store_id", "snapshot_digest", "snapshot_revision"):
         if not first.get(field) or first[field] != second.get(field):
             raise RuntimeError(f"persistent {field} changed across boots")
@@ -214,6 +242,7 @@ def main():
     parser.add_argument("--qemu", default="qemu-system-x86_64")
     parser.add_argument("--mke2fs", default="mke2fs")
     parser.add_argument("--timeout", type=float, default=240)
+    parser.add_argument("--corrupt-trial", action="store_true", help="corrupt the signed trial entrypoint before the second product boot, with one attempt still available")
     args = parser.parse_args()
     if args.timeout <= 0:
         parser.error("timeout must be positive")
@@ -254,7 +283,7 @@ def main():
                 result["disk_sha256_after_boot"] = sha256(disk)
                 if sha256(archive) != manifest["initramfs_sha256"] or sha256(kernel) != manifest["kernel_sha256"]:
                     raise RuntimeError("private boot inputs changed during the fixture")
-            check_witnesses(manifest["phases"])
+            check_witnesses(manifest["phases"], corrupt_trial=args.corrupt_trial)
             manifest["result"], manifest["two_boot_disk_fallback_tested"] = "passed", True
         except (OSError, RuntimeError, ValueError, subprocess.CalledProcessError, KeyboardInterrupt) as error:
             manifest["result"], manifest["error"] = "failed", str(error) or "interrupted"

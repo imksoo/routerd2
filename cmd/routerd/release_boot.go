@@ -29,20 +29,16 @@ func bootConfigured(path string, b runtimeconfig.Boot) error {
 	if err != nil {
 		return err
 	}
-	store, err := release.Open(release.Options{Root: b.Release.Root, TrustedKeys: keys})
-	if err != nil {
-		return err
-	}
-	defer store.Close()
 	bootID, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
 	if err != nil {
 		return err
 	}
 	id := strings.TrimSpace(string(bootID))
-	selection, err := store.BeginBoot(context.Background(), id)
+	store, selection, err := release.OpenForBoot(context.Background(), release.Options{Root: b.Release.Root, TrustedKeys: keys}, id)
 	if err != nil {
 		return err
 	}
+	defer store.Close()
 	defer selection.Image.Close()
 	if selection.State.Startup != nil {
 		return errors.New("paired runtime/configuration boot requires the coordinated loader and trial fence; not activated by the current command")

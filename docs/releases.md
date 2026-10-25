@@ -238,6 +238,21 @@ bootloader fallback, physical power-loss durability or kernel/rootfs switching.
 See the [release store contract](../internal/release/README.md) and
 [PID 1 gate](../internal/releaseboot/testdata/README.md) for exact boundaries.
 
+Appliance boot opens the existing selector through `release.OpenForBoot` so
+verification of a damaged pending payload does not prevent reaching its
+verified fallback. Normal operational opens still reject damaged references.
+The boot transaction checks the complete journal and all noncandidate payloads
+before recording failure and selecting the baseline. A previously executed
+trial additionally requires its signed ABI metadata to authenticate and match
+the fallback. Missing/corrupt journal, unusable baseline, lost trial metadata
+or unqualified format changes are refused without selecting an executable.
+Neither an arbitrary old runtime nor the factory executable can replace those
+checks. A pending update without a baseline records failure and returns no
+image. A separate storage fixture mode, `--corrupt-trial`, changes the signed
+trial payload before its second boot while another attempt remains; the normal
+attempt-limit gate remains separate. Configuration adoption and all-state
+migration are not activated by this recovery path.
+
 ## Runtime/configuration journal primitives (not an activated boot flow)
 
 The internal release store can prepare an explicit `Startup` selection with a

@@ -33,6 +33,37 @@ type Store struct {
 // journal if this is a genuinely new store. An absent or corrupt selector in an
 // existing store is never silently treated as a new installation.
 func Open(options Options) (*Store, error) {
+	s, err := openStoreHandles(options)
+	if err != nil {
+		return nil, err
+	}
+	fail := func(err error) (*Store, error) { s.closeFiles(); return nil, err }
+	unlock, err := s.acquire(context.Background())
+	if err != nil {
+		return fail(err)
+	}
+	_, err = s.readState(context.Background())
+	if errors.Is(err, os.ErrNotExist) {
+		names, listErr := directoryNames(s.generations, s.options.MaxGenerations)
+		if listErr != nil {
+			err = listErr
+		} else if len(names) != 0 {
+			err = fmt.Errorf("%w: missing current selector in nonempty journal", ErrCorrupt)
+		} else {
+			state := State{Version: StateVersion, Generation: 0, ChangedAt: s.now().UTC(), Operation: "empty"}
+			err = s.commit(state)
+		}
+	}
+	unlock()
+	if err != nil {
+		return fail(err)
+	}
+	return s, nil
+}
+
+// Opening pinned handles alone is private: only Open and the boot transaction
+// may expose a Store, after their respective validation/selection succeeds.
+func openStoreHandles(options Options) (*Store, error) {
 	if options.TargetOS == "" {
 		options.TargetOS = runtime.GOOS
 	}
@@ -85,26 +116,6 @@ func Open(options Options) (*Store, error) {
 		return fail(err)
 	}
 	if err = root.Sync(); err != nil {
-		return fail(err)
-	}
-	unlock, err := s.acquire(context.Background())
-	if err != nil {
-		return fail(err)
-	}
-	_, err = s.readState(context.Background())
-	if errors.Is(err, os.ErrNotExist) {
-		names, listErr := directoryNames(s.generations, options.MaxGenerations)
-		if listErr != nil {
-			err = listErr
-		} else if len(names) != 0 {
-			err = fmt.Errorf("%w: missing current selector in nonempty journal", ErrCorrupt)
-		} else {
-			state := State{Version: StateVersion, Generation: 0, ChangedAt: s.now().UTC(), Operation: "empty"}
-			err = s.commit(state)
-		}
-	}
-	unlock()
-	if err != nil {
 		return fail(err)
 	}
 	return s, nil

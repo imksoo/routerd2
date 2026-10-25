@@ -105,6 +105,15 @@ func abortBeforeGuest(err error) {
 	}
 }
 
+var corruptTrial bool // Dedicated kernel fixture flag, read independently on each process/boot.
+
+func trialAttemptLimit() int {
+	if corruptTrial {
+		return 2
+	}
+	return 1
+}
+
 func guestPhase() (string, error) {
 	if os.Geteuid() != 0 {
 		return "", errors.New("fixture requires guest root")
@@ -115,6 +124,9 @@ func guestPhase() (string, error) {
 	}
 	dedicated, phase := false, ""
 	for _, field := range strings.Fields(string(data)) {
+		if field == "routerd2_storage_corrupt_trial=1" {
+			corruptTrial = true
+		}
 		if field == guestFlag {
 			dedicated = true
 		}
@@ -231,7 +243,7 @@ func seedDisk(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	state, err = store.Prepare(ctx, trial, state.Generation, release.PrepareOptions{MaxAttempts: 1})
+	state, err = store.Prepare(ctx, trial, state.Generation, release.PrepareOptions{MaxAttempts: trialAttemptLimit()})
 	if err != nil {
 		return err
 	}
@@ -342,9 +354,64 @@ func verifyUnconfirmedDisk(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if state.Generation != witness.ReleaseGeneration || state.Operation != "begin-boot" || state.Active == nil || *state.Active != witness.Trial || state.Pending == nil || state.Pending.MaxAttempts != 1 || state.Attempt == nil || state.Attempt.BootID != witness.FirstBootID || state.Attempt.Number != 1 {
+	if state.Generation != witness.ReleaseGeneration || state.Operation != "begin-boot" || state.Active == nil || *state.Active != witness.Trial || state.Pending == nil || state.Pending.MaxAttempts != trialAttemptLimit() || state.Attempt == nil || state.Attempt.BootID != witness.FirstBootID || state.Attempt.Number != 1 {
 		return errors.New("unconfirmed trial journal did not survive the first poweroff")
 	}
+	if corruptTrial {
+		return damageTrialPayload(ctx, store, state)
+	}
+	return nil
+}
+
+// The dedicated initializer changes exactly one byte before product startup,
+// retaining the signed metadata, size and final mode. It never selects the
+// fallback; the actual product must reject the payload and make that decision.
+func damageTrialPayload(ctx context.Context, store *release.Store, state release.State) error {
+	image, err := store.Verify(ctx, *state.Active)
+	if err != nil {
+		return err
+	}
+	defer image.Close()
+	name := image.Manifest.Entrypoint
+	before := ""
+	for _, artifact := range image.Manifest.Artifacts {
+		if artifact.Name == name {
+			before = artifact.SHA256
+		}
+	}
+	var value [1]byte
+	if _, err := image.Entrypoint().ReadAt(value[:], 4096); err != nil {
+		return err
+	}
+	if err := image.Close(); err != nil {
+		return err
+	}
+	path := filepath.Join(storeRoot, "releases", state.Active.Digest, name)
+	if err := os.Chmod(path, 0700); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|unix.O_NOFOLLOW, 0)
+	if err != nil {
+		return err
+	}
+	value[0] ^= 0xff
+	_, err = f.WriteAt(value[:], 4096)
+	err = errors.Join(err, f.Sync(), f.Close(), os.Chmod(path, 0500))
+	if err != nil {
+		return err
+	}
+	after, err := fileHash(path)
+	if err != nil {
+		return err
+	}
+	if before == "" || before == after || state.Attempt.Number >= state.Pending.MaxAttempts {
+		return errors.New("fixture did not corrupt a verified payload before its attempt limit")
+	}
+	report, err := json.Marshal(map[string]any{"artifact": name, "before_sha256": before, "after_sha256": after, "attempt": state.Attempt.Number, "max_attempts": state.Pending.MaxAttempts})
+	if err != nil {
+		return err
+	}
+	fmt.Printf("%s_DAMAGE %s\n", marker, report)
 	return nil
 }
 

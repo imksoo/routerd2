@@ -127,6 +127,24 @@ func validateState(state State) error {
 }
 
 func (s *Store) readState(ctx context.Context) (State, error) {
+	state, err := s.readJournal(ctx)
+	if err != nil {
+		return State{}, err
+	}
+	if err := s.verifyReferencedImages(ctx, state, ""); err != nil {
+		return State{}, err
+	}
+	return state, nil
+}
+
+// readJournal authenticates the selector, canonical record, checksum, state
+// invariants and every exact reference link. It does not qualify an executable.
+// Operational callers use readState; only the boot transaction may distinguish
+// a damaged candidate payload from a damaged journal before choosing fallback.
+func (s *Store) readJournal(ctx context.Context) (State, error) {
+	if err := s.checkContext(ctx); err != nil {
+		return State{}, err
+	}
 	target, err := readLink(s.root, "current")
 	if err != nil {
 		if errors.Is(err, unix.ENOENT) {
@@ -173,7 +191,6 @@ func (s *Store) readState(ctx context.Context) (State, error) {
 			return State{}, fmt.Errorf("%w: unexpected journal entry", ErrCorrupt)
 		}
 	}
-	verified := map[string]bool{}
 	for link, ref := range stateLinks(state) {
 		got, linkErr := readLink(dir, link)
 		if ref == nil {
@@ -185,16 +202,24 @@ func (s *Store) readState(ctx context.Context) (State, error) {
 		if linkErr != nil || got != "../../releases/"+ref.Digest {
 			return State{}, fmt.Errorf("%w: %s link differs from journal", ErrCorrupt, link)
 		}
-		if !verified[ref.Digest] {
-			image, err := s.openImage(ctx, *ref)
-			if err != nil {
-				return State{}, err
-			}
-			image.Close()
-			verified[ref.Digest] = true
-		}
 	}
 	return state, nil
+}
+
+func (s *Store) verifyReferencedImages(ctx context.Context, state State, except string) error {
+	verified := map[string]bool{}
+	for _, ref := range stateLinks(state) {
+		if ref == nil || ref.Digest == except || verified[ref.Digest] {
+			continue
+		}
+		image, err := s.openImage(ctx, *ref)
+		if err != nil {
+			return err
+		}
+		image.Close()
+		verified[ref.Digest] = true
+	}
+	return nil
 }
 
 func (s *Store) next(state State, operation string) (State, error) {
@@ -485,11 +510,15 @@ func (s *Store) BeginBoot(ctx context.Context, bootID string) (Selection, error)
 		return Selection{}, err
 	}
 	defer unlock()
-	state, err := s.readState(ctx)
+	state, err := s.readJournal(ctx)
 	if err != nil {
 		return Selection{}, err
 	}
-	changed, rolledBack, failed := false, false, false
+	state, recovered, err := s.recoverBootCandidate(ctx, state, bootID)
+	if err != nil {
+		return Selection{}, err
+	}
+	changed, rolledBack, failed := recovered, recovered && state.Active != nil, recovered
 	if state.Pending != nil {
 		if state.Active != nil {
 			if err := s.requireSameSelectedABI(ctx, *state.Active, state.Pending.Release); err != nil {
@@ -533,6 +562,10 @@ func (s *Store) BeginBoot(ctx context.Context, bootID string) (Selection, error)
 		if err != nil {
 			return Selection{}, err
 		}
+	}
+	if err = s.checkContext(ctx); err != nil {
+		image.Close()
+		return Selection{}, err
 	}
 	if changed {
 		if err = s.commit(state); err != nil {
