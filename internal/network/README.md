@@ -138,9 +138,12 @@ The authority loop requires a running network writer. It is independent of
 the control worker, but it is not a kernel IPv4 timer. A stopped/unavailable
 writer cannot fence virtual links or remove IPv4 routes until it resumes or restarts. Linux's native
 [`expires` route option](https://man7.org/linux/man-pages/man8/ip-route.8.html)
-is IPv6-only. BFD receive deadlines and recursive next-hop dependencies are
-still evaluated by control; carrying all prerequisite lifetimes into the writer
-is not established by the BGP observation deadline alone.
+is IPv6-only. Control intersects a learned route's original BGP deadline with
+its acknowledged BFD receive deadline and the address, route and link lifetimes
+used to resolve its recursive next hop. The resulting single boot deadline is
+carried to this writer; a BGP heartbeat cannot prolong a shorter prerequisite.
+An ECMP route uses the earliest included prerequisite; control must project a
+new set of remaining paths after one expires.
 
 The state file is an ownership journal, not a configuration backup. Hold its
 directory in persistent storage and retain it across process and image upgrades.

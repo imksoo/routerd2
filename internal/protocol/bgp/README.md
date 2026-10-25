@@ -122,6 +122,14 @@ Unresolved paths can remain in the input snapshot with an explicit route issue
 in control status; accepting an input snapshot must not imply that every
 unresolved route reached the kernel. Link-local next hops need an interface.
 
+Control carries the earliest original BGP, acknowledged BFD receive and resolved
+next-hop prerequisite deadline into the network writer. Recursive resolution
+retains finite address, route and virtual-link lifetimes instead of discarding
+them when flattening the gateway. Expired prerequisites cannot resolve a path.
+The writer independently withdraws the resulting route even if control, BGP
+and BFD stop progressing. It must itself remain running. An ECMP route expires
+at its earliest included prerequisite until control selects a new surviving set.
+
 Multiple selected entries for one prefix form an ECMP set. The writer must
 compose a Linux multipath route or report the unsupported set; successive
 single-path RouteReplace operations would silently lose members. Stale paths

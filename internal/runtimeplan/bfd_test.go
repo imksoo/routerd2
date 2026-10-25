@@ -141,6 +141,9 @@ func TestBFDFIBUsesExplicitMonotonicFactsDespiteWallClockRollback(t *testing.T) 
 	if err != nil || len(p.network.Routes) != 1 {
 		t.Fatal("fresh proof not projected", err, p.network.Routes)
 	}
+	if route := p.network.Routes[0]; route.BootID != clock.BootID || route.ExpiresNanos != uint64(bfdSnapshot.Peers[0].DeadlineBootNanoseconds) {
+		t.Fatal("BGP heartbeat extended its required BFD receive deadline", route)
+	}
 	clock.BoottimeNanoseconds += int64(time.Second)
 	p, err = projectWithFacts(doc, "/run/routerd", "/var/lib/routerd", records, clock.WallTime.Add(-time.Hour), projectionFacts{bfdClock: clock})
 	if err != nil || len(p.network.Routes) != 0 {

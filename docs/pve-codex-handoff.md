@@ -68,6 +68,9 @@
   元のroute期限loopを共有し、metadata更新だけでkernel linkを書き換えない。
 - BGP経路の元のboot IDとBOOTTIME期限をnetwork workerへ渡し、controlと独立して
   期限切れ経路を撤去する。期限更新だけではkernel経路を置換せず、所有記録を更新する。
+  ACK済みBFD受信期限と、再帰next-hopに使ったaddress・route・linkの期限も短い方へ
+  まとめる。gatewayを直接到達先へ展開しても前提期限を失わない。期限切れの前提は
+  解決候補にしない。ECMPも含め一つの経路期限でwriterへ渡し、新しいleaseは発行しない。
   退役時も同じ所有権確認を使い、変更されたforeign経路を残す。table観測と経路選択は
   操作内で索引化した。network journal/runtime宣言はformat 4に直接置換した。
   経路追加は不在確認後に追加予定と元の期限をまとめて永続化し、kernel追加直後の
@@ -77,7 +80,7 @@
 
 ## 今回の確認
 
-製品は `RELEASE_ID=link-authority`。`make check`、関連Race Detector、全体vet・fmt確認、
+追加identityは `RELEASE_ID=link-authority` で `make check`、関連Race Detector、全体vet・fmt確認、
 amd64/arm64静的ビルド、private 0700へ6 ELFを配置する署名bundle/publisher試験が成功した。
 network journalはformat 4、compiler contractは `resource-program-native-7`。
 arm64は実行していない。`examples/vrrp-additional-identity.yaml`のCLI validateも成功した。
@@ -112,17 +115,27 @@ QEMU時計補正・物理NIC/性能/suspendは再実行していない。
 writer自身が停止中のlink fencingとIPv4 route撤去は保証しない。
 全計画と対象実機の受入は未完了。
 
+続く `RELEASE_ID=bgp-prerequisites` の関連Race Detector・fmt・全体vet・amd64/arm64静的buildと、
+実BFD/BGPの失効・再接続、writer再起動、再帰IPv6 routeの期限撤去が成功した。
+BFD試験ではcontrol・BGP・BFDを同時に停止し、元のBGP期限が残る間に稼働中writerだけが
+BFD受信budget内で経路を撤去した。再帰試験もsupervisor・control・BGPを止め、展開した
+learned routeが元の前提routeの期限で消えることを確認した。前提address/linkの期限伝播は
+ローカル投影試験で確認し、同じ条件の実daemon試験は未実施。全体`make check`も成功した。
+以前のBFD再接続timeoutの直接原因が確定したという意味ではない。
+
 現在のログは `dist/link-authority-final-{check,readiness,build,native}.log`、
 `dist/link-authority-readiness-race.log`、`dist/link-authority-health-pbr.log`、
 `dist/link-authority-health-sockets.log`、`dist/health-pbr-test/{test.log,wan0.pcap,wan1.pcap}`、
 `dist/link-authority-release-built.log`、`dist/vrrp-unicast/*.log`、
-`dist/link-authority-original-authority.log`。過去の出力との一致を実装条件にしない。
+`dist/link-authority-original-authority.log`、`dist/bgp-prerequisite-{race,build,bfd-native,check}.log`。
+過去の出力との一致を実装条件にしない。
 
 ## 続ける実装
 
 1. 初回BFD再接続timeoutを再現・診断し、原因を確定する。成功回数で閉じない。
-   BGP観測期限は稼働中のnetwork writerが独立して失効させる。writer自身が停止した間の
-   link fencing・IPv4 route失効と、BFD受信期限・再帰next-hopの前提期限を全てwriterへ渡す処理は未検証・未実装。
+   BGP/BFD・再帰next-hopの期限は稼働中のnetwork writerが独立して失効させる。
+   writer自身が停止した間のlink fencing・IPv4 route失効は保証しない。
+   finite linkを持たない条件付きaddress/route自身のfact期限もwriterへ渡す処理は残る。
 2. 残るprotocol snapshotの型付き保持、期限切れJSON書換えの削除、条件式の静的計算と、
    retained判定で繰り返すinstance生成・digest計算を整理する。
 3. HA-01のHealth以外のtrack・neutral、外部secret参照・peer-aware移行、clusterを実装する。

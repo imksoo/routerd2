@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -26,6 +27,7 @@ import (
 	"github.com/imksoo/routerd2/internal/control"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/network"
+	"github.com/imksoo/routerd2/internal/protocol/bfd"
 	"github.com/imksoo/routerd2/internal/protocol/bgpconfig"
 	"github.com/imksoo/routerd2/internal/runtimeconfig"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
@@ -198,6 +200,112 @@ func TestDaemonBGPFIBAndOwnershipExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Log("restarted network writer expired the original BGP route while supervisor, control and BGP were suspended")
+}
+
+func TestDaemonBGPRecursivePrerequisiteExpiry(t *testing.T) {
+	if !isolateFixture(t, "TestDaemonBGPRecursivePrerequisiteExpiry") {
+		return
+	}
+	if err := netlink.LinkAdd(&netlink.Veth{LinkAttrs: netlink.LinkAttrs{Name: "wan0"}, PeerName: "stub0"}); err != nil {
+		t.Fatal(err)
+	}
+	wan, err := netlink.LinkByName("wan0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stub, err := netlink.LinkByName("stub0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := netlink.LinkSetUp(stub); err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	peers := make(chan *fixtureBGPPeer, 1)
+	failures := make(chan error, 1)
+	go func() {
+		peer, err := acceptFixturePeer(listener)
+		if err != nil {
+			failures <- err
+			return
+		}
+		peers <- peer
+	}()
+	untilWall := time.Now().Add(8 * time.Second)
+	c := serviceconfig.BGP{
+		Runtime: bgpdaemon.AppliedConfig{
+			Global: bgpdaemon.AppliedGlobal{ASN: 64512, RouterID: "192.0.2.1", ListenPort: -1},
+			Peers:  map[string]bgpdaemon.AppliedPeer{"127.0.0.1": {Address: "127.0.0.1", ASN: 64513, TimersProfile: "fast", ImportPolicy: bgpdaemon.AppliedImportPolicy{AllowedPrefixes: []string{"2001:db8:77::/64"}, NextHopRewrite: "unchanged"}}},
+		},
+		PeerTransports: map[string]bgpconfig.PeerTransport{"127.0.0.1": {LocalAddress: "127.0.0.1", RemotePort: listener.Addr().(*net.TCPAddr).Port}},
+		RouteMetric:    200,
+	}
+	f := startFixtureDaemon(t, config.FromNative(config.Native{
+		Network: network.Desired{
+			Interfaces: []network.Interface{{Name: "wan0", Addresses: []string{"2001:db8::1/64"}, AddressOptions: map[string]network.AddressOptions{"2001:db8::1/64": {NoDAD: true}}}},
+			Routes:     []network.Route{{Destination: "2001:db8:88::/64", Gateway: "2001:db8::2", Interface: "wan0", ValidUntil: untilWall}},
+		},
+		Services: []serviceconfig.Service{{Name: "edge", BGP: &c}},
+	}))
+	var peer *fixtureBGPPeer
+	select {
+	case peer = <-peers:
+	case err := <-failures:
+		t.Fatal(err)
+	case <-time.After(12 * time.Second):
+		t.Fatal("BGP did not establish its independent session")
+	}
+	defer peer.conn.Close()
+	if err := peer.send(2, fixtureUpdate("2001:db8:77::/64", "2001:db8:88::9", false)); err != nil {
+		t.Fatal(err)
+	}
+	until(t, 3*time.Second, func() bool { return fixtureRoute(t, "2001:db8:77::/64", "2001:db8::2", wan.Attrs().Index) })
+	// Flattening the gateway removes the kernel's dependency on the static
+	// route. The writer must retain that route's expiry explicitly.
+	time.Sleep(time.Until(untilWall.Add(-time.Second)))
+	var instance runtimeplan.InstanceStatus
+	if err := f.control.Do(context.Background(), "GET", "/v1/services/service.edge", nil, &instance); err != nil {
+		t.Fatal(err)
+	}
+	var observed bgpconfig.Snapshot
+	if err := json.Unmarshal(instance.Snapshot, &observed); err != nil {
+		t.Fatal(err)
+	}
+	clock, err := bfd.ReadClock()
+	if err != nil || observed.ExpiresNanos <= uint64(clock.BoottimeNanoseconds)+uint64(2*time.Second) {
+		t.Fatal("BGP observation does not outlive the recursive prerequisite", err, observed)
+	}
+	var status supervisor.Status
+	if err := f.supervisor.Do(context.Background(), "GET", "/v1/status", nil, &status); err != nil {
+		t.Fatal(err)
+	}
+	paused := 0
+	for _, module := range status.Modules {
+		if module.Name == "control" || module.Name == "service.edge" {
+			if err := syscall.Kill(module.PID, syscall.SIGSTOP); err != nil {
+				t.Fatal(err)
+			}
+			defer syscall.Kill(module.PID, syscall.SIGCONT)
+			paused++
+		}
+	}
+	if paused != 2 {
+		t.Fatal("control and BGP workers were not both paused", status)
+	}
+	if err := syscall.Kill(f.pid, syscall.SIGSTOP); err != nil {
+		t.Fatal(err)
+	}
+	defer syscall.Kill(f.pid, syscall.SIGCONT)
+	until(t, 1500*time.Millisecond, func() bool { return !fixtureRoute(t, "2001:db8:77::/64", "", 0) })
+	clock, err = bfd.ReadClock()
+	if err != nil || uint64(clock.BoottimeNanoseconds) >= observed.ExpiresNanos {
+		t.Fatal("withdrawal waited for the longer BGP lease", err)
+	}
+	t.Log("writer withdrew the flattened learned IPv6 route at the original recursive-route deadline while supervisor, control and BGP were paused and the BGP lease remained current")
 }
 
 func fixtureRoute(t *testing.T, prefix, hop string, index int) bool {

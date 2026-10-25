@@ -299,6 +299,37 @@ func TestDaemonBFDControlsBGPSessionAndExpiry(t *testing.T) {
 	}
 	checkPeerError()
 	t.Log("SIGCONT: fresh BFD health recreates BGP session and restores advertisements and learned route")
+
+	// A longer BGP heartbeat cannot keep forwarding after the BFD authority
+	// used to resolve that route has expired. Only the writer may progress.
+	var bgpObservation bgpconfig.Snapshot
+	until(t, 3*time.Second, func() bool {
+		var instance runtimeplan.InstanceStatus
+		if err := fixture.control.Do(ctx, "GET", "/v1/services/service.edge", nil, &instance); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(instance.Snapshot, &bgpObservation); err != nil {
+			t.Fatal(err)
+		}
+		current, err := bfd.ReadClock()
+		return err == nil && bgpObservation.Active && bgpObservation.ExpiresNanos > uint64(current.BoottimeNanoseconds)+uint64(2*time.Second) && fixtureRoute(t, "203.0.113.0/24", "192.0.2.2", index)
+	})
+	writer := moduleStatus("network")
+	for _, module := range []supervisor.ModuleStatus{moduleStatus("control"), moduleStatus("service.edge"), moduleStatus("service.link-watch")} {
+		if err := syscall.Kill(module.PID, syscall.SIGSTOP); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = syscall.Kill(module.PID, syscall.SIGCONT) })
+	}
+	until(t, 1500*time.Millisecond, func() bool { return !fixtureRoute(t, "203.0.113.0/24", "", 0) })
+	current, err := bfd.ReadClock()
+	if err != nil || uint64(current.BoottimeNanoseconds) >= bgpObservation.ExpiresNanos {
+		t.Fatal("writer only expired the longer BGP lease instead of its BFD prerequisite", err)
+	}
+	if live := moduleStatus("network"); live.PID != writer.PID || live.Generation != writer.Generation {
+		t.Fatal("network worker restarted during independent BFD expiry", writer, live)
+	}
+	t.Log("surviving network writer withdrew the learned route within its BFD receive budget while BGP, BFD and control stayed paused and the original BGP lease remained current")
 }
 
 type bfdFixtureListener struct {
