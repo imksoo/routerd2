@@ -6,9 +6,38 @@ package release
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/imksoo/routerd2/internal/runtimeabi"
 )
+
+type nativeCheck struct{ Manifest, Artifact string }
+
+// Caller holds s.mu and has just checked the complete current payload digest,
+// regular-file mode/size and signed manifest. That manifest digest binds all
+// inspection expectations, not just an artifact's bytes. No result crosses a
+// Store lifetime; every reopen still reads and hashes every artifact.
+func (s *Store) verifyNative(file *os.File, artifact Artifact, manifest Manifest, digest string) error {
+	key := nativeCheck{Manifest: digest, Artifact: artifact.Name}
+	if _, ok := s.nativeChecks[key]; ok {
+		return nil
+	}
+	if err := s.checkpoint("native-inspection"); err != nil {
+		return err
+	}
+	declared, err := InspectELFABI(file, artifact.Size, artifact.Command, manifest.ReleaseID, manifest.GOOS, manifest.GOARCH)
+	if err != nil {
+		return err
+	}
+	if !declared.Equal(manifest.RuntimeABI) {
+		return fmt.Errorf("native ABI declaration differs from signed manifest")
+	}
+	if s.nativeChecks == nil || len(s.nativeChecks) >= MaxArtifacts*4 {
+		s.nativeChecks = make(map[nativeCheck]struct{})
+	}
+	s.nativeChecks[key] = struct{}{}
+	return nil
+}
 
 // Called only under the store lock after readState has verified the selected
 // payloads. Re-reading their signed metadata avoids hashing the same artifact

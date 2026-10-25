@@ -42,6 +42,11 @@ Native ABI records are extracted from readonly ELF data without execution;
 all native members must agree and match the signed manifest. There is no
 publisher layout override for the declaration. See the
 [format declaration contract](../../docs/releases.md#native-format-declarations).
+Every reopen rehashes complete payloads; only successful structural parsing is
+memoized within the Store, under the signed manifest digest and artifact name,
+with a 256-entry bound and no cached payload bytes. A changed signature claim
+cannot borrow another manifest's inspection, and changed bytes fail the hash
+before any memo lookup. Closing the Store discards the memo.
 
 The first extracted layout accepts bounded single filenames (no links or
 nested paths), static native Go ELF and non-executable regular data. Limits are

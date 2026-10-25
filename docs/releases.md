@@ -21,6 +21,14 @@ The receiver checks the signed declaration against each native artifact at
 stage and whenever the installed set is reopened. The executing supervisor also
 checks its own declaration against the selected signed manifest.
 
+Each reopen still reads and hashes every complete payload and verifies the signed
+manifest. Within one Store lifetime, successful ELF/identity/ABI parsing of those
+same bytes may be reused under the manifest-digest/artifact-name key. That key
+binds every expected command, release, architecture and ABI claim. It never
+substitutes for the current payload hash. The memo holds at most 256 entries,
+retains no payload bytes, and is discarded when the Store closes or its bound
+is reached. Changed signed metadata and changed payload bytes require new checks.
+
 The record describes profile/boot/worker contracts, configuration semantics and
 schema reader/writer versions, and named persistent-state reader/writer versions.
 It is bounded to 4KiB and 32 sorted unique state components; versions are positive

@@ -24,6 +24,7 @@ type Store struct {
 	root, releases, generations, lock *os.File
 	mu                                sync.Mutex
 	closed                            bool
+	nativeChecks                      map[nativeCheck]struct{} // per Store, bounded; never substitutes for hashing
 	now                               func() time.Time
 	fault                             func(string) error // deterministic crash/I/O boundary tests, never configuration
 }
@@ -415,12 +416,9 @@ func (s *Store) stageArtifact(ctx context.Context, dir *os.File, a Artifact, b b
 		return err
 	}
 	if a.Kind == "native" {
-		declared, inspectErr := InspectELFABI(f, a.Size, a.Command, m.ReleaseID, m.GOOS, m.GOARCH)
-		if inspectErr != nil {
-			return fmt.Errorf("%s: %w", a.Name, inspectErr)
-		}
-		if !declared.Equal(m.RuntimeABI) {
-			return fmt.Errorf("%s: native ABI declaration differs from signed manifest", a.Name)
+		sum := sha256.Sum256(raw)
+		if err := s.verifyNative(f, a, m, hex.EncodeToString(sum[:])); err != nil {
+			return fmt.Errorf("%s: %w", a.Name, err)
 		}
 	}
 	mode := os.FileMode(0400)
@@ -489,12 +487,8 @@ func (s *Store) openImage(ctx context.Context, ref Ref) (*Image, error) {
 			return fail(fmt.Errorf("%w: artifact digest changed", ErrCorrupt))
 		}
 		if a.Kind == "native" {
-			declared, inspectErr := InspectELFABI(f, a.Size, a.Command, m.ReleaseID, m.GOOS, m.GOARCH)
-			if inspectErr != nil {
-				return fail(fmt.Errorf("%w: %v", ErrCorrupt, inspectErr))
-			}
-			if !declared.Equal(m.RuntimeABI) {
-				return fail(fmt.Errorf("%w: native ABI differs from signed manifest", ErrCorrupt))
+			if err := s.verifyNative(f, a, m, ref.Digest); err != nil {
+				return fail(fmt.Errorf("%w: %v", ErrCorrupt, err))
 			}
 		}
 	}

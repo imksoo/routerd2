@@ -43,6 +43,8 @@ const (
 	stateDir    = "/var/lib/routerd"
 )
 
+var errLivePreflightFence = errors.New("preflight live configuration fence mismatch")
+
 type witness struct {
 	Baseline release.Ref `json:"baseline"`
 	Trial    release.Ref `json:"trial"`
@@ -362,7 +364,7 @@ func verifyLiveCommitFreeze(ctx context.Context, store *release.Store) error {
 				return err
 			}
 			if live.StoreID != reference.StoreID || live.Revision != expectedRevision || live.Confirmation != nil {
-				return errors.New("preflight live configuration fence mismatch")
+				return errLivePreflightFence
 			}
 			// Resolve the actual immutable snapshot through the sole journal's
 			// identity and the current compiler. Target ABI/capability/state
@@ -371,13 +373,13 @@ func verifyLiveCommitFreeze(ctx context.Context, store *release.Store) error {
 			return err
 		}
 	}
-	if _, err := store.PrepareRollbackChecked(ctx, state.Generation, options, preflight(3, snapshot, false)); err == nil {
-		return errors.New("stale live configuration passed checked prepare")
+	if _, err := store.PrepareRollbackChecked(ctx, state.Generation, options, preflight(3, snapshot, false)); !errors.Is(err, errLivePreflightFence) {
+		return fmt.Errorf("stale live configuration did not reach its intended preflight refusal: %v", err)
 	}
 	missing := snapshot
 	missing.Digest = strings.Repeat("0", 64)
-	if _, err := store.PrepareRollbackChecked(ctx, state.Generation, options, preflight(2, missing, false)); err == nil {
-		return errors.New("missing actual snapshot passed checked prepare")
+	if _, err := store.PrepareRollbackChecked(ctx, state.Generation, options, preflight(2, missing, false)); !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("missing snapshot did not reach its intended preflight refusal: %v", err)
 	}
 	unchangedRelease, err := store.Status(ctx)
 	if err != nil || unchangedRelease.Generation != state.Generation || unchangedRelease.ConfigHighWatermark != state.ConfigHighWatermark || unchangedRelease.Pending != nil {
