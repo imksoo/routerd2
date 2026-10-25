@@ -1,0 +1,5 @@
+--- FAIL: TestConditionalRecoveryDoesNotNeedFailedSnapshotAfterAdoption (0.26s)
+    recovery_test.go:158: recovery depended on failed candidate payload rather than its exact durable receipt no such file or directory
+FAIL
+FAIL    github.com/imksoo/routerd2/internal/config      0.271s
+FAIL

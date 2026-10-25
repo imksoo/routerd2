@@ -103,6 +103,7 @@ jobs:
             dist/daemon-resource-program-test/
             dist/daemon-management-test/
             dist/daemon-startup-test/
+            dist/daemon-startup-recovery-test/
             dist/daemon-dhcp-dns-test/
             dist/daemon-legacy-dhcp-dns-test/
             dist/daemon-bgp-test/

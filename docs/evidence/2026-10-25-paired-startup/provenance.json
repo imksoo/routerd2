@@ -1,0 +1,237 @@
+{
+  "recorded_at_utc": "2026-10-25T06:39:52.590513+00:00",
+  "product_checkpoint": "c14c7640b5f24c4c9e95704d3fbd6804c54fabc8",
+  "full_goal_status": "active",
+  "scope": "conditional fixed-runtime recovery and internal paired release-journal transactions; coordinated signed PID1 loader/prepare/commit fence/health flow NOT activated",
+  "normalizations": [
+    "developer workspace/Go-cache paths",
+    "ANSI colors, tabs, CRLF and trailing whitespace",
+    "public Alpine kernel certificate subject identifier",
+    "exact test private-host-key SHA256 omitted; raw hashes and public SSH fingerprint retained"
+  ],
+  "raw_artifacts": [
+    {
+      "public_name": "config-api-red.log",
+      "private_source": "dist/goal-validation/paired-startup-recovery-red.log",
+      "raw_sha256": "bf862a930edff9df7f8de167396db7682c5cc14007feedb022737b5295e06091"
+    },
+    {
+      "public_name": "failed-payload-red.log",
+      "private_source": "dist/goal-validation/paired-startup-failed-payload-red.log",
+      "raw_sha256": "f24de337542436edc09b250bceb8a25b5514d666c71665012315cff5906b4e2a"
+    },
+    {
+      "public_name": "release-api-red.log",
+      "private_source": "dist/goal-validation/paired-release-state-red.log",
+      "raw_sha256": "d354f2f7bb2e9acf178bca85702ca1f02839f81dbf2b11500cf1dc8077532ab6"
+    },
+    {
+      "public_name": "initial-focused-fixture-failure.log",
+      "private_source": "dist/goal-validation/paired-state-focused.log",
+      "raw_sha256": "0d5e586cafa8b65670e4cccca8bab7d00cf355be53fd686100e5ab9ec322ee84"
+    },
+    {
+      "public_name": "paired-journal-focused.log",
+      "private_source": "dist/goal-validation/paired-release-state-final.log",
+      "raw_sha256": "f4f19c822991102a8bb3be4b97eeb5224f7a171d64dec2c7c620c62cdae53703"
+    },
+    {
+      "public_name": "suite-red.log",
+      "private_source": "dist/goal-validation/paired-startup-suite-red.log",
+      "raw_sha256": "fac80c75ec15dcc057fe94b6e755d028543fe2cee6bd8bf8f49082da05643667"
+    },
+    {
+      "public_name": "tools.log",
+      "private_source": "dist/goal-validation/paired-startup-tools.log",
+      "raw_sha256": "79c0f6ecf79b7ae10c93dc19ba3440b082e3eb555cd66d6de048825306127fbf"
+    },
+    {
+      "public_name": "initial-build-manifest.json",
+      "private_source": "dist/goal-validation/paired-startup-build-manifest.json",
+      "raw_sha256": "b305dcca8b3a7b31bd1f974b59383346c86d861ecf230e2c19944b8ddf3083e1"
+    },
+    {
+      "public_name": "initial-check-build.log",
+      "private_source": "dist/goal-validation/paired-startup-check-build.log",
+      "raw_sha256": "7b515785fbfa00889120d6e0bbbc51281890f0a2af3e4c6313209ac100e91dc0"
+    },
+    {
+      "public_name": "clean-build-manifest.json",
+      "private_source": "dist/goal-validation/paired-startup-clean-build-manifest.json",
+      "raw_sha256": "c2bf7a0ef0b54d34b8057e4344dca63df37c301dad0aa6f1f8b7e58c7142c6f8"
+    },
+    {
+      "public_name": "clean-check-build.log",
+      "private_source": "dist/goal-validation/paired-startup-clean-check-build.log",
+      "raw_sha256": "46989607e429f881507a7c31b88baacb70d833cd653bbfd782f96cf50b7c01db"
+    },
+    {
+      "public_name": "before-runtime-red.log",
+      "private_source": "dist/goal-validation/paired-startup-before-runtime-red.log",
+      "raw_sha256": "51578872a85cbdb97be94a90d5ebb5bd16e55f4780d751ca9a7a9dade21a3597"
+    },
+    {
+      "public_name": "before-runtime-red-manifest.json",
+      "private_source": "dist/goal-validation/paired-startup-before-runtime-red-manifest.json",
+      "raw_sha256": "b9e5393341ab977241f1a08fa6ba07cf237ae74a24d4c87964475bd02ceccca3"
+    },
+    {
+      "public_name": "native-manifest.json",
+      "private_source": "dist/goal-validation/paired-startup-native-manifest.json",
+      "raw_sha256": "9424ed878347cac7e1ab0cbba798e391dfa9c7e5fee51c5167c5a050d7898cc7"
+    },
+    {
+      "public_name": "source-history-secrets.log",
+      "private_source": "dist/goal-validation/paired-startup-source-history-secrets.log",
+      "raw_sha256": "e105b2a67b8f3ffed86fbf4de7201db31ad8f1ad1aad704063636108a45cec5d"
+    },
+    {
+      "public_name": "release-dependencies.log",
+      "private_source": "dist/goal-validation/paired-startup-release-dependencies.log",
+      "raw_sha256": "985501681b733a12ec63cafa521d431f7efde32849201a2808e4b5fd63ab76e4"
+    },
+    {
+      "public_name": "reference-dependencies.log",
+      "private_source": "dist/goal-validation/paired-startup-reference-dependencies.log",
+      "raw_sha256": "7109991f33f26f361272b5345a416befc60be6e6756a049cdffeba58b54dd574"
+    },
+    {
+      "public_name": "TestBuiltRuntimeCatalog.log",
+      "private_source": "dist/goal-validation/paired-startup-native-TestBuiltRuntimeCatalog.log",
+      "raw_sha256": "8f6cc811ce66f3ffc27d1605300677dfa399054415225b2a7367a59edbb85aac"
+    },
+    {
+      "public_name": "TestPublishBuiltRelease.log",
+      "private_source": "dist/goal-validation/paired-startup-native-TestPublishBuiltRelease.log",
+      "raw_sha256": "af9815358ac873d0527937506c82dcdd279b811de7855a2357dd789064de2140"
+    },
+    {
+      "public_name": "TestDaemonDHCPv4OriginalLeaseAuthority.log",
+      "private_source": "dist/goal-validation/paired-startup-native-TestDaemonDHCPv4OriginalLeaseAuthority.log",
+      "raw_sha256": "d6fd35534b4dfd33d3c23e3f6f7ab721b805a1a34f842436daad836316ebceab"
+    },
+    {
+      "public_name": "TestDaemonConfigurationAndRecovery.log",
+      "private_source": "dist/goal-validation/paired-startup-native-TestDaemonConfigurationAndRecovery.log",
+      "raw_sha256": "8ae837bb625994921c94c85d027bc46e0c54f0dfea0e97b1f1bc293c134c2135"
+    },
+    {
+      "public_name": "TestDaemonStartupSelectionAndRecovery.log",
+      "private_source": "dist/goal-validation/paired-startup-native-TestDaemonStartupSelectionAndRecovery.log",
+      "raw_sha256": "7cc8440e7cd6fbcf3996f19e399cbcd0d94e3274f2036d595fb6e676e095ff7b"
+    },
+    {
+      "public_name": "TestDaemonConditionalStartupRecovery.log",
+      "private_source": "dist/goal-validation/paired-startup-native-TestDaemonConditionalStartupRecovery.log",
+      "raw_sha256": "2de755d2de69073322585b0e58878757c9fe16f5bfd068648a99447137d75c65"
+    },
+    {
+      "public_name": "TestDaemonHealthPBRFailoverAndRecovery.log",
+      "private_source": "dist/goal-validation/paired-startup-native-TestDaemonHealthPBRFailoverAndRecovery.log",
+      "raw_sha256": "6052004e1becf55bb0f149d6e4ceba51ffd8544f39a5bc73e5265ebeec5b1899"
+    },
+    {
+      "public_name": "qemu-source.json",
+      "private_source": "dist/goal-validation/paired-startup-qemu/source.json",
+      "raw_sha256": "0752b4b09db3fb7091a62f7c6ea93f22c2e29d319baf09680b8d0233fbfb8fdc"
+    },
+    {
+      "public_name": "daemon-startup-recovery-host.log",
+      "private_source": "dist/goal-validation/paired-startup-qemu/daemon-startup-recovery-host.log",
+      "raw_sha256": "0cfa5388f9c8bd513d866910eebe9c61fd4458da4f4e12dc05c1e928e844ca97"
+    },
+    {
+      "public_name": "daemon-startup-recovery-manifest.json",
+      "private_source": "dist/goal-validation/paired-startup-qemu/daemon-startup-recovery/manifest.json",
+      "raw_sha256": "ccc3a3d7c2d0dfc152cf696a1c015350495cb4031f3516466399a949ca21fb46"
+    },
+    {
+      "public_name": "daemon-startup-recovery-qemu-serial.log",
+      "private_source": "dist/goal-validation/paired-startup-qemu/daemon-startup-recovery/qemu-serial.log",
+      "raw_sha256": "55f42cd774def47f4911d52907f00ad56d28c06fc9c55f7940687454f8c9598c"
+    },
+    {
+      "public_name": "daemon-startup-host.log",
+      "private_source": "dist/goal-validation/paired-startup-qemu/daemon-startup-host.log",
+      "raw_sha256": "dee28534eacf1b4b0c29419bcff0283d27a4076e5f17e1b4faee320ef3aeee9d"
+    },
+    {
+      "public_name": "daemon-startup-manifest.json",
+      "private_source": "dist/goal-validation/paired-startup-qemu/daemon-startup/manifest.json",
+      "raw_sha256": "cc1973919352e4c7b848719822d6646b89a20c6849a449b6b521aa9c03e254c0"
+    },
+    {
+      "public_name": "daemon-startup-qemu-serial.log",
+      "private_source": "dist/goal-validation/paired-startup-qemu/daemon-startup/qemu-serial.log",
+      "raw_sha256": "80dadeab716f7694e4deea8a8368eaba04af45093dd8b7c3fee23079b69f0d56"
+    },
+    {
+      "public_name": "daemon-management-host.log",
+      "private_source": "dist/goal-validation/paired-startup-qemu/daemon-management-host.log",
+      "raw_sha256": "8d89eb08dba8af836e49be6bb0db539c79b6a9073052cdede5b40ff9606c49d9"
+    },
+    {
+      "public_name": "daemon-management-manifest.json",
+      "private_source": "dist/goal-validation/paired-startup-qemu/daemon-management/manifest.json",
+      "raw_sha256": "517bb22f8df149ce5483b14a6e5f67726906f8e6801c63cddc3e47a0443f7fe2"
+    },
+    {
+      "public_name": "daemon-management-qemu-serial.log",
+      "private_source": "dist/goal-validation/paired-startup-qemu/daemon-management/qemu-serial.log",
+      "raw_sha256": "b95825d2bc0e5f493dae335ce6c23c779a4026cf60dc4bab32154612dd04246b"
+    },
+    {
+      "public_name": "daemon-health-pbr-host.log",
+      "private_source": "dist/goal-validation/paired-startup-qemu/daemon-health-pbr-host.log",
+      "raw_sha256": "3f4512d741d67fffe4bd4675748e277a44afef2e55ef26e49e56eb1cda294500"
+    },
+    {
+      "public_name": "daemon-health-pbr-manifest.json",
+      "private_source": "dist/goal-validation/paired-startup-qemu/daemon-health-pbr/manifest.json",
+      "raw_sha256": "81d41bf0ef6d88d69ee98fecfcbc90e3390f0efb133ab0a088e1fe7ae2a2d096"
+    },
+    {
+      "public_name": "daemon-health-pbr-qemu-serial.log",
+      "private_source": "dist/goal-validation/paired-startup-qemu/daemon-health-pbr/qemu-serial.log",
+      "raw_sha256": "c4a08e73df76551cedbc0ed8e705652fb5bc79a4d0e4122879373f9c201fb6c1"
+    },
+    {
+      "public_name": "storage-host.log",
+      "private_source": "dist/goal-validation/paired-startup-qemu/storage-host.log",
+      "raw_sha256": "55eace67b29e43d3b3620c332011b95dc9fae3ce3c4f9257a09bc3a71cd31730"
+    },
+    {
+      "public_name": "storage-manifest.json",
+      "private_source": "dist/goal-validation/paired-startup-qemu/storage/manifest.json",
+      "raw_sha256": "5a3a6cb0fad5054d16b6b5cf47751a8fcd0fde8d42844641903bbae02d6f40a0"
+    },
+    {
+      "public_name": "storage-qemu-first.log",
+      "private_source": "dist/goal-validation/paired-startup-qemu/storage/qemu-first.log",
+      "raw_sha256": "ea695676975e319828d5f154bd0c5a222d46a5f7e6afc2999fdd7a3a0a36b116"
+    },
+    {
+      "public_name": "storage-qemu-second.log",
+      "private_source": "dist/goal-validation/paired-startup-qemu/storage/qemu-second.log",
+      "raw_sha256": "2a736ad21c9c37eb839f49f7f64a2ac8dfb7e70af04af8e55a74771fafa37dbb"
+    }
+  ],
+  "private_packet_captures": [
+    {
+      "private_source": "dist/goal-validation/paired-startup-native-packets/dhcp4-authority/wan0.pcap",
+      "bytes": 9046,
+      "sha256": "58393b6da8d32293f2cf381e1e4481674b8eeaaaf500998e7ff9e1ec268e8b57"
+    },
+    {
+      "private_source": "dist/goal-validation/paired-startup-native-packets/wan0.pcap",
+      "bytes": 31755,
+      "sha256": "ac49b50a19ca9776b5802b0c264a9f3586ddd686694e583bd0b6e78a71e7b8d8"
+    },
+    {
+      "private_source": "dist/goal-validation/paired-startup-native-packets/wan1.pcap",
+      "bytes": 33107,
+      "sha256": "4586e29936769db37f993b7a13fbb0467e8e92565ae147b189ebd08b4b6fc4eb"
+    }
+  ],
+  "physical_target_qualified": false
+}

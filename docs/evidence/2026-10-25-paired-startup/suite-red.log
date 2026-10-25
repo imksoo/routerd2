@@ -1,0 +1,14 @@
+E........
+======================================================================
+ERROR: test_conditional_recovery_requires_its_actual_daemon_oracle (qemu_network_test.GuestResultTest.test_conditional_recovery_requires_its_actual_daemon_oracle)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_network_test.py", line 17, in test_conditional_recovery_requires_its_actual_daemon_oracle
+    suite = GATE.SUITES["daemon-startup-recovery"]
+            ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+KeyError: 'daemon-startup-recovery'
+
+----------------------------------------------------------------------
+Ran 9 tests in 0.016s
+
+FAILED (errors=1)

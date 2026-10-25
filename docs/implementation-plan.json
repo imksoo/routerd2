@@ -10887,7 +10887,7 @@
     "prototype_compatibility": "None. Replace unreleased two-binary, boot, manifest and journal formats directly; no compatibility reader, shim bridge or prototype migration gate.",
     "first_supported_format": "The new extracted multi-binary runtime format.",
     "implementation_evidence": "docs/evidence/2026-10-25-runtime-catalog.md",
-    "startup_configuration_status": "durable snapshots and one-time fixed-runtime startup adoption implemented; signed runtime/configuration prepare/attempt/confirmation/fallback transaction pending"
+    "startup_configuration_status": "conditional fixed-runtime recovery and internal atomic runtime/configuration release journal implemented; coordinated signed loader, live writer/trial fences, compatibility and health integration pending"
   },
   "project_identity": {
     "routerd": {
@@ -12042,6 +12042,38 @@
         "First health-false observation component and recurrence conditions remain undetermined; stronger readiness and diagnostics retained",
         "Actual write-time power cuts/ENOSPC/fsync syscall failures, startup adoption across real PID1/kernel reboot, reference-aware pruning, separate small bootstrap, full kernel/config/state ABI and engine privilege/dependency closure",
         "Current product OCI/APK, arm64 execution, all remaining work packages, selected physical hardware/NIC/performance qualification"
+      ],
+      "full_goal_status": "active"
+    },
+    {
+      "id": "conditional-recovery-paired-release-journal",
+      "date": "2026-10-25",
+      "status": "partial_journal_primitives_and_fixed_runtime_recovery_verified",
+      "code_checkpoint": "c14c7640b5f24c4c9e95704d3fbd6804c54fabc8",
+      "work_packages": [
+        "CORE-02",
+        "CORE-06",
+        "DIST-01"
+      ],
+      "evidence": "docs/evidence/2026-10-25-paired-startup.md",
+      "implemented": [
+        "Bounded exact conditional recovery fence for candidate not yet adopted versus exact consumed candidate without later commit; current baseline document equality, explicit recovery receipt branch, semantic equality and deep copies; verified known-good snapshot required, failed candidate payload not needed after adoption",
+        "Internal release journal publishes candidate runtime/startup/fallback references and config store identity/high watermark together; two configuration generations reserved, cancel/failure cannot reset authority; bounded attempts and exec reentry retain exact intent",
+        "Typed paired confirmation requires exact adoption receipt and unchanged actual revision; direct confirmed-pair rollback rejected in favor of queued PrepareRollback trial with both watermarks retained",
+        "Current appliance command refuses selected paired intent until coordinated loader is activated; no CLI/SSH prepare/health/commit-fence acceptance claimed; fixed real-daemon recovery guest suite added"
+      ],
+      "validation": [
+        "API/failed-payload/suite REDs retained; first paired unit attempt used unequal-length release fixture IDs and failed, fixture data corrected without product workaround",
+        "Actual signed release store and actual configuration journal exercise both recovery branches; seven release journal publication-error boundaries and bad authority/fence records rejected; snapshot deletion after adoption proves recovery does not re-read failed input",
+        "Whole check/Race/vet/Python30/six static amd64+arm64 ELF build171.30s; clean9.80s with identical hashes; release/configref dependency inspection excludes compiler/control",
+        "Prior checked1048243 runtime fails new actual recovery oracle21.41s at unsupported recovery input; native Race7 gates pass catalog27.11s/publisher12.76s/DHCP10.80s/SSH9.55s/startup3.48s/conditional recovery3.48s/two-WAN TCP+UDP+PCAP30.91s",
+        "Related QEMU5 individual gates pass recovery25.82s/startup23.80s/SSH28.02s/two-WAN78.34s/ext4 two kernels147.50s; fixed-runtime recovery is host-mode actual daemon inside guest namespace, storage is existing runtime-only PID1 fallback"
+      ],
+      "remaining": [
+        "Coordinated paired loader and online/offline prepare workflow: actual snapshot/target ABI/state/revocation preflight, live configuration writer fencing, exact actual tuple health/confirmation and recovery attempt policy",
+        "Signed paired PID1/kernel boot, process/storage fault and true write-time power-cut acceptance; failed-runtime corruption/fallback and compatible state policies; reference-aware snapshot pruning",
+        "Current OCI/APK and arm64 execution; small independent bootstrap, complete engine/kernel/config/state ABI and privilege closure; all remaining work packages and selected physical hardware/NIC/performance acceptance",
+        "Previous QEMU health-false component/recurrence remains undetermined; stronger readiness/diagnostics retained"
       ],
       "full_goal_status": "active"
     }

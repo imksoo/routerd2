@@ -7,7 +7,17 @@
 部分checkpointでゴールを完了にせず、実装・検証・未検証と証跡を更新する。
 対象機種・NIC・性能条件の確認と並行して、独立して進められる実装・隔離VM検証を続ける。
 
-最新product checkpointは `1048243`、readiness fixtureは `f60b761`。固定runtimeのboot `startup`参照をcontrol workerが一度だけauthoritative journalへ採用する。
+最新product checkpointは `c14c764`。固定runtimeの条件付きstartup復旧と、内部release journalのruntime/configuration組を実装した。
+候補採用前は元revisionとknown-good文書の一致、採用後はexact failed receiptと後続commitなしを要求する。失敗候補snapshotが消えても採用記録から復旧し、再実行で後続commitを上書きしない。
+release prepareは候補・conditional fallback・config store identity・二世代の予約を同じcurrent切替で保存する。取消/失敗でwatermarkを戻さず、paired confirmはexact receipt/current revision、rollbackは再prepareを要求する。
+参照の型とtransaction整合性までの内部APIであり、snapshot互換性・稼働中writer fence・paired loader/health接続は未実装。現appliance commandはpaired選択を拒否し、runtimeだけを誤って起動しない。
+初回全体check/Race/vet/Python30/6 ELF build171.30秒、clean9.80秒PASS。6 SHAは一致し、release/configrefはcompiler/controlへ依存しない。
+実signed release storeと実config journalの両復旧分岐・7保存境界・不正authority拒否を検証。実native Race7 gateはcatalog27.11秒・publisher12.76秒・DHCP10.80秒・SSH9.55秒・startup3.48秒・新recovery3.48秒・二WAN/PBR30.91秒PASS。
+QEMU5 gateは新recovery25.82秒・startup23.80秒・SSH28.02秒・二WAN/PBR78.34秒・既存ext4二boot147.50秒PASS。paired signed PID1起動の証明ではない。
+全計画、pairedの実起動/confirmation/fallback、書込み中電源断、ABI/権限/engine、実機受入は未完了。前回health falseの内訳/再発条件も未確定のまま保持する。
+[条件付き復旧とpaired journalの証跡・境界・残作業](evidence/2026-10-25-paired-startup.md) を参照。全体ゴールはactive。
+
+前回product checkpointは `1048243`、readiness fixtureは `f60b761`。固定runtimeのboot `startup`参照をcontrol workerが一度だけauthoritative journalへ採用する。
 世代・expected revision・store/snapshot参照を検査し、採用revisionとstableなstartup_selected eventを同じrecordへ保存する。
 同一選択の再実行は後続commitを保持し、未確認commitも通常の再起動rollbackへ渡す。古い世代、同じ世代の改変、別store、未確認状態、outbox満杯を拒否する。
 compiler/kernel依存のないconfigref、bounded strict JSON、control専用の固定envも実装した。signed releaseとの同時指定は組のtransaction未実装のため拒否する。

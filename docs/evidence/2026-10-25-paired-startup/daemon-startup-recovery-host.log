@@ -1,0 +1,15 @@
+Extracting appliance kernel modules for the isolated test image...
+Building the test-only init and daemon-startup-recovery test binary...
+Booting the daemon-startup-recovery test guest (no external network interface)...
+=== RUN   TestDaemonConditionalStartupRecovery
+    bgp_test.go:194: === RUN   TestDaemonConditionalStartupRecovery
+            startup_recovery_test.go:109: ROUTERD_STARTUP_RECOVERY_DAEMON_TEST_PASS: exact post-adoption recovery, consumed recovery restart, later commit preserved, pre-adoption recovery and three stable lifecycle events
+        --- PASS: TestDaemonConditionalStartupRecovery (14.57s)
+        PASS
+--- PASS: TestDaemonConditionalStartupRecovery (14.75s)
+PASS
+ROUTERD_STARTUP_RECOVERY_DAEMON_TEST_PASS
+[   24.179768] ACPI: PM: Preparing to enter system sleep state S5
+[   24.183447] reboot: Power down
+
+QEMU conditional startup recovery before/after candidate adoption and durable replay: PASS (25.82s)

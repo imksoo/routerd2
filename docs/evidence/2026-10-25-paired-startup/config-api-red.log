@@ -1,0 +1,11 @@
+# github.com/imksoo/routerd2/internal/config [github.com/imksoo/routerd2/internal/config.test]
+internal/config/recovery_test.go:30:91: unknown field Recovery in struct literal of type configref.Selection
+internal/config/recovery_test.go:30:112: undefined: configref.Recovery
+internal/config/recovery_test.go:51:59: c.Startup.Recovered undefined (type *configref.Adoption has no field or method Recovered)
+internal/config/recovery_test.go:51:105: c.Startup.Selection.Equal undefined (type configref.Selection has no field or method Equal)
+internal/config/recovery_test.go:93:20: recovery.Recovery undefined (type configref.Selection has no field or method Recovery)
+internal/config/recovery_test.go:95:14: recovery.Recovery undefined (type configref.Selection has no field or method Recovery)
+internal/config/recovery_test.go:133:55: c.Startup.Recovered undefined (type *configref.Adoption has no field or method Recovered)
+internal/config/recovery_test.go:138:10: receipt.Recovered undefined (type configref.Adoption has no field or method Recovered)
+FAIL    github.com/imksoo/routerd2/internal/config [build failed]
+FAIL

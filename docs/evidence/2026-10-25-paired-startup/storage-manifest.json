@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "purpose": "persistent-state-and-signed-userland-two-boot-fallback",
+  "go": "go version go1.27.3 linux/amd64",
+  "target": "linux/amd64",
+  "kernel_release": "6.18.58-0-virt",
+  "kernel_sha256": "17fbd3efd16f2e7cb1b945f06423b37399ba7d5ac8cdd3665e7f13f363500e85",
+  "initramfs_sha256": "436d5e5c20e28c5fa201a8003049bffadf00d59f001dc820fa00dd5378f1bdba",
+  "source_image_manifest_sha256": "a1df58dc193d6f6f5a361b9b630e9fb106b76a3e3089239da2185f812d265b43",
+  "source_initramfs_sha256": "c6b0ac5a7e6dc64a186ab595586f27bed87440083dc7a13cf0db9df8a3d2c729",
+  "initializer_sha256": "623c1ee9c779eaea2ade6234edc3910b7fa3fa27a792d1e42d612b9923152cc6",
+  "binary_sha256": {
+    "/test/bin/baseline/routerd": "ba3db72077608dcd6f091e0b3d707fe63f6f20cb5c6518e438c0a9ae3e8ce246",
+    "/test/bin/baseline/routerd-modules": "d0b4514749e9646661400a0dabdfe00e69ac248109a6cfb6d20e41e0bf62f6df",
+    "/test/bin/baseline/routerd-logging": "39d93f3aa717b3b6f022e17210f9182f62ba6234a1f47cc78e079b3264ce947f",
+    "/test/bin/trial/routerd": "ab2111b15e750e69b7d983c07eb52fb463109a314f6bbc770b246338268620f1",
+    "/test/bin/trial/routerd-modules": "8758f8fa5043a1fee2a4027903075428ba6c1a3498db96dcda1520916df74da5",
+    "/test/bin/trial/routerd-logging": "dd0bad969af0f00569893dfdebf7b1cf0a036cdcc107c5585953fc6dce4ba92b"
+  },
+  "release_ids": {
+    "baseline": "storage-gate-baseline",
+    "trial": "storage-gate-trial"
+  },
+  "state_persistence": "ext4-virtio-block-regular-file",
+  "disk_bytes": 268435456,
+  "host_block_devices_used": false,
+  "host_filesystem_mounts_used": false,
+  "guest_external_network_interfaces": false,
+  "kernel_rootfs_updates": false,
+  "two_boot_disk_fallback_tested": true,
+  "phases": [
+    {
+      "phase": "first",
+      "result": "passed",
+      "witness": {
+        "store_id": "7c0fb2ddcda2a29534699c23c2175c44",
+        "snapshot_digest": "d8b974868b52fdbf3b2e52420a99deb4364d2395ec13f1566dfb3465ff45e07c",
+        "snapshot_revision": 2,
+        "phase": "first",
+        "boot_id": "973042b2-8266-44ff-8cea-f818a4fe3ffb",
+        "pid": 1,
+        "release_id": "storage-gate-trial",
+        "release_operation": "begin-boot",
+        "release_generation": 3,
+        "pending": true,
+        "revision": 2,
+        "config_sha256": "ca4f85c0e5e0d8e764e9bba1e140e7b78f13b54a46970a6f73853d6a4662ae61",
+        "event_id": "94083f24f2729c788d268a1c2b3f01ec",
+        "event_cursor": 1,
+        "host_key_sha256": "OMITTED_TEST_PRIVATE_KEY_HASH",
+        "host_key_fingerprint": "SHA256:A/mnR/tX/Q6Cgz/FcCMYWn4ky7o99zF97CrviZZH/cg",
+        "sentinel_sha256": "f9063c1d200a36f7ea31d55ac39693de4ad8065d6352d5e9634c52d97e0bee21",
+        "modules": [
+          "control",
+          "logging",
+          "management",
+          "network"
+        ],
+        "pinned_exec_verified": true,
+        "filesystem": "ext4"
+      },
+      "duration_seconds": 88.58,
+      "qemu_exit_status_before_cleanup": 0,
+      "disk_sha256_after_boot": "34c35c89ec1630d2d2d111a2b0086d819e627cc9dcceb2aee4679150fe884d0e"
+    },
+    {
+      "phase": "second",
+      "result": "passed",
+      "witness": {
+        "store_id": "7c0fb2ddcda2a29534699c23c2175c44",
+        "snapshot_digest": "d8b974868b52fdbf3b2e52420a99deb4364d2395ec13f1566dfb3465ff45e07c",
+        "snapshot_revision": 2,
+        "phase": "second",
+        "boot_id": "188debd7-3ccd-463b-8dc6-dd3154a713c0",
+        "pid": 1,
+        "release_id": "storage-gate-baseline",
+        "release_operation": "boot-rollback",
+        "release_generation": 4,
+        "pending": false,
+        "failed_boot_id": "973042b2-8266-44ff-8cea-f818a4fe3ffb",
+        "revision": 2,
+        "config_sha256": "ca4f85c0e5e0d8e764e9bba1e140e7b78f13b54a46970a6f73853d6a4662ae61",
+        "event_id": "94083f24f2729c788d268a1c2b3f01ec",
+        "event_cursor": 1,
+        "host_key_sha256": "OMITTED_TEST_PRIVATE_KEY_HASH",
+        "host_key_fingerprint": "SHA256:A/mnR/tX/Q6Cgz/FcCMYWn4ky7o99zF97CrviZZH/cg",
+        "sentinel_sha256": "f9063c1d200a36f7ea31d55ac39693de4ad8065d6352d5e9634c52d97e0bee21",
+        "modules": [
+          "control",
+          "logging",
+          "management",
+          "network"
+        ],
+        "pinned_exec_verified": true,
+        "filesystem": "ext4"
+      },
+      "duration_seconds": 58.92,
+      "qemu_exit_status_before_cleanup": 0,
+      "disk_sha256_after_boot": "f2e499c0a2b2175f02e3b63cb47fb8f7d9c2b9fb517b4afe0172a31686eb6220"
+    }
+  ],
+  "result": "passed",
+  "mke2fs_version": "mke2fs 1.47.0 (5-Feb-2023)\n\tUsing EXT2FS Library version 1.47.0",
+  "initial_disk_sha256": "9063aaa2049fa950c41e29785215d7b5361e9a40b02c9a06cb2f4c4c36176abf",
+  "final_disk_sha256": "f2e499c0a2b2175f02e3b63cb47fb8f7d9c2b9fb517b4afe0172a31686eb6220"
+}

@@ -34,6 +34,10 @@ prototype の配布形式・boot schema・設定/journal・内部APIに後方互
 [個別受入と初回失敗の記録](../evidence/2026-10-25-startup-adoption.md) を参照。
 signed runtime/configurationの組をprepare/attempt/confirmation/fallbackへ結ぶtransactionは引き続き未実装。
 
+2026-10-25追加: 候補の採用前後を区別する条件付き設定復旧と、runtime/config参照を同一世代で公開するrelease journalの内部APIを実装した。
+[証跡と未接続の境界](../evidence/2026-10-25-paired-startup.md) を参照。
+実snapshot/互換性検証・writer fence・paired loader/healthを結ぶcoordinatorは未実装で、現commandはpaired選択を起動しない。
+
 ## 1. 五つの対象を区別する
 
 | 対象 | 責務・保持するもの | 更新の主体 |

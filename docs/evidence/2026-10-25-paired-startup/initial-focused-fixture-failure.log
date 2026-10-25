@@ -1,0 +1,28 @@
+--- FAIL: TestPairedPrepareBootAndConditionalFallbackAreOneGeneration (0.16s)
+    paired_state_test.go:25: test release IDs must have the same length
+--- FAIL: TestPairedConfirmationRequiresExactReceiptAndPreparedRollback (0.16s)
+    paired_state_test.go:69: test release IDs must have the same length
+--- FAIL: TestPairedCancelBurnsGenerationsAndRejectsUnpairedOrForeignPlans (0.15s)
+    paired_state_test.go:116: test release IDs must have the same length
+--- FAIL: TestPairedJournalErrorsNeverPublishHalfATuple (1.12s)
+    --- FAIL: TestPairedJournalErrorsNeverPublishHalfATuple/journal-state-synced (0.15s)
+        paired_state_test.go:153: test release IDs must have the same length
+    --- FAIL: TestPairedJournalErrorsNeverPublishHalfATuple/journal-generation-synced (0.15s)
+        paired_state_test.go:153: test release IDs must have the same length
+    --- FAIL: TestPairedJournalErrorsNeverPublishHalfATuple/journal-generation-published (0.16s)
+        paired_state_test.go:153: test release IDs must have the same length
+    --- FAIL: TestPairedJournalErrorsNeverPublishHalfATuple/journal-parent-synced (0.17s)
+        paired_state_test.go:153: test release IDs must have the same length
+    --- FAIL: TestPairedJournalErrorsNeverPublishHalfATuple/journal-selector-created (0.17s)
+        paired_state_test.go:153: test release IDs must have the same length
+    --- FAIL: TestPairedJournalErrorsNeverPublishHalfATuple/journal-selector-replaced (0.16s)
+        paired_state_test.go:153: test release IDs must have the same length
+    --- FAIL: TestPairedJournalErrorsNeverPublishHalfATuple/journal-root-synced (0.16s)
+        paired_state_test.go:153: test release IDs must have the same length
+FAIL
+FAIL    github.com/imksoo/routerd2/internal/release     26.206s
+ok      github.com/imksoo/routerd2/internal/config      9.538s
+ok      github.com/imksoo/routerd2/internal/configref   (cached)
+ok      github.com/imksoo/routerd2/internal/control     12.842s
+ok      github.com/imksoo/routerd2/internal/supervisor  (cached)
+FAIL

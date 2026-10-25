@@ -1,0 +1,16 @@
+Extracting appliance kernel modules for the isolated test image...
+Building the test-only init and daemon-startup test binary...
+Booting the daemon-startup test guest (no external network interface)...
+=== RUN   TestDaemonStartupSelectionAndRecovery
+    bgp_test.go:194: === RUN   TestDaemonStartupSelectionAndRecovery
+            startup_test.go:58: await full startup readiness: revision=3 want=3 healthy=false alias=startup-A want_alias=startup-A origin=true last="required routerd modules are not ready" event_journal="" event_store="" rule="" derived="" protocol="" services=&{ProjectionGeneration:1 RouteIssueCount:0 RouteIssues:[] Revision:3 Phase:degraded LastError:required routerd modules are not ready Instances:[]}
+            startup_test.go:158: ROUTERD_STARTUP_SELECTION_DAEMON_TEST_PASS: explicit snapshot adoption, control SIGKILL, later-commit preservation across whole daemon restart, confirmed restart rollback, next selection and stable lifecycle events
+        --- PASS: TestDaemonStartupSelectionAndRecovery (12.99s)
+        PASS
+--- PASS: TestDaemonStartupSelectionAndRecovery (13.15s)
+PASS
+ROUTERD_STARTUP_SELECTION_DAEMON_TEST_PASS
+[   22.294198] ACPI: PM: Preparing to enter system sleep state S5
+[   22.295811] reboot: Power down
+
+QEMU explicit startup adoption, generation fencing, later commits and restart rollback: PASS (23.8s)
