@@ -2,6 +2,9 @@ package runtimeplan
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -10,6 +13,7 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
+	"github.com/imksoo/routerd2/internal/supervisor"
 )
 
 func conditionalVRRPSource() config.Document {
@@ -76,5 +80,159 @@ func TestConditionalVRRPWaitsForNetworkACK(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("success ACK lacked VIP with original boot expiry")
+	}
+}
+
+// This manager models the actual worker contract: Ready follows initial effect
+// ACK, and process exit follows the final inactive effect ACK.
+type vrrpACKManager struct {
+	mu                sync.Mutex
+	runtime           *Runtime
+	modules           map[string]supervisor.ModuleStatus
+	stopping          map[string]bool
+	haStarted         bool
+	initial           chan error
+	withdrawal        chan error
+	dependentStopping chan struct{}
+	releaseDependent  chan struct{}
+	snapshot          vrrp.Snapshot
+}
+
+func (m *vrrpACKManager) Status(context.Context) (supervisor.Status, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s := supervisor.Status{Ready: true, InstanceID: testSupervisorInstance}
+	for _, module := range m.modules {
+		s.Modules = append(s.Modules, module)
+		if !module.Ready {
+			s.Ready = false
+		}
+	}
+	return s, nil
+}
+func (m *vrrpACKManager) Reconcile(ctx context.Context, modules []supervisor.DynamicModule) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.modules == nil {
+		m.modules = make(map[string]supervisor.ModuleStatus)
+		m.stopping = make(map[string]bool)
+	}
+	wanted := make(map[string]bool)
+	for _, module := range modules {
+		wanted[module.Name] = true
+		if _, exists := m.modules[module.Name]; exists {
+			continue
+		}
+		status := supervisor.ModuleStatus{Name: module.Name, Role: module.Role, ConfigDigest: module.ConfigDigest, Generation: 1, State: "running", Ready: true}
+		if module.Name == "service.ha" {
+			status.Ready = false
+			m.haStarted = true
+			go func() {
+				raw, _ := json.Marshal(m.snapshot)
+				err := m.runtime.Accept(ctx, serviceconfig.Update{SupervisorInstance: testSupervisorInstance, Name: module.Name, Role: module.Role, ConfigDigest: module.ConfigDigest, Generation: 1, ProducerEpoch: strings.Repeat("a", 32), Sequence: 1, Snapshot: raw})
+				m.mu.Lock()
+				current := m.modules[module.Name]
+				current.Ready = err == nil
+				m.modules[module.Name] = current
+				m.mu.Unlock()
+				m.initial <- err
+			}()
+		}
+		m.modules[module.Name] = status
+	}
+	for name, module := range m.modules {
+		if wanted[name] || m.stopping[name] {
+			continue
+		}
+		m.stopping[name] = true
+		switch name {
+		case "service.ha":
+			go func() {
+				s := m.snapshot
+				s.Active = false
+				s.State = vrrp.StateInitialize
+				s.Transition++
+				s.ExpiresNanos = 0
+				s.ValidUntil = time.Time{}
+				raw, _ := json.Marshal(s)
+				err := m.runtime.Accept(ctx, serviceconfig.Update{SupervisorInstance: testSupervisorInstance, Name: module.Name, Role: module.Role, ConfigDigest: module.ConfigDigest, Generation: 1, ProducerEpoch: strings.Repeat("a", 32), Sequence: 2, Snapshot: raw})
+				m.mu.Lock()
+				delete(m.modules, module.Name)
+				m.mu.Unlock()
+				m.withdrawal <- err
+			}()
+		case "service.dependent":
+			close(m.dependentStopping)
+			go func() { <-m.releaseDependent; m.mu.Lock(); delete(m.modules, module.Name); m.mu.Unlock() }()
+		default:
+			delete(m.modules, name)
+		}
+	}
+	return nil
+}
+
+func TestConditionalVRRPStartupAndStopACKCannotDeadlock(t *testing.T) {
+	source := conditionalVRRPSource()
+	source.Resources = append(source.Resources, resourceprogram.Resource{ID: "dependent", When: &resourceprogram.FactCondition{Fact: "service.ha.active"}, Service: &serviceconfig.Service{Name: "dependent", DHCP4: &serviceconfig.DHCP4{Interface: "other0"}}})
+	n := &memoryNetwork{}
+	r := New(t.TempDir(), t.TempDir(), n, testSupervisorInstance)
+	m := &vrrpACKManager{runtime: r, initial: make(chan error, 1), withdrawal: make(chan error, 1), dependentStopping: make(chan struct{}), releaseDependent: make(chan struct{}), snapshot: bootVRRPSnapshot(t, source.Resources[0].Service.VRRPConfig())}
+	r.manager = m
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := r.ApplyConfig(ctx, 1, source); err != nil {
+		t.Fatal("startup waited for Ready without servicing ownership effects:", err)
+	}
+	if err := <-m.initial; err != nil {
+		t.Fatal(err)
+	}
+	if err := r.reconcileDynamic(ctx); err != nil {
+		t.Fatal(err)
+	}
+	status, _ := m.Status(ctx)
+	dependent := false
+	for _, module := range status.Modules {
+		dependent = dependent || module.Name == "service.dependent"
+	}
+	if !dependent {
+		t.Fatal("active VRRP did not start dependent")
+	}
+	stopped := make(chan error, 1)
+	go func() { stopped <- r.ApplyConfig(ctx, 2, config.FromNative(config.Native{})) }()
+	select {
+	case <-m.dependentStopping:
+	case <-ctx.Done():
+		t.Fatal("dependent was not asked to stop")
+	}
+	// A stop request alone is not process exit. Keep the prerequisite until the
+	// dependent is actually gone, even if HA has queued its final withdrawal.
+	time.Sleep(75 * time.Millisecond)
+	n.mu.Lock()
+	hasVIP := len(n.applied.Links) != 0
+	n.mu.Unlock()
+	if !hasVIP {
+		t.Fatal("VIP withdrawn while dependent worker still existed")
+	}
+	select {
+	case err := <-m.withdrawal:
+		t.Fatalf("withdrawal ACK preceded dependent exit: %v", err)
+	default:
+	}
+	close(m.releaseDependent)
+	select {
+	case err := <-stopped:
+		if err != nil {
+			t.Fatal("final withdrawal blocked configuration cutover:", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("stop did not drain VRRP withdrawal")
+	}
+	if err := <-m.withdrawal; err != nil {
+		t.Fatal(err)
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if len(n.applied.Links) != 0 {
+		t.Fatal("VIP remained after withdrawal ACK")
 	}
 }
