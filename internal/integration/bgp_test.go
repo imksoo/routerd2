@@ -215,14 +215,14 @@ func isolateFixtureTimeout(t *testing.T, name string, timeout time.Duration) boo
 		}
 		cmd := exec.Command(exe, "-test.run=^"+name+"$", "-test.v", "-test.timeout="+timeout.String())
 		cmd.Env = append(os.Environ(), child+"="+name, parentKey+"="+parent)
-		if name == "TestDaemonDHCPv4ClockCorrections" {
-			file, err := clocktest.ForwardFileFromEnv()
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer file.Close()
-			cmd.ExtraFiles = []*os.File{file}
+		files, err := fixtureClockFiles(name, clocktest.ForwardFileFromEnv)
+		if err != nil {
+			t.Fatal(err)
 		}
+		for _, file := range files {
+			defer file.Close()
+		}
+		cmd.ExtraFiles = files
 		cmd.SysProcAttr = &syscall.SysProcAttr{Cloneflags: unix.CLONE_NEWUSER | unix.CLONE_NEWNET, UidMappings: []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getuid(), Size: 1}}, GidMappings: []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getgid(), Size: 1}}, GidMappingsEnableSetgroups: false}
 		out, err := cmd.CombinedOutput()
 		if err != nil {
@@ -246,6 +246,17 @@ func isolateFixtureTimeout(t *testing.T, name string, timeout time.Duration) boo
 		t.Fatal(err)
 	}
 	return true
+}
+
+func fixtureClockFiles(name string, forward func() (*os.File, error)) ([]*os.File, error) {
+	if name != "TestDaemonDHCPv4ClockCorrections" {
+		return nil, nil
+	}
+	file, err := forward()
+	if err != nil {
+		return nil, err
+	}
+	return []*os.File{file}, nil
 }
 
 type daemonFixture struct {
