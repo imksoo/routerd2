@@ -33,7 +33,7 @@ func ServeNetwork(ctx context.Context, dir, stateDir string, ready func()) error
 	defer cancel()
 	expiryDone := make(chan error, 1)
 	go func() {
-		expiryDone <- e.MaintainRoutes(runCtx)
+		expiryDone <- e.MaintainAuthority(runCtx)
 		cancel()
 	}()
 	err = localapi.Serve(runCtx, filepath.Join(dir, NetworkSocketName), networkHandler(e), ready)

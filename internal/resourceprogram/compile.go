@@ -64,6 +64,9 @@ func Compile(source Program) (Plan, error) {
 		if r.Address != nil && r.Address.Options != nil && r.Address.Options.BootLifetime != (network.BootLifetime{}) {
 			return Plan{}, fmt.Errorf("resource %s: boot lifetime is internal projection authority", r.ID)
 		}
+		if r.Link != nil && (r.Link.BootID != "" || r.Link.ExpiresNanos != 0) {
+			return Plan{}, fmt.Errorf("resource %s: link boot deadline is internal projection authority", r.ID)
+		}
 		if r.Route != nil && (r.Route.BootID != "" || r.Route.ExpiresNanos != 0) {
 			return Plan{}, fmt.Errorf("resource %s: route boot deadline is internal projection authority", r.ID)
 		}

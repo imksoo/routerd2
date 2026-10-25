@@ -22,6 +22,7 @@ import (
 
 	"golang.org/x/sync/semaphore"
 
+	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/network"
@@ -93,6 +94,7 @@ type configuration struct {
 }
 
 type appliedProjection struct {
+	linkUntilNanos     uint64 // earliest original link deadline in the acknowledged projection
 	hash               string
 	at                 time.Time
 	sourceEpoch        uint64
@@ -162,6 +164,16 @@ func (r *Runtime) CheckReady(ctx context.Context) error {
 	defer r.mu.Unlock()
 	if r.applied.hash == "" || r.applied.sourceEpoch != r.sourceEpoch || r.applied.observationVersion != r.observationVersion {
 		return errors.New("accepted protocol observations await network application")
+	}
+	if r.applied.linkUntilNanos != 0 {
+		clock, err := boottime.Read()
+		if err != nil {
+			return err
+		}
+		if uint64(clock.BoottimeNanoseconds) >= r.applied.linkUntilNanos {
+			r.wakeCoordinatorLocked()
+			return errors.New("applied link authority expired; current projection awaits application")
+		}
 	}
 	if len(r.routeIssues) > 0 {
 		return errors.New("some learned routes have unresolved next hops; inspect show services")

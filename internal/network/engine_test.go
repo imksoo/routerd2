@@ -24,6 +24,8 @@ type fakeKernel struct {
 	writes             []string
 }
 
+func (f *fakeKernel) AnnounceLink(linkAnnouncement) error { return f.op("link-announcement") }
+
 func fake() *fakeKernel {
 	return &fakeKernel{links: map[string]InterfaceState{"lan0": {Name: "lan0", Index: 1, Kind: "dummy", MTU: 1500}, "wan0": {Name: "wan0", Index: 2, Kind: "dummy", MTU: 1500}}, firewall: FirewallState{Table: FirewallTable}}
 }

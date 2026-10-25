@@ -1,0 +1,61 @@
+# Two adjacent routers use different LAN source addresses and priorities.
+# Configure the same fixed WAN MAC/link-local address on both nodes.
+schema_version: 2
+resources:
+  - id: lan
+    interface:
+      name: lan0
+  - id: lan-source
+    address:
+      interface: lan0
+      cidr: 192.0.2.2/24
+  - id: ha
+    service:
+      name: ha
+      vrrp:
+        interface: lan0
+        family: ipv4
+        version: 3
+        source_address: 192.0.2.2
+        unicast_peers: [192.0.2.3]
+        virtual_router_id: 42
+        priority: 150
+        advert_interval_centiseconds: 100
+        addresses: [192.0.2.254/32]
+        accept_mode: true
+  - id: wan
+    interface:
+      name: wan0
+  - id: wan-identity
+    when:
+      fact: service.ha.elected
+    link:
+      name: wan-ha
+      kind: macvlan
+      parent: wan0
+      hardware_addr: 02:00:5e:00:42:01
+      ipv6_addr_gen_mode: none
+  - id: wan-interface
+    interface:
+      name: wan-ha
+  - id: wan-ipv4
+    address:
+      interface: wan-ha
+      cidr: 198.51.100.254/24
+  - id: wan-linklocal
+    address:
+      interface: wan-ha
+      cidr: fe80::42:1/64
+      options:
+        no_dad: true
+  - id: wan-advertisements
+    when:
+      fact: service.ha.active
+    service:
+      name: wan-ra
+      ra:
+        interface: wan-ha
+        source_address: fe80::42:1
+        router_lifetime_seconds: 1800
+        max_interval_seconds: 10
+        min_interval_seconds: 3

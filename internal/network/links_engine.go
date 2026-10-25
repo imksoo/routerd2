@@ -12,6 +12,7 @@ import (
 )
 
 type ownedLink struct {
+	announceAt uint64 // transient send schedule; restart reannounces current ownership
 	Definition Link   `json:"definition"`
 	Index      int    `json:"index"`
 	Token      string `json:"token"`
@@ -121,6 +122,9 @@ func verifyOwnedLink(live InterfaceState, saved ownedLink) error {
 	av, bv, lv := reflect.ValueOf(a), reflect.ValueOf(b), reflect.ValueOf(observed)
 	for i := 0; i < av.NumField(); i++ {
 		field := av.Type().Field(i).Name
+		if field == "BootID" || field == "ExpiresNanos" {
+			continue
+		}
 		if field == "HardwareAddr" && a.HardwareAddr == "" {
 			continue
 		}
@@ -253,9 +257,7 @@ func (p *apply) links(want []Link) error {
 			if !reflect.DeepEqual(old.Definition, l) || old.Attempted != nil {
 				old.Definition = l
 				old.Attempted = nil
-				if err := p.checkpoint("link ownership"); err != nil {
-					return err
-				}
+				// Apply persists all metadata-only renewals before acknowledging them.
 			}
 			continue
 		}
@@ -263,6 +265,7 @@ func (p *apply) links(want []Link) error {
 		// journaled definitions. Record that verified live state before changing
 		// the intent, so another interruption during rollback remains recoverable.
 		current := *live.Link
+		current.BootID, current.ExpiresNanos = old.Definition.BootID, old.Definition.ExpiresNanos
 		if old.Definition.HardwareAddr == "" {
 			current.HardwareAddr = ""
 		}

@@ -46,11 +46,11 @@ func TestBootRouteAuthorityRenewsWithoutKernelChangesAndSurvivesWriterRestart(t 
 	// An external writer replaced one recorded route. Expiry must preserve it.
 	k.routes[1].Protocol = 99
 	time.Sleep(time.Until(clock.WallTime.Add(1100 * time.Millisecond)))
-	if _, err := e.expireRoutes(context.Background()); err != nil || len(k.routes) != 2 {
+	if _, err := e.expireAuthority(context.Background()); err != nil || len(k.routes) != 2 {
 		t.Fatal("the superseded deadline expired a renewed route", err)
 	}
 	time.Sleep(time.Until(clock.WallTime.Add(2100 * time.Millisecond)))
-	if _, err := e.expireRoutes(context.Background()); err != nil || len(k.routes) != 1 || k.routes[0].Protocol != 99 || len(e.state.Routes) != 0 {
+	if _, err := e.expireAuthority(context.Background()); err != nil || len(k.routes) != 1 || k.routes[0].Protocol != 99 || len(e.state.Routes) != 0 {
 		t.Fatal("expiry retained owned state or deleted the foreign replacement", err, k.routes)
 	}
 	if _, err := e.Apply(context.Background(), 2, d); err != nil || len(k.routes) != 1 {

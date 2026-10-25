@@ -18,7 +18,7 @@ var errLinkNotFound = errors.New("link not found")
 const tunnelAlias = "routerd2:ds-lite:v1"
 
 // JournalVersion is the persisted network ownership/BOOTTIME contract.
-const JournalVersion = 3
+const JournalVersion = 4
 
 type settingKey struct {
 	Kind      string `json:"kind"`
@@ -62,6 +62,7 @@ type journal struct {
 // kernel is private: protocol modules use Desired, never netlink objects or
 // shell fragments. A fake implementation exercises ownership without root.
 type kernel interface {
+	AnnounceLink(linkAnnouncement) error
 	Interface(string) (InterfaceState, error)
 	Interfaces() ([]InterfaceState, error)
 	CreateLink(Link, string) error
@@ -97,7 +98,7 @@ type Engine struct {
 	directory      *os.File
 	journalName    string
 	journalPresent bool
-	routeWake      chan struct{}
+	authorityWake  chan struct{}
 }
 
 // New locks the ownership journal and reads it. It makes no kernel changes.
@@ -136,7 +137,7 @@ func newEngine(opts Options, k kernel) (*Engine, error) {
 		state.Status = "degraded"
 		state.LastError = "previous apply was interrupted; reconcile the committed configuration"
 	}
-	e := &Engine{opts: opts, kernel: k, lock: f, directory: dir, journalName: name, journalPresent: inspection.Present, state: state, routeWake: make(chan struct{}, 1)}
+	e := &Engine{opts: opts, kernel: k, lock: f, directory: dir, journalName: name, journalPresent: inspection.Present, state: state, authorityWake: make(chan struct{}, 1)}
 
 	return e, nil
 }
@@ -210,7 +211,7 @@ func (e *Engine) Apply(ctx context.Context, revision uint64, desired Desired) (S
 	defer e.mu.Unlock()
 	defer func() {
 		select {
-		case e.routeWake <- struct{}{}:
+		case e.authorityWake <- struct{}{}:
 		default:
 		}
 	}()
@@ -229,6 +230,12 @@ func (e *Engine) Apply(ctx context.Context, revision uint64, desired Desired) (S
 		return e.snapshotLocked(ctx), err
 	}
 	d := projectRouteExpiry(projectAddressExpiry(normalized(cloneDesired(desired)), now), now, clock)
+	for _, link := range d.Links {
+		if link.BootID != "" && (link.BootID != clock.BootID || link.ExpiresNanos <= uint64(clock.BoottimeNanoseconds)) {
+			return e.snapshotLocked(ctx), &ApplyError{Stage: "link authority", Err: fmt.Errorf("link %s original authority expired", link.Name)}
+		}
+	}
+	boundLinkAddresses(&d, clock, now)
 	e.state.AttemptedRevision, e.state.Attempted = revision, &d
 	e.state.Status, e.state.LastError = "applying", ""
 	if err := e.save(); err != nil {
@@ -511,7 +518,11 @@ func (p *apply) reconcile(d Desired) error {
 		return err
 	}
 	wantedSettings := map[settingKey]int{}
+	wantedAddresses := map[addressKey]bool{}
 	for _, l := range d.Interfaces {
+		for _, address := range l.Addresses {
+			wantedAddresses[addressKey{l.Name, address}] = true
+		}
 		wantedSettings[settingKey{Kind: "up", Interface: l.Name}] = 1
 		if l.MTU != 0 {
 			wantedSettings[settingKey{Kind: "mtu", Interface: l.Name}] = l.MTU
@@ -575,7 +586,7 @@ func (p *apply) reconcile(d Desired) error {
 			}
 		}
 	}
-	if err := p.removeAddresses(d); err != nil {
+	if err := p.removeAddresses(wantedAddresses); err != nil {
 		return err
 	}
 	if err := p.links(d.Links); err != nil {
@@ -685,13 +696,7 @@ func (p *apply) interfaceConfig(l Interface) error {
 	return nil
 }
 
-func (p *apply) removeAddresses(d Desired) error {
-	want := map[addressKey]bool{}
-	for _, l := range d.Interfaces {
-		for _, a := range l.Addresses {
-			want[addressKey{l.Name, a}] = true
-		}
-	}
+func (p *apply) removeAddresses(want map[addressKey]bool) error {
 	// Remove secondaries first. Linux may otherwise implicitly remove them when
 	// deleting their primary IPv4 address; the backend refuses that operation.
 	secondary := map[addressKey]bool{}

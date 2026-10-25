@@ -84,10 +84,11 @@ cached memory. The signed boot preflight fixture compares this response with a
 direct inspection of the actual journal before preparing a pair; operator paired
 prepare/boot and qualification of other state families remain separate work.
 
-Ownership journal format 3 records controller-generated boot-scoped address
-lifetimes and route deadlines. Earlier unreleased formats are refused without rewriting their contents; no
+Ownership journal format 4 records controller-generated boot-scoped address
+lifetimes, route deadlines and virtual-link activation deadlines. Earlier unreleased formats are refused without rewriting their contents; no
 prototype format migration or mixed-version rollback is supported. Operator
-configuration cannot declare `boot_lifetime`. It is the internal projection
+configuration cannot declare `boot_lifetime` or link/route `boot_id` and
+`expires_nanos`. It is the internal projection
 of an accepted finite protocol grant.
 
 For such addresses, boot ID and absolute preferred/valid BOOTTIME deadlines
@@ -108,9 +109,34 @@ netlink creation therefore does not lose the ownership needed for withdrawal.
 Each operation reads a routing table once, rather than dumping the whole FIB
 for every refreshed or expired route. Expiry removals are persisted together.
 
-The route expiry loop requires a running network writer. It is independent of
+Conditional virtual links retain the original boot deadline of their conditions
+and dependency readiness. The same network worker loop fences an expired owned
+link DOWN and removes its managed addresses, including their local-delivery
+routes. It verifies the recorded interface index, ownership marker and link
+attributes first. A foreign replacement is left untouched; unrelated addresses
+are not explicitly deleted. Link renewal changes the ownership journal without
+rewriting kernel link attributes. The UP operation rechecks original authority
+after intervening I/O, and an expired projection cannot reactivate the link.
+
+Addresses managed on a finite link receive the tighter of their own lifetime and
+the link's deadline. Static and UTC lifetimes are bounded in the prepared writer
+projection; protocol BOOTTIME deadlines stay on their original clock. The source
+configuration is unchanged. The kernel's second-resolution address timer also
+limits the address if the writer is unavailable; exact link fencing requires a
+running writer.
+
+Finite links with an explicit Ethernet MAC emit an immediate and one-second
+[RARP request-reverse](https://www.rfc-editor.org/rfc/rfc903.html) while UP and
+owned. This maintains switch learning when a fixed MAC moves between peers,
+including after the previous owner sends a final RA or queued frame. It does
+not announce an IP mapping or default route, nor renew any observation. The
+socket send checks the original boot deadline. This requires raw Ethernet socket
+permission in the network worker. The transient send schedule is rebuilt after
+restart; it is not another persisted authority.
+
+The authority loop requires a running network writer. It is independent of
 the control worker, but it is not a kernel IPv4 timer. A stopped/unavailable
-writer cannot remove IPv4 routes until it resumes or restarts. Linux's native
+writer cannot fence virtual links or remove IPv4 routes until it resumes or restarts. Linux's native
 [`expires` route option](https://man7.org/linux/man-pages/man8/ip-route.8.html)
 is IPv6-only. BFD receive deadlines and recursive next-hop dependencies are
 still evaluated by control; carrying all prerequisite lifetimes into the writer

@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -22,7 +23,9 @@ import (
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/health"
+	"github.com/imksoo/routerd2/internal/protocol/ra"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
+	"github.com/imksoo/routerd2/internal/resourceprogram"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 	"github.com/imksoo/routerd2/internal/supervisor"
@@ -61,7 +64,14 @@ func TestDaemonVRRPv2PASS(t *testing.T) {
 	}
 }
 
+func TestDaemonVRRPAdditionalIdentity(t *testing.T) {
+	if isolateFixture(t, "TestDaemonVRRPAdditionalIdentity") {
+		runVRRPPeer(t, vrrpPeerTest{family: "ipv4", wan: true})
+	}
+}
+
 type vrrpPeerTest struct {
+	wan       bool
 	family    string
 	version   int
 	password  string
@@ -122,7 +132,33 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 		c.Track = []vrrp.Track{{Service: "probe", Penalty: 100, HealthyThreshold: 2, UnhealthyThreshold: 3, MaxAgeMillis: 1500}}
 		services = append(services, serviceconfig.Service{Name: "probe", Health: &health.Config{Interface: "lan0", SourceAddress: local, Target: peer, Protocol: "tcp", Port: 18097, IntervalMillis: 300, TimeoutMillis: 50, HealthyThreshold: 1, UnhealthyThreshold: 1}})
 	}
-	f := startFixtureDaemon(t, config.FromNative(config.Native{Network: network.Desired{Interfaces: []network.Interface{iface}}, Services: services}))
+	program := config.FromNative(config.Native{Network: network.Desired{Interfaces: []network.Interface{iface}}, Services: services})
+	var wan *vrrpWANTest
+	if spec.wan {
+		wan = setupVRRPWAN(t, peerNS)
+		program.Resources = append(program.Resources,
+			resourceprogram.Resource{ID: "wan-identity", When: &resourceprogram.FactCondition{Fact: "service.ha.elected"}, Link: &network.Link{Name: "wan-ha", Kind: "macvlan", Parent: "wan0", HardwareAddr: vrrpWANMAC, IPv6AddrGenMode: "none"}},
+			resourceprogram.Resource{ID: "wan-interface", Interface: &network.Interface{Name: "wan-ha"}},
+			resourceprogram.Resource{ID: "wan-address", Address: &resourceprogram.Address{Interface: "wan-ha", CIDR: vrrpWANVIP + "/24"}},
+			resourceprogram.Resource{ID: "wan-linklocal", Address: &resourceprogram.Address{Interface: "wan-ha", CIDR: vrrpWANLL + "/64", Options: &network.AddressOptions{NoDAD: true}}},
+			resourceprogram.Resource{ID: "wan-ra", When: &resourceprogram.FactCondition{Fact: "service.ha.active"}, Service: &serviceconfig.Service{Name: "wan-ra", RA: &ra.Config{Interface: "wan-ha", SourceAddress: vrrpWANLL, MinIntervalSeconds: 3, MaxIntervalSeconds: 4, RouterLifetimeSeconds: 12}}},
+		)
+	}
+	f := startFixtureDaemon(t, program)
+	module := func(name string) supervisor.ModuleStatus {
+		t.Helper()
+		var status supervisor.Status
+		if err := f.supervisor.Do(context.Background(), "GET", "/v1/status", nil, &status); err != nil {
+			t.Fatal(err)
+		}
+		for _, module := range status.Modules {
+			if module.Name == name {
+				return module
+			}
+		}
+		t.Fatal("missing module", name)
+		return supervisor.ModuleStatus{}
+	}
 	snapshot := func() vrrp.Snapshot {
 		t.Helper()
 		var instance runtimeplan.InstanceStatus
@@ -169,9 +205,13 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 			return s.State == vrrp.StateBackup && !s.Active && !hasVIP() && peerOwns
 		})
 	}
-	vrrpVIPResponders(t, routerNS, suffix, vip, "R")
-	vrrpVIPResponders(t, peerNS, suffix, vip, "K")
-	traffic := func(ns netns.NsHandle, want string) {
+	targets := []string{vip}
+	if wan != nil {
+		targets = append(targets, vrrpWANVIP)
+	}
+	vrrpVIPResponders(t, routerNS, suffix, targets, "R")
+	vrrpVIPResponders(t, peerNS, suffix, targets, "K")
+	traffic := func(ns netns.NsHandle, target, want string) {
 		t.Helper()
 		for _, protocol := range []string{"tcp", "udp"} {
 			var conn net.Conn
@@ -182,9 +222,12 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 			}
 			if err := fixtureInsideNamespace(ns, func() error {
 				var err error
-				conn, err = net.DialTimeout(protocol+suffix, net.JoinHostPort(vip, port), time.Second)
+				conn, err = net.DialTimeout(protocol+suffix, net.JoinHostPort(target, port), time.Second)
 				return err
 			}); err != nil {
+				if wan != nil && target == vrrpWANVIP {
+					wan.logPath(t)
+				}
 				neighbors, _ := netlink.NeighList(0, unix.AF_UNSPEC)
 				peerNeighbors, _ := handle.NeighList(0, unix.AF_UNSPEC)
 				t.Log("neighbor state", neighbors, peerNeighbors)
@@ -228,9 +271,17 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 		}
 		if c.Version == 3 {
 			cfg += " v3_checksum_as_v2\n"
+		} else {
+			// RFC 3768 discards inferior adverts. Keepalived's default read path
+			// resets its send timer even for wrong-auth packets unless this is set.
+			cfg += " lower_prio_no_advert\n"
 		}
 		if password != "" {
 			cfg += " authentication {\n auth_type PASS\n auth_pass " + password + "\n }\n"
+		}
+		if wan != nil {
+			cfg += " garp_extra_if all 1\n"
+			cfg += " virtual_ipaddress_excluded {\n " + vrrpWANVIP + "/24 dev peer-ha\n " + vrrpWANLL + "/64 dev peer-ha\n }\n"
 		}
 		cfg += " virtual_ipaddress {\n"
 		for _, address := range vips {
@@ -276,6 +327,12 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 		return stop
 	}
 	waitOwner(true)
+	if wan != nil {
+		wan.waitNative(t, true)
+		wan.waitForwarder(t, true)
+		until(t, 5*time.Second, func() bool { positive, _ := wan.advertisements(); return positive > 0 })
+		traffic(wan.client, vrrpWANVIP, "R")
+	}
 	if suffix == "6" {
 		// Counterpart and router IPv6 link-local DAD must complete before a
 		// one-second client deadline can measure steady-state VIP forwarding.
@@ -303,22 +360,9 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 			return ready(localAddresses) && ready(peerAddresses)
 		})
 	}
-	traffic(peerNS, "R")
+	traffic(peerNS, vip, "R")
 	if tracking {
-		module := func(name string) supervisor.ModuleStatus {
-			t.Helper()
-			var status supervisor.Status
-			if err := f.supervisor.Do(context.Background(), "GET", "/v1/status", nil, &status); err != nil {
-				t.Fatal(err)
-			}
-			for _, module := range status.Modules {
-				if module.Name == name {
-					return module
-				}
-			}
-			t.Fatal("missing module", name)
-			return supervisor.ModuleStatus{}
-		}
+
 		native, source := module("service.ha"), module("service.probe")
 		startPeer(120, c.AuthPassword)
 		waitTrack := func(known, penalized bool, priority int) {
@@ -336,11 +380,11 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 		if s := snapshot(); s.Track[0].UnhealthyCount < 3 {
 			t.Fatal("penalty before three failed probes", s.Track)
 		}
-		traffic(routerNS, "K")
+		traffic(routerNS, vip, "K")
 		probe = healthPBRListener(t, peerNS, peer+":18097", "H")
 		waitTrack(true, false, 150)
 		waitOwner(true)
-		traffic(peerNS, "R")
+		traffic(peerNS, vip, "R")
 		if err := syscall.Kill(source.PID, syscall.SIGSTOP); err != nil {
 			t.Fatal(err)
 		}
@@ -351,13 +395,13 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 			t.Fatal("test did not expire the sample before supervisor replacement", paused)
 		}
 		waitOwner(false)
-		traffic(routerNS, "K")
+		traffic(routerNS, vip, "K")
 		if err := syscall.Kill(source.PID, syscall.SIGCONT); err != nil {
 			t.Fatal(err)
 		}
 		waitTrack(true, false, 150)
 		waitOwner(true)
-		traffic(peerNS, "R")
+		traffic(peerNS, vip, "R")
 		probe.Close()
 		if err := syscall.Kill(source.PID, syscall.SIGKILL); err != nil {
 			t.Fatal(err)
@@ -368,11 +412,11 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 		})
 		waitTrack(true, true, 50)
 		waitOwner(false)
-		traffic(routerNS, "K")
+		traffic(routerNS, vip, "K")
 		probe = healthPBRListener(t, peerNS, peer+":18097", "H")
 		waitTrack(true, false, 150)
 		waitOwner(true)
-		traffic(peerNS, "R")
+		traffic(peerNS, vip, "R")
 		current := module("service.ha")
 		if current.PID != native.PID || current.Generation != native.Generation {
 			t.Fatal("tracking restarted the election worker", native, current)
@@ -382,17 +426,42 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 		if c.AuthPassword != "" {
 			rejected := snapshot().Rejected
 			stopWrong := startPeer(200, "wrongkey")
+			tracePeer := func() {
+				current := snapshot()
+				localLink, _ := netlink.LinkByName("lan0")
+				peers, _ := handle.NeighList(0, unix.AF_INET)
+				t.Log("VRRP receive state", current.State, current.Received, current.Rejected, "physical MAC", localLink.Attrs().HardwareAddr, "peer neighbors", peers)
+				capture.mu.Lock()
+				defer capture.mu.Unlock()
+				for _, packet := range capture.packets {
+					b := packet.data
+					if len(b) >= 34 && binary.BigEndian.Uint16(b[12:14]) == 0x0800 && b[23] == 112 && net.IP(b[26:30]).String() == peer {
+						t.Logf("peer advertisement %s srcmac=%x dstmac=%x", packet.at.Format(time.RFC3339Nano), b[6:12], b[:6])
+					}
+				}
+			}
+			defer func() {
+				if t.Failed() {
+					tracePeer()
+				}
+			}()
 			until(t, 8*time.Second, func() bool { return snapshot().Rejected >= rejected+2 })
 			if s := snapshot(); s.State != vrrp.StateActive || !hasVIP() {
 				t.Fatal("wrong-password peer displaced native owner", s)
 			}
-			traffic(routerNS, "R")
+			traffic(routerNS, vip, "R")
 			t.Log("wrong-password keepalived advertisements rejected while native VIP ownership and TCP/UDP remained active")
 			stopWrong()
 		}
 		stopPeer := startPeer(200, c.AuthPassword)
 		waitOwner(false)
-		traffic(routerNS, "K")
+		traffic(routerNS, vip, "K")
+		if wan != nil {
+			wan.waitNative(t, false)
+			until(t, 2*time.Second, func() bool { _, zero := wan.advertisements(); return zero > 0 })
+			wan.waitForwarder(t, false)
+			traffic(wan.client, vrrpWANVIP, "K")
+		}
 		var status supervisor.Status
 		if err := f.supervisor.Do(context.Background(), "GET", "/v1/status", nil, &status); err != nil {
 			t.Fatal(err)
@@ -417,14 +486,72 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 			}
 		}
 		waitOwner(false)
-		traffic(routerNS, "K")
+		traffic(routerNS, vip, "K")
 		stopPeer()
 		waitOwner(true)
-		traffic(peerNS, "R")
+		traffic(peerNS, vip, "R")
+		if wan != nil {
+			wan.waitNative(t, true)
+			wan.waitForwarder(t, true)
+			traffic(wan.client, vrrpWANVIP, "R")
+		}
 		startPeer(100, c.AuthPassword)
 		time.Sleep(4 * time.Duration(c.AdvertIntervalCentiseconds) * 10 * time.Millisecond) // More than a complete peer master-down interval.
 		waitOwner(true)
-		traffic(peerNS, "R")
+		traffic(peerNS, vip, "R")
+		if wan != nil {
+			native, control, writer := module("service.ha"), module("control"), module("network")
+			for _, process := range []supervisor.ModuleStatus{control, native} {
+				if err := syscall.Kill(process.PID, syscall.SIGSTOP); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = syscall.Kill(process.PID, syscall.SIGCONT) })
+			}
+			until(t, 2*time.Second, func() bool {
+				for _, name := range []string{"ha", "wan-ha"} {
+					link, err := netlink.LinkByName(name)
+					if err != nil || link.Attrs().Flags&net.FlagUp != 0 {
+						return false
+					}
+					addresses, err := netlink.AddrList(link, unix.AF_UNSPEC)
+					if err != nil {
+						t.Fatal(err)
+					}
+					for _, address := range addresses {
+						if address.IP.String() == vip || address.IP.String() == vrrpWANVIP || address.IP.String() == vrrpWANLL {
+							return false
+						}
+					}
+				}
+				return true
+			})
+			for _, before := range []supervisor.ModuleStatus{native, control, writer} {
+				current := module(before.Name)
+				if current.PID != before.PID || current.Generation != before.Generation || !current.Ready {
+					t.Fatal("expiry was caused by process replacement instead of writer authority", before, current)
+				}
+			}
+			until(t, 2*time.Second, func() bool { return wan.peerOwns(t) })
+			wan.waitForwarder(t, false)
+			traffic(wan.client, vrrpWANVIP, "K")
+			for _, process := range []supervisor.ModuleStatus{control, native} {
+				if err := syscall.Kill(process.PID, syscall.SIGCONT); err != nil {
+					t.Fatal(err)
+				}
+			}
+			until(t, 8*time.Second, func() bool { return module("service.ha").Generation > native.Generation })
+			waitOwner(true)
+			wan.waitNative(t, true)
+			wan.waitForwarder(t, true)
+			traffic(wan.client, vrrpWANVIP, "R")
+			positive, zero := wan.advertisements()
+			announcements := wan.announcements(t)
+			if announcements < 2 {
+				t.Fatal("missing finite MAC location announcements", announcements)
+			}
+			t.Logf("WAN MAC location announcements=%d", announcements)
+			t.Logf("conditional WAN MAC/link-local identity, RA positive=%d withdrawal=%d, actual WAN TCP/UDP, control+VRRP pause expiry by surviving writer and fresh-election recovery passed", positive, zero)
+		}
 	}
 	capture.mu.Lock()
 	defer capture.mu.Unlock()
@@ -491,10 +618,10 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 	t.Logf("%s VRRPv%d keepalived interoperability: adverts=%v, VIP TCP/UDP, higher-priority takeover, SIGKILL/rebind, priority-zero recovery and lower-priority preemption passed", family, c.Version, counts)
 }
 
-func vrrpVIPResponders(t *testing.T, ns netns.NsHandle, suffix, vip, response string) {
+func vrrpVIPResponders(t *testing.T, ns netns.NsHandle, suffix string, vips []string, response string) {
 	t.Helper()
 	var tcp net.Listener
-	var udp net.PacketConn
+	var udp []net.PacketConn
 	if err := fixtureInsideNamespace(ns, func() error {
 		var err error
 		tcp, err = net.Listen("tcp"+suffix, ":18093")
@@ -514,17 +641,27 @@ func vrrpVIPResponders(t *testing.T, ns netns.NsHandle, suffix, vip, response st
 			}
 			return socketErr
 		}}
-		udp, err = listen.ListenPacket(context.Background(), "udp"+suffix, net.JoinHostPort(vip, "18094"))
-		return err
+		for _, vip := range vips {
+			socket, err := listen.ListenPacket(context.Background(), "udp"+suffix, net.JoinHostPort(vip, "18094"))
+			if err != nil {
+				return err
+			}
+			udp = append(udp, socket)
+		}
+		return nil
 	}); err != nil {
 		if tcp != nil {
 			tcp.Close()
 		}
+		for _, socket := range udp {
+			socket.Close()
+		}
 		t.Fatal(err)
 	}
-	tcpDone, udpDone := make(chan struct{}), make(chan struct{})
+	var workers sync.WaitGroup
+	workers.Add(1)
 	go func() {
-		defer close(tcpDone)
+		defer workers.Done()
 		for {
 			c, err := tcp.Accept()
 			if err != nil {
@@ -535,16 +672,25 @@ func vrrpVIPResponders(t *testing.T, ns netns.NsHandle, suffix, vip, response st
 			c.Close()
 		}
 	}()
-	go func() {
-		defer close(udpDone)
-		var b [64]byte
-		for {
-			_, peer, err := udp.ReadFrom(b[:])
-			if err != nil {
-				return
+	for _, socket := range udp {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			var b [64]byte
+			for {
+				_, peer, err := socket.ReadFrom(b[:])
+				if err != nil {
+					return
+				}
+				_, _ = socket.WriteTo([]byte(response), peer)
 			}
-			_, _ = udp.WriteTo([]byte(response), peer)
+		}()
+	}
+	t.Cleanup(func() {
+		tcp.Close()
+		for _, socket := range udp {
+			socket.Close()
 		}
-	}()
-	t.Cleanup(func() { tcp.Close(); udp.Close(); <-tcpDone; <-udpDone })
+		workers.Wait()
+	})
 }

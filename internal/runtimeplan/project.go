@@ -261,7 +261,7 @@ func projectWithFacts(doc config.Native, runtimeDir, stateDir string, records ma
 				continue
 			}
 			p.vrrpOwners[s.ModuleName()] = ownershipFor(record, snap)
-			p.network.Links = append(p.network.Links, network.Link{Name: c.VIPInterface, Kind: "macvlan", Parent: c.Interface, MACVLANMode: "bridge", HardwareAddr: vrrp.VirtualMAC(c.Family, c.VirtualRouterID).String(), IPv6AddrGenMode: "none"})
+			p.network.Links = append(p.network.Links, network.Link{BootID: snap.BootID, ExpiresNanos: snap.ExpiresNanos, Name: c.VIPInterface, Kind: "macvlan", Parent: c.Interface, MACVLANMode: "bridge", HardwareAddr: vrrp.VirtualMAC(c.Family, c.VirtualRouterID).String(), IPv6AddrGenMode: "none"})
 			ensureInterface(&p.network, c.VIPInterface)
 			if c.VRF != "" {
 				for i := range p.network.Interfaces {

@@ -3,18 +3,19 @@ package network
 import (
 	"context"
 	"errors"
+	"net"
 	"time"
 
 	"github.com/imksoo/routerd2/internal/boottime"
 )
 
-// MaintainRoutes runs in the network worker, independently of control requests.
-// It enforces original protocol deadlines, including after a writer restart.
+// MaintainAuthority runs in the network worker, independently of control requests.
+// It enforces original protocol deadlines, for routes and virtual links, including after a writer restart.
 // A paused or unavailable writer cannot enforce IPv4 expiry; this is not a
 // kernel timer. The worker owner must cancel and join this loop before Close.
-func (e *Engine) MaintainRoutes(ctx context.Context) error {
+func (e *Engine) MaintainAuthority(ctx context.Context) error {
 	for {
-		delay, err := e.expireRoutes(ctx)
+		delay, err := e.expireAuthority(ctx)
 		if err != nil {
 			return err
 		}
@@ -28,7 +29,7 @@ func (e *Engine) MaintainRoutes(ctx context.Context) error {
 		}
 		select {
 		case <-ctx.Done():
-		case <-e.routeWake:
+		case <-e.authorityWake:
 		case <-wake:
 		}
 		if timer != nil {
@@ -40,7 +41,7 @@ func (e *Engine) MaintainRoutes(ctx context.Context) error {
 	}
 }
 
-func (e *Engine) expireRoutes(ctx context.Context) (time.Duration, error) {
+func (e *Engine) expireAuthority(ctx context.Context) (time.Duration, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.lock == nil {
@@ -49,6 +50,7 @@ func (e *Engine) expireRoutes(ctx context.Context) (time.Duration, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
+	started := time.Now()
 	clock, err := boottime.Read()
 	if err != nil {
 		return 0, err
@@ -56,6 +58,7 @@ func (e *Engine) expireRoutes(ctx context.Context) (time.Duration, error) {
 	var delay time.Duration
 	p := &apply{e: e, ctx: ctx}
 	before := len(e.state.Routes)
+	var expiredLinks map[string]bool
 	for i := 0; i < len(e.state.Routes); {
 		r := e.state.Routes[i]
 		if r.BootID == "" {
@@ -75,10 +78,87 @@ func (e *Engine) expireRoutes(ctx context.Context) (time.Duration, error) {
 			return 0, errors.Join(err, e.save())
 		}
 	}
+	for i, owned := range e.state.Links {
+		link := owned.Definition
+		if link.BootID == "" {
+			continue
+		}
+		if link.BootID == clock.BootID && link.ExpiresNanos > uint64(clock.BoottimeNanoseconds) {
+			remaining := time.Duration(link.ExpiresNanos - uint64(clock.BoottimeNanoseconds))
+			if delay == 0 || remaining < delay {
+				delay = remaining
+			}
+			if link.HardwareAddr != "" {
+				if owned.announceAt <= uint64(clock.BoottimeNanoseconds) {
+					live, err := e.kernel.Interface(link.Name)
+					if err == nil {
+						err = verifyOwnedLink(live, owned)
+					}
+					if err != nil {
+						return 0, err
+					}
+					if live.Up {
+						mac, err := net.ParseMAC(link.HardwareAddr)
+						if err != nil {
+							return 0, err
+						}
+						if err := e.kernel.AnnounceLink(linkAnnouncement{Index: owned.Index, MAC: mac, BootID: link.BootID, ExpiresNanos: link.ExpiresNanos}); err != nil {
+							return 0, err
+						}
+					}
+					e.state.Links[i].announceAt = uint64(clock.BoottimeNanoseconds) + uint64(time.Second)
+				}
+				remaining = time.Duration(e.state.Links[i].announceAt - uint64(clock.BoottimeNanoseconds))
+				if delay == 0 || remaining < delay {
+					delay = remaining
+				}
+			}
+
+			continue
+		}
+		e.state.Links[i].announceAt = 0
+		live, err := e.kernel.Interface(link.Name)
+		if errors.Is(err, errLinkNotFound) {
+			if expiredLinks == nil {
+				expiredLinks = make(map[string]bool)
+			}
+			expiredLinks[link.Name] = true
+			continue
+		}
+		if err == nil {
+			err = verifyOwnedLink(live, owned)
+		}
+		if err == nil {
+			err = p.set(settingKey{Kind: "up", Interface: link.Name}, 0)
+		}
+		if err != nil {
+			e.state.Status, e.state.LastError = "degraded", err.Error()
+			return 0, errors.Join(err, e.save())
+		}
+		if expiredLinks == nil {
+			expiredLinks = make(map[string]bool)
+		}
+		expiredLinks[link.Name] = true
+	}
+	if len(expiredLinks) > 0 {
+		keep := make(map[addressKey]bool, len(e.state.Addresses))
+		for _, address := range e.state.Addresses {
+			if !expiredLinks[address.Interface] {
+				keep[address.key()] = true
+			}
+		}
+		if err := p.removeAddresses(keep); err != nil {
+			e.state.Status, e.state.LastError = "degraded", err.Error()
+			return 0, errors.Join(err, e.save())
+		}
+	}
 	if len(e.state.Routes) != before {
 		if err := e.save(); err != nil {
 			return 0, err
 		}
+	}
+	if delay > 0 {
+		delay = max(time.Nanosecond, delay-time.Since(started))
 	}
 	return delay, nil
 }

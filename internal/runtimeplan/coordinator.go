@@ -155,7 +155,7 @@ func vrrpEffectApplied(u serviceconfig.Update, d network.Desired, active bool) e
 	for _, link := range d.Links {
 		if link.Name == s.VIPInterface {
 			linkPresent = true
-			if active && (link.Kind != "macvlan" || link.Parent != s.Interface || link.HardwareAddr != s.VirtualMAC) {
+			if active && (link.Kind != "macvlan" || link.Parent != s.Interface || link.HardwareAddr != s.VirtualMAC || link.BootID != s.BootID || link.ExpiresNanos != s.ExpiresNanos) {
 				return errors.New("VRRP VMAC effect does not match publication")
 			}
 		}
@@ -389,6 +389,12 @@ func (r *Runtime) applyProjectionLocked(ctx context.Context, p projection) (proj
 		r.vrrpOwners = p.vrrpOwners
 		r.applied.observationVersion = p.observationVersion
 		r.applied.sourceEpoch = r.sourceEpoch
+		r.applied.linkUntilNanos = 0
+		for _, link := range p.network.Links {
+			if link.ExpiresNanos != 0 && (r.applied.linkUntilNanos == 0 || link.ExpiresNanos < r.applied.linkUntilNanos) {
+				r.applied.linkUntilNanos = link.ExpiresNanos
+			}
+		}
 		if p.observationVersion != r.observationVersion {
 			r.wakeCoordinatorLocked()
 			return p, nil

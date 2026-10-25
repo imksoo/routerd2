@@ -414,13 +414,29 @@ ACTIVE成功には元boot IDと絶対期限を保持するVIP投影が必要で�
 旧世代・上書きされた通知や適用失敗を成功として返さない。
 
 このsource受入範囲の追加に伴い、署名されたconfiguration contractは
-`resource-program-native-6`とする。VRRPの明示version、IPv4 v2の秒単位広告・
+`resource-program-native-7`とする。条件付きvirtual linkと依存先の準備条件の
+元のboot期限をwriterへ渡し、期限切れのlinkをDOWNにして管理addressを撤去する。
+この内部期限はoperatorのlink resourceへ記述できない。network journalはformat 4とする。
+VRRPの明示version、IPv4 v2の秒単位広告・
 任意のPASS認証、unicast peer、Health serviceを参照するtrackのpenalty・連続回数・
 元の観測のmax ageを受け入れる。tracking判定は実適用応答で返し、
 worker設定の再生成や再起動で優先度を変更しない。設定と応答の両端を同じ契約へ置き換える。
 以前のprototype compilerとの更新・fallbackは
 既存のABI検査で拒否する。format migrationや旧compilerとの互換性を表す変更ではない。
 
+
+## 追加MACとインターフェースの所有期限
+
+追加WAN/LAN MACは通常の`link`・`interface`・`address`を使う。
+[設定例](../examples/vrrp-additional-identity.yaml)では`service.ha.elected`で固定MACと
+link-local addressを準備し、`service.ha.active`でRAを公開する。
+linkへの依存はinterface/address/consumerへ推論され、依存先の`ready_when`も期限を制限する。
+resource自身の`ready_when`はそのresourceの起動を妨げない。
+
+writerは期限切れlinkをDOWNにして、そこで管理するaddressとlocal routeを撤去する。
+address自身の期限が短ければそちらを保持し、静的なaddressもlinkの所有期限を越えない。
+設定の再生成・worker再起動でこの期限を延長しない。実行中のnetwork workerを必要とし、
+writer停止中のlink fencingや物理suspendを保証するものではない。
 
 ## VRRPの選出とVIP公開のreadiness
 

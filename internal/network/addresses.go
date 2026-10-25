@@ -219,3 +219,55 @@ func (p *apply) addressConfig(l Interface, address string) error {
 		p.e.state.Addresses = append(p.e.state.Addresses, ownedAddress{Interface: l.Name, Address: address, Index: live.Index, Options: options})
 	})
 }
+
+// A lease on a virtual link also bounds addresses managed on that link. Keep
+// the tighter protocol/UTC deadline; operator intent remains in the caller's
+// unmodified Desired. The writer can then revoke local routes as well as L2.
+func boundLinkAddresses(d *Desired, clock boottime.Clock, now time.Time) {
+	var lifetimes map[string]BootLifetime
+	for _, link := range d.Links {
+		if link.BootID == "" {
+			continue
+		}
+		if lifetimes == nil {
+			lifetimes = make(map[string]BootLifetime)
+		}
+		lifetimes[link.Name] = BootLifetime{BootID: link.BootID, PreferredNanos: link.ExpiresNanos, ValidNanos: link.ExpiresNanos}
+	}
+	for i := range d.Interfaces {
+		iface := &d.Interfaces[i]
+		owner, finite := lifetimes[iface.Name]
+		if !finite {
+			continue
+		}
+		if iface.AddressOptions == nil {
+			iface.AddressOptions = make(map[string]AddressOptions)
+		}
+		for _, address := range iface.Addresses {
+			options := iface.AddressOptions[address]
+			until := owner
+			if own := options.BootLifetime; own != (BootLifetime{}) {
+				until.ValidNanos = min(until.ValidNanos, own.ValidNanos)
+				until.PreferredNanos = min(until.PreferredNanos, own.PreferredNanos)
+			} else {
+				deadline := func(wall time.Time) uint64 {
+					if wall.IsZero() {
+						return owner.ValidNanos
+					}
+					remaining := wall.Sub(now)
+					if remaining <= 0 {
+						return 0
+					}
+					base := uint64(clock.BoottimeNanoseconds)
+					return base + min(uint64(remaining), owner.ValidNanos-base)
+				}
+				until.ValidNanos = deadline(options.ValidUntil)
+				until.PreferredNanos = deadline(options.PreferredUntil)
+				options.ValidUntil, options.PreferredUntil = time.Time{}, time.Time{}
+			}
+			until.PreferredNanos = min(until.PreferredNanos, until.ValidNanos)
+			options.BootLifetime = until
+			iface.AddressOptions[address] = options
+		}
+	}
+}

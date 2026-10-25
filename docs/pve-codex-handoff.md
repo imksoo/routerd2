@@ -32,6 +32,9 @@
   GARP/NAは適用応答と実netlink検査の後に送る。準備待ちのgraceful選挙は広告だけを続ける。
 - config適用終了と定期更新は同じ準備確認を使う。VIP未公開の起動直後や未適用の観測を
   Ready/confirmed commitの成功へ読み替えない。
+- resourceの公開状態から投影中だけ使う期限を分離した。supervisorの準備時刻の更新で
+  状態比較が永久に不一致になる原因を除いた。ReadyはACK済みlinkの元の期限も確認し、
+  新しい準備観測だけで期限切れの実適用を成功扱いにしない。
 - Healthの現在監視と履歴配送は分離済み。保存先障害・queue満杯でprobeを止めず、欠落と
   保存エラーをsnapshotへ表示する。全probeの無欠落保存は保証しない。
 - VRRPはIPv4/IPv6 unicast peerに対応した。明示source、同familyのpeer一覧、実宛先、
@@ -43,7 +46,7 @@
   controlで判定し、既存のVIP適用応答で有限の判定を返す。再送やpollで確認回数を増やさず、
   worker/設定の交替や監視の空白後には新しい正常probeを要求する。VRRPは自分のboot clockで
   判定を失効させ、設定のbase priorityからwire priorityを導出する。Health flapでintentを
-  書き換えたりVRRPを再起動したりしない。compiler contractは `resource-program-native-6`。
+  書き換えたりVRRPを再起動したりしない。compiler contractは `resource-program-native-7`。
 - 実通信で発見したVIP期限更新の不具合を修正した。kernelの秒単位lifetimeの近似一致を
   更新不要の判定へ流用せず、元の絶対期限が変わったらkernel timerも更新する。
   同じ期限の再適用ではtimerを延長しない。所有記録だけを延長してVIPが消える原因を除去した。
@@ -53,10 +56,20 @@
   v3/IPv6のPASS、長過ぎるpasswordは拒否する。自動version切替やchecksum fallbackはない。
   PASSは旧peer用の平文方式で、暗号認証やreplay防止ではない。snapshotにはversionだけを返す。
   ownership lifetimeの公開helperと繰り返す設定正規化も除去した。
+- 追加WAN/LAN MACは既存の条件付きlink/interface/addressで表す。`.elected`で準備し、
+  `.active`でRA等を公開する。新しいVRRP managerや選挙workerは追加しない。
+  条件・依存先の準備の元の期限をwriterへ渡し、期限でowned linkをDOWNにして管理addressを
+  撤去する。古い要求はUPへ戻せず、UP直前もjournal等のI/Oで期限が過ぎていないか確認する。
+  addressの期限は自身とlinkの短い方に制限し、writer停止中もkernelの秒単位timerが残る。
+  expired linkのaddress撤去は通常の削除と同じ所有権確認・secondary順序を使う。
+- 有効なfinite MACはRARPで所在を通知する。初回と1秒間隔で送り、退出側の最終RA等の後も
+  switchの学習を戻す。IPやdefault routeを広告せず、観測・所有期限も延長しない。
+  送信直前にboot期限を確認する。scheduleは一時的で、永続的な別のauthorityを作らない。
+  元のroute期限loopを共有し、metadata更新だけでkernel linkを書き換えない。
 - BGP経路の元のboot IDとBOOTTIME期限をnetwork workerへ渡し、controlと独立して
   期限切れ経路を撤去する。期限更新だけではkernel経路を置換せず、所有記録を更新する。
   退役時も同じ所有権確認を使い、変更されたforeign経路を残す。table観測と経路選択は
-  操作内で索引化した。network journal/runtime宣言はformat 3に直接置換した。
+  操作内で索引化した。network journal/runtime宣言はformat 4に直接置換した。
   経路追加は不在確認後に追加予定と元の期限をまとめて永続化し、kernel追加直後の
   writer停止でも復旧側が撤去できるようにした。期限切れ撤去もまとめて保存する。
   journal読取りはatomic置換でunlinkされた開いた旧inodeを許す。lock・書込み先は
@@ -64,42 +77,56 @@
 
 ## 今回の確認
 
-製品は `RELEASE_ID=vrrp-v2`。関連packageのRace Detector、全体vet・fmt確認、amd64/arm64の
-静的ビルドが成功した。arm64は実行していない。全体 `make check`、およびprivate 0700配下へ
-6 ELFを配置する署名bundle/publisher試験も成功した。両architectureの全ELFでcompiler
-contract `resource-program-native-6` を確認した。
+製品は `RELEASE_ID=link-authority`。`make check`、関連Race Detector、全体vet・fmt確認、
+amd64/arm64静的ビルド、private 0700へ6 ELFを配置する署名bundle/publisher試験が成功した。
+network journalはformat 4、compiler contractは `resource-program-native-7`。
+arm64は実行していない。`examples/vrrp-additional-identity.yaml`のCLI validateも成功した。
 
-隔離namespaceの実supervisor/control/network/VRRPと独立Keepalived 2.2.8で、
-IPv4 VRRPv2のmulticast（認証なし）・unicast（PASS）が成功した。上位peerへの切替、
-VRRP worker SIGKILL/rebind、peer停止、下位peer復帰後の所有維持と、両所有者への
-VIP TCP/UDPを確認した。誤ったPASSを持つ独立peerの広告も拒否した。
-captureでversion・秒間隔・認証欄、宛先groupまたはpeer、TTL 255を検査した。
-IPv4/IPv6 v3 unicastとHealth trackingを含む5系統が最終binaryで成功した。
-元のVRRP期限・条件付きVIP所有・graceful公開の実daemon回帰試験も成功した。
+実supervisor/control/network/VRRPと独立Keepalived 2.2.8で6系統が成功した。
+IPv4/IPv6 v3 unicast、Health tracking、v2 multicastとPASSに加え、独立WANクライアントで
+固定MAC・IPv6 link-local address、RA公開/撤回、両所有者へのWAN TCP/UDPを確認した。
+controlとVRRPをSIGSTOPし、同じPID/世代でReady登録されたnetwork workerだけが
+元の期限で主VIP/WAN linkをDOWNにして管理addressを撤去することも確認した。
+再開後は新しい選挙世代と通信の復旧を要求する。captureでRARPの形式とMACを検査した。
+元のVRRP期限・条件付きVIP所有・graceful公開の3系統も成功した。
+実VIPのTCP/UDP、元の期限切れ・再適用、worker/control交替と古い世代の拒否、
+foreign addressの保持、準備不足での公開待ちと公開後の準備喪失を確認した。
 
-v2のwire fixture・checksum・切断された認証欄、不一致password/認証種別/広告間隔、
-v2の2秒広告に対する固定skew、下位広告の破棄、v3とのversion不一致を局所試験で確認した。
-旧routerd importerはphysical VIP・default preempt等の差を黙って置換せず、明示移行を要求する。
+WAN試験の初回TCP timeoutでは、peerのGARP後に退出側のRA撤回が送られる時系列を確認した。
+MAC所在通知とpeer側の`garp_extra_if all 1`を用い、bridge学習先の収束を観測してから
+steady-state TCP/UDPを試験する。許容する収束待ちは2秒で、無欠落切替の受入ではない。
+peerのWAN macvlanは事前作成し、IPはKeepalivedが管理する。両nodeのnative link fencing、
+IPv6 clientのdefault-route継続、DHCP/PD/NAT session継続はまだ受け入れていない。
 
-未解決: 以前の二native peer試験におけるIPv6 multicast広告未受信、初回IPv6 VIP TCP timeout、
-BFD再接続timeoutは直接原因が未確定。今回、二WAN PBRの全系統・Health実ソケット・
-QEMU時計補正・対象実機/NIC/性能/物理suspendは再実行していない。
-Health以外のtrack・条件除外時のneutral、外部secret参照・peer-aware移行、cluster、追加VMAC、
-VRF unicastと対象実機受入は未完了。AH/HMAC認証は実装していない。
+v2誤認証試験ではpeer広告間隔が延びる事象を診断した。変更前binaryとの比較とcaptureでは
+宛先MACが正しく、届いた2広告は両方拒否されていた。Keepalived 2.2.8のread dispatcherは
+既定設定で不正受信時もsend timerを再設定する。v2 peerへRFC準拠の`lower_prio_no_advert`を
+明示した。routerd2の認証条件も、2回の拒否を確認する試験条件も弱めていない。
 
-現在の出力は `dist/vrrp-v2-{check,final-race,final-build,release-built}.log` と
-`dist/vrrp-unicast/{ipv4,ipv6,health-track,v2,v2-pass}.log`、
-`dist/vrrp-v2-TestDaemonVRRP*.log`。
-過去の出力との一致を実装条件にしない。
+以前のIPv6 multicast未受信・初回IPv6 VIP TCP timeout・BFD再接続timeoutは原因未確定。
+HealthのTCP/HTTP・DNS・raw ICMP実ソケット試験も成功した。
+実supervisor/control/network/Healthと独立2 WANのHealth→PBRも成功した。TCP/UDPと
+各WANのcaptureで切替・閾値復旧・consumer hold・元の期限とmax_age・古い通知・
+各workerと全process treeの再起動・confirmed rollbackを確認し、foreign objectを保持した。
+QEMU時計補正・物理NIC/性能/suspendは再実行していない。
+writer自身が停止中のlink fencingとIPv4 route撤去は保証しない。
+全計画と対象実機の受入は未完了。
+
+現在のログは `dist/link-authority-final-{check,readiness,build,native}.log`、
+`dist/link-authority-readiness-race.log`、`dist/link-authority-health-pbr.log`、
+`dist/link-authority-health-sockets.log`、`dist/health-pbr-test/{test.log,wan0.pcap,wan1.pcap}`、
+`dist/link-authority-release-built.log`、`dist/vrrp-unicast/*.log`、
+`dist/link-authority-original-authority.log`。過去の出力との一致を実装条件にしない。
 
 ## 続ける実装
 
 1. 初回BFD再接続timeoutを再現・診断し、原因を確定する。成功回数で閉じない。
    BGP観測期限は稼働中のnetwork writerが独立して失効させる。writer自身が停止した間の
-   IPv4失効と、BFD受信期限・再帰next-hopの前提期限を全てwriterへ渡す処理は未検証・未実装。
+   link fencing・IPv4 route失効と、BFD受信期限・再帰next-hopの前提期限を全てwriterへ渡す処理は未検証・未実装。
 2. 残るprotocol snapshotの型付き保持、期限切れJSON書換えの削除、条件式の静的計算と、
    retained判定で繰り返すinstance生成・digest計算を整理する。
-3. HA-01のHealth以外のtrackと条件除外時のneutral、外部secret参照とpeer-aware移行、cluster、追加VMACを実装する。IPv6 multicast未受信と
+3. HA-01のHealth以外のtrack・neutral、外部secret参照・peer-aware移行、clusterを実装する。
+   二native nodeの追加identity・RA・DHCP/PD/NAT継続を受け入れる。IPv6 multicast未受信と
    起動直後のND/DADを診断し、VRFと対象実機での相互接続を確認する。
    全実装計画・全更新復旧経路・外部engine・配備先・対象実機は未完了。
 

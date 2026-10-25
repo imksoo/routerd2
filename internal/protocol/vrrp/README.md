@@ -190,6 +190,38 @@ the election worker or create another notification stream. Snapshot `priority`
 is effective priority and `track` explains its current counts and deadlines.
 Generic resource tracking and conditional-source neutral semantics remain open.
 
+## Additional WAN/LAN identities
+
+Additional identities use ordinary conditional `link`, `interface` and `address`
+resources, with no second VRRP instance or failover manager. See
+[`examples/vrrp-additional-identity.yaml`](../../../examples/vrrp-additional-identity.yaml).
+Gate the macvlan on `service.ha.elected` to prepare a fixed MAC and link-local
+address before publishing the gateway VIP. Inferred link dependencies carry this
+condition to its interface, addresses and consumers. Gate RA on
+`service.ha.active` so advertisements start only after VIP application.
+A graceful VRRP instance can wait for a dependent WAN protocol's readiness before
+publishing its VIP. Ordinary dependent stop ordering withdraws RA before deleting
+the identity.
+
+The network writer receives the original condition/dependency boot deadline and
+uses it to fence the link DOWN and revoke its managed addresses independently
+of control. Main VRRP VMACs carry the same finite link authority. Address budgets
+are intersected with the link budget; an old projection cannot restore UP.
+Current finite MACs reassert their L2 location with RARP once per second. This
+avoids relying on unrelated traffic to repair switch learning after handover.
+No IP lease or election lifetime is extended by that announcement.
+
+`TestDaemonVRRPAdditionalIdentity` uses an independent WAN client and Keepalived,
+a shared fixed WAN MAC/link-local address, real WAN TCP/UDP, RA withdrawal and
+packet capture. It pauses both control and VRRP while the registered network
+worker remains alive, verifies DOWN and managed-address removal, then requires
+a fresh election and traffic recovery. The peer uses `garp_extra_if all 1` for
+its excluded WAN VIPs. The fixture permits up to two seconds for bridge learning
+before testing steady-state traffic; it does not establish lossless handover.
+Its peer WAN macvlan is precreated, with addresses owned by Keepalived. Symmetric
+two-native-node DHCP/PD/NAT session continuity and physical NIC qualification
+remain open.
+
 ## Native wire and timer behavior
 
 Linux IPv4/IPv6 raw receive sockets provide the actual source, destination,
@@ -246,6 +278,10 @@ priority 120, with native priorities 150/50 and TCP/UDP on both owners.
 `TestDaemonVRRPv2` exercises IPv4 multicast without authentication and
 `TestDaemonVRRPv2PASS` exercises unicast PASS against Keepalived. The PASS fixture
 also verifies that a wrong-password peer cannot make the native owner withdraw.
+The v2 peer explicitly uses `lower_prio_no_advert`, matching RFC 3768 discard
+behavior. Keepalived 2.2.8 otherwise resets its send timer on rejected packets
+([receive dispatcher](https://github.com/acassen/keepalived/blob/v2.2.8/keepalived/vrrp/vrrp_scheduler.c#L1075)),
+which can postpone the wrong-password peer's advertisements.
 Both check takeover, process replacement, peer stop, lower-priority recovery,
 VIP TCP/UDP and actual version/interval/authentication fields in capture.
 Run `make check-vrrp-unicast` on the isolated Linux VM with keepalived installed
@@ -253,7 +289,8 @@ and root or noninteractive sudo available. The runner builds as the caller and
 stages execution in a root-owned 0700 temporary directory; it never changes home
 permissions or host interface configuration. Current logs go to
 `dist/vrrp-unicast/ipv4.log`, `ipv6.log`, `health-track.log`, `v2.log` and
-`v2-pass.log`.
+`v2-pass.log` and `additional-identity.log`. Use the runner's `--test` argument
+for an individual case while developing.
 
 ## Verification
 

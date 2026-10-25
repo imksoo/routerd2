@@ -3,11 +3,14 @@ package network
 import (
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"net/netip"
 	"reflect"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/imksoo/routerd2/internal/boottime"
 )
 
 // Link creates a virtual interface. Interface configures its administrative
@@ -16,6 +19,10 @@ import (
 // Identity fields (kind, parent, IDs, VXLAN port and macvlan mode) cannot change
 // in place: remove the old declaration and apply before creating its replacement.
 type Link struct {
+	// Internal original authority. The writer fences this owned link DOWN at
+	// expiry; these fields describe no kernel link attribute.
+	BootID       string `json:"boot_id,omitempty"`
+	ExpiresNanos uint64 `json:"expires_nanos,omitempty"`
 	Name         string `json:"name"`
 	Kind         string `json:"kind"`
 	Parent       string `json:"parent,omitempty"`
@@ -39,6 +46,13 @@ type Link struct {
 	BridgeMulticastSnooping *bool  `json:"bridge_multicast_snooping,omitempty"`
 }
 
+type linkAnnouncement struct {
+	Index        int
+	MAC          net.HardwareAddr
+	BootID       string
+	ExpiresNanos uint64
+}
+
 const linkAliasPrefix = "routerd2:link:v1:"
 
 func validAlias(s string, maximum int) bool {
@@ -50,6 +64,9 @@ func validateLinks(d Desired) error {
 	add := func(format string, args ...any) { errs = append(errs, fmt.Errorf(format, args...)) }
 	created := map[string]Link{}
 	for _, l := range d.Links {
+		if (l.BootID != "" || l.ExpiresNanos != 0) && (!boottime.ValidBootID(l.BootID) || l.ExpiresNanos == 0 || l.ExpiresNanos > math.MaxInt64) {
+			add("link %s: invalid original boot deadline", l.Name)
+		}
 		if !validName(l.Name) || l.Name == "lo" {
 			add("link %q: invalid virtual interface name", l.Name)
 		}
@@ -272,6 +289,8 @@ func vxlanFamily(l Link) int {
 }
 
 func sameManagedLink(live, want Link) bool {
+	live.BootID, want.BootID = "", ""
+	live.ExpiresNanos, want.ExpiresNanos = 0, 0
 	if want.HardwareAddr == "" {
 		live.HardwareAddr = ""
 	}

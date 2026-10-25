@@ -1,8 +1,10 @@
 package resourceprogram
 
 import (
-	"github.com/imksoo/routerd2/internal/network"
+	"math"
 	"time"
+
+	"github.com/imksoo/routerd2/internal/network"
 )
 
 // FactSnapshot is an immutable, single-instant view. All resources in one
@@ -73,10 +75,16 @@ type ResourceState struct {
 // validation, graph construction and protocol compilation belong to Compile.
 func (p Plan) Project(facts FactSnapshot) (Native, map[string]ResourceState) {
 	states := make(map[string]ResourceState, len(p.nodes))
+	type deadline struct{ active, ready uint64 }
+	bounds := make(map[string]deadline, len(p.nodes))
 	var selected []compiledResource
 	for _, node := range p.nodes {
 		r := node.source
-		state := ResourceState{When: facts.evaluate(r.When)}
+		state := ResourceState{When: True}
+		untilNanos := uint64(math.MaxUint64)
+		if r.When != nil {
+			state.When, untilNanos = facts.ConditionAuthority(*r.When)
+		}
 		gate := state.When
 		if gate != True {
 			state.Reason = conditionReason("when", gate)
@@ -86,14 +94,20 @@ func (p Plan) Project(facts FactSnapshot) (Native, map[string]ResourceState) {
 		}
 		for _, dep := range p.Dependencies[r.ID] {
 			gate = All(gate, states[dep].Ready)
+			untilNanos = min(untilNanos, bounds[dep].ready)
 			if state.When == True && states[dep].Ready != True && (state.Dependency == "" || state.Reason == "dependency_indeterminate" && states[dep].Ready == False) {
 				state.Reason, state.Dependency = conditionReason("dependency", states[dep].Ready), dep
 			}
 		}
 		state.Active = gate == True
 		state.Ready = gate
+		readyUntilNanos := untilNanos
 		if state.Active {
-			state.Ready = facts.evaluate(r.ReadyWhen)
+			if r.ReadyWhen != nil {
+				var until uint64
+				state.Ready, until = facts.ConditionAuthority(*r.ReadyWhen)
+				readyUntilNanos = min(readyUntilNanos, until)
+			}
 			if state.Ready != True {
 				state.Reason = conditionReason("ready_when", state.Ready)
 				if facts.pendingHold(r.ReadyWhen) {
@@ -103,8 +117,22 @@ func (p Plan) Project(facts FactSnapshot) (Native, map[string]ResourceState) {
 			selected = append(selected, node)
 		}
 		states[r.ID] = state
+		bounds[r.ID] = deadline{active: untilNanos, ready: readyUntilNanos}
 	}
-	return renderNative(selected), states
+	native := renderNative(selected)
+	linkIndex := 0
+	for _, node := range selected {
+		if node.source.Link == nil {
+			continue
+		}
+		until := bounds[node.source.ID].active
+		if until != math.MaxUint64 {
+			native.Network.Links[linkIndex].BootID = facts.Scope.BootID
+			native.Network.Links[linkIndex].ExpiresNanos = until
+		}
+		linkIndex++
+	}
+	return native, states
 }
 
 func conditionReason(prefix string, value Truth) string {

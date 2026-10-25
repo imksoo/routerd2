@@ -31,10 +31,10 @@ func TestDeclarationTracksImplementedFormatVersions(t *testing.T) {
 	}
 }
 
-func TestVRRPWireVersionsRequireAnExplicitCompilerContract(t *testing.T) {
+func TestFiniteVirtualLinksRequireAnExplicitCompilerContract(t *testing.T) {
 	current := runtimeabi.Current()
-	if current.ConfigurationContract != "resource-program-native-6" {
-		t.Fatal("VRRP wire-version input semantics require their signed compiler contract")
+	if current.ConfigurationContract != "resource-program-native-7" {
+		t.Fatal("Finite virtual-link semantics require their signed compiler contract")
 	}
 	facts := runtimeabi.Facts{Configuration: current.Configuration.Write, ConfigurationContract: current.ConfigurationContract}
 	for _, state := range current.State {
@@ -44,7 +44,7 @@ func TestVRRPWireVersionsRequireAnExplicitCompilerContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	previous := current
-	previous.ConfigurationContract = "resource-program-native-5"
+	previous.ConfigurationContract = "resource-program-native-6"
 	facts.ConfigurationContract = previous.ConfigurationContract
 	if err := runtimeabi.CheckTransition(previous, current, facts); err == nil {
 		t.Fatal("unqualified prototype compiler transition accepted")

@@ -731,8 +731,11 @@ IPv4 VRRPv2の明示選択、秒単位広告、v2固有skew、任意PASSと認�
 Snapshotへversionを返し、v3/IPv6のPASSや8 byteを超えるpasswordは拒否する。
 独立Keepalivedとのv2 multicast・PASS付きunicast、誤ったPASSの拒否、実TCP/UDPの
 切替・復旧とworker再起動を確認し、captureでversion・間隔・認証欄も検査した。
-Health以外のresource track・条件除外時のneutral、外部secret参照とpeer-aware移行、cluster、追加VMACと
-対象実機の受入は残っており、HA-01全体の完了とはしない。
+追加VMAC/link-local addressを条件付きlink/interface/addressで表現する経路を実装した。
+選挙中の準備は`.elected`、実公開後のRAは`.active`で制御する。writerは元の条件・依存期限で
+リンクをDOWNにして管理addressを撤去し、MACの所在通知はその期限内だけ送る。
+Health以外のresource track・条件除外時のneutral、外部secret参照とpeer-aware移行、cluster、
+二native nodeでのlease/session継続と対象実機の受入は残り、HA-01全体の完了とはしない。
 
 **受入条件**
 
