@@ -52,6 +52,15 @@ func TestCheckedPrepareValidatesPinnedTargetUnderFileLockBeforePublication(t *te
 	if _, err := s.PrepareChecked(ctx, target, before.Generation, PrepareOptions{}, nil); err == nil {
 		t.Fatal("checked API accepted missing preflight")
 	}
+	invalid := pairOptions()
+	invalid.Startup.Generation = 0
+	called := false
+	if _, err := s.PrepareChecked(ctx, target, before.Generation, invalid, func(context.Context, State, *Image) error {
+		called = true
+		return nil
+	}); err == nil || called {
+		t.Fatal("malformed pair invoked target preflight", err)
+	}
 	canceled, cancel := context.WithCancel(ctx)
 	if _, err := s.PrepareChecked(canceled, target, before.Generation, PrepareOptions{}, func(context.Context, State, *Image) error { cancel(); return nil }); !errors.Is(err, context.Canceled) {
 		t.Fatal("canceled validation published candidate", err)
