@@ -356,12 +356,47 @@ func runVRRPAuthority(t *testing.T, clockClient *clocktest.Client, conditional b
 		until(t, 8*time.Second, func() bool { return module("service.dependent").Ready && hasVIP() })
 		traffic(true)
 		base := config.FromNative(config.Native{Network: network.Desired{Interfaces: []network.Interface{{Name: "lan0", Addresses: []string{"192.0.2.2/24"}}}}})
-		if err := f.control.Do(ctx, "POST", "/v1/config/commit", control.CommitRequest{ExpectedRevision: current.Revision, RequestID: "conditional-vrrp-withdraw", Config: base}, nil); err != nil {
-			t.Fatal("worker stop/withdrawal ACK deadlocked:", err)
+		dependent := module("service.dependent")
+		if dependent.PID <= 1 {
+			t.Fatal("actual dependent worker missing")
+		}
+		if err := syscall.Kill(dependent.PID, syscall.SIGSTOP); err != nil {
+			t.Fatal(err)
+		}
+		dependentPaused := true
+		defer func() {
+			if dependentPaused {
+				_ = syscall.Kill(dependent.PID, syscall.SIGCONT)
+			}
+		}()
+		withdrawal := make(chan error, 1)
+		go func() {
+			withdrawal <- f.control.Do(ctx, "POST", "/v1/config/commit", control.CommitRequest{ExpectedRevision: current.Revision, RequestID: "conditional-vrrp-withdraw", Config: base}, nil)
+		}()
+		until(t, time.Second, func() bool { return module("service.dependent").State == "stopping" })
+		if !hasVIP() {
+			t.Fatal("VIP withdrawn while actual dependent was still stopping")
+		}
+		select {
+		case err := <-withdrawal:
+			t.Fatalf("cutover finished before dependent exit: %v", err)
+		default:
+		}
+		if err := syscall.Kill(dependent.PID, syscall.SIGCONT); err != nil {
+			t.Fatal(err)
+		}
+		dependentPaused = false
+		select {
+		case err := <-withdrawal:
+			if err != nil {
+				t.Fatal("worker stop/withdrawal ACK deadlocked:", err)
+			}
+		case <-time.After(8 * time.Second):
+			t.Fatal("actual worker withdrawal did not finish")
 		}
 		until(t, 8*time.Second, func() bool { return module("service.ha").PID == 0 && module("service.dependent").PID == 0 && !hasVIP() })
 		traffic(false)
-		t.Log("conditional VRRP startup/effect ACK, dependent activation on owned macvlan, final worker withdrawal and config cutover passed")
+		t.Log("conditional VRRP startup/effect ACK, dependent activation on owned macvlan, VIP retained while dependent stopping, final worker withdrawal and config cutover passed")
 	}
 	addresses, err := netlink.AddrList(lan, unix.AF_INET)
 	if err != nil {
