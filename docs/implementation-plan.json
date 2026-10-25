@@ -300,12 +300,12 @@
         "internal/supervisor"
       ],
       "implementation_notes": {
-        "implemented": "Compile static graph/programs once; direct finite facts; one coordinator-owned kernel application boundary for configuration, monitoring and startup/stop waits. Observation receipts are separate from explicit BGP/VRRP application completion. Kernel IO releases the observation mutex and completion fences newer input.",
+        "implemented": "Compile static graph/programs once; direct finite facts; one coordinator-owned kernel application boundary for configuration, monitoring and startup/stop waits. Observation receipts are separate from explicit BGP/VRRP application completion. Kernel IO releases the observation mutex and completion fences newer input. Prepare instance files once outside the observation mutex, reuse canonical bytes for digest and write, and repeat preparation/quiescence only if instance membership changed during the wait.",
         "validation": "Current local/real-daemon results and untested scope are in docs/pve-codex-handoff.md; historical checkpoints are not acceptance authority.",
         "remaining": [
           "Simplify VRRP admission and publication state; remove the grant round trip.",
           "Unify duplicated worker selection during normal reconciliation and startup/stop waits.",
-          "Keep accepted protocol data typed; remove JSON expiry rewrites and redundant instance preparation IO."
+          "Keep accepted protocol data typed; remove JSON expiry rewrites and repeated instance compilation during retention checks."
         ]
       }
     },

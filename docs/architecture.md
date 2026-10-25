@@ -46,7 +46,10 @@ network だけが netlink/sysctl/nftables を変更する。protocol worker は 
 
 設定にある任意 executable/argv を supervisor に渡す経路はない。dynamic module role は
 許可リスト、instance は固定ディレクトリの SHA-256 content-addressed JSON である。
-worker 自身が exact bytes を検証する。設定由来の journal/socket パスも compiler が割り当てる。
+worker 自身が exact bytes を検証する。digest計算と保存には同じ準備済みbytesを使う。
+instanceファイルとBFD設定は観測用mutexの外で準備し、worker停止待ち後には最新の観測を
+再投影する。instance構成が変わった場合だけ準備・停止をやり直す。
+設定由来の journal/socket パスも compiler が割り当てる。
 
 変更した worker は停止・reap を待って置換する。変更していない protocol config の取得状態は
 維持する。停止中に DHCP が更新した場合も、cutover 時点で最後に受理したリースを採用する。

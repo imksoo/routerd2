@@ -364,10 +364,11 @@ func AtomicJSON(path string, v any) error {
 		return err
 	}
 	b = append(b, '\n')
-	return atomicBytes(path, b)
+	return AtomicWrite(path, b)
 }
 
-func atomicBytes(path string, b []byte) error {
+// AtomicWrite durably replaces a private file with already prepared bytes.
+func AtomicWrite(path string, b []byte) error {
 	return atomicBytesChecked(path, b, nil)
 }
 

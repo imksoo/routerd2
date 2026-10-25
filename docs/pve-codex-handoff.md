@@ -20,6 +20,9 @@
 - kernel I/O中の観測mutex保持と、適用失敗で受理済み観測を巻き戻す処理を削除した。
   新しい観測は保持して再適用し、古い結果で新しい通知を完了扱いにしない。
   未適用の観測・適用中の処理があればReady/confirmed commitを拒否する。
+- config適用で同じinstanceを二度書く処理を削除した。digest計算と保存に同じbytesを使い、
+  ファイル準備・BFD解析は観測用mutexの外で行う。停止中の最新観測を採用し、
+  instance構成が変わった場合だけ準備と停止を繰り返す。
 
 ## 今回の確認
 
@@ -47,12 +50,19 @@ kernel VIP失効・再適用・通信を確認した。実機の時計は変更�
 `dist/coordinator-vrrp-clock.log`。保存した過去の出力とのhash一致は実装の前提にしない。
 全更新復旧経路・QEMU電源断・arm64実行・対象実機・全実装計画は今回完了していない。
 
+続くinstance準備の整理では `RELEASE_ID=instance-preparation` をビルドした。
+`make fmt-check vet build-linux` と runtimeplan/config/control/legacyconfig のRace Detectorが成功。
+最終バイナリでは実daemonの設定変更・再起動/rollback、Health/PBR二WAN、VRRP条件付き/graceful、
+resource lifecycleの5系統が成功した。ログは `dist/instance-preparation-{related,build,native}.log`
+と `dist/instance-preparation-native-TestDaemon*.log`。この整理後のQEMU・残りのdaemon系統は
+再実行していない。
+
 ## 続ける実装
 
 1. VRRPのadmission grant往復・複数latchを減らし、準備判定とVIP適用を単純化する。
    起動停止待ちと通常更新は同じ適用処理を使うが、worker選択の重複処理は残る。
 2. protocol snapshotを受理時から型付きで保持し、期限切れを表すJSON書換えを廃止する。
-   条件式の静的計算と、設定準備時の不要なI/O・再encodeも整理する。
+   条件式の静的計算と、retained判定で繰り返すinstance生成・digest計算も整理する。
 3. 実装計画の残機能を接続し、独立peerとの実通信と障害後の復旧を確認する。
    全更新復旧経路、外部engine、配備先、arm64実行、対象実機は未完了。
 

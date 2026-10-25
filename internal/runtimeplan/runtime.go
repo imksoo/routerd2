@@ -241,42 +241,55 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 		}
 		r.initialized = true
 	}
-	r.mu.Lock()
-	retained, err := r.retainedLocked(doc)
+	var retained map[string]serviceconfig.Update
 	var p projection
-	if err == nil {
-		p, err = r.projectProgramLocked(next, retained, time.Now())
-	}
-	r.mu.Unlock()
-	if err != nil {
-		return r.failure(err)
-	}
-	_, modules, err := r.prepare(p.instances)
-	if err != nil {
-		return r.failure(err)
-	}
-	if err := r.quiesceChanged(ctx, modules); err != nil {
-		return r.failure(err)
-	}
-	r.mu.Lock()
-	// Unchanged producers may renew while changed workers are stopping. Take
-	// their latest acknowledged facts at cutover; never restore an older lease.
-	retained, err = r.retainedLocked(doc)
-	if err == nil {
-		p, err = r.projectProgramLocked(next, retained, time.Now())
-	}
 	var bindings map[string]binding
-	if err == nil {
-		bindings, modules, err = r.prepare(p.instances)
-	}
+	var modules []supervisor.DynamicModule
 	var bfdSources map[string]bfdBinding
 	var bfdRecipients map[string]bfdRecipient
-	if err == nil {
-		bfdSources, bfdRecipients, err = compileBFDCache(bindings)
-	}
-	if err != nil {
+	for {
+		if err := ctx.Err(); err != nil {
+			return r.failure(err)
+		}
+		r.mu.Lock()
+		retained, err = r.retainedLocked(doc)
+		if err == nil {
+			p, err = r.projectProgramLocked(next, retained, time.Now())
+		}
 		r.mu.Unlock()
-		return r.failure(err)
+		if err != nil {
+			return r.failure(err)
+		}
+		// Preparing immutable files and BFD bindings does not own observations.
+		// Finish it before stopping workers so a write error leaves them running.
+		bindings, modules, err = r.prepare(p.instances)
+		if err == nil {
+			bfdSources, bfdRecipients, err = compileBFDCache(bindings)
+		}
+		if err != nil {
+			return r.failure(err)
+		}
+		if err := r.quiesceChanged(ctx, modules); err != nil {
+			return r.failure(err)
+		}
+		r.mu.Lock()
+		// Preserve renewals received during preparation and stopping. Only a
+		// changed instance set needs new files and another stop pass.
+		retained, err = r.retainedLocked(doc)
+		var latest projection
+		if err == nil {
+			latest, err = r.projectProgramLocked(next, retained, time.Now())
+		}
+		if err != nil {
+			r.mu.Unlock()
+			return r.failure(err)
+		}
+		if !reflect.DeepEqual(latest.instances, p.instances) {
+			r.mu.Unlock()
+			continue
+		}
+		p = latest
+		break // cut over while still holding mu
 	}
 	if r.config.revision != revision || r.config.digest != sourceDigest {
 		if r.sourceEpoch == math.MaxUint64 {
@@ -412,7 +425,7 @@ func (r *Runtime) prepare(instances []serviceconfig.Instance) (map[string]bindin
 	bindings := map[string]binding{}
 	modules := []supervisor.DynamicModule{}
 	for _, v := range instances {
-		_, digest, err := encodeInstance(v)
+		encoded, digest, err := encodeInstance(v)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -421,7 +434,7 @@ func (r *Runtime) prepare(instances []serviceconfig.Instance) (map[string]bindin
 			return nil, nil, err
 		}
 		path := filepath.Join(dir, digest+".json")
-		if err := config.AtomicJSON(path, v); err != nil {
+		if err := config.AtomicWrite(path, encoded); err != nil {
 			return nil, nil, err
 		}
 		bindings[v.Name] = binding{v, digest}
