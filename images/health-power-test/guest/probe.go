@@ -20,6 +20,7 @@ import (
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/protocol/health"
 	"github.com/imksoo/routerd2/internal/protocolevents"
+	"github.com/imksoo/routerd2/internal/runtimeconfig"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 	"github.com/imksoo/routerd2/internal/supervisor"
@@ -70,7 +71,7 @@ func runProbe(phase string) error {
 			return err
 		}
 		if processes.PID != 1 || processes.Platform != "appliance" || processes.ReleaseID != identity || !processes.Ready || processes.Stopping {
-			return errors.New("actual appliance PID 1 not ready")
+			return fmt.Errorf("actual appliance PID 1 not ready: pid=%d platform=%q release=%q ready=%t stopping=%t", processes.PID, processes.Platform, processes.ReleaseID, processes.Ready, processes.Stopping)
 		}
 		if err := verifyExecutables(processes); err != nil {
 			return err
@@ -485,13 +486,18 @@ func verifyExecutableCatalog(s supervisor.Status, stat func(string) (os.FileInfo
 	if err := sameExecutable(1, "/test/bin/routerd", stat); err != nil {
 		return err
 	}
+	workers := runtimeconfig.NativeWorkers("/test/bin/routerd-modules")
 	seen := map[string]bool{}
 	for _, m := range s.Modules {
-		if !m.Ready || m.PID <= 1 || m.ReleaseID != identity {
+		if !m.Ready || m.PID <= 1 || m.ReleaseID != identity || seen[m.Name] {
 			return errors.New("supervised process not ready on fresh command pair")
 		}
-		if err := sameExecutable(m.PID, "/test/bin/routerd-modules", stat); err != nil {
-			return err
+		path, ok := workers[m.Role]
+		if !ok {
+			return fmt.Errorf("unbound factory role %q", m.Role)
+		}
+		if err := sameExecutable(m.PID, path, stat); err != nil {
+			return fmt.Errorf("module %s role %s: %w", m.Name, m.Role, err)
 		}
 		seen[m.Name] = true
 	}
@@ -513,7 +519,7 @@ func sameExecutable(pid int, path string, stat func(string) (os.FileInfo, error)
 		return err
 	}
 	if !os.SameFile(a, b) {
-		return errors.New("process did not execute expected fresh ELF inode")
+		return fmt.Errorf("PID %d did not execute expected fresh ELF inode %s", pid, path)
 	}
 	return nil
 }

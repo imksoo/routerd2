@@ -64,6 +64,12 @@ phases must end with host SIGKILL and QEMU status -9. Missing/changed/duplicate
 events, changed cursors, pending work hidden by a valid-looking witness, and
 guest failures cannot pass. There is no automatic retry or filesystem repair.
 
+The factory worker catalog selects the expected inode for each role. In
+particular, logging executes `routerd-logging`, while the other factory roles
+execute `routerd-modules`; the probe checks both independently. A local
+regression test supplies three distinct file inodes and rejects a logger or
+health worker executing the other role's file.
+
 The output contains the manifest, all serial logs, per-phase test initramfs
 archives and the final private disk image. These raw artifacts can contain
 fixture state and are not intended for a public commit; publish reviewed,
