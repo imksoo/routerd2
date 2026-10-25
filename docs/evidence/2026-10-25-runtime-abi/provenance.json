@@ -1,0 +1,272 @@
+{
+  "recorded_at_utc": "2026-10-25T09:34:42.306396+00:00",
+  "product_checkpoint": "3331b81a056a2d03c5d577a48bcdb2b4d50da7d9",
+  "full_goal_status": "active",
+  "scope": "manifest v3 derived native format declarations, executable binding, bounded memo after fresh full payload hashes, same-declaration activation guard and pure observed-version checks; no format migration/operator paired loader/complete target qualification",
+  "normalizations": [
+    "developer workspace/Go-cache paths",
+    "ANSI, tabs, CRLF and trailing whitespace",
+    "public kernel certificate subject identifier",
+    "exact ephemeral private SSH host-key hash omitted; raw SHA and public fingerprint retained"
+  ],
+  "raw_artifacts": [
+    {
+      "public_name": "api-red.log",
+      "private_source": "dist/goal-validation/runtime-abi-api-red.log",
+      "raw_sha256": "3e6dbde1c7c2ae06ab67b36dedcfe8bacf086dc7e018272dbc6672974e02a2c0"
+    },
+    {
+      "public_name": "transition-red.log",
+      "private_source": "dist/goal-validation/runtime-abi-transition-red.log",
+      "raw_sha256": "2013682c8ae263875789b8428ffe207620e9249c7def720198355b348992a02c"
+    },
+    {
+      "public_name": "boot-red.log",
+      "private_source": "dist/goal-validation/runtime-abi-boot-red.log",
+      "raw_sha256": "64e1875b2721cae4fce0a689f18b2854c84fd867a82e410a3d205d12c0f44974"
+    },
+    {
+      "public_name": "focused-race.log",
+      "private_source": "dist/goal-validation/runtime-abi-final-race.log",
+      "raw_sha256": "a637f66d54454afeb5a2805e4b01e16fac6a7299f428baef257b877b21f2ce74"
+    },
+    {
+      "public_name": "parser-race.log",
+      "private_source": "dist/goal-validation/runtime-abi-parser-final.log",
+      "raw_sha256": "bedff86847261d7ce76eb81c4c6de38ee2da663dfc31bd4da66129aa566ac35d"
+    },
+    {
+      "public_name": "fuzz.log",
+      "private_source": "dist/goal-validation/runtime-abi-final-fuzz.log",
+      "raw_sha256": "2f5dbf5015106daedf2e163ea33d4590fe64ad96d03b6f0c1fa1277e6800a58e"
+    },
+    {
+      "public_name": "before-binaries-red.log",
+      "private_source": "dist/goal-validation/runtime-abi-before-binaries-red.log",
+      "raw_sha256": "bb8c222bf81f91b65445757422d3e0f84a2f7e98be7f39148dcc2568505ddfd1"
+    },
+    {
+      "public_name": "before-binaries-manifest.json",
+      "private_source": "dist/goal-validation/runtime-abi-before-binaries-manifest.json",
+      "raw_sha256": "8ced197b077ebd382d976bd55dfbbe339939d2c905f6a563f20fbbfee75e38e4"
+    },
+    {
+      "public_name": "initial-check-build-failure.log",
+      "private_source": "dist/goal-validation/runtime-abi-initial-check-build-failure.log",
+      "raw_sha256": "b16f20c418689570e1dd4ebd14b973f2239ed95f626a2aac57c65d16a381d2df"
+    },
+    {
+      "public_name": "initial-build-failure-manifest.json",
+      "private_source": "dist/goal-validation/runtime-abi-initial-build-failure-manifest.json",
+      "raw_sha256": "4fe5e5a5d7ff4cbe838456120276b7d592bec7e785930185dcd3250c0f38d330"
+    },
+    {
+      "public_name": "cli-fixture-fixed.log",
+      "private_source": "dist/goal-validation/runtime-abi-cli-fixed.log",
+      "raw_sha256": "3e0bfda80f8373ef96d862540480d8fd2efdb1d10e5e5b943eb57ad0b0ed0383"
+    },
+    {
+      "public_name": "initial-build-manifest.json",
+      "private_source": "dist/goal-validation/runtime-abi-memo-build-manifest.json",
+      "raw_sha256": "8db5fd362c4ec3715ff160d19177d0551257114edbca143eeac4d06d2665c919"
+    },
+    {
+      "public_name": "initial-check-build.log",
+      "private_source": "dist/goal-validation/runtime-abi-memo-check-build.log",
+      "raw_sha256": "184323843fe71e2e388a986a7fffe3b7520f558ddba1e5a348c8decee0ffb980"
+    },
+    {
+      "public_name": "clean-build-manifest.json",
+      "private_source": "dist/goal-validation/runtime-abi-memo-clean-build-manifest.json",
+      "raw_sha256": "351f3193acbd6db2e272e86568692608292ef9bc261a7513a20a620d5395bf26"
+    },
+    {
+      "public_name": "clean-check-build.log",
+      "private_source": "dist/goal-validation/runtime-abi-memo-clean-check-build.log",
+      "raw_sha256": "2c5c7f2dae2940928f22b8fdaa3bf2bf444b9ee86d8dc3e7c967139b7b6db97c"
+    },
+    {
+      "public_name": "native-manifest.json",
+      "private_source": "dist/goal-validation/runtime-abi-memo-native-manifest.json",
+      "raw_sha256": "8daec09eecbfbe34b4cf4fb8890fd169db31c208e46e1ac6df5cb8b70b6ca383"
+    },
+    {
+      "public_name": "source-history-secrets.log",
+      "private_source": "dist/goal-validation/runtime-abi-source-history-secrets.log",
+      "raw_sha256": "d79a6c8577f03888c450199ff9707d8c4dc500b10234c041ba7959665b69b228"
+    },
+    {
+      "public_name": "logging-dependencies.log",
+      "private_source": "dist/goal-validation/runtime-abi-logging-dependencies.log",
+      "raw_sha256": "f4ee80c3624773cb11cc0cb2f76313b9d9e3906ce3f8584b44d62cea1be5fb6b"
+    },
+    {
+      "public_name": "declaration-dependencies.log",
+      "private_source": "dist/goal-validation/runtime-abi-declaration-dependencies.log",
+      "raw_sha256": "a87e2dc746ad38072a2ae25b1e1d4a31d693e747171970a24da5c653063f8f47"
+    },
+    {
+      "public_name": "uncached-build-manifest.json",
+      "private_source": "dist/goal-validation/runtime-abi-final-build-manifest.json",
+      "raw_sha256": "cfac1ac3fed53478a1638bc7367b99cf92113eec84bb09a235ee51fa7fc18f09"
+    },
+    {
+      "public_name": "uncached-check-build.log",
+      "private_source": "dist/goal-validation/runtime-abi-final-check-build.log",
+      "raw_sha256": "8449f0cc3940daed0234cc075e1a7f4f633ff1f67ec744b9465d92268657a921"
+    },
+    {
+      "public_name": "uncached-clean-build-manifest.json",
+      "private_source": "dist/goal-validation/runtime-abi-clean-build-manifest.json",
+      "raw_sha256": "25db77444792b7bb1085ba5832ce4bab8f6cf7fdb5aad8cc354fccfd09737e66"
+    },
+    {
+      "public_name": "uncached-clean-check-build.log",
+      "private_source": "dist/goal-validation/runtime-abi-clean-check-build.log",
+      "raw_sha256": "20d10c69bd59e50aa96e2add3cbb7932b21694d7f5e42ccde3c85ba3c38f8aaa"
+    },
+    {
+      "public_name": "uncached-native-manifest.json",
+      "private_source": "dist/goal-validation/runtime-abi-native-manifest.json",
+      "raw_sha256": "5cf0cfb2690163da156d920d9c73a35dfb100a1fdb3ba86f9768ada2bdbf43d1"
+    },
+    {
+      "public_name": "memo-red.log",
+      "private_source": "dist/goal-validation/runtime-abi-memo-red.log",
+      "raw_sha256": "0058f9073622875fcdec47371f59f8170cc0419ae04e8c4451cf2bca5d1e97a3"
+    },
+    {
+      "public_name": "memo-focused-race.log",
+      "private_source": "dist/goal-validation/runtime-abi-memo-focused.log",
+      "raw_sha256": "a19ad31ef8831fc357db9d857f96a7d1ae6986c3c9e0ed082a7beef336e02fb4"
+    },
+    {
+      "public_name": "uncached-qemu-source.json",
+      "private_source": "dist/goal-validation/runtime-abi-qemu/source.json",
+      "raw_sha256": "91679489f13766b9addbf5ba04348f336776699545094fdec9f2adae533d85ba"
+    },
+    {
+      "public_name": "uncached-release-boot-host.log",
+      "private_source": "dist/goal-validation/runtime-abi-qemu/release-boot-host.log",
+      "raw_sha256": "ecca505de2544a9143d5a38cea1789986280ede11cf30140f8bb1ccefd4c2012"
+    },
+    {
+      "public_name": "uncached-release-boot-manifest.json",
+      "private_source": "dist/goal-validation/runtime-abi-qemu/release-boot/manifest.json",
+      "raw_sha256": "7895763b1080175c2c01d0009b398352fd6edd6b9c0bceab7d8b92b92ceeabeb"
+    },
+    {
+      "public_name": "uncached-release-boot-qemu-serial.log",
+      "private_source": "dist/goal-validation/runtime-abi-qemu/release-boot/qemu-serial.log",
+      "raw_sha256": "2820a74a35e3f6599c7d7dba44855c71fcd2367c49b94021f48de3259bf4dc45"
+    },
+    {
+      "public_name": "TestBuiltRuntimeCatalog.log",
+      "private_source": "dist/goal-validation/runtime-abi-memo-native-TestBuiltRuntimeCatalog.log",
+      "raw_sha256": "53618efc2667fa2bf74113ae5820b5087994f5ca6e533127fe187d81a7df83ee"
+    },
+    {
+      "public_name": "TestPublishBuiltRelease.log",
+      "private_source": "dist/goal-validation/runtime-abi-memo-native-TestPublishBuiltRelease.log",
+      "raw_sha256": "e8e26cbc014dca53759541749140b909ebdb7dae7988d66d095d58b3a609a82a"
+    },
+    {
+      "public_name": "TestDaemonDHCPv4OriginalLeaseAuthority.log",
+      "private_source": "dist/goal-validation/runtime-abi-memo-native-TestDaemonDHCPv4OriginalLeaseAuthority.log",
+      "raw_sha256": "24c1429b3acb82deaac6435d5ddc9290b42872b27e0885b3d823d72924a378ae"
+    },
+    {
+      "public_name": "TestDaemonConfigurationAndRecovery.log",
+      "private_source": "dist/goal-validation/runtime-abi-memo-native-TestDaemonConfigurationAndRecovery.log",
+      "raw_sha256": "f6f0e4b39894c267149ebee59e89c1f49cd421a24d80c24450ef10f1139ead53"
+    },
+    {
+      "public_name": "TestDaemonStartupSelectionAndRecovery.log",
+      "private_source": "dist/goal-validation/runtime-abi-memo-native-TestDaemonStartupSelectionAndRecovery.log",
+      "raw_sha256": "05bed1ba64e2481f2676b203be0e09a0d54a37593987e7fb8e61083c99d34803"
+    },
+    {
+      "public_name": "TestDaemonConditionalStartupRecovery.log",
+      "private_source": "dist/goal-validation/runtime-abi-memo-native-TestDaemonConditionalStartupRecovery.log",
+      "raw_sha256": "a58dbd6219d56c66ef3ac9a76c887ee5f7f0ea1330359e2268060d2e0d79bc5c"
+    },
+    {
+      "public_name": "TestDaemonHealthPBRFailoverAndRecovery.log",
+      "private_source": "dist/goal-validation/runtime-abi-memo-native-TestDaemonHealthPBRFailoverAndRecovery.log",
+      "raw_sha256": "2de409c470dd7faf517033555ade819145f7cdf3424135637dc79297c02aba72"
+    },
+    {
+      "public_name": "qemu-source.json",
+      "private_source": "dist/goal-validation/runtime-abi-memo-qemu/source.json",
+      "raw_sha256": "2d2a65ee9de7e24f56549b6dd27ee561081c9f08f44a5f993a467556ee3206fc"
+    },
+    {
+      "public_name": "release-boot-host.log",
+      "private_source": "dist/goal-validation/runtime-abi-memo-qemu/release-boot-host.log",
+      "raw_sha256": "c421743f93240d30f481c2130d06df1678c0e66bd14a593130475916e2e71c64"
+    },
+    {
+      "public_name": "release-boot-manifest.json",
+      "private_source": "dist/goal-validation/runtime-abi-memo-qemu/release-boot/manifest.json",
+      "raw_sha256": "aed5d08a389ffbaf9df4177f540d2639a7504287dd68ab98d7dbb17a1337f178"
+    },
+    {
+      "public_name": "release-boot-qemu-serial.log",
+      "private_source": "dist/goal-validation/runtime-abi-memo-qemu/release-boot/qemu-serial.log",
+      "raw_sha256": "5030c80822cca4cbb7c55e7c5408d84afe97f5b8eb9fd8f1e4c5b3d258fdf7dd"
+    },
+    {
+      "public_name": "storage-host.log",
+      "private_source": "dist/goal-validation/runtime-abi-memo-qemu/storage-host.log",
+      "raw_sha256": "b2154c56def74b9aa490b6b895ea4c8bbe23852b41bcae1e0b324a67a476b927"
+    },
+    {
+      "public_name": "storage-manifest.json",
+      "private_source": "dist/goal-validation/runtime-abi-memo-qemu/storage/manifest.json",
+      "raw_sha256": "1c0660731b15685b12000288aae5ee8c8b893054a3b41336b3e2962b295fcda4"
+    },
+    {
+      "public_name": "storage-qemu-first.log",
+      "private_source": "dist/goal-validation/runtime-abi-memo-qemu/storage/qemu-first.log",
+      "raw_sha256": "68893dca6d9708169b0a888c29928934cb3aef3e3385ffa3ca9667c8d1e22c42"
+    },
+    {
+      "public_name": "storage-qemu-second.log",
+      "private_source": "dist/goal-validation/runtime-abi-memo-qemu/storage/qemu-second.log",
+      "raw_sha256": "5f75c259d37994900f7695b67813b51d82cb2f2a8c85b4b484f8040d4e7a293d"
+    },
+    {
+      "public_name": "daemon-health-pbr-host.log",
+      "private_source": "dist/goal-validation/runtime-abi-memo-qemu/daemon-health-pbr-host.log",
+      "raw_sha256": "b42510fb2f7a0808c6949ab0fbf5108f2481c9668630d31d307775efff9f4bb1"
+    },
+    {
+      "public_name": "daemon-health-pbr-manifest.json",
+      "private_source": "dist/goal-validation/runtime-abi-memo-qemu/daemon-health-pbr/manifest.json",
+      "raw_sha256": "54d0b54ba6a204bff2af6fb4d234f94442198f94d172df3a2c14924d7715c642"
+    },
+    {
+      "public_name": "daemon-health-pbr-qemu-serial.log",
+      "private_source": "dist/goal-validation/runtime-abi-memo-qemu/daemon-health-pbr/qemu-serial.log",
+      "raw_sha256": "fcb199dc91dccf4b793fe52afcd4a049d122a1d7df41bcd4ab0d5c9185f75c6d"
+    }
+  ],
+  "private_packet_captures": [
+    {
+      "private_source": "dist/goal-validation/runtime-abi-memo-native-packets/dhcp4-authority/wan0.pcap",
+      "bytes": 9034,
+      "sha256": "0f92cd539dfc150941c0a99fb64c27fbe3f7ad6f8373c873db779e7d57ee5add"
+    },
+    {
+      "private_source": "dist/goal-validation/runtime-abi-memo-native-packets/wan0.pcap",
+      "bytes": 32846,
+      "sha256": "ea89892dc64cdf028c0955aaabe9fcee4cf1e6eb92ad43416ae7f5d946461476"
+    },
+    {
+      "private_source": "dist/goal-validation/runtime-abi-memo-native-packets/wan1.pcap",
+      "bytes": 34389,
+      "sha256": "b968d3c7a896fdfc15787e512e1b5f90a268870d106264848e5f5e388175ef99"
+    }
+  ],
+  "physical_target_qualified": false
+}

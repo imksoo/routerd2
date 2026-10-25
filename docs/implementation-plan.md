@@ -7,7 +7,18 @@
 部分checkpointでゴールを完了にせず、実装・検証・未検証と証跡を更新する。
 対象機種・NIC・性能条件の確認と並行して、独立して進められる実装・隔離VM検証を続ける。
 
-最新product checkpointは `973c2df`、probe budget fixtureは `5f7cfff`。
+最新product checkpointは `3331b81`。manifest v3でELFのreadonly ABI宣言を署名へ結び付けた。
+publisherは実入力から宣言を導出し、全nativeの一致・receiverでの再照合・実行中supervisorの一致を検査する。旧v1/v2 readerは置かない。
+設定schema/semanticsとstate reader/writer範囲を記録し、未検証のformat変更はprepare/boot/direct rollback/fallback前に拒否する。移行policy完成ではない。
+CLIの旧toy ELFがABIを持たず初回check54.91秒FAIL。fixtureだけを更新後、全体check/Race/vet/Python30/6 ELF build183.80秒、clean13.90秒PASS。
+uncached QEMUは起動確定後、否定試験後の状態比較が期限切れでhost238.56秒/guest199.85秒FAIL。状態変更を示す証拠とは扱わない。
+毎回の署名・全payload hashを保持し、同Store内の署名manifest/artifactに結び付く解析結果だけ256件までmemo化した。改変・再署名異宣言の拒否をRaceで確認する。
+最終全体check/build207.53秒、clean17.43秒PASS。各回の6 SHAは一致し、loggingのSHAはmemo前後で同一。CPU/RAM/deadlineを増やさない。
+native Race7 gate、QEMU signed PID1 173.72秒・ext4二kernel191.40秒・二WAN/PBR80.75秒PASS。前版実6 ELFは5.57秒でABI欠落の期待拒否。
+宣言の意味をcodeが実装すること、実state inventory、kernel/engine/capability・失効policy、format移行、operator prepare/paired loader/healthは未完了。paired bootの明示拒否を維持する。
+[署名ABIの証跡・受入境界・残作業](evidence/2026-10-25-runtime-abi.md) を参照。全計画・対象実機受入は未完了で、全体ゴールはactive。
+
+前回product checkpointは `973c2df`、probe budget fixtureは `5f7cfff`。
 `PrepareChecked`/`PrepareRollbackChecked`で、実target descriptor検証・参照/世代検査・caller preflight・公開を一つのrelease lock内へ接続した。
 current stateをdeep copyし、入力参照を固定する。不正pairはcallback前に拒否し、検査失敗/cancelでselectorとwatermarkを消費しない。
 全体check/Race/vet/Python30/6 ELF build194.15秒、clean12.32秒、probe修正後16.53秒PASS。6 SHAは一致。

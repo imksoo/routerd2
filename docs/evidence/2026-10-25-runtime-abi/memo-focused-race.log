@@ -1,0 +1,10 @@
+=== RUN   TestNativeInspectionMemoRequiresFreshHashAndSignedManifest
+--- PASS: TestNativeInspectionMemoRequiresFreshHashAndSignedManifest (1.59s)
+=== RUN   TestSignedManifestABIMustMatchEveryNativeArtifact
+--- PASS: TestSignedManifestABIMustMatchEveryNativeArtifact (0.26s)
+=== RUN   TestFormatChangingPrepareNeedsQualifiedMigrationNotJustCallbackSuccess
+--- PASS: TestFormatChangingPrepareNeedsQualifiedMigrationNotJustCallbackSuccess (1.54s)
+=== RUN   TestBootAndAutomaticFallbackRejectUnqualifiedFormatChange
+--- PASS: TestBootAndAutomaticFallbackRejectUnqualifiedFormatChange (2.10s)
+PASS
+ok      github.com/imksoo/routerd2/internal/release     6.530s

@@ -1,0 +1,7 @@
+--- FAIL: TestFormatChangingPrepareNeedsQualifiedMigrationNotJustCallbackSuccess (0.96s)
+    runtime_abi_test.go:74: raw prepare accepted changed formats <nil>
+--- FAIL: TestConfirmedRollbackCannotSelectDifferentFormatContract (0.38s)
+    runtime_abi_test.go:103: rollback accepted changed formats <nil>
+FAIL
+FAIL    github.com/imksoo/routerd2/internal/release     1.351s
+FAIL

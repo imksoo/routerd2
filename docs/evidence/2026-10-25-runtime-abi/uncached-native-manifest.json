@@ -1,0 +1,117 @@
+{
+  "source_commit": "7b4a070b2715be6e127d5b9dcb1b86ea4a84df56",
+  "source_dirty": false,
+  "release_id": "runtime-abi-v1",
+  "build_artifacts": [
+    {
+      "architecture": "amd64",
+      "binary": "routerd",
+      "sha256": "b0e9387666a67339e5db04f5bcf1bf2dd7253868f8e5e59af7838ba4b3e21956"
+    },
+    {
+      "architecture": "amd64",
+      "binary": "routerd-modules",
+      "sha256": "14b2cc7bc144f07518239b50707147a2e512e4193ffeb321ff2db8cdd707b893"
+    },
+    {
+      "architecture": "amd64",
+      "binary": "routerd-logging",
+      "sha256": "70e21e2258116778f162d8380a5e45f50e04ab1ca5fa4beffae0bc1b266b357f"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd",
+      "sha256": "5044dfc0b79ff1a6b393e19967e1ece028c16fd472ec92521ca9698838775817"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd-modules",
+      "sha256": "5ff6a425e75e290e7a2e929855ca62591e66bb9c6e3c6fe6b80e8b16e163f320"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd-logging",
+      "sha256": "2f54ca9f6cc3a708a9738e46a5b15db46fc9b74532e626e07ac0319bfacc6a86"
+    }
+  ],
+  "race_harnesses": {
+    "release": {
+      "path": "dist/goal-validation/runtime-abi-release.test",
+      "sha256": "e4da7f37afd52aebe054f29f51695d2f2c523135d7a616bdb307c6727a57fec8"
+    },
+    "publisher": {
+      "path": "dist/goal-validation/runtime-abi-publisher.test",
+      "sha256": "b99c9028a9b60cb50d7d66e16c74f7339be8254f4b4beaf6d5d90e2aefd5316a"
+    },
+    "daemon": {
+      "path": "dist/goal-validation/runtime-abi-daemon.test",
+      "sha256": "55b8a60cc037f474eadccc9ee82a0d4ed2d4f3d4bd79a998cbc90cf775270c6f"
+    }
+  },
+  "scope": "root-owned0700 stage; real built amd64/arm64 signature/ELF/staging without foreign execution; actual daemon tests in fresh user/net namespaces; no host network or clock mutation",
+  "tests": [
+    {
+      "test": "TestBuiltRuntimeCatalog",
+      "harness": "release",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 38.31,
+      "log": "runtime-abi-native-TestBuiltRuntimeCatalog.log",
+      "sha256": "9708bd51634bd0c98910e4ad0cbe472db89fb050d35b4f37f1c2c8671622f228"
+    },
+    {
+      "test": "TestPublishBuiltRelease",
+      "harness": "publisher",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 16.31,
+      "log": "runtime-abi-native-TestPublishBuiltRelease.log",
+      "sha256": "d1a423671275c80a532dcc260a8b5b190d336a05ee7c3a9e5a861187b86758e8"
+    },
+    {
+      "test": "TestDaemonDHCPv4OriginalLeaseAuthority",
+      "harness": "daemon",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 11.03,
+      "log": "runtime-abi-native-TestDaemonDHCPv4OriginalLeaseAuthority.log",
+      "sha256": "81e3f24a67b707cf473a601ec29c27d68a51c876a2fb2d5723e4d55bce3ca71e"
+    },
+    {
+      "test": "TestDaemonConfigurationAndRecovery",
+      "harness": "daemon",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 9.82,
+      "log": "runtime-abi-native-TestDaemonConfigurationAndRecovery.log",
+      "sha256": "7f9b157fd57ecbb1565730d246da1d1bac0468c3df89476cfb9822db85639409"
+    },
+    {
+      "test": "TestDaemonStartupSelectionAndRecovery",
+      "harness": "daemon",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 3.58,
+      "log": "runtime-abi-native-TestDaemonStartupSelectionAndRecovery.log",
+      "sha256": "e6465aa520205bcdde49ce9334ecad54807fc0a3dd1a7c0866299293df9bcf51"
+    },
+    {
+      "test": "TestDaemonConditionalStartupRecovery",
+      "harness": "daemon",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 3.89,
+      "log": "runtime-abi-native-TestDaemonConditionalStartupRecovery.log",
+      "sha256": "246864965bbf31036f4d21ccdb4ec1f77bfa9e329778ea366c953f1c28e83843"
+    },
+    {
+      "test": "TestDaemonHealthPBRFailoverAndRecovery",
+      "harness": "daemon",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 32.17,
+      "log": "runtime-abi-native-TestDaemonHealthPBRFailoverAndRecovery.log",
+      "sha256": "7a7cf65979f68e13294a6d6e73f0962f5329c4f5690ef39bd4061bc6d5d79be5"
+    }
+  ]
+}

@@ -12138,6 +12138,37 @@
         "Original probe timeout exact stage and earlier health-false component/recurrence remain undetermined; current OCI/APK, arm64 execution, all remaining work packages and selected physical hardware/NIC/performance acceptance"
       ],
       "full_goal_status": "active"
+    },
+    {
+      "id": "signed-native-format-declarations",
+      "date": "2026-10-25",
+      "status": "partial_signed_format_contracts_and_same_format_acceptance_verified",
+      "code_checkpoint": "3331b81a056a2d03c5d577a48bcdb2b4d50da7d9",
+      "work_packages": [
+        "CORE-02",
+        "CORE-06",
+        "DIST-01"
+      ],
+      "evidence": "docs/evidence/2026-10-25-runtime-abi.md",
+      "implemented": [
+        "Manifest v3 derives bounded native readonly ABI records from input bytes, signs them and checks every native member; former v1/v2 rejected without compatibility reader; executing supervisor also compares its declaration",
+        "Configuration semantics/schema and named state reader/writer ranges; pure trusted observed-version transition checker with explicit absence/missing-fact distinction and both writer checks; explicit format implementation constants tied to claims",
+        "Unqualified declaration changes refused before prepare/boot/direct rollback/fallback; callback success is not migration authorization; generic actual state/kernel/engine/revocation policies remain unfinished",
+        "Per-Store native structural inspection memo keyed by signed manifest digest/artifact after fresh complete payload hash and signature checks, bounded256 without payload cache or cross-Store reuse; changed bytes and re-signed different claims rejected"
+      ],
+      "validation": [
+        "API/unsafe transition/boot/fallback REDs, missing/duplicate ABI, mixed publisher refusal before output, canonical scanner bounds and final23,991 fuzz executions11.054s; explicit format constants and logging/declaration production dependency closure",
+        "Actual previous973c2df/5f7cfff six ELF builds fail new ABI inspection5.57s; initial whole check54.91s fails old CLI toy fixture, updated fixture2.634s passes; whole183.80s/clean13.90s pass",
+        "Uncached native seven gates pass; signed PID1 confirms but state comparison times out at host238.56s/guest199.85s without proving authority changed; original failure retained; memo RED0.770s and focused Race6.530s pass without changing deadlines/CPU/RAM",
+        "Final whole check/Race/vet/Python30/six ELF build207.53s, clean17.43s identical hashes; native seven gates and QEMU signed PID1173.72s/ext4 two kernels191.40s/two-WAN80.75s pass; no arm64 execution, format migration or paired boot claim"
+      ],
+      "remaining": [
+        "Actual state and verified absence inventory, target compiler/kernel/engine/profile capability and identity/lease/owner/revocation policy; qualified format-changing migration and supported operator paired prepare",
+        "Paired loader, exact tuple continuous health/confirmation, bounded conditional fallback and true signed paired PID1/kernel gate",
+        "Corrupt selected runtime fallback before Open, write-time power-cut/ENOSPC/fsync acceptance, reference-aware pruning and same-revision ACK/startup-switch audit; independent bootstrap and full engine/ABI/privilege closure",
+        "Original timeout detailed contributions and prior health-false component/recurrence remain undetermined; current OCI/APK, arm64 execution, all remaining work packages and selected physical hardware/NIC/performance acceptance"
+      ],
+      "full_goal_status": "active"
     }
   ],
   "delivery_goal": {

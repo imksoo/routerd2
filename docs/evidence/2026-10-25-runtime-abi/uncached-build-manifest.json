@@ -1,0 +1,65 @@
+{
+  "source_commit": "9c53ceb67e9a52285ecfdcb0db7866aac3bf0ded",
+  "source_dirty_paths": [
+    " M cmd/routerd/release_boot.go",
+    " M docs/adr/0001-boot-runtime-startup-config.md",
+    " M docs/releases.md",
+    " M internal/buildinfo/buildinfo.go",
+    " M internal/config/snapshot_linux.go",
+    " M internal/events/store_linux.go",
+    " M internal/network/engine.go",
+    " M internal/release/README.md",
+    " M internal/release/archive.go",
+    " M internal/release/elf.go",
+    " M internal/release/manifest.go",
+    " M internal/release/state_linux.go",
+    " M internal/release/store_linux.go",
+    " M internal/release/types.go",
+    " M internal/releasecli/cli_test.go",
+    "?? internal/release/runtime_abi_linux.go",
+    "?? internal/runtimeabi/abi.go"
+  ],
+  "tracked_diff_sha256": "e6f87a4b153eb8459106243207d5f3ffd5a07ac6bdcd69c66397c3b342127732",
+  "command": [
+    "make",
+    "check",
+    "build-linux",
+    "RELEASE_ID=runtime-abi-v1"
+  ],
+  "started_at_utc": "2026-10-25T09:00:44.465794+00:00",
+  "umask": "0022",
+  "exit_code": 0,
+  "elapsed_seconds": 183.8,
+  "artifacts": [
+    {
+      "architecture": "amd64",
+      "binary": "routerd",
+      "sha256": "b0e9387666a67339e5db04f5bcf1bf2dd7253868f8e5e59af7838ba4b3e21956"
+    },
+    {
+      "architecture": "amd64",
+      "binary": "routerd-modules",
+      "sha256": "14b2cc7bc144f07518239b50707147a2e512e4193ffeb321ff2db8cdd707b893"
+    },
+    {
+      "architecture": "amd64",
+      "binary": "routerd-logging",
+      "sha256": "70e21e2258116778f162d8380a5e45f50e04ab1ca5fa4beffae0bc1b266b357f"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd",
+      "sha256": "5044dfc0b79ff1a6b393e19967e1ece028c16fd472ec92521ca9698838775817"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd-modules",
+      "sha256": "5ff6a425e75e290e7a2e929855ca62591e66bb9c6e3c6fe6b80e8b16e163f320"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd-logging",
+      "sha256": "2f54ca9f6cc3a708a9738e46a5b15db46fc9b74532e626e07ac0319bfacc6a86"
+    }
+  ]
+}

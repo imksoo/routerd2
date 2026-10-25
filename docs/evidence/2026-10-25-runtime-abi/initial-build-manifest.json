@@ -1,0 +1,53 @@
+{
+  "source_commit": "135350ca48abec4b12059a34b3260284bac565b4",
+  "source_dirty_paths": [
+    " M docs/releases.md",
+    " M internal/release/README.md",
+    " M internal/release/runtime_abi_linux.go",
+    " M internal/release/store_linux.go",
+    " M internal/releaseboot/testdata/guest/main.go"
+  ],
+  "tracked_diff_sha256": "37badce159a22ff0541f4771085ede92a936cf3c968e7efe0ab9d91d98c9b450",
+  "command": [
+    "make",
+    "check",
+    "build-linux",
+    "RELEASE_ID=runtime-abi-v1"
+  ],
+  "started_at_utc": "2026-10-25T09:19:16.756325+00:00",
+  "umask": "0022",
+  "exit_code": 0,
+  "elapsed_seconds": 207.53,
+  "artifacts": [
+    {
+      "architecture": "amd64",
+      "binary": "routerd",
+      "sha256": "1db415c09d68e5193b29a4462b3a922226a240ce65c03a5294a730571943b367"
+    },
+    {
+      "architecture": "amd64",
+      "binary": "routerd-modules",
+      "sha256": "57759c3990684a35aee932af9a925fc2efcdb5a2292b207ffb1bac8ddce12e33"
+    },
+    {
+      "architecture": "amd64",
+      "binary": "routerd-logging",
+      "sha256": "70e21e2258116778f162d8380a5e45f50e04ab1ca5fa4beffae0bc1b266b357f"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd",
+      "sha256": "ec553933f690cb4e3452c716eda43fc6b6fd77a58b0c2cc3b32acb8f025ac0a8"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd-modules",
+      "sha256": "d53dab3d5444b99cc66ca874337457f79cb1cf32651c5f07b9e3af328000a9e3"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd-logging",
+      "sha256": "2f54ca9f6cc3a708a9738e46a5b15db46fc9b74532e626e07ac0319bfacc6a86"
+    }
+  ]
+}

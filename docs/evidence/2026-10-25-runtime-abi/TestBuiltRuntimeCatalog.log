@@ -1,0 +1,11 @@
+=== RUN   TestBuiltRuntimeCatalog
+=== RUN   TestBuiltRuntimeCatalog/amd64
+    built_integration_test.go:75: amd64 manifest_v3 ABI=routerd-native-v1 configuration=2 state_schemas=6 verified in all three native artifacts
+    built_integration_test.go:91: amd64 signed and staged: routerd=14520480 bytes, modules=33280160 bytes
+=== RUN   TestBuiltRuntimeCatalog/arm64
+    built_integration_test.go:75: arm64 manifest_v3 ABI=routerd-native-v1 configuration=2 state_schemas=6 verified in all three native artifacts
+    built_integration_test.go:91: arm64 signed and staged: routerd=13500576 bytes, modules=30933152 bytes
+--- PASS: TestBuiltRuntimeCatalog (28.78s)
+    --- PASS: TestBuiltRuntimeCatalog/amd64 (14.57s)
+    --- PASS: TestBuiltRuntimeCatalog/arm64 (14.21s)
+PASS

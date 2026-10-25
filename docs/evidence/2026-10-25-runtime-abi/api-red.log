@@ -1,0 +1,16 @@
+github.com/imksoo/routerd2/internal/runtimeabi: no non-test Go files in /workspace/routerd2/internal/runtimeabi
+# github.com/imksoo/routerd2/internal/runtimeabi [github.com/imksoo/routerd2/internal/runtimeabi.test]
+internal/runtimeabi/abi_test.go:13:12: undefined: ParseRecord
+internal/runtimeabi/abi_test.go:13:24: undefined: CurrentRecord
+internal/runtimeabi/abi_test.go:14:28: undefined: Current
+internal/runtimeabi/abi_test.go:17:17: undefined: EncodeRecord
+internal/runtimeabi/abi_test.go:18:29: undefined: CurrentRecord
+internal/runtimeabi/abi_test.go:18:60: undefined: MaxRecordBytes
+internal/runtimeabi/abi_test.go:22:13: undefined: Current
+internal/runtimeabi/abi_test.go:26:7: undefined: CurrentRecord
+internal/runtimeabi/abi_test.go:27:19: undefined: CurrentRecord
+internal/runtimeabi/abi_test.go:50:21: undefined: Facts
+internal/runtimeabi/abi_test.go:27:19: too many errors
+FAIL    github.com/imksoo/routerd2/internal/runtimeabi [build failed]
+FAIL    github.com/imksoo/routerd2/internal/release [build failed]
+FAIL
