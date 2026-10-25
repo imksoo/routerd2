@@ -67,7 +67,7 @@ func TestHealthPBRProjectionFailureFallbackAndRecovery(t *testing.T) {
 		}
 		ticks := uint64(clock.BoottimeNanoseconds)
 		snapshot := health.Snapshot{Resource: cfg.Resource, Interface: cfg.Interface, BootID: clock.BootID, ObservedNanos: ticks, ExpiresNanos: ticks + uint64(cfg.Freshness()), Active: active, State: old.State{Phase: phase, ConsecutivePassed: passed, ConsecutiveFailed: failed, LastCheckedAt: time.Now()}}
-		if err := r.Accept(ctx, update(t, r, "service.health-a", sequence, snapshot)); err != nil {
+		if err := r.Observe(ctx, update(t, r, "service.health-a", sequence, snapshot)); err != nil {
 			t.Fatal(err)
 		}
 		reconcileConditions(t, r)
@@ -136,7 +136,7 @@ func TestHealthPBRMaxAgeDoesNotRenewOnProjectionOrTransportReplay(t *testing.T) 
 	}
 	snapshot := health.Snapshot{Resource: cfg.Resource, Interface: cfg.Interface, BootID: clock.BootID, ObservedNanos: uint64(clock.BoottimeNanoseconds), ExpiresNanos: uint64(clock.BoottimeNanoseconds) + uint64(cfg.Freshness()), Active: true, State: old.State{Phase: old.PhaseHealthy, ConsecutivePassed: cfg.HealthyThreshold}}
 	u := update(t, r, "service.health-a", 1, snapshot)
-	if err := r.Accept(ctx, u); err != nil {
+	if err := r.Observe(ctx, u); err != nil {
 		t.Fatal(err)
 	}
 	reconcileConditions(t, r)
@@ -153,7 +153,7 @@ func TestHealthPBRMaxAgeDoesNotRenewOnProjectionOrTransportReplay(t *testing.T) 
 	}
 	time.Sleep(250 * time.Millisecond)
 	u.Sequence++
-	if err := r.Accept(ctx, u); err != nil {
+	if err := r.Observe(ctx, u); err != nil {
 		t.Fatal(err)
 	}
 	reconcileConditions(t, r)
@@ -167,7 +167,7 @@ func TestHealthPBRMaxAgeDoesNotRenewOnProjectionOrTransportReplay(t *testing.T) 
 	snapshot.ObservedNanos = uint64(clock.BoottimeNanoseconds)
 	snapshot.ExpiresNanos = snapshot.ObservedNanos + uint64(cfg.Freshness())
 	u = update(t, r, "service.health-a", 3, snapshot)
-	if err := r.Accept(ctx, u); err != nil {
+	if err := r.Observe(ctx, u); err != nil {
 		t.Fatal(err)
 	}
 	reconcileConditions(t, r)

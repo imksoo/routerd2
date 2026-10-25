@@ -38,7 +38,7 @@ func TestConditionalVRRPWaitsForNetworkACK(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	result := make(chan error, 1)
-	go func() { result <- r.Accept(ctx, u) }()
+	go func() { result <- r.Apply(ctx, u) }()
 	// Wait for the accepted observation, without relying on scheduler timing.
 	deadline := time.Now().Add(time.Second)
 	for {
@@ -130,7 +130,7 @@ func (m *vrrpACKManager) Reconcile(ctx context.Context, modules []supervisor.Dyn
 			m.haStarted = true
 			go func() {
 				raw, _ := json.Marshal(m.snapshot)
-				err := m.runtime.Accept(ctx, serviceconfig.Update{SupervisorInstance: testSupervisorInstance, Name: module.Name, Role: module.Role, ConfigDigest: module.ConfigDigest, Generation: 1, ProducerEpoch: strings.Repeat("a", 32), Sequence: 1, Snapshot: raw})
+				err := m.runtime.Apply(ctx, serviceconfig.Update{SupervisorInstance: testSupervisorInstance, Name: module.Name, Role: module.Role, ConfigDigest: module.ConfigDigest, Generation: 1, ProducerEpoch: strings.Repeat("a", 32), Sequence: 1, Snapshot: raw})
 				m.mu.Lock()
 				current := m.modules[module.Name]
 				current.Ready = err == nil
@@ -156,7 +156,7 @@ func (m *vrrpACKManager) Reconcile(ctx context.Context, modules []supervisor.Dyn
 				s.ExpiresNanos = 0
 				s.ValidUntil = time.Time{}
 				raw, _ := json.Marshal(s)
-				err := m.runtime.Accept(ctx, serviceconfig.Update{SupervisorInstance: testSupervisorInstance, Name: module.Name, Role: module.Role, ConfigDigest: module.ConfigDigest, Generation: 1, ProducerEpoch: strings.Repeat("a", 32), Sequence: 2, Snapshot: raw})
+				err := m.runtime.Apply(ctx, serviceconfig.Update{SupervisorInstance: testSupervisorInstance, Name: module.Name, Role: module.Role, ConfigDigest: module.ConfigDigest, Generation: 1, ProducerEpoch: strings.Repeat("a", 32), Sequence: 2, Snapshot: raw})
 				m.mu.Lock()
 				delete(m.modules, module.Name)
 				m.mu.Unlock()
@@ -257,7 +257,7 @@ func TestConditionalVRRPEffectFailureFences(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
 			result := make(chan error, 1)
-			go func() { result <- r.Accept(ctx, u) }()
+			go func() { result <- r.Apply(ctx, u) }()
 			deadline := time.Now().Add(time.Second)
 			for {
 				r.mu.Lock()
@@ -291,7 +291,7 @@ func TestConditionalVRRPEffectFailureFences(t *testing.T) {
 				stopped.Transition++
 				newer := update(t, r, u.Name, 2, stopped)
 				next := make(chan error, 1)
-				go func() { next <- r.Accept(ctx, newer) }()
+				go func() { next <- r.Observe(ctx, newer) }()
 				for {
 					r.mu.Lock()
 					sequence := r.records[u.Name].Sequence
@@ -354,12 +354,12 @@ func TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn(t *testi
 	defer cancel()
 	publish := func(u serviceconfig.Update) chan error {
 		result := make(chan error, 1)
-		go func() { result <- r.Accept(ctx, u) }()
+		go func() { result <- r.Apply(ctx, u) }()
 		deadline := time.Now().Add(time.Second)
 		for {
 			r.mu.Lock()
-			pending := r.vrrpEffects[u.Name]
-			accepted := sameVRRPUpdate(r.records[u.Name], u) && pending != nil && sameVRRPUpdate(pending.update, u)
+			pending := r.applications[u.Name]
+			accepted := sameUpdate(r.records[u.Name], u) && pending != nil && sameUpdate(pending.update, u)
 			r.mu.Unlock()
 			if accepted {
 				return result
@@ -409,7 +409,7 @@ func TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn(t *testi
 		t.Fatal("failed withdrawal acknowledged")
 	}
 	r.mu.Lock()
-	remembered := sameVRRPUpdate(r.records[u.Name], withdrawn)
+	remembered := sameUpdate(r.records[u.Name], withdrawn)
 	r.mu.Unlock()
 	if !remembered {
 		t.Fatal("withdrawal failure restored obsolete active observation")
@@ -450,7 +450,7 @@ func TestConditionalVRRPWakesCoordinatorBeforeShortOwnershipExpires(t *testing.T
 	defer func() { cancel(); <-finished }()
 	c := source.Resources[0].Service.VRRPConfig()
 	s := bootVRRPSnapshot(t, c)
-	if err := r.Accept(ctx, update(t, r, "service.ha", 1, s)); err != nil {
+	if err := r.Apply(ctx, update(t, r, "service.ha", 1, s)); err != nil {
 		t.Fatal("short ownership expired behind polling coordinator:", err)
 	}
 	n.mu.Lock()

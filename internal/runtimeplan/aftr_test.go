@@ -79,7 +79,7 @@ func TestAFTRObservedSourceGenerationAndProjection(t *testing.T) {
 		t.Fatal("poll renewed an unchanged dependency", again, err)
 	}
 	snapshot := aftr.Snapshot{Resource: "dslite", Interface: "wan0", ConfigDigest: input.ConfigDigest, Generation: input.Generation, Active: true, Available: true, Local: input.Source.Address, Remote: "2001:db8:42::2", CandidateIndex: 0, ResolverIndex: -1, UpdatedAt: time.Now().UTC()}
-	if err := r.Accept(ctx, update(t, r, "service.dslite", 1, snapshot)); err != nil {
+	if err := observeAndProject(ctx, r, update(t, r, "service.dslite", 1, snapshot)); err != nil {
 		t.Fatal(err)
 	}
 	if len(n.applied.DSLite) != 1 || len(n.applied.Routes) != 1 || n.applied.DSLite[0].Name != "dslite0" || n.applied.Routes[0].Interface != "dslite0" {
@@ -90,7 +90,7 @@ func TestAFTRObservedSourceGenerationAndProjection(t *testing.T) {
 	if err != nil || input.Generation != 3 || input.Source.Address != "" {
 		t.Fatal(input, err)
 	}
-	if err := r.Accept(ctx, update(t, r, "service.dslite", 2, snapshot)); !errors.Is(err, ErrStale) {
+	if err := observeAndProject(ctx, r, update(t, r, "service.dslite", 2, snapshot)); !errors.Is(err, ErrStale) {
 		t.Fatal("old dependency result was not fenced", err)
 	}
 	if err := r.reconcileDynamic(ctx); err != nil {
@@ -105,7 +105,7 @@ func TestAFTRObservedSourceGenerationAndProjection(t *testing.T) {
 		t.Fatal(err)
 	}
 	snapshot.Generation = input.Generation
-	if err := r.Accept(ctx, update(t, r, "service.dslite", 3, snapshot)); err != nil {
+	if err := observeAndProject(ctx, r, update(t, r, "service.dslite", 3, snapshot)); err != nil {
 		t.Fatal(err)
 	}
 	prior := r.bindings["service.dslite"].digest
@@ -153,12 +153,12 @@ func TestAFTRPeerAndGatewayChangesFenceOldProjection(t *testing.T) {
 			if err != nil || input.ConfigDigest == priorDigest || input.Generation != 1 {
 				t.Fatal("B4 intent change did not create a new fenced instance", input, err)
 			}
-			if priorDigest != "" && !errors.Is(r.Accept(ctx, priorUpdate), ErrStale) {
+			if priorDigest != "" && !errors.Is(observeAndProject(ctx, r, priorUpdate), ErrStale) {
 				t.Fatal("an old AFTR producer could recreate the prior peer or route")
 			}
 			snapshot := aftr.Snapshot{Resource: "dslite", Interface: "wan0", ConfigDigest: input.ConfigDigest, Generation: input.Generation, Active: true, Available: true, Local: input.Source.Address, Remote: "2001:db8:42::2", CandidateIndex: 0, ResolverIndex: -1, UpdatedAt: time.Now().UTC()}
 			current := update(t, r, "service.dslite", 1, snapshot)
-			if err := r.Accept(ctx, current); err != nil {
+			if err := observeAndProject(ctx, r, current); err != nil {
 				t.Fatal(err)
 			}
 			if err := network.Validate(n.applied); err != nil {
@@ -192,7 +192,7 @@ func TestAFTRPeerAndGatewayChangesFenceOldProjection(t *testing.T) {
 	if len(n.applied.DSLite)+len(n.applied.Interfaces)+len(n.applied.Routes) != 0 || len(r.bindings) != 0 || len(r.aftrInputs) != 0 {
 		t.Fatal("configuration removal retained B4 resources or an authorized producer", n.applied)
 	}
-	if !errors.Is(r.Accept(ctx, priorUpdate), ErrStale) {
+	if !errors.Is(observeAndProject(ctx, r, priorUpdate), ErrStale) {
 		t.Fatal("removed AFTR producer reacquired ownership")
 	}
 }

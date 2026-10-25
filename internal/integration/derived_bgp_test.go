@@ -232,8 +232,8 @@ func TestDaemonBGPDerivedCurrentStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	replay := serviceconfig.Update{SupervisorInstance: manager.InstanceID, Name: "service.router", Role: "bgp", ConfigDigest: frozen.ConfigDigest, Generation: frozen.Generation, ProducerEpoch: frozen.ProducerEpoch, Sequence: frozen.Sequence, Snapshot: frozen.Snapshot}
-	if err := f.control.Do(ctx, "POST", "/v1/services/state", replay, nil); err != nil {
-		t.Fatal("identical retry rejected", err)
+	if err := f.control.Do(ctx, "POST", "/v1/services/effects", replay, nil); !localapi.IsHTTPStatus(err, 409) {
+		t.Fatal("expired observation received an application ACK", err)
 	}
 	if v := view(); v.State.Asserted != nil {
 		t.Fatal("retry renewed expired Established", v)
@@ -242,7 +242,7 @@ func TestDaemonBGPDerivedCurrentStatus(t *testing.T) {
 	assert(true)
 	restart("service.router")
 	assert(true)
-	if err := f.control.Do(ctx, "POST", "/v1/services/state", replay, nil); !localapi.IsHTTPStatus(err, 409) {
+	if err := f.control.Do(ctx, "POST", "/v1/services/effects", replay, nil); !localapi.IsHTTPStatus(err, 409) {
 		t.Fatal("old worker notification accepted", err)
 	}
 	next, _ := status()

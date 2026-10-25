@@ -397,6 +397,11 @@ native writer / provider adapter に接続する。
 
 #### CORE-03 — 依存・条件・resource lifecycle の coordinator
 
+観測受理とBGP/VRRPの実適用待ちを分離し、config適用・定期更新・worker起動停止待ちの
+kernel書込みをcoordinatorへ集約した。I/O中も観測を受け取り、古い結果で新しい通知を
+完了扱いにしない。VRRP grantとworker選択の重複処理は残る。現在の検証範囲と残作業は
+[引き継ぎ](pve-codex-handoff.md) を参照する。CORE-03全体の完了とはしない。
+
 範囲: 共通基盤 / track: resource / risk: high。
 前提: CORE-02。
 

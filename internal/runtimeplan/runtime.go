@@ -92,16 +92,23 @@ type configuration struct {
 	revision uint64
 }
 
+type appliedProjection struct {
+	hash               string
+	at                 time.Time
+	sourceEpoch        uint64
+	observationVersion uint64
+}
+
 type Runtime struct {
 	config             configuration
+	applied            appliedProjection
 	reconcileWake      chan struct{}
 	waitWake           chan struct{}
 	supervisorInstance string              // immutable authority inherited by the control worker
 	op                 *semaphore.Weighted // module-set reconciliation; never held by protocol callbacks
-	mu                 sync.Mutex          // complete projection and protocol acceptance are serialized
-	// BFD observations and recipient grants never acquire mu: the network
-	// writer can hold it across a long apply. Configuration takes mu -> bfdMu;
-	// no path may acquire these locks in the opposite order.
+	mu                 sync.Mutex          // observations and projection metadata; released during kernel IO
+	// BFD packet observations and recipient queries use their own short lock.
+	// Configuration takes mu -> bfdMu, never the opposite order.
 	bfdMu                sync.Mutex
 	bfdSources           map[string]bfdBinding
 	bfdRecipients        map[string]bfdRecipient
@@ -120,19 +127,18 @@ type Runtime struct {
 	ruleIncarnation      string
 	derivedContinuity    map[string]derivedContinuity
 	projectionGeneration uint64
+	observationVersion   uint64
 	configured           bool
 	initialized          bool
 	bindings             map[string]binding
 	records              map[string]serviceconfig.Update
-	vrrpEffects          map[string]*vrrpEffect
+	applications         map[string]*pendingApplication
 	vrrpAdmissions       map[string]vrrpAdmission
 	vrrpPublications     map[string]vrrpPublication
 	vrrpAdmissionID      uint64
 	liveRA               map[string]ra.Config
 	aftrInputs           map[string]aftr.Input
 	installed            []supervisor.DynamicModule
-	appliedHash          string
-	lastNetworkApply     time.Time
 	leases               map[string]time.Time
 	routeIssues          []RouteIssue
 	bgpApplied           map[string]bgpProjectionStatus
@@ -156,6 +162,9 @@ func (r *Runtime) CheckReady(ctx context.Context) error {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.applied.hash == "" || r.applied.sourceEpoch != r.sourceEpoch || r.applied.observationVersion != r.observationVersion {
+		return errors.New("accepted protocol observations await network application")
+	}
 	if len(r.routeIssues) > 0 {
 		return errors.New("some learned routes have unresolved next hops; inspect show services")
 	}
@@ -274,8 +283,8 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 			r.mu.Unlock()
 			return r.failure(errors.New("source cutover epoch exhausted"))
 		}
-		for name := range r.vrrpEffects {
-			r.finishVRRPEffectLocked(name, ErrStale)
+		for name := range r.applications {
+			r.finishApplicationLocked(name, ErrStale)
 		}
 		r.sourceEpoch++
 		r.vrrpAdmissions = nil
@@ -314,10 +323,7 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 	r.routeIssues = p.routeIssues
 	r.phase = "applying"
 	r.lastError = ""
-	err = r.applyNetworkLocked(ctx, p.network)
-	if err == nil {
-		r.bgpApplied = p.bgpStatus
-	}
+	_, err = r.applyProjectionLocked(ctx, p)
 	r.mu.Unlock()
 	if err != nil {
 		return r.failure(err)
@@ -459,7 +465,7 @@ func (r *Runtime) wait(ctx context.Context, wanted []supervisor.DynamicModule, r
 		if err != nil {
 			return err
 		}
-		if err := r.drainVRRPEffects(ctx, s, removed); err != nil {
+		if err := r.reconcileWhileWaiting(ctx, s, removed); err != nil {
 			return err
 		}
 		byName := map[string]supervisor.ModuleStatus{}
@@ -508,18 +514,24 @@ func (r *Runtime) applyNetworkLocked(ctx context.Context, d network.Desired) err
 	}{r.config.revision, d})
 	h := sha256.Sum256(b)
 	digest := hex.EncodeToString(h[:])
-	if digest == r.appliedHash && time.Since(r.lastNetworkApply) < 5*time.Second {
+	if digest == r.applied.hash && time.Since(r.applied.at) < 5*time.Second {
 		return nil
 	}
-	if err := r.network.Apply(ctx, r.config.revision, d); err != nil {
+	previousHash := r.applied.hash
+	r.applied.hash = ""
+	revision := r.config.revision
+	r.mu.Unlock()
+	err := r.network.Apply(ctx, revision, d)
+	r.mu.Lock()
+	if err != nil {
 		r.bgpApplied = nil
 		return err
 	}
-	if digest != r.appliedHash {
+	if digest != previousHash {
 		r.projectionGeneration++
 	}
-	r.appliedHash = digest
-	r.lastNetworkApply = time.Now()
+	r.applied.hash = digest
+	r.applied.at = time.Now()
 	return nil
 }
 
@@ -591,7 +603,9 @@ func (r *Runtime) recordOwnershipLocked(u serviceconfig.Update, maximum time.Dur
 	return nil
 }
 
-func (r *Runtime) Accept(ctx context.Context, u serviceconfig.Update) error {
+// Observe acknowledges a validated observation. Kernel application belongs to
+// the serialized coordinator, independently of whether the source has guards.
+func (r *Runtime) Observe(ctx context.Context, u serviceconfig.Update) error {
 	// This check precedes both the main mutex and the independent BFD path.
 	// Old counters cannot seed an empty cache after a supervisor restart.
 	if !serviceconfig.ValidSupervisorInstance(r.supervisorInstance) || u.SupervisorInstance != r.supervisorInstance {
@@ -650,9 +664,6 @@ func (r *Runtime) Accept(ctx context.Context, u serviceconfig.Update) error {
 			}
 			if u.Sequence == old.Sequence {
 				if bytes.Equal(u.Snapshot, old.Snapshot) {
-					if u.Role == "vrrp" && conditionalProgram(r.config.source) {
-						return r.waitVRRPEffectLocked(ctx, u)
-					}
 					return nil
 				}
 				return errors.New("protocol sequence reused with different snapshot")
@@ -666,7 +677,7 @@ func (r *Runtime) Accept(ctx context.Context, u serviceconfig.Update) error {
 	} else if err := validateSnapshot(b.instance, u.Snapshot); err != nil {
 		return err
 	}
-	previous, had := r.records[u.Name]
+	previous := r.records[u.Name]
 	if u.Role == "vrrp" {
 		if err := validateVRRPTransition(previous, u); err != nil {
 			return err
@@ -692,77 +703,47 @@ func (r *Runtime) Accept(ctx context.Context, u serviceconfig.Update) error {
 			return err
 		}
 	}
-	if conditionalProgram(r.config.source) {
-		candidateRecords := r.effectiveRecordsLocked(time.Now())
-		candidateRecords[u.Name] = u
-		if _, err := r.projectLocked(r.config.plan.Native, candidateRecords, time.Now()); err != nil {
-			if oldLease.IsZero() {
-				delete(r.leases, u.Name)
-			} else {
-				r.leases[u.Name] = oldLease
-			}
-			return err
-		}
-		r.recordGuardGrantLocked(u, time.Now())
-		r.records[u.Name] = u
-		r.revokeVRRPPublicationLocked(u)
-		// Observe every accepted transition, including flaps that finish between
-		// monitor ticks. This updates only temporal condition state, not effects.
-		if _, err := r.conditionFactsLocked(r.config, time.Now()); err != nil {
-			return err
-		}
-		if u.Role == "vrrp" {
-			return r.waitVRRPEffectLocked(ctx, u)
-		}
-		// The serialized reconcile loop stops dependent workers before withdrawing
-		// their network prerequisites. A protocol callback must never do that work.
-		return nil
-	}
-	r.records[u.Name] = u
-	if len(r.config.plan.Native.DerivedEvents) > 0 {
-		r.recordGuardGrantLocked(u, time.Now())
-	}
-	p, err := r.projectProgramLocked(r.config, r.effectiveRecordsLocked(time.Now()), time.Now())
-	if err == nil {
-		err = r.applyNetworkLocked(ctx, p.network)
-	}
-	if err != nil {
+	candidateRecords := r.effectiveRecordsLocked(time.Now())
+	candidateRecords[u.Name] = u
+	if _, err := r.projectLocked(r.config.plan.Native, candidateRecords, time.Now()); err != nil {
 		if oldLease.IsZero() {
 			delete(r.leases, u.Name)
 		} else {
 			r.leases[u.Name] = oldLease
 		}
-		if had {
-			r.records[u.Name] = previous
-		} else {
-			delete(r.records, u.Name)
-		}
-		old, compileErr := r.projectProgramLocked(r.config, r.effectiveRecordsLocked(time.Now()), time.Now())
-		if compileErr == nil {
-			restoreCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			compileErr = r.network.Apply(restoreCtx, r.config.revision, old.network)
-			cancel()
-		}
-		r.appliedHash = ""
-		r.phase = "degraded"
-		r.lastError = errors.Join(err, compileErr).Error()
 		return err
 	}
-	r.resourceStates = p.resources
-	r.liveRA = p.liveRA
-	r.routeIssues = p.routeIssues
-	r.bgpApplied = p.bgpStatus
-	if u.Role == "bgp" {
-		// A newly started recipient may read grants only after this first
-		// publication has completed the existing network ACK boundary.
-		r.acceptBFDRecipientLocked(u)
-	}
-	if len(r.config.plan.Native.DerivedEvents) > 0 {
-		_, err := r.conditionFactsLocked(r.config, time.Now())
+	r.recordGuardGrantLocked(u, time.Now())
+	r.records[u.Name] = u
+	r.observationVersion++
+	r.revokeVRRPPublicationLocked(u)
+	// Observe flaps when accepted; a periodic projection must not hide them.
+	if _, err := r.conditionFactsLocked(r.config, time.Now()); err != nil {
 		return err
 	}
+	r.wakeCoordinatorLocked()
 	return nil
 }
+
+// Apply waits for the current BGP FIB or VRRP VIP projection. These protocols
+// require application completion before advancing their state machines.
+func (r *Runtime) Apply(ctx context.Context, u serviceconfig.Update) error {
+	if u.Role != "vrrp" && u.Role != "bgp" {
+		return errors.New("application requests support only BGP and VRRP")
+	}
+	if err := r.Observe(ctx, u); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	current, ok := r.records[u.Name]
+	binding, bound := r.bindings[u.Name]
+	if !ok || !bound || binding.digest != u.ConfigDigest || !sameUpdate(current, u) {
+		return ErrStale
+	}
+	return r.waitApplicationLocked(ctx, u)
+}
+
 func strict(b []byte, v any) error {
 	d := json.NewDecoder(bytes.NewReader(b))
 	d.DisallowUnknownFields()
@@ -923,7 +904,11 @@ func (r *Runtime) Handler() http.Handler {
 			localapi.Fail(w, 400, err)
 			return
 		}
-		if err := r.Accept(req.Context(), u); err != nil {
+		if u.Role == "vrrp" || u.Role == "bgp" {
+			localapi.Fail(w, 422, errors.New("BGP and VRRP must use the effect application endpoint"))
+			return
+		}
+		if err := r.Observe(req.Context(), u); err != nil {
 			code := 422
 			if errors.Is(err, ErrStale) {
 				code = 409
@@ -931,7 +916,23 @@ func (r *Runtime) Handler() http.Handler {
 			localapi.Fail(w, code, err)
 			return
 		}
-		localapi.JSON(w, 200, map[string]bool{"accepted": true})
+		localapi.JSON(w, 200, serviceconfig.ObservationReceipt{Accepted: true})
+	})
+	mux.HandleFunc("POST /v1/services/effects", func(w http.ResponseWriter, req *http.Request) {
+		var u serviceconfig.Update
+		if err := localapi.Decode(w, req, &u); err != nil {
+			localapi.Fail(w, 400, err)
+			return
+		}
+		if err := r.Apply(req.Context(), u); err != nil {
+			code := 422
+			if errors.Is(err, ErrStale) {
+				code = 409
+			}
+			localapi.Fail(w, code, err)
+			return
+		}
+		localapi.JSON(w, 200, serviceconfig.ApplicationReceipt{Applied: true})
 	})
 	mux.HandleFunc("GET /v1/services/{name}/dns-leases", func(w http.ResponseWriter, req *http.Request) {
 		projection, err := r.DNSLeases(req.PathValue("name"))
@@ -981,7 +982,7 @@ func (r *Runtime) Monitor(ctx context.Context) {
 func (r *Runtime) reconcileDynamic(ctx context.Context) error {
 	r.refreshGuardStatus(ctx)
 	r.mu.Lock()
-	r.fenceVRRPEffectsLocked()
+	r.fenceApplicationsLocked()
 	if !r.configured {
 		r.mu.Unlock()
 		return nil
@@ -1012,26 +1013,15 @@ func (r *Runtime) reconcileDynamic(ctx context.Context) error {
 		r.mu.Unlock()
 		return projectionErr
 	}
-	if !reflect.DeepEqual(latest, p) {
+	if !reflect.DeepEqual(latest.instances, p.instances) {
+		r.wakeCoordinatorLocked()
 		r.mu.Unlock()
 		return nil
 	}
-	p, err = r.applyVRRPProjectionLocked(ctx, p)
+	p, err = r.applyProjectionLocked(ctx, latest)
 	if err != nil {
-		r.finishVRRPEffectsLocked(p.network, err)
 		r.mu.Unlock()
 		return err
-	}
-	r.finishVRRPEffectsLocked(p.network, nil)
-	r.liveRA, r.routeIssues = p.liveRA, p.routeIssues
-	r.bgpApplied = p.bgpStatus
-	r.resourceStates = p.resources
-	if conditionalProgram(r.config.source) {
-		for _, record := range r.records {
-			if record.Role == "bgp" {
-				r.acceptBFDRecipientLocked(record)
-			}
-		}
 	}
 	if bindings != nil {
 		bfdSources, bfdRecipients, cacheErr := compileBFDCache(bindings)
@@ -1063,7 +1053,8 @@ func (r *Runtime) reconcileDynamic(ctx context.Context) error {
 		return nil
 	}
 	if err := r.CheckReady(ctx); err != nil {
-		return err
+		r.failure(err)
+		return nil // projection completed; readiness is reported separately
 	}
 	r.mu.Lock()
 	r.phase, r.lastError = "ready", ""

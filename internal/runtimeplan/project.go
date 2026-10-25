@@ -23,13 +23,14 @@ import (
 )
 
 type projection struct {
-	native      config.Native
-	resources   map[string]resourceprogram.ResourceState
-	routeIssues []RouteIssue
-	bgpStatus   map[string]bgpProjectionStatus
-	network     network.Desired
-	instances   []serviceconfig.Instance
-	liveRA      map[string]ra.Config
+	observationVersion uint64
+	native             config.Native
+	resources          map[string]resourceprogram.ResourceState
+	routeIssues        []RouteIssue
+	bgpStatus          map[string]bgpProjectionStatus
+	network            network.Desired
+	instances          []serviceconfig.Instance
+	liveRA             map[string]ra.Config
 }
 
 // project is pure: protocol facts and the committed intent produce a complete

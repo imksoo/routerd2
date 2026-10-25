@@ -39,7 +39,7 @@ func TestBFDTimestampEqualityRuntimeAndProducerCounterFence(t *testing.T) {
 		snapshot.ExpiresNanos = snapshot.ObservedNanos + uint64(bfd.StatusLifetime)
 		snapshot.TimestampChanges = changes
 		snapshot.UpdatedAt = wall
-		return r.Accept(ctx, update(t, r, "service.edge", sequence, snapshot))
+		return r.Observe(ctx, update(t, r, "service.edge", sequence, snapshot))
 	}
 	if err = publish(1, 1, literal.Add(-time.Second)); err != nil {
 		t.Fatal(err)

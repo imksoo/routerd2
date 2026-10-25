@@ -1,7 +1,6 @@
 package runtimeplan
 
 import (
-	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -19,7 +18,7 @@ func TestVRRPWallClockAloneCannotAuthorizeOwnership(t *testing.T) {
 	r, n, _ := fixture(t, doc)
 	c = doc.Services[0].VRRPConfig()
 	s := vrrp.Snapshot{Resource: c.Resource, Interface: c.Interface, VIPInterface: c.VIPInterface, Family: c.Family, VirtualRouterID: c.VirtualRouterID, Priority: c.Priority, AcceptMode: true, Addresses: c.Addresses, VirtualMAC: vrrp.VirtualMAC(c.Family, c.VirtualRouterID).String(), Epoch: strings.Repeat("a", 32), Transition: 1, Active: true, State: vrrp.StateActive, ValidUntil: time.Now().Add(3 * time.Second)}
-	if err := r.Accept(context.Background(), update(t, r, "service.ha", 1, s)); err == nil {
+	if err := acceptVRRPAndDrain(t, r, update(t, r, "service.ha", 1, s)); err == nil {
 		t.Fatal("UTC-only VRRP grant acquired VIP/VMAC ownership without boot-scoped evidence")
 	}
 	if len(n.applied.Links) != 0 {
@@ -46,7 +45,7 @@ func TestVRRPBootDeadlineReachesKernelWithoutUTCConversion(t *testing.T) {
 			c = doc.Services[0].VRRPConfig()
 			s := bootVRRPSnapshot(t, c)
 			s.ValidUntil = time.Now().Add(offset)
-			if err := r.Accept(context.Background(), update(t, r, "service.ha", 1, s)); err != nil {
+			if err := acceptVRRPAndDrain(t, r, update(t, r, "service.ha", 1, s)); err != nil {
 				t.Fatal("UTC metadata controlled boot ownership", err)
 			}
 			found := false
@@ -83,7 +82,7 @@ func TestVRRPColdControlRejectsRetiredSupervisorGeneration(t *testing.T) {
 	c = doc.Services[0].VRRPConfig()
 	s := bootVRRPSnapshot(t, c)
 	manager.vrrpGeneration = 2
-	if err := r.Accept(context.Background(), update(t, r, "service.ha", 1, s)); err == nil || len(r.records) != 0 || len(n.applied.Links) != 0 {
+	if err := acceptVRRPAndDrain(t, r, update(t, r, "service.ha", 1, s)); err == nil || len(r.records) != 0 || len(n.applied.Links) != 0 {
 		t.Fatal("first message after control restart revived retired VRRP generation", err)
 	}
 }
@@ -94,7 +93,7 @@ func TestVRRPFinalWithdrawalAndClockCannotBeReplayedIntoOwnership(t *testing.T) 
 	r, _, _ := fixture(t, doc)
 	c = doc.Services[0].VRRPConfig()
 	s := bootVRRPSnapshot(t, c)
-	if err := r.Accept(context.Background(), update(t, r, "service.ha", 1, s)); err != nil {
+	if err := acceptVRRPAndDrain(t, r, update(t, r, "service.ha", 1, s)); err != nil {
 		t.Fatal(err)
 	}
 	old := r.records["service.ha"]
@@ -106,7 +105,7 @@ func TestVRRPFinalWithdrawalAndClockCannotBeReplayedIntoOwnership(t *testing.T) 
 	} {
 		bad := s
 		mutate(&bad)
-		if err := r.Accept(context.Background(), update(t, r, "service.ha", 2, bad)); err == nil {
+		if err := acceptVRRPAndDrain(t, r, update(t, r, "service.ha", 2, bad)); err == nil {
 			t.Fatal("invalid VRRP transition accepted", bad)
 		}
 		if string(r.records["service.ha"].Snapshot) != string(old.Snapshot) {
@@ -116,12 +115,12 @@ func TestVRRPFinalWithdrawalAndClockCannotBeReplayedIntoOwnership(t *testing.T) 
 	stopped := s
 	stopped.Active, stopped.State, stopped.ValidUntil, stopped.ExpiresNanos = false, vrrp.StateInitialize, time.Time{}, 0
 	stopped.Transition++
-	if err := r.Accept(context.Background(), update(t, r, "service.ha", 2, stopped)); err != nil {
+	if err := acceptVRRPAndDrain(t, r, update(t, r, "service.ha", 2, stopped)); err != nil {
 		t.Fatal(err)
 	}
 	newer := bootVRRPSnapshot(t, c)
 	newer.Transition = stopped.Transition + 1
-	if err := r.Accept(context.Background(), update(t, r, "service.ha", 3, newer)); err == nil {
+	if err := acceptVRRPAndDrain(t, r, update(t, r, "service.ha", 3, newer)); err == nil {
 		t.Fatal("same worker revived after terminal withdrawal")
 	}
 	var stored vrrp.Snapshot

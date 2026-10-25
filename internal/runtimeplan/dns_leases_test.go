@@ -29,7 +29,7 @@ func TestDHCPServerDNSProjectionFencesSourcesAndExpiresReplays(t *testing.T) {
 	now := time.Now()
 	snapshot := dhcpserverconfig.Snapshot{Resource: "leases", Interface: "lan0", ServerAddress: "192.0.2.1", Epoch: strings.Repeat("b", 32), Sequence: 1, Active: true, ObservedAt: now, ValidUntil: now.Add(5 * time.Second), Leases: []dhcpserverconfig.Lease{{MACAddress: "02:00:00:00:00:02", IPAddress: "192.0.2.123", Hostname: "laptop", Scope: "default", AcquiredAt: now, RenewedAt: now, ExpiresAt: now.Add(600 * time.Second)}}}
 	u := update(t, r, "service.leases", 1, snapshot)
-	if err := r.Accept(context.Background(), u); err != nil {
+	if err := r.Observe(context.Background(), u); err != nil {
 		t.Fatal(err)
 	}
 	projected, err := r.DNSLeases("service.dns")
@@ -38,7 +38,7 @@ func TestDHCPServerDNSProjectionFencesSourcesAndExpiresReplays(t *testing.T) {
 	}
 	bad := snapshot
 	bad.Resource = "other"
-	if err := r.Accept(context.Background(), update(t, r, "service.leases", 2, bad)); err == nil {
+	if err := r.Observe(context.Background(), update(t, r, "service.leases", 2, bad)); err == nil {
 		t.Fatal("lease source identity spoof was accepted")
 	}
 	r.mu.Lock()
@@ -47,7 +47,7 @@ func TestDHCPServerDNSProjectionFencesSourcesAndExpiresReplays(t *testing.T) {
 	// Simulate a replay transported with a higher envelope sequence. Its old
 	// absolute expiry is still future, but its monotonic grant is exhausted.
 	u.Sequence++
-	if err := r.Accept(context.Background(), u); err != nil {
+	if err := r.Observe(context.Background(), u); err != nil {
 		t.Fatal(err)
 	}
 	projected, err = r.DNSLeases("service.dns")

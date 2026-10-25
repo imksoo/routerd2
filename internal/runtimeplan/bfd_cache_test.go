@@ -46,7 +46,7 @@ func blockBFDNetwork(t *testing.T, r *Runtime, backend Network, failure error) (
 	t.Helper()
 	blocked := &blockedBFDNetwork{Network: backend, entered: make(chan struct{}), release: make(chan struct{}), failure: failure}
 	r.mu.Lock()
-	r.network, r.appliedHash = blocked, ""
+	r.network, r.applied.hash = blocked, ""
 	r.mu.Unlock()
 	var release sync.Once
 	finish := func() { release.Do(func() { close(blocked.release) }) }
@@ -88,11 +88,11 @@ func TestBFDCacheUpdatesAndQueriesRemainIndependentOfBlockedNetworkWriter(t *tes
 	r, native, _ := fixture(t, doc)
 	ctx, stop := context.WithTimeout(context.Background(), 5*time.Second)
 	defer stop()
-	if err := r.Accept(ctx, nextBFDUpdate(t, r, doc, 1, false)); err != nil {
+	if err := r.Observe(ctx, nextBFDUpdate(t, r, doc, 1, false)); err != nil {
 		t.Fatal(err)
 	}
 	bgp := observedBGPRoutes()
-	if err := r.Accept(ctx, update(t, r, "service.router", 1, bgp)); err != nil {
+	if err := observeAndProject(ctx, r, update(t, r, "service.router", 1, bgp)); err != nil {
 		t.Fatal(err)
 	}
 	digest := r.bindings["service.router"].digest
@@ -102,7 +102,7 @@ func TestBFDCacheUpdatesAndQueriesRemainIndependentOfBlockedNetworkWriter(t *tes
 	}
 	bgp.BFD = map[string]bgpconfig.BFDAcknowledgement{"192.0.2.2": proofOf(view.Peers["192.0.2.2"])}
 	bgp.Sequence = 2
-	if err := r.Accept(ctx, update(t, r, "service.router", 2, bgp)); err != nil || len(native.applied.Routes) != 1 {
+	if err := observeAndProject(ctx, r, update(t, r, "service.router", 2, bgp)); err != nil || len(native.applied.Routes) != 1 {
 		t.Fatal("initial acknowledged path missing", err)
 	}
 	publication := nextBFDUpdate(t, r, doc, 2, true)
@@ -117,7 +117,7 @@ func TestBFDCacheUpdatesAndQueriesRemainIndependentOfBlockedNetworkWriter(t *tes
 	fastBFDCall(t, func() error {
 		call, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
 		defer cancel()
-		return r.Accept(call, publication)
+		return r.Observe(call, publication)
 	})
 	fastBFDCall(t, func() error {
 		view, err := r.BFDProjection("service.router", digest, 1)
@@ -164,7 +164,7 @@ func TestBFDCacheRecipientGenerationBecomesVisibleOnlyAfterSuccessfulACK(t *test
 	r, native, manager := fixture(t, doc)
 	ctx, stop := context.WithTimeout(context.Background(), 5*time.Second)
 	defer stop()
-	if err := r.Accept(ctx, nextBFDUpdate(t, r, doc, 1, false)); err != nil {
+	if err := r.Observe(ctx, nextBFDUpdate(t, r, doc, 1, false)); err != nil {
 		t.Fatal(err)
 	}
 	digest := r.bindings["service.router"].digest
@@ -183,7 +183,10 @@ func TestBFDCacheRecipientGenerationBecomesVisibleOnlyAfterSuccessfulACK(t *test
 		}
 		blocked, release := blockBFDNetwork(t, r, native, failure)
 		done := make(chan error, 1)
-		go func(u serviceconfig.Update) { done <- r.Accept(ctx, u) }(publication)
+		if err := r.Observe(ctx, publication); err != nil {
+			t.Fatal(err)
+		}
+		go func() { done <- r.reconcileDynamic(ctx) }()
 		select {
 		case <-blocked.entered:
 		case <-ctx.Done():
@@ -227,10 +230,10 @@ func TestBFDCacheCutoverPreservesNewerUnchangedSourceAndFencesChangedSources(t *
 	r, _, _ := fixture(t, doc)
 	ctx := context.Background()
 	initial := nextBFDUpdate(t, r, doc, 1, false)
-	if err := r.Accept(ctx, initial); err != nil {
+	if err := r.Observe(ctx, initial); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.Accept(ctx, update(t, r, "service.router", 1, observedBGPRoutes())); err != nil {
+	if err := observeAndProject(ctx, r, update(t, r, "service.router", 1, observedBGPRoutes())); err != nil {
 		t.Fatal(err)
 	}
 	digest := r.bindings["service.router"].digest
@@ -249,7 +252,7 @@ func TestBFDCacheCutoverPreservesNewerUnchangedSourceAndFencesChangedSources(t *
 	// A publisher advances while the configuration writer owns mu and still
 	// carries its earlier retained copy. No source reverts at cache cutover.
 	done := make(chan error, 1)
-	go func() { done <- r.Accept(ctx, newer) }()
+	go func() { done <- r.Observe(ctx, newer) }()
 	select {
 	case err := <-done:
 		if err != nil {
@@ -275,14 +278,14 @@ func TestBFDCacheCutoverPreservesNewerUnchangedSourceAndFencesChangedSources(t *
 	if err := r.ApplyConfig(ctx, 2, config.FromNative(changed)); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.Accept(ctx, newer); !errors.Is(err, ErrStale) {
+	if err := r.Observe(ctx, newer); !errors.Is(err, ErrStale) {
 		t.Fatal("changed source accepted its old configuration digest", err)
 	}
 	if view, err := r.BFDProjection("service.router", digest, 1); err != nil || view.Peers["192.0.2.2"].Up || view.Peers["192.0.2.2"].ConfigDigest == initial.ConfigDigest {
 		t.Fatal("changed source reused old health before a new observation", view, err)
 	}
 	newSource := nextBFDUpdate(t, r, changed, 1, false)
-	if err := r.Accept(ctx, newSource); err != nil {
+	if err := r.Observe(ctx, newSource); err != nil {
 		t.Fatal(err)
 	}
 	if view, err := r.BFDProjection("service.router", digest, 1); err != nil || !view.Peers["192.0.2.2"].Up || view.Peers["192.0.2.2"].ConfigDigest != newSource.ConfigDigest {
@@ -291,7 +294,7 @@ func TestBFDCacheCutoverPreservesNewerUnchangedSourceAndFencesChangedSources(t *
 	if err := r.ApplyConfig(ctx, 3, config.FromNative(config.Native{})); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.Accept(ctx, newSource); !errors.Is(err, ErrStale) {
+	if err := r.Observe(ctx, newSource); !errors.Is(err, ErrStale) {
 		t.Fatal("removed BFD source retained a publication capability", err)
 	}
 	if _, err := r.BFDProjection("service.router", digest, 1); !errors.Is(err, ErrStale) {
@@ -306,10 +309,10 @@ func TestBFDCacheAcceptedEvidenceIsImmutableAndCancellationHasNoEffect(t *testin
 	doc := bfdBGPDocument()
 	r, _, _ := fixture(t, doc)
 	first := nextBFDUpdate(t, r, doc, 1, false)
-	if err := r.Accept(context.Background(), first); err != nil {
+	if err := observeAndProject(context.Background(), r, first); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.Accept(context.Background(), update(t, r, "service.router", 1, observedBGPRoutes())); err != nil {
+	if err := observeAndProject(context.Background(), r, update(t, r, "service.router", 1, observedBGPRoutes())); err != nil {
 		t.Fatal(err)
 	}
 	digest := r.bindings["service.router"].digest
@@ -325,7 +328,7 @@ func TestBFDCacheAcceptedEvidenceIsImmutableAndCancellationHasNoEffect(t *testin
 	next := nextBFDUpdate(t, r, doc, 2, true)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := r.Accept(ctx, next); !errors.Is(err, context.Canceled) {
+	if err := r.Observe(ctx, next); !errors.Is(err, context.Canceled) {
 		t.Fatal("canceled BFD publication was accepted", err)
 	}
 	if view, err := r.BFDProjection("service.router", digest, 1); err != nil || view.Peers["192.0.2.2"].Sequence != 1 {
@@ -339,10 +342,10 @@ func TestBFDCacheAcceptedEvidenceIsImmutableAndCancellationHasNoEffect(t *testin
 func TestBFDCacheGrantQueriesReadOnlyCompiledRecipientReferences(t *testing.T) {
 	doc := bfdBGPDocument()
 	r, _, _ := fixture(t, doc)
-	if err := r.Accept(context.Background(), nextBFDUpdate(t, r, doc, 1, false)); err != nil {
+	if err := r.Observe(context.Background(), nextBFDUpdate(t, r, doc, 1, false)); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.Accept(context.Background(), update(t, r, "service.router", 1, observedBGPRoutes())); err != nil {
+	if err := observeAndProject(context.Background(), r, update(t, r, "service.router", 1, observedBGPRoutes())); err != nil {
 		t.Fatal(err)
 	}
 	digest := r.bindings["service.router"].digest
@@ -365,10 +368,10 @@ func TestBFDCacheProjectionCapturesEvidenceBeforeEvaluationClock(t *testing.T) {
 	doc := bfdBGPDocument()
 	r, _, _ := fixture(t, doc)
 	ctx := context.Background()
-	if err := r.Accept(ctx, nextBFDUpdate(t, r, doc, 1, false)); err != nil {
+	if err := r.Observe(ctx, nextBFDUpdate(t, r, doc, 1, false)); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.Accept(ctx, update(t, r, "service.router", 1, observedBGPRoutes())); err != nil {
+	if err := observeAndProject(ctx, r, update(t, r, "service.router", 1, observedBGPRoutes())); err != nil {
 		t.Fatal(err)
 	}
 	digest := r.bindings["service.router"].digest
@@ -391,7 +394,7 @@ func TestBFDCacheProjectionCapturesEvidenceBeforeEvaluationClock(t *testing.T) {
 		peer.ValidUntil = receiveClock.WallTime.Add(900 * time.Millisecond)
 		peer.DeadlineBootNanoseconds = receiveClock.BoottimeNanoseconds + int64(900*time.Millisecond)
 		next := update(t, r, "service.edge", 2, seen)
-		fastBFDCall(t, func() error { return r.Accept(ctx, next) })
+		fastBFDCall(t, func() error { return r.Observe(ctx, next) })
 		return queryClock, nil
 	})
 	if err != nil {

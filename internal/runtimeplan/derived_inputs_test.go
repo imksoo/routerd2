@@ -42,7 +42,7 @@ func TestDerivedInputKeepsOriginalAgeAndBreaksUnpolledFlapContinuity(t *testing.
 			phase, passed, failed = "Unhealthy", 0, 3
 		}
 		sample = health.Snapshot{Resource: "wan", Interface: "wan0", BootID: clock.BootID, ObservedNanos: now, ExpiresNanos: now + uint64(2*time.Minute), Active: up, State: old.State{Phase: phase, ConsecutivePassed: passed, ConsecutiveFailed: failed}}
-		if err = r.Accept(ctx, update(t, r, "service.wan", seq, sample)); err != nil {
+		if err = r.Observe(ctx, update(t, r, "service.wan", seq, sample)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -155,7 +155,7 @@ func TestInactiveProviderIsUnknownBeforeItsWorkerHasStopped(t *testing.T) {
 			phase, passed, failed = "Unhealthy", 0, 3
 		}
 		sample := health.Snapshot{Resource: name, Interface: "wan0", BootID: clock.BootID, ObservedNanos: now, ExpiresNanos: now + uint64(2*time.Minute), Active: up, State: old.State{Phase: phase, ConsecutivePassed: passed, ConsecutiveFailed: failed}}
-		if err = r.Accept(ctx, update(t, r, "service."+name, sequences[name], sample)); err != nil {
+		if err = r.Observe(ctx, update(t, r, "service."+name, sequences[name], sample)); err != nil {
 			t.Fatal(err)
 		}
 	}

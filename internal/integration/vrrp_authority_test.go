@@ -209,7 +209,10 @@ func runVRRPAuthorityOptions(t *testing.T, clockClient *clocktest.Client, condit
 		readinessListener = healthPBRListener(t, peerNS, "192.0.2.1:18097", "H")
 		t.Log("elected MASTER remained unpublished/unhealthy after timeout, kept election advertisements and emitted no VIP ARP")
 	}
-	until(t, 8*time.Second, hasVIP)
+	until(t, 8*time.Second, func() bool {
+		var state control.State
+		return f.control.Do(ctx, "GET", "/v1/config", nil, &state) == nil && state.Healthy && hasVIP()
+	})
 	link, err := netlink.LinkByName("ha4")
 	if err != nil || link.Type() != "macvlan" || !bytes.Equal(link.Attrs().HardwareAddr, vrrp.VirtualMAC("ipv4", 42)) {
 		t.Fatal("actual VMAC link missing", err)
@@ -401,7 +404,7 @@ func runVRRPAuthorityOptions(t *testing.T, clockClient *clocktest.Client, condit
 	})
 	traffic(true)
 	stale := serviceconfig.Update{SupervisorInstance: beforeInstance.SupervisorInstance, Name: beforeInstance.Name, Role: beforeInstance.Role, ConfigDigest: beforeInstance.ConfigDigest, Generation: beforeInstance.Generation, ProducerEpoch: beforeInstance.ProducerEpoch, Sequence: beforeInstance.Sequence + 100, Snapshot: beforeInstance.Snapshot}
-	if err := f.control.Do(ctx, "POST", "/v1/services/state", stale, nil); !localapi.IsHTTPStatus(err, 409) {
+	if err := f.control.Do(ctx, "POST", "/v1/services/effects", stale, nil); !localapi.IsHTTPStatus(err, 409) {
 		t.Fatal("retired VRRP worker accepted after replacement", err)
 	}
 	beforeControl := instance()
@@ -414,7 +417,7 @@ func runVRRPAuthorityOptions(t *testing.T, clockClient *clocktest.Client, condit
 		return m.Ready && m.Generation > oldControl.Generation && module("service.ha").Generation > beforeControl.Generation && hasVIP()
 	})
 	stale = serviceconfig.Update{SupervisorInstance: beforeControl.SupervisorInstance, Name: beforeControl.Name, Role: beforeControl.Role, ConfigDigest: beforeControl.ConfigDigest, Generation: beforeControl.Generation, ProducerEpoch: beforeControl.ProducerEpoch, Sequence: beforeControl.Sequence + 100, Snapshot: beforeControl.Snapshot}
-	if err := f.control.Do(ctx, "POST", "/v1/services/state", stale, nil); !localapi.IsHTTPStatus(err, 409) {
+	if err := f.control.Do(ctx, "POST", "/v1/services/effects", stale, nil); !localapi.IsHTTPStatus(err, 409) {
 		t.Fatal("cold control accepted retired generation", err)
 	}
 	traffic(true)

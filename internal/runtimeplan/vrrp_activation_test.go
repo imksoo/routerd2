@@ -26,7 +26,7 @@ func acceptVRRPAndDrain(t *testing.T, r *Runtime, u serviceconfig.Update) error 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	result := make(chan error, 1)
-	go func() { result <- r.Accept(ctx, u) }()
+	go func() { result <- r.Apply(ctx, u) }()
 	for {
 		select {
 		case err := <-result:
@@ -82,10 +82,10 @@ func TestGracefulVRRPRequiresCurrentAdmissionAndLatchesOnlyAppliedPublication(t 
 	forged.Active = true
 	forged.ActivationState = "Ready"
 	forged.ValidUntil = time.Now().Add(time.Hour)
-	if err := r.Accept(ctx, update(t, r, pending.Name, 2, forged)); err == nil {
+	if err := r.Observe(ctx, update(t, r, pending.Name, 2, forged)); err == nil {
 		t.Fatal("VIP request without a current admission grant accepted")
 	}
-	if err := r.Accept(ctx, update(t, r, "service.wan", 1, lease4(time.Now().Add(time.Hour)))); err != nil {
+	if err := r.Observe(ctx, update(t, r, "service.wan", 1, lease4(time.Now().Add(time.Hour)))); err != nil {
 		t.Fatal(err)
 	}
 	grant, err = r.GrantVRRPActivation(ctx, pending)
@@ -105,7 +105,7 @@ func TestGracefulVRRPRequiresCurrentAdmissionAndLatchesOnlyAppliedPublication(t 
 	// Readiness is admission, not a standing permission to keep the MASTER VIP.
 	lost := lease4(time.Now().Add(time.Hour))
 	lost.Active = false
-	if err := r.Accept(ctx, update(t, r, "service.wan", 2, lost)); err != nil {
+	if err := r.Observe(ctx, update(t, r, "service.wan", 2, lost)); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.reconcileDynamic(ctx); err != nil {
@@ -148,7 +148,7 @@ func TestGracefulVRRPRejectsChangedOrExpiredAdmissionBeforeRecording(t *testing.
 			if err := acceptVRRPAndDrain(t, r, pending); err != nil {
 				t.Fatal(err)
 			}
-			if err := r.Accept(ctx, update(t, r, "service.wan", 1, lease4(time.Now().Add(time.Hour)))); err != nil {
+			if err := r.Observe(ctx, update(t, r, "service.wan", 1, lease4(time.Now().Add(time.Hour)))); err != nil {
 				t.Fatal(err)
 			}
 			grant, err := r.GrantVRRPActivation(ctx, pending)
@@ -172,7 +172,7 @@ func TestGracefulVRRPRejectsChangedOrExpiredAdmissionBeforeRecording(t *testing.
 			case "readiness-lost":
 				lost := lease4(time.Now().Add(time.Hour))
 				lost.Active = false
-				if err := r.Accept(ctx, update(t, r, "service.wan", 2, lost)); err != nil {
+				if err := r.Observe(ctx, update(t, r, "service.wan", 2, lost)); err != nil {
 					t.Fatal(err)
 				}
 			case "source-cutover":
@@ -185,7 +185,7 @@ func TestGracefulVRRPRejectsChangedOrExpiredAdmissionBeforeRecording(t *testing.
 			case "producer-changed":
 				u.ProducerEpoch = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 			}
-			if err := r.Accept(ctx, u); err == nil {
+			if err := r.Apply(ctx, u); err == nil {
 				t.Fatal("invalid admission accepted")
 			}
 			r.mu.Lock()
@@ -245,7 +245,7 @@ func TestGracefulVRRPFailedPromotionCannotBecomeUnsolicitedLongOwnership(t *test
 	if err := acceptVRRPAndDrain(t, r, pending); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.Accept(ctx, update(t, r, "service.wan", 1, lease4(time.Now().Add(time.Hour)))); err != nil {
+	if err := r.Observe(ctx, update(t, r, "service.wan", 1, lease4(time.Now().Add(time.Hour)))); err != nil {
 		t.Fatal(err)
 	}
 	grant, err := r.GrantVRRPActivation(ctx, pending)
@@ -260,7 +260,7 @@ func TestGracefulVRRPFailedPromotionCannotBecomeUnsolicitedLongOwnership(t *test
 	n.originalExpiry = active.ExpiresNanos
 	u := update(t, r, pending.Name, 2, active)
 	result := make(chan error, 1)
-	go func() { result <- r.Accept(ctx, u) }()
+	go func() { result <- r.Apply(ctx, u) }()
 	deadline := time.Now().Add(time.Second)
 	for {
 		r.mu.Lock()
@@ -324,7 +324,7 @@ func TestGracefulSourceCutoverCannotApplyOldUnacknowledgedAdmission(t *testing.T
 	if err := acceptVRRPAndDrain(t, r, pending); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.Accept(ctx, update(t, r, "service.wan", 1, lease4(time.Now().Add(time.Hour)))); err != nil {
+	if err := r.Observe(ctx, update(t, r, "service.wan", 1, lease4(time.Now().Add(time.Hour)))); err != nil {
 		t.Fatal(err)
 	}
 	grant, err := r.GrantVRRPActivation(ctx, pending)
@@ -337,7 +337,7 @@ func TestGracefulSourceCutoverCannotApplyOldUnacknowledgedAdmission(t *testing.T
 	active.ActivationGrant = grant
 	u := update(t, r, pending.Name, 2, active)
 	result := make(chan error, 1)
-	go func() { result <- r.Accept(ctx, u) }()
+	go func() { result <- r.Apply(ctx, u) }()
 	deadline := time.Now().Add(time.Second)
 	for {
 		r.mu.Lock()
@@ -390,7 +390,7 @@ func TestGracefulConditionalReactivationCannotReuseWithdrawnPublication(t *testi
 	if err := acceptVRRPAndDrain(t, r, pending); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.Accept(ctx, update(t, r, "service.wan", 1, lease4(time.Now().Add(time.Hour)))); err != nil {
+	if err := r.Observe(ctx, update(t, r, "service.wan", 1, lease4(time.Now().Add(time.Hour)))); err != nil {
 		t.Fatal(err)
 	}
 	grant, err := r.GrantVRRPActivation(ctx, pending)
@@ -406,7 +406,7 @@ func TestGracefulConditionalReactivationCannotReuseWithdrawnPublication(t *testi
 	}
 	lost := lease4(time.Now().Add(time.Hour))
 	lost.Active = false
-	if err := r.Accept(ctx, update(t, r, "service.wan", 2, lost)); err != nil {
+	if err := r.Observe(ctx, update(t, r, "service.wan", 2, lost)); err != nil {
 		t.Fatal(err)
 	}
 	source.Resources[0].When = &resourceprogram.FactCondition{Fact: "service.wan.active"}
@@ -417,7 +417,7 @@ func TestGracefulConditionalReactivationCannotReuseWithdrawnPublication(t *testi
 	if len(n.applied.Links) != 0 {
 		t.Fatal("conditional removal kept VIP")
 	}
-	if err := r.Accept(ctx, update(t, r, "service.wan", 3, lease4(time.Now().Add(time.Hour)))); err != nil {
+	if err := r.Observe(ctx, update(t, r, "service.wan", 3, lease4(time.Now().Add(time.Hour)))); err != nil {
 		t.Fatal(err)
 	}
 	m.vrrpGeneration = 2

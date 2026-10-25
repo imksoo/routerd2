@@ -1,5 +1,7 @@
 package runtimeplan
 
+import "time"
+
 // HealthStatus is intentionally independent of protocol snapshot sizes. Health
 // polling neither encodes instance snapshots nor copies route-issue details.
 type HealthStatus struct {
@@ -15,5 +17,12 @@ type HealthStatus struct {
 func (r *Runtime) Health() HealthStatus {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return HealthStatus{ProjectionGeneration: r.projectionGeneration, Revision: r.config.revision, Phase: r.phase, LastError: boundedText(r.lastError, 4096), LastErrorTruncated: len(r.lastError) > 4096, InstanceCount: len(r.bindings), RouteIssueCount: len(r.routeIssues)}
+	return HealthStatus{ProjectionGeneration: r.projectionGeneration, Revision: r.config.revision, Phase: r.phaseLocked(), LastError: boundedText(r.lastError, 4096), LastErrorTruncated: len(r.lastError) > 4096, InstanceCount: len(r.bindings), RouteIssueCount: len(r.routeIssues)}
+}
+
+func (r *Runtime) phaseLocked() string {
+	if r.phase == "ready" && (r.applied.hash == "" || r.applied.sourceEpoch != r.sourceEpoch || r.applied.observationVersion != r.observationVersion || !time.Now().Before(r.guardUntil)) {
+		return "applying"
+	}
+	return r.phase
 }

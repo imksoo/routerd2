@@ -6,8 +6,9 @@ import (
 )
 
 // Update fences a protocol snapshot to its immutable configuration and process
-// generation and supervisor lifetime. Sequence is monotonic within ProducerEpoch; an acknowledged
-// duplicate has no second effect. Snapshots are intent, never shell commands.
+// generation and supervisor lifetime. Sequence is monotonic within ProducerEpoch.
+// Ordinary publication acknowledges receipt, not kernel application. BGP and VRRP use
+// separate application requests before advancing their protocol state.
 type Update struct {
 	SupervisorInstance string          `json:"supervisor_instance"`
 	Name               string          `json:"name"`
@@ -24,4 +25,14 @@ type Update struct {
 func ValidSupervisorInstance(value string) bool {
 	b, err := hex.DecodeString(value)
 	return len(value) == 32 && err == nil && len(b) == 16
+}
+
+// ObservationReceipt acknowledges only storage of a current observation.
+type ObservationReceipt struct {
+	Accepted bool `json:"accepted"`
+}
+
+// ApplicationReceipt acknowledges the coordinator's completed kernel projection.
+type ApplicationReceipt struct {
+	Applied bool `json:"applied"`
 }

@@ -298,7 +298,16 @@
         "internal/resourceprogram (新設予定)",
         "internal/runtimeplan",
         "internal/supervisor"
-      ]
+      ],
+      "implementation_notes": {
+        "implemented": "Compile static graph/programs once; direct finite facts; one coordinator-owned kernel application boundary for configuration, monitoring and startup/stop waits. Observation receipts are separate from explicit BGP/VRRP application completion. Kernel IO releases the observation mutex and completion fences newer input.",
+        "validation": "Current local/real-daemon results and untested scope are in docs/pve-codex-handoff.md; historical checkpoints are not acceptance authority.",
+        "remaining": [
+          "Simplify VRRP admission and publication state; remove the grant round trip.",
+          "Unify duplicated worker selection during normal reconciliation and startup/stop waits.",
+          "Keep accepted protocol data typed; remove JSON expiry rewrites and redundant instance preparation IO."
+        ]
+      }
     },
     {
       "id": "CORE-04",

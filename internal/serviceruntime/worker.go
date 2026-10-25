@@ -246,6 +246,16 @@ func (c *effectsClient) send(ctx context.Context, b json.RawMessage) error {
 	r.Snapshot = b
 	callCtx, stop := context.WithTimeout(ctx, 3*time.Second)
 	defer stop()
+	if c.identity.Role == "vrrp" || c.identity.Role == "bgp" {
+		var ack serviceconfig.ApplicationReceipt
+		if err := c.client.Do(callCtx, "POST", "/v1/services/effects", r, &ack); err != nil {
+			return err
+		}
+		if !ack.Applied {
+			return errors.New("protocol reply does not acknowledge kernel application")
+		}
+		return nil
+	}
 	return c.client.Do(callCtx, "POST", "/v1/services/state", r, nil)
 }
 func (c *effectsClient) replay(ctx context.Context) {

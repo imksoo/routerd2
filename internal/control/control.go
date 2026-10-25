@@ -162,7 +162,7 @@ func (e *Engine) State() State {
 	if e.runtime != nil {
 		v := e.runtime.State()
 		s.Services = &v
-		if v.Phase == "degraded" {
+		if v.Phase != "ready" {
 			s.Healthy = false
 			s.LastError = v.LastError
 		}

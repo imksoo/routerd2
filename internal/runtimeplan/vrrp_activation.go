@@ -99,7 +99,7 @@ func (r *Runtime) GrantVRRPActivation(ctx context.Context, u serviceconfig.Updat
 	}
 	c, gated := r.gracefulVRRPConfigLocked(u.Name)
 	current, ok := r.records[u.Name]
-	if !gated || !ok || !sameVRRPUpdate(current, u) {
+	if !gated || !ok || !sameUpdate(current, u) {
 		return denied, ErrStale
 	}
 	matched := false
@@ -201,6 +201,9 @@ func (r *Runtime) applyVRRPProjectionLocked(ctx context.Context, p projection) (
 	if err := r.applyNetworkLocked(ctx, p.network); err != nil {
 		return p, err
 	}
+	if p.observationVersion != r.observationVersion {
+		return p, nil // new input must be projected before publishing authority
+	}
 	for name, u := range r.records {
 		if _, gated := r.gracefulVRRPConfigLocked(name); !gated {
 			continue
@@ -208,9 +211,6 @@ func (r *Runtime) applyVRRPProjectionLocked(ctx context.Context, p projection) (
 		var s vrrp.Snapshot
 		if json.Unmarshal(u.Snapshot, &s) != nil || !s.Active || r.publicationLatchedLocked(u, s) {
 			continue
-		}
-		if err := r.validateVRRPAdmissionLocked(u); err != nil {
-			return p, err
 		}
 		clock, err := boottime.Read()
 		if err != nil {
@@ -220,6 +220,9 @@ func (r *Runtime) applyVRRPProjectionLocked(ctx context.Context, p projection) (
 		provisional.ExpiresNanos = min(s.ExpiresNanos, s.ActivationGrant.ExpiresNanos)
 		if !vrrp.CurrentOwnership(provisional, clock) || vrrpEffectApplied(uWithSnapshot(u, provisional), p.network) != nil {
 			continue
+		}
+		if err := r.validateVRRPAdmissionLocked(u); err != nil {
+			return p, err
 		}
 		if r.vrrpPublications == nil {
 			r.vrrpPublications = make(map[string]vrrpPublication)

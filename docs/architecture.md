@@ -49,10 +49,15 @@ network だけが netlink/sysctl/nftables を変更する。protocol worker は 
 worker 自身が exact bytes を検証する。設定由来の journal/socket パスも compiler が割り当てる。
 
 変更した worker は停止・reap を待って置換する。変更していない protocol config の取得状態は
-維持する。停止中に DHCP が更新した場合も、cutover 時点で最後に ACK したリースを採用する。
-アドレス・経路などの所有権を更新する ACK は kernel projection の適用完了後に返す。
-BFD の受信観測は専用の状態経路で受理し、大きな kernel projection の lock や fsync を待たない。
-変更途中の失敗時は前の設定を再投影する。
+維持する。停止中に DHCP が更新した場合も、cutover 時点で最後に受理したリースを採用する。
+`POST /v1/services/state` は観測の検証・受理を返し、kernel適用はcoordinatorが行う。
+BGPとVRRPはプロトコルを次へ進める前に実適用が必要なため、
+`POST /v1/services/effects` の適用完了を待つ。起動・停止待ち中も同じ適用処理を進め、
+初回Readyや最終withdrawalと循環させない。条件の有無で通知の意味を変えない。
+受理済み観測をkernel障害で巻き戻さず、coordinatorが最新の観測を再適用する。
+kernel I/O中は観測用mutexを解放する。適用開始後の新しい観測は、その古い結果で
+完了扱いにしない。未適用の観測や適用中の処理があればReady/confirmed commitを拒否する。
+BFDの受信観測は専用の状態経路で受理する。設定変更の失敗時は前の設定を再投影する。
 nftables batch は atomic だが netlink/sysctl/プロセス全体は一つの atomic transaction ではない。
 
 control crash の復旧は前世代の dynamic worker を一度停止してから再構成する。

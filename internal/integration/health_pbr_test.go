@@ -198,37 +198,43 @@ func TestDaemonHealthPBRFailoverAndRecovery(t *testing.T) {
 				t.Fatalf("marked probe host route lost: %+v %v", route, err)
 			}
 		}
-		var resources runtimeplan.ResourceObservationPage
-		if err := f.control.Do(ctx, "GET", "/v1/services/resources", nil, &resources); err != nil {
-			t.Fatal(err)
-		}
-		routes, err := netlink.RouteListFiltered(unix.AF_INET, &netlink.Route{Table: 100}, netlink.RT_FILTER_TABLE)
-		if err != nil {
-			t.Fatal(err)
-		}
-		checked := 0
-		for _, resource := range resources.Resources {
-			gateway := ""
-			switch resource.ID {
-			case "primary":
-				gateway = "192.0.2.1"
-			case "backup":
-				gateway = "203.0.113.1"
-			default:
-				continue
+		until(t, 5*time.Second, func() bool {
+			var resources runtimeplan.ResourceObservationPage
+			if err := f.control.Do(ctx, "GET", "/v1/services/resources", nil, &resources); err != nil {
+				t.Fatal(err)
 			}
-			present := false
-			for _, route := range routes {
-				present = present || route.Gw.Equal(net.ParseIP(gateway))
+			if resources.Phase != "ready" {
+				return false
 			}
-			if resource.State.Active != present {
-				t.Fatalf("resource status disagrees with kernel gateway %s: %+v", gateway, resource.State)
+			routes, err := netlink.RouteListFiltered(unix.AF_INET, &netlink.Route{Table: 100}, netlink.RT_FILTER_TABLE)
+			if err != nil {
+				t.Fatal(err)
 			}
-			checked++
-		}
-		if checked != 2 || resources.Total != len(program.Resources) {
-			t.Fatal("resource status omitted declared owners", resources)
-		}
+			checked := 0
+			for _, resource := range resources.Resources {
+				gateway := ""
+				switch resource.ID {
+				case "primary":
+					gateway = "192.0.2.1"
+				case "backup":
+					gateway = "203.0.113.1"
+				default:
+					continue
+				}
+				present := false
+				for _, route := range routes {
+					present = present || route.Gw.Equal(net.ParseIP(gateway))
+				}
+				if resource.State.Active != present {
+					return false
+				}
+				checked++
+			}
+			if checked != 2 || resources.Total != len(program.Resources) {
+				t.Fatal("resource status omitted declared owners", resources)
+			}
+			return true
+		})
 	}
 	traffic := func(want string) {
 		t.Helper()

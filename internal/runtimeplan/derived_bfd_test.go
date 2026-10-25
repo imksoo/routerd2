@@ -76,7 +76,7 @@ func TestDerivedBFDUsesOriginalPacketAgeAndExpiresWithoutInventingDown(t *testin
 		t.Fatal("declaration fabricated a live BFD source", before, err)
 	}
 	sample := bfdDerivedSample(t, r, true, 0)
-	if err = r.Accept(ctx, update(t, r, "service.edge", 1, sample)); err != nil {
+	if err = r.Observe(ctx, update(t, r, "service.edge", 1, sample)); err != nil {
 		t.Fatal(err)
 	}
 	up, err := p.Advance(before.State, bfdDerivedInputs(t, r), false)
@@ -101,14 +101,14 @@ func TestDerivedBFDUsesOriginalPacketAgeAndExpiresWithoutInventingDown(t *testin
 func TestDerivedBFDCoalescedFailureBreaksUnpolledHoldAndWorkerIdentity(t *testing.T) {
 	r, m, p := derivedBFDSource(t, "150ms")
 	ctx := context.Background()
-	if err := r.Accept(ctx, update(t, r, "service.edge", 1, bfdDerivedSample(t, r, false, 0))); err != nil {
+	if err := r.Observe(ctx, update(t, r, "service.edge", 1, bfdDerivedSample(t, r, false, 0))); err != nil {
 		t.Fatal(err)
 	}
 	down, err := p.Advance(nil, bfdDerivedInputs(t, r), false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = r.Accept(ctx, update(t, r, "service.edge", 2, bfdDerivedSample(t, r, true, 0))); err != nil {
+	if err = r.Observe(ctx, update(t, r, "service.edge", 2, bfdDerivedSample(t, r, true, 0))); err != nil {
 		t.Fatal(err)
 	}
 	pending, err := p.Advance(down.State, bfdDerivedInputs(t, r), false)
@@ -117,7 +117,7 @@ func TestDerivedBFDCoalescedFailureBreaksUnpolledHoldAndWorkerIdentity(t *testin
 	}
 	// The latest snapshot already returned to Up. No DerivedInputs callback
 	// ran while the native BFD mailbox coalesced the intervening failure.
-	if err = r.Accept(ctx, update(t, r, "service.edge", 3, bfdDerivedSample(t, r, true, 1))); err != nil {
+	if err = r.Observe(ctx, update(t, r, "service.edge", 3, bfdDerivedSample(t, r, true, 1))); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(170 * time.Millisecond)
@@ -133,7 +133,7 @@ func TestDerivedBFDCoalescedFailureBreaksUnpolledHoldAndWorkerIdentity(t *testin
 	next := update(t, r, "service.edge", 1, bfdDerivedSample(t, r, true, 0))
 	next.Generation = 2
 	next.ProducerEpoch = strings.Repeat("b", 32)
-	if err = r.Accept(ctx, next); err != nil {
+	if err = r.Observe(ctx, next); err != nil {
 		t.Fatal(err)
 	}
 	unknown, err := p.Advance(asserted.State, bfdDerivedInputs(t, r), false)

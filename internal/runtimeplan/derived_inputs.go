@@ -116,7 +116,7 @@ func (r *Runtime) rawDerivedSnapshotLocked(facts resourceprogram.FactSnapshot) (
 				record := r.records[name]
 				grant, granted := r.guardGrants[name]
 				applied, matched := r.bgpApplied[name]
-				if exists && managed && granted && grant.bgp != nil && matched && r.appliedHash != "" && module.Ready && module.Generation == record.Generation && grant.generation == record.Generation && record.ConfigDigest == binding.digest && module.ConfigDigest == binding.digest && grant.revision == r.config.revision && grant.epoch == record.ProducerEpoch && grant.sequence == record.Sequence && clock.BootID == r.guardBootID && clock.BootID == grant.bootID && now < r.guardUntilNanos && applied.identity == grant.bgp.projection {
+				if exists && managed && granted && grant.bgp != nil && matched && r.applied.hash != "" && module.Ready && module.Generation == record.Generation && grant.generation == record.Generation && record.ConfigDigest == binding.digest && module.ConfigDigest == binding.digest && grant.revision == r.config.revision && grant.epoch == record.ProducerEpoch && grant.sequence == record.Sequence && clock.BootID == r.guardBootID && clock.BootID == grant.bootID && now < r.guardUntilNanos && applied.identity == grant.bgp.projection {
 					provider.isBGP, provider.known = true, true
 					provider.bgpSnapshot = grant.bgp.snapshot
 					provider.bgpConfig = target.Service.BGPConfig(r.dir, r.stateDir)

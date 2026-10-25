@@ -60,7 +60,7 @@ func TestMigratedDHCPDNSGraphThroughPublicRuntimeOwnership(t *testing.T) {
 			Leases: []dhcpserverconfig.Lease{{MACAddress: "02:00:00:00:00:11", IPAddress: address, Hostname: name, Scope: "default", AcquiredAt: now, RenewedAt: now, ExpiresAt: now.Add(60 * time.Second)}}}
 	}
 	other := makeSnapshot(guest, "not-authorized", "198.51.100.100", time.Now().Add(4*time.Second))
-	if err := runtime.Accept(ctx, migrationUpdate(t, runtime, guest, 1, other)); err != nil {
+	if err := observeMigration(ctx, runtime, migrationUpdate(t, runtime, guest, 1, other)); err != nil {
 		t.Fatal(err)
 	}
 	projection, err := runtime.DNSLeases(dns.ModuleName())
@@ -71,10 +71,10 @@ func TestMigratedDHCPDNSGraphThroughPublicRuntimeOwnership(t *testing.T) {
 	update := migrationUpdate(t, runtime, dhcp, 1, active)
 	spoof := update
 	spoof.ConfigDigest = strings.Repeat("0", len(update.ConfigDigest))
-	if err := runtime.Accept(ctx, spoof); !errors.Is(err, runtimeplan.ErrStale) {
+	if err := observeMigration(ctx, runtime, spoof); !errors.Is(err, runtimeplan.ErrStale) {
 		t.Fatal("unbound producer digest supplied DNS records", err)
 	}
-	if err := runtime.Accept(ctx, update); err != nil {
+	if err := observeMigration(ctx, runtime, update); err != nil {
 		t.Fatal(err)
 	}
 	projection, err = runtime.DNSLeases(dns.ModuleName())
@@ -98,12 +98,12 @@ func TestMigratedDHCPDNSGraphThroughPublicRuntimeOwnership(t *testing.T) {
 		t.Fatal("stopped producer retained live DHCP DNS records", projection, err)
 	}
 	update.Sequence++
-	if err := runtime.Accept(ctx, update); err == nil {
+	if err := observeMigration(ctx, runtime, update); err == nil {
 		t.Fatal("expired wire grant was revived by a larger transport sequence")
 	}
 	active = makeSnapshot(dhcp, "laptop", "192.0.2.100", time.Now().Add(4*time.Second))
 	active.Sequence = 2
-	if err := runtime.Accept(ctx, migrationUpdate(t, runtime, dhcp, 3, active)); err != nil {
+	if err := observeMigration(ctx, runtime, migrationUpdate(t, runtime, dhcp, 3, active)); err != nil {
 		t.Fatal("fresh producer could not recover", err)
 	}
 	projection, err = runtime.DNSLeases(dns.ModuleName())
@@ -113,7 +113,7 @@ func TestMigratedDHCPDNSGraphThroughPublicRuntimeOwnership(t *testing.T) {
 	inactive := active
 	inactive.Sequence, inactive.Active, inactive.ValidUntil, inactive.Leases = 3, false, time.Time{}, nil
 	inactive.ObservedAt = time.Now().UTC()
-	if err := runtime.Accept(ctx, migrationUpdate(t, runtime, dhcp, 4, inactive)); err != nil {
+	if err := observeMigration(ctx, runtime, migrationUpdate(t, runtime, dhcp, 4, inactive)); err != nil {
 		t.Fatal(err)
 	}
 	projection, err = runtime.DNSLeases(dns.ModuleName())

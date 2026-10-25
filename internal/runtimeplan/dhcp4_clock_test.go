@@ -53,22 +53,22 @@ func TestDHCPv4OriginalBootGrantReplayMutationAndFinalFence(t *testing.T) {
 	s.AcquiredAt = s.AcquiredAt.Add(time.Hour)
 	s.RenewAt, s.RebindAt, s.ExpiresAt, s.UpdatedAt = s.RenewAt.Add(time.Hour), s.RebindAt.Add(time.Hour), s.ExpiresAt.Add(time.Hour), s.UpdatedAt.Add(time.Hour)
 	u := update(t, r, "service.wan", 1, s)
-	if err := r.Accept(ctx, u); err != nil || len(n.applied.Routes) != 1 {
+	if err := observeAndProject(ctx, r, u); err != nil || len(n.applied.Routes) != 1 {
 		t.Fatal(err, n.applied)
 	}
 	u.Sequence++
-	if err := r.Accept(ctx, u); err != nil {
+	if err := observeAndProject(ctx, r, u); err != nil {
 		t.Fatal("identical transport retry rejected", err)
 	}
 	changed := s
 	changed.ObservedNanos++
 	changed.CurrentAddress = "192.0.2.11"
-	if err := r.Accept(ctx, update(t, r, "service.wan", 3, changed)); err == nil {
+	if err := observeAndProject(ctx, r, update(t, r, "service.wan", 3, changed)); err == nil {
 		t.Fatal("same lease grant changed its address without new ACK")
 	}
 	time.Sleep(2100 * time.Millisecond)
 	u.Sequence = 4
-	if err := r.Accept(ctx, u); err != nil {
+	if err := observeAndProject(ctx, r, u); err != nil {
 		t.Fatal("expired duplicate should be harmlessly acknowledged", err)
 	}
 	if err := r.reconcileDynamic(ctx); err != nil || len(n.applied.Routes) != 0 || len(n.applied.Interfaces[0].Addresses) != 0 {
@@ -81,18 +81,18 @@ func TestDHCPv4OriginalBootGrantReplayMutationAndFinalFence(t *testing.T) {
 	if err := restarted.ApplyConfig(ctx, r.config.revision, r.config.source); err != nil {
 		t.Fatal(err)
 	}
-	if err := restarted.Accept(ctx, u); err != nil || len(networkAfterRestart.applied.Routes) != 0 || len(networkAfterRestart.applied.Interfaces[0].Addresses) != 0 {
+	if err := observeAndProject(ctx, restarted, u); err != nil || len(networkAfterRestart.applied.Routes) != 0 || len(networkAfterRestart.applied.Interfaces[0].Addresses) != 0 {
 		t.Fatal("empty control cache revived an expired original grant", err, networkAfterRestart.applied)
 	}
 	fresh, _ := boottime.Read()
 	final := bootLease4(fresh, time.Hour)
 	final.Active, final.Stopped = false, true
-	if err := r.Accept(ctx, update(t, r, "service.wan", 5, final)); err != nil {
+	if err := observeAndProject(ctx, r, update(t, r, "service.wan", 5, final)); err != nil {
 		t.Fatal(err)
 	}
 	final.Active, final.Stopped = true, false
 	final.ObservedNanos++
-	if err := r.Accept(ctx, update(t, r, "service.wan", 6, final)); err == nil {
+	if err := observeAndProject(ctx, r, update(t, r, "service.wan", 6, final)); err == nil {
 		t.Fatal("stopped worker regained authority")
 	}
 }
@@ -106,7 +106,7 @@ func TestDHCPv4FactUsesSourceAgeWithoutReceiptRenewal(t *testing.T) {
 	}
 	clock, _ := boottime.Read()
 	s := bootLease4(clock, time.Hour)
-	if err := r.Accept(context.Background(), update(t, r, "service.wan", 1, s)); err != nil {
+	if err := observeAndProject(context.Background(), r, update(t, r, "service.wan", 1, s)); err != nil {
 		t.Fatal(err)
 	}
 	g := r.guardGrants["service.wan"]
@@ -120,21 +120,21 @@ func TestDHCPv4ObservationOrderAndRestoredHintHaveSeparateEpochs(t *testing.T) {
 	clock, _ := boottime.Read()
 	r, _, _ := fixture(t, wanDoc())
 	s := bootLease4(clock, time.Hour)
-	if err := r.Accept(ctx, update(t, r, "service.wan", 1, s)); err != nil {
+	if err := observeAndProject(ctx, r, update(t, r, "service.wan", 1, s)); err != nil {
 		t.Fatal(err)
 	}
 	phase := s
 	phase.Sequence++
 	phase.State = wire.StateRenewing
-	if err := r.Accept(ctx, update(t, r, "service.wan", 2, phase)); err != nil {
+	if err := observeAndProject(ctx, r, update(t, r, "service.wan", 2, phase)); err != nil {
 		t.Fatal("distinct observations may share a clock reading", err)
 	}
-	if err := r.Accept(ctx, update(t, r, "service.wan", 3, s)); err == nil {
+	if err := observeAndProject(ctx, r, update(t, r, "service.wan", 3, s)); err == nil {
 		t.Fatal("older logical observation passed a higher transport sequence")
 	}
 	changed := phase
 	changed.State = wire.StateRebinding
-	if err := r.Accept(ctx, update(t, r, "service.wan", 4, changed)); err == nil {
+	if err := observeAndProject(ctx, r, update(t, r, "service.wan", 4, changed)); err == nil {
 		t.Fatal("same logical sequence changed its body")
 	}
 	// The local file can retain a high counter from the former worker. Its
@@ -145,7 +145,7 @@ func TestDHCPv4ObservationOrderAndRestoredHintHaveSeparateEpochs(t *testing.T) {
 	hint.Sequence = 1
 	hint.Active = false
 	hint.State = wire.StateRequesting
-	if err := r2.Accept(ctx, update(t, r2, "service.wan", 1, hint)); err != nil {
+	if err := observeAndProject(ctx, r2, update(t, r2, "service.wan", 1, hint)); err != nil {
 		t.Fatal(err)
 	}
 	ack := hint
@@ -154,7 +154,7 @@ func TestDHCPv4ObservationOrderAndRestoredHintHaveSeparateEpochs(t *testing.T) {
 	ack.Sequence = 2
 	ack.LeaseClock.Epoch = ack.Epoch
 	ack.LeaseClock.Sequence = 2
-	if err := r2.Accept(ctx, update(t, r2, "service.wan", 2, ack)); err != nil {
+	if err := observeAndProject(ctx, r2, update(t, r2, "service.wan", 2, ack)); err != nil {
 		t.Fatal("old hint counter fenced a fresh current-worker ACK", err)
 	}
 }

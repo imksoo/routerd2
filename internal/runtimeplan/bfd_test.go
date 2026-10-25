@@ -54,7 +54,7 @@ func TestBFDProjectionFencesRecipientAndFIBRequiresSessionAcknowledgement(t *tes
 		t.Fatal(err)
 	}
 	seen := observedBFD(t, doc.Services[0].BFDConfig(), clock)
-	if err := r.Accept(ctx, update(t, r, "service.edge", 1, seen)); err != nil {
+	if err := observeAndProject(ctx, r, update(t, r, "service.edge", 1, seen)); err != nil {
 		t.Fatal(err)
 	}
 	digest := r.bindings["service.router"].digest
@@ -62,7 +62,7 @@ func TestBFDProjectionFencesRecipientAndFIBRequiresSessionAcknowledgement(t *tes
 		t.Fatal("BFD projection served before recipient status acquired its generation", err)
 	}
 	bgp := observedBGPRoutes()
-	if err := r.Accept(ctx, update(t, r, "service.router", 1, bgp)); err != nil {
+	if err := observeAndProject(ctx, r, update(t, r, "service.router", 1, bgp)); err != nil {
 		t.Fatal(err)
 	}
 	if len(n.applied.Routes) != 0 {
@@ -82,7 +82,7 @@ func TestBFDProjectionFencesRecipientAndFIBRequiresSessionAcknowledgement(t *tes
 	}
 	bgp.BFD = map[string]bgpconfig.BFDAcknowledgement{"192.0.2.2": proofOf(view.Peers["192.0.2.2"])}
 	bgp.Sequence = 2
-	if err := r.Accept(ctx, update(t, r, "service.router", 2, bgp)); err != nil || len(n.applied.Routes) != 1 {
+	if err := observeAndProject(ctx, r, update(t, r, "service.router", 2, bgp)); err != nil || len(n.applied.Routes) != 1 {
 		t.Fatal("acknowledged current BFD path not installed", err, n.applied.Routes)
 	}
 	// Coalescing retains the failure counter even though the latest raw BFD
@@ -92,7 +92,7 @@ func TestBFDProjectionFencesRecipientAndFIBRequiresSessionAcknowledgement(t *tes
 	seen.Peers[0].Transitions = 4
 	seen.Peers[0].UpTransitions = 2
 	seen.Peers[0].DownTransitions = 1
-	if err := r.Accept(ctx, update(t, r, "service.edge", 2, seen)); err != nil {
+	if err := observeAndProject(ctx, r, update(t, r, "service.edge", 2, seen)); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.reconcileDynamic(ctx); err != nil || len(n.applied.Routes) != 0 {
@@ -104,7 +104,7 @@ func TestBFDProjectionFencesRecipientAndFIBRequiresSessionAcknowledgement(t *tes
 	}
 	bgp.BFD["192.0.2.2"] = proofOf(view.Peers["192.0.2.2"])
 	bgp.Sequence = 3
-	if err := r.Accept(ctx, update(t, r, "service.router", 3, bgp)); err != nil || len(n.applied.Routes) != 1 {
+	if err := observeAndProject(ctx, r, update(t, r, "service.router", 3, bgp)); err != nil || len(n.applied.Routes) != 1 {
 		t.Fatal("new session proof did not restore its path", err, n.applied.Routes)
 	}
 	// Source worker replacement has its own identity fence, independently of
@@ -112,7 +112,7 @@ func TestBFDProjectionFencesRecipientAndFIBRequiresSessionAcknowledgement(t *tes
 	next := update(t, r, "service.edge", 1, seen)
 	next.Generation = 2
 	next.ProducerEpoch = strings.Repeat("c", 32)
-	if err := r.Accept(ctx, next); err != nil {
+	if err := observeAndProject(ctx, r, next); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.reconcileDynamic(ctx); err != nil || len(n.applied.Routes) != 0 {
@@ -174,7 +174,7 @@ func TestBFDUpdatesDoNotRunKernelReconciliationAndFenceOldProducers(t *testing.T
 	u := update(t, r, "service.edge", 1, snapshot)
 	calls := n.calls
 	n.fail = errors.New("kernel operation must not be called by BFD observations")
-	if err := r.Accept(context.Background(), u); err != nil {
+	if err := observeAndProject(context.Background(), r, u); err != nil {
 		t.Fatal(err)
 	}
 	if n.calls != calls || n.fail == nil {
@@ -186,7 +186,7 @@ func TestBFDUpdatesDoNotRunKernelReconciliationAndFenceOldProducers(t *testing.T
 	}
 	stale := u
 	stale.ProducerEpoch = strings.Repeat("b", 32)
-	if !errors.Is(r.Accept(context.Background(), stale), ErrStale) {
+	if !errors.Is(observeAndProject(context.Background(), r, stale), ErrStale) {
 		t.Fatal("different producer within one generation accepted")
 	}
 	snapshot.Peers[0].State = bfd.StateDown
@@ -197,11 +197,11 @@ func TestBFDUpdatesDoNotRunKernelReconciliationAndFenceOldProducers(t *testing.T
 	snapshot.Peers[0].Transitions = 3
 	snapshot.Peers[0].DownTransitions = 1
 	down := update(t, r, "service.edge", 2, snapshot)
-	if err := r.Accept(context.Background(), down); err != nil {
+	if err := observeAndProject(context.Background(), r, down); err != nil {
 		t.Fatal(err)
 	}
 	u.Sequence = 3
-	if err := r.Accept(context.Background(), u); err == nil {
+	if err := observeAndProject(context.Background(), r, u); err == nil {
 		t.Fatal("higher IPC sequence hid a rewound BFD Down counter")
 	}
 	n.fail = nil

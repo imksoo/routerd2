@@ -49,7 +49,7 @@ func TestBGPOriginalDeadlineAndLiveGenerationFence(t *testing.T) {
 	s.ValidUntil = s.ObservedAt.Add(bgpconfig.ObservationLifetime)
 	s.Routes = []bgpconfig.Route{{Prefix: "203.0.113.0/24", NextHop: "192.0.2.2", Interface: "wan0", PeerAddress: "192.0.2.2", Table: 254, Metric: 200}}
 	u := update(t, r, "service.edge", 1, s)
-	if err := r.Accept(ctx, u); err != nil {
+	if err := observeAndProject(ctx, r, u); err != nil {
 		t.Fatal(err)
 	}
 	up, err := p.Advance(nil, bfdDerivedInputs(t, r), false)
@@ -59,15 +59,15 @@ func TestBGPOriginalDeadlineAndLiveGenerationFence(t *testing.T) {
 	bad := s
 	bad.Peers = append([]bgpconfig.Peer(nil), s.Peers...)
 	bad.Peers[0].State = "SESSION_STATE_IDLE"
-	if err := r.Accept(ctx, update(t, r, "service.edge", 2, bad)); err == nil {
+	if err := observeAndProject(ctx, r, update(t, r, "service.edge", 2, bad)); err == nil {
 		t.Fatal("changed inner sequence replay accepted")
 	}
 	u.Sequence = 2
-	if err := r.Accept(ctx, u); err != nil {
+	if err := observeAndProject(ctx, r, u); err != nil {
 		t.Fatal("identical inner observation retry rejected", err)
 	}
 	refreshed, err := p.Advance(up.State, bfdDerivedInputs(t, r), false)
-	if err != nil || refreshed.ObservedNanos != up.ObservedNanos || refreshed.ValidUntilNanos > up.ValidUntilNanos {
+	if err != nil || refreshed.ObservedNanos != up.ObservedNanos || refreshed.ValidUntilNanos > s.ExpiresNanos {
 		t.Fatal("transport retry renewed observation proof", refreshed, err)
 	}
 	time.Sleep(5100 * time.Millisecond)
@@ -82,7 +82,7 @@ func TestBGPOriginalDeadlineAndLiveGenerationFence(t *testing.T) {
 	}
 	r.manager.(*observedManager).generation = 2
 	r.refreshGuardStatus(ctx)
-	if err := r.Accept(ctx, update(t, r, "service.edge", 3, bgpDerivedSample(t, 3, true))); !errors.Is(err, ErrStale) {
+	if err := observeAndProject(ctx, r, update(t, r, "service.edge", 3, bgpDerivedSample(t, 3, true))); !errors.Is(err, ErrStale) {
 		t.Fatal("old worker seeded state despite live supervisor generation", err)
 	}
 }
@@ -106,7 +106,7 @@ func TestBGPRouterPhaseIncludesCurrentUnresolvedFIB(t *testing.T) {
 	r, p := bgpDerivedFixture(t, false, "")
 	s := bgpDerivedSample(t, 1, true)
 	s.Routes = []bgpconfig.Route{{Prefix: "203.0.113.0/24", NextHop: "198.51.100.1", Interface: "wan0", PeerAddress: "192.0.2.2", Table: 254, Metric: 200}}
-	if err := r.Accept(context.Background(), update(t, r, "service.edge", 1, s)); err != nil {
+	if err := observeAndProject(context.Background(), r, update(t, r, "service.edge", 1, s)); err != nil {
 		t.Fatal(err)
 	}
 	degraded, err := p.Advance(nil, bfdDerivedInputs(t, r), false)
@@ -115,7 +115,7 @@ func TestBGPRouterPhaseIncludesCurrentUnresolvedFIB(t *testing.T) {
 	}
 	s.Sequence = 2
 	s.Routes[0].NextHop = "192.0.2.2"
-	if err = r.Accept(context.Background(), update(t, r, "service.edge", 2, s)); err != nil {
+	if err = observeAndProject(context.Background(), r, update(t, r, "service.edge", 2, s)); err != nil {
 		t.Fatal(err)
 	}
 	established, err := p.Advance(degraded.State, bfdDerivedInputs(t, r), false)
@@ -127,7 +127,7 @@ func TestBGPRouterPhaseIncludesCurrentUnresolvedFIB(t *testing.T) {
 func TestBGPConditionalApplyFenceAndHeartbeatDoNotInventContinuity(t *testing.T) {
 	r, p := bgpDerivedFixture(t, true, "150ms")
 	ctx := context.Background()
-	if err := r.Accept(ctx, update(t, r, "service.edge", 1, bgpDerivedSample(t, 1, false))); err != nil {
+	if err := r.Observe(ctx, update(t, r, "service.edge", 1, bgpDerivedSample(t, 1, false))); err != nil {
 		t.Fatal(err)
 	}
 	before, err := p.Advance(nil, bfdDerivedInputs(t, r), false)
@@ -139,14 +139,14 @@ func TestBGPConditionalApplyFenceAndHeartbeatDoNotInventContinuity(t *testing.T)
 	if err != nil || down.Status.Asserted == nil || *down.Status.Asserted {
 		t.Fatal(down, err)
 	}
-	if err = r.Accept(ctx, update(t, r, "service.edge", 2, bgpDerivedSample(t, 2, true))); err != nil {
+	if err = r.Observe(ctx, update(t, r, "service.edge", 2, bgpDerivedSample(t, 2, true))); err != nil {
 		t.Fatal(err)
 	}
 	pending, err := p.Advance(down.State, bfdDerivedInputs(t, r), false)
 	if err != nil || pending.Status.PendingTransition != "Asserting" {
 		t.Fatal("unchanged applied route projection was not reusable", pending, err)
 	}
-	if err = r.Accept(ctx, update(t, r, "service.edge", 3, bgpDerivedSample(t, 3, true))); err != nil {
+	if err = r.Observe(ctx, update(t, r, "service.edge", 3, bgpDerivedSample(t, 3, true))); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(170 * time.Millisecond)
@@ -156,7 +156,7 @@ func TestBGPConditionalApplyFenceAndHeartbeatDoNotInventContinuity(t *testing.T)
 	}
 	changed := bgpDerivedSample(t, 4, true)
 	changed.Routes = []bgpconfig.Route{{Prefix: "203.0.113.0/24", NextHop: "192.0.2.2", Interface: "wan0", PeerAddress: "192.0.2.2", Table: 254, Metric: 200}}
-	if err = r.Accept(ctx, update(t, r, "service.edge", 4, changed)); err != nil {
+	if err = r.Observe(ctx, update(t, r, "service.edge", 4, changed)); err != nil {
 		t.Fatal(err)
 	}
 	unknown, err := p.Advance(up.State, bfdDerivedInputs(t, r), false)

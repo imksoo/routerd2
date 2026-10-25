@@ -41,10 +41,10 @@ func TestPreviousSupervisorCannotSeedEmptyProtocolRuntime(t *testing.T) {
 			b, _ = json.Marshal(fields)
 			var stale serviceconfig.Update
 			_ = json.Unmarshal(b, &stale)
-			if err := r.Accept(context.Background(), stale); !errors.Is(err, ErrStale) {
+			if err := r.Observe(context.Background(), stale); !errors.Is(err, ErrStale) {
 				t.Fatal("previous supervisor seeded new protocol authority", err)
 			}
-			if err := r.Accept(context.Background(), u); err != nil {
+			if err := r.Observe(context.Background(), u); err != nil {
 				t.Fatal("old supervisor poisoned the new worker's first update", err)
 			}
 		})

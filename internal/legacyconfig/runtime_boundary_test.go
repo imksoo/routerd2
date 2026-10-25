@@ -152,7 +152,33 @@ func runtimeMigrationFixture(t *testing.T, document config.Document) (*runtimepl
 	if err := r.ApplyConfig(ctx, 1, document); err != nil {
 		t.Fatal("native runtime rejected migration result:", err)
 	}
+	monitorCtx, stop := context.WithCancel(context.Background())
+	monitorDone := make(chan struct{})
+	go func() {
+		r.Monitor(monitorCtx)
+		close(monitorDone)
+	}()
+	t.Cleanup(func() { stop(); <-monitorDone })
 	return r, n, manager
+}
+
+// Drive the public observation/owner contract and wait for its applied view.
+func observeMigration(ctx context.Context, r *runtimeplan.Runtime, u serviceconfig.Update) error {
+	if err := r.Observe(ctx, u); err != nil {
+		return err
+	}
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if err := r.CheckReady(ctx); err == nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 func migrationUpdate(t *testing.T, runtime *runtimeplan.Runtime, service serviceconfig.Service, sequence uint64, snapshot any) serviceconfig.Update {
@@ -211,7 +237,7 @@ func TestMigratedWANGraphThroughPublicRuntimeProjection(t *testing.T) {
 		Routes:     []raclient.Route{{Destination: "::/0", Gateway: "fe80::1", Preference: 1, ValidUntil: now.Add(90 * time.Second)}},
 		DNSServers: []raclient.DNSServer{{Address: "2001:db8::54", Router: "fe80::1", ValidUntil: now.Add(90 * time.Second)}},
 	}
-	if err := runtime.Accept(ctx, migrationUpdate(t, runtime, raService, 1, learned)); err != nil {
+	if err := observeMigration(ctx, runtime, migrationUpdate(t, runtime, raService, 1, learned)); err != nil {
 		t.Fatal(err)
 	}
 	pd := dhcp6pd.Snapshot{Snapshot: pdclient.Snapshot{Resource: pdService.Name, Interface: "eth0", IAID: 1, State: pdclient.StateBound,
@@ -219,7 +245,7 @@ func TestMigratedWANGraphThroughPublicRuntimeProjection(t *testing.T) {
 		AFTRName: "dhcp-aftr.example", DNSServers: []string{"2001:db8::55"}, InfoUpdatedAt: now}, Active: true,
 		InformationRefreshSeconds: 120, InformationRefreshAt: now.Add(120 * time.Second),
 	}
-	if err := runtime.Accept(ctx, migrationUpdate(t, runtime, pdService, 1, pd)); err != nil {
+	if err := observeMigration(ctx, runtime, migrationUpdate(t, runtime, pdService, 1, pd)); err != nil {
 		t.Fatal(err)
 	}
 	input, err := runtime.AFTRInput(ctx, dsService.ModuleName())
@@ -256,7 +282,7 @@ func TestMigratedWANGraphThroughPublicRuntimeProjection(t *testing.T) {
 		Local: input.Source.Address, Remote: "2001:db8:ffff::10", CandidateIndex: 0, ResolverIndex: 1, UpdatedAt: received, ValidUntil: answerExpiry,
 		Answers: []aftr.Answer{{Address: "2001:db8:ffff::10", TTL: 60, ReceivedAt: received, ValidUntil: answerExpiry}},
 	}
-	if err := runtime.Accept(ctx, migrationUpdate(t, runtime, dsService, 1, resolved)); err != nil {
+	if err := observeMigration(ctx, runtime, migrationUpdate(t, runtime, dsService, 1, resolved)); err != nil {
 		t.Fatal(err)
 	}
 	projected = n.state()
@@ -279,7 +305,7 @@ func TestMigratedWANGraphThroughPublicRuntimeProjection(t *testing.T) {
 	// A newly stale information grant invalidates the original AFTR generation
 	// immediately, even though its earlier DNS answer has not yet expired.
 	pd.InformationStale = true
-	if err := runtime.Accept(ctx, migrationUpdate(t, runtime, pdService, 2, pd)); err != nil {
+	if err := observeMigration(ctx, runtime, migrationUpdate(t, runtime, pdService, 2, pd)); err != nil {
 		t.Fatal(err)
 	}
 	projected = n.state()
@@ -295,7 +321,7 @@ func TestMigratedWANGraphThroughPublicRuntimeProjection(t *testing.T) {
 	if err != nil || len(input.Candidates) != 3 || len(input.Resolvers) != 2 {
 		t.Fatal("stale information survived the next dependency generation", input, err)
 	}
-	if err := runtime.Accept(ctx, migrationUpdate(t, runtime, dsService, 2, resolved)); !errors.Is(err, runtimeplan.ErrStale) {
+	if err := observeMigration(ctx, runtime, migrationUpdate(t, runtime, dsService, 2, resolved)); !errors.Is(err, runtimeplan.ErrStale) {
 		t.Fatal("old AFTR generation was accepted after information expiry", err)
 	}
 	if err := runtime.ApplyConfig(ctx, 2, config.Document{SchemaVersion: config.SchemaVersion}); err != nil {

@@ -172,6 +172,10 @@ func TestDaemonRAClientConfigurationAndExpiry(t *testing.T) {
 	}
 	resume()
 	until(t, 12*time.Second, func() bool {
+		var recovered supervisor.Status
+		if err := f.supervisor.Do(context.Background(), "GET", "/v1/status", nil, &recovered); err != nil || !recovered.Ready {
+			return false
+		}
 		var s control.State
 		return f.control.Do(context.Background(), "GET", "/v1/config", nil, &s) == nil && s.Healthy
 	})

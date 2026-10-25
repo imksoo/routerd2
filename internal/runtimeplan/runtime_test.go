@@ -90,6 +90,16 @@ func fixture(t *testing.T, doc config.Native) (*Runtime, *memoryNetwork, *memory
 	}
 	return r, n, m
 }
+
+// A component test can publish input and explicitly run its application cycle.
+// Observe alone intentionally has no kernel-application guarantee.
+func observeAndProject(ctx context.Context, r *Runtime, u serviceconfig.Update) error {
+	if err := r.Observe(ctx, u); err != nil {
+		return err
+	}
+	return r.reconcileDynamic(ctx)
+}
+
 func update(t *testing.T, r *Runtime, name string, seq uint64, snapshot any) serviceconfig.Update {
 	t.Helper()
 	b := r.bindings[name]
@@ -116,46 +126,53 @@ func lease4(expires time.Time) dhcp4.Snapshot {
 	return bootLease4(clock, lifetime)
 }
 
-func TestLeaseApplyFencingFailureRollbackAndExpiry(t *testing.T) {
+func TestLeaseObservationSurvivesApplyFailureAndExpiresWithoutRenewal(t *testing.T) {
 	ctx := context.Background()
 	r, n, _ := fixture(t, wanDoc())
 	expires := time.Now().Add(time.Hour)
 	u := update(t, r, "service.wan", 1, lease4(expires))
-	if e := r.Accept(ctx, u); e != nil {
+	if e := observeAndProject(ctx, r, u); e != nil {
 		t.Fatal(e)
 	}
 	if len(n.applied.Routes) != 1 || n.applied.Routes[0].Gateway != "192.0.2.1" || n.applied.Interfaces[0].AddressOptions["192.0.2.10/24"].BootLifetime.ValidNanos == 0 {
 		t.Fatalf("lease was not projected: %+v", n.applied)
 	}
 	calls := n.calls
-	if e := r.Accept(ctx, u); e != nil || n.calls != calls {
+	if e := r.Observe(ctx, u); e != nil || n.calls != calls {
 		t.Fatal("exact duplicate was not idempotent", e)
 	}
 	stale := u
 	stale.ProducerEpoch = strings.Repeat("b", 32)
-	if !errors.Is(r.Accept(ctx, stale), ErrStale) {
+	if !errors.Is(r.Observe(ctx, stale), ErrStale) {
 		t.Fatal("stale producer was accepted")
 	}
 	bad := lease4(expires)
 	bad.Interface = "other0"
-	if r.Accept(ctx, update(t, r, "service.wan", 2, bad)) == nil {
+	if r.Observe(ctx, update(t, r, "service.wan", 2, bad)) == nil {
 		t.Fatal("identity spoof was accepted")
 	}
 	renewed := lease4(expires.Add(time.Hour))
 	n.fail = errors.New("injected kernel apply failure")
-	if r.Accept(ctx, update(t, r, "service.wan", 2, renewed)) == nil {
-		t.Fatal("kernel failure was acknowledged")
+	if err := r.Observe(ctx, update(t, r, "service.wan", 2, renewed)); err != nil {
+		t.Fatal("observation acceptance unexpectedly performs kernel IO", err)
 	}
-	var accepted dhcp4.Snapshot
-	_ = json.Unmarshal(u.Snapshot, &accepted)
-	if r.records["service.wan"].Sequence != 1 || n.applied.Interfaces[0].AddressOptions["192.0.2.10/24"].BootLifetime.ValidNanos != accepted.LeaseClock.ExpiresNanos {
-		t.Fatal("previous accepted intent was not restored")
+	if err := r.reconcileDynamic(ctx); err == nil {
+		t.Fatal("coordinator hid kernel application failure")
+	}
+	if r.records["service.wan"].Sequence != 2 || r.CheckReady(ctx) == nil {
+		t.Fatal("failed application lost accepted input or reported ready")
+	}
+	if err := r.reconcileDynamic(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n.applied.Interfaces[0].AddressOptions["192.0.2.10/24"].BootLifetime.ValidNanos != renewed.LeaseClock.ExpiresNanos {
+		t.Fatal("retry did not apply the accepted original lease deadline")
 	}
 	expired := lease4(time.Now().Add(time.Hour))
 	expired.Active = false
 	expired.LeaseClock = dhcp4.LeaseClock{}
 	expired.Snapshot = old4.Snapshot{Resource: "wan", Interface: "wan0", State: old4.StateExpired, UpdatedAt: time.Now().UTC()}
-	if e := r.Accept(ctx, update(t, r, "service.wan", 3, expired)); e != nil {
+	if e := observeAndProject(ctx, r, update(t, r, "service.wan", 3, expired)); e != nil {
 		t.Fatal(e)
 	}
 	if len(n.applied.Routes) != 0 || len(n.applied.Interfaces[0].Addresses) != 0 {
@@ -168,7 +185,7 @@ func TestConcurrentRenewalSurvivesConfigurationCutover(t *testing.T) {
 	doc.Services = append(doc.Services, serviceconfig.Service{Name: "lan", RA: &ra.Config{Interface: "lan0", RouterLifetimeSeconds: 1800}})
 	r, n, m := fixture(t, doc)
 	expires := time.Now().Add(time.Hour)
-	if e := r.Accept(context.Background(), update(t, r, "service.wan", 1, lease4(expires))); e != nil {
+	if e := r.Observe(context.Background(), update(t, r, "service.wan", 1, lease4(expires))); e != nil {
 		t.Fatal(e)
 	}
 	next := wanDoc() // removal of RA forces quiescence, while DHCP is unchanged.
@@ -180,7 +197,7 @@ func TestConcurrentRenewalSurvivesConfigurationCutover(t *testing.T) {
 		}
 		fired = true
 		renewal = lease4(expires.Add(time.Hour))
-		if e := r.Accept(context.Background(), update(t, r, "service.wan", 2, renewal)); e != nil {
+		if e := r.Observe(context.Background(), update(t, r, "service.wan", 2, renewal)); e != nil {
 			t.Fatal(e)
 		}
 	}
@@ -249,7 +266,7 @@ func TestVRRPOwnershipExpiresOnMonotonicReceiptAndRejectsPolicySpoof(t *testing.
 	r, n, _ := fixture(t, doc)
 	c = doc.Services[0].VRRPConfig()
 	s := bootVRRPSnapshot(t, c)
-	if e := r.Accept(context.Background(), update(t, r, "service.ha", 1, s)); e != nil {
+	if e := acceptVRRPAndDrain(t, r, update(t, r, "service.ha", 1, s)); e != nil {
 		t.Fatal(e)
 	}
 	if len(n.applied.Links) != 1 || n.applied.Links[0].IPv6AddrGenMode != "none" {
@@ -266,7 +283,7 @@ func TestVRRPOwnershipExpiresOnMonotonicReceiptAndRejectsPolicySpoof(t *testing.
 	}
 	bad := s
 	bad.AcceptMode = false
-	if r.Accept(context.Background(), update(t, r, "service.ha", 2, bad)) == nil {
+	if acceptVRRPAndDrain(t, r, update(t, r, "service.ha", 2, bad)) == nil {
 		t.Fatal("producer changed configured acceptance policy")
 	}
 	// Simulate monotonic expiration while the absolute wall deadline is future.
@@ -286,7 +303,7 @@ func TestDHCPLeaseCannotReplaceStaticAddressOwnership(t *testing.T) {
 	doc.Network.Interfaces = []network.Interface{{Name: "wan0", Addresses: []string{"192.0.2.10/24"}}}
 	r, n, _ := fixture(t, doc)
 	before := n.applied
-	if err := r.Accept(context.Background(), update(t, r, "service.wan", 1, lease4(time.Now().Add(time.Hour)))); err == nil || !strings.Contains(err.Error(), "address owner") {
+	if err := r.Observe(context.Background(), update(t, r, "service.wan", 1, lease4(time.Now().Add(time.Hour)))); err == nil || !strings.Contains(err.Error(), "address owner") {
 		t.Fatalf("overlapping lease did not reject conflicting ownership: %v", err)
 	}
 	if !reflect.DeepEqual(before, n.applied) || len(r.records) != 0 {

@@ -242,6 +242,7 @@ func (r *Runtime) projectProgramLocked(cfg configuration, records map[string]ser
 	// through ready_when; process readiness is not protocol readiness.
 	if !conditionalProgram(cfg.source) {
 		p, err := r.projectLocked(cfg.plan.Native, records, now)
+		p.observationVersion = r.observationVersion
 		p.resources = make(map[string]resourceprogram.ResourceState, len(cfg.source.Resources))
 		for _, resource := range cfg.source.Resources {
 			p.resources[resource.ID] = resourceprogram.ResourceState{Active: true, Ready: resourceprogram.True, When: resourceprogram.True}
@@ -254,6 +255,7 @@ func (r *Runtime) projectProgramLocked(cfg configuration, records map[string]ser
 	}
 	native, states := cfg.plan.Project(facts)
 	p, err := r.projectLocked(native, records, now)
+	p.observationVersion = r.observationVersion
 	p.resources = states
 	return p, err
 }

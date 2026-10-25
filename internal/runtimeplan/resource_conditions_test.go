@@ -34,7 +34,7 @@ func TestConditionHoldTimerAndFlapBetweenProjections(t *testing.T) {
 		sequence++
 		lease = lease4(time.Now().Add(time.Hour))
 		lease.Active = active
-		if err := r.Accept(ctx, update(t, r, "service.wan", sequence, lease)); err != nil {
+		if err := r.Observe(ctx, update(t, r, "service.wan", sequence, lease)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -123,7 +123,7 @@ func TestConditionalRuntimeStartWithdrawRecover(t *testing.T) {
 		t.Fatal("unknown condition started dependent work")
 	}
 	up := update(t, r, "service.wan", 1, lease4(time.Now().Add(time.Hour)))
-	if err := r.Accept(ctx, up); err != nil {
+	if err := r.Observe(ctx, up); err != nil {
 		t.Fatal(err)
 	}
 	if conditionalRoute(n) {
@@ -162,7 +162,7 @@ func TestConditionalRuntimeStartWithdrawRecover(t *testing.T) {
 	}
 	up = update(t, r, "service.wan", 1, lease4(time.Now().Add(time.Hour)))
 	up.Generation = 2
-	if err := r.Accept(ctx, up); err != nil {
+	if err := r.Observe(ctx, up); err != nil {
 		t.Fatal(err)
 	}
 	reconcileConditions(t, r)
@@ -174,7 +174,7 @@ func TestConditionalFactExpiryReplayAndRevisionFence(t *testing.T) {
 	ctx := context.Background()
 	r, n, _ := conditionalFixture(t)
 	u := update(t, r, "service.wan", 1, lease4(time.Now().Add(time.Hour)))
-	if err := r.Accept(ctx, u); err != nil {
+	if err := r.Observe(ctx, u); err != nil {
 		t.Fatal(err)
 	}
 	reconcileConditions(t, r)
@@ -184,7 +184,7 @@ func TestConditionalFactExpiryReplayAndRevisionFence(t *testing.T) {
 	grant := r.guardGrants[u.Name]
 	grant.untilNanos = 1
 	r.guardGrants[u.Name] = grant
-	if err := r.Accept(ctx, u); err != nil {
+	if err := r.Observe(ctx, u); err != nil {
 		t.Fatal(err)
 	} // duplicate must not renew
 	reconcileConditions(t, r)
@@ -192,7 +192,7 @@ func TestConditionalFactExpiryReplayAndRevisionFence(t *testing.T) {
 		t.Fatal("duplicate renewed expired fact")
 	}
 	u.Sequence++
-	if err := r.Accept(ctx, u); err != nil {
+	if err := r.Observe(ctx, u); err != nil {
 		t.Fatal(err)
 	} // same deadline, larger transport sequence
 	reconcileConditions(t, r)
@@ -200,7 +200,7 @@ func TestConditionalFactExpiryReplayAndRevisionFence(t *testing.T) {
 		t.Fatal("transport sequence renewed same expired grant")
 	}
 	u = update(t, r, "service.wan", 3, lease4(time.Now().Add(2*time.Hour)))
-	if err := r.Accept(ctx, u); err != nil {
+	if err := r.Observe(ctx, u); err != nil {
 		t.Fatal(err)
 	}
 	reconcileConditions(t, r)
@@ -221,12 +221,12 @@ func TestConditionalLeaseObservationDoesNotRefreshOnTransportReplay(t *testing.T
 	r, _, _ := conditionalFixture(t)
 	lease := lease4(time.Now().Add(time.Hour))
 	u := update(t, r, "service.wan", 1, lease)
-	if err := r.Accept(ctx, u); err != nil {
+	if err := r.Observe(ctx, u); err != nil {
 		t.Fatal(err)
 	}
 	original := r.guardGrants[u.Name]
 	u.Sequence++
-	if err := r.Accept(ctx, u); err != nil {
+	if err := r.Observe(ctx, u); err != nil {
 		t.Fatal(err)
 	}
 	replayed := r.guardGrants[u.Name]
@@ -235,7 +235,7 @@ func TestConditionalLeaseObservationDoesNotRefreshOnTransportReplay(t *testing.T
 	}
 	lease = lease4(time.Now().Add(2 * time.Hour))
 	u = update(t, r, "service.wan", 3, lease)
-	if err := r.Accept(ctx, u); err != nil {
+	if err := r.Observe(ctx, u); err != nil {
 		t.Fatal(err)
 	}
 	renewed := r.guardGrants[u.Name]
@@ -248,12 +248,12 @@ func TestConditionalLeaseObservationDoesNotRefreshOnTransportReplay(t *testing.T
 	lease.UpdatedAt = clock.WallTime
 	lease.Active = false
 	u = update(t, r, "service.wan", 4, lease)
-	if err := r.Accept(ctx, u); err != nil {
+	if err := r.Observe(ctx, u); err != nil {
 		t.Fatal(err)
 	}
 	inactive := r.guardGrants[u.Name]
 	u.Sequence++
-	if err := r.Accept(ctx, u); err != nil {
+	if err := r.Observe(ctx, u); err != nil {
 		t.Fatal(err)
 	}
 	if replayed := r.guardGrants[u.Name]; replayed.observedNanos != inactive.observedNanos || replayed.untilNanos != inactive.untilNanos {
@@ -263,7 +263,7 @@ func TestConditionalLeaseObservationDoesNotRefreshOnTransportReplay(t *testing.T
 func TestConditionalNetworkFailureDoesNotStartWorker(t *testing.T) {
 	ctx := context.Background()
 	r, n, m := conditionalFixture(t)
-	if err := r.Accept(ctx, update(t, r, "service.wan", 1, lease4(time.Now().Add(time.Hour)))); err != nil {
+	if err := r.Observe(ctx, update(t, r, "service.wan", 1, lease4(time.Now().Add(time.Hour)))); err != nil {
 		t.Fatal(err)
 	}
 	n.fail = errors.New("injected network failure")
@@ -281,7 +281,7 @@ func TestConditionalNetworkFailureDoesNotStartWorker(t *testing.T) {
 func TestConditionalUnavailableSupervisorWithdraws(t *testing.T) {
 	ctx := context.Background()
 	r, n, m := conditionalFixture(t)
-	if err := r.Accept(ctx, update(t, r, "service.wan", 1, lease4(time.Now().Add(time.Hour)))); err != nil {
+	if err := r.Observe(ctx, update(t, r, "service.wan", 1, lease4(time.Now().Add(time.Hour)))); err != nil {
 		t.Fatal(err)
 	}
 	reconcileConditions(t, r)
@@ -305,7 +305,7 @@ func TestConditionalUnavailableSupervisorWithdraws(t *testing.T) {
 func TestConditionalChangedFactDuringStopRestartsQuiescedWorker(t *testing.T) {
 	ctx := context.Background()
 	r, n, m := conditionalFixture(t)
-	if err := r.Accept(ctx, update(t, r, "service.wan", 1, lease4(time.Now().Add(time.Hour)))); err != nil {
+	if err := r.Observe(ctx, update(t, r, "service.wan", 1, lease4(time.Now().Add(time.Hour)))); err != nil {
 		t.Fatal(err)
 	}
 	reconcileConditions(t, r)
@@ -335,7 +335,7 @@ func TestConditionalChangedFactDuringStopRestartsQuiescedWorker(t *testing.T) {
 func TestConditionalSourceDigestCutoverRevokesSameRevisionFacts(t *testing.T) {
 	ctx := context.Background()
 	r, n, _ := conditionalFixture(t)
-	if err := r.Accept(ctx, update(t, r, "service.wan", 1, lease4(time.Now().Add(time.Hour)))); err != nil {
+	if err := r.Observe(ctx, update(t, r, "service.wan", 1, lease4(time.Now().Add(time.Hour)))); err != nil {
 		t.Fatal(err)
 	}
 	reconcileConditions(t, r)
