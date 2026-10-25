@@ -80,8 +80,9 @@ func bootConfigured(path string, b runtimeconfig.Boot) error {
 		}
 		b.Workers[binding.Role] = fmt.Sprintf("/proc/self/fd/%d", f.Fd())
 	}
+	authority := &release.Authority{Root: b.Release.Root, TrustFile: b.Release.TrustFile, Digest: selection.Image.Release.Digest}
 	if !selection.Trial {
-		return serve(b)
+		return serveRuntime(b, nil, authority)
 	}
 	timeout, stable := b.Release.ReadyTimeoutSeconds, b.Release.StableSeconds
 	if timeout == 0 {
@@ -91,7 +92,7 @@ func bootConfigured(path string, b runtimeconfig.Boot) error {
 		stable = 10
 	}
 	trial := &releaseboot.Trial{Store: store, BootID: id, Token: selection.State.Attempt.Token, Release: selection.Image.Release, RuntimeDir: b.RuntimeDir, Timeout: time.Duration(timeout) * time.Second, Stable: time.Duration(stable) * time.Second}
-	err = serveWithTrial(b, trial)
+	err = serveRuntime(b, trial, authority)
 	if err != nil {
 		// Early failures before the watcher starts still leave an explicit
 		// rollback record. A completed Confirm/FailBoot legitimately fences it.

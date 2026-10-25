@@ -160,6 +160,27 @@ func (s *Store) Status(ctx context.Context) (State, error) {
 	return s.readState(ctx)
 }
 
+// WithState keeps both the process mutex and the interprocess file lock until
+// fn returns. It lets the configuration writer validate the selected runtime
+// and finish a configuration transaction without racing prepare/boot/confirm.
+// The callback must not call another method on this Store. Competing operations
+// return ErrBusy rather than waiting. The supplied state is not persisted.
+func (s *Store) WithState(ctx context.Context, fn func(State) error) error {
+	if fn == nil {
+		return errors.New("nil release state callback")
+	}
+	unlock, err := s.acquire(ctx)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	state, err := s.readState(ctx)
+	if err != nil {
+		return err
+	}
+	return fn(state)
+}
+
 func (s *Store) bundleLimit() int64 {
 	return min(int64(MaxArtifacts)*s.options.MaxArtifactBytes, MaxRuntimeBytes) + MaxManifestBytes + MaxTrailerBytes + int64(MaxArtifacts+4)*1024
 }

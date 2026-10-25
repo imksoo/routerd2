@@ -17,6 +17,7 @@ import (
 	"github.com/imksoo/routerd2/internal/events"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/network"
+	"github.com/imksoo/routerd2/internal/release"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 	"github.com/imksoo/routerd2/internal/worker"
@@ -126,7 +127,7 @@ func (e *Engine) Handler() http.Handler {
 				code = 409
 			} else if errors.Is(err, ErrInvalid) {
 				code = 400
-			} else if errors.Is(err, events.ErrCapacity) {
+			} else if errors.Is(err, events.ErrCapacity) || errors.Is(err, release.ErrBusy) {
 				code = 503
 			}
 			localapi.Fail(w, code, err)
@@ -145,6 +146,8 @@ func (e *Engine) Handler() http.Handler {
 			code := 422
 			if errors.Is(err, ErrConflict) {
 				code = 409
+			} else if errors.Is(err, release.ErrBusy) {
+				code = 503
 			}
 			localapi.Fail(w, code, err)
 			return
@@ -162,19 +165,28 @@ func (e *Engine) Handler() http.Handler {
 	return mux
 }
 
-func Serve(ctx context.Context, dir, stateDir, bootstrap string, startup *configref.Selection, ready func()) error {
+func Serve(ctx context.Context, dir, stateDir, bootstrap string, startup *configref.Selection, authority *release.Authority, ready func()) error {
 	instanceID := os.Getenv(worker.SupervisorInstanceEnv)
 	if !serviceconfig.ValidSupervisorInstance(instanceID) {
 		return errors.New("supervisor instance is required")
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	store, current, err := config.OpenSelected(stateDir, bootstrap, startup)
+	store, current, root, err := openSelectedConfiguration(ctx, stateDir, bootstrap, startup, authority)
 	if err != nil {
 		return err
 	}
+	if root != nil {
+		defer root.Close()
+	}
 	networkClient := NewNetworkClient(dir)
 	e := New(store, current, networkClient)
+	if root != nil {
+		e, err = NewWithRelease(store, current, networkClient, root, authority.Digest)
+		if err != nil {
+			return err
+		}
+	}
 	e.journal, err = events.Open(events.Options{Directory: filepath.Join(stateDir, "events")})
 	if err != nil {
 		return fmt.Errorf("open durable event journal: %w", err)

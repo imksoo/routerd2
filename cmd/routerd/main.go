@@ -183,9 +183,9 @@ The boot configuration enables SSH; no shell or system service is launched.`)
 	return err
 }
 
-func serve(b runtimeconfig.Boot) error { return serveWithTrial(b, nil) }
+func serve(b runtimeconfig.Boot) error { return serveRuntime(b, nil, nil) }
 
-func serveWithTrial(b runtimeconfig.Boot, trial *releaseboot.Trial) error {
+func serveRuntime(b runtimeconfig.Boot, trial *releaseboot.Trial, authority *release.Authority) error {
 	applianceRuntime = b.Platform == "appliance"
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
@@ -226,8 +226,9 @@ func serveWithTrial(b runtimeconfig.Boot, trial *releaseboot.Trial) error {
 		}
 	}
 	err = supervisor.Run(ctx, supervisor.Options{
-		Startup:     b.Startup,
-		Executables: b.Workers, ReleaseID: buildinfo.ReleaseID, RuntimeDir: b.RuntimeDir, StateDir: b.StateDir, ConfigPath: b.Config, Platform: b.Platform,
+		ReleaseAuthority: authority,
+		Startup:          b.Startup,
+		Executables:      b.Workers, ReleaseID: buildinfo.ReleaseID, RuntimeDir: b.RuntimeDir, StateDir: b.StateDir, ConfigPath: b.Config, Platform: b.Platform,
 		DynamicRoles: dynamicRoles,
 		Modules: []supervisor.Spec{
 			{Name: "logging", Role: "logging", Required: false},

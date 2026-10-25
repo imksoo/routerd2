@@ -22,6 +22,7 @@ import (
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocolevents"
+	"github.com/imksoo/routerd2/internal/release"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
 )
 
@@ -121,6 +122,8 @@ func (n *NetworkClient) Snapshot(ctx context.Context) (s network.Snapshot, err e
 type Engine struct {
 	mu             sync.Mutex
 	store          *config.Store
+	releaseStore   *release.Store
+	releaseDigest  string
 	network        Network
 	state          State
 	events         []Event
@@ -178,6 +181,10 @@ func (e *Engine) apply(ctx context.Context, revision uint64, doc config.Document
 func (e *Engine) Reconcile(ctx context.Context) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	return e.withRelease(ctx, e.state.Confirmation != nil, func() error { return e.reconcileLocked(ctx) })
+}
+
+func (e *Engine) reconcileLocked(ctx context.Context) error {
 	if e.state.Confirmation != nil {
 		return e.rollbackConfirmation(ctx, "restart")
 	}
@@ -217,6 +224,22 @@ func (e *Engine) Commit(ctx context.Context, r CommitRequest) (State, error) {
 	digest := hex.EncodeToString(hash[:])
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	var state State
+	// An exact durable replay does not write or apply anything. It remains an
+	// acknowledgement even after prepare has frozen new mutations.
+	mutation := r.RequestID != e.state.LastRequestID
+	err := e.withRelease(ctx, mutation, func() error {
+		var err error
+		state, err = e.commitLocked(ctx, r, digest)
+		return err
+	})
+	if err != nil {
+		return e.state, err
+	}
+	return state, nil
+}
+
+func (e *Engine) commitLocked(ctx context.Context, r CommitRequest, digest string) (State, error) {
 	if r.RequestID == e.state.LastRequestID {
 		if digest != e.state.LastRequestHash {
 			return e.state, fmt.Errorf("%w: request_id reused with different configuration", ErrConflict)
@@ -277,6 +300,21 @@ func (e *Engine) Confirm(r ConfirmRequest) (State, error) {
 	cancel()
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	ctx, cancel = context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	var state State
+	err := e.withRelease(ctx, e.state.Confirmation != nil, func() error {
+		var err error
+		state, err = e.confirmLocked(r)
+		return err
+	})
+	if err != nil {
+		return e.state, err
+	}
+	return state, nil
+}
+
+func (e *Engine) confirmLocked(r ConfirmRequest) (State, error) {
 	if r.Revision != e.state.Revision || r.RequestID == "" || r.RequestID != e.state.LastRequestID {
 		return e.state, fmt.Errorf("%w: confirmation does not identify the current revision", ErrConflict)
 	}
@@ -324,7 +362,7 @@ func (e *Engine) Expire(ctx context.Context, now time.Time) error {
 	if e.state.Confirmation == nil || now.Before(e.state.Confirmation.Deadline) {
 		return nil
 	}
-	return e.rollbackConfirmation(ctx, "timeout")
+	return e.withRelease(ctx, true, func() error { return e.rollbackConfirmation(ctx, "timeout") })
 }
 
 func (e *Engine) rollbackConfirmation(ctx context.Context, reason string) error {

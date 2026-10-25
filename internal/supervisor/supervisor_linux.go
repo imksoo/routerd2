@@ -26,6 +26,7 @@ import (
 	"unsafe"
 
 	"github.com/imksoo/routerd2/internal/configref"
+	"github.com/imksoo/routerd2/internal/release"
 	"github.com/imksoo/routerd2/internal/worker"
 	"golang.org/x/sys/unix"
 )
@@ -331,6 +332,20 @@ func Run(parent context.Context, options Options) error {
 }
 
 func normalize(o Options) (Options, error) {
+	if o.ReleaseAuthority != nil {
+		selected := *o.ReleaseAuthority
+		if err := selected.Validate(); err != nil {
+			return o, err
+		}
+		o.ReleaseAuthority = &selected
+		raw, err := json.Marshal(selected)
+		if err != nil {
+			return o, err
+		}
+		o.authorityJSON = string(raw)
+	} else {
+		o.authorityJSON = ""
+	}
 	if o.Startup != nil {
 		selected := o.Startup.Clone()
 		if err := selected.Validate(); err != nil {
@@ -442,11 +457,13 @@ func startChild(ctx context.Context, o Options, image *os.File, c *child, events
 		return err
 	}
 	args := append([]string{o.Executables[c.spec.Role], "worker", "--role=" + c.spec.Role, "--name=" + c.spec.Name}, c.spec.Args...)
-	startup := ""
+	startup, authority := "", ""
 	if c.spec.Role == "control" {
 		startup = o.startupJSON
+		authority = o.authorityJSON
 	}
 	env := mergeEnv(os.Environ(), o.Env, []string{
+		release.AuthorityEnv + "=" + authority,
 		configref.SelectionEnv + "=" + startup,
 		worker.SupervisorInstanceEnv + "=" + o.instanceID,
 		worker.ControlFDEnv + "=3", worker.ModuleNameEnv + "=" + c.spec.Name,

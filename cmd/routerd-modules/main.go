@@ -21,6 +21,7 @@ import (
 	"github.com/imksoo/routerd2/internal/control"
 	"github.com/imksoo/routerd2/internal/logging"
 	"github.com/imksoo/routerd2/internal/management"
+	"github.com/imksoo/routerd2/internal/release"
 	"github.com/imksoo/routerd2/internal/runtimeconfig"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 	"github.com/imksoo/routerd2/internal/serviceruntime"
@@ -93,7 +94,11 @@ func run(args []string) error {
 			if err != nil {
 				return err
 			}
-			return control.Serve(ctx, dir, state, path, startup, ready)
+			authority, err := release.DecodeAuthority([]byte(os.Getenv(release.AuthorityEnv)))
+			if err != nil {
+				return err
+			}
+			return control.Serve(ctx, dir, state, path, startup, authority, ready)
 		case "management":
 			b, err := os.ReadFile(*managementPath)
 			if err != nil {
