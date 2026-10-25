@@ -17,7 +17,9 @@ import (
 
 	wire "github.com/imksoo/routerd/pkg/dhcpv4client"
 	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/clocktest"
 	"github.com/imksoo/routerd2/internal/config"
+	"github.com/imksoo/routerd2/internal/control"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp4"
@@ -32,6 +34,38 @@ func TestDaemonDHCPv4OriginalLeaseAuthority(t *testing.T) {
 	if !isolateFixtureTimeout(t, "TestDaemonDHCPv4OriginalLeaseAuthority", 180*time.Second) {
 		return
 	}
+	runDHCPv4Authority(t, nil)
+}
+
+// The positive clock mutation is available only through the dedicated guest
+// PID 1 broker. This test must refuse before creating namespaces on a host.
+func TestDaemonDHCPv4ClockCorrections(t *testing.T) {
+	file, err := clocktest.ForwardFileFromEnv()
+	if err != nil {
+		if os.Getenv("ROUTERD2_INTEGRATION_REQUIRED") == "1" {
+			t.Fatal(err)
+		}
+		t.Skip("dedicated no-NIC QEMU clock broker required")
+	}
+	_ = file.Close()
+	if !isolateFixtureTimeout(t, "TestDaemonDHCPv4ClockCorrections", 180*time.Second) {
+		return
+	}
+	client, err := clocktest.ClientFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if _, err := client.Step("restore"); err != nil {
+			t.Error("restore guest clock", err)
+		}
+		_ = client.Close()
+	})
+	runDHCPv4Authority(t, client)
+}
+
+func runDHCPv4Authority(t *testing.T, clockClient *clocktest.Client) {
+	t.Helper()
 	ctx := context.Background()
 	peerNS := fixturePeerNamespace(t, "wan0", "peer0")
 	peer, err := netlink.NewHandleAt(peerNS, unix.NETLINK_ROUTE)
@@ -81,6 +115,11 @@ func TestDaemonDHCPv4OriginalLeaseAuthority(t *testing.T) {
 	defer tcp.Close()
 	var acknowledge atomic.Bool
 	acknowledge.Store(true)
+	var leaseSeconds atomic.Uint32
+	leaseSeconds.Store(3)
+	if clockClient != nil {
+		leaseSeconds.Store(20)
+	}
 	go func() {
 		buf := make([]byte, 4096)
 		for {
@@ -102,7 +141,11 @@ func TestDaemonDHCPv4OriginalLeaseAuthority(t *testing.T) {
 				continue
 			}
 			u32 := func(n uint32) []byte { b := make([]byte, 4); binary.BigEndian.PutUint32(b, n); return b }
-			opts := map[byte][]byte{wire.OptionServerID: {192, 0, 2, 1}, wire.OptionSubnetMask: {255, 255, 255, 0}, wire.OptionRouter: {192, 0, 2, 1}, wire.OptionLeaseTime: u32(3), wire.OptionT1: u32(1), wire.OptionT2: u32(2)}
+			life, t1, t2 := leaseSeconds.Load(), uint32(1), uint32(2)
+			if life == 20 {
+				t1, t2 = 4, 12
+			}
+			opts := map[byte][]byte{wire.OptionServerID: {192, 0, 2, 1}, wire.OptionSubnetMask: {255, 255, 255, 0}, wire.OptionRouter: {192, 0, 2, 1}, wire.OptionLeaseTime: u32(life), wire.OptionT1: u32(t1), wire.OptionT2: u32(t2)}
 			packet := wire.EncodeRequest(kind, m.XID, m.CHAddr, opts)
 			packet[0] = 2
 			copy(packet[16:20], []byte{192, 0, 2, 10})
@@ -233,6 +276,27 @@ func TestDaemonDHCPv4OriginalLeaseAuthority(t *testing.T) {
 			}
 		}
 	}
+	step := func(action string, expectedDelta time.Duration) {
+		t.Helper()
+		before, err := boottime.Read()
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := clockClient.Step(action)
+		if err != nil {
+			t.Fatal(action, err)
+		}
+		after, err := boottime.Read()
+		if err != nil {
+			t.Fatal(err)
+		}
+		elapsed := time.Duration(after.BoottimeNanoseconds - before.BoottimeNanoseconds)
+		delta := after.WallTime.Sub(before.WallTime) - elapsed
+		if after.BootID != before.BootID || got.Clock.BootID != after.BootID || elapsed < 0 || elapsed > 3*time.Second || delta < expectedDelta-time.Second || delta > expectedDelta+time.Second {
+			t.Fatal("unexpected actual guest clock correction", action, before, got, after)
+		}
+		t.Logf("actual CLOCK_REALTIME action=%s wall_delta=%s BOOTTIME_elapsed=%s boot_unchanged=true", action, after.WallTime.Sub(before.WallTime), elapsed)
+	}
 	until(t, 15*time.Second, func() bool { return snapshot().Active })
 	first := snapshot()
 	if first.BootID == "" || first.LeaseClock.ExpiresNanos == 0 {
@@ -240,7 +304,55 @@ func TestDaemonDHCPv4OriginalLeaseAuthority(t *testing.T) {
 	}
 	until(t, 10*time.Second, func() bool { return kernel(true) })
 	traffic()
-	until(t, 10*time.Second, func() bool { return snapshot().LeaseClock.AcquiredNanos > first.LeaseClock.AcquiredNanos })
+	if clockClient != nil {
+		acknowledge.Store(false)
+		time.Sleep(100 * time.Millisecond) // drain any already-sent ACK before pinning the grant
+		first = snapshot()
+		step("forward", 24*time.Hour)
+		now, err := boottime.Read()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !first.ExpiresAt.Before(now.WallTime) || !dhcp4.CurrentLease(snapshot(), now) || snapshot().LeaseClock != first.LeaseClock || !kernel(true) {
+			t.Fatal("forward UTC correction revoked or rewrote original BOOT lease", first, snapshot(), now)
+		}
+		traffic()
+		var state control.State
+		if err := f.control.Do(ctx, "GET", "/v1/config", nil, &state); err != nil {
+			t.Fatal(err)
+		}
+		if state.ConfigOmitted {
+			t.Fatal("configuration omitted")
+		}
+		changed := false
+		for i := range state.Config.Resources {
+			r := &state.Config.Resources[i]
+			if r.Interface != nil && r.Interface.Name == "wan0" {
+				r.Interface.MTU = 1400
+				changed = true
+			}
+		}
+		if !changed {
+			t.Fatal("missing declared WAN")
+		}
+		if err := f.control.Do(ctx, "POST", "/v1/config/commit", control.CommitRequest{ExpectedRevision: state.Revision, RequestID: "dhcp4-clock-reapply", Config: state.Config}, nil); err != nil {
+			t.Fatal(err)
+		}
+		until(t, 8*time.Second, func() bool {
+			link, err := netlink.LinkByName("wan0")
+			return err == nil && link.Attrs().MTU == 1400 && kernel(true)
+		})
+		if snapshot().LeaseClock != first.LeaseClock {
+			t.Fatal("UTC reapply replaced original grant", first, snapshot())
+		}
+		traffic()
+		step("restore", -24*time.Hour)
+		leaseSeconds.Store(3)
+		acknowledge.Store(true)
+	}
+	until(t, 10*time.Second, func() bool {
+		return snapshot().LeaseClock.AcquiredNanos > first.LeaseClock.AcquiredNanos && snapshot().LeaseClock.ExpiresNanos-snapshot().LeaseClock.AcquiredNanos == uint64(3*time.Second)
+	})
 	traffic()
 	paused := 0
 	t.Cleanup(func() {
@@ -269,6 +381,9 @@ func TestDaemonDHCPv4OriginalLeaseAuthority(t *testing.T) {
 		traffic()
 	}
 	old := pause()
+	if clockClient != nil {
+		step("backward", -24*time.Hour)
+	}
 	until(t, 12*time.Second, func() bool { return kernel(false) })
 	if m := module("service.wan"); !m.Ready || m.PID != paused {
 		t.Fatal("expiry fixture lost the original ready producer", m)
@@ -279,6 +394,9 @@ func TestDaemonDHCPv4OriginalLeaseAuthority(t *testing.T) {
 	old = healthPBRUpdate(instance()) // all pre-stop RPCs have drained before expiry.
 	if err := f.control.Do(ctx, "POST", "/v1/services/state", old, nil); err != nil || !kernel(false) {
 		t.Fatal("identical retry renewed expired lease", err)
+	}
+	if clockClient != nil {
+		step("restore", 24*time.Hour)
 	}
 	resume()
 	old = healthPBRUpdate(instance())
@@ -308,5 +426,9 @@ func TestDaemonDHCPv4OriginalLeaseAuthority(t *testing.T) {
 		return capture.count("0.0.0.0", "255.255.255.255", unix.IPPROTO_UDP, 67) > 0 && capture.count("192.0.2.10", "192.0.2.1", unix.IPPROTO_TCP, 18091) > 0 && capture.count("192.0.2.10", "192.0.2.1", unix.IPPROTO_UDP, 18092) > 0
 	})
 	t.Log("real DHCP worker/independent server -> original BOOT grant -> kernel address/default route -> TCP/UDP/PCAP; renewal, SIGSTOP expiry, duplicate retry, worker/control SIGKILL, stale generation and foreign address preservation passed")
-	t.Log("ROUTERD_DHCP4_AUTHORITY_TEST_PASS")
+	if clockClient != nil {
+		t.Log("ROUTERD_DHCP4_CLOCK_TEST_PASS")
+	} else {
+		t.Log("ROUTERD_DHCP4_AUTHORITY_TEST_PASS")
+	}
 }

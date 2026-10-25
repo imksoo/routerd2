@@ -3,6 +3,8 @@
 import importlib.util
 from pathlib import Path
 import unittest
+import tempfile
+import re
 
 
 SPEC = importlib.util.spec_from_file_location("routerd_qemu_network", Path(__file__).with_name("qemu-network.py"))
@@ -26,6 +28,21 @@ class GuestResultTest(unittest.TestCase):
         ):
             with self.subTest(output=output), self.assertRaises(RuntimeError):
                 GATE.require_guest_pass(output, suite, 0)
+
+    def test_only_fixed_clock_suite_gets_matching_boot_marker(self):
+        for name in GATE.SUITES:
+            with self.subTest(suite=name), tempfile.TemporaryDirectory() as d:
+                root = Path(d)
+                marker = GATE.clock_marker(root, name)
+                nonce_file = root / "test-clock-nonce"
+                if name == "daemon-dhcp4-clock":
+                    nonce = nonce_file.read_text().strip()
+                    self.assertRegex(nonce, r"^[0-9a-f]{32}$")
+                    self.assertEqual(marker, "routerd2.clock-test=" + nonce)
+                    self.assertEqual(GATE.SUITES[name]["test"], "TestDaemonDHCPv4ClockCorrections")
+                else:
+                    self.assertEqual(marker, "")
+                    self.assertFalse(nonce_file.exists())
 
     def test_each_exact_suite_pass(self):
         for name, suite in GATE.SUITES.items():
