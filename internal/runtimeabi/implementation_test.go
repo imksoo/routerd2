@@ -50,3 +50,15 @@ func TestGuardedVRRPDependencyRequiresNewCompilerContract(t *testing.T) {
 		t.Fatal("old compiler contract accepted new dynamic interface semantics")
 	}
 }
+
+func TestGracefulVRRPHasASeparateSignedCompilerContract(t *testing.T) {
+	current := runtimeabi.Current()
+	if current.ConfigurationContract != "resource-program-native-3" {
+		t.Fatal("graceful publication semantics reused an earlier compiler contract")
+	}
+	previous := current
+	previous.ConfigurationContract = "resource-program-native-2"
+	if err := runtimeabi.CheckTransition(previous, current, runtimeabi.Facts{Configuration: 2, ConfigurationContract: previous.ConfigurationContract}); err == nil {
+		t.Fatal("unqualified old compiler transition accepted graceful publication")
+	}
+}
