@@ -478,7 +478,11 @@ func readHealth(ctx context.Context, client *localapi.Client) (control.Health, e
 }
 
 func verifyExecutables(s supervisor.Status) error {
-	if err := sameExecutable(1, "/test/bin/routerd"); err != nil {
+	return verifyExecutableCatalog(s, os.Stat)
+}
+
+func verifyExecutableCatalog(s supervisor.Status, stat func(string) (os.FileInfo, error)) error {
+	if err := sameExecutable(1, "/test/bin/routerd", stat); err != nil {
 		return err
 	}
 	seen := map[string]bool{}
@@ -486,7 +490,7 @@ func verifyExecutables(s supervisor.Status) error {
 		if !m.Ready || m.PID <= 1 || m.ReleaseID != identity {
 			return errors.New("supervised process not ready on fresh command pair")
 		}
-		if err := sameExecutable(m.PID, "/test/bin/routerd-modules"); err != nil {
+		if err := sameExecutable(m.PID, "/test/bin/routerd-modules", stat); err != nil {
 			return err
 		}
 		seen[m.Name] = true
@@ -499,12 +503,12 @@ func verifyExecutables(s supervisor.Status) error {
 	return nil
 }
 
-func sameExecutable(pid int, path string) error {
-	a, err := os.Stat(fmt.Sprintf("/proc/%d/exe", pid))
+func sameExecutable(pid int, path string, stat func(string) (os.FileInfo, error)) error {
+	a, err := stat(fmt.Sprintf("/proc/%d/exe", pid))
 	if err != nil {
 		return err
 	}
-	b, err := os.Stat(path)
+	b, err := stat(path)
 	if err != nil {
 		return err
 	}
