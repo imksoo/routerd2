@@ -719,7 +719,9 @@ func healthPBRCapture(t *testing.T, iface string) *healthPBRCaptureState {
 			default:
 			}
 			n, _, err := unix.Recvfrom(fd, buf, 0)
-			if err == unix.EAGAIN || err == unix.EINTR {
+			// A startup capture can precede link-up; retain the bounded poll
+			// through link-down rather than losing every later packet.
+			if err == unix.EAGAIN || err == unix.EINTR || err == unix.ENETDOWN {
 				time.Sleep(5 * time.Millisecond)
 				continue
 			}
