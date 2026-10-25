@@ -1,6 +1,7 @@
 package resourceprogram
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/imksoo/routerd2/internal/network"
@@ -12,7 +13,7 @@ func TestOperatorCannotDeclareInternalBootAddressAuthority(t *testing.T) {
 		if inactive {
 			r.When = &FactCondition{Fact: "service.wan.active"}
 		}
-		if _, err := Compile(Program{SchemaVersion: SchemaVersion, Resources: []Resource{r}}); err == nil {
+		if _, err := Compile(Program{SchemaVersion: SchemaVersion, Resources: []Resource{r}}); err == nil || !strings.Contains(err.Error(), "boot lifetime") {
 			t.Fatal("operator supplied internal boot projection authority", inactive)
 		}
 	}

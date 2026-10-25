@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -30,9 +31,11 @@ func TestFormerJournalCannotIgnoreNewBootLifetimeAuthority(t *testing.T) {
 	if err := os.WriteFile(path, before, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if restored, err := newEngine(opts, k); err == nil {
-		restored.Close()
-		t.Fatal("former address journal format was accepted")
+	if restored, err := newEngine(opts, k); err == nil || !strings.Contains(err.Error(), "unsupported network journal version 1") {
+		if restored != nil {
+			restored.Close()
+		}
+		t.Fatal("former address journal format was not explicitly refused", err)
 	}
 	after, err := os.ReadFile(path)
 	if err != nil || string(before) != string(after) {
