@@ -11871,6 +11871,41 @@
         "All work-package/resource parity, DHCPv6 IA_NA/server/relay/DAD/release, event storage/durability/effects/federation, scale/long-run/physical hardware/NIC/clock qualification remain"
       ],
       "parity_flags_unchanged": true
+    },
+    {
+      "id": "dhcp4-original-boot-authority",
+      "date": "2026-10-25",
+      "status": "partial_dhcp4_boot_authority_verified",
+      "code_checkpoint": "a136ae8e9af273f443d22b3fb1f7d045d56be674",
+      "fixture_checkpoint": "66475eb416fe3b70322c5c6ebb96ecfaf873411a",
+      "work_packages": [
+        "CORE-03",
+        "NET-05"
+      ],
+      "evidence": "docs/evidence/2026-10-25-dhcp4-authority.md",
+      "operator_contract": "internal/protocol/dhcp4/README.md",
+      "implemented": [
+        "Original source boot observation/logical epoch+sequence and ACK-scoped lease clock; source interval validation and no UTC/receipt restamp; slow publication cannot acknowledge an expired lease",
+        "First DHCP publication authenticated against current supervisor instance/module role/generation/digest; source sequence/epoch/final and immutable lease payload fences; inactive saved hints cannot authorize a new worker without fresh ACK",
+        "Active fact age remains original ACK acquisition through T1/T2/replay; source BOOT controls DHCP address/default-route projection",
+        "Internal absolute BOOT address lifetimes stored in network journal2, independent of UTC when projecting, matching live ownership or writing remaining kernel lifetime; immutable process boot clock shared with BFD; operator BOOT fields and former unreleased journal1 refused"
+      ],
+      "validation": [
+        "Test-first API, live old-worker seed and former-journal acceptance REDs retained; mandatory metadata/generation/UTC fixture failures and local source wiring failures retained without weakening validation",
+        "Related Race DHCPv4 1.043s/resource compile2.249s/runtime17.250s plus shared clock/BFD/network cached passes; explicit operator/journal refusals pass Race1.026s/1.246s; matching-directory empty-cache expired acceptance3.186s passes",
+        "Clean a136ae8 full check/Race/vet/Python23/static amd64+arm64 build128.43s; corrected fixture66475eb clean recheck7.41s including cached tests; all four ELF hashes identical",
+        "Pinned oldfa5792d actual pair0.62s fail after real lease acquisition: original BOOTTIME authority absent",
+        "Initial native kernel8.80s passes; new daemon10.55s (Go test10.48s) failure due8s lease versus5s heartbeat and capture cleanup, corrected daemon8.74s failure due requiring same worker generation across deliberate control quiescence; no product timeout/RAM/vCPU increase",
+        "Related native acceptance: initial kernel lifetime8.80s, corrected actual DHCP worker10.35s, DHCPv4/IPv6-PD/RA18.83s, native/migrated DHCP-DNS10.76s/10.65s, existing network21.74s, BFD-derived13.86s, BFD/BGP23.44s, two-WAN/PBR30.91s; source fixture groups distinct, same checked product",
+        "Nine related individual QEMU gates pass: kernel20.79s, new DHCP worker39.75s, DHCP31.02s, native/migrated DNS32.53s/33.53s, network39.04s, BFD-derived44.77s, BFD/BGP56.40s, two-WAN/PBR97.13s;512MiB/2CPU/64MiB scratch and original existing deadlines unchanged; not an all-suite aggregate, physical clock fault or complete work-package acceptance"
+      ],
+      "remaining": [
+        "Physical NTP/CLOCK_REALTIME correction/suspend and selected hardware/NIC/scale/long-run qualification; component clock injection is distinct evidence",
+        "Autonomous IPv4 default-route expiry with every coordinator/writer stopped; current IPv4 route removal requires live reconcile",
+        "DHCP current provider/structured selectors and other protocol boot-clock boundaries; complete DHCP resource/IA_NA/server/relay/DAD/release and all other work packages",
+        "Prototype network journal1→2 migration or rolling compatibility not provided; durable raw producers, storage retention/off-device durability/aggregate budgets, effects/federation and full product qualification remain"
+      ],
+      "parity_flags_unchanged": true
     }
   ],
   "delivery_goal": {

@@ -1,0 +1,6 @@
+=== RUN   TestFormerJournalCannotIgnoreNewBootLifetimeAuthority
+    boot_journal_test.go:35: former address journal format was accepted
+--- FAIL: TestFormerJournalCannotIgnoreNewBootLifetimeAuthority (0.22s)
+FAIL
+FAIL    github.com/imksoo/routerd2/internal/network     0.240s
+FAIL

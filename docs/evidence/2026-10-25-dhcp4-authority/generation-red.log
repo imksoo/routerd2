@@ -1,0 +1,6 @@
+=== RUN   TestDHCPv4LiveSupervisorFencesFirstOldGeneration
+    dhcp4_generation_test.go:15: old DHCP worker seeded empty runtime despite live supervisor generation2 <nil>
+--- FAIL: TestDHCPv4LiveSupervisorFencesFirstOldGeneration (0.04s)
+FAIL
+FAIL    github.com/imksoo/routerd2/internal/runtimeplan 0.064s
+FAIL

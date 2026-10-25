@@ -20,8 +20,10 @@ option fragments and the DHCP option-overload fields are decoded in wire order.
 The implementation handles discovery/selecting, INIT-REBOOT on a matching
 persisted MAC/client identity, ACK/NAK, T1 unicast renewal, T2 broadcast rebind,
 retransmission and expiry. Gateway, DNS, NTP, domain, MTU and lease timestamps are
-published in `Snapshot`. `Active` is the authority to install the current lease;
-inactive snapshots must not leave an old address/default route active. Restarted
+published in `Snapshot`. `Active` is the producer's observed intent; consumers
+also require its original current-boot lease deadline. A last raw `Active`
+can remain visible after ownership expires. Inactive snapshots must not leave
+an old address/default route active. Restarted
 leases require an ACK before becoming active. Normal stop withdraws effects but
 retains the server lease record for the next INIT-REBOOT exchange.
 
@@ -34,10 +36,20 @@ boot identity change, rewind or deadline overflow stops the worker. UTC lease
 timestamps remain display and saved INIT-REBOOT hint metadata. A saved hint is
 never active until the server supplies a fresh ACK.
 
-This is the client timer boundary. The controller currently still projects
-DHCPv4 lease/address lifetimes from UTC `expiresAt`; propagation of the original
-boot deadline through the snapshot and network writer remains required before
-claiming end-to-end clock correction safety, including a stopped worker.
+Snapshots carry the original boot observation, logical epoch/sequence and
+ACK-scoped lease clock. The controller authenticates even the first publication
+against the current supervisor generation. Transport retries cannot change the
+source observation, lease payload or original deadline. Active facts retain
+the ACK age through renewal/rebind phase publications. A final stopped snapshot
+cannot become active again in the same worker incarnation.
+
+The network writer persists boot-scoped address lifetimes and computes kernel
+relative lifetimes from BOOTTIME, including after journal reopen. UTC
+`expiresAt` is display metadata. Control recovery deliberately quiesces previous
+dynamic workers and requires a fresh server ACK; saved metadata is only an
+inactive INIT-REBOOT hint. Physical suspend/NTP faults, other protocol clock
+boundaries and autonomous IPv4 default-route expiry with every controller
+stopped remain separate acceptance work.
 
 The control-plane compiler owns `UseRoutes`, `UseDNS`, metric, dependency/when
 policy and merging this dynamic state with static declarations. Do not start

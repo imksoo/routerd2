@@ -1,0 +1,16 @@
+=== RUN   TestDaemonDHCPv4OriginalLeaseAuthority
+    dhcp4_authority_test.go:32: isolated protocol fixture: exit status 1
+        === RUN   TestDaemonDHCPv4OriginalLeaseAuthority
+            dhcp4_authority_test.go:273: expiry fixture lost the original ready producer {service.wan dhcp4 stopping true 1663022 a136ae8e9af2 false 1 0 2026-10-25 02:15:26.622531833 +0000 UTC 2026-10-25 02:15:28.631729438 +0000 UTC <nil> worker heartbeat timeout 249f6b7ab26f491344848a1a8cddb34465f6f83add388901d556574e0417a8ed}
+            bgp_test.go:305: console: {"timestamp":"2026-10-25T02:15:26.512165938Z","module":"supervisor","pid":1662974,"generation":0,"level":"INFO","message":"worker started","attributes":{"generation":1,"module":"logging","pid":1662985},"producer_epoch":"46b66d72151183e7bb56b0a11da74821","producer_sequence":1,"delivery":"console_fallback"}
+                {"timestamp":"2026-10-25T02:15:26.512828975Z","module":"supervisor","pid":1662974,"generation":0,"level":"INFO","message":"worker started","attributes":{"generation":1,"module":"network","pid":1662986},"producer_epoch":"46b66d72151183e7bb56b0a11da74821","producer_sequence":2,"delivery":"console_fallback"}
+                {"timestamp":"2026-10-25T02:15:26.513316039Z","module":"supervisor","pid":1662974,"generation":0,"level":"INFO","message":"worker started","attributes":{"generation":1,"module":"control","pid":1662987},"producer_epoch":"46b66d72151183e7bb56b0a11da74821","producer_sequence":3,"producer_dropped":2,"delivery":"console_fallback"}
+                {"timestamp":"2026-10-25T02:15:26.513867416Z","module":"supervisor","pid":1662974,"generation":0,"level":"INFO","message":"worker started","attributes":{"generation":1,"module":"management","pid":1662988},"producer_epoch":"46b66d72151183e7bb56b0a11da74821","producer_sequence":4,"producer_dropped":3,"delivery":"console_fallback"}
+                {"timestamp":"2026-10-25T02:15:26.521398928Z","module":"management","pid":1662988,"generation":1,"level":"INFO","message":"SSH disabled","attributes":{"reason":"listener and authorized keys are required"},"producer_epoch":"5be0648ccd6c1ad7c3126ef8c14509b0","producer_sequence":1,"delivery":"console_fallback"}
+                ROUTERD_READY
+[repeated fixture diagnostics omitted; raw SHA recorded in provenance]
+            health_pbr_test.go:744: packet capture failed network is down
+        --- FAIL: TestDaemonDHCPv4OriginalLeaseAuthority (10.45s)
+        FAIL
+--- FAIL: TestDaemonDHCPv4OriginalLeaseAuthority (10.48s)
+FAIL

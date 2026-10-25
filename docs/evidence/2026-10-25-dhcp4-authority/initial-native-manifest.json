@@ -1,0 +1,55 @@
+{
+  "source_commit": "a136ae8e9af273f443d22b3fb1f7d045d56be674",
+  "source_dirty": false,
+  "race_harnesses": {
+    "daemon": {
+      "path": "dist/goal-validation/dhcp4-authority-daemon.test",
+      "package": "./internal/integration",
+      "sha256": "1ca07215208d685709012fed3052779b699de56b9257f87cfd5443e27c408c77"
+    },
+    "network": {
+      "path": "dist/goal-validation/dhcp4-authority-network.test",
+      "package": "./internal/network",
+      "sha256": "c2c5a11081bd0ea8e46d691854548253ca14e719c2107e6daa8dc0a663b01d8a"
+    },
+    "protocol": {
+      "path": "dist/goal-validation/dhcp4-authority-protocol.test",
+      "package": "./internal/protocol/dhcp4",
+      "sha256": "cd30d5daa45d2b6c5d84f0d963b23c9ce05c0d9309d9214cf5190d28906122eb"
+    }
+  },
+  "binaries": [
+    {
+      "architecture": "amd64",
+      "binary": "routerd",
+      "sha256": "cc98d976bfd6909660accf9c4c46f1ef4e2b665f54ed67a350a2a089a338265a"
+    },
+    {
+      "architecture": "amd64",
+      "binary": "routerd-modules",
+      "sha256": "96c3d3a676fac4237cbea001ea145fc543ed6ad0c56d604adbcf02079450a5d3"
+    }
+  ],
+  "scope": "root-owned0700 private stage; fresh user/network namespaces; actual daemons, independent UDP/TCP peers and packet capture; three Race harnesses; no host network or clock mutation",
+  "tests": [
+    {
+      "test": "TestIsolatedBootAddressLifetime",
+      "harness": "network",
+      "exit_code": 0,
+      "passed": true,
+      "elapsed_seconds": 8.8,
+      "log": "dhcp4-authority-native-TestIsolatedBootAddressLifetime.log",
+      "sha256": "09c9eb3870f656a0713070e5fcecefdd8f5dc678e6eef1f2a589208323e91e6f"
+    },
+    {
+      "test": "TestDaemonDHCPv4OriginalLeaseAuthority",
+      "harness": "daemon",
+      "exit_code": 1,
+      "passed": false,
+      "elapsed_seconds": 10.55,
+      "log": "dhcp4-authority-native-TestDaemonDHCPv4OriginalLeaseAuthority.log",
+      "sha256": "e1e4beb1c7f129f13011584b0372974108693b7a90f57141c88d5fb15d925740"
+    }
+  ],
+  "completed_commit": "a136ae8e9af273f443d22b3fb1f7d045d56be674"
+}

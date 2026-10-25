@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "purpose": "isolated-daemon-legacy-dhcp-dns-integration",
+  "suite": "daemon-legacy-dhcp-dns",
+  "required_test": "TestDaemonMigratedDHCPDNSAndOwnershipExpiry",
+  "kernel_release": "6.18.58-0-virt",
+  "kernel_sha256": "17fbd3efd16f2e7cb1b945f06423b37399ba7d5ac8cdd3665e7f13f363500e85",
+  "initializer_sha256": "a488a45ce2bd638da4bf839896b4df4f8c507e210df62dd693e0f60701445f6c",
+  "test_binary_sha256": "ef328234e6ede0b8c1a9b82fa64a3fb84381c08de4c1b2c08a6fb6e5bb99bb0f",
+  "binary_sha256": {
+    "/test/bin/routerd": "a97e1ba43a5b7e1d7e1ef90162a1c2709a6f3b14c1a92d3ec28467c5a3d213b3",
+    "/test/bin/routerd-modules": "21f8f7e590ae2fd6f7ba49556a76d577631b684f3d65577a8681ec6ed17cc854"
+  },
+  "source_image_manifest_sha256": "a1df58dc193d6f6f5a361b9b630e9fb106b76a3e3089239da2185f812d265b43",
+  "source_initramfs_sha256": "c6b0ac5a7e6dc64a186ab595586f27bed87440083dc7a13cf0db9df8a3d2c729",
+  "host_network_access": false,
+  "result": "passed",
+  "guest_memory_mib": 512,
+  "test_scratch": {
+    "mountpoint": "/tmp",
+    "filesystem": "tmpfs",
+    "size_bytes": 67108864
+  },
+  "initramfs_sha256": "0809737f4c94ab4da310a9276b8d805fef0d58e0e4f1a4472992a674ea2f45ea",
+  "duration_seconds": 33.53,
+  "qemu_exit_status_before_cleanup": 0
+}

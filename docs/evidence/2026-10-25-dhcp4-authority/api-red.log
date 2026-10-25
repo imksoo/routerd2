@@ -1,0 +1,16 @@
+github.com/imksoo/routerd2/internal/boottime: no non-test Go files in /workspace/routerd2/internal/boottime
+FAIL    github.com/imksoo/routerd2/internal/network [build failed]
+# github.com/imksoo/routerd2/internal/protocol/dhcp4 [github.com/imksoo/routerd2/internal/protocol/dhcp4.test]
+internal/protocol/dhcp4/observation_test.go:18:12: undefined: ValidateSnapshot
+internal/protocol/dhcp4/observation_test.go:18:62: undefined: CurrentLease
+internal/protocol/dhcp4/observation_test.go:18:99: first.LeaseClock undefined (type Snapshot has no field or method LeaseClock)
+internal/protocol/dhcp4/observation_test.go:27:14: renewing.LeaseClock undefined (type Snapshot has no field or method LeaseClock)
+internal/protocol/dhcp4/observation_test.go:27:34: first.LeaseClock undefined (type Snapshot has no field or method LeaseClock)
+internal/protocol/dhcp4/observation_test.go:27:103: renewing.ObservedNanos undefined (type Snapshot has no field or method ObservedNanos)
+internal/protocol/dhcp4/observation_test.go:27:126: first.ObservedNanos undefined (type Snapshot has no field or method ObservedNanos)
+internal/protocol/dhcp4/observation_test.go:40:10: sent.LeaseClock undefined (type Snapshot has no field or method LeaseClock)
+internal/protocol/dhcp4/observation_test.go:40:47: renewing.ObservedNanos undefined (type Snapshot has no field or method ObservedNanos)
+internal/protocol/dhcp4/observation_test.go:40:69: sent.LeaseClock undefined (type Snapshot has no field or method LeaseClock)
+internal/protocol/dhcp4/observation_test.go:40:69: too many errors
+FAIL    github.com/imksoo/routerd2/internal/protocol/dhcp4 [build failed]
+FAIL

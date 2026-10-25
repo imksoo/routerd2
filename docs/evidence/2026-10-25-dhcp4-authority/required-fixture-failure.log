@@ -1,0 +1,37 @@
+ok      github.com/imksoo/routerd2/internal/boottime    (cached)
+ok      github.com/imksoo/routerd2/internal/protocol/bfd        1.337s
+ok      github.com/imksoo/routerd2/internal/protocol/dhcp4      1.046s
+ok      github.com/imksoo/routerd2/internal/network     (cached)
+ok      github.com/imksoo/routerd2/internal/resourceprogram     2.384s
+--- FAIL: TestDHCPv4OriginalBootGrantReplayMutationAndFinalFence (0.02s)
+    dhcp4_clock_test.go:57: stale protocol producer or configuration {[] [{wan0 0 [] map[] <nil> <nil> <nil> <nil>}] [] [] {<nil> <nil>} <nil> [] [] []}
+--- FAIL: TestEventRuleLifetimeSeesFlapBetweenControllerPolls (0.06s)
+    event_rules_test.go:33: invalid DHCPv4 boot observation
+--- FAIL: TestConditionHoldTimerAndFlapBetweenProjections (0.02s)
+    resource_conditions_test.go:39: invalid DHCPv4 boot observation
+--- FAIL: TestConditionalRuntimeStartWithdrawRecover (0.02s)
+    resource_conditions_test.go:125: invalid DHCPv4 boot observation
+--- FAIL: TestConditionalFactExpiryReplayAndRevisionFence (0.02s)
+    resource_conditions_test.go:176: invalid DHCPv4 boot observation
+--- FAIL: TestConditionalLeaseObservationDoesNotRefreshOnTransportReplay (0.02s)
+    resource_conditions_test.go:223: invalid DHCPv4 boot observation
+--- FAIL: TestConditionalNetworkFailureDoesNotStartWorker (0.02s)
+    resource_conditions_test.go:261: invalid DHCPv4 boot observation
+--- FAIL: TestConditionalUnavailableSupervisorWithdraws (0.02s)
+    resource_conditions_test.go:279: invalid DHCPv4 boot observation
+--- FAIL: TestConditionalChangedFactDuringStopRestartsQuiescedWorker (0.02s)
+    resource_conditions_test.go:303: invalid DHCPv4 boot observation
+--- FAIL: TestConditionalSourceDigestCutoverRevokesSameRevisionFacts (0.02s)
+    resource_conditions_test.go:333: invalid DHCPv4 boot observation
+--- FAIL: TestLeaseApplyFencingFailureRollbackAndExpiry (0.02s)
+    runtime_test.go:105: stale protocol producer or configuration
+--- FAIL: TestConcurrentRenewalSurvivesConfigurationCutover (0.05s)
+    runtime_test.go:147: stale protocol producer or configuration
+--- FAIL: TestDHCPLeaseCannotReplaceStaticAddressOwnership (0.02s)
+    runtime_test.go:263: overlapping lease did not reject conflicting ownership: stale protocol producer or configuration
+--- FAIL: TestPreviousSupervisorCannotSeedEmptyProtocolRuntime (0.05s)
+    --- FAIL: TestPreviousSupervisorCannotSeedEmptyProtocolRuntime/dhcp4 (0.02s)
+        supervisor_instance_test.go:48: old supervisor poisoned the new worker's first update stale protocol producer or configuration
+FAIL
+FAIL    github.com/imksoo/routerd2/internal/runtimeplan 12.707s
+FAIL

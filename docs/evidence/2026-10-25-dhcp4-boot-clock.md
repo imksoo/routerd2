@@ -93,3 +93,6 @@ DHCPv6等の時計境界、DHCP current providerとstructured selectors、IA_NA�
 
 [provenance](2026-10-25-dhcp4-boot-clock/provenance.json) に読んだcode、元log SHA・変換・環境とscopeを記録する。
 公開artifactのhashは `SHA256SUMS` に保存する。ELF/initramfs・private stageや実packet artifact本体はcommitしない。
+
+追補: 元BOOT期限のSnapshot/runtime/network writerへの伝搬は、後続の [a136ae8の証跡](2026-10-25-dhcp4-authority.md) を参照。
+この文書の未実装記述はfa5792d時点のもので、実NTP/物理suspendの受入は引き続き別の残作業である。

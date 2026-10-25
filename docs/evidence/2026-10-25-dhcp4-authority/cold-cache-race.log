@@ -1,0 +1,4 @@
+=== RUN   TestDHCPv4OriginalBootGrantReplayMutationAndFinalFence
+--- PASS: TestDHCPv4OriginalBootGrantReplayMutationAndFinalFence (2.16s)
+PASS
+ok      github.com/imksoo/routerd2/internal/runtimeplan 3.186s

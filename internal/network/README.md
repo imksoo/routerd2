@@ -42,6 +42,20 @@ network namespace. The caller must ensure this is the intended router namespace.
 
 ## Ownership and failures
 
+Ownership journal format 2 records controller-generated boot-scoped address
+lifetimes. Unreleased format 1 is refused without rewriting its contents; no
+prototype format migration or mixed-version rollback is supported. Operator
+configuration cannot declare `boot_lifetime`. It is the internal projection
+of an accepted finite protocol grant.
+
+For such addresses, boot ID and absolute preferred/valid BOOTTIME deadlines
+remain unchanged through writer restart and replay. Ownership checks and the
+kernel relative lifetime calculation use that original clock, independently
+of UTC corrections. An expired/foreign-boot intent cannot recreate an address,
+and an externally lengthened live lifetime is not adopted or deleted. Linux
+relative address expiry is also checked with the writer closed. Physical
+suspend and an autonomous IPv4 route expiry contract are separate gates.
+
 The state file is an ownership journal, not a configuration backup. Hold its
 directory in persistent storage and retain it across process and image upgrades.
 The engine locks it against a second instance using the same path.

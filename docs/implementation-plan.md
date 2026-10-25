@@ -7,7 +7,21 @@
 部分checkpointでゴールを完了にせず、実装・検証・未検証と証跡を更新する。
 対象機種・NIC・性能条件の確認と並行して、独立して進められる実装・隔離VM検証を続ける。
 
-最新product checkpointは `fa5792d`。
+最新product checkpointは `a136ae8`、検証fixtureは `66475eb`。
+DHCPv4の元BOOT観測・論理epoch/sequence・ACKのlease clockをSnapshot→runtime/fact→network writerへ伝える。
+最初の通知からlive supervisor世代を照合し、再送・phase表示・control cache初期化で元期限/ageを更新しない。
+writerは絶対BOOT寿命をjournal2へ保存し、再open後もkernel残寿命をUTCから作り直さない。operatorの内部BOOT期限指定と未公開journal1を拒否する。
+旧fa5792d pairは元BOOT情報不足で0.62秒FAIL。関連Race、clean全体check/Race/vet/Python23/両arch build128.43秒PASS。
+初回nativeの8秒leaseと5秒heartbeat、次のcontrol復旧の同世代要求はfixtureの誤りだった。失敗10.55秒（test10.48秒）/8.74秒を保存し、TTL3秒と実quiesce契約へ直した。
+最終fixtureの全体check/build7.41秒PASS（cache含む）。4 ELFのSHAは最初のchecked productと完全一致。
+nativeはkernel自律失効8.80秒、新DHCP worker10.35秒、実DHCP/v6/RA18.83秒、native/migrated DNS10.76/10.65秒、
+network21.74秒、BFD-derived13.86秒・BFD/BGP23.44秒・二WAN/PBR30.91秒がPASS。
+QEMUもkernel20.79秒・新DHCP39.75秒・DHCP31.02秒・native/migrated DNS32.53/33.53秒・network39.04秒・
+BFD-derived44.77秒・BFD/BGP56.40秒・二WAN/PBR97.13秒の関連9 gateがPASS。全suite/全計画の完了ではない。
+IPv4 route撤去にはlive coordinatorが必要。実NTP/物理suspend、他protocol、全resource/残計画、対象実機/NIC/性能受入は未完了。
+[証跡・検証scope・残作業](evidence/2026-10-25-dhcp4-authority.md) を参照。
+
+先行product checkpointは `fa5792d`。
 DHCPv4 clientのT1/T2/expiry、retry、transaction timeoutとpacket secsをBOOTTIMEで測る。
 UTC補正で元期限を変えず、更新ACKだけで新期限を確定する。失効後queued ACKは旧leaseを復活させない。
 旧timer処理の前後24時間補正FAILとclock入力adapterを保存し、関連package全体Race1.042秒PASS。
@@ -15,7 +29,7 @@ UTC補正で元期限を変えず、更新ACKだけで新期限を確定する�
 clean全体check/Race/vet/Python23/static両arch build96.59秒PASS。
 checked pair/native Raceの実DHCPv4/v6/RA18.94秒・DHCP→DNS10.70秒・migrated DHCP→DNS10.90秒PASS。
 QEMUも実DHCP/v6/RA30.22秒・DHCP→DNS31.56秒・migrated DHCP→DNS32.36秒PASS。
-関連3 gateの個別回帰であり、Snapshot/runtime/network writerのDHCPv4期限はまだUTC依存で、end-to-endのclock safetyは未達。
+この時点はclientのみの個別回帰で、Snapshot/runtime/network writerはUTC依存だった。元BOOT期限の伝搬は上記a136ae8で進めた。
 次に元BOOT期限をこの境界へ伝え、worker/control停止・旧通知・復旧を受入する。全計画・実機の完了は宣言しない。
 [証跡と次の境界](evidence/2026-10-25-dhcp4-boot-clock.md) を参照。
 

@@ -1,0 +1,8 @@
+=== RUN   TestDaemonBFDDerivedCurrentStatus
+    bgp_test.go:192: === RUN   TestDaemonBFDDerivedCurrentStatus
+            derived_bfd_test.go:206: independent real UDP BFD -> four typed fields -> durable DerivedEvent/EventRule; expiry, duplicate replay, worker/control restart and stale notification fencing passed
+            derived_bfd_test.go:207: ROUTERD_BFD_DERIVED_DAEMON_TEST_PASS
+        --- PASS: TestDaemonBFDDerivedCurrentStatus (11.74s)
+        PASS
+--- PASS: TestDaemonBFDDerivedCurrentStatus (12.77s)
+PASS
