@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/imksoo/routerd2/internal/runtimeabi"
 )
 
 // This gate uses the actual two command builds for both supported targets.
@@ -35,7 +37,8 @@ func TestBuiltRuntimeCatalog(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err = InspectELF(f, stat.Size(), name, id, "linux", arch); err != nil {
+				declared, err := InspectELFABI(f, stat.Size(), name, id, "linux", arch)
+				if err != nil || !declared.Equal(runtimeabi.Current()) {
 					t.Fatalf("%s: %v", name, err)
 				}
 				input = append(input, f)
@@ -65,6 +68,9 @@ func TestBuiltRuntimeCatalog(t *testing.T) {
 			}
 			if ref.ReleaseID != id || ref.Sequence != 42 || ref.GOARCH != arch {
 				t.Fatalf("staged actual bundle identity: %+v", ref)
+			}
+			if manifest.Version != 3 || !manifest.RuntimeABI.Equal(runtimeabi.Current()) {
+				t.Fatal("actual bundle lost native ABI declaration")
 			}
 			resolved, err := store.Lookup(ctx, ref.Digest)
 			if err != nil || resolved != ref {

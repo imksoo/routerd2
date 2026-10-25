@@ -110,3 +110,21 @@ func TestRecordScannerHandlesChunkBoundariesAndAmbiguity(t *testing.T) {
 		t.Fatal("unbounded current metadata")
 	}
 }
+
+func FuzzABIRecord(f *testing.F) {
+	for _, s := range []string{CurrentRecord, Prefix + "END", Prefix + Suffix, "{}"} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, s string) {
+		if len(s) > MaxRecordBytes+1 {
+			t.Skip()
+		}
+		if d, err := ParseRecord(s); err == nil {
+			round, err := EncodeRecord(d)
+			if err != nil || round != s {
+				t.Fatal("accepted noncanonical ABI record")
+			}
+		}
+		_, _ = ReadRecord(strings.NewReader(s))
+	})
+}

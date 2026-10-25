@@ -14,6 +14,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"github.com/imksoo/routerd2/internal/runtimeabi"
 )
 
 func TestManifestSignatureCanonicalAndTarget(t *testing.T) {
@@ -137,6 +139,9 @@ func TestELFRejectsWrongIdentityAndDynamicOrMalformedPayload(t *testing.T) {
 		{"cgo", func(b []byte) []byte { return bytes.ReplaceAll(b, []byte("CGO_ENABLED=0"), []byte("CGO_ENABLED=1")) }, "routerd", "fixture-r1"},
 		{"missing identity", func(b []byte) []byte {
 			return bytes.Replace(b, []byte("ROUTERD2-RELEASE-V1:fixture-r1:END"), []byte("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"), 1)
+		}, "routerd", "fixture-r1"},
+		{"missing ABI", func(b []byte) []byte {
+			return bytes.Replace(b, []byte(runtimeabi.CurrentRecord), bytes.Repeat([]byte("x"), len(runtimeabi.CurrentRecord)), 1)
 		}, "routerd", "fixture-r1"},
 		{"duplicate identity", func(b []byte) []byte {
 			f, err := elf.NewFile(bytes.NewReader(b))

@@ -8,8 +8,11 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/imksoo/routerd2/internal/runtimeabi"
@@ -107,6 +110,49 @@ func TestConfirmedRollbackCannotSelectDifferentFormatContract(t *testing.T) {
 	}
 }
 
+func TestBootAndAutomaticFallbackRejectUnqualifiedFormatChange(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	base := initializeFixture(t, s)
+	target := stageDifferentABI(t, s, "fixture-r2", 2)
+	prepared, err := s.next(mustState(t, s), "prepare")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared.Pending = &Pending{Release: target, MaxAttempts: 1}
+	prepared.HighWatermark = 2
+	if err := s.commit(prepared); err != nil {
+		t.Fatal(err)
+	}
+	boot, err := s.BeginBoot(ctx, "unqualified-boot")
+	if err == nil {
+		boot.Image.Close()
+	}
+	if !errors.Is(err, runtimeabi.ErrIncompatible) || !reflect.DeepEqual(mustState(t, s), prepared) {
+		t.Fatal("boot activated unqualified format change", err)
+	}
+	trial, err := s.next(prepared, "begin-boot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	trial.Active = &target
+	trial.Previous = &base
+	trial.Attempt = &Attempt{BootID: "unqualified-boot", Token: strings.Repeat("a", 32), Number: 1, StartedAt: s.now().UTC()}
+	if err := s.commit(trial); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.FailBoot(ctx, "unqualified-boot", trial.Attempt.Token, "unsafe fallback"); !errors.Is(err, runtimeabi.ErrIncompatible) {
+		t.Fatal("explicit failure selected incompatible fallback", err)
+	}
+	boot, err = s.BeginBoot(ctx, "later-boot")
+	if err == nil {
+		boot.Image.Close()
+	}
+	if !errors.Is(err, runtimeabi.ErrIncompatible) || !reflect.DeepEqual(mustState(t, s), trial) {
+		t.Fatal("automatic fallback bypassed ABI policy", err)
+	}
+}
+
 func TestLegacyManifestV2AndMissingABIHaveNoCompatibilityReader(t *testing.T) {
 	m, raw, _ := signedFixture(t, "fixture-r1", 1, nil)
 	abi, _ := json.Marshal(m.RuntimeABI)
@@ -120,5 +166,36 @@ func TestLegacyManifestV2AndMissingABIHaveNoCompatibilityReader(t *testing.T) {
 	m.RuntimeABI = runtimeabi.Descriptor{}
 	if _, _, err := SignManifest(m, testKey()); err == nil {
 		t.Fatal("manifest without ABI declaration signed")
+	}
+}
+
+func TestOfflinePublisherRejectsMixedNativeABIsBeforeOutput(t *testing.T) {
+	profile := runtimeabi.Current()
+	profile.ConfigurationContract = "resource-program-native-2"
+	record, err := runtimeabi.EncodeRecord(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]*os.File{}
+	for name, data := range fixtureBinaries(t) {
+		if name == "routerd-modules" {
+			data = bytes.Replace(data, []byte(runtimeabi.CurrentRecord), []byte(record), 1)
+		}
+		path := filepath.Join(t.TempDir(), name)
+		if err := os.WriteFile(path, data, 0500); err != nil {
+			t.Fatal(err)
+		}
+		file, err := os.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer file.Close()
+		files[name] = file
+	}
+	m, _, _ := signedFixture(t, fixtureRelease, 1, nil)
+	var out bytes.Buffer
+	_, err = WriteBundle(context.Background(), &out, BundleOptions{ReleaseID: fixtureRelease, Sequence: 1, GOOS: "linux", GOARCH: runtime.GOARCH, BootABI: 1, WorkerABI: 1, Entrypoint: m.Entrypoint, Roles: m.Roles, Artifacts: m.Artifacts}, testKey(), files)
+	if err == nil || out.Len() != 0 {
+		t.Fatal("mixed native declarations reached published output", err)
 	}
 }
