@@ -366,11 +366,27 @@ func verifyLiveCommitFreeze(ctx context.Context, store *release.Store) error {
 			if live.StoreID != reference.StoreID || live.Revision != expectedRevision || live.Confirmation != nil {
 				return errLivePreflightFence
 			}
-			// Resolve the actual immutable snapshot through the sole journal's
-			// identity and the current compiler. Target ABI/capability/state
-			// qualification remains separate from this transaction fixture.
-			_, err := (&config.Store{Dir: stateDir}).ResolveSnapshot(reference)
-			return err
+			// Inspect both actual startup inputs with the same read-only checks
+			// adoption will run. Target compiler/capability and other state
+			// families remain separate qualification gates.
+			cfg := &config.Store{Dir: stateDir}
+			candidate := configref.Selection{Generation: selection.Generation, ExpectedRevision: expectedRevision, Snapshot: reference}
+			checked, err := cfg.InspectStartup(candidate)
+			if err != nil {
+				return err
+			}
+			if checked.AlreadyAdopted || checked.Recovered {
+				return errors.New("preflight unexpectedly consumed candidate")
+			}
+			fallback := configref.Selection{Generation: selection.Generation + 1, ExpectedRevision: expectedRevision, Snapshot: snapshot, Recovery: &configref.Recovery{FailedGeneration: selection.Generation, FailedSnapshot: reference}}
+			checked, err = cfg.InspectStartup(fallback)
+			if err != nil {
+				return err
+			}
+			if checked.AlreadyAdopted || checked.Recovered {
+				return errors.New("preflight unexpectedly consumed fallback")
+			}
+			return nil
 		}
 	}
 	if _, err := store.PrepareRollbackChecked(ctx, state.Generation, options, preflight(3, snapshot, false)); !errors.Is(err, errLivePreflightFence) {
@@ -421,7 +437,7 @@ func verifyLiveCommitFreeze(ctx context.Context, store *release.Store) error {
 	if final.Revision != 3 || final.StoreID != snapshot.StoreID {
 		return errors.New("post-cancel commit did not preserve the live store")
 	}
-	fmt.Printf("%s_COMMIT_FENCE_WITNESS before=1 committed=2 blocked_status=409 replay=2 after_cancel=3 reserved_generation=11 store_identity=matched preflight_race_status=503 stale_revision=rejected missing_snapshot=rejected target_descriptor=verified\n", marker)
+	fmt.Printf("%s_COMMIT_FENCE_WITNESS before=1 committed=2 blocked_status=409 replay=2 after_cancel=3 reserved_generation=11 store_identity=matched preflight_race_status=503 stale_revision=rejected missing_snapshot=rejected target_descriptor=verified candidate_inspected=true fallback_inspected=true\n", marker)
 	return nil
 }
 

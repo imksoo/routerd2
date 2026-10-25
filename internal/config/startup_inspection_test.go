@@ -70,7 +70,34 @@ func TestStartupInspectionChecksRealCandidateAndRecoveryWithoutWriting(t *testin
 			if err != nil || !reflect.DeepEqual(adopted.Config, check.Snapshot.Config) || adopted.Startup.Recovered != check.Recovered || adopted.Revision != check.Current.Revision+1 {
 				t.Fatal("inspection and adoption disagree", err)
 			}
+			replay, err := s.InspectStartup(recovery)
+			if err != nil || !replay.AlreadyAdopted || replay.Recovered != consumed || !reflect.DeepEqual(replay.Current, adopted) {
+				t.Fatal("inspection lost the consumed recovery branch", err)
+			}
 		})
+	}
+}
+
+func TestStartupInspectionCannotAuthorizeAdoptionAfterAnotherCommit(t *testing.T) {
+	s, current, selection := startupFixture(t)
+	checked, err := s.InspectStartup(selection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current.Revision++
+	if err := s.Save(current); err != nil {
+		t.Fatal(err)
+	}
+	// Mutating an old observation must not alter stored intent or bypass the
+	// revision check. Adoption has no API for trusting this cached result.
+	checked.Current.Revision = current.Revision
+	checked.Snapshot.Config = Document{SchemaVersion: SchemaVersion}
+	before := inspectionTree(t, s.Dir)
+	if _, err := s.AdoptStartup(selection); !errors.Is(err, ErrStartupConflict) {
+		t.Fatal("stale observation authorized a new adoption", err)
+	}
+	if !reflect.DeepEqual(before, inspectionTree(t, s.Dir)) {
+		t.Fatal("refused adoption changed state")
 	}
 }
 

@@ -182,15 +182,29 @@ func readSnapshot(dir *os.File, ref SnapshotRef) (Snapshot, error) {
 }
 
 func (s *Store) snapshotDirectory(create bool) (*os.File, error) {
+	root, err := s.openStateRoot()
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	return snapshotDirectoryAt(root, create)
+}
+
+func (s *Store) openStateRoot() (*os.File, error) {
 	fd, err := unix.Open(s.Dir, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if err != nil {
 		return nil, err
 	}
 	root := os.NewFile(uintptr(fd), s.Dir)
-	defer root.Close()
-	if err := privateSnapshotDirectory(root); err != nil {
+	if err := privateStateDirectory(root); err != nil {
+		root.Close()
 		return nil, err
 	}
+	return root, nil
+}
+
+func snapshotDirectoryAt(root *os.File, create bool) (*os.File, error) {
+	fd := int(root.Fd())
 	if create {
 		if err := unix.Mkdirat(fd, "snapshots", 0700); err != nil && !errors.Is(err, unix.EEXIST) {
 			return nil, err
@@ -206,20 +220,20 @@ func (s *Store) snapshotDirectory(create bool) (*os.File, error) {
 		return nil, err
 	}
 	dir := os.NewFile(uintptr(child), "snapshots")
-	if err := privateSnapshotDirectory(dir); err != nil {
+	if err := privateStateDirectory(dir); err != nil {
 		dir.Close()
 		return nil, err
 	}
 	return dir, nil
 }
 
-func privateSnapshotDirectory(f *os.File) error {
+func privateStateDirectory(f *os.File) error {
 	var st unix.Stat_t
 	if err := unix.Fstat(int(f.Fd()), &st); err != nil {
 		return err
 	}
 	if st.Mode&unix.S_IFMT != unix.S_IFDIR || st.Uid != uint32(os.Geteuid()) || st.Mode&0777 != 0700 {
-		return fmt.Errorf("snapshot store must use owned private 0700 directories")
+		return fmt.Errorf("configuration state and snapshots require owned private 0700 directories")
 	}
 	return nil
 }

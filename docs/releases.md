@@ -317,3 +317,12 @@ policy. The raw preparation methods remain lower-level primitives, and there
 are no new operator CLI/SSH flags or activated paired loader in this change.
 Resolving a snapshot with the running compiler is not proof that the target
 runtime supports it.
+
+The configuration store now exposes `InspectStartup` for the configuration side
+of preflight. It shares adoption's checks and returns actual journal/snapshot
+observations without writing or syncing. Both candidate and conditional fallback
+inputs must be inspected while writers are excluded, and preparation must reject
+an already consumed candidate rather than interpreting replay as new authority.
+The signed PID 1 fixture inspects both inputs before preparation and cancels the
+pair before boot. This does not activate the paired loader or inspect target
+compiler behavior and other persistent state. See [startup configuration](startup-config.md).

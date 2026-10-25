@@ -86,6 +86,13 @@ before acknowledgment. An unconfirmed later commit is preserved for the normal
 control-restart rollback; the startup replay cannot erase that recovery record.
 Ordinary writes cannot forget or alter an already consumed generation.
 
+Explicit adoption also requires an owned private 0700 state directory and an
+owned 0600, singly linked, bounded regular `config.json`. Journal and snapshot
+reads are anchored to the same open directory. Symlinks, shared or foreign
+journals and special files are rejected; a FIFO cannot block startup inspection.
+This check applies to explicit startup selection, including replay, rather than
+claiming that every normal journal read/write already has this protection.
+
 The supervisor validates and copies the selection once, passes its bounded JSON
 only to the control worker and clears the reserved selection environment entry
 for all other workers. Inherited environment and `Options.Env` cannot inject a
@@ -126,14 +133,37 @@ payload cannot block post-adoption recovery when its exact durable receipt is
 present. Existing identity files, keys, revocation policy, lease authority and
 event history are not imported from either snapshot.
 
+## Read-only inspection before preparing an update
+
+The internal `Store.InspectStartup` method runs the same identity, generation,
+revision, confirmation, outbox-capacity, snapshot digest/provenance and compiler
+checks as adoption, without writing a record, event or selection, creating a
+directory, or performing a durability sync. Its result contains the actual
+current record, verified snapshot and recovery branch. A consumed selection
+returns `AlreadyAdopted` with the current record and no snapshot payload; later
+commits and confirmation recovery remain authoritative even if the old input
+snapshot is gone.
+
+Inspection is an observation, not a reusable authorization token. The caller
+must exclude independent configuration writers while checking both candidate
+and fallback inputs and publishing its release decision. Adoption inspects again
+before writing. `PrepareChecked` provides the release lock, and release-bound
+control writers participate in that lock; the inspection method itself does not
+acquire it. These are internal APIs, not a new operator prepare/restore command.
+
+The current compiler validates both source documents. This does not establish
+that an incoming executable can compile them, inspect the other persistent state
+families, authorize format migration or qualify the target kernel/engines.
+
 ## Remaining signed-runtime boot integration
 
 The one-time adoption path is implemented for boot with a fixed runtime. Using
 `startup` together with the signed `release` selector is currently rejected:
-preparing and confirming a runtime/configuration pair, reserving compatible
-fallback references, fencing changes during a trial and binding the adoption to
-the release attempt generation remain pending. Do not interpret fixed-runtime
-startup as acceptance of that coupled boot-control transaction.
+internal paired prepare/confirm records, reserved fallback references and the
+release-bound control writer fence exist, but their operator workflow, coordinated
+loader, exact tuple health/confirmation and fallback acceptance remain pending.
+Do not interpret fixed-runtime startup or read-only inspection as acceptance of
+that coupled boot-control transaction.
 
 The capture operation does not select startup by itself; there is no online
 snapshot-restore endpoint or SSH `prepare` implementation yet. Selection intent,

@@ -29,64 +29,87 @@ func OpenSelected(dir, seed string, selection *configref.Selection) (*Store, Com
 	return s, c, err
 }
 
-// AdoptStartup requires exclusive configuration-writer ownership. It is not an
-// online mutation API and never writes the kernel or changes boot selection.
-func (s *Store) AdoptStartup(selection configref.Selection) (Committed, error) {
+// StartupInspection is an observation of the existing journal and selected
+// immutable input, never permission to write later without rechecking. Snapshot
+// is zero when AlreadyAdopted is true: the consumed receipt, including any later
+// commit or confirmation, is authoritative and the input need not still exist.
+type StartupInspection struct {
+	Current        Committed
+	Snapshot       Snapshot
+	AlreadyAdopted bool
+	Recovered      bool
+}
+
+// InspectStartup checks the same state, compiler and recovery fences used by
+// AdoptStartup without creating state, publishing an event, fsyncing or consuming
+// a generation. The caller must exclude independent configuration writers while
+// inspecting and making its release decision (engine mutex, then release lock).
+// The current compiler validates both the journal and snapshot; this is not an
+// inspection of an incoming executable's compiler or other state families.
+func (s *Store) InspectStartup(selection configref.Selection) (StartupInspection, error) {
 	if err := selection.Validate(); err != nil {
-		return Committed{}, err
+		return StartupInspection{}, err
 	}
-	c, err := s.Load()
+	dir, err := s.openStateRoot()
 	if err != nil {
-		return c, err
+		return StartupInspection{}, err
+	}
+	defer dir.Close()
+	c, err := readStartupRecord(dir)
+	if err != nil {
+		return StartupInspection{Current: c}, err
 	}
 	if selection.Snapshot.StoreID != c.StoreID {
-		return c, ErrStartupConflict
+		return StartupInspection{Current: c}, ErrStartupConflict
 	}
 	if c.Startup != nil {
 		old := c.Startup.Selection
 		if selection.Generation < old.Generation || selection.Generation == old.Generation && !selection.Equal(old) {
-			return c, ErrStartupConflict
+			return StartupInspection{Current: c}, ErrStartupConflict
 		}
 		if selection.Equal(old) {
-			// Journal is now authoritative, including later normal commits and
-			// any unconfirmed recovery record. Never reimport the old snapshot.
-			if err := syncDir(s.Dir); err != nil {
-				return c, errors.Join(ErrStartupUncertain, err)
-			}
-			return c, nil
+			// A consumed receipt is authoritative even after later commits or
+			// removal of its input snapshot. Inspection must neither reimport it
+			// nor perform the durability sync required when adoption is retried.
+			return StartupInspection{Current: c, AlreadyAdopted: true, Recovered: c.Startup.Recovered}, nil
 		}
 	}
 	if c.Confirmation != nil {
-		return c, ErrStartupConflict
+		return StartupInspection{Current: c}, ErrStartupConflict
 	}
 	recovered := false
 	if selection.Recovery == nil {
 		if c.Revision != selection.ExpectedRevision {
-			return c, ErrStartupConflict
+			return StartupInspection{Current: c}, ErrStartupConflict
 		}
 	} else {
 		r := selection.Recovery
 		switch {
 		case c.Revision == selection.ExpectedRevision:
 			if c.Startup != nil && c.Startup.Selection.Generation >= r.FailedGeneration {
-				return c, ErrStartupConflict
+				return StartupInspection{Current: c}, ErrStartupConflict
 			}
 		case c.Revision == selection.ExpectedRevision+1:
 			failed := configref.Selection{Generation: r.FailedGeneration, ExpectedRevision: selection.ExpectedRevision, Snapshot: r.FailedSnapshot}
 			if c.Startup == nil || !c.Startup.Selection.Equal(failed) || c.Startup.Revision != c.Revision || c.Startup.Recovered {
-				return c, ErrStartupConflict
+				return StartupInspection{Current: c}, ErrStartupConflict
 			}
 			recovered = true
 		default:
-			return c, ErrStartupConflict
+			return StartupInspection{Current: c}, ErrStartupConflict
 		}
 	}
 	if len(c.EventOutbox) >= MaxEventOutbox {
-		return c, ErrStartupCapacity
+		return StartupInspection{Current: c}, ErrStartupCapacity
 	}
-	snapshot, err := s.ResolveSnapshot(selection.Snapshot)
+	snapshots, err := snapshotDirectoryAt(dir, false)
 	if err != nil {
-		return c, err
+		return StartupInspection{Current: c}, err
+	}
+	defer snapshots.Close()
+	snapshot, err := readSnapshot(snapshots, selection.Snapshot)
+	if err != nil {
+		return StartupInspection{Current: c}, err
 	}
 	if selection.Recovery != nil && !recovered {
 		// Before adoption, the live baseline must still match the prepared
@@ -96,9 +119,27 @@ func (s *Store) AdoptStartup(selection configref.Selection) (Committed, error) {
 		before, _ := json.Marshal(c.Config)
 		expected, _ := json.Marshal(snapshot.Config)
 		if !bytes.Equal(before, expected) {
-			return c, ErrStartupConflict
+			return StartupInspection{Current: c}, ErrStartupConflict
 		}
 	}
+	return StartupInspection{Current: c, Snapshot: snapshot, Recovered: recovered}, nil
+}
+
+// AdoptStartup requires exclusive configuration-writer ownership. It is not an
+// online mutation API and never writes the kernel or changes boot selection.
+func (s *Store) AdoptStartup(selection configref.Selection) (Committed, error) {
+	check, err := s.InspectStartup(selection)
+	c := check.Current
+	if err != nil {
+		return c, err
+	}
+	if check.AlreadyAdopted {
+		if err := syncDir(s.Dir); err != nil {
+			return c, errors.Join(ErrStartupUncertain, err)
+		}
+		return c, nil
+	}
+	snapshot, recovered := check.Snapshot, check.Recovered
 	var eventID [16]byte
 	if _, err := rand.Read(eventID[:]); err != nil {
 		return c, err
