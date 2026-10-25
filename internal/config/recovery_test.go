@@ -2,6 +2,8 @@ package config
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -140,5 +142,19 @@ func TestConditionalRecoveryPublicationFailureRetainsExactReceipt(t *testing.T) 
 	bad.Startup = &receipt
 	if err := s.Save(bad); err == nil {
 		t.Fatal("ordinary save changed the consumed recovery branch")
+	}
+}
+
+func TestConditionalRecoveryDoesNotNeedFailedSnapshotAfterAdoption(t *testing.T) {
+	s, baseline, candidate, recovery := recoveryFixture(t)
+	if _, err := s.AdoptStartup(candidate); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(s.Dir, "snapshots", candidate.Snapshot.Digest+".json")); err != nil {
+		t.Fatal(err)
+	}
+	c, err := s.AdoptStartup(recovery)
+	if err != nil || !reflect.DeepEqual(c.Config, baseline.Config) || !c.Startup.Recovered {
+		t.Fatal("recovery depended on failed candidate payload rather than its exact durable receipt", err)
 	}
 }
