@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "purpose": "isolated-daemon-dhcp4-clock-integration",
+  "suite": "daemon-dhcp4-clock",
+  "required_test": "TestDaemonDHCPv4ClockCorrections",
+  "kernel_release": "6.18.58-0-virt",
+  "kernel_sha256": "17fbd3efd16f2e7cb1b945f06423b37399ba7d5ac8cdd3665e7f13f363500e85",
+  "initializer_sha256": "e3f98983d8ca236d36bbcbc83761fa5fa883784aebd5313d1c44afd305cc45b9",
+  "test_binary_sha256": "89a9d66eb92be59a2159eae1a6272294cc02fc72cedaa1e595e06ae5e1100c3b",
+  "binary_sha256": {
+    "/test/bin/routerd": "a97e1ba43a5b7e1d7e1ef90162a1c2709a6f3b14c1a92d3ec28467c5a3d213b3",
+    "/test/bin/routerd-modules": "21f8f7e590ae2fd6f7ba49556a76d577631b684f3d65577a8681ec6ed17cc854"
+  },
+  "source_image_manifest_sha256": "a1df58dc193d6f6f5a361b9b630e9fb106b76a3e3089239da2185f812d265b43",
+  "source_initramfs_sha256": "c6b0ac5a7e6dc64a186ab595586f27bed87440083dc7a13cf0db9df8a3d2c729",
+  "host_network_access": false,
+  "result": "passed",
+  "guest_memory_mib": 512,
+  "test_scratch": {
+    "mountpoint": "/tmp",
+    "filesystem": "tmpfs",
+    "size_bytes": 67108864
+  },
+  "clock_fault": {
+    "enabled": true,
+    "scope": "guest-only"
+  },
+  "initramfs_sha256": "51cc6c3e408e6942d4698f43d76c8cd7e3b653e0b0da6616f111d585c263cc55",
+  "duration_seconds": 37.74,
+  "qemu_exit_status_before_cleanup": 0
+}

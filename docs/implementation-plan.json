@@ -11906,6 +11906,37 @@
         "Prototype network journal1→2 migration or rolling compatibility not provided; durable raw producers, storage retention/off-device durability/aggregate budgets, effects/federation and full product qualification remain"
       ],
       "parity_flags_unchanged": true
+    },
+    {
+      "id": "dhcp4-real-clock-step-acceptance",
+      "date": "2026-10-25",
+      "status": "partial_clock_step_acceptance_verified",
+      "code_checkpoint": "a136ae8e9af273f443d22b3fb1f7d045d56be674",
+      "fixture_checkpoint": "c051be212521e7c40df0bf0072b5ec1940442a9e",
+      "workflow_checkpoint": "00c0d8ea106cfd15ba989196ca178b4e66fe962a",
+      "work_packages": [
+        "CORE-03",
+        "NET-05"
+      ],
+      "evidence": "docs/evidence/2026-10-25-dhcp4-clockstep.md",
+      "implemented": [
+        "Test-only PID1 clock broker: exact fixed suite, per-boot kernel/initramfs nonce, private inherited socketpair with PID1 peer verification; bounded fixed actions and unconditional final restore; absent from production pair",
+        "Actual QEMU CLOCK_REALTIME +/-24h qualification of original DHCPv4 lease through configuration reapply, kernel expiry, TCP/UDP/capture, duplicate retry and worker/control recovery; production code unchanged",
+        "Dedicated make qemu-dhcp4-clock and inclusion in protocol acceptance sequence; native positive clock mutation refused before namespace setup"
+      ],
+      "validation": [
+        "Test-first controller/transport/runner API refusals retained; first transport1s timeout was fixture retaining original socket after net.FileConn duplication, locally fixed by closing spare FD without longer deadlines",
+        "Controller/transport/cleanup Race tests pass with fake clock setter; Python24 pass; native required clock test without broker returns expected failure in0.07s; native original DHCP authority Race harness10.15s passes",
+        "Clean c051be2 make check/Race/vet/Python24/static amd64+arm64 build9.39s; clean workflow00c0d8e recheck/build7.36s including cached tests; all four production ELF hashes equal previous checked a136ae8 pair",
+        "Actual no-NIC512MiB/2CPU/64MiB scratch QEMU clock gate37.74s passes; forward lease and config reapply, backward original expiry while same producer Ready, real TCP/UDP/capture, stale409 and fresh ACK recovery, final PID1 restore; host wall-minus-monotonic delta -570ns, no host clock step",
+        "Normal QEMU DHCP gate34.14s passes with clock broker disabled; initializer/test/kernel/production pair SHA equal the clock gate, production pair equal previous QEMU acceptance; original fixture deadlines unchanged; two individual related QEMU gates, not a new all-suite aggregate"
+      ],
+      "remaining": [
+        "Actual NTP client/server discipline or slew, physical suspend, arm64 execution and selected physical hardware/NIC/long-run/performance acceptance",
+        "All-controller/writer-stopped autonomous IPv4 route expiry is not provided; existing route removal needs live coordinator",
+        "Other protocol original clock/current provider contracts, complete DHCP resources and every remaining implementation-plan work package including extracted runtime/update/recovery/storage/effects/federation"
+      ],
+      "parity_flags_unchanged": true
     }
   ],
   "delivery_goal": {

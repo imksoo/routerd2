@@ -4,7 +4,19 @@
 対象: `https://github.com/imksoo/routerd2`
 
 **継続ゴール:** 全残実装・必要試験・対象実機での利用可能性の受入まで進める。
-部分checkpointでは完了しない。最新product checkpointは `a136ae8`、検証fixtureは `66475eb`。
+部分checkpointでは完了しない。
+
+今回の追加受入はfixture `c051be2`、実行手順 `00c0d8e`。製品は `a136ae8` のまま。
+外部NICのない専用QEMUのPID 1だけで、実CLOCK_REALTIMEを前後24時間補正して復元した。
+元DHCPv4 BOOT leaseは前進後のconfig再適用とTCP/UDPを維持し、後退中も元期限でaddress/default routeを撤去する。
+同じworkerがReadyのままのSIGSTOP失効、再送、worker/control再起動、旧世代409、fresh ACK復旧とcaptureを確認した。
+新clock gate37.74秒・通常DHCP gate34.14秒PASS。native通常DHCPのRace harness10.15秒PASS、brokerなしclock必須実行は0.07秒で期待拒否。
+clean全体check/Race/vet/Python24/両arch build9.39秒、実行手順追加後7.36秒PASS（cache含む）。4 ELFは前回checked pairと一致。
+固定suite・per-boot kernel marker・private PID 1 socketpairでclock操作を隔離し、production両binaryには含めない。
+実NTP discipline/slew・物理suspend・対象実機/NIC/性能と全残計画は未完了。work package/parityは変更しない。
+[実clock補正の証跡・境界・残作業](evidence/2026-10-25-dhcp4-clockstep.md) を参照。
+
+前回の期限伝搬検証はproduct `a136ae8`、fixture `66475eb`。
 DHCPv4の元BOOT観測・論理epoch/sequence・ACKのlease clockをSnapshot→runtime/fact→network writerへ伝える。
 最初の通知からlive supervisor世代を照合し、再送・phase表示・control cache初期化で元期限/ageを更新しない。
 writerは絶対BOOT寿命をjournal2へ保存し、再open後もkernel残寿命をUTCから作り直さない。operatorの内部BOOT期限指定と未公開journal1を拒否する。

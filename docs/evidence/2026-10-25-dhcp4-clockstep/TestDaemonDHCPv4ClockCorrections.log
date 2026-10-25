@@ -1,0 +1,4 @@
+=== RUN   TestDaemonDHCPv4ClockCorrections
+    dhcp4_authority_test.go:46: dedicated guest clock FD 3 is required
+--- FAIL: TestDaemonDHCPv4ClockCorrections (0.00s)
+FAIL

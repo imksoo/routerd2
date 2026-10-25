@@ -1,0 +1,14 @@
+# github.com/imksoo/routerd2/internal/clocktest [github.com/imksoo/routerd2/internal/clocktest.test]
+internal/clocktest/controller_test.go:13:19: undefined: Guest
+internal/clocktest/controller_test.go:15:9: undefined: Guest
+internal/clocktest/controller_test.go:15:30: undefined: SuiteName
+internal/clocktest/controller_test.go:19:33: undefined: Guest
+internal/clocktest/controller_test.go:20:11: undefined: Guest
+internal/clocktest/controller_test.go:21:11: undefined: Guest
+internal/clocktest/controller_test.go:22:11: undefined: Guest
+internal/clocktest/controller_test.go:23:11: undefined: Guest
+internal/clocktest/controller_test.go:24:11: undefined: Guest
+internal/clocktest/controller_test.go:25:11: undefined: Guest
+internal/clocktest/controller_test.go:25:11: too many errors
+FAIL    github.com/imksoo/routerd2/internal/clocktest [build failed]
+FAIL

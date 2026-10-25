@@ -1,0 +1,26 @@
+{
+  "source_commit": "c051be212521e7c40df0bf0072b5ec1940442a9e",
+  "source_dirty": false,
+  "product_code_checkpoint": "a136ae8e9af273f443d22b3fb1f7d045d56be674",
+  "scope": "dedicated no-NIC512MiB2CPU guest; actual REALTIME steps only via test-only PID1; existing deadlines and64MiB scratch unchanged; not actual NTP discipline or physical suspend",
+  "tests": [
+    {
+      "suite": "daemon-dhcp4-clock",
+      "exit_code": 0,
+      "passed": true,
+      "wall_seconds": 51.58,
+      "guest_run_seconds": 37.74,
+      "host_wall_minus_monotonic_delta_nanoseconds": -570,
+      "host_no_clock_step": true
+    },
+    {
+      "suite": "daemon-dhcp4",
+      "exit_code": 0,
+      "passed": true,
+      "wall_seconds": 46.11,
+      "guest_run_seconds": 34.14,
+      "host_wall_minus_monotonic_delta_nanoseconds": -1313,
+      "host_no_clock_step": true
+    }
+  ]
+}
