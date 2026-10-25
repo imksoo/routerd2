@@ -7,6 +7,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import secrets
 from pathlib import Path, PurePosixPath
 import shutil
 import stat
@@ -110,6 +111,13 @@ SUITES = {
         "marker": "ROUTERD_DHCP4_AUTHORITY_TEST", "timeout": 250,
         "commands": True,
         "description": "original DHCPv4 BOOTTIME authority, kernel lease, TCP/UDP/capture and worker/control recovery",
+    },
+    "daemon-dhcp4-clock": {
+        "package": "./internal/integration", "binary": "daemon.test",
+        "test": "TestDaemonDHCPv4ClockCorrections",
+        "marker": "ROUTERD_DHCP4_CLOCK_TEST", "timeout": 250,
+        "commands": True,
+        "description": "actual guest UTC steps, original DHCP BOOT lease, kernel reapply, expiry, TCP/UDP/capture and recovery",
     },
     "daemon-dhcp-dns": {
         "package": "./internal/integration", "binary": "daemon.test",
@@ -249,6 +257,15 @@ def extract_modules(archive, root):
         raise ValueError("source image has no kernel modules")
 
 
+def clock_marker(root, suite_name):
+    """Only the fixed clock-fault guest receives a per-boot kernel marker."""
+    if suite_name != "daemon-dhcp4-clock":
+        return ""
+    nonce = secrets.token_hex(16)
+    (root / "test-clock-nonce").write_text(nonce + "\n")
+    return "routerd2.clock-test=" + nonce
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--suite", choices=tuple(SUITES), default="network")
@@ -286,6 +303,7 @@ def main():
             (root / directory).mkdir(parents=True, exist_ok=True)
         (root / "tmp").chmod(0o1777)
         (root / "test-suite").write_text(args.suite + "\n")
+        clock_argument = clock_marker(root, args.suite)
         print("Extracting appliance kernel modules for the isolated test image...", flush=True)
         source_archive = Path(temporary) / "source-initramfs.cpio.gz"
         shutil.copyfile(image / "initramfs.cpio.gz", source_archive)
@@ -326,6 +344,7 @@ def main():
             "host_network_access": False, "result": "not-run",
             "guest_memory_mib": 512,
             "test_scratch": {"mountpoint": "/tmp", "filesystem": "tmpfs", "size_bytes": 64 << 20},
+            "clock_fault": {"enabled": bool(clock_argument), "scope": "guest-only" if clock_argument else "none"},
         }
         spec = importlib.util.spec_from_file_location("mkinitramfs", PROJECT / "images/mkinitramfs.py")
         packer = importlib.util.module_from_spec(spec)
@@ -345,7 +364,7 @@ def main():
         shutil.copyfile(image / "vmlinuz", kernel)
         if hashlib.sha256(kernel.read_bytes()).hexdigest() != manifest["kernel_sha256"]:
             raise RuntimeError("source kernel changed while preparing the guest")
-        run_guest(args, suite, output, manifest, timeout, kernel, archive)
+        run_guest(args, suite, output, manifest, timeout, kernel, archive, clock_argument)
 
 
 def publish_artifact(source, destination):
@@ -377,14 +396,14 @@ def require_guest_pass(text, suite, exit_status):
         raise RuntimeError("guest initializer reported failure")
 
 
-def run_guest(args, suite, output, manifest, timeout, kernel, archive):
+def run_guest(args, suite, output, manifest, timeout, kernel, archive, clock_argument=""):
     log_path = archive.parent / "qemu-serial.log"
     command = [
         args.qemu, "-machine", "q35", "-accel", "tcg", "-cpu", "max",
         "-m", "512M", "-smp", "2", "-display", "none", "-monitor", "none",
         "-no-reboot", "-nodefaults", "-nic", "none", "-serial", f"file:{log_path}",
         "-kernel", str(kernel), "-initrd", str(archive),
-        "-append", "console=ttyS0,115200 panic=-1",
+        "-append", "console=ttyS0,115200 panic=-1" + (" " + clock_argument if clock_argument else ""),
     ]
     print(f"Booting the {args.suite} test guest (no external network interface)...", flush=True)
     process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)

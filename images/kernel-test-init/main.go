@@ -8,6 +8,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -63,6 +64,8 @@ func selectedSuite() (suite, error) {
 		return suite{"/daemon.test", "TestDaemonDHCPDNSAndOwnershipExpiry", "ROUTERD_DHCP_DNS_DAEMON_TEST", 150 * time.Second}, nil
 	case "daemon-dhcp4":
 		return suite{"/daemon.test", "TestDaemonDHCPv4OriginalLeaseAuthority", "ROUTERD_DHCP4_AUTHORITY_TEST", 210 * time.Second}, nil
+	case "daemon-dhcp4-clock":
+		return suite{"/daemon.test", "TestDaemonDHCPv4ClockCorrections", "ROUTERD_DHCP4_CLOCK_TEST", 210 * time.Second}, nil
 	case "daemon-legacy-dhcp-dns":
 		return suite{"/daemon.test", "TestDaemonMigratedDHCPDNSAndOwnershipExpiry", "ROUTERD_LEGACY_DHCP_DNS_DAEMON_TEST", 150 * time.Second}, nil
 	case "daemon-bgp":
@@ -88,7 +91,7 @@ func selectedSuite() (suite, error) {
 	}
 }
 
-func run(s suite) error {
+func run(s suite) (runErr error) {
 	if os.Getpid() != 1 {
 		return fmt.Errorf("test init requires PID 1 in its dedicated virtual machine")
 	}
@@ -127,6 +130,11 @@ func run(s suite) error {
 	if s.binary == "/daemon.test" {
 		command.Env = append(command.Env, "ROUTERD2_TEST_BIN_DIR=/test/bin")
 	}
+	broker, err := startClockBroker(s, command)
+	if err != nil {
+		return err
+	}
+	defer func() { runErr = errors.Join(runErr, broker.closeAndRestore()) }()
 	var output bytes.Buffer
 	writer := io.MultiWriter(os.Stdout, &output)
 	command.Stdout, command.Stderr = writer, writer

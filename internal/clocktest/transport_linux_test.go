@@ -59,6 +59,7 @@ func TestClockBrokerOnlyRunsFixedActionsAndReportsOriginalClock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	_ = file.Close() // net.FileConn owns its duplicate; do not keep a spare peer alive.
 	for _, action := range []string{"forward", "backward", "restore"} {
 		r, err := client.Step(action)
 		if err != nil || r.Action != action || r.Clock.BootID != original.BootID {

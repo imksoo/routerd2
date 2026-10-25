@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/imksoo/routerd/pkg/bgpdaemon"
+	"github.com/imksoo/routerd2/internal/clocktest"
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/control"
 	"github.com/imksoo/routerd2/internal/localapi"
@@ -213,6 +214,14 @@ func isolateFixtureTimeout(t *testing.T, name string, timeout time.Duration) boo
 		}
 		cmd := exec.Command(exe, "-test.run=^"+name+"$", "-test.v", "-test.timeout="+timeout.String())
 		cmd.Env = append(os.Environ(), child+"="+name, parentKey+"="+parent)
+		if name == "TestDaemonDHCPv4ClockCorrections" {
+			file, err := clocktest.ForwardFileFromEnv()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer file.Close()
+			cmd.ExtraFiles = []*os.File{file}
+		}
 		cmd.SysProcAttr = &syscall.SysProcAttr{Cloneflags: unix.CLONE_NEWUSER | unix.CLONE_NEWNET, UidMappings: []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getuid(), Size: 1}}, GidMappings: []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getgid(), Size: 1}}, GidMappingsEnableSetgroups: false}
 		out, err := cmd.CombinedOutput()
 		if err != nil {
