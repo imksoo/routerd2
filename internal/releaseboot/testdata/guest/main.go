@@ -339,7 +339,53 @@ func verifyLiveCommitFreeze(ctx context.Context, store *release.Store) error {
 		return err
 	}
 	selection := configref.Selection{Generation: 10, ExpectedRevision: 2, Snapshot: snapshot}
-	pending, err := store.PrepareRollback(ctx, state.Generation, release.PrepareOptions{Startup: &selection, KnownGood: &snapshot})
+	options := release.PrepareOptions{Startup: &selection, KnownGood: &snapshot}
+	preflight := func(expectedRevision uint64, reference config.SnapshotRef, race bool) release.Preflight {
+		return func(call context.Context, current release.State, target *release.Image) error {
+			if current.Active == nil || state.Active == nil || *current.Active != *state.Active {
+				return errors.New("preflight current runtime changed")
+			}
+			if current.Previous == nil || target.Release != *current.Previous {
+				return errors.New("preflight did not receive the actual rollback target")
+			}
+			if _, err := target.Entrypoint().Stat(); err != nil {
+				return fmt.Errorf("preflight target descriptor: %w", err)
+			}
+			if race {
+				request := control.CommitRequest{ExpectedRevision: 2, RequestID: "live-preflight-race", Config: initial.Config}
+				err := client.Do(call, "POST", "/v1/config/commit", request, nil)
+				var busy *localapi.HTTPError
+				if !errors.As(err, &busy) || busy.StatusCode != 503 {
+					return fmt.Errorf("live commit entered locked preflight: %v", err)
+				}
+			}
+			var live control.State
+			if err := client.Do(call, "GET", "/v1/config", nil, &live); err != nil {
+				return err
+			}
+			if live.StoreID != reference.StoreID || live.Revision != expectedRevision || live.Confirmation != nil {
+				return errors.New("preflight live configuration fence mismatch")
+			}
+			// Resolve the actual immutable snapshot through the sole journal's
+			// identity and the current compiler. Target ABI/capability/state
+			// qualification remains separate from this transaction fixture.
+			_, err := (&config.Store{Dir: stateDir}).ResolveSnapshot(reference)
+			return err
+		}
+	}
+	if _, err := store.PrepareRollbackChecked(ctx, state.Generation, options, preflight(3, snapshot, false)); err == nil {
+		return errors.New("stale live configuration passed checked prepare")
+	}
+	missing := snapshot
+	missing.Digest = strings.Repeat("0", 64)
+	if _, err := store.PrepareRollbackChecked(ctx, state.Generation, options, preflight(2, missing, false)); err == nil {
+		return errors.New("missing actual snapshot passed checked prepare")
+	}
+	unchangedRelease, err := store.Status(ctx)
+	if err != nil || unchangedRelease.Generation != state.Generation || unchangedRelease.ConfigHighWatermark != state.ConfigHighWatermark || unchangedRelease.Pending != nil {
+		return fmt.Errorf("failed preflight changed release authority: %v", err)
+	}
+	pending, err := store.PrepareRollbackChecked(ctx, state.Generation, options, preflight(2, snapshot, true))
 	if err != nil {
 		return fmt.Errorf("prepare raw paired rollback intent: %w", err)
 	}
@@ -375,7 +421,7 @@ func verifyLiveCommitFreeze(ctx context.Context, store *release.Store) error {
 	if final.Revision != 3 || final.StoreID != snapshot.StoreID {
 		return errors.New("post-cancel commit did not preserve the live store")
 	}
-	fmt.Printf("%s_COMMIT_FENCE_WITNESS before=1 committed=2 blocked_status=409 replay=2 after_cancel=3 reserved_generation=11 store_identity=matched\n", marker)
+	fmt.Printf("%s_COMMIT_FENCE_WITNESS before=1 committed=2 blocked_status=409 replay=2 after_cancel=3 reserved_generation=11 store_identity=matched preflight_race_status=503 stale_revision=rejected missing_snapshot=rejected target_descriptor=verified\n", marker)
 	return nil
 }
 
