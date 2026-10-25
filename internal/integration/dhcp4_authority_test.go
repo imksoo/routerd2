@@ -102,7 +102,7 @@ func TestDaemonDHCPv4OriginalLeaseAuthority(t *testing.T) {
 				continue
 			}
 			u32 := func(n uint32) []byte { b := make([]byte, 4); binary.BigEndian.PutUint32(b, n); return b }
-			opts := map[byte][]byte{wire.OptionServerID: {192, 0, 2, 1}, wire.OptionSubnetMask: {255, 255, 255, 0}, wire.OptionRouter: {192, 0, 2, 1}, wire.OptionLeaseTime: u32(8), wire.OptionT1: u32(2), wire.OptionT2: u32(6)}
+			opts := map[byte][]byte{wire.OptionServerID: {192, 0, 2, 1}, wire.OptionSubnetMask: {255, 255, 255, 0}, wire.OptionRouter: {192, 0, 2, 1}, wire.OptionLeaseTime: u32(3), wire.OptionT1: u32(1), wire.OptionT2: u32(2)}
 			packet := wire.EncodeRequest(kind, m.XID, m.CHAddr, opts)
 			packet[0] = 2
 			copy(packet[16:20], []byte{192, 0, 2, 10})
@@ -141,8 +141,9 @@ func TestDaemonDHCPv4OriginalLeaseAuthority(t *testing.T) {
 	if dir := os.Getenv("ROUTERD2_TEST_EVIDENCE_DIR"); dir != "" {
 		t.Setenv("ROUTERD2_TEST_EVIDENCE_DIR", filepath.Join(dir, "dhcp4-authority"))
 	}
-	capture := healthPBRCapture(t, "wan0")
 	f := startFixtureDaemon(t, config.FromNative(config.Native{Network: network.Desired{Interfaces: []network.Interface{{Name: "wan0"}}}, Services: []serviceconfig.Service{{Name: "wan", DHCP4: &serviceconfig.DHCP4{Interface: "wan0"}}}}))
+	// Stop capture before daemon shutdown can change its interface state.
+	capture := healthPBRCapture(t, "wan0")
 	instance := func() runtimeplan.InstanceStatus {
 		t.Helper()
 		var s runtimeplan.InstanceStatus
@@ -287,14 +288,25 @@ func TestDaemonDHCPv4OriginalLeaseAuthority(t *testing.T) {
 		t.Fatal("old DHCP worker notification accepted", err)
 	}
 	traffic()
-	expired := pause()
+	// Keep heartbeats alive during control recovery. The independent server
+	// withholds ACKs, so the client naturally expires and enters Requesting.
+	expired := healthPBRUpdate(instance())
+	acknowledge.Store(false)
 	until(t, 12*time.Second, func() bool { return kernel(false) })
-	expired = healthPBRUpdate(instance())
+	until(t, 5*time.Second, func() bool { s := snapshot(); return !s.Active && s.State == wire.StateRequesting })
+	stableGeneration := instance().Generation
 	restart("control")
-	if err := f.control.Do(ctx, "POST", "/v1/services/state", expired, nil); err != nil || !kernel(false) {
+	if instance().Generation != stableGeneration {
+		t.Fatal("worker restarted during control recovery gate")
+	}
+	// A fresh control may ACK the already-expired old grant, or reject it if
+	// the live worker has already replayed its newer inactive observation.
+	if err := f.control.Do(ctx, "POST", "/v1/services/state", expired, nil); err != nil && !localapi.IsHTTPStatus(err, 409) || !kernel(false) {
 		t.Fatal("control restart revived an expired original grant", err)
 	}
-	resume()
+	acknowledge.Store(true)
+	until(t, 15*time.Second, func() bool { clock, _ := boottime.Read(); return dhcp4.CurrentLease(snapshot(), clock) && kernel(true) })
+	traffic()
 	until(t, 5*time.Second, func() bool {
 		return capture.count("0.0.0.0", "255.255.255.255", unix.IPPROTO_UDP, 67) > 0 && capture.count("192.0.2.10", "192.0.2.1", unix.IPPROTO_TCP, 18091) > 0 && capture.count("192.0.2.10", "192.0.2.1", unix.IPPROTO_UDP, 18092) > 0
 	})
