@@ -11,6 +11,17 @@ supervisor and control health to confirm a trial. The local management CLI
 queues changes; a successful prepare or rollback does not mean that the running
 process tree has already changed.
 
+`WithState` holds the process mutex and interprocess file lock across a callback,
+after verifying the current state and referenced runtimes. It does not publish
+callback changes. The configuration writer uses it for selection checks and its
+complete apply/save/restore transaction; a separate prepare cannot enter midway.
+Callbacks must not recursively call this store. Contention returns `ErrBusy`,
+and callback errors/canceled acquisition release or avoid both locks.
+Private boot authority and pending-pair commit fencing are described in
+[the writer contract](../../docs/releases.md#configuration-writer-fence-for-a-selected-signed-runtime).
+This does not activate paired boot or add snapshot/compatibility preflight to
+the raw store primitives.
+
 ## Bundle and trust contract
 
 An uncompressed USTAR bundle contains canonical `manifest.json`, raw 64-byte

@@ -125,10 +125,6 @@ func runProbe(phase string) error {
 		if err := commitThroughSSH(ctx, client); err != nil {
 			return err
 		}
-		health, err = readHealthyConfig(ctx)
-		if err != nil {
-			return err
-		}
 	} else {
 		// This is a fresh authenticated SSH connection to the persistent host
 		// key after kernel reboot; inspect committed state through that channel.
@@ -259,23 +255,30 @@ func settledConfigEvent(s control.State, page control.ObservationPage) (events.R
 }
 
 func awaitPublishedConfigEvent(ctx context.Context) (control.State, events.Record, error) {
+	return awaitPublishedConfigEventFrom(ctx, localapi.NewClient(filepath.Join(runtimeDir, control.SocketName)))
+}
+
+func awaitPublishedConfigEventFrom(ctx context.Context, client *localapi.Client) (control.State, events.Record, error) {
 	timer := time.NewTimer(0)
 	defer timer.Stop()
+	var last error
 	for {
 		select {
 		case <-ctx.Done():
-			return control.State{}, events.Record{}, fmt.Errorf("configuration publication/ACK did not settle: %w", ctx.Err())
+			return control.State{}, events.Record{}, fmt.Errorf("configuration publication/ACK did not settle: %w (last observation: %v)", ctx.Err(), last)
 		case <-timer.C:
 		}
-		s, err := readHealthyConfig(ctx)
+		s, err := readHealthyConfigFrom(ctx, client)
 		if err == nil {
 			var page control.ObservationPage
-			if err = localapi.NewClient(filepath.Join(runtimeDir, control.SocketName)).Do(ctx, "GET", "/v1/observations?after_cursor=0&limit=16", nil, &page); err == nil {
+			if err = client.Do(ctx, "GET", "/v1/observations?after_cursor=0&limit=16", nil, &page); err == nil {
 				if record, ok := settledConfigEvent(s, page); ok {
 					return s, record, nil
 				}
+				err = errors.New("configuration event or producer ACK is not settled")
 			}
 		}
+		last = err
 		timer.Reset(100 * time.Millisecond)
 	}
 }
@@ -315,10 +318,18 @@ func awaitReady(ctx context.Context, phase string) (supervisor.Status, control.S
 }
 
 func readHealthyConfig(ctx context.Context) (control.State, error) {
+	return readHealthyConfigFrom(ctx, localapi.NewClient(filepath.Join(runtimeDir, control.SocketName)))
+}
+
+func readHealthyConfigFrom(ctx context.Context, client *localapi.Client) (control.State, error) {
 	var health control.State
-	err := localapi.NewClient(filepath.Join(runtimeDir, control.SocketName)).Do(ctx, "GET", "/v1/config", nil, &health)
+	err := client.Do(ctx, "GET", "/v1/config", nil, &health)
 	if err == nil && (!health.Healthy || health.Revision == 0 || health.Services == nil || health.Services.Phase != "ready" || health.Services.Revision != health.Revision || health.Services.RouteIssueCount != 0) {
-		err = errors.New("committed routing configuration is not healthy")
+		servicePhase, serviceRevision, routeIssues := "missing", uint64(0), 0
+		if health.Services != nil {
+			servicePhase, serviceRevision, routeIssues = health.Services.Phase, health.Services.Revision, health.Services.RouteIssueCount
+		}
+		err = fmt.Errorf("committed routing configuration is not healthy: revision=%d healthy=%t services=%s service_revision=%d route_issues=%d last_error=%q event_journal=%q event_store=%q event_rule=%q derived=%q protocol=%q", health.Revision, health.Healthy, servicePhase, serviceRevision, routeIssues, health.LastError, health.EventJournalError, health.EventStoreError, health.EventRuleError, health.DerivedError, health.ProtocolEventError)
 	}
 	return health, err
 }

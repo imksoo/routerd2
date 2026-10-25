@@ -59,7 +59,15 @@ separate initializer and probe, excluded from the ordinary production build.
    service/config revisions, active trial, previous baseline, no pending
    attempt, retained high watermark, `operation=confirm` and unchanged kernel
    boot ID.
-8. The probe emits its witness and PASS marker, drains the serial console and
+8. After observing confirmation, the probe makes a real control commit and
+   snapshot. It prepares a paired rollback intent through the raw release store
+   while PID 1 and the selected workers continue running. Exact request replay
+   must retain revision 2, a new commit must return HTTP 409 without changing
+   the authoritative journal, and cancellation must retain store identity and
+   the reserved configuration generation 11. A new commit must then reach
+   revision 3. This tests the live writer fence without activating paired boot.
+9. The probe emits both its execution and commit-fence witnesses and PASS marker,
+   drains the serial console and
    powers off the guest. The host requires QEMU to exit successfully after
    those markers; a marker without clean guest poweroff does not pass.
 
@@ -68,12 +76,14 @@ its read-only checks cannot lock the store during initial boot selection.
 Temporary contention with health confirmation is retried using the product's
 explicit busy response. After re-verifying the executable files it always
 leaves an idle interval, so the observer cannot monopolize the store lock on a
-slow CPU.
+slow CPU. Once confirmation has been witnessed, a fence failure ends the test;
+the probe does not restart the transaction or retry mutations until they pass.
 
 ## Outputs and boundaries
 
 The output directory contains a dedicated initramfs, serial log and JSON result
-manifest. The manifest records kernel, source-image manifest, initializer,
+manifest. The host requires both witnesses before accepting PASS. The manifest
+records kernel, source-image manifest, initializer,
 executable and initramfs hashes, the observed confirmation witness, elapsed time
 and QEMU exit status. A failed rebuild removes old passing artifacts before
 starting; a renamed or absent PASS marker cannot be interpreted as success.
@@ -82,7 +92,10 @@ Keys are created inside the ephemeral guest and are not production trust
 material. The release store and configuration state use the guest initramfs.
 They do not survive guest shutdown.
 
-This gate proves a same-kernel userland transition and real health confirmation.
+This gate proves a same-kernel userland transition, real health confirmation and
+the running control worker's paired-prepare commit fence/replay/cancel behavior.
+The raw paired intent is canceled before any boot. It does not prove a paired
+runtime/configuration loader, compatible target preflight or paired trial health.
 It does not test two separate boots using a persistent disk, bootloader fallback,
 kernel or root-filesystem updates, data-partition mounting, schema migration,
 hardware watchdog recovery or appliance power-loss durability. Release unit

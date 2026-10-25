@@ -206,6 +206,37 @@ runtime, keeping both high watermarks; direct confirmed-pair rollback is refused
 These are library/state-machine primitives. There are no corresponding CLI or
 SSH prepare flags yet, and the current appliance command explicitly refuses a
 selected paired intent rather than booting its runtime without its configuration.
-The coordinated loader, trial commit fence, profile/kernel/state compatibility
-checks and full runtime/configuration health confirmation remain to be wired
-and accepted. Existing runtime-only prototype gates do not qualify this flow.
+The coordinated loader, profile/kernel/state compatibility checks and full
+runtime/configuration health confirmation remain to be wired and accepted.
+Existing runtime-only prototype gates do not qualify this flow.
+
+## Configuration writer fence for a selected signed runtime
+
+Signed appliance boot passes private root/trust-file/manifest-digest context to
+the control worker. The supervisor validates and copies it once, overrides any
+inherited or caller-provided environment entry, and clears it for other workers.
+The worker opens the protected trust policy and release store independently.
+Before opening/adopting configuration it checks the exact selected runtime and
+startup intent under the release lock; a bound store identity must already match.
+This context is not an operator boot-config field or an authorization credential.
+
+Control holds its own writer mutex, then the release process mutex and file lock,
+through stage, kernel/protocol apply, journal save, and any failed-apply restoration.
+Confirmed rollback, restart reconciliation and configuration confirmation use the
+same lock order. A competing release transaction returns busy (configuration HTTP
+503); a stale runtime, foreign store or unconsumed startup returns HTTP 409.
+There is no unlocked check-then-apply window. The release callback does not call
+back into control or recursively acquire its own store.
+
+A pending paired intent freezes new commits and changes to an unconfirmed record,
+both before boot and during a trial. Exact durable request replay remains an
+acknowledgment without repeating apply. Canceling the candidate or confirming the
+exact adopted pair unfreezes writes; cancellation retains authority reservations.
+Reapplying an already confirmed configuration remains possible during prepare.
+Runtime-only pending releases retain their existing configuration behavior.
+
+This is the writer side of coordination. The raw release store still cannot
+preflight live configuration revision, unconfirmed state, snapshots or target
+compatibility. Preparing a stale raw intent is therefore not a supported operator
+workflow. Paired signed boot remains explicitly refused until the coordinator,
+loader, health confirmation and fallback policy are connected and accepted.
