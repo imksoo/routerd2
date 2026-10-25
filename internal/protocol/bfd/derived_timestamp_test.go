@@ -4,6 +4,7 @@ package bfd
 
 import (
 	"encoding/json"
+	"math"
 	"testing"
 	"time"
 
@@ -83,5 +84,36 @@ func TestObservedTimestampContinuityBeforeMailboxCoalescing(t *testing.T) {
 				t.Fatal("actually unchanged timestamp could not complete its new hold", stable, err)
 			}
 		})
+	}
+}
+
+func TestTimestampChangeSaturationAndUnchangedPublication(t *testing.T) {
+	cfg := testConfig()
+	w, err := newWorker(cfg, fakeDevice(1), sampleClock(int64(10*time.Second)), func(uint32) uint32 { return 0 })
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := w.snapshot(true, 0)
+	unchanged := w.snapshot(true, 0)
+	if first.TimestampChanges != 1 || unchanged.TimestampChanges != first.TimestampChanges {
+		t.Fatal("identical snapshot changed timestamp proof")
+	}
+	w.timestampChanges = math.MaxUint64 - 1
+	w.clock.WallTime = w.clock.WallTime.Add(time.Second)
+	w.clock.BoottimeNanoseconds += int64(time.Second)
+	saturated := w.snapshot(true, 0)
+	if saturated.TimestampChanges != math.MaxUint64 {
+		t.Fatal("timestamp counter did not saturate")
+	}
+	if _, known := CurrentStatus(cfg, saturated, "observedAt", w.clock); known {
+		t.Fatal("saturated timestamp proof certified equality continuity")
+	}
+	if got, known := CurrentStatus(cfg, saturated, "phase", w.clock); !known || got.Text != "Down" {
+		t.Fatal("unrelated state field lost its independent proof", got, known)
+	}
+	w.clock.WallTime = w.clock.WallTime.Add(-time.Hour)
+	w.clock.BoottimeNanoseconds += int64(time.Second)
+	if next := w.snapshot(true, 0); next.TimestampChanges != math.MaxUint64 {
+		t.Fatal("timestamp counter wrapped after a clock correction")
 	}
 }

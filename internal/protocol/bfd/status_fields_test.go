@@ -20,7 +20,7 @@ func TestCurrentStatusFieldsPreserveLegacyShapesAndOriginalReceiveProof(t *testi
 	if _, _, err := session.receive(control{state: wireInit, multiplier: 3, my: 2, your: 1, minTx: 300000, minRx: 300000}, "192.0.2.2", at, at.BoottimeNanoseconds); err != nil {
 		t.Fatal(err)
 	}
-	sample := Snapshot{Resource: cfg.Resource, Interface: cfg.Interface, SourceAddress: cfg.SourceAddress, BootID: testBootID, Active: true, UpdatedAt: at.WallTime, ObservedNanos: uint64(at.BoottimeNanoseconds), ExpiresNanos: uint64(at.BoottimeNanoseconds) + uint64(StatusLifetime), Peers: []PeerState{session.snapshot(true)}}
+	sample := Snapshot{Resource: cfg.Resource, Interface: cfg.Interface, SourceAddress: cfg.SourceAddress, BootID: testBootID, Active: true, TimestampChanges: 1, UpdatedAt: at.WallTime, ObservedNanos: uint64(at.BoottimeNanoseconds), ExpiresNanos: uint64(at.BoottimeNanoseconds) + uint64(StatusLifetime), Peers: []PeerState{session.snapshot(true)}}
 	if err := ValidateSnapshot(cfg, sample); err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestCurrentDownStatusNeedsFiniteProducerObservation(t *testing.T) {
 	cfg := Normalize(Config{Resource: "edge", Interface: "eth0", SourceAddress: "192.0.2.1", Peers: []Peer{{Address: "192.0.2.2"}}})
 	at := sampleClock(int64(10 * time.Second))
 	session := newSession(cfg.Peers[0], 1, 49152, at.BoottimeNanoseconds, func(uint32) uint32 { return 0 })
-	sample := Snapshot{Resource: cfg.Resource, Interface: cfg.Interface, SourceAddress: cfg.SourceAddress, BootID: testBootID, Active: true, UpdatedAt: at.WallTime, ObservedNanos: uint64(at.BoottimeNanoseconds), ExpiresNanos: uint64(at.BoottimeNanoseconds) + uint64(StatusLifetime), Peers: []PeerState{session.snapshot(true)}}
+	sample := Snapshot{Resource: cfg.Resource, Interface: cfg.Interface, SourceAddress: cfg.SourceAddress, BootID: testBootID, Active: true, TimestampChanges: 1, UpdatedAt: at.WallTime, ObservedNanos: uint64(at.BoottimeNanoseconds), ExpiresNanos: uint64(at.BoottimeNanoseconds) + uint64(StatusLifetime), Peers: []PeerState{session.snapshot(true)}}
 	got, known := CurrentStatus(cfg, sample, "phase", at)
 	if !known || got.Text != "Down" || got.ObservedNanos != sample.ObservedNanos || got.ExpiresNanos != sample.ExpiresNanos {
 		t.Fatal(got, known)
@@ -92,7 +92,7 @@ func TestCurrentStatusAtMaximumPeersAndMixedLegacyPhases(t *testing.T) {
 	}
 	cfg = Normalize(cfg)
 	at := sampleClock(int64(10 * time.Second))
-	sample := Snapshot{Resource: cfg.Resource, Interface: cfg.Interface, SourceAddress: cfg.SourceAddress, BootID: testBootID, Active: true, UpdatedAt: at.WallTime, ObservedNanos: uint64(at.BoottimeNanoseconds), ExpiresNanos: uint64(at.BoottimeNanoseconds) + uint64(StatusLifetime)}
+	sample := Snapshot{Resource: cfg.Resource, Interface: cfg.Interface, SourceAddress: cfg.SourceAddress, BootID: testBootID, Active: true, TimestampChanges: 1, UpdatedAt: at.WallTime, ObservedNanos: uint64(at.BoottimeNanoseconds), ExpiresNanos: uint64(at.BoottimeNanoseconds) + uint64(StatusLifetime)}
 	states := make([]*session, len(cfg.Peers))
 	for i, peer := range cfg.Peers {
 		s := newSession(peer, uint32(i+1), uint16(49152+i), at.BoottimeNanoseconds, func(uint32) uint32 { return 0 })

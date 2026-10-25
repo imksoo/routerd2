@@ -225,7 +225,7 @@ func FuzzSessionSnapshot(f *testing.F) {
 		}
 		cfg, s, now := testConfig(), testSession(), int64(time.Second)
 		check := func() {
-			snapshot := Snapshot{Resource: cfg.Resource, Interface: cfg.Interface, SourceAddress: cfg.SourceAddress, BootID: testBootID, Active: true, ObservedNanos: uint64(now), ExpiresNanos: uint64(now) + uint64(StatusLifetime), UpdatedAt: sampleClock(now).WallTime, Peers: []PeerState{s.snapshot(true)}}
+			snapshot := Snapshot{Resource: cfg.Resource, Interface: cfg.Interface, SourceAddress: cfg.SourceAddress, BootID: testBootID, Active: true, TimestampChanges: 1, ObservedNanos: uint64(now), ExpiresNanos: uint64(now) + uint64(StatusLifetime), UpdatedAt: sampleClock(now).WallTime, Peers: []PeerState{s.snapshot(true)}}
 			if err := ValidateSnapshot(cfg, snapshot); err != nil {
 				t.Fatalf("machine emitted invalid boundary: %v; %+v", err, snapshot)
 			}
