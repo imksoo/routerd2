@@ -14,7 +14,7 @@ SPEC.loader.exec_module(STORAGE)
 def witnesses():
     first_id = "50695aa4-d7d3-48c1-abab-14e150fae427"
     first = {
-        "boot_id": first_id, "pid": 1, "revision": 2, "pinned_exec_verified": True,
+        "boot_id": first_id, "pid": 1, "revision": 2, "pinned_exec_verified": True, "host_identity_inspected": True,
         "release_id": STORAGE.IDENTITIES["trial"], "release_operation": "begin-boot", "pending": True,
         "config_sha256": "config", "host_key_sha256": "host", "host_key_fingerprint": "fingerprint",
         "sentinel_sha256": "sentinel",
@@ -47,7 +47,7 @@ class TwoBootWitnessTests(unittest.TestCase):
             "boot_id": witnesses()[0]["witness"]["boot_id"],
             "release_id": STORAGE.IDENTITIES["trial"], "release_operation": "confirm",
             "failed_boot_id": "unrelated", "pending": True, "pid": 2, "revision": 1,
-            "pinned_exec_verified": False, "config_sha256": "changed",
+            "pinned_exec_verified": False, "host_identity_inspected": False, "config_sha256": "changed",
             "host_key_sha256": "changed", "host_key_fingerprint": "changed", "sentinel_sha256": "changed",
             "event_id": "changed", "event_cursor": 2,
             "store_id": "d" * 32, "snapshot_digest": "e" * 64, "snapshot_revision": 3,

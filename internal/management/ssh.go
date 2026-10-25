@@ -3,76 +3,20 @@ package management
 import (
 	"bytes"
 	"context"
-	"crypto/ed25519"
-	"crypto/rand"
-	"crypto/x509"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net"
-	"os"
 	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/imksoo/routerd2/internal/cli"
 	"github.com/imksoo/routerd2/internal/runtimeconfig"
+	"github.com/imksoo/routerd2/internal/statefs"
 	"golang.org/x/crypto/ssh"
 )
-
-func HostKey(path string) (ssh.Signer, error) {
-	b, err := os.ReadFile(path)
-	if err == nil {
-		return ssh.ParsePrivateKey(b)
-	}
-	if !os.IsNotExist(err) {
-		return nil, err
-	}
-	_, key, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		return nil, err
-	}
-	der, err := x509.MarshalPKCS8PrivateKey(key)
-	if err != nil {
-		return nil, err
-	}
-	b = pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if os.IsExist(err) {
-		b, err = os.ReadFile(path)
-		if err != nil {
-			return nil, err
-		}
-		return ssh.ParsePrivateKey(b)
-	}
-	if err != nil {
-		return nil, err
-	}
-	_, err = f.Write(b)
-	if err == nil {
-		err = f.Sync()
-	}
-	closeErr := f.Close()
-	if err == nil {
-		err = closeErr
-	}
-	if err != nil {
-		_ = os.Remove(path)
-		return nil, err
-	}
-	d, err := os.Open(filepath.Dir(path))
-	if err != nil {
-		return nil, err
-	}
-	err = d.Sync()
-	_ = d.Close()
-	if err != nil {
-		return nil, err
-	}
-	return ssh.NewSignerFromKey(key)
-}
 
 func ServerConfig(opts runtimeconfig.SSH, signer ssh.Signer) (*ssh.ServerConfig, error) {
 	allowed := make([]ssh.PublicKey, 0, len(opts.AuthorizedKeys))
@@ -113,10 +57,17 @@ func Serve(ctx context.Context, opts runtimeconfig.SSH, runtimeDir, stateDir str
 		<-ctx.Done()
 		return nil
 	}
-	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+	if err := ctx.Err(); err != nil {
 		return err
 	}
-	signer, err := HostKey(filepath.Join(stateDir, "ssh_host_ed25519_key"))
+	dir, err := statefs.OpenDirectory(stateDir, true)
+	if err != nil {
+		return err
+	}
+	if err := dir.Close(); err != nil {
+		return err
+	}
+	signer, err := hostKey(ctx, filepath.Join(stateDir, HostKeyName), nil)
 	if err != nil {
 		return err
 	}

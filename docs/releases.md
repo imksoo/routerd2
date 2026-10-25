@@ -335,3 +335,11 @@ The signed boot fixture compares worker and direct disk observations under the
 preparation lock. This contributes a network format observation; it is not a
 complete state inventory, an atomic observation of other workers, or evidence
 that saved lease/ownership facts are fresh. See the [network journal contract](../internal/network/README.md).
+
+`management.InspectHostKey` adds a protected read-only observation of SSH host
+identity codec/presence and public fingerprint. Explicit key initialization uses
+atomic no-replace publication, and existing keys are never repaired or replaced
+on parse failure. The signed fixture observes absence with SSH disabled; the
+two-boot storage fixture inspects the actual persistent management key and SSH
+peer. This is not key rotation/revocation or complete state qualification. See
+the [identity contract](../internal/management/README.md).

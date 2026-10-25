@@ -184,6 +184,8 @@ def check_witnesses(phases):
     for witness in (first, second):
         if witness.get("pid") != 1 or witness.get("revision") != 2 or not witness.get("pinned_exec_verified"):
             raise RuntimeError("guest witness did not verify actual PID 1, committed config and pinned executables")
+        if witness.get("host_identity_inspected") is not True:
+            raise RuntimeError("guest witness did not inspect the actual persistent SSH identity")
         if not isinstance(witness.get("event_id"), str) or not re.fullmatch(r"[0-9a-f]{32}", witness["event_id"]):
             raise RuntimeError("guest witness lacks a canonical durable configuration event ID")
         if type(witness.get("event_cursor")) is not int or witness["event_cursor"] <= 0:

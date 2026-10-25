@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/imksoo/routerd2/internal/statefs"
 	"golang.org/x/sys/unix"
 )
 
@@ -17,7 +18,7 @@ func openNetworkJournalParent(path string, create bool) (*os.File, string, error
 	if !secretFilePath(path) || path == "/" {
 		return nil, "", errors.New("network journal needs a clean absolute file path")
 	}
-	dir, err := openProtectedNetworkDirectory(filepath.Dir(path), create)
+	dir, err := statefs.OpenDirectory(filepath.Dir(path), create)
 	if err != nil {
 		return nil, "", err
 	}

@@ -10,9 +10,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"syscall"
 
+	"github.com/imksoo/routerd2/internal/statefs"
 	"golang.org/x/sys/unix"
 )
 
@@ -26,70 +26,11 @@ func privateFileOwner(info os.FileInfo) bool {
 // ordinary group/other-writable ancestor is not. Root and the worker UID are
 // trusted owners of ancestors; the final secret must belong to the worker UID.
 func openWireGuardSecretDirectory(path string) (*os.File, error) {
-	return openProtectedNetworkDirectory(path, false)
+	return statefs.OpenDirectory(path, false)
 }
 
 // create is reserved for journal initialization. Read-only state inspection and
 // secret resolution never create or synchronize directories.
-func openProtectedNetworkDirectory(path string, create bool) (*os.File, error) {
-	if !filepath.IsAbs(path) || filepath.Clean(path) != path || len(path) > 4096 || strings.ContainsAny(path, "\x00\r\n") {
-		return nil, errors.New("network state/secret directory must be a clean absolute path")
-	}
-	fd, err := unix.Open("/", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
-	if err != nil {
-		return nil, err
-	}
-	current := os.NewFile(uintptr(fd), "/")
-	ok := false
-	defer func() {
-		if !ok {
-			current.Close()
-		}
-	}()
-	check := func(f *os.File) error {
-		var st unix.Stat_t
-		if err := unix.Fstat(int(f.Fd()), &st); err != nil {
-			return err
-		}
-		stickyRoot := st.Uid == 0 && st.Mode&unix.S_ISVTX != 0
-		if st.Mode&unix.S_IFMT != unix.S_IFDIR || st.Uid != 0 && st.Uid != uint32(os.Geteuid()) || st.Mode&0022 != 0 && !stickyRoot {
-			return errors.New("network state/secret path has an untrusted or writable directory")
-		}
-		return nil
-	}
-	if err := check(current); err != nil {
-		return nil, err
-	}
-	if path != "/" {
-		for _, component := range strings.Split(strings.TrimPrefix(path, "/"), "/") {
-			fd, err := unix.Openat(int(current.Fd()), component, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
-			if errors.Is(err, unix.ENOENT) && create {
-				if err := unix.Mkdirat(int(current.Fd()), component, 0700); err != nil && !errors.Is(err, unix.EEXIST) {
-					return nil, err
-				}
-				fd, err = unix.Openat(int(current.Fd()), component, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
-			}
-			if err != nil {
-				return nil, err
-			}
-			next := os.NewFile(uintptr(fd), component)
-			if err := check(next); err != nil {
-				next.Close()
-				return nil, err
-			}
-			if create {
-				if err := errors.Join(next.Sync(), current.Sync()); err != nil {
-					next.Close()
-					return nil, err
-				}
-			}
-			current.Close()
-			current = next
-		}
-	}
-	ok = true
-	return current, nil
-}
 
 func openWireGuardSecretParent(path string) (*os.File, string, error) {
 	if !secretFilePath(path) || path == "/" {

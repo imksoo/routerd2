@@ -20,6 +20,7 @@ import (
 	"github.com/imksoo/routerd2/internal/control"
 	"github.com/imksoo/routerd2/internal/events"
 	"github.com/imksoo/routerd2/internal/localapi"
+	"github.com/imksoo/routerd2/internal/management"
 	"github.com/imksoo/routerd2/internal/release"
 	"github.com/imksoo/routerd2/internal/supervisor"
 	"github.com/vishvananda/netlink"
@@ -28,27 +29,28 @@ import (
 )
 
 type executionWitness struct {
-	StoreID            string   `json:"store_id"`
-	SnapshotDigest     string   `json:"snapshot_digest"`
-	SnapshotRevision   uint64   `json:"snapshot_revision"`
-	Phase              string   `json:"phase"`
-	BootID             string   `json:"boot_id"`
-	PID                int      `json:"pid"`
-	ReleaseID          string   `json:"release_id"`
-	ReleaseOperation   string   `json:"release_operation"`
-	ReleaseGeneration  uint64   `json:"release_generation"`
-	Pending            bool     `json:"pending"`
-	FailedBootID       string   `json:"failed_boot_id,omitempty"`
-	Revision           uint64   `json:"revision"`
-	ConfigSHA256       string   `json:"config_sha256"`
-	EventID            string   `json:"event_id"`
-	EventCursor        uint64   `json:"event_cursor"`
-	HostKeySHA256      string   `json:"host_key_sha256"`
-	HostKeyFingerprint string   `json:"host_key_fingerprint"`
-	SentinelSHA256     string   `json:"sentinel_sha256"`
-	Modules            []string `json:"modules"`
-	PinnedExecVerified bool     `json:"pinned_exec_verified"`
-	Filesystem         string   `json:"filesystem"`
+	StoreID               string   `json:"store_id"`
+	SnapshotDigest        string   `json:"snapshot_digest"`
+	SnapshotRevision      uint64   `json:"snapshot_revision"`
+	Phase                 string   `json:"phase"`
+	BootID                string   `json:"boot_id"`
+	PID                   int      `json:"pid"`
+	ReleaseID             string   `json:"release_id"`
+	ReleaseOperation      string   `json:"release_operation"`
+	ReleaseGeneration     uint64   `json:"release_generation"`
+	Pending               bool     `json:"pending"`
+	FailedBootID          string   `json:"failed_boot_id,omitempty"`
+	Revision              uint64   `json:"revision"`
+	ConfigSHA256          string   `json:"config_sha256"`
+	EventID               string   `json:"event_id"`
+	EventCursor           uint64   `json:"event_cursor"`
+	HostKeySHA256         string   `json:"host_key_sha256"`
+	HostKeyFingerprint    string   `json:"host_key_fingerprint"`
+	HostIdentityInspected bool     `json:"host_identity_inspected"`
+	SentinelSHA256        string   `json:"sentinel_sha256"`
+	Modules               []string `json:"modules"`
+	PinnedExecVerified    bool     `json:"pinned_exec_verified"`
+	Filesystem            string   `json:"filesystem"`
 }
 
 func runProbe(phase string) error {
@@ -110,6 +112,14 @@ func runProbe(phase string) error {
 		return errors.New("product host key cannot be parsed")
 	}
 	fingerprint := ssh.FingerprintSHA256(host.PublicKey())
+	identity, err := management.InspectHostKey(ctx, filepath.Join(stateDir, management.HostKeyName))
+	if err != nil {
+		return err
+	}
+	if !identity.Present || identity.Version != management.IdentityVersion || identity.Fingerprint != fingerprint {
+		return errors.New("persistent SSH identity inspection differs from the actual key")
+	}
+
 	if phase == "second" && fingerprint != expected.HostKeyFingerprint {
 		return errors.New("SSH host public key changed across disk remount")
 	}
@@ -231,7 +241,7 @@ func runProbe(phase string) error {
 		Phase: phase, BootID: bootID, PID: processes.PID, ReleaseID: selected.ReleaseID,
 		ReleaseOperation: state.Operation, ReleaseGeneration: state.Generation,
 		Pending: state.Pending != nil, Revision: health.Revision,
-		ConfigSHA256: configHash, HostKeySHA256: hostHash, HostKeyFingerprint: fingerprint,
+		ConfigSHA256: configHash, HostKeySHA256: hostHash, HostKeyFingerprint: fingerprint, HostIdentityInspected: true,
 		EventID: published.Event.ID, EventCursor: published.Cursor,
 		SentinelSHA256: sentinelHash, Modules: names, PinnedExecVerified: true, Filesystem: "ext4",
 	}
