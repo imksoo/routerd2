@@ -343,17 +343,42 @@ func (s *Store) Initialize(ctx context.Context, ref Ref) (State, error) {
 // Prepare accepts a future boot candidate, but leaves Active unchanged.
 // expectedGeneration is a required compare-and-swap fence, including zero.
 func (s *Store) Prepare(ctx context.Context, ref Ref, expectedGeneration uint64, options PrepareOptions) (State, error) {
-	return s.prepare(ctx, ref, expectedGeneration, options, false)
+	return s.prepare(ctx, ref, expectedGeneration, options, false, nil)
+}
+
+// PrepareChecked keeps the lock across target verification, preflight and
+// publication. A failed or canceled preflight leaves the selector and authority
+// watermarks unchanged. The raw Prepare primitive does not perform this check.
+func (s *Store) PrepareChecked(ctx context.Context, ref Ref, expectedGeneration uint64, options PrepareOptions, check Preflight) (State, error) {
+	if check == nil {
+		return State{}, errors.New("checked prepare requires preflight")
+	}
+	return s.prepare(ctx, ref, expectedGeneration, options, false, check)
 }
 
 // PrepareRollback queues the known previous runtime as a new configuration
 // trial. It never immediately switches an already confirmed pair or lowers
 // either watermark. The coordinator must preflight both supplied snapshots.
 func (s *Store) PrepareRollback(ctx context.Context, expectedGeneration uint64, options PrepareOptions) (State, error) {
-	return s.prepare(ctx, Ref{}, expectedGeneration, options, true)
+	return s.prepare(ctx, Ref{}, expectedGeneration, options, true, nil)
 }
 
-func (s *Store) prepare(ctx context.Context, ref Ref, expectedGeneration uint64, options PrepareOptions, rollback bool) (State, error) {
+// PrepareRollbackChecked verifies and preflights the actual known previous
+// runtime, rather than accepting a caller-substituted target for rollback.
+func (s *Store) PrepareRollbackChecked(ctx context.Context, expectedGeneration uint64, options PrepareOptions, check Preflight) (State, error) {
+	if check == nil {
+		return State{}, errors.New("checked rollback requires preflight")
+	}
+	return s.prepare(ctx, Ref{}, expectedGeneration, options, true, check)
+}
+
+func (s *Store) prepare(ctx context.Context, ref Ref, expectedGeneration uint64, options PrepareOptions, rollback bool, check Preflight) (State, error) {
+	// Bind the caller's references before any callback can change its options.
+	options.Startup = cloneStartup(options.Startup)
+	if options.KnownGood != nil {
+		known := *options.KnownGood
+		options.KnownGood = &known
+	}
 	unlock, err := s.acquire(ctx)
 	if err != nil {
 		return State{}, err
@@ -404,9 +429,29 @@ func (s *Store) prepare(ctx context.Context, ref Ref, expectedGeneration uint64,
 		return State{}, err
 	}
 	defer image.Close()
+	var current State
+	if check != nil {
+		// State contains nested pointers. A shallow callback copy must not be
+		// able to modify the state subsequently published by this transaction.
+		raw, err := json.Marshal(state)
+		if err != nil {
+			return State{}, err
+		}
+		if err := decodeCanonical(raw, &current); err != nil {
+			return State{}, err
+		}
+	}
 	pending := &Pending{Release: ref, MaxAttempts: options.MaxAttempts}
 	if err := prepareStartup(&state, pending, options); err != nil {
 		return State{}, err
+	}
+	if check != nil {
+		if err := check(ctx, current, image); err != nil {
+			return State{}, err
+		}
+		if err := s.checkContext(ctx); err != nil {
+			return State{}, err
+		}
 	}
 	state, err = s.next(state, operation)
 	if err != nil {

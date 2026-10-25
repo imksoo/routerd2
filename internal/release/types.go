@@ -6,6 +6,7 @@
 package release
 
 import (
+	"context"
 	"crypto/ed25519"
 	"errors"
 	"github.com/imksoo/routerd2/internal/configref"
@@ -139,6 +140,12 @@ type PrepareOptions struct {
 	// A retry requires a different kernel boot ID. Defaults to one attempt.
 	MaxAttempts int
 }
+
+// Preflight runs under the release store lock, with an independent current-state
+// view and a verified target whose artifact descriptors are borrowed for this
+// call only. It must not recursively call this Store. The coordinator validates
+// live configuration/snapshots and target compatibility here before publication.
+type Preflight func(context.Context, State, *Image) error
 
 type ConfigurationConfirmation struct {
 	Adoption configref.Adoption
