@@ -17,7 +17,7 @@ func TestVRRPWallClockAloneCannotAuthorizeOwnership(t *testing.T) {
 	doc := config.Native{Services: []serviceconfig.Service{{Name: "ha", VRRP: &c}}}
 	r, n, _ := fixture(t, doc)
 	c = doc.Services[0].VRRPConfig()
-	s := vrrp.Snapshot{Resource: c.Resource, Interface: c.Interface, VIPInterface: c.VIPInterface, Family: c.Family, VirtualRouterID: c.VirtualRouterID, Priority: c.Priority, AcceptMode: true, Addresses: c.Addresses, VirtualMAC: vrrp.VirtualMAC(c.Family, c.VirtualRouterID).String(), Epoch: strings.Repeat("a", 32), Transition: 1, Active: true, State: vrrp.StateActive, ValidUntil: time.Now().Add(3 * time.Second)}
+	s := vrrp.Snapshot{Version: c.Version, Resource: c.Resource, Interface: c.Interface, VIPInterface: c.VIPInterface, Family: c.Family, VirtualRouterID: c.VirtualRouterID, Priority: c.Priority, AcceptMode: true, Addresses: c.Addresses, VirtualMAC: vrrp.VirtualMAC(c.Family, c.VirtualRouterID).String(), Epoch: strings.Repeat("a", 32), Transition: 1, Active: true, State: vrrp.StateActive, ValidUntil: time.Now().Add(3 * time.Second)}
 	if _, err := applyAndDrain(t, r, update(t, r, "service.ha", 1, s)); err == nil {
 		t.Fatal("UTC-only VRRP grant acquired VIP/VMAC ownership without boot-scoped evidence")
 	}
@@ -33,7 +33,7 @@ func bootVRRPSnapshot(t *testing.T, c vrrp.Config) vrrp.Snapshot {
 		t.Fatal(err)
 	}
 	now := uint64(clock.BoottimeNanoseconds)
-	return vrrp.Snapshot{Resource: c.Resource, Interface: c.Interface, VIPInterface: c.VIPInterface, VRF: c.VRF, Family: c.Family, SourceAddress: c.SourceAddress, VirtualRouterID: c.VirtualRouterID, Priority: c.Priority, AcceptMode: c.AcceptMode || c.AddressOwner, AddressOwner: c.AddressOwner, Addresses: c.Addresses, VirtualMAC: vrrp.VirtualMAC(c.Family, c.VirtualRouterID).String(), Epoch: strings.Repeat("a", 32), Transition: 1, Active: true, State: vrrp.StateActive, ValidUntil: time.Now().Add(time.Hour), BootID: clock.BootID, ObservedNanos: now, ExpiresNanos: now + uint64(vrrp.OwnershipLifetime(c))}
+	return vrrp.Snapshot{Version: c.Version, Resource: c.Resource, Interface: c.Interface, VIPInterface: c.VIPInterface, VRF: c.VRF, Family: c.Family, SourceAddress: c.SourceAddress, VirtualRouterID: c.VirtualRouterID, Priority: c.Priority, AcceptMode: c.AcceptMode || c.AddressOwner, AddressOwner: c.AddressOwner, Addresses: c.Addresses, VirtualMAC: vrrp.VirtualMAC(c.Family, c.VirtualRouterID).String(), Epoch: strings.Repeat("a", 32), Transition: 1, Active: true, State: vrrp.StateActive, ValidUntil: time.Now().Add(time.Hour), BootID: clock.BootID, ObservedNanos: now, ExpiresNanos: now + uint64(3*time.Duration(c.AdvertIntervalCentiseconds)*10*time.Millisecond)}
 }
 
 func TestVRRPBootDeadlineReachesKernelWithoutUTCConversion(t *testing.T) {

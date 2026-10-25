@@ -48,8 +48,15 @@ func newMachine(c Config, source netip.Addr, epoch string) *machine {
 	return &machine{config: c, source: source, epoch: epoch, state: StateInitialize, activeInterval: c.interval(), track: initialTracks(c)}
 }
 
+func skewTime(version, priority int, interval time.Duration) time.Duration {
+	if version == 2 {
+		interval = time.Second
+	}
+	return time.Duration(256-priority) * interval / 256
+}
+
 func (m *machine) skew() time.Duration {
-	return time.Duration(256-m.priority()) * m.activeInterval / 256
+	return skewTime(m.config.Version, m.priority(), m.activeInterval)
 }
 
 func (m *machine) downInterval() time.Duration { return 3*m.activeInterval + m.skew() }
@@ -139,6 +146,9 @@ func (m *machine) receive(now time.Time, p advertisement) actions {
 			m.enter(StateBackup, now)
 			return actions{update: true}
 		}
+		if m.config.Version == 2 {
+			return actions{} // RFC 3768 discards inferior nonzero advertisements.
+		}
 		// RFC 9568's immediate assertion also refreshes learning bridges.
 		// Keep the existing periodic deadline for nonzero inferior peers.
 		return actions{advertise: true}
@@ -155,7 +165,7 @@ func (m *machine) snapshot() Snapshot {
 		ActivationState: m.activationState, ActivationStartedNanos: m.activationStartedNanos,
 		BootID: m.bootID, ObservedNanos: m.observedNanos, ExpiresNanos: m.expiresNanos,
 		Resource: m.config.Resource, Interface: m.config.Interface, VIPInterface: m.config.VIPInterface, VRF: m.config.VRF,
-		Family: m.config.Family, SourceAddress: m.source.String(), VirtualRouterID: m.config.VirtualRouterID,
+		Family: m.config.Family, Version: m.config.Version, SourceAddress: m.source.String(), VirtualRouterID: m.config.VirtualRouterID,
 		VirtualMAC: VirtualMAC(m.config.Family, m.config.VirtualRouterID).String(), Addresses: append([]string(nil), m.config.Addresses...),
 		Active: m.published, State: m.state, AcceptMode: m.config.AcceptMode || m.config.AddressOwner, AddressOwner: m.config.AddressOwner,
 		Epoch: m.epoch, Transition: m.transition, Priority: m.priority(), Peer: peer, PeerPriority: int(m.peerPriority), Track: append([]TrackStatus(nil), m.track...),

@@ -29,6 +29,8 @@ type GracefulActivation struct {
 }
 
 type Config struct {
+	Version                    int                 `json:"version,omitempty"`
+	AuthPassword               string              `json:"auth_password,omitempty"`
 	Track                      []Track             `json:"track,omitempty"`
 	GracefulActivation         *GracefulActivation `json:"graceful_activation,omitempty"`
 	Resource                   string              `json:"resource"`
@@ -52,6 +54,7 @@ type Config struct {
 // The coordinator decides admission, applies the VIP and returns its actual
 // ownership from Effects.Apply. Election messages cannot grant themselves a VIP.
 type Snapshot struct {
+	Version                int           `json:"version"`
 	Track                  []TrackStatus `json:"track,omitempty"`
 	ActivationState        string        `json:"activation_state,omitempty"`
 	ActivationStartedNanos uint64        `json:"activation_started_nanos,omitempty"`
@@ -98,6 +101,9 @@ type EffectsFunc func(context.Context, Snapshot) (Decision, error)
 func (f EffectsFunc) Apply(ctx context.Context, s Snapshot) (Decision, error) { return f(ctx, s) }
 
 func Normalize(c Config) Config {
+	if c.Version == 0 {
+		c.Version = 3
+	}
 	if c.Track != nil {
 		c.Track = append([]Track(nil), c.Track...)
 		for i := range c.Track {
@@ -184,8 +190,27 @@ func Validate(c Config) error {
 	if c.Priority < 1 || c.Priority > 255 || (c.Priority == 255) != c.AddressOwner {
 		return errors.New("VRRP priority must be 1..254; 255 is reserved for an explicit address_owner")
 	}
-	if c.AdvertIntervalCentiseconds < 1 || c.AdvertIntervalCentiseconds > 4095 {
-		return errors.New("VRRP advertisement interval must be 1..4095 centiseconds")
+	switch c.Version {
+	case 2:
+		if c.Family != "ipv4" || c.AdvertIntervalCentiseconds < 100 || c.AdvertIntervalCentiseconds > 25500 || c.AdvertIntervalCentiseconds%100 != 0 {
+			return errors.New("VRRPv2 requires IPv4 and a whole-second advertisement interval in 1..255 seconds")
+		}
+	case 3:
+		if c.AdvertIntervalCentiseconds < 1 || c.AdvertIntervalCentiseconds > 4095 {
+			return errors.New("VRRPv3 advertisement interval must be 1..4095 centiseconds")
+		}
+	default:
+		return errors.New("VRRP version must be 2 or 3")
+	}
+	if c.AuthPassword != "" {
+		if c.Version != 2 || len(c.AuthPassword) > 8 {
+			return errors.New("VRRP auth_password requires version 2 and at most 8 printable ASCII bytes")
+		}
+		for _, b := range []byte(c.AuthPassword) {
+			if b < 32 || b > 126 {
+				return errors.New("VRRP auth_password must contain printable ASCII bytes")
+			}
+		}
 	}
 	if c.EffectTimeoutMilliseconds < 10 || c.EffectTimeoutMilliseconds > 10000 {
 		return errors.New("VRRP effect timeout must be 10..10000 milliseconds")

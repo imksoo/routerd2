@@ -43,10 +43,16 @@
   controlで判定し、既存のVIP適用応答で有限の判定を返す。再送やpollで確認回数を増やさず、
   worker/設定の交替や監視の空白後には新しい正常probeを要求する。VRRPは自分のboot clockで
   判定を失効させ、設定のbase priorityからwire priorityを導出する。Health flapでintentを
-  書き換えたりVRRPを再起動したりしない。compiler contractは `resource-program-native-5`。
+  書き換えたりVRRPを再起動したりしない。compiler contractは `resource-program-native-6`。
 - 実通信で発見したVIP期限更新の不具合を修正した。kernelの秒単位lifetimeの近似一致を
   更新不要の判定へ流用せず、元の絶対期限が変わったらkernel timerも更新する。
   同じ期限の再適用ではtimerを延長しない。所有記録だけを延長してVIPが消える原因を除去した。
+- VRRPのwire versionを明示する設定を追加した。既定はv3、IPv4はv2も選べる。
+  v2は1..255秒広告と固定1秒基準のskew、広告間隔一致、下位広告の破棄を実装した。
+  任意のPASSは8 byteまでとし、認証種別とzero paddingを含む全8 byteを検査する。
+  v3/IPv6のPASS、長過ぎるpasswordは拒否する。自動version切替やchecksum fallbackはない。
+  PASSは旧peer用の平文方式で、暗号認証やreplay防止ではない。snapshotにはversionだけを返す。
+  ownership lifetimeの公開helperと繰り返す設定正規化も除去した。
 - BGP経路の元のboot IDとBOOTTIME期限をnetwork workerへ渡し、controlと独立して
   期限切れ経路を撤去する。期限更新だけではkernel経路を置換せず、所有記録を更新する。
   退役時も同じ所有権確認を使い、変更されたforeign経路を残す。table観測と経路選択は
@@ -58,40 +64,32 @@
 
 ## 今回の確認
 
-製品は `RELEASE_ID=vrrp-health-track`。`make check` が成功した。広告直前のpriority導出を
-整理した後もVRRP/runtimeplan/serviceconfig/serviceruntime/network/runtimeabiのRace Detector、
-全体vet・fmt確認、Pythonの関連check、amd64/arm64静的ビルドを確認した。
-arm64は実行していない。private 0700配下へ6 ELFを配置し、`make release-built-test`で
-両architectureの署名bundle・全ELFの宣言一致・publisher出力も確認した。
+製品は `RELEASE_ID=vrrp-v2`。関連packageのRace Detector、全体vet・fmt確認、amd64/arm64の
+静的ビルドが成功した。arm64は実行していない。全体 `make check`、およびprivate 0700配下へ
+6 ELFを配置する署名bundle/publisher試験も成功した。両architectureの全ELFでcompiler
+contract `resource-program-native-6` を確認した。
 
-隔離namespaceの実supervisor/control/network/VRRP/Healthとkeepalived 2.2.8で、
-Health失敗・復旧、SIGSTOP中の元の観測期限切れ、Health worker SIGKILL/rebindを試験した。
-VRRP workerを再起動せずpriority 150→50→150で切り替わり、両所有者のVIP TCP/UDPが成功した。
-packet captureでnative priority 150/50とpeerの広告を確認した。通常のtracking切替に
-priority zeroを使わない。IPv4/IPv6 unicastの選出、peer停止、VRRP worker再起動の試験も成功した。
-`make check-vrrp-unicast` はこの3系統を実行する。元のVRRP期限・条件付きVIP所有・
-graceful公開の実daemon試験も最終binaryで成功した。
+隔離namespaceの実supervisor/control/network/VRRPと独立Keepalived 2.2.8で、
+IPv4 VRRPv2のmulticast（認証なし）・unicast（PASS）が成功した。上位peerへの切替、
+VRRP worker SIGKILL/rebind、peer停止、下位peer復帰後の所有維持と、両所有者への
+VIP TCP/UDPを確認した。誤ったPASSを持つ独立peerの広告も拒否した。
+captureでversion・秒間隔・認証欄、宛先groupまたはpeer、TTL 255を検査した。
+IPv4/IPv6 v3 unicastとHealth trackingを含む5系統が最終binaryで成功した。
+元のVRRP期限・条件付きVIP所有・graceful公開の実daemon回帰試験も成功した。
 
-二つの独立WANによるHealth→PBR実daemon試験も成功した。実TCP/UDPと両側capture、
-Health/control/network worker再起動、古い通知と再送の拒否、元の観測期限とconsumer max age、
-全supervisor再起動、confirmed rollback後の通信を確認した。Health実ソケットの
-TCP・HTTP・DNS・raw ICMPも成功した。`make check-health-pbr` のrunnerをroot所有0700へ
-stageする方式に置き換え、過去checkpointのmanifest/hash台帳生成とその専用試験を削除した。
-現在のログとpacket captureだけを出す。
-
-初回のHealth tracking試験はVIP消失で失敗した。kernel期限を更新しない原因を特定し、
-局所回帰試験でも修正前の失敗を再現した上で修正した。成功回数を増やすだけのretryや
-試験結果の互換コードは追加していない。
+v2のwire fixture・checksum・切断された認証欄、不一致password/認証種別/広告間隔、
+v2の2秒広告に対する固定skew、下位広告の破棄、v3とのversion不一致を局所試験で確認した。
+旧routerd importerはphysical VIP・default preempt等の差を黙って置換せず、明示移行を要求する。
 
 未解決: 以前の二native peer試験におけるIPv6 multicast広告未受信、初回IPv6 VIP TCP timeout、
-BFD再接続timeoutは直接原因が未確定。今回はQEMU時計補正、対象実機・NIC・性能・
-物理suspendを再検証していない。Health以外のtrack、条件除外時のneutral、VRF unicast、
-旧version/auth、cluster、追加VMACと旧routerdからの移行は未受入。
+BFD再接続timeoutは直接原因が未確定。今回、二WAN PBRの全系統・Health実ソケット・
+QEMU時計補正・対象実機/NIC/性能/物理suspendは再実行していない。
+Health以外のtrack・条件除外時のneutral、外部secret参照・peer-aware移行、cluster、追加VMAC、
+VRF unicastと対象実機受入は未完了。AH/HMAC認証は実装していない。
 
-現在の出力は `dist/vrrp-track-check.log`、`dist/vrrp-track-final-race.log`、
-`dist/vrrp-track-final-build.log`、`dist/vrrp-unicast/{ipv4,ipv6,health-track}.log`、
-`dist/vrrp-track-release-built.log`、`dist/vrrp-track-TestDaemonVRRP*.log`、
-`dist/vrrp-track-health-socket.log`、`dist/health-pbr-test/test.log` と `wan{0,1}.pcap`。
+現在の出力は `dist/vrrp-v2-{check,final-race,final-build,release-built}.log` と
+`dist/vrrp-unicast/{ipv4,ipv6,health-track,v2,v2-pass}.log`、
+`dist/vrrp-v2-TestDaemonVRRP*.log`。
 過去の出力との一致を実装条件にしない。
 
 ## 続ける実装
@@ -101,7 +99,7 @@ BFD再接続timeoutは直接原因が未確定。今回はQEMU時計補正、対
    IPv4失効と、BFD受信期限・再帰next-hopの前提期限を全てwriterへ渡す処理は未検証・未実装。
 2. 残るprotocol snapshotの型付き保持、期限切れJSON書換えの削除、条件式の静的計算と、
    retained判定で繰り返すinstance生成・digest計算を整理する。
-3. HA-01のHealth以外のtrackと条件除外時のneutral、旧version・auth、cluster、追加VMACを実装する。IPv6 multicast未受信と
+3. HA-01のHealth以外のtrackと条件除外時のneutral、外部secret参照とpeer-aware移行、cluster、追加VMACを実装する。IPv6 multicast未受信と
    起動直後のND/DADを診断し、VRFと対象実機での相互接続を確認する。
    全実装計画・全更新復旧経路・外部engine・配備先・対象実機は未完了。
 

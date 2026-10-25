@@ -1,6 +1,7 @@
 package vrrp
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -93,14 +94,35 @@ func pseudo6(source, dest netip.Addr, length int, nextHeader byte) []byte {
 	return p
 }
 
+// Both VRRPv2 authentication data words are present even without PASS.
+func advertisementSize(c Config, addresses int) int {
+	width := 4
+	if c.Family == "ipv6" {
+		width = 16
+	}
+	size := 8 + width*addresses
+	if c.Version == 2 {
+		size += 8
+	}
+	return size
+}
+
 func marshalAdvertisement(c Config, source, destination netip.Addr, priority uint8) []byte {
 	width := 4
 	if c.Family == "ipv6" {
 		width = 16
 	}
-	b := make([]byte, 8+width*len(c.Addresses))
-	b[0], b[1], b[2], b[3] = 0x31, byte(c.VirtualRouterID), priority, byte(len(c.Addresses))
-	binary.BigEndian.PutUint16(b[4:], uint16(c.AdvertIntervalCentiseconds))
+	b := make([]byte, advertisementSize(c, len(c.Addresses)))
+	b[0], b[1], b[2], b[3] = byte(c.Version<<4)|1, byte(c.VirtualRouterID), priority, byte(len(c.Addresses))
+	if c.Version == 2 {
+		b[5] = byte(c.AdvertIntervalCentiseconds / 100)
+		if c.AuthPassword != "" {
+			b[4] = 1
+			copy(b[len(b)-8:], c.AuthPassword)
+		}
+	} else {
+		binary.BigEndian.PutUint16(b[4:], uint16(c.AdvertIntervalCentiseconds))
+	}
 	for i, a := range c.addresses() {
 		copy(b[8+i*width:], a.AsSlice())
 	}
@@ -116,14 +138,14 @@ func parseAdvertisement(c Config, source, destination netip.Addr, payload []byte
 	if len(payload) >= 2 && int(payload[1]) != c.VirtualRouterID {
 		return advertisement{}, errOtherVirtualRouter
 	}
-	if len(payload) < 8 || payload[0] != 0x31 || payload[3] == 0 {
+	if len(payload) < 8 || payload[0] != byte(c.Version<<4)|1 || payload[3] == 0 {
 		return advertisement{}, errors.New("invalid VRRP version, type, VRID, or address count")
 	}
 	width := 4
 	if c.Family == "ipv6" {
 		width = 16
 	}
-	if len(payload) != 8+width*int(payload[3]) {
+	if len(payload) != advertisementSize(c, int(payload[3])) {
 		return advertisement{}, errors.New("incomplete VRRP address list or trailing bytes")
 	}
 	validChecksum := checksum(payload) == 0
@@ -133,8 +155,29 @@ func parseAdvertisement(c Config, source, destination netip.Addr, payload []byte
 	if !validChecksum {
 		return advertisement{}, errors.New("invalid VRRP checksum")
 	}
-	// The high four reserved bits must be ignored by receivers.
-	centiseconds := binary.BigEndian.Uint16(payload[4:6]) & 0xfff
+	// VRRPv3 ignores the high four reserved bits. VRRPv2 uses separate
+	// one-byte authentication type and whole-second interval fields.
+	centiseconds := int(binary.BigEndian.Uint16(payload[4:6]) & 0xfff)
+	if c.Version == 2 {
+		authType := byte(0)
+		if c.AuthPassword != "" {
+			authType = 1
+		}
+		if payload[4] != authType {
+			return advertisement{}, errors.New("VRRPv2 authentication type mismatch")
+		}
+		if authType == 1 {
+			var expected [8]byte
+			copy(expected[:], c.AuthPassword)
+			if !bytes.Equal(payload[len(payload)-8:], expected[:]) {
+				return advertisement{}, errors.New("VRRPv2 password mismatch")
+			}
+		}
+		centiseconds = int(payload[5]) * 100
+		if centiseconds != c.AdvertIntervalCentiseconds {
+			return advertisement{}, errors.New("VRRPv2 advertisement interval differs from configuration")
+		}
+	}
 	if centiseconds == 0 {
 		return advertisement{}, errors.New("zero VRRP advertisement interval")
 	}

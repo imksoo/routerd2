@@ -1,9 +1,11 @@
-# Native VRRPv3 module
+# Native VRRP module
 
 This package runs one independently supervised VRRP instance per address family,
 election interface and VRID. It has no keepalived, systemd, shell, `ip`, `arping`
-or `nft` dependency. Protocol behavior targets
-[RFC 9568](https://www.rfc-editor.org/rfc/rfc9568.html).
+or `nft` dependency. VRRPv3 targets
+[RFC 9568](https://www.rfc-editor.org/rfc/rfc9568.html); explicit IPv4 VRRPv2 targets
+[RFC 3768](https://www.rfc-editor.org/rfc/rfc3768.html), with optional
+[RFC 2338 PASS](https://www.rfc-editor.org/rfc/rfc2338.html#section-5.3.6.2).
 
 ```go
 err := vrrp.Run(ctx, config, effects, ready)
@@ -17,6 +19,7 @@ interface name when omitted. Example IPv4 instance:
 ```json
 {
   "resource": "lan-gateway4",
+  "version": 3,
   "interface": "lan0",
   "vip_interface": "vrrp-lan4",
   "family": "ipv4",
@@ -51,6 +54,33 @@ group. Linux handles unicast routing and ARP/ND on a source/interface-bound raw
 IP socket. Multicast advertisements and GARP/NA use Ethernet frames with the
 virtual MAC. Unicast advertisements use the election interface's normal MAC;
 VIP ownership, its VMAC and neighbor announcements retain the same writer ACK.
+
+## Wire version and PASS
+
+`version` defaults to 3. Select `version: 2` explicitly for IPv4 peers using
+VRRPv2. The advertisement interval remains expressed in centiseconds, but v2
+accepts only whole seconds from 1 to 255 (`100..25500`). IPv6 requires v3.
+A v2 receiver rejects advertisements whose interval differs from its configured
+interval. V2 skew is `(256-priority)/256` seconds, independently of the advert
+interval; v3 scales skew by the received advert interval. The original ownership
+deadline uses the configured base priority and the selected version's skew.
+Inferior nonzero advertisements are discarded by a v2 master; v3 immediately
+asserts ownership. A normal shutdown sends priority zero in either format.
+There is no version negotiation or automatic fallback.
+
+For v2 PASS, set `auth_password` to 1–8 printable ASCII bytes. Omit it for no
+authentication. Long passwords are rejected, not silently truncated. The sender
+includes both authentication words, zero-pads short passwords and checksums the
+entire v2 message. The receiver checks the authentication type and all eight
+bytes when PASS is selected. Type zero ignores the two authentication words.
+Passwords are configuration data and are never copied into election snapshots.
+
+PASS is a cleartext legacy mechanism from RFC 2338, removed by RFC 3768. It is
+provided for existing peers, not cryptographic authentication or replay
+protection. IPv6/v3 PASS, AH and Keepalived's HMAC extension are not implemented;
+unsupported declarations are rejected rather than downgraded. Secret-provider
+resolution and peer-aware import of original `VirtualAddress` declarations
+remain separate work.
 
 ## Single-writer effects and liveness contract
 
@@ -105,8 +135,8 @@ after Initialize are refused. A paused Active process whose lease already
 expired must not renew or advertise under its old election transition.
 
 The coordinator uses the original boot clock directly. It does not derive a
-second receipt lease or rewrite an expired election snapshot. Legacy
-version/authentication and cluster coordination remain separate HA-01 work.
+second receipt lease or rewrite an expired election snapshot. Cluster
+coordination remains separate HA-01 work.
 
 `make qemu-vrrp-daemon` exercises actual supervisor/control/network/VRRP workers,
 VIP TCP/UDP traffic and capture, original deadline expiry/reapply, worker/control
@@ -176,7 +206,7 @@ its network namespace and disappears when its process dies.
 The implementation checks version, advertisement type, VRID, complete address
 list, checksum, receiving interface and TTL/hop limit 255. It also checks virtual
 address-set agreement. IPv4 checksums cover the VRRP message alone; IPv6 includes
-its pseudo-header. Incoming reserved bits are ignored. A different configured
+its pseudo-header. Incoming VRRPv3 reserved bits are ignored. A different configured
 interval is observable and accepted. State transitions implement priority skew,
 master-down detection, optional nonpreemption, address-owner priority, priority
 zero, primary-address tie breaking, and immediate active assertions.
@@ -196,8 +226,8 @@ additional failover MAC interfaces, associated DHCP/RA state and cloud actions.
 `RouterdCluster` lease/peer policy is a different mechanism and is not silently
 mapped onto this local VRRP election.
 
-VRRPv2, VRRPv2 authentication, legacy IPv4 pseudo-header checksums and
-preempt-delay extensions are not implemented. Use an Ethernet logical interface for a VLAN;
+Legacy IPv4 pseudo-header checksums and preempt-delay extensions are not
+implemented. Use an Ethernet logical interface for a VLAN;
 the worker does not interpret encapsulated VLAN tags itself. Importers must
 reject unsupported declarations rather than drop them. VRRP provides local-LAN
 election, not authenticated quorum or protection against an on-link attacker.
@@ -213,11 +243,17 @@ have not been qualified by these plain Ethernet fixtures.
 `TestDaemonVRRPHealthTracking` also exercises real Health failure, original sample
 expiry during SIGSTOP, Health worker replacement and recovery against keepalived
 priority 120, with native priorities 150/50 and TCP/UDP on both owners.
+`TestDaemonVRRPv2` exercises IPv4 multicast without authentication and
+`TestDaemonVRRPv2PASS` exercises unicast PASS against Keepalived. The PASS fixture
+also verifies that a wrong-password peer cannot make the native owner withdraw.
+Both check takeover, process replacement, peer stop, lower-priority recovery,
+VIP TCP/UDP and actual version/interval/authentication fields in capture.
 Run `make check-vrrp-unicast` on the isolated Linux VM with keepalived installed
 and root or noninteractive sudo available. The runner builds as the caller and
 stages execution in a root-owned 0700 temporary directory; it never changes home
 permissions or host interface configuration. Current logs go to
-`dist/vrrp-unicast/ipv4.log`, `ipv6.log` and `health-track.log`.
+`dist/vrrp-unicast/ipv4.log`, `ipv6.log`, `health-track.log`, `v2.log` and
+`v2-pass.log`.
 
 ## Verification
 

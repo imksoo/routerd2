@@ -27,7 +27,7 @@ func TestOriginalBootOwnershipIgnoresUTCAndExpiresAtExactTick(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := m.snapshot()
-	if err := ValidateSnapshot(c, s); err != nil || s.BootID != clock.BootID || s.ObservedNanos != uint64(clock.BoottimeNanoseconds) || s.ExpiresNanos-s.ObservedNanos != uint64(OwnershipLifetime(c)) {
+	if err := ValidateSnapshot(c, s); err != nil || s.BootID != clock.BootID || s.ObservedNanos != uint64(clock.BoottimeNanoseconds) || s.ExpiresNanos-s.ObservedNanos != uint64(ownershipLifetime(c)) {
 		t.Fatal("publisher did not bind its original observation deadline", s, err)
 	}
 	for _, wall := range []time.Time{clock.WallTime.Add(-48 * time.Hour), clock.WallTime.Add(48 * time.Hour)} {
@@ -155,7 +155,7 @@ func TestExpiredActiveElectionCannotPublishFreshLeaseBeforeAdvertising(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	clock.BoottimeNanoseconds -= int64(OwnershipLifetime(c) + time.Millisecond)
+	clock.BoottimeNanoseconds -= int64(ownershipLifetime(c) + time.Millisecond)
 	if err := m.stampObservation(clock); err != nil {
 		t.Fatal(err)
 	}

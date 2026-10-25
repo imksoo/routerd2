@@ -727,7 +727,11 @@ worker再起動、双方向packet captureを確認した。Health serviceのtrac
 有限の判定を返し、設定変更やworker再起動を介さずwire priorityを変える。
 独立keepalivedとのHealth障害・元の観測期限切れ・Health worker交替と復旧、
 priority 150/50のcaptureと両所有者へのVIP TCP/UDPを実daemonで確認した。
-Health以外のresource track・条件除外時のneutral、旧version/auth、cluster、追加VMACと
+IPv4 VRRPv2の明示選択、秒単位広告、v2固有skew、任意PASSと認証不一致の拒否を実装した。
+Snapshotへversionを返し、v3/IPv6のPASSや8 byteを超えるpasswordは拒否する。
+独立Keepalivedとのv2 multicast・PASS付きunicast、誤ったPASSの拒否、実TCP/UDPの
+切替・復旧とworker再起動を確認し、captureでversion・間隔・認証欄も検査した。
+Health以外のresource track・条件除外時のneutral、外部secret参照とpeer-aware移行、cluster、追加VMACと
 対象実機の受入は残っており、HA-01全体の完了とはしない。
 
 **受入条件**

@@ -78,11 +78,11 @@ func openTransport(c Config) (_ *nativeTransport, _ netip.Addr, result error) {
 	if err != nil {
 		return nil, netip.Addr{}, err
 	}
-	width, header := 4, 20
+	header := 20
 	if c.Family == "ipv6" {
-		width, header = 16, 40
+		header = 40
 	}
-	if header+8+width*len(c.Addresses) > attrs.MTU {
+	if header+advertisementSize(c, len(c.Addresses)) > attrs.MTU {
 		return nil, netip.Addr{}, errors.New("VRRP address list exceeds the election interface MTU")
 	}
 	// Abstract Unix addresses are scoped to the network namespace. This

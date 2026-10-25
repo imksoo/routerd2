@@ -14,10 +14,10 @@ import (
 
 const inactiveObservationLifetime = 5 * time.Second
 
-func OwnershipLifetime(c Config) time.Duration {
-	c = Normalize(c)
+// Callers use the configuration normalized at the worker or snapshot boundary.
+func ownershipLifetime(c Config) time.Duration {
 	interval := c.interval()
-	return 3*interval + time.Duration(256-c.Priority)*interval/256
+	return 3*interval + skewTime(c.Version, c.Priority, interval)
 }
 
 // stampObservation gives each accepted publication its original absolute boot
@@ -33,7 +33,7 @@ func (m *machine) stampObservation(clock boottime.Clock) error {
 	}
 	span := inactiveObservationLifetime
 	if m.state == StateActive {
-		span = OwnershipLifetime(m.config)
+		span = ownershipLifetime(m.config)
 	}
 	if span <= 0 || now > math.MaxInt64-uint64(span) {
 		return errors.New("VRRP observation deadline overflow")
@@ -69,7 +69,7 @@ func ValidateSnapshot(raw Config, s Snapshot) error {
 	if err := validateTracks(c, s.Track); err != nil {
 		return err
 	}
-	if c.Resource != s.Resource || c.Interface != s.Interface || c.VIPInterface != s.VIPInterface || c.VRF != s.VRF || c.Family != s.Family || c.VirtualRouterID != s.VirtualRouterID || effectivePriority(c, s.Track) != s.Priority || (c.AcceptMode || c.AddressOwner) != s.AcceptMode || c.AddressOwner != s.AddressOwner || s.VirtualMAC != VirtualMAC(c.Family, c.VirtualRouterID).String() || !slices.Equal(c.Addresses, s.Addresses) || c.SourceAddress != "" && s.SourceAddress != c.SourceAddress {
+	if c.Version != s.Version || c.Resource != s.Resource || c.Interface != s.Interface || c.VIPInterface != s.VIPInterface || c.VRF != s.VRF || c.Family != s.Family || c.VirtualRouterID != s.VirtualRouterID || effectivePriority(c, s.Track) != s.Priority || (c.AcceptMode || c.AddressOwner) != s.AcceptMode || c.AddressOwner != s.AddressOwner || s.VirtualMAC != VirtualMAC(c.Family, c.VirtualRouterID).String() || !slices.Equal(c.Addresses, s.Addresses) || c.SourceAddress != "" && s.SourceAddress != c.SourceAddress {
 		return errors.New("VRRP snapshot identity or ownership policy mismatch")
 	}
 	epoch, err := hex.DecodeString(s.Epoch)
@@ -104,7 +104,7 @@ func ValidateSnapshot(raw Config, s Snapshot) error {
 	}
 	maximum := inactiveObservationLifetime
 	if s.State == StateActive {
-		maximum = OwnershipLifetime(c)
+		maximum = ownershipLifetime(c)
 	}
 	if s.ExpiresNanos <= s.ObservedNanos || s.ExpiresNanos-s.ObservedNanos > uint64(maximum) {
 		return errors.New("VRRP observation has invalid or overlong authority")
