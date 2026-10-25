@@ -21,6 +21,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/imksoo/routerd2/internal/release"
 	"github.com/imksoo/routerd2/internal/worker"
 	"golang.org/x/sys/unix"
 )
@@ -70,6 +71,7 @@ func helperMain() int {
 	}
 	_ = os.WriteFile(filepath.Join(state, "generation."+name), []byte(os.Getenv("ROUTERD_GENERATION")), 0600)
 	_ = os.WriteFile(filepath.Join(state, "instance."+name), []byte(os.Getenv(worker.SupervisorInstanceEnv)), 0600)
+	_ = os.WriteFile(filepath.Join(state, "authority."+name), []byte(os.Getenv(release.AuthorityEnv)), 0600)
 	if role == "nohello" {
 		signal.Ignore(syscall.SIGTERM)
 		for {
@@ -138,6 +140,10 @@ func startTestSupervisorRoles(t *testing.T, modules []Spec, roles []string) *tes
 	return startTestSupervisorCatalog(t, modules, roles, false)
 }
 func startTestSupervisorCatalog(t *testing.T, modules []Spec, roles []string, split bool) *testSupervisor {
+	return startTestSupervisorCustomized(t, modules, roles, split, nil)
+}
+
+func startTestSupervisorCustomized(t *testing.T, modules []Spec, roles []string, split bool, customize func(*Options)) *testSupervisor {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "routerd-sup-")
 	if err != nil {
@@ -170,6 +176,9 @@ func startTestSupervisorCatalog(t *testing.T, modules []Spec, roles []string, sp
 		}
 	}
 	o := Options{Executables: catalog, ReleaseID: testRelease, RuntimeDir: filepath.Join(dir, "run"), StateDir: state, Platform: "host", Modules: modules, DynamicRoles: roles, Env: []string{"ROUTERD_SUPERVISOR_HELPER=1", worker.SupervisorInstanceEnv + "=inherited-value-must-not-choose-authority"}}
+	if customize != nil {
+		customize(&o)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &testSupervisor{options: o, cancel: cancel, done: make(chan error, 1)}
 	s.client = &http.Client{Timeout: time.Second, Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
