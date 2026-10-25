@@ -49,7 +49,7 @@ type projectionFacts struct {
 func (r *Runtime) projectLocked(doc config.Native, records map[string]serviceconfig.Update, now time.Time) (projection, error) {
 	facts := projectionFacts{aftr: r.aftrInputs}
 	for _, service := range doc.Services {
-		if service.BGP != nil || service.DHCP4 != nil {
+		if service.BGP != nil || service.DHCP4 != nil || service.VRRP != nil {
 			// A clock read failure withholds DHCP/BGP/BFD-owned paths. It must not
 			// manufacture a new lease or disturb unrelated routing intent.
 			facts.bfdClock, _ = bfd.ReadClock()
@@ -214,7 +214,7 @@ func projectWithFacts(doc config.Native, runtimeDir, stateDir string, records ma
 			if err := json.Unmarshal(record.Snapshot, &snap); err != nil {
 				return p, err
 			}
-			if !snap.Active || !now.Before(snap.ValidUntil) {
+			if !vrrp.CurrentOwnership(snap, facts.bfdClock) {
 				continue
 			}
 			c := s.VRRPConfig()
@@ -229,7 +229,7 @@ func projectWithFacts(doc config.Native, runtimeDir, stateDir string, records ma
 				}
 			}
 			for _, address := range c.Addresses {
-				if err := addAddressWithOptions(&p.network, c.VIPInterface, address, network.AddressOptions{NoDAD: c.Family == "ipv6", PreferredUntil: snap.ValidUntil, ValidUntil: snap.ValidUntil}); err != nil {
+				if err := addAddressWithOptions(&p.network, c.VIPInterface, address, network.AddressOptions{NoDAD: c.Family == "ipv6", BootLifetime: network.BootLifetime{BootID: snap.BootID, PreferredNanos: snap.ExpiresNanos, ValidNanos: snap.ExpiresNanos}}); err != nil {
 					return p, err
 				}
 			}

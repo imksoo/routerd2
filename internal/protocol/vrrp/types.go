@@ -45,6 +45,9 @@ type Config struct {
 // must withdraw the owned VIPs and stop answering ARP/ND or forwarding frames
 // destined for the virtual MAC. The observer never owns those kernel writes.
 type Snapshot struct {
+	BootID           string    `json:"boot_id"`
+	ObservedNanos    uint64    `json:"observed_nanos"`
+	ExpiresNanos     uint64    `json:"expires_nanos"`
 	Resource         string    `json:"resource"`
 	Interface        string    `json:"interface"`
 	VIPInterface     string    `json:"vip_interface"`
@@ -65,8 +68,7 @@ type Snapshot struct {
 	PeerPriority     int       `json:"peer_priority,omitempty"`
 	ActiveIntervalCS int       `json:"active_interval_centiseconds"`
 	Deadline         time.Time `json:"deadline,omitempty"`
-	// The single kernel writer must withdraw ownership if this lease expires.
-	// Active workers refresh it before every positive-priority advertisement.
+	// Display metadata only. ExpiresNanos in BootID defines actual authority.
 	ValidUntil       time.Time `json:"valid_until,omitempty"`
 	Advertisements   uint64    `json:"advertisements"`
 	Received         uint64    `json:"received"`

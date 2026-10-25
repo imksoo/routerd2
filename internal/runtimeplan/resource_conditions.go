@@ -12,6 +12,7 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/bfd"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp4"
 	"github.com/imksoo/routerd2/internal/protocol/health"
+	"github.com/imksoo/routerd2/internal/protocol/vrrp"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 	"github.com/imksoo/routerd2/internal/supervisor"
@@ -65,6 +66,18 @@ func (r *Runtime) installGuardStatusLocked(status supervisor.Status, err error) 
 }
 
 func (r *Runtime) recordGuardGrantLocked(u serviceconfig.Update, now time.Time) {
+	if u.Role == "vrrp" {
+		var s vrrp.Snapshot
+		if json.Unmarshal(u.Snapshot, &s) != nil {
+			delete(r.guardGrants, u.Name)
+			return
+		}
+		if r.guardGrants == nil {
+			r.guardGrants = map[string]guardGrant{}
+		}
+		r.guardGrants[u.Name] = guardGrant{revision: r.revision, generation: u.Generation, sequence: u.Sequence, epoch: u.ProducerEpoch, bootID: s.BootID, value: s.Active, observedNanos: s.ObservedNanos, untilNanos: s.ExpiresNanos}
+		return
+	}
 	if u.Role == "dhcp4" {
 		var s dhcp4.Snapshot
 		if json.Unmarshal(u.Snapshot, &s) != nil {
@@ -114,7 +127,7 @@ func (r *Runtime) recordGuardGrantLocked(u serviceconfig.Update, now time.Time) 
 		ExpiresAt  time.Time `json:"expiresAt"`
 	}
 	switch u.Role {
-	case "dhcp4", "dhcp6pd", "vrrp", "bgp", "dhcp_server":
+	case "dhcp6pd", "dhcp_server":
 	default:
 		return
 	}

@@ -483,6 +483,9 @@ var ErrStale = errors.New("stale protocol producer or configuration")
 // still a replay of the same ownership grant. It must not extend monotonic
 // validity after a backward wall-clock adjustment.
 func (r *Runtime) recordOwnershipLocked(u serviceconfig.Update, maximum time.Duration) error {
+	if u.Role == "vrrp" {
+		return r.recordVRRPOwnershipLocked(u)
+	}
 	if u.Role == "dhcp4" {
 		var s dhcp4.Snapshot
 		if err := json.Unmarshal(u.Snapshot, &s); err != nil {
@@ -557,7 +560,7 @@ func (r *Runtime) Accept(ctx context.Context, u serviceconfig.Update) error {
 	if u.Role == "bfd" {
 		return r.acceptBFD(ctx, u)
 	}
-	if u.Role == "bgp" || u.Role == "dhcp4" {
+	if u.Role == "bgp" || u.Role == "dhcp4" || u.Role == "vrrp" {
 		// A restarted control has no remembered generations. Authenticate even
 		// its first BGP/DHCPv4 publication against the current process-tree registry;
 		// initial publication precedes worker Ready, so Ready is not required.
@@ -608,6 +611,11 @@ func (r *Runtime) Accept(ctx context.Context, u serviceconfig.Update) error {
 		return err
 	}
 	previous, had := r.records[u.Name]
+	if u.Role == "vrrp" {
+		if err := validateVRRPTransition(previous, u); err != nil {
+			return err
+		}
+	}
 	if u.Role == "dhcp4" {
 		if err := validateDHCP4Transition(previous, u); err != nil {
 			return err
@@ -621,13 +629,7 @@ func (r *Runtime) Accept(ctx context.Context, u serviceconfig.Update) error {
 	oldLease := r.leases[u.Name]
 	switch u.Role {
 	case "vrrp", "bgp", "dhcp_server", "dhcp4":
-		maximum := 5 * time.Second
-		if u.Role == "vrrp" {
-			var c vrrp.Config
-			_ = json.Unmarshal(b.instance.Config, &c)
-			maximum = 4 * time.Duration(c.AdvertIntervalCentiseconds) * 10 * time.Millisecond
-		}
-		if err := r.recordOwnershipLocked(u, maximum); err != nil {
+		if err := r.recordOwnershipLocked(u, 5*time.Second); err != nil {
 			return err
 		}
 	}
@@ -838,20 +840,7 @@ func validateSnapshot(instance serviceconfig.Instance, b json.RawMessage) error 
 		if err := strict(b, &s); err != nil {
 			return err
 		}
-		if c.Resource != s.Resource || c.Interface != s.Interface || c.VIPInterface != s.VIPInterface || c.VRF != s.VRF || c.Family != s.Family || c.VirtualRouterID != s.VirtualRouterID || c.Priority != s.Priority || c.AcceptMode != s.AcceptMode || c.AddressOwner != s.AddressOwner || s.VirtualMAC != vrrp.VirtualMAC(c.Family, c.VirtualRouterID).String() {
-			return errors.New("VRRP snapshot identity or ownership policy mismatch")
-		}
-		x, _ := json.Marshal(c.Addresses)
-		y, _ := json.Marshal(s.Addresses)
-		if !bytes.Equal(x, y) || c.SourceAddress != "" && s.SourceAddress != c.SourceAddress {
-			return errors.New("VRRP snapshot address set mismatch")
-		}
-		if s.Active != (s.State == vrrp.StateActive) || s.State != vrrp.StateActive && s.State != vrrp.StateBackup && s.State != vrrp.StateInitialize {
-			return errors.New("invalid VRRP state")
-		}
-		if !s.Active && !s.ValidUntil.IsZero() {
-			return errors.New("inactive VRRP state cannot retain an ownership lease")
-		}
+		return vrrp.ValidateSnapshot(c, s)
 	default:
 		return errors.New("unsupported protocol snapshot")
 	}
@@ -901,7 +890,7 @@ func (r *Runtime) Handler() http.Handler {
 	return mux
 }
 
-// Monitor expires facts from wall-clock deadlines even if a worker is killed,
+// Monitor expires facts under each protocol's clock contract if a worker stops,
 // and creates/retires PD-derived RA instances. Configuration transactions have
 // priority; no protocol callback waits for process startup while holding mu.
 func (r *Runtime) Monitor(ctx context.Context) {

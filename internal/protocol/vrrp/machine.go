@@ -15,22 +15,27 @@ type actions struct {
 // ownership update before the advertisement/notification actions and terminates
 // with withdrawal if an acknowledged effect or send fails.
 type machine struct {
-	config           Config
-	source           netip.Addr
-	epoch            string
-	state            string
-	transition       uint64
-	activeInterval   time.Duration
-	deadline         time.Time
-	validUntil       time.Time
-	peer             netip.Addr
-	peerPriority     uint8
-	advertisements   uint64
-	received         uint64
-	rejected         uint64
-	receiveDropped   uint64
-	intervalMismatch uint64
-	lastError        string
+	bootID                string
+	observedNanos         uint64
+	expiresNanos          uint64
+	observationTransition uint64
+	observationActive     bool
+	config                Config
+	source                netip.Addr
+	epoch                 string
+	state                 string
+	transition            uint64
+	activeInterval        time.Duration
+	deadline              time.Time
+	validUntil            time.Time
+	peer                  netip.Addr
+	peerPriority          uint8
+	advertisements        uint64
+	received              uint64
+	rejected              uint64
+	receiveDropped        uint64
+	intervalMismatch      uint64
+	lastError             string
 }
 
 func newMachine(c Config, source netip.Addr, epoch string) *machine {
@@ -135,6 +140,7 @@ func (m *machine) snapshot() Snapshot {
 		peer = m.peer.String()
 	}
 	return Snapshot{
+		BootID: m.bootID, ObservedNanos: m.observedNanos, ExpiresNanos: m.expiresNanos,
 		Resource: m.config.Resource, Interface: m.config.Interface, VIPInterface: m.config.VIPInterface, VRF: m.config.VRF,
 		Family: m.config.Family, SourceAddress: m.source.String(), VirtualRouterID: m.config.VirtualRouterID,
 		VirtualMAC: VirtualMAC(m.config.Family, m.config.VirtualRouterID).String(), Addresses: append([]string(nil), m.config.Addresses...),

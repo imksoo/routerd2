@@ -24,7 +24,7 @@ type guestClockBroker struct {
 }
 
 func startClockBroker(s suite, command *exec.Cmd) (*guestClockBroker, error) {
-	if s.test != "TestDaemonDHCPv4ClockCorrections" {
+	if s.test != "TestDaemonDHCPv4ClockCorrections" && s.test != "TestDaemonVRRPClockCorrections" {
 		return nil, nil
 	}
 	selected, err := os.ReadFile("/test-suite")

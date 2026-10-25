@@ -12,6 +12,8 @@ import (
 	"net/netip"
 	"sync/atomic"
 	"time"
+
+	"github.com/imksoo/routerd2/internal/boottime"
 )
 
 type transport interface {
@@ -47,21 +49,30 @@ func Run(ctx context.Context, cfg Config, effects Effects, ready func()) error {
 
 func applyActions(ctx context.Context, m *machine, a actions, device transport, effects Effects) error {
 	if a.update || a.advertise {
+		clock, err := boottime.Read()
+		if err != nil {
+			return err
+		}
+		if err := m.stampObservation(clock); err != nil {
+			return err
+		}
 		operation, cancel := context.WithTimeout(ctx, time.Duration(m.config.EffectTimeoutMilliseconds)*time.Millisecond)
 		if m.state == StateActive {
-			interval := m.config.interval()
-			m.validUntil = time.Now().Add(3*interval + time.Duration(256-m.config.Priority)*interval/256)
+			m.validUntil = time.Now().Add(time.Duration(m.expiresNanos - uint64(clock.BoottimeNanoseconds)))
 			leased, cancelLease := context.WithDeadline(operation, m.validUntil)
 			defer cancelLease()
 			operation = leased
 		}
-		err := effects.Update(operation, m.snapshot())
+		err = effects.Update(operation, m.snapshot())
 		cancel()
 		if err != nil {
 			return fmt.Errorf("VRRP ownership %s: %w", m.state, err)
 		}
-		if m.state == StateActive && !time.Now().Before(m.validUntil) {
-			return errors.New("VRRP ownership lease expired before acknowledgement")
+		if m.state == StateActive {
+			clock, err := boottime.Read()
+			if err != nil || !CurrentOwnership(m.snapshot(), clock) {
+				return errors.Join(errors.New("VRRP ownership lease expired before acknowledgement"), err)
+			}
 		}
 	}
 	if a.advertise || a.notify {
@@ -79,8 +90,12 @@ func applyActions(ctx context.Context, m *machine, a actions, device transport, 
 	}
 	if a.notify {
 		for _, frame := range notificationFrames(m.config) {
+			clock, err := boottime.Read()
+			if err != nil || !CurrentOwnership(m.snapshot(), clock) {
+				return errors.Join(errors.New("VRRP ownership expired before neighbor announcement"), err)
+			}
 			operation, cancel := context.WithDeadline(ctx, minTime(time.Now().Add(250*time.Millisecond), m.validUntil))
-			err := device.Send(operation, frame)
+			err = device.Send(operation, frame)
 			cancel()
 			if err != nil {
 				return fmt.Errorf("VRRP neighbor announcement: %w", err)
@@ -92,6 +107,12 @@ func applyActions(ctx context.Context, m *machine, a actions, device transport, 
 }
 
 func sendAdvertisement(ctx context.Context, m *machine, device transport, priority uint8) error {
+	if priority != 0 {
+		clock, err := boottime.Read()
+		if err != nil || !CurrentOwnership(m.snapshot(), clock) {
+			return errors.Join(errors.New("VRRP ownership expired before advertisement"), err)
+		}
+	}
 	deadline := time.Now().Add(250 * time.Millisecond)
 	if priority != 0 {
 		deadline = minTime(deadline, m.validUntil)
@@ -125,8 +146,17 @@ func withdraw(m *machine, device transport, effects Effects) error {
 		sendErr = sendAdvertisement(ctx, m, device, 0)
 	}
 	m.enter(StateInitialize, time.Now())
+	clock, clockErr := boottime.Read()
+	if clockErr == nil {
+		clockErr = m.stampObservation(clock)
+	}
+	if clockErr != nil {
+		// Revoke even if the clock becomes unavailable. Keep the last observed
+		// boot/time; a zero deadline never creates authority or a new lease.
+		m.expiresNanos = 0
+	}
 	applyErr := effects.Update(ctx, m.snapshot())
-	return errors.Join(sendErr, applyErr)
+	return errors.Join(sendErr, clockErr, applyErr)
 }
 
 func run(ctx context.Context, cfg Config, source netip.Addr, epoch string, device transport, effects Effects, ready func()) (result error) {
@@ -180,6 +210,8 @@ func run(ctx context.Context, cfg Config, source netip.Addr, epoch string, devic
 		ready()
 	}
 	nextDiagnostic := time.Time{}
+	observationTicker := time.NewTicker(time.Second)
+	defer observationTicker.Stop()
 	for {
 		wait := time.Until(m.deadline)
 		if wait < 0 {
@@ -220,6 +252,12 @@ func run(ctx context.Context, cfg Config, source netip.Addr, epoch string, devic
 			}
 		case <-timer.C:
 			action = m.tick(time.Now())
+		case <-observationTicker.C:
+			timer.Stop()
+			// Backup is a current negative observation too. Do not leave its
+			// readiness to expire merely because a peer keeps resetting the
+			// election deadline without a local state transition.
+			action.update = m.state == StateBackup
 		}
 		m.receiveDropped = dropped.Load()
 		if err := applyActions(ctx, m, action, device, effects); err != nil {

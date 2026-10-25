@@ -263,6 +263,9 @@ ready は supervisor の現在 generation / config digest と有限の観測期�
 active は DHCP4 / DHCP6-PD / VRRP / BGP / DHCP server の受理済み snapshot から作り、
 Health の有限 sample も同じ active fact に変換する。
 operator revision、boot ID、producer generation / epoch / sequence と CLOCK_BOOTTIME の期限を照合する。
+VRRPは元のObservedNanos/ExpiresNanosをfactとVIP address lifetimeへ渡し、UTCのvalid_untilは表示だけに使う。
+BACKUPも1秒ごとに有限なfalse観測を更新し、INITIALIZE後は同じproducer世代からのActive再送を拒否する。
+このVRRP authority受入は無条件serviceの実daemon試験であり、条件付きVRRP callbackのkernel ACK順序やHA-01全体の受入ではない。
 未観測、期限切れ、worker 世代違いは indeterminate であり、`not` でも成功へ変換しない。
 supervisorの生存中は、削除・再追加したworkerにも以前より大きいgenerationを割り当てる。
 control workerの再起動によるserviceの停止・再取得でもgenerationを再利用せず、古い通知が新しい観測を上書きしない。

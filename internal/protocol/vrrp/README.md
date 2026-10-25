@@ -61,11 +61,16 @@ necessary IPv6 ND; this package does not install that policy. Returning success
 without these effects violates the module contract.
 
 Every positive advertisement is preceded by an acknowledged lease renewal.
-`ValidUntil` is three local advertisement intervals plus priority skew into the
-future. The writer **must withdraw ownership when that lease expires**, using
-the authenticated worker generation, config digest, producer epoch and
-sequence to fence stale publishers. Convert the accepted bounded remaining
-duration to a local monotonic deadline. A failed or expired acknowledgment, or
+`BootID`, `ObservedNanos` and `ExpiresNanos` bind its original CLOCK_BOOTTIME
+observation and deadline. The bounded lifetime is three local advertisement
+intervals plus priority skew. `ValidUntil` is UTC display metadata only.
+The writer **must withdraw ownership at that original boot deadline**, using
+the current supervisor registry, authenticated worker generation, config
+digest, producer epoch and sequence to fence stale publishers. The coordinator
+passes the same absolute boot deadline to the address writer; UTC corrections,
+transport replay and reapplying a projection cannot extend it. Both the first
+publication after control restart and subsequent messages must match the live
+supervisor's generation. A failed or expired acknowledgment, or
 a missing/tentative VIP, prevents a positive advertisement and triggers
 withdrawal. A normal shutdown sends priority zero before withdrawing.
 Parent cancellation during effects, active verification, advertisement or
@@ -74,6 +79,26 @@ withdrawal failures remain errors. Cleanup uses a fresh bounded context.
 Kernel
 ownership cannot rely only on a process's graceful exit: SIGKILL cannot execute
 cleanup, and expiry belongs to the surviving single writer.
+
+Backup publishes a finite negative observation every second even when valid
+peer advertisements keep resetting its election timer. It grants no ownership.
+Initialize withdraws authority with a zero deadline and is terminal for that
+producer generation. Rewound observations, changed epochs or a later Active
+after Initialize are refused. A paused Active process whose lease already
+expired must not renew or advertise under its old election transition.
+
+The wire snapshot now requires boot evidence; the unreleased UTC-only prototype
+snapshot is refused. No persistent state codec is changed or restored. This
+does not implement all track/cluster/graceful-activation or resource-condition
+policies in HA-01. In particular, the real-daemon authority gate uses an
+unconditional VRRP declaration; conditional callback/kernel-ACK ordering still
+requires its own acceptance gate.
+
+`make qemu-vrrp-daemon` exercises actual supervisor/control/network/VRRP workers,
+VIP TCP/UDP traffic and capture, original deadline expiry/reapply, worker/control
+replacement and old-generation refusal. `make qemu-vrrp-clock` repeats it with
+fixed actual guest UTC corrections through the dedicated test PID 1 broker.
+The native two-peer IPv4/IPv6 election/VMAC tests remain separate.
 
 Callbacks must honor their context deadlines. Extremely short intervals need
 enough CPU and IPC headroom for the complete renewal/verification/send cycle;

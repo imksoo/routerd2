@@ -75,6 +75,10 @@ func selectedSuite() (suite, error) {
 		return suite{"/daemon.test", "TestDaemonDHCPv4OriginalLeaseAuthority", "ROUTERD_DHCP4_AUTHORITY_TEST", 210 * time.Second}, nil
 	case "daemon-dhcp4-clock":
 		return suite{"/daemon.test", "TestDaemonDHCPv4ClockCorrections", "ROUTERD_DHCP4_CLOCK_TEST", 210 * time.Second}, nil
+	case "daemon-vrrp":
+		return suite{"/daemon.test", "TestDaemonVRRPOriginalOwnership", "ROUTERD_VRRP_AUTHORITY_TEST", 120 * time.Second}, nil
+	case "daemon-vrrp-clock":
+		return suite{"/daemon.test", "TestDaemonVRRPClockCorrections", "ROUTERD_VRRP_CLOCK_TEST", 120 * time.Second}, nil
 	case "daemon-legacy-dhcp-dns":
 		return suite{"/daemon.test", "TestDaemonMigratedDHCPDNSAndOwnershipExpiry", "ROUTERD_LEGACY_DHCP_DNS_DAEMON_TEST", 150 * time.Second}, nil
 	case "daemon-bgp":

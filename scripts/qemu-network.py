@@ -126,6 +126,20 @@ SUITES = {
         "commands": True,
         "description": "original DHCPv4 BOOTTIME authority, kernel lease, TCP/UDP/capture and worker/control recovery",
     },
+    "daemon-vrrp": {
+        "package": "./internal/integration", "binary": "daemon.test",
+        "test": "TestDaemonVRRPOriginalOwnership",
+        "marker": "ROUTERD_VRRP_AUTHORITY_TEST", "timeout": 180,
+        "commands": True,
+        "description": "original VRRP BOOTTIME ownership, VMAC/VIP TCP/UDP/capture, expiry and worker/control recovery",
+    },
+    "daemon-vrrp-clock": {
+        "package": "./internal/integration", "binary": "daemon.test",
+        "test": "TestDaemonVRRPClockCorrections",
+        "marker": "ROUTERD_VRRP_CLOCK_TEST", "timeout": 180,
+        "commands": True,
+        "description": "guest-only actual UTC corrections with original VRRP BOOTTIME VIP expiry and reapply",
+    },
     "daemon-dhcp4-clock": {
         "package": "./internal/integration", "binary": "daemon.test",
         "test": "TestDaemonDHCPv4ClockCorrections",
@@ -341,7 +355,7 @@ def prune_modules(root, kernel_release, roots):
 
 def clock_marker(root, suite_name):
     """Only the fixed clock-fault guest receives a per-boot kernel marker."""
-    if suite_name != "daemon-dhcp4-clock":
+    if suite_name not in ("daemon-dhcp4-clock", "daemon-vrrp-clock"):
         return ""
     nonce = secrets.token_hex(16)
     (root / "test-clock-nonce").write_text(nonce + "\n")
