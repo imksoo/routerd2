@@ -63,6 +63,8 @@ func TestSnapshotAPIRequiresCurrentRevision(t *testing.T) {
 		{`{"expected_revision":0}`, 409},
 		{`{"expected_revision":2}`, 409},
 		{`{"expected_revision":1,"path":"/tmp/snapshot"}`, 400},
+		{`{"expected_revision":1,"expected_revision":1}`, 400},
+		{`{"Expected_Revision":1}`, 400},
 	} {
 		w := httptest.NewRecorder()
 		e.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/config/snapshots", strings.NewReader(test.body)))

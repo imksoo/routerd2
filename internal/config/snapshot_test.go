@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func snapshotFixture(t *testing.T) (*Store, Committed) {
@@ -91,6 +92,9 @@ func TestSnapshotRejectsUnconfirmedAndCorruptState(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, changed, 0400); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0400); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.ResolveSnapshot(ref); err == nil {
@@ -214,5 +218,55 @@ func TestJournalIdentityCannotBeReplacedByOrdinarySave(t *testing.T) {
 	got, err := s.Load()
 	if err != nil || !reflect.DeepEqual(got, c) {
 		t.Fatal("failed save changed committed journal", err)
+	}
+}
+
+func TestSnapshotStoreRejectsUnconfirmedAndMultipleLinks(t *testing.T) {
+	s, c := snapshotFixture(t)
+	trial := c
+	trial.Revision++
+	trial.LastRequestID = "trial"
+	trial.Confirmation = &Confirmation{Previous: c.Config, PreviousRevision: c.Revision, RequestID: "trial", Deadline: time.Now().Add(time.Minute).UTC()}
+	if err := s.Save(trial); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Snapshot(trial.Revision); !errors.Is(err, ErrSnapshotConflict) {
+		t.Fatal("store captured an unconfirmed configuration", err)
+	}
+	trial.Confirmation = nil
+	if err := s.Save(trial); err != nil {
+		t.Fatal(err)
+	}
+	ref, err := s.Snapshot(trial.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(s.Dir, "snapshots", ref.Digest+".json")
+	if err := os.Link(path, filepath.Join(t.TempDir(), "alias")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ResolveSnapshot(ref); err == nil {
+		t.Fatal("snapshot accepted a multiply linked payload")
+	}
+	if _, err := s.Snapshot(trial.Revision); err == nil {
+		t.Fatal("retry accepted a multiply linked payload")
+	}
+}
+
+func TestLargeSnapshotRoundTrip(t *testing.T) {
+	s, c := snapshotFixture(t)
+	c.Config = largeDocument(7000)
+	if err := s.Save(c); err != nil {
+		t.Fatal(err)
+	}
+	ref, err := s.Snapshot(c.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.ResolveSnapshot(ref)
+	a, _ := json.Marshal(c.Config)
+	b, _ := json.Marshal(got.Config)
+	if err != nil || !bytes.Equal(a, b) {
+		t.Fatal("large complete snapshot did not survive validation", err)
 	}
 }

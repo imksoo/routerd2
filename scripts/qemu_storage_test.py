@@ -19,6 +19,7 @@ def witnesses():
         "config_sha256": "config", "host_key_sha256": "host", "host_key_fingerprint": "fingerprint",
         "sentinel_sha256": "sentinel",
         "event_id": "d7b3f753ee2a52bb24261bf44a508688", "event_cursor": 1,
+        "store_id": "b" * 32, "snapshot_digest": "c" * 64, "snapshot_revision": 2,
     }
     second = dict(first, boot_id="7bbe264e-57c0-4ee6-aa19-67c3a1d244fb",
                   release_id=STORAGE.IDENTITIES["baseline"], release_operation="boot-rollback",
@@ -49,6 +50,7 @@ class TwoBootWitnessTests(unittest.TestCase):
             "pinned_exec_verified": False, "config_sha256": "changed",
             "host_key_sha256": "changed", "host_key_fingerprint": "changed", "sentinel_sha256": "changed",
             "event_id": "changed", "event_cursor": 2,
+            "store_id": "d" * 32, "snapshot_digest": "e" * 64, "snapshot_revision": 3,
         }
         for field, value in changes.items():
             with self.subTest(field=field):
@@ -60,6 +62,18 @@ class TwoBootWitnessTests(unittest.TestCase):
     def test_missing_or_malformed_publication_cannot_pass(self):
         for phase in (0, 1):
             for field, values in {"event_id": [None, "", "not-an-event-id"], "event_cursor": [None, 0, -1, True]}.items():
+                for value in values:
+                    with self.subTest(phase=phase, field=field, value=value):
+                        data = witnesses()
+                        data[phase]["witness"][field] = value
+                        with self.assertRaises(RuntimeError):
+                            STORAGE.check_witnesses(data)
+
+    def test_missing_or_invalid_snapshot_provenance_cannot_pass(self):
+        for phase in (0, 1):
+            for field, values in {"store_id": [None, "", "A" * 32],
+                                  "snapshot_digest": [None, "", "../config", "C" * 64],
+                                  "snapshot_revision": [None, 0, True, 1, 3]}.items():
                 for value in values:
                     with self.subTest(phase=phase, field=field, value=value):
                         data = witnesses()
