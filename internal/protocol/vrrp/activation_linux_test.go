@@ -74,3 +74,20 @@ func TestGracefulTimeoutNeverPublishesAndReadinessIsAdmissionOnly(t *testing.T) 
 		t.Fatal("readiness loss revoked previously published election")
 	}
 }
+
+func TestActivationGrantOriginalBootBoundary(t *testing.T) {
+	s := Snapshot{State: StateActive, BootID: bootClock(100).BootID, Epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Transition: 1, ObservedNanos: 100, ExpiresNanos: 1000}
+	g := ActivationGrant{ID: 1, BootID: s.BootID, ElectionEpoch: s.Epoch, Transition: 1, ObservedNanos: 100, ExpiresNanos: 500}
+	if !g.ValidFor(s, bootClock(499)) || g.ValidFor(s, bootClock(500)) {
+		t.Fatal("activation boundary was not exclusive")
+	}
+	clock := bootClock(499)
+	clock.WallTime = clock.WallTime.Add(-48 * time.Hour)
+	if !g.ValidFor(s, clock) {
+		t.Fatal("UTC changed admission authority")
+	}
+	clock.BootID = "7bbe264e-57c0-4ee6-aa19-67c3a1d244fb"
+	if g.ValidFor(s, clock) {
+		t.Fatal("another boot reused admission")
+	}
+}

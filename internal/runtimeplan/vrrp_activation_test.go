@@ -124,3 +124,80 @@ func TestGracefulVRRPRequiresCurrentAdmissionAndLatchesOnlyAppliedPublication(t 
 		t.Fatal("published role could not renew after readiness degradation:", err)
 	}
 }
+
+func TestGracefulVRRPRejectsChangedOrExpiredAdmissionBeforeRecording(t *testing.T) {
+	for _, mode := range []string{"expired", "readiness-lost", "source-cutover", "election-changed", "producer-changed"} {
+		t.Run(mode, func(t *testing.T) {
+			source := activationSource()
+			n := &memoryNetwork{}
+			r := New(t.TempDir(), t.TempDir(), n, testSupervisorInstance)
+			r.manager = &memoryManager{}
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			if err := r.ApplyConfig(ctx, 1, source); err != nil {
+				t.Fatal(err)
+			}
+			c := source.Resources[0].Service.VRRPConfig()
+			s := bootVRRPSnapshot(t, c)
+			s.Active = false
+			s.ValidUntil = time.Time{}
+			s.ActivationState = "Preparing"
+			s.ActivationStartedNanos = s.ObservedNanos
+			pending := update(t, r, "service.ha", 1, s)
+			if err := acceptVRRPAndDrain(t, r, pending); err != nil {
+				t.Fatal(err)
+			}
+			if err := r.Accept(ctx, update(t, r, "service.wan", 1, lease4(time.Now().Add(time.Hour)))); err != nil {
+				t.Fatal(err)
+			}
+			grant, err := r.GrantVRRPActivation(ctx, pending)
+			if err != nil || grant.ID == 0 {
+				t.Fatal(grant, err)
+			}
+			active := bootVRRPSnapshot(t, c)
+			active.ActivationState = "Ready"
+			active.ActivationStartedNanos = s.ActivationStartedNanos
+			active.ActivationGrant = grant
+			u := update(t, r, pending.Name, 2, active)
+			switch mode {
+			case "expired":
+				active.ActivationGrant.ExpiresNanos = grant.ObservedNanos + 1
+				r.mu.Lock()
+				admission := r.vrrpAdmissions[u.Name]
+				admission.grant = active.ActivationGrant
+				r.vrrpAdmissions[u.Name] = admission
+				r.mu.Unlock()
+				u = update(t, r, u.Name, 2, active)
+			case "readiness-lost":
+				lost := lease4(time.Now().Add(time.Hour))
+				lost.Active = false
+				if err := r.Accept(ctx, update(t, r, "service.wan", 2, lost)); err != nil {
+					t.Fatal(err)
+				}
+			case "source-cutover":
+				if err := r.ApplyConfig(ctx, 2, source); err != nil {
+					t.Fatal(err)
+				}
+			case "election-changed":
+				active.Transition++
+				u = update(t, r, u.Name, 2, active)
+			case "producer-changed":
+				u.ProducerEpoch = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+			}
+			if err := r.Accept(ctx, u); err == nil {
+				t.Fatal("invalid admission accepted")
+			}
+			r.mu.Lock()
+			remembered := r.records[u.Name]
+			r.mu.Unlock()
+			if remembered.Sequence != pending.Sequence || string(remembered.Snapshot) != string(pending.Snapshot) {
+				t.Fatal("rejected admission changed the accepted election")
+			}
+			n.mu.Lock()
+			defer n.mu.Unlock()
+			if len(n.applied.Links) != 0 {
+				t.Fatal("invalid admission installed a VIP")
+			}
+		})
+	}
+}
