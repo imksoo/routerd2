@@ -36,6 +36,9 @@ type Snapshot struct {
 	Epoch         string                        `json:"epoch"`
 	Sequence      uint64                        `json:"sequence"`
 	Active        bool                          `json:"active"`
+	BootID        string                        `json:"boot_id"`
+	ObservedNanos uint64                        `json:"observed_nanos"`
+	ExpiresNanos  uint64                        `json:"expires_nanos"`
 	ObservedAt    time.Time                     `json:"observed_at"`
 	ValidUntil    time.Time                     `json:"valid_until,omitempty"`
 	Routes        []Route                       `json:"routes"`

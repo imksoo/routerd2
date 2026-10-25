@@ -25,6 +25,7 @@ import (
 type projection struct {
 	resources   map[string]resourceprogram.ResourceState
 	routeIssues []RouteIssue
+	bgpStatus   map[string]bgpProjectionStatus
 	network     network.Desired
 	instances   []serviceconfig.Instance
 	liveRA      map[string]ra.Config
@@ -48,8 +49,8 @@ type projectionFacts struct {
 func (r *Runtime) projectLocked(doc config.Native, records map[string]serviceconfig.Update, now time.Time) (projection, error) {
 	facts := projectionFacts{aftr: r.aftrInputs}
 	for _, service := range doc.Services {
-		if service.BGP != nil && len(service.BGP.PeerBFD) > 0 {
-			// A clock read failure withholds BFD-dependent paths. It must not
+		if service.BGP != nil {
+			// A clock read failure withholds BGP/BFD-dependent paths. It must not
 			// manufacture a new lease or disturb unrelated routing intent.
 			facts.bfdClock, _ = bfd.ReadClock()
 			break

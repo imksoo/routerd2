@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/protocol/bfd"
 	"github.com/imksoo/routerd2/internal/protocol/bgpconfig"
 	gobgpapi "github.com/osrg/gobgp/v4/api"
 	gobgpapiutil "github.com/osrg/gobgp/v4/pkg/apiutil"
@@ -17,7 +18,7 @@ import (
 	gobgpserver "github.com/osrg/gobgp/v4/pkg/server"
 )
 
-const leaseDuration = 5 * time.Second
+const leaseDuration = bgpconfig.ObservationLifetime
 
 type observation struct {
 	mu       sync.RWMutex
@@ -66,6 +67,11 @@ func selectedRoute(cfg Config, prefix string, p *gobgpapiutil.Path) (Route, bool
 
 func readSnapshot(ctx context.Context, server *gobgpserver.BgpServer, cfg Config) (Snapshot, error) {
 	snapshot := Snapshot{Resource: cfg.Resource, Active: true, Routes: []Route{}, Peers: []Peer{}}
+	clock, err := bfd.ReadClock()
+	if err != nil {
+		return snapshot, err
+	}
+	bgpconfig.StampObservation(&snapshot, clock)
 	global, err := server.GetBgp(ctx, &gobgpapi.GetBgpRequest{})
 	if err != nil {
 		return snapshot, err
@@ -154,12 +160,16 @@ func cloneSnapshot(s Snapshot) Snapshot {
 func (o *observation) publish(ctx context.Context, s Snapshot) error {
 	o.sequence++
 	s.Resource, s.Epoch, s.Sequence = o.cfg.Resource, o.epoch, o.sequence
-	s.ObservedAt = time.Now().UTC()
-	if s.Active {
-		s.ValidUntil = s.ObservedAt.Add(leaseDuration)
-	} else {
-		s.ValidUntil = time.Time{}
+	if !s.Active {
 		s.Routes = []Route{}
+		clock, err := bfd.ReadClock()
+		if err != nil {
+			return err
+		}
+		bgpconfig.StampObservation(&s, clock)
+	}
+	if err := bgpconfig.ValidateObservation(s); err != nil {
+		return err
 	}
 	call, cancel := context.WithTimeout(ctx, time.Duration(o.cfg.EffectTimeoutMilliseconds)*time.Millisecond)
 	err := o.effects.Update(call, cloneSnapshot(s))
@@ -170,8 +180,11 @@ func (o *observation) publish(ctx context.Context, s Snapshot) error {
 	if err != nil {
 		return fmt.Errorf("publish BGP ownership: %w", err)
 	}
-	if s.Active && !time.Now().Before(s.ValidUntil) {
-		return errors.New("BGP ownership acknowledgment arrived after its lease expired")
+	if s.Active {
+		clock, err := bfd.ReadClock()
+		if err != nil || !bgpconfig.CurrentObservation(s, clock) {
+			return errors.Join(errors.New("BGP ownership acknowledgment arrived after its lease expired"), err)
+		}
 	}
 	if o.cfg.StatusPath != "" {
 		if err := atomicJSON(o.cfg.StatusPath, s); err != nil {

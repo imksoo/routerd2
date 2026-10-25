@@ -63,6 +63,8 @@ func selectedSuite() (suite, error) {
 		return suite{"/daemon.test", "TestDaemonMigratedDHCPDNSAndOwnershipExpiry", "ROUTERD_LEGACY_DHCP_DNS_DAEMON_TEST", 150 * time.Second}, nil
 	case "daemon-bgp":
 		return suite{"/daemon.test", "TestDaemonBGPFIBAndOwnershipExpiry", "ROUTERD_BGP_DAEMON_TEST", 150 * time.Second}, nil
+	case "daemon-bgp-derived":
+		return suite{"/daemon.test", "TestDaemonBGPDerivedCurrentStatus", "ROUTERD_BGP_DERIVED_DAEMON_TEST", 150 * time.Second}, nil
 	case "daemon-bfd":
 		return suite{"/daemon.test", "TestDaemonBFDControlsBGPSessionAndExpiry", "ROUTERD_BFD_DAEMON_TEST", 150 * time.Second}, nil
 	case "daemon-bfd-derived":

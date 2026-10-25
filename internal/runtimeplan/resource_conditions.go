@@ -25,6 +25,7 @@ type guardGrant struct {
 	deadline                       time.Time
 	untilNanos                     uint64
 	observedNanos                  uint64
+	bgp                            *bgpProvider
 }
 
 func conditionalProgram(source config.Document) bool {
@@ -62,6 +63,19 @@ func (r *Runtime) installGuardStatusLocked(status supervisor.Status, err error) 
 }
 
 func (r *Runtime) recordGuardGrantLocked(u serviceconfig.Update, now time.Time) {
+	if u.Role == "bgp" {
+		provider, err := bgpProviderFor(u)
+		if err != nil {
+			delete(r.guardGrants, u.Name)
+			return
+		}
+		if r.guardGrants == nil {
+			r.guardGrants = map[string]guardGrant{}
+		}
+		s := provider.snapshot
+		r.guardGrants[u.Name] = guardGrant{revision: r.revision, generation: u.Generation, sequence: u.Sequence, epoch: u.ProducerEpoch, bootID: s.BootID, value: s.Active, untilNanos: s.ExpiresNanos, observedNanos: s.ObservedNanos, deadline: s.ValidUntil, bgp: &provider}
+		return
+	}
 	if u.Role == "health" {
 		var snapshot health.Snapshot
 		if json.Unmarshal(u.Snapshot, &snapshot) != nil {

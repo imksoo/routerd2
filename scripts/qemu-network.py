@@ -125,6 +125,13 @@ SUITES = {
         "commands": True,
         "description": "two-binary daemon BGP FIB and ownership expiry",
     },
+    "daemon-bgp-derived": {
+        "package": "./internal/integration", "binary": "daemon.test",
+        "test": "TestDaemonBGPDerivedCurrentStatus",
+        "marker": "ROUTERD_BGP_DERIVED_DAEMON_TEST", "timeout": 200,
+        "commands": True,
+        "description": "current BGPRouter fields, applied FIB, DerivedEvent/EventRule and process recovery",
+    },
     "daemon-bfd": {
         "package": "./internal/integration", "binary": "daemon.test",
         "test": "TestDaemonBFDControlsBGPSessionAndExpiry",

@@ -61,6 +61,7 @@ func routeMetric(metric int, ip netip.Addr) int {
 // or kills a healthy BGP session. Kernel apply errors still fail the ACK.
 // Resolution uses this complete committed projection, excluding foreign routes.
 func projectBGP(p *projection, doc config.Native, records map[string]serviceconfig.Update, now time.Time, clock bfd.Clock) error {
+	p.bgpStatus = map[string]bgpProjectionStatus{}
 	groups := map[string]*routeGroup{}
 	sources := collectBFD(doc.Services, records)
 	for _, service := range doc.Services {
@@ -75,9 +76,14 @@ func projectBGP(p *projection, doc config.Native, records map[string]serviceconf
 		if err := json.Unmarshal(u.Snapshot, &s); err != nil {
 			return err
 		}
-		if !s.Active || !now.Before(s.ValidUntil) {
+		if !bgpconfig.CurrentObservation(s, clock) {
 			continue
 		}
+		provider, err := bgpProviderFor(u)
+		if err != nil {
+			return err
+		}
+		p.bgpStatus[service.ModuleName()] = bgpProjectionStatus{identity: provider.projection}
 		c := service.BGPConfig("/run/routerd", "/var/lib/routerd")
 		if len(s.Routes) > c.MaxRoutes {
 			return errors.New("BGP selected routes exceed configured limit")
@@ -171,6 +177,9 @@ func projectBGP(p *projection, doc config.Native, records map[string]serviceconf
 		}
 		if len(reasons) > 0 {
 			p.routeIssues = append(p.routeIssues, RouteIssue{Service: g.service, Prefix: g.prefix.String(), Reason: strings.Join(unique(reasons), "; ")})
+			status := p.bgpStatus["service."+g.service]
+			status.unresolved++
+			p.bgpStatus["service."+g.service] = status
 		}
 		next = uniqueHops(next)
 		if len(next) == 0 {

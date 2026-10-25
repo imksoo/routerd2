@@ -125,6 +125,7 @@ type Runtime struct {
 	lastNetworkApply     time.Time
 	leases               map[string]time.Time
 	routeIssues          []RouteIssue
+	bgpApplied           map[string]bgpProjectionStatus
 	phase, lastError     string
 }
 
@@ -283,6 +284,9 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 	r.phase = "applying"
 	r.lastError = ""
 	err = r.applyNetworkLocked(ctx, p.network)
+	if err == nil {
+		r.bgpApplied = p.bgpStatus
+	}
 	r.mu.Unlock()
 	if err != nil {
 		return r.failure(err)
@@ -462,6 +466,7 @@ func (r *Runtime) applyNetworkLocked(ctx context.Context, d network.Desired) err
 		return nil
 	}
 	if err := r.network.Apply(ctx, r.revision, d); err != nil {
+		r.bgpApplied = nil
 		return err
 	}
 	if digest != r.appliedHash {
@@ -478,6 +483,22 @@ var ErrStale = errors.New("stale protocol producer or configuration")
 // still a replay of the same ownership grant. It must not extend monotonic
 // validity after a backward wall-clock adjustment.
 func (r *Runtime) recordOwnershipLocked(u serviceconfig.Update, maximum time.Duration) error {
+	if u.Role == "bgp" {
+		var s bgpconfig.Snapshot
+		if err := json.Unmarshal(u.Snapshot, &s); err != nil {
+			return err
+		}
+		if !s.Active {
+			delete(r.leases, u.Name)
+			return nil
+		}
+		clock, err := bfd.ReadClock()
+		if err != nil || !bgpconfig.CurrentObservation(s, clock) {
+			return errors.Join(errors.New("invalid BGP boot-scoped ownership deadline"), err)
+		}
+		r.leases[u.Name] = time.Now().Add(time.Duration(s.ExpiresNanos - uint64(clock.BoottimeNanoseconds)))
+		return nil
+	}
 	var grant struct {
 		Active     bool      `json:"active"`
 		ValidUntil time.Time `json:"valid_until"`
@@ -520,6 +541,27 @@ func (r *Runtime) Accept(ctx context.Context, u serviceconfig.Update) error {
 	if u.Role == "bfd" {
 		return r.acceptBFD(ctx, u)
 	}
+	if u.Role == "bgp" {
+		// A restarted control has no remembered generations. Authenticate even
+		// its first BGP publication against the current process-tree registry;
+		// initial publication precedes worker Ready, so Ready is not required.
+		status, err := r.manager.Status(ctx)
+		if err != nil {
+			return err
+		}
+		matched := false
+		if status.InstanceID == r.supervisorInstance && !status.Stopping {
+			for _, module := range status.Modules {
+				if module.Name == u.Name && module.Role == "bgp" && module.Generation == u.Generation && module.ConfigDigest == u.ConfigDigest {
+					matched = true
+					break
+				}
+			}
+		}
+		if !matched {
+			return ErrStale
+		}
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	b, ok := r.bindings[u.Name]
@@ -550,6 +592,11 @@ func (r *Runtime) Accept(ctx context.Context, u serviceconfig.Update) error {
 		return err
 	}
 	previous, had := r.records[u.Name]
+	if u.Role == "bgp" {
+		if err := validateBGPTransition(previous, u); err != nil {
+			return err
+		}
+	}
 	oldLease := r.leases[u.Name]
 	switch u.Role {
 	case "vrrp", "bgp", "dhcp_server":
@@ -618,6 +665,7 @@ func (r *Runtime) Accept(ctx context.Context, u serviceconfig.Update) error {
 	r.resourceStates = p.resources
 	r.liveRA = p.liveRA
 	r.routeIssues = p.routeIssues
+	r.bgpApplied = p.bgpStatus
 	if u.Role == "bgp" {
 		// A newly started recipient may read grants only after this first
 		// publication has completed the existing network ACK boundary.
@@ -734,6 +782,9 @@ func validateSnapshot(instance serviceconfig.Instance, b json.RawMessage) error 
 		}
 		if s.Resource != c.Resource || len(s.Epoch) != 32 || s.Sequence == 0 {
 			return errors.New("BGP snapshot identity mismatch")
+		}
+		if err := bgpconfig.ValidateObservation(s); err != nil {
+			return err
 		}
 		if len(s.Routes) > c.MaxRoutes {
 			return errors.New("BGP route limit exceeded")
@@ -895,6 +946,7 @@ func (r *Runtime) reconcileDynamic(ctx context.Context) error {
 		return err
 	}
 	r.liveRA, r.routeIssues = p.liveRA, p.routeIssues
+	r.bgpApplied = p.bgpStatus
 	r.resourceStates = p.resources
 	if conditionalProgram(r.source) {
 		for _, record := range r.records {

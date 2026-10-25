@@ -12,6 +12,7 @@ import (
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/derived"
 	"github.com/imksoo/routerd2/internal/protocol/bfd"
+	"github.com/imksoo/routerd2/internal/protocol/bgpconfig"
 	"github.com/imksoo/routerd2/internal/protocol/health"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
 )
@@ -70,6 +71,10 @@ func (r *Runtime) rawDerivedSnapshotLocked(facts resourceprogram.FactSnapshot) (
 		bfdSnapshot bfd.Snapshot
 		bfdConfig   bfd.Config
 		isBFD       bool
+		isBGP       bool
+		bgpSnapshot bgpconfig.Snapshot
+		bgpConfig   bgpconfig.Config
+		unresolved  int
 		origin      string
 		until       uint64
 	}
@@ -108,10 +113,29 @@ func (r *Runtime) rawDerivedSnapshotLocked(facts resourceprogram.FactSnapshot) (
 					provider.origin = identity(clock.BootID, binding.digest, module.Generation, record.ProducerEpoch)
 				}
 			}
+			if target.Service != nil && target.Service.BGP != nil && lifecycles[ref.Resource].Active {
+				name := target.Service.ModuleName()
+				binding, exists := r.bindings[name]
+				module, managed := r.guardStatus[name]
+				record := r.records[name]
+				grant, granted := r.guardGrants[name]
+				applied, matched := r.bgpApplied[name]
+				if exists && managed && granted && grant.bgp != nil && matched && r.appliedHash != "" && module.Ready && module.Generation == record.Generation && grant.generation == record.Generation && record.ConfigDigest == binding.digest && module.ConfigDigest == binding.digest && grant.revision == r.revision && grant.epoch == record.ProducerEpoch && grant.sequence == record.Sequence && clock.BootID == r.guardBootID && clock.BootID == grant.bootID && now < r.guardUntilNanos && applied.identity == grant.bgp.projection {
+					provider.isBGP, provider.known = true, true
+					provider.bgpSnapshot = grant.bgp.snapshot
+					provider.bgpConfig = target.Service.BGPConfig(r.dir, r.stateDir)
+					provider.unresolved = applied.unresolved
+					provider.until = min(grant.untilNanos, r.guardUntilNanos)
+					provider.origin = identity(clock.BootID, binding.digest, module.Generation, record.ProducerEpoch, provider.bgpSnapshot.Epoch)
+				}
+			}
 			providers[ref.Resource] = provider
 		}
 		value := derived.Value{Scope: scope}
-		if provider.known && provider.isBFD {
+		if provider.known && provider.isBGP {
+			field, known := bgpconfig.CurrentStatus(provider.bgpConfig, provider.bgpSnapshot, ref.Field, clock, provider.unresolved)
+			value = derived.Value{Text: field.Text, Known: known, Scope: scope, Origin: provider.origin, ObservedNanos: field.ObservedNanos, ExpiresNanos: min(field.ExpiresNanos, provider.until)}
+		} else if provider.known && provider.isBFD {
 			field, known := bfd.CurrentStatus(provider.bfdConfig, provider.bfdSnapshot, ref.Field, clock)
 			value = derived.Value{Text: field.Text, Known: known, Scope: scope, Origin: provider.origin, Continuity: field.Continuity, EqualityContinuity: field.EqualityContinuity, ObservedNanos: field.ObservedNanos, ExpiresNanos: min(field.ExpiresNanos, provider.until)}
 		} else if provider.known {
