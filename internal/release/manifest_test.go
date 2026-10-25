@@ -143,6 +143,23 @@ func TestELFRejectsWrongIdentityAndDynamicOrMalformedPayload(t *testing.T) {
 		{"missing ABI", func(b []byte) []byte {
 			return bytes.Replace(b, []byte(runtimeabi.CurrentRecord), bytes.Repeat([]byte("x"), len(runtimeabi.CurrentRecord)), 1)
 		}, "routerd", "fixture-r1"},
+		{"duplicate ABI", func(b []byte) []byte {
+			f, err := elf.NewFile(bytes.NewReader(b))
+			if err != nil {
+				t.Fatal(err)
+			}
+			section := f.Section(".rodata")
+			position := int(section.Offset)
+			original := bytes.Index(b, []byte(runtimeabi.CurrentRecord))
+			if position+len(runtimeabi.CurrentRecord) > original && position <= original {
+				position = original + len(runtimeabi.CurrentRecord) + 32
+			}
+			if position+len(runtimeabi.CurrentRecord) > int(section.Offset+section.Size) {
+				t.Fatal("ABI duplicate fixture exceeds readonly section")
+			}
+			copy(b[position:], []byte(runtimeabi.CurrentRecord))
+			return b
+		}, "routerd", "fixture-r1"},
 		{"duplicate identity", func(b []byte) []byte {
 			f, err := elf.NewFile(bytes.NewReader(b))
 			if err != nil {

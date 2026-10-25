@@ -72,6 +72,7 @@ func TestBuiltRuntimeCatalog(t *testing.T) {
 			if manifest.Version != 3 || !manifest.RuntimeABI.Equal(runtimeabi.Current()) {
 				t.Fatal("actual bundle lost native ABI declaration")
 			}
+			t.Logf("%s manifest_v3 ABI=%s configuration=%d state_schemas=%d verified in all three native artifacts", arch, manifest.RuntimeABI.Profile, manifest.RuntimeABI.Configuration.Write, len(manifest.RuntimeABI.State))
 			resolved, err := store.Lookup(ctx, ref.Digest)
 			if err != nil || resolved != ref {
 				t.Fatalf("digest lookup: %+v %v", resolved, err)

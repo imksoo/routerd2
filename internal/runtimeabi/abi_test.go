@@ -5,6 +5,8 @@ package runtimeabi
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"io"
 	"strings"
 	"testing"
 )
@@ -108,6 +110,19 @@ func TestRecordScannerHandlesChunkBoundariesAndAmbiguity(t *testing.T) {
 	raw, _ := json.Marshal(Current())
 	if len(raw) > MaxRecordBytes {
 		t.Fatal("unbounded current metadata")
+	}
+}
+
+type stalledABIReader struct{}
+
+func (stalledABIReader) Read([]byte) (int, error) { return 0, nil }
+
+func TestRecordScannerBoundsMarkerSprayAndNonProgressingReaders(t *testing.T) {
+	if _, err := ReadRecord(strings.NewReader(strings.Repeat(Prefix+"{", 32) + CurrentRecord)); err == nil {
+		t.Fatal("unbounded malformed marker candidates accepted")
+	}
+	if _, err := ReadRecord(stalledABIReader{}); !errors.Is(err, io.ErrNoProgress) {
+		t.Fatal("non-progressing reader was not bounded", err)
 	}
 }
 

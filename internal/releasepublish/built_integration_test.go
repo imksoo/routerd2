@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/imksoo/routerd2/internal/release"
+	"github.com/imksoo/routerd2/internal/runtimeabi"
 )
 
 func TestPublishBuiltRelease(t *testing.T) {
@@ -45,6 +46,9 @@ func TestPublishBuiltRelease(t *testing.T) {
 			}
 			if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
 				t.Fatal(err)
+			}
+			if result.Manifest.Version != 3 || !result.Manifest.RuntimeABI.Equal(runtimeabi.Current()) {
+				t.Fatal("publisher CLI did not derive native ABI from its inputs")
 			}
 			root := filepath.Join(t.TempDir(), "store")
 			// The production store intentionally makes generations immutable.
