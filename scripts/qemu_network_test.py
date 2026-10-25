@@ -13,6 +13,11 @@ SPEC.loader.exec_module(GATE)
 
 
 class GuestResultTest(unittest.TestCase):
+    def test_conditional_recovery_requires_its_actual_daemon_oracle(self):
+        suite = GATE.SUITES["daemon-startup-recovery"]
+        self.assertEqual(suite["test"], "TestDaemonConditionalStartupRecovery")
+        self.assertEqual(suite["marker"], "ROUTERD_STARTUP_RECOVERY_DAEMON_TEST")
+        self.assertTrue(suite["commands"])
     def test_startup_suite_requires_actual_adoption_and_recovery_test(self):
         suite = GATE.SUITES["daemon-startup"]
         self.assertEqual(suite["test"], "TestDaemonStartupSelectionAndRecovery")
