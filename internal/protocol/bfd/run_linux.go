@@ -43,14 +43,16 @@ func Run(ctx context.Context, cfg Config, effects Effects, ready func()) error {
 }
 
 type worker struct {
-	config    Config
-	sessions  []*session
-	byDisc    map[uint32]int
-	bySource  map[netip.Addr]int
-	source    netip.Addr
-	clock     Clock
-	rejected  uint64
-	lastError string
+	config           Config
+	sessions         []*session
+	byDisc           map[uint32]int
+	bySource         map[netip.Addr]int
+	source           netip.Addr
+	clock            Clock
+	rejected         uint64
+	lastError        string
+	lastTimestamp    time.Time
+	timestampChanges uint64
 }
 
 func newWorker(cfg Config, device transport, clock Clock, jitter func(uint32) uint32) (*worker, error) {
@@ -70,7 +72,13 @@ func newWorker(cfg Config, device transport, clock Clock, jitter func(uint32) ui
 }
 
 func (w *worker) snapshot(active bool, dropped uint64) Snapshot {
-	s := Snapshot{Resource: w.config.Resource, Interface: w.config.Interface, SourceAddress: w.config.SourceAddress, BootID: w.clock.BootID, Active: active, ObservedNanos: uint64(w.clock.BoottimeNanoseconds), ExpiresNanos: uint64(w.clock.BoottimeNanoseconds) + uint64(StatusLifetime), UpdatedAt: w.clock.WallTime, Rejected: w.rejected, ReceiveDropped: dropped, LastError: w.lastError, Peers: make([]PeerState, len(w.sessions))}
+	// Count produced timestamp changes before the publisher can coalesce them.
+	// Equality can distinguish A->B->A; notEmpty need not reset on each renewal.
+	if !w.clock.WallTime.Equal(w.lastTimestamp) {
+		increment(&w.timestampChanges)
+		w.lastTimestamp = w.clock.WallTime
+	}
+	s := Snapshot{Resource: w.config.Resource, Interface: w.config.Interface, SourceAddress: w.config.SourceAddress, BootID: w.clock.BootID, Active: active, ObservedNanos: uint64(w.clock.BoottimeNanoseconds), ExpiresNanos: uint64(w.clock.BoottimeNanoseconds) + uint64(StatusLifetime), TimestampChanges: w.timestampChanges, UpdatedAt: w.clock.WallTime, Rejected: w.rejected, ReceiveDropped: dropped, LastError: w.lastError, Peers: make([]PeerState, len(w.sessions))}
 	for i, peer := range w.sessions {
 		s.Peers[i] = peer.snapshot(active)
 	}

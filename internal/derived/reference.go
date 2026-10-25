@@ -41,7 +41,7 @@ func (p Program) References() []Reference {
 // InputIdentity detects changed values/continuity without renewing the age of
 // an unchanged observation. The caller must still check the finite deadline.
 func (p Program) InputIdentity(s Snapshot) string {
-	parts := []any{s.scope, p.target(s).truth, s.authority(p.refs)}
+	parts := []any{s.scope, p.target(s).truth, s.authority(p.refs, p.equality)}
 	body, _ := json.Marshal(parts)
 	sum := sha256.Sum256(body)
 	return hex.EncodeToString(sum[:])
@@ -55,7 +55,7 @@ type InputProof struct {
 
 func (p Program) Proof(s Snapshot) InputProof {
 	v := p.target(s)
-	return InputProof{Value: v.truth, UntilNanos: v.until, Authority: s.authority(p.refs)}
+	return InputProof{Value: v.truth, UntilNanos: v.until, Authority: s.authority(p.refs, p.equality)}
 }
 
 func (s Snapshot) Timebase() (scope string, now uint64) { return s.scope, s.now }

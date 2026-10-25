@@ -113,7 +113,7 @@ func (r *Runtime) rawDerivedSnapshotLocked(facts resourceprogram.FactSnapshot) (
 		value := derived.Value{Scope: scope}
 		if provider.known && provider.isBFD {
 			field, known := bfd.CurrentStatus(provider.bfdConfig, provider.bfdSnapshot, ref.Field, clock)
-			value = derived.Value{Text: field.Text, Known: known, Scope: scope, Origin: provider.origin, Continuity: field.Continuity, ObservedNanos: field.ObservedNanos, ExpiresNanos: min(field.ExpiresNanos, provider.until)}
+			value = derived.Value{Text: field.Text, Known: known, Scope: scope, Origin: provider.origin, Continuity: field.Continuity, EqualityContinuity: field.EqualityContinuity, ObservedNanos: field.ObservedNanos, ExpiresNanos: min(field.ExpiresNanos, provider.until)}
 		} else if provider.known {
 			text, known := health.ScalarStatus(provider.snapshot, ref.Field)
 			value = derived.Value{Text: text, Known: known, Scope: scope, Origin: provider.origin, ObservedNanos: provider.snapshot.ObservedNanos, ExpiresNanos: provider.until}

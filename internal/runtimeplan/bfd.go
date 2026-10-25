@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"strconv"
 
@@ -207,7 +208,7 @@ func validateBFDTransitionSnapshots(previous, update serviceconfig.Update, old, 
 	if previous.Generation != update.Generation || previous.ProducerEpoch != update.ProducerEpoch || len(previous.Snapshot) == 0 {
 		return nil
 	}
-	if next.ObservedNanos < old.ObservedNanos || old.BootID != next.BootID || len(old.Peers) != len(next.Peers) || next.Rejected < old.Rejected || next.ReceiveDropped < old.ReceiveDropped || !old.Active && next.Active {
+	if next.ObservedNanos < old.ObservedNanos || next.TimestampChanges < old.TimestampChanges || next.TimestampChanges == old.TimestampChanges && next.TimestampChanges != math.MaxUint64 && !next.UpdatedAt.Equal(old.UpdatedAt) || old.BootID != next.BootID || len(old.Peers) != len(next.Peers) || next.Rejected < old.Rejected || next.ReceiveDropped < old.ReceiveDropped || !old.Active && next.Active {
 		return errors.New("BFD producer rewound its identity, final fence or counters")
 	}
 	for i, p := range next.Peers {

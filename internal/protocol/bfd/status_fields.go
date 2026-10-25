@@ -18,6 +18,7 @@ type StatusValue struct {
 	Text                        string
 	ObservedNanos, ExpiresNanos uint64
 	Continuity                  string
+	EqualityContinuity          string
 }
 
 func StatusFieldSupported(field string) bool {
@@ -85,10 +86,18 @@ func CurrentStatus(cfg Config, s Snapshot, field string, clock Clock) (StatusVal
 		body, _ := json.Marshal(peers)
 		value.Text = string(body)
 	case "observedAt":
+		if s.TimestampChanges == math.MaxUint64 {
+			return StatusValue{}, false
+		}
 		value.Text = s.UpdatedAt.UTC().Format(time.RFC3339Nano)
 	}
 	body, _ := json.Marshal(tokens)
 	sum := sha256.Sum256(body)
 	value.Continuity = hex.EncodeToString(sum[:])
+	if field == "observedAt" {
+		body, _ = json.Marshal([]any{value.Continuity, s.TimestampChanges})
+		sum = sha256.Sum256(body)
+		value.EqualityContinuity = hex.EncodeToString(sum[:])
+	}
 	return value, true
 }

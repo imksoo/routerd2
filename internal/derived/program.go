@@ -18,6 +18,7 @@ type Program struct {
 	spec         api.DerivedEventSpec
 	hold         uint64
 	refs         []string
+	equality     map[string]bool
 }
 
 func Compile(name string, spec api.DerivedEventSpec) (Program, error) {
@@ -37,6 +38,7 @@ func Compile(name string, spec api.DerivedEventSpec) (Program, error) {
 	}
 	visited := 0
 	refs := map[string]bool{}
+	equality := map[string]bool{}
 	validate := func(p api.ReadyWhenPredicateSpec) error {
 		visited++
 		if visited > 1024 || len(p.Field) > 512 || len(p.Equals) > 4096 || !utf8.ValidString(p.Field) || !utf8.ValidString(p.Equals) {
@@ -48,6 +50,9 @@ func Compile(name string, spec api.DerivedEventSpec) (Program, error) {
 				return err
 			}
 			refs[field] = true
+			if p.Equals != "" {
+				equality[field] = true
+			}
 		}
 		return nil
 	}
@@ -90,7 +95,7 @@ func Compile(name string, spec api.DerivedEventSpec) (Program, error) {
 		return Program{}, err
 	}
 	digest := sha256.Sum256(body)
-	p := Program{name: name, digest: hex.EncodeToString(digest[:]), spec: owned.Spec, hold: hold}
+	p := Program{name: name, digest: hex.EncodeToString(digest[:]), spec: owned.Spec, hold: hold, equality: equality}
 	for ref := range refs {
 		p.refs = append(p.refs, ref)
 	}

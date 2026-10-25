@@ -23,10 +23,13 @@ const (
 )
 
 type Value struct {
-	Text                        string
-	Known                       bool
-	Scope, Origin               string
-	Continuity                  string
+	Text          string
+	Known         bool
+	Scope, Origin string
+	Continuity    string
+	// Optional stronger proof for literal comparisons. Presence-only predicates
+	// can stay continuous while a nonempty value changes on every publication.
+	EqualityContinuity          string
 	ObservedNanos, ExpiresNanos uint64
 }
 
@@ -53,10 +56,10 @@ func NewSnapshot(id, scope string, now uint64, wall time.Time, values map[string
 	s := Snapshot{id: id, scope: scope, now: now, wall: wall.UTC(), values: make(map[string]Value, len(values))}
 	bytes := 0
 	for key, value := range values {
-		if !token(key, 512) || len(value.Text) > 64<<10 || !utf8.ValidString(value.Text) || len(value.Scope) > 1024 || len(value.Origin) > 256 || len(value.Continuity) > 128 || !utf8.ValidString(value.Continuity) || !utf8.ValidString(value.Scope) || !utf8.ValidString(value.Origin) {
+		if !token(key, 512) || len(value.Text) > 64<<10 || !utf8.ValidString(value.Text) || len(value.Scope) > 1024 || len(value.Origin) > 256 || len(value.Continuity) > 128 || len(value.EqualityContinuity) > 128 || !utf8.ValidString(value.EqualityContinuity) || !utf8.ValidString(value.Continuity) || !utf8.ValidString(value.Scope) || !utf8.ValidString(value.Origin) {
 			return Snapshot{}, errors.New("invalid bounded derived observation")
 		}
-		bytes += len(key) + len(value.Text) + len(value.Scope) + len(value.Origin) + len(value.Continuity)
+		bytes += len(key) + len(value.Text) + len(value.Scope) + len(value.Origin) + len(value.Continuity) + len(value.EqualityContinuity)
 		if bytes > 2<<20 {
 			return Snapshot{}, errors.New("derived snapshot exceeds 2 MiB")
 		}
@@ -87,10 +90,15 @@ func (s Snapshot) read(field string) (string, bool, uint64, uint64) {
 	return value.Text, true, value.ExpiresNanos, value.ObservedNanos
 }
 
-func (s Snapshot) authority(refs []string) string {
+func (s Snapshot) authority(refs []string, equality map[string]bool) string {
 	tokens := make([]string, 0, len(refs))
 	for _, ref := range refs {
-		tokens = append(tokens, s.values[ref].Continuity)
+		value := s.values[ref]
+		continuity := value.Continuity
+		if equality[ref] && value.EqualityContinuity != "" {
+			continuity = value.EqualityContinuity
+		}
+		tokens = append(tokens, continuity)
 	}
 	body, _ := json.Marshal([]any{s.producerAuthority(refs), s.continuity, s.continuousSince, tokens})
 	sum := sha256.Sum256(body)

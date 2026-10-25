@@ -173,7 +173,7 @@ func (p Program) Advance(previous json.RawMessage, snapshot Snapshot, forceIniti
 		}
 		return finish(s, out, input.truth, input.proofUntil, input.observed)
 	}
-	origin := snapshot.authority(p.refs)
+	origin := snapshot.authority(p.refs, p.equality)
 	continuous := s.Pending != nil && snapshot.continuity != "" && snapshot.continuousSince <= s.Pending.Since
 	if s.Pending == nil || s.Pending.Target != target || s.Pending.Origin != origin || snapshot.now >= s.Pending.Until && !continuous {
 		if p.hold > math.MaxUint64-snapshot.now {

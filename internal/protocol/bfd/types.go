@@ -55,18 +55,19 @@ type Clock struct {
 }
 
 type Snapshot struct {
-	Resource       string      `json:"resource"`
-	Interface      string      `json:"interface"`
-	SourceAddress  string      `json:"source_address"`
-	BootID         string      `json:"boot_id"`
-	Active         bool        `json:"active"`
-	ObservedNanos  uint64      `json:"observed_nanos"`
-	ExpiresNanos   uint64      `json:"expires_nanos"`
-	UpdatedAt      time.Time   `json:"updated_at"`
-	Peers          []PeerState `json:"peers"`
-	Rejected       uint64      `json:"rejected"`
-	ReceiveDropped uint64      `json:"receive_dropped"`
-	LastError      string      `json:"last_error,omitempty"`
+	Resource         string      `json:"resource"`
+	Interface        string      `json:"interface"`
+	SourceAddress    string      `json:"source_address"`
+	BootID           string      `json:"boot_id"`
+	Active           bool        `json:"active"`
+	ObservedNanos    uint64      `json:"observed_nanos"`
+	ExpiresNanos     uint64      `json:"expires_nanos"`
+	TimestampChanges uint64      `json:"timestamp_changes"`
+	UpdatedAt        time.Time   `json:"updated_at"`
+	Peers            []PeerState `json:"peers"`
+	Rejected         uint64      `json:"rejected"`
+	ReceiveDropped   uint64      `json:"receive_dropped"`
+	LastError        string      `json:"last_error,omitempty"`
 }
 
 type PeerState struct {
@@ -205,7 +206,7 @@ func ValidateSnapshot(c Config, s Snapshot) error {
 	if err := Validate(c); err != nil {
 		return err
 	}
-	if s.ObservedNanos == 0 || s.ObservedNanos > math.MaxInt64 || s.ExpiresNanos != s.ObservedNanos+uint64(StatusLifetime) || s.Resource != c.Resource || s.Interface != c.Interface || s.SourceAddress != c.SourceAddress || !validBootID(s.BootID) || !validWall(s.UpdatedAt) || len(s.Peers) != len(c.Peers) || len(s.LastError) > 256 {
+	if s.TimestampChanges == 0 || s.ObservedNanos == 0 || s.ObservedNanos > math.MaxInt64 || s.ExpiresNanos != s.ObservedNanos+uint64(StatusLifetime) || s.Resource != c.Resource || s.Interface != c.Interface || s.SourceAddress != c.SourceAddress || !validBootID(s.BootID) || !validWall(s.UpdatedAt) || len(s.Peers) != len(c.Peers) || len(s.LastError) > 256 {
 		return errors.New("BFD snapshot scope or bounded metadata is invalid")
 	}
 	seenDiscriminators := map[uint32]bool{}
