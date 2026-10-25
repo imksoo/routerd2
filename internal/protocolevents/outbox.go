@@ -68,11 +68,10 @@ type Outbox struct {
 	store   *events.Store
 	name    string
 	flushMu sync.Mutex
-	space   chan struct{}
 }
 
 func NewOutbox(store *events.Store, name string) *Outbox {
-	return &Outbox{store: store, name: name, space: make(chan struct{}, 1)}
+	return &Outbox{store: store, name: name}
 }
 
 // Pending returns an owned observation copy without acknowledging any entry.
@@ -163,29 +162,21 @@ func (o *Outbox) Enqueue(ctx context.Context, d daemonapi.DaemonEvent) error {
 	if err := ValidateHealth(o.name, e); err != nil {
 		return err
 	}
-	for {
+	for range 8 {
 		cp, q, err := o.read(ctx)
 		if err != nil {
 			return err
 		}
-		if len(q.Pending) < MaxPending {
-			q.Pending = append(q.Pending, e)
-			err = o.save(ctx, cp, q)
-			if errors.Is(err, events.ErrConflict) {
-				continue
-			}
-			if !errors.Is(err, events.ErrCapacity) || len(q.Pending) == 1 {
-				return err
-			}
+		if len(q.Pending) >= MaxPending {
+			return events.ErrCapacity
 		}
-		// This worker retains the pending observation while its independent
-		// relay frees durable space. Restarting cannot create more capacity.
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-o.space:
+		q.Pending = append(q.Pending, e)
+		err = o.save(ctx, cp, q)
+		if !errors.Is(err, events.ErrConflict) {
+			return err
 		}
 	}
+	return events.ErrConflict
 }
 
 // Flush acknowledges only the frozen prefix after the target confirms it.
@@ -224,12 +215,6 @@ func (o *Outbox) Flush(ctx context.Context, send func(context.Context, []events.
 		current.Pending = current.Pending[len(page):]
 		err = o.save(ctx, cp, current)
 		if !errors.Is(err, events.ErrConflict) {
-			if err == nil {
-				select {
-				case o.space <- struct{}{}:
-				default:
-				}
-			}
 			return err
 		}
 	}

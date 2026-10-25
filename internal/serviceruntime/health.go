@@ -7,8 +7,10 @@ import (
 	"net/http"
 	"path/filepath"
 	"strconv"
+	"sync/atomic"
 	"time"
 
+	"github.com/imksoo/routerd/pkg/daemonapi"
 	old "github.com/imksoo/routerd/pkg/healthcheck"
 	"github.com/imksoo/routerd2/internal/events"
 	"github.com/imksoo/routerd2/internal/localapi"
@@ -18,16 +20,13 @@ import (
 )
 
 func (c *effectsClient) runHealth(ctx context.Context, dir, eventDir string, cfg health.Config, ready func()) error {
-	store, err := events.Open(events.Options{Directory: eventDir})
-	if err != nil {
-		return err
-	}
-	defer store.Close()
-	outbox := protocolevents.NewOutbox(store, cfg.Resource)
+	history := make(chan daemonapi.DaemonEvent, protocolevents.PageSize)
+	var status atomic.Pointer[healthHistoryStatus]
 	relayCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
-	go func() { defer close(done); c.replayProtocolEvents(relayCtx, cfg.Resource, outbox) }()
+	go func() { defer close(done); c.runHealthHistory(relayCtx, eventDir, cfg.Resource, history, &status) }()
 	defer func() { cancel(); <-done }()
+
 	networkClient := localapi.NewClient(filepath.Join(dir, "network.sock"))
 	probe := func(ctx context.Context, cfg health.Config) old.ProbeResult {
 		result := health.Probe(ctx, cfg)
@@ -47,6 +46,7 @@ func (c *effectsClient) runHealth(ctx context.Context, dir, eventDir string, cfg
 		}
 		return result
 	}
+	var dropped uint64
 	return health.RunWithProbe(ctx, cfg, func(ctx context.Context, s health.Snapshot) error {
 		if s.ProbeEvent != nil {
 			c.mu.Lock()
@@ -58,9 +58,21 @@ func (c *effectsClient) runHealth(ctx context.Context, dir, eventDir string, cfg
 			event.Attributes["routerd.producer.generation"] = strconv.FormatUint(identity.Generation, 10)
 			event.Attributes["routerd.producer.supervisor"] = identity.SupervisorInstance
 			event.Attributes["routerd.producer.boot_id"] = s.BootID
-			if err := outbox.Enqueue(ctx, event); err != nil {
-				return err
+			select {
+			case history <- event:
+			default:
+				dropped++
+				s.HistoryError = "history recorder busy"
 			}
+		}
+		s.HistoryDropped = dropped
+		if current := status.Load(); current != nil {
+			s.HistoryDropped += current.dropped
+			if s.HistoryError == "" {
+				s.HistoryError = current.err
+			}
+		} else if s.HistoryError == "" {
+			s.HistoryError = "history recorder starting"
 		}
 		return c.update(ctx, s)
 	}, ready, probe)
@@ -87,31 +99,77 @@ func (c *effectsClient) sendProtocolEvents(ctx context.Context, resource string,
 	return nil
 }
 
-func (c *effectsClient) replayProtocolEvents(ctx context.Context, resource string, outbox *protocolevents.Outbox) {
+// The history recorder owns its store and delivery. It never blocks the probe
+// loop: unrecorded events are counted for this producer lifetime, while events
+// already committed to the outbox retain their original IDs until delivery.
+type healthHistoryStatus struct {
+	dropped uint64
+	err     string
+}
+
+func (c *effectsClient) runHealthHistory(ctx context.Context, eventDir, resource string, input <-chan daemonapi.DaemonEvent, status *atomic.Pointer[healthHistoryStatus]) {
+	var store *events.Store
+	var outbox *protocolevents.Outbox
+	defer func() {
+		if store != nil {
+			_ = store.Close()
+		}
+	}()
 	timer := time.NewTimer(0)
 	defer timer.Stop()
+	var dropped uint64
 	lastError := ""
+	report := func(err error) {
+		message := ""
+		if err != nil {
+			message = err.Error()
+			if len(message) > 768 {
+				message = message[:768]
+			}
+		}
+		status.Store(&healthHistoryStatus{dropped: dropped, err: message})
+		if message != lastError {
+			if err != nil {
+				slog.Error("health history pending or incomplete", "error", err, "dropped", dropped)
+			} else {
+				slog.Info("health history delivery recovered", "dropped", dropped)
+			}
+			lastError = message
+		}
+	}
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-timer.C:
-		}
-		err := outbox.Flush(ctx, func(ctx context.Context, page []events.Event) error {
-			return c.sendProtocolEvents(ctx, resource, page)
-		})
-		if ctx.Err() != nil {
-			return
-		}
-		if err != nil {
-			if err.Error() != lastError {
-				slog.Error("durable protocol publication pending", "error", err)
+		case event := <-input:
+			if outbox == nil {
+				dropped++
+				report(errors.New("health history store unavailable"))
+				continue
 			}
-			lastError = err.Error()
-		} else if lastError != "" {
-			slog.Info("durable protocol publication recovered")
-			lastError = ""
+			if err := outbox.Enqueue(ctx, event); err != nil {
+				dropped++
+				report(err)
+			}
+		case <-timer.C:
+			if store == nil {
+				var err error
+				store, err = events.Open(events.Options{Directory: eventDir})
+				if err != nil {
+					report(err)
+					timer.Reset(200 * time.Millisecond)
+					continue
+				}
+				outbox = protocolevents.NewOutbox(store, resource)
+			}
+			err := outbox.Flush(ctx, func(ctx context.Context, page []events.Event) error {
+				return c.sendProtocolEvents(ctx, resource, page)
+			})
+			if ctx.Err() != nil {
+				return
+			}
+			report(err)
+			timer.Reset(200 * time.Millisecond)
 		}
-		timer.Reset(200 * time.Millisecond)
 	}
 }

@@ -5,13 +5,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"math"
+	"strconv"
 	"time"
 )
-
-type factOrigin struct {
-	Producer string
-	Epoch    ProducerEpoch
-}
 
 type timedTruth struct {
 	value     Truth
@@ -56,11 +52,11 @@ func (t *ConditionTimeline) Observe(program Program, facts FactSnapshot) (FactSn
 			}
 		}
 	}
-	scope := facts.scope
+	scope := facts.Scope
 	// A successful kernel projection must not restart observation continuity.
-	// Its authority remains fenced separately by FactStore and the coordinator.
+	// Its authority remains fenced separately by the observation coordinator.
 	scope.ProjectionGeneration = 0
-	if scope != t.scope || facts.nowNanos < t.lastNow {
+	if scope != t.scope || facts.NowNanos < t.lastNow {
 		t.holds = nil
 	}
 	next := make(map[string]conditionHold)
@@ -85,13 +81,13 @@ func (t *ConditionTimeline) Observe(program Program, facts FactSnapshot) (FactSn
 		result := raw
 		if raw.value == True {
 			hold, exists := t.holds[key]
-			if !exists || facts.nowNanos >= hold.until || hold.authority != raw.authority {
-				hold.since = facts.nowNanos
+			if !exists || facts.NowNanos >= hold.until || hold.authority != raw.authority {
+				hold.since = facts.NowNanos
 			}
 			hold.until, hold.authority = raw.until, raw.authority
 			next[key] = hold
 			duration, _ := time.ParseDuration(c.For) // validated above
-			if facts.nowNanos-hold.since < uint64(duration) {
+			if facts.NowNanos-hold.since < uint64(duration) {
 				result.value = Indeterminate
 				result.holding = true
 			}
@@ -105,7 +101,7 @@ func (t *ConditionTimeline) Observe(program Program, facts FactSnapshot) (FactSn
 			visit(&resource.Service.VRRP.GracefulActivation.ReadyWhen)
 		}
 	}
-	t.scope, t.lastNow, t.holds = scope, facts.nowNanos, next
+	t.scope, t.lastNow, t.holds = scope, facts.NowNanos, next
 	return facts, nil
 }
 
@@ -139,18 +135,19 @@ func (s FactSnapshot) timedCondition(c *FactCondition, ignoreOwnHold bool) timed
 	if c.Fact != "" {
 		leaf := *c
 		leaf.For = ""
-		origin, _ := json.Marshal(s.origins[c.Fact])
-		result := timedTruth{value: s.evaluate(&leaf), until: s.expires[c.Fact], authority: string(origin)}
+		fact := s.Facts[c.Fact]
+		origin := strconv.FormatUint(fact.WorkerGeneration, 10) + ":" + fact.ProducerEpoch
+		result := timedTruth{value: s.evaluate(&leaf), until: fact.ExpiresNanos, authority: origin}
 		if c.MaxAge != "" {
 			age, _ := time.ParseDuration(c.MaxAge)
-			observed := s.observed[c.Fact]
+			observed := fact.ObservedNanos
 			deadline := uint64(math.MaxUint64)
 			if uint64(age) < math.MaxUint64-observed {
 				deadline = observed + uint64(age) + 1 // max_age boundary is valid
 			}
 			result.until = min(result.until, deadline)
 		}
-		if result.until <= s.nowNanos {
+		if result.until <= s.NowNanos {
 			result.value = Indeterminate
 		}
 		return result

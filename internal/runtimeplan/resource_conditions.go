@@ -193,32 +193,21 @@ func (r *Runtime) conditionFactsLocked(source config.Document, revision uint64, 
 		return resourceprogram.FactSnapshot{}, nil
 	}
 	scope := resourceprogram.FactScope{BootID: clock.BootID, ConfigDigest: hex.EncodeToString(sum[:]), OperatorRevision: revision, ProjectionGeneration: r.projectionGeneration}
-	store, err := resourceprogram.NewFactStore(scope)
-	if err != nil {
-		return resourceprogram.FactSnapshot{}, err
-	}
 	ticks := uint64(clock.BoottimeNanoseconds)
 	if r.guardBootID != clock.BootID || ticks >= r.guardUntilNanos {
 		return resourceprogram.FactSnapshot{}, nil
 	}
+	facts := resourceprogram.FactSnapshot{Scope: scope, NowNanos: ticks, Facts: make(map[string]resourceprogram.Fact, 2*len(r.bindings))}
 	for name, binding := range r.bindings {
 		module, ok := r.guardStatus[name]
 		if !ok || module.Generation == 0 || module.ConfigDigest != binding.digest {
 			continue
 		}
-		epoch := resourceprogram.ProducerEpoch{Epoch: 1, WorkerGeneration: module.Generation}
-		if err := store.ActivateProducer(scope, name, epoch); err != nil {
-			return resourceprogram.FactSnapshot{}, err
+		ready := resourceprogram.False
+		if module.Ready {
+			ready = resourceprogram.True
 		}
-		publish := func(key string, sequence uint64, value bool, observed, until uint64) error {
-			if until <= ticks {
-				return nil
-			}
-			return store.Publish(resourceprogram.ProtocolFact{Key: key, Producer: name, Scope: scope, Epoch: epoch, Sequence: sequence, ObservedNanos: observed, ExpiresNanos: until, Value: value}, ticks)
-		}
-		if err := publish(name+".ready", 1, module.Ready, r.guardUntilNanos-uint64(time.Second), r.guardUntilNanos); err != nil {
-			return resourceprogram.FactSnapshot{}, err
-		}
+		facts.Facts[name+".ready"] = resourceprogram.Fact{Value: ready, ObservedNanos: r.guardUntilNanos - uint64(time.Second), ExpiresNanos: r.guardUntilNanos, WorkerGeneration: module.Generation, ProducerEpoch: r.supervisorInstance}
 		grant, ok := r.guardGrants[name]
 		record := r.records[name]
 		if !ok || !module.Ready || grant.revision != revision || grant.bootID != clock.BootID || grant.generation != module.Generation || grant.epoch != record.ProducerEpoch || grant.sequence != record.Sequence {
@@ -235,20 +224,24 @@ func (r *Runtime) conditionFactsLocked(source config.Document, revision uint64, 
 			}
 		}
 		if activeKnown {
-			if err := publish(name+".active", 2, grant.value, grant.observedNanos, until); err != nil {
-				return resourceprogram.FactSnapshot{}, err
+			value := resourceprogram.False
+			if grant.value {
+				value = resourceprogram.True
 			}
+			facts.Facts[name+".active"] = resourceprogram.Fact{Value: value, ObservedNanos: grant.observedNanos, ExpiresNanos: until, WorkerGeneration: module.Generation, ProducerEpoch: record.ProducerEpoch}
 		}
 		if record.Role == "vrrp" {
 			var election vrrp.Snapshot
 			if json.Unmarshal(record.Snapshot, &election) == nil {
-				if err := publish(name+".elected", 3, election.State == vrrp.StateActive, election.ObservedNanos, min(election.ExpiresNanos, r.guardUntilNanos)); err != nil {
-					return resourceprogram.FactSnapshot{}, err
+				value := resourceprogram.False
+				if election.State == vrrp.StateActive {
+					value = resourceprogram.True
 				}
+				facts.Facts[name+".elected"] = resourceprogram.Fact{Value: value, ObservedNanos: election.ObservedNanos, ExpiresNanos: min(election.ExpiresNanos, r.guardUntilNanos), WorkerGeneration: module.Generation, ProducerEpoch: record.ProducerEpoch}
 			}
 		}
 	}
-	return r.conditionTimeline.Observe(source, store.Snapshot(ticks))
+	return r.conditionTimeline.Observe(source, facts)
 }
 
 func (r *Runtime) projectProgramLocked(source config.Document, revision uint64, full config.Native, records map[string]serviceconfig.Update, now time.Time) (projection, error) {

@@ -15,6 +15,13 @@ facts remain indeterminate. The finite CLOCK_BOOTTIME lifetime is
 `max(2 minutes, 3*interval + timeout)`; supervisor readiness/generation also gates
 consumption. There is no generic replay renewal. Shutdown publishes withdrawal.
 
+History storage is independent of probing. A bounded background recorder keeps
+accepted events durable and reports dropped uncommitted events through
+`history_dropped` and `history_error` in the current snapshot. The loss count
+belongs to the worker's producer epoch and resets on replacement. Storage or
+receiver failure does not pause probes or current observations. See
+[history delivery](../../protocolevents/README.md) for queue and loss limits.
+
 Configuration example: `examples/health-pbr.yaml`. It keeps a probe host route
 independent of the application routing table. Health activates the primary
 metric-100 route, with an unconditional metric-200 backup and a source policy
@@ -47,7 +54,7 @@ umask 022
 make check-health-pbr
 ```
 
-The target freshly builds both daemon binaries and a race-instrumented test.
+The target freshly builds the daemon binaries and a race-instrumented test.
 It requires the named test and PASS marker, refuses skips, and preserves each
 run separately under `dist/health-pbr-test/TIMESTAMP/`: executable hashes,
 commit/dirty-tree metadata, typed status at each transition, Ethernet PCAPs

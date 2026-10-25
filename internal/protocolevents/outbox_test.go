@@ -78,9 +78,8 @@ func TestTargetSavedProbeSurvivesActualLocalACKTransactionFailure(t *testing.T) 
 	}
 }
 
-func TestFullRelayWaitsForDeliveryWithoutRestartingOrLosingAcceptedHistory(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+func TestRelayByteCapacityPreservesEveryAcceptedObservation(t *testing.T) {
+	ctx := context.Background()
 	store, err := events.Open(events.Options{Directory: filepath.Join(t.TempDir(), "relay")})
 	if err != nil {
 		t.Fatal(err)
@@ -91,52 +90,37 @@ func TestFullRelayWaitsForDeliveryWithoutRestartingOrLosingAcceptedHistory(t *te
 	large.Message = strings.Repeat("x", 4096)
 	accepted := 0
 	for {
-		attempt, cancel := context.WithTimeout(ctx, 30*time.Millisecond)
-		err = outbox.Enqueue(attempt, large)
-		cancel()
-		if errors.Is(err, context.DeadlineExceeded) {
+		err = outbox.Enqueue(ctx, large)
+		if errors.Is(err, events.ErrCapacity) {
 			break
 		}
 		if err != nil {
 			t.Fatal(err)
 		}
 		accepted++
-	}
-	before, err := outbox.Pending(ctx)
-	if err != nil || len(before) != accepted || accepted == 0 {
-		t.Fatal(len(before), accepted, err)
-	}
-	done := make(chan error, 1)
-	go func() { done <- outbox.Enqueue(ctx, large) }()
-	select {
-	case err := <-done:
-		t.Fatal("full queue terminated the producer", err)
-	case <-time.After(10 * time.Millisecond):
-	}
-	if err = outbox.Flush(ctx, func(_ context.Context, page []events.Event) error {
-		if len(page) != len(before) {
-			t.Fatal("capacity failure lost accepted observations", len(page), len(before))
+		if accepted >= MaxPending {
+			t.Fatal("byte limit was not applied")
 		}
-		for i, event := range page {
-			if event.ID != before[i].ID || event.Detail.Message != large.Message {
-				t.Fatal("queued observation changed", event.ID)
+	}
+	if accepted == 0 {
+		t.Fatal("fixture did not accept a bounded event")
+	}
+	delivered := 0
+	for delivered < accepted {
+		if err = outbox.Flush(ctx, func(_ context.Context, page []events.Event) error {
+			delivered += len(page)
+			for _, e := range page {
+				if e.Detail.Message != large.Message {
+					t.Fatal("capacity failure changed an accepted event")
+				}
 			}
-		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case err := <-done:
-		if err != nil {
+			return nil
+		}); err != nil {
 			t.Fatal(err)
 		}
-	case <-ctx.Done():
-		t.Fatal("delivery did not resume blocked observation", ctx.Err())
 	}
-	after, err := outbox.Pending(ctx)
-	if err != nil || len(after) != 1 {
-		t.Fatal("new observation was lost after drainage", len(after), err)
+	if delivered != accepted {
+		t.Fatal(accepted, delivered)
 	}
 }
 
@@ -217,10 +201,8 @@ func TestRelayBoundsOnlyPendingWorkAndRejectsOtherResources(t *testing.T) {
 			t.Fatal(i, err)
 		}
 	}
-	full, cancel := context.WithTimeout(ctx, 30*time.Millisecond)
-	defer cancel()
-	if err = outbox.Enqueue(full, probeEvent("wan")); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatal("full relay did not apply backpressure", err)
+	if err = outbox.Enqueue(ctx, probeEvent("wan")); !errors.Is(err, events.ErrCapacity) {
+		t.Fatal("full relay silently accepted another event", err)
 	}
 	for i := 0; i < MaxPending/PageSize; i++ {
 		if err = outbox.Flush(ctx, func(_ context.Context, page []events.Event) error {

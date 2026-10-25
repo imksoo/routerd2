@@ -32,11 +32,8 @@ func TestConditionValidationRejectsAmbiguousAndUnbounded(t *testing.T) {
 }
 
 func TestConditionMaxAgeUsesObservationClockAndRemainsUnknownUnderNot(t *testing.T) {
-	s := newTestStore(t)
 	second := uint64(time.Second)
-	if err := s.Publish(observation(1, second, 20*second, true), second); err != nil {
-		t.Fatal(err)
-	}
+	fact := Fact{Value: True, ObservedNanos: second, ExpiresNanos: 20 * second}
 	var condition FactCondition
 	if err := json.Unmarshal([]byte(`{"fact":"health/wan/up","max_age":"2s"}`), &condition); err != nil {
 		t.Fatal(err)
@@ -45,20 +42,18 @@ func TestConditionMaxAgeUsesObservationClockAndRemainsUnknownUnderNot(t *testing
 		now  uint64
 		want Truth
 	}{{second, True}, {3 * second, True}, {3*second + 1, Indeterminate}, {20 * second, Indeterminate}} {
-		value, err := s.EvaluateCondition(condition, tc.now)
-		if err != nil || value != tc.want {
-			t.Fatalf("max_age at %d: got %v/%v, want %v", tc.now, value, err, tc.want)
+		value := healthFacts(tc.now, fact).evaluate(&condition)
+		if value != tc.want {
+			t.Fatalf("max_age at %d: got %v, want %v", tc.now, value, tc.want)
 		}
 	}
 	negated := FactCondition{Not: &condition}
-	if value, err := s.EvaluateCondition(negated, 4*second); err != nil || value != Indeterminate {
-		t.Fatalf("stale negation authorized work: %v/%v", value, err)
+	if value := healthFacts(4*second, fact).evaluate(&negated); value != Indeterminate {
+		t.Fatalf("stale negation authorized work: %v", value)
 	}
-	snapshot := s.Snapshot(4 * second)
-	if err := s.Publish(observation(2, 4*second, 20*second, true), 4*second); err != nil {
-		t.Fatal(err)
-	}
-	if snapshot.evaluate(&condition) != Indeterminate || s.Snapshot(4*second).evaluate(&condition) != True {
+	snapshot := healthFacts(4*second, fact)
+	fact.ObservedNanos = 4 * second
+	if snapshot.evaluate(&condition) != Indeterminate || healthFacts(4*second, fact).evaluate(&condition) != True {
 		t.Fatal("max_age snapshot mixed old and renewed observations")
 	}
 }
@@ -82,14 +77,11 @@ func TestConditionMaxAgeValidation(t *testing.T) {
 }
 
 func TestConditionEvaluationUnknownFalseTrue(t *testing.T) {
-	s := newTestStore(t)
 	unknown := FactCondition{Fact: "vrrp/role/master"}
 	health := FactCondition{Fact: "health/wan/up"}
-	if value, err := s.EvaluateCondition(FactCondition{Not: &unknown}, 100); err != nil || value != Indeterminate {
-		t.Fatalf("unknown VRRP role must remain unknown: %v, %v", value, err)
-	}
-	if err := s.Publish(observation(1, 100, 150, false), 100); err != nil {
-		t.Fatal(err)
+	fact := Fact{Value: False, ObservedNanos: 100, ExpiresNanos: 150}
+	if value := healthFacts(100, fact).evaluate(&FactCondition{Not: &unknown}); value != Indeterminate {
+		t.Fatalf("unknown VRRP role must remain unknown: %v", value)
 	}
 	checks := []struct {
 		condition FactCondition
@@ -101,23 +93,12 @@ func TestConditionEvaluationUnknownFalseTrue(t *testing.T) {
 		{FactCondition{Not: &unknown}, Indeterminate},
 	}
 	for _, tc := range checks {
-		value, err := s.EvaluateCondition(tc.condition, 110)
-		if err != nil || value != tc.want {
-			t.Fatalf("Eval(%+v) = %v, %v; want %v", tc.condition, value, err, tc.want)
+		value := healthFacts(110, fact).evaluate(&tc.condition)
+		if value != tc.want {
+			t.Fatalf("Eval(%+v) = %v; want %v", tc.condition, value, tc.want)
 		}
 	}
-	if value, err := s.EvaluateCondition(FactCondition{All: []FactCondition{health, unknown}}, 150); err != nil || value != Indeterminate {
-		t.Fatalf("expired condition = %v, %v", value, err)
-	}
-}
-
-func TestConditionFailsClosedOnInvalidExpression(t *testing.T) {
-	s := newTestStore(t)
-	if err := s.Publish(observation(1, 100, 200, true), 100); err != nil {
-		t.Fatal(err)
-	}
-	value, err := s.EvaluateCondition(FactCondition{All: []FactCondition{{Fact: "health/wan/up"}, {}}}, 101)
-	if err == nil || value != Indeterminate {
-		t.Fatalf("invalid expression authorized a resource: %v, %v", value, err)
+	if value := healthFacts(150, fact).evaluate(&FactCondition{All: []FactCondition{health, unknown}}); value != Indeterminate {
+		t.Fatalf("expired condition = %v", value)
 	}
 }

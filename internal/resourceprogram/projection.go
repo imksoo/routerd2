@@ -5,29 +5,21 @@ import "time"
 // FactSnapshot is an immutable, single-instant view. All resources in one
 // projection see the same producer epochs, scope and expiration boundary.
 type FactSnapshot struct {
-	values   map[string]Truth
-	observed map[string]uint64
-	expires  map[string]uint64
-	origins  map[string]factOrigin
-	held     map[string]timedTruth
-	scope    FactScope
-	nowNanos uint64
+	Scope    FactScope
+	NowNanos uint64
+	// Facts is owned by this snapshot. The caller transfers the map and
+	// must not mutate it while any evaluation uses this view.
+	Facts map[string]Fact
+	held  map[string]timedTruth
 }
 
-func (s *FactStore) Snapshot(nowNanos uint64) FactSnapshot {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	out := FactSnapshot{values: make(map[string]Truth, len(s.facts)), observed: make(map[string]uint64, len(s.facts)), expires: make(map[string]uint64, len(s.facts)), origins: make(map[string]factOrigin, len(s.facts)), scope: s.scope, nowNanos: nowNanos}
-	for key := range s.facts {
-		out.values[key] = s.factValueLocked(key, nowNanos)
-		out.observed[key] = s.facts[key].ObservedNanos
-		out.expires[key] = s.facts[key].ExpiresNanos
-		out.origins[key] = factOrigin{s.facts[key].Producer, s.facts[key].Epoch}
+func (s FactSnapshot) Value(key string) Truth {
+	fact, ok := s.Facts[key]
+	if !ok || s.NowNanos < fact.ObservedNanos || s.NowNanos >= fact.ExpiresNanos {
+		return Indeterminate
 	}
-	return out
+	return fact.Value
 }
-
-func (s FactSnapshot) Value(key string) Truth { return s.values[key] }
 
 func (s FactSnapshot) evaluate(c *FactCondition) Truth {
 	if c == nil {
@@ -39,8 +31,9 @@ func (s FactSnapshot) evaluate(c *FactCondition) Truth {
 	if c.Fact != "" {
 		if c.MaxAge != "" {
 			age, err := time.ParseDuration(c.MaxAge)
-			observed, ok := s.observed[c.Fact]
-			if err != nil || age <= 0 || !ok || s.nowNanos < observed || s.nowNanos-observed > uint64(age) {
+			fact, ok := s.Facts[c.Fact]
+			observed := fact.ObservedNanos
+			if err != nil || age <= 0 || !ok || s.NowNanos < observed || s.NowNanos-observed > uint64(age) {
 				return Indeterminate
 			}
 		}

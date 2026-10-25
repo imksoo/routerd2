@@ -29,13 +29,13 @@ func (s FactSnapshot) Lifecycle(program Program) (map[string]LifecycleEvidence, 
 	ready := map[string]LifecycleEvidence{}
 	leaf := func(c *FactCondition) LifecycleEvidence {
 		if c == nil {
-			return LifecycleEvidence{Active: true, Until: math.MaxUint64, Now: s.nowNanos, Authority: "static"}
+			return LifecycleEvidence{Active: true, Until: math.MaxUint64, Now: s.NowNanos, Authority: "static"}
 		}
 		p := s.timedCondition(c, false)
-		return LifecycleEvidence{Active: p.value == True, Conditional: true, Until: p.until, Now: s.nowNanos, Authority: p.authority}
+		return LifecycleEvidence{Active: p.value == True, Conditional: true, Until: p.until, Now: s.NowNanos, Authority: p.authority}
 	}
 	join := func(parts []LifecycleEvidence) LifecycleEvidence {
-		p := LifecycleEvidence{Active: true, Until: math.MaxUint64, Now: s.nowNanos}
+		p := LifecycleEvidence{Active: true, Until: math.MaxUint64, Now: s.NowNanos}
 		var authorities []string
 		for _, part := range parts {
 			p.Active = p.Active && part.Active
@@ -43,7 +43,7 @@ func (s FactSnapshot) Lifecycle(program Program) (map[string]LifecycleEvidence, 
 			p.Until = min(p.Until, part.Until)
 			authorities = append(authorities, part.Authority)
 		}
-		scope := s.scope
+		scope := s.Scope
 		scope.ProjectionGeneration = 0
 		body, _ := json.Marshal([]any{scope, authorities})
 		sum := sha256.Sum256(body)

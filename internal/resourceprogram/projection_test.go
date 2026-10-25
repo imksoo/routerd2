@@ -33,7 +33,7 @@ func TestProjectionGuardReadinessAndOwnerClosure(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			plan, states, err := Project(p, FactSnapshot{values: tt.values})
+			plan, states, err := Project(p, truthSnapshot(tt.values))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -62,7 +62,7 @@ func TestProjectionExplainsInactiveAndUnreadyResources(t *testing.T) {
 		{map[string]Truth{"health": True, "address": False}, "ready_when_false", "dependency_false"},
 		{map[string]Truth{"health": True, "address": True}, "", ""},
 	} {
-		_, states, err := Project(guardedProgram(), FactSnapshot{values: tc.values})
+		_, states, err := Project(guardedProgram(), truthSnapshot(tc.values))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -95,44 +95,28 @@ func TestProjectionValidatesInactiveDeclarations(t *testing.T) {
 	}
 }
 
-func TestSnapshotImmutableAcrossRevocationAndExpiry(t *testing.T) {
-	scope := FactScope{BootID: "boot", ConfigDigest: "digest", OperatorRevision: 1, ProjectionGeneration: 1}
-	store, err := NewFactStore(scope)
-	if err != nil {
-		t.Fatal(err)
+func truthSnapshot(values map[string]Truth) FactSnapshot {
+	facts := make(map[string]Fact, len(values))
+	for key, value := range values {
+		facts[key] = Fact{Value: value, ExpiresNanos: 10}
 	}
-	epoch := ProducerEpoch{Epoch: 1, WorkerGeneration: 1}
-	if err := store.ActivateProducer(scope, "worker", epoch); err != nil {
-		t.Fatal(err)
-	}
-	for i, key := range []string{"health", "address"} {
-		if err := store.Publish(ProtocolFact{Key: key, Producer: "worker", Scope: scope, Epoch: epoch, Sequence: uint64(i + 1), ObservedNanos: 1, ExpiresNanos: 10, Value: true}, 2); err != nil {
-			t.Fatal(err)
-		}
-	}
-	snapshot := store.Snapshot(9)
+	return FactSnapshot{Facts: facts, NowNanos: 9}
+}
+
+func TestProjectionUsesOneFiniteSnapshot(t *testing.T) {
+	snapshot := truthSnapshot(map[string]Truth{"health": True, "address": True})
 	before, _, err := Project(guardedProgram(), snapshot)
 	if err != nil {
 		t.Fatal(err)
 	}
-	expired, states, err := Project(guardedProgram(), store.Snapshot(10))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(expired.Native.Network.Routes) != 0 || states["wan"].When != Indeterminate {
-		t.Fatal("expiry authorized work")
-	}
-	if err := store.RevokeProducer(scope, "worker", epoch); err != nil {
-		t.Fatal(err)
+	expiredView := snapshot
+	expiredView.NowNanos = 10
+	expired, states, err := Project(guardedProgram(), expiredView)
+	if err != nil || len(expired.Native.Network.Routes) != 0 || states["wan"].When != Indeterminate {
+		t.Fatal("expiry authorized work", states, err)
 	}
 	after, _, err := Project(guardedProgram(), snapshot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(before, after) {
-		t.Fatal("snapshot changed after revocation")
-	}
-	if store.Snapshot(9).Value("health") != Indeterminate {
-		t.Fatal("revoked fact survived")
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatal("later projection changed an earlier snapshot", err)
 	}
 }

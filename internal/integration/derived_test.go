@@ -26,7 +26,6 @@ import (
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/bfd"
 	"github.com/imksoo/routerd2/internal/protocol/health"
-	"github.com/imksoo/routerd2/internal/protocolevents"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
@@ -375,9 +374,6 @@ func TestDaemonDerivedHealthCurrentStatusAndDurability(t *testing.T) {
 	restart("service.wan")
 	restart("control")
 	waitHistoryError()
-	if err = f.control.Do(ctx, "POST", "/v1/protocol-events", protocolevents.Batch{Resource: "wan", Events: queued.Pending[:1]}, nil); !localapi.IsHTTPStatus(err, 503) {
-		t.Fatal("historical delivery was coupled to current worker registration", err)
-	}
 	if _, err = injector.Exec(`DROP TRIGGER fail_health_history`); err != nil {
 		t.Fatal(err)
 	}
@@ -486,9 +482,6 @@ func TestDaemonDerivedHealthCurrentStatusAndDurability(t *testing.T) {
 		h := retirementHealth()
 		return !h.Healthy && h.ProtocolEvents.Retiring == 1 && h.ProtocolEvents.LastError != ""
 	})
-	if err = f.control.Do(ctx, "POST", "/v1/protocol-events", protocolevents.Batch{Resource: "wan", Events: retiredQueue.Pending[:1]}, nil); !localapi.IsHTTPStatus(err, 503) {
-		t.Fatal("registered retired history did not reach the unavailable journal", err)
-	}
 	if _, err = injector.Exec(`CREATE TRIGGER fail_retirement_registry BEFORE UPDATE ON producers WHEN NEW.name='control-health-relays' BEGIN SELECT RAISE(ABORT,'injected retirement registry failure'); END`); err != nil {
 		t.Fatal(err)
 	}

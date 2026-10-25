@@ -96,17 +96,19 @@ func (c Config) Freshness() time.Duration {
 }
 
 type Snapshot struct {
-	// ProbeEvent belongs to the durable observation channel, never the finite
+	// ProbeEvent is offered to history storage, never serialized in the finite
 	// status RPC. Shutdown carries no invented probe result.
-	ProbeEvent    *daemonapi.DaemonEvent `json:"-"`
-	Resource      string                 `json:"resource"`
-	Interface     string                 `json:"interface"`
-	BootID        string                 `json:"boot_id"`
-	ObservedNanos uint64                 `json:"observed_nanos"`
-	ExpiresNanos  uint64                 `json:"expires_nanos"`
-	Active        bool                   `json:"active"`
-	Stopped       bool                   `json:"stopped,omitempty"`
-	State         old.State              `json:"state"`
+	ProbeEvent     *daemonapi.DaemonEvent `json:"-"`
+	HistoryDropped uint64                 `json:"history_dropped"`
+	HistoryError   string                 `json:"history_error,omitempty"`
+	Resource       string                 `json:"resource"`
+	Interface      string                 `json:"interface"`
+	BootID         string                 `json:"boot_id"`
+	ObservedNanos  uint64                 `json:"observed_nanos"`
+	ExpiresNanos   uint64                 `json:"expires_nanos"`
+	Active         bool                   `json:"active"`
+	Stopped        bool                   `json:"stopped,omitempty"`
+	State          old.State              `json:"state"`
 }
 
 func eligible(phase string) bool { return phase == old.PhaseHealthy || phase == old.PhaseFailing }
@@ -119,7 +121,7 @@ func ValidateSnapshot(raw Config, s Snapshot, clock bfd.Clock) error {
 	if s.Resource != c.Resource || s.Interface != c.Interface || s.BootID != clock.BootID || s.ObservedNanos > now || s.ExpiresNanos <= now || s.ExpiresNanos <= s.ObservedNanos || s.ExpiresNanos-s.ObservedNanos > uint64(c.Freshness()) {
 		return errors.New("health snapshot identity or finite interval mismatch")
 	}
-	if len(s.State.History) > 20 || len(s.State.LastMessage) > 4096 {
+	if len(s.State.History) > 20 || len(s.State.LastMessage) > 4096 || len(s.HistoryError) > 768 {
 		return errors.New("health snapshot exceeds history/message bounds")
 	}
 	if s.Stopped {
