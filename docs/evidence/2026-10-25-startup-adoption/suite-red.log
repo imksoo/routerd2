@@ -1,0 +1,14 @@
+.......E
+======================================================================
+ERROR: test_startup_suite_requires_actual_adoption_and_recovery_test (qemu_network_test.GuestResultTest.test_startup_suite_requires_actual_adoption_and_recovery_test)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_network_test.py", line 17, in test_startup_suite_requires_actual_adoption_and_recovery_test
+    suite = GATE.SUITES["daemon-startup"]
+            ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+KeyError: 'daemon-startup'
+
+----------------------------------------------------------------------
+Ran 8 tests in 0.012s
+
+FAILED (errors=1)

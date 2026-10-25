@@ -29,6 +29,11 @@ prototype の配布形式・boot schema・設定/journal・内部APIに後方互
 現在のjournalを通常起動の正本とし、snapshotの明示startup採用とruntime/configurationを結ぶtransactionはまだ実装していない。
 [個別受入の証跡](../evidence/2026-10-25-config-snapshots.md) を参照。
 
+2026-10-25追加: 固定runtimeのstartup参照をjournalへ一度だけ採用する処理を実装した。
+同一選択の再実行で後続commitを上書きせず、採用世代とstable eventを保持する。
+[個別受入と初回失敗の記録](../evidence/2026-10-25-startup-adoption.md) を参照。
+signed runtime/configurationの組をprepare/attempt/confirmation/fallbackへ結ぶtransactionは引き続き未実装。
+
 ## 1. 五つの対象を区別する
 
 | 対象 | 責務・保持するもの | 更新の主体 |

@@ -1,0 +1,9 @@
+# github.com/imksoo/routerd2/internal/config
+internal/config/startup_test.go:12:2: no required module provides package github.com/imksoo/routerd2/internal/configref; to add it:
+        go get github.com/imksoo/routerd2/internal/configref
+FAIL    github.com/imksoo/routerd2/internal/config [setup failed]
+# github.com/imksoo/routerd2/internal/runtimeconfig
+internal/config/startup_test.go:12:2: no required module provides package github.com/imksoo/routerd2/internal/configref; to add it:
+        go get github.com/imksoo/routerd2/internal/configref
+FAIL    github.com/imksoo/routerd2/internal/runtimeconfig [setup failed]
+FAIL

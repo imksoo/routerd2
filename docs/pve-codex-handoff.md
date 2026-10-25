@@ -6,7 +6,18 @@
 **継続ゴール:** 全残実装・必要試験・対象実機での利用可能性の受入まで進める。
 部分checkpointでは完了しない。
 
-最新product checkpointは `1fb91bc`。設定journalに永続store identityを持たせ、確定済み現在revisionを不変snapshotとして保存・SHA/provenance検証する。
+最新product checkpointは `1048243`、readiness fixtureは `f60b761`。固定runtimeのboot `startup`参照をcontrol workerが一度だけauthoritative journalへ採用する。
+世代・expected revision・store/snapshot参照を検査し、採用revisionとstableなstartup_selected eventを同じrecordへ保存する。
+同一選択の再実行は後続commitを保持し、未確認commitも通常の再起動rollbackへ渡す。古い世代、同じ世代の改変、別store、未確認状態、outbox満杯を拒否する。
+compiler/kernel依存のないconfigref、bounded strict JSON、control専用の固定envも実装した。signed releaseとの同時指定は組のtransaction未実装のため拒否する。
+clean check/Race/vet/Python29/6 ELF build110.17秒、fixture変更後10.84秒PASS。製品6 SHAは一致。
+native Race6 gateはcatalog27.31秒・publisher12.41秒・DHCP10.65秒・SSH9.55秒・新startup3.48秒・二WAN/PBR31.12秒PASS。
+初回QEMU startupは22.65秒FAIL（host36.03秒）。revision6/kernel Cは一致したがhealth falseで、内訳は記録されず具体的原因は未確定。
+1 CPU native40回102.43秒では再現せず。fixtureは75秒の全体期限内でfull health/projectionも待つ条件へ強化し、製品は変更していない。
+最終QEMUはstartup24.85秒・SSH29.41秒・二WAN/PBR82.13秒・ext4二boot149.32秒PASS。全suite、startup採用を伴う実PID1/電源断、signed組のfallback、対象実機は未完了。
+[採用処理の証跡・初回失敗・残作業](evidence/2026-10-25-startup-adoption.md) を参照。継続ゴールはactive。
+
+前回product checkpointは `1fb91bc`。設定journalに永続store identityを持たせ、確定済み現在revisionを不変snapshotとして保存・SHA/provenance検証する。
 `routerd config snapshot --expected-revision N` とprivate control APIを実装し、commit/confirmed rollback/control再起動でidentityとsnapshotを保持する。
 別store・古いrevision・unconfirmed・改変・symlink/hardlink・容量超過を拒否し、既存snapshotを上書き・自動削除しない。
 未公開のstore identityなしjournalは拒否する。明示startup選択・authoritative journalへの採用・runtime/config組のboot transactionは未実装。

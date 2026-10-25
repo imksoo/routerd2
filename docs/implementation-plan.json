@@ -414,7 +414,8 @@
         "packaging/alpine",
         "docs/adr",
         "internal/releaseboot",
-        "cmd/routerd-boot (新設予定)"
+        "cmd/routerd-boot (新設予定)",
+        "internal/configref"
       ],
       "completion_boundary": "共通manifest/authority/IPC、boot/runtime ABI、startup参照とverified role catalogの契約・最小実証をここで閉じる。全moduleのbinary分割や全boot媒体の更新は待たず、実runtime展開/起動はDIST-01/02、各engineはSYS-02/NET-04/EXT-01/EXT-02/OPS-03で個別に受入する。"
     },
@@ -1366,7 +1367,7 @@
       "title": "イメージ展開・boot 選択・SSH 更新・state 移行",
       "milestone": "M6",
       "track": "platform",
-      "status": "planned",
+      "status": "in_progress",
       "scope": "user_platform_goal",
       "risk": "high",
       "depends_on": [
@@ -10886,7 +10887,7 @@
     "prototype_compatibility": "None. Replace unreleased two-binary, boot, manifest and journal formats directly; no compatibility reader, shim bridge or prototype migration gate.",
     "first_supported_format": "The new extracted multi-binary runtime format.",
     "implementation_evidence": "docs/evidence/2026-10-25-runtime-catalog.md",
-    "startup_configuration_status": "durable store identity and immutable confirmed snapshots implemented; explicit startup adoption and runtime/configuration boot transaction pending"
+    "startup_configuration_status": "durable snapshots and one-time fixed-runtime startup adoption implemented; signed runtime/configuration prepare/attempt/confirmation/fallback transaction pending"
   },
   "project_identity": {
     "routerd": {
@@ -12007,6 +12008,40 @@
         "Snapshot write-time power cuts, actual ENOSPC and fsync-failure acceptance; safe reference-aware pruning; no automatic snapshot eviction",
         "Small independent bootstrap, full config/state/kernel ABI and engine/runtime dependency/privilege separation; all remaining work packages and selected physical target acceptance",
         "Current checkpoint OCI/APK execution and arm64 execution; previous catalog packaging evidence belongs to earlier product"
+      ],
+      "full_goal_status": "active"
+    },
+    {
+      "id": "one-time-fixed-runtime-startup-adoption",
+      "date": "2026-10-25",
+      "status": "partial_adoption_and_individual_acceptance_verified",
+      "code_checkpoint": "1048243d21d64510aa7bc6bd347f4fff81dee17c",
+      "readiness_fixture_checkpoint": "f60b76169724899fbc39a42fc2a76602a9037dae",
+      "work_packages": [
+        "CORE-02",
+        "CORE-06",
+        "DIST-01"
+      ],
+      "evidence": "docs/evidence/2026-10-25-startup-adoption.md",
+      "implemented": [
+        "Explicit fixed-runtime boot startup reference; sole control writer compiles and adopts verified snapshot into a new public revision with durable generation/reference/adoption-revision metadata and stable lifecycle event in one fsync/rename journal transaction",
+        "Same consumed selection preserves later commits and unconfirmed restart recovery; stale generations, reused generation with differing input, store/revision conflicts and full durable event outbox rejected; normal Save/Stage cannot forget adoption provenance",
+        "Lightweight configref types and bounded strict decoder without compiler/kernel/runtime dependencies; typed boot/journal JSON cannot bypass duplicate/case validation; supervisor pins selection and reserves environment for control only",
+        "Signed release plus standalone startup input refused until atomic runtime/configuration pair prepare/attempt/fallback is implemented; fixed guest startup suite and regression artifact collection"
+      ],
+      "validation": [
+        "Missing API/package RED, typed-JSON bypass RED and missing fixed suite RED preserved; real journal publication interruption hooks at four boundaries retain complete old/new records and exact replay without duplicate revision/event",
+        "Clean check/Race/vet/Python29/static six amd64+arm64 ELF build110.17s; readiness-fixture clean check/build10.84s, identical six product hashes",
+        "Prior checked snapshot-capable1fb91bc runtime fails new startup oracle20.71s at unsupported boot startup field; current native Race6 gates pass: catalog27.31s, publisher12.41s, DHCP10.65s, SSH/rollback9.55s, startup/restart3.48s, two-WAN TCP/UDP/PCAP31.12s",
+        "Initial QEMU startup22.65s guest/36.03s host failed at revision6/kernel C with control health false; exact health component not captured, not asserted as a proven product regression or fully explained transient",
+        "Unchanged product one-CPU native40 diagnostic repetitions102.43s pass without reproduction; fixture requires full control/projection readiness within unchanged75s child/110s init/150s host bounds; original failed raw evidence retained",
+        "Final individual QEMU startup24.85s, SSH29.41s, two-WAN/PBR82.13s, ext4 two kernels149.32s pass; fixed startup tested as host-mode real daemon inside isolated guest namespace, not coupled signed-PID1 startup acceptance"
+      ],
+      "remaining": [
+        "Atomic signed runtime/configuration pair prepare with generation/attempt and compatible conditional fallback; exact consumed selection/current revision health confirmation and trial commit fencing",
+        "First health-false observation component and recurrence conditions remain undetermined; stronger readiness and diagnostics retained",
+        "Actual write-time power cuts/ENOSPC/fsync syscall failures, startup adoption across real PID1/kernel reboot, reference-aware pruning, separate small bootstrap, full kernel/config/state ABI and engine privilege/dependency closure",
+        "Current product OCI/APK, arm64 execution, all remaining work packages, selected physical hardware/NIC/performance qualification"
       ],
       "full_goal_status": "active"
     }

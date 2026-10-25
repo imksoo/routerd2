@@ -1,0 +1,15 @@
+Extracting appliance kernel modules for the isolated test image...
+Building the test-only init and daemon-startup test binary...
+Booting the daemon-startup test guest (no external network interface)...
+=== RUN   TestDaemonStartupSelectionAndRecovery
+    bgp_test.go:194: === RUN   TestDaemonStartupSelectionAndRecovery
+            startup_test.go:158: ROUTERD_STARTUP_SELECTION_DAEMON_TEST_PASS: explicit snapshot adoption, control SIGKILL, later-commit preservation across whole daemon restart, confirmed restart rollback, next selection and stable lifecycle events
+        --- PASS: TestDaemonStartupSelectionAndRecovery (13.19s)
+        PASS
+--- PASS: TestDaemonStartupSelectionAndRecovery (13.36s)
+PASS
+ROUTERD_STARTUP_SELECTION_DAEMON_TEST_PASS
+[   22.909361] ACPI: PM: Preparing to enter system sleep state S5
+[   22.914822] reboot: Power down
+
+QEMU explicit startup adoption, generation fencing, later commits and restart rollback: PASS (24.85s)

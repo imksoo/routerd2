@@ -1,0 +1,44 @@
+{
+  "source_commit": "1048243d21d64510aa7bc6bd347f4fff81dee17c",
+  "fixture_diff_sha256": "160b11cf52023ecae05303c8ed61e2b547450c9232b8ca3e29f022d084dc1da3",
+  "product": "unchanged checked1048243 binaries",
+  "cpu_affinity_count": 1,
+  "requested_repeats": 40,
+  "exit_code": 0,
+  "elapsed_seconds": 102.43,
+  "log_sha256": "7a67499c483ff1ebae7f134e0661055692a665640f8e4427f8151fbab4e177a4",
+  "diagnostic_harness_sha256": "2d8edf798a2703d6056d43b6eac8dc100e0f9d182d4832558d0f6e9bf84afa9a",
+  "diagnostic_harness_private_path": "dist/goal-validation/startup-adoption-diagnostic.test",
+  "product_artifacts": [
+    {
+      "architecture": "amd64",
+      "binary": "routerd",
+      "sha256": "b5cc02a4ef4af419cf212c345fb74c3c2dbe87fcbf36c6d4342a2e1850801acb"
+    },
+    {
+      "architecture": "amd64",
+      "binary": "routerd-modules",
+      "sha256": "909976df88137a64ee3521e6a849de4ea64e5d2723650ac8460e81e91fd7359a"
+    },
+    {
+      "architecture": "amd64",
+      "binary": "routerd-logging",
+      "sha256": "0cc89766f37ff679f2888973306b25721ee2d7d11396f4f27bc60daa9af00232"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd",
+      "sha256": "e04fa3826fa0c98d685ef86645aa69ae5db89f85578e8deb975124d891d61bd0"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd-modules",
+      "sha256": "3adc56deb3cc81453aa482e8516d0df9e8077a43b319f2dbc2913c65723a9733"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd-logging",
+      "sha256": "7dc4585ba96d8f8b4e2cc99475f62c09288bcb26349b4f4b7923fbba82e76699"
+    }
+  ]
+}

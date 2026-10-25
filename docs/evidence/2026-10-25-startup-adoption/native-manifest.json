@@ -1,0 +1,108 @@
+{
+  "source_commit": "f60b76169724899fbc39a42fc2a76602a9037dae",
+  "source_dirty": false,
+  "release_id": "startup-adoption-v1",
+  "build_artifacts": [
+    {
+      "architecture": "amd64",
+      "binary": "routerd",
+      "sha256": "b5cc02a4ef4af419cf212c345fb74c3c2dbe87fcbf36c6d4342a2e1850801acb"
+    },
+    {
+      "architecture": "amd64",
+      "binary": "routerd-modules",
+      "sha256": "909976df88137a64ee3521e6a849de4ea64e5d2723650ac8460e81e91fd7359a"
+    },
+    {
+      "architecture": "amd64",
+      "binary": "routerd-logging",
+      "sha256": "0cc89766f37ff679f2888973306b25721ee2d7d11396f4f27bc60daa9af00232"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd",
+      "sha256": "e04fa3826fa0c98d685ef86645aa69ae5db89f85578e8deb975124d891d61bd0"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd-modules",
+      "sha256": "3adc56deb3cc81453aa482e8516d0df9e8077a43b319f2dbc2913c65723a9733"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd-logging",
+      "sha256": "7dc4585ba96d8f8b4e2cc99475f62c09288bcb26349b4f4b7923fbba82e76699"
+    }
+  ],
+  "race_harnesses": {
+    "release": {
+      "path": "dist/goal-validation/startup-adoption-release.test",
+      "sha256": "a7b72f5a61a5aa9f6e42901c8506ddbfaa410f783ee6cd69ec537c064ab522d4"
+    },
+    "publisher": {
+      "path": "dist/goal-validation/startup-adoption-publisher.test",
+      "sha256": "14d2a69f88ab9f976c0afc2c7cf971c92c141bfd538a7714b4e80732d4b574f6"
+    },
+    "daemon": {
+      "path": "dist/goal-validation/startup-adoption-daemon.test",
+      "sha256": "1a7013b3185720b4389bbb96a00c41315bd3d4610a46a13c77683f993ed337ad"
+    }
+  },
+  "scope": "root-owned0700 stage; real built amd64/arm64 signature/ELF/staging without foreign execution; actual daemon tests in fresh user/net namespaces; no host network or clock mutation",
+  "tests": [
+    {
+      "test": "TestBuiltRuntimeCatalog",
+      "harness": "release",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 27.31,
+      "log": "startup-adoption-fixture-native-TestBuiltRuntimeCatalog.log",
+      "sha256": "51cedfd0b8e957e8d9cda31b2283f47b6812af405387a1368fc3cf52b85a8ceb"
+    },
+    {
+      "test": "TestPublishBuiltRelease",
+      "harness": "publisher",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 12.41,
+      "log": "startup-adoption-fixture-native-TestPublishBuiltRelease.log",
+      "sha256": "94adc5fa24f2f56941a1c4a6e9a4b08bdeaa1a567f7dbfd4e88d0c2cdbcec603"
+    },
+    {
+      "test": "TestDaemonDHCPv4OriginalLeaseAuthority",
+      "harness": "daemon",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 10.65,
+      "log": "startup-adoption-fixture-native-TestDaemonDHCPv4OriginalLeaseAuthority.log",
+      "sha256": "d0aba9465081c49f2e3d1e2edab52228698a6d5a4ace4d2bc0693aab7a51282e"
+    },
+    {
+      "test": "TestDaemonConfigurationAndRecovery",
+      "harness": "daemon",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 9.55,
+      "log": "startup-adoption-fixture-native-TestDaemonConfigurationAndRecovery.log",
+      "sha256": "a592bb3746c2d5c48e263a945230ca4278dd6b0352e5de53ea62fa02dfe08358"
+    },
+    {
+      "test": "TestDaemonStartupSelectionAndRecovery",
+      "harness": "daemon",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 3.48,
+      "log": "startup-adoption-fixture-native-TestDaemonStartupSelectionAndRecovery.log",
+      "sha256": "4239e422896a51ae0894a798d78e6b06c3b668fcf572396b86a45af837da217a"
+    },
+    {
+      "test": "TestDaemonHealthPBRFailoverAndRecovery",
+      "harness": "daemon",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 31.12,
+      "log": "startup-adoption-fixture-native-TestDaemonHealthPBRFailoverAndRecovery.log",
+      "sha256": "58a034ea4a5f7a984394f8a06f29fcce6a900ab7a81c48fcf731b2f526b1076e"
+    }
+  ]
+}
