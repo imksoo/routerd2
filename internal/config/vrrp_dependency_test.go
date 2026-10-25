@@ -10,7 +10,7 @@ import (
 
 func TestVRRPDynamicInterfaceRequiresDependencyAndActiveGuard(t *testing.T) {
 	active := resourceprogram.FactCondition{Fact: "service.ha.active"}
-	for _, mode := range []string{"guarded", "missing-edge", "missing-guard", "negative-guard", "partial-any", "all-guard", "all-any-guard", "owner-readiness"} {
+	for _, mode := range []string{"guarded", "missing-edge", "missing-guard", "negative-guard", "partial-any", "all-guard", "all-any-guard", "owner-readiness", "owner-edge", "double-negative", "de-morgan"} {
 		t.Run(mode, func(t *testing.T) {
 			source := Document{SchemaVersion: SchemaVersion, Resources: []resourceprogram.Resource{
 				{ID: "ha-owner", Service: &serviceconfig.Service{Name: "ha", VRRP: &vrrp.Config{Interface: "lan0", VIPInterface: "ha4", Family: "ipv4", VirtualRouterID: 42, Addresses: []string{"192.0.2.254/24"}}}},
@@ -30,12 +30,19 @@ func TestVRRPDynamicInterfaceRequiresDependencyAndActiveGuard(t *testing.T) {
 				consumer.When = &resourceprogram.FactCondition{All: []resourceprogram.FactCondition{active, {Fact: "service.ha.ready"}}}
 			case "all-any-guard":
 				consumer.When = &resourceprogram.FactCondition{Any: []resourceprogram.FactCondition{active, {All: []resourceprogram.FactCondition{active, {Fact: "service.ha.ready"}}}}}
+			case "owner-edge":
+				consumer.DependsOn = nil
+				consumer.Owner = "ha-owner"
+			case "double-negative":
+				consumer.When = &resourceprogram.FactCondition{Not: &resourceprogram.FactCondition{Not: &active}}
+			case "de-morgan":
+				consumer.When = &resourceprogram.FactCondition{Not: &resourceprogram.FactCondition{Any: []resourceprogram.FactCondition{{Not: &active}, {Fact: "service.other.active"}}}}
 			case "owner-readiness":
 				consumer.When = nil
 				source.Resources[0].ReadyWhen = &active
 			}
 			_, err := Compile(source)
-			valid := mode == "guarded" || mode == "all-guard" || mode == "all-any-guard" || mode == "owner-readiness"
+			valid := mode == "guarded" || mode == "all-guard" || mode == "all-any-guard" || mode == "owner-readiness" || mode == "owner-edge" || mode == "double-negative" || mode == "de-morgan"
 			if valid && err != nil {
 				t.Fatal("explicitly guarded VRRP dependent rejected:", err)
 			}
