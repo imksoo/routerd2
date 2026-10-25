@@ -28,6 +28,9 @@ import (
 )
 
 type executionWitness struct {
+	StoreID            string   `json:"store_id"`
+	SnapshotDigest     string   `json:"snapshot_digest"`
+	SnapshotRevision   uint64   `json:"snapshot_revision"`
 	Phase              string   `json:"phase"`
 	BootID             string   `json:"boot_id"`
 	PID                int      `json:"pid"`
@@ -168,6 +171,29 @@ func runProbe(phase string) error {
 	if err != nil || committed.Revision != 2 || committed.Confirmation != nil || len(committed.EventOutbox) != 0 {
 		return errors.New("persistent committed configuration record is missing")
 	}
+	if health.StoreID == "" || committed.StoreID != health.StoreID {
+		return errors.New("control and durable journal store identities differ")
+	}
+	if phase == "first" {
+		if err := localapi.NewClient(filepath.Join(runtimeDir, control.SocketName)).Do(ctx, "POST", "/v1/config/snapshots", control.SnapshotRequest{ExpectedRevision: 2}, &expected.Snapshot); err != nil {
+			return err
+		}
+	}
+	if err := expected.Snapshot.Validate(); err != nil {
+		return err
+	}
+	if expected.Snapshot.StoreID != committed.StoreID || expected.Snapshot.Revision != 2 {
+		return errors.New("persistent snapshot lost its confirmed store/revision provenance")
+	}
+	snapshot, err := (&config.Store{Dir: stateDir}).ResolveSnapshot(expected.Snapshot)
+	if err != nil {
+		return fmt.Errorf("resolve persistent snapshot: %w", err)
+	}
+	wantDocument, _ := json.Marshal(committed.Config)
+	gotDocument, _ := json.Marshal(snapshot.Config)
+	if !bytes.Equal(wantDocument, gotDocument) {
+		return errors.New("persistent snapshot differs from confirmed SSH configuration")
+	}
 	configHash, err := fileHash(filepath.Join(stateDir, "config.json"))
 	if err != nil {
 		return err
@@ -205,6 +231,7 @@ func runProbe(phase string) error {
 		return errors.New("fresh kernel did not automatically fall back from its spent trial")
 	}
 	witness := executionWitness{
+		StoreID: committed.StoreID, SnapshotDigest: expected.Snapshot.Digest, SnapshotRevision: expected.Snapshot.Revision,
 		Phase: phase, BootID: bootID, PID: processes.PID, ReleaseID: selected.ReleaseID,
 		ReleaseOperation: state.Operation, ReleaseGeneration: state.Generation,
 		Pending: state.Pending != nil, Revision: health.Revision,

@@ -56,6 +56,10 @@ single attempt and select the baseline automatically. The probe checks:
   SSH connection, and is projected onto the fresh kernel's loopback interface.
 - The SSH host private key hash and public-key fingerprint remain unchanged.
 - The independent state sentinel survives the disk remount.
+- The confirmed configuration snapshot captured through the actual control API
+  resolves byte-for-byte after the second kernel boot. Its store identity,
+  revision and complete payload digest match the first-boot witness; the host
+  gate rejects missing, malformed or differing snapshot provenance.
 - The state directory is the dedicated writable ext4 device with `nosuid` and
   `nodev`, while allowing execution of the verified release pair.
 

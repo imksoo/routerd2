@@ -188,13 +188,18 @@ def check_witnesses(phases):
             raise RuntimeError("guest witness lacks a canonical durable configuration event ID")
         if type(witness.get("event_cursor")) is not int or witness["event_cursor"] <= 0:
             raise RuntimeError("guest witness lacks a positive durable event cursor")
+        for field, width in (("store_id", 32), ("snapshot_digest", 64)):
+            if not isinstance(witness.get(field), str) or not re.fullmatch(r"[0-9a-f]{" + str(width) + r"}", witness[field]):
+                raise RuntimeError("guest witness lacks canonical snapshot provenance: " + field)
+        if type(witness.get("snapshot_revision")) is not int or witness["snapshot_revision"] != 2:
+            raise RuntimeError("guest witness did not capture confirmed revision 2")
     if first.get("release_id") != IDENTITIES["trial"] or first.get("release_operation") != "begin-boot" or not first.get("pending"):
         raise RuntimeError("first boot did not leave a real unconfirmed trial")
     if second.get("release_id") != IDENTITIES["baseline"] or second.get("release_operation") != "boot-rollback" or second.get("pending"):
         raise RuntimeError("second boot did not fall back to the baseline")
     if second.get("failed_boot_id") != first["boot_id"]:
         raise RuntimeError("fallback was not caused by the first boot's unconfirmed trial")
-    for field in ("config_sha256", "host_key_sha256", "host_key_fingerprint", "sentinel_sha256", "event_id", "event_cursor"):
+    for field in ("config_sha256", "host_key_sha256", "host_key_fingerprint", "sentinel_sha256", "event_id", "event_cursor", "store_id", "snapshot_digest", "snapshot_revision"):
         if not first.get(field) or first[field] != second.get(field):
             raise RuntimeError(f"persistent {field} changed across boots")
 

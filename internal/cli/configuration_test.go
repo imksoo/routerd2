@@ -85,7 +85,7 @@ func TestLargeConfigurationPublicAPIRoundTrip(t *testing.T) {
 		t.Fatal("fixture must fit one document but exceed the response bound when doubled", size)
 	}
 	store := &config.Store{Dir: t.TempDir()}
-	current := config.Committed{Revision: 1, Config: baseline}
+	current := config.Committed{StoreID: strings.Repeat("a", 32), Revision: 1, Config: baseline}
 	if err := store.Save(current); err != nil {
 		t.Fatal(err)
 	}

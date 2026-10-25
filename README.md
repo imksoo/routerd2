@@ -49,6 +49,9 @@ routerd は設定、プロトコル、監視、ログ、管理とその整合性
 `boot config → load runtime → load startup-config` の順に起動する方針です。
 実行ファイル数は二つに固定しません。factoryの3 commandは最初の分割であり、全moduleの分割完了ではありません。
 manifest v2とverified role catalogを実装し、旧二ELF形式は受理しません。明示startup-config参照とengine/kernel ABIの完全化は残っています。
+設定store identityと確定済みrevisionの不変snapshot保存・検証も実装しました。
+`routerd config snapshot --expected-revision N` は保存のみで、起動時の明示選択・採用transactionは未実装です。
+[保存契約と残作業](docs/startup-config.md)を参照してください。
 利用者のいない試作形式との後方互換は要求せず、新しい形式へ直接置換します。
 
 ## Build and test
@@ -181,7 +184,7 @@ interface と address は独立した resource です。試作 schema 1 の read
 - 管理対象外のアドレス・経路・nftables tableは採用・削除しません。ownership journalの喪失は自動採用の根拠になりません。
 - nftablesの一括更新以外は、複数のカーネル操作を一つのatomic transactionにはできません。復元失敗はdegradedとして残します。
 - `commit confirmed` のrollbackも通信の無停止を保証しません。接続・conntrackの状態は設定のrollbackとは別です。
-- 同じ release ID の 2 バイナリを署名した一組として保存・選択します。`routerd release help` がローカル管理入口です。boot の release 設定がある appliance は検証済み FD から PID 1 を引き継ぎ、連続した module/config readiness で確定します。live process tree の無停止置換、kernel/rootfs/設定 schema の移行は含みません。
+- 同じ release ID の可変artifact集合とrole catalogを署名したruntimeとして保存・選択します。`routerd release help` がローカル管理入口です。boot の release 設定がある appliance は検証済み FD から PID 1 を引き継ぎ、連続した module/config readiness で確定します。live process tree の無停止置換、kernel/rootfs/設定 schema の移行は含みません。
 - 初期実装のworkerは同じUIDで動きます。プロセス分離は最小権限化や完全なセキュリティ境界の完成を意味しません。
 
 ## License

@@ -89,6 +89,7 @@ func (e *Engine) Handler() http.Handler {
 	}
 	mux.HandleFunc("GET /v1/version", func(w http.ResponseWriter, r *http.Request) { localapi.JSON(w, 200, buildinfo.Current()) })
 	e.configurationViewRoutes(mux)
+	e.snapshotRoutes(mux)
 	e.observationRoutes(mux)
 	e.eventStoreRoutes(mux)
 	e.derivedRoutes(mux)

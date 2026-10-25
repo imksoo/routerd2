@@ -2,6 +2,8 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -39,6 +41,7 @@ type Native = resourceprogram.Native
 func FromNative(native Native) Document { return resourceprogram.FromNative(native) }
 
 type Committed struct {
+	StoreID         string        `json:"store_id"`
 	Revision        uint64        `json:"revision"`
 	Config          Document      `json:"config"`
 	LastRequestID   string        `json:"last_request_id,omitempty"`
@@ -239,7 +242,11 @@ func Open(dir, bootstrap string) (*Store, Committed, error) {
 	if err != nil {
 		return nil, c, fmt.Errorf("bootstrap config: %w", err)
 	}
-	c = Committed{Revision: 1, Config: d}
+	var identity [16]byte
+	if _, err = io.ReadFull(rand.Reader, identity[:]); err != nil {
+		return nil, c, err
+	}
+	c = Committed{StoreID: hex.EncodeToString(identity[:]), Revision: 1, Config: d}
 	if err = s.Save(c); err != nil {
 		return nil, c, err
 	}
@@ -267,6 +274,9 @@ func (s *Store) Load() (Committed, error) {
 }
 
 func validateRecord(c Committed) error {
+	if !validStoreID(c.StoreID) {
+		return errors.New("committed configuration requires a lower-case 128-bit store identity")
+	}
 	if c.Revision == 0 {
 		return errors.New("invalid committed revision zero")
 	}
@@ -291,6 +301,13 @@ func (s *Store) Save(c Committed) error  { return s.writeRecord("config.json", c
 func (s *Store) Stage(c Committed) error { return s.writeRecord("pending.json", c) }
 func (s *Store) writeRecord(name string, c Committed) error {
 	if err := validateRecord(c); err != nil {
+		return err
+	}
+	current, err := s.Load()
+	if err == nil && current.StoreID != c.StoreID {
+		return errors.New("configuration write cannot replace the durable store identity")
+	}
+	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	b, err := json.Marshal(c)

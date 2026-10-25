@@ -34,7 +34,7 @@ func TestLargeConfirmedRecordSurvivesSaveLoad(t *testing.T) {
 	if err != nil || len(encoded) > MaxSize || len(encoded) < MaxSize/2 {
 		t.Fatalf("fixture must be a large individually valid document: %d, %v", len(encoded), err)
 	}
-	record := Committed{Revision: 2, Config: doc, LastRequestID: "large-confirmed", LastRequestHash: strings.Repeat("a", 64),
+	record := Committed{StoreID: strings.Repeat("a", 32), Revision: 2, Config: doc, LastRequestID: "large-confirmed", LastRequestHash: strings.Repeat("a", 64),
 		Confirmation: &Confirmation{Previous: doc, PreviousRevision: 1, RequestID: "large-confirmed", Deadline: time.Now().Add(time.Minute).UTC()}}
 	store := &Store{Dir: t.TempDir()}
 	if err := store.Stage(record); err != nil {
@@ -60,7 +60,7 @@ func TestLargeConfirmedRecordSurvivesSaveLoad(t *testing.T) {
 
 func TestRecordRefusesUnrecoverableWritesBeforeReplacement(t *testing.T) {
 	store := &Store{Dir: t.TempDir()}
-	baseline := Committed{Revision: 1, Config: Document{SchemaVersion: SchemaVersion}}
+	baseline := Committed{StoreID: strings.Repeat("a", 32), Revision: 1, Config: Document{SchemaVersion: SchemaVersion}}
 	if err := store.Save(baseline); err != nil {
 		t.Fatal(err)
 	}
@@ -69,10 +69,10 @@ func TestRecordRefusesUnrecoverableWritesBeforeReplacement(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, invalid := range []Committed{
-		{Revision: 2, Config: largeDocument(30000)},
-		{Revision: 2, Config: baseline.Config, LastRequestID: strings.Repeat("x", 129)},
-		{Revision: 2, Config: baseline.Config, LastRequestID: "pending", Confirmation: &Confirmation{Previous: baseline.Config, PreviousRevision: 2, RequestID: "pending", Deadline: time.Now()}},
-		{Revision: 0, Config: baseline.Config},
+		{StoreID: baseline.StoreID, Revision: 2, Config: largeDocument(30000)},
+		{StoreID: baseline.StoreID, Revision: 2, Config: baseline.Config, LastRequestID: strings.Repeat("x", 129)},
+		{StoreID: baseline.StoreID, Revision: 2, Config: baseline.Config, LastRequestID: "pending", Confirmation: &Confirmation{Previous: baseline.Config, PreviousRevision: 2, RequestID: "pending", Deadline: time.Now()}},
+		{StoreID: baseline.StoreID, Revision: 0, Config: baseline.Config},
 	} {
 		if err := store.Save(invalid); err == nil {
 			t.Fatal("accepted unrecoverable committed record")
@@ -93,10 +93,10 @@ func TestRecordRefusesUnrecoverableWritesBeforeReplacement(t *testing.T) {
 func TestRecordStrictJSONAndReadBound(t *testing.T) {
 	store := &Store{Dir: t.TempDir()}
 	for _, data := range []string{
-		`{"revision":1,"revision":2,"config":{"schema_version":2,"resources":[]}}`,
-		`{"revision":1,"config":{"schema_version":2,"resources":[],"resources":[]}}`,
-		`{"revision":1,"typo":true,"config":{"schema_version":2,"resources":[]}}`,
-		`{"revision":1,"config":{"schema_version":2,"resources":[]}} {}`,
+		`{"store_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","revision":1,"revision":2,"config":{"schema_version":2,"resources":[]}}`,
+		`{"store_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","revision":1,"config":{"schema_version":2,"resources":[],"resources":[]}}`,
+		`{"store_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","revision":1,"typo":true,"config":{"schema_version":2,"resources":[]}}`,
+		`{"store_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","revision":1,"config":{"schema_version":2,"resources":[]}} {}`,
 		`revision: 1`,
 		strings.Repeat(" ", MaxStoredReadSize+1),
 	} {

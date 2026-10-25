@@ -42,9 +42,14 @@ routerd config plan running-config.yaml
 routerd config apply --file running-config.yaml \
   --expected-revision 42 --request-id change-2026-001 --confirmed 60
 routerd config confirm
+routerd config snapshot --expected-revision 12
 ```
 
 Use the current revision from `routerd config show` for `--expected-revision`.
+`config snapshot` captures an immutable confirmed revision without changing the
+running configuration. Its store/revision/digest reference is a prerequisite
+for explicit startup selection, which is not yet wired into boot. See
+[the persistent configuration contract](../../docs/startup-config.md).
 File input is bounded to 2 MiB; the document's compact JSON representation must
 also leave 4 KiB within that budget for the API envelope. The complete confirmed
 commit record has a separate budget because it contains both the new document

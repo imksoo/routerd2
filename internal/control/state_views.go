@@ -29,6 +29,7 @@ type ConfirmationMetadata struct {
 // Health preserves the field names consumed by releaseboot and old health
 // clients, while containing no configuration or protocol snapshot bodies.
 type Health struct {
+	StoreID            string                    `json:"store_id"`
 	Revision           uint64                    `json:"revision"`
 	Healthy            bool                      `json:"healthy"`
 	LastError          string                    `json:"last_error,omitempty"`
@@ -90,7 +91,7 @@ func stateText(value string, maximum int) string {
 }
 
 func (e *Engine) healthForState(s State) Health {
-	h := Health{Revision: s.Revision, Healthy: s.Healthy, LastError: stateText(s.LastError, 4096), LastErrorTruncated: len(s.LastError) > 4096, ProducerEpoch: s.ProducerEpoch, Sequence: s.Sequence}
+	h := Health{StoreID: s.StoreID, Revision: s.Revision, Healthy: s.Healthy, LastError: stateText(s.LastError, 4096), LastErrorTruncated: len(s.LastError) > 4096, ProducerEpoch: s.ProducerEpoch, Sequence: s.Sequence}
 	h.EventJournal = JournalHealth{Pending: len(s.EventOutbox), LastError: s.EventJournalError}
 	h.EventRules.LastError = s.EventRuleError
 	h.Derived.LastError = s.DerivedError
