@@ -278,6 +278,11 @@ func stagePair(ctx context.Context, store *release.Store, key ed25519.PrivateKey
 	if err != nil {
 		return release.Ref{}, err
 	}
+	logger, err := os.Open(filepath.Join("/test/bin", directory, "routerd-logging"))
+	if err != nil {
+		return release.Ref{}, err
+	}
+	defer logger.Close()
 	noticesPath := filepath.Join(stateDir, directory+"-notices.txt")
 	if err := os.WriteFile(noticesPath, []byte("test-only runtime catalog fixture notices\n"), 0600); err != nil {
 		return release.Ref{}, err
@@ -287,10 +292,9 @@ func stagePair(ctx context.Context, store *release.Store, key ed25519.PrivateKey
 		return release.Ref{}, err
 	}
 	defer notices.Close()
-	runtimeOptions := release.BundleOptions{ReleaseID: identity, Sequence: sequence, GOOS: "linux", GOARCH: "amd64", BootABI: 1, WorkerABI: 1, Entrypoint: "supervisor", Artifacts: []release.Artifact{{Name: "supervisor", Kind: "native", Command: "routerd"}, {Name: "coordinator", Kind: "native", Command: "routerd-modules"}, {Name: "kernel", Kind: "native", Command: "routerd-modules"}, {Name: "services", Kind: "native", Command: "routerd-modules"}, {Name: "notices", Kind: "data"}}}
+	runtimeOptions := release.BundleOptions{ReleaseID: identity, Sequence: sequence, GOOS: "linux", GOARCH: "amd64", BootABI: 1, WorkerABI: 1, Entrypoint: "supervisor", Artifacts: []release.Artifact{{Name: "supervisor", Kind: "native", Command: "routerd"}, {Name: "services", Kind: "native", Command: "routerd-modules"}, {Name: "logger", Kind: "native", Command: "routerd-logging"}, {Name: "notices", Kind: "data"}}}
 	roles := runtimeconfig.NativeWorkers("services")
-	roles["control"] = "coordinator"
-	roles["network"] = "kernel"
+	roles["logging"] = "logger"
 	names := make([]string, 0, len(roles))
 	for role := range roles {
 		names = append(names, role)
@@ -299,8 +303,8 @@ func stagePair(ctx context.Context, store *release.Store, key ed25519.PrivateKey
 	for _, role := range names {
 		runtimeOptions.Roles = append(runtimeOptions.Roles, release.RoleBinding{Role: role, Artifact: roles[role]})
 	}
-	fmt.Println("ROUTERD_RUNTIME_CATALOG_FIXTURE artifacts=5 native=4 data=1 core_roles=separate_pinned_files")
-	_, err = release.WriteBundle(ctx, output, runtimeOptions, key, map[string]*os.File{"supervisor": first, "coordinator": second, "kernel": second, "services": second, "notices": notices})
+	fmt.Println("ROUTERD_RUNTIME_CATALOG_FIXTURE artifacts=4 native=3 data=1 native_commands=independently_built")
+	_, err = release.WriteBundle(ctx, output, runtimeOptions, key, map[string]*os.File{"supervisor": first, "services": second, "logger": logger, "notices": notices})
 	if err == nil {
 		err = output.Sync()
 	}

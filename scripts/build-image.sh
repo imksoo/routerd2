@@ -47,6 +47,7 @@ else
   mkdir -p "$package_root/usr/sbin" "$package_root/usr/libexec" "$package_root/usr/share/licenses/routerd2"
   cp "$binary_dir/routerd" "$package_root/usr/sbin/routerd"
   cp "$binary_dir/routerd-modules" "$package_root/usr/libexec/routerd-modules"
+  cp "$binary_dir/routerd-logging" "$package_root/usr/libexec/routerd-logging"
   cp "$project_dir/LICENSE" "$package_root/usr/share/licenses/routerd2/LICENSE"
   if [ ! -f "$project_dir/dist/licenses/manifest.json" ]; then
     printf '%s\n' 'Development images require dependency notices; run make licenses first.' >&2
@@ -62,6 +63,7 @@ mkdir -p "$rootfs/usr/sbin" "$rootfs/usr/libexec" "$rootfs/etc/routerd" \
 chmod 1777 "$rootfs/tmp"
 cp "$package_root/usr/sbin/routerd" "$rootfs/usr/sbin/routerd"
 cp "$package_root/usr/libexec/routerd-modules" "$rootfs/usr/libexec/routerd-modules"
+cp "$package_root/usr/libexec/routerd-logging" "$rootfs/usr/libexec/routerd-logging"
 cp "$package_root/usr/share/licenses/routerd2/LICENSE" "$rootfs/usr/share/licenses/routerd2/LICENSE"
 cp -a "$package_root/usr/share/licenses/routerd2/dependencies" "$rootfs/usr/share/licenses/routerd2/"
 cp "$config_file" "$rootfs/etc/routerd/config.json"
@@ -140,13 +142,13 @@ manifest = {
     "package_sha256": hashlib.sha256(Path(sys.argv[4]).read_bytes()).hexdigest() if sys.argv[4] else None,
     "binary_sha256": {
         name: hashlib.sha256((root / name.lstrip("/")).read_bytes()).hexdigest()
-        for name in ("/usr/sbin/routerd", "/usr/libexec/routerd-modules")
+        for name in ("/usr/sbin/routerd", "/usr/libexec/routerd-modules", "/usr/libexec/routerd-logging")
     },
     "dependency_license_manifest_sha256": hashlib.sha256(
         (root / "usr/share/licenses/routerd2/dependencies/manifest.json").read_bytes()
     ).hexdigest(),
     "init": "/usr/sbin/routerd",
-    "programs": ["/usr/sbin/routerd", "/usr/libexec/routerd-modules"],
+    "programs": ["/usr/sbin/routerd", "/usr/libexec/routerd-modules", "/usr/libexec/routerd-logging"],
     "platform": boot["platform"],
     "kernel_modules": boot["kernel_modules"],
     "ssh_enabled": bool(boot.get("ssh", {}).get("authorized_keys")),

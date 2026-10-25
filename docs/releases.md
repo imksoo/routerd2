@@ -165,7 +165,7 @@ alone cannot reset an unresponsive machine.
 
 ## Verification
 
-`make release-built-test` verifies both actual amd64/arm64 command pairs and
+`make release-built-test` verifies the actual amd64/arm64 three-command catalogs and
 the offline publisher-to-runtime bundle path. Unit/race tests cover malformed
 archives, signatures, ELF identity, generation/token fencing, capacity, pruning,
 key permissions, cancellation, concurrent publication and process crashes at

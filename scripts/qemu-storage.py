@@ -88,7 +88,7 @@ def build_guest(args, temporary, common):
     for directory, identity in IDENTITIES.items():
         target = root / "test/bin" / directory
         target.mkdir(parents=True)
-        for name in ("routerd", "routerd-modules"):
+        for name in ("routerd", "routerd-modules", "routerd-logging"):
             binary = target / name
             subprocess.run([
                 go_binary, "build", "-mod=readonly", "-trimpath", "-buildvcs=false",

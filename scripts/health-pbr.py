@@ -58,7 +58,7 @@ def main():
     try:
         subprocess.run([args.go, "test", "-c", "-race", "-tags", "integration", "-o", str(binary), "./internal/integration"], check=True)
         manifest["executables"] = {name: digest(path) for name, path in {
-            "routerd": binary_dir / "routerd", "routerd-modules": binary_dir / "routerd-modules", "integration.test": binary,
+            "routerd": binary_dir / "routerd", "routerd-modules": binary_dir / "routerd-modules", "routerd-logging": binary_dir / "routerd-logging", "integration.test": binary,
         }.items()}
         env = dict(os.environ, ROUTERD2_TEST_BIN_DIR=str(binary_dir), ROUTERD2_INTEGRATION_REQUIRED="1", ROUTERD2_TEST_EVIDENCE_DIR=str(output))
         result = subprocess.run([str(binary), "-test.run=^" + TEST + "$", "-test.v", "-test.timeout=195s"], env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=210)

@@ -34,7 +34,7 @@ func TestPublishBuiltRelease(t *testing.T) {
 			keyPath, public := testKey(t)
 			path := filepath.Join(t.TempDir(), "release.tar")
 			var stdout bytes.Buffer
-			args := []string{"pack", "--private-key-file", keyPath, "--layout", testLayout(t, filepath.Join(dir, "linux-"+arch, "routerd"), filepath.Join(dir, "linux-"+arch, "routerd-modules")), "--release-id", id, "--sequence", "42", "--target-arch", arch, "--output", path}
+			args := []string{"pack", "--private-key-file", keyPath, "--layout", testLayout(t, filepath.Join(dir, "linux-"+arch, "routerd"), filepath.Join(dir, "linux-"+arch, "routerd-modules"), filepath.Join(dir, "linux-"+arch, "routerd-logging")), "--release-id", id, "--sequence", "42", "--target-arch", arch, "--output", path}
 			if err := Run(context.Background(), args, &stdout, io.Discard); err != nil {
 				t.Fatal(err)
 			}

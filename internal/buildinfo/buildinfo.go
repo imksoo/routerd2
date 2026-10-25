@@ -10,9 +10,9 @@ import (
 const IdentityPrefix = "ROUTERD2-RELEASE-V1:"
 const IdentitySuffix = ":END"
 
-// Identity is the single linker-set release identity in both executables. The
+// Identity is the single linker-set release identity in each native executable. The
 // explicit record survives -trimpath and symbol stripping, allowing a signed
-// bundle to be checked without executing either incoming ELF.
+// bundle to be checked without executing any incoming ELF.
 // An unversioned developer build has no complete record in rodata and cannot
 // be installed as a signed release. Keeping this empty also prevents a stale
 // default record from surviving linker replacement beside the real identity.

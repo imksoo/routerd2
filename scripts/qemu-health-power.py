@@ -178,7 +178,7 @@ def build_guest(args, temporary, storage, common):
     print("Building dedicated power-cut init/probe and fresh actual command pair...", flush=True)
     subprocess.run([args.go, "build", "-trimpath", "-buildvcs=false", "-ldflags", "-s -w", "-o", str(root / "init"), "./images/health-power-test/guest"], cwd=PROJECT, env=environment, check=True)
     hashes = {}
-    for name in ("routerd", "routerd-modules"):
+    for name in ("routerd", "routerd-modules", "routerd-logging"):
         path = root / "test/bin" / name
         subprocess.run([args.go, "build", "-trimpath", "-buildvcs=false", "-ldflags", f"-s -w -X github.com/imksoo/routerd2/internal/buildinfo.Identity=ROUTERD2-RELEASE-V1:{IDENTITY}:END", "-o", str(path), f"./cmd/{name}"], cwd=PROJECT, env=environment, check=True)
         hashes[f"/test/bin/{name}"] = storage.sha256(path)

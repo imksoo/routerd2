@@ -19,6 +19,7 @@ build() {
 	# Override Alpine's default -buildmode=pie: the appliance has no ELF loader.
 	go build -buildmode=exe -trimpath -buildvcs=false -ldflags "$ldflags" -o routerd ./cmd/routerd || return 1
 	go build -buildmode=exe -trimpath -buildvcs=false -ldflags "$ldflags" -o routerd-modules ./cmd/routerd-modules || return 1
+ go build -buildmode=exe -trimpath -buildvcs=false -ldflags "$ldflags" -o routerd-logging ./cmd/routerd-logging || return 1
 	python3 scripts/licenses.py --output dist/licenses || return 1
 }
 
@@ -29,7 +30,7 @@ check() {
 	export TMPDIR=/tmp GOTMPDIR=/tmp
 	CGO_ENABLED=0 go test ./... || return 1
 	CGO_ENABLED=0 go test github.com/google/nftables/expr || return 1
-	for binary in routerd routerd-modules; do
+	for binary in routerd routerd-modules routerd-logging; do
 		headers=$(readelf -l "$binary") || return 1
 		dynamic=$(readelf -d "$binary") || return 1
 		case "$headers" in *INTERP*) echo "$binary requires an ELF interpreter" >&2; return 1 ;; esac
@@ -40,6 +41,7 @@ check() {
 package() {
 	install -Dm755 routerd "$pkgdir/usr/sbin/routerd"
 	install -Dm755 routerd-modules "$pkgdir/usr/libexec/routerd-modules"
+ install -Dm755 routerd-logging "$pkgdir/usr/libexec/routerd-logging"
 	install -Dm644 images/config-empty.json "$pkgdir/etc/routerd/config.json"
 	install -Dm644 images/boot.json "$pkgdir/etc/routerd/boot.json"
 	install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"

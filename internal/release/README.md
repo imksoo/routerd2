@@ -111,8 +111,8 @@ may already be visible, and the caller must read status before deciding what to
 do next. Successful fsync depends on filesystem and storage-device guarantees;
 process-crash tests are not a claim of hardware power-loss certification.
 
-`Verify` and `BeginBoot` return an `Image` with both verified files pinned open.
-Launchers must use those descriptors, rather than independently resolving two
+`Verify` and `BeginBoot` return an `Image` with every declared artifact pinned open.
+Launchers must use those descriptors, rather than independently resolving role
 paths through a selector that may change. Installed payloads are never modified
 in place by this package. A privileged process outside this contract can still
 alter the filesystem; there is no TPM-backed rollback counter or protection
@@ -130,7 +130,7 @@ cancellation, failure and explicit rollback.
 | `Lookup` / `Verify` | Re-verify an installed manifest digest or complete reference. |
 | `Initialize` | An empty store only: register an explicitly installer-approved baseline. This declares prior knowledge; it does not boot or health-test the binary. |
 | `Prepare` | Match the expected journal generation, have no outstanding trial and provide a sequence above the durable high watermark; queue the pending runtime. |
-| `BeginBoot` | Choose and pin both executables. A queued trial records the old active release as fallback and creates a boot attempt token. |
+| `BeginBoot` | Choose and pin all runtime artifacts. A queued trial records the old active release as fallback and creates a boot attempt token. |
 | `Confirm` | Match the current boot ID, token and selected manifest digest; clear the pending attempt and retain the previous confirmed release. |
 | `CancelPending` | Match the generation and cancel an untried pending runtime. An already running trial cannot use this shortcut. |
 | `FailBoot` | Match the active boot ID and token, record the failure and select the previously confirmed release. |
@@ -198,8 +198,8 @@ Process-crash fixtures exit abruptly without running defers at seven journal
 publication boundaries and five bundle staging boundaries. They reopen the
 store, verify the selected generation, and clean incomplete transactions.
 
-`TestBuiltRuntimeCatalog` additionally checks the actual project build's four
-ELFs (amd64 and arm64 pairs), writes signed bundles, stages them, looks them up,
+`TestBuiltRuntimeCatalog` additionally checks the actual project build's six
+ELFs (amd64 and arm64 native catalogs), writes signed bundles, stages them, looks them up,
 initializes the store and pins the selected catalog. It never executes a foreign
 architecture payload.
 

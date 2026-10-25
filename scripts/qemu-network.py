@@ -321,7 +321,7 @@ def main():
         if suite.get("commands"):
             binary_dir = root / "test/bin"
             binary_dir.mkdir(parents=True)
-            for name in ("routerd", "routerd-modules"):
+            for name in ("routerd", "routerd-modules", "routerd-logging"):
                 binary = binary_dir / name
                 subprocess.run([
                     args.go, "build", "-trimpath", "-buildvcs=false",

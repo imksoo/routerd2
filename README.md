@@ -13,7 +13,7 @@ Alpineのパッケージをビルドとイメージ組み立てに利用しま�
 | 層 | 実装 |
 | --- | --- |
 | init / supervisor | 明示的な appliance・container・host モード、PID 1、子プロセス回収、終了処理、backoff、heartbeat、同一 release 検証、設定に応じたプロトコルプロセスの追加・置換・停止 |
-| worker runtime | `routerd-modules` を役割とインスタンスごとの別プロセスで起動。専用 lifecycle FD、世代・設定 SHA-256・producer epoch による古い通知の拒否 |
+| worker runtime | manifestのrole catalogに従ってnative binaryを固定。factoryでは`routerd-modules`と専用`routerd-logging`を別プロセスで起動。専用 lifecycle FD、世代・設定 SHA-256・producer epoch による古い通知の拒否 |
 | logging | journald を使わない独立ログプロセス、構造化ログ、回転・復旧、bounded queue、console fallback、appliance の `/dev/kmsg` 収集。ログ障害を必須ルーティングプロセスの停止条件にしない |
 | network | Netlink による IPv4/IPv6、有限アドレス寿命、静的経路・ECMP、policy routing、bridge/VLAN/VRF/VXLAN/macvlan、MTU・リンク・forwarding。nftables の INPUT/OUTPUT/FORWARD ACL、DNAT/SNAT/masquerade とポート範囲 |
 | WAN | native DHCPv4、DHCPv6 IA_PD / Information-request、DUID/IAID とリースの永続化、renew/rebind/失効。WAN RA クライアント、SLAAC、default/RIO/on-link routes、RDNSS/DNSSL。PD から LAN /64 を割り当て、旧 prefix を deprecated で維持 |
@@ -32,8 +32,8 @@ Alpineのパッケージをビルドとイメージ組み立てに利用しま�
 | large observations | 大きな設定の revision 固定読取・確認応答、軽量 health、network summary と詳細ページ。経路・WireGuard の大きな観測を省略するときは件数・省略フラグを明示し、CLI から詳細を取得 |
 | migration | `routerd config migrate [--policy FILE] FILE` で旧 resource YAML を変換。静的 DHCPv4 server/reservation、DHCP-derived DNS、静的 WireGuard も対応範囲を検証して変換。WAN と DHCP DNS の動作変更は resource ごとの明示 policy と review notes で扱う。未対応入力は理由を列挙し、部分的な設定を出力しない |
 | persistent state | appliance PID 1 が明示された既存 ext4 データ領域を mount・検証し、設定・SSH host key・署名付きリリース履歴を保存。起動時にディスクを検出・初期化する処理は含めない |
-| distribution | static amd64/arm64 の 2 バイナリ、依存ライセンス manifest、scratch OCI、Alpine APK、kernel + initramfs、QEMU と namespace 統合試験 |
-| release | Ed25519 署名・SHA-256・ELF/architecture/release identity の検証、immutable な二つの実行ファイルの世代保存、next-boot selection、試行回数・health confirmation・rollback journal。kernel/rootfs の A/B 更新は別の未実装範囲 |
+| distribution | static amd64/arm64 の3つのnative command、依存ライセンス manifest、scratch OCI、Alpine APK、kernel + initramfs、QEMU と namespace 統合試験 |
+| release | Ed25519 署名・SHA-256・ELF/architecture/release identity の検証、可変個数のstatic native/dataとrole bindingを持つmanifest v2、全artifactの世代保存、next-boot selection、試行回数・health confirmation・rollback journal。kernel/rootfs の A/B 更新は別の未実装範囲 |
 
 アプライアンスの通常起動には systemd、journald、sshd、OpenRC、`ip`、`nft`、シェルを使いません。
 パケット転送と IPv4/IPv6、conntrack、NAT、トンネルは Linux カーネルが処理します。
@@ -47,7 +47,8 @@ routerd は設定、プロトコル、監視、ログ、管理とその整合性
 
 今後の配布は、一つのイメージファイルを filesystem へ展開した複数バイナリーの束を runtime とし、
 `boot config → load runtime → load startup-config` の順に起動する方針です。
-実行ファイル数は二つに固定しません。上表の二つの ELF と現在の release コマンドは、未リリースの試作仕様です。
+実行ファイル数は二つに固定しません。factoryの3 commandは最初の分割であり、全moduleの分割完了ではありません。
+manifest v2とverified role catalogを実装し、旧二ELF形式は受理しません。明示startup-config参照とengine/kernel ABIの完全化は残っています。
 利用者のいない試作形式との後方互換は要求せず、新しい形式へ直接置換します。
 
 ## Build and test
@@ -73,7 +74,8 @@ mkdir -p /tmp/routerd2-dev/run /tmp/routerd2-dev/state
 python3 - <<'PYWORKERS' > /tmp/routerd2-dev/workers.json
 import json, pathlib
 boot = json.load(open("images/boot.json"))
-print(json.dumps({role: str(pathlib.Path("dist/bin/routerd-modules").resolve())
+print(json.dumps({role: str(pathlib.Path("dist/bin/routerd-logging" if role == "logging"
+                                              else "dist/bin/routerd-modules").resolve())
                   for role in boot["workers"]}))
 PYWORKERS
 ./dist/bin/routerd run \

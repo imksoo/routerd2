@@ -23,13 +23,13 @@ const usage = `Usage: routerd release COMMAND [flags]
 
 Commands:
   status       Show the verified durable release state
-  stage        Verify a local signed tar and install its immutable executable pair
-  verify       Re-verify an installed pair by --digest
+  stage        Verify a local signed tar and install its immutable runtime artifact set
+  verify       Re-verify an installed runtime by --digest
   initialize   Register an installed baseline in an empty store
-  prepare      Queue an installed pair for the next boot
+  prepare      Queue an installed runtime for the next boot
   cancel       Cancel an untried pending release
   rollback     Select the previously confirmed release
-  prune        Remove old generations, incomplete transactions, and named unused pairs
+  prune        Remove old generations, incomplete transactions, and named unused runtimes
 
 Every command requires --root, --trust-file and --target-arch.
 prepare, cancel, rollback and prune also require --expected-generation.

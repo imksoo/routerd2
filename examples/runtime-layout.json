@@ -5,7 +5,7 @@
   "roles": [
     {
       "role": "logging",
-      "artifact": "native-workers"
+      "artifact": "logger"
     },
     {
       "role": "network",
@@ -76,6 +76,12 @@
       "kind": "native",
       "command": "routerd-modules",
       "file": "/build/bin/routerd-modules"
+    },
+    {
+      "name": "logger",
+      "kind": "native",
+      "command": "routerd-logging",
+      "file": "/build/bin/routerd-logging"
     },
     {
       "name": "notices",

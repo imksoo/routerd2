@@ -24,7 +24,7 @@ release store:
   "platform": "appliance",
   "config": "/etc/routerd/config.json",
   "workers": {
-    "logging": "/usr/libexec/routerd-modules",
+    "logging": "/usr/libexec/routerd-logging",
     "network": "/usr/libexec/routerd-modules",
     "control": "/usr/libexec/routerd-modules",
     "management": "/usr/libexec/routerd-modules"

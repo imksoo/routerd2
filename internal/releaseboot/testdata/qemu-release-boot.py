@@ -147,7 +147,7 @@ def build_image(args, image, output):
             print(f"Building the actual routerd command pair for {identity}...", flush=True)
             target = root / "test/bin" / directory
             target.mkdir(parents=True)
-            for name in ("routerd", "routerd-modules"):
+            for name in ("routerd", "routerd-modules", "routerd-logging"):
                 binary = target / name
                 subprocess.run([
                     go_binary, "build", "-mod=readonly", "-trimpath", "-buildvcs=false",

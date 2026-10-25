@@ -17,6 +17,7 @@ The APK installs:
 
 - `/usr/sbin/routerd`
 - `/usr/libexec/routerd-modules`
+- `/usr/libexec/routerd-logging` (independently built logging worker)
 - `/etc/routerd/config.json` with an empty network configuration
 - `/etc/routerd/boot.json` for explicit appliance startup
 - `/usr/share/licenses/routerd2/LICENSE`

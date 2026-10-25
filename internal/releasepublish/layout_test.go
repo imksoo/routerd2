@@ -16,7 +16,7 @@ func TestPublisherRejectsOldImplicitPairFlagsAndUnknownLayoutCommands(t *testing
 	if err == nil || !strings.Contains(err.Error(), "flag provided but not defined") {
 		t.Fatal("old implicit pair publisher accepted", err)
 	}
-	path := testLayout(t, "/test/routerd", "/test/worker")
+	path := testLayout(t, "/test/routerd", "/test/worker", "/test/logging")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)

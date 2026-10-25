@@ -161,7 +161,11 @@ func pathContains(parent, child string) bool {
 func NativeWorkers(path string) map[string]string {
 	out := map[string]string{}
 	for _, role := range []string{"logging", "network", "control", "management", "health", "dhcp4", "dhcp6pd", "dhcp_server", "ra", "ra_client", "aftr", "dns", "vrrp", "bgp", "bfd"} {
-		out[role] = path
+		if role == "logging" {
+			out[role] = filepath.Join(filepath.Dir(path), "routerd-logging")
+		} else {
+			out[role] = path
+		}
 	}
 	return out
 }

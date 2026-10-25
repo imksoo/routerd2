@@ -23,6 +23,9 @@ RUN GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -buildvcs=false \
  && GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -buildvcs=false \
       -ldflags "-s -w -X github.com/imksoo/routerd2/internal/buildinfo.Identity=ROUTERD2-RELEASE-V1:$RELEASE_ID:END" \
       -o /out/routerd-modules ./cmd/routerd-modules \
+ && GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -buildvcs=false \
+      -ldflags "-s -w -X github.com/imksoo/routerd2/internal/buildinfo.Identity=ROUTERD2-RELEASE-V1:$RELEASE_ID:END" \
+      -o /out/routerd-logging ./cmd/routerd-logging \
  && GOOS=$TARGETOS GOARCH=$TARGETARCH python3 scripts/licenses.py --output dist/licenses
 
 FROM scratch AS runtime
@@ -31,6 +34,7 @@ LABEL org.opencontainers.image.title="routerd2" \
       org.opencontainers.image.licenses="BSD-3-Clause"
 COPY --from=build /out/routerd /usr/sbin/routerd
 COPY --from=build /out/routerd-modules /usr/libexec/routerd-modules
+COPY --from=build /out/routerd-logging /usr/libexec/routerd-logging
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY images/config-empty.json /etc/routerd/config.json
 COPY LICENSE /usr/share/licenses/routerd2/LICENSE
