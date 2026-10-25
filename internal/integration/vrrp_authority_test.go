@@ -1,0 +1,355 @@
+//go:build linux && integration
+
+package integration
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net"
+	"os"
+	"path/filepath"
+	"syscall"
+	"testing"
+	"time"
+
+	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/clocktest"
+	"github.com/imksoo/routerd2/internal/config"
+	"github.com/imksoo/routerd2/internal/control"
+	"github.com/imksoo/routerd2/internal/localapi"
+	"github.com/imksoo/routerd2/internal/network"
+	"github.com/imksoo/routerd2/internal/protocol/vrrp"
+	"github.com/imksoo/routerd2/internal/runtimeplan"
+	"github.com/imksoo/routerd2/internal/serviceconfig"
+	"github.com/imksoo/routerd2/internal/supervisor"
+	"github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
+)
+
+func TestDaemonVRRPOriginalOwnership(t *testing.T) {
+	if !isolateFixtureTimeout(t, "TestDaemonVRRPOriginalOwnership", 100*time.Second) {
+		return
+	}
+	runVRRPAuthority(t, nil)
+}
+
+func TestDaemonVRRPClockCorrections(t *testing.T) {
+	file, err := clocktest.ForwardFileFromEnv()
+	if err != nil {
+		if os.Getenv("ROUTERD2_INTEGRATION_REQUIRED") == "1" {
+			t.Fatal(err)
+		}
+		t.Skip("dedicated no-NIC QEMU clock broker required")
+	}
+	_ = file.Close()
+	if !isolateFixtureTimeout(t, "TestDaemonVRRPClockCorrections", 100*time.Second) {
+		return
+	}
+	client, err := clocktest.ClientFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if _, err := client.Step("restore"); err != nil {
+			t.Error(err)
+		}
+		_ = client.Close()
+	})
+	runVRRPAuthority(t, client)
+}
+
+func runVRRPAuthority(t *testing.T, clockClient *clocktest.Client) {
+	t.Helper()
+	ctx := context.Background()
+	peerNS := fixturePeerNamespace(t, "lan0", "peer0")
+	peer, err := netlink.NewHandleAt(peerNS, unix.NETLINK_ROUTE)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer peer.Close()
+	peerLink, err := peer.LinkByName("peer0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	address, _ := netlink.ParseAddr("192.0.2.1/24")
+	if err := peer.AddrAdd(peerLink, address); err != nil {
+		t.Fatal(err)
+	}
+	lan, err := netlink.LinkByName("lan0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign, _ := netlink.ParseAddr("192.0.2.99/32")
+	if err := netlink.AddrAdd(lan, foreign); err != nil {
+		t.Fatal(err)
+	}
+	dir, err := os.MkdirTemp("", "r2-vrrp-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	c := vrrp.Config{Interface: "lan0", VIPInterface: "ha4", Family: "ipv4", SourceAddress: "192.0.2.2", VirtualRouterID: 42, Priority: 255, AddressOwner: true, AdvertIntervalCentiseconds: 200, Addresses: []string{"192.0.2.254/24"}}
+	source := config.FromNative(config.Native{Network: network.Desired{Interfaces: []network.Interface{{Name: "lan0", Addresses: []string{"192.0.2.2/24"}}}}, Services: []serviceconfig.Service{{Name: "ha", VRRP: &c}}})
+	f := startFixtureDaemonAt(t, source, dir)
+	if evidence := os.Getenv("ROUTERD2_TEST_EVIDENCE_DIR"); evidence != "" {
+		t.Setenv("ROUTERD2_TEST_EVIDENCE_DIR", filepath.Join(evidence, "vrrp-authority"))
+	}
+	capture := healthPBRCapture(t, "lan0")
+	nc := control.NewNetworkClient(filepath.Join(dir, "run"))
+	instance := func() runtimeplan.InstanceStatus {
+		var s runtimeplan.InstanceStatus
+		if err := f.control.Do(ctx, "GET", "/v1/services/service.ha", nil, &s); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	snapshot := func() vrrp.Snapshot {
+		var s vrrp.Snapshot
+		if err := json.Unmarshal(instance().Snapshot, &s); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	module := func(name string) supervisor.ModuleStatus {
+		var s supervisor.Status
+		if err := f.supervisor.Do(ctx, "GET", "/v1/status", nil, &s); err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range s.Modules {
+			if m.Name == name {
+				return m
+			}
+		}
+		return supervisor.ModuleStatus{}
+	}
+	hasVIP := func() bool {
+		link, err := netlink.LinkByName("ha4")
+		if err != nil {
+			return false
+		}
+		addresses, err := netlink.AddrList(link, unix.AF_INET)
+		if err != nil {
+			return false
+		}
+		for _, a := range addresses {
+			if a.IP.String() == "192.0.2.254" {
+				return true
+			}
+		}
+		return false
+	}
+	until(t, 8*time.Second, hasVIP)
+	link, err := netlink.LinkByName("ha4")
+	if err != nil || link.Type() != "macvlan" || !bytes.Equal(link.Attrs().HardwareAddr, vrrp.VirtualMAC("ipv4", 42)) {
+		t.Fatal("actual VMAC link missing", err)
+	}
+	tcp, err := net.Listen("tcp4", "192.0.2.254:18095")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tcp.Close()
+	go func() {
+		for {
+			conn, err := tcp.Accept()
+			if err != nil {
+				return
+			}
+			_, _ = conn.Write([]byte("ha"))
+			_ = conn.Close()
+		}
+	}()
+	udp, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("192.0.2.254"), Port: 18096})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer udp.Close()
+	go func() {
+		buffer := make([]byte, 64)
+		for {
+			_, addr, err := udp.ReadFromUDP(buffer)
+			if err != nil {
+				return
+			}
+			_, _ = udp.WriteToUDP([]byte("ha"), addr)
+		}
+	}()
+	traffic := func(want bool) {
+		t.Helper()
+		for _, protocol := range []string{"tcp4", "udp4"} {
+			port := "18095"
+			if protocol == "udp4" {
+				port = "18096"
+			}
+			succeeded := false
+			err := fixtureInsideNamespace(peerNS, func() error {
+				conn, err := net.DialTimeout(protocol, "192.0.2.254:"+port, 400*time.Millisecond)
+				if err != nil {
+					return nil
+				}
+				defer conn.Close()
+				_ = conn.SetDeadline(time.Now().Add(400 * time.Millisecond))
+				if protocol == "udp4" {
+					if _, err = conn.Write([]byte("hi")); err != nil {
+						return nil
+					}
+				}
+				body := make([]byte, 2)
+				_, err = io.ReadFull(conn, body)
+				succeeded = err == nil && string(body) == "ha"
+				return nil
+			})
+			if err != nil || succeeded != want {
+				t.Fatalf("peer to VIP %s want=%t got=%t error=%v", protocol, want, succeeded, err)
+			}
+		}
+	}
+	traffic(true)
+	oldWorker := module("service.ha")
+	if oldWorker.PID <= 1 {
+		t.Fatal("actual VRRP worker missing")
+	}
+	if err := syscall.Kill(oldWorker.PID, syscall.SIGSTOP); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Kill(f.pid, syscall.SIGSTOP); err != nil {
+		t.Fatal(err)
+	}
+	paused := true
+	defer func() {
+		if paused {
+			_ = syscall.Kill(oldWorker.PID, syscall.SIGKILL)
+			_ = syscall.Kill(f.pid, syscall.SIGCONT)
+		}
+	}()
+	first := snapshot()
+	beforeInstance := instance()
+	projection, err := nc.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, iface := range projection.Desired.Interfaces {
+		if iface.Name == "ha4" {
+			o := iface.AddressOptions["192.0.2.254/24"]
+			found = o.BootLifetime.BootID == first.BootID && o.BootLifetime.ValidNanos == first.ExpiresNanos && o.ValidUntil.IsZero()
+		}
+	}
+	if !found {
+		t.Fatal("writer did not retain exact original boot deadline")
+	}
+	offset := time.Duration(0)
+	if clockClient != nil {
+		for _, step := range []struct {
+			action string
+			offset time.Duration
+		}{{"forward", 24 * time.Hour}, {"backward", -24 * time.Hour}} {
+			before, err := boottime.Read()
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := clockClient.Step(step.action)
+			if err != nil {
+				t.Fatal(err)
+			}
+			after, err := boottime.Read()
+			if err != nil {
+				t.Fatal(err)
+			}
+			delta := after.WallTime.Sub(before.WallTime) - time.Duration(after.BoottimeNanoseconds-before.BoottimeNanoseconds)
+			want := step.offset - offset
+			if after.BootID != before.BootID || result.Clock.BootID != after.BootID || delta < want-time.Second || delta > want+time.Second {
+				t.Fatal("guest clock did not perform fixed actual correction", step.action, delta, want)
+			}
+			offset = step.offset
+			if !vrrp.CurrentOwnership(first, after) {
+				t.Fatal("clock test overran original ownership before reapply")
+			}
+			if err := nc.Apply(ctx, projection.Revision, projection.Desired); err != nil {
+				t.Fatal("same original BOOT projection reapply failed", err)
+			}
+			if !hasVIP() {
+				t.Fatal("UTC correction prematurely revoked VIP")
+			}
+			traffic(true)
+			t.Logf("actual VRRP CLOCK_REALTIME action=%s wall_delta=%s original_BOOT_deadline_unchanged=true", step.action, delta)
+		}
+	} else if err := nc.Apply(ctx, projection.Revision, projection.Desired); err != nil {
+		t.Fatal(err)
+	}
+	until(t, 10*time.Second, func() bool {
+		clock, err := boottime.Read()
+		return err == nil && uint64(clock.BoottimeNanoseconds) >= first.ExpiresNanos && !hasVIP()
+	})
+	if err := nc.Apply(ctx, projection.Revision, projection.Desired); err != nil {
+		t.Log("expired projection safely refused:", err)
+	}
+	if hasVIP() {
+		t.Fatal("expired original projection recreated VIP")
+	}
+	traffic(false)
+	if err := syscall.Kill(oldWorker.PID, syscall.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Kill(f.pid, syscall.SIGCONT); err != nil {
+		t.Fatal(err)
+	}
+	paused = false
+	if clockClient != nil {
+		if _, err := clockClient.Step("restore"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	until(t, 10*time.Second, func() bool {
+		m := module("service.ha")
+		return m.Ready && m.Generation > oldWorker.Generation && hasVIP()
+	})
+	traffic(true)
+	stale := serviceconfig.Update{SupervisorInstance: beforeInstance.SupervisorInstance, Name: beforeInstance.Name, Role: beforeInstance.Role, ConfigDigest: beforeInstance.ConfigDigest, Generation: beforeInstance.Generation, ProducerEpoch: beforeInstance.ProducerEpoch, Sequence: beforeInstance.Sequence + 100, Snapshot: beforeInstance.Snapshot}
+	if err := f.control.Do(ctx, "POST", "/v1/services/state", stale, nil); !localapi.IsHTTPStatus(err, 409) {
+		t.Fatal("retired VRRP worker accepted after replacement", err)
+	}
+	beforeControl := instance()
+	oldControl := module("control")
+	if err := syscall.Kill(oldControl.PID, syscall.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	until(t, 15*time.Second, func() bool {
+		m := module("control")
+		return m.Ready && m.Generation > oldControl.Generation && module("service.ha").Generation > beforeControl.Generation && hasVIP()
+	})
+	stale = serviceconfig.Update{SupervisorInstance: beforeControl.SupervisorInstance, Name: beforeControl.Name, Role: beforeControl.Role, ConfigDigest: beforeControl.ConfigDigest, Generation: beforeControl.Generation, ProducerEpoch: beforeControl.ProducerEpoch, Sequence: beforeControl.Sequence + 100, Snapshot: beforeControl.Snapshot}
+	if err := f.control.Do(ctx, "POST", "/v1/services/state", stale, nil); !localapi.IsHTTPStatus(err, 409) {
+		t.Fatal("cold control accepted retired generation", err)
+	}
+	traffic(true)
+	addresses, err := netlink.AddrList(lan, unix.AF_INET)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept := false
+	for _, a := range addresses {
+		kept = kept || a.IP.String() == "192.0.2.99"
+	}
+	if !kept {
+		t.Fatal("foreign address removed")
+	}
+	until(t, time.Second, func() bool {
+		return capture.count("192.0.2.1", "192.0.2.254", unix.IPPROTO_TCP, 18095) > 0 && capture.count("192.0.2.1", "192.0.2.254", unix.IPPROTO_UDP, 18096) > 0
+	})
+	capture.mu.Lock()
+	adverts := 0
+	for _, p := range capture.packets {
+		b := p.data
+		if len(b) >= 42 && b[12] == 8 && b[13] == 0 && b[23] == 112 && bytes.Equal(b[6:12], vrrp.VirtualMAC("ipv4", 42)) {
+			adverts++
+		}
+	}
+	capture.mu.Unlock()
+	if adverts == 0 {
+		t.Fatal("missing actual VMAC VRRP advertisements")
+	}
+	t.Log(fmt.Sprintf("actual VIP TCP/UDP, %d VMAC advertisements, original BOOT expiry/reapply, worker/control replacement and stale-generation refusal; foreign address retained", adverts))
+}
