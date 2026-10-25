@@ -297,6 +297,43 @@ func TestBootRecoveryErrorBoundariesKeepOneCompleteSelection(t *testing.T) {
 	}
 }
 
+func TestBootRecoveryProcessExitAtJournalBoundaries(t *testing.T) {
+	for _, point := range journalBoundaries {
+		t.Run(point, func(t *testing.T) {
+			s := newTestStore(t)
+			base := initializeFixture(t, s)
+			target := stageFixture(t, s, "fixture-r2", 2)
+			prepared, err := s.Prepare(context.Background(), target, 1, PrepareOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			damageBootArtifact(t, s, target, false)
+			crashChild(t, s.options.Root, point, "boot-recovery", Ref{}, "")
+			observed, err := s.readJournal(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			published := point == "journal-selector-replaced" || point == "journal-root-synced"
+			if published {
+				if observed.Generation != prepared.Generation+1 || observed.Pending != nil || observed.LastFailure == nil || observed.LastFailure.Release != target {
+					t.Fatal("crash lost published recovery or mixed selector/state")
+				}
+			} else if !reflect.DeepEqual(observed, prepared) {
+				t.Fatal("crash published an incomplete fallback")
+			}
+			opened, selected, err := OpenForBoot(context.Background(), s.options, "crashed-recovery")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer opened.Close()
+			selected.Image.Close()
+			if selected.Image.Release != base || selected.State.Generation != prepared.Generation+1 || selected.State.HighWatermark != prepared.HighWatermark || selected.Trial {
+				t.Fatal("restart after recovery crash changed runtime or fences")
+			}
+		})
+	}
+}
+
 func TestBootRecoversDamagedPendingPayloadWithoutExecutingIt(t *testing.T) {
 	for _, trial := range []bool{false, true} {
 		for _, missing := range []bool{false, true} {

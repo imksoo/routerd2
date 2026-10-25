@@ -151,7 +151,15 @@ func TestReleaseCrashHelper(t *testing.T) {
 	if root == "" {
 		return
 	}
-	store, err := Open(storeOptions(root))
+	var store *Store
+	var err error
+	if os.Getenv("ROUTERD2_RELEASE_CRASH_OPERATION") == "boot-recovery" {
+		// Only the test helper opens raw pinned handles so it can install its
+		// process-exit hook before the complete BeginBoot transaction.
+		store, err = openStoreHandles(storeOptions(root))
+	} else {
+		store, err = Open(storeOptions(root))
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,6 +181,10 @@ func TestReleaseCrashHelper(t *testing.T) {
 		_, err = store.Prepare(context.Background(), ref, state.Generation, PrepareOptions{})
 	case "stage":
 		_, err = store.StageFile(context.Background(), os.Getenv("ROUTERD2_RELEASE_CRASH_BUNDLE"))
+	case "boot-recovery":
+		var selected Selection
+		selected, err = store.BeginBoot(context.Background(), "crashed-recovery")
+		selected.Image.Close()
 	default:
 		t.Fatal("invalid crash helper operation")
 	}
