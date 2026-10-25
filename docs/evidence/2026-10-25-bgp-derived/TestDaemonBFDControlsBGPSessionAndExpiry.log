@@ -1,0 +1,14 @@
+=== RUN   TestDaemonBFDControlsBGPSessionAndExpiry
+    bgp_test.go:192: === RUN   TestDaemonBFDControlsBGPSessionAndExpiry
+            bfd_test.go:148: BFD initially Down: no TCP connection or advertisement
+            bfd_test.go:190: BFD Up: BGP established, outbound advertisement observed, learned route installed
+            bfd_test.go:205: UDP BFD stopped while TCP KEEPALIVE continued: connection closed and learned route withdrawn
+            bfd_test.go:207: BFD resumed: new BGP session, advertisement and route restored
+            bfd_test.go:233: SIGSTOP BFD worker: last snapshot remains UP, monotonic receive deadline expires, BGP closes and route disappears
+            bfd_test.go:264: SIGSTOP hold exceeded the latest possible unpublished receive deadline; producer and frozen UP snapshot remained unchanged
+            bfd_test.go:285: SIGCONT recovery: same BFD producer PID 1641278 generation 1 recorded a loss transition and fresh receive
+            bfd_test.go:296: SIGCONT: fresh BFD health recreates BGP session and restores advertisements and learned route
+        --- PASS: TestDaemonBFDControlsBGPSessionAndExpiry (20.64s)
+        PASS
+--- PASS: TestDaemonBFDControlsBGPSessionAndExpiry (21.67s)
+PASS

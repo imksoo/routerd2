@@ -172,7 +172,7 @@ ResourceProgramの `id` である。`service/wan` のような `/` を含むID�
 上の例では対象への経路とアドレスは別resourceまたは既存の管理経路で用意する。
 status参照だけでは暗黙のstart/readiness依存辺を作らない。停止中のproviderはunknownになる。
 
-対応するproviderはHealthCheckとBFD。HealthCheckのscalar fieldは `active`、`phase`、`lastResult`、
+対応するproviderはHealthCheck・BFD・BGPRouter。HealthCheckのscalar fieldは `active`、`phase`、`lastResult`、
 `lastCheckedAt`、`lastTransitionAt`、`consecutivePassed`、`consecutiveFailed`、`failureCount`、
 `message`、`lastSuccessTime`、`lastFailureTime`、`firstFailureTime`。
 観測済みの空optional fieldと観測なしは区別する。
@@ -195,6 +195,23 @@ BFD `observedAt` の値変更はworkerで通知集約の前に数える。`equal
 `notEmpty`だけなら定期更新をまたいでholdを継続できる。同じ参照を値比較と存在確認の両方に使う場合は
 厳しい値比較側を選ぶため、集約truthが変わらなくても保守的にholdをやり直すことがある。
 時刻変更counterの飽和では `observedAt` はunknownになり、独立したphaseの有限証拠は保持する。
+
+BGPRouterはnative BGP serviceの `phase`、`establishedPeers`、`backend`、`observedAt` を読む。
+例は `${BGPRouter/service/edge-bgp.status.phase}` に `equals: Established` を指定する。
+宣言した全peerの観測が必要で、全Establishedなら `Established`、一部なら `Degraded`、
+全非Establishedなら `Down`、peer宣言なしなら `Pending`。全Establishedでも未解決FIBは `Degraded` となる。
+`backend` は `gobgp`、`establishedPeers` は数の文字列、`observedAt` はUTC RFC3339Nanoである。
+
+元のBGP経路/BFD依存内容と同じ投影のnetwork ACKが必要で、変更した経路の適用待ちはunknownになる。
+経路内容が同じheartbeatはACKを再利用し、holdを毎回取り消さない。
+観測時刻はengine walkの前にBOOTTIMEで固定し、元の最大5秒とfresh supervisor期限を超えない。
+UTCの補正、遅いwalk/apply、同じ観測の再送や表示で期限を延長しない。
+停止したworkerのraw Establishedは残っても、現在値はunknownとなり、Down eventを捏造しない。
+BGP通知は最初の1件から現在のsupervisor instance/worker generation/digestと照合する。
+
+`acceptedPrefixes` を選択済みFIB候補数で代用しない。受理RIB、構造化peer/prefix、
+再収束/GR、他の旧BGPRouter/BGPPeer fieldとresource契約は未実装であり、未対応参照はcompile時に拒否する。
+これは現在のnative session/FIB観測のproviderで、BGP全体のsemantic parityではない。
 
 現在のboot/source/control、worker generation、producer epoch、sequenceと一致し、元の観測時刻が
 未来でなく、producer期限・supervisor観測期限が残るsampleだけを読む。pollやHTTP GETでは

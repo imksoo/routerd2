@@ -1,0 +1,5 @@
+--- FAIL: TestBGPOriginalDeadlineAndLiveGenerationFence (5.31s)
+    derived_bgp_test.go:86: old worker seeded state despite live supervisor generation <nil>
+FAIL
+FAIL    github.com/imksoo/routerd2/internal/runtimeplan 5.319s
+FAIL

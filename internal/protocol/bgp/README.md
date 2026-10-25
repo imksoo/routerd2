@@ -27,6 +27,22 @@ GoBGP or gRPC. The configured resource is resolved intent, not an interpreter
 for the original resource graph. The compiler resolves dependencies, dynamic
 admission, addresses, secrets and convergence defaults before constructing it.
 
+Full snapshots carry boot-scoped `observed_nanos`/`expires_nanos` metadata.
+The worker stamps before the engine walk and preserves that age through the
+effect acknowledgment; active ownership lasts at most five seconds. UTC is
+display metadata and cannot revive an expired observation after a correction.
+The controller validates the current supervisor instance/generation/digest
+even when its accepted cache is empty, and fences inner producer sequence,
+epoch, clock rewind and the final inactive observation.
+
+ResourceProgram's `BGPRouter` provider reads `phase`, `establishedPeers`,
+`backend` and `observedAt` from complete committed-peer observations. It also
+requires the matching successfully applied route/BFD-dependency projection;
+an unresolved FIB makes an otherwise Established router Degraded. Heartbeat
+changes alone do not invalidate the applied projection. Accepted RIB/prefix
+counts and the complete legacy peer/status resource contract remain separate
+work; selected FIB candidates are not relabeled as accepted prefixes.
+
 An instance uses one worker process in the intended network namespace. GoBGP
 has process-global route selection options; a second simultaneous `Run` in the
 same process is rejected. Global `BindInterface` scopes BGP listeners and is

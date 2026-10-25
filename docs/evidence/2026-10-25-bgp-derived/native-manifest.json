@@ -1,0 +1,69 @@
+{
+  "source_commit": "8887e75d1a6702032f25801c0cb828201bfbb7c8",
+  "source_dirty": false,
+  "race_harness_sha256": "fb6751bf507ac240f78acdb1f570057fb7060318e9336c155901d10901f87378",
+  "binaries": [
+    {
+      "architecture": "amd64",
+      "binary": "routerd",
+      "sha256": "16021a22f4dc3895ebf9b5917cdd7e547f1b186748225fbd7355639cd19736c6"
+    },
+    {
+      "architecture": "amd64",
+      "binary": "routerd-modules",
+      "sha256": "521c409fb605bc237e049222efb9cadb485fe42b80ab40e4ea1a3566c1267231"
+    }
+  ],
+  "scope": "root-owned0700 stage; private network namespaces; actual daemon and UDP/packet peers",
+  "tests": [
+    {
+      "test": "TestDaemonBGPDerivedCurrentStatus",
+      "exit_code": 0,
+      "passed": true,
+      "elapsed_seconds": 22.74,
+      "log": "bgp-derived-native-TestDaemonBGPDerivedCurrentStatus.log",
+      "sha256": "3a79cc7fd2963ab58fad1271e13444f1e19dbd9c54ce1028fd3121344b9873e3"
+    },
+    {
+      "test": "TestDaemonBGPFIBAndOwnershipExpiry",
+      "exit_code": 0,
+      "passed": true,
+      "elapsed_seconds": 9.7,
+      "log": "bgp-derived-native-TestDaemonBGPFIBAndOwnershipExpiry.log",
+      "sha256": "3dcf737b72e85d4dffa053b8254ed8122af6f6f0d8c5b72a92a88295ed4624e1"
+    },
+    {
+      "test": "TestDaemonBFDDerivedCurrentStatus",
+      "exit_code": 0,
+      "passed": true,
+      "elapsed_seconds": 13.71,
+      "log": "bgp-derived-native-TestDaemonBFDDerivedCurrentStatus.log",
+      "sha256": "f2e17c4d18a47fec4b31150a8f89531c7a1938a814791522387e294c60396869"
+    },
+    {
+      "test": "TestDaemonBFDControlsBGPSessionAndExpiry",
+      "exit_code": 0,
+      "passed": true,
+      "elapsed_seconds": 22.74,
+      "log": "bgp-derived-native-TestDaemonBFDControlsBGPSessionAndExpiry.log",
+      "sha256": "21d40aa671396f73b167cc284d5d84620f9e8e5cd2c6af6006f52bc2c55870a1"
+    },
+    {
+      "test": "TestDaemonDerivedHealthCurrentStatusAndDurability",
+      "exit_code": 0,
+      "passed": true,
+      "elapsed_seconds": 13.38,
+      "log": "bgp-derived-native-TestDaemonDerivedHealthCurrentStatusAndDurability.log",
+      "sha256": "94293c42fb3080500bfa7fb5eb3b39a1bdf0da76c1c01e55b36cac23fecd4c47"
+    },
+    {
+      "test": "TestDaemonHealthPBRFailoverAndRecovery",
+      "exit_code": 0,
+      "passed": true,
+      "elapsed_seconds": 32.13,
+      "log": "bgp-derived-native-TestDaemonHealthPBRFailoverAndRecovery.log",
+      "sha256": "dc859608a3b584b102c457c4c89a8b7601b9e3f2184344d327a63193491d8895"
+    }
+  ],
+  "completed_commit": "8887e75d1a6702032f25801c0cb828201bfbb7c8"
+}

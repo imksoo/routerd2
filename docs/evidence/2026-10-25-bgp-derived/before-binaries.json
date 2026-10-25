@@ -1,0 +1,18 @@
+{
+  "source_commit": "95b2f43a666669905e4132b1959c3e5075e2ba83",
+  "artifacts": [
+    {
+      "architecture": "amd64",
+      "binary": "routerd",
+      "sha256": "4cb20a3389975f81198268714d46a2f2efe82ccda849878ed99c321b81f007d1"
+    },
+    {
+      "architecture": "amd64",
+      "binary": "routerd-modules",
+      "sha256": "27c0a82f3616cf5d66249ede03394d5037ba7bebbdd32560c198aad202b71070"
+    }
+  ],
+  "exit_code": 1,
+  "elapsed_seconds": 20.33,
+  "expected_failure": "old pair cannot compile BGPRouter current status provider"
+}

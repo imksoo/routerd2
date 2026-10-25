@@ -7,8 +7,23 @@
 部分checkpointでゴールを完了にせず、実装・検証・未検証と証跡を更新する。
 対象機種・NIC・性能条件の確認と並行して、独立して進められる実装・隔離VM検証を続ける。
 
-最新product checkpointは `95b2f43`。
-BFD `observedAt` の `equals` / `any_of` で、通知集約中のA→B→Aや別の一致値への移行が
+最新product checkpointは `8887e75`。
+BGPRouterの `phase` / `establishedPeers` / `backend` / `observedAt` をDerivedEvent/EventRuleへ接続した。
+全peerの観測と同じ経路/BFD依存のnetwork ACKを要求し、未解決FIBならDegraded、適用待ちはunknownになる。
+同じ経路のheartbeatはACKを再利用する。engine walk前のBOOTTIMEで元の最大5秒を固定し、
+BGPのFIBもその期限で失効する。最初の通知からlive supervisorのinstance/generation/digestを照合する。
+旧95b2f43 pair20.33秒FAIL、関連4 package Raceとclean全体check/Race/vet/static両arch build115.99秒PASS。
+native6 gateは新BGP-derived22.74秒・既存BGP9.70秒・BFD-derived13.71秒・BFD/BGP22.74秒・
+Health/Derived13.38秒・二WAN/PBR32.13秒PASS。QEMUのBGP-derived54.19秒・BGP31.53秒・BFD-derived41.56秒・BFD/BGP56.57秒もPASS。
+Health/Derivedは初回67.14秒FAILを保存。target保存後のACK喪失でpendingに残る既存prefixを、未保存と誤判定していた。
+実SQLiteで局所再現後、fixture544233eで保存失敗境界の既存履歴と新規未保存を分けて検証する。
+修正後clean全体check/Race/vet/両arch build12.80秒PASS（cache含む）、4 ELFのSHAは元と完全一致。
+同じ製品pairの修正native Health/Derived13.01秒・二WAN/PBR31.12秒PASS。
+修正QEMU Health/Derived100.08秒・二WAN/PBR85.05秒もPASS。関連6 gateの個別受入であり、全計画・全suite・対象実機の完了ではない。
+受理RIBの件数をFIB候補数で代用せず、richer status/GR/旧resource/profile、他providerと全残計画は残す。
+work package全体の完了とparityは変更しない。[証跡と残作業](evidence/2026-10-25-bgp-derived.md) を参照。
+
+先行product checkpoint `95b2f43`では、BFD `observedAt` の `equals` / `any_of` で、通知集約中のA→B→Aや別の一致値への移行が
 古いhysteresisを完成させる問題をtest-firstで再現し、修正した。
 workerで集約前の時刻変更を数え、比較用continuityとpresence-onlyのcontinuityを分ける。
 650msの実hold、正のcounterと定期更新、期限切れ・再送・worker/control復旧を要求する。

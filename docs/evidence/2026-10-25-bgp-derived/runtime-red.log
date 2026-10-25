@@ -1,0 +1,7 @@
+--- FAIL: TestBGPRouterPhaseIncludesCurrentUnresolvedFIB (0.03s)
+    derived_bgp_test.go:65: unresolved current FIB was not known Degraded {0 0 {"digest":"3d8b0853885f3f92ab410f080def0b2cc8b48c706ec20cda96d5f9c57a9ed913","scope":"e9e9ece6667d283261c82e9cf198e85fd8809b8b2390b9741860c5d74e381992","initialized":true,"initial_emission":true,"asserted":false,"counter":0,"last_now":7389883537038542,"last_asserted_at":"0001-01-01T00:00:00Z","last_retracted_at":"0001-01-01T00:00:00Z"} [] {Indeterminate indeterminate <nil> None 0001-01-01 00:00:00 +0000 UTC 0001-01-01 00:00:00 +0000 UTC}} <nil>
+--- FAIL: TestBGPConditionalApplyFenceAndHeartbeatDoNotInventContinuity (0.04s)
+    derived_bgp_test.go:91: {0 0 {"digest":"21767c2fea2d54540036cbb2d86c3c4140047eac945f4749973174ada9a0f555","scope":"71d27c5eed7bd0200d9f1f3c237a15ea89f46164fbc4d6f03aa454fc910df582","initialized":true,"initial_emission":true,"asserted":false,"counter":0,"last_now":7389883573366241,"last_asserted_at":"0001-01-01T00:00:00Z","last_retracted_at":"0001-01-01T00:00:00Z"} [] {Indeterminate indeterminate <nil> None 0001-01-01 00:00:00 +0000 UTC 0001-01-01 00:00:00 +0000 UTC}} <nil>
+FAIL
+FAIL    github.com/imksoo/routerd2/internal/runtimeplan 0.073s
+FAIL

@@ -151,6 +151,7 @@ and actual signed-bundle validation.
 | `daemon-dhcp-dns` | `TestDaemonDHCPDNSAndOwnershipExpiry` | DHCP leases projected into DNS and ownership expiry |
 | `daemon-legacy-dhcp-dns` | `TestDaemonMigratedDHCPDNSAndOwnershipExpiry` | Original resource YAML migration, explicit finite-source DNS policy, DHCP acquisition, scoped INPUT exception, producer expiry and journal recovery |
 | `daemon-bgp` | `TestDaemonBGPFIBAndOwnershipExpiry` | Real BGP workers, kernel FIB and ownership expiry |
+| `daemon-bgp-derived` | `TestDaemonBGPDerivedCurrentStatus` | Real TCP BGP, complete peer scalars and applied-FIB phase, DerivedEvent/EventRule, boot expiry, replay and worker/control recovery |
 | `daemon-bfd` | `TestDaemonBFDControlsBGPSessionAndExpiry` | BFD startup gating, UDP-only loss, suspended-producer expiry and fresh BGP/FIB recovery |
 | `daemon-bfd-derived` | `TestDaemonBFDDerivedCurrentStatus` | Real UDP BFD, four current status fields, durable DerivedEvent/EventRule, independent expiry, replay and worker/control recovery |
 | `dhcp` | `TestIsolatedNativeDHCPAndRA` | DHCPv4, DHCPv6-PD and native router advertisements |

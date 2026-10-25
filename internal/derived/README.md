@@ -2,7 +2,7 @@
 
 This package is the pure evaluator used by the live control-worker
 `derivedcontroller`. ResourceProgram accepts typed `derived_event` payloads.
-The runtime supplies finite current HealthCheck and BFD observations; the
+The runtime supplies finite current HealthCheck, BFD and BGPRouter observations; the
 controller atomically saves producer state/output jobs and publishes stable
 historical events to the journal. Neither package executes external effects or
 grants kernel authority.

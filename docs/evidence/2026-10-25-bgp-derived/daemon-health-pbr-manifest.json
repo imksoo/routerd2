@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "purpose": "isolated-daemon-health-pbr-integration",
+  "suite": "daemon-health-pbr",
+  "required_test": "TestDaemonHealthPBRFailoverAndRecovery",
+  "kernel_release": "6.18.58-0-virt",
+  "kernel_sha256": "17fbd3efd16f2e7cb1b945f06423b37399ba7d5ac8cdd3665e7f13f363500e85",
+  "initializer_sha256": "bd573d1c446a1ccf3153856c023d4e48558879b2a5f44d7c4c0d536c21efde9f",
+  "test_binary_sha256": "22c70505cfd9f61011f8cf3ccdc106df711fe68e28990cdd6803a62f85adbab5",
+  "binary_sha256": {
+    "/test/bin/routerd": "50c58ddb1bf29d5ab8308a740eecb128ea575e9306ec11bee61283316c4baf97",
+    "/test/bin/routerd-modules": "f1814892d3be788c9211ff9f96e98df63bc8d9e57e93c7e50ce7e324ffe00f54"
+  },
+  "source_image_manifest_sha256": "a1df58dc193d6f6f5a361b9b630e9fb106b76a3e3089239da2185f812d265b43",
+  "source_initramfs_sha256": "c6b0ac5a7e6dc64a186ab595586f27bed87440083dc7a13cf0db9df8a3d2c729",
+  "host_network_access": false,
+  "result": "passed",
+  "guest_memory_mib": 512,
+  "test_scratch": {
+    "mountpoint": "/tmp",
+    "filesystem": "tmpfs",
+    "size_bytes": 67108864
+  },
+  "initramfs_sha256": "c10bab90fe1eefb78d4151c14cbdd2f0203879fe426d1dc0ffead8254721f5e2",
+  "duration_seconds": 85.05,
+  "qemu_exit_status_before_cleanup": 0
+}

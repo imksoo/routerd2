@@ -1,0 +1,16 @@
+=== RUN   TestDaemonDerivedHealthCurrentStatusAndDurability
+    derived_test.go:42: === RUN   TestDaemonDerivedHealthCurrentStatusAndDurability
+            derived_test.go:46: isolated lifecycle deadline remaining: 2m30s
+            derived_test.go:415: raw probe events and EventRule count passed; 4 queued stable observations (4 absent at target failure) survived worker/control SIGKILL and journal failure without duplicate or renewed facts
+            derived_test.go:547: permanent health removal recovered 2 original observations through target failure, registry ACK failure and two control restarts without reactivation
+            derived_test.go:569: registry persistence failure rejected candidate before health worker launch and preserved authoritative source
+            derived_test.go:570: real TCP probes -> finite typed current status -> durable DerivedEvent -> EventRule; producer/control/logging restart, old notification, max_age and SQL failure recovery passed
+            derived_test.go:571: ROUTERD_DERIVED_DAEMON_TEST_PASS
+            derived_test.go:103: fixture filesystem type=61267 total_bytes=268250730496 available_bytes=51276267520
+            derived_test.go:103: fixture file_bytes=4620000 allocated_bytes=4648960 largest_files=[{state/events/journal.sqlite3-wal 4136512 4141056} {state/events/journal.sqlite3 229376 229376} {state/services/wan/health-events/journal.sqlite3 106496 106496} {state/services/wan2/health-events/journal.sqlite3 90112 90112} {state/events/journal.sqlite3-shm 32768 32768} {state/logs/log.0.ndjson 17518 20480} {console.log 2955 4096} {config.json 2085 4096} {state/config.json 614 4096} {state/network.json 579 4096} {boot.json 471 4096} {run/instances/service.wan/bf4cb8e7dd4e5d27d5e90c2ce14f84d5bf8cb69d0112e6cc99438bb234784440.json 449 4096}]
+            derived_test.go:103: fixture memory MemAvailable:   31099912 kB
+            derived_test.go:103: fixture memory Shmem:              1064 kB
+        --- PASS: TestDaemonDerivedHealthCurrentStatusAndDurability (10.94s)
+        PASS
+--- PASS: TestDaemonDerivedHealthCurrentStatusAndDurability (11.97s)
+PASS

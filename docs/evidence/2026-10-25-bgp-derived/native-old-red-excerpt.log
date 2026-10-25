@@ -1,0 +1,11 @@
+=== RUN   TestDaemonBGPDerivedCurrentStatus
+    bgp_test.go:192: isolated protocol fixture: exit status 1
+        === RUN   TestDaemonBGPDerivedCurrentStatus
+            derived_bgp_test.go:108: condition timed out after 20s
+            bgp_test.go:305: console: {"timestamp":"2026-10-25T00:52:13.531925506Z","module":"supervisor","pid":1637481,"generation":0,"level":"INFO","message":"worker started","attributes":{"generation":1,"module":"logging","pid":1637493},"producer_epoch":"b7d8079b7baf8105344eba661acdd0f8","producer_sequence":1,"delivery":"console_fallback"}
+                {"timestamp":"2026-10-25T00:52:13.533650027Z","module":"supervisor","pid":1637481,"generation":0,"level":"INFO","message":"worker started","attributes":{"generation":1,"module":"network","pid":1637494},"producer_epoch":"b7d8079b7baf8105344eba661acdd0f8","producer_sequence":2,"producer_dropped":1,"delivery":"console_fallback"}
+[repeated fixture console omitted; full raw SHA recorded in provenance]
+        --- FAIL: TestDaemonBGPDerivedCurrentStatus (20.26s)
+        FAIL
+--- FAIL: TestDaemonBGPDerivedCurrentStatus (20.29s)
+FAIL

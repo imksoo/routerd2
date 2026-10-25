@@ -1,0 +1,6 @@
+=== RUN   TestNewTargetFailureCanRetainAnAlreadyCommittedPendingPrefix
+--- PASS: TestNewTargetFailureCanRetainAnAlreadyCommittedPendingPrefix (0.35s)
+=== RUN   TestTargetSavedProbeSurvivesActualLocalACKTransactionFailure
+--- PASS: TestTargetSavedProbeSurvivesActualLocalACKTransactionFailure (0.37s)
+PASS
+ok      github.com/imksoo/routerd2/internal/protocolevents      1.741s

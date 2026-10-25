@@ -11802,6 +11802,43 @@
         "All remaining work packages, effects/idempotency/federation, storage retention/off-device durability/lifetime sealing/aggregate budgets"
       ],
       "parity_flags_unchanged": true
+    },
+    {
+      "id": "bgprouter-current-derived-status",
+      "date": "2026-10-25",
+      "status": "partial_provider_implementation_verified",
+      "code_checkpoint": "8887e75d1a6702032f25801c0cb828201bfbb7c8",
+      "work_packages": [
+        "CORE-03",
+        "CORE-04"
+      ],
+      "evidence": "docs/evidence/2026-10-25-bgp-derived.md",
+      "operator_contract": "docs/resource-program.md#derivedevent",
+      "implemented": [
+        "Typed BGPRouter references to native BGP phase/establishedPeers/backend/observedAt; complete configured peer observation required; unobserved RIB/prefix/status fields rejected rather than fabricated",
+        "Original boot-scoped five-second observation stamp before engine/RIB walk, preserved through slow effects, retries and display; FIB ownership also expires from BOOTTIME independently of UTC",
+        "Applied route/BFD-dependency fingerprint fenced by config/worker/engine identity; same-route heartbeat can retain hold; changed unapplied routes unknown and unresolved FIB degrades Established phase",
+        "Every BGP publication, including first after control recovery, authenticated against current supervisor instance/module generation/digest; inner epoch/sequence/clock/final fences enforced",
+        "Durable DerivedEvent/EventRule through actual TCP BGP, unresolved next hop/fix, original expiry, duplicate retry and worker/control recovery; no raw BGP durable event producer added"
+      ],
+      "validation": [
+        "Test-first missing API/compile refusal and actual runtime unapplied/FIB/heartbeat failures; new original-age/publication tests, future UTC versus original BOOTTIME expiry and route withdrawal, inner replay rejection and live generation failure captured before fix",
+        "Mandatory clock and inner-sequence fixture failures retained; normal fixtures updated to explicit original stamps/correct sequence without weakening validation",
+        "Related Race runtime14.802s, BGP5.902s, BGP config1.047s and resource compile2.230s pass",
+        "Clean8887e75 full make check/Race/vet/Python23/static amd64+arm64 build115.99s passes; pinned old95b2f43 actual pair20.33s unsupported-reference fail",
+        "Matching checked native pair passes six gates: new BGP-Derived22.74s, existing BGP FIB9.70s, BFD-Derived13.71s, BFD/BGP22.74s, Health-Derived13.38s, two-WAN TCP/UDP/PCAP PBR32.13s",
+        "QEMU original fixture passes BGP-Derived54.19s, BGP FIB31.53s, BFD-Derived41.56s, BFD/BGP56.57s; Health-Derived67.14s failure retained: old oracle incorrectly forbade a legitimate already-committed pending prefix after lost ACK",
+        "Actual SQLite committed-A/lost-ACK/new-B/failed-insert reproduction and existing local ACK fault test pass Race1.741s, relay package Race11.541s; new oracle requires at least one genuinely new pending event and keeps committed content/cursor and postrestart exactly-once assertions",
+        "Clean fixture544233e check/Race/vet/Python23/amd64+arm64 build12.80s passes including cached tests; all four product ELF hashes equal original checked pair; fixed native Health-Derived13.01s and two-WAN/PBR31.12s pass",
+        "Corrected related QEMU Health/Derived100.08s and Health/PBR85.05s pass with unchanged512MiB/2CPU/64MiB scratch and original operation/fixture deadlines; four earlier BGP/BFD passes retained with distinct fixture hashes and identical product/initializer/kernel; six individual related gates, not a new all-suite aggregate or physical qualification"
+      ],
+      "remaining": [
+        "Accepted RIB/prefix/full peer/GR/reconvergence status and complete legacy BGPRouter/BGPPeer/dynamic resource/profile contracts; selected FIB is not a substitute for accepted RIB",
+        "Other providers, structured selectors/Derived chaining, raw BGP durable producer/queue, effects/idempotency/federation",
+        "Storage retention/off-device durability/lifetime sealing/aggregate budgets; all remaining work packages and scale/long-run/physical hardware/NIC/clock qualification"
+      ],
+      "parity_flags_unchanged": true,
+      "fixture_checkpoint": "544233ec51ba413547e8f9e2bebaf099e31b8117"
     }
   ],
   "delivery_goal": {

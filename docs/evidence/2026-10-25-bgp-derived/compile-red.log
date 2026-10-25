@@ -1,0 +1,5 @@
+--- FAIL: TestDerivedBGPRouterReferenceUsesAllDeclaredProviders (0.00s)
+    derived_test.go:45: phase derived event derived has unsupported or missing typed reference BGPRouter/service/router.status.phase
+FAIL
+FAIL    github.com/imksoo/routerd2/internal/resourceprogram     0.009s
+FAIL

@@ -1,0 +1,5 @@
+--- FAIL: TestBFDCacheUpdatesAndQueriesRemainIndependentOfBlockedNetworkWriter (0.06s)
+    bfd_cache_test.go:105: initial acknowledged path missing BGP inner sequence reused with changed observation
+FAIL
+FAIL    github.com/imksoo/routerd2/internal/runtimeplan 8.304s
+FAIL

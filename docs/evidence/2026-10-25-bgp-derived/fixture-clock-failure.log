@@ -1,0 +1,24 @@
+--- FAIL: TestBFDCacheUpdatesAndQueriesRemainIndependentOfBlockedNetworkWriter (0.06s)
+    bfd_cache_test.go:96: invalid BGP observation clock
+--- FAIL: TestBFDCacheRecipientGenerationBecomesVisibleOnlyAfterSuccessfulACK (5.05s)
+    bfd_cache_test.go:188: recipient apply did not start
+--- FAIL: TestBFDCacheCutoverPreservesNewerUnchangedSourceAndFencesChangedSources (0.05s)
+    bfd_cache_test.go:232: invalid BGP observation clock
+--- FAIL: TestBFDCacheAcceptedEvidenceIsImmutableAndCancellationHasNoEffect (0.05s)
+    bfd_cache_test.go:311: invalid BGP observation clock
+--- FAIL: TestBFDCacheGrantQueriesReadOnlyCompiledRecipientReferences (0.05s)
+    bfd_cache_test.go:344: invalid BGP observation clock
+--- FAIL: TestBFDCacheProjectionCapturesEvidenceBeforeEvaluationClock (0.05s)
+    bfd_cache_test.go:370: invalid BGP observation clock
+--- FAIL: TestBFDProjectionFencesRecipientAndFIBRequiresSessionAcknowledgement (0.05s)
+    bfd_test.go:56: invalid BGP observation clock
+--- FAIL: TestBFDFIBUsesExplicitMonotonicFactsDespiteWallClockRollback (0.00s)
+    bfd_test.go:131: fresh proof not projected <nil> []
+--- FAIL: TestBGPRecursiveResolutionECMPAndUnreachableAccounting (0.00s)
+    bgp_test.go:39: ECMP paths were collapsed: [{Destination:10.8.0.0/16 Gateway:192.0.2.1 Interface:wan0 NextHops:[] Metric:0 Table:0 ValidUntil:0001-01-01 00:00:00 +0000 UTC}]
+FAIL
+FAIL    github.com/imksoo/routerd2/internal/runtimeplan 13.224s
+ok      github.com/imksoo/routerd2/internal/protocol/bgp        6.669s
+ok      github.com/imksoo/routerd2/internal/protocol/bgpconfig  (cached)
+ok      github.com/imksoo/routerd2/internal/resourceprogram     (cached)
+FAIL
