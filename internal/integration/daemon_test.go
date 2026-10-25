@@ -208,6 +208,22 @@ func TestDaemonConfigurationAndRecovery(t *testing.T) {
 		t.Fatalf("candidate not committed and confirmed: %+v; transcript=%s", state, transcript.String())
 	}
 	answer(t, dnsPort, "192.0.2.2")
+	// Save through the actual operator command and Unix API. This captures
+	// intent only; a later boot selection must explicitly adopt its reference.
+	snapshotCommand := exec.Command(filepath.Join(os.Getenv("ROUTERD2_TEST_BIN_DIR"), "routerd"), "config", "snapshot", "--runtime-dir="+runDir, "--expected-revision=2")
+	snapshotOutput, err := snapshotCommand.CombinedOutput()
+	var saved config.SnapshotRef
+	if err != nil || json.Unmarshal(snapshotOutput, &saved) != nil || saved.Validate() != nil || saved.StoreID != state.StoreID || saved.Revision != 2 {
+		t.Fatalf("actual snapshot CLI did not capture confirmed revision: %v %s", err, snapshotOutput)
+	}
+	configStore := &config.Store{Dir: stateDir}
+	originalSnapshot, err := configStore.ResolveSnapshot(saved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if originalSnapshot.Config.Resources[0].Service.DNS.Zones[0].Spec.Records[0].IPv4 != "192.0.2.2" {
+		t.Fatal("snapshot CLI saved a different configuration")
+	}
 	// An unconfirmed record change must roll back durably and restart only DNS.
 	changedBytes, _ := json.Marshal(state.Config)
 	var changed config.Document
@@ -218,6 +234,9 @@ func TestDaemonConfigurationAndRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	answer(t, dnsPort, "192.0.2.3")
+	if err := ctl.Do(ctx, "POST", "/v1/config/snapshots", control.SnapshotRequest{ExpectedRevision: 3}, nil); !localapi.IsHTTPStatus(err, 409) {
+		t.Fatal("actual control accepted unconfirmed snapshot", err)
+	}
 	until(t, 12*time.Second, func() bool {
 		state = control.State{}
 		_ = ctl.Do(ctx, "GET", "/v1/config", nil, &state)
@@ -285,6 +304,20 @@ func TestDaemonConfigurationAndRecovery(t *testing.T) {
 		t.Fatal("control SIGKILL changed or duplicated durable lifecycle history")
 	}
 	t.Log("durable commit/confirm/rollback observations survived control SIGKILL with stable IDs/cursors")
+	var recovered control.State
+	if err := ctl.Do(ctx, "GET", "/v1/config", nil, &recovered); err != nil || recovered.StoreID != saved.StoreID {
+		t.Fatal("control restart changed store identity", err)
+	}
+	recoveredSnapshot, err := configStore.ResolveSnapshot(saved)
+	aSnapshot, _ := json.Marshal(originalSnapshot)
+	bSnapshot, _ := json.Marshal(recoveredSnapshot)
+	if err != nil || !bytes.Equal(aSnapshot, bSnapshot) {
+		t.Fatal("confirmed rollback or control restart changed snapshot", err)
+	}
+	if err := ctl.Do(ctx, "POST", "/v1/config/snapshots", control.SnapshotRequest{ExpectedRevision: 2}, nil); !localapi.IsHTTPStatus(err, 409) {
+		t.Fatal("stale capture request was accepted after rollback", err)
+	}
+	t.Log("ROUTERD_CONFIG_SNAPSHOT_DAEMON_TEST_PASS: actual CLI, confirmed-only capture, stable store identity, immutable snapshot after rollback and control SIGKILL")
 	observationSession, err := client.NewSession()
 	if err != nil {
 		t.Fatal(err)

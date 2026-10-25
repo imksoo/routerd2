@@ -3,6 +3,7 @@ package config
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -161,5 +162,57 @@ func TestSnapshotDoesNotFollowLinksOrAcceptPathReferences(t *testing.T) {
 		if _, err := s.ResolveSnapshot(bad); err == nil {
 			t.Fatal("accepted mismatched snapshot provenance")
 		}
+	}
+}
+
+func TestSnapshotCapacityRetainsExistingAndAllowsIdempotentRetry(t *testing.T) {
+	s, c := snapshotFixture(t)
+	first, err := s.Snapshot(c.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i < MaxSnapshots; i++ {
+		c.Revision++
+		if err := s.Save(c); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Snapshot(c.Revision); err != nil {
+			t.Fatal(err)
+		}
+	}
+	last, err := s.Snapshot(c.Revision)
+	if err != nil {
+		t.Fatal("idempotent retry failed at capacity", err)
+	}
+	c.Revision++
+	if err := s.Save(c); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Snapshot(c.Revision); !errors.Is(err, ErrSnapshotCapacity) {
+		t.Fatal("snapshot budget was not enforced", err)
+	}
+	for _, ref := range []SnapshotRef{first, last} {
+		if _, err := s.ResolveSnapshot(ref); err != nil {
+			t.Fatal("capacity evicted an existing reference", err)
+		}
+	}
+}
+
+func TestJournalIdentityCannotBeReplacedByOrdinarySave(t *testing.T) {
+	s, c := snapshotFixture(t)
+	for _, identity := range []string{"", strings.Repeat("a", 32), strings.Repeat("A", 32)} {
+		bad := c
+		bad.StoreID = identity
+		bad.Revision++
+		if err := s.Save(bad); err == nil {
+			t.Fatal("save replaced store identity")
+		}
+		if err := s.Stage(bad); err == nil {
+			t.Fatal("stage accepted foreign store identity")
+		}
+	}
+	got, err := s.Load()
+	if err != nil || !reflect.DeepEqual(got, c) {
+		t.Fatal("failed save changed committed journal", err)
 	}
 }

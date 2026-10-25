@@ -15,6 +15,9 @@ import (
 func TestSnapshotSerializesConfirmedRevisionWithoutKernelApply(t *testing.T) {
 	e, n := fixture(t)
 	identity := e.State().StoreID
+	if e.health().StoreID != identity {
+		t.Fatal("bounded health omitted the store identity")
+	}
 	before := len(n.calls)
 	ref, err := e.Snapshot(SnapshotRequest{ExpectedRevision: 1})
 	if err != nil || ref.StoreID != identity || len(n.calls) != before {
