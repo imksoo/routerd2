@@ -20,14 +20,63 @@ def witnesses():
         "sentinel_sha256": "sentinel",
         "event_id": "d7b3f753ee2a52bb24261bf44a508688", "event_cursor": 1,
         "store_id": "b" * 32, "snapshot_digest": "c" * 64, "snapshot_revision": 2,
+        "corrupt_trial": False, "trial_attempt_limit": 1,
     }
     second = dict(first, boot_id="7bbe264e-57c0-4ee6-aa19-67c3a1d244fb",
                   release_id=STORAGE.IDENTITIES["baseline"], release_operation="boot-rollback",
-                  pending=False, failed_boot_id=first_id)
-    return [{"witness": first}, {"witness": second}]
+                  pending=False, failed_boot_id=first_id, failure_reason="unconfirmed boot attempt limit reached")
+    return [{"phase": "first", "result": "passed", "qemu_exit_status_before_cleanup": 0, "witness": first},
+            {"phase": "second", "result": "passed", "qemu_exit_status_before_cleanup": 0, "witness": second}]
+
+
+def damaged_witnesses():
+    data = witnesses()
+    for phase in data:
+        phase["witness"].update(corrupt_trial=True, trial_attempt_limit=2)
+    data[1]["witness"]["failure_reason"] = "trial runtime payload failed verification before execution"
+    data[1]["corruption"] = {"artifact": "supervisor", "before_sha256": "1" * 64,
+                              "after_sha256": "2" * 64, "attempt": 1, "max_attempts": 2}
+    return data
 
 
 class TwoBootWitnessTests(unittest.TestCase):
+    def test_failed_phase_cannot_be_hidden_by_valid_witness(self):
+        for index in (0, 1):
+            for field, value in (("result", "failed"), ("phase", "unrelated"), ("qemu_exit_status_before_cleanup", -9)):
+                with self.subTest(index=index, field=field):
+                    data = witnesses()
+                    data[index][field] = value
+                    with self.assertRaises(RuntimeError):
+                        STORAGE.check_witnesses(data)
+
+    def test_damaged_trial_requires_changed_bytes_and_unspent_attempt(self):
+        STORAGE.check_witnesses(damaged_witnesses(), corrupt_trial=True)
+        changes = (("corruption", None), ("before_sha256", "2" * 64), ("after_sha256", "invalid"),
+                   ("attempt", 2), ("max_attempts", 1), ("artifact", "../outside"))
+        for field, value in changes:
+            with self.subTest(field=field):
+                data = damaged_witnesses()
+                if field == "corruption":
+                    data[1].pop(field)
+                else:
+                    data[1]["corruption"][field] = value
+                with self.assertRaises(RuntimeError):
+                    STORAGE.check_witnesses(data, corrupt_trial=True)
+        for phase in (0, 1):
+            for field, value in (("corrupt_trial", False), ("trial_attempt_limit", 1),
+                                 ("trial_attempt_limit", True)):
+                with self.subTest(phase=phase, field=field):
+                    data = damaged_witnesses()
+                    data[phase]["witness"][field] = value
+                    with self.assertRaises(RuntimeError):
+                        STORAGE.check_witnesses(data, corrupt_trial=True)
+        data = damaged_witnesses()
+        data[1]["witness"]["failure_reason"] = "unconfirmed boot attempt limit reached"
+        with self.assertRaises(RuntimeError):
+            STORAGE.check_witnesses(data, corrupt_trial=True)
+        with self.assertRaises(RuntimeError):
+            STORAGE.check_witnesses(damaged_witnesses())
+
     def test_both_complete_witnesses_are_required(self):
         STORAGE.check_witnesses(witnesses())
         for phase in (0, 1):
