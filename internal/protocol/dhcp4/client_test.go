@@ -12,6 +12,7 @@ import (
 	"time"
 
 	wire "github.com/imksoo/routerd/pkg/dhcpv4client"
+	"github.com/imksoo/routerd2/internal/protocol/bfd"
 )
 
 type sent struct {
@@ -32,10 +33,13 @@ func (*fakeConn) Close() error                    { return nil }
 func fixture(t *testing.T) (*client, *fakeConn, *time.Time, *[]Snapshot) {
 	t.Helper()
 	now := time.Unix(1700000000, 0).UTC()
+	origin := now
 	conn := &fakeConn{}
 	var updates []Snapshot
 	x := uint32(100)
-	c := &client{config: Config{Resource: "wan", Interface: "wan0", StatePath: t.TempDir() + "/lease.json"}, hardware: net.HardwareAddr{2, 0, 0, 0, 0, 1}, conn: conn, now: func() time.Time { return now }, xid: func() uint32 { x++; return x }, persist: func(Snapshot) error { return nil }, effects: EffectsFunc(func(_ context.Context, s Snapshot) error { updates = append(updates, s); return nil })}
+	c := &client{config: Config{Resource: "wan", Interface: "wan0", StatePath: t.TempDir() + "/lease.json"}, hardware: net.HardwareAddr{2, 0, 0, 0, 0, 1}, conn: conn, readClock: func() (bfd.Clock, error) {
+		return bfd.Clock{BootID: "11111111-2222-4333-8444-555555555555", BoottimeNanoseconds: int64(time.Hour + now.Sub(origin)), WallTime: now}, nil
+	}, xid: func() uint32 { x++; return x }, persist: func(Snapshot) error { return nil }, effects: EffectsFunc(func(_ context.Context, s Snapshot) error { updates = append(updates, s); return nil })}
 	return c, conn, &now, &updates
 }
 func reply(c *client, typ byte) []byte {

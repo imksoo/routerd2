@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"math"
 	"testing"
 	"time"
 
@@ -137,5 +138,65 @@ func TestLeaseClockFailureIdentityChangeAndRewindAreFatal(t *testing.T) {
 				t.Fatal("invalid lease clock was accepted")
 			}
 		})
+	}
+}
+
+func TestQueuedRenewalACKCannotReviveLeaseAfterBootExpiry(t *testing.T) {
+	c, _, _, updates := fixture(t)
+	clock := independentClock(t, c)
+	bind(t, c)
+	boot := clock.BoottimeNanoseconds
+	clock.BoottimeNanoseconds = boot + int64(40*time.Second)
+	if err := c.tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	late := reply(c, wire.MessageACK)
+	oldTransaction, before := c.transaction, len(*updates)
+	clock.BoottimeNanoseconds = boot + int64(100*time.Second)
+	clock.WallTime = clock.WallTime.Add(-24 * time.Hour)
+	if err := c.handle(context.Background(), late); err != nil {
+		t.Fatal(err)
+	}
+	if c.state != wire.StateDiscovering || c.snapshot().Active || c.transaction == oldTransaction {
+		t.Fatal("late queued ACK revived old transaction/lease")
+	}
+	for _, s := range (*updates)[before:] {
+		if s.Active {
+			t.Fatal("expired input published a new active lease")
+		}
+	}
+}
+
+func TestDiscoveryRetryIgnoresWallSteps(t *testing.T) {
+	c, conn, _, _ := fixture(t)
+	clock := independentClock(t, c)
+	if err := c.start(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	boot := clock.BoottimeNanoseconds
+	clock.BoottimeNanoseconds = boot + int64(time.Second)
+	clock.WallTime = clock.WallTime.Add(24 * time.Hour)
+	if err := c.tick(context.Background()); err != nil || len(conn.sent) != 1 {
+		t.Fatal("forward wall step caused an early retry", err)
+	}
+	clock.BoottimeNanoseconds = boot + int64(5*time.Second)
+	clock.WallTime = clock.WallTime.Add(-48 * time.Hour)
+	if err := c.tick(context.Background()); err != nil || len(conn.sent) != 2 || binary.BigEndian.Uint16(conn.sent[1].data[8:10]) != 5 {
+		t.Fatal("backward wall step postponed the randomized retry", err)
+	}
+}
+
+func TestACKCannotOverflowBootLeaseDeadline(t *testing.T) {
+	c, _, _, _ := fixture(t)
+	clock := independentClock(t, c)
+	clock.BoottimeNanoseconds = math.MaxInt64 - int64(66*time.Second)
+	if err := c.start(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.handle(context.Background(), reply(c, wire.MessageOffer)); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.handle(context.Background(), reply(c, wire.MessageACK)); err == nil || c.snapshot().Active {
+		t.Fatal("overflowing server lease was acknowledged", err)
 	}
 }
