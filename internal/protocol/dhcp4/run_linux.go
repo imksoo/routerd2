@@ -13,6 +13,7 @@ import (
 	"time"
 
 	wire "github.com/imksoo/routerd/pkg/dhcpv4client"
+	"github.com/imksoo/routerd2/internal/protocol/bfd"
 	"golang.org/x/sys/unix"
 )
 
@@ -63,7 +64,7 @@ func Run(ctx context.Context, cfg Config, effects Effects, ready func()) (result
 		}
 		prior = &s
 	}
-	c := &client{config: cfg, hardware: ifi.HardwareAddr, conn: conn, effects: effects, now: time.Now, xid: wire.NewXID, persist: func(s Snapshot) error { return writeSnapshot(cfg.StatePath, s) }}
+	c := &client{config: cfg, hardware: ifi.HardwareAddr, conn: conn, effects: effects, readClock: bfd.ReadClock, xid: wire.NewXID, persist: func(s Snapshot) error { return writeSnapshot(cfg.StatePath, s) }}
 	if err := c.start(ctx, prior); err != nil {
 		return err
 	}

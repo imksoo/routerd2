@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"net/netip"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	wire "github.com/imksoo/routerd/pkg/dhcpv4client"
+	"github.com/imksoo/routerd2/internal/protocol/bfd"
 )
 
 type Config struct {
@@ -73,26 +75,55 @@ type packetConn interface {
 }
 
 type client struct {
-	config       Config
-	hardware     net.HardwareAddr
-	conn         packetConn
-	effects      Effects
-	now          func() time.Time
-	xid          func() uint32
-	state        wire.State
-	lease        wire.Lease
-	selected     wire.Message
-	transaction  uint32
-	nextRetry    time.Time
-	retry        time.Duration
-	phaseStarted time.Time
-	reboot       bool
-	persist      func(Snapshot) error
+	config                               Config
+	hardware                             net.HardwareAddr
+	conn                                 packetConn
+	effects                              Effects
+	readClock                            func() (bfd.Clock, error)
+	clock                                bfd.Clock
+	xid                                  func() uint32
+	state                                wire.State
+	lease                                wire.Lease
+	selected                             wire.Message
+	transaction                          uint32
+	nextRetry                            int64
+	retry                                time.Duration
+	phaseStarted                         int64
+	reboot                               bool
+	persist                              func(Snapshot) error
+	leaseRenew, leaseRebind, leaseExpiry int64
+}
+
+// refreshClock is separate from UTC display metadata. BOOTTIME includes time
+// spent suspended, so a stalled client must expire its lease before receiving
+// queued traffic. A clock failure never falls back to wall-clock authority.
+func (c *client) refreshClock() error {
+	if c.readClock == nil {
+		return errors.New("DHCPv4 boot clock is required")
+	}
+	clock, err := c.readClock()
+	if err != nil {
+		return err
+	}
+	if clock.BootID == "" || clock.BoottimeNanoseconds <= 0 || clock.BoottimeNanoseconds > math.MaxInt64-int64(65*time.Second) || clock.WallTime.IsZero() || clock.WallTime.Year() < 1970 || clock.WallTime.Year() > 9999 || c.clock.BootID != "" && (clock.BootID != c.clock.BootID || clock.BoottimeNanoseconds < c.clock.BoottimeNanoseconds) {
+		return errors.New("invalid or changed DHCPv4 boot clock")
+	}
+	c.clock = clock
+	return nil
+}
+
+func (c *client) leaseTimers(renew, rebind, expiry time.Duration) error {
+	now := c.clock.BoottimeNanoseconds
+	if expiry <= 0 || expiry > time.Duration(math.MaxInt64-now) || renew <= 0 || rebind <= renew || expiry <= rebind {
+		return errors.New("invalid DHCPv4 boot lease interval")
+	}
+	c.leaseRenew, c.leaseRebind, c.leaseExpiry = now+int64(renew), now+int64(rebind), now+int64(expiry)
+	return nil
 }
 
 func (c *client) snapshot() Snapshot {
-	now := c.now().UTC()
-	active := (c.state == wire.StateBound || c.state == wire.StateRenewing || c.state == wire.StateRebinding) && c.lease.Address.IsValid() && now.Before(c.lease.ExpiresAt())
+	now := c.clock.WallTime.UTC()
+	active := (c.state == wire.StateBound || c.state == wire.StateRenewing || c.state == wire.StateRebinding) && c.lease.Address.IsValid() && c.clock.BoottimeNanoseconds < c.leaseExpiry
 	return Snapshot{Snapshot: wire.SnapshotFromLease(c.config.Resource, c.config.Interface, c.state, c.lease, now), HardwareAddress: c.hardware.String(), ClientIdentity: c.config.ClientID, Active: active}
 }
 func (c *client) publish(ctx context.Context) error {
@@ -106,13 +137,24 @@ func (c *client) publish(ctx context.Context) error {
 	return nil
 }
 func (c *client) start(ctx context.Context, previous *Snapshot) error {
+	if err := c.refreshClock(); err != nil {
+		return err
+	}
+	now := c.clock.WallTime
 	// Active describes current kernel intent, not whether the server's lease
 	// can be requested again. In particular INIT-REBOOT persists an inactive
 	// Requesting snapshot; another restart must not forget that lease.
-	if previous != nil && previous.Resource == c.config.Resource && previous.Interface == c.config.Interface && previous.HardwareAddress == c.hardware.String() && previous.ClientIdentity == c.config.ClientID && c.now().Before(previous.ExpiresAt) {
+	if previous != nil && previous.Resource == c.config.Resource && previous.Interface == c.config.Interface && previous.HardwareAddress == c.hardware.String() && previous.ClientIdentity == c.config.ClientID && now.Before(previous.ExpiresAt) {
 		lease := wire.LeaseFromSnapshot(previous.Snapshot)
-		if lease.Address.Is4() && !lease.Address.IsUnspecified() && !lease.Address.IsMulticast() && lease.PrefixLength >= 0 && lease.PrefixLength <= 32 && lease.ServerID.Is4() && !lease.ServerID.IsUnspecified() && !lease.ServerID.IsMulticast() && lease.LeaseTime > 0 && !lease.AcquiredAt.After(c.now()) && c.now().Before(lease.ExpiresAt()) {
+		if lease.Address.Is4() && !lease.Address.IsUnspecified() && !lease.Address.IsMulticast() && lease.PrefixLength >= 0 && lease.PrefixLength <= 32 && lease.ServerID.Is4() && !lease.ServerID.IsUnspecified() && !lease.ServerID.IsMulticast() && lease.LeaseTime > 0 && !lease.AcquiredAt.After(now) && now.Before(lease.ExpiresAt()) {
 			c.lease = lease
+			// The saved lease is only an INIT-REBOOT hint. Limit its request
+			// lifetime once; a fresh server ACK establishes actual authority.
+			remaining := lease.ExpiresAt().Sub(now)
+			if remaining > time.Duration(math.MaxInt64-c.clock.BoottimeNanoseconds) {
+				return errors.New("DHCPv4 reboot hint exceeds boot clock")
+			}
+			c.leaseExpiry = c.clock.BoottimeNanoseconds + int64(remaining)
 			c.reboot = true
 			return c.begin(ctx, wire.StateRequesting)
 		}
@@ -124,7 +166,7 @@ func (c *client) begin(ctx context.Context, state wire.State) error {
 	c.state = state
 	c.transaction = c.xid()
 	c.retry = 4 * time.Second
-	c.phaseStarted = c.now()
+	c.phaseStarted = c.clock.BoottimeNanoseconds
 	if err := c.publish(ctx); err != nil {
 		return err
 	}
@@ -167,7 +209,7 @@ func (c *client) send(ctx context.Context) error {
 			binary.BigEndian.PutUint16(payload[10:12], 0)
 		}
 	}
-	seconds := int(c.now().Sub(c.phaseStarted) / time.Second)
+	seconds := int((c.clock.BoottimeNanoseconds - c.phaseStarted) / int64(time.Second))
 	if seconds > 65535 {
 		seconds = 65535
 	}
@@ -180,15 +222,18 @@ func (c *client) send(ctx context.Context) error {
 	}
 	// RFC 2131 randomized exponential retransmission, initially 4 +/- 1s.
 	variation := time.Duration(wire.NewXID()%2000000001) - time.Second
-	c.nextRetry = c.now().Add(c.retry + variation)
+	c.nextRetry = c.clock.BoottimeNanoseconds + int64(c.retry+variation)
 	if c.retry < 64*time.Second {
 		c.retry *= 2
 	}
 	return nil
 }
 func (c *client) tick(ctx context.Context) error {
-	now := c.now()
-	if c.lease.Address.IsValid() && !now.Before(c.lease.ExpiresAt()) {
+	if err := c.refreshClock(); err != nil {
+		return err
+	}
+	now := c.clock.BoottimeNanoseconds
+	if c.lease.Address.IsValid() && now >= c.leaseExpiry {
 		c.state = wire.StateExpired
 		c.lease = wire.Lease{}
 		c.reboot = false
@@ -197,21 +242,21 @@ func (c *client) tick(ctx context.Context) error {
 		}
 		return c.begin(ctx, wire.StateDiscovering)
 	}
-	if (c.state == wire.StateBound || c.state == wire.StateRenewing) && !now.Before(c.lease.RebindAt()) {
+	if (c.state == wire.StateBound || c.state == wire.StateRenewing) && now >= c.leaseRebind {
 		return c.begin(ctx, wire.StateRebinding)
 	}
-	if c.state == wire.StateBound && !now.Before(c.lease.RenewAt()) {
+	if c.state == wire.StateBound && now >= c.leaseRenew {
 		return c.begin(ctx, wire.StateRenewing)
 	}
 	if c.state == wire.StateBound {
 		return nil
 	}
-	if c.state == wire.StateRequesting && now.Sub(c.phaseStarted) >= 60*time.Second {
+	if c.state == wire.StateRequesting && now-c.phaseStarted >= int64(60*time.Second) {
 		c.reboot = false
 		c.lease = wire.Lease{}
 		return c.begin(ctx, wire.StateDiscovering)
 	}
-	if !now.Before(c.nextRetry) {
+	if now >= c.nextRetry {
 		return c.send(ctx)
 	}
 	return nil
@@ -279,6 +324,14 @@ func decode(payload []byte) (wire.Message, error) {
 	return m, nil
 }
 func (c *client) handle(ctx context.Context, payload []byte) error {
+	if err := c.refreshClock(); err != nil {
+		return err
+	}
+	// A reply queued before a stall cannot renew an already expired lease or
+	// bypass the new discovery transaction. Tick withdraws before decoding it.
+	if c.lease.Address.IsValid() && c.clock.BoottimeNanoseconds >= c.leaseExpiry {
+		return c.tick(ctx)
+	}
 	m, err := decode(payload)
 	if err != nil {
 		return nil
@@ -308,7 +361,7 @@ func (c *client) handle(ctx context.Context, payload []byte) error {
 		c.selected = m
 		c.state = wire.StateRequesting
 		c.retry = 4 * time.Second
-		c.phaseStarted = c.now()
+		c.phaseStarted = c.clock.BoottimeNanoseconds
 		// Selecting/requesting is one transaction and keeps the discovery xid.
 		if err := c.publish(ctx); err != nil {
 			return err
@@ -358,9 +411,12 @@ func (c *client) handle(ctx context.Context, payload []byte) error {
 				return nil
 			}
 		}
-		lease := wire.LeaseFromACK(m, c.now().UTC())
+		lease := wire.LeaseFromACK(m, c.clock.WallTime.UTC())
 		if lease.T1 <= 0 || lease.T2 <= lease.T1 || lease.T2 >= lease.LeaseTime {
 			return nil
+		}
+		if err := c.leaseTimers(lease.T1, lease.T2, lease.LeaseTime); err != nil {
+			return err
 		}
 		c.lease = lease
 		c.state = wire.StateBound
