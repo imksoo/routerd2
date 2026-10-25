@@ -32,6 +32,11 @@ func Run(ctx context.Context, cfg Config, effects Effects, ready func()) error {
 	if err := Validate(cfg); err != nil {
 		return err
 	}
+	if cfg.GracefulActivation != nil {
+		if _, ok := effects.(ActivationAuthority); !ok {
+			return errors.New("graceful VRRP requires an activation authority")
+		}
+	}
 	if effects == nil {
 		return errors.New("VRRP requires an acknowledged ownership effects implementation")
 	}
@@ -49,33 +54,27 @@ func Run(ctx context.Context, cfg Config, effects Effects, ready func()) error {
 
 func applyActions(ctx context.Context, m *machine, a actions, device transport, effects Effects) error {
 	if a.update || a.advertise {
-		clock, err := boottime.Read()
-		if err != nil {
-			return err
-		}
-		if err := m.stampObservation(clock); err != nil {
+		if err := publishOwnership(ctx, m, effects); err != nil {
 			return err
 		}
 		operation, cancel := context.WithTimeout(ctx, time.Duration(m.config.EffectTimeoutMilliseconds)*time.Millisecond)
-		if m.state == StateActive {
-			m.validUntil = time.Now().Add(time.Duration(m.expiresNanos - uint64(clock.BoottimeNanoseconds)))
-			leased, cancelLease := context.WithDeadline(operation, m.validUntil)
-			defer cancelLease()
-			operation = leased
-		}
-		err = effects.Update(operation, m.snapshot())
+		activated, err := m.requestActivation(operation, effects)
 		cancel()
 		if err != nil {
-			return fmt.Errorf("VRRP ownership %s: %w", m.state, err)
+			return err
 		}
-		if m.state == StateActive {
-			clock, err := boottime.Read()
-			if err != nil || !CurrentOwnership(m.snapshot(), clock) {
-				return errors.Join(errors.New("VRRP ownership lease expired before acknowledgement"), err)
+		if activated {
+			if err := publishOwnership(ctx, m, effects); err != nil {
+				return err
 			}
+			a.advertise, a.notify = true, true
 		}
 	}
-	if a.advertise || a.notify {
+	if !m.published {
+		a.notify = false
+	}
+
+	if m.published && (a.advertise || a.notify) {
 		operation, cancel := context.WithTimeout(ctx, time.Duration(m.config.EffectTimeoutMilliseconds)*time.Millisecond)
 		err := device.VerifyActive(operation, m.snapshot())
 		cancel()
@@ -106,16 +105,57 @@ func applyActions(ctx context.Context, m *machine, a actions, device transport, 
 	return nil
 }
 
+func publishOwnership(ctx context.Context, m *machine, effects Effects) error {
+	clock, err := boottime.Read()
+	if err != nil {
+		return err
+	}
+	if err = m.stampObservation(clock); err != nil {
+		return err
+	}
+	m.activationStatus(clock)
+	operation, cancel := context.WithTimeout(ctx, time.Duration(m.config.EffectTimeoutMilliseconds)*time.Millisecond)
+	defer cancel()
+	if m.state == StateActive {
+		deadline := time.Now().Add(time.Duration(m.expiresNanos - uint64(clock.BoottimeNanoseconds)))
+		if m.published {
+			m.validUntil = deadline
+		} else {
+			m.validUntil = time.Time{}
+		}
+		leased, cancelLease := context.WithDeadline(operation, deadline)
+		defer cancelLease()
+		operation = leased
+	}
+	if err := effects.Update(operation, m.snapshot()); err != nil {
+		return fmt.Errorf("VRRP ownership %s: %w", m.state, err)
+	}
+	if m.state == StateActive {
+		clock, err = boottime.Read()
+		if err != nil || !CurrentElection(m.snapshot(), clock) {
+			return errors.Join(errors.New("VRRP election expired before acknowledgement"), err)
+		}
+	}
+	return nil
+}
+
 func sendAdvertisement(ctx context.Context, m *machine, device transport, priority uint8) error {
 	if priority != 0 {
 		clock, err := boottime.Read()
-		if err != nil || !CurrentOwnership(m.snapshot(), clock) {
-			return errors.Join(errors.New("VRRP ownership expired before advertisement"), err)
+		if err != nil || !CurrentElection(m.snapshot(), clock) || m.config.GracefulActivation == nil && !m.published {
+			return errors.Join(errors.New("VRRP election expired before advertisement"), err)
 		}
 	}
 	deadline := time.Now().Add(250 * time.Millisecond)
 	if priority != 0 {
-		deadline = minTime(deadline, m.validUntil)
+		clock, err := boottime.Read()
+		if err != nil {
+			return err
+		}
+		if !CurrentElection(m.snapshot(), clock) {
+			return errors.New("VRRP election expired before send deadline")
+		}
+		deadline = minTime(deadline, time.Now().Add(time.Duration(m.expiresNanos-uint64(clock.BoottimeNanoseconds))))
 	}
 	operation, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
@@ -210,7 +250,11 @@ func run(ctx context.Context, cfg Config, source netip.Addr, epoch string, devic
 		ready()
 	}
 	nextDiagnostic := time.Time{}
-	observationTicker := time.NewTicker(time.Second)
+	observationInterval := time.Second
+	if cfg.GracefulActivation != nil {
+		observationInterval = 250 * time.Millisecond
+	}
+	observationTicker := time.NewTicker(observationInterval)
 	defer observationTicker.Stop()
 	for {
 		wait := time.Until(m.deadline)
@@ -257,7 +301,7 @@ func run(ctx context.Context, cfg Config, source netip.Addr, epoch string, devic
 			// Backup is a current negative observation too. Do not leave its
 			// readiness to expire merely because a peer keeps resetting the
 			// election deadline without a local state transition.
-			action.update = m.state == StateBackup
+			action.update = m.state == StateBackup || m.config.GracefulActivation != nil && m.state == StateActive && !m.published
 		}
 		m.receiveDropped = dropped.Load()
 		if err := applyActions(ctx, m, action, device, effects); err != nil {

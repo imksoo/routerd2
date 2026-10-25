@@ -15,27 +15,31 @@ type actions struct {
 // ownership update before the advertisement/notification actions and terminates
 // with withdrawal if an acknowledged effect or send fails.
 type machine struct {
-	bootID                string
-	observedNanos         uint64
-	expiresNanos          uint64
-	observationTransition uint64
-	observationActive     bool
-	config                Config
-	source                netip.Addr
-	epoch                 string
-	state                 string
-	transition            uint64
-	activeInterval        time.Duration
-	deadline              time.Time
-	validUntil            time.Time
-	peer                  netip.Addr
-	peerPriority          uint8
-	advertisements        uint64
-	received              uint64
-	rejected              uint64
-	receiveDropped        uint64
-	intervalMismatch      uint64
-	lastError             string
+	published              bool
+	activationStartedNanos uint64
+	activationState        string
+	activationGrant        ActivationGrant
+	bootID                 string
+	observedNanos          uint64
+	expiresNanos           uint64
+	observationTransition  uint64
+	observationActive      bool
+	config                 Config
+	source                 netip.Addr
+	epoch                  string
+	state                  string
+	transition             uint64
+	activeInterval         time.Duration
+	deadline               time.Time
+	validUntil             time.Time
+	peer                   netip.Addr
+	peerPriority           uint8
+	advertisements         uint64
+	received               uint64
+	rejected               uint64
+	receiveDropped         uint64
+	intervalMismatch       uint64
+	lastError              string
 }
 
 func newMachine(c Config, source netip.Addr, epoch string) *machine {
@@ -52,6 +56,10 @@ func (m *machine) downInterval() time.Duration { return 3*m.activeInterval + m.s
 func (m *machine) enter(state string, now time.Time) {
 	m.state = state
 	m.transition++
+	m.published = state == StateActive && m.config.GracefulActivation == nil
+	m.activationStartedNanos = 0
+	m.activationState = ""
+	m.activationGrant = ActivationGrant{}
 	switch state {
 	case StateActive:
 		m.deadline = now.Add(m.config.interval())
@@ -140,11 +148,12 @@ func (m *machine) snapshot() Snapshot {
 		peer = m.peer.String()
 	}
 	return Snapshot{
+		ActivationState: m.activationState, ActivationStartedNanos: m.activationStartedNanos, ActivationGrant: m.activationGrant,
 		BootID: m.bootID, ObservedNanos: m.observedNanos, ExpiresNanos: m.expiresNanos,
 		Resource: m.config.Resource, Interface: m.config.Interface, VIPInterface: m.config.VIPInterface, VRF: m.config.VRF,
 		Family: m.config.Family, SourceAddress: m.source.String(), VirtualRouterID: m.config.VirtualRouterID,
 		VirtualMAC: VirtualMAC(m.config.Family, m.config.VirtualRouterID).String(), Addresses: append([]string(nil), m.config.Addresses...),
-		Active: m.state == StateActive, State: m.state, AcceptMode: m.config.AcceptMode || m.config.AddressOwner, AddressOwner: m.config.AddressOwner,
+		Active: m.published, State: m.state, AcceptMode: m.config.AcceptMode || m.config.AddressOwner, AddressOwner: m.config.AddressOwner,
 		Epoch: m.epoch, Transition: m.transition, Priority: m.config.Priority, Peer: peer, PeerPriority: int(m.peerPriority),
 		ActiveIntervalCS: int(m.activeInterval / (10 * time.Millisecond)), Deadline: m.deadline, ValidUntil: m.validUntil,
 		Advertisements: m.advertisements, Received: m.received, Rejected: m.rejected, ReceiveDropped: m.receiveDropped,

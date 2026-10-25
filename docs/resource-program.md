@@ -403,5 +403,35 @@ ACTIVE成功には元boot IDと絶対期限を保持するVIP投影が必要で�
 旧世代・上書きされた通知や適用失敗を成功として返さない。
 
 このsource受入範囲の追加に伴い、署名されたconfiguration contractは
-`resource-program-native-2`とする。旧`resource-program-native-1`との更新・fallbackは
+`resource-program-native-3`とする。旧`resource-program-native-1`/`native-2`との更新・fallbackは
 既存のABI検査で拒否する。format migrationや旧compilerとの互換性を表す変更ではない。
+
+
+## VRRPの選出とVIP公開のreadiness
+
+VRRP固有の`service.vrrp.graceful_activation.ready_when`はVIP公開の入場条件を
+指定する。resource自体の`ready_when`による依存先の準備完了とは別の役割を持つ。
+
+```yaml
+service:
+  name: ha
+  vrrp:
+    interface: lan0
+    family: ipv4
+    virtual_router_id: 42
+    addresses: [192.0.2.254/24]
+    graceful_activation:
+      ready_when: {fact: service.uplink.active, for: 1s}
+      timeout: 45s
+```
+
+選出がMASTERでも条件がfalse/indeterminateならVIPを公開しない。VRRPの選出広告は
+継続するが、VIPのGARP/NAは公開完了後だけ送る。timeoutは状態報告だけを変え、
+後でreadinessが回復したら同じ有効な選出から再試行できる。
+公開済みの選出ではreadiness悪化だけでVIPを取り下げない。role喪失、worker世代変更、
+条件によるresource除外、元所有期限の失効は引き続き撤去理由になる。
+
+`service.NAME.elected`は有限の選出fact、`service.NAME.active`はVIP公開側のfactである。
+初回公開をnetworkがACKするまではactiveを真として扱わない。
+自身の未公開activeを必須にする循環した入場条件はcompile時に拒否する。
+一般の旧status referenceや全cluster/track契約の移植完了を意味しない。

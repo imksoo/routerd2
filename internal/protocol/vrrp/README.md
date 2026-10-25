@@ -49,7 +49,7 @@ owned macvlan on the election interface, set the requested virtual MAC, bring
 it up, assign every requested VIP, and enforce the accept policy. Set IPv6
 address generation mode to `IN6_ADDR_GEN_MODE_NONE` before link-up and install
 the explicit virtual link-local address. VIPs must have completed DAD, or the
-writer must explicitly suppress DAD for these owned HA addresses. The protocol
+writer must explicitly suppress DAD for these owned HA addresses. For ordinary publication, the protocol
 worker checks link type, parent, MAC, UP state, optional VRF, and non-tentative
 CIDRs through netlink before advertising ownership. It never changes them.
 
@@ -170,3 +170,34 @@ matching kernel modules. Its PID 1 `TestMain` mounts the basic guest filesystems
 loads `veth`, `bridge` and `macvlan`, requires the native tests, reports
 `VRRP_QEMU_TEST_PASS` or `VRRP_QEMU_TEST_FAIL`, and powers off the guest. That
 branch is not used by ordinary test execution.
+
+## Graceful publication admission
+
+`graceful_activation` is opt-in. Its `ready_when` uses the same bounded finite
+fact expression grammar as resource conditions; `timeout` defaults to `45s`.
+The resource's own `ready_when` still gates dependents rather than its own start.
+
+An elected MASTER can report `State: ACTIVE` and `Active: false`. It keeps its
+VRRP election advertisements but owns no VIP/VMAC and sends no VIP GARP/NA.
+`ActivationState` reports `Preparing` or `ReadinessTimeout`; timeout never forces
+publication and the same live election can retry when readiness recovers.
+
+The bundled effects client requests a control-issued admission permission tied
+to the boot, source, producer and election observation. Initial kernel ownership
+uses that original short deadline, then an acknowledged admission is promoted
+to the original election lifetime. No neighbor announcement precedes the final
+network ACK and existing netlink ownership verification. Linux address lifetimes
+use integer seconds; autonomous kernel expiry has that existing rounding
+resolution, not nanosecond precision. Permission validation and promotion use
+the original BOOTTIME boundary without renewal.
+
+Readiness is an admission condition. Once the publication is acknowledged for
+that election, readiness degradation alone does not withdraw it or restart the
+admission timeout. Role loss, conditional exclusion, worker replacement and
+finite ownership expiry still fence it. A stopped/expired election cannot renew
+under its former transition. `service.NAME.elected` is a finite role fact;
+`service.NAME.active` remains unknown during unacknowledged initial publication.
+
+This is not the complete legacy VirtualAddress/cluster/track/VMAC contract.
+General legacy status references, cluster fencing and all protocol/hardware
+qualification remain separate acceptance requirements.

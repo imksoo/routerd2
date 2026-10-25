@@ -73,8 +73,23 @@ func ValidateSnapshot(raw Config, s Snapshot) error {
 	if err != nil || len(epoch) != 16 || len(s.Epoch) != 32 || s.Transition == 0 || !boottime.ValidBootID(s.BootID) || s.ObservedNanos == 0 || s.ObservedNanos > math.MaxInt64 || s.ExpiresNanos > math.MaxInt64 {
 		return errors.New("invalid VRRP boot, epoch, transition or observation clock")
 	}
-	if s.Active != (s.State == StateActive) || s.State != StateActive && s.State != StateBackup && s.State != StateInitialize {
+	if (s.Active && s.State != StateActive || !s.Active && s.State == StateActive && c.GracefulActivation == nil) || s.State != StateActive && s.State != StateBackup && s.State != StateInitialize {
 		return errors.New("invalid VRRP state")
+	}
+	if c.GracefulActivation != nil && s.State == StateActive {
+		if s.ActivationStartedNanos == 0 || s.ActivationStartedNanos > s.ObservedNanos {
+			return errors.New("invalid graceful VRRP activation start")
+		}
+		if s.Active {
+			g := s.ActivationGrant
+			if s.ActivationState != "Ready" || g.ID == 0 || g.BootID != s.BootID || g.ElectionEpoch != s.Epoch || g.Transition != s.Transition || g.ObservedNanos > s.ObservedNanos || g.ExpiresNanos <= g.ObservedNanos {
+				return errors.New("invalid graceful VRRP publication metadata")
+			}
+		} else if s.ActivationState != "Preparing" && s.ActivationState != "ReadinessTimeout" {
+			return errors.New("invalid pending VRRP activation state")
+		}
+	} else if s.ActivationState != "" || s.ActivationStartedNanos != 0 || s.ActivationGrant != (ActivationGrant{}) {
+		return errors.New("unexpected VRRP activation metadata")
 	}
 	if !s.Active && !s.ValidUntil.IsZero() {
 		return errors.New("inactive VRRP state cannot retain an ownership lease")
@@ -86,11 +101,17 @@ func ValidateSnapshot(raw Config, s Snapshot) error {
 		return nil
 	}
 	maximum := inactiveObservationLifetime
-	if s.Active {
+	if s.State == StateActive {
 		maximum = OwnershipLifetime(c)
 	}
 	if s.ExpiresNanos <= s.ObservedNanos || s.ExpiresNanos-s.ObservedNanos > uint64(maximum) {
 		return errors.New("VRRP observation has invalid or overlong authority")
 	}
 	return nil
+}
+
+// CurrentElection permits elected-but-unpublished graceful MASTER observations;
+// it never grants VIP ownership.
+func CurrentElection(s Snapshot, clock boottime.Clock) bool {
+	return s.State == StateActive && CurrentObservation(s, clock)
 }

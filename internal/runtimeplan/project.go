@@ -23,6 +23,7 @@ import (
 )
 
 type projection struct {
+	native      config.Native
 	resources   map[string]resourceprogram.ResourceState
 	routeIssues []RouteIssue
 	bgpStatus   map[string]bgpProjectionStatus
@@ -42,12 +43,36 @@ func project(doc config.Native, runtimeDir, stateDir string, records map[string]
 }
 
 type projectionFacts struct {
-	aftr     map[string]aftr.Input
-	bfdClock bfd.Clock
+	aftr            map[string]aftr.Input
+	bfdClock        bfd.Clock
+	vrrpPublication map[string]uint64
 }
 
 func (r *Runtime) projectLocked(doc config.Native, records map[string]serviceconfig.Update, now time.Time) (projection, error) {
-	facts := projectionFacts{aftr: r.aftrInputs}
+	facts := projectionFacts{aftr: r.aftrInputs, vrrpPublication: make(map[string]uint64)}
+	ownedRecords := make(map[string]serviceconfig.Update, len(records))
+	for name, record := range records {
+		if record.Role != "vrrp" {
+			ownedRecords[name] = record
+			continue
+		}
+		binding, bound := r.bindings[name]
+		if !bound || binding.digest != record.ConfigDigest {
+			continue
+		}
+		module, registered := r.guardStatus[name]
+		if registered && (module.Role != "vrrp" || module.Generation != record.Generation || module.ConfigDigest != record.ConfigDigest) || !registered && !r.guardUntil.IsZero() {
+			continue
+		}
+		ownedRecords[name] = record
+		var snapshot vrrp.Snapshot
+		if json.Unmarshal(record.Snapshot, &snapshot) == nil && snapshot.Active {
+			if err := r.validateVRRPAdmissionLocked(record); err == nil {
+				facts.vrrpPublication[name] = r.restrictVRRPPublicationLocked(name, record, snapshot)
+			}
+		}
+	}
+
 	for _, service := range doc.Services {
 		if service.BGP != nil || service.DHCP4 != nil || service.VRRP != nil {
 			// A clock read failure withholds DHCP/BGP/BFD-owned paths. It must not
@@ -56,12 +81,12 @@ func (r *Runtime) projectLocked(doc config.Native, records map[string]servicecon
 			break
 		}
 	}
-	return projectWithFacts(doc, r.dir, r.stateDir, records, now, facts)
+	return projectWithFacts(doc, r.dir, r.stateDir, ownedRecords, now, facts)
 }
 
 func projectWithFacts(doc config.Native, runtimeDir, stateDir string, records map[string]serviceconfig.Update, now time.Time, facts projectionFacts) (projection, error) {
 	b, _ := json.Marshal(doc.Network)
-	p := projection{liveRA: map[string]ra.Config{}}
+	p := projection{liveRA: map[string]ra.Config{}, native: doc}
 	if err := json.Unmarshal(b, &p.network); err != nil {
 		return p, err
 	}
@@ -218,6 +243,16 @@ func projectWithFacts(doc config.Native, runtimeDir, stateDir string, records ma
 				continue
 			}
 			c := s.VRRPConfig()
+			if c.GracefulActivation != nil {
+				expires, allowed := facts.vrrpPublication[s.ModuleName()]
+				if !allowed || expires == 0 {
+					continue
+				}
+				snap.ExpiresNanos = min(snap.ExpiresNanos, expires)
+				if !vrrp.CurrentOwnership(snap, facts.bfdClock) {
+					continue
+				}
+			}
 			p.network.Links = append(p.network.Links, network.Link{Name: c.VIPInterface, Kind: "macvlan", Parent: c.Interface, MACVLANMode: "bridge", HardwareAddr: vrrp.VirtualMAC(c.Family, c.VirtualRouterID).String(), IPv6AddrGenMode: "none"})
 			ensureInterface(&p.network, c.VIPInterface)
 			if c.VRF != "" {

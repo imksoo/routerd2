@@ -179,7 +179,7 @@ func Run(ctx context.Context, runtimeDir, name, role, path, digest string, gener
 		if err := decode(instance.Config, &cfg); err != nil {
 			return err
 		}
-		return vrrp.Run(runCtx, cfg, vrrp.EffectsFunc(func(ctx context.Context, s vrrp.Snapshot) error { return c.update(ctx, s) }), ready)
+		return vrrp.Run(runCtx, cfg, vrrpEffects{client: c}, ready)
 	default:
 		return fmt.Errorf("unavailable bundled service role %q", role)
 	}

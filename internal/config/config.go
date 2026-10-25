@@ -107,6 +107,11 @@ func Compile(d Document) (resourceprogram.Plan, error) {
 
 func validateNative(d Native, source Document) error {
 	for _, service := range d.Services {
+		if service.VRRP != nil && service.VRRP.GracefulActivation != nil && conditionRequiresFact(&service.VRRP.GracefulActivation.ReadyWhen, service.ModuleName()+".active") {
+			return fmt.Errorf("VRRP %s publication cannot require its own unpublished active fact", service.Name)
+		}
+	}
+	for _, service := range d.Services {
 		if service.BFD == nil {
 			continue
 		}

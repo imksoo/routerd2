@@ -86,6 +86,8 @@ type InstanceStatus struct {
 	Snapshot           json.RawMessage  `json:"snapshot,omitempty"`
 }
 type Runtime struct {
+	reconcileWake      chan struct{}
+	waitWake           chan struct{}
 	supervisorInstance string              // immutable authority inherited by the control worker
 	op                 *semaphore.Weighted // module-set reconciliation; never held by protocol callbacks
 	mu                 sync.Mutex          // complete projection and protocol acceptance are serialized
@@ -119,6 +121,9 @@ type Runtime struct {
 	bindings             map[string]binding
 	records              map[string]serviceconfig.Update
 	vrrpEffects          map[string]*vrrpEffect
+	vrrpAdmissions       map[string]vrrpAdmission
+	vrrpPublications     map[string]vrrpPublication
+	vrrpAdmissionID      uint64
 	liveRA               map[string]ra.Config
 	aftrInputs           map[string]aftr.Input
 	installed            []supervisor.DynamicModule
@@ -131,7 +136,7 @@ type Runtime struct {
 }
 
 func New(dir, stateDir string, n Network, supervisorInstance string) *Runtime {
-	return &Runtime{op: semaphore.NewWeighted(1), supervisorInstance: supervisorInstance, dir: dir, stateDir: stateDir, network: n, manager: managerClient{localapi.NewClient(filepath.Join(dir, supervisor.SocketName))}, bindings: map[string]binding{}, records: map[string]serviceconfig.Update{}, liveRA: map[string]ra.Config{}, leases: map[string]time.Time{}, phase: "starting"}
+	return &Runtime{reconcileWake: make(chan struct{}, 1), waitWake: make(chan struct{}, 1), op: semaphore.NewWeighted(1), supervisorInstance: supervisorInstance, dir: dir, stateDir: stateDir, network: n, manager: managerClient{localapi.NewClient(filepath.Join(dir, supervisor.SocketName))}, bindings: map[string]binding{}, records: map[string]serviceconfig.Update{}, liveRA: map[string]ra.Config{}, leases: map[string]time.Time{}, phase: "starting"}
 }
 
 // CheckReady queries the process manager at confirmation time. A previously
@@ -158,6 +163,12 @@ func (r *Runtime) CheckReady(ctx context.Context) error {
 		module, ok := byName[name]
 		if !ok || !module.Ready || module.ConfigDigest != binding.digest {
 			return fmt.Errorf("protocol %s is not ready for the committed configuration", name)
+		}
+		if _, gated := r.gracefulVRRPConfigLocked(name); gated {
+			var ownership vrrp.Snapshot
+			if record, exists := r.records[name]; !exists || json.Unmarshal(record.Snapshot, &ownership) != nil || ownership.State == vrrp.StateActive && (!ownership.Active || !r.publicationLatchedLocked(record, ownership)) {
+				return fmt.Errorf("%w: %s", ErrVRRPActivationPending, name)
+			}
 		}
 	}
 	if conditionalProgram(r.source) {
@@ -265,6 +276,7 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 			r.finishVRRPEffectLocked(name, ErrStale)
 		}
 		r.sourceEpoch++
+		r.vrrpAdmissions = nil
 		r.guardGrants = nil
 		r.guardStatus = nil
 		r.guardUntil = time.Time{}
@@ -276,11 +288,27 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 	r.configured = true
 	r.records = retained
 	r.bindings = bindings
+	r.pruneVRRPAuthoritiesLocked()
 	r.installBFDCacheLocked(bfdSources, bfdRecipients)
 	for name, input := range r.aftrInputs {
 		if b, ok := bindings[name]; !ok || b.digest != input.ConfigDigest {
 			delete(r.aftrInputs, name)
 		}
+	}
+	// The selected resource membership was compiled before cutover. Re-render
+	// its protocol effects under the installed authority: a pending old-source
+	// admission must not survive just because its earlier network plan exists.
+	for _, service := range p.native.Services {
+		if service.VRRP == nil || service.VRRP.GracefulActivation == nil {
+			continue
+		}
+		refreshed, refreshErr := r.projectLocked(p.native, r.effectiveRecordsLocked(time.Now()), time.Now())
+		if refreshErr != nil {
+			r.mu.Unlock()
+			return r.failure(refreshErr)
+		}
+		p.network, p.liveRA, p.routeIssues, p.bgpStatus = refreshed.network, refreshed.liveRA, refreshed.routeIssues, refreshed.bgpStatus
+		break
 	}
 	r.resourceStates = p.resources
 	r.liveRA = p.liveRA
@@ -470,6 +498,7 @@ func (r *Runtime) wait(ctx context.Context, wanted []supervisor.DynamicModule, r
 		case <-ctx.Done():
 			return fmt.Errorf("module reconciliation: %w", ctx.Err())
 		case <-ticker.C:
+		case <-r.waitWake:
 		}
 	}
 }
@@ -578,6 +607,7 @@ func (r *Runtime) Accept(ctx context.Context, u serviceconfig.Update) error {
 	if u.Role == "bfd" {
 		return r.acceptBFD(ctx, u)
 	}
+	var producerStatus *supervisor.Status
 	if u.Role == "bgp" || u.Role == "dhcp4" || u.Role == "vrrp" {
 		// A restarted control has no remembered generations. Authenticate even
 		// its first BGP/DHCPv4 publication against the current process-tree registry;
@@ -598,9 +628,15 @@ func (r *Runtime) Accept(ctx context.Context, u serviceconfig.Update) error {
 		if !matched {
 			return ErrStale
 		}
+		if u.Role == "vrrp" {
+			producerStatus = &status
+		}
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if producerStatus != nil {
+		r.installGuardStatusLocked(*producerStatus, nil)
+	}
 	b, ok := r.bindings[u.Name]
 	if !r.configured || !ok || b.instance.Role != u.Role || b.digest != u.ConfigDigest {
 		return ErrStale
@@ -636,6 +672,9 @@ func (r *Runtime) Accept(ctx context.Context, u serviceconfig.Update) error {
 		if err := validateVRRPTransition(previous, u); err != nil {
 			return err
 		}
+		if err := r.validateVRRPAdmissionLocked(u); err != nil {
+			return err
+		}
 	}
 	if u.Role == "dhcp4" {
 		if err := validateDHCP4Transition(previous, u); err != nil {
@@ -667,6 +706,7 @@ func (r *Runtime) Accept(ctx context.Context, u serviceconfig.Update) error {
 		}
 		r.recordGuardGrantLocked(u, time.Now())
 		r.records[u.Name] = u
+		r.revokeVRRPPublicationLocked(u)
 		// Observe every accepted transition, including flaps that finish between
 		// monitor ticks. This updates only temporal condition state, not effects.
 		if _, err := r.conditionFactsLocked(r.source, r.revision, time.Now()); err != nil {
@@ -876,6 +916,7 @@ func (r *Runtime) Handler() http.Handler {
 	r.observationRoutes(mux)
 	r.aftrRoutes(mux)
 	r.bfdRoutes(mux)
+	r.vrrpActivationRoutes(mux)
 	mux.HandleFunc("GET /v1/services", func(w http.ResponseWriter, req *http.Request) { localapi.JSON(w, 200, r.State()) })
 	mux.HandleFunc("POST /v1/services/state", func(w http.ResponseWriter, req *http.Request) {
 		var u serviceconfig.Update
@@ -925,17 +966,19 @@ func (r *Runtime) Monitor(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if !r.op.TryAcquire(1) {
-				continue
-			}
-			err := r.reconcileDynamic(ctx)
-			r.op.Release(1)
-			if err != nil {
-				r.failure(err)
-			}
+		case <-r.reconcileWake:
+		}
+		if !r.op.TryAcquire(1) {
+			continue
+		}
+		err := r.reconcileDynamic(ctx)
+		r.op.Release(1)
+		if err != nil {
+			r.failure(err)
 		}
 	}
 }
+
 func (r *Runtime) reconcileDynamic(ctx context.Context) error {
 	r.refreshGuardStatus(ctx)
 	r.mu.Lock()
@@ -974,7 +1017,8 @@ func (r *Runtime) reconcileDynamic(ctx context.Context) error {
 		r.mu.Unlock()
 		return nil
 	}
-	if err = r.applyNetworkLocked(ctx, p.network); err != nil {
+	p, err = r.applyVRRPProjectionLocked(ctx, p)
+	if err != nil {
 		r.finishVRRPEffectsLocked(p.network, err)
 		r.mu.Unlock()
 		return err
@@ -997,6 +1041,7 @@ func (r *Runtime) reconcileDynamic(ctx context.Context) error {
 			return cacheErr
 		}
 		r.bindings = bindings
+		r.pruneVRRPAuthoritiesLocked()
 		r.installBFDCacheLocked(bfdSources, bfdRecipients)
 		for name, input := range r.aftrInputs {
 			if b, ok := bindings[name]; !ok || b.digest != input.ConfigDigest {

@@ -33,7 +33,7 @@ type guardGrant struct {
 
 func conditionalProgram(source config.Document) bool {
 	for _, r := range source.Resources {
-		if r.When != nil || r.ReadyWhen != nil {
+		if r.When != nil || r.ReadyWhen != nil || r.Service != nil && r.Service.VRRP != nil && r.Service.VRRP.GracefulActivation != nil {
 			return true
 		}
 	}
@@ -225,8 +225,27 @@ func (r *Runtime) conditionFactsLocked(source config.Document, revision uint64, 
 			continue
 		}
 		until := min(grant.untilNanos, r.guardUntilNanos)
-		if err := publish(name+".active", 2, grant.value, grant.observedNanos, until); err != nil {
-			return resourceprogram.FactSnapshot{}, err
+		activeKnown := true
+		if record.Role == "vrrp" && grant.value {
+			if _, gated := r.gracefulVRRPConfigLocked(name); gated {
+				var observation vrrp.Snapshot
+				if json.Unmarshal(record.Snapshot, &observation) != nil || !r.publicationLatchedLocked(record, observation) {
+					activeKnown = false
+				}
+			}
+		}
+		if activeKnown {
+			if err := publish(name+".active", 2, grant.value, grant.observedNanos, until); err != nil {
+				return resourceprogram.FactSnapshot{}, err
+			}
+		}
+		if record.Role == "vrrp" {
+			var election vrrp.Snapshot
+			if json.Unmarshal(record.Snapshot, &election) == nil {
+				if err := publish(name+".elected", 3, election.State == vrrp.StateActive, election.ObservedNanos, min(election.ExpiresNanos, r.guardUntilNanos)); err != nil {
+					return resourceprogram.FactSnapshot{}, err
+				}
+			}
 		}
 	}
 	return r.conditionTimeline.Observe(source, store.Snapshot(ticks))

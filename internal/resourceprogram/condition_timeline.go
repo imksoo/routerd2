@@ -48,7 +48,7 @@ func conditionIdentity(c *FactCondition) string {
 // withdraws immediately. The duration boundary itself is inclusive.
 func (t *ConditionTimeline) Observe(program Program, facts FactSnapshot) (FactSnapshot, error) {
 	for _, resource := range program.Resources {
-		for _, c := range []*FactCondition{resource.When, resource.ReadyWhen} {
+		for _, c := range resourceConditions(resource) {
 			if c != nil {
 				if err := ValidateFactCondition(*c); err != nil {
 					return FactSnapshot{}, err
@@ -101,6 +101,9 @@ func (t *ConditionTimeline) Observe(program Program, facts FactSnapshot) (FactSn
 	for _, resource := range program.Resources {
 		visit(resource.When)
 		visit(resource.ReadyWhen)
+		if resource.Service != nil && resource.Service.VRRP != nil && resource.Service.VRRP.GracefulActivation != nil {
+			visit(&resource.Service.VRRP.GracefulActivation.ReadyWhen)
+		}
 	}
 	t.scope, t.lastNow, t.holds = scope, facts.nowNanos, next
 	return facts, nil
@@ -191,4 +194,19 @@ func (s FactSnapshot) timedCondition(c *FactCondition, ignoreOwnHold bool) timed
 	sum := sha256.Sum256(b)
 	result.authority = hex.EncodeToString(sum[:])
 	return result
+}
+
+func resourceConditions(resource Resource) []*FactCondition {
+	conditions := []*FactCondition{resource.When, resource.ReadyWhen}
+	if resource.Service != nil && resource.Service.VRRP != nil && resource.Service.VRRP.GracefulActivation != nil {
+		conditions = append(conditions, &resource.Service.VRRP.GracefulActivation.ReadyWhen)
+	}
+	return conditions
+}
+
+// ConditionAuthority returns the current result and the original BOOTTIME
+// boundary of its supporting facts. It cannot manufacture a new lifetime.
+func (s FactSnapshot) ConditionAuthority(c FactCondition) (Truth, uint64) {
+	result := s.timedCondition(&c, false)
+	return result.value, result.until
 }

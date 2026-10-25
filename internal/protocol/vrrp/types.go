@@ -13,6 +13,8 @@ import (
 	"net/netip"
 	"strings"
 	"time"
+
+	"github.com/imksoo/routerd2/internal/factcondition"
 )
 
 const (
@@ -21,21 +23,27 @@ const (
 	StateActive     = "ACTIVE"
 )
 
+type GracefulActivation struct {
+	ReadyWhen factcondition.Expression `json:"ready_when"`
+	Timeout   string                   `json:"timeout,omitempty"`
+}
+
 type Config struct {
-	Resource                   string   `json:"resource"`
-	Interface                  string   `json:"interface"`
-	VIPInterface               string   `json:"vip_interface,omitempty"`
-	VRF                        string   `json:"vrf,omitempty"`
-	Family                     string   `json:"family"`
-	SourceAddress              string   `json:"source_address,omitempty"`
-	VirtualRouterID            int      `json:"virtual_router_id"`
-	Priority                   int      `json:"priority,omitempty"`
-	AdvertIntervalCentiseconds int      `json:"advert_interval_centiseconds,omitempty"`
-	EffectTimeoutMilliseconds  int      `json:"effect_timeout_milliseconds,omitempty"`
-	Addresses                  []string `json:"addresses"`
-	Preempt                    *bool    `json:"preempt,omitempty"`
-	AddressOwner               bool     `json:"address_owner,omitempty"`
-	AcceptMode                 bool     `json:"accept_mode,omitempty"`
+	GracefulActivation         *GracefulActivation `json:"graceful_activation,omitempty"`
+	Resource                   string              `json:"resource"`
+	Interface                  string              `json:"interface"`
+	VIPInterface               string              `json:"vip_interface,omitempty"`
+	VRF                        string              `json:"vrf,omitempty"`
+	Family                     string              `json:"family"`
+	SourceAddress              string              `json:"source_address,omitempty"`
+	VirtualRouterID            int                 `json:"virtual_router_id"`
+	Priority                   int                 `json:"priority,omitempty"`
+	AdvertIntervalCentiseconds int                 `json:"advert_interval_centiseconds,omitempty"`
+	EffectTimeoutMilliseconds  int                 `json:"effect_timeout_milliseconds,omitempty"`
+	Addresses                  []string            `json:"addresses"`
+	Preempt                    *bool               `json:"preempt,omitempty"`
+	AddressOwner               bool                `json:"address_owner,omitempty"`
+	AcceptMode                 bool                `json:"accept_mode,omitempty"`
 }
 
 // Snapshot describes an ownership request. A successful Update must mean that
@@ -45,29 +53,32 @@ type Config struct {
 // must withdraw the owned VIPs and stop answering ARP/ND or forwarding frames
 // destined for the virtual MAC. The observer never owns those kernel writes.
 type Snapshot struct {
-	BootID           string    `json:"boot_id"`
-	ObservedNanos    uint64    `json:"observed_nanos"`
-	ExpiresNanos     uint64    `json:"expires_nanos"`
-	Resource         string    `json:"resource"`
-	Interface        string    `json:"interface"`
-	VIPInterface     string    `json:"vip_interface"`
-	VRF              string    `json:"vrf,omitempty"`
-	Family           string    `json:"family"`
-	SourceAddress    string    `json:"source_address"`
-	VirtualRouterID  int       `json:"virtual_router_id"`
-	VirtualMAC       string    `json:"virtual_mac"`
-	Addresses        []string  `json:"addresses"`
-	Active           bool      `json:"active"`
-	State            string    `json:"state"`
-	AcceptMode       bool      `json:"accept_mode"`
-	AddressOwner     bool      `json:"address_owner"`
-	Epoch            string    `json:"epoch"`
-	Transition       uint64    `json:"transition"`
-	Priority         int       `json:"priority"`
-	Peer             string    `json:"peer,omitempty"`
-	PeerPriority     int       `json:"peer_priority,omitempty"`
-	ActiveIntervalCS int       `json:"active_interval_centiseconds"`
-	Deadline         time.Time `json:"deadline,omitempty"`
+	ActivationState        string          `json:"activation_state,omitempty"`
+	ActivationStartedNanos uint64          `json:"activation_started_nanos,omitempty"`
+	ActivationGrant        ActivationGrant `json:"activation_grant,omitempty"`
+	BootID                 string          `json:"boot_id"`
+	ObservedNanos          uint64          `json:"observed_nanos"`
+	ExpiresNanos           uint64          `json:"expires_nanos"`
+	Resource               string          `json:"resource"`
+	Interface              string          `json:"interface"`
+	VIPInterface           string          `json:"vip_interface"`
+	VRF                    string          `json:"vrf,omitempty"`
+	Family                 string          `json:"family"`
+	SourceAddress          string          `json:"source_address"`
+	VirtualRouterID        int             `json:"virtual_router_id"`
+	VirtualMAC             string          `json:"virtual_mac"`
+	Addresses              []string        `json:"addresses"`
+	Active                 bool            `json:"active"`
+	State                  string          `json:"state"`
+	AcceptMode             bool            `json:"accept_mode"`
+	AddressOwner           bool            `json:"address_owner"`
+	Epoch                  string          `json:"epoch"`
+	Transition             uint64          `json:"transition"`
+	Priority               int             `json:"priority"`
+	Peer                   string          `json:"peer,omitempty"`
+	PeerPriority           int             `json:"peer_priority,omitempty"`
+	ActiveIntervalCS       int             `json:"active_interval_centiseconds"`
+	Deadline               time.Time       `json:"deadline,omitempty"`
 	// Display metadata only. ExpiresNanos in BootID defines actual authority.
 	ValidUntil       time.Time `json:"valid_until,omitempty"`
 	Advertisements   uint64    `json:"advertisements"`
@@ -87,6 +98,13 @@ type EffectsFunc func(context.Context, Snapshot) error
 func (f EffectsFunc) Update(ctx context.Context, s Snapshot) error { return f(ctx, s) }
 
 func Normalize(c Config) Config {
+	if c.GracefulActivation != nil {
+		copy := *c.GracefulActivation
+		if copy.Timeout == "" {
+			copy.Timeout = "45s"
+		}
+		c.GracefulActivation = &copy
+	}
 	if a, err := netip.ParseAddr(c.SourceAddress); err == nil {
 		c.SourceAddress = a.String()
 	}
@@ -119,6 +137,14 @@ func validInterface(s string) bool {
 
 func Validate(c Config) error {
 	c = Normalize(c)
+	if c.GracefulActivation != nil {
+		if err := factcondition.Validate(c.GracefulActivation.ReadyWhen); err != nil {
+			return fmt.Errorf("VRRP graceful_activation.ready_when: %w", err)
+		}
+		if timeout, err := time.ParseDuration(c.GracefulActivation.Timeout); err != nil || timeout <= 0 {
+			return errors.New("VRRP graceful_activation.timeout requires a positive finite duration")
+		}
+	}
 	if strings.TrimSpace(c.Resource) == "" || len(c.Resource) > 256 || strings.ContainsAny(c.Resource, "\x00\r\n") {
 		return errors.New("VRRP resource must be a nonempty bounded identity")
 	}

@@ -56,6 +56,7 @@ func (r *Runtime) waitVRRPEffectLocked(ctx context.Context, u serviceconfig.Upda
 		effect = &vrrpEffect{update: u, sourceEpoch: r.sourceEpoch, done: make(chan struct{})}
 		r.vrrpEffects[u.Name] = effect
 	}
+	r.wakeVRRPEffectsLocked()
 	r.mu.Unlock()
 	select {
 	case <-ctx.Done():
@@ -83,7 +84,7 @@ func (r *Runtime) finishVRRPEffectLocked(name string, err error) {
 func (r *Runtime) fenceVRRPEffectsLocked() {
 	for name, effect := range r.vrrpEffects {
 		module, ok := r.guardStatus[name]
-		if ok && effect.sourceEpoch == r.sourceEpoch && module.Role == "vrrp" && module.Generation == effect.update.Generation && module.ConfigDigest == effect.update.ConfigDigest {
+		if ok && effect.sourceEpoch == r.sourceEpoch && module.Role == "vrrp" && module.Generation == effect.update.Generation && module.ConfigDigest == effect.update.ConfigDigest && r.validateVRRPAdmissionLocked(effect.update) == nil {
 			continue
 		}
 		if current, exists := r.records[name]; exists && sameVRRPUpdate(current, effect.update) {
@@ -226,11 +227,24 @@ func (r *Runtime) drainVRRPEffects(ctx context.Context, status supervisor.Status
 			return nil
 		}
 	}
-	err = r.applyNetworkLocked(ctx, p.network)
+	p, err = r.applyVRRPProjectionLocked(ctx, p)
 	if err == nil {
 		r.resourceStates, r.liveRA, r.routeIssues, r.bgpApplied = p.resources, p.liveRA, p.routeIssues, p.bgpStatus
 	}
 	r.finishVRRPEffectsLocked(p.network, err)
 	r.mu.Unlock()
 	return err
+}
+
+// Separate coalescing signals prevent Monitor from consuming a wake intended
+// for an ApplyConfig/stop waiter that currently holds op.
+func (r *Runtime) wakeVRRPEffectsLocked() {
+	select {
+	case r.reconcileWake <- struct{}{}:
+	default:
+	}
+	select {
+	case r.waitWake <- struct{}{}:
+	default:
+	}
 }

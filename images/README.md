@@ -150,6 +150,7 @@ and actual signed-bundle validation.
 | `daemon-health-pbr` | `TestDaemonHealthPBRFailoverAndRecovery` | Two independent WAN peers and a LAN, marked/scoped health probes, Ethernet capture, real TCP/UDP failover and recovery, worker restart, delayed results, finite fact expiry and confirmed rollback |
 | `daemon-dhcp-dns` | `TestDaemonDHCPDNSAndOwnershipExpiry` | DHCP leases projected into DNS and ownership expiry |
 | `daemon-vrrp` | `TestDaemonVRRPOriginalOwnership` | Original VRRP BOOTTIME authority, real VMAC/VIP TCP/UDP, expiry, replay and worker/control recovery |
+| `daemon-vrrp-activation` | `TestDaemonVRRPGracefulAdmission` | Elected MASTER holds VIP through readiness timeout, admits after recovery, preserves publication on degradation, then verifies traffic, expiry and worker/control recovery |
 | `daemon-vrrp-conditional` | `TestDaemonVRRPConditionalOwnership` | Conditional ownership ACK during startup, real VIP traffic/recovery, dependent worker activation and final withdrawal during config cutover |
 | `daemon-vrrp-clock` | `TestDaemonVRRPClockCorrections` | Fixed guest-only UTC corrections preserve the original BOOTTIME VIP deadline |
 | `daemon-dhcp4` | `TestDaemonDHCPv4OriginalLeaseAuthority` | Original DHCPv4 BOOTTIME grant, actual kernel address/default route, TCP/UDP/capture, original expiry and worker/control recovery |

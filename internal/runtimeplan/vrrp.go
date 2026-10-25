@@ -36,7 +36,7 @@ func validateVRRPTransition(previous, next serviceconfig.Update) error {
 	if s.ObservedNanos == old.ObservedNanos && !bytes.Equal(previous.Snapshot, next.Snapshot) && s.State != vrrp.StateInitialize {
 		return errors.New("VRRP original observation reused with different content")
 	}
-	if s.Active && old.Active && s.Transition == old.Transition && uint64(clock.BoottimeNanoseconds) >= old.ExpiresNanos {
+	if s.State == vrrp.StateActive && old.State == vrrp.StateActive && s.Transition == old.Transition && uint64(clock.BoottimeNanoseconds) >= old.ExpiresNanos {
 		return errors.New("expired VRRP election requires a new transition")
 	}
 	return nil
