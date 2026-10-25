@@ -1,0 +1,47 @@
+{
+  "source_commit": "e5971e6727b1125f82729cdea870e2cd74e23825",
+  "source_dirty_paths": [],
+  "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "command": [
+    "make",
+    "check",
+    "build-linux",
+    "RELEASE_ID=network-inspection-v1"
+  ],
+  "started_at_utc": "2026-10-25T10:16:50.239552+00:00",
+  "umask": "0022",
+  "exit_code": 0,
+  "elapsed_seconds": 233.27,
+  "artifacts": [
+    {
+      "architecture": "amd64",
+      "binary": "routerd",
+      "sha256": "929f4f834231238f4568ce64fcdcbb23b7f59c109c2845016ba2fa86c19fc519"
+    },
+    {
+      "architecture": "amd64",
+      "binary": "routerd-modules",
+      "sha256": "91e8a01478a27b6d150454cf4b6798627479200aaf604928218e2d71d10b8fb9"
+    },
+    {
+      "architecture": "amd64",
+      "binary": "routerd-logging",
+      "sha256": "05b9ea8531fa870e1be6775c3fec1a12c9f09c1903df20585ae042bdfe42b43b"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd",
+      "sha256": "c686a1e81d5ef2377016b7f3659a7a18d6d285132b0cef77eda939465d2c19a7"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd-modules",
+      "sha256": "3adae09dff9144334e2701bb19879b9fe11195d6300b03ee26d85de83786a9f7"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd-logging",
+      "sha256": "2e7988872151782525a8ecfcbecbcfb96e4f6b5e01a80091ef0671b0459afa5e"
+    }
+  ]
+}

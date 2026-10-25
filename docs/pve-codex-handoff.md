@@ -6,7 +6,15 @@
 **継続ゴール:** 全残実装・必要試験・対象実機での利用可能性の受入まで進める。
 部分checkpointでは完了しない。
 
-最新product checkpointは `28c98ca`。設定のread-only `InspectStartup`を採用処理と共有し、実journal・candidate/fallback snapshotのidentity/revision/generation/confirmation/outbox容量・current compiler検査をprepareへ接続した。
+最新product checkpointは `e5971e6`。networkの実journalをread-only検査し、private worker APIとsigned PID1 prepare fixtureへ接続した。
+reader/writerは64MiB・200万JSON値・深さ64を共有し、重複/alias/unknown JSONと不正所有権を拒否する。設定の厳密decoderをcompiler依存のない共通packageへ抽出した。
+journal/lockはowned0600・単一link、全ancestorはnofollow・trusted owner・非group/other writable（root sticky祖先を除く）。workerは同じdirectory descriptorで保存・検査し、元path差替えでもforeign directoryへ書かない。
+先行reader/API RED、初回directory条件の修正と元FAILを保存。関連Raceと最終全体check/Race/vet/Python30/6 ELF build233.27秒PASS。
+native10 gateとQEMU signed PID1 156.28秒・ext4二kernel175.56秒・二WAN/PBR78.54秒・WireGuard19.48秒PASS。実workerと実fileのnetwork journal一致witnessを確認。
+一つの永続recordの観測であり、kernel health・期限の更新・全worker同時snapshotではない。他state/target/kernel/engine/失効policy、operator paired prepare/loader/health、全残計画・実機受入は未完了。全体ゴールはactive。
+[network journal検査の証跡・境界・残作業](evidence/2026-10-25-network-inspection.md) を参照。
+
+前回product checkpointは `28c98ca`。設定のread-only `InspectStartup`を採用処理と共有し、実journal・candidate/fallback snapshotのidentity/revision/generation/confirmation/outbox容量・current compiler検査をprepareへ接続した。
 同じ保護directory descriptor下でjournalとsnapshotを検査する。explicit選択のjournalはowned0600・単一link・bounded regularを要求し、FIFOを非blockingで拒否する。
 先行テストはAPI欠落と、旧採用のsymlink/hardlink/0644 journal受入をREDで固定。追加release試験のID長fixture誤りを直し、関連Raceと最終全体check/Race/vet/Python30/6 ELF build220.58秒PASS。
 native Race7 gateとQEMU signed PID1 154.25秒・ext4二kernel178.37秒・二WAN/PBR83.75秒PASS。実PID1 fixtureでcandidate/fallback両検査witnessを確認した。

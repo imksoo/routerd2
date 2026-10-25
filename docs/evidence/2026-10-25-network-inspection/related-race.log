@@ -1,0 +1,5 @@
+ok      github.com/imksoo/routerd2/internal/network     24.657s
+ok      github.com/imksoo/routerd2/internal/config      33.746s
+ok      github.com/imksoo/routerd2/internal/control     56.855s
+?       github.com/imksoo/routerd2/internal/strictjson  [no test files]
+ok      github.com/imksoo/routerd2/internal/releaseboot/testdata/guest  1.083s

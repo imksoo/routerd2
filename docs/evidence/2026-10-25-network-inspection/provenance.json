@@ -1,0 +1,218 @@
+{
+  "recorded_at_utc": "2026-10-25T10:33:00.598329+00:00",
+  "product_checkpoint": "e5971e6727b1125f82729cdea870e2cd74e23825",
+  "full_goal_status": "active",
+  "physical_target_qualified": false,
+  "scope": "Bounded strict network journal reader/writer and read-only inspection with pinned parent handles; actual private worker API and signed PID1 prepare fixture witness, no complete state inventory or activated paired loader",
+  "normalizations": [
+    "developer workspace and toolchain paths",
+    "ANSI, tabs, CRLF and trailing whitespace",
+    "public kernel certificate identifier",
+    "ephemeral private SSH host-key hash omitted; public fingerprints retained",
+    "trailing empty lines removed from dependency listing"
+  ],
+  "raw_artifacts": [
+    {
+      "public_name": "api-red.log",
+      "private_source": "dist/goal-validation/network-inspection-api-red.log",
+      "raw_sha256": "1105d265bcca8fb6c07532e8d662446887c66ad03df5f3b8afdd9d8a702532ef"
+    },
+    {
+      "public_name": "reader-red.log",
+      "private_source": "dist/goal-validation/network-inspection-reader-red.log",
+      "raw_sha256": "d953ffa644ecd6f961aaecafa089dc54f7d6777bbfcab11813a8d1a68f1ac556"
+    },
+    {
+      "public_name": "focused.log",
+      "private_source": "dist/goal-validation/network-inspection-focused.log",
+      "raw_sha256": "6a4c9c4b41eada6b1c933c72644b6f83d1c8eb32c21a04ef195ab4fb50adfaf5"
+    },
+    {
+      "public_name": "focused-fixed.log",
+      "private_source": "dist/goal-validation/network-inspection-focused-fixed.log",
+      "raw_sha256": "dcfdebbf6aebbdfc21455d398ad1586a0b015c4e63ae1bae56f2348f7820e6ae"
+    },
+    {
+      "public_name": "related-race.log",
+      "private_source": "dist/goal-validation/network-inspection-related-race.log",
+      "raw_sha256": "f07d9fe3fc280a21c618e77d254598720870b6c9ea16d0c2da0e9811c3991917"
+    },
+    {
+      "public_name": "final-focused-race.log",
+      "private_source": "dist/goal-validation/network-inspection-final-focused-race.log",
+      "raw_sha256": "671b93af144a69e1897decff535bf0337df5957aaf92b0e0f58b2973617b6155"
+    },
+    {
+      "public_name": "check-build.log",
+      "private_source": "dist/goal-validation/network-inspection-check-build.log",
+      "raw_sha256": "05d20c96401f8e842a4d6fe75ce2bab7c8a84650e5e44421d3d2682896473f79"
+    },
+    {
+      "public_name": "api-red.json",
+      "private_source": "dist/goal-validation/network-inspection-api-red.json",
+      "raw_sha256": "77d176776b8ed1ea1838e56cf7ffccf266be152bf37b90192306883c61684b35"
+    },
+    {
+      "public_name": "reader-red.json",
+      "private_source": "dist/goal-validation/network-inspection-reader-red.json",
+      "raw_sha256": "dc86b03abc57b3dcb7c92f8dbf77f7c756d55ffe2503be65289ad909742f568e"
+    },
+    {
+      "public_name": "dependencies.log",
+      "private_source": "dist/goal-validation/network-inspection-dependencies.log",
+      "raw_sha256": "336c503024a6e7a8637b960c92a577cf49d93a14f1691ef0dfae0c00552d5025"
+    },
+    {
+      "public_name": "build-manifest.json",
+      "private_source": "dist/goal-validation/network-inspection-build-manifest.json",
+      "raw_sha256": "2edceed95be8b90609a76489d9b52907563a4611d3ebc9d57f2c4175a1a23b1e"
+    },
+    {
+      "public_name": "native-manifest.json",
+      "private_source": "dist/goal-validation/network-inspection-native-manifest.json",
+      "raw_sha256": "019ebce03ea32d861ced0aca239623bf1885b6edb5e3bd014d845641e2791ac6"
+    },
+    {
+      "public_name": "TestBuiltRuntimeCatalog.log",
+      "private_source": "dist/goal-validation/network-inspection-native-TestBuiltRuntimeCatalog.log",
+      "raw_sha256": "cb736370cb8d3adf62af8f3cb49ef73eba31f302312ab9ffcfb3b56878043689"
+    },
+    {
+      "public_name": "TestPublishBuiltRelease.log",
+      "private_source": "dist/goal-validation/network-inspection-native-TestPublishBuiltRelease.log",
+      "raw_sha256": "ef6ac8ffdf7a90798a95ccf96ea5a9b5f8750fdf9746fe4459a9064882fd0240"
+    },
+    {
+      "public_name": "TestDaemonDHCPv4OriginalLeaseAuthority.log",
+      "private_source": "dist/goal-validation/network-inspection-native-TestDaemonDHCPv4OriginalLeaseAuthority.log",
+      "raw_sha256": "e468dbcf1e1adf3e33a897d5d2b8d6bc2ae4bf36aa644c128c2ad2f6ac9de275"
+    },
+    {
+      "public_name": "TestDaemonConfigurationAndRecovery.log",
+      "private_source": "dist/goal-validation/network-inspection-native-TestDaemonConfigurationAndRecovery.log",
+      "raw_sha256": "bece5ee5afcf6474bf77226e91ae01fda4609329ba1b1a71cefa84e55a419e57"
+    },
+    {
+      "public_name": "TestDaemonStartupSelectionAndRecovery.log",
+      "private_source": "dist/goal-validation/network-inspection-native-TestDaemonStartupSelectionAndRecovery.log",
+      "raw_sha256": "4239e422896a51ae0894a798d78e6b06c3b668fcf572396b86a45af837da217a"
+    },
+    {
+      "public_name": "TestDaemonConditionalStartupRecovery.log",
+      "private_source": "dist/goal-validation/network-inspection-native-TestDaemonConditionalStartupRecovery.log",
+      "raw_sha256": "e821b37ba4ccd587cfad82a62e159b1c9ff61af00bd061763f33520907fff6d6"
+    },
+    {
+      "public_name": "TestDaemonHealthPBRFailoverAndRecovery.log",
+      "private_source": "dist/goal-validation/network-inspection-native-TestDaemonHealthPBRFailoverAndRecovery.log",
+      "raw_sha256": "08d7c40f5f7aa85d1cfaba30daae1ba7ca98261773e1c329f7d5c9a37e10f7c4"
+    },
+    {
+      "public_name": "TestIsolatedKernelForwardingNATAndDSLite.log",
+      "private_source": "dist/goal-validation/network-inspection-native-TestIsolatedKernelForwardingNATAndDSLite.log",
+      "raw_sha256": "61a836c3cdcdc062ef5056d5fa367f508b3f2181cc5b6092078a5262dec9f95b"
+    },
+    {
+      "public_name": "TestIsolatedKernelWireGuardOwnershipAndTraffic.log",
+      "private_source": "dist/goal-validation/network-inspection-native-TestIsolatedKernelWireGuardOwnershipAndTraffic.log",
+      "raw_sha256": "3977804afbfacb946a910f137b2e22681094c083d8753f3bb8bbad3a6e17b490"
+    },
+    {
+      "public_name": "TestIsolatedBootAddressLifetime.log",
+      "private_source": "dist/goal-validation/network-inspection-native-TestIsolatedBootAddressLifetime.log",
+      "raw_sha256": "3bddb50b1ff09fd6e89cd8bcd3b12747a2bc7af71c9060557a89784c2f18d027"
+    },
+    {
+      "public_name": "qemu-source.json",
+      "private_source": "dist/goal-validation/network-inspection-qemu/source.json",
+      "raw_sha256": "096159f631845cbae80c0b12d861252148e616572fc3cc8f8e112ba8e4d8a718"
+    },
+    {
+      "public_name": "qemu-resources.json",
+      "private_source": "dist/goal-validation/network-inspection-qemu/resources.json",
+      "raw_sha256": "a84d2dfa5e0c9eadace505366afa38e195ce39367b4ca94a813467a9f0fbb679"
+    },
+    {
+      "public_name": "release-boot-host.log",
+      "private_source": "dist/goal-validation/network-inspection-qemu/release-boot-host.log",
+      "raw_sha256": "50ae52dbdd0dcfdd34d8a7bff2d5f27982cb9a015e905a79af4bf29f171669fa"
+    },
+    {
+      "public_name": "release-boot-manifest.json",
+      "private_source": "dist/goal-validation/network-inspection-qemu/release-boot/manifest.json",
+      "raw_sha256": "956011988ffd60b98575aa0968a94a03ed1a5b73aa408e6dcae96ca23234f8d5"
+    },
+    {
+      "public_name": "release-boot-qemu-serial.log",
+      "private_source": "dist/goal-validation/network-inspection-qemu/release-boot/qemu-serial.log",
+      "raw_sha256": "47c7a97e27fd91aed2367baa41e34eeca22b0f9e4b503a2ee570d7aaaa4bb0ef"
+    },
+    {
+      "public_name": "storage-host.log",
+      "private_source": "dist/goal-validation/network-inspection-qemu/storage-host.log",
+      "raw_sha256": "617dab6710b5de187642362a9f5402d482fde97ff14b2295d5efc41e7c568cc8"
+    },
+    {
+      "public_name": "storage-manifest.json",
+      "private_source": "dist/goal-validation/network-inspection-qemu/storage/manifest.json",
+      "raw_sha256": "a2430628dded786538c7e7eca733fb9ac8f3fd9ef29dcac1247bb1715d0e914d"
+    },
+    {
+      "public_name": "storage-qemu-first.log",
+      "private_source": "dist/goal-validation/network-inspection-qemu/storage/qemu-first.log",
+      "raw_sha256": "628ca54e9811627b65f42df3d77a8de2f23321b6574581f3e22004fb1eb40f2d"
+    },
+    {
+      "public_name": "storage-qemu-second.log",
+      "private_source": "dist/goal-validation/network-inspection-qemu/storage/qemu-second.log",
+      "raw_sha256": "36cd743e8340ad83973420ea5bc7ef1c89b1ea92c5e59778279c621e97146dcd"
+    },
+    {
+      "public_name": "daemon-health-pbr-host.log",
+      "private_source": "dist/goal-validation/network-inspection-qemu/daemon-health-pbr-host.log",
+      "raw_sha256": "557f29ed18b7ecb0fceef5723d88838d166ef3dc6146b0ced6ad0d0974d11a44"
+    },
+    {
+      "public_name": "daemon-health-pbr-manifest.json",
+      "private_source": "dist/goal-validation/network-inspection-qemu/daemon-health-pbr/manifest.json",
+      "raw_sha256": "226d780aad8770453e3e7cd3e1f20614670a5cfec48c61ac056646a088724808"
+    },
+    {
+      "public_name": "daemon-health-pbr-qemu-serial.log",
+      "private_source": "dist/goal-validation/network-inspection-qemu/daemon-health-pbr/qemu-serial.log",
+      "raw_sha256": "97c370ca8176473a7642c25baa03e39cad2207cf3bb209c5bb743f0261c08a8d"
+    },
+    {
+      "public_name": "wireguard-host.log",
+      "private_source": "dist/goal-validation/network-inspection-qemu/wireguard-host.log",
+      "raw_sha256": "bc9dc115bde955ad59bd0bb3d0c638323b5c74066e70dade52b89d7883b0451d"
+    },
+    {
+      "public_name": "wireguard-manifest.json",
+      "private_source": "dist/goal-validation/network-inspection-qemu/wireguard/manifest.json",
+      "raw_sha256": "265a6a882bae8a57e68c05fcf07ca6550ea5709e7b39a8cc6d5052ec848e76b9"
+    },
+    {
+      "public_name": "wireguard-qemu-serial.log",
+      "private_source": "dist/goal-validation/network-inspection-qemu/wireguard/qemu-serial.log",
+      "raw_sha256": "4e6130b13ff8371414b038e4ab807a722d3cbbde7c79a36e52d246782f916551"
+    }
+  ],
+  "private_packet_captures": [
+    {
+      "private_source": "dist/goal-validation/network-inspection-native-packets/dhcp4-authority/wan0.pcap",
+      "bytes": 9046,
+      "sha256": "df02bb7d11dd676afcd49dc61fc97b23232269652b90bb239f0a391e971ad913"
+    },
+    {
+      "private_source": "dist/goal-validation/network-inspection-native-packets/wan0.pcap",
+      "bytes": 31861,
+      "sha256": "55a85308a2eff59d1e6eaee71e1a50d1d9f64d132adce452eaa291e3f8707a14"
+    },
+    {
+      "private_source": "dist/goal-validation/network-inspection-native-packets/wan1.pcap",
+      "bytes": 33055,
+      "sha256": "b2331db5c03296bf051a13543ce100f43118f6d5293bf02786c468e64ea942de"
+    }
+  ]
+}

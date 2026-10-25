@@ -12196,6 +12196,33 @@
         "Corrupt selected runtime fallback before Open, write-time power-cut/ENOSPC/fsync, reference-aware pruning and remaining bootstrap/engine/ABI/privilege separation; current OCI/APK, arm64 execution, all plan work packages and selected physical hardware acceptance"
       ],
       "full_goal_status": "active"
+    },
+    {
+      "id": "bounded-network-journal-inspection",
+      "date": "2026-10-25",
+      "status": "partial_network_state_inspection_and_same_format_acceptance_verified",
+      "code_checkpoint": "e5971e6727b1125f82729cdea870e2cd74e23825",
+      "work_packages": [
+        "CORE-06",
+        "DIST-01"
+      ],
+      "evidence": "docs/evidence/2026-10-25-network-inspection.md",
+      "implemented": [
+        "Shared bounded exact-field JSON shape decoder extracted from configuration without compiler dependencies; network actual reader/writer share64MiB/two-million-values/depth64 and ownership validation",
+        "Pinned checked parent descriptors for owned0600 singly-linked network journal/lock, all-component nofollow/trusted nonwritable ancestors; atomic same-directory publish and rename/sync uncertainty tracking",
+        "Read-only path/live-worker inspection returns only actual presence/version/revisions/status/SHA; no kernel/lease projection or cached success; private fixed-input API and signed PID1 preparation fixture compare actual disk/writer observations"
+      ],
+      "validation": [
+        "Existing-reader ambiguity/unsafe-file RED2.40s and API compile RED0.33s; initial final-directory policy FAIL0.296s retained, worker-owned nonwritable contract fixed0.322s without weakening unsafe-path/secret directory checks",
+        "Related full Race and final focused Race pass; record-preserving inspection, simultaneous atomic writes, pinned parent replacement, bounds before publish, busy/closed/established disappearance and BOOT deadline preservation",
+        "Clean whole check/Race/vet/Python30/six static ELF build233.27s; native10 actual daemon/kernel gates and QEMU signed PID1/ext4 two kernels/two-WAN PBR/WireGuard pass; no arm64 execution claim"
+      ],
+      "remaining": [
+        "Other actual state/absence inventory, target compiler/kernel/engine/profile qualification and identity/lease/owner/revocation policy; supported operator paired prepare/loader/exact tuple health and bounded fallback",
+        "Corrupt selected runtime fallback before Open, write-time power-cut/ENOSPC/fsync, reference-aware pruning, startup/ACK audit, independent bootstrap and full engine/ABI/privilege closure",
+        "Current OCI/APK, arm64 execution, all plan work packages and selected physical hardware/NIC/performance/long-duration qualification"
+      ],
+      "full_goal_status": "active"
     }
   ],
   "delivery_goal": {

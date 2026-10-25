@@ -1,0 +1,15 @@
+{
+  "source_commit": "1665048cb732debbb81a70b4af2a4714a864a592",
+  "source_dirty": true,
+  "command": [
+    "go",
+    "test",
+    "./internal/network",
+    "-run",
+    "^TestJournalInspection",
+    "-count=1"
+  ],
+  "exit_code": 1,
+  "expected_failure": true,
+  "elapsed_seconds": 0.33
+}

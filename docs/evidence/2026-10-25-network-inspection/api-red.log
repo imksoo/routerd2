@@ -1,0 +1,14 @@
+# github.com/imksoo/routerd2/internal/network [github.com/imksoo/routerd2/internal/network.test]
+internal/network/journal_inspection_test.go:44:14: undefined: InspectJournal
+internal/network/journal_inspection_test.go:49:19: e.InspectJournal undefined (type *Engine has no field or method InspectJournal)
+internal/network/journal_inspection_test.go:72:17: e.InspectJournal undefined (type *Engine has no field or method InspectJournal)
+internal/network/journal_inspection_test.go:87:14: undefined: InspectJournal
+internal/network/journal_inspection_test.go:88:27: undefined: JournalInspection
+internal/network/journal_inspection_test.go:95:15: undefined: InspectJournal
+internal/network/journal_inspection_test.go:100:15: undefined: InspectJournal
+internal/network/journal_inspection_test.go:119:27: undefined: MaxJournalBytes
+internal/network/journal_inspection_test.go:127:17: undefined: InspectJournal
+internal/network/journal_inspection_test.go:148:15: undefined: InspectJournal
+internal/network/journal_inspection_test.go:148:15: too many errors
+FAIL    github.com/imksoo/routerd2/internal/network [build failed]
+FAIL
