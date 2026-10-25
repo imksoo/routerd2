@@ -294,9 +294,9 @@ func TestDaemonDHCPv4OriginalLeaseAuthority(t *testing.T) {
 	acknowledge.Store(false)
 	until(t, 12*time.Second, func() bool { return kernel(false) })
 	until(t, 5*time.Second, func() bool { s := snapshot(); return !s.Active && s.State == wire.StateRequesting })
-	stableGeneration := instance().Generation
+	stableGeneration := module("service.wan").Generation
 	restart("control")
-	if instance().Generation != stableGeneration {
+	if module("service.wan").Generation != stableGeneration {
 		t.Fatal("worker restarted during control recovery gate")
 	}
 	// A fresh control may ACK the already-expired old grant, or reject it if
