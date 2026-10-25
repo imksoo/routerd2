@@ -65,3 +65,14 @@ DHCPv4 acquisition/renewal/expiry with a kernel UDP server, DHCPv6 PD/informatio
 renewal, and RA solicitation/shutdown withdrawal. It never mutates the host
 network. Set `ROUTERD2_INTEGRATION_REQUIRED=1` to fail if isolation is unavailable.
 Interoperability with independent vendor DHCP servers remains a separate gate.
+
+`make qemu-dhcp4-clock` requires an existing appliance kernel image in
+`IMAGE_DIR` and boots a separate no-NIC guest. Its test-only PID 1 changes actual
+`CLOCK_REALTIME` by fixed +24h/-24h offsets and restores the original boot-based
+baseline on exit. A per-boot kernel marker and inherited socketpair fence the
+clock broker; it is absent from both production binaries. The real supervisor,
+control, network and DHCP workers must retain the original lease across UTC
+correction and configuration reapply, withdraw on original BOOT expiry, reject
+old generations and recover only after fresh ACKs, with TCP/UDP and capture.
+Running the positive fault directly on a host is refused. This verifies clock
+steps in QEMU, not NTP discipline/slew, physical suspend, or hardware readiness.

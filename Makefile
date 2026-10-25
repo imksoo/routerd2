@@ -17,7 +17,7 @@ QEMU_SSH_KEY ?=
 LDFLAGS = -s -w -X github.com/imksoo/routerd2/internal/buildinfo.Identity=ROUTERD2-RELEASE-V1:$(RELEASE_ID):END
 BUILD_ARGS = --build-arg GO_VERSION=$(GO_VERSION) --build-arg ALPINE_VERSION=$(ALPINE_VERSION) --build-arg RELEASE_ID=$(RELEASE_ID)
 
-.PHONY: help fmt fmt-check test test-dependencies test-tools race vet check check-health-pbr licenses build build-linux release-built-test container container-multi container-smoke apk image qemu-smoke qemu-network qemu-wireguard qemu-ra-dns qemu-daemon qemu-daemon-aftr qemu-eventrule qemu-derived qemu-protocols qemu-release-boot qemu-storage qemu-health-power clean
+.PHONY: help fmt fmt-check test test-dependencies test-tools race vet check check-health-pbr licenses build build-linux release-built-test container container-multi container-smoke apk image qemu-smoke qemu-network qemu-wireguard qemu-ra-dns qemu-daemon qemu-daemon-aftr qemu-dhcp4-clock qemu-eventrule qemu-derived qemu-protocols qemu-release-boot qemu-storage qemu-health-power clean
 
 help:
 	@printf '%s\n' \
@@ -35,6 +35,7 @@ help:
 	  'make qemu-ra-dns       Verify learned RA DNS expiry and live updates in QEMU' \
 	  'make qemu-daemon       Run the two-binary RA daemon gate in QEMU' \
 	  'make qemu-daemon-aftr  Run the two-binary AFTR daemon gate in QEMU' \
+	  'make qemu-dhcp4-clock  Verify DHCP lease authority during actual guest UTC steps' \
 	  'make qemu-protocols    Verify native protocols and real daemon recovery in QEMU' \
 	  'make qemu-eventrule    Verify durable rules and worker/source recovery in QEMU' \
 	  'make qemu-derived      Verify finite live status, derived output and recovery' \
@@ -125,8 +126,11 @@ qemu-daemon:
 qemu-daemon-aftr:
 	$(PYTHON) scripts/qemu-network.py --suite daemon-aftr --go '$(GO)' --image-dir $(IMAGE_DIR) --timeout $(QEMU_DAEMON_TIMEOUT)
 
+qemu-dhcp4-clock:
+	$(PYTHON) scripts/qemu-network.py --suite daemon-dhcp4-clock --go '$(GO)' --image-dir $(IMAGE_DIR)
+
 qemu-protocols:
-	@set -eu; for suite in boot-address daemon-dhcp4 daemon-resource-program daemon-health-pbr daemon-management daemon-eventrule daemon-event-archive daemon-derived daemon-stopped-health daemon-dhcp-dns daemon-legacy-dhcp-dns daemon-bgp daemon-bgp-derived daemon-bfd daemon-bfd-derived dhcp dhcp-server vrrp ra-client aftr bfd; do \
+	@set -eu; for suite in boot-address daemon-dhcp4 daemon-dhcp4-clock daemon-resource-program daemon-health-pbr daemon-management daemon-eventrule daemon-event-archive daemon-derived daemon-stopped-health daemon-dhcp-dns daemon-legacy-dhcp-dns daemon-bgp daemon-bgp-derived daemon-bfd daemon-bfd-derived dhcp dhcp-server vrrp ra-client aftr bfd; do \
 	  $(PYTHON) scripts/qemu-network.py --suite "$$suite" --go '$(GO)' --image-dir $(IMAGE_DIR); \
 	done
 
