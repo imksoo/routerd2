@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -168,5 +169,39 @@ func TestStartupAtomicPublicationFailureAndReplay(t *testing.T) {
 				t.Fatal("retry repeated or lost the adoption")
 			}
 		})
+	}
+}
+
+func TestStartupBackpressureAndGenerationMetadataCannotBeForgotten(t *testing.T) {
+	s, c, selection := startupFixture(t)
+	for i := 0; i < MaxEventOutbox; i++ {
+		c.EventOutbox = append(c.EventOutbox, ChangeEvent{ID: fmt.Sprintf("%032x", i+1), Type: "committed", Revision: c.Revision, ObservedAt: time.Now().UTC()})
+	}
+	if err := s.Save(c); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AdoptStartup(selection); !errors.Is(err, ErrStartupCapacity) {
+		t.Fatal("adoption dropped outstanding history to make room", err)
+	}
+	got, err := s.Load()
+	if err != nil || !reflect.DeepEqual(got, c) {
+		t.Fatal("backpressure changed authoritative state", err)
+	}
+	c.EventOutbox = nil
+	if err := s.Save(c); err != nil {
+		t.Fatal(err)
+	}
+	adopted, err := s.AdoptStartup(selection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad := adopted
+	bad.Revision++
+	bad.Startup = nil
+	if err := s.Save(bad); err == nil {
+		t.Fatal("ordinary save forgot consumed selection generation")
+	}
+	if err := s.Stage(bad); err == nil {
+		t.Fatal("ordinary stage forgot consumed selection generation")
 	}
 }

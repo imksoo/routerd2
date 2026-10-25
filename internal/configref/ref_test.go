@@ -32,5 +32,9 @@ func TestSelectionDecoderRejectsAmbiguousAndUnboundedInput(t *testing.T) {
 		if _, err := DecodeSelection([]byte(bad)); err == nil {
 			t.Fatal("accepted ambiguous startup input")
 		}
+		var selection Selection
+		if err := json.Unmarshal([]byte(bad), &selection); err == nil {
+			t.Fatal("typed boot/journal decoder bypassed strict startup input")
+		}
 	}
 }

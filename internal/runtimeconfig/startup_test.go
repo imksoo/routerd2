@@ -23,4 +23,9 @@ func TestStartupSelectionRequiresExplicitValidReference(t *testing.T) {
 		}
 		b.Startup = &configref.Selection{Generation: 1, ExpectedRevision: 2, Snapshot: configref.Ref{StoreID: strings.Repeat("a", 32), Revision: 1, Digest: strings.Repeat("b", 64)}}
 	}
+	b.Platform = "appliance"
+	b.Release = &Release{Root: "/var/lib/routerd/releases", TrustFile: "/etc/routerd/trust.json"}
+	if err := b.Validate(); err == nil || !strings.Contains(err.Error(), "atomic runtime/configuration") {
+		t.Fatal("uncoupled signed runtime/config selection was accepted", err)
+	}
 }
