@@ -15,6 +15,25 @@ func validGuest() Guest {
 	return Guest{PID: 1, Suite: SuiteName, Nonce: nonce, CommandLine: "console=ttyS0 routerd2.clock-test=" + nonce}
 }
 
+func TestClockControllerAcceptsOnlyTheTwoDedicatedClockFixtures(t *testing.T) {
+	for _, name := range []string{SuiteName, "daemon-vrrp-clock"} {
+		g := validGuest()
+		g.Suite = name
+		clock := boottime.Clock{BootID: "11111111-2222-4333-8444-555555555555", BoottimeNanoseconds: 1, WallTime: time.Now().UTC()}
+		if _, err := NewController(g, func() (boottime.Clock, error) { return clock, nil }, func(time.Time) error { return nil }); err != nil {
+			t.Fatal("fixed dedicated clock fixture rejected", name, err)
+		}
+	}
+	for _, name := range []string{"daemon-vrrp", "daemon-vrrp-clock-extra", "network"} {
+		g := validGuest()
+		g.Suite = name
+		called := false
+		if _, err := NewController(g, func() (boottime.Clock, error) { called = true; return boottime.Clock{}, nil }, func(time.Time) error { called = true; return nil }); err == nil || called {
+			t.Fatal("ordinary suite reached clock I/O", name)
+		}
+	}
+}
+
 func TestClockControllerRefusesHostAndAmbiguousBootBeforeAnyClockIO(t *testing.T) {
 	for _, change := range []func(*Guest){
 		func(g *Guest) { g.PID = 123 },

@@ -43,16 +43,20 @@ class GuestResultTest(unittest.TestCase):
                 GATE.require_guest_pass(output, suite, 0)
 
     def test_only_fixed_clock_suite_gets_matching_boot_marker(self):
+        fixed = {"daemon-dhcp4-clock": "TestDaemonDHCPv4ClockCorrections",
+                 "daemon-vrrp-clock": "TestDaemonVRRPClockCorrections"}
+        for name in fixed:
+            self.assertIn(name, GATE.SUITES)
         for name in GATE.SUITES:
             with self.subTest(suite=name), tempfile.TemporaryDirectory() as d:
                 root = Path(d)
                 marker = GATE.clock_marker(root, name)
                 nonce_file = root / "test-clock-nonce"
-                if name == "daemon-dhcp4-clock":
+                if name in fixed:
                     nonce = nonce_file.read_text().strip()
                     self.assertRegex(nonce, r"^[0-9a-f]{32}$")
                     self.assertEqual(marker, "routerd2.clock-test=" + nonce)
-                    self.assertEqual(GATE.SUITES[name]["test"], "TestDaemonDHCPv4ClockCorrections")
+                    self.assertEqual(GATE.SUITES[name]["test"], fixed[name])
                 else:
                     self.assertEqual(marker, "")
                     self.assertFalse(nonce_file.exists())
