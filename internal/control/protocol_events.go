@@ -6,15 +6,11 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/imksoo/routerd2/internal/config"
-	"github.com/imksoo/routerd2/internal/events"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/protocolevents"
-	"github.com/imksoo/routerd2/internal/runtimeplan"
-	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
 
 const protocolRetirementError = "retired-health-relays"
@@ -112,40 +108,6 @@ func (e *Engine) ProcessRetiredProtocolEvents(ctx context.Context) error {
 	return err
 }
 
-func validateProtocolPage(name string, page []events.Event) error {
-	if len(page) == 0 || len(page) > protocolevents.PageSize {
-		return errors.New("protocol publication requires 1..16 observations")
-	}
-	seen := map[string]bool{}
-	for _, event := range page {
-		if err := protocolevents.ValidateHealth(name, event); err != nil {
-			return err
-		}
-		if seen[event.ID] {
-			return errors.New("duplicate observation in protocol page")
-		}
-		seen[event.ID] = true
-	}
-	return nil
-}
-
-func appendProtocolBatch(ctx context.Context, journal *events.Store, name string, page []events.Event) (protocolevents.Acknowledgement, error) {
-	ack := protocolevents.Acknowledgement{}
-	if err := validateProtocolPage(name, page); err != nil {
-		return ack, err
-	}
-	if journal == nil {
-		return ack, errors.New("durable protocol journal unavailable")
-	}
-	for _, event := range page {
-		if _, err := journal.Append(ctx, event); err != nil {
-			return protocolevents.Acknowledgement{}, err
-		}
-		ack.IDs = append(ack.IDs, event.ID)
-	}
-	return ack, nil
-}
-
 func (e *Engine) setProtocolErrorLocked(name string, err error) {
 	if e.protocolErrors == nil {
 		e.protocolErrors = map[string]string{}
@@ -190,34 +152,25 @@ func (e *Engine) protocolEventRoutes(mux *http.ServeMux) {
 			localapi.Fail(w, 400, err)
 			return
 		}
-		u := batch.Producer
-		if !serviceconfig.ValidSupervisorInstance(u.SupervisorInstance) || !serviceconfig.ValidSupervisorInstance(u.ProducerEpoch) || u.Role != "health" || u.Generation == 0 || u.Sequence != 0 || len(u.Snapshot) != 0 || len(u.ConfigDigest) != 64 || !strings.HasPrefix(u.Name, "service.") {
-			localapi.Fail(w, 422, errors.New("invalid current protocol producer envelope"))
-			return
-		}
-		if err := validateProtocolPage(strings.TrimPrefix(u.Name, "service."), batch.Events); err != nil {
-			localapi.Fail(w, 422, err)
-			return
-		}
+
 		e.mu.Lock()
 		defer e.mu.Unlock()
-		if e.runtime == nil {
-			localapi.Fail(w, 503, errors.New("protocol runtime unavailable"))
+		if e.protocolRelays == nil {
+			localapi.Fail(w, 503, errors.New("protocol journal unavailable"))
 			return
 		}
-		var ack protocolevents.Acknowledgement
 		ctx, cancel := context.WithTimeout(r.Context(), time.Second)
 		defer cancel()
-		err := e.runtime.WithProtocolProducer(ctx, u, func(name string) error {
-			var err error
-			ack, err = appendProtocolBatch(ctx, e.journal, name, batch.Events)
-			e.setProtocolErrorLocked(u.Name, err)
-			return err
-		})
+		ack, err := e.protocolRelays.Deliver(ctx, batch)
+		if err == nil || !errors.Is(err, protocolevents.ErrInvalidBatch) && !errors.Is(err, protocolevents.ErrUnregistered) {
+			e.setProtocolErrorLocked("service."+batch.Resource, err)
+		}
 		if err != nil {
 			code := http.StatusServiceUnavailable
-			if errors.Is(err, runtimeplan.ErrStale) {
+			if errors.Is(err, protocolevents.ErrUnregistered) {
 				code = http.StatusConflict
+			} else if errors.Is(err, protocolevents.ErrInvalidBatch) {
+				code = http.StatusUnprocessableEntity
 			}
 			localapi.Fail(w, code, err)
 			return

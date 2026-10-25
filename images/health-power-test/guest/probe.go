@@ -321,7 +321,7 @@ func recoverAndCut(ctx context.Context, client, manager *localapi.Client, state 
 	if err = requireNoHealth(ctx, client, manager); err != nil {
 		return err
 	}
-	if err = requireOldHistoryRejected(ctx, client, w); err != nil {
+	if err = requireHistoryDoesNotRestoreCurrentAuthority(ctx, client, w); err != nil {
 		return err
 	}
 	if err = captureCompleted(ctx, &w, true); err != nil {
@@ -364,7 +364,7 @@ func finishRecovery(ctx context.Context, client, manager *localapi.Client, w wit
 	if _, err = verifyHistory(w.Observations, records, true); err != nil {
 		return err
 	}
-	if err = requireOldHistoryRejected(ctx, client, w); err != nil {
+	if err = requireHistoryDoesNotRestoreCurrentAuthority(ctx, client, w); err != nil {
 		return err
 	}
 	db, err := openInjector()
@@ -418,7 +418,7 @@ func finishRecovery(ctx context.Context, client, manager *localapi.Client, w wit
 	return emitAndWait(w, false)
 }
 
-func requireOldHistoryRejected(ctx context.Context, client *localapi.Client, w witness) error {
+func requireHistoryDoesNotRestoreCurrentAuthority(ctx context.Context, client *localapi.Client, w witness) error {
 	records, err := history(ctx, client)
 	if err != nil {
 		return err
@@ -426,9 +426,11 @@ func requireOldHistoryRejected(ctx context.Context, client *localapi.Client, w w
 	for _, r := range records {
 		if r.Event.ID == w.Observations[0].ID {
 			u := serviceconfig.Update{SupervisorInstance: w.OriginalSupervisor, Name: "service.wan", Role: "health", ConfigDigest: w.OriginalDigest, Generation: w.OriginalGeneration, ProducerEpoch: w.OriginalEpoch}
-			err = client.Do(ctx, "POST", "/v1/protocol-events", protocolevents.Batch{Producer: u, Events: []events.Event{r.Event}}, nil)
-			if !localapi.IsHTTPStatus(err, 409) {
-				return fmt.Errorf("old supervisor history was not fenced: %v", err)
+			err = client.Do(ctx, "POST", "/v1/protocol-events", protocolevents.Batch{Resource: "wan", Events: []events.Event{r.Event}}, nil)
+			// Retirement has not acknowledged the registry yet. This historical
+			// duplicate is accepted without restoring the old current producer.
+			if err != nil {
+				return fmt.Errorf("registered historical retry was rejected: %w", err)
 			}
 			u.Sequence = 1
 			u.Snapshot, _ = json.Marshal(health.Snapshot{Resource: "wan", Interface: "lo", BootID: w.OriginBootID, ObservedNanos: 1, ExpiresNanos: 2})

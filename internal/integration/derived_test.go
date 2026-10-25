@@ -375,11 +375,8 @@ func TestDaemonDerivedHealthCurrentStatusAndDurability(t *testing.T) {
 	restart("service.wan")
 	restart("control")
 	waitHistoryError()
-	oldProducer := stale
-	oldProducer.Sequence = 0
-	oldProducer.Snapshot = nil
-	if err = f.control.Do(ctx, "POST", "/v1/protocol-events", protocolevents.Batch{Producer: oldProducer, Events: queued.Pending[:1]}, nil); !localapi.IsHTTPStatus(err, 409) {
-		t.Fatal("stale worker published historical output", err)
+	if err = f.control.Do(ctx, "POST", "/v1/protocol-events", protocolevents.Batch{Resource: "wan", Events: queued.Pending[:1]}, nil); !localapi.IsHTTPStatus(err, 503) {
+		t.Fatal("historical delivery was coupled to current worker registration", err)
 	}
 	if _, err = injector.Exec(`DROP TRIGGER fail_health_history`); err != nil {
 		t.Fatal(err)
@@ -420,9 +417,6 @@ func TestDaemonDerivedHealthCurrentStatusAndDurability(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitHistoryError()
-	retiredProducer := healthPBRUpdate(instance())
-	retiredProducer.Sequence = 0
-	retiredProducer.Snapshot = nil
 	retiredDB, err := sql.Open("sqlite", filepath.Join(root, "state", "services", "wan", "health-events", "journal.sqlite3"))
 	if err != nil {
 		t.Fatal(err)
@@ -492,8 +486,8 @@ func TestDaemonDerivedHealthCurrentStatusAndDurability(t *testing.T) {
 		h := retirementHealth()
 		return !h.Healthy && h.ProtocolEvents.Retiring == 1 && h.ProtocolEvents.LastError != ""
 	})
-	if err = f.control.Do(ctx, "POST", "/v1/protocol-events", protocolevents.Batch{Producer: retiredProducer, Events: retiredQueue.Pending[:1]}, nil); !localapi.IsHTTPStatus(err, 409) {
-		t.Fatal("retired worker regained publication authority", err)
+	if err = f.control.Do(ctx, "POST", "/v1/protocol-events", protocolevents.Batch{Resource: "wan", Events: retiredQueue.Pending[:1]}, nil); !localapi.IsHTTPStatus(err, 503) {
+		t.Fatal("registered retired history did not reach the unavailable journal", err)
 	}
 	if _, err = injector.Exec(`CREATE TRIGGER fail_retirement_registry BEFORE UPDATE ON producers WHEN NEW.name='control-health-relays' BEGIN SELECT RAISE(ABORT,'injected retirement registry failure'); END`); err != nil {
 		t.Fatal(err)

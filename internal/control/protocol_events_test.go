@@ -1,7 +1,9 @@
 package control
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http/httptest"
 	"strings"
@@ -17,6 +19,44 @@ import (
 	"github.com/imksoo/routerd2/internal/resourceprogram"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
+
+func TestRegisteredHistoryCanDrainBeforeAnyCurrentWorkerObservation(t *testing.T) {
+	e, _ := fixture(t)
+	journal := attachJournal(t, e, 0)
+	e.protocolRelays = protocolevents.NewRetirement(journal, e.store.Dir)
+	if err := e.protocolRelays.Register(context.Background(), []string{"wan"}); err != nil {
+		t.Fatal(err)
+	}
+	// Control has restarted; neither a runtime nor a ready worker is needed
+	// to deliver history from a queue registered before the restart.
+	e.protocolRelays = protocolevents.NewRetirement(journal, e.store.Dir)
+	before := e.State()
+	batch := protocolevents.Batch{Resource: "wan", Events: []events.Event{protocolProbe("a")}}
+	body, err := json.Marshal(batch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		w := httptest.NewRecorder()
+		e.Handler().ServeHTTP(w, httptest.NewRequest("POST", "/v1/protocol-events", bytes.NewReader(body)))
+		if w.Code != 200 {
+			t.Fatal(w.Code, w.Body.String())
+		}
+	}
+	rows, err := journal.List(context.Background(), 0, 16)
+	if err != nil || len(rows) != 1 || rows[0].Event.ID != batch.Events[0].ID {
+		t.Fatal("restarted relay lost or duplicated history", rows, err)
+	}
+	if after := e.State(); after.Revision != before.Revision || after.ProducerEpoch != before.ProducerEpoch {
+		t.Fatal("historical delivery changed current authority")
+	}
+	batch.Events = []events.Event{protocolProbe("b")}
+	batch.Events[0].ID = "health/unknown/" + strings.Repeat("b", 32)
+	// A valid-shaped foreign history entry cannot use another registration.
+	if _, err := e.protocolRelays.Deliver(context.Background(), protocolevents.Batch{Resource: "wan", Events: batch.Events}); !errors.Is(err, protocolevents.ErrInvalidBatch) {
+		t.Fatal("foreign history used an existing registration", err)
+	}
+}
 
 func protocolProbe(id string) events.Event {
 	return events.FromDaemon("health/wan/"+strings.Repeat(id, 32), daemonapi.DaemonEvent{Time: time.Date(2026, 10, 24, 0, 0, 0, 0, time.UTC), Type: "routerd.healthcheck.wan.passed", Daemon: daemonapi.DaemonRef{Name: old.DaemonKind + "-wan", Kind: old.DaemonKind, Instance: "wan"}, Resource: &daemonapi.ResourceRef{APIVersion: api.NetAPIVersion, Kind: "HealthCheck", Name: "wan"}, Reason: "HealthCheckProbe", Severity: daemonapi.SeverityInfo})
@@ -68,22 +108,26 @@ func TestProtocolBatchRetriesPartialStorageWithoutDuplicatingOrAcceptingForeignE
 	ctx := context.Background()
 	e, _ := fixture(t)
 	journal := attachJournal(t, e, 1)
+	relay := protocolevents.NewRetirement(journal, e.store.Dir)
+	if err := relay.Register(ctx, []string{"wan"}); err != nil {
+		t.Fatal(err)
+	}
 	page := []events.Event{protocolProbe("a"), protocolProbe("b")}
-	if _, err := appendProtocolBatch(ctx, journal, "wan", page); err == nil {
+	if _, err := relay.Deliver(ctx, protocolevents.Batch{Resource: "wan", Events: page}); err == nil {
 		t.Fatal("capacity failure was acknowledged")
 	}
 	rows, err := journal.List(ctx, 0, 16)
 	if err != nil || len(rows) != 1 || rows[0].Event.ID != page[0].ID {
 		t.Fatal(rows, err)
 	}
-	if _, err = appendProtocolBatch(ctx, journal, "wan", page); err == nil {
+	if _, err = relay.Deliver(ctx, protocolevents.Batch{Resource: "wan", Events: page}); err == nil {
 		t.Fatal("retry bypassed capacity")
 	}
 	rows, err = journal.List(ctx, 0, 16)
 	if err != nil || len(rows) != 1 {
 		t.Fatal("retry duplicated saved prefix", rows, err)
 	}
-	ack, err := appendProtocolBatch(ctx, journal, "wan", page[:1])
+	ack, err := relay.Deliver(ctx, protocolevents.Batch{Resource: "wan", Events: page[:1]})
 	if err != nil || len(ack.IDs) != 1 || ack.IDs[0] != page[0].ID {
 		t.Fatal(ack, err)
 	}
@@ -91,8 +135,12 @@ func TestProtocolBatchRetriesPartialStorageWithoutDuplicatingOrAcceptingForeignE
 	foreign.Topic = "configuration.committed"
 	other, _ := fixture(t)
 	roomy := attachJournal(t, other, 0)
+	otherRelay := protocolevents.NewRetirement(roomy, other.store.Dir)
+	if err := otherRelay.Register(ctx, []string{"wan"}); err != nil {
+		t.Fatal(err)
+	}
 	for _, invalid := range [][]events.Event{nil, append(make([]events.Event, protocolevents.PageSize), foreign), {protocolProbe("c"), foreign}} {
-		if _, err = appendProtocolBatch(ctx, roomy, "wan", invalid); err == nil {
+		if _, err = otherRelay.Deliver(ctx, protocolevents.Batch{Resource: "wan", Events: invalid}); err == nil {
 			t.Fatal("invalid batch accepted", invalid)
 		}
 	}

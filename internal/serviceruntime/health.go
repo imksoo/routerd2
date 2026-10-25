@@ -26,7 +26,7 @@ func (c *effectsClient) runHealth(ctx context.Context, dir, eventDir string, cfg
 	outbox := protocolevents.NewOutbox(store, cfg.Resource)
 	relayCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
-	go func() { defer close(done); c.replayProtocolEvents(relayCtx, outbox) }()
+	go func() { defer close(done); c.replayProtocolEvents(relayCtx, cfg.Resource, outbox) }()
 	defer func() { cancel(); <-done }()
 	networkClient := localapi.NewClient(filepath.Join(dir, "network.sock"))
 	probe := func(ctx context.Context, cfg health.Config) old.ProbeResult {
@@ -66,19 +66,14 @@ func (c *effectsClient) runHealth(ctx context.Context, dir, eventDir string, cfg
 	}, ready, probe)
 }
 
-func (c *effectsClient) sendProtocolEvents(ctx context.Context, page []events.Event) error {
+func (c *effectsClient) sendProtocolEvents(ctx context.Context, resource string, page []events.Event) error {
 	if len(page) == 0 || len(page) > protocolevents.PageSize {
 		return errors.New("invalid bounded protocol publication page")
 	}
-	c.mu.Lock()
-	identity := c.identity
-	c.mu.Unlock()
-	identity.Sequence = 0
-	identity.Snapshot = nil
 	call, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 	var ack protocolevents.Acknowledgement
-	if err := c.client.Do(call, http.MethodPost, "/v1/protocol-events", protocolevents.Batch{Producer: identity, Events: page}, &ack); err != nil {
+	if err := c.client.Do(call, http.MethodPost, "/v1/protocol-events", protocolevents.Batch{Resource: resource, Events: page}, &ack); err != nil {
 		return err
 	}
 	if len(ack.IDs) != len(page) {
@@ -92,7 +87,7 @@ func (c *effectsClient) sendProtocolEvents(ctx context.Context, page []events.Ev
 	return nil
 }
 
-func (c *effectsClient) replayProtocolEvents(ctx context.Context, outbox *protocolevents.Outbox) {
+func (c *effectsClient) replayProtocolEvents(ctx context.Context, resource string, outbox *protocolevents.Outbox) {
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 	lastError := ""
@@ -102,7 +97,9 @@ func (c *effectsClient) replayProtocolEvents(ctx context.Context, outbox *protoc
 			return
 		case <-timer.C:
 		}
-		err := outbox.Flush(ctx, c.sendProtocolEvents)
+		err := outbox.Flush(ctx, func(ctx context.Context, page []events.Event) error {
+			return c.sendProtocolEvents(ctx, resource, page)
+		})
 		if ctx.Err() != nil {
 			return
 		}

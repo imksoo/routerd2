@@ -28,7 +28,7 @@ func TestProtocolSenderRequiresAnExplicitMatchingDurableACK(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&batch); err != nil {
 			t.Fatal(err)
 		}
-		if batch.Producer.Generation != 7 || batch.Producer.Sequence != 0 || batch.Producer.Snapshot != nil || len(batch.Events) != 1 || batch.Events[0].ID != "stable-id" {
+		if batch.Resource != "wan" || len(batch.Events) != 1 || batch.Events[0].ID != "stable-id" {
 			t.Fatal(batch)
 		}
 		id := "stable-id"
@@ -39,11 +39,11 @@ func TestProtocolSenderRequiresAnExplicitMatchingDurableACK(t *testing.T) {
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(body)))}, nil
 	})}}}
 	page := []events.Event{{ID: "stable-id"}}
-	if err := c.sendProtocolEvents(context.Background(), page); err == nil {
+	if err := c.sendProtocolEvents(context.Background(), "wan", page); err == nil {
 		t.Fatal("wrong ACK discarded pending event")
 	}
 	bad = false
-	if err := c.sendProtocolEvents(context.Background(), page); err != nil {
+	if err := c.sendProtocolEvents(context.Background(), "wan", page); err != nil {
 		t.Fatal(err)
 	}
 }

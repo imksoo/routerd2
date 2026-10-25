@@ -18,7 +18,6 @@ import (
 	"github.com/imksoo/routerd/pkg/daemonapi"
 	old "github.com/imksoo/routerd/pkg/healthcheck"
 	"github.com/imksoo/routerd2/internal/events"
-	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
 
 const (
@@ -30,8 +29,30 @@ const (
 var serviceName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,23}$`)
 
 type Batch struct {
-	Producer serviceconfig.Update `json:"producer"`
-	Events   []events.Event       `json:"events"`
+	Resource string         `json:"resource"`
+	Events   []events.Event `json:"events"`
+}
+
+var (
+	ErrUnregistered = errors.New("health history queue is not registered")
+	ErrInvalidBatch = errors.New("invalid health history batch")
+)
+
+func (b Batch) Validate() error {
+	if !serviceName.MatchString(b.Resource) || len(b.Events) == 0 || len(b.Events) > PageSize {
+		return ErrInvalidBatch
+	}
+	seen := make(map[string]bool, len(b.Events))
+	for _, event := range b.Events {
+		if err := ValidateHealth(b.Resource, event); err != nil {
+			return errors.Join(ErrInvalidBatch, err)
+		}
+		if seen[event.ID] {
+			return ErrInvalidBatch
+		}
+		seen[event.ID] = true
+	}
+	return nil
 }
 
 type Acknowledgement struct {
@@ -47,9 +68,12 @@ type Outbox struct {
 	store   *events.Store
 	name    string
 	flushMu sync.Mutex
+	space   chan struct{}
 }
 
-func NewOutbox(store *events.Store, name string) *Outbox { return &Outbox{store: store, name: name} }
+func NewOutbox(store *events.Store, name string) *Outbox {
+	return &Outbox{store: store, name: name, space: make(chan struct{}, 1)}
+}
 
 // Pending returns an owned observation copy without acknowledging any entry.
 func (o *Outbox) Pending(ctx context.Context) ([]events.Event, error) {
@@ -100,7 +124,7 @@ func (o *Outbox) read(ctx context.Context) (events.ProducerState, queue, error) 
 	if err = d.Decode(&q); err != nil {
 		return cp, q, err
 	}
-	if d.Decode(new(any)) != io.EOF || q.SchemaVersion != 1 || len(q.Pending) > MaxPending {
+	if d.Decode(new(json.RawMessage)) != io.EOF || q.SchemaVersion != 1 || len(q.Pending) > MaxPending {
 		return cp, q, errors.New("invalid health relay checkpoint")
 	}
 	seen := map[string]bool{}
@@ -139,21 +163,29 @@ func (o *Outbox) Enqueue(ctx context.Context, d daemonapi.DaemonEvent) error {
 	if err := ValidateHealth(o.name, e); err != nil {
 		return err
 	}
-	for range 8 {
+	for {
 		cp, q, err := o.read(ctx)
 		if err != nil {
 			return err
 		}
-		if len(q.Pending) >= MaxPending {
-			return events.ErrCapacity
+		if len(q.Pending) < MaxPending {
+			q.Pending = append(q.Pending, e)
+			err = o.save(ctx, cp, q)
+			if errors.Is(err, events.ErrConflict) {
+				continue
+			}
+			if !errors.Is(err, events.ErrCapacity) || len(q.Pending) == 1 {
+				return err
+			}
 		}
-		q.Pending = append(q.Pending, e)
-		err = o.save(ctx, cp, q)
-		if !errors.Is(err, events.ErrConflict) {
-			return err
+		// This worker retains the pending observation while its independent
+		// relay frees durable space. Restarting cannot create more capacity.
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-o.space:
 		}
 	}
-	return events.ErrConflict
 }
 
 // Flush acknowledges only the frozen prefix after the target confirms it.
@@ -192,6 +224,12 @@ func (o *Outbox) Flush(ctx context.Context, send func(context.Context, []events.
 		current.Pending = current.Pending[len(page):]
 		err = o.save(ctx, cp, current)
 		if !errors.Is(err, events.ErrConflict) {
+			if err == nil {
+				select {
+				case o.space <- struct{}{}:
+				default:
+				}
+			}
 			return err
 		}
 	}

@@ -66,6 +66,29 @@ func (r *Retirement) RegisteredNames(ctx context.Context) ([]string, error) {
 	return slices.Clone(r.names), nil
 }
 
+// Deliver appends historical observations for a durably registered queue.
+// A relay's current worker generation and readiness do not grant historical
+// authority. Current facts and kernel effects use the separate service API.
+func (r *Retirement) Deliver(ctx context.Context, batch Batch) (Acknowledgement, error) {
+	if err := batch.Validate(); err != nil {
+		return Acknowledgement{}, err
+	}
+	if _, _, err := r.load(ctx); err != nil {
+		return Acknowledgement{}, err
+	}
+	if !slices.Contains(r.names, batch.Resource) {
+		return Acknowledgement{}, ErrUnregistered
+	}
+	ack := Acknowledgement{IDs: make([]string, 0, len(batch.Events))}
+	for _, event := range batch.Events {
+		if _, err := r.journal.Append(ctx, event); err != nil {
+			return Acknowledgement{}, err
+		}
+		ack.IDs = append(ack.IDs, event.ID)
+	}
+	return ack, nil
+}
+
 func (r *Retirement) Declare(names []string) {
 	r.declared = map[string]bool{}
 	for _, name := range names {

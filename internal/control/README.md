@@ -209,8 +209,8 @@ assertion transitions are also connected through their producer state/outbox.
 ## Historical protocol input
 
 `POST /v1/protocol-events` accepts up to 16 stable-ID HealthCheck probe events
-from a current registered, supervisor-ready worker. Its producer identity binds
-the supervisor lifetime, immutable config digest, generation and producer epoch.
+for a durably registered queue, using `{resource, events}`. Historical delivery
+is independent of current worker generation, readiness and current observations.
 Only that HealthCheck's passed/failed/timeout topics and typed resource detail
 are accepted. Validation covers the entire page before any append; success
 returns `accepted_ids` in exactly the page order. A partially stored page is
