@@ -288,20 +288,17 @@ func TestDaemonDHCPv4OriginalLeaseAuthority(t *testing.T) {
 		t.Fatal("old DHCP worker notification accepted", err)
 	}
 	traffic()
-	// Keep heartbeats alive during control recovery. The independent server
-	// withholds ACKs, so the client naturally expires and enters Requesting.
+	// Control recovery deliberately quiesces all previous dynamic workers.
+	// Withhold ACKs: their cached positive lease must remain only a hint in
+	// the replacement worker, even if its original deadline is still future.
 	expired := healthPBRUpdate(instance())
 	acknowledge.Store(false)
-	until(t, 12*time.Second, func() bool { return kernel(false) })
-	until(t, 5*time.Second, func() bool { s := snapshot(); return !s.Active && s.State == wire.StateRequesting })
 	stableGeneration := module("service.wan").Generation
 	restart("control")
-	if module("service.wan").Generation != stableGeneration {
-		t.Fatal("worker restarted during control recovery gate")
-	}
-	// A fresh control may ACK the already-expired old grant, or reject it if
-	// the live worker has already replayed its newer inactive observation.
-	if err := f.control.Do(ctx, "POST", "/v1/services/state", expired, nil); err != nil && !localapi.IsHTTPStatus(err, 409) || !kernel(false) {
+	until(t, 10*time.Second, func() bool {
+		return module("service.wan").Generation > stableGeneration && !snapshot().Active && kernel(false)
+	})
+	if err := f.control.Do(ctx, "POST", "/v1/services/state", expired, nil); !localapi.IsHTTPStatus(err, 409) || !kernel(false) {
 		t.Fatal("control restart revived an expired original grant", err)
 	}
 	acknowledge.Store(true)
