@@ -1,0 +1,42 @@
+=== RUN   TestStartupAdoptionRejectsUnsafeAuthoritativeJournal
+=== RUN   TestStartupAdoptionRejectsUnsafeAuthoritativeJournal/symlink
+=== RUN   TestStartupAdoptionRejectsUnsafeAuthoritativeJournal/hardlink
+=== RUN   TestStartupAdoptionRejectsUnsafeAuthoritativeJournal/directory_symlink
+=== RUN   TestStartupAdoptionRejectsUnsafeAuthoritativeJournal/readable_journal
+=== RUN   TestStartupAdoptionRejectsUnsafeAuthoritativeJournal/writable_directory
+=== RUN   TestStartupAdoptionRejectsUnsafeAuthoritativeJournal/fifo
+--- PASS: TestStartupAdoptionRejectsUnsafeAuthoritativeJournal (0.43s)
+    --- PASS: TestStartupAdoptionRejectsUnsafeAuthoritativeJournal/symlink (0.24s)
+    --- PASS: TestStartupAdoptionRejectsUnsafeAuthoritativeJournal/hardlink (0.04s)
+    --- PASS: TestStartupAdoptionRejectsUnsafeAuthoritativeJournal/directory_symlink (0.04s)
+    --- PASS: TestStartupAdoptionRejectsUnsafeAuthoritativeJournal/readable_journal (0.04s)
+    --- PASS: TestStartupAdoptionRejectsUnsafeAuthoritativeJournal/writable_directory (0.04s)
+    --- PASS: TestStartupAdoptionRejectsUnsafeAuthoritativeJournal/fifo (0.04s)
+=== RUN   TestStartupInspectionChecksRealCandidateAndRecoveryWithoutWriting
+=== RUN   TestStartupInspectionChecksRealCandidateAndRecoveryWithoutWriting/before_adoption
+=== RUN   TestStartupInspectionChecksRealCandidateAndRecoveryWithoutWriting/after_adoption
+--- PASS: TestStartupInspectionChecksRealCandidateAndRecoveryWithoutWriting (0.13s)
+    --- PASS: TestStartupInspectionChecksRealCandidateAndRecoveryWithoutWriting/before_adoption (0.06s)
+    --- PASS: TestStartupInspectionChecksRealCandidateAndRecoveryWithoutWriting/after_adoption (0.07s)
+=== RUN   TestStartupInspectionPreservesConsumedReceiptWithoutRereadingSnapshot
+--- PASS: TestStartupInspectionPreservesConsumedReceiptWithoutRereadingSnapshot (0.06s)
+=== RUN   TestStartupInspectionRefusesWrongStateAndMissingInputs
+=== RUN   TestStartupInspectionRefusesWrongStateAndMissingInputs/revision
+=== RUN   TestStartupInspectionRefusesWrongStateAndMissingInputs/generation
+=== RUN   TestStartupInspectionRefusesWrongStateAndMissingInputs/store
+=== RUN   TestStartupInspectionRefusesWrongStateAndMissingInputs/confirmation
+=== RUN   TestStartupInspectionRefusesWrongStateAndMissingInputs/capacity
+=== RUN   TestStartupInspectionRefusesWrongStateAndMissingInputs/baseline
+=== RUN   TestStartupInspectionRefusesWrongStateAndMissingInputs/missing_snapshot
+=== RUN   TestStartupInspectionRefusesWrongStateAndMissingInputs/corrupt_snapshot
+--- PASS: TestStartupInspectionRefusesWrongStateAndMissingInputs (0.46s)
+    --- PASS: TestStartupInspectionRefusesWrongStateAndMissingInputs/revision (0.05s)
+    --- PASS: TestStartupInspectionRefusesWrongStateAndMissingInputs/generation (0.06s)
+    --- PASS: TestStartupInspectionRefusesWrongStateAndMissingInputs/store (0.05s)
+    --- PASS: TestStartupInspectionRefusesWrongStateAndMissingInputs/confirmation (0.06s)
+    --- PASS: TestStartupInspectionRefusesWrongStateAndMissingInputs/capacity (0.06s)
+    --- PASS: TestStartupInspectionRefusesWrongStateAndMissingInputs/baseline (0.06s)
+    --- PASS: TestStartupInspectionRefusesWrongStateAndMissingInputs/missing_snapshot (0.05s)
+    --- PASS: TestStartupInspectionRefusesWrongStateAndMissingInputs/corrupt_snapshot (0.05s)
+PASS
+ok      github.com/imksoo/routerd2/internal/config      1.085s

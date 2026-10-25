@@ -76,7 +76,7 @@ prepared replay/409/cancel後commitを確認した。pairはboot前にcancelし�
 既存runtime-only fallbackで設定/snapshot provenance、SSH公開identity、stable event ID/cursorを保持する。
 関連3個別gateであり、全suiteや対象実機の完了とは数えない。
 
-QEMUは外部NIC/host port/共有host mountなし。通常512MiB/2CPU、storage1024MiB/2CPUとprivate regular-file disk256MiB。
+QEMUは外部NIC/host port/共有host mountなし。signed PID1/storageは1024MiB/2CPU、通常daemonは512MiB/2CPU、storageはprivate regular-file disk256MiB。
 host network/block device/mount/clockは変更しない。
 
 ## 残作業

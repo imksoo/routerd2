@@ -1,0 +1,7 @@
+# github.com/imksoo/routerd2/internal/config [github.com/imksoo/routerd2/internal/config.test]
+internal/config/startup_inspection_test.go:61:20: s.InspectStartup undefined (type *Store has no field or method InspectStartup)
+internal/config/startup_inspection_test.go:79:18: s.InspectStartup undefined (type *Store has no field or method InspectStartup)
+internal/config/startup_inspection_test.go:97:16: s.InspectStartup undefined (type *Store has no field or method InspectStartup)
+internal/config/startup_inspection_test.go:164:19: s.InspectStartup undefined (type *Store has no field or method InspectStartup)
+FAIL    github.com/imksoo/routerd2/internal/config [build failed]
+FAIL

@@ -1,0 +1,167 @@
+{
+  "recorded_at_utc": "2026-10-25T09:58:58.367599+00:00",
+  "product_checkpoint": "28c98cae3e44baed3ec1cfb17f48c928d7806022",
+  "full_goal_status": "active",
+  "physical_target_qualified": false,
+  "scope": "Read-only configuration startup candidate/fallback inspection shared with adoption; private regular journal and pinned directory checks; checked-prepare unit/real PID1 fixture acceptance, without paired loader or complete target/state qualification",
+  "normalizations": [
+    "developer workspace and toolchain paths",
+    "ANSI, tabs, CRLF and trailing whitespace",
+    "public kernel certificate identifier",
+    "ephemeral private SSH host-key hash omitted; public fingerprints retained"
+  ],
+  "raw_artifacts": [
+    {
+      "public_name": "api-red.log",
+      "private_source": "dist/goal-validation/startup-inspection-api-red.log",
+      "raw_sha256": "91fdbd50131e8128227006dc9af99547821fce1677aa5cf2f61c9ef094e5221f"
+    },
+    {
+      "public_name": "authority-red.log",
+      "private_source": "dist/goal-validation/startup-inspection-authority-red.log",
+      "raw_sha256": "e36f0be8786ed0d99ecb398b999df326baa97f535a681ab13a3650fa9f70d3e9"
+    },
+    {
+      "public_name": "focused.log",
+      "private_source": "dist/goal-validation/startup-inspection-focused.log",
+      "raw_sha256": "7a7d4d43ddb1d47ee2233b2499c53ee4c5e91984ae9bb3b0edc8b71f3eef33b3"
+    },
+    {
+      "public_name": "related-race.log",
+      "private_source": "dist/goal-validation/startup-inspection-related-race.log",
+      "raw_sha256": "62325cd2a03f94b3ffe1d0ace9c715247130f8155b23099be0f4b43e3ed49833"
+    },
+    {
+      "public_name": "final-focused-race.log",
+      "private_source": "dist/goal-validation/startup-inspection-final-focused-race.log",
+      "raw_sha256": "086657ab23d02194b86336b2b7da6dfbcbc3901e0c87760099b64ade7cf24098"
+    },
+    {
+      "public_name": "check-build.log",
+      "private_source": "dist/goal-validation/startup-inspection-check-build.log",
+      "raw_sha256": "5d2f4e277df4927d793ee8941ae56cb9e4bbcd62ff2c4ff338d9d3991a107e5c"
+    },
+    {
+      "public_name": "build-manifest.json",
+      "private_source": "dist/goal-validation/startup-inspection-build-manifest.json",
+      "raw_sha256": "7e8a8c127700368916027d476e31c2c397100edeb8d6e8a6c55ef15a77f2c736"
+    },
+    {
+      "public_name": "native-manifest.json",
+      "private_source": "dist/goal-validation/startup-inspection-native-manifest.json",
+      "raw_sha256": "d94c1ee96421f830792d0af6f0efd725516d5ff9f6f904f9bf851a009e39a93a"
+    },
+    {
+      "public_name": "TestBuiltRuntimeCatalog.log",
+      "private_source": "dist/goal-validation/startup-inspection-native-TestBuiltRuntimeCatalog.log",
+      "raw_sha256": "5e89a720b1343b983c7d6ae8133af36b1f1e971d6b53b3493255d5ccf029df08"
+    },
+    {
+      "public_name": "TestPublishBuiltRelease.log",
+      "private_source": "dist/goal-validation/startup-inspection-native-TestPublishBuiltRelease.log",
+      "raw_sha256": "92f135e719bf4f7a2a059b77ee30bcb63d3a5bd9a2b4897a34386d9bcf6c6c5c"
+    },
+    {
+      "public_name": "TestDaemonDHCPv4OriginalLeaseAuthority.log",
+      "private_source": "dist/goal-validation/startup-inspection-native-TestDaemonDHCPv4OriginalLeaseAuthority.log",
+      "raw_sha256": "e9fcabd2a48ac8e25232867dafecc0ba4021a4a65c99d5e36800ae47dab47214"
+    },
+    {
+      "public_name": "TestDaemonConfigurationAndRecovery.log",
+      "private_source": "dist/goal-validation/startup-inspection-native-TestDaemonConfigurationAndRecovery.log",
+      "raw_sha256": "135efa6bde2d4786e55cab371a5fdabd616fd1b1d0a9eef26cd068d79abb5c76"
+    },
+    {
+      "public_name": "TestDaemonStartupSelectionAndRecovery.log",
+      "private_source": "dist/goal-validation/startup-inspection-native-TestDaemonStartupSelectionAndRecovery.log",
+      "raw_sha256": "f5ba1c99412f6b828c1064a122d17098e663be952b280dcdd2276c0bff9f861a"
+    },
+    {
+      "public_name": "TestDaemonConditionalStartupRecovery.log",
+      "private_source": "dist/goal-validation/startup-inspection-native-TestDaemonConditionalStartupRecovery.log",
+      "raw_sha256": "3015b459e3d47c59516f262b2835fbfe018d2dad2336f0629cdc12ee1a905cfa"
+    },
+    {
+      "public_name": "TestDaemonHealthPBRFailoverAndRecovery.log",
+      "private_source": "dist/goal-validation/startup-inspection-native-TestDaemonHealthPBRFailoverAndRecovery.log",
+      "raw_sha256": "c09696f6400b2891b7a8a4a1d295ac83496c38f0a7f556b587280aa5e6415541"
+    },
+    {
+      "public_name": "qemu-source.json",
+      "private_source": "dist/goal-validation/startup-inspection-qemu/source.json",
+      "raw_sha256": "705e89cfd194d76f1bb4a505b5da0777ad45af8dead5afeb4414980c31db3bca"
+    },
+    {
+      "public_name": "qemu-resources.json",
+      "private_source": "dist/goal-validation/startup-inspection-qemu/resources.json",
+      "raw_sha256": "e623e604616ebedb1405542b0e783de4f8a3abde4e1c6dc8a06af9386837fd13"
+    },
+    {
+      "public_name": "release-boot-host.log",
+      "private_source": "dist/goal-validation/startup-inspection-qemu/release-boot-host.log",
+      "raw_sha256": "e1e7079f0a72df91c02261840ad14d9899b2362084ccff4372bdb9e5341701c6"
+    },
+    {
+      "public_name": "release-boot-manifest.json",
+      "private_source": "dist/goal-validation/startup-inspection-qemu/release-boot/manifest.json",
+      "raw_sha256": "204fbddec7d1af664d5386fab2e0c92fb24e8a9f502d10f9ec1a8204c87618a1"
+    },
+    {
+      "public_name": "release-boot-qemu-serial.log",
+      "private_source": "dist/goal-validation/startup-inspection-qemu/release-boot/qemu-serial.log",
+      "raw_sha256": "551e7b808adb410113f5760b4724af8ca4077a73c15686a53020dfba4551a3b9"
+    },
+    {
+      "public_name": "storage-host.log",
+      "private_source": "dist/goal-validation/startup-inspection-qemu/storage-host.log",
+      "raw_sha256": "dcb9b26e183f42158fc46c9ce021faa7cc5b14439ddb49af7e3ad47b4af2e22d"
+    },
+    {
+      "public_name": "storage-manifest.json",
+      "private_source": "dist/goal-validation/startup-inspection-qemu/storage/manifest.json",
+      "raw_sha256": "5192c56c26b4109029b884b32a91a17733f3214dfe9759a0dc1d8fb80b8fa9f7"
+    },
+    {
+      "public_name": "storage-qemu-first.log",
+      "private_source": "dist/goal-validation/startup-inspection-qemu/storage/qemu-first.log",
+      "raw_sha256": "a6222eb7c48a9180bb7509c1d69143aa584368d12d49bd4dc48a24c209e5f983"
+    },
+    {
+      "public_name": "storage-qemu-second.log",
+      "private_source": "dist/goal-validation/startup-inspection-qemu/storage/qemu-second.log",
+      "raw_sha256": "d9d03113bf6aa02acf42b6c3630c0ab317d17b8dcf373a1109bc92f5c716a3da"
+    },
+    {
+      "public_name": "daemon-health-pbr-host.log",
+      "private_source": "dist/goal-validation/startup-inspection-qemu/daemon-health-pbr-host.log",
+      "raw_sha256": "1f75c90ef59ec10f3786a4dad597a30e89ca932d6aec7092835369b3cb941b9d"
+    },
+    {
+      "public_name": "daemon-health-pbr-manifest.json",
+      "private_source": "dist/goal-validation/startup-inspection-qemu/daemon-health-pbr/manifest.json",
+      "raw_sha256": "7a0229d9680a0bc61100326123d73f62a19efdaac27b1dddab42d144450e8be7"
+    },
+    {
+      "public_name": "daemon-health-pbr-qemu-serial.log",
+      "private_source": "dist/goal-validation/startup-inspection-qemu/daemon-health-pbr/qemu-serial.log",
+      "raw_sha256": "f00ba22f1b61189be525016cfb69154220c77a77df3c691d8dc86cab8651326e"
+    }
+  ],
+  "private_packet_captures": [
+    {
+      "private_source": "dist/goal-validation/startup-inspection-native-packets/dhcp4-authority/wan0.pcap",
+      "bytes": 10033,
+      "sha256": "7b069c39e11e67b0fe48cd049207cd0ec68131050c8297fc90ec45fb2b8ff111"
+    },
+    {
+      "private_source": "dist/goal-validation/startup-inspection-native-packets/wan0.pcap",
+      "bytes": 31829,
+      "sha256": "c6163debe4dda554ab99d2257638fcde087bd80dbd38fc7e41f27de021a6eb51"
+    },
+    {
+      "private_source": "dist/goal-validation/startup-inspection-native-packets/wan1.pcap",
+      "bytes": 33441,
+      "sha256": "e9bddff5258f136b117d77fe41169c7d1839015b9c82e441a63609993d9ea65b"
+    }
+  ]
+}

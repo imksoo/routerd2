@@ -12169,6 +12169,33 @@
         "Original timeout detailed contributions and prior health-false component/recurrence remain undetermined; current OCI/APK, arm64 execution, all remaining work packages and selected physical hardware/NIC/performance acceptance"
       ],
       "full_goal_status": "active"
+    },
+    {
+      "id": "read-only-startup-inspection",
+      "date": "2026-10-25",
+      "status": "partial_configuration_inspection_and_same_format_acceptance_verified",
+      "code_checkpoint": "28c98cae3e44baed3ec1cfb17f48c928d7806022",
+      "work_packages": [
+        "CORE-02",
+        "DIST-01"
+      ],
+      "evidence": "docs/evidence/2026-10-25-startup-inspection.md",
+      "implemented": [
+        "Read-only actual journal/snapshot inspection shares adoption checks and exposes current input/recovery branch without publishing or syncing; consumed receipt preserves later commits and does not reread old snapshot",
+        "Explicit startup anchors journal/snapshot reads under one private directory descriptor; owned0600 singly-linked bounded regular journal, nofollow/nonblocking file checks",
+        "Both actual configuration inputs checked under PrepareChecked lock in signed PID1 fixture before cancellation; no activated paired loader or new operator workflow"
+      ],
+      "validation": [
+        "API compile RED and existing unsafe journal adoption RED; FIFO included after guard; initial related Race fails new fixture unequal release ID and retains log, corrected focused Race passes",
+        "Actual signed release/config files reject missing candidate/fallback, differing baseline and stale revision without changing selector/watermarks/config journal; read-only inode/mode/size/mtime/content/tree checks and stale observation refusal",
+        "Clean whole check/Race/vet/Python30/six static ELF build 220.58s, native seven gates and QEMU signed PID1/ext4 two kernels/two-WAN PBR pass; source and artifact SHA recorded"
+      ],
+      "remaining": [
+        "Incoming target compiler and other actual persistent state/absence inventory; full kernel/engine/profile/identity/lease/owner/revocation qualification and format-changing migration",
+        "Operator paired prepare, coordinated loader, exact tuple continuous health/confirmation and bounded conditional fallback with actual signed paired boot gate",
+        "Corrupt selected runtime fallback before Open, write-time power-cut/ENOSPC/fsync, reference-aware pruning and remaining bootstrap/engine/ABI/privilege separation; current OCI/APK, arm64 execution, all plan work packages and selected physical hardware acceptance"
+      ],
+      "full_goal_status": "active"
     }
   ],
   "delivery_goal": {

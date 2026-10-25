@@ -6,7 +6,15 @@
 **継続ゴール:** 全残実装・必要試験・対象実機での利用可能性の受入まで進める。
 部分checkpointでは完了しない。
 
-最新product checkpointは `3331b81`。manifest v3でELFのreadonly ABI宣言を署名へ結び付けた。
+最新product checkpointは `28c98ca`。設定のread-only `InspectStartup`を採用処理と共有し、実journal・candidate/fallback snapshotのidentity/revision/generation/confirmation/outbox容量・current compiler検査をprepareへ接続した。
+同じ保護directory descriptor下でjournalとsnapshotを検査する。explicit選択のjournalはowned0600・単一link・bounded regularを要求し、FIFOを非blockingで拒否する。
+先行テストはAPI欠落と、旧採用のsymlink/hardlink/0644 journal受入をREDで固定。追加release試験のID長fixture誤りを直し、関連Raceと最終全体check/Race/vet/Python30/6 ELF build220.58秒PASS。
+native Race7 gateとQEMU signed PID1 154.25秒・ext4二kernel178.37秒・二WAN/PBR83.75秒PASS。実PID1 fixtureでcandidate/fallback両検査witnessを確認した。
+観測は再利用可能なwrite権限ではなく、adopt時に再検査する。既採用receiptではsnapshotを再読せず、後続commit/confirmationと復旧分岐を保持する。
+当版のtarget compiler/他state inventory・kernel/engine/失効policy・format移行・operator prepare/paired loader/health・全残計画・対象実機受入は未完了。全体ゴールはactive。
+[read-only起動入力検査の証跡・境界・残作業](evidence/2026-10-25-startup-inspection.md) を参照。
+
+前回product checkpointは `3331b81`。manifest v3でELFのreadonly ABI宣言を署名へ結び付けた。
 publisherは実入力から宣言を導出し、全nativeの一致・receiverでの再照合・実行中supervisorの一致を検査する。旧v1/v2 readerは置かない。
 設定schema/semanticsとstate reader/writer範囲を記録し、未検証のformat変更はprepare/boot/direct rollback/fallback前に拒否する。移行policy完成ではない。
 CLIの旧toy ELFがABIを持たず初回check54.91秒FAIL。fixtureだけを更新後、全体check/Race/vet/Python30/6 ELF build183.80秒、clean13.90秒PASS。
