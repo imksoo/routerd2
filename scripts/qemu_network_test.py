@@ -4,7 +4,7 @@ import importlib.util
 from pathlib import Path
 import unittest
 import tempfile
-import re
+import json
 
 
 SPEC = importlib.util.spec_from_file_location("routerd_qemu_network", Path(__file__).with_name("qemu-network.py"))
@@ -44,6 +44,37 @@ class GuestResultTest(unittest.TestCase):
                     self.assertEqual(marker, "")
                     self.assertFalse(nonce_file.exists())
 
+    def test_module_selection_keeps_dependency_closure_and_builtins(self):
+        dep = "kernel/foo.ko: kernel/base.ko\nkernel/base.ko:\nkernel/unneeded.ko:\n"
+        self.assertEqual(GATE.module_closure(dep, "kernel/builtin.ko\n", ["foo", "builtin"]),
+                         {"kernel/foo.ko", "kernel/base.ko"})
+        for invalid, roots in [("kernel/a.ko: kernel/b.ko\nkernel/b.ko: kernel/a.ko\n", ["a"]),
+                               (dep, ["missing"]), ("../a.ko:\n", ["a"]),
+                               ("a/foo.ko:\nb/foo.ko:\n", ["foo"])]:
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                GATE.module_closure(invalid, "", roots)
+
+    def test_pruned_image_keeps_metadata_and_only_selected_modules(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            base = root / "lib/modules/test-kernel"
+            (base / "kernel").mkdir(parents=True)
+            (base / "modules.dep").write_text("kernel/foo.ko: kernel/base.ko\nkernel/base.ko:\nkernel/unused.ko:\n")
+            (base / "modules.builtin").write_text("")
+            for name in ("foo", "base", "unused"):
+                (base / ("kernel/" + name + ".ko")).write_bytes(b"module")
+            result = GATE.prune_modules(root, "test-kernel", ["foo"])
+            self.assertEqual(result["selected_files"], ["kernel/base.ko", "kernel/foo.ko"])
+            self.assertFalse((base / "kernel/unused.ko").exists())
+            self.assertTrue((base / "modules.dep").is_file())
+
+    def test_fixed_kernel_module_roots_are_declared_once(self):
+        roots = json.loads((GATE.PROJECT / "images/kernel-test-init/modules.json").read_text())
+        self.assertEqual(len(roots), len(set(roots)))
+        self.assertTrue({"af_packet", "wireguard", "veth", "ip6_tunnel", "nft_ct", "nft_chain_nat"}.issubset(roots))
+        init = (GATE.PROJECT / "images/kernel-test-init/main.go").read_text()
+        self.assertIn("go:embed modules.json", init)
+
     def test_each_exact_suite_pass(self):
         for name, suite in GATE.SUITES.items():
             with self.subTest(suite=name):
@@ -61,6 +92,7 @@ class GuestResultTest(unittest.TestCase):
             "skipped subtest": exact + "    --- SKIP: child (0.00s)\n",
             "failed subtest": exact + "    --- FAIL: child (0.00s)\n",
             "kernel panic": exact + "Kernel panic - not syncing\n",
+            "truncated initramfs": exact + "Initramfs unpacking failed: write error\n",
             "initializer failure": exact + "ROUTERD_KERNEL_TEST_FAIL\n",
             "suite failure": exact + suite["marker"] + "_FAIL: shutdown\n",
         }
