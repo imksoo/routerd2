@@ -483,6 +483,22 @@ var ErrStale = errors.New("stale protocol producer or configuration")
 // still a replay of the same ownership grant. It must not extend monotonic
 // validity after a backward wall-clock adjustment.
 func (r *Runtime) recordOwnershipLocked(u serviceconfig.Update, maximum time.Duration) error {
+	if u.Role == "dhcp4" {
+		var s dhcp4.Snapshot
+		if err := json.Unmarshal(u.Snapshot, &s); err != nil {
+			return err
+		}
+		clock, err := bfd.ReadClock()
+		if err != nil {
+			return err
+		}
+		if !dhcp4.CurrentLease(s, clock) {
+			delete(r.leases, u.Name)
+			return nil
+		}
+		r.leases[u.Name] = time.Now().Add(time.Duration(s.LeaseClock.ExpiresNanos - uint64(clock.BoottimeNanoseconds)))
+		return nil
+	}
 	if u.Role == "bgp" {
 		var s bgpconfig.Snapshot
 		if err := json.Unmarshal(u.Snapshot, &s); err != nil {
@@ -541,9 +557,9 @@ func (r *Runtime) Accept(ctx context.Context, u serviceconfig.Update) error {
 	if u.Role == "bfd" {
 		return r.acceptBFD(ctx, u)
 	}
-	if u.Role == "bgp" {
+	if u.Role == "bgp" || u.Role == "dhcp4" {
 		// A restarted control has no remembered generations. Authenticate even
-		// its first BGP publication against the current process-tree registry;
+		// its first BGP/DHCPv4 publication against the current process-tree registry;
 		// initial publication precedes worker Ready, so Ready is not required.
 		status, err := r.manager.Status(ctx)
 		if err != nil {
@@ -552,7 +568,7 @@ func (r *Runtime) Accept(ctx context.Context, u serviceconfig.Update) error {
 		matched := false
 		if status.InstanceID == r.supervisorInstance && !status.Stopping {
 			for _, module := range status.Modules {
-				if module.Name == u.Name && module.Role == "bgp" && module.Generation == u.Generation && module.ConfigDigest == u.ConfigDigest {
+				if module.Name == u.Name && module.Role == u.Role && module.Generation == u.Generation && module.ConfigDigest == u.ConfigDigest {
 					matched = true
 					break
 				}
@@ -592,6 +608,11 @@ func (r *Runtime) Accept(ctx context.Context, u serviceconfig.Update) error {
 		return err
 	}
 	previous, had := r.records[u.Name]
+	if u.Role == "dhcp4" {
+		if err := validateDHCP4Transition(previous, u); err != nil {
+			return err
+		}
+	}
 	if u.Role == "bgp" {
 		if err := validateBGPTransition(previous, u); err != nil {
 			return err
@@ -599,7 +620,7 @@ func (r *Runtime) Accept(ctx context.Context, u serviceconfig.Update) error {
 	}
 	oldLease := r.leases[u.Name]
 	switch u.Role {
-	case "vrrp", "bgp", "dhcp_server":
+	case "vrrp", "bgp", "dhcp_server", "dhcp4":
 		maximum := 5 * time.Second
 		if u.Role == "vrrp" {
 			var c vrrp.Config
@@ -744,9 +765,7 @@ func validateSnapshot(instance serviceconfig.Instance, b json.RawMessage) error 
 		if err := strict(b, &s); err != nil {
 			return err
 		}
-		if c.Resource != s.Resource || c.Interface != s.Interface {
-			return errors.New("DHCPv4 snapshot identity mismatch")
-		}
+		return dhcp4.ValidateSnapshot(c, s)
 	case "dhcp6pd":
 		var c dhcp6pd.Config
 		var s dhcp6pd.Snapshot

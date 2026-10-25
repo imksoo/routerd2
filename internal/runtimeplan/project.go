@@ -49,8 +49,8 @@ type projectionFacts struct {
 func (r *Runtime) projectLocked(doc config.Native, records map[string]serviceconfig.Update, now time.Time) (projection, error) {
 	facts := projectionFacts{aftr: r.aftrInputs}
 	for _, service := range doc.Services {
-		if service.BGP != nil {
-			// A clock read failure withholds BGP/BFD-dependent paths. It must not
+		if service.BGP != nil || service.DHCP4 != nil {
+			// A clock read failure withholds DHCP/BGP/BFD-owned paths. It must not
 			// manufacture a new lease or disturb unrelated routing intent.
 			facts.bfdClock, _ = bfd.ReadClock()
 			break
@@ -105,7 +105,7 @@ func projectWithFacts(doc config.Native, runtimeDir, stateDir string, records ma
 			if err := json.Unmarshal(record.Snapshot, &snap); err != nil {
 				return p, err
 			}
-			if !snap.Active || !now.Before(snap.ExpiresAt) {
+			if !dhcp4.CurrentLease(snap, facts.bfdClock) {
 				continue
 			}
 			a, err := netip.ParseAddr(snap.CurrentAddress)
@@ -113,7 +113,7 @@ func projectWithFacts(doc config.Native, runtimeDir, stateDir string, records ma
 				return p, errors.New("invalid active DHCPv4 address")
 			}
 			prefix := netip.PrefixFrom(a, snap.PrefixLength)
-			if err := addAddressWithOptions(&p.network, s.Interface(), prefix.String(), network.AddressOptions{PreferredUntil: snap.ExpiresAt, ValidUntil: snap.ExpiresAt}); err != nil {
+			if err := addAddressWithOptions(&p.network, s.Interface(), prefix.String(), network.AddressOptions{BootLifetime: network.BootLifetime{BootID: snap.BootID, PreferredNanos: snap.LeaseClock.ExpiresNanos, ValidNanos: snap.LeaseClock.ExpiresNanos}}); err != nil {
 				return p, err
 			}
 			if (s.DHCP4.DefaultRoute == nil || *s.DHCP4.DefaultRoute) && snap.DefaultGateway != "" {

@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/imksoo/routerd2/internal/boottime"
 	"math"
 	"net/netip"
 	"strings"
@@ -48,11 +49,7 @@ type Peer struct {
 // Clock relates an absolute CLOCK_BOOTTIME value to display-only UTC. Neither
 // peer health nor expiry may rely only on wall time. BootID scopes monotonic
 // deadlines to the current kernel, including when userland restarts.
-type Clock struct {
-	BootID              string
-	BoottimeNanoseconds int64
-	WallTime            time.Time
-}
+type Clock = boottime.Clock
 
 type Snapshot struct {
 	Resource         string      `json:"resource"`
@@ -180,25 +177,8 @@ func Validate(c Config) error {
 func validState(value string) bool {
 	return value == StateAdminDown || value == StateDown || value == StateInit || value == StateUp
 }
-func validBootID(value string) bool {
-	if len(value) != 36 {
-		return false
-	}
-	for i, ch := range value {
-		if i == 8 || i == 13 || i == 18 || i == 23 {
-			if ch != '-' {
-				return false
-			}
-			continue
-		}
-		if ch < '0' || ch > '9' {
-			if ch < 'a' || ch > 'f' {
-				return false
-			}
-		}
-	}
-	return true
-}
+func validBootID(value string) bool { return boottime.ValidBootID(value) }
+
 func validWall(t time.Time) bool { return !t.IsZero() && t.Year() >= 1970 && t.Year() <= 9999 }
 
 func ValidateSnapshot(c Config, s Snapshot) error {

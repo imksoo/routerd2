@@ -10,14 +10,15 @@ import (
 
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/protocol/bfd"
+	"github.com/imksoo/routerd2/internal/protocol/dhcp4"
 	"github.com/imksoo/routerd2/internal/protocol/health"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 	"github.com/imksoo/routerd2/internal/supervisor"
 )
 
-// guardGrant records a local monotonic deadline once at snapshot acceptance.
-// Re-projecting, repeating a sequence or stepping wall time cannot renew it.
+// guardGrant retains source age and its original deadline. Re-projecting,
+// repeating a sequence or stepping wall time cannot renew protocol authority.
 type guardGrant struct {
 	revision, generation, sequence uint64
 	epoch, bootID                  string
@@ -26,6 +27,7 @@ type guardGrant struct {
 	untilNanos                     uint64
 	observedNanos                  uint64
 	bgp                            *bgpProvider
+	dhcpLease                      dhcp4.LeaseClock
 }
 
 func conditionalProgram(source config.Document) bool {
@@ -63,6 +65,25 @@ func (r *Runtime) installGuardStatusLocked(status supervisor.Status, err error) 
 }
 
 func (r *Runtime) recordGuardGrantLocked(u serviceconfig.Update, now time.Time) {
+	if u.Role == "dhcp4" {
+		var s dhcp4.Snapshot
+		if json.Unmarshal(u.Snapshot, &s) != nil {
+			delete(r.guardGrants, u.Name)
+			return
+		}
+		observed, until := s.ObservedNanos, s.ObservedNanos+uint64(5*time.Second)
+		if s.Active {
+			observed, until = s.LeaseClock.AcquiredNanos, s.LeaseClock.ExpiresNanos
+		}
+		if old, ok := r.guardGrants[u.Name]; ok && old.revision == r.revision && old.generation == u.Generation && old.epoch == u.ProducerEpoch && old.bootID == s.BootID && old.value == s.Active && (s.Active && old.dhcpLease == s.LeaseClock || !s.Active && old.observedNanos == s.ObservedNanos) {
+			until = min(until, old.untilNanos)
+		}
+		if r.guardGrants == nil {
+			r.guardGrants = map[string]guardGrant{}
+		}
+		r.guardGrants[u.Name] = guardGrant{revision: r.revision, generation: u.Generation, sequence: u.Sequence, epoch: u.ProducerEpoch, bootID: s.BootID, value: s.Active, observedNanos: observed, untilNanos: until, dhcpLease: s.LeaseClock}
+		return
+	}
 	if u.Role == "bgp" {
 		provider, err := bgpProviderFor(u)
 		if err != nil {

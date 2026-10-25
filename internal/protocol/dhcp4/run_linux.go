@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"path/filepath"
@@ -72,8 +73,13 @@ func Run(ctx context.Context, cfg Config, effects Effects, ready func()) (result
 		ready()
 	}
 	defer func() {
+		_ = c.refreshClock() // failure retains the last valid observation for withdrawal.
+		if c.sequence < math.MaxUint64 {
+			c.sequence++
+		}
 		withdraw := c.snapshot()
 		withdraw.Active = false
+		withdraw.Stopped = true
 		cleanup, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 		if err := effects.Update(cleanup, withdraw); err != nil {

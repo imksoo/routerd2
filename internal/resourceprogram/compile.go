@@ -75,6 +75,9 @@ func compile(source Program, referenceTargets map[string]Resource) (Plan, error)
 		if r.Interface != nil && (len(r.Interface.Addresses) != 0 || len(r.Interface.AddressOptions) != 0) {
 			return Plan{}, fmt.Errorf("resource %s: interface addresses and address_options belong in separate address resources", r.ID)
 		}
+		if r.Address != nil && r.Address.Options != nil && r.Address.Options.BootLifetime != (network.BootLifetime{}) {
+			return Plan{}, fmt.Errorf("resource %s: boot lifetime is internal projection authority", r.ID)
+		}
 		if p := r.Provenance; p != nil {
 			for _, s := range []string{p.Source, p.Resource, p.Revision, p.Path} {
 				if len(s) > 4096 || !utf8.ValidString(s) || strings.ContainsAny(s, "\x00\r\n") {

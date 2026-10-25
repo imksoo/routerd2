@@ -118,14 +118,14 @@ func newEngine(opts Options, k kernel) (*Engine, error) {
 		f.Close()
 		return nil, fmt.Errorf("network journal already in use or cannot be locked: %w", err)
 	}
-	e := &Engine{opts: opts, kernel: k, lock: f, state: journal{Version: 1, Status: "unapplied"}}
+	e := &Engine{opts: opts, kernel: k, lock: f, state: journal{Version: 2, Status: "unapplied"}}
 	b, err := os.ReadFile(opts.StatePath)
 	if err == nil {
 		if err = json.Unmarshal(b, &e.state); err != nil {
 			f.Close()
 			return nil, fmt.Errorf("network ownership journal: %w", err)
 		}
-		if e.state.Version != 1 {
+		if e.state.Version != 2 {
 			f.Close()
 			return nil, fmt.Errorf("unsupported network journal version %d", e.state.Version)
 		}

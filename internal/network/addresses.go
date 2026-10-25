@@ -3,6 +3,7 @@ package network
 import (
 	"errors"
 	"fmt"
+	"github.com/imksoo/routerd2/internal/boottime"
 	"math"
 	"net/netip"
 	"time"
@@ -15,9 +16,10 @@ import (
 // NoDAD is only for explicitly coordinated IPv6 addresses such as HA VIPs. It
 // never changes the DAD policy of another address on the same interface.
 type AddressOptions struct {
-	PreferredUntil time.Time `json:"preferred_until,omitzero"`
-	ValidUntil     time.Time `json:"valid_until,omitzero"`
-	NoDAD          bool      `json:"no_dad,omitempty"`
+	BootLifetime   BootLifetime `json:"boot_lifetime,omitzero"`
+	PreferredUntil time.Time    `json:"preferred_until,omitzero"`
+	ValidUntil     time.Time    `json:"valid_until,omitzero"`
+	NoDAD          bool         `json:"no_dad,omitempty"`
 	// Peer is a point-to-point peer address/prefix. The local address must use
 	// its host prefix (/32 or /128); the network prefix belongs to the peer.
 	// Changing a peer requires removing and applying the local address first.
@@ -62,6 +64,11 @@ func validateAddressOptions(d Desired) error {
 					errs = append(errs, fmt.Errorf("interface %s address %s: local point-to-point address must use /32 or /128; prefix length belongs to the peer", l.Name, p))
 				}
 			}
+			if b := o.BootLifetime; b != (BootLifetime{}) {
+				if !boottime.ValidBootID(b.BootID) || b.ValidNanos == 0 || b.ValidNanos > math.MaxInt64 || b.PreferredNanos > b.ValidNanos || !o.PreferredUntil.IsZero() || !o.ValidUntil.IsZero() {
+					errs = append(errs, fmt.Errorf("interface %s address %s: invalid boot lifetime", l.Name, p))
+				}
+			}
 			if !o.ValidUntil.IsZero() && (o.PreferredUntil.IsZero() || o.PreferredUntil.After(o.ValidUntil)) {
 				errs = append(errs, fmt.Errorf("interface %s address %s: preferred lifetime must not exceed valid lifetime", l.Name, p))
 			}
@@ -88,7 +95,7 @@ func normalizeAddressOptions(o AddressOptions) AddressOptions {
 	return o
 }
 func sameAddressOptions(a, b AddressOptions) bool {
-	return a.NoDAD == b.NoDAD && a.Peer == b.Peer && a.PreferredUntil.Equal(b.PreferredUntil) && a.ValidUntil.Equal(b.ValidUntil)
+	return a.BootLifetime == b.BootLifetime && a.NoDAD == b.NoDAD && a.Peer == b.Peer && a.PreferredUntil.Equal(b.PreferredUntil) && a.ValidUntil.Equal(b.ValidUntil)
 }
 
 func lifetimeRemaining(deadline, now time.Time) uint32 {
@@ -111,7 +118,7 @@ func projectAddressExpiry(d Desired, now time.Time) Desired {
 		kept := l.Addresses[:0]
 		for _, address := range l.Addresses {
 			o := l.AddressOptions[address]
-			if !o.ValidUntil.IsZero() && !o.ValidUntil.After(now) {
+			if _, valid, err := addressLifetimes(o, now); err != nil || valid == 0 {
 				delete(l.AddressOptions, address)
 				continue
 			}
@@ -144,7 +151,8 @@ func lifetimeClose(actual, expected uint32) bool {
 	return expected-actual <= 2
 }
 func addressOptionsMatch(live AddressState, want AddressOptions, now time.Time) bool {
-	return live.Peer == want.Peer && (live.Flags&addressNoDADFlag != 0) == want.NoDAD && lifetimeClose(live.PreferredLifetime, lifetimeRemaining(want.PreferredUntil, now)) && lifetimeClose(live.ValidLifetime, lifetimeRemaining(want.ValidUntil, now))
+	p, v, err := addressLifetimes(want, now)
+	return err == nil && live.Peer == want.Peer && (live.Flags&addressNoDADFlag != 0) == want.NoDAD && lifetimeClose(live.PreferredLifetime, p) && lifetimeClose(live.ValidLifetime, v)
 }
 
 func (p *apply) addressConfig(l Interface, address string) error {

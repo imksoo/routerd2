@@ -11,82 +11,18 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/netip"
-	"os"
-	"strings"
-	"sync"
-	"sync/atomic"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 )
 
-type processClockReader struct {
-	identity atomic.Pointer[string]
-	mu       sync.Mutex
-	load     func() (string, error)
-}
-
-var processClock = processClockReader{load: loadKernelBootID}
-
-// ReadClock observes BOOTTIME on every call. Boot identity is immutable for
-// this process's lifetime: a kernel reboot replaces the process, including its
-// cache. Avoid filesystem I/O and allocations in BFD/admin deadline hot paths.
-func ReadClock() (Clock, error) { return processClock.Read() }
-
-func (r *processClockReader) Read() (Clock, error) {
-	id := r.identity.Load()
-	if id == nil {
-		r.mu.Lock()
-		id = r.identity.Load()
-		if id == nil {
-			value, err := r.load()
-			if err == nil && !validBootID(value) {
-				err = errors.New("invalid kernel boot ID")
-			}
-			if err != nil {
-				r.mu.Unlock()
-				return Clock{}, err
-			}
-			r.identity.Store(&value)
-			id = &value
-		}
-		r.mu.Unlock()
-	}
-	return clockForBoot(*id)
-}
-
-func loadKernelBootID() (string, error) {
-	f, err := os.Open("/proc/sys/kernel/random/boot_id")
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	value, err := io.ReadAll(io.LimitReader(f, 65))
-	if err != nil {
-		return "", err
-	}
-	id := strings.TrimSpace(string(value))
-	if len(value) > 64 || !validBootID(id) {
-		return "", errors.New("invalid kernel boot ID")
-	}
-	return id, nil
-}
-
-func clockForBoot(id string) (Clock, error) {
-	var ts unix.Timespec
-	if err := unix.ClockGettime(unix.CLOCK_BOOTTIME, &ts); err != nil {
-		return Clock{}, err
-	}
-	value := ts.Nano()
-	if value <= 0 {
-		return Clock{}, errors.New("invalid CLOCK_BOOTTIME value")
-	}
-	return Clock{BootID: id, BoottimeNanoseconds: value, WallTime: time.Now().UTC()}, nil
-}
+// ReadClock shares the immutable process boot identity with other finite owners.
+func ReadClock() (Clock, error)             { return boottime.Read() }
+func clockForBoot(id string) (Clock, error) { return boottime.ReadForBoot(id) }
 
 type datagram struct {
 	data                []byte

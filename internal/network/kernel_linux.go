@@ -106,7 +106,10 @@ func nativeAddress(address string, options AddressOptions) (*netlink.Addr, error
 		return nil, err
 	}
 	now := time.Now()
-	preferred, valid := lifetimeRemaining(options.PreferredUntil, now), lifetimeRemaining(options.ValidUntil, now)
+	preferred, valid, err := addressLifetimes(options, now)
+	if err != nil {
+		return nil, err
+	}
 	if valid == 0 {
 		return nil, fmt.Errorf("address %s valid lifetime has expired", address)
 	}
