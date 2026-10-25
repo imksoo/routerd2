@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/configref"
@@ -19,16 +20,97 @@ import (
 )
 
 type guardNetwork struct {
-	calls int
-	hook  func()
+	calls        int
+	hook         func()
+	failRevision uint64
 }
 
-func (n *guardNetwork) Apply(context.Context, uint64, network.Desired) error {
+func (n *guardNetwork) Apply(_ context.Context, revision uint64, _ network.Desired) error {
 	n.calls++
 	if n.hook != nil {
 		n.hook()
 	}
+	if revision == n.failRevision {
+		return errors.New("injected apply failure")
+	}
 	return nil
+}
+
+func TestReleaseGuardKeepsConfirmedRollbackAndFailedApplyExclusive(t *testing.T) {
+	ctx := context.Background()
+	root := release.NewFixtureStore(t)
+	active := release.InitializeFixture(t, root)
+	next := release.StageFixture(t, root, "fixture-r2", 2)
+	dir := t.TempDir()
+	seed := filepath.Join(dir, "seed.json")
+	if err := config.AtomicJSON(seed, config.Document{SchemaVersion: config.SchemaVersion}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, current, err := config.Open(filepath.Join(dir, "state"), seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseline, err := cfg.Snapshot(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := &guardNetwork{}
+	e, err := control.NewWithRelease(cfg, current, n, root, active.Digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	state, err := root.Status(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n.hook = func() {
+		if _, err := root.Prepare(ctx, next, state.Generation, release.PrepareOptions{}); !errors.Is(err, release.ErrBusy) {
+			t.Fatalf("mutation/restore lost release lock: %v", err)
+		}
+	}
+	req := control.CommitRequest{ExpectedRevision: 1, RequestID: "confirmed-trial", Config: current.Config, ConfirmTimeoutSeconds: 5}
+	if _, err := e.Commit(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	// Raw store primitives cannot preflight the live writer. Even if a caller
+	// prepares a stale pair, no later rollback may silently overwrite its fence.
+	selected := configref.Selection{Generation: 10, ExpectedRevision: 1, Snapshot: baseline}
+	pending, err := root.Prepare(ctx, next, state.Generation, release.PrepareOptions{Startup: &selected, KnownGood: &baseline})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Expire(ctx, time.Now().Add(time.Hour)); !errors.Is(err, control.ErrConflict) {
+		t.Fatalf("pending pair allowed expiry: %v", err)
+	}
+	if err := e.Reconcile(ctx); !errors.Is(err, control.ErrConflict) {
+		t.Fatalf("pending pair allowed restart rollback: %v", err)
+	}
+	if _, err := e.Confirm(control.ConfirmRequest{Revision: 2, RequestID: req.RequestID}); !errors.Is(err, control.ErrConflict) {
+		t.Fatalf("pending pair allowed config confirmation: %v", err)
+	}
+	if _, err := root.CancelPending(ctx, pending.Generation); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Expire(ctx, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if s := e.State(); s.Revision != 3 || s.Confirmation != nil {
+		t.Fatal("rollback failed", s)
+	}
+	n.failRevision = 4
+	req.ExpectedRevision, req.RequestID, req.ConfirmTimeoutSeconds = 3, "failed-apply", 0
+	if _, err := e.Commit(ctx, req); err == nil {
+		t.Fatal("failed apply succeeded")
+	}
+	if c, err := cfg.Load(); err != nil || c.Revision != 3 {
+		t.Fatal("failed apply changed authoritative journal", c, err)
+	}
+	if _, err := root.Status(ctx); err != nil {
+		t.Fatal("failed apply leaked lock", err)
+	}
 }
 func (*guardNetwork) Snapshot(context.Context) (network.Snapshot, error) {
 	return network.Snapshot{}, nil
@@ -110,6 +192,9 @@ func TestActualReleaseStoreFencesControlCommitPrepareTrialAndConfirmation(t *tes
 	if _, err := e.Commit(ctx, req); err != nil {
 		t.Fatalf("cancel did not unfreeze commits: %v", err)
 	}
+	// Cancellation reserves the publisher sequence permanently. The next
+	// trial uses a fresh publication rather than reusing the canceled image.
+	next = release.StageFixture(t, root, "fixture-r3", 3)
 	baseline, err = cfg.Snapshot(3)
 	if err != nil {
 		t.Fatal(err)
