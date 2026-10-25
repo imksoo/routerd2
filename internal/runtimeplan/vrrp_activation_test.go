@@ -62,6 +62,15 @@ func TestGracefulVRRPRequiresCurrentAdmissionAndLatchesOnlyAppliedPublication(t 
 	if err := acceptVRRPAndDrain(t, r, pending); err != nil {
 		t.Fatal(err)
 	}
+	if err := r.CheckReady(ctx); err == nil {
+		t.Fatal("unpublished elected MASTER was reported healthy")
+	}
+	r.mu.Lock()
+	facts, factErr := r.conditionFactsLocked(r.source, r.revision, time.Now())
+	r.mu.Unlock()
+	if factErr != nil || facts.Value("service.ha.elected") != resourceprogram.True || facts.Value("service.ha.active") != resourceprogram.False {
+		t.Fatal("election and publication facts were conflated", factErr)
+	}
 	grant, err := r.GrantVRRPActivation(ctx, pending)
 	if err != nil || grant.ID != 0 || len(n.applied.Links) != 0 {
 		t.Fatal("unready elected MASTER acquired VIP", grant, err)
