@@ -104,3 +104,47 @@ func TestDHCPv4FactUsesSourceAgeWithoutReceiptRenewal(t *testing.T) {
 		t.Fatal("fact age was minted at receipt", g)
 	}
 }
+
+func TestDHCPv4ObservationOrderAndRestoredHintHaveSeparateEpochs(t *testing.T) {
+	ctx := context.Background()
+	clock, _ := boottime.Read()
+	r, _, _ := fixture(t, wanDoc())
+	s := bootLease4(clock, time.Hour)
+	if err := r.Accept(ctx, update(t, r, "service.wan", 1, s)); err != nil {
+		t.Fatal(err)
+	}
+	phase := s
+	phase.Sequence++
+	phase.State = wire.StateRenewing
+	if err := r.Accept(ctx, update(t, r, "service.wan", 2, phase)); err != nil {
+		t.Fatal("distinct observations may share a clock reading", err)
+	}
+	if err := r.Accept(ctx, update(t, r, "service.wan", 3, s)); err == nil {
+		t.Fatal("older logical observation passed a higher transport sequence")
+	}
+	changed := phase
+	changed.State = wire.StateRebinding
+	if err := r.Accept(ctx, update(t, r, "service.wan", 4, changed)); err == nil {
+		t.Fatal("same logical sequence changed its body")
+	}
+	// The local file can retain a high counter from the former worker. Its
+	// INIT-REBOOT hint is inactive and cannot block this worker's fresh ACK.
+	r2, _, _ := fixture(t, wanDoc())
+	hint := s
+	hint.Epoch = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+	hint.Sequence = 1
+	hint.Active = false
+	hint.State = wire.StateRequesting
+	if err := r2.Accept(ctx, update(t, r2, "service.wan", 1, hint)); err != nil {
+		t.Fatal(err)
+	}
+	ack := hint
+	ack.Active = true
+	ack.State = wire.StateBound
+	ack.Sequence = 2
+	ack.LeaseClock.Epoch = ack.Epoch
+	ack.LeaseClock.Sequence = 2
+	if err := r2.Accept(ctx, update(t, r2, "service.wan", 2, ack)); err != nil {
+		t.Fatal("old hint counter fenced a fresh current-worker ACK", err)
+	}
+}

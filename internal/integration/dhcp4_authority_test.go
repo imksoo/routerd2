@@ -275,6 +275,7 @@ func TestDaemonDHCPv4OriginalLeaseAuthority(t *testing.T) {
 	if !snapshot().Active {
 		t.Fatal("raw last active snapshot did not remain independently stale")
 	}
+	old = healthPBRUpdate(instance()) // all pre-stop RPCs have drained before expiry.
 	if err := f.control.Do(ctx, "POST", "/v1/services/state", old, nil); err != nil || !kernel(false) {
 		t.Fatal("identical retry renewed expired lease", err)
 	}
@@ -288,6 +289,7 @@ func TestDaemonDHCPv4OriginalLeaseAuthority(t *testing.T) {
 	traffic()
 	expired := pause()
 	until(t, 12*time.Second, func() bool { return kernel(false) })
+	expired = healthPBRUpdate(instance())
 	restart("control")
 	if err := f.control.Do(ctx, "POST", "/v1/services/state", expired, nil); err != nil || !kernel(false) {
 		t.Fatal("control restart revived an expired original grant", err)

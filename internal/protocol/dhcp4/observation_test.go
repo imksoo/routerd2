@@ -48,6 +48,9 @@ func TestLeaseObservationValidationAndSavedHintCannotAuthorizeOldBoot(t *testing
 	bind(t, c)
 	s := c.snapshot()
 	for _, change := range []func(*Snapshot){
+		func(s *Snapshot) { s.Epoch = "bad" },
+		func(s *Snapshot) { s.Sequence = 0 },
+		func(s *Snapshot) { s.LeaseClock.Epoch = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee" },
 		func(s *Snapshot) { s.BootID = "bad" },
 		func(s *Snapshot) { s.ObservedNanos = 0 },
 		func(s *Snapshot) { s.LeaseClock.ExpiresNanos++ },
