@@ -5,6 +5,7 @@ import (
 
 	"github.com/imksoo/routerd/pkg/api"
 	"github.com/imksoo/routerd2/internal/protocol/bfd"
+	"github.com/imksoo/routerd2/internal/protocol/bgpconfig"
 	"github.com/imksoo/routerd2/internal/protocol/health"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
@@ -31,6 +32,27 @@ func TestDerivedEventValidatesTypedReferencesBeforeProjection(t *testing.T) {
 		spec.Inputs[0].Field = field
 		if _, err = Compile(source); err == nil {
 			t.Fatal("invalid reference accepted", field)
+		}
+	}
+}
+
+func TestDerivedBGPRouterReferenceUsesAllDeclaredProviders(t *testing.T) {
+	for _, field := range []string{"phase", "establishedPeers", "backend", "observedAt"} {
+		spec := api.DerivedEventSpec{Topic: "routerd.bgp", Inputs: []api.ReadyWhenSpec{{Field: "${BGPRouter/service/router.status." + field + "}", NotEmpty: true}}}
+		source := Program{SchemaVersion: SchemaVersion, Resources: []Resource{{ID: "service/router", When: &FactCondition{Fact: "service.gate.ready"}, Service: &serviceconfig.Service{Name: "router", BGP: &serviceconfig.BGP{Runtime: bgpconfig.AppliedConfig{Global: bgpconfig.AppliedGlobal{ASN: 65001, RouterID: "192.0.2.1", ListenPort: -1}, Peers: map[string]bgpconfig.AppliedPeer{"192.0.2.2": {Address: "192.0.2.2", ASN: 65002}}}}}}, {ID: "derived", DerivedEvent: &spec}}}
+		plan, err := Compile(source)
+		if err != nil || len(plan.Native.DerivedEvents) != 1 {
+			t.Fatal(field, err)
+		}
+		projected, _, err := Project(source, FactSnapshot{})
+		if err != nil || len(projected.Native.Services) != 0 || len(projected.Native.DerivedEvents) != 1 {
+			t.Fatal("inactive declaration lost typed reference", field, err)
+		}
+		for _, bad := range []string{"${BGP/service/router.status.phase}", "${BGPPeer/service/router.status.phase}", "${BGPRouter/missing.status.phase}", "${HealthCheck/service/router.status.phase}", "${BGPRouter/service/router.status.acceptedPrefixes}", "${BGPRouter/service/router.status.peers.state}"} {
+			spec.Inputs[0].Field = bad
+			if _, err := Compile(source); err == nil {
+				t.Fatal("wrong kind or unobserved field accepted", bad)
+			}
 		}
 	}
 }
