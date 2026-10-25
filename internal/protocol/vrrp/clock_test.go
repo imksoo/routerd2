@@ -3,6 +3,7 @@
 package vrrp
 
 import (
+	"context"
 	"math"
 	"net/netip"
 	"strings"
@@ -101,5 +102,64 @@ func TestSnapshotRejectsMalformedBootAuthorityAndOverlongLease(t *testing.T) {
 		if err := ValidateSnapshot(c, s); err == nil {
 			t.Fatal("malformed ownership accepted", s)
 		}
+	}
+}
+
+func TestBackupPublishesFreshFiniteNegativeObservationsWithoutTransition(t *testing.T) {
+	c := Normalize(config4())
+	device := newFakeTransport()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	updates := make(chan Snapshot, 8)
+	done := make(chan error, 1)
+	go func() {
+		done <- run(ctx, c, netip.MustParseAddr(c.SourceAddress), strings.Repeat("d", 32), device, EffectsFunc(func(_ context.Context, s Snapshot) error { updates <- s; return nil }), nil)
+	}()
+	var first, second Snapshot
+	select {
+	case first = <-updates:
+	case <-time.After(time.Second):
+		t.Fatal("initial backup observation missing")
+	}
+	select {
+	case second = <-updates:
+	case <-time.After(2 * time.Second):
+		t.Fatal("backup state had no bounded observation heartbeat")
+	}
+	if first.Active || second.Active || first.State != StateBackup || second.State != StateBackup || first.Transition != second.Transition || second.ObservedNanos <= first.ObservedNanos || second.ExpiresNanos <= first.ExpiresNanos {
+		t.Fatal("backup heartbeat changed role or reused old observation authority", first, second)
+	}
+	if err := ValidateSnapshot(c, second); err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	final := <-updates
+	if final.State != StateInitialize || final.ExpiresNanos != 0 {
+		t.Fatal("backup shutdown retained authority")
+	}
+}
+
+func TestExpiredActiveElectionCannotPublishFreshLeaseBeforeAdvertising(t *testing.T) {
+	c := config4()
+	c.AdvertIntervalCentiseconds = 1
+	c = Normalize(c)
+	m := newMachine(c, netip.MustParseAddr(c.SourceAddress), strings.Repeat("e", 32))
+	m.enter(StateActive, time.Now())
+	clock, err := boottime.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock.BoottimeNanoseconds -= int64(OwnershipLifetime(c) + time.Millisecond)
+	if err := m.stampObservation(clock); err != nil {
+		t.Fatal(err)
+	}
+	device := newFakeTransport()
+	published := false
+	err = applyActions(context.Background(), m, actions{advertise: true}, device, EffectsFunc(func(context.Context, Snapshot) error { published = true; return nil }))
+	if err == nil || published || len(device.sent) != 0 {
+		t.Fatal("expired election renewed or advertised without a new transition", err, published, len(device.sent))
 	}
 }
