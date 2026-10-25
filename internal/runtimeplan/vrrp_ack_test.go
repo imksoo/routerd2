@@ -433,3 +433,29 @@ func TestConditionalVRRPDuplicateWaitsAndFailedWithdrawalStaysWithdrawn(t *testi
 		t.Fatal("withdrawal retry retained VIP")
 	}
 }
+
+func TestConditionalVRRPWakesCoordinatorBeforeShortOwnershipExpires(t *testing.T) {
+	source := conditionalVRRPSource()
+	source.Resources[0].Service.VRRP.AdvertIntervalCentiseconds = 5
+	n := &memoryNetwork{}
+	r := New(t.TempDir(), t.TempDir(), n, testSupervisorInstance)
+	r.manager = &memoryManager{}
+	if err := r.ApplyConfig(context.Background(), 1, source); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	finished := make(chan struct{})
+	go func() { defer close(finished); r.Monitor(ctx) }()
+	defer func() { cancel(); <-finished }()
+	c := source.Resources[0].Service.VRRPConfig()
+	s := bootVRRPSnapshot(t, c)
+	if err := r.Accept(ctx, update(t, r, "service.ha", 1, s)); err != nil {
+		t.Fatal("short ownership expired behind polling coordinator:", err)
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if len(n.applied.Links) == 0 {
+		t.Fatal("short ownership acknowledged before VIP application")
+	}
+}
