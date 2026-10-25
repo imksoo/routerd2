@@ -28,7 +28,17 @@ func bfdBGPDocument() config.Native {
 }
 
 func observedBGPRoutes() bgpconfig.Snapshot {
-	return bgpconfig.Snapshot{Resource: "router", Epoch: strings.Repeat("b", 32), Sequence: 1, Active: true, ValidUntil: time.Now().Add(4 * time.Second), Routes: []bgpconfig.Route{{Prefix: "203.0.113.0/24", NextHop: "192.0.2.2", Interface: "wan0", PeerAddress: "192.0.2.2", Table: 254, Metric: 200}}}
+	clock, err := bfd.ReadClock()
+	if err != nil {
+		panic(err)
+	}
+	return observedBGPRoutesAt(clock)
+}
+
+func observedBGPRoutesAt(clock bfd.Clock) bgpconfig.Snapshot {
+	s := bgpconfig.Snapshot{Resource: "router", Epoch: strings.Repeat("b", 32), Sequence: 1, Active: true, Peers: []bgpconfig.Peer{{Address: "192.0.2.2", ASN: 65002, State: "SESSION_STATE_ESTABLISHED", AdminState: "ADMIN_STATE_UP"}}, Routes: []bgpconfig.Route{{Prefix: "203.0.113.0/24", NextHop: "192.0.2.2", Interface: "wan0", PeerAddress: "192.0.2.2", Table: 254, Metric: 200}}}
+	bgpconfig.StampObservation(&s, clock)
+	return s
 }
 
 func proofOf(g bgpconfig.BFDGrant) bgpconfig.BFDAcknowledgement {
@@ -71,6 +81,7 @@ func TestBFDProjectionFencesRecipientAndFIBRequiresSessionAcknowledgement(t *tes
 		}
 	}
 	bgp.BFD = map[string]bgpconfig.BFDAcknowledgement{"192.0.2.2": proofOf(view.Peers["192.0.2.2"])}
+	bgp.Sequence = 2
 	if err := r.Accept(ctx, update(t, r, "service.router", 2, bgp)); err != nil || len(n.applied.Routes) != 1 {
 		t.Fatal("acknowledged current BFD path not installed", err, n.applied.Routes)
 	}
@@ -92,6 +103,7 @@ func TestBFDProjectionFencesRecipientAndFIBRequiresSessionAcknowledgement(t *tes
 		t.Fatal(err)
 	}
 	bgp.BFD["192.0.2.2"] = proofOf(view.Peers["192.0.2.2"])
+	bgp.Sequence = 3
 	if err := r.Accept(ctx, update(t, r, "service.router", 3, bgp)); err != nil || len(n.applied.Routes) != 1 {
 		t.Fatal("new session proof did not restore its path", err, n.applied.Routes)
 	}
@@ -121,8 +133,7 @@ func TestBFDFIBUsesExplicitMonotonicFactsDespiteWallClockRollback(t *testing.T) 
 	bfdSnapshot := observedBFD(t, doc.Services[0].BFDConfig(), clock)
 	bfdBytes, _ := json.Marshal(bfdSnapshot)
 	source := serviceconfig.Update{ConfigDigest: strings.Repeat("d", 64), Generation: 1, ProducerEpoch: strings.Repeat("a", 32), Sequence: 1, Snapshot: bfdBytes}
-	bgp := observedBGPRoutes()
-	bgp.ValidUntil = clock.WallTime.Add(time.Minute)
+	bgp := observedBGPRoutesAt(clock)
 	bgp.BFD = map[string]bgpconfig.BFDAcknowledgement{"192.0.2.2": {ConfigDigest: source.ConfigDigest, Generation: source.Generation, ProducerEpoch: source.ProducerEpoch, Enabled: true}}
 	bgpBytes, _ := json.Marshal(bgp)
 	records := map[string]serviceconfig.Update{"service.edge": source, "service.router": {Snapshot: bgpBytes}}

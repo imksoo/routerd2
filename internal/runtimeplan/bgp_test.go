@@ -9,6 +9,7 @@ import (
 
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/network"
+	"github.com/imksoo/routerd2/internal/protocol/bfd"
 	"github.com/imksoo/routerd2/internal/protocol/bgpconfig"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
@@ -26,8 +27,13 @@ func TestBGPRecursiveResolutionECMPAndUnreachableAccounting(t *testing.T) {
 		{Prefix: "10.12.0.0/16", NextHop: "10.12.0.9"},
 	}
 	snapshot := bgpconfig.Snapshot{Active: true, ValidUntil: now.Add(4 * time.Second), Routes: routes}
+	clock, clockErr := bfd.ReadClock()
+	if clockErr != nil {
+		t.Fatal(clockErr)
+	}
+	bgpconfig.StampObservation(&snapshot, clock)
 	raw, _ := json.Marshal(snapshot)
-	p, e := project(d, "/run/routerd", "/var/lib/routerd", map[string]serviceconfig.Update{"service.edge": {Snapshot: raw}}, now)
+	p, e := projectWithFacts(d, "/run/routerd", "/var/lib/routerd", map[string]serviceconfig.Update{"service.edge": {Snapshot: raw}}, now, projectionFacts{bfdClock: clock})
 	if e != nil {
 		t.Fatal(e)
 	}

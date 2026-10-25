@@ -46,8 +46,9 @@ func (n *memoryNetwork) Apply(_ context.Context, _ uint64, d network.Desired) er
 }
 
 type memoryManager struct {
-	modules []supervisor.DynamicModule
-	before  func([]supervisor.DynamicModule)
+	modules       []supervisor.DynamicModule
+	before        func([]supervisor.DynamicModule)
+	bgpGeneration uint64
 }
 
 func (m *memoryManager) Reconcile(_ context.Context, v []supervisor.DynamicModule) error {
@@ -58,9 +59,13 @@ func (m *memoryManager) Reconcile(_ context.Context, v []supervisor.DynamicModul
 	return nil
 }
 func (m *memoryManager) Status(_ context.Context) (supervisor.Status, error) {
-	s := supervisor.Status{Ready: true}
+	s := supervisor.Status{Ready: true, InstanceID: testSupervisorInstance}
 	for _, v := range m.modules {
-		s.Modules = append(s.Modules, supervisor.ModuleStatus{Name: v.Name, Role: v.Role, Ready: true, State: "running", ConfigDigest: v.ConfigDigest})
+		generation := uint64(0)
+		if v.Role == "bgp" {
+			generation = max(uint64(1), m.bgpGeneration)
+		}
+		s.Modules = append(s.Modules, supervisor.ModuleStatus{Name: v.Name, Role: v.Role, Ready: true, State: "running", ConfigDigest: v.ConfigDigest, Generation: generation})
 	}
 	return s, nil
 }

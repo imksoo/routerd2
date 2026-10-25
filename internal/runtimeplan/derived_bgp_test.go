@@ -2,6 +2,7 @@ package runtimeplan
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -36,6 +37,54 @@ func bgpDerivedFixture(t *testing.T, conditional bool, hold string) (*Runtime, c
 		t.Fatal(err)
 	}
 	return r, source, p
+}
+
+func TestBGPOriginalDeadlineAndLiveGenerationFence(t *testing.T) {
+	r, source, p := bgpDerivedFixture(t, false, "")
+	ctx := context.Background()
+	s := bgpDerivedSample(t, 1, true)
+	// UTC can be corrected independently; only the original boot clock expires
+	// this grant. Do not derive a fresh receipt age from the future UTC value.
+	s.ObservedAt = s.ObservedAt.Add(time.Hour)
+	s.ValidUntil = s.ObservedAt.Add(bgpconfig.ObservationLifetime)
+	s.Routes = []bgpconfig.Route{{Prefix: "203.0.113.0/24", NextHop: "192.0.2.2", Interface: "wan0", PeerAddress: "192.0.2.2", Table: 254, Metric: 200}}
+	u := update(t, r, "service.edge", 1, s)
+	if err := r.Accept(ctx, u); err != nil {
+		t.Fatal(err)
+	}
+	up, err := p.Advance(nil, bfdDerivedInputs(t, r, source), false)
+	if err != nil || up.Status.Asserted == nil || !*up.Status.Asserted || up.ObservedNanos != s.ObservedNanos {
+		t.Fatal(up, err)
+	}
+	bad := s
+	bad.Peers = append([]bgpconfig.Peer(nil), s.Peers...)
+	bad.Peers[0].State = "SESSION_STATE_IDLE"
+	if err := r.Accept(ctx, update(t, r, "service.edge", 2, bad)); err == nil {
+		t.Fatal("changed inner sequence replay accepted")
+	}
+	u.Sequence = 2
+	if err := r.Accept(ctx, u); err != nil {
+		t.Fatal("identical inner observation retry rejected", err)
+	}
+	refreshed, err := p.Advance(up.State, bfdDerivedInputs(t, r, source), false)
+	if err != nil || refreshed.ObservedNanos != up.ObservedNanos || refreshed.ValidUntilNanos > up.ValidUntilNanos {
+		t.Fatal("transport retry renewed observation proof", refreshed, err)
+	}
+	time.Sleep(5100 * time.Millisecond)
+	r.refreshGuardStatus(ctx)
+	expired, err := p.Advance(refreshed.State, bfdDerivedInputs(t, r, source), false)
+	if err != nil || expired.Status.Asserted != nil || len(expired.Emissions) != 0 {
+		t.Fatal("old UTC value revived source or fabricated Down", expired, err)
+	}
+	reconcileConditions(t, r)
+	if len(r.network.(*memoryNetwork).applied.Routes) != 0 {
+		t.Fatal("expired boot clock retained BGP routes")
+	}
+	r.manager.(*observedManager).generation = 2
+	r.refreshGuardStatus(ctx)
+	if err := r.Accept(ctx, update(t, r, "service.edge", 3, bgpDerivedSample(t, 3, true))); !errors.Is(err, ErrStale) {
+		t.Fatal("old worker seeded state despite live supervisor generation", err)
+	}
 }
 
 func bgpDerivedSample(t *testing.T, sequence uint64, up bool) bgpconfig.Snapshot {

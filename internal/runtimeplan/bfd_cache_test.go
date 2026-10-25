@@ -101,6 +101,7 @@ func TestBFDCacheUpdatesAndQueriesRemainIndependentOfBlockedNetworkWriter(t *tes
 		t.Fatal(err)
 	}
 	bgp.BFD = map[string]bgpconfig.BFDAcknowledgement{"192.0.2.2": proofOf(view.Peers["192.0.2.2"])}
+	bgp.Sequence = 2
 	if err := r.Accept(ctx, update(t, r, "service.router", 2, bgp)); err != nil || len(native.applied.Routes) != 1 {
 		t.Fatal("initial acknowledged path missing", err)
 	}
@@ -160,7 +161,7 @@ func TestBFDCacheUpdatesAndQueriesRemainIndependentOfBlockedNetworkWriter(t *tes
 
 func TestBFDCacheRecipientGenerationBecomesVisibleOnlyAfterSuccessfulACK(t *testing.T) {
 	doc := bfdBGPDocument()
-	r, native, _ := fixture(t, doc)
+	r, native, manager := fixture(t, doc)
 	ctx, stop := context.WithTimeout(context.Background(), 5*time.Second)
 	defer stop()
 	if err := r.Accept(ctx, nextBFDUpdate(t, r, doc, 1, false)); err != nil {
@@ -173,6 +174,7 @@ func TestBFDCacheRecipientGenerationBecomesVisibleOnlyAfterSuccessfulACK(t *test
 		generation uint64
 		fail       bool
 	}{{1, false}, {2, true}, {2, false}} {
+		manager.bgpGeneration = iteration.generation
 		publication.Generation = iteration.generation
 		publication.ProducerEpoch = strings.Repeat(string(rune('a'+iteration.generation)), 32)
 		var failure error
