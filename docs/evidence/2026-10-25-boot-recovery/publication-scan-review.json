@@ -1,0 +1,23 @@
+{
+  "reviewed_at_utc": "2026-10-25T12:36:03.771101+00:00",
+  "product_checkpoint": "35c24d1adcc9fe87fa0dbf78d807e5bdf13112e2",
+  "checked_tree_before_adding_this_record": "e006aa28c5e4e93690efcba7f4d43e8f54997bdc",
+  "checked_history_end": "c9a24cd7e4a06e54fc7bb5fefe8a74deb65e0b02",
+  "index_scan": {
+    "scanner": "gitleaks detect --no-git --redact on full index export",
+    "exit_code": 1,
+    "findings": 15,
+    "existing_reviewed_noncredentials": 15,
+    "new_file_findings": 0,
+    "credential_findings": 0,
+    "unreviewed_findings": 0
+  },
+  "history_scan": {
+    "range": "origin/main..c9a24cd7e4a06e54fc7bb5fefe8a74deb65e0b02",
+    "exit_code": 0,
+    "findings": 0
+  },
+  "prior_classification": "../2026-10-25-events-inspection/reviewed-scan-findings.json",
+  "review_method": "Coding-agent source/witness review and exact rule/file/line comparison; not human review",
+  "rules_or_fixtures_modified_to_suppress_findings": false
+}

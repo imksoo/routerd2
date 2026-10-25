@@ -87,4 +87,4 @@ operator paired prepare/loader/exact tuple health、全protocol/engine state inv
 読んだ主な実装・契約は `internal/release/{store_linux,state_linux,runtime_abi_linux,configuration}.go`、既存state/paired/crash/ABI試験、`cmd/routerd/release_boot.go`、`images/storage-test/guest/`、`scripts/qemu-storage.py`とfixture README、release contract、実装計画/hand-off/ADR0001。
 [provenance](2026-10-25-boot-recovery/provenance.json)に元raw SHA・正規化とprivate PCAP SHAを保持する。公開directoryで`sha256sum --check SHA256SUMS`を実行できる。
 
-公開前にindex全体と未push履歴をgitleaksで検査する。既存証跡のcompleted output識別子14件と無効base64 PEM否定fixture1件は、[前回の分類とcode根拠](2026-10-25-events-inspection/reviewed-scan-findings.json)へ照合する。検出を隠すrule/fixture変更はせず、credentialや未分類の検出があればpushしない。
+公開前にindex全体と未push履歴をgitleaksで検査した。indexの15件は既存のcompleted output識別子14件と無効base64 PEM否定fixture1件に完全一致し、当版の新fileには検出なし。履歴scanは0件。rule/fixtureを抑制変更せず、[scan結果と対象tree/history](2026-10-25-boot-recovery/publication-scan-review.json)に記録した。
