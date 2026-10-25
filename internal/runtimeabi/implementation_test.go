@@ -33,7 +33,7 @@ func TestDeclarationTracksImplementedFormatVersions(t *testing.T) {
 
 func TestGuardedVRRPDependencyRequiresNewCompilerContract(t *testing.T) {
 	current := runtimeabi.Current()
-	if current.ConfigurationContract != "resource-program-native-2" {
+	if current.ConfigurationContract != "resource-program-native-3" {
 		t.Fatal("guarded dynamic VRRP consumers were added without changing the signed compiler contract")
 	}
 	old := current

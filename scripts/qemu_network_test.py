@@ -13,6 +13,14 @@ SPEC.loader.exec_module(GATE)
 
 
 class GuestResultTest(unittest.TestCase):
+    def test_graceful_vrrp_requires_real_admission_gate(self):
+        suite = GATE.SUITES["daemon-vrrp-activation"]
+        self.assertEqual(suite["test"], "TestDaemonVRRPGracefulAdmission")
+        self.assertTrue(suite["commands"])
+        initializer = (GATE.PROJECT / "images/kernel-test-init/main.go").read_text()
+        self.assertIn('case "daemon-vrrp-activation":', initializer)
+        self.assertIn('"TestDaemonVRRPGracefulAdmission", "ROUTERD_VRRP_ACTIVATION_TEST"', initializer)
+
     def test_conditional_vrrp_requires_actual_ownership_and_shutdown_gate(self):
         suite = GATE.SUITES["daemon-vrrp-conditional"]
         self.assertEqual(suite["test"], "TestDaemonVRRPConditionalOwnership")
