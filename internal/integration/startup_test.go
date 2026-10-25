@@ -43,18 +43,24 @@ func TestDaemonStartupSelectionAndRecovery(t *testing.T) {
 	}
 	assert := func(rev uint64, alias string, generation uint64) {
 		t.Helper()
-		s := read()
-		link, err := netlink.LinkByName("lo")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err != nil || !s.Healthy || s.Revision != rev || link.Attrs().Alias != alias {
-			t.Fatalf("adopted configuration was not reconciled: rev=%d healthy=%v alias=%s error=%v", s.Revision, s.Healthy, link.Attrs().Alias, err)
-		}
-		if generation != 0 && (s.Startup == nil || s.Startup.Selection.Generation != generation || s.Startup.Selection.Snapshot.StoreID != s.StoreID) {
-			t.Fatal("startup provenance missing from authoritative state")
-		}
+		reported := false
+		until(t, 20*time.Second, func() bool {
+			s := read()
+			link, err := netlink.LinkByName("lo")
+			if err != nil {
+				t.Fatal(err)
+			}
+			origin := generation == 0 || s.Startup != nil && s.Startup.Selection.Generation == generation && s.Startup.Selection.Snapshot.StoreID == s.StoreID
+			projection := s.Services != nil && s.Services.Phase == "ready" && s.Services.Revision == rev
+			ok := s.Healthy && s.Revision == rev && link.Attrs().Alias == alias && origin && projection
+			if !ok && !reported {
+				reported = true
+				t.Logf("await full startup readiness: revision=%d want=%d healthy=%v alias=%s want_alias=%s origin=%v last=%q event_journal=%q event_store=%q rule=%q derived=%q protocol=%q services=%+v", s.Revision, rev, s.Healthy, link.Attrs().Alias, alias, origin, s.LastError, s.EventJournalError, s.EventStoreError, s.EventRuleError, s.DerivedError, s.ProtocolEventError, s.Services)
+			}
+			return ok
+		})
 	}
+
 	assert(1, "startup-A", 0)
 	var savedA, savedB config.SnapshotRef
 	if err := f.control.Do(ctx, "POST", "/v1/config/snapshots", control.SnapshotRequest{ExpectedRevision: 1}, &savedA); err != nil {
