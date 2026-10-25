@@ -1,0 +1,9 @@
+--- FAIL: TestActualReleaseStoreFencesControlCommitPrepareTrialAndConfirmation (0.81s)
+    control_guard_test.go:123: release sequence does not exceed the durable high watermark
+FAIL
+FAIL    github.com/imksoo/routerd2/internal/release     31.267s
+ok      github.com/imksoo/routerd2/internal/control     11.027s
+ok      github.com/imksoo/routerd2/internal/supervisor  (cached)
+ok      github.com/imksoo/routerd2/cmd/routerd  0.301s
+?       github.com/imksoo/routerd2/cmd/routerd-modules  [no test files]
+FAIL

@@ -1,0 +1,18 @@
+{
+  "product_commit": "0d35db72e11c9ff5a4cf5fe7776bc4f0e62faf84",
+  "oracle_commit": "bf84223681347d666e7d2a0fc1cd487b98ca850a",
+  "scope": "actual old signed PID1 product with new independent live control fence oracle",
+  "oracle_files": [
+    {
+      "path": "internal/releaseboot/testdata/guest/main.go",
+      "sha256": "4c4450c68e2e99947e56a7603774a33340346f256e4177f093da9c3092b8ff54"
+    },
+    {
+      "path": "internal/releaseboot/testdata/qemu-release-boot.py",
+      "sha256": "ce749414a3b7a9288834364bc5209c031a54e6de39cfc228fe3b45d5eeec616a"
+    }
+  ],
+  "exit_code": 1,
+  "expected_failure": true,
+  "elapsed_seconds": 116.28
+}

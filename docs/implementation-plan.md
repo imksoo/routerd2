@@ -7,7 +7,18 @@
 部分checkpointでゴールを完了にせず、実装・検証・未検証と証跡を更新する。
 対象機種・NIC・性能条件の確認と並行して、独立して進められる実装・隔離VM検証を続ける。
 
-最新product checkpointは `c14c764`。固定runtimeの条件付きstartup復旧と、内部release journalのruntime/configuration組を実装した。
+最新product checkpointは `e3451ef`、storage readiness fixtureは `234827d`。
+署名済みbootのroot/trust/digestをcontrolへ固定し、設定revisionを変える操作・confirm・復元をrelease storeのプロセス間lockで保護した。
+paired prepare/trial中の新規commitを拒否し、同一requestのACKは再適用しない。cancel/正確なpair confirm後にcommitを再開する。
+全体check/Race/vet/Python30/6 ELF build193.31秒、clean9.55秒、fixture修正後11.50秒PASS。6 SHAは一致。
+native Race7 gateと、signed PID1でのprepare/再送/409拒否/cancel後commitはPASS。前版0d35db7は同じ実起動oracleで116.28秒の期待失敗。
+QEMUはsigned起動136.79秒、永続ext4二kernel192.60秒、二WAN/PBR83.34秒PASS。
+初回storageはhost137.04秒でhealth falseによりFAIL。局所試験でcommit直後の一回判定を再現し、既存期限内でhealth/保存/ACKを待つfixtureへ直した。製品は変えていない。
+元失敗のhealth内訳は未記録で、具体的原因・再発条件を断定しない。元FAILと診断追加を保存した。
+paired loader/prepare preflight/実tuple health/fallback、実書込み中電源断、全残計画、対象実機受入は未完了。paired bootの明示拒否を維持する。
+[writer fenceの証跡・検証範囲・残作業](evidence/2026-10-25-release-control-guard.md) を参照。全体ゴールはactive。
+
+前回product checkpointは `c14c764`。固定runtimeの条件付きstartup復旧と、内部release journalのruntime/configuration組を実装した。
 候補採用前は元revisionとknown-good文書の一致、採用後はexact failed receiptと後続commitなしを要求する。失敗候補snapshotが消えても採用記録から復旧し、再実行で後続commitを上書きしない。
 release prepareは候補・conditional fallback・config store identity・二世代の予約を同じcurrent切替で保存する。取消/失敗でwatermarkを戻さず、paired confirmはexact receipt/current revision、rollbackは再prepareを要求する。
 参照の型とtransaction整合性までの内部APIであり、snapshot互換性・稼働中writer fence・paired loader/health接続は未実装。現appliance commandはpaired選択を拒否し、runtimeだけを誤って起動しない。

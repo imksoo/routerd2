@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "go": "go version go1.27.3 linux/amd64",
+  "purpose": "real-pid1-signed-userland-selection-and-health-confirmation",
+  "target": "linux/amd64",
+  "kernel_release": "6.18.58-0-virt",
+  "kernel_sha256": "17fbd3efd16f2e7cb1b945f06423b37399ba7d5ac8cdd3665e7f13f363500e85",
+  "source_image_manifest_sha256": "a1df58dc193d6f6f5a361b9b630e9fb106b76a3e3089239da2185f812d265b43",
+  "initializer_sha256": "e4ad72c748695e4642c2ed3e04203c0adbba0d6c60313416931f32b216ae47b7",
+  "binary_sha256": {
+    "/test/bin/baseline/routerd": "825ebc8d903df5c3490238ed7fbdcb31bd3e96edb285374e104795012176b76f",
+    "/test/bin/baseline/routerd-modules": "f87f7ddabc3f752a85834e534c4e966601327a05e5caca7f2ab0200664c04be3",
+    "/test/bin/baseline/routerd-logging": "c13a9186d0eb1f921f9a44e437e06831cac32ffac244b2c875ec1c7cadd040cd",
+    "/test/bin/trial/routerd": "d1d8b31aaa66920becb545236d6853a49dc8396862d23caae64d92a3604ebef4",
+    "/test/bin/trial/routerd-modules": "e3b57ef123866a2ae3f62faf761743a12a06a3d6c7b3b35976a4ec0ddc57ef2c",
+    "/test/bin/trial/routerd-logging": "5c94bb1b6999580113007d68479cc2525c4648d8ae3dfcec3177ec9d6edf25c6"
+  },
+  "release_ids": {
+    "baseline": "release-gate-baseline",
+    "trial": "release-gate-trial"
+  },
+  "host_network_access": false,
+  "guest_external_network_interfaces": false,
+  "state_persistence": "volatile-initramfs",
+  "kernel_rootfs_updates": false,
+  "two_boot_disk_fallback_tested": false,
+  "result": "failed",
+  "initramfs_sha256": "1bc2d979c05e52c9278f60939723fbe89d2aac3128526420fce170b3de701dc0",
+  "error": "release boot fixture failed in guest",
+  "duration_seconds": 101.93,
+  "qemu_exit_status_before_cleanup": null
+}

@@ -1,0 +1,106 @@
+Copying appliance modules into an isolated release-boot image...
+Building the guest-only initializer and independent health probe...
+Building the actual routerd command pair for release-gate-baseline...
+Building the actual routerd command pair for release-gate-trial...
+Booting real PID-1 trial in QEMU (no NIC, no host ports or shared disk)...
+[    1.322829] IP idents hash table entries: 16384 (order: 5, 131072 bytes, linear)
+[    1.588326] tcp_listen_portaddr_hash hash table entries: 512 (order: 1, 8192 bytes, linear)
+[    1.590184] Table-perturb hash table entries: 65536 (order: 6, 262144 bytes, linear)
+[    1.591275] TCP established hash table entries: 8192 (order: 4, 65536 bytes, linear)
+[    1.593307] TCP bind hash table entries: 8192 (order: 6, 262144 bytes, linear)
+[    1.594163] TCP: Hash tables configured (established 8192 bind 8192)
+[    1.599078] MPTCP token hash table entries: 1024 (order: 3, 24576 bytes, linear)
+[    1.600257] UDP hash table entries: 512 (order: 3, 32768 bytes, linear)
+[    1.601192] UDP-Lite hash table entries: 512 (order: 3, 32768 bytes, linear)
+[    1.605664] NET: Registered PF_UNIX/PF_LOCAL protocol family
+[    1.607308] NET: Registered PF_XDP protocol family
+[    1.609055] pci_bus 0000:00: resource 4 [io  0x0000-0x0cf7 window]
+[    1.609320] pci_bus 0000:00: resource 5 [io  0x0d00-0xffff window]
+[    1.609472] pci_bus 0000:00: resource 6 [mem 0x000a0000-0x000bffff window]
+[    1.609619] pci_bus 0000:00: resource 7 [mem 0x40000000-0xafffffff window]
+[    1.609765] pci_bus 0000:00: resource 8 [mem 0xc0000000-0xfebfffff window]
+[    1.610045] pci_bus 0000:00: resource 9 [mem 0x100000000-0x8ffffffff window]
+[    1.611340] PCI: CLS 0 bytes, default 64
+[    1.622797] Unpacking initramfs...
+[    1.624605] Initialise system trusted keyrings
+[    1.639469] workingset: timestamp_bits=40 max_order=18 bucket_order=0
+[    1.647783] Key type asymmetric registered
+[    1.648189] Asymmetric key parser 'x509' registered
+[    1.649414] Block layer SCSI generic (bsg) driver version 0.4 loaded (major 247)
+[    1.653677] io scheduler mq-deadline registered
+[    1.654122] io scheduler kyber registered
+[    1.654711] io scheduler bfq registered
+[    1.668990] ERST DBG: ERST support is disabled.
+[    1.673332] Serial: 8250/16550 driver, 4 ports, IRQ sharing enabled
+[    1.682971] 00:02: ttyS0 at I/O 0x3f8 (irq = 4, base_baud = 115200) is a 16550A
+[    1.728027] VMware PVSCSI driver - version 1.0.7.0-k
+[    1.738120] ACPI: \_SB_.GSIA: Enabled at IRQ 16
+[    1.761274] ahci 0000:00:1f.2: AHCI vers 0001.0000, 32 command slots, 1.5 Gbps, SATA mode
+[    1.761592] ahci 0000:00:1f.2: 6/6 ports implemented (port mask 0x3f)
+[    1.761952] ahci 0000:00:1f.2: flags: 64bit ncq only
+[    1.795742] scsi host0: ahci
+[    1.804116] scsi host1: ahci
+[    1.808544] scsi host2: ahci
+[    1.815062] scsi host3: ahci
+[    1.821453] scsi host4: ahci
+[    1.827600] scsi host5: ahci
+[    1.856263] ata1: SATA max UDMA/133 abar m4096@0xfebff000 port 0xfebff100 irq 24 lpm-pol 1
+[    1.856725] ata2: SATA max UDMA/133 abar m4096@0xfebff000 port 0xfebff180 irq 24 lpm-pol 1
+[    1.857067] ata3: SATA max UDMA/133 abar m4096@0xfebff000 port 0xfebff200 irq 24 lpm-pol 1
+[    1.857299] ata4: SATA max UDMA/133 abar m4096@0xfebff000 port 0xfebff280 irq 24 lpm-pol 1
+[    1.857576] ata5: SATA max UDMA/133 abar m4096@0xfebff000 port 0xfebff300 irq 24 lpm-pol 1
+[    1.857759] ata6: SATA max UDMA/133 abar m4096@0xfebff000 port 0xfebff380 irq 24 lpm-pol 1
+[    1.867611] hv_vmbus: registering driver hv_netvsc
+[    1.871072] i8042: PNP: PS/2 Controller [PNP0303:KBD,PNP0f13:MOU] at 0x60,0x64 irq 1,12
+[    1.879466] serio: i8042 KBD port at 0x60,0x64 irq 1
+[    1.880255] serio: i8042 AUX port at 0x60,0x64 irq 12
+[    1.881200] hv_vmbus: registering driver hyperv_keyboard
+[    1.884352] rtc_cmos PNP0B00:00: RTC can wake from S4
+[    1.896400] rtc_cmos PNP0B00:00: registered as rtc0
+[    1.897836] rtc_cmos PNP0B00:00: setting system clock to 2026-10-25T07:10:06 UTC (1792912206)
+[    1.900367] rtc_cmos PNP0B00:00: alarms up to one day, y3k, 242 bytes nvram, hpet irqs
+[    1.901744] amd_pstate: the _CPC object is not present in SBIOS or ACPI disabled
+[    1.911055] gre: GRE over IPv4 demultiplexer driver
+[    1.912886] NET: Registered PF_INET6 protocol family
+[    1.920974] input: AT Translated Set 2 keyboard as /devices/platform/i8042/serio0/input/input0
+[    1.946938] Segment Routing with IPv6
+[    1.947579] In-situ OAM (IOAM) with IPv6
+[    1.951095] Key type dns_resolver registered
+[    1.954401] IPI shorthand broadcast: enabled
+[    2.008513] sched_clock: Marking stable (2028140850, -20249752)->(2033130795, -25239697)
+[    2.079680] registered taskstats version 1
+[    2.086277] Loading compiled-in X.509 certificates
+[    2.196507] ata2: SATA link down (SStatus 0 SControl 300)
+[    2.201298] ata1: SATA link down (SStatus 0 SControl 300)
+[    2.217917] ata3: SATA link down (SStatus 0 SControl 300)
+[    2.243377] ata6: SATA link down (SStatus 0 SControl 300)
+[    2.244258] ata4: SATA link down (SStatus 0 SControl 300)
+[    2.245005] ata5: SATA link down (SStatus 0 SControl 300)
+[    2.635679] tsc: Refined TSC clocksource calibration: 3293.798 MHz
+[    2.640580] clocksource: tsc: mask: 0xffffffffffffffff max_cycles: 0x2f7a696fa44, max_idle_ns: 440795303741 ns
+[    2.642069] clocksource: Switched to clocksource tsc
+[   17.587346] Freeing initrd memory: 85184K
+[   17.683747] Loaded X.509 cert 'alpinelinux.org: Alpine Linux kernel key: PUBLIC_CERTIFICATE_ID_OMITTED'
+[   17.741526] Demotion targets for Node 0: null
+[   17.745761] Key type .fscrypt registered
+[   17.746467] Key type fscrypt-provisioning registered
+[   18.027086] Freeing unused kernel image (initmem) memory: 3008K
+[   18.028585] Write protecting the kernel read-only data: 26624k
+[   18.035819] Freeing unused kernel image (text/rodata gap) memory: 1672K
+[   18.037651] Freeing unused kernel image (rodata/data gap) memory: 304K
+[   18.039758] rodata_test: all tests were successful
+[   18.040785] Run /init as init process
+ROUTERD_RUNTIME_CATALOG_FIXTURE artifacts=4 native=3 data=1 native_commands=independently_built
+ROUTERD_RUNTIME_CATALOG_FIXTURE artifacts=4 native=3 data=1 native_commands=independently_built
+ROUTERD_RELEASE_BOOT_SETUP baseline=release-gate-baseline trial=release-gate-trial generation=2
+{"timestamp":"2026-10-25T07:11:13.022485491Z","module":"supervisor","pid":1,"generation":0,"level":"INFO","message":"worker started","attributes":{"generation":1,"module":"logging","pid":509},"producer_epoch":"3e1db36d8d4e107d33be37f4aaeff2c8","producer_sequence":1,"delivery":"console_fallback"}
+{"timestamp":"2026-10-25T07:11:13.048671426Z","module":"supervisor","pid":1,"generation":0,"level":"INFO","message":"worker started","attributes":{"generation":1,"module":"network","pid":510},"producer_epoch":"3e1db36d8d4e107d33be37f4aaeff2c8","producer_sequence":2,"delivery":"console_fallback"}
+{"timestamp":"2026-10-25T07:11:13.05690994Z","module":"supervisor","pid":1,"generation":0,"level":"INFO","message":"worker started","attributes":{"generation":1,"module":"control","pid":511},"producer_epoch":"3e1db36d8d4e107d33be37f4aaeff2c8","producer_sequence":3,"delivery":"console_fallback"}
+{"timestamp":"2026-10-25T07:11:13.074486013Z","module":"supervisor","pid":1,"generation":0,"level":"INFO","message":"worker started","attributes":{"generation":1,"module":"management","pid":512},"producer_epoch":"3e1db36d8d4e107d33be37f4aaeff2c8","producer_sequence":4,"delivery":"console_fallback"}
+{"timestamp":"2026-10-25T07:11:14.298916075Z","module":"management","pid":512,"generation":1,"level":"INFO","message":"SSH disabled","attributes":{"reason":"listener and authorized keys are required"},"producer_epoch":"c7e8268766860c3d2e4e12dc4d9d2e1c","producer_sequence":1,"delivery":"console_fallback"}
+ROUTERD_READY
+ROUTERD_RELEASE_BOOT_WITNESS pid=1 release=release-gate-trial generation=4 operation=confirm revision=1 modules=control,logging,management,network pinned_exec=verified artifact_count=4 native_count=3 data_count=1 role_catalog=verified
+ROUTERD_RELEASE_BOOT_FAIL: prepared pair allowed a real control commit: <nil>
+[  100.150006] ACPI: PM: Preparing to enter system sleep state S5
+[  100.160591] reboot: Power down
+release boot fixture failed in guest

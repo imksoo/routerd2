@@ -1,0 +1,8 @@
+# github.com/imksoo/routerd2/internal/supervisor [github.com/imksoo/routerd2/internal/supervisor.test]
+internal/supervisor/authority_test.go:17:168: unknown field ReleaseAuthority in struct literal of type Options
+internal/supervisor/authority_test.go:24:9: got.ReleaseAuthority undefined (type Options has no field or method ReleaseAuthority)
+internal/supervisor/authority_test.go:24:52: got.authorityJSON undefined (type Options has no field or method authorityJSON)
+internal/supervisor/authority_test.go:36:19: got.ReleaseAuthority undefined (type Options has no field or method ReleaseAuthority)
+internal/supervisor/authority_test.go:37:8: o.ReleaseAuthority undefined (type *Options has no field or method ReleaseAuthority)
+FAIL    github.com/imksoo/routerd2/internal/supervisor [build failed]
+FAIL

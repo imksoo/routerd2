@@ -12076,6 +12076,37 @@
         "Previous QEMU health-false component/recurrence remains undetermined; stronger readiness/diagnostics retained"
       ],
       "full_goal_status": "active"
+    },
+    {
+      "id": "selected-runtime-configuration-writer-fence",
+      "date": "2026-10-25",
+      "status": "partial_writer_fence_and_individual_acceptance_verified",
+      "code_checkpoint": "e3451efa0b775f98248c13123ea84a78ba819fef",
+      "fixture_checkpoint": "234827d762174b12dff5141eec039c50b4b6ffdf",
+      "work_packages": [
+        "CORE-02",
+        "CORE-06",
+        "DIST-01"
+      ],
+      "evidence": "docs/evidence/2026-10-25-release-control-guard.md",
+      "implemented": [
+        "Private copied canonical signed boot authority for control only; protected trust/store reopen and selected runtime/startup/store identity check before configuration open/adoption",
+        "Control mutex then release process/file lock held over stage/apply/save/restore, reconciliation and confirmation/expiry; competing transactions return busy; paired prepare/trial freezes mutations while exact durable request replay stays idempotent",
+        "Cancellation and exact paired confirmation unfreeze writes without clearing reservations; actual signed PID1 probe requires prepare/replay/409/cancel/commit witness; paired loader still explicitly refused"
+      ],
+      "validation": [
+        "API/transport and confirmed-rollback freeze REDs; actual signed store/config journal/control integration, cross-handle file lock, errors/cancellation/identity mismatches; initial import and canceled publisher-sequence test mistakes retained",
+        "Whole check/Race/vet/Python30/six ELF build193.31s; clean9.55s, fixture-only readiness clean11.50s with all six product hashes identical; native Race seven related gates pass",
+        "Previous0d35db7 actual signed PID1 product fails live-fence oracle116.28s; current signed PID1136.79s passes real control prepare/replay/409/cancel/commit and identity reservation witness",
+        "Initial storage host137.04s fails health false without component diagnostics; local HTTP fixture reproduces legal transient rejection; existing bounded full-health/event/ACK wait and diagnostics used, no product/deadline/resource change; final ext4 two kernels192.60s and QEMU two-WAN/PBR83.34s pass"
+      ],
+      "remaining": [
+        "Coordinated operator prepare and actual snapshot/target ABI/state/revocation preflight; paired loader, exact live tuple health confirmation and recovery attempt policy; true signed paired PID1/kernel boot",
+        "Failed referenced runtime corruption/fallback before Open, write-time power-cut/ENOSPC/fsync acceptance, reference-aware snapshot pruning and same-revision event ACK/startup-switch audit",
+        "Original and prior health-false component/recurrence remains undetermined; preserve original failures and stronger bounded readiness/diagnostics",
+        "Current OCI/APK and arm64 execution; full bootstrap/engine/ABI/privilege closure, all remaining work packages and selected physical hardware/NIC/performance acceptance"
+      ],
+      "full_goal_status": "active"
     }
   ],
   "delivery_goal": {

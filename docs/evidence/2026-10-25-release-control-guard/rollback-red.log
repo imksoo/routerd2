@@ -1,0 +1,5 @@
+--- FAIL: TestReleaseGuardKeepsConfirmedRollbackAndFailedApplyExclusive (1.02s)
+    control_guard_test.go:86: pending pair allowed expiry: <nil>
+FAIL
+FAIL    github.com/imksoo/routerd2/internal/release     1.035s
+FAIL
