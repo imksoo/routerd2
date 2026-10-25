@@ -1,0 +1,17 @@
+{
+  "source_commit": "521d1512c588b5578bd6fddb77c626e164b83d2f",
+  "checked_index_tree": "2cd098209aae4daa864b8ec9ce27e62e95d2631f",
+  "exit_code": 1,
+  "findings": 15,
+  "reviewed_existing_noncredentials": 15,
+  "new_file_findings": 0,
+  "credential_findings": 0,
+  "unreviewed_findings": 0,
+  "classification_reference": "docs/evidence/2026-10-25-events-inspection/reviewed-scan-findings.json",
+  "reviewed_at_utc": "2026-10-25T13:27:59.387386+00:00",
+  "checked_history_end": "7585c71b829f9827b7bc9c6e683c85850a35c81c",
+  "history_scan_exit_code": 0,
+  "history_findings": 0,
+  "review_method": "Coding-agent source/witness review and exact match to previously inspected noncredentials, not human review",
+  "rules_or_fixtures_modified_to_suppress_findings": false
+}

@@ -111,3 +111,5 @@ ready_when/graceful activation、track/preempt/unicast/旧auth・動的VIP、Rou
 networkのBootLifetime、clocktestとkernel initializer、namespace fixture、DHCP clock試験、実装計画/hand-off/resource contract。
 [provenance](2026-10-25-vrrp-boot-authority/provenance.json)に各raw SHAと段階、private PCAP SHAを記録する。
 binary/image/PCAP本体はcommitせず、公開directoryで`sha256sum --check SHA256SUMS`を実行できる。
+
+公開前のindex全体scanは既存のcompleted output識別子14件と無効base64 PEM否定fixture1件に完全一致し、新file・credential・未分類の検出はなかった。未push履歴scanは0件。rule/fixtureの抑制変更はせず、[検査対象と結果](2026-10-25-vrrp-boot-authority/publication-scan-review.json)を記録する。
