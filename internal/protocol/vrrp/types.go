@@ -36,6 +36,7 @@ type Config struct {
 	VRF                        string              `json:"vrf,omitempty"`
 	Family                     string              `json:"family"`
 	SourceAddress              string              `json:"source_address,omitempty"`
+	UnicastPeers               []netip.Addr        `json:"unicast_peers,omitempty"`
 	VirtualRouterID            int                 `json:"virtual_router_id"`
 	Priority                   int                 `json:"priority,omitempty"`
 	AdvertIntervalCentiseconds int                 `json:"advert_interval_centiseconds,omitempty"`
@@ -182,9 +183,25 @@ func Validate(c Config) error {
 	}
 	if c.SourceAddress != "" {
 		a, err := netip.ParseAddr(c.SourceAddress)
-		if err != nil || !addressInFamily(a, c.Family) || c.Family == "ipv6" && !a.IsLinkLocalUnicast() {
-			return errors.New("VRRP source must be unicast IPv4 or a link-local IPv6 address without a zone")
+		if err != nil || !addressInFamily(a, c.Family) || len(c.UnicastPeers) == 0 && c.Family == "ipv6" && !a.IsLinkLocalUnicast() {
+			return errors.New("VRRP source must be a same-family unicast address; multicast IPv6 requires link-local")
 		}
+	}
+	if len(c.UnicastPeers) > 0 && c.SourceAddress == "" {
+		return errors.New("VRRP unicast requires an explicit source_address")
+	}
+	if c.UnicastPeers != nil && len(c.UnicastPeers) == 0 {
+		return errors.New("VRRP unicast_peers must not be empty; omit it to use multicast")
+	}
+	if len(c.UnicastPeers) > 128 {
+		return errors.New("VRRP unicast supports at most 128 peers")
+	}
+	peers := make(map[netip.Addr]bool, len(c.UnicastPeers))
+	for _, peer := range c.UnicastPeers {
+		if !addressInFamily(peer, c.Family) || peers[peer] || peer.String() == c.SourceAddress {
+			return errors.New("VRRP unicast peers must be distinct same-family unicast addresses different from the source")
+		}
+		peers[peer] = true
 	}
 	return nil
 }

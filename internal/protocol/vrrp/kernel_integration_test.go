@@ -194,11 +194,11 @@ type failingTransport struct {
 	fail atomic.Bool
 }
 
-func (f *failingTransport) Send(ctx context.Context, frame []byte) error {
+func (f *failingTransport) SendFrame(ctx context.Context, frame []byte) error {
 	if f.fail.Load() {
 		return unix.ENETDOWN
 	}
-	return f.nativeTransport.Send(ctx, frame)
+	return f.nativeTransport.SendFrame(ctx, frame)
 }
 
 type nativePeer struct {
@@ -345,7 +345,8 @@ func nativeFixture(t *testing.T, family string) {
 	// receiver with a broken multicast path would incorrectly take over here.
 	time.Sleep(1200 * time.Millisecond)
 	if low.effects.state().State != StateBackup {
-		t.Fatalf("backup did not receive active peer's native advertisements: %+v", low.effects.state())
+		mdb, _ := exec.Command("bridge", "-s", "mdb", "show").CombinedOutput()
+		t.Fatalf("backup did not receive active peer's native advertisements: low=%+v high=%+v MDB=%s", low.effects.state(), high.effects.state(), mdb)
 	}
 	// Fail all transmissions, including the graceful priority-zero packet.
 	// The surviving peer must detect absence using its actual down timer.
@@ -378,4 +379,11 @@ func nativeFixture(t *testing.T, family string) {
 		t.Fatal("graceful shutdown retained ownership")
 	}
 	t.Logf("%s native raw-socket election, advertisement reception, VIP/VMAC verification and failover passed", family)
+}
+
+func (f *failingTransport) Advertise(ctx context.Context, p datagram) error {
+	if f.fail.Load() {
+		return unix.ENETDOWN
+	}
+	return f.nativeTransport.Advertise(ctx, p)
 }

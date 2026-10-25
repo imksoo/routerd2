@@ -414,7 +414,8 @@ ACTIVE成功には元boot IDと絶対期限を保持するVIP投影が必要で�
 旧世代・上書きされた通知や適用失敗を成功として返さない。
 
 このsource受入範囲の追加に伴い、署名されたconfiguration contractは
-`resource-program-native-3`とする。旧`resource-program-native-1`/`native-2`との更新・fallbackは
+`resource-program-native-4`とする。unicast peer一覧・明示sourceとIPv6 global sourceの受入を含む。
+以前のprototype compilerとの更新・fallbackは
 既存のABI検査で拒否する。format migrationや旧compilerとの互換性を表す変更ではない。
 
 

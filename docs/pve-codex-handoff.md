@@ -34,6 +34,11 @@
   Ready/confirmed commitの成功へ読み替えない。
 - Healthの現在監視と履歴配送は分離済み。保存先障害・queue満杯でprobeを止めず、欠落と
   保存エラーをsnapshotへ表示する。全probeの無欠落保存は保証しない。
+- VRRPはIPv4/IPv6 unicast peerに対応した。明示source、同familyのpeer一覧、実宛先、
+  TTL/Hop Limit 255を使う。IPv6 global sourceにも対応し、checksumは実宛先で計算する。
+  multicastはフィールド省略で選び、明示空配列をmulticastへ読み替えない。
+  受信側の仮Ethernet/IPv6ヘッダ生成と本番でのEthernet再解析を削除し、kernelのIP metadataを
+  直接検証する。unicast送信はkernelのrouting/ARP/NDへ任せ、VIP/GARP/NAの適用ACKは維持する。
 - BGP経路の元のboot IDとBOOTTIME期限をnetwork workerへ渡し、controlと独立して
   期限切れ経路を撤去する。期限更新だけではkernel経路を置換せず、所有記録を更新する。
   退役時も同じ所有権確認を使い、変更されたforeign経路を残す。table観測と経路選択は
@@ -45,35 +50,33 @@
 
 ## 今回の確認
 
-製品は `RELEASE_ID=route-authority`。`make check`、networkの最終個別Race Detector、
+製品は `RELEASE_ID=vrrp-unicast`。`make check`、VRRP/runtimeplan/serviceconfigの個別Race Detector、
 全体vet・fmt確認、amd64/arm64の静的ビルドが成功した。arm64は実行していない。
 専用0700ディレクトリへ6 ELFを配置し、`umask 022` で `make release-built-test` も成功した。
-両architectureのruntime宣言・署名bundle・publisher CLI出力を実receiverで確認した。
-group書込み可能な作業treeからの入力拒否を回避するために製品の権限検査は緩めていない。
+両architectureでcompiler contract `resource-program-native-4` と署名bundle/publisher出力を確認した。
 
-実BGP peerから学習した経路を使い、control/BGPを停止し、network workerをSIGKILLして
-再起動した。その後supervisorも停止したまま、元の期限で経路を撤去できた。
-追加前の所有予定保存により、kernel追加と保存の間に停止して期限情報を失う窓を除いた。
-再起動後の期限保持、期限更新時にkernel経路を置換しないこと、失効後・別bootの再適用で
-経路を復活させないこと、foreign置換を残すことはcomponent試験でも確認した。
+隔離namespaceの実supervisor/control/network/VRRPとkeepalived 2.2.8を接続し、IPv4/IPv6の
+unicast広告、VIP TCP/UDP、上位priorityへの切替、worker SIGKILL/rebind、peer停止、下位peer
+復帰後の所有維持が成功した。IPv6はglobal sourceを使い、captureで両方向とHop Limit 255、
+multicast広告がないことを確認した。IPv4 peerはRFC 9568に合わせ `v3_checksum_as_v2` を明示する。
+routerd2に旧checksumの自動fallbackは設けていない。
 
-実daemonのBFD/BGP停止復旧と二WAN Health/PBRも成功した。後者はTCP/UDP・capture、
-worker/control/network交替、旧通知、期限切れ、confirmed rollbackを含む。
-Healthの再起動待ちは、新workerの世代・digestに一致するHealthy観測と適用済みReady、
-実primary経路を待つ。旧観測が残っているだけで復旧成功と判定していた試験を修正した。
+unicast一覧の空配列、重複、local sourceとの一致、別family等を拒否する。
+受信元一覧・実宛先・TTL/Hop Limit・IPv6 checksum宛先もcomponent試験で確認した。
+実daemonの元のVRRP期限・条件付き所有・graceful admissionの3系統も成功した。
+再実行用に `make check-vrrp-unicast` を追加した。keepalivedとroot/noninteractive sudoが必要で、
+root所有0700の一時ディレクトリから実行する。homeや管理NICの権限・設定は変更しない。
 
-隔離namespaceで、実kernelのIPv4/IPv6 PBR・ECMP TCP、NAT/ACL、DS-Lite、bridge/VLAN/
-VRF/VXLAN/macvlan、IPv6経路期限、VRRP receive guardとforeign資源保護が成功した。
-全体チェックで再現したjournal置換中の読取り失敗も修正し、集中Race試験20回が成功した。
+既存の二native peer試験では初回IPv6 multicastの広告未受信が一度発生した。後続と変更前コードの
+比較試験では再現できず、直接原因は未確定。成功回数だけでこの問題を閉じない。
+初回のIPv6 VIP TCP接続timeoutも未再現で、起動直後のND/DAD確認が残る。
+UDP応答はfixture側をVIPへの明示bindへ修正し、TCP/UDP測定前には両physical linkのIPv6 DADを待つ。
+BFD再接続timeoutの原因調査も未完了。今回はBGP/Health全系統、QEMU時計補正、対象実機・NIC・
+性能・物理suspendを再検証していない。VRF unicastと旧routerd VRRPの移行は未受入。
 
-初回BFD再接続timeoutの直接原因は未確定。現在の再試験成功だけでこの問題を閉じない。
-DHCP/RA/AFTR/Derived/EventRule/VRRPの実daemon全系統、QEMU時計補正、物理suspendは
-この変更後に再実行していない。対象実機・NIC・性能の検証も未実施。
-
-現在の出力は `dist/route-authority-final-check.log`、`dist/route-authority-checked-build.log`、
-`dist/route-authority-final-network-race.log`、`dist/route-authority-ready-native*.log`、
-`dist/route-authority-intent-kernel.log`、`dist/route-authority-journal-race.log`。
-配布物確認は `dist/route-authority-publish.log`。
+出力は `dist/vrrp-unicast-check.log`、`dist/vrrp-unicast-final-build.log`、
+`dist/vrrp-unicast-final-native*.log`、`dist/vrrp-unicast-race.log`、`dist/vrrp-unicast-publish.log`。
+標準commandの現在ログは `dist/vrrp-unicast/ipv4.log` と `ipv6.log`。
 過去出力との一致を実装の条件にしない。
 
 ## 続ける実装
@@ -83,7 +86,8 @@ DHCP/RA/AFTR/Derived/EventRule/VRRPの実daemon全系統、QEMU時計補正、�
    IPv4失効と、BFD受信期限・再帰next-hopの前提期限を全てwriterへ渡す処理は未検証・未実装。
 2. 残るprotocol snapshotの型付き保持、期限切れJSON書換えの削除、条件式の静的計算と、
    retained判定で繰り返すinstance生成・digest計算を整理する。
-3. HA-01のtrack/unicast/旧version・auth/cluster方針と独立実装との相互接続を進める。
+3. HA-01のtrack、旧version・auth、cluster、追加VMACを実装する。IPv6 multicast未受信と
+   起動直後のND/DADを診断し、VRFと対象実機での相互接続を確認する。
    全実装計画・全更新復旧経路・外部engine・配備先・対象実機は未完了。
 
 ## 環境

@@ -35,7 +35,7 @@ func TestRFC9568WireChecksumsAndVirtualMAC(t *testing.T) {
 		t.Run(fixture.config.Family, func(t *testing.T) {
 			c := fixture.config
 			source := netip.MustParseAddr(c.SourceAddress)
-			wire := marshalAdvertisement(c, source, uint8(c.Priority))
+			wire := marshalAdvertisement(c, source, multicastGroup(c.Family), uint8(c.Priority))
 			if hex.EncodeToString(wire) != fixture.wire || VirtualMAC(c.Family, c.VirtualRouterID).String() != fixture.mac {
 				t.Fatalf("wire mismatch: %x", wire)
 			}
@@ -48,49 +48,33 @@ func TestRFC9568WireChecksumsAndVirtualMAC(t *testing.T) {
 	}
 }
 
-func fix4(frame []byte) {
-	ip := frame[14:]
-	ip[10], ip[11] = 0, 0
-	binary.BigEndian.PutUint16(ip[10:], checksum(ip[:int(ip[0]&15)*4]))
-}
-
-func TestRejectsMalformedOrOffLinkAdvertisements(t *testing.T) {
+func TestRejectsMalformedOrOffLinkDatagrams(t *testing.T) {
 	for _, c := range []Config{config4(), config6()} {
-		frame := advertisementFrame(c, netip.MustParseAddr(c.SourceAddress), uint8(c.Priority))
-		offset := 14 + 20
-		if c.Family == "ipv6" {
-			offset = 14 + 40
+		source := netip.MustParseAddr(c.SourceAddress)
+		destination := multicastGroup(c.Family)
+		p := datagram{source: source, destination: destination, hopLimit: 255, payload: marshalAdvertisement(c, source, destination, uint8(c.Priority))}
+		for name, bad := range map[string]datagram{
+			"hop":         {source: source, destination: destination, hopLimit: 254, payload: p.payload},
+			"destination": {source: source, destination: source, hopLimit: 255, payload: p.payload},
+			"source":      {source: netip.Addr{}, destination: destination, hopLimit: 255, payload: p.payload},
+		} {
+			if _, err := parseDatagram(c, source, bad); err == nil {
+				t.Fatal(c.Family, name, "unsafe datagram accepted")
+			}
 		}
-		mutations := map[string]func([]byte){
-			"checksum": func(b []byte) { b[len(b)-1] ^= 1 },
-			"version":  func(b []byte) { b[offset] = 0x21 },
-			"type":     func(b []byte) { b[offset] = 0x32 },
-			"count":    func(b []byte) { b[offset+3] = 0 },
-			"mac":      func(b []byte) { b[8] ^= 1 },
+		for _, offset := range []int{0, 3, len(p.payload) - 1} {
+			bad := p
+			bad.payload = bytes.Clone(p.payload)
+			bad.payload[offset] ^= 1
+			if _, err := parseDatagram(c, source, bad); err == nil {
+				t.Fatal("malformed VRRP payload accepted", c.Family, offset)
+			}
 		}
-		if c.Family == "ipv4" {
-			mutations["ttl"] = func(b []byte) { b[14+8] = 254; fix4(b) }
-			mutations["fragment"] = func(b []byte) { b[14+6] = 0x20; fix4(b) }
-			mutations["ip checksum"] = func(b []byte) { b[14+10] ^= 1 }
-			mutations["destination"] = func(b []byte) { b[14+19] = 19; fix4(b) }
-		} else {
-			mutations["hop limit"] = func(b []byte) { b[14+7] = 254 }
-			mutations["fragment"] = func(b []byte) { b[14+6] = 44 }
-			mutations["non link local source"] = func(b []byte) { b[14+8] = 0x20 }
-			mutations["destination"] = func(b []byte) { b[14+39] = 19 }
-		}
-		for name, mutate := range mutations {
-			t.Run(c.Family+"/"+name, func(t *testing.T) {
-				bad := append([]byte(nil), frame...)
-				mutate(bad)
-				if _, err := parseFrame(c, bad); err == nil {
-					t.Fatal("unsafe advertisement accepted")
-				}
-			})
-		}
-		for length := 0; length < len(frame); length++ {
-			if _, err := parseFrame(c, frame[:length]); err == nil {
-				t.Fatalf("truncated %s frame accepted at %d bytes", c.Family, length)
+		for n := 0; n < len(p.payload); n++ {
+			bad := p
+			bad.payload = p.payload[:n]
+			if _, err := parseDatagram(c, source, bad); err == nil {
+				t.Fatal("truncated payload accepted", c.Family, n)
 			}
 		}
 	}
@@ -99,7 +83,7 @@ func TestRejectsMalformedOrOffLinkAdvertisements(t *testing.T) {
 func TestReservedBitsAcceptedAndDifferentVirtualRouterIgnored(t *testing.T) {
 	c := config4()
 	source := netip.MustParseAddr(c.SourceAddress)
-	payload := marshalAdvertisement(c, source, 150)
+	payload := marshalAdvertisement(c, source, multicastGroup(c.Family), 150)
 	payload[4] |= 0xf0
 	payload[6], payload[7] = 0, 0
 	binary.BigEndian.PutUint16(payload[6:], checksum(payload))
@@ -113,7 +97,7 @@ func TestReservedBitsAcceptedAndDifferentVirtualRouterIgnored(t *testing.T) {
 	}
 	other := c
 	other.Addresses = []string{"192.0.2.200/24"}
-	if _, err := parseAdvertisement(c, source, group4, marshalAdvertisement(other, source, 150)); err == nil {
+	if _, err := parseAdvertisement(c, source, group4, marshalAdvertisement(other, source, multicastGroup(other.Family), 150)); err == nil {
 		t.Fatal("VRID collision with a different virtual address set was accepted")
 	}
 }
@@ -176,4 +160,48 @@ func TestValidateRefusesAmbiguousOrUnsafeIdentity(t *testing.T) {
 	if err := Validate(c); err == nil {
 		t.Fatal("IPv6 instance missing first link-local VIP accepted")
 	}
+}
+
+// Capture helpers verify actual Ethernet frames in the native socket tests.
+func advertisementFrame(c Config, source netip.Addr, priority uint8) []byte {
+	destination := multicastGroup(c.Family)
+	return datagramFrame(c.Family, c.VirtualRouterID, datagram{source: source, destination: destination, hopLimit: 255, payload: marshalAdvertisement(c, source, destination, priority)})
+}
+
+func parseFrame(c Config, frame []byte) (advertisement, error) {
+	if len(frame) < 14 || !bytes.Equal(frame[:6], groupMAC(c.Family)) || !bytes.Equal(frame[6:12], VirtualMAC(c.Family, c.VirtualRouterID)) {
+		return advertisement{}, errors.New("invalid VRRP Ethernet address")
+	}
+	ip := frame[14:]
+	if c.Family == "ipv4" {
+		if binary.BigEndian.Uint16(frame[12:]) != 0x0800 || len(ip) < 20 || ip[0]>>4 != 4 {
+			return advertisement{}, errors.New("invalid VRRP IPv4 header")
+		}
+		ihl, length := int(ip[0]&15)*4, int(binary.BigEndian.Uint16(ip[2:4]))
+		if ihl < 20 || ihl > len(ip) || length < ihl+8 || length > len(ip) || ip[8] != 255 || ip[9] != protocol || binary.BigEndian.Uint16(ip[6:8])&0x3fff != 0 {
+			return advertisement{}, errors.New("invalid VRRP IPv4 size, TTL, protocol or fragmentation")
+		}
+		if checksum(ip[:ihl]) != 0 {
+			return advertisement{}, errors.New("invalid IPv4 header checksum")
+		}
+		source := netip.AddrFrom4([4]byte(ip[12:16]))
+		destination := netip.AddrFrom4([4]byte(ip[16:20]))
+		if !addressInFamily(source, "ipv4") || destination != group4 {
+			return advertisement{}, errors.New("invalid VRRP IPv4 source or destination")
+		}
+		return parseAdvertisement(c, source, destination, ip[ihl:length])
+	}
+	if binary.BigEndian.Uint16(frame[12:]) != 0x86dd || len(ip) < 48 || ip[0]>>4 != 6 || ip[6] != protocol || ip[7] != 255 {
+		return advertisement{}, errors.New("invalid VRRP IPv6 header, hop limit or next header")
+	}
+	length := 40 + int(binary.BigEndian.Uint16(ip[4:6]))
+	if length < 48 || length > len(ip) {
+		return advertisement{}, errors.New("incomplete VRRP IPv6 payload")
+	}
+	source := netip.AddrFrom16([16]byte(ip[8:24]))
+	destination := netip.AddrFrom16([16]byte(ip[24:40]))
+	if !source.IsLinkLocalUnicast() || destination != group6 {
+		return advertisement{}, errors.New("invalid VRRP IPv6 source or destination")
+	}
+	return parseAdvertisement(c, source, destination, ip[40:length])
 }

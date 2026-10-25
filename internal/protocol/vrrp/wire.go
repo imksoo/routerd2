@@ -1,7 +1,6 @@
 package vrrp
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -24,6 +23,41 @@ type advertisement struct {
 	priority  uint8
 	interval  time.Duration
 	addresses []netip.Addr
+}
+
+// An IP datagram with actual kernel receive metadata, not a fabricated Ethernet
+// frame. Unicast checks use the real destination and an explicit peer allowlist.
+type datagram struct {
+	source, destination netip.Addr
+	hopLimit            int
+	payload             []byte
+}
+
+func multicastGroup(family string) netip.Addr {
+	if family == "ipv6" {
+		return group6
+	}
+	return group4
+}
+
+func parseDatagram(c Config, local netip.Addr, p datagram) (advertisement, error) {
+	if p.hopLimit != 255 || !addressInFamily(p.source, c.Family) {
+		return advertisement{}, errors.New("invalid VRRP source or TTL/hop limit")
+	}
+	if len(c.UnicastPeers) == 0 {
+		if p.destination != multicastGroup(c.Family) || c.Family == "ipv6" && !p.source.IsLinkLocalUnicast() {
+			return advertisement{}, errors.New("invalid VRRP multicast source or destination")
+		}
+	} else {
+		peer := false
+		for _, address := range c.UnicastPeers {
+			peer = peer || address == p.source
+		}
+		if !peer || p.destination != local {
+			return advertisement{}, errors.New("VRRP unicast source is not a configured peer or destination is not local")
+		}
+	}
+	return parseAdvertisement(c, p.source, p.destination, p.payload)
 }
 
 func checksum(parts ...[]byte) uint16 {
@@ -59,7 +93,7 @@ func pseudo6(source, dest netip.Addr, length int, nextHeader byte) []byte {
 	return p
 }
 
-func marshalAdvertisement(c Config, source netip.Addr, priority uint8) []byte {
+func marshalAdvertisement(c Config, source, destination netip.Addr, priority uint8) []byte {
 	width := 4
 	if c.Family == "ipv6" {
 		width = 16
@@ -72,7 +106,7 @@ func marshalAdvertisement(c Config, source netip.Addr, priority uint8) []byte {
 	}
 	value := checksum(b) // RFC 9568: no pseudo-header for IPv4.
 	if c.Family == "ipv6" {
-		value = checksum(pseudo6(source, group6, len(b), protocol), b)
+		value = checksum(pseudo6(source, destination, len(b), protocol), b)
 	}
 	binary.BigEndian.PutUint16(b[6:], value)
 	return b
@@ -167,57 +201,14 @@ func ipv6Packet(source, dest netip.Addr, payload []byte, nextHeader byte) []byte
 	return b
 }
 
-func advertisementFrame(c Config, source netip.Addr, priority uint8) []byte {
-	payload := marshalAdvertisement(c, source, priority)
+func datagramFrame(family string, vrid int, p datagram) []byte {
 	typeID := uint16(0x0800)
 	ip := ipv4Packet
-	if c.Family == "ipv6" {
+	if family == "ipv6" {
 		typeID = 0x86dd
 		ip = func(s, d netip.Addr, b []byte) []byte { return ipv6Packet(s, d, b, protocol) }
 	}
-	dest := group4
-	if c.Family == "ipv6" {
-		dest = group6
-	}
-	return ethernet(ip(source, dest, payload), VirtualMAC(c.Family, c.VirtualRouterID), groupMAC(c.Family), typeID)
-}
-
-func parseFrame(c Config, frame []byte) (advertisement, error) {
-	if len(frame) < 14 || !bytes.Equal(frame[:6], groupMAC(c.Family)) || !bytes.Equal(frame[6:12], VirtualMAC(c.Family, c.VirtualRouterID)) {
-		return advertisement{}, errors.New("invalid VRRP Ethernet address")
-	}
-	ip := frame[14:]
-	if c.Family == "ipv4" {
-		if binary.BigEndian.Uint16(frame[12:]) != 0x0800 || len(ip) < 20 || ip[0]>>4 != 4 {
-			return advertisement{}, errors.New("invalid VRRP IPv4 header")
-		}
-		ihl, length := int(ip[0]&15)*4, int(binary.BigEndian.Uint16(ip[2:4]))
-		if ihl < 20 || ihl > len(ip) || length < ihl+8 || length > len(ip) || ip[8] != 255 || ip[9] != protocol || binary.BigEndian.Uint16(ip[6:8])&0x3fff != 0 {
-			return advertisement{}, errors.New("invalid VRRP IPv4 size, TTL, protocol or fragmentation")
-		}
-		if checksum(ip[:ihl]) != 0 {
-			return advertisement{}, errors.New("invalid IPv4 header checksum")
-		}
-		source := netip.AddrFrom4([4]byte(ip[12:16]))
-		destination := netip.AddrFrom4([4]byte(ip[16:20]))
-		if !addressInFamily(source, "ipv4") || destination != group4 {
-			return advertisement{}, errors.New("invalid VRRP IPv4 source or destination")
-		}
-		return parseAdvertisement(c, source, destination, ip[ihl:length])
-	}
-	if binary.BigEndian.Uint16(frame[12:]) != 0x86dd || len(ip) < 48 || ip[0]>>4 != 6 || ip[6] != protocol || ip[7] != 255 {
-		return advertisement{}, errors.New("invalid VRRP IPv6 header, hop limit or next header")
-	}
-	length := 40 + int(binary.BigEndian.Uint16(ip[4:6]))
-	if length < 48 || length > len(ip) {
-		return advertisement{}, errors.New("incomplete VRRP IPv6 payload")
-	}
-	source := netip.AddrFrom16([16]byte(ip[8:24]))
-	destination := netip.AddrFrom16([16]byte(ip[24:40]))
-	if !source.IsLinkLocalUnicast() || destination != group6 {
-		return advertisement{}, errors.New("invalid VRRP IPv6 source or destination")
-	}
-	return parseAdvertisement(c, source, destination, ip[40:length])
+	return ethernet(ip(p.source, p.destination, p.payload), VirtualMAC(family, vrid), groupMAC(family), typeID)
 }
 
 func notificationFrames(c Config) [][]byte {

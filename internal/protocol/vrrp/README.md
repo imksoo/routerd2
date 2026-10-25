@@ -29,13 +29,28 @@ interface name when omitted. Example IPv4 instance:
 }
 ```
 
-IPv6 is a separate instance with `family: ipv6`, a real link-local source and
+Multicast IPv6 is a separate instance with `family: ipv6`, a real link-local source and
 a virtual link-local address first in `addresses`, followed by optional global
 VIPs. Virtual addresses are host CIDRs, including their prefix lengths. An
 explicit `address_owner: true` uses reserved priority 255 and activates without
 the backup timer. Ordinary backup priorities are 1–254. IPv4 and IPv6 can reuse
 the same VRID independently. An optional `vrf` requires both the election
 interface's VRF association and the active virtual interface's VRF membership.
+
+For unicast, add a nonempty `unicast_peers` list and an explicit `source_address`.
+For example, the IPv4 configuration above can use `"unicast_peers": ["192.0.2.3"]`.
+Peers must be distinct same-family unicast addresses other than the local source;
+at most 128 are accepted. An explicit empty list is an error, not a multicast
+fallback. Omitting the field selects multicast. Unicast IPv6 also permits a
+global source and peers; the virtual address list still starts with a link-local
+VIP. Both modes require TTL/Hop Limit 255 and therefore adjacent peers.
+
+Unicast advertises to every configured peer, accepts only those source addresses
+and the actual local destination, and never joins or advertises to the multicast
+group. Linux handles unicast routing and ARP/ND on a source/interface-bound raw
+IP socket. Multicast advertisements and GARP/NA use Ethernet frames with the
+virtual MAC. Unicast advertisements use the election interface's normal MAC;
+VIP ownership, its VMAC and neighbor announcements retain the same writer ACK.
 
 ## Single-writer effects and liveness contract
 
@@ -90,7 +105,7 @@ expired must not renew or advertise under its old election transition.
 
 The coordinator uses the original boot clock directly. It does not derive a
 second receipt lease or rewrite an expired election snapshot. Track policy,
-unicast peers, legacy version/authentication and cluster coordination remain
+legacy version/authentication and cluster coordination remain
 separate HA-01 work.
 
 `make qemu-vrrp-daemon` exercises actual supervisor/control/network/VRRP workers,
@@ -106,8 +121,12 @@ readiness. There is no claim of hitless config or worker restart.
 
 ## Native wire and timer behavior
 
-Linux IPv4/IPv6 raw receive sockets join the VRRP group and provide interface
-and hop-limit metadata. AF_PACKET transmission supplies the correct Ethernet
+Linux IPv4/IPv6 raw receive sockets provide the actual source, destination,
+interface and hop-limit metadata directly. Multicast instances join the VRRP
+group. There is no synthetic Ethernet header or reconstructed IPv6 packet in
+the receive path. Linux owns IP validation, extension processing and reassembly;
+this package validates the complete VRRP message and received IP metadata.
+AF_PACKET transmission supplies the correct Ethernet
 source MAC, including for gratuitous ARP and unsolicited neighbor advertisements.
 Receiving never substitutes a configured TTL for the value received from the
 kernel. An abstract Unix socket reserves each interface/family/VRID tuple within
@@ -134,14 +153,27 @@ This is a native election engine, **not full original `VirtualAddress` or
 dependency/`when` behavior, health tracking penalties, readiness gates,
 additional failover MAC interfaces, associated DHCP/RA state and cloud actions.
 `RouterdCluster` lease/peer policy is a different mechanism and is not silently
-mapped onto this local multicast election.
+mapped onto this local VRRP election.
 
-VRRPv2, VRRPv2 authentication, legacy IPv4 pseudo-header checksums, unicast peer
-extensions, preempt-delay extensions, packet fragmentation and IPv6 extension
-header chains are not accepted. Use an Ethernet logical interface for a VLAN;
+VRRPv2, VRRPv2 authentication, legacy IPv4 pseudo-header checksums and
+preempt-delay extensions are not implemented. Use an Ethernet logical interface for a VLAN;
 the worker does not interpret encapsulated VLAN tags itself. Importers must
 reject unsupported declarations rather than drop them. VRRP provides local-LAN
 election, not authenticated quorum or protection against an on-link attacker.
+
+`TestDaemonVRRPUnicastIPv4` and `TestDaemonVRRPUnicastIPv6` use an independent
+keepalived process with real supervisor/control/network/VRRP workers in isolated
+Linux namespaces. They check two-way unicast capture, TTL/Hop Limit, VIP TCP/UDP,
+higher-priority takeover, worker SIGKILL/rebind, peer stop and lower-priority
+recovery. The keepalived peer explicitly uses `v3_checksum_as_v2` for the
+[RFC 9568 IPv4 checksum](https://keepalived.org/documentation/keepalived-conf/).
+No legacy checksum fallback is added to routerd2. VRF unicast and target hardware
+have not been qualified by these plain Ethernet fixtures.
+Run `make check-vrrp-unicast` on the isolated Linux VM with keepalived installed
+and root or noninteractive sudo available. The runner builds as the caller and
+stages execution in a root-owned 0700 temporary directory; it never changes home
+permissions or host interface configuration. Current logs go to
+`dist/vrrp-unicast/ipv4.log` and `ipv6.log`.
 
 ## Verification
 

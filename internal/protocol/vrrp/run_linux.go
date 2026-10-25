@@ -17,8 +17,9 @@ import (
 )
 
 type transport interface {
-	Receive(context.Context) ([]byte, error)
-	Send(context.Context, []byte) error
+	Receive(context.Context) (datagram, error)
+	Advertise(context.Context, datagram) error
+	SendFrame(context.Context, []byte) error
 	VerifyActive(context.Context, Snapshot) error
 	Close() error
 }
@@ -82,7 +83,7 @@ func applyActions(ctx context.Context, m *machine, a actions, device transport, 
 				return errors.Join(errors.New("VRRP ownership expired before neighbor announcement"), err)
 			}
 			operation, cancel := context.WithDeadline(ctx, minTime(time.Now().Add(250*time.Millisecond), m.validUntil))
-			err = device.Send(operation, frame)
+			err = device.SendFrame(operation, frame)
 			cancel()
 			if err != nil {
 				return fmt.Errorf("VRRP neighbor announcement: %w", err)
@@ -162,8 +163,15 @@ func sendAdvertisement(ctx context.Context, m *machine, device transport, priori
 	if err := operation.Err(); err != nil {
 		return err
 	}
-	if err := device.Send(operation, advertisementFrame(m.config, m.source, priority)); err != nil {
-		return fmt.Errorf("send VRRP advertisement: %w", err)
+	destinations := m.config.UnicastPeers
+	if len(destinations) == 0 {
+		destinations = []netip.Addr{multicastGroup(m.config.Family)}
+	}
+	for _, destination := range destinations {
+		p := datagram{source: m.source, destination: destination, hopLimit: 255, payload: marshalAdvertisement(m.config, m.source, destination, priority)}
+		if err := device.Advertise(operation, p); err != nil {
+			return fmt.Errorf("send VRRP advertisement to %s: %w", destination, err)
+		}
 	}
 	m.advertisements++
 	return nil
@@ -218,13 +226,13 @@ func run(ctx context.Context, cfg Config, source netip.Addr, epoch string, devic
 		result = errors.Join(result, withdraw(m, device, effects))
 	}()
 	rxContext, cancelReceive := context.WithCancel(ctx)
-	frames := make(chan []byte, 64)
+	packets := make(chan datagram, 64)
 	rxError, rxDone := make(chan error, 1), make(chan struct{})
 	var dropped atomic.Uint64
 	go func() {
 		defer close(rxDone)
 		for rxContext.Err() == nil {
-			frame, err := device.Receive(rxContext)
+			packet, err := device.Receive(rxContext)
 			if err != nil {
 				select {
 				case rxError <- err:
@@ -233,7 +241,7 @@ func run(ctx context.Context, cfg Config, source netip.Addr, epoch string, devic
 				return
 			}
 			select {
-			case frames <- frame:
+			case packets <- packet:
 			default:
 				dropped.Add(1)
 			}
@@ -273,9 +281,9 @@ func run(ctx context.Context, cfg Config, source netip.Addr, epoch string, devic
 				return nil
 			}
 			return fmt.Errorf("receive VRRP: %w", err)
-		case frame := <-frames:
+		case packet := <-packets:
 			timer.Stop()
-			p, err := parseFrame(cfg, frame)
+			p, err := parseDatagram(cfg, source, packet)
 			if err != nil {
 				if errors.Is(err, errOtherVirtualRouter) {
 					continue

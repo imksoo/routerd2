@@ -720,6 +720,10 @@ BGP経路の元の期限はnetwork workerへ渡し、controlと独立して撤�
 - electionとVIP公開を分離し、ready_whenとgraceful activation、WAN/LAN VMAC、RA withdrawalを同じrole authorityで扱う。
 - RouterdClusterのfile/flock/TTL協調を維持するか、異なるfencing方式への置換を明示する。
 
+native unicastのIPv4/IPv6を実装し、独立keepalived peerとのVIP TCP/UDP、選出・peer停止・
+worker再起動、双方向packet captureを確認した。track、旧version/auth、cluster、追加VMACと
+対象実機の受入は残っており、HA-01全体の完了とはしない。
+
 **受入条件**
 
 - 二台と独立peerで選出、track、preempt、分断、worker/control crash、再起動を確認する。

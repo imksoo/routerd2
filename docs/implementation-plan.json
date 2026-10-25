@@ -920,7 +920,7 @@
         "internal/cluster (新設予定)",
         "internal/legacyconfig"
       ],
-      "implementation_notes": "Native VRRP election and coordinator-owned graceful admission implemented. Admission consumes finite readiness when kernel application begins; successful ownership survives readiness loss, while failed application creates no admission. Original boot expiry and producer fences remain. Track/unicast/legacy authentication, cluster policy, independent implementation interoperability and hardware qualification are incomplete."
+      "implementation_notes": "Native VRRP election and coordinator-owned graceful admission implemented. Admission consumes finite readiness when kernel application begins; successful ownership survives readiness loss, while failed application creates no admission. Original boot expiry and producer fences remain. Native IPv4/IPv6 unicast peers now use source/interface-bound raw IP sockets, explicit peer/local-destination checks, TTL/Hop Limit 255 and actual IPv6 checksum destinations. Empty peer lists are rejected rather than falling back to multicast. Independent keepalived interoperability covers actual daemon VIP TCP/UDP, takeover, worker SIGKILL/rebind, peer stop, lower-priority recovery and bidirectional packet capture. Receive processing uses actual IP metadata instead of fabricated Ethernet headers. Compiler contract is resource-program-native-4. Track, legacy authentication/version, cluster, additional VMACs, VRF unicast and hardware qualification remain incomplete."
     },
     {
       "id": "HA-02",

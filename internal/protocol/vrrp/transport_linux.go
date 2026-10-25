@@ -17,13 +17,14 @@ import (
 )
 
 type nativeTransport struct {
-	config Config
-	index  int
-	rxFD   int
-	txFD   int
-	lockFD int
-	links  *netlink.Handle
-	source netip.Addr
+	config    Config
+	index     int
+	rxFD      int
+	txFD      int
+	unicastFD int
+	lockFD    int
+	links     *netlink.Handle
+	source    netip.Addr
 }
 
 func htons(v uint16) uint16 {
@@ -33,7 +34,7 @@ func htons(v uint16) uint16 {
 }
 
 func openTransport(c Config) (_ *nativeTransport, _ netip.Addr, result error) {
-	t := &nativeTransport{config: c, rxFD: -1, txFD: -1, lockFD: -1}
+	t := &nativeTransport{config: c, rxFD: -1, txFD: -1, unicastFD: -1, lockFD: -1}
 	defer func() {
 		if result != nil {
 			_ = t.Close()
@@ -52,8 +53,8 @@ func openTransport(c Config) (_ *nativeTransport, _ netip.Addr, result error) {
 		return nil, netip.Addr{}, err
 	}
 	attrs := link.Attrs()
-	if len(attrs.HardwareAddr) != 6 || attrs.RawFlags&unix.IFF_UP == 0 || attrs.RawFlags&unix.IFF_MULTICAST == 0 {
-		return nil, netip.Addr{}, errors.New("VRRP election interface must be an up multicast Ethernet link")
+	if len(attrs.HardwareAddr) != 6 || attrs.RawFlags&unix.IFF_UP == 0 || len(c.UnicastPeers) == 0 && attrs.RawFlags&unix.IFF_MULTICAST == 0 {
+		return nil, netip.Addr{}, errors.New("VRRP election interface must be an up Ethernet link with multicast support when required")
 	}
 	t.index = attrs.Index
 	if c.VRF != "" {
@@ -77,8 +78,11 @@ func openTransport(c Config) (_ *nativeTransport, _ netip.Addr, result error) {
 	if err != nil {
 		return nil, netip.Addr{}, err
 	}
-	frame := advertisementFrame(c, t.source, uint8(c.Priority))
-	if len(frame)-14 > attrs.MTU {
+	width, header := 4, 20
+	if c.Family == "ipv6" {
+		width, header = 16, 40
+	}
+	if header+8+width*len(c.Addresses) > attrs.MTU {
 		return nil, netip.Addr{}, errors.New("VRRP address list exceeds the election interface MTU")
 	}
 	// Abstract Unix addresses are scoped to the network namespace. This
@@ -107,9 +111,11 @@ func openTransport(c Config) (_ *nativeTransport, _ netip.Addr, result error) {
 		if err := unix.SetsockoptInt(t.rxFD, unix.IPPROTO_IP, unix.IP_PKTINFO, 1); err != nil {
 			return nil, netip.Addr{}, err
 		}
-		membership := &unix.IPMreqn{Multiaddr: group4.As4(), Ifindex: int32(t.index)}
-		if err := unix.SetsockoptIPMreqn(t.rxFD, unix.IPPROTO_IP, unix.IP_ADD_MEMBERSHIP, membership); err != nil {
-			return nil, netip.Addr{}, err
+		if len(c.UnicastPeers) == 0 {
+			membership := &unix.IPMreqn{Multiaddr: group4.As4(), Ifindex: int32(t.index)}
+			if err := unix.SetsockoptIPMreqn(t.rxFD, unix.IPPROTO_IP, unix.IP_ADD_MEMBERSHIP, membership); err != nil {
+				return nil, netip.Addr{}, err
+			}
 		}
 	} else {
 		for _, option := range []int{unix.IPV6_RECVPKTINFO, unix.IPV6_RECVHOPLIMIT} {
@@ -117,13 +123,15 @@ func openTransport(c Config) (_ *nativeTransport, _ netip.Addr, result error) {
 				return nil, netip.Addr{}, err
 			}
 		}
-		membership := &unix.IPv6Mreq{Multiaddr: group6.As16(), Interface: uint32(t.index)}
-		if err := unix.SetsockoptIPv6Mreq(t.rxFD, unix.IPPROTO_IPV6, unix.IPV6_JOIN_GROUP, membership); err != nil {
-			return nil, netip.Addr{}, err
+		if len(c.UnicastPeers) == 0 {
+			membership := &unix.IPv6Mreq{Multiaddr: group6.As16(), Interface: uint32(t.index)}
+			if err := unix.SetsockoptIPv6Mreq(t.rxFD, unix.IPPROTO_IPV6, unix.IPV6_JOIN_GROUP, membership); err != nil {
+				return nil, netip.Addr{}, err
+			}
 		}
 	}
-	// Layer-3 group membership above also emits IGMP/MLD as needed. Transmission
-	// uses Ethernet raw frames because an ordinary IP raw socket would use the
+	// Multicast group membership above also emits IGMP/MLD as needed. Multicast
+	// transmission uses Ethernet frames because an ordinary IP raw socket uses the
 	// physical link's MAC instead of the protocol's mandatory virtual MAC.
 	t.txFD, err = unix.Socket(unix.AF_PACKET, unix.SOCK_RAW|unix.SOCK_NONBLOCK|unix.SOCK_CLOEXEC, 0)
 	if err != nil {
@@ -131,6 +139,11 @@ func openTransport(c Config) (_ *nativeTransport, _ netip.Addr, result error) {
 	}
 	if err := unix.Bind(t.txFD, &unix.SockaddrLinklayer{Ifindex: t.index}); err != nil {
 		return nil, netip.Addr{}, err
+	}
+	if len(c.UnicastPeers) != 0 {
+		if err := t.openUnicast(family); err != nil {
+			return nil, netip.Addr{}, err
+		}
 	}
 	return t, t.source, nil
 }
@@ -154,7 +167,7 @@ func chooseSource(handle *netlink.Handle, link netlink.Link, c Config) (netip.Ad
 			continue
 		}
 		a = a.Unmap()
-		if !addressInFamily(a, c.Family) || c.Family == "ipv6" && !a.IsLinkLocalUnicast() {
+		if !addressInFamily(a, c.Family) || len(c.UnicastPeers) == 0 && c.Family == "ipv6" && !a.IsLinkLocalUnicast() {
 			continue
 		}
 		if c.SourceAddress != "" {
@@ -216,25 +229,25 @@ func pollSocket(ctx context.Context, fd int, events int16) error {
 	}
 }
 
-func (t *nativeTransport) Receive(ctx context.Context) ([]byte, error) {
+func (t *nativeTransport) Receive(ctx context.Context) (datagram, error) {
 	buffer, oob := make([]byte, 65536), make([]byte, 256)
 	for {
 		if err := pollSocket(ctx, t.rxFD, unix.POLLIN); err != nil {
-			return nil, err
+			return datagram{}, err
 		}
 		n, controlLen, flags, sender, err := unix.Recvmsg(t.rxFD, buffer, oob, 0)
 		if errors.Is(err, unix.EAGAIN) || errors.Is(err, unix.EINTR) {
 			continue
 		}
 		if err != nil {
-			return nil, err
+			return datagram{}, err
 		}
 		if flags&(unix.MSG_TRUNC|unix.MSG_CTRUNC) != 0 || n == 0 {
-			return nil, nil // Let the runtime count a malformed datagram.
+			return datagram{}, nil // Let the runtime count a malformed datagram.
 		}
 		messages, err := unix.ParseSocketControlMessage(oob[:controlLen])
 		if err != nil {
-			return nil, nil
+			return datagram{}, nil
 		}
 		index, hop := 0, -1
 		var destination netip.Addr
@@ -252,44 +265,48 @@ func (t *nativeTransport) Receive(ctx context.Context) ([]byte, error) {
 			}
 		}
 		if index != t.index {
-			return nil, nil
+			return datagram{}, nil
 		}
-		mac := VirtualMAC(t.config.Family, t.config.VirtualRouterID)
 		if t.config.Family == "ipv4" {
-			if destination != group4 {
-				return nil, nil
+			// Linux validates/reassembles the IP packet before raw delivery.
+			// Preserve its actual endpoints, TTL and payload for VRRP checks.
+			if n < 20 {
+				return datagram{}, nil
 			}
-			// Native IP receive sockets expose no Ethernet header. Only sending
-			// requires the VMAC check; the protocol receive checks use the IP
-			// header, kernel-provided interface and ancillary hop-limit fields.
-			return ethernet(buffer[:n], mac, groupMAC("ipv4"), 0x0800), nil
+			header := int(buffer[0]&15) * 4
+			if header < 20 || header > n {
+				return datagram{}, nil
+			}
+			return datagram{source: netip.AddrFrom4([4]byte(buffer[12:16])), destination: destination, hopLimit: int(buffer[8]), payload: buffer[header:n]}, nil
 		}
 		address, ok := sender.(*unix.SockaddrInet6)
-		if !ok || destination != group6 || hop < 0 || hop > 255 {
-			return nil, nil
+		if !ok {
+			return datagram{}, nil
 		}
-		ip := ipv6Packet(netip.AddrFrom16(address.Addr), destination, buffer[:n], protocol)
-		ip[7] = byte(hop) // Never replace a received hop limit with our default.
-		return ethernet(ip, mac, groupMAC("ipv6"), 0x86dd), nil
+		return datagram{source: netip.AddrFrom16(address.Addr), destination: destination, hopLimit: hop, payload: buffer[:n]}, nil
 	}
 }
 
-func (t *nativeTransport) Send(ctx context.Context, frame []byte) error {
+func (t *nativeTransport) SendFrame(ctx context.Context, frame []byte) error {
 	if len(frame) < 14 {
 		return errors.New("cannot send incomplete Ethernet frame")
 	}
 	destination := &unix.SockaddrLinklayer{Ifindex: t.index, Protocol: htons(binary.BigEndian.Uint16(frame[12:14])), Halen: 6}
 	copy(destination.Addr[:], frame[:6])
+	return sendTo(ctx, t.txFD, frame, destination)
+}
+
+func sendTo(ctx context.Context, fd int, payload []byte, destination unix.Sockaddr) error {
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		err := unix.Sendto(t.txFD, frame, 0, destination)
+		err := unix.Sendto(fd, payload, 0, destination)
 		if errors.Is(err, unix.EINTR) {
 			continue
 		}
 		if errors.Is(err, unix.EAGAIN) || errors.Is(err, unix.ENOBUFS) {
-			if err := pollSocket(ctx, t.txFD, unix.POLLOUT); err != nil {
+			if err := pollSocket(ctx, fd, unix.POLLOUT); err != nil {
 				return err
 			}
 			continue
@@ -355,12 +372,12 @@ func (t *nativeTransport) VerifyActive(ctx context.Context, snapshot Snapshot) e
 
 func (t *nativeTransport) Close() error {
 	var errs []error
-	for _, fd := range []int{t.rxFD, t.txFD, t.lockFD} {
+	for _, fd := range []int{t.rxFD, t.txFD, t.unicastFD, t.lockFD} {
 		if fd >= 0 {
 			errs = append(errs, unix.Close(fd))
 		}
 	}
-	t.rxFD, t.txFD, t.lockFD = -1, -1, -1
+	t.rxFD, t.txFD, t.unicastFD, t.lockFD = -1, -1, -1, -1
 	if t.links != nil {
 		t.links.Close()
 		t.links = nil

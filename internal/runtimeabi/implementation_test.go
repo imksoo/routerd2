@@ -31,34 +31,22 @@ func TestDeclarationTracksImplementedFormatVersions(t *testing.T) {
 	}
 }
 
-func TestGuardedVRRPDependencyRequiresNewCompilerContract(t *testing.T) {
+func TestUnicastVRRPRequiresAnExplicitCompilerContract(t *testing.T) {
 	current := runtimeabi.Current()
-	if current.ConfigurationContract != "resource-program-native-3" {
-		t.Fatal("guarded dynamic VRRP consumers were added without changing the signed compiler contract")
+	if current.ConfigurationContract != "resource-program-native-4" {
+		t.Fatal("unicast VRRP input semantics require their signed compiler contract")
 	}
-	old := current
-	old.ConfigurationContract = "resource-program-native-1"
 	facts := runtimeabi.Facts{Configuration: current.Configuration.Write, ConfigurationContract: current.ConfigurationContract}
 	for _, state := range current.State {
 		facts.State = append(facts.State, runtimeabi.StateVersion{Name: state.Name, Version: state.Format.Write})
 	}
 	if err := runtimeabi.CheckTransition(current, current, facts); err != nil {
-		t.Fatal("current contract failed its complete format observations:", err)
-	}
-	facts.ConfigurationContract = old.ConfigurationContract
-	if err := runtimeabi.CheckTransition(old, current, facts); err == nil {
-		t.Fatal("old compiler contract accepted new dynamic interface semantics")
-	}
-}
-
-func TestGracefulVRRPHasASeparateSignedCompilerContract(t *testing.T) {
-	current := runtimeabi.Current()
-	if current.ConfigurationContract != "resource-program-native-3" {
-		t.Fatal("graceful publication semantics reused an earlier compiler contract")
+		t.Fatal(err)
 	}
 	previous := current
-	previous.ConfigurationContract = "resource-program-native-2"
-	if err := runtimeabi.CheckTransition(previous, current, runtimeabi.Facts{Configuration: 2, ConfigurationContract: previous.ConfigurationContract}); err == nil {
-		t.Fatal("unqualified old compiler transition accepted graceful publication")
+	previous.ConfigurationContract = "resource-program-native-3"
+	facts.ConfigurationContract = previous.ConfigurationContract
+	if err := runtimeabi.CheckTransition(previous, current, facts); err == nil {
+		t.Fatal("unqualified prototype compiler transition accepted")
 	}
 }

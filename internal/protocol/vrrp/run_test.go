@@ -14,7 +14,7 @@ import (
 )
 
 type fakeTransport struct {
-	received chan []byte
+	received chan datagram
 	sent     chan []byte
 	mu       sync.Mutex
 	active   bool
@@ -22,17 +22,17 @@ type fakeTransport struct {
 }
 
 func newFakeTransport() *fakeTransport {
-	return &fakeTransport{received: make(chan []byte, 16), sent: make(chan []byte, 1024)}
+	return &fakeTransport{received: make(chan datagram, 16), sent: make(chan []byte, 1024)}
 }
-func (f *fakeTransport) Receive(ctx context.Context) ([]byte, error) {
+func (f *fakeTransport) Receive(ctx context.Context) (datagram, error) {
 	select {
 	case frame := <-f.received:
 		return frame, nil
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return datagram{}, ctx.Err()
 	}
 }
-func (f *fakeTransport) Send(ctx context.Context, frame []byte) error {
+func (f *fakeTransport) SendFrame(ctx context.Context, frame []byte) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -60,13 +60,13 @@ type canceledActionTransport struct {
 	sends  int
 }
 
-func (d *canceledActionTransport) Send(ctx context.Context, frame []byte) error {
+func (d *canceledActionTransport) SendFrame(ctx context.Context, frame []byte) error {
 	d.sends++
 	if d.mode == "send" && d.sends == 1 || d.mode == "notify" && d.sends == 2 {
 		d.cancel()
 		return ctx.Err()
 	}
-	return d.fakeTransport.Send(ctx, frame)
+	return d.fakeTransport.SendFrame(ctx, frame)
 }
 
 func (d *canceledActionTransport) VerifyActive(ctx context.Context, s Snapshot) error {
@@ -298,4 +298,19 @@ func TestActiveAdvertisementsRenewAcknowledgedLease(t *testing.T) {
 	if len(leases) < 3 || !leases[1].After(leases[0]) || !leases[2].After(leases[1]) {
 		t.Fatalf("ownership lease did not advance: %v", leases)
 	}
+}
+
+func (f *fakeTransport) Advertise(ctx context.Context, p datagram) error {
+	family := "ipv6"
+	if p.source.Is4() {
+		family = "ipv4"
+	}
+	return f.SendFrame(ctx, datagramFrame(family, int(p.payload[1]), p))
+}
+func (d *canceledActionTransport) Advertise(ctx context.Context, p datagram) error {
+	family := "ipv6"
+	if p.source.Is4() {
+		family = "ipv4"
+	}
+	return d.SendFrame(ctx, datagramFrame(family, int(p.payload[1]), p))
 }
