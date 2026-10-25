@@ -203,6 +203,8 @@ def run_guest(args, image, output, manifest):
             if MARKER + "_PASS" in lines and passed_at is None:
                 if not any(line.startswith(MARKER + "_WITNESS ") for line in lines):
                     raise RuntimeError("guest reported PASS without its independent execution witness")
+                if not any(line.startswith(MARKER + "_COMMIT_FENCE_WITNESS ") for line in lines):
+                    raise RuntimeError("guest reported PASS without the real control commit fence witness")
                 passed_at = time.monotonic()
             status = process.poll()
             if status is not None:
@@ -211,6 +213,7 @@ def run_guest(args, image, output, manifest):
                     raise RuntimeError(f"QEMU exited {status} without confirmed trial and clean poweroff: {detail}")
                 manifest["result"] = "passed"
                 manifest["witness"] = next(line for line in lines if line.startswith(MARKER + "_WITNESS "))
+                manifest["commit_fence_witness"] = next(line for line in lines if line.startswith(MARKER + "_COMMIT_FENCE_WITNESS "))
                 print("\n".join(line for line in lines if line.startswith(MARKER)))
                 break
             if passed_at is not None and time.monotonic() - passed_at > 10:

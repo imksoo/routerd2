@@ -21,6 +21,7 @@ import (
 
 	"github.com/imksoo/routerd2/internal/boot"
 	"github.com/imksoo/routerd2/internal/config"
+	"github.com/imksoo/routerd2/internal/configref"
 	"github.com/imksoo/routerd2/internal/control"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/release"
@@ -298,7 +299,7 @@ func runProbe() error {
 			err := observe(call, &store, keys, expected)
 			stop()
 			if err == nil {
-				return nil
+				return verifyLiveCommitFreeze(ctx, store)
 			}
 			last = err
 			// Leave an actual idle interval after ELF re-verification. An
@@ -307,6 +308,75 @@ func runProbe() error {
 			timer.Reset(time.Second)
 		}
 	}
+}
+
+// This deliberately uses the existing raw journal primitives, not an operator
+// prepare API. The running signed PID 1 and real control/network workers must
+// enforce the fence before a second paired boot is enabled in the product.
+func verifyLiveCommitFreeze(ctx context.Context, store *release.Store) error {
+	client := localapi.NewClient(filepath.Join(runtimeDir, control.SocketName))
+	var initial control.State
+	if err := client.Do(ctx, "GET", "/v1/config", nil, &initial); err != nil {
+		return err
+	}
+	if initial.ConfigOmitted || initial.Revision != 1 {
+		return errors.New("live fence fixture requires the original confirmed seed")
+	}
+	request := control.CommitRequest{ExpectedRevision: initial.Revision, RequestID: "live-fence-before-prepare", Config: initial.Config}
+	var committed control.State
+	if err := client.Do(ctx, "POST", "/v1/config/commit", request, &committed); err != nil {
+		return fmt.Errorf("commit before paired prepare: %w", err)
+	}
+	if committed.Revision != 2 {
+		return errors.New("first live commit did not advance once")
+	}
+	var snapshot config.SnapshotRef
+	if err := client.Do(ctx, "POST", "/v1/config/snapshots", control.SnapshotRequest{ExpectedRevision: 2}, &snapshot); err != nil {
+		return err
+	}
+	state, err := store.Status(ctx)
+	if err != nil {
+		return err
+	}
+	selection := configref.Selection{Generation: 10, ExpectedRevision: 2, Snapshot: snapshot}
+	pending, err := store.PrepareRollback(ctx, state.Generation, release.PrepareOptions{Startup: &selection, KnownGood: &snapshot})
+	if err != nil {
+		return fmt.Errorf("prepare raw paired rollback intent: %w", err)
+	}
+	var replay control.State
+	if err := client.Do(ctx, "POST", "/v1/config/commit", request, &replay); err != nil || replay.Revision != 2 {
+		return fmt.Errorf("prepared pair lost durable replay (revision %d): %v", replay.Revision, err)
+	}
+	request.ExpectedRevision, request.RequestID = 2, "live-fence-blocked"
+	err = client.Do(ctx, "POST", "/v1/config/commit", request, nil)
+	var rejected *localapi.HTTPError
+	if !errors.As(err, &rejected) || rejected.StatusCode != 409 {
+		return fmt.Errorf("prepared pair allowed a real control commit: %v", err)
+	}
+	var unchanged control.State
+	if err := client.Do(ctx, "GET", "/v1/config", nil, &unchanged); err != nil {
+		return err
+	}
+	if unchanged.Revision != 2 || unchanged.LastRequestID != committed.LastRequestID {
+		return errors.New("rejected live commit changed the configuration journal")
+	}
+	canceled, err := store.CancelPending(ctx, pending.Generation)
+	if err != nil {
+		return err
+	}
+	if canceled.ConfigHighWatermark != 11 || canceled.ConfigStoreID != snapshot.StoreID {
+		return errors.New("cancel discarded paired authority reservations")
+	}
+	request.RequestID = "live-fence-after-cancel"
+	var final control.State
+	if err := client.Do(ctx, "POST", "/v1/config/commit", request, &final); err != nil {
+		return fmt.Errorf("cancel did not unfreeze real control: %w", err)
+	}
+	if final.Revision != 3 || final.StoreID != snapshot.StoreID {
+		return errors.New("post-cancel commit did not preserve the live store")
+	}
+	fmt.Printf("%s_COMMIT_FENCE_WITNESS before=1 committed=2 blocked_status=409 replay=2 after_cancel=3 reserved_generation=11 store_identity=matched\n", marker)
+	return nil
 }
 
 func observe(ctx context.Context, store **release.Store, keys map[string]ed25519.PublicKey, expected witness) error {
