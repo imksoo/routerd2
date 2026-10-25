@@ -1,0 +1,8 @@
+# github.com/imksoo/routerd2/internal/release [github.com/imksoo/routerd2/internal/release.test]
+internal/release/prepare_checked_test.go:43:17: s.PrepareChecked undefined (type *Store has no field or method PrepareChecked)
+internal/release/prepare_checked_test.go:52:17: s.PrepareChecked undefined (type *Store has no field or method PrepareChecked)
+internal/release/prepare_checked_test.go:56:17: s.PrepareChecked undefined (type *Store has no field or method PrepareChecked)
+internal/release/prepare_checked_test.go:62:18: s.PrepareChecked undefined (type *Store has no field or method PrepareChecked)
+internal/release/prepare_checked_test.go:73:17: s.PrepareChecked undefined (type *Store has no field or method PrepareChecked)
+FAIL    github.com/imksoo/routerd2/internal/release [build failed]
+FAIL

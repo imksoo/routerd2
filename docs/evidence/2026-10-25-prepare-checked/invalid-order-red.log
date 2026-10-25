@@ -1,0 +1,5 @@
+--- FAIL: TestCheckedPrepareValidatesPinnedTargetUnderFileLockBeforePublication (0.82s)
+    prepare_checked_test.go:62: malformed pair invoked target preflight invalid startup generation or expected configuration revision
+FAIL
+FAIL    github.com/imksoo/routerd2/internal/release     0.832s
+FAIL

@@ -6,7 +6,18 @@
 **継続ゴール:** 全残実装・必要試験・対象実機での利用可能性の受入まで進める。
 部分checkpointでは完了しない。
 
-最新product checkpointは `e3451ef`、storage readiness fixtureは `234827d`。
+最新product checkpointは `973c2df`、probe budget fixtureは `5f7cfff`。
+`PrepareChecked`/`PrepareRollbackChecked`で、実target descriptor検証・参照/世代検査・caller preflight・公開を一つのrelease lock内へ接続した。
+current stateをdeep copyし、入力参照を固定する。不正pairはcallback前に拒否し、検査失敗/cancelでselectorとwatermarkを消費しない。
+全体check/Race/vet/Python30/6 ELF build194.15秒、clean12.32秒、probe修正後16.53秒PASS。6 SHAは一致。
+native Race7 gateはPASS。QEMU signed PID1は164.89秒、ext4二kernel184.05秒、二WAN/PBR84.36秒PASS。
+実controlでpreflight中commit503、stale revision/実snapshot欠落拒否、target FD、prepare後の同一再送ACK・新規commit409・cancel後commitをwitnessで確認した。
+初回QEMUはprobeがconfirmationを観測できずhost191.18秒/guest175.31秒FAIL。局所試験で短いRPC deadlineがELF検証まで中断する問題を再現し、既存全体125秒/host240秒内で段階ごとのcontextを分けた。
+製品/CPU/RAM/期限は変えず、段階別診断とtestdata明示unit/Race/vetをMakeへ加えた。元失敗の正確な処理段階は未記録で、因果を断定しない。
+これは検査を置くtransaction APIと実fixtureであり、target ABI/state/capability/失効policyやoperator prepare/paired loader/healthは未実装。paired bootの明示拒否を維持する。
+[checked prepareの証跡・境界・残作業](evidence/2026-10-25-prepare-checked.md) を参照。全計画・対象実機受入は未完了で、全体ゴールはactive。
+
+前回product checkpointは `e3451ef`、storage readiness fixtureは `234827d`。
 署名済みbootのroot/trust/digestをcontrolへ固定し、設定revisionを変える操作・confirm・復元をrelease storeのプロセス間lockで保護した。
 paired prepare/trial中の新規commitを拒否し、同一requestのACKは再適用しない。cancel/正確なpair confirm後にcommitを再開する。
 全体check/Race/vet/Python30/6 ELF build193.31秒、clean9.55秒、fixture修正後11.50秒PASS。6 SHAは一致。

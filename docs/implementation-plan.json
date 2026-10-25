@@ -12107,6 +12107,37 @@
         "Current OCI/APK and arm64 execution; full bootstrap/engine/ABI/privilege closure, all remaining work packages and selected physical hardware/NIC/performance acceptance"
       ],
       "full_goal_status": "active"
+    },
+    {
+      "id": "locked-target-preflight-before-publication",
+      "date": "2026-10-25",
+      "status": "partial_checked_prepare_primitives_and_real_transaction_verified",
+      "code_checkpoint": "973c2df4acc87bdcb010f21d537bb37f698b36b0",
+      "fixture_checkpoint": "5f7cfff31b82f34b9762ab31bdaebcbdc4b577a9",
+      "work_packages": [
+        "CORE-02",
+        "CORE-06",
+        "DIST-01"
+      ],
+      "evidence": "docs/evidence/2026-10-25-prepare-checked.md",
+      "implemented": [
+        "Checked prepare/rollback require caller preflight under process/file lock, after actual target verification and pair validation, before publication; actual previous runtime supplied for rollback",
+        "Deep current-state view and frozen input references prevent callback metadata changes from changing the published tuple; failed/canceled/nil/stale validation leaves selector and watermarks unchanged",
+        "Actual signed PID1 fixture checks live revision/SID/confirmation and actual immutable snapshot, target FD, competing real commit503 under preflight lock, subsequent prepared replay/409/cancel/recommit; no paired boot activation"
+      ],
+      "validation": [
+        "API/order REDs and final actual signed-store Race5.760s; whole check/Race/vet/Python30/six ELF build194.15s, clean12.32s, fixture-only clean16.53s with identical product hashes",
+        "Native Race seven related catalog/publisher/DHCP/SSH/startup/conditional-recovery/two-WAN gates pass; arm64 is signature/ELF/stage, not execution",
+        "Initial QEMU host191.18s/guest175.31s fails before confirmation witness with context deadline and no stage diagnostics; local RED reproduces shared short RPC deadline aborting verified-runtime observation, corrected within existing125s/240s and CPU/RAM; original exact stage/causality remains undetermined",
+        "Final QEMU signed PID1164.89s, ext4 two kernels184.05s and two-WAN/PBR84.36s pass; signed guest six product hashes match initial failed run; explicit testdata unit/Race/vet added"
+      ],
+      "remaining": [
+        "Caller target ABI/capability/kernel/profile/state/revocation policy and supported operator prepare workflow; checked callback alone is not target compatibility",
+        "Paired loader, exact live tuple continuous health/confirmation and bounded conditional fallback policy; real signed paired PID1/kernel boot and write-time power cut/ENOSPC/fsync acceptance",
+        "Corrupt referenced runtime fallback before Open, reference-aware snapshot pruning, same-revision ACK/startup-switch audit, bootstrap/engine/ABI/privilege closure",
+        "Original probe timeout exact stage and earlier health-false component/recurrence remain undetermined; current OCI/APK, arm64 execution, all remaining work packages and selected physical hardware/NIC/performance acceptance"
+      ],
+      "full_goal_status": "active"
     }
   ],
   "delivery_goal": {

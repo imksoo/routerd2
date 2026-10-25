@@ -1,0 +1,8 @@
+=== RUN   TestProbeUsesRemainingGlobalBudgetForVerifiedRuntime
+    probe_test.go:32: short socket budget incorrectly canceled runtime inspection verified runtime observation: context deadline exceeded
+--- FAIL: TestProbeUsesRemainingGlobalBudgetForVerifiedRuntime (0.01s)
+=== RUN   TestProbeKeepsSocketTimeoutAndGlobalDeadline
+--- PASS: TestProbeKeepsSocketTimeoutAndGlobalDeadline (0.02s)
+FAIL
+FAIL    github.com/imksoo/routerd2/internal/releaseboot/testdata/guest  0.057s
+FAIL

@@ -240,3 +240,27 @@ preflight live configuration revision, unconfirmed state, snapshots or target
 compatibility. Preparing a stale raw intent is therefore not a supported operator
 workflow. Paired signed boot remains explicitly refused until the coordinator,
 loader, health confirmation and fallback policy are connected and accepted.
+
+## Checked preparation before publication
+
+`PrepareChecked` and `PrepareRollbackChecked` extend the internal primitives
+with a required preflight callback. They hold the release mutex and file lock
+across reading the current state, verifying the actual target descriptors,
+validating the pair's reference/generation bounds, running preflight and
+publishing the candidate. Rollback supplies the actual previous runtime to the
+callback. A malformed pair is rejected before invoking preflight.
+
+The callback receives an independent copy of the current state and borrowed
+target descriptors. Input startup/known-good references are frozen before it
+runs; modifying callback metadata cannot change the published pair. Callbacks
+must not recursively acquire the same store or retain/close borrowed descriptors.
+Failure or cancellation before publication leaves both watermarks and selector
+unchanged; a canceled context is rechecked after the callback returns.
+
+This provides a place for the coordinator to verify the live configuration and
+actual immutable snapshots while its release lock excludes configuration writes.
+It does not supply the coordinator's target ABI, capability, state or revocation
+policy. The raw preparation methods remain lower-level primitives, and there
+are no new operator CLI/SSH flags or activated paired loader in this change.
+Resolving a snapshot with the running compiler is not proof that the target
+runtime supports it.

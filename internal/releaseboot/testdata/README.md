@@ -60,7 +60,12 @@ separate initializer and probe, excluded from the ordinary production build.
    attempt, retained high watermark, `operation=confirm` and unchanged kernel
    boot ID.
 8. After observing confirmation, the probe makes a real control commit and
-   snapshot. It prepares a paired rollback intent through the raw release store
+   snapshot. Checked preparation rejects a stale live revision and a missing
+   actual snapshot without consuming authority. During the successful preflight,
+   the actual previous runtime's descriptor must be open, live store/revision
+   must match, and a competing real control commit must return HTTP 503 while
+   the release file lock is held. It prepares a paired rollback intent through
+   these internal primitives
    while PID 1 and the selected workers continue running. Exact request replay
    must retain revision 2, a new commit must return HTTP 409 without changing
    the authoritative journal, and cancellation must retain store identity and
@@ -78,6 +83,11 @@ explicit busy response. After re-verifying the executable files it always
 leaves an idle interval, so the observer cannot monopolize the store lock on a
 slow CPU. Once confirmation has been witnessed, a fence failure ends the test;
 the probe does not restart the transaction or retry mutations until they pass.
+Unix API observations have a five-second bound. Full artifact re-verification
+uses the remaining existing 125-second probe budget, instead of inheriting the
+short RPC deadline. Both stages retain the global deadline and include their
+stage name on error. The fixture's deadline-contract unit/Race/vet checks are
+explicit Makefile targets because Go's `./...` pattern excludes `testdata`.
 
 ## Outputs and boundaries
 
@@ -96,6 +106,8 @@ This gate proves a same-kernel userland transition, real health confirmation and
 the running control worker's paired-prepare commit fence/replay/cancel behavior.
 The raw paired intent is canceled before any boot. It does not prove a paired
 runtime/configuration loader, compatible target preflight or paired trial health.
+The snapshot is resolved using the running compiler; target ABI/capability/state
+qualification is still a separate requirement.
 It does not test two separate boots using a persistent disk, bootloader fallback,
 kernel or root-filesystem updates, data-partition mounting, schema migration,
 hardware watchdog recovery or appliance power-loss durability. Release unit

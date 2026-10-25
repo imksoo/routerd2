@@ -22,6 +22,14 @@ Private boot authority and pending-pair commit fencing are described in
 This does not activate paired boot or add snapshot/compatibility preflight to
 the raw store primitives.
 
+`PrepareChecked` and `PrepareRollbackChecked` require a preflight callback under
+that same lock, after target verification and pure pair validation, before any
+publication. Its current-state view is a deep copy; caller-owned references are
+frozen first. The target descriptors are borrowed only during the call. Errors
+or a canceled context leave the selector and watermarks unchanged. These checked
+methods provide the transaction boundary for live/snapshot/target-policy checks;
+they do not implement the policy, an operator workflow or paired boot by themselves.
+
 ## Bundle and trust contract
 
 An uncompressed USTAR bundle contains canonical `manifest.json`, raw 64-byte

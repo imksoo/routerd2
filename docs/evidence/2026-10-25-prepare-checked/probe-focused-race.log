@@ -1,0 +1,6 @@
+=== RUN   TestProbeUsesRemainingGlobalBudgetForVerifiedRuntime
+--- PASS: TestProbeUsesRemainingGlobalBudgetForVerifiedRuntime (0.03s)
+=== RUN   TestProbeKeepsSocketTimeoutAndGlobalDeadline
+--- PASS: TestProbeKeepsSocketTimeoutAndGlobalDeadline (0.02s)
+PASS
+ok      github.com/imksoo/routerd2/internal/releaseboot/testdata/guest  1.077s

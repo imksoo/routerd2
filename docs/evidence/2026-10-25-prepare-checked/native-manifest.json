@@ -1,0 +1,117 @@
+{
+  "source_commit": "973c2df4acc87bdcb010f21d537bb37f698b36b0",
+  "source_dirty": false,
+  "release_id": "prepare-checked-v1",
+  "build_artifacts": [
+    {
+      "architecture": "amd64",
+      "binary": "routerd",
+      "sha256": "c4ee64a07f9887921e6b73b94f3a015ff3dfbb585b9f261d2f4082776e5c6c4f"
+    },
+    {
+      "architecture": "amd64",
+      "binary": "routerd-modules",
+      "sha256": "094a172bb53e5003696a7702fd5b98e6646b58ae854109d622de97ec9f790914"
+    },
+    {
+      "architecture": "amd64",
+      "binary": "routerd-logging",
+      "sha256": "4b8df548f080ebafade7385ec3d2263e67de603a8edf7a0dad5407c0ab79e9fc"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd",
+      "sha256": "3c66bd58ba457ba8a8dc3faeabf0c640ef50c77a6b17de443325395991402a9c"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd-modules",
+      "sha256": "d67831603f5257765df454fab9d9350d752ac522a86816f175139cd919ee229b"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd-logging",
+      "sha256": "4afe383c7d53f6e76090eff9278c90d76bc5f1026b2bf8c302263743ade766bf"
+    }
+  ],
+  "race_harnesses": {
+    "release": {
+      "path": "dist/goal-validation/prepare-checked-release.test",
+      "sha256": "31fe54ff051ab5e348e2bf8e7ebf33e58db32dc9f0f174efac250b84378e54b0"
+    },
+    "publisher": {
+      "path": "dist/goal-validation/prepare-checked-publisher.test",
+      "sha256": "d63689507338bc996669150b42be7d5c515ec24e5264d523d5ac94d718406b22"
+    },
+    "daemon": {
+      "path": "dist/goal-validation/prepare-checked-daemon.test",
+      "sha256": "e643ccc49904ab2bf25f178d2c807741480647204ec22d2419a3bbbf9902a5fe"
+    }
+  },
+  "scope": "root-owned0700 stage; real built amd64/arm64 signature/ELF/staging without foreign execution; actual daemon tests in fresh user/net namespaces; no host network or clock mutation",
+  "tests": [
+    {
+      "test": "TestBuiltRuntimeCatalog",
+      "harness": "release",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 28.81,
+      "log": "prepare-checked-native-TestBuiltRuntimeCatalog.log",
+      "sha256": "5d4f99427ef35e41711111d8bdd7eade9002992e8056b8f85e86388b02c6e516"
+    },
+    {
+      "test": "TestPublishBuiltRelease",
+      "harness": "publisher",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 13.61,
+      "log": "prepare-checked-native-TestPublishBuiltRelease.log",
+      "sha256": "528ff541e7f459c246c51081e2acb8f2bfbb6181e7b4455196e6ffc49cb96daa"
+    },
+    {
+      "test": "TestDaemonDHCPv4OriginalLeaseAuthority",
+      "harness": "daemon",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 11.0,
+      "log": "prepare-checked-native-TestDaemonDHCPv4OriginalLeaseAuthority.log",
+      "sha256": "61a7fe124321357c913cad82338a4fd117f40a799e6489249e189424050aef64"
+    },
+    {
+      "test": "TestDaemonConfigurationAndRecovery",
+      "harness": "daemon",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 9.55,
+      "log": "prepare-checked-native-TestDaemonConfigurationAndRecovery.log",
+      "sha256": "bd645c34bf01ab5a5dde533db61fa69f87c3ad1052e9d2d1b0c52b2fd70a4c4d"
+    },
+    {
+      "test": "TestDaemonStartupSelectionAndRecovery",
+      "harness": "daemon",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 3.33,
+      "log": "prepare-checked-native-TestDaemonStartupSelectionAndRecovery.log",
+      "sha256": "f5ba1c99412f6b828c1064a122d17098e663be952b280dcdd2276c0bff9f861a"
+    },
+    {
+      "test": "TestDaemonConditionalStartupRecovery",
+      "harness": "daemon",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 3.58,
+      "log": "prepare-checked-native-TestDaemonConditionalStartupRecovery.log",
+      "sha256": "5c5e86f7c20a4bc7234ac00a7084ac49d01030161b4dbb214585516db3c10c62"
+    },
+    {
+      "test": "TestDaemonHealthPBRFailoverAndRecovery",
+      "harness": "daemon",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 31.02,
+      "log": "prepare-checked-native-TestDaemonHealthPBRFailoverAndRecovery.log",
+      "sha256": "10f5ac41652d3a9625bab8db5c5756d22cf495469552b80e078d23dde626c252"
+    }
+  ]
+}
