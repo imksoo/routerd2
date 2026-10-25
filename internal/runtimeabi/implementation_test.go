@@ -30,3 +30,15 @@ func TestDeclarationTracksImplementedFormatVersions(t *testing.T) {
 		}
 	}
 }
+
+func TestGuardedVRRPDependencyRequiresNewCompilerContract(t *testing.T) {
+	current := runtimeabi.Current()
+	if current.ConfigurationContract != "resource-program-native-2" {
+		t.Fatal("guarded dynamic VRRP consumers were added without changing the signed compiler contract")
+	}
+	old := current
+	old.ConfigurationContract = "resource-program-native-1"
+	if err := runtimeabi.CheckTransition(old, current, nil); err == nil {
+		t.Fatal("old compiler contract accepted new dynamic interface semantics")
+	}
+}
