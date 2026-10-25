@@ -6,7 +6,20 @@
 **継続ゴール:** 全残実装・必要試験・対象実機での利用可能性の受入まで進める。
 部分checkpointでは完了しない。
 
-今回の追加受入はfixture `c051be2`、実行手順 `00c0d8e`。製品は `a136ae8` のまま。
+最新product checkpointは `f7da1c2`。manifest v2で可変native/data artifact、entrypoint、role→artifactを署名し、全descriptorを固定する。
+旧manifest v1／旧暗黙pair publisher／`module_path`は拒否し、互換readerを作らない。factoryはsupervisor・native multicall・独立loggingの3 command。
+loggingは約6.9MiBで他roleを拒否し、control/management/protocol engineをlinkしない。startup-config明示参照・全ABI/engine/権限分離は残る。
+最終6 ELFのclean全体check/Race/vet/build11.04秒、disk fixture `e6720b9` の11.37秒、kernel image fixture `c88a897` のPython27を含む11.43秒PASS。6 SHAは一致。
+実amd64/arm64 catalog署名/stage27.01秒、publisher12.76秒、native実DHCP10.25秒・SSH復旧9.30秒・二WAN/PBR31.12秒PASS。
+OCI build133.02秒とnetwork none/read-only起動・終了1.19秒、Alpine APK unit/static/build266.83秒・実3 ELF検証1.03秒PASS。
+QEMUはPID 1の3 native＋data起動確定83.25秒、永続disk2 bootのSSH設定/鍵/eventとfallback148.50秒PASS。
+通常daemonも修正fixtureでSSH26.85秒・二WAN/PBR78.52秒・実UTC補正29.22秒PASS。関連5個別gateであり全suiteや実機完了ではない。
+初回複製ELF容量不足、disk probeの旧filename、通常imageのunpack容量不足を保存し、局所再現後に修正した。
+256MiB stageと192MiB展開の実tmpfsで再現。必要35 moduleへ絞ってpayload198.8→84.4MiB、unpack errorをFAILにする。
+RAM/CPU/rootfs mount設定/scratch/既存期限は変更していない。CORE-06を進行中へ更新し、全計画と対象実機の受入は継続する。
+[可変runtimeの証跡・受入境界・残作業](evidence/2026-10-25-runtime-catalog.md) を参照。
+
+前回の時計補正受入はfixture `c051be2`、実行手順 `00c0d8e`。製品は `a136ae8` のまま。
 外部NICのない専用QEMUのPID 1だけで、実CLOCK_REALTIMEを前後24時間補正して復元した。
 元DHCPv4 BOOT leaseは前進後のconfig再適用とTCP/UDPを維持し、後退中も元期限でaddress/default routeを撤去する。
 同じworkerがReadyのままのSIGSTOP失効、再送、worker/control再起動、旧世代409、fresh ACK復旧とcaptureを確認した。

@@ -1,0 +1,106 @@
+Copying appliance modules for the two-boot storage guest...
+Building the guest initializer and fresh signed command pairs...
+Formatting only the newly created private regular-file disk...
+Booting storage phase first (no NIC, one private regular-file disk)...
+qemu-first.log:
+[    2.109410] UDP-Lite hash table entries: 512 (order: 3, 32768 bytes, linear)
+[    2.113176] NET: Registered PF_UNIX/PF_LOCAL protocol family
+[    2.114453] NET: Registered PF_XDP protocol family
+[    2.116997] pci_bus 0000:00: resource 4 [io  0x0000-0x0cf7 window]
+[    2.117528] pci_bus 0000:00: resource 5 [io  0x0d00-0xffff window]
+[    2.117679] pci_bus 0000:00: resource 6 [mem 0xADDRESS-0xADDRESS window]
+[    2.117861] pci_bus 0000:00: resource 7 [mem 0xADDRESS-0xADDRESS window]
+[    2.118096] pci_bus 0000:00: resource 8 [mem 0xADDRESS-0xADDRESS window]
+[    2.118255] pci_bus 0000:00: resource 9 [mem 0xADDRESS-0xADDRESS window]
+[    2.119474] PCI: CLS 0 bytes, default 64
+[    2.131742] Unpacking initramfs...
+[    2.133289] Initialise system trusted keyrings
+[    2.160707] workingset: timestamp_bits=40 max_order=18 bucket_order=0
+[    2.168908] Key type asymmetric registered
+[    2.169560] Asymmetric key parser 'x509' registered
+[    2.170580] Block layer SCSI generic (bsg) driver version 0.4 loaded (major 247)
+[    2.174407] io scheduler mq-deadline registered
+[    2.174725] io scheduler kyber registered
+[    2.175530] io scheduler bfq registered
+[    2.197116] ERST DBG: ERST support is disabled.
+[    2.210460] ACPI: \_SB_.GSIF: Enabled at IRQ 21
+[    2.225266] Serial: 8250/16550 driver, 4 ports, IRQ sharing enabled
+[    2.232960] 00:02: ttyS0 at I/O 0x3f8 (irq = 4, base_baud = 115200) is a 16550A
+[    2.265882] VMware PVSCSI driver - version 1.0.7.0-k
+[    2.270355] ACPI: \_SB_.GSIA: Enabled at IRQ 16
+[    2.288615] ahci 0000:00:1f.2: AHCI vers 0001.0000, 32 command slots, 1.5 Gbps, SATA mode
+[    2.288962] ahci 0000:00:1f.2: 6/6 ports implemented (port mask 0x3f)
+[    2.289372] ahci 0000:00:1f.2: flags: 64bit ncq only
+[    2.316810] scsi host0: ahci
+[    2.325282] scsi host1: ahci
+[    2.330532] scsi host2: ahci
+[    2.334937] scsi host3: ahci
+[    2.341962] scsi host4: ahci
+[    2.346863] scsi host5: ahci
+[    2.367934] ata1: SATA max UDMA/133 abar m4096@0xADDRESS port 0xADDRESS irq 24 lpm-pol 1
+[    2.368448] ata2: SATA max UDMA/133 abar m4096@0xADDRESS port 0xADDRESS irq 24 lpm-pol 1
+[    2.368654] ata3: SATA max UDMA/133 abar m4096@0xADDRESS port 0xADDRESS irq 24 lpm-pol 1
+[    2.368865] ata4: SATA max UDMA/133 abar m4096@0xADDRESS port 0xADDRESS irq 24 lpm-pol 1
+[    2.369244] ata5: SATA max UDMA/133 abar m4096@0xADDRESS port 0xADDRESS irq 24 lpm-pol 1
+[    2.369453] ata6: SATA max UDMA/133 abar m4096@0xADDRESS port 0xADDRESS irq 24 lpm-pol 1
+[    2.379491] hv_vmbus: registering driver hv_netvsc
+[    2.383171] i8042: PNP: PS/2 Controller [PNP0303:KBD,PNP0f13:MOU] at 0x60,0x64 irq 1,12
+[    2.390337] serio: i8042 KBD port at 0x60,0x64 irq 1
+[    2.390911] serio: i8042 AUX port at 0x60,0x64 irq 12
+[    2.391677] hv_vmbus: registering driver hyperv_keyboard
+[    2.394634] rtc_cmos PNP0B00:00: RTC can wake from S4
+[    2.409870] rtc_cmos PNP0B00:00: registered as rtc0
+[    2.411380] rtc_cmos PNP0B00:00: setting system clock to 2026-10-25T03:49:28 UTC (1792900168)
+[    2.414578] rtc_cmos PNP0B00:00: alarms up to one day, y3k, 242 bytes nvram, hpet irqs
+[    2.416349] amd_pstate: the _CPC object is not present in SBIOS or ACPI disabled
+[    2.421874] input: AT Translated Set 2 keyboard as /devices/platform/i8042/serio0/input/input0
+[    2.434418] gre: GRE over IPv4 demultiplexer driver
+[    2.436026] NET: Registered PF_INET6 protocol family
+[    2.458226] Segment Routing with IPv6
+[    2.458809] In-situ OAM (IOAM) with IPv6
+[    2.461705] Key type dns_resolver registered
+[    2.464741] IPI shorthand broadcast: enabled
+[    2.532249] sched_clock: Marking stable (2474197786, 57943922)->(2564860480, -32718772)
+[    2.616226] registered taskstats version 1
+[    2.621968] Loading compiled-in X.509 certificates
+[    2.736173] ata6: SATA link down (SStatus 0 SControl 300)
+[    2.739449] ata1: SATA link down (SStatus 0 SControl 300)
+[    2.739938] ata3: SATA link down (SStatus 0 SControl 300)
+[    2.740478] ata2: SATA link down (SStatus 0 SControl 300)
+[    2.740700] ata5: SATA link down (SStatus 0 SControl 300)
+[    2.756735] ata4: SATA link down (SStatus 0 SControl 300)
+[    3.143862] tsc: Refined TSC clocksource calibration: 3293.798 MHz
+[    3.144887] clocksource: tsc: mask: 0xADDRESS max_cycles: 0xADDRESS, max_idle_ns: 440795303741 ns
+[    3.146268] clocksource: Switched to clocksource tsc
+[   16.372412] Freeing initrd memory: 85744K
+[   16.443589] Loaded X.509 cert 'alpinelinux.org: Alpine Linux kernel key: omitted'
+[   16.481203] Demotion targets for Node 0: null
+[   16.484265] Key type .fscrypt registered
+[   16.484517] Key type fscrypt-provisioning registered
+[   16.710389] Freeing unused kernel image (initmem) memory: 3008K
+[   16.711315] Write protecting the kernel read-only data: 26624k
+[   16.718173] Freeing unused kernel image (text/rodata gap) memory: 1672K
+[   16.719602] Freeing unused kernel image (rodata/data gap) memory: 304K
+[   16.720911] rodata_test: all tests were successful
+[   16.721615] Run /init as init process
+[   17.286820] virtio_blk virtio0: 2/0/0 default/read/poll queues
+[   17.305592] virtio_blk virtio0: [vda] 524288 512-byte logical blocks (268 MB/256 MiB)
+[   17.861706] EXT4-fs (vda): mounted filesystem e0de5e48-e0a4-466b-b355-2e38b0f392b9 r/w with ordered data mode. Quota mode: none.
+ROUTERD_RUNTIME_CATALOG_FIXTURE artifacts=4 native=3 data=1 native_commands=independently_built
+ROUTERD_RUNTIME_CATALOG_FIXTURE artifacts=4 native=3 data=1 native_commands=independently_built
+[   42.133643] EXT4-fs (vda): unmounting filesystem e0de5e48-e0a4-466b-b355-2e38b0f392b9.
+ROUTERD_STORAGE_TEST_SETUP phase=first seed_unmounted=true uuid=e0de5e48-e0a4-466b-b355-2e38b0f392b9
+[   42.957916] EXT4-fs (vda): mounted filesystem e0de5e48-e0a4-466b-b355-2e38b0f392b9 r/w with ordered data mode. Quota mode: none.
+{"time":"2026-10-25T03:50:09.071917933Z","level":"INFO","msg":"persistent state volume ready","device":"/dev/vda","target":"/var/lib/routerd","filesystem":"ext4","uuid":"e0de5e48-e0a4-466b-b355-2e38b0f392b9","already_mounted":false}
+{"time":"2026-10-25T03:50:19.808759235Z","level":"INFO","msg":"persistent state volume ready","device":"/dev/vda","target":"/var/lib/routerd","filesystem":"ext4","uuid":"e0de5e48-e0a4-466b-b355-2e38b0f392b9","already_mounted":true}
+{"time":"2026-10-25T03:50:29.301158664Z","level":"INFO","msg":"persistent state volume ready","device":"/dev/vda","target":"/var/lib/routerd","filesystem":"ext4","uuid":"e0de5e48-e0a4-466b-b355-2e38b0f392b9","already_mounted":true}
+{"timestamp":"2026-10-25T03:50:29.38585655Z","module":"supervisor","pid":1,"generation":0,"level":"INFO","message":"worker started","attributes":{"generation":1,"module":"logging","pid":524},"producer_epoch":"5939d66309578ff8d090a869e5a95fd2","producer_sequence":1,"delivery":"console_fallback"}
+{"timestamp":"2026-10-25T03:50:29.408924024Z","module":"supervisor","pid":1,"generation":0,"level":"INFO","message":"worker started","attributes":{"generation":1,"module":"network","pid":525},"producer_epoch":"5939d66309578ff8d090a869e5a95fd2","producer_sequence":2,"delivery":"console_fallback"}
+{"timestamp":"2026-10-25T03:50:29.432210651Z","module":"supervisor","pid":1,"generation":0,"level":"INFO","message":"worker started","attributes":{"generation":1,"module":"control","pid":526},"producer_epoch":"5939d66309578ff8d090a869e5a95fd2","producer_sequence":3,"delivery":"console_fallback"}
+{"timestamp":"2026-10-25T03:50:29.45434971Z","module":"supervisor","pid":1,"generation":0,"level":"INFO","message":"worker started","attributes":{"generation":1,"module":"management","pid":527},"producer_epoch":"5939d66309578ff8d090a869e5a95fd2","producer_sequence":4,"delivery":"console_fallback"}
+{"timestamp":"2026-10-25T03:50:31.186737014Z","module":"management","pid":527,"generation":1,"level":"INFO","message":"SSH management listening","attributes":{"address":"127.0.0.1:2222","host_key":"SHA256:ow18xXUJiwZxBmvQsS9DwaJP/w1Abd2E81kdLRbdwy8"},"producer_epoch":"d2f670e224e8a89fa1f84c6f728fff47","producer_sequence":1,"delivery":"console_fallback"}
+ROUTERD_READY
+ROUTERD_STORAGE_TEST_FAIL: stat /var/lib/routerd/releases/releases/fd8053c7463563590d38d95f9f2e0760a62e2101e1f41d8f6da5a6ad858555aa/routerd: no such file or directory
+[   67.315679] ACPI: PM: Preparing to enter system sleep state S5
+[   67.318448] reboot: Power down
+storage phase first failed in guest

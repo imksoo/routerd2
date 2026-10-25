@@ -1,0 +1,28 @@
+{
+  "source_commit": "c88a89775ef223745b51a9b0b63c7f77ab603f5d",
+  "source_dirty": false,
+  "scope": "three ordinary-daemon gates after bounded kernel-module closure fix; release/disk passes retained on identical product and unchanged1024MiB fixtures; no external NIC; existing release/storage1024MiB and network512MiB/2CPU budgets, existing deadlines unchanged; signed release/storage fixtures now three independently built native commands and one data artifact",
+  "tests": [
+    {
+      "gate": "daemon-management",
+      "exit_code": 0,
+      "passed": true,
+      "elapsed_seconds": 37.08,
+      "guest_seconds": 26.85
+    },
+    {
+      "gate": "daemon-health-pbr",
+      "exit_code": 0,
+      "passed": true,
+      "elapsed_seconds": 88.5,
+      "guest_seconds": 78.52
+    },
+    {
+      "gate": "daemon-dhcp4-clock",
+      "exit_code": 0,
+      "passed": true,
+      "elapsed_seconds": 39.58,
+      "guest_seconds": 29.22
+    }
+  ]
+}

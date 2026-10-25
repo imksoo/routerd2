@@ -1,0 +1,14 @@
+{
+  "source_commit": "b199360075ae9b14a51678b7b556218e4bacccd0",
+  "source_dirty": false,
+  "scope": "five related individual gates; no external NIC; existing release/storage1024MiB and network512MiB/2CPU budgets, existing deadlines unchanged; signed release/storage fixtures now four native artifacts and one data artifact",
+  "tests": [
+    {
+      "gate": "release-boot",
+      "exit_code": 1,
+      "passed": false,
+      "elapsed_seconds": 56.53,
+      "guest_seconds": 43.93
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+# github.com/imksoo/routerd2/images/storage-test/guest [github.com/imksoo/routerd2/images/storage-test/guest.test]
+images/storage-test/guest/catalog_test.go:41:15: undefined: verifyExecutableCatalog
+images/storage-test/guest/catalog_test.go:45:15: undefined: verifyExecutableCatalog
+FAIL    github.com/imksoo/routerd2/images/storage-test/guest [build failed]
+FAIL

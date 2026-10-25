@@ -1,0 +1,14 @@
+# github.com/imksoo/routerd2/internal/release [github.com/imksoo/routerd2/internal/release.test]
+internal/release/catalog_test.go:35:102: unknown field BootABI in struct literal of type BundleOptions
+internal/release/catalog_test.go:35:114: unknown field WorkerABI in struct literal of type BundleOptions
+internal/release/catalog_test.go:35:128: unknown field Entrypoint in struct literal of type BundleOptions
+internal/release/catalog_test.go:35:197: unknown field Kind in struct literal of type Artifact
+internal/release/catalog_test.go:35:213: unknown field Command in struct literal of type Artifact
+internal/release/catalog_test.go:35: unknown field Kind in struct literal of type Artifact
+internal/release/catalog_test.go:35: unknown field Command in struct literal of type Artifact
+internal/release/catalog_test.go:35: unknown field Kind in struct literal of type Artifact
+internal/release/catalog_test.go:35: unknown field Command in struct literal of type Artifact
+internal/release/catalog_test.go:35: unknown field Kind in struct literal of type Artifact
+internal/release/catalog_test.go:35: too many errors
+FAIL    github.com/imksoo/routerd2/internal/release [build failed]
+FAIL

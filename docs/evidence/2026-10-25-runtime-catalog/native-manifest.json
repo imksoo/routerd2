@@ -1,0 +1,99 @@
+{
+  "source_commit": "f7da1c2b0016727c5681b83485e672788af8f8c7",
+  "source_dirty": false,
+  "release_id": "runtime-catalog-v2",
+  "build_artifacts": [
+    {
+      "architecture": "amd64",
+      "binary": "routerd",
+      "sha256": "0057b8efa402499871b0b88ececf5fae212fe647d239ee33c303425a9fd05b65"
+    },
+    {
+      "architecture": "amd64",
+      "binary": "routerd-modules",
+      "sha256": "2a5519f5e5e02225b9bb4f82c61c68db7f7a44aca1ba596c342b51f5fd38ae31"
+    },
+    {
+      "architecture": "amd64",
+      "binary": "routerd-logging",
+      "sha256": "4e8ea4146a9e6586dc25bc60784fb039b01598cb4ec68153bcbabdaf6ce88ba9"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd",
+      "sha256": "1d71054d29770408c123f9ad76fb2674bd861cd0bc879c516c32b40885e5ea6b"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd-modules",
+      "sha256": "19ebf5d42d5ef1925ce8a0200433db17accb8a0bb17ee8259b71402eea6f3c9c"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd-logging",
+      "sha256": "7c155e1b5387706dca06f9a88fc3f54c9a5fbad358de069db7e8d4dfa5c0d928"
+    }
+  ],
+  "race_harnesses": {
+    "release": {
+      "path": "dist/goal-validation/runtime-catalog-compact-release.test",
+      "sha256": "a7b72f5a61a5aa9f6e42901c8506ddbfaa410f783ee6cd69ec537c064ab522d4"
+    },
+    "publisher": {
+      "path": "dist/goal-validation/runtime-catalog-compact-publisher.test",
+      "sha256": "14d2a69f88ab9f976c0afc2c7cf971c92c141bfd538a7714b4e80732d4b574f6"
+    },
+    "daemon": {
+      "path": "dist/goal-validation/runtime-catalog-compact-daemon.test",
+      "sha256": "b061c968fc60b76fdcf5d681c4fd0ded7c77db2ceb405086bb582b441ec9dfcf"
+    }
+  },
+  "scope": "root-owned0700 stage; real built amd64/arm64 signature/ELF/staging without foreign execution; actual daemon tests in fresh user/net namespaces; no host network or clock mutation",
+  "tests": [
+    {
+      "test": "TestBuiltRuntimeCatalog",
+      "harness": "release",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 27.01,
+      "log": "runtime-catalog-compact-native-TestBuiltRuntimeCatalog.log",
+      "sha256": "fc1b577ec847ca2c4c3213571cefd9fa26552228b79334deddcdab96a2097fd1"
+    },
+    {
+      "test": "TestPublishBuiltRelease",
+      "harness": "publisher",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 12.76,
+      "log": "runtime-catalog-compact-native-TestPublishBuiltRelease.log",
+      "sha256": "e822e233f2ac16f1098dfcab0f0fc213d822abe41594cdc053130605fa43e1f3"
+    },
+    {
+      "test": "TestDaemonDHCPv4OriginalLeaseAuthority",
+      "harness": "daemon",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 10.25,
+      "log": "runtime-catalog-compact-native-TestDaemonDHCPv4OriginalLeaseAuthority.log",
+      "sha256": "925a9072d0cb1bd6f6c54825c5b84555b10d10d2f91ae89abc0b69840c6bd166"
+    },
+    {
+      "test": "TestDaemonConfigurationAndRecovery",
+      "harness": "daemon",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 9.3,
+      "log": "runtime-catalog-compact-native-TestDaemonConfigurationAndRecovery.log",
+      "sha256": "9d141367d8307831069d67b087ce8c7f0374d5e67e9659f5f1f0c8aab85bf3b1"
+    },
+    {
+      "test": "TestDaemonHealthPBRFailoverAndRecovery",
+      "harness": "daemon",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 31.12,
+      "log": "runtime-catalog-compact-native-TestDaemonHealthPBRFailoverAndRecovery.log",
+      "sha256": "2488ec657dd1d94c1f5437c67db3b3ecf9c9d932b44eb9a5b1eb45459a5e99a6"
+    }
+  ]
+}

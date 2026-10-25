@@ -1,0 +1,46 @@
+.EFE.E.
+======================================================================
+ERROR: test_fixed_kernel_module_roots_are_declared_once (qemu_network_test.GuestResultTest.test_fixed_kernel_module_roots_are_declared_once)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_network_test.py", line 72, in test_fixed_kernel_module_roots_are_declared_once
+    roots = json.loads((GATE.PROJECT / "images/kernel-test-init/modules.json").read_text())
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/pathlib.py", line 1029, in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/pathlib.py", line 1015, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/workspace/routerd2/images/kernel-test-init/modules.json'
+
+======================================================================
+ERROR: test_module_selection_keeps_dependency_closure_and_builtins (qemu_network_test.GuestResultTest.test_module_selection_keeps_dependency_closure_and_builtins)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_network_test.py", line 49, in test_module_selection_keeps_dependency_closure_and_builtins
+    self.assertEqual(GATE.module_closure(dep, "kernel/builtin.ko\n", ["foo", "builtin"]),
+                     ^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'routerd_qemu_network' has no attribute 'module_closure'
+
+======================================================================
+ERROR: test_pruned_image_keeps_metadata_and_only_selected_modules (qemu_network_test.GuestResultTest.test_pruned_image_keeps_metadata_and_only_selected_modules)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_network_test.py", line 66, in test_pruned_image_keeps_metadata_and_only_selected_modules
+    result = GATE.prune_modules(root, "test-kernel", ["foo"])
+             ^^^^^^^^^^^^^^^^^^
+AttributeError: module 'routerd_qemu_network' has no attribute 'prune_modules'
+
+======================================================================
+FAIL: test_missing_renamed_skipped_and_failed_tests_do_not_pass (qemu_network_test.GuestResultTest.test_missing_renamed_skipped_and_failed_tests_do_not_pass) (reason='truncated initramfs')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_network_test.py", line 100, in test_missing_renamed_skipped_and_failed_tests_do_not_pass
+    with self.subTest(reason=name), self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+----------------------------------------------------------------------
+Ran 7 tests in 0.011s
+
+FAILED (failures=1, errors=3)

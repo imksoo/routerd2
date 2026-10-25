@@ -376,7 +376,7 @@
       "title": "展開済み runtime・module catalog・boot ABI・engine 選定",
       "milestone": "M1",
       "track": "platform",
-      "status": "planned",
+      "status": "in_progress",
       "scope": "shared_infrastructure",
       "risk": "high",
       "depends_on": [
@@ -10882,9 +10882,10 @@
     "startup_config_authority": "Selected authoritative config store/revision in the new schema, with explicit selection/save transactions and initial seed only for an empty store. Prototype serialized formats may be replaced.",
     "recommended_handoff": "Small bootstrap execs the verified runtime supervisor, which inherits PID 1; bootstrap does not remain a watchdog after exec.",
     "mutable_state": "Outside immutable runtime roots; boot intent, attempt state, configuration, identities, revocations, leases and cursors have separate contracts.",
-    "implementation_status": "planned_not_implemented",
+    "implementation_status": "partial_signed_native_runtime_catalog_implemented",
     "prototype_compatibility": "None. Replace unreleased two-binary, boot, manifest and journal formats directly; no compatibility reader, shim bridge or prototype migration gate.",
-    "first_supported_format": "The new extracted multi-binary runtime format."
+    "first_supported_format": "The new extracted multi-binary runtime format.",
+    "implementation_evidence": "docs/evidence/2026-10-25-runtime-catalog.md"
   },
   "project_identity": {
     "routerd": {
@@ -11935,6 +11936,44 @@
         "Actual NTP client/server discipline or slew, physical suspend, arm64 execution and selected physical hardware/NIC/long-run/performance acceptance",
         "All-controller/writer-stopped autonomous IPv4 route expiry is not provided; existing route removal needs live coordinator",
         "Other protocol original clock/current provider contracts, complete DHCP resources and every remaining implementation-plan work package including extracted runtime/update/recovery/storage/effects/federation"
+      ],
+      "parity_flags_unchanged": true
+    },
+    {
+      "id": "signed-native-runtime-catalog-v2",
+      "date": "2026-10-25",
+      "status": "partial_native_catalog_and_individual_acceptance_verified",
+      "code_checkpoint": "f7da1c2b0016727c5681b83485e672788af8f8c7",
+      "disk_probe_fixture_checkpoint": "e6720b9f8e7225bdbc90e18b4ccd209f477f87a0",
+      "kernel_image_fixture_checkpoint": "c88a89775ef223745b51a9b0b63c7f77ab603f5d",
+      "work_packages": [
+        "CORE-06",
+        "DIST-01"
+      ],
+      "evidence": "docs/evidence/2026-10-25-runtime-catalog.md",
+      "implemented": [
+        "Replace former v1 implicit pair with signed manifest v2 variable static native/data artifacts, boot/worker ABI1, explicit entrypoint and role binding; no former-domain/format reader",
+        "Hash/ELF/command/size/mode verification of all artifacts and exact bounded flat USTAR set; full descriptor catalog pinned at boot and per-role restart; arbitrary argv/path absent from dynamic worker API",
+        "Offline publisher explicit --layout; serialized workers map replaces module_path without merging factory defaults; source paths excluded from signed manifest",
+        "Independent scoped logging Go command; three-command factory build/OCI/APK/image/QEMU recipes; binary split does not complete privilege separation",
+        "Fixed kernel-test module roots shared by embed/builder, required35-module closure and fail-closed initramfs unpack error gate; prepare-only result explicitly not an executed PASS"
+      ],
+      "validation": [
+        "Test-first catalog/supervisor/logger/disk-oracle/module-closure API REDs and actual failed guest attempts preserved; related native Race and whole check/Race/vet pass",
+        "Final checked product clean build11.04s, disk fixture11.37s, kernel fixture Python27/check/build11.43s; all six static amd64/arm64 ELF hashes identical across final fixture changes",
+        "Root-owned0700 native stages and Race harnesses: actual three-command amd64/arm64 signatures/ELF/staging27.01s, offline publisher12.76s, DHCP original deadline/recovery10.25s, SSH/confirmed rollback/recovery9.30s, two-WAN TCP/UDP/PCAP PBR31.12s",
+        "Duplicated multicall payload failed QEMU release staging43.93s (host56.53s); reproduce ENOSPC in256MiB private tmpfs and independent three-command staging succeeds unchanged; first33.38s/clean33.09s",
+        "Disk old-filename oracle failed host101.86s, local signed-descriptor oracle Race1.031s passes; no old filename compatibility links",
+        "Raw512MiB daemon initramfs had early kernel unpack write error and incomplete ELF: FD diagnostics found no userspace writer, same-byte clone SIGSEGV; preserve each observation and do not call them product FD regression or passing acceptance",
+        "Actual192MiB private tmpfs reproduces full198.8MiB image ENOSPC; required dependency closure reduces prepared payload to84.4MiB and full extraction succeeds; no RAM/vCPU/rootfs mount-policy/scratch/deadline changes",
+        "Individual no-NIC QEMU: real PID1 signed three-native-plus-data confirmation83.25s; two-boot persistent ext4 config/SSH identity/event and fallback148.50s; final pruned ordinary SSH26.85s, two-WAN/PBR78.52s, actual UTC/DHCP29.22s pass; product equal across distinct fixture commits, not a new all-suite aggregate",
+        "Actual OCI build133.02s and network-none/read-only runtime/control/shutdown smoke1.19s pass; Alpine APK abuild includes unit tests/static checks and passes266.83s; APK-extracted three actual native ELF/command/release identities pass offline verifier1.03s; APK/native distinct hashes retained; root-owned private exporter collection failure preserved and only new task output ownership adjusted",
+        "Actual APK-extracted three-command runtime SSH/config/confirmed rollback/DNS/process recovery passes native Race harness9.35s in private root-owned stage and fresh user/net namespace; no host package installation"
+      ],
+      "remaining": [
+        "Explicit startup-config store/revision selection and health tuple; small independent bootstrap and complete config/state/kernel ABI/profile preflight",
+        "External engine/loader/library/plugin/nested artifact contracts, full exact source/SBOM/license distribution, privilege/writable-dir separation and running-runtime prune authority",
+        "all remaining resource/surface/work-package parity and selected hardware/NIC/arm64 execution/scale/long-run qualification remain"
       ],
       "parity_flags_unchanged": true
     }

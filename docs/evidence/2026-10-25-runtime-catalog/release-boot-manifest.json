@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "go": "go version go1.27.3 linux/amd64",
+  "purpose": "real-pid1-signed-userland-selection-and-health-confirmation",
+  "target": "linux/amd64",
+  "kernel_release": "6.18.58-0-virt",
+  "kernel_sha256": "17fbd3efd16f2e7cb1b945f06423b37399ba7d5ac8cdd3665e7f13f363500e85",
+  "source_image_manifest_sha256": "a1df58dc193d6f6f5a361b9b630e9fb106b76a3e3089239da2185f812d265b43",
+  "initializer_sha256": "91d509ef1835bdfe3fc63508842d05322871873a64959609e3a71ac9f204f882",
+  "binary_sha256": {
+    "/test/bin/baseline/routerd": "bb6a1cb9cbecbe0af8b6cfa96d7488618df63b79fecec63c432981d81abec2f7",
+    "/test/bin/baseline/routerd-modules": "fdb400ae391a4d6b571556af1dd9440c7cbddf75e2dec6050f39724a576023e5",
+    "/test/bin/baseline/routerd-logging": "c13a9186d0eb1f921f9a44e437e06831cac32ffac244b2c875ec1c7cadd040cd",
+    "/test/bin/trial/routerd": "2cd6c8fd9558dc1f2b5d2edb7cf2ee3ad09a6190c0273e021765a6bcd78e875f",
+    "/test/bin/trial/routerd-modules": "4554dfed0a2bc1eb6469bbe9d0c09ff908b17d50dc454d1995147cc4b25b15b1",
+    "/test/bin/trial/routerd-logging": "5c94bb1b6999580113007d68479cc2525c4648d8ae3dfcec3177ec9d6edf25c6"
+  },
+  "release_ids": {
+    "baseline": "release-gate-baseline",
+    "trial": "release-gate-trial"
+  },
+  "host_network_access": false,
+  "guest_external_network_interfaces": false,
+  "state_persistence": "volatile-initramfs",
+  "kernel_rootfs_updates": false,
+  "two_boot_disk_fallback_tested": false,
+  "result": "passed",
+  "initramfs_sha256": "687c69cb1d9fafc19250f902934041af0657cdb19ede3419cf026cf2dff62289",
+  "witness": "ROUTERD_RELEASE_BOOT_WITNESS pid=1 release=release-gate-trial generation=4 operation=confirm revision=1 modules=control,logging,management,network pinned_exec=verified artifact_count=4 native_count=3 data_count=1 role_catalog=verified",
+  "duration_seconds": 83.25,
+  "qemu_exit_status_before_cleanup": 0
+}

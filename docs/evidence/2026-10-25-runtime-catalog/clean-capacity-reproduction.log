@@ -1,0 +1,9 @@
+=== RUN   TestRuntimeCatalogBoundedStagingScratch
+=== RUN   TestRuntimeCatalogBoundedStagingScratch/duplicated-multicall
+    capacity_integration_test.go:102: bounded256MiB actual tmpfs compact=false result=write services: no space left on device
+=== RUN   TestRuntimeCatalogBoundedStagingScratch/independent-logging
+    capacity_integration_test.go:102: bounded256MiB actual tmpfs compact=true result=<nil>
+--- PASS: TestRuntimeCatalogBoundedStagingScratch (33.09s)
+    --- PASS: TestRuntimeCatalogBoundedStagingScratch/duplicated-multicall (21.60s)
+    --- PASS: TestRuntimeCatalogBoundedStagingScratch/independent-logging (11.48s)
+PASS

@@ -1,0 +1,106 @@
+Copying appliance modules into an isolated release-boot image...
+Building the guest-only initializer and independent health probe...
+Building the actual routerd command pair for release-gate-baseline...
+Building the actual routerd command pair for release-gate-trial...
+Booting real PID-1 trial in QEMU (no NIC, no host ports or shared disk)...
+[    1.587228] clocksource: Switched to clocksource tsc-early
+[    1.598920] VFS: Disk quotas dquot_6.6.0
+[    1.599629] VFS: Dquot-cache hash table entries: 512 (order 0, 4096 bytes)
+[    1.607537] pnp: PnP ACPI init
+[    1.616418] system 00:03: [mem 0xADDRESS-0xADDRESS window] has been reserved
+[    1.621667] pnp: PnP ACPI: found 4 devices
+[    1.704330] clocksource: acpi_pm: mask: 0xffffff max_cycles: 0xffffff, max_idle_ns: 2085701024 ns
+[    1.706809] NET: Registered PF_INET protocol family
+[    1.711027] IP idents hash table entries: 16384 (order: 5, 131072 bytes, linear)
+[    1.855472] tcp_listen_portaddr_hash hash table entries: 512 (order: 1, 8192 bytes, linear)
+[    1.857209] Table-perturb hash table entries: 65536 (order: 6, 262144 bytes, linear)
+[    1.858039] TCP established hash table entries: 8192 (order: 4, 65536 bytes, linear)
+[    1.860196] TCP bind hash table entries: 8192 (order: 6, 262144 bytes, linear)
+[    1.860816] TCP: Hash tables configured (established 8192 bind 8192)
+[    1.865772] MPTCP token hash table entries: 1024 (order: 3, 24576 bytes, linear)
+[    1.866877] UDP hash table entries: 512 (order: 3, 32768 bytes, linear)
+[    1.867799] UDP-Lite hash table entries: 512 (order: 3, 32768 bytes, linear)
+[    1.871551] NET: Registered PF_UNIX/PF_LOCAL protocol family
+[    1.872876] NET: Registered PF_XDP protocol family
+[    1.875149] pci_bus 0000:00: resource 4 [io  0x0000-0x0cf7 window]
+[    1.875440] pci_bus 0000:00: resource 5 [io  0x0d00-0xffff window]
+[    1.875594] pci_bus 0000:00: resource 6 [mem 0xADDRESS-0xADDRESS window]
+[    1.875744] pci_bus 0000:00: resource 7 [mem 0xADDRESS-0xADDRESS window]
+[    1.875902] pci_bus 0000:00: resource 8 [mem 0xADDRESS-0xADDRESS window]
+[    1.876320] pci_bus 0000:00: resource 9 [mem 0xADDRESS-0xADDRESS window]
+[    1.877478] PCI: CLS 0 bytes, default 64
+[    1.889456] Unpacking initramfs...
+[    1.891542] Initialise system trusted keyrings
+[    1.911847] workingset: timestamp_bits=40 max_order=18 bucket_order=0
+[    1.918664] Key type asymmetric registered
+[    1.919137] Asymmetric key parser 'x509' registered
+[    1.920088] Block layer SCSI generic (bsg) driver version 0.4 loaded (major 247)
+[    1.923665] io scheduler mq-deadline registered
+[    1.924193] io scheduler kyber registered
+[    1.924782] io scheduler bfq registered
+[    1.963866] ERST DBG: ERST support is disabled.
+[    1.979693] Serial: 8250/16550 driver, 4 ports, IRQ sharing enabled
+[    1.988463] 00:02: ttyS0 at I/O 0x3f8 (irq = 4, base_baud = 115200) is a 16550A
+[    2.037686] VMware PVSCSI driver - version 1.0.7.0-k
+[    2.048863] ACPI: \_SB_.GSIA: Enabled at IRQ 16
+[    2.072665] ahci 0000:00:1f.2: AHCI vers 0001.0000, 32 command slots, 1.5 Gbps, SATA mode
+[    2.073207] ahci 0000:00:1f.2: 6/6 ports implemented (port mask 0x3f)
+[    2.073594] ahci 0000:00:1f.2: flags: 64bit ncq only
+[    2.107684] scsi host0: ahci
+[    2.117624] scsi host1: ahci
+[    2.122844] scsi host2: ahci
+[    2.126695] scsi host3: ahci
+[    2.133115] scsi host4: ahci
+[    2.139395] scsi host5: ahci
+[    2.158131] ata1: SATA max UDMA/133 abar m4096@0xADDRESS port 0xADDRESS irq 24 lpm-pol 1
+[    2.158597] ata2: SATA max UDMA/133 abar m4096@0xADDRESS port 0xADDRESS irq 24 lpm-pol 1
+[    2.158777] ata3: SATA max UDMA/133 abar m4096@0xADDRESS port 0xADDRESS irq 24 lpm-pol 1
+[    2.159110] ata4: SATA max UDMA/133 abar m4096@0xADDRESS port 0xADDRESS irq 24 lpm-pol 1
+[    2.159339] ata5: SATA max UDMA/133 abar m4096@0xADDRESS port 0xADDRESS irq 24 lpm-pol 1
+[    2.159640] ata6: SATA max UDMA/133 abar m4096@0xADDRESS port 0xADDRESS irq 24 lpm-pol 1
+[    2.174478] hv_vmbus: registering driver hv_netvsc
+[    2.177612] i8042: PNP: PS/2 Controller [PNP0303:KBD,PNP0f13:MOU] at 0x60,0x64 irq 1,12
+[    2.184788] serio: i8042 KBD port at 0x60,0x64 irq 1
+[    2.185542] serio: i8042 AUX port at 0x60,0x64 irq 12
+[    2.186109] hv_vmbus: registering driver hyperv_keyboard
+[    2.188625] rtc_cmos PNP0B00:00: RTC can wake from S4
+[    2.201093] input: AT Translated Set 2 keyboard as /devices/platform/i8042/serio0/input/input0
+[    2.224179] rtc_cmos PNP0B00:00: registered as rtc0
+[    2.225548] rtc_cmos PNP0B00:00: setting system clock to 2026-10-25T03:29:48 UTC (1792898988)
+[    2.228522] rtc_cmos PNP0B00:00: alarms up to one day, y3k, 242 bytes nvram, hpet irqs
+[    2.230201] amd_pstate: the _CPC object is not present in SBIOS or ACPI disabled
+[    2.238616] gre: GRE over IPv4 demultiplexer driver
+[    2.240154] NET: Registered PF_INET6 protocol family
+[    2.260841] Segment Routing with IPv6
+[    2.261594] In-situ OAM (IOAM) with IPv6
+[    2.264458] Key type dns_resolver registered
+[    2.267366] IPI shorthand broadcast: enabled
+[    2.313685] sched_clock: Marking stable (2248056244, 64846390)->(2345308111, -32405477)
+[    2.385439] registered taskstats version 1
+[    2.391843] Loading compiled-in X.509 certificates
+[    2.526665] ata4: SATA link down (SStatus 0 SControl 300)
+[    2.529844] ata1: SATA link down (SStatus 0 SControl 300)
+[    2.535740] ata3: SATA link down (SStatus 0 SControl 300)
+[    2.536359] ata2: SATA link down (SStatus 0 SControl 300)
+[    2.541544] ata5: SATA link down (SStatus 0 SControl 300)
+[    2.542126] ata6: SATA link down (SStatus 0 SControl 300)
+[    2.924499] tsc: Refined TSC clocksource calibration: 3293.800 MHz
+[    2.925549] clocksource: tsc: mask: 0xADDRESS max_cycles: 0xADDRESS, max_idle_ns: 440795245926 ns
+[    2.927644] clocksource: Switched to clocksource tsc
+[   15.015850] Freeing initrd memory: 78636K
+[   15.104398] Loaded X.509 cert 'alpinelinux.org: Alpine Linux kernel key: omitted'
+[   15.157530] Demotion targets for Node 0: null
+[   15.164498] Key type .fscrypt registered
+[   15.164846] Key type fscrypt-provisioning registered
+[   15.404667] Freeing unused kernel image (initmem) memory: 3008K
+[   15.406076] Write protecting the kernel read-only data: 26624k
+[   15.417230] Freeing unused kernel image (text/rodata gap) memory: 1672K
+[   15.419918] Freeing unused kernel image (rodata/data gap) memory: 304K
+[   15.422320] rodata_test: all tests were successful
+[   15.423561] Run /init as init process
+ROUTERD_RUNTIME_CATALOG_FIXTURE artifacts=5 native=4 data=1 core_roles=separate_pinned_files
+ROUTERD_RUNTIME_CATALOG_FIXTURE artifacts=5 native=4 data=1 core_roles=separate_pinned_files
+ROUTERD_RELEASE_BOOT_FAIL: stage trial: write supervisor: no space left on device
+[   42.456128] ACPI: PM: Preparing to enter system sleep state S5
+[   42.457595] reboot: Power down
+release boot fixture failed in guest

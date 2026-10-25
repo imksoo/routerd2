@@ -1,0 +1,11 @@
+{
+  "raw_scanner_findings": 1,
+  "actual_secrets": 0,
+  "rule": "private-key",
+  "file": "internal/releasepublish/publish_linux_test.go",
+  "line": 108,
+  "source_sha256": "3398c5eb6f47585400f096423332f4d9873fe50c5e99e9c7a6af413dc5f68496",
+  "classification": "pre-existing deliberately invalid PEM fixture; exact bytes unchanged from origin/main and base64 validation fails",
+  "fixture_modified_for_scan": false,
+  "suppressions_added": false
+}

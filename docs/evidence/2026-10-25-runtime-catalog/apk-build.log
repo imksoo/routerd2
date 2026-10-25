@@ -1,0 +1,196 @@
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 1.46kB done
+#1 DONE 0.0s
+
+#2 resolve image config for docker-image://docker.io/docker/dockerfile:1
+#2 DONE 0.9s
+
+#3 docker-image://docker.io/docker/dockerfile:1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
+#3 resolve docker.io/docker/dockerfile:1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e 0.1s done
+#3 CACHED
+
+#4 [internal] load metadata for docker.io/library/alpine:3.24.3
+#4 ...
+
+#5 [internal] load metadata for docker.io/library/golang:1.27.3-alpine3.24
+#5 DONE 0.8s
+
+#4 [internal] load metadata for docker.io/library/alpine:3.24.3
+#4 DONE 1.7s
+
+#6 [internal] load .dockerignore
+#6 transferring context: 107B done
+#6 DONE 0.0s
+
+#7 [internal] load build context
+#7 DONE 0.0s
+
+#8 [toolchain 1/1] FROM docker.io/library/golang:1.27.3-alpine3.24@sha256:b8c9b82affbbb82a020bbcf998dad2ba9516944ac7e883524642a481a9505e9c
+#8 resolve docker.io/library/golang:1.27.3-alpine3.24@sha256:b8c9b82affbbb82a020bbcf998dad2ba9516944ac7e883524642a481a9505e9c 0.1s done
+#8 DONE 0.1s
+
+#9 [package-build 1/6] FROM docker.io/library/alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
+#9 resolve docker.io/library/alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a 0.1s done
+#9 DONE 0.1s
+
+#7 [internal] load build context
+#7 transferring context: 1.24MB 0.1s done
+#7 DONE 0.2s
+
+#10 [package-build 2/6] COPY --from=toolchain /usr/local/go /usr/local/go
+#10 CACHED
+
+#11 [package-build 3/6] RUN apk add --no-cache alpine-sdk ca-certificates tar python3  && adduser -D -G abuild builder  && mkdir -p /out  && chown builder:abuild /out
+#11 CACHED
+
+#12 [package-build 4/6] WORKDIR /src
+#12 CACHED
+
+#13 [package-build 5/6] COPY . .
+#13 DONE 0.3s
+
+#14 [package-build 6/6] RUN sh packaging/alpine/build.sh /src /out
+#14 1.990 writing RSA key
+#14 1.993 >>>
+#14 1.993 >>> You'll need to install /tmp/routerd2-abuild.Iihgah/abuild/-6add89bd.rsa.pub into
+#14 1.993 >>> /etc/apk/keys to be able to install packages and repositories signed with
+#14 1.993 >>> /tmp/routerd2-abuild.Iihgah/abuild/-6add89bd.rsa
+#14 1.993 >>>
+#14 1.993 >>> Please remember to make a safe backup of your private key:
+#14 1.993 >>> /tmp/routerd2-abuild.Iihgah/abuild/-6add89bd.rsa
+#14 1.993 >>>
+#14 2.129 >>> routerd2: Updating the sha512sums in /tmp/routerd2-abuild.Iihgah/aports/main/routerd2/APKBUILD...
+#14 2.180 >>> routerd2: Building main/routerd2 0.1.0-r0 (using abuild 3.17.0-r0) started Sun, 25 Oct 2026 04:46:54 +0000
+#14 2.187 >>> routerd2: Validating /tmp/routerd2-abuild.Iihgah/aports/main/routerd2/APKBUILD...
+#14 2.212 >>> WARNING: routerd2: No maintainer
+#14 2.220 >>> routerd2: Cleaning up srcdir
+#14 2.221 >>> routerd2: Cleaning up pkgdir
+#14 2.222 >>> routerd2: Cleaning up tmpdir
+#14 2.236 /tmp/routerd2-abuild.Iihgah/aports/main/routerd2/routerd2-0.1.0.tar.gz: OK
+#14 2.252 /tmp/routerd2-abuild.Iihgah/aports/main/routerd2/routerd2-0.1.0.tar.gz: OK
+#14 2.255 >>> routerd2: Unpacking /tmp/routerd2-abuild.Iihgah/aports/main/routerd2/routerd2-0.1.0.tar.gz...
+#14 2.410 go: downloading golang.org/x/term v0.47.0
+#14 2.410 go: downloading golang.org/x/sys v0.49.0
+#14 2.445 go: downloading go.yaml.in/yaml/v3 v3.0.5
+#14 2.496 go: downloading github.com/imksoo/routerd v0.3.1-0.20261023172044-1329ef54f296
+#14 2.503 go: downloading modernc.org/sqlite v1.50.0
+#14 2.674 go: downloading gopkg.in/yaml.v3 v3.0.1
+#14 3.894 go: downloading github.com/vishvananda/netlink v1.3.1
+#14 3.903 go: downloading golang.org/x/sync v0.24.0
+#14 4.187 go: downloading github.com/miekg/dns v1.1.72
+#14 4.336 go: downloading golang.org/x/net v0.60.0
+#14 4.849 go: downloading github.com/mdlayher/netlink v1.7.3-0.20250113171957-fbb4dce95f42
+#14 4.882 go: downloading github.com/google/uuid v1.6.0
+#14 28.17 go: downloading github.com/vishvananda/netns v0.0.5
+#14 28.20 go: downloading github.com/mdlayher/socket v0.5.0
+#14 28.20 go: downloading modernc.org/libc v1.72.0
+#14 32.77 go: downloading modernc.org/memory v1.11.0
+#14 32.77 go: downloading github.com/dustin/go-humanize v1.0.1
+#14 32.77 go: downloading modernc.org/mathutil v1.7.1
+#14 32.82 go: downloading github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec
+#14 80.66 go: downloading golang.org/x/crypto v0.58.0
+#14 80.68 go: downloading github.com/quic-go/quic-go v0.59.0
+#14 80.68 go: downloading google.golang.org/grpc v1.80.0
+#14 80.68 go: downloading github.com/osrg/gobgp/v4 v4.7.0
+#14 81.23 go: downloading google.golang.org/protobuf v1.36.11
+#14 81.39 go: downloading github.com/dgryski/go-farm v0.0.0-20240924180020-3414d57e47da
+#14 81.41 go: downloading github.com/eapache/channels v1.1.0
+#14 81.44 go: downloading github.com/eapache/queue v1.1.0
+#14 81.46 go: downloading github.com/orcaman/concurrent-map/v2 v2.0.1
+#14 81.48 go: downloading github.com/gaissmai/bart v0.26.1
+#14 81.60 go: downloading github.com/k-sone/critbitgo v1.4.0
+#14 81.60 go: downloading github.com/segmentio/fasthash v1.0.3
+#14 81.60 go: downloading github.com/fsnotify/fsnotify v1.9.0
+#14 81.60 go: downloading github.com/go-viper/mapstructure/v2 v2.4.0
+#14 81.63 go: downloading github.com/spf13/viper v1.20.1
+#14 81.63 go: downloading google.golang.org/genproto/googleapis/rpc v0.0.0-20260401024825-9d38bb4040a9
+#14 81.79 go: downloading github.com/sagikazarmark/locafero v0.7.0
+#14 81.79 go: downloading github.com/spf13/afero v1.12.0
+#14 81.79 go: downloading github.com/spf13/cast v1.7.1
+#14 81.79 go: downloading github.com/spf13/pflag v1.0.6
+#14 81.79 go: downloading github.com/subosito/gotenv v1.6.0
+#14 81.79 go: downloading github.com/pelletier/go-toml/v2 v2.2.3
+#14 81.79 go: downloading golang.org/x/text v0.43.0
+#14 81.88 go: downloading github.com/sourcegraph/conc v0.3.0
+#14 123.6 Collected source notices for 156 modules and the Go toolchain in /tmp/routerd2-abuild.Iihgah/aports/main/routerd2/src/routerd2-0.1.0/dist/licenses
+#14 212.2 ok    github.com/imksoo/routerd2/cmd/routerd  0.704s
+#14 212.2 ?     github.com/imksoo/routerd2/cmd/routerd-bundle   [no test files]
+#14 212.2 ok    github.com/imksoo/routerd2/cmd/routerd-logging  0.010s
+#14 212.2 ?     github.com/imksoo/routerd2/cmd/routerd-modules  [no test files]
+#14 212.2 ok    github.com/imksoo/routerd2/images/health-power-test/guest       0.156s
+#14 212.2 ok    github.com/imksoo/routerd2/images/kernel-test-init      0.018s
+#14 212.2 ok    github.com/imksoo/routerd2/images/storage-test/guest    0.026s
+#14 212.2 ok    github.com/imksoo/routerd2/internal/boot        0.024s
+#14 212.2 ok    github.com/imksoo/routerd2/internal/boottime    0.015s
+#14 212.2 ?     github.com/imksoo/routerd2/internal/buildinfo   [no test files]
+#14 221.6 ok    github.com/imksoo/routerd2/internal/cli 9.396s
+#14 221.6 ok    github.com/imksoo/routerd2/internal/clocktest   0.009s
+#14 221.6 ok    github.com/imksoo/routerd2/internal/config      4.041s
+#14 228.5 ok    github.com/imksoo/routerd2/internal/control     16.187s
+#14 228.5 ok    github.com/imksoo/routerd2/internal/derived     0.629s
+#14 228.5 ok    github.com/imksoo/routerd2/internal/derivedcontroller   0.636s
+#14 228.5 ok    github.com/imksoo/routerd2/internal/engineprobe 0.159s
+#14 228.5 ok    github.com/imksoo/routerd2/internal/eventcontroller     2.246s
+#14 228.5 ok    github.com/imksoo/routerd2/internal/eventrule   1.299s
+#14 229.5 ok    github.com/imksoo/routerd2/internal/events      15.820s
+#14 229.5 ok    github.com/imksoo/routerd2/internal/featurecontract     0.010s
+#14 229.5 ok    github.com/imksoo/routerd2/internal/kmod        0.007s
+#14 229.5 ok    github.com/imksoo/routerd2/internal/legacyconfig        2.051s
+#14 229.5 ok    github.com/imksoo/routerd2/internal/localapi    0.026s
+#14 229.5 ok    github.com/imksoo/routerd2/internal/logging     0.342s
+#14 229.5 ok    github.com/imksoo/routerd2/internal/management  0.052s
+#14 233.6 ok    github.com/imksoo/routerd2/internal/network     15.674s
+#14 233.6 ok    github.com/imksoo/routerd2/internal/protocol/aftr       0.513s
+#14 233.6 ok    github.com/imksoo/routerd2/internal/protocol/bfd        0.262s
+#14 233.6 ok    github.com/imksoo/routerd2/internal/protocol/bgp        5.484s
+#14 233.6 ok    github.com/imksoo/routerd2/internal/protocol/bgpconfig  0.010s
+#14 233.6 ok    github.com/imksoo/routerd2/internal/protocol/dhcp4      0.015s
+#14 233.6 ok    github.com/imksoo/routerd2/internal/protocol/dhcp6pd    0.022s
+#14 233.6 ok    github.com/imksoo/routerd2/internal/protocol/dhcpserver 0.341s
+#14 233.6 ok    github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig   0.011s
+#14 233.6 ok    github.com/imksoo/routerd2/internal/protocol/dns        4.176s
+#14 233.6 ?     github.com/imksoo/routerd2/internal/protocol/dnsconfig  [no test files]
+#14 233.6 ok    github.com/imksoo/routerd2/internal/protocol/health     0.811s
+#14 233.6 ok    github.com/imksoo/routerd2/internal/protocol/ra 0.013s
+#14 233.6 ok    github.com/imksoo/routerd2/internal/protocol/raclient   0.113s
+#14 233.6 ok    github.com/imksoo/routerd2/internal/protocol/vrrp       0.144s
+#14 233.6 ok    github.com/imksoo/routerd2/internal/protocolevents      8.485s
+#14 246.1 ok    github.com/imksoo/routerd2/internal/release     26.103s
+#14 246.1 ok    github.com/imksoo/routerd2/internal/releaseboot 1.759s
+#14 246.1 ok    github.com/imksoo/routerd2/internal/releasecli  3.645s
+#14 246.1 ok    github.com/imksoo/routerd2/internal/releasepublish      0.034s
+#14 246.1 ok    github.com/imksoo/routerd2/internal/resourceprogram     0.183s
+#14 246.1 ok    github.com/imksoo/routerd2/internal/runtimeconfig       0.015s
+#14 246.1 ok    github.com/imksoo/routerd2/internal/runtimeplan 13.163s
+#14 246.1 ok    github.com/imksoo/routerd2/internal/serviceconfig       0.009s
+#14 246.1 ok    github.com/imksoo/routerd2/internal/serviceruntime      0.035s
+#14 246.1 ok    github.com/imksoo/routerd2/internal/storage     0.030s
+#14 246.1 ok    github.com/imksoo/routerd2/internal/supervisor  2.304s
+#14 246.1 ok    github.com/imksoo/routerd2/internal/worker      0.039s
+#14 247.1 ok    github.com/google/nftables/expr 0.005s
+#14 247.3 >>> routerd2: Entering fakeroot...
+#14 247.7 >>> routerd2*: Running postcheck for routerd2
+#14 247.9 >>> routerd2*: Preparing package routerd2...
+#14 248.1 >>> routerd2*: Scanning shared objects
+#14 248.2 >>> routerd2*: Tracing dependencies...
+#14 248.2 >>> routerd2*: Package size: 52.8 MB
+#14 248.2 >>> routerd2*: Compressing data...
+#14 258.8 >>> routerd2*: Create checksum...
+#14 259.0 >>> routerd2*: Create routerd2-0.1.0-r0.apk
+#14 259.0 >>> routerd2: Build complete at Sun, 25 Oct 2026 04:51:11 +0000 elapsed time 0h 4m 17s
+#14 259.0 >>> routerd2: Cleaning up srcdir
+#14 259.1 >>> routerd2: Cleaning up pkgdir
+#14 259.2 >>> routerd2: Cleaning up tmpdir
+#14 261.6 >>> routerd2: Updating the main/x86_64 repository index...
+#14 261.6 >>> routerd2: Signing the index...
+#14 DONE 261.8s
+
+#15 [apk-output 1/1] COPY --from=package-build /out/ /
+#15 DONE 0.1s
+
+#16 exporting to client directory
+#16 copying files 11.37MB 0.1s
+#16 copying files 23.87MB 0.2s done
+#16 DONE 0.2s

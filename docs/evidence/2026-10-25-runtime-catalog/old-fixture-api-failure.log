@@ -1,0 +1,12 @@
+# github.com/imksoo/routerd2/internal/release [github.com/imksoo/routerd2/internal/release.test]
+internal/release/archive_test.go:268:178: cannot use 64 (untyped int constant) as string value in struct literal
+internal/release/archive_test.go:268:205: too few values in struct literal of type Artifact
+internal/release/archive_test.go:268:228: cannot use 64 (untyped int constant) as string value in struct literal
+internal/release/archive_test.go:268: too few values in struct literal of type Artifact
+internal/release/manifest_test.go:95:174: too many arguments in call to WriteBundle
+        have (context.Context, *bytes.Buffer, BundleOptions, "crypto/ed25519".PrivateKey, *os.File, *os.File)
+        want (context.Context, io.Writer, BundleOptions, "crypto/ed25519".PrivateKey, map[string]*os.File)
+internal/release/manifest_test.go:109:37: image.Routerd undefined (type *Image has no field or method Routerd)
+internal/release/manifest_test.go:109:52: image.Modules undefined (type *Image has no field or method Modules)
+FAIL    github.com/imksoo/routerd2/internal/release [build failed]
+FAIL

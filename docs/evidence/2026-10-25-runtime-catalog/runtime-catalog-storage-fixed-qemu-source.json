@@ -1,0 +1,21 @@
+{
+  "source_commit": "e6720b9f8e7225bdbc90e18b4ccd209f477f87a0",
+  "source_dirty": false,
+  "scope": "four related individual gates after disk-probe oracle fix; earlier release boot pass retained on identical product; no external NIC; existing release/storage1024MiB and network512MiB/2CPU budgets, existing deadlines unchanged; signed release/storage fixtures now three independently built native commands and one data artifact",
+  "tests": [
+    {
+      "gate": "storage",
+      "exit_code": 0,
+      "passed": true,
+      "elapsed_seconds": 183.63,
+      "guest_seconds": 148.5
+    },
+    {
+      "gate": "daemon-management",
+      "exit_code": 1,
+      "passed": false,
+      "elapsed_seconds": 47.82,
+      "guest_seconds": 32.67
+    }
+  ]
+}

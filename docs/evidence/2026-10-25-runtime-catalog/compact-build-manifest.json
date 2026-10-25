@@ -1,0 +1,74 @@
+{
+  "source_commit": "3ccb7af8bdccd72021b6eda98d7d810be09fed2d",
+  "source_dirty_paths": [
+    " M Dockerfile",
+    " M Makefile",
+    " M README.md",
+    " M docs/releases.md",
+    " M examples/runtime-layout.json",
+    " M images/boot.json",
+    " M images/storage-test/guest/main.go",
+    " M internal/buildinfo/buildinfo.go",
+    " M internal/release/README.md",
+    " M internal/release/built_integration_test.go",
+    " M internal/releaseboot/testdata/guest/main.go",
+    " M internal/releaseboot/testdata/qemu-release-boot.py",
+    " M internal/releasecli/cli_linux.go",
+    " M internal/releasepublish/built_integration_test.go",
+    " M internal/releasepublish/layout_test.go",
+    " M internal/releasepublish/publish_linux_test.go",
+    " M internal/runtimeconfig/README.md",
+    " M internal/runtimeconfig/config.go",
+    " M packaging/alpine/APKBUILD",
+    " M packaging/alpine/README.md",
+    " M scripts/build-image.sh",
+    " M scripts/health-pbr.py",
+    " M scripts/qemu-health-power.py",
+    " M scripts/qemu-network.py",
+    " M scripts/qemu-storage.py",
+    "?? cmd/routerd-logging/main.go",
+    "?? internal/release/capacity_integration_test.go"
+  ],
+  "command": [
+    "make",
+    "check",
+    "build-linux",
+    "RELEASE_ID=runtime-catalog-v2"
+  ],
+  "started_at_utc": "2026-10-25T03:41:26.480676+00:00",
+  "umask": "0022",
+  "exit_code": 0,
+  "elapsed_seconds": 27.0,
+  "artifacts": [
+    {
+      "architecture": "amd64",
+      "binary": "routerd",
+      "sha256": "0057b8efa402499871b0b88ececf5fae212fe647d239ee33c303425a9fd05b65"
+    },
+    {
+      "architecture": "amd64",
+      "binary": "routerd-modules",
+      "sha256": "2a5519f5e5e02225b9bb4f82c61c68db7f7a44aca1ba596c342b51f5fd38ae31"
+    },
+    {
+      "architecture": "amd64",
+      "binary": "routerd-logging",
+      "sha256": "4e8ea4146a9e6586dc25bc60784fb039b01598cb4ec68153bcbabdaf6ce88ba9"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd",
+      "sha256": "1d71054d29770408c123f9ad76fb2674bd861cd0bc879c516c32b40885e5ea6b"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd-modules",
+      "sha256": "19ebf5d42d5ef1925ce8a0200433db17accb8a0bb17ee8259b71402eea6f3c9c"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd-logging",
+      "sha256": "7c155e1b5387706dca06f9a88fc3f54c9a5fbad358de069db7e8d4dfa5c0d928"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+Extracting appliance kernel modules for the isolated test image...
+Building the test-only init and daemon-management test binary...
+Booting the daemon-management test guest (no external network interface)...
+=== RUN   TestDaemonConfigurationAndRecovery
+    daemon_test.go:69: === RUN   TestDaemonConfigurationAndRecovery
+            daemon_test.go:287: durable commit/confirm/rollback observations survived control SIGKILL with stable IDs/cursors
+            daemon_test.go:327: real SSH show derived returned current finite status for a resource ID containing slash
+        --- PASS: TestDaemonConfigurationAndRecovery (15.52s)
+        PASS
+--- PASS: TestDaemonConfigurationAndRecovery (15.72s)
+PASS
+ROUTERD_MANAGEMENT_DAEMON_TEST_PASS
+[   25.311555] ACPI: PM: Preparing to enter system sleep state S5
+[   25.313022] reboot: Power down
+
+QEMU two-binary daemon SSH configuration and recovery: PASS (26.85s)

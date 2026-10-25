@@ -1,0 +1,81 @@
+{
+  "source_commit": "c88a89775ef223745b51a9b0b63c7f77ab603f5d",
+  "product_code_checkpoint": "f7da1c2b0016727c5681b83485e672788af8f8c7",
+  "source_dirty_paths": [
+    "?? docs/evidence/2026-10-25-runtime-catalog.md"
+  ],
+  "started_at_utc": "2026-10-25T04:44:34.639665+00:00",
+  "tests": [
+    {
+      "name": "oci-build",
+      "command": [
+        "sudo",
+        "-n",
+        "docker",
+        "build",
+        "--progress=plain",
+        "--build-arg",
+        "RELEASE_ID=runtime-catalog-v2",
+        "-t",
+        "routerd2:runtime-catalog-v2",
+        "."
+      ],
+      "exit_code": 0,
+      "passed": true,
+      "elapsed_seconds": 133.02,
+      "log": "runtime-catalog-oci-build.log",
+      "sha256": "d6f218e0cfd0c7011d9f5a4c238373a5c14eebb069b25f09126ac4c490daec97"
+    },
+    {
+      "name": "oci-smoke",
+      "command": [
+        "sudo",
+        "-n",
+        "python3",
+        "images/container-smoke.py",
+        "--engine",
+        "docker",
+        "--image",
+        "routerd2:runtime-catalog-v2"
+      ],
+      "exit_code": 0,
+      "passed": true,
+      "elapsed_seconds": 1.19,
+      "log": "runtime-catalog-oci-smoke.log",
+      "sha256": "3f93e507cff566192fd92cee321f50e511955d83cbd0f15522bcd15275d75506"
+    },
+    {
+      "name": "apk-build",
+      "command": [
+        "sudo",
+        "-n",
+        "docker",
+        "build",
+        "--progress=plain",
+        "--build-arg",
+        "RELEASE_ID=runtime-catalog-v2",
+        "-f",
+        "packaging/alpine/Dockerfile",
+        "--target",
+        "apk-output",
+        "--output",
+        "type=local,dest=dist/goal-validation/runtime-catalog-apk",
+        "."
+      ],
+      "exit_code": 0,
+      "passed": true,
+      "elapsed_seconds": 266.83,
+      "log": "runtime-catalog-apk-build.log",
+      "sha256": "859b64c4debee75bb25f3961b7679e41645a719fa8d9660b1d76bc5d642ff839"
+    }
+  ],
+  "oci_image_id": "sha256:6e75a03b2c704f526039884214b76772dc035f4e32e9a9dc6f4e2056bb738359",
+  "apk_artifacts": [
+    {
+      "file": "dist/goal-validation/runtime-catalog-apk/routerd2-0.1.0-r0.apk",
+      "size": 21514147,
+      "sha256": "a1c0745c21cc7fea1d6cf93d9fb38db9a4e2b1fbce777fde5cb54b72f3c41a48"
+    }
+  ],
+  "artifact_collection_note": "Private Docker local exporter created root-owned0700 output; first non-root post-build enumeration found zero files. Preserve that wrapper failure; ownership changed only on this newly generated private task output, then exact artifact count/hash collected. No build rerun or home/repository mode change."
+}

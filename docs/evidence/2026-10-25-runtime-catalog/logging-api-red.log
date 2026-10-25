@@ -1,0 +1,5 @@
+# github.com/imksoo/routerd2/cmd/routerd-logging [github.com/imksoo/routerd2/cmd/routerd-logging.test]
+cmd/routerd-logging/main_test.go:12:13: undefined: run
+cmd/routerd-logging/main_test.go:17:12: undefined: run
+FAIL    github.com/imksoo/routerd2/cmd/routerd-logging [build failed]
+FAIL
