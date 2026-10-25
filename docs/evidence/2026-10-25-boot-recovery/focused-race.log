@@ -1,0 +1,53 @@
+=== RUN   TestOpenForBootSelectsFallbackBeforeOperationalOpen
+--- PASS: TestOpenForBootSelectsFallbackBeforeOperationalOpen (2.06s)
+=== RUN   TestBootRecoveryRefusesInvalidJournalFallbackAndTrialMetadata
+=== RUN   TestBootRecoveryRefusesInvalidJournalFallbackAndTrialMetadata/selector
+=== RUN   TestBootRecoveryRefusesInvalidJournalFallbackAndTrialMetadata/journal
+=== RUN   TestBootRecoveryRefusesInvalidJournalFallbackAndTrialMetadata/link
+=== RUN   TestBootRecoveryRefusesInvalidJournalFallbackAndTrialMetadata/fallback
+=== RUN   TestBootRecoveryRefusesInvalidJournalFallbackAndTrialMetadata/trial_metadata
+--- PASS: TestBootRecoveryRefusesInvalidJournalFallbackAndTrialMetadata (6.01s)
+    --- PASS: TestBootRecoveryRefusesInvalidJournalFallbackAndTrialMetadata/selector (1.09s)
+    --- PASS: TestBootRecoveryRefusesInvalidJournalFallbackAndTrialMetadata/journal (1.07s)
+    --- PASS: TestBootRecoveryRefusesInvalidJournalFallbackAndTrialMetadata/link (1.09s)
+    --- PASS: TestBootRecoveryRefusesInvalidJournalFallbackAndTrialMetadata/fallback (1.19s)
+    --- PASS: TestBootRecoveryRefusesInvalidJournalFallbackAndTrialMetadata/trial_metadata (1.56s)
+=== RUN   TestBootRecoveryPreservesPairedFallbackAndConfigurationFences
+--- PASS: TestBootRecoveryPreservesPairedFallbackAndConfigurationFences (1.81s)
+=== RUN   TestBootRecoveryCancellationBeforePublicationDoesNotSpendGeneration
+--- PASS: TestBootRecoveryCancellationBeforePublicationDoesNotSpendGeneration (1.37s)
+=== RUN   TestBootRecoversDamagedPendingPayloadWithoutExecutingIt
+=== RUN   TestBootRecoversDamagedPendingPayloadWithoutExecutingIt/prepared/changed
+=== RUN   TestBootRecoversDamagedPendingPayloadWithoutExecutingIt/prepared/missing
+=== RUN   TestBootRecoversDamagedPendingPayloadWithoutExecutingIt/trial/changed
+=== RUN   TestBootRecoversDamagedPendingPayloadWithoutExecutingIt/trial/missing
+--- PASS: TestBootRecoversDamagedPendingPayloadWithoutExecutingIt (8.51s)
+    --- PASS: TestBootRecoversDamagedPendingPayloadWithoutExecutingIt/prepared/changed (2.04s)
+    --- PASS: TestBootRecoversDamagedPendingPayloadWithoutExecutingIt/prepared/missing (1.82s)
+    --- PASS: TestBootRecoversDamagedPendingPayloadWithoutExecutingIt/trial/changed (2.43s)
+    --- PASS: TestBootRecoversDamagedPendingPayloadWithoutExecutingIt/trial/missing (2.22s)
+=== RUN   TestBootAndAutomaticFallbackRejectUnqualifiedFormatChange
+--- PASS: TestBootAndAutomaticFallbackRejectUnqualifiedFormatChange (2.13s)
+=== RUN   TestInitializePrepareBootConfirmRollbackAndWatermark
+--- PASS: TestInitializePrepareBootConfirmRollbackAndWatermark (6.02s)
+=== RUN   TestCorruptionAndMissingContentFailClosed
+=== RUN   TestCorruptionAndMissingContentFailClosed/missing_selector
+=== RUN   TestCorruptionAndMissingContentFailClosed/escape_selector
+=== RUN   TestCorruptionAndMissingContentFailClosed/changed_valid_JSON
+=== RUN   TestCorruptionAndMissingContentFailClosed/missing_ELF
+=== RUN   TestCorruptionAndMissingContentFailClosed/tampered_ELF
+=== RUN   TestCorruptionAndMissingContentFailClosed/ELF_symlink
+=== RUN   TestCorruptionAndMissingContentFailClosed/wrong_active_link
+--- PASS: TestCorruptionAndMissingContentFailClosed (3.51s)
+    --- PASS: TestCorruptionAndMissingContentFailClosed/missing_selector (0.47s)
+    --- PASS: TestCorruptionAndMissingContentFailClosed/escape_selector (0.46s)
+    --- PASS: TestCorruptionAndMissingContentFailClosed/changed_valid_JSON (0.47s)
+    --- PASS: TestCorruptionAndMissingContentFailClosed/missing_ELF (0.49s)
+    --- PASS: TestCorruptionAndMissingContentFailClosed/tampered_ELF (0.62s)
+    --- PASS: TestCorruptionAndMissingContentFailClosed/ELF_symlink (0.49s)
+    --- PASS: TestCorruptionAndMissingContentFailClosed/wrong_active_link (0.51s)
+PASS
+ok      github.com/imksoo/routerd2/internal/release     32.468s
+testing: warning: no tests to run
+PASS
+ok      github.com/imksoo/routerd2/cmd/routerd  1.029s [no tests to run]

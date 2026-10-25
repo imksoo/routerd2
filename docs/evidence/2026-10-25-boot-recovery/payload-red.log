@@ -1,0 +1,17 @@
+=== RUN   TestBootRecoversDamagedPendingPayloadWithoutExecutingIt
+=== RUN   TestBootRecoversDamagedPendingPayloadWithoutExecutingIt/prepared/changed
+    boot_recovery_test.go:66: damaged candidate prevented verified fallback: release store is corrupt: artifact digest changed
+=== RUN   TestBootRecoversDamagedPendingPayloadWithoutExecutingIt/prepared/missing
+    boot_recovery_test.go:66: damaged candidate prevented verified fallback: release store is corrupt: incomplete runtime directory
+=== RUN   TestBootRecoversDamagedPendingPayloadWithoutExecutingIt/trial/changed
+    boot_recovery_test.go:66: damaged candidate prevented verified fallback: release store is corrupt: artifact digest changed
+=== RUN   TestBootRecoversDamagedPendingPayloadWithoutExecutingIt/trial/missing
+    boot_recovery_test.go:66: damaged candidate prevented verified fallback: release store is corrupt: incomplete runtime directory
+--- FAIL: TestBootRecoversDamagedPendingPayloadWithoutExecutingIt (2.41s)
+    --- FAIL: TestBootRecoversDamagedPendingPayloadWithoutExecutingIt/prepared/changed (1.04s)
+    --- FAIL: TestBootRecoversDamagedPendingPayloadWithoutExecutingIt/prepared/missing (0.38s)
+    --- FAIL: TestBootRecoversDamagedPendingPayloadWithoutExecutingIt/trial/changed (0.52s)
+    --- FAIL: TestBootRecoversDamagedPendingPayloadWithoutExecutingIt/trial/missing (0.47s)
+FAIL
+FAIL    github.com/imksoo/routerd2/internal/release     2.422s
+FAIL

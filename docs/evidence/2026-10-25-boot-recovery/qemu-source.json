@@ -1,0 +1,28 @@
+{
+  "source_commit": "35c24d1adcc9fe87fa0dbf78d807e5bdf13112e2",
+  "source_dirty": false,
+  "scope": "actual signed PID1 selection and confirmation; persistent two-kernel ordinary attempt exhaustion and separately deliberately corrupted trial payload with an unspent attempt; no host network/mount/clock/block mutation; no paired loader activation",
+  "tests": [
+    {
+      "gate": "release-boot",
+      "exit_code": 0,
+      "passed": true,
+      "elapsed_seconds": 183.94,
+      "guest_seconds": 169.5
+    },
+    {
+      "gate": "storage",
+      "exit_code": 0,
+      "passed": true,
+      "elapsed_seconds": 214.1,
+      "guest_seconds": 177.01999999999998
+    },
+    {
+      "gate": "storage-corrupt-trial",
+      "exit_code": 0,
+      "passed": true,
+      "elapsed_seconds": 210.15,
+      "guest_seconds": 174.41000000000003
+    }
+  ]
+}

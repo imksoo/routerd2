@@ -1,0 +1,6 @@
+=== RUN   TestBootRecoveryDropsDamagedPreviousWhenItWasThePreparedRollbackTarget
+    boot_recovery_test.go:219: rejected rollback retained a damaged executable reference or adopted its configuration
+--- FAIL: TestBootRecoveryDropsDamagedPreviousWhenItWasThePreparedRollbackTarget (1.25s)
+FAIL
+FAIL    github.com/imksoo/routerd2/internal/release     1.256s
+FAIL

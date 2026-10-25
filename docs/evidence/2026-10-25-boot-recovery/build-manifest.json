@@ -1,0 +1,47 @@
+{
+  "source_commit": "35c24d1adcc9fe87fa0dbf78d807e5bdf13112e2",
+  "source_dirty_paths": [],
+  "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "command": [
+    "make",
+    "check",
+    "build-linux",
+    "RELEASE_ID=boot-recovery-v1"
+  ],
+  "started_at_utc": "2026-10-25T12:16:55.977272+00:00",
+  "umask": "0022",
+  "exit_code": 0,
+  "elapsed_seconds": 273.18,
+  "artifacts": [
+    {
+      "architecture": "amd64",
+      "binary": "routerd",
+      "sha256": "d07eb8d6fd98aa08c38bfc03d6a1232907bc5a555aed14a854940f4e0c795602"
+    },
+    {
+      "architecture": "amd64",
+      "binary": "routerd-modules",
+      "sha256": "1e863b4c5f85cf01ec97cd75936947d75593435983563937806f255992609f3a"
+    },
+    {
+      "architecture": "amd64",
+      "binary": "routerd-logging",
+      "sha256": "e9d12e04fa6521430d3f65c9099994b917676e54afb849bb3f362e3ca4ee70e6"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd",
+      "sha256": "21bcc3d30c29d434c70065d7cc6d79d1a60a0c4424c2724acaada58fa36e26b6"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd-modules",
+      "sha256": "235b61f428ccad8a960c3c4a0041231cb534e93c433caf7643dc7bbc06dfd594"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd-logging",
+      "sha256": "635a760b92605382bae08db212124f509c019d177928f2f05eca3029d2baa892"
+    }
+  ]
+}

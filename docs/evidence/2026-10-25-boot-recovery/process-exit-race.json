@@ -1,0 +1,14 @@
+{
+  "command": [
+    "go",
+    "test",
+    "-race",
+    "./internal/release",
+    "-run",
+    "^TestBootRecoveryProcessExitAtJournalBoundaries$",
+    "-count=1",
+    "-v"
+  ],
+  "exit_code": 0,
+  "elapsed_seconds": 20.185
+}

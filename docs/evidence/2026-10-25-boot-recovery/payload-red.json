@@ -1,0 +1,13 @@
+{
+  "command": [
+    "go",
+    "test",
+    "./internal/release",
+    "-run",
+    "^TestBootRecoversDamagedPendingPayloadWithoutExecutingIt$",
+    "-count=1",
+    "-v"
+  ],
+  "exit_code": 1,
+  "elapsed_seconds": 6.327
+}

@@ -12279,6 +12279,34 @@
         "Current OCI/APK/arm64 execution, all plan work packages and selected physical hardware/NIC/performance/long-duration qualification"
       ],
       "full_goal_status": "active"
+    },
+    {
+      "id": "corrupt-pending-boot-fallback",
+      "date": "2026-10-25",
+      "status": "partial_verified_pending_payload_boot_fallback_and_two_kernel_corruption_acceptance",
+      "code_checkpoint": "35c24d1adcc9fe87fa0dbf78d807e5bdf13112e2",
+      "work_packages": [
+        "CORE-06",
+        "DIST-01"
+      ],
+      "evidence": "docs/evidence/2026-10-25-boot-recovery.md",
+      "implemented": [
+        "Boot-specific existing-selector OpenForBoot, complete canonical journal/reference validation before distinguishing pending payload failure; ordinary operational Open/status remain strict",
+        "Fully verified baseline fallback for damaged prepared/trial payloads, signed ABI equality required for previously executed trial; no arbitrary old/factory fallback or missing-selector initialization",
+        "One generation for rejection/failure/fallback preserving runtime and configuration fences; exact paired reference retention; damaged Previous alias removed when it was the prepared rollback target"
+      ],
+      "validation": [
+        "Whole check/Race/vet/Python32/six static ELF build273.18s, native7 and actual signed PID1 + separate ordinary/corrupted-trial ext4 two-kernel gates pass",
+        "Payload changed/missing RED, API compile RED, damaged Previous alias RED, host failed-phase/missing-corruption-contract RED; focused/related checks pass",
+        "Injected I/O errors at7 journal boundaries and real process Exit99 at same7 boundaries; cancellation, no baseline, corrupt journal/link/fallback, unauthenticated trial metadata and paired watermark/reference checks",
+        "Corrupted trial has before/after full SHA difference and attempt1/max2; actual product selects verified baseline with persistent SSH/config/snapshot/event provenance; ordinary attempt exhaustion cannot satisfy this gate"
+      ],
+      "remaining": [
+        "Operator paired prepare/loader/exact tuple health, full protocol/engine state and target policy, independent bootstrap/worker authority",
+        "Lost signed trial metadata or corrupted confirmed active remain refused; broader corruption qualification, write-time power-cut/ENOSPC/fsync and reference-aware pruning/startup-ACK audit remain",
+        "All work packages, current OCI/APK/arm64 execution and selected physical hardware/NIC/performance/long-duration qualification"
+      ],
+      "full_goal_status": "active"
     }
   ],
   "delivery_goal": {

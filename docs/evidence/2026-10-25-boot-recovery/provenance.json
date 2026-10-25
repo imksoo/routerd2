@@ -1,0 +1,212 @@
+{
+  "recorded_at_utc": "2026-10-25T12:33:56.904134+00:00",
+  "product_checkpoint": "35c24d1adcc9fe87fa0dbf78d807e5bdf13112e2",
+  "full_goal_status": "active",
+  "physical_target_qualified": false,
+  "scope": "Boot-specific existing-selector open, verified candidate payload failure recovery, ordinary operational strictness, runtime/configuration fences; actual signed PID1 and two distinct two-kernel ext4 gates; no activated paired loader or complete state migration",
+  "normalizations": [
+    "workspace/toolchain paths",
+    "ANSI, tabs, CRLF, trailing whitespace",
+    "public kernel certificate identifier",
+    "ephemeral private SSH host-key hashes omitted; public fingerprints retained"
+  ],
+  "raw_artifacts": [
+    {
+      "public_name": "payload-red.log",
+      "private_source": "dist/goal-validation/boot-recovery-payload-red.log",
+      "raw_sha256": "21b53c1d29581d834c427983abcaad46a21c37bf596cf29545ad230a5d36e90f"
+    },
+    {
+      "public_name": "payload-red.json",
+      "private_source": "dist/goal-validation/boot-recovery-payload-red.json",
+      "raw_sha256": "a86e2020ef86ba0ffd03c015ab0768b2580fe8eb0e7245adf50fc359d07efabf"
+    },
+    {
+      "public_name": "api-red.log",
+      "private_source": "dist/goal-validation/boot-recovery-api-red.log",
+      "raw_sha256": "896d1438481068279232455e29734d5c3fa9bc3684053734be67662ef8ec60b7"
+    },
+    {
+      "public_name": "api-red.json",
+      "private_source": "dist/goal-validation/boot-recovery-api-red.json",
+      "raw_sha256": "4e8855fe6b328432e71edd83aeb1f957b8c431fc038f5dd60f3cc31ca7ff8eb0"
+    },
+    {
+      "public_name": "previous-reference-red.log",
+      "private_source": "dist/goal-validation/boot-recovery-previous-reference-red.log",
+      "raw_sha256": "e08f08ac03e3c1634073ba2fc211105ef2b41dbd94a7a179819a0f4589c94af9"
+    },
+    {
+      "public_name": "previous-reference-red.json",
+      "private_source": "dist/goal-validation/boot-recovery-previous-reference-red.json",
+      "raw_sha256": "251f2d204f14bb1ae646620047226c28fa7c61831efc59aef99bfdc0fab26ae6"
+    },
+    {
+      "public_name": "storage-oracle-red.log",
+      "private_source": "dist/goal-validation/boot-recovery-storage-oracle-red.log",
+      "raw_sha256": "6e45008f4c6f804c456e894c4c4f2073c55465e7d239af3184b0c61237e9d70b"
+    },
+    {
+      "public_name": "storage-oracle-red.json",
+      "private_source": "dist/goal-validation/boot-recovery-storage-oracle-red.json",
+      "raw_sha256": "a8a112f18c9fe85ed0a15dcdf4cd8bba4db02185db4cbf62bf6a7fc52c0e458b"
+    },
+    {
+      "public_name": "focused-race.log",
+      "private_source": "dist/goal-validation/boot-recovery-focused-race.log",
+      "raw_sha256": "336f1c6ba0c71671ed98690ef46eea2411d3558d8e929babaa86f5d91d339003"
+    },
+    {
+      "public_name": "focused-race.json",
+      "private_source": "dist/goal-validation/boot-recovery-focused-race.json",
+      "raw_sha256": "3854eae1d7a1c729b72de646cb54a9479f5979be8c5edc8c7489c4f425675bd5"
+    },
+    {
+      "public_name": "final-focused-race.log",
+      "private_source": "dist/goal-validation/boot-recovery-final-focused-race.log",
+      "raw_sha256": "3741926c9ef049bb9a4bcc9208cf39793f5e0f7112cc9bbe2674660ca24e24c7"
+    },
+    {
+      "public_name": "final-focused-race.json",
+      "private_source": "dist/goal-validation/boot-recovery-final-focused-race.json",
+      "raw_sha256": "690bbf384c5129f75f7afbbb9bbc0707622b2eed76d0fcadb512000d96bea43f"
+    },
+    {
+      "public_name": "process-exit-race.log",
+      "private_source": "dist/goal-validation/boot-recovery-process-exit-race.log",
+      "raw_sha256": "9bce5341419375b1700acc04a33db7ee7818ddbbe732cae5b4ecb5983bc382ce"
+    },
+    {
+      "public_name": "process-exit-race.json",
+      "private_source": "dist/goal-validation/boot-recovery-process-exit-race.json",
+      "raw_sha256": "974841baf7a07ecea13eecc5329eee311b6454eb967736cde3e369ab4bbc950e"
+    },
+    {
+      "public_name": "check-build.log",
+      "private_source": "dist/goal-validation/boot-recovery-check-build.log",
+      "raw_sha256": "fae3992572ca575f8c2888b2f3122c2eabcb22a6183445f11755c20a55f8c0b0"
+    },
+    {
+      "public_name": "build-manifest.json",
+      "private_source": "dist/goal-validation/boot-recovery-build-manifest.json",
+      "raw_sha256": "129220d64fc3cd720ad7e3bf9d20579033b69729f55e444fb5adcd36dd079355"
+    },
+    {
+      "public_name": "native-manifest.json",
+      "private_source": "dist/goal-validation/boot-recovery-native-manifest.json",
+      "raw_sha256": "32a195fa235fcff699995b96a8a2c38ec34cd571842cf75f69bf70a60a9eb76a"
+    },
+    {
+      "public_name": "qemu-source.json",
+      "private_source": "dist/goal-validation/boot-recovery-qemu/source.json",
+      "raw_sha256": "5cc654df4788dfab7a6166a5837c8aec360c4dba3dd8cb34c688a840096ea299"
+    },
+    {
+      "public_name": "TestBuiltRuntimeCatalog.log",
+      "private_source": "dist/goal-validation/boot-recovery-native-TestBuiltRuntimeCatalog.log",
+      "raw_sha256": "a2204d772259d7ed92db54f06fdb1a981f6bdefef1f7f9133c6b0f5bf4b60dc9"
+    },
+    {
+      "public_name": "TestPublishBuiltRelease.log",
+      "private_source": "dist/goal-validation/boot-recovery-native-TestPublishBuiltRelease.log",
+      "raw_sha256": "523880f84fba0e2825ec74398e3ce65b5a691a1deda28b993a11e2a71961bf81"
+    },
+    {
+      "public_name": "TestDaemonDHCPv4OriginalLeaseAuthority.log",
+      "private_source": "dist/goal-validation/boot-recovery-native-TestDaemonDHCPv4OriginalLeaseAuthority.log",
+      "raw_sha256": "a81252cd691fec549944d94e8bcad9c4ee874e23ceae600f497a2c607e626aac"
+    },
+    {
+      "public_name": "TestDaemonConfigurationAndRecovery.log",
+      "private_source": "dist/goal-validation/boot-recovery-native-TestDaemonConfigurationAndRecovery.log",
+      "raw_sha256": "343cbae5a03535fe2bd95647b6f55c674ca136ecceb7b9f41a628bb94ffb38e7"
+    },
+    {
+      "public_name": "TestDaemonStartupSelectionAndRecovery.log",
+      "private_source": "dist/goal-validation/boot-recovery-native-TestDaemonStartupSelectionAndRecovery.log",
+      "raw_sha256": "c8bc9b457a1007e82a51d4f6a670e389f434ec5bcd24e7c751b2db3f16be2a66"
+    },
+    {
+      "public_name": "TestDaemonConditionalStartupRecovery.log",
+      "private_source": "dist/goal-validation/boot-recovery-native-TestDaemonConditionalStartupRecovery.log",
+      "raw_sha256": "04d7ac6bcd65d1d9e005c2870d2cbc2cdc5a8aa5502203c39e40b80e34911ad5"
+    },
+    {
+      "public_name": "TestDaemonHealthPBRFailoverAndRecovery.log",
+      "private_source": "dist/goal-validation/boot-recovery-native-TestDaemonHealthPBRFailoverAndRecovery.log",
+      "raw_sha256": "f339751b04dd37208cda23b3769cabf839f11b898c37eeb5345b58b2357b70fa"
+    },
+    {
+      "public_name": "release-boot-host.log",
+      "private_source": "dist/goal-validation/boot-recovery-qemu/release-boot-host.log",
+      "raw_sha256": "fd11f2b00353ff0af5ed85055aab7aa4079f195b6c6534178556f6eafcd75efd"
+    },
+    {
+      "public_name": "release-boot-manifest.json",
+      "private_source": "dist/goal-validation/boot-recovery-qemu/release-boot/manifest.json",
+      "raw_sha256": "760a3ab934b34c1a8f896a30f5845f3f2822c0130b83f83ef5c971eff8882229"
+    },
+    {
+      "public_name": "release-boot-qemu-serial.log",
+      "private_source": "dist/goal-validation/boot-recovery-qemu/release-boot/qemu-serial.log",
+      "raw_sha256": "a0dc37a26a733d5d36344635adb02f87aeb708b46d282777e9bb1887203b148e"
+    },
+    {
+      "public_name": "storage-host.log",
+      "private_source": "dist/goal-validation/boot-recovery-qemu/storage-host.log",
+      "raw_sha256": "f8ea36e841204e1e3aeac94ad5b2dcfbdf7fbc4593f4b8c191f3b843b4cbbc3d"
+    },
+    {
+      "public_name": "storage-manifest.json",
+      "private_source": "dist/goal-validation/boot-recovery-qemu/storage/manifest.json",
+      "raw_sha256": "9b26f7cf6453c280d99ab9a243bbc96abe84ea96000292eb2919ce2c77e9c5a3"
+    },
+    {
+      "public_name": "storage-qemu-first.log",
+      "private_source": "dist/goal-validation/boot-recovery-qemu/storage/qemu-first.log",
+      "raw_sha256": "25c5a2d4019416ae34b81107be64fd8df3d7601a176b55d0bc07a4e6a0b68e3b"
+    },
+    {
+      "public_name": "storage-qemu-second.log",
+      "private_source": "dist/goal-validation/boot-recovery-qemu/storage/qemu-second.log",
+      "raw_sha256": "9ae870a07045e0efc8c0b840084768997838901f82bba976d84e20061ce58317"
+    },
+    {
+      "public_name": "storage-corrupt-trial-host.log",
+      "private_source": "dist/goal-validation/boot-recovery-qemu/storage-corrupt-trial-host.log",
+      "raw_sha256": "d56fb7d41d661d73d66912039718c7608cad71813eec6b420f987b9e9deac547"
+    },
+    {
+      "public_name": "storage-corrupt-trial-manifest.json",
+      "private_source": "dist/goal-validation/boot-recovery-qemu/storage-corrupt-trial/manifest.json",
+      "raw_sha256": "9413cfb8c56a8b40cf168cf371fe8862914d43545538e7b2bc82521c9c4ff0d2"
+    },
+    {
+      "public_name": "storage-corrupt-trial-qemu-first.log",
+      "private_source": "dist/goal-validation/boot-recovery-qemu/storage-corrupt-trial/qemu-first.log",
+      "raw_sha256": "f79f0f96b3867f58da78c4f59a757e32f22ce402a2233490cd0f2ff1b223b1b5"
+    },
+    {
+      "public_name": "storage-corrupt-trial-qemu-second.log",
+      "private_source": "dist/goal-validation/boot-recovery-qemu/storage-corrupt-trial/qemu-second.log",
+      "raw_sha256": "7c5eed94500117d21dfb732cc5ead3eef7cd015c6b3883303b6b834c3072d10a"
+    }
+  ],
+  "private_packet_captures": [
+    {
+      "private_source": "dist/goal-validation/boot-recovery-native-packets/dhcp4-authority/wan0.pcap",
+      "bytes": 9124,
+      "sha256": "c0acb81f407a7b2a153775365e17d00d18ebe4ca4b525d02590800d114af684f"
+    },
+    {
+      "private_source": "dist/goal-validation/boot-recovery-native-packets/wan0.pcap",
+      "bytes": 31144,
+      "sha256": "005b7c51192137cd3d9e3fe9daee98971f3d5d6b0564d58f2d3b4db253087d7e"
+    },
+    {
+      "private_source": "dist/goal-validation/boot-recovery-native-packets/wan1.pcap",
+      "bytes": 33199,
+      "sha256": "928be8e42045d680e572656e62d9294816f76b9c3faeaa05ba5a1af515daa5e8"
+    }
+  ]
+}

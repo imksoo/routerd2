@@ -1,0 +1,117 @@
+{
+  "source_commit": "35c24d1adcc9fe87fa0dbf78d807e5bdf13112e2",
+  "source_dirty": false,
+  "release_id": "boot-recovery-v1",
+  "build_artifacts": [
+    {
+      "architecture": "amd64",
+      "binary": "routerd",
+      "sha256": "d07eb8d6fd98aa08c38bfc03d6a1232907bc5a555aed14a854940f4e0c795602"
+    },
+    {
+      "architecture": "amd64",
+      "binary": "routerd-modules",
+      "sha256": "1e863b4c5f85cf01ec97cd75936947d75593435983563937806f255992609f3a"
+    },
+    {
+      "architecture": "amd64",
+      "binary": "routerd-logging",
+      "sha256": "e9d12e04fa6521430d3f65c9099994b917676e54afb849bb3f362e3ca4ee70e6"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd",
+      "sha256": "21bcc3d30c29d434c70065d7cc6d79d1a60a0c4424c2724acaada58fa36e26b6"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd-modules",
+      "sha256": "235b61f428ccad8a960c3c4a0041231cb534e93c433caf7643dc7bbc06dfd594"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "routerd-logging",
+      "sha256": "635a760b92605382bae08db212124f509c019d177928f2f05eca3029d2baa892"
+    }
+  ],
+  "race_harnesses": {
+    "release": {
+      "path": "dist/goal-validation/boot-recovery-release.test",
+      "sha256": "eafbf075e32aad53049c3590b35abae6fe46006ceeb90cf431e9e6f74f88f9d1"
+    },
+    "publisher": {
+      "path": "dist/goal-validation/boot-recovery-publisher.test",
+      "sha256": "d4782d25c55275390ae9c2bd59120aa4a148e3b9e67b79af1d66344954024841"
+    },
+    "daemon": {
+      "path": "dist/goal-validation/boot-recovery-daemon.test",
+      "sha256": "7827f483c93db85c794fc704cabb38522852630ab7e341fcfeaa8de32d60b274"
+    }
+  },
+  "scope": "root-owned0700 stage; real built amd64/arm64 signature/ELF/staging without foreign execution; actual daemon tests in fresh user/net namespaces; no host network or clock mutation",
+  "tests": [
+    {
+      "test": "TestBuiltRuntimeCatalog",
+      "harness": "release",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 27.71,
+      "log": "boot-recovery-native-TestBuiltRuntimeCatalog.log",
+      "sha256": "a2204d772259d7ed92db54f06fdb1a981f6bdefef1f7f9133c6b0f5bf4b60dc9"
+    },
+    {
+      "test": "TestPublishBuiltRelease",
+      "harness": "publisher",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 13.21,
+      "log": "boot-recovery-native-TestPublishBuiltRelease.log",
+      "sha256": "523880f84fba0e2825ec74398e3ce65b5a691a1deda28b993a11e2a71961bf81"
+    },
+    {
+      "test": "TestDaemonDHCPv4OriginalLeaseAuthority",
+      "harness": "daemon",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 10.6,
+      "log": "boot-recovery-native-TestDaemonDHCPv4OriginalLeaseAuthority.log",
+      "sha256": "a81252cd691fec549944d94e8bcad9c4ee874e23ceae600f497a2c607e626aac"
+    },
+    {
+      "test": "TestDaemonConfigurationAndRecovery",
+      "harness": "daemon",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 9.55,
+      "log": "boot-recovery-native-TestDaemonConfigurationAndRecovery.log",
+      "sha256": "343cbae5a03535fe2bd95647b6f55c674ca136ecceb7b9f41a628bb94ffb38e7"
+    },
+    {
+      "test": "TestDaemonStartupSelectionAndRecovery",
+      "harness": "daemon",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 3.53,
+      "log": "boot-recovery-native-TestDaemonStartupSelectionAndRecovery.log",
+      "sha256": "c8bc9b457a1007e82a51d4f6a670e389f434ec5bcd24e7c751b2db3f16be2a66"
+    },
+    {
+      "test": "TestDaemonConditionalStartupRecovery",
+      "harness": "daemon",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 3.33,
+      "log": "boot-recovery-native-TestDaemonConditionalStartupRecovery.log",
+      "sha256": "04d7ac6bcd65d1d9e005c2870d2cbc2cdc5a8aa5502203c39e40b80e34911ad5"
+    },
+    {
+      "test": "TestDaemonHealthPBRFailoverAndRecovery",
+      "harness": "daemon",
+      "passed": true,
+      "exit_code": 0,
+      "elapsed_seconds": 30.86,
+      "log": "boot-recovery-native-TestDaemonHealthPBRFailoverAndRecovery.log",
+      "sha256": "f339751b04dd37208cda23b3769cabf839f11b898c37eeb5345b58b2357b70fa"
+    }
+  ]
+}

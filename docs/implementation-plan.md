@@ -7,7 +7,14 @@
 部分checkpointでゴールを完了にせず、実装・検証・未検証と証跡を更新する。
 対象機種・NIC・性能条件の確認と並行して、独立して進められる実装・隔離VM検証を続ける。
 
-最新product checkpointは `5ddf258`。実event SQLiteのheader/catalogを同じowned connectionの一つのSELECTで検査する`InspectFormat`とfreshなprivate control APIを実装した。
+最新product checkpointは `35c24d1`。applianceは`OpenForBoot`で既存journalの検査と起動選択を先に完了し、破損したpending payloadが通常openを妨げる前に検証済みbaselineへ戻す。
+selector/checksum/世代/参照linkと全noncandidate payloadを検査する。untriedは現在startupを保持し、実行済みtrialは署名ABIの同一性を必須とする。旧版/journal/署名trial metadataが不明な場合は拒否する。
+失敗履歴・runtime/config watermarkを一つのgenerationへ保存し、準備済みrollback対象とPreviousが同じ場合も破損参照を残さない。通常open/statusのstrict検査とpaired commandの明示拒否を保持する。
+局所RED、I/O errorとprocess exit各7境界、cancel/no-fallback/paired参照を検証。全体check/Race/vet/Python32/6 ELF build273.18秒、native7、QEMU signed PID1とext4通常/破損trial各二bootはPASS。
+破損gateはattempt1/2のentrypointを実際に1byte改変し、full hash変更とpayload検証理由によるfallback、SSH/config/snapshot/eventの保持を確認した。通常のattempt上限fallbackを合格根拠に代用しない。
+[起動前payload破損復旧の証跡・境界・残作業](evidence/2026-10-25-boot-recovery.md) を参照。paired loader/全state policy・全残計画・実機受入は未完了、全体ゴールはactive。
+
+前回product checkpointは `5ddf258`。実event SQLiteのheader/catalogを同じowned connectionの一つのSELECTで検査する`InspectFormat`とfreshなprivate control APIを実装した。
 DB/lock inodeの消失・置換、version/header/必須DDL変更を拒否する。通常openはread-only probeで必須DDLを認証し、更新資格は追加trigger等を含め全catalog一致を要求する。row/cursor/registration/migrationは変更しない。
 LIKEのunderscore wildcardによる追加table見逃しをREDで再現し、literalなsqlite_ prefixへ修正。schema6の13 object digestを固定し、DDLとversionのずれを検出する。
 実PID1 prepare fixtureで、宣言済み6 familyの実観測をcandidate/fallback双方のformat checkerへ接続した。protocol固有stateや全target policy・paired loader/health完成ではない。

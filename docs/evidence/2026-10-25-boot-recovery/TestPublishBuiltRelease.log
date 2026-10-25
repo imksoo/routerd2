@@ -1,0 +1,9 @@
+=== RUN   TestPublishBuiltRelease
+=== RUN   TestPublishBuiltRelease/amd64
+    built_integration_test.go:79: amd64 CLI bundle accepted by runtime: 8bfa0fb5ddcabfd88a6cdac98ff706f4296ccd0360df5bbf79d631ed660f8081
+=== RUN   TestPublishBuiltRelease/arm64
+    built_integration_test.go:79: arm64 CLI bundle accepted by runtime: 23a43d4911bc4911d7d25d49da2a61b9be691e340b665f02c92897868cb03798
+--- PASS: TestPublishBuiltRelease (12.17s)
+    --- PASS: TestPublishBuiltRelease/amd64 (6.04s)
+    --- PASS: TestPublishBuiltRelease/arm64 (6.12s)
+PASS

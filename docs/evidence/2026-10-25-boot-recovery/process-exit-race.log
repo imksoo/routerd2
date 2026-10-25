@@ -1,0 +1,18 @@
+=== RUN   TestBootRecoveryProcessExitAtJournalBoundaries
+=== RUN   TestBootRecoveryProcessExitAtJournalBoundaries/journal-state-synced
+=== RUN   TestBootRecoveryProcessExitAtJournalBoundaries/journal-generation-synced
+=== RUN   TestBootRecoveryProcessExitAtJournalBoundaries/journal-generation-published
+=== RUN   TestBootRecoveryProcessExitAtJournalBoundaries/journal-parent-synced
+=== RUN   TestBootRecoveryProcessExitAtJournalBoundaries/journal-selector-created
+=== RUN   TestBootRecoveryProcessExitAtJournalBoundaries/journal-selector-replaced
+=== RUN   TestBootRecoveryProcessExitAtJournalBoundaries/journal-root-synced
+--- PASS: TestBootRecoveryProcessExitAtJournalBoundaries (13.33s)
+    --- PASS: TestBootRecoveryProcessExitAtJournalBoundaries/journal-state-synced (2.35s)
+    --- PASS: TestBootRecoveryProcessExitAtJournalBoundaries/journal-generation-synced (1.80s)
+    --- PASS: TestBootRecoveryProcessExitAtJournalBoundaries/journal-generation-published (1.78s)
+    --- PASS: TestBootRecoveryProcessExitAtJournalBoundaries/journal-parent-synced (1.78s)
+    --- PASS: TestBootRecoveryProcessExitAtJournalBoundaries/journal-selector-created (1.81s)
+    --- PASS: TestBootRecoveryProcessExitAtJournalBoundaries/journal-selector-replaced (1.79s)
+    --- PASS: TestBootRecoveryProcessExitAtJournalBoundaries/journal-root-synced (2.01s)
+PASS
+ok      github.com/imksoo/routerd2/internal/release     14.365s

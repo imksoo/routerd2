@@ -1,0 +1,50 @@
+=== RUN   TestOpenForBootSelectsFallbackBeforeOperationalOpen
+--- PASS: TestOpenForBootSelectsFallbackBeforeOperationalOpen (1.90s)
+=== RUN   TestBootRecoveryRefusesInvalidJournalFallbackAndTrialMetadata
+=== RUN   TestBootRecoveryRefusesInvalidJournalFallbackAndTrialMetadata/selector
+=== RUN   TestBootRecoveryRefusesInvalidJournalFallbackAndTrialMetadata/journal
+=== RUN   TestBootRecoveryRefusesInvalidJournalFallbackAndTrialMetadata/link
+=== RUN   TestBootRecoveryRefusesInvalidJournalFallbackAndTrialMetadata/fallback
+=== RUN   TestBootRecoveryRefusesInvalidJournalFallbackAndTrialMetadata/trial_metadata
+--- PASS: TestBootRecoveryRefusesInvalidJournalFallbackAndTrialMetadata (6.11s)
+    --- PASS: TestBootRecoveryRefusesInvalidJournalFallbackAndTrialMetadata/selector (1.10s)
+    --- PASS: TestBootRecoveryRefusesInvalidJournalFallbackAndTrialMetadata/journal (1.11s)
+    --- PASS: TestBootRecoveryRefusesInvalidJournalFallbackAndTrialMetadata/link (1.13s)
+    --- PASS: TestBootRecoveryRefusesInvalidJournalFallbackAndTrialMetadata/fallback (1.21s)
+    --- PASS: TestBootRecoveryRefusesInvalidJournalFallbackAndTrialMetadata/trial_metadata (1.56s)
+=== RUN   TestBootRecoveryPreservesPairedFallbackAndConfigurationFences
+--- PASS: TestBootRecoveryPreservesPairedFallbackAndConfigurationFences (1.76s)
+=== RUN   TestBootRecoveryCancellationBeforePublicationDoesNotSpendGeneration
+--- PASS: TestBootRecoveryCancellationBeforePublicationDoesNotSpendGeneration (1.30s)
+=== RUN   TestBootRecoveryDropsDamagedPreviousWhenItWasThePreparedRollbackTarget
+--- PASS: TestBootRecoveryDropsDamagedPreviousWhenItWasThePreparedRollbackTarget (2.45s)
+=== RUN   TestOpenForBootHasNoInitializationOrUnverifiedBaselineShortcut
+--- PASS: TestOpenForBootHasNoInitializationOrUnverifiedBaselineShortcut (0.63s)
+=== RUN   TestBootRecoveryErrorBoundariesKeepOneCompleteSelection
+=== RUN   TestBootRecoveryErrorBoundariesKeepOneCompleteSelection/journal-state-synced
+=== RUN   TestBootRecoveryErrorBoundariesKeepOneCompleteSelection/journal-generation-synced
+=== RUN   TestBootRecoveryErrorBoundariesKeepOneCompleteSelection/journal-generation-published
+=== RUN   TestBootRecoveryErrorBoundariesKeepOneCompleteSelection/journal-parent-synced
+=== RUN   TestBootRecoveryErrorBoundariesKeepOneCompleteSelection/journal-selector-created
+=== RUN   TestBootRecoveryErrorBoundariesKeepOneCompleteSelection/journal-selector-replaced
+=== RUN   TestBootRecoveryErrorBoundariesKeepOneCompleteSelection/journal-root-synced
+--- PASS: TestBootRecoveryErrorBoundariesKeepOneCompleteSelection (12.16s)
+    --- PASS: TestBootRecoveryErrorBoundariesKeepOneCompleteSelection/journal-state-synced (1.76s)
+    --- PASS: TestBootRecoveryErrorBoundariesKeepOneCompleteSelection/journal-generation-synced (1.74s)
+    --- PASS: TestBootRecoveryErrorBoundariesKeepOneCompleteSelection/journal-generation-published (1.75s)
+    --- PASS: TestBootRecoveryErrorBoundariesKeepOneCompleteSelection/journal-parent-synced (1.80s)
+    --- PASS: TestBootRecoveryErrorBoundariesKeepOneCompleteSelection/journal-selector-created (1.78s)
+    --- PASS: TestBootRecoveryErrorBoundariesKeepOneCompleteSelection/journal-selector-replaced (1.67s)
+    --- PASS: TestBootRecoveryErrorBoundariesKeepOneCompleteSelection/journal-root-synced (1.66s)
+=== RUN   TestBootRecoversDamagedPendingPayloadWithoutExecutingIt
+=== RUN   TestBootRecoversDamagedPendingPayloadWithoutExecutingIt/prepared/changed
+=== RUN   TestBootRecoversDamagedPendingPayloadWithoutExecutingIt/prepared/missing
+=== RUN   TestBootRecoversDamagedPendingPayloadWithoutExecutingIt/trial/changed
+=== RUN   TestBootRecoversDamagedPendingPayloadWithoutExecutingIt/trial/missing
+--- PASS: TestBootRecoversDamagedPendingPayloadWithoutExecutingIt (8.74s)
+    --- PASS: TestBootRecoversDamagedPendingPayloadWithoutExecutingIt/prepared/changed (2.05s)
+    --- PASS: TestBootRecoversDamagedPendingPayloadWithoutExecutingIt/prepared/missing (1.84s)
+    --- PASS: TestBootRecoversDamagedPendingPayloadWithoutExecutingIt/trial/changed (2.53s)
+    --- PASS: TestBootRecoversDamagedPendingPayloadWithoutExecutingIt/trial/missing (2.31s)
+PASS
+ok      github.com/imksoo/routerd2/internal/release     36.076s

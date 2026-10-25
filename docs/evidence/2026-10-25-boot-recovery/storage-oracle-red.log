@@ -1,0 +1,61 @@
+.EFFFFFF...
+======================================================================
+ERROR: test_damaged_trial_requires_changed_bytes_and_unspent_attempt (qemu_storage_test.TwoBootWitnessTests.test_damaged_trial_requires_changed_bytes_and_unspent_attempt)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_storage_test.py", line 53, in test_damaged_trial_requires_changed_bytes_and_unspent_attempt
+    STORAGE.check_witnesses(damaged_witnesses(), corrupt_trial=True)
+TypeError: check_witnesses() got an unexpected keyword argument 'corrupt_trial'
+
+======================================================================
+FAIL: test_failed_phase_cannot_be_hidden_by_valid_witness (qemu_storage_test.TwoBootWitnessTests.test_failed_phase_cannot_be_hidden_by_valid_witness) (index=0, field='result')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_storage_test.py", line 49, in test_failed_phase_cannot_be_hidden_by_valid_witness
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_failed_phase_cannot_be_hidden_by_valid_witness (qemu_storage_test.TwoBootWitnessTests.test_failed_phase_cannot_be_hidden_by_valid_witness) (index=0, field='phase')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_storage_test.py", line 49, in test_failed_phase_cannot_be_hidden_by_valid_witness
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_failed_phase_cannot_be_hidden_by_valid_witness (qemu_storage_test.TwoBootWitnessTests.test_failed_phase_cannot_be_hidden_by_valid_witness) (index=0, field='qemu_exit_status_before_cleanup')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_storage_test.py", line 49, in test_failed_phase_cannot_be_hidden_by_valid_witness
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_failed_phase_cannot_be_hidden_by_valid_witness (qemu_storage_test.TwoBootWitnessTests.test_failed_phase_cannot_be_hidden_by_valid_witness) (index=1, field='result')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_storage_test.py", line 49, in test_failed_phase_cannot_be_hidden_by_valid_witness
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_failed_phase_cannot_be_hidden_by_valid_witness (qemu_storage_test.TwoBootWitnessTests.test_failed_phase_cannot_be_hidden_by_valid_witness) (index=1, field='phase')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_storage_test.py", line 49, in test_failed_phase_cannot_be_hidden_by_valid_witness
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+======================================================================
+FAIL: test_failed_phase_cannot_be_hidden_by_valid_witness (qemu_storage_test.TwoBootWitnessTests.test_failed_phase_cannot_be_hidden_by_valid_witness) (index=1, field='qemu_exit_status_before_cleanup')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/routerd2/scripts/qemu_storage_test.py", line 49, in test_failed_phase_cannot_be_hidden_by_valid_witness
+    with self.assertRaises(RuntimeError):
+AssertionError: RuntimeError not raised
+
+----------------------------------------------------------------------
+Ran 6 tests in 0.008s
+
+FAILED (failures=6, errors=1)

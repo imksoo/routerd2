@@ -1,0 +1,14 @@
+{
+  "command": [
+    "python3",
+    "-m",
+    "unittest",
+    "discover",
+    "-s",
+    "scripts",
+    "-p",
+    "qemu_storage_test.py"
+  ],
+  "exit_code": 1,
+  "elapsed_seconds": 0.149
+}
