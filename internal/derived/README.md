@@ -2,7 +2,7 @@
 
 This package is the pure evaluator used by the live control-worker
 `derivedcontroller`. ResourceProgram accepts typed `derived_event` payloads.
-The runtime supplies finite current HealthCheck scalar observations; the
+The runtime supplies finite current HealthCheck and BFD observations; the
 controller atomically saves producer state/output jobs and publishes stable
 historical events to the journal. Neither package executes external effects or
 grants kernel authority.
@@ -51,6 +51,17 @@ input transition. It bridges coalesced same-predicate renewals, even when the
 previous sampled lease has elapsed, without extending the current input lease.
 Without this trusted proof, a lease gap always resets the hold. Predicate truth,
 rather than irrelevant scalar text changes, defines this continuity.
+Providers can attach a separate `EqualityContinuity` token when nonempty
+values change independently of presence. The compiler selects it for a status
+reference used by an `equals` predicate, including predicates inside `any_of`.
+BFD counts every produced `observedAt` change before mailbox coalescing, so
+an unseen A→B→A or a move between two literal witnesses restarts the hold.
+Presence-only references retain their normal continuity across periodic
+timestamp changes. If a reference is used for both presence and equality,
+the stricter equality proof is selected conservatively; provider changes can
+restart a hold even while another branch keeps the aggregate truth unchanged.
+These tokens never replace producer authority or renew observation deadlines.
+
 Wall-clock jumps cannot complete a hold; its event timestamp is fixed at the
 original observation wall time plus the duration. No goroutines or volatile
 wall timers run in this package. Restored holds still require a current

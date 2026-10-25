@@ -1,14 +1,25 @@
 # 現行 routerd と同等の製品にするための実装計画
 
 作成日: **2026-10-24（Asia/Tokyo）**
-状態: **実装中。最初の ResourceProgram checkpoint を追加した。作業単位全体の完了とは区別する。**
+状態: **実装中。各部分checkpointの検証と、作業単位全体の完了判定を区別する。**
 
 ユーザー指定の継続ゴールは、全残実装と必要な試験を完了し、対象実機で利用可能と判断できる状態まで進めること。
 部分checkpointでゴールを完了にせず、実装・検証・未検証と証跡を更新する。
 対象機種・NIC・性能条件の確認と並行して、独立して進められる実装・隔離VM検証を続ける。
 
-最新product checkpointは `d376489`（BFD初回 `e848fbe`）。
-BFDの `phase` / `peerStates` / `peers` / `observedAt` を有限な現在状態としてDerivedEventへ渡し、durable EventRuleへ接続した。
+最新product checkpointは `95b2f43`。
+BFD `observedAt` の `equals` / `any_of` で、通知集約中のA→B→Aや別の一致値への移行が
+古いhysteresisを完成させる問題をtest-firstで再現し、修正した。
+workerで集約前の時刻変更を数え、比較用continuityとpresence-onlyのcontinuityを分ける。
+650msの実hold、正のcounterと定期更新、期限切れ・再送・worker/control復旧を要求する。
+旧d376489 ELF4.43秒FAIL、関連4 package Raceとclean全体check/Race/vet/static両arch build115.48秒PASS。
+checked pairのnativeはBFD-derived13.46秒・Health/Derived13.06秒・BFD/BGP23.14秒・二WAN/PBR33.25秒PASS。
+最終QEMUはBFD-derived44.16秒・Health/Derived95.07秒・BFD/BGP53.39秒・二WAN/PBR98.27秒PASS。
+時刻反転の再現はsimulated clockで、host/guestのCLOCK_REALTIME操作やNTP fault／実機clock受入ではない。
+BGPを含む他providerと全残計画を継続する。work package全体の完了とparityは変更しない。
+[検証・残作業](evidence/2026-10-25-bfd-timestamp.md) を参照。
+
+先行product checkpoint `d376489`（BFD初回 `e848fbe`）では、BFDの `phase` / `peerStates` / `peers` / `observedAt` を有限な現在状態としてDerivedEventへ渡し、durable EventRuleへ接続した。
 Up/Initは元packet受信期限を超えず、通知再送や表示で期限を延長しない。通知集約中のflapはcounterでholdをリセットする。
 実UDP peerを使い、期限切れ・同一再送・worker/control再起動・旧通知409・過去Upを復活させない経路を追加した。
 初回QEMUの既存Health/Derivedは52.11秒FAILで保存。localの圧縮保存16件/batchは2,098,093byteを割り当て、

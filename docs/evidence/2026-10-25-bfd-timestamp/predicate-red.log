@@ -1,0 +1,13 @@
+=== RUN   TestObservedTimestampContinuityBeforeMailboxCoalescing
+=== RUN   TestObservedTimestampContinuityBeforeMailboxCoalescing/return_to_literal
+    derived_timestamp_test.go:79: unseen timestamp mismatch inherited the old hold {Asserted true 0xADDRESS None 2026-10-24 00:01:11 +0000 UTC 2026-10-24 00:00:10 +0000 UTC} 1 <nil>
+=== RUN   TestObservedTimestampContinuityBeforeMailboxCoalescing/different_any_of_literal
+    derived_timestamp_test.go:79: unseen timestamp mismatch inherited the old hold {Asserted true 0xADDRESS None 2026-10-24 00:01:11 +0000 UTC 2026-10-24 00:00:10 +0000 UTC} 1 <nil>
+=== RUN   TestObservedTimestampContinuityBeforeMailboxCoalescing/not_empty
+--- FAIL: TestObservedTimestampContinuityBeforeMailboxCoalescing (0.01s)
+    --- FAIL: TestObservedTimestampContinuityBeforeMailboxCoalescing/return_to_literal (0.00s)
+    --- FAIL: TestObservedTimestampContinuityBeforeMailboxCoalescing/different_any_of_literal (0.00s)
+    --- PASS: TestObservedTimestampContinuityBeforeMailboxCoalescing/not_empty (0.00s)
+FAIL
+FAIL    github.com/imksoo/routerd2/internal/protocol/bfd        0.026s
+FAIL

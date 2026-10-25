@@ -1,0 +1,4 @@
+# github.com/imksoo/routerd2/internal/runtimeplan [github.com/imksoo/routerd2/internal/runtimeplan.test]
+internal/runtimeplan/derived_bfd_timestamp_test.go:40:12: snapshot.TimestampChanges undefined (type bfd.Snapshot has no field or method TimestampChanges)
+FAIL    github.com/imksoo/routerd2/internal/runtimeplan [build failed]
+FAIL

@@ -190,6 +190,12 @@ BFDのlocal状態観測は元のBOOTTIMEから最大5秒で失効する。Up/Ini
 集約phaseが同じでもpeerの変化で保守的にholdをやり直す。counterが飽和した観測はunknownになる。
 値は1 field最大64KiB・snapshot全体2MiBに制限し、元の大きな値をdurable producer stateへコピーしない。
 
+BFD `observedAt` の値変更はworkerで通知集約の前に数える。`equals`（`any_of`内も含む）は
+この記録を使い、途中で不一致になってから元の時刻へ戻る場合や、別の一致時刻へ移る場合に古いholdを引き継がない。
+`notEmpty`だけなら定期更新をまたいでholdを継続できる。同じ参照を値比較と存在確認の両方に使う場合は
+厳しい値比較側を選ぶため、集約truthが変わらなくても保守的にholdをやり直すことがある。
+時刻変更counterの飽和では `observedAt` はunknownになり、独立したphaseの有限証拠は保持する。
+
 現在のboot/source/control、worker generation、producer epoch、sequenceと一致し、元の観測時刻が
 未来でなく、producer期限・supervisor観測期限が残るsampleだけを読む。pollやHTTP GETでは
 観測時刻や期限を延長しない。unknownは保留中のholdを取り消し、asserted booleanを返さず、

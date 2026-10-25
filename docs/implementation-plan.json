@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "document_type": "implementation_plan",
-  "as_of": "2026-10-24",
+  "as_of": "2026-10-25",
   "timezone": "Asia/Tokyo",
   "status": "implementation_in_progress",
   "baselines": {
@@ -11769,6 +11769,39 @@
       ],
       "parity_flags_unchanged": true,
       "intermediate_codec_checkpoint": "896b61ac499085c1779bce51382439e6e75260c7"
+    },
+    {
+      "id": "bfd-timestamp-predicate-continuity",
+      "date": "2026-10-25",
+      "status": "partial_predicate_continuity_implementation_verified",
+      "code_checkpoint": "95b2f43a666669905e4132b1959c3e5075e2ba83",
+      "work_packages": [
+        "CORE-03",
+        "CORE-04"
+      ],
+      "evidence": "docs/evidence/2026-10-25-bfd-timestamp.md",
+      "operator_contract": "docs/resource-program.md#derivedevent",
+      "implemented": [
+        "Count every produced BFD observedAt value change before publication mailbox coalescing; positive mandatory uint64 counter saturates without wrap",
+        "Separate bounded equality continuity from presence-only continuity; equals inside any_of uses the stronger proof consistently in pending holds/input identity/runtime observation",
+        "Reject same-worker counter rewind and changed timestamp without advancement; saturated timestamp becomes unknown while independent phase proof remains usable",
+        "Keep periodic nonempty observations continuous, reject A-to-B-to-A or different equality witnesses inheriting old holds; mixed use of a reference conservatively selects equality proof",
+        "Strengthen actual daemon BFD-Derived fixture to650ms hold across periodic publication with positive advancing timestamp counter; retain expiry/replay/stale notification/worker/control recovery"
+      ],
+      "validation": [
+        "Test-first actual pre-fix assertion failures for A-B-A and A-B-C any_of; presence-only passes before/after; runtime counter/type FAIL captured; saturation/stable-value and rejected-update nonmutation covered",
+        "SHA-pinned old d376489 actual daemon fails4.43s because its real worker omits the new timestamp proof; this is a separate test from simulated clock reversal",
+        "Final related Race: BFD1.321s, Derived1.880s, runtime8.552s, resource compile2.185s pass",
+        "Clean95b2f43 make check/Race/vet/Python23/static amd64+arm64 build115.48s pass; matching fresh native pair BFD-Derived13.46s, Health-Derived13.06s, BFD/BGP23.14s, two-WAN TCP/UDP/PCAP PBR33.25s pass",
+        "QEMU BFD-Derived44.16s, Health-Derived95.07s, BFD/BGP53.39s and two-WAN TCP/UDP/PCAP PBR98.27s all pass at unchanged512MiB/2CPU/64MiB scratch and operation/fixture deadlines; all four ELF/test/init/kernel identities match; related gates, not a new all-suite aggregate"
+      ],
+      "remaining": [
+        "Clock reversal exercised using simulated clocks through worker snapshot/evaluator/runtime; actual guest/physical CLOCK_REALTIME or NTP fault acceptance and physical/NIC/performance qualification remain",
+        "Mixed predicate/ref proof is conservative and not a full minimal-witness legacy parity claim",
+        "BGP and other providers, structured selectors/Derived chaining, durable raw BFD event queue, complete legacy BFD/BGP resource/profile contracts",
+        "All remaining work packages, effects/idempotency/federation, storage retention/off-device durability/lifetime sealing/aggregate budgets"
+      ],
+      "parity_flags_unchanged": true
     }
   ],
   "delivery_goal": {

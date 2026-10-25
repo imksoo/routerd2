@@ -104,6 +104,17 @@ independent short cache lock; this consumer does not make it wait for network
 apply. This is sampled current-state evaluation, not a lossless durable raw
 BFD packet/transition producer or full legacy BFD resource parity.
 
+For `observedAt` literal comparisons, a separate timestamp-change counter is
+advanced before publication coalescing. This prevents a skipped mismatch and
+return to the same timestamp from completing an old hold. The evaluator uses
+this proof for `equals`, including `any_of`; presence-only `notEmpty` can span
+ordinary periodic updates. Mixed presence/equality use of the same reference
+selects the stricter proof conservatively. A saturated timestamp counter makes
+that field unknown without invalidating the independent phase proof. Counter
+rewinds and changed timestamps without counter advancement are rejected in
+the same worker identity. The internal snapshot requires `timestamp_changes`;
+unreleased worker/control formats are deployed as a matching runtime pair.
+
 ## Explicit BGP dependency
 
 The public BGP setting is `peer_bfd`, keyed by the exact BGP neighbor address.
