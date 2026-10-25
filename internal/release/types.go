@@ -8,6 +8,7 @@ package release
 import (
 	"crypto/ed25519"
 	"errors"
+	"github.com/imksoo/routerd2/internal/configref"
 	"os"
 	"time"
 )
@@ -25,15 +26,16 @@ const (
 )
 
 var (
-	ErrBusy       = errors.New("release store is busy")
-	ErrClosed     = errors.New("release store is closed")
-	ErrStale      = errors.New("release generation or boot attempt is stale")
-	ErrDowngrade  = errors.New("release sequence does not exceed the durable high watermark")
-	ErrNoActive   = errors.New("no active release")
-	ErrNoFallback = errors.New("failed boot has no previously confirmed release")
-	ErrCorrupt    = errors.New("release store is corrupt")
-	ErrUncertain  = errors.New("release selector changed but directory durability was not confirmed; read status before retrying")
-	ErrCapacity   = errors.New("release store capacity reached; remove unused releases or old generations explicitly")
+	ErrBusy                  = errors.New("release store is busy")
+	ErrClosed                = errors.New("release store is closed")
+	ErrStale                 = errors.New("release generation or boot attempt is stale")
+	ErrDowngrade             = errors.New("release sequence does not exceed the durable high watermark")
+	ErrNoActive              = errors.New("no active release")
+	ErrNoFallback            = errors.New("failed boot has no previously confirmed release")
+	ErrCorrupt               = errors.New("release store is corrupt")
+	ErrUncertain             = errors.New("release selector changed but directory durability was not confirmed; read status before retrying")
+	ErrCapacity              = errors.New("release store capacity reached; remove unused releases or old generations explicitly")
+	ErrConfigurationRequired = errors.New("paired runtime requires explicit configuration preparation and confirmation")
 )
 
 type Artifact struct {
@@ -74,8 +76,10 @@ type Ref struct {
 }
 
 type Pending struct {
-	Release     Ref `json:"release"`
-	MaxAttempts int `json:"max_attempts"`
+	Startup     *configref.Selection `json:"startup,omitempty"`
+	Fallback    *configref.Selection `json:"fallback,omitempty"`
+	Release     Ref                  `json:"release"`
+	MaxAttempts int                  `json:"max_attempts"`
 }
 
 type Attempt struct {
@@ -86,25 +90,30 @@ type Attempt struct {
 }
 
 type Failure struct {
-	Release Ref       `json:"release"`
-	BootID  string    `json:"boot_id,omitempty"`
-	Reason  string    `json:"reason"`
-	At      time.Time `json:"at"`
+	Startup *configref.Selection `json:"startup,omitempty"`
+	Release Ref                  `json:"release"`
+	BootID  string               `json:"boot_id,omitempty"`
+	Reason  string               `json:"reason"`
+	At      time.Time            `json:"at"`
 }
 
 // State and its active/pending/previous symlinks are published together by one
 // atomic current-symlink replacement. HighWatermark survives cancel/rollback.
 type State struct {
-	Version       int       `json:"version"`
-	Generation    uint64    `json:"generation"`
-	HighWatermark uint64    `json:"high_watermark"`
-	Active        *Ref      `json:"active,omitempty"`
-	Pending       *Pending  `json:"pending,omitempty"`
-	Previous      *Ref      `json:"previous,omitempty"`
-	Attempt       *Attempt  `json:"attempt,omitempty"`
-	LastFailure   *Failure  `json:"last_failure,omitempty"`
-	ChangedAt     time.Time `json:"changed_at"`
-	Operation     string    `json:"operation"`
+	ConfigStoreID       string               `json:"config_store_id,omitempty"`
+	ConfigHighWatermark uint64               `json:"config_high_watermark,omitempty"`
+	Startup             *configref.Selection `json:"startup,omitempty"`
+	PreviousStartup     *configref.Selection `json:"previous_startup,omitempty"`
+	Version             int                  `json:"version"`
+	Generation          uint64               `json:"generation"`
+	HighWatermark       uint64               `json:"high_watermark"`
+	Active              *Ref                 `json:"active,omitempty"`
+	Pending             *Pending             `json:"pending,omitempty"`
+	Previous            *Ref                 `json:"previous,omitempty"`
+	Attempt             *Attempt             `json:"attempt,omitempty"`
+	LastFailure         *Failure             `json:"last_failure,omitempty"`
+	ChangedAt           time.Time            `json:"changed_at"`
+	Operation           string               `json:"operation"`
 }
 
 type Options struct {
@@ -123,8 +132,17 @@ type Options struct {
 }
 
 type PrepareOptions struct {
+	// References must have been verified by the configuration coordinator.
+	// The release store deliberately does not import or execute its compiler.
+	Startup   *configref.Selection
+	KnownGood *configref.Ref
 	// A retry requires a different kernel boot ID. Defaults to one attempt.
 	MaxAttempts int
+}
+
+type ConfigurationConfirmation struct {
+	Adoption configref.Adoption
+	Revision uint64
 }
 
 // Image pins every verified artifact and its signed role catalog. Callers must

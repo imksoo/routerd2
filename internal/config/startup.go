@@ -1,8 +1,10 @@
 package config
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -42,10 +44,10 @@ func (s *Store) AdoptStartup(selection configref.Selection) (Committed, error) {
 	}
 	if c.Startup != nil {
 		old := c.Startup.Selection
-		if selection.Generation < old.Generation || selection.Generation == old.Generation && selection != old {
+		if selection.Generation < old.Generation || selection.Generation == old.Generation && !selection.Equal(old) {
 			return c, ErrStartupConflict
 		}
-		if selection == old {
+		if selection.Equal(old) {
 			// Journal is now authoritative, including later normal commits and
 			// any unconfirmed recovery record. Never reimport the old snapshot.
 			if err := syncDir(s.Dir); err != nil {
@@ -54,8 +56,30 @@ func (s *Store) AdoptStartup(selection configref.Selection) (Committed, error) {
 			return c, nil
 		}
 	}
-	if c.Revision != selection.ExpectedRevision || c.Confirmation != nil {
+	if c.Confirmation != nil {
 		return c, ErrStartupConflict
+	}
+	recovered := false
+	if selection.Recovery == nil {
+		if c.Revision != selection.ExpectedRevision {
+			return c, ErrStartupConflict
+		}
+	} else {
+		r := selection.Recovery
+		switch {
+		case c.Revision == selection.ExpectedRevision:
+			if c.Startup != nil && c.Startup.Selection.Generation >= r.FailedGeneration {
+				return c, ErrStartupConflict
+			}
+		case c.Revision == selection.ExpectedRevision+1:
+			failed := configref.Selection{Generation: r.FailedGeneration, ExpectedRevision: selection.ExpectedRevision, Snapshot: r.FailedSnapshot}
+			if c.Startup == nil || !c.Startup.Selection.Equal(failed) || c.Startup.Revision != c.Revision || c.Startup.Recovered {
+				return c, ErrStartupConflict
+			}
+			recovered = true
+		default:
+			return c, ErrStartupConflict
+		}
 	}
 	if len(c.EventOutbox) >= MaxEventOutbox {
 		return c, ErrStartupCapacity
@@ -64,11 +88,22 @@ func (s *Store) AdoptStartup(selection configref.Selection) (Committed, error) {
 	if err != nil {
 		return c, err
 	}
+	if selection.Recovery != nil && !recovered {
+		// Before adoption, the live baseline must still match the prepared
+		// known-good snapshot. After adoption the exact durable receipt and
+		// unchanged public revision are the fence; do not depend on a failed
+		// candidate payload remaining readable in order to recover from it.
+		before, _ := json.Marshal(c.Config)
+		expected, _ := json.Marshal(snapshot.Config)
+		if !bytes.Equal(before, expected) {
+			return c, ErrStartupConflict
+		}
+	}
 	var eventID [16]byte
 	if _, err := rand.Read(eventID[:]); err != nil {
 		return c, err
 	}
-	next := Committed{StoreID: c.StoreID, Revision: c.Revision + 1, Config: snapshot.Config, Startup: &configref.Adoption{Selection: selection, Revision: c.Revision + 1}}
+	next := Committed{StoreID: c.StoreID, Revision: c.Revision + 1, Config: snapshot.Config, Startup: &configref.Adoption{Selection: selection.Clone(), Revision: c.Revision + 1, Recovered: recovered}}
 	next.EventOutbox = append([]ChangeEvent(nil), c.EventOutbox...)
 	next.EventOutbox = append(next.EventOutbox, ChangeEvent{ID: hex.EncodeToString(eventID[:]), Type: "startup_selected", Revision: next.Revision, ObservedAt: time.Now().UTC()})
 	if err := s.Save(next); err != nil {

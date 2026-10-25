@@ -72,11 +72,14 @@ func validTime(t time.Time) bool {
 }
 
 func validateState(state State) error {
+	if err := validateConfigurationState(state); err != nil {
+		return err
+	}
 	if state.Version != 1 || !validTime(state.ChangedAt) {
 		return errors.New("invalid release journal version or timestamp")
 	}
 	switch state.Operation {
-	case "empty", "initialize", "prepare", "begin-boot", "confirm", "cancel", "rollback", "boot-failed", "boot-rollback":
+	case "empty", "initialize", "prepare", "prepare-rollback", "begin-boot", "confirm", "cancel", "rollback", "boot-failed", "boot-rollback":
 	default:
 		return errors.New("invalid release journal operation")
 	}
@@ -340,6 +343,17 @@ func (s *Store) Initialize(ctx context.Context, ref Ref) (State, error) {
 // Prepare accepts a future boot candidate, but leaves Active unchanged.
 // expectedGeneration is a required compare-and-swap fence, including zero.
 func (s *Store) Prepare(ctx context.Context, ref Ref, expectedGeneration uint64, options PrepareOptions) (State, error) {
+	return s.prepare(ctx, ref, expectedGeneration, options, false)
+}
+
+// PrepareRollback queues the known previous runtime as a new configuration
+// trial. It never immediately switches an already confirmed pair or lowers
+// either watermark. The coordinator must preflight both supplied snapshots.
+func (s *Store) PrepareRollback(ctx context.Context, expectedGeneration uint64, options PrepareOptions) (State, error) {
+	return s.prepare(ctx, Ref{}, expectedGeneration, options, true)
+}
+
+func (s *Store) prepare(ctx context.Context, ref Ref, expectedGeneration uint64, options PrepareOptions, rollback bool) (State, error) {
 	unlock, err := s.acquire(ctx)
 	if err != nil {
 		return State{}, err
@@ -355,7 +369,17 @@ func (s *Store) Prepare(ctx context.Context, ref Ref, expectedGeneration uint64,
 	if state.Pending != nil || state.Attempt != nil {
 		return State{}, ErrBusy
 	}
-	if ref.Sequence <= state.HighWatermark {
+	operation := "prepare"
+	if rollback {
+		if state.Previous == nil {
+			return State{}, ErrNoFallback
+		}
+		if options.Startup == nil {
+			return State{}, ErrConfigurationRequired
+		}
+		ref = *state.Previous
+		operation = "prepare-rollback"
+	} else if ref.Sequence <= state.HighWatermark {
 		return State{}, ErrDowngrade
 	}
 	if options.MaxAttempts == 0 {
@@ -380,12 +404,18 @@ func (s *Store) Prepare(ctx context.Context, ref Ref, expectedGeneration uint64,
 		return State{}, err
 	}
 	defer image.Close()
-	state, err = s.next(state, "prepare")
+	pending := &Pending{Release: ref, MaxAttempts: options.MaxAttempts}
+	if err := prepareStartup(&state, pending, options); err != nil {
+		return State{}, err
+	}
+	state, err = s.next(state, operation)
 	if err != nil {
 		return State{}, err
 	}
-	state.Pending = &Pending{Release: ref, MaxAttempts: options.MaxAttempts}
-	state.HighWatermark = ref.Sequence
+	state.Pending = pending
+	if ref.Sequence > state.HighWatermark {
+		state.HighWatermark = ref.Sequence
+	}
 	if err = s.commit(state); err != nil {
 		return State{}, err
 	}
@@ -428,9 +458,11 @@ func (s *Store) BeginBoot(ctx context.Context, bootID string) (Selection, error)
 					number = state.Attempt.Number + 1
 				} else {
 					state.Previous = state.Active
+					state.PreviousStartup = cloneStartup(state.Pending.Fallback)
 				}
 				active := state.Pending.Release
 				state.Active = &active
+				state.Startup = cloneStartup(state.Pending.Startup)
 				state.Attempt = &Attempt{BootID: bootID, Token: token, Number: number, StartedAt: s.now().UTC()}
 				state, err = s.next(state, "begin-boot")
 				if err != nil {
@@ -465,6 +497,14 @@ func (s *Store) BeginBoot(ctx context.Context, bootID string) (Selection, error)
 // Confirm records caller-observed health of exactly this active trial. There
 // is no "confirm latest" shortcut: stale boot IDs, tokens and digests fail.
 func (s *Store) Confirm(ctx context.Context, bootID, token, digest string) (State, error) {
+	return s.confirm(ctx, bootID, token, digest, nil)
+}
+
+func (s *Store) ConfirmConfiguration(ctx context.Context, bootID, token, digest string, proof ConfigurationConfirmation) (State, error) {
+	return s.confirm(ctx, bootID, token, digest, &proof)
+}
+
+func (s *Store) confirm(ctx context.Context, bootID, token, digest string, proof *ConfigurationConfirmation) (State, error) {
 	unlock, err := s.acquire(ctx)
 	if err != nil {
 		return State{}, err
@@ -475,6 +515,16 @@ func (s *Store) Confirm(ctx context.Context, bootID, token, digest string) (Stat
 		return State{}, err
 	}
 	if state.Attempt == nil || state.Pending == nil || state.Active == nil || state.Attempt.BootID != bootID || state.Attempt.Token != token || state.Active.Digest != digest {
+		return State{}, ErrStale
+	}
+	if state.Startup != nil {
+		if proof == nil {
+			return State{}, ErrConfigurationRequired
+		}
+		if proof.Adoption.Validate(state.ConfigStoreID, proof.Revision) != nil || proof.Adoption.Recovered || !proof.Adoption.Selection.Equal(*state.Startup) || proof.Revision != proof.Adoption.Revision {
+			return State{}, ErrStale
+		}
+	} else if proof != nil {
 		return State{}, ErrStale
 	}
 	state, err = s.next(state, "confirm")
@@ -517,6 +567,7 @@ func (s *Store) CancelPending(ctx context.Context, expectedGeneration uint64) (S
 		return State{}, errors.New("no pending release")
 	}
 	canceled := state.Pending.Release
+	canceledStartup := cloneStartup(state.Pending.Startup)
 	state, err = s.next(state, "cancel")
 	if err != nil {
 		return State{}, err
@@ -525,7 +576,7 @@ func (s *Store) CancelPending(ctx context.Context, expectedGeneration uint64) (S
 	// An empty-store candidate has no baseline. Retain an explicit failure
 	// record instead of manufacturing a healthy active release.
 	if state.Active == nil {
-		state.LastFailure = &Failure{Release: canceled, Reason: "pending initial release canceled", At: s.now().UTC()}
+		state.LastFailure = &Failure{Release: canceled, Startup: canceledStartup, Reason: "pending initial release canceled", At: s.now().UTC()}
 	}
 	if err = s.commit(state); err != nil {
 		return State{}, err
@@ -551,6 +602,9 @@ func (s *Store) Rollback(ctx context.Context, expectedGeneration uint64, reason 
 	}
 	if state.Generation != expectedGeneration {
 		return State{}, ErrStale
+	}
+	if state.ConfigStoreID != "" && state.Attempt == nil {
+		return State{}, ErrConfigurationRequired
 	}
 	if state.Pending != nil && state.Attempt == nil {
 		return State{}, ErrBusy
@@ -612,8 +666,11 @@ func (s *Store) failBootState(state State, reason string) (State, error) {
 		return state, ErrStale
 	}
 	state.LastFailure = &Failure{Release: *state.Active, BootID: state.Attempt.BootID, Reason: reason, At: s.now().UTC()}
+	state.LastFailure.Startup = cloneStartup(state.Startup)
 	state.Active = state.Previous
+	state.Startup = cloneStartup(state.PreviousStartup)
 	state.Previous = nil
+	state.PreviousStartup = nil
 	state.Pending = nil
 	state.Attempt = nil
 	operation := "boot-failed"

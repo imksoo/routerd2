@@ -270,3 +270,9 @@ SIGKILL, preservation of later commits across whole-daemon restarts, unconfirmed
 restart rollback, a subsequent selection and stable lifecycle events. It runs
 without an external NIC and does not qualify signed runtime/configuration-pair
 fallback or physical hardware.
+
+The fixed `daemon-startup-recovery` suite exercises exact conditional recovery
+before and after candidate adoption, removal of the failed candidate snapshot,
+replay across daemon restarts, preservation of later commits and stable events.
+This is a host-mode real daemon inside a disposable guest namespace; it does not
+qualify the signed PID 1 pair loader or write-time power-cut behavior.

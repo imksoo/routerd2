@@ -332,7 +332,7 @@ func Run(parent context.Context, options Options) error {
 
 func normalize(o Options) (Options, error) {
 	if o.Startup != nil {
-		selected := *o.Startup
+		selected := o.Startup.Clone()
 		if err := selected.Validate(); err != nil {
 			return o, err
 		}

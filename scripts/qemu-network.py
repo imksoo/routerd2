@@ -70,6 +70,13 @@ SUITES = {
         "commands": True,
         "description": "explicit startup adoption, generation fencing, later commits and restart rollback",
     },
+    "daemon-startup-recovery": {
+        "package": "./internal/integration", "binary": "daemon.test",
+        "test": "TestDaemonConditionalStartupRecovery",
+        "marker": "ROUTERD_STARTUP_RECOVERY_DAEMON_TEST", "timeout": 150,
+        "commands": True,
+        "description": "conditional startup recovery before/after candidate adoption and durable replay",
+    },
     "daemon-eventrule": {
         "package": "./internal/integration", "binary": "daemon.test",
         "test": "TestDaemonEventRuleDurabilityAndLifecycle",

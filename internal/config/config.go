@@ -319,7 +319,7 @@ func (s *Store) writeRecord(name string, c Committed) error {
 	}
 	if err == nil && current.Startup != nil {
 		old := current.Startup
-		if c.Startup == nil || c.Startup.Selection.Generation < old.Selection.Generation || c.Startup.Selection.Generation == old.Selection.Generation && *c.Startup != *old {
+		if c.Startup == nil || c.Startup.Selection.Generation < old.Selection.Generation || c.Startup.Selection.Generation == old.Selection.Generation && !c.Startup.Equal(*old) {
 			return errors.New("configuration write cannot forget or alter adopted startup generation")
 		}
 	}

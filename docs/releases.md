@@ -184,3 +184,28 @@ from an unconfirmed signed userland attempt to its baseline. Neither gate proves
 bootloader fallback, physical power-loss durability or kernel/rootfs switching.
 See the [release store contract](../internal/release/README.md) and
 [PID 1 gate](../internal/releaseboot/testdata/README.md) for exact boundaries.
+
+## Runtime/configuration journal primitives (not an activated boot flow)
+
+The internal release store can prepare an explicit `Startup` selection with a
+`KnownGood` configuration reference. It publishes the candidate runtime, exact
+configuration intent and conditional fallback in one current-generation switch.
+Configuration store identity and candidate/recovery generation reservations
+survive cancellation and failure. The release store validates reference shape
+and transaction coherence; the coordinator must verify the snapshots, target
+compatibility and live configuration revision before invoking it.
+
+`BeginBoot` keeps the same intent across exec handoff and bounded attempts.
+`FailBoot` selects the previous runtime and its prepared conditional recovery
+together. A paired trial cannot use runtime-only confirmation:
+`ConfirmConfiguration` requires the exact adoption receipt and unchanged actual
+configuration revision. It is a caller-observed assertion, not an internal
+health probe. `PrepareRollback` queues a new paired trial for the known previous
+runtime, keeping both high watermarks; direct confirmed-pair rollback is refused.
+
+These are library/state-machine primitives. There are no corresponding CLI or
+SSH prepare flags yet, and the current appliance command explicitly refuses a
+selected paired intent rather than booting its runtime without its configuration.
+The coordinated loader, trial commit fence, profile/kernel/state compatibility
+checks and full runtime/configuration health confirmation remain to be wired
+and accepted. Existing runtime-only prototype gates do not qualify this flow.

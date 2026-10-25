@@ -44,6 +44,9 @@ func bootConfigured(path string, b runtimeconfig.Boot) error {
 		return err
 	}
 	defer selection.Image.Close()
+	if selection.State.Startup != nil {
+		return errors.New("paired runtime/configuration boot requires the coordinated loader and trial fence; not activated by the current command")
+	}
 	selected, err := selection.Image.Entrypoint().Stat()
 	if err != nil {
 		return err

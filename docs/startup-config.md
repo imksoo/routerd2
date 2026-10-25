@@ -99,6 +99,33 @@ with uncertain durability. Retry the same selection: the journal will contain
 the complete previous or adopted record and a consumed generation is not applied
 twice. No compensating write silently rewinds adoption after publication.
 
+## Conditional fallback to a prepared known-good configuration
+
+A recovery selection contains a `recovery` fence with `failed_generation` and
+`failed_snapshot`, in addition to its own new generation, baseline
+`expected_revision` and known-good `snapshot`. It permits exactly two states:
+
+- Before candidate adoption, the journal is still at the prepared baseline
+  revision, has not consumed the failed generation, and its operator document
+  exactly matches the verified known-good snapshot.
+- After candidate adoption, the journal contains that exact failed generation,
+  expected revision and source reference, with no later public revision or
+  unconfirmed commit. Its durable adoption receipt authorizes recovery; reading
+  the failed candidate snapshot again is unnecessary.
+
+Anything else is a conflict, including a later operator commit. This is not an
+open-ended allowed revision range. Both branches adopt the known-good document
+as a new public revision. The receipt's `recovered` flag records whether the
+failed candidate had actually been consumed; its adoption revision is checked
+against that branch. Repeating the exact recovery selection preserves later
+commits and its original receipt. Normal Save/Stage cannot change that receipt.
+The supervisor deep-copies the nested fence before fixing the control-only env.
+
+The known-good snapshot is always verified. A missing/corrupt failed candidate
+payload cannot block post-adoption recovery when its exact durable receipt is
+present. Existing identity files, keys, revocation policy, lease authority and
+event history are not imported from either snapshot.
+
 ## Remaining signed-runtime boot integration
 
 The one-time adoption path is implemented for boot with a fixed runtime. Using
