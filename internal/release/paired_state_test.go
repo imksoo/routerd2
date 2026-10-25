@@ -4,6 +4,7 @@ package release
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
@@ -173,5 +174,38 @@ func TestPairedJournalErrorsNeverPublishHalfATuple(t *testing.T) {
 				t.Fatal("unpublished pair changed selected state")
 			}
 		})
+	}
+}
+
+func TestPairedJournalRejectsMismatchedAuthorityAndRecoveryFences(t *testing.T) {
+	s := newTestStore(t)
+	initializeFixture(t, s)
+	next := stageFixture(t, s, "fixture-r2", 2)
+	p, err := s.Prepare(context.Background(), next, 1, pairOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mutate := range []func(*State){
+		func(v *State) { v.ConfigHighWatermark++ },
+		func(v *State) { v.ConfigStoreID = strings.Repeat("e", 32) },
+		func(v *State) { v.Pending.Fallback = nil },
+		func(v *State) { v.Pending.Fallback.Recovery.FailedGeneration-- },
+		func(v *State) { v.Pending.Fallback.ExpectedRevision++ },
+	} {
+		var bad State
+		if err := json.Unmarshal(raw, &bad); err != nil {
+			t.Fatal(err)
+		}
+		mutate(&bad)
+		if err := s.commit(bad); err == nil {
+			t.Fatal("mismatched configuration tuple was published")
+		}
+		if got := mustState(t, s); !reflect.DeepEqual(got, p) {
+			t.Fatal("refused tuple changed authority")
+		}
 	}
 }

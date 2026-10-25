@@ -4,6 +4,8 @@ package integration
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -35,13 +37,19 @@ func TestDaemonConditionalStartupRecovery(t *testing.T) {
 	}
 	check := func(revision uint64, alias string, selection *configref.Selection, recovered bool) {
 		t.Helper()
+		reported := false
 		until(t, 20*time.Second, func() bool {
 			s := state()
 			link, err := netlink.LinkByName("lo")
 			if err != nil {
 				t.Fatal(err)
 			}
-			return s.Revision == revision && s.Healthy && s.Services != nil && s.Services.Phase == "ready" && s.Services.Revision == revision && link.Attrs().Alias == alias && s.Startup != nil && s.Startup.Selection.Equal(*selection) && s.Startup.Recovered == recovered
+			ok := s.Revision == revision && s.Healthy && s.Services != nil && s.Services.Phase == "ready" && s.Services.Revision == revision && link.Attrs().Alias == alias && s.Startup != nil && s.Startup.Selection.Equal(*selection) && s.Startup.Recovered == recovered
+			if !ok && !reported {
+				reported = true
+				t.Logf("await recovery readiness: revision=%d want=%d healthy=%v alias=%s last=%q journal=%q store=%q rule=%q derived=%q protocol=%q services=%+v", s.Revision, revision, s.Healthy, link.Attrs().Alias, s.LastError, s.EventJournalError, s.EventStoreError, s.EventRuleError, s.DerivedError, s.ProtocolEventError, s.Services)
+			}
+			return ok
 		})
 	}
 	capture := func(revision uint64) config.SnapshotRef {
@@ -66,6 +74,9 @@ func TestDaemonConditionalStartupRecovery(t *testing.T) {
 	f = startFixtureDaemonSelected(t, a, dir, &trial)
 	check(3, "recovery-A", &trial, false)
 	f.stop()
+	if err := os.Remove(filepath.Join(dir, "state", "snapshots", target.Digest+".json")); err != nil {
+		t.Fatal(err)
+	}
 	recovery := configref.Selection{Generation: 21, ExpectedRevision: 2, Snapshot: baseline, Recovery: &configref.Recovery{FailedGeneration: 20, FailedSnapshot: target}}
 	f = startFixtureDaemonSelected(t, a, dir, &recovery)
 	check(4, "recovery-B", &recovery, true)
