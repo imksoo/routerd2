@@ -12251,6 +12251,34 @@
         "Startup/ACK audit, independent bootstrap/full engine/ABI/privilege closure, current OCI/APK/arm64 execution, all remaining work packages and selected physical target acceptance"
       ],
       "full_goal_status": "active"
+    },
+    {
+      "id": "live-event-format-and-declared-state-inspection",
+      "date": "2026-10-25",
+      "status": "partial_live_event_schema_and_declared_six_family_format_acceptance_verified",
+      "code_checkpoint": "5ddf2582dba200e4d6eed5dd6f213d4a47f49f54",
+      "fixture_checkpoint": "7dd1d740ef52a3a32e359c3bb06ad6d7ce27a812",
+      "work_packages": [
+        "CORE-06",
+        "DIST-01"
+      ],
+      "evidence": "docs/evidence/2026-10-25-events-inspection.md",
+      "implemented": [
+        "Actual owned SQLite header/catalog in one SELECT, bounded metadata only, database/lock inode checks before/after, no initialization/cursor/registration/checkpoint/migration or health-cache substitution",
+        "Required DDL authenticated in read-only probe before writable open; operational ancillary-object behavior retained, stricter update qualification requires exact catalog; literal sqlite_ prefix and frozen schema6 catalog digest",
+        "Private fresh control format endpoint outside configuration mutex; real declared-six-family facts checked against active/target declarations for both candidate and fallback in signed preparation fixture; no paired loader activation"
+      ],
+      "validation": [
+        "Required-DDL reader RED1.79s, API compile RED0.42s, control404 RED0.229s, LIKE prefix evasion RED0.058s; focused/related Race pass",
+        "query_only/total_changes/state retention, actual live schema/header modification refusal, lost/replaced paths, closed/cancel/deadline and concurrent event writes; operational core vs exact qualification distinction tested",
+        "Clean whole check/Race/vet/Python30/six static ELF build226.03s, fixture-only final check/build11.85s with same six SHA; Health power initial FAIL preserved, independent logger inode local RED/fix/Race verified; native11 and QEMU signed PID1/ext4 two kernels/two-WAN/event archive/three-boot two-SIGKILL Health recovery pass; no arm64 execution claim"
+      ],
+      "remaining": [
+        "All protocol/engine state inventory, target compiler/kernel/profile and identity/lease/owner/revocation policy; supported operator paired prepare/loader/exact tuple health and bounded fallback",
+        "Corrupt selected runtime fallback before Open, all-state write-time power-cut/ENOSPC/fsync, reference-aware pruning/startup-ACK audit and independent bootstrap/full engine/ABI/privilege closure",
+        "Current OCI/APK/arm64 execution, all plan work packages and selected physical hardware/NIC/performance/long-duration qualification"
+      ],
+      "full_goal_status": "active"
     }
   ],
   "delivery_goal": {

@@ -1,0 +1,13 @@
+{
+  "command": [
+    "go",
+    "test",
+    "./images/health-power-test/guest",
+    "-run",
+    "^TestPowerProbeChecksEachFactoryRoleInode$",
+    "-count=1",
+    "-v"
+  ],
+  "exit_code": 1,
+  "elapsed_seconds": 1.445
+}

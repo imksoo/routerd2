@@ -1,0 +1,12 @@
+{
+  "command": [
+    "go",
+    "test",
+    "-race",
+    "./images/health-power-test/guest",
+    "-count=1",
+    "-v"
+  ],
+  "elapsed_seconds": 3.078,
+  "exit_code": 0
+}

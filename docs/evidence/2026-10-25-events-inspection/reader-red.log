@@ -1,0 +1,11 @@
+=== RUN   TestExistingStoreRejectsChangedRequiredDDLBeforeWritableOpen
+=== RUN   TestExistingStoreRejectsChangedRequiredDDLBeforeWritableOpen/ALTER_TABLE_events_ADD_COLUMN_foreign_owner_TEXT
+    format_reader_test.go:33: changed required schema accepted despite unchanged version
+=== RUN   TestExistingStoreRejectsChangedRequiredDDLBeforeWritableOpen/DROP_INDEX_pending_work
+    format_reader_test.go:33: changed required schema accepted despite unchanged version
+--- FAIL: TestExistingStoreRejectsChangedRequiredDDLBeforeWritableOpen (0.12s)
+    --- FAIL: TestExistingStoreRejectsChangedRequiredDDLBeforeWritableOpen/ALTER_TABLE_events_ADD_COLUMN_foreign_owner_TEXT (0.06s)
+    --- FAIL: TestExistingStoreRejectsChangedRequiredDDLBeforeWritableOpen/DROP_INDEX_pending_work (0.06s)
+FAIL
+FAIL    github.com/imksoo/routerd2/internal/events      0.129s
+FAIL

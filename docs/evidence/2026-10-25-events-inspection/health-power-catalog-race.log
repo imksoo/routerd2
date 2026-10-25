@@ -1,0 +1,52 @@
+=== RUN   TestPowerProbeChecksEachFactoryRoleInode
+=== RUN   TestPowerProbeChecksEachFactoryRoleInode/wrong_supervisor
+=== RUN   TestPowerProbeChecksEachFactoryRoleInode/logger_uses_modules
+=== RUN   TestPowerProbeChecksEachFactoryRoleInode/health_uses_logger
+=== RUN   TestPowerProbeChecksEachFactoryRoleInode/missing_executable
+=== RUN   TestPowerProbeChecksEachFactoryRoleInode/unready
+=== RUN   TestPowerProbeChecksEachFactoryRoleInode/foreign_release
+=== RUN   TestPowerProbeChecksEachFactoryRoleInode/missing_core
+--- PASS: TestPowerProbeChecksEachFactoryRoleInode (0.00s)
+    --- PASS: TestPowerProbeChecksEachFactoryRoleInode/wrong_supervisor (0.00s)
+    --- PASS: TestPowerProbeChecksEachFactoryRoleInode/logger_uses_modules (0.00s)
+    --- PASS: TestPowerProbeChecksEachFactoryRoleInode/health_uses_logger (0.00s)
+    --- PASS: TestPowerProbeChecksEachFactoryRoleInode/missing_executable (0.00s)
+    --- PASS: TestPowerProbeChecksEachFactoryRoleInode/unready (0.00s)
+    --- PASS: TestPowerProbeChecksEachFactoryRoleInode/foreign_release (0.00s)
+    --- PASS: TestPowerProbeChecksEachFactoryRoleInode/missing_core (0.00s)
+=== RUN   TestCompletedWitnessKeepsFullIdentityThroughBothCuts
+=== RUN   TestCompletedWitnessKeepsFullIdentityThroughBothCuts/missing
+=== RUN   TestCompletedWitnessKeepsFullIdentityThroughBothCuts/kind
+=== RUN   TestCompletedWitnessKeepsFullIdentityThroughBothCuts/name
+=== RUN   TestCompletedWitnessKeepsFullIdentityThroughBothCuts/duplicate
+=== RUN   TestCompletedWitnessKeepsFullIdentityThroughBothCuts/zero
+=== RUN   TestCompletedWitnessKeepsFullIdentityThroughBothCuts/digest
+=== RUN   TestCompletedWitnessKeepsFullIdentityThroughBothCuts/position
+=== RUN   TestCompletedWitnessKeepsFullIdentityThroughBothCuts/key
+=== RUN   TestCompletedWitnessKeepsFullIdentityThroughBothCuts/malformed_digest
+--- PASS: TestCompletedWitnessKeepsFullIdentityThroughBothCuts (0.00s)
+    --- PASS: TestCompletedWitnessKeepsFullIdentityThroughBothCuts/missing (0.00s)
+    --- PASS: TestCompletedWitnessKeepsFullIdentityThroughBothCuts/kind (0.00s)
+    --- PASS: TestCompletedWitnessKeepsFullIdentityThroughBothCuts/name (0.00s)
+    --- PASS: TestCompletedWitnessKeepsFullIdentityThroughBothCuts/duplicate (0.00s)
+    --- PASS: TestCompletedWitnessKeepsFullIdentityThroughBothCuts/zero (0.00s)
+    --- PASS: TestCompletedWitnessKeepsFullIdentityThroughBothCuts/digest (0.00s)
+    --- PASS: TestCompletedWitnessKeepsFullIdentityThroughBothCuts/position (0.00s)
+    --- PASS: TestCompletedWitnessKeepsFullIdentityThroughBothCuts/key (0.00s)
+    --- PASS: TestCompletedWitnessKeepsFullIdentityThroughBothCuts/malformed_digest (0.00s)
+=== RUN   TestHistoryWitnessPreservesFullContentAndStableCursor
+=== RUN   TestHistoryWitnessPreservesFullContentAndStableCursor/zero_cursor
+=== RUN   TestHistoryWitnessPreservesFullContentAndStableCursor/duplicate_cursor
+=== RUN   TestHistoryWitnessPreservesFullContentAndStableCursor/missing
+=== RUN   TestHistoryWitnessPreservesFullContentAndStableCursor/duplicate_ID
+=== RUN   TestHistoryWitnessPreservesFullContentAndStableCursor/changed_body
+=== RUN   TestHistoryWitnessPreservesFullContentAndStableCursor/changed_cursor
+--- PASS: TestHistoryWitnessPreservesFullContentAndStableCursor (0.00s)
+    --- PASS: TestHistoryWitnessPreservesFullContentAndStableCursor/zero_cursor (0.00s)
+    --- PASS: TestHistoryWitnessPreservesFullContentAndStableCursor/duplicate_cursor (0.00s)
+    --- PASS: TestHistoryWitnessPreservesFullContentAndStableCursor/missing (0.00s)
+    --- PASS: TestHistoryWitnessPreservesFullContentAndStableCursor/duplicate_ID (0.00s)
+    --- PASS: TestHistoryWitnessPreservesFullContentAndStableCursor/changed_body (0.00s)
+    --- PASS: TestHistoryWitnessPreservesFullContentAndStableCursor/changed_cursor (0.00s)
+PASS
+ok      github.com/imksoo/routerd2/images/health-power-test/guest       1.033s

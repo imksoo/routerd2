@@ -1,0 +1,6 @@
+=== RUN   TestEventFormatAPIUsesActualOwnedDatabaseWithoutHealthCache
+    event_format_test.go:22: unavailable journal invented metadata 404
+--- FAIL: TestEventFormatAPIUsesActualOwnedDatabaseWithoutHealthCache (0.22s)
+FAIL
+FAIL    github.com/imksoo/routerd2/internal/control     0.229s
+FAIL

@@ -1,0 +1,69 @@
+Building dedicated power-cut init/probe and fresh actual command pair...
+Booting produce on the same private disk (no NIC)...
+qemu-produce.log:
+[    2.355343] rtc_cmos PNP0B00:00: setting system clock to 2026-10-25T11:43:12 UTC (1792928592)
+[    2.358317] rtc_cmos PNP0B00:00: alarms up to one day, y3k, 242 bytes nvram, hpet irqs
+[    2.359794] amd_pstate: the _CPC object is not present in SBIOS or ACPI disabled
+[    2.369023] gre: GRE over IPv4 demultiplexer driver
+[    2.370410] NET: Registered PF_INET6 protocol family
+[    2.391774] Segment Routing with IPv6
+[    2.392391] In-situ OAM (IOAM) with IPv6
+[    2.396055] Key type dns_resolver registered
+[    2.398948] IPI shorthand broadcast: enabled
+[    2.444161] sched_clock: Marking stable (2376094605, 67466638)->(2473333210, -29771967)
+[    2.531299] registered taskstats version 1
+[    2.537413] Loading compiled-in X.509 certificates
+[    2.661258] ata5: SATA link down (SStatus 0 SControl 300)
+[    2.665361] ata2: SATA link down (SStatus 0 SControl 300)
+[    2.666032] ata6: SATA link down (SStatus 0 SControl 300)
+[    2.666353] ata1: SATA link down (SStatus 0 SControl 300)
+[    2.666752] ata4: SATA link down (SStatus 0 SControl 300)
+[    2.667102] ata3: SATA link down (SStatus 0 SControl 300)
+[    3.094203] tsc: Refined TSC clocksource calibration: 3293.798 MHz
+[    3.095291] clocksource: tsc: mask: 0xffffffffffffffff max_cycles: 0x2f7a696fa44, max_idle_ns: 440795303741 ns
+[    3.098282] clocksource: Switched to clocksource tsc
+[   12.678986] Freeing initrd memory: 62424K
+[   12.750414] Loaded X.509 cert 'alpinelinux.org: Alpine Linux kernel key: PUBLIC_CERTIFICATE_ID_OMITTED'
+[   12.786909] Demotion targets for Node 0: null
+[   12.790022] Key type .fscrypt registered
+[   12.790229] Key type fscrypt-provisioning registered
+[   13.017155] Freeing unused kernel image (initmem) memory: 3008K
+[   13.018322] Write protecting the kernel read-only data: 26624k
+[   13.025946] Freeing unused kernel image (text/rodata gap) memory: 1672K
+[   13.027468] Freeing unused kernel image (rodata/data gap) memory: 304K
+[   13.029420] rodata_test: all tests were successful
+[   13.030740] Run /init as init process
+[   13.631887] virtio_blk virtio0: 2/0/0 default/read/poll queues
+[   13.652270] virtio_blk virtio0: [vda] 524288 512-byte logical blocks (268 MB/256 MiB)
+[   14.625257] EXT4-fs (vda): mounted filesystem a2b28900-7a82-4c5f-bb90-fdbba1570e5a r/w with ordered data mode. Quota mode: none.
+[   15.607384] EXT4-fs (vda): unmounting filesystem a2b28900-7a82-4c5f-bb90-fdbba1570e5a.
+ROUTERD_HEALTH_POWER_SETUP phase=produce seed_mounted=false product_mount_required=true
+[   16.194202] EXT4-fs (vda): mounted filesystem a2b28900-7a82-4c5f-bb90-fdbba1570e5a r/w with ordered data mode. Quota mode: none.
+{"time":"2026-10-25T11:43:26.385358774Z","level":"INFO","msg":"persistent state volume ready","device":"/dev/vda","target":"/var/lib/routerd","filesystem":"ext4","uuid":"a2b28900-7a82-4c5f-bb90-fdbba1570e5a","already_mounted":false}
+{"timestamp":"2026-10-25T11:43:26.466647923Z","module":"supervisor","pid":1,"generation":0,"level":"INFO","message":"worker started","attributes":{"generation":1,"module":"logging","pid":522},"producer_epoch":"0a3c9db1c090213f44bb34aeef7eb16b","producer_sequence":1,"delivery":"console_fallback"}
+{"timestamp":"2026-10-25T11:43:26.534932501Z","module":"supervisor","pid":1,"generation":0,"level":"INFO","message":"worker started","attributes":{"generation":1,"module":"network","pid":523},"producer_epoch":"0a3c9db1c090213f44bb34aeef7eb16b","producer_sequence":2,"delivery":"console_fallback"}
+{"timestamp":"2026-10-25T11:43:26.55516124Z","module":"supervisor","pid":1,"generation":0,"level":"INFO","message":"worker started","attributes":{"generation":1,"module":"control","pid":524},"producer_epoch":"0a3c9db1c090213f44bb34aeef7eb16b","producer_sequence":3,"delivery":"console_fallback"}
+{"timestamp":"2026-10-25T11:43:26.593515024Z","module":"supervisor","pid":1,"generation":0,"level":"INFO","message":"worker started","attributes":{"generation":1,"module":"management","pid":525},"producer_epoch":"0a3c9db1c090213f44bb34aeef7eb16b","producer_sequence":4,"delivery":"console_fallback"}
+{"timestamp":"2026-10-25T11:43:28.026906739Z","module":"management","pid":525,"generation":1,"level":"INFO","message":"SSH disabled","attributes":{"reason":"listener and authorized keys are required"},"producer_epoch":"9e0f44c5624ba302b96ee57804f777ca","producer_sequence":1,"delivery":"console_fallback"}
+ROUTERD_READY
+{"time":"2026-10-25T11:44:51.372473426Z","level":"ERROR","msg":"worker stopped","error":"health publication: durable event storage capacity exhausted"}
+ROUTERD_READY
+{"time":"2026-10-25T11:44:53.282978985Z","level":"ERROR","msg":"worker stopped","error":"health publication: durable event storage capacity exhausted"}
+ROUTERD_READY
+{"time":"2026-10-25T11:44:54.890498005Z","level":"ERROR","msg":"worker stopped","error":"health publication: durable event storage capacity exhausted"}
+ROUTERD_READY
+{"time":"2026-10-25T11:44:56.508622408Z","level":"ERROR","msg":"worker stopped","error":"health publication: durable event storage capacity exhausted"}
+ROUTERD_READY
+{"time":"2026-10-25T11:44:58.476320758Z","level":"ERROR","msg":"worker stopped","error":"health publication: durable event storage capacity exhausted"}
+ROUTERD_READY
+{"time":"2026-10-25T11:45:01.793200245Z","level":"ERROR","msg":"worker stopped","error":"health publication: durable event storage capacity exhausted"}
+ROUTERD_READY
+{"time":"2026-10-25T11:45:06.59760084Z","level":"ERROR","msg":"worker stopped","error":"health publication: durable event storage capacity exhausted"}
+ROUTERD_READY
+{"time":"2026-10-25T11:45:14.52926084Z","level":"ERROR","msg":"worker stopped","error":"health publication: durable event storage capacity exhausted"}
+ROUTERD_READY
+{"time":"2026-10-25T11:45:28.44318148Z","level":"ERROR","msg":"worker stopped","error":"health publication: durable event storage capacity exhausted"}
+ROUTERD_READY
+{"time":"2026-10-25T11:45:55.632379879Z","level":"ERROR","msg":"worker stopped","error":"health publication: durable event storage capacity exhausted"}
+ROUTERD_HEALTH_POWER_FAIL: actual product startup: context deadline exceeded (last: actual appliance PID 1 not ready)
+produce guest failed

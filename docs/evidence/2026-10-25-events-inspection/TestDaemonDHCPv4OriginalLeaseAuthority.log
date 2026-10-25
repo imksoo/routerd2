@@ -1,0 +1,8 @@
+=== RUN   TestDaemonDHCPv4OriginalLeaseAuthority
+    dhcp4_authority_test.go:34: === RUN   TestDaemonDHCPv4OriginalLeaseAuthority
+            dhcp4_authority_test.go:37: real DHCP worker/independent server -> original BOOT grant -> kernel address/default route -> TCP/UDP/PCAP; renewal, SIGSTOP expiry, duplicate retry, worker/control SIGKILL, stale generation and foreign address preservation passed
+            dhcp4_authority_test.go:37: ROUTERD_DHCP4_AUTHORITY_TEST_PASS
+        --- PASS: TestDaemonDHCPv4OriginalLeaseAuthority (8.26s)
+        PASS
+--- PASS: TestDaemonDHCPv4OriginalLeaseAuthority (9.30s)
+PASS

@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "purpose": "health-queue-three-boot-two-SIGKILL-recovery",
+  "product_commit": "5ddf2582dba200e4d6eed5dd6f213d4a47f49f54",
+  "initializer_sha256": "682ced88e6562bb3e4c65b89a32db595e1430c62eca47c3c0f6726d9a4eb1a16",
+  "binary_sha256": {
+    "/test/bin/routerd": "a9a0e5f032c962c00eac1ea375ddc4834812b036c01f11c6622fd8f7b0640142",
+    "/test/bin/routerd-modules": "43ea080ac4159fa58eece7e1ce073d7ff6b8e040abb7bc92b57d1b2bdc3fa3b8",
+    "/test/bin/routerd-logging": "a866631f93fa0ef48737f996ca8deb116c2687f414075b688fa11cae4ef9497a"
+  },
+  "kernel_sha256": "17fbd3efd16f2e7cb1b945f06423b37399ba7d5ac8cdd3665e7f13f363500e85",
+  "source_initramfs_sha256": "c6b0ac5a7e6dc64a186ab595586f27bed87440083dc7a13cf0db9df8a3d2c729",
+  "source_image_manifest_sha256": "a1df58dc193d6f6f5a361b9b630e9fb106b76a3e3089239da2185f812d265b43",
+  "guest_memory_mib": 1024,
+  "guest_vcpus": 2,
+  "disk_bytes": 268435456,
+  "state_persistence": "ext4-virtio-block-regular-file",
+  "host_block_devices_used": false,
+  "host_filesystem_mounts_used": false,
+  "guest_external_network_interfaces": false,
+  "power_loss_scope": "guest VM process/device memory only; host filesystem and physical power loss are not emulated",
+  "witness_transport": "UART to host, then test-only initramfs file; no guest witness fsync at cut points",
+  "phases": [
+    {
+      "phase": "produce",
+      "result": "failed",
+      "error": "produce guest failed",
+      "duration_seconds": 167.1,
+      "qemu_exit_status_before_cleanup": null
+    }
+  ],
+  "result": "failed",
+  "error": "produce guest failed",
+  "final_disk_sha256": "146287078ce9a58d4f3239ff159914b6cade6316a9a946f4d3eb9bdf1255a2f8"
+}

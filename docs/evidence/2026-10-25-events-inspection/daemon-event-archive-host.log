@@ -1,0 +1,17 @@
+Extracting appliance kernel modules for the isolated test image...
+Building the test-only init and daemon-event-archive test binary...
+Booting the daemon-event-archive test guest (no external network interface)...
+=== RUN   TestDaemonEventArchiveAndCapacity
+    bgp_test.go:194: === RUN   TestDaemonEventArchiveAndCapacity
+            event_archive_test.go:150: actual cold gzip independently matches complete live/export content; archive write failure and recovery exposed; control SIGKILL preserved original compressed body/digest/cursor
+            event_archive_test.go:150: actual EventRule and Derived outputs compacted; injected write failure stayed unhealthy across inspection; recovery and control SIGKILL preserved original dedup identity
+            event_archive_test.go:151: actual CLI exported and independently matched 17 complete records through cursor 17, verified offline and preserved source producer authority
+        --- PASS: TestDaemonEventArchiveAndCapacity (22.58s)
+        PASS
+--- PASS: TestDaemonEventArchiveAndCapacity (22.77s)
+PASS
+ROUTERD_EVENT_ARCHIVE_DAEMON_TEST_PASS
+[   32.337149] ACPI: PM: Preparing to enter system sleep state S5
+[   32.339853] reboot: Power down
+
+QEMU live event capacity inspection and private verified CLI history export: PASS (34.03s)

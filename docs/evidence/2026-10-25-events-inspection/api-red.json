@@ -1,0 +1,15 @@
+{
+  "source_commit": "88d078cd51f06b0032b801e60e392b88150f183e",
+  "source_dirty": true,
+  "command": [
+    "go",
+    "test",
+    "./internal/events",
+    "-run",
+    "TestFormatInspection|TestOperationalOpenChecks",
+    "-count=1"
+  ],
+  "exit_code": 1,
+  "expected_failure": true,
+  "elapsed_seconds": 0.42
+}

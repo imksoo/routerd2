@@ -1,0 +1,8 @@
+=== RUN   TestDaemonStoppedHealthHistoryWithoutReactivation
+    bgp_test.go:194: === RUN   TestDaemonStoppedHealthHistoryWithoutReactivation
+            health_retirement_test.go:290: cycle 1: 1 original observations delivered once while source stayed declared and producer stayed stopped; control replaced=true; ownership retained for fresh reactivation
+            health_retirement_test.go:290: cycle 2: 2 original observations delivered once while source stayed declared and producer stayed stopped; control replaced=false; ownership retained for fresh reactivation
+        --- PASS: TestDaemonStoppedHealthHistoryWithoutReactivation (3.20s)
+        PASS
+--- PASS: TestDaemonStoppedHealthHistoryWithoutReactivation (4.24s)
+PASS

@@ -6,7 +6,15 @@
 **継続ゴール:** 全残実装・必要試験・対象実機での利用可能性の受入まで進める。
 部分checkpointでは完了しない。
 
-最新product checkpointは `cfced2e`。SSH host identityのread-only検査とatomic no-replace初回保存を実装した。
+最新product checkpointは `5ddf258`。実event SQLiteのheader/catalogを同じowned connectionの一つのSELECTで検査する`InspectFormat`とfreshなprivate control APIを実装した。
+DB/lock inodeの消失・置換、version/header/必須DDL変更を拒否する。通常openはread-only probeで必須DDLを認証し、更新資格は追加trigger等を含め全catalog一致を要求する。row/cursor/registration/migrationは変更しない。
+LIKEのunderscore wildcardによる追加table見逃しをREDで再現し、literalなsqlite_ prefixへ修正。schema6の13 object digestを固定し、DDLとversionのずれを検出する。
+実PID1 prepare fixtureで、宣言済み6 familyの実観測をcandidate/fallback双方のformat checkerへ接続した。protocol固有stateや全target policy・paired loader/health完成ではない。
+全体check/Race/vet/Python30/6 ELF build226.03秒、native11 gateはPASS。Health power初回はfixtureの独立logger inode照合誤りでFAIL。局所REDからfixture `7dd1d74` で修正後、全体check/build11.85秒PASS、製品6 SHAは不変。
+QEMU signed PID1/ext4二kernel/二WAN/event archiveと、修正fixtureの三boot二power cutはPASS。旧FAILは保持し、同一source一括受入とは扱わない。
+[実event format検査の証跡・境界・残作業](evidence/2026-10-25-events-inspection.md) を参照。全残計画・実機受入は未完了、全体ゴールはactive。
+
+前回product checkpointは `cfced2e`。SSH host identityのread-only検査とatomic no-replace初回保存を実装した。
 owner-only0400/0600・単一link・64KiB以内・一つの非暗号化keyを要求する。新規keyはtemporary/file sync後に公開し、並行creatorも実winnerを返す。公開後errorでは正式fileを消さずuncertainとして扱う。
 networkで使う全component nofollow/trusted非writable ancestorのwalkを`internal/statefs`へ抽出し、双方で共有する。既存OpenSSH encodingは変換しない。private key hash/bodyはinspectionへ返さない。
 reader/APIとstorage witnessのRED、process-exit5境界、再実行、並行作成、実signer署名を検査。全体check/Race/vet/Python30/6 ELF build242.32秒、native10 gateとQEMU4 gateはPASS。
