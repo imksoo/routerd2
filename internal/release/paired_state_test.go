@@ -22,7 +22,7 @@ func TestPairedPrepareBootAndConditionalFallbackAreOneGeneration(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore(t)
 	first := initializeFixture(t, s)
-	second := stageFixture(t, s, "paired-r2", 2)
+	second := stageFixture(t, s, "fixture-r2", 2)
 	opts := pairOptions()
 	p, err := s.Prepare(ctx, second, 1, opts)
 	if err != nil {
@@ -66,7 +66,7 @@ func TestPairedConfirmationRequiresExactReceiptAndPreparedRollback(t *testing.T)
 	ctx := context.Background()
 	s := newTestStore(t)
 	first := initializeFixture(t, s)
-	second := stageFixture(t, s, "paired-r2", 2)
+	second := stageFixture(t, s, "fixture-r2", 2)
 	opts := pairOptions()
 	if _, err := s.Prepare(ctx, second, 1, opts); err != nil {
 		t.Fatal(err)
@@ -113,8 +113,8 @@ func TestPairedCancelBurnsGenerationsAndRejectsUnpairedOrForeignPlans(t *testing
 	ctx := context.Background()
 	s := newTestStore(t)
 	initializeFixture(t, s)
-	second := stageFixture(t, s, "paired-r2", 2)
-	third := stageFixture(t, s, "paired-r3", 3)
+	second := stageFixture(t, s, "fixture-r2", 2)
+	third := stageFixture(t, s, "fixture-r3", 3)
 	opts := pairOptions()
 	p, err := s.Prepare(ctx, second, 1, opts)
 	if err != nil {
@@ -150,7 +150,7 @@ func TestPairedJournalErrorsNeverPublishHalfATuple(t *testing.T) {
 		t.Run(point, func(t *testing.T) {
 			s := newTestStore(t)
 			initializeFixture(t, s)
-			next := stageFixture(t, s, "paired-r2", 2)
+			next := stageFixture(t, s, "fixture-r2", 2)
 			before := mustState(t, s)
 			cut := errors.New("paired publication interruption")
 			s.fault = func(at string) error {
