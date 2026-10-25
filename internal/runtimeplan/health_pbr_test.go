@@ -42,7 +42,7 @@ func TestHealthPBRProjectionFailureFallbackAndRecovery(t *testing.T) {
 		if got != primary || !backup || !probe || len(n.applied.PolicyRules) != 1 || n.applied.PolicyRules[0].Table != 100 || n.applied.PolicyRules[0].Source != "192.168.10.0/24" {
 			t.Fatal("PBR projection or independent probe route changed", n.applied)
 		}
-		if r.revision != 1 {
+		if r.config.revision != 1 {
 			t.Fatal("health rewrote operator revision")
 		}
 	}

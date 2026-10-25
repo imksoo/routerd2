@@ -353,7 +353,7 @@ func TestBFDCacheGrantQueriesReadOnlyCompiledRecipientReferences(t *testing.T) {
 	owner := r.bindings["service.router"]
 	owner.instance.Config = json.RawMessage(`invalid legacy/full config`)
 	r.bindings["service.router"] = owner
-	r.current.Services = nil
+	r.config.plan.Native.Services = nil
 	r.mu.Unlock()
 	view, err := r.BFDProjection("service.router", digest, 1)
 	if err != nil || len(view.Peers) != 1 || !view.Peers["192.0.2.2"].Up {

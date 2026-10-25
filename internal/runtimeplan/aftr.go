@@ -164,7 +164,7 @@ func (r *Runtime) AFTRInput(ctx context.Context, name string) (aftr.Input, error
 		return aftr.Input{}, errors.New("no committed AFTR consumer")
 	}
 	var service serviceconfig.Service
-	for _, s := range r.current.Services {
+	for _, s := range r.config.plan.Native.Services {
 		if s.ModuleName() == name {
 			service = s
 			break
@@ -173,7 +173,7 @@ func (r *Runtime) AFTRInput(ctx context.Context, name string) (aftr.Input, error
 	if service.DSLite == nil {
 		return aftr.Input{}, errors.New("missing DS-Lite intent")
 	}
-	in, err := aftrDependencies(r.current, service, r.effectiveRecordsLocked(time.Now()), b.digest, time.Now())
+	in, err := aftrDependencies(r.config.plan.Native, service, r.effectiveRecordsLocked(time.Now()), b.digest, time.Now())
 	if err != nil {
 		return in, err
 	}

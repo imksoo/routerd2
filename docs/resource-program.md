@@ -4,6 +4,22 @@ routerd2 の設定は `schema_version: 2` の **ResourceProgram** である。
 保存する正本は operator が編集した resource の宣言で、kernel の観測値や生成済み worker 設定ではない。
 resource の ID、依存関係、owner、provenance と入力順を、そのまま candidate・running・確認付き commit の復旧用設定に保持する。
 
+## 内部での設定の所有と投影
+
+controlが受理した設定は、その設定世代の間は読み取り専用とする。compilerとruntimeは
+同じ宣言を参照し、内部関数間の受け渡しのためにJSONへ変換して複製しない。
+設定変更では新しい宣言を渡す。HTTP/worker境界では従来どおりJSONをdecodeする。
+
+設定受理時に依存graph、出力の所有権、EventRule/DerivedEventのprogramとidentityを
+一度計算する。runtimeは宣言・Plan・digest・revisionを一つのconfiguration値で保持する。
+観測更新の `Plan.Project` と `Plan.Lifecycle` はこのgraphを使い、設定を再コンパイルしない。
+`Project` は選択されたNative入力と各resourceの状態を返す。
+EventRule/DerivedEvent controllerも計算済みprogramを受け取り、同じrevisionとidentityなら
+永続登録を再読しない。DerivedEventの実行期限は更新する。
+
+条件式のduration解析・hold identity計算、観測snapshotの型付き保持、読み取りと
+continuity更新の分離は残っている。通知受理とkernel適用完了の契約も引き続き整理する。
+
 ## 設定例
 
 ```yaml

@@ -78,7 +78,7 @@ func TestDHCPv4OriginalBootGrantReplayMutationAndFinalFence(t *testing.T) {
 	networkAfterRestart := &memoryNetwork{}
 	restarted := New(r.dir, r.stateDir, networkAfterRestart, testSupervisorInstance)
 	restarted.manager = &memoryManager{}
-	if err := restarted.ApplyConfig(ctx, r.revision, r.source); err != nil {
+	if err := restarted.ApplyConfig(ctx, r.config.revision, r.config.source); err != nil {
 		t.Fatal(err)
 	}
 	if err := restarted.Accept(ctx, u); err != nil || len(networkAfterRestart.applied.Routes) != 0 || len(networkAfterRestart.applied.Interfaces[0].Addresses) != 0 {

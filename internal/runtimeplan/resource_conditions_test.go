@@ -150,7 +150,7 @@ func TestConditionalRuntimeStartWithdrawRecover(t *testing.T) {
 	if conditionalRoute(n) || len(m.modules) != 1 || !stoppedBeforeWithdrawal {
 		t.Fatal("unsafe withdrawal order", n.applied, m.modules)
 	}
-	if len(r.source.Resources) != 4 || r.revision != 1 {
+	if len(r.config.source.Resources) != 4 || r.config.revision != 1 {
 		t.Fatal("dynamic change rewrote source or operator revision")
 	}
 	// New generation cannot revive the old Up; it needs a new accepted report.

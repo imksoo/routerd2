@@ -9,7 +9,6 @@ import (
 	"math"
 	"time"
 
-	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/derived"
 	"github.com/imksoo/routerd2/internal/protocol/bfd"
 	"github.com/imksoo/routerd2/internal/protocol/bgpconfig"
@@ -50,19 +49,16 @@ func (r *Runtime) rawDerivedSnapshotLocked(facts resourceprogram.FactSnapshot) (
 		r.ruleIncarnation = hex.EncodeToString(id[:])
 	}
 	now := uint64(clock.BoottimeNanoseconds)
-	scope := identity(clock.BootID, r.supervisorInstance, r.ruleIncarnation, r.revision, r.sourceDigest, r.sourceEpoch)
-	lifecycles, err := facts.Lifecycle(r.source)
-	if err != nil {
-		return derived.Snapshot{}, err
-	}
+	scope := identity(clock.BootID, r.supervisorInstance, r.ruleIncarnation, r.config.revision, r.config.digest, r.sourceEpoch)
+	lifecycles := r.config.plan.Lifecycle(facts)
 	refs := map[string]derived.Reference{}
-	for _, declaration := range r.current.DerivedEvents {
+	for _, declaration := range r.config.plan.Native.DerivedEvents {
 		for _, ref := range declaration.References {
 			refs[ref.Key()] = ref
 		}
 	}
 	byID := map[string]resourceprogram.Resource{}
-	for _, resource := range r.source.Resources {
+	for _, resource := range r.config.source.Resources {
 		byID[resource.ID] = resource
 	}
 	type observed struct {
@@ -90,7 +86,7 @@ func (r *Runtime) rawDerivedSnapshotLocked(facts resourceprogram.FactSnapshot) (
 				module, managed := r.guardStatus[name]
 				record := r.records[name]
 				grant, granted := r.guardGrants[name]
-				if exists && managed && granted && module.Ready && module.Generation == record.Generation && module.Generation == grant.generation && module.ConfigDigest == binding.digest && record.ConfigDigest == binding.digest && grant.revision == r.revision && grant.epoch == record.ProducerEpoch && grant.sequence == record.Sequence && clock.BootID == r.guardBootID && clock.BootID == grant.bootID && now < r.guardUntilNanos {
+				if exists && managed && granted && module.Ready && module.Generation == record.Generation && module.Generation == grant.generation && module.ConfigDigest == binding.digest && record.ConfigDigest == binding.digest && grant.revision == r.config.revision && grant.epoch == record.ProducerEpoch && grant.sequence == record.Sequence && clock.BootID == r.guardBootID && clock.BootID == grant.bootID && now < r.guardUntilNanos {
 					if json.Unmarshal(record.Snapshot, &provider.snapshot) == nil && !provider.snapshot.Stopped && provider.snapshot.BootID == clock.BootID {
 						provider.until = min(provider.snapshot.ExpiresNanos, grant.untilNanos, r.guardUntilNanos)
 						provider.known = provider.snapshot.ObservedNanos <= now && provider.until > now && provider.until > provider.snapshot.ObservedNanos
@@ -120,7 +116,7 @@ func (r *Runtime) rawDerivedSnapshotLocked(facts resourceprogram.FactSnapshot) (
 				record := r.records[name]
 				grant, granted := r.guardGrants[name]
 				applied, matched := r.bgpApplied[name]
-				if exists && managed && granted && grant.bgp != nil && matched && r.appliedHash != "" && module.Ready && module.Generation == record.Generation && grant.generation == record.Generation && record.ConfigDigest == binding.digest && module.ConfigDigest == binding.digest && grant.revision == r.revision && grant.epoch == record.ProducerEpoch && grant.sequence == record.Sequence && clock.BootID == r.guardBootID && clock.BootID == grant.bootID && now < r.guardUntilNanos && applied.identity == grant.bgp.projection {
+				if exists && managed && granted && grant.bgp != nil && matched && r.appliedHash != "" && module.Ready && module.Generation == record.Generation && grant.generation == record.Generation && record.ConfigDigest == binding.digest && module.ConfigDigest == binding.digest && grant.revision == r.config.revision && grant.epoch == record.ProducerEpoch && grant.sequence == record.Sequence && clock.BootID == r.guardBootID && clock.BootID == grant.bootID && now < r.guardUntilNanos && applied.identity == grant.bgp.projection {
 					provider.isBGP, provider.known = true, true
 					provider.bgpSnapshot = grant.bgp.snapshot
 					provider.bgpConfig = target.Service.BGPConfig(r.dir, r.stateDir)
@@ -151,7 +147,7 @@ func (r *Runtime) rawDerivedSnapshotLocked(facts resourceprogram.FactSnapshot) (
 // predicate continuity between sampled reconciliations, without restoring
 // historical values or depending on the lossy logging/event transport.
 func (r *Runtime) observeDerivedLocked(facts resourceprogram.FactSnapshot) error {
-	if len(r.current.DerivedEvents) == 0 {
+	if len(r.config.plan.Native.DerivedEvents) == 0 {
 		r.derivedContinuity = nil
 		return nil
 	}
@@ -161,7 +157,7 @@ func (r *Runtime) observeDerivedLocked(facts resourceprogram.FactSnapshot) error
 	}
 	_, now := snapshot.Timebase()
 	next := map[string]derivedContinuity{}
-	for _, declaration := range r.current.DerivedEvents {
+	for _, declaration := range r.config.plan.Native.DerivedEvents {
 		proof := declaration.Compiled.Proof(snapshot)
 		old := r.derivedContinuity[declaration.ID]
 		if old.epoch == 0 || old.proof.Value != proof.Value || old.proof.Authority != proof.Authority || now < old.lastNow || old.proof.Value != derived.Indeterminate && now >= old.proof.UntilNanos {
@@ -179,35 +175,27 @@ func (r *Runtime) observeDerivedLocked(facts resourceprogram.FactSnapshot) error
 	return nil
 }
 
-func (r *Runtime) DerivedInputs(source config.Document, revision uint64) ([]resourceprogram.DerivedEvent, map[string]derived.Snapshot, error) {
-	encoded, err := json.Marshal(source)
-	if err != nil {
-		return nil, nil, err
-	}
-	sum := sha256.Sum256(encoded)
+func (r *Runtime) DerivedInputs(revision uint64) ([]resourceprogram.DerivedEvent, map[string]derived.Snapshot, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if !r.configured || r.revision != revision || r.sourceDigest != hex.EncodeToString(sum[:]) {
+	if !r.configured || r.config.revision != revision {
 		return nil, nil, nil
 	}
-	if len(r.current.DerivedEvents) == 0 {
+	if len(r.config.plan.Native.DerivedEvents) == 0 {
 		return nil, nil, nil
 	}
-	facts, err := r.conditionFactsLocked(source, revision, time.Now())
+	facts, err := r.conditionFactsLocked(r.config, time.Now())
 	if err != nil {
 		return nil, nil, err
 	}
-	plan, _, err := resourceprogram.Project(source, facts)
-	if err != nil {
-		return nil, nil, err
-	}
+	native, _ := r.config.plan.Project(facts)
 	snapshot, err := r.rawDerivedSnapshotLocked(facts)
 	if err != nil {
 		return nil, nil, err
 	}
 	views := map[string]derived.Snapshot{}
-	for i := range plan.Native.DerivedEvents {
-		declaration := &plan.Native.DerivedEvents[i]
+	for i := range native.DerivedEvents {
+		declaration := &native.DerivedEvents[i]
 		lifecycle := r.ruleContinuity[declaration.ID]
 		declaration.ActiveUntilNanos = lifecycle.Until
 		if lifecycle.Conditional {
@@ -220,5 +208,5 @@ func (r *Runtime) DerivedInputs(source config.Document, revision uint64) ([]reso
 		}
 		views[declaration.ID] = view
 	}
-	return plan.Native.DerivedEvents, views, nil
+	return native.DerivedEvents, views, nil
 }

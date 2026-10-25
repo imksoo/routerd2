@@ -185,7 +185,7 @@ func (r *Runtime) drainVRRPEffects(ctx context.Context, status supervisor.Status
 	}
 	r.installGuardStatusLocked(status, nil)
 	r.fenceVRRPEffectsLocked()
-	p, err := r.projectProgramLocked(r.source, r.revision, r.current, r.effectiveRecordsLocked(time.Now()), time.Now())
+	p, err := r.projectProgramLocked(r.config, r.effectiveRecordsLocked(time.Now()), time.Now())
 	if err != nil {
 		r.finishVRRPEffectsLocked(network.Desired{}, err)
 		r.mu.Unlock()

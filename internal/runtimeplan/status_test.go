@@ -14,7 +14,7 @@ import (
 
 func TestServiceStatusRemainsBoundedAndProvidesDetailAndIssuePages(t *testing.T) {
 	r := New(t.TempDir(), t.TempDir(), &memoryNetwork{}, testSupervisorInstance)
-	r.revision, r.phase = 7, "ready"
+	r.config.revision, r.phase = 7, "ready"
 	large, _ := json.Marshal(map[string]any{"active": true, "routes": strings.Repeat("large route information ", 4096)})
 	for i := 0; i < 128; i++ {
 		name := fmt.Sprintf("service.instance-%d", i)

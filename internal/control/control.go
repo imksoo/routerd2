@@ -23,6 +23,7 @@ import (
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocolevents"
 	"github.com/imksoo/routerd2/internal/release"
+	"github.com/imksoo/routerd2/internal/resourceprogram"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
 )
 
@@ -125,6 +126,7 @@ func (n *NetworkClient) Snapshot(ctx context.Context) (s network.Snapshot, err e
 }
 
 type Engine struct {
+	plan           resourceprogram.Plan
 	mu             sync.Mutex
 	store          *config.Store
 	releaseStore   *release.Store
@@ -178,7 +180,11 @@ func (e *Engine) apply(ctx context.Context, revision uint64, doc config.Document
 	if err != nil {
 		return err
 	}
-	return e.network.Apply(ctx, revision, plan.Native.Network)
+	if err := e.network.Apply(ctx, revision, plan.Native.Network); err != nil {
+		return err
+	}
+	e.plan = plan
+	return nil
 }
 
 // Reconcile deliberately restores only the durable committed revision. A pending

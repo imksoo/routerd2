@@ -15,5 +15,5 @@ type HealthStatus struct {
 func (r *Runtime) Health() HealthStatus {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return HealthStatus{ProjectionGeneration: r.projectionGeneration, Revision: r.revision, Phase: r.phase, LastError: boundedText(r.lastError, 4096), LastErrorTruncated: len(r.lastError) > 4096, InstanceCount: len(r.bindings), RouteIssueCount: len(r.routeIssues)}
+	return HealthStatus{ProjectionGeneration: r.projectionGeneration, Revision: r.config.revision, Phase: r.phase, LastError: boundedText(r.lastError, 4096), LastErrorTruncated: len(r.lastError) > 4096, InstanceCount: len(r.bindings), RouteIssueCount: len(r.routeIssues)}
 }

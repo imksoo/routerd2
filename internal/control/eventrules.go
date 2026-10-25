@@ -32,11 +32,10 @@ func (e *Engine) syncEventRulesLocked(ctx context.Context) (err error) {
 	var active []resourceprogram.EventRule
 	if e.state.Healthy {
 		if e.runtime != nil {
-			active, err = e.runtime.ActiveEventRules(e.state.Config, e.state.Revision)
+			active, err = e.runtime.ActiveEventRules(e.state.Revision)
 		} else {
-			var p resourceprogram.Plan
-			p, _, err = resourceprogram.Project(e.state.Config, resourceprogram.FactSnapshot{})
-			active = p.Native.EventRules
+			p, _ := e.plan.Project(resourceprogram.FactSnapshot{})
+			active = p.EventRules
 		}
 		if err != nil {
 			return err

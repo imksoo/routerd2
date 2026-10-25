@@ -9,7 +9,6 @@ import (
 	"math"
 	"time"
 
-	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
 )
 
@@ -18,27 +17,17 @@ type ruleContinuity struct {
 	epoch uint64
 }
 
-func (r *Runtime) observeEventRulesLocked(source config.Document, facts resourceprogram.FactSnapshot) error {
-	hasRules := false
-	for _, v := range source.Resources {
-		if v.EventRule != nil || v.DerivedEvent != nil {
-			hasRules = true
-			break
-		}
-	}
-	if !hasRules {
+func (r *Runtime) observeEventRulesLocked(facts resourceprogram.FactSnapshot) error {
+	if len(r.config.plan.Native.EventRules)+len(r.config.plan.Native.DerivedEvents) == 0 {
 		r.ruleContinuity = nil
 		return nil
 	}
-	proofs, err := facts.Lifecycle(source)
-	if err != nil {
-		return err
-	}
+	proofs := r.config.plan.Lifecycle(facts)
 	if r.ruleContinuity == nil {
 		r.ruleContinuity = map[string]ruleContinuity{}
 	}
 	next := map[string]ruleContinuity{}
-	for _, v := range source.Resources {
+	for _, v := range r.config.source.Resources {
 		if v.EventRule == nil && v.DerivedEvent == nil {
 			continue
 		}
@@ -60,39 +49,35 @@ func (r *Runtime) observeEventRulesLocked(source config.Document, facts resource
 // ActiveEventRules takes a fresh single-instant lifecycle projection for the
 // exact authoritative source. It does not reuse yesterday's applied Ready or
 // turn an event into a protocol lease. Caller fences source changes separately.
-func (r *Runtime) ActiveEventRules(source config.Document, revision uint64) ([]resourceprogram.EventRule, error) {
-	encoded, err := json.Marshal(source)
-	if err != nil {
-		return nil, err
-	}
-	sum := sha256.Sum256(encoded)
+func (r *Runtime) ActiveEventRules(revision uint64) ([]resourceprogram.EventRule, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if !r.configured || r.revision != revision || r.sourceDigest != hex.EncodeToString(sum[:]) {
+	if !r.configured || r.config.revision != revision {
 		return nil, nil
 	}
-	facts, err := r.conditionFactsLocked(source, revision, time.Now())
+	facts, err := r.conditionFactsLocked(r.config, time.Now())
 	if err != nil {
 		return nil, err
 	}
-	plan, _, err := resourceprogram.Project(source, facts)
-	if err == nil {
-		for i := range plan.Native.EventRules {
-			rule := &plan.Native.EventRules[i]
-			proof := r.ruleContinuity[rule.ID]
-			if proof.Conditional {
-				if r.ruleIncarnation == "" {
-					var id [16]byte
-					if _, err = rand.Read(id[:]); err != nil {
-						return nil, err
-					}
-					r.ruleIncarnation = hex.EncodeToString(id[:])
+	native, _ := r.config.plan.Project(facts)
+	for i := range native.EventRules {
+		rule := &native.EventRules[i]
+		proof := r.ruleContinuity[rule.ID]
+		if proof.Conditional {
+			if r.ruleIncarnation == "" {
+				var id [16]byte
+				if _, err = rand.Read(id[:]); err != nil {
+					return nil, err
 				}
-				body, _ := json.Marshal([]any{rule.Identity, r.ruleIncarnation, proof.epoch, r.sourceEpoch})
-				sum := sha256.Sum256(body)
-				rule.Identity = hex.EncodeToString(sum[:])
+				r.ruleIncarnation = hex.EncodeToString(id[:])
 			}
+			body, _ := json.Marshal(struct {
+				Identity, Incarnation string
+				Epoch, SourceEpoch    uint64
+			}{rule.Identity, r.ruleIncarnation, proof.epoch, r.sourceEpoch})
+			sum := sha256.Sum256(body)
+			rule.Identity = hex.EncodeToString(sum[:])
 		}
 	}
-	return plan.Native.EventRules, err
+	return native.EventRules, nil
 }

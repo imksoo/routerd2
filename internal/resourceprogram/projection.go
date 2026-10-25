@@ -1,6 +1,9 @@
 package resourceprogram
 
-import "time"
+import (
+	"github.com/imksoo/routerd2/internal/network"
+	"time"
+)
 
 // FactSnapshot is an immutable, single-instant view. All resources in one
 // projection see the same producer epochs, scope and expiration boundary.
@@ -66,22 +69,13 @@ type ResourceState struct {
 	Dependency string `json:"dependency,omitempty"`
 }
 
-// Project validates every declaration, including inactive ones, before
-// selecting a dependency-closed subset. A false or unknown guard withdraws the
-// entire dependent subtree while keeping the durable source unchanged.
-func Project(source Program, facts FactSnapshot) (Plan, map[string]ResourceState, error) {
-	full, err := Compile(source)
-	if err != nil {
-		return Plan{}, nil, err
-	}
-	byID := make(map[string]Resource, len(source.Resources))
-	for _, r := range source.Resources {
-		byID[r.ID] = r
-	}
-	states := make(map[string]ResourceState, len(source.Resources))
-	selected := Program{SchemaVersion: source.SchemaVersion}
-	for _, id := range full.Order {
-		r := byID[id]
+// Project evaluates only observations and dependency readiness. Configuration
+// validation, graph construction and protocol compilation belong to Compile.
+func (p Plan) Project(facts FactSnapshot) (Native, map[string]ResourceState) {
+	states := make(map[string]ResourceState, len(p.nodes))
+	var selected []compiledResource
+	for _, node := range p.nodes {
+		r := node.source
 		state := ResourceState{When: facts.evaluate(r.When)}
 		gate := state.When
 		if gate != True {
@@ -90,11 +84,8 @@ func Project(source Program, facts FactSnapshot) (Plan, map[string]ResourceState
 				state.Reason = "when_hold"
 			}
 		}
-		for _, dep := range full.Dependencies[id] {
+		for _, dep := range p.Dependencies[r.ID] {
 			gate = All(gate, states[dep].Ready)
-			// Explain a false prerequisite ahead of an indeterminate one,
-			// consistent with the three-valued conjunction. Own guards keep
-			// precedence; dependency order is deterministic in the compiler.
 			if state.When == True && states[dep].Ready != True && (state.Dependency == "" || state.Reason == "dependency_indeterminate" && states[dep].Ready == False) {
 				state.Reason, state.Dependency = conditionReason("dependency", states[dep].Ready), dep
 			}
@@ -109,15 +100,11 @@ func Project(source Program, facts FactSnapshot) (Plan, map[string]ResourceState
 					state.Reason = "ready_when_hold"
 				}
 			}
-			selected.Resources = append(selected.Resources, r)
+			selected = append(selected, node)
 		}
-		states[id] = state
+		states[r.ID] = state
 	}
-	plan, err := compile(selected, byID)
-	if err != nil {
-		return Plan{}, nil, err
-	}
-	return plan, states, nil
+	return renderNative(selected), states
 }
 
 func conditionReason(prefix string, value Truth) string {
@@ -125,4 +112,69 @@ func conditionReason(prefix string, value Truth) string {
 		return prefix + "_false"
 	}
 	return prefix + "_indeterminate"
+}
+
+// renderNative assembles selected, already compiled resources. Only output
+// collections are mutable; configuration payloads remain owned by their plan.
+func renderNative(nodes []compiledResource) Native {
+	var out Native
+	interfaces := make(map[string]int)
+	ensureInterface := func(name string) int {
+		if index, exists := interfaces[name]; exists {
+			return index
+		}
+		index := len(out.Network.Interfaces)
+		interfaces[name] = index
+		out.Network.Interfaces = append(out.Network.Interfaces, network.Interface{Name: name})
+		return index
+	}
+	for _, node := range nodes {
+		r := node.source
+		switch {
+		case r.Interface != nil:
+			index := ensureInterface(r.Interface.Name)
+			previous := out.Network.Interfaces[index]
+			out.Network.Interfaces[index] = *r.Interface
+			out.Network.Interfaces[index].Addresses = previous.Addresses
+			out.Network.Interfaces[index].AddressOptions = previous.AddressOptions
+		case r.Address != nil:
+			index := ensureInterface(r.Address.Interface)
+			iface := &out.Network.Interfaces[index]
+			iface.Addresses = append(iface.Addresses, r.Address.CIDR)
+			if r.Address.Options != nil {
+				if iface.AddressOptions == nil {
+					iface.AddressOptions = make(map[string]network.AddressOptions)
+				}
+				iface.AddressOptions[r.Address.CIDR] = *r.Address.Options
+			}
+		case r.Link != nil:
+			out.Network.Links = append(out.Network.Links, *r.Link)
+		case r.Route != nil:
+			out.Network.Routes = append(out.Network.Routes, *r.Route)
+		case r.PolicyRule != nil:
+			out.Network.PolicyRules = append(out.Network.PolicyRules, *r.PolicyRule)
+		case r.Forwarding != nil:
+			if r.Forwarding.IPv4 != nil {
+				out.Network.Forwarding.IPv4 = r.Forwarding.IPv4
+			}
+			if r.Forwarding.IPv6 != nil {
+				out.Network.Forwarding.IPv6 = r.Forwarding.IPv6
+			}
+		case r.Firewall != nil:
+			out.Network.Firewall = r.Firewall
+		case r.DSLite != nil:
+			out.Network.DSLite = append(out.Network.DSLite, *r.DSLite)
+		case r.VRRPGuard != nil:
+			out.Network.VRRPGuards = append(out.Network.VRRPGuards, *r.VRRPGuard)
+		case r.WireGuard != nil:
+			out.Network.WireGuard = append(out.Network.WireGuard, *r.WireGuard)
+		case r.Service != nil:
+			out.Services = append(out.Services, *r.Service)
+		case r.EventRule != nil:
+			out.EventRules = append(out.EventRules, node.rule)
+		case r.DerivedEvent != nil:
+			out.DerivedEvents = append(out.DerivedEvents, node.derived)
+		}
+	}
+	return out
 }

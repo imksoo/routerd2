@@ -112,24 +112,15 @@ func TestRejectDuplicateOutputOwnership(t *testing.T) {
 	}
 }
 
-func TestAddressOwnersRemainIndependentAndSourceIsImmutable(t *testing.T) {
+func TestAddressOwnersRemainIndependent(t *testing.T) {
 	program := Program{SchemaVersion: SchemaVersion, Resources: []Resource{
 		{ID: "first", Provenance: &Provenance{Source: "manual"}, Address: &Address{Interface: "eth0", CIDR: "192.0.2.1/24"}},
 		{ID: "second", Address: &Address{Interface: "eth0", CIDR: "2001:db8::1/64", Options: &network.AddressOptions{NoDAD: true}}},
 		{ID: "forward4", Forwarding: &network.Forwarding{IPv4: pointer(true)}},
 		{ID: "forward6", Forwarding: &network.Forwarding{IPv6: pointer(true)}},
 	}}
-	before, _ := json.Marshal(program)
-	plan, err := Compile(program)
-	if err != nil {
+	if _, err := Compile(program); err != nil {
 		t.Fatal(err)
-	}
-	plan.Native.Network.Interfaces[0].Addresses[0] = "198.51.100.1/24"
-	*plan.Native.Network.Forwarding.IPv4 = false
-	plan.Ownership[0].Provenance.Source = "changed"
-	after, _ := json.Marshal(program)
-	if string(before) != string(after) {
-		t.Fatal("mutating the compiled plan changed durable source intent")
 	}
 	program.Resources = program.Resources[1:]
 	remaining, err := Compile(program)

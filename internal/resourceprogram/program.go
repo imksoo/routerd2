@@ -6,6 +6,7 @@ package resourceprogram
 import (
 	"github.com/imksoo/routerd/pkg/api"
 	"github.com/imksoo/routerd2/internal/derived"
+	"github.com/imksoo/routerd2/internal/eventrule"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
@@ -85,12 +86,17 @@ type DerivedEvent struct {
 // EventRule is an internal, owned declaration. Identity binds its complete
 // resource lifecycle controls, rather than unrelated source revisions.
 type EventRule struct {
+	Compiled eventrule.Program `json:"-"`
 	ID       string            `json:"id"`
 	Identity string            `json:"identity"`
 	Spec     api.EventRuleSpec `json:"spec"`
 }
 
+// A Plan owns its validated resource graph and static protocol declarations.
+// Consumers treat its input data as read-only; projections allocate new output
+// collections and reuse the immutable configuration payloads.
 type Plan struct {
+	nodes        []compiledResource
 	Native       Native              `json:"native"`
 	Order        []string            `json:"order"`
 	Dependencies map[string][]string `json:"dependencies"`
@@ -136,4 +142,10 @@ func (r Resource) kind() (string, int) {
 		}
 	}
 	return kind, count
+}
+
+type compiledResource struct {
+	source  Resource
+	rule    EventRule
+	derived DerivedEvent
 }

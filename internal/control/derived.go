@@ -21,14 +21,11 @@ func (e *Engine) derivedInputsLocked() ([]resourceprogram.DerivedEvent, map[stri
 		return nil, nil, nil
 	}
 	if e.runtime != nil {
-		return e.runtime.DerivedInputs(e.state.Config, e.state.Revision)
+		return e.runtime.DerivedInputs(e.state.Revision)
 	}
 	// In-process engines have no protocol producer registry. Only literals can
 	// be known; a declaration never fabricates a live health observation.
-	plan, _, err := resourceprogram.Project(e.state.Config, resourceprogram.FactSnapshot{})
-	if err != nil {
-		return nil, nil, err
-	}
+	native, _ := e.plan.Project(resourceprogram.FactSnapshot{})
 	clock, err := bfd.ReadClock()
 	if err != nil {
 		return nil, nil, err
@@ -41,10 +38,10 @@ func (e *Engine) derivedInputsLocked() ([]resourceprogram.DerivedEvent, map[stri
 		return nil, nil, err
 	}
 	views := map[string]derived.Snapshot{}
-	for _, declaration := range plan.Native.DerivedEvents {
+	for _, declaration := range native.DerivedEvents {
 		views[declaration.ID] = snapshot
 	}
-	return plan.Native.DerivedEvents, views, nil
+	return native.DerivedEvents, views, nil
 }
 
 func (e *Engine) syncDerivedLocked(ctx context.Context) (snapshots map[string]derived.Snapshot, err error) {

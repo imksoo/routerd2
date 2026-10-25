@@ -24,8 +24,8 @@ func TestDerivedEventValidatesTypedReferencesBeforeProjection(t *testing.T) {
 		t.Fatal("status references did not bind the stable resource ID", p.Native.DerivedEvents)
 	}
 	source.Resources[0].When = &FactCondition{Fact: "service.wan.ready"}
-	projected, _, err := Project(source, FactSnapshot{})
-	if err != nil || len(projected.Native.DerivedEvents) != 1 || len(projected.Native.Services) != 0 {
+	projected, _, err := projectSource(source, FactSnapshot{})
+	if err != nil || len(projected.DerivedEvents) != 1 || len(projected.Services) != 0 {
 		t.Fatal("inactive provider became an invalid configuration reference", projected, err)
 	}
 	for _, field := range []string{"${HealthCheck/missing.status.phase}", "${HealthCheck/service/wan.status.unknown}", "${Interface/service/wan.status.phase}"} {
@@ -44,8 +44,8 @@ func TestDerivedBGPRouterReferenceUsesAllDeclaredProviders(t *testing.T) {
 		if err != nil || len(plan.Native.DerivedEvents) != 1 {
 			t.Fatal(field, err)
 		}
-		projected, _, err := Project(source, FactSnapshot{})
-		if err != nil || len(projected.Native.Services) != 0 || len(projected.Native.DerivedEvents) != 1 {
+		projected, _, err := projectSource(source, FactSnapshot{})
+		if err != nil || len(projected.Services) != 0 || len(projected.DerivedEvents) != 1 {
 			t.Fatal("inactive declaration lost typed reference", field, err)
 		}
 		for _, bad := range []string{"${BGP/service/router.status.phase}", "${BGPPeer/service/router.status.phase}", "${BGPRouter/missing.status.phase}", "${HealthCheck/service/router.status.phase}", "${BGPRouter/service/router.status.acceptedPrefixes}", "${BGPRouter/service/router.status.peers.state}"} {
@@ -65,8 +65,8 @@ func TestDerivedBFDReferencesValidateAgainstAllDeclaredTypedProviders(t *testing
 		if err != nil || len(p.Native.DerivedEvents) != 1 {
 			t.Fatal(field, p, err)
 		}
-		projected, _, err := Project(source, FactSnapshot{})
-		if err != nil || len(projected.Native.Services) != 0 || len(projected.Native.DerivedEvents) != 1 {
+		projected, _, err := projectSource(source, FactSnapshot{})
+		if err != nil || len(projected.Services) != 0 || len(projected.DerivedEvents) != 1 {
 			t.Fatal("inactive provider reference was discarded", field, err)
 		}
 		for _, bad := range []string{"${BFD/missing.status.phase}", "${HealthCheck/bfd/source.status.phase}", "${BFD/bfd/source.status.unsupported}", "${BFD/bfd/source.status.peers.state}"} {

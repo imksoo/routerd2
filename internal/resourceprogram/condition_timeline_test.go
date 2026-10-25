@@ -69,7 +69,7 @@ func TestConditionHoldScopeAndExpiryAtAdmissionBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, states, err := Project(p, view)
+	_, states, err := projectSource(p, view)
 	if err != nil || states["wan"].Reason != "when_hold" || states["ready"].Reason != "ready_when_hold" || !states["ready"].Active {
 		t.Fatal("hold prevented its own resource startup or lost its reason", states, err)
 	}

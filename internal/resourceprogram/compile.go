@@ -29,15 +29,9 @@ func ValidResourceID(id string) bool { return resourceID.MatchString(id) }
 // Compile validates the entire program before returning any executable output.
 // Dependency order is deterministic for the same declarations regardless of
 // their order in YAML. Payload order inside a resource (e.g. firewall rules) is
-// preserved. Source and returned values never share mutable slices or pointers.
+// preserved. The caller keeps source payloads immutable for the lifetime of the plan;
+// compilation does not serialize typed configuration to clone it.
 func Compile(source Program) (Plan, error) {
-	return compile(source, nil)
-}
-
-// referenceTargets is supplied only by Project after validating the complete
-// source. An inactive provider stays a declared, currently unknown observation;
-// it is not a missing configuration reference or an implicit start dependency.
-func compile(source Program, referenceTargets map[string]Resource) (Plan, error) {
 	for _, r := range source.Resources {
 		for _, guard := range []struct {
 			name  string
@@ -53,16 +47,8 @@ func compile(source Program, referenceTargets map[string]Resource) (Plan, error)
 	if source.SchemaVersion != SchemaVersion {
 		return Plan{}, fmt.Errorf("unsupported config schema %d (expected %d)", source.SchemaVersion, SchemaVersion)
 	}
-	encoded, err := json.Marshal(source)
-	if err != nil {
-		return Plan{}, fmt.Errorf("encode resource program: %w", err)
-	}
-	var program Program
-	if err := json.Unmarshal(encoded, &program); err != nil {
-		return Plan{}, fmt.Errorf("clone resource program: %w", err)
-	}
-	byID := make(map[string]Resource, len(program.Resources))
-	for _, r := range program.Resources {
+	byID := make(map[string]Resource, len(source.Resources))
+	for _, r := range source.Resources {
 		if !resourceID.MatchString(r.ID) {
 			return Plan{}, fmt.Errorf("invalid resource id %q (1..128 ASCII letters, digits, . _ : / -)", r.ID)
 		}
@@ -87,10 +73,7 @@ func compile(source Program, referenceTargets map[string]Resource) (Plan, error)
 		}
 		byID[r.ID] = r
 	}
-	if referenceTargets == nil {
-		referenceTargets = byID
-	}
-	dependencies, err := dependencyGraph(program.Resources, byID)
+	dependencies, err := dependencyGraph(source.Resources, byID)
 	if err != nil {
 		return Plan{}, err
 	}
@@ -99,9 +82,9 @@ func compile(source Program, referenceTargets map[string]Resource) (Plan, error)
 		return Plan{}, err
 	}
 	plan := Plan{Order: order, Dependencies: dependencies}
-	interfaces := map[string]int{}
 	claimed := map[string]string{}
 	derivedRefs := map[string]bool{}
+	ruleCount, derivedCount := 0, 0
 	claim := func(r Resource, kind, key string) error {
 		identity := kind + "\x00" + key
 		if previous, exists := claimed[identity]; exists {
@@ -115,65 +98,36 @@ func compile(source Program, referenceTargets map[string]Resource) (Plan, error)
 		plan.Ownership = append(plan.Ownership, Ownership{ResourceID: r.ID, OwnerID: owner, Kind: kind, Key: key, Provenance: r.Provenance})
 		return nil
 	}
-	ensureInterface := func(name string) int {
-		if index, exists := interfaces[name]; exists {
-			return index
-		}
-		index := len(plan.Native.Network.Interfaces)
-		interfaces[name] = index
-		plan.Native.Network.Interfaces = append(plan.Native.Network.Interfaces, network.Interface{Name: name})
-		return index
-	}
 	for _, id := range order {
 		r := byID[id]
+		node := compiledResource{source: r}
 		var err error
 		switch {
 		case r.Interface != nil:
 			err = claim(r, "interface", r.Interface.Name)
-			index := ensureInterface(r.Interface.Name)
-			previous := plan.Native.Network.Interfaces[index]
-			plan.Native.Network.Interfaces[index] = *r.Interface
-			plan.Native.Network.Interfaces[index].Addresses = previous.Addresses
-			plan.Native.Network.Interfaces[index].AddressOptions = previous.AddressOptions
 		case r.Address != nil:
 			key := canonicalPrefix(r.Address.CIDR)
 			err = claim(r, "address", r.Address.Interface+"/"+key)
-			index := ensureInterface(r.Address.Interface)
-			iface := &plan.Native.Network.Interfaces[index]
-			iface.Addresses = append(iface.Addresses, r.Address.CIDR)
-			if r.Address.Options != nil {
-				if iface.AddressOptions == nil {
-					iface.AddressOptions = map[string]network.AddressOptions{}
-				}
-				iface.AddressOptions[r.Address.CIDR] = *r.Address.Options
-			}
 		case r.Link != nil:
 			err = claim(r, "link", r.Link.Name)
-			plan.Native.Network.Links = append(plan.Native.Network.Links, *r.Link)
 		case r.Route != nil:
 			err = claim(r, "route", routeKey(*r.Route))
-			plan.Native.Network.Routes = append(plan.Native.Network.Routes, *r.Route)
 		case r.PolicyRule != nil:
 			err = claim(r, "policy_rule", fmt.Sprintf("%d/%d", r.PolicyRule.Family, r.PolicyRule.Priority))
-			plan.Native.Network.PolicyRules = append(plan.Native.Network.PolicyRules, *r.PolicyRule)
 		case r.Forwarding != nil:
 			if r.Forwarding.IPv4 == nil && r.Forwarding.IPv6 == nil {
 				err = fmt.Errorf("resource %s: forwarding requires ipv4 or ipv6", r.ID)
 			}
 			if r.Forwarding.IPv4 != nil {
 				err = errors.Join(err, claim(r, "forwarding", "ipv4"))
-				plan.Native.Network.Forwarding.IPv4 = r.Forwarding.IPv4
 			}
 			if r.Forwarding.IPv6 != nil {
 				err = errors.Join(err, claim(r, "forwarding", "ipv6"))
-				plan.Native.Network.Forwarding.IPv6 = r.Forwarding.IPv6
 			}
 		case r.Firewall != nil:
 			err = claim(r, "firewall", network.FirewallTable)
-			plan.Native.Network.Firewall = r.Firewall
 		case r.DSLite != nil:
 			err = claim(r, "link", r.DSLite.Name)
-			plan.Native.Network.DSLite = append(plan.Native.Network.DSLite, *r.DSLite)
 		case r.VRRPGuard != nil:
 			for _, a := range r.VRRPGuard.Addresses {
 				if ip, parseErr := netip.ParseAddr(a); parseErr == nil {
@@ -181,25 +135,26 @@ func compile(source Program, referenceTargets map[string]Resource) (Plan, error)
 				}
 				err = errors.Join(err, claim(r, "vrrp_guard", a))
 			}
-			plan.Native.Network.VRRPGuards = append(plan.Native.Network.VRRPGuards, *r.VRRPGuard)
 		case r.WireGuard != nil:
 			err = claim(r, "wireguard", r.WireGuard.Interface)
-			plan.Native.Network.WireGuard = append(plan.Native.Network.WireGuard, *r.WireGuard)
 		case r.Service != nil:
 			err = claim(r, "service", r.Service.ModuleName())
-			plan.Native.Services = append(plan.Native.Services, *r.Service)
 		case r.EventRule != nil:
-			if len(plan.Native.EventRules) >= 128 {
+			ruleCount++
+			if ruleCount > 128 {
 				return Plan{}, errors.New("event rule resource count exceeds 128")
 			}
-			if _, err = eventrule.Compile(r.ID, *r.EventRule); err == nil {
+			compiled, compileErr := eventrule.Compile(r.ID, *r.EventRule)
+			err = compileErr
+			if err == nil {
 				err = claim(r, "event_rule", r.ID)
 			}
 			body, _ := json.Marshal(r)
 			digest := sha256.Sum256(body)
-			plan.Native.EventRules = append(plan.Native.EventRules, EventRule{ID: r.ID, Identity: hex.EncodeToString(digest[:]), Spec: *r.EventRule})
+			node.rule = EventRule{ID: r.ID, Identity: hex.EncodeToString(digest[:]), Spec: *r.EventRule, Compiled: compiled}
 		case r.DerivedEvent != nil:
-			if len(plan.Native.DerivedEvents) >= 128 {
+			derivedCount++
+			if derivedCount > 128 {
 				return Plan{}, errors.New("derived event resource count exceeds 128")
 			}
 			compiled, compileErr := derived.Compile(r.ID, *r.DerivedEvent)
@@ -207,7 +162,7 @@ func compile(source Program, referenceTargets map[string]Resource) (Plan, error)
 				return Plan{}, fmt.Errorf("derived event %s: %w", r.ID, compileErr)
 			}
 			for _, ref := range compiled.References() {
-				target, exists := referenceTargets[ref.Resource]
+				target, exists := byID[ref.Resource]
 				supported := exists && target.Service != nil && ((ref.Kind == "HealthCheck" && target.Service.Health != nil && health.ScalarFieldSupported(ref.Field)) || (ref.Kind == "BFD" && target.Service.BFD != nil && bfd.StatusFieldSupported(ref.Field)) || (ref.Kind == "BGPRouter" && target.Service.BGP != nil && bgpconfig.StatusFieldSupported(ref.Field)))
 				if !supported {
 					return Plan{}, fmt.Errorf("derived event %s has unsupported or missing typed reference %s", r.ID, ref.Key())
@@ -220,12 +175,14 @@ func compile(source Program, referenceTargets map[string]Resource) (Plan, error)
 			err = claim(r, "derived_event", r.ID)
 			body, _ := json.Marshal(r)
 			sum := sha256.Sum256(body)
-			plan.Native.DerivedEvents = append(plan.Native.DerivedEvents, DerivedEvent{ID: r.ID, Identity: hex.EncodeToString(sum[:]), Spec: *r.DerivedEvent, References: compiled.References(), Compiled: compiled})
+			node.derived = DerivedEvent{ID: r.ID, Identity: hex.EncodeToString(sum[:]), Spec: *r.DerivedEvent, References: compiled.References(), Compiled: compiled}
 		}
 		if err != nil {
 			return Plan{}, err
 		}
+		plan.nodes = append(plan.nodes, node)
 	}
+	plan.Native = renderNative(plan.nodes)
 	if err := errors.Join(network.Validate(plan.Native.Network), serviceconfig.Validate(plan.Native.Services)); err != nil {
 		return Plan{}, fmt.Errorf("resource projection: %w", err)
 	}

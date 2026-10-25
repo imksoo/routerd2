@@ -15,7 +15,7 @@ import (
 
 func TestResourceObservationPagesRejectMixedSnapshots(t *testing.T) {
 	r := New(t.TempDir(), t.TempDir(), &memoryNetwork{}, testSupervisorInstance)
-	r.revision, r.projectionGeneration, r.phase = 7, 12, "ready"
+	r.config.revision, r.projectionGeneration, r.phase = 7, 12, "ready"
 	r.resourceStates = map[string]resourceprogram.ResourceState{}
 	for i := 2999; i >= 0; i-- {
 		r.resourceStates[fmt.Sprintf("resource-%04d", i)] = resourceprogram.ResourceState{When: resourceprogram.Indeterminate}
@@ -58,7 +58,7 @@ func TestResourceObservationPagesRejectMixedSnapshots(t *testing.T) {
 	for _, path := range []string{"?offset=-1", "?offset=128", "?offset=0&offset=1", "?unknown=x", "?observation_id=bad"} {
 		get("/v1/services/resources"+path, 400)
 	}
-	if len(r.resourceStates) != 3000 || r.revision != 7 || r.projectionGeneration != 12 {
+	if len(r.resourceStates) != 3000 || r.config.revision != 7 || r.projectionGeneration != 12 {
 		t.Fatal("status read mutated source or projection")
 	}
 }

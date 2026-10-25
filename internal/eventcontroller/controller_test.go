@@ -139,8 +139,13 @@ func TestTimerRestoresButDeactivationAndSourceChangeFenceOldWork(t *testing.T) {
 	if err = c.Step(ctx, epoch); err != nil {
 		t.Fatal(err)
 	}
-	rule.Spec.Emit.Attributes = map[string]string{"changed": "true"}
-	rule.Identity = "new-definition"
+	spec := rule.Spec
+	spec.Emit.Attributes = map[string]string{"changed": "true"}
+	compiled, err := resourceprogram.Compile(resourceprogram.Program{SchemaVersion: resourceprogram.SchemaVersion, Resources: []resourceprogram.Resource{{ID: rule.ID, EventRule: &spec}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule = compiled.Native.EventRules[0]
 	if err = c.Sync(ctx, 2, []resourceprogram.EventRule{rule}); err != nil {
 		t.Fatal(err)
 	}
@@ -214,8 +219,6 @@ func TestAbsenceOrdersQueuedObservationsAgainstTheirOriginalDeadline(t *testing.
 			}
 			defer s.Close()
 			rule := declaration(t, "absence", 0)
-			rule.Spec.Pattern.Trigger = "fixture.input"
-			rule.Spec.Pattern.Expected = "fixture.expected"
 			c := New(s)
 			if err = c.Sync(ctx, 1, []resourceprogram.EventRule{rule}); err != nil {
 				t.Fatal(err)

@@ -95,7 +95,7 @@ func TestAFTRSourceObservationRequiresExactUsableOwnedAddress(t *testing.T) {
 
 func TestRuntimeHealthDoesNotEncodeOrCopyProtocolSnapshots(t *testing.T) {
 	r := New(t.TempDir(), t.TempDir(), &memoryNetwork{}, testSupervisorInstance)
-	r.revision, r.phase, r.lastError = 17, "degraded", strings.Repeat("<診断>", 10000)
+	r.config.revision, r.phase, r.lastError = 17, "degraded", strings.Repeat("<診断>", 10000)
 	payload := json.RawMessage(`{"private_observation":"` + strings.Repeat("x", 64<<10) + `"}`)
 	for i := range 1000 {
 		name := fmt.Sprintf("service.test-%d", i)

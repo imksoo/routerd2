@@ -47,7 +47,7 @@ func TestDerivedInputKeepsOriginalAgeAndBreaksUnpolledFlapContinuity(t *testing.
 		}
 	}
 	publish(false)
-	_, s, err := r.DerivedInputs(source, 1)
+	_, s, err := r.DerivedInputs(1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func TestDerivedInputKeepsOriginalAgeAndBreaksUnpolledFlapContinuity(t *testing.
 		t.Fatal(err)
 	}
 	publish(true)
-	_, s, err = r.DerivedInputs(source, 1)
+	_, s, err = r.DerivedInputs(1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestDerivedInputKeepsOriginalAgeAndBreaksUnpolledFlapContinuity(t *testing.
 	publish(false)
 	publish(true) // no DerivedInputs or durable evaluation between callbacks
 	time.Sleep(220 * time.Millisecond)
-	_, s, err = r.DerivedInputs(source, 1)
+	_, s, err = r.DerivedInputs(1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestDerivedInputKeepsOriginalAgeAndBreaksUnpolledFlapContinuity(t *testing.
 	grant.untilNanos = 1
 	r.guardGrants["service.wan"] = grant
 	r.mu.Unlock()
-	_, s, err = r.DerivedInputs(source, 1)
+	_, s, err = r.DerivedInputs(1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestSourceRestoreDoesNotReuseDerivedEvaluationScope(t *testing.T) {
 	if err := r.ApplyConfig(ctx, 1, source); err != nil {
 		t.Fatal(err)
 	}
-	_, before, err := r.DerivedInputs(source, 1)
+	_, before, err := r.DerivedInputs(1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ func TestSourceRestoreDoesNotReuseDerivedEvaluationScope(t *testing.T) {
 	if err = r.ApplyConfig(ctx, 1, source); err != nil {
 		t.Fatal(err)
 	}
-	_, after, err := r.DerivedInputs(source, 1)
+	_, after, err := r.DerivedInputs(1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +163,7 @@ func TestInactiveProviderIsUnknownBeforeItsWorkerHasStopped(t *testing.T) {
 	reconcileConditions(t, r)
 	publish("wan", true)
 	reconcileConditions(t, r)
-	_, inputs, err := r.DerivedInputs(source, 1)
+	_, inputs, err := r.DerivedInputs(1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +176,7 @@ func TestInactiveProviderIsUnknownBeforeItsWorkerHasStopped(t *testing.T) {
 		t.Fatal(before, err)
 	}
 	publish("switch", false) // deliberately do not reconcile/stop the wan worker
-	_, inputs, err = r.DerivedInputs(source, 1)
+	_, inputs, err = r.DerivedInputs(1)
 	if err != nil {
 		t.Fatal(err)
 	}

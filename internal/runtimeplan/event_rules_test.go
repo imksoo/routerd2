@@ -32,13 +32,13 @@ func TestEventRuleLifetimeSeesFlapBetweenControllerPolls(t *testing.T) {
 	}
 	reconcileConditions(t, r)
 	publish(true)
-	before, err := r.ActiveEventRules(source, 2)
+	before, err := r.ActiveEventRules(2)
 	if err != nil || len(before) != 1 {
 		t.Fatal(before, err)
 	}
 	publish(false)
 	publish(true)
-	after, err := r.ActiveEventRules(source, 2)
+	after, err := r.ActiveEventRules(2)
 	if err != nil || len(after) != 1 {
 		t.Fatal(after, err)
 	}
@@ -59,7 +59,7 @@ func TestUnconditionalHistoricalRuleDoesNotDependOnUnrelatedWorkerReadiness(t *t
 	r.phase = "degraded"
 	r.lastError = "unrelated logging worker is restarting"
 	r.mu.Unlock()
-	rules, err := r.ActiveEventRules(source, 1)
+	rules, err := r.ActiveEventRules(1)
 	if err != nil || len(rules) != 1 {
 		t.Fatal("unrelated readiness revoked durable historical consumer", rules, err)
 	}

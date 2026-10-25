@@ -84,6 +84,7 @@ func (c *Controller) Sync(ctx context.Context, revision uint64, declarations []r
 		if err != nil {
 			c.bindings = nil
 			c.order = nil
+			c.revision = 0
 		}
 	}()
 	if c.store == nil || revision == 0 || len(declarations) > 128 {
@@ -94,16 +95,22 @@ func (c *Controller) Sync(ctx context.Context, revision uint64, declarations []r
 		if _, exists := wanted[declaration.ID]; exists {
 			return errors.New("duplicate derived resource")
 		}
-		program, err := derived.Compile(declaration.ID, declaration.Spec)
-		if err != nil {
-			return fmt.Errorf("derived event %s: %w", declaration.ID, err)
+		wanted[declaration.ID] = binding{registration: registration{Identity: declaration.Identity}, program: declaration.Compiled, until: declaration.ActiveUntilNanos}
+	}
+	unchanged := c.revision == revision && len(c.bindings) == len(wanted)
+	for id, binding := range wanted {
+		if prior, ok := c.bindings[id]; !ok || prior.Identity != binding.Identity {
+			unchanged = false
+			break
 		}
-		body, err := json.Marshal(declaration)
-		if err != nil {
-			return err
+	}
+	if unchanged {
+		for id, desired := range wanted {
+			binding := c.bindings[id]
+			binding.until = desired.until
+			c.bindings[id] = binding
 		}
-		sum := sha256.Sum256(body)
-		wanted[declaration.ID] = binding{registration: registration{Identity: hex.EncodeToString(sum[:])}, program: program, until: declaration.ActiveUntilNanos}
+		return nil
 	}
 	cp, err := c.store.ProducerCheckpoint(ctx, registryName)
 	if err != nil {

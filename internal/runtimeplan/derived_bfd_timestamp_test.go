@@ -44,14 +44,14 @@ func TestBFDTimestampEqualityRuntimeAndProducerCounterFence(t *testing.T) {
 	if err = publish(1, 1, literal.Add(-time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	down, err := p.Advance(nil, bfdDerivedInputs(t, r, source), false)
+	down, err := p.Advance(nil, bfdDerivedInputs(t, r), false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err = publish(2, 2, literal); err != nil {
 		t.Fatal(err)
 	}
-	pending, err := p.Advance(down.State, bfdDerivedInputs(t, r, source), false)
+	pending, err := p.Advance(down.State, bfdDerivedInputs(t, r), false)
 	if err != nil || pending.Status.PendingTransition != "Asserting" {
 		t.Fatal(pending, err)
 	}
@@ -59,7 +59,7 @@ func TestBFDTimestampEqualityRuntimeAndProducerCounterFence(t *testing.T) {
 	if err = publish(3, 4, literal); err != nil {
 		t.Fatal(err)
 	}
-	reset, err := p.Advance(pending.State, bfdDerivedInputs(t, r, source), false)
+	reset, err := p.Advance(pending.State, bfdDerivedInputs(t, r), false)
 	if err != nil || len(reset.Emissions) != 0 || reset.Status.PendingTransition != "Asserting" {
 		t.Fatal("runtime discarded the coalesced timestamp continuity", reset.Status, err)
 	}
@@ -70,7 +70,7 @@ func TestBFDTimestampEqualityRuntimeAndProducerCounterFence(t *testing.T) {
 		t.Fatal("changed timestamp without counter advance accepted")
 	}
 	time.Sleep(170 * time.Millisecond)
-	stable, err := p.Advance(reset.State, bfdDerivedInputs(t, r, source), false)
+	stable, err := p.Advance(reset.State, bfdDerivedInputs(t, r), false)
 	if err != nil || len(stable.Emissions) != 1 {
 		t.Fatal("rejected producer evidence changed the accepted source", stable, err)
 	}

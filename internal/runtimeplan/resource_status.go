@@ -41,7 +41,7 @@ type ResourceObservationPage struct {
 func (r *Runtime) resourceObservation(offset int, expected string) (ResourceObservationPage, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	page := ResourceObservationPage{Revision: r.revision, ProjectionGeneration: r.projectionGeneration, Phase: r.phase, LastError: boundedText(r.lastError, 4096), LastErrorTruncated: len(r.lastError) > 4096, Total: len(r.resourceStates), Offset: offset}
+	page := ResourceObservationPage{Revision: r.config.revision, ProjectionGeneration: r.projectionGeneration, Phase: r.phase, LastError: boundedText(r.lastError, 4096), LastErrorTruncated: len(r.lastError) > 4096, Total: len(r.resourceStates), Offset: offset}
 	all := make([]ResourceObservation, 0, len(r.resourceStates))
 	for id, state := range r.resourceStates {
 		all = append(all, ResourceObservation{ID: id, State: state})

@@ -3,8 +3,6 @@ package runtimeplan
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"time"
 
@@ -60,8 +58,8 @@ func (r *Runtime) installGuardStatusLocked(status supervisor.Status, err error) 
 	r.guardUntil = time.Now().Add(time.Second)
 	r.guardBootID = clock.BootID
 	r.guardUntilNanos = uint64(clock.BoottimeNanoseconds) + uint64(time.Second)
-	if len(r.current.DerivedEvents) > 0 {
-		_, _ = r.conditionFactsLocked(r.source, r.revision, time.Now())
+	if len(r.config.plan.Native.DerivedEvents) > 0 {
+		_, _ = r.conditionFactsLocked(r.config, time.Now())
 	} // clock failure remains unknown
 }
 
@@ -75,7 +73,7 @@ func (r *Runtime) recordGuardGrantLocked(u serviceconfig.Update, now time.Time) 
 		if r.guardGrants == nil {
 			r.guardGrants = map[string]guardGrant{}
 		}
-		r.guardGrants[u.Name] = guardGrant{revision: r.revision, generation: u.Generation, sequence: u.Sequence, epoch: u.ProducerEpoch, bootID: s.BootID, value: s.Active, observedNanos: s.ObservedNanos, untilNanos: s.ExpiresNanos}
+		r.guardGrants[u.Name] = guardGrant{revision: r.config.revision, generation: u.Generation, sequence: u.Sequence, epoch: u.ProducerEpoch, bootID: s.BootID, value: s.Active, observedNanos: s.ObservedNanos, untilNanos: s.ExpiresNanos}
 		return
 	}
 	if u.Role == "dhcp4" {
@@ -88,13 +86,13 @@ func (r *Runtime) recordGuardGrantLocked(u serviceconfig.Update, now time.Time) 
 		if s.Active {
 			observed, until = s.LeaseClock.AcquiredNanos, s.LeaseClock.ExpiresNanos
 		}
-		if old, ok := r.guardGrants[u.Name]; ok && old.revision == r.revision && old.generation == u.Generation && old.epoch == u.ProducerEpoch && old.bootID == s.BootID && old.value == s.Active && (s.Active && old.dhcpLease == s.LeaseClock || !s.Active && old.observedNanos == s.ObservedNanos) {
+		if old, ok := r.guardGrants[u.Name]; ok && old.revision == r.config.revision && old.generation == u.Generation && old.epoch == u.ProducerEpoch && old.bootID == s.BootID && old.value == s.Active && (s.Active && old.dhcpLease == s.LeaseClock || !s.Active && old.observedNanos == s.ObservedNanos) {
 			until = min(until, old.untilNanos)
 		}
 		if r.guardGrants == nil {
 			r.guardGrants = map[string]guardGrant{}
 		}
-		r.guardGrants[u.Name] = guardGrant{revision: r.revision, generation: u.Generation, sequence: u.Sequence, epoch: u.ProducerEpoch, bootID: s.BootID, value: s.Active, observedNanos: observed, untilNanos: until, dhcpLease: s.LeaseClock}
+		r.guardGrants[u.Name] = guardGrant{revision: r.config.revision, generation: u.Generation, sequence: u.Sequence, epoch: u.ProducerEpoch, bootID: s.BootID, value: s.Active, observedNanos: observed, untilNanos: until, dhcpLease: s.LeaseClock}
 		return
 	}
 	if u.Role == "bgp" {
@@ -107,7 +105,7 @@ func (r *Runtime) recordGuardGrantLocked(u serviceconfig.Update, now time.Time) 
 			r.guardGrants = map[string]guardGrant{}
 		}
 		s := provider.snapshot
-		r.guardGrants[u.Name] = guardGrant{revision: r.revision, generation: u.Generation, sequence: u.Sequence, epoch: u.ProducerEpoch, bootID: s.BootID, value: s.Active, untilNanos: s.ExpiresNanos, observedNanos: s.ObservedNanos, deadline: s.ValidUntil, bgp: &provider}
+		r.guardGrants[u.Name] = guardGrant{revision: r.config.revision, generation: u.Generation, sequence: u.Sequence, epoch: u.ProducerEpoch, bootID: s.BootID, value: s.Active, untilNanos: s.ExpiresNanos, observedNanos: s.ObservedNanos, deadline: s.ValidUntil, bgp: &provider}
 		return
 	}
 	if u.Role == "health" {
@@ -118,7 +116,7 @@ func (r *Runtime) recordGuardGrantLocked(u serviceconfig.Update, now time.Time) 
 		if r.guardGrants == nil {
 			r.guardGrants = make(map[string]guardGrant)
 		}
-		r.guardGrants[u.Name] = guardGrant{revision: r.revision, generation: u.Generation, sequence: u.Sequence, epoch: u.ProducerEpoch, bootID: snapshot.BootID, value: snapshot.Active, untilNanos: snapshot.ExpiresNanos, observedNanos: snapshot.ObservedNanos}
+		r.guardGrants[u.Name] = guardGrant{revision: r.config.revision, generation: u.Generation, sequence: u.Sequence, epoch: u.ProducerEpoch, bootID: snapshot.BootID, value: snapshot.Active, untilNanos: snapshot.ExpiresNanos, observedNanos: snapshot.ObservedNanos}
 		return
 	}
 	var snapshot struct {
@@ -153,7 +151,7 @@ func (r *Runtime) recordGuardGrantLocked(u serviceconfig.Update, now time.Time) 
 	}
 	until := uint64(clock.BoottimeNanoseconds) + uint64(remaining)
 	observed := uint64(clock.BoottimeNanoseconds)
-	if old, ok := r.guardGrants[u.Name]; ok && old.revision == r.revision && old.generation == u.Generation && old.epoch == u.ProducerEpoch && old.bootID == clock.BootID && old.value == snapshot.Active && (old.deadline.Equal(deadline) || bytes.Equal(r.records[u.Name].Snapshot, u.Snapshot)) {
+	if old, ok := r.guardGrants[u.Name]; ok && old.revision == r.config.revision && old.generation == u.Generation && old.epoch == u.ProducerEpoch && old.bootID == clock.BootID && old.value == snapshot.Active && (old.deadline.Equal(deadline) || bytes.Equal(r.records[u.Name].Snapshot, u.Snapshot)) {
 		until = old.untilNanos
 		observed = old.observedNanos
 		deadline = old.deadline
@@ -161,38 +159,33 @@ func (r *Runtime) recordGuardGrantLocked(u serviceconfig.Update, now time.Time) 
 	if r.guardGrants == nil {
 		r.guardGrants = make(map[string]guardGrant)
 	}
-	r.guardGrants[u.Name] = guardGrant{revision: r.revision, generation: u.Generation, sequence: u.Sequence, epoch: u.ProducerEpoch, bootID: clock.BootID, value: snapshot.Active, deadline: deadline, untilNanos: until, observedNanos: observed}
+	r.guardGrants[u.Name] = guardGrant{revision: r.config.revision, generation: u.Generation, sequence: u.Sequence, epoch: u.ProducerEpoch, bootID: clock.BootID, value: snapshot.Active, deadline: deadline, untilNanos: until, observedNanos: observed}
 
 }
 
 // conditionFactsLocked adapts already validated protocol messages and a fresh
 // supervisor observation into one finite fact snapshot. Workers cannot select
 // their keys, activate producers, or publish generic arbitrary facts.
-func (r *Runtime) conditionFactsLocked(source config.Document, revision uint64, now time.Time) (result resourceprogram.FactSnapshot, resultErr error) {
+func (r *Runtime) conditionFactsLocked(cfg configuration, now time.Time) (result resourceprogram.FactSnapshot, resultErr error) {
+	if cfg.revision != r.config.revision || cfg.digest != r.config.digest {
+		return resourceprogram.FactSnapshot{}, nil
+	}
 	defer func() {
 		if resultErr == nil {
-			resultErr = r.observeEventRulesLocked(source, result)
+			resultErr = r.observeEventRulesLocked(result)
 		}
 		if resultErr == nil {
 			resultErr = r.observeDerivedLocked(result)
 		}
 	}()
-	if revision != r.revision || !now.Before(r.guardUntil) {
+	if !now.Before(r.guardUntil) {
 		return resourceprogram.FactSnapshot{}, nil
 	}
 	clock, err := bfd.ReadClock()
 	if err != nil {
 		return resourceprogram.FactSnapshot{}, nil
 	} // fail closed
-	encoded, err := json.Marshal(source)
-	if err != nil {
-		return resourceprogram.FactSnapshot{}, err
-	}
-	sum := sha256.Sum256(encoded)
-	if hex.EncodeToString(sum[:]) != r.sourceDigest {
-		return resourceprogram.FactSnapshot{}, nil
-	}
-	scope := resourceprogram.FactScope{BootID: clock.BootID, ConfigDigest: hex.EncodeToString(sum[:]), OperatorRevision: revision, ProjectionGeneration: r.projectionGeneration}
+	scope := resourceprogram.FactScope{BootID: clock.BootID, ConfigDigest: cfg.digest, OperatorRevision: cfg.revision, ProjectionGeneration: r.projectionGeneration}
 	ticks := uint64(clock.BoottimeNanoseconds)
 	if r.guardBootID != clock.BootID || ticks >= r.guardUntilNanos {
 		return resourceprogram.FactSnapshot{}, nil
@@ -210,7 +203,7 @@ func (r *Runtime) conditionFactsLocked(source config.Document, revision uint64, 
 		facts.Facts[name+".ready"] = resourceprogram.Fact{Value: ready, ObservedNanos: r.guardUntilNanos - uint64(time.Second), ExpiresNanos: r.guardUntilNanos, WorkerGeneration: module.Generation, ProducerEpoch: r.supervisorInstance}
 		grant, ok := r.guardGrants[name]
 		record := r.records[name]
-		if !ok || !module.Ready || grant.revision != revision || grant.bootID != clock.BootID || grant.generation != module.Generation || grant.epoch != record.ProducerEpoch || grant.sequence != record.Sequence {
+		if !ok || !module.Ready || grant.revision != cfg.revision || grant.bootID != clock.BootID || grant.generation != module.Generation || grant.epoch != record.ProducerEpoch || grant.sequence != record.Sequence {
 			continue
 		}
 		until := min(grant.untilNanos, r.guardUntilNanos)
@@ -241,29 +234,26 @@ func (r *Runtime) conditionFactsLocked(source config.Document, revision uint64, 
 			}
 		}
 	}
-	return r.conditionTimeline.Observe(source, facts)
+	return r.conditionTimeline.Observe(cfg.source, facts)
 }
 
-func (r *Runtime) projectProgramLocked(source config.Document, revision uint64, full config.Native, records map[string]serviceconfig.Update, now time.Time) (projection, error) {
+func (r *Runtime) projectProgramLocked(cfg configuration, records map[string]serviceconfig.Update, now time.Time) (projection, error) {
 	// Preserve the existing static fast path. Runtime readiness edges are opt-in
 	// through ready_when; process readiness is not protocol readiness.
-	if !conditionalProgram(source) {
-		p, err := r.projectLocked(full, records, now)
-		p.resources = make(map[string]resourceprogram.ResourceState, len(source.Resources))
-		for _, resource := range source.Resources {
+	if !conditionalProgram(cfg.source) {
+		p, err := r.projectLocked(cfg.plan.Native, records, now)
+		p.resources = make(map[string]resourceprogram.ResourceState, len(cfg.source.Resources))
+		for _, resource := range cfg.source.Resources {
 			p.resources[resource.ID] = resourceprogram.ResourceState{Active: true, Ready: resourceprogram.True, When: resourceprogram.True}
 		}
 		return p, err
 	}
-	facts, err := r.conditionFactsLocked(source, revision, now)
+	facts, err := r.conditionFactsLocked(cfg, now)
 	if err != nil {
 		return projection{}, err
 	}
-	plan, states, err := resourceprogram.Project(source, facts)
-	if err != nil {
-		return projection{}, err
-	}
-	p, err := r.projectLocked(plan.Native, records, now)
+	native, states := cfg.plan.Project(facts)
+	p, err := r.projectLocked(native, records, now)
 	p.resources = states
 	return p, err
 }

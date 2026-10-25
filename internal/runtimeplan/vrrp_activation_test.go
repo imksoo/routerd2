@@ -68,7 +68,7 @@ func TestGracefulVRRPRequiresCurrentAdmissionAndLatchesOnlyAppliedPublication(t 
 		t.Fatal("unpublished elected MASTER was reported healthy")
 	}
 	r.mu.Lock()
-	facts, factErr := r.conditionFactsLocked(r.source, r.revision, time.Now())
+	facts, factErr := r.conditionFactsLocked(r.config, time.Now())
 	r.mu.Unlock()
 	if factErr != nil || facts.Value("service.ha.elected") != resourceprogram.True || facts.Value("service.ha.active") != resourceprogram.False {
 		t.Fatal("election and publication facts were conflated", factErr)

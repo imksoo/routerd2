@@ -85,7 +85,15 @@ type InstanceStatus struct {
 	Sequence           uint64           `json:"sequence,omitempty"`
 	Snapshot           json.RawMessage  `json:"snapshot,omitempty"`
 }
+type configuration struct {
+	source   config.Document
+	plan     resourceprogram.Plan
+	digest   string
+	revision uint64
+}
+
 type Runtime struct {
+	config             configuration
 	reconcileWake      chan struct{}
 	waitWake           chan struct{}
 	supervisorInstance string              // immutable authority inherited by the control worker
@@ -100,9 +108,6 @@ type Runtime struct {
 	dir, stateDir        string
 	network              Network
 	manager              moduleManager
-	current              config.Native
-	source               config.Document
-	sourceDigest         string
 	sourceEpoch          uint64
 	resourceStates       map[string]resourceprogram.ResourceState
 	guardStatus          map[string]supervisor.ModuleStatus
@@ -115,7 +120,6 @@ type Runtime struct {
 	ruleIncarnation      string
 	derivedContinuity    map[string]derivedContinuity
 	projectionGeneration uint64
-	revision             uint64
 	configured           bool
 	initialized          bool
 	bindings             map[string]binding
@@ -171,9 +175,9 @@ func (r *Runtime) CheckReady(ctx context.Context) error {
 			}
 		}
 	}
-	if conditionalProgram(r.source) {
+	if conditionalProgram(r.config.source) {
 		r.installGuardStatusLocked(s, nil)
-		p, err := r.projectProgramLocked(r.source, r.revision, r.current, r.effectiveRecordsLocked(time.Now()), time.Now())
+		p, err := r.projectProgramLocked(r.config, r.effectiveRecordsLocked(time.Now()), time.Now())
 		if err != nil {
 			return err
 		}
@@ -200,6 +204,7 @@ func (r *Runtime) failure(err error) error {
 
 // ApplyConfig accepts only a source ResourceProgram. Compilation is pure and
 // completes before process reconciliation, instance-file writes, or kernel I/O.
+// The control engine owns immutable source data for the plan lifetime.
 // Protocol facts can change its projection, but cannot replace operator intent.
 func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source config.Document) error {
 	plan, err := config.Compile(source)
@@ -208,10 +213,9 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 	}
 	doc := plan.Native
 	encoded, _ := json.Marshal(source)
-	var ownedSource config.Document
-	if err := json.Unmarshal(encoded, &ownedSource); err != nil {
-		return err
-	}
+	sourceSum := sha256.Sum256(encoded)
+	sourceDigest := hex.EncodeToString(sourceSum[:])
+	next := configuration{source: source, plan: plan, digest: sourceDigest, revision: revision}
 	if err := r.op.Acquire(ctx, 1); err != nil {
 		return r.failure(err)
 	}
@@ -232,7 +236,7 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 	retained, err := r.retainedLocked(doc)
 	var p projection
 	if err == nil {
-		p, err = r.projectProgramLocked(ownedSource, revision, doc, retained, time.Now())
+		p, err = r.projectProgramLocked(next, retained, time.Now())
 	}
 	r.mu.Unlock()
 	if err != nil {
@@ -250,7 +254,7 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 	// their latest acknowledged facts at cutover; never restore an older lease.
 	retained, err = r.retainedLocked(doc)
 	if err == nil {
-		p, err = r.projectProgramLocked(ownedSource, revision, doc, retained, time.Now())
+		p, err = r.projectProgramLocked(next, retained, time.Now())
 	}
 	var bindings map[string]binding
 	if err == nil {
@@ -265,9 +269,7 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 		r.mu.Unlock()
 		return r.failure(err)
 	}
-	sourceSum := sha256.Sum256(encoded)
-	sourceDigest := hex.EncodeToString(sourceSum[:])
-	if r.revision != revision || r.sourceDigest != sourceDigest {
+	if r.config.revision != revision || r.config.digest != sourceDigest {
 		if r.sourceEpoch == math.MaxUint64 {
 			r.mu.Unlock()
 			return r.failure(errors.New("source cutover epoch exhausted"))
@@ -281,10 +283,7 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 		r.guardStatus = nil
 		r.guardUntil = time.Time{}
 	}
-	r.current = doc
-	r.source = ownedSource
-	r.sourceDigest = sourceDigest
-	r.revision = revision
+	r.config = next
 	r.configured = true
 	r.records = retained
 	r.bindings = bindings
@@ -506,13 +505,13 @@ func (r *Runtime) applyNetworkLocked(ctx context.Context, d network.Desired) err
 	b, _ := json.Marshal(struct {
 		Revision uint64
 		Desired  network.Desired
-	}{r.revision, d})
+	}{r.config.revision, d})
 	h := sha256.Sum256(b)
 	digest := hex.EncodeToString(h[:])
 	if digest == r.appliedHash && time.Since(r.lastNetworkApply) < 5*time.Second {
 		return nil
 	}
-	if err := r.network.Apply(ctx, r.revision, d); err != nil {
+	if err := r.network.Apply(ctx, r.config.revision, d); err != nil {
 		r.bgpApplied = nil
 		return err
 	}
@@ -651,7 +650,7 @@ func (r *Runtime) Accept(ctx context.Context, u serviceconfig.Update) error {
 			}
 			if u.Sequence == old.Sequence {
 				if bytes.Equal(u.Snapshot, old.Snapshot) {
-					if u.Role == "vrrp" && conditionalProgram(r.source) {
+					if u.Role == "vrrp" && conditionalProgram(r.config.source) {
 						return r.waitVRRPEffectLocked(ctx, u)
 					}
 					return nil
@@ -693,10 +692,10 @@ func (r *Runtime) Accept(ctx context.Context, u serviceconfig.Update) error {
 			return err
 		}
 	}
-	if conditionalProgram(r.source) {
+	if conditionalProgram(r.config.source) {
 		candidateRecords := r.effectiveRecordsLocked(time.Now())
 		candidateRecords[u.Name] = u
-		if _, err := r.projectLocked(r.current, candidateRecords, time.Now()); err != nil {
+		if _, err := r.projectLocked(r.config.plan.Native, candidateRecords, time.Now()); err != nil {
 			if oldLease.IsZero() {
 				delete(r.leases, u.Name)
 			} else {
@@ -709,7 +708,7 @@ func (r *Runtime) Accept(ctx context.Context, u serviceconfig.Update) error {
 		r.revokeVRRPPublicationLocked(u)
 		// Observe every accepted transition, including flaps that finish between
 		// monitor ticks. This updates only temporal condition state, not effects.
-		if _, err := r.conditionFactsLocked(r.source, r.revision, time.Now()); err != nil {
+		if _, err := r.conditionFactsLocked(r.config, time.Now()); err != nil {
 			return err
 		}
 		if u.Role == "vrrp" {
@@ -720,10 +719,10 @@ func (r *Runtime) Accept(ctx context.Context, u serviceconfig.Update) error {
 		return nil
 	}
 	r.records[u.Name] = u
-	if len(r.current.DerivedEvents) > 0 {
+	if len(r.config.plan.Native.DerivedEvents) > 0 {
 		r.recordGuardGrantLocked(u, time.Now())
 	}
-	p, err := r.projectProgramLocked(r.source, r.revision, r.current, r.effectiveRecordsLocked(time.Now()), time.Now())
+	p, err := r.projectProgramLocked(r.config, r.effectiveRecordsLocked(time.Now()), time.Now())
 	if err == nil {
 		err = r.applyNetworkLocked(ctx, p.network)
 	}
@@ -738,10 +737,10 @@ func (r *Runtime) Accept(ctx context.Context, u serviceconfig.Update) error {
 		} else {
 			delete(r.records, u.Name)
 		}
-		old, compileErr := r.projectProgramLocked(r.source, r.revision, r.current, r.effectiveRecordsLocked(time.Now()), time.Now())
+		old, compileErr := r.projectProgramLocked(r.config, r.effectiveRecordsLocked(time.Now()), time.Now())
 		if compileErr == nil {
 			restoreCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			compileErr = r.network.Apply(restoreCtx, r.revision, old.network)
+			compileErr = r.network.Apply(restoreCtx, r.config.revision, old.network)
 			cancel()
 		}
 		r.appliedHash = ""
@@ -758,8 +757,8 @@ func (r *Runtime) Accept(ctx context.Context, u serviceconfig.Update) error {
 		// publication has completed the existing network ACK boundary.
 		r.acceptBFDRecipientLocked(u)
 	}
-	if len(r.current.DerivedEvents) > 0 {
-		_, err := r.conditionFactsLocked(r.source, r.revision, time.Now())
+	if len(r.config.plan.Native.DerivedEvents) > 0 {
+		_, err := r.conditionFactsLocked(r.config, time.Now())
 		return err
 	}
 	return nil
@@ -987,7 +986,7 @@ func (r *Runtime) reconcileDynamic(ctx context.Context) error {
 		r.mu.Unlock()
 		return nil
 	}
-	p, err := r.projectProgramLocked(r.source, r.revision, r.current, r.effectiveRecordsLocked(time.Now()), time.Now())
+	p, err := r.projectProgramLocked(r.config, r.effectiveRecordsLocked(time.Now()), time.Now())
 	r.mu.Unlock()
 	if err != nil {
 		return err
@@ -1004,11 +1003,11 @@ func (r *Runtime) reconcileDynamic(ctx context.Context) error {
 	r.mu.Lock()
 	// Quiescing may take time. Never use an expired conditional authorization.
 	// Retry with a fresh supervisor observation before applying or starting work.
-	if conditionalProgram(r.source) && !time.Now().Before(r.guardUntil) {
+	if conditionalProgram(r.config.source) && !time.Now().Before(r.guardUntil) {
 		r.mu.Unlock()
 		return nil
 	}
-	latest, projectionErr := r.projectProgramLocked(r.source, r.revision, r.current, r.effectiveRecordsLocked(time.Now()), time.Now())
+	latest, projectionErr := r.projectProgramLocked(r.config, r.effectiveRecordsLocked(time.Now()), time.Now())
 	if projectionErr != nil {
 		r.mu.Unlock()
 		return projectionErr
@@ -1027,7 +1026,7 @@ func (r *Runtime) reconcileDynamic(ctx context.Context) error {
 	r.liveRA, r.routeIssues = p.liveRA, p.routeIssues
 	r.bgpApplied = p.bgpStatus
 	r.resourceStates = p.resources
-	if conditionalProgram(r.source) {
+	if conditionalProgram(r.config.source) {
 		for _, record := range r.records {
 			if record.Role == "bgp" {
 				r.acceptBFDRecipientLocked(record)

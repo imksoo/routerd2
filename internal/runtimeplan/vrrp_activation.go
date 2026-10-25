@@ -69,7 +69,7 @@ func (r *Runtime) validateVRRPAdmissionLocked(u serviceconfig.Update) error {
 		return errors.New("VRRP publication requires a current control-issued admission grant")
 	}
 	c, _ := r.gracefulVRRPConfigLocked(u.Name)
-	facts, factErr := r.conditionFactsLocked(r.source, r.revision, time.Now())
+	facts, factErr := r.conditionFactsLocked(r.config, time.Now())
 	if factErr != nil {
 		return factErr
 	}
@@ -124,7 +124,7 @@ func (r *Runtime) GrantVRRPActivation(ctx context.Context, u serviceconfig.Updat
 		return denied, ErrStale
 	}
 	r.installGuardStatusLocked(status, nil)
-	facts, err := r.conditionFactsLocked(r.source, r.revision, time.Now())
+	facts, err := r.conditionFactsLocked(r.config, time.Now())
 	if err != nil {
 		return denied, err
 	}

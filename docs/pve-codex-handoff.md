@@ -56,14 +56,28 @@ Healthの実TCP・HTTP・DNS・raw ICMP、VRRP復旧、二WAN切替、履歴復�
 新IPCでのQEMU電源断試験、arm64実行、対象実機は未検証。
 過去成果物とのhash一致は作業の前提にしない。
 
+## 計算済み設定への整理
+
+設定をJSONで複製していたresource compiler/runtimeの処理を削除した。
+control所有の読み取り専用宣言を共有し、宣言・Plan・digest・revisionを一つの値で扱う。
+観測ごとの全体/選択部分/lifecycleの再コンパイルとsourceの再hashを廃止した。
+EventRule/DerivedEvent controllerも計算済みprogramとidentityを受け取り、同じ構成の
+登録を200msごとに読み直さない。期限・観測・continuityは静的宣言と区別する。
+
+`make check build-linux RELEASE_ID=compiled-plan` が成功。PVEの同じ隔離環境で
+Race付きharnessと新バイナリを使い、Health/PBR二WAN、VRRP graceful、DerivedHealth、
+EventRule、BGP-derived、BFD-derivedの6系統が成功した。
+ログは `dist/compiled-plan-check.log` と `dist/compiled-plan-native-TestDaemon*.log`。
+QEMU、arm64実行、実機は今回の変更で再検証していない。
+
 ## 続ける実装
 
 1. 観測受理・kernel適用・worker起動停止を一つの実行責務へ揃える。
    現状は条件付き構成の一般通知が適用前に成功を返し、VRRPには複数の適用経路と
    grant往復がある。単に全通知を待機させると停止中のcallbackと循環する。
 2. 条件評価の一時FactStore・仮producer登録は廃止した。値・元の期限・実producerの
-   識別情報を一つのFactへまとめ、直接評価する。続けて受理時の型付き保持を統一し、
-   期限切れを表すJSON書換えと、観測ごとの設定再コンパイルを廃止する。
+   識別情報を一つのFactへまとめ、直接評価する。設定再コンパイルも廃止した。
+   受理時の型付き保持、期限切れを表すJSON書換えの廃止、条件式の静的計算が残る。
 3. 実装計画の残機能を順に接続し、実通信と障害後の復旧を確認する。
    既存チェックが通っても、全作業完了へ読み替えない。
 

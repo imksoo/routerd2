@@ -73,6 +73,7 @@ func (c *Controller) Sync(ctx context.Context, revision uint64, rules []resource
 	defer func() {
 		if err != nil {
 			c.bindings = nil
+			c.status.Revision = 0
 		}
 	}()
 	if c.store == nil || revision == 0 || len(rules) > 128 {
@@ -84,17 +85,18 @@ func (c *Controller) Sync(ctx context.Context, revision uint64, rules []resource
 		if _, duplicate := programs[rule.ID]; duplicate {
 			return errors.New("duplicate event rule resource")
 		}
-		p, compileErr := eventrule.Compile(rule.ID, rule.Spec)
-		if compileErr != nil {
-			return fmt.Errorf("event rule %s: %w", rule.ID, compileErr)
+		programs[rule.ID] = rule.Compiled
+		identities[rule.ID] = rule.Identity
+	}
+	unchanged := c.status.Revision == revision && len(c.bindings) == len(rules)
+	for _, binding := range c.bindings {
+		if identities[binding.id] != binding.Identity {
+			unchanged = false
+			break
 		}
-		body, encodeErr := json.Marshal(rule)
-		if encodeErr != nil {
-			return encodeErr
-		}
-		sum := sha256.Sum256(body)
-		programs[rule.ID] = p
-		identities[rule.ID] = hex.EncodeToString(sum[:])
+	}
+	if unchanged {
+		return nil
 	}
 	cp, err := c.store.ProducerCheckpoint(ctx, registryName)
 	if err != nil {

@@ -16,15 +16,7 @@ type LifecycleEvidence struct {
 	Authority   string
 }
 
-func (s FactSnapshot) Lifecycle(program Program) (map[string]LifecycleEvidence, error) {
-	plan, err := Compile(program)
-	if err != nil {
-		return nil, err
-	}
-	byID := map[string]Resource{}
-	for _, r := range program.Resources {
-		byID[r.ID] = r
-	}
+func (plan Plan) Lifecycle(s FactSnapshot) map[string]LifecycleEvidence {
 	active := map[string]LifecycleEvidence{}
 	ready := map[string]LifecycleEvidence{}
 	leaf := func(c *FactCondition) LifecycleEvidence {
@@ -45,18 +37,22 @@ func (s FactSnapshot) Lifecycle(program Program) (map[string]LifecycleEvidence, 
 		}
 		scope := s.Scope
 		scope.ProjectionGeneration = 0
-		body, _ := json.Marshal([]any{scope, authorities})
+		body, _ := json.Marshal(struct {
+			Scope       FactScope
+			Authorities []string
+		}{scope, authorities})
 		sum := sha256.Sum256(body)
 		p.Authority = hex.EncodeToString(sum[:])
 		return p
 	}
-	for _, id := range plan.Order {
-		parts := []LifecycleEvidence{leaf(byID[id].When)}
+	for _, node := range plan.nodes {
+		id := node.source.ID
+		parts := []LifecycleEvidence{leaf(node.source.When)}
 		for _, dep := range plan.Dependencies[id] {
 			parts = append(parts, ready[dep])
 		}
 		active[id] = join(parts)
-		ready[id] = join([]LifecycleEvidence{active[id], leaf(byID[id].ReadyWhen)})
+		ready[id] = join([]LifecycleEvidence{active[id], leaf(node.source.ReadyWhen)})
 	}
-	return active, nil
+	return active
 }
