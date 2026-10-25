@@ -52,11 +52,15 @@ func Run(ctx context.Context, cfg Config, effects Effects, ready func()) error {
 func applyActions(ctx context.Context, m *machine, a actions, device transport, effects Effects) error {
 	if a.update || a.advertise {
 		previouslyPublished := m.published
+		previousPriority := m.priority()
 		if err := publishOwnership(ctx, m, effects); err != nil {
 			return err
 		}
 		if !previouslyPublished && m.published {
 			a.advertise, a.notify = true, true
+		}
+		if m.state == StateActive && previousPriority != m.priority() {
+			a.advertise = true
 		}
 	}
 	if !m.published {
@@ -72,7 +76,7 @@ func applyActions(ctx context.Context, m *machine, a actions, device transport, 
 		}
 	}
 	if a.advertise {
-		if err := sendAdvertisement(ctx, m, device, uint8(m.config.Priority)); err != nil {
+		if err := sendAdvertisement(ctx, m, device, false); err != nil {
 			return err
 		}
 	}
@@ -99,6 +103,8 @@ func publishOwnership(ctx context.Context, m *machine, effects Effects) error {
 	if err != nil {
 		return err
 	}
+	previousPriority := m.priority()
+	m.expireTracks(uint64(clock.BoottimeNanoseconds))
 	if err = m.stampObservation(clock); err != nil {
 		return err
 	}
@@ -117,22 +123,29 @@ func publishOwnership(ctx context.Context, m *machine, effects Effects) error {
 		defer cancelLease()
 		operation = leased
 	}
-	published, err := effects.Apply(operation, m.snapshot())
+	decision, err := effects.Apply(operation, m.snapshot())
 	if err != nil {
 		return fmt.Errorf("VRRP ownership %s: %w", m.state, err)
 	}
-	if m.state == StateActive {
-		clock, err = boottime.Read()
-		if err != nil || !CurrentElection(m.snapshot(), clock) {
-			return errors.Join(errors.New("VRRP election expired before acknowledgement"), err)
-		}
+	if err := validateTracks(m.config, decision.Track); err != nil {
+		return err
 	}
-	if m.state == StateActive && m.config.GracefulActivation == nil && !published {
+	clock, err = boottime.Read()
+	if err != nil {
+		return err
+	}
+	if m.state == StateActive && !CurrentElection(m.snapshot(), clock) {
+		return errors.New("VRRP election expired before acknowledgement")
+	}
+	if m.state == StateActive && m.config.GracefulActivation == nil && !decision.Active {
 		return errors.New("VRRP elected ownership was not installed")
 	}
-	m.published = published
+	m.track = append(m.track[:0], decision.Track...)
+	m.expireTracks(uint64(clock.BoottimeNanoseconds))
+	m.retimePriority(time.Now(), previousPriority)
+	m.published = decision.Active
 	m.activationStatus(clock)
-	if published {
+	if decision.Active {
 		m.validUntil = deadline
 	} else {
 		m.validUntil = time.Time{}
@@ -140,21 +153,15 @@ func publishOwnership(ctx context.Context, m *machine, effects Effects) error {
 	return nil
 }
 
-func sendAdvertisement(ctx context.Context, m *machine, device transport, priority uint8) error {
-	if priority != 0 {
-		clock, err := boottime.Read()
-		if err != nil || !CurrentElection(m.snapshot(), clock) || m.config.GracefulActivation == nil && !m.published {
-			return errors.Join(errors.New("VRRP election expired before advertisement"), err)
-		}
-	}
+func sendAdvertisement(ctx context.Context, m *machine, device transport, stopping bool) error {
 	deadline := time.Now().Add(250 * time.Millisecond)
-	if priority != 0 {
+	if !stopping {
 		clock, err := boottime.Read()
 		if err != nil {
 			return err
 		}
-		if !CurrentElection(m.snapshot(), clock) {
-			return errors.New("VRRP election expired before send deadline")
+		if !CurrentElection(m.snapshot(), clock) || m.config.GracefulActivation == nil && !m.published {
+			return errors.New("VRRP election expired before advertisement")
 		}
 		deadline = minTime(deadline, time.Now().Add(time.Duration(m.expiresNanos-uint64(clock.BoottimeNanoseconds))))
 	}
@@ -168,6 +175,17 @@ func sendAdvertisement(ctx context.Context, m *machine, device transport, priori
 		destinations = []netip.Addr{multicastGroup(m.config.Family)}
 	}
 	for _, destination := range destinations {
+		var priority uint8
+		if !stopping {
+			clock, err := boottime.Read()
+			if err != nil {
+				return err
+			}
+			// Verification and earlier unicast sends can outlive a Health
+			// decision. Use only the priority its original deadline permits.
+			m.expireTracks(uint64(clock.BoottimeNanoseconds))
+			priority = uint8(m.priority())
+		}
 		p := datagram{source: m.source, destination: destination, hopLimit: 255, payload: marshalAdvertisement(m.config, m.source, destination, priority)}
 		if err := device.Advertise(operation, p); err != nil {
 			return fmt.Errorf("send VRRP advertisement to %s: %w", destination, err)
@@ -191,7 +209,7 @@ func withdraw(m *machine, device transport, effects Effects) error {
 	if m.state == StateActive && m.advertisements != 0 {
 		// Priority zero accelerates the peer's failover while the departing
 		// owner can still forward. Withdrawal then prevents further ownership.
-		sendErr = sendAdvertisement(ctx, m, device, 0)
+		sendErr = sendAdvertisement(ctx, m, device, true)
 	}
 	m.enter(StateInitialize, time.Now())
 	clock, clockErr := boottime.Read()
@@ -259,7 +277,7 @@ func run(ctx context.Context, cfg Config, source netip.Addr, epoch string, devic
 	}
 	nextDiagnostic := time.Time{}
 	observationInterval := time.Second
-	if cfg.GracefulActivation != nil {
+	if cfg.GracefulActivation != nil || len(cfg.Track) != 0 {
 		observationInterval = 250 * time.Millisecond
 	}
 	observationTicker := time.NewTicker(observationInterval)

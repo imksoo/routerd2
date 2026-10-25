@@ -15,12 +15,12 @@ type activationEffects struct {
 	snapshots []Snapshot
 }
 
-func (e *activationEffects) Apply(_ context.Context, s Snapshot) (bool, error) {
+func (e *activationEffects) Apply(_ context.Context, s Snapshot) (Decision, error) {
 	e.snapshots = append(e.snapshots, s)
 	e.device.mu.Lock()
 	e.device.active = e.published
 	e.device.mu.Unlock()
-	return e.published, nil
+	return Decision{Active: e.published}, nil
 }
 
 func TestGracefulTimeoutNeverPublishesAndReadinessIsAdmissionOnly(t *testing.T) {

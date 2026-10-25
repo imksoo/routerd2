@@ -127,8 +127,10 @@ func (r *Runtime) finishApplicationsLocked(p projection, applyErr error) {
 			switch effect.update.Role {
 			case "vrrp":
 				_, active := p.vrrpOwners[name]
-				effect.receipt.Active = active
 				err = vrrpEffectApplied(effect.update, p.network, active)
+				if err == nil {
+					effect.receipt.VRRP, err = r.vrrpDecisionLocked(name, active)
+				}
 			case "bgp":
 				err = bgpApplicationApplied(effect.update, p)
 			}

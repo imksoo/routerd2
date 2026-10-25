@@ -70,7 +70,7 @@ func TestGracefulVRRPAdmissionReturnsAppliedOwnershipAndSurvivesReadinessLoss(t 
 	election.ActivationStartedNanos = election.ObservedNanos
 	u := update(t, r, "service.ha", 1, election)
 	receipt, err := applyAndDrain(t, r, u)
-	if err != nil || !receipt.Applied || receipt.Active || len(n.applied.Links) != 0 || r.CheckReady(ctx) == nil {
+	if err != nil || !receipt.Applied || receipt.VRRP.Active || len(n.applied.Links) != 0 || r.CheckReady(ctx) == nil {
 		t.Fatal("unready election acquired ownership or reported healthy", receipt, err)
 	}
 	if err := r.Observe(ctx, update(t, r, "service.wan", 1, lease4(time.Now().Add(time.Hour)))); err != nil {
@@ -78,7 +78,7 @@ func TestGracefulVRRPAdmissionReturnsAppliedOwnershipAndSurvivesReadinessLoss(t 
 	}
 	u.Sequence++
 	receipt, err = applyAndDrain(t, r, u)
-	if err != nil || !receipt.Active || len(n.applied.Links) != 1 || r.CheckReady(ctx) != nil {
+	if err != nil || !receipt.VRRP.Active || len(n.applied.Links) != 1 || r.CheckReady(ctx) != nil {
 		t.Fatal("readiness did not apply the elected VIP", receipt, err)
 	}
 	found := false
@@ -191,7 +191,7 @@ func TestGracefulVRRPAdmissionIsConsumedWhenKernelApplicationBegins(t *testing.T
 	release()
 	select {
 	case v := <-done:
-		if v.err != nil || !v.receipt.Applied || !v.receipt.Active {
+		if v.err != nil || !v.receipt.Applied || !v.receipt.VRRP.Active {
 			t.Fatal("readiness loss during admitted IO revoked successful ownership", v)
 		}
 	case <-ctx.Done():

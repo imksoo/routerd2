@@ -5,9 +5,38 @@ package network
 import (
 	"context"
 	"math"
+	"slices"
 	"testing"
 	"time"
 )
+
+func TestRenewedDeadlineUpdatesKernelEvenWithinLifetimeRoundingTolerance(t *testing.T) {
+	k := fake()
+	e, _ := engineFor(t, k)
+	address := "192.0.2.254/32"
+	deadline := time.Now().Add(5500 * time.Millisecond)
+	o := AddressOptions{PreferredUntil: deadline, ValidUntil: deadline}
+	d := Desired{Interfaces: []Interface{{Name: "lan0", Addresses: []string{address}, AddressOptions: map[string]AddressOptions{address: o}}}}
+	if _, err := e.Apply(context.Background(), 1, d); err != nil {
+		t.Fatal(err)
+	}
+	k.writes = nil
+	o.PreferredUntil, o.ValidUntil = deadline.Add(200*time.Millisecond), deadline.Add(200*time.Millisecond)
+	d.Interfaces[0].AddressOptions[address] = o
+	if _, err := e.Apply(context.Background(), 1, d); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(k.writes, "address-update") {
+		t.Fatal("renewal changed the journal without renewing the kernel timer", k.writes)
+	}
+	k.writes = nil
+	if _, err := e.Apply(context.Background(), 1, d); err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(k.writes, "address-update") {
+		t.Fatal("replay renewed the same original deadline")
+	}
+}
 
 func TestPeerAddressOwnershipRestartAndDeletion(t *testing.T) {
 	k := fake()

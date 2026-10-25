@@ -33,6 +33,8 @@ type machine struct {
 	validUntil             time.Time
 	peer                   netip.Addr
 	peerPriority           uint8
+	peerReceived           time.Time
+	track                  []TrackStatus
 	advertisements         uint64
 	received               uint64
 	rejected               uint64
@@ -43,11 +45,11 @@ type machine struct {
 
 func newMachine(c Config, source netip.Addr, epoch string) *machine {
 	c = Normalize(c)
-	return &machine{config: c, source: source, epoch: epoch, state: StateInitialize, activeInterval: c.interval()}
+	return &machine{config: c, source: source, epoch: epoch, state: StateInitialize, activeInterval: c.interval(), track: initialTracks(c)}
 }
 
 func (m *machine) skew() time.Duration {
-	return time.Duration(256-m.config.Priority) * m.activeInterval / 256
+	return time.Duration(256-m.priority()) * m.activeInterval / 256
 }
 
 func (m *machine) downInterval() time.Duration { return 3*m.activeInterval + m.skew() }
@@ -62,6 +64,7 @@ func (m *machine) enter(state string, now time.Time) {
 	case StateActive:
 		m.deadline = now.Add(m.config.interval())
 		m.peer, m.peerPriority = netip.Addr{}, 0
+		m.peerReceived = time.Time{}
 	case StateBackup:
 		m.deadline = now.Add(m.downInterval())
 	default:
@@ -114,9 +117,11 @@ func (m *machine) receive(now time.Time, p advertisement) actions {
 	if m.state == StateBackup {
 		if p.priority == 0 {
 			m.peer, m.peerPriority = p.source, p.priority
+			m.peerReceived = now
 			m.deadline = now.Add(m.skew())
-		} else if !m.config.preempt() || int(p.priority) >= m.config.Priority {
+		} else if !m.config.preempt() || int(p.priority) >= m.priority() {
 			m.peer, m.peerPriority = p.source, p.priority
+			m.peerReceived = now
 			m.activeInterval = p.interval
 			m.deadline = now.Add(m.downInterval())
 		}
@@ -127,9 +132,10 @@ func (m *machine) receive(now time.Time, p advertisement) actions {
 			m.deadline = now.Add(m.config.interval())
 			return actions{advertise: true}
 		}
-		if int(p.priority) > m.config.Priority || int(p.priority) == m.config.Priority && p.source.Compare(m.source) > 0 {
+		if int(p.priority) > m.priority() || int(p.priority) == m.priority() && p.source.Compare(m.source) > 0 {
 			m.activeInterval = p.interval
 			m.peer, m.peerPriority = p.source, p.priority
+			m.peerReceived = now
 			m.enter(StateBackup, now)
 			return actions{update: true}
 		}
@@ -152,7 +158,7 @@ func (m *machine) snapshot() Snapshot {
 		Family: m.config.Family, SourceAddress: m.source.String(), VirtualRouterID: m.config.VirtualRouterID,
 		VirtualMAC: VirtualMAC(m.config.Family, m.config.VirtualRouterID).String(), Addresses: append([]string(nil), m.config.Addresses...),
 		Active: m.published, State: m.state, AcceptMode: m.config.AcceptMode || m.config.AddressOwner, AddressOwner: m.config.AddressOwner,
-		Epoch: m.epoch, Transition: m.transition, Priority: m.config.Priority, Peer: peer, PeerPriority: int(m.peerPriority),
+		Epoch: m.epoch, Transition: m.transition, Priority: m.priority(), Peer: peer, PeerPriority: int(m.peerPriority), Track: append([]TrackStatus(nil), m.track...),
 		ActiveIntervalCS: int(m.activeInterval / (10 * time.Millisecond)), Deadline: m.deadline, ValidUntil: m.validUntil,
 		Advertisements: m.advertisements, Received: m.received, Rejected: m.rejected, ReceiveDropped: m.receiveDropped,
 		IntervalMismatch: m.intervalMismatch, LastError: m.lastError,

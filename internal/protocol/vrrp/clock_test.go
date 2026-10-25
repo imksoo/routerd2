@@ -113,7 +113,10 @@ func TestBackupPublishesFreshFiniteNegativeObservationsWithoutTransition(t *test
 	updates := make(chan Snapshot, 8)
 	done := make(chan error, 1)
 	go func() {
-		done <- run(ctx, c, netip.MustParseAddr(c.SourceAddress), strings.Repeat("d", 32), device, EffectsFunc(func(_ context.Context, s Snapshot) (bool, error) { updates <- s; return s.Active, nil }), nil)
+		done <- run(ctx, c, netip.MustParseAddr(c.SourceAddress), strings.Repeat("d", 32), device, EffectsFunc(func(_ context.Context, s Snapshot) (Decision, error) {
+			updates <- s
+			return Decision{Active: s.Active, Track: s.Track}, nil
+		}), nil)
 	}()
 	var first, second Snapshot
 	select {
@@ -158,7 +161,7 @@ func TestExpiredActiveElectionCannotPublishFreshLeaseBeforeAdvertising(t *testin
 	}
 	device := newFakeTransport()
 	published := false
-	err = applyActions(context.Background(), m, actions{advertise: true}, device, EffectsFunc(func(context.Context, Snapshot) (bool, error) { published = true; return false, nil }))
+	err = applyActions(context.Background(), m, actions{advertise: true}, device, EffectsFunc(func(context.Context, Snapshot) (Decision, error) { published = true; return Decision{}, nil }))
 	if err == nil || published || len(device.sent) != 0 {
 		t.Fatal("expired election renewed or advertised without a new transition", err, published, len(device.sent))
 	}

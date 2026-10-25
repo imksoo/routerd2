@@ -54,8 +54,8 @@ VIP ownership, its VMAC and neighbor announcements retain the same writer ACK.
 
 ## Single-writer effects and liveness contract
 
-`Effects.Apply(ctx, Snapshot) (bool, error)` returns completed kernel application
-and whether the VIP is actually owned. It does not acknowledge a queue submission. `Snapshot` includes resource identity, process epoch,
+`Effects.Apply(ctx, Snapshot) (Decision, error)` returns completed kernel application,
+actual VIP ownership and finite Health tracking decisions. It does not acknowledge a queue submission. `Snapshot` includes resource identity, process epoch,
 transition number, active state, virtual MAC, virtual interface, host CIDRs,
 accept policy, peer observation and counters.
 
@@ -79,7 +79,8 @@ Every advertisement of published ownership follows an acknowledged renewal.
 A graceful election may advertise while withholding VIP publication.
 `BootID`, `ObservedNanos` and `ExpiresNanos` bind its original CLOCK_BOOTTIME
 observation and deadline. The bounded lifetime is three local advertisement
-intervals plus priority skew. `ValidUntil` is UTC display metadata only.
+intervals plus skew calculated from the configured base priority. Tracking changes
+the wire priority and election timers, but never extends this ownership deadline. `ValidUntil` is UTC display metadata only.
 The writer **must withdraw ownership at that original boot deadline**, using
 the current supervisor registry, authenticated worker generation, config
 digest, producer epoch and sequence to fence stale publishers. The coordinator
@@ -104,9 +105,8 @@ after Initialize are refused. A paused Active process whose lease already
 expired must not renew or advertise under its old election transition.
 
 The coordinator uses the original boot clock directly. It does not derive a
-second receipt lease or rewrite an expired election snapshot. Track policy,
-legacy version/authentication and cluster coordination remain
-separate HA-01 work.
+second receipt lease or rewrite an expired election snapshot. Legacy
+version/authentication and cluster coordination remain separate HA-01 work.
 
 `make qemu-vrrp-daemon` exercises actual supervisor/control/network/VRRP workers,
 VIP TCP/UDP traffic and capture, original deadline expiry/reapply, worker/control
@@ -118,6 +118,47 @@ Callbacks must honor their context deadlines. Extremely short intervals need
 enough CPU and IPC headroom for the complete renewal/verification/send cycle;
 failure to meet a lease stops ownership rather than advertising unverified
 readiness. There is no claim of hitless config or worker restart.
+
+## Health tracking
+
+An instance can reference up to 16 configured Health services:
+
+```json
+"track": [{
+  "service": "wan-probe",
+  "penalty": 100,
+  "healthy_threshold": 2,
+  "unhealthy_threshold": 3,
+  "max_age_millis": 1500
+}]
+```
+
+Each source subtracts its penalty until enough consecutive passed probes have
+been accepted. After recovery, the penalty returns when the consecutive failure
+threshold is met. Defaults are penalty 50, two passed and three failed probes.
+`max_age_millis` is required and bounds the age of the original Health observation;
+choose it above the probe interval and expected scheduling/IPC delay. Health's
+own phase thresholds are independent of these counts. Priority is the configured
+base minus current penalties, with a floor of 1. Priority zero remains reserved
+for shutdown. Address owners cannot configure tracking because their priority
+must remain 255.
+
+The control coordinator advances hysteresis on accepted Health observations.
+RPC polling and replays never add confirmations. Producer consecutive counters
+preserve progress through coalesced delivery within the current streak; this is
+not a lossless history of missed transitions. Missing, stopped, expired or
+unregistered sources are unknown and penalized immediately, without inventing
+failed probes. After an observation gap or producer/configuration cutover,
+recovery requires fresh passed probes; an inherited raw counter cannot restore
+the old authority. Configuration changes reset tracking confirmation state.
+
+Tracking decisions return through the existing ownership application response.
+The VRRP worker expires them on its own boot clock, derives wire priority before
+sending, and adjusts Backup's down timer when priority changes. Backup polls at
+250ms when tracking is configured. Health flaps do not rewrite intent, restart
+the election worker or create another notification stream. Snapshot `priority`
+is effective priority and `track` explains its current counts and deadlines.
+Generic resource tracking and conditional-source neutral semantics remain open.
 
 ## Native wire and timer behavior
 
@@ -169,11 +210,14 @@ recovery. The keepalived peer explicitly uses `v3_checksum_as_v2` for the
 [RFC 9568 IPv4 checksum](https://keepalived.org/documentation/keepalived-conf/).
 No legacy checksum fallback is added to routerd2. VRF unicast and target hardware
 have not been qualified by these plain Ethernet fixtures.
+`TestDaemonVRRPHealthTracking` also exercises real Health failure, original sample
+expiry during SIGSTOP, Health worker replacement and recovery against keepalived
+priority 120, with native priorities 150/50 and TCP/UDP on both owners.
 Run `make check-vrrp-unicast` on the isolated Linux VM with keepalived installed
 and root or noninteractive sudo available. The runner builds as the caller and
 stages execution in a root-owned 0700 temporary directory; it never changes home
 permissions or host interface configuration. Current logs go to
-`dist/vrrp-unicast/ipv4.log` and `ipv6.log`.
+`dist/vrrp-unicast/ipv4.log`, `ipv6.log` and `health-track.log`.
 
 ## Verification
 

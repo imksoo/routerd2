@@ -336,6 +336,9 @@ func Validate(services []Service) error {
 	if err := validateBFDReferences(services); err != nil {
 		return err
 	}
+	if err := validateVRRPTracks(services); err != nil {
+		return err
+	}
 	return validateDNSLeaseSources(services)
 }
 

@@ -89,6 +89,7 @@ type configuration struct {
 	plan     resourceprogram.Plan
 	digest   string
 	revision uint64
+	vrrp     map[string]vrrp.Config
 }
 
 type appliedProjection struct {
@@ -133,6 +134,7 @@ type Runtime struct {
 	records              map[string]serviceconfig.Update
 	applications         map[string]*pendingApplication
 	vrrpOwners           map[string]vrrpOwnership
+	vrrpTracks           map[string][]vrrpTrackState
 	liveRA               map[string]ra.Config
 	aftrInputs           map[string]aftr.Input
 	leases               map[string]time.Time
@@ -221,6 +223,12 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 	sourceSum := sha256.Sum256(encoded)
 	sourceDigest := hex.EncodeToString(sourceSum[:])
 	next := configuration{source: source, plan: plan, digest: sourceDigest, revision: revision}
+	next.vrrp = make(map[string]vrrp.Config)
+	for _, service := range doc.Services {
+		if service.VRRP != nil {
+			next.vrrp[service.ModuleName()] = service.VRRPConfig()
+		}
+	}
 	if err := r.op.Acquire(ctx, 1); err != nil {
 		return r.failure(err)
 	}
@@ -301,6 +309,7 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 		}
 		r.sourceEpoch++
 		r.guardGrants = nil
+		r.vrrpTracks = nil
 		r.guardStatus = nil
 		r.guardUntil = time.Time{}
 	}

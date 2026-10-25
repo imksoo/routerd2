@@ -88,23 +88,23 @@ func TestShutdownDuringActionsWithdrawsWithoutHidingCleanupFailure(t *testing.T)
 				cfg.AddressOwner, cfg.Priority = true, 255
 				withdrawn := false
 				cleanupError := errors.New("withdrawal failed")
-				effects := EffectsFunc(func(call context.Context, s Snapshot) (bool, error) {
+				effects := EffectsFunc(func(call context.Context, s Snapshot) (Decision, error) {
 					if !s.Active {
 						withdrawn = true
 						if call.Err() != nil {
 							t.Error("withdrawal inherited canceled context")
 						}
 						if cleanupFails {
-							return false, cleanupError
+							return Decision{}, cleanupError
 						}
-						return s.Active, nil
+						return Decision{Active: s.Active, Track: s.Track}, nil
 					}
 					device.active = true
 					if mode == "apply" {
 						cancel()
-						return false, call.Err()
+						return Decision{}, call.Err()
 					}
-					return s.Active, nil
+					return Decision{Active: s.Active, Track: s.Track}, nil
 				})
 				err := run(ctx, cfg, netip.MustParseAddr(cfg.SourceAddress), strings.Repeat("a", 32), device, effects, func() { t.Error("canceled activation became ready") })
 				if !withdrawn || cleanupFails && !errors.Is(err, cleanupError) || !cleanupFails && err != nil || errors.Is(err, context.Canceled) {
@@ -122,13 +122,13 @@ func TestActionFailureJoinedWithCancellationIsPreserved(t *testing.T) {
 	cfg.AddressOwner, cfg.Priority = true, 255
 	failure := errors.New("independent action failure")
 	withdrawn := false
-	effects := EffectsFunc(func(_ context.Context, s Snapshot) (bool, error) {
+	effects := EffectsFunc(func(_ context.Context, s Snapshot) (Decision, error) {
 		if !s.Active {
 			withdrawn = true
-			return s.Active, nil
+			return Decision{Active: s.Active, Track: s.Track}, nil
 		}
 		cancel()
-		return false, errors.Join(ctx.Err(), failure)
+		return Decision{}, errors.Join(ctx.Err(), failure)
 	})
 	err := run(ctx, cfg, netip.MustParseAddr(cfg.SourceAddress), strings.Repeat("a", 32), newFakeTransport(), effects, nil)
 	if !withdrawn || !errors.Is(err, failure) {
@@ -145,7 +145,7 @@ func TestRuntimeWaitsForOwnershipAndWithdrawsGracefully(t *testing.T) {
 	defer cancel()
 	var mu sync.Mutex
 	var updates []Snapshot
-	effects := EffectsFunc(func(ctx context.Context, s Snapshot) (bool, error) {
+	effects := EffectsFunc(func(ctx context.Context, s Snapshot) (Decision, error) {
 		mu.Lock()
 		updates = append(updates, s)
 		first := len(updates) == 1
@@ -155,13 +155,13 @@ func TestRuntimeWaitsForOwnershipAndWithdrawsGracefully(t *testing.T) {
 			select {
 			case <-acknowledge:
 			case <-ctx.Done():
-				return false, ctx.Err()
+				return Decision{}, ctx.Err()
 			}
 		}
 		device.mu.Lock()
 		device.active = s.Active
 		device.mu.Unlock()
-		return s.Active, nil
+		return Decision{Active: s.Active, Track: s.Track}, nil
 	})
 	done := make(chan error, 1)
 	go func() {
@@ -225,20 +225,20 @@ func TestFailedOrExpiredActivationNeverAdvertises(t *testing.T) {
 				device.verify = errors.New("configured VIP is still tentative")
 			}
 			withdrawn := false
-			effects := EffectsFunc(func(ctx context.Context, s Snapshot) (bool, error) {
+			effects := EffectsFunc(func(ctx context.Context, s Snapshot) (Decision, error) {
 				if !s.Active {
 					withdrawn = true
-					return s.Active, nil
+					return Decision{Active: s.Active, Track: s.Track}, nil
 				}
 				device.active = true
 				switch mode {
 				case "apply":
-					return false, errors.New("partial network apply failed")
+					return Decision{}, errors.New("partial network apply failed")
 				case "expired acknowledgement":
 					<-ctx.Done()
-					return s.Active, nil // A buggy effect acknowledges after its lease.
+					return Decision{Active: s.Active, Track: s.Track}, nil // A buggy effect acknowledges after its lease.
 				}
-				return s.Active, nil
+				return Decision{Active: s.Active, Track: s.Track}, nil
 			})
 			err := run(context.Background(), c, netip.MustParseAddr(c.SourceAddress), strings.Repeat("b", 32), device, effects, func() { t.Error("failed activation became ready") })
 			if err == nil || !withdrawn || len(device.sent) != 0 {
@@ -256,7 +256,7 @@ func TestActiveAdvertisementsRenewAcknowledgedLease(t *testing.T) {
 	defer cancel()
 	var mu sync.Mutex
 	var leases []time.Time
-	effects := EffectsFunc(func(_ context.Context, s Snapshot) (bool, error) {
+	effects := EffectsFunc(func(_ context.Context, s Snapshot) (Decision, error) {
 		device.mu.Lock()
 		device.active = s.Active
 		device.mu.Unlock()
@@ -265,7 +265,7 @@ func TestActiveAdvertisementsRenewAcknowledgedLease(t *testing.T) {
 			leases = append(leases, s.ValidUntil)
 			mu.Unlock()
 		}
-		return s.Active, nil
+		return Decision{Active: s.Active, Track: s.Track}, nil
 	})
 	done := make(chan error, 1)
 	go func() {

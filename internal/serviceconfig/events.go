@@ -3,6 +3,8 @@ package serviceconfig
 import (
 	"encoding/hex"
 	"encoding/json"
+
+	"github.com/imksoo/routerd2/internal/protocol/vrrp"
 )
 
 // Update fences a protocol snapshot to its immutable configuration and process
@@ -34,7 +36,6 @@ type ObservationReceipt struct {
 
 // ApplicationReceipt acknowledges the coordinator's completed kernel projection.
 type ApplicationReceipt struct {
-	Applied bool `json:"applied"`
-	// Active reports the VRRP ownership actually installed by this operation.
-	Active bool `json:"active,omitempty"`
+	Applied bool          `json:"applied"`
+	VRRP    vrrp.Decision `json:"vrrp,omitzero"`
 }

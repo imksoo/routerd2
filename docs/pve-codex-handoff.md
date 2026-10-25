@@ -39,6 +39,14 @@
   multicastはフィールド省略で選び、明示空配列をmulticastへ読み替えない。
   受信側の仮Ethernet/IPv6ヘッダ生成と本番でのEthernet再解析を削除し、kernelのIP metadataを
   直接検証する。unicast送信はkernelのrouting/ARP/NDへ任せ、VIP/GARP/NAの適用ACKは維持する。
+- Healthを参照するVRRP trackを追加した。penalty・連続probe回数・元の観測のmax ageを
+  controlで判定し、既存のVIP適用応答で有限の判定を返す。再送やpollで確認回数を増やさず、
+  worker/設定の交替や監視の空白後には新しい正常probeを要求する。VRRPは自分のboot clockで
+  判定を失効させ、設定のbase priorityからwire priorityを導出する。Health flapでintentを
+  書き換えたりVRRPを再起動したりしない。compiler contractは `resource-program-native-5`。
+- 実通信で発見したVIP期限更新の不具合を修正した。kernelの秒単位lifetimeの近似一致を
+  更新不要の判定へ流用せず、元の絶対期限が変わったらkernel timerも更新する。
+  同じ期限の再適用ではtimerを延長しない。所有記録だけを延長してVIPが消える原因を除去した。
 - BGP経路の元のboot IDとBOOTTIME期限をnetwork workerへ渡し、controlと独立して
   期限切れ経路を撤去する。期限更新だけではkernel経路を置換せず、所有記録を更新する。
   退役時も同じ所有権確認を使い、変更されたforeign経路を残す。table観測と経路選択は
@@ -50,34 +58,41 @@
 
 ## 今回の確認
 
-製品は `RELEASE_ID=vrrp-unicast`。`make check`、VRRP/runtimeplan/serviceconfigの個別Race Detector、
-全体vet・fmt確認、amd64/arm64の静的ビルドが成功した。arm64は実行していない。
-専用0700ディレクトリへ6 ELFを配置し、`umask 022` で `make release-built-test` も成功した。
-両architectureでcompiler contract `resource-program-native-4` と署名bundle/publisher出力を確認した。
+製品は `RELEASE_ID=vrrp-health-track`。`make check` が成功した。広告直前のpriority導出を
+整理した後もVRRP/runtimeplan/serviceconfig/serviceruntime/network/runtimeabiのRace Detector、
+全体vet・fmt確認、Pythonの関連check、amd64/arm64静的ビルドを確認した。
+arm64は実行していない。private 0700配下へ6 ELFを配置し、`make release-built-test`で
+両architectureの署名bundle・全ELFの宣言一致・publisher出力も確認した。
 
-隔離namespaceの実supervisor/control/network/VRRPとkeepalived 2.2.8を接続し、IPv4/IPv6の
-unicast広告、VIP TCP/UDP、上位priorityへの切替、worker SIGKILL/rebind、peer停止、下位peer
-復帰後の所有維持が成功した。IPv6はglobal sourceを使い、captureで両方向とHop Limit 255、
-multicast広告がないことを確認した。IPv4 peerはRFC 9568に合わせ `v3_checksum_as_v2` を明示する。
-routerd2に旧checksumの自動fallbackは設けていない。
+隔離namespaceの実supervisor/control/network/VRRP/Healthとkeepalived 2.2.8で、
+Health失敗・復旧、SIGSTOP中の元の観測期限切れ、Health worker SIGKILL/rebindを試験した。
+VRRP workerを再起動せずpriority 150→50→150で切り替わり、両所有者のVIP TCP/UDPが成功した。
+packet captureでnative priority 150/50とpeerの広告を確認した。通常のtracking切替に
+priority zeroを使わない。IPv4/IPv6 unicastの選出、peer停止、VRRP worker再起動の試験も成功した。
+`make check-vrrp-unicast` はこの3系統を実行する。元のVRRP期限・条件付きVIP所有・
+graceful公開の実daemon試験も最終binaryで成功した。
 
-unicast一覧の空配列、重複、local sourceとの一致、別family等を拒否する。
-受信元一覧・実宛先・TTL/Hop Limit・IPv6 checksum宛先もcomponent試験で確認した。
-実daemonの元のVRRP期限・条件付き所有・graceful admissionの3系統も成功した。
-再実行用に `make check-vrrp-unicast` を追加した。keepalivedとroot/noninteractive sudoが必要で、
-root所有0700の一時ディレクトリから実行する。homeや管理NICの権限・設定は変更しない。
+二つの独立WANによるHealth→PBR実daemon試験も成功した。実TCP/UDPと両側capture、
+Health/control/network worker再起動、古い通知と再送の拒否、元の観測期限とconsumer max age、
+全supervisor再起動、confirmed rollback後の通信を確認した。Health実ソケットの
+TCP・HTTP・DNS・raw ICMPも成功した。`make check-health-pbr` のrunnerをroot所有0700へ
+stageする方式に置き換え、過去checkpointのmanifest/hash台帳生成とその専用試験を削除した。
+現在のログとpacket captureだけを出す。
 
-既存の二native peer試験では初回IPv6 multicastの広告未受信が一度発生した。後続と変更前コードの
-比較試験では再現できず、直接原因は未確定。成功回数だけでこの問題を閉じない。
-初回のIPv6 VIP TCP接続timeoutも未再現で、起動直後のND/DAD確認が残る。
-UDP応答はfixture側をVIPへの明示bindへ修正し、TCP/UDP測定前には両physical linkのIPv6 DADを待つ。
-BFD再接続timeoutの原因調査も未完了。今回はBGP/Health全系統、QEMU時計補正、対象実機・NIC・
-性能・物理suspendを再検証していない。VRF unicastと旧routerd VRRPの移行は未受入。
+初回のHealth tracking試験はVIP消失で失敗した。kernel期限を更新しない原因を特定し、
+局所回帰試験でも修正前の失敗を再現した上で修正した。成功回数を増やすだけのretryや
+試験結果の互換コードは追加していない。
 
-出力は `dist/vrrp-unicast-check.log`、`dist/vrrp-unicast-final-build.log`、
-`dist/vrrp-unicast-final-native*.log`、`dist/vrrp-unicast-race.log`、`dist/vrrp-unicast-publish.log`。
-標準commandの現在ログは `dist/vrrp-unicast/ipv4.log` と `ipv6.log`。
-過去出力との一致を実装の条件にしない。
+未解決: 以前の二native peer試験におけるIPv6 multicast広告未受信、初回IPv6 VIP TCP timeout、
+BFD再接続timeoutは直接原因が未確定。今回はQEMU時計補正、対象実機・NIC・性能・
+物理suspendを再検証していない。Health以外のtrack、条件除外時のneutral、VRF unicast、
+旧version/auth、cluster、追加VMACと旧routerdからの移行は未受入。
+
+現在の出力は `dist/vrrp-track-check.log`、`dist/vrrp-track-final-race.log`、
+`dist/vrrp-track-final-build.log`、`dist/vrrp-unicast/{ipv4,ipv6,health-track}.log`、
+`dist/vrrp-track-release-built.log`、`dist/vrrp-track-TestDaemonVRRP*.log`、
+`dist/vrrp-track-health-socket.log`、`dist/health-pbr-test/test.log` と `wan{0,1}.pcap`。
+過去の出力との一致を実装条件にしない。
 
 ## 続ける実装
 
@@ -86,7 +101,7 @@ BFD再接続timeoutの原因調査も未完了。今回はBGP/Health全系統、
    IPv4失効と、BFD受信期限・再帰next-hopの前提期限を全てwriterへ渡す処理は未検証・未実装。
 2. 残るprotocol snapshotの型付き保持、期限切れJSON書換えの削除、条件式の静的計算と、
    retained判定で繰り返すinstance生成・digest計算を整理する。
-3. HA-01のtrack、旧version・auth、cluster、追加VMACを実装する。IPv6 multicast未受信と
+3. HA-01のHealth以外のtrackと条件除外時のneutral、旧version・auth、cluster、追加VMACを実装する。IPv6 multicast未受信と
    起動直後のND/DADを診断し、VRFと対象実機での相互接続を確認する。
    全実装計画・全更新復旧経路・外部engine・配備先・対象実機は未完了。
 

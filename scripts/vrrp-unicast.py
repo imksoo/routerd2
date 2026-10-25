@@ -29,9 +29,8 @@ def main():
         for name in ("routerd", "routerd-modules", "routerd-logging"):
             subprocess.run(root + ["install", "-m", "755", str(args.binary_dir.resolve() / name), stage + "/bin/" + name], check=True)
         subprocess.run(root + ["install", "-m", "755", str(harness), stage + "/integration.test"], check=True)
-        for family in ("IPv4", "IPv6"):
-            name = "TestDaemonVRRPUnicast" + family
-            log_path = output / (family.lower() + ".log")
+        for name, log_name in (("TestDaemonVRRPUnicastIPv4", "ipv4"), ("TestDaemonVRRPUnicastIPv6", "ipv6"), ("TestDaemonVRRPHealthTracking", "health-track")):
+            log_path = output / (log_name + ".log")
             with log_path.open("w") as log:
                 result = subprocess.run(root + ["env", "ROUTERD2_INTEGRATION_REQUIRED=1", "ROUTERD2_TEST_BIN_DIR=" + stage + "/bin", stage + "/integration.test", "-test.run=^" + name + "$", "-test.v", "-test.timeout=90s"], stdout=log, stderr=subprocess.STDOUT, timeout=100)
             content = log_path.read_text()

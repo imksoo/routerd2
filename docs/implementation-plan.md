@@ -721,7 +721,13 @@ BGP経路の元の期限はnetwork workerへ渡し、controlと独立して撤�
 - RouterdClusterのfile/flock/TTL協調を維持するか、異なるfencing方式への置換を明示する。
 
 native unicastのIPv4/IPv6を実装し、独立keepalived peerとのVIP TCP/UDP、選出・peer停止・
-worker再起動、双方向packet captureを確認した。track、旧version/auth、cluster、追加VMACと
+worker再起動、双方向packet captureを確認した。Health serviceのtrack penalty・連続回数・
+元の観測のmax ageを実装した。実probeで確認回数を進め、通知の再送・pollでは増やさない。
+監視喪失・期限切れ・世代交代は不明/penaltyとし、新しい正常観測で復旧する。既存の適用応答へ
+有限の判定を返し、設定変更やworker再起動を介さずwire priorityを変える。
+独立keepalivedとのHealth障害・元の観測期限切れ・Health worker交替と復旧、
+priority 150/50のcaptureと両所有者へのVIP TCP/UDPを実daemonで確認した。
+Health以外のresource track・条件除外時のneutral、旧version/auth、cluster、追加VMACと
 対象実機の受入は残っており、HA-01全体の完了とはしない。
 
 **受入条件**

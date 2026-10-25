@@ -29,6 +29,7 @@ type GracefulActivation struct {
 }
 
 type Config struct {
+	Track                      []Track             `json:"track,omitempty"`
 	GracefulActivation         *GracefulActivation `json:"graceful_activation,omitempty"`
 	Resource                   string              `json:"resource"`
 	Interface                  string              `json:"interface"`
@@ -51,31 +52,32 @@ type Config struct {
 // The coordinator decides admission, applies the VIP and returns its actual
 // ownership from Effects.Apply. Election messages cannot grant themselves a VIP.
 type Snapshot struct {
-	ActivationState        string    `json:"activation_state,omitempty"`
-	ActivationStartedNanos uint64    `json:"activation_started_nanos,omitempty"`
-	BootID                 string    `json:"boot_id"`
-	ObservedNanos          uint64    `json:"observed_nanos"`
-	ExpiresNanos           uint64    `json:"expires_nanos"`
-	Resource               string    `json:"resource"`
-	Interface              string    `json:"interface"`
-	VIPInterface           string    `json:"vip_interface"`
-	VRF                    string    `json:"vrf,omitempty"`
-	Family                 string    `json:"family"`
-	SourceAddress          string    `json:"source_address"`
-	VirtualRouterID        int       `json:"virtual_router_id"`
-	VirtualMAC             string    `json:"virtual_mac"`
-	Addresses              []string  `json:"addresses"`
-	Active                 bool      `json:"active"`
-	State                  string    `json:"state"`
-	AcceptMode             bool      `json:"accept_mode"`
-	AddressOwner           bool      `json:"address_owner"`
-	Epoch                  string    `json:"epoch"`
-	Transition             uint64    `json:"transition"`
-	Priority               int       `json:"priority"`
-	Peer                   string    `json:"peer,omitempty"`
-	PeerPriority           int       `json:"peer_priority,omitempty"`
-	ActiveIntervalCS       int       `json:"active_interval_centiseconds"`
-	Deadline               time.Time `json:"deadline,omitempty"`
+	Track                  []TrackStatus `json:"track,omitempty"`
+	ActivationState        string        `json:"activation_state,omitempty"`
+	ActivationStartedNanos uint64        `json:"activation_started_nanos,omitempty"`
+	BootID                 string        `json:"boot_id"`
+	ObservedNanos          uint64        `json:"observed_nanos"`
+	ExpiresNanos           uint64        `json:"expires_nanos"`
+	Resource               string        `json:"resource"`
+	Interface              string        `json:"interface"`
+	VIPInterface           string        `json:"vip_interface"`
+	VRF                    string        `json:"vrf,omitempty"`
+	Family                 string        `json:"family"`
+	SourceAddress          string        `json:"source_address"`
+	VirtualRouterID        int           `json:"virtual_router_id"`
+	VirtualMAC             string        `json:"virtual_mac"`
+	Addresses              []string      `json:"addresses"`
+	Active                 bool          `json:"active"`
+	State                  string        `json:"state"`
+	AcceptMode             bool          `json:"accept_mode"`
+	AddressOwner           bool          `json:"address_owner"`
+	Epoch                  string        `json:"epoch"`
+	Transition             uint64        `json:"transition"`
+	Priority               int           `json:"priority"`
+	Peer                   string        `json:"peer,omitempty"`
+	PeerPriority           int           `json:"peer_priority,omitempty"`
+	ActiveIntervalCS       int           `json:"active_interval_centiseconds"`
+	Deadline               time.Time     `json:"deadline,omitempty"`
 	// Display metadata only. ExpiresNanos in BootID defines actual authority.
 	ValidUntil       time.Time `json:"valid_until,omitempty"`
 	Advertisements   uint64    `json:"advertisements"`
@@ -86,16 +88,30 @@ type Snapshot struct {
 	LastError        string    `json:"last_error,omitempty"`
 }
 
-// Effects applies one election observation and reports whether the VIP is owned.
+// Effects applies one election observation and returns ownership and tracking.
 type Effects interface {
-	Apply(context.Context, Snapshot) (bool, error)
+	Apply(context.Context, Snapshot) (Decision, error)
 }
 
-type EffectsFunc func(context.Context, Snapshot) (bool, error)
+type EffectsFunc func(context.Context, Snapshot) (Decision, error)
 
-func (f EffectsFunc) Apply(ctx context.Context, s Snapshot) (bool, error) { return f(ctx, s) }
+func (f EffectsFunc) Apply(ctx context.Context, s Snapshot) (Decision, error) { return f(ctx, s) }
 
 func Normalize(c Config) Config {
+	if c.Track != nil {
+		c.Track = append([]Track(nil), c.Track...)
+		for i := range c.Track {
+			if c.Track[i].Penalty == 0 {
+				c.Track[i].Penalty = 50
+			}
+			if c.Track[i].HealthyThreshold == 0 {
+				c.Track[i].HealthyThreshold = 2
+			}
+			if c.Track[i].UnhealthyThreshold == 0 {
+				c.Track[i].UnhealthyThreshold = 3
+			}
+		}
+	}
 	if c.GracefulActivation != nil {
 		copy := *c.GracefulActivation
 		if copy.Timeout == "" {
@@ -135,6 +151,16 @@ func validInterface(s string) bool {
 
 func Validate(c Config) error {
 	c = Normalize(c)
+	if len(c.Track) > 16 || len(c.Track) > 0 && c.AddressOwner {
+		return errors.New("VRRP track supports at most 16 sources and cannot change an address owner's priority 255")
+	}
+	tracked := make(map[string]bool, len(c.Track))
+	for _, track := range c.Track {
+		if track.Service == "" || strings.TrimSpace(track.Service) != track.Service || len(track.Service) > 24 || tracked[track.Service] || track.Penalty < 1 || track.Penalty > 254 || track.HealthyThreshold < 1 || track.HealthyThreshold > 255 || track.UnhealthyThreshold < 1 || track.UnhealthyThreshold > 255 || track.MaxAgeMillis < 1 || track.MaxAgeMillis > 86400000 {
+			return errors.New("VRRP track requires distinct Health services, penalty 1..254, thresholds 1..255 and max_age_millis 1..86400000")
+		}
+		tracked[track.Service] = true
+	}
 	if c.GracefulActivation != nil {
 		if err := factcondition.Validate(c.GracefulActivation.ReadyWhen); err != nil {
 			return fmt.Errorf("VRRP graceful_activation.ready_when: %w", err)

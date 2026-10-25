@@ -26,6 +26,7 @@ type guardGrant struct {
 	observedNanos                  uint64
 	bgp                            *bgpProvider
 	dhcpLease                      dhcp4.LeaseClock
+	health                         *health.Snapshot
 }
 
 func conditionalProgram(source config.Document) bool {
@@ -96,7 +97,8 @@ func (r *Runtime) recordGuardGrantLocked(u serviceconfig.Update, now time.Time) 
 		if r.guardGrants == nil {
 			r.guardGrants = make(map[string]guardGrant)
 		}
-		r.guardGrants[u.Name] = guardGrant{revision: r.config.revision, generation: u.Generation, sequence: u.Sequence, epoch: u.ProducerEpoch, bootID: snapshot.BootID, value: snapshot.Active, untilNanos: snapshot.ExpiresNanos, observedNanos: snapshot.ObservedNanos}
+		r.guardGrants[u.Name] = guardGrant{revision: r.config.revision, generation: u.Generation, sequence: u.Sequence, epoch: u.ProducerEpoch, bootID: snapshot.BootID, value: snapshot.Active, untilNanos: snapshot.ExpiresNanos, observedNanos: snapshot.ObservedNanos, health: &snapshot}
+		r.advanceVRRPTracksLocked(u, snapshot)
 		return
 	}
 	var snapshot struct {

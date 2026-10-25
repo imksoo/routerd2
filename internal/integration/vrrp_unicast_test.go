@@ -20,6 +20,7 @@ import (
 
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/network"
+	"github.com/imksoo/routerd2/internal/protocol/health"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
@@ -31,17 +32,23 @@ import (
 
 func TestDaemonVRRPUnicastIPv4(t *testing.T) {
 	if isolateFixture(t, "TestDaemonVRRPUnicastIPv4") {
-		runVRRPUnicast(t, "ipv4")
+		runVRRPUnicast(t, "ipv4", false)
 	}
 }
 
 func TestDaemonVRRPUnicastIPv6(t *testing.T) {
 	if isolateFixture(t, "TestDaemonVRRPUnicastIPv6") {
-		runVRRPUnicast(t, "ipv6")
+		runVRRPUnicast(t, "ipv6", false)
 	}
 }
 
-func runVRRPUnicast(t *testing.T, family string) {
+func TestDaemonVRRPHealthTracking(t *testing.T) {
+	if isolateFixture(t, "TestDaemonVRRPHealthTracking") {
+		runVRRPUnicast(t, "ipv4", true)
+	}
+}
+
+func runVRRPUnicast(t *testing.T, family string, tracking bool) {
 	keepalived, err := exec.LookPath("keepalived")
 	if err != nil {
 		t.Fatal("independent keepalived peer is required", err)
@@ -79,7 +86,14 @@ func runVRRPUnicast(t *testing.T, family string) {
 	if family == "ipv6" {
 		iface.AddressOptions = map[string]network.AddressOptions{iface.Addresses[0]: {NoDAD: true}}
 	}
-	f := startFixtureDaemon(t, config.FromNative(config.Native{Network: network.Desired{Interfaces: []network.Interface{iface}}, Services: []serviceconfig.Service{{Name: "ha", VRRP: &c}}}))
+	var probe net.Listener
+	services := []serviceconfig.Service{{Name: "ha", VRRP: &c}}
+	if tracking {
+		probe = healthPBRListener(t, peerNS, peer+":18097", "H")
+		c.Track = []vrrp.Track{{Service: "probe", Penalty: 100, HealthyThreshold: 2, UnhealthyThreshold: 3, MaxAgeMillis: 1500}}
+		services = append(services, serviceconfig.Service{Name: "probe", Health: &health.Config{Interface: "lan0", SourceAddress: local, Target: peer, Protocol: "tcp", Port: 18097, IntervalMillis: 300, TimeoutMillis: 50, HealthyThreshold: 1, UnhealthyThreshold: 1}})
+	}
+	f := startFixtureDaemon(t, config.FromNative(config.Native{Network: network.Desired{Interfaces: []network.Interface{iface}}, Services: services}))
 	snapshot := func() vrrp.Snapshot {
 		t.Helper()
 		var instance runtimeplan.InstanceStatus
@@ -251,52 +265,132 @@ func runVRRPUnicast(t *testing.T, family string) {
 		})
 	}
 	traffic(peerNS, "R")
-	stopPeer := startPeer(200)
-	waitOwner(false)
-	traffic(routerNS, "K")
-	var status supervisor.Status
-	if err := f.supervisor.Do(context.Background(), "GET", "/v1/status", nil, &status); err != nil {
-		t.Fatal(err)
-	}
-	for _, module := range status.Modules {
-		if module.Name == "service.ha" {
-			if err := syscall.Kill(module.PID, syscall.SIGKILL); err != nil {
+	if tracking {
+		module := func(name string) supervisor.ModuleStatus {
+			t.Helper()
+			var status supervisor.Status
+			if err := f.supervisor.Do(context.Background(), "GET", "/v1/status", nil, &status); err != nil {
 				t.Fatal(err)
 			}
+			for _, module := range status.Modules {
+				if module.Name == name {
+					return module
+				}
+			}
+			t.Fatal("missing module", name)
+			return supervisor.ModuleStatus{}
+		}
+		native, source := module("service.ha"), module("service.probe")
+		startPeer(120)
+		waitTrack := func(known, penalized bool, priority int) {
+			t.Helper()
 			until(t, 6*time.Second, func() bool {
-				var current supervisor.Status
-				if f.supervisor.Do(context.Background(), "GET", "/v1/status", nil, &current) != nil {
-					return false
-				}
-				for _, replacement := range current.Modules {
-					if replacement.Name == module.Name {
-						return replacement.Ready && replacement.Generation > module.Generation
-					}
-				}
-				return false
+				s := snapshot()
+				return s.Priority == priority && len(s.Track) == 1 && s.Track[0].Known == known && s.Track[0].Penalized == penalized
 			})
 		}
+		waitTrack(true, false, 150)
+		waitOwner(true)
+		probe.Close()
+		waitTrack(true, true, 50)
+		waitOwner(false)
+		if s := snapshot(); s.Track[0].UnhealthyCount < 3 {
+			t.Fatal("penalty before three failed probes", s.Track)
+		}
+		traffic(routerNS, "K")
+		probe = healthPBRListener(t, peerNS, peer+":18097", "H")
+		waitTrack(true, false, 150)
+		waitOwner(true)
+		traffic(peerNS, "R")
+		if err := syscall.Kill(source.PID, syscall.SIGSTOP); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = syscall.Kill(source.PID, syscall.SIGCONT) })
+		waitTrack(false, true, 50)
+		paused := module("service.probe")
+		if paused.Generation != source.Generation || paused.PID != source.PID || !paused.Ready {
+			t.Fatal("test did not expire the sample before supervisor replacement", paused)
+		}
+		waitOwner(false)
+		traffic(routerNS, "K")
+		if err := syscall.Kill(source.PID, syscall.SIGCONT); err != nil {
+			t.Fatal(err)
+		}
+		waitTrack(true, false, 150)
+		waitOwner(true)
+		traffic(peerNS, "R")
+		probe.Close()
+		if err := syscall.Kill(source.PID, syscall.SIGKILL); err != nil {
+			t.Fatal(err)
+		}
+		until(t, 6*time.Second, func() bool {
+			replacement := module("service.probe")
+			return replacement.Ready && replacement.Generation > source.Generation
+		})
+		waitTrack(true, true, 50)
+		waitOwner(false)
+		traffic(routerNS, "K")
+		probe = healthPBRListener(t, peerNS, peer+":18097", "H")
+		waitTrack(true, false, 150)
+		waitOwner(true)
+		traffic(peerNS, "R")
+		current := module("service.ha")
+		if current.PID != native.PID || current.Generation != native.Generation {
+			t.Fatal("tracking restarted the election worker", native, current)
+		}
+		t.Log("Health failure/recovery, original sample expiry and Health SIGKILL/rebind changed priority 150/50 without restarting VRRP")
+	} else {
+		stopPeer := startPeer(200)
+		waitOwner(false)
+		traffic(routerNS, "K")
+		var status supervisor.Status
+		if err := f.supervisor.Do(context.Background(), "GET", "/v1/status", nil, &status); err != nil {
+			t.Fatal(err)
+		}
+		for _, module := range status.Modules {
+			if module.Name == "service.ha" {
+				if err := syscall.Kill(module.PID, syscall.SIGKILL); err != nil {
+					t.Fatal(err)
+				}
+				until(t, 6*time.Second, func() bool {
+					var current supervisor.Status
+					if f.supervisor.Do(context.Background(), "GET", "/v1/status", nil, &current) != nil {
+						return false
+					}
+					for _, replacement := range current.Modules {
+						if replacement.Name == module.Name {
+							return replacement.Ready && replacement.Generation > module.Generation
+						}
+					}
+					return false
+				})
+			}
+		}
+		waitOwner(false)
+		traffic(routerNS, "K")
+		stopPeer()
+		waitOwner(true)
+		traffic(peerNS, "R")
+		startPeer(100)
+		time.Sleep(time.Second) // More than a complete peer master-down interval.
+		waitOwner(true)
+		traffic(peerNS, "R")
 	}
-	waitOwner(false)
-	traffic(routerNS, "K")
-	stopPeer()
-	waitOwner(true)
-	traffic(peerNS, "R")
-	startPeer(100)
-	time.Sleep(time.Second) // More than a complete peer master-down interval.
-	waitOwner(true)
-	traffic(peerNS, "R")
 	capture.mu.Lock()
 	defer capture.mu.Unlock()
 	counts := map[string]int{}
+	priorities := map[byte]int{}
 	for _, packet := range capture.packets {
 		b := packet.data
 		var source, destination netip.Addr
 		var hop byte
+		var payload []byte
 		if suffix == "4" && len(b) >= 34 && binary.BigEndian.Uint16(b[12:14]) == 0x0800 && b[23] == 112 {
 			source, destination, hop = netip.AddrFrom4([4]byte(b[26:30])), netip.AddrFrom4([4]byte(b[30:34])), b[22]
+			payload = b[14+int(b[14]&15)*4:]
 		} else if suffix == "6" && len(b) >= 54 && binary.BigEndian.Uint16(b[12:14]) == 0x86dd && b[20] == 112 {
 			source, destination, hop = netip.AddrFrom16([16]byte(b[22:38])), netip.AddrFrom16([16]byte(b[38:54])), b[21]
+			payload = b[54:]
 		} else {
 			continue
 		}
@@ -304,9 +398,19 @@ func runVRRPUnicast(t *testing.T, family string) {
 			t.Fatal("unexpected unicast VRRP packet", source, destination, hop)
 		}
 		counts[source.String()]++
+		if source.String() == local && len(payload) >= 3 {
+			priorities[payload[2]]++
+		}
 	}
 	if counts[local] < 2 || counts[peer] < 2 || capture.err != nil {
 		t.Fatal("bidirectional unicast packet capture incomplete", counts, capture.err)
+	}
+	if tracking {
+		if priorities[50] == 0 || priorities[150] == 0 || priorities[0] != 0 {
+			t.Fatal("tracking wire priorities", priorities)
+		}
+		t.Logf("Health tracking keepalived interoperability: unicast adverts=%v, native priorities=%v, VIP TCP/UDP on both owners", counts, priorities)
+		return
 	}
 	t.Logf("%s keepalived interoperability: unicast adverts=%v, VIP TCP/UDP, higher-priority takeover, SIGKILL/rebind, priority-zero recovery and lower-priority preemption passed", family, counts)
 }

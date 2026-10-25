@@ -66,7 +66,10 @@ func ValidateSnapshot(raw Config, s Snapshot) error {
 	if err := Validate(c); err != nil {
 		return err
 	}
-	if c.Resource != s.Resource || c.Interface != s.Interface || c.VIPInterface != s.VIPInterface || c.VRF != s.VRF || c.Family != s.Family || c.VirtualRouterID != s.VirtualRouterID || c.Priority != s.Priority || (c.AcceptMode || c.AddressOwner) != s.AcceptMode || c.AddressOwner != s.AddressOwner || s.VirtualMAC != VirtualMAC(c.Family, c.VirtualRouterID).String() || !slices.Equal(c.Addresses, s.Addresses) || c.SourceAddress != "" && s.SourceAddress != c.SourceAddress {
+	if err := validateTracks(c, s.Track); err != nil {
+		return err
+	}
+	if c.Resource != s.Resource || c.Interface != s.Interface || c.VIPInterface != s.VIPInterface || c.VRF != s.VRF || c.Family != s.Family || c.VirtualRouterID != s.VirtualRouterID || effectivePriority(c, s.Track) != s.Priority || (c.AcceptMode || c.AddressOwner) != s.AcceptMode || c.AddressOwner != s.AddressOwner || s.VirtualMAC != VirtualMAC(c.Family, c.VirtualRouterID).String() || !slices.Equal(c.Addresses, s.Addresses) || c.SourceAddress != "" && s.SourceAddress != c.SourceAddress {
 		return errors.New("VRRP snapshot identity or ownership policy mismatch")
 	}
 	epoch, err := hex.DecodeString(s.Epoch)

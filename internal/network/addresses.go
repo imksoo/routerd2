@@ -187,9 +187,11 @@ func (p *apply) addressConfig(l Interface, address string) error {
 		if !addressOptionsMatch(*observed, old.Options, now) && (old.Attempted == nil || !addressOptionsMatch(*observed, *old.Attempted, now)) {
 			return p.failure("address option ownership", fmt.Errorf("lifetimes, DAD flags or peer for %s on %s changed outside routerd2", address, l.Name))
 		}
-		if addressOptionsMatch(*observed, options, now) {
-			if old.Attempted != nil || old.Index != live.Index || !sameAddressOptions(old.Options, options) {
-				old.Options = options
+		// Kernel lifetimes are rounded to seconds. Ownership comparison allows
+		// that rounding, but a new absolute deadline must renew the kernel
+		// timer even when its remaining seconds appear unchanged.
+		if sameAddressOptions(old.Options, options) && addressOptionsMatch(*observed, options, now) {
+			if old.Attempted != nil || old.Index != live.Index {
 				old.Attempted = nil
 				old.Index = live.Index
 				return p.checkpoint("address options ownership")
