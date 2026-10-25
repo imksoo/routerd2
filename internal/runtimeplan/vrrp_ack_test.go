@@ -327,7 +327,7 @@ func TestConditionalVRRPEffectFailureFences(t *testing.T) {
 				if err == nil {
 					t.Fatal("invalid effect was acknowledged")
 				}
-			case <-ctx.Done():
+			case <-time.After(time.Second):
 				t.Fatal("failed effect did not complete")
 			}
 			if mode == "retired-generation" || mode == "expired-active" || mode == "superseded" {

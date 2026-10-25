@@ -22,6 +22,7 @@ import (
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
+	"github.com/imksoo/routerd2/internal/resourceprogram"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 	"github.com/imksoo/routerd2/internal/supervisor"
@@ -33,7 +34,7 @@ func TestDaemonVRRPOriginalOwnership(t *testing.T) {
 	if !isolateFixtureTimeout(t, "TestDaemonVRRPOriginalOwnership", 100*time.Second) {
 		return
 	}
-	runVRRPAuthority(t, nil)
+	runVRRPAuthority(t, nil, false)
 }
 
 func TestDaemonVRRPClockCorrections(t *testing.T) {
@@ -58,10 +59,17 @@ func TestDaemonVRRPClockCorrections(t *testing.T) {
 		}
 		_ = client.Close()
 	})
-	runVRRPAuthority(t, client)
+	runVRRPAuthority(t, client, false)
 }
 
-func runVRRPAuthority(t *testing.T, clockClient *clocktest.Client) {
+func TestDaemonVRRPConditionalOwnership(t *testing.T) {
+	if !isolateFixtureTimeout(t, "TestDaemonVRRPConditionalOwnership", 100*time.Second) {
+		return
+	}
+	runVRRPAuthority(t, nil, true)
+}
+
+func runVRRPAuthority(t *testing.T, clockClient *clocktest.Client, conditional bool) {
 	t.Helper()
 	ctx := context.Background()
 	peerNS := fixturePeerNamespace(t, "lan0", "peer0")
@@ -93,6 +101,13 @@ func runVRRPAuthority(t *testing.T, clockClient *clocktest.Client) {
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	c := vrrp.Config{Interface: "lan0", VIPInterface: "ha4", Family: "ipv4", SourceAddress: "192.0.2.2", VirtualRouterID: 42, Priority: 255, AddressOwner: true, AdvertIntervalCentiseconds: 200, Addresses: []string{"192.0.2.254/24"}}
 	source := config.FromNative(config.Native{Network: network.Desired{Interfaces: []network.Interface{{Name: "lan0", Addresses: []string{"192.0.2.2/24"}}}}, Services: []serviceconfig.Service{{Name: "ha", VRRP: &c}}})
+	if conditional {
+		for i := range source.Resources {
+			if source.Resources[i].Service != nil && source.Resources[i].Service.VRRP != nil {
+				source.Resources[i].ReadyWhen = &resourceprogram.FactCondition{Fact: "service.ha.ready"}
+			}
+		}
+	}
 	f := startFixtureDaemonAt(t, source, dir)
 	if evidence := os.Getenv("ROUTERD2_TEST_EVIDENCE_DIR"); evidence != "" {
 		t.Setenv("ROUTERD2_TEST_EVIDENCE_DIR", filepath.Join(evidence, "vrrp-authority"))
@@ -325,6 +340,29 @@ func runVRRPAuthority(t *testing.T, clockClient *clocktest.Client) {
 		t.Fatal("cold control accepted retired generation", err)
 	}
 	traffic(true)
+	if conditional {
+		// Add a real protocol worker whose interface is the VRRP-owned macvlan.
+		// Its activation must follow kernel ownership; removing both exercises the
+		// final VRRP callback while the coordinator is already waiting for exit.
+		var current control.State
+		if err := f.control.Do(ctx, "GET", "/v1/config", nil, &current); err != nil {
+			t.Fatal(err)
+		}
+		withDependent := current.Config
+		withDependent.Resources = append(withDependent.Resources, resourceprogram.Resource{ID: "dependent", DependsOn: []string{"service/ha"}, When: &resourceprogram.FactCondition{Fact: "service.ha.active"}, Service: &serviceconfig.Service{Name: "dependent", DHCP4: &serviceconfig.DHCP4{Interface: "ha4"}}})
+		if err := f.control.Do(ctx, "POST", "/v1/config/commit", control.CommitRequest{ExpectedRevision: current.Revision, RequestID: "conditional-vrrp-dependent", Config: withDependent}, &current); err != nil {
+			t.Fatal(err)
+		}
+		until(t, 8*time.Second, func() bool { return module("service.dependent").Ready && hasVIP() })
+		traffic(true)
+		base := config.FromNative(config.Native{Network: network.Desired{Interfaces: []network.Interface{{Name: "lan0", Addresses: []string{"192.0.2.2/24"}}}}})
+		if err := f.control.Do(ctx, "POST", "/v1/config/commit", control.CommitRequest{ExpectedRevision: current.Revision, RequestID: "conditional-vrrp-withdraw", Config: base}, nil); err != nil {
+			t.Fatal("worker stop/withdrawal ACK deadlocked:", err)
+		}
+		until(t, 8*time.Second, func() bool { return module("service.ha").PID == 0 && module("service.dependent").PID == 0 && !hasVIP() })
+		traffic(false)
+		t.Log("conditional VRRP startup/effect ACK, dependent activation on owned macvlan, final worker withdrawal and config cutover passed")
+	}
 	addresses, err := netlink.AddrList(lan, unix.AF_INET)
 	if err != nil {
 		t.Fatal(err)
