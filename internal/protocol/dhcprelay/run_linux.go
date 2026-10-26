@@ -39,20 +39,11 @@ func (l clientLink) check(links *netlink.Handle, vrf string) error {
 	if a.Name != l.name || a.RawFlags&unix.IFF_UP == 0 || a.MTU != l.mtu || string(a.HardwareAddr) != string(l.mac) {
 		return errors.New("DHCP relay interface identity or readiness changed")
 	}
-	actualVRF := ""
-	master := a.MasterIndex
-	for depth := 0; master != 0 && depth < 16; depth++ {
-		parent, err := links.LinkByIndex(master)
-		if err != nil {
-			return err
-		}
-		if parent.Type() == "vrf" {
-			actualVRF, master = parent.Attrs().Name, 0
-			break
-		}
-		master = parent.Attrs().MasterIndex
+	actualVRF, err := routingDomain(links, link)
+	if err != nil {
+		return err
 	}
-	if master != 0 || actualVRF != vrf {
+	if actualVRF != vrf {
 		return errors.New("DHCP relay interface VRF changed")
 	}
 	addresses, err := links.AddrList(link, netlink.FAMILY_V4)
@@ -65,6 +56,23 @@ func (l clientLink) check(links *netlink.Handle, vrf string) error {
 		}
 	}
 	return errors.New("DHCP relay giaddr is not installed on its client interface")
+}
+
+func routingDomain(links *netlink.Handle, link netlink.Link) (string, error) {
+	for depth := 0; depth < 16; depth++ {
+		if link.Type() == "vrf" {
+			return link.Attrs().Name, nil
+		}
+		if link.Attrs().MasterIndex == 0 {
+			return "", nil
+		}
+		var err error
+		link, err = links.LinkByIndex(link.Attrs().MasterIndex)
+		if err != nil {
+			return "", err
+		}
+	}
+	return "", errors.New("DHCP relay interface master chain did not stabilize")
 }
 
 // Run owns one UDP listener in the routing domain and one output-only Ethernet
@@ -224,6 +232,19 @@ func Run(ctx context.Context, c dhcprelayconfig.Config, ready func()) error {
 			client, local := byAddress[giaddr]
 			fromAddress, ok := netip.AddrFromSlice(from.IP)
 			if !local || !ok || from.Port != 67 || !slices.Contains(client.servers, fromAddress.Unmap()) {
+				continue
+			}
+			incoming, err := links.LinkByIndex(metadata.IfIndex)
+			if err != nil {
+				return err
+			}
+			domain, err := routingDomain(links, incoming)
+			if err != nil {
+				return err
+			}
+			// udp_l3mdev_accept can deliver a retired VRF's reply to the
+			// unbound default socket. Its identical addresses confer no scope.
+			if domain != c.VRF {
 				continue
 			}
 			if err := client.check(links, c.VRF); err != nil {

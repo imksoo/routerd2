@@ -667,7 +667,11 @@ worker再起動後の再取得、利用者TCP/UDPと3 interfaceのcaptureを確�
 MTU 600のLANでは大きいunicast/broadcast DHCPINFORM応答をIPv4分割し、client kernelの
 再組立て後も二つの200-byte optionが一致することを確認した。元実装のMTU超過dropは削除した。
 共有Ethernet encoderはDHCP serverとrelayの両方でMTU・fragment offset・header checksumを扱う。
-`make check-dhcp-relay`で再実行できる。VRF/HAの受入と、
+さらに同じserver IP・giaddrを持つblue/red/defaultで独立peerのDHCP・TCP/UDPを確認した。
+`udp_l3mdev_accept=1`の隔離namespaceでblue relayを宣言から外すと、遅い応答がdefault LANへ
+漏れる問題を再現した。受信interfaceの実master chainからVRFを確認し、別domainの応答を拒否する。
+修正後は漏れず、red/defaultのworkerを維持したままblueを同じ設定digestで再起動・復旧した。
+`make check-dhcp-relay`で再実行できる。HA・動的なVRF/interface変更の受入と、
 DHCPv6 server・残るresource契約は未完了であり、NET-06全体の完了とはしない。
 
 **受入条件**

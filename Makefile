@@ -27,7 +27,7 @@ help:
 	  'make check-bfd         Verify BFD/BGP routing domains with real workers' \
 	  'make check-pd-ra       Verify PD renewal, generated RA and client traffic' \
 	  'make check-aftr        Verify AFTR input identity, DNS and tunnel expiry' \
-	  'make check-dhcp-relay  Verify two LAN clients with an independent DHCP server' \
+	  'make check-dhcp-relay  Verify DHCP peers, fragmentation and VRF isolation' \
 	  'make licenses          Collect dependency licenses and their manifest' \
 	  'make build             Build the native commands for the current platform' \
 	  'make build-linux       Build static linux/amd64 and linux/arm64 binaries' \

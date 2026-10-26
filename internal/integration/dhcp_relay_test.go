@@ -32,14 +32,6 @@ func TestDaemonDHCPRelayIndependentClientsAndServer(t *testing.T) {
 	if !isolateFixture(t, "TestDaemonDHCPRelayIndependentClientsAndServer") {
 		return
 	}
-	dnsmasq, err := exec.LookPath("dnsmasq")
-	if err != nil {
-		t.Fatal("independent dnsmasq server required", err)
-	}
-	busybox, err := exec.LookPath("busybox")
-	if err != nil {
-		t.Fatal("independent BusyBox udhcpc required", err)
-	}
 	provider := fixturePeerNamespace(t, "wan0", "server0")
 	clients := []netns.NsHandle{fixturePeerNamespace(t, "lan0", "client0"), fixturePeerNamespace(t, "lan1", "client1")}
 	if err := fixtureInsideNamespace(provider, func() error {
@@ -72,69 +64,17 @@ func TestDaemonDHCPRelayIndependentClientsAndServer(t *testing.T) {
 		{Name: "lan1", Addresses: []string{"203.0.113.1/24"}},
 	}, Forwarding: network.Forwarding{IPv4: &forward}}, Services: []serviceconfig.Service{{Name: "relay", DHCPRelay: &relay}}}))
 	captures := []*healthPBRCaptureState{healthPBRCapture(t, "wan0"), healthPBRCapture(t, "lan0"), healthPBRCapture(t, "lan1")}
-	work := t.TempDir()
-	serverLog, err := os.Create(filepath.Join(work, "dnsmasq.log"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { serverLog.Close() })
-	ctx, stopServer := context.WithCancel(context.Background())
-	// Debug mode keeps the peer in the foreground without setgroups(), which
-	// this isolated user namespace deliberately disallows.
-	server := exec.CommandContext(ctx, dnsmasq, "--no-daemon", "--conf-file=/dev/null", "--port=0", "--interface=server0", "--bind-interfaces", "--dhcp-authoritative", "--log-dhcp", "--log-facility=-", "--pid-file=", "--dhcp-leasefile="+filepath.Join(work, "leases"),
-		"--dhcp-range=set:lan0,192.0.2.100,192.0.2.110,255.255.255.0,60s", "--dhcp-option=tag:lan0,3,192.0.2.1",
+	startFixtureDHCPRelayServer(t, provider, []string{"--dhcp-range=set:lan0,192.0.2.100,192.0.2.110,255.255.255.0,60s", "--dhcp-option=tag:lan0,3,192.0.2.1",
 		"--dhcp-range=set:lan1,203.0.113.100,203.0.113.110,255.255.255.0,60s", "--dhcp-option=tag:lan1,3,203.0.113.1",
-		"--dhcp-vendorclass=set:large,relay-large", "--dhcp-option-force=tag:large,224,"+strings.Repeat("A", 200), "--dhcp-option-force=tag:large,225,"+strings.Repeat("B", 200))
-	server.Stdout, server.Stderr = serverLog, serverLog
-	if err := fixtureInsideNamespace(provider, server.Start); err != nil {
-		stopServer()
-		t.Fatal(err)
-	}
-	serverDone := make(chan error, 1)
-	go func() { serverDone <- server.Wait() }()
-	t.Cleanup(func() { stopServer(); <-serverDone })
-	t.Cleanup(func() {
-		if t.Failed() {
-			log, _ := os.ReadFile(serverLog.Name())
-			t.Logf("independent server:\n%s", log)
-		}
-	})
-	script := filepath.Join(work, "lease.sh")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\ncase \"$1\" in bound|renew) printf '%s\\n' \"$ip\" \"$serverid\" \"$router\" > \"$ROUTERD_RELAY_REPORT\";; esac\n"), 0700); err != nil {
-		t.Fatal(err)
-	}
+		"--dhcp-vendorclass=set:large,relay-large", "--dhcp-option-force=tag:large,224," + strings.Repeat("A", 200), "--dhcp-option-force=tag:large,225," + strings.Repeat("B", 200)})
 	acquire := func(i int, requested string) string {
 		t.Helper()
-		report := filepath.Join(work, fmt.Sprintf("lease%d", i))
-		args := []string{"udhcpc", "-f", "-n", "-q", "-t", "5", "-T", "1", "-i", fmt.Sprintf("client%d", i), "-s", script, "-p", report + ".pid"}
-		if i == 1 {
-			args = append(args, "-B")
-		}
-		if requested != "" {
-			args = append(args, "-r", requested)
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
-		defer cancel()
-		cmd := exec.CommandContext(ctx, busybox, args...)
-		cmd.Env = append(os.Environ(), "ROUTERD_RELAY_REPORT="+report)
-		var output strings.Builder
-		cmd.Stdout, cmd.Stderr = &output, &output
-		if err := fixtureInsideNamespace(clients[i], cmd.Start); err != nil {
-			t.Fatal(err)
-		}
-		if err := cmd.Wait(); err != nil {
-			t.Fatalf("independent client %d: %v\n%s", i, err, output.String())
-		}
-		data, err := os.ReadFile(report)
-		if err != nil {
-			t.Fatal(err)
-		}
-		lease := strings.Fields(string(data))
+		lease := acquireFixtureDHCPRelayLease(t, clients[i], fmt.Sprintf("client%d", i), i == 1, requested)
 		prefix := []string{"192.0.2.0/24", "203.0.113.0/24"}[i]
-		if len(lease) != 3 || !netip.MustParsePrefix(prefix).Contains(netip.MustParseAddr(lease[0])) || lease[1] != "198.51.100.2" || lease[2] != relay.Interfaces[i].Address {
+		if !netip.MustParsePrefix(prefix).Contains(netip.MustParseAddr(lease.Address)) || lease.Server != "198.51.100.2" || lease.Router != relay.Interfaces[i].Address {
 			t.Fatal("wrong client subnet, upstream server or gateway", lease)
 		}
-		return lease[0]
+		return lease.Address
 	}
 	vrrpVIPResponders(t, provider, "4", []string{"198.51.100.2"}, "D")
 	var leases []string
@@ -375,4 +315,80 @@ func TestDaemonDHCPRelayIndependentClientsAndServer(t *testing.T) {
 		return true
 	})
 	t.Log("independent clients acquired both remote scopes; large unicast/broadcast DHCPINFORM reassembled across MTU 600 with intact options, packet fragment checks, giaddr/hops, hop-limit discard, TCP/UDP and worker restart passed")
+}
+
+func startFixtureDHCPRelayServer(t *testing.T, namespace netns.NsHandle, args []string) *exec.Cmd {
+	t.Helper()
+	dnsmasq, err := exec.LookPath("dnsmasq")
+	if err != nil {
+		t.Fatal("independent dnsmasq server required", err)
+	}
+	work := t.TempDir()
+	log, err := os.Create(filepath.Join(work, "dnsmasq.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { log.Close() })
+	ctx, cancel := context.WithCancel(context.Background())
+	// Debug mode avoids setgroups() in this isolated user namespace.
+	base := []string{"--no-daemon", "--conf-file=/dev/null", "--port=0", "--interface=server0", "--bind-interfaces", "--dhcp-authoritative", "--log-dhcp", "--log-facility=-", "--pid-file=", "--dhcp-leasefile=" + filepath.Join(work, "leases")}
+	command := exec.CommandContext(ctx, dnsmasq, append(base, args...)...)
+	command.Stdout, command.Stderr = log, log
+	if err := fixtureInsideNamespace(namespace, command.Start); err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- command.Wait() }()
+	t.Cleanup(func() { cancel(); <-done })
+	t.Cleanup(func() {
+		if t.Failed() {
+			data, _ := os.ReadFile(log.Name())
+			t.Logf("independent server: %s\n%s", args, data)
+		}
+	})
+	return command
+}
+
+type fixtureDHCPRelayLease struct{ Address, Server, Router, Domain string }
+
+func acquireFixtureDHCPRelayLease(t *testing.T, namespace netns.NsHandle, iface string, broadcast bool, requested string) fixtureDHCPRelayLease {
+	t.Helper()
+	busybox, err := exec.LookPath("busybox")
+	if err != nil {
+		t.Fatal("independent BusyBox udhcpc required", err)
+	}
+	work := t.TempDir()
+	report, script := filepath.Join(work, "report"), filepath.Join(work, "lease.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\ncase \"$1\" in bound|renew) printf '%s\\n' \"$ip\" \"$serverid\" \"$router\" \"$domain\" > \"$ROUTERD_RELAY_REPORT\";; esac\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"udhcpc", "-f", "-n", "-q", "-t", "5", "-T", "1", "-i", iface, "-s", script, "-p", filepath.Join(work, "pid")}
+	if broadcast {
+		args = append(args, "-B")
+	}
+	if requested != "" {
+		args = append(args, "-r", requested)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, busybox, args...)
+	command.Env = append(os.Environ(), "ROUTERD_RELAY_REPORT="+report)
+	var output strings.Builder
+	command.Stdout, command.Stderr = &output, &output
+	if err := fixtureInsideNamespace(namespace, command.Start); err != nil {
+		t.Fatal(err)
+	}
+	if err := command.Wait(); err != nil {
+		t.Fatalf("independent client %s: %v\n%s", iface, err, output.String())
+	}
+	data, err := os.ReadFile(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fields := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
+	if len(fields) != 4 {
+		t.Fatal("independent client did not report all DHCP fields", fields)
+	}
+	return fixtureDHCPRelayLease{Address: fields[0], Server: fields[1], Router: fields[2], Domain: fields[3]}
 }
