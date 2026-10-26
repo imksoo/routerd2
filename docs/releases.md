@@ -40,7 +40,9 @@ The release identity record remains V1; its format is independent of manifest
 version and the runtime ABI record envelope.
 
 The current declaration has configuration schema 2 and semantics contract
-`resource-program-native-9`. Boot ABI is 1 and worker ABI is 3. VRRP tracking
+`resource-program-native-10`. Boot ABI is 1 and worker ABI is 3. Explicit
+multihop BFD uses committed local sources and routed UDP 4784 endpoint pairs;
+single-hop retains its device-bound UDP 3784 scope. VRRP tracking
 resolves declared resource IDs, shares finite Health/BFD/BGP observations, and
 uses explicit healthy/unhealthy/neutral/unknown decisions. Its wire/configuration
 contract replaces the discarded service-only tracking form. DHCP server and DNS

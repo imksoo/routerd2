@@ -41,7 +41,8 @@ func TestSignedManifestABIMustMatchEveryNativeArtifact(t *testing.T) {
 func stageDifferentABI(t *testing.T, s *Store, id string, sequence uint64) Ref {
 	t.Helper()
 	profile := runtimeabi.Current()
-	profile.ConfigurationContract = "resource-program-native-x"
+	// Mutate the contract without resizing its compiled ELF metadata region.
+	profile.ConfigurationContract = "x" + profile.ConfigurationContract[1:]
 	record, err := runtimeabi.EncodeRecord(profile)
 	if err != nil || len(record) != len(runtimeabi.CurrentRecord) {
 		t.Fatal("bad ABI mutation fixture", err)

@@ -1,13 +1,13 @@
-# Native single-hop BFD
+# Native BFD
 
 This package implements asynchronous IPv4 and IPv6 BFD control sessions directly
 on Linux UDP sockets. It needs no FRR, `bfdd`, `vtysh`, shell, systemd or journald.
 It reports observations and finite health grants; consumers own routing policy.
 
 Protocol references are [RFC 5880](https://www.rfc-editor.org/rfc/rfc5880.html)
-and [RFC 5881](https://www.rfc-editor.org/rfc/rfc5881.html). Multihop is a distinct
-application ([RFC 5883](https://www.rfc-editor.org/rfc/rfc5883.html)) and is not
-silently inferred from incomplete single-hop configuration.
+and [RFC 5881](https://www.rfc-editor.org/rfc/rfc5881.html). Explicit multihop
+sessions use [RFC 5883](https://www.rfc-editor.org/rfc/rfc5883.html), UDP 4784 and
+routed endpoint pairs. An omitted interface alone does not select multihop.
 
 ```go
 err := bfd.Run(ctx, config, effects, ready)
@@ -39,7 +39,7 @@ instances. Config and Snapshot are JSON serializable:
 `Normalize` copies the peer slice and supplies 300ms TX/RX intervals, multiplier
 3 and a 1000ms effect timeout. Configured intervals are 50–60000ms, multipliers
 1–255, and effect timeouts 10–5000ms. `Validate` requires canonical addresses,
-an explicit interface, compatible families and unique peers. The declared local
+compatible families and unique peers. Single-hop requires an explicit interface. The declared local
 source must be installed, usable and non-tentative. Startup requires a direct
 route for each peer on the bound interface; ordinary multiaccess peers must
 belong to the source subnet. There is no implicit address selection or route
@@ -52,14 +52,33 @@ separately. An actual Linux point-to-point interface requires this explicit mode
 IPv6 link-local addresses omit the zone in configuration; the bound interface
 supplies their scope.
 
-An abstract Unix socket reserves the interface/family in its network namespace.
+With `multihop: true`, omit `interface` and `point_to_point`. Both endpoints must
+be explicit canonical unicast addresses that do not require interface scope.
+The local address must be committed and usable; it can live on `lo` while packets
+leave another link. The worker binds the address, uses UDP 4784 and permits
+routing/egress changes. It does not require an on-link peer, bind to the source
+owner's device, or create routes. For example:
+
+```json
+{"resource":"routed-health","multihop":true,"source_address":"192.0.2.1",
+ "peers":[{"address":"192.0.2.2"}]}
+```
+
+One multihop worker owns each local address's control socket and can contain up
+to 64 peers. It can coexist with a single-hop worker using UDP 3784. The source
+owner's link identity and address usability are checked; the source prefix is
+not a peer-adjacency constraint in this mode.
+
+An abstract Unix socket reserves the single-hop interface/family or multihop
+local address in its network namespace.
 Additional abstract claims reserve nonzero cryptographically random local
 discriminators across routerd BFD workers in that namespace. Each session has a
-stable UDP source port in 49152–65535 and transmits to UDP 3784. UDP reuse-port
+stable UDP source port in 49152–65535 and transmits to the selected control port. UDP reuse-port
 distribution is not used. The transport reads link/address/route information
-through netlink and never changes it. A separate verifier checks source-prefix,
+through netlink and never changes it. A separate verifier checks source usability,
 link identity, master and administrative state every second without blocking
-packet processing. Loss of these facts stops the worker.
+packet processing. Single-hop additionally keeps its source-prefix constraint.
+Loss of these facts stops the worker.
 
 ## Wire behavior and timing
 
@@ -71,9 +90,12 @@ largest wire interval, use checked 64-bit calculations. Expiry clears the remote
 discriminator even while already Down. Remote RequiredMinRx zero suppresses
 periodic packets while still allowing an immediate Final response to Poll.
 
-Both IP families bind to the configured device and source; transmission uses
-`MSG_DONTROUTE`. Receive validation checks actual kernel interface/destination,
-TTL or hop limit 255, source-port range, peer scope, discriminator and the base
+Single-hop sockets bind the configured device and source, transmit using
+`MSG_DONTROUTE` and require receive TTL/Hop Limit 255. Multihop sockets use normal
+routing, originate with TTL/Hop Limit 255 and accept the decremented receive
+value. Initial multihop packets match the exact source/destination pair; later
+packets still require that peer plus the session discriminator. Receive validation
+also checks kernel interface/destination metadata, source-port range and the base
 24-byte version-1 control format. P+F, zero multiplier, zero MyDiscriminator,
 zero DesiredMinTx and invalid zero YourDiscriminator are rejected. UDP padding
 outside the declared control length is ignored. A remote nonzero Echo RX value
@@ -81,7 +103,7 @@ is a capability advertisement and can be observed; local Echo RX remains zero
 and no echo traffic is generated. The outgoing C bit is zero because this
 userspace engine does not claim forwarding-plane independence.
 
-Authentication, Demand, Echo, Multihop and Passive configuration are explicitly
+Authentication, Demand, Echo and Passive configuration are explicitly
 rejected. Incoming Authentication, Demand and Multipoint flags are rejected and
 cannot refresh health. These modes have no fallback to another daemon. The
 worker does not claim interoperability tests with FRR or hardware vendors; the

@@ -36,7 +36,7 @@ func TestConfigDefaultsAndExplicitUnsupportedModes(t *testing.T) {
 		"authentication":           func(c *Config) { c.Authentication = "sha1" },
 		"demand":                   func(c *Config) { c.DemandMode = true },
 		"echo":                     func(c *Config) { c.Echo = true },
-		"multihop":                 func(c *Config) { c.Multihop = true },
+		"multihop with interface":  func(c *Config) { c.Multihop = true },
 		"passive":                  func(c *Config) { c.Passive = true },
 		"unbounded effect timeout": func(c *Config) { c.EffectTimeoutMilliseconds = 5001 },
 		"ambiguous point to point": func(c *Config) { c.PointToPoint = true; c.Peers = append(c.Peers, Peer{Address: "192.0.2.3"}) },
@@ -53,6 +53,26 @@ func TestConfigDefaultsAndExplicitUnsupportedModes(t *testing.T) {
 	c.SourceAddress, c.Peers[0].Address = "fe80::1", "fe80::2"
 	if err := Validate(c); err != nil {
 		t.Fatalf("interface-scoped IPv6 link local rejected: %v", err)
+	}
+}
+
+func TestMultihopRequiresAnUnscopedRoutedAddressPair(t *testing.T) {
+	c := Normalize(Config{Resource: "routed", Multihop: true, SourceAddress: "192.0.2.1", Peers: []Peer{{Address: "198.51.100.2"}}})
+	if err := Validate(c); err != nil {
+		t.Fatal(err)
+	}
+	c.PointToPoint = true
+	if err := Validate(c); err == nil {
+		t.Fatal("multihop accepted arbitrary point-to-point remote sources")
+	}
+	c.PointToPoint = false
+	c.SourceAddress, c.Peers[0].Address = "fe80::1", "fe80::2"
+	if err := Validate(c); err == nil {
+		t.Fatal("interface-scoped addresses accepted for a routed session")
+	}
+	c.SourceAddress, c.Peers[0].Address = "2001:db8:1::1", "2001:db8:2::2"
+	if err := Validate(c); err != nil {
+		t.Fatal(err)
 	}
 }
 

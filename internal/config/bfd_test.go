@@ -21,4 +21,13 @@ func TestBFDRequiresCommittedSourceOnItsInterface(t *testing.T) {
 	if err := Validate(FromNative(doc)); err != nil {
 		t.Fatal(err)
 	}
+	doc.Services[0].BFD.Multihop, doc.Services[0].BFD.Interface = true, ""
+	doc.Network.Interfaces[0].Name = "lo"
+	if err := Validate(FromNative(doc)); err != nil {
+		t.Fatal("routed loopback source rejected", err)
+	}
+	doc.Network.Interfaces[0].Addresses = nil
+	if err := Validate(FromNative(doc)); err == nil {
+		t.Fatal("multihop source absent from committed intent accepted")
+	}
 }

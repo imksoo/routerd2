@@ -420,3 +420,25 @@ func TestPointToPointRemoteSourceMayChangeWithoutRetargeting(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestMultihopAcceptsRoutedPacketsOnlyForTheConfiguredAddressPair(t *testing.T) {
+	cfg := testConfig()
+	cfg.Multihop, cfg.Interface = true, ""
+	w, err := newWorker(cfg, fakeDevice(1), sampleClock(int64(time.Second)), func(uint32) uint32 { return 0 })
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := frameFrom(cfg, peerPacket(wireInit, 17), w.clock)
+	d.hopLimit, d.index = 254, 9
+	if i, _, _ := w.accept(d); i != 0 || w.sessions[0].state != wireUp {
+		t.Fatal("routed BFD control was rejected")
+	}
+	deadline := w.sessions[0].deadline
+	d.source = netip.MustParseAddr("192.0.2.99")
+	if i, _, _ := w.accept(d); i >= 0 || w.sessions[0].deadline != deadline {
+		t.Fatal("foreign source refreshed multihop health using a matching discriminator")
+	}
+	if err := ValidateSnapshot(cfg, w.snapshot(true, 0)); err != nil {
+		t.Fatal(err)
+	}
+}

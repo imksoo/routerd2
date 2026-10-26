@@ -75,25 +75,51 @@ func openTransport(c Config, clock Clock) (_ *nativeTransport, result error) {
 	if err = t.links.SetSocketTimeout(200 * time.Millisecond); err != nil {
 		return nil, err
 	}
-	link, err := t.links.LinkByName(c.Interface)
+	var link netlink.Link
+	if c.Multihop {
+		// The source owner stays fixed; the routed egress may change. Binding
+		// to its device would prevent loopback sources and asymmetric paths.
+		addresses, readErr := t.links.AddrList(nil, netlink.FAMILY_ALL)
+		if readErr != nil {
+			return nil, readErr
+		}
+		for _, address := range addresses {
+			ip, ok := netip.AddrFromSlice(address.IP)
+			if ok && ip.Unmap() == t.source {
+				link, err = t.links.LinkByIndex(address.LinkIndex)
+				break
+			}
+		}
+		if link == nil && err == nil {
+			err = errors.New("multihop BFD source is not installed locally")
+		}
+	} else {
+		link, err = t.links.LinkByName(c.Interface)
+	}
 	if err != nil {
 		return nil, err
 	}
 	a := link.Attrs()
 	t.index, t.master, t.linkType, t.hardware = a.Index, a.MasterIndex, link.Type(), append([]byte(nil), a.HardwareAddr...)
-	if a.RawFlags&unix.IFF_POINTOPOINT != 0 && !c.PointToPoint {
+	if !c.Multihop && a.RawFlags&unix.IFF_POINTOPOINT != 0 && !c.PointToPoint {
 		return nil, errors.New("point-to-point interface requires explicit BFD point_to_point mode")
 	}
 	if err = t.Verify(); err != nil {
 		return nil, err
 	}
+	port := singleHopPort
+	if c.Multihop {
+		port = multihopPort
+	}
 	for _, peer := range c.Peers {
 		addr := netip.MustParseAddr(peer.Address)
-		routes, err := t.links.RouteGetWithOptions(net.IP(addr.AsSlice()), &netlink.RouteGetOptions{OifIndex: t.index, SrcAddr: net.IP(t.source.AsSlice())})
-		if err != nil || len(routes) != 1 || routes[0].LinkIndex != t.index || len(routes[0].Gw) != 0 || len(routes[0].MultiPath) != 0 || routes[0].Type != unix.RTN_UNICAST {
-			return nil, errors.New("BFD peer requires a direct single-hop route on the configured interface")
+		if !c.Multihop {
+			routes, err := t.links.RouteGetWithOptions(net.IP(addr.AsSlice()), &netlink.RouteGetOptions{OifIndex: t.index, SrcAddr: net.IP(t.source.AsSlice())})
+			if err != nil || len(routes) != 1 || routes[0].LinkIndex != t.index || len(routes[0].Gw) != 0 || len(routes[0].MultiPath) != 0 || routes[0].Type != unix.RTN_UNICAST {
+				return nil, errors.New("BFD peer requires a direct single-hop route on the configured interface")
+			}
 		}
-		t.destinations = append(t.destinations, t.sockaddr(addr, ControlPort))
+		t.destinations = append(t.destinations, t.sockaddr(addr, port))
 	}
 	// One process owns all sessions on one interface/family. Do not use UDP
 	// SO_REUSEPORT: hash distribution would deliver sessions to the wrong owner.
@@ -101,8 +127,12 @@ func openTransport(c Config, clock Clock) (_ *nativeTransport, result error) {
 	if err != nil {
 		return nil, err
 	}
-	if err = unix.Bind(t.lock, &unix.SockaddrUnix{Name: fmt.Sprintf("\x00routerd2-bfd:%d:%t", t.index, t.source.Is4())}); err != nil {
-		return nil, fmt.Errorf("claim BFD interface/family: %w", err)
+	claim := fmt.Sprintf("\x00routerd2-bfd:%d:%t", t.index, t.source.Is4())
+	if c.Multihop {
+		claim = "\x00routerd2-bfd-multihop:" + c.SourceAddress
+	}
+	if err = unix.Bind(t.lock, &unix.SockaddrUnix{Name: claim}); err != nil {
+		return nil, fmt.Errorf("claim BFD receive endpoint: %w", err)
 	}
 	t.rx, err = t.socket()
 	if err != nil {
@@ -126,7 +156,7 @@ func openTransport(c Config, clock Clock) (_ *nativeTransport, result error) {
 			return nil, err
 		}
 	}
-	if err = unix.Bind(t.rx, t.sockaddr(t.source, ControlPort)); err != nil {
+	if err = unix.Bind(t.rx, t.sockaddr(t.source, port)); err != nil {
 		return nil, fmt.Errorf("bind BFD control socket: %w", err)
 	}
 	for i := range c.Peers {
@@ -186,8 +216,10 @@ func (t *nativeTransport) socket() (int, error) {
 		return -1, err
 	}
 	fail := func(err error) (int, error) { _ = unix.Close(fd); return -1, err }
-	if err = unix.SetsockoptString(fd, unix.SOL_SOCKET, unix.SO_BINDTODEVICE, t.config.Interface); err != nil {
-		return fail(err)
+	if !t.config.Multihop {
+		if err = unix.SetsockoptString(fd, unix.SOL_SOCKET, unix.SO_BINDTODEVICE, t.config.Interface); err != nil {
+			return fail(err)
+		}
 	}
 	if t.source.Is4() {
 		if err = unix.SetsockoptInt(fd, unix.IPPROTO_IP, unix.IP_TTL, 255); err != nil {
@@ -235,12 +267,18 @@ func (t *nativeTransport) bindSourcePort(fd int) (uint16, error) {
 }
 
 func (t *nativeTransport) Verify() error {
-	link, err := t.links.LinkByName(t.config.Interface)
+	var link netlink.Link
+	var err error
+	if t.config.Multihop {
+		link, err = t.links.LinkByIndex(t.index)
+	} else {
+		link, err = t.links.LinkByName(t.config.Interface)
+	}
 	if err != nil {
 		return err
 	}
 	a := link.Attrs()
-	if a.Index != t.index || a.MasterIndex != t.master || link.Type() != t.linkType || !bytes.Equal(a.HardwareAddr, t.hardware) || a.RawFlags&unix.IFF_UP == 0 || a.RawFlags&unix.IFF_LOOPBACK != 0 {
+	if a.Index != t.index || a.MasterIndex != t.master || link.Type() != t.linkType || !bytes.Equal(a.HardwareAddr, t.hardware) || a.RawFlags&unix.IFF_UP == 0 || !t.config.Multihop && a.RawFlags&unix.IFF_LOOPBACK != 0 {
 		return errors.New("BFD interface identity, master or administrative state changed")
 	}
 	family := netlink.FAMILY_V4
@@ -254,6 +292,9 @@ func (t *nativeTransport) Verify() error {
 	for _, addr := range addresses {
 		ip, ok := netip.AddrFromSlice(addr.IP)
 		if ok && ip.Unmap() == t.source && addr.Flags&(unix.IFA_F_TENTATIVE|unix.IFA_F_DADFAILED|unix.IFA_F_DEPRECATED) == 0 && addr.PreferedLft != 0 && addr.ValidLft != 0 {
+			if t.config.Multihop {
+				return nil
+			}
 			bits, _ := addr.Mask.Size()
 			prefix := netip.PrefixFrom(t.source, bits)
 			if !prefix.IsValid() || t.sourcePrefix.IsValid() && prefix != t.sourcePrefix {
@@ -278,7 +319,11 @@ func (t *nativeTransport) Discriminators() []uint32 {
 	return append([]uint32(nil), t.discriminators...)
 }
 func (t *nativeTransport) Send(peer int, data []byte) error {
-	return unix.Sendto(t.tx[peer], data, unix.MSG_DONTROUTE, t.destinations[peer])
+	flags := 0
+	if !t.config.Multihop {
+		flags = unix.MSG_DONTROUTE
+	}
+	return unix.Sendto(t.tx[peer], data, flags, t.destinations[peer])
 }
 
 func (t *nativeTransport) Receive(ctx context.Context) (datagram, error) {
@@ -353,7 +398,9 @@ func (t *nativeTransport) Receive(ctx context.Context) (datagram, error) {
 		if err != nil {
 			p.invalid = true
 		}
-		if p.index != t.index || p.destination != t.source || p.hopLimit != 255 || p.sourcePort < 49152 {
+		// The socket owns device scope; the session owner validates address,
+		// hop limit, source port and protocol fields once in accept.
+		if !t.config.Multihop && p.index != t.index {
 			p.invalid = true
 		}
 		return p, nil

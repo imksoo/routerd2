@@ -418,7 +418,7 @@
         "bfd"
       ],
       "parity_status": "not_integrated",
-      "known_gap": "Native active single-hop IPv4/IPv6 BFD is implemented without FRR/vtysh; its wire and real two-binary BFD/BGP failure/recovery gates passed. Original resource profiles, when, controller/status/lifecycle compatibility and unsupported protocol modes remain incomplete."
+      "known_gap": "Native active asynchronous IPv4/IPv6 BFD supports explicit single-hop interface scope and routed multihop endpoint pairs without FRR/vtysh. Multihop real-daemon tests traverse a Linux forwarder with UDP 4784 and validate BGP loss/recovery, original expiry and IPv6 worker replacement. Original resource profiles, when, controller/status/lifecycle contracts, authentication and other unsupported modes remain incomplete."
     },
     {
       "id": "vpn.wireguard",
@@ -12224,63 +12224,27 @@
     {
       "package": "internal/protocol/bfd",
       "status": "integrated_supervised_worker",
-      "scope": "Native active single-hop asynchronous IPv4/IPv6 BFD, up to 64 peers per explicitly bound interface/address-family worker; native UDP sockets without FRR/vtysh. An explicit BGP peer_bfd dependency consumes typed finite health; BFD itself does not write routes.",
-      "validation": "Unit/race/vet and independent native wire tests cover Poll/Final negotiation, TTL/interface/destination and packet validation, silent expiry, remote restart, point-to-point source behavior, source/interface loss, coalesced transition counters and inactive final fencing. No-external-NIC Alpine QEMU passed TestIsolatedNativeBFD in 9.06 seconds. Controller tests cover source/recipient binding, frozen receive evidence, replay/future rejection, current BOOTTIME health, source cutover and BFD ingress/query progress while the network writer is blocked. Scoped immutable evidence is captured before its evaluation clock. The BGP consumer requires current source proof and health, TCP Down/Idle acknowledgement, fresh receive evidence after close and a matching successful withdrawal acknowledgement before recovery. The real two-binary daemon-bfd QEMU gate also passed startup suppression, UDP-only loss, frozen published-UP expiry, a full producer receive-deadline stop and fresh BGP/FIB recovery without restarting the BGP worker.",
+      "scope": "Native active asynchronous IPv4/IPv6 BFD. Single-hop owns one explicit interface/family; multihop owns one committed local source address, including loopback endpoints with independently routed egress. Each worker has up to 64 configured peers. BGP consumes finite typed health; BFD creates no routes.",
+      "validation": "PVE isolated Linux VM: make check-bfd passed the current single-hop BFD/BGP daemon case, routed IPv4 BFD/BGP failure/recovery/expiry and routed IPv6 BFD loss/recovery/worker replacement. Routed packet captures verify UDP 4784, source ports, outgoing TTL/Hop Limit 255 and incoming 254 across a real Linux forwarder. Local checks retain single-hop TTL, device scope, discriminators, original clocks, source lifecycle and source/recipient fences. This is not target hardware, authenticated BFD, or full original resource parity. Routed IPv4 user TCP/UDP crosses the learned prefix, fails while that route is withdrawn and resumes after BFD/BGP recovery.",
       "acceptance_gates": [
         {
-          "name": "native-bfd-qemu",
+          "name": "native-bfd-daemons",
           "status": "passed",
-          "suite": "bfd",
-          "required_test": "TestIsolatedNativeBFD",
-          "environment": "No-external-NIC Alpine QEMU; independent IPv4/IPv6 wire peers in a private network namespace",
-          "duration_seconds": 9.06
-        },
-        {
-          "name": "bgp-bfd-blocked-route-effects",
-          "status": "passed",
-          "required_test": "TestBFDWireExpiryClosesActualTCPWhileRouteEffectsBlocked",
-          "test_source": "internal/protocol/bgp/bfd_wire_test.go"
-        },
-        {
-          "name": "bfd-publication-source-full-check",
-          "status": "passed",
-          "command": "make check",
-          "source_tree": "f930b242b95d5555f7bface527074d4269cec91a",
-          "scope": "All packages, race detector, vet, nftables expression tests and 11 Python tool tests, including the immutable-evidence-before-clock correction"
-        },
-        {
-          "name": "bfd-runtime-cache-clock-order",
-          "status": "passed",
-          "validation": "runtimeplan race/vet and deterministic TestBFDCacheProjectionCapturesEvidenceBeforeEvaluationClock regression passed after the intermediate tree",
-          "test_source": "internal/runtimeplan/bfd_cache_test.go"
-        },
-        {
-          "name": "daemon-bfd-qemu",
-          "status": "passed",
-          "suite": "daemon-bfd",
-          "required_test": "TestDaemonBFDControlsBGPSessionAndExpiry",
-          "source_tree": "4155eb9d48bb8f35d1933f761928773dbf566d8b",
-          "environment": "No-external-NIC Alpine QEMU; real routerd/routerd-modules ELF pair and independent UDP BFD/TCP BGP peers",
-          "duration_seconds": 22.68,
-          "guest_total_seconds": 30.12,
-          "validation": "Startup suppression, UDP-only receive loss while TCP keepalives continue, frozen published-UP deadline expiry during SIGSTOP, full unpublished receive deadline expiry, same-producer Down counter and fresh receive, then BGP connection/export/FIB recovery without restarting BGP. Recovery validation also supports a strictly newer fenced BFD worker generation."
-        },
-        {
-          "name": "bfd-actual-static-release-pairs",
-          "status": "passed",
-          "architectures": [
-            "amd64",
-            "arm64"
+          "command": "make check-bfd RELEASE_ID=bfd-multihop",
+          "environment": "PVE isolated amd64 Linux VM with private user/network namespaces and independently encoded UDP BFD/TCP BGP peers",
+          "tests": [
+            "TestDaemonBFDControlsBGPSessionAndExpiry",
+            "TestDaemonMultihopBFDControlsBGPSessionAndExpiry",
+            "TestDaemonMultihopBFDIPv6"
           ],
-          "source_tree": "8b607b42fe335d795ef62431991273d1eb223482",
-          "release_id": "bfd-8b607b42fe335d79",
-          "validation": "make build-linux release-built-test built the actual static runtime ELF pairs and passed signature, immutable staging and CLI publication validation. Later daemon-bfd fixture and inventory-only changes do not modify the production binaries."
+          "logs": "dist/bfd-test",
+          "scope": "Executed native daemon and actual kernel communication; current routed modes have not run in QEMU or on physical devices."
         }
       ],
       "limitations": [
-        "Authentication, echo execution, demand/passive mode and multihop BFD are not implemented; BFD-bound BGP rejects graceful restart.",
-        "The original BFD resource profiles, BGPPeer.bfd string, when/dependency/controller orchestration and status/lifecycle semantics are not compatible merely because a native session engine exists.",
-        "FIB withdrawal remains subject to the single network writer and reconciliation schedule; no hard realtime convergence guarantee is made."
+        "Authentication, echo execution and demand/passive modes remain unimplemented; BFD-bound BGP rejects graceful restart.",
+        "Multihop requires explicit committed non-link-local endpoints and no interface binding. Dynamic source selection, VRF routing context and original BFD resource/profile lifecycle remain incomplete.",
+        "FIB withdrawal uses the existing network writer and reconciliation schedule. No hard realtime, target hardware, suspend or scale qualification is claimed."
       ],
       "resource_parity": false
     },

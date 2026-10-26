@@ -690,6 +690,14 @@ control／DNSの受信側期限表と内部JSON複製を削除した。個別cli
 - interface無しで元が生成するmultihop BFDを実装し、local address解決、legacy reset modeとnative strict modeを分ける。
 - 全世代単位のRIB snapshot、分割転送/backpressure/上限超過の状態を定義し、現在の4096 selected pathsを無条件の互換上限にしない。
 
+明示multihop BFDをUDP 4784と宣言済みlocal addressで実装した。interfaceは指定せず、
+sourceを持つlinkとaddressを監視し、egressはLinux routingへ任せる。single-hopの隣接・
+TTL/Hop Limit 255の制約は維持する。実Linux forwarderを越えるIPv4 BFD/BGPの
+障害・復旧・元期限での撤去と、IPv6 BFDの障害・復旧・worker交替を確認した。
+learned route先の利用者TCP/UDPも通信し、撤去中の接続拒否と復旧後の再開を確認した。
+両方向captureでUDP 4784・送信255／受信254を検査し、`make check-bfd`から再実行できる。
+旧profile/resource lifecycle、VRF・動的source・大規模RIB等は残り、NET-07全体は未完了。
+
 **受入条件**
 
 - 独立BGP/BFD peerとのIPv4/v6、RR/dynamic peer、VRF/recursive/ECMP、single/multihopを確認する。

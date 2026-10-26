@@ -25,12 +25,12 @@ func validateBFDReferences(services []Service) error {
 			continue
 		}
 		for address, ref := range service.BGP.PeerBFD {
-			if service.BGP.Runtime.Peers[address].EbgpMultihop > 1 {
-				return fmt.Errorf("BGP %s peer %s cannot bind a multihop session to single-hop BFD", service.Name, address)
-			}
 			source, ok := sources[ref.Service]
 			if !ok {
 				return fmt.Errorf("BGP %s peer %s refers to unconfigured BFD service %s", service.Name, address, ref.Service)
+			}
+			if service.BGP.Runtime.Peers[address].EbgpMultihop > 1 && !source.BFD.Multihop {
+				return fmt.Errorf("BGP %s peer %s cannot bind a multihop session to single-hop BFD", service.Name, address)
 			}
 			peer := ref.Address
 			if peer == "" {
@@ -48,7 +48,7 @@ func validateBFDReferences(services []Service) error {
 			if bgpAddress.Is4() != bfdAddress.Is4() {
 				return fmt.Errorf("BGP %s peer %s must use a BFD session of the same address family", service.Name, address)
 			}
-			// The explicit dependency protects this exact adjacent BGP path.
+			// The explicit dependency protects this exact BGP endpoint pair.
 			// Monitoring an unrelated router requires a separate conditional
 			// policy contract and must not silently become BFD session binding.
 			if peer != address {
@@ -63,7 +63,7 @@ func validateBFDReferences(services []Service) error {
 				binding = service.BGP.BindInterface
 			}
 			if binding != source.BFD.Interface {
-				return fmt.Errorf("BGP %s BFD-bound peer %s requires bind_interface %s", service.Name, address, source.BFD.Interface)
+				return fmt.Errorf("BGP %s BFD-bound peer %s requires bind_interface %q", service.Name, address, source.BFD.Interface)
 			}
 		}
 	}

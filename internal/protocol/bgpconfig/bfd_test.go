@@ -24,11 +24,6 @@ func TestBFDReferenceDefaultsAndRejectedModes(t *testing.T) {
 			c.PeerBFD["192.0.2.2"] = BFDReference{Service: "uplink-health", Address: "2001:db8::2"}
 		},
 		"multicast address": func(c *Config) { c.PeerBFD["192.0.2.2"] = BFDReference{Service: "uplink-health", Address: "224.0.0.1"} },
-		"multihop": func(c *Config) {
-			p := c.Runtime.Peers["192.0.2.2"]
-			p.EbgpMultihop = 2
-			c.Runtime.Peers["192.0.2.2"] = p
-		},
 		"peer graceful restart": func(c *Config) {
 			p := c.Runtime.Peers["192.0.2.2"]
 			p.GracefulRestart = &bgpdaemon.AppliedGracefulRestart{Enabled: true}

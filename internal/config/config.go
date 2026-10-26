@@ -117,7 +117,7 @@ func validateNative(d Native, source Document) error {
 		}
 		owned := false
 		for _, iface := range d.Network.Interfaces {
-			if iface.Name != service.BFD.Interface {
+			if !service.BFD.Multihop && iface.Name != service.BFD.Interface {
 				continue
 			}
 			for _, address := range iface.Addresses {
@@ -128,7 +128,7 @@ func validateNative(d Native, source Document) error {
 			}
 		}
 		if !owned {
-			return fmt.Errorf("BFD %s source_address must be committed on its interface; dynamic address dependencies require explicit support", service.Name)
+			return fmt.Errorf("BFD %s source_address must be committed in its address scope; dynamic address dependencies require explicit support", service.Name)
 		}
 	}
 	for _, service := range d.Services {

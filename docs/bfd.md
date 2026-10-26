@@ -1,15 +1,15 @@
 # Native BFD and BGP session ownership
 
-`routerd-modules` has a native `bfd` role. It runs one worker per interface and
-address family, with an explicitly configured local address and up to 64 peers.
+`routerd-modules` has a native `bfd` role. It runs one worker per single-hop interface/family or multihop local address,
+with an explicitly configured local address and up to 64 peers.
 It opens Linux UDP sockets directly; FRR, `vtysh`, systemd and external helpers
 are not part of the runtime path. [The example](../examples/bfd-bgp.yaml) binds
 an adjacent BGP peer to a BFD service.
 
 ## Protocol and configuration scope
 
-The engine implements active, single-hop, asynchronous BFD control for IPv4
-and IPv6, following [RFC 5880](https://www.rfc-editor.org/rfc/rfc5880) and
+The engine implements active asynchronous BFD control for IPv4
+and IPv6. Single-hop follows [RFC 5880](https://www.rfc-editor.org/rfc/rfc5880) and
 [RFC 5881](https://www.rfc-editor.org/rfc/rfc5881). Each session has a stable
 local discriminator and UDP source port in 49152..65535. Reception uses port
 3784, interface/destination checks and TTL/Hop Limit 255. It validates the
@@ -24,7 +24,7 @@ the local values alone do not guarantee a fixed failure time. Down/Init
 transmission is no faster than once per second before jitter. Linux scheduling
 and control-plane load still matter; this is not a real-time convergence bound.
 
-`source_address` must be a canonical unicast address explicitly committed on
+In single-hop mode, `source_address` must be a canonical unicast address explicitly committed on
 the configured interface by an `address` resource. A worker does not choose a
 DHCP/RA source implicitly. It checks continuing ownership of the interface and
 source address. Separate IPv4/IPv6 workers may use one interface; two workers
@@ -34,9 +34,29 @@ socket/discriminator ownership within its network namespace.
 `point_to_point: true` permits the RFC's point-to-point source-address behavior
 and requires exactly one configured peer. It is an explicit topology choice,
 not a general wildcard for accepting arbitrary neighbors. Authentication,
-demand mode, echo execution, passive mode and multihop BFD are not implemented
+demand mode, echo execution and passive mode are not implemented
 and are rejected. A remote echo capability advertisement is not a request to
 silently create an echo engine. See the [protocol implementation contract](../internal/protocol/bfd/README.md).
+
+## Routed multihop
+
+Set `multihop: true`, omit `interface` and `point_to_point`, and declare the
+explicit local source address and peer routes. The source can live on `lo` while
+packets leave a physical interface. See [the routed BFD/BGP example](../examples/bfd-multihop.yaml).
+The source address must be committed and usable; its owning link is monitored.
+There is no implicit source selection, route creation or fallback to single-hop.
+
+[RFC 5883](https://www.rfc-editor.org/rfc/rfc5883.html) sessions use UDP 4784 and
+normal source-bound routing. The kernel can change the egress path without
+retargeting the session. Packets originate with TTL/Hop Limit 255 and can arrive
+with a decremented value. The receiver checks the exact configured endpoint
+pair and discriminator; multihop does not allow point-to-point source aliases or
+link-local addresses. Two workers cannot own the same local multihop receive
+socket. Single-hop UDP 3784 remains independently available.
+
+Authentication is not implemented in either mode. Other pending protocol and
+resource work is listed in the implementation plan; this routed mode is not a
+claim of full BFD resource parity.
 
 ## Receive time, publication and restarts
 
@@ -120,7 +140,8 @@ unreleased worker/control formats are deployed as a matching runtime pair.
 The public BGP setting is `peer_bfd`, keyed by the exact BGP neighbor address.
 Its `service` names a configured BFD service. `address` defaults to that BGP
 neighbor and must identify the same neighbor. The BGP transport must explicitly
-use the same local address and bound interface as BFD. A dependency on an
+use the same local address as BFD. Single-hop requires the same bound interface;
+multihop uses routing on both transports with empty `bind_interface`. A dependency on an
 unrelated monitored router, a different family, or an implicit transport path
 is rejected before applying a configuration.
 
@@ -159,11 +180,27 @@ This behavior is a configured strict dependency, including startup, rather
 than opportunistic detection after an already-established BGP session. The
 original `AppliedPeer.BFD` profile string is still rejected: it is a different
 legacy model and is not silently reinterpreted as a native service reference.
-Multihop BGP and enabled global/peer graceful restart cannot be combined with
-this single-hop gate in the current implementation. Full original BFD resource
+Multihop BGP can use a multihop BFD source for that same endpoint pair. Enabled
+global/peer graceful restart is rejected because it conflicts with immediate
+withdrawal. Full original BFD resource
 and BGP profile compatibility remains a separate migration item.
 
-## Acceptance evidence
+## Running the current communication checks
+
+`make check-bfd` builds the native product and runs real workers in fresh user/network
+namespaces. It needs Linux namespace capabilities and root or passwordless sudo.
+The harness and product ELFs are staged in a private root-owned directory; home
+permissions are unchanged. Logs and routed captures are written to `dist/bfd-test`.
+
+The IPv4 routed test uses independent UDP BFD and TCP BGP peers behind a Linux
+forwarder. It verifies initial Down suppresses BGP, loss closes TCP and withdraws
+routes, recovery, actual user TCP/UDP over the learned route, original receive expiry during SIGSTOP, and surviving writer
+expiry while control/BGP/BFD are stopped. The IPv6 test verifies loopback endpoint
+sessions across a forwarder, loss/recovery and a fresh producer after SIGKILL.
+Both capture tests check UDP 4784, the source-port range, outgoing TTL/Hop Limit
+255 and incoming 254. A single-hop case checks the existing UDP 3784 path.
+
+## Additional environments
 
 The native BFD suite uses an independently encoded UDP peer inside a private
 network namespace. It covers both families, negotiation, malformed/off-scope
@@ -180,6 +217,6 @@ not successful gates. Exact results belong to the corresponding CI run and
 its serial log/manifest, not merely the presence of this test definition.
 
 The application boundary follows the considerations in
-[RFC 5882](https://www.rfc-editor.org/rfc/rfc5882). Authentication, multihop,
+[RFC 5882](https://www.rfc-editor.org/rfc/rfc5882). Authentication,
 hardware offload, very large peer populations and behavior on homert02/03's
 actual links require additional implementation or acceptance work.

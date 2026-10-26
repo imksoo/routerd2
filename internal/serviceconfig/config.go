@@ -181,7 +181,7 @@ func Validate(services []Service) error {
 		if n != 1 {
 			return fmt.Errorf("service %s must select exactly one protocol", s.Name)
 		}
-		if s.DNS == nil && s.BGP == nil && !interfaceName.MatchString(s.Interface()) {
+		if s.DNS == nil && s.BGP == nil && !(s.BFD != nil && s.BFD.Multihop) && !interfaceName.MatchString(s.Interface()) {
 			return fmt.Errorf("service %s has an invalid interface", s.Name)
 		}
 		key := s.Role() + ":" + s.Interface()
@@ -198,6 +198,9 @@ func Validate(services []Service) error {
 				family = "ipv4"
 			}
 			key = "bfd:" + s.BFD.Interface + ":" + family
+			if s.BFD.Multihop {
+				key = "bfd-multihop:" + s.BFD.SourceAddress
+			}
 		}
 		if other, ok := sockets[key]; ok {
 			return fmt.Errorf("services %s and %s compete for %s", other, s.Name, key)

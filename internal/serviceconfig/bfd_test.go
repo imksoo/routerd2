@@ -73,6 +73,17 @@ func TestBGPBFDDependencyRequiresTheSameConfiguredPath(t *testing.T) {
 	if err := Validate(s); err != nil {
 		t.Fatal("explicit global interface binding should be accepted", err)
 	}
+	s = makeServices()
+	s[0].BFD.Multihop, s[0].BFD.Interface = true, ""
+	p := s[1].BGP.Runtime.Peers["192.0.2.2"]
+	p.EbgpMultihop = 10
+	s[1].BGP.Runtime.Peers["192.0.2.2"] = p
+	tr = s[1].BGP.PeerTransports["192.0.2.2"]
+	tr.BindInterface = ""
+	s[1].BGP.PeerTransports["192.0.2.2"] = tr
+	if err := Validate(s); err != nil {
+		t.Fatal("routed BGP and multihop BFD address pair rejected", err)
+	}
 }
 
 func TestBFDInstanceAndSocketOwnership(t *testing.T) {
@@ -99,6 +110,16 @@ func TestBFDInstanceAndSocketOwnership(t *testing.T) {
 	other.BFD.Interface = "wan1"
 	if err := Validate([]Service{v4, other}); err != nil {
 		t.Fatal(err)
+	}
+	multi := bfdService("routed", "192.0.2.1", "198.51.100.2")
+	multi.BFD.Interface, multi.BFD.Multihop = "", true
+	if err := Validate([]Service{v4, multi}); err != nil {
+		t.Fatal("single-hop and multihop receive ports should be independent", err)
+	}
+	duplicate := multi
+	duplicate.Name = "duplicate"
+	if err := Validate([]Service{multi, duplicate}); err == nil {
+		t.Fatal("two workers accepted ownership of the same multihop receive socket")
 	}
 	other.BFD.Resource = "forged"
 	if err := Validate([]Service{other}); err == nil {

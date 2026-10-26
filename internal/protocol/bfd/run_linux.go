@@ -16,8 +16,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// Run owns one single-hop interface/family until cancellation or a fatal socket,
-// interface or publisher failure. No routing configuration is changed. Initial
+// Run owns a single-hop interface/family or multihop local address until
+// cancellation or a fatal source, socket or publisher failure. It changes no routes. Initial
 // Down status is acknowledged before ready; the last active Update is joined
 // before final inactive status. Effects must honor their context deadlines.
 func Run(ctx context.Context, cfg Config, effects Effects, ready func()) error {
@@ -102,7 +102,7 @@ func (w *worker) reject(peer int, err error) {
 }
 
 func (w *worker) accept(d datagram) (int, bool, bool) {
-	if d.invalid || d.hopLimit != 255 || d.index <= 0 || d.destination != w.source || d.sourcePort < 49152 || d.source.Is4() != w.source.Is4() || d.source == w.source || d.received.BootID != w.clock.BootID || !validWall(d.received.WallTime) {
+	if d.invalid || d.hopLimit <= 0 || d.hopLimit > 255 || !w.config.Multihop && d.hopLimit != 255 || d.index <= 0 || d.destination != w.source || d.sourcePort < 49152 || d.source.Is4() != w.source.Is4() || d.source == w.source || d.received.BootID != w.clock.BootID || !validWall(d.received.WallTime) {
 		w.reject(-1, errors.New("BFD datagram has invalid interface, address, hop limit, port or receive clock"))
 		return -1, false, false
 	}

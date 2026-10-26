@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/netip"
 	"os"
@@ -42,18 +43,34 @@ func TestDaemonBFDControlsBGPSessionAndExpiry(t *testing.T) {
 	if !isolateFixture(t, "TestDaemonBFDControlsBGPSessionAndExpiry") {
 		return
 	}
-	testDaemonBFDControls(t, false)
+	testDaemonBFDControls(t, false, false)
 }
 
 func TestDaemonVRRPBFDAndBGPTracking(t *testing.T) {
 	if isolateFixture(t, "TestDaemonVRRPBFDAndBGPTracking") {
-		testDaemonBFDControls(t, true)
+		testDaemonBFDControls(t, true, false)
 	}
 }
 
-func testDaemonBFDControls(t *testing.T, tracking bool) {
+func TestDaemonMultihopBFDControlsBGPSessionAndExpiry(t *testing.T) {
+	if isolateFixture(t, "TestDaemonMultihopBFDControlsBGPSessionAndExpiry") {
+		testDaemonBFDControls(t, false, true)
+	}
+}
+
+func testDaemonBFDControls(t *testing.T, tracking, multihop bool) {
 	t.Helper()
-	peer, listener, index := newDaemonBFDPeer(t)
+	var peer *daemonBFDPeer
+	var listener *bfdFixtureListener
+	var index int
+	gateway := "192.0.2.2"
+	desired := network.Desired{Interfaces: []network.Interface{{Name: "wan0", Addresses: []string{"192.0.2.1/24"}}}}
+	if multihop {
+		path := newRoutedBFDPeer(t, "ipv4")
+		peer, listener, index, desired, gateway = path.peer, path.listener, path.index, path.desired, path.gateway
+	} else {
+		peer, listener, index = newDaemonBFDPeer(t)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	peerErrors := make(chan error, 4)
@@ -95,13 +112,24 @@ func testDaemonBFDControls(t *testing.T, tracking bool) {
 		PeerBFD:        map[string]bgpconfig.BFDReference{"192.0.2.2": {Service: "link-watch"}},
 		RouteMetric:    200,
 	}
-	doc := config.Native{Network: network.Desired{Interfaces: []network.Interface{{Name: "wan0", Addresses: []string{"192.0.2.1/24"}}}}, Services: []serviceconfig.Service{
+	doc := config.Native{Network: desired, Services: []serviceconfig.Service{
 		{Name: "link-watch", BFD: &bfd.Config{Interface: "wan0", SourceAddress: "192.0.2.1", Peers: []bfd.Peer{{Address: "192.0.2.2", MinTxMilliseconds: 200, MinRxMilliseconds: 200, DetectMultiplier: 5}}}},
 		{Name: "edge", BGP: &bgp},
 	}}
+	if multihop {
+		doc.Services[0].BFD.Multihop, doc.Services[0].BFD.Interface = true, ""
+		transport := bgp.PeerTransports["192.0.2.2"]
+		transport.BindInterface = ""
+		bgp.PeerTransports["192.0.2.2"] = transport
+		remote := bgp.Runtime.Peers["192.0.2.2"]
+		remote.EbgpMultihop = 5
+		bgp.Runtime.Peers["192.0.2.2"] = remote
+	}
 	var capture *healthPBRCaptureState
-	if tracking {
+	if multihop || tracking {
 		capture = healthPBRCapture(t, "wan0")
+	}
+	if tracking {
 		for i, source := range []string{"link-watch", "edge"} {
 			cfg := vrrp.Config{Interface: "wan0", VIPInterface: fmt.Sprintf("track-vip%d", i), Family: "ipv4", SourceAddress: "192.0.2.1", UnicastPeers: []netip.Addr{netip.MustParseAddr("192.0.2.2")}, VirtualRouterID: 41 + i, Priority: 150, AdvertIntervalCentiseconds: 20, Addresses: []string{fmt.Sprintf("192.0.2.%d/32", 254-i)}, AcceptMode: true, Track: []vrrp.Track{{Resource: "service/" + source, Penalty: 100, HealthyThreshold: 2, UnhealthyThreshold: 3, MaxAgeMillis: 1500}}}
 			doc.Services = append(doc.Services, serviceconfig.Service{Name: "track-" + source, VRRP: &cfg})
@@ -111,6 +139,42 @@ func testDaemonBFDControls(t *testing.T, tracking bool) {
 		t.Fatal(err)
 	}
 	fixture := startFixtureDaemon(t, config.FromNative(doc))
+	traffic := func(available bool) {
+		t.Helper()
+		if !multihop {
+			return
+		}
+		for _, protocol := range []string{"tcp", "udp"} {
+			port := "18093"
+			dialer := net.Dialer{Timeout: time.Second, LocalAddr: &net.TCPAddr{IP: net.ParseIP("192.0.2.1")}}
+			if protocol == "udp" {
+				port, dialer.LocalAddr = "18094", &net.UDPAddr{IP: net.ParseIP("192.0.2.1")}
+			}
+			conn, err := dialer.DialContext(ctx, protocol+"4", net.JoinHostPort("203.0.113.9", port))
+			if !available {
+				if err == nil {
+					conn.Close()
+					t.Fatal("withdrawn learned route still opened user traffic", protocol)
+				}
+				continue
+			}
+			if err != nil {
+				t.Fatal("learned route did not carry user traffic", protocol, err)
+			}
+			_ = conn.SetDeadline(time.Now().Add(time.Second))
+			if protocol == "udp" {
+				_, err = conn.Write([]byte("routed"))
+			}
+			var response [1]byte
+			if err == nil {
+				_, err = io.ReadFull(conn, response[:])
+			}
+			conn.Close()
+			if err != nil || response[0] != 'B' {
+				t.Fatal("routed TCP/UDP response", protocol, response, err)
+			}
+		}
+	}
 	serviceStatus := func() (runtimeplan.InstanceStatus, bfd.Snapshot) {
 		t.Helper()
 		call, stop := context.WithTimeout(ctx, time.Second)
@@ -229,7 +293,7 @@ func testDaemonBFDControls(t *testing.T, tracking bool) {
 		}
 		until(t, 6*time.Second, func() bool {
 			checkPeerError()
-			return fixtureRoute(t, "203.0.113.0/24", "192.0.2.2", index) && session.advertised.Load() && session.keepalives.Load() > 0
+			return fixtureRoute(t, "203.0.113.0/24", gateway, index) && session.advertised.Load() && session.keepalives.Load() > 0
 		})
 		if modulePID("service.edge") != bgpPID {
 			t.Fatal("BFD recovery restarted the BGP worker instead of controlling its session")
@@ -249,6 +313,7 @@ func testDaemonBFDControls(t *testing.T, tracking bool) {
 		})
 	}
 	first := connect()
+	traffic(true)
 	waitTracks(150)
 	t.Log("BFD Up: BGP established, outbound advertisement observed, learned route installed")
 	// A short control delay must not replace valid original wire evidence with
@@ -290,7 +355,7 @@ func testDaemonBFDControls(t *testing.T, tracking bool) {
 		t.Fatal("queued transport failure reset BGP after fresh BFD recovery")
 	default:
 	}
-	if listener.accepted.Load() != 1 || !fixtureRoute(t, "203.0.113.0/24", "192.0.2.2", index) {
+	if listener.accepted.Load() != 1 || !fixtureRoute(t, "203.0.113.0/24", gateway, index) {
 		t.Fatal("short control delay replaced the BGP session or withdrew its route")
 	}
 	t.Log("350 ms control pause exceeded the projection RPC timeout; original BFD budget preserved the same BGP TCP session and route")
@@ -309,8 +374,10 @@ func testDaemonBFDControls(t *testing.T, tracking bool) {
 		t.Fatal("BFD UDP loss did not publish the independent receive timeout", down.Peers[0])
 	}
 	waitTracks(50)
+	traffic(false)
 	t.Log("UDP BFD stopped while TCP KEEPALIVE continued: connection closed and learned route withdrawn")
 	second := connect()
+	traffic(true)
 	waitTracks(150)
 	t.Log("BFD resumed: new BGP session, advertisement and route restored")
 	beforeInstance, before := serviceStatus()
@@ -374,6 +441,7 @@ func testDaemonBFDControls(t *testing.T, tracking bool) {
 		t.Fatal(err)
 	}
 	connect()
+	traffic(true)
 	waitTracks(150)
 	recoveredInstance, recovered := serviceStatus()
 	recoveredModule := moduleStatus("service.link-watch")
@@ -403,6 +471,9 @@ func testDaemonBFDControls(t *testing.T, tracking bool) {
 	}
 	checkPeerError()
 	t.Log("SIGCONT: fresh BFD health recreates BGP session and restores advertisements and learned route")
+	if multihop {
+		verifyMultihopBFDCapture(t, capture, "192.0.2.1", "192.0.2.2")
+	}
 
 	if tracking {
 		capture.mu.Lock()
@@ -442,7 +513,7 @@ func testDaemonBFDControls(t *testing.T, tracking bool) {
 			t.Fatal(err)
 		}
 		current, err := bfd.ReadClock()
-		return err == nil && bgpObservation.Active && bgpObservation.ExpiresNanos > uint64(current.BoottimeNanoseconds)+uint64(2*time.Second) && fixtureRoute(t, "203.0.113.0/24", "192.0.2.2", index)
+		return err == nil && bgpObservation.Active && bgpObservation.ExpiresNanos > uint64(current.BoottimeNanoseconds)+uint64(2*time.Second) && fixtureRoute(t, "203.0.113.0/24", gateway, index)
 	})
 	writer := moduleStatus("network")
 	for _, module := range []supervisor.ModuleStatus{moduleStatus("control"), moduleStatus("service.edge"), moduleStatus("service.link-watch")} {
@@ -591,6 +662,8 @@ func bfdFixtureAdvertised(payload []byte, prefix netip.Prefix) bool {
 
 type daemonBFDPeer struct {
 	receive, send *net.UDPConn
+	destination   netip.AddrPort
+	hopLimit      int
 	enabled       atomic.Bool
 	received      atomic.Uint64
 }
@@ -622,7 +695,7 @@ func (p *daemonBFDPeer) run(ctx context.Context, failures chan<- error) {
 		}
 		binary.BigEndian.PutUint32(frame[12:16], interval)
 		binary.BigEndian.PutUint32(frame[16:20], 200000)
-		_, err := p.send.WriteToUDP(frame, &net.UDPAddr{IP: net.ParseIP("192.0.2.1"), Port: 3784})
+		_, err := p.send.WriteToUDP(frame, net.UDPAddrFromAddrPort(p.destination))
 		last = time.Now()
 		return err
 	}
@@ -647,7 +720,7 @@ func (p *daemonBFDPeer) run(ctx context.Context, failures chan<- error) {
 			report(err)
 			return
 		}
-		if n != 24 || flags&(unix.MSG_TRUNC|unix.MSG_CTRUNC) != 0 || packet[0]>>5 != 1 || packet[3] != 24 || packet[2] != 5 || packet[1]&0x0f != 0 || !from.IP.Equal(net.ParseIP("192.0.2.1")) || from.Port < 49152 {
+		if n != 24 || flags&(unix.MSG_TRUNC|unix.MSG_CTRUNC) != 0 || packet[0]>>5 != 1 || packet[3] != 24 || packet[2] != 5 || packet[1]&0x0f != 0 || !from.IP.Equal(net.IP(p.destination.Addr().AsSlice())) || from.Port < 49152 {
 			report(fmt.Errorf("invalid independent BFD wire envelope: %x from=%v", packet[:n], from))
 			return
 		}
@@ -658,11 +731,11 @@ func (p *daemonBFDPeer) run(ctx context.Context, failures chan<- error) {
 		}
 		ttl := 0
 		for _, control := range controls {
-			if control.Header.Level == unix.IPPROTO_IP && control.Header.Type == unix.IP_TTL && len(control.Data) == 4 {
+			if (control.Header.Level == unix.IPPROTO_IP && control.Header.Type == unix.IP_TTL || control.Header.Level == unix.IPPROTO_IPV6 && control.Header.Type == unix.IPV6_HOPLIMIT) && len(control.Data) == 4 {
 				ttl = int(binary.NativeEndian.Uint32(control.Data))
 			}
 		}
-		if ttl != 255 {
+		if ttl != p.hopLimit {
 			report(fmt.Errorf("outbound BFD TTL = %d", ttl))
 			return
 		}
@@ -744,8 +817,6 @@ func newDaemonBFDPeer(t *testing.T) (*daemonBFDPeer, *bfdFixtureListener, int) {
 	if err := h.LinkSetUp(local); err != nil {
 		t.Fatal(err)
 	}
-	peer := &daemonBFDPeer{}
-	var listener net.Listener
 	err = inDaemonBFDNamespace(namespace, func() error {
 		h, err := netlink.NewHandle(unix.NETLINK_ROUTE)
 		if err != nil {
@@ -763,32 +834,48 @@ func newDaemonBFDPeer(t *testing.T) (*daemonBFDPeer, *bfdFixtureListener, int) {
 		if err != nil {
 			return err
 		}
-		if err := h.AddrAdd(link, address); err != nil {
-			return err
-		}
-		peer.receive, err = net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("192.0.2.2"), Port: 3784})
+		return h.AddrAdd(link, address)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	peer, listener := openDaemonBFDPeer(t, namespace, netip.MustParseAddr("192.0.2.2"), netip.MustParseAddrPort("192.0.2.1:3784"), 255)
+	return peer, listener, local.Attrs().Index
+}
+
+func openDaemonBFDPeer(t *testing.T, namespace netns.NsHandle, source netip.Addr, destination netip.AddrPort, hopLimit int) (*daemonBFDPeer, *bfdFixtureListener) {
+	t.Helper()
+	peer := &daemonBFDPeer{destination: destination, hopLimit: hopLimit}
+	var listener net.Listener
+	suffix, level, receiveTTL, sendTTL := "4", unix.IPPROTO_IP, unix.IP_RECVTTL, unix.IP_TTL
+	if source.Is6() {
+		suffix, level, receiveTTL, sendTTL = "6", unix.IPPROTO_IPV6, unix.IPV6_RECVHOPLIMIT, unix.IPV6_UNICAST_HOPS
+	}
+	err := inDaemonBFDNamespace(namespace, func() error {
+		var err error
+		peer.receive, err = net.ListenUDP("udp"+suffix, &net.UDPAddr{IP: net.IP(source.AsSlice()), Port: int(destination.Port())})
 		if err != nil {
 			return err
 		}
-		peer.send, err = net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("192.0.2.2"), Port: 49170})
+		peer.send, err = net.ListenUDP("udp"+suffix, &net.UDPAddr{IP: net.IP(source.AsSlice()), Port: 49170})
 		if err != nil {
 			return err
 		}
 		for _, option := range []struct {
 			conn        *net.UDPConn
 			name, value int
-		}{{peer.receive, unix.IP_RECVTTL, 1}, {peer.send, unix.IP_TTL, 255}} {
+		}{{peer.receive, receiveTTL, 1}, {peer.send, sendTTL, 255}} {
 			raw, err := option.conn.SyscallConn()
 			if err != nil {
 				return err
 			}
 			var optionErr error
-			err = raw.Control(func(fd uintptr) { optionErr = unix.SetsockoptInt(int(fd), unix.IPPROTO_IP, option.name, option.value) })
+			err = raw.Control(func(fd uintptr) { optionErr = unix.SetsockoptInt(int(fd), level, option.name, option.value) })
 			if err = errors.Join(err, optionErr); err != nil {
 				return err
 			}
 		}
-		listener, err = net.Listen("tcp4", "192.0.2.2:0")
+		listener, err = net.Listen("tcp"+suffix, net.JoinHostPort(source.String(), "0"))
 		return err
 	})
 	if err != nil {
@@ -796,7 +883,7 @@ func newDaemonBFDPeer(t *testing.T) (*daemonBFDPeer, *bfdFixtureListener, int) {
 	}
 	counted := &bfdFixtureListener{Listener: listener}
 	t.Cleanup(func() { _ = peer.receive.Close(); _ = peer.send.Close(); _ = counted.Close() })
-	return peer, counted, local.Attrs().Index
+	return peer, counted
 }
 
 func inDaemonBFDNamespace(namespace netns.NsHandle, fn func() error) error {

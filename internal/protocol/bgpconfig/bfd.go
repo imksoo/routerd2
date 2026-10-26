@@ -70,9 +70,6 @@ func ValidateBFDReferences(c Config) error {
 		if !bfdServiceName.MatchString(ref.Service) {
 			return errors.New("BGP BFD service reference must be a service name")
 		}
-		if configured.EbgpMultihop > 1 {
-			return errors.New("native BFD-bound BGP peers do not support multihop")
-		}
 		if c.Runtime.Global.GracefulRestart != nil && c.Runtime.Global.GracefulRestart.Enabled || configured.GracefulRestart != nil && configured.GracefulRestart.Enabled {
 			return errors.New("native BFD-bound BGP peers cannot enable graceful restart; immediate withdrawal is required")
 		}

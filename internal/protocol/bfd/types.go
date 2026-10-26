@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
-// Package bfd implements single-hop asynchronous BFD control sessions. It owns
+// Package bfd implements asynchronous single-hop and multihop BFD sessions. It owns
 // sockets and observations only; routing decisions remain with its consumer.
 package bfd
 
@@ -8,11 +8,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/imksoo/routerd2/internal/boottime"
 	"math"
 	"net/netip"
 	"strings"
 	"time"
+
+	"github.com/imksoo/routerd2/internal/boottime"
 )
 
 const (
@@ -21,21 +22,22 @@ const (
 	StateInit      = "INIT"
 	StateUp        = "UP"
 	MaxPeers       = 64
-	ControlPort    = 3784
+	singleHopPort  = 3784
+	multihopPort   = 4784
 )
 
 type Config struct {
 	Resource                  string `json:"resource"`
-	Interface                 string `json:"interface"`
+	Interface                 string `json:"interface,omitempty"`
 	SourceAddress             string `json:"source_address"`
 	Peers                     []Peer `json:"peers"`
 	PointToPoint              bool   `json:"point_to_point,omitempty"`
+	Multihop                  bool   `json:"multihop,omitempty"`
 	EffectTimeoutMilliseconds int    `json:"effect_timeout_milliseconds,omitempty"`
 	// Unsupported modes have explicit rejection instead of implicit fallback.
 	Authentication string `json:"authentication,omitempty"`
 	DemandMode     bool   `json:"demand_mode,omitempty"`
 	Echo           bool   `json:"echo,omitempty"`
-	Multihop       bool   `json:"multihop,omitempty"`
 	Passive        bool   `json:"passive,omitempty"`
 }
 
@@ -144,14 +146,17 @@ func Validate(c Config) error {
 	if strings.TrimSpace(c.Resource) == "" || len(c.Resource) > 128 || strings.ContainsAny(c.Resource, "\x00\r\n") {
 		return errors.New("BFD resource must be nonempty and bounded")
 	}
-	if !validInterface(c.Interface) {
+	if c.Multihop && (c.Interface != "" || c.PointToPoint) {
+		return errors.New("multihop BFD uses routed address pairs without an interface or point_to_point mode")
+	}
+	if !c.Multihop && !validInterface(c.Interface) {
 		return errors.New("BFD requires an explicit valid interface")
 	}
-	if c.Authentication != "" && c.Authentication != "none" || c.DemandMode || c.Echo || c.Multihop || c.Passive {
-		return errors.New("BFD supports active single-hop asynchronous control only; authentication, demand, echo, multihop and passive modes are unavailable")
+	if c.Authentication != "" && c.Authentication != "none" || c.DemandMode || c.Echo || c.Passive {
+		return errors.New("BFD supports active asynchronous control only; authentication, demand, echo and passive modes are unavailable")
 	}
 	source, ok := unicast(c.SourceAddress)
-	if !ok {
+	if !ok || c.Multihop && source.IsLinkLocalUnicast() {
 		return errors.New("BFD requires an explicit canonical local unicast address without a zone")
 	}
 	if len(c.Peers) == 0 || len(c.Peers) > MaxPeers || c.PointToPoint && len(c.Peers) != 1 {
@@ -163,7 +168,7 @@ func Validate(c Config) error {
 	seen := map[string]bool{}
 	for _, p := range c.Peers {
 		a, ok := unicast(p.Address)
-		if !ok || a.Is4() != source.Is4() || a == source || seen[p.Address] {
+		if !ok || a.Is4() != source.Is4() || a == source || seen[p.Address] || c.Multihop && a.IsLinkLocalUnicast() {
 			return errors.New("BFD peers must be distinct canonical unicast addresses of the source family")
 		}
 		seen[p.Address] = true

@@ -201,8 +201,10 @@ The ACK carries its observation time,
 so queueing after observation does not change its validity. A missing, late or
 failed acknowledgment aborts the worker;
 opposite requests are never stacked onto the asynchronous channel. BFD-bound
-peers reject multihop and enabled global/peer graceful restart, whose stale
+peers reject enabled global/peer graceful restart, whose stale
 route behavior would conflict with the required immediate withdrawal.
+Multihop BGP requires a multihop BFD source for the same endpoint pair; both
+transports use the explicit local address and routing table without device binding.
 
 `Snapshot.BFD` contains the acknowledged source identity/Down counter for each
 bound peer and an `Enabled` proof. The kernel writer requires both this proof
@@ -223,8 +225,9 @@ a previous reset cannot release this fence. Slow Effects can delay recovery but
 cannot delay TCP shutdown or original source-deadline checks.
 
 The native BFD worker follows [RFC 5880](https://www.rfc-editor.org/rfc/rfc5880.html)
-and the supported single-hop scope in
-[RFC 5881](https://www.rfc-editor.org/rfc/rfc5881.html). The consumer separation
+and the single-hop scope in [RFC 5881](https://www.rfc-editor.org/rfc/rfc5881.html)
+or explicit routed scope in [RFC 5883](https://www.rfc-editor.org/rfc/rfc5883.html).
+The consumer separation
 and withdrawal decision follow the application model in
 [RFC 5882](https://www.rfc-editor.org/rfc/rfc5882.html). This implementation is
 userspace scheduling with finite failure bounds, not a hard realtime guarantee.

@@ -72,84 +72,66 @@
 - Health監視と履歴配送は分離する。保存先障害・queue満杯でもprobeを止めず、欠落と保存エラーを表示する。
   全probeの無欠落保存は保証しない。
 
-現在のworker ABIは3、compiler contractは `resource-program-native-9`、network journalはformat 5。
+現在のworker ABIは3、compiler contractは `resource-program-native-10`、network journalはformat 5。
 `track.resource`は宣言IDであり、decisionはhealthy/unhealthy/neutral/unknownを明示する。
 破棄したservice-only形式のreader・混在運用・migrationは実装しない。
 
-## 今回の検証
+## 今回の実装と検証
 
-resource trackingの検証buildは `RELEASE_ID=resource-track`。PVE隔離Linux VM、amd64で実行した。
-独立したUDP BFD/TCP BGP peerと、別試験のKeepalivedを使用する。
+最新buildは `RELEASE_ID=bfd-multihop`。NET-07の明示multihop BFDを追加した。
+`multihop: true`ではinterfaceを指定せず、宣言済みのlocal source addressを使う。
+UDP 4784・通常のsource-bound routingで送受信し、lo上のsourceと物理egressを分離する。
+sourceを持つlinkのidentityとaddressの利用可否は監視するが、prefixやegressを隣接先として固定しない。
+single-hopはUDP 3784、明示interface、直結route/subnetとTTL/Hop Limit 255を維持する。
+receiveのaddress/TTL/port等の検証はsession ownerへ集約し、transportはkernel metadataとdevice scopeを扱う。
+BGP multihop参照は同じendpoint pairとsourceに束縛し、両transportともdevice bindingを指定しない。
+新しいproducerやlease・状態機械・compatibility readerは追加していない。
 
-- BFD/BGPの実障害と復旧が二つのVRRPの広告priorityを150→50→150へ変える。
-  packet captureで両VRIDを確認し、選挙workerのPID・世代を維持する。
-  BFD worker停止・元の観測期限・freshな復旧、controlの350ms停止時のTCP session維持、
-  BGP/BFD/control停止中のsurviving writerによるroute撤去も同じ製品で確認した。
-  この試験だけでBFD/BGPによる二node間のVIP引継ぎまで確認したとは扱わない。
-- KeepalivedとのHealth障害・復旧、Health SIGSTOP中の元の期限切れ、SIGKILL/rebindで
-  priority150/50と両ownerのVIP TCP/UDPを確認した。監視元の条件除外は有限neutralとして
-  counters/penaltyを保持し、同じ選挙workerとVIP TCP/UDPを維持する。条件復帰後も復旧する。
-- 新しい実試験で二つの不具合を発見し、ローカルでも再現して修正した。
-  無関係なkernel I/OでBGPの適用済みstatusを不明へ戻す判定と、後続観測によって
-  適用済み要求のACKを保留し、VRRP workerをtimeout・再起動させる判定である。
-  更新要求自身のidentityと適用開始時の要求を用いる。timeoutや確認条件は緩めていない。
-- IPv6 multicastで独立Keepalivedとの実daemon相互接続を追加した。明示的な実link-local
-  sourceと`ff02::12`・hop limit 255をcaptureで確認し、高優先度peerへのVIP引継ぎ、
-  SIGKILL/rebind、priority-zero復旧、低優先度peerからの再取得、両ownerへのTCP/UDPが成功した。
-  既存nativeのLinux bridge経由の受信・障害切替もcapture付きで実行したが、過去の未受信は
-  再現しなかった。成功回数を原因解明の代わりに使わない。
-- neutralの元の条件期限切れ、繰返しpollとreplayによる確認回数の水増し拒否、
-  異なるresourceのI/O中のACK順序はローカルで確認した。
+PVE隔離amd64 VMで、独立UDP BFD/TCP BGP peerと実Linux forwarderを用いた。
+`make check-bfd RELEASE_ID=bfd-multihop`が次の全ケースで成功した。
 
-- 同じ製品で独立2 WANのHealth→PBRを実TCP/UDPと両WANのcaptureで再確認した。
-  Health/control/network/supervisorの再起動、旧tree通知、duplicate/resequence、元期限とmax_age、
-  producer停止中のwriter自身の期限撤去、confirmed rollbackでのprimary復旧が成功した。
-  foreign address/route/rule/nft stateとprobeのsocket markを保持した。
-- 別のnetwork namespace内でHealthのTCP/HTTP/DNS/raw ICMP実ソケット試験が成功した。
-- 全体`make check`（unit・Python・Race Detector・vet）と関連Race Detector、fmt、
-  amd64/arm64の6静的ELF buildが成功した。
-  最終6 ELFのsigned bundle/catalog/runtime照合とCLI publisher検査も成功した。
+- single-hop BFD/BGPの起動抑止、UDP障害、元の観測期限、worker停止・復旧、
+  control/BGP/BFD停止中のsurviving writerのroute撤去。
+- routed IPv4のloopback間BFDとBGP。初回DownのTCP起動抑止、BFD正常時の経路import/export、
+  TCP KEEPALIVEを維持したUDP障害でTCP終了とFIB撤去、復旧を確認した。
+  learned route先の利用者TCP/UDPも実通信し、撤去中は接続できず復旧後に再開することを確認した。
+  BFD SIGSTOPの元期限、freshな復旧、control/BGP/BFD停止中のwriter期限撤去も確認した。
+- routed IPv6のloopback間BFD。障害検出・復旧、同じworkerの継続、SIGKILL後の新しいproducerを確認した。
+- IPv4/IPv6の両方向captureでUDP 4784、送信元port 49152以上、送信255／受信254を検査した。
+  独立peerも実際の受信TTL/Hop Limit 254を検証する。中継ルーターを迂回した直接接続では通らない。
 
-実daemonログは `dist/resource-track-final-native.log`、2 WANは `dist/resource-track-final-pbr.log`、
-captureは `dist/resource-track-packets/{protocols,health,pbr}`。
-実ソケットは `dist/resource-track-final-health-sockets.log`、buildは
-`dist/resource-track-release-build.log`、bundleは `dist/resource-track-final-bundle.log`、
-全体checkは `dist/resource-track-final-check.log`。
-IPv6 multicastは `dist/vrrp-multicast-peers.log` と `dist/vrrp-multicast-packets`、
-bridge診断は `dist/vrrp-multicast-bridge`。製品binaryは同じ `resource-track` buildである。
-出力との一致を実装条件にしない。
-途中のcapture保存失敗は、namespaceからhomeへ書こうとしたfixture配置の問題だった。
-root所有の一時0700内へ保存し外側から取り出すことで解決し、homeの権限は変えていない。
+再実行は `make check-bfd`。rootまたはpasswordless sudoとLinux user/network namespaceが必要。
+製品・harnessはroot所有の一時0700へ配置し、captureもその中から回収する。homeの権限は変えない。
+設定例は [bfd-multihop.yaml](../examples/bfd-multihop.yaml)。製品CLIのconfig validateで受入を確認した。
 
-### 初回VRRP適用ACK後の更新
+ローカルでは明示mode、local source、endpoint family、single/multihop socket競合、
+同じBGP endpointへの参照、低いTTLのmultihop受入、foreign sourceのdiscriminator再利用拒否を確認した。
+compiler contractはnative-10へ更新した。worker ABI 3と保存形式は変更していない。
+契約名の一桁に依存していたrelease試験fixtureを修正し、異なる契約への更新／rollback／boot拒否を再確認した。
+全体`make check`、関連Race Detector、fmt・vet、amd64/arm64の6静的ELF buildが成功した。
+最終6 ELFのsigned bundle/catalog/runtime照合とCLI publisher検査も成功した。arm64は実行していない。
 
-最新buildは `RELEASE_ID=vrrp-renewal`。初回ownership ACKが遅い場合、neighbor通知の後に
-次回advert timerを再設定すると、まだ有効だった元のauthorityを次回更新前に使い切る。
-余分な再設定一行を削除し、既存の選挙timerで期限内に更新する。authorityもclient deadlineも延長しない。
+最初のnative試験はfixtureのIPv4 NoDAD指定、その次はconfig入口の旧interface限定検証で停止した。
+IPv4 fixtureの指定を除き、multihopの検証範囲を宣言済みlocal sourceへ修正した。
+最終製品のnativeログは `dist/bfd-multihop-current-native.log` と
+`dist/bfd-multihop-current/{single-hop,multihop-ipv4,multihop-ipv6}.log`、captureは同じディレクトリにある。
+利用者TCP/UDP追加後の実行は `dist/bfd-multihop-user-traffic{.log,/multihop-ipv4.log}`。
+全体check・build・bundleは `dist/bfd-multihop-{final-check,final-build,final-bundle}.log`、
+関連Race DetectorとABI fixtureは `dist/bfd-multihop-{final-race,abi-regression}.log`。
+出力との一致や古いcheckpointは実装条件にしない。
 
-- ローカルでは約600msの元authority内の500ms ACKで変更前の停止を再現し、修正後は更新できる。
-- 実network workerをSIGSTOPし、初回Active観測から550ms待って再開した。同じharnessで
-  変更前の一行だけを含む製品（`vrrp-before-renewal`）が期限切れで停止する。
-  修正後は同じ選挙workerが元の期限を越えて更新し、Keepalivedへの引継ぎ・復旧、VIP TCP/UDPを完了する。
-  最終比較ではwriter再開時の元budget残りが変更前128ms・修正後105msだった。
-- 最初の修正後実行は適用ACK自体のtimeoutで失敗した。原因は未確定で、成功扱いにしない。
-  全体checkと分けた診断と最終比較は成功したが、負荷下の余裕・物理性能を保証する結果ではない。
-- 同じ修正後製品でIPv6 multicastとBFD/BGP→VRRPの実広告・停止・期限切れ・復旧も成功した
-  （`dist/vrrp-renewal-final-related.log`）。
-- 関連Race Detector、fmt・vet、amd64/arm64静的buildと全体`make check`が成功した。
-  worker ABI 3、compiler native-9、network journal 5は変更していない。
-  signed bundle/publisherの直近検査は上記resource-trackの6 ELFに対するものである。
-
-ログは `dist/vrrp-slow-ack-repro.log`、`dist/vrrp-renewal-{before,after}-final-native.log`、
-`dist/vrrp-renewal-{race,build,final-check}.log`。最初の修正後失敗は
-`dist/vrrp-renewal-after-native.log`。captureは `dist/vrrp-renewal-packets`。
-無注入の初回IPv6 unicast timeoutの原因を、このcontrolled ACK遅延だけで確定したとは扱わない。
+直前の変更では、実2 WANのHealth→PBR・実TCP/UDP・capture・worker再起動・古い通知・
+期限切れ・confirmed rollback、およびKeepalivedとのHealth追跡・neutral・IPv6 multicastを確認した。
+BGP/VRRP要求のACKを無関係な後続観測で保留する原因と、初回ACK後にVRRP更新を先延ばしする
+不要なtimer再設定は削除済みである。これらを今回のmultihop buildで再実行したとは扱わない。
 
 ## 未完了と次の作業
 
 1. 全実装計画、全更新復旧経路、外部engine、配備先と対象実機の受入は未完了。
    今回の試験成功を製品全体・実機利用可能の判定には使わない。
-2. HA-01の残るresource種別・phase tracking、外部secret参照、peer-aware移行、cluster、
+2. NET-07の旧resource/profile、動的source・VRF・経路変更、大規模RIBを実装・受入する。
+   今回はIPv6のBGP multihop連動までは試していない。
+   HA-01の残るresource種別・phase tracking、外部secret参照、peer-aware移行、cluster、
    二native nodeの追加identity・RA・DHCP/PD/NAT session継続を実装・受入する。
 3. 過去のBFD再接続timeoutの失敗request、IPv6 multicast未受信、初回IPv6 VIP TCP/DAD timeoutは
    原因未確定。IPv6 unicastの初回TCP timeoutと同時の選挙authority期限切れは今回も一度再現した

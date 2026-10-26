@@ -1,0 +1,57 @@
+# Loopback endpoint pairs across a routed path. Configure the reverse path and
+# matching BFD/BGP on the peer; replace the documentation addresses and ASNs.
+schema_version: 2
+resources:
+  - id: uplink
+    interface:
+      name: wan0
+  - id: uplink-address
+    address:
+      interface: wan0
+      cidr: 198.18.0.1/30
+  - id: loopback
+    interface:
+      name: lo
+  - id: local-endpoint
+    address:
+      interface: lo
+      cidr: 192.0.2.1/32
+  - id: peer-route
+    route:
+      destination: 192.0.2.2/32
+      interface: wan0
+      gateway: 198.18.0.2
+  - id: routed-bfd
+    service:
+      name: routed-bfd
+      bfd:
+        multihop: true
+        source_address: 192.0.2.1
+        peers:
+          - address: 192.0.2.2
+            min_tx_milliseconds: 300
+            min_rx_milliseconds: 300
+            detect_multiplier: 3
+  - id: routed-bgp
+    service:
+      name: routed-bgp
+      bgp:
+        runtime:
+          version: 1
+          global:
+            asn: 64512
+            routerID: 192.0.2.1
+            listenPort: 179
+          peers:
+            192.0.2.2:
+              address: 192.0.2.2
+              asn: 64513
+              ebgpMultihop: 5
+              importPolicy:
+                allowedPrefixes: [203.0.113.0/24]
+        peer_transports:
+          192.0.2.2:
+            local_address: 192.0.2.1
+        peer_bfd:
+          192.0.2.2:
+            service: routed-bfd
