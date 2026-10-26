@@ -5,6 +5,7 @@ Requires Linux root/sudo, pppd 2.4.9 + rp-pppoe.so, pppoe-server, iproute2,
 curl, tcpdump and ping. Host PPP files, hooks and routes are not used.
 """
 import argparse
+import copy
 import json
 import os
 from pathlib import Path
@@ -71,12 +72,20 @@ def peer(stage, auth, engine_archive):
         return next((x for x in json.loads(run(["ip", "-n", ns, "-j", "addr", "show"])) if x["ifname"] == "ppp-wan" and any(a["local"] == "192.0.2.2" for a in x["addr_info"])), None)
 
     def routed():
-        return any(r.get("dev") == "ppp-wan" and r.get("dst") == "default" for r in json.loads(run(["ip", "-n", ns, "-j", "route", "show"])))
+        return any(r.get("dev") == "ppp-wan" and r.get("dst") == "default" and str(r.get("table")) == "100" for r in json.loads(run(["ip", "-n", ns, "-j", "route", "show", "table", "all"])))
+
+    def selected():
+        return any(r.get("priority") == 1000 and str(r.get("table")) == "100" for r in json.loads(run(["ip", "-n", ns, "-j", "rule", "show"])))
 
     def traffic():
         assert run(inside(lan, ["curl", "--noproxy", "*", "--max-time", "2", "-sS", "-o", "/dev/null", "-w", "%{http_code}", "http://198.51.100.20:18080/"])) == "200"
         code = 'import socket;s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.settimeout(2);s.connect(("198.51.100.20",18081));s.send(b"pppoe");assert s.recv(100)==b"pppoe"'
         run(inside(lan, ["python3", "-c", code]))
+
+    def traffic_fails():
+        for protocol in ("tcp", "udp"):
+            code = 'import socket;s=socket.socket(socket.AF_INET,' + ('socket.SOCK_STREAM' if protocol == 'tcp' else 'socket.SOCK_DGRAM') + ');s.settimeout(1);s.connect(("198.51.100.20",' + ('18080' if protocol == 'tcp' else '18081') + '));s.send(b"lost");s.recv(100)'
+            assert subprocess.run(inside(lan, ["python3", "-c", code]), capture_output=True).returncode != 0
 
     def ac_start():
         return start(acns, ["/usr/sbin/pppoe-server", "-F", "-k", "-I", "server0", "-C", "ROUTERD2-AC", "-S", "ROUTERD2-LAB", "-L", "192.0.2.1", "-R", "192.0.2.2", "-N", "1", "-O", str(stage / "server.conf"), "-X", str(stage / "ac.pid")], "ac")
@@ -96,17 +105,21 @@ def peer(stage, auth, engine_archive):
         run(["mount", "--bind", str(root_options), "/root"])
         (stage / "password").write_text("routerd2-fixture\n")
         (stage / "password").chmod(0o600)
-        service = dict(interface="wan0", ppp_interface="ppp-wan", username="routerd2", password_file=str(stage / "password"), auth_method=auth, ipv6=auth == "chap", service_name="ROUTERD2-LAB", ac_name="ROUTERD2-AC", mtu=1454, mru=1454, lcp_echo_interval=1, lcp_echo_failure=3, metric=20)
+        service = dict(interface="wan0", ppp_interface="ppp-wan", username="routerd2", password_file=str(stage / "password"), auth_method=auth, ipv6=auth == "chap", service_name="ROUTERD2-LAB", ac_name="ROUTERD2-AC", mtu=1454, mru=1454, lcp_echo_interval=1, lcp_echo_failure=3, metric=20, table=100)
         resources = [
             {"id": "wan", "interface": {"name": "wan0"}},
             {"id": "lan", "interface": {"name": "lan0"}},
             {"id": "lan-address", "address": {"interface": "lan0", "cidr": "10.42.0.1/24"}},
-            {"id": "forwarding", "forwarding": {"ipv4": True}},
+            {"id": "forwarding", "forwarding": {"ipv4": True, "ipv4_rp_filter": 0}},
             {"id": "firewall", "firewall": {"forward": [{"from": "lan0", "to": "ppp-wan"}], "masquerade": [{"source": "10.42.0.0/24", "out_interface": "ppp-wan"}]}},
             {"id": "internet", "service": {"name": "internet", "pppoe": service}},
+            {"id": "probe-policy", "policy_rule": {"family": 4, "priority": 100, "table": 100, "mark": 42}},
+            {"id": "probe", "depends_on": ["internet", "probe-policy"], "when": {"fact": "service.internet.active"}, "service": {"name": "reachability", "health": {"interface": "ppp-wan", "target": "198.51.100.20", "protocol": "tcp", "port": 18082, "mark": 42, "interval_ms": 200, "timeout_ms": 100, "unhealthy_threshold": 1}}},
+            {"id": "application-policy", "when": {"fact": "service.reachability.active", "max_age": "1s"}, "policy_rule": {"family": 4, "priority": 1000, "table": 100, "source": "10.42.0.0/24"}},
         ]
-        (stage / "config.json").write_text(json.dumps({"schema_version": 2, "resources": resources}))
-        boot = dict(platform="host", config=str(stage / "config.json"), runtime_dir=str(stage / "run"), state_dir=str(stage / "state"), ssh={"user": "admin"}, workers={r: str(stage.parent / ("routerd-logging" if r == "logging" else "routerd-modules")) for r in ["logging", "network", "control", "management", "pppoe"]})
+        configuration = {"schema_version": 2, "resources": resources}
+        (stage / "config.json").write_text(json.dumps(configuration))
+        boot = dict(platform="host", config=str(stage / "config.json"), runtime_dir=str(stage / "run"), state_dir=str(stage / "state"), ssh={"user": "admin"}, workers={r: str(stage.parent / ("routerd-logging" if r == "logging" else "routerd-modules")) for r in ["logging", "network", "control", "management", "pppoe", "health"]})
         (stage / "boot.json").write_text(json.dumps(boot))
         (stage / "server.conf").write_text("auth\nrequire-" + auth + "\nrefuse-" + ("chap" if auth == "pap" else "pap") + "\nmtu 1454\nmru 1454\nms-dns 203.0.113.53\nlogfd 1\nhide-password\nlcp-echo-interval 1\nlcp-echo-failure 3\n")
         for name in (ns, acns, lan):
@@ -150,13 +163,39 @@ def peer(stage, auth, engine_archive):
         wait(lambda: link() is not None and routed())
         start(acns, ["python3", "-u", "-m", "http.server", "18080", "--bind", "198.51.100.20", "--directory", str(etc)], "http")
         start(acns, ["python3", "-u", "-c", 'import socket\ns=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.bind(("198.51.100.20",18081))\nwhile True:\n b,a=s.recvfrom(4096);s.sendto(b,a)'], "udp")
+        probe_command = ["python3", "-u", "-m", "http.server", "18082", "--bind", "198.51.100.20", "--directory", str(etc)]
+        probe = start(acns, probe_command, "probe")
         wait(lambda: ":18080 " in run(inside(acns, ["ss", "-lnt"])))
+        wait(selected)
         traffic()
         initial = record()
         assert set(initial["snapshot"]["dns_servers"]) == {"203.0.113.53"}
         assert all(x["generation"] == 1 for x in modules().values())
         assert link()["mtu"] == 1454
         print("PASS native " + auth + ": negotiated DNS, LAN TCP/UDP, MTU 1454, generation 1", flush=True)
+        probe.terminate()
+        probe.wait(timeout=3)
+        wait(lambda: not selected())
+        assert routed() and link() is not None
+        traffic_fails()
+        probe = start(acns, probe_command, "probe")
+        wait(selected)
+        traffic()
+        print("PASS PPP-scoped marked Health withdrew/restored LAN PBR and TCP/UDP while IPCP stayed up", flush=True)
+        assert run(inside(ns, ["sysctl", "-n", "net.ipv4.conf.all.rp_filter", "net.ipv4.conf.default.rp_filter", "net.ipv4.conf.ppp-wan.rp_filter"])).split() == ["0", "0", "0"]
+        # Removing the explicit profile restores the inherited RPF=2, making
+        # marked Health fail. Timed rollback must restore the real path.
+        stable_index = link()["ifindex"]
+        trial = copy.deepcopy(configuration)
+        next(r for r in trial["resources"] if r["id"] == "forwarding")["forwarding"].pop("ipv4_rp_filter")
+        api("control.sock", "/v1/config/commit", {"expected_revision": 1, "request_id": "pppoe-rpf-trial", "config": trial, "confirm_timeout_seconds": 8})
+        wait(lambda: not selected(), 5)
+        assert run(inside(ns, ["sysctl", "-n", "net.ipv4.conf.all.rp_filter", "net.ipv4.conf.default.rp_filter"])).split() == ["2", "2"]
+        traffic_fails()
+        wait(lambda: api("control.sock", "/v1/config")["revision"] == 3 and selected(), 15)
+        traffic()
+        assert link()["ifindex"] == stable_index and modules()["service.internet"]["generation"] == 1
+        print("PASS profile removal restored original RPF; confirmed rollback restored Health/PBR/TCP/UDP without PPP restart", flush=True)
         if auth == "chap":
             ll = next(a["address"] for a in link()["addr_info"] if a["family"] == "inet6")
             run(inside(ns, ["ping", "-6", "-I", "ppp-wan", "-c", "1", "-W", "2", ll]))
@@ -171,11 +210,11 @@ def peer(stage, auth, engine_archive):
         for pid in frozen:
             os.kill(pid, signal.SIGCONT)
         frozen = []
-        wait(routed)
+        wait(lambda: routed() and selected())
         traffic()
         previous, old_index = modules()["service.internet"], link()["ifindex"]
         os.kill(previous["pid"], signal.SIGKILL)
-        wait(lambda: modules()["service.internet"]["generation"] > previous["generation"] and routed() and link() is not None and link()["ifindex"] != old_index, 35)
+        wait(lambda: modules()["service.internet"]["generation"] > previous["generation"] and routed() and selected() and link() is not None and link()["ifindex"] != old_index, 35)
         traffic()
         print("PASS killed worker removed old PPP child; replacement restored LAN TCP/UDP", flush=True)
         stale = {k: initial[k] for k in ["supervisor_instance", "name", "role", "config_digest", "generation", "producer_epoch", "sequence", "snapshot"]}
@@ -193,10 +232,15 @@ def peer(stage, auth, engine_archive):
         assert not routed()
         print("PASS independent AC rejected incorrect credentials without a default route", flush=True)
         (stage / "password").write_text("routerd2-fixture\n")
-        wait(routed, 40)
+        wait(lambda: routed() and selected(), 40)
         traffic()
         print("PASS independent AC restart restored LAN TCP/UDP", flush=True)
     except BaseException:
+        try:
+            print("services", api("control.sock", "/v1/services"), flush=True)
+            print("rules", run(["ip", "-n", ns, "-j", "rule", "show"]), flush=True)
+        except (OSError, subprocess.SubprocessError):
+            pass
         for name in ("console", "ac", "capture"):
             p = stage / (name + ".log")
             if p.exists():

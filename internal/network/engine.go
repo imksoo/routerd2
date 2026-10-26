@@ -17,7 +17,7 @@ import (
 var errLinkNotFound = errors.New("link not found")
 
 // JournalVersion is the persisted network ownership/BOOTTIME contract.
-const JournalVersion = 7
+const JournalVersion = 8
 
 type settingKey struct {
 	Kind      string `json:"kind"`
@@ -72,6 +72,7 @@ type kernel interface {
 	DeleteAddress(string, string, AddressOptions) error
 	Routes(int) ([]RouteState, error)
 	AddRoute(ownedRoute) error
+	UpdateRoute(ownedRoute) error
 	DeleteRoute(Route) error
 	PolicyRules() ([]PolicyRuleState, error)
 	AddPolicyRule(PolicyRule) error
@@ -393,6 +394,10 @@ func (e *Engine) snapshotLocked(ctx context.Context) Snapshot {
 	v, err = e.kernel.ReadSetting(settingKey{Kind: "forwarding6"})
 	problem(err)
 	s.Forwarding.IPv6 = v == 1
+	s.Forwarding.IPv4RPFilterAll, err = e.kernel.ReadSetting(settingKey{Kind: "rp_filter_all"})
+	problem(err)
+	s.Forwarding.IPv4RPFilterDefault, err = e.kernel.ReadSetting(settingKey{Kind: "rp_filter_default"})
+	problem(err)
 	fw, err := e.kernel.Firewall()
 	problem(err)
 	if err == nil {
@@ -427,13 +432,10 @@ func (e *Engine) ownsAddress(a addressKey) bool {
 	return false
 }
 func routeMatches(live RouteState, saved ownedRoute) bool {
-	want := saved.Route
-	observed := live.Route
-	if !sameRouteTimer(live.kernelExpiry, saved.KernelExpiry) {
+	if !sameRouteTimer(live.kernelExpiry, saved.KernelExpiry) && (saved.AttemptedExpiry == nil || !sameRouteTimer(live.kernelExpiry, *saved.AttemptedExpiry)) {
 		return false
 	}
-	observed.ValidUntil = want.ValidUntil
-	return sameKernelRoute(observed, want) && live.Protocol == RouteProtocol && live.Type == 1 && live.Source == "" && live.Multipath == (len(live.NextHops) > 0) && !live.Advanced
+	return sameKernelRoute(live.Route, saved.Route) && live.Protocol == RouteProtocol && live.Type == 1 && live.Source == "" && live.Multipath == (len(live.NextHops) > 0) && !live.Advanced
 }
 func (e *Engine) ownsRoute(r RouteState) bool {
 	for _, v := range e.state.Routes {
@@ -525,6 +527,10 @@ func (p *apply) reconcile(d Desired) error {
 	if d.Forwarding.IPv6 != nil {
 		wantedSettings[settingKey{Kind: "forwarding6"}] = boolInt(*d.Forwarding.IPv6)
 	}
+	if d.Forwarding.IPv4RPFilter != nil {
+		wantedSettings[settingKey{Kind: "rp_filter_all"}] = *d.Forwarding.IPv4RPFilter
+		wantedSettings[settingKey{Kind: "rp_filter_default"}] = *d.Forwarding.IPv4RPFilter
+	}
 	// Keep the kernel RA/SLAAC writers disabled while removing the client-owned
 	// routes and addresses. Restore these settings after reconciliation finishes.
 	earlySettings := make(map[settingKey]int, len(wantedSettings))
@@ -603,6 +609,15 @@ func (p *apply) reconcile(d Desired) error {
 	for _, kind := range []string{"forwarding4", "forwarding6"} {
 		key := settingKey{Kind: kind}
 		if v, ok := wantedSettings[key]; ok && v == 1 {
+			if err := p.set(key, v); err != nil {
+				return err
+			}
+		}
+	}
+	// Apply after ip_forward, before protocol workers can create their units.
+	for _, kind := range []string{"rp_filter_all", "rp_filter_default"} {
+		key := settingKey{Kind: kind}
+		if v, ok := wantedSettings[key]; ok {
 			if err := p.set(key, v); err != nil {
 				return err
 			}
@@ -719,8 +734,13 @@ func (p *apply) routes(want []Route) error {
 		r := p.e.state.Routes[i]
 		key := routeSlot(r.Route)
 		if next, ok := wanted[key]; ok && sameKernelRoute(r.Route, next) {
-			// Authority-only refreshes need no kernel mutation. The final
-			// Apply journal write persists them together before its ACK.
+			if r.ValidUntil != next.ValidUntil || r.AttemptedExpiry != nil {
+				if err := p.refreshRoute(i, next); err != nil {
+					return err
+				}
+			}
+			// BootID/ExpiresNanos are writer authority, not kernel attributes.
+			// The final journal write persists them together before its ACK.
 			p.e.state.Routes[i].Route = next
 			owned[key] = p.e.state.Routes[i]
 			i++
@@ -750,6 +770,62 @@ func (p *apply) routes(want []Route) error {
 		}
 	}
 	return p.addRoutes(additions, linkBounds)
+}
+
+// A renewed RA/RIO lifetime changes the kernel timer in place. Removing the
+// working route first creates real ip6tnl host-unreachable errors between the
+// netlink messages. Keep both expected timers until the update is acknowledged.
+func (p *apply) refreshRoute(i int, next Route) error {
+	saved := p.e.state.Routes[i]
+	live, err := p.routeTable(routeTable(saved.Route))
+	if err != nil {
+		return p.failure("route refresh read", err)
+	}
+	key := routeSlot(saved.Route)
+	found := false
+	for _, observed := range live[key] {
+		if !routeMatches(observed, saved) {
+			return p.failure("route refresh ownership", errors.New("route changed outside routerd2"))
+		}
+		found = true
+	}
+	clock, err := readRouteClock()
+	if err != nil {
+		return p.failure("route refresh clock", err)
+	}
+	timer, err := newRouteTimer(next.ValidUntil, clock)
+	if err != nil {
+		return p.failure("route refresh lifetime", err)
+	}
+	p.e.state.Routes[i].Route = next
+	p.e.state.Routes[i].AttemptedExpiry = &timer
+	if err := p.checkpoint("route refresh intent"); err != nil {
+		return err
+	}
+	installed := ownedRoute{Route: next, KernelExpiry: timer}
+	return p.change("route refresh", func() error {
+		// The journal write may outlast an authority or a UTC cutoff.
+		clock, err := boottime.Read()
+		if err != nil {
+			return err
+		}
+		if !next.ValidUntil.Live(clock) || next.BootID != "" && (next.BootID != clock.BootID || next.ExpiresNanos <= uint64(clock.BoottimeNanoseconds)) {
+			return errors.New("route authority expired before refresh")
+		}
+		for _, link := range p.e.state.Links {
+			if routeUsesInterface(next, link.Definition.Name) && !link.Definition.Authority.Live(clock) {
+				return errors.New("route link authority expired before refresh")
+			}
+		}
+		if found {
+			return p.e.kernel.UpdateRoute(installed)
+		}
+		return p.e.kernel.AddRoute(installed)
+	}, func() {
+		p.e.state.Routes[i] = installed
+		// Preserve the one-dump-per-table operation cache after this write.
+		live[key] = []RouteState{{Route: next, kernelExpiry: timer, Protocol: RouteProtocol, Type: 1, Multipath: len(next.NextHops) > 0}}
+	})
 }
 
 func (p *apply) addRoutes(additions []Route, linkBounds map[string]lifetime.Deadline) error {

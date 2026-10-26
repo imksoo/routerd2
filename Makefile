@@ -32,6 +32,7 @@ help:
 	  'make check-aftr        Verify AFTR input identity, DNS and tunnel expiry' \
 	  'make check-ra-client   Verify real RA, source/default-route TCP/UDP and expiry' \
 	  'make check-ra-aftr     Verify learned RA/DNS to DS-Lite LAN forwarding and expiry' \
+	  'make check-ra-route-refresh Verify routed AFTR TCP/UDP during independent RA renewal' \
 	  'make check-dhcp-relay  Verify DHCP peers, fragmentation and VRF isolation' \
 	  'make licenses          Collect dependency licenses and their manifest' \
 	  'make build             Build the native commands for the current platform' \
@@ -121,6 +122,10 @@ check-pd-ra: build
 
 check-ra-aftr: build
 	$(PYTHON) scripts/daemon-tests.py ra-aftr --go '$(GO)'
+
+.PHONY: check-ra-route-refresh
+check-ra-route-refresh: build
+	$(PYTHON) scripts/ra-route-refresh.py
 
 check-ra-client: build
 	$(PYTHON) scripts/daemon-tests.py ra-client --go '$(GO)'

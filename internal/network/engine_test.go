@@ -14,14 +14,15 @@ import (
 )
 
 type fakeKernel struct {
-	links              map[string]InterfaceState
-	routes             []RouteState
-	rules              []PolicyRuleState
-	forward4, forward6 int
-	firewall           FirewallState
-	guard              FirewallState
-	fail               string
-	writes             []string
+	links                        map[string]InterfaceState
+	routes                       []RouteState
+	rules                        []PolicyRuleState
+	forward4, forward6           int
+	rpFilterAll, rpFilterDefault int
+	firewall                     FirewallState
+	guard                        FirewallState
+	fail                         string
+	writes                       []string
 }
 
 func (f *fakeKernel) AnnounceLink(linkAnnouncement) error { return f.op("link-announcement") }
@@ -133,6 +134,19 @@ func (f *fakeKernel) AddRoute(saved ownedRoute) error {
 	f.routes = append(f.routes, RouteState{Route: r, kernelExpiry: saved.KernelExpiry, Protocol: RouteProtocol, Type: 1, Multipath: len(r.NextHops) > 0})
 	return nil
 }
+func (f *fakeKernel) UpdateRoute(saved ownedRoute) error {
+	if err := f.op("route-update"); err != nil {
+		return err
+	}
+	updated := normalizeRoute(saved.Route)
+	for i, r := range f.routes {
+		if routeSlot(r.Route) == routeSlot(saved.Route) {
+			f.routes[i] = RouteState{Route: updated, kernelExpiry: saved.KernelExpiry, Protocol: RouteProtocol, Type: 1, Multipath: len(updated.NextHops) > 0}
+			return nil
+		}
+	}
+	return errors.New("missing route")
+}
 func (f *fakeKernel) DeleteRoute(r Route) error {
 	if err := f.op("route-delete"); err != nil {
 		return err
@@ -151,6 +165,10 @@ func (f *fakeKernel) ReadSetting(k settingKey) (int, error) {
 		return f.forward4, nil
 	case "forwarding6":
 		return f.forward6, nil
+	case "rp_filter_all":
+		return f.rpFilterAll, nil
+	case "rp_filter_default":
+		return f.rpFilterDefault, nil
 	}
 	l, err := f.Interface(k.Interface)
 	if err != nil {
@@ -182,6 +200,10 @@ func (f *fakeKernel) WriteSetting(k settingKey, v int) error {
 		f.forward4 = v
 	case "forwarding6":
 		f.forward6 = v
+	case "rp_filter_all":
+		f.rpFilterAll = v
+	case "rp_filter_default":
+		f.rpFilterDefault = v
 	default:
 		l := f.links[k.Interface]
 		switch k.Kind {

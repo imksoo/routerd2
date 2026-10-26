@@ -209,7 +209,7 @@ func validateNative(d Native, source Document) error {
 		}
 	}
 	for _, service := range d.Services {
-		if owner := reserved[service.Interface()]; owner != "" && !guardedVRRPDependency(source, service.Name, owner) {
+		if owner := reserved[service.Interface()]; owner != "" && !guardedDynamicDependency(source, service.Name, owner) {
 			return fmt.Errorf("service %s cannot use dynamic interface of %s without a dependency", service.Name, owner)
 		}
 	}

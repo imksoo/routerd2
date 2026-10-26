@@ -31,14 +31,15 @@ type Config struct {
 }
 
 type Snapshot struct {
-	Resource     string            `json:"resource"`
-	Interface    string            `json:"interface"`
-	PPPInterface string            `json:"ppp_interface"`
-	Active       bool              `json:"active"`
-	Address      string            `json:"address,omitempty"`
-	Peer         string            `json:"peer,omitempty"`
-	DNSServers   []string          `json:"dns_servers,omitempty"`
-	ValidUntil   lifetime.Deadline `json:"valid_until,omitzero"`
+	ObservedNanos uint64            `json:"observed_nanos"`
+	Resource      string            `json:"resource"`
+	Interface     string            `json:"interface"`
+	PPPInterface  string            `json:"ppp_interface"`
+	Active        bool              `json:"active"`
+	Address       string            `json:"address,omitempty"`
+	Peer          string            `json:"peer,omitempty"`
+	DNSServers    []string          `json:"dns_servers,omitempty"`
+	ValidUntil    lifetime.Deadline `json:"valid_until,omitzero"`
 }
 
 func Validate(c Config) error {
@@ -80,8 +81,14 @@ func ValidateSnapshot(c Config, s Snapshot) error {
 	if s.Resource != c.Resource || s.Interface != c.Interface || s.PPPInterface != c.PPPInterface {
 		return errors.New("PPPoE observation identity mismatch")
 	}
+	if err := s.ValidUntil.Validate(); err != nil {
+		return err
+	}
+	if s.ValidUntil.BootID == "" || s.ObservedNanos == 0 || s.ValidUntil.Nanos <= s.ObservedNanos {
+		return errors.New("PPPoE observation requires an original finite boot interval")
+	}
 	if !s.Active {
-		if s.Address != "" || s.Peer != "" || s.ValidUntil != (lifetime.Deadline{}) || len(s.DNSServers) != 0 {
+		if s.Address != "" || s.Peer != "" || len(s.DNSServers) != 0 {
 			return errors.New("inactive PPPoE observation retains negotiated state")
 		}
 		return nil
@@ -91,12 +98,6 @@ func ValidateSnapshot(c Config, s Snapshot) error {
 		if err != nil || !a.Is4() || a.IsUnspecified() || a.IsMulticast() {
 			return errors.New("invalid negotiated PPP IPv4 address")
 		}
-	}
-	if err := s.ValidUntil.Validate(); err != nil {
-		return err
-	}
-	if s.ValidUntil.BootID == "" || s.ValidUntil.Nanos == 0 {
-		return errors.New("active PPPoE observation requires a finite boot deadline")
 	}
 	return nil
 }

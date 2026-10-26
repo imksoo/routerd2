@@ -4,6 +4,7 @@ package network
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -66,5 +67,57 @@ func TestWriterRenewsLongKernelTimerWithoutRenewingSourceAuthority(t *testing.T)
 	}
 	if len(e.state.Routes) != 1 || len(k.routes) != 1 || e.state.Routes[0].ValidUntil != original || e.state.Routes[0].KernelExpiry.Nanos < uint64(clock.monotonicNanos)+uint64(6*24*time.Hour) {
 		t.Fatal("kernel renewal changed source or failed to renew its own timer", e.state.Routes)
+	}
+}
+
+func TestRouteTimerUpdateKeepsForwardingRouteAcrossWriterRestart(t *testing.T) {
+	for _, acknowledged := range []bool{false, true} {
+		t.Run(fmt.Sprint("kernel-ack-", acknowledged), func(t *testing.T) {
+			clock, err := readRouteClock()
+			if err != nil {
+				t.Fatal(err)
+			}
+			k := fake()
+			e, opts := engineFor(t, k)
+			route := Route{Destination: "2001:db8::/64", Interface: "wan0", ValidUntil: lifetime.After(clock.Clock, 100*365*24*3600)}
+			if _, err := e.Apply(context.Background(), 1, Desired{Routes: []Route{route}}); err != nil {
+				t.Fatal(err)
+			}
+			// The writer persisted an update intent and stopped on either side
+			// of its kernel ACK. Both readbacks still belong to this route.
+			e.state.Routes[0].KernelExpiry.Nanos = uint64(clock.monotonicNanos) + uint64(time.Hour)
+			k.routes[0].kernelExpiry = e.state.Routes[0].KernelExpiry
+			timer, err := newRouteTimer(route.ValidUntil, clock)
+			if err != nil {
+				t.Fatal(err)
+			}
+			e.state.Routes[0].AttemptedExpiry = &timer
+			if err := e.save(); err != nil {
+				t.Fatal(err)
+			}
+			if acknowledged {
+				if err := k.UpdateRoute(ownedRoute{Route: route, KernelExpiry: timer}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			_ = e.Close()
+			restarted, err := newEngine(opts, k)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer restarted.Close()
+			k.writes = nil
+			if _, err := restarted.expireAuthority(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if len(k.routes) != 1 || restarted.state.Routes[0].AttemptedExpiry != nil || !restarted.ownsRoute(k.routes[0]) {
+				t.Fatal("writer lost the in-flight route update")
+			}
+			for _, op := range k.writes {
+				if op == "route-delete" {
+					t.Fatal("timer renewal withdrew the forwarding route")
+				}
+			}
+		})
 	}
 }

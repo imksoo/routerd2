@@ -128,6 +128,10 @@ func (e *Engine) observationSnapshotLocked(ctx context.Context) Snapshot {
 	v, err = e.kernel.ReadSetting(settingKey{Kind: "forwarding6"})
 	problem(err)
 	s.Forwarding.IPv6 = v == 1
+	s.Forwarding.IPv4RPFilterAll, err = e.kernel.ReadSetting(settingKey{Kind: "rp_filter_all"})
+	problem(err)
+	s.Forwarding.IPv4RPFilterDefault, err = e.kernel.ReadSetting(settingKey{Kind: "rp_filter_default"})
+	problem(err)
 	fw, err := e.kernel.Firewall()
 	problem(err)
 	if err == nil {

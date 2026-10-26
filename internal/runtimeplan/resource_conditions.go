@@ -11,6 +11,7 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/health"
+	"github.com/imksoo/routerd2/internal/protocol/pppoeconfig"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
@@ -150,6 +151,18 @@ func (r *Runtime) conditionFactsLocked(cfg configuration, now time.Time) (result
 		}
 		facts.Facts[name+".ready"] = resourceprogram.Fact{Value: ready, ObservedNanos: r.guardUntilNanos - uint64(time.Second), ExpiresNanos: r.guardUntilNanos, WorkerGeneration: module.Generation, ProducerEpoch: r.supervisorInstance}
 		record := r.records[name]
+		if record.Role == "pppoe" {
+			var session pppoeconfig.Snapshot
+			if !module.Ready || record.Generation != module.Generation || record.ConfigDigest != binding.digest || json.Unmarshal(record.Snapshot, &session) != nil || session.ValidUntil.BootID != clock.BootID || session.ObservedNanos > ticks {
+				continue
+			}
+			value := resourceprogram.False
+			if session.Active {
+				value = resourceprogram.True
+			}
+			facts.Facts[name+".active"] = resourceprogram.Fact{Value: value, ObservedNanos: session.ObservedNanos, ExpiresNanos: min(session.ValidUntil.Nanos, r.guardUntilNanos), WorkerGeneration: module.Generation, ProducerEpoch: record.ProducerEpoch}
+			continue
+		}
 		if record.Role == "dhcp_server" {
 			s := r.dhcpServers[name]
 			if !module.Ready || record.Generation != module.Generation || record.ConfigDigest != binding.digest || !dhcpserverconfig.CurrentObservation(s, clock) {

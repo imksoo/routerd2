@@ -10,6 +10,28 @@
 
 ## 現在の実装
 
+- RA/RIO の期限更新は kernel の既存 IPv6 route を更新する。削除・再追加による
+  DS-Lite の一時 host-unreachable を修正した。更新前後の physical timer を ACK まで
+  記録し、writer 再起動後も所有権を判定する。旧形式 reader は追加しない。
+  独立 dnsmasq 2.90 と別 namespace の Linux AFTR を使い、修正前は 20,000 UDP 中 3 欠落、
+  修正後は 30,000 UDP と同一 TCP が通った。control/writer/supervisor 停止中の元の
+  kernel 期限での撤去と、再開・新しい RA による復旧も確認した。
+  再実行は `make check-ra-route-refresh`。記録は `dist/ra-route-refresh-current/`。
+- PPP の有限 `.active` fact で、依存する Health を起動する。Health は PPP の UP 状態を
+  所有しない。PPP の専用 table からの marked probe は、Ubuntu の既定 RPF=2 で応答が
+  捨てられた。旧 routerd の router 用 sysctl で扱っていた設定を明示的な
+  `forwarding.ipv4_rp_filter`（all/default、0/1/2）へ移した。省略時は変更しない。
+  table-100 の Health/PBR/TCP/UDP、設定撤去時の元の値への復元、8秒 confirmed rollback
+  による復旧を Ubuntu PAP / Alpine CHAP で確認した。PPP の再接続は不要だった。
+  記録は `dist/pppoe-health-final/` と `dist/pppoe-health-alpine/`。
+- 実 PD-source の130分継続試験は、111分の成功後、UDP DNS の失敗で停止した。
+  capture は WAN カプセル化前の ICMP host-unreachable を示し、上記の route 更新を
+  隔離環境で再現・修正した。自然な carrier T1 では PD 期限が更新され、worker は第1世代、
+  tunnel index も不変だったが、この停止した試験で更新前後の連続 TCP/UDP は受入しない。
+  修正版 `route-refresh` は通常DADで全関連workerが第1世代のまま再接続し、実上流を
+  使うLAN IPv4/IPv6 HTTPSとUDP DNSが通った。新しい130分の同一TCP・UDP継続試験を
+  `dist/live-route-refresh-continuity.log` へ出力中であり、完了とは扱わない。
+
 - PPPoE は旧 `LinuxPeer` の設定生成と pppd を土台にし、実 supervisor/control/network/worker へ統合した。
   pppd が PPP unit/address、writer が有限の経路を所有する。child の mount namespace に
   `/etc/ppp`・`/run` と root user option を閉じ込め、ホストの hook や設定を使わない。
@@ -84,7 +106,7 @@
 - Health監視と履歴配送は分離する。保存先障害・queue満杯でもprobeを止めず、欠落と保存エラーを表示する。
   全probeの無欠落保存は保証しない。
 
-現在のworker ABIは3、compiler contractは `resource-program-native-17`、network journalはformat 7。
+現在のworker ABIは3、compiler contractは `resource-program-native-18`、network journalはformat 8。
 `track.resource`は宣言IDであり、decisionはhealthy/unhealthy/neutral/unknownを明示する。
 破棄したservice-only形式のreader・混在運用・migrationは実装しない。
 

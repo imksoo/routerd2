@@ -2,10 +2,10 @@ package config
 
 import "github.com/imksoo/routerd2/internal/resourceprogram"
 
-// A worker may use a VRRP-owned link only when the source graph ties its
-// lifetime to that owner and requires current positive ownership. Readiness
-// alone is insufficient: a healthy BACKUP process owns no VIP interface.
-func guardedVRRPDependency(source Document, consumerName, ownerName string) bool {
+// A worker may use a protocol-owned link only when the source graph ties its
+// lifetime to that owner and requires current positive ownership. Process
+// readiness alone does not establish an elected VIP or a negotiated PPP unit.
+func guardedDynamicDependency(source Document, consumerName, ownerName string) bool {
 	var owner, consumer *resourceprogram.Resource
 	for i := range source.Resources {
 		resource := &source.Resources[i]
@@ -19,7 +19,7 @@ func guardedVRRPDependency(source Document, consumerName, ownerName string) bool
 			consumer = resource
 		}
 	}
-	if owner == nil || owner.Service.VRRP == nil || consumer == nil {
+	if owner == nil || owner.Service.VRRP == nil && owner.Service.PPPoE == nil || consumer == nil {
 		return false
 	}
 	edge := consumer.Owner == owner.ID

@@ -97,6 +97,10 @@ type NextHop struct {
 type Forwarding struct {
 	IPv4 *bool `json:"ipv4,omitempty"`
 	IPv6 *bool `json:"ipv6,omitempty"`
+	// IPv4RPFilter sets Linux conf/all and conf/default rp_filter. Zero disables
+	// reverse-path filtering for policy-routed/asymmetric router paths. Existing
+	// interfaces keep their individual setting; new PPP units inherit default.
+	IPv4RPFilter *int `json:"ipv4_rp_filter,omitempty"`
 }
 
 // Firewall manages only the routerd2 inet table. A nil Firewall removes a
@@ -172,8 +176,10 @@ type RouteState struct {
 }
 
 type ForwardingState struct {
-	IPv4 bool `json:"ipv4"`
-	IPv6 bool `json:"ipv6"`
+	IPv4                bool `json:"ipv4"`
+	IPv6                bool `json:"ipv6"`
+	IPv4RPFilterAll     int  `json:"ipv4_rp_filter_all"`
+	IPv4RPFilterDefault int  `json:"ipv4_rp_filter_default"`
 }
 
 type FirewallState struct {
@@ -219,6 +225,9 @@ func validName(s string) bool { return interfaceName.MatchString(s) && s != "." 
 // Validate is side-effect free and does not require Linux or privileges.
 func Validate(d Desired) error {
 	var errs []error
+	if v := d.Forwarding.IPv4RPFilter; v != nil && (*v < 0 || *v > 2) {
+		errs = append(errs, errors.New("ipv4_rp_filter must be 0 (disabled), 1 (strict) or 2 (loose)"))
+	}
 	if err := validateLinks(d); err != nil {
 		errs = append(errs, err)
 	}

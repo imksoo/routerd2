@@ -627,6 +627,14 @@ DS-Lite との二経路/PBR/MSS、実 ISP は未完了。[ADR 0002](adr/0002-ppp
 
 #### NET-05 — link・address・WAN resource の完全化
 
+2026-10-26追加: 実PD-sourceで111分後に生じたDS-Lite UDP失敗から、RA routeの期限更新時の
+削除・再追加による一時的なIPv6経路喪失を特定した。独立dnsmasq/Linux AFTRでも再現し、
+kernel timerのin-place更新へ変更した。更新途中のphysical timerをjournalに記録し、ACK前後の
+writer再起動で所有権を回復する。30,000 UDP・同一TCP、kernel自身の元期限失効と復旧を確認した。
+実上流の修正版は再接続とIPv4/IPv6 TCP/UDPまで通り、新しい長時間試験は実行中である。
+PPPの有限active factと依存Health、明示した`forwarding.ipv4_rp_filter`のall/default管理・
+復元も実装し、実PPPoE peerでPBRとconfirmed rollbackを確認した。全体受入は未完了。
+
 範囲: 旧 routerd 互換 / track: network / risk: high。
 前提: CORE-03, CORE-04。 設計判断: D-04。
 
@@ -810,7 +818,7 @@ learned route先の利用者TCP/UDPも通信し、撤去中の接続拒否と復
 明示VRFではmultihop socketをVRF master、single-hopをmember interfaceへ束縛する。
 source domainとBGP FIB tableも検証する。同じendpointを持つ二つのVRFとdefault domainで
 実daemonを動かし、独立TCP/UDP・片側UDP障害・worker交替・main tableへの流出防止を確認した。
-single-hop VRFも実peerと障害・復旧を確認した。現在のcompiler contractはnative-17。
+single-hop VRFも実peerと障害・復旧を確認した。現在のcompiler contractはnative-18。
 IPv4/IPv6とも同じendpointを二つのVRFとdefault domainで同時使用し、BFD/BGPと三経路の
 TCP/UDPを確認した。defaultとVRFのUDP bind競合は受信socketだけの`SO_REUSEADDR`で修正した。
 domain/sourceの既存claimで二重ownerを拒否し、TX port専有と`SO_REUSEPORT`不使用を維持する。

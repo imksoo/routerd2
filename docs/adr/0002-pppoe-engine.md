@@ -44,6 +44,13 @@ PPP 上の DHCPv6 PD、resolver への DNS 適用、完全な旧 resource field 
 DS-Lite との二経路 Health/PBR・MSS、実 ISP と物理 NIC の受入も未完了である。
 これらの結果に応じて今回の interface・配置・契約を変更する。prototype 互換層は作らない。
 
+PPP の有限 `.active` fact と明示した依存関係で Health を起動する。PPP のアドレスと
+UP 状態は引き続き pppd が所有する。専用 routing table と marked probe を使う場合、
+Linux の RPF が応答を拒否し得る。旧 routerd の router profile と同様の効果は、明示した
+`forwarding.ipv4_rp_filter: 0` で選ぶ。all/default の元の値は journal が所有し、設定撤去で
+復元する。既存 interface の個別 RPF 値は変更しない。実 peer で Health→PBR→TCP/UDP と
+設定撤去・confirmed rollback を確認した。DS-Lite との二経路受入は依然として残る。
+
 参照:
 
 - [再利用した routerd の設定生成](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/pppoeclient/client.go)

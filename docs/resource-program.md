@@ -427,7 +427,10 @@ ACTIVE成功には元boot IDと絶対期限を保持するVIP投影が必要で�
 旧世代・上書きされた通知や適用失敗を成功として返さない。
 
 このsource受入範囲の追加に伴い、署名されたconfiguration contractは
-`resource-program-native-17`とする。BFDの明示`multihop: true`はinterfaceを指定せず、
+`resource-program-native-18`とする。PPPの有限`.active` factで依存workerを起動し、PPP unitの
+UP/addressはpppdが所有する。`forwarding.ipv4_rp_filter`はLinux all/defaultを明示して管理する
+（0:無効、1:strict、2:loose、省略:管理しない）。撤去時は記録した元の値へ戻す。
+BFDの明示`multihop: true`はinterfaceを指定せず、
 宣言済みの送信元アドレスとUDP 4784のrouted endpoint pairを使う。single-hopは従来の
 interface・隣接route・TTL/Hop Limit 255の検証を維持する。BGPのmultihop参照も同じ
 endpoint pairへ束縛し、両transportはdevice bindingを指定しない。条件付きlink・address・routeと依存先の準備条件の

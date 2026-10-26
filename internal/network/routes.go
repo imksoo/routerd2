@@ -133,7 +133,7 @@ func normalizeRoute(r Route) Route {
 // Protocol authority can renew without replacing an unchanged kernel route.
 func sameKernelRoute(a, b Route) bool {
 	a, b = normalizeRoute(a), normalizeRoute(b)
-	return a.Destination == b.Destination && a.Gateway == b.Gateway && a.Interface == b.Interface && a.Metric == b.Metric && a.Table == b.Table && slices.Equal(a.NextHops, b.NextHops) && a.ValidUntil == b.ValidUntil
+	return a.Destination == b.Destination && a.Gateway == b.Gateway && a.Interface == b.Interface && a.Metric == b.Metric && a.Table == b.Table && slices.Equal(a.NextHops, b.NextHops)
 }
 
 func routeUsesInterface(r Route, name string) bool {

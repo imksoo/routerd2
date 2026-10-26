@@ -294,6 +294,12 @@ func linuxRoute(r Route) (*netlink.Route, error) {
 	return result, nil
 }
 func (k *linuxKernel) AddRoute(saved ownedRoute) error {
+	return k.writeRoute(saved, false)
+}
+func (k *linuxKernel) UpdateRoute(saved ownedRoute) error {
+	return k.writeRoute(saved, true)
+}
+func (k *linuxKernel) writeRoute(saved ownedRoute, replace bool) error {
 	r := saved.Route
 	v, err := linuxRoute(r)
 	if err != nil {
@@ -311,8 +317,14 @@ func (k *linuxKernel) AddRoute(saved ownedRoute) error {
 		if err != nil {
 			return err
 		}
+		if replace {
+			req.Flags = unix.NLM_F_REPLACE | unix.NLM_F_ACK
+		}
 		_, err = req.Execute(unix.NETLINK_ROUTE, 0)
 		return err
+	}
+	if replace {
+		return netlink.RouteChange(v)
 	}
 	return netlink.RouteAdd(v)
 }
@@ -330,6 +342,10 @@ func settingPath(key settingKey) (string, error) {
 		return "/proc/sys/net/ipv4/ip_forward", nil
 	case "forwarding6":
 		return "/proc/sys/net/ipv6/conf/all/forwarding", nil
+	case "rp_filter_all":
+		return "/proc/sys/net/ipv4/conf/all/rp_filter", nil
+	case "rp_filter_default":
+		return "/proc/sys/net/ipv4/conf/default/rp_filter", nil
 	case "accept_ra", "autoconf":
 		if !validName(key.Interface) || key.Interface == "all" || key.Interface == "default" {
 			return "", fmt.Errorf("invalid per-interface IPv6 sysctl identity %q", key.Interface)

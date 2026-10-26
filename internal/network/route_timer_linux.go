@@ -20,8 +20,9 @@ type routeTimer struct {
 	Nanos  uint64 `json:"nanos,omitempty"`
 }
 type ownedRoute struct {
-	Route        `json:"route"`
-	KernelExpiry routeTimer `json:"kernel_expiry,omitzero"`
+	Route           `json:"route"`
+	KernelExpiry    routeTimer  `json:"kernel_expiry,omitzero"`
+	AttemptedExpiry *routeTimer `json:"attempted_expiry,omitempty"`
 }
 type routeClock struct {
 	boottime.Clock
@@ -69,6 +70,9 @@ func validateRouteJournal(routes []ownedRoute) error {
 	definitions := make([]Route, 0, len(routes))
 	for _, r := range routes {
 		timer := r.KernelExpiry
+		if r.AttemptedExpiry != nil {
+			timer = *r.AttemptedExpiry
+		}
 		finite := !r.ValidUntil.UTC.IsZero() || r.ValidUntil.BootID != "" && r.ValidUntil.Nanos != 0
 		if finite != (timer != (routeTimer{})) {
 			return fmt.Errorf("route %s kernel timer differs from lifetime", r.Destination)
@@ -76,8 +80,10 @@ func validateRouteJournal(routes []ownedRoute) error {
 		if r.ValidUntil.BootID != "" && timer.BootID != "" && r.ValidUntil.BootID != timer.BootID {
 			return fmt.Errorf("route %s timer belongs to another boot", r.Destination)
 		}
-		if timer != (routeTimer{}) && (!boottime.ValidBootID(timer.BootID) || timer.Nanos == 0 || timer.Nanos > 1<<63-1) {
-			return fmt.Errorf("invalid kernel timer for route %s", r.Destination)
+		for _, observed := range []routeTimer{r.KernelExpiry, timer} {
+			if observed != (routeTimer{}) && (!boottime.ValidBootID(observed.BootID) || observed.Nanos == 0 || observed.Nanos > 1<<63-1) {
+				return fmt.Errorf("invalid kernel timer for route %s", r.Destination)
+			}
 		}
 		definitions = append(definitions, r.Route)
 	}

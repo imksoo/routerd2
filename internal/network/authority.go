@@ -60,16 +60,11 @@ func (e *Engine) expireAuthority(ctx context.Context) (time.Duration, error) {
 	p := &apply{e: e, ctx: ctx}
 	before := len(e.state.Routes)
 	var expiredLinks map[string]bool
-	var linkBounds map[string]lifetime.Deadline
 	for i, owned := range e.state.Links {
 		link := owned.Definition
 		if link.Authority == (lifetime.Deadline{}) {
 			continue
 		}
-		if linkBounds == nil {
-			linkBounds = make(map[string]lifetime.Deadline)
-		}
-		linkBounds[link.Name] = link.Authority
 		if link.Authority.Live(clock.Clock) {
 			remaining := link.Authority.Remaining(clock.Clock)
 			if delay == 0 || remaining < delay {
@@ -147,13 +142,10 @@ func (e *Engine) expireAuthority(ctx context.Context) (time.Duration, error) {
 			if timer := r.KernelExpiry; timer.BootID == clock.BootID {
 				renewIn := time.Duration(int64(timer.Nanos)-clock.monotonicNanos) - routeKernelRenewBefore
 				if r.ValidUntil.Remaining(clock.Clock) > time.Duration(int64(timer.Nanos)-clock.monotonicNanos)+2*time.Second && renewIn <= 0 {
-					if err := p.removeRoute(i); err != nil {
+					if err := p.refreshRoute(i, r.Route); err != nil {
 						return 0, err
 					}
-					if err := p.addRoutes([]Route{r.Route}, linkBounds); err != nil {
-						return 0, err
-					}
-					// Removal compacts the slice. Inspect its replacement next.
+					i++
 					continue
 				}
 				if renewIn > 0 && (delay == 0 || renewIn < delay) {

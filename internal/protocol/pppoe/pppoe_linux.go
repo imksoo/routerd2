@@ -210,7 +210,11 @@ func Run(ctx context.Context, cfg pppoeconfig.Config, publish func(context.Conte
 }
 
 func observe(cfg pppoeconfig.Config, pid int) (pppoeconfig.Snapshot, error) {
-	s := pppoeconfig.Snapshot{Resource: cfg.Resource, Interface: cfg.Interface, PPPInterface: cfg.PPPInterface}
+	clock, err := boottime.Read()
+	if err != nil {
+		return pppoeconfig.Snapshot{}, err
+	}
+	s := pppoeconfig.Snapshot{Resource: cfg.Resource, Interface: cfg.Interface, PPPInterface: cfg.PPPInterface, ObservedNanos: uint64(clock.BoottimeNanoseconds), ValidUntil: lifetime.After(clock, 5)}
 	link, err := netlink.LinkByName(cfg.PPPInterface)
 	if err != nil {
 		var absent netlink.LinkNotFoundError
@@ -227,12 +231,7 @@ func observe(cfg pppoeconfig.Config, pid int) (pppoeconfig.Snapshot, error) {
 		if a.Peer == nil || a.IP.To4() == nil || a.Peer.IP.To4() == nil {
 			continue
 		}
-		clock, err := boottime.Read()
-		if err != nil {
-			return s, err
-		}
 		s.Active, s.Address, s.Peer = true, a.IP.String(), a.Peer.IP.String()
-		s.ValidUntil = lifetime.After(clock, 5)
 		// pppd's usepeerdns file is private to this exact child mount namespace.
 		b, err := os.ReadFile(fmt.Sprintf("/proc/%d/root/run/ppp/resolv.conf", pid))
 		if err != nil && !errors.Is(err, os.ErrNotExist) {

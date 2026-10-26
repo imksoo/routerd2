@@ -81,7 +81,7 @@ func FromNative(native Native) Program {
 		v := original
 		add(Resource{ID: fmt.Sprintf("policy_rule/%d/%d", v.Family, v.Priority), PolicyRule: &v})
 	}
-	if native.Network.Forwarding.IPv4 != nil || native.Network.Forwarding.IPv6 != nil {
+	if native.Network.Forwarding.IPv4 != nil || native.Network.Forwarding.IPv6 != nil || native.Network.Forwarding.IPv4RPFilter != nil {
 		v := native.Network.Forwarding
 		add(Resource{ID: "forwarding", Forwarding: &v})
 	}
