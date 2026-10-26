@@ -14,6 +14,26 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
 )
 
+func TestDeclineNoBindingCompletesWithoutLosingDelegation(t *testing.T) {
+	clock := clockAt(time.Unix(1700000000, 0))
+	prefix := dhcp6config.Prefix{Prefix: "2001:db8:100::/56", PreferredUntil: lifetime.After(clock, 20), ValidUntil: lifetime.After(clock, 30)}
+	c := client{
+		cfg:  dhcp6config.Config{IAID: 7, RequestAddress: true, RequestPrefix: true, PrefixLength: 56},
+		duid: []byte{0, 3, 0, 1}, server: []byte{0, 3, 0, 2},
+		declined: []assignment{{prefix: netip.MustParsePrefix("2001:db8:42::100/128")}},
+		snapshot: dhcp6config.Snapshot{BootID: clock.BootID, Prefixes: []dhcp6config.Prefix{prefix}},
+	}
+	if err := c.begin(decline, time.Unix(0, clock.BoottimeNanoseconds)); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.accept(message{kind: reply, xid: c.lease.xid, client: c.duid, server: c.server, status: 3}, clock); err != nil {
+		t.Fatal(err)
+	}
+	if c.lease.kind != solicit || len(c.snapshot.Prefixes) != 1 || c.snapshot.Prefixes[0] != prefix {
+		t.Fatal("NoBinding left Decline pending or changed unrelated prefix authority", c.snapshot, c.lease)
+	}
+}
+
 func TestCombinedAddressAndPrefixExchange(t *testing.T) {
 	now := time.Unix(1700000000, 0)
 	c := client{cfg: dhcp6config.Config{IAID: 7, RequestAddress: true, RequestPrefix: true, PrefixLength: 56}, duid: []byte{0, 3, 0, 1}, server: []byte{0, 3, 0, 2}, snapshot: dhcp6config.Snapshot{BootID: clockAt(now).BootID, State: "bound"}}

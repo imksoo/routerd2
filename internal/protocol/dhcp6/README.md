@@ -20,13 +20,20 @@ A completed or replaced transaction cannot refresh an assignment.
 Only the DUID identity is persisted under `state/identities`; restart requests
 fresh server confirmation through a new acquisition. No saved lease is
 published as current, and no discarded PD-wrapper journal is imported. Kernel
-DAD failure removes the proposed address and starts Decline; failure-path
-interoperability still needs acceptance. Worker readiness currently means the
+DAD failure notifications remove the proposed address and start Decline. The
+client subscribes before publishing assignments and reads kernel events in the
+same exchange loop. Finite addresses disappear on DAD failure, so periodically
+listing current addresses cannot detect the failure reliably. A valid Decline
+Reply completes the exchange even with NoBinding. Worker readiness means the
 socket is open, not that an address has completed DAD.
 
 `make check-dhcp6` uses the real supervisor/control/network/client processes,
 independent dnsmasq, source-bound TCP/UDP, worker replacement, actual lease
-renewal and server silence through Rebind/expiry/recovery. `make check-pd-ra`
+renewal and server silence through Rebind/expiry/recovery. It also connects an
+independent Linux duplicate host and verifies actual DAD/Decline packets, failed
+address withdrawal and a usable replacement lease with TCP/UDP on the same
+worker. The product configures the WAN bridge; no address flags are injected.
+`make check-pd-ra`
 uses an independent wire server and captures generated LAN advertisements;
 IA_NA and IA_PD must share each stateful transaction and IAID.
 
@@ -48,7 +55,8 @@ the guest clock, and restores its original baseline on exit.
 
 These are isolated amd64 Linux VM checks. Actual suspend, reboot, automatic
 RA-triggered DHCPv6, required-address readiness, complete legacy resource
-selection, DAD-failure/Decline, VRF, graceful Release and physical NIC
+selection, DAD failure alongside other IA_NA/IA_PD bindings, VRF, graceful
+Release and physical NIC
 qualification remain separate work. The former pinned PD state-machine
 wrapper, timer corrections and prototype journal reader were removed; there is
 no compatibility path.

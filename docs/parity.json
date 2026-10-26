@@ -300,7 +300,7 @@
         "dhcp6-client"
       ],
       "parity_status": "not_integrated",
-      "known_gap": "One native client owns IA_NA/IA_PD/information and their original BOOTTIME budgets. Control no longer creates a receipt grant. RA router/prefix/DNS and AFTR preserve original deadlines; AFTR no longer copies/rebases its input or maintains wall-clock anchors. Independent dnsmasq covers IA_NA lifecycle, and independent wire/real-daemon tests cover combined IA_NA/IA_PD, renumbering, LAN RA/TCP/UDP, expiry and recovery. A dedicated no-NIC QEMU passed actual UTC +/-24h, frozen producer snapshots, continued LAN communication, original writer address expiry with control/supervisor frozen, bounded/withdrawn RA, expired delivery replay and fresh acquisition. Complete resource selection/readiness, DAD failure, Release, RA trigger/resolver effects, actual suspend/reboot, VRF and hardware remain incomplete."
+      "known_gap": "One native client owns IA_NA/IA_PD/information and their original BOOTTIME budgets. Control no longer creates a receipt grant. RA router/prefix/DNS and AFTR preserve original deadlines; AFTR no longer copies/rebases its input or maintains wall-clock anchors. Independent dnsmasq covers IA_NA lifecycle, and independent wire/real-daemon tests cover combined IA_NA/IA_PD, renumbering, LAN RA/TCP/UDP, expiry and recovery. A dedicated no-NIC QEMU passed actual UTC +/-24h, frozen producer snapshots, continued LAN communication, original writer address expiry with control/supervisor frozen, bounded/withdrawn RA, expired delivery replay and fresh acquisition. Independent dnsmasq plus a Linux duplicate host verified actual finite-address DAD failure/Decline, withdrawal and usable replacement TCP/UDP on the same worker; the client now consumes kernel notifications instead of polling an already-deleted address. Complete resource selection/readiness, DAD coexistence with other IA_NA/IA_PD bindings, Release, RA trigger/resolver effects, actual suspend/reboot, VRF and hardware remain incomplete."
     },
     {
       "id": "wan.pppoe",
@@ -12194,7 +12194,7 @@
     {
       "package": "internal/protocol/dhcp6",
       "status": "integrated_supervised_worker",
-      "validation": "Original BOOTTIME assignment, information and exchange budgets now replace UTC lease deadlines. Actual no-NIC QEMU UTC +/-24h with frozen producer/control/supervisor passed unchanged original observations, LAN TCP/UDP, writer IA_NA/LAN address expiry, bounded/withdrawn RA, expired replay and fresh acquisition. Native PD/RA and independent DNS/AFTR namespace gates also passed. Full resource/phase parity, actual suspend/reboot, DAD failure, Release, VRF and hardware remain open.",
+      "validation": "Original BOOTTIME assignment, information and exchange budgets now replace UTC lease deadlines. Actual no-NIC QEMU UTC +/-24h with frozen producer/control/supervisor passed unchanged original observations, LAN TCP/UDP, writer IA_NA/LAN address expiry, bounded/withdrawn RA, expired replay and fresh acquisition. Native PD/RA and independent DNS/AFTR namespace gates also passed. Independent dnsmasq/Linux duplicate-host DAD/Decline, withdrawal and usable replacement TCP/UDP passed on the same actual worker. Full resource/phase parity, actual suspend/reboot, DAD coexistence with other bindings, Release, VRF and hardware remain open.",
       "resource_parity": false
     },
     {

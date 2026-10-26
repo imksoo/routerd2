@@ -194,15 +194,17 @@ func (c *client) accept(m message, clock boottime.Clock) error {
 			return nil
 		}
 	}
+	// A valid Decline Reply completes the exchange regardless of status,
+	// including NoBinding after a lost acknowledgement (RFC 8415 18.2.10.2).
+	if e.kind == decline {
+		return c.begin(solicit, now)
+	}
 	if m.status == 3 && (e.kind == renew || e.kind == rebind) {
 		c.server = slices.Clone(m.server)
 		return c.begin(request, now)
 	}
 	if m.status != 0 {
 		return nil
-	}
-	if e.kind == decline {
-		return c.begin(solicit, now)
 	}
 	if m.na != nil && m.na.iaid != c.cfg.IAID || m.pd != nil && m.pd.iaid != c.cfg.IAID {
 		return nil
@@ -446,6 +448,17 @@ func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, ready fun
 		return err
 	}
 	defer conn.Close()
+	dadFD := -1
+	if cfg.RequestAddress {
+		dadFD, err = unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW|unix.SOCK_NONBLOCK|unix.SOCK_CLOEXEC, unix.NETLINK_ROUTE)
+		if err != nil {
+			return fmt.Errorf("open IPv6 DAD notifications: %w", err)
+		}
+		defer unix.Close(dadFD)
+		if err := unix.Bind(dadFD, &unix.SockaddrNetlink{Family: unix.AF_NETLINK, Groups: unix.RTMGRP_IPV6_IFADDR}); err != nil {
+			return fmt.Errorf("subscribe IPv6 DAD notifications: %w", err)
+		}
+	}
 	clock, err := boottime.Read()
 	if err != nil {
 		return err
@@ -492,7 +505,7 @@ func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, ready fun
 	if ready != nil {
 		ready()
 	}
-	buf := make([]byte, 65535)
+	buf := make([]byte, 65536)
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -505,8 +518,8 @@ func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, ready fun
 		if err := c.advance(clock); err != nil {
 			return err
 		}
-		if cfg.RequestAddress && c.lease.kind != decline {
-			failed, err := dadFailures(cfg.Interface, c.snapshot.Addresses)
+		if cfg.RequestAddress {
+			failed, err := dadFailures(ctx, dadFD, ifi.Index, c.snapshot.Addresses, buf)
 			if err != nil {
 				return err
 			}
@@ -563,27 +576,64 @@ func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, ready fun
 		}
 	}
 }
-func dadFailures(name string, addresses []dhcp6config.Address) ([]assignment, error) {
-	if len(addresses) == 0 {
-		return nil, nil
-	}
-	l, err := netlink.LinkByName(name)
-	if err != nil {
-		return nil, err
-	}
-	current, err := netlink.AddrList(l, netlink.FAMILY_V6)
-	if err != nil {
-		return nil, err
-	}
+
+// Finite addresses are deleted on DAD failure. An address-list poll misses
+// that transition; RTM_DELADDR retains IFA_F_DADFAILED. Subscribe before any
+// assignment is published and drain in the same owner as the DHCP exchange.
+func dadFailures(ctx context.Context, fd, index int, addresses []dhcp6config.Address, buf []byte) ([]assignment, error) {
 	var failed []assignment
-	for _, a := range addresses {
-		for _, live := range current {
-			if live.Flags&unix.IFA_F_DADFAILED != 0 && live.IP.String() == a.Address {
-				failed = append(failed, assignment{prefix: netip.PrefixFrom(netip.MustParseAddr(a.Address), 128)})
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		n, _, flags, from, err := unix.Recvmsg(fd, buf, nil, unix.MSG_DONTWAIT)
+		if errors.Is(err, unix.EAGAIN) {
+			return failed, nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("receive IPv6 DAD notification: %w", err)
+		}
+		sender, ok := from.(*unix.SockaddrNetlink)
+		if !ok || sender.Pid != 0 {
+			continue
+		}
+		if flags&unix.MSG_TRUNC != 0 {
+			return nil, errors.New("truncated IPv6 DAD notification")
+		}
+		messages, err := syscall.ParseNetlinkMessage(buf[:n])
+		if err != nil {
+			return nil, err
+		}
+		for _, m := range messages {
+			if m.Header.Type == unix.NLMSG_OVERRUN {
+				return nil, unix.ENOBUFS
+			}
+			if m.Header.Type != unix.RTM_NEWADDR && m.Header.Type != unix.RTM_DELADDR {
+				continue
+			}
+			if len(m.Data) < unix.SizeofIfAddrmsg {
+				return nil, errors.New("short IPv6 address notification")
+			}
+			if m.Data[0] != unix.AF_INET6 || int(binary.NativeEndian.Uint32(m.Data[4:8])) != index || m.Data[2]&unix.IFA_F_DADFAILED == 0 {
+				continue
+			}
+			attrs, err := syscall.ParseNetlinkRouteAttr(&m)
+			if err != nil {
+				return nil, err
+			}
+			for _, attr := range attrs {
+				if attr.Attr.Type != unix.IFA_ADDRESS || len(attr.Value) != net.IPv6len {
+					continue
+				}
+				address := net.IP(attr.Value).String()
+				for _, a := range addresses {
+					if a.Address == address && !slices.ContainsFunc(failed, func(v assignment) bool { return v.prefix.Addr().String() == address }) {
+						failed = append(failed, assignment{prefix: netip.PrefixFrom(netip.MustParseAddr(address), 128)})
+					}
+				}
 			}
 		}
 	}
-	return failed, nil
 }
 func listen(name string, index int) (*net.UDPConn, error) {
 	l, err := netlink.LinkByName(name)

@@ -640,7 +640,11 @@ DUID/IAID・stateful transactionを共有する。複数割当と個別preferred
 network writerへの/128投影を持つ。PD専用の外部state machine・補正wrapper・旧journal readerは削除した。
 独立dnsmasqとの実daemon試験で取得・DNS/search・DAD後のsource付きTCP/UDP・SIGKILL後の再取得・
 実Renew/Reply・サーバ停止中のRenew/Rebind・期限切れ撤去・復旧を確認した。
-`make check-dhcp6`で再実行できる。required/observe-only・RA trigger・resolver効果・DAD失敗・
+`make check-dhcp6`で再実行できる。独立Linux hostとの重複では、有限addressのDAD失敗を
+一覧pollが見逃す不具合を修正した。割当通知前にkernelへsubscribeし、既存loopで失敗通知を読む。
+実DAD/Decline・失敗address撤去・同じworkerで別のdnsmasq割当へのTCP/UDP復旧を確認した。
+DeclineのNoBinding応答で完了し、無関係なPD期限を変えないこともローカルで確認した。
+複数割当/PDとのDAD共存、required/observe-only・RA trigger・resolver効果・
 suspend/reboot・graceful Release・VRF・全link option/lifecycle・WAN選択は残り、NET-05全体は未完了。
 DHCPv6の割当・情報・T1/T2・再送は元のBOOTTIMEへ変更し、controlの受信側grantを削除した。
 RAのrouter/PIO/DNSとAFTRまで元の期限を渡し、AFTRの二重input・clock anchor・再base・JSON identityを削除した。
