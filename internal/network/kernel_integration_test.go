@@ -232,7 +232,7 @@ func runKernelFixture(t *testing.T) {
 	}
 	peerAddress(t, server, "aftr0", "192.0.0.1/30")
 	tunneled := cloneDesired(d)
-	tunneled.DSLite = []DSLite{{Name: "dslite0", Underlay: "wan0", Local: "2001:db8:2::1", Remote: "2001:db8:2::2"}}
+	tunneled.Links = []Link{{Name: "dslite0", Kind: "ip6tnl", Parent: "wan0", Local: "2001:db8:2::1", Remote: "2001:db8:2::2"}}
 	tunneled.Interfaces = append(tunneled.Interfaces, Interface{Name: "dslite0", Addresses: []string{"192.0.0.2/32"}, AddressOptions: map[string]AddressOptions{"192.0.0.2/32": {Peer: "192.0.0.1/32"}}})
 	tunneled.Routes = append(tunneled.Routes, Route{Destination: "198.18.0.0/24", Gateway: "192.0.0.1", Interface: "dslite0", Metric: 100})
 	tunneled.Firewall.Forward = append(tunneled.Firewall.Forward, Forward{From: "lan0", To: "dslite0"})

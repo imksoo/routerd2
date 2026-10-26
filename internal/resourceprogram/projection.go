@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/lifetime"
 	"github.com/imksoo/routerd2/internal/network"
 )
 
@@ -148,8 +149,7 @@ func (p Plan) Project(facts FactSnapshot) (Native, map[string]ResourceState) {
 		switch {
 		case node.source.Link != nil:
 			if until != math.MaxUint64 {
-				native.Network.Links[linkIndex].BootID = facts.Scope.BootID
-				native.Network.Links[linkIndex].ExpiresNanos = until
+				native.Network.Links[linkIndex].Authority = lifetime.Deadline{BootID: facts.Scope.BootID, Nanos: until}
 			}
 			linkIndex++
 		case node.source.Route != nil:
@@ -225,8 +225,6 @@ func renderNative(nodes []compiledResource) Native {
 			}
 		case r.Firewall != nil:
 			out.Network.Firewall = r.Firewall
-		case r.DSLite != nil:
-			out.Network.DSLite = append(out.Network.DSLite, *r.DSLite)
 		case r.VRRPGuard != nil:
 			out.Network.VRRPGuards = append(out.Network.VRRPGuards, *r.VRRPGuard)
 		case r.WireGuard != nil:

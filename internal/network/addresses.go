@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/lifetime"
 )
 
 // AddressOptions are explicit per-address options. A zero deadline means
@@ -205,15 +206,15 @@ func (p *apply) addressConfig(l Interface, address string) error {
 // the tighter protocol/UTC deadline; operator intent remains in the caller's
 // unmodified Desired. The writer can then revoke local routes as well as L2.
 func boundLinkAddresses(d *Desired, clock boottime.Clock) {
-	var lifetimes map[string]uint64
+	var lifetimes map[string]lifetime.Deadline
 	for _, link := range d.Links {
-		if link.BootID == "" {
+		if link.Authority == (lifetime.Deadline{}) {
 			continue
 		}
 		if lifetimes == nil {
-			lifetimes = make(map[string]uint64)
+			lifetimes = make(map[string]lifetime.Deadline)
 		}
-		lifetimes[link.Name] = link.ExpiresNanos
+		lifetimes[link.Name] = link.Authority
 	}
 	for i := range d.Interfaces {
 		iface := &d.Interfaces[i]
@@ -225,7 +226,23 @@ func boundLinkAddresses(d *Desired, clock boottime.Clock) {
 			iface.AddressOptions = make(map[string]AddressOptions)
 		}
 		for _, address := range iface.Addresses {
-			iface.AddressOptions[address] = BoundAddressLifetime(iface.AddressOptions[address], clock, owner)
+			options := iface.AddressOptions[address]
+			if owner.BootID != "" {
+				if owner.Nanos != 0 {
+					options = BoundAddressLifetime(options, clock, owner.Nanos)
+				}
+			} else if !owner.UTC.IsZero() && options.BootLifetime != (BootLifetime{}) {
+				deadline := uint64(clock.BoottimeNanoseconds) + uint64(max(0, owner.UTC.Sub(clock.WallTime)))
+				options = BoundAddressLifetime(options, clock, deadline)
+			} else if !owner.UTC.IsZero() {
+				if options.ValidUntil.IsZero() || options.ValidUntil.After(owner.UTC) {
+					options.ValidUntil = owner.UTC
+				}
+				if options.PreferredUntil.IsZero() || options.PreferredUntil.After(owner.UTC) {
+					options.PreferredUntil = owner.UTC
+				}
+			}
+			iface.AddressOptions[address] = options
 		}
 	}
 }

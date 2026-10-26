@@ -8,7 +8,7 @@ arbitrary Linux networking command interface.
 
 ## Current behavior
 
-- Create owned bridge, 802.1Q VLAN, VRF, VXLAN, macvlan, dummy and WireGuard links;
+- Create owned bridge, 802.1Q VLAN, VRF, VXLAN, macvlan, dummy, WireGuard and IPv4-in-IPv6 ip6tnl links;
   manage explicit aliases, membership, MTU and administrative state.
 - Manage IPv4/IPv6 addresses, finite preferred/valid lifetimes, explicit NoDAD
   and point-to-point peers. Automatic IPv6 address generation can be disabled
@@ -84,11 +84,11 @@ cached memory. The signed boot preflight fixture compares this response with a
 direct inspection of the actual journal before preparing a pair; operator paired
 prepare/boot and qualification of other state families remain separate work.
 
-Ownership journal format 5 records controller-generated boot-scoped address
+Ownership journal format 6 records controller-generated boot-scoped address
 lifetimes, route deadlines and virtual-link activation deadlines. Earlier unreleased formats are refused without rewriting their contents; no
 prototype format migration or mixed-version rollback is supported. Operator
-configuration cannot declare `boot_lifetime` or link/route `boot_id` and
-`expires_nanos`. It is the internal projection
+configuration cannot declare `boot_lifetime`, link `authority`, or route `boot_id`
+and `expires_nanos`. It is the internal projection
 of an accepted finite protocol grant.
 
 For such addresses, boot ID and absolute preferred/valid BOOTTIME deadlines

@@ -36,7 +36,6 @@ func (k *linuxKernel) Interface(name string) (InterfaceState, error) {
 	if err != nil {
 		return InterfaceState{}, err
 	}
-	a := l.Attrs()
 	out, err := nativeLinkState(l)
 	if err != nil {
 		return out, err
@@ -66,22 +65,6 @@ func (k *linuxKernel) Interface(name string) (InterfaceState, error) {
 		}
 	}
 	sort.Slice(out.Addresses, func(i, j int) bool { return out.Addresses[i].Address < out.Addresses[j].Address })
-	if t, ok := l.(*netlink.Ip6tnl); ok && t.Proto == unix.IPPROTO_IPIP {
-		underlay := int(t.Link)
-		if underlay == 0 {
-			// netlink v1.3.1 omits IFLA_IPTUN_LINK when decoding Ip6tnl.
-			// Linux also reports the bound underlay in IFLA_LINK.
-			underlay = a.ParentIndex
-		}
-		if underlay == 0 {
-			return out, nil
-		}
-		parent, err := netlink.LinkByIndex(underlay)
-		if err != nil {
-			return out, fmt.Errorf("tunnel underlay: %w", err)
-		}
-		out.DSLite = &DSLite{Name: a.Name, Underlay: parent.Attrs().Name, Local: t.Local.String(), Remote: t.Remote.String(), MTU: a.MTU}
-	}
 	return out, nil
 }
 
@@ -328,46 +311,6 @@ func (k *linuxKernel) DeleteRoute(r Route) error {
 		return err
 	}
 	return netlink.RouteDel(v)
-}
-
-func linuxTunnel(t DSLite) (*netlink.Ip6tnl, error) {
-	parent, err := linuxLink(t.Underlay)
-	if err != nil {
-		return nil, err
-	}
-	return &netlink.Ip6tnl{LinkAttrs: netlink.LinkAttrs{Name: t.Name, Alias: tunnelAlias, MTU: t.MTU}, Link: uint32(parent.Attrs().Index), Local: net.ParseIP(t.Local), Remote: net.ParseIP(t.Remote), Proto: unix.IPPROTO_IPIP, Ttl: 64, Flags: 1, EncapLimit: 0}, nil
-}
-func (k *linuxKernel) CreateDSLite(t DSLite) error {
-	v, err := linuxTunnel(t)
-	if err != nil {
-		return err
-	}
-	if err := netlink.LinkAdd(v); err != nil {
-		return err
-	}
-	if err := netlink.LinkSetAlias(v, tunnelAlias); err != nil {
-		return errors.Join(err, netlink.LinkDel(v))
-	}
-	return nil
-}
-func (k *linuxKernel) UpdateDSLite(t DSLite) error {
-	l, err := linuxLink(t.Name)
-	if err != nil {
-		return err
-	}
-	v, err := linuxTunnel(t)
-	if err != nil {
-		return err
-	}
-	v.Index = l.Attrs().Index
-	return netlink.LinkModify(v)
-}
-func (k *linuxKernel) DeleteDSLite(name string) error {
-	l, err := linuxLink(name)
-	if err != nil {
-		return err
-	}
-	return netlink.LinkDel(l)
 }
 
 func settingPath(key settingKey) (string, error) {

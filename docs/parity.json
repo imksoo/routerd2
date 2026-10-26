@@ -330,11 +330,11 @@
       ],
       "native_replacement": "Retain AFTR resolution and self-address selection; emit native ip6tnl, tunnel-address, policy-route and MTU plans.",
       "target_workers": [
-        "dslite",
+        "aftr",
         "network"
       ],
       "parity_status": "not_integrated",
-      "known_gap": "Native B4, dynamic AFTR resolution, explicit RA/DHCPv6 dependencies and finite DNS/source lifetime projection are implemented. Strict migration of original SelfAddressPolicy, multi-AFTR source routing, when/dependency and full resource lifecycle semantics remains incomplete."
+      "known_gap": "Native B4, dynamic AFTR resolution, explicit RA/DHCPv6 dependencies and original DNS/source lifetimes are implemented. Static and generated tunnels share ordinary ip6tnl link ownership. Independent Linux AFTR TCP/UDP and writer restart/control-stop expiry/recovery are verified. Strict migration of original SelfAddressPolicy, multi-AFTR source routing, when/dependency and full resource lifecycle semantics, RA-client boot deadlines, suspend/reboot, VRF and target hardware remain incomplete."
     },
     {
       "id": "lan.dhcp_ra",

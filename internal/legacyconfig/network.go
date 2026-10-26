@@ -398,8 +398,9 @@ func (c *compiler) staticDSLite(r resource) {
 	if s.MTU != 0 && (s.MTU < 1280 || s.MTU > 65495) {
 		c.reject(r, "mtu", "invalid_value", "MTU must satisfy both the pinned DSLiteTunnel range and the native IPv6 encapsulation limit")
 	}
-	c.document.Network.DSLite = append(c.document.Network.DSLite, network.DSLite{Name: name, Underlay: underlay, Local: local, Remote: remote, MTU: mtu})
+	c.document.Network.Links = append(c.document.Network.Links, network.Link{Name: name, Kind: "ip6tnl", Parent: underlay, Local: local, Remote: remote})
 	if iface := c.ensureInterface(r, "tunnelName", name); iface != nil {
+		iface.MTU = mtu
 		address := innerIP.String() + "/32"
 		iface.Addresses = append(iface.Addresses, address)
 		if iface.AddressOptions == nil {
@@ -407,7 +408,7 @@ func (c *compiler) staticDSLite(r resource) {
 		}
 		iface.AddressOptions[address] = network.AddressOptions{Peer: "192.0.0.1/32"}
 	}
-	c.target(r, "network.ds_lite/"+name)
+	c.target(r, "network.links/"+name)
 	c.target(r, "network.interfaces/"+name+"/addresses")
 	c.note(r, "Preserves the legacy inner IPv4 peer and fixed 1460-byte default MTU; routes and NAT remain separately declared intent.")
 }

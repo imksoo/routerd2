@@ -3,14 +3,13 @@ package network
 import (
 	"errors"
 	"fmt"
-	"math"
 	"net"
 	"net/netip"
 	"reflect"
 	"strings"
 	"unicode/utf8"
 
-	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/lifetime"
 )
 
 // Link creates a virtual interface. Interface configures its administrative
@@ -20,14 +19,13 @@ import (
 // in place: remove the old declaration and apply before creating its replacement.
 type Link struct {
 	// Internal original authority. The writer fences this owned link DOWN at
-	// expiry; these fields describe no kernel link attribute.
-	BootID       string `json:"boot_id,omitempty"`
-	ExpiresNanos uint64 `json:"expires_nanos,omitempty"`
-	Name         string `json:"name"`
-	Kind         string `json:"kind"`
-	Parent       string `json:"parent,omitempty"`
-	Alias        string `json:"alias,omitempty"`
-	HardwareAddr string `json:"hardware_addr,omitempty"`
+	// expiry; this value describes no kernel link attribute.
+	Authority    lifetime.Deadline `json:"authority,omitzero"`
+	Name         string            `json:"name"`
+	Kind         string            `json:"kind"`
+	Parent       string            `json:"parent,omitempty"`
+	Alias        string            `json:"alias,omitempty"`
+	HardwareAddr string            `json:"hardware_addr,omitempty"`
 	// IPv6AddrGenMode is applied before bringing a new link up. Empty preserves
 	// the kernel default; none disables automatic link-local generation so HA
 	// can install its explicit virtual link-local address without a second one.
@@ -47,10 +45,9 @@ type Link struct {
 }
 
 type linkAnnouncement struct {
-	Index        int
-	MAC          net.HardwareAddr
-	BootID       string
-	ExpiresNanos uint64
+	Index     int
+	MAC       net.HardwareAddr
+	Authority lifetime.Deadline
 }
 
 const linkAliasPrefix = "routerd2:link:v1:"
@@ -64,8 +61,8 @@ func validateLinks(d Desired) error {
 	add := func(format string, args ...any) { errs = append(errs, fmt.Errorf(format, args...)) }
 	created := map[string]Link{}
 	for _, l := range d.Links {
-		if (l.BootID != "" || l.ExpiresNanos != 0) && (!boottime.ValidBootID(l.BootID) || l.ExpiresNanos == 0 || l.ExpiresNanos > math.MaxInt64) {
-			add("link %s: invalid original boot deadline", l.Name)
+		if err := l.Authority.Validate(); err != nil {
+			add("link %s: invalid original authority: %v", l.Name, err)
 		}
 		if !validName(l.Name) || l.Name == "lo" {
 			add("link %q: invalid virtual interface name", l.Name)
@@ -92,7 +89,10 @@ func validateLinks(d Desired) error {
 		if l.Kind != "vrf" && l.VRFTable != 0 {
 			add("link %s: vrf_table is valid only for vrf", l.Name)
 		}
-		if l.Kind != "vxlan" && (l.VXLANID != 0 || l.Local != "" || l.Remote != "" || l.Group != "" || l.Port != 0 || l.TTL != 0 || l.Learning != nil) {
+		if l.Kind != "ip6tnl" && l.Kind != "vxlan" && (l.Local != "" || l.Remote != "") {
+			add("link %s: endpoints require kind vxlan or ip6tnl", l.Name)
+		}
+		if l.Kind != "vxlan" && (l.VXLANID != 0 || l.Group != "" || l.Port != 0 || l.TTL != 0 || l.Learning != nil) {
 			add("link %s: VXLAN options require kind vxlan", l.Name)
 		}
 		if l.Kind != "macvlan" && l.MACVLANMode != "" {
@@ -120,6 +120,19 @@ func validateLinks(d Desired) error {
 			}
 			if l.VRFTable < 1 || uint64(l.VRFTable) > uint64(^uint32(0)) || l.VRFTable >= 253 && l.VRFTable <= 255 {
 				add("VRF %s: vrf_table must be a non-reserved routing table", l.Name)
+			}
+		case "ip6tnl":
+			if !validName(l.Parent) || l.Parent == l.Name || l.HardwareAddr != "" {
+				add("ip6tnl %s: requires a distinct parent and no hardware_addr", l.Name)
+			}
+			for _, endpoint := range []string{l.Local, l.Remote} {
+				a, err := netip.ParseAddr(endpoint)
+				if err != nil || !a.Is6() || a.Is4In6() || a.Zone() != "" || a.IsUnspecified() || a.IsMulticast() || a.IsLinkLocalUnicast() {
+					add("ip6tnl %s: endpoint %q must be a non-link-local IPv6 unicast address", l.Name, endpoint)
+				}
+			}
+			if l.Local == l.Remote {
+				add("ip6tnl %s: local and remote must differ", l.Name)
 			}
 		case "vlan", "vxlan", "macvlan":
 			if !validName(l.Parent) || l.Parent == l.Name {
@@ -164,11 +177,6 @@ func validateLinks(d Desired) error {
 			add("link %s: unsupported kind %q", l.Name, l.Kind)
 		}
 	}
-	for _, t := range d.DSLite {
-		if _, ok := created[t.Name]; ok {
-			add("link %s: cannot be both a Link and a DS-Lite tunnel", t.Name)
-		}
-	}
 	for _, i := range d.Interfaces {
 		if i.Master != nil {
 			if *i.Master != "" && (!validName(*i.Master) || *i.Master == i.Name) {
@@ -184,11 +192,6 @@ func validateLinks(d Desired) error {
 			}
 			if _, ok := created[i.Name]; ok {
 				add("interface %s: use Link.Alias for created links", i.Name)
-			}
-			for _, t := range d.DSLite {
-				if t.Name == i.Name {
-					add("interface %s: DS-Lite ownership alias cannot be overridden", i.Name)
-				}
 			}
 		}
 	}
@@ -259,6 +262,11 @@ func normalizeLink(l Link) Link {
 			l.BridgeMulticastSnooping = boolPointer(true)
 		}
 	}
+	if l.Kind == "ip6tnl" {
+		local, _ := netip.ParseAddr(l.Local)
+		remote, _ := netip.ParseAddr(l.Remote)
+		l.Local, l.Remote = local.String(), remote.String()
+	}
 	if l.Kind == "vxlan" {
 		if l.Port == 0 {
 			l.Port = 4789
@@ -293,8 +301,7 @@ func vxlanFamily(l Link) int {
 }
 
 func sameManagedLink(live, want Link) bool {
-	live.BootID, want.BootID = "", ""
-	live.ExpiresNanos, want.ExpiresNanos = 0, 0
+	live.Authority, want.Authority = lifetime.Deadline{}, lifetime.Deadline{}
 	if want.HardwareAddr == "" {
 		live.HardwareAddr = ""
 	}

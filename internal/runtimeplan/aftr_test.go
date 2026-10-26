@@ -89,7 +89,7 @@ func TestAFTRObservedSourceGenerationAndProjection(t *testing.T) {
 	if err := observeAndProject(ctx, r, update(t, r, "service.dslite", 1, snapshot)); err != nil {
 		t.Fatal(err)
 	}
-	if len(n.applied.DSLite) != 1 || len(n.applied.Routes) != 1 || n.applied.DSLite[0].Name != "dslite0" || n.applied.Routes[0].Interface != "dslite0" {
+	if len(n.applied.Links) != 1 || len(n.applied.Routes) != 1 || n.applied.Links[0].Name != "dslite0" || n.applied.Routes[0].Interface != "dslite0" {
 		t.Fatalf("complete B4 projection missing: %+v", n.applied)
 	}
 	n.observed.Interfaces[0].Addresses[0].Flags = unix.IFA_F_DADFAILED
@@ -103,7 +103,7 @@ func TestAFTRObservedSourceGenerationAndProjection(t *testing.T) {
 	if err := r.reconcileDynamic(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if len(n.applied.DSLite) != 0 || len(n.applied.Routes) != 0 || len(n.applied.Interfaces) != 1 {
+	if len(n.applied.Links) != 0 || len(n.applied.Routes) != 0 || len(n.applied.Interfaces) != 1 {
 		t.Fatalf("unusable source retained B4 resources: %+v", n.applied)
 	}
 	n.observed.Interfaces[0].Addresses[0].Flags = 0
@@ -120,7 +120,7 @@ func TestAFTRObservedSourceGenerationAndProjection(t *testing.T) {
 	if err := r.ApplyConfig(ctx, 2, config.FromNative(doc)); err != nil {
 		t.Fatal(err)
 	}
-	if r.bindings["service.dslite"].digest == prior || len(r.aftrInputs) != 0 || len(n.applied.DSLite) != 0 {
+	if r.bindings["service.dslite"].digest == prior || len(r.aftrInputs) != 0 || len(n.applied.Links) != 0 {
 		t.Fatal("changed dependency policy reused old instance or tunnel")
 	}
 }
@@ -153,7 +153,7 @@ func TestAFTRPeerAndGatewayChangesFenceOldProjection(t *testing.T) {
 			if err := r.ApplyConfig(ctx, uint64(i+1), config.FromNative(doc)); err != nil {
 				t.Fatal(err)
 			}
-			if len(n.applied.DSLite) != 0 || len(n.applied.Routes) != 0 || len(n.applied.Interfaces) != 1 {
+			if len(n.applied.Links) != 0 || len(n.applied.Routes) != 0 || len(n.applied.Interfaces) != 1 {
 				t.Fatal("changed B4 intent retained old address/route ownership before new facts arrived", n.applied)
 			}
 			input, err := r.AFTRInput(ctx, "service.dslite")
@@ -177,7 +177,7 @@ func TestAFTRPeerAndGatewayChangesFenceOldProjection(t *testing.T) {
 			if err := network.Validate(n.applied); err != nil {
 				t.Fatal("public service produced invalid point-to-point kernel intent", err)
 			}
-			if len(n.applied.DSLite) != 1 || len(n.applied.Interfaces) != 2 {
+			if len(n.applied.Links) != 1 || len(n.applied.Interfaces) != 2 {
 				t.Fatal("new AFTR producer did not acquire its complete B4 projection", n.applied)
 			}
 			var b4 network.Interface
@@ -202,7 +202,7 @@ func TestAFTRPeerAndGatewayChangesFenceOldProjection(t *testing.T) {
 	if err := r.ApplyConfig(ctx, uint64(len(steps)+1), config.FromNative(config.Native{})); err != nil {
 		t.Fatal(err)
 	}
-	if len(n.applied.DSLite)+len(n.applied.Interfaces)+len(n.applied.Routes) != 0 || len(r.bindings) != 0 || len(r.aftrInputs) != 0 {
+	if len(n.applied.Links)+len(n.applied.Interfaces)+len(n.applied.Routes) != 0 || len(r.bindings) != 0 || len(r.aftrInputs) != 0 {
 		t.Fatal("configuration removal retained B4 resources or an authorized producer", n.applied)
 	}
 	if !errors.Is(observeAndProject(ctx, r, priorUpdate), ErrStale) {
@@ -244,7 +244,7 @@ func TestAFTRFinitePeerAddressAndGatewayWithdrawTogether(t *testing.T) {
 	records := map[string]serviceconfig.Update{instance.Name: {Role: "aftr", Snapshot: raw}}
 	inputs := map[string]aftr.Input{instance.Name: in}
 	p, err := projectNative(doc, "/run/routerd", "/var/lib/routerd", records, now, inputs)
-	if err != nil || len(p.network.DSLite) != 1 || len(p.network.Routes) != 1 || p.network.Routes[0].Gateway != "192.0.0.1" {
+	if err != nil || len(p.network.Links) != 1 || len(p.network.Routes) != 1 || p.network.Routes[0].Gateway != "192.0.0.1" {
 		t.Fatal("finite source did not project its peer route", p.network, err)
 	}
 	if err := network.Validate(p.network); err != nil {
@@ -260,7 +260,7 @@ func TestAFTRFinitePeerAddressAndGatewayWithdrawTogether(t *testing.T) {
 		t.Fatal("peer addressing changed the finite address lifetime", options)
 	}
 	p, err = projectNative(doc, "/run/routerd", "/var/lib/routerd", records, expiry, inputs)
-	if err != nil || len(p.network.DSLite) != 0 || len(p.network.Routes) != 0 || len(p.network.Interfaces) != 1 || p.network.Interfaces[0].Name != "wan0" {
+	if err != nil || len(p.network.Links) != 0 || len(p.network.Routes) != 0 || len(p.network.Interfaces) != 1 || p.network.Interfaces[0].Name != "wan0" {
 		t.Fatal("source expiry retained peer address, tunnel or gateway route", p.network, err)
 	}
 }
@@ -292,13 +292,13 @@ func TestAFTRFiniteDependencyInvalidatesPriorResolution(t *testing.T) {
 	inputs := map[string]aftr.Input{instance.Name: in}
 	protocols := protocolsFor(t, doc, "/run/routerd", "/var/lib/routerd")
 	p, err := projectWithFacts(doc, protocols, records, clock.WallTime, projectionFacts{bfdClock: clock, aftr: inputs})
-	if err != nil || len(p.network.DSLite) != 1 {
+	if err != nil || len(p.network.Links) != 1 {
 		t.Fatal(p.network, err)
 	}
 	clock.BoottimeNanoseconds += int64(31 * time.Second)
 	clock.WallTime = clock.WallTime.Add(-24 * time.Hour)
 	p, err = projectWithFacts(doc, protocols, records, clock.WallTime, projectionFacts{bfdClock: clock, aftr: inputs})
-	if err != nil || len(p.network.DSLite) != 0 {
+	if err != nil || len(p.network.Links) != 0 {
 		t.Fatal("stale candidate index survived boot expiry and UTC rollback", p.network, err)
 	}
 	in, err = aftrDependencies(doc, doc.Services[0], records, bound.digest, clock)

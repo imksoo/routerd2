@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/imksoo/routerd2/internal/config"
+	"github.com/imksoo/routerd2/internal/lifetime"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/bfd"
 	"github.com/imksoo/routerd2/internal/protocol/bgpconfig"
@@ -97,7 +98,7 @@ func TestLearnedRouteRetainsRecursiveAddressRouteAndLinkDeadlines(t *testing.T) 
 				d.Network.Routes[0].ValidUntil = clock.WallTime.Add(2 * time.Second)
 				hop, family = "2001:db8:8::9", "2001:db8:77::/64"
 			case "link", "link-local":
-				d.Network.Links = []network.Link{{Name: "wan0", Kind: "macvlan", Parent: "uplink", BootID: clock.BootID, ExpiresNanos: base + uint64(2*time.Second)}}
+				d.Network.Links = []network.Link{{Name: "wan0", Kind: "macvlan", Parent: "uplink", Authority: lifetime.Deadline{BootID: clock.BootID, Nanos: base + uint64(2*time.Second)}}}
 				if prerequisite == "link-local" {
 					hop, family = "fe80::1", "2001:db8:77::/64"
 				}

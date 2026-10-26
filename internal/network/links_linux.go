@@ -53,6 +53,15 @@ func nativeLinkState(l netlink.Link) (InterfaceState, error) {
 	case *netlink.Dummy:
 	case *netlink.Wireguard:
 		definition.HardwareAddr = ""
+	case *netlink.Ip6tnl:
+		// Linux adds CAP_XMIT/RCV/PER_PACKET to the configured flags. They
+		// describe current reachability, not an operator-owned tunnel option.
+		const capabilities = 0x10000 | 0x20000 | 0x40000
+		if v.Proto != unix.IPPROTO_IPIP || v.Ttl != 64 || v.Flags & ^uint32(capabilities) != 1 || v.EncapLimit != 0 || v.FlowInfo != 0 || v.Tos != 0 || v.FlowBased || v.EncapType != 0 {
+			return out, nil
+		}
+		definition.Local, definition.Remote = v.Local.String(), v.Remote.String()
+		definition.HardwareAddr = ""
 	case *netlink.Bridge:
 		definition.BridgeVLANFiltering = v.VlanFiltering
 		definition.BridgeMulticastSnooping = v.MulticastSnooping
@@ -149,6 +158,8 @@ func nativeLink(l Link, alias string) (netlink.Link, error) {
 		return &netlink.Dummy{LinkAttrs: a}, nil
 	case "wireguard":
 		return &netlink.Wireguard{LinkAttrs: a}, nil
+	case "ip6tnl":
+		return &netlink.Ip6tnl{LinkAttrs: a, Link: uint32(a.ParentIndex), Local: net.ParseIP(l.Local), Remote: net.ParseIP(l.Remote), Proto: unix.IPPROTO_IPIP, Ttl: 64, Flags: 1}, nil
 	case "bridge":
 		return &netlink.Bridge{LinkAttrs: a, VlanFiltering: l.BridgeVLANFiltering, MulticastSnooping: l.BridgeMulticastSnooping}, nil
 	case "vlan":
@@ -230,6 +241,16 @@ func (k *linuxKernel) UpdateLink(l Link, alias string) (result error) {
 		}
 	}
 	switch l.Kind {
+	case "ip6tnl":
+		updated, err := nativeLink(l, alias)
+		if err != nil {
+			return err
+		}
+		updated.Attrs().Index = live.Attrs().Index
+		mutationAttempted = true
+		if err := netlink.LinkModify(updated); err != nil {
+			return fmt.Errorf("ip6tnl %s endpoints: %w", l.Name, err)
+		}
 	case "bridge":
 		// Do not pass the observed Bridge back to LinkModify: that would replay
 		// every observed attribute (including flags and kernel-derived timers).

@@ -22,15 +22,15 @@ resources:
     address:
       interface: eth1
       cidr: 192.168.10.1/24
-  - id: ds_lite/ds0
+  - id: link/ds0
     depends_on:
       - interface/eth0
-    ds_lite:
+    link:
+      kind: ip6tnl
       name: ds0
-      underlay: eth0
+      parent: eth0
       local: 2001:db8:100::2
       remote: 2001:db8:200::1
-      mtu: 1460
   - id: firewall
     firewall:
       forward:
@@ -42,9 +42,10 @@ resources:
       ipv6: true
   - id: interface/ds0
     depends_on:
-      - ds_lite/ds0
+      - link/ds0
     interface:
       name: ds0
+      mtu: 1460
   - id: interface/eth0
     interface:
       name: eth0

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/imksoo/routerd2/internal/config"
+	"github.com/imksoo/routerd2/internal/lifetime"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/bfd"
 	"github.com/imksoo/routerd2/internal/protocol/bgpconfig"
@@ -139,6 +140,9 @@ func projectBGP(p *projection, doc config.Native, configs map[string]bgpconfig.C
 			if boot != clock.BootID {
 				return uint64(clock.BoottimeNanoseconds)
 			}
+			if nanos == 0 {
+				return math.MaxUint64
+			}
 			return nanos
 		}
 		if wall.IsZero() {
@@ -149,8 +153,8 @@ func projectBGP(p *projection, doc config.Native, configs map[string]bgpconfig.C
 	index := fibIndex{links: map[string]uint64{}}
 	domains := network.RoutingDomains(p.network)
 	for _, l := range p.network.Links {
-		if l.BootID != "" {
-			index.links[l.Name] = deadline(l.BootID, l.ExpiresNanos, time.Time{})
+		if l.Authority != (lifetime.Deadline{}) {
+			index.links[l.Name] = deadline(l.Authority.BootID, l.Authority.Nanos, l.Authority.UTC)
 		}
 	}
 	for _, l := range p.network.Interfaces {

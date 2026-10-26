@@ -26,7 +26,6 @@ type Desired struct {
 	PolicyRules []PolicyRule `json:"policy_rules,omitempty"`
 	Forwarding  Forwarding   `json:"forwarding,omitempty"`
 	Firewall    *Firewall    `json:"firewall,omitempty"`
-	DSLite      []DSLite     `json:"ds_lite,omitempty"`
 	VRRPGuards  []VRRPGuard  `json:"vrrp_guards,omitempty"`
 	WireGuard   []WireGuard  `json:"wireguard,omitempty"`
 }
@@ -127,18 +126,6 @@ type Masquerade struct {
 	OutInterface string `json:"out_interface"`
 }
 
-// DSLite creates an IPv4-in-IPv6 Linux ip6tnl device with fixed IPv6 endpoints.
-// It does not discover an AFTR, acquire IPv6, install routes, or perform NAT.
-// Configure the B4 IPv4 address through Interfaces and routes through Routes.
-// MTU zero derives the inner MTU from the underlay MTU minus 40 bytes.
-type DSLite struct {
-	Name     string `json:"name"`
-	Underlay string `json:"underlay"`
-	Local    string `json:"local"`
-	Remote   string `json:"remote"`
-	MTU      int    `json:"mtu,omitempty"`
-}
-
 type Options struct {
 	// StatePath must be an absolute, persistent path owned by the caller.
 	// Losing this journal does not authorize adoption of existing resources.
@@ -168,7 +155,6 @@ type InterfaceState struct {
 	Link         *Link          `json:"link,omitempty"`
 	Owned        bool           `json:"owned"`
 	Addresses    []AddressState `json:"addresses,omitempty"`
-	DSLite       *DSLite        `json:"ds_lite,omitempty"`
 	IPv6AcceptRA *int           `json:"ipv6_accept_ra,omitempty"`
 	IPv6Autoconf *bool          `json:"ipv6_autoconf,omitempty"`
 }
@@ -287,36 +273,6 @@ func Validate(d Desired) error {
 	if err := validateRoutes(d.Routes); err != nil {
 		errs = append(errs, err)
 	}
-	seenTunnels := map[string]bool{}
-	for _, t := range d.DSLite {
-		if !validName(t.Name) || !validName(t.Underlay) || t.Name == t.Underlay {
-			add("DS-Lite %q: invalid name or underlay", t.Name)
-		}
-		if seenTunnels[t.Name] {
-			add("duplicate DS-Lite tunnel %q", t.Name)
-		}
-		seenTunnels[t.Name] = true
-		if t.MTU != 0 && (t.MTU < 68 || t.MTU > 65495) {
-			add("DS-Lite %s: invalid MTU", t.Name)
-		}
-		for _, endpoint := range []string{t.Local, t.Remote} {
-			a, err := netip.ParseAddr(endpoint)
-			if err != nil || !a.Is6() || a.Is4In6() || a.Zone() != "" || a.IsUnspecified() || a.IsMulticast() || a.IsLinkLocalUnicast() {
-				add("DS-Lite %s: endpoint %q must be a non-link-local IPv6 unicast address", t.Name, endpoint)
-			}
-		}
-		if t.Local == t.Remote {
-			add("DS-Lite %s: local and remote must differ", t.Name)
-		}
-		if l, ok := links[t.Name]; ok && l.MTU != 0 && t.MTU != 0 && l.MTU != t.MTU {
-			add("DS-Lite %s: conflicting interface/tunnel MTUs", t.Name)
-		}
-	}
-	for _, t := range d.DSLite {
-		if seenTunnels[t.Underlay] {
-			add("DS-Lite %s: nested DS-Lite underlays are not supported", t.Name)
-		}
-	}
 	if d.Firewall != nil {
 		seen := map[Forward]bool{}
 		for _, f := range d.Firewall.Forward {
@@ -402,12 +358,6 @@ func normalized(d Desired) Desired {
 	}
 	for i := range d.Routes {
 		d.Routes[i] = normalizeRoute(d.Routes[i])
-	}
-	for i := range d.DSLite {
-		t := &d.DSLite[i]
-		l, _ := netip.ParseAddr(t.Local)
-		r, _ := netip.ParseAddr(t.Remote)
-		t.Local, t.Remote = l.String(), r.String()
 	}
 	if d.Firewall != nil {
 		normalizeFirewall(d.Firewall)

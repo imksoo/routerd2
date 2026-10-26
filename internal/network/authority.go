@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/lifetime"
 )
 
 // MaintainAuthority runs in the network worker, independently of control requests.
@@ -60,32 +61,13 @@ func (e *Engine) expireAuthority(ctx context.Context) (time.Duration, error) {
 	p := &apply{e: e, ctx: ctx}
 	before := len(e.state.Routes)
 	var expiredLinks map[string]bool
-	for i := 0; i < len(e.state.Routes); {
-		r := e.state.Routes[i]
-		if r.BootID == "" {
-			i++
-			continue
-		}
-		if r.BootID == clock.BootID && r.ExpiresNanos > uint64(clock.BoottimeNanoseconds) {
-			remaining := time.Duration(r.ExpiresNanos - uint64(clock.BoottimeNanoseconds))
-			if delay == 0 || remaining < delay {
-				delay = remaining
-			}
-			i++
-			continue
-		}
-		if err := p.removeRoute(i); err != nil {
-			e.state.Status, e.state.LastError = "degraded", err.Error()
-			return 0, errors.Join(err, e.save())
-		}
-	}
 	for i, owned := range e.state.Links {
 		link := owned.Definition
-		if link.BootID == "" {
+		if link.Authority == (lifetime.Deadline{}) {
 			continue
 		}
-		if link.BootID == clock.BootID && link.ExpiresNanos > uint64(clock.BoottimeNanoseconds) {
-			remaining := time.Duration(link.ExpiresNanos - uint64(clock.BoottimeNanoseconds))
+		if link.Authority.Live(clock) {
+			remaining := link.Authority.Remaining(clock)
 			if delay == 0 || remaining < delay {
 				delay = remaining
 			}
@@ -103,7 +85,7 @@ func (e *Engine) expireAuthority(ctx context.Context) (time.Duration, error) {
 						if err != nil {
 							return 0, err
 						}
-						if err := e.kernel.AnnounceLink(linkAnnouncement{Index: owned.Index, MAC: mac, BootID: link.BootID, ExpiresNanos: link.ExpiresNanos}); err != nil {
+						if err := e.kernel.AnnounceLink(linkAnnouncement{Index: owned.Index, MAC: mac, Authority: link.Authority}); err != nil {
 							return 0, err
 						}
 					}
@@ -140,6 +122,31 @@ func (e *Engine) expireAuthority(ctx context.Context) (time.Duration, error) {
 			expiredLinks = make(map[string]bool)
 		}
 		expiredLinks[link.Name] = true
+	}
+	for i := 0; i < len(e.state.Routes); {
+		r := e.state.Routes[i]
+		expired := expiredLinks[r.Interface]
+		if r.BootID != "" {
+			if r.BootID != clock.BootID || r.ExpiresNanos <= uint64(clock.BoottimeNanoseconds) {
+				expired = true
+			} else {
+				remaining := time.Duration(r.ExpiresNanos - uint64(clock.BoottimeNanoseconds))
+				if delay == 0 || remaining < delay {
+					delay = remaining
+				}
+			}
+		}
+		for _, hop := range r.NextHops {
+			expired = expired || expiredLinks[hop.Interface]
+		}
+		if !expired {
+			i++
+			continue
+		}
+		if err := p.removeRoute(i); err != nil {
+			e.state.Status, e.state.LastError = "degraded", err.Error()
+			return 0, errors.Join(err, e.save())
+		}
 	}
 	keep := make(map[addressKey]bool, len(e.state.Addresses))
 	expiredAddresses := false

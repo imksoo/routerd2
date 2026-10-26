@@ -647,8 +647,12 @@ RAのrouter/PIO/DNSとAFTRまで元の期限を渡し、AFTRの二重input・clo
 `make qemu-dhcp6-clock`で実UTC±24時間、凍結producerの元通知不変、LAN TCP/UDP、
 control/supervisor停止中のwriterによるIA_NA/LAN address撤去、RAの期限制限・撤退、
 期限切れ通知の再送で復活しないこと、fresh workerでの再取得を確認した。
-control停止時にRAは早期撤退し得る。DS-Lite link/route自体のcontrol非依存fencingと
-RA client自身のUTC契約はまだ残る。
+control停止時にRAは早期撤退し得る。DS-Lite専用のkernel API・Desired・journalを削除し、
+固定tunnelと動的AFTR出力を通常の`link.kind: ip6tnl`へ統一した。元のAFTR期限をlinkへ渡し、
+writerがcontrolなしでDOWN・管理address/route撤去を担当する。実daemon＋独立DNS/Linux AFTRで
+TCP/UDP、同じindexでのendpoint更新、writer SIGKILL/再起動、control/supervisor停止中の
+元TTLによる失効とfresh DNSによる復旧を確認した。`make check-aftr`から再実行できる。
+RA client自身のUTC契約、suspend/reboot・VRF・対象実機の受入はまだ残る。
 
 **受入条件**
 
@@ -740,7 +744,7 @@ learned route先の利用者TCP/UDPも通信し、撤去中の接続拒否と復
 明示VRFではmultihop socketをVRF master、single-hopをmember interfaceへ束縛する。
 source domainとBGP FIB tableも検証する。同じendpointを持つ二つのVRFとdefault domainで
 実daemonを動かし、独立TCP/UDP・片側UDP障害・worker交替・main tableへの流出防止を確認した。
-single-hop VRFも実peerと障害・復旧を確認した。現在のcompiler contractはnative-14。
+single-hop VRFも実peerと障害・復旧を確認した。現在のcompiler contractはnative-15。
 IPv4/IPv6とも同じendpointを二つのVRFとdefault domainで同時使用し、BFD/BGPと三経路の
 TCP/UDPを確認した。defaultとVRFのUDP bind競合は受信socketだけの`SO_REUSEADDR`で修正した。
 domain/sourceの既存claimで二重ownerを拒否し、TX port専有と`SO_REUSEPORT`不使用を維持する。

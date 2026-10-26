@@ -195,11 +195,6 @@ func validateNative(d Native, source Document) error {
 			return fmt.Errorf("static interface %s conflicts with dynamic service %s", link.Name, owner)
 		}
 	}
-	for _, link := range d.Network.DSLite {
-		if owner := reserved[link.Name]; owner != "" {
-			return fmt.Errorf("static DS-Lite %s conflicts with dynamic service %s", link.Name, owner)
-		}
-	}
 	for _, route := range d.Network.Routes {
 		if owner := reserved[route.Interface]; owner != "" {
 			return fmt.Errorf("static route cannot use dynamic interface owned by %s", owner)

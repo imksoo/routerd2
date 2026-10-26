@@ -254,8 +254,8 @@ func projectDSLite(p *projection, doc config.Native, instances map[string]bindin
 		if err := aftr.ValidateSnapshot(cfg, input, snap); err != nil {
 			return err
 		}
-		p.network.DSLite = append(p.network.DSLite, network.DSLite{Name: c.Tunnel, Underlay: c.Interface, Local: snap.Local, Remote: snap.Remote, MTU: c.MTU})
-		ensureInterface(&p.network, c.Tunnel)
+		p.network.Links = append(p.network.Links, network.Link{Name: c.Tunnel, Kind: "ip6tnl", Parent: c.Interface, Local: snap.Local, Remote: snap.Remote, Authority: snap.ValidUntil})
+		p.network.Interfaces = append(p.network.Interfaces, network.Interface{Name: c.Tunnel, MTU: c.MTU})
 		address := c.B4Address
 		if address == "" {
 			address = "192.0.0.2/32"

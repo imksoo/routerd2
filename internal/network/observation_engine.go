@@ -174,9 +174,6 @@ func (e *Engine) observationTargetsLocked() ([]string, []int) {
 				names[*l.Master] = true
 			}
 		}
-		for _, t := range d.DSLite {
-			names[t.Name], names[t.Underlay] = true, true
-		}
 		for _, r := range d.Routes {
 			if r.Interface != "" {
 				names[r.Interface] = true
@@ -193,9 +190,6 @@ func (e *Engine) observationTargetsLocked() ([]string, []int) {
 	}
 	for _, a := range e.state.Addresses {
 		names[a.Interface] = true
-	}
-	for _, t := range e.state.Tunnels {
-		names[t.Name] = true
 	}
 	for _, l := range e.state.Links {
 		names[l.Definition.Name] = true

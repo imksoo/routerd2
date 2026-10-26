@@ -170,15 +170,15 @@ func TestDNSResourceGraphAndStaticReferences(t *testing.T) {
 
 func TestDSLitePreservesPeerAndOldMTUDefault(t *testing.T) {
 	d := compiled(t, "dslite").Document
-	if len(nativeProgram(t, d).Network.DSLite) != 1 {
+	if len(nativeProgram(t, d).Network.Links) != 1 {
 		t.Fatal("DS-Lite tunnel missing")
 	}
-	tunnel := nativeProgram(t, d).Network.DSLite[0]
-	if tunnel.Name != "ds0" || tunnel.Underlay != "eth0" || tunnel.Local != "2001:db8::2" || tunnel.Remote != "2001:db8:ffff::1" || tunnel.MTU != 1460 {
+	tunnel := nativeProgram(t, d).Network.Links[0]
+	if tunnel.Name != "ds0" || tunnel.Parent != "eth0" || tunnel.Local != "2001:db8::2" || tunnel.Remote != "2001:db8:ffff::1" {
 		t.Fatal("tunnel endpoint or fixed legacy MTU changed")
 	}
 	inner := iface(t, d, "ds0")
-	if !reflect.DeepEqual(inner.Addresses, []string{"192.0.0.2/32"}) || inner.AddressOptions["192.0.0.2/32"].Peer != "192.0.0.1/32" {
+	if inner.MTU != 1460 || !reflect.DeepEqual(inner.Addresses, []string{"192.0.0.2/32"}) || inner.AddressOptions["192.0.0.2/32"].Peer != "192.0.0.1/32" {
 		t.Fatal("inner point-to-point address semantics were lost")
 	}
 	if len(nativeProgram(t, d).Network.Routes) != 1 || nativeProgram(t, d).Network.Routes[0].Interface != "ds0" || nativeProgram(t, d).Network.Routes[0].Gateway != "192.0.0.1" {
@@ -186,7 +186,7 @@ func TestDSLitePreservesPeerAndOldMTUDefault(t *testing.T) {
 	}
 	data := strings.Replace(string(fixture(t, "dslite")), "        tunnelName: ds0\n", "", 1)
 	withoutName, err := Migrate([]byte(data))
-	if err != nil || nativeProgram(t, withoutName).Network.DSLite[0].Name != "wan" {
+	if err != nil || nativeProgram(t, withoutName).Network.Links[0].Name != "wan" {
 		t.Fatalf("legacy tunnel name fallback was not preserved: %v", err)
 	}
 }
@@ -199,7 +199,7 @@ func TestDSLiteLocalAddressFromMeansInnerIPv4(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if nativeProgram(t, d).Network.DSLite[0].Local != "2001:db8::2" {
+	if nativeProgram(t, d).Network.Links[0].Local != "2001:db8::2" {
 		t.Fatal("IPv4 inner source was incorrectly used as outer IPv6 source")
 	}
 	inner := iface(t, d, "ds0")

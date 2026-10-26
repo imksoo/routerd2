@@ -35,7 +35,7 @@ func (*linuxKernel) AnnounceLink(a linkAnnouncement) error {
 	if err != nil {
 		return err
 	}
-	if a.BootID != clock.BootID || a.ExpiresNanos <= uint64(clock.BoottimeNanoseconds) {
+	if !a.Authority.Live(clock) {
 		return nil
 	}
 	destination := &unix.SockaddrLinklayer{Ifindex: a.Index, Protocol: protocol, Halen: 6}

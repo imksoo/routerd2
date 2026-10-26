@@ -100,9 +100,8 @@ func (r *Runtime) projectLocked(protocols protocolPlan, doc config.Native, recor
 func projectWithFacts(doc config.Native, protocols protocolPlan, records map[string]serviceconfig.Update, now time.Time, facts projectionFacts) (projection, error) {
 	p := projection{network: doc.Network, liveRA: map[string]ra.Config{}, native: doc, vrrpOwners: make(map[string]vrrpOwnership)}
 	// Own the collections changed by protocol projection and lifetime removal.
-	// Links, tunnels and guards are only appended; all other intent is read-only.
+	// Links and guards are only appended; all other intent is read-only.
 	p.network.Links = slices.Clip(p.network.Links)
-	p.network.DSLite = slices.Clip(p.network.DSLite)
 	p.network.VRRPGuards = slices.Clip(p.network.VRRPGuards)
 	p.network.Routes = slices.Clone(p.network.Routes)
 	p.network.Interfaces = slices.Clone(p.network.Interfaces)
@@ -241,7 +240,7 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 				continue
 			}
 			p.vrrpOwners[s.ModuleName()] = ownershipFor(record, snap)
-			p.network.Links = append(p.network.Links, network.Link{BootID: snap.BootID, ExpiresNanos: snap.ExpiresNanos, Name: c.VIPInterface, Kind: "macvlan", Parent: c.Interface, MACVLANMode: "bridge", HardwareAddr: vrrp.VirtualMAC(c.Family, c.VirtualRouterID).String(), IPv6AddrGenMode: "none"})
+			p.network.Links = append(p.network.Links, network.Link{Authority: lifetime.Deadline{BootID: snap.BootID, Nanos: snap.ExpiresNanos}, Name: c.VIPInterface, Kind: "macvlan", Parent: c.Interface, MACVLANMode: "bridge", HardwareAddr: vrrp.VirtualMAC(c.Family, c.VirtualRouterID).String(), IPv6AddrGenMode: "none"})
 			ensureInterface(&p.network, c.VIPInterface)
 			if c.VRF != "" {
 				for i := range p.network.Interfaces {

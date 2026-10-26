@@ -103,7 +103,7 @@ func editDS(options *Options, edit func(*DSLitePolicy)) {
 func TestExplicitWANPolicyJoinsRAInformationAFTRAndRoute(t *testing.T) {
 	result := compiledPolicy(t, fixture(t, "wan-dynamic"), wanPolicy(t))
 	d := result.Document
-	if len(nativeProgram(t, d).Services) != 3 || len(nativeProgram(t, d).Network.Interfaces) != 2 || len(nativeProgram(t, d).Network.DSLite) != 0 || len(nativeProgram(t, d).Network.Routes) != 0 {
+	if len(nativeProgram(t, d).Services) != 3 || len(nativeProgram(t, d).Network.Interfaces) != 2 || len(nativeProgram(t, d).Network.Links) != 0 || len(nativeProgram(t, d).Network.Routes) != 0 {
 		t.Fatal("dynamic ownership leaked into static network intent or created an extra socket owner")
 	}
 	raService, pd, ds := service(t, d, "ra_client"), service(t, d, "dhcp6"), service(t, d, "aftr")

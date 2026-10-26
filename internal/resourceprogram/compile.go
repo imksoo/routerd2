@@ -15,6 +15,7 @@ import (
 
 	"github.com/imksoo/routerd2/internal/derived"
 	"github.com/imksoo/routerd2/internal/eventrule"
+	"github.com/imksoo/routerd2/internal/lifetime"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/bfd"
 	"github.com/imksoo/routerd2/internal/protocol/bgpconfig"
@@ -64,8 +65,8 @@ func Compile(source Program) (Plan, error) {
 		if r.Address != nil && r.Address.Options != nil && r.Address.Options.BootLifetime != (network.BootLifetime{}) {
 			return Plan{}, fmt.Errorf("resource %s: boot lifetime is internal projection authority", r.ID)
 		}
-		if r.Link != nil && (r.Link.BootID != "" || r.Link.ExpiresNanos != 0) {
-			return Plan{}, fmt.Errorf("resource %s: link boot deadline is internal projection authority", r.ID)
+		if r.Link != nil && r.Link.Authority != (lifetime.Deadline{}) {
+			return Plan{}, fmt.Errorf("resource %s: link authority is internal projection authority", r.ID)
 		}
 		if r.Route != nil && (r.Route.BootID != "" || r.Route.ExpiresNanos != 0) {
 			return Plan{}, fmt.Errorf("resource %s: route boot deadline is internal projection authority", r.ID)
@@ -145,8 +146,6 @@ func Compile(source Program) (Plan, error) {
 			}
 		case r.Firewall != nil:
 			err = claim(r, "firewall", network.FirewallTable)
-		case r.DSLite != nil:
-			err = claim(r, "link", r.DSLite.Name)
 		case r.VRRPGuard != nil:
 			for _, a := range r.VRRPGuard.Addresses {
 				if ip, parseErr := netip.ParseAddr(a); parseErr == nil {

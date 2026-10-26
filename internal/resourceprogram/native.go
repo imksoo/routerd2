@@ -89,10 +89,6 @@ func FromNative(native Native) Program {
 		v := *native.Network.Firewall
 		add(Resource{ID: "firewall", Firewall: &v})
 	}
-	for _, original := range native.Network.DSLite {
-		v := original
-		add(Resource{ID: "ds_lite/" + v.Name, DSLite: &v})
-	}
 	for _, original := range native.Network.VRRPGuards {
 		v := original
 		addresses := slices.Clone(v.Addresses)

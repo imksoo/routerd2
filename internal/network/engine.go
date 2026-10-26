@@ -11,14 +11,13 @@ import (
 	"time"
 
 	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/lifetime"
 )
 
 var errLinkNotFound = errors.New("link not found")
 
-const tunnelAlias = "routerd2:ds-lite:v1"
-
 // JournalVersion is the persisted network ownership/BOOTTIME contract.
-const JournalVersion = 5
+const JournalVersion = 6
 
 type settingKey struct {
 	Kind      string `json:"kind"`
@@ -49,7 +48,6 @@ type journal struct {
 	Addresses         []ownedAddress           `json:"addresses,omitempty"`
 	Routes            []Route                  `json:"routes,omitempty"`
 	PolicyRules       []PolicyRule             `json:"policy_rules,omitempty"`
-	Tunnels           []DSLite                 `json:"tunnels,omitempty"`
 	Links             []ownedLink              `json:"links,omitempty"`
 	Attributes        []ownedAttribute         `json:"attributes,omitempty"`
 	Settings          []ownedSetting           `json:"settings,omitempty"`
@@ -78,9 +76,6 @@ type kernel interface {
 	PolicyRules() ([]PolicyRuleState, error)
 	AddPolicyRule(PolicyRule) error
 	DeletePolicyRule(PolicyRule) error
-	CreateDSLite(DSLite) error
-	UpdateDSLite(DSLite) error
-	DeleteDSLite(string) error
 	ReadSetting(settingKey) (int, error)
 	WriteSetting(settingKey, int) error
 	Firewall() (FirewallState, error)
@@ -173,7 +168,7 @@ func validateJournal(s journal) error {
 			}
 		}
 	}
-	if err := Validate(Desired{Routes: s.Routes, DSLite: s.Tunnels}); err != nil {
+	if err := Validate(Desired{Routes: s.Routes}); err != nil {
 		return err
 	}
 	for _, v := range s.Settings {
@@ -230,7 +225,7 @@ func (e *Engine) Apply(ctx context.Context, revision uint64, desired Desired) (S
 	}
 	d := ProjectLifetimes(normalized(cloneDesired(desired)), clock)
 	for _, link := range d.Links {
-		if link.BootID != "" && (link.BootID != clock.BootID || link.ExpiresNanos <= uint64(clock.BoottimeNanoseconds)) {
+		if !link.Authority.Live(clock) {
 			return e.snapshotLocked(ctx), &ApplyError{Stage: "link authority", Err: fmt.Errorf("link %s original authority expired", link.Name)}
 		}
 	}
@@ -314,10 +309,6 @@ func (e *Engine) snapshotLocked(ctx context.Context) Snapshot {
 				names[*l.Master] = true
 			}
 		}
-		for _, t := range d.DSLite {
-			names[t.Name] = true
-			names[t.Underlay] = true
-		}
 		for _, r := range d.Routes {
 			if r.Interface != "" {
 				names[r.Interface] = true
@@ -334,9 +325,6 @@ func (e *Engine) snapshotLocked(ctx context.Context) Snapshot {
 	}
 	for _, a := range e.state.Addresses {
 		names[a.Interface] = true
-	}
-	for _, t := range e.state.Tunnels {
-		names[t.Name] = true
 	}
 	for _, l := range e.state.Links {
 		names[l.Definition.Name] = true
@@ -533,9 +521,6 @@ func (p *apply) reconcile(d Desired) error {
 			wantedSettings[settingKey{Kind: "autoconf", Interface: l.Name}] = boolInt(*l.IPv6Autoconf)
 		}
 	}
-	for _, t := range d.DSLite {
-		wantedSettings[settingKey{Kind: "up", Interface: t.Name}] = 1
-	}
 	if d.Forwarding.IPv4 != nil {
 		wantedSettings[settingKey{Kind: "forwarding4"}] = boolInt(*d.Forwarding.IPv4)
 	}
@@ -594,37 +579,9 @@ func (p *apply) reconcile(d Desired) error {
 	if err := p.wireGuard(d); err != nil {
 		return err
 	}
-	tunnels := map[string]bool{}
-	for _, t := range d.DSLite {
-		tunnels[t.Name] = true
-	}
 	for _, l := range d.Interfaces {
-		if !tunnels[l.Name] {
-			if err := p.interfaceConfig(l); err != nil {
-				return err
-			}
-		}
-	}
-	if err := p.tunnels(d.DSLite); err != nil {
-		return err
-	}
-	for _, t := range d.DSLite {
-		configured := false
-		for _, l := range d.Interfaces {
-			configured = configured || l.Name == t.Name
-		}
-		if configured {
-			continue // interfaceConfig applies sysctls before UP.
-		}
-		if err := p.set(settingKey{Kind: "up", Interface: t.Name}, 1); err != nil {
+		if err := p.interfaceConfig(l); err != nil {
 			return err
-		}
-	}
-	for _, l := range d.Interfaces {
-		if tunnels[l.Name] {
-			if err := p.interfaceConfig(l); err != nil {
-				return err
-			}
 		}
 	}
 	if err := p.removePolicyRules(d.PolicyRules); err != nil {
@@ -634,9 +591,6 @@ func (p *apply) reconcile(d Desired) error {
 		return err
 	}
 	if err := p.policyRules(d.PolicyRules); err != nil {
-		return err
-	}
-	if err := p.removeTunnels(d); err != nil {
 		return err
 	}
 	if err := p.removeLinks(d); err != nil {
@@ -754,6 +708,10 @@ func (p *apply) removeAddresses(want map[addressKey]bool) error {
 }
 
 func (p *apply) routes(want []Route) error {
+	linkBounds := make(map[string]lifetime.Deadline, len(p.e.state.Links))
+	for _, link := range p.e.state.Links {
+		linkBounds[link.Definition.Name] = link.Definition.Authority
+	}
 	wanted := make(map[string]Route, len(want))
 	for _, r := range want {
 		wanted[routeSlot(r)] = r
@@ -810,13 +768,21 @@ func (p *apply) routes(want []Route) error {
 		if err := p.ctx.Err(); err != nil {
 			return p.failure("route add", err)
 		}
-		if r.BootID != "" {
+		bounded := r.BootID != "" || linkBounds[r.Interface] != (lifetime.Deadline{})
+		for _, hop := range r.NextHops {
+			bounded = bounded || linkBounds[hop.Interface] != (lifetime.Deadline{})
+		}
+		if bounded {
 			// Journal I/O or earlier additions may have consumed the lease.
 			clock, err := boottime.Read()
 			if err != nil {
 				return p.failure("route authority", err)
 			}
-			if r.BootID != clock.BootID || r.ExpiresNanos <= uint64(clock.BoottimeNanoseconds) {
+			live := (r.BootID == "" || r.BootID == clock.BootID && r.ExpiresNanos > uint64(clock.BoottimeNanoseconds)) && linkBounds[r.Interface].Live(clock)
+			for _, hop := range r.NextHops {
+				live = live && linkBounds[hop.Interface].Live(clock)
+			}
+			if !live {
 				continue
 			}
 		}
@@ -824,118 +790,6 @@ func (p *apply) routes(want []Route) error {
 			return p.failure("route add", err)
 		}
 		p.changed++
-	}
-	return nil
-}
-
-func (p *apply) tunnels(want []DSLite) error {
-	for _, t := range want {
-		parent, err := p.e.kernel.Interface(t.Underlay)
-		if err != nil {
-			return p.failure("DS-Lite underlay", err)
-		}
-		if t.MTU == 0 {
-			t.MTU = parent.MTU - 40
-		}
-		if t.MTU < 68 || t.MTU > 65495 || t.MTU > parent.MTU-40 {
-			return p.failure("DS-Lite MTU", fmt.Errorf("%s inner MTU %d exceeds supported range or underlay MTU %d minus 40", t.Name, t.MTU, parent.MTU))
-		}
-		localPresent := false
-		for _, a := range parent.Addresses {
-			if addressIP(a.Address) == t.Local {
-				localPresent = true
-			}
-		}
-		if !localPresent {
-			return p.failure("DS-Lite local address", fmt.Errorf("%s is not assigned to underlay %s", t.Local, t.Underlay))
-		}
-		live, err := p.e.kernel.Interface(t.Name)
-		if errors.Is(err, errLinkNotFound) {
-			if err := p.change("DS-Lite create", func() error { return p.e.kernel.CreateDSLite(t) }, func() { p.recordTunnel(t) }); err != nil {
-				return err
-			}
-			continue
-		}
-		if err != nil {
-			return p.failure("DS-Lite read", err)
-		}
-		owned := false
-		for _, old := range p.e.state.Tunnels {
-			if old.Name == t.Name {
-				owned = true
-				break
-			}
-		}
-		if !owned || live.Alias != tunnelAlias || live.DSLite == nil {
-			return p.failure("DS-Lite ownership", fmt.Errorf("link %s exists without matching ownership", t.Name))
-		}
-		if *live.DSLite == t {
-			continue
-		}
-		if err := p.change("DS-Lite update", func() error { return p.e.kernel.UpdateDSLite(t) }, func() { p.recordTunnel(t) }); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-func (p *apply) recordTunnel(t DSLite) {
-	for i := range p.e.state.Tunnels {
-		if p.e.state.Tunnels[i].Name == t.Name {
-			p.e.state.Tunnels[i] = t
-			return
-		}
-	}
-	p.e.state.Tunnels = append(p.e.state.Tunnels, t)
-}
-
-func (p *apply) removeTunnels(d Desired) error {
-	for i := 0; i < len(p.e.state.Tunnels); {
-		t := p.e.state.Tunnels[i]
-		keep := false
-		for _, v := range d.DSLite {
-			if v.Name == t.Name {
-				keep = true
-			}
-		}
-		if keep {
-			i++
-			continue
-		}
-		for _, v := range d.Interfaces {
-			if v.Name == t.Name {
-				return p.failure("DS-Lite remove", fmt.Errorf("remove interface declaration %s before deleting its tunnel", t.Name))
-			}
-		}
-		l, err := p.e.kernel.Interface(t.Name)
-		forget := func() { p.e.state.Tunnels = append(p.e.state.Tunnels[:i], p.e.state.Tunnels[i+1:]...) }
-		if errors.Is(err, errLinkNotFound) {
-			forget()
-			if err := p.checkpoint("forget absent DS-Lite tunnel"); err != nil {
-				return err
-			}
-			continue
-		}
-		if err != nil {
-			return p.failure("DS-Lite remove read", err)
-		}
-		if l.Alias != tunnelAlias || l.DSLite == nil {
-			return p.failure("DS-Lite remove ownership", fmt.Errorf("link %s has changed ownership", t.Name))
-		}
-		if len(l.Addresses) != 0 {
-			return p.failure("DS-Lite remove", fmt.Errorf("link %s still has addresses; refusing to delete them implicitly", t.Name))
-		}
-		rs, err := p.e.kernel.Routes(0)
-		if err != nil {
-			return p.failure("DS-Lite route references", err)
-		}
-		for _, r := range rs {
-			if r.Interface == t.Name {
-				return p.failure("DS-Lite remove", fmt.Errorf("link %s still has routes; refusing to delete them implicitly", t.Name))
-			}
-		}
-		if err := p.change("DS-Lite remove", func() error { return p.e.kernel.DeleteDSLite(t.Name) }, forget); err != nil {
-			return err
-		}
 	}
 	return nil
 }

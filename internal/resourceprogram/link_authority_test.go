@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/lifetime"
 	"github.com/imksoo/routerd2/internal/network"
 )
 
@@ -26,12 +27,12 @@ func TestConditionalLinkAndChildRetainOriginalFactDeadline(t *testing.T) {
 	}
 	for _, link := range native.Network.Links {
 		if link.Name == "static" {
-			if link.BootID != "" || link.ExpiresNanos != 0 {
+			if link.Authority.BootID != "" || link.Authority.Nanos != 0 {
 				t.Fatal("static link acquired a finite deadline")
 			}
 			continue
 		}
-		if link.BootID != facts.Scope.BootID || link.ExpiresNanos != observed+uint64(600*time.Millisecond)+1 {
+		if link.Authority.BootID != facts.Scope.BootID || link.Authority.Nanos != observed+uint64(600*time.Millisecond)+1 {
 			t.Fatal("link lost inherited original max-age boundary", link)
 		}
 	}
@@ -44,7 +45,7 @@ func TestConditionalLinkAndChildRetainOriginalFactDeadline(t *testing.T) {
 
 func TestOperatorCannotDeclareInternalBootLinkAuthority(t *testing.T) {
 	for _, conditional := range []bool{false, true} {
-		r := Resource{ID: "link", Link: &network.Link{Name: "wan-ha", Kind: "macvlan", Parent: "wan0", BootID: "11111111-2222-4333-8444-555555555555", ExpiresNanos: 10}}
+		r := Resource{ID: "link", Link: &network.Link{Name: "wan-ha", Kind: "macvlan", Parent: "wan0", Authority: lifetime.Deadline{BootID: "11111111-2222-4333-8444-555555555555", Nanos: 10}}}
 		if conditional {
 			r.When = &FactCondition{Fact: "service.ha.elected"}
 		}

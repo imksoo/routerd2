@@ -228,7 +228,7 @@ func TestMigratedWANGraphThroughPublicRuntimeProjection(t *testing.T) {
 	}
 	initial := n.state()
 	wan := migrationInterface(t, initial, "eth0")
-	if wan.IPv6AcceptRA == nil || *wan.IPv6AcceptRA != 0 || wan.IPv6Autoconf == nil || *wan.IPv6Autoconf || len(initial.DSLite) != 0 {
+	if wan.IPv6AcceptRA == nil || *wan.IPv6AcceptRA != 0 || wan.IPv6Autoconf == nil || *wan.IPv6Autoconf || len(initial.Links) != 0 {
 		t.Fatal("native RA ownership was not acquired before tunnel activation")
 	}
 	clock, err := boottime.Read()
@@ -291,11 +291,11 @@ func TestMigratedWANGraphThroughPublicRuntimeProjection(t *testing.T) {
 		t.Fatal(err)
 	}
 	projected = n.state()
-	if len(projected.DSLite) != 1 || projected.DSLite[0].Name != "ds0" || projected.DSLite[0].Local != resolved.Local || projected.DSLite[0].Remote != resolved.Remote || projected.DSLite[0].MTU != 1460 {
-		t.Fatal("resolved native tunnel differs from migrated intent", projected.DSLite)
+	if len(projected.Links) != 1 || projected.Links[0].Name != "ds0" || projected.Links[0].Local != resolved.Local || projected.Links[0].Remote != resolved.Remote {
+		t.Fatal("resolved native tunnel differs from migrated intent", projected.Links)
 	}
 	b4 := migrationInterface(t, projected, "ds0")
-	if options := b4.AddressOptions["192.0.0.2/32"]; options.Peer != "192.0.0.1/32" || options.BootLifetime.ValidNanos != answerExpiry.Nanos {
+	if options := b4.AddressOptions["192.0.0.2/32"]; b4.MTU != 1460 || options.Peer != "192.0.0.1/32" || options.BootLifetime.ValidNanos != answerExpiry.Nanos {
 		t.Fatal("B4 peer or endpoint expiry lost at native projection", b4)
 	}
 	var b4Route network.Route
@@ -314,7 +314,7 @@ func TestMigratedWANGraphThroughPublicRuntimeProjection(t *testing.T) {
 		t.Fatal(err)
 	}
 	projected = n.state()
-	if len(projected.DSLite) != 0 || len(projected.Interfaces) != 2 || len(migrationInterface(t, projected, "eth0").Addresses) != 1 || len(migrationInterface(t, projected, "eth1").Addresses) != 2 {
+	if len(projected.Links) != 0 || len(projected.Interfaces) != 2 || len(migrationInterface(t, projected, "eth0").Addresses) != 1 || len(migrationInterface(t, projected, "eth1").Addresses) != 2 {
 		t.Fatal("information expiry did not withdraw only the B4 dependency", projected)
 	}
 	for _, route := range projected.Routes {

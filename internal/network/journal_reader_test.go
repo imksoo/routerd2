@@ -10,13 +10,13 @@ import (
 
 func TestNetworkReaderRejectsAmbiguousOwnershipJSON(t *testing.T) {
 	for _, raw := range []string{
-		`{"version":5,"version":5,"status":"applied"}`,
-		`{"version":5,"Version":5,"status":"applied"}`,
-		`{"version":5,"status":"applied","ſtatus":"applied"}`,
-		`{"version":5,"status":"applied","future_owner":true}`,
-		`{"version":5,"status":"applied","desired":{"interfaces":[{"name":"lan0","name":"wan0"}]}}`,
-		`{"version":5,"status":"applied","desired":{"interfaces":[{"name":"lan0","MTU":1400}]}}`,
-		`{"version":5,"status":"unknown"}`,
+		`{"version":6,"version":6,"status":"applied"}`,
+		`{"version":6,"Version":6,"status":"applied"}`,
+		`{"version":6,"status":"applied","ſtatus":"applied"}`,
+		`{"version":6,"status":"applied","future_owner":true}`,
+		`{"version":6,"status":"applied","desired":{"interfaces":[{"name":"lan0","name":"wan0"}]}}`,
+		`{"version":6,"status":"applied","desired":{"interfaces":[{"name":"lan0","MTU":1400}]}}`,
+		`{"version":6,"status":"unknown"}`,
 	} {
 		t.Run(raw, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "network.json")
@@ -44,7 +44,7 @@ func TestNetworkReaderRejectsUnsafeJournalFiles(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			dir := t.TempDir()
 			path := filepath.Join(dir, "network.json")
-			if err := os.WriteFile(path, []byte(`{"version":5,"status":"applied"}`), 0600); err != nil {
+			if err := os.WriteFile(path, []byte(`{"version":6,"status":"applied"}`), 0600); err != nil {
 				t.Fatal(err)
 			}
 			switch kind {

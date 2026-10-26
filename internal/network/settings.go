@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/lifetime"
 )
 
 func raSetting(key settingKey) bool { return key.Kind == "accept_ra" || key.Kind == "autoconf" }
@@ -69,12 +70,12 @@ func settingValueOwned(s ownedSetting, value int) bool {
 
 func (p *apply) set(key settingKey, value int) error {
 	if key.Kind == "up" && value == 1 {
-		if link := p.e.linkRecord(key.Interface); link != nil && link.Definition.BootID != "" {
+		if link := p.e.linkRecord(key.Interface); link != nil && link.Definition.Authority != (lifetime.Deadline{}) {
 			clock, err := boottime.Read()
 			if err != nil {
 				return p.failure("link authority", err)
 			}
-			if link.Definition.BootID != clock.BootID || link.Definition.ExpiresNanos <= uint64(clock.BoottimeNanoseconds) {
+			if !link.Definition.Authority.Live(clock) {
 				return p.failure("link authority", fmt.Errorf("link %s original authority expired before activation", key.Interface))
 			}
 		}

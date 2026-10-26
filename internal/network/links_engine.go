@@ -122,7 +122,7 @@ func verifyOwnedLink(live InterfaceState, saved ownedLink) error {
 	av, bv, lv := reflect.ValueOf(a), reflect.ValueOf(b), reflect.ValueOf(observed)
 	for i := 0; i < av.NumField(); i++ {
 		field := av.Type().Field(i).Name
-		if field == "BootID" || field == "ExpiresNanos" {
+		if field == "Authority" {
 			continue
 		}
 		if field == "HardwareAddr" && a.HardwareAddr == "" {
@@ -166,11 +166,6 @@ func (p *apply) preflightLinks(d Desired) error {
 			for _, l := range d.Links {
 				if l.Parent == old.Definition.Name {
 					return p.failure("link removal", fmt.Errorf("%s is still the parent of %s", old.Definition.Name, l.Name))
-				}
-			}
-			for _, t := range d.DSLite {
-				if t.Underlay == old.Definition.Name {
-					return p.failure("link removal", fmt.Errorf("%s is still the underlay of %s", old.Definition.Name, t.Name))
 				}
 			}
 			for _, r := range d.Routes {
@@ -265,7 +260,7 @@ func (p *apply) links(want []Link) error {
 		// journaled definitions. Record that verified live state before changing
 		// the intent, so another interruption during rollback remains recoverable.
 		current := *live.Link
-		current.BootID, current.ExpiresNanos = old.Definition.BootID, old.Definition.ExpiresNanos
+		current.Authority = old.Definition.Authority
 		if old.Definition.HardwareAddr == "" {
 			current.HardwareAddr = ""
 		}

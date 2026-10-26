@@ -91,10 +91,21 @@ valid lifetime, candidate/resolver lifetime and minimum DNS chain TTL. A failed
 refresh retains the last good endpoint only until those original deadlines.
 This deliberately differs from retaining a stale AFTR forever while pending.
 
-The controller withdraws expired DS-Lite projections. Unlike finite IPv6
-routes, Linux ip6tnl has no autonomous DNS TTL timer; controller-independent
-removal of a tunnel with a static source is not guaranteed. Source address
-expiry, kernel forwarding, tunnel creation and DNS TTL are distinct lifecycles.
+Static IPv4-in-IPv6 tunnels use an ordinary `link` resource with `kind: ip6tnl`,
+`parent`, `local` and `remote`. Configure MTU and the B4 address through an
+`interface` resource and routing through `route`; see `examples/ds-lite-static.yaml`.
+Dynamic AFTR resolution generates that same link type. There is one ownership
+journal and one link writer, with interface index, random marker and attribute
+readback checks.
+
+The original AFTR deadline is attached to the owned link. The network worker
+independently fences it DOWN and removes managed addresses and routes using it,
+including multipath routes, even while control and supervisor are stopped.
+Restarting the writer retains the original deadline. Expired notifications do
+not acquire a new lease at delivery. Control subsequently removes the inactive
+projection; fresh DNS can recreate it. Linux ip6tnl has no DNS TTL timer, so a
+stopped network writer cannot enforce this IPv4 expiry. Kernel address timers,
+link fencing and process supervision remain distinct mechanisms.
 
 ## Learned DNS in LAN advertisements
 

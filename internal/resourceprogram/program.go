@@ -48,7 +48,6 @@ type Resource struct {
 	PolicyRule   *network.PolicyRule    `json:"policy_rule,omitempty"`
 	Forwarding   *network.Forwarding    `json:"forwarding,omitempty"`
 	Firewall     *network.Firewall      `json:"firewall,omitempty"`
-	DSLite       *network.DSLite        `json:"ds_lite,omitempty"`
 	VRRPGuard    *network.VRRPGuard     `json:"vrrp_guard,omitempty"`
 	WireGuard    *network.WireGuard     `json:"wireguard,omitempty"`
 	Service      *serviceconfig.Service `json:"service,omitempty"`
@@ -131,7 +130,7 @@ func (r Resource) kind() (string, int) {
 		{"interface", r.Interface != nil}, {"address", r.Address != nil},
 		{"link", r.Link != nil}, {"route", r.Route != nil},
 		{"policy_rule", r.PolicyRule != nil}, {"forwarding", r.Forwarding != nil},
-		{"firewall", r.Firewall != nil}, {"ds_lite", r.DSLite != nil},
+		{"firewall", r.Firewall != nil},
 		{"vrrp_guard", r.VRRPGuard != nil}, {"wireguard", r.WireGuard != nil},
 		{"service", r.Service != nil},
 		{"event_rule", r.EventRule != nil},

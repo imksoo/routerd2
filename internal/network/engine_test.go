@@ -144,30 +144,6 @@ func (f *fakeKernel) DeleteRoute(r Route) error {
 	}
 	return errors.New("missing route")
 }
-func (f *fakeKernel) CreateDSLite(d DSLite) error {
-	if err := f.op("tunnel-create"); err != nil {
-		return err
-	}
-	f.links[d.Name] = InterfaceState{Name: d.Name, MTU: d.MTU, Kind: "ip6tnl", Alias: tunnelAlias, DSLite: &d}
-	return nil
-}
-func (f *fakeKernel) UpdateDSLite(d DSLite) error {
-	if err := f.op("tunnel-update"); err != nil {
-		return err
-	}
-	l := f.links[d.Name]
-	l.MTU = d.MTU
-	l.DSLite = &d
-	f.links[d.Name] = l
-	return nil
-}
-func (f *fakeKernel) DeleteDSLite(name string) error {
-	if err := f.op("tunnel-delete"); err != nil {
-		return err
-	}
-	delete(f.links, name)
-	return nil
-}
 func (f *fakeKernel) ReadSetting(k settingKey) (int, error) {
 	switch k.Kind {
 	case "forwarding4":
@@ -400,30 +376,6 @@ func TestDriftRestoredButForeignMTURestorationRefused(t *testing.T) {
 	}
 }
 
-func TestTunnelLifecycleAndForeignDependencies(t *testing.T) {
-	k := fake()
-	l := k.links["wan0"]
-	l.Addresses = []AddressState{{Address: "2001:db8::1/64"}}
-	k.links["wan0"] = l
-	e, _ := engineFor(t, k)
-	d := Desired{DSLite: []DSLite{{Name: "dslite0", Underlay: "wan0", Local: "2001:db8::1", Remote: "2001:db8::2"}}}
-	if _, err := e.Apply(context.Background(), 1, d); err != nil {
-		t.Fatal(err)
-	}
-	if k.links["dslite0"].MTU != 1460 || !k.links["dslite0"].Up {
-		t.Fatal("tunnel is not configured")
-	}
-	l = k.links["dslite0"]
-	l.Addresses = []AddressState{{Address: "192.0.0.2/32"}}
-	k.links["dslite0"] = l
-	if _, err := e.Apply(context.Background(), 2, Desired{}); err == nil {
-		t.Fatal("deletion with foreign addresses allowed")
-	}
-	if _, ok := k.links["dslite0"]; !ok {
-		t.Fatal("owned tunnel with foreign address deleted")
-	}
-}
-
 func TestJournalLock(t *testing.T) {
 	k := fake()
 	_, opts := engineFor(t, k)
@@ -441,7 +393,7 @@ func TestValidateRejectsUnsafeOrAmbiguousIntent(t *testing.T) {
 		{Routes: []Route{{Destination: "::/0", Gateway: "192.0.2.1", Interface: "lan0"}}},
 		{Routes: []Route{{Destination: "2001:0db8::/32", Interface: "lan0"}, {Destination: "2001:db8::/32", Interface: "wan0"}}},
 		{Firewall: &Firewall{Masquerade: []Masquerade{{Source: "192.0.2.1/24", OutInterface: "wan0"}}}},
-		{DSLite: []DSLite{{Name: "t0", Underlay: "wan0", Local: "192.0.2.1", Remote: "2001:db8::2"}}},
+		{Links: []Link{{Name: "t0", Kind: "ip6tnl", Parent: "wan0", Local: "192.0.2.1", Remote: "2001:db8::2"}}},
 	} {
 		if err := Validate(d); err == nil {
 			t.Fatalf("accepted invalid intent %+v", d)

@@ -99,7 +99,7 @@ func TestRejectDuplicateOutputOwnership(t *testing.T) {
 		{"policy slot", []Resource{{ID: "a", PolicyRule: &network.PolicyRule{Family: 4, Priority: 100, Table: 100}}, {ID: "b", PolicyRule: &network.PolicyRule{Family: 4, Priority: 100, Table: 200}}}},
 		{"forwarding family", []Resource{{ID: "a", Forwarding: &network.Forwarding{IPv4: pointer(true)}}, {ID: "b", Forwarding: &network.Forwarding{IPv4: pointer(false)}}}},
 		{"firewall table", []Resource{{ID: "a", Firewall: &network.Firewall{}}, {ID: "b", Firewall: &network.Firewall{}}}},
-		{"link namespace", []Resource{{ID: "a", Link: &network.Link{Name: "b4", Kind: "bridge"}}, {ID: "b", DSLite: &network.DSLite{Name: "b4", Underlay: "eth0", Local: "2001:db8::1", Remote: "2001:db8::2"}}}},
+		{"link namespace", []Resource{{ID: "a", Link: &network.Link{Name: "b4", Kind: "bridge"}}, {ID: "b", Link: &network.Link{Name: "b4", Kind: "ip6tnl", Parent: "eth0", Local: "2001:db8::1", Remote: "2001:db8::2"}}}},
 		{"service instance", []Resource{{ID: "a", Service: &serviceconfig.Service{Name: "wan", DHCP4: &serviceconfig.DHCP4{Interface: "eth0"}}}, {ID: "b", Service: &serviceconfig.Service{Name: "wan", DHCP4: &serviceconfig.DHCP4{Interface: "eth1"}}}}},
 	}
 	for _, tc := range cases {
@@ -143,7 +143,7 @@ func TestAddressOwnersRemainIndependent(t *testing.T) {
 func TestFromNativePreservesEverySupportedProjection(t *testing.T) {
 	native := Native{
 		Network: network.Desired{
-			Links: []network.Link{{Name: "wg0", Kind: "wireguard"}, {Name: "br0", Kind: "bridge", BridgeMulticastSnooping: pointer(false)}},
+			Links: []network.Link{{Name: "wg0", Kind: "wireguard"}, {Name: "b4", Kind: "ip6tnl", Parent: "wan0", Local: "2001:db8::1", Remote: "2001:db8::ffff"}, {Name: "br0", Kind: "bridge", BridgeMulticastSnooping: pointer(false)}},
 			Interfaces: []network.Interface{
 				{Name: "wan0", MTU: 1500, Addresses: []string{"192.0.2.2/24", "192.0.2.3/24", "2001:db8::1/64"}, AddressOptions: map[string]network.AddressOptions{"2001:db8::1/64": {NoDAD: true}}, IPv6AcceptRA: pointer(0), IPv6Autoconf: pointer(false)},
 				{Name: "wg0", MTU: 1380, Addresses: []string{"10.0.0.1/24"}},
@@ -154,7 +154,6 @@ func TestFromNativePreservesEverySupportedProjection(t *testing.T) {
 			PolicyRules: []network.PolicyRule{{Family: 4, Priority: 100, Table: 100, Source: "10.0.0.0/24", Mark: pointer(uint32(1)), Mask: pointer(uint32(255))}},
 			Forwarding:  network.Forwarding{IPv4: pointer(true), IPv6: pointer(false)},
 			Firewall:    &network.Firewall{Forward: []network.Forward{{From: "lan0", To: "b4"}}, Masquerade: []network.Masquerade{{Source: "10.0.0.0/24", OutInterface: "b4"}}},
-			DSLite:      []network.DSLite{{Name: "b4", Underlay: "wan0", Local: "2001:db8::1", Remote: "2001:db8::ffff", MTU: 1460}},
 			VRRPGuards:  []network.VRRPGuard{{Family: 4, Interface: "wan0", Addresses: []string{"192.0.2.3"}}},
 			WireGuard:   []network.WireGuard{{Interface: "wg0", PrivateKeyFile: "/var/lib/routerd/keys/wg0", GeneratePrivateKey: true, ListenPort: 51820, FirewallMark: 200}},
 		},
@@ -172,7 +171,7 @@ func TestFromNativePreservesEverySupportedProjection(t *testing.T) {
 	if string(before) != string(after) {
 		t.Fatalf("native round trip lost or changed intent:\nbefore %s\nafter  %s", before, after)
 	}
-	if len(plan.Native.Network.Links) != 2 || len(plan.Native.Network.Interfaces) != 4 || len(plan.Native.Network.Routes) != 2 || len(plan.Native.Network.PolicyRules) != 1 || plan.Native.Network.Firewall == nil || len(plan.Native.Network.DSLite) != 1 || len(plan.Native.Network.VRRPGuards) != 1 || len(plan.Native.Network.WireGuard) != 1 || len(plan.Native.Services) != 1 {
+	if len(plan.Native.Network.Links) != 3 || len(plan.Native.Network.Interfaces) != 4 || len(plan.Native.Network.Routes) != 2 || len(plan.Native.Network.PolicyRules) != 1 || plan.Native.Network.Firewall == nil || len(plan.Native.Network.VRRPGuards) != 1 || len(plan.Native.Network.WireGuard) != 1 || len(plan.Native.Services) != 1 {
 		t.Fatal("one or more supported native roles were omitted")
 	}
 	var wan network.Interface

@@ -26,7 +26,7 @@ SUITES = {
         ("TestDaemonDHCPRelayVRFIsolation", ("wan0", "lan0", "wan1", "lan1", "wan2", "lan2"), 120),
     ),
     "dhcp-server": (("TestDaemonDHCPDNSAndOwnershipExpiry", (), 120),),
-    "aftr": (("TestDaemonAFTRResolutionAndExpiry", (), 120),),
+    "aftr": (("TestDaemonAFTRResolutionAndExpiry", ("wan0",), 120),),
 }
 
 

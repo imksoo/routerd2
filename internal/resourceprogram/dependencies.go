@@ -18,8 +18,6 @@ func inferredDependencies(resources []Resource) map[string][]string {
 			interfaces[r.Interface.Name] = r.ID
 		case r.Link != nil:
 			links[r.Link.Name] = r.ID
-		case r.DSLite != nil:
-			links[r.DSLite.Name] = r.ID
 		case r.Address != nil:
 			if p, err := netip.ParsePrefix(r.Address.CIDR); err == nil {
 				key := r.Address.Interface + "\x00" + p.Addr().String()
@@ -60,8 +58,6 @@ func inferredDependencies(resources []Resource) map[string][]string {
 		case r.PolicyRule != nil:
 			iface(r.PolicyRule.InInterface)
 			iface(r.PolicyRule.OutInterface)
-		case r.DSLite != nil:
-			iface(r.DSLite.Underlay)
 		case r.WireGuard != nil:
 			add(links[r.WireGuard.Interface])
 		case r.VRRPGuard != nil:
