@@ -61,6 +61,7 @@ func (m managerClient) Status(ctx context.Context) (s supervisor.Status, err err
 type binding struct {
 	instance serviceconfig.Instance
 	digest   string
+	encoded  []byte // canonical child-file bytes, owned by the immutable protocol plan
 }
 type Status struct {
 	ProjectionGeneration uint64           `json:"projection_generation"`
@@ -91,8 +92,7 @@ type configuration struct {
 	plan      resourceprogram.Plan
 	digest    string
 	revision  uint64
-	vrrp      map[string]vrrp.Config
-	bgp       map[string]bgpconfig.Config
+	protocols protocolPlan
 }
 
 type appliedProjection struct {
@@ -238,31 +238,12 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 	sourceDigest := hex.EncodeToString(sourceSum[:])
 	next := configuration{source: source, plan: plan, digest: sourceDigest, revision: revision}
 	next.resources = make(map[string]resourceprogram.Resource, len(source.Resources))
-	next.bgp = make(map[string]bgpconfig.Config)
 	for _, resource := range source.Resources {
 		next.resources[resource.ID] = resource
-		if resource.Service != nil && resource.Service.BGP != nil {
-			next.bgp[resource.Service.ModuleName()] = resource.Service.BGPConfig(r.dir, r.stateDir)
-		}
 	}
-	next.vrrp = make(map[string]vrrp.Config)
-	// Static identities depend only on this compiled configuration and our
-	// private paths. Prepare them once, outside the observation lock; retries
-	// after worker shutdown only need to select the latest matching records.
-	expected := make(map[string]string, len(doc.Services))
-	for _, service := range doc.Services {
-		instance, err := service.Instance(r.dir, r.stateDir)
-		if err != nil {
-			return err
-		}
-		_, digest, err := encodeInstance(instance)
-		if err != nil {
-			return err
-		}
-		expected[instance.Name] = digest
-		if service.VRRP != nil {
-			next.vrrp[service.ModuleName()] = service.VRRPConfig()
-		}
+	next.protocols, err = prepareProtocols(doc, r.dir, r.stateDir)
+	if err != nil {
+		return err
 	}
 	if err := r.op.Acquire(ctx, 1); err != nil {
 		return r.failure(err)
@@ -288,7 +269,7 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 			return r.failure(err)
 		}
 		r.mu.Lock()
-		retained = r.retainedLocked(expected)
+		retained = r.retainedLocked(next.protocols.instances)
 		p, err = r.projectProgramLocked(next, retained, time.Now())
 		r.mu.Unlock()
 		if err != nil {
@@ -296,10 +277,8 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 		}
 		// Preparing immutable files and BFD bindings does not own observations.
 		// Finish it before stopping workers so a write error leaves them running.
-		instances, err = compileInstances(p.instances, nil)
-		if err == nil {
-			err = r.prepare(instances)
-		}
+		instances = selectInstances(p.instances, nil)
+		err = r.prepare(instances)
 		bindings = instances.bindings
 		if err == nil {
 			bfdSources, bfdRecipients, err = compileBFDCache(bindings)
@@ -317,13 +296,13 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 		r.mu.Lock()
 		// Preserve renewals received during preparation and stopping. Only a
 		// changed instance set needs new files and another stop pass.
-		retained = r.retainedLocked(expected)
+		retained = r.retainedLocked(next.protocols.instances)
 		latest, err := r.projectProgramLocked(next, retained, time.Now())
 		if err != nil {
 			r.mu.Unlock()
 			return r.failure(err)
 		}
-		if !reflect.DeepEqual(latest.instances, p.instances) {
+		if !sameInstances(latest.instances, p.instances) {
 			r.mu.Unlock()
 			continue
 		}
@@ -368,11 +347,11 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 }
 
 // Caller holds mu. Configuration equality includes all protocol-owned paths.
-func (r *Runtime) retainedLocked(expected map[string]string) map[string]serviceconfig.Update {
+func (r *Runtime) retainedLocked(expected map[string]binding) map[string]serviceconfig.Update {
 	retained := map[string]serviceconfig.Update{}
 	effective := r.observationsLocked()
-	for name, digest := range expected {
-		if old, ok := r.bindings[name]; ok && old.digest == digest {
+	for name, desired := range expected {
+		if old, ok := r.bindings[name]; ok && old.digest == desired.digest {
 			if value, ok := effective[name]; ok {
 				retained[name] = value
 			}
@@ -392,54 +371,48 @@ func (r *Runtime) observationsLocked() map[string]serviceconfig.Update {
 	return out
 }
 
-func encodeInstance(v serviceconfig.Instance) ([]byte, string, error) {
+func encodeInstance(v serviceconfig.Instance) (binding, error) {
 	b, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
-		return nil, "", err
+		return binding{}, err
 	}
 	b = append(b, '\n')
 	sum := sha256.Sum256(b)
-	return b, hex.EncodeToString(sum[:]), nil
+	return binding{instance: v, digest: hex.EncodeToString(sum[:]), encoded: b}, nil
 }
 
-// An instance set keeps canonical wire bytes only through preparation. The
-// runtime retains typed bindings, not another serialized configuration cache.
+// An instance set selects the current workers from the source's prepared plan.
 type instanceSet struct {
 	bindings map[string]binding
 	modules  []supervisor.DynamicModule
-	encoded  [][]byte
 }
 
-func compileInstances(instances []serviceconfig.Instance, ceiling map[string]supervisor.DynamicModule) (instanceSet, error) {
+func selectInstances(instances []binding, ceiling map[string]supervisor.DynamicModule) instanceSet {
 	set := instanceSet{bindings: make(map[string]binding, len(instances))}
-	for _, instance := range instances {
+	for _, bound := range instances {
+		instance := bound.instance
 		if ceiling != nil {
 			if _, ok := ceiling[instance.Name]; !ok {
 				continue
 			}
 		}
-		encoded, digest, err := encodeInstance(instance)
-		if err != nil {
-			return instanceSet{}, err
-		}
-		module := supervisor.DynamicModule{Name: instance.Name, Role: instance.Role, ConfigDigest: digest}
+		module := supervisor.DynamicModule{Name: instance.Name, Role: instance.Role, ConfigDigest: bound.digest}
 		if ceiling != nil && ceiling[instance.Name] != module {
 			continue
 		}
-		set.bindings[instance.Name] = binding{instance, digest}
+		set.bindings[instance.Name] = bound
 		set.modules = append(set.modules, module)
-		set.encoded = append(set.encoded, encoded)
 	}
-	return set, nil
+	return set
 }
 
 func (r *Runtime) prepare(set instanceSet) error {
-	for i, module := range set.modules {
+	for _, module := range set.modules {
 		dir := filepath.Join(r.dir, "instances", module.Name)
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			return err
 		}
-		if err := config.AtomicWrite(filepath.Join(dir, module.ConfigDigest+".json"), set.encoded[i]); err != nil {
+		if err := config.AtomicWrite(filepath.Join(dir, module.ConfigDigest+".json"), set.bindings[module.Name].encoded); err != nil {
 			return err
 		}
 	}
@@ -599,7 +572,7 @@ func (r *Runtime) Observe(ctx context.Context, u serviceconfig.Update) error {
 	}
 	candidateRecords := r.observationsLocked()
 	candidateRecords[u.Name] = u
-	if _, err := r.projectLocked(r.config.plan.Native, candidateRecords, time.Now(), resourceprogram.FactSnapshot{}); err != nil {
+	if _, err := r.projectLocked(r.config.protocols, r.config.plan.Native, candidateRecords, time.Now(), resourceprogram.FactSnapshot{}); err != nil {
 		return err
 	}
 	if u.Role == "dhcp_server" {

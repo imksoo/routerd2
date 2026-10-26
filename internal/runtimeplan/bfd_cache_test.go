@@ -239,7 +239,7 @@ func TestBFDCacheCutoverPreservesNewerUnchangedSourceAndFencesChangedSources(t *
 	digest := r.bindings["service.router"].digest
 	newer := nextBFDUpdate(t, r, doc, 2, true)
 	r.mu.Lock()
-	retained := r.retainedLocked(map[string]string{"service.edge": r.bindings["service.edge"].digest, "service.router": digest})
+	retained := r.retainedLocked(map[string]binding{"service.edge": r.bindings["service.edge"], "service.router": {digest: digest}})
 	sources, recipients, err := compileBFDCache(r.bindings)
 	if err != nil {
 		r.mu.Unlock()

@@ -33,7 +33,7 @@ func TestBGPRecursiveResolutionECMPAndUnreachableAccounting(t *testing.T) {
 	}
 	bgpconfig.StampObservation(&snapshot, clock)
 	raw, _ := json.Marshal(snapshot)
-	p, e := projectWithFacts(d, "/run/routerd", "/var/lib/routerd", map[string]serviceconfig.Update{"service.edge": {Snapshot: raw}}, now, projectionFacts{bfdClock: clock})
+	p, e := projectWithFacts(d, protocolsFor(t, d, "/run/routerd", "/var/lib/routerd"), map[string]serviceconfig.Update{"service.edge": {Snapshot: raw}}, now, projectionFacts{bfdClock: clock})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -112,7 +112,8 @@ func TestLearnedRouteRetainsRecursiveAddressRouteAndLinkDeadlines(t *testing.T) 
 				t.Fatal(err)
 			}
 			p := projection{network: d.Network}
-			if err := projectBGP(&p, d, map[string]serviceconfig.Update{"service.edge": {Snapshot: raw}}, clock.WallTime, clock); err != nil {
+			protocols := protocolsFor(t, d, "/run/routerd", "/var/lib/routerd")
+			if err := projectBGP(&p, d, protocols.bgp, map[string]serviceconfig.Update{"service.edge": {Snapshot: raw}}, clock.WallTime, clock); err != nil {
 				t.Fatal(err)
 			}
 			found := false
@@ -131,7 +132,7 @@ func TestLearnedRouteRetainsRecursiveAddressRouteAndLinkDeadlines(t *testing.T) 
 			expired.BoottimeNanoseconds += int64(2100 * time.Millisecond)
 			expired.WallTime = expired.WallTime.Add(2100 * time.Millisecond)
 			p = projection{network: d.Network}
-			if err := projectBGP(&p, d, map[string]serviceconfig.Update{"service.edge": {Snapshot: raw}}, expired.WallTime, expired); err != nil {
+			if err := projectBGP(&p, d, protocols.bgp, map[string]serviceconfig.Update{"service.edge": {Snapshot: raw}}, expired.WallTime, expired); err != nil {
 				t.Fatal(err)
 			}
 			for _, route := range p.network.Routes {

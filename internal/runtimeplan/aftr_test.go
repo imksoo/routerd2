@@ -208,10 +208,11 @@ func TestAFTRFinitePeerAddressAndGatewayWithdrawTogether(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, digest, err := encodeInstance(instance)
+	bound, err := encodeInstance(instance)
 	if err != nil {
 		t.Fatal(err)
 	}
+	digest := bound.digest
 	in, err := aftrDependencies(doc, doc.Services[0], nil, digest, now)
 	if err != nil {
 		t.Fatal(err)
@@ -223,7 +224,7 @@ func TestAFTRFinitePeerAddressAndGatewayWithdrawTogether(t *testing.T) {
 	}
 	records := map[string]serviceconfig.Update{instance.Name: {Role: "aftr", Snapshot: raw}}
 	inputs := map[string]aftr.Input{instance.Name: in}
-	p, err := project(doc, "/run/routerd", "/var/lib/routerd", records, now, inputs)
+	p, err := projectNative(doc, "/run/routerd", "/var/lib/routerd", records, now, inputs)
 	if err != nil || len(p.network.DSLite) != 1 || len(p.network.Routes) != 1 || p.network.Routes[0].Gateway != "192.0.0.1" {
 		t.Fatal("finite source did not project its peer route", p.network, err)
 	}
@@ -239,7 +240,7 @@ func TestAFTRFinitePeerAddressAndGatewayWithdrawTogether(t *testing.T) {
 	if options.Peer != "192.0.0.1/32" || !options.PreferredUntil.Equal(expiry) || !options.ValidUntil.Equal(expiry) {
 		t.Fatal("peer addressing changed the finite address lifetime", options)
 	}
-	p, err = project(doc, "/run/routerd", "/var/lib/routerd", records, expiry, inputs)
+	p, err = projectNative(doc, "/run/routerd", "/var/lib/routerd", records, expiry, inputs)
 	if err != nil || len(p.network.DSLite) != 0 || len(p.network.Routes) != 0 || len(p.network.Interfaces) != 1 || p.network.Interfaces[0].Name != "wan0" {
 		t.Fatal("source expiry retained peer address, tunnel or gateway route", p.network, err)
 	}
@@ -258,7 +259,8 @@ func TestAFTRFiniteDependencyInvalidatesPriorResolution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, digest, _ := encodeInstance(instance)
+	bound, _ := encodeInstance(instance)
+	digest := bound.digest
 	in, err := aftrDependencies(doc, doc.Services[0], records, digest, now)
 	if err != nil {
 		t.Fatal(err)
@@ -270,14 +272,14 @@ func TestAFTRFiniteDependencyInvalidatesPriorResolution(t *testing.T) {
 	raw, _ = json.Marshal(snap)
 	records[instance.Name] = serviceconfig.Update{Role: "aftr", Snapshot: raw}
 	inputs := map[string]aftr.Input{instance.Name: in}
-	p, err := project(doc, "/run/routerd", "/var/lib/routerd", records, now, inputs)
+	p, err := projectNative(doc, "/run/routerd", "/var/lib/routerd", records, now, inputs)
 	if err != nil || len(p.network.DSLite) != 1 {
 		t.Fatal("valid generation failed", p.network, err)
 	}
 	// Information expires while the lower-priority literal is still static.
 	// Reusing candidate index 1 against a changed list would authorize a stale
 	// result; only a new dependency generation may select the remaining entry.
-	p, err = project(doc, "/run/routerd", "/var/lib/routerd", records, now.Add(31*time.Second), inputs)
+	p, err = projectNative(doc, "/run/routerd", "/var/lib/routerd", records, now.Add(31*time.Second), inputs)
 	if err != nil || len(p.network.DSLite) != 0 {
 		t.Fatal("changed candidate list retained an old generation", p.network, err)
 	}
@@ -297,7 +299,8 @@ func TestAFTRExplicitInfiniteInformationRefresh(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, digest, _ := encodeInstance(instance)
+	bound, _ := encodeInstance(instance)
+	digest := bound.digest
 	info := dhcp6pd.Snapshot{Snapshot: old6.Snapshot{Resource: "wan-info", Interface: "wan0", AFTRName: "aftr.example", DNSServers: []string{"2001:db8:42::53"}, InfoUpdatedAt: now}, Active: true, InformationOnly: true, InformationRefreshSeconds: ^uint32(0)}
 	for _, pd := range []bool{false, true} {
 		info.InformationOnly = !pd

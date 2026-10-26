@@ -38,7 +38,7 @@ func projectRAFixture(t *testing.T, doc config.Native, s raclient.Snapshot, now 
 	if err := validateSnapshot(instance, b); err != nil {
 		t.Fatal(err)
 	}
-	p, err := project(doc, "/run/routerd", "/var/lib/routerd", map[string]serviceconfig.Update{instance.Name: {Name: instance.Name, Role: "ra_client", Snapshot: b}}, now)
+	p, err := projectNative(doc, "/run/routerd", "/var/lib/routerd", map[string]serviceconfig.Update{instance.Name: {Name: instance.Name, Role: "ra_client", Snapshot: b}}, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +48,7 @@ func projectRAFixture(t *testing.T, doc config.Native, s raclient.Snapshot, now 
 func TestRAClientProjectionOwnsSysctlsAndSeparateAddressAndRoutes(t *testing.T) {
 	now := time.Now().UTC()
 	doc, s := raClientFixture(now)
-	initial, err := project(doc, "/run/routerd", "/var/lib/routerd", nil, now)
+	initial, err := projectNative(doc, "/run/routerd", "/var/lib/routerd", nil, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func TestRAClientRejectsKernelCompetitionAndInvalidSnapshotIdentity(t *testing.T
 	}
 	doc.Network.Interfaces = []network.Interface{{Name: "wan0", Addresses: []string{"2001:db8:1::1234/64"}}}
 	b, _ := json.Marshal(s)
-	if _, err := project(doc, "/run/routerd", "/var/lib/routerd", map[string]serviceconfig.Update{"service.wan-ra": {Snapshot: b}}, now); err == nil {
+	if _, err := projectNative(doc, "/run/routerd", "/var/lib/routerd", map[string]serviceconfig.Update{"service.wan-ra": {Snapshot: b}}, now); err == nil {
 		t.Fatal("SLAAC replaced an explicitly owned static address")
 	}
 	instance, err := doc.Services[0].Instance(t.TempDir(), t.TempDir())

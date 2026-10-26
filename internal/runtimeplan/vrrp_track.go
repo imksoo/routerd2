@@ -36,7 +36,7 @@ func (r *Runtime) trackReference(resource string) derived.Reference {
 // condition exclusion preserves decisions/counters with the condition's budget.
 func (r *Runtime) advanceVRRPTracksLocked(facts resourceprogram.FactSnapshot) error {
 	refs := map[string]derived.Reference{}
-	for _, cfg := range r.config.vrrp {
+	for _, cfg := range r.config.protocols.vrrp {
 		for _, track := range cfg.Track {
 			ref := r.trackReference(track.Resource)
 			refs[ref.Key()] = ref
@@ -57,7 +57,7 @@ func (r *Runtime) advanceVRRPTracksLocked(facts resourceprogram.FactSnapshot) er
 	if r.vrrpTracks == nil {
 		r.vrrpTracks = map[string][]vrrpTrackState{}
 	}
-	for name, cfg := range r.config.vrrp {
+	for name, cfg := range r.config.protocols.vrrp {
 		states, exists := r.vrrpTracks[name]
 		if !exists {
 			states = make([]vrrpTrackState, len(cfg.Track))
@@ -139,7 +139,7 @@ func (r *Runtime) advanceVRRPTracksLocked(facts resourceprogram.FactSnapshot) er
 }
 
 func (r *Runtime) vrrpDecisionLocked(name string, active bool) (vrrp.Decision, error) {
-	cfg, ok := r.config.vrrp[name]
+	cfg, ok := r.config.protocols.vrrp[name]
 	if !ok {
 		return vrrp.Decision{}, ErrStale
 	}

@@ -69,7 +69,7 @@ func routeMetric(metric int, ip netip.Addr) int {
 // visible as a pending RouteIssue; it never installs a speculative onlink route
 // or kills a healthy BGP session. Kernel apply errors still fail the ACK.
 // Resolution uses this complete committed projection, excluding foreign routes.
-func projectBGP(p *projection, doc config.Native, records map[string]serviceconfig.Update, now time.Time, clock bfd.Clock) error {
+func projectBGP(p *projection, doc config.Native, configs map[string]bgpconfig.Config, records map[string]serviceconfig.Update, now time.Time, clock bfd.Clock) error {
 	p.bgpStatus = map[string]bgpProjectionStatus{}
 	groups := map[string]*routeGroup{}
 	sources := collectBFD(doc.Services, records)
@@ -93,7 +93,7 @@ func projectBGP(p *projection, doc config.Native, records map[string]serviceconf
 			return err
 		}
 		p.bgpStatus[service.ModuleName()] = bgpProjectionStatus{identity: provider.projection}
-		c := service.BGPConfig("/run/routerd", "/var/lib/routerd")
+		c := configs[service.ModuleName()]
 		if len(s.Routes) > c.MaxRoutes {
 			return errors.New("BGP selected routes exceed configured limit")
 		}

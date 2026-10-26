@@ -231,7 +231,7 @@ func (r *Runtime) projectProgramLocked(cfg configuration, records map[string]ser
 	// Preserve the existing static fast path. Runtime readiness edges are opt-in
 	// through ready_when; process readiness is not protocol readiness.
 	if !dynamicProgram(cfg.source) {
-		p, err := r.projectLocked(cfg.plan.Native, records, now, resourceprogram.FactSnapshot{})
+		p, err := r.projectLocked(cfg.protocols, cfg.plan.Native, records, now, resourceprogram.FactSnapshot{})
 		p.observationVersion = r.observationVersion
 		p.resources = make(map[string]resourceprogram.ResourceState, len(cfg.source.Resources))
 		for _, resource := range cfg.source.Resources {
@@ -244,7 +244,7 @@ func (r *Runtime) projectProgramLocked(cfg configuration, records map[string]ser
 		return projection{}, err
 	}
 	native, states := cfg.plan.Project(facts)
-	p, err := r.projectLocked(native, records, now, facts)
+	p, err := r.projectLocked(cfg.protocols, native, records, now, facts)
 	p.observationVersion = r.observationVersion
 	p.resources = states
 	return p, err

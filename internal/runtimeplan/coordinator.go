@@ -230,11 +230,7 @@ func (r *Runtime) reconcileStep(ctx context.Context, ceiling map[string]supervis
 		r.mu.Unlock()
 		return false, err
 	}
-	set, err := compileInstances(p.instances, ceiling)
-	if err != nil {
-		r.mu.Unlock()
-		return false, err
-	}
+	set := selectInstances(p.instances, ceiling)
 	changed := len(set.bindings) != len(r.bindings)
 	for name, b := range set.bindings {
 		if old, ok := r.bindings[name]; !ok || old.digest != b.digest {
@@ -307,7 +303,7 @@ func (r *Runtime) reconcileStep(ctx context.Context, ceiling map[string]supervis
 		r.mu.Unlock()
 		return false, err
 	}
-	if !reflect.DeepEqual(latest.instances, p.instances) {
+	if !sameInstances(latest.instances, p.instances) {
 		r.wakeCoordinatorLocked()
 		r.mu.Unlock()
 		return false, nil
@@ -325,7 +321,7 @@ func (r *Runtime) reconcileStep(ctx context.Context, ceiling map[string]supervis
 			r.mu.Unlock()
 			return false, projectErr
 		}
-		if !reflect.DeepEqual(current.network, p.network) || !reflect.DeepEqual(current.instances, p.instances) {
+		if !reflect.DeepEqual(current.network, p.network) || !sameInstances(current.instances, p.instances) {
 			r.wakeCoordinatorLocked()
 			r.mu.Unlock()
 			return false, nil

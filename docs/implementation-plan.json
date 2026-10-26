@@ -15,7 +15,7 @@
       "ci": "https://github.com/imksoo/routerd2/actions/runs/40060123092"
     }
   },
-  "inventory_sha256": "b22bc934da6571c2fe32444dabd337e20df0db527285aaaa6b7345a01377efe9",
+  "inventory_sha256": "8339e310aede914816a2faf82bf784b3449d1fb2147eae4183dfbae8667d3b2f",
   "policy": {
     "scope": "Complete Linux routing product including cloud/SAM and operational contracts; homert is one acceptance profile.",
     "parity_flags_unchanged": true,
@@ -300,11 +300,11 @@
         "internal/supervisor"
       ],
       "implementation_notes": {
-        "implemented": "Static plans, resource-ID indexes, BGP status configuration and configuration-cutover instance identities are prepared once outside the observation mutex. One coordinator owns kernel application and worker reconciliation against actual supervisor registration. Observations remain accepted while IO runs; application ACKs complete only requests included in that operation, without waiting for unrelated later observations. Superseded requests cannot complete a newer request. Observation receipts differ from BGP/VRRP application results. Matching BGP application identity remains usable during unrelated kernel IO. VRRP admission and ownership use the original election deadline and one applied-election map. Finite readiness bounds managed links, addresses and routes; control and writer share lifetime projection, and writer expiry runs independently of control. Learned-route authority intersects original BGP observation, acknowledged BFD packet/source deadlines and recursive next-hop prerequisites. Authority renewals update the journal without replacing unchanged kernel routes. Accepted protocol bodies remain immutable; consumers evaluate expiry. DHCP server observations are decoded once and original BOOTTIME authority reaches DNS and delayed reply checks. Tracking and derived assertions share typed Health/BFD/BGP status providers. Compiler contract is resource-program-native-11, worker ABI is 3 and network journal is format 5. No prototype readers, receipt leases, synthetic producers or migrations are retained. After a delayed initial VRRP ownership ACK, neighbor notifications no longer postpone the existing renewal timer past original authority. A real 550 ms writer pause reproduces the pre-fix expiry; the fixed product preserves its election worker and completes Keepalived VIP TCP/UDP without longer authority or client timeouts.",
-        "validation": "Current local/real-daemon results and untested scope are in docs/pve-codex-handoff.md; historical checkpoints are not acceptance authority.",
+        "implemented": "One coordinator owns kernel application, worker reconciliation and application ACKs against actual supervisor registration. Each accepted source prepares immutable protocol worker configs, canonical child-file bytes and digests once outside the observation mutex, including conditionally inactive and generated RA workers. Ordinary projections select these definitions; BGP/VRRP typed configs and static LAN RA templates are reused. Cutover selects matching live observations without rebuilding identities. Dynamic RA prefix/lifetime/DNS data stays outside immutable worker config. Finite readiness and original protocol deadlines still bound kernel resources and consumers. No extra manager, invalidation flag, synthetic producer, receipt lease or prototype adapter was added. Compiler contract native-11, worker ABI 3 and stored formats are unchanged.",
+        "validation": "Local projection/cutover/expiry tests and actual worker files match supervisor digests. The static projection plus worker selection benchmark for 8 BGP routers/64 peers each changed median 2.531 ms/540004 bytes/1238 allocations to 7.756 us/4021 bytes/20 allocations on this VM; it does not measure learned RIB work or packet throughput. Actual two-WAN Health/PBR, BFD/BGP (all six cases), independent Keepalived Health tracking and AFTR resolution/expiry passed. A new independent DHCPv6 wire peer verifies actual generated LAN RA, same-worker renew/renumber, routed TCP/UDP, expiry/address cleanup and reacquisition with the prepared identity. Current check/build outcomes are in docs/pve-codex-handoff.md. Final make check (full Race Detector and vet), static amd64/arm64 builds, six-ELF signed bundle/catalog/publisher checks, and the shared-runner Health/PBR and six BFD cases passed. arm64 was not executed.",
         "remaining": [
           "The historical BFD reconnection timeout still lacks direct failed-request diagnostics. IPv6 multicast now has independent Keepalived VIP TCP/UDP and wire checks, but the earlier bridged missing-advertisement cause remains unresolved. The initial IPv6 unicast TCP timeout with election-authority expiry was reproduced once on current products; syscall tracing did not reproduce it. Request-time snapshots were added to failure diagnostics; neither client deadlines nor election authority were extended.",
-          "Keep other accepted protocol data typed; compile static condition work and remove repeated instance generation/digest computation during ordinary projections. DHCP client allocation and durable retention still depend on UTC; this source-observation change does not qualify allocation across wall-clock correction, power loss or physical suspend.",
+          "Keep other accepted protocol data typed, compile static condition work and remove network-intent JSON round-trip copying. DHCP client allocation and durable retention still depend on UTC; these changes do not qualify allocation across wall-clock correction, power loss or physical suspend.",
           "Expiry while the network writer itself is unavailable and physical suspend remain unqualified. Recursive prerequisite address/link deadline propagation has local projection checks; equivalent paused-control real-daemon cases are not yet exercised."
         ]
       }
@@ -763,7 +763,7 @@
       ],
       "implementation_notes": {
         "implemented": "Owned dummy links use the existing native link writer, ownership journal and lifetime handling. Declared routing-domain resolution follows master chains and includes the VRF device itself; config BFD source checks and recursive BGP FIB address resolution share it.",
-        "validation": "The actual daemon configures owned dummy source links under VRFs and root loopback sources. IPv4 and IPv6 routed BFD/BGP and user TCP/UDP operate simultaneously in three domains with identical endpoint addresses. IPv6 uses explicitly coordinated usable link-local addresses with NoDAD on every forwarding link; initial automatic tentative link-local addresses prevented ND and the first TCP SYN. This observed setup dependence is documented, not hidden by longer deadlines.",
+        "validation": "The actual daemon configures owned dummy source links under VRFs and root loopback sources. IPv4 and IPv6 routed BFD/BGP and user TCP/UDP operate simultaneously in three domains with identical endpoint addresses. IPv6 uses explicitly coordinated usable link-local addresses with NoDAD on every forwarding link; initial automatic tentative link-local addresses prevented ND and the first TCP SYN. This observed setup dependence is documented, not hidden by longer deadlines. An independent DHCPv6 server builds wire replies without the product codec. The real daemon obtains/renews/renumbers PD, advertises current/deprecated LAN prefixes from the same RA worker, forwards actual client TCP/UDP, retires RA and owned addresses at expiry, and reacquires with the same immutable identity. make check-pd-ra reproduces this gate.",
         "remaining": [
           "Complete link option/lifecycle and ownership/adoption semantics, WAN selection and DHCPv6 IA_NA acceptance remain incomplete. Automatic IPv6 link-local DAD startup, arbitrary forwarded VRF policy and target NICs are not qualified."
         ]
@@ -774,7 +774,7 @@
       "title": "LAN・DHCPv6・relay・DNS の resource 完全化",
       "milestone": "M2",
       "track": "network",
-      "status": "planned",
+      "status": "in_progress",
       "scope": "baseline_parity",
       "risk": "high",
       "depends_on": [
@@ -810,7 +810,14 @@
         "internal/protocol/dns",
         "internal/runtimeplan",
         "internal/legacyconfig"
-      ]
+      ],
+      "implementation_notes": {
+        "implemented": "Generated LAN RA uses a source-prepared immutable worker template and separate live prefix/lifetime/DNS input. Native DHCPv4/RA primitives already exist; this does not implement the complete LAN resource scope.",
+        "validation": "Actual DHCPv6 IA_PD with an independent wire server drives LAN RA captured on the link. Renew/renumber preserve RA PID/generation; real client TCP/UDP crosses the delegated LAN. Expiry removes the RA worker and managed addresses, and reacquisition creates a new worker with the same prepared digest.",
+        "remaining": [
+          "DHCPv6 server modes, relay, full dynamic pool/options and DNS addressFrom/resource priority, global sticky/fingerprint/lease import and lease-sync contracts remain incomplete. Host SLAAC/DNS behavior, full server interoperability and clock/suspend qualification are not established by the PD/RA fixture."
+        ]
+      }
     },
     {
       "id": "NET-07",

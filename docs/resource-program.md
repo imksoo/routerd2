@@ -7,7 +7,7 @@ resource の ID、依存関係、owner、provenance と入力順を、そのま�
 ## 内部での設定の所有と投影
 
 controlが受理した設定は、その設定世代の間は読み取り専用とする。compilerとruntimeは
-同じ宣言を参照し、内部関数間の受け渡しのためにJSONへ変換して複製しない。
+同じ宣言を参照する。
 設定変更では新しい宣言を渡す。HTTP/worker境界では従来どおりJSONをdecodeする。
 
 設定受理時に依存graph、出力の所有権、EventRule/DerivedEventのprogramとidentityを
@@ -17,8 +17,15 @@ controlが受理した設定は、その設定世代の間は読み取り専用�
 EventRule/DerivedEvent controllerも計算済みprogramを受け取り、同じrevisionとidentityなら
 永続登録を再読しない。DerivedEventの実行期限は更新する。
 
+worker設定、canonicalな子process用bytes、digestは、条件除外中のworkerや生成予定のRAも含めて
+設定受理時に一度準備し、同じconfigurationに保持する。通常投影はその中から起動対象を選び、
+設定を再生成・JSON化・hashしない。supervisorへ渡すidentityと保存する子process設定は
+この同じbytesから得る。設定切替では新しいplanを準備し、継続可能な実workerと現在の観測を選ぶ。
+BGP・VRRPの型付き設定、delegated RAの固定templateも再利用する。RAのprefix・期限・DNSは
+観測由来のlive入力であり、immutable workerへ埋め込まない。
+
 条件式のduration解析・hold identity計算、観測snapshotの型付き保持、読み取りと
-continuity更新の分離は残っている。通知受理とkernel適用完了の契約も引き続き整理する。
+continuity更新の分離、network intentのJSON往復複製は残っている。
 
 ## 設定例
 

@@ -88,7 +88,7 @@ func (r *Runtime) statusValuesLocked(facts resourceprogram.FactSnapshot, refs []
 				if exists && managed && granted && grant.bgp != nil && matched && module.Ready && module.Generation == record.Generation && grant.generation == record.Generation && record.ConfigDigest == binding.digest && module.ConfigDigest == binding.digest && grant.revision == r.config.revision && grant.epoch == record.ProducerEpoch && grant.sequence == record.Sequence && clock.BootID == r.guardBootID && clock.BootID == grant.bootID && now < r.guardUntilNanos && applied.identity == grant.bgp.projection {
 					provider.isBGP, provider.known = true, true
 					provider.bgpSnapshot = grant.bgp.snapshot
-					provider.bgpConfig = r.config.bgp[name]
+					provider.bgpConfig = r.config.protocols.bgp[name]
 					provider.unresolved = applied.unresolved
 					provider.until = min(grant.untilNanos, r.guardUntilNanos)
 					provider.origin = identity(clock.BootID, binding.digest, module.Generation, record.ProducerEpoch, provider.bgpSnapshot.Epoch)

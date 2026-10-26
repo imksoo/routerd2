@@ -137,7 +137,7 @@ func TestBFDFIBUsesExplicitMonotonicFactsDespiteWallClockRollback(t *testing.T) 
 	bgp.BFD = map[string]bgpconfig.BFDAcknowledgement{"192.0.2.2": {ConfigDigest: source.ConfigDigest, Generation: source.Generation, ProducerEpoch: source.ProducerEpoch, Enabled: true}}
 	bgpBytes, _ := json.Marshal(bgp)
 	records := map[string]serviceconfig.Update{"service.edge": source, "service.router": {Snapshot: bgpBytes}}
-	p, err := projectWithFacts(doc, "/run/routerd", "/var/lib/routerd", records, clock.WallTime, projectionFacts{bfdClock: clock})
+	p, err := projectWithFacts(doc, protocolsFor(t, doc, "/run/routerd", "/var/lib/routerd"), records, clock.WallTime, projectionFacts{bfdClock: clock})
 	if err != nil || len(p.network.Routes) != 1 {
 		t.Fatal("fresh proof not projected", err, p.network.Routes)
 	}
@@ -145,11 +145,11 @@ func TestBFDFIBUsesExplicitMonotonicFactsDespiteWallClockRollback(t *testing.T) 
 		t.Fatal("BGP heartbeat extended its required BFD receive deadline", route)
 	}
 	clock.BoottimeNanoseconds += int64(time.Second)
-	p, err = projectWithFacts(doc, "/run/routerd", "/var/lib/routerd", records, clock.WallTime.Add(-time.Hour), projectionFacts{bfdClock: clock})
+	p, err = projectWithFacts(doc, protocolsFor(t, doc, "/run/routerd", "/var/lib/routerd"), records, clock.WallTime.Add(-time.Hour), projectionFacts{bfdClock: clock})
 	if err != nil || len(p.network.Routes) != 0 {
 		t.Fatal("wall-clock rollback prolonged BFD FIB ownership", err, p.network.Routes)
 	}
-	p, err = project(doc, "/run/routerd", "/var/lib/routerd", records, clock.WallTime)
+	p, err = projectNative(doc, "/run/routerd", "/var/lib/routerd", records, clock.WallTime)
 	if err != nil || len(p.network.Routes) != 0 {
 		t.Fatal("missing kernel-clock evidence granted BFD FIB ownership", err, p.network.Routes)
 	}

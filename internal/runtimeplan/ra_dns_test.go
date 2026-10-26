@@ -16,6 +16,7 @@ import (
 func TestPDLearnedDNSDeadlineAndStableRAIdentity(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
 	doc := config.Native{Services: []serviceconfig.Service{{Name: "pd", DHCP6: &serviceconfig.DHCP6{Interface: "wan0", IAID: 7, Delegations: []serviceconfig.Delegation{{Name: "lan", Interface: "lan0", SubnetID: 3, Advertise: true, UseLearnedDNS: true, RDNSS: []string{"2001:db8::1"}, DNSSL: []string{"static.example"}}}}}}}
+	protocols := protocolsFor(t, doc, "/run/routerd", "/var/lib/routerd")
 	snapshot := dhcp6pd.Snapshot{Active: true, InformationRefreshSeconds: 600, InformationRefreshAt: now.Add(180 * time.Second), Snapshot: old6.Snapshot{Resource: "pd", Interface: "wan0", IAID: 7, CurrentPrefix: "2001:db8:100::/56", AcquiredAt: now, Preferred: 400, Valid: 600, ExpiresAt: now.Add(600 * time.Second), InfoUpdatedAt: now, DNSServers: []string{"2001:db8::1", "2001:db8::53"}, DomainSearch: []string{"static.example", "learned.example"}}}
 	projectAt := func(value dhcp6pd.Snapshot, at time.Time) (ra.Config, string) {
 		t.Helper()
@@ -23,7 +24,7 @@ func TestPDLearnedDNSDeadlineAndStableRAIdentity(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		p, err := project(doc, "/run/routerd", "/var/lib/routerd", map[string]serviceconfig.Update{"service.pd": {Role: "dhcp6pd", Snapshot: raw}}, at)
+		p, err := projectWithFacts(doc, protocols, map[string]serviceconfig.Update{"service.pd": {Role: "dhcp6pd", Snapshot: raw}}, at, projectionFacts{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -31,7 +32,8 @@ func TestPDLearnedDNSDeadlineAndStableRAIdentity(t *testing.T) {
 		if !found {
 			t.Fatal("expected live LAN advertisement")
 		}
-		for _, instance := range p.instances {
+		for _, bound := range p.instances {
+			instance := bound.instance
 			if instance.Name == "service.pd-lan-ra" {
 				var template ra.Config
 				if err := json.Unmarshal(instance.Config, &template); err != nil {
@@ -40,11 +42,7 @@ func TestPDLearnedDNSDeadlineAndStableRAIdentity(t *testing.T) {
 				if len(template.RDNSS)+len(template.DNSSL)+len(template.LearnedRDNSS)+len(template.LearnedDNSSL) != 0 {
 					t.Fatal("live DNS leaked into immutable worker template")
 				}
-				_, digest, err := encodeInstance(instance)
-				if err != nil {
-					t.Fatal(err)
-				}
-				return live, digest
+				return live, bound.digest
 			}
 		}
 		t.Fatal("missing dynamic RA instance")

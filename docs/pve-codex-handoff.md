@@ -78,69 +78,58 @@
 
 ## 今回の実装と検証
 
-最新buildは `RELEASE_ID=bfd-vrf-ipv6`。NET-07の同一endpointを持つIPv4/IPv6の
-blue/red VRFとdefault domainを実daemonへ接続した。IPv6 BGP transport、再帰next-hop、
-learned route先のTCP/UDPも実Linux routerを越えて動く。設定例
-[bfd-vrf.yaml](../examples/bfd-vrf.yaml) をdual-stackへ更新し、製品CLIでvalidateした。
+最新buildは `RELEASE_ID=protocol-plan`。CORE-03の通常投影で繰り返していたworker設定生成・
+JSON化・hashを除いた。受理したsourceごとに、条件除外中のworkerと生成予定のRAも含めて
+設定・canonicalな子process用bytes・digestを一度準備する。通常投影はその中から必要なworkerを
+選ぶ。新しいmanager、invalidation flag、旧形式adapterは作っていない。
 
-三domainを同時に起動するとdefault BFDのUDP 4784 bindが`address already in use`で失敗した。
-multihopの受信socketだけに`SO_REUSEADDR`を指定して修正した。domain/sourceの既存abstract
-claimでrouterd受信ownerは一つに限定し、TX portの専有と`SO_REUSEPORT`不使用を維持する。
-新しいmanager・lease・別の状態機械は追加していない。実ソケット試験でIPv4/IPv6とも二重ownerを拒否した。
+BGP/VRRPの型付き設定とLAN RAの固定templateも同じ不変planに保持する。
+BGPのFIB投影とAFTRの入力digest確認でもworker設定を再構築しない。
+設定切替・停止待ちの前後は最新のmatching観測と選択したidentityを比較する。
+RAのprefix・期限・DNSはlive入力のままで、更新してもworker自身のidentityは変えない。
+childへ保存した実bytesのSHA-256とsupervisorへ渡すidentityの一致も確認した。
 
-BGP設定の正規化では、全configをJSONへencode/decodeして複製する処理を除いた。
-固定版normalizerが既に再構築するslice/mapを使い、残るnative mapとgraceful-restart pointerを
-明示的に複製する。結果を変更しても呼出元のpolicy・path・pointer・transportを変更しない。
-512 peerのこのVMでの3回測定は、中央値3.606ms/835122Bから0.351ms/199417Bへ減った。
-これは設定正規化の測定であり、packet throughputや対象機の性能受入ではない。
-再測定は `go test ./internal/protocol/bgpconfig -run '^$' -bench BenchmarkNormalize512Peers -benchmem`。
+8つのBGP worker／各64 peerの静的投影＋worker選択を、このVMで3回測定した。
+中央値は2.531ms・540004B・1238 allocationsから、7.756µs・4021B・20 allocationsへ減った。
+準備は設定受理時へ移している。learned RIBの走査・kernel適用・packet性能の測定ではない。
+network intentのJSON往復複製や残るprotocol snapshotのdecode、条件式の静的計算は未整理である。
+再測定は `go test ./internal/runtimeplan -run '^$' -bench BenchmarkProjectEightBGPRouters -benchmem`。
 
-PVE隔離amd64 VMで、CGO無効の実3 ELF、Race Detector付きharness、独立UDP/TCP peerと
-Linux forwarderを使用した。三domainのIPv4/IPv6個別試験で次を確認した。
+PVE隔離amd64 VMで、CGO無効の実3 ELF、Race Detector付きharness、独立peerと実kernelを使用した。
 
-- 同じsource/remoteをblue/red/defaultで同時使用し、それぞれのBFDとBGPを接続する。
-  利用者TCP/UDPの異なる応答で各domainの実経路を識別する。
-- 初回BFD Down中はBGPを接続しない。blueだけのUDP停止でそのTCPを終了し、学習経路を撤去する。
-  defaultに同じ宛先への通信可能な経路があってもblueの利用者通信を受け渡さない。
-  UDP復旧、blue BFD SIGKILL後のfresh producer、同じBGP workerでの再接続・経路復旧を確認した。
-- red/defaultのTCP session・通信・worker PID/世代は継続する。
-- default BFDをSIGSTOPすると、保持したraw UP通知の元の期限でhealthが失効し、
-  default BGPのTCPと学習経路が失効する。blue/redのsessionと通信は継続する。
-  SIGCONT後は同じworkerの新しい受信でBGPと学習経路が戻る。
-- 三つのWANのcaptureでUDP 4784、source port 49152以上、送信255／受信254を検査した。
-  default domainの実BFD/BGPも同時に動くため、単にVRF同士のsocketが衝突しないだけの試験ではない。
+- 実2 WANのHealth→PBR、TCP/UDPとcapture、worker交替、古い通知、期限切れ、confirmed rollbackが成功した。
+- BFD/BGPの全6ケースが成功した。single-hop、routed IPv4/IPv6、同一endpointを持つ
+  blue/red/default domain、片側UDP障害、source凍結の元期限、worker交替と復旧を含む。
+- KeepalivedとのHealth trackingでpriority 150/50、finite neutral、同じ選挙worker、VIP TCP/UDPを確認した。
+- AFTRの実DNS解決、source/instance identity、tunnelとrouteの期限処理が成功した。
+- 新しい独立DHCPv6 serverは製品のPD codec/state machineを使わずに応答を組み立てる。
+  実daemonのPD取得・renew・再番号付けで、同じRA workerから新旧LAN prefixの広告を確認した。
+  LAN clientの実TCP/UDPを転送し、PD期限切れでRA workerと管理addressが消えることを確認した。
+  再取得では新しいRA generationが、事前に準備した同じ設定digestとfreshな広告で動いた。
+  link-local addressは隔離された静的topologyで明示・協調している。host SLAACやIA_NAの受入ではない。
 
-IPv6で自動link-localがDAD中の初回TCPは、SYNもNSも出ずneighbor cacheが未解決だった。
-このfixtureでは各転送linkへ協調した明示link-localをNoDADで設定している。
-loopback sourceではLinuxが送出link上の利用可能なND sourceを必要とする挙動と一致する。
-[Linux 6.8の実装](https://github.com/torvalds/linux/blob/v6.8/net/ipv6/ndisc.c#L612-L715)を参照。
-自動生成link-local DADの起動受入へ成功を広げない。client deadlineとprotocol期限は延長していない。
-新規隔離namespaceで`udp_l3mdev_accept=0`も確認した。別のaccept policyは未受入である。
+Health/BFD/PD-RA/AFTRの実daemon起動は `scripts/daemon-tests.py` へ共通化し、旧scriptを削除した。
+`make check-health-pbr`、`make check-bfd`に加え、`make check-pd-ra`と`make check-aftr`で再実行できる。
+特定ケースは例として `python3 scripts/daemon-tests.py bfd --test TestDaemonBFDVRFIPv6Isolation`。
+製品とharnessはroot所有の一時0700へ配置し、成功／失敗双方のcaptureを回収する。
+rootまたはpasswordless sudoとLinux user/network namespaceが必要で、home権限は変えない。
 
-IPv4のdefault BFD凍結後、blueの利用者TCP接続が一度300msでtimeoutした。
-captureにはその試行のSYN/SYN-ACK/ACKがあり、直後に接続を閉じている。
-trace付きと通常の再実行、IPv6の同じ試験は成功したが、原因は未確定である。
-成功した再実行を原因解決とは扱わない。失敗時刻の出力はローカル
-`dist/bfd-vrf-ipv4-timeout/`、syscall比較は `dist/bfd-vrf-ipv4-syscall/`。
-
-再実行は `make check-bfd`。rootまたはpasswordless sudo、Linux user/network namespaceが必要。
-製品とharnessはroot所有0700へ配置し、失敗した実行のcaptureも回収する。home権限は変えない。
-関連Race Detector、fmt・vet、amd64/arm64の6静的ELF buildは成功した。
-全体`make check`、最終6 ELFのsigned bundle/catalog/publisher検査、最終native全6ケースは成功した。
-実ソケットの二重owner拒否も最終コードで再実行して成功した。amd64は実通信、arm64はbuild/bundle検査までである。
+全体`make check`（Go/Python・Race Detector・vet）とamd64/arm64の6静的ELF buildが成功した。
+実daemon用amd64 ELFと、bundle検査用のELFは同一である。signed bundle/catalog/publisher検査と
+共通runnerでのHealth/BFD最終確認も成功した。PD/RA、AFTRも共通runnerで成功した。
 worker ABI 3、compiler contract native-11、network journal format 5は変更していない。
-prototype reader・migrationは追加していない。
+arm64実行、物理NIC、性能、suspend、clock補正の受入は今回行っていない。
 
-現在の個別実行は `dist/bfd-vrf-ipv{4,6}-expiry{.log,/vrf*.log}`。
-BFD native socketは `dist/bfd-vrf-ipv6-ownership.log`、関連Race Detectorは
-`dist/bfd-vrf-ipv6-race.log`、benchmarkは `dist/bgp-normalize-{before,after}.log`。
-全体check・build・bundleは `dist/bfd-vrf-ipv6-{final-check,static-build,final-bundle}.log`。
-最終全ケースの出力先は `dist/bfd-vrf-ipv6-final-native{.log,/}`。
-過去の出力・checkpointは実装制約にしない。
+現在の出力:
 
-先行buildでは実2 WANのHealth→PBR・実TCP/UDP・worker再起動・古い通知・期限切れ・
-confirmed rollback、およびKeepalivedとのtracking・IPv6 multicastを確認している。
-これらを今回のbuildで再実行したとは扱わない。
+- `dist/protocol-plan-{before,after}.log`: 静的投影benchmark。
+- `dist/protocol-plan-{final-check,linux-build,bundle}.log`: 全体check・build・bundle。
+- `dist/protocol-plan-final-{health,bfd}{.log,/}`: 共通runnerの最終Health/BFDログとpcap。
+- `dist/protocol-plan-pd-ra/`、`dist/protocol-plan-aftr/`、`dist/protocol-plan-vrrp/`: PD/RA、AFTR、Keepalived。
+
+過去の出力・checkpointは実装制約にしない。前buildで一度発生したdefault BFD凍結後の
+IPv4 client TCP 300ms timeoutは、原因未確定のままである。今回の高速化で解決したとは断定しない。
+自動IPv6 link-local DAD起動も未受入であり、明示NoDADのtopologyを一般化しない。
 
 ## 未完了と次の作業
 
@@ -155,7 +144,7 @@ confirmed rollback、およびKeepalivedとのtracking・IPv6 multicastを確認
    （`dist/vrrp-multicast-related.log`）。syscall trace付き実行では再現せず、要求前後の選挙snapshotを
    失敗時に表示するようfixtureへ追加したが、同じ失敗は再取得できていない。接続deadlineや
    選挙authorityは延長していない。今回修正した二つのACK/status問題と同一とは断定しない。
-4. 残るprotocol snapshotの型付き保持、条件式の静的計算、通常投影でのinstance生成・digest再計算を整理する。
+4. 残るprotocol snapshotの型付き保持、条件式の静的計算、network intentのJSON往復複製を整理する。
    DHCP client割当とjournalのUTC依存を整理し、実clock補正・停電・suspendで受入する。
 5. 再帰next-hopの前提address/link期限はローカル投影で確認済みだが、同じ条件の実daemon試験は未実施。
    writer自体の停止中のlink fencing・IPv4 route撤去、物理suspendは保証しない。

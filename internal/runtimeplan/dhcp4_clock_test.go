@@ -25,7 +25,7 @@ func TestDHCPv4ProjectionUsesOriginalBootExpiryAcrossUTCChanges(t *testing.T) {
 	for _, step := range []time.Duration{-24 * time.Hour, 24 * time.Hour} {
 		at := clock
 		at.WallTime = at.WallTime.Add(step)
-		p, err := projectWithFacts(wanDoc(), "/run/routerd", "/var/lib/routerd", records, at.WallTime, projectionFacts{bfdClock: at})
+		p, err := projectWithFacts(wanDoc(), protocolsFor(t, wanDoc(), "/run/routerd", "/var/lib/routerd"), records, at.WallTime, projectionFacts{bfdClock: at})
 		if err != nil || len(p.network.Routes) != 1 || len(p.network.Interfaces[0].Addresses) != 1 {
 			t.Fatal("UTC correction changed an unexpired lease", p.network, err)
 		}
@@ -34,7 +34,7 @@ func TestDHCPv4ProjectionUsesOriginalBootExpiryAcrossUTCChanges(t *testing.T) {
 			t.Fatal("projection restamped lease from receipt/UTC", o)
 		}
 		at.BoottimeNanoseconds += int64(100 * time.Second)
-		expired, err := projectWithFacts(wanDoc(), "/run/routerd", "/var/lib/routerd", records, at.WallTime, projectionFacts{bfdClock: at})
+		expired, err := projectWithFacts(wanDoc(), protocolsFor(t, wanDoc(), "/run/routerd", "/var/lib/routerd"), records, at.WallTime, projectionFacts{bfdClock: at})
 		if err != nil || len(expired.network.Routes) != 0 || len(expired.network.Interfaces[0].Addresses) != 0 {
 			t.Fatal("expired original boot grant retained address/route", expired.network, err)
 		}

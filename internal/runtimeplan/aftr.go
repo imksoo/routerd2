@@ -218,7 +218,7 @@ func (r *Runtime) aftrRoutes(mux *http.ServeMux) {
 	})
 }
 
-func projectDSLite(p *projection, doc config.Native, runtimeDir, stateDir string, records map[string]serviceconfig.Update, inputs map[string]aftr.Input, now time.Time) error {
+func projectDSLite(p *projection, doc config.Native, instances map[string]binding, records map[string]serviceconfig.Update, inputs map[string]aftr.Input, now time.Time) error {
 	for _, service := range doc.Services {
 		if service.DSLite == nil {
 			continue
@@ -229,14 +229,7 @@ func projectDSLite(p *projection, doc config.Native, runtimeDir, stateDir string
 		if !exists || !has {
 			continue
 		}
-		instance, err := service.Instance(runtimeDir, stateDir)
-		if err != nil {
-			return err
-		}
-		_, digest, err := encodeInstance(instance)
-		if err != nil {
-			return err
-		}
+		digest := instances[service.ModuleName()].digest
 		if input.ConfigDigest != digest {
 			continue
 		}

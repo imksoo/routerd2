@@ -300,7 +300,7 @@
         "dhcp6-client"
       ],
       "parity_status": "not_integrated",
-      "known_gap": ""
+      "known_gap": "Native IA_PD/information and delegated RA run through the actual daemon with an independent DHCPv6 wire peer. Renew/renumber retain the RA worker; expiry removes it and owned addresses; reacquisition reuses its prepared identity. Routed LAN client TCP/UDP is exercised. IA_NA, full resource selection/lifecycle, clock correction/suspend and complete option semantics remain incomplete."
     },
     {
       "id": "wan.pppoe",
@@ -363,7 +363,7 @@
         "ra"
       ],
       "parity_status": "not_integrated",
-      "known_gap": "Native RA server/client, delegated-prefix updates and DHCPv4 server are implemented. Strict static DHCPv4 server/profile/reservation conversion and explicit DHCP-derived DNS replacement are available. DHCPv6 server, relay, dynamic dependencies, original global sticky behavior and lease-sync resource semantics remain incomplete."
+      "known_gap": "Native RA server/client, delegated-prefix updates and DHCPv4 server are implemented. Generated RA is verified with an independent PD peer, actual LAN PIO capture, renew/renumber on the same worker, owned expiry/reacquisition and routed client TCP/UDP. DHCPv6 server, relay, complete dynamic dependencies, original global sticky behavior and lease-sync resource semantics remain incomplete."
     },
     {
       "id": "dns",

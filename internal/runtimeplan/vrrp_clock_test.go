@@ -67,7 +67,7 @@ func TestVRRPBootDeadlineReachesKernelWithoutUTCConversion(t *testing.T) {
 				t.Fatal(err)
 			}
 			clock.BoottimeNanoseconds = int64(s.ExpiresNanos)
-			p, err := projectWithFacts(doc, r.dir, r.stateDir, r.records, time.Now().Add(-48*time.Hour), projectionFacts{bfdClock: clock})
+			p, err := projectWithFacts(doc, protocolsFor(t, doc, r.dir, r.stateDir), r.records, time.Now().Add(-48*time.Hour), projectionFacts{bfdClock: clock})
 			if err != nil || len(p.network.Links) != 0 {
 				t.Fatal("expired boot lease survived UTC rollback", p.network.Links, err)
 			}

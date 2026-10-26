@@ -415,6 +415,9 @@ DHCP serverは設定切替後も元通知を保持し、期限切れのactive条
 DHCP server観測も受理時に型付きで保持し、元BOOTTIME期限をDNSのA/PTR応答まで渡す。
 control／DNSの受信側期限表と内部JSON複製を削除した。個別clientの割当・保存のUTC依存と、
 他protocolの型付き保持は未完了。
+worker設定・canonical bytes・digestを、生成予定のRAも含めてsourceごとに一度準備する。
+通常投影は起動対象を選び、設定の再生成・JSON化・hashを行わない。BGP/VRRPの型付き設定と
+RA固定templateも共有し、RAのprefix・期限・DNSはlive入力に分ける。
 現在の検証範囲と残作業は
 [引き継ぎ](pve-codex-handoff.md) を参照する。CORE-03全体の完了とはしない。
 
@@ -627,6 +630,9 @@ control／DNSの受信側期限表と内部JSON複製を削除した。個別cli
 owned `dummy` linkを既存writer・所有権journalへ追加した。VRFごとの独立sourceとして実daemonで
 生成・master接続・address設定を確認した。宣言済みmaster chainのrouting domainをconfig検証と
 BGPの再帰解決で共有し、VRF device自身とbridge配下のtableを正しく導出する。
+独立DHCPv6 serverと実daemonでPDのrenew・再番号付け、同じRA workerの継続、LAN上の
+新旧prefix広告、利用者TCP/UDP、期限切れ時のRA停止・管理address撤去、再取得を確認した。
+再生成したRAも事前に準備した同じ設定digestを使う。`make check-pd-ra`で再実行できる。
 全link option/lifecycle・WAN選択・DHCPv6 IA_NA等は残り、NET-05全体は未完了。
 
 **受入条件**

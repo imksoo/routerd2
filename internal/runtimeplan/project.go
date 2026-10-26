@@ -32,18 +32,8 @@ type projection struct {
 	routeIssues        []RouteIssue
 	bgpStatus          map[string]bgpProjectionStatus
 	network            network.Desired
-	instances          []serviceconfig.Instance
+	instances          []binding
 	liveRA             map[string]ra.Config
-}
-
-// project is pure: protocol facts and the committed intent produce a complete
-// kernel projection. No producer can submit arbitrary addresses or routes.
-func project(doc config.Native, runtimeDir, stateDir string, records map[string]serviceconfig.Update, now time.Time, dynamicInputs ...map[string]aftr.Input) (projection, error) {
-	facts := projectionFacts{}
-	if len(dynamicInputs) > 0 {
-		facts.aftr = dynamicInputs[0]
-	}
-	return projectWithFacts(doc, runtimeDir, stateDir, records, now, facts)
 }
 
 type projectionFacts struct {
@@ -53,7 +43,7 @@ type projectionFacts struct {
 	vrrpActivation map[string]uint64
 }
 
-func (r *Runtime) projectLocked(doc config.Native, records map[string]serviceconfig.Update, now time.Time, policy resourceprogram.FactSnapshot) (projection, error) {
+func (r *Runtime) projectLocked(protocols protocolPlan, doc config.Native, records map[string]serviceconfig.Update, now time.Time, policy resourceprogram.FactSnapshot) (projection, error) {
 	facts := projectionFacts{aftr: r.aftrInputs, vrrpActivation: make(map[string]uint64)}
 	var err error
 	facts.bfdClock, err = bfd.ReadClock()
@@ -95,36 +85,23 @@ func (r *Runtime) projectLocked(doc config.Native, records map[string]servicecon
 		}
 
 	}
-	p, err := projectWithFacts(doc, r.dir, r.stateDir, ownedRecords, now, facts)
+	p, err := projectWithFacts(doc, protocols, ownedRecords, now, facts)
 	if err == nil {
 		p.network = network.ProjectLifetimes(p.network, boottime.Clock{BootID: facts.bfdClock.BootID, BoottimeNanoseconds: facts.bfdClock.BoottimeNanoseconds, WallTime: facts.bfdClock.WallTime})
 	}
 	return p, err
 }
 
-func projectWithFacts(doc config.Native, runtimeDir, stateDir string, records map[string]serviceconfig.Update, now time.Time, facts projectionFacts) (projection, error) {
+// Pure projection combines active intent with the source's immutable workers
+// and current protocol evidence. Producers cannot submit arbitrary effects.
+func projectWithFacts(doc config.Native, protocols protocolPlan, records map[string]serviceconfig.Update, now time.Time, facts projectionFacts) (projection, error) {
 	b, _ := json.Marshal(doc.Network)
 	p := projection{liveRA: map[string]ra.Config{}, native: doc, vrrpOwners: make(map[string]vrrpOwnership)}
 	if err := json.Unmarshal(b, &p.network); err != nil {
 		return p, err
 	}
-	names := map[string]bool{}
-	addInstance := func(v serviceconfig.Instance) error {
-		if names[v.Name] {
-			return fmt.Errorf("generated service name collision: %s", v.Name)
-		}
-		names[v.Name] = true
-		p.instances = append(p.instances, v)
-		return nil
-	}
 	for _, s := range doc.Services {
-		instance, err := s.Instance(runtimeDir, stateDir)
-		if err != nil {
-			return p, err
-		}
-		if err = addInstance(instance); err != nil {
-			return p, err
-		}
+		p.instances = append(p.instances, protocols.instances[s.ModuleName()])
 		if s.Interface() != "" {
 			ensureInterface(&p.network, s.Interface())
 		}
@@ -217,11 +194,8 @@ func projectWithFacts(doc config.Native, runtimeDir, stateDir string, records ma
 				}
 				name := s.Name + "-" + lan.Name + "-ra"
 				module := "service." + name
-				lifetime := 1800
-				if lan.RouterLifetimeSeconds != nil {
-					lifetime = *lan.RouterLifetimeSeconds
-				}
-				c := ra.Config{Resource: name, Interface: lan.Interface, Prefixes: prefixes, RouterLifetimeSeconds: lifetime, DNSSLifetimeSeconds: 1800, MinIntervalSeconds: 3, MaxIntervalSeconds: 10, RDNSS: append([]string(nil), lan.RDNSS...), DNSSL: append([]string(nil), lan.DNSSL...)}
+				c := protocols.lanRA[module]
+				c.Prefixes = prefixes
 				if lan.UseLearnedDNS {
 					if until, usable := informationDeadline(snap, now); usable {
 						for _, server := range unique(snap.DNSServers) {
@@ -232,22 +206,11 @@ func projectWithFacts(doc config.Native, runtimeDir, stateDir string, records ma
 						}
 					}
 				}
-				c.RDNSS = unique(c.RDNSS)
-				c.DNSSL = unique(c.DNSSL)
 				if err := ra.Validate(c); err != nil {
 					return p, err
 				}
 				p.liveRA[module] = c
-				template := c
-				template.Prefixes = nil
-				template.RDNSS = nil
-				template.DNSSL = nil
-				template.LearnedRDNSS = nil
-				template.LearnedDNSSL = nil
-				b, _ := json.Marshal(template)
-				if err := addInstance(serviceconfig.Instance{Name: module, Role: "ra", Config: b, DynamicRA: true}); err != nil {
-					return p, err
-				}
+				p.instances = append(p.instances, protocols.instances[module])
 			}
 		case "vrrp":
 			if !has {
@@ -257,7 +220,7 @@ func projectWithFacts(doc config.Native, runtimeDir, stateDir string, records ma
 			if err := json.Unmarshal(record.Snapshot, &snap); err != nil {
 				return p, err
 			}
-			c := s.VRRPConfig()
+			c := protocols.vrrp[s.ModuleName()]
 			if c.GracefulActivation != nil {
 				until, allowed := facts.vrrpActivation[s.ModuleName()]
 				if !allowed || !vrrp.CurrentElection(snap, facts.bfdClock) {
@@ -298,18 +261,15 @@ func projectWithFacts(doc config.Native, runtimeDir, stateDir string, records ma
 			}
 		}
 	}
-	if err := projectBGP(&p, doc, records, now, facts.bfdClock); err != nil {
+	if err := projectBGP(&p, doc, protocols.bgp, records, now, facts.bfdClock); err != nil {
 		return p, err
 	}
 	if facts.aftr != nil {
-		if err := projectDSLite(&p, doc, runtimeDir, stateDir, records, facts.aftr, now); err != nil {
+		if err := projectDSLite(&p, doc, protocols.instances, records, facts.aftr, now); err != nil {
 			return p, err
 		}
 	}
-	if len(p.instances) > 128 {
-		return p, errors.New("runtime instance limit exceeded")
-	}
-	sort.Slice(p.instances, func(i, j int) bool { return p.instances[i].Name < p.instances[j].Name })
+	sort.Slice(p.instances, func(i, j int) bool { return p.instances[i].instance.Name < p.instances[j].instance.Name })
 	if err := network.Validate(p.network); err != nil {
 		return p, err
 	}

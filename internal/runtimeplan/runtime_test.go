@@ -220,7 +220,7 @@ func TestPDProjectionKeepsDeprecatedAddressesAndStableRAIdentity(t *testing.T) {
 	snapshot := dhcp6pd.Snapshot{Active: true, Snapshot: old6.Snapshot{Resource: "pd", Interface: "wan0", IAID: 7, CurrentPrefix: "2001:db8:100::/56", AcquiredAt: now, Preferred: 100, Valid: 200, ExpiresAt: now.Add(200 * time.Second), PreviousPrefixes: []old6.PreviousPrefixSnapshot{{Prefix: "2001:db8:200::/56", ExpiresAt: now.Add(80 * time.Second)}}}}
 	raw, _ := json.Marshal(snapshot)
 	records := map[string]serviceconfig.Update{"service.pd": {Snapshot: raw}}
-	first, e := project(doc, "/run/routerd", "/var/lib/routerd", records, now)
+	first, e := projectNative(doc, "/run/routerd", "/var/lib/routerd", records, now)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -243,20 +243,20 @@ func TestPDProjectionKeepsDeprecatedAddressesAndStableRAIdentity(t *testing.T) {
 	if !lan.AddressOptions["2001:db8:200:3::1/64"].PreferredUntil.Before(now) {
 		t.Fatal("old prefix is still preferred")
 	}
-	_, digest, _ := encodeInstance(first.instances[1])
+	digest := first.instances[1].digest
 	snapshot.ExpiresAt = snapshot.ExpiresAt.Add(time.Minute)
 	snapshot.AcquiredAt = snapshot.AcquiredAt.Add(time.Minute)
 	raw, _ = json.Marshal(snapshot)
 	records["service.pd"] = serviceconfig.Update{Snapshot: raw}
-	renewed, e := project(doc, "/run/routerd", "/var/lib/routerd", records, now)
+	renewed, e := projectNative(doc, "/run/routerd", "/var/lib/routerd", records, now)
 	if e != nil {
 		t.Fatal(e)
 	}
-	_, next, _ := encodeInstance(renewed.instances[1])
+	next := renewed.instances[1].digest
 	if digest != next {
 		t.Fatal("PD renewal changes RA immutable identity and would restart it")
 	}
-	expired, e := project(doc, "/run/routerd", "/var/lib/routerd", records, now.Add(time.Hour))
+	expired, e := projectNative(doc, "/run/routerd", "/var/lib/routerd", records, now.Add(time.Hour))
 	if e != nil {
 		t.Fatal(e)
 	}
