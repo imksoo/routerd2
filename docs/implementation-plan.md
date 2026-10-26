@@ -604,7 +604,7 @@ PAP/CHAP、DNS、MTU 1454、LAN TCP/UDP、IPv6CP link-local、元の観測期限
 worker 強制終了・古い通知・認証拒否/修復・AC 停止/復旧を確認した。
 `make check-pppoe` で実 daemon と packet capture を再実行する。
 engine の配布・署名・依存 library、PPP 上の PD、DNS の resolver 適用、完全な旧 field、
-DS-Lite との二経路/PBR/MSS、実 ISP は未完了。[ADR 0002](adr/0002-pppoe-engine.md) を参照。
+二経路での大 payload/MSS、実 ISP は未完了。[ADR 0002](adr/0002-pppoe-engine.md) を参照。
 
 範囲: 旧 routerd 互換 / track: network / risk: high。
 前提: CORE-03, CORE-06, NET-03, NET-05。 設計判断: D-02, D-03, D-07。
@@ -624,6 +624,12 @@ DS-Lite との二経路/PBR/MSS、実 ISP は未完了。[ADR 0002](adr/0002-ppp
 再利用・比較元: [pkg/pppoeclient](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/pppoeclient), [pkg/controller/pppoesession](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/pppoesession), [cmd/routerd-pppoe-client](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/cmd/routerd-pppoe-client)。
 
 実装先の案: `internal/protocol/pppoe (新設予定)`, `internal/network`, `internal/serviceconfig`, `internal/runtimeplan`。
+
+2026-10-26追加: 独立RP-PPPoE ACとLinux AFTRの二つのWAN、別LAN client、実native
+Health/PBRを結び、応答内容で選択経路を識別したTCP/UDPの切替・復旧を確認した。
+Healthの元期限、古い通知、5秒confirmed rollback、AFTR worker再起動後の新Healthによる
+復旧も確認した。AFTRのactive factと通知元の実登録確認を追加し、consumerによる動的linkの
+二重所有を除いた。再実行は `make check-dual-wan`。MSS・大payload、実ISPのPPP、配布engineは未完了。
 
 #### NET-05 — link・address・WAN resource の完全化
 
@@ -818,7 +824,7 @@ learned route先の利用者TCP/UDPも通信し、撤去中の接続拒否と復
 明示VRFではmultihop socketをVRF master、single-hopをmember interfaceへ束縛する。
 source domainとBGP FIB tableも検証する。同じendpointを持つ二つのVRFとdefault domainで
 実daemonを動かし、独立TCP/UDP・片側UDP障害・worker交替・main tableへの流出防止を確認した。
-single-hop VRFも実peerと障害・復旧を確認した。現在のcompiler contractはnative-18。
+single-hop VRFも実peerと障害・復旧を確認した。現在のcompiler contractはnative-19。
 IPv4/IPv6とも同じendpointを二つのVRFとdefault domainで同時使用し、BFD/BGPと三経路の
 TCP/UDPを確認した。defaultとVRFのUDP bind競合は受信socketだけの`SO_REUSEADDR`で修正した。
 domain/sourceの既存claimで二重ownerを拒否し、TX port専有と`SO_REUSEPORT`不使用を維持する。

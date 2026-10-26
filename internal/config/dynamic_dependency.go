@@ -19,7 +19,7 @@ func guardedDynamicDependency(source Document, consumerName, ownerName string) b
 			consumer = resource
 		}
 	}
-	if owner == nil || owner.Service.VRRP == nil && owner.Service.PPPoE == nil || consumer == nil {
+	if owner == nil || owner.Service.VRRP == nil && owner.Service.PPPoE == nil && owner.Service.DSLite == nil || consumer == nil {
 		return false
 	}
 	edge := consumer.Owner == owner.ID

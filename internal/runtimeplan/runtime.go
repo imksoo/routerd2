@@ -493,7 +493,7 @@ func (r *Runtime) Observe(ctx context.Context, u serviceconfig.Update) error {
 		return r.acceptBFD(ctx, u)
 	}
 	var producerStatus *supervisor.Status
-	if u.Role == "bgp" || u.Role == "dhcp4" || u.Role == "vrrp" || u.Role == "dhcp_server" || u.Role == "pppoe" {
+	if u.Role == "bgp" || u.Role == "dhcp4" || u.Role == "vrrp" || u.Role == "dhcp_server" || u.Role == "pppoe" || u.Role == "aftr" {
 		// A restarted control has no remembered generations. Authenticate even
 		// its first publication against the current process-tree registry;
 		// initial publication precedes worker Ready, so Ready is not required.

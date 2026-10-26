@@ -186,6 +186,9 @@ func validateDSLiteSources(services []Service) error {
 		}
 	}
 	for _, s := range services {
+		if s.DSLite == nil {
+			continue
+		}
 		if owner := tunnels[s.Interface()]; owner != "" {
 			return fmt.Errorf("service %s cannot use dynamically owned DS-Lite tunnel of %s as its underlay", s.Name, owner)
 		}

@@ -113,7 +113,7 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 	}
 	for _, s := range doc.Services {
 		p.instances = append(p.instances, protocols.instances[s.ModuleName()])
-		if s.Interface() != "" && !protocols.pppInterfaces[s.Interface()] {
+		if s.Interface() != "" && !protocols.serviceLinks[s.Interface()] {
 			ensureInterface(&p.network, s.Interface())
 		}
 		if s.DHCPRelay != nil {

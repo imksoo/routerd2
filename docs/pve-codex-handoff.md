@@ -10,6 +10,19 @@
 
 ## 現在の実装
 
+- 実 PPPoE と独立 Linux AFTR の二経路を、別 LAN client から native Health/PBR 経由で
+  通信した。TCP/UDP の応答で PPP/DS-Lite の選択を識別し、主 probe だけの停止・復旧、
+  Health の元の観測期限切れ、5秒 confirmed rollback、AFTR worker 再起動後の復旧を確認した。
+  AFTR の `.active` fact と現在の実 supervisor 登録による通知の認証を追加し、
+  Health が動的 tunnel を使えない制約と、consumer による interface の二重所有を修正した。
+  再起動試験では古い残存 rule だけで復旧扱いにせず、新 worker と新 Health の適用を待つ。
+  通常 DAD を維持する。二経路の大きな TCP payload / MSS・実 ISP の PPP・物理 NIC は未検証。
+  期限切れHealthの同一通知再送は経路を復活させず、AFTRの旧世代通知は409で拒否した。
+  再実行は `make check-dual-wan`、記録は `dist/dual-wan-current/`。
+  関連 Go/race、全 vet、amd64/arm64 の6静的 ELF、format/Python checks が通った。
+  記録は `dist/dual-wan-local-fixed.log`、`dist/dual-wan-race.log`、
+  `dist/dual-wan-vet-linux-build.log`、`dist/dual-wan-format-tools.log`。
+
 - RA/RIO の期限更新は kernel の既存 IPv6 route を更新する。削除・再追加による
   DS-Lite の一時 host-unreachable を修正した。更新前後の physical timer を ACK まで
   記録し、writer 再起動後も所有権を判定する。旧形式 reader は追加しない。
@@ -42,7 +55,7 @@
   ローカル結果は `dist/pppoe-host-current/` と `dist/pppoe-alpine-current/` の log/pcap。
   `make check` と、最終変更の関連 race・全 vet・amd64/arm64 の静的 build が通った。
   scratch/appliance に engine を同梱したものではない。配布 component・PPP 上の PD・
-  resolver 適用・二経路 PBR/MSS・実 ISP は未完了。[ADR 0002](adr/0002-pppoe-engine.md) を参照。
+  resolver 適用・二経路 MSS・実 ISP は未完了。[ADR 0002](adr/0002-pppoe-engine.md) を参照。
 
 - controlは読み取り専用のsource宣言を所有し、一度compileしたplanへ有限のfactを渡す。
   一時FactStoreや仮producer登録は使わない。operator revisionと観測・投影世代を区別する。
@@ -106,7 +119,7 @@
 - Health監視と履歴配送は分離する。保存先障害・queue満杯でもprobeを止めず、欠落と保存エラーを表示する。
   全probeの無欠落保存は保証しない。
 
-現在のworker ABIは3、compiler contractは `resource-program-native-18`、network journalはformat 8。
+現在のworker ABIは3、compiler contractは `resource-program-native-19`、network journalはformat 8。
 `track.resource`は宣言IDであり、decisionはhealthy/unhealthy/neutral/unknownを明示する。
 破棄したservice-only形式のreader・混在運用・migrationは実装しない。
 

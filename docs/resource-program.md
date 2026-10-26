@@ -286,7 +286,7 @@ compiler は明示された辺に加え、program 内で管理する link/interf
 
 現在の実行時 fact は `service.NAME.ready` と `service.NAME.active`。
 ready は supervisor の現在 generation / config digest と有限の観測期限を検査する。
-active は DHCP4 / DHCP6-PD / VRRP / BGP / DHCP server の受理済み snapshot から作り、
+active は DHCP4 / DHCP6-PD / VRRP / BGP / DHCP server / PPPoE / AFTR の受理済み snapshot から作り、
 Health の有限 sample も同じ active fact に変換する。
 operator revision、boot ID、producer generation / epoch / sequence と CLOCK_BOOTTIME の期限を照合する。
 VRRPは元のObservedNanos/ExpiresNanosをfactとVIP address lifetimeへ渡し、UTCのvalid_untilは表示だけに使う。
@@ -410,15 +410,18 @@ routerd2 の試作 `schema_version: 1` とその保存 record は読み込まな
 元 routerd の条件・依存・削除契約の根拠は [feature-contracts.md](feature-contracts.md) を参照。
 この checkpoint は ResourceProgram の初期実装で、全 resource 契約の同等性を完了したものではない。
 
-## VRRP所有interfaceを使うworker
+## protocol所有interfaceを使うworker
 
-VRRPが作成するVIP interfaceを他のserviceで使う場合、consumerからVRRP
-resourceへの直接の`depends_on`または`owner`を指定する。
+VRRPのVIP interface、PPP unit、DS-Lite tunnelを他のserviceで使う場合、consumerから
+所有serviceのresourceへの直接の`depends_on`または`owner`を指定する。
 さらにconsumerの`when`、または依存先の`ready_when`が、対応する
 `service.<name>.active`の真を必須にしなければならない。
 `ready`だけではBACKUPも含むため、interface所有権の条件にならない。
 `all`・`any`・`not`は三値論理で検査し、無関係なOR分岐だけで起動できる条件は拒否する。
-static link/interface/routeの所有権制限や、他protocolのdynamic interface制限は継続する。
+consumerはinterface/address/UPを再所有しない。static link/interface/routeの所有権制限は継続する。
+AFTRのactiveは現在のsupervisor登録と元のsource/DNS期限で制限する。変更のないstatic
+endpointへ架空のheartbeatや受信時刻のleaseを加えない。DS-Lite tunnelを別のDS-Liteの
+underlayには使えないが、所有者に従うHealth等のconsumerは使える。
 
 条件付きVRRPの通知は受理だけでは成功にならない。coordinatorは依存workerの
 終了を確認してからnetwork workerへVIP/VMACを適用・撤去し、そのACKを待って
@@ -427,7 +430,7 @@ ACTIVE成功には元boot IDと絶対期限を保持するVIP投影が必要で�
 旧世代・上書きされた通知や適用失敗を成功として返さない。
 
 このsource受入範囲の追加に伴い、署名されたconfiguration contractは
-`resource-program-native-18`とする。PPPの有限`.active` factで依存workerを起動し、PPP unitの
+`resource-program-native-19`とする。PPPの有限`.active` factで依存workerを起動し、PPP unitの
 UP/addressはpppdが所有する。`forwarding.ipv4_rp_filter`はLinux all/defaultを明示して管理する
 （0:無効、1:strict、2:loose、省略:管理しない）。撤去時は記録した元の値へ戻す。
 BFDの明示`multihop: true`はinterfaceを指定せず、

@@ -70,6 +70,9 @@ func (m *memoryManager) Status(_ context.Context) (supervisor.Status, error) {
 	s := supervisor.Status{Ready: true, InstanceID: testSupervisorInstance}
 	for _, v := range m.modules {
 		generation := uint64(0)
+		if v.Role == "aftr" {
+			generation = 1
+		}
 		if v.Role == "dhcp4" {
 			generation = max(uint64(1), m.dhcp4Generation)
 		}

@@ -13,24 +13,24 @@ import (
 // A protocol plan belongs to one immutable source configuration. Observations
 // select its workers and supply live data; they do not rebuild worker identity.
 type protocolPlan struct {
-	instances     map[string]binding
-	bgp           map[string]bgpconfig.Config
-	vrrp          map[string]vrrp.Config
-	lanRA         map[string]ra.Config
-	aftr          map[string]aftrDefinition
-	pppInterfaces map[string]bool
+	instances    map[string]binding
+	bgp          map[string]bgpconfig.Config
+	vrrp         map[string]vrrp.Config
+	lanRA        map[string]ra.Config
+	aftr         map[string]aftrDefinition
+	serviceLinks map[string]bool
 }
 
 // The complete Native source has passed config.Compile, including generated
 // worker-name collisions and the service/instance limits.
 func prepareProtocols(doc config.Native, runtimeDir, stateDir string) (protocolPlan, error) {
 	plan := protocolPlan{
-		instances:     make(map[string]binding),
-		bgp:           make(map[string]bgpconfig.Config),
-		vrrp:          make(map[string]vrrp.Config),
-		lanRA:         make(map[string]ra.Config),
-		aftr:          make(map[string]aftrDefinition),
-		pppInterfaces: make(map[string]bool),
+		instances:    make(map[string]binding),
+		bgp:          make(map[string]bgpconfig.Config),
+		vrrp:         make(map[string]vrrp.Config),
+		lanRA:        make(map[string]ra.Config),
+		aftr:         make(map[string]aftrDefinition),
+		serviceLinks: make(map[string]bool),
 	}
 	add := func(instance serviceconfig.Instance) error {
 		bound, err := encodeInstance(instance)
@@ -42,7 +42,13 @@ func prepareProtocols(doc config.Native, runtimeDir, stateDir string) (protocolP
 	}
 	for _, service := range doc.Services {
 		if service.PPPoE != nil {
-			plan.pppInterfaces[service.PPPoE.PPPInterface] = true
+			plan.serviceLinks[service.PPPoE.PPPInterface] = true
+		}
+		if service.DSLite != nil {
+			plan.serviceLinks[service.DSLite.Tunnel] = true
+		}
+		if service.VRRP != nil && service.VRRP.VIPInterface != "" {
+			plan.serviceLinks[service.VRRP.VIPInterface] = true
 		}
 		name := service.ModuleName()
 		var instance serviceconfig.Instance

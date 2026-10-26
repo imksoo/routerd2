@@ -41,7 +41,7 @@ PPP/PPPoE 機能を必要とする。現時点の scratch runtime / appliance �
 CORE-06 / NET-04 の残作業である。Go の静的 build 成功で代用しない。
 
 PPP 上の DHCPv6 PD、resolver への DNS 適用、完全な旧 resource field の意味、
-DS-Lite との二経路 Health/PBR・MSS、実 ISP と物理 NIC の受入も未完了である。
+二経路の大 payload / MSS、実 ISP と物理 NIC の受入も未完了である。
 これらの結果に応じて今回の interface・配置・契約を変更する。prototype 互換層は作らない。
 
 PPP の有限 `.active` fact と明示した依存関係で Health を起動する。PPP のアドレスと
@@ -49,7 +49,14 @@ UP 状態は引き続き pppd が所有する。専用 routing table と marked 
 Linux の RPF が応答を拒否し得る。旧 routerd の router profile と同様の効果は、明示した
 `forwarding.ipv4_rp_filter: 0` で選ぶ。all/default の元の値は journal が所有し、設定撤去で
 復元する。既存 interface の個別 RPF 値は変更しない。実 peer で Health→PBR→TCP/UDP と
-設定撤去・confirmed rollback を確認した。DS-Lite との二経路受入は依然として残る。
+設定撤去・confirmed rollback を確認した。
+
+独立 RP-PPPoE AC と Linux AFTR を同時に用いる `make check-dual-wan` では、
+別 LAN client の TCP/UDP 応答で選択経路を識別した。主 probe 障害・復旧、Health の元期限、
+confirmed rollback、AFTR worker の再起動後の復旧を確認した。Health は PPP unit や
+DS-Lite tunnel の interface/address/UP を所有しない。AFTR の active fact は実 supervisor
+登録と元の endpoint 期限に従い、static endpoint に heartbeat を追加しない。
+この小 payload の通信は MSS と path MTU の受入を代替しない。
 
 参照:
 

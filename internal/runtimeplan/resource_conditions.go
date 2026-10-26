@@ -6,6 +6,7 @@ import (
 
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/lifetime"
+	"github.com/imksoo/routerd2/internal/protocol/aftr"
 	"github.com/imksoo/routerd2/internal/protocol/bfd"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp4"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
@@ -151,6 +152,19 @@ func (r *Runtime) conditionFactsLocked(cfg configuration, now time.Time) (result
 		}
 		facts.Facts[name+".ready"] = resourceprogram.Fact{Value: ready, ObservedNanos: r.guardUntilNanos - uint64(time.Second), ExpiresNanos: r.guardUntilNanos, WorkerGeneration: module.Generation, ProducerEpoch: r.supervisorInstance}
 		record := r.records[name]
+		if record.Role == "aftr" {
+			var endpoint aftr.Snapshot
+			if !module.Ready || record.Generation != module.Generation || record.ConfigDigest != binding.digest || json.Unmarshal(record.Snapshot, &endpoint) != nil || endpoint.BootID != clock.BootID || endpoint.ObservedNanos > ticks {
+				continue
+			}
+			value := resourceprogram.False
+			if endpoint.Active && endpoint.Available && endpoint.ValidUntil.Live(clock) {
+				value = resourceprogram.True
+			}
+			until := ticks + uint64(min(time.Second, endpoint.ValidUntil.Remaining(clock)))
+			facts.Facts[name+".active"] = resourceprogram.Fact{Value: value, ObservedNanos: endpoint.ObservedNanos, ExpiresNanos: min(until, r.guardUntilNanos), WorkerGeneration: module.Generation, ProducerEpoch: record.ProducerEpoch}
+			continue
+		}
 		if record.Role == "pppoe" {
 			var session pppoeconfig.Snapshot
 			if !module.Ready || record.Generation != module.Generation || record.ConfigDigest != binding.digest || json.Unmarshal(record.Snapshot, &session) != nil || session.ValidUntil.BootID != clock.BootID || session.ObservedNanos > ticks {
