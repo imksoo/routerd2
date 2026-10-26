@@ -382,7 +382,7 @@ func decode(payload []byte) (wire.Message, error) {
 			}
 		}
 	}
-	for code, size := range map[byte]int{wire.OptionMessageType: 1, wire.OptionServerID: 4, wire.OptionSubnetMask: 4, wire.OptionLeaseTime: 4, wire.OptionT1: 4, wire.OptionT2: 4, wire.OptionMTU: 2, wire.OptionBroadcastAddress: 4} {
+	for code, size := range map[byte]int{wire.OptionMessageType: 1, wire.OptionServerID: 4, wire.OptionSubnetMask: 4, wire.OptionLeaseTime: 4} {
 		if b, exists := m.Options[code]; exists && len(b) != size {
 			return wire.Message{}, fmt.Errorf("invalid DHCPv4 option %d length", code)
 		}
@@ -471,11 +471,6 @@ func (c *client) handle(ctx context.Context, payload []byte) error {
 		life := m.Options[wire.OptionLeaseTime]
 		if len(life) != 4 || binary.BigEndian.Uint32(life) == 0 {
 			return nil
-		}
-		for _, code := range []byte{wire.OptionRouter, wire.OptionDNSServer, wire.OptionNTPServer} {
-			if len(m.Options[code])%4 != 0 {
-				return nil
-			}
 		}
 		lease := wire.LeaseFromACK(m, c.clock.WallTime.UTC())
 		if lease.T1 <= 0 || lease.T2 <= lease.T1 || lease.T2 >= lease.LeaseTime {

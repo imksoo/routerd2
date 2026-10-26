@@ -62,3 +62,7 @@ ISC Kea 2.4.1との同時NA/PD取得、WAN/LAN TCP/UDP、リンクローカルDN
 KeaのReplyからPDだけを省略しても、元T2/Rebind・PD失効とNA通信継続を確認した。
 完全なReplyを戻すとLANも復旧した。省略された旧prefixの期限を勝手に変更する処理を削除し、
 WANリンクローカルDNSを別LANへ広告しないようにした。全体の機能受入完了ではない。
+
+DHCPv4の任意option全拒否も削除し、旧`LeaseFromACK`の完結した要素・規定timer処理を使う。
+不良optionを含むACKは局所確認、独立dnsmasqは通常の/32とTCP/UDP確認までである。
+raw timer指定をpeer自身が正規化したため、不良timerの実socket受信を確認したとは数えない。

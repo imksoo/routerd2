@@ -172,6 +172,16 @@ Keaのローカル出力は`dist/kea-partial-peer-4.log`、private setup/capture
 実回線の長時間TCP/UDPと元T1でのPD更新は継続中で、まだ成功と数えない。
 実行中の回線バイナリーは`ntt-aftr`であり、以降の修正まで実回線受入済みとはしない。
 
+DHCPv4受信も旧`LeaseFromACK`の実装と照合し、任意T1/T2・MTU・broadcastの不良だけで
+message全体を捨てる制約と、DNS/NTP/router listの端数だけで割当を捨てる制約を削除した。
+旧helperが完結したaddress要素を使い、使えない任意timerを規定値へ戻す経路を使う。
+必須identity・subnet mask・lease期間・packet境界の検査は残す。局所的なACK試験は通った。
+独立dnsmasqとの/32・明示gateway・TCP/UDPも最終`dhcp4-options`で通った。
+ただしdnsmasqはraw T1指定を通常の4-byte値へ正規化したため、その実行を不良timer受信の
+相互接続試験とは数えない。出力は`dist/dhcp4-optional-local.log`、`dist/dhcp4-optional-peer.log`。
+`make check`・全体Race Detector・vet・6静的ELF buildも成功した
+（`dist/dhcp4-optional-check-build.log`）。
+
 ## 未完了と次の作業
 
 1. 全実装計画、全更新復旧経路、外部engine、配備先と対象実機の受入は未完了。

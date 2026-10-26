@@ -170,10 +170,28 @@ func TestConcatenatedAndOverloadedOptions(t *testing.T) {
 		t.Fatal("duplicate singleton server identity accepted")
 	}
 	bad = append(append([]byte(nil), b[:len(b)-1]...), wire.OptionT1, 1, 1, 255)
-	if _, err := decode(bad); err == nil {
-		t.Fatal("malformed timer option accepted")
+	if _, err := decode(bad); err != nil {
+		t.Fatal("unusable optional timer discarded an otherwise usable message", err)
 	}
 }
+func TestOptionalDataDoesNotDiscardUsableACK(t *testing.T) {
+	c, _, _, _ := fixture(t)
+	if err := c.start(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.handle(context.Background(), reply(c, wire.MessageOffer)); err != nil {
+		t.Fatal(err)
+	}
+	ack := reply(c, wire.MessageACK)
+	ack = append(ack[:len(ack)-1], wire.OptionT1, 1, 1, wire.OptionDNSServer, 1, 255, wire.OptionMTU, 1, 255, wire.OptionEnd)
+	if err := c.handle(context.Background(), ack); err != nil {
+		t.Fatal(err)
+	}
+	if c.state != wire.StateBound || c.lease.T1 != c.lease.LeaseTime/2 || c.lease.MTU != 0 || len(c.lease.DNSServers) != 1 || c.lease.DNSServers[0].String() != "192.0.2.53" {
+		t.Fatal("independent optional data lost the address, standard timer or complete DNS entry", c.state, c.lease)
+	}
+}
+
 func TestRejectForeignAndMalformedReplies(t *testing.T) {
 	c, _, _, _ := fixture(t)
 	if err := c.start(context.Background(), nil); err != nil {

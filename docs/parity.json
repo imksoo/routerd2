@@ -282,7 +282,7 @@
         "dhcp4-client"
       ],
       "parity_status": "not_integrated",
-      "known_gap": " The client now requests the subnet mask it requires; an independent dnsmasq custom-mask ACK reproduced the prior request-list omission. A /32 lease with an explicitly configured gateway host route installed the default and passed actual TCP/UDP. Projection no longer rejects a gateway solely for lying outside the assigned subnet; no synthetic onlink route is added."
+      "known_gap": " The client now requests the subnet mask it requires; an independent dnsmasq custom-mask ACK reproduced the prior request-list omission. A /32 lease with an explicitly configured gateway host route installed the default and passed actual TCP/UDP. Projection no longer rejects a gateway solely for lying outside the assigned subnet; no synthetic onlink route is added. Removed whole-message rejection for unusable independent optional fields, using the existing LeaseFromACK timer defaults and complete address entries. Local ACK regression passed; final actual dnsmasq /32 and TCP/UDP passed. dnsmasq normalized the attempted raw timer override, so malformed-timer socket interoperability was not demonstrated."
     },
     {
       "id": "wan.dhcp6",

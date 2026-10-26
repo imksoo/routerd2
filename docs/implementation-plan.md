@@ -670,6 +670,9 @@ WANリンクローカルDNSは別LANへ広告せず、実LAN captureでも確認
 DHCPv4は旧request encoderのsubnet mask要求漏れを独立dnsmasqで再現して修正した。
 /32割当・明示gateway直結routeからdefault routeとTCP/UDPが通った。
 サブネット外であるだけでは投影全体を拒否せず、架空のonlink routeも作らない。
+任意DHCPv4 optionの不良で割当全体を捨てる制約を削除し、旧helperの規定値・完結要素処理を使う。
+不良option ACKは局所確認、独立dnsmasqは通常の/32・TCP/UDP確認までと区別する。
+
 
 
 
