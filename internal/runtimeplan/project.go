@@ -19,6 +19,7 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/bfd"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp4"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
+	"github.com/imksoo/routerd2/internal/protocol/pppoeconfig"
 	"github.com/imksoo/routerd2/internal/protocol/ra"
 	"github.com/imksoo/routerd2/internal/protocol/raclient"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
@@ -122,6 +123,17 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 		}
 		record, has := records[s.ModuleName()]
 		switch s.Role() {
+		case "pppoe":
+			if !has {
+				continue
+			}
+			var snapshot pppoeconfig.Snapshot
+			if err := json.Unmarshal(record.Snapshot, &snapshot); err != nil {
+				return p, err
+			}
+			if snapshot.Active && snapshot.ValidUntil.Live(facts.bfdClock) && (s.PPPoE.DefaultRoute == nil || *s.PPPoE.DefaultRoute) {
+				p.network.Routes = append(p.network.Routes, network.Route{Destination: "0.0.0.0/0", Interface: s.PPPoE.PPPInterface, Metric: s.PPPoE.Metric, Table: s.PPPoE.Table, BootID: snapshot.ValidUntil.BootID, ExpiresNanos: snapshot.ValidUntil.Nanos})
+			}
 		case "ra_client":
 			var snapshot raclient.Snapshot
 			if has {

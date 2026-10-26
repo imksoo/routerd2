@@ -33,6 +33,7 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/health"
+	"github.com/imksoo/routerd2/internal/protocol/pppoeconfig"
 	"github.com/imksoo/routerd2/internal/protocol/ra"
 	"github.com/imksoo/routerd2/internal/protocol/raclient"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
@@ -492,7 +493,7 @@ func (r *Runtime) Observe(ctx context.Context, u serviceconfig.Update) error {
 		return r.acceptBFD(ctx, u)
 	}
 	var producerStatus *supervisor.Status
-	if u.Role == "bgp" || u.Role == "dhcp4" || u.Role == "vrrp" || u.Role == "dhcp_server" {
+	if u.Role == "bgp" || u.Role == "dhcp4" || u.Role == "vrrp" || u.Role == "dhcp_server" || u.Role == "pppoe" {
 		// A restarted control has no remembered generations. Authenticate even
 		// its first publication against the current process-tree registry;
 		// initial publication precedes worker Ready, so Ready is not required.
@@ -623,6 +624,16 @@ func strict(b []byte, v any) error {
 }
 func validateSnapshot(instance serviceconfig.Instance, b json.RawMessage) error {
 	switch instance.Role {
+	case "pppoe":
+		var cfg pppoeconfig.Config
+		var snapshot pppoeconfig.Snapshot
+		if err := strict(instance.Config, &cfg); err != nil {
+			return err
+		}
+		if err := strict(b, &snapshot); err != nil {
+			return err
+		}
+		return pppoeconfig.ValidateSnapshot(cfg, snapshot)
 	case "health":
 		var cfg health.Config
 		var snapshot health.Snapshot

@@ -1,0 +1,30 @@
+# Linux development profile: pppd + rp-pppoe.so + /dev/ppp are required.
+# Create the private password file before boot. Replace username/interfaces.
+schema_version: 2
+resources:
+  - id: wan
+    interface: {name: wan0}
+  - id: lan
+    interface: {name: lan0}
+  - id: lan-address
+    address: {interface: lan0, cidr: 192.168.50.1/24}
+  - id: forwarding
+    forwarding: {ipv4: true}
+  - id: firewall
+    firewall:
+      forward:
+        - {from: lan0, to: ppp-wan}
+      masquerade:
+        - {source: 192.168.50.0/24, out_interface: ppp-wan}
+  - id: internet
+    service:
+      name: internet
+      pppoe:
+        interface: wan0
+        ppp_interface: ppp-wan
+        username: replace-with-provider-username
+        password_file: /etc/routerd/secrets/pppoe-password
+        auth_method: both
+        mtu: 1454
+        mru: 1454
+        metric: 100

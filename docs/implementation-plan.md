@@ -598,6 +598,14 @@ network intentのprotocol投影もJSON往復を除き、変更する集合だけ
 
 #### NET-04 — PPPoE の engine 選定と session 運用
 
+2026-10-26 実装中。既存 routerd の `LinuxPeer` を土台にした設定生成と foreground pppd を使い、
+supervisor/control/network/PPPoE worker を接続した。独立 RP-PPPoE 3.15 / pppd 2.4.9 で
+PAP/CHAP、DNS、MTU 1454、LAN TCP/UDP、IPv6CP link-local、元の観測期限での撤去、
+worker 強制終了・古い通知・認証拒否/修復・AC 停止/復旧を確認した。
+`make check-pppoe` で実 daemon と packet capture を再実行する。
+engine の配布・署名・依存 library、PPP 上の PD、DNS の resolver 適用、完全な旧 field、
+DS-Lite との二経路/PBR/MSS、実 ISP は未完了。[ADR 0002](adr/0002-pppoe-engine.md) を参照。
+
 範囲: 旧 routerd 互換 / track: network / risk: high。
 前提: CORE-03, CORE-06, NET-03, NET-05。 設計判断: D-02, D-03, D-07。
 
@@ -802,7 +810,7 @@ learned route先の利用者TCP/UDPも通信し、撤去中の接続拒否と復
 明示VRFではmultihop socketをVRF master、single-hopをmember interfaceへ束縛する。
 source domainとBGP FIB tableも検証する。同じendpointを持つ二つのVRFとdefault domainで
 実daemonを動かし、独立TCP/UDP・片側UDP障害・worker交替・main tableへの流出防止を確認した。
-single-hop VRFも実peerと障害・復旧を確認した。現在のcompiler contractはnative-16。
+single-hop VRFも実peerと障害・復旧を確認した。現在のcompiler contractはnative-17。
 IPv4/IPv6とも同じendpointを二つのVRFとdefault domainで同時使用し、BFD/BGPと三経路の
 TCP/UDPを確認した。defaultとVRFのUDP bind競合は受信socketだけの`SO_REUSEADDR`で修正した。
 domain/sourceの既存claimで二重ownerを拒否し、TX port専有と`SO_REUSEPORT`不使用を維持する。

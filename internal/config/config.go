@@ -154,6 +154,9 @@ func validateNative(d Native, source Document) error {
 	reserved := map[string]string{}
 	for _, service := range d.Services {
 		name := ""
+		if service.PPPoE != nil {
+			name = service.PPPoE.PPPInterface
+		}
 		if service.VRRP != nil {
 			name = service.VRRPConfig().VIPInterface
 		}

@@ -312,12 +312,12 @@
         "pkg/controller/pppoesession",
         "cmd/routerd-pppoe-client"
       ],
-      "native_replacement": "Retain config/status/event behavior; provide discovery, PPP authentication/LCP/IPCP/IPv6CP and kernel PPP attachment in an owned protocol worker.",
+      "native_replacement": "Adapt routerd LinuxPeer option generation with an owned foreground pppd/RP-PPPoE worker. pppd owns negotiated PPP unit/addresses; the network writer owns finite routes and forwarding.",
       "target_workers": [
         "pppoe"
       ],
       "parity_status": "not_integrated",
-      "known_gap": "The existing client constructs pppd/FreeBSD ppp commands. Wrapping that client in a self-reexec worker does not replace the PPP engine."
+      "known_gap": "Native supervisor/control/network/PPPoE worker and independent RP-PPPoE 3.15 / pppd 2.4.9 passed PAP/CHAP, negotiated DNS, MTU 1454, LAN TCP/UDP, IPv6CP link-local ping, original observation expiry while PPP remained live, killed-worker cleanup/recovery, stale generation rejection, invalid credentials and repair, and AC stop/recovery. make check-pppoe captures actual traffic. Engine/plugin/loader/libraries and licenses are not yet bundled or signed for the appliance/scratch runtime. PPP DHCPv6 PD, resolver effects, complete legacy fields and conversion, two-WAN DS-Lite/PBR/MSS, actual ISP and physical hardware remain incomplete. The same communication and recovery checks also passed with an actual Alpine 3.24.3 rootfs and pppd 2.5.3-r0; the standard pppoe.so plugin name and one private DNS file replace assumptions specific to Ubuntu. This is not appliance or signed-engine qualification."
     },
     {
       "id": "wan.dslite",

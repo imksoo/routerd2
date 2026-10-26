@@ -32,7 +32,8 @@
 | system/更新/storage | PID 1、supervisor、署名runtime選択を新規実装 | 起動・停止・回復の順序、kernel/rootfs更新、停電、対象実機。旧OSの成熟した機能を失った範囲を確認する |
 | management | 新規SSH/CLI/control境界と既存Goライブラリ | 旧操作・認証・権限・運用契約。組み込みSSHがあるだけでは同等ではない |
 | observability/events | 新規log/event永続化とrule処理。DNS部分では旧logstore等を利用 | 旧OTel・ログ・event/通知・運用操作との欠落と差分 |
-| PPPoE/IPsec/Tailscale | 完成したnative置換はない | 旧engineと配布componentの再利用から実装方針を見直す |
+| PPPoE | 旧 `LinuxPeer` の設定生成と foreground pppd / RP-PPPoE を土台にする | 独立 AC で PAP/CHAP・DNS・LAN TCP/UDP・IPv6CP・期限/再起動/認証拒否と修復を確認。配布 engine・PPP 上の PD・resolver・二経路 PBR/MSS と実 ISP は未完了 |
+| IPsec/Tailscale | 完成したnative置換はない | 旧engineと配布componentの再利用から実装方針を見直す |
 | hybrid/mobility/federation | 旧機能範囲の完成した置換はない | 既存provider/engine/運用契約を土台にする。未実装を新設計で置換済みとは扱わない |
 | time | protocol期限のBOOTTIME化はNTP等の実装ではない | 旧時刻同期機能、clock補正・suspend・rebootと運用契約 |
 

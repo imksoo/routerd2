@@ -19,12 +19,14 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
 	"github.com/imksoo/routerd2/internal/protocol/health"
+	"github.com/imksoo/routerd2/internal/protocol/pppoeconfig"
 	"github.com/imksoo/routerd2/internal/protocol/ra"
 	"github.com/imksoo/routerd2/internal/protocol/raclient"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
 )
 
 type Service struct {
+	PPPoE      *pppoeconfig.Config      `json:"pppoe,omitempty"`
 	Health     *health.Config           `json:"health,omitempty"`
 	BFD        *bfd.Config              `json:"bfd,omitempty"`
 	DSLite     *DSLite                  `json:"ds_lite,omitempty"`
@@ -95,6 +97,9 @@ var safeName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,23}$`)
 var interfaceName = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]{0,14}$`)
 
 func (s Service) Role() string {
+	if s.PPPoE != nil {
+		return "pppoe"
+	}
 	if s.Health != nil {
 		return "health"
 	}
@@ -135,6 +140,9 @@ func (s Service) Role() string {
 }
 func (s Service) ModuleName() string { return "service." + s.Name }
 func (s Service) Interface() string {
+	if s.PPPoE != nil {
+		return s.PPPoE.Interface
+	}
 	if s.Health != nil {
 		return s.Health.Interface
 	}
@@ -180,7 +188,7 @@ func Validate(services []Service) error {
 		}
 		names[s.Name] = true
 		n := 0
-		for _, set := range []bool{s.Health != nil, s.BFD != nil, s.DSLite != nil, s.RAClient != nil, s.DHCPServer != nil, s.DHCPRelay != nil, s.DHCP4 != nil, s.DHCP6 != nil, s.RA != nil, s.DNS != nil, s.VRRP != nil, s.BGP != nil} {
+		for _, set := range []bool{s.PPPoE != nil, s.Health != nil, s.BFD != nil, s.DSLite != nil, s.RAClient != nil, s.DHCPServer != nil, s.DHCPRelay != nil, s.DHCP4 != nil, s.DHCP6 != nil, s.RA != nil, s.DNS != nil, s.VRRP != nil, s.BGP != nil} {
 			if set {
 				n++
 			}
@@ -192,6 +200,9 @@ func Validate(services []Service) error {
 			return fmt.Errorf("service %s has an invalid interface", s.Name)
 		}
 		key := s.Role() + ":" + s.Interface()
+		if s.PPPoE != nil {
+			key = "pppoe:" + s.PPPoE.PPPInterface
+		}
 		var dhcpInterfaces []string
 		if s.DHCPServer != nil {
 			dhcpInterfaces = append(dhcpInterfaces, s.DHCPServer.Interface)
@@ -230,6 +241,13 @@ func Validate(services []Service) error {
 		}
 		sockets[key] = s.Name
 		switch s.Role() {
+		case "pppoe":
+			if s.PPPoE.Resource != "" && s.PPPoE.Resource != s.Name {
+				return errors.New("PPPoE resource is managed by the service name")
+			}
+			if err := pppoeconfig.Validate(s.PPPoEConfig()); err != nil {
+				return err
+			}
 		case "health":
 			if s.Health.Resource != "" && s.Health.Resource != s.Name {
 				return errors.New("health resource is managed by service name")
@@ -392,6 +410,8 @@ func (s Service) Instance(runtimeDir, stateDir string) (Instance, error) {
 	var b []byte
 	var err error
 	switch s.Role() {
+	case "pppoe":
+		b, err = json.Marshal(s.PPPoEConfig())
 	case "health":
 		b, err = json.Marshal(s.HealthConfig())
 	case "bfd":
@@ -426,6 +446,12 @@ func (s Service) Instance(runtimeDir, stateDir string) (Instance, error) {
 		instance.EventDirectory = HealthEventDirectory(stateDir, s.Name)
 	}
 	return instance, err
+}
+
+func (s Service) PPPoEConfig() pppoeconfig.Config {
+	c := *s.PPPoE
+	c.Resource = s.Name
+	return c
 }
 
 // HealthEventDirectory is generated ownership, not an operator-selected path.

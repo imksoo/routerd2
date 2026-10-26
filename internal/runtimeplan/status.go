@@ -12,6 +12,7 @@ import (
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/protocol/bgpconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
+	"github.com/imksoo/routerd2/internal/protocol/pppoeconfig"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
@@ -38,6 +39,13 @@ func (r *Runtime) instanceStatusLocked(name string, b binding, v serviceconfig.U
 		v = r.bfdRecord(name, b.digest)
 	}
 	out := instanceStatus(name, b, v, detail)
+	if v.Role == "pppoe" {
+		var session pppoeconfig.Snapshot
+		clock, err := boottime.Read()
+		if json.Unmarshal(v.Snapshot, &session) == nil && session.Active {
+			out.OwnershipExpired = err != nil || !session.ValidUntil.Live(clock)
+		}
+	}
 	if v.Role == "vrrp" {
 		var election vrrp.Snapshot
 		clock, err := boottime.Read()

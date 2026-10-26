@@ -10,6 +10,18 @@
 
 ## 現在の実装
 
+- PPPoE は旧 `LinuxPeer` の設定生成と pppd を土台にし、実 supervisor/control/network/worker へ統合した。
+  pppd が PPP unit/address、writer が有限の経路を所有する。child の mount namespace に
+  `/etc/ppp`・`/run` と root user option を閉じ込め、ホストの hook や設定を使わない。
+  独立 RP-PPPoE 3.15 / pppd 2.4.9 との PAP/CHAP、DNS、MTU 1454、LAN TCP/UDP、
+  Alpine 3.24.3 / pppd 2.5.3-r0 でも同じ経路を確認した。標準 plugin 名と一つの private DNS file を使う。
+  IPv6CP link-local、writer の原期限撤去、worker 強制終了、古い通知、認証拒否/修復、
+  AC 停止/復旧が通った。再実行は `make check-pppoe`。
+  ローカル結果は `dist/pppoe-host-current/` と `dist/pppoe-alpine-current/` の log/pcap。
+  `make check` と、最終変更の関連 race・全 vet・amd64/arm64 の静的 build が通った。
+  scratch/appliance に engine を同梱したものではない。配布 component・PPP 上の PD・
+  resolver 適用・二経路 PBR/MSS・実 ISP は未完了。[ADR 0002](adr/0002-pppoe-engine.md) を参照。
+
 - controlは読み取り専用のsource宣言を所有し、一度compileしたplanへ有限のfactを渡す。
   一時FactStoreや仮producer登録は使わない。operator revisionと観測・投影世代を区別する。
 - 一つのcoordinatorがconfig適用・通常更新・worker起動停止待ちのkernel適用とACKを所有する。
@@ -72,7 +84,7 @@
 - Health監視と履歴配送は分離する。保存先障害・queue満杯でもprobeを止めず、欠落と保存エラーを表示する。
   全probeの無欠落保存は保証しない。
 
-現在のworker ABIは3、compiler contractは `resource-program-native-16`、network journalはformat 7。
+現在のworker ABIは3、compiler contractは `resource-program-native-17`、network journalはformat 7。
 `track.resource`は宣言IDであり、decisionはhealthy/unhealthy/neutral/unknownを明示する。
 破棄したservice-only形式のreader・混在運用・migrationは実装しない。
 

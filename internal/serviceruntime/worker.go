@@ -1,5 +1,6 @@
 // Package serviceruntime connects protocol engines to the control plane. It
-// never owns netlink mutations or invokes external network utilities.
+// never owns netlink mutations. The PPP engine owns its negotiated PPP unit;
+// routes and forwarding always belong to the network writer.
 package serviceruntime
 
 import (
@@ -28,6 +29,8 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/dns"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
 	"github.com/imksoo/routerd2/internal/protocol/health"
+	"github.com/imksoo/routerd2/internal/protocol/pppoe"
+	"github.com/imksoo/routerd2/internal/protocol/pppoeconfig"
 	"github.com/imksoo/routerd2/internal/protocol/ra"
 	"github.com/imksoo/routerd2/internal/protocol/raclient"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
@@ -97,6 +100,12 @@ func Run(ctx context.Context, runtimeDir, name, role, path, digest string, gener
 		go func() { defer close(done); c.replay(runCtx) }()
 	}
 	switch role {
+	case "pppoe":
+		var cfg pppoeconfig.Config
+		if err := decode(instance.Config, &cfg); err != nil {
+			return err
+		}
+		return pppoe.Run(runCtx, cfg, func(ctx context.Context, s pppoeconfig.Snapshot) error { return c.update(ctx, s) }, ready)
 	case "health":
 		var cfg health.Config
 		if err := decode(instance.Config, &cfg); err != nil {

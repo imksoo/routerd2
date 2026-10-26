@@ -17,11 +17,12 @@ QEMU_SSH_KEY ?=
 LDFLAGS = -s -w -X github.com/imksoo/routerd2/internal/buildinfo.Identity=ROUTERD2-RELEASE-V1:$(RELEASE_ID):END
 BUILD_ARGS = --build-arg GO_VERSION=$(GO_VERSION) --build-arg ALPINE_VERSION=$(ALPINE_VERSION) --build-arg RELEASE_ID=$(RELEASE_ID)
 
-.PHONY: help fmt fmt-check test test-dependencies test-tools race vet check check-health-pbr check-vrrp-unicast check-bgp check-bfd check-pd-ra check-dhcp6 check-aftr check-ra-client check-ra-aftr check-dhcp-relay licenses build build-linux release-built-test container container-multi container-smoke apk image qemu-smoke qemu-network qemu-wireguard qemu-ra-dns qemu-daemon qemu-daemon-aftr qemu-dhcp4-clock qemu-dhcp6-clock qemu-ra-clock qemu-vrrp-daemon qemu-vrrp-activation qemu-vrrp-conditional qemu-vrrp-clock qemu-eventrule qemu-derived qemu-protocols qemu-release-boot qemu-storage qemu-health-power clean
+.PHONY: help fmt fmt-check test test-dependencies test-tools race vet check check-pppoe check-health-pbr check-vrrp-unicast check-bgp check-bfd check-pd-ra check-dhcp6 check-aftr check-ra-client check-ra-aftr check-dhcp-relay licenses build build-linux release-built-test container container-multi container-smoke apk image qemu-smoke qemu-network qemu-wireguard qemu-ra-dns qemu-daemon qemu-daemon-aftr qemu-dhcp4-clock qemu-dhcp6-clock qemu-ra-clock qemu-vrrp-daemon qemu-vrrp-activation qemu-vrrp-conditional qemu-vrrp-clock qemu-eventrule qemu-derived qemu-protocols qemu-release-boot qemu-storage qemu-health-power clean
 
 help:
 	@printf '%s\n' \
 	  'make check             Format, unit tests, race detector, and vet' \
+	  'make check-pppoe        Verify real PPPoE PAP/CHAP, LAN forwarding and recovery' \
 	  'make check-health-pbr  Required two-WAN real-daemon TCP/UDP failover gate' \
 	  'make check-vrrp-unicast Verify VRRP peer failover and finite WAN identity' \
 	  'make check-bfd         Verify BFD/BGP routing domains with real workers' \
@@ -91,6 +92,17 @@ check: fmt-check test test-dependencies test-tools race vet
 
 check-health-pbr: build
 	$(PYTHON) scripts/daemon-tests.py health-pbr --go '$(GO)'
+
+check-pppoe: build
+	$(PYTHON) scripts/pppoe-peer.py
+
+.PHONY: pppoe-peer-profile
+pppoe-peer-profile:
+	$(DOCKER) build --build-arg ALPINE_VERSION=$(ALPINE_VERSION) -f packaging/alpine/pppoe-peer.Dockerfile -t routerd2-pppoe-peer:$(ALPINE_VERSION) .
+	mkdir -p dist
+	@set -eu; profile_id=$$($(DOCKER) create --network none routerd2-pppoe-peer:$(ALPINE_VERSION)); \
+	  trap '$(DOCKER) rm "$$profile_id" >/dev/null' EXIT HUP INT TERM; \
+	  $(DOCKER) export --output dist/pppoe-peer-profile.tar "$$profile_id"
 
 check-vrrp-unicast: build
 	$(PYTHON) scripts/vrrp-unicast.py --go '$(GO)'
