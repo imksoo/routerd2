@@ -40,6 +40,12 @@ the backup timer. Ordinary backup priorities are 1–254. IPv4 and IPv6 can reus
 the same VRID independently. An optional `vrf` requires both the election
 interface's VRF association and the active virtual interface's VRF membership.
 
+Startup waits for a tentative IPv6 election source to finish normal kernel DAD.
+Automatic multicast source selection also waits for kernel link-local creation.
+The worker context and supervisor startup bound own this wait; it neither writes
+addresses nor disables DAD. Active ownership checks still fail immediately when
+the selected source becomes unusable.
+
 For unicast, add a nonempty `unicast_peers` list and an explicit `source_address`.
 For example, the IPv4 configuration above can use `"unicast_peers": ["192.0.2.3"]`.
 Peers must be distinct same-family unicast addresses other than the local source;
@@ -294,6 +300,11 @@ behavior. Keepalived 2.2.8 otherwise resets its send timer on rejected packets
 which can postpone the wrong-password peer's advertisements.
 Both check takeover, process replacement, peer stop, lower-priority recovery,
 VIP TCP/UDP and actual version/interval/authentication fields in capture.
+The election-source addresses in these fixtures use normal DAD; first startup
+must remain in generation 1. The owned virtual HA addresses separately use the
+writer's deliberate NoDAD policy. A traffic probe does not query control, so it
+also works during the test's intentional control SIGSTOP.
+
 Run `make check-vrrp-unicast` on the isolated Linux VM with keepalived installed
 and root or noninteractive sudo available. The runner builds as the caller and
 stages execution in a root-owned 0700 temporary directory; it never changes home

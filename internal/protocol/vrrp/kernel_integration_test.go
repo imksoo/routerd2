@@ -275,11 +275,11 @@ func makeNativePeer(t *testing.T, bridge netlink.Link, family string, priority, 
 			return err
 		}
 		effects = &peerEffects{handle: handle, parent: link.Attrs().Index}
-		transport, _, err = openTransport(c)
+		transport, _, err = openTransport(t.Context(), c)
 		if err != nil {
 			return err
 		}
-		duplicate, _, duplicateErr := openTransport(c)
+		duplicate, _, duplicateErr := openTransport(t.Context(), c)
 		if duplicateErr == nil {
 			_ = duplicate.Close()
 			return errors.New("duplicate VRRP instance was accepted")

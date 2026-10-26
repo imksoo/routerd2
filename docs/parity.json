@@ -183,7 +183,7 @@
         "ha-sync"
       ],
       "parity_status": "not_integrated",
-      "known_gap": "Native VRRPv3 IPv4/IPv6, explicit IPv4 VRRPv2 with optional PASS, and declared-resource Health/BFD/BGP tracking are implemented. Explicit false conditions produce finite neutral decisions that retain counts and penalty. Other resource kinds and Disabled/NotApplicable/Standby phase contracts, external secret resolution and peer-aware legacy import, symmetric native HA qualification, cluster dependency gating, lease replication and NAT session replication remain incomplete. Additional MAC/link-local identities are expressed by conditional network resources with independent writer fencing and scoped L2 announcements."
+      "known_gap": "Native VRRPv3 IPv4/IPv6, explicit IPv4 VRRPv2 with optional PASS, and declared-resource Health/BFD/BGP tracking are implemented. Explicit false conditions produce finite neutral decisions that retain counts and penalty. Other resource kinds and Disabled/NotApplicable/Standby phase contracts, external secret resolution and peer-aware legacy import, symmetric native HA qualification, cluster dependency gating, lease replication and NAT session replication remain incomplete. Additional MAC/link-local identities are expressed by conditional network resources with independent writer fencing and scoped L2 announcements. Normal-DAD IPv6 unicast/multicast startup and actual keepalived VIP TCP/UDP takeover/recovery now pass in generation 1. A slow initial writer-ACK failure during concurrent checks remains unresolved despite a passing isolated rerun."
     },
     {
       "id": "network.links",
@@ -12206,7 +12206,7 @@
     {
       "package": "internal/protocol/vrrp",
       "status": "integrated_supervised_worker",
-      "validation": "Unit/race plus independent native IPv4 and IPv6 peer elections/failover passed. Kernel VMAC, explicit NoDAD, input guards and monotonic ownership-expiry projection are tested. Original v2/auth/tracking/cluster dependency behavior remains separate.",
+      "validation": "Actual product workers and independent keepalived 2.2.8 passed normal-DAD generation-1 IPv6 unicast/multicast startup, both-owner VIP TCP/UDP, takeover and worker replacement/recovery. IPv4, Health/BFD/BGP tracking, v2/PASS and additional WAN identity/RA withdrawal/recovery also passed individually. Removed pre-traffic control diagnostics that blocked the intentional control SIGSTOP test. The HA writer still deliberately uses NoDAD for virtual addresses. A 550ms writer-pause case missed its original deadline during concurrent checks; an isolated rerun passed. This failure and earlier intermittent TCP/expiry results remain open; not hardware, timing or full resource qualification.",
       "resource_parity": false
     },
     {

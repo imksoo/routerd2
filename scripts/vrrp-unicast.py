@@ -55,7 +55,7 @@ def main():
                 raise RuntimeError(name + " failed; see " + str(log_path))
             print(name + ": PASS; " + str(log_path), flush=True)
     finally:
-        subprocess.run(root + ["rm", "-rf", stage], check=True)
+        subprocess.run(root + ["python3", "-c", "import shutil,sys; shutil.rmtree(sys.argv[1])", stage], check=True)
 
 
 if __name__ == "__main__":

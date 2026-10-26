@@ -23,7 +23,7 @@
 | DHCP server | 旧API型と変換を利用。旧dnsmasq engineの再利用ではない | Rapid Commit要求への通常OFFERはScapyとの実通信で修正確認。割当・再送・option・sticky・複数scope・DNS・journalを旧実運用と比較。dnsmasq採用も再評価する |
 | DHCP relay | 旧dnsmasqの動作を新規relayへ置換 | giaddr/option/fragment/VRF/再構成・HA。独立server試験を全機器の受入と扱わない |
 | DS-Lite/AFTR | 旧controller/host処理を新規resolverと通常のip6tnl所有権へ置換 | SelfAddressPolicy・DNS選択・endpoint維持。実回線の定期RA更新によるtunnel再生成を修正し、同じTCPで100秒継続を確認。PD由来source・完全な選択は未完了 |
-| VRRP/HA | 旧keepalivedの選挙・VIP管理をnative VRRPとwriterへ置換 | 実keepalived等との相互接続、VMAC/ND、選挙、notify、tracking、accept/graceful、session継続。新規置換の妥当性を再評価する |
+| VRRP/HA | 旧keepalivedの選挙・VIP管理をnative VRRPとwriterへ置換 | keepalived 2.2.8との通常DAD起動・VIP TCP/UDP・選挙/停止/復旧を確認。NoDADが隠したDAD中のworker再起動を修正。全tracking/HA session継続とchecksum差分等は未完了 |
 | BFD | 旧FRR/bfddの処理をnative BFDへ置換 | 独立FRR 8.4.4で通常DAD・/32と/128・実BGP/FIB/LAN TCP/UDP・障害/期限/再起動後復旧を確認。不要なsubnet/MAC/受信port制約を削除。旧profile/reset policy、認証、全VRF/規模の受入は未完了 |
 | link/address/route | 旧OS renderer/applyを新規netlink writerへ置換 | option・source選択・所有権・bridge/VRF再構成。wireの実績とは別にOS設定の意味を照合する |
 | firewall/PBR/NAT | 旧rendererを新規nftables writerへ置換 | ICMPv6・DHCP等の許可、条件、順序、NAT、conntrack。DS-Lite生成前の不要なinterface存在確認は削除した |
@@ -74,3 +74,10 @@ BFDも独立FRRとの初回接続で、直結host routeがある/32・/128をsub
 不要なprefix/MAC保持と受信元port制約を削除した。FRRの実payloadのportだけを
 3784へ変更した場合も両系統UPを維持した。独立FRR bgpdとの経路学習・LAN TCP/UDP、
 片系BFD障害・元期限切れ・worker交替と復旧まで確認した。既存fixtureの合格とは別の結果である。
+
+VRRPの実keepalived fixtureからelection sourceのNoDADを外すと、IPv6 unicast/
+multicastとも初回起動が第6世代まで再起動していた。通常DADを起動contextで待つよう直し、
+第1世代起動と両ownerのVIP TCP/UDP・切替・復旧を確認した。追加WAN identity試験の
+通信直前diagnosticがSIGSTOP中のcontrolへ同期問い合わせしていたため、その不要処理も削除した。
+550msのwriter停止では、同時check中に元期限内の適用に失敗した実行があり、単独では通った。
+この期限内性能と、過去の初回TCP timeout等は未解決として残す。

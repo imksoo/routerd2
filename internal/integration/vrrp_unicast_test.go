@@ -126,13 +126,11 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 		t.Fatal(err)
 	}
 	address, _ := netlink.ParseAddr(peer + "/" + strconv.Itoa(bits))
-	address.Flags = unix.IFA_F_NODAD
 	if err := handle.AddrAdd(link, address); err != nil {
 		t.Fatal(err)
 	}
 	if peerSource != peer {
 		address, _ := netlink.ParseAddr(peerSource + "/64")
-		address.Flags = unix.IFA_F_NODAD
 		if err := handle.AddrAdd(link, address); err != nil {
 			t.Fatal(err)
 		}
@@ -149,10 +147,8 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 	c = vrrp.Normalize(c)
 	iface := network.Interface{Name: "lan0", Addresses: []string{local + "/" + strconv.Itoa(bits)}}
 	if family == "ipv6" {
-		iface.AddressOptions = map[string]network.AddressOptions{iface.Addresses[0]: {NoDAD: true}}
 		if source != local {
 			iface.Addresses = append(iface.Addresses, source+"/64")
-			iface.AddressOptions[source+"/64"] = network.AddressOptions{NoDAD: true}
 		}
 	}
 	var probe, trackingGate net.Listener
@@ -253,7 +249,6 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 	vrrpVIPResponders(t, peerNS, suffix, targets, "K")
 	traffic := func(ns netns.NsHandle, target, want string) {
 		t.Helper()
-		before, started := snapshot(), time.Now()
 		for _, protocol := range []string{"tcp", "udp"} {
 			var conn net.Conn
 			var err error
@@ -266,7 +261,6 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 				conn, err = net.DialTimeout(protocol+suffix, net.JoinHostPort(target, port), time.Second)
 				return err
 			}); err != nil {
-				t.Log("VIP request began", started, "election", before, "current", snapshot())
 				if wan != nil && target == vrrpWANVIP {
 					wan.logPath(t)
 				}
@@ -405,6 +399,9 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 		t.Log("550 ms writer pause delayed the initial VIP ACK; same election renewed beyond its original deadline without extending authority")
 	}
 	waitOwner(true)
+	if first := module("service.ha"); first.Generation != 1 {
+		t.Fatal("normal address DAD replaced the initial VRRP worker", first)
+	}
 	if wan != nil {
 		wan.waitNative(t, true)
 		wan.waitForwarder(t, true)

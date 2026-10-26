@@ -214,6 +214,28 @@ captureの到達不能と世代を照合し、新BFD世代に結び付くBGP再�
 `make check`・Race Detector・vet・amd64/arm64の6静的ELF buildも成功した
 （`dist/bfd-frr-final-check-build.log`）。arm64実行、認証・全profile・VRF/規模・物理機器は未完了。
 
+## VRRP通常DADとkeepalived
+
+製品`vrrp-dad`、keepalived 2.2.8、実supervisor/control/network/VRRPと隔離namespaceで確認した。
+election sourceのNoDADを外すと、IPv6 unicast/multicastともDAD中にworkerが終了し、第6世代で起動した。
+DADまたは自動link-local生成だけを起動contextで待つよう修正し、両方ともgeneration 1で
+VIP TCP/UDP・keepalivedとの優先度切替・worker交替・復旧が通った。
+HAの仮想addressに対するwriterの意図したNoDADとは区別する。
+IPv4、Health/BFD/BGP tracking、v2/PASS、追加WAN identityの既存実peer試験も個別に通った。
+追加identityの試験は、SIGSTOP中のcontrolに通信前diagnosticが同期問い合わせしていた。
+この不要処理を削除し、writerによる元期限のidentity/RA撤去・peer通信・復旧を確認した。
+root stagingのcleanupも所有した一時directoryだけのPython削除へ揃えた。
+
+550ms writer停止の初回は、再開時の元期限残り約114ms内に適用できずworkerが再起動した。
+`make check`同時実行中だったが、それだけを原因とは断定しない。単独再実行は通った。
+期限を延ばしたり成功条件を緩めたりしていない。期限内性能は未解決で、通常DAD修正の完了と分ける。
+出力は`dist/vrrp-dad-generation-{unicast,multicast}/`（修正前）、
+`dist/vrrp-normal-dad-peer.log`（IPv4/IPv6とmulticast成功、slow ACK失敗）、
+`dist/vrrp-dad-slow-ack.log`、`dist/vrrp-dad-remaining-peer.log`（最後のdiagnostic失敗以外）、
+`dist/vrrp-dad-additional.log`（diagnostic削除後成功）。
+`make check`・全体Race Detector・vet・6静的ELF buildは成功した（`dist/vrrp-dad-check-build.log`）。
+旧checksum方式のpeer、全resource/profile、HA session継続、物理/性能の受入は未完了。
+
 ## 未完了と次の作業
 
 1. 全実装計画、全更新復旧経路、外部engine、配備先と対象実機の受入は未完了。

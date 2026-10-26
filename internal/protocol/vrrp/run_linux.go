@@ -37,7 +37,7 @@ func Run(ctx context.Context, cfg Config, effects Effects, ready func()) error {
 	if effects == nil {
 		return errors.New("VRRP requires an acknowledged ownership effects implementation")
 	}
-	device, source, err := openTransport(cfg)
+	device, source, err := openTransport(ctx, cfg)
 	if err != nil {
 		return err
 	}

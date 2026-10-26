@@ -893,6 +893,12 @@ track参照を宣言resource IDへ統一し、BFD/BGPも元の有限な状態観
 
 実装先の案: `internal/protocol/vrrp`, `internal/runtimeplan`, `internal/network`, `internal/cluster (新設予定)`, `internal/legacyconfig`。
 
+通常DADの独立keepalived 2.2.8試験で、IPv6 unicast/multicastのworker再起動を再現・修正した。
+第1世代起動、実VIP TCP/UDP、切替/交替/復旧を確認した。仮想HA addressの意図したNoDADとは別である。
+追加identityの試験から、停止中controlへの不要な通信前diagnosticを削除した。
+550ms writer停止は同時check中の期限内適用失敗があり、単独は成功したが、期限内性能は未解決。
+実行条件と限界は[引き継ぎ](pve-codex-handoff.md)に記録した。
+
 #### HA-02 — DHCP/PD lease の認証付き同期
 
 範囲: 旧 routerd 互換 / track: network / risk: high。

@@ -16,6 +16,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+var errSourcePending = errors.New("VRRP IPv6 source address is pending")
+
 type nativeTransport struct {
 	config    Config
 	index     int
@@ -33,7 +35,7 @@ func htons(v uint16) uint16 {
 	return binary.NativeEndian.Uint16(b[:])
 }
 
-func openTransport(c Config) (_ *nativeTransport, _ netip.Addr, result error) {
+func openTransport(ctx context.Context, c Config) (_ *nativeTransport, _ netip.Addr, result error) {
 	t := &nativeTransport{config: c, rxFD: -1, txFD: -1, unicastFD: -1, lockFD: -1}
 	defer func() {
 		if result != nil {
@@ -74,7 +76,20 @@ func openTransport(c Config) (_ *nativeTransport, _ netip.Addr, result error) {
 			return nil, netip.Addr{}, errors.New("VRRP election interface is not in the configured VRF")
 		}
 	}
-	t.source, err = chooseSource(t.links, link, c)
+	for {
+		if err = ctx.Err(); err != nil {
+			return nil, netip.Addr{}, err
+		}
+		t.source, err = chooseSource(t.links, link, c)
+		if !errors.Is(err, errSourcePending) {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return nil, netip.Addr{}, ctx.Err()
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
 	if err != nil {
 		return nil, netip.Addr{}, err
 	}
@@ -158,8 +173,9 @@ func chooseSource(handle *netlink.Handle, link netlink.Link, c Config) (netip.Ad
 		return netip.Addr{}, err
 	}
 	var candidates []netip.Addr
+	pending := c.Family == "ipv6" && c.SourceAddress == ""
 	for _, address := range addresses {
-		if address.Flags&(unix.IFA_F_TENTATIVE|unix.IFA_F_DADFAILED) != 0 {
+		if address.Flags&unix.IFA_F_DADFAILED != 0 {
 			continue
 		}
 		a, ok := netip.AddrFromSlice(address.IP)
@@ -170,13 +186,21 @@ func chooseSource(handle *netlink.Handle, link netlink.Link, c Config) (netip.Ad
 		if !addressInFamily(a, c.Family) || len(c.UnicastPeers) == 0 && c.Family == "ipv6" && !a.IsLinkLocalUnicast() {
 			continue
 		}
-		if c.SourceAddress != "" {
-			if a.String() == c.SourceAddress {
-				return a, nil
-			}
+		if c.SourceAddress != "" && a.String() != c.SourceAddress {
+			continue
+		}
+		if address.Flags&unix.IFA_F_TENTATIVE != 0 {
+			pending = true
 			continue
 		}
 		candidates = append(candidates, a)
+	}
+	if len(candidates) > 0 {
+		sort.Slice(candidates, func(i, j int) bool { return candidates[i].Less(candidates[j]) })
+		return candidates[0], nil
+	}
+	if pending {
+		return netip.Addr{}, errSourcePending
 	}
 	if c.SourceAddress != "" {
 		// An explicit IPv4 address owner can move its real address onto the
@@ -192,11 +216,7 @@ func chooseSource(handle *netlink.Handle, link netlink.Link, c Config) (netip.Ad
 		}
 		return netip.Addr{}, errors.New("VRRP source address is not ready on the election interface")
 	}
-	if len(candidates) == 0 {
-		return netip.Addr{}, errors.New("VRRP election interface has no usable source address")
-	}
-	sort.Slice(candidates, func(i, j int) bool { return candidates[i].Less(candidates[j]) })
-	return candidates[0], nil
+	return netip.Addr{}, errors.New("VRRP election interface has no usable source address")
 }
 
 func pollSocket(ctx context.Context, fd int, events int16) error {
