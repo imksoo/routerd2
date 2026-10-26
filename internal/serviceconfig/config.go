@@ -199,7 +199,7 @@ func Validate(services []Service) error {
 			}
 			key = "bfd:" + s.BFD.Interface + ":" + family
 			if s.BFD.Multihop {
-				key = "bfd-multihop:" + s.BFD.SourceAddress
+				key = "bfd-multihop:" + s.BFD.VRF + ":" + s.BFD.SourceAddress
 			}
 		}
 		if other, ok := sockets[key]; ok {

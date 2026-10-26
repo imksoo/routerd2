@@ -47,6 +47,8 @@ type nativeTransport struct {
 	source         netip.Addr
 	sourcePrefix   netip.Prefix
 	index, master  int
+	vrfIndex       int
+	vrfTable       uint32
 	linkType       string
 	hardware       []byte
 	bootID         string
@@ -75,6 +77,17 @@ func openTransport(c Config, clock Clock) (_ *nativeTransport, result error) {
 	if err = t.links.SetSocketTimeout(200 * time.Millisecond); err != nil {
 		return nil, err
 	}
+	if c.VRF != "" {
+		link, err := t.links.LinkByName(c.VRF)
+		if err != nil {
+			return nil, err
+		}
+		vrf, ok := link.(*netlink.Vrf)
+		if !ok || vrf.Attrs().RawFlags&unix.IFF_UP == 0 {
+			return nil, errors.New("BFD VRF must be an up VRF device")
+		}
+		t.vrfIndex, t.vrfTable = vrf.Index, vrf.Table
+	}
 	var link netlink.Link
 	if c.Multihop {
 		// The source owner stays fixed; the routed egress may change. Binding
@@ -87,11 +100,22 @@ func openTransport(c Config, clock Clock) (_ *nativeTransport, result error) {
 			ip, ok := netip.AddrFromSlice(address.IP)
 			if ok && ip.Unmap() == t.source {
 				link, err = t.links.LinkByIndex(address.LinkIndex)
+				if err != nil {
+					return nil, err
+				}
+				domain, err := t.routingDomain(link)
+				if err != nil {
+					return nil, err
+				}
+				if domain != t.vrfIndex {
+					link = nil
+					continue
+				}
 				break
 			}
 		}
 		if link == nil && err == nil {
-			err = errors.New("multihop BFD source is not installed locally")
+			err = errors.New("multihop BFD source is not installed in the configured routing domain")
 		}
 	} else {
 		link, err = t.links.LinkByName(c.Interface)
@@ -129,7 +153,7 @@ func openTransport(c Config, clock Clock) (_ *nativeTransport, result error) {
 	}
 	claim := fmt.Sprintf("\x00routerd2-bfd:%d:%t", t.index, t.source.Is4())
 	if c.Multihop {
-		claim = "\x00routerd2-bfd-multihop:" + c.SourceAddress
+		claim = fmt.Sprintf("\x00routerd2-bfd-multihop:%d:%s", t.vrfIndex, c.SourceAddress)
 	}
 	if err = unix.Bind(t.lock, &unix.SockaddrUnix{Name: claim}); err != nil {
 		return nil, fmt.Errorf("claim BFD receive endpoint: %w", err)
@@ -216,8 +240,12 @@ func (t *nativeTransport) socket() (int, error) {
 		return -1, err
 	}
 	fail := func(err error) (int, error) { _ = unix.Close(fd); return -1, err }
-	if !t.config.Multihop {
-		if err = unix.SetsockoptString(fd, unix.SOL_SOCKET, unix.SO_BINDTODEVICE, t.config.Interface); err != nil {
+	binding := t.config.Interface
+	if t.config.Multihop {
+		binding = t.config.VRF
+	}
+	if binding != "" {
+		if err = unix.SetsockoptString(fd, unix.SOL_SOCKET, unix.SO_BINDTODEVICE, binding); err != nil {
 			return fail(err)
 		}
 	}
@@ -267,6 +295,16 @@ func (t *nativeTransport) bindSourcePort(fd int) (uint16, error) {
 }
 
 func (t *nativeTransport) Verify() error {
+	if t.config.VRF != "" {
+		link, err := t.links.LinkByName(t.config.VRF)
+		if err != nil {
+			return err
+		}
+		vrf, ok := link.(*netlink.Vrf)
+		if !ok || vrf.Index != t.vrfIndex || vrf.Table != t.vrfTable || vrf.Attrs().RawFlags&unix.IFF_UP == 0 {
+			return errors.New("BFD VRF identity, table or administrative state changed")
+		}
+	}
 	var link netlink.Link
 	var err error
 	if t.config.Multihop {
@@ -280,6 +318,13 @@ func (t *nativeTransport) Verify() error {
 	a := link.Attrs()
 	if a.Index != t.index || a.MasterIndex != t.master || link.Type() != t.linkType || !bytes.Equal(a.HardwareAddr, t.hardware) || a.RawFlags&unix.IFF_UP == 0 || !t.config.Multihop && a.RawFlags&unix.IFF_LOOPBACK != 0 {
 		return errors.New("BFD interface identity, master or administrative state changed")
+	}
+	domain, err := t.routingDomain(link)
+	if err != nil {
+		return err
+	}
+	if domain != t.vrfIndex {
+		return errors.New("BFD source owner is outside the configured VRF")
 	}
 	family := netlink.FAMILY_V4
 	if t.source.Is6() {
@@ -312,6 +357,25 @@ func (t *nativeTransport) Verify() error {
 		}
 	}
 	return errors.New("BFD configured source is not a usable address on its interface")
+}
+
+// Kernel masters are acyclic; bound the walk across concurrent membership
+// changes so a verifier cannot be kept alive by repeated topology changes.
+func (t *nativeTransport) routingDomain(link netlink.Link) (int, error) {
+	for depth := 0; depth < 16; depth++ {
+		if link.Type() == "vrf" {
+			return link.Attrs().Index, nil
+		}
+		if link.Attrs().MasterIndex == 0 {
+			return 0, nil
+		}
+		var err error
+		link, err = t.links.LinkByIndex(link.Attrs().MasterIndex)
+		if err != nil {
+			return 0, err
+		}
+	}
+	return 0, errors.New("BFD source master chain did not stabilize")
 }
 
 func (t *nativeTransport) Ports() []uint16 { return append([]uint16(nil), t.ports...) }

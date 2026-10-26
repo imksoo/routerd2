@@ -62,8 +62,12 @@ func validateBFDReferences(services []Service) error {
 			if binding == "" {
 				binding = service.BGP.BindInterface
 			}
-			if binding != source.BFD.Interface {
-				return fmt.Errorf("BGP %s BFD-bound peer %s requires bind_interface %q", service.Name, address, source.BFD.Interface)
+			expected := source.BFD.Interface
+			if source.BFD.Multihop {
+				expected = source.BFD.VRF
+			}
+			if binding != expected {
+				return fmt.Errorf("BGP %s BFD-bound peer %s requires bind_interface %q", service.Name, address, expected)
 			}
 		}
 	}

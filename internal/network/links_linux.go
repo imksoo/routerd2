@@ -50,6 +50,7 @@ func nativeLinkState(l netlink.Link) (InterfaceState, error) {
 	}
 	definition := Link{Name: a.Name, Kind: l.Type(), Parent: out.Parent, Alias: userLinkAlias(a.Alias), HardwareAddr: a.HardwareAddr.String()}
 	switch v := l.(type) {
+	case *netlink.Dummy:
 	case *netlink.Wireguard:
 		definition.HardwareAddr = ""
 	case *netlink.Bridge:
@@ -144,6 +145,8 @@ func nativeLink(l Link, alias string) (netlink.Link, error) {
 		a.ParentIndex = parent.Attrs().Index
 	}
 	switch l.Kind {
+	case "dummy":
+		return &netlink.Dummy{LinkAttrs: a}, nil
 	case "wireguard":
 		return &netlink.Wireguard{LinkAttrs: a}, nil
 	case "bridge":

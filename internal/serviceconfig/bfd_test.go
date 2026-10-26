@@ -121,6 +121,12 @@ func TestBFDInstanceAndSocketOwnership(t *testing.T) {
 	if err := Validate([]Service{multi, duplicate}); err == nil {
 		t.Fatal("two workers accepted ownership of the same multihop receive socket")
 	}
+	scoped := *multi.BFD
+	scoped.VRF = "blue"
+	multi.BFD = &scoped
+	if err := Validate([]Service{multi, duplicate}); err != nil {
+		t.Fatal("different routing domains should have independent receive sockets", err)
+	}
 	other.BFD.Resource = "forged"
 	if err := Validate([]Service{other}); err == nil {
 		t.Fatal("resource spoof accepted")

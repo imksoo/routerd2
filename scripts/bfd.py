@@ -8,9 +8,11 @@ import subprocess
 
 
 TESTS = (
-    ("TestDaemonBFDControlsBGPSessionAndExpiry", "single-hop", False),
-    ("TestDaemonMultihopBFDControlsBGPSessionAndExpiry", "multihop-ipv4", True),
-    ("TestDaemonMultihopBFDIPv6", "multihop-ipv6", True),
+    ("TestDaemonBFDControlsBGPSessionAndExpiry", "single-hop", ()),
+    ("TestDaemonMultihopBFDControlsBGPSessionAndExpiry", "multihop-ipv4", ("wan0",)),
+    ("TestDaemonMultihopBFDIPv6", "multihop-ipv6", ("wan0",)),
+    ("TestDaemonBFDVRFIsolation", "vrf", ("wan0", "wan1")),
+    ("TestDaemonSinglehopBFDVRF", "vrf-single-hop", ()),
 )
 
 
@@ -34,7 +36,7 @@ def main():
         for name in ("routerd", "routerd-modules", "routerd-logging"):
             subprocess.run(root + ["install", "-m", "755", str(args.binary_dir.resolve() / name), stage + "/bin/" + name], check=True)
         subprocess.run(root + ["install", "-m", "755", str(harness), stage + "/integration.test"], check=True)
-        for name, label, capture in TESTS:
+        for name, label, interfaces in TESTS:
             if args.test and name != args.test:
                 continue
             packets = stage + "/" + label
@@ -46,11 +48,11 @@ def main():
             if result.returncode or "--- PASS: " + name not in content or "--- SKIP:" in content:
                 print(content, end="")
                 raise RuntimeError(name + " failed; see " + str(log_path))
-            if capture:
-                packet = subprocess.check_output(root + ["cat", packets + "/wan0.pcap"])
+            for interface in interfaces:
+                packet = subprocess.check_output(root + ["cat", packets + "/" + interface + ".pcap"])
                 if len(packet) <= 24:
                     raise RuntimeError("missing routed packet capture for " + name)
-                (output / (label + ".pcap")).write_bytes(packet)
+                (output / (label + "-" + interface + ".pcap")).write_bytes(packet)
             print(name + ": PASS; " + str(log_path), flush=True)
     finally:
         subprocess.run(root + ["python3", "-c", "import shutil,sys; shutil.rmtree(sys.argv[1])", stage], check=True)

@@ -1,6 +1,6 @@
 # 現行 routerd と同等の製品にするための実装計画
 
-作成日: 2026-10-24。更新日: 2026-10-25。開発中。全体ゴールは継続中。
+作成日: 2026-10-24。更新日: 2026-10-26。開発中。全体ゴールは継続中。
 
 過去のcheckpoint列挙を削除した。過去の試験・API・保存形式の維持を実装制約にしない。
 [AGENTS.md](../AGENTS.md) に従い、機能と実通信を満たす簡潔な構造へ作り直す。
@@ -624,6 +624,11 @@ control／DNSの受信側期限表と内部JSON複製を削除した。個別cli
 - explicit adoption/exclusive等の意図と管理外状態の保護を両立する所有権移行を設計し、曖昧な黙示採用は拒否する。
 - DHCPv6AddressのIA_NA clientを所有する。RAのmanaged/required/observe-only、RAによるDHCP起動、MTU/hop-limit、useDNSによるsystem resolver効果を旧host engine版ごとに確定し、native実装または明示replacementとする。
 
+owned `dummy` linkを既存writer・所有権journalへ追加した。VRFごとの独立sourceとして実daemonで
+生成・master接続・address設定を確認した。宣言済みmaster chainのrouting domainをconfig検証と
+BGPの再帰解決で共有し、VRF device自身とbridge配下のtableを正しく導出する。
+全link option/lifecycle・WAN選択・DHCPv6 IA_NA等は残り、NET-05全体は未完了。
+
 **受入条件**
 
 - PD再番号付け、旧prefix deprecated、DAD失敗、source/router消失、AFTR/DNS失敗と回復を確認する。
@@ -696,7 +701,11 @@ TTL/Hop Limit 255の制約は維持する。実Linux forwarderを越えるIPv4 B
 障害・復旧・元期限での撤去と、IPv6 BFDの障害・復旧・worker交替を確認した。
 learned route先の利用者TCP/UDPも通信し、撤去中の接続拒否と復旧後の再開を確認した。
 両方向captureでUDP 4784・送信255／受信254を検査し、`make check-bfd`から再実行できる。
-旧profile/resource lifecycle、VRF・動的source・大規模RIB等は残り、NET-07全体は未完了。
+明示VRFではmultihop socketをVRF master、single-hopをmember interfaceへ束縛する。
+source domainとBGP FIB tableも検証する。同じendpointを持つ二つのVRFとdefault domainで
+実daemonを動かし、独立TCP/UDP・片側UDP障害・worker交替・main tableへの流出防止を確認した。
+single-hop VRFも実peerと障害・復旧を確認した。compiler contractはnative-11。
+旧profile/resource lifecycle、動的source・VRF経路変更・IPv6 VRF・大規模RIB等は残り、NET-07全体は未完了。
 
 **受入条件**
 

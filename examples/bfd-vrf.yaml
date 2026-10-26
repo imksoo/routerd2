@@ -1,0 +1,72 @@
+# One explicit VRF, with an independent loopback source. Configure matching
+# reverse routes and BFD/BGP on the peer. Replace these documentation addresses.
+schema_version: 2
+resources:
+  - id: blue-link
+    link:
+      name: blue
+      kind: vrf
+      vrf_table: 1001
+  - id: blue
+    interface:
+      name: blue
+  - id: uplink
+    interface:
+      name: wan0
+      master: blue
+  - id: uplink-address
+    address:
+      interface: wan0
+      cidr: 198.18.0.1/30
+  - id: source-link
+    link:
+      name: blue-src
+      kind: dummy
+  - id: source
+    interface:
+      name: blue-src
+      master: blue
+  - id: source-address
+    address:
+      interface: blue-src
+      cidr: 192.0.2.1/32
+  - id: peer-route
+    route:
+      destination: 192.0.2.2/32
+      interface: wan0
+      gateway: 198.18.0.2
+      table: 1001
+  - id: watch
+    service:
+      name: blue-bfd
+      bfd:
+        vrf: blue
+        multihop: true
+        source_address: 192.0.2.1
+        peers:
+          - address: 192.0.2.2
+  - id: router
+    service:
+      name: blue-bgp
+      bgp:
+        table: 1001
+        bind_interface: blue
+        runtime:
+          version: 1
+          global:
+            asn: 64512
+            routerID: 192.0.2.1
+            listenPort: -1
+          peers:
+            192.0.2.2:
+              address: 192.0.2.2
+              asn: 64513
+              ebgpMultihop: 5
+              importPolicy:
+                allowedPrefixes: [203.0.113.0/24]
+        peer_transports:
+          192.0.2.2:
+            local_address: 192.0.2.1
+        peer_bfd:
+          192.0.2.2:
+            service: blue-bfd

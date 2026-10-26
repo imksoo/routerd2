@@ -111,25 +111,8 @@ func validateNative(d Native, source Document) error {
 			return fmt.Errorf("VRRP %s publication cannot require its own unpublished active fact", service.Name)
 		}
 	}
-	for _, service := range d.Services {
-		if service.BFD == nil {
-			continue
-		}
-		owned := false
-		for _, iface := range d.Network.Interfaces {
-			if !service.BFD.Multihop && iface.Name != service.BFD.Interface {
-				continue
-			}
-			for _, address := range iface.Addresses {
-				prefix, err := netip.ParsePrefix(address)
-				if err == nil && prefix.Addr().String() == service.BFD.SourceAddress {
-					owned = true
-				}
-			}
-		}
-		if !owned {
-			return fmt.Errorf("BFD %s source_address must be committed in its address scope; dynamic address dependencies require explicit support", service.Name)
-		}
+	if err := validateBFDRouting(d); err != nil {
+		return err
 	}
 	for _, service := range d.Services {
 		if service.RAClient == nil {

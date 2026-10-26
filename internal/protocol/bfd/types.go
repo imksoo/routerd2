@@ -29,6 +29,7 @@ const (
 type Config struct {
 	Resource                  string `json:"resource"`
 	Interface                 string `json:"interface,omitempty"`
+	VRF                       string `json:"vrf,omitempty"`
 	SourceAddress             string `json:"source_address"`
 	Peers                     []Peer `json:"peers"`
 	PointToPoint              bool   `json:"point_to_point,omitempty"`
@@ -151,6 +152,9 @@ func Validate(c Config) error {
 	}
 	if !c.Multihop && !validInterface(c.Interface) {
 		return errors.New("BFD requires an explicit valid interface")
+	}
+	if c.VRF != "" && (!validInterface(c.VRF) || c.VRF == c.Interface) {
+		return errors.New("BFD vrf must name a valid routing master distinct from its single-hop interface")
 	}
 	if c.Authentication != "" && c.Authentication != "none" || c.DemandMode || c.Echo || c.Passive {
 		return errors.New("BFD supports active asynchronous control only; authentication, demand, echo and passive modes are unavailable")

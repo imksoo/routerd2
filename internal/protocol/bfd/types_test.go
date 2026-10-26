@@ -18,6 +18,8 @@ func TestConfigDefaultsAndExplicitUnsupportedModes(t *testing.T) {
 	tests := map[string]func(*Config){
 		"empty interface":          func(c *Config) { c.Interface = "" },
 		"invalid interface":        func(c *Config) { c.Interface = "eth0:1" },
+		"invalid VRF":              func(c *Config) { c.VRF = "blue:1" },
+		"VRF as adjacency":         func(c *Config) { c.VRF = c.Interface },
 		"empty source":             func(c *Config) { c.SourceAddress = "" },
 		"mapped source":            func(c *Config) { c.SourceAddress = "::ffff:192.0.2.1" },
 		"multicast source":         func(c *Config) { c.SourceAddress = "224.0.0.1" },

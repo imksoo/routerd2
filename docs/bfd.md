@@ -1,6 +1,6 @@
 # Native BFD and BGP session ownership
 
-`routerd-modules` has a native `bfd` role. It runs one worker per single-hop interface/family or multihop local address,
+`routerd-modules` has a native `bfd` role. It runs one worker per single-hop interface/family or multihop local address/routing domain,
 with an explicitly configured local address and up to 64 peers.
 It opens Linux UDP sockets directly; FRR, `vtysh`, systemd and external helpers
 are not part of the runtime path. [The example](../examples/bfd-bgp.yaml) binds
@@ -52,11 +52,42 @@ retargeting the session. Packets originate with TTL/Hop Limit 255 and can arrive
 with a decremented value. The receiver checks the exact configured endpoint
 pair and discriminator; multihop does not allow point-to-point source aliases or
 link-local addresses. Two workers cannot own the same local multihop receive
-socket. Single-hop UDP 3784 remains independently available.
+socket within a routing domain. Single-hop UDP 3784 remains independently available.
 
 Authentication is not implemented in either mode. Other pending protocol and
 resource work is listed in the implementation plan; this routed mode is not a
 claim of full BFD resource parity.
+
+## Explicit VRF scope
+
+Set `vrf` to a declared `link` of kind `vrf`. Its committed table and interface
+membership determine the source domain. Omitting `vrf` selects the default
+domain; an address installed only in another VRF cannot supply that source.
+An owned `dummy` link provides a per-VRF loopback source, separate from the
+egress. See [the VRF example](../examples/bfd-vrf.yaml).
+
+Multihop sockets bind to the VRF master using Linux `SO_BINDTODEVICE`; they
+remain free to route through its members. Single-hop retains its explicit
+member interface binding, direct route and TTL/Hop Limit 255. The worker checks
+the source owner's master chain and the VRF's identity, table and administrative
+state. Identical local/remote addresses in different VRFs have independent
+receive sockets and session ownership.
+
+A BFD-bound BGP multihop transport must bind the same VRF master and use its
+table for learned routes. Single-hop BGP binds the same member interface as
+BFD. Address routes used for recursive FIB resolution inherit the declared
+VRF through the master chain, including addresses on the VRF device itself.
+An excluded VRF declaration also excludes its dependent BFD service.
+
+`make check-bfd` exercises IPv4 single-hop in a VRF and two independent routed
+IPv4 BFD/BGP peers with identical addresses in separate VRFs. Distinct actual
+TCP/UDP responses identify each path. UDP loss and worker replacement in one
+VRF leave the other worker/session running. A reachable default-domain copy
+of the destination cannot carry the withdrawn VRF's bound client traffic.
+Captures inspect UDP 4784 and both routed TTLs. This establishes the exercised
+bound sockets and FIBs, not arbitrary forwarded VRF policy, IPv6 VRF operation
+or physical NIC qualification. Tests use the kernel's default l3mdev accept
+settings; changing shared socket-accept policy requires separate qualification.
 
 ## Receive time, publication and restarts
 

@@ -6,7 +6,26 @@ import (
 	"testing"
 
 	"github.com/imksoo/routerd2/internal/network"
+	"github.com/imksoo/routerd2/internal/protocol/bfd"
+	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
+
+func TestExcludedVRFStopsItsMultihopBFD(t *testing.T) {
+	program := Program{SchemaVersion: SchemaVersion, Resources: []Resource{
+		{ID: "blue-link", When: &FactCondition{Fact: "enabled"}, Link: &network.Link{Name: "blue", Kind: "vrf", VRFTable: 1001}},
+		{ID: "blue-interface", Interface: &network.Interface{Name: "blue"}},
+		{ID: "watch", Service: &serviceconfig.Service{Name: "watch", BFD: &bfd.Config{Multihop: true, VRF: "blue", SourceAddress: "192.0.2.1", Peers: []bfd.Peer{{Address: "192.0.2.2"}}}}},
+	}}
+	for _, enabled := range []Truth{False, True} {
+		native, states, err := projectSource(program, truthSnapshot(map[string]Truth{"enabled": enabled}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if states["watch"].Active != (enabled == True) || (len(native.Services) == 1) != (enabled == True) {
+			t.Fatal("BFD escaped its declared VRF dependency", enabled, states, native.Services)
+		}
+	}
+}
 
 func guardedProgram() Program {
 	return Program{SchemaVersion: SchemaVersion, Resources: []Resource{

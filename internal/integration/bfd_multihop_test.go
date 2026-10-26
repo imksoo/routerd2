@@ -30,13 +30,14 @@ type routedBFDPeer struct {
 	desired                 network.Desired
 	source, remote, gateway string
 	index                   int
+	remoteNS                netns.NsHandle
 }
 
 // Each endpoint owns a /32 or /128 on lo. A third Linux namespace forwards
 // between different subnets, so direct-link transport cannot pass this fixture.
-func newRoutedBFDPeer(t *testing.T, family string) routedBFDPeer {
+func newRoutedBFDPeer(t *testing.T, family, interfaceName string) routedBFDPeer {
 	t.Helper()
-	middle := fixturePeerNamespace(t, "wan0", "from-router")
+	middle := fixturePeerNamespace(t, interfaceName, "from-router")
 	var remoteNS netns.NsHandle
 	if err := fixtureInsideNamespace(middle, func() error {
 		remoteNS = fixturePeerNamespace(t, "to-peer", "peer0")
@@ -103,30 +104,29 @@ func newRoutedBFDPeer(t *testing.T, family string) routedBFDPeer {
 	if family == "ipv4" {
 		configure(middle, nil, []network.Route{{Destination: "203.0.113.0/24", Interface: "to-peer", Gateway: peerAddress}})
 		configure(remoteNS, map[string]string{"lo": "203.0.113.9/32"}, nil)
-		vrrpVIPResponders(t, remoteNS, "4", []string{"203.0.113.9"}, "B")
 	}
 	peer, listener := openDaemonBFDPeer(t, remoteNS, netip.MustParseAddr(remote), netip.AddrPortFrom(netip.MustParseAddr(source), 4784), 254)
-	link, err := netlink.LinkByName("wan0")
+	link, err := netlink.LinkByName(interfaceName)
 	if err != nil {
 		t.Fatal(err)
 	}
 	desired := network.Desired{Interfaces: []network.Interface{
-		{Name: "wan0", Addresses: []string{localCIDR}},
+		{Name: interfaceName, Addresses: []string{localCIDR}},
 		{Name: "lo", Addresses: []string{sourceCIDR}},
-	}, Routes: []network.Route{{Destination: remoteCIDR, Interface: "wan0", Gateway: gateway}}}
+	}, Routes: []network.Route{{Destination: remoteCIDR, Interface: interfaceName, Gateway: gateway}}}
 	if family == "ipv6" {
 		for i := range desired.Interfaces {
 			desired.Interfaces[i].AddressOptions = map[string]network.AddressOptions{desired.Interfaces[i].Addresses[0]: {NoDAD: true}}
 		}
 	}
-	return routedBFDPeer{peer: peer, listener: listener, index: link.Attrs().Index, source: source, remote: remote, gateway: gateway, desired: desired}
+	return routedBFDPeer{peer: peer, listener: listener, index: link.Attrs().Index, source: source, remote: remote, gateway: gateway, desired: desired, remoteNS: remoteNS}
 }
 
 func TestDaemonMultihopBFDIPv6(t *testing.T) {
 	if !isolateFixture(t, "TestDaemonMultihopBFDIPv6") {
 		return
 	}
-	path := newRoutedBFDPeer(t, "ipv6")
+	path := newRoutedBFDPeer(t, "ipv6", "wan0")
 	capture := healthPBRCapture(t, "wan0")
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)

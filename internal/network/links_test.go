@@ -322,7 +322,8 @@ func TestPartialLinkUpdateCanRollBackAfterRestart(t *testing.T) {
 
 func TestLinkValidationRejectsUnsupportedAndCyclicModels(t *testing.T) {
 	cases := []Desired{
-		{Links: []Link{{Name: "x", Kind: "dummy"}}},
+		{Links: []Link{{Name: "x", Kind: "unsupported"}}},
+		{Links: []Link{{Name: "x", Kind: "dummy", Parent: "wan0"}}},
 		{Links: []Link{{Name: "x", Kind: "vlan", Parent: "lan0", VLANID: 0}}},
 		{Links: []Link{{Name: "x", Kind: "bridge", VLANID: 12}}},
 		{Links: []Link{{Name: "x", Kind: "vrf", VRFTable: 254}}},

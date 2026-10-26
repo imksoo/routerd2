@@ -77,6 +77,9 @@ func inferredDependencies(resources []Resource) map[string][]string {
 			}
 		case r.Service != nil:
 			iface(r.Service.Interface())
+			if r.Service.BFD != nil {
+				iface(r.Service.BFD.VRF)
+			}
 			if r.Service.Health != nil && r.Service.Health.SourceAddress != "" {
 				if source, err := netip.ParseAddr(r.Service.Health.SourceAddress); err == nil {
 					for _, id := range addresses[r.Service.Health.Interface+"\x00"+source.String()] {

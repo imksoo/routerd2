@@ -147,20 +147,14 @@ func projectBGP(p *projection, doc config.Native, records map[string]serviceconf
 		return uint64(clock.BoottimeNanoseconds) + uint64(max(0, wall.Sub(now)))
 	}
 	index := fibIndex{links: map[string]uint64{}}
-	vrfs := map[string]int{}
+	domains := network.RoutingDomains(p.network)
 	for _, l := range p.network.Links {
 		if l.BootID != "" {
 			index.links[l.Name] = deadline(l.BootID, l.ExpiresNanos, time.Time{})
 		}
-		if l.Kind == "vrf" {
-			vrfs[l.Name] = l.VRFTable
-		}
 	}
 	for _, l := range p.network.Interfaces {
-		table := 254
-		if l.Master != nil && vrfs[*l.Master] != 0 {
-			table = vrfs[*l.Master]
-		}
+		table := domains[l.Name].Table
 		for _, value := range l.Addresses {
 			prefix, err := netip.ParsePrefix(value)
 			if err != nil {

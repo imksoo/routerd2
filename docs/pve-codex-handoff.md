@@ -72,65 +72,65 @@
 - Health監視と履歴配送は分離する。保存先障害・queue満杯でもprobeを止めず、欠落と保存エラーを表示する。
   全probeの無欠落保存は保証しない。
 
-現在のworker ABIは3、compiler contractは `resource-program-native-10`、network journalはformat 5。
+現在のworker ABIは3、compiler contractは `resource-program-native-11`、network journalはformat 5。
 `track.resource`は宣言IDであり、decisionはhealthy/unhealthy/neutral/unknownを明示する。
 破棄したservice-only形式のreader・混在運用・migrationは実装しない。
 
 ## 今回の実装と検証
 
-最新buildは `RELEASE_ID=bfd-multihop`。NET-07の明示multihop BFDを追加した。
-`multihop: true`ではinterfaceを指定せず、宣言済みのlocal source addressを使う。
-UDP 4784・通常のsource-bound routingで送受信し、lo上のsourceと物理egressを分離する。
-sourceを持つlinkのidentityとaddressの利用可否は監視するが、prefixやegressを隣接先として固定しない。
-single-hopはUDP 3784、明示interface、直結route/subnetとTTL/Hop Limit 255を維持する。
-receiveのaddress/TTL/port等の検証はsession ownerへ集約し、transportはkernel metadataとdevice scopeを扱う。
-BGP multihop参照は同じendpoint pairとsourceに束縛し、両transportともdevice bindingを指定しない。
-新しいproducerやlease・状態機械・compatibility readerは追加していない。
+最新buildは `RELEASE_ID=bfd-vrf`。NET-07のBFDと参照するBGPを明示VRFへ接続した。
+BFDの`vrf`省略はdefault domain、指定時は宣言済みVRFを選ぶ。multihop socketは
+VRF masterへ、single-hopは明示member interfaceへ束縛する。sourceのdomain、VRFのidentity・
+table・UP状態を確認し、同じlocal/remote addressを別VRFで独立して利用できる。
+BGP transportのbindingとFIB tableも同じscopeへ限定する。新しいleaseやmanagerは追加していない。
 
-PVE隔離amd64 VMで、独立UDP BFD/TCP BGP peerと実Linux forwarderを用いた。
-`make check-bfd RELEASE_ID=bfd-multihop`が次の全ケースで成功した。
+VRFごとのloopback source用に、既存link writerへowned `dummy`を追加した。
+所有権journal・属性適用・期限処理は既存のものを使う。宣言済みmaster chainから求める
+routing domainをconfig検証とBGP再帰next-hop解決で共有し、旧direct-master限定処理を除いた。
+VRF device自身やbridge配下のaddressも正しいtableで扱う。条件から除外されたVRFは依存BFDも停止する。
 
-- single-hop BFD/BGPの起動抑止、UDP障害、元の観測期限、worker停止・復旧、
-  control/BGP/BFD停止中のsurviving writerのroute撤去。
-- routed IPv4のloopback間BFDとBGP。初回DownのTCP起動抑止、BFD正常時の経路import/export、
-  TCP KEEPALIVEを維持したUDP障害でTCP終了とFIB撤去、復旧を確認した。
-  learned route先の利用者TCP/UDPも実通信し、撤去中は接続できず復旧後に再開することを確認した。
-  BFD SIGSTOPの元期限、freshな復旧、control/BGP/BFD停止中のwriter期限撤去も確認した。
-- routed IPv6のloopback間BFD。障害検出・復旧、同じworkerの継続、SIGKILL後の新しいproducerを確認した。
-- IPv4/IPv6の両方向captureでUDP 4784、送信元port 49152以上、送信255／受信254を検査した。
-  独立peerも実際の受信TTL/Hop Limit 254を検証する。中継ルーターを迂回した直接接続では通らない。
+PVE隔離amd64 VMで `scripts/bfd.py` の全5ケースが成功した。製品はCGO無効の実3 ELF、
+harnessはRace Detector付きで、独立UDP/TCP peerとLinux forwarderを使う。
 
-再実行は `make check-bfd`。rootまたはpasswordless sudoとLinux user/network namespaceが必要。
-製品・harnessはroot所有の一時0700へ配置し、captureもその中から回収する。homeの権限は変えない。
-設定例は [bfd-multihop.yaml](../examples/bfd-multihop.yaml)。製品CLIのconfig validateで受入を確認した。
+- 既存default-domain single-hop BFD/BGP。初回Downの起動抑止、UDP障害、元期限、
+  worker停止・復旧、surviving writerの撤去。
+- routed IPv4 BFD/BGP。Linux routerを越えたloopback間接続、learned route先のTCP/UDP、
+  UDPのみ停止中のTCP終了・FIB撤去、復旧、凍結sourceとwriterの期限撤去。
+- routed IPv6 BFD。障害・復旧とSIGKILL後のfresh producer。
+- IPv4 single-hop VRF。UDP 3784・TTL 255・直結routeでUp→Down→Up。
+- 同じsource/peerを持つblue/red VRFとdefault domain。独立BFD/BGP、別々の利用者TCP/UDP応答、
+  blueだけのUDP障害・復旧、blue BFD SIGKILL後の新producerを確認した。
+  redのsession・通信とred BFD/BGP・blue BGPのPID/世代は継続する。
+  default domainに同じ宛先への実通信可能な経路を置き、blue撤去中に流出しないことを確認した。
+- routed IPv4/IPv6と両VRFのcaptureで、UDP 4784、source port 49152以上、送信255／受信254を検査した。
 
-ローカルでは明示mode、local source、endpoint family、single/multihop socket競合、
-同じBGP endpointへの参照、低いTTLのmultihop受入、foreign sourceのdiscriminator再利用拒否を確認した。
-compiler contractはnative-10へ更新した。worker ABI 3と保存形式は変更していない。
-契約名の一桁に依存していたrelease試験fixtureを修正し、異なる契約への更新／rollback／boot拒否を再確認した。
-全体`make check`、関連Race Detector、fmt・vet、amd64/arm64の6静的ELF buildが成功した。
-最終6 ELFのsigned bundle/catalog/runtime照合とCLI publisher検査も成功した。arm64は実行していない。
+再実行は `make check-bfd`。rootまたはpasswordless sudo、Linux user/network namespaceが必要。
+製品・harnessをroot所有0700の一時directoryへ配置し、captureをその中から回収する。
+home権限は変えない。設定例 [bfd-vrf.yaml](../examples/bfd-vrf.yaml) は製品CLIでvalidate済み。
+VRF試験はkernel既定のl3mdev accept設定で実行した。今回のbound socket/FIB試験を、
+任意の転送VRF policy、IPv6 VRFやNIC受入の成功へ拡張して解釈しない。
 
-最初のnative試験はfixtureのIPv4 NoDAD指定、その次はconfig入口の旧interface限定検証で停止した。
-IPv4 fixtureの指定を除き、multihopの検証範囲を宣言済みlocal sourceへ修正した。
-最終製品のnativeログは `dist/bfd-multihop-current-native.log` と
-`dist/bfd-multihop-current/{single-hop,multihop-ipv4,multihop-ipv6}.log`、captureは同じディレクトリにある。
-利用者TCP/UDP追加後の実行は `dist/bfd-multihop-user-traffic{.log,/multihop-ipv4.log}`。
-全体check・build・bundleは `dist/bfd-multihop-{final-check,final-build,final-bundle}.log`、
-関連Race DetectorとABI fixtureは `dist/bfd-multihop-{final-race,abi-regression}.log`。
-出力との一致や古いcheckpointは実装条件にしない。
+compiler contractはnative-11、worker ABI 3、network journal format 5。prototype readerやmigrationはない。
+全体`make check`（全Go/Python試験・Race Detector・vet）と最終6 ELFのsigned bundle/catalog/publisher検査は成功した。
+amd64/arm64の6静的ELF buildは成功した。arm64は実行していない。
 
-直前の変更では、実2 WANのHealth→PBR・実TCP/UDP・capture・worker再起動・古い通知・
-期限切れ・confirmed rollback、およびKeepalivedとのHealth追跡・neutral・IPv6 multicastを確認した。
-BGP/VRRP要求のACKを無関係な後続観測で保留する原因と、初回ACK後にVRRP更新を先延ばしする
-不要なtimer再設定は削除済みである。これらを今回のmultihop buildで再実行したとは扱わない。
+現在のnativeログは `dist/bfd-vrf-final-native.log` と
+`dist/bfd-vrf-final-native/{single-hop,multihop-ipv4,multihop-ipv6,vrf,vrf-single-hop}.log`。
+captureは同じdirectoryの `*-wan0.pcap` と `vrf-wan1.pcap`。
+全体check・build・bundleは `dist/bfd-vrf-final-{check,build,bundle}.log`。
+最後のred TCP session継続assertion追加後の実行は `dist/bfd-vrf-final-isolation.log`。
+古い試験記録・出力との一致は実装条件にしない。
+
+先行buildでは実2 WANのHealth→PBR・実TCP/UDP・worker再起動・古い通知・期限切れ・
+confirmed rollback、およびKeepalivedとのtracking・IPv6 multicastを確認している。
+これらを今回のbuildで再実行したとは扱わない。
 
 ## 未完了と次の作業
 
 1. 全実装計画、全更新復旧経路、外部engine、配備先と対象実機の受入は未完了。
    今回の試験成功を製品全体・実機利用可能の判定には使わない。
-2. NET-07の旧resource/profile、動的source・VRF・経路変更、大規模RIBを実装・受入する。
-   今回はIPv6のBGP multihop連動までは試していない。
+2. NET-07の旧resource/profile、動的source・VRF経路変更、大規模RIBを実装・受入する。
+   今回はIPv6のBGP multihop連動・VRFまでは試していない。
    HA-01の残るresource種別・phase tracking、外部secret参照、peer-aware移行、cluster、
    二native nodeの追加identity・RA・DHCP/PD/NAT session継続を実装・受入する。
 3. 過去のBFD再接続timeoutの失敗request、IPv6 multicast未受信、初回IPv6 VIP TCP/DAD timeoutは

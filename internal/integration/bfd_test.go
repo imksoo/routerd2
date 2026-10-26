@@ -66,7 +66,8 @@ func testDaemonBFDControls(t *testing.T, tracking, multihop bool) {
 	gateway := "192.0.2.2"
 	desired := network.Desired{Interfaces: []network.Interface{{Name: "wan0", Addresses: []string{"192.0.2.1/24"}}}}
 	if multihop {
-		path := newRoutedBFDPeer(t, "ipv4")
+		path := newRoutedBFDPeer(t, "ipv4", "wan0")
+		vrrpVIPResponders(t, path.remoteNS, "4", []string{"203.0.113.9"}, "B")
 		peer, listener, index, desired, gateway = path.peer, path.listener, path.index, path.desired, path.gateway
 	} else {
 		peer, listener, index = newDaemonBFDPeer(t)

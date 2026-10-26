@@ -8,7 +8,7 @@ arbitrary Linux networking command interface.
 
 ## Current behavior
 
-- Create owned bridge, 802.1Q VLAN, VRF, VXLAN, macvlan and WireGuard links;
+- Create owned bridge, 802.1Q VLAN, VRF, VXLAN, macvlan, dummy and WireGuard links;
   manage explicit aliases, membership, MTU and administrative state.
 - Manage IPv4/IPv6 addresses, finite preferred/valid lifetimes, explicit NoDAD
   and point-to-point peers. Automatic IPv6 address generation can be disabled

@@ -102,6 +102,10 @@ func validateLinks(d Desired) error {
 			add("link %s: bridge options require kind bridge", l.Name)
 		}
 		switch l.Kind {
+		case "dummy":
+			if l.Parent != "" {
+				add("dummy %s: parent is not supported", l.Name)
+			}
 		case "wireguard":
 			if l.Parent != "" || l.HardwareAddr != "" {
 				add("wireguard %s: parent and hardware_addr are not supported", l.Name)

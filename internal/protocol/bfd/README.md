@@ -64,13 +64,13 @@ owner's device, or create routes. For example:
  "peers":[{"address":"192.0.2.2"}]}
 ```
 
-One multihop worker owns each local address's control socket and can contain up
+One multihop worker owns each routing domain/local address's control socket and can contain up
 to 64 peers. It can coexist with a single-hop worker using UDP 3784. The source
 owner's link identity and address usability are checked; the source prefix is
 not a peer-adjacency constraint in this mode.
 
 An abstract Unix socket reserves the single-hop interface/family or multihop
-local address in its network namespace.
+local address/VRF in its network namespace.
 Additional abstract claims reserve nonzero cryptographically random local
 discriminators across routerd BFD workers in that namespace. Each session has a
 stable UDP source port in 49152–65535 and transmits to the selected control port. UDP reuse-port
@@ -79,6 +79,14 @@ through netlink and never changes it. A separate verifier checks source usabilit
 link identity, master and administrative state every second without blocking
 packet processing. Single-hop additionally keeps its source-prefix constraint.
 Loss of these facts stops the worker.
+
+An explicit `vrf` names a committed Linux VRF master. The local source must
+belong to that domain; omission selects the default domain. Multihop sockets
+bind the VRF master and route through its members; single-hop sockets bind the
+declared member interface. Identity, table, administrative state and source
+membership are rechecked. Source-address duplicates across domains are permitted.
+BFD-bound BGP must use the same transport scope and the VRF's FIB table. See
+[the VRF operator contract](../../../docs/bfd.md#explicit-vrf-scope).
 
 ## Wire behavior and timing
 

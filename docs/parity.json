@@ -206,7 +206,7 @@
         "network"
       ],
       "parity_status": "not_integrated",
-      "known_gap": "Native bridge/VLAN/VRF/VXLAN/macvlan, alias and membership ownership are implemented. Full legacy lifecycle, link options, dependency and adoption semantics still need per-resource acceptance."
+      "known_gap": "Native bridge/VLAN/VRF/VXLAN/macvlan/dummy, alias and membership ownership are implemented. Owned dummy sources and two VRF domains with identical endpoint addresses run with actual daemon BFD/BGP and independent TCP/UDP peers. Full legacy lifecycle, link options, forwarding policy, dependency and adoption semantics still need per-resource acceptance."
     },
     {
       "id": "network.addresses",
@@ -418,7 +418,7 @@
         "bfd"
       ],
       "parity_status": "not_integrated",
-      "known_gap": "Native active asynchronous IPv4/IPv6 BFD supports explicit single-hop interface scope and routed multihop endpoint pairs without FRR/vtysh. Multihop real-daemon tests traverse a Linux forwarder with UDP 4784 and validate BGP loss/recovery, original expiry and IPv6 worker replacement. Original resource profiles, when, controller/status/lifecycle contracts, authentication and other unsupported modes remain incomplete."
+      "known_gap": "Native active asynchronous IPv4/IPv6 BFD supports explicit single-hop interface scope, routed multihop endpoint pairs and explicit VRF scope without FRR/vtysh. IPv4 VRF tests exercise single-hop and two independent routed BFD/BGP sessions using identical addresses, real TCP/UDP, isolated loss/recovery and worker replacement. Original resource profiles, dynamic source selection, controller/status/lifecycle contracts, IPv6 VRF qualification, authentication and other unsupported modes remain incomplete."
     },
     {
       "id": "vpn.wireguard",

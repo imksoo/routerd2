@@ -15,7 +15,7 @@ Alpineのパッケージをビルドとイメージ組み立てに利用しま�
 | init / supervisor | 明示的な appliance・container・host モード、PID 1、子プロセス回収、終了処理、backoff、heartbeat、同一 release 検証、設定に応じたプロトコルプロセスの追加・置換・停止 |
 | worker runtime | manifestのrole catalogに従ってnative binaryを固定。factoryでは`routerd-modules`と専用`routerd-logging`を別プロセスで起動。専用 lifecycle FD、世代・設定 SHA-256・producer epoch による古い通知の拒否 |
 | logging | journald を使わない独立ログプロセス、構造化ログ、回転・復旧、bounded queue、console fallback、appliance の `/dev/kmsg` 収集。ログ障害を必須ルーティングプロセスの停止条件にしない |
-| network | Netlink による IPv4/IPv6、有限アドレス寿命、静的経路・ECMP、policy routing、bridge/VLAN/VRF/VXLAN/macvlan、MTU・リンク・forwarding。nftables の INPUT/OUTPUT/FORWARD ACL、DNAT/SNAT/masquerade とポート範囲 |
+| network | Netlink による IPv4/IPv6、有限アドレス寿命、静的経路・ECMP、policy routing、bridge/VLAN/VRF/VXLAN/macvlan/dummy、MTU・リンク・forwarding。nftables の INPUT/OUTPUT/FORWARD ACL、DNAT/SNAT/masquerade とポート範囲 |
 | WAN | native DHCPv4、DHCPv6 IA_PD / Information-request、DUID/IAID とリースの永続化、renew/rebind/失効。WAN RA クライアント、SLAAC、default/RIO/on-link routes、RDNSS/DNSSL。PD から LAN /64 を割り当て、旧 prefix を deprecated で維持 |
 | DHCP server | native DHCPv4、scope・予約・sticky lease、ARP conflict probe、信頼する relay の限定、永続 journal を保存してから ACK。worker 再起動後の INIT-REBOOT / renew に対応 |
 | RA | native ICMPv6、RS 応答、RDNSS/DNSSL、絶対寿命、PD 更新時に同じプロセス・socket で prefix を変更。削除した prefix だけを withdraw |
@@ -23,7 +23,7 @@ Alpineのパッケージをビルドとイメージ組み立てに利用しま�
 | VRRPv3 | native IPv4/IPv6 election、VMAC、GARP/NA、preempt、優先度、有限 ownership lease、NoDAD の明示 VIP、Accept_Mode の入力制御 |
 | DNS | 現行 routerd の resolver engine を再利用。UDP/TCP サーバー、cache、zones、query log、UDP/TCP/TLS/HTTPS/QUIC upstream。型付き DHCP リースによる A/PTR を、listener 再起動なしで更新・失効。虚偽の AD bit を防ぐため未実装の local DNSSEC signing は拒否 |
 | BGP | GoBGP v4 を独立 worker に統合。IPv4/IPv6 unicast、policy、選択経路の kernel 投影、recursive next hop、ECMP、期限付き FIB ownership。未解決 next hop は状態に表示し、未解決のまま FIB に入れない |
-| BFD | native IPv4/IPv6 single-hop asynchronous BFD。BGP の明示した隣接 peer を管理し、受信期限・producer 世代・Down counter で実セッションと学習経路を制御。旧 BFD profile、multihop、認証・echo は別の未実装範囲 |
+| BFD | native IPv4/IPv6 single-hop・明示multihop asynchronous BFDとVRF scope。BGP の明示peerを管理し、受信期限・producer世代・Down counterで実セッションと学習経路を制御。旧profile/resource契約、認証・echoは未実装。VRFの実通信試験はIPv4 |
 | Health / events | ICMP/TCP/DNS/HTTPの有限Health snapshotと最小Health→PBR。probe履歴の永続queue・安定ID再送・永久削除・条件停止中の回収、EventRule、Health/BFD/BGPRouter参照DerivedEventと現在値表示。retention・他producer/providerは未完了 |
 | WireGuard | kernel WireGuard を generic netlink で設定。完全な peer set、IPv4/IPv6 endpoint、roaming、公開 handshake/counter 状態。秘密鍵は versioned file と immutable snapshot で管理し、失敗時は所有リンクを DOWN にして復旧 |
 | configuration | ResourceProgram（schema 2）の ID・依存 graph・owner・provenance、YAML / JSON の厳密な検証、read-only `config plan`、candidate、revision・冪等 request ID、永続 journal、プロセス構成と kernel projection の適用、失敗時の旧設定への reconcile |
