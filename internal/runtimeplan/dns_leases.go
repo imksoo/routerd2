@@ -25,15 +25,14 @@ func (r *Runtime) DNSLeases(moduleName string) (dnsconfig.LeaseProjection, error
 	}
 	out := dnsconfig.LeaseProjection{Resource: cfg.Runtime.Resource, ConfigDigest: binding.digest, Sets: []dnsconfig.LeaseSet{}}
 	now := time.Now()
-	records := r.effectiveRecordsLocked(now)
 	for _, zone := range cfg.Runtime.Zones {
 		for _, ref := range zone.Spec.DHCPDerived.Sources {
 			source, valid := dnsconfig.LeaseSourceName(ref)
 			if !valid {
 				return out, errors.New("invalid committed DNS lease source")
 			}
-			u, has := records["service."+source]
-			if !has || u.Role != "dhcp_server" {
+			u, has := r.records["service."+source]
+			if !has || u.Role != "dhcp_server" || !now.Before(r.serverDeadlines[u.Name]) {
 				continue
 			}
 			var s dhcpserverconfig.Snapshot

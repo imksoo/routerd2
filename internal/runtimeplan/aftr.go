@@ -173,7 +173,7 @@ func (r *Runtime) AFTRInput(ctx context.Context, name string) (aftr.Input, error
 	if service.DSLite == nil {
 		return aftr.Input{}, errors.New("missing DS-Lite intent")
 	}
-	in, err := aftrDependencies(r.config.plan.Native, service, r.effectiveRecordsLocked(time.Now()), b.digest, time.Now())
+	in, err := aftrDependencies(r.config.plan.Native, service, r.observationsLocked(), b.digest, time.Now())
 	if err != nil {
 		return in, err
 	}

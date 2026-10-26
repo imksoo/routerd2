@@ -24,6 +24,7 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/dhcp4"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
+	"github.com/imksoo/routerd2/internal/runtimeplan"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 	"github.com/imksoo/routerd2/internal/supervisor"
 	mdns "github.com/miekg/dns"
@@ -201,6 +202,14 @@ func testDaemonDHCPDNSOwnership(t *testing.T, migrated bool) {
 	if err := syscall.Kill(serverPID, 0); err != nil {
 		t.Fatalf("producer exited before independent ownership-expiry proof: %v", err)
 	}
+	var expired runtimeplan.InstanceStatus
+	if err := f.control.Do(context.Background(), "GET", "/v1/services/"+serverName, nil, &expired); err != nil {
+		t.Fatal(err)
+	}
+	var original dhcpserverconfig.Snapshot
+	if err := json.Unmarshal(expired.Snapshot, &original); err != nil || !expired.OwnershipExpired || !original.Active || len(original.Leases) != 1 || !time.Now().Before(original.Leases[0].ExpiresAt) {
+		t.Fatal("current DNS eligibility and the publisher's last observation were not distinguished", err, expired, original)
+	}
 	if err := syscall.Kill(serverPID, syscall.SIGKILL); err != nil {
 		t.Fatal(err)
 	}
@@ -217,6 +226,7 @@ func testDaemonDHCPDNSOwnership(t *testing.T, migrated bool) {
 	if !hasAddress("workstation.lab.example.", lease.CurrentAddress) {
 		t.Fatal("renewed lease disappeared from the existing DNS TCP connection")
 	}
+	t.Log("real DHCP ACK and persistent DNS TCP: original active snapshot exposed expired ownership, and journal recovery restored the lease without restarting DNS")
 	if migrated {
 		t.Log("legacy resource YAML and explicit finite-source policy: real DHCP ACK, DNS publication, stopped-producer expiry and journal recovery passed")
 	}

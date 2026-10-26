@@ -406,6 +406,10 @@ BGP経路の元の期限は、ACK済みBFD受信期限と再帰next-hopのaddres
 期限更新だけではkernel経路を置換せず、routing tableの観測も操作ごとに共有する。
 物理interface上の条件付きaddress／routeにも元の条件・依存期限を渡し、writer再起動後も
 独立して失効させる。controlとwriterのlifetime投影を共有し、ReadyはACK済み期限を確認する。
+失効時のprotocol通知JSON書換えを廃止し、元の観測を消費側で評価する。
+BGP・DHCPv4の重複した受信期限を削除し、BGP状態表示も元のBOOTTIME期限を使う。
+DHCP serverは設定切替後も元通知を保持し、期限切れのactive条件とDNS出力を除外する。
+server→DNSの元BOOTTIME期限への置換と、残るsnapshotの型付き保持は未完了。
 現在の検証範囲と残作業は
 [引き継ぎ](pve-codex-handoff.md) を参照する。CORE-03全体の完了とはしない。
 

@@ -107,7 +107,6 @@ func (r *Runtime) fenceApplicationsLocked() {
 		}
 		if current, exists := r.records[name]; exists && sameUpdate(current, effect.update) {
 			delete(r.records, name)
-			delete(r.leases, name)
 			delete(r.guardGrants, name)
 			r.observationVersion++
 		}
@@ -221,7 +220,7 @@ func (r *Runtime) reconcileStep(ctx context.Context, ceiling map[string]supervis
 	r.fenceApplicationsLocked()
 	var p projection
 	if r.configured {
-		p, err = r.projectProgramLocked(r.config, r.effectiveRecordsLocked(time.Now()), time.Now())
+		p, err = r.projectProgramLocked(r.config, r.observationsLocked(), time.Now())
 	}
 	if err != nil {
 		r.mu.Unlock()
@@ -299,7 +298,7 @@ func (r *Runtime) reconcileStep(ctx context.Context, ceiling map[string]supervis
 		r.mu.Unlock()
 		return matching, nil
 	}
-	latest, err := r.projectProgramLocked(r.config, r.effectiveRecordsLocked(time.Now()), time.Now())
+	latest, err := r.projectProgramLocked(r.config, r.observationsLocked(), time.Now())
 	if err != nil {
 		r.mu.Unlock()
 		return false, err
@@ -317,7 +316,7 @@ func (r *Runtime) reconcileStep(ctx context.Context, ceiling map[string]supervis
 	if p.observationVersion != r.observationVersion {
 		// New observations can arrive during kernel I/O. Do not start workers
 		// against a projection that no longer describes their prerequisites.
-		current, projectErr := r.projectProgramLocked(r.config, r.effectiveRecordsLocked(time.Now()), time.Now())
+		current, projectErr := r.projectProgramLocked(r.config, r.observationsLocked(), time.Now())
 		if projectErr != nil {
 			r.mu.Unlock()
 			return false, projectErr
@@ -339,6 +338,7 @@ func (r *Runtime) reconcileStep(ctx context.Context, ceiling map[string]supervis
 		for name := range r.records {
 			if _, ok := r.bindings[name]; !ok {
 				delete(r.records, name)
+				delete(r.serverDeadlines, name)
 				delete(r.guardGrants, name)
 			}
 		}

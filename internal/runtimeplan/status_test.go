@@ -6,7 +6,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
@@ -20,7 +19,6 @@ func TestServiceStatusRemainsBoundedAndProvidesDetailAndIssuePages(t *testing.T)
 		name := fmt.Sprintf("service.instance-%d", i)
 		r.bindings[name] = binding{instance: serviceconfig.Instance{Name: name, Role: "bgp"}, digest: strings.Repeat("f", 64)}
 		r.records[name] = serviceconfig.Update{Name: name, Role: "bgp", Generation: 2, Sequence: 3, Snapshot: large}
-		r.leases[name] = time.Now().Add(-time.Second)
 	}
 	// JSON HTML escaping must be counted too; a short raw string can grow six
 	// times in the actual HTTP response. Aggregate status must stay bounded.

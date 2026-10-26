@@ -188,6 +188,9 @@ func (r *Runtime) conditionFactsLocked(cfg configuration, now time.Time) (result
 		}
 		facts.Facts[name+".ready"] = resourceprogram.Fact{Value: ready, ObservedNanos: r.guardUntilNanos - uint64(time.Second), ExpiresNanos: r.guardUntilNanos, WorkerGeneration: module.Generation, ProducerEpoch: r.supervisorInstance}
 		record := r.records[name]
+		if record.Role == "dhcp_server" && !now.Before(r.serverDeadlines[name]) {
+			continue
+		}
 		if record.Role == "vrrp" {
 			var election vrrp.Snapshot
 			if !module.Ready || record.Generation != module.Generation || record.ConfigDigest != binding.digest || json.Unmarshal(record.Snapshot, &election) != nil || election.BootID != clock.BootID {

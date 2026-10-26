@@ -139,14 +139,14 @@ type Runtime struct {
 	vrrpTracks           map[string][]vrrpTrackState
 	liveRA               map[string]ra.Config
 	aftrInputs           map[string]aftr.Input
-	leases               map[string]time.Time
+	serverDeadlines      map[string]time.Time
 	routeIssues          []RouteIssue
 	bgpApplied           map[string]bgpProjectionStatus
 	phase, lastError     string
 }
 
 func New(dir, stateDir string, n Network, supervisorInstance string) *Runtime {
-	return &Runtime{reconcileWake: make(chan struct{}, 1), waitWake: make(chan struct{}, 1), op: semaphore.NewWeighted(1), supervisorInstance: supervisorInstance, dir: dir, stateDir: stateDir, network: n, manager: managerClient{localapi.NewClient(filepath.Join(dir, supervisor.SocketName))}, bindings: map[string]binding{}, records: map[string]serviceconfig.Update{}, liveRA: map[string]ra.Config{}, leases: map[string]time.Time{}, phase: "starting"}
+	return &Runtime{reconcileWake: make(chan struct{}, 1), waitWake: make(chan struct{}, 1), op: semaphore.NewWeighted(1), supervisorInstance: supervisorInstance, dir: dir, stateDir: stateDir, network: n, manager: managerClient{localapi.NewClient(filepath.Join(dir, supervisor.SocketName))}, bindings: map[string]binding{}, records: map[string]serviceconfig.Update{}, liveRA: map[string]ra.Config{}, serverDeadlines: map[string]time.Time{}, phase: "starting"}
 }
 
 // CheckReady queries the process manager at confirmation time. A previously
@@ -196,7 +196,7 @@ func (r *Runtime) CheckReady(ctx context.Context) error {
 	}
 	if dynamicProgram(r.config.source) {
 		r.installGuardStatusLocked(s, nil)
-		p, err := r.projectProgramLocked(r.config, r.effectiveRecordsLocked(time.Now()), time.Now())
+		p, err := r.projectProgramLocked(r.config, r.observationsLocked(), time.Now())
 		if err != nil {
 			return err
 		}
@@ -337,6 +337,11 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 	r.configured = true
 	r.records = retained
 	r.bindings = bindings
+	for name := range r.serverDeadlines {
+		if record, ok := retained[name]; !ok || record.Role != "dhcp_server" {
+			delete(r.serverDeadlines, name)
+		}
+	}
 	r.installBFDCacheLocked(bfdSources, bfdRecipients)
 	for name, input := range r.aftrInputs {
 		if b, ok := bindings[name]; !ok || b.digest != input.ConfigDigest {
@@ -355,7 +360,7 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 // Caller holds mu. Configuration equality includes all protocol-owned paths.
 func (r *Runtime) retainedLocked(expected map[string]string) map[string]serviceconfig.Update {
 	retained := map[string]serviceconfig.Update{}
-	effective := r.effectiveRecordsLocked(time.Now())
+	effective := r.observationsLocked()
 	for name, digest := range expected {
 		if old, ok := r.bindings[name]; ok && old.digest == digest {
 			if value, ok := effective[name]; ok {
@@ -366,28 +371,11 @@ func (r *Runtime) retainedLocked(expected map[string]string) map[string]servicec
 	return retained
 }
 
-// The local receipt deadline retains Go's monotonic clock. A backward wall
-// clock step cannot prolong an HA ownership lease and an ordinary replay
-// cannot create one. The worker still supplies the kernel's absolute deadline.
-func (r *Runtime) effectiveRecordsLocked(now time.Time) map[string]serviceconfig.Update {
+// Caller holds mu. The envelopes and their bodies remain the original accepted
+// observations; consumers evaluate eligibility without rewriting source state.
+func (r *Runtime) observationsLocked() map[string]serviceconfig.Update {
 	out := make(map[string]serviceconfig.Update, len(r.records))
 	for name, record := range r.records {
-		if record.Role == "dhcp_server" && !now.Before(r.leases[name]) {
-			var snapshot dhcpserverconfig.Snapshot
-			if json.Unmarshal(record.Snapshot, &snapshot) == nil && snapshot.Active {
-				snapshot.Active = false
-				snapshot.ValidUntil = time.Time{}
-				snapshot.Leases = nil
-				record.Snapshot, _ = json.Marshal(snapshot)
-			}
-		}
-		if record.Role == "bgp" && !now.Before(r.leases[name]) {
-			var snapshot bgpconfig.Snapshot
-			if json.Unmarshal(record.Snapshot, &snapshot) == nil && snapshot.Active {
-				snapshot.Active = false
-				record.Snapshot, _ = json.Marshal(snapshot)
-			}
-		}
 		out[name] = record
 	}
 	r.mergeBFDRecordsLocked(out)
@@ -502,67 +490,33 @@ func (r *Runtime) applyNetworkLocked(ctx context.Context, d network.Desired) err
 
 var ErrStale = errors.New("stale protocol producer or configuration")
 
-// Caller holds mu. Repeating a snapshot with a larger transport sequence is
-// still a replay of the same ownership grant. It must not extend monotonic
-// validity after a backward wall-clock adjustment.
-func (r *Runtime) recordOwnershipLocked(u serviceconfig.Update, maximum time.Duration) error {
-	if u.Role == "dhcp4" {
-		var s dhcp4.Snapshot
-		if err := json.Unmarshal(u.Snapshot, &s); err != nil {
-			return err
-		}
-		clock, err := bfd.ReadClock()
-		if err != nil {
-			return err
-		}
-		if !dhcp4.CurrentLease(s, clock) {
-			delete(r.leases, u.Name)
-			return nil
-		}
-		r.leases[u.Name] = time.Now().Add(time.Duration(s.LeaseClock.ExpiresNanos - uint64(clock.BoottimeNanoseconds)))
-		return nil
-	}
-	if u.Role == "bgp" {
-		var s bgpconfig.Snapshot
-		if err := json.Unmarshal(u.Snapshot, &s); err != nil {
-			return err
-		}
-		if !s.Active {
-			delete(r.leases, u.Name)
-			return nil
-		}
-		clock, err := bfd.ReadClock()
-		if err != nil || !bgpconfig.CurrentObservation(s, clock) {
-			return errors.Join(errors.New("invalid BGP boot-scoped ownership deadline"), err)
-		}
-		r.leases[u.Name] = time.Now().Add(time.Duration(s.ExpiresNanos - uint64(clock.BoottimeNanoseconds)))
-		return nil
-	}
+// Caller holds mu. An unchanged DHCP server deadline cannot acquire a longer
+// monotonic lifetime through replay, even after a backward wall-clock step.
+// Computing a candidate deadline does not change accepted observations.
+func (r *Runtime) serverDeadlineLocked(u serviceconfig.Update) (time.Time, error) {
 	var grant struct {
 		Active     bool      `json:"active"`
 		ValidUntil time.Time `json:"valid_until"`
 	}
 	_ = json.Unmarshal(u.Snapshot, &grant)
 	if !grant.Active {
-		delete(r.leases, u.Name)
-		return nil
+		return time.Time{}, nil
 	}
 	now := time.Now()
 	remaining := grant.ValidUntil.Sub(now)
-	if remaining <= 0 || remaining > maximum {
-		return fmt.Errorf("invalid %s ownership deadline", u.Role)
+	if remaining <= 0 || remaining > 5*time.Second {
+		return time.Time{}, errors.New("invalid DHCP server observation deadline")
 	}
 	if previous, ok := r.records[u.Name]; ok && previous.Generation == u.Generation {
 		var old struct {
 			Active     bool      `json:"active"`
 			ValidUntil time.Time `json:"valid_until"`
 		}
-		if json.Unmarshal(previous.Snapshot, &old) == nil && old.Active && old.ValidUntil.Equal(grant.ValidUntil) && !r.leases[u.Name].IsZero() {
-			return nil
+		if json.Unmarshal(previous.Snapshot, &old) == nil && old.Active && old.ValidUntil.Equal(grant.ValidUntil) && !r.serverDeadlines[u.Name].IsZero() {
+			return r.serverDeadlines[u.Name], nil
 		}
 	}
-	r.leases[u.Name] = now.Add(remaining)
-	return nil
+	return now.Add(remaining), nil
 }
 
 // Observe acknowledges a validated observation. Kernel application belongs to
@@ -655,22 +609,25 @@ func (r *Runtime) Observe(ctx context.Context, u serviceconfig.Update) error {
 			return err
 		}
 	}
-	oldLease := r.leases[u.Name]
-	switch u.Role {
-	case "bgp", "dhcp_server", "dhcp4":
-		if err := r.recordOwnershipLocked(u, 5*time.Second); err != nil {
+	var serverDeadline time.Time
+	if u.Role == "dhcp_server" {
+		var err error
+		serverDeadline, err = r.serverDeadlineLocked(u)
+		if err != nil {
 			return err
 		}
 	}
-	candidateRecords := r.effectiveRecordsLocked(time.Now())
+	candidateRecords := r.observationsLocked()
 	candidateRecords[u.Name] = u
 	if _, err := r.projectLocked(r.config.plan.Native, candidateRecords, time.Now(), resourceprogram.FactSnapshot{}); err != nil {
-		if oldLease.IsZero() {
-			delete(r.leases, u.Name)
-		} else {
-			r.leases[u.Name] = oldLease
-		}
 		return err
+	}
+	if u.Role == "dhcp_server" {
+		if serverDeadline.IsZero() {
+			delete(r.serverDeadlines, u.Name)
+		} else {
+			r.serverDeadlines[u.Name] = serverDeadline
+		}
 	}
 	r.recordGuardGrantLocked(u, time.Now())
 	r.records[u.Name] = u

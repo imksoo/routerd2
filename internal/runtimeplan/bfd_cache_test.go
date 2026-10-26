@@ -261,7 +261,7 @@ func TestBFDCacheCutoverPreservesNewerUnchangedSourceAndFencesChangedSources(t *
 	}
 	r.records = retained
 	r.installBFDCacheLocked(sources, recipients)
-	effective := r.effectiveRecordsLocked(time.Now())
+	effective := r.observationsLocked()
 	r.mu.Unlock()
 	if effective["service.edge"].Sequence != 2 || !bytes.Equal(effective["service.edge"].Snapshot, newer.Snapshot) {
 		t.Fatal("cutover restored an older BFD receive/counter snapshot")

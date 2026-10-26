@@ -46,6 +46,9 @@ func validateBGPTransition(previous, next serviceconfig.Update) error {
 	if s.BootID != clock.BootID || s.ObservedNanos > uint64(clock.BoottimeNanoseconds) {
 		return errors.New("BGP observation belongs to a different boot or future clock")
 	}
+	if s.Active && !bgpconfig.CurrentObservation(s, clock) {
+		return errors.New("BGP original observation expired")
+	}
 	if previous.Generation != next.Generation || previous.ProducerEpoch != next.ProducerEpoch || len(previous.Snapshot) == 0 {
 		return nil
 	}
