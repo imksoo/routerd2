@@ -17,7 +17,7 @@ QEMU_SSH_KEY ?=
 LDFLAGS = -s -w -X github.com/imksoo/routerd2/internal/buildinfo.Identity=ROUTERD2-RELEASE-V1:$(RELEASE_ID):END
 BUILD_ARGS = --build-arg GO_VERSION=$(GO_VERSION) --build-arg ALPINE_VERSION=$(ALPINE_VERSION) --build-arg RELEASE_ID=$(RELEASE_ID)
 
-.PHONY: help fmt fmt-check test test-dependencies test-tools race vet check check-health-pbr check-vrrp-unicast check-bfd check-pd-ra check-dhcp6 check-aftr check-dhcp-relay licenses build build-linux release-built-test container container-multi container-smoke apk image qemu-smoke qemu-network qemu-wireguard qemu-ra-dns qemu-daemon qemu-daemon-aftr qemu-dhcp4-clock qemu-dhcp6-clock qemu-vrrp-daemon qemu-vrrp-activation qemu-vrrp-conditional qemu-vrrp-clock qemu-eventrule qemu-derived qemu-protocols qemu-release-boot qemu-storage qemu-health-power clean
+.PHONY: help fmt fmt-check test test-dependencies test-tools race vet check check-health-pbr check-vrrp-unicast check-bfd check-pd-ra check-dhcp6 check-aftr check-ra-client check-dhcp-relay licenses build build-linux release-built-test container container-multi container-smoke apk image qemu-smoke qemu-network qemu-wireguard qemu-ra-dns qemu-daemon qemu-daemon-aftr qemu-dhcp4-clock qemu-dhcp6-clock qemu-ra-clock qemu-vrrp-daemon qemu-vrrp-activation qemu-vrrp-conditional qemu-vrrp-clock qemu-eventrule qemu-derived qemu-protocols qemu-release-boot qemu-storage qemu-health-power clean
 
 help:
 	@printf '%s\n' \
@@ -28,6 +28,7 @@ help:
 	  'make check-dhcp6       Verify native IA_NA with independent dnsmasq' \
 	  'make check-pd-ra       Verify PD renewal, generated RA and client traffic' \
 	  'make check-aftr        Verify AFTR input identity, DNS and tunnel expiry' \
+	  'make check-ra-client   Verify real RA, source/default-route TCP/UDP and expiry' \
 	  'make check-dhcp-relay  Verify DHCP peers, fragmentation and VRF isolation' \
 	  'make licenses          Collect dependency licenses and their manifest' \
 	  'make build             Build the native commands for the current platform' \
@@ -41,6 +42,7 @@ help:
 	  'make qemu-ra-dns       Verify learned RA DNS expiry and live updates in QEMU' \
 	  'make qemu-daemon       Run the two-binary RA daemon gate in QEMU' \
 	  'make qemu-daemon-aftr  Run the two-binary AFTR daemon gate in QEMU' \
+	  'make qemu-ra-clock     Verify original RA budgets during guest UTC corrections' \
 	  'make qemu-dhcp6-clock Verify original IA_NA/PD/RA expiry during guest UTC steps' \
 	  'make qemu-dhcp4-clock  Verify DHCP lease authority during actual guest UTC steps' \
 	  'make qemu-vrrp-daemon  Verify original VRRP VIP authority and real daemon recovery' \
@@ -99,6 +101,9 @@ check-dhcp6: build
 
 check-pd-ra: build
 	$(PYTHON) scripts/daemon-tests.py pd-ra --go '$(GO)'
+
+check-ra-client: build
+	$(PYTHON) scripts/daemon-tests.py ra-client --go '$(GO)'
 
 check-aftr: build
 	$(PYTHON) scripts/daemon-tests.py aftr --go '$(GO)'
@@ -160,6 +165,9 @@ qemu-daemon:
 qemu-daemon-aftr:
 	$(PYTHON) scripts/qemu-network.py --suite daemon-aftr --go '$(GO)' --image-dir $(IMAGE_DIR) --timeout $(QEMU_DAEMON_TIMEOUT)
 
+qemu-ra-clock:
+	$(PYTHON) scripts/qemu-network.py --suite daemon-ra-clock --go '$(GO)' --image-dir $(IMAGE_DIR)
+
 qemu-dhcp6-clock:
 	$(PYTHON) scripts/qemu-network.py --suite daemon-dhcp6-clock --go '$(GO)' --image-dir $(IMAGE_DIR)
 
@@ -179,7 +187,7 @@ qemu-vrrp-clock:
 	$(PYTHON) scripts/qemu-network.py --suite daemon-vrrp-clock --go '$(GO)' --image-dir $(IMAGE_DIR)
 
 qemu-protocols:
-	@set -eu; for suite in boot-address daemon-dhcp4 daemon-dhcp4-clock daemon-dhcp6-clock daemon-vrrp daemon-vrrp-activation daemon-vrrp-conditional daemon-vrrp-clock daemon-resource-program daemon-health-pbr daemon-management daemon-startup daemon-startup-recovery daemon-eventrule daemon-event-archive daemon-derived daemon-stopped-health daemon-dhcp-dns daemon-legacy-dhcp-dns daemon-bgp daemon-bgp-derived daemon-bfd daemon-bfd-derived dhcp dhcp-server vrrp ra-client aftr bfd; do \
+	@set -eu; for suite in boot-address daemon-dhcp4 daemon-dhcp4-clock daemon-dhcp6-clock daemon-ra-clock daemon-vrrp daemon-vrrp-activation daemon-vrrp-conditional daemon-vrrp-clock daemon-resource-program daemon-health-pbr daemon-management daemon-startup daemon-startup-recovery daemon-eventrule daemon-event-archive daemon-derived daemon-stopped-health daemon-dhcp-dns daemon-legacy-dhcp-dns daemon-bgp daemon-bgp-derived daemon-bfd daemon-bfd-derived dhcp dhcp-server vrrp ra-client aftr bfd; do \
 	  $(PYTHON) scripts/qemu-network.py --suite "$$suite" --go '$(GO)' --image-dir $(IMAGE_DIR); \
 	done
 

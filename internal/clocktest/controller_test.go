@@ -16,7 +16,7 @@ func validGuest() Guest {
 }
 
 func TestClockControllerAcceptsOnlyNamedDedicatedClockFixtures(t *testing.T) {
-	for _, name := range []string{SuiteName, VRRPSuiteName, DHCP6SuiteName} {
+	for _, name := range []string{SuiteName, VRRPSuiteName, DHCP6SuiteName, RAClientSuiteName} {
 		g := validGuest()
 		g.Suite = name
 		clock := boottime.Clock{BootID: "11111111-2222-4333-8444-555555555555", BoottimeNanoseconds: 1, WallTime: time.Now().UTC()}

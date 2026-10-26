@@ -189,7 +189,10 @@ func (k *linuxKernel) Routes(table int) ([]RouteState, error) {
 		names[l.Attrs().Index] = l.Attrs().Name
 	}
 	out := make([]RouteState, 0, len(rs))
-	observedAt := time.Now()
+	observedAt, err := readRouteClock()
+	if err != nil {
+		return nil, err
+	}
 	for _, raw := range rs {
 		r, err := decodeNativeRoute(raw, names, observedAt)
 		if err != nil {
@@ -290,13 +293,21 @@ func linuxRoute(r Route) (*netlink.Route, error) {
 	}
 	return result, nil
 }
-func (k *linuxKernel) AddRoute(r Route) error {
+func (k *linuxKernel) AddRoute(saved ownedRoute) error {
+	r := saved.Route
 	v, err := linuxRoute(r)
 	if err != nil {
 		return err
 	}
-	if !r.ValidUntil.IsZero() {
-		req, err := expiringRouteRequest(v, r.ValidUntil, time.Now())
+	if saved.KernelExpiry != (routeTimer{}) {
+		clock, err := readRouteClock()
+		if err != nil {
+			return err
+		}
+		if clock.BootID != saved.KernelExpiry.BootID {
+			return errors.New("route timer belongs to a different kernel boot")
+		}
+		req, err := expiringRouteRequest(v, time.Duration(int64(saved.KernelExpiry.Nanos)-clock.monotonicNanos))
 		if err != nil {
 			return err
 		}

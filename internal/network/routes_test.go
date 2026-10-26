@@ -88,7 +88,7 @@ func TestECMPDoesNotAdoptMatchingProtocolOrOverwriteWeightDrift(t *testing.T) {
 			e, _ := engineFor(t, k)
 			d := ecmpExample()
 			if mode == "no-journal" {
-				if err := k.AddRoute(d.Routes[0]); err != nil {
+				if err := k.AddRoute(ownedRoute{Route: d.Routes[0]}); err != nil {
 					t.Fatal(err)
 				}
 			} else if _, err := e.Apply(context.Background(), 1, d); err != nil {
@@ -148,11 +148,11 @@ func TestNativeECMPObservationPreservesWeightsAndUnknownPolicy(t *testing.T) {
 	want := Route{Destination: "2001:db8:3::/64", NextHops: []NextHop{{Gateway: "2001:db8:1::1", Interface: "lan0", Weight: 3}, {Gateway: "2001:db8:2::1", Interface: "wan0", Weight: 256}}}
 	names := map[int]string{1: "lan0", 2: "wan0"}
 	s := nativeRouteState(r, names)
-	if !routeMatches(s, want) || s.Advanced {
+	if !routeMatches(s, ownedRoute{Route: want}) || s.Advanced {
 		t.Fatalf("native weighted route not recognized: %+v", s)
 	}
 	r.MultiPath[0].Flags |= unix.RTNH_F_ONLINK
-	if routeMatches(nativeRouteState(r, names), want) {
+	if routeMatches(nativeRouteState(r, names), ownedRoute{Route: want}) {
 		t.Fatal("foreign ONLINK next-hop flag ignored")
 	}
 }
@@ -165,7 +165,7 @@ func TestForeignECMPReferencePreventsOwnedLinkDeletion(t *testing.T) {
 		t.Fatal(err)
 	}
 	foreign := Route{Destination: "198.18.0.0/24", NextHops: []NextHop{{Interface: "br0", Weight: 1}, {Interface: "lan0", Weight: 1}}}
-	if err := k.AddRoute(foreign); err != nil {
+	if err := k.AddRoute(ownedRoute{Route: foreign}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.Apply(context.Background(), 2, Desired{}); err == nil {

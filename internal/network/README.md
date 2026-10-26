@@ -84,7 +84,7 @@ cached memory. The signed boot preflight fixture compares this response with a
 direct inspection of the actual journal before preparing a pair; operator paired
 prepare/boot and qualification of other state families remain separate work.
 
-Ownership journal format 6 records controller-generated boot-scoped address
+Ownership journal format 7 records controller-generated boot-scoped address
 lifetimes, route deadlines and virtual-link activation deadlines. Earlier unreleased formats are refused without rewriting their contents; no
 prototype format migration or mixed-version rollback is supported. Operator
 configuration cannot declare `boot_lifetime`, link `authority`, or route `boot_id`
@@ -307,3 +307,14 @@ independent quarantine path and successful rollback afterward.
 The gate also checks wrong-PSK/peer-removal traffic rejection and foreign peer
 preservation. Its required PASS marker and artifact hashes are recorded in
 `dist/wireguard-test`; a guest that exits before running the test is a failure.
+
+IPv6 route `valid_until` is one typed deadline: `{utc: ...}` for operator intent
+or an original boot-scoped protocol lifetime. Operator resources cannot supply
+boot authority. The owned route record contains the actual kernel relative
+expiry as a boot-scoped CLOCK_MONOTONIC timestamp. Readback ownership compares
+that physical timer, independently of displayed UTC. Finite lifetimes longer
+than the kernel grant are retained unchanged; the existing writer renews its
+seven-day kernel timer with one day remaining. Original authority is checked
+before renewal and route installation. Expired or foreign routes are not
+adopted. Private RA journal format 2 and network journal format 7 have no readers
+for discarded prototype formats.

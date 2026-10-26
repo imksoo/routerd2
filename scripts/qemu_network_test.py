@@ -61,7 +61,8 @@ class GuestResultTest(unittest.TestCase):
     def test_only_fixed_clock_suite_gets_matching_boot_marker(self):
         fixed = {"daemon-dhcp4-clock": "TestDaemonDHCPv4ClockCorrections",
                  "daemon-vrrp-clock": "TestDaemonVRRPClockCorrections",
-                 "daemon-dhcp6-clock": "TestDaemonDHCP6ClockCorrections"}
+                 "daemon-dhcp6-clock": "TestDaemonDHCP6ClockCorrections",
+                 "daemon-ra-clock": "TestDaemonRAClientClockCorrections"}
         for name in fixed:
             self.assertIn(name, GATE.SUITES)
         for name in GATE.SUITES:

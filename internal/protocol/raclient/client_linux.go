@@ -16,17 +16,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/boottime"
+
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 )
-
-func nowInstant() (instant, error) {
-	var ts unix.Timespec
-	if err := unix.ClockGettime(unix.CLOCK_BOOTTIME, &ts); err != nil {
-		return instant{}, err
-	}
-	return instant{wall: time.Now().UTC(), boot: time.Unix(ts.Sec, ts.Nsec).UTC()}, nil
-}
 
 // Run calls ready only after the raw socket, journal and initial full snapshot
 // are available. No router/lease is required for readiness. Callback, durable
@@ -59,15 +53,11 @@ func Run(ctx context.Context, cfg Config, effects Effects, ready func()) (result
 	if err != nil {
 		return err
 	}
-	bootID, err := readBootID()
+	now, err := boottime.Read()
 	if err != nil {
 		return err
 	}
-	now, err := nowInstant()
-	if err != nil {
-		return err
-	}
-	if err = s.restore(cfg.StatePath, bootID, now); err != nil {
+	if err = s.restore(cfg.StatePath, now); err != nil {
 		return err
 	}
 	fd, pktinfo, err := openSocket(cfg, link)
@@ -75,12 +65,12 @@ func Run(ctx context.Context, cfg Config, effects Effects, ready func()) (result
 		return fmt.Errorf("open RA raw socket: %w", err)
 	}
 	defer unix.Close(fd)
-	publish := func(now instant) error {
+	publish := func(now boottime.Clock) error {
 		snap := s.snapshot(now)
 		if err := ValidateSnapshot(cfg, snap); err != nil {
 			return fmt.Errorf("RA client produced invalid snapshot: %w", err)
 		}
-		if err := saveState(cfg.StatePath, s.record(bootID, now)); err != nil {
+		if err := saveState(cfg.StatePath, journal{Version: 2, Identity: s.identity, Snapshot: snap}); err != nil {
 			return fmt.Errorf("persist RA state: %w", err)
 		}
 		if err := effects.Update(ctx, snap); err != nil {
@@ -92,7 +82,7 @@ func Run(ctx context.Context, cfg Config, effects Effects, ready func()) (result
 		return err
 	}
 	defer func() {
-		now, err := nowInstant()
+		now, err := boottime.Read()
 		if err != nil {
 			result = errors.Join(result, err)
 			return
@@ -108,9 +98,9 @@ func Run(ctx context.Context, cfg Config, effects Effects, ready func()) (result
 	if ready != nil {
 		ready()
 	}
-	nextSolicit := now.boot.Add(solicitationDelay())
+	nextSolicit := now.BoottimeNanoseconds + int64(solicitationDelay())
 	tries := 0
-	lastPublish, nextInspect := now.boot, now.boot.Add(time.Second)
+	lastPublish, nextInspect := now.BoottimeNanoseconds, now.BoottimeNanoseconds+int64(time.Second)
 	inspectConfig := cfg
 	inspectConfig.SourceAddress = link.source.String()
 	dirty := false
@@ -119,22 +109,22 @@ func Run(ctx context.Context, cfg Config, effects Effects, ready func()) (result
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		now, err = nowInstant()
+		now, err = boottime.Read()
 		if err != nil {
 			return err
 		}
 		hadRoutes := len(s.learned.Routes) > 0
-		if s.expire(now) || wallClockMoved(s.clock, now) {
+		if s.expire(now) {
 			if hadRoutes && len(s.learned.Routes) == 0 {
 				tries = 0
-				nextSolicit = now.boot.Add(solicitationDelay())
+				nextSolicit = now.BoottimeNanoseconds + int64(solicitationDelay())
 			}
 			if err := publish(now); err != nil {
 				return err
 			}
-			lastPublish, dirty = now.boot, false
+			lastPublish, dirty = now.BoottimeNanoseconds, false
 		}
-		if !now.boot.Before(nextInspect) {
+		if now.BoottimeNanoseconds >= nextInspect {
 			observed, err := inspectLink(inspectConfig)
 			if err != nil {
 				return err
@@ -162,9 +152,9 @@ func Run(ctx context.Context, cfg Config, effects Effects, ready func()) (result
 					}
 				}
 			}
-			nextInspect = now.boot.Add(time.Second)
+			nextInspect = now.BoottimeNanoseconds + int64(time.Second)
 		}
-		if !nextSolicit.IsZero() && !now.boot.Before(nextSolicit) {
+		if nextSolicit != 0 && now.BoottimeNanoseconds >= nextSolicit {
 			if err := sendSolicitation(fd, pktinfo, link); err != nil {
 				return err
 			}
@@ -172,16 +162,16 @@ func Run(ctx context.Context, cfg Config, effects Effects, ready func()) (result
 			tries++
 			dirty = true
 			if tries < 3 {
-				nextSolicit = now.boot.Add(4 * time.Second)
+				nextSolicit = now.BoottimeNanoseconds + int64(4*time.Second)
 			} else {
-				nextSolicit = time.Time{}
+				nextSolicit = 0
 			}
 		}
-		if dirty && !now.boot.Before(lastPublish.Add(time.Second)) {
+		if dirty && now.BoottimeNanoseconds >= lastPublish+int64(time.Second) {
 			if err := publish(now); err != nil {
 				return err
 			}
-			lastPublish, dirty = now.boot, false
+			lastPublish, dirty = now.BoottimeNanoseconds, false
 		}
 		poll := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
 		if _, err := unix.Poll(poll, 100); err != nil {
@@ -238,7 +228,7 @@ func Run(ctx context.Context, cfg Config, effects Effects, ready func()) (result
 				p.ifindex = int(binary.NativeEndian.Uint32(cm.Data[16:]))
 			}
 		}
-		now, err = nowInstant()
+		now, err = boottime.Read()
 		if err != nil {
 			return err
 		}
@@ -246,11 +236,11 @@ func Run(ctx context.Context, cfg Config, effects Effects, ready func()) (result
 			dirty = true
 			continue
 		}
-		nextSolicit = time.Time{}
+		nextSolicit = 0
 		if err := publish(now); err != nil {
 			return err
 		}
-		lastPublish, dirty = now.boot, false
+		lastPublish, dirty = now.BoottimeNanoseconds, false
 	}
 }
 

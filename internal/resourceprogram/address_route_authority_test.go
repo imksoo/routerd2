@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/lifetime"
 	"github.com/imksoo/routerd2/internal/network"
 )
 
@@ -15,7 +16,7 @@ func TestAddressAndRouteIntersectOriginalConditionsDependenciesAndUTCLifetimes(t
 		{ID: "wan", ReadyWhen: &FactCondition{Fact: "ready"}, Interface: &network.Interface{Name: "wan0"}},
 		{ID: "address", When: &FactCondition{Fact: "active", MaxAge: "600ms"}, Address: &Address{Interface: "wan0", CIDR: "2001:db8::2/64", Options: &network.AddressOptions{NoDAD: true, PreferredUntil: wall.Add(200 * time.Millisecond), ValidUntil: wall.Add(300 * time.Millisecond)}}},
 		{ID: "route", DependsOn: []string{"address"}, Route: &network.Route{Destination: "2001:db8:1::/64", Gateway: "2001:db8::1", Interface: "wan0"}},
-		{ID: "shorter-route", DependsOn: []string{"address"}, Route: &network.Route{Destination: "2001:db8:2::/64", Gateway: "2001:db8::1", Interface: "wan0", ValidUntil: wall.Add(250 * time.Millisecond)}},
+		{ID: "shorter-route", DependsOn: []string{"address"}, Route: &network.Route{Destination: "2001:db8:2::/64", Gateway: "2001:db8::1", Interface: "wan0", ValidUntil: lifetime.Deadline{UTC: wall.Add(250 * time.Millisecond)}}},
 		{ID: "static", Address: &Address{Interface: "other0", CIDR: "192.0.2.2/24"}},
 	}}
 	before, err := json.Marshal(source)
@@ -55,7 +56,7 @@ func TestAddressAndRouteIntersectOriginalConditionsDependenciesAndUTCLifetimes(t
 			t.Fatal("route lost its original boot scope", route)
 		}
 	}
-	if !native.Network.Routes[1].ValidUntil.Equal(wall.Add(250 * time.Millisecond)) {
+	if !native.Network.Routes[1].ValidUntil.UTC.Equal(wall.Add(250 * time.Millisecond)) {
 		t.Fatal("projection discarded the explicit IPv6 kernel expiry", native.Network.Routes[1])
 	}
 	after, err := json.Marshal(source)

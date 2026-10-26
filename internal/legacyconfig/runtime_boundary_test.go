@@ -236,11 +236,11 @@ func TestMigratedWANGraphThroughPublicRuntimeProjection(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := clock.WallTime
-	learned := raclient.Snapshot{Resource: raService.Name, Interface: "eth0", SourceAddress: "fe80::2", InterfaceID: "::2", Active: true, UpdatedAt: now,
-		Addresses:  []raclient.Address{{Address: "2001:db8:100::2/128", Prefix: "2001:db8:100::/64", PreferredUntil: now.Add(15 * time.Minute), ValidUntil: now.Add(20 * time.Minute)}},
-		Prefixes:   []raclient.Prefix{{Prefix: "2001:db8:100::/64", ValidUntil: now.Add(20 * time.Minute)}},
-		Routes:     []raclient.Route{{Destination: "::/0", Gateway: "fe80::1", Preference: 1, ValidUntil: now.Add(90 * time.Second)}},
-		DNSServers: []raclient.DNSServer{{Address: "2001:db8::54", Router: "fe80::1", ValidUntil: now.Add(90 * time.Second)}},
+	learned := raclient.Snapshot{BootID: clock.BootID, ObservedNanos: uint64(clock.BoottimeNanoseconds), Resource: raService.Name, Interface: "eth0", SourceAddress: "fe80::2", InterfaceID: "::2", Active: true, UpdatedAt: now,
+		Addresses:  []raclient.Address{{Address: "2001:db8:100::2/128", Prefix: "2001:db8:100::/64", PreferredUntil: lifetime.After(clock, 900), ValidUntil: lifetime.After(clock, 1200)}},
+		Prefixes:   []raclient.Prefix{{Prefix: "2001:db8:100::/64", ValidUntil: lifetime.After(clock, 1200)}},
+		Routes:     []raclient.Route{{Destination: "::/0", Gateway: "fe80::1", Preference: 1, ValidUntil: lifetime.After(clock, 90)}},
+		DNSServers: []raclient.DNSServer{{Address: "2001:db8::54", Router: "fe80::1", ValidUntil: lifetime.After(clock, 90)}},
 	}
 	if err := observeMigration(ctx, runtime, migrationUpdate(t, runtime, raService, 1, learned)); err != nil {
 		t.Fatal(err)
@@ -260,7 +260,7 @@ func TestMigratedWANGraphThroughPublicRuntimeProjection(t *testing.T) {
 	if err != nil || input.Source.Address != "2001:db8:100::2" || len(input.Candidates) != 4 || input.Candidates[0].Value != "dhcp-aftr.example" || input.Candidates[0].ValidUntil != pd.InformationRefreshAt {
 		t.Fatal("typed source or supplementary-information candidate was not projected", input, err)
 	}
-	if len(input.Resolvers) != 3 || input.Resolvers[0].Address != "2001:db8::53" || input.Resolvers[0].ValidUntil != (lifetime.Deadline{}) || input.Resolvers[1].Address != "2001:db8::55" || input.Resolvers[1].ValidUntil != pd.InformationRefreshAt || input.Resolvers[2].Address != "2001:db8::54" || !input.Resolvers[2].ValidUntil.UTC.Equal(learned.DNSServers[0].ValidUntil) {
+	if len(input.Resolvers) != 3 || input.Resolvers[0].Address != "2001:db8::53" || input.Resolvers[0].ValidUntil != (lifetime.Deadline{}) || input.Resolvers[1].Address != "2001:db8::55" || input.Resolvers[1].ValidUntil != pd.InformationRefreshAt || input.Resolvers[2].Address != "2001:db8::54" || input.Resolvers[2].ValidUntil != learned.DNSServers[0].ValidUntil {
 		t.Fatal("configured/PD/RA resolver order or absolute lifetimes changed", input.Resolvers)
 	}
 	projected := n.state()
@@ -274,7 +274,7 @@ func TestMigratedWANGraphThroughPublicRuntimeProjection(t *testing.T) {
 			raRoute = route
 		}
 	}
-	if raRoute.Gateway != "fe80::1" || raRoute.Table != 254 || raRoute.Metric != 200 || !raRoute.ValidUntil.Equal(learned.Routes[0].ValidUntil) {
+	if raRoute.Gateway != "fe80::1" || raRoute.Table != 254 || raRoute.Metric != 200 || raRoute.ValidUntil != learned.Routes[0].ValidUntil {
 		t.Fatal("explicit native RA routing policy failed projection", raRoute)
 	}
 	receipt, err := boottime.Read()

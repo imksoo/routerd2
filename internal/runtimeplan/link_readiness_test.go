@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/imksoo/routerd2/internal/config"
+	"github.com/imksoo/routerd2/internal/lifetime"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/health"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
@@ -28,7 +29,7 @@ func TestReadinessRefreshDoesNotConfirmExpiredNetworkAuthority(t *testing.T) {
 			r.manager = &observedManager{generation: 1}
 			resource.ID, resource.DependsOn = "owned", []string{"probe"}
 			if name == "utc-route" {
-				resource.Route.ValidUntil = time.Now().Add(500 * time.Millisecond)
+				resource.Route.ValidUntil = lifetime.Deadline{UTC: time.Now().Add(500 * time.Millisecond)}
 			}
 			if name == "utc-address" {
 				until := time.Now().Add(500 * time.Millisecond)

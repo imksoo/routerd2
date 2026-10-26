@@ -10,12 +10,13 @@ import (
 	"time"
 
 	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/lifetime"
 )
 
-// MaxRouteLifetime bounds finite IPv6 lifetimes to the signed 32-bit USER_HZ
+// maxRouteLifetime bounds finite IPv6 lifetimes to the signed 32-bit USER_HZ
 // expiry field in Linux RTA_CACHEINFO (100 ticks/second on amd64 and arm64).
 // Longer lifetimes cannot be read back unambiguously for ownership checks.
-const MaxRouteLifetime = time.Duration((1<<31-1)/100-1) * time.Second
+const maxRouteLifetime = time.Duration((1<<31-1)/100-1) * time.Second
 
 func validateRoutes(routes []Route) error {
 	var errs []error
@@ -30,13 +31,11 @@ func validateRoutes(routes []Route) error {
 		if p != p.Masked() {
 			add("route %s: destination must be a network prefix", r.Destination)
 		}
-		if !r.ValidUntil.IsZero() {
-			if !p.Addr().Is6() {
-				add("route %s: valid_until is supported only for IPv6", r.Destination)
-			}
-			if r.ValidUntil.Unix() < 0 || r.ValidUntil.UTC().Year() > 9999 || r.ValidUntil.Sub(time.Now()) > MaxRouteLifetime {
-				add("route %s: valid_until must be a valid absolute deadline within %s", r.Destination, MaxRouteLifetime)
-			}
+		if err := r.ValidUntil.Validate(); err != nil {
+			add("route %s: %v", r.Destination, err)
+		}
+		if r.ValidUntil != (lifetime.Deadline{}) && !p.Addr().Is6() {
+			add("route %s: valid_until is supported only for IPv6", r.Destination)
 		}
 		if r.BootID != "" || r.ExpiresNanos != 0 {
 			if !boottime.ValidBootID(r.BootID) || r.ExpiresNanos == 0 || r.ExpiresNanos > math.MaxInt64 {
@@ -93,8 +92,8 @@ func validateRoutes(routes []Route) error {
 }
 
 func normalizeRoute(r Route) Route {
-	if !r.ValidUntil.IsZero() {
-		r.ValidUntil = r.ValidUntil.UTC()
+	if !r.ValidUntil.UTC.IsZero() {
+		r.ValidUntil.UTC = r.ValidUntil.UTC.UTC()
 	}
 	if p, err := netip.ParsePrefix(r.Destination); err == nil {
 		r.Destination = p.Masked().String()
@@ -134,16 +133,7 @@ func normalizeRoute(r Route) Route {
 // Protocol authority can renew without replacing an unchanged kernel route.
 func sameKernelRoute(a, b Route) bool {
 	a, b = normalizeRoute(a), normalizeRoute(b)
-	return a.Destination == b.Destination && a.Gateway == b.Gateway && a.Interface == b.Interface && a.Metric == b.Metric && a.Table == b.Table && slices.Equal(a.NextHops, b.NextHops) && a.ValidUntil.Equal(b.ValidUntil)
-}
-
-func routeLifetimeMatches(actual, expected time.Time) bool {
-	if actual.IsZero() || expected.IsZero() {
-		return actual.IsZero() && expected.IsZero()
-	}
-	// The write rounds up to seconds; the kernel dump rounds to USER_HZ.
-	// A static route never matches a finite route, even near its expiry.
-	return actual.Sub(expected).Abs() <= 2*time.Second
+	return a.Destination == b.Destination && a.Gateway == b.Gateway && a.Interface == b.Interface && a.Metric == b.Metric && a.Table == b.Table && slices.Equal(a.NextHops, b.NextHops) && a.ValidUntil == b.ValidUntil
 }
 
 func routeUsesInterface(r Route, name string) bool {

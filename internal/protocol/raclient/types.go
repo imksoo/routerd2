@@ -12,6 +12,9 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/lifetime"
 )
 
 const (
@@ -44,46 +47,48 @@ type Config struct {
 type Address struct {
 	// A /128 intentionally avoids the kernel's implicit connected /64 route.
 	// The L-bit on-link prefix is represented separately in Prefixes.
-	Address        string    `json:"address"`
-	Prefix         string    `json:"prefix"`
-	PreferredUntil time.Time `json:"preferred_until"`
-	ValidUntil     time.Time `json:"valid_until"`
-	Deprecated     bool      `json:"deprecated,omitempty"`
-	DADFailed      bool      `json:"dad_failed,omitempty"`
+	Address        string            `json:"address"`
+	Prefix         string            `json:"prefix"`
+	PreferredUntil lifetime.Deadline `json:"preferred_until"`
+	ValidUntil     lifetime.Deadline `json:"valid_until"`
+	Deprecated     bool              `json:"deprecated,omitempty"`
+	DADFailed      bool              `json:"dad_failed,omitempty"`
 }
 
 type Prefix struct {
-	Prefix     string    `json:"prefix"`
-	ValidUntil time.Time `json:"valid_until"`
+	Prefix     string            `json:"prefix"`
+	ValidUntil lifetime.Deadline `json:"valid_until"`
 }
 
 type Route struct {
 	Destination string `json:"destination"`
 	Gateway     string `json:"gateway"`
 	// Preference is -1 (low), 0 (medium), or 1 (high).
-	Preference int       `json:"preference"`
-	ValidUntil time.Time `json:"valid_until"`
+	Preference int               `json:"preference"`
+	ValidUntil lifetime.Deadline `json:"valid_until"`
 }
 
 type DNSServer struct {
 	Address string `json:"address"`
 	// Router records the last advertiser, not an independent ownership key.
 	// RFC 8106 updates a server's lifetime per receiving interface/address.
-	Router     string    `json:"router"`
-	ValidUntil time.Time `json:"valid_until"`
+	Router     string            `json:"router"`
+	ValidUntil lifetime.Deadline `json:"valid_until"`
 }
 
 type SearchDomain struct {
-	Domain     string    `json:"domain"`
-	Router     string    `json:"router"`
-	ValidUntil time.Time `json:"valid_until"`
+	Domain     string            `json:"domain"`
+	Router     string            `json:"router"`
+	ValidUntil lifetime.Deadline `json:"valid_until"`
 }
 
-// Zero deadlines mean an explicitly advertised infinite lifetime. Finite
-// deadlines are absolute UTC, rebased from CLOCK_BOOTTIME at publication. Active
-// means the receive worker is running; it does not assert an address or default
-// router was received. MTU/M/O/hop/retransmission fields are observations only.
+// Learned lifetimes retain their original boot scope, including explicit
+// infinity. Display timestamps never define protocol authority. Active means
+// the receiver is running; it does not assert an address or router was learned.
 type Snapshot struct {
+	BootID                 string         `json:"boot_id"`
+	ObservedNanos          uint64         `json:"observed_nanos"`
+	ReceivedNanos          uint64         `json:"received_nanos,omitempty"`
 	Resource               string         `json:"resource"`
 	Interface              string         `json:"interface"`
 	SourceAddress          string         `json:"source_address"`
@@ -239,8 +244,11 @@ func ValidateSnapshot(c Config, s Snapshot) error {
 	if s.UpdatedAt.IsZero() || s.UpdatedAt.Year() < 1970 || s.UpdatedAt.Year() > 9999 || len(s.LastError) > 512 || s.MTU != 0 && (s.MTU < 1280 || s.MTU > 65535) || s.CurrentHopLimit < 0 || s.CurrentHopLimit > 255 || s.ReachableMilliseconds > 3600000 || !s.LastReceivedAt.IsZero() && (s.LastReceivedAt.Year() < 1970 || s.LastReceivedAt.Year() > 9999) {
 		return errors.New("RA snapshot contains invalid status metadata")
 	}
-	deadline := func(t time.Time) bool {
-		return t.IsZero() || t.Year() >= 1970 && t.Year() <= 9999 && !t.After(s.UpdatedAt.Add(time.Duration(^uint32(0))*time.Second))
+	if !boottime.ValidBootID(s.BootID) || s.ObservedNanos == 0 || s.ObservedNanos > uint64(1<<63-1) || s.ReceivedNanos > s.ObservedNanos {
+		return errors.New("RA snapshot contains invalid boot metadata")
+	}
+	deadline := func(d lifetime.Deadline) bool {
+		return d.Validate() == nil && d.UTC.IsZero() && d.BootID == s.BootID && (d.Nanos == 0 || d.Nanos <= s.ObservedNanos+uint64(time.Duration(^uint32(0))*time.Second))
 	}
 	if s.LastRouter != "" && (!canonicalLinkLocal(s.LastRouter) || !allowed(c, s.LastRouter)) {
 		return errors.New("RA snapshot last router is outside configured scope")
@@ -257,7 +265,7 @@ func ValidateSnapshot(c Config, s Snapshot) error {
 		if v.Addr() != netip.AddrFrom16(raw) {
 			return errors.New("RA snapshot address does not derive from the configured interface ID")
 		}
-		if !deadline(a.ValidUntil) || !deadline(a.PreferredUntil) || !a.ValidUntil.IsZero() && (a.PreferredUntil.IsZero() || a.PreferredUntil.After(a.ValidUntil)) {
+		if !deadline(a.ValidUntil) || !deadline(a.PreferredUntil) || !lifetime.Ordered(a.PreferredUntil, a.ValidUntil) {
 			return errors.New("RA snapshot address lifetimes are invalid")
 		}
 		seen[a.Address] = true

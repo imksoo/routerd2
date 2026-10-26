@@ -25,6 +25,7 @@ import (
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/configref"
 	"github.com/imksoo/routerd2/internal/control"
+	"github.com/imksoo/routerd2/internal/lifetime"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/bfd"
@@ -247,7 +248,7 @@ func TestDaemonBGPRecursivePrerequisiteExpiry(t *testing.T) {
 	f := startFixtureDaemon(t, config.FromNative(config.Native{
 		Network: network.Desired{
 			Interfaces: []network.Interface{{Name: "wan0", Addresses: []string{"2001:db8::1/64"}, AddressOptions: map[string]network.AddressOptions{"2001:db8::1/64": {NoDAD: true}}}},
-			Routes:     []network.Route{{Destination: "2001:db8:88::/64", Gateway: "2001:db8::2", Interface: "wan0", ValidUntil: untilWall}},
+			Routes:     []network.Route{{Destination: "2001:db8:88::/64", Gateway: "2001:db8::2", Interface: "wan0", ValidUntil: lifetime.Deadline{UTC: untilWall}}},
 		},
 		Services: []serviceconfig.Service{{Name: "edge", BGP: &c}},
 	}))
@@ -389,7 +390,7 @@ func isolateFixtureTimeout(t *testing.T, name string, timeout time.Duration) boo
 }
 
 func fixtureClockFiles(name string, forward func() (*os.File, error)) ([]*os.File, error) {
-	if name != "TestDaemonDHCPv4ClockCorrections" && name != "TestDaemonVRRPClockCorrections" && name != "TestDaemonDHCP6ClockCorrections" {
+	if name != "TestDaemonDHCPv4ClockCorrections" && name != "TestDaemonVRRPClockCorrections" && name != "TestDaemonDHCP6ClockCorrections" && name != "TestDaemonRAClientClockCorrections" {
 		return nil, nil
 	}
 	file, err := forward()

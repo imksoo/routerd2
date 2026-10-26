@@ -7,6 +7,7 @@ import (
 
 	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/config"
+	"github.com/imksoo/routerd2/internal/lifetime"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/raclient"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
@@ -16,14 +17,18 @@ func raClientFixture(now time.Time) (config.Native, raclient.Snapshot) {
 	doc := config.Native{
 		Services: []serviceconfig.Service{{Name: "wan-ra", RAClient: &serviceconfig.RAClient{Interface: "wan0", SourceAddress: "fe80::1", InterfaceID: "::1234"}}},
 	}
-	s := raclient.Snapshot{Resource: "wan-ra", Interface: "wan0", SourceAddress: "fe80::1", InterfaceID: "::1234", Active: true, UpdatedAt: now,
-		Addresses: []raclient.Address{{Address: "2001:db8:1::1234/128", Prefix: "2001:db8:1::/64", PreferredUntil: now.Add(time.Hour), ValidUntil: now.Add(2 * time.Hour)}},
-		Prefixes:  []raclient.Prefix{{Prefix: "2001:db8:1::/64", ValidUntil: now.Add(time.Hour)}},
+	clock, err := boottime.Read()
+	if err != nil {
+		panic(err)
+	}
+	s := raclient.Snapshot{BootID: clock.BootID, ObservedNanos: uint64(clock.BoottimeNanoseconds), Resource: "wan-ra", Interface: "wan0", SourceAddress: "fe80::1", InterfaceID: "::1234", Active: true, UpdatedAt: now,
+		Addresses: []raclient.Address{{Address: "2001:db8:1::1234/128", Prefix: "2001:db8:1::/64", PreferredUntil: lifetime.After(clock, 3600), ValidUntil: lifetime.After(clock, 7200)}},
+		Prefixes:  []raclient.Prefix{{Prefix: "2001:db8:1::/64", ValidUntil: lifetime.After(clock, 3600)}},
 		Routes: []raclient.Route{
-			{Destination: "::/0", Gateway: "fe80::2", Preference: 1, ValidUntil: now.Add(10 * time.Second)},
-			{Destination: "::/0", Gateway: "fe80::3", Preference: 1, ValidUntil: now.Add(30 * time.Second)},
-			{Destination: "::/0", Gateway: "fe80::4", Preference: 0, ValidUntil: now.Add(40 * time.Second)},
-			{Destination: "2001:db8:1::/64", Gateway: "fe80::2", Preference: 1, ValidUntil: now.Add(time.Hour)},
+			{Destination: "::/0", Gateway: "fe80::2", Preference: 1, ValidUntil: lifetime.After(clock, 10)},
+			{Destination: "::/0", Gateway: "fe80::3", Preference: 1, ValidUntil: lifetime.After(clock, 30)},
+			{Destination: "::/0", Gateway: "fe80::4", Preference: 0, ValidUntil: lifetime.After(clock, 40)},
+			{Destination: "2001:db8:1::/64", Gateway: "fe80::2", Preference: 1, ValidUntil: lifetime.After(clock, 3600)},
 		},
 	}
 	return doc, s
@@ -39,7 +44,12 @@ func projectRAFixture(t *testing.T, doc config.Native, s raclient.Snapshot, now 
 	if err := validateSnapshot(instance, b); err != nil {
 		t.Fatal(err)
 	}
-	p, err := projectNative(doc, "/run/routerd", "/var/lib/routerd", map[string]serviceconfig.Update{instance.Name: {Name: instance.Name, Role: "ra_client", Snapshot: b}}, now)
+	protocols, err := prepareProtocols(doc, "/run/routerd", "/var/lib/routerd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock := boottime.Clock{BootID: s.BootID, BoottimeNanoseconds: int64(s.ObservedNanos) + int64(now.Sub(s.UpdatedAt)), WallTime: now}
+	p, err := projectWithFacts(doc, protocols, map[string]serviceconfig.Update{instance.Name: {Name: instance.Name, Role: "ra_client", Snapshot: b}}, now, projectionFacts{bfdClock: clock})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +70,7 @@ func TestRAClientProjectionOwnsSysctlsAndSeparateAddressAndRoutes(t *testing.T) 
 	p := projectRAFixture(t, doc, s, now)
 	iface = p.network.Interfaces[0]
 	options := iface.AddressOptions["2001:db8:1::1234/128"]
-	if len(iface.Addresses) != 1 || iface.Addresses[0] != "2001:db8:1::1234/128" || options.NoDAD || !options.ValidUntil.Equal(s.Addresses[0].ValidUntil) {
+	if len(iface.Addresses) != 1 || iface.Addresses[0] != "2001:db8:1::1234/128" || options.NoDAD || options.BootLifetime.ValidNanos != s.Addresses[0].ValidUntil.Nanos {
 		t.Fatal("SLAAC must use /128, normal DAD and the original finite lifetime", iface)
 	}
 	if len(p.network.Routes) != 2 {
@@ -72,7 +82,7 @@ func TestRAClientProjectionOwnsSysctlsAndSeparateAddressAndRoutes(t *testing.T) 
 			def = r
 		}
 	}
-	if len(def.NextHops) != 2 || def.NextHops[0].Gateway != "fe80::2" || def.NextHops[1].Gateway != "fe80::3" || !def.ValidUntil.Equal(s.Routes[0].ValidUntil) || def.Metric != 200 || def.Table != 254 {
+	if len(def.NextHops) != 2 || def.NextHops[0].Gateway != "fe80::2" || def.NextHops[1].Gateway != "fe80::3" || def.ValidUntil != s.Routes[0].ValidUntil || def.Metric != 200 || def.Table != 254 {
 		t.Fatal("highest preference routers require ECMP with the earliest member deadline", def)
 	}
 	for _, tc := range []struct {
@@ -105,29 +115,24 @@ func TestRAClientProjectionOwnsSysctlsAndSeparateAddressAndRoutes(t *testing.T) 
 	}
 }
 
-func TestRAClientProjectionPreservesLongProtocolLifetimeWithRenewableKernelGrant(t *testing.T) {
+func TestRAClientProjectionRetainsOriginalLongAndInfiniteBootLifetimes(t *testing.T) {
 	now := time.Now().UTC()
 	doc, s := raClientFixture(now)
-	deadline := now.Add(100 * 365 * 24 * time.Hour)
+	c := boottime.Clock{BootID: s.BootID, BoottimeNanoseconds: int64(s.ObservedNanos), WallTime: now}
+	deadline := lifetime.After(c, 100*365*24*3600)
 	s.Routes = []raclient.Route{{Destination: "2001:db8:ffff::/64", Gateway: "fe80::2", ValidUntil: deadline}}
 	s.Prefixes = nil
 	doc.Network.Links = []network.Link{{Name: "blue", Kind: "vrf", VRFTable: 123}}
 	master := "blue"
 	doc.Network.Interfaces = []network.Interface{{Name: "wan0", Master: &master}}
 	p := projectRAFixture(t, doc, s, now)
-	route := p.network.Routes[0]
-	if route.Table != 123 || route.ValidUntil.Sub(now) < 6*24*time.Hour || route.ValidUntil.Sub(now) > 7*24*time.Hour || !s.Routes[0].ValidUntil.Equal(deadline) {
-		t.Fatal("long RA lifetime was lost or lacks a bounded renewable kernel grant", route)
+	if p.network.Routes[0].Table != 123 || p.network.Routes[0].ValidUntil != deadline {
+		t.Fatal("long RA lifetime was rebased or truncated", p.network.Routes)
 	}
-	if !raKernelDeadline(deadline, now.Truncate(time.Hour)).Equal(route.ValidUntil) {
-		t.Fatal("grant moved within the same UTC day")
-	}
-	next := raKernelDeadline(deadline, now.Add(24*time.Hour))
-	if !next.Equal(route.ValidUntil.Add(24 * time.Hour)) {
-		t.Fatal("long route grant is not renewed daily", next)
-	}
-	if !raKernelDeadline(time.Time{}, now).IsZero() {
-		t.Fatal("explicit infinite lifetime became a finite protocol lifetime")
+	s.Routes[0].ValidUntil = lifetime.After(c, ^uint32(0))
+	p = projectRAFixture(t, doc, s, now)
+	if p.network.Routes[0].ValidUntil != s.Routes[0].ValidUntil {
+		t.Fatal("boot infinity was not preserved")
 	}
 }
 
@@ -141,10 +146,10 @@ func TestRAProjectionAndExpiryLeaveIntentAndEarlierProjectionUnchanged(t *testin
 		addresses[0]: {ValidUntil: expired, PreferredUntil: expired},
 	}}}
 	doc.Network.Routes = []network.Route{
-		{Destination: "2001:db8:4::/64", Interface: "wan0", ValidUntil: expired},
+		{Destination: "2001:db8:4::/64", Interface: "wan0", ValidUntil: lifetime.Deadline{UTC: expired}},
 		{Destination: "2001:db8:5::/64", Interface: "wan0"},
 	}
-	clock := boottime.Clock{WallTime: now}
+	clock := boottime.Clock{BootID: snapshot.BootID, BoottimeNanoseconds: int64(snapshot.ObservedNanos), WallTime: now}
 	active := projectRAFixture(t, doc, snapshot, now)
 	active.network = network.ProjectLifetimes(active.network, clock)
 	if got := active.network.Interfaces[0].Addresses; len(got) != 2 || got[0] != addresses[1] || got[1] != snapshot.Addresses[0].Address {

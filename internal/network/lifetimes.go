@@ -27,7 +27,7 @@ func ProjectLifetimes(d Desired, clock boottime.Clock) Desired {
 	}
 	kept := d.Routes[:0]
 	for _, route := range d.Routes {
-		if (route.ValidUntil.IsZero() || route.ValidUntil.After(clock.WallTime)) && (route.BootID == "" || route.BootID == clock.BootID && route.ExpiresNanos > uint64(clock.BoottimeNanoseconds)) {
+		if route.ValidUntil.Live(clock) && (route.BootID == "" || route.BootID == clock.BootID && route.ExpiresNanos > uint64(clock.BoottimeNanoseconds)) {
 			kept = append(kept, route)
 		}
 	}

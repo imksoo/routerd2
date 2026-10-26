@@ -3,28 +3,31 @@
 package raclient
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"net"
 	"net/netip"
 	"slices"
 	"sort"
 	"time"
+
+	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/lifetime"
 )
 
-// All internal deadlines use a synthetic CLOCK_BOOTTIME epoch. Public times
-// use wall UTC. This makes NTP steps and suspend irrelevant to live lifetimes.
-type instant struct{ wall, boot time.Time }
 type linkInfo struct {
 	index, mtu int
 	hardware   net.HardwareAddr
 	source     netip.Addr
 }
 type state struct {
-	config  Config
-	link    linkInfo
-	iid     [8]byte
-	learned Snapshot
-	clock   instant // stable wall/BOOTTIME mapping, preserved by the journal pair
+	identity string
+	config   Config
+	link     linkInfo
+	iid      [8]byte
+	learned  Snapshot
 }
 
 func newState(c Config, link linkInfo) (*state, error) {
@@ -47,7 +50,19 @@ func newState(c Config, link linkInfo) (*state, error) {
 		}
 		iid = [8]byte{link.hardware[0] ^ 2, link.hardware[1], link.hardware[2], 0xff, 0xfe, link.hardware[3], link.hardware[4], link.hardware[5]}
 	}
-	return &state{config: c, link: link, iid: iid, learned: Snapshot{Resource: c.Resource, Interface: c.Interface, SourceAddress: link.source.String(), InterfaceID: suffixString(iid), Active: true}}, nil
+	s := &state{config: c, link: link, iid: iid, learned: Snapshot{Resource: c.Resource, Interface: c.Interface, SourceAddress: link.source.String(), InterfaceID: suffixString(iid), Active: true}}
+	c.StatePath = ""
+	b, err := json.Marshal(struct {
+		Config                Config
+		InterfaceIndex        int
+		Hardware, Source, IID string
+	}{c, link.index, link.hardware.String(), link.source.String(), suffixString(iid)})
+	if err != nil {
+		return nil, err
+	}
+	sum := sha256.Sum256(b)
+	s.identity = hex.EncodeToString(sum[:])
+	return s, nil
 }
 
 func clone(s Snapshot) Snapshot {
@@ -59,64 +74,11 @@ func clone(s Snapshot) Snapshot {
 	return s
 }
 
-func convertDeadline(t, from, to time.Time) time.Time {
-	if t.IsZero() {
-		return t
-	}
-	return to.Add(t.Sub(from)).UTC()
-}
-
-func convertDeadlines(s *Snapshot, from, to time.Time) {
-	for i := range s.Addresses {
-		s.Addresses[i].ValidUntil = convertDeadline(s.Addresses[i].ValidUntil, from, to)
-		s.Addresses[i].PreferredUntil = convertDeadline(s.Addresses[i].PreferredUntil, from, to)
-	}
-	for i := range s.Prefixes {
-		s.Prefixes[i].ValidUntil = convertDeadline(s.Prefixes[i].ValidUntil, from, to)
-	}
-	for i := range s.Routes {
-		s.Routes[i].ValidUntil = convertDeadline(s.Routes[i].ValidUntil, from, to)
-	}
-	for i := range s.DNSServers {
-		s.DNSServers[i].ValidUntil = convertDeadline(s.DNSServers[i].ValidUntil, from, to)
-	}
-	for i := range s.SearchDomains {
-		s.SearchDomains[i].ValidUntil = convertDeadline(s.SearchDomains[i].ValidUntil, from, to)
-	}
-}
-
-func (s *state) snapshot(now instant) Snapshot {
-	now = s.stableClock(now)
+func (s *state) snapshot(clock boottime.Clock) Snapshot {
 	out := clone(s.learned)
-	convertDeadlines(&out, now.boot, now.wall)
-	out.UpdatedAt = now.wall.UTC()
+	out.BootID, out.ObservedNanos, out.UpdatedAt = clock.BootID, uint64(clock.BoottimeNanoseconds), clock.WallTime
 	return out
 }
-
-// UTC lifetime facts must remain exactly constant when only status counters
-// change. Separate wall/BOOTTIME reads have sampling jitter; only a material
-// offset change replaces this mapping. UpdatedAt uses the same mapping so the
-// durable journal can convert every deadline back to its original boot time.
-func (s *state) stableClock(now instant) instant {
-	if s.clock.boot.IsZero() || wallClockMoved(s.clock, now) {
-		s.clock = now
-	}
-	now.wall = convertDeadline(now.boot, s.clock.boot, s.clock.wall)
-	return now
-}
-
-func wallClockMoved(before, after instant) bool {
-	shift := after.wall.Sub(before.wall) - after.boot.Sub(before.boot)
-	return shift >= time.Second || shift <= -time.Second
-}
-
-func expiry(now time.Time, seconds uint32) time.Time {
-	if seconds == ^uint32(0) {
-		return time.Time{}
-	}
-	return now.Add(time.Duration(seconds) * time.Second)
-}
-func expired(until, now time.Time) bool { return !until.IsZero() && !now.Before(until) }
 
 // update is deliberately generic only over slice storage; protocol-specific
 // key/lifetime semantics stay in handle below.
@@ -136,17 +98,17 @@ func update[T any](items []T, matches func(T) bool, value T, remove bool) []T {
 	return items
 }
 
-func expireSnapshot(s *Snapshot, now time.Time) bool {
+func expireSnapshot(s *Snapshot, now boottime.Clock) bool {
 	changed := false
 	before := len(s.Addresses) + len(s.Prefixes) + len(s.Routes) + len(s.DNSServers) + len(s.SearchDomains)
-	s.Addresses = slices.DeleteFunc(s.Addresses, func(a Address) bool { return expired(a.ValidUntil, now) })
-	s.Prefixes = slices.DeleteFunc(s.Prefixes, func(p Prefix) bool { return expired(p.ValidUntil, now) })
-	s.Routes = slices.DeleteFunc(s.Routes, func(r Route) bool { return expired(r.ValidUntil, now) })
-	s.DNSServers = slices.DeleteFunc(s.DNSServers, func(d DNSServer) bool { return expired(d.ValidUntil, now) })
-	s.SearchDomains = slices.DeleteFunc(s.SearchDomains, func(d SearchDomain) bool { return expired(d.ValidUntil, now) })
+	s.Addresses = slices.DeleteFunc(s.Addresses, func(a Address) bool { return !a.ValidUntil.Live(now) })
+	s.Prefixes = slices.DeleteFunc(s.Prefixes, func(p Prefix) bool { return !p.ValidUntil.Live(now) })
+	s.Routes = slices.DeleteFunc(s.Routes, func(r Route) bool { return !r.ValidUntil.Live(now) })
+	s.DNSServers = slices.DeleteFunc(s.DNSServers, func(d DNSServer) bool { return !d.ValidUntil.Live(now) })
+	s.SearchDomains = slices.DeleteFunc(s.SearchDomains, func(d SearchDomain) bool { return !d.ValidUntil.Live(now) })
 	for i := range s.Addresses {
 		a := &s.Addresses[i]
-		deprecated := expired(a.PreferredUntil, now)
+		deprecated := !a.PreferredUntil.Live(now)
 		if a.Deprecated != deprecated {
 			a.Deprecated = deprecated
 			changed = true
@@ -155,30 +117,27 @@ func expireSnapshot(s *Snapshot, now time.Time) bool {
 	return changed || before != len(s.Addresses)+len(s.Prefixes)+len(s.Routes)+len(s.DNSServers)+len(s.SearchDomains)
 }
 
-func (s *state) expire(now instant) bool { return expireSnapshot(&s.learned, now.boot) }
+func (s *state) expire(now boottime.Clock) bool { return expireSnapshot(&s.learned, now) }
 
 // validLifetime implements RFC 4862 5.5.3(e). A whitelist does not authenticate
 // an RA, so it never bypasses the two-hour safeguard. Preferred lifetime still
 // changes immediately, including immediate deprecation on a zero-lifetime PIO.
-func validLifetime(old, now time.Time, advertised uint32) time.Time {
+func validLifetime(old lifetime.Deadline, now boottime.Clock, advertised uint32) lifetime.Deadline {
 	if advertised == ^uint32(0) {
-		return time.Time{}
+		return lifetime.After(now, advertised)
 	}
 	next := time.Duration(advertised) * time.Second
-	remaining := old.Sub(now)
-	if old.IsZero() {
-		remaining = time.Duration(1<<63 - 1)
-	}
+	remaining := old.Remaining(now)
 	if next > 2*time.Hour || next > remaining {
-		return now.Add(next)
+		return lifetime.After(now, advertised)
 	}
 	if remaining <= 2*time.Hour {
 		return old
 	}
-	return now.Add(2 * time.Hour)
+	return lifetime.After(now, 7200)
 }
 
-func (s *state) handle(p packet, now instant) error {
+func (s *state) handle(p packet, now boottime.Clock) error {
 	a, err := parse(p, s.link.index, s.link.mtu)
 	if err == nil && (p.destination.IsMulticast() && p.destination != netip.MustParseAddr("ff02::1") || !p.destination.IsMulticast() && p.destination != s.link.source) {
 		err = snapshotError("unexpected destination")
@@ -192,8 +151,8 @@ func (s *state) handle(p packet, now instant) error {
 		return err
 	}
 	next := clone(s.learned)
-	expireSnapshot(&next, now.boot)
-	next.LastReceivedAt, next.LastRouter = now.wall.UTC(), a.router.String()
+	expireSnapshot(&next, now)
+	next.LastReceivedAt, next.LastRouter, next.ReceivedNanos = now.WallTime.UTC(), a.router.String(), uint64(now.BoottimeNanoseconds)
 	next.Managed, next.OtherConfig = a.managed, a.other
 	if a.mtu != 0 {
 		next.MTU = a.mtu
@@ -207,9 +166,9 @@ func (s *state) handle(p packet, now instant) error {
 	if a.retransmit != 0 {
 		next.RetransmitMilliseconds = a.retransmit
 	}
-	putRoute := func(prefix netip.Prefix, pref int, lifetime uint32) {
-		r := Route{Destination: prefix.String(), Gateway: a.router.String(), Preference: pref, ValidUntil: expiry(now.boot, lifetime)}
-		next.Routes = update(next.Routes, func(old Route) bool { return old.Destination == r.Destination && old.Gateway == r.Gateway }, r, lifetime == 0)
+	putRoute := func(prefix netip.Prefix, pref int, seconds uint32) {
+		r := Route{Destination: prefix.String(), Gateway: a.router.String(), Preference: pref, ValidUntil: lifetime.After(now, seconds)}
+		next.Routes = update(next.Routes, func(old Route) bool { return old.Destination == r.Destination && old.Gateway == r.Gateway }, r, seconds == 0)
 	}
 	if enabled(s.config.DefaultRoute) {
 		putRoute(netip.MustParsePrefix("::/0"), a.preference, a.lifetime)
@@ -224,7 +183,7 @@ func (s *state) handle(p packet, now instant) error {
 	}
 	for _, p := range a.prefixes {
 		if p.onLink && enabled(s.config.OnLink) {
-			v := Prefix{Prefix: p.prefix.String(), ValidUntil: expiry(now.boot, p.valid)}
+			v := Prefix{Prefix: p.prefix.String(), ValidUntil: lifetime.After(now, p.valid)}
 			next.Prefixes = update(next.Prefixes, func(old Prefix) bool { return old.Prefix == v.Prefix }, v, p.valid == 0)
 		}
 		if !p.autonomous || !enabled(s.config.SLAAC) || p.prefix.Bits() != 64 {
@@ -243,9 +202,9 @@ func (s *state) handle(p packet, now instant) error {
 		if old == nil && p.valid == 0 {
 			continue
 		}
-		v := Address{Address: address, Prefix: p.prefix.String(), ValidUntil: expiry(now.boot, p.valid), PreferredUntil: expiry(now.boot, p.preferred), Deprecated: p.preferred == 0}
+		v := Address{Address: address, Prefix: p.prefix.String(), ValidUntil: lifetime.After(now, p.valid), PreferredUntil: lifetime.After(now, p.preferred), Deprecated: p.preferred == 0}
 		if old != nil {
-			v.ValidUntil = validLifetime(old.ValidUntil, now.boot, p.valid)
+			v.ValidUntil = validLifetime(old.ValidUntil, now, p.valid)
 			v.DADFailed = old.DADFailed
 		}
 		next.Addresses = update(next.Addresses, func(old Address) bool { return old.Address == address }, v, false)
@@ -254,14 +213,14 @@ func (s *state) handle(p packet, now instant) error {
 		newServers, newDomains := []string{}, []string{}
 		for _, d := range a.dns {
 			for _, address := range d.addresses {
-				v := DNSServer{Address: address.String(), Router: a.router.String(), ValidUntil: expiry(now.boot, d.lifetime)}
+				v := DNSServer{Address: address.String(), Router: a.router.String(), ValidUntil: lifetime.After(now, d.lifetime)}
 				if d.lifetime != 0 && !slices.ContainsFunc(next.DNSServers, func(old DNSServer) bool { return old.Address == v.Address }) && !slices.Contains(newServers, v.Address) {
 					newServers = append(newServers, v.Address)
 				}
 				next.DNSServers = update(next.DNSServers, func(old DNSServer) bool { return old.Address == v.Address }, v, d.lifetime == 0)
 			}
 			for _, domain := range d.domains {
-				v := SearchDomain{Domain: domain, Router: a.router.String(), ValidUntil: expiry(now.boot, d.lifetime)}
+				v := SearchDomain{Domain: domain, Router: a.router.String(), ValidUntil: lifetime.After(now, d.lifetime)}
 				if d.lifetime != 0 && !slices.ContainsFunc(next.SearchDomains, func(old SearchDomain) bool { return old.Domain == v.Domain }) && !slices.Contains(newDomains, v.Domain) {
 					newDomains = append(newDomains, v.Domain)
 				}

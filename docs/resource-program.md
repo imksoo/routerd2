@@ -427,13 +427,13 @@ ACTIVE成功には元boot IDと絶対期限を保持するVIP投影が必要で�
 旧世代・上書きされた通知や適用失敗を成功として返さない。
 
 このsource受入範囲の追加に伴い、署名されたconfiguration contractは
-`resource-program-native-15`とする。BFDの明示`multihop: true`はinterfaceを指定せず、
+`resource-program-native-16`とする。BFDの明示`multihop: true`はinterfaceを指定せず、
 宣言済みの送信元アドレスとUDP 4784のrouted endpoint pairを使う。single-hopは従来の
 interface・隣接route・TTL/Hop Limit 255の検証を維持する。BGPのmultihop参照も同じ
 endpoint pairへ束縛し、両transportはdevice bindingを指定しない。条件付きlink・address・routeと依存先の準備条件の
 元のboot期限をwriterへ渡す。期限切れのowned linkをDOWNにし、管理address・routeを撤去する。
 address／routeを直接条件付きにした場合も物理interface上で失効する。
-この内部期限はoperator resourceへ記述できない。network journalはformat 6とする。
+この内部期限はoperator resourceへ記述できない。network journalはformat 7とする。
 VRRPの明示version、IPv4 v2の秒単位広告・
 任意のPASS認証、unicast peer、宣言resource IDを参照するtrackのpenalty・連続回数・
 元の観測のmax ageを受け入れる。現在のtrack providerはHealth・BFD・BGPで、
@@ -507,3 +507,8 @@ service:
 固定DS-Lite tunnelも`link.kind: ip6tnl`として`parent`・`local`・`remote`を指定する。
 MTU・B4 addressはinterface/address、経路はrouteで表す。動的AFTR serviceも同じowned linkを生成し、
 元のAFTR期限でwriterがDOWN・管理address/route撤去を担当する。内部`link.authority`はoperator宣言できない。
+
+IPv6 routeの`valid_until`は運用者の絶対期限なら`{utc: "2030-01-01T00:00:00Z"}`とする。
+学習したRAは同じ型で元のboot ID/nanosecondsを渡すが、operator resourceはboot期限を指定できない。
+writerは元のauthorityとkernelの相対timerを区別し、保存したCLOCK_MONOTONICのtimerで所有権を確認する。
+長い期限のkernel grant更新はwriterが担当し、元のprotocol期限は変更しない。

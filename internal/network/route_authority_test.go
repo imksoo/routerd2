@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/lifetime"
 )
 
 func TestBootRouteAuthorityRenewsWithoutKernelChangesAndSurvivesWriterRestart(t *testing.T) {
@@ -69,7 +70,7 @@ func TestBootRouteDeadlineValidation(t *testing.T) {
 		{BootID: "11111111-2222-4333-8444-555555555555"},
 		{ExpiresNanos: 1},
 		{BootID: "11111111-2222-4333-8444-555555555555", ExpiresNanos: math.MaxUint64},
-		{BootID: "11111111-2222-4333-8444-555555555555", ExpiresNanos: 1, ValidUntil: time.Now()},
+		{BootID: "11111111-2222-4333-8444-555555555555", ExpiresNanos: 1, ValidUntil: lifetime.Deadline{UTC: time.Now()}},
 	} {
 		r.Destination, r.Interface = "203.0.113.0/24", "wan0"
 		if err := Validate(Desired{Routes: []Route{r}}); err == nil {

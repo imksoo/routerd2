@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/imksoo/routerd2/internal/lifetime"
 )
 
 func observationFixture(t *testing.T, k kernel) *Engine {
@@ -133,7 +135,7 @@ func TestObservationNativeCollectionsAndProjectionFence(t *testing.T) {
 	}
 	f.routes[0].Interface, f.routes[0].NextHops = "", hops
 	f.routes[0].Multipath = true
-	e.state.Routes = []Route{f.routes[1].Route}
+	e.state.Routes = []ownedRoute{{Route: f.routes[1].Route}}
 	first, err := e.ObservationPage(ctx, ObservationQuery{Section: "interfaces"})
 	if err != nil || len(first.Items) != 1 {
 		t.Fatal(first, err)
@@ -454,13 +456,15 @@ func TestObservationIndexedOwnershipMatchesAuthoritativeSnapshot(t *testing.T) {
 	e := observationFixture(t, f)
 	e.state.Desired = Desired{Interfaces: []Interface{{Name: "wan0"}}, Routes: []Route{{Destination: "2001:db8::/64", Interface: "wan0", Table: 254}}}
 	expiry := time.Now().Add(time.Hour).Truncate(time.Second)
-	e.state.Routes = []Route{
+	definitions := []Route{
 		{Destination: "2001:db8::/64", Interface: "wan0"},
-		{Destination: "192.0.2.0/24", Gateway: "192.0.2.1", Interface: "wan0", Table: 123, Metric: 7, ValidUntil: expiry},
+		{Destination: "2001:db8:2::/64", Gateway: "fe80::2", Interface: "wan0", Table: 123, Metric: 7, ValidUntil: lifetime.Deadline{UTC: expiry}},
 		{Destination: "198.51.100.0/24", Table: 254, NextHops: []NextHop{{Interface: "lan0", Gateway: "192.0.2.2", Weight: 2}, {Interface: "wan0", Gateway: "192.0.2.1", Weight: 1}}},
 	}
-	for _, desired := range e.state.Routes {
-		f.routes = append(f.routes, RouteState{Route: normalizeRoute(desired), Protocol: RouteProtocol, Type: 1, Multipath: len(desired.NextHops) > 0})
+	for _, definition := range definitions {
+		saved := testOwnedRoute(t, definition)
+		e.state.Routes = append(e.state.Routes, saved)
+		f.routes = append(f.routes, RouteState{Route: normalizeRoute(definition), kernelExpiry: saved.KernelExpiry, Protocol: RouteProtocol, Type: 1, Multipath: len(definition.NextHops) > 0})
 	}
 	index := e.observationRouteOwnershipLocked()
 	variants := []func(*RouteState){
@@ -473,9 +477,9 @@ func TestObservationIndexedOwnershipMatchesAuthoritativeSnapshot(t *testing.T) {
 		func(r *RouteState) { r.Table++ },
 		func(r *RouteState) { r.Metric++ },
 		func(r *RouteState) { r.Gateway = "192.0.2.222" },
-		func(r *RouteState) { r.ValidUntil = r.ValidUntil.Add(time.Second) },
-		func(r *RouteState) { r.ValidUntil = r.ValidUntil.Add(3 * time.Second) },
-		func(r *RouteState) { r.ValidUntil = time.Time{} },
+		func(r *RouteState) { r.kernelExpiry.Nanos += uint64(time.Second) },
+		func(r *RouteState) { r.kernelExpiry.Nanos += uint64(3 * time.Second) },
+		func(r *RouteState) { r.kernelExpiry = routeTimer{} },
 		func(r *RouteState) { r.Multipath = !r.Multipath },
 		func(r *RouteState) {
 			if len(r.NextHops) > 1 {
@@ -519,7 +523,7 @@ func TestObservationLargeManagedFIBKeepsSummaryAndTailPageUsable(t *testing.T) {
 	for i := range 16000 {
 		route := Route{Destination: fmt.Sprintf("10.%d.%d.%d/32", i>>16, i>>8&255, i&255), Interface: "wan0", Table: 254}
 		e.state.Desired.Routes = append(e.state.Desired.Routes, route)
-		e.state.Routes = append(e.state.Routes, route)
+		e.state.Routes = append(e.state.Routes, ownedRoute{Route: route})
 		f.routes = append(f.routes, RouteState{Route: route, Protocol: RouteProtocol, Type: 1})
 	}
 	view, err := e.Observe(context.Background())

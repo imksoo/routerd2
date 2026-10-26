@@ -15,27 +15,27 @@ import (
 func TestRestartUsesBootElapsedTimeAcrossWallClockSteps(t *testing.T) {
 	s := testState(t, testConfig())
 	mustHandle(t, s, advert("fe80::2", 100, 0, pio("2001:db8:1::/64", 0xc0, 300, 150), rdnss(200, "fe80::53")), testClock(0))
-	record := s.record("boot-a", testClock(10))
+	record := journal{Version: 2, Identity: s.identity, Snapshot: s.snapshot(testClock(10))}
 	for _, jump := range []time.Duration{-24 * time.Hour, 24 * time.Hour, 0} {
 		now := testClock(40)
-		now.wall = now.wall.Add(jump)
+		now.WallTime = now.WallTime.Add(jump)
 		restarted := testState(t, testConfig())
-		if err := restarted.restoreRecord(record, "boot-a", now); err != nil {
+		if err := restarted.restoreRecord(record, now); err != nil {
 			t.Fatal(err)
 		}
 		snap := restarted.snapshot(now)
-		if len(snap.Routes) != 1 || snap.Routes[0].ValidUntil.Sub(now.wall) != 60*time.Second || snap.Addresses[0].ValidUntil.Sub(now.wall) != 260*time.Second || snap.DNSServers[0].ValidUntil.Sub(now.wall) != 160*time.Second {
+		if len(snap.Routes) != 1 || snap.Routes[0].ValidUntil.Remaining(now) != 60*time.Second || snap.Addresses[0].ValidUntil.Remaining(now) != 260*time.Second || snap.DNSServers[0].ValidUntil.Remaining(now) != 160*time.Second {
 			t.Fatalf("clock step extended/shortened lifetime: %+v", snap)
 		}
 		// Same protection survives restart: a forged PIO zero cannot shorten
 		// the remaining 260-second address lifetime, nor reset it to 300.
 		got := mustHandle(t, restarted, advert("fe80::2", 0, 0, pio("2001:db8:1::/64", 0xc0, 0, 0)), now)
-		if got.Addresses[0].ValidUntil.Sub(now.wall) != 260*time.Second || !got.Addresses[0].Deprecated {
+		if got.Addresses[0].ValidUntil.Remaining(now) != 260*time.Second || !got.Addresses[0].Deprecated {
 			t.Fatal("restart lost the two-hour state")
 		}
 	}
 	restarted := testState(t, testConfig())
-	if err := restarted.restoreRecord(record, "boot-a", testClock(301)); err != nil {
+	if err := restarted.restoreRecord(record, testClock(301)); err != nil {
 		t.Fatal(err)
 	}
 	if len(restarted.learned.Addresses)+len(restarted.learned.Routes)+len(restarted.learned.DNSServers) != 0 {
@@ -43,49 +43,26 @@ func TestRestartUsesBootElapsedTimeAcrossWallClockSteps(t *testing.T) {
 	}
 }
 
-func TestJournalPreservesClockAnchorAcrossStatusOnlySavesAndRestart(t *testing.T) {
+func TestJournalRetainsOriginalDeadlinesWithoutClockMapping(t *testing.T) {
 	s := testState(t, testConfig())
-	first := mustHandle(t, s, advert("fe80::2", 100, 0, pio("2001:db8:1::/64", 0xc0, 300, 150), rio("2001:db8:2::/48", 0, 120), rdnss(200, "fe80::53"), dnssl(210)), testClock(0))
-	bootFacts := learnedData(s.learned)
+	first := mustHandle(t, s, advert("fe80::2", 100, 0, pio("2001:db8:1::/64", 0xc0, 300, 150), rdnss(200, "fe80::53")), testClock(0))
 	path := filepath.Join(t.TempDir(), "ra.json")
-	for i, jitter := range []time.Duration{7521 * time.Nanosecond, -400 * time.Millisecond, 800 * time.Microsecond} {
-		now := testClock(10 * (i + 1))
-		now.wall = now.wall.Add(jitter)
-		s.learned.Solicitations++
-		record := s.record("boot-a", now)
-		if !record.SavedAt.Equal(record.Snapshot.UpdatedAt) || !record.SavedAt.Equal(testClock(10*(i+1)).wall) || !reflect.DeepEqual(learnedData(record.Snapshot), learnedData(first)) {
-			t.Fatal("journal mixed sampled wall time with anchored lifetime timestamps")
+	for _, jump := range []time.Duration{-24 * time.Hour, 24 * time.Hour, 500 * time.Millisecond} {
+		now := testClock(40)
+		now.WallTime = now.WallTime.Add(jump)
+		record := journal{Version: 2, Identity: s.identity, Snapshot: s.snapshot(now)}
+		if !reflect.DeepEqual(learnedData(first), learnedData(record.Snapshot)) {
+			t.Fatal("status save rewrote original RA deadlines")
 		}
 		if err := saveState(path, record); err != nil {
 			t.Fatal(err)
 		}
-		restarted := testState(t, testConfig())
-		now = testClock(10*(i+1) + 1)
-		now.wall = now.wall.Add(-jitter)
-		if err := restarted.restore(path, "boot-a", now); err != nil {
+		next := testState(t, testConfig())
+		if err := next.restore(path, now); err != nil {
 			t.Fatal(err)
 		}
-		after := restarted.snapshot(now)
-		if err := ValidateSnapshot(restarted.config, after); err != nil {
-			t.Fatal(err)
-		}
-		if !reflect.DeepEqual(bootFacts, learnedData(restarted.learned)) || !reflect.DeepEqual(learnedData(first), learnedData(after)) {
-			t.Fatal("same-boot save/restore accumulated lifetime or UTC deadline drift")
-		}
-		s = restarted
-	}
-	// The restored anchor must still detect a true step and preserve remaining
-	// protocol lifetime rather than preserving obsolete UTC wall coordinates.
-	now := testClock(40)
-	now.wall = now.wall.Add(time.Hour)
-	after := s.snapshot(now)
-	if after.Addresses[0].ValidUntil.Sub(after.UpdatedAt) != 260*time.Second || len(after.Routes) != 2 {
-		t.Fatal("persisted anchor hid a true clock step or extended a lease")
-	}
-	for _, route := range after.Routes {
-		want := map[string]time.Duration{"::/0": 60 * time.Second, "2001:db8:2::/48": 80 * time.Second}[route.Destination]
-		if want == 0 || route.ValidUntil.Sub(after.UpdatedAt) != want {
-			t.Fatal("restored route did not retain its independent boot-clock lifetime")
+		if !reflect.DeepEqual(learnedData(first), learnedData(next.snapshot(now))) {
+			t.Fatal("restart rebased RA authority")
 		}
 	}
 }
@@ -93,25 +70,25 @@ func TestJournalPreservesClockAnchorAcrossStatusOnlySavesAndRestart(t *testing.T
 func TestRebootOrIdentityChangeDropsLearningExplicitly(t *testing.T) {
 	s := testState(t, testConfig())
 	mustHandle(t, s, advert("fe80::2", 100, 0, pio("2001:db8:1::/64", 0xc0, ^uint32(0), ^uint32(0))), testClock(0))
-	record := s.record("boot-a", testClock(1))
+	record := journal{Version: 2, Identity: s.identity, Snapshot: s.snapshot(testClock(1))}
 	for _, change := range []string{"boot", "identity"} {
 		cfg := testConfig()
-		boot := "boot-a"
+		now := testClock(2)
 		if change == "boot" {
-			boot = "boot-b"
+			now.BootID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
 		} else {
 			cfg.InterfaceID = "::5678"
 		}
 		s := testState(t, cfg)
-		if err := s.restoreRecord(record, boot, testClock(2)); err != nil {
+		if err := s.restoreRecord(record, now); err != nil {
 			t.Fatal(err)
 		}
 		if len(s.learned.Addresses)+len(s.learned.Routes) != 0 || s.learned.LastError == "" {
 			t.Fatal("stale state adopted after ownership epoch changed")
 		}
 	}
-	record.SavedBootTime = testClock(100).boot
-	if err := testState(t, testConfig()).restoreRecord(record, "boot-a", testClock(2)); err == nil {
+	record.Snapshot.ObservedNanos = uint64(testClock(100).BoottimeNanoseconds)
+	if err := testState(t, testConfig()).restoreRecord(record, testClock(2)); err == nil {
 		t.Fatal("future monotonic timestamp accepted")
 	}
 }
@@ -128,7 +105,7 @@ func TestDurablePrivateStateAndExclusiveOwnership(t *testing.T) {
 		t.Fatal("second live state writer acquired flock")
 	}
 	s := testState(t, testConfig())
-	record := s.record("boot-a", testClock(0))
+	record := journal{Version: 2, Identity: s.identity, Snapshot: s.snapshot(testClock(0))}
 	if err := saveState(path, record); err != nil {
 		t.Fatal(err)
 	}

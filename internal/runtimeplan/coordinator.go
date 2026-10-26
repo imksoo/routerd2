@@ -406,6 +406,9 @@ func (r *Runtime) applyProjectionLocked(ctx context.Context, p projection) (proj
 			}
 		}
 		for _, route := range p.network.Routes {
+			if route.ValidUntil.BootID != "" && route.ValidUntil.Nanos != 0 {
+				until = min(until, route.ValidUntil.Nanos)
+			}
 			if route.BootID != "" {
 				until = min(until, route.ExpiresNanos)
 			}

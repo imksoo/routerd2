@@ -27,11 +27,18 @@ addresses cannot become a new DS-Lite source. The default IID is derived from
 the interface MAC; `interface_id` can explicitly select its lower 64 bits.
 
 Finite address and IPv6 route lifetimes are installed in Linux, so they expire
-even if the supervisor, controller and RA producer stop together. Extremely
+even if the supervisor, controller, network writer and RA producer stop together. Extremely
 long finite routes use a renewable 6–7 day kernel grant; the protocol's complete
 advertised lifetime remains in its snapshot. Explicit infinite lifetimes stay
 infinite. The state journal is scoped to the kernel boot ID; previous-boot
 advertisements are not silently restored as current router authorization.
+Published RA facts and their journal carry original BOOTTIME deadlines, including
+explicit infinity in that boot. Status-only updates, UTC corrections and
+same-boot restarts do not rebase those deadlines. Kernel route timer ownership
+uses its actual monotonic expiry. `make check-ra-client` verifies real RA and
+source/default-route TCP/UDP with capture; `make qemu-ra-clock` additionally
+checks actual UTC corrections, worker restarts, kernel expiry with all owners
+stopped, stale delivery and fresh RA recovery. Physical suspend remains open.
 
 ## AFTR resolution and DS-Lite
 

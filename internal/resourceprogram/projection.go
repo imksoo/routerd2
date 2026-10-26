@@ -107,7 +107,7 @@ func (p Plan) Project(facts FactSnapshot) (Native, map[string]ResourceState) {
 			validUntil = r.Address.Options.ValidUntil
 		}
 		if r.Route != nil {
-			validUntil = r.Route.ValidUntil
+			validUntil = r.Route.ValidUntil.UTC
 		}
 		if !validUntil.IsZero() {
 			untilNanos = min(untilNanos, facts.NowNanos+uint64(max(0, validUntil.Sub(facts.WallTime))))

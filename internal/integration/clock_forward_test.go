@@ -11,7 +11,7 @@ import (
 )
 
 func TestClockFixtureSocketSurvivesNamespaceChildExec(t *testing.T) {
-	for _, name := range []string{"TestDaemonDHCPv4ClockCorrections", "TestDaemonVRRPClockCorrections", "TestDaemonDHCP6ClockCorrections"} {
+	for _, name := range []string{"TestDaemonDHCPv4ClockCorrections", "TestDaemonVRRPClockCorrections", "TestDaemonDHCP6ClockCorrections", "TestDaemonRAClientClockCorrections"} {
 		t.Run(name, func(t *testing.T) {
 			fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM|unix.SOCK_CLOEXEC, 0)
 			if err != nil {

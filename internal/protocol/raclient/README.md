@@ -10,7 +10,7 @@ spawn a process, or depend on systemd, journald, `ip`, `nft`, `rdisc6` or
 `Run(ctx, Config, Effects, ready)` owns one raw receive socket and one private
 state journal for its lifetime. `Validate` and `ValidateSnapshot` are pure.
 `Effects.Update(ctx, Snapshot)` receives the entire learned set, including
-resource/interface/source/interface-ID identity and absolute UTC deadlines.
+resource/interface/source/interface-ID identity and original boot-scoped deadlines.
 A callback error is fatal; there is no silent partial-success fallback.
 
 `ready` runs after opening the socket, restoring/persisting state and publishing
@@ -96,30 +96,28 @@ scope and bounded metadata at the IPC boundary.
 
 ## Time, expiry and restart
 
-Internal finite lifetimes use Linux `CLOCK_BOOTTIME`, including suspended time.
-A published deadline is absolute UTC, using a fixed wall/boot-clock mapping.
-Status-only events such as rejected packets and solicitations keep every
-unaffected timestamp exactly unchanged despite jitter between the two clock
-reads. Ordinary polling/publication does not extend a lifetime. A wall-clock
-offset change of at least one second replaces the mapping and triggers a new
-rebased snapshot so the network writer can reconcile UTC deadlines without
-reinterpreting an old wall-clock value. `UpdatedAt` uses the same mapping.
+Learned lifetimes use Linux `CLOCK_BOOTTIME` and retain the originating boot
+identity. `preferred_until` and `valid_until` are typed deadline values. Explicit
+infinity has that boot ID and zero nanoseconds; an empty value is not learned
+infinity. `ObservedNanos` timestamps publication, and `ReceivedNanos` identifies
+the last accepted RA. `UpdatedAt` and `LastReceivedAt` are display metadata.
+Publication, status events, wall-clock corrections and polling never rewrite
+learned deadlines. There is no UTC conversion, clock anchor or rebasing state.
 
-The private journal records boot identity, monotonic time, wall time, immutable
-configuration/link identity and the complete snapshot. Its `SavedAt` uses the
-snapshot's anchored UTC time, paired with the corresponding boot-clock time;
-mixing sampled wall time into that pair would introduce drift during restore.
-A same-boot restart retains this exact mapping and uses elapsed boot time,
-while still detecting forward or backward wall-clock jumps. A
-reboot or identity change discards cached learning with an explicit status
-reason and solicits fresh advertisements. It never grants an old lease its
-original duration again. Zero deadline is reserved for an explicitly
-advertised infinite lifetime.
+Journal format 2 contains the immutable configuration/link identity and the
+same snapshot. The identity is prepared once at worker construction. A same-boot
+restart reuses original deadlines and prunes expired facts. A reboot or identity
+change discards learning and solicits fresh advertisements. Discarded prerelease
+journals are not migrated.
 
-The kernel projector must preserve protocol expiry even when a kernel's
-finite route timer cannot represent a very long RIO lifetime. A shorter,
-renewable kernel horizon is acceptable while the protocol snapshot retains
-the actual deadline. An infinite protocol lifetime remains explicit.
+The writer translates a finite route lifetime to Linux's relative timer at
+installation. Its ownership journal keeps the actual CLOCK_MONOTONIC kernel
+timer separately from original UTC/BOOTTIME authority. UTC correction therefore
+does not look like foreign kernel modification. Long finite lifetimes get a
+seven-day kernel grant renewed by the writer with one day remaining; the
+original protocol deadline is unchanged. Infinite lifetimes have no finite
+kernel timer. After actual suspend the running writer enforces BOOTTIME;
+qualification with suspended/stopped writers remains incomplete.
 
 Router solicitations use the configured link-local source, Ethernet source
 link-layer option when available, hop limit 255 and `ff02::2`. The initial
@@ -177,3 +175,11 @@ References: [RFC 4861](https://www.rfc-editor.org/rfc/rfc4861.html),
 [RFC 4862](https://www.rfc-editor.org/rfc/rfc4862.html),
 [RFC 4191](https://www.rfc-editor.org/rfc/rfc4191.html), and
 [RFC 8106](https://www.rfc-editor.org/rfc/rfc8106.html).
+
+`make check-ra-client` runs actual workers against an independent RA sender and
+IPv6 TCP/UDP backend in private PVE namespaces, with bidirectional WAN capture.
+`make qemu-ra-clock` additionally uses the dedicated no-NIC guest clock broker:
+actual UTC +/-24h, unchanged frozen-producer notifications, RA/network worker
+restarts, all owners stopped during kernel expiry, expired replay rejection,
+fresh advertisement recovery and original guest-clock restoration. This does
+not qualify physical suspend, target NICs or the complete WAN resource model.

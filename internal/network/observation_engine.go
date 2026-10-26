@@ -8,6 +8,8 @@ import (
 	"net/netip"
 	"sort"
 	"time"
+
+	"github.com/imksoo/routerd2/internal/lifetime"
 )
 
 func (e *Engine) observationHeaderLocked() (ObservationHeader, error) {
@@ -55,9 +57,9 @@ func (e *Engine) observationRouteOwnershipLocked() func(RouteState) bool {
 		destination   string
 		table, metric int
 	}
-	index := make(map[key][]Route, len(e.state.Routes))
+	index := make(map[key][]ownedRoute, len(e.state.Routes))
 	for _, route := range e.state.Routes {
-		route = normalizeRoute(route)
+		route.Route = normalizeRoute(route.Route)
 		k := key{route.Destination, route.Table, route.Metric}
 		index[k] = append(index[k], route)
 	}
@@ -198,7 +200,7 @@ func (e *Engine) observationTargetsLocked() ([]string, []int) {
 		names[a.Key.Interface] = true
 	}
 	for _, r := range e.state.Routes {
-		tables[routeTable(r)] = true
+		tables[routeTable(r.Route)] = true
 	}
 	for _, r := range e.state.PolicyRules {
 		tables[r.Table] = true
@@ -270,7 +272,7 @@ func routeObservationID(r RouteState) (string, error) {
 	r.Route = normalizeRoute(r.Route)
 	// Remaining lifetime changes between kernel reads; the endpoint identifies
 	// a routing entry, not a particular timer tick or ownership observation.
-	r.ValidUntil, r.Owned = time.Time{}, false
+	r.ValidUntil, r.Owned = lifetime.Deadline{}, false
 	return observationDigest(r)
 }
 

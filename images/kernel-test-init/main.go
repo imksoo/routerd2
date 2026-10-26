@@ -81,6 +81,8 @@ func selectedSuite() (suite, error) {
 		return suite{"/daemon.test", "TestDaemonVRRPGracefulAdmission", "ROUTERD_VRRP_ACTIVATION_TEST", 120 * time.Second}, nil
 	case "daemon-vrrp-conditional":
 		return suite{"/daemon.test", "TestDaemonVRRPConditionalOwnership", "ROUTERD_VRRP_CONDITIONAL_TEST", 120 * time.Second}, nil
+	case "daemon-ra-clock":
+		return suite{"/daemon.test", "TestDaemonRAClientClockCorrections", "ROUTERD_RA_CLOCK_TEST", 150 * time.Second}, nil
 	case "daemon-dhcp6-clock":
 		return suite{"/daemon.test", "TestDaemonDHCP6ClockCorrections", "ROUTERD_DHCP6_CLOCK_TEST", 150 * time.Second}, nil
 	case "daemon-vrrp-clock":

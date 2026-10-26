@@ -183,7 +183,7 @@ func projectBGP(p *projection, doc config.Native, configs map[string]bgpconfig.C
 		if len(hops) == 0 {
 			hops = []network.NextHop{{Gateway: r.Gateway, Interface: r.Interface, Weight: 1}}
 		}
-		until := deadline(r.BootID, r.ExpiresNanos, r.ValidUntil)
+		until := min(deadline(r.BootID, r.ExpiresNanos, time.Time{}), deadline(r.ValidUntil.BootID, r.ValidUntil.Nanos, r.ValidUntil.UTC))
 		for _, hop := range hops {
 			if linkUntil := index.links[hop.Interface]; linkUntil != 0 {
 				until = min(until, linkUntil)

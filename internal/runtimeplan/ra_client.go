@@ -3,38 +3,15 @@ package runtimeplan
 import (
 	"fmt"
 	"sort"
-	"time"
 
+	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/lifetime"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/raclient"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
 
-// The native route API has a finite kernel expiry range. Long protocol
-// lifetimes retain their original value in the accepted snapshot; only their
-// kernel grant uses a renewable horizon. Daily renewal leaves at least six
-// days of kernel lifetime while avoiding per-tick route replacement.
-func raKernelDeadline(deadline, now time.Time) time.Time {
-	if deadline.IsZero() {
-		return time.Time{} // explicitly advertised infinity
-	}
-	horizon := now.UTC().Truncate(24 * time.Hour).Add(7 * 24 * time.Hour)
-	if deadline.After(horizon) {
-		return horizon
-	}
-	return deadline
-}
-
-func raLive(deadline, now time.Time) bool { return deadline.IsZero() || now.Before(deadline) }
-
-func raEarlier(a, b time.Time) time.Time {
-	if a.IsZero() || !b.IsZero() && b.Before(a) {
-		return b
-	}
-	return a
-}
-
-func projectRAClient(p *projection, service serviceconfig.Service, snapshot raclient.Snapshot, has bool, now time.Time) error {
+func projectRAClient(p *projection, service serviceconfig.Service, snapshot raclient.Snapshot, has bool, clock boottime.Clock) error {
 	c := service.RAClient
 	ensureInterface(&p.network, c.Interface)
 	for i := range p.network.Interfaces {
@@ -48,14 +25,14 @@ func projectRAClient(p *projection, service serviceconfig.Service, snapshot racl
 		zero, disabled := 0, false
 		link.IPv6AcceptRA, link.IPv6Autoconf = &zero, &disabled
 	}
-	if !has || !snapshot.Active {
+	if !has || !snapshot.Active || snapshot.BootID != clock.BootID || snapshot.ObservedNanos > uint64(clock.BoottimeNanoseconds) {
 		return nil
 	}
 	for _, address := range snapshot.Addresses {
-		if address.DADFailed || !raLive(address.ValidUntil, now) {
+		if address.DADFailed || !address.ValidUntil.Live(clock) {
 			continue
 		}
-		if err := addAddressWithOptions(&p.network, c.Interface, address.Address, network.AddressOptions{PreferredUntil: address.PreferredUntil, ValidUntil: address.ValidUntil}); err != nil {
+		if err := addAddressWithOptions(&p.network, c.Interface, address.Address, addressLifetimes(address.PreferredUntil, address.ValidUntil)); err != nil {
 			return err
 		}
 	}
@@ -79,15 +56,15 @@ func projectRAClient(p *projection, service serviceconfig.Service, snapshot racl
 	}
 	onLink := map[string]bool{}
 	for _, prefix := range snapshot.Prefixes {
-		if !raLive(prefix.ValidUntil, now) {
+		if !prefix.ValidUntil.Live(clock) {
 			continue
 		}
 		onLink[prefix.Prefix] = true
-		p.network.Routes = append(p.network.Routes, network.Route{Destination: prefix.Prefix, Interface: c.Interface, Table: table, Metric: metric, ValidUntil: raKernelDeadline(prefix.ValidUntil, now)})
+		p.network.Routes = append(p.network.Routes, network.Route{Destination: prefix.Prefix, Interface: c.Interface, Table: table, Metric: metric, ValidUntil: prefix.ValidUntil})
 	}
 	groups := map[string][]raclient.Route{}
 	for _, route := range snapshot.Routes {
-		if !raLive(route.ValidUntil, now) || onLink[route.Destination] {
+		if !route.ValidUntil.Live(clock) || onLink[route.Destination] {
 			continue
 		}
 		group := groups[route.Destination]
@@ -105,11 +82,11 @@ func projectRAClient(p *projection, service serviceconfig.Service, snapshot racl
 	for _, destination := range destinations {
 		group := groups[destination]
 		sort.Slice(group, func(i, j int) bool { return group[i].Gateway < group[j].Gateway })
-		var deadline time.Time
+		var deadline lifetime.Deadline
 		for _, member := range group {
-			deadline = raEarlier(deadline, member.ValidUntil)
+			deadline = lifetime.Minimum(clock, deadline, member.ValidUntil)
 		}
-		out := network.Route{Destination: destination, Table: table, Metric: metric, ValidUntil: raKernelDeadline(deadline, now)}
+		out := network.Route{Destination: destination, Table: table, Metric: metric, ValidUntil: deadline}
 		if len(group) == 1 {
 			out.Gateway, out.Interface = group[0].Gateway, c.Interface
 		} else {

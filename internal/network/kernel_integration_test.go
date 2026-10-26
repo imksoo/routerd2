@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/google/nftables"
+	"github.com/imksoo/routerd2/internal/lifetime"
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netns"
 	"golang.org/x/net/ipv6"
@@ -304,7 +305,7 @@ func runNativeECMPFixture(t *testing.T, e *Engine, base Desired, clientNS, serve
 	d.Routes[0].NextHops = []NextHop{{Gateway: "198.51.100.2", Interface: "wan0", Weight: 1}, {Gateway: "198.51.101.2", Interface: "wan1", Weight: 1}}
 	d.Routes[1].Gateway, d.Routes[1].Interface = "", ""
 	d.Routes[1].NextHops = []NextHop{{Gateway: "2001:db8:2::2", Interface: "wan0", Weight: 1}, {Gateway: "2001:db8:22::2", Interface: "wan1", Weight: 1}}
-	d.Routes[1].ValidUntil = time.Now().Add(time.Minute)
+	d.Routes[1].ValidUntil = lifetime.Deadline{UTC: time.Now().Add(time.Minute)}
 	if _, err := e.Apply(context.Background(), 20, d); err != nil {
 		t.Fatalf("ECMP install: %v", err)
 	}
@@ -318,7 +319,7 @@ func runNativeECMPFixture(t *testing.T, e *Engine, base Desired, clientNS, serve
 		for _, route := range want.Routes {
 			found := false
 			for _, live := range s.Routes {
-				if routeMatches(live, route) && live.Owned {
+				if routeMatches(live, testOwnedRoute(t, route)) && live.Owned {
 					found = true
 				}
 			}
@@ -410,8 +411,8 @@ func runNativeRAStateFixture(t *testing.T, e *Engine, base Desired, clientNS, se
 	d.Interfaces[1].IPv6AcceptRA, d.Interfaces[1].IPv6Autoconf = &zero, &disabled
 	d.Links = append(d.Links, Link{Name: "rabr0", Kind: "bridge", IPv6AddrGenMode: "none"})
 	d.Interfaces = append(d.Interfaces, Interface{Name: "rabr0", IPv6AcceptRA: &zero, IPv6Autoconf: &disabled})
-	d.Routes[1].ValidUntil = time.Now().Add(4 * time.Second)
-	d.Routes = append(d.Routes, Route{Destination: "2001:db8:77::/64", Interface: "wan0", ValidUntil: time.Now().Add(time.Minute)})
+	d.Routes[1].ValidUntil = lifetime.Deadline{UTC: time.Now().Add(4 * time.Second)}
+	d.Routes = append(d.Routes, Route{Destination: "2001:db8:77::/64", Interface: "wan0", ValidUntil: lifetime.Deadline{UTC: time.Now().Add(time.Minute)}})
 	if _, err := e.Apply(context.Background(), 40, d); err != nil {
 		t.Fatalf("RA writer settings and finite routes: %v", err)
 	}
@@ -422,7 +423,7 @@ func runNativeRAStateFixture(t *testing.T, e *Engine, base Desired, clientNS, se
 		}
 	}
 	tcpExchange(t, clientNS, serverNS, "tcp6", "2001:db8:3::2", "2001:db8:2::1")
-	d.Routes[1].ValidUntil = time.Now().Add(5 * time.Second)
+	d.Routes[1].ValidUntil = lifetime.Deadline{UTC: time.Now().Add(5 * time.Second)}
 	if _, err := e.Apply(context.Background(), 41, d); err != nil {
 		t.Fatalf("finite route renewal: %v", err)
 	}
@@ -436,14 +437,14 @@ func runNativeRAStateFixture(t *testing.T, e *Engine, base Desired, clientNS, se
 	for _, want := range d.Routes {
 		found := false
 		for _, live := range observed.Routes {
-			found = found || routeMatches(live, want) && live.Owned
+			found = found || routeMatches(live, testOwnedRoute(t, want)) && live.Owned
 		}
 		if !found {
 			t.Fatalf("finite route deadline or ownership not read back: want %+v; live %+v", want, observed.Routes)
 		}
 	}
-	foreign := Route{Destination: "2001:db8:99::/64", Interface: "wan0", Metric: 177, ValidUntil: time.Now().Add(time.Hour)}
-	if err := e.kernel.AddRoute(foreign); err != nil {
+	foreign := Route{Destination: "2001:db8:99::/64", Interface: "wan0", Metric: 177, ValidUntil: lifetime.Deadline{UTC: time.Now().Add(time.Hour)}}
+	if err := e.kernel.AddRoute(testOwnedRoute(t, foreign)); err != nil {
 		t.Fatal(err)
 	}
 	defer e.kernel.DeleteRoute(foreign)
@@ -453,7 +454,7 @@ func runNativeRAStateFixture(t *testing.T, e *Engine, base Desired, clientNS, se
 	if _, err := netlink.RouteGet(target); err != nil {
 		t.Fatalf("finite route expired before its deadline: %v", err)
 	}
-	limit := d.Routes[1].ValidUntil.Add(2 * time.Second)
+	limit := d.Routes[1].ValidUntil.UTC.Add(2 * time.Second)
 	for {
 		_, err := netlink.RouteGet(target)
 		if errors.Is(err, unix.ENETUNREACH) {
@@ -487,7 +488,7 @@ func runNativeRAStateFixture(t *testing.T, e *Engine, base Desired, clientNS, se
 	}
 	found := false
 	for _, r := range routes {
-		if routeMatches(r, foreign) {
+		if routeMatches(r, testOwnedRoute(t, foreign)) {
 			found = true
 			if e.ownsRoute(r) {
 				t.Fatal("foreign finite route with matching protocol adopted")

@@ -6,16 +6,14 @@ package raclient
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
-	"time"
+
+	"github.com/imksoo/routerd2/internal/boottime"
 
 	"golang.org/x/sys/unix"
 )
@@ -23,80 +21,41 @@ import (
 const maxStateBytes = 1 << 20
 
 type journal struct {
-	Version       int       `json:"version"`
-	Identity      string    `json:"identity"`
-	BootID        string    `json:"boot_id"`
-	SavedAt       time.Time `json:"saved_at"`
-	SavedBootTime time.Time `json:"saved_boot_time"`
-	Snapshot      Snapshot  `json:"snapshot"`
+	Version  int      `json:"version"`
+	Identity string   `json:"identity"`
+	Snapshot Snapshot `json:"snapshot"`
 }
 
-func (s *state) identity() string {
-	c := s.config
-	c.StatePath = ""
-	b, _ := json.Marshal(struct {
-		Config                Config
-		InterfaceIndex        int
-		Hardware, Source, IID string
-	}{c, s.link.index, s.link.hardware.String(), s.link.source.String(), suffixString(s.iid)})
-	sum := sha256.Sum256(b)
-	return hex.EncodeToString(sum[:])
-}
-
-func (s *state) record(bootID string, now instant) journal {
-	snapshot := s.snapshot(now)
-	return journal{Version: 1, Identity: s.identity(), BootID: bootID, SavedAt: snapshot.UpdatedAt, SavedBootTime: now.boot, Snapshot: snapshot}
-}
-
-func (s *state) restore(path, bootID string, now instant) error {
+func (s *state) restore(path string, now boottime.Clock) error {
 	record, exists, err := readState(path)
 	if err != nil || !exists {
 		return err
 	}
-	return s.restoreRecord(record, bootID, now)
+	return s.restoreRecord(record, now)
 }
 
-func (s *state) restoreRecord(record journal, bootID string, now instant) error {
-	if record.Version != 1 || record.Identity == "" || record.BootID == "" || record.SavedAt.IsZero() || record.SavedBootTime.IsZero() || !record.Snapshot.UpdatedAt.Equal(record.SavedAt) {
+func (s *state) restoreRecord(record journal, now boottime.Clock) error {
+	if record.Version != 2 || record.Identity == "" {
 		return errors.New("invalid RA state journal envelope")
 	}
-	if record.BootID != bootID {
+	if record.Snapshot.BootID != now.BootID {
 		s.learned.LastError = "stored RA learning discarded after reboot; waiting for fresh advertisements"
 		return nil
 	}
-	if record.Identity != s.identity() {
+	if record.Identity != s.identity {
 		s.learned.LastError = "stored RA learning discarded after interface/config identity change"
 		return nil
-	}
-	if record.SavedBootTime.After(now.boot) || record.SavedBootTime.Before(time.Unix(0, 0)) {
-		return errors.New("RA state journal has an invalid monotonic timestamp")
 	}
 	if err := ValidateSnapshot(s.config, record.Snapshot); err != nil {
 		return fmt.Errorf("invalid RA state snapshot: %w", err)
 	}
-	next := clone(record.Snapshot)
-	// This uses the stored boot clock, not elapsed wall time. It remains valid
-	// across backward and forward NTP steps during a same-boot worker restart.
-	convertDeadlines(&next, record.SavedAt, record.SavedBootTime)
-	next.Active = true
-	expireSnapshot(&next, now.boot)
-	s.learned = next
-	// Preserve the exact original UTC mapping across same-boot restart. A real
-	// wall-clock step is still detected by snapshot/worker against this pair.
-	s.clock = instant{wall: record.SavedAt, boot: record.SavedBootTime}
+	if record.Snapshot.ObservedNanos > uint64(now.BoottimeNanoseconds) {
+		return errors.New("RA state journal has a future boot timestamp")
+	}
+	s.learned = clone(record.Snapshot)
+	s.learned.Active = true
+	expireSnapshot(&s.learned, now)
 	return nil
-}
-
-func readBootID() (string, error) {
-	b, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
-	if err != nil {
-		return "", err
-	}
-	id := strings.TrimSpace(string(b))
-	if len(id) != 36 {
-		return "", errors.New("kernel boot identity is unavailable")
-	}
-	return id, nil
 }
 
 func lockState(path string) (*os.File, error) {

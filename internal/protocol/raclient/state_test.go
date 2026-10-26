@@ -9,13 +9,16 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/lifetime"
 )
 
 func testConfig() Config {
 	return Config{Resource: "wan-ra", Interface: "wan0", StatePath: "/state/wan-ra.json", InterfaceID: "::1234"}
 }
-func testClock(seconds int) instant {
-	return instant{wall: time.Unix(1700000000+int64(seconds), 0).UTC(), boot: time.Unix(1000+int64(seconds), 0).UTC()}
+func testClock(seconds int) boottime.Clock {
+	return boottime.Clock{BootID: "11111111-2222-4333-8444-555555555555", WallTime: time.Unix(1700000000+int64(seconds), 0).UTC(), BoottimeNanoseconds: int64(1000+seconds) * int64(time.Second)}
 }
 func testState(t *testing.T, cfg Config) *state {
 	t.Helper()
@@ -81,7 +84,7 @@ func recalc(p *packet) {
 	p.payload[2], p.payload[3] = 0, 0
 	binary.BigEndian.PutUint16(p.payload[2:], checksum(p.payload, p.source, p.destination))
 }
-func mustHandle(t *testing.T, s *state, p packet, now instant) Snapshot {
+func mustHandle(t *testing.T, s *state, p packet, now boottime.Clock) Snapshot {
 	t.Helper()
 	if err := s.handle(p, now); err != nil {
 		t.Fatal(err)
@@ -100,7 +103,7 @@ func TestRALifetimesAreIndependentAndAbsolute(t *testing.T) {
 	if len(snap.Addresses) != 1 || snap.Addresses[0].Address != "2001:db8:1::1234/128" || len(snap.Prefixes) != 1 || len(snap.Routes) != 2 || !snap.Managed || !snap.OtherConfig || len(snap.DNSServers) != 1 || len(snap.SearchDomains) != 1 {
 		t.Fatalf("incomplete RA projection: %+v", snap)
 	}
-	if !snap.Addresses[0].ValidUntil.Equal(now.wall.Add(30*time.Second)) || !snap.Addresses[0].PreferredUntil.Equal(now.wall.Add(10*time.Second)) {
+	if snap.Addresses[0].ValidUntil != lifetime.After(now, 30) || snap.Addresses[0].PreferredUntil != lifetime.After(now, 10) {
 		t.Fatal("PIO deadlines shifted")
 	}
 	if !s.expire(testClock(4)) {
@@ -110,7 +113,7 @@ func TestRALifetimesAreIndependentAndAbsolute(t *testing.T) {
 	if len(after.Routes) != 1 || after.Routes[0].Destination != "2001:db8:2::/48" || len(after.DNSServers) != 0 || len(after.SearchDomains) != 1 || len(after.Addresses) != 1 {
 		t.Fatal("expiration removed unrelated independently timed state")
 	}
-	if !after.Addresses[0].ValidUntil.Equal(snap.Addresses[0].ValidUntil) {
+	if after.Addresses[0].ValidUntil != snap.Addresses[0].ValidUntil {
 		t.Fatal("periodic publication extended PIO lifetime")
 	}
 	if !s.expire(testClock(11)) || !s.snapshot(testClock(11)).Addresses[0].Deprecated {
@@ -143,7 +146,7 @@ func TestTwoHourRuleAndImmediateDeprecation(t *testing.T) {
 			s := testState(t, testConfig())
 			mustHandle(t, s, advert("fe80::2", 30, 0, pio("2001:db8:1::/64", 0xc0, tc.old, tc.old)), testClock(0))
 			snap := mustHandle(t, s, advert("fe80::2", 0, 0, pio("2001:db8:1::/64", 0xc0, tc.next, 0)), testClock(tc.elapsed))
-			if len(snap.Addresses) != 1 || !snap.Addresses[0].ValidUntil.Equal(testClock(tc.want).wall) || !snap.Addresses[0].Deprecated {
+			if len(snap.Addresses) != 1 || snap.Addresses[0].ValidUntil.Nanos != uint64(testClock(tc.want).BoottimeNanoseconds) || !snap.Addresses[0].Deprecated {
 				t.Fatalf("wrong protected valid/deprecated lifetime: %+v", snap.Addresses)
 			}
 			if tc.next == 0 && (len(snap.Prefixes) != 0 || len(snap.Routes) != 0) {
@@ -173,7 +176,7 @@ func TestPIOAutonomousAndOnLinkAreIndependent(t *testing.T) {
 func TestRIOOverridesHeaderAndRoutersRemainIndependent(t *testing.T) {
 	s := testState(t, testConfig())
 	snap := mustHandle(t, s, advert("fe80::2", 30, 0x08, rio("::/0", 0x18, 60)), testClock(0))
-	if len(snap.Routes) != 1 || snap.Routes[0].Preference != -1 || !snap.Routes[0].ValidUntil.Equal(testClock(60).wall) {
+	if len(snap.Routes) != 1 || snap.Routes[0].Preference != -1 || snap.Routes[0].ValidUntil.Nanos != uint64(testClock(60).BoottimeNanoseconds) {
 		t.Fatal("RIO ::/0 did not override the RA header")
 	}
 	snap = mustHandle(t, s, advert("fe80::3", 100, 0x08, rdnss(200, "2001:db8::53")), testClock(1))
@@ -270,7 +273,7 @@ func TestSnapshotScopeAndEUI64Validation(t *testing.T) {
 	for _, mutation := range []func(*Snapshot){
 		func(v *Snapshot) { v.Resource = "other" }, func(v *Snapshot) { v.SourceAddress = "2001:db8::1" },
 		func(v *Snapshot) { v.Addresses[0].Address = "2001:db8:1::beef/128" }, func(v *Snapshot) { v.Addresses[0].Address = "2001:db8:1::ff:fe00:1/64" },
-		func(v *Snapshot) { v.Addresses[0].PreferredUntil = time.Time{} }, func(v *Snapshot) { v.Routes[0].Gateway = "2001:db8::1" },
+		func(v *Snapshot) { v.Addresses[0].PreferredUntil = lifetime.Deadline{} }, func(v *Snapshot) { v.Routes[0].Gateway = "2001:db8::1" },
 		func(v *Snapshot) { v.Routes = append(v.Routes, v.Routes[0]) }, func(v *Snapshot) { v.UpdatedAt = time.Time{} },
 	} {
 		v := clone(snap)
@@ -348,22 +351,16 @@ func TestDuplicateRIOIsRejectedWithoutPartialWithdrawal(t *testing.T) {
 	}
 }
 
-func TestLiveWallClockStepsRebaseWithoutExtendingLifetimes(t *testing.T) {
+func TestWallClockStepsPreserveOriginalBootLifetimes(t *testing.T) {
 	s := testState(t, testConfig())
 	mustHandle(t, s, advert("fe80::2", 30, 0, pio("2001:db8:1::/64", 0xc0, 60, 30)), testClock(0))
 	for _, shift := range []time.Duration{-24 * time.Hour, 24 * time.Hour} {
 		now := testClock(20)
-		now.wall = now.wall.Add(shift)
-		if !wallClockMoved(testClock(0), now) {
-			t.Fatal("wall clock step not detected")
-		}
+		now.WallTime = now.WallTime.Add(shift)
 		snap := s.snapshot(now)
-		if snap.Addresses[0].ValidUntil.Sub(now.wall) != 40*time.Second || snap.Routes[0].ValidUntil.Sub(now.wall) != 10*time.Second {
+		if snap.Addresses[0].ValidUntil.Remaining(now) != 40*time.Second || snap.Routes[0].ValidUntil.Remaining(now) != 10*time.Second {
 			t.Fatal("wall step changed remaining protocol lifetime")
 		}
-	}
-	if wallClockMoved(testClock(0), testClock(3600)) {
-		t.Fatal("ordinary passage of time was treated as a clock step")
 	}
 }
 
@@ -374,7 +371,7 @@ func TestStatusOnlyEventsKeepExactAbsoluteDeadlines(t *testing.T) {
 	bad.hopLimit = 254
 	for i, jitter := range []time.Duration{7521 * time.Nanosecond, -12 * time.Microsecond, 800 * time.Microsecond, -500 * time.Millisecond} {
 		now := testClock(i + 1)
-		now.wall = now.wall.Add(jitter)
+		now.WallTime = now.WallTime.Add(jitter)
 		if err := s.handle(bad, now); err == nil {
 			t.Fatal("bad-hop RA did not generate the expected rejection event")
 		}
@@ -383,11 +380,11 @@ func TestStatusOnlyEventsKeepExactAbsoluteDeadlines(t *testing.T) {
 		if err := ValidateSnapshot(s.config, after); err != nil {
 			t.Fatal(err)
 		}
-		if !reflect.DeepEqual(learnedData(first), learnedData(after)) || !after.UpdatedAt.Equal(testClock(i+1).wall) {
+		if !reflect.DeepEqual(learnedData(first), learnedData(after)) || !after.UpdatedAt.Equal(now.WallTime) {
 			t.Fatalf("status-only event/jitter %v changed absolute lifetime facts: first=%+v next=%+v", jitter, first, after)
 		}
 		if after.Received != 1 || after.Rejected != uint64(i+1) || after.Solicitations != uint64(i+1) || after.LastError == "" {
-			t.Fatal("fixed clock mapping suppressed the status event")
+			t.Fatal("status publication lost the counters")
 		}
 	}
 }

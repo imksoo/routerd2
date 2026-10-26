@@ -68,7 +68,7 @@ func Compile(source Program) (Plan, error) {
 		if r.Link != nil && r.Link.Authority != (lifetime.Deadline{}) {
 			return Plan{}, fmt.Errorf("resource %s: link authority is internal projection authority", r.ID)
 		}
-		if r.Route != nil && (r.Route.BootID != "" || r.Route.ExpiresNanos != 0) {
+		if r.Route != nil && (r.Route.BootID != "" || r.Route.ExpiresNanos != 0 || r.Route.ValidUntil.BootID != "") {
 			return Plan{}, fmt.Errorf("resource %s: route boot deadline is internal projection authority", r.ID)
 		}
 		if p := r.Provenance; p != nil {

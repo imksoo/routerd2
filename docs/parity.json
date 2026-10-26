@@ -226,7 +226,7 @@
         "network"
       ],
       "parity_status": "not_integrated",
-      "known_gap": "Native static, DHCP/PD finite/deprecated addresses and VRRP VMAC address ownership are implemented. Full SelfAddressPolicy and legacy dependency semantics remain incomplete."
+      "known_gap": "Native static, DHCP/PD finite/deprecated addresses and VRRP VMAC address ownership are implemented. Full SelfAddressPolicy and legacy dependency semantics remain incomplete. Native RA facts and restart now retain original boot deadlines; real RA/backend TCP/UDP and guest UTC correction gates pass. Complete resource behavior and physical suspend remain unqualified."
     },
     {
       "id": "network.routes",
@@ -334,7 +334,7 @@
         "network"
       ],
       "parity_status": "not_integrated",
-      "known_gap": "Native B4, dynamic AFTR resolution, explicit RA/DHCPv6 dependencies and original DNS/source lifetimes are implemented. Static and generated tunnels share ordinary ip6tnl link ownership. Independent Linux AFTR TCP/UDP and writer restart/control-stop expiry/recovery are verified. Strict migration of original SelfAddressPolicy, multi-AFTR source routing, when/dependency and full resource lifecycle semantics, RA-client boot deadlines, suspend/reboot, VRF and target hardware remain incomplete."
+      "known_gap": "Native B4, dynamic AFTR resolution, explicit RA/DHCPv6 dependencies and original DNS/source lifetimes are implemented. Static and generated tunnels share ordinary ip6tnl link ownership. Independent Linux AFTR TCP/UDP and writer restart/control-stop expiry/recovery are verified. Strict migration of original SelfAddressPolicy, multi-AFTR source routing, when/dependency and full resource lifecycle semantics, suspend/reboot, VRF and target hardware remain incomplete."
     },
     {
       "id": "lan.dhcp_ra",

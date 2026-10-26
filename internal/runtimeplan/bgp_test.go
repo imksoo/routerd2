@@ -95,7 +95,7 @@ func TestLearnedRouteRetainsRecursiveAddressRouteAndLinkDeadlines(t *testing.T) 
 			case "utc-route":
 				d.Network.Interfaces[0].Addresses = []string{"2001:db8:1::10/64"}
 				d.Network.Routes[0] = network.Route{Destination: "2001:db8:8::/64", Gateway: "2001:db8:1::1", Interface: "wan0"}
-				d.Network.Routes[0].ValidUntil = clock.WallTime.Add(2 * time.Second)
+				d.Network.Routes[0].ValidUntil = lifetime.Deadline{UTC: clock.WallTime.Add(2 * time.Second)}
 				hop, family = "2001:db8:8::9", "2001:db8:77::/64"
 			case "link", "link-local":
 				d.Network.Links = []network.Link{{Name: "wan0", Kind: "macvlan", Parent: "uplink", Authority: lifetime.Deadline{BootID: clock.BootID, Nanos: base + uint64(2*time.Second)}}}

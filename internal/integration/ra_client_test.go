@@ -3,9 +3,13 @@
 package integration
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
+	"io"
+	"net"
 	"net/netip"
 	"os"
 	"strings"
@@ -13,8 +17,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/clocktest"
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/control"
+	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/raclient"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
@@ -31,6 +37,35 @@ func TestDaemonRAClientConfigurationAndExpiry(t *testing.T) {
 	if !isolateFixture(t, "TestDaemonRAClientConfigurationAndExpiry") {
 		return
 	}
+	runRAClientFixture(t, nil)
+}
+
+func TestDaemonRAClientClockCorrections(t *testing.T) {
+	file, err := clocktest.ForwardFileFromEnv()
+	if err != nil {
+		if os.Getenv("ROUTERD2_INTEGRATION_REQUIRED") == "1" {
+			t.Fatal(err)
+		}
+		t.Skip("dedicated no-NIC QEMU clock broker required")
+	}
+	file.Close()
+	if !isolateFixtureTimeout(t, "TestDaemonRAClientClockCorrections", 120*time.Second) {
+		return
+	}
+	client, err := clocktest.ClientFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if _, err := client.Step("restore"); err != nil {
+			t.Error(err)
+		}
+		client.Close()
+	})
+	runRAClientFixture(t, client)
+}
+
+func runRAClientFixture(t *testing.T, clockClient *clocktest.Client) {
 	peerNS := fixturePeerNamespace(t, "wan0", "provider0")
 	h, err := netlink.NewHandleAt(peerNS, unix.NETLINK_ROUTE)
 	if err != nil {
@@ -45,6 +80,50 @@ func TestDaemonRAClientConfigurationAndExpiry(t *testing.T) {
 	address.Flags = unix.IFA_F_NODAD
 	if err := h.AddrReplace(peer, address); err != nil {
 		t.Fatal(err)
+	}
+	loopback, err := h.LinkByName("lo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend, _ := netlink.ParseAddr("2001:db8:ffff::9/128")
+	backend.Flags = unix.IFA_F_NODAD
+	if err := h.AddrAdd(loopback, backend); err != nil {
+		t.Fatal(err)
+	}
+	_, subnet, _ := net.ParseCIDR("2001:db8:10::/64")
+	if err := h.RouteAdd(&netlink.Route{Dst: subnet, LinkIndex: peer.Attrs().Index, Scope: netlink.SCOPE_LINK}); err != nil {
+		t.Fatal(err)
+	}
+	vrrpVIPResponders(t, peerNS, "6", []string{"2001:db8:ffff::9"}, "R")
+	capture := healthPBRCapture(t, "wan0")
+	traffic := func() {
+		t.Helper()
+		for _, protocol := range []string{"tcp6", "udp6"} {
+			port := "18093"
+			dialer := net.Dialer{Timeout: time.Second, LocalAddr: &net.TCPAddr{IP: net.ParseIP("2001:db8:10::1234")}}
+			if protocol == "udp6" {
+				port, dialer.LocalAddr = "18094", &net.UDPAddr{IP: net.ParseIP("2001:db8:10::1234")}
+			}
+			conn, err := dialer.Dial(protocol, net.JoinHostPort("2001:db8:ffff::9", port))
+			if err != nil {
+				t.Fatal(protocol, err)
+			}
+			if err := conn.SetDeadline(time.Now().Add(time.Second)); err != nil {
+				conn.Close()
+				t.Fatal(err)
+			}
+			if protocol == "udp6" {
+				_, err = conn.Write([]byte("RA"))
+			}
+			var response [1]byte
+			if err == nil {
+				_, err = io.ReadFull(conn, response[:])
+			}
+			conn.Close()
+			if err != nil || response[0] != 'R' {
+				t.Fatal("RA-learned source/default route TCP/UDP", protocol, response, err)
+			}
+		}
 	}
 	prior := map[string]string{}
 	for _, key := range []string{"accept_ra", "autoconf"} {
@@ -80,6 +159,19 @@ func TestDaemonRAClientConfigurationAndExpiry(t *testing.T) {
 		Services: []serviceconfig.Service{{Name: "wan-ra", RAClient: &serviceconfig.RAClient{Interface: "wan0", SourceAddress: "fe80::1", InterfaceID: "::1234", AllowedRouters: []string{"fe80::2"}}}},
 	}
 	f := startFixtureDaemon(t, config.FromNative(doc))
+	module := func(name string) supervisor.ModuleStatus {
+		t.Helper()
+		var status supervisor.Status
+		if err := f.supervisor.Do(context.Background(), "GET", "/v1/status", nil, &status); err != nil {
+			t.Fatal(err)
+		}
+		for _, module := range status.Modules {
+			if module.Name == name {
+				return module
+			}
+		}
+		return supervisor.ModuleStatus{}
+	}
 	for key := range prior {
 		value, err := os.ReadFile("/proc/sys/net/ipv6/conf/wan0/" + key)
 		if err != nil || strings.TrimSpace(string(value)) != "0" {
@@ -88,23 +180,31 @@ func TestDaemonRAClientConfigurationAndExpiry(t *testing.T) {
 	}
 	packet := make([]byte, 16+32+8+24)
 	packet[0], packet[4], packet[5] = 134, 64, 0x08 // RA, current hop limit, high preference
-	binary.BigEndian.PutUint16(packet[6:8], 8)
+	valid, preferred := uint32(8), uint32(6)
+	if clockClient != nil {
+		valid, preferred = 20, 18
+	}
+	binary.BigEndian.PutUint16(packet[6:8], uint16(valid))
 	pio := packet[16:48]
 	pio[0], pio[1], pio[2], pio[3] = 3, 4, 64, 0xc0
-	binary.BigEndian.PutUint32(pio[4:8], 8)
-	binary.BigEndian.PutUint32(pio[8:12], 6)
+	binary.BigEndian.PutUint32(pio[4:8], valid)
+	binary.BigEndian.PutUint32(pio[8:12], preferred)
 	prefix := netip.MustParseAddr("2001:db8:10::").As16()
 	copy(pio[16:], prefix[:])
 	packet[48], packet[49] = 1, 1
 	copy(packet[50:56], peer.Attrs().HardwareAddr)
 	dns := packet[56:]
 	dns[0], dns[1] = 25, 3
-	binary.BigEndian.PutUint32(dns[4:8], 5)
+	binary.BigEndian.PutUint32(dns[4:8], valid-2)
 	resolver := netip.MustParseAddr("2001:db8:53::53").As16()
 	copy(dns[8:], resolver[:])
-	if err := unix.Sendto(fd, packet, 0, &unix.SockaddrInet6{Addr: netip.MustParseAddr("ff02::1").As16(), ZoneId: uint32(peer.Attrs().Index)}); err != nil {
-		t.Fatal(err)
+	send := func() {
+		t.Helper()
+		if err := unix.Sendto(fd, packet, 0, &unix.SockaddrInet6{Addr: netip.MustParseAddr("ff02::1").As16(), ZoneId: uint32(peer.Attrs().Index)}); err != nil {
+			t.Fatal(err)
+		}
 	}
+	send()
 	link, err := netlink.LinkByName("wan0")
 	if err != nil {
 		t.Fatal(err)
@@ -115,7 +215,7 @@ func TestDaemonRAClientConfigurationAndExpiry(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, value := range values {
-			if value.IPNet.String() == want {
+			if value.IPNet.String() == want && value.Flags&(unix.IFA_F_TENTATIVE|unix.IFA_F_DADFAILED) == 0 {
 				return true
 			}
 		}
@@ -124,6 +224,7 @@ func TestDaemonRAClientConfigurationAndExpiry(t *testing.T) {
 	until(t, 5*time.Second, func() bool {
 		return hasAddress("2001:db8:10::1234/128") && fixtureRoute(t, "::/0", "fe80::2", link.Attrs().Index)
 	})
+	traffic()
 	var state runtimeplan.InstanceStatus
 	if err := f.control.Do(context.Background(), "GET", "/v1/services/service.wan-ra", nil, &state); err != nil {
 		t.Fatal(err)
@@ -132,18 +233,35 @@ func TestDaemonRAClientConfigurationAndExpiry(t *testing.T) {
 	if err := json.Unmarshal(state.Snapshot, &snapshot); err != nil || !snapshot.Active || snapshot.Received != 1 || len(snapshot.Addresses) != 1 || len(snapshot.DNSServers) != 1 {
 		t.Fatalf("wire RA did not reach the typed service state: %+v %v", snapshot, err)
 	}
-	var status supervisor.Status
-	if err := f.supervisor.Do(context.Background(), "GET", "/v1/status", nil, &status); err != nil {
-		t.Fatal(err)
-	}
-	pids := []int{f.pid}
-	for _, module := range status.Modules {
-		if module.Name == "control" || module.Name == "service.wan-ra" {
-			pids = append(pids, module.PID)
+	if clockClient != nil {
+		before := module("service.wan-ra")
+		if before.PID < 2 {
+			t.Fatal("RA worker missing")
 		}
+		if err := syscall.Kill(before.PID, syscall.SIGKILL); err != nil {
+			t.Fatal(err)
+		}
+		until(t, 5*time.Second, func() bool {
+			next := module("service.wan-ra")
+			return next.Ready && next.PID > 1 && next.PID != before.PID
+		})
+		until(t, 5*time.Second, func() bool {
+			if err := f.control.Do(context.Background(), "GET", "/v1/services/service.wan-ra", nil, &state); err != nil {
+				t.Fatal(err)
+			}
+			var restored raclient.Snapshot
+			if err := json.Unmarshal(state.Snapshot, &restored); err != nil {
+				t.Fatal(err)
+			}
+			return len(restored.Addresses) == 1 && restored.Addresses[0].ValidUntil == snapshot.Addresses[0].ValidUntil && restored.Routes[0].ValidUntil == snapshot.Routes[0].ValidUntil
+		})
+		traffic()
 	}
-	if len(pids) != 3 {
-		t.Fatal("required process ownership is missing", status)
+	pids := []int{f.pid, module("control").PID, module("service.wan-ra").PID, module("network").PID}
+	for _, pid := range pids {
+		if pid < 2 {
+			t.Fatal("required process ownership missing", pids)
+		}
 	}
 	var stopped []int
 	resume := func() {
@@ -153,21 +271,59 @@ func TestDaemonRAClientConfigurationAndExpiry(t *testing.T) {
 		stopped = nil
 	}
 	t.Cleanup(resume)
-	// Suspend supervision too so heartbeat recovery cannot masquerade as
-	// autonomous kernel expiry. The processes remain alive throughout.
-	for _, pid := range pids {
+	stop := func(pid int) {
+		t.Helper()
 		if err := syscall.Kill(pid, syscall.SIGSTOP); err != nil {
 			t.Fatal(err)
 		}
 		stopped = append(stopped, pid)
 	}
-	until(t, 10*time.Second, func() bool {
+	if clockClient != nil {
+		stop(pids[2])
+		for _, action := range []string{"forward", "backward"} {
+			result, err := clockClient.Step(action)
+			if err != nil {
+				t.Fatal(err)
+			}
+			traffic()
+			var current runtimeplan.InstanceStatus
+			if err := f.control.Do(context.Background(), "GET", "/v1/services/service.wan-ra", nil, &current); err != nil {
+				t.Fatal(err)
+			}
+			if current.Sequence != state.Sequence || !bytes.Equal(current.Snapshot, state.Snapshot) {
+				t.Fatal("clock step/poll rewrote a frozen RA observation")
+			}
+			t.Log("actual guest UTC correction", action, result.Clock.WallTime, result.Clock.BoottimeNanoseconds)
+		}
+		writer := module("network")
+		if err := syscall.Kill(writer.PID, syscall.SIGKILL); err != nil {
+			t.Fatal(err)
+		}
+		until(t, 5*time.Second, func() bool { next := module("network"); return next.Ready && next.PID > 1 && next.PID != writer.PID })
+		pids[3] = module("network").PID
+		traffic()
+		stop(pids[0])
+		stop(pids[1])
+		stop(pids[3])
+	} else {
+		for _, pid := range pids {
+			stop(pid)
+		}
+	}
+	// With both owners and supervision frozen, only kernel timers can expire
+	// the learned /128 and default route. Host UTC is never changed.
+	until(t, time.Duration(valid+2)*time.Second, func() bool {
 		_, routeErr := netlink.RouteGet(netip.MustParseAddr("2001:db8:ffff::1").AsSlice())
 		return routeErr != nil && !hasAddress("2001:db8:10::1234/128")
 	})
 	for _, pid := range pids {
 		if err := syscall.Kill(pid, 0); err != nil {
 			t.Fatalf("process %d exited before autonomous kernel expiry: %v", pid, err)
+		}
+	}
+	if clockClient != nil {
+		if _, err := clockClient.Step("restore"); err != nil {
+			t.Fatal(err)
 		}
 	}
 	resume()
@@ -178,6 +334,48 @@ func TestDaemonRAClientConfigurationAndExpiry(t *testing.T) {
 		}
 		var s control.State
 		return f.control.Do(context.Background(), "GET", "/v1/config", nil, &s) == nil && s.Healthy
+	})
+	if clockClient != nil {
+		replay := healthPBRUpdate(state)
+		replay.Sequence++
+		if err := f.control.Do(context.Background(), "POST", "/v1/services/state", replay, nil); err != nil && !localapi.IsHTTPStatus(err, 409) {
+			t.Fatal(err)
+		}
+		if hasAddress("2001:db8:10::1234/128") || fixtureRoute(t, "::/0", "fe80::2", link.Attrs().Index) {
+			t.Fatal("expired RA replay restored kernel authority")
+		}
+		send()
+		until(t, 5*time.Second, func() bool {
+			return hasAddress("2001:db8:10::1234/128") && fixtureRoute(t, "::/0", "fe80::2", link.Attrs().Index)
+		})
+		traffic()
+		t.Log("RA and network worker restart, actual UTC +/-24h, all owners stopped, kernel expiry, expired replay rejection and fresh RA TCP/UDP recovery")
+	}
+	until(t, time.Second, func() bool {
+		capture.mu.Lock()
+		defer capture.mu.Unlock()
+		counts := map[string]int{}
+		for _, p := range capture.packets {
+			b := p.data
+			if len(b) < 58 || binary.BigEndian.Uint16(b[12:14]) != unix.ETH_P_IPV6 {
+				continue
+			}
+			if b[20] == unix.IPPROTO_ICMPV6 && b[54] == 134 && b[21] == 255 {
+				counts["ra"]++
+				continue
+			}
+			if b[20] != unix.IPPROTO_TCP && b[20] != unix.IPPROTO_UDP {
+				continue
+			}
+			source, dest := net.IP(b[22:38]), net.IP(b[38:54])
+			if source.Equal(net.ParseIP("2001:db8:10::1234")) && dest.Equal(net.ParseIP("2001:db8:ffff::9")) {
+				counts[fmt.Sprintf("%d-out", b[20])]++
+			}
+			if dest.Equal(net.ParseIP("2001:db8:10::1234")) && source.Equal(net.ParseIP("2001:db8:ffff::9")) {
+				counts[fmt.Sprintf("%d-in", b[20])]++
+			}
+		}
+		return counts["ra"] > 0 && counts["6-out"] > 0 && counts["6-in"] > 0 && counts["17-out"] > 0 && counts["17-in"] > 0
 	})
 	doc.Services = nil
 	var committed control.State

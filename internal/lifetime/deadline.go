@@ -20,7 +20,7 @@ type Deadline struct {
 
 func (d Deadline) Validate() error {
 	if !d.UTC.IsZero() {
-		if d.BootID != "" || d.Nanos != 0 || d.UTC.Year() < 1970 || d.UTC.Year() > 9999 {
+		if d.BootID != "" || d.Nanos != 0 || d.UTC.Unix() < 0 || d.UTC.UTC().Year() > 9999 {
 			return errors.New("invalid UTC deadline")
 		}
 		return nil

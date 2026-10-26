@@ -52,17 +52,17 @@ func aftrDependencies(doc config.Native, s serviceconfig.Service, records map[st
 		if err := json.Unmarshal(u.Snapshot, &snap); err != nil {
 			return in, err
 		}
-		if snap.Active {
+		if snap.Active && snap.BootID == clock.BootID && snap.ObservedNanos <= uint64(clock.BoottimeNanoseconds) {
 			var sources []aftr.Source
 			for _, address := range snap.Addresses {
-				if address.Deprecated || address.DADFailed || !deadlineLive(address.PreferredUntil, now) || !deadlineLive(address.ValidUntil, now) {
+				if address.Deprecated || address.DADFailed || !address.PreferredUntil.Live(clock) || !address.ValidUntil.Live(clock) {
 					continue
 				}
 				p, err := netip.ParsePrefix(address.Address)
 				if err != nil || !p.Addr().IsGlobalUnicast() {
 					continue
 				}
-				sources = append(sources, aftr.Source{Address: p.Addr().String(), PreferredUntil: lifetime.Deadline{UTC: address.PreferredUntil}, ValidUntil: lifetime.Deadline{UTC: address.ValidUntil}})
+				sources = append(sources, aftr.Source{Address: p.Addr().String(), PreferredUntil: address.PreferredUntil, ValidUntil: address.ValidUntil})
 			}
 			sort.Slice(sources, func(i, j int) bool { return sources[i].Address < sources[j].Address })
 			if len(sources) != 0 {
@@ -121,9 +121,9 @@ func aftrDependencies(doc config.Native, s serviceconfig.Service, records map[st
 		if err := json.Unmarshal(u.Snapshot, &snap); err != nil {
 			return in, err
 		}
-		if snap.Active {
+		if snap.Active && snap.BootID == clock.BootID && snap.ObservedNanos <= uint64(clock.BoottimeNanoseconds) {
 			for _, server := range snap.DNSServers {
-				addResolver(server.Address, 53, lifetime.Deadline{UTC: server.ValidUntil})
+				addResolver(server.Address, 53, server.ValidUntil)
 			}
 		}
 	}

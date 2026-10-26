@@ -7,7 +7,8 @@ import (
 	"fmt"
 	"net/netip"
 	"regexp"
-	"time"
+
+	"github.com/imksoo/routerd2/internal/lifetime"
 )
 
 const (
@@ -68,10 +69,10 @@ type Route struct {
 	// Table zero means the main table (254). Use PolicyRules to select a different
 	// table; creating a route in a table does not install a policy rule implicitly.
 	Table int `json:"table,omitempty"`
-	// ValidUntil is an absolute IPv6 route expiry; zero means infinite. The
-	// kernel expires finite routes even while the control plane is unavailable.
-	// IPv4 and deadlines more than MaxRouteLifetime ahead are rejected.
-	ValidUntil time.Time `json:"valid_until,omitzero"`
+	// ValidUntil is the original IPv6 route lifetime: operator UTC or learned
+	// boot scope. The writer installs a relative kernel timer. Very long finite
+	// lifetimes retain their original deadline with a renewable kernel grant.
+	ValidUntil lifetime.Deadline `json:"valid_until,omitzero"`
 	// BootID/ExpiresNanos carry a protocol's original authority to the writer.
 	// They are internal projection metadata, not kernel attributes. The network
 	// worker removes expired routes independently of control and protocol workers.
@@ -160,6 +161,7 @@ type InterfaceState struct {
 }
 
 type RouteState struct {
+	kernelExpiry routeTimer
 	Route
 	Protocol  int    `json:"protocol"`
 	Type      int    `json:"type"`

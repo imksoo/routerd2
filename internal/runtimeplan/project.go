@@ -129,7 +129,7 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 					return p, err
 				}
 			}
-			if err := projectRAClient(&p, s, snapshot, has, now); err != nil {
+			if err := projectRAClient(&p, s, snapshot, has, facts.bfdClock); err != nil {
 				return p, err
 			}
 		case "dhcp4":

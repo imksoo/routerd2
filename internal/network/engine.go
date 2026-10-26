@@ -17,7 +17,7 @@ import (
 var errLinkNotFound = errors.New("link not found")
 
 // JournalVersion is the persisted network ownership/BOOTTIME contract.
-const JournalVersion = 6
+const JournalVersion = 7
 
 type settingKey struct {
 	Kind      string `json:"kind"`
@@ -46,7 +46,7 @@ type journal struct {
 	Status            string                   `json:"status"`
 	LastError         string                   `json:"last_error,omitempty"`
 	Addresses         []ownedAddress           `json:"addresses,omitempty"`
-	Routes            []Route                  `json:"routes,omitempty"`
+	Routes            []ownedRoute             `json:"routes,omitempty"`
 	PolicyRules       []PolicyRule             `json:"policy_rules,omitempty"`
 	Links             []ownedLink              `json:"links,omitempty"`
 	Attributes        []ownedAttribute         `json:"attributes,omitempty"`
@@ -71,7 +71,7 @@ type kernel interface {
 	UpdateAddress(string, string, AddressOptions) error
 	DeleteAddress(string, string, AddressOptions) error
 	Routes(int) ([]RouteState, error)
-	AddRoute(Route) error
+	AddRoute(ownedRoute) error
 	DeleteRoute(Route) error
 	PolicyRules() ([]PolicyRuleState, error)
 	AddPolicyRule(PolicyRule) error
@@ -168,7 +168,7 @@ func validateJournal(s journal) error {
 			}
 		}
 	}
-	if err := Validate(Desired{Routes: s.Routes}); err != nil {
+	if err := validateRouteJournal(s.Routes); err != nil {
 		return err
 	}
 	for _, v := range s.Settings {
@@ -333,7 +333,7 @@ func (e *Engine) snapshotLocked(ctx context.Context) Snapshot {
 		names[a.Key.Interface] = true
 	}
 	for _, r := range e.state.Routes {
-		tables[routeTable(r)] = true
+		tables[routeTable(r.Route)] = true
 	}
 	for _, r := range e.state.PolicyRules {
 		tables[r.Table] = true
@@ -429,9 +429,10 @@ func (e *Engine) ownsAddress(a addressKey) bool {
 	}
 	return false
 }
-func routeMatches(live RouteState, want Route) bool {
+func routeMatches(live RouteState, saved ownedRoute) bool {
+	want := saved.Route
 	observed := live.Route
-	if !routeLifetimeMatches(observed.ValidUntil, want.ValidUntil) {
+	if !sameRouteTimer(live.kernelExpiry, saved.KernelExpiry) {
 		return false
 	}
 	observed.ValidUntil = want.ValidUntil
@@ -716,15 +717,15 @@ func (p *apply) routes(want []Route) error {
 	for _, r := range want {
 		wanted[routeSlot(r)] = r
 	}
-	owned := make(map[string]bool, len(p.e.state.Routes))
+	owned := make(map[string]ownedRoute, len(p.e.state.Routes))
 	for i := 0; i < len(p.e.state.Routes); {
 		r := p.e.state.Routes[i]
-		key := routeSlot(r)
-		if next, ok := wanted[key]; ok && sameKernelRoute(r, next) {
+		key := routeSlot(r.Route)
+		if next, ok := wanted[key]; ok && sameKernelRoute(r.Route, next) {
 			// Authority-only refreshes need no kernel mutation. The final
 			// Apply journal write persists them together before its ACK.
-			p.e.state.Routes[i] = next
-			owned[key] = true
+			p.e.state.Routes[i].Route = next
+			owned[key] = p.e.state.Routes[i]
 			i++
 			continue
 		}
@@ -741,7 +742,7 @@ func (p *apply) routes(want []Route) error {
 		key := routeSlot(r)
 		found := false
 		for _, v := range live[key] {
-			if owned[key] && routeMatches(v, r) {
+			if saved, ok := owned[key]; ok && routeMatches(v, saved) {
 				found = true
 				continue
 			}
@@ -751,42 +752,56 @@ func (p *apply) routes(want []Route) error {
 			additions = append(additions, r)
 		}
 	}
-	if len(additions) > 0 {
-		// Absence was checked before claiming any new slot. Persist all add
-		// intentions before kernel mutations, so a killed writer can recover
-		// their ownership and original deadline without a control callback.
-		for _, r := range additions {
-			if !owned[routeSlot(r)] {
-				p.e.state.Routes = append(p.e.state.Routes, r)
-			}
-		}
-		if err := p.checkpoint("route add intent"); err != nil {
-			return err
-		}
+	return p.addRoutes(additions, linkBounds)
+}
+
+func (p *apply) addRoutes(additions []Route, linkBounds map[string]lifetime.Deadline) error {
+	if len(additions) == 0 {
+		return nil
+	}
+	clock, err := readRouteClock()
+	if err != nil {
+		return p.failure("route clock", err)
+	}
+	prepared := make([]ownedRoute, 0, len(additions))
+	positions := make(map[string]int, len(p.e.state.Routes))
+	for i, saved := range p.e.state.Routes {
+		positions[routeSlot(saved.Route)] = i
 	}
 	for _, r := range additions {
+		timer, err := newRouteTimer(r.ValidUntil, clock)
+		if err != nil {
+			return p.failure("route lifetime", err)
+		}
+		saved := ownedRoute{Route: r, KernelExpiry: timer}
+		if i, ok := positions[routeSlot(r)]; ok {
+			p.e.state.Routes[i] = saved
+		} else {
+			positions[routeSlot(r)] = len(p.e.state.Routes)
+			p.e.state.Routes = append(p.e.state.Routes, saved)
+		}
+		prepared = append(prepared, saved)
+	}
+	if err := p.checkpoint("route add intent"); err != nil {
+		return err
+	}
+	for _, saved := range prepared {
+		r := saved.Route
 		if err := p.ctx.Err(); err != nil {
 			return p.failure("route add", err)
 		}
-		bounded := r.BootID != "" || linkBounds[r.Interface] != (lifetime.Deadline{})
+		clock, err := boottime.Read()
+		if err != nil {
+			return p.failure("route authority", err)
+		}
+		live := r.ValidUntil.Live(clock) && (r.BootID == "" || r.BootID == clock.BootID && r.ExpiresNanos > uint64(clock.BoottimeNanoseconds)) && linkBounds[r.Interface].Live(clock)
 		for _, hop := range r.NextHops {
-			bounded = bounded || linkBounds[hop.Interface] != (lifetime.Deadline{})
+			live = live && linkBounds[hop.Interface].Live(clock)
 		}
-		if bounded {
-			// Journal I/O or earlier additions may have consumed the lease.
-			clock, err := boottime.Read()
-			if err != nil {
-				return p.failure("route authority", err)
-			}
-			live := (r.BootID == "" || r.BootID == clock.BootID && r.ExpiresNanos > uint64(clock.BoottimeNanoseconds)) && linkBounds[r.Interface].Live(clock)
-			for _, hop := range r.NextHops {
-				live = live && linkBounds[hop.Interface].Live(clock)
-			}
-			if !live {
-				continue
-			}
+		if !live {
+			continue
 		}
-		if err := p.e.kernel.AddRoute(r); err != nil {
+		if err := p.e.kernel.AddRoute(saved); err != nil {
 			return p.failure("route add", err)
 		}
 		p.changed++

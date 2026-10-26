@@ -72,54 +72,49 @@
 - Health監視と履歴配送は分離する。保存先障害・queue満杯でもprobeを止めず、欠落と保存エラーを表示する。
   全probeの無欠落保存は保証しない。
 
-現在のworker ABIは3、compiler contractは `resource-program-native-15`、network journalはformat 6。
+現在のworker ABIは3、compiler contractは `resource-program-native-16`、network journalはformat 7。
 `track.resource`は宣言IDであり、decisionはhealthy/unhealthy/neutral/unknownを明示する。
 破棄したservice-only形式のreader・混在運用・migrationは実装しない。
 
 ## 今回の実装と検証
 
-DS-Lite専用のDesired/journal/kernel APIと、名前・固定aliasだけの所有権経路を削除した。
-固定tunnelは`link.kind: ip6tnl`、MTU・B4 addressは通常のinterface、経路は通常のrouteで表す。
-動的AFTR serviceも同じlinkを生成する。linkのindex・ランダムmarker・属性と中断した更新を
-既存のlink journalで確認し、endpoint変更は同じindexへ適用する。
+RA clientのUTC変換・clock anchor・sampling補正・再base・保存用のwall/boot対応表を削除した。
+割当・prefix・router/RIO・DNS/searchは受信した元のboot期限を一つの型で保持する。
+無期限も元のboot IDに属する。journal format 2は固定identityと同じsnapshotだけを保存し、
+同じbootでのworker再起動は元の期限から失効を判定する。identityのhashは構築時に一度だけ計算する。
 
-linkは元の`lifetime.Deadline`を所有する。UTCと元のboot budgetを区別し、元のDNS/sourceの
-期限を受信時刻から作り直さない。writerはcontrolなしで期限切れlinkをDOWNにし、
-そのlinkを使う管理route（ECMPを含む）と管理addressを通常の所有権検査で撤去する。
-route追加直前にもlinkの期限を確認する。writerが停止したままのIPv4失効は保証していない。
-Linux ip6tnlの読み戻しでは、kernel由来のCAP_XMIT/RCV/PER_PACKETを設定flagと区別する。
-隔離namespaceで実kernelの返値を確認して実装した。
+network routeの寿命もUTCか元のboot期限として渡す。条件の有限authorityとは区別する。
+journal format 7のowned routeはkernelの実際のCLOCK_MONOTONIC timerを保持する。
+UTC補正で自分のrouteを管理外と誤判定しない。長い元期限は切り詰めず、kernelの7日grantだけを
+writerが残り1日で更新する。元期限の再baseやcontrolによる毎日のUTC horizonはない。
 
-PVEの実supervisor/control/network/AFTR workerと、別namespaceの独立DNS/Linux AFTRで、
-初期取得・同じtunnel indexへのendpoint更新・実TCP/UDP・DNS失敗・元TTLでの撤去・復旧を確認した。
-network workerをSIGKILLして再起動した後、controlとsupervisorをSIGSTOPしても、元のTTLで
-link DOWN・B4 address/IPv4 route撤去・TCP/UDP停止を確認した。fresh DNSで通信が回復した。
-`make check-aftr`で再実行できる。試験は管理hostのnetwork namespaceを変更しない。
+PVEの隔離namespaceで、実RA worker→control→network writerによるSLAAC /128とdefault route、
+独立したRA sender/backendとのsource付きTCP/UDP、両方向capture、全owner停止中のkernel失効、
+設定削除でのsysctl復元を確認した。`make check-ra-client`で再実行できる。
+NICなしQEMUではRA/network worker再起動、実UTC±24時間、凍結producer通知不変、TCP/UDP、
+全owner停止中のkernel expiry、期限切れ再送で復活しないこと、新RAでの通信復旧を確認した。
+`make qemu-ra-clock`を使う。時計変更は専用guest PID 1の固定brokerだけで行い、host clockは変更しない。
 
-`make check`（Go/Python 33件・全体Race Detector・vet）とamd64/arm64の6静的ELF buildは成功した。
-関連raceでは元のUTC cutoffとboot期限、writer再起動後の期限、linkに依存するroute/address撤去も確認した。
-NICなしQEMUのkernel転送・ACL/NAT・DS-Lite TCP・link作成/更新/削除も通った。
-最終6 ELFの宣言・署名bundle/catalog/publisher、staged secrets scanも成功した。
-最終binaryによるAFTRと二WAN Health/PBRのTCP/UDP、元期限の失効、古い通知・worker交替・
-confirmed rollbackを再確認した。wan0/wan1の両方向captureも保存した。
-arm64の実行、対象NIC・物理suspend・throughputの受入はしていない。
+全体`make check`（Python 33件・全体Race Detector・vet）とamd64/arm64の6静的ELF buildは成功した。
+reviewでkernel grant更新時にもlink期限を再確認するようにし、その後の関連race/vet/buildも成功した。
+最終sourceでQEMUのkernel転送・ACL/NAT・DS-Lite・link更新/失効、RA実UTC補正、
+PVEのRA・AFTR・二WAN Health/PBR（古い通知・期限切れ・worker交替・confirmed rollback）も通った。
+arm64は実行していない。実機・NIC・物理suspendと負荷条件の受入は未完了である。
 
-現在の出力は`dist/dslite-links-{check-build,related-final,aftr-final,health-pbr-final}.log`、
-`dist/dslite-links-{aftr-final,health-pbr-final}/`のログ・pcap、`dist/dslite-links-kernel/`、
-`dist/dslite-links-{bundle,secrets,final-tools}.log`。
+現在の出力は`dist/ra-boot-{check-build,final-related,final-build,final-tools,clock-forward}.log`、
+`dist/ra-boot-{kernel-final,clock-final}/`のserial log、
+`dist/ra-boot-{ra-final,aftr-final,health-pbr-final}/`の実daemonログ・wan0/wan1.pcap。
+最終6 ELFの署名bundle/catalog/publisherとstaged secrets scanも成功した。
+結果は`dist/ra-boot-{bundle,secrets}.log`にある。
 
-別のGoチェック併走時に、7000-route設定の大規模ACK試験がconfirmedの30秒期限を超え、
-confirmが409になった。通常の`make check`では同じcontrol試験と全体raceが通った。
-期限は延長していない。併走負荷条件の受入・原因の切り分けは未完了である。
-
-RA client自身のlearned期限、DHCP serverの個別割当/journal、実suspend/reboot、DAD失敗/Decline、
-graceful Release、required/observe-only、RA trigger/resolver効果・VRF・実機の受入は未完了。
-製品全体・実機利用可能とは判断していない。
+実装した受信経路を、RA required/observe-onlyやRA trigger/resolver効果の完成とは数えない。
+RA→AFTRの元期限投影はローカルで確認したが、連結した実通信・VRF・物理suspend/rebootは未受入。
+製品全体と対象実機での利用可能とは判断していない。
 
 ## 未完了と次の作業
 
 1. 全実装計画、全更新復旧経路、外部engine、配備先と対象実機の受入は未完了。
-   次はRA clientの元期限、
+   次はRAからAFTRまでの連結実通信、
    DAD失敗/Decline・Release・resource readiness/RA連携を実装・受入する。
    NET-06はrelayのHA・動的VRF/interface変更の受入、DHCPv6 server、dynamic pool/options・DNS・sticky/lease importが残る。
    今回の試験成功を製品全体・実機利用可能の判定には使わない。
@@ -133,7 +128,7 @@ graceful Release、required/observe-only、RA trigger/resolver効果・VRF・実
    失敗時に表示するようfixtureへ追加したが、同じ失敗は再取得できていない。接続deadlineや
    選挙authorityは延長していない。過去に修正したACK/status問題と同一とは断定しない。
 4. 残るprotocol snapshotの型付き保持、条件式の静的計算、writer内部のsnapshot複製を整理する。
-   RA client・DHCP server割当/journal等の残るUTC依存を整理し、実clock補正・停電・suspendで受入する。
+   DHCP server割当/journal等の残るUTC依存を整理し、実clock補正・停電・suspendで受入する。
 5. 再帰next-hopの前提address/link期限はローカル投影で確認済みだが、同じ条件の実daemon試験は未実施。
    writer自体の停止中のlink fencing・IPv4 route撤去、物理suspendは保証しない。
 6. arm64は静的buildとbundle検査までで、実行していない。物理NIC・性能・suspend、

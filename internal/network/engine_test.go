@@ -124,12 +124,13 @@ func (f *fakeKernel) Routes(table int) ([]RouteState, error) {
 	}
 	return out, nil
 }
-func (f *fakeKernel) AddRoute(r Route) error {
+func (f *fakeKernel) AddRoute(saved ownedRoute) error {
+	r := saved.Route
 	if err := f.op("route-add"); err != nil {
 		return err
 	}
 	r = normalizeRoute(r)
-	f.routes = append(f.routes, RouteState{Route: r, Protocol: RouteProtocol, Type: 1, Multipath: len(r.NextHops) > 0})
+	f.routes = append(f.routes, RouteState{Route: r, kernelExpiry: saved.KernelExpiry, Protocol: RouteProtocol, Type: 1, Multipath: len(r.NextHops) > 0})
 	return nil
 }
 func (f *fakeKernel) DeleteRoute(r Route) error {
@@ -137,7 +138,7 @@ func (f *fakeKernel) DeleteRoute(r Route) error {
 		return err
 	}
 	for i, v := range f.routes {
-		if routeMatches(v, r) {
+		if sameKernelRoute(v.Route, r) {
 			f.routes = append(f.routes[:i], f.routes[i+1:]...)
 			return nil
 		}

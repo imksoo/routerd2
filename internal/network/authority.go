@@ -6,7 +6,6 @@ import (
 	"net"
 	"time"
 
-	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/lifetime"
 )
 
@@ -53,7 +52,7 @@ func (e *Engine) expireAuthority(ctx context.Context) (time.Duration, error) {
 		return 0, err
 	}
 	started := time.Now()
-	clock, err := boottime.Read()
+	clock, err := readRouteClock()
 	if err != nil {
 		return 0, err
 	}
@@ -61,13 +60,18 @@ func (e *Engine) expireAuthority(ctx context.Context) (time.Duration, error) {
 	p := &apply{e: e, ctx: ctx}
 	before := len(e.state.Routes)
 	var expiredLinks map[string]bool
+	var linkBounds map[string]lifetime.Deadline
 	for i, owned := range e.state.Links {
 		link := owned.Definition
 		if link.Authority == (lifetime.Deadline{}) {
 			continue
 		}
-		if link.Authority.Live(clock) {
-			remaining := link.Authority.Remaining(clock)
+		if linkBounds == nil {
+			linkBounds = make(map[string]lifetime.Deadline)
+		}
+		linkBounds[link.Name] = link.Authority
+		if link.Authority.Live(clock.Clock) {
+			remaining := link.Authority.Remaining(clock.Clock)
 			if delay == 0 || remaining < delay {
 				delay = remaining
 			}
@@ -125,7 +129,7 @@ func (e *Engine) expireAuthority(ctx context.Context) (time.Duration, error) {
 	}
 	for i := 0; i < len(e.state.Routes); {
 		r := e.state.Routes[i]
-		expired := expiredLinks[r.Interface]
+		expired := expiredLinks[r.Interface] || !r.ValidUntil.Live(clock.Clock)
 		if r.BootID != "" {
 			if r.BootID != clock.BootID || r.ExpiresNanos <= uint64(clock.BoottimeNanoseconds) {
 				expired = true
@@ -140,6 +144,25 @@ func (e *Engine) expireAuthority(ctx context.Context) (time.Duration, error) {
 			expired = expired || expiredLinks[hop.Interface]
 		}
 		if !expired {
+			if timer := r.KernelExpiry; timer.BootID == clock.BootID {
+				renewIn := time.Duration(int64(timer.Nanos)-clock.monotonicNanos) - routeKernelRenewBefore
+				if r.ValidUntil.Remaining(clock.Clock) > time.Duration(int64(timer.Nanos)-clock.monotonicNanos)+2*time.Second && renewIn <= 0 {
+					if err := p.removeRoute(i); err != nil {
+						return 0, err
+					}
+					if err := p.addRoutes([]Route{r.Route}, linkBounds); err != nil {
+						return 0, err
+					}
+					// Removal compacts the slice. Inspect its replacement next.
+					continue
+				}
+				if renewIn > 0 && (delay == 0 || renewIn < delay) {
+					delay = renewIn
+				}
+			}
+			if remaining := r.ValidUntil.Remaining(clock.Clock); r.ValidUntil != (lifetime.Deadline{}) && (delay == 0 || remaining < delay) {
+				delay = remaining
+			}
 			i++
 			continue
 		}
@@ -190,7 +213,7 @@ func (e *Engine) expireAuthority(ctx context.Context) (time.Duration, error) {
 // check and durable removal. A changed or replaced foreign route is left alone.
 func (p *apply) removeRoute(i int) error {
 	r := p.e.state.Routes[i]
-	live, err := p.routeTable(routeTable(r))
+	live, err := p.routeTable(routeTable(r.Route))
 	if err != nil {
 		return p.failure("route remove read", err)
 	}
@@ -199,16 +222,16 @@ func (p *apply) removeRoute(i int) error {
 		// learned FIB expires, rather than shifting it after every removal.
 		last := len(p.e.state.Routes) - 1
 		p.e.state.Routes[i] = p.e.state.Routes[last]
-		p.e.state.Routes[last] = Route{}
+		p.e.state.Routes[last] = ownedRoute{}
 		p.e.state.Routes = p.e.state.Routes[:last]
 	}
-	key := routeSlot(r)
+	key := routeSlot(r.Route)
 	for j, v := range live[key] {
 		if routeMatches(v, r) {
 			if err := p.ctx.Err(); err != nil {
 				return p.failure("route remove", err)
 			}
-			if err := p.e.kernel.DeleteRoute(r); err != nil {
+			if err := p.e.kernel.DeleteRoute(r.Route); err != nil {
 				return p.failure("route remove", err)
 			}
 			p.changed++

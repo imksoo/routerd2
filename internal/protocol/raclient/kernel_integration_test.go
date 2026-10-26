@@ -362,16 +362,16 @@ func nativeRAClient(t *testing.T) {
 		}
 	}
 	// A rejected packet changes status only. Publishing that status must not
-	// perturb UTC lifetimes and cause an unnecessary network reconfiguration.
+	// perturb original boot lifetimes and cause an unnecessary network reconfiguration.
 	sendAdvertisement(t, fd, index, 254, advert("fe80::2", 0, 0))
 	statusOnly := wait(updates, done, func(s Snapshot) bool { return s.Rejected > learned.Rejected })
-	if statusOnly.Received != learned.Received || len(statusOnly.Addresses) != 1 || !statusOnly.Addresses[0].ValidUntil.Equal(learned.Addresses[0].ValidUntil) || !statusOnly.Addresses[0].PreferredUntil.Equal(learned.Addresses[0].PreferredUntil) {
+	if statusOnly.Received != learned.Received || len(statusOnly.Addresses) != 1 || statusOnly.Addresses[0].ValidUntil != learned.Addresses[0].ValidUntil || statusOnly.Addresses[0].PreferredUntil != learned.Addresses[0].PreferredUntil {
 		t.Fatal("native status-only publication shifted an absolute SLAAC deadline")
 	}
 	stop(updates, done, cancel)
 	updates, done, cancel = start()
 	restored := wait(updates, done, func(s Snapshot) bool { return s.Active && s.Received == 1 })
-	if !restored.Addresses[0].ValidUntil.Equal(learned.Addresses[0].ValidUntil) || !restored.Addresses[0].PreferredUntil.Equal(learned.Addresses[0].PreferredUntil) {
+	if restored.Addresses[0].ValidUntil != learned.Addresses[0].ValidUntil || restored.Addresses[0].PreferredUntil != learned.Addresses[0].PreferredUntil {
 		t.Fatal("same-boot native restart reset or shifted SLAAC lifetime")
 	}
 	sendAdvertisement(t, fd, index, 255, advert("fe80::2", 0, 0, pio("2001:db8:1::/64", 0xc0, 0, 0), rdnss(0, "fe80::53")))

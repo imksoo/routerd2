@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/imksoo/routerd2/internal/config"
+	"github.com/imksoo/routerd2/internal/lifetime"
 	"github.com/imksoo/routerd2/internal/protocol/bfd"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp4"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
@@ -35,7 +36,7 @@ func dynamicProgram(source config.Document) bool {
 		if r.When != nil || r.ReadyWhen != nil || r.Service != nil && r.Service.VRRP != nil && r.Service.VRRP.GracefulActivation != nil {
 			return true
 		}
-		if r.Address != nil && r.Address.Options != nil && !r.Address.Options.ValidUntil.IsZero() || r.Route != nil && !r.Route.ValidUntil.IsZero() {
+		if r.Address != nil && r.Address.Options != nil && !r.Address.Options.ValidUntil.IsZero() || r.Route != nil && r.Route.ValidUntil != (lifetime.Deadline{}) {
 			return true
 		}
 	}

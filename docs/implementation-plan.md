@@ -652,7 +652,14 @@ control停止時にRAは早期撤退し得る。DS-Lite専用のkernel API・Des
 writerがcontrolなしでDOWN・管理address/route撤去を担当する。実daemon＋独立DNS/Linux AFTRで
 TCP/UDP、同じindexでのendpoint更新、writer SIGKILL/再起動、control/supervisor停止中の
 元TTLによる失効とfresh DNSによる復旧を確認した。`make check-aftr`から再実行できる。
-RA client自身のUTC契約、suspend/reboot・VRF・対象実機の受入はまだ残る。
+RA clientも元のboot期限を通知・journal・address/route・AFTRへ渡す形に変更し、
+UTC変換・clock anchor・再base・保存用の対応表を削除した。固定identityは構築時に一度だけhashする。
+network writerは元のroute authorityとkernelのCLOCK_MONOTONIC timerを区別して保存する。
+長い期限のkernel grant更新をwriterへ移し、controlの毎日のUTC horizonを廃止した。
+PVEの実RA sender/backendとのSLAAC/default-route TCP/UDPとcapture、全owner停止中のkernel失効、
+専用QEMUの実UTC±24時間、RA/network worker再起動、通知不変・期限切れ再送・新RAでの復旧を確認した。
+`make check-ra-client`と`make qemu-ra-clock`で再実行できる。required/observe-only・RA trigger/resolver、
+RA→AFTRの連結実通信、suspend/reboot・VRF・対象実機の受入はまだ残る。
 
 **受入条件**
 
@@ -744,7 +751,7 @@ learned route先の利用者TCP/UDPも通信し、撤去中の接続拒否と復
 明示VRFではmultihop socketをVRF master、single-hopをmember interfaceへ束縛する。
 source domainとBGP FIB tableも検証する。同じendpointを持つ二つのVRFとdefault domainで
 実daemonを動かし、独立TCP/UDP・片側UDP障害・worker交替・main tableへの流出防止を確認した。
-single-hop VRFも実peerと障害・復旧を確認した。現在のcompiler contractはnative-15。
+single-hop VRFも実peerと障害・復旧を確認した。現在のcompiler contractはnative-16。
 IPv4/IPv6とも同じendpointを二つのVRFとdefault domainで同時使用し、BFD/BGPと三経路の
 TCP/UDPを確認した。defaultとVRFのUDP bind競合は受信socketだけの`SO_REUSEADDR`で修正した。
 domain/sourceの既存claimで二重ownerを拒否し、TX port専有と`SO_REUSEPORT`不使用を維持する。
