@@ -17,7 +17,7 @@ import (
 
 	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/lifetime"
-	"github.com/vishvananda/netlink"
+	"github.com/imksoo/routerd2/internal/linklocal"
 	"golang.org/x/sys/unix"
 )
 
@@ -337,14 +337,15 @@ func RunWithUpdates(ctx context.Context, cfg Config, updates <-chan Config, effe
 		return errors.New("RA effects are required")
 	}
 	cfg = normalized(cfg)
-	ifi, err := net.InterfaceByName(cfg.Interface)
+	wanted, _ := netip.ParseAddr(cfg.SourceAddress)
+	ifi, source, err := linklocal.Wait(ctx, cfg.Interface, wanted)
 	if err != nil {
 		return err
 	}
 	if cfg.MTU > ifi.MTU {
 		return errors.New("advertised RA MTU exceeds interface MTU")
 	}
-	fd, packetInfo, err := socket(cfg, ifi)
+	fd, packetInfo, err := socket(cfg, ifi, source)
 	if err != nil {
 		return err
 	}
@@ -355,11 +356,17 @@ func RunWithUpdates(ctx context.Context, cfg Config, updates <-chan Config, effe
 	destination := &unix.SockaddrInet6{ZoneId: uint32(ifi.Index)}
 	copy(destination.Addr[:], net.ParseIP("ff02::1").To16())
 	send := func(updateCtx context.Context, withdraw bool) error {
+		// A bridge can select a different MAC when ports join or leave. Do
+		// not advertise the constructor's obsolete neighbor-cache address.
+		link, err := net.InterfaceByIndex(ifi.Index)
+		if err != nil {
+			return err
+		}
 		clock, err := boottime.Read()
 		if err != nil {
 			return err
 		}
-		payload, err := encodeWithWithdrawals(cfg, pending, ifi.HardwareAddr, clock, withdraw)
+		payload, err := encodeWithWithdrawals(cfg, pending, link.HardwareAddr, clock, withdraw)
 		if err != nil {
 			return err
 		}
@@ -530,25 +537,7 @@ func RunWithUpdates(ctx context.Context, cfg Config, updates <-chan Config, effe
 	}
 }
 
-func socket(c Config, ifi *net.Interface) (int, []byte, error) {
-	l, err := netlink.LinkByName(c.Interface)
-	if err != nil {
-		return -1, nil, err
-	}
-	addrs, err := netlink.AddrList(l, netlink.FAMILY_V6)
-	if err != nil {
-		return -1, nil, err
-	}
-	var source net.IP
-	for _, a := range addrs {
-		if a.IP.IsLinkLocalUnicast() && a.Flags&(unix.IFA_F_TENTATIVE|unix.IFA_F_DADFAILED) == 0 && (c.SourceAddress == "" || a.IP.Equal(net.ParseIP(c.SourceAddress))) {
-			source = a.IP
-			break
-		}
-	}
-	if source == nil {
-		return -1, nil, errors.New("RA interface has no configured usable link-local source")
-	}
+func socket(c Config, ifi *net.Interface, source netip.Addr) (int, []byte, error) {
 	fd, err := unix.Socket(unix.AF_INET6, unix.SOCK_RAW|unix.SOCK_CLOEXEC, unix.IPPROTO_ICMPV6)
 	if err != nil {
 		return -1, nil, err
@@ -573,7 +562,7 @@ func socket(c Config, ifi *net.Interface) (int, []byte, error) {
 	// Do not bind the receive socket to the unicast source: that would filter
 	// multicast ff02::2 solicitations. Select the source on each send instead.
 	info := &unix.Inet6Pktinfo{Ifindex: uint32(ifi.Index)}
-	copy(info.Addr[:], source.To16())
+	info.Addr = source.As16()
 	var group unix.IPv6Mreq
 	group.Interface = uint32(ifi.Index)
 	copy(group.Multiaddr[:], net.ParseIP("ff02::2").To16())

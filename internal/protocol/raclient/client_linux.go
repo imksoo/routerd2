@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/linklocal"
 
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
@@ -42,10 +43,12 @@ func Run(ctx context.Context, cfg Config, effects Effects, ready func()) (result
 		return err
 	}
 	defer lock.Close()
-	link, err := inspectLink(cfg)
+	wanted, _ := netip.ParseAddr(cfg.SourceAddress)
+	ifi, source, err := linklocal.Wait(ctx, cfg.Interface, wanted)
 	if err != nil {
 		return err
 	}
+	link := linkInfo{index: ifi.Index, mtu: ifi.MTU, hardware: append(net.HardwareAddr(nil), ifi.HardwareAddr...), source: source}
 	if err = checkKernelOwnership(cfg.Interface); err != nil {
 		return err
 	}
@@ -258,29 +261,15 @@ func checkKernelOwnership(ifname string) error {
 }
 
 func inspectLink(c Config) (linkInfo, error) {
-	ifi, err := net.InterfaceByName(c.Interface)
+	wanted, _ := netip.ParseAddr(c.SourceAddress)
+	ifi, source, err := linklocal.Read(c.Interface, wanted)
 	if err != nil {
 		return linkInfo{}, err
 	}
-	if ifi.Flags&net.FlagUp == 0 {
-		return linkInfo{}, errors.New("RA receive interface is not administratively up")
+	if !source.IsValid() {
+		return linkInfo{}, errors.New("RA receive interface has no usable link-local source")
 	}
-	l, err := netlink.LinkByName(c.Interface)
-	if err != nil {
-		return linkInfo{}, err
-	}
-	addresses, err := netlink.AddrList(l, netlink.FAMILY_V6)
-	if err != nil {
-		return linkInfo{}, err
-	}
-	want, _ := netip.ParseAddr(c.SourceAddress)
-	for _, a := range addresses {
-		ip, ok := netip.AddrFromSlice(a.IP)
-		if ok && ip.IsLinkLocalUnicast() && a.Flags&(unix.IFA_F_TENTATIVE|unix.IFA_F_DADFAILED) == 0 && (!want.IsValid() || want == ip) {
-			return linkInfo{index: ifi.Index, mtu: ifi.MTU, hardware: append(net.HardwareAddr(nil), ifi.HardwareAddr...), source: ip}, nil
-		}
-	}
-	return linkInfo{}, errors.New("RA receive interface has no usable link-local source")
+	return linkInfo{index: ifi.Index, mtu: ifi.MTU, hardware: append(net.HardwareAddr(nil), ifi.HardwareAddr...), source: source}, nil
 }
 
 func openSocket(c Config, link linkInfo) (int, []byte, error) {

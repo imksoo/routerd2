@@ -76,36 +76,38 @@
 `track.resource`は宣言IDであり、decisionはhealthy/unhealthy/neutral/unknownを明示する。
 破棄したservice-only形式のreader・混在運用・migrationは実装しない。
 
-## 今回の実装と検証
+## 今回の実装と実回線での確認
 
-DHCPv6の有限addressで、実際のDAD失敗を見逃す不具合を修正した。
-独立dnsmasq・重複addressを持つ別のLinux hostを製品が設定するWAN bridgeへ接続した。
-最初の実行はDADのNS/NAをcaptureしたがDeclineを送らず、失敗addressを再追加していた。
-Linuxは有限addressをDAD失敗で削除するため、その後の一覧pollには失敗が残らない。
+nwadmin03の既存uplinkへ、専用MAC/DUIDのmacvlanを隔離namespace内で接続した。
+ホストの管理address・route・clockは変更していない。上流機器の型番・ONU直結の配線は未確認。
+実上流のRA、DHCPv4、DHCPv6 PD /60を製品workerで受信した。
+DHCPv6 Advertise/ReplyはUDP 49153から届き、547限定の独自フィルターが取得を妨げていた。
+旧routerdと同じくポート限定を削除し、transaction/client/serverの照合は維持した。
 
-clientは割当を通知する前にkernel address通知へsubscribeし、既存のexchange loopで
-失敗フラグを読む。一覧pollを削除し、別goroutine・失敗cache・network writerへの特例は追加しない。
-Declineの有効なReplyはNoBindingを含めて完了扱いとし、無関係なPD期限を変更しない。
-単独IA_NAのDAD→Decline・失敗address撤去・同じworkerで別の割当へのTCP/UDP復旧が通った。
-NoBindingとPD保持の組合せはローカルで確認し、複数IA_NA/PDを同時に使う実通信は未受入である。
+通常のlink-local DAD完了を待つ処理をRA受信・RA送信・DHCPv6で共有した。
+保存状態なし・LAN配線済みのcold startで全関連workerが第1世代のままReadyとなった。
+RA送信はbridge port変更後の現在のMACを広告する。起動時MACの保持でLAN IPv6が
+切れていた問題を修正し、別LAN namespaceのkernel SLAAC端末からIPv4 NAT・委譲IPv6の
+HTTPSとUDP DNSの実Internet通信を確認した。
 
-`make check-dhcp6`で通常IA_NA lifecycleと実DADをまとめて再実行できる。
-単独では `python3 scripts/daemon-tests.py dhcp6 --test TestDaemonDHCP6DuplicateAddressDecline`。
-最終sourceの`make check`（全Go/Python 33件・全体Race Detector・vet）と
-amd64/arm64の6静的ELF buildは成功した（`dist/dhcp6-dad-check-build.log`）。
-最終バイナリーの通常IA_NA lifecycle・DAD/Decline・combined IA_NA/PDとLAN RA/TCP/UDPも成功した。
-出力は`dist/dhcp6-dad-final/`と`dist/dhcp6-dad-pd-final/`。
-6 ELFの署名bundle/catalog/publisher検査も成功した（`dist/dhcp6-dad-bundle.log`）。
-最後のunit fixture整理後の関連Race Detectorとformat/Pythonチェックも成功した。
+既存routerdの設定で用いるAFTR名を実上流DNSで解決し、実AFTR経由のLAN HTTPS・UDP DNSと
+IPv4-in-IPv6の往復もcaptureした。しかし同一TCP接続の継続は失敗し、通常RA更新の前後で
+DS-Lite linkが再生成された。原因修正と再受入が必要であり、実用可能とは判断しない。
+PDのT1は7200秒であり、今回の実回線確認は取得まで。実回線Renew/Rebind/期限切れ/Releaseは未確認。
+実装の再利用・新規置換と残る比較対象は[routerd-reuse-review.md](routerd-reuse-review.md)を参照。
+一次ソース照合を全モジュールの機能受入完了とは数えない。
 
-RA→RDNSS→AFTR→LAN TCP/UDP、元DNS/source期限でのwriterによる撤去、再番号付け・worker交替は
-`make check-ra-aftr`で確認できる。起動不能の原因だったfirewallのinterface名存在確認は削除済み。
-過去の結果を保持するための互換経路は作らない。製品全体・対象実機の受入は未完了である。
+今回の3修正のsourceで`make check`（Go/Python 33件・Race Detector・vet）、
+amd64/arm64の6静的ELF build、署名bundle/catalog/publisher検査は成功した。
+ローカル出力は`dist/ntt-startup-check-build.log`、`dist/ntt-startup-bundle.log`、
+`dist/live-cold-results.log`、`dist/live-dslite-continuity.log`。後者は失敗結果である。
+過去の試験結果を維持する互換コードは残さない。
 
 ## 未完了と次の作業
 
 1. 全実装計画、全更新復旧経路、外部engine、配備先と対象実機の受入は未完了。
-   次は複数IA_NA/PDのDAD共存・Release・resource readiness/RA連携を実装・受入する。
+   まず実回線で再現したDS-Lite継続通信の切断を修正する。旧routerdの各モジュールとの比較を続ける。
+   複数IA_NA/PDのDAD共存・Release・resource readiness/RA連携も未完了。
    NET-06はrelayのHA・動的VRF/interface変更の受入、DHCPv6 server、dynamic pool/options・DNS・sticky/lease importが残る。
    今回の試験成功を製品全体・実機利用可能の判定には使わない。
 2. NET-07の旧resource/profile、動的source・VRF経路変更、大規模RIBを実装・受入する。
@@ -129,8 +131,6 @@ RA→RDNSS→AFTR→LAN TCP/UDP、元DNS/source期限でのwriterによる撤去
 PVE隔離VM、Ubuntu kernel 6.8、amd64。隔離namespaceかNICなしQEMUを使い、
 ホストの管理NIC・route・clockは変更しない。通常build/testは `umask 022`。
 rootで動かすharness/binaryは一時的なroot所有0700ディレクトリへ配置する。
-homeの権限は緩めない。routerd2をNTT ONUや実際のNTT回線へ接続したRA/DHCPv6 PD試験は未実施。
-旧routerdのNTT NGN/PD取得に関する記録は同じhostの別checkoutにある。
-ユーザー指摘を受け、既存NIC・旧構成・現在のuplinkを読み取りで照合している。
-実行hostは既にEthernet 2本を持ち、両方ともDHCPv4取得が確認できた。管理経路は変更しない。
-追加のSSH先が必須という前提を置かない。独立serverとのVM試験をNTT回線の受入済みとは数えない。
+homeの権限は緩めない。実回線接続では既存uplink上の専用macvlanと別LAN namespaceを使う。
+namespace・daemon・captureの所有者が時間上限と終了時cleanupを持つ。実機の型番・NIC性能・
+直接ONU接続の受入と、今回の実上流相互接続は区別する。

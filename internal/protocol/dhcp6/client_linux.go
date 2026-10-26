@@ -25,8 +25,8 @@ import (
 
 	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/lifetime"
+	"github.com/imksoo/routerd2/internal/linklocal"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
-	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 )
 
@@ -420,7 +420,7 @@ func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, ready fun
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	ifi, err := net.InterfaceByName(cfg.Interface)
+	ifi, source, err := linklocal.Wait(ctx, cfg.Interface, netip.Addr{})
 	if err != nil {
 		return err
 	}
@@ -443,7 +443,7 @@ func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, ready fun
 	if err := writeIdentity(cfg.StatePath, identity{Resource: cfg.Resource, ClientDUID: hex.EncodeToString(duid)}); err != nil {
 		return err
 	}
-	conn, err := listen(cfg.Interface, ifi.Index)
+	conn, err := listen(ctx, cfg.Interface, ifi.Index, source)
 	if err != nil {
 		return err
 	}
@@ -552,16 +552,15 @@ func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, ready fun
 		if err := conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond)); err != nil {
 			return err
 		}
-		n, from, err := conn.ReadFromUDP(buf)
+		// Access gateways can reply from a high source port. accept matches
+		// the client, transaction and selected server on this bound interface.
+		n, _, err := conn.ReadFromUDP(buf)
 		if err != nil {
 			var ne net.Error
 			if errors.As(err, &ne) && ne.Timeout() {
 				continue
 			}
 			return err
-		}
-		if from.Port != 547 {
-			continue
 		}
 		m, err := decode(buf[:n])
 		if err != nil {
@@ -635,25 +634,7 @@ func dadFailures(ctx context.Context, fd, index int, addresses []dhcp6config.Add
 		}
 	}
 }
-func listen(name string, index int) (*net.UDPConn, error) {
-	l, err := netlink.LinkByName(name)
-	if err != nil {
-		return nil, err
-	}
-	addresses, err := netlink.AddrList(l, netlink.FAMILY_V6)
-	if err != nil {
-		return nil, err
-	}
-	var source string
-	for _, a := range addresses {
-		if a.IP.IsLinkLocalUnicast() && a.Flags&(unix.IFA_F_TENTATIVE|unix.IFA_F_DADFAILED) == 0 {
-			source = a.IP.String()
-			break
-		}
-	}
-	if source == "" {
-		return nil, errors.New("DHCPv6 interface has no usable link-local address")
-	}
+func listen(ctx context.Context, name string, index int, source netip.Addr) (*net.UDPConn, error) {
 	lc := net.ListenConfig{Control: func(_, _ string, raw syscall.RawConn) error {
 		var inner error
 		err := raw.Control(func(fd uintptr) {
@@ -666,7 +647,7 @@ func listen(name string, index int) (*net.UDPConn, error) {
 		})
 		return errors.Join(err, inner)
 	}}
-	pc, err := lc.ListenPacket(context.Background(), "udp6", net.JoinHostPort(source+"%"+name, "546"))
+	pc, err := lc.ListenPacket(ctx, "udp6", net.JoinHostPort(source.String()+"%"+name, "546"))
 	if err != nil {
 		return nil, err
 	}

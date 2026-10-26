@@ -646,6 +646,15 @@ network writerへの/128投影を持つ。PD専用の外部state machine・補�
 DeclineのNoBinding応答で完了し、無関係なPD期限を変えないこともローカルで確認した。
 複数割当/PDとのDAD共存、required/observe-only・RA trigger・resolver効果・
 suspend/reboot・graceful Release・VRF・全link option/lifecycle・WAN選択は残り、NET-05全体は未完了。
+
+既存uplinkへ専用MAC/DUIDのmacvlanを隔離接続し、実上流RA・DHCPv4・PD /60と
+LAN kernel SLAAC端末のIPv4 NAT/委譲IPv6 HTTPS・UDP DNSを確認した。
+実上流がUDP 49153から返すDHCPv6応答を捨てる独自制約、通常DAD待ちの欠落、
+bridge MAC変更後の古いSLLA広告を修正した。保存状態なしの起動でも全関連workerは第1世代でReady。
+実AFTR経由の単発TCP/UDPは通ったが、定期RA更新時のlink再生成でTCP継続に失敗し未受入。
+実回線T1=7200秒のRenew/Rebind/Releaseは未確認。ONU型番・直結配線・NICは未資格判定。
+[既存routerdとの比較](routerd-reuse-review.md)を各モジュールで継続する。
+
 DHCPv6の割当・情報・T1/T2・再送は元のBOOTTIMEへ変更し、controlの受信側grantを削除した。
 RAのrouter/PIO/DNSとAFTRまで元の期限を渡し、AFTRの二重input・clock anchor・再base・JSON identityを削除した。
 `make qemu-dhcp6-clock`で実UTC±24時間、凍結producerの元通知不変、LAN TCP/UDP、
