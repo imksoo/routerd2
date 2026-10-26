@@ -258,10 +258,47 @@ RFC 9568方式peerの両方がVIP TCP/UDP・優先度切替・worker SIGKILL/reb
 
 同じ版を既存uplink上の専用macvlanと別LAN namespaceへ再配備した。
 保存状態なし・通常DADで全workerがgeneration 1、実上流RA/DHCPv4/PD /60、
-LAN IPv4/IPv6 HTTPS 301を確認した。新しい同一TCP/UDPの130分試験は進行中で、
-まだ完走/自然T1更新を成功と数えない。既に完走した100分の実行版は前述の`ntt-aftr`である。
-現行の場所は`dist/live-current-location.json`、所有者は3時間上限で自身のnamespace等をcleanupする。
+LAN IPv4/IPv6 HTTPS 301を確認した。この版の130分予定試験はPD source版へ切り替えるため
+途中で意図的に停止した。`dist/live-current-continuity.log`末尾のSIGINTはその停止で、
+完走/自然T1更新の成功でも製品障害でもない。既に完走した100分の版は前述の`ntt-aftr`である。
+その実行場所は`dist/live-current-location.json`で、所有者がcleanup済み。
 `dist/live-current-continuity.log`に経過を出す。ホスト管理NIC・route・clockは変更していない。
+
+## PD/IA_NA由来のDS-Lite source
+
+旧routerdの`localDelegatedAddress`/`localAddressSuffix`と専用source address設置を照合した。
+`source_from`はRAまたはDHCPv6を参照する。DHCPv6で`source_delegation`を指定すると、
+そのLAN割当のmanaged addressと元preferred/valid期限を使う。省略時はIA_NAのWAN addressを使う。
+同じPD /64にLAN用`::1`とB4用`::100`を別bindingで設置でき、advertiseするbindingだけがRAを起動する。
+旧宣言の別suffixも追加managed bindingへ変換する。nativeは/64 addressを使い、旧専用/128と
+byte-for-byte同等ではない。全SelfAddressPolicy候補・HA・複数WAN/VRFのsource契約は未完了。
+
+static sourceの宣言とdelegation解決は設定compile時に一度行う。kernel queryは実際のowner
+interfaceを読み、PDではLANの所有権・DAD・preferredを確認する。DNSとtunnelはWANへ束縛する。
+既存の同じ型付きprefix計算をLAN投影とsource選択で使う。Network契約にSourceAddressを必須とし、
+optional method probeを削除した。新しいsource registry・leaseコピー・DNS source管理は作らない。
+[設定例](../examples/wan-dslite-pd.yaml)はCLI validate済みで、provider名/interfaceは置換が必要である。
+
+製品`pd-aftr-source`と独立ISC Kea 2.4.1・dnsmasq・Linux ip6tnl AFTR・別LAN clientで、
+PD `::100`とWAN IA_NAの両方を確認した。WAN/LANは通常DADで全workerがgeneration 1。
+実DNS query sourceとencapsulated TCP/UDPをcaptureした。Keaの更新を跨いだ同一TCP、
+tunnel index不変、元preferred期限での撤去、Kea再開後のTCP/UDP復旧が通った。
+このpeerはWAN接続/通常DAD後に起動し、固定した単一NA/PD poolを使う。追加aliasとLAN本来のaddressは同じ/64である。
+出力`dist/pd-aftr-final-{pd,na}.log`、private setup/capture場所は
+`dist/pd-aftr-{pd,na}-location.json`。最初の15秒処理/8秒runner timeoutはsetup失敗で、製品結果には数えない。
+既存`make check-ra-aftr`も成功し、RA source/DNSと元期限の独立writer撤去を維持した。
+`make check`・全体Race Detector・vet・6静的ELF buildと、引数整理後の関連race/vet/6buildも成功した
+（`dist/pd-aftr-source-check-build.log`、`dist/pd-aftr-source-reviewed-{race,vet,build}.log`）。
+
+同じ機能を実上流の専用macvlanで実行した。RA/DHCPv4/PD /60とLAN `::1`/`::100`を取得し、
+通常DAD・fresh stateで全workerがgeneration 1。PD内`::100`から実DNS/AFTRを使い、
+LAN IPv4/IPv6 HTTPS 301とUDP DNSが通った。route getはdslite0、captureはPD source/実AFTR間の
+IPv4-in-IPv6往復を確認した。別のIPv4 defaultによる成功とは数えていない。
+現行の場所は`dist/live-pd-source-location.json`、captureはそのprivate stage、
+実行ELFのSHAは`dist/live-pd-source-executed-hashes.json`。
+同一TCP/UDPの130分試験は`dist/live-pd-source-continuity.log`へ経過を出す。
+元T1=7200秒の自然更新を含むこの版の完走はまだ確認していない。所有者は3時間上限でcleanupする。
+対象ONU型番・直結配線・物理NIC/性能のqualificationとは区別する。
 
 ## 未完了と次の作業
 

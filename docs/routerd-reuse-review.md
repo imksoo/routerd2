@@ -22,7 +22,7 @@
 | RA送信 | 旧dnsmasq側の処理を新規raw ICMPv6 engineへ置換 | link/MAC変化、RS応答、prefix/DNS期限、withdrawal。MAC変更時の誤広告を今回修正 |
 | DHCP server | 旧API型と変換を利用。旧dnsmasq engineの再利用ではない | Rapid Commit要求への通常OFFERはScapyとの実通信で修正確認。割当・再送・option・sticky・複数scope・DNS・journalを旧実運用と比較。dnsmasq採用も再評価する |
 | DHCP relay | 旧dnsmasqの動作を新規relayへ置換 | giaddr/option/fragment/VRF/再構成・HA。独立server試験を全機器の受入と扱わない |
-| DS-Lite/AFTR | 旧controller/host処理を新規resolverと通常のip6tnl所有権へ置換 | SelfAddressPolicy・DNS選択・endpoint維持。実回線の定期RA更新によるtunnel再生成を修正し、同じTCPで100秒継続を確認。PD由来source・完全な選択は未完了 |
+| DS-Lite/AFTR | 旧controller/host処理を新規resolverと通常のip6tnl所有権へ置換 | SelfAddressPolicy・DNS選択・endpoint維持。実回線の定期RA更新によるtunnel再生成を修正し、同じTCPで100秒継続を確認。PD/IA_NA由来sourceとPD host suffixを実装し、独立Kea/Linux AFTRと実上流PD sourceのTCP/UDPを確認。全SelfAddressPolicy候補の選択は未完了 |
 | VRRP/HA | 旧keepalivedの選挙・VIP管理をnative VRRPとwriterへ置換 | keepalived 2.2.8との通常DAD起動・VIP TCP/UDP・選挙/停止/復旧を確認。NoDADが隠したDAD中のworker再起動を修正。標準keepalived checksumへの拒否も実peerで修正。全tracking/HA session継続等は未完了 |
 | BFD | 旧FRR/bfddの処理をnative BFDへ置換 | 独立FRR 8.4.4で通常DAD・/32と/128・実BGP/FIB/LAN TCP/UDP・障害/期限/再起動後復旧を確認。不要なsubnet/MAC/受信port制約を削除。旧profile/reset policy、認証、全VRF/規模の受入は未完了 |
 | link/address/route | 旧OS renderer/applyを新規netlink writerへ置換 | option・source選択・所有権・bridge/VRF再構成。wireの実績とは別にOS設定の意味を照合する |
@@ -50,7 +50,7 @@ DS-Liteでは通常RAの期限更新とDNS RRset順序変更でトンネルを�
 最終バイナリーの実AFTR経由で同じTCP接続のHTTPS 100回・UDP DNSが100秒継続し、
 110秒の監視でtunnel indexは不変だった。その後、自然なT1=7200秒のRenew/Replyと
 PD期限更新を実回線captureで確認し、同じTCP接続・UDP DNSが100分継続した。
-更新後のLAN IPv4/IPv6 HTTPSも通った。旧PD由来source、実回線Rebind/失効/Release、
+更新後のLAN IPv4/IPv6 HTTPSも通った。PD由来sourceは後述の実通信まで進んだ。実回線Rebind/失効/Release、
 その他の置換による不必要な受信拒否は引き続き見直す。
 全モジュールの実機受入・旧動作との差分確認は未完了である。
 
@@ -86,3 +86,13 @@ multicastとも初回起動が第6世代まで再起動していた。通常DAD�
 `v3_checksum_as_v2`を指定するだけでは、標準peerとの相互接続を裏付けなかった。
 受信は両方式を扱い、送信を明示選択する小さな契約へ修正した。標準peerと現行方式peerの
 VIP TCP/UDP・切替・交替・復旧、標準方式でのHealth/追加WANも実通信とcaptureで通った。
+
+PD-derived DS-Lite sourceも旧`localDelegatedAddress`/`localAddressSuffix`と
+`ensureIPv6LocalEndpoint`の動作を読み、実装した。LANの`::1`とB4用`::100`を
+同じPD/64内のmanaged addressとして、一つのDHCPv6 workerとwriterが管理する。
+旧宣言とsuffixは追加bindingへ変換する。nativeのmaskは/64であり、旧専用/128と完全同一とは数えない。
+独立Kea 2.4.1・DNS・Linux AFTR・別LAN clientでPD/IA_NAの両送信元、通常DAD、
+更新中の同一TCPとUDP、元preferred期限の撤去と再取得/復旧を確認した。
+実回線でもPD内`::100`のDNSと実AFTR往復、LAN IPv4/IPv6 HTTPS/UDPが通った。
+Source queryは実際のLAN ownerを読む。固定source/delegationの解決は設定ごとに一度行い、
+DNS用の別source managerや重複leaseは作らない。全候補/HA/VRFと実回線長時間更新は残る。

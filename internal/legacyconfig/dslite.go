@@ -3,6 +3,7 @@
 package legacyconfig
 
 import (
+	"encoding/binary"
 	"net/netip"
 	"strings"
 	"time"
@@ -147,8 +148,63 @@ func (c *compiler) dsliteInnerAddress(r resource, source api.StatusValueSourceSp
 }
 
 func (c *compiler) dynamicDSLiteSource(r resource, s api.DSLiteTunnelSpec, policy DSLitePolicy, out *serviceconfig.DSLite) {
+	if s.LocalAddressSource == "delegatedAddress" {
+		ref := c.getRef(r, "localDelegatedAddress", s.LocalDelegatedAddress, "IPv6DelegatedAddress")
+		if ref == nil {
+			return
+		}
+		delegated := ref.Spec.(api.IPv6DelegatedAddressSpec)
+		provider := c.getRef(r, "localDelegatedAddress", delegated.PrefixDelegation, "DHCPv6PrefixDelegation")
+		if provider == nil {
+			return
+		}
+		id := provider.Kind + "/" + provider.Metadata.Name
+		index, ok := c.pd[id]
+		if !ok {
+			c.reject(r, "localDelegatedAddress", "reference", "delegated source provider was not compiled")
+			return
+		}
+		if policy.SourceFrom != "" && policy.SourceFrom != id {
+			c.policyIssue(r, "ds_lite", "source_from", "policy_source", "delegated source policy must retain the declared PD provider")
+			return
+		}
+		service := c.document.Services[index]
+		if service.Interface() != out.Interface {
+			c.reject(r, "localDelegatedAddress", "reference_scope", "delegated source must belong to this tunnel's WAN provider")
+			return
+		}
+		name := c.serviceName(*ref, "lan")
+		for _, lan := range service.DHCP6.Delegations {
+			if lan.Name != name {
+				continue
+			}
+			if s.LocalAddressSuffix != "" {
+				a, err := netip.ParseAddr(s.LocalAddressSuffix)
+				if err != nil || !a.Is6() || a.Is4In6() {
+					c.reject(r, "localAddressSuffix", "invalid_value", "expected an IPv6 host suffix")
+					return
+				}
+				raw := a.As16()
+				host := binary.BigEndian.Uint64(raw[8:])
+				if binary.BigEndian.Uint64(raw[:8]) != 0 || host == 0 {
+					c.reject(r, "localAddressSuffix", "unsupported_semantics", "delegated source requires a nonzero 64-bit host suffix")
+					return
+				}
+				if host != lan.HostID {
+					lan = serviceconfig.Delegation{Name: c.serviceName(r, "b4-source"), Interface: lan.Interface, SubnetID: lan.SubnetID, HostID: host}
+					service.DHCP6.Delegations = append(service.DHCP6.Delegations, lan)
+					c.target(r, "services/"+service.Name+"/delegations/"+lan.Name)
+				}
+			}
+			out.SourceFrom, out.SourceDelegation = service.Name, lan.Name
+			c.note(r, "The declared PD provider and LAN allocation own the DS-Lite source and its original lifetimes. A different source suffix creates another managed address on that LAN, without another DHCP socket or address-selection daemon; native delegation addresses use /64.")
+			return
+		}
+		c.reject(r, "localDelegatedAddress", "reference", "delegated LAN allocation was not compiled")
+		return
+	}
 	if s.LocalAddressSource != "" && s.LocalAddressSource != "interface" && s.LocalAddressSource != "static" || s.LocalDelegatedAddress != "" || s.LocalAddressSuffix != "" {
-		c.reject(r, "localAddressSource", "unsupported_semantics", "PD-derived, suffix-derived and HA/VMAC-staged outer sources have no equivalent native source contract; migration policy cannot replace those dependencies")
+		c.reject(r, "localAddressSource", "unsupported_semantics", "unsupported source mode, interface suffix or HA/VMAC source; delegated sources require an explicit localDelegatedAddress")
 		return
 	}
 	value := s.LocalAddress

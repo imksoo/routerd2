@@ -100,6 +100,26 @@ func editDS(options *Options, edit func(*DSLitePolicy)) {
 	options.DSLite["DSLiteTunnel/provider"] = p
 }
 
+func TestWANPolicyPreservesDelegatedDSLiteSourceAndHostSuffix(t *testing.T) {
+	data := changed(t, fixture(t, "wan-dynamic"), "localAddressSource: interface", "localAddressSource: delegatedAddress\n        localDelegatedAddress: lan-prefix\n        localAddressSuffix: '::100'")
+	options := wanPolicy(t)
+	editDS(&options, func(p *DSLitePolicy) { p.SourceFrom = "DHCPv6PrefixDelegation/wan-pd" })
+	result := compiledPolicy(t, data, options)
+	pd, ds := service(t, result.Document, "dhcp6"), service(t, result.Document, "aftr")
+	if ds.DSLite.SourceFrom != pd.Name || len(pd.DHCP6.Delegations) != 2 {
+		t.Fatal("delegated source lost its one PD owner", pd, ds)
+	}
+	for _, lan := range pd.DHCP6.Delegations {
+		if lan.Name == ds.DSLite.SourceDelegation {
+			if lan.HostID != 256 || lan.SubnetID != 16 || lan.Interface != "eth1" || lan.Advertise {
+				t.Fatal("DS-Lite source suffix changed LAN allocation or enabled extra RA", lan)
+			}
+			return
+		}
+	}
+	t.Fatal("DS-Lite source has no managed delegated address")
+}
+
 func TestExplicitWANPolicyJoinsRAInformationAFTRAndRoute(t *testing.T) {
 	result := compiledPolicy(t, fixture(t, "wan-dynamic"), wanPolicy(t))
 	d := result.Document
@@ -276,7 +296,7 @@ func TestPolicyRefusalsAreResourceScopedAndAtomic(t *testing.T) {
 			editDS(o, func(p *DSLitePolicy) { p.Selection = "" })
 			return d
 		}},
-		{"pd-source", ".localAddressSource", "unsupported_semantics", func(t *testing.T, d []byte, _ *Options) []byte {
+		{"pd-source-policy-conflict", "$policy.ds_lite", "policy_source", func(t *testing.T, d []byte, _ *Options) []byte {
 			return changed(t, d, "localAddressSource: interface", "localAddressSource: delegatedAddress\n        localDelegatedAddress: lan-prefix")
 		}},
 		{"source-suffix", ".localAddressSource", "unsupported_semantics", func(t *testing.T, d []byte, _ *Options) []byte {

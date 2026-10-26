@@ -311,13 +311,11 @@ func Validate(services []Service) error {
 				return errors.New("DHCPv6 delegations require request_prefix")
 			}
 			lanNames := map[string]bool{}
-			lanIDs := map[uint64]bool{}
 			for _, lan := range s.DHCP6.Delegations {
-				if !safeName.MatchString(lan.Name) || lanNames[lan.Name] || !interfaceName.MatchString(lan.Interface) || lanIDs[lan.SubnetID] {
-					return fmt.Errorf("service %s has invalid/duplicate delegation name, interface or subnet_id", s.Name)
+				if !safeName.MatchString(lan.Name) || lanNames[lan.Name] || !interfaceName.MatchString(lan.Interface) {
+					return fmt.Errorf("service %s has invalid/duplicate delegation name or invalid interface", s.Name)
 				}
 				lanNames[lan.Name] = true
-				lanIDs[lan.SubnetID] = true
 				if lan.RouterLifetimeSeconds != nil && (*lan.RouterLifetimeSeconds < 0 || *lan.RouterLifetimeSeconds > 9000 || (*lan.RouterLifetimeSeconds > 0 && *lan.RouterLifetimeSeconds < 600)) {
 					return errors.New("delegated RA lifetime must be zero or 600..9000 seconds")
 				}

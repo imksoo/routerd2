@@ -29,6 +29,10 @@ func (f *fakeNetwork) Apply(_ context.Context, rev uint64, desired network.Desir
 func (f *fakeNetwork) Snapshot(context.Context) (network.Snapshot, error) {
 	return network.Snapshot{}, nil
 }
+func (f *fakeNetwork) SourceAddress(_ context.Context, name, requested string) (network.SourceObservation, error) {
+	return network.SourceObservation{Interface: name, RequestedAddress: requested}, nil
+}
+
 func fixture(t *testing.T) (*Engine, *fakeNetwork) {
 	t.Helper()
 	d := t.TempDir()

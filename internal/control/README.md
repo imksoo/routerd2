@@ -132,6 +132,8 @@ not authorization or immutable kernel state.
 
 AFTR obtains only its source dependency through
 `GET /v1/source?interface=NAME&address=NUMERIC_ADDRESS` on the network worker.
+`NAME` is the address owner: the WAN for RA/IA_NA, or the selected LAN delegation
+for a PD-derived source. DNS and tunnel transport remain on the configured WAN.
 `NetworkClient.SourceAddress` forwards that native query; there is no full
 Snapshot fallback. The result identifies the requested interface/address,
 interface presence/index/up state, and at most one matching address state.

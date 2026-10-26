@@ -33,12 +33,26 @@ The digest is excluded from `Config` JSON so it does not hash itself.
 | Candidates | Ordered configured or DHCPv6 AFTR names/literals, each with its own deadline; maximum four |
 | Resolvers | Ordered literal IPv6 addresses, ports and receiving-interface scope, each with its own deadline; maximum eight |
 
-The coordinator must first observe the source installed and owned on the
-underlay, with DAD completed, no duplicate-address failure and positive
+The coordinator must first observe the source installed and owned on its
+configured interface, with DAD completed, no duplicate-address failure and positive
 preferred/valid lifetime. This worker does not infer eligibility from an
 address string or discover another source when it disappears. An empty source,
 empty candidate set, or absent resolvers while using only names is an explicit
 waiting state. A literal candidate needs no resolver.
+
+The public DS-Lite service can select `source_from` from an RA client or a
+DHCPv6 client. A DHCPv6 source without `source_delegation` uses a preferred IA_NA
+address on the WAN. With `source_delegation`, it uses the named LAN allocation's
+managed address and original preferred/valid deadlines. This can be a separate
+host ID, such as `::100`, on the same /64 as the LAN router's `::1`; only the
+allocation with `advertise: true` starts an RA worker. See
+[the PD source example](../../../examples/wan-dslite-pd.yaml).
+
+Source ownership is observed on that LAN interface; DNS and tunnel transport
+still use the configured WAN. Static source ownership and delegation selection
+are prepared once per configuration. The worker receives no new source registry
+or mutable copy of the lease. The existing network writer owns both addresses
+and the ordinary tunnel. Source querying is a required runtime network operation.
 
 The public service compiler supplies RA/DHCPv6 dependencies by service name,
 not by arbitrary file paths. A DHCPv6 AFTR name or DNS server is bounded by its

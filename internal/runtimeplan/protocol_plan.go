@@ -17,6 +17,7 @@ type protocolPlan struct {
 	bgp       map[string]bgpconfig.Config
 	vrrp      map[string]vrrp.Config
 	lanRA     map[string]ra.Config
+	aftr      map[string]aftrDefinition
 }
 
 // The complete Native source has passed config.Compile, including generated
@@ -27,6 +28,7 @@ func prepareProtocols(doc config.Native, runtimeDir, stateDir string) (protocolP
 		bgp:       make(map[string]bgpconfig.Config),
 		vrrp:      make(map[string]vrrp.Config),
 		lanRA:     make(map[string]ra.Config),
+		aftr:      make(map[string]aftrDefinition),
 	}
 	add := func(instance serviceconfig.Instance) error {
 		bound, err := encodeInstance(instance)
@@ -59,6 +61,9 @@ func prepareProtocols(doc config.Native, runtimeDir, stateDir string) (protocolP
 		}
 		if err := add(instance); err != nil {
 			return protocolPlan{}, err
+		}
+		if service.DSLite != nil {
+			plan.aftr[name] = prepareAFTR(doc, service)
 		}
 		if service.DHCP6 == nil {
 			continue

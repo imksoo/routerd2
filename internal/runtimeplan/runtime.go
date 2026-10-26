@@ -43,6 +43,7 @@ import (
 
 type Network interface {
 	Apply(context.Context, uint64, network.Desired) error
+	SourceAddress(context.Context, string, string) (network.SourceObservation, error)
 }
 type moduleManager interface {
 	Reconcile(context.Context, []supervisor.DynamicModule) error

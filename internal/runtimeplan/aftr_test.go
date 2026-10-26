@@ -226,7 +226,7 @@ func TestAFTRFinitePeerAddressAndGatewayWithdrawTogether(t *testing.T) {
 		t.Fatal(err)
 	}
 	digest := bound.digest
-	in, err := aftrDependencies(doc, doc.Services[0], nil, digest, boottime.Clock{WallTime: now})
+	in, err := aftrDependencies(prepareAFTR(doc, doc.Services[0]), nil, digest, boottime.Clock{WallTime: now})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +288,7 @@ func TestAFTRFiniteDependencyInvalidatesPriorResolution(t *testing.T) {
 		t.Fatal(err)
 	}
 	bound, _ := encodeInstance(instance)
-	in, err := aftrDependencies(doc, doc.Services[0], records, bound.digest, clock)
+	in, err := aftrDependencies(prepareAFTR(doc, doc.Services[0]), records, bound.digest, clock)
 	if err != nil || len(in.Candidates) != 2 || in.Candidates[0].ValidUntil != info.InformationRefreshAt || len(in.Resolvers) != 1 || in.Resolvers[0].ValidUntil != info.InformationRefreshAt {
 		t.Fatal("original DHCPv6 budget was lost", in, err)
 	}
@@ -307,7 +307,7 @@ func TestAFTRFiniteDependencyInvalidatesPriorResolution(t *testing.T) {
 	if err != nil || len(p.network.Links) != 0 {
 		t.Fatal("stale candidate index survived boot expiry and UTC rollback", p.network, err)
 	}
-	in, err = aftrDependencies(doc, doc.Services[0], records, bound.digest, clock)
+	in, err = aftrDependencies(prepareAFTR(doc, doc.Services[0]), records, bound.digest, clock)
 	if err != nil || len(in.Candidates) != 1 || len(in.Resolvers) != 0 {
 		t.Fatal("expired DHCP information retained", in, err)
 	}
@@ -338,13 +338,13 @@ func TestAFTRExplicitInfiniteInformationRefresh(t *testing.T) {
 		}
 		raw, _ := json.Marshal(info)
 		records := map[string]serviceconfig.Update{"service.wan-info": {Role: "dhcp6", Snapshot: raw}}
-		in, err := aftrDependencies(doc, doc.Services[0], records, bound.digest, clock)
+		in, err := aftrDependencies(prepareAFTR(doc, doc.Services[0]), records, bound.digest, clock)
 		if err != nil || len(in.Candidates) != 2 || in.Candidates[0].ValidUntil != want || len(in.Resolvers) != 1 || in.Resolvers[0].ValidUntil != want {
 			t.Fatal("scoped infinity lost its origin/bound", in, err)
 		}
 		expired := clock
 		expired.BootID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
-		in, err = aftrDependencies(doc, doc.Services[0], records, bound.digest, expired)
+		in, err = aftrDependencies(prepareAFTR(doc, doc.Services[0]), records, bound.digest, expired)
 		if err != nil || len(in.Candidates) != 1 || len(in.Resolvers) != 0 {
 			t.Fatal("old boot reused DHCP information", in, err)
 		}

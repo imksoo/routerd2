@@ -47,6 +47,10 @@ func (n *memoryNetwork) Apply(_ context.Context, _ uint64, d network.Desired) er
 	return json.Unmarshal(b, &n.applied)
 }
 
+func (n *memoryNetwork) SourceAddress(_ context.Context, name, requested string) (network.SourceObservation, error) {
+	return network.SourceObservation{Interface: name, RequestedAddress: requested}, nil
+}
+
 type memoryManager struct {
 	modules         []supervisor.DynamicModule
 	before          func([]supervisor.DynamicModule)

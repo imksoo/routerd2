@@ -187,10 +187,10 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 					if err != nil {
 						return p, fmt.Errorf("%s/%s: %w", s.Name, lan.Name, err)
 					}
-					if err := addAddressWithOptions(&p.network, lan.Interface, address, addressLifetimes(lease.PreferredUntil, lease.ValidUntil)); err != nil {
+					if err := addAddressWithOptions(&p.network, lan.Interface, address.String(), addressLifetimes(lease.PreferredUntil, lease.ValidUntil)); err != nil {
 						return p, err
 					}
-					prefixes = append(prefixes, ra.Prefix{Prefix: prefix, OnLink: true, Autonomous: true, ValidLifetimeSeconds: ^uint32(0), PreferredLifetimeSeconds: ^uint32(0), ValidUntil: lease.ValidUntil, PreferredUntil: lease.PreferredUntil})
+					prefixes = append(prefixes, ra.Prefix{Prefix: prefix.String(), OnLink: true, Autonomous: true, ValidLifetimeSeconds: ^uint32(0), PreferredLifetimeSeconds: ^uint32(0), ValidUntil: lease.ValidUntil, PreferredUntil: lease.PreferredUntil})
 				}
 				if !lan.Advertise || len(prefixes) == 0 {
 					continue
@@ -273,7 +273,7 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 		return p, err
 	}
 	if facts.aftr != nil {
-		if err := projectDSLite(&p, doc, protocols.instances, records, facts.aftr, facts.bfdClock); err != nil {
+		if err := projectDSLite(&p, doc, protocols, records, facts.aftr, facts.bfdClock); err != nil {
 			return p, err
 		}
 	}
@@ -324,14 +324,14 @@ func addAddressWithOptions(d *network.Desired, name, address string, options net
 	}
 	return errors.New("dynamic address interface is missing")
 }
-func delegated(prefix string, subnet, host uint64) (string, string, error) {
+func delegated(prefix string, subnet, host uint64) (netip.Prefix, netip.Prefix, error) {
 	p, err := netip.ParsePrefix(prefix)
 	if err != nil || !p.Addr().Is6() || p.Addr().Is4In6() || p.Addr().IsUnspecified() || p.Addr().IsMulticast() || p.Bits() > 64 || p != p.Masked() {
-		return "", "", errors.New("delegated prefix must be a canonical IPv6 prefix no longer than /64")
+		return netip.Prefix{}, netip.Prefix{}, errors.New("delegated prefix must be a canonical IPv6 prefix no longer than /64")
 	}
 	bits := 64 - p.Bits()
 	if bits < 64 && subnet >= uint64(1)<<bits {
-		return "", "", errors.New("subnet_id does not fit acquired prefix")
+		return netip.Prefix{}, netip.Prefix{}, errors.New("subnet_id does not fit acquired prefix")
 	}
 	b := p.Addr().As16()
 	binary.BigEndian.PutUint64(b[:8], binary.BigEndian.Uint64(b[:8])|subnet)
@@ -340,7 +340,7 @@ func delegated(prefix string, subnet, host uint64) (string, string, error) {
 		host = 1
 	}
 	binary.BigEndian.PutUint64(b[8:], host)
-	return netip.PrefixFrom(base, 64).String(), netip.PrefixFrom(netip.AddrFrom16(b), 64).String(), nil
+	return netip.PrefixFrom(base, 64), netip.PrefixFrom(netip.AddrFrom16(b), 64), nil
 }
 func boundedSeconds(v int64) uint32 {
 	if v <= 0 {

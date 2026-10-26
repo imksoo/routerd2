@@ -57,7 +57,7 @@ func TestAFTRSourceIndependentOfUnrelatedLargeNetworkObservations(t *testing.T) 
 func TestAFTRSourceObservationRequiresExactUsableOwnedAddress(t *testing.T) {
 	in := aftr.Input{Interface: "wan0", Source: aftr.Source{Address: "2001:db8::1"}}
 	baseline := network.SourceObservation{Interface: "wan0", RequestedAddress: "2001:db8::1", InterfacePresent: true, Index: 42, Up: true, Found: true, Address: &network.AddressState{Address: "2001:db8::1/64", Owned: true, PreferredLifetime: ^uint32(0), ValidLifetime: ^uint32(0)}}
-	if !sourceInstalled(in, baseline) {
+	if !sourceInstalled(in.Interface, in.Source.Address, baseline) {
 		t.Fatal("owned usable source was rejected")
 	}
 	cases := []struct {
@@ -86,7 +86,7 @@ func TestAFTRSourceObservationRequiresExactUsableOwnedAddress(t *testing.T) {
 			address := *baseline.Address
 			value.Address = &address
 			tc.change(&value)
-			if sourceInstalled(in, value) {
+			if sourceInstalled(in.Interface, in.Source.Address, value) {
 				t.Fatal("unusable source accepted")
 			}
 		})

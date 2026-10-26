@@ -2,8 +2,8 @@
 # PD + supplementary information + DS-Lite topology at source pin 1329ef54.
 # This is not a deployed homert02/03 configuration. This separate fixture uses
 # interface source discovery; the companion policy explicitly binds it to RA.
-# The public tutorial's PD-derived source remains unsupported and is tested as
-# a rejection rather than being silently rewritten into RA source intent.
+# A separate case uses the public tutorial's PD-derived source and host suffix;
+# it must retain that provider rather than silently selecting this RA source.
 apiVersion: routerd.net/v1alpha1
 kind: Router
 metadata: {name: migration-dynamic-wan}

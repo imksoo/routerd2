@@ -714,6 +714,15 @@ required/observe-only・RA trigger/resolver、suspend/reboot・VRF・対象実�
 
 実装先の案: `internal/network`, `internal/runtimeplan`, `internal/protocol/raclient`, `internal/protocol/aftr`, `internal/legacyconfig`, `internal/protocol/dhcp6`, `internal/protocol/dhcp6config`。
 
+PD/IA_NA由来のDS-Lite sourceを実装した。`source_delegation`でLAN割当を選び、
+同じ/64のLAN `::1`とB4 `::100`を一つのPD worker/writerが管理する。旧localDelegatedAddressと
+host suffixもmanaged bindingへ変換する。native address maskは/64で、旧専用/128とは明示的に異なる。
+静的source/delegationはcompile時に解決し、sourceの実owner interfaceでDAD・所有権を確認する。
+独立Kea/DNS/Linux AFTRでPDとIA_NA双方のTCP/UDP、更新中の同一TCP、元期限撤去・復旧を確認した。
+実上流のPD `::100` sourceでも実AFTR往復とLAN IPv4/IPv6 HTTPS/UDPが通った。
+この版の自然T1を含む長時間試験は継続中。全SelfAddressPolicy/HA/VRFは未完了。
+[設定例](../examples/wan-dslite-pd.yaml)と[引き継ぎ](pve-codex-handoff.md)を参照する。
+
 #### NET-06 — LAN・DHCPv6・relay・DNS の resource 完全化
 
 範囲: 旧 routerd 互換 / track: network / risk: high。

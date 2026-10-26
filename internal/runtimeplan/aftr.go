@@ -22,15 +22,16 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func deadlineLive(until, now time.Time) bool { return until.IsZero() || now.Before(until) }
+type aftrDefinition struct {
+	service         serviceconfig.Service
+	sourceInterface string
+	staticSource    aftr.Source
+	delegation      *serviceconfig.Delegation
+}
 
-// Dependency construction is pure and uses only explicitly authorized facts.
-// The caller additionally gates Source against the acknowledged kernel view.
-func aftrDependencies(doc config.Native, s serviceconfig.Service, records map[string]serviceconfig.Update, digest string, clock boottime.Clock) (aftr.Input, error) {
-	now := clock.WallTime
-	c := s.DSLite
-	in := aftr.Input{Resource: s.Name, Interface: c.Interface, ConfigDigest: digest, Generation: 1, UpdatedAt: now.UTC(), Active: true}
-	var sourceRA raclient.Snapshot
+func prepareAFTR(doc config.Native, service serviceconfig.Service) aftrDefinition {
+	c := service.DSLite
+	d := aftrDefinition{service: service, sourceInterface: c.Interface}
 	if c.LocalAddress != "" {
 		for _, iface := range doc.Network.Interfaces {
 			if iface.Name != c.Interface {
@@ -38,15 +39,39 @@ func aftrDependencies(doc config.Native, s serviceconfig.Service, records map[st
 			}
 			for _, address := range iface.Addresses {
 				p, err := netip.ParsePrefix(address)
-				if err != nil || p.Addr().String() != c.LocalAddress {
-					continue
-				}
-				o := iface.AddressOptions[address]
-				if deadlineLive(o.PreferredUntil, now) && deadlineLive(o.ValidUntil, now) {
-					in.Source = aftr.Source{Address: c.LocalAddress, PreferredUntil: lifetime.Deadline{UTC: o.PreferredUntil}, ValidUntil: lifetime.Deadline{UTC: o.ValidUntil}}
+				if err == nil && p.Addr().String() == c.LocalAddress {
+					o := iface.AddressOptions[address]
+					d.staticSource = aftr.Source{Address: c.LocalAddress, PreferredUntil: lifetime.Deadline{UTC: o.PreferredUntil}, ValidUntil: lifetime.Deadline{UTC: o.ValidUntil}}
 				}
 			}
 		}
+	}
+	if c.SourceDelegation != "" {
+		for _, provider := range doc.Services {
+			if provider.Name != c.SourceFrom {
+				continue
+			}
+			for i := range provider.DHCP6.Delegations {
+				lan := &provider.DHCP6.Delegations[i]
+				if lan.Name == c.SourceDelegation {
+					d.delegation, d.sourceInterface = lan, lan.Interface
+				}
+			}
+		}
+	}
+	return d
+}
+
+// Static source ownership belongs to the compiled configuration. Live budgets
+// come from the original observations; the caller checks actual kernel DAD.
+func aftrDependencies(d aftrDefinition, records map[string]serviceconfig.Update, digest string, clock boottime.Clock) (aftr.Input, error) {
+	s := d.service
+	c := s.DSLite
+	in := aftr.Input{Resource: s.Name, Interface: c.Interface, ConfigDigest: digest, Generation: 1, UpdatedAt: clock.WallTime.UTC(), Active: true}
+	var sourceRA raclient.Snapshot
+	var sourceDHCP dhcp6config.Snapshot
+	if d.staticSource.Address != "" && d.staticSource.PreferredUntil.Live(clock) && d.staticSource.ValidUntil.Live(clock) {
+		in.Source = d.staticSource
 	} else if u, ok := records["service."+c.SourceFrom]; ok && u.Role == "ra_client" {
 		if err := json.Unmarshal(u.Snapshot, &sourceRA); err != nil {
 			return in, err
@@ -67,10 +92,44 @@ func aftrDependencies(doc config.Native, s serviceconfig.Service, records map[st
 			}
 		}
 	}
+	if u, ok := records["service."+c.SourceFrom]; ok && u.Role == "dhcp6" {
+		if err := json.Unmarshal(u.Snapshot, &sourceDHCP); err != nil {
+			return in, err
+		}
+		if sourceDHCP.Active(clock) {
+			selectSource := func(address string, preferred, valid lifetime.Deadline) {
+				if preferred.Live(clock) && valid.Live(clock) && (in.Source.Address == "" || address < in.Source.Address) {
+					in.Source = aftr.Source{Address: address, PreferredUntil: preferred, ValidUntil: valid}
+				}
+			}
+			if d.delegation == nil {
+				for _, a := range sourceDHCP.Addresses {
+					selectSource(a.Address, a.PreferredUntil, a.ValidUntil)
+				}
+			} else {
+				for _, prefix := range sourceDHCP.Prefixes {
+					if !prefix.PreferredUntil.Live(clock) || !prefix.ValidUntil.Live(clock) {
+						continue
+					}
+					_, address, err := delegated(prefix.Prefix, d.delegation.SubnetID, d.delegation.HostID)
+					if err != nil {
+						return in, err
+					}
+					selectSource(address.Addr().String(), prefix.PreferredUntil, prefix.ValidUntil)
+				}
+			}
+		}
+	}
+
 	information := func(name string) (dhcp6config.Snapshot, lifetime.Deadline, bool) {
 		u, ok := records["service."+name]
 		var snap dhcp6config.Snapshot
-		if !ok || u.Role != "dhcp6" || json.Unmarshal(u.Snapshot, &snap) != nil {
+		if !ok || u.Role != "dhcp6" {
+			return snap, lifetime.Deadline{}, false
+		}
+		if name == c.SourceFrom {
+			snap = sourceDHCP
+		} else if json.Unmarshal(u.Snapshot, &snap) != nil {
 			return snap, lifetime.Deadline{}, false
 		}
 		until, usable := snap.InformationUntil(clock)
@@ -139,13 +198,13 @@ func sameAFTRInput(a, b aftr.Input) bool {
 	return reflect.DeepEqual(a, b)
 }
 
-func sourceInstalled(in aftr.Input, observed network.SourceObservation) bool {
-	if in.Source.Address == "" || observed.Interface != in.Interface || observed.RequestedAddress != in.Source.Address || !observed.InterfacePresent || observed.Index <= 0 || !observed.Up || !observed.Found || observed.Address == nil {
+func sourceInstalled(sourceInterface, requested string, observed network.SourceObservation) bool {
+	if observed.Interface != sourceInterface || observed.RequestedAddress != requested || !observed.InterfacePresent || observed.Index <= 0 || !observed.Up || !observed.Found || observed.Address == nil {
 		return false
 	}
 	address := observed.Address
 	p, err := netip.ParsePrefix(address.Address)
-	return err == nil && p.Addr().String() == in.Source.Address && address.Owned && address.PreferredLifetime > 0 && address.ValidLifetime > 0 && address.Flags&(unix.IFA_F_TENTATIVE|unix.IFA_F_DADFAILED|unix.IFA_F_DEPRECATED) == 0
+	return err == nil && p.Addr().String() == requested && address.Owned && address.PreferredLifetime > 0 && address.ValidLifetime > 0 && address.Flags&(unix.IFA_F_TENTATIVE|unix.IFA_F_DADFAILED|unix.IFA_F_DEPRECATED) == 0
 }
 
 // AFTRInput increments generation when endpoint dependencies change. A
@@ -158,35 +217,20 @@ func (r *Runtime) AFTRInput(ctx context.Context, name string) (aftr.Input, error
 	if !r.configured || !ok || b.instance.Role != "aftr" {
 		return aftr.Input{}, errors.New("no committed AFTR consumer")
 	}
-	var service serviceconfig.Service
-	for _, s := range r.config.plan.Native.Services {
-		if s.ModuleName() == name {
-			service = s
-			break
-		}
-	}
-	if service.DSLite == nil {
-		return aftr.Input{}, errors.New("missing DS-Lite intent")
-	}
+	definition := r.config.protocols.aftr[name]
 	clock, err := boottime.Read()
 	if err != nil {
 		return aftr.Input{}, err
 	}
-	in, err := aftrDependencies(r.config.plan.Native, service, r.observationsLocked(), b.digest, clock)
+	in, err := aftrDependencies(definition, r.observationsLocked(), b.digest, clock)
 	if err != nil {
 		return in, err
-	}
-	observer, ok := r.network.(interface {
-		SourceAddress(context.Context, string, string) (network.SourceObservation, error)
-	})
-	if !ok {
-		return in, errors.New("AFTR requires native source address observation")
 	}
 	if in.Source.Address != "" {
 		// Unrelated routing tables and WireGuard peers cannot invalidate this
 		// dependency merely by exceeding the operator observation response cap.
-		observed, err := observer.SourceAddress(ctx, in.Interface, in.Source.Address)
-		if err != nil || !sourceInstalled(in, observed) {
+		observed, err := r.network.SourceAddress(ctx, definition.sourceInterface, in.Source.Address)
+		if err != nil || !sourceInstalled(definition.sourceInterface, in.Source.Address, observed) {
 			in.Source = aftr.Source{}
 		}
 	}
@@ -220,7 +264,7 @@ func (r *Runtime) aftrRoutes(mux *http.ServeMux) {
 	})
 }
 
-func projectDSLite(p *projection, doc config.Native, instances map[string]binding, records map[string]serviceconfig.Update, inputs map[string]aftr.Input, clock boottime.Clock) error {
+func projectDSLite(p *projection, doc config.Native, protocols protocolPlan, records map[string]serviceconfig.Update, inputs map[string]aftr.Input, clock boottime.Clock) error {
 	for _, service := range doc.Services {
 		if service.DSLite == nil {
 			continue
@@ -231,11 +275,11 @@ func projectDSLite(p *projection, doc config.Native, instances map[string]bindin
 		if !exists || !has {
 			continue
 		}
-		digest := instances[service.ModuleName()].digest
+		digest := protocols.instances[service.ModuleName()].digest
 		if input.ConfigDigest != digest {
 			continue
 		}
-		current, err := aftrDependencies(doc, service, records, digest, clock)
+		current, err := aftrDependencies(protocols.aftr[service.ModuleName()], records, digest, clock)
 		if err != nil {
 			return err
 		}

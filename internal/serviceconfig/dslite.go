@@ -14,19 +14,20 @@ import (
 // never arbitrary status paths. A DNS server must be reachable over the IPv6
 // underlay before this tunnel exists.
 type DSLite struct {
-	Interface      string         `json:"interface"`
-	Tunnel         string         `json:"tunnel"`
-	LocalAddress   string         `json:"local_address,omitempty"`
-	SourceFrom     string         `json:"source_from,omitempty"`
-	AFTRFrom       string         `json:"aftr_from,omitempty"`
-	Candidates     []string       `json:"candidates,omitempty"`
-	DNSFrom        []string       `json:"dns_from,omitempty"`
-	Resolvers      []AFTRResolver `json:"resolvers,omitempty"`
-	Selection      string         `json:"selection,omitempty"`
-	Ordinal        int            `json:"ordinal,omitempty"`
-	TimeoutSeconds int            `json:"timeout_seconds,omitempty"`
-	RetrySeconds   int            `json:"retry_seconds,omitempty"`
-	B4Address      string         `json:"b4_address,omitempty"`
+	Interface        string         `json:"interface"`
+	Tunnel           string         `json:"tunnel"`
+	LocalAddress     string         `json:"local_address,omitempty"`
+	SourceFrom       string         `json:"source_from,omitempty"`
+	SourceDelegation string         `json:"source_delegation,omitempty"`
+	AFTRFrom         string         `json:"aftr_from,omitempty"`
+	Candidates       []string       `json:"candidates,omitempty"`
+	DNSFrom          []string       `json:"dns_from,omitempty"`
+	Resolvers        []AFTRResolver `json:"resolvers,omitempty"`
+	Selection        string         `json:"selection,omitempty"`
+	Ordinal          int            `json:"ordinal,omitempty"`
+	TimeoutSeconds   int            `json:"timeout_seconds,omitempty"`
+	RetrySeconds     int            `json:"retry_seconds,omitempty"`
+	B4Address        string         `json:"b4_address,omitempty"`
 	// B4Peer explicitly requests point-to-point addressing. Omitting it keeps
 	// the existing address-only behavior; it never implies a default route.
 	B4Peer       string `json:"b4_peer,omitempty"`
@@ -62,6 +63,9 @@ func validateDSLite(s Service) error {
 	}
 	if (c.SourceFrom == "") == (c.LocalAddress == "") {
 		return errors.New("DS-Lite requires exactly one of source_from and local_address")
+	}
+	if c.SourceDelegation != "" && c.SourceFrom == "" {
+		return errors.New("DS-Lite source_delegation requires a DHCPv6 source_from")
 	}
 	if len(c.Candidates) == 0 && c.AFTRFrom == "" {
 		return errors.New("DS-Lite requires candidates or aftr_from")
@@ -145,8 +149,24 @@ func validateDSLiteSources(services []Service) error {
 			return nil
 		}
 		if c.SourceFrom != "" {
-			if err := check(c.SourceFrom, "ra_client"); err != nil {
+			if err := check(c.SourceFrom, ""); err != nil {
 				return err
+			}
+			source := byName[c.SourceFrom]
+			if c.SourceDelegation == "" {
+				if source.DHCP6 != nil && !source.DHCP6.RequestAddress {
+					return fmt.Errorf("DS-Lite %s DHCPv6 source requires request_address or source_delegation", s.Name)
+				}
+			} else {
+				found := false
+				if source.DHCP6 != nil {
+					for _, lan := range source.DHCP6.Delegations {
+						found = found || lan.Name == c.SourceDelegation
+					}
+				}
+				if !found {
+					return fmt.Errorf("DS-Lite %s source_delegation must name a delegation of %s", s.Name, c.SourceFrom)
+				}
 			}
 		}
 		if c.AFTRFrom != "" {

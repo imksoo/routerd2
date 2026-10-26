@@ -1,0 +1,64 @@
+# Replace interface names and aftr.example with the actual uplink/LAN/provider.
+# One DHCPv6 client owns both the LAN address and the B4 source alias.
+schema_version: 2
+resources:
+  - id: interface/wan0
+    interface: {name: wan0}
+  - id: interface/lan0
+    interface: {name: lan0}
+  - id: address/lan-v4
+    depends_on: [interface/lan0]
+    address: {interface: lan0, cidr: 192.168.50.1/24}
+  - id: forwarding
+    forwarding: {ipv4: true, ipv6: true}
+  - id: firewall
+    firewall:
+      forward:
+        - {from: lan0, to: wan0}
+        - {from: lan0, to: dslite0}
+      masquerade:
+        - {source: 192.168.50.0/24, out_interface: dslite0}
+  - id: service/wan-ra
+    depends_on: [interface/wan0]
+    service:
+      name: wan-ra
+      ra_client:
+        interface: wan0
+        slaac: true
+        default_route: true
+        on_link: true
+        route_information: true
+        dns: true
+  - id: service/wan-pd
+    depends_on: [interface/wan0, interface/lan0]
+    service:
+      name: wan-pd
+      dhcp6:
+        interface: wan0
+        iaid: 1
+        request_prefix: true
+        prefix_length: 60
+        delegations:
+          - name: lan
+            interface: lan0
+            host_id: 1
+            advertise: true
+          - name: b4-source
+            interface: lan0
+            host_id: 256 # ::100 in the same delegated /64; no extra RA worker.
+  - id: service/internet
+    service:
+      name: internet
+      ds_lite:
+        interface: wan0
+        tunnel: dslite0
+        source_from: wan-pd
+        source_delegation: b4-source
+        aftr_from: wan-pd
+        candidates: [aftr.example]
+        dns_from: [wan-pd, wan-ra]
+        b4_address: 192.0.0.2/32
+        b4_peer: 192.0.0.1/32
+        route_gateway: 192.0.0.1
+        default_route: true
+        metric: 200
