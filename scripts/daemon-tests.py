@@ -28,6 +28,7 @@ SUITES = {
     "dhcp-server": (("TestDaemonDHCPDNSAndOwnershipExpiry", (), 120),),
     "aftr": (("TestDaemonAFTRResolutionAndExpiry", ("wan0",), 120),),
     "ra-client": (("TestDaemonRAClientConfigurationAndExpiry", ("wan0",), 120),),
+    "ra-aftr": (("TestDaemonRAAFTRForwardingAndOriginalExpiry", ("wan0", "lan0"), 150),),
 }
 
 

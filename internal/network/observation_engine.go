@@ -152,9 +152,6 @@ func (e *Engine) observationTargetsLocked() ([]string, []int) {
 		for _, w := range d.WireGuard {
 			names[w.Interface] = true
 		}
-		for _, n := range firewallInterfaces(d.Firewall) {
-			names[n] = true
-		}
 		for _, r := range d.PolicyRules {
 			tables[r.Table] = true
 			if r.InInterface != "" {

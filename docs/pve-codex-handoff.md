@@ -78,44 +78,40 @@
 
 ## 今回の実装と検証
 
-RA clientのUTC変換・clock anchor・sampling補正・再base・保存用のwall/boot対応表を削除した。
-割当・prefix・router/RIO・DNS/searchは受信した元のboot期限を一つの型で保持する。
-無期限も元のboot IDに属する。journal format 2は固定identityと同じsnapshotだけを保存し、
-同じbootでのworker再起動は元の期限から失効を判定する。identityのhashは構築時に一度だけ計算する。
+RAで取得したsourceとRDNSSをAFTRまで接続し、独立したRA送信元・DNS・Linux AFTRと
+別namespaceのLAN端末で実転送を確認した。製品daemon以外がrouterの設定を補う操作はない。
 
-network routeの寿命もUTCか元のboot期限として渡す。条件の有限authorityとは区別する。
-journal format 7のowned routeはkernelの実際のCLOCK_MONOTONIC timerを保持する。
-UTC補正で自分のrouteを管理外と誤判定しない。長い元期限は切り詰めず、kernelの7日grantだけを
-writerが残り1日で更新する。元期限の再baseやcontrolによる毎日のUTC horizonはない。
+起動時、firewallがまだ生成されていないDS-Lite interfaceの存在を要求してcontrolが再起動を
+繰り返していた。nftablesはinterface名を照合するため、この存在確認は不要である。
+存在確認と補助collectorを削除した。firewallの名前参照を管理対象linkの所有権観測にも加えない。
+AFTRのsource選択も全件sortから一回の走査へ変更し、sourceとDNSが同じRAならdecodeを共有する。
+別のDNS sourceは空の型へdecodeし、他sourceの省略fieldを引き継がない。
 
-PVEの隔離namespaceで、実RA worker→control→network writerによるSLAAC /128とdefault route、
-独立したRA sender/backendとのsource付きTCP/UDP、両方向capture、全owner停止中のkernel失効、
-設定削除でのsysctl復元を確認した。`make check-ra-client`で再実行できる。
-NICなしQEMUではRA/network worker再起動、実UTC±24時間、凍結producer通知不変、TCP/UDP、
-全owner停止中のkernel expiry、期限切れ再送で復活しないこと、新RAでの通信復旧を確認した。
-`make qemu-ra-clock`を使う。時計変更は専用guest PID 1の固定brokerだけで行い、host clockは変更しない。
+`make check-ra-aftr`は実supervisor/control/network/RA/AFTR workerを使う。次を確認した。
 
-全体`make check`（Python 33件・全体Race Detector・vet）とamd64/arm64の6静的ELF buildは成功した。
-reviewでkernel grant更新時にもlink期限を再確認するようにし、その後の関連race/vet/buildも成功した。
-最終sourceでQEMUのkernel転送・ACL/NAT・DS-Lite・link更新/失効、RA実UTC補正、
-PVEのRA・AFTR・二WAN Health/PBR（古い通知・期限切れ・worker交替・confirmed rollback）も通った。
-arm64は実行していない。実機・NIC・物理suspendと負荷条件の受入は未完了である。
+- 学習前はDNS queryもトンネルもない。学習後は元のsourceでDNS queryを送り、
+  LANの実TCP/UDPをNATしてIPv4-in-IPv6で転送する。LAN/WAN両方のcaptureも確認する。
+- RDNSSの期限とsourceのpreferred期限を別々に失効させる。control停止中もwriterが
+  元の短い期限でlinkをDOWNにし、B4 addressとIPv4 default routeを撤去する。
+- 期限切れの元通知を再送しても復活しない。新prefixのRAでDNS・source・LAN通信が復旧する。
+- RA workerとnetwork writerをSIGKILLし、置換後も同じLAN TCP/UDPが通る。
 
-現在の出力は`dist/ra-boot-{check-build,final-related,final-build,final-tools,clock-forward}.log`、
-`dist/ra-boot-{kernel-final,clock-final}/`のserial log、
-`dist/ra-boot-{ra-final,aftr-final,health-pbr-final}/`の実daemonログ・wan0/wan1.pcap。
-最終6 ELFの署名bundle/catalog/publisherとstaged secrets scanも成功した。
-結果は`dist/ra-boot-{bundle,secrets}.log`にある。
+最初の試験はownerの停止がheartbeat期限を超え、supervisor再開時のworker再起動と混ざった。
+writer期限の試験はheartbeatより短いRA期限で行うようにした。製品側のtimeoutや例外処理は増やしていない。
 
-実装した受信経路を、RA required/observe-onlyやRA trigger/resolver効果の完成とは数えない。
-RA→AFTRの元期限投影はローカルで確認したが、連結した実通信・VRF・物理suspend/rebootは未受入。
-製品全体と対象実機での利用可能とは判断していない。
+最終sourceの`make check`（全Go/Python 33件、全体Race Detector、vet）、
+amd64/arm64の6静的ELF build、署名bundle/catalog/publisher検査が成功した。
+最終バイナリーのRA→AFTR連結、独立DNS/AFTRの障害・期限・復旧、二WANのHealth→PBRも成功した。
+Health/PBRではHealth/control/network・supervisor再起動、古い通知・max_age・元期限切れ、
+実LAN TCP/UDPと両WAN capture、confirmed rollbackを確認した。
+実行結果は`dist/ra-aftr-{check-build,final-tools,bundle}.log`と
+`dist/ra-aftr-{final,aftr-final,health-final}/`にある。
+実機・NIC・物理suspend・arm64実行・全resourceの受入は未完了である。
 
 ## 未完了と次の作業
 
 1. 全実装計画、全更新復旧経路、外部engine、配備先と対象実機の受入は未完了。
-   次はRAからAFTRまでの連結実通信、
-   DAD失敗/Decline・Release・resource readiness/RA連携を実装・受入する。
+   次はDAD失敗/Decline・Release・resource readiness/RA連携を実装・受入する。
    NET-06はrelayのHA・動的VRF/interface変更の受入、DHCPv6 server、dynamic pool/options・DNS・sticky/lease importが残る。
    今回の試験成功を製品全体・実機利用可能の判定には使わない。
 2. NET-07の旧resource/profile、動的source・VRF経路変更、大規模RIBを実装・受入する。
@@ -132,7 +128,7 @@ RA→AFTRの元期限投影はローカルで確認したが、連結した実�
 5. 再帰next-hopの前提address/link期限はローカル投影で確認済みだが、同じ条件の実daemon試験は未実施。
    writer自体の停止中のlink fencing・IPv4 route撤去、物理suspendは保証しない。
 6. arm64は静的buildとbundle検査までで、実行していない。物理NIC・性能・suspend、
-   QEMU時計補正は今回再実行していない。対象実機の条件は未確定である。
+   今回の変更でQEMU時計補正は再実行していない。対象実機の条件は未確定である。
 
 ## 環境
 

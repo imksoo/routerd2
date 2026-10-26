@@ -334,7 +334,7 @@
         "network"
       ],
       "parity_status": "not_integrated",
-      "known_gap": "Native B4, dynamic AFTR resolution, explicit RA/DHCPv6 dependencies and original DNS/source lifetimes are implemented. Static and generated tunnels share ordinary ip6tnl link ownership. Independent Linux AFTR TCP/UDP and writer restart/control-stop expiry/recovery are verified. Strict migration of original SelfAddressPolicy, multi-AFTR source routing, when/dependency and full resource lifecycle semantics, suspend/reboot, VRF and target hardware remain incomplete."
+      "known_gap": "Native B4 and AFTR resolution consume explicit RA/DHCPv6 dependencies with original DNS/source deadlines. Static and generated tunnels use ordinary ip6tnl ownership. An independent RA sender, DNS, Linux AFTR and separate LAN client verified actual daemon NAT/IPv4-in-IPv6 TCP/UDP, original RDNSS and preferred-source expiry with control stopped, expired notification without resurrection, renumbering recovery and RA/network worker replacement. The bootstrap firewall now accepts interface-name selectors before the dynamic link exists. SelfAddressPolicy, multi-AFTR source routing, full resource readiness/lifecycle, suspend/reboot, VRF and hardware remain incomplete."
     },
     {
       "id": "lan.dhcp_ra",

@@ -658,8 +658,13 @@ network writerは元のroute authorityとkernelのCLOCK_MONOTONIC timerを区別
 長い期限のkernel grant更新をwriterへ移し、controlの毎日のUTC horizonを廃止した。
 PVEの実RA sender/backendとのSLAAC/default-route TCP/UDPとcapture、全owner停止中のkernel失効、
 専用QEMUの実UTC±24時間、RA/network worker再起動、通知不変・期限切れ再送・新RAでの復旧を確認した。
-`make check-ra-client`と`make qemu-ra-clock`で再実行できる。required/observe-only・RA trigger/resolver、
-RA→AFTRの連結実通信、suspend/reboot・VRF・対象実機の受入はまだ残る。
+`make check-ra-client`と`make qemu-ra-clock`で再実行できる。
+RA→RDNSS→AFTRの連結では、独立したRA/DNS/Linux AFTRと別namespaceのLAN端末を使い、
+実daemonによるNAT・IPv4-in-IPv6 TCP/UDP、DNSとsource preferredの元期限での停止、
+新prefixでの復旧、RA/network worker再起動を確認した。`make check-ra-aftr`で再実行できる。
+firewallの名前照合に存在確認を要求して起動を阻害していた制約・補助collectorを削除した。
+AFTR source選択の全件sortを一回の走査へ変え、同じRAのsource/DNSでdecodeを共有する。
+required/observe-only・RA trigger/resolver、suspend/reboot・VRF・対象実機の受入はまだ残る。
 
 **受入条件**
 

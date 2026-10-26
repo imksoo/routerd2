@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/netip"
 	"reflect"
-	"sort"
 	"time"
 
 	"github.com/imksoo/routerd2/internal/boottime"
@@ -31,6 +30,7 @@ func aftrDependencies(doc config.Native, s serviceconfig.Service, records map[st
 	now := clock.WallTime
 	c := s.DSLite
 	in := aftr.Input{Resource: s.Name, Interface: c.Interface, ConfigDigest: digest, Generation: 1, UpdatedAt: now.UTC(), Active: true}
+	var sourceRA raclient.Snapshot
 	if c.LocalAddress != "" {
 		for _, iface := range doc.Network.Interfaces {
 			if iface.Name != c.Interface {
@@ -48,13 +48,11 @@ func aftrDependencies(doc config.Native, s serviceconfig.Service, records map[st
 			}
 		}
 	} else if u, ok := records["service."+c.SourceFrom]; ok && u.Role == "ra_client" {
-		var snap raclient.Snapshot
-		if err := json.Unmarshal(u.Snapshot, &snap); err != nil {
+		if err := json.Unmarshal(u.Snapshot, &sourceRA); err != nil {
 			return in, err
 		}
-		if snap.Active && snap.BootID == clock.BootID && snap.ObservedNanos <= uint64(clock.BoottimeNanoseconds) {
-			var sources []aftr.Source
-			for _, address := range snap.Addresses {
+		if sourceRA.Active && sourceRA.BootID == clock.BootID && sourceRA.ObservedNanos <= uint64(clock.BoottimeNanoseconds) {
+			for _, address := range sourceRA.Addresses {
 				if address.Deprecated || address.DADFailed || !address.PreferredUntil.Live(clock) || !address.ValidUntil.Live(clock) {
 					continue
 				}
@@ -62,11 +60,10 @@ func aftrDependencies(doc config.Native, s serviceconfig.Service, records map[st
 				if err != nil || !p.Addr().IsGlobalUnicast() {
 					continue
 				}
-				sources = append(sources, aftr.Source{Address: p.Addr().String(), PreferredUntil: address.PreferredUntil, ValidUntil: address.ValidUntil})
-			}
-			sort.Slice(sources, func(i, j int) bool { return sources[i].Address < sources[j].Address })
-			if len(sources) != 0 {
-				in.Source = sources[0]
+				candidate := p.Addr().String()
+				if in.Source.Address == "" || candidate < in.Source.Address {
+					in.Source = aftr.Source{Address: candidate, PreferredUntil: address.PreferredUntil, ValidUntil: address.ValidUntil}
+				}
 			}
 		}
 	}
@@ -118,8 +115,12 @@ func aftrDependencies(doc config.Native, s serviceconfig.Service, records map[st
 			continue
 		}
 		var snap raclient.Snapshot
-		if err := json.Unmarshal(u.Snapshot, &snap); err != nil {
-			return in, err
+		if name == c.SourceFrom {
+			snap = sourceRA
+		} else {
+			if err := json.Unmarshal(u.Snapshot, &snap); err != nil {
+				return in, err
+			}
 		}
 		if snap.Active && snap.BootID == clock.BootID && snap.ObservedNanos <= uint64(clock.BoottimeNanoseconds) {
 			for _, server := range snap.DNSServers {

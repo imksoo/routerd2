@@ -303,37 +303,3 @@ func normalizeFirewall(f *Firewall) {
 		}
 	}
 }
-
-func firewallInterfaces(f *Firewall) []string {
-	if f == nil {
-		return nil
-	}
-	seen := map[string]bool{}
-	var names []string
-	add := func(name string) {
-		if name != "" && !seen[name] {
-			names = append(names, name)
-			seen[name] = true
-		}
-	}
-	for _, p := range f.Forward {
-		add(p.From)
-		add(p.To)
-	}
-	for _, n := range f.Masquerade {
-		add(n.OutInterface)
-	}
-	for _, chain := range []*FirewallChain{f.Input, f.Output, f.ForwardChain} {
-		if chain != nil {
-			for _, rule := range chain.Rules {
-				add(rule.Match.InInterface)
-				add(rule.Match.OutInterface)
-			}
-		}
-	}
-	for _, n := range f.NAT {
-		add(n.Match.InInterface)
-		add(n.Match.OutInterface)
-	}
-	return names
-}

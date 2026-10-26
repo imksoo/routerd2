@@ -285,9 +285,6 @@ func (e *Engine) snapshotLocked(ctx context.Context) Snapshot {
 		for _, wireguard := range d.WireGuard {
 			names[wireguard.Interface] = true
 		}
-		for _, name := range firewallInterfaces(d.Firewall) {
-			names[name] = true
-		}
 		for _, r := range d.PolicyRules {
 			tables[r.Table] = true
 			if r.InInterface != "" {
@@ -837,13 +834,6 @@ func (p *apply) firewall(want *Firewall) error {
 	if want == nil && !live.Present {
 		p.e.state.FirewallOwned = false
 		return p.checkpoint("forget absent firewall")
-	}
-	if want != nil {
-		for _, name := range firewallInterfaces(want) {
-			if _, err := p.e.kernel.Interface(name); err != nil {
-				return p.failure("firewall interface", err)
-			}
-		}
 	}
 	return p.change("firewall atomic replace", func() error { return p.e.kernel.ReplaceFirewall(want) }, func() { p.e.state.FirewallOwned = want != nil })
 }
