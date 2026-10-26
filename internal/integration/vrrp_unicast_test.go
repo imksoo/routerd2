@@ -46,6 +46,12 @@ func TestDaemonVRRPUnicastIPv6(t *testing.T) {
 	}
 }
 
+func TestDaemonVRRPMulticastIPv6(t *testing.T) {
+	if isolateFixture(t, "TestDaemonVRRPMulticastIPv6") {
+		runVRRPPeer(t, vrrpPeerTest{family: "ipv6", multicast: true})
+	}
+}
+
 func TestDaemonVRRPHealthTracking(t *testing.T) {
 	if isolateFixture(t, "TestDaemonVRRPHealthTracking") {
 		runVRRPPeer(t, vrrpPeerTest{family: "ipv4", tracking: true})
@@ -98,6 +104,10 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 		local, peer, vip, suffix, bits = "2001:db8:42::2", "2001:db8:42::3", "2001:db8:42::254", "6", 64
 		vips = []string{"fe80::42/64", vip + "/128"}
 	}
+	source, peerSource := local, peer
+	if family == "ipv6" && spec.multicast {
+		source, peerSource = "fe80::2", "fe80::3"
+	}
 	handle, err := netlink.NewHandleAt(peerNS, unix.NETLINK_ROUTE)
 	if err != nil {
 		t.Fatal(err)
@@ -112,6 +122,13 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 	if err := handle.AddrAdd(link, address); err != nil {
 		t.Fatal(err)
 	}
+	if peerSource != peer {
+		address, _ := netlink.ParseAddr(peerSource + "/64")
+		address.Flags = unix.IFA_F_NODAD
+		if err := handle.AddrAdd(link, address); err != nil {
+			t.Fatal(err)
+		}
+	}
 	capture := healthPBRCapture(t, "lan0")
 	c := vrrp.Config{Version: spec.version, AuthPassword: spec.password, Interface: "lan0", VIPInterface: "ha", Family: family, SourceAddress: local, UnicastPeers: []netip.Addr{netip.MustParseAddr(peer)}, VirtualRouterID: 42, Priority: 150, AdvertIntervalCentiseconds: 20, Addresses: vips, AcceptMode: true}
 	if c.Version == 2 {
@@ -119,11 +136,16 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 	}
 	if spec.multicast {
 		c.UnicastPeers = nil
+		c.SourceAddress = source
 	}
 	c = vrrp.Normalize(c)
 	iface := network.Interface{Name: "lan0", Addresses: []string{local + "/" + strconv.Itoa(bits)}}
 	if family == "ipv6" {
 		iface.AddressOptions = map[string]network.AddressOptions{iface.Addresses[0]: {NoDAD: true}}
+		if source != local {
+			iface.Addresses = append(iface.Addresses, source+"/64")
+			iface.AddressOptions[source+"/64"] = network.AddressOptions{NoDAD: true}
+		}
 	}
 	var probe, trackingGate net.Listener
 	services := []serviceconfig.Service{{Name: "ha", VRRP: &c}}
@@ -223,6 +245,7 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 	vrrpVIPResponders(t, peerNS, suffix, targets, "K")
 	traffic := func(ns netns.NsHandle, target, want string) {
 		t.Helper()
+		before, started := snapshot(), time.Now()
 		for _, protocol := range []string{"tcp", "udp"} {
 			var conn net.Conn
 			var err error
@@ -235,6 +258,7 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 				conn, err = net.DialTimeout(protocol+suffix, net.JoinHostPort(target, port), time.Second)
 				return err
 			}); err != nil {
+				t.Log("VIP request began", started, "election", before, "current", snapshot())
 				if wan != nil && target == vrrpWANVIP {
 					wan.logPath(t)
 				}
@@ -278,6 +302,8 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 		cfg := fmt.Sprintf("global_defs {\n router_id ROUTERD2_TEST\n}\nvrrp_instance TEST {\n state BACKUP\n interface peer0\n virtual_router_id 42\n priority %d\n advert_int %.2f\n version %d\n accept\n", priority, float64(c.AdvertIntervalCentiseconds)/100, c.Version)
 		if !spec.multicast {
 			cfg += fmt.Sprintf(" unicast_src_ip %s\n unicast_peer {\n %s\n }\n check_unicast_src\n unicast_ttl 255\n", peer, local)
+		} else {
+			cfg += " mcast_src_ip " + peerSource + "\n"
 		}
 		if c.Version == 3 {
 			cfg += " v3_checksum_as_v2\n"
@@ -616,12 +642,16 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 		if len(payload) < 8 || payload[0] != byte(c.Version<<4)|1 {
 			t.Fatal("wrong wire version", payload)
 		}
-		if hop != 255 || source.String() != local && source.String() != peer {
+		if hop != 255 || source.String() != c.SourceAddress && source.String() != peerSource {
 			t.Fatal("unexpected VRRP source or hop", source, hop)
 		}
 		if spec.multicast {
-			if destination.String() != "224.0.0.18" {
-				t.Fatal("unexpected VRRPv2 multicast destination", destination)
+			group := "224.0.0.18"
+			if family == "ipv6" {
+				group = "ff02::12"
+			}
+			if destination.String() != group {
+				t.Fatal("unexpected VRRP multicast destination", destination)
 			}
 		} else if destination.IsMulticast() || destination.String() != local && destination.String() != peer {
 			t.Fatal("unexpected unicast VRRP destination", destination)
@@ -630,7 +660,7 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 			if len(payload) != 16+4*int(payload[3]) || int(payload[5])*100 != c.AdvertIntervalCentiseconds {
 				t.Fatal("invalid VRRPv2 capture layout")
 			}
-			if source.String() == local {
+			if source.String() == c.SourceAddress {
 				var auth [8]byte
 				copy(auth[:], c.AuthPassword)
 				kind := byte(0)
@@ -643,12 +673,12 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 			}
 		}
 		counts[source.String()]++
-		if source.String() == local && len(payload) >= 3 {
+		if source.String() == c.SourceAddress && len(payload) >= 3 {
 			priorities[payload[2]]++
 		}
 	}
-	if counts[local] < 2 || counts[peer] < 2 || capture.err != nil {
-		t.Fatal("bidirectional unicast packet capture incomplete", counts, capture.err)
+	if counts[c.SourceAddress] < 2 || counts[peerSource] < 2 || capture.err != nil {
+		t.Fatal("bidirectional VRRP packet capture incomplete", counts, capture.err)
 	}
 	if tracking {
 		if priorities[50] == 0 || priorities[150] == 0 || priorities[0] != 0 {

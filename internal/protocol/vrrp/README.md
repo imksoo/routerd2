@@ -85,7 +85,7 @@ remain separate work.
 ## Single-writer effects and liveness contract
 
 `Effects.Apply(ctx, Snapshot) (Decision, error)` returns completed kernel application,
-actual VIP ownership and finite Health tracking decisions. It does not acknowledge a queue submission. `Snapshot` includes resource identity, process epoch,
+actual VIP ownership and finite resource tracking decisions. It does not acknowledge a queue submission. `Snapshot` includes resource identity, process epoch,
 transition number, active state, virtual MAC, virtual interface, host CIDRs,
 accept policy, peer observation and counters.
 

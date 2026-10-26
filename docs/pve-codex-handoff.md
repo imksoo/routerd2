@@ -93,6 +93,11 @@
   無関係なkernel I/OでBGPの適用済みstatusを不明へ戻す判定と、後続観測によって
   適用済み要求のACKを保留し、VRRP workerをtimeout・再起動させる判定である。
   更新要求自身のidentityと適用開始時の要求を用いる。timeoutや確認条件は緩めていない。
+- IPv6 multicastで独立Keepalivedとの実daemon相互接続を追加した。明示的な実link-local
+  sourceと`ff02::12`・hop limit 255をcaptureで確認し、高優先度peerへのVIP引継ぎ、
+  SIGKILL/rebind、priority-zero復旧、低優先度peerからの再取得、両ownerへのTCP/UDPが成功した。
+  既存nativeのLinux bridge経由の受信・障害切替もcapture付きで実行したが、過去の未受信は
+  再現しなかった。成功回数を原因解明の代わりに使わない。
 - neutralの元の条件期限切れ、繰返しpollとreplayによる確認回数の水増し拒否、
   異なるresourceのI/O中のACK順序はローカルで確認した。
 
@@ -110,6 +115,8 @@ captureは `dist/resource-track-packets/{protocols,health,pbr}`。
 実ソケットは `dist/resource-track-final-health-sockets.log`、buildは
 `dist/resource-track-release-build.log`、bundleは `dist/resource-track-final-bundle.log`、
 全体checkは `dist/resource-track-final-check.log`。
+IPv6 multicastは `dist/vrrp-multicast-peers.log` と `dist/vrrp-multicast-packets`、
+bridge診断は `dist/vrrp-multicast-bridge`。製品binaryは同じ `resource-track` buildである。
 出力との一致を実装条件にしない。
 途中のcapture保存失敗は、namespaceからhomeへ書こうとしたfixture配置の問題だった。
 root所有の一時0700内へ保存し外側から取り出すことで解決し、homeの権限は変えていない。
@@ -121,7 +128,10 @@ root所有の一時0700内へ保存し外側から取り出すことで解決し
 2. HA-01の残るresource種別・phase tracking、外部secret参照、peer-aware移行、cluster、
    二native nodeの追加identity・RA・DHCP/PD/NAT session継続を実装・受入する。
 3. 過去のBFD再接続timeoutの失敗request、IPv6 multicast未受信、初回IPv6 VIP TCP/DAD timeoutは
-   原因未確定。今回再現・修正した二つのACK/status問題と同一とは断定しない。
+   原因未確定。IPv6 unicastの初回TCP timeoutと同時の選挙authority期限切れは今回も一度再現した
+   （`dist/vrrp-multicast-related.log`）。syscall trace付き実行では再現せず、要求前後の選挙snapshotを
+   失敗時に表示するようfixtureへ追加したが、同じ失敗は再取得できていない。接続deadlineや
+   選挙authorityは延長していない。今回修正した二つのACK/status問題と同一とは断定しない。
 4. 残るprotocol snapshotの型付き保持、条件式の静的計算、通常投影でのinstance生成・digest再計算を整理する。
    DHCP client割当とjournalのUTC依存を整理し、実clock補正・停電・suspendで受入する。
 5. 再帰next-hopの前提address/link期限はローカル投影で確認済みだが、同じ条件の実daemon試験は未実施。
