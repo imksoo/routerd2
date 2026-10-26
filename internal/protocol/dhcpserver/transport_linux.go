@@ -5,6 +5,7 @@ package dhcpserver
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -37,6 +38,11 @@ func htons(v uint16) uint16 {
 }
 func openTransport(c Config) (_ *nativeTransport, result error) {
 	t := &nativeTransport{config: c, txFD: -1, lockFD: -1}
+	var idSeed [2]byte
+	if _, err := rand.Read(idSeed[:]); err != nil {
+		return nil, err
+	}
+	t.ipID = binary.BigEndian.Uint16(idSeed[:])
 	defer func() {
 		if result != nil {
 			_ = t.Close()
@@ -218,28 +224,31 @@ func (t *nativeTransport) Send(ctx context.Context, r response) error {
 		return err
 	}
 	t.ipID++
-	frame, err := ethernet.UDP4(t.mac, r.MAC, t.source, r.Destination, 67, uint16(r.Port), t.ipID, r.Data)
+	frames, err := ethernet.UDP4(t.mac, r.MAC, t.source, r.Destination, 67, uint16(r.Port), t.ipID, t.mtu, r.Data)
 	if err != nil {
 		return err
 	}
-	for {
-		err := unix.Sendto(t.txFD, frame, 0, &unix.SockaddrLinklayer{Ifindex: t.index, Protocol: htons(unix.ETH_P_IP)})
-		if err == nil {
-			return nil
-		}
-		if err != unix.EAGAIN && err != unix.EINTR {
-			return err
-		}
-		if !time.Now().Before(deadline) {
-			return context.DeadlineExceeded
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if _, err := unix.Poll([]unix.PollFd{{Fd: int32(t.txFD), Events: unix.POLLOUT}}, 20); err != nil && err != unix.EINTR {
-			return err
+	for _, frame := range frames {
+		for {
+			err := unix.Sendto(t.txFD, frame, 0, &unix.SockaddrLinklayer{Ifindex: t.index, Protocol: htons(unix.ETH_P_IP)})
+			if err == nil {
+				break
+			}
+			if err != unix.EAGAIN && err != unix.EINTR {
+				return err
+			}
+			if !time.Now().Before(deadline) {
+				return context.DeadlineExceeded
+			}
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if _, err := unix.Poll([]unix.PollFd{{Fd: int32(t.txFD), Events: unix.POLLOUT}}, 20); err != nil && err != unix.EINTR {
+				return err
+			}
 		}
 	}
+	return nil
 }
 func (t *nativeTransport) Probe(ctx context.Context, address netip.Addr, clientMAC net.HardwareAddr) (bool, error) {
 	if err := t.Check(); err != nil {

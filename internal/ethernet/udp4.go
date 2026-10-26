@@ -11,9 +11,10 @@ import (
 	"net/netip"
 )
 
-// UDP4 constructs one unfragmented Ethernet/IPv4/UDP frame with both checksums.
-func UDP4(sourceMAC, destinationMAC net.HardwareAddr, source, destination netip.Addr, sourcePort, destinationPort, id uint16, payload []byte) ([]byte, error) {
-	if len(sourceMAC) != 6 || len(destinationMAC) != 6 || !source.Is4() || !destination.Is4() || len(payload) > 65507 {
+// UDP4 constructs Ethernet/IPv4/UDP frames with both checksums. Datagrams above
+// mtu are fragmented on eight-byte boundaries with the supplied identification.
+func UDP4(sourceMAC, destinationMAC net.HardwareAddr, source, destination netip.Addr, sourcePort, destinationPort, id uint16, mtu int, payload []byte) ([][]byte, error) {
+	if len(sourceMAC) != 6 || len(destinationMAC) != 6 || !source.Is4() || !destination.Is4() || len(payload) > 65507 || mtu < 68 || mtu > 65535 {
 		return nil, errors.New("invalid Ethernet IPv4/UDP frame")
 	}
 	b := make([]byte, 42+len(payload))
@@ -46,7 +47,30 @@ func UDP4(sourceMAC, destinationMAC net.HardwareAddr, source, destination netip.
 		sum = 0xffff
 	}
 	binary.BigEndian.PutUint16(udp[6:8], sum)
-	return b, nil
+	if len(ip)+len(udp) <= mtu {
+		return [][]byte{b}, nil
+	}
+	// All but the last fragment carry a multiple of eight bytes. Only the first
+	// contains the UDP header; its checksum covers the complete reassembled UDP.
+	chunk := (mtu - 20) &^ 7
+	frames := make([][]byte, 0, (len(udp)+chunk-1)/chunk)
+	for offset := 0; offset < len(udp); offset += chunk {
+		end := min(offset+chunk, len(udp))
+		frame := make([]byte, 34+end-offset)
+		copy(frame[:34], b[:34])
+		copy(frame[34:], udp[offset:end])
+		header := frame[14:34]
+		binary.BigEndian.PutUint16(header[2:4], uint16(len(frame)-14))
+		flags := uint16(offset / 8)
+		if end < len(udp) {
+			flags |= 0x2000
+		}
+		binary.BigEndian.PutUint16(header[6:8], flags)
+		header[10], header[11] = 0, 0
+		binary.BigEndian.PutUint16(header[10:12], checksum(header))
+		frames = append(frames, frame)
+	}
+	return frames, nil
 }
 func checksum(b []byte) uint16 {
 	var sum uint32

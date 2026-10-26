@@ -378,12 +378,14 @@ func nativeClientWireLifecycle(t *testing.T) {
 	server := netip.MustParseAddr("192.0.2.1")
 	id := append([]byte{1}, iface.HardwareAddr...)
 	send := func(p packet) {
-		frame, err := ethernet.UDP4(iface.HardwareAddr, broadcastMAC, p.Source, p.Destination, 68, 67, 1, p.Data)
+		frames, err := ethernet.UDP4(iface.HardwareAddr, broadcastMAC, p.Source, p.Destination, 68, 67, 1, iface.MTU, p.Data)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := unix.Sendto(fd, frame, 0, &unix.SockaddrLinklayer{Ifindex: iface.Index, Protocol: htons(unix.ETH_P_IP)}); err != nil {
-			t.Fatal(err)
+		for _, frame := range frames {
+			if err := unix.Sendto(fd, frame, 0, &unix.SockaddrLinklayer{Ifindex: iface.Index, Protocol: htons(unix.ETH_P_IP)}); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	receive := func(xid uint32, typ byte, unicast bool) wire.Message {

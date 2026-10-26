@@ -4,6 +4,7 @@ package dhcprelay
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -153,6 +154,11 @@ func Run(ctx context.Context, c dhcprelayconfig.Config, ready func()) error {
 		return err
 	}
 	defer unix.Close(tx)
+	var idSeed [2]byte
+	if _, err := rand.Read(idSeed[:]); err != nil {
+		return err
+	}
+	ipID := binary.BigEndian.Uint16(idSeed[:])
 	ready()
 	buf := make([]byte, 4097)
 	nextCheck := time.Now()
@@ -223,9 +229,6 @@ func Run(ctx context.Context, c dhcprelayconfig.Config, ready func()) error {
 			if err := client.check(links, c.VRF); err != nil {
 				return err
 			}
-			if n+28 > client.mtu {
-				continue // this output socket sends unfragmented Ethernet frames
-			}
 			destination := netip.AddrFrom4([4]byte(packet[16:20]))
 			if destination.IsUnspecified() {
 				destination = netip.AddrFrom4([4]byte(packet[12:16])) // DHCPINFORM ACK
@@ -235,12 +238,15 @@ func Run(ctx context.Context, c dhcprelayconfig.Config, ready func()) error {
 				destination = netip.AddrFrom4([4]byte{255, 255, 255, 255})
 				mac = net.HardwareAddr{255, 255, 255, 255, 255, 255}
 			}
-			frame, err := ethernet.UDP4(client.mac, mac, fromAddress.Unmap(), destination, 67, 68, 0, packet)
+			ipID++
+			frames, err := ethernet.UDP4(client.mac, mac, fromAddress.Unmap(), destination, 67, 68, ipID, client.mtu, packet)
 			if err != nil {
 				return err
 			}
-			if err := unix.Sendto(tx, frame, 0, &unix.SockaddrLinklayer{Ifindex: client.index}); err != nil && err != unix.EAGAIN && err != unix.ENOBUFS && err != unix.EINTR {
-				return fmt.Errorf("forward DHCP reply: %w", err)
+			for _, frame := range frames {
+				if err := unix.Sendto(tx, frame, 0, &unix.SockaddrLinklayer{Ifindex: client.index}); err != nil && err != unix.EAGAIN && err != unix.ENOBUFS && err != unix.EINTR {
+					return fmt.Errorf("forward DHCP reply: %w", err)
+				}
 			}
 		}
 	}

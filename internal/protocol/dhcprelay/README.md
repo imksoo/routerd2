@@ -45,12 +45,19 @@ The worker exits when its interface identity, VRF, readiness or local address
 changes. The supervisor owns process recovery.
 
 DHCP options are opaque; the relay does not insert Option 82.
-Input datagrams are bounded at 4096 bytes. Client replies must fit the Ethernet
-MTU without fragmentation. Oversized reply fragmentation,
-HA relay failover and VRF interoperability qualification remain unfinished.
+Input datagrams are bounded at 4096 bytes. Replies exceeding the client link MTU
+use IPv4 fragments, including broadcast replies. The shared Ethernet encoder
+keeps one datagram identification and UDP checksum across the fragments and
+computes each IP header checksum and eight-byte fragment offset, following
+[RFC 791](https://www.rfc-editor.org/rfc/rfc791.html#section-3.1).
+The socket owner increments its identification from a random initial value.
+It stores no persistent fragment or lease state. HA relay failover and VRF
+interoperability qualification remain unfinished.
 
 `make check-dhcp-relay` requires Linux user/network namespaces, root or
 passwordless sudo, dnsmasq and BusyBox with udhcpc. It runs actual product workers,
 two independent client namespaces and an independent server namespace. It checks
 both scopes, unicast/broadcast delivery, DHCPINFORM, the hop limit, worker recovery,
-forwarded TCP/UDP and captures on both LANs and the WAN.
+forwarded TCP/UDP and captures on both LANs and the WAN. On a client link with
+MTU 600, large unicast and broadcast DHCPINFORM ACKs must reassemble with both
+200-byte vendor options intact; the capture must show bounded first/last fragments.

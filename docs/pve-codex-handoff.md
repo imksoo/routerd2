@@ -78,7 +78,7 @@
 
 ## 今回の実装と検証
 
-最新buildは `RELEASE_ID=dhcp-relay`。NET-06のDHCPv4 relayをnative serviceへ追加した。
+最新buildは `RELEASE_ID=relay-fragments`。NET-06のDHCPv4 relayをnative serviceへ追加した。
 routing domainごとに一つのUDP 67 listenerを持ち、LAN別の上流一覧と宣言済みgiaddrで中継する。
 lease表、transaction map、再送queue、永続状態は持たない。client interfaceとgiaddrのaddress宣言を
 依存graphへ接続し、native DHCP serverとのlistener競合を設定とnamespace内のsocket claimで防ぐ。
@@ -96,32 +96,42 @@ DORAで二つのremote scopeから正しいaddress/server/routerを取得した�
 unicast/broadcastの応答、取得したaddressでの実TCP/UDP、worker強制終了後の再取得が成功した。
 独立wire要求のDHCPINFORMでは、yiaddrが空のACKがciaddrへ届いた。
 hops=5の要求は破棄され、同じclientの正しい要求は成功した。
-WAN/LAN2本のpcapで元のgiaddr・hopsと応答先を確認した。型付きaddress準備とUDP送信期限を含む最終buildで成功した。
+WAN/LAN2本のpcapで元のgiaddr・hopsと応答先を確認した。
+
+今回、MTUを超えるrelay応答を捨てる分岐を削除した。MTU 600のLANに対し、独立dnsmasqは
+二つの200-byte optionを持つ694-byteのIPv4応答を返す。`c509efd` の実ELFではWANに応答が
+届いてもLANへ出ず、clientがtimeoutした。変更後はunicast/broadcastとも596-byteと118-byteの
+fragment（offset 0/576、同じdatagram ID、最初だけMF）で送り、client kernelの再組立て後も
+両optionが一致した。共有Ethernet encoderはMTUとfragment offset/header checksumを扱い、
+UDP checksumは元のdatagram全体で計算する。socket ownerはランダムな開始値からIDを増やす。
+fragment用journal、再送queue、旧API adapterは作っていない。
 
 peerはdnsmasq 2.90、BusyBox 1.36.1。dnsmasqはuser namespace内のsetgroupsを避ける
 `--no-daemon`で起動する。build/testは規定のumask=022を使う。
 最終の全体check・Race Detector・vet・6 ELF buildが成功した。
-同じamd64 ELFでrelay/既存DHCP→DNS/Health→PBR/PD→RAが成功した。
-6 ELFのsigned bundle/catalog/publisher検査も成功した。catalogの試験は、重複した手書きrole一覧を
-削除し、実際のfactory role catalogを使う。最終stagingのsecrets scanも成功した。
+同じamd64 ELFで上記relayと既存DHCP→DNSが成功した。namespace内のnative serverも
+DORA/renew/reboot/NAK/RELEASE/DECLINE/quarantineをRace Detector付きで確認した。
+6 ELFのsigned bundle/catalog/publisher検査も成功した。最終stagingのsecrets scanも成功した。
+Health/PBRとPD/RAは直前のc509efdで成功しており、この変更後は再実行していない。
 
 現在の出力:
 
-- `dist/dhcp-relay-final-check-build.log`: 全体check・Race Detector・vet・6 ELF build。
-- `dist/dhcp-relay-final/`: 最終relayの独立client/serverログと3本のpcap。
-- `dist/dhcp-relay-{server,health,pd-ra}{.log,/}`: 既存DHCP→DNS、二WAN切替、PD/RA。
-- `dist/dhcp-relay-{bundle,tools,secrets}.log`: signed bundle、Python tools、secrets scan。
+- `dist/relay-fragments-check-build.log`: 全体check・Race Detector・vet・6 ELF build。
+- `dist/relay-fragments-before/`: 修正前の実ELFで応答が消えたWAN/LAN captureとtimeout。
+- `dist/relay-fragments-final/`: 独立peerの大きいunicast/broadcast応答、fragmentと復旧のログ/pcap。
+- `dist/relay-fragments-native-server.log`、`dist/relay-fragments-server/`: native serverと実daemon DHCP/DNS。
+- `dist/relay-fragments-{bundle,secrets}.log`: signed bundle、secrets scan。
 
-`make check-dhcp-relay`、`make check-health-pbr`、`make check-pd-ra`で再実行できる。
+`make check-dhcp-relay`で再実行できる。
 既存server経路は `python3 scripts/daemon-tests.py dhcp-server`。
-compiler contractは `resource-program-native-12` へ変更した。worker ABI 3とnetwork journal 5は同じ。
-prototype migration/readerは追加しない。fragmentation、HA/VRFの受入、
+compiler contractは `resource-program-native-12`、worker ABIは3、network journalは5のままである。
+prototype migration/readerは追加しない。HA/VRFの受入、
 arm64実行、物理NIC、性能、suspendは未完了である。
 
 ## 未完了と次の作業
 
 1. 全実装計画、全更新復旧経路、外部engine、配備先と対象実機の受入は未完了。
-   NET-06はrelayのfragmentation・HA/VRF受入、DHCPv6 server、dynamic pool/options・DNS・sticky/lease importが残る。
+   NET-06はrelayのHA/VRF受入、DHCPv6 server、dynamic pool/options・DNS・sticky/lease importが残る。
    今回の試験成功を製品全体・実機利用可能の判定には使わない。
 2. NET-07の旧resource/profile、動的source・VRF経路変更、大規模RIBを実装・受入する。
    IPv4/IPv6のmultihop BFD/BGPは実通信したが、自動link-local DAD起動、IPv6 single-hop VRF・link-local next-hop・ECMP等は未受入。

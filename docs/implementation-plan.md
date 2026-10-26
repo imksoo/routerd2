@@ -664,7 +664,10 @@ UDP listenerを持ち、LAN別の上流一覧と宣言済みgiaddrを使う。le
 旧DHCPv4Relayの静的interfaces/upstreamもこのworkerへ変換する。
 独立dnsmasqと二つのBusyBox clientでDORA、unicast/broadcast応答、DHCPINFORM、hop制限、
 worker再起動後の再取得、利用者TCP/UDPと3 interfaceのcaptureを確認した。
-`make check-dhcp-relay`で再実行できる。fragmentation・VRF/HAの受入と、
+MTU 600のLANでは大きいunicast/broadcast DHCPINFORM応答をIPv4分割し、client kernelの
+再組立て後も二つの200-byte optionが一致することを確認した。元実装のMTU超過dropは削除した。
+共有Ethernet encoderはDHCP serverとrelayの両方でMTU・fragment offset・header checksumを扱う。
+`make check-dhcp-relay`で再実行できる。VRF/HAの受入と、
 DHCPv6 server・残るresource契約は未完了であり、NET-06全体の完了とはしない。
 
 **受入条件**

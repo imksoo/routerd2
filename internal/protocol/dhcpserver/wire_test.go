@@ -136,10 +136,14 @@ func TestResponseDeliveryAndIndependentPacketChecksums(t *testing.T) {
 		t.Fatal("pre-address unicast must use client Ethernet MAC")
 	}
 	serverMAC := net.HardwareAddr{2, 0, 0, 0, 0, 2}
-	frame, err := ethernet.UDP4(serverMAC, r.MAC, source, yi, 67, 68, 5, payload)
+	frames, err := ethernet.UDP4(serverMAC, r.MAC, source, yi, 67, 68, 5, 1500, payload)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(frames) != 1 {
+		t.Fatal("small reply was fragmented", len(frames))
+	}
+	frame := frames[0]
 	if binary.BigEndian.Uint16(frame[12:14]) != unix.ETH_P_IP || binary.BigEndian.Uint16(frame[34:36]) != 67 || binary.BigEndian.Uint16(frame[36:38]) != 68 || binary.BigEndian.Uint16(frame[16:18]) != uint16(len(frame)-14) {
 		t.Fatal("wrong packet lengths/ports")
 	}

@@ -68,7 +68,7 @@ func TestDaemonDHCPRelayIndependentClientsAndServer(t *testing.T) {
 	}}
 	f := startFixtureDaemon(t, config.FromNative(config.Native{Network: network.Desired{Interfaces: []network.Interface{
 		{Name: "wan0", Addresses: []string{"198.51.100.1/24"}},
-		{Name: "lan0", Addresses: []string{"192.0.2.1/24"}},
+		{Name: "lan0", MTU: 600, Addresses: []string{"192.0.2.1/24"}},
 		{Name: "lan1", Addresses: []string{"203.0.113.1/24"}},
 	}, Forwarding: network.Forwarding{IPv4: &forward}}, Services: []serviceconfig.Service{{Name: "relay", DHCPRelay: &relay}}}))
 	captures := []*healthPBRCaptureState{healthPBRCapture(t, "wan0"), healthPBRCapture(t, "lan0"), healthPBRCapture(t, "lan1")}
@@ -83,7 +83,8 @@ func TestDaemonDHCPRelayIndependentClientsAndServer(t *testing.T) {
 	// this isolated user namespace deliberately disallows.
 	server := exec.CommandContext(ctx, dnsmasq, "--no-daemon", "--conf-file=/dev/null", "--port=0", "--interface=server0", "--bind-interfaces", "--dhcp-authoritative", "--log-dhcp", "--log-facility=-", "--pid-file=", "--dhcp-leasefile="+filepath.Join(work, "leases"),
 		"--dhcp-range=set:lan0,192.0.2.100,192.0.2.110,255.255.255.0,60s", "--dhcp-option=tag:lan0,3,192.0.2.1",
-		"--dhcp-range=set:lan1,203.0.113.100,203.0.113.110,255.255.255.0,60s", "--dhcp-option=tag:lan1,3,203.0.113.1")
+		"--dhcp-range=set:lan1,203.0.113.100,203.0.113.110,255.255.255.0,60s", "--dhcp-option=tag:lan1,3,203.0.113.1",
+		"--dhcp-vendorclass=set:large,relay-large", "--dhcp-option-force=tag:large,224,"+strings.Repeat("A", 200), "--dhcp-option-force=tag:large,225,"+strings.Repeat("B", 200))
 	server.Stdout, server.Stderr = serverLog, serverLog
 	if err := fixtureInsideNamespace(provider, server.Start); err != nil {
 		stopServer()
@@ -214,7 +215,10 @@ func TestDaemonDHCPRelayIndependentClientsAndServer(t *testing.T) {
 	binary.BigEndian.PutUint32(request[4:8], 0x71829304)
 	copy(request[12:16], net.ParseIP(leases[0]).To4())
 	copy(request[28:34], clientMAC)
-	copy(request[236:], []byte{99, 130, 83, 99, 53, 1, 8, 55, 2, 3, 6, 255})
+	options := []byte{99, 130, 83, 99, 53, 1, 8, 55, 2, 224, 225, 57, 2, 0x10, 0, 60, 11}
+	options = append(options, []byte("relay-large")...)
+	options = append(options, 255)
+	copy(request[236:], options)
 	send := func() {
 		t.Helper()
 		if _, err := conn.WriteTo(request, nil, &net.UDPAddr{IP: net.IPv4bcast, Port: 67}); err != nil {
@@ -230,11 +234,47 @@ func TestDaemonDHCPRelayIndependentClientsAndServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	request[3] = 0
-	send()
-	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	n, metadata, _, err := conn.ReadFrom(response)
-	if err != nil || n < 240 || metadata == nil || metadata.Dst.String() != leases[0] || response[0] != 2 || binary.BigEndian.Uint32(response[4:8]) != 0x71829304 || net.IP(response[16:20]).String() != "0.0.0.0" {
-		t.Fatal("DHCPINFORM requires an ACK to ciaddr with zero yiaddr", n, metadata, err)
+	for _, broadcast := range []bool{false, true} {
+		wantDestination := leases[0]
+		xid := uint32(0x71829304)
+		if broadcast {
+			wantDestination = "255.255.255.255"
+			xid++
+			binary.BigEndian.PutUint16(request[10:12], 0x8000)
+		}
+		binary.BigEndian.PutUint32(request[4:8], xid)
+		send()
+		conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		n, metadata, _, err := conn.ReadFrom(response)
+		if err != nil || n < 240 || metadata == nil || metadata.Dst.String() != wantDestination || response[0] != 2 || binary.BigEndian.Uint32(response[4:8]) != xid || net.IP(response[16:20]).String() != "0.0.0.0" {
+			t.Fatal("DHCPINFORM requires an ACK to ciaddr with zero yiaddr", n, metadata, err)
+		}
+		if n <= 600 {
+			t.Fatal("large DHCPINFORM reply did not exceed the client link MTU", n)
+		}
+		large := map[byte]string{}
+		for at := 240; at < n; {
+			code := response[at]
+			at++
+			if code == 255 {
+				break
+			}
+			if code == 0 {
+				continue
+			}
+			if at >= n || int(response[at])+at+1 > n {
+				t.Fatal("truncated reassembled DHCP options")
+			}
+			length := int(response[at])
+			at++
+			if code == 224 || code == 225 {
+				large[code] += string(response[at : at+length])
+			}
+			at += length
+		}
+		if large[224] != strings.Repeat("A", 200) || large[225] != strings.Repeat("B", 200) {
+			t.Fatal("large DHCP options changed in transit", len(large[224]), len(large[225]))
+		}
 	}
 	module := func() supervisor.ModuleStatus {
 		var status supervisor.Status
@@ -261,6 +301,33 @@ func TestDaemonDHCPRelayIndependentClientsAndServer(t *testing.T) {
 	})
 	acquire(0, leases[0])
 	until(t, time.Second, func() bool {
+		fragments := map[string]byte{}
+		captures[1].mu.Lock()
+		for _, packet := range captures[1].packets {
+			b := packet.data
+			if len(b) < 34 || b[12] != 8 || b[13] != 0 || b[23] != 17 || net.IP(b[26:30]).String() != "198.51.100.2" {
+				continue
+			}
+			flags := binary.BigEndian.Uint16(b[20:22])
+			if flags&0x3fff == 0 {
+				continue
+			}
+			if binary.BigEndian.Uint16(b[16:18]) > 600 {
+				captures[1].mu.Unlock()
+				t.Fatal("fragment exceeds client link MTU")
+			}
+			destination := net.IP(b[30:34]).String()
+			if flags&0x1fff == 0 && flags&0x2000 != 0 {
+				fragments[destination] |= 1
+			}
+			if flags&0x1fff != 0 && flags&0x2000 == 0 {
+				fragments[destination] |= 2
+			}
+		}
+		captures[1].mu.Unlock()
+		if fragments[leases[0]] != 3 || fragments["255.255.255.255"] != 3 {
+			return false
+		}
 		for i, iface := range relay.Interfaces {
 			if captures[0].count(iface.Address, "198.51.100.2", 17, 67) == 0 {
 				return false
@@ -307,5 +374,5 @@ func TestDaemonDHCPRelayIndependentClientsAndServer(t *testing.T) {
 		}
 		return true
 	})
-	t.Log("independent clients acquired both remote scopes; giaddr/hops, unicast/broadcast replies, DHCPINFORM ciaddr, hop-limit discard, TCP/UDP and worker restart passed")
+	t.Log("independent clients acquired both remote scopes; large unicast/broadcast DHCPINFORM reassembled across MTU 600 with intact options, packet fragment checks, giaddr/hops, hop-limit discard, TCP/UDP and worker restart passed")
 }

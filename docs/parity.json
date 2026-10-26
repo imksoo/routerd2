@@ -363,7 +363,7 @@
         "ra"
       ],
       "parity_status": "not_integrated",
-      "known_gap": "Native RA server/client, delegated-prefix updates and DHCPv4 server are implemented. Generated RA is verified with an independent PD peer, actual LAN PIO capture, renew/renumber on the same worker, owned expiry/reacquisition and routed client TCP/UDP. Native DHCPv4 relay now has independent dnsmasq/BusyBox DORA on two LANs, unicast/broadcast replies, DHCPINFORM, hop-limit discard, worker recovery and client TCP/UDP. DHCPv6 server, relay fragmentation/HA/VRF qualification, complete dynamic dependencies, original global sticky behavior and lease-sync resource semantics remain incomplete."
+      "known_gap": "Native RA server/client, delegated-prefix updates and DHCPv4 server are implemented. Generated RA is verified with an independent PD peer, actual LAN PIO capture, renew/renumber on the same worker, owned expiry/reacquisition and routed client TCP/UDP. Native DHCPv4 relay now has independent dnsmasq/BusyBox DORA on two LANs, unicast/broadcast replies, DHCPINFORM, hop-limit discard, worker recovery and client TCP/UDP. Oversized unicast/broadcast DHCP replies now fragment at the LAN MTU; independent peers and kernel reassembly preserve two 200-byte options on MTU 600. DHCPv6 server, relay HA/VRF qualification, complete dynamic dependencies, original global sticky behavior and lease-sync resource semantics remain incomplete."
     },
     {
       "id": "dns",
