@@ -129,7 +129,7 @@ Rapid Commit付きDHCPDISCOVERも通常OFFERで処理する（RFC 4039 §3）。
 最後まで完了した出力は`dist/rapid-commit-final-peer.log`。BusyBoxの空option指定はoptionを送らず、
 Rapid Commitの検証には使えなかった。RA/DHCPの出力は`dist/receive-ra/`、`dist/receive-dhcp6/`。
 `make check`・Race Detector・vet・6静的ELF buildも成功した。
-NA/PD片方だけのReplyによる共通更新timerとexchangeの置換は修正が残る。
+Renew/Rebindの部分Replyは有効なIAだけを更新し、未回答IAのexchangeと元T2を保持するよう修正した。
 
 ## 経路と補助保存の結合の修正
 
@@ -150,6 +150,27 @@ subnet maskを要求するよう修正した（出典とlicenseは`internal/prot
 製品版`route-continuity`、出力は`dist/dhcp4-offsubnet-final-peer.log`と`dist/daemon-bgp/`。
 最終sourceの`make check`・Race Detector・vet・6静的ELF buildは成功した
 （`dist/route-continuity-final-check-build.log`）。
+
+## 独立Keaとの同時NA/PDと部分更新
+
+ISC Kea 2.4.1を隔離namespaceで動かし、製品`dhcp6-partial`のIA_NA/IA_PD同時取得、
+WAN source付きTCP/UDP、委譲LANのkernel SLAAC/TCP/UDP、scope付きリンクローカルDNSを確認した。
+peerは製品writerによるlink UPと通常DADの完了後に起動する。NoDADやhost NIC変更は使わない。
+Keaの実ReplyからIA_PDだけを除いたpacketをScapyで配送し、元の完全なpacketだけを隔離INPUTで落とした。
+NAを更新しても元T2でRebindへ進み、未更新PDの元期限は不変だった。
+PDは元の期限で失効し、その間も更新済みNAのTCP/UDPは継続した。
+完全なKea Replyを再び配送すると、委譲LANのTCP/UDPが復旧した。
+WAN workerは第1世代のまま、LAN RAはPD失効で停止し再取得で第2世代となった。
+LAN captureのRDNSSは明示global serverだけで、WANから学んだリンクローカルDNSを別LANへ転送しない。
+
+Replyから省略された旧prefixのpreferred/valid期限は元のまま残す。省略を明示deprecationに変えない。
+`make check-pd-ra`の既存実daemon試験も、元のpreferred期限での旧prefix非推奨化・新prefix通信が通った。
+Keaのローカル出力は`dist/kea-partial-peer-4.log`、private setup/captureの場所は
+`dist/kea-partial-location.json`。最終3バイナリーのhashは配備先とbuild出力で一致した。
+`make check`・全体Race Detector・vet・6静的ELF build、追加の小さな部分Reply再発防止試験と
+関連Race Detectorも通った（`dist/dhcp6-partial-check-build.log`、`dist/dhcp6-partial-regression.log`）。
+実回線の長時間TCP/UDPと元T1でのPD更新は継続中で、まだ成功と数えない。
+実行中の回線バイナリーは`ntt-aftr`であり、以降の修正まで実回線受入済みとはしない。
 
 ## 未完了と次の作業
 

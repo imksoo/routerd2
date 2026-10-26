@@ -662,7 +662,11 @@ bridge MAC変更後の古いSLLA広告を修正した。保存状態なしの起
 リンクローカルDNS/SNTPを許可し、独立dnsmasqと通常DAD・scope付きDNS実問い合わせ・
 IA_NA TCP/UDP・更新/失効/復旧を確認した。不良RDNSS/DNSSLもRA option単位で破棄する。
 Rapid Commit Discoverへの通常OFFERとDORAを独立Scapy・captureで確認した。
-NA/PD片方の応答が未更新IAの共通更新timerを置換する問題は修正が残る。
+部分Renew/Rebindは有効なIAを更新し、未回答IAのexchangeと元T2を保持する。
+ISC Kea 2.4.1でNA/PD同時取得・WAN/LAN TCP/UDP・scope付きDNSを確認した。
+Keaの実ReplyからPDだけを省略して、元T2/RebindとPD失効、NA通信継続を確認した。
+完全なReplyを戻すとLANも復旧した。省略された旧prefixの元のpreferred/valid期限を保持する。
+WANリンクローカルDNSは別LANへ広告せず、実LAN captureでも確認した。
 DHCPv4は旧request encoderのsubnet mask要求漏れを独立dnsmasqで再現して修正した。
 /32割当・明示gateway直結routeからdefault routeとTCP/UDPが通った。
 サブネット外であるだけでは投影全体を拒否せず、架空のonlink routeも作らない。

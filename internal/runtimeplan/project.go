@@ -203,6 +203,10 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 				if lan.UseLearnedDNS {
 					if until, usable := snap.InformationUntil(facts.bfdClock); usable {
 						for _, server := range unique(snap.DNSServers) {
+							address, _ := netip.ParseAddr(server)
+							if address.IsLinkLocalUnicast() && lan.Interface != s.Interface() {
+								continue // The WAN link-local scope is not the LAN link.
+							}
 							c.LearnedRDNSS = append(c.LearnedRDNSS, ra.DNSServer{Address: server, ValidUntil: until})
 						}
 						for _, name := range unique(snap.DomainSearch) {

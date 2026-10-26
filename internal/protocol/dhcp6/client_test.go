@@ -34,6 +34,31 @@ func TestDeclineNoBindingCompletesWithoutLosingDelegation(t *testing.T) {
 	}
 }
 
+func TestPartialRenewKeepsMissingPrefixExchangeAndOriginalT2(t *testing.T) {
+	now := time.Unix(1000, 0)
+	clock := clockAt(now)
+	prefix := dhcp6config.Prefix{Prefix: "2001:db8:100::/56", PreferredUntil: lifetime.After(clock, 20), ValidUntil: lifetime.After(clock, 30)}
+	c := client{
+		cfg:  dhcp6config.Config{IAID: 7, RequestAddress: true, RequestPrefix: true},
+		duid: []byte{0, 3, 0, 1}, server: []byte{0, 3, 0, 2},
+		snapshot: dhcp6config.Snapshot{BootID: clock.BootID, Prefixes: []dhcp6config.Prefix{prefix}, RenewAt: lifetime.After(clock, 2), RebindAt: lifetime.After(clock, 4)},
+	}
+	if err := c.begin(renew, now.Add(2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	xid := c.lease.xid
+	m := message{kind: reply, xid: xid, client: c.duid, server: c.server, na: &association{iaid: 7, t1: 5, t2: 8, leases: []assignment{{netip.MustParsePrefix("2001:db8:42::10/128"), 20, 30}}}}
+	if err := c.accept(m, clockAt(now.Add(3*time.Second))); err != nil {
+		t.Fatal(err)
+	}
+	if c.lease.kind != renew || c.lease.xid != xid || c.snapshot.RebindAt != lifetime.After(clock, 4) || len(c.snapshot.Addresses) != 1 || len(c.snapshot.Prefixes) != 1 || c.snapshot.Prefixes[0] != prefix {
+		t.Fatal("NA-only Reply completed PD renewal or changed its original budget", c.snapshot, c.lease)
+	}
+	if err := c.advance(clockAt(now.Add(4 * time.Second))); err != nil || c.lease.kind != rebind {
+		t.Fatal("partial Reply postponed original T2", err, c.lease)
+	}
+}
+
 func TestCombinedAddressAndPrefixExchange(t *testing.T) {
 	now := time.Unix(1700000000, 0)
 	c := client{cfg: dhcp6config.Config{IAID: 7, RequestAddress: true, RequestPrefix: true, PrefixLength: 56}, duid: []byte{0, 3, 0, 1}, server: []byte{0, 3, 0, 2}, snapshot: dhcp6config.Snapshot{BootID: clockAt(now).BootID, State: "bound"}}
@@ -142,7 +167,7 @@ func TestRenumberRetainsOriginalOldPrefixDeadline(t *testing.T) {
 	if err := c.accept(m, clockAt(now)); err != nil {
 		t.Fatal(err)
 	}
-	if len(c.snapshot.Prefixes) != 2 || c.snapshot.Prefixes[0].PreferredUntil != lifetime.After(clockAt(now), 0) || c.snapshot.Prefixes[0].ValidUntil != old.ValidUntil {
+	if len(c.snapshot.Prefixes) != 2 || c.snapshot.Prefixes[0].PreferredUntil != old.PreferredUntil || c.snapshot.Prefixes[0].ValidUntil != old.ValidUntil {
 		t.Fatal("renumber refreshed an old prefix", c.snapshot)
 	}
 	// Late replies from the completed exchange cannot extend either assignment.

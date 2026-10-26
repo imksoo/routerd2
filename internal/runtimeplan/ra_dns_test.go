@@ -19,7 +19,7 @@ func TestPDLearnedDNSDeadlineAndStableRAIdentity(t *testing.T) {
 	clock := boottime.Clock{BootID: "11111111-2222-4333-8444-555555555555", BoottimeNanoseconds: int64(time.Hour), WallTime: now}
 	doc := config.Native{Services: []serviceconfig.Service{{Name: "pd", DHCP6: &serviceconfig.DHCP6{RequestPrefix: true, Interface: "wan0", IAID: 7, Delegations: []serviceconfig.Delegation{{Name: "lan", Interface: "lan0", SubnetID: 3, Advertise: true, UseLearnedDNS: true, RDNSS: []string{"2001:db8::1"}, DNSSL: []string{"static.example"}}}}}}}
 	protocols := protocolsFor(t, doc, "/run/routerd", "/var/lib/routerd")
-	snapshot := dhcp6config.Snapshot{BootID: clock.BootID, Resource: "pd", Interface: "wan0", IAID: 7, State: "bound", Prefixes: []dhcp6config.Prefix{{Prefix: "2001:db8:100::/56", PreferredUntil: lifetime.After(clock, 400), ValidUntil: lifetime.After(clock, 600)}}, InformationRefreshSeconds: 600, InformationRefreshAt: lifetime.After(clock, 180), InfoReceivedNanos: uint64(clock.BoottimeNanoseconds), DNSServers: []string{"2001:db8::1", "2001:db8::53"}, DomainSearch: []string{"static.example", "learned.example"}}
+	snapshot := dhcp6config.Snapshot{BootID: clock.BootID, Resource: "pd", Interface: "wan0", IAID: 7, State: "bound", Prefixes: []dhcp6config.Prefix{{Prefix: "2001:db8:100::/56", PreferredUntil: lifetime.After(clock, 400), ValidUntil: lifetime.After(clock, 600)}}, InformationRefreshSeconds: 600, InformationRefreshAt: lifetime.After(clock, 180), InfoReceivedNanos: uint64(clock.BoottimeNanoseconds), DNSServers: []string{"2001:db8::1", "2001:db8::53", "fe80::53"}, DomainSearch: []string{"static.example", "learned.example"}}
 	projectAt := func(value dhcp6config.Snapshot, at time.Time) (ra.Config, string) {
 		t.Helper()
 		raw, err := json.Marshal(value)

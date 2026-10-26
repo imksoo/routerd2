@@ -56,4 +56,9 @@ DS-Liteでは通常RAの期限更新とDNS RRset順序変更でトンネルを�
 IA_NA更新/失効/復旧、悪いDNS optionを含むRAからの経路/TCP/UDP、
 ScapyのRapid Commit要求から通常OFFER/REQUEST/ACKまでを確認した。
 DHCPv4 off-subnet gateway・subnet mask要求漏れ・BGP補助保存と生存の結合は修正し、
-独立dnsmasq・実GoBGP worker/独立wire peer・kernelで確認した。共通IA更新timerの修正は残る。
+独立dnsmasq・実GoBGP worker/独立wire peer・kernelで確認した。部分Renew/Rebindは元のexchange/T2と未更新IAの期限を保持するよう修正した。
+
+ISC Kea 2.4.1との同時NA/PD取得、WAN/LAN TCP/UDP、リンクローカルDNSを実通信した。
+KeaのReplyからPDだけを省略しても、元T2/Rebind・PD失効とNA通信継続を確認した。
+完全なReplyを戻すとLANも復旧した。省略された旧prefixの期限を勝手に変更する処理を削除し、
+WANリンクローカルDNSを別LANへ広告しないようにした。全体の機能受入完了ではない。

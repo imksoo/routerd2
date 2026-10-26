@@ -270,17 +270,6 @@ func (c *client) accept(m message, clock boottime.Clock) error {
 	}
 	if m.pd != nil && m.pd.status == 0 {
 		prefixes := slices.Clone(next.Prefixes)
-		if len(m.pd.leases) > 0 {
-			for i := range prefixes {
-				present := false
-				for _, a := range m.pd.leases {
-					present = present || a.prefix.String() == prefixes[i].Prefix
-				}
-				if !present {
-					prefixes[i].PreferredUntil = lifetime.Minimum(clock, prefixes[i].PreferredUntil, lifetime.After(clock, 0))
-				}
-			}
-		}
 		for _, a := range m.pd.leases {
 			value := a.prefix.String()
 			prefixes = slices.DeleteFunc(prefixes, func(v dhcp6config.Prefix) bool { return v.Prefix == value })
@@ -295,11 +284,19 @@ func (c *client) accept(m message, clock boottime.Clock) error {
 	}
 	c.server = slices.Clone(m.server)
 	next.ServerDUID = hex.EncodeToString(m.server)
+	// A partial Renew/Rebind Reply updates its own bindings but does not
+	// acknowledge missing IAs or postpone their original retry/T2 budget
+	// (RFC 8415 section 18.2.10.1).
+	partial := (e.kind == renew || e.kind == rebind) && (c.cfg.RequestAddress && (m.na == nil || m.na.status != 0) || c.cfg.RequestPrefix && (m.pd == nil || m.pd.status != 0))
+	if partial {
+		renewAt = lifetime.Minimum(clock, next.RenewAt, renewAt)
+		rebindAt = lifetime.Minimum(clock, next.RebindAt, rebindAt)
+	} else {
+		c.lease = exchange{}
+		next.State = "bound"
+	}
+	next.RenewAt, next.RebindAt = renewAt, rebindAt
 	c.snapshot = next
-	c.snapshot.RenewAt = renewAt
-	c.snapshot.RebindAt = rebindAt
-	c.lease = exchange{}
-	c.snapshot.State = "bound"
 	if m.maxSolicit != 0 {
 		c.maxSolicit = time.Duration(m.maxSolicit) * time.Second
 	}
