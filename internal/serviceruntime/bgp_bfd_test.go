@@ -19,7 +19,7 @@ type bfdRoundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f bfdRoundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
-func TestBFDWatcherFencesRecipientAndRetainsCoalescedFailure(t *testing.T) {
+func TestBFDWatcherFencesRecipientAndPublishesOnlySuccessfulSnapshots(t *testing.T) {
 	digest := strings.Repeat("a", 64)
 	var requests atomic.Int32
 	second := make(chan struct{})
@@ -46,17 +46,13 @@ func TestBFDWatcherFencesRecipientAndRetainsCoalescedFailure(t *testing.T) {
 		t.Fatal("watcher did not recover from initial generation conflict")
 	}
 	var update bgp.BFDUpdate
-	deadline := time.NewTimer(time.Second)
-	defer deadline.Stop()
-	for !update.Available {
-		select {
-		case update = <-updates:
-		case <-deadline.C:
-			t.Fatal("success did not replace unavailable coalesced value")
-		}
+	select {
+	case update = <-updates:
+	case <-time.After(time.Second):
+		t.Fatal("successful projection was not published")
 	}
-	if update.Failures != 1 || update.Received.BootID == "" || update.Received.BoottimeNanoseconds <= 0 || update.Projection.Generation != 9 {
-		t.Fatalf("watcher lost failure/finite receipt evidence: %+v", update)
+	if update.Received.BootID == "" || update.Received.BoottimeNanoseconds <= 0 || update.Projection.Generation != 9 {
+		t.Fatalf("failed response was published as source evidence: %+v", update)
 	}
 	cancel()
 	select {

@@ -408,6 +408,9 @@ BGP経路の元の期限は、ACK済みBFD受信期限と再帰next-hopのaddres
 独立して失効させる。controlとwriterのlifetime投影を共有し、ReadyはACK済み期限を確認する。
 失効時のprotocol通知JSON書換えを廃止し、元の観測を消費側で評価する。
 BGP・DHCPv4の重複した受信期限を削除し、BGP状態表示も元のBOOTTIME期限を使う。
+BFD→BGPもpacketとproducer観測の元期限へ揃え、HTTP受信leaseと失敗counterを削除した。
+350msのcontrol停止で健全なBGPが切れる問題を実通信で再現し、同じTCP sessionと経路の維持を確認した。
+元の期限が切れた後の復旧では、撤去ACKと新しい受信を引き続き要求する。
 DHCP serverは設定切替後も元通知を保持し、期限切れのactive条件とDNS出力を除外する。
 DHCP server観測も受理時に型付きで保持し、元BOOTTIME期限をDNSのA/PTR応答まで渡す。
 control／DNSの受信側期限表と内部JSON複製を削除した。個別clientの割当・保存のUTC依存と、

@@ -97,9 +97,11 @@ func (source bfdSource) grant(ref bgpconfig.BFDReference, clock bfd.Clock) bgpco
 	if found && index < len(source.snapshot.Peers) {
 		peer := source.snapshot.Peers[index]
 		grant.LastReceivedBootNanoseconds = peer.LastReceivedBootNanoseconds
-		grant.DeadlineBootNanoseconds = peer.DeadlineBootNanoseconds
+		// The source's own observation deadline also bounds a long negotiated
+		// packet interval. Polling must not manufacture a shorter receipt lease.
+		grant.DeadlineBootNanoseconds = min(peer.DeadlineBootNanoseconds, int64(source.snapshot.ExpiresNanos))
 		grant.DownTransitions = peer.DownTransitions
-		grant.Up = source.snapshot.Active && peer.State == bfd.StateUp && source.snapshot.BootID == clock.BootID && clock.BoottimeNanoseconds > 0 && peer.LastReceivedBootNanoseconds <= clock.BoottimeNanoseconds && clock.BoottimeNanoseconds < peer.DeadlineBootNanoseconds
+		grant.Up = source.snapshot.Active && peer.State == bfd.StateUp && source.snapshot.BootID == clock.BootID && clock.BoottimeNanoseconds > 0 && peer.LastReceivedBootNanoseconds <= clock.BoottimeNanoseconds && source.snapshot.ObservedNanos <= uint64(clock.BoottimeNanoseconds) && clock.BoottimeNanoseconds < grant.DeadlineBootNanoseconds
 	}
 	return grant
 }

@@ -175,16 +175,20 @@ a 200ms request deadline. A startup 409 while the initial status is unaccepted
 leaves peers down. A stopped/missing watcher never permits ungated BGP.
 
 Each source grant binds its configuration digest, generation, producer epoch,
-packet publication sequence, boot ID, cumulative Down counter and finite
-receive-derived BOOTTIME deadline. The separate gate loop checks expiry at most
-10ms apart and requires a control response received within 500ms on that same
-boot. It does not use wall-clock timestamps for health. Fresh HTTP responses
-cannot extend a replayed packet deadline. A response with receive evidence
-newer than its own receipt is rejected. Missing/failed sources, control failure,
-expiry, source replacement and coalesced Down counter increments close the
+packet publication sequence, boot ID and cumulative Down counter. Its BOOTTIME
+deadline is the earlier of the original packet detection deadline and the BFD
+producer's original snapshot expiry. The separate gate loop checks expiry at
+most 10ms apart; it does not create a control-response lease. A failed poll
+publishes no replacement evidence. Existing authority can survive a short IPC
+delay, but expires at its original deadline without further input. Fresh HTTP
+responses cannot extend replayed evidence. Receive evidence newer than its own
+receipt is rejected. A successful projection with missing/failed sources,
+expiry, source replacement and coalesced Down counter increments closes the
 actual BGP session. Retired source identities and regressing evidence are
 rejected; the bounded retired-source set requires worker restart after 128
-source replacements.
+source replacements. Expiry is evaluated before queued renewals: a consumer
+suspended across its old deadline must close and obtain new post-close receive
+evidence before re-enabling.
 
 The pinned GoBGP [server](https://github.com/osrg/gobgp/blob/v4.7.0/pkg/server/server.go)
 only enqueues Enable/Disable requests and may return success when its admin
@@ -192,8 +196,8 @@ channel is full. The gate therefore waits for explicit `ADMIN_STATE_DOWN` and
 `SESSION_STATE_IDLE`, which follows old TCP closure in the
 [FSM](https://github.com/osrg/gobgp/blob/v4.7.0/pkg/server/fsm.go), before it can
 reenable a peer. Forwarding proof is revoked before the admin call is issued.
-Each admin request/acknowledgment has a separate 2s context and BOOTTIME watchdog;
-the control freshness limit remains 500ms. The ACK carries its observation time,
+Each admin request/acknowledgment has a separate 2s context and BOOTTIME watchdog.
+The ACK carries its observation time,
 so queueing after observation does not change its validity. A missing, late or
 failed acknowledgment aborts the worker;
 opposite requests are never stacked onto the asynchronous channel. BFD-bound
@@ -216,7 +220,7 @@ disabled, recovery also waits asynchronously for the kernel writer to acknowledg
 a disabled snapshot belonging to that reset, and for a BFD receipt newer than
 the completed TCP close. An old in-flight publication or an acknowledgment from
 a previous reset cannot release this fence. Slow Effects can delay recovery but
-cannot delay TCP shutdown, wire-deadline checks or control failure processing.
+cannot delay TCP shutdown or original source-deadline checks.
 
 The native BFD worker follows [RFC 5880](https://www.rfc-editor.org/rfc/rfc5880.html)
 and the supported single-hop scope in
@@ -316,11 +320,15 @@ tests do not modify host interfaces, routes or firewall state. They do not
 substitute for the parent writer's namespace/QEMU FIB and ECMP tests, appliance
 boot tests or performance measurements.
 
-BFD tests cover finite deadline/control freshness independently, source replay,
-future receive evidence, coalesced failure, asynchronous admin acknowledgments,
+BFD tests cover original expiry with no further input or replayed projections,
+future receive evidence, coalesced source failure, asynchronous admin acknowledgments,
 late ACK rejection, RIB walk ABA races, and matching withdrawal acknowledgment
 before recovery. A separate real TCP wire test verifies initial Down suppression,
 actual export/import and TCP closure on source expiry while route Effects are
 blocked and successful HTTP responses continue replaying the expired evidence.
 The appliance BFD integration fixture adds an independent UDP BFD speaker and
 native TCP BGP speaker, kernel routes, worker SIGSTOP expiry and recovery.
+It also pauses control for 350ms, longer than a projection request timeout,
+and verifies that still-valid original BFD evidence preserves the same BGP TCP
+session and learned route. The discarded receipt-lease implementation failed
+this communication check.

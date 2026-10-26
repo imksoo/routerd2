@@ -134,13 +134,16 @@ Disable/Enable race in GoBGP's management API.
 The worker consumes a typed projection scoped to its configuration digest and
 process generation. A separate loop observes the original BOOTTIME deadlines
 while a control request is slow. Polling is currently every 20 milliseconds;
-loss of successful control observations for 500 milliseconds also removes the
-grant. This is bounded local IPC polling, not an Internet probe. A BGP worker
+each projected deadline intersects the original packet deadline and the
+producer's original snapshot expiry. A failed poll does not replace valid wire
+evidence with an IPC failure. If control remains unavailable, the unchanged
+source deadline still closes the session. There is no receiver-created lease.
+This is bounded local IPC polling, not an Internet probe. A BGP worker
 can bind at most 64 peers to BFD in this version.
 
 Forwarding proof is revoked before requesting the asynchronous GoBGP admin
 operation. Its acknowledgment has a separate 2-second watchdog; this does not
-renew either the packet deadline or the 500-millisecond control freshness.
+renew the original packet or producer observation deadline.
 Recovery waits for Down/Idle, accepted withdrawal, and a new packet after the
 close. A missing or failed admin acknowledgment still terminates the worker.
 

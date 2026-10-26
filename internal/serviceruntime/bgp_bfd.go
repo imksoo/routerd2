@@ -2,7 +2,6 @@ package serviceruntime
 
 import (
 	"context"
-	"math"
 	"net/url"
 	"strconv"
 	"time"
@@ -42,8 +41,12 @@ func (c *effectsClient) watchBFD(ctx context.Context, name, digest string, gener
 	path := "/v1/services/" + name + "/bfd?" + query.Encode()
 	ticker := time.NewTicker(20 * time.Millisecond)
 	defer ticker.Stop()
-	var failures uint64
-	for ctx.Err() == nil {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
 		var projection bgpconfig.BFDProjection
 		call, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
 		err := c.client.Do(call, "GET", path, nil, &projection)
@@ -51,17 +54,15 @@ func (c *effectsClient) watchBFD(ctx context.Context, name, digest string, gener
 		if ctx.Err() != nil {
 			return
 		}
-		clock, clockErr := bfd.ReadClock()
-		if clockErr != nil {
+		if err != nil {
+			// Original source deadlines keep running across a failed poll.
+			continue
+		}
+		clock, err := bfd.ReadClock()
+		if err != nil {
 			return
 		}
-		if err != nil {
-			if failures == math.MaxUint64 {
-				return
-			}
-			failures++
-		}
-		update := bgp.BFDUpdate{Projection: projection, Received: clock, Available: err == nil, Failures: failures}
+		update := bgp.BFDUpdate{Projection: projection, Received: clock}
 		select {
 		case updates <- update:
 		default:
@@ -74,11 +75,6 @@ func (c *effectsClient) watchBFD(ctx context.Context, name, digest string, gener
 			case <-ctx.Done():
 				return
 			}
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
 		}
 	}
 }

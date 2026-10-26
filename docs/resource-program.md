@@ -198,7 +198,9 @@ peerごとの構造化selector、他Kind、DerivedEvent連鎖はcompile時に拒
 inactiveな宣言も全sourceで型検証する。
 
 BFDのlocal状態観測は元のBOOTTIMEから最大5秒で失効する。Up/Initを含む観測はさらに
-全該当peerの元パケット受信期限で制限し、現在のsupervisor観測期限も超えない。
+全該当peerの元パケット受信期限とBFD producer自身の元観測期限で制限し、
+現在のsupervisor観測期限も超えない。BFD→BGPには別のHTTP受信leaseを作らず、
+短いpoll失敗だけでは有効な元の観測を取り消さない。配送が止まれば元の期限で失効する。
 古いraw `UP` の失効はunknownとなり、Down eventを捏造しない。
 通知を集約した間のflapはpeer遷移counterでholdをリセットする。全peerのcounterを使うため、
 集約phaseが同じでもpeerの変化で保守的にholdをやり直す。counterが飽和した観測はunknownになる。

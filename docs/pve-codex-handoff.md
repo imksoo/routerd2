@@ -57,6 +57,10 @@
   control／DNSの受信側期限表は廃止し、遅いACKの後も同じ期限を確認してからDHCP応答を返す。
   DNS内部の正規化も型付きsliceの複製と整列へ変更した。
   client個別の割当・journal保持・lease期限にはUTC依存が残る。suspendを含む受入は未完了である。
+- BFD→BGPのHTTP受信leaseと失敗counterを廃止した。元のpacket期限とproducer観測期限の
+  短い方をsessionとFIBへ渡す。失敗したpollでは元のauthorityを上書きせず、配送が止まれば
+  元の期限で失効する。期限を跨いで届いた更新も、先に古いbudgetの失効を評価する。
+  実際のDown／source交替／期限切れの後は、TCP Down/Idle・該当撤去のACK・新しい受信を要求する。
 - Health監視と履歴配送は分離する。保存先障害・queue満杯でもprobeを止めず、欠落と保存エラーを表示する。
   全probeの無欠落保存は保証しない。
 
@@ -65,41 +69,49 @@
 
 ## 今回の検証
 
-最終製品buildは `RELEASE_ID=dhcp-source-clock`。PVE隔離Linux VMで全体`make check`
-（通常試験・Race Detector・Python/dependency検査・vet）と関連Race Detector、fmt、
-amd64/arm64静的buildが成功した。arm64は実行していない。
-最終6 ELFの署名bundle生成・catalog保存・CLI publisher検査も両architectureで成功した。
-publisherへの入力はtask専用0700ディレクトリへ配置した。group書込み可能な作業treeからの
-直接publishは既存の入力検査が拒否したためであり、検査や作業treeの権限は変更していない。
+最終製品buildは `RELEASE_ID=bfd-source-budget`。PVE隔離Linux VMで関連Race Detector、
+fmt・全体vet・amd64/arm64静的build、全体`make check`が成功した。arm64は実行していない。
+今回の修正ではworker ABI 2・compiler contract native-8・network journal 5を変更していない。
 
-Race Detector付きharnessと最終amd64製品で、native sourceとrouterd入力の両方について確認した。
+最終amd64製品とRace Detector付きharnessで、独立UDP BFD peer・TCP BGP peer・実kernelを使った。
 
-- 実DHCP ACKからDNSのA応答へleaseが反映され、元のboot ID・観測時刻・期限が一致する。
-- DHCP server・control・supervisorをSIGSTOPしても、DNSが元の期限でhostnameを除外する。
-  static DNSと同じTCP接続は維持し、DNS workerのPIDも変わらない。
-- APIは最後の元通知のActive=trueと現在のOwnershipExpired=trueを区別する。
-  client個別のlease期限はまだ未来であり、その期限切れに頼った除外ではない。
-- server再起動後にjournalから元のleaseを戻し、clientのINIT-REBOOTへ同じaddressをACKする。
-  同じDNS TCP接続でhostnameも復旧する。
+- controlを350ms停止する。元のBFD期限はまだ有効なのに、c169643製品では一度のHTTP timeoutで
+  実BGP TCP接続が閉じることを再現した。修正後は同じ接続・worker・経路が維持される。
+- 実UDP BFDを止めると、TCP KEEPALIVEが続いていてもsessionとFIBを撤去する。再開後に復旧する。
+- BFD workerのSIGSTOP中も、元の受信期限でBGPと経路が失効する。再開後はfreshな受信で復旧する。
+- BGP・BFD・controlが停止中も、surviving writerはBFDの元の期限で経路を撤去する。
+  長いBGP観測期限の失効に頼らない。
+- BGP FIBの追加・withdrawと、writer再起動後の元の期限による撤去を確認した。
+  再帰IPv6 routeの元の前提期限による撤去も、supervisor・control・BGP停止中に確認した。
 
-ローカルでは、元の期限の実時間失効、再送・source切替・DNS再読込による延長拒否、
-遅れて成功したEffects ACKの後にDHCPACKを返さないことを確認した。
-publicationがIPC上限を超えればReady／ACK前に停止し、durableな割当除外は保持する。
-保存とpublicationで同じsnapshotを作り直す予備のJSON処理を削除し、上限は実際のIPC境界で確認する。
+ローカルでは、長い9秒のpacket検出期限をproducerの元の5秒観測期限で制限し、
+原通知を変えずに失効させることを確認した。この長い間隔の同一条件は実daemonでは未試験。
+期限後にqueueから届いた更新が失効を隠さないこと、再送での延長拒否、TCP終了・撤去ACKとの
+対応付けも検証した。過去の再接続timeout自体には失敗requestの診断がなく、同じ原因とは断定しない。
 
-直前のoriginal-observation buildではBGP/BFD・DHCPv4・source graphの実daemon試験を実行した。
+直前の `RELEASE_ID=dhcp-source-clock`（c169643）では次を確認済み。今回DHCP経路は変更していない。
+
+- 実DHCP ACK→DNSで元のboot ID・観測時刻・期限が一致する。native sourceとrouterd入力の両方を使う。
+- server・control・supervisor停止中もDNSが元の期限でhostnameを除外し、static DNS・同じTCP接続・
+  DNS PIDを維持する。APIは元通知のActive=trueと現在のOwnershipExpired=trueを区別する。
+- server再起動とjournalからのlease復旧、clientのINIT-REBOOTへの同じaddressのACK、同じDNS接続での復旧。
+- 遅い成功ACKからのDHCP応答拒否、publication上限超過時のReady／ACK拒否と割当除外の保存。
+- 全体`make check`と最終6 ELFの署名bundle・catalog・CLI publisher検査。今回のBFD buildでは
+  この6 ELF検査は再実行していない。publisherの入力は専用0700ディレクトリへ配置し、入力検査を緩めていない。
+
 Health→PBRの独立2 WAN・実TCP/UDP・packet capture、worker再起動・古い通知・confirmed rollback、
-graceful VRRP・追加WANとKeepalivedの相互運用も実行済みだが、今回のDHCP変更後は再実行していない。
-これらの過去の成功を全体完成の判定には使わない。
+graceful VRRP・追加WANとKeepalivedは、今回のBFD buildでは再実行していない。
+過去の成功を全体完成の判定には使わない。
 
-現在のログは `dist/dhcp-source-clock-{release-build,final-race,native,final-bundle}.log`。
-全体`make check`は `dist/dhcp-source-clock-final-check.log` を参照する。
-新契約への切替途中で配布側の固定ABIと試験用supervisor識別子の未更新を検出し、両方修正した。
+今回のログは `dist/bfd-control-budget-repro.log`（修正前の実通信失敗）、
+`dist/bfd-source-budget-{build,final-race,native,check}.log`。
+DHCP/DNSは `dist/dhcp-source-clock-{release-build,final-race,native,final-bundle,final-check}.log`。
+出力との一致を実装条件にしない。
 
 ## 未完了と次の作業
 
-1. 以前のBFD再接続timeout、IPv6 multicast未受信、初回IPv6 VIP TCP timeoutは原因未確定。
-   成功回数で閉じない。今回の変更で原因を修正したとは判断していない。
+1. 以前の再接続timeoutの失敗request、IPv6 multicast未受信、初回IPv6 VIP TCP timeoutは原因未確定。
+   今回再現・修正した短いcontrol停止による不要な切断とは区別する。成功回数で閉じない。
 2. 残るprotocol snapshotの型付き保持、条件式の静的計算、通常投影のinstance生成・digest再計算を整理する。
    DHCP client割当とjournalのUTC依存を整理し、実clock補正・停電・suspendで受入する。
 3. HA-01のHealth以外のtrack・neutral、外部secret参照・peer-aware移行、clusterと、

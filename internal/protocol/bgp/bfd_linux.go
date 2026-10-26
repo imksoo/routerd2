@@ -18,22 +18,17 @@ import (
 	gobgpapi "github.com/osrg/gobgp/v4/api"
 )
 
-const BFDControlFreshness = 500 * time.Millisecond
-
 // Forwarding eligibility is revoked before requesting the admin operation.
 // This watchdog bounds an unresponsive GoBGP operation, independently of the
-// packet/control freshness deadlines. Admin observation can lag the TCP close.
+// original source deadlines. Admin observation can lag the TCP close.
 const bfdAdminTimeout = 2 * time.Second
 
-// BFDUpdate is local transport metadata, not the control API's JSON document.
-// Received is stamped when the HTTP response completes, before any queueing.
-// Failures is a cumulative counter so latest-value coalescing retains a failed
-// control request even if the following request succeeds before consumption.
+// BFDUpdate carries a successful source projection and its local receipt clock.
+// Failed polls publish nothing: only original source deadlines define authority.
+// Received detects future wire evidence; it never becomes another lease.
 type BFDUpdate struct {
 	Projection bgpconfig.BFDProjection
 	Received   bfd.Clock
-	Available  bool
-	Failures   uint64
 }
 
 type bfdInput struct {
@@ -291,8 +286,8 @@ func (g *bfdPeerGate) observe(grant bgpconfig.BFDGrant, present bool, now int64)
 	return nil
 }
 
-func (g *bfdPeerGate) healthy(clock bfd.Clock, control bool) bool {
-	return !g.withheld && control && g.seen && g.present && g.grant.Up && g.grant.BootID == clock.BootID && g.grant.LastReceivedBootNanoseconds > g.minReceive && g.grant.LastReceivedBootNanoseconds <= clock.BoottimeNanoseconds && clock.BoottimeNanoseconds < g.grant.DeadlineBootNanoseconds
+func (g *bfdPeerGate) healthy(clock bfd.Clock) bool {
+	return !g.withheld && g.seen && g.present && g.grant.Up && g.grant.BootID == clock.BootID && g.grant.LastReceivedBootNanoseconds > g.minReceive && g.grant.LastReceivedBootNanoseconds <= clock.BoottimeNanoseconds && clock.BoottimeNanoseconds < g.grant.DeadlineBootNanoseconds
 }
 
 type bfdAdminResult struct {
@@ -423,9 +418,7 @@ func runBFDGate(ctx context.Context, cfg Config, input bfdInput, server peerAdmi
 			startBFDAdmin(ctx, server, peers[address], "initial", previousNow, results, readClock)
 		}
 	}
-	var controlDeadline, receivedAt int64
-	var failures uint64
-	available := false
+	var receivedAt int64
 	var incoming *BFDUpdate
 	var completed *bfdAdminResult
 	completions := make([]bfdAdminResult, 0, len(peers))
@@ -459,7 +452,7 @@ func runBFDGate(ctx context.Context, cfg Config, input bfdInput, server peerAdmi
 			return err
 		}
 		now := clock.BoottimeNanoseconds
-		if clock.BootID == "" || clock.BootID != bootID || now < previousNow || now <= 0 || now > math.MaxInt64-int64(BFDControlFreshness) {
+		if clock.BootID == "" || clock.BootID != bootID || now < previousNow || now <= 0 {
 			return errors.New("BGP BFD clock identity changed")
 		}
 		previousNow = now
@@ -472,48 +465,43 @@ func runBFDGate(ctx context.Context, cfg Config, input bfdInput, server peerAdmi
 				return err
 			}
 		}
+		// Observe exhaustion before a queued renewal can replace the old budget.
+		// A consumer suspended across the deadline must close before re-enabling.
+		for _, g := range peers {
+			if g.wanted && now >= g.grant.DeadlineBootNanoseconds {
+				g.block(now)
+			}
+		}
 		if incoming != nil {
 			update := *incoming
 			incoming = nil
-			if update.Received.BootID != bootID || update.Received.BoottimeNanoseconds <= 0 || update.Received.BoottimeNanoseconds < receivedAt || update.Received.BoottimeNanoseconds > now || update.Failures < failures {
-				return errors.New("BGP BFD control receipt identity or failure counter regressed")
+			if update.Received.BootID != bootID || update.Received.BoottimeNanoseconds <= 0 || update.Received.BoottimeNanoseconds < receivedAt || update.Received.BoottimeNanoseconds > now {
+				return errors.New("BGP BFD control receipt identity regressed")
 			}
-			if update.Available {
-				if err := bgpconfig.ValidateBFDProjection(cfg, update.Projection, input.digest, input.generation); err != nil {
-					return err
-				}
-				for _, grant := range update.Projection.Peers {
-					if grant.BootID == bootID && grant.LastReceivedBootNanoseconds > update.Received.BoottimeNanoseconds {
-						return errors.New("BFD grant receive evidence is newer than its control receipt")
-					}
+			if err := bgpconfig.ValidateBFDProjection(cfg, update.Projection, input.digest, input.generation); err != nil {
+				return err
+			}
+			for _, grant := range update.Projection.Peers {
+				if grant.BootID == bootID && grant.LastReceivedBootNanoseconds > update.Received.BoottimeNanoseconds {
+					return errors.New("BFD grant receive evidence is newer than its control receipt")
 				}
 			}
-			if update.Failures != failures {
-				for _, g := range peers {
-					g.block(now)
-				}
-			}
-			receivedAt, failures, available = update.Received.BoottimeNanoseconds, update.Failures, update.Available
-			controlDeadline = receivedAt + int64(BFDControlFreshness)
+			receivedAt = update.Received.BoottimeNanoseconds
 			for _, address := range order {
 				grant, present := update.Projection.Peers[address]
-				if err := peers[address].observe(grant, available && present, now); err != nil {
+				if err := peers[address].observe(grant, present, now); err != nil {
 					return fmt.Errorf("BGP peer %s: %w", address, err)
 				}
 			}
 		}
-		control := available && now < controlDeadline
 		operations = operations[:0]
 		next := now + int64(10*time.Millisecond)
-		if controlDeadline > now {
-			next = min(next, controlDeadline)
-		}
 		for _, address := range order {
 			g := peers[address]
 			if g.operation != "" && now >= g.operationDeadline {
 				return fmt.Errorf("BGP BFD %s acknowledgment timed out for %s; worker process exit is required", g.operation, address)
 			}
-			healthy := g.healthy(clock, control)
+			healthy := g.healthy(clock)
 			if !healthy && g.wanted {
 				g.block(now)
 			}

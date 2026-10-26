@@ -114,7 +114,7 @@ func TestBFDWireExpiryClosesActualTCPWhileRouteEffectsBlocked(t *testing.T) {
 				grant.BootID = clock.BootID
 				grant.DeadlineBootNanoseconds = clock.BoottimeNanoseconds + int64(250*time.Millisecond)
 			}
-			update := BFDUpdate{Projection: bgpconfig.BFDProjection{ConfigDigest: strings.Repeat("a", 64), Generation: 9, Peers: map[string]bgpconfig.BFDGrant{"127.0.0.1": grant}}, Received: clock, Available: true}
+			update := BFDUpdate{Projection: bgpconfig.BFDProjection{ConfigDigest: strings.Repeat("a", 64), Generation: 9, Peers: map[string]bgpconfig.BFDGrant{"127.0.0.1": grant}}, Received: clock}
 			select {
 			case updates <- update:
 			case <-ctx.Done():

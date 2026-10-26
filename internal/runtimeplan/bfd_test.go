@@ -321,3 +321,38 @@ func TestBFDReceiveCountFencesRemoteTimingAndDeadline(t *testing.T) {
 		t.Fatal("fresh receive cannot renegotiate", err)
 	}
 }
+
+func TestBFDGrantIntersectsOriginalSnapshotAndNegotiatedPacketDeadlines(t *testing.T) {
+	doc := bfdDocument()
+	cfg := doc.Services[0].BFDConfig()
+	clock, err := bfd.ReadClock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := observedBFD(t, cfg, clock)
+	peer := &snapshot.Peers[0]
+	peer.RemoteMinTxMicroseconds = 3000000
+	peer.DetectionTimeMicroseconds = 9000000
+	peer.DeadlineBootNanoseconds = peer.LastReceivedBootNanoseconds + int64(9*time.Second)
+	peer.ValidUntil = peer.LastReceivedAt.Add(9 * time.Second)
+	if err := bfd.ValidateSnapshot(cfg, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := collectBFD(doc.Services, map[string]serviceconfig.Update{"service.edge": {Name: "service.edge", Role: "bfd", ConfigDigest: strings.Repeat("a", 64), Generation: 1, ProducerEpoch: strings.Repeat("b", 32), Sequence: 1, Snapshot: body}})["edge"]
+	ref := bgpconfig.BFDReference{Service: "edge", Address: cfg.Peers[0].Address}
+	grant := source.grant(ref, clock)
+	if !grant.Up || grant.DeadlineBootNanoseconds != int64(snapshot.ExpiresNanos) || peer.DeadlineBootNanoseconds <= grant.DeadlineBootNanoseconds {
+		t.Fatal("long wire interval outlived producer observation", grant)
+	}
+	clock.BoottimeNanoseconds = int64(snapshot.ExpiresNanos)
+	if expired := source.grant(ref, clock); expired.Up || expired.DeadlineBootNanoseconds != grant.DeadlineBootNanoseconds {
+		t.Fatal("expired producer retained health or received a new deadline", expired)
+	}
+	if source.snapshot.Peers[0].DeadlineBootNanoseconds != peer.DeadlineBootNanoseconds {
+		t.Fatal("grant projection changed the original wire observation")
+	}
+}

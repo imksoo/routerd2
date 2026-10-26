@@ -193,6 +193,49 @@ func TestDaemonBFDControlsBGPSessionAndExpiry(t *testing.T) {
 	}
 	first := connect()
 	t.Log("BFD Up: BGP established, outbound advertisement observed, learned route installed")
+	// A short control delay must not replace valid original wire evidence with
+	// a second, shorter transport lease. UDP BFD and TCP keepalives keep running.
+	var beforePause bfd.Snapshot
+	until(t, 3*time.Second, func() bool {
+		_, beforePause = serviceStatus()
+		clock, err := bfd.ReadClock()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return beforePause.Peers[0].State == bfd.StateUp && beforePause.Peers[0].DeadlineBootNanoseconds > clock.BoottimeNanoseconds+int64(700*time.Millisecond)
+	})
+	controlPID := modulePID("control")
+	if err := syscall.Kill(controlPID, syscall.SIGSTOP); err != nil {
+		t.Fatal(err)
+	}
+	defer syscall.Kill(controlPID, syscall.SIGCONT)
+	time.Sleep(350 * time.Millisecond) // exceeds one real 200 ms projection request
+	currentClock, err := bfd.ReadClock()
+	if err != nil || currentClock.BoottimeNanoseconds >= beforePause.Peers[0].DeadlineBootNanoseconds {
+		t.Fatal("fixture exhausted the original BFD budget", err)
+	}
+	select {
+	case <-first.closed:
+		t.Fatal("one delayed control request closed BGP while original BFD evidence remained current")
+	default:
+	}
+	if err := syscall.Kill(controlPID, syscall.SIGCONT); err != nil {
+		t.Fatal(err)
+	}
+	until(t, time.Second, func() bool {
+		checkPeerError()
+		_, live := serviceStatus()
+		return live.Peers[0].LastReceivedBootNanoseconds > beforePause.Peers[0].LastReceivedBootNanoseconds
+	})
+	select {
+	case <-first.closed:
+		t.Fatal("queued transport failure reset BGP after fresh BFD recovery")
+	default:
+	}
+	if listener.accepted.Load() != 1 || !fixtureRoute(t, "203.0.113.0/24", "192.0.2.2", index) {
+		t.Fatal("short control delay replaced the BGP session or withdrew its route")
+	}
+	t.Log("350 ms control pause exceeded the projection RPC timeout; original BFD budget preserved the same BGP TCP session and route")
 	keepalives := first.keepalives.Load()
 	peer.enabled.Store(false) // Only UDP transmission stops; TCP keepalives continue.
 	waitWithdrawal(first)

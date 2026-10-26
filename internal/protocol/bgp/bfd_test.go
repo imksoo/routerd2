@@ -28,7 +28,7 @@ func gateConfig() Config {
 	return Config{Runtime: bgpdaemon.AppliedConfig{Peers: map[string]bgpdaemon.AppliedPeer{gatePeer: {Address: gatePeer, ASN: 64513}}}, PeerBFD: map[string]bgpconfig.BFDReference{gatePeer: {Service: "health", Address: gatePeer}}}
 }
 
-func TestBFDGateAuthoritativeEvidenceSurvivesTransientControlFailure(t *testing.T) {
+func TestBFDGateMissingSourceRevokesAuthoritativeEvidence(t *testing.T) {
 	g := &bfdPeerGate{address: gatePeer, retired: map[bfdSource]bool{}}
 	grant := gateGrant(int64(time.Second), 1, 0)
 	if err := g.observe(grant, true, int64(time.Second)); err != nil {
@@ -39,12 +39,12 @@ func TestBFDGateAuthoritativeEvidenceSurvivesTransientControlFailure(t *testing.
 		t.Fatal(err)
 	}
 	if g.grant != grant || g.present {
-		t.Fatal("control loss mutated authoritative source evidence")
+		t.Fatal("source removal mutated authoritative source evidence")
 	}
 	if err := g.observe(grant, true, int64(time.Second+20*time.Millisecond)); err != nil {
 		t.Fatal("unchanged sequence replay after failure was misclassified:", err)
 	}
-	if g.healthy(bfd.Clock{BootID: gateBoot, BoottimeNanoseconds: int64(time.Second + 20*time.Millisecond)}, true) || !g.forceReset {
+	if g.healthy(bfd.Clock{BootID: gateBoot, BoottimeNanoseconds: int64(time.Second + 20*time.Millisecond)}) || !g.forceReset {
 		t.Fatal("replayed Up bypassed reset/fresh-packet fence")
 	}
 }
@@ -133,10 +133,10 @@ func TestBFDAdminWatchdogIsSeparateFromImmediateProofRevocation(t *testing.T) {
 		h.admin.holdDown = true
 		h.admin.beforeDisable = func() { revoked <- !h.view.snapshot()[gatePeer].Enabled }
 	})
-	h.send(gateGrant(h.clock.Load(), 1, 0), true, 0)
+	h.send(gateGrant(h.clock.Load(), 1, 0), true)
 	gateWait(t, func() bool { return h.view.snapshot()[gatePeer].Enabled }, "initial source did not enable")
 	h.clock.Add(int64(20 * time.Millisecond))
-	h.send(gateGrant(h.clock.Load(), 2, 1), true, 0)
+	h.send(gateGrant(h.clock.Load(), 2, 1), true)
 	select {
 	case ok := <-revoked:
 		if !ok {
@@ -145,10 +145,10 @@ func TestBFDAdminWatchdogIsSeparateFromImmediateProofRevocation(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("disable not requested")
 	}
-	// GoBGP may take longer to acknowledge its admin state than the control
-	// freshness window. Fresh control does not revive an in-progress disable.
+	// Fresh source evidence does not revive an in-progress admin disable.
+	// The admin watchdog remains independent of source expiry.
 	h.clock.Add(int64(800 * time.Millisecond))
-	h.send(gateGrant(h.clock.Load(), 3, 1), true, 0)
+	h.send(gateGrant(h.clock.Load(), 3, 1), true)
 	gateWait(t, func() bool { return h.view.snapshotWithVersion()[gatePeer].state.operation == "disable" }, "bounded admin operation was aborted too early")
 	if h.view.snapshot()[gatePeer].Enabled {
 		t.Fatal("pending disable retained forwarding proof")
@@ -220,9 +220,14 @@ func newGateHarnessPrepared(t *testing.T, prepare func(*gateHarness)) *gateHarne
 	})
 	return h
 }
-func (h *gateHarness) send(g bgpconfig.BFDGrant, available bool, failures uint64) {
-	h.updates <- BFDUpdate{Projection: bgpconfig.BFDProjection{ConfigDigest: strings.Repeat("a", 64), Generation: 9, Peers: map[string]bgpconfig.BFDGrant{gatePeer: g}}, Received: bfd.Clock{BootID: gateBoot, BoottimeNanoseconds: h.clock.Load()}, Available: available, Failures: failures}
+func (h *gateHarness) send(g bgpconfig.BFDGrant, present bool) {
+	peers := map[string]bgpconfig.BFDGrant{}
+	if present {
+		peers[gatePeer] = g
+	}
+	h.updates <- BFDUpdate{Projection: bgpconfig.BFDProjection{ConfigDigest: strings.Repeat("a", 64), Generation: 9, Peers: peers}, Received: bfd.Clock{BootID: gateBoot, BoottimeNanoseconds: h.clock.Load()}}
 }
+
 func gateWait(t *testing.T, condition func() bool, message string) {
 	t.Helper()
 	until := time.Now().Add(2 * time.Second)
@@ -237,19 +242,19 @@ func gateWait(t *testing.T, condition func() bool, message string) {
 
 func TestBFDGateWaitsForTCPDownAckAndNewReceiveBeforeRecovery(t *testing.T) {
 	h := newGateHarness(t)
-	h.send(gateGrant(h.clock.Load(), 1, 0), true, 0)
+	h.send(gateGrant(h.clock.Load(), 1, 0), true)
 	gateWait(t, func() bool { return h.view.snapshot()[gatePeer].Enabled }, "initial healthy source did not enable")
 	h.admin.mu.Lock()
 	h.admin.holdDown = true
 	h.admin.mu.Unlock()
 	h.clock.Add(int64(20 * time.Millisecond))
-	h.send(gateGrant(h.clock.Load(), 2, 1), true, 0)
+	h.send(gateGrant(h.clock.Load(), 2, 1), true)
 	gateWait(t, func() bool { return len(h.admin.log()) == 2 }, "coalesced failure did not disable session")
 	if proof := h.view.snapshot()[gatePeer]; proof.Enabled || proof.DownTransitions != 0 {
 		t.Fatalf("unacknowledged source counter became a routing proof: %+v", proof)
 	}
 	h.clock.Add(int64(20 * time.Millisecond))
-	h.send(gateGrant(h.clock.Load(), 3, 1), true, 0)
+	h.send(gateGrant(h.clock.Load(), 3, 1), true)
 	time.Sleep(20 * time.Millisecond)
 	if len(h.admin.log()) != 2 {
 		t.Fatal("reenabled before ADMIN_DOWN+IDLE acknowledged TCP closure")
@@ -267,34 +272,34 @@ func TestBFDGateWaitsForTCPDownAckAndNewReceiveBeforeRecovery(t *testing.T) {
 	}
 	h.view.acknowledge(disabled)
 	h.clock.Add(int64(20 * time.Millisecond))
-	h.send(gateGrant(h.clock.Load(), 4, 1), true, 0)
+	h.send(gateGrant(h.clock.Load(), 4, 1), true)
 	gateWait(t, func() bool { p := h.view.snapshot()[gatePeer]; return p.Enabled && p.DownTransitions == 1 }, "fresh post-close evidence did not reenable")
 	if got := strings.Join(h.admin.log(), ","); got != "enable,disable,enable" {
 		t.Fatal(got)
 	}
 }
 
-func TestBFDGateWireExpiryAndControlFreshnessAreIndependent(t *testing.T) {
-	for _, mode := range []string{"wire", "control"} {
+func TestBFDGateOriginalExpiryDoesNotRequireFurtherInput(t *testing.T) {
+	for _, mode := range []string{"replayed", "no-input"} {
 		t.Run(mode, func(t *testing.T) {
 			h := newGateHarness(t)
 			g := gateGrant(h.clock.Load(), 1, 0)
-			if mode == "wire" {
+			if mode == "replayed" {
 				g.DeadlineBootNanoseconds = g.LastReceivedBootNanoseconds + int64(100*time.Millisecond)
 			}
-			h.send(g, true, 0)
+			h.send(g, true)
 			gateWait(t, func() bool { return h.view.snapshot()[gatePeer].Enabled }, "not enabled")
-			if mode == "wire" {
+			if mode == "replayed" {
 				h.clock.Add(int64(100 * time.Millisecond))
-				h.send(g, true, 0)
+				h.send(g, true)
 			} else {
-				h.clock.Add(int64(501 * time.Millisecond))
+				h.clock.Add(int64(time.Second))
 			}
-			gateWait(t, func() bool { return len(h.admin.log()) == 2 && !h.view.snapshot()[gatePeer].Enabled }, "expired grant/control receipt did not close peer")
+			gateWait(t, func() bool { return len(h.admin.log()) == 2 && !h.view.snapshot()[gatePeer].Enabled }, "expired original grant did not close peer")
 			// A replay keeps the source receipt unchanged, even when the control
 			// envelope is fresh; it must not resurrect the closed session.
 			h.clock.Add(int64(20 * time.Millisecond))
-			h.send(g, true, 0)
+			h.send(g, true)
 			time.Sleep(20 * time.Millisecond)
 			if len(h.admin.log()) != 2 {
 				t.Fatal("replay renewed health")
@@ -303,21 +308,12 @@ func TestBFDGateWireExpiryAndControlFreshnessAreIndependent(t *testing.T) {
 	}
 }
 
-func TestBFDGateCoalescedControlFailureStillResets(t *testing.T) {
-	h := newGateHarness(t)
-	h.send(gateGrant(h.clock.Load(), 1, 0), true, 0)
-	gateWait(t, func() bool { return h.view.snapshot()[gatePeer].Enabled }, "not enabled")
-	h.clock.Add(int64(20 * time.Millisecond))
-	h.send(gateGrant(h.clock.Load(), 2, 0), true, 1)
-	gateWait(t, func() bool { return len(h.admin.log()) == 2 && !h.view.snapshot()[gatePeer].Enabled }, "coalesced HTTP failure did not reset")
-}
-
 func TestBFDGateNeverTreatsEnqueuedAdminRequestAsAcknowledged(t *testing.T) {
 	h := newGateHarness(t)
 	h.admin.mu.Lock()
 	h.admin.ignoreEnable = true
 	h.admin.mu.Unlock()
-	h.send(gateGrant(h.clock.Load(), 1, 0), true, 0)
+	h.send(gateGrant(h.clock.Load(), 1, 0), true)
 	gateWait(t, func() bool { return len(h.admin.log()) == 1 }, "enable was not requested")
 	if h.view.snapshot()[gatePeer].Enabled {
 		t.Fatal("nil EnablePeer return was treated as an ACK")
@@ -403,10 +399,10 @@ func TestBFDGateConsumesQueuedTimelyAckAfterConsumerPause(t *testing.T) {
 		}
 	})
 	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
-	h.send(gateGrant(h.clock.Load(), 1, 0), true, 0)
+	h.send(gateGrant(h.clock.Load(), 1, 0), true)
 	gateWait(t, func() bool { return h.view.snapshot()[gatePeer].Enabled }, "initial source did not enable")
 	h.clock.Add(int64(20 * time.Millisecond))
-	h.send(gateGrant(h.clock.Load(), 2, 1), true, 0)
+	h.send(gateGrant(h.clock.Load(), 2, 1), true)
 	select {
 	case <-blocked:
 	case <-time.After(time.Second):
@@ -434,7 +430,7 @@ func TestBFDGateConsumesQueuedTimelyAckAfterConsumerPause(t *testing.T) {
 func TestBFDGrantFutureReceiveNeverBecomesAuthorizedByTimer(t *testing.T) {
 	h := newGateHarness(t)
 	g := gateGrant(h.clock.Load()+int64(100*time.Millisecond), 1, 0)
-	h.send(g, true, 0)
+	h.send(g, true)
 	select {
 	case err := <-h.done:
 		h.done <- nil
@@ -469,7 +465,7 @@ func TestBFDGateRejectsQueuedAcknowledgmentPastBootDeadline(t *testing.T) {
 		}
 	}
 	h.admin.mu.Unlock()
-	h.send(gateGrant(h.clock.Load(), 1, 0), true, 0)
+	h.send(gateGrant(h.clock.Load(), 1, 0), true)
 	select {
 	case err := <-h.done:
 		h.done <- nil
@@ -494,8 +490,8 @@ func TestBFDSnapshotFencesGateResetDuringRIBWalk(t *testing.T) {
 	view.publish(peers)
 	before := view.snapshotWithVersion()
 	snapshot, _, err := view.readSnapshot(func() (Snapshot, error) {
-		// These paths were read before an admin reset. A control freshness
-		// failure can reset without changing the BFD source/down counter.
+		// These paths were read before a missing-source reset, which can occur
+		// without changing the original BFD source/down counter.
 		old := Snapshot{Routes: []Route{{PeerAddress: gatePeer, Prefix: "203.0.113.0/24"}, {PeerAddress: otherPeer, Prefix: "198.51.100.0/24"}, {PeerAddress: "192.0.2.4", Prefix: "198.18.0.0/15"}}}
 		g.wanted, g.enabled, g.operation = false, false, "disable"
 		view.publish(peers)
@@ -532,9 +528,9 @@ func TestBFDSnapshotFencesGateResetDuringRIBWalk(t *testing.T) {
 	}
 }
 
-func TestBFDControlOnlyRecoveryWaitsForMatchingWithdrawalAcknowledgment(t *testing.T) {
+func TestBFDSourceRemovalWaitsForMatchingWithdrawalAcknowledgment(t *testing.T) {
 	h := newGateHarness(t)
-	h.send(gateGrant(h.clock.Load(), 1, 0), true, 0)
+	h.send(gateGrant(h.clock.Load(), 1, 0), true)
 	gateWait(t, func() bool { return h.view.snapshot()[gatePeer].Enabled }, "initial peer was not enabled")
 	// An old successful RIB read can remain in a slow Effects request while
 	// the gate closes the peer. Its eventual ACK must never release a reset.
@@ -547,17 +543,17 @@ func TestBFDControlOnlyRecoveryWaitsForMatchingWithdrawalAcknowledgment(t *testi
 	var previousWithdrawal map[string]uint64
 	for reset := uint64(1); reset <= 2; reset++ {
 		h.clock.Add(int64(20 * time.Millisecond))
-		h.send(gateGrant(h.clock.Load(), reset*2, 0), true, reset)
+		h.send(gateGrant(h.clock.Load(), reset*2, 0), false)
 		gateWait(t, func() bool {
 			entry := h.view.snapshotWithVersion()[gatePeer]
 			return entry.state.needsWithdrawal && !entry.state.enabled && entry.state.operation == ""
-		}, "control failure did not close TCP before waiting for Effects")
+		}, "missing source did not close TCP before waiting for Effects")
 		_, withdrawal, err := h.view.readSnapshot(func() (Snapshot, error) { return Snapshot{}, nil })
 		if err != nil {
 			t.Fatal(err)
 		}
 		h.clock.Add(int64(20 * time.Millisecond))
-		h.send(gateGrant(h.clock.Load(), reset*2+1, 0), true, reset)
+		h.send(gateGrant(h.clock.Load(), reset*2+1, 0), true)
 		h.view.acknowledge(oldPublication)
 		h.view.acknowledge(previousWithdrawal)
 		time.Sleep(20 * time.Millisecond)
@@ -604,5 +600,30 @@ func TestBFDReferenceChangeInvalidatesPersistedDynamicIntent(t *testing.T) {
 	restored, _, err = readApplied(cfg.StatePath)
 	if err != nil || len(bgpdaemon.NonStaticPaths(restored.Paths)) != 0 {
 		t.Fatal("new BFD source inherited old dynamic intent", err)
+	}
+}
+
+func TestBFDGateQueuedRefreshCannotHideOriginalAuthorityGap(t *testing.T) {
+	h := newGateHarness(t)
+	h.send(gateGrant(h.clock.Load(), 1, 0), true)
+	gateWait(t, func() bool { return h.view.snapshot()[gatePeer].Enabled }, "initial source did not enable")
+	// No Down message is necessary: old authority elapsed before this new
+	// observation reached the consumer. Keep the peer's Down counter unchanged.
+	h.clock.Add(int64(time.Second + time.Millisecond))
+	h.send(gateGrant(h.clock.Load(), 2, 0), true)
+	gateWait(t, func() bool {
+		entry := h.view.snapshotWithVersion()[gatePeer]
+		return entry.state.needsWithdrawal && !entry.state.enabled && entry.state.operation == ""
+	}, "queued renewal hid an exhausted source budget")
+	_, disabled, err := h.view.readSnapshot(func() (Snapshot, error) { return Snapshot{}, nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.view.acknowledge(disabled)
+	h.clock.Add(int64(20 * time.Millisecond))
+	h.send(gateGrant(h.clock.Load(), 3, 0), true)
+	gateWait(t, func() bool { return h.view.snapshot()[gatePeer].Enabled }, "fresh post-close receive did not recover")
+	if got := strings.Join(h.admin.log(), ","); got != "enable,disable,enable" {
+		t.Fatal(got)
 	}
 }
