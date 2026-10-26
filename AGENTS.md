@@ -1,11 +1,21 @@
 # routerd2 Development Policy
 
-## 1. Highest priority: make the router solve the real problem
+## 1. Highest priority: real interoperability through KISS and robustness
 
 **Bring routerd2 to its first release by making it work with real peer devices and clients.**
 Implement the needed routing functions with a simple, understandable architecture.
 Judge completion by the forwarding, interoperability, failure handling, and recovery the feature actually needs.
 Passing tests, increasing coverage, or producing more code and reports does not establish that the problem is solved.
+
+**KISS and the robustness principle are coequal, highest-priority engineering rules for achieving that goal.**
+Apply them together to protocol behavior, architecture, implementation, tests, and review.
+
+- **KISS:** use the simplest complete path that makes the real function work. Remove unnecessary restrictions, branches, state, layers, and test machinery rather than surrounding them with more code.
+- **Robustness:** "Be liberal in what you accept, and conservative in what you send" ([RFC 1122, section 1.2.2](https://www.rfc-editor.org/rfc/rfc1122.html#section-1.2.2)). Send correct, simple messages that peers can handle. Accept usable input whose meaning is clear, including harmless variations and deviations found in real implementations.
+- A requirement on a sender is not automatically a requirement for the receiver to reject a message. Do not invent rejection rules from an RFC example, our own encoder, preferred port or address conventions, or a convenient test fixture. Read the applicable receiver behavior and compare established implementations and actual peers.
+- Ignore unknown optional information where the protocol permits it. When an optional or independent element is unusable, discard that element and continue using the valid information. Do not turn an unrelated option error into loss of an address, prefix, route, lease, session, or working forwarding path.
+- Keep the checks needed to parse within packet bounds, identify the relevant exchange or peer, enforce actual authentication requirements, and avoid concrete resource failures. Reject at the narrowest necessary scope. A generic appeal to strictness or hypothetical risk does not justify rejecting otherwise usable traffic.
+- Tolerance belongs in a small, understandable receive path. Do not implement a speculative compatibility framework, version matrix, or collection of device-specific switches to achieve it.
 
 **Unnecessary defensive production code and test code are prohibited.**
 Every addition must serve the function being built or a reachable failure implied by real protocol, OS, resource, or persistence constraints.
@@ -25,15 +35,15 @@ Current explicit user instructions and existing task authorization take preceden
 - Change producers, consumers, callers, stored representations, fixtures, and documentation together. Remove the superseded path as part of the same coherent change.
 - Recreate disposable development configuration and state for the chosen format when needed. Do not build migrations between discarded prerelease formats.
 - Do not add compatibility readers, adapters, dual representations, fallback APIs, version negotiation, or version matrices to keep prototype interfaces alive.
-- Internal messages use the chosen current contract. Update both ends together. Reject unsupported input through ordinary boundary handling instead of imagining old producers and implementing their formats.
-- Use routerd as evidence about needed functions and real operational failures. Its architecture and internal compatibility obligations do not transfer to routerd2.
+- Internal messages between routerd2 components use the chosen current contract. Update both ends together; do not imagine old internal producers and implement their formats. This rule does not authorize stricter rejection of external network protocols.
+- Read routerd's relevant implementation, callers, operational fixes, and available real-communication evidence before replacing its networking behavior. Preserve the useful interoperability knowledge, not its architecture or internal interfaces. Being a new product does not justify losing established network behavior.
 - Implement update and recovery functions when the task calls for them. Any future supported product upgrades start from the first released format, not from discarded prototypes.
 
 ## 3. Reach real communication early
 
 1. Identify the operator problem, peer or client, intended result, and what would demonstrate it.
-2. Read the actual production path, callers, data ownership, and deployment setup.
-3. Resolve unknown device, OS, or protocol behavior in the smallest suitable authorized environment.
+2. Read the actual production path, callers, data ownership, and deployment setup. Compare the corresponding routerd behavior and the established peer implementation where relevant.
+3. Resolve unknown device, OS, or protocol behavior with actual peers in the smallest suitable authorized environment. Do this before spending time encoding assumptions in tests.
 4. Implement a useful complete path and exercise real communication early.
 5. Diagnose observed failures, fix their cause, check the affected behavior, and continue toward the release.
 
@@ -63,7 +73,7 @@ Current explicit user instructions and existing task authorization take preceden
 
 ## 5. Validation, ownership, and data flow
 
-- Decode unknown input at the boundary that owns it. Validate and normalize it there, then pass typed values inward.
+- Decode unknown input at the boundary that owns it. Apply the receive rules in section 1, normalize the usable information, and pass typed values inward. Boundary validation is not a mandate for strict conformance rejection.
 - Rely on invariants actually established by a type, construction, or preceding check in the operation. A struct type alone does not prove semantic validity.
 - Do not repeatedly parse, hash, encode, decode, or inspect unchanged data merely because it crosses an internal function.
 - Pass information already available to the operation directly to its consumer. Do not reread files or reconstruct objects to recover values still available on the call stack.
@@ -72,7 +82,7 @@ Current explicit user instructions and existing task authorization take preceden
 - Recheck a property when its premise can change through new external input, concurrent mutation, elapsed time, or a wait. Put the check with the responsible operation, not in every forwarding layer.
 - Account for actual retries, process restarts, and delayed or expired observations in the design being built. These do not justify supporting discarded versions.
 - Establish authentication, integrity, conflict handling, and write atomicity where the feature requires them. Design that boundary directly; existing validation functions, state fields, and acknowledgement mechanisms are not requirements in themselves.
-- Do not turn a batch that must reject invalid input before writing into a sequence of partial writes while removing duplicate checks.
+- Preserve atomicity for configuration or persistence operations that require it. Do not apply that rule to independently usable network options or observations and thereby reject an entire message unnecessarily.
 - Do not introduce a universal `Validated<T>` framework, wrapper hierarchy, validation cache, or flags to avoid passing a small typed value directly.
 
 ## 6. Write idiomatic, direct Go
@@ -110,7 +120,7 @@ Current explicit user instructions and existing task authorization take preceden
 - Keep a cohesive operation together. Extract a function for actual reuse, a named domain operation, or a meaningful resource lifetime, error boundary, or external side effect with clear inputs and results.
 - A single caller does not make such a function wrong. A one-use helper that merely renames an expression or forwards arguments usually adds indirection.
 - Let the main function show the normal flow and keep supporting helpers nearby. Do not impose function-length quotas.
-- Return early on errors and invalid input. Avoid `else` after an unconditional return and long `if err == nil` ladders.
+- Return early when the current operation cannot proceed. In receive loops, skip an unusable independent element when the rest remains useful. Avoid `else` after an unconditional return and long `if err == nil` ladders.
 - Prefer a clear `switch` for distinct states over dense conditions or several independent booleans encoding the same state.
 - Use short declarations and inferred local types where clear. Use `const` for constants and keep variables in the smallest useful scope.
 - Avoid redundant aliases and trivial one-use temporaries. Keep a named local when it explains meaning, captures one observation, or clarifies error handling.
@@ -125,7 +135,7 @@ Current explicit user instructions and existing task authorization take preceden
 - Handle errors explicitly. Add useful operation context with `%w` when callers need the cause; inspect causes with `errors.Is` or `errors.As`.
 - Do not wrap the same error at every forwarding layer, flatten it with `errors.New(err.Error())`, or parse error strings for control flow.
 - Let the responsible boundary report a failure once. Avoid logging and returning the same error at every layer.
-- Do not swallow errors, fabricate success, or use broad `recover` handlers to keep invalid state running. Ordinary failures use errors, not panics.
+- Report failures at the boundary responsible for the affected operation; do not fabricate success or use broad `recover` handlers to keep invalid state running. Deliberately ignoring unusable optional input under section 1 is normal receive behavior, not error concealment. An ancillary reporting or history failure must not terminate unrelated working protocol or forwarding operations.
 - Do not repeat nil checks for dependencies whose presence is established by construction. If absence is a supported state, represent its meaning.
 - Make ownership of files, sockets, transactions, locks, and buffers clear. Put cleanup beside acquisition and use `defer` when its lifetime is appropriate.
 - Do not add retries, backoff, fallbacks, or cache invalidation to hide an unexplained failure. Give necessary retries one owner, stopping conditions, and bounds appropriate to the operation.
@@ -146,7 +156,9 @@ Current explicit user instructions and existing task authorization take preceden
 ## 7. Tests must earn their cost
 
 - Unnecessary defensive test code is prohibited. Make the requirement or reproduced failure evident from the test name, inputs, and assertions; no separate justification document is required.
-- Use focused local tests for deterministic parsing, calculation, diagnosis, or useful regression prevention. Test count and coverage percentage are not product goals.
+- Do not make writing or expanding test code the default response to every change. Use a small local test when it resolves a concrete uncertainty or prevents a meaningful regression. Test count, coverage, and exhaustive rejection matrices are not product goals.
+- Establish expected networking behavior from real peers, captured traffic, operational experience, and the applicable protocol behavior. Never turn an invented restriction into a passing test and then treat that test as a requirement. Remove or rewrite tests that enshrine such restrictions.
+- Exercise the actual receive and send path for interoperability failures. Calling a parser or state transition directly does not verify socket filtering, interface scope, kernel behavior, or peer interaction. Prefer an existing real communication check over building another simulator.
 - Test observable results through the real implementation. Do not copy its algorithm or state machine into an expected-result generator.
 - Avoid elaborate mocks, global replacement hooks, impossible-state matrices, and assertions that freeze private implementation details.
 - Put test-only helpers in `*_test.go`. Do not add production wrappers, optional parameters, or alternate entry points solely for tests.
@@ -170,6 +182,7 @@ Current explicit user instructions and existing task authorization take preceden
 - Publishing, merging, releasing, deployment, destructive actions, and billable resource changes follow the actual task authorization. Do not invent an additional approval workflow for routine implementation.
 - Keep credentials, private keys, session data, and unnecessary private infrastructure details out of publication. Retain applicable licenses and notices for reused material.
 - Report the executed version, relevant setup, peer or client, observed result, and untested scope concisely. Distinguish implementation progress, real communication, and physical-device qualification.
+- Reviewers must read the relevant function bodies and call paths themselves and compare them with routerd and real communication evidence. Logs, author summaries, cleaner structure, and passing tests alone do not establish correct networking behavior. When real communication remains broken, make fixing it the next priority; do not keep polishing tests and reports around the failure.
 - If changed code fails the intended function, fix the cause and pause affected publication or deployment. Continue independent work.
 - Finish the requested outcome. Do not extend the task with speculative robustness work or new issues after it is complete.
 
