@@ -288,6 +288,12 @@ def peer(stage):
                 for r in json.loads(run(["ip", "-n", ns, "-j", "-6", "route", "show"]))
             )
         )
+        first_route = next(
+            r
+            for r in json.loads(run(["ip", "-n", ns, "-j", "-6", "route", "show"]))
+            if r.get("dst") == "default"
+        )
+        first_expiry = time.monotonic() + first_route["expires"]
         start(
             peer,
             [
@@ -327,7 +333,16 @@ def peer(stage):
         )
         print(r.stdout, r.stderr, flush=True)
         assert r.returncode == 0
-        print("PASS RA refresh kept routed Linux AFTR UDP forwarding", flush=True)
+        renewed_route = next(
+            r
+            for r in json.loads(run(["ip", "-n", ns, "-j", "-6", "route", "show"]))
+            if r.get("dst") == "default"
+        )
+        assert time.monotonic() + renewed_route["expires"] > first_expiry + 5
+        print(
+            "PASS RA refresh advanced the actual kernel route timer and kept AFTR TCP/UDP",
+            flush=True,
+        )
         ra.terminate()
         ra.wait(timeout=3)
         status = json.loads(
@@ -350,10 +365,11 @@ def peer(stage):
         for pid in frozen:
             os.kill(pid, signal.SIGSTOP)
         wait(
-            lambda: not any(
-                r.get("dst") == "default"
-                for r in json.loads(run(["ip", "-n", ns, "-j", "-6", "route", "show"]))
-            ),
+            lambda: subprocess.run(
+                ["ip", "-n", ns, "-6", "route", "get", "2001:db8:99::1"],
+                capture_output=True,
+            ).returncode
+            != 0,
             100,
         )
         failed = subprocess.run(
@@ -381,10 +397,11 @@ def peer(stage):
         frozen = []
         ra = start(peer, ra_command, "ra-recovery")
         wait(
-            lambda: any(
-                r.get("dst") == "default"
-                for r in json.loads(run(["ip", "-n", ns, "-j", "-6", "route", "show"]))
-            ),
+            lambda: subprocess.run(
+                ["ip", "-n", ns, "-6", "route", "get", "2001:db8:99::1"],
+                capture_output=True,
+            ).returncode
+            == 0,
             30,
         )
         assert (

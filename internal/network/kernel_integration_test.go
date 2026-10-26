@@ -423,7 +423,7 @@ func runNativeRAStateFixture(t *testing.T, e *Engine, base Desired, clientNS, se
 		}
 	}
 	tcpExchange(t, clientNS, serverNS, "tcp6", "2001:db8:3::2", "2001:db8:2::1")
-	d.Routes[1].ValidUntil = lifetime.Deadline{UTC: time.Now().Add(5 * time.Second)}
+	d.Routes[1].ValidUntil = lifetime.Deadline{UTC: time.Now().Add(9 * time.Second)}
 	if _, err := e.Apply(context.Background(), 41, d); err != nil {
 		t.Fatalf("finite route renewal: %v", err)
 	}

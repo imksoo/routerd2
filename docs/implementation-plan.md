@@ -637,7 +637,11 @@ Healthの元期限、古い通知、5秒confirmed rollback、AFTR worker再起�
 削除・再追加による一時的なIPv6経路喪失を特定した。独立dnsmasq/Linux AFTRでも再現し、
 kernel timerのin-place更新へ変更した。更新途中のphysical timerをjournalに記録し、ACK前後の
 writer再起動で所有権を回復する。30,000 UDP・同一TCP、kernel自身の元期限失効と復旧を確認した。
-実上流の修正版は再接続とIPv4/IPv6 TCP/UDPまで通り、新しい長時間試験は実行中である。
+後続のroute-refresh実上流130分試験はDHCPv4 default routeを通っており、DS-Lite受入は無効。
+`NLM_F_REPLACE`でREQUESTを落としてkernel未更新のままjournalだけが進む原因を修正した。
+実kernelで旧コードの所有権エラーと修正後の期限更新を確認した。新しい実daemonのRA試験は
+kernelの実期限更新も検査する。DHCPv4 defaultを無効にした修正版はready、第1世代で
+実AFTRのカプセル化往復とLAN IPv4/IPv6 TCP/UDPが通り、長時間試験を再開始した。
 PPPの有限active factと依存Health、明示した`forwarding.ipv4_rp_filter`のall/default管理・
 復元も実装し、実PPPoE peerでPBRとconfirmed rollbackを確認した。全体受入は未完了。
 

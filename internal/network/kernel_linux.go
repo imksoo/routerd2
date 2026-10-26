@@ -318,7 +318,7 @@ func (k *linuxKernel) writeRoute(saved ownedRoute, replace bool) error {
 			return err
 		}
 		if replace {
-			req.Flags = unix.NLM_F_REPLACE | unix.NLM_F_ACK
+			req.Flags = unix.NLM_F_REQUEST | unix.NLM_F_REPLACE | unix.NLM_F_ACK
 		}
 		_, err = req.Execute(unix.NETLINK_ROUTE, 0)
 		return err

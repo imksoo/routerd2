@@ -7,6 +7,8 @@
 [AGENTS.md](../AGENTS.md) とユーザー指示に従い、未公開API・保存形式・過去の試験結果を
 維持するための実装は残さない。過去の `docs/evidence` は削除済み。
 現在の設計に合わせてfixtureを更新し、prototype reader・adapter・migrationは作らない。
+容量不足へのユーザー指示で、過去の`dist/goal-validation`・停止済みfixture・旧log/captureは削除した。
+本文の旧`dist/`参照は履歴上の実行先であり、現存する証跡を意味しない。現在の実行中試験のみ保持する。
 
 ## 現在の実装
 
@@ -37,13 +39,25 @@
   table-100 の Health/PBR/TCP/UDP、設定撤去時の元の値への復元、8秒 confirmed rollback
   による復旧を Ubuntu PAP / Alpine CHAP で確認した。PPP の再接続は不要だった。
   記録は `dist/pppoe-health-final/` と `dist/pppoe-health-alpine/`。
-- 実 PD-source の130分継続試験は、111分の成功後、UDP DNS の失敗で停止した。
-  capture は WAN カプセル化前の ICMP host-unreachable を示し、上記の route 更新を
-  隔離環境で再現・修正した。自然な carrier T1 では PD 期限が更新され、worker は第1世代、
-  tunnel index も不変だったが、この停止した試験で更新前後の連続 TCP/UDP は受入しない。
-  修正版 `route-refresh` は通常DADで全関連workerが第1世代のまま再接続し、実上流を
-  使うLAN IPv4/IPv6 HTTPSとUDP DNSが通った。新しい130分の同一TCP・UDP継続試験を
-  `dist/live-route-refresh-continuity.log` へ出力中であり、完了とは扱わない。
+- 実 PD-source の旧130分試験は111分後のUDP失敗で停止した。後続の `route-refresh` は
+  130分の同一TCP/UDPと自然T1更新を通ったが、実経路はDHCPv4であり、DS-Lite受入は無効。
+  captureにIPv4-in-IPv6はなく、controlはroute更新の所有権エラーでdegradedだった。
+  `NLM_F_REPLACE`の代入で`NLM_F_REQUEST`を落とし、kernelへ適用せずjournalだけが
+  新timerを記録したことを特定した。REQUESTを保持する一行の修正で実kernelの期限更新・
+  所有権・再適用を確認した。旧コードをoverlayした実kernel試験は同じ所有権エラーで失敗した。
+  旧fixtureの4→5秒更新は2秒の丸め許容内だったため、4→9秒に直した。実daemonのRA試験も
+  UDP/TCP成功に加えてkernelの絶対期限が進んだことを確認する。
+  期限切れのkernel entryはGCまでdumpに残るため、失効・復旧はAFTR宛の実route lookupと
+  LAN TCPで確認する。30,000 UDP・同一TCP、writer/control/supervisor停止中の失効と復旧が通った。
+  修正版 `route-request-fix` はDHCPv4 default routeを明示的に無効にした新しい隔離状態で
+  `ready`、全worker第1世代、LAN IPv4/IPv6 HTTPSとUDP DNSが通った。`dslite0`選択と
+  実AFTRのIPv4-in-IPv6往復、RX/TXをcapture/経路で確認した。新しい130分試験は
+  `dist/live-route-request-continuity.log`へ出力中で、完了扱いにしない。
+  停止済みの旧試験のlog/captureはユーザー指示で削除した。
+  kernel比較は`dist/route-request-kernel-before.log` / `route-request-kernel-root.log`、
+  RA実daemonは`dist/route-request-ra-peer/`。物理ONU identity・直接配線・NIC受入は未確認。
+  最終`make check build-linux RELEASE_ID=route-request-fix`（Go/Python・race・vet・6静的ELF）が通った。
+  記録は`dist/route-request-check-build.log`。
 
 - PPPoE は旧 `LinuxPeer` の設定生成と pppd を土台にし、実 supervisor/control/network/worker へ統合した。
   pppd が PPP unit/address、writer が有限の経路を所有する。child の mount namespace に
