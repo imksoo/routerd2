@@ -14,9 +14,9 @@
 | モジュール | 実際の土台・置換 | 見直す対象 |
 | --- | --- | --- |
 | DNS | `pkg/dnsresolver`、`pkg/logstore`と旧daemonを利用・改変 | native化したlease期限、更新、listener、保存の差分。再利用しているだけで全resource同等とは数えない |
-| BGP | 旧`bgpdaemon`の設定・処理とGoBGPを利用・改変 | FIB ACK、BFD連動、VRF、全世代RIB・上限。旧FRR連携の効果を別途照合する |
+| BGP | 旧`bgpdaemon`の設定・処理とGoBGPを利用・改変 | 補助状態/履歴保存失敗でGoBGPを停止する結合を除去し、実filesystem失敗下のsession/FIB更新・撤去を確認。FIB ACK、BFD連動、VRF、全世代RIB・上限。旧FRR連携の効果を別途照合する |
 | Health | 旧`Probe`のTCP/DNS/HTTP、旧`ApplyResult`を利用。ICMP transportは新規 | ICMP実機、source/mark、threshold、旧状態・条件との違い |
-| DHCPv4 client | 旧socket実装を移植し、旧wire/lease helperを利用。orchestrationは新規 | socketを再利用しても取得・再送・renew・restoreが同等とは限らない。実回線取得とLAN NAT通信は確認した |
+| DHCPv4 client | 旧socket実装を移植し、旧wire/lease helperを利用。orchestrationは新規 | socketを再利用しても取得・再送・renew・restoreが同等とは限らない。実回線取得とLAN NAT通信は確認した。独立dnsmasqでsubnet mask要求漏れを発見し、旧encoderを土台に修正。/32・明示gateway routeでTCP/UDPも確認 |
 | DHCPv6 client | 旧`pdclient` wrapperから、新規のIA_NA/IA_PD/information engineへ置換 | 受信・link-local待機の退行、リンクローカルDNS、無関係IA・不良optionで全体を捨てる処理を修正。旧codec/state machine、実Renew/Rebind/Release、複数割当の扱いを再照合する |
 | RA受信 | 旧netplan/systemd側の動作をnative clientへ置換 | DAD待機と不良DNS optionの局所破棄を修正。managed/required/observe-only、DHCP起動、MTU/hop-limit、resolver効果 |
 | RA送信 | 旧dnsmasq側の処理を新規raw ICMPv6 engineへ置換 | link/MAC変化、RS応答、prefix/DNS期限、withdrawal。MAC変更時の誤広告を今回修正 |
@@ -55,4 +55,5 @@ DS-Liteでは通常RAの期限更新とDNS RRset順序変更でトンネルを�
 受信処理の見直し後、dnsmasqとの通常DAD・リンクローカルDNSの実問い合わせ・
 IA_NA更新/失効/復旧、悪いDNS optionを含むRAからの経路/TCP/UDP、
 ScapyのRapid Commit要求から通常OFFER/REQUEST/ACKまでを確認した。
-共通IA更新timer・DHCPv4 off-subnet gateway・BGP補助保存と生存の結合は修正が残る。
+DHCPv4 off-subnet gateway・subnet mask要求漏れ・BGP補助保存と生存の結合は修正し、
+独立dnsmasq・実GoBGP worker/独立wire peer・kernelで確認した。共通IA更新timerの修正は残る。

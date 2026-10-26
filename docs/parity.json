@@ -282,7 +282,7 @@
         "dhcp4-client"
       ],
       "parity_status": "not_integrated",
-      "known_gap": ""
+      "known_gap": " The client now requests the subnet mask it requires; an independent dnsmasq custom-mask ACK reproduced the prior request-list omission. A /32 lease with an explicitly configured gateway host route installed the default and passed actual TCP/UDP. Projection no longer rejects a gateway solely for lying outside the assigned subnet; no synthetic onlink route is added."
     },
     {
       "id": "wan.dhcp6",
@@ -403,7 +403,7 @@
         "bgp"
       ],
       "parity_status": "not_integrated",
-      "known_gap": "Extracted GoBGP v4 engine, dual-stack policy, route effects and durable dynamic-path API are integrated. An explicit native BFD dependency passed consumer and real two-binary QEMU failure/recovery gates. Original BFD profile/resource and SAM controller orchestration, mobility ownership policy and resource conversion remain incomplete. EVPN is deferred in the original baseline and is not a prerequisite for parity with it."
+      "known_gap": "Extracted GoBGP v4 engine, dual-stack policy, route effects and durable dynamic-path API are integrated. An explicit native BFD dependency passed consumer and real two-binary QEMU failure/recovery gates. Original BFD profile/resource and SAM controller orchestration, mobility ownership policy and resource conversion remain incomplete. EVPN is deferred in the original baseline and is not a prerequisite for parity with it. Ancillary status/history write failures are logged without stopping GoBGP or route publication. Actual directory-path write failures passed session/FIB updates and withdrawals. The writer also withdrew a flattened IPv6 route at its recursive static-route deadline while supervisor/control/BGP were paused. Address/link prerequisite expiry still needs actual-daemon qualification."
     },
     {
       "id": "routing.bfd",

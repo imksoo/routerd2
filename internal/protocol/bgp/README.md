@@ -285,7 +285,9 @@ neighbor scope names include a hash to prevent compressed-address collisions.
 
 Optional status JSON is replaced atomically at mode 0600. Optional event NDJSON
 rotates at 1 MiB, retaining one archive; events are observation summaries, not a
-durable protocol command log. Secrets are absent from status and event records.
+durable protocol command log. A status/history write failure is logged and does
+not stop GoBGP or FIB publication. The configuration journal and ownership ACK
+remain required operations. Secrets are absent from status and event records.
 
 ## Lifecycle and supported scope
 

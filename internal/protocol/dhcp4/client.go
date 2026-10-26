@@ -249,7 +249,23 @@ func (c *client) send(ctx context.Context) error {
 	default:
 		return fmt.Errorf("cannot send DHCPv4 request in state %s", c.state)
 	}
-	payload := wire.EncodeRequest(typ, c.transaction, c.hardware, opts)
+	// Adapt routerd's request encoding, including every value this client
+	// requires in an ACK. dnsmasq omits an unrequested custom subnet mask.
+	payload := make([]byte, 240)
+	payload[0], payload[1], payload[2] = 1, 1, byte(len(c.hardware))
+	binary.BigEndian.PutUint32(payload[4:8], c.transaction)
+	binary.BigEndian.PutUint16(payload[10:12], 0x8000)
+	copy(payload[28:44], c.hardware)
+	copy(payload[236:240], []byte{99, 130, 83, 99})
+	payload = append(payload, wire.OptionMessageType, 1, typ, wire.OptionParameterRequest, 12,
+		wire.OptionSubnetMask, wire.OptionLeaseTime, wire.OptionRouter, wire.OptionDNSServer,
+		wire.OptionHostname, wire.OptionDomainName, wire.OptionMTU, wire.OptionBroadcastAddress,
+		wire.OptionNTPServer, wire.OptionTFTPServer, wire.OptionBootfile, wire.OptionServerID)
+	for code, value := range opts {
+		payload = append(payload, code, byte(len(value)))
+		payload = append(payload, value...)
+	}
+	payload = append(payload, wire.OptionEnd)
 	for len(payload) < 300 {
 		payload = append(payload, 0)
 	}

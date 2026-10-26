@@ -2,6 +2,9 @@ socket_linux.go is adapted from imksoo/routerd, commit
 1329ef54f296507eda79bbbc3b853783dd27251e, file
 cmd/routerd-dhcpv4-client/socket_linux.go.
 
+The request encoding in client.go is adapted from pkg/dhcpv4client/message.go
+at the same commit. It additionally requests the subnet mask required by the
+client and leaves the existing orchestration to set elapsed time and ciaddr.
 The client uses github.com/imksoo/routerd/pkg/dhcpv4client as a pinned dependency.
 The protocol orchestration and effects interface are new routerd2 code.
 

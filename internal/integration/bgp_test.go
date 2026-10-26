@@ -90,7 +90,19 @@ func TestDaemonBGPFIBAndOwnershipExpiry(t *testing.T) {
 		Network:  network.Desired{Interfaces: []network.Interface{{Name: "wan0", Addresses: []string{"192.0.2.1/24", "2001:db8::1/64"}, AddressOptions: map[string]network.AddressOptions{"2001:db8::1/64": {NoDAD: true}}}}},
 		Services: []serviceconfig.Service{{Name: "edge", BGP: &c}},
 	}
-	fixture := startFixtureDaemon(t, config.FromNative(doc))
+	root, err := os.MkdirTemp("", "r2-bgp-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	// Reporting paths fail at real filesystem operations. They must not stop
+	// the GoBGP session, route publication or subsequent withdrawals.
+	for _, path := range []string{filepath.Join(root, "run", "services", "edge", "status.json"), filepath.Join(root, "state", "services", "edge", "bgp-events.jsonl")} {
+		if err := os.MkdirAll(path, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fixture := startFixtureDaemonAt(t, config.FromNative(doc), root)
 	var peer *fixtureBGPPeer
 	select {
 	case peer = <-peerReady:

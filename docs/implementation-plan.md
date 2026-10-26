@@ -663,6 +663,10 @@ bridge MAC変更後の古いSLLA広告を修正した。保存状態なしの起
 IA_NA TCP/UDP・更新/失効/復旧を確認した。不良RDNSS/DNSSLもRA option単位で破棄する。
 Rapid Commit Discoverへの通常OFFERとDORAを独立Scapy・captureで確認した。
 NA/PD片方の応答が未更新IAの共通更新timerを置換する問題は修正が残る。
+DHCPv4は旧request encoderのsubnet mask要求漏れを独立dnsmasqで再現して修正した。
+/32割当・明示gateway直結routeからdefault routeとTCP/UDPが通った。
+サブネット外であるだけでは投影全体を拒否せず、架空のonlink routeも作らない。
+
 
 
 DHCPv6の割当・情報・T1/T2・再送は元のBOOTTIMEへ変更し、controlの受信側grantを削除した。
@@ -800,6 +804,11 @@ default凍結後のIPv4 TCP接続が一度300msでtimeoutし、trace付き／通
 再利用・比較元: [pkg/bgp](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/bgp), [pkg/bgpdaemon](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/bgpdaemon), [pkg/controller/bgp](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/bgp), [pkg/controller/bfd](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/bfd)。
 
 実装先の案: `internal/protocol/bgp`, `internal/protocol/bfd`, `internal/runtimeplan`, `internal/network`, `internal/legacyconfig`。
+
+BGPの補助status/history書込み失敗はprotocol停止と結合しない。
+実filesystem失敗下のsession/FIB更新・撤去と、supervisor/control/BGP停止中に
+再帰先の静的IPv6経路の元期限でwriterが撤去する実daemon試験が通った。
+`make check-bgp`で再実行できる。address/linkの前提期限・対象機器の受入は別である。
 
 #### NET-08 — WireGuard の動的 peer・endpoint・identity
 

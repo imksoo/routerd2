@@ -11,6 +11,10 @@ import subprocess
 # Timeout is the outer harness budget, not a protocol or client deadline.
 SUITES = {
     "health-pbr": (("TestDaemonHealthPBRFailoverAndRecovery", ("wan0", "wan1"), 195),),
+    "bgp": (
+        ("TestDaemonBGPFIBAndOwnershipExpiry", (), 120),
+        ("TestDaemonBGPRecursivePrerequisiteExpiry", (), 120),
+    ),
     "bfd": (
         ("TestDaemonBFDControlsBGPSessionAndExpiry", (), 120),
         ("TestDaemonMultihopBFDControlsBGPSessionAndExpiry", ("wan0",), 120),

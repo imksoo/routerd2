@@ -129,8 +129,27 @@ Rapid Commit付きDHCPDISCOVERも通常OFFERで処理する（RFC 4039 §3）。
 最後まで完了した出力は`dist/rapid-commit-final-peer.log`。BusyBoxの空option指定はoptionを送らず、
 Rapid Commitの検証には使えなかった。RA/DHCPの出力は`dist/receive-ra/`、`dist/receive-dhcp6/`。
 `make check`・Race Detector・vet・6静的ELF buildも成功した。
-NA/PD片方だけのReplyによる共通更新timerの置換、off-subnet DHCPv4 gateway、
-BGPの補助保存失敗による停止など、照合で見つかった残る処理の修正を続ける。
+NA/PD片方だけのReplyによる共通更新timerとexchangeの置換は修正が残る。
+
+## 経路と補助保存の結合の修正
+
+BGPの状態表示・履歴への書込み失敗は、その操作でログへ報告し、GoBGPと経路所有通知を止めない。
+設定の適用journalやkernel ACKの失敗と、補助保存の失敗を同じ停止理由にしない。
+実際の保存先をdirectoryにした製品workerでBGP session、IPv4/IPv6 FIB、更新・撤去が通った。
+writer再起動後の元期限での撤去と、再帰先の静的IPv6経路の元期限による撤去も通った。
+後者はsupervisor/control/BGP停止中でも、BGP観測の期限より先に撤去した。
+`make check-bgp`で既存の2つの実daemon試験を実行できる。
+address/link由来の再帰前提期限は別であり、その実daemon受入はまだ残る。
+
+DHCPv4はサブネット外という理由だけで投影全体を拒否しない。
+明示したgatewayの直結routeを含む通常のkernel適用を使う。架空のonlink routeは加えない。
+独立dnsmasqとの最初の接続では、必須のsubnet maskを旧request encoderが要求しておらず、
+custom maskを含まないACKを捨て続けた。旧encoderを土台に送信箇所へ必要なfieldをまとめ、
+subnet maskを要求するよう修正した（出典とlicenseは`internal/protocol/dhcp4/NOTICE`）。
+同じ相手で/32取得、gateway host route、default route、TCP HTTP 200とUDP echoが通った。
+製品版`route-continuity`、出力は`dist/dhcp4-offsubnet-final-peer.log`と`dist/daemon-bgp/`。
+最終sourceの`make check`・Race Detector・vet・6静的ELF buildは成功した
+（`dist/route-continuity-final-check-build.log`）。
 
 ## 未完了と次の作業
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/netip"
 	"sort"
 	"sync"
@@ -188,12 +189,12 @@ func (o *observation) publish(ctx context.Context, s Snapshot) error {
 	}
 	if o.cfg.StatusPath != "" {
 		if err := atomicJSON(o.cfg.StatusPath, s); err != nil {
-			return fmt.Errorf("persist BGP status: %w", err)
+			slog.Error("persist BGP status", "resource", o.cfg.Resource, "path", o.cfg.StatusPath, "error", err)
 		}
 	}
 	event := Event{Type: "bgp.snapshot", Resource: s.Resource, Epoch: s.Epoch, Sequence: s.Sequence, Time: s.ObservedAt, Active: s.Active, Routes: len(s.Routes), Peers: len(s.Peers), Error: s.Error}
 	if err := appendEvent(o.cfg.EventPath, event); err != nil {
-		return fmt.Errorf("append BGP event: %w", err)
+		slog.Error("append BGP event", "resource", o.cfg.Resource, "path", o.cfg.EventPath, "error", err)
 	}
 	o.mu.Lock()
 	o.latest = s

@@ -17,7 +17,7 @@ QEMU_SSH_KEY ?=
 LDFLAGS = -s -w -X github.com/imksoo/routerd2/internal/buildinfo.Identity=ROUTERD2-RELEASE-V1:$(RELEASE_ID):END
 BUILD_ARGS = --build-arg GO_VERSION=$(GO_VERSION) --build-arg ALPINE_VERSION=$(ALPINE_VERSION) --build-arg RELEASE_ID=$(RELEASE_ID)
 
-.PHONY: help fmt fmt-check test test-dependencies test-tools race vet check check-health-pbr check-vrrp-unicast check-bfd check-pd-ra check-dhcp6 check-aftr check-ra-client check-ra-aftr check-dhcp-relay licenses build build-linux release-built-test container container-multi container-smoke apk image qemu-smoke qemu-network qemu-wireguard qemu-ra-dns qemu-daemon qemu-daemon-aftr qemu-dhcp4-clock qemu-dhcp6-clock qemu-ra-clock qemu-vrrp-daemon qemu-vrrp-activation qemu-vrrp-conditional qemu-vrrp-clock qemu-eventrule qemu-derived qemu-protocols qemu-release-boot qemu-storage qemu-health-power clean
+.PHONY: help fmt fmt-check test test-dependencies test-tools race vet check check-health-pbr check-vrrp-unicast check-bgp check-bfd check-pd-ra check-dhcp6 check-aftr check-ra-client check-ra-aftr check-dhcp-relay licenses build build-linux release-built-test container container-multi container-smoke apk image qemu-smoke qemu-network qemu-wireguard qemu-ra-dns qemu-daemon qemu-daemon-aftr qemu-dhcp4-clock qemu-dhcp6-clock qemu-ra-clock qemu-vrrp-daemon qemu-vrrp-activation qemu-vrrp-conditional qemu-vrrp-clock qemu-eventrule qemu-derived qemu-protocols qemu-release-boot qemu-storage qemu-health-power clean
 
 help:
 	@printf '%s\n' \
@@ -27,6 +27,7 @@ help:
 	  'make check-bfd         Verify BFD/BGP routing domains with real workers' \
 	  'make check-dhcp6       Verify native IA_NA with independent dnsmasq' \
 	  'make check-pd-ra       Verify PD renewal, generated RA and client traffic' \
+	  'make check-bgp         Verify actual BGP FIB, reporting failure and ownership expiry' \
 	  'make check-aftr        Verify AFTR input identity, DNS and tunnel expiry' \
 	  'make check-ra-client   Verify real RA, source/default-route TCP/UDP and expiry' \
 	  'make check-ra-aftr     Verify learned RA/DNS to DS-Lite LAN forwarding and expiry' \
@@ -93,6 +94,9 @@ check-health-pbr: build
 
 check-vrrp-unicast: build
 	$(PYTHON) scripts/vrrp-unicast.py --go '$(GO)'
+
+check-bgp: build
+	$(PYTHON) scripts/daemon-tests.py bgp --go '$(GO)'
 
 check-bfd: build
 	$(PYTHON) scripts/daemon-tests.py bfd --go '$(GO)'

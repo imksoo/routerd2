@@ -156,9 +156,6 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 				if err != nil || !gw.Is4() || gw.IsUnspecified() || gw.IsMulticast() {
 					return p, errors.New("invalid DHCPv4 gateway")
 				}
-				if !prefix.Contains(gw) {
-					return p, errors.New("DHCPv4 off-subnet gateway requires an explicit on-link route; no implicit unsafe route is installed")
-				}
 				p.network.Routes = append(p.network.Routes, network.Route{Destination: "0.0.0.0/0", Gateway: gw.String(), Interface: s.Interface(), Metric: s.DHCP4.Metric, Table: s.DHCP4.Table})
 			}
 		case "dhcp6":
