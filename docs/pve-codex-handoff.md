@@ -12,13 +12,28 @@
 
 ## 現在の実装
 
+- `firewall.mss_clamp`で明示MTUと一方向のinterface pairを指定し、IPv4/IPv6 TCPの
+  SYN/SYN-ACKにある大きいMSSだけを下げる。旧routerdの同処理を土台にした。
+  owned inet tableへmangle hookを足し、既存のnft batchで交換する。interface MTUやUDPは変更しない。
+  独立PPP/AFTRの先にMTU-1500端末を置き、上流でIPv4 ICMP MTU通知を遮断すると、
+  修正前はHealthと小packetが正常でも1MiB downloadが停止した。修正後は両WANで
+  1MiB download/upload、IPv6、MSS1200、切替・AFTR worker再起動後の転送が通った。
+  captureのSYN/SYN-ACKはPPP1414、DS-Lite1420、IPv61400、元の1200を維持した。
+  再実行は`make check-dual-wan`。現在の結果は`dist/mss-current/`、capture要約は
+  `dist/mss-capture-summary.json`。小payloadだけの旧fixtureは追加backendへ置き換えた。
+  bridge-family clamp、旧PathMTUPolicy変換、動的MTU導出、force-fragment、UDP/QUIC/実NICは未受入。
+  実回線の長時間試験はMSS追加前の`route-request-fix`（native-19）で継続中であり、
+  今回のMSS版を実回線へdeployしたものではない。
+  `make check build-linux RELEASE_ID=mss-clamp`（Go/Python、race、vet、6静的ELF）が通った。
+  記録は`dist/mss-check-build.log`、実行したELFのhashは`dist/mss-executed-hashes.json`。
+
 - 実 PPPoE と独立 Linux AFTR の二経路を、別 LAN client から native Health/PBR 経由で
   通信した。TCP/UDP の応答で PPP/DS-Lite の選択を識別し、主 probe だけの停止・復旧、
   Health の元の観測期限切れ、5秒 confirmed rollback、AFTR worker 再起動後の復旧を確認した。
   AFTR の `.active` fact と現在の実 supervisor 登録による通知の認証を追加し、
   Health が動的 tunnel を使えない制約と、consumer による interface の二重所有を修正した。
   再起動試験では古い残存 rule だけで復旧扱いにせず、新 worker と新 Health の適用を待つ。
-  通常 DAD を維持する。二経路の大きな TCP payload / MSS・実 ISP の PPP・物理 NIC は未検証。
+  通常 DAD を維持する。両WANの大きなTCP/MSSは後続試験で確認した。実ISPのPPPと物理NICは未検証。
   期限切れHealthの同一通知再送は経路を復活させず、AFTRの旧世代通知は409で拒否した。
   再実行は `make check-dual-wan`、記録は `dist/dual-wan-current/`。
   関連 Go/race、全 vet、amd64/arm64 の6静的 ELF、format/Python checks が通った。
@@ -69,7 +84,7 @@
   ローカル結果は `dist/pppoe-host-current/` と `dist/pppoe-alpine-current/` の log/pcap。
   `make check` と、最終変更の関連 race・全 vet・amd64/arm64 の静的 build が通った。
   scratch/appliance に engine を同梱したものではない。配布 component・PPP 上の PD・
-  resolver 適用・二経路 MSS・実 ISP は未完了。[ADR 0002](adr/0002-pppoe-engine.md) を参照。
+  resolver 適用・完全なMTU/fragment policy・実 ISP は未完了。[ADR 0002](adr/0002-pppoe-engine.md) を参照。
 
 - controlは読み取り専用のsource宣言を所有し、一度compileしたplanへ有限のfactを渡す。
   一時FactStoreや仮producer登録は使わない。operator revisionと観測・投影世代を区別する。
@@ -133,7 +148,7 @@
 - Health監視と履歴配送は分離する。保存先障害・queue満杯でもprobeを止めず、欠落と保存エラーを表示する。
   全probeの無欠落保存は保証しない。
 
-現在のworker ABIは3、compiler contractは `resource-program-native-19`、network journalはformat 8。
+現在のworker ABIは3、compiler contractは `resource-program-native-20`、network journalはformat 8。
 `track.resource`は宣言IDであり、decisionはhealthy/unhealthy/neutral/unknownを明示する。
 破棄したservice-only形式のreader・混在運用・migrationは実装しない。
 

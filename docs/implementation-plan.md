@@ -577,6 +577,13 @@ network intentのprotocol投影もJSON往復を除き、変更する集合だけ
 
 #### NET-03 — Firewall・ingress・MTU/MSS・fragment policy
 
+2026-10-26: 旧`writeTCPMSSClampTable`のSYN/SYN-ACK・小MSS維持をnativeの
+`firewall.mss_clamp`へ移した。明示MTUと一方向のinterface pairを既存owned nft batchで管理する。
+独立RP-PPPoE/Linux AFTRの先のMTU-1500端末と通信し、ICMP MTU通知の遮断時に修正前の
+1MiB download停止を再現した。修正後は両WANの1MiB download/upload、IPv6 TCP、
+MSS1200、障害切替・AFTR再起動後の大転送を確認した。captureのSYN/SYN-ACKはPPP1414、
+DS-Lite1420、IPv61400で、1200は不変。bridge/force-fragment/動的path導出/旧resource変換は未完了。
+
 範囲: 旧 routerd 互換 / track: network / risk: high。
 前提: CORE-03, CORE-04。
 
@@ -604,7 +611,7 @@ PAP/CHAP、DNS、MTU 1454、LAN TCP/UDP、IPv6CP link-local、元の観測期限
 worker 強制終了・古い通知・認証拒否/修復・AC 停止/復旧を確認した。
 `make check-pppoe` で実 daemon と packet capture を再実行する。
 engine の配布・署名・依存 library、PPP 上の PD、DNS の resolver 適用、完全な旧 field、
-二経路での大 payload/MSS、実 ISP は未完了。[ADR 0002](adr/0002-pppoe-engine.md) を参照。
+完全なMTU/fragment policyと実 ISP は未完了。[ADR 0002](adr/0002-pppoe-engine.md) を参照。
 
 範囲: 旧 routerd 互換 / track: network / risk: high。
 前提: CORE-03, CORE-06, NET-03, NET-05。 設計判断: D-02, D-03, D-07。
@@ -629,7 +636,7 @@ engine の配布・署名・依存 library、PPP 上の PD、DNS の resolver �
 Health/PBRを結び、応答内容で選択経路を識別したTCP/UDPの切替・復旧を確認した。
 Healthの元期限、古い通知、5秒confirmed rollback、AFTR worker再起動後の新Healthによる
 復旧も確認した。AFTRのactive factと通知元の実登録確認を追加し、consumerによる動的linkの
-二重所有を除いた。再実行は `make check-dual-wan`。MSS・大payload、実ISPのPPP、配布engineは未完了。
+二重所有を除いた。再実行は `make check-dual-wan`。両WANの大payload/MSSは後続のNET-03試験で確認した。完全なMTU/fragment policy、実ISPのPPP、配布engineは未完了。
 
 #### NET-05 — link・address・WAN resource の完全化
 
@@ -828,7 +835,7 @@ learned route先の利用者TCP/UDPも通信し、撤去中の接続拒否と復
 明示VRFではmultihop socketをVRF master、single-hopをmember interfaceへ束縛する。
 source domainとBGP FIB tableも検証する。同じendpointを持つ二つのVRFとdefault domainで
 実daemonを動かし、独立TCP/UDP・片側UDP障害・worker交替・main tableへの流出防止を確認した。
-single-hop VRFも実peerと障害・復旧を確認した。現在のcompiler contractはnative-19。
+single-hop VRFも実peerと障害・復旧を確認した。現在のcompiler contractはnative-20。
 IPv4/IPv6とも同じendpointを二つのVRFとdefault domainで同時使用し、BFD/BGPと三経路の
 TCP/UDPを確認した。defaultとVRFのUDP bind競合は受信socketだけの`SO_REUSEADDR`で修正した。
 domain/sourceの既存claimで二重ownerを拒否し、TX port専有と`SO_REUSEPORT`不使用を維持する。

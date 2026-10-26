@@ -22,7 +22,7 @@ BUILD_ARGS = --build-arg GO_VERSION=$(GO_VERSION) --build-arg ALPINE_VERSION=$(A
 help:
 	@printf '%s\n' \
 	  'make check             Format, unit tests, race detector, and vet' \
-	  'make check-dual-wan    Verify PPPoE/DS-Lite Health/PBR with independent peers' \
+	  'make check-dual-wan    Verify PPPoE/DS-Lite Health/PBR and TCP MSS with independent peers' \
 	  'make check-pppoe        Verify real PPPoE PAP/CHAP, LAN forwarding and recovery' \
 	  'make check-health-pbr  Required two-WAN real-daemon TCP/UDP failover gate' \
 	  'make check-vrrp-unicast Verify VRRP peer failover and finite WAN identity' \

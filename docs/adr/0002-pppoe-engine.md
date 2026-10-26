@@ -41,7 +41,7 @@ PPP/PPPoE 機能を必要とする。現時点の scratch runtime / appliance �
 CORE-06 / NET-04 の残作業である。Go の静的 build 成功で代用しない。
 
 PPP 上の DHCPv6 PD、resolver への DNS 適用、完全な旧 resource field の意味、
-二経路の大 payload / MSS、実 ISP と物理 NIC の受入も未完了である。
+完全なMTU/fragment policy、実 ISP と物理 NIC の受入も未完了である。
 これらの結果に応じて今回の interface・配置・契約を変更する。prototype 互換層は作らない。
 
 PPP の有限 `.active` fact と明示した依存関係で Health を起動する。PPP のアドレスと
@@ -56,7 +56,10 @@ Linux の RPF が応答を拒否し得る。旧 routerd の router profile と�
 confirmed rollback、AFTR worker の再起動後の復旧を確認した。Health は PPP unit や
 DS-Lite tunnel の interface/address/UP を所有しない。AFTR の active fact は実 supervisor
 登録と元の endpoint 期限に従い、static endpoint に heartbeat を追加しない。
-この小 payload の通信は MSS と path MTU の受入を代替しない。
+後続試験ではWANの先のMTU-1500端末と1MiB TCPを往復し、上流ICMP MTU通知の遮断時に
+旧実装のdownload停止を再現した。native MSS clamp後はPPP/DS-Lite、切替・再起動後とも
+転送でき、captureでMSS1414/1420と元の1200維持を確認した。完全なpath MTU/fragment policyや
+実ISP・NICを受入したものではない。
 
 参照:
 

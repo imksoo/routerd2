@@ -113,7 +113,9 @@ type Firewall struct {
 	Input        *FirewallChain `json:"input,omitempty"`
 	Output       *FirewallChain `json:"output,omitempty"`
 	ForwardChain *FirewallChain `json:"forward_chain,omitempty"`
-	// DisableForward installs no forward hook, for example for NAT-only use.
+	MSSClamp     []MSSClamp     `json:"mss_clamp,omitempty"`
+	// DisableForward omits the forwarding filter hook, for example for NAT-only
+	// or MSS-only use. Explicit MSS and NAT rules retain their own hooks.
 	// It cannot be combined with Forward pairs or ForwardChain.
 	DisableForward bool      `json:"disable_forward,omitempty"`
 	NAT            []NATRule `json:"nat,omitempty"`

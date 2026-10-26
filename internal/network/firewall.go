@@ -65,6 +65,17 @@ type NATRule struct {
 	Ports   *PortRange  `json:"ports,omitempty"`
 }
 
+// MSSClamp lowers an existing TCP MSS option on SYN/SYN-ACK packets crossing
+// one directed interface pair. MTU is the operator's path limit; IPv4 uses
+// MTU-40 and IPv6 MTU-60. Smaller options are retained. This does not authorize
+// forwarding or change interface MTU, UDP fragmentation or PMTU discovery.
+type MSSClamp struct {
+	From   string `json:"from"`
+	To     string `json:"to"`
+	Family int    `json:"family"`
+	MTU    int    `json:"mtu"`
+}
+
 func normalizedPortRange(p PortRange) PortRange {
 	if p.End == 0 {
 		p.End = p.Start
@@ -195,6 +206,20 @@ func validateFirewall(f *Firewall) error {
 	var errs []error
 	if f.DisableForward && (f.ForwardChain != nil || len(f.Forward) > 0) {
 		errs = append(errs, errors.New("firewall: disable_forward conflicts with forward_chain/forward pairs"))
+	}
+	for i, rule := range f.MSSClamp {
+		if !validName(rule.From) || !validName(rule.To) {
+			errs = append(errs, fmt.Errorf("MSS clamp %d: from and to interfaces are required", i))
+		}
+		minimum := 576
+		if rule.Family == 6 {
+			minimum = 1280
+		} else if rule.Family != 4 {
+			errs = append(errs, fmt.Errorf("MSS clamp %d: family must be 4 or 6", i))
+		}
+		if rule.MTU < minimum || rule.MTU > 65535 {
+			errs = append(errs, fmt.Errorf("MSS clamp %d: MTU must be %d..65535", i, minimum))
+		}
 	}
 	for _, item := range []struct {
 		name  string

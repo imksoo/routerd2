@@ -89,6 +89,9 @@ func buildFirewall(c *nftables.Conn, f *Firewall) {
 		}
 		buildFilterChain(c, t, "forward", nftables.ChainHookForward, policy, f.Forward)
 	}
+	if len(f.MSSClamp) > 0 {
+		buildMSSClamp(c, t, f.MSSClamp)
+	}
 	var pre, post *nftables.Chain
 	accept := nftables.ChainPolicyAccept
 	for _, rule := range f.NAT {
@@ -198,5 +201,32 @@ func prefixFieldMatch(prefix netip.Prefix, source bool) []expr.Any {
 		&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseNetworkHeader, Offset: offset, Len: length},
 		&expr.Bitwise{SourceRegister: 1, DestRegister: 1, Len: length, Mask: mask, Xor: make([]byte, length)},
 		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: address},
+	}
+}
+
+// Like routerd's mangle rule, rewrite only oversized MSS options on SYN without
+// RST. TCP option writes let the kernel update the checksum; no packet is rebuilt.
+func buildMSSClamp(c *nftables.Conn, table *nftables.Table, rules []MSSClamp) {
+	accept := nftables.ChainPolicyAccept
+	chain := c.AddChain(&nftables.Chain{Name: "mss_clamp", Table: table, Type: nftables.ChainTypeFilter, Hooknum: nftables.ChainHookForward, Priority: nftables.ChainPriorityMangle, Policy: &accept})
+	for _, rule := range rules {
+		header := 40
+		if rule.Family == 6 {
+			header = 60
+		}
+		mss := binaryutil.BigEndian.PutUint16(uint16(rule.MTU - header))
+		for _, match := range packetExpressions(PacketMatch{Family: rule.Family, InInterface: rule.From, OutInterface: rule.To, Protocol: "tcp"}) {
+			match = append(match,
+				&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseTransportHeader, Offset: 13, Len: 1},
+				&expr.Bitwise{SourceRegister: 1, DestRegister: 1, Len: 1, Mask: []byte{0x06}, Xor: []byte{0}},
+				&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{0x02}},
+				&expr.Exthdr{DestRegister: 1, Type: 2, Offset: 2, Len: 2, Op: expr.ExthdrOpTcpopt},
+				&expr.Cmp{Op: expr.CmpOpGt, Register: 1, Data: mss},
+				&expr.Immediate{Register: 1, Data: mss},
+				&expr.Exthdr{SourceRegister: 1, Type: 2, Offset: 2, Len: 2, Op: expr.ExthdrOpTcpopt},
+				&expr.Counter{},
+			)
+			c.AddRule(&nftables.Rule{Table: table, Chain: chain, Exprs: match})
+		}
 	}
 }

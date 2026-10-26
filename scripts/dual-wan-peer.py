@@ -2,8 +2,10 @@
 """Verify real PPPoE/DS-Lite Health/PBR failover with independent peers.
 
 Requires Linux root/sudo, pppd with pppoe.so, RP-PPPoE pppoe-server,
-iproute2, tcpdump, curl and Python 3. Host PPP files and routes are isolated.
+iproute2, nft, tcpdump, curl and Python 3. Host PPP files and routes are isolated.
 Packet capture includes both real WAN paths and the separate LAN client.
+WAN providers route to separate MTU-1500 application hosts and suppress IPv4
+fragmentation-needed messages. Check 1 MiB TCP in both directions and small MSS.
 """
 
 import argparse
@@ -37,6 +39,8 @@ def peer(stage):
     ppp = ns + "p"
     dsl = ns + "d"
     lan = ns + "l"
+    ppp_app = ns + "pa"
+    dsl_app = ns + "da"
     children = []
     capture = None
 
@@ -105,6 +109,30 @@ def peer(stage):
         )
         run(inside(lan, ["python3", "-c", code]))
 
+    def large_transfer(host, mtu):
+        code = r"""import http.client,hashlib,socket,sys
+host=sys.argv[2];c=http.client.HTTPConnection(host,18080,timeout=3)
+c.connect();mss=c.sock.getsockopt(socket.IPPROTO_TCP,socket.TCP_MAXSEG);assert mss<=int(sys.argv[1])-(60 if ':' in host else 40),mss
+c.request('GET','/large');r=c.getresponse();data=r.read();assert r.status==200 and data==b'x'*(1024*1024)
+c.close()
+c=http.client.HTTPConnection(host,18080,timeout=3)
+body=b'y'*(1024*1024);c.request('POST','/',body);r=c.getresponse();assert r.status==200 and r.read().decode()==hashlib.sha256(body).hexdigest()
+small=socket.socket(socket.AF_INET6 if ':' in host else socket.AF_INET,socket.SOCK_STREAM)
+small.settimeout(3);small.setsockopt(socket.IPPROTO_TCP,socket.TCP_MAXSEG,1200);small.connect((host,18083))
+small.sendall(b'GET / HTTP/1.0\r\nHost: peer\r\n\r\n');response=http.client.HTTPResponse(small);response.begin();assert response.status==200 and response.read() in (b'PPP',b'DSL')
+assert small.getsockopt(socket.IPPROTO_TCP,socket.TCP_MAXSEG)<=1200
+small.close()
+print('PASS actual 1 MiB TCP download/upload',host,'TCP_MAXSEG',mss,'and smaller MSS; upstream ICMP fragmentation-needed blocked for IPv4',flush=True)
+"""
+        result = subprocess.run(
+            inside(lan, ["python3", "-u", "-c", code, str(mtu), host]),
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        print(result.stdout, result.stderr, flush=True)
+        assert result.returncode == 0
+
     def probe(n, name):
         return start(
             n,
@@ -128,7 +156,16 @@ def peer(stage):
         {"id": "lan", "interface": {"name": "lan0"}},
         {"id": "lan-ip", "address": {"interface": "lan0", "cidr": "10.42.0.1/24"}},
         {"id": "dsl-ip", "address": {"interface": "wan1", "cidr": "2001:db8:42::2/64"}},
-        {"id": "forward", "forwarding": {"ipv4": True, "ipv4_rp_filter": 0}},
+        {"id": "forward", "forwarding": {"ipv4": True, "ipv6": True, "ipv4_rp_filter": 0}},
+        {"id": "lan-v6", "address": {"interface": "lan0", "cidr": "2001:db8:43::1/64"}},
+        {
+            "id": "peer-v6",
+            "route": {
+                "destination": "2001:db8:45::1/128",
+                "gateway": "2001:db8:42::1",
+                "interface": "wan1",
+            },
+        },
         {
             "id": "firewall",
             "firewall": {
@@ -212,6 +249,17 @@ def peer(stage):
                 },
             },
         ]
+    firewall = next(r["firewall"] for r in resources if r["id"] == "firewall")
+    firewall["mss_clamp"] = [
+        {"from": a, "to": b, "family": 4, "mtu": mtu}
+        for wan, mtu in [("ppp-wan", 1454), ("dslite0", 1460)]
+        for a, b in [("lan0", wan), (wan, "lan0")]
+    ]
+    firewall["forward"].append({"from": "lan0", "to": "wan1"})
+    firewall["mss_clamp"] += [
+        {"from": a, "to": b, "family": 6, "mtu": 1460}
+        for a, b in [("lan0", "wan1"), ("wan1", "lan0")]
+    ]
     configuration = {"schema_version": 2, "resources": resources}
     (stage / "config.json").write_text(json.dumps(configuration))
     (stage / "password").write_text("routerd2-fixture\n")
@@ -240,7 +288,7 @@ def peer(stage):
         (stage / "server.conf").write_text(
             "auth\nrequire-pap\nrefuse-chap\nmtu 1454\nmru 1454\nlogfd 1\nhide-password\nlcp-echo-interval 1\nlcp-echo-failure 3\n"
         )
-        for n in [ns, ppp, dsl, lan]:
+        for n in [ns, ppp, dsl, lan, ppp_app, dsl_app]:
             run(["ip", "netns", "add", n])
             run(["ip", "-n", n, "link", "set", "lo", "up"])
         for dev, peer, n in [
@@ -268,10 +316,52 @@ def peer(stage):
             run(["ip", "-n", n, "link", "set", peer, "up"])
         run(["ip", "-n", lan, "addr", "add", "10.42.0.2/24", "dev", "client0"])
         run(["ip", "-n", lan, "route", "add", "default", "via", "10.42.0.1", "dev", "client0"])
+        run(["ip", "-n", lan, "-6", "addr", "add", "2001:db8:43::2/64", "dev", "client0"])
+        run(["ip", "-n", lan, "-6", "route", "add", "default", "via", "2001:db8:43::1"])
         run(["ip", "-n", dsl, "addr", "add", "2001:db8:42::1/64", "dev", "server1"])
-        for n in [ppp, dsl]:
-            for addr in ["198.51.100.10/32", "198.51.100.20/32"]:
-                run(["ip", "-n", n, "addr", "add", addr, "dev", "lo"])
+        for provider, backend in [(ppp, ppp_app), (dsl, dsl_app)]:
+            run(["ip", "-n", provider, "addr", "add", "198.51.100.10/32", "dev", "lo"])
+            run(
+                [
+                    "ip",
+                    "link",
+                    "add",
+                    "backend0",
+                    "netns",
+                    provider,
+                    "type",
+                    "veth",
+                    "peer",
+                    "name",
+                    "uplink0",
+                    "netns",
+                    backend,
+                ]
+            )
+            for n, dev, address in [
+                (provider, "backend0", "192.0.3.1/24"),
+                (backend, "uplink0", "192.0.3.2/24"),
+            ]:
+                run(["ip", "-n", n, "link", "set", dev, "up"])
+                run(["ip", "-n", n, "addr", "add", address, "dev", dev])
+            run(["ip", "-n", provider, "route", "add", "198.51.100.20/32", "via", "192.0.3.2"])
+            run(["ip", "-n", backend, "addr", "add", "198.51.100.20/32", "dev", "lo"])
+            run(["ip", "-n", backend, "route", "add", "default", "via", "192.0.3.1"])
+            run(inside(provider, ["sysctl", "-qw", "net.ipv4.ip_forward=1"]))
+            # A real upstream firewall can suppress PMTU feedback. Keep this
+            # condition outside the product and count the suppressed packets.
+            rules = "table inet peer { chain output { type filter hook output priority 0; policy accept; ip protocol icmp icmp type destination-unreachable icmp code frag-needed counter drop; }; }\n"
+            subprocess.run(inside(provider, ["nft", "-f", "-"]), input=rules, text=True, check=True)
+        for n, dev, address in [
+            (dsl, "backend0", "2001:db8:44::1/64"),
+            (dsl_app, "uplink0", "2001:db8:44::2/64"),
+            (dsl_app, "lo", "2001:db8:45::1/128"),
+        ]:
+            run(["ip", "-n", n, "-6", "addr", "add", address, "dev", dev])
+        run(["ip", "-n", dsl_app, "-6", "route", "add", "default", "via", "2001:db8:44::1"])
+        run(["ip", "-n", dsl, "-6", "route", "add", "2001:db8:45::1/128", "via", "2001:db8:44::2"])
+        run(["ip", "-n", dsl, "-6", "route", "add", "2001:db8:43::/64", "via", "2001:db8:42::2"])
+        run(inside(dsl, ["sysctl", "-qw", "net.ipv6.conf.all.forwarding=1"]))
         run(
             [
                 "ip",
@@ -343,9 +433,18 @@ def peer(stage):
             class H(http.server.BaseHTTPRequestHandler):
                 def do_GET(self):
                     self.send_response(200)
-                    self.send_header('Content-Length', str(len(name)))
+                    body = b'x' * (1024 * 1024) if self.path == '/large' else name
+                    self.send_header('Content-Length', str(len(body)))
                     self.end_headers()
-                    self.wfile.write(name)
+                    self.wfile.write(body)
+                def do_POST(self):
+                    import hashlib
+                    body = self.rfile.read(int(self.headers['Content-Length']))
+                    answer = hashlib.sha256(body).hexdigest().encode()
+                    self.send_response(200)
+                    self.send_header('Content-Length', str(len(answer)))
+                    self.end_headers()
+                    self.wfile.write(answer)
             def udp():
                 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                 s.bind(('198.51.100.20', 18081))
@@ -353,14 +452,26 @@ def peer(stage):
                     body, address = s.recvfrom(4096)
                     s.sendto(name, address)
             threading.Thread(target=udp, daemon=True).start()
+            def small_mss_server(server):
+                server.socket.setsockopt(socket.IPPROTO_TCP,socket.TCP_MAXSEG,1200)
+                server.server_bind();server.server_activate()
+                threading.Thread(target=server.serve_forever,daemon=True).start()
+            small_mss_server(http.server.ThreadingHTTPServer(('198.51.100.20',18083),H,bind_and_activate=False))
+            if name == b'DSL':
+                class V6Server(http.server.ThreadingHTTPServer):
+                    address_family = socket.AF_INET6
+                threading.Thread(target=V6Server(('2001:db8:45::1',18080),H).serve_forever, daemon=True).start()
+                small_mss_server(V6Server(('2001:db8:45::1',18083),H,bind_and_activate=False))
             http.server.ThreadingHTTPServer(('198.51.100.20', 18080), H).serve_forever()
         """)
-        for n, name in [(ppp, "PPP"), (dsl, "DSL")]:
+        for n, name in [(ppp_app, "PPP"), (dsl_app, "DSL")]:
             start(n, ["python3", "-u", "-c", server, name], "apps-" + name)
         a = probe(ppp, "probe-ppp")
         b = probe(dsl, "probe-dsl")
         wait(lambda: selected(1000, 101) and selected(1100, 102))
         traffic("PPP")
+        large_transfer("198.51.100.20", 1454)
+        large_transfer("2001:db8:45::1", 1460)
         assert all(x["generation"] == 1 for x in modules().values())
         print(
             "PASS two independent PPP/AFTR WANs and actual marked Health/PBR -> primary PPP TCP/UDP",
@@ -370,6 +481,7 @@ def peer(stage):
         a.wait(timeout=3)
         wait(lambda: not selected(1000, 101))
         traffic("DSL")
+        large_transfer("198.51.100.20", 1460)
         print(
             "PASS primary reachability loss selected real AFTR TCP/UDP while PPP stayed up",
             flush=True,
@@ -438,12 +550,8 @@ def peer(stage):
                 and mods["service.internet-dsl"]["ready"]
                 and mods.get("service.health-dsl", {}).get("generation", 0) > prior_health
                 and state["phase"] == "ready"
-                and any(
-                    x["name"] == "service.health-dsl"
-                    and x["generation"] == mods["service.health-dsl"]["generation"]
-                    and x["snapshot"].get("active")
-                    for x in state["instances"]
-                )
+                and mods["service.health-dsl"]["ready"]
+                and api("control.sock", "/v1/services/service.health-dsl")["snapshot"].get("active")
                 and selected(1100, 102)
             )
 
@@ -467,6 +575,7 @@ def peer(stage):
         a.wait(timeout=3)
         wait(lambda: not selected(1000, 101))
         traffic("DSL")
+        large_transfer("198.51.100.20", 1460)
         print(
             "PASS actual AFTR worker restart recovered backup forwarding; primary remained usable",
             flush=True,
@@ -490,7 +599,7 @@ def peer(stage):
                 except subprocess.TimeoutExpired:
                     p.kill()
                     p.wait()
-        for n in [ns, ppp, dsl, lan]:
+        for n in [ns, ppp, dsl, lan, ppp_app, dsl_app]:
             for pid in subprocess.run(
                 ["ip", "netns", "pids", n], capture_output=True, text=True
             ).stdout.split():

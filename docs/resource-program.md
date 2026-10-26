@@ -430,7 +430,7 @@ ACTIVE成功には元boot IDと絶対期限を保持するVIP投影が必要で�
 旧世代・上書きされた通知や適用失敗を成功として返さない。
 
 このsource受入範囲の追加に伴い、署名されたconfiguration contractは
-`resource-program-native-19`とする。PPPの有限`.active` factで依存workerを起動し、PPP unitの
+`resource-program-native-20`とする。PPPの有限`.active` factで依存workerを起動し、PPP unitの
 UP/addressはpppdが所有する。`forwarding.ipv4_rp_filter`はLinux all/defaultを明示して管理する
 （0:無効、1:strict、2:loose、省略:管理しない）。撤去時は記録した元の値へ戻す。
 BFDの明示`multihop: true`はinterfaceを指定せず、
@@ -518,3 +518,30 @@ IPv6 routeの`valid_until`は運用者の絶対期限なら`{utc: "2030-01-01T00
 学習したRAは同じ型で元のboot ID/nanosecondsを渡すが、operator resourceはboot期限を指定できない。
 writerは元のauthorityとkernelの相対timerを区別し、保存したCLOCK_MONOTONICのtimerで所有権を確認する。
 長い期限のkernel grant更新はwriterが担当し、元のprotocol期限は変更しない。
+
+## TCP MSSと明示したpath MTU
+
+`firewall.mss_clamp`はIPv4/IPv6の転送TCP SYN/SYN-ACKにあるMSS optionだけを下げる。
+`from`・`to`は一方向のinterface pair、`family`は4/6、`mtu`はoperatorが指定するpath MTU。
+IPv4はMTU-40、IPv6はMTU-60を上限にし、元から小さいMSSは増やさない。
+両方向へ適用する場合は、それぞれのpairを指定する。動的PPP/tunnelの生成前にも名前で指定できる。
+
+```yaml
+id: firewall
+firewall:
+  forward: [{from: lan0, to: ppp-wan}]
+  mss_clamp:
+    - {from: lan0, to: ppp-wan, family: 4, mtu: 1454}
+    - {from: ppp-wan, to: lan0, family: 4, mtu: 1454}
+```
+
+既存のowned inet tableへforward/mangle hookを追加し、他のfirewall変更と同じnft batchで交換する。
+forward許可、interface MTU、UDP/QUICのfragment処理、PMTU探索の設定は変更しない。
+`disable_forward`はforwardのfilter hookを省略する指定で、明示したMSS/NAT hookは有効である。
+これは固定の明示MTUに対するnative機能であり、bridge-family clamp、旧PathMTUPolicyの変換、
+動的なpath MTU導出、IPv4 force-fragmentの受入は未完了である。
+
+`make check-dual-wan`は独立RP-PPPoE AC/Linux AFTRと、その先のMTU-1500端末を使う。
+IPv4 PMTU通知を上流で遮断した同じ構成で、修正前は小packetとHealthだけが通り、1MiB TCPは停止した。
+修正後はPPP/DS-Liteの両方で1MiB download/upload、IPv6、MSS1200、切替とworker再起動後の
+転送が通った。captureでPPP 1414、DS-Lite 1420、IPv6 1400、元の1200維持を確認した。
