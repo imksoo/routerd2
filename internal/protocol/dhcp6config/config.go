@@ -7,7 +7,9 @@ import (
 	"net/netip"
 	"path/filepath"
 	"strings"
-	"time"
+
+	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/lifetime"
 )
 
 type Config struct {
@@ -22,34 +24,36 @@ type Config struct {
 }
 
 type Address struct {
-	Address        string    `json:"address"`
-	PreferredUntil time.Time `json:"preferred_until"`
-	ValidUntil     time.Time `json:"valid_until"`
+	Address        string            `json:"address"`
+	PreferredUntil lifetime.Deadline `json:"preferred_until"`
+	ValidUntil     lifetime.Deadline `json:"valid_until"`
 }
 type Prefix struct {
-	Prefix         string    `json:"prefix"`
-	PreferredUntil time.Time `json:"preferred_until"`
-	ValidUntil     time.Time `json:"valid_until"`
+	Prefix         string            `json:"prefix"`
+	PreferredUntil lifetime.Deadline `json:"preferred_until"`
+	ValidUntil     lifetime.Deadline `json:"valid_until"`
 }
 
 type Snapshot struct {
-	Resource                  string    `json:"resource"`
-	Interface                 string    `json:"interface"`
-	IAID                      uint32    `json:"iaid"`
-	ClientDUID                string    `json:"client_duid"`
-	ServerDUID                string    `json:"server_duid,omitempty"`
-	State                     string    `json:"state"`
-	Addresses                 []Address `json:"addresses,omitempty"`
-	Prefixes                  []Prefix  `json:"prefixes,omitempty"`
-	RenewAt                   time.Time `json:"renew_at,omitempty"`
-	RebindAt                  time.Time `json:"rebind_at,omitempty"`
-	DNSServers                []string  `json:"dns_servers,omitempty"`
-	DomainSearch              []string  `json:"domain_search,omitempty"`
-	SNTPServers               []string  `json:"sntp_servers,omitempty"`
-	AFTRName                  string    `json:"aftr_name,omitempty"`
-	InfoUpdatedAt             time.Time `json:"info_updated_at,omitempty"`
-	InformationRefreshSeconds uint32    `json:"information_refresh_seconds,omitempty"`
-	InformationRefreshAt      time.Time `json:"information_refresh_at,omitempty"`
+	ObservedNanos             uint64            `json:"observed_nanos"`
+	BootID                    string            `json:"boot_id"`
+	Resource                  string            `json:"resource"`
+	Interface                 string            `json:"interface"`
+	IAID                      uint32            `json:"iaid"`
+	ClientDUID                string            `json:"client_duid"`
+	ServerDUID                string            `json:"server_duid,omitempty"`
+	State                     string            `json:"state"`
+	Addresses                 []Address         `json:"addresses,omitempty"`
+	Prefixes                  []Prefix          `json:"prefixes,omitempty"`
+	RenewAt                   lifetime.Deadline `json:"renew_at,omitempty"`
+	RebindAt                  lifetime.Deadline `json:"rebind_at,omitempty"`
+	DNSServers                []string          `json:"dns_servers,omitempty"`
+	DomainSearch              []string          `json:"domain_search,omitempty"`
+	SNTPServers               []string          `json:"sntp_servers,omitempty"`
+	AFTRName                  string            `json:"aftr_name,omitempty"`
+	InfoReceivedNanos         uint64            `json:"info_received_nanos,omitempty"`
+	InformationRefreshSeconds uint32            `json:"information_refresh_seconds,omitempty"`
+	InformationRefreshAt      lifetime.Deadline `json:"information_refresh_at,omitempty"`
 }
 
 func Validate(c Config) error {
@@ -73,53 +77,55 @@ func ParseDUID(s string) ([]byte, error) {
 	return b, nil
 }
 
-// LeaseUntil bounds consumers by the last surviving assignment. Information
-// refresh is separate and cannot renew an address or a delegated prefix.
-func (s Snapshot) LeaseUntil() time.Time {
-	var until time.Time
-	for _, a := range s.Addresses {
-		if a.ValidUntil.After(until) {
-			until = a.ValidUntil
+// LeaseUntil returns the last surviving assignment budget. The bool
+// distinguishes absence of assignments from an explicit infinite assignment.
+func (s Snapshot) LeaseUntil() (lifetime.Deadline, bool) {
+	var until lifetime.Deadline
+	found := false
+	add := func(d lifetime.Deadline) {
+		if !found || until.Nanos != 0 && (d.Nanos == 0 || d.Nanos > until.Nanos) {
+			until = d
 		}
+		found = true
+	}
+	for _, a := range s.Addresses {
+		add(a.ValidUntil)
 	}
 	for _, p := range s.Prefixes {
-		if p.ValidUntil.After(until) {
-			until = p.ValidUntil
-		}
+		add(p.ValidUntil)
 	}
-	return until
+	return until, found
 }
-func (s Snapshot) Active(now time.Time) bool {
-	if s.State == "stopped" {
+func (s Snapshot) Active(clock boottime.Clock) bool {
+	if s.State == "stopped" || s.BootID != clock.BootID {
 		return false
 	}
 	if s.State == "information" {
-		_, ok := s.InformationUntil(now)
+		_, ok := s.InformationUntil(clock)
 		return ok
 	}
-	return now.Before(s.LeaseUntil())
+	until, found := s.LeaseUntil()
+	return found && until.Live(clock)
 }
-func (s Snapshot) InformationUntil(now time.Time) (time.Time, bool) {
-	if s.State == "stopped" || s.InfoUpdatedAt.IsZero() {
-		return time.Time{}, false
+func (s Snapshot) InformationUntil(clock boottime.Clock) (lifetime.Deadline, bool) {
+	if s.State == "stopped" || s.BootID != clock.BootID || s.InfoReceivedNanos == 0 {
+		return lifetime.Deadline{}, false
 	}
 	until := s.InformationRefreshAt
-	if until.IsZero() && s.InformationRefreshSeconds != ^uint32(0) {
-		return time.Time{}, false
+	if until.BootID != s.BootID {
+		return lifetime.Deadline{}, false
 	}
 	if s.State != "information" {
-		lease := s.LeaseUntil()
-		if lease.IsZero() {
-			return time.Time{}, false
+		lease, found := s.LeaseUntil()
+		if !found {
+			return lifetime.Deadline{}, false
 		}
-		if until.IsZero() || lease.Before(until) {
-			until = lease
-		}
+		until = lifetime.Minimum(clock, until, lease)
 	}
-	return until, until.IsZero() || now.Before(until)
+	return until, until.Live(clock)
 }
 func ValidateSnapshot(c Config, s Snapshot) error {
-	if s.Resource != c.Resource || s.Interface != c.Interface || s.IAID != c.IAID {
+	if s.Resource != c.Resource || s.Interface != c.Interface || s.IAID != c.IAID || !boottime.ValidBootID(s.BootID) || s.ObservedNanos == 0 || s.ObservedNanos > 1<<63-1 {
 		return errors.New("DHCPv6 snapshot identity mismatch")
 	}
 	if _, err := ParseDUID(s.ClientDUID); err != nil {
@@ -130,7 +136,7 @@ func ValidateSnapshot(c Config, s Snapshot) error {
 	default:
 		return errors.New("invalid DHCPv6 client state")
 	}
-	if s.State == "stopped" && (len(s.Addresses)+len(s.Prefixes) > 0 || !s.InfoUpdatedAt.IsZero()) {
+	if s.State == "stopped" && (len(s.Addresses)+len(s.Prefixes) > 0 || s.InfoReceivedNanos != 0) {
 		return errors.New("stopped DHCPv6 client retains assignments/information")
 	}
 	if s.State == "information" && (c.RequestAddress || c.RequestPrefix) {
@@ -144,22 +150,33 @@ func ValidateSnapshot(c Config, s Snapshot) error {
 	if len(s.Addresses) > 64 || len(s.Prefixes) > 64 {
 		return errors.New("too many DHCPv6 assignments")
 	}
+	if s.InfoReceivedNanos > s.ObservedNanos {
+		return errors.New("DHCPv6 information is from a future observation")
+	}
+	for _, d := range []lifetime.Deadline{s.RenewAt, s.RebindAt, s.InformationRefreshAt} {
+		if d.Validate() != nil || !d.UTC.IsZero() || d != (lifetime.Deadline{}) && d.BootID != s.BootID {
+			return errors.New("DHCPv6 timers require the originating boot")
+		}
+	}
 	seen := map[string]bool{}
 	for _, a := range s.Addresses {
 		ip, err := netip.ParseAddr(a.Address)
-		if err != nil || !usable(ip) || a.Address != ip.String() || !c.RequestAddress || seen[a.Address] || a.ValidUntil.IsZero() || a.PreferredUntil.IsZero() || a.PreferredUntil.After(a.ValidUntil) {
+		if err != nil || !usable(ip) || a.Address != ip.String() || !c.RequestAddress || seen[a.Address] || !validLease(s.BootID, a.PreferredUntil, a.ValidUntil) {
 			return errors.New("invalid DHCPv6 address assignment")
 		}
 		seen[a.Address] = true
 	}
 	for _, p := range s.Prefixes {
 		ip, err := netip.ParsePrefix(p.Prefix)
-		if err != nil || !usable(ip.Addr()) || ip != ip.Masked() || p.Prefix != ip.String() || !c.RequestPrefix || seen[p.Prefix] || p.ValidUntil.IsZero() || p.PreferredUntil.IsZero() || p.PreferredUntil.After(p.ValidUntil) {
+		if err != nil || !usable(ip.Addr()) || ip != ip.Masked() || p.Prefix != ip.String() || !c.RequestPrefix || seen[p.Prefix] || !validLease(s.BootID, p.PreferredUntil, p.ValidUntil) {
 			return errors.New("invalid DHCPv6 prefix assignment")
 		}
 		seen[p.Prefix] = true
 	}
 	return nil
+}
+func validLease(bootID string, preferred, valid lifetime.Deadline) bool {
+	return preferred.Validate() == nil && valid.Validate() == nil && preferred.BootID == bootID && valid.BootID == bootID && (valid.Nanos == 0 || preferred.Nanos != 0 && preferred.Nanos <= valid.Nanos)
 }
 func usable(a netip.Addr) bool {
 	return a.Is6() && !a.Is4In6() && !a.IsUnspecified() && !a.IsMulticast() && !a.IsLinkLocalUnicast()

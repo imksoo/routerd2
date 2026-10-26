@@ -8,21 +8,28 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/lifetime"
 )
 
-func liveInput() Input {
+func liveInput(t *testing.T) Input {
+	t.Helper()
 	in := inputForTest()
-	now := time.Now().UTC()
-	in.UpdatedAt = now
-	in.Source.PreferredUntil = now.Add(10 * time.Second)
-	in.Source.ValidUntil = now.Add(20 * time.Second)
-	in.Candidates[0].ValidUntil = now.Add(20 * time.Second)
-	in.Resolvers[0].ValidUntil = now.Add(20 * time.Second)
+	now, err := boottime.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	in.UpdatedAt = now.WallTime
+	in.Source.PreferredUntil = lifetime.After(now, 10)
+	in.Source.ValidUntil = lifetime.After(now, 20)
+	in.Candidates[0].ValidUntil = lifetime.After(now, 20)
+	in.Resolvers[0].ValidUntil = lifetime.After(now, 20)
 	return in
 }
 
 func TestWorkerDiscardsOldQueryGenerationAndWithdraws(t *testing.T) {
-	cfg, in := configForTest(), liveInput()
+	cfg, in := configForTest(), liveInput(t)
 	updates := make(chan Input, 4)
 	snapshots := make(chan Snapshot, 32)
 	done := make(chan error, 1)
@@ -43,7 +50,7 @@ func TestWorkerDiscardsOldQueryGenerationAndWithdraws(t *testing.T) {
 			close(oldStarted)
 			<-releaseOld
 		}
-		now, _ := currentInstant()
+		now, _ := boottime.Read()
 		r := goodResult(now, 5)
 		if input.Generation == 2 {
 			r.answers[0].Address = "2001:db8:ffff::2"
@@ -115,8 +122,12 @@ stopped:
 }
 
 func TestWorkerExpiresSourceWhileDNSLookupIsBlocked(t *testing.T) {
-	cfg, in := configForTest(), liveInput()
-	in.Source.PreferredUntil = time.Now().UTC().Add(250 * time.Millisecond)
+	cfg, in := configForTest(), liveInput(t)
+	clock, err := boottime.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	in.Source.PreferredUntil = lifetime.Deadline{BootID: clock.BootID, Nanos: uint64(clock.BoottimeNanoseconds) + uint64(250*time.Millisecond)}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	snapshots := make(chan Snapshot, 32)
@@ -152,7 +163,7 @@ func TestWorkerExpiresSourceWhileDNSLookupIsBlocked(t *testing.T) {
 }
 
 func TestWorkerRejectsChangedSameGenerationAndCallbackFailure(t *testing.T) {
-	cfg, in := configForTest(), liveInput()
+	cfg, in := configForTest(), liveInput(t)
 	updates := make(chan Input, 1)
 	next := cloneInput(in)
 	next.Source.Address = "2001:db8:1::2"

@@ -66,7 +66,7 @@ func validateAddressOptions(d Desired) error {
 				}
 			}
 			if b := o.BootLifetime; b != (BootLifetime{}) {
-				if !boottime.ValidBootID(b.BootID) || b.ValidNanos == 0 || b.ValidNanos > math.MaxInt64 || b.PreferredNanos > b.ValidNanos || !o.PreferredUntil.IsZero() || !o.ValidUntil.IsZero() {
+				if !b.valid() || !o.PreferredUntil.IsZero() || !o.ValidUntil.IsZero() {
 					errs = append(errs, fmt.Errorf("interface %s address %s: invalid boot lifetime", l.Name, p))
 				}
 			}

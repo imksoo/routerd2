@@ -6,7 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/config"
+	"github.com/imksoo/routerd2/internal/lifetime"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
 	"github.com/imksoo/routerd2/internal/protocol/ra"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
@@ -14,16 +16,17 @@ import (
 
 func TestPDLearnedDNSDeadlineAndStableRAIdentity(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
+	clock := boottime.Clock{BootID: "11111111-2222-4333-8444-555555555555", BoottimeNanoseconds: int64(time.Hour), WallTime: now}
 	doc := config.Native{Services: []serviceconfig.Service{{Name: "pd", DHCP6: &serviceconfig.DHCP6{RequestPrefix: true, Interface: "wan0", IAID: 7, Delegations: []serviceconfig.Delegation{{Name: "lan", Interface: "lan0", SubnetID: 3, Advertise: true, UseLearnedDNS: true, RDNSS: []string{"2001:db8::1"}, DNSSL: []string{"static.example"}}}}}}}
 	protocols := protocolsFor(t, doc, "/run/routerd", "/var/lib/routerd")
-	snapshot := dhcp6config.Snapshot{Resource: "pd", Interface: "wan0", IAID: 7, State: "bound", Prefixes: []dhcp6config.Prefix{{Prefix: "2001:db8:100::/56", PreferredUntil: now.Add(400 * time.Second), ValidUntil: now.Add(600 * time.Second)}}, InformationRefreshSeconds: 600, InformationRefreshAt: now.Add(180 * time.Second), InfoUpdatedAt: now, DNSServers: []string{"2001:db8::1", "2001:db8::53"}, DomainSearch: []string{"static.example", "learned.example"}}
+	snapshot := dhcp6config.Snapshot{BootID: clock.BootID, Resource: "pd", Interface: "wan0", IAID: 7, State: "bound", Prefixes: []dhcp6config.Prefix{{Prefix: "2001:db8:100::/56", PreferredUntil: lifetime.After(clock, 400), ValidUntil: lifetime.After(clock, 600)}}, InformationRefreshSeconds: 600, InformationRefreshAt: lifetime.After(clock, 180), InfoReceivedNanos: uint64(clock.BoottimeNanoseconds), DNSServers: []string{"2001:db8::1", "2001:db8::53"}, DomainSearch: []string{"static.example", "learned.example"}}
 	projectAt := func(value dhcp6config.Snapshot, at time.Time) (ra.Config, string) {
 		t.Helper()
 		raw, err := json.Marshal(value)
 		if err != nil {
 			t.Fatal(err)
 		}
-		p, err := projectWithFacts(doc, protocols, map[string]serviceconfig.Update{"service.pd": {Role: "dhcp6", Snapshot: raw}}, at, projectionFacts{})
+		p, err := projectWithFacts(doc, protocols, map[string]serviceconfig.Update{"service.pd": {Role: "dhcp6", Snapshot: raw}}, at, projectionFacts{bfdClock: boottime.Clock{BootID: clock.BootID, BoottimeNanoseconds: clock.BoottimeNanoseconds + int64(at.Sub(now)), WallTime: at}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -48,7 +51,7 @@ func TestPDLearnedDNSDeadlineAndStableRAIdentity(t *testing.T) {
 		return ra.Config{}, ""
 	}
 	first, identity := projectAt(snapshot, now)
-	check := func(c ra.Config, deadline time.Time) {
+	check := func(c ra.Config, deadline lifetime.Deadline) {
 		t.Helper()
 		if !reflect.DeepEqual(c.RDNSS, []string{"2001:db8::1"}) || !reflect.DeepEqual(c.DNSSL, []string{"static.example"}) {
 			t.Fatal("learned entries contaminated static intent", c)
@@ -57,12 +60,12 @@ func TestPDLearnedDNSDeadlineAndStableRAIdentity(t *testing.T) {
 			t.Fatal("learned DNS missing", c)
 		}
 		for _, server := range c.LearnedRDNSS {
-			if !server.ValidUntil.Equal(deadline) {
+			if server.ValidUntil != deadline {
 				t.Fatal("RDNSS lost absolute source deadline", server)
 			}
 		}
 		for _, domain := range c.LearnedDNSSL {
-			if !domain.ValidUntil.Equal(deadline) {
+			if domain.ValidUntil != deadline {
 				t.Fatal("DNSSL lost absolute source deadline", domain)
 			}
 		}
@@ -73,8 +76,8 @@ func TestPDLearnedDNSDeadlineAndStableRAIdentity(t *testing.T) {
 		t.Fatal("polling changed absolute deadlines or worker identity")
 	}
 	renewed := snapshot
-	renewed.InfoUpdatedAt = now.Add(60 * time.Second)
-	renewed.InformationRefreshAt = now.Add(240 * time.Second)
+	renewed.InfoReceivedNanos = uint64(clock.BoottimeNanoseconds) + uint64(60*time.Second)
+	renewed.InformationRefreshAt = lifetime.After(clock, 240)
 	live, renewedIdentity := projectAt(renewed, now.Add(60*time.Second))
 	check(live, renewed.InformationRefreshAt)
 	if renewedIdentity != identity {
@@ -82,9 +85,9 @@ func TestPDLearnedDNSDeadlineAndStableRAIdentity(t *testing.T) {
 	}
 	for _, value := range []dhcp6config.Snapshot{
 		snapshot,
-		func() dhcp6config.Snapshot { v := renewed; v.InformationRefreshAt = now.Add(time.Second); return v }(),
-		func() dhcp6config.Snapshot { v := renewed; v.InfoUpdatedAt = time.Time{}; return v }(),
-		func() dhcp6config.Snapshot { v := renewed; v.InformationRefreshAt = time.Time{}; return v }(),
+		func() dhcp6config.Snapshot { v := renewed; v.InformationRefreshAt = lifetime.After(clock, 1); return v }(),
+		func() dhcp6config.Snapshot { v := renewed; v.InfoReceivedNanos = 0; return v }(),
+		func() dhcp6config.Snapshot { v := renewed; v.InformationRefreshAt = lifetime.Deadline{}; return v }(),
 	} {
 		live, digest := projectAt(value, now.Add(181*time.Second))
 		if len(live.LearnedRDNSS)+len(live.LearnedDNSSL) != 0 || len(live.RDNSS) != 1 || len(live.DNSSL) != 1 || digest != identity {
@@ -93,14 +96,15 @@ func TestPDLearnedDNSDeadlineAndStableRAIdentity(t *testing.T) {
 	}
 	infinite := snapshot
 	infinite.InformationRefreshSeconds = ^uint32(0)
-	infinite.InformationRefreshAt = time.Time{}
+	infinite.InformationRefreshAt = lifetime.After(clock, ^uint32(0))
 	live, digest := projectAt(infinite, now)
-	check(live, snapshot.LeaseUntil())
+	until, _ := snapshot.LeaseUntil()
+	check(live, until)
 	if digest != identity {
 		t.Fatal("infinite refresh changed worker template")
 	}
 	finiteBeyondPD := snapshot
-	finiteBeyondPD.InformationRefreshAt = now.Add(time.Hour)
+	finiteBeyondPD.InformationRefreshAt = lifetime.After(clock, 3600)
 	live, _ = projectAt(finiteBeyondPD, now)
-	check(live, snapshot.LeaseUntil())
+	check(live, until)
 }

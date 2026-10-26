@@ -9,12 +9,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/lifetime"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
 )
 
 func TestCombinedAddressAndPrefixExchange(t *testing.T) {
 	now := time.Unix(1700000000, 0)
-	c := client{cfg: dhcp6config.Config{IAID: 7, RequestAddress: true, RequestPrefix: true, PrefixLength: 56}, duid: []byte{0, 3, 0, 1}, server: []byte{0, 3, 0, 2}, snapshot: dhcp6config.Snapshot{State: "bound"}}
+	c := client{cfg: dhcp6config.Config{IAID: 7, RequestAddress: true, RequestPrefix: true, PrefixLength: 56}, duid: []byte{0, 3, 0, 1}, server: []byte{0, 3, 0, 2}, snapshot: dhcp6config.Snapshot{BootID: clockAt(now).BootID, State: "bound"}}
 	if err := c.begin(renew, now); err != nil {
 		t.Fatal(err)
 	}
@@ -24,19 +26,19 @@ func TestCombinedAddressAndPrefixExchange(t *testing.T) {
 	}
 	wrong := m
 	wrong.server = []byte{0, 3, 0, 9}
-	if err := c.accept(wrong, now); err != nil {
+	if err := c.accept(wrong, clockAt(now)); err != nil {
 		t.Fatal(err)
 	}
 	if len(c.snapshot.Addresses) != 0 {
 		t.Fatal("foreign server extended a Renew")
 	}
-	if err := c.accept(m, now); err != nil {
+	if err := c.accept(m, clockAt(now)); err != nil {
 		t.Fatal(err)
 	}
-	if len(c.snapshot.Addresses) != 2 || len(c.snapshot.Prefixes) != 1 || !c.snapshot.RenewAt.Equal(now.Add(2*time.Second)) || !c.snapshot.RebindAt.Equal(now.Add(4*time.Second)) {
+	if len(c.snapshot.Addresses) != 2 || len(c.snapshot.Prefixes) != 1 || c.snapshot.RenewAt != lifetime.After(clockAt(now), 2) || c.snapshot.RebindAt != lifetime.After(clockAt(now), 4) {
 		t.Fatal(c.snapshot)
 	}
-	if err := c.advance(now.Add(2 * time.Second)); err != nil {
+	if err := c.advance(clockAt(now.Add(2 * time.Second))); err != nil {
 		t.Fatal(err)
 	}
 	if c.lease.kind != renew {
@@ -80,7 +82,7 @@ func TestCombinedAddressAndPrefixExchange(t *testing.T) {
 			}
 		}
 	}
-	if err := c.advance(now.Add(4 * time.Second)); err != nil {
+	if err := c.advance(clockAt(now.Add(4 * time.Second))); err != nil {
 		t.Fatal(err)
 	}
 	if c.lease.kind != rebind {
@@ -89,10 +91,10 @@ func TestCombinedAddressAndPrefixExchange(t *testing.T) {
 	// NoBinding during Rebind starts Request even after the old T2. That
 	// recovery exchange must not be overwritten by the old renewal timer.
 	missing := message{kind: reply, xid: c.lease.xid, client: c.duid, server: []byte{0, 3, 0, 9}, na: &association{iaid: 7, status: 3}}
-	if err := c.accept(missing, now.Add(5*time.Second)); err != nil {
+	if err := c.accept(missing, clockAt(now.Add(5*time.Second))); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.advance(now.Add(5 * time.Second)); err != nil {
+	if err := c.advance(clockAt(now.Add(5 * time.Second))); err != nil {
 		t.Fatal(err)
 	}
 	if c.lease.kind != request {
@@ -102,7 +104,7 @@ func TestCombinedAddressAndPrefixExchange(t *testing.T) {
 	if err != nil || !bytes.Equal(target.server, missing.server) {
 		t.Fatal("NoBinding Request did not target the responding server", target, err)
 	}
-	if err := c.advance(now.Add(13 * time.Second)); err != nil {
+	if err := c.advance(clockAt(now.Add(13 * time.Second))); err != nil {
 		t.Fatal(err)
 	}
 	if len(c.snapshot.Addresses) != 0 || len(c.snapshot.Prefixes) != 1 {
@@ -111,23 +113,23 @@ func TestCombinedAddressAndPrefixExchange(t *testing.T) {
 }
 func TestRenumberRetainsOriginalOldPrefixDeadline(t *testing.T) {
 	now := time.Unix(1700000000, 0)
-	old := dhcp6config.Prefix{Prefix: "2001:db8:100::/56", PreferredUntil: now.Add(20 * time.Second), ValidUntil: now.Add(30 * time.Second)}
-	c := client{cfg: dhcp6config.Config{IAID: 7, RequestPrefix: true}, duid: []byte{0, 3, 0, 1}, server: []byte{0, 3, 0, 2}, snapshot: dhcp6config.Snapshot{State: "bound", Prefixes: []dhcp6config.Prefix{old}}}
+	old := dhcp6config.Prefix{Prefix: "2001:db8:100::/56", PreferredUntil: lifetime.After(clockAt(now), 20), ValidUntil: lifetime.After(clockAt(now), 30)}
+	c := client{cfg: dhcp6config.Config{IAID: 7, RequestPrefix: true}, duid: []byte{0, 3, 0, 1}, server: []byte{0, 3, 0, 2}, snapshot: dhcp6config.Snapshot{BootID: clockAt(now).BootID, State: "bound", Prefixes: []dhcp6config.Prefix{old}}}
 	if err := c.begin(renew, now); err != nil {
 		t.Fatal(err)
 	}
 	m := message{kind: reply, xid: c.lease.xid, client: c.duid, server: c.server, pd: &association{iaid: 7, t1: 2, t2: 4, leases: []assignment{{netip.MustParsePrefix("2001:db8:200::/56"), 40, 50}}}}
-	if err := c.accept(m, now); err != nil {
+	if err := c.accept(m, clockAt(now)); err != nil {
 		t.Fatal(err)
 	}
-	if len(c.snapshot.Prefixes) != 2 || !c.snapshot.Prefixes[0].PreferredUntil.Equal(now) || !c.snapshot.Prefixes[0].ValidUntil.Equal(old.ValidUntil) {
+	if len(c.snapshot.Prefixes) != 2 || c.snapshot.Prefixes[0].PreferredUntil != lifetime.After(clockAt(now), 0) || c.snapshot.Prefixes[0].ValidUntil != old.ValidUntil {
 		t.Fatal("renumber refreshed an old prefix", c.snapshot)
 	}
 	// Late replies from the completed exchange cannot extend either assignment.
-	if err := c.accept(m, now.Add(time.Second)); err != nil {
+	if err := c.accept(m, clockAt(now.Add(time.Second))); err != nil {
 		t.Fatal(err)
 	}
-	if !c.snapshot.Prefixes[0].ValidUntil.Equal(old.ValidUntil) {
+	if c.snapshot.Prefixes[0].ValidUntil != old.ValidUntil {
 		t.Fatal("late reply extended old lease")
 	}
 }
@@ -155,5 +157,30 @@ func TestDecodeAddressAssociationAndRejectMalformedOptions(t *testing.T) {
 		if _, err := domainNames(name); err == nil {
 			t.Fatal("invalid/compressed domain accepted", name)
 		}
+	}
+}
+
+func clockAt(t time.Time) boottime.Clock {
+	return boottime.Clock{BootID: "11111111-2222-4333-8444-555555555555", BoottimeNanoseconds: t.UnixNano(), WallTime: time.Unix(1700000000, 0)}
+}
+
+func TestInformationInfinityDoesNotScheduleRefreshOrSurviveBootChange(t *testing.T) {
+	clock := clockAt(time.Unix(1000, 0))
+	c := client{duid: []byte{0, 3, 0, 1}, info: exchange{kind: information, xid: 42}, snapshot: dhcp6config.Snapshot{BootID: clock.BootID, State: "information"}}
+	m := message{kind: reply, xid: 42, client: c.duid, server: []byte{0, 3, 0, 2}, refresh: ^uint32(0), dns: []string{"2001:db8::53"}}
+	if err := c.accept(m, clock); err != nil {
+		t.Fatal(err)
+	}
+	clock.BoottimeNanoseconds += int64(time.Hour)
+	clock.WallTime = clock.WallTime.Add(-24 * time.Hour)
+	if err := c.advance(clock); err != nil {
+		t.Fatal(err)
+	}
+	if c.info.kind != 0 || !c.info.next.IsZero() || !c.snapshot.Active(clock) {
+		t.Fatal("infinite information budget became a refresh timer")
+	}
+	clock.BootID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+	if c.snapshot.Active(clock) {
+		t.Fatal("infinite information survived another boot")
 	}
 }

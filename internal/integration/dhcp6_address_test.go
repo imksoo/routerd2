@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
@@ -125,7 +126,7 @@ func TestDaemonDHCP6AddressIndependentServer(t *testing.T) {
 		replacement = module()
 		s, generation := snapshot()
 		current = s
-		return replacement.Ready && replacement.PID != initial.PID && replacement.Generation > initial.Generation && generation == replacement.Generation && len(s.Addresses) > 0 && s.Addresses[0].ValidUntil.After(first.Addresses[0].ValidUntil) && installed(s.Addresses[0].Address)
+		return replacement.Ready && replacement.PID != initial.PID && replacement.Generation > initial.Generation && generation == replacement.Generation && len(s.Addresses) > 0 && s.Addresses[0].ValidUntil.Nanos > first.Addresses[0].ValidUntil.Nanos && installed(s.Addresses[0].Address)
 	})
 	if current.ClientDUID != first.ClientDUID || current.IAID != first.IAID || replacement.ConfigDigest != initial.ConfigDigest {
 		t.Fatal("worker restart changed client or prepared identity", first, current, initial, replacement)
@@ -137,7 +138,7 @@ func TestDaemonDHCP6AddressIndependentServer(t *testing.T) {
 	acquired := current.Addresses[0].ValidUntil
 	until(t, 80*time.Second, func() bool {
 		current, _ = snapshot()
-		return len(current.Addresses) > 0 && current.Addresses[0].ValidUntil.After(acquired.Add(10*time.Second))
+		return len(current.Addresses) > 0 && current.Addresses[0].ValidUntil.Nanos > acquired.Nanos+uint64(10*time.Second)
 	})
 	fixtureDHCP6Traffic(t, address)
 	paused := time.Now()
@@ -146,10 +147,14 @@ func TestDaemonDHCP6AddressIndependentServer(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = unix.Kill(server.Process.Pid, unix.SIGCONT) })
 	expires := current.Addresses[0].ValidUntil
-	if time.Until(expires) > 130*time.Second {
+	clock, err := boottime.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if expires.Remaining(clock) > 130*time.Second {
 		t.Fatal("fixture server returned an unexpected lease duration", current)
 	}
-	until(t, time.Until(expires)+8*time.Second, func() bool { current, _ = snapshot(); return len(current.Addresses) == 0 && !installed(address) })
+	until(t, expires.Remaining(clock)+8*time.Second, func() bool { current, _ = snapshot(); return len(current.Addresses) == 0 && !installed(address) })
 	kinds := map[byte]int{}
 	capture.mu.Lock()
 	for _, p := range capture.packets {

@@ -13,14 +13,18 @@ MTU, RDNSS and DNSSL options. Router lifetime zero is explicit; the compiler mus
 set a positive lifetime when the router should be a default router. Interval
 defaults are min 200/max 600 seconds; DNS lifetime is also explicit. Prefix
 `ValidUntil`/`PreferredUntil` prevent a previous delegated prefix from having its
-remaining lifetime renewed by every advertisement. Autonomous prefixes must be
+remaining lifetime renewed by every advertisement. Each deadline is a
+`lifetime.Deadline`: an operator `{"utc":"..."}` cutoff or a learned
+`{"boot_id":"...","nanos":...}` budget. Clock kinds are mutually exclusive.
+Generated RA `Authority` carries the original PD budget and also bounds router,
+PIO and DNS lifetimes, even if control stops delivering updates. Autonomous prefixes must be
 /64. The worker does not configure the interface, enable forwarding, allocate
 DHCPv6 addresses or install routes.
 
 Configured DNS uses `RDNSS []string` and `DNSSL []string`. Learned DNS uses
 `LearnedRDNSS []DNSServer{Address, ValidUntil}` and
 `LearnedDNSSL []SearchDomain{Domain, ValidUntil}`. The sender caps each learned
-wire lifetime by both `DNSSLifetimeSeconds` and the remaining absolute source
+wire lifetime by both `DNSSLifetimeSeconds` and the remaining original source
 lifetime, rounded down. A passed deadline produces lifetime zero even when the
 controller stops sending updates. Zero `ValidUntil` means an explicitly
 unlimited source, not a missing source; the controller must omit missing data.
@@ -40,7 +44,10 @@ Tests validate packet options, absolute lifetime decay, withdrawal and
 solicitation rejection without opening a socket. The isolated native test in
 `../dhcp4/kernel_integration_test.go` additionally verifies kernel multicast
 delivery with hop limit 255, a received RS and shutdown packet reception across
-private veth peers. Client SLAAC behavior and PD-driven renumbering still require
+private veth peers. `make check-pd-ra` exercises actual generated RA and PD
+renumbering. `make qemu-dhcp6-clock` verifies original budgets during actual
+guest UTC changes, independent writer expiry and control failure. Client SLAAC
+behavior and complete resource lifecycle still require
 control-plane integration evidence. An RA engine is not DHCPv6 server parity.
 
 ## Prefix updates without restarting the process

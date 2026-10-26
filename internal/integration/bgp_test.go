@@ -389,7 +389,7 @@ func isolateFixtureTimeout(t *testing.T, name string, timeout time.Duration) boo
 }
 
 func fixtureClockFiles(name string, forward func() (*os.File, error)) ([]*os.File, error) {
-	if name != "TestDaemonDHCPv4ClockCorrections" && name != "TestDaemonVRRPClockCorrections" {
+	if name != "TestDaemonDHCPv4ClockCorrections" && name != "TestDaemonVRRPClockCorrections" && name != "TestDaemonDHCP6ClockCorrections" {
 		return nil, nil
 	}
 	file, err := forward()

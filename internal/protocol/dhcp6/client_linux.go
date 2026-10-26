@@ -23,6 +23,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/lifetime"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
@@ -105,12 +107,12 @@ func (c *client) packet(e *exchange, now time.Time) []byte {
 		}
 	} else {
 		for _, a := range c.snapshot.Addresses {
-			if now.Before(a.ValidUntil) {
+			if a.ValidUntil.Live(boottime.Clock{BootID: c.snapshot.BootID, BoottimeNanoseconds: now.UnixNano()}) {
 				addresses = append(addresses, assignment{prefix: netip.PrefixFrom(netip.MustParseAddr(a.Address), 128)})
 			}
 		}
 		for _, p := range c.snapshot.Prefixes {
-			if now.Before(p.ValidUntil) {
+			if p.ValidUntil.Live(boottime.Clock{BootID: c.snapshot.BootID, BoottimeNanoseconds: now.UnixNano()}) {
 				prefixes = append(prefixes, assignment{prefix: netip.MustParsePrefix(p.Prefix)})
 			}
 		}
@@ -156,18 +158,6 @@ func (c *client) transmit(conn *net.UDPConn, e *exchange, now time.Time) error {
 	e.attempts++
 	return nil
 }
-func deadline(now time.Time, seconds uint32) time.Time {
-	if seconds == ^uint32(0) {
-		return time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC)
-	}
-	return now.Add(time.Duration(seconds) * time.Second)
-}
-func earlier(a, b time.Time) time.Time {
-	if a.IsZero() || !b.IsZero() && b.Before(a) {
-		return b
-	}
-	return a
-}
 func timers(ia *association) (uint32, uint32) {
 	basis := ^uint32(0)
 	for _, a := range ia.leases {
@@ -184,14 +174,14 @@ func timers(ia *association) (uint32, uint32) {
 	}
 	return t1, t2
 }
-func (c *client) accept(m message, now time.Time) error {
+func (c *client) accept(m message, clock boottime.Clock) error {
+	now := time.Unix(0, clock.BoottimeNanoseconds)
 	if !bytes.Equal(m.client, c.duid) || len(m.server) < 4 || len(m.server) > 128 {
 		return nil
 	}
 	if c.info.kind != 0 && m.xid == c.info.xid && m.kind == reply {
 		if m.status == 0 {
-			c.information(m, now)
-			c.info = exchange{next: c.snapshot.InformationRefreshAt}
+			c.information(m, clock)
 		}
 		return nil
 	}
@@ -250,7 +240,7 @@ func (c *client) accept(m message, now time.Time) error {
 		return nil
 	}
 	next := c.snapshot
-	var renewAt, rebindAt time.Time
+	var renewAt, rebindAt lifetime.Deadline
 	for _, ia := range []*association{m.na, m.pd} {
 		if ia == nil {
 			continue
@@ -264,8 +254,8 @@ func (c *client) accept(m message, now time.Time) error {
 		}
 		t1, t2 := timers(ia)
 		if len(ia.leases) > 0 {
-			renewAt = earlier(renewAt, deadline(now, t1))
-			rebindAt = earlier(rebindAt, deadline(now, t2))
+			renewAt = lifetime.Minimum(clock, renewAt, lifetime.After(clock, t1))
+			rebindAt = lifetime.Minimum(clock, rebindAt, lifetime.After(clock, t2))
 		}
 	}
 	if m.na != nil && m.na.status == 0 {
@@ -274,7 +264,7 @@ func (c *client) accept(m message, now time.Time) error {
 			value := a.prefix.Addr().String()
 			addresses = slices.DeleteFunc(addresses, func(v dhcp6config.Address) bool { return v.Address == value })
 			if a.valid > 0 {
-				addresses = append(addresses, dhcp6config.Address{Address: value, PreferredUntil: deadline(now, a.preferred), ValidUntil: deadline(now, a.valid)})
+				addresses = append(addresses, dhcp6config.Address{Address: value, PreferredUntil: lifetime.After(clock, a.preferred), ValidUntil: lifetime.After(clock, a.valid)})
 			}
 		}
 		next.Addresses = addresses
@@ -288,7 +278,7 @@ func (c *client) accept(m message, now time.Time) error {
 					present = present || a.prefix.String() == prefixes[i].Prefix
 				}
 				if !present {
-					prefixes[i].PreferredUntil = earlier(prefixes[i].PreferredUntil, now)
+					prefixes[i].PreferredUntil = lifetime.Minimum(clock, prefixes[i].PreferredUntil, lifetime.After(clock, 0))
 				}
 			}
 		}
@@ -296,7 +286,7 @@ func (c *client) accept(m message, now time.Time) error {
 			value := a.prefix.String()
 			prefixes = slices.DeleteFunc(prefixes, func(v dhcp6config.Prefix) bool { return v.Prefix == value })
 			if a.valid > 0 {
-				prefixes = append(prefixes, dhcp6config.Prefix{Prefix: value, PreferredUntil: deadline(now, a.preferred), ValidUntil: deadline(now, a.valid)})
+				prefixes = append(prefixes, dhcp6config.Prefix{Prefix: value, PreferredUntil: lifetime.After(clock, a.preferred), ValidUntil: lifetime.After(clock, a.valid)})
 			}
 		}
 		next.Prefixes = prefixes
@@ -318,8 +308,7 @@ func (c *client) accept(m message, now time.Time) error {
 		c.maxInformation = time.Duration(m.maxInformation) * time.Second
 	}
 	if len(m.dns)+len(m.domains)+len(m.sntp) > 0 || m.aftr != "" {
-		c.information(m, now)
-		c.info = exchange{next: c.snapshot.InformationRefreshAt}
+		c.information(m, clock)
 		return nil
 	}
 	// Information has its own transaction: it cannot replace or postpone renew.
@@ -337,35 +326,44 @@ func (c *client) selectOffer(now time.Time) error {
 	c.lease.offer = offer
 	return nil
 }
-func (c *client) information(m message, now time.Time) {
+func (c *client) information(m message, clock boottime.Clock) {
 	c.snapshot.DNSServers = m.dns
 	c.snapshot.DomainSearch = m.domains
 	c.snapshot.SNTPServers = m.sntp
 	c.snapshot.AFTRName = m.aftr
-	c.snapshot.InfoUpdatedAt = now
+	c.snapshot.InfoReceivedNanos = uint64(clock.BoottimeNanoseconds)
 	c.snapshot.InformationRefreshSeconds = m.refresh
-	c.snapshot.InformationRefreshAt = time.Time{}
-	if m.refresh != ^uint32(0) {
-		c.snapshot.InformationRefreshAt = deadline(now, m.refresh)
+	c.snapshot.InformationRefreshAt = lifetime.After(clock, m.refresh)
+	c.info = exchange{}
+	if c.snapshot.InformationRefreshAt.Nanos != 0 {
+		c.info.next = time.Unix(0, int64(c.snapshot.InformationRefreshAt.Nanos))
 	}
 	if m.maxInformation != 0 {
 		c.maxInformation = time.Duration(m.maxInformation) * time.Second
 	}
 }
-func (c *client) advance(now time.Time) error {
-	c.snapshot.Addresses = slices.DeleteFunc(slices.Clone(c.snapshot.Addresses), func(a dhcp6config.Address) bool { return !now.Before(a.ValidUntil) })
-	c.snapshot.Prefixes = slices.DeleteFunc(slices.Clone(c.snapshot.Prefixes), func(p dhcp6config.Prefix) bool { return !now.Before(p.ValidUntil) })
+func (c *client) advance(clock boottime.Clock) error {
+	now := time.Unix(0, clock.BoottimeNanoseconds)
+	expiredAddress := func(a dhcp6config.Address) bool { return !a.ValidUntil.Live(clock) }
+	if slices.ContainsFunc(c.snapshot.Addresses, expiredAddress) {
+		c.snapshot.Addresses = slices.DeleteFunc(slices.Clone(c.snapshot.Addresses), expiredAddress)
+	}
+	expiredPrefix := func(p dhcp6config.Prefix) bool { return !p.ValidUntil.Live(clock) }
+	if slices.ContainsFunc(c.snapshot.Prefixes, expiredPrefix) {
+		c.snapshot.Prefixes = slices.DeleteFunc(slices.Clone(c.snapshot.Prefixes), expiredPrefix)
+	}
+	_, hasLease := c.snapshot.LeaseUntil()
 	if c.cfg.RequestAddress || c.cfg.RequestPrefix {
 		switch {
 		case c.lease.kind == decline:
 			if now.Sub(c.lease.started) >= 10*time.Second {
 				return c.begin(solicit, now)
 			}
-		case !c.snapshot.LeaseUntil().IsZero() && !c.snapshot.RebindAt.IsZero() && !now.Before(c.snapshot.RebindAt) && (c.lease.kind == 0 || c.lease.kind == renew):
+		case hasLease && c.snapshot.RebindAt.BootID != "" && !c.snapshot.RebindAt.Live(clock) && (c.lease.kind == 0 || c.lease.kind == renew):
 			return c.begin(rebind, now)
-		case !c.snapshot.LeaseUntil().IsZero() && c.lease.kind == 0 && !c.snapshot.RenewAt.IsZero() && !now.Before(c.snapshot.RenewAt):
+		case hasLease && c.lease.kind == 0 && c.snapshot.RenewAt.BootID != "" && !c.snapshot.RenewAt.Live(clock):
 			return c.begin(renew, now)
-		case c.snapshot.LeaseUntil().IsZero() && (c.lease.kind == 0 || c.lease.kind == renew || c.lease.kind == rebind):
+		case !hasLease && (c.lease.kind == 0 || c.lease.kind == renew || c.lease.kind == rebind):
 			return c.begin(solicit, now)
 		case c.lease.kind == solicit && c.lease.offer != nil && !now.Before(c.lease.next):
 			return c.selectOffer(now)
@@ -448,8 +446,12 @@ func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, ready fun
 		return err
 	}
 	defer conn.Close()
-	c := client{cfg: cfg, duid: duid, maxSolicit: 3600 * time.Second, maxInformation: 3600 * time.Second, snapshot: dhcp6config.Snapshot{Resource: cfg.Resource, Interface: cfg.Interface, IAID: cfg.IAID, ClientDUID: hex.EncodeToString(duid)}}
-	now := time.Now()
+	clock, err := boottime.Read()
+	if err != nil {
+		return err
+	}
+	c := client{cfg: cfg, duid: duid, maxSolicit: 3600 * time.Second, maxInformation: 3600 * time.Second, snapshot: dhcp6config.Snapshot{BootID: clock.BootID, Resource: cfg.Resource, Interface: cfg.Interface, IAID: cfg.IAID, ClientDUID: hex.EncodeToString(duid)}}
+	now := time.Unix(0, clock.BoottimeNanoseconds)
 	if cfg.RequestAddress || cfg.RequestPrefix {
 		err = c.begin(solicit, now)
 	} else {
@@ -461,9 +463,12 @@ func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, ready fun
 	}
 	var last dhcp6config.Snapshot
 	publish := func() error {
-		if reflect.DeepEqual(last, c.snapshot) {
+		previous, current := last, c.snapshot
+		previous.ObservedNanos, current.ObservedNanos = 0, 0
+		if reflect.DeepEqual(previous, current) {
 			return nil
 		}
+		c.snapshot.ObservedNanos = uint64(clock.BoottimeNanoseconds)
 		if err := effects.Update(ctx, c.snapshot); err != nil {
 			return fmt.Errorf("publish DHCPv6 assignments: %w", err)
 		}
@@ -473,7 +478,12 @@ func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, ready fun
 	defer func() {
 		cleanup, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
-		withdrawn := dhcp6config.Snapshot{Resource: cfg.Resource, Interface: cfg.Interface, IAID: cfg.IAID, ClientDUID: hex.EncodeToString(duid), State: "stopped"}
+		clock, err := boottime.ReadForBoot(c.snapshot.BootID)
+		if err != nil {
+			result = errors.Join(result, err)
+			return
+		}
+		withdrawn := dhcp6config.Snapshot{ObservedNanos: uint64(clock.BoottimeNanoseconds), BootID: clock.BootID, Resource: cfg.Resource, Interface: cfg.Interface, IAID: cfg.IAID, ClientDUID: hex.EncodeToString(duid), State: "stopped"}
 		result = errors.Join(result, effects.Update(cleanup, withdrawn))
 	}()
 	if err := publish(); err != nil {
@@ -487,8 +497,12 @@ func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, ready fun
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		now = time.Now()
-		if err := c.advance(now); err != nil {
+		clock, err = boottime.ReadForBoot(c.snapshot.BootID)
+		if err != nil {
+			return err
+		}
+		now = time.Unix(0, clock.BoottimeNanoseconds)
+		if err := c.advance(clock); err != nil {
 			return err
 		}
 		if cfg.RequestAddress && c.lease.kind != decline {
@@ -540,7 +554,11 @@ func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, ready fun
 		if err != nil {
 			continue
 		}
-		if err := c.accept(m, time.Now()); err != nil {
+		clock, err = boottime.ReadForBoot(c.snapshot.BootID)
+		if err != nil {
+			return err
+		}
+		if err := c.accept(m, clock); err != nil {
 			return err
 		}
 	}

@@ -9,7 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/config"
+	"github.com/imksoo/routerd2/internal/lifetime"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/aftr"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
@@ -78,6 +80,12 @@ func TestAFTRObservedSourceGenerationAndProjection(t *testing.T) {
 		t.Fatal("poll renewed an unchanged dependency", again, err)
 	}
 	snapshot := aftr.Snapshot{Resource: "dslite", Interface: "wan0", ConfigDigest: input.ConfigDigest, Generation: input.Generation, Active: true, Available: true, Local: input.Source.Address, Remote: "2001:db8:42::2", CandidateIndex: 0, ResolverIndex: -1, UpdatedAt: time.Now().UTC()}
+	clock, err := boottime.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot.BootID = clock.BootID
+	snapshot.ObservedNanos = uint64(clock.BoottimeNanoseconds)
 	if err := observeAndProject(ctx, r, update(t, r, "service.dslite", 1, snapshot)); err != nil {
 		t.Fatal(err)
 	}
@@ -156,6 +164,12 @@ func TestAFTRPeerAndGatewayChangesFenceOldProjection(t *testing.T) {
 				t.Fatal("an old AFTR producer could recreate the prior peer or route")
 			}
 			snapshot := aftr.Snapshot{Resource: "dslite", Interface: "wan0", ConfigDigest: input.ConfigDigest, Generation: input.Generation, Active: true, Available: true, Local: input.Source.Address, Remote: "2001:db8:42::2", CandidateIndex: 0, ResolverIndex: -1, UpdatedAt: time.Now().UTC()}
+			clock, err := boottime.Read()
+			if err != nil {
+				t.Fatal(err)
+			}
+			snapshot.BootID = clock.BootID
+			snapshot.ObservedNanos = uint64(clock.BoottimeNanoseconds)
 			current := update(t, r, "service.dslite", 1, snapshot)
 			if err := observeAndProject(ctx, r, current); err != nil {
 				t.Fatal(err)
@@ -212,11 +226,17 @@ func TestAFTRFinitePeerAddressAndGatewayWithdrawTogether(t *testing.T) {
 		t.Fatal(err)
 	}
 	digest := bound.digest
-	in, err := aftrDependencies(doc, doc.Services[0], nil, digest, now)
+	in, err := aftrDependencies(doc, doc.Services[0], nil, digest, boottime.Clock{WallTime: now})
 	if err != nil {
 		t.Fatal(err)
 	}
-	snapshot := aftr.Snapshot{Resource: "dslite", Interface: "wan0", ConfigDigest: digest, Generation: in.Generation, Active: true, Available: true, Local: in.Source.Address, Remote: "2001:db8:42::2", CandidateIndex: 0, ResolverIndex: -1, UpdatedAt: now, ValidUntil: expiry}
+	snapshot := aftr.Snapshot{Resource: "dslite", Interface: "wan0", ConfigDigest: digest, Generation: in.Generation, Active: true, Available: true, Local: in.Source.Address, Remote: "2001:db8:42::2", CandidateIndex: 0, ResolverIndex: -1, UpdatedAt: now, ValidUntil: lifetime.Deadline{UTC: expiry}}
+	clock, err := boottime.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot.BootID = clock.BootID
+	snapshot.ObservedNanos = uint64(clock.BoottimeNanoseconds)
 	raw, err := json.Marshal(snapshot)
 	if err != nil {
 		t.Fatal(err)
@@ -246,12 +266,15 @@ func TestAFTRFinitePeerAddressAndGatewayWithdrawTogether(t *testing.T) {
 }
 
 func TestAFTRFiniteDependencyInvalidatesPriorResolution(t *testing.T) {
-	now := time.Now().UTC()
+	clock, err := boottime.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
 	doc := aftrDocument()
 	doc.Services[0].DSLite.AFTRFrom = "wan-info"
 	doc.Services[0].DSLite.DNSFrom = []string{"wan-info"}
 	doc.Services = append(doc.Services, serviceconfig.Service{Name: "wan-info", DHCP6: &serviceconfig.DHCP6{Interface: "wan0"}})
-	info := dhcp6config.Snapshot{Resource: "wan-info", Interface: "wan0", AFTRName: "aftr.example", DNSServers: []string{"2001:db8:42::53"}, InfoUpdatedAt: now, State: "information", InformationRefreshAt: now.Add(30 * time.Second)}
+	info := dhcp6config.Snapshot{BootID: clock.BootID, Resource: "wan-info", Interface: "wan0", State: "information", AFTRName: "aftr.example", DNSServers: []string{"2001:db8:42::53"}, InfoReceivedNanos: uint64(clock.BoottimeNanoseconds), InformationRefreshAt: lifetime.After(clock, 30)}
 	raw, _ := json.Marshal(info)
 	records := map[string]serviceconfig.Update{"service.wan-info": {Role: "dhcp6", Snapshot: raw}}
 	instance, err := doc.Services[0].Instance("/run/routerd", "/var/lib/routerd")
@@ -259,37 +282,35 @@ func TestAFTRFiniteDependencyInvalidatesPriorResolution(t *testing.T) {
 		t.Fatal(err)
 	}
 	bound, _ := encodeInstance(instance)
-	digest := bound.digest
-	in, err := aftrDependencies(doc, doc.Services[0], records, digest, now)
-	if err != nil {
-		t.Fatal(err)
+	in, err := aftrDependencies(doc, doc.Services[0], records, bound.digest, clock)
+	if err != nil || len(in.Candidates) != 2 || in.Candidates[0].ValidUntil != info.InformationRefreshAt || len(in.Resolvers) != 1 || in.Resolvers[0].ValidUntil != info.InformationRefreshAt {
+		t.Fatal("original DHCPv6 budget was lost", in, err)
 	}
-	if len(in.Candidates) != 2 || in.Candidates[0].Value != "aftr.example" || !in.Candidates[0].ValidUntil.Equal(info.InformationRefreshAt) || len(in.Resolvers) != 1 || !in.Resolvers[0].ValidUntil.Equal(info.InformationRefreshAt) {
-		t.Fatalf("information lifetime lost: %+v", in)
-	}
-	snap := aftr.Snapshot{Resource: "dslite", Interface: "wan0", ConfigDigest: digest, Generation: 1, Active: true, Available: true, Local: in.Source.Address, Remote: "2001:db8:42::2", CandidateIndex: 1, ResolverIndex: -1, UpdatedAt: now}
+	snap := aftr.Snapshot{BootID: clock.BootID, ObservedNanos: uint64(clock.BoottimeNanoseconds), Resource: "dslite", Interface: "wan0", ConfigDigest: bound.digest, Generation: 1, Active: true, Available: true, Local: in.Source.Address, Remote: "2001:db8:42::2", CandidateIndex: 1, ResolverIndex: -1, UpdatedAt: clock.WallTime}
 	raw, _ = json.Marshal(snap)
 	records[instance.Name] = serviceconfig.Update{Role: "aftr", Snapshot: raw}
 	inputs := map[string]aftr.Input{instance.Name: in}
-	p, err := projectNative(doc, "/run/routerd", "/var/lib/routerd", records, now, inputs)
+	protocols := protocolsFor(t, doc, "/run/routerd", "/var/lib/routerd")
+	p, err := projectWithFacts(doc, protocols, records, clock.WallTime, projectionFacts{bfdClock: clock, aftr: inputs})
 	if err != nil || len(p.network.DSLite) != 1 {
-		t.Fatal("valid generation failed", p.network, err)
+		t.Fatal(p.network, err)
 	}
-	// Information expires while the lower-priority literal is still static.
-	// Reusing candidate index 1 against a changed list would authorize a stale
-	// result; only a new dependency generation may select the remaining entry.
-	p, err = projectNative(doc, "/run/routerd", "/var/lib/routerd", records, now.Add(31*time.Second), inputs)
+	clock.BoottimeNanoseconds += int64(31 * time.Second)
+	clock.WallTime = clock.WallTime.Add(-24 * time.Hour)
+	p, err = projectWithFacts(doc, protocols, records, clock.WallTime, projectionFacts{bfdClock: clock, aftr: inputs})
 	if err != nil || len(p.network.DSLite) != 0 {
-		t.Fatal("changed candidate list retained an old generation", p.network, err)
+		t.Fatal("stale candidate index survived boot expiry and UTC rollback", p.network, err)
 	}
-	in, err = aftrDependencies(doc, doc.Services[0], records, digest, now.Add(31*time.Second))
+	in, err = aftrDependencies(doc, doc.Services[0], records, bound.digest, clock)
 	if err != nil || len(in.Candidates) != 1 || len(in.Resolvers) != 0 {
-		t.Fatal("expired DHCP information used", in, err)
+		t.Fatal("expired DHCP information retained", in, err)
 	}
 }
-
 func TestAFTRExplicitInfiniteInformationRefresh(t *testing.T) {
-	now := time.Unix(1700000000, 0).UTC()
+	clock, err := boottime.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
 	doc := aftrDocument()
 	doc.Services[0].DSLite.AFTRFrom = "wan-info"
 	doc.Services[0].DSLite.DNSFrom = []string{"wan-info"}
@@ -299,40 +320,28 @@ func TestAFTRExplicitInfiniteInformationRefresh(t *testing.T) {
 		t.Fatal(err)
 	}
 	bound, _ := encodeInstance(instance)
-	digest := bound.digest
-	info := dhcp6config.Snapshot{Resource: "wan-info", Interface: "wan0", AFTRName: "aftr.example", DNSServers: []string{"2001:db8:42::53"}, InfoUpdatedAt: now, State: "information", InformationRefreshSeconds: ^uint32(0)}
+	info := dhcp6config.Snapshot{BootID: clock.BootID, Resource: "wan-info", Interface: "wan0", State: "information", AFTRName: "aftr.example", DNSServers: []string{"2001:db8:42::53"}, InfoReceivedNanos: uint64(clock.BoottimeNanoseconds), InformationRefreshAt: lifetime.After(clock, ^uint32(0))}
 	for _, pd := range []bool{false, true} {
 		info.State = "information"
 		info.Prefixes = nil
+		want := info.InformationRefreshAt
 		if pd {
 			info.State = "bound"
-		}
-		want := time.Time{}
-		if pd {
-			want = now.Add(90 * time.Second)
+			want = lifetime.After(clock, 90)
 			info.Prefixes = []dhcp6config.Prefix{{Prefix: "2001:db8:100::/56", PreferredUntil: want, ValidUntil: want}}
 		}
 		raw, _ := json.Marshal(info)
 		records := map[string]serviceconfig.Update{"service.wan-info": {Role: "dhcp6", Snapshot: raw}}
-		in, err := aftrDependencies(doc, doc.Services[0], records, digest, now)
-		if err != nil || len(in.Candidates) != 2 || in.Candidates[0].Value != "aftr.example" || len(in.Resolvers) != 1 {
-			t.Fatal("explicit infinite refresh lost valid information", in, err)
+		in, err := aftrDependencies(doc, doc.Services[0], records, bound.digest, clock)
+		if err != nil || len(in.Candidates) != 2 || in.Candidates[0].ValidUntil != want || len(in.Resolvers) != 1 || in.Resolvers[0].ValidUntil != want {
+			t.Fatal("scoped infinity lost its origin/bound", in, err)
 		}
-		if !in.Candidates[0].ValidUntil.Equal(want) || !in.Resolvers[0].ValidUntil.Equal(want) {
-			t.Fatal("infinite refresh lost PD lease bound", in)
+		expired := clock
+		expired.BootID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+		in, err = aftrDependencies(doc, doc.Services[0], records, bound.digest, expired)
+		if err != nil || len(in.Candidates) != 1 || len(in.Resolvers) != 0 {
+			t.Fatal("old boot reused DHCP information", in, err)
 		}
-		if pd {
-			in, err = aftrDependencies(doc, doc.Services[0], records, digest, info.LeaseUntil())
-			if err != nil || len(in.Candidates) != 1 || len(in.Resolvers) != 0 {
-				t.Fatal("infinite refresh outlived its PD lease", in, err)
-			}
-		}
-	}
-	info.State, info.InformationRefreshSeconds = "information", 0
-	raw, _ := json.Marshal(info)
-	in, err := aftrDependencies(doc, doc.Services[0], map[string]serviceconfig.Update{"service.wan-info": {Role: "dhcp6", Snapshot: raw}}, digest, now)
-	if err != nil || len(in.Candidates) != 1 || len(in.Resolvers) != 0 {
-		t.Fatal("missing refresh timestamp was mistaken for explicit infinity", in, err)
 	}
 }
 

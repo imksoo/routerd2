@@ -9,6 +9,9 @@ import (
 	"net/netip"
 	"testing"
 	"time"
+
+	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/lifetime"
 )
 
 func prefixLifetimes(t *testing.T, packet []byte) map[string][2]uint32 {
@@ -42,17 +45,17 @@ func TestLiveUpdateKeepsRetainedPrefixAndWithdrawsOnlyRemovedOptions(t *testing.
 	old.Prefixes = append(old.Prefixes, Prefix{Prefix: "2001:db8:2::/64", ValidLifetimeSeconds: 600, PreferredLifetimeSeconds: 300, OnLink: true, Autonomous: true})
 	next := normalized(old)
 	next.Prefixes = next.Prefixes[:1]
-	next.Prefixes[0].ValidUntil = now.Add(200 * time.Second)
-	next.Prefixes[0].PreferredUntil = now.Add(100 * time.Second)
+	next.Prefixes[0].ValidUntil = lifetime.Deadline{UTC: now.Add(200 * time.Second)}
+	next.Prefixes[0].PreferredUntil = lifetime.Deadline{UTC: now.Add(100 * time.Second)}
 	next.Prefixes = append(next.Prefixes, Prefix{Prefix: "2001:db8:3::/64", ValidLifetimeSeconds: 500, PreferredLifetimeSeconds: 250, OnLink: true, Autonomous: true})
 	next.RDNSS = []string{"2001:db8:3::1"}
 	next.DNSSL = []string{"new.example"}
-	active, pending, changed, err := planUpdate(old, next, withdrawals{}, nil, 1500, now)
+	active, pending, changed, err := planUpdate(old, next, withdrawals{}, nil, 1500, boottime.Clock{WallTime: now})
 	if err != nil || !changed {
 		t.Fatalf("update: %v changed=%v", err, changed)
 	}
 	for count := 0; count < 3; count++ {
-		packet, err := encodeWithWithdrawals(active, pending, nil, now.Add(time.Duration(10+count*10)*time.Second), false)
+		packet, err := encodeWithWithdrawals(active, pending, nil, boottime.Clock{WallTime: now.Add(time.Duration(10+count*10) * time.Second)}, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -82,7 +85,7 @@ func TestLiveUpdateKeepsRetainedPrefixAndWithdrawsOnlyRemovedOptions(t *testing.
 	if pending.any() {
 		t.Fatal("withdrawals not retired after three transmissions")
 	}
-	packet, err := encodeWithWithdrawals(active, pending, nil, now.Add(40*time.Second), false)
+	packet, err := encodeWithWithdrawals(active, pending, nil, boottime.Clock{WallTime: now.Add(40 * time.Second)}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +99,7 @@ func TestLiveUpdateRejectsIdentityInvalidAndOversizedTransition(t *testing.T) {
 	for _, change := range []func(*Config){func(c *Config) { c.Resource = "other" }, func(c *Config) { c.Interface = "other0" }, func(c *Config) { c.SourceAddress = "fe80::1" }, func(c *Config) { c.MTU = 9000 }, func(c *Config) { c.Prefixes[0].PreferredLifetimeSeconds = 10000 }} {
 		next := normalized(old)
 		change(&next)
-		if _, _, changed, err := planUpdate(old, next, withdrawals{}, nil, 1500, time.Now()); err == nil || changed {
+		if _, _, changed, err := planUpdate(old, next, withdrawals{}, nil, 1500, boottime.Clock{WallTime: time.Now()}); err == nil || changed {
 			t.Fatalf("invalid update accepted: %+v", next)
 		}
 	}
@@ -114,7 +117,7 @@ func TestLiveUpdateRejectsIdentityInvalidAndOversizedTransition(t *testing.T) {
 	if err := Validate(next); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := planUpdate(old, next, withdrawals{}, net.HardwareAddr{2, 0, 0, 0, 0, 1}, 1500, time.Now()); err == nil {
+	if _, _, _, err := planUpdate(old, next, withdrawals{}, net.HardwareAddr{2, 0, 0, 0, 0, 1}, 1500, boottime.Clock{WallTime: time.Now()}); err == nil {
 		t.Fatal("oversized transition accepted")
 	}
 }
@@ -123,18 +126,18 @@ func TestLiveUpdateReadditionCancelsPendingWithdrawal(t *testing.T) {
 	old := normalized(example())
 	removed := normalized(old)
 	removed.Prefixes = nil
-	active, pending, _, err := planUpdate(old, removed, withdrawals{}, nil, 1500, time.Now())
+	active, pending, _, err := planUpdate(old, removed, withdrawals{}, nil, 1500, boottime.Clock{WallTime: time.Now()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	restored, remaining, _, err := planUpdate(active, old, pending, nil, 1500, time.Now())
+	restored, remaining, _, err := planUpdate(active, old, pending, nil, 1500, boottime.Clock{WallTime: time.Now()})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if remaining.any() {
 		t.Fatal("restored prefix still queued for withdrawal")
 	}
-	packet, err := encodeWithWithdrawals(restored, remaining, nil, time.Now(), false)
+	packet, err := encodeWithWithdrawals(restored, remaining, nil, boottime.Clock{WallTime: time.Now()}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,16 +149,16 @@ func TestLiveUpdateReadditionCancelsPendingWithdrawal(t *testing.T) {
 func TestPollingAbsoluteDeadlineDoesNotTriggerRenewalOrExtendIt(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
 	old := normalized(example())
-	old.Prefixes[0].ValidUntil = now.Add(100 * time.Second)
-	old.Prefixes[0].PreferredUntil = now.Add(50 * time.Second)
+	old.Prefixes[0].ValidUntil = lifetime.Deadline{UTC: now.Add(100 * time.Second)}
+	old.Prefixes[0].PreferredUntil = lifetime.Deadline{UTC: now.Add(50 * time.Second)}
 	polled := normalized(old)
 	polled.Prefixes[0].ValidLifetimeSeconds = 90
 	polled.Prefixes[0].PreferredLifetimeSeconds = 40
-	active, pending, changed, err := planUpdate(old, polled, withdrawals{}, nil, 1500, now.Add(10*time.Second))
+	active, pending, changed, err := planUpdate(old, polled, withdrawals{}, nil, 1500, boottime.Clock{WallTime: now.Add(10 * time.Second)})
 	if err != nil || changed {
 		t.Fatalf("same deadline changed configuration: %v %v", changed, err)
 	}
-	packet, err := encodeWithWithdrawals(active, pending, nil, now.Add(20*time.Second), false)
+	packet, err := encodeWithWithdrawals(active, pending, nil, boottime.Clock{WallTime: now.Add(20 * time.Second)}, false)
 	if err != nil {
 		t.Fatal(err)
 	}

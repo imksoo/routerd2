@@ -15,27 +15,30 @@ import (
 	"strings"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/lifetime"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 )
 
 type Config struct {
-	Resource              string         `json:"resource"`
-	Interface             string         `json:"interface"`
-	SourceAddress         string         `json:"source_address,omitempty"`
-	Prefixes              []Prefix       `json:"prefixes,omitempty"`
-	RDNSS                 []string       `json:"rdnss,omitempty"`
-	DNSSL                 []string       `json:"dnssl,omitempty"`
-	LearnedRDNSS          []DNSServer    `json:"learned_rdnss,omitempty"`
-	LearnedDNSSL          []SearchDomain `json:"learned_dnssl,omitempty"`
-	MinIntervalSeconds    int            `json:"min_interval_seconds,omitempty"`
-	MaxIntervalSeconds    int            `json:"max_interval_seconds,omitempty"`
-	RouterLifetimeSeconds int            `json:"router_lifetime_seconds"`
-	DNSSLifetimeSeconds   int            `json:"dns_lifetime_seconds"`
-	MTU                   int            `json:"mtu,omitempty"`
-	Managed               bool           `json:"managed,omitempty"`
-	OtherConfig           bool           `json:"other_config,omitempty"`
-	RouterPreference      string         `json:"router_preference,omitempty"`
+	Authority             lifetime.Deadline `json:"authority,omitzero"`
+	Resource              string            `json:"resource"`
+	Interface             string            `json:"interface"`
+	SourceAddress         string            `json:"source_address,omitempty"`
+	Prefixes              []Prefix          `json:"prefixes,omitempty"`
+	RDNSS                 []string          `json:"rdnss,omitempty"`
+	DNSSL                 []string          `json:"dnssl,omitempty"`
+	LearnedRDNSS          []DNSServer       `json:"learned_rdnss,omitempty"`
+	LearnedDNSSL          []SearchDomain    `json:"learned_dnssl,omitempty"`
+	MinIntervalSeconds    int               `json:"min_interval_seconds,omitempty"`
+	MaxIntervalSeconds    int               `json:"max_interval_seconds,omitempty"`
+	RouterLifetimeSeconds int               `json:"router_lifetime_seconds"`
+	DNSSLifetimeSeconds   int               `json:"dns_lifetime_seconds"`
+	MTU                   int               `json:"mtu,omitempty"`
+	Managed               bool              `json:"managed,omitempty"`
+	OtherConfig           bool              `json:"other_config,omitempty"`
+	RouterPreference      string            `json:"router_preference,omitempty"`
 }
 type Prefix struct {
 	Prefix                   string `json:"prefix"`
@@ -45,8 +48,8 @@ type Prefix struct {
 	Autonomous               bool   `json:"autonomous"`
 	// Absolute deadlines let the PD compiler retain old prefixes without
 	// refreshing their lifetimes on every advertisement or worker restart.
-	ValidUntil     time.Time `json:"valid_until,omitempty"`
-	PreferredUntil time.Time `json:"preferred_until,omitempty"`
+	ValidUntil     lifetime.Deadline `json:"valid_until,omitempty"`
+	PreferredUntil lifetime.Deadline `json:"preferred_until,omitempty"`
 }
 type Snapshot struct {
 	Resource            string    `json:"resource"`
@@ -81,8 +84,8 @@ func normalized(c Config) Config {
 		if p, err := netip.ParsePrefix(c.Prefixes[i].Prefix); err == nil {
 			c.Prefixes[i].Prefix = p.String()
 		}
-		c.Prefixes[i].ValidUntil = c.Prefixes[i].ValidUntil.UTC()
-		c.Prefixes[i].PreferredUntil = c.Prefixes[i].PreferredUntil.UTC()
+		c.Prefixes[i].ValidUntil.UTC = c.Prefixes[i].ValidUntil.UTC.UTC()
+		c.Prefixes[i].PreferredUntil.UTC = c.Prefixes[i].PreferredUntil.UTC.UTC()
 	}
 	for i := range c.RDNSS {
 		if a, err := netip.ParseAddr(c.RDNSS[i]); err == nil {
@@ -96,11 +99,11 @@ func normalized(c Config) Config {
 		if a, err := netip.ParseAddr(c.LearnedRDNSS[i].Address); err == nil {
 			c.LearnedRDNSS[i].Address = a.String()
 		}
-		c.LearnedRDNSS[i].ValidUntil = c.LearnedRDNSS[i].ValidUntil.UTC()
+		c.LearnedRDNSS[i].ValidUntil.UTC = c.LearnedRDNSS[i].ValidUntil.UTC.UTC()
 	}
 	for i := range c.LearnedDNSSL {
 		c.LearnedDNSSL[i].Domain = strings.TrimSuffix(strings.ToLower(c.LearnedDNSSL[i].Domain), ".")
-		c.LearnedDNSSL[i].ValidUntil = c.LearnedDNSSL[i].ValidUntil.UTC()
+		c.LearnedDNSSL[i].ValidUntil.UTC = c.LearnedDNSSL[i].ValidUntil.UTC.UTC()
 	}
 	if c.MaxIntervalSeconds == 0 {
 		c.MaxIntervalSeconds = 600
@@ -111,6 +114,9 @@ func normalized(c Config) Config {
 	return c
 }
 func Validate(c Config) error {
+	if err := c.Authority.Validate(); err != nil {
+		return err
+	}
 	c = normalized(c)
 	if strings.TrimSpace(c.Resource) == "" {
 		return errors.New("ra resource is required")
@@ -153,7 +159,13 @@ func Validate(c Config) error {
 		if v.PreferredLifetimeSeconds > v.ValidLifetimeSeconds {
 			return errors.New("RA preferred lifetime exceeds valid lifetime")
 		}
-		if !v.PreferredUntil.IsZero() && !v.ValidUntil.IsZero() && v.PreferredUntil.After(v.ValidUntil) {
+		if err := v.ValidUntil.Validate(); err != nil {
+			return err
+		}
+		if err := v.PreferredUntil.Validate(); err != nil {
+			return err
+		}
+		if !v.PreferredUntil.UTC.IsZero() && !v.ValidUntil.UTC.IsZero() && v.PreferredUntil.UTC.After(v.ValidUntil.UTC) {
 			return errors.New("RA preferred_until exceeds valid_until")
 		}
 		if seen[p.String()] {
@@ -164,12 +176,22 @@ func Validate(c Config) error {
 	servers, domains := dnsEntries(c)
 	for _, entry := range servers {
 		s := entry.Name
+		for _, d := range entry.Lifetimes {
+			if err := d.Validate(); err != nil {
+				return err
+			}
+		}
 		a, err := netip.ParseAddr(s)
 		if err != nil || !a.Is6() || a.Is4In6() || a.IsUnspecified() || a.IsMulticast() || a.Zone() != "" {
 			return fmt.Errorf("invalid RA RDNSS %q", s)
 		}
 	}
 	for _, entry := range domains {
+		for _, d := range entry.Lifetimes {
+			if err := d.Validate(); err != nil {
+				return err
+			}
+		}
 		if _, err := domain(entry.Name); err != nil {
 			return err
 		}
@@ -182,22 +204,6 @@ func Validate(c Config) error {
 		return errors.New("RA options exceed the minimum IPv6 MTU; split prefix/DNS intent")
 	}
 	return nil
-}
-func lifetime(value uint32, until, now time.Time) uint32 {
-	if until.IsZero() {
-		return value
-	}
-	seconds := until.Sub(now) / time.Second
-	if seconds <= 0 {
-		return 0
-	}
-	if uint64(seconds) > uint64(^uint32(0)) {
-		return value
-	}
-	if uint32(seconds) < value {
-		return uint32(seconds)
-	}
-	return value
 }
 func domain(s string) ([]byte, error) {
 	s = strings.TrimSuffix(strings.ToLower(s), ".")
@@ -219,7 +225,7 @@ func domain(s string) ([]byte, error) {
 	}
 	return append(out, 0), nil
 }
-func encode(c Config, hardware net.HardwareAddr, now time.Time, withdraw bool) ([]byte, error) {
+func encode(c Config, hardware net.HardwareAddr, clock boottime.Clock, withdraw bool) ([]byte, error) {
 	p := make([]byte, 16)
 	p[0] = 134
 	p[4] = 64
@@ -235,7 +241,7 @@ func encode(c Config, hardware net.HardwareAddr, now time.Time, withdraw bool) (
 	case "low":
 		p[5] |= 0x18
 	}
-	routerLifetime := c.RouterLifetimeSeconds
+	routerLifetime := int(c.Authority.Seconds(uint32(c.RouterLifetimeSeconds), clock))
 	if withdraw {
 		routerLifetime = 0
 	}
@@ -266,8 +272,8 @@ func encode(c Config, hardware net.HardwareAddr, now time.Time, withdraw bool) (
 		if prefix.Autonomous {
 			opt[3] |= 0x40
 		}
-		valid := lifetime(prefix.ValidLifetimeSeconds, prefix.ValidUntil, now)
-		preferred := lifetime(prefix.PreferredLifetimeSeconds, prefix.PreferredUntil, now)
+		valid := min(prefix.ValidUntil.Seconds(prefix.ValidLifetimeSeconds, clock), c.Authority.Seconds(prefix.ValidLifetimeSeconds, clock))
+		preferred := min(prefix.PreferredUntil.Seconds(prefix.PreferredLifetimeSeconds, clock), c.Authority.Seconds(prefix.PreferredLifetimeSeconds, clock))
 		if preferred > valid {
 			preferred = valid
 		}
@@ -280,7 +286,7 @@ func encode(c Config, hardware net.HardwareAddr, now time.Time, withdraw bool) (
 		copy(opt[16:], n.Addr().AsSlice())
 		p = append(p, opt...)
 	}
-	return appendDNSOptions(p, c, now, withdraw)
+	return appendDNSOptions(p, c, clock, withdraw)
 }
 
 func solicitation(payload []byte, source netip.Addr, hopLimit, ifindex, wantIndex int) bool {
@@ -349,7 +355,11 @@ func RunWithUpdates(ctx context.Context, cfg Config, updates <-chan Config, effe
 	destination := &unix.SockaddrInet6{ZoneId: uint32(ifi.Index)}
 	copy(destination.Addr[:], net.ParseIP("ff02::1").To16())
 	send := func(updateCtx context.Context, withdraw bool) error {
-		payload, err := encodeWithWithdrawals(cfg, pending, ifi.HardwareAddr, time.Now(), withdraw)
+		clock, err := boottime.Read()
+		if err != nil {
+			return err
+		}
+		payload, err := encodeWithWithdrawals(cfg, pending, ifi.HardwareAddr, clock, withdraw)
 		if err != nil {
 			return err
 		}
@@ -404,7 +414,11 @@ func RunWithUpdates(ctx context.Context, cfg Config, updates <-chan Config, effe
 				updates = nil
 				break
 			}
-			next, withdrawals, changed, err := planUpdate(cfg, candidate, pending, ifi.HardwareAddr, ifi.MTU, time.Now())
+			clock, err := boottime.Read()
+			if err != nil {
+				return err
+			}
+			next, withdrawals, changed, err := planUpdate(cfg, candidate, pending, ifi.HardwareAddr, ifi.MTU, clock)
 			if err != nil {
 				snapshot.RejectedUpdates++
 				snapshot.LastUpdateError = err.Error()

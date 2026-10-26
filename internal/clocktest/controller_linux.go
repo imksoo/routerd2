@@ -15,6 +15,7 @@ import (
 
 const SuiteName = "daemon-dhcp4-clock"
 const VRRPSuiteName = "daemon-vrrp-clock"
+const DHCP6SuiteName = "daemon-dhcp6-clock"
 
 type Guest struct {
 	PID                       int
@@ -38,7 +39,7 @@ type Controller struct {
 // before calling either clock function. The per-boot kernel argument must
 // match the nonce embedded in the dedicated initramfs.
 func NewController(g Guest, read func() (boottime.Clock, error), set func(time.Time) error) (*Controller, error) {
-	if g.PID != 1 || g.Suite != SuiteName && g.Suite != VRRPSuiteName || len(g.Nonce) != 32 {
+	if g.PID != 1 || g.Suite != SuiteName && g.Suite != VRRPSuiteName && g.Suite != DHCP6SuiteName || len(g.Nonce) != 32 {
 		return nil, errors.New("clock correction requires the dedicated guest PID 1")
 	}
 	for _, c := range g.Nonce {

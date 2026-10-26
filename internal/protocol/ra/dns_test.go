@@ -5,15 +5,18 @@ package ra
 import (
 	"encoding/binary"
 	"fmt"
+	"github.com/imksoo/routerd2/internal/boottime"
 	"net/netip"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	// Parse every name rather than assuming an option order or one common lifetime.
+	// A duplicate is invalid for these tests, including a positive/zero conflict.
+	"github.com/imksoo/routerd2/internal/lifetime"
 )
 
-// Parse every name rather than assuming an option order or one common lifetime.
-// A duplicate is invalid for these tests, including a positive/zero conflict.
 func dnsLifetimes(t *testing.T, packet []byte) (map[string]uint32, map[string]uint32) {
 	t.Helper()
 	servers, domains := map[string]uint32{}, map[string]uint32{}
@@ -74,17 +77,17 @@ func TestLearnedDNSLifetimesAndStaticPrecedence(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
 	c := example()
 	c.LearnedRDNSS = []DNSServer{
-		{Address: "2001:0db8:1::1", ValidUntil: now.Add(time.Second)},
-		{Address: "2001:db8::53", ValidUntil: now.Add(5 * time.Second)},
-		{Address: "2001:db8::53", ValidUntil: now.Add(12 * time.Second)},
-		{Address: "2001:db8::54", ValidUntil: now.Add(25 * time.Second)},
+		{Address: "2001:0db8:1::1", ValidUntil: lifetime.Deadline{UTC: now.Add(time.Second)}},
+		{Address: "2001:db8::53", ValidUntil: lifetime.Deadline{UTC: now.Add(5 * time.Second)}},
+		{Address: "2001:db8::53", ValidUntil: lifetime.Deadline{UTC: now.Add(12 * time.Second)}},
+		{Address: "2001:db8::54", ValidUntil: lifetime.Deadline{UTC: now.Add(25 * time.Second)}},
 		{Address: "2001:db8::55"}, // explicitly infinite source, still wire-capped
 	}
 	c.LearnedDNSSL = []SearchDomain{
-		{Domain: "LAN.EXAMPLE.", ValidUntil: now.Add(time.Second)},
-		{Domain: "Wan.Example.", ValidUntil: now.Add(12 * time.Second)},
-		{Domain: "wan.example", ValidUntil: now.Add(5 * time.Second)},
-		{Domain: "later.example", ValidUntil: now.Add(25 * time.Second)},
+		{Domain: "LAN.EXAMPLE.", ValidUntil: lifetime.Deadline{UTC: now.Add(time.Second)}},
+		{Domain: "Wan.Example.", ValidUntil: lifetime.Deadline{UTC: now.Add(12 * time.Second)}},
+		{Domain: "wan.example", ValidUntil: lifetime.Deadline{UTC: now.Add(5 * time.Second)}},
+		{Domain: "later.example", ValidUntil: lifetime.Deadline{UTC: now.Add(25 * time.Second)}},
 		{Domain: "infinite.example"},
 	}
 	if err := Validate(c); err != nil {
@@ -96,7 +99,7 @@ func TestLearnedDNSLifetimesAndStaticPrecedence(t *testing.T) {
 		first   uint32
 		second  uint32
 	}{{0, 12, 20}, {4250 * time.Millisecond, 7, 20}, {12 * time.Second, 0, 13}, {26 * time.Second, 0, 0}} {
-		packet, err := encode(c, nil, now.Add(check.elapsed), false)
+		packet, err := encode(c, nil, boottime.Clock{WallTime: now.Add(check.elapsed)}, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -107,7 +110,7 @@ func TestLearnedDNSLifetimesAndStaticPrecedence(t *testing.T) {
 			t.Fatalf("after %s, got RDNSS=%v DNSSL=%v", check.elapsed, servers, domains)
 		}
 	}
-	packet, err := encode(c, nil, now, true)
+	packet, err := encode(c, nil, boottime.Clock{WallTime: now}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,16 +127,16 @@ func TestLearnedDNSLifetimesAndStaticPrecedence(t *testing.T) {
 func TestLearnedDNSUpdateWithdrawsOnlyRemovedNames(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
 	old := normalized(example())
-	old.LearnedRDNSS = []DNSServer{{Address: "2001:db8::53", ValidUntil: now.Add(10 * time.Second)}, {Address: "2001:db8::54", ValidUntil: now.Add(10 * time.Second)}}
-	old.LearnedDNSSL = []SearchDomain{{Domain: "keep.example", ValidUntil: now.Add(10 * time.Second)}, {Domain: "remove.example", ValidUntil: now.Add(10 * time.Second)}}
+	old.LearnedRDNSS = []DNSServer{{Address: "2001:db8::53", ValidUntil: lifetime.Deadline{UTC: now.Add(10 * time.Second)}}, {Address: "2001:db8::54", ValidUntil: lifetime.Deadline{UTC: now.Add(10 * time.Second)}}}
+	old.LearnedDNSSL = []SearchDomain{{Domain: "keep.example", ValidUntil: lifetime.Deadline{UTC: now.Add(10 * time.Second)}}, {Domain: "remove.example", ValidUntil: lifetime.Deadline{UTC: now.Add(10 * time.Second)}}}
 	next := normalized(old)
-	next.LearnedRDNSS = []DNSServer{{Address: "2001:db8::53", ValidUntil: now.Add(40 * time.Second)}}
-	next.LearnedDNSSL = []SearchDomain{{Domain: "keep.example", ValidUntil: now.Add(40 * time.Second)}}
-	active, pending, changed, err := planUpdate(old, next, withdrawals{}, nil, 1500, now.Add(5*time.Second))
+	next.LearnedRDNSS = []DNSServer{{Address: "2001:db8::53", ValidUntil: lifetime.Deadline{UTC: now.Add(40 * time.Second)}}}
+	next.LearnedDNSSL = []SearchDomain{{Domain: "keep.example", ValidUntil: lifetime.Deadline{UTC: now.Add(40 * time.Second)}}}
+	active, pending, changed, err := planUpdate(old, next, withdrawals{}, nil, 1500, boottime.Clock{WallTime: now.Add(5 * time.Second)})
 	if err != nil || !changed {
 		t.Fatal(changed, err)
 	}
-	packet, err := encodeWithWithdrawals(active, pending, nil, now.Add(6*time.Second), false)
+	packet, err := encodeWithWithdrawals(active, pending, nil, boottime.Clock{WallTime: now.Add(6 * time.Second)}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +145,7 @@ func TestLearnedDNSUpdateWithdrawsOnlyRemovedNames(t *testing.T) {
 		!reflect.DeepEqual(domains, map[string]uint32{"lan.example": 20, "keep.example": 20, "remove.example": 0}) {
 		t.Fatal("renewal withdrew a retained name or retained a removed name", servers, domains)
 	}
-	_, _, changed, err = planUpdate(active, normalized(active), pending, nil, 1500, now.Add(8*time.Second))
+	_, _, changed, err = planUpdate(active, normalized(active), pending, nil, 1500, boottime.Clock{WallTime: now.Add(8 * time.Second)})
 	if err != nil || changed {
 		t.Fatal("unchanged polling changes learned DNS", changed, err)
 	}
@@ -153,11 +156,11 @@ func TestLearnedDNSUpdateWithdrawsOnlyRemovedNames(t *testing.T) {
 	static.DNSSL = append(static.DNSSL, "keep.example")
 	static.LearnedRDNSS, static.LearnedDNSSL = nil, nil
 	for _, pair := range [][2]Config{{active, static}, {static, active}} {
-		cfg, queued, _, err := planUpdate(pair[0], pair[1], withdrawals{}, nil, 1500, now.Add(9*time.Second))
+		cfg, queued, _, err := planUpdate(pair[0], pair[1], withdrawals{}, nil, 1500, boottime.Clock{WallTime: now.Add(9 * time.Second)})
 		if err != nil || queued.any() {
 			t.Fatal("DNS ownership transfer caused withdrawal", queued, err)
 		}
-		packet, err := encodeWithWithdrawals(cfg, queued, nil, now.Add(10*time.Second), false)
+		packet, err := encodeWithWithdrawals(cfg, queued, nil, boottime.Clock{WallTime: now.Add(10 * time.Second)}, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -167,11 +170,11 @@ func TestLearnedDNSUpdateWithdrawsOnlyRemovedNames(t *testing.T) {
 		}
 	}
 	// Restoring a removed learned name cancels its queued withdrawal.
-	restored, queued, _, err := planUpdate(active, old, pending, nil, 1500, now.Add(7*time.Second))
+	restored, queued, _, err := planUpdate(active, old, pending, nil, 1500, boottime.Clock{WallTime: now.Add(7 * time.Second)})
 	if err != nil || queued.any() {
 		t.Fatal("re-added name retained a queued withdrawal", queued, err)
 	}
-	packet, err = encodeWithWithdrawals(restored, queued, nil, now.Add(8*time.Second), false)
+	packet, err = encodeWithWithdrawals(restored, queued, nil, boottime.Clock{WallTime: now.Add(8 * time.Second)}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,9 +191,9 @@ func TestLearnedDNSValidationReservesFutureOptionGroups(t *testing.T) {
 	c.DNSSLifetimeSeconds = 1800
 	now := time.Now().UTC()
 	for i := 0; i < 54; i++ {
-		c.LearnedRDNSS = append(c.LearnedRDNSS, DNSServer{Address: fmt.Sprintf("2001:db8::%x", i+1), ValidUntil: now.Add(time.Hour + time.Duration(i)*time.Second)})
+		c.LearnedRDNSS = append(c.LearnedRDNSS, DNSServer{Address: fmt.Sprintf("2001:db8::%x", i+1), ValidUntil: lifetime.Deadline{UTC: now.Add(time.Hour + time.Duration(i)*time.Second)}})
 	}
-	packet, err := encode(c, nil, now, false)
+	packet, err := encode(c, nil, boottime.Clock{WallTime: now}, false)
 	if err != nil || len(packet) > 1240 {
 		t.Fatal("fixture should initially fit one common lifetime", len(packet), err)
 	}

@@ -6,19 +6,26 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/netip"
+	"os"
 	"strconv"
 	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/clocktest"
 	"github.com/imksoo/routerd2/internal/config"
+	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/network"
+	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
+	"github.com/imksoo/routerd2/internal/runtimeplan"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 	"github.com/imksoo/routerd2/internal/supervisor"
 	"github.com/vishvananda/netlink"
@@ -32,6 +39,33 @@ func TestDaemonPDGeneratedRAWorkerLifetime(t *testing.T) {
 	if !isolateFixture(t, "TestDaemonPDGeneratedRAWorkerLifetime") {
 		return
 	}
+	runPDRAFixture(t, nil)
+}
+func TestDaemonDHCP6ClockCorrections(t *testing.T) {
+	file, err := clocktest.ForwardFileFromEnv()
+	if err != nil {
+		if os.Getenv("ROUTERD2_INTEGRATION_REQUIRED") == "1" {
+			t.Fatal(err)
+		}
+		t.Skip("dedicated no-NIC QEMU clock broker required")
+	}
+	file.Close()
+	if !isolateFixtureTimeout(t, "TestDaemonDHCP6ClockCorrections", 120*time.Second) {
+		return
+	}
+	client, err := clocktest.ClientFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if _, err := client.Step("restore"); err != nil {
+			t.Error(err)
+		}
+		client.Close()
+	})
+	runPDRAFixture(t, client)
+}
+func runPDRAFixture(t *testing.T, clockClient *clocktest.Client) {
 	provider := fixturePeerNamespace(t, "wan0", "provider0")
 	client := fixturePeerNamespace(t, "lan0", "client0")
 	configure := func(namespace netns.NsHandle, name string, addresses ...string) {
@@ -51,7 +85,7 @@ func TestDaemonPDGeneratedRAWorkerLifetime(t *testing.T) {
 		for _, value := range addresses {
 			address, _ := netlink.ParseAddr(value)
 			address.Flags = unix.IFA_F_NODAD
-			if err := h.AddrAdd(link, address); err != nil {
+			if err := h.AddrReplace(link, address); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -112,7 +146,11 @@ func TestDaemonPDGeneratedRAWorkerLifetime(t *testing.T) {
 			if !enabled.Load() {
 				continue
 			}
-			packet, err := delegatedPrefixReply(buffer[:n], selected.Load())
+			valid := uint32(10)
+			if clockClient != nil {
+				valid = 20
+			}
+			packet, err := delegatedPrefixReply(buffer[:n], selected.Load(), valid)
 			if err != nil {
 				failures <- err
 				return
@@ -179,6 +217,9 @@ func TestDaemonPDGeneratedRAWorkerLifetime(t *testing.T) {
 					continue
 				}
 				prefixes := advertisedPDPrefixes(packet.data)
+				if len(prefixes) == 0 || binary.BigEndian.Uint16(packet.data[60:]) == 0 {
+					continue
+				}
 				if prefixes[prefix][0] > 0 && prefixes[prefix][1] > 0 && (deprecated == "" || prefixes[deprecated][0] > 0 && prefixes[deprecated][1] == 0) {
 					return true
 				}
@@ -249,6 +290,213 @@ func TestDaemonPDGeneratedRAWorkerLifetime(t *testing.T) {
 		return false
 	})
 	pdWorker, _ := module("service.pd")
+	if clockClient != nil {
+		var original runtimeplan.InstanceStatus
+		var source dhcp6config.Snapshot
+		until(t, 8*time.Second, func() bool {
+			checkPeer()
+			if err := f.control.Do(ctx, "GET", "/v1/services/service.pd", nil, &original); err != nil {
+				t.Fatal(err)
+			}
+			if len(original.Snapshot) == 0 {
+				return false
+			}
+			if err := json.Unmarshal(original.Snapshot, &source); err != nil {
+				t.Fatal(err)
+			}
+			now, err := boottime.Read()
+			if err != nil {
+				t.Fatal(err)
+			}
+			return len(source.Prefixes) == 1 && source.InfoReceivedNanos != 0 && source.Prefixes[0].ValidUntil.Remaining(now) > 18*time.Second
+		})
+		stop := func(pid int) {
+			t.Helper()
+			if err := unix.Kill(pid, unix.SIGSTOP); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = unix.Kill(pid, unix.SIGCONT) })
+		}
+		stop(pdWorker.PID)
+		// RS uses an independent client socket; no product configuration or
+		// observation is rewritten to make the RA worker send a packet.
+		solicit := func() {
+			t.Helper()
+			if err := fixtureInsideNamespace(client, func() error {
+				link, err := netlink.LinkByName("client0")
+				if err != nil {
+					return err
+				}
+				fd, err := unix.Socket(unix.AF_INET6, unix.SOCK_RAW|unix.SOCK_CLOEXEC, unix.IPPROTO_ICMPV6)
+				if err != nil {
+					return err
+				}
+				defer unix.Close(fd)
+				if err := unix.SetsockoptInt(fd, unix.IPPROTO_IPV6, unix.IPV6_MULTICAST_IF, link.Attrs().Index); err != nil {
+					return err
+				}
+				if err := unix.SetsockoptInt(fd, unix.IPPROTO_IPV6, unix.IPV6_MULTICAST_HOPS, 255); err != nil {
+					return err
+				}
+				return unix.Sendto(fd, []byte{133, 0, 0, 0, 0, 0, 0, 0}, 0, &unix.SockaddrInet6{Addr: netip.MustParseAddr("ff02::2").As16(), ZoneId: uint32(link.Attrs().Index)})
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		advertisement := func(after time.Time, expired bool) {
+			t.Helper()
+			solicit()
+			until(t, 5*time.Second, func() bool {
+				checkPeer()
+				now, err := boottime.Read()
+				if err != nil {
+					t.Fatal(err)
+				}
+				lanCapture.mu.Lock()
+				defer lanCapture.mu.Unlock()
+				for _, packet := range lanCapture.packets {
+					if packet.at.Before(after) {
+						continue
+					}
+					prefixes := advertisedPDPrefixes(packet.data)
+					p, found := prefixes["2001:db8:1200:3::/64"]
+					if !found {
+						continue
+					}
+					router := binary.BigEndian.Uint16(packet.data[60:])
+					dnsFound := false
+					var dnsLife uint32
+					for at := 70; at+2 <= len(packet.data); {
+						n := int(packet.data[at+1]) * 8
+						if n == 0 || at+n > len(packet.data) {
+							break
+						}
+						if packet.data[at] == 25 && n >= 24 {
+							dnsFound = true
+							dnsLife = binary.BigEndian.Uint32(packet.data[at+4:])
+						}
+						at += n
+					}
+					if expired {
+						if router == 0 && p[0] == 0 && p[1] == 0 && dnsFound && dnsLife == 0 {
+							return true
+						}
+						continue
+					}
+					remaining := source.Prefixes[0].ValidUntil.Remaining(now)
+					if router > 0 && p[0] > 0 && p[1] > 0 && dnsFound && dnsLife > 0 {
+						if time.Duration(router)*time.Second > remaining+time.Second || time.Duration(p[0])*time.Second > remaining+time.Second || time.Duration(dnsLife)*time.Second > remaining+time.Second {
+							t.Fatal("advertisement extended original authority", router, p, dnsLife, source)
+						}
+						return true
+					}
+				}
+				return false
+			})
+		}
+		for _, action := range []string{"forward", "backward"} {
+			result, err := clockClient.Step(action)
+			if err != nil {
+				t.Fatal(err)
+			}
+			changed := time.Now()
+			advertisement(changed, false)
+			traffic("2001:db8:1200:3::")
+			var current runtimeplan.InstanceStatus
+			if err := f.control.Do(ctx, "GET", "/v1/services/service.pd", nil, &current); err != nil {
+				t.Fatal(err)
+			}
+			if current.Sequence != original.Sequence || !bytes.Equal(current.Snapshot, original.Snapshot) {
+				t.Fatal("clock/poll rewrote a frozen producer observation", original, current)
+			}
+			t.Log("actual guest UTC step", action, result.Clock.WallTime, result.Clock.BoottimeNanoseconds)
+		}
+		controller, _ := module("control")
+		if controller.PID == 0 {
+			t.Fatal("missing control worker")
+		}
+		enabled.Store(false)
+		stop(f.pid)
+		stop(controller.PID)
+		controlStoppedAt := time.Now()
+		deadlineClock, err := boottime.Read()
+		if err != nil {
+			t.Fatal(err)
+		}
+		expiresAt := time.Now().Add(source.Prefixes[0].ValidUntil.Remaining(deadlineClock))
+		until(t, 22*time.Second, func() bool {
+			for _, name := range []string{"wan0", "lan0"} {
+				link, err := netlink.LinkByName(name)
+				if err != nil {
+					t.Fatal(err)
+				}
+				addresses, err := netlink.AddrList(link, netlink.FAMILY_V6)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, a := range addresses {
+					if a.IP.IsGlobalUnicast() {
+						return false
+					}
+				}
+			}
+			now, err := boottime.Read()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if source.Prefixes[0].ValidUntil.Remaining(now) > time.Second {
+				t.Fatal("addresses were removed before their original lease while control/supervisor were frozen")
+			}
+			return true
+		})
+		advertisement(controlStoppedAt, true)
+		lanCapture.mu.Lock()
+		for _, packet := range lanCapture.packets {
+			if packet.at.Before(expiresAt) {
+				continue
+			}
+			prefixes := advertisedPDPrefixes(packet.data)
+			if len(prefixes) == 0 {
+				continue
+			}
+			if binary.BigEndian.Uint16(packet.data[60:]) != 0 || prefixes["2001:db8:1200:3::/64"][0] != 0 {
+				lanCapture.mu.Unlock()
+				t.Fatal("positive RA authority survived original expiry")
+			}
+		}
+		lanCapture.mu.Unlock()
+		if _, err := clockClient.Step("restore"); err != nil {
+			t.Fatal(err)
+		}
+		if err := unix.Kill(f.pid, unix.SIGCONT); err != nil {
+			t.Fatal(err)
+		}
+		if err := unix.Kill(controller.PID, unix.SIGCONT); err != nil {
+			t.Fatal(err)
+		}
+		until(t, 6*time.Second, func() bool { _, found := module("service.pd-lan-ra"); return !found })
+		replay := healthPBRUpdate(original)
+		replay.Sequence++
+		if err := f.control.Do(ctx, "POST", "/v1/services/state", replay, nil); err != nil && !localapi.IsHTTPStatus(err, 409) {
+			t.Fatal("expired replay was not processed", err)
+		}
+		if _, found := module("service.pd-lan-ra"); found {
+			t.Fatal("delivery sequence renewed expired producer authority")
+		}
+		var waiting supervisor.ModuleStatus
+		until(t, 6*time.Second, func() bool { waiting, _ = module("service.pd"); return waiting.Ready && waiting.PID > 1 })
+		if err := unix.Kill(waiting.PID, unix.SIGKILL); err != nil {
+			t.Fatal(err)
+		}
+		enabled.Store(true)
+		recovered := waitRA("2001:db8:1200:3::/64", "", time.Now())
+		traffic("2001:db8:1200:3::")
+		if recovered.Generation <= first.Generation || recovered.ConfigDigest != first.ConfigDigest {
+			t.Fatal("fresh acquisition changed immutable RA identity", first, recovered)
+		}
+		t.Log("original IA_NA/PD/info BOOTTIME budgets survived UTC forward/backward, frozen producer and control, independent writer address expiry, bounded/withdrawn RA router/PIO/RDNSS, expired replay and fresh worker acquisition")
+		return
+	}
 	until(t, 6*time.Second, func() bool { checkPeer(); return renewals.Load() > 0 })
 	renumbering := time.Now()
 	selected.Store(0x1300)
@@ -299,7 +547,7 @@ func TestDaemonPDGeneratedRAWorkerLifetime(t *testing.T) {
 	t.Log("independent DHCPv6 PD and captured LAN RA: renew/renumber on the same RA worker, routed client TCP/UDP, expiry/owned address removal, and reacquisition with the same immutable identity")
 }
 
-func delegatedPrefixReply(packet []byte, selected uint32) ([]byte, error) {
+func delegatedPrefixReply(packet []byte, selected uint32, valid uint32) ([]byte, error) {
 	if len(packet) < 4 {
 		return nil, errors.New("short DHCPv6 request")
 	}
@@ -343,8 +591,8 @@ func delegatedPrefixReply(packet []byte, selected uint32) ([]byte, error) {
 	ia = binary.BigEndian.AppendUint32(ia, 2)
 	ia = binary.BigEndian.AppendUint32(ia, 4)
 	ia = append(ia, 0, 26, 0, 25)
-	ia = binary.BigEndian.AppendUint32(ia, 6)
-	ia = binary.BigEndian.AppendUint32(ia, 10)
+	ia = binary.BigEndian.AppendUint32(ia, valid*3/5)
+	ia = binary.BigEndian.AppendUint32(ia, valid)
 	ia = append(ia, 56)
 	prefix := netip.MustParseAddr(fmt.Sprintf("2001:db8:%x::", selected)).As16()
 	ia = append(ia, prefix[:]...)
@@ -359,8 +607,8 @@ func delegatedPrefixReply(packet []byte, selected uint32) ([]byte, error) {
 		addressIA = append(addressIA, 0, 5, 0, 24)
 		raw := netip.MustParseAddr("2001:db8:42::10").As16()
 		addressIA = append(addressIA, raw[:]...)
-		addressIA = binary.BigEndian.AppendUint32(addressIA, 6)
-		addressIA = binary.BigEndian.AppendUint32(addressIA, 10)
+		addressIA = binary.BigEndian.AppendUint32(addressIA, valid*3/5)
+		addressIA = binary.BigEndian.AppendUint32(addressIA, valid)
 		option(3, addressIA)
 	}
 	return response, nil
@@ -368,7 +616,7 @@ func delegatedPrefixReply(packet []byte, selected uint32) ([]byte, error) {
 
 func advertisedPDPrefixes(frame []byte) map[string][2]uint32 {
 	result := make(map[string][2]uint32)
-	if len(frame) < 70 || binary.BigEndian.Uint16(frame[12:]) != 0x86dd || frame[20] != 58 || frame[21] != 255 || frame[54] != 134 || binary.BigEndian.Uint16(frame[60:]) == 0 {
+	if len(frame) < 70 || binary.BigEndian.Uint16(frame[12:]) != 0x86dd || frame[20] != 58 || frame[21] != 255 || frame[54] != 134 {
 		return result
 	}
 	for at := 70; at+2 <= len(frame); {

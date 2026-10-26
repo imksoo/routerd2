@@ -18,6 +18,8 @@ import (
 
 	wire "github.com/imksoo/routerd/pkg/dhcpv4client"
 	"github.com/imksoo/routerd/pkg/pdclient"
+	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/lifetime"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
 	"github.com/imksoo/routerd2/internal/protocol/ra"
@@ -358,20 +360,24 @@ func nativePD(t *testing.T) {
 	go func() {
 		done <- dhcp6.Run(ctx, dhcp6config.Config{RequestPrefix: true, Resource: "pd-test", Interface: "pdwan", StatePath: t.TempDir() + "/pd.json", IAID: 7}, dhcp6.EffectsFunc(func(_ context.Context, s dhcp6config.Snapshot) error { updates <- s; return nil }), nil)
 	}()
-	var acquired time.Time
+	var acquired uint64
 	for {
 		select {
 		case s := <-updates:
-			if !s.Active(time.Now()) {
+			clock, err := boottime.Read()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !s.Active(clock) {
 				continue
 			}
 			if len(s.Prefixes) == 0 || s.Prefixes[0].Prefix != "2001:db8:1200::/56" {
-				t.Fatalf("wrong PD prefix %q", s.Prefixes)
+				t.Fatalf("wrong PD prefix %+v", s.Prefixes)
 			}
-			if acquired.IsZero() {
-				acquired = s.Prefixes[0].ValidUntil
+			if acquired == 0 {
+				acquired = s.Prefixes[0].ValidUntil.Nanos
 			}
-			if s.Prefixes[0].ValidUntil.After(acquired) && len(s.DNSServers) == 1 && s.InformationRefreshSeconds == 600 {
+			if s.Prefixes[0].ValidUntil.Nanos > acquired && len(s.DNSServers) == 1 && s.InformationRefreshSeconds == 600 {
 				cancel()
 				if err := <-done; !errors.Is(err, context.Canceled) {
 					t.Fatalf("stop PD: %v", err)
@@ -505,8 +511,8 @@ func nativeRA(t *testing.T) {
 	renewed.Prefixes = append([]ra.Prefix(nil), initial.Prefixes...)
 	renewed.Prefixes[0].ValidLifetimeSeconds = 400
 	renewed.Prefixes[0].PreferredLifetimeSeconds = 200
-	renewed.Prefixes[0].ValidUntil = time.Now().Add(400 * time.Second)
-	renewed.Prefixes[0].PreferredUntil = time.Now().Add(200 * time.Second)
+	renewed.Prefixes[0].ValidUntil = lifetime.Deadline{UTC: time.Now().Add(400 * time.Second)}
+	renewed.Prefixes[0].PreferredUntil = lifetime.Deadline{UTC: time.Now().Add(200 * time.Second)}
 	configs <- renewed
 	if got := prefixes(read(false)); got["2001:db8:5::/64"][0] < 390 || got["2001:db8:7::/64"][0] != 100 {
 		t.Fatalf("renewal did not preserve prefixes: %v", got)

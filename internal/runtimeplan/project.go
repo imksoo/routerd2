@@ -13,6 +13,7 @@ import (
 
 	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/config"
+	"github.com/imksoo/routerd2/internal/lifetime"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/aftr"
 	"github.com/imksoo/routerd2/internal/protocol/bfd"
@@ -173,24 +174,24 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 				return p, err
 			}
 			for _, address := range snap.Addresses {
-				if !now.Before(address.ValidUntil) {
+				if !address.ValidUntil.Live(facts.bfdClock) {
 					continue
 				}
-				if err := addAddressWithOptions(&p.network, s.DHCP6.Interface, address.Address+"/128", network.AddressOptions{PreferredUntil: address.PreferredUntil, ValidUntil: address.ValidUntil}); err != nil {
+				if err := addAddressWithOptions(&p.network, s.DHCP6.Interface, address.Address+"/128", addressLifetimes(address.PreferredUntil, address.ValidUntil)); err != nil {
 					return p, err
 				}
 			}
 			for _, lan := range s.DHCP6.Delegations {
 				var prefixes []ra.Prefix
 				for _, lease := range snap.Prefixes {
-					if !now.Before(lease.ValidUntil) {
+					if !lease.ValidUntil.Live(facts.bfdClock) {
 						continue
 					}
 					prefix, address, err := delegated(lease.Prefix, lan.SubnetID, lan.HostID)
 					if err != nil {
 						return p, fmt.Errorf("%s/%s: %w", s.Name, lan.Name, err)
 					}
-					if err := addAddressWithOptions(&p.network, lan.Interface, address, network.AddressOptions{PreferredUntil: lease.PreferredUntil, ValidUntil: lease.ValidUntil}); err != nil {
+					if err := addAddressWithOptions(&p.network, lan.Interface, address, addressLifetimes(lease.PreferredUntil, lease.ValidUntil)); err != nil {
 						return p, err
 					}
 					prefixes = append(prefixes, ra.Prefix{Prefix: prefix, OnLink: true, Autonomous: true, ValidLifetimeSeconds: ^uint32(0), PreferredLifetimeSeconds: ^uint32(0), ValidUntil: lease.ValidUntil, PreferredUntil: lease.PreferredUntil})
@@ -202,8 +203,9 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 				module := "service." + name
 				c := protocols.lanRA[module]
 				c.Prefixes = prefixes
+				c.Authority, _ = snap.LeaseUntil()
 				if lan.UseLearnedDNS {
-					if until, usable := snap.InformationUntil(now); usable {
+					if until, usable := snap.InformationUntil(facts.bfdClock); usable {
 						for _, server := range unique(snap.DNSServers) {
 							c.LearnedRDNSS = append(c.LearnedRDNSS, ra.DNSServer{Address: server, ValidUntil: until})
 						}
@@ -271,7 +273,7 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 		return p, err
 	}
 	if facts.aftr != nil {
-		if err := projectDSLite(&p, doc, protocols.instances, records, facts.aftr, now); err != nil {
+		if err := projectDSLite(&p, doc, protocols.instances, records, facts.aftr, facts.bfdClock); err != nil {
 			return p, err
 		}
 	}
@@ -359,4 +361,18 @@ func unique(v []string) []string {
 		}
 	}
 	return out
+}
+
+func addressLifetimes(preferred, valid lifetime.Deadline) network.AddressOptions {
+	if valid.BootID != "" {
+		p, v := preferred.Nanos, valid.Nanos
+		if p == 0 {
+			p = network.InfiniteNanos
+		}
+		if v == 0 {
+			v = network.InfiniteNanos
+		}
+		return network.AddressOptions{BootLifetime: network.BootLifetime{BootID: valid.BootID, PreferredNanos: p, ValidNanos: v}}
+	}
+	return network.AddressOptions{PreferredUntil: preferred.UTC, ValidUntil: valid.UTC}
 }

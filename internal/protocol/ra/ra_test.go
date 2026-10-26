@@ -3,11 +3,15 @@
 package ra
 
 import (
+	"bytes"
 	"encoding/binary"
 	"net"
 	"net/netip"
 	"testing"
 	"time"
+
+	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/lifetime"
 )
 
 func example() Config {
@@ -16,14 +20,14 @@ func example() Config {
 func TestAdvertisementLifetimesAndWithdrawal(t *testing.T) {
 	cfg := example()
 	now := time.Unix(1700000000, 0).UTC()
-	cfg.Prefixes[0].ValidUntil = now.Add(100 * time.Second)
-	cfg.Prefixes[0].PreferredUntil = now.Add(50 * time.Second)
+	cfg.Prefixes[0].ValidUntil = lifetime.Deadline{UTC: now.Add(100 * time.Second)}
+	cfg.Prefixes[0].PreferredUntil = lifetime.Deadline{UTC: now.Add(50 * time.Second)}
 	if err := Validate(cfg); err != nil {
 		t.Fatal(err)
 	}
 	check := func(withdraw bool) {
 		t.Helper()
-		b, err := encode(cfg, net.HardwareAddr{2, 0, 0, 0, 0, 1}, now.Add(10*time.Second), withdraw)
+		b, err := encode(cfg, net.HardwareAddr{2, 0, 0, 0, 0, 1}, boottime.Clock{WallTime: now.Add(10 * time.Second)}, withdraw)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -88,10 +92,10 @@ func TestDeprecatedPrefixUsesFiniteDeadlineAndDNSRetainsItsCap(t *testing.T) {
 	cfg := example()
 	cfg.Prefixes[0].ValidLifetimeSeconds = ^uint32(0)
 	cfg.Prefixes[0].PreferredLifetimeSeconds = 0
-	cfg.Prefixes[0].ValidUntil = now.Add(80 * time.Second)
-	cfg.Prefixes[0].PreferredUntil = time.Unix(1, 0).UTC()
+	cfg.Prefixes[0].ValidUntil = lifetime.Deadline{UTC: now.Add(80 * time.Second)}
+	cfg.Prefixes[0].PreferredUntil = lifetime.Deadline{UTC: time.Unix(1, 0).UTC()}
 	for _, elapsed := range []time.Duration{10 * time.Second, 81 * time.Second} {
-		packet, err := encode(cfg, nil, now.Add(elapsed), false)
+		packet, err := encode(cfg, nil, boottime.Clock{WallTime: now.Add(elapsed)}, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -114,10 +118,10 @@ func TestDeprecatedPrefixUsesFiniteDeadlineAndDNSRetainsItsCap(t *testing.T) {
 		}
 	}
 	farFuture := now.AddDate(200, 0, 0)
-	if value := lifetime(1800, farFuture, now); value != 1800 {
+	if value := (lifetime.Deadline{UTC: farFuture}).Seconds(1800, boottime.Clock{WallTime: now}); value != 1800 {
 		t.Fatal("distant absolute deadline removed the configured DNS cap", value)
 	}
-	if value := lifetime(0, farFuture, now); value != 0 {
+	if value := (lifetime.Deadline{UTC: farFuture}).Seconds(0, boottime.Clock{WallTime: now}); value != 0 {
 		t.Fatal("distant absolute deadline undid explicit withdrawal", value)
 	}
 }
@@ -141,5 +145,30 @@ func TestValidateRejectsUnrepresentableAdvertisements(t *testing.T) {
 	bad.RouterLifetimeSeconds = 2
 	if Validate(bad) == nil {
 		t.Fatal("short router lifetime accepted")
+	}
+}
+
+func TestOriginalBootAuthorityBoundsAllAdvertisementsAcrossUTCSteps(t *testing.T) {
+	clock := boottime.Clock{BootID: "11111111-2222-4333-8444-555555555555", BoottimeNanoseconds: int64(time.Hour), WallTime: time.Unix(1700000000, 0)}
+	cfg := normalized(Config{Resource: "lan", Interface: "lan0", RouterLifetimeSeconds: 1800, DNSSLifetimeSeconds: 120, Authority: lifetime.After(clock, 30), Prefixes: []Prefix{{Prefix: "2001:db8:1::/64", OnLink: true, Autonomous: true, ValidLifetimeSeconds: 60, PreferredLifetimeSeconds: 20, ValidUntil: lifetime.After(clock, 60), PreferredUntil: lifetime.After(clock, 20)}}, LearnedRDNSS: []DNSServer{{Address: "2001:db8::53", ValidUntil: lifetime.After(clock, 120)}}})
+	before, err := encode(cfg, nil, clock, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, shift := range []time.Duration{24 * time.Hour, -24 * time.Hour} {
+		stepped := clock
+		stepped.WallTime = stepped.WallTime.Add(shift)
+		after, err := encode(cfg, nil, stepped, false)
+		if err != nil || !bytes.Equal(before, after) {
+			t.Fatal("UTC changed original RA budgets", err)
+		}
+	}
+	clock.BoottimeNanoseconds += int64(30 * time.Second)
+	expired, err := encode(cfg, nil, clock, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if binary.BigEndian.Uint16(expired[6:]) != 0 || binary.BigEndian.Uint32(expired[20:]) != 0 || binary.BigEndian.Uint32(expired[52:]) != 0 {
+		t.Fatal("expired authority continued advertising router/prefix/DNS lifetimes")
 	}
 }

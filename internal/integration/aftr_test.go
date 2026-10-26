@@ -14,8 +14,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/control"
+	"github.com/imksoo/routerd2/internal/lifetime"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/aftr"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
@@ -216,14 +218,18 @@ func TestDaemonAFTRResolutionAndExpiry(t *testing.T) {
 		failed = state()
 		return failed.Failures > baseline.Failures && failed.LastError != ""
 	})
-	if !failed.Available || failed.Remote != "2001:db8:42::3" || failed.ValidUntil.IsZero() || !failed.ValidUntil.After(time.Now()) {
+	clock, err := boottime.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !failed.Available || failed.Remote != "2001:db8:42::3" || failed.ValidUntil == (lifetime.Deadline{}) || !failed.ValidUntil.Live(clock) {
 		t.Fatalf("DNS failure did not retain the live bounded last-good endpoint: %+v", failed)
 	}
 	expires := failed.ValidUntil
 	until(t, 8*time.Second, func() bool {
 		snapshot := state()
-		if snapshot.Available && !snapshot.ValidUntil.Equal(expires) {
-			t.Fatalf("DNS deadline changed during silence: endpoint_delta=%v first_failed=%+v next=%+v", snapshot.ValidUntil.Sub(expires), failed, snapshot)
+		if snapshot.Available && snapshot.ValidUntil != expires {
+			t.Fatalf("DNS deadline changed during silence: endpoint_delta=%v first_failed=%+v next=%+v", int64(snapshot.ValidUntil.Nanos)-int64(expires.Nanos), failed, snapshot)
 		}
 		link, err := netlink.LinkByName("dslite0")
 		if err == nil {
@@ -234,12 +240,20 @@ func TestDaemonAFTRResolutionAndExpiry(t *testing.T) {
 		if !errors.As(err, &missing) {
 			t.Fatal(err)
 		}
-		if time.Now().Before(expires.Add(-200 * time.Millisecond)) {
+		clock, err := boottime.Read()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if expires.Remaining(clock) > 200*time.Millisecond {
 			t.Fatal("last-good endpoint was removed before its original DNS TTL")
 		}
 		return !snapshot.Available && !fixtureRoute(t, "0.0.0.0/0", "192.0.0.1", 0)
 	})
-	if time.Now().After(expires.Add(3 * time.Second)) {
+	clock, err = boottime.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if uint64(clock.BoottimeNanoseconds) > expires.Nanos+uint64(3*time.Second) {
 		t.Fatal("expired DNS endpoint survived beyond the coordinator reconciliation interval")
 	}
 	underlay()

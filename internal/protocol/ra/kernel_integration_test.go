@@ -18,10 +18,12 @@ import (
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netns"
 	"golang.org/x/sys/unix"
+
+	// The parent does not create sockets, run a protocol worker, or modify links.
+	// Every mutation happens after re-exec has proved fresh user AND net namespaces.
+	"github.com/imksoo/routerd2/internal/lifetime"
 )
 
-// The parent does not create sockets, run a protocol worker, or modify links.
-// Every mutation happens after re-exec has proved fresh user AND net namespaces.
 func TestIsolatedLearnedDNSLifetimes(t *testing.T) {
 	if os.Getenv("ROUTERD2_RA_DNS_CHILD") == "1" {
 		for _, kind := range []string{"net", "user"} {
@@ -157,14 +159,14 @@ func nativeLearnedDNS(t *testing.T) {
 	cfg.Interface, cfg.SourceAddress = "ra-dns0", "fe80::1"
 	cfg.Prefixes = nil
 	cfg.LearnedRDNSS = []DNSServer{
-		{Address: "2001:db8:1::1", ValidUntil: now.Add(time.Second)},
-		{Address: "2001:db8::53", ValidUntil: now.Add(8 * time.Second)},
-		{Address: "2001:db8::54", ValidUntil: now.Add(time.Minute)},
+		{Address: "2001:db8:1::1", ValidUntil: lifetime.Deadline{UTC: now.Add(time.Second)}},
+		{Address: "2001:db8::53", ValidUntil: lifetime.Deadline{UTC: now.Add(8 * time.Second)}},
+		{Address: "2001:db8::54", ValidUntil: lifetime.Deadline{UTC: now.Add(time.Minute)}},
 	}
 	cfg.LearnedDNSSL = []SearchDomain{
-		{Domain: "lan.example", ValidUntil: now.Add(time.Second)},
-		{Domain: "learned.example", ValidUntil: now.Add(8 * time.Second)},
-		{Domain: "remove.example", ValidUntil: now.Add(time.Minute)},
+		{Domain: "lan.example", ValidUntil: lifetime.Deadline{UTC: now.Add(time.Second)}},
+		{Domain: "learned.example", ValidUntil: lifetime.Deadline{UTC: now.Add(8 * time.Second)}},
+		{Domain: "remove.example", ValidUntil: lifetime.Deadline{UTC: now.Add(time.Minute)}},
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	updates := make(chan Config, 1)
@@ -266,8 +268,8 @@ func nativeLearnedDNS(t *testing.T) {
 		t.Fatal("unchanged learned DNS did not count down", first, servers, domains)
 	}
 	renewed := normalized(cfg)
-	renewed.LearnedRDNSS = []DNSServer{{Address: "2001:db8::53", ValidUntil: now.Add(11 * time.Second)}}
-	renewed.LearnedDNSSL = []SearchDomain{{Domain: "learned.example", ValidUntil: now.Add(11 * time.Second)}}
+	renewed.LearnedRDNSS = []DNSServer{{Address: "2001:db8::53", ValidUntil: lifetime.Deadline{UTC: now.Add(11 * time.Second)}}}
+	renewed.LearnedDNSSL = []SearchDomain{{Domain: "learned.example", ValidUntil: lifetime.Deadline{UTC: now.Add(11 * time.Second)}}}
 	updates <- renewed
 	close(updates) // No controller input is available to remove expired DNS.
 	servers, domains = read(false)

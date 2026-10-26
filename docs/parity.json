@@ -300,7 +300,7 @@
         "dhcp6-client"
       ],
       "parity_status": "not_integrated",
-      "known_gap": "The PD state-machine wrapper and embedded upstream snapshot were replaced by a native client with explicit address/prefix requests and multiple assignments. Independent dnsmasq and actual supervisor/control/network/client processes passed IA_NA acquisition, DNS/search, source-bound TCP/UDP after DAD, SIGKILL recovery with stable DUID/IAID, Renew/Reply, unanswered Renew/Rebind, expiry and reacquisition. An independent wire server and real daemon also passed combined IA_NA/IA_PD transactions, current/deprecated LAN RA, routed client TCP/UDP, expiry/removal and reacquisition. Required/observe-only and full resource selection, RA triggers, resolver effects, DAD failure, UTC correction/suspend, Release, VRF and hardware qualification remain incomplete."
+      "known_gap": "One native client owns IA_NA/IA_PD/information and their original BOOTTIME budgets. Control no longer creates a receipt grant. RA router/prefix/DNS and AFTR preserve original deadlines; AFTR no longer copies/rebases its input or maintains wall-clock anchors. Independent dnsmasq covers IA_NA lifecycle, and independent wire/real-daemon tests cover combined IA_NA/IA_PD, renumbering, LAN RA/TCP/UDP, expiry and recovery. A dedicated no-NIC QEMU passed actual UTC +/-24h, frozen producer snapshots, continued LAN communication, original writer address expiry with control/supervisor frozen, bounded/withdrawn RA, expired delivery replay and fresh acquisition. Complete resource selection/readiness, DAD failure, Release, RA trigger/resolver effects, actual suspend/reboot, VRF and hardware remain incomplete."
     },
     {
       "id": "wan.pppoe",
@@ -12194,7 +12194,7 @@
     {
       "package": "internal/protocol/dhcp6",
       "status": "integrated_supervised_worker",
-      "validation": "Native client replaces the pinned PD state-machine wrapper. Independent dnsmasq with real daemon workers passed IA_NA acquisition, DNS/search, kernel DAD completion, source-bound TCP/UDP, stable-identity worker replacement, Renew/Reply, unanswered Renew/Rebind, expiry/removal and reacquisition. Unit/race verifies combined IA state/timer ownership, stale reply rejection, NoBinding recovery target and original old-prefix deadlines. Full resource parity, clock/suspend, DAD-failure, Release, VRF and hardware acceptance remain open.",
+      "validation": "Original BOOTTIME assignment, information and exchange budgets now replace UTC lease deadlines. Actual no-NIC QEMU UTC +/-24h with frozen producer/control/supervisor passed unchanged original observations, LAN TCP/UDP, writer IA_NA/LAN address expiry, bounded/withdrawn RA, expired replay and fresh acquisition. Native PD/RA and independent DNS/AFTR namespace gates also passed. Full resource/phase parity, actual suspend/reboot, DAD failure, Release, VRF and hardware remain open.",
       "resource_parity": false
     },
     {

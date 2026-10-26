@@ -153,9 +153,11 @@ func (e *Engine) expireAuthority(ctx context.Context) (time.Duration, error) {
 				expiredAddresses = true
 				continue
 			}
-			remaining := time.Duration(lifetime.ValidNanos - uint64(clock.BoottimeNanoseconds))
-			if delay == 0 || remaining < delay {
-				delay = remaining
+			if lifetime.ValidNanos != InfiniteNanos {
+				remaining := time.Duration(lifetime.ValidNanos - uint64(clock.BoottimeNanoseconds))
+				if delay == 0 || remaining < delay {
+					delay = remaining
+				}
 			}
 		}
 		keep[address.key()] = true

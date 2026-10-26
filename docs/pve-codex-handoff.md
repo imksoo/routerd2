@@ -72,59 +72,69 @@
 - Health監視と履歴配送は分離する。保存先障害・queue満杯でもprobeを止めず、欠落と保存エラーを表示する。
   全probeの無欠落保存は保証しない。
 
-現在のworker ABIは3、compiler contractは `resource-program-native-13`、network journalはformat 5。
+現在のworker ABIは3、compiler contractは `resource-program-native-14`、network journalはformat 5。
 `track.resource`は宣言IDであり、decisionはhealthy/unhealthy/neutral/unknownを明示する。
 破棄したservice-only形式のreader・混在運用・migrationは実装しない。
 
 ## 今回の実装と検証
 
-PD専用の外部state machine、補正wrapper、埋め込みsnapshot、旧lease journal readerを削除した。
-`internal/protocol/dhcp6`が一つのinterface・UDP 546・DUID/IAIDを所有する。
-`request_address`と`request_prefix`でIA_NAとIA_PDを同じstateful transactionへ入れる。
-両方falseならInformation-requestだけを行う。複数割当のpreferred/validは個別に保持し、
-IA_NAの/128とPD由来のLANアドレスを唯一のnetwork writerへ渡す。
-静的な契約は`dhcp6config`に置き、engineをboot/configへ持ち込まない。
+DHCPv6の割当・T1/T2・情報refresh・再送を元のBOOTTIMEへ変更した。
+`internal/lifetime.Deadline`は運用者のUTC cutoff、または元のboot ID/nanosecondsを保持する。
+同じ値へ二つの時計は入れない。protocolの無期限も元のbootに属し、rebootで復活しない。
+保存するDHCPv6 stateはDUID identityだけで、旧snapshot/journalを読む互換経路はない。
 
-永続化するのはresourceのDUID identityだけで、保存leaseを有効として復活させない。
-再起動後はfreshな取得を行う。proto互換reader・lease移行・仮producerはない。
-同じinterfaceのNA/PD/情報取得を別workerへ分割しない。
-元のprefix期限を保持したdeprecated化、T1/T2、個別失効、情報取得の別transactionを実装した。
-古いtransactionのReplyを採用せず、NoBindingでは返答serverへRequestを送る。
-初回送信のelapsed-timeは0で、初期random delayを再送経過時間へ混ぜない。
+controlはDHCPv6の配送時刻からgrantを作り直さず、元の観測と期限を条件・address・RA・AFTRへ渡す。
+RAのrouter/PIO/RDNSS/DNSSLも元のPD authorityで上限を決める。
+AFTRは一つのimmutable inputと元のDNS回答を使い、期限を再baseしない。
+複製input・wall/boot anchor・sampling jitter補正・内部JSONのquery identityを削除した。
+`UpdatedAt`は表示用で、DNS受信と出力の期限は元のboot scopeを保持する。
+network writerは有限期限に加え、明示したboot内の無期限をkernel infinityとして保存・再適用する。
+DHCPv6の通常tickでは有効な割当sliceを複製せず、失効時だけ所有するsliceを作り直す。
 
-PVE隔離Linux VMの実supervisor/control/network/clientと独立dnsmasqで、IA_NA取得、
-DNS/search、DAD完了後のsource付きTCP/UDP、SIGKILL後のDUID/IAID・config digest維持、
-実Renew/Reply、server停止中のRenew/Rebind、kernel addressの失効撤去・同じworkerでの再取得を確認した。
-独立wire serverでも同じ要求内のIA_NA/IA_PDとIAIDを確認し、現在prefixとdeprecated旧prefixのRA、
-LAN TCP/UDP、同じRA workerでのrenew/renumber、失効時のRA退役とLANアドレス撤去、復旧を確認した。
-最初のIA_NA実行はfixture子プロセスの75秒制限で打ち切られたため、120秒leaseの失効を待てる
-fixture期限に修正した。打切りで残った専用namespace内のprocessは終了した。
-PD fixtureはRA退役をkernel撤去完了とみなしていたため、元の14秒budget内で両方の実状態を待つよう変更した。
-製品の期限や接続deadlineは延長していない。
+新しい契約でPVE隔離namespaceの実daemon＋独立wire peerによるIA_NA/PD同時取得、
+同じRA workerでのrenew/renumber、deprecated旧prefix、LAN TCP/UDP、失効撤去・復旧を確認した。
+AFTRの独立DNS UDP/TCP/CNAMEとtunnel失効・復旧も通った。
+
+NICなしQEMUで実UTCを+24時間/-24時間変更した。凍結したDHCPv6 workerの元の通知が
+書き換わらず、router/PIO/RDNSSとLAN TCP/UDPが元のbudget内で動くことを確認した。
+さらにcontrolとsupervisorの自動修復を停止して、writerが元の期限でIA_NA・LAN addressを撤去した。
+RAのlifetimesは元のauthority内で制限・撤退され、期限後に有効な広告は残らなかった。
+control喪失時はRA status/設定配送の失敗でRA workerが早期に撤退する場合がある。
+同じPIDを維持することはこの障害の要件ではない。
+serverを無応答にしたまま復旧し、期限切れ通知の大きい配送sequenceでRAが復活しないこと、
+freshなworkerでの取得・同じprepared RA digest・利用者通信の回復を確認した。
+試験guest PID 1は最後に元のboot baselineへUTCを戻す。host clockは変更していない。
 
 再実行コマンド:
 
-- `make check-dhcp6`: dnsmasqによるIA_NAの取得・更新・失効・復旧。
+- `make check`: ローカルGo/Python・Race Detector・vet。
+- `make check-dhcp6`: 独立dnsmasqによるIA_NAの取得・更新・失効・復旧。
 - `make check-pd-ra`: 同じworkerのIA_NA/IA_PD、LAN RA・TCP/UDP、再番号付けと失効。
+- `make qemu-dhcp6-clock`: 実UTC変更・通知元/control/supervisor停止・元期限の撤去・再取得。
+- `make check-aftr`: 独立DNSと実daemonの依存失効・tunnel回復。
 - `make check-health-pbr`: 二WANの実通信、worker交替、古い通知・失効・confirmed rollback。
-- `make check-aftr`: 実daemonの依存失効・DNS・tunnel回復。
 
-全体`make check`（Python 33件、Race Detector、vetを含む）、amd64/arm64の6静的ELF build、
-関連する最終clientのrace/vet、低位DHCPv4/PD/RA kernel試験、Health/PBR・AFTR実daemon試験、
-6 ELFの署名bundle/catalog/publisher検査とstaged secrets scanは成功した。
-現在の出力は`dist/dhcp6-{check-build,final-related,final-build,kernel,health-pbr,aftr-final}.log`、
-`dist/dhcp6-address-final/`と`dist/dhcp6-pd-ra-final/`のログ・pcap、
-`dist/dhcp6-{bundle,secrets}.log`。
-compiler contractは`resource-program-native-13`、worker ABIは3、network journalは5。
+全体`make check`（Python 33件、Race Detector、vet）、最終IA_NA・PD/RA・AFTR・Health/PBR、
+専用QEMUの実時計変更・boot addressのfinite/infinite kernel lifetime試験は成功した。
+amd64/arm64の6静的ELFと署名bundle/catalog/publisherを確認し、staged secrets scanも通した。
+未使用のUTC期限helperを削除した後の関連race/vetとbuild/bundleも成功した。
 
-IA_NAの有効leaseはworkerのsocket Readyとは異なる。required-address/observe-only、RA trigger、
-MTU/hop-limit、system resolver、DAD失敗/Decline、graceful Release、VRF、時計補正/suspend・実機は未受入。
-DHCPv6の割当・情報snapshotにはUTC期限が残る。今回の成功で製品全体・実機利用可能とは判断しない。
+現在の出力は`dist/dhcp6-boot-{check-build,final-related,final-build,final-clock}.log`、
+`dist/dhcp6-boot-{address-final,pd-ra-final,aftr-final,health-pbr}/`のログ・pcap、
+`dist/daemon-dhcp6-clock-test/qemu-serial.log`、`dist/dhcp6-boot-address-kernel/`、
+`dist/dhcp6-boot-{bundle,secrets}.log`。
+compiler contractは`resource-program-native-14`、worker ABIは3、network journalは5。
+
+RA client自身のlearned期限、DHCP serverの個別割当/journal、実suspend/reboot、DAD失敗/Decline、
+graceful Release、required/observe-only、RA trigger/resolver効果・VRF・実機の受入は未完了。
+AFTR snapshotの期限は修正したが、control凍結中のDS-Lite link/route自身の独立fencingはまだ必要である。
+今回の成功を製品全体・実機利用可能の判定には使わない。
 
 ## 未完了と次の作業
 
 1. 全実装計画、全更新復旧経路、外部engine、配備先と対象実機の受入は未完了。
-   次はNET-05のDHCPv6期限を元のBOOTTIMEへ揃え、DAD失敗/Decline・Release・resource readiness/RA連携を実装・受入する。
+   次は元のAFTR期限によるDS-Lite link/route fencing、RA clientの元期限、
+   DAD失敗/Decline・Release・resource readiness/RA連携を実装・受入する。
    NET-06はrelayのHA・動的VRF/interface変更の受入、DHCPv6 server、dynamic pool/options・DNS・sticky/lease importが残る。
    今回の試験成功を製品全体・実機利用可能の判定には使わない。
 2. NET-07の旧resource/profile、動的source・VRF経路変更、大規模RIBを実装・受入する。
@@ -137,7 +147,7 @@ DHCPv6の割当・情報snapshotにはUTC期限が残る。今回の成功で製
    失敗時に表示するようfixtureへ追加したが、同じ失敗は再取得できていない。接続deadlineや
    選挙authorityは延長していない。過去に修正したACK/status問題と同一とは断定しない。
 4. 残るprotocol snapshotの型付き保持、条件式の静的計算、writer内部のsnapshot複製を整理する。
-   DHCP client割当とjournalのUTC依存を整理し、実clock補正・停電・suspendで受入する。
+   RA client・DHCP server割当/journal等の残るUTC依存を整理し、実clock補正・停電・suspendで受入する。
 5. 再帰next-hopの前提address/link期限はローカル投影で確認済みだが、同じ条件の実daemon試験は未実施。
    writer自体の停止中のlink fencing・IPv4 route撤去、物理suspendは保証しない。
 6. arm64は静的buildとbundle検査までで、実行していない。物理NIC・性能・suspend、

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	old4 "github.com/imksoo/routerd/pkg/dhcpv4client"
 	"math"
 	"reflect"
 	"strings"
@@ -12,8 +11,10 @@ import (
 	"testing"
 	"time"
 
+	old4 "github.com/imksoo/routerd/pkg/dhcpv4client"
 	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/config"
+	"github.com/imksoo/routerd2/internal/lifetime"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp4"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
@@ -214,12 +215,14 @@ func TestConcurrentRenewalSurvivesConfigurationCutover(t *testing.T) {
 }
 
 func TestPDProjectionKeepsDeprecatedAddressesAndStableRAIdentity(t *testing.T) {
-	now := time.Now()
+	clock := boottime.Clock{BootID: "11111111-2222-4333-8444-555555555555", BoottimeNanoseconds: int64(time.Hour), WallTime: time.Unix(1700000000, 0)}
+	now := clock.WallTime
 	doc := config.Native{Services: []serviceconfig.Service{{Name: "pd", DHCP6: &serviceconfig.DHCP6{RequestPrefix: true, Interface: "wan0", IAID: 7, Delegations: []serviceconfig.Delegation{{Name: "lan", Interface: "lan0", SubnetID: 3, Advertise: true}}}}}}
-	snapshot := dhcp6config.Snapshot{Resource: "pd", Interface: "wan0", IAID: 7, State: "bound", Prefixes: []dhcp6config.Prefix{{Prefix: "2001:db8:100::/56", PreferredUntil: now.Add(100 * time.Second), ValidUntil: now.Add(200 * time.Second)}, {Prefix: "2001:db8:200::/56", PreferredUntil: now.Add(-time.Second), ValidUntil: now.Add(80 * time.Second)}}}
+	snapshot := dhcp6config.Snapshot{BootID: clock.BootID, Resource: "pd", Interface: "wan0", IAID: 7, State: "bound", Prefixes: []dhcp6config.Prefix{{Prefix: "2001:db8:100::/56", PreferredUntil: lifetime.After(clock, 100), ValidUntil: lifetime.After(clock, 200)}, {Prefix: "2001:db8:200::/56", PreferredUntil: lifetime.After(clock, 0), ValidUntil: lifetime.After(clock, 80)}}}
+	protocols := protocolsFor(t, doc, "/run/routerd", "/var/lib/routerd")
 	raw, _ := json.Marshal(snapshot)
 	records := map[string]serviceconfig.Update{"service.pd": {Snapshot: raw}}
-	first, e := projectNative(doc, "/run/routerd", "/var/lib/routerd", records, now)
+	first, e := projectWithFacts(doc, protocols, records, now, projectionFacts{bfdClock: clock})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -227,7 +230,7 @@ func TestPDProjectionKeepsDeprecatedAddressesAndStableRAIdentity(t *testing.T) {
 		t.Fatal("renumbering prefixes lost")
 	}
 	oldAdvertisement := first.liveRA["service.pd-lan-ra"].Prefixes[1]
-	if oldAdvertisement.ValidLifetimeSeconds == 0 || !oldAdvertisement.ValidUntil.Equal(snapshot.Prefixes[1].ValidUntil) || !oldAdvertisement.PreferredUntil.Before(now) {
+	if oldAdvertisement.ValidLifetimeSeconds == 0 || oldAdvertisement.ValidUntil != snapshot.Prefixes[1].ValidUntil || oldAdvertisement.PreferredUntil.Live(clock) {
 		t.Fatal("retained prefix must remain valid but deprecated on the LAN", oldAdvertisement)
 	}
 	var lan network.Interface
@@ -239,15 +242,15 @@ func TestPDProjectionKeepsDeprecatedAddressesAndStableRAIdentity(t *testing.T) {
 	if !reflect.DeepEqual(lan.Addresses, []string{"2001:db8:100:3::1/64", "2001:db8:200:3::1/64"}) {
 		t.Fatalf("LAN addresses %+v", lan)
 	}
-	if !lan.AddressOptions["2001:db8:200:3::1/64"].PreferredUntil.Before(now) {
+	if lan.AddressOptions["2001:db8:200:3::1/64"].BootLifetime.PreferredNanos > uint64(clock.BoottimeNanoseconds) {
 		t.Fatal("old prefix is still preferred")
 	}
 	digest := first.instances[1].digest
-	snapshot.Prefixes[0].ValidUntil = snapshot.Prefixes[0].ValidUntil.Add(time.Minute)
-	snapshot.Prefixes[0].PreferredUntil = snapshot.Prefixes[0].PreferredUntil.Add(time.Minute)
+	snapshot.Prefixes[0].ValidUntil.Nanos += uint64(time.Minute)
+	snapshot.Prefixes[0].PreferredUntil.Nanos += uint64(time.Minute)
 	raw, _ = json.Marshal(snapshot)
 	records["service.pd"] = serviceconfig.Update{Snapshot: raw}
-	renewed, e := projectNative(doc, "/run/routerd", "/var/lib/routerd", records, now)
+	renewed, e := projectWithFacts(doc, protocols, records, now, projectionFacts{bfdClock: clock})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -255,7 +258,8 @@ func TestPDProjectionKeepsDeprecatedAddressesAndStableRAIdentity(t *testing.T) {
 	if digest != next {
 		t.Fatal("PD renewal changes RA immutable identity and would restart it")
 	}
-	expired, e := projectNative(doc, "/run/routerd", "/var/lib/routerd", records, now.Add(time.Hour))
+	clock.BoottimeNanoseconds += int64(time.Hour)
+	expired, e := projectWithFacts(doc, protocols, records, now, projectionFacts{bfdClock: clock})
 	if e != nil {
 		t.Fatal(e)
 	}

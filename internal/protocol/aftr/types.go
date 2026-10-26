@@ -12,6 +12,9 @@ import (
 	"net/netip"
 	"strings"
 	"time"
+
+	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/lifetime"
 )
 
 const (
@@ -37,22 +40,22 @@ type Config struct {
 }
 
 type Source struct {
-	Address        string    `json:"address"`
-	PreferredUntil time.Time `json:"preferred_until"`
-	ValidUntil     time.Time `json:"valid_until"`
+	Address        string            `json:"address"`
+	PreferredUntil lifetime.Deadline `json:"preferred_until"`
+	ValidUntil     lifetime.Deadline `json:"valid_until"`
 }
 
 type Candidate struct {
-	Value      string    `json:"value"`
-	Origin     string    `json:"origin"` // configured or dhcp6
-	ValidUntil time.Time `json:"valid_until"`
+	Value      string            `json:"value"`
+	Origin     string            `json:"origin"` // configured or dhcp6
+	ValidUntil lifetime.Deadline `json:"valid_until"`
 }
 
 type Resolver struct {
-	Address    string    `json:"address"`        // IPv6 literal; no hostname or host DNS fallback
-	Port       uint16    `json:"port,omitempty"` // zero means 53
-	Interface  string    `json:"interface"`
-	ValidUntil time.Time `json:"valid_until"`
+	Address    string            `json:"address"`        // IPv6 literal; no hostname or host DNS fallback
+	Port       uint16            `json:"port,omitempty"` // zero means 53
+	Interface  string            `json:"interface"`
+	ValidUntil lifetime.Deadline `json:"valid_until"`
 }
 
 // Input is one complete, compiler-authorized dependency snapshot. Generation
@@ -73,32 +76,34 @@ type Input struct {
 }
 
 // Answer.ValidUntil includes the minimum lifetime of its CNAME chain. TTL is
-// the AAAA RRset's minimum TTL at ReceivedAt; no input/status poll renews it.
+// the AAAA RRset's minimum TTL at ReceivedNanos; no input/status poll renews it.
 type Answer struct {
-	Address    string    `json:"address"`
-	TTL        uint32    `json:"ttl"`
-	ReceivedAt time.Time `json:"received_at"`
-	ValidUntil time.Time `json:"valid_until"`
+	Address       string            `json:"address"`
+	TTL           uint32            `json:"ttl"`
+	ReceivedNanos uint64            `json:"received_nanos"`
+	ValidUntil    lifetime.Deadline `json:"valid_until"`
 }
 
 type Snapshot struct {
-	Resource       string    `json:"resource"`
-	Interface      string    `json:"interface"`
-	ConfigDigest   string    `json:"config_digest"`
-	Generation     uint64    `json:"generation"`
-	Active         bool      `json:"active"`
-	Available      bool      `json:"available"`
-	Local          string    `json:"local,omitempty"`
-	Remote         string    `json:"remote,omitempty"`
-	CandidateIndex int       `json:"candidate_index"` // -1 when unavailable
-	ResolverIndex  int       `json:"resolver_index"`  // -1 for a literal or unavailable
-	Answers        []Answer  `json:"answers,omitempty"`
-	ValidUntil     time.Time `json:"valid_until"`
-	UpdatedAt      time.Time `json:"updated_at"`
-	NextAttemptAt  time.Time `json:"next_attempt_at,omitempty"`
-	Attempts       uint64    `json:"attempts"`
-	Failures       uint64    `json:"failures"`
-	LastError      string    `json:"last_error,omitempty"`
+	BootID           string            `json:"boot_id"`
+	ObservedNanos    uint64            `json:"observed_nanos"`
+	Resource         string            `json:"resource"`
+	Interface        string            `json:"interface"`
+	ConfigDigest     string            `json:"config_digest"`
+	Generation       uint64            `json:"generation"`
+	Active           bool              `json:"active"`
+	Available        bool              `json:"available"`
+	Local            string            `json:"local,omitempty"`
+	Remote           string            `json:"remote,omitempty"`
+	CandidateIndex   int               `json:"candidate_index"` // -1 when unavailable
+	ResolverIndex    int               `json:"resolver_index"`  // -1 for a literal or unavailable
+	Answers          []Answer          `json:"answers,omitempty"`
+	ValidUntil       lifetime.Deadline `json:"valid_until"`
+	UpdatedAt        time.Time         `json:"updated_at"`
+	NextAttemptNanos uint64            `json:"next_attempt_nanos,omitempty"`
+	Attempts         uint64            `json:"attempts"`
+	Failures         uint64            `json:"failures"`
+	LastError        string            `json:"last_error,omitempty"`
 }
 
 type Effects interface {
@@ -138,21 +143,8 @@ func validDigest(value string) bool {
 	return err == nil && len(b) == 32 && value == strings.ToLower(value)
 }
 func validTime(t time.Time) bool { return t.IsZero() || t.Year() >= 1970 && t.Year() <= 9999 }
-func validDeadline(t, now time.Time) bool {
-	return validTime(t) && (t.IsZero() || !t.After(now.Add(time.Duration(^uint32(0))*time.Second)))
-}
-func alive(t, now time.Time) bool { return t.IsZero() || now.Before(t) }
-func minimum(values ...time.Time) time.Time {
-	var out time.Time
-	for _, v := range values {
-		if !v.IsZero() && (out.IsZero() || v.Before(out)) {
-			out = v
-		}
-	}
-	return out
-}
-func bounded(value, limit time.Time) bool {
-	return limit.IsZero() || !value.IsZero() && !value.After(limit)
+func bounded(value, limit lifetime.Deadline, clock boottime.Clock) bool {
+	return value.Remaining(clock) <= limit.Remaining(clock)
 }
 func global(value string) bool {
 	a, err := netip.ParseAddr(value)
@@ -199,10 +191,10 @@ func ValidateInput(c Config, in Input) error {
 		return errors.New("AFTR input requires a bounded timestamp")
 	}
 	if in.Source.Address == "" {
-		if !in.Source.PreferredUntil.IsZero() || !in.Source.ValidUntil.IsZero() {
+		if in.Source.PreferredUntil != (lifetime.Deadline{}) || in.Source.ValidUntil != (lifetime.Deadline{}) {
 			return errors.New("AFTR empty source cannot carry lifetimes")
 		}
-	} else if !global(in.Source.Address) || !validDeadline(in.Source.ValidUntil, in.UpdatedAt) || !validDeadline(in.Source.PreferredUntil, in.UpdatedAt) || !bounded(in.Source.PreferredUntil, in.Source.ValidUntil) {
+	} else if !global(in.Source.Address) || in.Source.ValidUntil.Validate() != nil || in.Source.PreferredUntil.Validate() != nil || !lifetime.Ordered(in.Source.PreferredUntil, in.Source.ValidUntil) {
 		return errors.New("AFTR source must be canonical global IPv6 with ordered lifetimes")
 	}
 	if len(in.Candidates) > MaxCandidates || len(in.Resolvers) > MaxResolvers {
@@ -211,7 +203,7 @@ func ValidateInput(c Config, in Input) error {
 	seen := map[string]bool{}
 	for _, v := range in.Candidates {
 		_, ipErr := netip.ParseAddr(v.Value)
-		if len(v.Value) > 254 || v.Origin != "configured" && v.Origin != "dhcp6" || ipErr == nil && !global(v.Value) || ipErr != nil && !hostname(v.Value) || !validDeadline(v.ValidUntil, in.UpdatedAt) || seen[candidateKey(v)] {
+		if len(v.Value) > 254 || v.Origin != "configured" && v.Origin != "dhcp6" || ipErr == nil && !global(v.Value) || ipErr != nil && !hostname(v.Value) || v.ValidUntil.Validate() != nil || seen[candidateKey(v)] {
 			return errors.New("AFTR input has an invalid or duplicate candidate")
 		}
 		seen[candidateKey(v)] = true
@@ -219,7 +211,7 @@ func ValidateInput(c Config, in Input) error {
 	seen = map[string]bool{}
 	for _, v := range in.Resolvers {
 		a, err := netip.ParseAddr(v.Address)
-		if err != nil || !a.Is6() || a.Is4In6() || a.IsUnspecified() || a.IsLoopback() || a.IsMulticast() || a.Zone() != "" || a.String() != v.Address || v.Interface != c.Interface || !validDeadline(v.ValidUntil, in.UpdatedAt) || seen[resolverKey(v)] {
+		if err != nil || !a.Is6() || a.Is4In6() || a.IsUnspecified() || a.IsLoopback() || a.IsMulticast() || a.Zone() != "" || a.String() != v.Address || v.Interface != c.Interface || v.ValidUntil.Validate() != nil || seen[resolverKey(v)] {
 			return errors.New("AFTR resolver must be a unique literal IPv6 server scoped to the underlay; implicit/loopback/IPv4 DNS is forbidden")
 		}
 		seen[resolverKey(v)] = true
@@ -234,23 +226,24 @@ func ValidateSnapshot(c Config, in Input, s Snapshot) error {
 	if err := ValidateInput(c, in); err != nil {
 		return err
 	}
-	if s.Resource != c.Resource || s.Interface != c.Interface || s.ConfigDigest != c.ConfigDigest || s.Generation != in.Generation || s.UpdatedAt.IsZero() || !validTime(s.UpdatedAt) || !validTime(s.NextAttemptAt) || len(s.LastError) > 1024 || len(s.Answers) > MaxAnswers {
+	if s.Resource != c.Resource || s.Interface != c.Interface || s.ConfigDigest != c.ConfigDigest || s.Generation != in.Generation || s.UpdatedAt.IsZero() || !validTime(s.UpdatedAt) || !boottime.ValidBootID(s.BootID) || s.ObservedNanos == 0 || s.ObservedNanos > 1<<63-1 || len(s.LastError) > 1024 || len(s.Answers) > MaxAnswers {
 		return errors.New("AFTR snapshot identity or bounded metadata is invalid")
 	}
 	if !s.Available {
-		if s.Local != "" || s.Remote != "" || s.CandidateIndex != -1 || s.ResolverIndex != -1 || len(s.Answers) != 0 || !s.ValidUntil.IsZero() {
+		if s.Local != "" || s.Remote != "" || s.CandidateIndex != -1 || s.ResolverIndex != -1 || len(s.Answers) != 0 || s.ValidUntil != (lifetime.Deadline{}) {
 			return errors.New("unavailable AFTR snapshot contains installable endpoint facts")
 		}
 		return nil
 	}
-	if !s.Active || !in.Active || s.Local != in.Source.Address || !global(s.Local) || !global(s.Remote) || !alive(in.Source.PreferredUntil, s.UpdatedAt) || !alive(in.Source.ValidUntil, s.UpdatedAt) || !validTime(s.ValidUntil) || !alive(s.ValidUntil, s.UpdatedAt) || !bounded(s.ValidUntil, minimum(in.Source.PreferredUntil, in.Source.ValidUntil)) {
+	clock := boottime.Clock{BootID: s.BootID, BoottimeNanoseconds: int64(s.ObservedNanos), WallTime: s.UpdatedAt}
+	if !s.Active || !in.Active || s.Local != in.Source.Address || !global(s.Local) || !global(s.Remote) || !in.Source.PreferredUntil.Live(clock) || !in.Source.ValidUntil.Live(clock) || s.ValidUntil.Validate() != nil || !s.ValidUntil.Live(clock) || !bounded(s.ValidUntil, lifetime.Minimum(clock, in.Source.PreferredUntil, in.Source.ValidUntil), clock) {
 		return errors.New("AFTR snapshot uses an unavailable source or outlives it")
 	}
 	if s.CandidateIndex < 0 || s.CandidateIndex >= len(in.Candidates) {
 		return errors.New("AFTR snapshot candidate is outside current input")
 	}
 	candidate := in.Candidates[s.CandidateIndex]
-	if !alive(candidate.ValidUntil, s.UpdatedAt) || !bounded(s.ValidUntil, candidate.ValidUntil) {
+	if !candidate.ValidUntil.Live(clock) || !bounded(s.ValidUntil, candidate.ValidUntil, clock) {
 		return errors.New("AFTR snapshot outlives its candidate")
 	}
 	if ip, err := netip.ParseAddr(candidate.Value); err == nil {
@@ -259,22 +252,22 @@ func ValidateSnapshot(c Config, in Input, s Snapshot) error {
 		}
 		return nil
 	}
-	if s.ResolverIndex < 0 || s.ResolverIndex >= len(in.Resolvers) || len(s.Answers) == 0 || s.ValidUntil.IsZero() {
+	if s.ResolverIndex < 0 || s.ResolverIndex >= len(in.Resolvers) || len(s.Answers) == 0 || s.ValidUntil == (lifetime.Deadline{}) {
 		return errors.New("DNS AFTR snapshot lacks scoped resolver/finite answer lifetime")
 	}
 	resolver := in.Resolvers[s.ResolverIndex]
-	if !alive(resolver.ValidUntil, s.UpdatedAt) || !bounded(s.ValidUntil, resolver.ValidUntil) {
+	if !resolver.ValidUntil.Live(clock) || !bounded(s.ValidUntil, resolver.ValidUntil, clock) {
 		return errors.New("AFTR snapshot outlives its resolver source")
 	}
 	seen, selected := map[string]bool{}, false
 	for _, a := range s.Answers {
-		if !global(a.Address) || a.TTL == 0 || a.TTL > MaxDNSTTL || a.ReceivedAt.IsZero() || !validTime(a.ReceivedAt) || a.ReceivedAt.After(s.UpdatedAt) || a.ValidUntil.IsZero() || !validTime(a.ValidUntil) || !alive(a.ValidUntil, s.UpdatedAt) || a.ValidUntil.After(a.ReceivedAt.Add(time.Duration(a.TTL)*time.Second)) || seen[a.Address] {
+		if !global(a.Address) || a.TTL == 0 || a.TTL > MaxDNSTTL || a.ReceivedNanos == 0 || a.ReceivedNanos > s.ObservedNanos || a.ValidUntil.BootID != s.BootID || a.ValidUntil.Nanos == 0 || a.ValidUntil.Validate() != nil || !a.ValidUntil.Live(clock) || a.ValidUntil.Nanos > a.ReceivedNanos+uint64(a.TTL)*uint64(time.Second) || seen[a.Address] {
 			return errors.New("AFTR snapshot contains invalid, expired or duplicate DNS answers")
 		}
 		seen[a.Address] = true
 		if a.Address == s.Remote {
 			selected = true
-			if !bounded(s.ValidUntil, a.ValidUntil) {
+			if !bounded(s.ValidUntil, a.ValidUntil, clock) {
 				return errors.New("AFTR endpoint outlives its DNS answer")
 			}
 		}

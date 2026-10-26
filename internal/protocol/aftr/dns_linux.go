@@ -13,8 +13,9 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
-	"time"
 
+	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/lifetime"
 	"github.com/miekg/dns"
 	"golang.org/x/sys/unix"
 )
@@ -25,14 +26,14 @@ func resolve(ctx context.Context, c Config, in Input) (resolution, error) {
 		if err := ctx.Err(); err != nil {
 			return resolution{}, err
 		}
-		now, err := currentInstant()
+		now, err := boottime.Read()
 		if err != nil {
 			return resolution{}, err
 		}
-		if !in.Active || !alive(in.Source.PreferredUntil, now.boot) || !alive(in.Source.ValidUntil, now.boot) {
+		if !in.Active || !in.Source.PreferredUntil.Live(now) || !in.Source.ValidUntil.Live(now) {
 			return resolution{}, errors.New("AFTR source expired during resolution")
 		}
-		if !alive(candidate.ValidUntil, now.boot) {
+		if !candidate.ValidUntil.Live(now) {
 			failures = append(failures, fmt.Sprintf("candidate %d expired", candidateIndex))
 			continue
 		}
@@ -46,28 +47,26 @@ func resolve(ctx context.Context, c Config, in Input) (resolution, error) {
 			if err := ctx.Err(); err != nil {
 				return resolution{}, err
 			}
-			now, err = currentInstant()
+			now, err = boottime.Read()
 			if err != nil {
 				return resolution{}, err
 			}
-			until := minimum(in.Source.PreferredUntil, in.Source.ValidUntil, candidate.ValidUntil, server.ValidUntil)
-			if !alive(until, now.boot) {
+			until := lifetime.Minimum(now, in.Source.PreferredUntil, in.Source.ValidUntil, candidate.ValidUntil, server.ValidUntil)
+			if !until.Live(now) {
 				failures = append(failures, fmt.Sprintf("candidate %d resolver %d dependency expired", candidateIndex, resolverIndex))
 				continue
 			}
 			budget := timeout(c)
-			if !until.IsZero() && until.Sub(now.boot) < budget {
-				budget = until.Sub(now.boot)
-			}
+			budget = min(budget, until.Remaining(now))
 			attempt, cancel := context.WithTimeout(ctx, budget)
 			answers, err := lookupAAAA(attempt, c, in.Source.Address, server, candidate.Value)
 			cancel()
 			if err == nil {
-				now, err = currentInstant()
+				now, err = boottime.Read()
 				if err != nil {
 					return resolution{}, err
 				}
-				if _, err = chooseAnswer(c, liveAnswers(answers, now.boot)); err == nil {
+				if _, err = chooseAnswer(c, liveAnswers(answers, now)); err == nil {
 					return resolution{candidate: candidateIndex, resolver: resolverIndex, answers: answers, warning: fallbackWarning(failures)}, nil
 				}
 			}
@@ -90,7 +89,7 @@ func fallbackWarning(failures []string) string {
 type chainState struct {
 	names map[string]bool
 	links int
-	until time.Time
+	until lifetime.Deadline
 }
 
 func fqdn(value string) string { return dns.Fqdn(strings.ToLower(value)) }
@@ -126,11 +125,11 @@ func lookupAAAA(ctx context.Context, c Config, local string, server Resolver, va
 		if response.Rcode != dns.RcodeSuccess {
 			return nil, fmt.Errorf("DNS returned %s", dns.RcodeToString[response.Rcode])
 		}
-		now, err := currentInstant()
+		now, err := boottime.Read()
 		if err != nil {
 			return nil, err
 		}
-		answers, follow, err := extractAnswers(response, name, &chain, now.boot)
+		answers, follow, err := extractAnswers(response, name, &chain, now)
 		if err != nil {
 			return nil, err
 		}
@@ -197,7 +196,7 @@ func validateResponse(request, response *dns.Msg) error {
 	return nil
 }
 
-func extractAnswers(response *dns.Msg, query string, chain *chainState, now time.Time) ([]Answer, string, error) {
+func extractAnswers(response *dns.Msg, query string, chain *chainState, now boottime.Clock) ([]Answer, string, error) {
 	name := fqdn(query)
 	for {
 		if chain.names[name] {
@@ -235,7 +234,7 @@ func extractAnswers(response *dns.Msg, query string, chain *chainState, now time
 				if ttl == 0 || ttl > MaxDNSTTL {
 					return nil, "", errors.New("zero/invalid CNAME TTL cannot authorize a persistent AFTR endpoint")
 				}
-				chain.until = minimum(chain.until, now.Add(time.Duration(ttl)*time.Second))
+				chain.until = lifetime.Minimum(now, chain.until, lifetime.After(now, ttl))
 			}
 			name = target
 			continue
@@ -265,9 +264,9 @@ func extractAnswers(response *dns.Msg, query string, chain *chainState, now time
 			if !ok || !global(a.String()) {
 				return nil, "", errors.New("AFTR AAAA is not an eligible global IPv6 endpoint")
 			}
-			value := Answer{Address: a.String(), TTL: rrsetTTL, ReceivedAt: now, ValidUntil: minimum(chain.until, now.Add(time.Duration(rrsetTTL)*time.Second))}
+			value := Answer{Address: a.String(), TTL: rrsetTTL, ReceivedNanos: uint64(now.BoottimeNanoseconds), ValidUntil: lifetime.Minimum(now, chain.until, lifetime.After(now, rrsetTTL))}
 			if i, ok := positions[value.Address]; ok {
-				if value.ValidUntil.Before(answers[i].ValidUntil) {
+				if value.ValidUntil.Remaining(now) < answers[i].ValidUntil.Remaining(now) {
 					answers[i] = value
 				}
 				continue

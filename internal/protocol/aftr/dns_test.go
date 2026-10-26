@@ -7,8 +7,8 @@ import (
 	"net"
 	"strings"
 	"testing"
-	"time"
 
+	"github.com/imksoo/routerd2/internal/lifetime"
 	"github.com/miekg/dns"
 )
 
@@ -30,14 +30,14 @@ func dnsReply(t *testing.T, records ...string) *dns.Msg {
 func chainForTest() *chainState { return &chainState{names: map[string]bool{}} }
 
 func TestCNAMEAndAAAAExpiryAndAnswerOwnership(t *testing.T) {
-	now := clockForTest(0).boot
+	now := clockForTest(0)
 	m := dnsReply(t, "aftr.example. 20 IN CNAME target.example.", "target.example. 60 IN AAAA 2001:db8::2", "target.example. 60 IN AAAA 2001:db8::1", "unrelated.example. 3600 IN AAAA 2001:db8::bad")
 	answers, follow, err := extractAnswers(m, "aftr.example.", chainForTest(), now)
 	if err != nil || follow != "" || len(answers) != 2 || answers[0].Address != "2001:db8::2" || answers[1].Address != "2001:db8::1" {
 		t.Fatalf("wrong reachable RR order/set: %+v %q %v", answers, follow, err)
 	}
 	for _, a := range answers {
-		if a.TTL != 60 || !a.ValidUntil.Equal(now.Add(20*time.Second)) {
+		if a.TTL != 60 || a.ValidUntil != lifetime.After(now, 20) {
 			t.Fatal("CNAME expiry was ignored or AAAA order lost")
 		}
 	}
@@ -48,8 +48,8 @@ func TestCNAMEAndAAAAExpiryAndAnswerOwnership(t *testing.T) {
 		t.Fatal("CNAME-only reply did not request its target")
 	}
 	second := dnsReply(t, "target.example. 60 IN AAAA 2001:db8::3")
-	answers, _, err = extractAnswers(second, follow, chain, now.Add(10*time.Second))
-	if err != nil || len(answers) != 1 || !answers[0].ValidUntil.Equal(now.Add(20*time.Second)) {
+	answers, _, err = extractAnswers(second, follow, chain, clockForTest(10))
+	if err != nil || len(answers) != 1 || answers[0].ValidUntil != lifetime.After(now, 20) {
 		t.Fatal("second query reset the original CNAME TTL")
 	}
 }
@@ -68,7 +68,7 @@ func TestMalformedDNSChainsCannotBecomePersistentEndpoints(t *testing.T) {
 		"mapped-aftr":     {"aftr.example. 60 IN AAAA ::ffff:192.0.2.1"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, _, err := extractAnswers(dnsReply(t, records...), "aftr.example.", chainForTest(), clockForTest(0).boot); err == nil {
+			if _, _, err := extractAnswers(dnsReply(t, records...), "aftr.example.", chainForTest(), clockForTest(0)); err == nil {
 				t.Fatal("invalid DNS chain accepted")
 			}
 		})
@@ -81,7 +81,7 @@ func TestMalformedDNSChainsCannotBecomePersistentEndpoints(t *testing.T) {
 		name = target
 	}
 	deep = append(deep, fmt.Sprintf("%s 60 IN AAAA 2001:db8::1", name))
-	if _, _, err := extractAnswers(dnsReply(t, deep...), "aftr.example.", chainForTest(), clockForTest(0).boot); err == nil {
+	if _, _, err := extractAnswers(dnsReply(t, deep...), "aftr.example.", chainForTest(), clockForTest(0)); err == nil {
 		t.Fatal("CNAME depth limit missing")
 	}
 }
@@ -104,27 +104,27 @@ func TestDNSIdentityAndAnswerLimit(t *testing.T) {
 	for i := 0; i <= MaxAnswers; i++ {
 		m.Answer = append(m.Answer, &dns.AAAA{Hdr: dns.RR_Header{Name: "aftr.example.", Rrtype: dns.TypeAAAA, Class: dns.ClassINET, Ttl: 60}, AAAA: net.ParseIP(fmt.Sprintf("2001:db8::%x", i+1))})
 	}
-	if _, _, err := extractAnswers(m, "aftr.example.", chainForTest(), clockForTest(0).boot); err == nil {
+	if _, _, err := extractAnswers(m, "aftr.example.", chainForTest(), clockForTest(0)); err == nil {
 		t.Fatal("oversized AFTR answer set was truncated silently")
 	}
 }
 
 func TestDuplicateAAAAUsesShortestLifetime(t *testing.T) {
 	m := dnsReply(t, "aftr.example. 60 IN AAAA 2001:db8::1", "aftr.example. 10 IN AAAA 2001:db8::1")
-	answers, _, err := extractAnswers(m, "aftr.example.", chainForTest(), clockForTest(0).boot)
-	if err != nil || len(answers) != 1 || answers[0].TTL != 10 || !answers[0].ValidUntil.Equal(clockForTest(10).boot) {
+	answers, _, err := extractAnswers(m, "aftr.example.", chainForTest(), clockForTest(0))
+	if err != nil || len(answers) != 1 || answers[0].TTL != 10 || answers[0].ValidUntil != lifetime.After(clockForTest(0), 10) {
 		t.Fatal("duplicate answer lifetime was extended")
 	}
 }
 
 func TestAAAASetExpiresAtItsShortestMemberTTL(t *testing.T) {
 	m := dnsReply(t, "aftr.example. 60 IN AAAA 2001:db8::2", "aftr.example. 10 IN AAAA 2001:db8::1")
-	answers, _, err := extractAnswers(m, "aftr.example.", chainForTest(), clockForTest(0).boot)
+	answers, _, err := extractAnswers(m, "aftr.example.", chainForTest(), clockForTest(0))
 	if err != nil || len(answers) != 2 || answers[0].Address != "2001:db8::2" || answers[1].Address != "2001:db8::1" {
 		t.Fatalf("RRset normalization changed answer identity/order: %+v %v", answers, err)
 	}
 	for _, answer := range answers {
-		if answer.TTL != 10 || !answer.ValidUntil.Equal(clockForTest(10).boot) {
+		if answer.TTL != 10 || answer.ValidUntil != lifetime.After(clockForTest(0), 10) {
 			t.Fatal("partial RRset could outlive its shortest TTL")
 		}
 	}
@@ -147,7 +147,7 @@ func FuzzAFTRDNSAnswerScope(f *testing.F) {
 		if m.Unpack(b) != nil || len(m.Answer) > 256 {
 			return
 		}
-		answers, _, err := extractAnswers(m, "aftr.example.", chainForTest(), clockForTest(0).boot)
+		answers, _, err := extractAnswers(m, "aftr.example.", chainForTest(), clockForTest(0))
 		if err != nil {
 			return
 		}

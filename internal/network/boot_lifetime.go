@@ -8,6 +8,9 @@ import (
 	"github.com/imksoo/routerd2/internal/boottime"
 )
 
+// InfiniteNanos denotes an unbounded budget within its originating boot.
+const InfiniteNanos = uint64(math.MaxUint64)
+
 // BootLifetime is controller-generated address lifetime intent. It is not an
 // operator configuration field. Deadlines survive writer restart in this boot.
 type BootLifetime struct {
@@ -16,15 +19,21 @@ type BootLifetime struct {
 	ValidNanos     uint64 `json:"valid_nanos"`
 }
 
+func (b BootLifetime) valid() bool {
+	return boottime.ValidBootID(b.BootID) && b.ValidNanos != 0 && (b.ValidNanos <= math.MaxInt64 || b.ValidNanos == InfiniteNanos) && (b.PreferredNanos <= math.MaxInt64 || b.PreferredNanos == InfiniteNanos) && b.PreferredNanos <= b.ValidNanos
+}
 func addressLifetimesAt(o AddressOptions, now time.Time, clock boottime.Clock) (uint32, uint32, error) {
 	b := o.BootLifetime
 	if b == (BootLifetime{}) {
 		return lifetimeRemaining(o.PreferredUntil, now), lifetimeRemaining(o.ValidUntil, now), nil
 	}
-	if !boottime.ValidBootID(b.BootID) || b.BootID != clock.BootID || clock.BoottimeNanoseconds <= 0 || b.ValidNanos == 0 || b.ValidNanos > math.MaxInt64 || b.PreferredNanos > b.ValidNanos || !o.PreferredUntil.IsZero() || !o.ValidUntil.IsZero() {
+	if !b.valid() || b.BootID != clock.BootID || clock.BoottimeNanoseconds <= 0 || !o.PreferredUntil.IsZero() || !o.ValidUntil.IsZero() {
 		return 0, 0, errors.New("invalid or former-boot address lifetime")
 	}
 	remaining := func(until uint64) uint32 {
+		if until == InfiniteNanos {
+			return math.MaxUint32
+		}
 		now := uint64(clock.BoottimeNanoseconds)
 		if until <= now {
 			return 0

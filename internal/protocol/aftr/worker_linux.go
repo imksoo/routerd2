@@ -12,16 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"golang.org/x/sys/unix"
+	"github.com/imksoo/routerd2/internal/boottime"
 )
-
-func currentInstant() (instant, error) {
-	var ts unix.Timespec
-	if err := unix.ClockGettime(unix.CLOCK_BOOTTIME, &ts); err != nil {
-		return instant{}, err
-	}
-	return instant{wall: time.Now().UTC(), boot: time.Unix(ts.Sec, ts.Nsec).UTC()}, nil
-}
 
 type lookupFunc func(context.Context, Config, Input) (resolution, error)
 type lookupResult struct {
@@ -49,7 +41,7 @@ func run(ctx context.Context, c Config, initial Input, updates <-chan Input, eff
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	now, err := currentInstant()
+	now, err := boottime.Read()
 	if err != nil {
 		return err
 	}
@@ -59,11 +51,11 @@ func run(ctx context.Context, c Config, initial Input, updates <-chan Input, eff
 	}
 	var lastView Snapshot
 	published := false
-	publish := func(now instant, force bool) error {
-		view := m.view(now)
+	publish := func(now boottime.Clock, force bool) error {
+		view := m.snapshot(now)
 		view.UpdatedAt = time.Time{}
-		shift := clockShift(m.clock, now)
-		if !force && published && reflect.DeepEqual(view, lastView) && shift < time.Second && shift > -time.Second {
+		view.ObservedNanos = 0
+		if !force && published && reflect.DeepEqual(view, lastView) {
 			return nil
 		}
 		s := m.snapshot(now)
@@ -80,12 +72,12 @@ func run(ctx context.Context, c Config, initial Input, updates <-chan Input, eff
 		return err
 	}
 	defer func() {
-		now, err := currentInstant()
+		now, err := boottime.Read()
 		if err != nil {
 			result = errors.Join(result, err)
 			return
 		}
-		s := Snapshot{Resource: c.Resource, Interface: c.Interface, ConfigDigest: c.ConfigDigest, Generation: m.input.Generation, CandidateIndex: -1, ResolverIndex: -1, UpdatedAt: now.wall, Attempts: m.attempts, Failures: m.failures, LastError: m.lastError}
+		s := Snapshot{BootID: now.BootID, ObservedNanos: uint64(now.BoottimeNanoseconds), Resource: c.Resource, Interface: c.Interface, ConfigDigest: c.ConfigDigest, Generation: m.input.Generation, CandidateIndex: -1, ResolverIndex: -1, UpdatedAt: now.WallTime, Attempts: m.attempts, Failures: m.failures, LastError: m.lastError}
 		cleanup, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 		if err := effects.Update(cleanup, s); err != nil {
@@ -113,25 +105,25 @@ func run(ctx context.Context, c Config, initial Input, updates <-chan Input, eff
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		now, err = currentInstant()
+		now, err = boottime.Read()
 		if err != nil {
 			return err
 		}
-		if m.dependencyError(now.boot) != "" {
+		if m.dependencyError(now) != "" {
 			if cancelQuery != nil {
 				cancel()
 			}
-			m.nextAttempt = time.Time{}
-		} else if cancelQuery == nil && m.nextAttempt.IsZero() && !m.view(now).Available {
-			m.nextAttempt = now.boot
+			m.nextAttempt = 0
+		} else if cancelQuery == nil && m.nextAttempt == 0 && !m.snapshot(now).Available {
+			m.nextAttempt = uint64(now.BoottimeNanoseconds)
 		}
-		if m.dependencyError(now.boot) == "" && cancelQuery == nil && !m.nextAttempt.IsZero() && !now.boot.Before(m.nextAttempt) {
+		if m.dependencyError(now) == "" && cancelQuery == nil && m.nextAttempt != 0 && uint64(now.BoottimeNanoseconds) >= m.nextAttempt {
 			queryCtx, queryCancel := context.WithCancel(ctx)
 			cancelQuery = queryCancel
 			sequence++
-			seq, input := sequence, cloneInput(m.learned)
+			seq, input := sequence, cloneInput(m.input)
 			m.attempts++
-			m.nextAttempt = time.Time{}
+			m.nextAttempt = 0
 			workers.Add(1)
 			go func() {
 				defer workers.Done()
@@ -153,7 +145,7 @@ func run(ctx context.Context, c Config, initial Input, updates <-chan Input, eff
 			if !ok {
 				return errors.New("AFTR input stream closed")
 			}
-			now, err = currentInstant()
+			now, err = boottime.Read()
 			if err != nil {
 				return err
 			}
@@ -169,7 +161,7 @@ func run(ctx context.Context, c Config, initial Input, updates <-chan Input, eff
 				continue
 			}
 			cancel()
-			now, err = currentInstant()
+			now, err = boottime.Read()
 			if err != nil {
 				return err
 			}

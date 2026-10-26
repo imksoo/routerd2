@@ -63,7 +63,12 @@ func projectNative(doc config.Native, runtimeDir, stateDir string, records map[s
 	if err != nil {
 		return projection{}, err
 	}
-	facts := projectionFacts{}
+	clock, err := bfd.ReadClock()
+	if err != nil {
+		return projection{}, err
+	}
+	clock.WallTime = now
+	facts := projectionFacts{bfdClock: clock}
 	if len(inputs) > 0 {
 		facts.aftr = inputs[0]
 	}

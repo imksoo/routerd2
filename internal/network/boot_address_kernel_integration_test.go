@@ -64,6 +64,8 @@ func TestIsolatedBootAddressLifetime(t *testing.T) {
 	expiry := uint64(clock.BoottimeNanoseconds) + uint64(6*time.Second)
 	address := "192.0.2.200/24"
 	d := Desired{Interfaces: []Interface{{Name: "boot0", Addresses: []string{address}, AddressOptions: map[string]AddressOptions{address: {BootLifetime: BootLifetime{BootID: clock.BootID, PreferredNanos: expiry, ValidNanos: expiry}}}}}}
+	d.Interfaces[0].Addresses = append(d.Interfaces[0].Addresses, "192.0.2.202/32")
+	d.Interfaces[0].AddressOptions["192.0.2.202/32"] = AddressOptions{BootLifetime: BootLifetime{BootID: clock.BootID, PreferredNanos: InfiniteNanos, ValidNanos: InfiniteNanos}}
 	opts := Options{StatePath: filepath.Join(t.TempDir(), "network.json")}
 	e, err := New(opts)
 	if err != nil {
@@ -89,8 +91,14 @@ func TestIsolatedBootAddressLifetime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	found := false
+	found, infinite := false, false
 	for _, a := range addresses {
+		if a.IP.String() == "192.0.2.202" {
+			infinite = true
+			if a.ValidLft != int(^uint32(0)) || a.PreferedLft != int(^uint32(0)) {
+				t.Fatal("boot infinity was encoded as a finite kernel lifetime", a)
+			}
+		}
 		if a.IP.String() == "192.0.2.200" {
 			found = true
 			if a.ValidLft > 5 || a.ValidLft <= 0 {
@@ -98,8 +106,8 @@ func TestIsolatedBootAddressLifetime(t *testing.T) {
 			}
 		}
 	}
-	if !found {
-		t.Fatal("valid lease address missing after writer restart")
+	if !found || !infinite {
+		t.Fatal("finite/infinite lease address missing after writer restart")
 	}
 	if err := e.Close(); err != nil {
 		t.Fatal(err)
@@ -110,13 +118,14 @@ func TestIsolatedBootAddressLifetime(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		owned, kept := false, false
+		owned, kept, infinite := false, false, false
 		for _, a := range addresses {
 			owned = owned || a.IP.String() == "192.0.2.200"
 			kept = kept || a.IP.String() == "192.0.2.201"
+			infinite = infinite || a.IP.String() == "192.0.2.202"
 		}
-		if !kept {
-			t.Fatal("foreign address removed")
+		if !kept || !infinite {
+			t.Fatal("foreign or explicitly infinite address removed")
 		}
 		if !owned {
 			break

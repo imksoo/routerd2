@@ -11,7 +11,9 @@ import (
 	"sort"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/config"
+	"github.com/imksoo/routerd2/internal/lifetime"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/aftr"
@@ -22,19 +24,11 @@ import (
 )
 
 func deadlineLive(until, now time.Time) bool { return until.IsZero() || now.Before(until) }
-func deadlineMinimum(values ...time.Time) time.Time {
-	var result time.Time
-	for _, value := range values {
-		if !value.IsZero() && (result.IsZero() || value.Before(result)) {
-			result = value
-		}
-	}
-	return result
-}
 
 // Dependency construction is pure and uses only explicitly authorized facts.
 // The caller additionally gates Source against the acknowledged kernel view.
-func aftrDependencies(doc config.Native, s serviceconfig.Service, records map[string]serviceconfig.Update, digest string, now time.Time) (aftr.Input, error) {
+func aftrDependencies(doc config.Native, s serviceconfig.Service, records map[string]serviceconfig.Update, digest string, clock boottime.Clock) (aftr.Input, error) {
+	now := clock.WallTime
 	c := s.DSLite
 	in := aftr.Input{Resource: s.Name, Interface: c.Interface, ConfigDigest: digest, Generation: 1, UpdatedAt: now.UTC(), Active: true}
 	if c.LocalAddress != "" {
@@ -49,7 +43,7 @@ func aftrDependencies(doc config.Native, s serviceconfig.Service, records map[st
 				}
 				o := iface.AddressOptions[address]
 				if deadlineLive(o.PreferredUntil, now) && deadlineLive(o.ValidUntil, now) {
-					in.Source = aftr.Source{Address: c.LocalAddress, PreferredUntil: o.PreferredUntil, ValidUntil: o.ValidUntil}
+					in.Source = aftr.Source{Address: c.LocalAddress, PreferredUntil: lifetime.Deadline{UTC: o.PreferredUntil}, ValidUntil: lifetime.Deadline{UTC: o.ValidUntil}}
 				}
 			}
 		}
@@ -68,7 +62,7 @@ func aftrDependencies(doc config.Native, s serviceconfig.Service, records map[st
 				if err != nil || !p.Addr().IsGlobalUnicast() {
 					continue
 				}
-				sources = append(sources, aftr.Source{Address: p.Addr().String(), PreferredUntil: address.PreferredUntil, ValidUntil: address.ValidUntil})
+				sources = append(sources, aftr.Source{Address: p.Addr().String(), PreferredUntil: lifetime.Deadline{UTC: address.PreferredUntil}, ValidUntil: lifetime.Deadline{UTC: address.ValidUntil}})
 			}
 			sort.Slice(sources, func(i, j int) bool { return sources[i].Address < sources[j].Address })
 			if len(sources) != 0 {
@@ -76,13 +70,13 @@ func aftrDependencies(doc config.Native, s serviceconfig.Service, records map[st
 			}
 		}
 	}
-	information := func(name string) (dhcp6config.Snapshot, time.Time, bool) {
+	information := func(name string) (dhcp6config.Snapshot, lifetime.Deadline, bool) {
 		u, ok := records["service."+name]
 		var snap dhcp6config.Snapshot
 		if !ok || u.Role != "dhcp6" || json.Unmarshal(u.Snapshot, &snap) != nil {
-			return snap, time.Time{}, false
+			return snap, lifetime.Deadline{}, false
 		}
-		until, usable := snap.InformationUntil(now)
+		until, usable := snap.InformationUntil(clock)
 		return snap, until, usable
 	}
 	if c.AFTRFrom != "" {
@@ -94,12 +88,12 @@ func aftrDependencies(doc config.Native, s serviceconfig.Service, records map[st
 		in.Candidates = append(in.Candidates, aftr.Candidate{Value: candidate, Origin: "configured"})
 	}
 	seen := map[string]bool{}
-	addResolver := func(address string, port uint16, until time.Time) {
+	addResolver := func(address string, port uint16, until lifetime.Deadline) {
 		if port == 0 {
 			port = 53
 		}
 		key := fmt.Sprintf("%s:%d", address, port)
-		if seen[key] || len(in.Resolvers) >= aftr.MaxResolvers || !deadlineLive(until, now) {
+		if seen[key] || len(in.Resolvers) >= aftr.MaxResolvers || !until.Live(clock) {
 			return
 		}
 		a, err := netip.ParseAddr(address)
@@ -110,7 +104,7 @@ func aftrDependencies(doc config.Native, s serviceconfig.Service, records map[st
 		in.Resolvers = append(in.Resolvers, aftr.Resolver{Address: a.String(), Port: port, Interface: c.Interface, ValidUntil: until})
 	}
 	for _, resolver := range c.Resolvers {
-		addResolver(resolver.Address, resolver.Port, time.Time{})
+		addResolver(resolver.Address, resolver.Port, lifetime.Deadline{})
 	}
 	for _, name := range c.DNSFrom {
 		if snap, until, usable := information(name); usable {
@@ -129,7 +123,7 @@ func aftrDependencies(doc config.Native, s serviceconfig.Service, records map[st
 		}
 		if snap.Active {
 			for _, server := range snap.DNSServers {
-				addResolver(server.Address, 53, server.ValidUntil)
+				addResolver(server.Address, 53, lifetime.Deadline{UTC: server.ValidUntil})
 			}
 		}
 	}
@@ -173,7 +167,11 @@ func (r *Runtime) AFTRInput(ctx context.Context, name string) (aftr.Input, error
 	if service.DSLite == nil {
 		return aftr.Input{}, errors.New("missing DS-Lite intent")
 	}
-	in, err := aftrDependencies(r.config.plan.Native, service, r.observationsLocked(), b.digest, time.Now())
+	clock, err := boottime.Read()
+	if err != nil {
+		return aftr.Input{}, err
+	}
+	in, err := aftrDependencies(r.config.plan.Native, service, r.observationsLocked(), b.digest, clock)
 	if err != nil {
 		return in, err
 	}
@@ -218,7 +216,7 @@ func (r *Runtime) aftrRoutes(mux *http.ServeMux) {
 	})
 }
 
-func projectDSLite(p *projection, doc config.Native, instances map[string]binding, records map[string]serviceconfig.Update, inputs map[string]aftr.Input, now time.Time) error {
+func projectDSLite(p *projection, doc config.Native, instances map[string]binding, records map[string]serviceconfig.Update, inputs map[string]aftr.Input, clock boottime.Clock) error {
 	for _, service := range doc.Services {
 		if service.DSLite == nil {
 			continue
@@ -233,7 +231,7 @@ func projectDSLite(p *projection, doc config.Native, instances map[string]bindin
 		if input.ConfigDigest != digest {
 			continue
 		}
-		current, err := aftrDependencies(doc, service, records, digest, now)
+		current, err := aftrDependencies(doc, service, records, digest, clock)
 		if err != nil {
 			return err
 		}
@@ -248,7 +246,7 @@ func projectDSLite(p *projection, doc config.Native, instances map[string]bindin
 		if err := strict(u.Snapshot, &snap); err != nil {
 			return err
 		}
-		if !snap.Active || !snap.Available || snap.Generation != input.Generation || !deadlineLive(snap.ValidUntil, now) {
+		if !snap.Active || !snap.Available || snap.Generation != input.Generation || snap.BootID != clock.BootID || !snap.ValidUntil.Live(clock) {
 			continue
 		}
 		cfg := service.AFTRConfig()
@@ -262,7 +260,9 @@ func projectDSLite(p *projection, doc config.Native, instances map[string]bindin
 		if address == "" {
 			address = "192.0.0.2/32"
 		}
-		if err := addAddressWithOptions(&p.network, c.Tunnel, address, network.AddressOptions{Peer: c.B4Peer, PreferredUntil: snap.ValidUntil, ValidUntil: snap.ValidUntil}); err != nil {
+		options := addressLifetimes(snap.ValidUntil, snap.ValidUntil)
+		options.Peer = c.B4Peer
+		if err := addAddressWithOptions(&p.network, c.Tunnel, address, options); err != nil {
 			return err
 		}
 		if c.DefaultRoute == nil || *c.DefaultRoute {

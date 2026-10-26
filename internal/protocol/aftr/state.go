@@ -3,7 +3,6 @@
 package aftr
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -12,22 +11,21 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/lifetime"
 )
 
-type instant struct{ wall, boot time.Time }
 type resolution struct {
 	candidate, resolver int
-	answers             []Answer // boot-clock times, not UTC
+	answers             []Answer
 	warning             string
 }
-
 type machine struct {
 	config             Config
-	input              Input   // exact public input for generation/scope validation
-	learned            Input   // input deadlines translated once to boot time
-	clock              instant // stable BOOTTIME-to-UTC mapping between clock steps
+	input              Input
 	cache              *resolution
-	nextAttempt        time.Time
+	nextAttempt        uint64
 	attempts, failures uint64
 	lastError          string
 }
@@ -37,60 +35,25 @@ func cloneInput(in Input) Input {
 	in.Resolvers = slices.Clone(in.Resolvers)
 	return in
 }
-func rebase(t, from, to time.Time) time.Time {
-	if t.IsZero() {
-		return t
-	}
-	return to.Add(t.Sub(from)).UTC()
-}
-func inputToBoot(in Input, now instant) Input {
-	in = cloneInput(in)
-	in.Source.PreferredUntil = rebase(in.Source.PreferredUntil, now.wall, now.boot)
-	in.Source.ValidUntil = rebase(in.Source.ValidUntil, now.wall, now.boot)
-	for i := range in.Candidates {
-		in.Candidates[i].ValidUntil = rebase(in.Candidates[i].ValidUntil, now.wall, now.boot)
-	}
-	for i := range in.Resolvers {
-		in.Resolvers[i].ValidUntil = rebase(in.Resolvers[i].ValidUntil, now.wall, now.boot)
-	}
-	return in
-}
 
-func clockShift(before, after instant) time.Duration {
-	return after.wall.Sub(before.wall) - after.boot.Sub(before.boot)
-}
-
-// Consecutive CLOCK_BOOTTIME and wall-clock reads have sampling jitter. Reusing
-// the same mapping preserves exact UTC deadlines across retries/status changes,
-// so those publications cannot trigger a kernel apply for unchanged lifetimes.
-// An actual offset change of at least one second starts a new mapping. UpdatedAt
-// uses that mapping too, keeping receipt timestamps and TTL arithmetic coherent.
-func (m *machine) stableClock(now instant) instant {
-	shift := clockShift(m.clock, now)
-	if m.clock.boot.IsZero() || shift >= time.Second || shift <= -time.Second {
-		m.clock = now
+// Expiry changes do not change the DNS question or discard a still-live answer.
+func sameQuery(a, b Input) bool {
+	if a.Active != b.Active || a.Source.Address != b.Source.Address || len(a.Candidates) != len(b.Candidates) || len(a.Resolvers) != len(b.Resolvers) {
+		return false
 	}
-	now.wall = rebase(now.boot, m.clock.boot, m.clock.wall)
-	return now
-}
-
-func queryIdentity(in Input) string {
-	v := struct {
-		Active                bool
-		Local                 string
-		Candidates, Resolvers []string
-	}{Active: in.Active, Local: in.Source.Address}
-	for _, x := range in.Candidates {
-		v.Candidates = append(v.Candidates, candidateKey(x))
+	for i, c := range a.Candidates {
+		if candidateKey(c) != candidateKey(b.Candidates[i]) {
+			return false
+		}
 	}
-	for _, x := range in.Resolvers {
-		v.Resolvers = append(v.Resolvers, resolverKey(x))
+	for i, r := range a.Resolvers {
+		if resolverKey(r) != resolverKey(b.Resolvers[i]) {
+			return false
+		}
 	}
-	b, _ := json.Marshal(v)
-	return string(b)
+	return true
 }
-
-func (m *machine) apply(in Input, now instant) (bool, error) {
+func (m *machine) apply(in Input, clock boottime.Clock) (bool, error) {
 	if err := ValidateInput(m.config, in); err != nil {
 		return false, err
 	}
@@ -103,44 +66,41 @@ func (m *machine) apply(in Input, now instant) (bool, error) {
 		}
 		return false, nil
 	}
-	if queryIdentity(in) != queryIdentity(m.input) {
+	if !sameQuery(in, m.input) {
 		m.cache = nil
 	}
-	m.input, m.learned = cloneInput(in), inputToBoot(in, now)
-	m.nextAttempt = now.boot
+	m.input = cloneInput(in)
+	m.nextAttempt = uint64(clock.BoottimeNanoseconds)
 	m.lastError = ""
 	return true, nil
 }
-
-func (m *machine) dependencyError(now time.Time) string {
-	in := m.learned
+func (m *machine) dependencyError(clock boottime.Clock) string {
+	in := m.input
 	if !in.Active {
 		return "AFTR dependency input is inactive"
 	}
 	if in.Source.Address == "" {
 		return "waiting for an eligible global IPv6 source"
 	}
-	if !alive(in.Source.PreferredUntil, now) || !alive(in.Source.ValidUntil, now) {
+	if !in.Source.PreferredUntil.Live(clock) || !in.Source.ValidUntil.Live(clock) {
 		return "local IPv6 source is no longer preferred and valid"
 	}
 	for _, c := range in.Candidates {
-		if alive(c.ValidUntil, now) {
+		if c.ValidUntil.Live(clock) {
 			return ""
 		}
 	}
 	return "waiting for a live AFTR candidate"
 }
-
-func liveAnswers(answers []Answer, now time.Time) []Answer {
+func liveAnswers(answers []Answer, clock boottime.Clock) []Answer {
 	out := make([]Answer, 0, len(answers))
 	for _, a := range answers {
-		if alive(a.ValidUntil, now) {
+		if a.ValidUntil.Live(clock) {
 			out = append(out, a)
 		}
 	}
 	return out
 }
-
 func chooseAnswer(c Config, answers []Answer) (Answer, error) {
 	if len(answers) == 0 {
 		return Answer{}, errors.New("no usable live AAAA answers")
@@ -162,10 +122,9 @@ func chooseAnswer(c Config, answers []Answer) (Answer, error) {
 	}
 	return values[ordinal-1], nil
 }
-
-func (m *machine) view(now instant) Snapshot {
-	s := Snapshot{Resource: m.config.Resource, Interface: m.config.Interface, ConfigDigest: m.config.ConfigDigest, Generation: m.input.Generation, Active: true, CandidateIndex: -1, ResolverIndex: -1, UpdatedAt: now.boot, NextAttemptAt: m.nextAttempt, Attempts: m.attempts, Failures: m.failures, LastError: m.lastError}
-	if err := m.dependencyError(now.boot); err != "" {
+func (m *machine) snapshot(clock boottime.Clock) Snapshot {
+	s := Snapshot{BootID: clock.BootID, ObservedNanos: uint64(clock.BoottimeNanoseconds), Resource: m.config.Resource, Interface: m.config.Interface, ConfigDigest: m.config.ConfigDigest, Generation: m.input.Generation, Active: true, CandidateIndex: -1, ResolverIndex: -1, UpdatedAt: clock.WallTime, NextAttemptNanos: m.nextAttempt, Attempts: m.attempts, Failures: m.failures, LastError: m.lastError}
+	if err := m.dependencyError(clock); err != "" {
 		s.LastError = err
 		return s
 	}
@@ -176,68 +135,33 @@ func (m *machine) view(now instant) Snapshot {
 		return s
 	}
 	cached := m.cache
-	if cached.candidate < 0 || cached.candidate >= len(m.learned.Candidates) {
-		s.LastError = "AFTR candidate is outside current input"
-		return s
-	}
-	candidate := m.learned.Candidates[cached.candidate]
-	if !alive(candidate.ValidUntil, now.boot) {
+	candidate := m.input.Candidates[cached.candidate]
+	if !candidate.ValidUntil.Live(clock) {
 		s.LastError = "AFTR candidate lifetime expired"
 		return s
 	}
-	deadline := minimum(m.learned.Source.PreferredUntil, m.learned.Source.ValidUntil, candidate.ValidUntil)
+	deadline := lifetime.Minimum(clock, m.input.Source.PreferredUntil, m.input.Source.ValidUntil, candidate.ValidUntil)
 	remote := ""
 	if a, err := netip.ParseAddr(candidate.Value); err == nil {
 		remote = a.String()
 	} else {
-		if cached.resolver < 0 || cached.resolver >= len(m.learned.Resolvers) {
-			s.LastError = "AFTR resolver is outside current input"
-			return s
-		}
-		resolver := m.learned.Resolvers[cached.resolver]
-		if !alive(resolver.ValidUntil, now.boot) {
+		resolver := m.input.Resolvers[cached.resolver]
+		if !resolver.ValidUntil.Live(clock) {
 			s.LastError = "AFTR resolver source lifetime expired"
 			return s
 		}
-		answers := liveAnswers(cached.answers, now.boot)
+		answers := liveAnswers(cached.answers, clock)
 		answer, err := chooseAnswer(m.config, answers)
 		if err != nil {
 			s.LastError = err.Error()
 			return s
 		}
-		remote, deadline = answer.Address, minimum(deadline, resolver.ValidUntil, answer.ValidUntil)
+		remote, deadline = answer.Address, lifetime.Minimum(clock, deadline, resolver.ValidUntil, answer.ValidUntil)
 		s.ResolverIndex, s.Answers = cached.resolver, answers
 	}
-	s.Available, s.Local, s.Remote, s.CandidateIndex, s.ValidUntil = true, m.learned.Source.Address, remote, cached.candidate, deadline
+	s.Available, s.Local, s.Remote, s.CandidateIndex, s.ValidUntil = true, m.input.Source.Address, remote, cached.candidate, deadline
 	return s
 }
-
-func (m *machine) snapshot(now instant) Snapshot {
-	now = m.stableClock(now)
-	s := m.view(now)
-	s.UpdatedAt = now.wall.UTC()
-	s.NextAttemptAt = rebase(s.NextAttemptAt, now.boot, now.wall)
-	s.ValidUntil = rebase(s.ValidUntil, now.boot, now.wall)
-	for i := range s.Answers {
-		s.Answers[i].ReceivedAt = rebase(s.Answers[i].ReceivedAt, now.boot, now.wall)
-		s.Answers[i].ValidUntil = rebase(s.Answers[i].ValidUntil, now.boot, now.wall)
-	}
-	if s.Available {
-		// UTC input bounds belong to the compiler. If the wall clock stepped,
-		// never assert an endpoint beyond those unrefreshed bounds.
-		limit := minimum(m.input.Source.PreferredUntil, m.input.Source.ValidUntil, m.input.Candidates[s.CandidateIndex].ValidUntil)
-		if s.ResolverIndex >= 0 {
-			limit = minimum(limit, m.input.Resolvers[s.ResolverIndex].ValidUntil)
-		}
-		s.ValidUntil = minimum(s.ValidUntil, limit)
-		if !alive(s.ValidUntil, now.wall) {
-			s.Available, s.Local, s.Remote, s.CandidateIndex, s.ResolverIndex, s.Answers, s.ValidUntil = false, "", "", -1, -1, nil, time.Time{}
-			s.LastError = "AFTR input deadlines require refresh after a wall-clock change"
-		}
-	}
-	return s
-}
-
 func errorText(err error) string {
 	if err == nil {
 		return ""
@@ -260,43 +184,38 @@ func timeout(c Config) time.Duration {
 	}
 	return time.Duration(c.TimeoutSeconds) * time.Second
 }
-
-func (m *machine) result(value resolution, err error, now instant) {
+func (m *machine) result(value resolution, err error, clock boottime.Clock) {
 	if err == nil {
 		before := m.cache
 		value.answers = slices.Clone(value.answers)
 		m.cache = &value
-		if !m.view(now).Available {
+		if !m.snapshot(clock).Available {
 			err = errors.New("AFTR result expired before it could be applied")
 			m.cache = before
 		}
 	}
+	now := uint64(clock.BoottimeNanoseconds)
 	if err != nil {
 		m.failures++
 		m.lastError = errorText(err)
-		m.nextAttempt = now.boot.Add(retry(m.config))
+		m.nextAttempt = now + uint64(retry(m.config))
 		return
 	}
 	m.lastError = value.warning
-	m.nextAttempt = time.Time{}
+	m.nextAttempt = 0
 	if len(value.answers) > 0 {
-		answer, err := chooseAnswer(m.config, liveAnswers(value.answers, now.boot))
+		answer, err := chooseAnswer(m.config, liveAnswers(value.answers, clock))
 		if err != nil {
-			m.nextAttempt = now.boot.Add(retry(m.config))
+			m.nextAttempt = now + uint64(retry(m.config))
 			return
 		}
-		delay := answer.ValidUntil.Sub(now.boot) / 2
-		if delay > 30*time.Second {
-			delay = 30 * time.Second
-		}
-		if delay < 100*time.Millisecond {
-			delay = 100 * time.Millisecond
-		}
-		m.nextAttempt = now.boot.Add(delay)
+		delay := max(100*time.Millisecond, min(30*time.Second, answer.ValidUntil.Remaining(clock)/2))
+		m.nextAttempt = now + uint64(delay)
 	}
-	// Successful fallback must periodically retry earlier priorities, including
-	// a literal fallback whose own address has no DNS TTL.
 	if value.candidate > 0 || value.resolver > 0 || value.warning != "" {
-		m.nextAttempt = minimum(m.nextAttempt, now.boot.Add(retry(m.config)))
+		earlier := now + uint64(retry(m.config))
+		if m.nextAttempt == 0 || earlier < m.nextAttempt {
+			m.nextAttempt = earlier
+		}
 	}
 }

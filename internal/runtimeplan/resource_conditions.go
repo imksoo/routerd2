@@ -1,7 +1,6 @@
 package runtimeplan
 
 import (
-	"bytes"
 	"encoding/json"
 	"time"
 
@@ -105,46 +104,6 @@ func (r *Runtime) recordGuardGrantLocked(u serviceconfig.Update, now time.Time) 
 		r.guardGrants[u.Name] = guardGrant{revision: r.config.revision, generation: u.Generation, sequence: u.Sequence, epoch: u.ProducerEpoch, bootID: snapshot.BootID, value: snapshot.Active, untilNanos: snapshot.ExpiresNanos, observedNanos: snapshot.ObservedNanos, health: &snapshot}
 		return
 	}
-	if u.Role != "dhcp6" {
-		return
-	}
-	var snapshot dhcp6config.Snapshot
-	if json.Unmarshal(u.Snapshot, &snapshot) != nil {
-		return
-	}
-	active := snapshot.Active(now)
-	deadline := snapshot.LeaseUntil()
-	if snapshot.State == "information" {
-		deadline, _ = snapshot.InformationUntil(now)
-	}
-	if !active {
-		deadline = now.Add(5 * time.Second)
-	}
-	clock, err := bfd.ReadClock()
-	if err != nil {
-		delete(r.guardGrants, u.Name)
-		return
-	}
-	remaining := deadline.Sub(now)
-	if deadline.IsZero() {
-		remaining = time.Duration(1<<63-1) - time.Duration(clock.BoottimeNanoseconds)
-	}
-	if remaining <= 0 {
-		delete(r.guardGrants, u.Name)
-		return
-	}
-	until := uint64(clock.BoottimeNanoseconds) + uint64(remaining)
-	observed := uint64(clock.BoottimeNanoseconds)
-	if old, ok := r.guardGrants[u.Name]; ok && old.revision == r.config.revision && old.generation == u.Generation && old.epoch == u.ProducerEpoch && old.bootID == clock.BootID && old.value == active && (old.deadline.Equal(deadline) || bytes.Equal(r.records[u.Name].Snapshot, u.Snapshot)) {
-		until = old.untilNanos
-		observed = old.observedNanos
-		deadline = old.deadline
-	}
-	if r.guardGrants == nil {
-		r.guardGrants = make(map[string]guardGrant)
-	}
-	r.guardGrants[u.Name] = guardGrant{revision: r.config.revision, generation: u.Generation, sequence: u.Sequence, epoch: u.ProducerEpoch, bootID: clock.BootID, value: active, deadline: deadline, untilNanos: until, observedNanos: observed}
-
 }
 
 // conditionFactsLocked adapts already validated protocol messages and a fresh
@@ -217,6 +176,30 @@ func (r *Runtime) conditionFactsLocked(cfg configuration, now time.Time) (result
 				fact.Value = resourceprogram.True
 			}
 			facts.Facts[name+".elected"] = fact
+			continue
+		}
+		if record.Role == "dhcp6" {
+			var source dhcp6config.Snapshot
+			if json.Unmarshal(record.Snapshot, &source) != nil || !module.Ready || record.Generation != module.Generation || record.ConfigDigest != binding.digest || source.BootID != clock.BootID || source.ObservedNanos > ticks {
+				continue
+			}
+			active := source.Active(clock)
+			until := source.ObservedNanos + uint64(5*time.Second)
+			if active {
+				deadline, _ := source.LeaseUntil()
+				if source.State == "information" {
+					deadline, _ = source.InformationUntil(clock)
+				}
+				until = deadline.Nanos
+				if until == 0 {
+					until = ^uint64(0)
+				}
+			}
+			value := resourceprogram.False
+			if active {
+				value = resourceprogram.True
+			}
+			facts.Facts[name+".active"] = resourceprogram.Fact{Value: value, ObservedNanos: source.ObservedNanos, ExpiresNanos: min(until, r.guardUntilNanos), WorkerGeneration: module.Generation, ProducerEpoch: record.ProducerEpoch}
 			continue
 		}
 		grant, ok := r.guardGrants[name]

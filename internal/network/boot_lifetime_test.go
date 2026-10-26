@@ -42,7 +42,7 @@ func TestBootAddressLifetimesIgnoreWallStepsAndRejectOtherBoots(t *testing.T) {
 	}
 }
 
-func TestBootAddressValidationDoesNotAdmitMixedOrUnboundedClocks(t *testing.T) {
+func TestBootAddressValidationDoesNotAdmitMixedOrInvalidClocks(t *testing.T) {
 	good := BootLifetime{BootID: "11111111-2222-4333-8444-555555555555", PreferredNanos: 10, ValidNanos: 20}
 	for _, bad := range []AddressOptions{
 		{BootLifetime: good, PreferredUntil: time.Now()},
@@ -51,7 +51,7 @@ func TestBootAddressValidationDoesNotAdmitMixedOrUnboundedClocks(t *testing.T) {
 		{BootLifetime: BootLifetime{BootID: "bad", PreferredNanos: 10, ValidNanos: 20}},
 		{BootLifetime: BootLifetime{PreferredNanos: 10, ValidNanos: 20}},
 		{BootLifetime: BootLifetime{BootID: good.BootID, PreferredNanos: 30, ValidNanos: 20}},
-		{BootLifetime: BootLifetime{BootID: good.BootID, ValidNanos: math.MaxUint64}},
+		{BootLifetime: BootLifetime{BootID: good.BootID, PreferredNanos: math.MaxInt64 + 1, ValidNanos: InfiniteNanos}},
 	} {
 		d := Desired{Interfaces: []Interface{{Name: "wan0", Addresses: []string{"192.0.2.9/24"}, AddressOptions: map[string]AddressOptions{"192.0.2.9/24": bad}}}}
 		if err := Validate(d); err == nil {

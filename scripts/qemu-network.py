@@ -154,6 +154,12 @@ SUITES = {
         "commands": True,
         "description": "guest-only actual UTC corrections with original VRRP BOOTTIME VIP expiry and reapply",
     },
+    "daemon-dhcp6-clock": {
+        "package": "./internal/integration", "binary": "daemon.test",
+        "test": "TestDaemonDHCP6ClockCorrections",
+        "marker": "ROUTERD_DHCP6_CLOCK_TEST", "timeout": 190, "commands": True,
+        "description": "guest UTC steps with original DHCPv6/PD/RA budgets, frozen producer/control and autonomous expiry",
+    },
     "daemon-dhcp4-clock": {
         "package": "./internal/integration", "binary": "daemon.test",
         "test": "TestDaemonDHCPv4ClockCorrections",
@@ -369,7 +375,7 @@ def prune_modules(root, kernel_release, roots):
 
 def clock_marker(root, suite_name):
     """Only the fixed clock-fault guest receives a per-boot kernel marker."""
-    if suite_name not in ("daemon-dhcp4-clock", "daemon-vrrp-clock"):
+    if suite_name not in ("daemon-dhcp4-clock", "daemon-vrrp-clock", "daemon-dhcp6-clock"):
         return ""
     nonce = secrets.token_hex(16)
     (root / "test-clock-nonce").write_text(nonce + "\n")

@@ -6,7 +6,10 @@ import (
 	"encoding/binary"
 	"errors"
 	"net/netip"
-	"time"
+	"slices"
+
+	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/lifetime"
 )
 
 // DNSServer is a learned RDNSS address whose source has an absolute lifetime.
@@ -14,20 +17,20 @@ import (
 // absence of a learned source must be represented by removing the entry.
 // Config.RDNSS takes precedence over a learned copy of the same address.
 type DNSServer struct {
-	Address    string    `json:"address"`
-	ValidUntil time.Time `json:"valid_until,omitempty"`
+	Address    string            `json:"address"`
+	ValidUntil lifetime.Deadline `json:"valid_until,omitempty"`
 }
 
 // SearchDomain is the DNSSL counterpart of DNSServer. Config.DNSSL takes
 // precedence over a learned copy of the same canonical domain.
 type SearchDomain struct {
-	Domain     string    `json:"domain"`
-	ValidUntil time.Time `json:"valid_until,omitempty"`
+	Domain     string            `json:"domain"`
+	ValidUntil lifetime.Deadline `json:"valid_until,omitempty"`
 }
 
 type dnsEntry struct {
-	Name       string
-	ValidUntil time.Time
+	Name      string
+	Lifetimes []lifetime.Deadline
 }
 
 // A name appears once on the wire. Configured names have no source deadline;
@@ -41,13 +44,11 @@ func mergeDNS(configured []string, learned []dnsEntry) []dnsEntry {
 			continue
 		}
 		index[name] = len(entries)
-		entries = append(entries, dnsEntry{Name: name})
+		entries = append(entries, dnsEntry{Name: name, Lifetimes: []lifetime.Deadline{{}}})
 	}
 	for _, entry := range learned {
 		if i, exists := index[entry.Name]; exists {
-			if !entries[i].ValidUntil.IsZero() && (entry.ValidUntil.IsZero() || entry.ValidUntil.After(entries[i].ValidUntil)) {
-				entries[i].ValidUntil = entry.ValidUntil
-			}
+			entries[i].Lifetimes = append(entries[i].Lifetimes, entry.Lifetimes...)
 			continue
 		}
 		index[entry.Name] = len(entries)
@@ -59,12 +60,12 @@ func mergeDNS(configured []string, learned []dnsEntry) []dnsEntry {
 func dnsEntries(c Config) (servers, domains []dnsEntry) {
 	learned := make([]dnsEntry, 0, len(c.LearnedRDNSS))
 	for _, entry := range c.LearnedRDNSS {
-		learned = append(learned, dnsEntry{Name: entry.Address, ValidUntil: entry.ValidUntil})
+		learned = append(learned, dnsEntry{Name: entry.Address, Lifetimes: []lifetime.Deadline{entry.ValidUntil}})
 	}
 	servers = mergeDNS(c.RDNSS, learned)
 	learned = make([]dnsEntry, 0, len(c.LearnedDNSSL))
 	for _, entry := range c.LearnedDNSSL {
-		learned = append(learned, dnsEntry{Name: entry.Domain, ValidUntil: entry.ValidUntil})
+		learned = append(learned, dnsEntry{Name: entry.Domain, Lifetimes: []lifetime.Deadline{entry.ValidUntil}})
 	}
 	return servers, mergeDNS(c.DNSSL, learned)
 }
@@ -84,11 +85,14 @@ type dnsGroup struct {
 
 // Options with different remaining lifetimes need distinct wire headers.
 // Lifetime is rounded down so an advertisement never extends a source deadline.
-func groupDNS(entries []dnsEntry, maximum uint32, now time.Time, withdraw bool) []dnsGroup {
+func groupDNS(entries []dnsEntry, maximum uint32, clock boottime.Clock, withdraw bool) []dnsGroup {
 	var groups []dnsGroup
 	index := map[uint32]int{}
 	for _, entry := range entries {
-		remaining := lifetime(maximum, entry.ValidUntil, now)
+		var remaining uint32
+		for _, d := range entry.Lifetimes {
+			remaining = max(remaining, d.Seconds(maximum, clock))
+		}
 		if withdraw {
 			remaining = 0
 		}
@@ -108,13 +112,19 @@ func groupDNS(entries []dnsEntry, maximum uint32, now time.Time, withdraw bool) 
 // grouping, not only the packet that happens to be encoded at validation time.
 func maximumDNSSize(c Config) (int, error) {
 	servers, domains := dnsEntries(c)
-	groups := func(entries []dnsEntry) map[time.Time][]string {
-		out := map[time.Time][]string{}
+	groups := func(entries []dnsEntry) [][]string {
+		var keys [][]lifetime.Deadline
+		var names [][]string
 		for _, entry := range entries {
-			deadline := entry.ValidUntil.UTC()
-			out[deadline] = append(out[deadline], entry.Name)
+			i := slices.IndexFunc(keys, func(key []lifetime.Deadline) bool { return slices.Equal(key, entry.Lifetimes) })
+			if i < 0 {
+				i = len(keys)
+				keys = append(keys, entry.Lifetimes)
+				names = append(names, nil)
+			}
+			names[i] = append(names[i], entry.Name)
 		}
-		return out
+		return names
 	}
 	size := 0
 	for _, names := range groups(servers) {
@@ -156,9 +166,9 @@ func maximumPacketSize(c Config, hardware bool) (int, error) {
 	return size, nil
 }
 
-func appendDNSOptions(packet []byte, c Config, now time.Time, withdraw bool) ([]byte, error) {
+func appendDNSOptions(packet []byte, c Config, clock boottime.Clock, withdraw bool) ([]byte, error) {
 	servers, domains := dnsEntries(c)
-	for _, group := range groupDNS(servers, uint32(c.DNSSLifetimeSeconds), now, withdraw) {
+	for _, group := range groupDNS(servers, c.Authority.Seconds(uint32(c.DNSSLifetimeSeconds), clock), clock, withdraw) {
 		if len(group.Names) > 127 {
 			return nil, errors.New("too many RDNSS addresses")
 		}
@@ -174,7 +184,7 @@ func appendDNSOptions(packet []byte, c Config, now time.Time, withdraw bool) ([]
 		}
 		packet = append(packet, option...)
 	}
-	for _, group := range groupDNS(domains, uint32(c.DNSSLifetimeSeconds), now, withdraw) {
+	for _, group := range groupDNS(domains, c.Authority.Seconds(uint32(c.DNSSLifetimeSeconds), clock), clock, withdraw) {
 		option := make([]byte, 8)
 		option[0] = 31
 		binary.BigEndian.PutUint32(option[4:], group.Lifetime)

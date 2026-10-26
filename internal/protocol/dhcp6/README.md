@@ -30,10 +30,25 @@ renewal and server silence through Rebind/expiry/recovery. `make check-pd-ra`
 uses an independent wire server and captures generated LAN advertisements;
 IA_NA and IA_PD must share each stateful transaction and IAID.
 
-These are isolated amd64 Linux VM checks. DHCPv6 assignment and information
-snapshots still carry UTC deadlines; wall-clock correction, suspend and reboot
-qualification remain unfinished. Automatic RA-triggered DHCPv6, required-address
-readiness, complete legacy resource selection, VRF transport, graceful Release,
-and physical NIC qualification remain separate work. The former pinned PD
-state-machine wrapper, timer corrections and prototype journal reader were
-removed; there is no compatibility path.
+Assignment, T1/T2, information-refresh and retransmission timing use
+`CLOCK_BOOTTIME`. Snapshots preserve the originating boot and each original
+budget. UTC is not used to reconstruct a lease at an IPC receiver. Explicit
+infinity is scoped to the same boot. The network writer owns finite and
+infinite address lifetimes and preserves them across its journal restart.
+
+`make qemu-dhcp6-clock` runs the actual workers and an independent wire peer in
+a dedicated no-NIC guest. It steps UTC forward/backward 24 hours, verifies
+unchanged frozen-producer snapshots and LAN TCP/UDP, then pauses control and
+supervisor repair as well. The writer removes IA_NA/delegated addresses at their
+original deadline. RA router/PIO/RDNSS lifetimes are bounded by original PD
+authority and withdrawn; control unavailability may stop the RA worker early.
+Expired higher-sequence delivery cannot restore ownership; fresh acquisition
+recovers the same prepared RA identity. Only dedicated guest PID 1 can change
+the guest clock, and restores its original baseline on exit.
+
+These are isolated amd64 Linux VM checks. Actual suspend, reboot, automatic
+RA-triggered DHCPv6, required-address readiness, complete legacy resource
+selection, DAD-failure/Decline, VRF, graceful Release and physical NIC
+qualification remain separate work. The former pinned PD state-machine
+wrapper, timer corrections and prototype journal reader were removed; there is
+no compatibility path.

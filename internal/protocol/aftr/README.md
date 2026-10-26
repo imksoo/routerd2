@@ -132,20 +132,22 @@ sequence and the current input generation, so a delayed old reply cannot
 replace a newer selection. The coordinator validates the same generation again
 at the IPC boundary and checks current dependency facts during projection.
 
-Finite internal lifetimes use Linux `CLOCK_BOOTTIME`, including suspended time.
-Inputs are translated once into that clock; published times are absolute UTC.
-A fixed wall/boot-clock anchor keeps timestamps and deadlines exactly unchanged
-across ordinary status and retry publications, despite sampling jitter between
-the two clock reads. An offset change of at least one second replaces the
-anchor and rebases remaining lifetimes; it never renews the boot-clock TTL.
-`UpdatedAt` uses the same mapping as receipt/deadline timestamps. Publication
-remains capped by the coordinator's original UTC input bounds until it supplies
-refreshed facts. A forward clock step can therefore temporarily withdraw an
-endpoint instead of claiming a lifetime outside the current input's scope.
+DNS receipts and expiry use the originating Linux `CLOCK_BOOTTIME`, including
+suspended time. Inputs retain their actual deadline kind: operator UTC cutoffs
+or original boot budgets. `internal/lifetime.Deadline` permits only one kind per
+value, and scopes infinity to a boot when a protocol supplies it. DHCPv6 budgets
+are passed through unchanged; RA-derived inputs still retain the RA client's
+UTC deadline contract, whose publisher conversion remains separate work.
 
-There is no persistent DNS cache. A restarted worker publishes an unavailable
-initial state and resolves again from the coordinator's current input. No
-deadline from a previous process is reinterpreted as a new duration.
+The machine keeps one immutable input, the selected DNS answer and its original
+budget. It no longer translates a second input, maintains a wall/boot mapping,
+or rebases outputs on clock steps. `Snapshot.BootID`, `ObservedNanos` and each
+answer's `ReceivedNanos` identify their original clock; `UpdatedAt` is display
+metadata. Minimum-of-dependencies selection returns an original deadline.
+UTC steps cannot refresh a BOOTTIME answer or DHCPv6 input, while an explicit
+operator UTC cutoff is still enforced against UTC. Endpoint snapshots carry
+these same deadlines to the coordinator and B4 address writer. Autonomous
+DS-Lite link/route fencing while control is frozen remains unfinished.
 
 ## Migration from the pinned Linux implementation
 

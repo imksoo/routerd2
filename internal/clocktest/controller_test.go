@@ -15,8 +15,8 @@ func validGuest() Guest {
 	return Guest{PID: 1, Suite: SuiteName, Nonce: nonce, CommandLine: "console=ttyS0 routerd2.clock-test=" + nonce}
 }
 
-func TestClockControllerAcceptsOnlyTheTwoDedicatedClockFixtures(t *testing.T) {
-	for _, name := range []string{SuiteName, "daemon-vrrp-clock"} {
+func TestClockControllerAcceptsOnlyNamedDedicatedClockFixtures(t *testing.T) {
+	for _, name := range []string{SuiteName, VRRPSuiteName, DHCP6SuiteName} {
 		g := validGuest()
 		g.Suite = name
 		clock := boottime.Clock{BootID: "11111111-2222-4333-8444-555555555555", BoottimeNanoseconds: 1, WallTime: time.Now().UTC()}

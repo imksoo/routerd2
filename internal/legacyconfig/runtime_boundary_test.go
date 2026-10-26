@@ -18,7 +18,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/config"
+	"github.com/imksoo/routerd2/internal/lifetime"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/aftr"
@@ -229,7 +231,11 @@ func TestMigratedWANGraphThroughPublicRuntimeProjection(t *testing.T) {
 	if wan.IPv6AcceptRA == nil || *wan.IPv6AcceptRA != 0 || wan.IPv6Autoconf == nil || *wan.IPv6Autoconf || len(initial.DSLite) != 0 {
 		t.Fatal("native RA ownership was not acquired before tunnel activation")
 	}
-	now := time.Now().UTC()
+	clock, err := boottime.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := clock.WallTime
 	learned := raclient.Snapshot{Resource: raService.Name, Interface: "eth0", SourceAddress: "fe80::2", InterfaceID: "::2", Active: true, UpdatedAt: now,
 		Addresses:  []raclient.Address{{Address: "2001:db8:100::2/128", Prefix: "2001:db8:100::/64", PreferredUntil: now.Add(15 * time.Minute), ValidUntil: now.Add(20 * time.Minute)}},
 		Prefixes:   []raclient.Prefix{{Prefix: "2001:db8:100::/64", ValidUntil: now.Add(20 * time.Minute)}},
@@ -239,7 +245,7 @@ func TestMigratedWANGraphThroughPublicRuntimeProjection(t *testing.T) {
 	if err := observeMigration(ctx, runtime, migrationUpdate(t, runtime, raService, 1, learned)); err != nil {
 		t.Fatal(err)
 	}
-	pd := dhcp6config.Snapshot{Resource: pdService.Name, Interface: "eth0", IAID: 1, ClientDUID: "00030001020000000001", State: "bound", Prefixes: []dhcp6config.Prefix{{Prefix: "2001:db8:200::/56", PreferredUntil: now.Add(480 * time.Second), ValidUntil: now.Add(600 * time.Second)}}, AFTRName: "dhcp-aftr.example", DNSServers: []string{"2001:db8::55"}, InfoUpdatedAt: now, InformationRefreshSeconds: 120, InformationRefreshAt: now.Add(120 * time.Second)}
+	pd := dhcp6config.Snapshot{BootID: clock.BootID, ObservedNanos: uint64(clock.BoottimeNanoseconds), Resource: pdService.Name, Interface: "eth0", IAID: 1, ClientDUID: "00030001020000000001", State: "bound", Prefixes: []dhcp6config.Prefix{{Prefix: "2001:db8:200::/56", PreferredUntil: lifetime.After(clock, 480), ValidUntil: lifetime.After(clock, 600)}}, AFTRName: "dhcp-aftr.example", DNSServers: []string{"2001:db8::55"}, InfoReceivedNanos: uint64(clock.BoottimeNanoseconds), InformationRefreshSeconds: 120, InformationRefreshAt: lifetime.After(clock, 120)}
 	if err := observeMigration(ctx, runtime, migrationUpdate(t, runtime, pdService, 1, pd)); err != nil {
 		t.Fatal(err)
 	}
@@ -251,15 +257,15 @@ func TestMigratedWANGraphThroughPublicRuntimeProjection(t *testing.T) {
 	n.dadReady = true
 	n.mu.Unlock()
 	input, err = runtime.AFTRInput(ctx, dsService.ModuleName())
-	if err != nil || input.Source.Address != "2001:db8:100::2" || len(input.Candidates) != 4 || input.Candidates[0].Value != "dhcp-aftr.example" || !input.Candidates[0].ValidUntil.Equal(pd.InformationRefreshAt) {
+	if err != nil || input.Source.Address != "2001:db8:100::2" || len(input.Candidates) != 4 || input.Candidates[0].Value != "dhcp-aftr.example" || input.Candidates[0].ValidUntil != pd.InformationRefreshAt {
 		t.Fatal("typed source or supplementary-information candidate was not projected", input, err)
 	}
-	if len(input.Resolvers) != 3 || input.Resolvers[0].Address != "2001:db8::53" || !input.Resolvers[0].ValidUntil.IsZero() || input.Resolvers[1].Address != "2001:db8::55" || !input.Resolvers[1].ValidUntil.Equal(pd.InformationRefreshAt) || input.Resolvers[2].Address != "2001:db8::54" || !input.Resolvers[2].ValidUntil.Equal(learned.DNSServers[0].ValidUntil) {
+	if len(input.Resolvers) != 3 || input.Resolvers[0].Address != "2001:db8::53" || input.Resolvers[0].ValidUntil != (lifetime.Deadline{}) || input.Resolvers[1].Address != "2001:db8::55" || input.Resolvers[1].ValidUntil != pd.InformationRefreshAt || input.Resolvers[2].Address != "2001:db8::54" || !input.Resolvers[2].ValidUntil.UTC.Equal(learned.DNSServers[0].ValidUntil) {
 		t.Fatal("configured/PD/RA resolver order or absolute lifetimes changed", input.Resolvers)
 	}
 	projected := n.state()
 	lan := migrationInterface(t, projected, "eth1")
-	if option, ok := lan.AddressOptions["2001:db8:200:10::1/64"]; !ok || !option.ValidUntil.Equal(pd.Prefixes[0].ValidUntil) {
+	if option, ok := lan.AddressOptions["2001:db8:200:10::1/64"]; !ok || option.BootLifetime.ValidNanos != pd.Prefixes[0].ValidUntil.Nanos {
 		t.Fatal("hexadecimal delegation or PD expiry was lost at runtime", lan)
 	}
 	var raRoute network.Route
@@ -271,11 +277,15 @@ func TestMigratedWANGraphThroughPublicRuntimeProjection(t *testing.T) {
 	if raRoute.Gateway != "fe80::1" || raRoute.Table != 254 || raRoute.Metric != 200 || !raRoute.ValidUntil.Equal(learned.Routes[0].ValidUntil) {
 		t.Fatal("explicit native RA routing policy failed projection", raRoute)
 	}
-	received := time.Now().UTC()
-	answerExpiry := received.Add(time.Minute)
-	resolved := aftr.Snapshot{Resource: dsService.Name, Interface: "eth0", ConfigDigest: input.ConfigDigest, Generation: input.Generation, Active: true, Available: true,
+	receipt, err := boottime.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	received := receipt.WallTime
+	answerExpiry := lifetime.After(receipt, 60)
+	resolved := aftr.Snapshot{BootID: receipt.BootID, ObservedNanos: uint64(receipt.BoottimeNanoseconds), Resource: dsService.Name, Interface: "eth0", ConfigDigest: input.ConfigDigest, Generation: input.Generation, Active: true, Available: true,
 		Local: input.Source.Address, Remote: "2001:db8:ffff::10", CandidateIndex: 0, ResolverIndex: 1, UpdatedAt: received, ValidUntil: answerExpiry,
-		Answers: []aftr.Answer{{Address: "2001:db8:ffff::10", TTL: 60, ReceivedAt: received, ValidUntil: answerExpiry}},
+		Answers: []aftr.Answer{{Address: "2001:db8:ffff::10", TTL: 60, ReceivedNanos: uint64(receipt.BoottimeNanoseconds), ValidUntil: answerExpiry}},
 	}
 	if err := observeMigration(ctx, runtime, migrationUpdate(t, runtime, dsService, 1, resolved)); err != nil {
 		t.Fatal(err)
@@ -285,7 +295,7 @@ func TestMigratedWANGraphThroughPublicRuntimeProjection(t *testing.T) {
 		t.Fatal("resolved native tunnel differs from migrated intent", projected.DSLite)
 	}
 	b4 := migrationInterface(t, projected, "ds0")
-	if options := b4.AddressOptions["192.0.0.2/32"]; options.Peer != "192.0.0.1/32" || !options.ValidUntil.Equal(answerExpiry) {
+	if options := b4.AddressOptions["192.0.0.2/32"]; options.Peer != "192.0.0.1/32" || options.BootLifetime.ValidNanos != answerExpiry.Nanos {
 		t.Fatal("B4 peer or endpoint expiry lost at native projection", b4)
 	}
 	var b4Route network.Route
@@ -299,7 +309,7 @@ func TestMigratedWANGraphThroughPublicRuntimeProjection(t *testing.T) {
 	}
 	// A newly stale information grant invalidates the original AFTR generation
 	// immediately, even though its earlier DNS answer has not yet expired.
-	pd.InformationRefreshAt = now.Add(-time.Second)
+	pd.InformationRefreshAt = lifetime.After(clock, 0)
 	if err := observeMigration(ctx, runtime, migrationUpdate(t, runtime, pdService, 2, pd)); err != nil {
 		t.Fatal(err)
 	}

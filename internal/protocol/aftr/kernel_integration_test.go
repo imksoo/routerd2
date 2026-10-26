@@ -18,6 +18,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/lifetime"
 	"github.com/miekg/dns"
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netns"
@@ -248,11 +250,15 @@ func nativeAFTR(t *testing.T) {
 		}
 	}
 	mode.Store(0)
-	in := liveInput()
+	in := liveInput(t)
 	in.Interface = "awan"
 	in.Resolvers = []Resolver{server}
-	in.Source.PreferredUntil = time.Now().UTC().Add(15 * time.Second)
-	in.Source.ValidUntil = time.Now().UTC().Add(20 * time.Second)
+	clock, err := boottime.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	in.Source.PreferredUntil = lifetime.After(clock, 15)
+	in.Source.ValidUntil = lifetime.After(clock, 20)
 	updates := make(chan Input, 4)
 	snapshots := make(chan Snapshot, 64)
 	done, finished := make(chan error, 1), make(chan struct{})
@@ -295,12 +301,12 @@ func nativeAFTR(t *testing.T) {
 		t.Fatal("ready invented an unresolved endpoint")
 	}
 	first := wait(func(s Snapshot) bool { return s.Available })
-	if first.Remote != "2001:db8:ffff::2" || first.ResolverIndex != 0 || len(first.Answers) != 2 || first.ValidUntil.Sub(first.Answers[0].ReceivedAt) > 4*time.Second || udpQueries.Load() < 1 || tcpQueries.Load() < 1 {
+	if first.Remote != "2001:db8:ffff::2" || first.ResolverIndex != 0 || len(first.Answers) != 2 || first.ValidUntil.Nanos-first.Answers[0].ReceivedNanos > uint64(4*time.Second) || udpQueries.Load() < 1 || tcpQueries.Load() < 1 {
 		t.Fatalf("native UDP/TCP/CNAME selection failed: %+v", first)
 	}
 	mode.Store(4)
 	failed := wait(func(s Snapshot) bool { return s.Failures > 0 })
-	if !failed.Available || failed.LastError == "" || failed.ValidUntil.Sub(first.ValidUntil) > 10*time.Millisecond {
+	if !failed.Available || failed.LastError == "" || failed.ValidUntil != first.ValidUntil {
 		t.Fatal("transient DNS failure lost or extended the bounded last-good endpoint")
 	}
 	wait(func(s Snapshot) bool { return !s.Available && s.Failures > 0 })
@@ -309,7 +315,11 @@ func nativeAFTR(t *testing.T) {
 	next.UpdatedAt = time.Now().UTC()
 	next.Candidates = []Candidate{{Value: "2001:db8:ffff::3", Origin: "configured"}}
 	next.Resolvers = nil
-	next.Source.PreferredUntil = time.Now().UTC().Add(500 * time.Millisecond)
+	clock, err = boottime.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	next.Source.PreferredUntil = lifetime.Deadline{BootID: clock.BootID, Nanos: uint64(clock.BoottimeNanoseconds) + uint64(500*time.Millisecond)}
 	inputs[2] = next
 	updates <- next
 	literal := wait(func(s Snapshot) bool { return s.Generation == 2 && s.Available })

@@ -641,7 +641,14 @@ network writerへの/128投影を持つ。PD専用の外部state machine・補�
 独立dnsmasqとの実daemon試験で取得・DNS/search・DAD後のsource付きTCP/UDP・SIGKILL後の再取得・
 実Renew/Reply・サーバ停止中のRenew/Rebind・期限切れ撤去・復旧を確認した。
 `make check-dhcp6`で再実行できる。required/observe-only・RA trigger・resolver効果・DAD失敗・
-UTC補正/suspend・graceful Release・VRF・全link option/lifecycle・WAN選択は残り、NET-05全体は未完了。
+suspend/reboot・graceful Release・VRF・全link option/lifecycle・WAN選択は残り、NET-05全体は未完了。
+DHCPv6の割当・情報・T1/T2・再送は元のBOOTTIMEへ変更し、controlの受信側grantを削除した。
+RAのrouter/PIO/DNSとAFTRまで元の期限を渡し、AFTRの二重input・clock anchor・再base・JSON identityを削除した。
+`make qemu-dhcp6-clock`で実UTC±24時間、凍結producerの元通知不変、LAN TCP/UDP、
+control/supervisor停止中のwriterによるIA_NA/LAN address撤去、RAの期限制限・撤退、
+期限切れ通知の再送で復活しないこと、fresh workerでの再取得を確認した。
+control停止時にRAは早期撤退し得る。DS-Lite link/route自体のcontrol非依存fencingと
+RA client自身のUTC契約はまだ残る。
 
 **受入条件**
 
@@ -733,7 +740,7 @@ learned route先の利用者TCP/UDPも通信し、撤去中の接続拒否と復
 明示VRFではmultihop socketをVRF master、single-hopをmember interfaceへ束縛する。
 source domainとBGP FIB tableも検証する。同じendpointを持つ二つのVRFとdefault domainで
 実daemonを動かし、独立TCP/UDP・片側UDP障害・worker交替・main tableへの流出防止を確認した。
-single-hop VRFも実peerと障害・復旧を確認した。現在のcompiler contractはnative-13。
+single-hop VRFも実peerと障害・復旧を確認した。現在のcompiler contractはnative-14。
 IPv4/IPv6とも同じendpointを二つのVRFとdefault domainで同時使用し、BFD/BGPと三経路の
 TCP/UDPを確認した。defaultとVRFのUDP bind競合は受信socketだけの`SO_REUSEADDR`で修正した。
 domain/sourceの既存claimで二重ownerを拒否し、TX port専有と`SO_REUSEPORT`不使用を維持する。

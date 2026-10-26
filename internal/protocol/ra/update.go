@@ -7,7 +7,9 @@ import (
 	"net"
 	"reflect"
 	"sort"
-	"time"
+
+	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/lifetime"
 )
 
 // Three advertisements reduce a single lost multicast's impact. The outer loop
@@ -66,19 +68,19 @@ func (w withdrawals) sent() {
 	}
 }
 
-func equivalentAt(a, b Config, now time.Time) bool {
+func equivalentAt(a, b Config, clock boottime.Clock) bool {
 	a, b = normalized(a), normalized(b)
 	for _, c := range []*Config{&a, &b} {
 		for i := range c.Prefixes {
 			p := &c.Prefixes[i]
-			p.ValidLifetimeSeconds = lifetime(p.ValidLifetimeSeconds, p.ValidUntil, now)
-			p.PreferredLifetimeSeconds = lifetime(p.PreferredLifetimeSeconds, p.PreferredUntil, now)
+			p.ValidLifetimeSeconds = p.ValidUntil.Seconds(p.ValidLifetimeSeconds, clock)
+			p.PreferredLifetimeSeconds = p.PreferredUntil.Seconds(p.PreferredLifetimeSeconds, clock)
 		}
 	}
 	return reflect.DeepEqual(a, b)
 }
 
-func planUpdate(current, candidate Config, pending withdrawals, hardware net.HardwareAddr, mtu int, now time.Time) (Config, withdrawals, bool, error) {
+func planUpdate(current, candidate Config, pending withdrawals, hardware net.HardwareAddr, mtu int, clock boottime.Clock) (Config, withdrawals, bool, error) {
 	candidate = normalized(candidate)
 	if err := Validate(candidate); err != nil {
 		return current, pending, false, err
@@ -89,7 +91,7 @@ func planUpdate(current, candidate Config, pending withdrawals, hardware net.Har
 	if candidate.MTU > mtu {
 		return current, pending, false, errors.New("advertised RA MTU exceeds interface MTU")
 	}
-	if equivalentAt(current, candidate, now) {
+	if equivalentAt(current, candidate, clock) {
 		return current, pending, false, nil
 	}
 	updated := pending.clone()
@@ -101,7 +103,7 @@ func planUpdate(current, candidate Config, pending withdrawals, hardware net.Har
 	for _, p := range current.Prefixes {
 		if !nextPrefixes[p.Prefix] {
 			p.ValidLifetimeSeconds, p.PreferredLifetimeSeconds = 0, 0
-			p.ValidUntil, p.PreferredUntil = time.Time{}, time.Time{}
+			p.ValidUntil, p.PreferredUntil = lifetime.Deadline{}, lifetime.Deadline{}
 			updated.Prefixes[p.Prefix] = withdrawnPrefix{Prefix: p, Remaining: withdrawalAdvertisements}
 		}
 	}
@@ -142,12 +144,12 @@ func planUpdate(current, candidate Config, pending withdrawals, hardware net.Har
 	return candidate, updated, true, nil
 }
 
-func encodeWithWithdrawals(cfg Config, pending withdrawals, hardware net.HardwareAddr, now time.Time, stop bool) ([]byte, error) {
+func encodeWithWithdrawals(cfg Config, pending withdrawals, hardware net.HardwareAddr, clock boottime.Clock, stop bool) ([]byte, error) {
 	cfg = normalized(cfg)
 	for _, name := range pending.prefixNames() {
 		cfg.Prefixes = append(cfg.Prefixes, pending.Prefixes[name].Prefix)
 	}
-	payload, err := encode(cfg, hardware, now, stop)
+	payload, err := encode(cfg, hardware, clock, stop)
 	if err != nil {
 		return nil, err
 	}
@@ -161,7 +163,7 @@ func encodeWithWithdrawals(cfg Config, pending withdrawals, hardware net.Hardwar
 	sort.Strings(removed.RDNSS)
 	sort.Strings(removed.DNSSL)
 	if len(removed.RDNSS)+len(removed.DNSSL) > 0 {
-		extra, err := encode(removed, nil, now, true)
+		extra, err := encode(removed, nil, clock, true)
 		if err != nil {
 			return nil, err
 		}
