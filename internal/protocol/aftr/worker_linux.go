@@ -17,9 +17,9 @@ import (
 
 type lookupFunc func(context.Context, Config, Input) (resolution, error)
 type lookupResult struct {
-	generation, sequence uint64
-	value                resolution
-	err                  error
+	sequence uint64
+	value    resolution
+	err      error
 }
 
 // Run consumes complete compiler inputs, not kernel state. ready means the
@@ -129,7 +129,7 @@ func run(ctx context.Context, c Config, initial Input, updates <-chan Input, eff
 				defer workers.Done()
 				value, err := lookup(queryCtx, c, input)
 				select {
-				case results <- lookupResult{generation: input.Generation, sequence: seq, value: value, err: err}:
+				case results <- lookupResult{sequence: seq, value: value, err: err}:
 				case <-queryCtx.Done():
 				}
 			}()
@@ -157,7 +157,7 @@ func run(ctx context.Context, c Config, initial Input, updates <-chan Input, eff
 				cancel()
 			}
 		case r := <-results:
-			if r.generation != m.input.Generation || r.sequence != sequence {
+			if r.sequence != sequence {
 				continue
 			}
 			cancel()

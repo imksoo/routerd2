@@ -59,7 +59,8 @@ type Resolver struct {
 }
 
 // Input is one complete, compiler-authorized dependency snapshot. Generation
-// increases only when its contents change; repeating an identical input is safe.
+// increases when endpoint dependencies change. Renewed lifetimes keep the same
+// generation and update the budget without changing the DNS question.
 // The selected Source must already be installed, preferred, non-tentative and
 // DAD-usable. Empty Source/Candidates/Resolvers express waiting for dependencies.
 // Zero deadlines are explicit infinite/static lifetimes, never a TTL default.
@@ -219,7 +220,9 @@ func ValidateInput(c Config, in Input) error {
 	return nil
 }
 
-// ValidateSnapshot proves scope against the exact current input generation.
+// ValidateSnapshot checks endpoint identity and the original DNS answer budget.
+// Consumers intersect its deadline with current source/candidate/resolver budgets;
+// those can be renewed or shortened while this snapshot is being delivered.
 // It cannot establish authenticity of DNS itself; the transport checks source,
 // ID, question and chain integrity before creating these bounded facts.
 func ValidateSnapshot(c Config, in Input, s Snapshot) error {
@@ -236,14 +239,14 @@ func ValidateSnapshot(c Config, in Input, s Snapshot) error {
 		return nil
 	}
 	clock := boottime.Clock{BootID: s.BootID, BoottimeNanoseconds: int64(s.ObservedNanos), WallTime: s.UpdatedAt}
-	if !s.Active || !in.Active || s.Local != in.Source.Address || !global(s.Local) || !global(s.Remote) || !in.Source.PreferredUntil.Live(clock) || !in.Source.ValidUntil.Live(clock) || s.ValidUntil.Validate() != nil || !s.ValidUntil.Live(clock) || !bounded(s.ValidUntil, lifetime.Minimum(clock, in.Source.PreferredUntil, in.Source.ValidUntil), clock) {
+	if !s.Active || !in.Active || s.Local != in.Source.Address || !global(s.Local) || !global(s.Remote) || !in.Source.PreferredUntil.Live(clock) || !in.Source.ValidUntil.Live(clock) || s.ValidUntil.Validate() != nil || !s.ValidUntil.Live(clock) {
 		return errors.New("AFTR snapshot uses an unavailable source or outlives it")
 	}
 	if s.CandidateIndex < 0 || s.CandidateIndex >= len(in.Candidates) {
 		return errors.New("AFTR snapshot candidate is outside current input")
 	}
 	candidate := in.Candidates[s.CandidateIndex]
-	if !candidate.ValidUntil.Live(clock) || !bounded(s.ValidUntil, candidate.ValidUntil, clock) {
+	if !candidate.ValidUntil.Live(clock) {
 		return errors.New("AFTR snapshot outlives its candidate")
 	}
 	if ip, err := netip.ParseAddr(candidate.Value); err == nil {
@@ -256,7 +259,7 @@ func ValidateSnapshot(c Config, in Input, s Snapshot) error {
 		return errors.New("DNS AFTR snapshot lacks scoped resolver/finite answer lifetime")
 	}
 	resolver := in.Resolvers[s.ResolverIndex]
-	if !resolver.ValidUntil.Live(clock) || !bounded(s.ValidUntil, resolver.ValidUntil, clock) {
+	if !resolver.ValidUntil.Live(clock) {
 		return errors.New("AFTR snapshot outlives its resolver source")
 	}
 	seen, selected := map[string]bool{}, false

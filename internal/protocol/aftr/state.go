@@ -36,9 +36,10 @@ func cloneInput(in Input) Input {
 	return in
 }
 
-// Expiry changes do not change the DNS question or discard a still-live answer.
-func sameQuery(a, b Input) bool {
-	if a.Active != b.Active || a.Source.Address != b.Source.Address || len(a.Candidates) != len(b.Candidates) || len(a.Resolvers) != len(b.Resolvers) {
+// SameQuery compares endpoint dependencies, independently of renewed lifetimes.
+// A lifetime update must not interrupt a still-usable tunnel or DNS exchange.
+func SameQuery(a, b Input) bool {
+	if a.Resource != b.Resource || a.Interface != b.Interface || a.ConfigDigest != b.ConfigDigest || a.Active != b.Active || a.Source.Address != b.Source.Address || len(a.Candidates) != len(b.Candidates) || len(a.Resolvers) != len(b.Resolvers) {
 		return false
 	}
 	for i, c := range a.Candidates {
@@ -60,19 +61,20 @@ func (m *machine) apply(in Input, clock boottime.Clock) (bool, error) {
 	if in.Generation < m.input.Generation {
 		return false, errors.New("stale AFTR input generation")
 	}
-	if in.Generation == m.input.Generation {
-		if !reflect.DeepEqual(in, m.input) {
-			return false, errors.New("AFTR input changed without advancing generation")
-		}
+	queryChanged := !SameQuery(in, m.input)
+	if in.Generation == m.input.Generation && queryChanged {
+		return false, errors.New("AFTR query changed without advancing generation")
+	}
+	if reflect.DeepEqual(in, m.input) {
 		return false, nil
 	}
-	if !sameQuery(in, m.input) {
+	if queryChanged {
 		m.cache = nil
+		m.nextAttempt = uint64(clock.BoottimeNanoseconds)
+		m.lastError = ""
 	}
 	m.input = cloneInput(in)
-	m.nextAttempt = uint64(clock.BoottimeNanoseconds)
-	m.lastError = ""
-	return true, nil
+	return queryChanged, nil
 }
 func (m *machine) dependencyError(clock boottime.Clock) string {
 	in := m.input
@@ -188,6 +190,18 @@ func (m *machine) result(value resolution, err error, clock boottime.Clock) {
 	if err == nil {
 		before := m.cache
 		value.answers = slices.Clone(value.answers)
+		// DNS servers rotate RRset order. Keep the working endpoint when
+		// the renewed answer still contains it; a refresh is not failover.
+		if before != nil && (m.config.Selection == "" || m.config.Selection == "first") && before.candidate == value.candidate && before.resolver == value.resolver {
+			if current, err := chooseAnswer(m.config, liveAnswers(before.answers, clock)); err == nil {
+				for i, answer := range value.answers {
+					if answer.Address == current.Address {
+						value.answers[0], value.answers[i] = value.answers[i], value.answers[0]
+						break
+					}
+				}
+			}
+		}
 		m.cache = &value
 		if !m.snapshot(clock).Available {
 			err = errors.New("AFTR result expired before it could be applied")

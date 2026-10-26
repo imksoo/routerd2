@@ -91,22 +91,30 @@ RA送信はbridge port変更後の現在のMACを広告する。起動時MACの�
 HTTPSとUDP DNSの実Internet通信を確認した。
 
 既存routerdの設定で用いるAFTR名を実上流DNSで解決し、実AFTR経由のLAN HTTPS・UDP DNSと
-IPv4-in-IPv6の往復もcaptureした。しかし同一TCP接続の継続は失敗し、通常RA更新の前後で
-DS-Lite linkが再生成された。原因修正と再受入が必要であり、実用可能とは判断しない。
+IPv4-in-IPv6の往復もcaptureした。通常RA更新の前後でDS-Lite linkが再生成され、
+同一TCP接続が数秒で切断する不具合を再現・修正した。有効期限だけの更新は問い合わせ世代と
+再試行時刻を変えず、投影時に現在の期限を交差させる。DNS RRsetの順序変更でも現在のAFTRが
+新しい応答に残っていれば維持する。古い問い合わせの結果はsequenceで除外する。
+最終3バイナリー（`ntt-aftr`）の実回線再接続で、同じTCP source portのHTTPS 100回と
+UDP DNSが100秒継続し、110秒の監視でtunnel indexも不変だった。RA・DNS再問い合わせ・
+IPv4-in-IPv6往復をcaptureで確認した。IPv6 LAN HTTPS/UDP DNSも成功した。
+独立RA/DNS/Linux AFTRとの元期限での撤去・再取得・worker交替も既存の実daemon試験が通った。
+全実装計画・実機受入は未完了であり、製品全体の利用可能判定には使わない。
 PDのT1は7200秒であり、今回の実回線確認は取得まで。実回線Renew/Rebind/期限切れ/Releaseは未確認。
 実装の再利用・新規置換と残る比較対象は[routerd-reuse-review.md](routerd-reuse-review.md)を参照。
 一次ソース照合を全モジュールの機能受入完了とは数えない。
 
-今回の3修正のsourceで`make check`（Go/Python 33件・Race Detector・vet）、
-amd64/arm64の6静的ELF build、署名bundle/catalog/publisher検査は成功した。
-ローカル出力は`dist/ntt-startup-check-build.log`、`dist/ntt-startup-bundle.log`、
-`dist/live-cold-results.log`、`dist/live-dslite-continuity.log`。後者は失敗結果である。
+最終AFTR修正のsourceで`make check`（Go/Python 33件・Race Detector・vet）、
+amd64/arm64の6静的ELF buildは成功した。直前のuplink/DAD修正では署名bundle検査も成功した。
+ローカル出力は`dist/ntt-aftr-check-build.log`、`dist/ntt-aftr-final-related.log`、
+`dist/live-aftr-final-results.log`、`dist/live-aftr-final-link.log`、
+`dist/ntt-aftr-ra/`、`dist/ntt-aftr-daemon/`。修正前の失敗は`dist/live-dslite-continuity.log`。
 過去の試験結果を維持する互換コードは残さない。
 
 ## 未完了と次の作業
 
 1. 全実装計画、全更新復旧経路、外部engine、配備先と対象実機の受入は未完了。
-   まず実回線で再現したDS-Lite継続通信の切断を修正する。旧routerdの各モジュールとの比較を続ける。
+   旧routerdの各モジュールとの比較を続け、任意optionの不良で有効な割当・経路まで捨てる受信処理を修正する。
    複数IA_NA/PDのDAD共存・Release・resource readiness/RA連携も未完了。
    NET-06はrelayのHA・動的VRF/interface変更の受入、DHCPv6 server、dynamic pool/options・DNS・sticky/lease importが残る。
    今回の試験成功を製品全体・実機利用可能の判定には使わない。

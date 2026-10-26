@@ -259,6 +259,12 @@ func TestAFTRFinitePeerAddressAndGatewayWithdrawTogether(t *testing.T) {
 	if options.Peer != "192.0.0.1/32" || !options.PreferredUntil.Equal(expiry) || !options.ValidUntil.Equal(expiry) {
 		t.Fatal("peer addressing changed the finite address lifetime", options)
 	}
+	shorter := now.Add(10 * time.Second)
+	doc.Network.Interfaces[0].AddressOptions["2001:db8:42::1/64"] = network.AddressOptions{PreferredUntil: shorter, ValidUntil: shorter}
+	p, err = projectNative(doc, "/run/routerd", "/var/lib/routerd", records, now, inputs)
+	if err != nil || len(p.network.Links) != 1 || !p.network.Links[0].Authority.UTC.Equal(shorter) {
+		t.Fatal("lifetime-only update interrupted the endpoint or failed to shorten its budget", p.network, err)
+	}
 	p, err = projectNative(doc, "/run/routerd", "/var/lib/routerd", records, expiry, inputs)
 	if err != nil || len(p.network.Links) != 0 || len(p.network.Routes) != 0 || len(p.network.Interfaces) != 1 || p.network.Interfaces[0].Name != "wan0" {
 		t.Fatal("source expiry retained peer address, tunnel or gateway route", p.network, err)

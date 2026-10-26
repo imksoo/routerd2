@@ -148,7 +148,7 @@ func sourceInstalled(in aftr.Input, observed network.SourceObservation) bool {
 	return err == nil && p.Addr().String() == in.Source.Address && address.Owned && address.PreferredLifetime > 0 && address.ValidLifetime > 0 && address.Flags&(unix.IFA_F_TENTATIVE|unix.IFA_F_DADFAILED|unix.IFA_F_DEPRECATED) == 0
 }
 
-// AFTRInput increments a dependency generation only on a content change. A
+// AFTRInput increments generation when endpoint dependencies change. A
 // poll cannot renew DHCP, RA or DNS lifetimes. DAD completion is observed by
 // the network worker, which is the only process allowed to mutate networking.
 func (r *Runtime) AFTRInput(ctx context.Context, name string) (aftr.Input, error) {
@@ -194,10 +194,13 @@ func (r *Runtime) AFTRInput(ctx context.Context, name string) (aftr.Input, error
 		if sameAFTRInput(previous, in) {
 			return previous, nil
 		}
-		if previous.Generation == ^uint64(0) {
-			return in, errors.New("AFTR dependency generation exhausted")
+		in.Generation = previous.Generation
+		if !aftr.SameQuery(previous, in) {
+			if previous.Generation == ^uint64(0) {
+				return in, errors.New("AFTR dependency generation exhausted")
+			}
+			in.Generation++
 		}
-		in.Generation = previous.Generation + 1
 	}
 	if r.aftrInputs == nil {
 		r.aftrInputs = map[string]aftr.Input{}
@@ -240,7 +243,7 @@ func projectDSLite(p *projection, doc config.Native, instances map[string]bindin
 		if input.Source.Address == "" {
 			continue
 		}
-		if !sameAFTRInput(input, current) {
+		if !aftr.SameQuery(input, current) {
 			continue
 		}
 		var snap aftr.Snapshot
@@ -255,13 +258,22 @@ func projectDSLite(p *projection, doc config.Native, instances map[string]bindin
 		if err := aftr.ValidateSnapshot(cfg, input, snap); err != nil {
 			return err
 		}
-		p.network.Links = append(p.network.Links, network.Link{Name: c.Tunnel, Kind: "ip6tnl", Parent: c.Interface, Local: snap.Local, Remote: snap.Remote, Authority: snap.ValidUntil})
+		// Use current source budgets immediately, including shortening, without
+		// waiting for the resolver to republish an unchanged DNS endpoint.
+		until := lifetime.Minimum(clock, snap.ValidUntil, current.Source.PreferredUntil, current.Source.ValidUntil, current.Candidates[snap.CandidateIndex].ValidUntil)
+		if snap.ResolverIndex >= 0 {
+			until = lifetime.Minimum(clock, until, current.Resolvers[snap.ResolverIndex].ValidUntil)
+		}
+		if !until.Live(clock) {
+			continue
+		}
+		p.network.Links = append(p.network.Links, network.Link{Name: c.Tunnel, Kind: "ip6tnl", Parent: c.Interface, Local: snap.Local, Remote: snap.Remote, Authority: until})
 		p.network.Interfaces = append(p.network.Interfaces, network.Interface{Name: c.Tunnel, MTU: c.MTU})
 		address := c.B4Address
 		if address == "" {
 			address = "192.0.0.2/32"
 		}
-		options := addressLifetimes(snap.ValidUntil, snap.ValidUntil)
+		options := addressLifetimes(until, until)
 		options.Peer = c.B4Peer
 		if err := addAddressWithOptions(&p.network, c.Tunnel, address, options); err != nil {
 			return err

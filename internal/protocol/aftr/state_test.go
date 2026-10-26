@@ -49,11 +49,11 @@ func TestInputRenewalFailureAndUTCStepsCannotRefreshDNS(t *testing.T) {
 	m.result(goodResult(clockForTest(0), 20), nil, clockForTest(0))
 	first := validView(t, m, clockForTest(0))
 	input := cloneInput(m.input)
-	input.Generation++
+	nextAttempt := m.nextAttempt
 	input.Source.PreferredUntil = lifetime.After(clockForTest(0), 500)
 	input.Source.ValidUntil = lifetime.After(clockForTest(0), 600)
-	if _, err := m.apply(input, clockForTest(5)); err != nil {
-		t.Fatal(err)
+	if changed, err := m.apply(input, clockForTest(5)); err != nil || changed || m.nextAttempt != nextAttempt {
+		t.Fatal("source lifetime renewal restarted DNS", changed, err, m.nextAttempt, nextAttempt)
 	}
 	m.result(resolution{}, errors.New("upstream unavailable"), clockForTest(6))
 	for _, offset := range []time.Duration{24 * time.Hour, -24 * time.Hour, 0} {
@@ -68,6 +68,21 @@ func TestInputRenewalFailureAndUTCStepsCannotRefreshDNS(t *testing.T) {
 		t.Fatal("expired DNS survived")
 	}
 }
+func TestDNSRefreshRetainsEndpointAcrossRoundRobinOrder(t *testing.T) {
+	m := testMachine(t)
+	first := goodResult(clockForTest(0), 60)
+	m.result(first, nil, clockForTest(0))
+	renewed := goodResult(clockForTest(5), 60)
+	other := renewed.answers[0]
+	other.Address = "2001:db8:ffff::2"
+	renewed.answers = append([]Answer{other}, renewed.answers...)
+	m.result(renewed, nil, clockForTest(5))
+	view := validView(t, m, clockForTest(5))
+	if !view.Available || view.Remote != first.answers[0].Address || view.Answers[0].ReceivedNanos != renewed.answers[1].ReceivedNanos {
+		t.Fatal("DNS RRset rotation replaced the working endpoint or lost the real renewal", view)
+	}
+}
+
 func TestEndpointUsesOriginalShortestDependency(t *testing.T) {
 	for _, which := range []string{"source", "candidate", "resolver"} {
 		t.Run(which, func(t *testing.T) {

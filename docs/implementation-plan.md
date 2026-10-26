@@ -651,7 +651,11 @@ suspend/reboot・graceful Release・VRF・全link option/lifecycle・WAN選択�
 LAN kernel SLAAC端末のIPv4 NAT/委譲IPv6 HTTPS・UDP DNSを確認した。
 実上流がUDP 49153から返すDHCPv6応答を捨てる独自制約、通常DAD待ちの欠落、
 bridge MAC変更後の古いSLLA広告を修正した。保存状態なしの起動でも全関連workerは第1世代でReady。
-実AFTR経由の単発TCP/UDPは通ったが、定期RA更新時のlink再生成でTCP継続に失敗し未受入。
+実AFTR経由で定期RA更新によるlink再生成とTCP切断を再現・修正した。
+問い合わせ世代をendpoint依存先の変更だけで進め、期限更新では再問い合わせしない。
+投影では現在のsource/DNS期限を直ちに交差させる。DNS順序変更では現在のAFTRを維持する。
+最終製品の同一TCP接続で100秒のHTTPS/UDP DNSが通り、110秒でtunnel indexも不変だった。
+独立RA/DNS/Linux AFTRとの期限切れ撤去・再取得・worker交替も通った。
 実回線T1=7200秒のRenew/Rebind/Releaseは未確認。ONU型番・直結配線・NICは未資格判定。
 [既存routerdとの比較](routerd-reuse-review.md)を各モジュールで継続する。
 

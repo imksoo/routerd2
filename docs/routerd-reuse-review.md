@@ -22,7 +22,7 @@
 | RA送信 | 旧dnsmasq側の処理を新規raw ICMPv6 engineへ置換 | link/MAC変化、RS応答、prefix/DNS期限、withdrawal。MAC変更時の誤広告を今回修正 |
 | DHCP server | 旧API型と変換を利用。旧dnsmasq engineの再利用ではない | 割当・再送・option・sticky・複数scope・DNS・journalを旧実運用と比較。dnsmasq採用も再評価する |
 | DHCP relay | 旧dnsmasqの動作を新規relayへ置換 | giaddr/option/fragment/VRF/再構成・HA。独立server試験を全機器の受入と扱わない |
-| DS-Lite/AFTR | 旧controller/host処理を新規resolverと通常のip6tnl所有権へ置換 | SelfAddressPolicy・DNS選択・endpoint維持。実回線の定期RA更新でtunnelが再生成され、TCP継続に失敗したため未受入 |
+| DS-Lite/AFTR | 旧controller/host処理を新規resolverと通常のip6tnl所有権へ置換 | SelfAddressPolicy・DNS選択・endpoint維持。実回線の定期RA更新によるtunnel再生成を修正し、同じTCPで100秒継続を確認。PD由来source・完全な選択は未完了 |
 | VRRP/HA | 旧keepalivedの選挙・VIP管理をnative VRRPとwriterへ置換 | 実keepalived等との相互接続、VMAC/ND、選挙、notify、tracking、accept/graceful、session継続。新規置換の妥当性を再評価する |
 | BFD | 旧FRR/bfddの処理をnative BFDへ置換 | startup/reset policy、認証、single/multihop/VRF、実peer・大規模動作。strict gatingは旧動作と同じではない |
 | link/address/route | 旧OS renderer/applyを新規netlink writerへ置換 | option・source選択・所有権・bridge/VRF再構成。wireの実績とは別にOS設定の意味を照合する |
@@ -46,6 +46,8 @@
   送信時のMACで広告するようにし、同じ実上流・LAN clientでIPv6通信の復旧を確認した。
 
 実回線のLAN IPv4/IPv6 HTTPS・UDP DNSと単発の実AFTR転送は確認した。
-DS-Liteで同じTCP接続を継続する試験は失敗している。DNSが返す複数AFTRの選択と、
-定期RAで更新されるauthorityをendpointの変更として扱う経路を次に修正する。
+DS-Liteでは通常RAの期限更新とDNS RRset順序変更でトンネルを壊す経路を修正した。
+最終バイナリーの実AFTR経由で同じTCP接続のHTTPS 100回・UDP DNSが100秒継続し、
+110秒の監視でtunnel indexは不変だった。旧PD由来source、長時間の回線更新、
+その他の置換による不必要な受信拒否は引き続き見直す。
 全モジュールの実機受入・旧動作との差分確認は未完了である。

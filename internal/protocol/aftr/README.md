@@ -27,7 +27,7 @@ The digest is excluded from `Config` JSON so it does not hash itself.
 | Input | Contract |
 | --- | --- |
 | Resource, interface, configuration digest | Must match the immutable worker instance exactly |
-| Generation | Nonzero and increasing when any input content changes; an identical repeat is allowed |
+| Generation | Nonzero and increasing when endpoint dependencies change; lifetime renewal keeps the generation and the active DNS question |
 | Active | False withdraws endpoint eligibility while the worker remains operational |
 | Source | One canonical global IPv6 address with absolute preferred and valid deadlines |
 | Candidates | Ordered configured or DHCPv6 AFTR names/literals, each with its own deadline; maximum four |
@@ -45,7 +45,12 @@ not by arbitrary file paths. A DHCPv6 AFTR name or DNS server is bounded by its
 information-refresh deadline and, for a stateful lease, lease expiry. RA-derived
 DNS and source addresses retain their independent advertised deadlines. The
 coordinator must also enforce producer ownership and revalidate current input
-when accepting and projecting a snapshot.
+when accepting and projecting a snapshot. Projection intersects the published
+endpoint deadline with the current source/candidate/resolver deadlines, so a
+shorter budget takes effect immediately without discarding a usable endpoint.
+A lifetime renewal does not start another DNS query. For the default `first`
+selection, a DNS refresh retains the working remote when it remains in the new
+answer set; rotating RRset order alone must not interrupt established flows.
 
 `Effects.Update` receives the entire `Snapshot`, including the exact input
 generation and digest, selected source/remote, candidate/resolver indexes,
