@@ -358,13 +358,13 @@ func independentPeerFixture(t *testing.T, family string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if duplicate, err := openTransport(cfg, clock); err == nil {
+	if duplicate, err := openTransport(t.Context(), cfg, clock); err == nil {
 		duplicate.Close()
 		t.Fatal("second owner claimed the same interface/family")
 	}
 	multihop := cfg
 	multihop.Multihop, multihop.Interface = true, ""
-	transportProbe, err := openTransport(multihop, clock)
+	transportProbe, err := openTransport(t.Context(), multihop, clock)
 	if err != nil {
 		t.Fatal("open multihop receive endpoint", err)
 	}
@@ -373,7 +373,7 @@ func independentPeerFixture(t *testing.T, family string) {
 			t.Error(err)
 		}
 	}()
-	duplicate, claimErr := openTransport(multihop, clock)
+	duplicate, claimErr := openTransport(t.Context(), multihop, clock)
 	if claimErr == nil {
 		duplicate.Close()
 		t.Fatal("address reuse admitted two multihop receivers in one domain")

@@ -35,7 +35,7 @@ func Run(ctx context.Context, cfg Config, effects Effects, ready func()) error {
 	if err != nil {
 		return err
 	}
-	device, err := openTransport(cfg, clock)
+	device, err := openTransport(ctx, cfg, clock)
 	if err != nil {
 		return fmt.Errorf("open BFD transport: %w", err)
 	}
@@ -102,8 +102,8 @@ func (w *worker) reject(peer int, err error) {
 }
 
 func (w *worker) accept(d datagram) (int, bool, bool) {
-	if d.invalid || d.hopLimit <= 0 || d.hopLimit > 255 || !w.config.Multihop && d.hopLimit != 255 || d.index <= 0 || d.destination != w.source || d.sourcePort < 49152 || d.source.Is4() != w.source.Is4() || d.source == w.source || d.received.BootID != w.clock.BootID || !validWall(d.received.WallTime) {
-		w.reject(-1, errors.New("BFD datagram has invalid interface, address, hop limit, port or receive clock"))
+	if d.invalid || d.hopLimit <= 0 || d.hopLimit > 255 || !w.config.Multihop && d.hopLimit != 255 || d.index <= 0 || d.destination != w.source || d.source.Is4() != w.source.Is4() || d.source == w.source || d.received.BootID != w.clock.BootID || !validWall(d.received.WallTime) {
+		w.reject(-1, errors.New("BFD datagram has invalid interface, address, hop limit or receive clock"))
 		return -1, false, false
 	}
 	if _, ok := unicast(d.source.String()); !ok {

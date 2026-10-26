@@ -656,7 +656,10 @@ bridge MAC変更後の古いSLLA広告を修正した。保存状態なしの起
 投影では現在のsource/DNS期限を直ちに交差させる。DNS順序変更では現在のAFTRを維持する。
 最終製品の同一TCP接続で100秒のHTTPS/UDP DNSが通り、110秒でtunnel indexも不変だった。
 独立RA/DNS/Linux AFTRとの期限切れ撤去・再取得・worker交替も通った。
-実回線T1=7200秒のRenew/Rebind/Releaseは未確認。ONU型番・直結配線・NICは未資格判定。
+製品`ntt-aftr`では実回線T1=7200秒の自然なRenew/Reply（上流source 49153）とPD期限更新を確認した。
+同じDS-Lite TCP接続とUDP DNSが100分継続し、更新後のLAN IPv4/IPv6 HTTPSも通った。
+tunnel indexは不変、PD workerはgeneration 1だった。Rebind/失効/Releaseの実回線受入、
+ONU型番・直結配線・NIC資格判定、以降の修正を含む最新版の実回線受入は未完了。
 [既存routerdとの比較](routerd-reuse-review.md)を各モジュールで継続する。
 受信IAIDはdecoderで選択し、不良・無関係IAや独立optionで有効な割当全体を捨てない。
 リンクローカルDNS/SNTPを許可し、独立dnsmasqと通常DAD・scope付きDNS実問い合わせ・
@@ -816,6 +819,12 @@ BGPの補助status/history書込み失敗はprotocol停止と結合しない。
 実filesystem失敗下のsession/FIB更新・撤去と、supervisor/control/BGP停止中に
 再帰先の静的IPv6経路の元期限でwriterが撤去する実daemon試験が通った。
 `make check-bgp`で再実行できる。address/linkの前提期限・対象機器の受入は別である。
+
+2026-10-26のNET-07実相互接続では、独立FRR 8.4.4 `zebra`/`bfdd`/`bgpd`と
+製品workerで通常DAD・/32と/128・IPv4/IPv6 learned FIB・LAN TCP/UDPが通った。
+片系BFD遮断・元受信期限切れ・worker交替と復旧を確認し、無関係なIPv6通信を維持した。
+subnet・cached MAC・受信high-portの不要な制約を削除した。全profile・VRF・規模の受入ではない。
+詳細と残作業は[引き継ぎ](pve-codex-handoff.md)を参照する。
 
 #### NET-08 — WireGuard の動的 peer・endpoint・identity
 

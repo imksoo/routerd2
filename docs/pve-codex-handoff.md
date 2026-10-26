@@ -169,7 +169,12 @@ Keaのローカル出力は`dist/kea-partial-peer-4.log`、private setup/capture
 `dist/kea-partial-location.json`。最終3バイナリーのhashは配備先とbuild出力で一致した。
 `make check`・全体Race Detector・vet・6静的ELF build、追加の小さな部分Reply再発防止試験と
 関連Race Detectorも通った（`dist/dhcp6-partial-check-build.log`、`dist/dhcp6-partial-regression.log`）。
-実回線の長時間TCP/UDPと元T1でのPD更新は継続中で、まだ成功と数えない。
+実回線では元T1=7200秒の自然なRenewと上流source 49153からのReplyをcaptureし、
+PD期限の更新を確認した。同じTCP接続（LAN側SYNは1組）とUDP DNSが100分継続した。
+更新後のLAN IPv4/IPv6 HTTPSも301、PD workerはgeneration 1、tunnel indexは不変だった。
+出力`dist/live-long-continuity.log`、更新snapshot`dist/live-after-natural-renew-services.json`。
+private capture場所は`dist/live-uplink-location.json`。所有者が製品・capture・隔離namespaceを停止済み。
+停止captureにReleaseはなく、実回線Rebind/期限切れ/Releaseは受入済みとしない。
 実行中の回線バイナリーは`ntt-aftr`であり、以降の修正まで実回線受入済みとはしない。
 
 DHCPv4受信も旧`LeaseFromACK`の実装と照合し、任意T1/T2・MTU・broadcastの不良だけで
@@ -182,6 +187,33 @@ message全体を捨てる制約と、DNS/NTP/router listの端数だけで割当
 `make check`・全体Race Detector・vet・6静的ELF buildも成功した
 （`dist/dhcp4-optional-check-build.log`）。
 
+## 独立FRRとのBFD/BGP相互接続
+
+製品`bfd-frr`とFRR 8.4.4の`zebra`/`bfdd`を別namespaceで起動した。
+/32・/128のsourceと明示直結host route、通常DADを使う。初回接続でsubnet制約による
+拒否とDAD中のworker再起動を再現した。DADを起動contextで待ち、不要なprefix・MAC保持と
+受信元high-port制約を削除した。送信は規定high-portを維持し、受信のpeer/discriminator・
+interface・TTL/Hop Limit 255検査は残す。
+修正後は両系統generation 1でUP、Down transitionとrejectは0だった。
+FRRの実control payloadのUDP source portだけをScapyで3784へ変え、元packetを隔離INPUTで
+落としてもUPを維持した。出力`dist/frr-bfd-final-peer.log`、private capture場所は
+`dist/frr-bfd-location.json`。FRRのdistributed-dataplane設定とstatus大文字小文字を
+誤った初期runnerのtimeoutは、製品の結果には数えない。
+
+別の実FRR `bgpd`/`bfdd`と製品BGP/BFD・network worker、独立LAN clientで、
+IPv4/IPv6経路学習・kernel FIB・転送TCP HTTP/UDP echoが通った。
+IPv4だけのBFD遮断でIPv4 routeを撤去し、IPv6 TCP/UDPは継続した。遮断解除で復旧した。
+BFD4のSIGSTOPでは元受信期限で経路を撤去し、SIGCONTで復旧した。
+SIGKILL後の新workerでも復旧し、無関係なBFD6はgeneration 1を維持した。
+最初の再実行は新worker起動直後の旧routeを復旧と誤認し、TCPの直後の撤去でUDPが失敗した。
+captureの到達不能と世代を照合し、新BFD世代に結び付くBGP再学習とFIBを待つようrunnerを直した。
+製品の検出期限・通信deadlineは緩めていない。
+出力`dist/frr-bgp-fresh-peer.log`、capture場所は`dist/frr-bgp-location.json`。
+`make check-bfd`の既存6件も成功したが、手書きwire peerによるkernel/失敗試験であり、
+独立FRR相互接続とは区別する。出力`dist/bfd-frr-daemon-related.log`。
+`make check`・Race Detector・vet・amd64/arm64の6静的ELF buildも成功した
+（`dist/bfd-frr-final-check-build.log`）。arm64実行、認証・全profile・VRF/規模・物理機器は未完了。
+
 ## 未完了と次の作業
 
 1. 全実装計画、全更新復旧経路、外部engine、配備先と対象実機の受入は未完了。
@@ -190,7 +222,7 @@ message全体を捨てる制約と、DNS/NTP/router listの端数だけで割当
    NET-06はrelayのHA・動的VRF/interface変更の受入、DHCPv6 server、dynamic pool/options・DNS・sticky/lease importが残る。
    今回の試験成功を製品全体・実機利用可能の判定には使わない。
 2. NET-07の旧resource/profile、動的source・VRF経路変更、大規模RIBを実装・受入する。
-   IPv4/IPv6のmultihop BFD/BGPは実通信したが、自動link-local DAD起動、IPv6 single-hop VRF・link-local next-hop・ECMP等は未受入。
+   IPv4/IPv6のmultihop BFD/BGPは実通信したが、routed/VRFでの通常DAD起動、IPv6 single-hop VRF・link-local next-hop・ECMP等は未受入。
    HA-01の残るresource種別・phase tracking、外部secret参照、peer-aware移行、cluster、
    二native nodeの追加identity・RA・DHCP/PD/NAT session継続を実装・受入する。
 3. 過去のBFD再接続timeoutの失敗request、IPv6 multicast未受信、初回IPv6 VIP TCP/DAD timeoutは

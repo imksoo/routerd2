@@ -31,6 +31,12 @@ source address. Separate IPv4/IPv6 workers may use one interface; two workers
 of the same family on that interface are rejected. The runtime also claims
 socket/discriminator ownership within its network namespace.
 
+Startup waits for normal DAD on the configured IPv6 source. Single-hop uses the
+actual direct kernel route; /32 and /128 addresses with explicit peer host routes
+are supported. MAC and source prefix length are not UDP session identities.
+The sender uses the required high source port; reception identifies the peer and
+discriminator without imposing that source-port convention on incoming packets.
+
 `point_to_point: true` permits the RFC's point-to-point source-address behavior
 and requires exactly one configured peer. It is an explicit topology choice,
 not a general wildcard for accepting arbitrary neighbors. Authentication,
@@ -234,6 +240,16 @@ withdrawal. Full original BFD resource
 and BGP profile compatibility remains a separate migration item.
 
 ## Running the current communication checks
+
+The 2026-10-26 independent FRR 8.4.4 run used actual `zebra`/`bfdd` and product
+supervisor/control/network/BFD workers in separate namespaces, normal DAD, /32 and
+/128 sources and explicit host routes. IPv4 and IPv6 stayed Up with generation-1
+product workers and no Down transitions. Changing only the source port of actual
+FRR control packets to 3784 while dropping the original copies also maintained
+both sessions. A separate FRR bgpd/bfdd run also passed actual BGP FIB and
+forwarded LAN IPv4/IPv6 TCP/UDP, IPv4-only BFD loss/withdrawal/recovery, receive
+expiry and worker replacement. These checks do not qualify all FRR modes, BGP
+policies, scale or hardware. Local logs/capture locations are in the handoff.
 
 `make check-bfd` builds the native product and runs real workers in fresh user/network
 namespaces. It needs Linux namespace capabilities and root or passwordless sudo.

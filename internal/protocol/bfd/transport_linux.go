@@ -5,7 +5,6 @@
 package bfd
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/binary"
@@ -20,6 +19,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+var errSourceDAD = errors.New("BFD source address DAD is pending")
+
 // ReadClock shares the immutable process boot identity with other finite owners.
 func ReadClock() (Clock, error)             { return boottime.Read() }
 func clockForBoot(id string) (Clock, error) { return boottime.ReadForBoot(id) }
@@ -27,7 +28,6 @@ func clockForBoot(id string) (Clock, error) { return boottime.ReadForBoot(id) }
 type datagram struct {
 	data                []byte
 	source, destination netip.Addr
-	sourcePort          uint16
 	index, hopLimit     int
 	received            Clock
 	invalid             bool
@@ -45,12 +45,10 @@ type transport interface {
 type nativeTransport struct {
 	config         Config
 	source         netip.Addr
-	sourcePrefix   netip.Prefix
 	index, master  int
 	vrfIndex       int
 	vrfTable       uint32
 	linkType       string
-	hardware       []byte
 	bootID         string
 	lastEmpty      Clock
 	rx, lock       int
@@ -62,7 +60,7 @@ type nativeTransport struct {
 	links          *netlink.Handle
 }
 
-func openTransport(c Config, clock Clock) (_ *nativeTransport, result error) {
+func openTransport(ctx context.Context, c Config, clock Clock) (_ *nativeTransport, result error) {
 	t := &nativeTransport{config: c, source: netip.MustParseAddr(c.SourceAddress), bootID: clock.BootID, lastEmpty: clock, rx: -1, lock: -1}
 	defer func() {
 		if result != nil {
@@ -124,11 +122,25 @@ func openTransport(c Config, clock Clock) (_ *nativeTransport, result error) {
 		return nil, err
 	}
 	a := link.Attrs()
-	t.index, t.master, t.linkType, t.hardware = a.Index, a.MasterIndex, link.Type(), append([]byte(nil), a.HardwareAddr...)
+	t.index, t.master, t.linkType = a.Index, a.MasterIndex, link.Type()
 	if !c.Multihop && a.RawFlags&unix.IFF_POINTOPOINT != 0 && !c.PointToPoint {
 		return nil, errors.New("point-to-point interface requires explicit BFD point_to_point mode")
 	}
-	if err = t.Verify(); err != nil {
+	for {
+		if err = ctx.Err(); err != nil {
+			return nil, err
+		}
+		err = t.Verify()
+		if !errors.Is(err, errSourceDAD) {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+	if err != nil {
 		return nil, err
 	}
 	port := singleHopPort
@@ -325,7 +337,7 @@ func (t *nativeTransport) Verify() error {
 		return err
 	}
 	a := link.Attrs()
-	if a.Index != t.index || a.MasterIndex != t.master || link.Type() != t.linkType || !bytes.Equal(a.HardwareAddr, t.hardware) || a.RawFlags&unix.IFF_UP == 0 || !t.config.Multihop && a.RawFlags&unix.IFF_LOOPBACK != 0 {
+	if a.Index != t.index || a.MasterIndex != t.master || link.Type() != t.linkType || a.RawFlags&unix.IFF_UP == 0 || !t.config.Multihop && a.RawFlags&unix.IFF_LOOPBACK != 0 {
 		return errors.New("BFD interface identity, master or administrative state changed")
 	}
 	domain, err := t.routingDomain(link)
@@ -343,27 +355,19 @@ func (t *nativeTransport) Verify() error {
 	if err != nil {
 		return err
 	}
+	pending := false
 	for _, addr := range addresses {
 		ip, ok := netip.AddrFromSlice(addr.IP)
-		if ok && ip.Unmap() == t.source && addr.Flags&(unix.IFA_F_TENTATIVE|unix.IFA_F_DADFAILED|unix.IFA_F_DEPRECATED) == 0 && addr.PreferedLft != 0 && addr.ValidLft != 0 {
-			if t.config.Multihop {
-				return nil
+		if ok && ip.Unmap() == t.source && addr.Flags&(unix.IFA_F_DADFAILED|unix.IFA_F_DEPRECATED) == 0 && addr.PreferedLft != 0 && addr.ValidLft != 0 {
+			if addr.Flags&unix.IFA_F_TENTATIVE != 0 {
+				pending = true
+				continue
 			}
-			bits, _ := addr.Mask.Size()
-			prefix := netip.PrefixFrom(t.source, bits)
-			if !prefix.IsValid() || t.sourcePrefix.IsValid() && prefix != t.sourcePrefix {
-				return errors.New("BFD source prefix identity changed")
-			}
-			if !t.config.PointToPoint {
-				for _, peer := range t.config.Peers {
-					if !prefix.Contains(netip.MustParseAddr(peer.Address)) {
-						return errors.New("multiaccess BFD source and peers must belong to the same subnet")
-					}
-				}
-			}
-			t.sourcePrefix = prefix
 			return nil
 		}
+	}
+	if pending {
+		return errSourceDAD
 	}
 	return errors.New("BFD configured source is not a usable address on its interface")
 }
@@ -436,9 +440,9 @@ func (t *nativeTransport) Receive(ctx context.Context) (datagram, error) {
 		p := datagram{data: append([]byte(nil), buffer[:min(n, len(buffer))]...), invalid: flags&(unix.MSG_TRUNC|unix.MSG_CTRUNC) != 0 || n > len(buffer)}
 		switch addr := from.(type) {
 		case *unix.SockaddrInet4:
-			p.source, p.sourcePort = netip.AddrFrom4(addr.Addr), uint16(addr.Port)
+			p.source = netip.AddrFrom4(addr.Addr)
 		case *unix.SockaddrInet6:
-			p.source, p.sourcePort = netip.AddrFrom16(addr.Addr), uint16(addr.Port)
+			p.source = netip.AddrFrom16(addr.Addr)
 		default:
 			p.invalid = true
 		}

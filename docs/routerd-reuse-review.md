@@ -24,7 +24,7 @@
 | DHCP relay | 旧dnsmasqの動作を新規relayへ置換 | giaddr/option/fragment/VRF/再構成・HA。独立server試験を全機器の受入と扱わない |
 | DS-Lite/AFTR | 旧controller/host処理を新規resolverと通常のip6tnl所有権へ置換 | SelfAddressPolicy・DNS選択・endpoint維持。実回線の定期RA更新によるtunnel再生成を修正し、同じTCPで100秒継続を確認。PD由来source・完全な選択は未完了 |
 | VRRP/HA | 旧keepalivedの選挙・VIP管理をnative VRRPとwriterへ置換 | 実keepalived等との相互接続、VMAC/ND、選挙、notify、tracking、accept/graceful、session継続。新規置換の妥当性を再評価する |
-| BFD | 旧FRR/bfddの処理をnative BFDへ置換 | startup/reset policy、認証、single/multihop/VRF、実peer・大規模動作。strict gatingは旧動作と同じではない |
+| BFD | 旧FRR/bfddの処理をnative BFDへ置換 | 独立FRR 8.4.4で通常DAD・/32と/128・実BGP/FIB/LAN TCP/UDP・障害/期限/再起動後復旧を確認。不要なsubnet/MAC/受信port制約を削除。旧profile/reset policy、認証、全VRF/規模の受入は未完了 |
 | link/address/route | 旧OS renderer/applyを新規netlink writerへ置換 | option・source選択・所有権・bridge/VRF再構成。wireの実績とは別にOS設定の意味を照合する |
 | firewall/PBR/NAT | 旧rendererを新規nftables writerへ置換 | ICMPv6・DHCP等の許可、条件、順序、NAT、conntrack。DS-Lite生成前の不要なinterface存在確認は削除した |
 | WireGuard | kernel/WireGuard APIを利用。旧CLI/rendererから新規writerへ置換 | peer/source/secret/route/lifecycleの差分と実peer |
@@ -48,7 +48,9 @@
 実回線のLAN IPv4/IPv6 HTTPS・UDP DNSと単発の実AFTR転送は確認した。
 DS-Liteでは通常RAの期限更新とDNS RRset順序変更でトンネルを壊す経路を修正した。
 最終バイナリーの実AFTR経由で同じTCP接続のHTTPS 100回・UDP DNSが100秒継続し、
-110秒の監視でtunnel indexは不変だった。旧PD由来source、長時間の回線更新、
+110秒の監視でtunnel indexは不変だった。その後、自然なT1=7200秒のRenew/Replyと
+PD期限更新を実回線captureで確認し、同じTCP接続・UDP DNSが100分継続した。
+更新後のLAN IPv4/IPv6 HTTPSも通った。旧PD由来source、実回線Rebind/失効/Release、
 その他の置換による不必要な受信拒否は引き続き見直す。
 全モジュールの実機受入・旧動作との差分確認は未完了である。
 
@@ -66,3 +68,9 @@ WANリンクローカルDNSを別LANへ広告しないようにした。全体�
 DHCPv4の任意option全拒否も削除し、旧`LeaseFromACK`の完結した要素・規定timer処理を使う。
 不良optionを含むACKは局所確認、独立dnsmasqは通常の/32とTCP/UDP確認までである。
 raw timer指定をpeer自身が正規化したため、不良timerの実socket受信を確認したとは数えない。
+
+BFDも独立FRRとの初回接続で、直結host routeがある/32・/128をsubnet判定で拒否し、
+通常DAD中にworkerを再起動する問題が判明した。DADだけを起動contextで待ち、
+不要なprefix/MAC保持と受信元port制約を削除した。FRRの実payloadのportだけを
+3784へ変更した場合も両系統UPを維持した。独立FRR bgpdとの経路学習・LAN TCP/UDP、
+片系BFD障害・元期限切れ・worker交替と復旧まで確認した。既存fixtureの合格とは別の結果である。

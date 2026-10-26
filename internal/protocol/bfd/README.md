@@ -40,9 +40,10 @@ instances. Config and Snapshot are JSON serializable:
 3 and a 1000ms effect timeout. Configured intervals are 50–60000ms, multipliers
 1–255, and effect timeouts 10–5000ms. `Validate` requires canonical addresses,
 compatible families and unique peers. Single-hop requires an explicit interface. The declared local
-source must be installed, usable and non-tentative. Startup requires a direct
-route for each peer on the bound interface; ordinary multiaccess peers must
-belong to the source subnet. There is no implicit address selection or route
+source must be installed and usable. Startup waits for normal IPv6 DAD on that
+address, with cancellation owned by the worker context. Startup requires a direct
+route for each peer on the bound interface; explicit host routes also work with
+/32 or /128 local addresses. There is no implicit address selection or route
 creation.
 
 `point_to_point: true` permits exactly one peer. It accepts another valid unicast
@@ -77,8 +78,8 @@ stable UDP source port in 49152–65535 and transmits to the selected control po
 distribution is not used. The transport reads link/address/route information
 through netlink and never changes it. A separate verifier checks source usability,
 link identity, master and administrative state every second without blocking
-packet processing. Single-hop additionally keeps its source-prefix constraint.
-Loss of these facts stops the worker.
+packet processing. MAC or prefix-length changes do not identify a different UDP
+session. Loss of the required source or interface facts stops the worker.
 
 Multihop receive sockets enable `SO_REUSEADDR` for simultaneous default-domain
 and VRF-bound endpoints at the same local address/port. Domain/address abstract
@@ -108,7 +109,7 @@ Single-hop sockets bind the configured device and source, transmit using
 routing, originate with TTL/Hop Limit 255 and accept the decremented receive
 value. Initial multihop packets match the exact source/destination pair; later
 packets still require that peer plus the session discriminator. Receive validation
-also checks kernel interface/destination metadata, source-port range and the base
+also checks kernel interface/destination metadata and the base
 24-byte version-1 control format. P+F, zero multiplier, zero MyDiscriminator,
 zero DesiredMinTx and invalid zero YourDiscriminator are rejected. UDP padding
 outside the declared control length is ignored. A remote nonzero Echo RX value
@@ -119,8 +120,8 @@ userspace engine does not claim forwarding-plane independence.
 Authentication, Demand, Echo and Passive configuration are explicitly
 rejected. Incoming Authentication, Demand and Multipoint flags are rejected and
 cannot refresh health. These modes have no fallback to another daemon. The
-worker does not claim interoperability tests with FRR or hardware vendors; the
-native test uses a separately encoded UDP peer fixture.
+ordinary native test uses a separately encoded UDP peer fixture. The independent
+FRR interoperability run described below is separate from that fixture.
 
 ## Finite health and publisher contract
 
@@ -196,6 +197,23 @@ separate work; configured semantics outside the implemented scope must be
 rejected rather than dropped. This is not a claim of complete old BFD parity.
 
 ## Verification
+
+On 2026-10-26, actual product supervisor/control/network/BFD workers established
+IPv4 and IPv6 sessions with independent FRR 8.4.4 `zebra`/`bfdd` processes in
+separate Linux namespaces. Both endpoints used /32 or /128 addresses with direct
+host routes. Normal IPv6 DAD completed with both product workers remaining in
+generation 1. Both peers stayed Up, including after Scapy changed only the UDP
+source port of actual FRR control payloads to 3784 and the original high-port
+copies were dropped. Product snapshots recorded one Up transition, no Down
+transitions and no rejected packets. This is single-hop interoperability,
+not authentication, scale or physical-device qualification. Setup, capture and
+remaining work are recorded in [the handoff](../../../docs/pve-codex-handoff.md).
+
+The sender still uses stable source ports in 49152–65535. That sender requirement
+in [RFC 5881 section 4](https://www.rfc-editor.org/rfc/rfc5881.html#section-4)
+does not require discarding otherwise identifiable input from another source
+port. Peer/discriminator matching and the section 5 receive hop-limit check
+remain in force.
 
 Pure tests cover independent wire vectors, malformed/unsupported flags, exhaustive
 state pairs, Poll/Final, negotiated interval extremes, deterministic jitter,

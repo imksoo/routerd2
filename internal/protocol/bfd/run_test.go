@@ -74,7 +74,7 @@ func runningClock() func() (Clock, error) {
 }
 
 func frameFrom(cfg Config, p control, clock Clock) datagram {
-	return datagram{data: p.bytes(), source: netip.MustParseAddr(cfg.Peers[0].Address), destination: netip.MustParseAddr(cfg.SourceAddress), sourcePort: 49170, index: 3, hopLimit: 255, received: clock}
+	return datagram{data: p.bytes(), source: netip.MustParseAddr(cfg.Peers[0].Address), destination: netip.MustParseAddr(cfg.SourceAddress), index: 3, hopLimit: 255, received: clock}
 }
 
 func waitUntil(t *testing.T, check func() bool, message string) {
@@ -373,7 +373,6 @@ func TestDemultiplexingAndRejectedPacketsNeverRefresh(t *testing.T) {
 		"unknown discriminator": func(d *datagram) { p := peerPacket(wireUp, 99); d.data = p.bytes() },
 		"foreign source":        func(d *datagram) { d.source = netip.MustParseAddr("192.0.2.99") },
 		"ttl":                   func(d *datagram) { d.hopLimit = 254 },
-		"source port":           func(d *datagram) { d.sourcePort = 3784 },
 		"destination":           func(d *datagram) { d.destination = netip.MustParseAddr("192.0.2.10") },
 		"different boot":        func(d *datagram) { d.received.BootID = "ffffffff-ffff-ffff-ffff-ffffffffffff" },
 		"future receive":        func(d *datagram) { d.received.BoottimeNanoseconds++ },

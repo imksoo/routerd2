@@ -418,7 +418,7 @@
         "bfd"
       ],
       "parity_status": "not_integrated",
-      "known_gap": "Native active asynchronous IPv4/IPv6 BFD supports explicit single-hop interface scope, routed multihop endpoint pairs and VRF scope without FRR/vtysh. IPv4/IPv6 real-daemon multihop checks use the same endpoints in two VRFs and the default domain simultaneously. Receive-only address reuse fixes their UDP bind collision while per-domain abstract claims retain exclusive routerd ownership. Original resource profiles, dynamic source selection, full controller/status/lifecycle contracts, automatic link-local DAD startup, IPv6 single-hop VRF, authentication and other unsupported modes remain incomplete."
+      "known_gap": "Native active asynchronous IPv4/IPv6 BFD supports explicit single-hop interface scope, routed multihop endpoint pairs and VRF scope without FRR/vtysh. IPv4/IPv6 real-daemon multihop checks use the same endpoints in two VRFs and the default domain simultaneously. Receive-only address reuse fixes their UDP bind collision while per-domain abstract claims retain exclusive routerd ownership. Original resource profiles, dynamic source selection, full controller/status/lifecycle contracts, automatic DAD on routed/VRF topologies, IPv6 single-hop VRF, authentication and other unsupported modes remain incomplete. Independent FRR 8.4.4 single-hop /32 and /128 peers passed normal-DAD startup, actual learned BGP FIB and forwarded LAN TCP/UDP, loss, receive-expiry and worker replacement recovery. Source-prefix, MAC-cache and receive-source-port restrictions were removed. This does not complete original resource/profile acceptance."
     },
     {
       "id": "vpn.wireguard",
@@ -12225,7 +12225,7 @@
       "package": "internal/protocol/bfd",
       "status": "integrated_supervised_worker",
       "scope": "Native active asynchronous IPv4/IPv6 BFD. Single-hop owns one explicit interface/family; multihop owns one committed local source address, including loopback endpoints with independently routed egress. Each worker has up to 64 configured peers. BGP consumes finite typed health; BFD creates no routes.",
-      "validation": "PVE isolated Linux VM: make check-bfd passed the current single-hop BFD/BGP daemon case, routed IPv4 BFD/BGP failure/recovery/expiry and routed IPv6 BFD loss/recovery/worker replacement. Routed packet captures verify UDP 4784, source ports, outgoing TTL/Hop Limit 255 and incoming 254 across a real Linux forwarder. Local checks retain single-hop TTL, device scope, discriminators, original clocks, source lifecycle and source/recipient fences. This is not target hardware, authenticated BFD, or full original resource parity. Routed IPv4 user TCP/UDP crosses the learned prefix, fails while that route is withdrawn and resumes after BFD/BGP recovery.",
+      "validation": "PVE isolated Linux VM: make check-bfd passed the current single-hop BFD/BGP daemon case, routed IPv4 BFD/BGP failure/recovery/expiry and routed IPv6 BFD loss/recovery/worker replacement. Routed packet captures verify UDP 4784, source ports, outgoing TTL/Hop Limit 255 and incoming 254 across a real Linux forwarder. Local checks retain single-hop TTL, device scope, discriminators, original clocks, source lifecycle and source/recipient fences. This is not target hardware, authenticated BFD, or full original resource parity. Routed IPv4 user TCP/UDP crosses the learned prefix, fails while that route is withdrawn and resumes after BFD/BGP recovery. Independent FRR 8.4.4 zebra/bfdd/bgpd passed normal-DAD generation-1 single-hop startup with /32-/128 host routes; actual BGP FIB and forwarded LAN IPv4/IPv6 TCP/UDP; IPv4 BFD loss, withdrawal and recovery preserving IPv6; receive-grant expiry during SIGSTOP; and SIGKILL replacement recovery. Actual FRR control payloads with only UDP source port rewritten to 3784 also remained Up. See current handoff for local captures and limits.",
       "acceptance_gates": [
         {
           "name": "native-bfd-daemons",
@@ -12243,7 +12243,7 @@
       ],
       "limitations": [
         "Authentication, echo execution and demand/passive modes remain unimplemented; BFD-bound BGP rejects graceful restart.",
-        "Multihop requires explicit committed non-link-local endpoints and no interface binding. Dynamic source selection, VRF routing context and original BFD resource/profile lifecycle remain incomplete.",
+        "Multihop requires explicit committed non-link-local endpoints and no member-interface binding. Explicit VRF scope works in the exercised kernel topologies; dynamic source/path changes, routed/VRF normal-DAD startup and original resource/profile lifecycle remain incomplete.",
         "FIB withdrawal uses the existing network writer and reconciliation schedule. No hard realtime, target hardware, suspend or scale qualification is claimed."
       ],
       "resource_parity": false
