@@ -10,6 +10,7 @@ import subprocess
 
 TESTS = (
     ("TestDaemonVRRPUnicastIPv4", "ipv4"),
+    ("TestDaemonVRRPRFC9568IPv4", "ipv4-rfc9568"),
     ("TestDaemonVRRPUnicastIPv6", "ipv6"),
     ("TestDaemonVRRPMulticastIPv6", "ipv6-multicast"),
     ("TestDaemonVRRPSlowInitialACK", "slow-initial-ack"),
@@ -47,12 +48,21 @@ def main():
             if args.test and name != args.test:
                 continue
             log_path = output / (log_name + ".log")
+            packets = stage + "/" + log_name
             with log_path.open("w") as log:
-                result = subprocess.run(root + ["env", "ROUTERD2_INTEGRATION_REQUIRED=1", "ROUTERD2_TEST_BIN_DIR=" + stage + "/bin", stage + "/integration.test", "-test.run=^" + name + "$", "-test.v", "-test.timeout=90s"], stdout=log, stderr=subprocess.STDOUT, timeout=100)
+                result = subprocess.run(root + ["env", "ROUTERD2_INTEGRATION_REQUIRED=1", "ROUTERD2_TEST_BIN_DIR=" + stage + "/bin", "ROUTERD2_TEST_EVIDENCE_DIR=" + packets, stage + "/integration.test", "-test.run=^" + name + "$", "-test.v", "-test.timeout=90s"], stdout=log, stderr=subprocess.STDOUT, timeout=100)
             content = log_path.read_text()
+            captured = False
+            for interface in ("lan0", "wan0"):
+                packet = subprocess.run(root + ["cat", packets + "/" + interface + ".pcap"], capture_output=True)
+                if packet.returncode == 0 and len(packet.stdout) > 24:
+                    (output / (log_name + "-" + interface + ".pcap")).write_bytes(packet.stdout)
+                    captured = True
             if result.returncode or "--- PASS: " + name not in content or "--- SKIP:" in content:
                 print(content, end="")
                 raise RuntimeError(name + " failed; see " + str(log_path))
+            if not captured:
+                raise RuntimeError("missing packet capture for " + name)
             print(name + ": PASS; " + str(log_path), flush=True)
     finally:
         subprocess.run(root + ["python3", "-c", "import shutil,sys; shutil.rmtree(sys.argv[1])", stage], check=True)

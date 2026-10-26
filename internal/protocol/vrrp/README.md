@@ -61,6 +61,18 @@ IP socket. Multicast advertisements and GARP/NA use Ethernet frames with the
 virtual MAC. Unicast advertisements use the election interface's normal MAC;
 VIP ownership, its VMAC and neighbor announcements retain the same writer ACK.
 
+## IPv4 VRRPv3 checksum
+
+`ipv4_checksum` selects the transmitted IPv4 VRRPv3 checksum. Omit it or use
+`rfc9568` for the current message-only checksum. Use `rfc5798` for the IPv4
+pseudo-header form required by default keepalived 2.2.8 peers. The pseudo-header
+uses the actual source and destination, including for unicast. Configure the
+transmit form understood by the other routers on that virtual router.
+
+Reception accepts both forms regardless of the transmit choice. IPv6 retains
+its required pseudo-header, and IPv4 VRRPv2 retains its message-only checksum.
+This setting does not apply to IPv6 or v2.
+
 ## Wire version and PASS
 
 `version` defaults to 3. Select `version: 2` explicitly for IPv4 peers using
@@ -253,8 +265,8 @@ its network namespace and disappears when its process dies.
 
 The implementation checks version, advertisement type, VRID, complete address
 list, checksum, receiving interface and TTL/hop limit 255. It also checks virtual
-address-set agreement. IPv4 checksums cover the VRRP message alone; IPv6 includes
-its pseudo-header. Incoming VRRPv3 reserved bits are ignored. A different configured
+address-set agreement. IPv4 VRRPv3 accepts both established checksum forms; IPv6
+includes its pseudo-header. Incoming VRRPv3 reserved bits are ignored. A different configured
 interval is observable and accepted. State transitions implement priority skew,
 master-down detection, optional nonpreemption, address-owner priority, priority
 zero, primary-address tie breaking, and immediate active assertions.
@@ -274,8 +286,7 @@ additional failover MAC interfaces, associated DHCP/RA state and cloud actions.
 `RouterdCluster` lease/peer policy is a different mechanism and is not silently
 mapped onto this local VRRP election.
 
-Legacy IPv4 pseudo-header checksums and preempt-delay extensions are not
-implemented. Use an Ethernet logical interface for a VLAN;
+Preempt-delay extensions are not implemented. Use an Ethernet logical interface for a VLAN;
 the worker does not interpret encapsulated VLAN tags itself. Importers must
 reject unsupported declarations rather than drop them. VRRP provides local-LAN
 election, not authenticated quorum or protection against an on-link attacker.
@@ -284,9 +295,11 @@ election, not authenticated quorum or protection against an on-link attacker.
 keepalived process with real supervisor/control/network/VRRP workers in isolated
 Linux namespaces. They check two-way unicast capture, TTL/Hop Limit, VIP TCP/UDP,
 higher-priority takeover, worker SIGKILL/rebind, peer stop and lower-priority
-recovery. The keepalived peer explicitly uses `v3_checksum_as_v2` for the
-[RFC 9568 IPv4 checksum](https://keepalived.org/documentation/keepalived-conf/).
-No legacy checksum fallback is added to routerd2. VRF unicast and target hardware
+recovery. The ordinary IPv4 case uses default keepalived checksum settings and native
+`ipv4_checksum: rfc5798`. `TestDaemonVRRPRFC9568IPv4` separately uses native
+`rfc9568` and keepalived `v3_checksum_as_v2`; see the
+[keepalived checksum settings](https://keepalived.org/documentation/keepalived-conf/).
+Both pass actual VIP TCP/UDP, takeover and process replacement/recovery. VRF unicast and target hardware
 have not been qualified by these plain Ethernet fixtures.
 `TestDaemonVRRPHealthTracking` also exercises real Health failure, original sample
 expiry during SIGSTOP, Health worker replacement and recovery against keepalived
@@ -310,7 +323,8 @@ and root or noninteractive sudo available. The runner builds as the caller and
 stages execution in a root-owned 0700 temporary directory; it never changes home
 permissions or host interface configuration. Current logs go to
 `dist/vrrp-unicast/ipv4.log`, `ipv6.log`, `health-track.log`, `v2.log` and
-`v2-pass.log` and `additional-identity.log`. Use the runner's `--test` argument
+`v2-pass.log`, `additional-identity.log` and `ipv4-rfc9568.log`. The runner also
+saves actual interface captures beside each log. Use its `--test` argument
 for an individual case while developing.
 
 ## Verification

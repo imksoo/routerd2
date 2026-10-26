@@ -236,6 +236,33 @@ root stagingのcleanupも所有した一時directoryだけのPython削除へ揃�
 `make check`・全体Race Detector・vet・6静的ELF buildは成功した（`dist/vrrp-dad-check-build.log`）。
 旧checksum方式のpeer、全resource/profile、HA session継続、物理/性能の受入は未完了。
 
+## IPv4 VRRPv3の標準keepalived checksum
+
+従来のIPv4 peer fixtureはkeepalived側に`v3_checksum_as_v2`を付けていた。
+これを外すと、標準keepalived 2.2.8と双方でchecksum拒否になり、優先度切替が8秒で失敗した。
+移植元routerdはkeepalivedを使っており、この相互接続範囲を落としていた。
+受信はIPv4 VRRPv3のmessage-onlyとpseudo-headerの両方式を許可する。
+送信は省略/`ipv4_checksum: rfc9568`で現行message-only、`rfc5798`で実source/destinationの
+IPv4 pseudo-headerを含める。送信形式はpeerに合わせて明示し、受信条件と結合しない。
+IPv6とv2のchecksum規則は変えない。内部prototype形式の維持ではなく、実在するnetwork peerへの対応である。
+
+製品`vrrp-checksum`、実supervisor/control/network/VRRPと独立keepalivedで、標準設定peerと
+RFC 9568方式peerの両方がVIP TCP/UDP・優先度切替・worker SIGKILL/rebind・peer停止/復旧を通った。
+標準checksumのHealth連動と追加WAN identity/RA撤去・復旧も通った。
+出力`dist/vrrp-checksum-final-peers.log`と`dist/vrrp-checksum-final-peers/`、
+その`*-lan0.pcap`と`*-wan0.pcap`に実packetがある。runnerは既存captureの出力を保存する。
+実keepalived packetから抽出した2つのchecksumを、反対の送信設定でも受け入れる小さな回帰試験も通った。
+`make check`・Race Detector・vet・6静的ELF build、関連raceとcapture回帰試験は成功した
+（`dist/vrrp-checksum-check-build.log`、`dist/vrrp-checksum-related-local.log`、
+`dist/vrrp-checksum-captured-regression.log`）。前節の期限内適用失敗はこれで解決したとはしない。
+
+同じ版を既存uplink上の専用macvlanと別LAN namespaceへ再配備した。
+保存状態なし・通常DADで全workerがgeneration 1、実上流RA/DHCPv4/PD /60、
+LAN IPv4/IPv6 HTTPS 301を確認した。新しい同一TCP/UDPの130分試験は進行中で、
+まだ完走/自然T1更新を成功と数えない。既に完走した100分の実行版は前述の`ntt-aftr`である。
+現行の場所は`dist/live-current-location.json`、所有者は3時間上限で自身のnamespace等をcleanupする。
+`dist/live-current-continuity.log`に経過を出す。ホスト管理NIC・route・clockは変更していない。
+
 ## 未完了と次の作業
 
 1. 全実装計画、全更新復旧経路、外部engine、配備先と対象実機の受入は未完了。

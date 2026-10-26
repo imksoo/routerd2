@@ -899,6 +899,11 @@ track参照を宣言resource IDへ統一し、BFD/BGPも元の有限な状態観
 550ms writer停止は同時check中の期限内適用失敗があり、単独は成功したが、期限内性能は未解決。
 実行条件と限界は[引き継ぎ](pve-codex-handoff.md)に記録した。
 
+標準keepalived 2.2.8のIPv4 VRRPv3 checksumを拒否する問題も、peer側の補正設定を外して再現した。
+受信はmessage-only/pseudo-headerを許可し、送信は`ipv4_checksum`でRFC 9568（既定）か
+RFC 5798方式を明示できる。標準peerと現行方式peerのVIP TCP/UDP・切替/再起動/復旧、
+標準checksumでのHealth連動・追加WAN identityもcapture付きで通った。全HA受入完了ではない。
+
 #### HA-02 — DHCP/PD lease の認証付き同期
 
 範囲: 旧 routerd 互換 / track: network / risk: high。

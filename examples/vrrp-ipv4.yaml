@@ -1,3 +1,5 @@
+# Default keepalived IPv4 VRRPv3 peers require ipv4_checksum: rfc5798.
+# Omission uses RFC 9568; reception accepts both checksum forms.
 # Peer: use a different real address (for example .3) and lower priority (100).
 # The virtual MAC interface exists only while this router owns the active lease.
 schema_version: 2

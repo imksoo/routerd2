@@ -94,6 +94,16 @@ func pseudo6(source, dest netip.Addr, length int, nextHeader byte) []byte {
 	return p
 }
 
+func pseudo4(source, dest netip.Addr, length int) []byte {
+	p := make([]byte, 12)
+	s, d := source.As4(), dest.As4()
+	copy(p, s[:])
+	copy(p[4:], d[:])
+	p[9] = protocol
+	binary.BigEndian.PutUint16(p[10:], uint16(length))
+	return p
+}
+
 // Both VRRPv2 authentication data words are present even without PASS.
 func advertisementSize(c Config, addresses int) int {
 	width := 4
@@ -129,6 +139,8 @@ func marshalAdvertisement(c Config, source, destination netip.Addr, priority uin
 	value := checksum(b) // RFC 9568: no pseudo-header for IPv4.
 	if c.Family == "ipv6" {
 		value = checksum(pseudo6(source, destination, len(b), protocol), b)
+	} else if c.Version == 3 && c.IPv4Checksum == ChecksumRFC5798 {
+		value = checksum(pseudo4(source, destination, len(b)), b)
 	}
 	binary.BigEndian.PutUint16(b[6:], value)
 	return b
@@ -151,6 +163,10 @@ func parseAdvertisement(c Config, source, destination netip.Addr, payload []byte
 	validChecksum := checksum(payload) == 0
 	if c.Family == "ipv6" {
 		validChecksum = checksum(pseudo6(source, destination, len(payload), protocol), payload) == 0
+	} else if c.Version == 3 && !validChecksum {
+		// Established RFC 5798 peers include the IPv4 pseudo-header. Accept
+		// that wire form independently of the configured transmit choice.
+		validChecksum = checksum(pseudo4(source, destination, len(payload)), payload) == 0
 	}
 	if !validChecksum {
 		return advertisement{}, errors.New("invalid VRRP checksum")

@@ -41,6 +41,12 @@ func TestDaemonVRRPUnicastIPv4(t *testing.T) {
 	}
 }
 
+func TestDaemonVRRPRFC9568IPv4(t *testing.T) {
+	if isolateFixture(t, "TestDaemonVRRPRFC9568IPv4") {
+		runVRRPPeer(t, vrrpPeerTest{family: "ipv4", checksum: vrrp.ChecksumRFC9568})
+	}
+}
+
 func TestDaemonVRRPUnicastIPv6(t *testing.T) {
 	if isolateFixture(t, "TestDaemonVRRPUnicastIPv6") {
 		runVRRPPeer(t, vrrpPeerTest{family: "ipv6"})
@@ -84,6 +90,7 @@ func TestDaemonVRRPAdditionalIdentity(t *testing.T) {
 }
 
 type vrrpPeerTest struct {
+	checksum  vrrp.IPv4Checksum
 	wan       bool
 	family    string
 	version   int
@@ -139,6 +146,12 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 	c := vrrp.Config{Version: spec.version, AuthPassword: spec.password, Interface: "lan0", VIPInterface: "ha", Family: family, SourceAddress: local, UnicastPeers: []netip.Addr{netip.MustParseAddr(peer)}, VirtualRouterID: 42, Priority: 150, AdvertIntervalCentiseconds: 20, Addresses: vips, AcceptMode: true}
 	if c.Version == 2 {
 		c.AdvertIntervalCentiseconds = 100
+	}
+	if family == "ipv4" && c.Version != 2 {
+		c.IPv4Checksum = spec.checksum
+		if c.IPv4Checksum == "" {
+			c.IPv4Checksum = vrrp.ChecksumRFC5798
+		}
 	}
 	if spec.multicast {
 		c.UnicastPeers = nil
@@ -307,9 +320,10 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 		} else {
 			cfg += " mcast_src_ip " + peerSource + "\n"
 		}
-		if c.Version == 3 {
+		if c.IPv4Checksum == vrrp.ChecksumRFC9568 {
 			cfg += " v3_checksum_as_v2\n"
-		} else {
+		}
+		if c.Version == 2 {
 			// RFC 3768 discards inferior adverts. Keepalived's default read path
 			// resets its send timer even for wrong-auth packets unless this is set.
 			cfg += " lower_prio_no_advert\n"

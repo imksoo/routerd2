@@ -48,6 +48,30 @@ func TestRFC9568WireChecksumsAndVirtualMAC(t *testing.T) {
 	}
 }
 
+func TestAcceptsKeepalivedIPv4ChecksumsIndependentOfTransmitChoice(t *testing.T) {
+	c := config4()
+	c.Addresses = []string{"192.0.2.254/32"}
+	for _, sample := range []struct {
+		transmit IPv4Checksum
+		packet   string
+	}{
+		// Actual keepalived 2.2.8 advertisements captured on the unicast link:
+		// default pseudo-header and explicit v3_checksum_as_v2, respectively.
+		{ChecksumRFC9568, "312ac8010014bf3ec00002fe"},
+		{ChecksumRFC5798, "312ac801001443c1c00002fe"},
+	} {
+		c.IPv4Checksum = sample.transmit
+		payload, err := hex.DecodeString(sample.packet)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p, err := parseAdvertisement(c, netip.MustParseAddr("192.0.2.3"), netip.MustParseAddr("192.0.2.2"), payload)
+		if err != nil || p.priority != 200 {
+			t.Fatalf("receive with transmit choice %s: %+v %v", sample.transmit, p, err)
+		}
+	}
+}
+
 func TestRejectsMalformedOrOffLinkDatagrams(t *testing.T) {
 	for _, c := range []Config{config4(), config6()} {
 		source := netip.MustParseAddr(c.SourceAddress)

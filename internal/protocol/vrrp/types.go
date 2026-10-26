@@ -23,6 +23,13 @@ const (
 	StateActive     = "ACTIVE"
 )
 
+type IPv4Checksum string
+
+const (
+	ChecksumRFC9568 IPv4Checksum = "rfc9568"
+	ChecksumRFC5798 IPv4Checksum = "rfc5798"
+)
+
 type GracefulActivation struct {
 	ReadyWhen factcondition.Expression `json:"ready_when"`
 	Timeout   string                   `json:"timeout,omitempty"`
@@ -30,6 +37,7 @@ type GracefulActivation struct {
 
 type Config struct {
 	Version                    int                 `json:"version,omitempty"`
+	IPv4Checksum               IPv4Checksum        `json:"ipv4_checksum,omitempty"`
 	AuthPassword               string              `json:"auth_password,omitempty"`
 	Track                      []Track             `json:"track,omitempty"`
 	GracefulActivation         *GracefulActivation `json:"graceful_activation,omitempty"`
@@ -201,6 +209,9 @@ func Validate(c Config) error {
 		}
 	default:
 		return errors.New("VRRP version must be 2 or 3")
+	}
+	if c.IPv4Checksum != "" && (c.Version != 3 || c.Family != "ipv4" || c.IPv4Checksum != ChecksumRFC9568 && c.IPv4Checksum != ChecksumRFC5798) {
+		return errors.New("VRRP ipv4_checksum requires IPv4 version 3 and rfc9568 or rfc5798")
 	}
 	if c.AuthPassword != "" {
 		if c.Version != 2 || len(c.AuthPassword) > 8 {
