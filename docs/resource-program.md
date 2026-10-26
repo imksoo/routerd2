@@ -416,13 +416,16 @@ ACTIVE成功には元boot IDと絶対期限を保持するVIP投影が必要で�
 旧世代・上書きされた通知や適用失敗を成功として返さない。
 
 このsource受入範囲の追加に伴い、署名されたconfiguration contractは
-`resource-program-native-8`とする。条件付きlink・address・routeと依存先の準備条件の
+`resource-program-native-9`とする。条件付きlink・address・routeと依存先の準備条件の
 元のboot期限をwriterへ渡す。期限切れのowned linkをDOWNにし、管理address・routeを撤去する。
 address／routeを直接条件付きにした場合も物理interface上で失効する。
 この内部期限はoperator resourceへ記述できない。network journalはformat 5とする。
 VRRPの明示version、IPv4 v2の秒単位広告・
-任意のPASS認証、unicast peer、Health serviceを参照するtrackのpenalty・連続回数・
-元の観測のmax ageを受け入れる。tracking判定は実適用応答で返し、
+任意のPASS認証、unicast peer、宣言resource IDを参照するtrackのpenalty・連続回数・
+元の観測のmax ageを受け入れる。現在のtrack providerはHealth・BFD・BGPで、
+`when`が明示falseなら有限のneutralとして直前の判定・回数を保持する。
+indeterminateと期限切れはunknown／penaltyに戻す。参照は宣言全体で検証し、
+条件付きproviderが投影から除かれても選挙は継続する。tracking判定は実適用応答で返し、
 worker設定の再生成や再起動で優先度を変更しない。設定と応答の両端を同じ契約へ置き換える。
 以前のprototype compilerとの更新・fallbackは
 既存のABI検査で拒否する。format migrationや旧compilerとの互換性を表す変更ではない。

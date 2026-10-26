@@ -102,7 +102,6 @@ func (r *Runtime) recordGuardGrantLocked(u serviceconfig.Update, now time.Time) 
 			r.guardGrants = make(map[string]guardGrant)
 		}
 		r.guardGrants[u.Name] = guardGrant{revision: r.config.revision, generation: u.Generation, sequence: u.Sequence, epoch: u.ProducerEpoch, bootID: snapshot.BootID, value: snapshot.Active, untilNanos: snapshot.ExpiresNanos, observedNanos: snapshot.ObservedNanos, health: &snapshot}
-		r.advanceVRRPTracksLocked(u, snapshot)
 		return
 	}
 	if u.Role != "dhcp6pd" {
@@ -158,6 +157,9 @@ func (r *Runtime) conditionFactsLocked(cfg configuration, now time.Time) (result
 		return facts, nil
 	}
 	defer func() {
+		if resultErr == nil {
+			resultErr = r.advanceVRRPTracksLocked(result)
+		}
 		if resultErr == nil {
 			resultErr = r.observeEventRulesLocked(result)
 		}

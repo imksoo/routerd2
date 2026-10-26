@@ -305,7 +305,7 @@ func stagePair(ctx context.Context, store *release.Store, key ed25519.PrivateKey
 		return release.Ref{}, err
 	}
 	defer notices.Close()
-	runtimeOptions := release.BundleOptions{ReleaseID: identity, Sequence: sequence, GOOS: "linux", GOARCH: "amd64", BootABI: 1, WorkerABI: 2, Entrypoint: "supervisor", Artifacts: []release.Artifact{{Name: "supervisor", Kind: "native", Command: "routerd"}, {Name: "services", Kind: "native", Command: "routerd-modules"}, {Name: "logger", Kind: "native", Command: "routerd-logging"}, {Name: "notices", Kind: "data"}}}
+	runtimeOptions := release.BundleOptions{ReleaseID: identity, Sequence: sequence, GOOS: "linux", GOARCH: "amd64", BootABI: 1, WorkerABI: 3, Entrypoint: "supervisor", Artifacts: []release.Artifact{{Name: "supervisor", Kind: "native", Command: "routerd"}, {Name: "services", Kind: "native", Command: "routerd-modules"}, {Name: "logger", Kind: "native", Command: "routerd-logging"}, {Name: "notices", Kind: "data"}}}
 	roles := runtimeconfig.NativeWorkers("services")
 	roles["logging"] = "logger"
 	names := make([]string, 0, len(roles))

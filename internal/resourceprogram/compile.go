@@ -79,6 +79,19 @@ func Compile(source Program) (Plan, error) {
 		}
 		byID[r.ID] = r
 	}
+	// Tracks are observations, not hard readiness dependencies. Resolve them
+	// against declarations so conditional removal does not invalidate the VIP.
+	for _, r := range source.Resources {
+		if r.Service == nil || r.Service.VRRP == nil {
+			continue
+		}
+		for _, track := range r.Service.VRRP.Track {
+			target, exists := byID[track.Resource]
+			if !exists || target.Service == nil || target.Service.Health == nil && target.Service.BFD == nil && target.Service.BGP == nil {
+				return Plan{}, fmt.Errorf("VRRP %s track %s requires a declared Health, BFD or BGP status provider", r.ID, track.Resource)
+			}
+		}
+	}
 	dependencies, err := dependencyGraph(source.Resources, byID)
 	if err != nil {
 		return Plan{}, err

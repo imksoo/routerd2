@@ -183,7 +183,7 @@
         "ha-sync"
       ],
       "parity_status": "not_integrated",
-      "known_gap": "Native VRRPv3 IPv4/IPv6, explicit IPv4 VRRPv2 with optional PASS, and Health tracking are implemented. Non-Health tracking and neutral conditions, external secret resolution and peer-aware legacy import, symmetric native HA qualification, cluster dependency gating, lease replication and NAT session replication remain incomplete. Additional MAC/link-local identities are expressed by conditional network resources with independent writer fencing and scoped L2 announcements."
+      "known_gap": "Native VRRPv3 IPv4/IPv6, explicit IPv4 VRRPv2 with optional PASS, and declared-resource Health/BFD/BGP tracking are implemented. Explicit false conditions produce finite neutral decisions that retain counts and penalty. Other resource kinds and Disabled/NotApplicable/Standby phase contracts, external secret resolution and peer-aware legacy import, symmetric native HA qualification, cluster dependency gating, lease replication and NAT session replication remain incomplete. Additional MAC/link-local identities are expressed by conditional network resources with independent writer fencing and scoped L2 announcements."
     },
     {
       "id": "network.links",

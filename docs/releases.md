@@ -40,9 +40,11 @@ The release identity record remains V1; its format is independent of manifest
 version and the runtime ABI record envelope.
 
 The current declaration has configuration schema 2 and semantics contract
-`resource-program-native-8`. Boot ABI is 1 and worker ABI is 2: DHCP server
-observations and DNS lease projections use original boot-scoped deadlines,
-without the discarded UTC ownership field or receipt leases. Its named formats
+`resource-program-native-9`. Boot ABI is 1 and worker ABI is 3. VRRP tracking
+resolves declared resource IDs, shares finite Health/BFD/BGP observations, and
+uses explicit healthy/unhealthy/neutral/unknown decisions. Its wire/configuration
+contract replaces the discarded service-only tracking form. DHCP server and DNS
+lease projections retain original boot-scoped deadlines without receipt leases. Its named formats
 are configuration journal 1, events SQLite 6, network journal 5, release journal
 1, snapshot 1 and SSH identity 1. Configuration journal and SSH identity numbers
 name codec contracts; they are not extra fields inserted into existing files. A persistent-format or

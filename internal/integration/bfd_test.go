@@ -26,6 +26,7 @@ import (
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/bfd"
 	"github.com/imksoo/routerd2/internal/protocol/bgpconfig"
+	"github.com/imksoo/routerd2/internal/protocol/vrrp"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 	"github.com/imksoo/routerd2/internal/supervisor"
@@ -41,6 +42,17 @@ func TestDaemonBFDControlsBGPSessionAndExpiry(t *testing.T) {
 	if !isolateFixture(t, "TestDaemonBFDControlsBGPSessionAndExpiry") {
 		return
 	}
+	testDaemonBFDControls(t, false)
+}
+
+func TestDaemonVRRPBFDAndBGPTracking(t *testing.T) {
+	if isolateFixture(t, "TestDaemonVRRPBFDAndBGPTracking") {
+		testDaemonBFDControls(t, true)
+	}
+}
+
+func testDaemonBFDControls(t *testing.T, tracking bool) {
+	t.Helper()
 	peer, listener, index := newDaemonBFDPeer(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -87,6 +99,14 @@ func TestDaemonBFDControlsBGPSessionAndExpiry(t *testing.T) {
 		{Name: "link-watch", BFD: &bfd.Config{Interface: "wan0", SourceAddress: "192.0.2.1", Peers: []bfd.Peer{{Address: "192.0.2.2", MinTxMilliseconds: 200, MinRxMilliseconds: 200, DetectMultiplier: 5}}}},
 		{Name: "edge", BGP: &bgp},
 	}}
+	var capture *healthPBRCaptureState
+	if tracking {
+		capture = healthPBRCapture(t, "wan0")
+		for i, source := range []string{"link-watch", "edge"} {
+			cfg := vrrp.Config{Interface: "wan0", VIPInterface: fmt.Sprintf("track-vip%d", i), Family: "ipv4", SourceAddress: "192.0.2.1", UnicastPeers: []netip.Addr{netip.MustParseAddr("192.0.2.2")}, VirtualRouterID: 41 + i, Priority: 150, AdvertIntervalCentiseconds: 20, Addresses: []string{fmt.Sprintf("192.0.2.%d/32", 254-i)}, AcceptMode: true, Track: []vrrp.Track{{Resource: "service/" + source, Penalty: 100, HealthyThreshold: 2, UnhealthyThreshold: 3, MaxAgeMillis: 1500}}}
+			doc.Services = append(doc.Services, serviceconfig.Service{Name: "track-" + source, VRRP: &cfg})
+		}
+	}
 	if err := config.Validate(config.FromNative(doc)); err != nil {
 		t.Fatal(err)
 	}
@@ -130,6 +150,43 @@ func TestDaemonBFDControlsBGPSessionAndExpiry(t *testing.T) {
 			t.Fatal("independent peer:", err)
 		default:
 		}
+	}
+	trackWorkers := map[string]supervisor.ModuleStatus{}
+	waitTracks := func(priority int) {
+		t.Helper()
+		if !tracking {
+			return
+		}
+		last := map[string]vrrp.Snapshot{}
+		t.Cleanup(func() {
+			if t.Failed() {
+				t.Log("last VRRP tracking decisions", priority, last)
+			}
+		})
+		until(t, 4*time.Second, func() bool {
+			matched := true
+			for _, source := range []string{"link-watch", "edge"} {
+				var instance runtimeplan.InstanceStatus
+				if err := fixture.control.Do(ctx, "GET", "/v1/services/service.track-"+source, nil, &instance); err != nil {
+					t.Fatal(err)
+				}
+				var state vrrp.Snapshot
+				if err := json.Unmarshal(instance.Snapshot, &state); err != nil {
+					t.Fatal(err)
+				}
+				last[source] = state
+				if state.Priority != priority || len(state.Track) != 1 {
+					matched = false
+				}
+				current := moduleStatus("service.track-" + source)
+				if old, exists := trackWorkers[source]; exists && (current.PID != old.PID || current.Generation != old.Generation) {
+					t.Fatal("tracking replaced its election worker", old, current)
+				}
+				trackWorkers[source] = current
+
+			}
+			return matched
+		})
 	}
 	// Merely starting a BGP worker must not open a transport before BFD grants
 	// health. No TCP connection means no OPEN, UPDATE, or advertisement can leak.
@@ -192,6 +249,7 @@ func TestDaemonBFDControlsBGPSessionAndExpiry(t *testing.T) {
 		})
 	}
 	first := connect()
+	waitTracks(150)
 	t.Log("BFD Up: BGP established, outbound advertisement observed, learned route installed")
 	// A short control delay must not replace valid original wire evidence with
 	// a second, shorter transport lease. UDP BFD and TCP keepalives keep running.
@@ -250,8 +308,10 @@ func TestDaemonBFDControlsBGPSessionAndExpiry(t *testing.T) {
 	if down.Peers[0].State != bfd.StateDown || down.Peers[0].DownTransitions == 0 || instance.BFD == nil || len(instance.BFD.HealthyPeers) != 0 {
 		t.Fatal("BFD UDP loss did not publish the independent receive timeout", down.Peers[0])
 	}
+	waitTracks(50)
 	t.Log("UDP BFD stopped while TCP KEEPALIVE continued: connection closed and learned route withdrawn")
 	second := connect()
+	waitTracks(150)
 	t.Log("BFD resumed: new BGP session, advertisement and route restored")
 	beforeInstance, before := serviceStatus()
 	if before.Peers[0].State != bfd.StateUp {
@@ -314,6 +374,7 @@ func TestDaemonBFDControlsBGPSessionAndExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	connect()
+	waitTracks(150)
 	recoveredInstance, recovered := serviceStatus()
 	recoveredModule := moduleStatus("service.link-watch")
 	clock, err = bfd.ReadClock()
@@ -343,6 +404,32 @@ func TestDaemonBFDControlsBGPSessionAndExpiry(t *testing.T) {
 	checkPeerError()
 	t.Log("SIGCONT: fresh BFD health recreates BGP session and restores advertisements and learned route")
 
+	if tracking {
+		capture.mu.Lock()
+		seen := map[byte]map[byte]bool{}
+		for _, packet := range capture.packets {
+			data := packet.data
+			if len(data) < 38 || binary.BigEndian.Uint16(data[12:14]) != 0x0800 || data[23] != 112 || !bytes.Equal(data[26:30], []byte{192, 0, 2, 1}) {
+				continue
+			}
+			at := 14 + int(data[14]&15)*4
+			if at+3 > len(data) {
+				continue
+			}
+			id, priority := data[at+1], data[at+2]
+			if seen[id] == nil {
+				seen[id] = map[byte]bool{}
+			}
+			seen[id][priority] = true
+		}
+		capture.mu.Unlock()
+		for _, id := range []byte{41, 42} {
+			if !seen[id][50] || !seen[id][150] {
+				t.Fatal("VRRP wire priority did not follow actual BFD/BGP state", seen)
+			}
+		}
+		t.Log("real UDP BFD and TCP BGP loss/recovery drove both VRRP instances; capture verified wire priorities 150/50 without replacing election workers")
+	}
 	// A longer BGP heartbeat cannot keep forwarding after the BFD authority
 	// used to resolve that route has expired. Only the writer may progress.
 	var bgpObservation bgpconfig.Snapshot

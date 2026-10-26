@@ -746,7 +746,9 @@ Snapshotへversionを返し、v3/IPv6のPASSや8 byteを超えるpasswordは拒�
 追加VMAC/link-local addressを条件付きlink/interface/addressで表現する経路を実装した。
 選挙中の準備は`.elected`、実公開後のRAは`.active`で制御する。writerは元の条件・依存期限で
 リンクをDOWNにして管理addressを撤去し、MACの所在通知はその期限内だけ送る。
-Health以外のresource track・条件除外時のneutral、外部secret参照とpeer-aware移行、cluster、
+track参照を宣言resource IDへ統一し、BFD/BGPも元の有限な状態観測で判定する。
+明示falseの`when`でproviderを除外すると、条件の元期限内だけneutralとして判定・回数を保つ。
+他resource kindのtrack・Disabled/Standby等のphase契約、外部secret参照とpeer-aware移行、cluster、
 二native nodeでのlease/session継続と対象実機の受入は残り、HA-01全体の完了とはしない。
 
 **受入条件**
@@ -1229,12 +1231,12 @@ JSON の `inventory_sha256` と pinned baseline を使用し、元台帳が変�
 新機能は、旧宣言の parse 成功、文字列 renderer の一致、worker Ready のいずれかだけでは完了にしない。
 各機能のリスクに対応する次の証拠を揃える。
 
-1. 旧 public field/default/validation/status/event の contract fixture。
+1. 採用した public field/default/validation/status/event の機能と、意図した旧設計との差。
 2. 同じ入力・観測系列に対する pure planner の比較と、意図的差の記録。
 3. 独立 peer / wire encoder との相互接続と、kernel 上の実パケット。
 4. 実際の選択 runtime supervisor と manifest が宣言する workers の起動・変更・再起動・期限切れ・rollback。
 5. crash、重複、旧 generation、観測遅延、途中失敗時の所有権と再観測。
-6. 対象 profile の build / state migration / 更新・戻し手順。
+6. 対象 profile の build と更新・復旧手順。破棄したprototype形式のmigrationは作らない。
 
 環境のない試験を skip して「合格」と扱わない。required suite と明示的な成功 marker を設け、
 実施環境・source/artifact digest・結果・既知の制約を evidence に記録する。

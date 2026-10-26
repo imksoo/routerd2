@@ -125,14 +125,24 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 	if family == "ipv6" {
 		iface.AddressOptions = map[string]network.AddressOptions{iface.Addresses[0]: {NoDAD: true}}
 	}
-	var probe net.Listener
+	var probe, trackingGate net.Listener
 	services := []serviceconfig.Service{{Name: "ha", VRRP: &c}}
 	if tracking {
 		probe = healthPBRListener(t, peerNS, peer+":18097", "H")
-		c.Track = []vrrp.Track{{Service: "probe", Penalty: 100, HealthyThreshold: 2, UnhealthyThreshold: 3, MaxAgeMillis: 1500}}
+		trackingGate = healthPBRListener(t, peerNS, peer+":18098", "G")
+		c.Track = []vrrp.Track{{Resource: "service/probe", Penalty: 100, HealthyThreshold: 2, UnhealthyThreshold: 3, MaxAgeMillis: 1500}}
 		services = append(services, serviceconfig.Service{Name: "probe", Health: &health.Config{Interface: "lan0", SourceAddress: local, Target: peer, Protocol: "tcp", Port: 18097, IntervalMillis: 300, TimeoutMillis: 50, HealthyThreshold: 1, UnhealthyThreshold: 1}})
 	}
 	program := config.FromNative(config.Native{Network: network.Desired{Interfaces: []network.Interface{iface}}, Services: services})
+	if tracking {
+		for i := range program.Resources {
+			if program.Resources[i].ID == "service/probe" {
+				program.Resources[i].When = &resourceprogram.FactCondition{Fact: "service.track-gate.active"}
+			}
+		}
+		program.Resources = append(program.Resources, resourceprogram.Resource{ID: "track-gate", Service: &serviceconfig.Service{Name: "track-gate", Health: &health.Config{Interface: "lan0", SourceAddress: local, Target: peer, Protocol: "tcp", Port: 18098, IntervalMillis: 200, TimeoutMillis: 50, HealthyThreshold: 1, UnhealthyThreshold: 1}}})
+	}
+
 	var wan *vrrpWANTest
 	if spec.wan {
 		wan = setupVRRPWAN(t, peerNS)
@@ -369,7 +379,7 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 			t.Helper()
 			until(t, 6*time.Second, func() bool {
 				s := snapshot()
-				return s.Priority == priority && len(s.Track) == 1 && s.Track[0].Known == known && s.Track[0].Penalized == penalized
+				return s.Priority == priority && len(s.Track) == 1 && (s.Track[0].State != vrrp.TrackUnknown) == known && s.Track[0].Penalized == penalized
 			})
 		}
 		waitTrack(true, false, 150)
@@ -421,7 +431,39 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 		if current.PID != native.PID || current.Generation != native.Generation {
 			t.Fatal("tracking restarted the election worker", native, current)
 		}
-		t.Log("Health failure/recovery, original sample expiry and Health SIGKILL/rebind changed priority 150/50 without restarting VRRP")
+		trackingGate.Close()
+		until(t, 6*time.Second, func() bool {
+			s := snapshot()
+			return len(s.Track) == 1 && s.Track[0].State == vrrp.TrackNeutral && !s.Track[0].Penalized && s.Priority == 150
+		})
+		neutral := snapshot().Track[0]
+		until(t, 6*time.Second, func() bool {
+			var status supervisor.Status
+			if err := f.supervisor.Do(context.Background(), "GET", "/v1/status", nil, &status); err != nil {
+				t.Fatal(err)
+			}
+			for _, module := range status.Modules {
+				if module.Name == "service.probe" {
+					return false
+				}
+			}
+			return true
+		})
+		time.Sleep(600 * time.Millisecond)
+		held := snapshot()
+		if held.Track[0].State != vrrp.TrackNeutral || held.Track[0].HealthyCount != neutral.HealthyCount || held.Track[0].UnhealthyCount != neutral.UnhealthyCount || held.Track[0].Penalized || held.Priority != 150 {
+			t.Fatal("excluded source changed counters or penalty", held.Track, neutral)
+		}
+		waitOwner(true)
+		traffic(peerNS, vip, "R")
+		trackingGate = healthPBRListener(t, peerNS, peer+":18098", "G")
+		waitTrack(true, false, 150)
+		waitOwner(true)
+		traffic(peerNS, vip, "R")
+		if current := module("service.ha"); current.PID != native.PID || current.Generation != native.Generation {
+			t.Fatal("conditional source exclusion restarted the election", current, native)
+		}
+		t.Log("Health failure/recovery and source replacement changed priority 150/50; conditional source exclusion preserved the finite neutral decision, counters, same election worker and VIP TCP/UDP")
 	} else {
 		if c.AuthPassword != "" {
 			rejected := snapshot().Rejected

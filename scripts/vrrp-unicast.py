@@ -12,6 +12,7 @@ TESTS = (
     ("TestDaemonVRRPUnicastIPv4", "ipv4"),
     ("TestDaemonVRRPUnicastIPv6", "ipv6"),
     ("TestDaemonVRRPHealthTracking", "health-track"),
+    ("TestDaemonVRRPBFDAndBGPTracking", "bfd-bgp-track"),
     ("TestDaemonVRRPv2", "v2"),
     ("TestDaemonVRRPv2PASS", "v2-pass"),
     ("TestDaemonVRRPAdditionalIdentity", "additional-identity"),

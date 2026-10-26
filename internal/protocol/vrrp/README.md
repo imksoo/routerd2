@@ -149,13 +149,14 @@ enough CPU and IPC headroom for the complete renewal/verification/send cycle;
 failure to meet a lease stops ownership rather than advertising unverified
 readiness. There is no claim of hitless config or worker restart.
 
-## Health tracking
+## Resource tracking
 
-An instance can reference up to 16 configured Health services:
+An instance can track up to 16 declared HealthCheck, BFD or BGPRouter resources.
+The reference is the source resource ID, including any slash in that ID:
 
 ```json
 "track": [{
-  "service": "wan-probe",
+  "resource": "service/wan-probe",
   "penalty": 100,
   "healthy_threshold": 2,
   "unhealthy_threshold": 3,
@@ -163,32 +164,39 @@ An instance can reference up to 16 configured Health services:
 }]
 ```
 
-Each source subtracts its penalty until enough consecutive passed probes have
-been accepted. After recovery, the penalty returns when the consecutive failure
-threshold is met. Defaults are penalty 50, two passed and three failed probes.
-`max_age_millis` is required and bounds the age of the original Health observation;
-choose it above the probe interval and expected scheduling/IPC delay. Health's
-own phase thresholds are independent of these counts. Priority is the configured
-base minus current penalties, with a floor of 1. Priority zero remains reserved
-for shutdown. Address owners cannot configure tracking because their priority
-must remain 255.
+References are resolved against the whole declaration at compilation. Tracking
+is a soft observation dependency: a conditionally excluded provider can leave
+the projected worker set while its election continues. Missing declarations and
+unsupported status providers are rejected before any worker or kernel changes.
+The discarded `service` reference and `known` decision field are not accepted.
 
-The control coordinator advances hysteresis on accepted Health observations.
-RPC polling and replays never add confirmations. Producer consecutive counters
-preserve progress through coalesced delivery within the current streak; this is
-not a lossless history of missed transitions. Missing, stopped, expired or
-unregistered sources are unknown and penalized immediately, without inventing
-failed probes. After an observation gap or producer/configuration cutover,
-recovery requires fresh passed probes; an inherited raw counter cannot restore
-the old authority. Configuration changes reset tracking confirmation state.
+Health tracking counts original passed/failed probes independently of the
+Health service's own phase thresholds; raw consecutive counters retain progress
+through coalesced delivery within the current streak. BFD is healthy when its
+current phase is Up; BGP requires Established with matching applied FIB proof.
+Their confirmations count distinct original status observation times. Repeated
+queries and replayed observations do not add confirmations. Producer replacement,
+BFD transition continuity changes and expiry require fresh confirmation.
 
-Tracking decisions return through the existing ownership application response.
-The VRRP worker expires them on its own boot clock, derives wire priority before
-sending, and adjusts Backup's down timer when priority changes. Backup polls at
-250ms when tracking is configured. Health flaps do not rewrite intent, restart
-the election worker or create another notification stream. Snapshot `priority`
-is effective priority and `track` explains its current counts and deadlines.
-Generic resource tracking and conditional-source neutral semantics remain open.
+Defaults are penalty 50, two healthy and three unhealthy observations.
+`max_age_millis` is required and bounds original observation age. Each decision
+also retains its source's earlier expiry and current supervisor authority.
+Priority is the configured base minus current penalties, with a floor of 1;
+priority zero is reserved for withdrawal. Address owners cannot configure tracking.
+
+An explicitly false `when` on the tracked resource produces `neutral`, preserving
+its previous penalty and confirmation counts. Neutral carries the condition's
+original finite deadline. An indeterminate/expired condition, missing observation,
+stopped or unregistered producer produces `unknown` and imposes the penalty.
+A new configuration resets tracking history. Other resource kinds and their
+Disabled/NotApplicable/Standby phase contracts remain unimplemented.
+
+Decisions return through the existing ownership application response. `track`
+reports resource, state (`healthy`, `unhealthy`, `neutral`, `unknown`), counts,
+penalty and expiry. The worker checks expiry with its own BOOTTIME clock before
+advertising, including for neutral decisions, and adjusts Backup's down timer
+when priority changes. Backup polls at 250ms when tracking is configured.
+Tracking does not rewrite operator intent or restart the election worker.
 
 ## Additional WAN/LAN identities
 

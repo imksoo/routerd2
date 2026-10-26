@@ -84,6 +84,74 @@ func TestConditionalVRRPWaitsForNetworkACK(t *testing.T) {
 	}
 }
 
+func TestVRRPAcknowledgesAppliedElectionWhileAnotherArrivesDuringIO(t *testing.T) {
+	source := conditionalVRRPSource()
+	second := *source.Resources[0].Service.VRRP
+	second.VirtualRouterID, second.Addresses = 43, []string{"192.0.2.253/24"}
+	source.Resources = append(source.Resources, resourceprogram.Resource{ID: "second", Service: &serviceconfig.Service{Name: "second", VRRP: &second}})
+	n := &memoryNetwork{}
+	r := New(t.TempDir(), t.TempDir(), n, testSupervisorInstance)
+	r.manager = &memoryManager{}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := r.ApplyConfig(ctx, 1, source); err != nil {
+		t.Fatal(err)
+	}
+	publish := func(name string, cfg vrrp.Config) <-chan error {
+		u := update(t, r, name, 1, bootVRRPSnapshot(t, cfg))
+		result := make(chan error, 1)
+		go func() { _, err := r.Apply(ctx, u); result <- err }()
+		for {
+			r.mu.Lock()
+			pending := r.applications[name] != nil
+			r.mu.Unlock()
+			if pending {
+				return result
+			}
+			select {
+			case err := <-result:
+				t.Fatal("publication rejected", err)
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			case <-time.After(time.Millisecond):
+			}
+		}
+	}
+	first := publish("service.ha", source.Resources[0].Service.VRRPConfig())
+	blocked, release := blockBFDNetwork(t, r, n, nil)
+	done := make(chan error, 1)
+	go func() { done <- r.reconcileDynamic(ctx) }()
+	select {
+	case <-blocked.entered:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	next := publish("service.second", source.Resources[2].Service.VRRPConfig())
+	release()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-first:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("unrelated election prevented ACK of the applied VIP")
+	}
+	select {
+	case err := <-next:
+		t.Fatal("new election completed before its own kernel application", err)
+	default:
+	}
+	if err := r.reconcileDynamic(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-next; err != nil {
+		t.Fatal(err)
+	}
+}
+
 // This manager models the actual worker contract: Ready follows initial effect
 // ACK, and process exit follows the final inactive effect ACK.
 type vrrpACKManager struct {

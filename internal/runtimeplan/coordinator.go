@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"reflect"
 	"strings"
@@ -114,8 +115,11 @@ func (r *Runtime) fenceApplicationsLocked() {
 	}
 }
 
-func (r *Runtime) finishApplicationsLocked(p projection, applyErr error) {
-	for name, effect := range r.applications {
+func (r *Runtime) finishApplicationsLocked(p projection, applications map[string]*pendingApplication, applyErr error) {
+	for name, effect := range applications {
+		if r.applications[name] != effect {
+			continue
+		}
 		err := applyErr
 		current, ok := r.records[name]
 		binding, bound := r.bindings[name]
@@ -374,11 +378,20 @@ func (r *Runtime) wakeCoordinatorLocked() {
 // The operation owner holds op and mu. Protocol callbacks only record input;
 // network effects, published views and acknowledgements complete here.
 func (r *Runtime) applyProjectionLocked(ctx context.Context, p projection) (projection, error) {
+	// Only these requests belong to this kernel operation. Later observations
+	// need their own application, but cannot delay ACKs of completed effects.
+	applications := maps.Clone(r.applications)
+	var recipients []serviceconfig.Update
+	for _, record := range r.records {
+		if record.Role == "bgp" {
+			recipients = append(recipients, record)
+		}
+	}
 	if p.activationUntil != 0 {
 		clock, err := boottime.Read()
 		if err != nil || uint64(clock.BoottimeNanoseconds) >= p.activationUntil {
 			err = errors.Join(ErrStale, err)
-			r.finishApplicationsLocked(p, err)
+			r.finishApplicationsLocked(p, applications, err)
 			return p, err
 		}
 	}
@@ -414,17 +427,16 @@ func (r *Runtime) applyProjectionLocked(ctx context.Context, p projection) (proj
 		}
 		if p.observationVersion != r.observationVersion {
 			r.wakeCoordinatorLocked()
-			return p, nil
 		}
-		for _, record := range r.records {
-			if record.Role == "bgp" {
+		for _, record := range recipients {
+			if sameUpdate(r.records[record.Name], record) {
 				r.acceptBFDRecipientLocked(record)
 			}
 		}
 	} else {
 		r.applied.hash = ""
 	}
-	r.finishApplicationsLocked(p, err)
+	r.finishApplicationsLocked(p, applications, err)
 	return p, err
 }
 

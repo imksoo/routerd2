@@ -162,10 +162,10 @@ func Validate(c Config) error {
 	}
 	tracked := make(map[string]bool, len(c.Track))
 	for _, track := range c.Track {
-		if track.Service == "" || strings.TrimSpace(track.Service) != track.Service || len(track.Service) > 24 || tracked[track.Service] || track.Penalty < 1 || track.Penalty > 254 || track.HealthyThreshold < 1 || track.HealthyThreshold > 255 || track.UnhealthyThreshold < 1 || track.UnhealthyThreshold > 255 || track.MaxAgeMillis < 1 || track.MaxAgeMillis > 86400000 {
-			return errors.New("VRRP track requires distinct Health services, penalty 1..254, thresholds 1..255 and max_age_millis 1..86400000")
+		if track.Resource == "" || strings.TrimSpace(track.Resource) != track.Resource || len(track.Resource) > 128 || tracked[track.Resource] || track.Penalty < 1 || track.Penalty > 254 || track.HealthyThreshold < 1 || track.HealthyThreshold > 255 || track.UnhealthyThreshold < 1 || track.UnhealthyThreshold > 255 || track.MaxAgeMillis < 1 || track.MaxAgeMillis > 86400000 {
+			return errors.New("VRRP track requires distinct resource references, penalty 1..254, thresholds 1..255 and max_age_millis 1..86400000")
 		}
-		tracked[track.Service] = true
+		tracked[track.Resource] = true
 	}
 	if c.GracefulActivation != nil {
 		if err := factcondition.Validate(c.GracefulActivation.ReadyWhen); err != nil {

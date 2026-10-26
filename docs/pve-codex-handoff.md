@@ -27,7 +27,7 @@
 - gracefulはkernel適用開始時の入場条件である。成功後の準備喪失だけでは撤去しない。
   条件除外・role喪失・producer交替・元のboot期限では失効する。GARP/NAは適用ACKと
   実netlink検査の後に送る。準備待ちでも選挙広告は続ける。
-- IPv4/IPv6 v3 unicast、IPv4 v2と任意PASS、有限のHealth trackingに対応する。
+- IPv4/IPv6 v3 unicast、IPv4 v2と任意PASS、宣言resourceのHealth/BFD/BGP trackingに対応する。
   unicastはkernelのrouting/ARP/NDと実IP metadataを使い、仮Ethernet headerを作らない。
   Health penalty・連続probe回数・max_ageは元の観測で判定し、poll/replayで回数を増やさない。
   監視の空白・producer交替後はfreshなprobeを要求し、worker自身のboot clockでも失効させる。
@@ -61,65 +61,73 @@
   短い方をsessionとFIBへ渡す。失敗したpollでは元のauthorityを上書きせず、配送が止まれば
   元の期限で失効する。期限を跨いで届いた更新も、先に古いbudgetの失効を評価する。
   実際のDown／source交替／期限切れの後は、TCP Down/Idle・該当撤去のACK・新しい受信を要求する。
+- trackingは元の型付きstatusをderived assertionと共有する。宣言IDで参照を解決し、
+  現在のworker集合に含まれないsourceも設定から失わない。Healthは実probe回数、BFD/BGPは
+  別の元観測を数える。BFD continuity・producer交替・期限切れ後はfreshな確認を要求する。
+  tracked resource自身の明示的when=falseは、条件の元の期限内だけneutralとして回数とpenaltyを保持する。
+  他のresource種別とDisabled/NotApplicable/Standbyのphase契約は未実装。
+- kernel適用開始時の要求を固定し、その要求だけを完了する。I/O中の別通知で適用済み要求の
+  ACKを保留せず、後から届いた要求を先に完了しない。BGP statusは自身のmatching適用identityで
+  判断し、無関係なkernel I/Oで不明へ戻さない。
 - Health監視と履歴配送は分離する。保存先障害・queue満杯でもprobeを止めず、欠落と保存エラーを表示する。
   全probeの無欠落保存は保証しない。
 
-現在のworker ABIは2、compiler contractは `resource-program-native-8`、network journalはformat 5。
-以前のprototypeとの混在・rollbackは受け入れない。
+現在のworker ABIは3、compiler contractは `resource-program-native-9`、network journalはformat 5。
+`track.resource`は宣言IDであり、decisionはhealthy/unhealthy/neutral/unknownを明示する。
+破棄したservice-only形式のreader・混在運用・migrationは実装しない。
 
 ## 今回の検証
 
-最終製品buildは `RELEASE_ID=bfd-source-budget`。PVE隔離Linux VMで関連Race Detector、
-fmt・全体vet・amd64/arm64静的build、全体`make check`が成功した。arm64は実行していない。
-今回の修正ではworker ABI 2・compiler contract native-8・network journal 5を変更していない。
+製品buildは `RELEASE_ID=resource-track`。PVE隔離Linux VM、amd64で実行した。
+独立したUDP BFD/TCP BGP peerと、別試験のKeepalivedを使用する。
 
-最終amd64製品とRace Detector付きharnessで、独立UDP BFD peer・TCP BGP peer・実kernelを使った。
+- BFD/BGPの実障害と復旧が二つのVRRPの広告priorityを150→50→150へ変える。
+  packet captureで両VRIDを確認し、選挙workerのPID・世代を維持する。
+  BFD worker停止・元の観測期限・freshな復旧、controlの350ms停止時のTCP session維持、
+  BGP/BFD/control停止中のsurviving writerによるroute撤去も同じ製品で確認した。
+  この試験だけでBFD/BGPによる二node間のVIP引継ぎまで確認したとは扱わない。
+- KeepalivedとのHealth障害・復旧、Health SIGSTOP中の元の期限切れ、SIGKILL/rebindで
+  priority150/50と両ownerのVIP TCP/UDPを確認した。監視元の条件除外は有限neutralとして
+  counters/penaltyを保持し、同じ選挙workerとVIP TCP/UDPを維持する。条件復帰後も復旧する。
+- 新しい実試験で二つの不具合を発見し、ローカルでも再現して修正した。
+  無関係なkernel I/OでBGPの適用済みstatusを不明へ戻す判定と、後続観測によって
+  適用済み要求のACKを保留し、VRRP workerをtimeout・再起動させる判定である。
+  更新要求自身のidentityと適用開始時の要求を用いる。timeoutや確認条件は緩めていない。
+- neutralの元の条件期限切れ、繰返しpollとreplayによる確認回数の水増し拒否、
+  異なるresourceのI/O中のACK順序はローカルで確認した。
 
-- controlを350ms停止する。元のBFD期限はまだ有効なのに、c169643製品では一度のHTTP timeoutで
-  実BGP TCP接続が閉じることを再現した。修正後は同じ接続・worker・経路が維持される。
-- 実UDP BFDを止めると、TCP KEEPALIVEが続いていてもsessionとFIBを撤去する。再開後に復旧する。
-- BFD workerのSIGSTOP中も、元の受信期限でBGPと経路が失効する。再開後はfreshな受信で復旧する。
-- BGP・BFD・controlが停止中も、surviving writerはBFDの元の期限で経路を撤去する。
-  長いBGP観測期限の失効に頼らない。
-- BGP FIBの追加・withdrawと、writer再起動後の元の期限による撤去を確認した。
-  再帰IPv6 routeの元の前提期限による撤去も、supervisor・control・BGP停止中に確認した。
+- 同じ製品で独立2 WANのHealth→PBRを実TCP/UDPと両WANのcaptureで再確認した。
+  Health/control/network/supervisorの再起動、旧tree通知、duplicate/resequence、元期限とmax_age、
+  producer停止中のwriter自身の期限撤去、confirmed rollbackでのprimary復旧が成功した。
+  foreign address/route/rule/nft stateとprobeのsocket markを保持した。
+- 別のnetwork namespace内でHealthのTCP/HTTP/DNS/raw ICMP実ソケット試験が成功した。
+- 全体`make check`（unit・Python・Race Detector・vet）と関連Race Detector、fmt、
+  amd64/arm64の6静的ELF buildが成功した。
+  最終6 ELFのsigned bundle/catalog/runtime照合とCLI publisher検査も成功した。
 
-ローカルでは、長い9秒のpacket検出期限をproducerの元の5秒観測期限で制限し、
-原通知を変えずに失効させることを確認した。この長い間隔の同一条件は実daemonでは未試験。
-期限後にqueueから届いた更新が失効を隠さないこと、再送での延長拒否、TCP終了・撤去ACKとの
-対応付けも検証した。過去の再接続timeout自体には失敗requestの診断がなく、同じ原因とは断定しない。
-
-直前の `RELEASE_ID=dhcp-source-clock`（c169643）では次を確認済み。今回DHCP経路は変更していない。
-
-- 実DHCP ACK→DNSで元のboot ID・観測時刻・期限が一致する。native sourceとrouterd入力の両方を使う。
-- server・control・supervisor停止中もDNSが元の期限でhostnameを除外し、static DNS・同じTCP接続・
-  DNS PIDを維持する。APIは元通知のActive=trueと現在のOwnershipExpired=trueを区別する。
-- server再起動とjournalからのlease復旧、clientのINIT-REBOOTへの同じaddressのACK、同じDNS接続での復旧。
-- 遅い成功ACKからのDHCP応答拒否、publication上限超過時のReady／ACK拒否と割当除外の保存。
-- 全体`make check`と最終6 ELFの署名bundle・catalog・CLI publisher検査。今回のBFD buildでは
-  この6 ELF検査は再実行していない。publisherの入力は専用0700ディレクトリへ配置し、入力検査を緩めていない。
-
-Health→PBRの独立2 WAN・実TCP/UDP・packet capture、worker再起動・古い通知・confirmed rollback、
-graceful VRRP・追加WANとKeepalivedは、今回のBFD buildでは再実行していない。
-過去の成功を全体完成の判定には使わない。
-
-今回のログは `dist/bfd-control-budget-repro.log`（修正前の実通信失敗）、
-`dist/bfd-source-budget-{build,final-race,native,check}.log`。
-DHCP/DNSは `dist/dhcp-source-clock-{release-build,final-race,native,final-bundle,final-check}.log`。
+実daemonログは `dist/resource-track-final-native.log`、2 WANは `dist/resource-track-final-pbr.log`、
+captureは `dist/resource-track-packets/{protocols,health,pbr}`。
+実ソケットは `dist/resource-track-final-health-sockets.log`、buildは
+`dist/resource-track-release-build.log`、bundleは `dist/resource-track-final-bundle.log`、
+全体checkは `dist/resource-track-final-check.log`。
 出力との一致を実装条件にしない。
+途中のcapture保存失敗は、namespaceからhomeへ書こうとしたfixture配置の問題だった。
+root所有の一時0700内へ保存し外側から取り出すことで解決し、homeの権限は変えていない。
 
 ## 未完了と次の作業
 
-1. 以前の再接続timeoutの失敗request、IPv6 multicast未受信、初回IPv6 VIP TCP timeoutは原因未確定。
-   今回再現・修正した短いcontrol停止による不要な切断とは区別する。成功回数で閉じない。
-2. 残るprotocol snapshotの型付き保持、条件式の静的計算、通常投影のinstance生成・digest再計算を整理する。
-   DHCP client割当とjournalのUTC依存を整理し、実clock補正・停電・suspendで受入する。
-3. HA-01のHealth以外のtrack・neutral、外部secret参照・peer-aware移行、clusterと、
+1. 全実装計画、全更新復旧経路、外部engine、配備先と対象実機の受入は未完了。
+   今回の試験成功を製品全体・実機利用可能の判定には使わない。
+2. HA-01の残るresource種別・phase tracking、外部secret参照、peer-aware移行、cluster、
    二native nodeの追加identity・RA・DHCP/PD/NAT session継続を実装・受入する。
-4. 再帰next-hopの前提address/link期限はローカル投影で確認済みだが、同じ条件の実daemon試験は未実施。
+3. 過去のBFD再接続timeoutの失敗request、IPv6 multicast未受信、初回IPv6 VIP TCP/DAD timeoutは
+   原因未確定。今回再現・修正した二つのACK/status問題と同一とは断定しない。
+4. 残るprotocol snapshotの型付き保持、条件式の静的計算、通常投影でのinstance生成・digest再計算を整理する。
+   DHCP client割当とjournalのUTC依存を整理し、実clock補正・停電・suspendで受入する。
+5. 再帰next-hopの前提address/link期限はローカル投影で確認済みだが、同じ条件の実daemon試験は未実施。
    writer自体の停止中のlink fencing・IPv4 route撤去、物理suspendは保証しない。
-5. 全実装計画、全更新復旧経路、外部engine、配備先と対象実機の受入は未完了。
-   物理NIC・性能・suspend、QEMU時計補正は今回再実行していない。
+6. arm64は静的buildとbundle検査までで、実行していない。物理NIC・性能・suspend、
+   QEMU時計補正は今回再実行していない。対象実機の条件は未確定である。
 
 ## 環境
 

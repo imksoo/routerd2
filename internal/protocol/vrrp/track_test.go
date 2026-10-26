@@ -12,7 +12,7 @@ import (
 func trackedConfig() Config {
 	c := config4()
 	c.AdvertIntervalCentiseconds = 20
-	c.Track = []Track{{Service: "probe", Penalty: 100, MaxAgeMillis: 1000}}
+	c.Track = []Track{{Resource: "service/probe", Penalty: 100, MaxAgeMillis: 1000}}
 	return Normalize(c)
 }
 
@@ -47,14 +47,21 @@ func TestExpiredTrackDecisionCannotRestoreHigherPriority(t *testing.T) {
 	m := newMachine(c, netip.MustParseAddr(c.SourceAddress), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	m.start(time.Now())
 	err := publishOwnership(context.Background(), m, EffectsFunc(func(context.Context, Snapshot) (Decision, error) {
-		return Decision{Track: []TrackStatus{{Service: "probe", Known: true, ExpiresNanos: 1}}}, nil
+		return Decision{Track: []TrackStatus{{Resource: "service/probe", State: TrackHealthy, ExpiresNanos: 1}}}, nil
 	}))
-	if err != nil || m.priority() != 50 || m.track[0].Known {
+	if err != nil || m.priority() != 50 || m.track[0].State != TrackUnknown {
 		t.Fatal("expired response raised native priority", m.track, err)
 	}
 }
 
 func TestAdvertisementExpiresTrackingAfterOwnershipVerification(t *testing.T) {
+	for _, state := range []TrackState{TrackHealthy, TrackNeutral} {
+		t.Run(string(state), func(t *testing.T) { testAdvertisementExpiresTracking(t, state) })
+	}
+}
+
+func testAdvertisementExpiresTracking(t *testing.T, state TrackState) {
+	t.Helper()
 	c := trackedConfig()
 	m := newMachine(c, netip.MustParseAddr(c.SourceAddress), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	m.enter(StateActive, time.Now())
@@ -65,20 +72,20 @@ func TestAdvertisementExpiresTrackingAfterOwnershipVerification(t *testing.T) {
 	if err := m.stampObservation(clock); err != nil {
 		t.Fatal(err)
 	}
-	m.track[0] = TrackStatus{Service: "probe", Known: true, ExpiresNanos: 1}
+	m.track[0] = TrackStatus{Resource: "service/probe", State: state, ExpiresNanos: 1}
 	device := newFakeTransport()
 	if err := sendAdvertisement(context.Background(), m, device, false); err != nil {
 		t.Fatal(err)
 	}
 	frame := <-device.sent
-	if frame[14+20+2] != 50 || m.track[0].Known {
+	if frame[14+20+2] != 50 || m.track[0].State != TrackUnknown {
 		t.Fatal("advertisement used an expired Health decision", frame, m.track)
 	}
 }
 
 func TestTrackConfigurationAndPriorityFloor(t *testing.T) {
 	c := trackedConfig()
-	c.Track = append(c.Track, Track{Service: "second", Penalty: 100, MaxAgeMillis: 1000})
+	c.Track = append(c.Track, Track{Resource: "service/second", Penalty: 100, MaxAgeMillis: 1000})
 	if err := Validate(c); err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +95,7 @@ func TestTrackConfigurationAndPriorityFloor(t *testing.T) {
 	for _, edit := range []func(*Config){
 		func(c *Config) { c.AddressOwner, c.Priority = true, 255 },
 		func(c *Config) { c.Track[0].MaxAgeMillis = 0 },
-		func(c *Config) { c.Track[1].Service = c.Track[0].Service },
+		func(c *Config) { c.Track[1].Resource = c.Track[0].Resource },
 		func(c *Config) { c.Track[0].Penalty = -1 },
 	} {
 		bad := Normalize(c)

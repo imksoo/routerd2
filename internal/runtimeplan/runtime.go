@@ -86,11 +86,13 @@ type InstanceStatus struct {
 	Snapshot           json.RawMessage  `json:"snapshot,omitempty"`
 }
 type configuration struct {
-	source   config.Document
-	plan     resourceprogram.Plan
-	digest   string
-	revision uint64
-	vrrp     map[string]vrrp.Config
+	source    config.Document
+	resources map[string]resourceprogram.Resource
+	plan      resourceprogram.Plan
+	digest    string
+	revision  uint64
+	vrrp      map[string]vrrp.Config
+	bgp       map[string]bgpconfig.Config
 }
 
 type appliedProjection struct {
@@ -235,6 +237,14 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 	sourceSum := sha256.Sum256(encoded)
 	sourceDigest := hex.EncodeToString(sourceSum[:])
 	next := configuration{source: source, plan: plan, digest: sourceDigest, revision: revision}
+	next.resources = make(map[string]resourceprogram.Resource, len(source.Resources))
+	next.bgp = make(map[string]bgpconfig.Config)
+	for _, resource := range source.Resources {
+		next.resources[resource.ID] = resource
+		if resource.Service != nil && resource.Service.BGP != nil {
+			next.bgp[resource.Service.ModuleName()] = resource.Service.BGPConfig(r.dir, r.stateDir)
+		}
+	}
 	next.vrrp = make(map[string]vrrp.Config)
 	// Static identities depend only on this compiled configuration and our
 	// private paths. Prepare them once, outside the observation lock; retries

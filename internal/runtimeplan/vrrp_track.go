@@ -3,86 +3,141 @@ package runtimeplan
 import (
 	"time"
 
-	"github.com/imksoo/routerd2/internal/boottime"
-	"github.com/imksoo/routerd2/internal/protocol/health"
+	"github.com/imksoo/routerd2/internal/derived"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
-	"github.com/imksoo/routerd2/internal/serviceconfig"
+	"github.com/imksoo/routerd2/internal/resourceprogram"
 )
 
-type trackSource struct {
-	digest, epoch, boot string
-	generation          uint64
-}
-
 type vrrpTrackState struct {
-	source       trackSource
-	observed     uint64
-	lastPassed   int
-	healthyFloor int
-	status       vrrp.TrackStatus
+	origin, continuity       string
+	observed                 uint64
+	lastPassed, healthyFloor int
+	status                   vrrp.TrackStatus
 }
 
-func (s *vrrpTrackState) unknown(service string) {
+func (s *vrrpTrackState) unknown(resource string) {
 	s.healthyFloor = s.lastPassed
-	s.status = vrrp.TrackStatus{Service: service, Penalized: true}
+	s.status = vrrp.TrackStatus{Resource: resource, State: vrrp.TrackUnknown, Penalized: true}
 }
 
-// Advancing an accepted Health probe, rather than an RPC poll, owns hysteresis.
-// Raw consecutive counters also preserve progress through coalesced delivery.
-// An authority gap starts a new confirmation streak, never a synthetic failure.
-func (r *Runtime) advanceVRRPTracksLocked(u serviceconfig.Update, sample health.Snapshot) {
+func (r *Runtime) trackReference(resource string) derived.Reference {
+	service := r.config.resources[resource].Service
+	kind := "HealthCheck"
+	if service.BFD != nil {
+		kind = "BFD"
+	}
+	if service.BGP != nil {
+		kind = "BGPRouter"
+	}
+	return derived.Reference{Kind: kind, Resource: resource, Field: "phase"}
+}
+
+// Confirmation consumes original observations, not policy RPC polls. Explicit
+// condition exclusion preserves decisions/counters with the condition's budget.
+func (r *Runtime) advanceVRRPTracksLocked(facts resourceprogram.FactSnapshot) error {
+	refs := map[string]derived.Reference{}
+	for _, cfg := range r.config.vrrp {
+		for _, track := range cfg.Track {
+			ref := r.trackReference(track.Resource)
+			refs[ref.Key()] = ref
+		}
+	}
+	if len(refs) == 0 {
+		return nil
+	}
+	requested := make([]derived.Reference, 0, len(refs))
+	for _, ref := range refs {
+		requested = append(requested, ref)
+	}
+	clock, values, err := r.statusValuesLocked(facts, requested)
+	if err != nil {
+		return err
+	}
+	now := uint64(clock.BoottimeNanoseconds)
+	if r.vrrpTracks == nil {
+		r.vrrpTracks = map[string][]vrrpTrackState{}
+	}
 	for name, cfg := range r.config.vrrp {
-		if len(cfg.Track) == 0 {
-			continue
-		}
-		if r.vrrpTracks == nil {
-			r.vrrpTracks = make(map[string][]vrrpTrackState)
-		}
 		states, exists := r.vrrpTracks[name]
 		if !exists {
 			states = make([]vrrpTrackState, len(cfg.Track))
 			for i, track := range cfg.Track {
-				states[i].unknown(track.Service)
+				states[i].unknown(track.Resource)
 			}
-			r.vrrpTracks[name] = states
 		}
 		for i, track := range cfg.Track {
-			if "service."+track.Service != u.Name {
-				continue
-			}
 			state := &states[i]
-			source := trackSource{u.ConfigDigest, u.ProducerEpoch, sample.BootID, u.Generation}
-			if source == state.source && sample.ObservedNanos <= state.observed {
-				continue // retransmission or clock rewind is not a new probe
+			target := r.config.resources[track.Resource]
+			if target.When != nil {
+				truth, until := facts.ConditionAuthority(*target.When)
+				if truth == resourceprogram.False && until > now && r.guardBootID == clock.BootID && now < r.guardUntilNanos {
+					state.status.Resource, state.status.State = track.Resource, vrrp.TrackNeutral
+					state.status.ExpiresNanos = min(until, r.guardUntilNanos)
+					continue
+				}
 			}
-			if source != state.source || !state.status.Known || sample.ObservedNanos >= state.status.ExpiresNanos {
-				*state = vrrpTrackState{source: source}
-				state.unknown(track.Service)
-				state.healthyFloor = max(0, sample.State.ConsecutivePassed-1)
-			}
-			if sample.State.ConsecutivePassed < state.lastPassed {
-				state.healthyFloor = 0
-			}
-			state.observed, state.lastPassed = sample.ObservedNanos, sample.State.ConsecutivePassed
-			if sample.Stopped {
-				state.unknown(track.Service)
+			value := values[r.trackReference(track.Resource).Key()]
+			until := min(value.ExpiresNanos, value.ObservedNanos+uint64(track.MaxAgeMillis)*uint64(time.Millisecond))
+			if !value.Known || value.Origin == "" || value.ObservedNanos > now || until <= now {
+				state.unknown(track.Resource)
 				continue
 			}
-			passed := max(0, sample.State.ConsecutivePassed-state.healthyFloor)
-			if sample.State.ConsecutiveFailed >= track.UnhealthyThreshold {
-				state.status.Penalized = true
-			} else if passed >= track.HealthyThreshold {
-				state.status.Penalized = false
+			healthy := value.Text == "Healthy" || value.Text == "Up" || value.Text == "Established"
+			var passed, failed int
+			if target.Service.Health != nil {
+				sample := r.guardGrants[target.Service.ModuleName()].health
+				passed, failed = sample.State.ConsecutivePassed, sample.State.ConsecutiveFailed
+				if passed == 0 && failed == 0 {
+					state.unknown(track.Resource)
+					continue
+				}
+				healthy = passed > 0
 			}
-			state.status.Service, state.status.Known = track.Service, true
-			state.status.HealthyCount, state.status.UnhealthyCount = passed, sample.State.ConsecutiveFailed
-			state.status.ExpiresNanos = min(sample.ExpiresNanos, sample.ObservedNanos+uint64(track.MaxAgeMillis)*uint64(time.Millisecond))
+			if value.Origin != state.origin || value.Continuity != state.continuity || state.status.State == vrrp.TrackUnknown || now >= state.status.ExpiresNanos {
+				if value.Origin == state.origin && value.Continuity == state.continuity && value.ObservedNanos <= state.observed {
+					continue
+				}
+				*state = vrrpTrackState{origin: value.Origin, continuity: value.Continuity}
+				state.unknown(track.Resource)
+				state.healthyFloor = max(0, passed-1)
+			}
+			if value.ObservedNanos < state.observed {
+				continue
+			}
+			if value.ObservedNanos > state.observed {
+				state.observed = value.ObservedNanos
+				if target.Service.Health != nil {
+					if passed < state.lastPassed {
+						state.healthyFloor = 0
+					}
+					state.lastPassed = passed
+					state.status.HealthyCount = max(0, passed-state.healthyFloor)
+					state.status.UnhealthyCount = failed
+				} else if healthy {
+					state.status.HealthyCount = min(track.HealthyThreshold, state.status.HealthyCount+1)
+					state.status.UnhealthyCount = 0
+				} else {
+					state.status.UnhealthyCount = min(track.UnhealthyThreshold, state.status.UnhealthyCount+1)
+					state.status.HealthyCount = 0
+				}
+				if state.status.UnhealthyCount >= track.UnhealthyThreshold {
+					state.status.Penalized = true
+				}
+				if state.status.HealthyCount >= track.HealthyThreshold {
+					state.status.Penalized = false
+				}
+			}
+			state.status.Resource, state.status.ExpiresNanos = track.Resource, until
+			state.status.State = vrrp.TrackUnhealthy
+			if healthy {
+				state.status.State = vrrp.TrackHealthy
+			}
 		}
+		r.vrrpTracks[name] = states
 	}
+	return nil
 }
 
-// The coordinator holds mu after completing kernel effects. Registry loss,
-// stopped input and original source expiry all impose the configured penalty.
 func (r *Runtime) vrrpDecisionLocked(name string, active bool) (vrrp.Decision, error) {
 	cfg, ok := r.config.vrrp[name]
 	if !ok {
@@ -92,27 +147,11 @@ func (r *Runtime) vrrpDecisionLocked(name string, active bool) (vrrp.Decision, e
 	if len(cfg.Track) == 0 {
 		return decision, nil
 	}
-	clock, err := boottime.Read()
-	if err != nil {
+	if _, err := r.conditionFactsLocked(r.config, time.Now()); err != nil {
 		return decision, err
 	}
-	now := uint64(clock.BoottimeNanoseconds)
-	for i, track := range cfg.Track {
-		status := vrrp.TrackStatus{Service: track.Service, Penalized: true}
-		if states, exists := r.vrrpTracks[name]; exists {
-			state := &states[i]
-			sourceName := "service." + track.Service
-			binding, bound := r.bindings[sourceName]
-			module, registered := r.guardStatus[sourceName]
-			grant, granted := r.guardGrants[sourceName]
-			current := r.records[sourceName]
-			known := bound && registered && granted && module.Role == "health" && module.Ready && module.Generation == current.Generation && module.ConfigDigest == binding.digest && current.ConfigDigest == binding.digest && grant.generation == current.Generation && grant.epoch == current.ProducerEpoch && grant.sequence == current.Sequence && grant.health != nil && !grant.health.Stopped && clock.BootID == state.source.boot && clock.BootID == r.guardBootID && now < r.guardUntilNanos && now < state.status.ExpiresNanos
-			if !known {
-				state.unknown(track.Service)
-			}
-			status = state.status
-		}
-		decision.Track = append(decision.Track, status)
+	for _, state := range r.vrrpTracks[name] {
+		decision.Track = append(decision.Track, state.status)
 	}
 	return decision, nil
 }
