@@ -78,48 +78,65 @@
 
 ## 今回の実装と検証
 
-最新buildは `RELEASE_ID=bfd-vrf`。NET-07のBFDと参照するBGPを明示VRFへ接続した。
-BFDの`vrf`省略はdefault domain、指定時は宣言済みVRFを選ぶ。multihop socketは
-VRF masterへ、single-hopは明示member interfaceへ束縛する。sourceのdomain、VRFのidentity・
-table・UP状態を確認し、同じlocal/remote addressを別VRFで独立して利用できる。
-BGP transportのbindingとFIB tableも同じscopeへ限定する。新しいleaseやmanagerは追加していない。
+最新buildは `RELEASE_ID=bfd-vrf-ipv6`。NET-07の同一endpointを持つIPv4/IPv6の
+blue/red VRFとdefault domainを実daemonへ接続した。IPv6 BGP transport、再帰next-hop、
+learned route先のTCP/UDPも実Linux routerを越えて動く。設定例
+[bfd-vrf.yaml](../examples/bfd-vrf.yaml) をdual-stackへ更新し、製品CLIでvalidateした。
 
-VRFごとのloopback source用に、既存link writerへowned `dummy`を追加した。
-所有権journal・属性適用・期限処理は既存のものを使う。宣言済みmaster chainから求める
-routing domainをconfig検証とBGP再帰next-hop解決で共有し、旧direct-master限定処理を除いた。
-VRF device自身やbridge配下のaddressも正しいtableで扱う。条件から除外されたVRFは依存BFDも停止する。
+三domainを同時に起動するとdefault BFDのUDP 4784 bindが`address already in use`で失敗した。
+multihopの受信socketだけに`SO_REUSEADDR`を指定して修正した。domain/sourceの既存abstract
+claimでrouterd受信ownerは一つに限定し、TX portの専有と`SO_REUSEPORT`不使用を維持する。
+新しいmanager・lease・別の状態機械は追加していない。実ソケット試験でIPv4/IPv6とも二重ownerを拒否した。
 
-PVE隔離amd64 VMで `scripts/bfd.py` の全5ケースが成功した。製品はCGO無効の実3 ELF、
-harnessはRace Detector付きで、独立UDP/TCP peerとLinux forwarderを使う。
+BGP設定の正規化では、全configをJSONへencode/decodeして複製する処理を除いた。
+固定版normalizerが既に再構築するslice/mapを使い、残るnative mapとgraceful-restart pointerを
+明示的に複製する。結果を変更しても呼出元のpolicy・path・pointer・transportを変更しない。
+512 peerのこのVMでの3回測定は、中央値3.606ms/835122Bから0.351ms/199417Bへ減った。
+これは設定正規化の測定であり、packet throughputや対象機の性能受入ではない。
+再測定は `go test ./internal/protocol/bgpconfig -run '^$' -bench BenchmarkNormalize512Peers -benchmem`。
 
-- 既存default-domain single-hop BFD/BGP。初回Downの起動抑止、UDP障害、元期限、
-  worker停止・復旧、surviving writerの撤去。
-- routed IPv4 BFD/BGP。Linux routerを越えたloopback間接続、learned route先のTCP/UDP、
-  UDPのみ停止中のTCP終了・FIB撤去、復旧、凍結sourceとwriterの期限撤去。
-- routed IPv6 BFD。障害・復旧とSIGKILL後のfresh producer。
-- IPv4 single-hop VRF。UDP 3784・TTL 255・直結routeでUp→Down→Up。
-- 同じsource/peerを持つblue/red VRFとdefault domain。独立BFD/BGP、別々の利用者TCP/UDP応答、
-  blueだけのUDP障害・復旧、blue BFD SIGKILL後の新producerを確認した。
-  redのsession・通信とred BFD/BGP・blue BGPのPID/世代は継続する。
-  default domainに同じ宛先への実通信可能な経路を置き、blue撤去中に流出しないことを確認した。
-- routed IPv4/IPv6と両VRFのcaptureで、UDP 4784、source port 49152以上、送信255／受信254を検査した。
+PVE隔離amd64 VMで、CGO無効の実3 ELF、Race Detector付きharness、独立UDP/TCP peerと
+Linux forwarderを使用した。三domainのIPv4/IPv6個別試験で次を確認した。
+
+- 同じsource/remoteをblue/red/defaultで同時使用し、それぞれのBFDとBGPを接続する。
+  利用者TCP/UDPの異なる応答で各domainの実経路を識別する。
+- 初回BFD Down中はBGPを接続しない。blueだけのUDP停止でそのTCPを終了し、学習経路を撤去する。
+  defaultに同じ宛先への通信可能な経路があってもblueの利用者通信を受け渡さない。
+  UDP復旧、blue BFD SIGKILL後のfresh producer、同じBGP workerでの再接続・経路復旧を確認した。
+- red/defaultのTCP session・通信・worker PID/世代は継続する。
+- default BFDをSIGSTOPすると、保持したraw UP通知の元の期限でhealthが失効し、
+  default BGPのTCPと学習経路が失効する。blue/redのsessionと通信は継続する。
+  SIGCONT後は同じworkerの新しい受信でBGPと学習経路が戻る。
+- 三つのWANのcaptureでUDP 4784、source port 49152以上、送信255／受信254を検査した。
+  default domainの実BFD/BGPも同時に動くため、単にVRF同士のsocketが衝突しないだけの試験ではない。
+
+IPv6で自動link-localがDAD中の初回TCPは、SYNもNSも出ずneighbor cacheが未解決だった。
+このfixtureでは各転送linkへ協調した明示link-localをNoDADで設定している。
+loopback sourceではLinuxが送出link上の利用可能なND sourceを必要とする挙動と一致する。
+[Linux 6.8の実装](https://github.com/torvalds/linux/blob/v6.8/net/ipv6/ndisc.c#L612-L715)を参照。
+自動生成link-local DADの起動受入へ成功を広げない。client deadlineとprotocol期限は延長していない。
+新規隔離namespaceで`udp_l3mdev_accept=0`も確認した。別のaccept policyは未受入である。
+
+IPv4のdefault BFD凍結後、blueの利用者TCP接続が一度300msでtimeoutした。
+captureにはその試行のSYN/SYN-ACK/ACKがあり、直後に接続を閉じている。
+trace付きと通常の再実行、IPv6の同じ試験は成功したが、原因は未確定である。
+成功した再実行を原因解決とは扱わない。失敗時刻の出力はローカル
+`dist/bfd-vrf-ipv4-timeout/`、syscall比較は `dist/bfd-vrf-ipv4-syscall/`。
 
 再実行は `make check-bfd`。rootまたはpasswordless sudo、Linux user/network namespaceが必要。
-製品・harnessをroot所有0700の一時directoryへ配置し、captureをその中から回収する。
-home権限は変えない。設定例 [bfd-vrf.yaml](../examples/bfd-vrf.yaml) は製品CLIでvalidate済み。
-VRF試験はkernel既定のl3mdev accept設定で実行した。今回のbound socket/FIB試験を、
-任意の転送VRF policy、IPv6 VRFやNIC受入の成功へ拡張して解釈しない。
+製品とharnessはroot所有0700へ配置し、失敗した実行のcaptureも回収する。home権限は変えない。
+関連Race Detector、fmt・vet、amd64/arm64の6静的ELF buildは成功した。
+全体`make check`、最終6 ELFのsigned bundle/catalog/publisher検査、最終native全6ケースは成功した。
+実ソケットの二重owner拒否も最終コードで再実行して成功した。amd64は実通信、arm64はbuild/bundle検査までである。
+worker ABI 3、compiler contract native-11、network journal format 5は変更していない。
+prototype reader・migrationは追加していない。
 
-compiler contractはnative-11、worker ABI 3、network journal format 5。prototype readerやmigrationはない。
-全体`make check`（全Go/Python試験・Race Detector・vet）と最終6 ELFのsigned bundle/catalog/publisher検査は成功した。
-amd64/arm64の6静的ELF buildは成功した。arm64は実行していない。
-
-現在のnativeログは `dist/bfd-vrf-final-native.log` と
-`dist/bfd-vrf-final-native/{single-hop,multihop-ipv4,multihop-ipv6,vrf,vrf-single-hop}.log`。
-captureは同じdirectoryの `*-wan0.pcap` と `vrf-wan1.pcap`。
-全体check・build・bundleは `dist/bfd-vrf-final-{check,build,bundle}.log`。
-最後のred TCP session継続assertion追加後の実行は `dist/bfd-vrf-final-isolation.log`。
-古い試験記録・出力との一致は実装条件にしない。
+現在の個別実行は `dist/bfd-vrf-ipv{4,6}-expiry{.log,/vrf*.log}`。
+BFD native socketは `dist/bfd-vrf-ipv6-ownership.log`、関連Race Detectorは
+`dist/bfd-vrf-ipv6-race.log`、benchmarkは `dist/bgp-normalize-{before,after}.log`。
+全体check・build・bundleは `dist/bfd-vrf-ipv6-{final-check,static-build,final-bundle}.log`。
+最終全ケースの出力先は `dist/bfd-vrf-ipv6-final-native{.log,/}`。
+過去の出力・checkpointは実装制約にしない。
 
 先行buildでは実2 WANのHealth→PBR・実TCP/UDP・worker再起動・古い通知・期限切れ・
 confirmed rollback、およびKeepalivedとのtracking・IPv6 multicastを確認している。
@@ -130,7 +147,7 @@ confirmed rollback、およびKeepalivedとのtracking・IPv6 multicastを確認
 1. 全実装計画、全更新復旧経路、外部engine、配備先と対象実機の受入は未完了。
    今回の試験成功を製品全体・実機利用可能の判定には使わない。
 2. NET-07の旧resource/profile、動的source・VRF経路変更、大規模RIBを実装・受入する。
-   今回はIPv6のBGP multihop連動・VRFまでは試していない。
+   IPv4/IPv6のmultihop BFD/BGPは実通信したが、自動link-local DAD起動、IPv6 single-hop VRF・link-local next-hop・ECMP等は未受入。
    HA-01の残るresource種別・phase tracking、外部secret参照、peer-aware移行、cluster、
    二native nodeの追加identity・RA・DHCP/PD/NAT session継続を実装・受入する。
 3. 過去のBFD再接続timeoutの失敗request、IPv6 multicast未受信、初回IPv6 VIP TCP/DAD timeoutは

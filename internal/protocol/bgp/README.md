@@ -27,6 +27,11 @@ GoBGP or gRPC. The configured resource is resolved intent, not an interpreter
 for the original resource graph. The compiler resolves dependencies, dynamic
 admission, addresses, secrets and convergence defaults before constructing it.
 
+Configuration normalization uses typed values. The pinned `bgpdaemon`
+normalizer rebuilds slices and the peer map; native transport/reference maps
+and graceful-restart pointers are copied explicitly. It does not encode and
+decode an entire configuration merely to obtain independent mutable storage.
+
 Full snapshots carry boot-scoped `observed_nanos`/`expires_nanos` metadata.
 The worker stamps before the engine walk and preserves that age through the
 effect acknowledgment; active ownership lasts at most five seconds. UTC is

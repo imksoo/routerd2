@@ -101,9 +101,19 @@ func newRoutedBFDPeer(t *testing.T, family, interfaceName string) routedBFDPeer 
 		{Destination: remoteCIDR, Interface: "to-peer", Gateway: peerAddress},
 	})
 	configure(remoteNS, map[string]string{"lo": remoteCIDR, "peer0": peerCIDR}, []network.Route{{Destination: sourceCIDR, Interface: "peer0", Gateway: outbound}})
+	if family == "ipv6" {
+		// Loopback-sourced packets need usable link-local ND sources on every
+		// forwarding link. This isolated static topology coordinates them
+		// explicitly instead of relying on automatic-address DAD timing.
+		configure(middle, map[string]string{"from-router": "fe80::2/64", "to-peer": "fe80::1/64"}, nil)
+		configure(remoteNS, map[string]string{"peer0": "fe80::2/64"}, nil)
+	}
 	if family == "ipv4" {
 		configure(middle, nil, []network.Route{{Destination: "203.0.113.0/24", Interface: "to-peer", Gateway: peerAddress}})
 		configure(remoteNS, map[string]string{"lo": "203.0.113.9/32"}, nil)
+	} else {
+		configure(middle, nil, []network.Route{{Destination: "2001:db8:77::/64", Interface: "to-peer", Gateway: peerAddress}})
+		configure(remoteNS, map[string]string{"lo": "2001:db8:77::9/128"}, nil)
 	}
 	peer, listener := openDaemonBFDPeer(t, remoteNS, netip.MustParseAddr(remote), netip.AddrPortFrom(netip.MustParseAddr(source), 4784), 254)
 	link, err := netlink.LinkByName(interfaceName)
@@ -115,8 +125,12 @@ func newRoutedBFDPeer(t *testing.T, family, interfaceName string) routedBFDPeer 
 		{Name: "lo", Addresses: []string{sourceCIDR}},
 	}, Routes: []network.Route{{Destination: remoteCIDR, Interface: interfaceName, Gateway: gateway}}}
 	if family == "ipv6" {
+		desired.Interfaces[0].Addresses = append(desired.Interfaces[0].Addresses, "fe80::1/64")
 		for i := range desired.Interfaces {
-			desired.Interfaces[i].AddressOptions = map[string]network.AddressOptions{desired.Interfaces[i].Addresses[0]: {NoDAD: true}}
+			desired.Interfaces[i].AddressOptions = map[string]network.AddressOptions{}
+			for _, address := range desired.Interfaces[i].Addresses {
+				desired.Interfaces[i].AddressOptions[address] = network.AddressOptions{NoDAD: true}
+			}
 		}
 	}
 	return routedBFDPeer{peer: peer, listener: listener, index: link.Attrs().Index, source: source, remote: remote, gateway: gateway, desired: desired, remoteNS: remoteNS}

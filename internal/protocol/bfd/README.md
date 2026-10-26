@@ -80,6 +80,11 @@ link identity, master and administrative state every second without blocking
 packet processing. Single-hop additionally keeps its source-prefix constraint.
 Loss of these facts stops the worker.
 
+Multihop receive sockets enable `SO_REUSEADDR` for simultaneous default-domain
+and VRF-bound endpoints at the same local address/port. Domain/address abstract
+claims still reject a second routerd owner. Transmit sockets keep exclusive
+source-port binds, and `SO_REUSEPORT` is not enabled.
+
 An explicit `vrf` names a committed Linux VRF master. The local source must
 belong to that domain; omission selects the default domain. Multihop sockets
 bind the VRF master and route through its members; single-hop sockets bind the

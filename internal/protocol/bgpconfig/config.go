@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/netip"
 	"path/filepath"
 	"regexp"
@@ -56,12 +57,23 @@ type PeerTransport struct {
 }
 
 func Normalize(c Config) Config {
-	// Upstream Normalize canonicalizes slices in place. Clone first so a plan
-	// or another module cannot observe mutation of its shared configuration.
-	b, _ := json.Marshal(c)
-	var out Config
-	_ = json.Unmarshal(b, &out)
-	out.Runtime = bgpdaemon.Normalize(out.Runtime)
+	out := c
+	// The pinned normalizer rebuilds its slices and peer map. Graceful-restart
+	// pointers remain shared; copy them so the result owns its mutable intent.
+	out.Runtime = bgpdaemon.Normalize(c.Runtime)
+	if restart := out.Runtime.Global.GracefulRestart; restart != nil {
+		copy := *restart
+		out.Runtime.Global.GracefulRestart = &copy
+	}
+	for address, peer := range out.Runtime.Peers {
+		if restart := peer.GracefulRestart; restart != nil {
+			copy := *restart
+			peer.GracefulRestart = &copy
+			out.Runtime.Peers[address] = peer
+		}
+	}
+	out.PeerTransports = maps.Clone(c.PeerTransports)
+	out.PeerBFD = maps.Clone(c.PeerBFD)
 	if out.Runtime.Global.ListenPort == 0 {
 		out.Runtime.Global.ListenPort = 179
 	}

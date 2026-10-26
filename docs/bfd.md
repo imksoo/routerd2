@@ -54,6 +54,11 @@ pair and discriminator; multihop does not allow point-to-point source aliases or
 link-local addresses. Two workers cannot own the same local multihop receive
 socket within a routing domain. Single-hop UDP 3784 remains independently available.
 
+Multihop receivers use `SO_REUSEADDR` so a default-domain socket and VRF-bound
+sockets can bind the same address/control port. The existing abstract endpoint
+claim still gives one routerd receiver per domain/address. Transmit source
+ports remain exclusive; `SO_REUSEPORT` distribution is not used.
+
 Authentication is not implemented in either mode. Other pending protocol and
 resource work is listed in the implementation plan; this routed mode is not a
 claim of full BFD resource parity.
@@ -80,14 +85,26 @@ VRF through the master chain, including addresses on the VRF device itself.
 An excluded VRF declaration also excludes its dependent BFD service.
 
 `make check-bfd` exercises IPv4 single-hop in a VRF and two independent routed
-IPv4 BFD/BGP peers with identical addresses in separate VRFs. Distinct actual
+BFD/BGP peers with identical addresses in separate VRFs and the default domain,
+for both IPv4 and IPv6. Distinct actual
 TCP/UDP responses identify each path. UDP loss and worker replacement in one
 VRF leave the other worker/session running. A reachable default-domain copy
 of the destination cannot carry the withdrawn VRF's bound client traffic.
-Captures inspect UDP 4784 and both routed TTLs. This establishes the exercised
-bound sockets and FIBs, not arbitrary forwarded VRF policy, IPv6 VRF operation
-or physical NIC qualification. Tests use the kernel's default l3mdev accept
+Freezing the default-domain BFD worker also expires its retained UP observation,
+closes its BGP session and withdraws its learned route while the VRFs continue.
+Captures inspect UDP 4784 and both routed TTLs on all three paths. This establishes the exercised
+bound sockets and FIBs, not arbitrary forwarded VRF policy or physical NIC
+qualification. Tests use the kernel's default l3mdev accept
 settings; changing shared socket-accept policy requires separate qualification.
+
+The IPv6 namespace topology explicitly coordinates usable link-local addresses
+on each forwarding link with NoDAD. A loopback source is not an address of the
+egress link; Linux needs a usable on-link source for its neighbor solicitations.
+The first attempt with only tentative automatic link-local addresses produced
+no SYN or neighbor solicitation and left the neighbor cache incomplete. This
+matches [Linux 6.8's ND source selection](https://github.com/torvalds/linux/blob/v6.8/net/ipv6/ndisc.c#L612-L715).
+The test does not qualify startup with automatic link-local DAD. Client
+timeouts and protocol detection budgets were not increased.
 
 ## Receive time, publication and restarts
 

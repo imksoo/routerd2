@@ -67,45 +67,65 @@ func TestDaemonSinglehopBFDVRF(t *testing.T) {
 	t.Log("VRF member-bound single-hop BFD: UDP 3784, TTL 255, direct route, loss and recovery")
 }
 
-// Identical addresses behind two independent Linux routers must produce two
-// independent BFD/BGP sessions, FIBs and application responses.
+// Identical addresses behind independent Linux routers must produce separate
+// BFD/BGP sessions, FIBs and application responses in each routing domain.
 func TestDaemonBFDVRFIsolation(t *testing.T) {
-	if !isolateFixture(t, "TestDaemonBFDVRFIsolation") {
-		return
+	if isolateFixture(t, "TestDaemonBFDVRFIsolation") {
+		testDaemonBFDVRFIsolation(t, "ipv4")
+	}
+}
+
+func TestDaemonBFDVRFIPv6Isolation(t *testing.T) {
+	if isolateFixture(t, "TestDaemonBFDVRFIPv6Isolation") {
+		testDaemonBFDVRFIsolation(t, "ipv6")
+	}
+}
+
+func testDaemonBFDVRFIsolation(t *testing.T, family string) {
+	t.Helper()
+	suffix, learnedPrefix, application := "4", "203.0.113.0/24", "203.0.113.9"
+	fibFamily := netlink.FAMILY_V4
+	if family == "ipv6" {
+		suffix, learnedPrefix, application, fibFamily = "6", "2001:db8:77::/64", "2001:db8:77::9", netlink.FAMILY_V6
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	failures := make(chan error, 8)
-	paths := []routedBFDPeer{newRoutedBFDPeer(t, "ipv4", "wan0"), newRoutedBFDPeer(t, "ipv4", "wan1"), newRoutedBFDPeer(t, "ipv4", "wan2")}
-	names := []string{"blue", "red", ""}
-	sessions := []chan *bfdBGPSession{make(chan *bfdBGPSession, 4), make(chan *bfdBGPSession, 4)}
-	captures := []*healthPBRCaptureState{healthPBRCapture(t, "wan0"), healthPBRCapture(t, "wan1")}
+	paths := []routedBFDPeer{newRoutedBFDPeer(t, family, "wan0"), newRoutedBFDPeer(t, family, "wan1"), newRoutedBFDPeer(t, family, "wan2")}
+	domains := []struct {
+		name, vrf, response string
+		table               int
+	}{{"blue", "blue", "B", 1001}, {"red", "red", "R", 1002}, {"default", "", "D", 254}}
+	sessions := []chan *bfdBGPSession{make(chan *bfdBGPSession, 4), make(chan *bfdBGPSession, 4), make(chan *bfdBGPSession, 4)}
+	captures := []*healthPBRCaptureState{healthPBRCapture(t, "wan0"), healthPBRCapture(t, "wan1"), healthPBRCapture(t, "wan2")}
 	doc := config.Native{}
-	for i, path := range paths[:2] {
-		name, table := names[i], 1001+i
-		vrrpVIPResponders(t, path.remoteNS, "4", []string{"203.0.113.9"}, []string{"B", "R"}[i])
-		path.desired.Interfaces[0].Master = &name
-		path.desired.Interfaces[1].Name = name + "-src"
-		path.desired.Interfaces[1].Master = &name
-		path.desired.Interfaces = append(path.desired.Interfaces, network.Interface{Name: name})
-		path.desired.Routes[0].Table = table
+	for i, path := range paths {
+		domain := domains[i]
+		vrrpVIPResponders(t, path.remoteNS, suffix, []string{application}, domain.response)
+		if domain.vrf != "" {
+			path.desired.Interfaces[0].Master = &domain.vrf
+			path.desired.Interfaces[1].Name = domain.name + "-src"
+			path.desired.Interfaces[1].Master = &domain.vrf
+			path.desired.Interfaces = append(path.desired.Interfaces, network.Interface{Name: domain.vrf})
+			doc.Network.Links = append(doc.Network.Links, network.Link{Name: domain.vrf, Kind: "vrf", VRFTable: domain.table}, network.Link{Name: domain.name + "-src", Kind: "dummy"})
+		}
+		path.desired.Routes[0].Table = domain.table
 		doc.Network.Interfaces = append(doc.Network.Interfaces, path.desired.Interfaces...)
 		doc.Network.Routes = append(doc.Network.Routes, path.desired.Routes...)
-		doc.Network.Links = append(doc.Network.Links, network.Link{Name: name, Kind: "vrf", VRFTable: table}, network.Link{Name: name + "-src", Kind: "dummy"})
 		doc.Services = append(doc.Services,
-			serviceconfig.Service{Name: name + "-watch", BFD: &bfd.Config{VRF: name, Multihop: true, SourceAddress: path.source, Peers: []bfd.Peer{{Address: path.remote, MinTxMilliseconds: 200, MinRxMilliseconds: 200, DetectMultiplier: 5}}}},
-			serviceconfig.Service{Name: name + "-bgp", BGP: &serviceconfig.BGP{
-				Table: table, RouteMetric: 200,
+			serviceconfig.Service{Name: domain.name + "-watch", BFD: &bfd.Config{VRF: domain.vrf, Multihop: true, SourceAddress: path.source, Peers: []bfd.Peer{{Address: path.remote, MinTxMilliseconds: 200, MinRxMilliseconds: 200, DetectMultiplier: 5}}}},
+			serviceconfig.Service{Name: domain.name + "-bgp", BGP: &serviceconfig.BGP{
+				Table: domain.table, RouteMetric: 200,
 				Runtime: bgpdaemon.AppliedConfig{
-					Global: bgpdaemon.AppliedGlobal{ASN: 64512, RouterID: path.source, ListenPort: -1},
+					Global: bgpdaemon.AppliedGlobal{ASN: 64512, RouterID: "192.0.2.1", ListenPort: -1},
 					Peers: map[string]bgpdaemon.AppliedPeer{path.remote: {
 						Address: path.remote, ASN: 64513, TimersProfile: "fast", EbgpMultihop: 5,
-						ImportPolicy:     bgpdaemon.AppliedImportPolicy{AllowedPrefixes: []string{"203.0.113.0/24"}, NextHopRewrite: "unchanged"},
+						ImportPolicy:     bgpdaemon.AppliedImportPolicy{AllowedPrefixes: []string{learnedPrefix}, NextHopRewrite: "unchanged"},
 						ExportPolicyName: "fixture-export", ExportPolicy: bgpdaemon.AppliedExportPolicy{AllowedPrefixes: []string{"198.51.100.0/24"}},
 					}},
 				},
-				PeerTransports: map[string]bgpconfig.PeerTransport{path.remote: {LocalAddress: path.source, RemotePort: path.listener.Addr().(*net.TCPAddr).Port, BindInterface: name}},
-				PeerBFD:        map[string]bgpconfig.BFDReference{path.remote: {Service: name + "-watch"}},
+				PeerTransports: map[string]bgpconfig.PeerTransport{path.remote: {LocalAddress: path.source, RemotePort: path.listener.Addr().(*net.TCPAddr).Port, BindInterface: domain.vrf}},
+				PeerBFD:        map[string]bgpconfig.BFDReference{path.remote: {Service: domain.name + "-watch"}},
 			}},
 		)
 		go path.peer.run(ctx, failures)
@@ -131,10 +151,7 @@ func TestDaemonBFDVRFIsolation(t *testing.T) {
 	// A reachable main-table destination with the same source and peer pair
 	// makes accidental fallback observable as a distinct application response.
 	decoy := paths[2]
-	vrrpVIPResponders(t, decoy.remoteNS, "4", []string{"203.0.113.9"}, "D")
-	doc.Network.Interfaces = append(doc.Network.Interfaces, decoy.desired.Interfaces...)
-	doc.Network.Routes = append(doc.Network.Routes, decoy.desired.Routes...)
-	doc.Network.Routes = append(doc.Network.Routes, network.Route{Destination: "203.0.113.0/24", Gateway: decoy.gateway, Interface: "wan2", Metric: 777})
+	doc.Network.Routes = append(doc.Network.Routes, network.Route{Destination: learnedPrefix, Gateway: decoy.gateway, Interface: "wan2", Metric: 777})
 	if err := config.Validate(config.FromNative(doc)); err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +182,7 @@ func TestDaemonBFDVRFIsolation(t *testing.T) {
 		t.Helper()
 		var instance runtimeplan.InstanceStatus
 		var state bfd.Snapshot
-		if err := f.control.Do(ctx, "GET", "/v1/services/service."+names[i]+"-watch", nil, &instance); err != nil {
+		if err := f.control.Do(ctx, "GET", "/v1/services/service."+domains[i].name+"-watch", nil, &instance); err != nil {
 			t.Fatal(err)
 		}
 		if err := json.Unmarshal(instance.Snapshot, &state); err != nil {
@@ -175,8 +192,8 @@ func TestDaemonBFDVRFIsolation(t *testing.T) {
 	}
 	route := func(i int) bool {
 		t.Helper()
-		_, prefix, _ := net.ParseCIDR("203.0.113.0/24")
-		routes, err := netlink.RouteListFiltered(netlink.FAMILY_V4, &netlink.Route{Dst: prefix, Table: 1001 + i}, netlink.RT_FILTER_DST|netlink.RT_FILTER_TABLE)
+		_, prefix, _ := net.ParseCIDR(learnedPrefix)
+		routes, err := netlink.RouteListFiltered(fibFamily, &netlink.Route{Dst: prefix, Table: domains[i].table}, netlink.RT_FILTER_DST|netlink.RT_FILTER_TABLE)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -189,11 +206,11 @@ func TestDaemonBFDVRFIsolation(t *testing.T) {
 	}
 	traffic := func(i int, available bool) {
 		t.Helper()
-		for _, protocol := range []string{"tcp4", "udp4"} {
+		for _, protocol := range []string{"tcp", "udp"} {
 			dialer := net.Dialer{Timeout: 300 * time.Millisecond, LocalAddr: &net.TCPAddr{IP: net.ParseIP(paths[i].source)}, Control: func(_, _ string, raw syscall.RawConn) error {
 				var result error
 				err := raw.Control(func(fd uintptr) {
-					result = unix.SetsockoptString(int(fd), unix.SOL_SOCKET, unix.SO_BINDTODEVICE, names[i])
+					result = unix.SetsockoptString(int(fd), unix.SOL_SOCKET, unix.SO_BINDTODEVICE, domains[i].vrf)
 				})
 				if err != nil {
 					return err
@@ -201,14 +218,15 @@ func TestDaemonBFDVRFIsolation(t *testing.T) {
 				return result
 			}}
 			port := "18093"
-			if protocol == "udp4" {
+			if protocol == "udp" {
 				port, dialer.LocalAddr = "18094", &net.UDPAddr{IP: net.ParseIP(paths[i].source)}
 			}
-			conn, err := dialer.DialContext(ctx, protocol, net.JoinHostPort("203.0.113.9", port))
+			started := time.Now()
+			conn, err := dialer.DialContext(ctx, protocol+suffix, net.JoinHostPort(application, port))
 			var response [1]byte
 			if err == nil {
 				_ = conn.SetDeadline(time.Now().Add(300 * time.Millisecond))
-				if protocol == "udp4" {
+				if protocol == "udp" {
 					_, err = conn.Write([]byte("domain"))
 				}
 				if err == nil {
@@ -216,8 +234,9 @@ func TestDaemonBFDVRFIsolation(t *testing.T) {
 				}
 				conn.Close()
 			}
-			if available && (err != nil || response[0] != []byte{'B', 'R', 'D'}[i]) || !available && err == nil {
-				t.Fatal("VRF user traffic", names[i], protocol, available, response, err)
+			if available && (err != nil || response[0] != domains[i].response[0]) || !available && err == nil {
+				t.Log("user traffic duration", time.Since(started))
+				t.Fatal("routing-domain user traffic", domains[i].name, protocol, available, response, err)
 			}
 		}
 	}
@@ -231,9 +250,9 @@ func TestDaemonBFDVRFIsolation(t *testing.T) {
 			t.Fatal(err)
 		case <-time.After(12 * time.Second):
 			instance, state := snapshot(i)
-			t.Fatal("VRF BGP did not establish", names[i], instance, state)
+			t.Fatal("routing-domain BGP did not establish", domains[i].name, instance, state)
 		}
-		if err := session.wire.send(2, fixtureUpdate("203.0.113.0/24", paths[i].remote, false)); err != nil {
+		if err := session.wire.send(2, fixtureUpdate(learnedPrefix, paths[i].remote, false)); err != nil {
 			t.Fatal(err)
 		}
 		until(t, 6*time.Second, func() bool { checkPeer(); return route(i) })
@@ -254,18 +273,21 @@ func TestDaemonBFDVRFIsolation(t *testing.T) {
 		traffic(i, false)
 	}
 	traffic(2, true)
-	for i, path := range paths[:2] {
+	for i, path := range paths {
 		until(t, 4*time.Second, func() bool { checkPeer(); return path.peer.received.Load() > 0 })
 		if path.listener.accepted.Load() != 0 || route(i) {
-			t.Fatal("initial BFD Down allowed VRF BGP", names[i])
+			t.Fatal("initial BFD Down allowed BGP", domains[i].name)
 		}
 	}
+	defaultSession := connect(2)
 	blue, red := connect(0), connect(1)
 	redWatch, redBGP, blueBGP := worker("red-watch"), worker("red-bgp"), worker("blue-bgp")
+	defaultWatch, defaultBGP := worker("default-watch"), worker("default-bgp")
 	original, _ := snapshot(0)
 	paths[0].peer.enabled.Store(false)
 	withdraw(0, blue)
 	traffic(1, true)
+	traffic(2, true)
 	select {
 	case <-red.closed:
 		t.Fatal("blue BFD loss closed red BGP")
@@ -278,30 +300,70 @@ func TestDaemonBFDVRFIsolation(t *testing.T) {
 	}
 	withdraw(0, blue)
 	traffic(1, true)
-	connect(0)
+	traffic(2, true)
+	blue = connect(0)
 	fresh, _ := snapshot(0)
 	if fresh.Generation <= original.Generation || fresh.ProducerEpoch == original.ProducerEpoch {
 		t.Fatal("VRF BFD restart retained old producer", original, fresh)
 	}
-	for name, before := range map[string]supervisor.ModuleStatus{"red-watch": redWatch, "red-bgp": redBGP, "blue-bgp": blueBGP} {
+	for name, before := range map[string]supervisor.ModuleStatus{"red-watch": redWatch, "red-bgp": redBGP, "blue-bgp": blueBGP, "default-watch": defaultWatch, "default-bgp": defaultBGP} {
 		if after := worker(name); after.PID != before.PID || after.Generation != before.Generation {
 			t.Fatal("VRF outage restarted unrelated worker", name, before, after)
 		}
 	}
-	traffic(1, true)
-	select {
-	case <-red.closed:
-		t.Fatal("blue worker replacement closed red BGP")
-	default:
+	for i, session := range map[int]*bfdBGPSession{1: red, 2: defaultSession} {
+		traffic(i, true)
+		select {
+		case <-session.closed:
+			t.Fatal("blue worker replacement closed unrelated BGP", domains[i].name)
+		default:
+		}
+		if paths[i].listener.accepted.Load() != 1 || !route(i) {
+			t.Fatal("unrelated domain reconnected or lost its learned route", domains[i].name)
+		}
 	}
-	if paths[1].listener.accepted.Load() != 1 {
-		t.Fatal("red BGP reconnected during an unrelated VRF outage")
+	beforeFreeze, before := snapshot(2)
+	t.Log("pause default BFD", defaultWatch.PID)
+	if err := syscall.Kill(defaultWatch.PID, syscall.SIGSTOP); err != nil {
+		t.Fatal(err)
 	}
-	if fixtureRoute(t, "203.0.113.0/24", "", 0) {
-		t.Fatal("VRF BGP route escaped into the main table")
+	t.Cleanup(func() { _ = syscall.Kill(defaultWatch.PID, syscall.SIGCONT) })
+	until(t, 5*time.Second, func() bool {
+		checkPeer()
+		select {
+		case <-defaultSession.closed:
+			return !route(2)
+		default:
+			return false
+		}
+	})
+	instance, frozen := snapshot(2)
+	t.Log("default BFD authority expired; checking unaffected VRFs")
+	clock, err := bfd.ReadClock()
+	if err != nil || frozen.Peers[0].State != bfd.StateUp || frozen.Peers[0].DeadlineBootNanoseconds > clock.BoottimeNanoseconds || instance.BFD == nil || len(instance.BFD.HealthyPeers) != 0 {
+		t.Fatal("frozen default-domain UP did not independently expire", instance, frozen, err)
+	}
+	for i, session := range []*bfdBGPSession{blue, red} {
+		traffic(i, true)
+		select {
+		case <-session.closed:
+			t.Fatal("default-domain source expiry closed VRF BGP", domains[i].name)
+		default:
+		}
+	}
+	if err := syscall.Kill(defaultWatch.PID, syscall.SIGCONT); err != nil {
+		t.Fatal(err)
+	}
+	connect(2)
+	freshDefault, received := snapshot(2)
+	if freshDefault.Generation != beforeFreeze.Generation || freshDefault.ProducerEpoch != beforeFreeze.ProducerEpoch || received.Peers[0].LastReceivedBootNanoseconds <= before.Peers[0].LastReceivedBootNanoseconds {
+		t.Fatal("default-domain recovery did not use fresh packets from the same worker", beforeFreeze, freshDefault, received)
+	}
+	if after := worker("default-bgp"); after.PID != defaultBGP.PID || after.Generation != defaultBGP.Generation {
+		t.Fatal("default-domain expiry replaced BGP worker", defaultBGP, after)
 	}
 	for i, capture := range captures {
 		verifyMultihopBFDCapture(t, capture, paths[i].source, paths[i].remote)
 	}
-	t.Log("two VRFs and default domain with identical endpoints: routed BFD/BGP, distinct TCP/UDP responses, no main-table fallback, isolated UDP loss/recovery and fresh BFD worker replacement")
+	t.Log(family, "three routing domains with identical endpoints: routed BFD/BGP, distinct TCP/UDP responses, no main-table fallback, isolated UDP loss/recovery, BFD replacement and frozen-source expiry/recovery")
 }

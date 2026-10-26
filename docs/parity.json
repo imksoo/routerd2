@@ -206,7 +206,7 @@
         "network"
       ],
       "parity_status": "not_integrated",
-      "known_gap": "Native bridge/VLAN/VRF/VXLAN/macvlan/dummy, alias and membership ownership are implemented. Owned dummy sources and two VRF domains with identical endpoint addresses run with actual daemon BFD/BGP and independent TCP/UDP peers. Full legacy lifecycle, link options, forwarding policy, dependency and adoption semantics still need per-resource acceptance."
+      "known_gap": "Native bridge/VLAN/VRF/VXLAN/macvlan/dummy, alias and membership ownership are implemented. Owned dummy sources and IPv4/IPv6 routing domains with identical endpoint addresses run with actual daemon BFD/BGP and independent TCP/UDP peers. Full legacy lifecycle, link options, automatic IPv6 link-local DAD startup, forwarding policy, dependency and adoption semantics still need per-resource acceptance."
     },
     {
       "id": "network.addresses",
@@ -418,7 +418,7 @@
         "bfd"
       ],
       "parity_status": "not_integrated",
-      "known_gap": "Native active asynchronous IPv4/IPv6 BFD supports explicit single-hop interface scope, routed multihop endpoint pairs and explicit VRF scope without FRR/vtysh. IPv4 VRF tests exercise single-hop and two independent routed BFD/BGP sessions using identical addresses, real TCP/UDP, isolated loss/recovery and worker replacement. Original resource profiles, dynamic source selection, controller/status/lifecycle contracts, IPv6 VRF qualification, authentication and other unsupported modes remain incomplete."
+      "known_gap": "Native active asynchronous IPv4/IPv6 BFD supports explicit single-hop interface scope, routed multihop endpoint pairs and VRF scope without FRR/vtysh. IPv4/IPv6 real-daemon multihop checks use the same endpoints in two VRFs and the default domain simultaneously. Receive-only address reuse fixes their UDP bind collision while per-domain abstract claims retain exclusive routerd ownership. Original resource profiles, dynamic source selection, full controller/status/lifecycle contracts, automatic link-local DAD startup, IPv6 single-hop VRF, authentication and other unsupported modes remain incomplete."
     },
     {
       "id": "vpn.wireguard",

@@ -162,6 +162,15 @@ func openTransport(c Config, clock Clock) (_ *nativeTransport, result error) {
 	if err != nil {
 		return nil, err
 	}
+	if c.Multihop {
+		// A default-domain socket has no bound device. Linux requires address
+		// reuse for it to share the control port with VRF-bound sockets. The
+		// abstract claim still grants one receiver per routing domain/address;
+		// transmit ports remain exclusive and SO_REUSEPORT is never enabled.
+		if err = unix.SetsockoptInt(t.rx, unix.SOL_SOCKET, unix.SO_REUSEADDR, 1); err != nil {
+			return nil, err
+		}
+	}
 	if err = unix.SetsockoptInt(t.rx, unix.SOL_SOCKET, unix.SO_TIMESTAMPNS_NEW, 1); err != nil {
 		return nil, err
 	}

@@ -705,7 +705,16 @@ learned route先の利用者TCP/UDPも通信し、撤去中の接続拒否と復
 source domainとBGP FIB tableも検証する。同じendpointを持つ二つのVRFとdefault domainで
 実daemonを動かし、独立TCP/UDP・片側UDP障害・worker交替・main tableへの流出防止を確認した。
 single-hop VRFも実peerと障害・復旧を確認した。compiler contractはnative-11。
-旧profile/resource lifecycle、動的source・VRF経路変更・IPv6 VRF・大規模RIB等は残り、NET-07全体は未完了。
+IPv4/IPv6とも同じendpointを二つのVRFとdefault domainで同時使用し、BFD/BGPと三経路の
+TCP/UDPを確認した。defaultとVRFのUDP bind競合は受信socketだけの`SO_REUSEADDR`で修正した。
+domain/sourceの既存claimで二重ownerを拒否し、TX port専有と`SO_REUSEPORT`不使用を維持する。
+default BFDの凍結中もVRFのsessionは継続し、元のUP期限でdefault BGPと学習経路を失効する。
+IPv6は各転送linkの明示link-local/NoDADが前提で、自動link-local DADの起動受入は未完了。
+BGP設定のJSON往復複製を除き、固定版normalizerのslice/mapと必要なpointer複製で所有権を保つ。
+このVMの512 peer測定は中央値3.606msから0.351ms、835122Bから199417Bへ減った。
+旧profile/resource lifecycle、動的source・VRF経路変更・IPv6 single-hop VRF・大規模RIB等は残る。
+default凍結後のIPv4 TCP接続が一度300msでtimeoutし、trace付き／通常の再実行では再現していない。
+この原因は未確定であり、NET-07全体は未完了である。
 
 **受入条件**
 

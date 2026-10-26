@@ -15,7 +15,7 @@
       "ci": "https://github.com/imksoo/routerd2/actions/runs/40060123092"
     }
   },
-  "inventory_sha256": "1f4c503e57521992ff67a5bc2886b9dde27be621b2280b16407f4af3032871f8",
+  "inventory_sha256": "b22bc934da6571c2fe32444dabd337e20df0db527285aaaa6b7345a01377efe9",
   "policy": {
     "scope": "Complete Linux routing product including cloud/SAM and operational contracts; homert is one acceptance profile.",
     "parity_flags_unchanged": true,
@@ -763,9 +763,9 @@
       ],
       "implementation_notes": {
         "implemented": "Owned dummy links use the existing native link writer, ownership journal and lifetime handling. Declared routing-domain resolution follows master chains and includes the VRF device itself; config BFD source checks and recursive BGP FIB address resolution share it.",
-        "validation": "The real supervisor/control/network/BFD/BGP daemon creates and configures independent dummy source links under two VRFs with identical source/peer addresses. Actual routed UDP BFD and TCP BGP plus distinct user TCP/UDP responses establish the exercised link/master/address path.",
+        "validation": "The actual daemon configures owned dummy source links under VRFs and root loopback sources. IPv4 and IPv6 routed BFD/BGP and user TCP/UDP operate simultaneously in three domains with identical endpoint addresses. IPv6 uses explicitly coordinated usable link-local addresses with NoDAD on every forwarding link; initial automatic tentative link-local addresses prevented ND and the first TCP SYN. This observed setup dependence is documented, not hidden by longer deadlines.",
         "remaining": [
-          "Complete link option/lifecycle and ownership/adoption semantics, WAN selection and DHCPv6 IA_NA acceptance remain incomplete. This check does not qualify arbitrary forwarded VRF policy or target NICs."
+          "Complete link option/lifecycle and ownership/adoption semantics, WAN selection and DHCPv6 IA_NA acceptance remain incomplete. Automatic IPv6 link-local DAD startup, arbitrary forwarded VRF policy and target NICs are not qualified."
         ]
       }
     },
@@ -852,11 +852,12 @@
         "internal/legacyconfig"
       ],
       "implementation_notes": {
-        "implemented": "Explicit single-hop and multihop BFD support a declared VRF. Multihop uses UDP 4784, a committed source in the selected domain and SO_BINDTODEVICE on the VRF master, retaining ordinary member egress routing. Single-hop binds its declared member interface with UDP 3784 and TTL/Hop Limit 255. Config validation requires matching source scope, BGP transport binding and VRF FIB table. Source-owner/VRF identity and table are supervised. Existing session/publisher and original packet/source deadlines are shared; no new lease or manager. Recursive BGP FIB address resolution follows declared master chains. Compiler contract is native-11; worker ABI 3 and stored formats are unchanged.",
-        "validation": "All five real-daemon cases in scripts/bfd.py passed on the PVE isolated amd64 VM: default-domain single-hop, routed IPv4 BFD/BGP/user TCP/UDP and expiry, routed IPv6 BFD and worker replacement, IPv4 VRF single-hop, and two independent routed IPv4 VRFs with identical endpoints. The VRF case verifies distinct TCP/UDP responses, isolated BFD loss/recovery, fresh producer replacement and unchanged unrelated workers. A reachable default-domain copy of the destination cannot carry withdrawn VRF-bound client traffic. Captures verify UDP 4784, outgoing 255 and incoming 254 on both VRF egresses. Local source/table validation and conditional VRF dependency are checked. Current local/build/bundle check outcomes are recorded in docs/pve-codex-handoff.md.",
+        "implemented": "Explicit single-hop and multihop BFD support declared VRFs. Multihop UDP 4784 receivers use SO_REUSEADDR so an unbound default-domain endpoint can coexist with VRF-bound endpoints at the same address. Existing per-domain/address abstract claims reject a second routerd receiver; TX ports remain exclusive and SO_REUSEPORT is not enabled. Source ownership, original packet/source deadlines, matching BGP transport scope and VRF FIB tables remain explicit. BGP normalization no longer JSON-encodes/decodes the entire config: the pinned normalizer rebuilds slices/maps, and native maps and graceful-restart pointers are copied directly. Compiler contract native-11, worker ABI 3 and stored formats are unchanged.",
+        "validation": "Actual routed IPv4 and IPv6 BFD/BGP with identical endpoints operates simultaneously in two VRFs and the default domain. Distinct user TCP/UDP responses identify the three paths. Blue-only UDP loss/recovery and BFD replacement preserve unrelated sessions and workers. Freezing default BFD expires a retained raw UP snapshot, closes BGP and withdraws only its learned route; fresh receive evidence restores the same workers. Capture checks UDP 4784 and outgoing 255/incoming 254 on all three egresses. A real native socket test rejects duplicate multihop ownership for both families. The IPv6 topology explicitly coordinates link-local ND sources with NoDAD. A 512-peer normalization benchmark on this VM changed median 3.606 ms/835122 bytes to 0.351 ms/199417 bytes; this is not packet-throughput qualification. Check outcomes and the unresolved TCP timeout are recorded in docs/pve-codex-handoff.md. Final make check (including full Race Detector and vet), all six real-daemon cases, the native socket gate, static amd64/arm64 builds and six-ELF signed bundle/catalog/publisher checks passed. arm64 was not executed.",
         "remaining": [
           "Original BGPRouter/BGPPeer/BGPDynamicPeer source/profile/redistribution and typed resource lifecycle are incomplete. Current strict BFD startup gating is an explicit native replacement, not identical opportunistic pre-Up legacy reset behavior.",
-          "Multihop authentication, dynamic local-source selection, VRF/path selection changes, IPv6 BGP multihop/VRF acceptance, scale/backpressure/full-generation RIB transfer and physical/arm64 runtime qualification remain incomplete. Bound socket isolation does not qualify all forwarded VRF policy."
+          "Multihop authentication, dynamic local-source selection, VRF/path selection changes, automatic link-local DAD startup, IPv6 single-hop VRF/link-local next-hop/ECMP acceptance, scale/backpressure/full-generation RIB transfer and physical/arm64 runtime qualification remain incomplete. Bound socket isolation does not qualify all forwarded VRF policy.",
+          "One IPv4 user TCP dial timed out at 300 ms after default BFD was paused; capture contains SYN/SYN-ACK/ACK at the end of that attempt. Later traced and untraced executions passed. The cause remains unproven, and client/protocol deadlines were not extended."
         ]
       }
     },

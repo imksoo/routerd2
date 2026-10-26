@@ -24,7 +24,7 @@ help:
 	  'make check             Format, unit tests, race detector, and vet' \
 	  'make check-health-pbr  Required two-WAN real-daemon TCP/UDP failover gate' \
 	  'make check-vrrp-unicast Verify VRRP peer failover and finite WAN identity' \
-	  'make check-bfd         Verify single-hop and routed BFD with real workers' \
+	  'make check-bfd         Verify BFD/BGP routing domains with real workers' \
 	  'make licenses          Collect dependency licenses and their manifest' \
 	  'make build             Build the native commands for the current platform' \
 	  'make build-linux       Build static linux/amd64 and linux/arm64 binaries' \

@@ -362,6 +362,25 @@ func independentPeerFixture(t *testing.T, family string) {
 		duplicate.Close()
 		t.Fatal("second owner claimed the same interface/family")
 	}
+	multihop := cfg
+	multihop.Multihop, multihop.Interface = true, ""
+	transportProbe, err := openTransport(multihop, clock)
+	if err != nil {
+		t.Fatal("open multihop receive endpoint", err)
+	}
+	defer func() {
+		if err := transportProbe.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	duplicate, claimErr := openTransport(multihop, clock)
+	if claimErr == nil {
+		duplicate.Close()
+		t.Fatal("address reuse admitted two multihop receivers in one domain")
+	}
+	if !errors.Is(claimErr, unix.EADDRINUSE) {
+		t.Fatal("duplicate multihop endpoint failed without an ownership conflict", claimErr)
+	}
 	remoteDisc := uint32(0x8675309)
 	handshake := func(from *net.UDPConn, disc uint32) {
 		t.Helper()

@@ -11,7 +11,8 @@ TESTS = (
     ("TestDaemonBFDControlsBGPSessionAndExpiry", "single-hop", ()),
     ("TestDaemonMultihopBFDControlsBGPSessionAndExpiry", "multihop-ipv4", ("wan0",)),
     ("TestDaemonMultihopBFDIPv6", "multihop-ipv6", ("wan0",)),
-    ("TestDaemonBFDVRFIsolation", "vrf", ("wan0", "wan1")),
+    ("TestDaemonBFDVRFIsolation", "vrf", ("wan0", "wan1", "wan2")),
+    ("TestDaemonBFDVRFIPv6Isolation", "vrf-ipv6", ("wan0", "wan1", "wan2")),
     ("TestDaemonSinglehopBFDVRF", "vrf-single-hop", ()),
 )
 
@@ -45,14 +46,15 @@ def main():
             with log_path.open("w") as log:
                 result = subprocess.run(root + ["env", "ROUTERD2_INTEGRATION_REQUIRED=1", "ROUTERD2_TEST_BIN_DIR=" + stage + "/bin", "ROUTERD2_TEST_EVIDENCE_DIR=" + packets, stage + "/integration.test", "-test.run=^" + name + "$", "-test.v", "-test.timeout=120s"], stdout=log, stderr=subprocess.STDOUT, timeout=130)
             content = log_path.read_text()
+            for interface in interfaces:
+                packet = subprocess.run(root + ["cat", packets + "/" + interface + ".pcap"], capture_output=True)
+                if packet.returncode == 0:
+                    (output / (label + "-" + interface + ".pcap")).write_bytes(packet.stdout)
+                if result.returncode == 0 and (packet.returncode or len(packet.stdout) <= 24):
+                    raise RuntimeError("missing routed packet capture for " + name + ": " + interface)
             if result.returncode or "--- PASS: " + name not in content or "--- SKIP:" in content:
                 print(content, end="")
                 raise RuntimeError(name + " failed; see " + str(log_path))
-            for interface in interfaces:
-                packet = subprocess.check_output(root + ["cat", packets + "/" + interface + ".pcap"])
-                if len(packet) <= 24:
-                    raise RuntimeError("missing routed packet capture for " + name)
-                (output / (label + "-" + interface + ".pcap")).write_bytes(packet)
             print(name + ": PASS; " + str(log_path), flush=True)
     finally:
         subprocess.run(root + ["python3", "-c", "import shutil,sys; shutil.rmtree(sys.argv[1])", stage], check=True)
