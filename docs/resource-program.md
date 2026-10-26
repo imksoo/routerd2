@@ -24,8 +24,13 @@ worker設定、canonicalな子process用bytes、digestは、条件除外中のwo
 BGP・VRRPの型付き設定、delegated RAの固定templateも再利用する。RAのprefix・期限・DNSは
 観測由来のlive入力であり、immutable workerへ埋め込まない。
 
+protocol投影ではnetwork intentをJSON化して複製しない。変更するinterface・address・
+address options・routeの集合を所有し、追加だけを行うlink・tunnel・guardは元の配列へ
+書き込まない。残りの固定設定は読み取り専用で共有する。writer内部のsnapshot複製には
+JSON往復が残っている。
+
 条件式のduration解析・hold identity計算、観測snapshotの型付き保持、読み取りと
-continuity更新の分離、network intentのJSON往復複製は残っている。
+continuity更新の分離は残っている。
 
 ## 設定例
 

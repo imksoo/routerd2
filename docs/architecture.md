@@ -52,6 +52,8 @@ worker 自身が exact bytes を検証する。digest計算と保存には同じ
 instanceファイルとBFD設定は観測用mutexの外で準備し、worker停止待ち後には最新の観測を
 再投影する。instance構成が変わった場合だけ準備・停止をやり直す。
 設定由来の journal/socket パスも compiler が割り当てる。
+protocol投影は変更するnetwork集合を複製し、固定設定を読み取り専用で共有する。
+元の宣言を変えずに学習情報と期限切れを反映し、JSON往復による複製は行わない。
 
 変更した worker は停止・reap を待って置換する。変更していない protocol config の取得状態は
 維持する。停止中に DHCP が更新した場合も、cutover 時点で最後に受理したリースを採用する。

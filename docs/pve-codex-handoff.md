@@ -78,7 +78,7 @@
 
 ## 今回の実装と検証
 
-最新buildは `RELEASE_ID=protocol-plan`。CORE-03の通常投影で繰り返していたworker設定生成・
+最新buildは `RELEASE_ID=projection-ownership`。CORE-03の通常投影で繰り返していたworker設定生成・
 JSON化・hashを除いた。受理したsourceごとに、条件除外中のworkerと生成予定のRAも含めて
 設定・canonicalな子process用bytes・digestを一度準備する。通常投影はその中から必要なworkerを
 選ぶ。新しいmanager、invalidation flag、旧形式adapterは作っていない。
@@ -92,14 +92,22 @@ childへ保存した実bytesのSHA-256とsupervisorへ渡すidentityの一致も
 8つのBGP worker／各64 peerの静的投影＋worker選択を、このVMで3回測定した。
 中央値は2.531ms・540004B・1238 allocationsから、7.756µs・4021B・20 allocationsへ減った。
 準備は設定受理時へ移している。learned RIBの走査・kernel適用・packet性能の測定ではない。
-network intentのJSON往復複製や残るprotocol snapshotのdecode、条件式の静的計算は未整理である。
+この比較は `protocol-plan` build時の測定である。
+残るprotocol snapshotのdecode、条件式の静的計算は未整理である。
 再測定は `go test ./internal/runtimeplan -run '^$' -bench BenchmarkProjectEightBGPRouters -benchmem`。
+
+続いてprotocol投影のnetwork intentのJSON往復複製を削除した。interface・address・
+options・routeの変更する集合だけを複製し、追加だけを行うlink・tunnel・guardは
+元の配列へ書き込まない。残りの固定設定は読み取り専用で共有する。
+RA取得・学習情報撤去・address/route期限切れが、sourceや先に作った投影を変更しないことを
+ローカルで確認した。writer内部のsnapshot複製にはJSON往復が残る。
 
 PVE隔離amd64 VMで、CGO無効の実3 ELF、Race Detector付きharness、独立peerと実kernelを使用した。
 
 - 実2 WANのHealth→PBR、TCP/UDPとcapture、worker交替、古い通知、期限切れ、confirmed rollbackが成功した。
-- BFD/BGPの全6ケースが成功した。single-hop、routed IPv4/IPv6、同一endpointを持つ
-  blue/red/default domain、片側UDP障害、source凍結の元期限、worker交替と復旧を含む。
+- 直前の `61a2918` ではBFD/BGPの全6ケースが成功した。single-hop、routed IPv4/IPv6、
+  同一endpointを持つblue/red/default domain、片側UDP障害、source凍結、worker交替と復旧を含む。
+  最新buildではIPv6 VRFの独立domain・障害・撤去・復旧を再確認した。
 - KeepalivedとのHealth trackingでpriority 150/50、finite neutral、同じ選挙worker、VIP TCP/UDPを確認した。
 - AFTRの実DNS解決、source/instance identity、tunnelとrouteの期限処理が成功した。
 - 新しい独立DHCPv6 serverは製品のPD codec/state machineを使わずに応答を組み立てる。
@@ -115,17 +123,17 @@ Health/BFD/PD-RA/AFTRの実daemon起動は `scripts/daemon-tests.py` へ共通�
 rootまたはpasswordless sudoとLinux user/network namespaceが必要で、home権限は変えない。
 
 全体`make check`（Go/Python・Race Detector・vet）とamd64/arm64の6静的ELF buildが成功した。
-実daemon用amd64 ELFと、bundle検査用のELFは同一である。signed bundle/catalog/publisher検査と
-共通runnerでのHealth/BFD最終確認も成功した。PD/RA、AFTRも共通runnerで成功した。
+実daemon用amd64 ELFと、bundle検査用のELFは同一である。Health/PBR・PD/RA・AFTR・
+IPv6 VRF BFD・Keepalived Health trackingが最新buildで成功した。signed bundle/catalog/publisher検査も成功した。
 worker ABI 3、compiler contract native-11、network journal format 5は変更していない。
 arm64実行、物理NIC、性能、suspend、clock補正の受入は今回行っていない。
 
 現在の出力:
 
-- `dist/protocol-plan-{before,after}.log`: 静的投影benchmark。
-- `dist/protocol-plan-{final-check,linux-build,bundle}.log`: 全体check・build・bundle。
-- `dist/protocol-plan-final-{health,bfd}{.log,/}`: 共通runnerの最終Health/BFDログとpcap。
-- `dist/protocol-plan-pd-ra/`、`dist/protocol-plan-aftr/`、`dist/protocol-plan-vrrp/`: PD/RA、AFTR、Keepalived。
+- `dist/projection-ownership-{local,check-build,bundle}.log`: ローカル投影・全体check・6 ELF build・bundle。
+- `dist/projection-ownership-{health,pd-ra,aftr,bfd,vrrp}{.log,/}`: 実daemonのログとcapture。
+- `dist/protocol-plan-{before,after}.log`: 直前のworker準備変更の静的投影benchmark。
+- `dist/protocol-plan-final-bfd/`: `61a2918` の全6 BFDケース。
 
 過去の出力・checkpointは実装制約にしない。前buildで一度発生したdefault BFD凍結後の
 IPv4 client TCP 300ms timeoutは、原因未確定のままである。今回の高速化で解決したとは断定しない。
@@ -140,11 +148,11 @@ IPv4 client TCP 300ms timeoutは、原因未確定のままである。今回の
    HA-01の残るresource種別・phase tracking、外部secret参照、peer-aware移行、cluster、
    二native nodeの追加identity・RA・DHCP/PD/NAT session継続を実装・受入する。
 3. 過去のBFD再接続timeoutの失敗request、IPv6 multicast未受信、初回IPv6 VIP TCP/DAD timeoutは
-   原因未確定。IPv6 unicastの初回TCP timeoutと同時の選挙authority期限切れは今回も一度再現した
+   原因未確定。IPv6 unicastの初回TCP timeoutと同時の選挙authority期限切れは以前の試験で一度再現した
    （`dist/vrrp-multicast-related.log`）。syscall trace付き実行では再現せず、要求前後の選挙snapshotを
    失敗時に表示するようfixtureへ追加したが、同じ失敗は再取得できていない。接続deadlineや
-   選挙authorityは延長していない。今回修正した二つのACK/status問題と同一とは断定しない。
-4. 残るprotocol snapshotの型付き保持、条件式の静的計算、network intentのJSON往復複製を整理する。
+   選挙authorityは延長していない。過去に修正したACK/status問題と同一とは断定しない。
+4. 残るprotocol snapshotの型付き保持、条件式の静的計算、writer内部のsnapshot複製を整理する。
    DHCP client割当とjournalのUTC依存を整理し、実clock補正・停電・suspendで受入する。
 5. 再帰next-hopの前提address/link期限はローカル投影で確認済みだが、同じ条件の実daemon試験は未実施。
    writer自体の停止中のlink fencing・IPv4 route撤去、物理suspendは保証しない。

@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/netip"
+	"slices"
 	"sort"
 	"time"
 
@@ -95,10 +97,18 @@ func (r *Runtime) projectLocked(protocols protocolPlan, doc config.Native, recor
 // Pure projection combines active intent with the source's immutable workers
 // and current protocol evidence. Producers cannot submit arbitrary effects.
 func projectWithFacts(doc config.Native, protocols protocolPlan, records map[string]serviceconfig.Update, now time.Time, facts projectionFacts) (projection, error) {
-	b, _ := json.Marshal(doc.Network)
-	p := projection{liveRA: map[string]ra.Config{}, native: doc, vrrpOwners: make(map[string]vrrpOwnership)}
-	if err := json.Unmarshal(b, &p.network); err != nil {
-		return p, err
+	p := projection{network: doc.Network, liveRA: map[string]ra.Config{}, native: doc, vrrpOwners: make(map[string]vrrpOwnership)}
+	// Own the collections changed by protocol projection and lifetime removal.
+	// Links, tunnels and guards are only appended; all other intent is read-only.
+	p.network.Links = slices.Clip(p.network.Links)
+	p.network.DSLite = slices.Clip(p.network.DSLite)
+	p.network.VRRPGuards = slices.Clip(p.network.VRRPGuards)
+	p.network.Routes = slices.Clone(p.network.Routes)
+	p.network.Interfaces = slices.Clone(p.network.Interfaces)
+	for i := range p.network.Interfaces {
+		iface := &p.network.Interfaces[i]
+		iface.Addresses = slices.Clone(iface.Addresses)
+		iface.AddressOptions = maps.Clone(iface.AddressOptions)
 	}
 	for _, s := range doc.Services {
 		p.instances = append(p.instances, protocols.instances[s.ModuleName()])

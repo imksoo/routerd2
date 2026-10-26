@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/raclient"
@@ -127,6 +128,40 @@ func TestRAClientProjectionPreservesLongProtocolLifetimeWithRenewableKernelGrant
 	}
 	if !raKernelDeadline(time.Time{}, now).IsZero() {
 		t.Fatal("explicit infinite lifetime became a finite protocol lifetime")
+	}
+}
+
+func TestRAProjectionAndExpiryLeaveIntentAndEarlierProjectionUnchanged(t *testing.T) {
+	now := time.Now().UTC()
+	doc, snapshot := raClientFixture(now)
+	expired := now.Add(-time.Second)
+	addresses := make([]string, 2, 4)
+	addresses[0], addresses[1] = "2001:db8:2::1/64", "2001:db8:3::1/64"
+	doc.Network.Interfaces = []network.Interface{{Name: "wan0", Addresses: addresses, AddressOptions: map[string]network.AddressOptions{
+		addresses[0]: {ValidUntil: expired, PreferredUntil: expired},
+	}}}
+	doc.Network.Routes = []network.Route{
+		{Destination: "2001:db8:4::/64", Interface: "wan0", ValidUntil: expired},
+		{Destination: "2001:db8:5::/64", Interface: "wan0"},
+	}
+	clock := boottime.Clock{WallTime: now}
+	active := projectRAFixture(t, doc, snapshot, now)
+	active.network = network.ProjectLifetimes(active.network, clock)
+	if got := active.network.Interfaces[0].Addresses; len(got) != 2 || got[0] != addresses[1] || got[1] != snapshot.Addresses[0].Address {
+		t.Fatal("expiry must retain static and learned addresses independently", got)
+	}
+	snapshot.Active = false
+	inactive := projectRAFixture(t, doc, snapshot, now)
+	inactive.network = network.ProjectLifetimes(inactive.network, clock)
+	if got := inactive.network.Interfaces[0].Addresses; len(got) != 1 || got[0] != addresses[1] || len(inactive.network.Routes) != 1 {
+		t.Fatal("withdrawal retained learned state or lost static state", inactive.network)
+	}
+	iface := doc.Network.Interfaces[0]
+	if len(iface.Addresses) != 2 || iface.Addresses[0] != "2001:db8:2::1/64" || len(iface.AddressOptions) != 1 || iface.AddressOptions[iface.Addresses[0]].ValidUntil != expired || iface.IPv6AcceptRA != nil || iface.IPv6Autoconf != nil || doc.Network.Routes[0].Destination != "2001:db8:4::/64" {
+		t.Fatal("projection or expiry wrote into operator intent", doc.Network)
+	}
+	if len(active.network.Interfaces[0].Addresses) != 2 || len(active.network.Interfaces[0].AddressOptions) != 1 || len(active.network.Routes) != 3 {
+		t.Fatal("later withdrawal changed the earlier projection", active.network)
 	}
 }
 

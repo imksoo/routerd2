@@ -418,6 +418,8 @@ control／DNSの受信側期限表と内部JSON複製を削除した。個別cli
 worker設定・canonical bytes・digestを、生成予定のRAも含めてsourceごとに一度準備する。
 通常投影は起動対象を選び、設定の再生成・JSON化・hashを行わない。BGP/VRRPの型付き設定と
 RA固定templateも共有し、RAのprefix・期限・DNSはlive入力に分ける。
+network intentのprotocol投影もJSON往復を除き、変更する集合だけを複製する。
+期限切れ・学習情報撤去でもsourceと既存の投影を変更しない。writer内部のsnapshot複製は未整理。
 現在の検証範囲と残作業は
 [引き継ぎ](pve-codex-handoff.md) を参照する。CORE-03全体の完了とはしない。
 
