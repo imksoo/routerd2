@@ -31,7 +31,6 @@ func TestStrictRequestDecoderBoundsAndReservedFlags(t *testing.T) {
 		{"bad-server-id", func(b []byte) []byte { return append(b[:len(b)-1], 54, 4, 0, 0, 0, 0, 255) }},
 		{"multicast-chaddr", func(b []byte) []byte { b[28] = 1; return b }},
 		{"server-field", func(b []byte) []byte { b[20] = 192; return b }},
-		{"rapid-commit", func(b []byte) []byte { return append(b[:len(b)-1], 80, 0, 255) }},
 		{"authentication", func(b []byte) []byte { return append(b[:len(b)-1], 90, 1, 0, 255) }},
 		{"overload", func(b []byte) []byte { return append(b[:len(b)-1], 52, 1, 4, 255) }},
 	} {

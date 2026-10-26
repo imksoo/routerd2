@@ -55,7 +55,8 @@ func preference(flags byte) (int, bool) {
 
 // parse validates the whole RA before returning any mutation. Unknown options
 // are ignored as RFC 4861 requires; malformed framing, checksums or known option
-// lengths reject the whole datagram. Semantic-invalid PIO/RIO options are ignored.
+// lengths reject the whole datagram. Unusable DNS options are discarded on
+// their own (RFC 8106 section 5.3.1), as are semantic-invalid PIO/RIO options.
 func parse(p packet, index, linkMTU int) (advertisement, error) {
 	b := p.payload
 	if len(b) < 16 || len(b) > 65535 || b[0] != 134 || b[1] != 0 || p.hopLimit != 255 || p.ifindex != index || !p.source.Is6() || !p.source.IsLinkLocalUnicast() || p.source.Zone() != "" || !p.destination.Is6() || p.destination.Is4In6() || p.destination.IsUnspecified() || p.destination.Zone() != "" {
@@ -67,6 +68,7 @@ func parse(p packet, index, linkMTU int) (advertisement, error) {
 	pref, _ := preference(b[5]) // Reserved header preference is medium, RFC 4191.
 	a := advertisement{router: p.source, managed: b[5]&0x80 != 0, other: b[5]&0x40 != 0, preference: pref, lifetime: uint32(binary.BigEndian.Uint16(b[6:])), hopLimit: int(b[4]), reachable: binary.BigEndian.Uint32(b[8:]), retransmit: binary.BigEndian.Uint32(b[12:])}
 	routePrefixes := map[netip.Prefix]bool{}
+optionLoop:
 	for at := 16; at < len(b); {
 		if at+2 > len(b) || b[at+1] == 0 {
 			return advertisement{}, snapshotError("zero/truncated option length")
@@ -125,7 +127,7 @@ func parse(p packet, index, linkMTU int) (advertisement, error) {
 			a.routes = append(a.routes, routeOption{prefix, pref, binary.BigEndian.Uint32(o[4:])})
 		case 25:
 			if size < 24 || (size-8)%16 != 0 {
-				return advertisement{}, snapshotError("RDNSS length")
+				continue
 			}
 			d := dnsOption{lifetime: binary.BigEndian.Uint32(o[4:])}
 			for pos := 8; pos < size; pos += 16 {
@@ -133,18 +135,18 @@ func parse(p packet, index, linkMTU int) (advertisement, error) {
 				copy(raw[:], o[pos:pos+16])
 				address := netip.AddrFrom16(raw)
 				if address.Is4In6() || address.IsUnspecified() || address.IsMulticast() {
-					return advertisement{}, snapshotError("RDNSS address")
+					continue optionLoop
 				}
 				d.addresses = append(d.addresses, address)
 			}
 			a.dns = append(a.dns, d)
 		case 31:
 			if size < 16 {
-				return advertisement{}, snapshotError("DNSSL length")
+				continue
 			}
 			domains, err := decodeDomains(o[8:])
 			if err != nil {
-				return advertisement{}, err
+				continue
 			}
 			a.dns = append(a.dns, dnsOption{domains: domains, lifetime: binary.BigEndian.Uint32(o[4:])})
 		}

@@ -114,9 +114,6 @@ func decodeRequest(b []byte) (message, error) {
 	if _, ok := m.Options[90]; ok {
 		return message{}, errors.New("DHCP authentication is not implemented")
 	}
-	if _, ok := m.Options[80]; ok {
-		return message{}, errors.New("DHCP rapid commit is not implemented")
-	}
 	return m, nil
 }
 func decodeOptions(b []byte, out map[byte][]byte, overloaded bool) error {

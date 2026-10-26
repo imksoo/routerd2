@@ -85,7 +85,7 @@ func TestCombinedAddressAndPrefixExchange(t *testing.T) {
 			t.Fatal("retry elapsed time includes the initial random delay")
 		}
 	}
-	decoded, err := decode(packet)
+	decoded, err := decode(packet, c.cfg.IAID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestCombinedAddressAndPrefixExchange(t *testing.T) {
 	if c.lease.kind != request {
 		t.Fatal("old T2 replaced NoBinding recovery Request")
 	}
-	target, err := decode(c.packet(&c.lease, now.Add(5*time.Second)))
+	target, err := decode(c.packet(&c.lease, now.Add(5*time.Second)), c.cfg.IAID)
 	if err != nil || !bytes.Equal(target.server, missing.server) {
 		t.Fatal("NoBinding Request did not target the responding server", target, err)
 	}
@@ -163,15 +163,20 @@ func TestDecodeAddressAssociationAndRejectMalformedOptions(t *testing.T) {
 	ia = binary.BigEndian.AppendUint32(ia, 4)
 	ia = appendOption(ia, 5, address)
 	b := appendOption([]byte{7, 1, 2, 3}, 3, ia)
-	m, err := decode(b)
+	m, err := decode(b, 7)
 	if err != nil || m.na == nil || len(m.na.leases) != 1 || m.na.leases[0].prefix.String() != "2001:db8:42::10/128" {
 		t.Fatal(m, err)
 	}
-	if _, err := decode(append(b, 0, 1, 0)); err == nil {
+	if _, err := decode(append(b, 0, 1, 0), 7); err == nil {
 		t.Fatal("truncated option accepted")
 	}
-	if _, err := decode(appendOption(b, 3, ia)); err == nil {
-		t.Fatal("duplicate IA_NA accepted")
+	unrelated := append([]byte(nil), ia...)
+	binary.BigEndian.PutUint32(unrelated, 99)
+	b = appendOption(appendOption([]byte{7, 1, 2, 3}, 3, unrelated), 3, ia)
+	b = appendOption(b, 23, netip.MustParseAddr("fe80::53").AsSlice())
+	m, err = decode(b, 7)
+	if err != nil || m.na == nil || m.na.iaid != 7 || len(m.dns) != 1 || m.dns[0] != "fe80::53" {
+		t.Fatal("unrelated IA or link-local DNS discarded the requested assignment", m, err)
 	}
 	for _, name := range [][]byte{{0xc0, 0}, {4, 'a', 'b'}, {0}} {
 		if _, err := domainNames(name); err == nil {

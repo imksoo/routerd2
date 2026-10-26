@@ -206,9 +206,6 @@ func (c *client) accept(m message, clock boottime.Clock) error {
 	if m.status != 0 {
 		return nil
 	}
-	if m.na != nil && m.na.iaid != c.cfg.IAID || m.pd != nil && m.pd.iaid != c.cfg.IAID {
-		return nil
-	}
 	if !c.cfg.RequestAddress {
 		m.na = nil
 	}
@@ -562,7 +559,7 @@ func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, ready fun
 			}
 			return err
 		}
-		m, err := decode(buf[:n])
+		m, err := decode(buf[:n], cfg.IAID)
 		if err != nil {
 			continue
 		}

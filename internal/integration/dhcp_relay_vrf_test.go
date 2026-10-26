@@ -70,7 +70,7 @@ func TestDaemonDHCPRelayVRFIsolation(t *testing.T) {
 			network.Interface{Name: wan, Master: master, Addresses: []string{"198.51.100.1/24"}},
 			network.Interface{Name: lan, Master: master, Addresses: []string{"192.0.2.1/24"}})
 		doc.Services = append(doc.Services, serviceconfig.Service{Name: domain.name + "-relay", DHCPRelay: &dhcprelayconfig.Config{VRF: domain.vrf, Interfaces: []dhcprelayconfig.Interface{{Name: lan, Address: "192.0.2.1", Servers: []string{"198.51.100.2"}}}}})
-		server := startFixtureDNSMasq(t, provider, []string{"--dhcp-range=192.0.2.100,192.0.2.110,255.255.255.0,60s", "--dhcp-option=3,192.0.2.1", "--dhcp-option=15," + domain.name + ".test"})
+		server := startFixtureDNSMasq(t, provider, []string{"--port=0", "--dhcp-range=192.0.2.100,192.0.2.110,255.255.255.0,60s", "--dhcp-option=3,192.0.2.1", "--dhcp-option=15," + domain.name + ".test"})
 		servers = append(servers, server.Process)
 		vrrpVIPResponders(t, provider, "4", []string{"198.51.100.2"}, domain.response)
 	}

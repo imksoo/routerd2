@@ -111,6 +111,27 @@ amd64/arm64の6静的ELF buildは成功した。直前のuplink/DAD修正では�
 `dist/ntt-aftr-ra/`、`dist/ntt-aftr-daemon/`。修正前の失敗は`dist/live-dslite-continuity.log`。
 過去の試験結果を維持する互換コードは残さない。
 
+## 受信制約の見直し
+
+旧routerdの`pdclient`と現行のsocket→decode→accept→投影を照合した。
+DHCPv6 decoderへ既知のIAIDを渡し、無関係・不良のIAだけを除外する。
+DNS/SNTPのリンクローカルaddressを許可し、不良の独立optionは有効な割当を捨てず除外する。
+RAの不良RDNSS/DNSSLはoption単位で破棄する（RFC 8106 §5.3.1）。
+Rapid Commit付きDHCPDISCOVERも通常OFFERで処理する（RFC 4039 §3）。
+以前の全拒否を正解にするfixtureは削除・更新した。
+
+製品バイナリー`receive-tolerance`で、独立dnsmasqのIA_NA・リンクローカルDNS取得と
+そのscopeでの実DNS問い合わせ、通常DAD、TCP/UDP、worker交替、Renew/Rebind/失効/復旧が通った。
+`python3 scripts/daemon-tests.py dhcp6 --test TestDaemonDHCP6AddressIndependentServer`で再実行できる。
+不良DNS optionを併送した既存の実RA/経路/TCP/UDP/期限切れ試験も通った（`make check-ra-client`）。
+隔離LANのScapy 2.8.0からoption 80長さ0のDiscoverを送信し、修正前の無応答をcaptureで確認、
+修正後は通常OFFER→REQUEST→ACKを確認した。Scapyのbroadcast返信照合設定を修正して
+最後まで完了した出力は`dist/rapid-commit-final-peer.log`。BusyBoxの空option指定はoptionを送らず、
+Rapid Commitの検証には使えなかった。RA/DHCPの出力は`dist/receive-ra/`、`dist/receive-dhcp6/`。
+`make check`・Race Detector・vet・6静的ELF buildも成功した。
+NA/PD片方だけのReplyによる共通更新timerの置換、off-subnet DHCPv4 gateway、
+BGPの補助保存失敗による停止など、照合で見つかった残る処理の修正を続ける。
+
 ## 未完了と次の作業
 
 1. 全実装計画、全更新復旧経路、外部engine、配備先と対象実機の受入は未完了。

@@ -17,10 +17,10 @@
 | BGP | 旧`bgpdaemon`の設定・処理とGoBGPを利用・改変 | FIB ACK、BFD連動、VRF、全世代RIB・上限。旧FRR連携の効果を別途照合する |
 | Health | 旧`Probe`のTCP/DNS/HTTP、旧`ApplyResult`を利用。ICMP transportは新規 | ICMP実機、source/mark、threshold、旧状態・条件との違い |
 | DHCPv4 client | 旧socket実装を移植し、旧wire/lease helperを利用。orchestrationは新規 | socketを再利用しても取得・再送・renew・restoreが同等とは限らない。実回線取得とLAN NAT通信は確認した |
-| DHCPv6 client | 旧`pdclient` wrapperから、新規のIA_NA/IA_PD/information engineへ置換 | 受信・link-local待機の退行を今回修正。旧codec/state machine、実Renew/Rebind/Release、複数割当の扱いを再照合する |
-| RA受信 | 旧netplan/systemd側の動作をnative clientへ置換 | DAD待機、managed/required/observe-only、DHCP起動、MTU/hop-limit、resolver効果 |
+| DHCPv6 client | 旧`pdclient` wrapperから、新規のIA_NA/IA_PD/information engineへ置換 | 受信・link-local待機の退行、リンクローカルDNS、無関係IA・不良optionで全体を捨てる処理を修正。旧codec/state machine、実Renew/Rebind/Release、複数割当の扱いを再照合する |
+| RA受信 | 旧netplan/systemd側の動作をnative clientへ置換 | DAD待機と不良DNS optionの局所破棄を修正。managed/required/observe-only、DHCP起動、MTU/hop-limit、resolver効果 |
 | RA送信 | 旧dnsmasq側の処理を新規raw ICMPv6 engineへ置換 | link/MAC変化、RS応答、prefix/DNS期限、withdrawal。MAC変更時の誤広告を今回修正 |
-| DHCP server | 旧API型と変換を利用。旧dnsmasq engineの再利用ではない | 割当・再送・option・sticky・複数scope・DNS・journalを旧実運用と比較。dnsmasq採用も再評価する |
+| DHCP server | 旧API型と変換を利用。旧dnsmasq engineの再利用ではない | Rapid Commit要求への通常OFFERはScapyとの実通信で修正確認。割当・再送・option・sticky・複数scope・DNS・journalを旧実運用と比較。dnsmasq採用も再評価する |
 | DHCP relay | 旧dnsmasqの動作を新規relayへ置換 | giaddr/option/fragment/VRF/再構成・HA。独立server試験を全機器の受入と扱わない |
 | DS-Lite/AFTR | 旧controller/host処理を新規resolverと通常のip6tnl所有権へ置換 | SelfAddressPolicy・DNS選択・endpoint維持。実回線の定期RA更新によるtunnel再生成を修正し、同じTCPで100秒継続を確認。PD由来source・完全な選択は未完了 |
 | VRRP/HA | 旧keepalivedの選挙・VIP管理をnative VRRPとwriterへ置換 | 実keepalived等との相互接続、VMAC/ND、選挙、notify、tracking、accept/graceful、session継続。新規置換の妥当性を再評価する |
@@ -51,3 +51,8 @@ DS-Liteでは通常RAの期限更新とDNS RRset順序変更でトンネルを�
 110秒の監視でtunnel indexは不変だった。旧PD由来source、長時間の回線更新、
 その他の置換による不必要な受信拒否は引き続き見直す。
 全モジュールの実機受入・旧動作との差分確認は未完了である。
+
+受信処理の見直し後、dnsmasqとの通常DAD・リンクローカルDNSの実問い合わせ・
+IA_NA更新/失効/復旧、悪いDNS optionを含むRAからの経路/TCP/UDP、
+ScapyのRapid Commit要求から通常OFFER/REQUEST/ACKまでを確認した。
+共通IA更新timer・DHCPv4 off-subnet gateway・BGP補助保存と生存の結合は修正が残る。

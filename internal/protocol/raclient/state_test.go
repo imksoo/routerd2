@@ -221,8 +221,6 @@ func TestMalformedAndUnauthorizedRAIsAtomic(t *testing.T) {
 		"code":                         func(p *packet) { p.payload[1] = 1; recalc(p) },
 		"truncated-after-valid-option": func(p *packet) { p.payload = append(p.payload, 25, 3); recalc(p) },
 		"zero-option-size":             func(p *packet) { p.payload = append(p.payload, 25, 0, 0, 0, 0, 0, 0, 0); recalc(p) },
-		"bad-rdnss":                    func(p *packet) { p.payload = append(p.payload, rdnss(30, "ff02::1")...); recalc(p) },
-		"dns-compression":              func(p *packet) { d := dnssl(10); d[8] = 0xc0; p.payload = append(p.payload, d...); recalc(p) },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -238,6 +236,16 @@ func TestMalformedAndUnauthorizedRAIsAtomic(t *testing.T) {
 	}
 	if s.learned.Rejected != uint64(len(cases)) {
 		t.Fatal("invalid datagrams not accounted for")
+	}
+}
+
+func TestUnusableDNSOptionsDoNotDiscardRouterAndPrefix(t *testing.T) {
+	s := testState(t, testConfig())
+	badDomain := dnssl(10)
+	badDomain[8] = 0xc0
+	snap := mustHandle(t, s, advert("fe80::2", 30, 0, pio("2001:db8:1::/64", 0xc0, 60, 30), rdnss(30, "ff02::1"), badDomain, rdnss(30, "fe80::53")), testClock(0))
+	if len(snap.Addresses) != 1 || len(snap.Routes) == 0 || len(snap.DNSServers) != 1 || snap.DNSServers[0].Address != "fe80::53" || len(snap.SearchDomains) != 0 {
+		t.Fatal("independent DNS errors discarded valid router, prefix or DNS", snap)
 	}
 }
 

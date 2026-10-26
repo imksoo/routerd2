@@ -3,10 +3,12 @@
 package integration
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
 	"net"
+	"os/exec"
 	"testing"
 	"time"
 
@@ -53,10 +55,10 @@ func TestDaemonDHCP6AddressIndependentServer(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	server := startFixtureDNSMasq(t, provider, []string{"--dhcp-range=2001:db8:42::100,2001:db8:42::110,64,120s", "--dhcp-option=option6:dns-server,[2001:db8:42::53]", "--dhcp-option=option6:domain-search,wan.test"})
+	server := startFixtureDNSMasq(t, provider, []string{"--dhcp-range=2001:db8:42::100,2001:db8:42::110,64,120s", "--dhcp-option=option6:dns-server,[fe80::2]", "--dhcp-option=option6:domain-search,wan.test", "--port=53", "--no-resolv", "--no-hosts", "--address=/wan.test/2001:db8:ffff::9"})
 	vrrpVIPResponders(t, provider, "6", []string{"2001:db8:ffff::9"}, "A")
 	capture := healthPBRCapture(t, "wan0")
-	doc := config.Native{Network: network.Desired{Interfaces: []network.Interface{{Name: "wan0", Addresses: []string{"fe80::1/64"}, AddressOptions: map[string]network.AddressOptions{"fe80::1/64": {NoDAD: true}}}}, Routes: []network.Route{{Destination: "2001:db8:ffff::9/128", Gateway: "fe80::2", Interface: "wan0"}}}, Services: []serviceconfig.Service{{Name: "wan", DHCP6: &serviceconfig.DHCP6{Interface: "wan0", IAID: 7, RequestAddress: true}}}}
+	doc := config.Native{Network: network.Desired{Interfaces: []network.Interface{{Name: "wan0"}}, Routes: []network.Route{{Destination: "2001:db8:ffff::9/128", Gateway: "fe80::2", Interface: "wan0"}}}, Services: []serviceconfig.Service{{Name: "wan", DHCP6: &serviceconfig.DHCP6{Interface: "wan0", IAID: 7, RequestAddress: true}}}}
 	f := startFixtureDaemon(t, config.FromNative(doc))
 	ctx := context.Background()
 	snapshot := func() (dhcp6config.Snapshot, uint64) {
@@ -108,8 +110,12 @@ func TestDaemonDHCP6AddressIndependentServer(t *testing.T) {
 		first, _ = snapshot()
 		return len(first.Addresses) > 0 && len(first.DNSServers) == 1 && len(first.DomainSearch) == 1 && installed(first.Addresses[0].Address)
 	})
-	if first.DNSServers[0] != "2001:db8:42::53" || first.DomainSearch[0] != "wan.test" {
+	if first.DNSServers[0] != "fe80::2" || first.DomainSearch[0] != "wan.test" {
 		t.Fatal("server information was lost", first)
+	}
+	answer, err := exec.Command("dig", "-6", "@fe80::2%wan0", "host.wan.test", "AAAA", "+short", "+time=2", "+tries=1").CombinedOutput()
+	if err != nil || !bytes.Contains(answer, []byte("2001:db8:ffff::9")) {
+		t.Fatalf("learned link-local DNS failed on the WAN scope: %s %v", answer, err)
 	}
 	address := first.Addresses[0].Address
 	fixtureDHCP6Traffic(t, address)

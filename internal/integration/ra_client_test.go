@@ -198,6 +198,10 @@ func runRAClientFixture(t *testing.T, clockClient *clocktest.Client) {
 	binary.BigEndian.PutUint32(dns[4:8], valid-2)
 	resolver := netip.MustParseAddr("2001:db8:53::53").As16()
 	copy(dns[8:], resolver[:])
+	// Broken independent DNS options must not discard this valid PIO/router.
+	// Both options fit the packet; only their own contents are unusable.
+	packet = append(packet, 25, 1, 0, 0, 0, 0, 0, 5)
+	packet = append(packet, 31, 2, 0, 0, 0, 0, 0, 5, 0xc0, 0, 0, 0, 0, 0, 0, 0)
 	send := func() {
 		t.Helper()
 		if err := unix.Sendto(fd, packet, 0, &unix.SockaddrInet6{Addr: netip.MustParseAddr("ff02::1").As16(), ZoneId: uint32(peer.Attrs().Index)}); err != nil {

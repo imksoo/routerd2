@@ -69,7 +69,7 @@ type message struct {
 	preference                 byte
 }
 
-func decode(packet []byte) (message, error) {
+func decode(packet []byte, iaid uint32) (message, error) {
 	if len(packet) < 4 {
 		return message{}, errors.New("short DHCPv6 message")
 	}
@@ -81,7 +81,7 @@ func decode(packet []byte) (message, error) {
 	seen := map[uint16]bool{}
 	for _, o := range opts {
 		switch o.code {
-		case 1, 2, 3, 7, 13, 23, 24, 25, 31, 32, 64, 82, 83:
+		case 1, 2, 13:
 			if seen[o.code] {
 				return m, errors.New("duplicate DHCPv6 option")
 			}
@@ -94,17 +94,17 @@ func decode(packet []byte) (message, error) {
 			m.server = append([]byte(nil), o.value...)
 		case 3, 25:
 			ia, e := decodeIA(o.code, o.value)
-			if e != nil {
-				return m, e
+			if e != nil || ia.iaid != iaid {
+				continue
 			}
-			if o.code == 3 {
+			if o.code == 3 && m.na == nil {
 				m.na = &ia
-			} else {
+			} else if o.code == 25 && m.pd == nil {
 				m.pd = &ia
 			}
 		case 7:
 			if len(o.value) != 1 {
-				return m, errors.New("invalid DHCPv6 preference")
+				continue
 			}
 			m.preference = o.value[0]
 		case 13:
@@ -114,12 +114,12 @@ func decode(packet []byte) (message, error) {
 			m.status = binary.BigEndian.Uint16(o.value)
 		case 23, 31:
 			if len(o.value) == 0 || len(o.value)%16 != 0 {
-				return m, errors.New("invalid DHCPv6 server list")
+				continue
 			}
 			for b := o.value; len(b) > 0; b = b[16:] {
 				a := netip.AddrFrom16([16]byte(b[:16]))
-				if !usable(a) {
-					return m, errors.New("invalid DHCPv6 server address")
+				if a.Is4In6() || a.IsUnspecified() || a.IsMulticast() {
+					continue
 				}
 				if o.code == 23 {
 					m.dns = append(m.dns, a.String())
@@ -130,19 +130,19 @@ func decode(packet []byte) (message, error) {
 		case 24, 64:
 			names, e := domainNames(o.value)
 			if e != nil {
-				return m, e
+				continue
 			}
 			if o.code == 24 {
-				m.domains = names
+				m.domains = append(m.domains, names...)
 			} else {
 				if len(names) != 1 {
-					return m, errors.New("AFTR requires one name")
+					continue
 				}
 				m.aftr = names[0]
 			}
 		case 32, 82, 83:
 			if len(o.value) != 4 {
-				return m, errors.New("invalid DHCPv6 timer option")
+				continue
 			}
 			n := binary.BigEndian.Uint32(o.value)
 			switch o.code {

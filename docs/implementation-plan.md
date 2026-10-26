@@ -658,6 +658,12 @@ bridge MAC変更後の古いSLLA広告を修正した。保存状態なしの起
 独立RA/DNS/Linux AFTRとの期限切れ撤去・再取得・worker交替も通った。
 実回線T1=7200秒のRenew/Rebind/Releaseは未確認。ONU型番・直結配線・NICは未資格判定。
 [既存routerdとの比較](routerd-reuse-review.md)を各モジュールで継続する。
+受信IAIDはdecoderで選択し、不良・無関係IAや独立optionで有効な割当全体を捨てない。
+リンクローカルDNS/SNTPを許可し、独立dnsmasqと通常DAD・scope付きDNS実問い合わせ・
+IA_NA TCP/UDP・更新/失効/復旧を確認した。不良RDNSS/DNSSLもRA option単位で破棄する。
+Rapid Commit Discoverへの通常OFFERとDORAを独立Scapy・captureで確認した。
+NA/PD片方の応答が未更新IAの共通更新timerを置換する問題は修正が残る。
+
 
 DHCPv6の割当・情報・T1/T2・再送は元のBOOTTIMEへ変更し、controlの受信側grantを削除した。
 RAのrouter/PIO/DNSとAFTRまで元の期限を渡し、AFTRの二重input・clock anchor・再base・JSON identityを削除した。

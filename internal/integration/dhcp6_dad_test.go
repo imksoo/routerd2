@@ -51,7 +51,7 @@ func TestDaemonDHCP6DuplicateAddressDecline(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	server := startFixtureDNSMasq(t, provider, []string{"--dhcp-range=2001:db8:42::100,2001:db8:42::100,64,120s"})
+	server := startFixtureDNSMasq(t, provider, []string{"--port=0", "--dhcp-range=2001:db8:42::100,2001:db8:42::100,64,120s"})
 	vrrpVIPResponders(t, provider, "6", []string{"2001:db8:ffff::9"}, "A")
 	capture := healthPBRCapture(t, "wire0")
 	bridge := "wan0"
@@ -129,7 +129,7 @@ func TestDaemonDHCP6DuplicateAddressDecline(t *testing.T) {
 		t.Fatal(err)
 	}
 	until(t, time.Second, func() bool { return errors.Is(unix.Kill(server.Process.Pid, 0), unix.ESRCH) })
-	startFixtureDNSMasq(t, provider, []string{"--dhcp-range=2001:db8:42::101,2001:db8:42::101,64,120s"})
+	startFixtureDNSMasq(t, provider, []string{"--port=0", "--dhcp-range=2001:db8:42::101,2001:db8:42::101,64,120s"})
 	until(t, 12*time.Second, func() bool {
 		var status runtimeplan.InstanceStatus
 		if err := f.control.Do(context.Background(), "GET", "/v1/services/service.wan", nil, &status); err != nil {
