@@ -428,8 +428,10 @@ worker設定の再生成や再起動で優先度を変更しない。設定と�
 
 元のprotocol通知は期限切れでも書き換えない。状態APIの`snapshot`はpublisherの最後の観測であり、
 現在の利用可否とは別である。BGP・VRRP・DHCP serverの`ownership_expired`は現在の期限判定を示す。
-DNS出力・条件・経路はそれぞれ現在有効な観測だけを使う。BGPは元のBOOTTIME期限、
-DHCP serverは現時点ではUTCと受信側monotonic期限を使う。後者の元BOOTTIMEへの置換は未完了。
+DNS出力・条件・経路はそれぞれ現在有効な観測だけを使う。BGPとDHCP serverは元のBOOTTIME期限を使う。
+DHCP serverの型付き観測から、元のboot ID・観測時刻・期限をそのままDNS workerへ渡す。
+DNSはA/PTR応答時に期限と個別clientのUTC lease期限を確認し、TTLを短い方で制限する。
+controlにもDNSにも受信側で作る所有期限はない。個別clientの割当・保存のUTC依存は残る。
 
 ## 追加MACとインターフェースの所有期限
 

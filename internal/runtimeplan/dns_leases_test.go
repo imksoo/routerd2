@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/imksoo/routerd/pkg/api"
+
+	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
@@ -36,8 +38,12 @@ func TestDHCPServerDNSProjectionFencesSourcesAndExpiresReplays(t *testing.T) {
 	if err != nil || len(initial.Sets) != 0 || initial.ConfigDigest != r.bindings["service.dns"].digest {
 		t.Fatalf("initial fenced empty projection: %+v %v", initial, err)
 	}
-	now := time.Now()
-	snapshot := dhcpserverconfig.Snapshot{Resource: "leases", Interface: "lan0", ServerAddress: "192.0.2.1", Epoch: strings.Repeat("b", 32), Sequence: 1, Active: true, ObservedAt: now, ValidUntil: now.Add(5 * time.Second), Leases: []dhcpserverconfig.Lease{{MACAddress: "02:00:00:00:00:02", IPAddress: "192.0.2.123", Hostname: "laptop", Scope: "default", AcquiredAt: now, RenewedAt: now, ExpiresAt: now.Add(600 * time.Second)}}}
+	clock, err := boottime.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := clock.WallTime
+	snapshot := dhcpserverconfig.Snapshot{Resource: "leases", Interface: "lan0", ServerAddress: "192.0.2.1", Epoch: strings.Repeat("b", 32), Sequence: 1, Active: true, ObservedAt: now, BootID: clock.BootID, ObservedNanos: uint64(clock.BoottimeNanoseconds), ExpiresNanos: uint64(clock.BoottimeNanoseconds) + uint64(500*time.Millisecond), Leases: []dhcpserverconfig.Lease{{MACAddress: "02:00:00:00:00:02", IPAddress: "192.0.2.123", Hostname: "laptop", Scope: "default", AcquiredAt: now, RenewedAt: now, ExpiresAt: now.Add(300 * time.Millisecond)}}}
 	u := update(t, r, "service.leases", 1, snapshot)
 	if err := r.Observe(context.Background(), u); err != nil {
 		t.Fatal(err)
@@ -54,9 +60,12 @@ func TestDHCPServerDNSProjectionFencesSourcesAndExpiresReplays(t *testing.T) {
 	if err := r.Observe(context.Background(), update(t, r, "service.leases", 2, bad)); err == nil {
 		t.Fatal("lease source identity spoof was accepted")
 	}
-	r.mu.Lock()
-	r.serverDeadlines["service.leases"] = time.Now().Add(-time.Second)
-	r.mu.Unlock()
+	time.Sleep(350 * time.Millisecond)
+	projected, err = r.DNSLeases("service.dns")
+	if err != nil || len(projected.Sets) != 1 || len(projected.Sets[0].Records) != 1 || !projected.Sets[0].Records[0].ExpiresAt.Equal(snapshot.Leases[0].ExpiresAt) {
+		t.Fatal("client expiry changed the original source sequence contents", projected, err)
+	}
+	time.Sleep(200 * time.Millisecond)
 	if err := r.reconcileDynamic(ctx); err != nil || len(networkWriter.applied.Routes) != 0 {
 		t.Fatal("expired server still authorized a dependent route", err)
 	}
@@ -66,11 +75,10 @@ func TestDHCPServerDNSProjectionFencesSourcesAndExpiresReplays(t *testing.T) {
 	if string(r.records[u.Name].Snapshot) != string(u.Snapshot) {
 		t.Fatal("configuration cutover rewrote the expired source observation")
 	}
-	// Simulate a replay transported with a higher envelope sequence. Its old
-	// absolute expiry is still future, but its monotonic grant is exhausted.
+	// A higher transport sequence cannot give an expired source new authority.
 	u.Sequence++
-	if err := r.Observe(context.Background(), u); err != nil {
-		t.Fatal(err)
+	if err := r.Observe(context.Background(), u); err == nil {
+		t.Fatal("expired original observation was accepted as fresh")
 	}
 	if err := r.reconcileDynamic(ctx); err != nil || len(networkWriter.applied.Routes) != 0 {
 		t.Fatal("replayed observation reactivated the expired server after cutover", err)

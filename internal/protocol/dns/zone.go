@@ -19,6 +19,7 @@ import (
 	"github.com/imksoo/routerd/pkg/api"
 	"github.com/imksoo/routerd/pkg/daemonapi"
 	"github.com/imksoo/routerd/pkg/dnsresolver"
+	"github.com/imksoo/routerd2/internal/boottime"
 )
 
 type zoneTable struct {
@@ -44,10 +45,11 @@ type zoneRecord struct {
 	IPv6     []string
 	TTL      uint32
 	Source   zoneRecordSource
-	// Native leases carry both finite server lease expiry and a local
-	// monotonic ownership deadline. Static records leave these zero.
-	ExpiresAt      time.Time
-	OwnershipUntil time.Time
+	// Native leases retain client UTC expiry and the original server boot
+	// deadline. Query, polling and reload never extend either.
+	ExpiresAt    time.Time
+	BootID       string
+	ExpiresNanos uint64
 }
 
 type zoneRecordSource uint8
@@ -227,12 +229,11 @@ func (t *zoneTable) ApplyLease(lease dhcpLeaseEvent) {
 
 func (z *zoneData) answer(req *dns.Msg, q dns.Question) (*dns.Msg, bool) {
 	name := dns.Fqdn(strings.ToLower(q.Name))
-	now := time.Now()
 	if withinZone(name, z.Name) {
 		msg := new(dns.Msg)
 		msg.SetReply(req)
 		msg.Authoritative = true
-		record, ok := z.liveRecord(name, now)
+		record, ok := z.liveRecord(name)
 		if !ok {
 			// RFC 4592 style wildcard: with no exact match, walk up toward the
 			// zone apex looking for a "*" record at the closest enclosing label.
@@ -245,7 +246,7 @@ func (z *zoneData) answer(req *dns.Msg, q dns.Question) (*dns.Msg, bool) {
 				if len(rest) < len(z.Name) {
 					break
 				}
-				if wc, found := z.liveRecord("*."+rest, now); found {
+				if wc, found := z.liveRecord("*." + rest); found {
 					record = wc
 					ok = true
 					break
@@ -280,7 +281,7 @@ func (z *zoneData) answer(req *dns.Msg, q dns.Question) (*dns.Msg, bool) {
 	}
 	if q.Qtype == dns.TypePTR && (strings.HasSuffix(name, ".in-addr.arpa.") || strings.HasSuffix(name, ".ip6.arpa.")) {
 		target := z.PTR[name]
-		record, active := z.liveRecord(strings.ToLower(dns.Fqdn(target)), now)
+		record, active := z.liveRecord(strings.ToLower(dns.Fqdn(target)))
 		if target == "" || !active {
 			return nil, false
 		}
@@ -297,19 +298,18 @@ func (z *zoneData) answer(req *dns.Msg, q dns.Question) (*dns.Msg, bool) {
 	return nil, false
 }
 
-func (z *zoneData) liveRecord(name string, now time.Time) (zoneRecord, bool) {
+func (z *zoneData) liveRecord(name string) (zoneRecord, bool) {
 	r, ok := z.Records[name]
 	if !ok || r.Source != zoneRecordSourceTypedLease {
 		return r, ok
 	}
-	if !now.Before(r.ExpiresAt) || !now.Before(r.OwnershipUntil) {
+	clock, err := boottime.Read()
+	if err != nil || r.BootID != clock.BootID || uint64(clock.BoottimeNanoseconds) >= r.ExpiresNanos || !clock.WallTime.Before(r.ExpiresAt) {
 		return zoneRecord{}, false
 	}
-	for _, deadline := range []time.Time{r.ExpiresAt, r.OwnershipUntil} {
-		seconds := uint64(deadline.Sub(now) / time.Second)
-		if seconds < uint64(r.TTL) {
-			r.TTL = uint32(seconds)
-		}
+	seconds := min(uint64(r.ExpiresAt.Sub(clock.WallTime)/time.Second), (r.ExpiresNanos-uint64(clock.BoottimeNanoseconds))/uint64(time.Second))
+	if seconds < uint64(r.TTL) {
+		r.TTL = uint32(seconds)
 	}
 	return r, true
 }

@@ -108,7 +108,7 @@ func (m *migrationSupervisor) ServeHTTP(w http.ResponseWriter, req *http.Request
 		m.modules = append([]supervisor.DynamicModule(nil), set.Modules...)
 		localapi.JSON(w, http.StatusOK, struct{}{})
 	case "GET /v1/status":
-		state := supervisor.Status{Ready: true}
+		state := supervisor.Status{InstanceID: "11111111111111111111111111111111", Ready: true}
 		for _, module := range m.modules {
 			state.Modules = append(state.Modules, supervisor.ModuleStatus{Name: module.Name, Role: module.Role, ConfigDigest: module.ConfigDigest, Ready: true, State: "running", Generation: 1})
 		}

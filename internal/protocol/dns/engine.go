@@ -23,6 +23,7 @@ import (
 	"github.com/imksoo/routerd/pkg/daemonapi"
 	"github.com/imksoo/routerd/pkg/dnsresolver"
 	"github.com/imksoo/routerd/pkg/logstore"
+	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
 )
@@ -74,7 +75,6 @@ type daemon struct {
 	// retain monotonic time and are never extended by a duplicate sequence.
 	nativeLeaseMode  bool
 	nativeLeases     *dnsconfig.LeaseProjection
-	leaseReceipts    map[string]leaseReceipt
 	leaseFingerprint string
 	leaseRejected    atomic.Uint64
 }
@@ -873,7 +873,11 @@ func (d *daemon) applyRuntime(ctx context.Context, config dnsresolver.RuntimeCon
 	d.stateMu.RUnlock()
 	zones.CopyDynamicFrom(oldZones)
 	if d.nativeLeaseMode {
-		d.populateNativeZones(zones, config, time.Now())
+		clock, err := boottime.Read()
+		if err != nil {
+			return reloadSummary{}, err
+		}
+		d.populateNativeZones(zones, config, clock)
 	}
 
 	// Prepare the new query database before any live state changes. Permission,

@@ -6,12 +6,12 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
-	"time"
 	"unicode/utf8"
 
 	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/protocol/bgpconfig"
+	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
@@ -52,13 +52,9 @@ func (r *Runtime) instanceStatusLocked(name string, b binding, v serviceconfig.U
 			out.OwnershipExpired = err != nil || !bgpconfig.CurrentObservation(provider.snapshot, clock)
 		}
 	}
-	if v.Role == "dhcp_server" {
-		var grant struct {
-			Active bool `json:"active"`
-		}
-		if json.Unmarshal(v.Snapshot, &grant) == nil && grant.Active {
-			out.OwnershipExpired = !time.Now().Before(r.serverDeadlines[name])
-		}
+	if s := r.dhcpServers[name]; v.Role == "dhcp_server" && s.Active {
+		clock, err := boottime.Read()
+		out.OwnershipExpired = err != nil || !dhcpserverconfig.CurrentObservation(s, clock)
 	}
 	return out
 }

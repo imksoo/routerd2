@@ -61,7 +61,7 @@ func TestRuntimeCatalogBoundedStagingScratch(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer store.Close()
-			opts := BundleOptions{ReleaseID: id, GOOS: "linux", GOARCH: runtime.GOARCH, BootABI: 1, WorkerABI: 1, Entrypoint: "supervisor", Artifacts: []Artifact{{Name: "supervisor", Kind: "native", Command: "routerd"}, {Name: "services", Kind: "native", Command: "routerd-modules"}}}
+			opts := BundleOptions{ReleaseID: id, GOOS: "linux", GOARCH: runtime.GOARCH, BootABI: 1, WorkerABI: 2, Entrypoint: "supervisor", Artifacts: []Artifact{{Name: "supervisor", Kind: "native", Command: "routerd"}, {Name: "services", Kind: "native", Command: "routerd-modules"}}}
 			files := map[string]*os.File{"supervisor": inputs["routerd"], "services": inputs["routerd-modules"]}
 			if compact {
 				opts.Artifacts = append(opts.Artifacts, Artifact{Name: "logger", Kind: "native", Command: "routerd-logging"})

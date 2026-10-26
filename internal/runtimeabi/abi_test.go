@@ -65,7 +65,7 @@ func TestTransitionChecksObservedReadersAndBothWriters(t *testing.T) {
 	for _, change := range []func(*Descriptor, *Descriptor, *Facts){
 		func(_, target *Descriptor, _ *Facts) { target.ConfigurationContract = "other-contract" },
 		func(_, target *Descriptor, _ *Facts) { target.Profile = "other-profile" },
-		func(_, target *Descriptor, _ *Facts) { target.WorkerABI = 2 },
+		func(_, target *Descriptor, _ *Facts) { target.WorkerABI++ },
 		func(_, target *Descriptor, _ *Facts) {
 			target.State[0].Format = Format{ReadMin: 2, ReadMax: 2, Write: 2}
 		},

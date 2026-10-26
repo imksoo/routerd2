@@ -178,7 +178,7 @@ func TestPackRejectsUnverifiedELFWithoutPublishing(t *testing.T) {
 
 func testLayout(t *testing.T, supervisor, modules, logger string) string {
 	t.Helper()
-	l := Layout{BootABI: 1, WorkerABI: 1, Entrypoint: "routerd", Roles: []release.RoleBinding{{Role: "logging", Artifact: "routerd-logging"}, {Role: "control", Artifact: "routerd-modules"}, {Role: "network", Artifact: "routerd-modules"}}, Artifacts: []ArtifactInput{{Name: "routerd", Kind: "native", Command: "routerd", File: supervisor}, {Name: "routerd-modules", Kind: "native", Command: "routerd-modules", File: modules}, {Name: "routerd-logging", Kind: "native", Command: "routerd-logging", File: logger}}}
+	l := Layout{BootABI: 1, WorkerABI: 2, Entrypoint: "routerd", Roles: []release.RoleBinding{{Role: "logging", Artifact: "routerd-logging"}, {Role: "control", Artifact: "routerd-modules"}, {Role: "network", Artifact: "routerd-modules"}}, Artifacts: []ArtifactInput{{Name: "routerd", Kind: "native", Command: "routerd", File: supervisor}, {Name: "routerd-modules", Kind: "native", Command: "routerd-modules", File: modules}, {Name: "routerd-logging", Kind: "native", Command: "routerd-logging", File: logger}}}
 	raw, err := json.Marshal(l)
 	if err != nil {
 		t.Fatal(err)

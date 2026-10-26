@@ -409,7 +409,9 @@ BGP経路の元の期限は、ACK済みBFD受信期限と再帰next-hopのaddres
 失効時のprotocol通知JSON書換えを廃止し、元の観測を消費側で評価する。
 BGP・DHCPv4の重複した受信期限を削除し、BGP状態表示も元のBOOTTIME期限を使う。
 DHCP serverは設定切替後も元通知を保持し、期限切れのactive条件とDNS出力を除外する。
-server→DNSの元BOOTTIME期限への置換と、残るsnapshotの型付き保持は未完了。
+DHCP server観測も受理時に型付きで保持し、元BOOTTIME期限をDNSのA/PTR応答まで渡す。
+control／DNSの受信側期限表と内部JSON複製を削除した。個別clientの割当・保存のUTC依存と、
+他protocolの型付き保持は未完了。
 現在の検証範囲と残作業は
 [引き継ぎ](pve-codex-handoff.md) を参照する。CORE-03全体の完了とはしない。
 

@@ -8,9 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"slices"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 )
 
 const MaxLeaseRecords = 4096
@@ -26,13 +30,15 @@ type LeaseProjection struct {
 }
 
 type LeaseSet struct {
-	Zone       string        `json:"zone"`
-	Source     string        `json:"source"`
-	Epoch      string        `json:"epoch"`
-	Sequence   uint64        `json:"sequence"`
-	ObservedAt time.Time     `json:"observed_at"`
-	ValidUntil time.Time     `json:"valid_until"`
-	Records    []LeaseRecord `json:"records"`
+	Zone          string        `json:"zone"`
+	Source        string        `json:"source"`
+	Epoch         string        `json:"epoch"`
+	Sequence      uint64        `json:"sequence"`
+	ObservedAt    time.Time     `json:"observed_at"`
+	BootID        string        `json:"boot_id"`
+	ObservedNanos uint64        `json:"observed_nanos"`
+	ExpiresNanos  uint64        `json:"expires_nanos"`
+	Records       []LeaseRecord `json:"records"`
 }
 
 type LeaseRecord struct {
@@ -75,11 +81,11 @@ func ValidLeaseHostname(name string) bool {
 // NormalizeLeaseProjection copies, canonicalizes and sorts the snapshot. It
 // never repairs an invalid identity or deadline; validation still rejects it.
 func NormalizeLeaseProjection(p LeaseProjection) LeaseProjection {
-	b, _ := json.Marshal(p)
-	var out LeaseProjection
-	_ = json.Unmarshal(b, &out)
+	out := p
+	out.Sets = slices.Clone(p.Sets)
 	for i := range out.Sets {
 		s := &out.Sets[i]
+		s.Records = slices.Clone(s.Records)
 		if name, ok := LeaseSourceName(s.Source); ok {
 			s.Source = name
 		}
@@ -106,7 +112,7 @@ func NormalizeLeaseProjection(p LeaseProjection) LeaseProjection {
 	return out
 }
 
-func ValidateLeaseProjection(c RuntimeConfig, p LeaseProjection, now time.Time) error {
+func ValidateLeaseProjection(c RuntimeConfig, p LeaseProjection, clock boottime.Clock) error {
 	if p.Resource != c.Resource || len(p.Sets) > 128 {
 		return errors.New("DNS lease projection has an invalid resource identity or exceeds 128 source sets")
 	}
@@ -138,8 +144,8 @@ func ValidateLeaseProjection(c RuntimeConfig, p LeaseProjection, now time.Time) 
 		if _, err := hex.DecodeString(s.Epoch); err != nil {
 			return errors.New("DNS lease snapshot epoch is invalid")
 		}
-		if s.ObservedAt.IsZero() || s.ObservedAt.After(now.Add(time.Second)) || !s.ValidUntil.After(s.ObservedAt) || s.ValidUntil.Sub(s.ObservedAt) > 5*time.Second {
-			return errors.New("DNS lease ownership deadline must follow observation by at most five seconds")
+		if s.ObservedAt.IsZero() || s.BootID != clock.BootID || s.ObservedNanos == 0 || s.ObservedNanos > uint64(clock.BoottimeNanoseconds) || s.ExpiresNanos <= s.ObservedNanos || s.ExpiresNanos-s.ObservedNanos > uint64(dhcpserverconfig.ObservationLifetime) {
+			return errors.New("DNS lease source requires its original boot-scoped observation and deadline")
 		}
 		addresses := map[string]bool{}
 		for _, r := range s.Records {

@@ -2,7 +2,13 @@
 
 package dhcpserverconfig
 
-import "time"
+import (
+	"time"
+
+	"github.com/imksoo/routerd2/internal/boottime"
+)
+
+const ObservationLifetime = 5 * time.Second
 
 // Lease is an active, locally durable binding. ClientID is the exact option 61
 // value in hexadecimal, or empty when identity is the Ethernet chaddr.
@@ -42,7 +48,9 @@ type Snapshot struct {
 	Sequence      uint64    `json:"sequence"`
 	Active        bool      `json:"active"`
 	ObservedAt    time.Time `json:"observed_at"`
-	ValidUntil    time.Time `json:"valid_until"`
+	BootID        string    `json:"boot_id"`
+	ObservedNanos uint64    `json:"observed_nanos"`
+	ExpiresNanos  uint64    `json:"expires_nanos"`
 	Leases        []Lease   `json:"leases"`
 	Stats         Stats     `json:"stats"`
 	Error         string    `json:"error,omitempty"`
@@ -56,4 +64,10 @@ type Event struct {
 	At       time.Time `json:"at"`
 	Lease    *Lease    `json:"lease,omitempty"`
 	Error    string    `json:"error,omitempty"`
+}
+
+// CurrentObservation uses the original publisher clock, including suspend.
+// ObservedAt is display metadata; client binding expiry is checked separately.
+func CurrentObservation(s Snapshot, clock boottime.Clock) bool {
+	return s.BootID == clock.BootID && s.ObservedNanos > 0 && s.ObservedNanos <= uint64(clock.BoottimeNanoseconds) && uint64(clock.BoottimeNanoseconds) < s.ExpiresNanos
 }

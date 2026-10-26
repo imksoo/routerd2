@@ -13,13 +13,21 @@ import (
 	"time"
 
 	"github.com/imksoo/routerd/pkg/daemonapi"
+	mdns "github.com/miekg/dns"
+
+	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
-	mdns "github.com/miekg/dns"
 )
 
-func nativeProjection(now time.Time) dnsconfig.LeaseProjection {
-	return dnsconfig.LeaseProjection{Resource: "lab", ConfigDigest: strings.Repeat("a", 64), Sets: []dnsconfig.LeaseSet{{Zone: "lan-zone", Source: "DHCPv4Server/dhcpv4", Epoch: strings.Repeat("b", 32), Sequence: 1, ObservedAt: now, ValidUntil: now.Add(5 * time.Second), Records: []dnsconfig.LeaseRecord{{Hostname: "laptop", Address: "192.0.2.73", ExpiresAt: now.Add(time.Hour)}}}}}
+func nativeProjection(t *testing.T) dnsconfig.LeaseProjection {
+	t.Helper()
+	clock, err := boottime.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := clock.WallTime
+	return dnsconfig.LeaseProjection{Resource: "lab", ConfigDigest: strings.Repeat("a", 64), Sets: []dnsconfig.LeaseSet{{Zone: "lan-zone", Source: "DHCPv4Server/dhcpv4", Epoch: strings.Repeat("b", 32), Sequence: 1, ObservedAt: now, BootID: clock.BootID, ObservedNanos: uint64(clock.BoottimeNanoseconds), ExpiresNanos: uint64(clock.BoottimeNanoseconds) + uint64(5*time.Second), Records: []dnsconfig.LeaseRecord{{Hostname: "laptop", Address: "192.0.2.73", ExpiresAt: now.Add(time.Hour)}}}}}
 }
 
 func answerNative(t *testing.T, d *daemon, name string, typ uint16) *mdns.Msg {
@@ -37,7 +45,7 @@ func answerNative(t *testing.T, d *daemon, name string, typ uint16) *mdns.Msg {
 func TestNativeLeaseSourceScopeStaticPrecedenceAndMonotonicExpiry(t *testing.T) {
 	d := newTestDaemon(t, "", testResolverConfig(nil), true)
 	d.nativeLeaseMode = true
-	p := nativeProjection(time.Now())
+	p := nativeProjection(t)
 	p.Sets[0].Records = append(p.Sets[0].Records, dnsconfig.LeaseRecord{Hostname: "router", Address: "192.0.2.99", ExpiresAt: time.Now().Add(time.Hour)})
 	if err := d.applyLeaseProjection(p); err != nil {
 		t.Fatal(err)
@@ -62,18 +70,24 @@ func TestNativeLeaseSourceScopeStaticPrecedenceAndMonotonicExpiry(t *testing.T) 
 	generation := d.generation
 	d.cache["preserve-upstream"] = cacheEntry{Message: []byte("retained")}
 	p.Sets[0].Sequence++
-	p.Sets[0].ObservedAt = time.Now()
-	p.Sets[0].ValidUntil = p.Sets[0].ObservedAt.Add(5 * time.Second)
+	clock, err := boottime.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Sets[0].ObservedAt = clock.WallTime
+	p.Sets[0].ObservedNanos = uint64(clock.BoottimeNanoseconds)
+	p.Sets[0].ExpiresNanos = p.Sets[0].ObservedNanos + uint64(300*time.Millisecond)
 	if err := d.applyLeaseProjection(p); err != nil {
 		t.Fatal(err)
 	}
 	if d.generation != generation || len(d.cache) != 1 {
 		t.Fatal("ownership heartbeat invalidated unrelated upstream cache")
 	}
-	key := "lan-zone/dhcpv4"
-	receipt := d.leaseReceipts[key]
-	receipt.deadline = time.Now().Add(-time.Second)
-	d.leaseReceipts[key] = receipt
+	// Neither reload nor replay may renew the publisher's original budget.
+	time.Sleep(350 * time.Millisecond)
+	if _, err := d.applyRuntime(context.Background(), d.config); err != nil {
+		t.Fatal(err)
+	}
 	if err := d.applyLeaseProjection(p); err != nil {
 		t.Fatal(err)
 	}
@@ -84,6 +98,20 @@ func TestNativeLeaseSourceScopeStaticPrecedenceAndMonotonicExpiry(t *testing.T) 
 		t.Fatal("expired native lease retained its PTR", out)
 	}
 	p.Sets[0].Sequence++
+	if err := d.applyLeaseProjection(p); err != nil {
+		t.Fatal(err)
+	}
+	if out := answerNative(t, d, "laptop.lab.example.", mdns.TypeA); out.Rcode != mdns.RcodeNameError {
+		t.Fatal("sequence-only replay revived expired ownership", out)
+	}
+	clock, err = boottime.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Sets[0].Sequence++
+	p.Sets[0].ObservedAt = clock.WallTime
+	p.Sets[0].ObservedNanos = uint64(clock.BoottimeNanoseconds)
+	p.Sets[0].ExpiresNanos = p.Sets[0].ObservedNanos + uint64(5*time.Second)
 	if err := d.applyLeaseProjection(p); err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +130,7 @@ func TestNativeLeaseSourceScopeStaticPrecedenceAndMonotonicExpiry(t *testing.T) 
 func TestNativeLeaseUpdatesKeepTCPConnectionAndExpireWhenInputCloses(t *testing.T) {
 	cfg := moduleConfig(t)
 	updates := make(chan dnsconfig.LeaseProjection, 1)
-	p := nativeProjection(time.Now())
+	p := nativeProjection(t)
 	updates <- p
 	ctx, cancel := context.WithCancel(context.Background())
 	ready, done := make(chan struct{}), make(chan error, 1)
@@ -141,8 +169,13 @@ func TestNativeLeaseUpdatesKeepTCPConnectionAndExpireWhenInputCloses(t *testing.
 	}
 	p.Sets[0].Records[0].Address = "192.0.2.74"
 	p.Sets[0].Sequence++
-	p.Sets[0].ObservedAt = time.Now()
-	p.Sets[0].ValidUntil = p.Sets[0].ObservedAt.Add(2 * time.Second)
+	clock, err := boottime.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Sets[0].ObservedAt = clock.WallTime
+	p.Sets[0].ObservedNanos = uint64(clock.BoottimeNanoseconds)
+	p.Sets[0].ExpiresNanos = p.Sets[0].ObservedNanos + uint64(2*time.Second)
 	updates <- p
 	deadline := time.Now().Add(time.Second)
 	for {

@@ -139,14 +139,14 @@ type Runtime struct {
 	vrrpTracks           map[string][]vrrpTrackState
 	liveRA               map[string]ra.Config
 	aftrInputs           map[string]aftr.Input
-	serverDeadlines      map[string]time.Time
+	dhcpServers          map[string]dhcpserverconfig.Snapshot
 	routeIssues          []RouteIssue
 	bgpApplied           map[string]bgpProjectionStatus
 	phase, lastError     string
 }
 
 func New(dir, stateDir string, n Network, supervisorInstance string) *Runtime {
-	return &Runtime{reconcileWake: make(chan struct{}, 1), waitWake: make(chan struct{}, 1), op: semaphore.NewWeighted(1), supervisorInstance: supervisorInstance, dir: dir, stateDir: stateDir, network: n, manager: managerClient{localapi.NewClient(filepath.Join(dir, supervisor.SocketName))}, bindings: map[string]binding{}, records: map[string]serviceconfig.Update{}, liveRA: map[string]ra.Config{}, serverDeadlines: map[string]time.Time{}, phase: "starting"}
+	return &Runtime{reconcileWake: make(chan struct{}, 1), waitWake: make(chan struct{}, 1), op: semaphore.NewWeighted(1), supervisorInstance: supervisorInstance, dir: dir, stateDir: stateDir, network: n, manager: managerClient{localapi.NewClient(filepath.Join(dir, supervisor.SocketName))}, bindings: map[string]binding{}, records: map[string]serviceconfig.Update{}, liveRA: map[string]ra.Config{}, dhcpServers: map[string]dhcpserverconfig.Snapshot{}, phase: "starting"}
 }
 
 // CheckReady queries the process manager at confirmation time. A previously
@@ -337,9 +337,9 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 	r.configured = true
 	r.records = retained
 	r.bindings = bindings
-	for name := range r.serverDeadlines {
+	for name := range r.dhcpServers {
 		if record, ok := retained[name]; !ok || record.Role != "dhcp_server" {
-			delete(r.serverDeadlines, name)
+			delete(r.dhcpServers, name)
 		}
 	}
 	r.installBFDCacheLocked(bfdSources, bfdRecipients)
@@ -490,35 +490,6 @@ func (r *Runtime) applyNetworkLocked(ctx context.Context, d network.Desired) err
 
 var ErrStale = errors.New("stale protocol producer or configuration")
 
-// Caller holds mu. An unchanged DHCP server deadline cannot acquire a longer
-// monotonic lifetime through replay, even after a backward wall-clock step.
-// Computing a candidate deadline does not change accepted observations.
-func (r *Runtime) serverDeadlineLocked(u serviceconfig.Update) (time.Time, error) {
-	var grant struct {
-		Active     bool      `json:"active"`
-		ValidUntil time.Time `json:"valid_until"`
-	}
-	_ = json.Unmarshal(u.Snapshot, &grant)
-	if !grant.Active {
-		return time.Time{}, nil
-	}
-	now := time.Now()
-	remaining := grant.ValidUntil.Sub(now)
-	if remaining <= 0 || remaining > 5*time.Second {
-		return time.Time{}, errors.New("invalid DHCP server observation deadline")
-	}
-	if previous, ok := r.records[u.Name]; ok && previous.Generation == u.Generation {
-		var old struct {
-			Active     bool      `json:"active"`
-			ValidUntil time.Time `json:"valid_until"`
-		}
-		if json.Unmarshal(previous.Snapshot, &old) == nil && old.Active && old.ValidUntil.Equal(grant.ValidUntil) && !r.serverDeadlines[u.Name].IsZero() {
-			return r.serverDeadlines[u.Name], nil
-		}
-	}
-	return now.Add(remaining), nil
-}
-
 // Observe acknowledges a validated observation. Kernel application belongs to
 // the serialized coordinator, independently of whether the source has guards.
 func (r *Runtime) Observe(ctx context.Context, u serviceconfig.Update) error {
@@ -537,9 +508,9 @@ func (r *Runtime) Observe(ctx context.Context, u serviceconfig.Update) error {
 		return r.acceptBFD(ctx, u)
 	}
 	var producerStatus *supervisor.Status
-	if u.Role == "bgp" || u.Role == "dhcp4" || u.Role == "vrrp" {
+	if u.Role == "bgp" || u.Role == "dhcp4" || u.Role == "vrrp" || u.Role == "dhcp_server" {
 		// A restarted control has no remembered generations. Authenticate even
-		// its first BGP/DHCPv4 publication against the current process-tree registry;
+		// its first publication against the current process-tree registry;
 		// initial publication precedes worker Ready, so Ready is not required.
 		status, err := r.manager.Status(ctx)
 		if err != nil {
@@ -586,7 +557,14 @@ func (r *Runtime) Observe(ctx context.Context, u serviceconfig.Update) error {
 			}
 		}
 	}
-	if u.Role == "aftr" {
+	var server dhcpserverconfig.Snapshot
+	if u.Role == "dhcp_server" {
+		var err error
+		server, err = r.validateDHCPServerSnapshotLocked(b, u)
+		if err != nil {
+			return err
+		}
+	} else if u.Role == "aftr" {
 		if err := r.validateAFTRSnapshotLocked(b, u.Snapshot); err != nil {
 			return err
 		}
@@ -609,25 +587,13 @@ func (r *Runtime) Observe(ctx context.Context, u serviceconfig.Update) error {
 			return err
 		}
 	}
-	var serverDeadline time.Time
-	if u.Role == "dhcp_server" {
-		var err error
-		serverDeadline, err = r.serverDeadlineLocked(u)
-		if err != nil {
-			return err
-		}
-	}
 	candidateRecords := r.observationsLocked()
 	candidateRecords[u.Name] = u
 	if _, err := r.projectLocked(r.config.plan.Native, candidateRecords, time.Now(), resourceprogram.FactSnapshot{}); err != nil {
 		return err
 	}
 	if u.Role == "dhcp_server" {
-		if serverDeadline.IsZero() {
-			delete(r.serverDeadlines, u.Name)
-		} else {
-			r.serverDeadlines[u.Name] = serverDeadline
-		}
+		r.dhcpServers[u.Name] = server
 	}
 	r.recordGuardGrantLocked(u, time.Now())
 	r.records[u.Name] = u
@@ -707,16 +673,6 @@ func validateSnapshot(instance serviceconfig.Instance, b json.RawMessage) error 
 			return err
 		}
 		return raclient.ValidateSnapshot(cfg, snapshot)
-	case "dhcp_server":
-		var c dhcpserverconfig.Config
-		var s dhcpserverconfig.Snapshot
-		if err := strict(instance.Config, &c); err != nil {
-			return err
-		}
-		if err := strict(b, &s); err != nil {
-			return err
-		}
-		return dhcpserverconfig.ValidateSnapshot(c, s)
 	case "dhcp4":
 		var c dhcp4.Config
 		var s dhcp4.Snapshot

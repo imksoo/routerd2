@@ -59,10 +59,13 @@ Lease action names are the original `daemonapi` added/updated/removed actions.
 The compatibility `Run` entry point preserves the original lease endpoint.
 The bundled runtime uses `RunWithLeaseUpdates` when DHCP sources are configured;
 in that mode this unscoped endpoint is rejected. Typed complete projections carry
-source, epoch, sequence and a bounded ownership deadline, and are validated
+source, epoch, sequence and the original publisher BOOTTIME deadline, and are validated
 against each zone's configured source allowlist. Static records retain priority.
 Both A and PTR answers expire at the earlier of the address lease and producer
-ownership; repeated sequence numbers cannot renew an expired ownership receipt.
+ownership. Each answer checks the original boot identity/deadline, including
+suspend elapsed time, and clamps its TTL to the remaining budget. There is no
+receiver-clock lease; polling, replay and configuration reload cannot renew it.
+Client lease expiry remains UTC and is checked separately.
 Listener sockets and existing TCP connections stay open during lease updates.
 Heartbeat-only updates do not invalidate the upstream cache.
 

@@ -111,7 +111,7 @@ func TestRuntimeReadinessAndDurableEffectsGate(t *testing.T) {
 		return nil
 	})
 	go func() {
-		done <- run(ctx, c, effects, func() { close(ready) }, func(Config) (transport, error) { return f, nil }, time.Now)
+		done <- run(ctx, c, effects, func() { close(ready) }, func(Config) (transport, error) { return f, nil })
 	}()
 	awaitSignal(t, initialEntered)
 	select {
@@ -172,7 +172,7 @@ func TestRuntimeReadinessAndDurableEffectsGate(t *testing.T) {
 	mu.Lock()
 	last := snapshots[len(snapshots)-1]
 	mu.Unlock()
-	if last.Active || len(last.Leases) != 0 || !last.ValidUntil.IsZero() || !f.closed.Load() {
+	if last.Active || len(last.Leases) != 0 || last.ExpiresNanos <= last.ObservedNanos || !f.closed.Load() {
 		t.Fatalf("shutdown did not withdraw: %+v", last)
 	}
 	if _, err := os.Lstat(c.SocketPath); !errors.Is(err, os.ErrNotExist) {
@@ -187,6 +187,17 @@ func TestRuntimeReadinessAndDurableEffectsGate(t *testing.T) {
 }
 
 func TestEffectsFailureNeverAcknowledgesClient(t *testing.T) {
+	for _, late := range []bool{false, true} {
+		name := "unavailable"
+		if late {
+			name = "late-success"
+		}
+		t.Run(name, func(t *testing.T) { testEffectsFailureNeverAcknowledgesClient(t, late) })
+	}
+}
+
+func testEffectsFailureNeverAcknowledgesClient(t *testing.T, late bool) {
+	t.Helper()
 	c := testConfig(t)
 	f := newFakeTransport()
 	ready := make(chan struct{})
@@ -195,12 +206,16 @@ func TestEffectsFailureNeverAcknowledgesClient(t *testing.T) {
 	defer cancel()
 	effects := EffectsFunc(func(_ context.Context, s Snapshot) error {
 		if s.Active && len(s.Leases) > 0 {
+			if late {
+				time.Sleep(dhcpserverconfig.ObservationLifetime + 50*time.Millisecond)
+				return nil
+			}
 			return errors.New("control unavailable")
 		}
 		return nil
 	})
 	go func() {
-		done <- run(ctx, c, effects, func() { close(ready) }, func(Config) (transport, error) { return f, nil }, time.Now)
+		done <- run(ctx, c, effects, func() { close(ready) }, func(Config) (transport, error) { return f, nil })
 	}()
 	awaitSignal(t, ready)
 	f.in <- requestPacket(msgDiscover, 9, testMAC, map[byte][]byte{61: testID}, "")
@@ -209,10 +224,14 @@ func TestEffectsFailureNeverAcknowledgesClient(t *testing.T) {
 	f.in <- requestPacket(msgRequest, 9, testMAC, map[byte][]byte{61: testID, 50: m.YIAddr.AsSlice(), 54: {192, 0, 2, 1}}, "")
 	select {
 	case err := <-done:
-		if err == nil || !strings.Contains(err.Error(), "control unavailable") {
+		want := "control unavailable"
+		if late {
+			want = "original observation expired"
+		}
+		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Fatal(err)
 		}
-	case <-time.After(3 * time.Second):
+	case <-time.After(8 * time.Second):
 		t.Fatal("failed effects did not stop worker")
 	}
 	select {
@@ -234,7 +253,7 @@ func TestInitialEffectsFailureDoesNotBecomeReady(t *testing.T) {
 			return errors.New("initial failure")
 		}
 		return nil
-	}), func() { ready = true }, func(Config) (transport, error) { return f, nil }, time.Now)
+	}), func() { ready = true }, func(Config) (transport, error) { return f, nil })
 	if err == nil || ready || !f.closed.Load() {
 		t.Fatalf("readiness on failure: %v %v", err, ready)
 	}
@@ -370,7 +389,7 @@ func mustRead(t *testing.T, path string) []byte {
 	return b
 }
 
-func TestSnapshotLimitPreventsAcknowledgingOversizedState(t *testing.T) {
+func TestSnapshotLimitPreventsReadinessAndPublication(t *testing.T) {
 	c := testConfig(t)
 	c.MaxLeases = 2048
 	c.Primary.Prefix = "10.0.0.0/8"
@@ -379,16 +398,33 @@ func TestSnapshotLimitPreventsAcknowledgingOversizedState(t *testing.T) {
 	c.Primary.Router = "10.0.0.1"
 	c.ServerAddress = "10.0.0.1"
 	now := time.Now().UTC()
-	written := false
-	e := newTestEngine(t, c, &now, func(journal) error { written = true; return nil })
+	store, _, err := openStore(c, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := newTestEngine(t, c, &now, store.Save)
 	hostname := strings.Repeat("a", 63) + "." + strings.Repeat("b", 63) + "." + strings.Repeat("c", 63) + "." + strings.Repeat("d", 61)
 	for i := 0; i < 2048; i++ {
 		id := strings.Repeat("ab", 253) + stringHex(uint16(i))
 		l := Lease{ClientID: id, MACAddress: "02:00:00:00:00:01", IPAddress: numberIP(0x0a000002 + uint32(i)).String(), Hostname: hostname, Scope: "default", AcquiredAt: now, RenewedAt: now, ExpiresAt: now.Add(time.Minute)}
 		e.leases[leaseKey(l)] = storedLease{Lease: l, HeldUntil: l.ExpiresAt}
 	}
-	if err := e.save(now); err == nil || written {
-		t.Fatal("oversized snapshot was durably admitted")
+	// Keep allocation exclusions durable even when a full source publication
+	// cannot fit IPC. Run must fail before authorizing any reply or readiness.
+	if err := e.save(now); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+	f := newFakeTransport()
+	ready, published := false, false
+	err = run(context.Background(), c, EffectsFunc(func(_ context.Context, s Snapshot) error {
+		if s.Active {
+			published = true
+		}
+		return nil
+	}), func() { ready = true }, func(Config) (transport, error) { return f, nil })
+	if err == nil || !strings.Contains(err.Error(), "IPC bound") || ready || published || !f.closed.Load() {
+		t.Fatal("oversized snapshot reached publication or readiness", err, ready, published)
 	}
 }
 func stringHex(v uint16) string {

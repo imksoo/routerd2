@@ -8,6 +8,7 @@ import (
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/protocol/bfd"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp4"
+	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/health"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
@@ -104,23 +105,17 @@ func (r *Runtime) recordGuardGrantLocked(u serviceconfig.Update, now time.Time) 
 		r.advanceVRRPTracksLocked(u, snapshot)
 		return
 	}
-	var snapshot struct {
-		Active     bool      `json:"active"`
-		ValidUntil time.Time `json:"valid_until"`
-		ExpiresAt  time.Time `json:"expiresAt"`
-	}
-	switch u.Role {
-	case "dhcp6pd", "dhcp_server":
-	default:
+	if u.Role != "dhcp6pd" {
 		return
+	}
+	var snapshot struct {
+		Active    bool      `json:"active"`
+		ExpiresAt time.Time `json:"expiresAt"`
 	}
 	if json.Unmarshal(u.Snapshot, &snapshot) != nil {
 		return
 	}
-	deadline := snapshot.ValidUntil
-	if u.Role == "dhcp4" || u.Role == "dhcp6pd" {
-		deadline = snapshot.ExpiresAt
-	}
+	deadline := snapshot.ExpiresAt
 	if !snapshot.Active {
 		deadline = now.Add(5 * time.Second)
 	}
@@ -188,7 +183,16 @@ func (r *Runtime) conditionFactsLocked(cfg configuration, now time.Time) (result
 		}
 		facts.Facts[name+".ready"] = resourceprogram.Fact{Value: ready, ObservedNanos: r.guardUntilNanos - uint64(time.Second), ExpiresNanos: r.guardUntilNanos, WorkerGeneration: module.Generation, ProducerEpoch: r.supervisorInstance}
 		record := r.records[name]
-		if record.Role == "dhcp_server" && !now.Before(r.serverDeadlines[name]) {
+		if record.Role == "dhcp_server" {
+			s := r.dhcpServers[name]
+			if !module.Ready || record.Generation != module.Generation || record.ConfigDigest != binding.digest || !dhcpserverconfig.CurrentObservation(s, clock) {
+				continue
+			}
+			value := resourceprogram.False
+			if s.Active {
+				value = resourceprogram.True
+			}
+			facts.Facts[name+".active"] = resourceprogram.Fact{Value: value, ObservedNanos: s.ObservedNanos, ExpiresNanos: min(s.ExpiresNanos, r.guardUntilNanos), WorkerGeneration: module.Generation, ProducerEpoch: record.ProducerEpoch}
 			continue
 		}
 		if record.Role == "vrrp" {

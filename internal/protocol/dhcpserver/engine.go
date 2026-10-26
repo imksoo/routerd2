@@ -7,8 +7,6 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -16,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 )
 
@@ -520,16 +519,6 @@ func (e *engine) markConflict(a netip.Addr, now time.Time) error {
 	return e.save(now, Event{Type: "conflict", Lease: &Lease{IPAddress: a.String()}})
 }
 func (e *engine) save(now time.Time, events ...Event) error {
-	// Validate the full lease payload before committing or acknowledging a
-	// lease. The parent service envelope still has room under its 2 MiB cap.
-	s := e.snapshot("", 0, now, true)
-	b, err := json.Marshal(s)
-	if err != nil {
-		return err
-	}
-	if len(b) > dhcpserverconfig.MaxSnapshotBytes {
-		return errors.New("DHCP active lease snapshot exceeds 1792 KiB; no ACK was sent")
-	}
 	j := journal{Version: 1, Resource: e.config.Resource, Interface: e.config.Interface, WrittenAt: now}
 	for _, l := range e.leases {
 		j.Leases = append(j.Leases, l)
@@ -580,17 +569,15 @@ func (e *engine) sweep(now time.Time) error {
 	}
 	return nil
 }
-func (e *engine) snapshot(epoch string, sequence uint64, now time.Time, active bool) Snapshot {
-	s := Snapshot{Resource: e.config.Resource, Interface: e.config.Interface, ServerAddress: e.config.ServerAddress, Epoch: epoch, Sequence: sequence, Active: active, ObservedAt: now, ValidUntil: now.Add(5 * time.Second), Leases: []Lease{}, Stats: e.stats}
+func (e *engine) snapshot(epoch string, sequence uint64, clock boottime.Clock, active bool) Snapshot {
+	now := clock.WallTime
+	s := Snapshot{Resource: e.config.Resource, Interface: e.config.Interface, ServerAddress: e.config.ServerAddress, Epoch: epoch, Sequence: sequence, Active: active, ObservedAt: now, BootID: clock.BootID, ObservedNanos: uint64(clock.BoottimeNanoseconds), ExpiresNanos: uint64(clock.BoottimeNanoseconds) + uint64(dhcpserverconfig.ObservationLifetime), Leases: []Lease{}, Stats: e.stats}
 	s.Stats.Offers = len(e.offers)
 	s.Stats.Quarantined = len(e.quarantines)
 	for _, l := range e.leases {
 		if active && dhcpserverconfig.ValidateLease(e.config, l.Lease, now) == nil {
 			s.Leases = append(s.Leases, l.Lease)
 		}
-	}
-	if !active {
-		s.ValidUntil = time.Time{}
 	}
 	sort.Slice(s.Leases, func(i, j int) bool { return leaseKey(s.Leases[i]) < leaseKey(s.Leases[j]) })
 	return s

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	wire "github.com/imksoo/routerd/pkg/dhcpv4client"
+	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 )
 
@@ -121,7 +122,7 @@ func acquire(t *testing.T, e *engine, mac net.HardwareAddr, id []byte, xid uint3
 	if ack.YIAddr != offer.YIAddr {
 		t.Fatal("ACK differs from offer")
 	}
-	s := e.snapshot("0123456789abcdef0123456789abcdef", 1, e.now(), true)
+	s := e.snapshot("0123456789abcdef0123456789abcdef", 1, boottime.Clock{BootID: "01234567-89ab-cdef-0123-456789abcdef", BoottimeNanoseconds: int64(time.Second), WallTime: e.now()}, true)
 	if err := dhcpserverconfig.ValidateSnapshot(e.config, s); err != nil {
 		t.Fatal(err)
 	}
@@ -339,7 +340,7 @@ func TestChangedIntentRetainsAllocationExclusionButNotDNSOwnership(t *testing.T)
 	e := newTestEngine(t, c, &now, nil)
 	l, _ := acquire(t, e, testMAC, testID, 1)
 	e.config.Reservations = []Reservation{{MACAddress: "02:00:00:00:00:99", IPAddress: l.IPAddress, Hostname: "new-owner"}}
-	s := e.snapshot("0123456789abcdef0123456789abcdef", 2, now, true)
+	s := e.snapshot("0123456789abcdef0123456789abcdef", 2, boottime.Clock{BootID: "01234567-89ab-cdef-0123-456789abcdef", BoottimeNanoseconds: int64(time.Second), WallTime: now}, true)
 	if len(s.Leases) != 0 || len(e.leases) != 1 {
 		t.Fatal("old allocation must remain excluded but not claim new DNS intent")
 	}

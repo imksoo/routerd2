@@ -52,70 +52,56 @@
   BGPのFIB・状態表示は元のBOOTTIME期限を使い、BGPとDHCPv4の受信側重複leaseを廃止した。
   DHCP serverのDNS出力・active条件は利用時に失効を判定する。設定切替後も、同じ通知を
   大きい配送sequenceで再送してauthorityを復活させない。
-  DHCP server自体はまだUTC通知と受信側monotonic期限を使う。server→DNSへ元のBOOTTIME期限を
-  渡す変更、DNS側の受信期限の廃止、suspendを含む受入は未実装である。
+  DHCP serverは通知前のtable walkからBOOTTIMEを固定し、その元の期限をDNSのA/PTR応答まで渡す。
+  controlは受理時に一度decode・検証した型付き観測を条件・DNS・状態表示で使う。
+  control／DNSの受信側期限表は廃止し、遅いACKの後も同じ期限を確認してからDHCP応答を返す。
+  DNS内部の正規化も型付きsliceの複製と整列へ変更した。
+  client個別の割当・journal保持・lease期限にはUTC依存が残る。suspendを含む受入は未完了である。
 - Health監視と履歴配送は分離する。保存先障害・queue満杯でもprobeを止めず、欠落と保存エラーを表示する。
   全probeの無欠落保存は保証しない。
 
-現在のcompiler contractは `resource-program-native-8`、network journalはformat 5。
+現在のworker ABIは2、compiler contractは `resource-program-native-8`、network journalはformat 5。
 以前のprototypeとの混在・rollbackは受け入れない。
 
 ## 今回の検証
 
-製品は `RELEASE_ID=original-observation`。PVEの隔離Linux VMで全体`make check`
-（通常試験・Race Detector・Python/dependency検査・vet）、fmt、amd64/arm64静的buildが成功した。
-arm64は実行していない。今回の観測処理変更では保存形式・compiler contractは変更していない。
-署名bundle/publisherの実6 ELF検査は前のconditional-authority buildで成功したが、今回再実行していない。
+最終製品buildは `RELEASE_ID=dhcp-source-clock`。PVE隔離Linux VMで全体`make check`
+（通常試験・Race Detector・Python/dependency検査・vet）と関連Race Detector、fmt、
+amd64/arm64静的buildが成功した。arm64は実行していない。
+最終6 ELFの署名bundle生成・catalog保存・CLI publisher検査も両architectureで成功した。
+publisherへの入力はtask専用0700ディレクトリへ配置した。group書込み可能な作業treeからの
+直接publishは既存の入力検査が拒否したためであり、検査や作業treeの権限は変更していない。
 
-今回の最終製品buildを使い、Race Detector付きharnessで次の実daemon試験が成功した。
+Race Detector付きharnessと最終amd64製品で、native sourceとrouterd入力の両方について確認した。
 
-- BGP FIBの追加・withdraw、元の観測期限での撤去とworker復旧。
-- BFDによるBGP session制御・期限切れ、DHCPv4の元lease期限とworker復旧。
-- 実DHCP ACKと同じDNS TCP接続で、停止したproducerの期限切れによるhostname除外と
-  journalからの復旧。native sourceとrouterd入力の両方を確認した。
-  APIは最後の元通知のActive=trueと現在のOwnershipExpired=trueを区別して返す。
-- source依存graphの実UDP、control再起動とkernel object修復、owner別撤去とforeign state保持。
+- 実DHCP ACKからDNSのA応答へleaseが反映され、元のboot ID・観測時刻・期限が一致する。
+- DHCP server・control・supervisorをSIGSTOPしても、DNSが元の期限でhostnameを除外する。
+  static DNSと同じTCP接続は維持し、DNS workerのPIDも変わらない。
+- APIは最後の元通知のActive=trueと現在のOwnershipExpired=trueを区別する。
+  client個別のlease期限はまだ未来であり、その期限切れに頼った除外ではない。
+- server再起動後にjournalから元のleaseを戻し、clientのINIT-REBOOTへ同じaddressをACKする。
+  同じDNS TCP接続でhostnameも復旧する。
 
-ローカルでは、BGPの実時間失効後も元bodyが同一であり、古い通知の配送sequenceを増やしても
-経路が復活しないことを確認した。DHCP serverはUTC期限が未来のまま受信側budgetを使い切った
-状態を作り、条件付きrouteとDNSの失効、同じ設定への切替、再送による復活拒否を確認した。
-これはVMの実clock補正やsuspendの受入ではない。
+ローカルでは、元の期限の実時間失効、再送・source切替・DNS再読込による延長拒否、
+遅れて成功したEffects ACKの後にDHCPACKを返さないことを確認した。
+publicationがIPC上限を超えればReady／ACK前に停止し、durableな割当除外は保持する。
+保存とpublicationで同じsnapshotを作り直す予備のJSON処理を削除し、上限は実際のIPC境界で確認する。
 
-以下のHealth→PBR・VRRP・イベント連携の実通信は前のconditional-authority buildで確認済み。
-今回変更したBGP/DHCP/DNS経路は上記で再検証したが、これら全組合せは再実行していない。
+直前のoriginal-observation buildではBGP/BFD・DHCPv4・source graphの実daemon試験を実行した。
+Health→PBRの独立2 WAN・実TCP/UDP・packet capture、worker再起動・古い通知・confirmed rollback、
+graceful VRRP・追加WANとKeepalivedの相互運用も実行済みだが、今回のDHCP変更後は再実行していない。
+これらの過去の成功を全体完成の判定には使わない。
 
-実supervisor/control/network/Healthと独立2 WANのHealth→PBR試験が成功した。
-実TCP/UDPと両WANのpacket captureで次を確認した。
-
-- 主経路→障害→予備経路→閾値復旧とconsumer hold。operator revisionは維持する。
-- 元の観測期限、consumer max_age、古い通知・重複・再送による期限延長の拒否。
-- 各workerと全process treeの再起動、旧tree通知の拒否、confirmed rollback。
-- controlと両HealthをSIGSTOPし、network workerをSIGKILLして再起動する。
-  同じPID/世代でReady登録のままの停止workerに頼らず、元の期限で条件付きIPとPBR routeが消える。
-  期限後のTCP/UDPは失敗し、物理link・静的probe IP・foreign objectは保持する。
-  再開後のfreshな実probeで、転送と条件付きIPのTCP/UDPが復旧する。
-
-UTC lifetime・条件・依存期限の交差、宣言の不変性、ACK後に期限切れとなった
-link/address/routeのReady拒否と再適用後の復旧はローカル試験で確認した。
-明示UTC期限が切れたaddress/routeは正常に投影から除かれ、適用待ちとして残らない。
-
-最終buildでgraceful VRRPと追加WAN/Keepalived、実BFD/BGP、再帰IPv6期限、
-Health→DerivedEvent/EventRuleとworker/control/logging再起動の回帰が成功した。
-追加WANのpeer macvlanは事前作成し、
-IPはKeepalivedが管理する。bridge学習の収束待ちは2秒で、無欠落切替の受入ではない。
-
-今回の実行ログは `dist/original-observation-final-{check,build,native}.log`、
-`dist/original-observation-dns-native.log`、`dist/original-observation-focused.log`。
-以前のHealth→PBR packet captureは `dist/health-pbr-test/{test.log,wan0.pcap,wan1.pcap}`。
-出力との一致を実装条件にしない。修正前のunit fixtureがworker世代0を使いfresh条件を満たさず
-失敗したため、実登録に対応する世代を設定して修正した。最終`make check`はその修正後に成功した。
+現在のログは `dist/dhcp-source-clock-{release-build,final-race,native,final-bundle}.log`。
+全体`make check`は `dist/dhcp-source-clock-final-check.log` を参照する。
+新契約への切替途中で配布側の固定ABIと試験用supervisor識別子の未更新を検出し、両方修正した。
 
 ## 未完了と次の作業
 
 1. 以前のBFD再接続timeout、IPv6 multicast未受信、初回IPv6 VIP TCP timeoutは原因未確定。
    成功回数で閉じない。今回の変更で原因を修正したとは判断していない。
 2. 残るprotocol snapshotの型付き保持、条件式の静的計算、通常投影のinstance生成・digest再計算を整理する。
-   DHCP server→DNSのUTC／受信時計から元のBOOTTIME期限への置換を実装・検証する。
+   DHCP client割当とjournalのUTC依存を整理し、実clock補正・停電・suspendで受入する。
 3. HA-01のHealth以外のtrack・neutral、外部secret参照・peer-aware移行、clusterと、
    二native nodeの追加identity・RA・DHCP/PD/NAT session継続を実装・受入する。
 4. 再帰next-hopの前提address/link期限はローカル投影で確認済みだが、同じ条件の実daemon試験は未実施。

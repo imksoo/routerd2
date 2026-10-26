@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 )
 
@@ -23,10 +24,10 @@ import (
 // or mutate DNS directly. A response granting a lease is sent only after both
 // local fsync and a successful bounded Effects.Update.
 func Run(ctx context.Context, cfg Config, effects Effects, ready func()) error {
-	return run(ctx, cfg, effects, ready, func(c Config) (transport, error) { return openTransport(c) }, time.Now)
+	return run(ctx, cfg, effects, ready, func(c Config) (transport, error) { return openTransport(c) })
 }
 
-func run(ctx context.Context, cfg Config, effects Effects, ready func(), open func(Config) (transport, error), now func() time.Time) (result error) {
+func run(ctx context.Context, cfg Config, effects Effects, ready func(), open func(Config) (transport, error)) (result error) {
 	if err := Validate(cfg); err != nil {
 		return err
 	}
@@ -44,7 +45,7 @@ func run(ctx context.Context, cfg Config, effects Effects, ready func(), open fu
 			}
 		}
 	}
-	store, j, err := openStore(cfg, now().UTC())
+	store, j, err := openStore(cfg, time.Now().UTC())
 	if err != nil {
 		return err
 	}
@@ -54,7 +55,7 @@ func run(ctx context.Context, cfg Config, effects Effects, ready func(), open fu
 		return err
 	}
 	defer conn.Close()
-	e := newEngine(cfg, j, func() time.Time { return now().UTC() }, store.Save)
+	e := newEngine(cfg, j, func() time.Time { return time.Now().UTC() }, store.Save)
 	e.probe = conn.Probe
 	if t, ok := conn.(*nativeTransport); ok {
 		e.mtu = t.mtu
@@ -75,15 +76,16 @@ func run(ctx context.Context, cfg Config, effects Effects, ready func(), open fu
 	epoch := hex.EncodeToString(id[:])
 	monitor := &observation{epoch: epoch}
 	var seq uint64
-	var lastValidUntil time.Time
+	var lastExpiresNanos uint64
 	publish := func(ctx context.Context, active bool, reason error) error {
 		seq++
-		s := e.snapshot(epoch, seq, e.now(), active)
+		clock, err := boottime.Read()
+		if err != nil {
+			return err
+		}
+		s := e.snapshot(epoch, seq, clock, active)
 		if reason != nil {
 			s.Error = reason.Error()
-		}
-		if !active {
-			s.ValidUntil = time.Time{}
 		}
 		b, err := json.Marshal(s)
 		if err != nil {
@@ -95,13 +97,16 @@ func run(ctx context.Context, cfg Config, effects Effects, ready func(), open fu
 		effectCtx, cancel := context.WithTimeout(ctx, time.Duration(cfg.EffectTimeoutMilliseconds)*time.Millisecond)
 		err = effects.Update(effectCtx, s)
 		cancel()
-		if err == nil && active && !e.now().Before(s.ValidUntil) {
-			err = errors.New("DHCP effects acknowledgment arrived after its ownership lease")
+		if err == nil && active {
+			clock, err = boottime.ReadForBoot(s.BootID)
+			if err == nil && !dhcpserverconfig.CurrentObservation(s, clock) {
+				err = errors.New("DHCP effects acknowledgment arrived after its original observation expired")
+			}
 		}
 		if err != nil {
 			return fmt.Errorf("publish DHCP lease snapshot: %w", err)
 		}
-		lastValidUntil = s.ValidUntil
+		lastExpiresNanos = s.ExpiresNanos
 		monitor.setSnapshot(s)
 		if cfg.StatusPath != "" {
 			if err := writePrivate(cfg.StatusPath, append(b, '\n')); err != nil {
@@ -231,7 +236,11 @@ func run(ctx context.Context, cfg Config, effects Effects, ready func(), open fu
 			if err != nil {
 				return err
 			}
-			if len(e.events) > 0 || reply != nil && !e.now().Add(time.Second).Before(lastValidUntil) {
+			clock, err := boottime.Read()
+			if err != nil {
+				return err
+			}
+			if len(e.events) > 0 || reply != nil && uint64(clock.BoottimeNanoseconds)+uint64(time.Second) >= lastExpiresNanos {
 				if err := publish(ctx, true, nil); err != nil {
 					return err
 				}
@@ -240,8 +249,12 @@ func run(ctx context.Context, cfg Config, effects Effects, ready func(), open fu
 				if err := ctx.Err(); err != nil {
 					return err
 				}
-				if !e.now().Before(lastValidUntil) {
-					return errors.New("DHCP ownership lease expired before reply")
+				clock, err := boottime.Read()
+				if err != nil {
+					return err
+				}
+				if uint64(clock.BoottimeNanoseconds) >= lastExpiresNanos {
+					return errors.New("DHCP original observation expired before reply")
 				}
 				if err := conn.Send(ctx, *reply); err != nil {
 					return fmt.Errorf("send DHCP reply: %w", err)

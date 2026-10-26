@@ -7,17 +7,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"time"
+	"slices"
 
 	"github.com/imksoo/routerd/pkg/dnsresolver"
+	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
 )
-
-type leaseReceipt struct {
-	epoch    string
-	sequence uint64
-	deadline time.Time
-}
 
 func (d *daemon) applyLeaseProjection(raw dnsconfig.LeaseProjection) error {
 	d.reloadMu.Lock()
@@ -25,36 +20,38 @@ func (d *daemon) applyLeaseProjection(raw dnsconfig.LeaseProjection) error {
 	d.stateMu.RLock()
 	cfg := d.config
 	d.stateMu.RUnlock()
-	now := time.Now()
-	if err := dnsconfig.ValidateLeaseProjection(cfg, raw, now); err != nil {
+	clock, err := boottime.Read()
+	if err != nil {
 		return err
 	}
 	p := dnsconfig.NormalizeLeaseProjection(raw)
-	receipts := make(map[string]leaseReceipt, len(p.Sets))
+	if err := dnsconfig.ValidateLeaseProjection(cfg, p, clock); err != nil {
+		return err
+	}
+	previous := make(map[string]dnsconfig.LeaseSet)
+	if d.nativeLeases != nil {
+		for _, set := range d.nativeLeases.Sets {
+			previous[set.Zone+"/"+set.Source] = set
+		}
+	}
 	for _, set := range p.Sets {
-		key := set.Zone + "/" + set.Source
-		previous := d.leaseReceipts[key]
-		if previous.epoch == set.Epoch {
-			if set.Sequence < previous.sequence {
-				return errors.New("stale DNS lease source sequence")
-			}
-			if set.Sequence == previous.sequence {
-				receipts[key] = previous
-				continue
-			}
+		old, ok := previous[set.Zone+"/"+set.Source]
+		if !ok || old.Epoch != set.Epoch {
+			continue
 		}
-		remaining := set.ValidUntil.Sub(now)
-		if remaining > 5*time.Second {
-			remaining = 5 * time.Second
+		if set.Sequence < old.Sequence || set.ObservedNanos < old.ObservedNanos {
+			return errors.New("stale DNS lease source observation")
 		}
-		receipts[key] = leaseReceipt{epoch: set.Epoch, sequence: set.Sequence, deadline: now.Add(remaining)}
+		if set.Sequence == old.Sequence && (!set.ObservedAt.Equal(old.ObservedAt) || set.ObservedNanos != old.ObservedNanos || set.ExpiresNanos != old.ExpiresNanos || set.BootID != old.BootID || !slices.Equal(set.Records, old.Records)) || set.ObservedNanos == old.ObservedNanos && set.ExpiresNanos != old.ExpiresNanos {
+			return errors.New("DNS lease source reused an observation with changed contents or deadline")
+		}
 	}
 	zones := newZoneTable(cfg.Zones)
 	if zones.err != nil {
 		return zones.err
 	}
-	d.nativeLeases, d.leaseReceipts = &p, receipts
-	d.populateNativeZones(zones, cfg, now)
+	d.nativeLeases = &p
+	d.populateNativeZones(zones, cfg, clock)
 	fingerprint := leaseContentFingerprint(p)
 	d.stateMu.Lock()
 	d.zones = zones
@@ -76,8 +73,8 @@ func (d *daemon) applyLeaseProjection(raw dnsconfig.LeaseProjection) error {
 
 // Caller holds reloadMu; table is newly built and not yet published. Applying
 // the same projection during a configuration reload honors the new source
-// allowlist and reuses the original monotonic receipt deadlines.
-func (d *daemon) populateNativeZones(table *zoneTable, cfg dnsresolver.RuntimeConfig, now time.Time) {
+// allowlist and retains the original publisher boot deadlines.
+func (d *daemon) populateNativeZones(table *zoneTable, cfg dnsresolver.RuntimeConfig, clock boottime.Clock) {
 	if d.nativeLeases == nil {
 		return
 	}
@@ -91,8 +88,7 @@ func (d *daemon) populateNativeZones(table *zoneTable, cfg dnsresolver.RuntimeCo
 	}
 	for _, set := range d.nativeLeases.Sets {
 		key := set.Zone + "/" + set.Source
-		ownership := d.leaseReceipts[key].deadline
-		if !allowed[key] || !now.Before(ownership) || !now.Before(set.ValidUntil) {
+		if !allowed[key] || set.BootID != clock.BootID || uint64(clock.BoottimeNanoseconds) >= set.ExpiresNanos {
 			continue
 		}
 		for _, zone := range table.zones {
@@ -104,10 +100,10 @@ func (d *daemon) populateNativeZones(table *zoneTable, cfg dnsresolver.RuntimeCo
 				ttl = 60
 			}
 			for _, lease := range set.Records {
-				if !now.Before(lease.ExpiresAt) {
+				if !clock.WallTime.Before(lease.ExpiresAt) {
 					continue
 				}
-				record := zoneRecord{Hostname: zone.recordName(lease.Hostname), IPv4: []string{lease.Address}, TTL: ttl, Source: zoneRecordSourceTypedLease, ExpiresAt: lease.ExpiresAt, OwnershipUntil: ownership}
+				record := zoneRecord{Hostname: zone.recordName(lease.Hostname), IPv4: []string{lease.Address}, TTL: ttl, Source: zoneRecordSourceTypedLease, ExpiresAt: lease.ExpiresAt, BootID: set.BootID, ExpiresNanos: set.ExpiresNanos}
 				// Static aliases and PTR ownership have higher precedence.
 				zone.mergeRecord(record)
 			}

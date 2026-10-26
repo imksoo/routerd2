@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
@@ -54,12 +55,16 @@ func TestMigratedDHCPDNSGraphThroughPublicRuntimeOwnership(t *testing.T) {
 	if err != nil || initial.Resource != dns.Name || initial.ConfigDigest == "" || len(initial.Sets) != 0 {
 		t.Fatal("DNS started with unauthenticated or unfenced lease records", initial, err)
 	}
-	makeSnapshot := func(s serviceconfig.Service, name, address string, until time.Time) dhcpserverconfig.Snapshot {
-		now := time.Now().UTC()
-		return dhcpserverconfig.Snapshot{Resource: s.Name, Interface: s.DHCPServer.Interface, ServerAddress: s.DHCPServer.ServerAddress, Epoch: strings.Repeat("b", 32), Sequence: 1, Active: true, ObservedAt: now, ValidUntil: until,
+	makeSnapshot := func(s serviceconfig.Service, name, address string, lifetime time.Duration) dhcpserverconfig.Snapshot {
+		clock, err := boottime.Read()
+		if err != nil {
+			t.Fatal(err)
+		}
+		now := clock.WallTime
+		return dhcpserverconfig.Snapshot{Resource: s.Name, Interface: s.DHCPServer.Interface, ServerAddress: s.DHCPServer.ServerAddress, Epoch: strings.Repeat("b", 32), Sequence: 1, Active: true, ObservedAt: now, BootID: clock.BootID, ObservedNanos: uint64(clock.BoottimeNanoseconds), ExpiresNanos: uint64(clock.BoottimeNanoseconds) + uint64(lifetime),
 			Leases: []dhcpserverconfig.Lease{{MACAddress: "02:00:00:00:00:11", IPAddress: address, Hostname: name, Scope: "default", AcquiredAt: now, RenewedAt: now, ExpiresAt: now.Add(60 * time.Second)}}}
 	}
-	other := makeSnapshot(guest, "not-authorized", "198.51.100.100", time.Now().Add(4*time.Second))
+	other := makeSnapshot(guest, "not-authorized", "198.51.100.100", 4*time.Second)
 	if err := observeMigration(ctx, runtime, migrationUpdate(t, runtime, guest, 1, other)); err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +72,7 @@ func TestMigratedDHCPDNSGraphThroughPublicRuntimeOwnership(t *testing.T) {
 	if err != nil || len(projection.Sets) != 0 {
 		t.Fatal("unreferenced DHCP producer leaked across the zone's source allowlist", projection, err)
 	}
-	active := makeSnapshot(dhcp, "laptop", "192.0.2.100", time.Now().Add(300*time.Millisecond))
+	active := makeSnapshot(dhcp, "laptop", "192.0.2.100", 300*time.Millisecond)
 	update := migrationUpdate(t, runtime, dhcp, 1, active)
 	spoof := update
 	spoof.ConfigDigest = strings.Repeat("0", len(update.ConfigDigest))
@@ -86,7 +91,7 @@ func TestMigratedDHCPDNSGraphThroughPublicRuntimeOwnership(t *testing.T) {
 	}
 	// The producer stops publishing while its client lease remains valid. Its
 	// short ownership grant must expire independently of the 60-second lease.
-	wait := time.NewTimer(time.Until(active.ValidUntil) + 10*time.Millisecond)
+	wait := time.NewTimer(310 * time.Millisecond)
 	defer wait.Stop()
 	select {
 	case <-wait.C:
@@ -101,7 +106,7 @@ func TestMigratedDHCPDNSGraphThroughPublicRuntimeOwnership(t *testing.T) {
 	if err := observeMigration(ctx, runtime, update); err == nil {
 		t.Fatal("expired wire grant was revived by a larger transport sequence")
 	}
-	active = makeSnapshot(dhcp, "laptop", "192.0.2.100", time.Now().Add(4*time.Second))
+	active = makeSnapshot(dhcp, "laptop", "192.0.2.100", 4*time.Second)
 	active.Sequence = 2
 	if err := observeMigration(ctx, runtime, migrationUpdate(t, runtime, dhcp, 3, active)); err != nil {
 		t.Fatal("fresh producer could not recover", err)
@@ -111,7 +116,7 @@ func TestMigratedDHCPDNSGraphThroughPublicRuntimeOwnership(t *testing.T) {
 		t.Fatal("fresh ownership did not restore the current lease", projection, err)
 	}
 	inactive := active
-	inactive.Sequence, inactive.Active, inactive.ValidUntil, inactive.Leases = 3, false, time.Time{}, nil
+	inactive.Sequence, inactive.Active, inactive.Leases = 3, false, nil
 	inactive.ObservedAt = time.Now().UTC()
 	if err := observeMigration(ctx, runtime, migrationUpdate(t, runtime, dhcp, 4, inactive)); err != nil {
 		t.Fatal(err)

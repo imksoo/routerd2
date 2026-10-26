@@ -194,7 +194,7 @@ func TestOfflinePublisherRejectsMixedNativeABIsBeforeOutput(t *testing.T) {
 	}
 	m, _, _ := signedFixture(t, fixtureRelease, 1, nil)
 	var out bytes.Buffer
-	_, err = WriteBundle(context.Background(), &out, BundleOptions{ReleaseID: fixtureRelease, Sequence: 1, GOOS: "linux", GOARCH: runtime.GOARCH, BootABI: 1, WorkerABI: 1, Entrypoint: m.Entrypoint, Roles: m.Roles, Artifacts: m.Artifacts}, testKey(), files)
+	_, err = WriteBundle(context.Background(), &out, BundleOptions{ReleaseID: fixtureRelease, Sequence: 1, GOOS: "linux", GOARCH: runtime.GOARCH, BootABI: 1, WorkerABI: 2, Entrypoint: m.Entrypoint, Roles: m.Roles, Artifacts: m.Artifacts}, testKey(), files)
 	if err == nil || out.Len() != 0 {
 		t.Fatal("mixed native declarations reached published output", err)
 	}

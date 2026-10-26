@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/imksoo/routerd/pkg/api"
+	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/legacyconfig"
 	"github.com/imksoo/routerd2/internal/network"
@@ -195,12 +196,59 @@ func testDaemonDHCPDNSOwnership(t *testing.T, migrated bool) {
 		t.Fatal(err)
 	}
 	defer syscall.Kill(serverPID, syscall.SIGKILL)
+	var accepted dhcpserverconfig.Snapshot
+	wait(2*time.Second, func() bool {
+		var source runtimeplan.InstanceStatus
+		var projection dnsconfig.LeaseProjection
+		if err := f.control.Do(context.Background(), "GET", "/v1/services/"+serverName, nil, &source); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(source.Snapshot, &accepted); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.control.Do(context.Background(), "GET", "/v1/services/"+dnsName+"/dns-leases", nil, &projection); err != nil {
+			t.Fatal(err)
+		}
+		if len(projection.Sets) != 1 {
+			return false
+		}
+		set := projection.Sets[0]
+		return set.Epoch == accepted.Epoch && set.Sequence == accepted.Sequence && set.BootID == accepted.BootID && set.ObservedNanos == accepted.ObservedNanos && set.ExpiresNanos == accepted.ExpiresNanos
+	})
+	clock, err := boottime.Read()
+	if err != nil || !dhcpserverconfig.CurrentObservation(accepted, clock) {
+		t.Fatal("source observation already expired", err, accepted)
+	}
+	remaining := time.Duration(accepted.ExpiresNanos - uint64(clock.BoottimeNanoseconds))
+	if remaining > 2*time.Second {
+		time.Sleep(remaining - 2*time.Second)
+	}
+	controlPID := pid(before, "control")
+	if controlPID == 0 {
+		t.Fatal("missing control process")
+	}
+	// Stop both policy actors. Only DNS can remove the live answer, using the
+	// exact deadline published before either actor was paused.
+	for _, paused := range []int{controlPID, f.pid} {
+		if err := syscall.Kill(paused, syscall.SIGSTOP); err != nil {
+			t.Fatal(err)
+		}
+		defer syscall.Kill(paused, syscall.SIGCONT)
+	}
 	wait(7*time.Second, func() bool { return !hasAddress("workstation.lab.example.", lease.CurrentAddress) })
-	if !hasAddress("router.lab.example.", "192.0.2.1") || pid(status(), dnsName) != dnsPID {
+	if !hasAddress("router.lab.example.", "192.0.2.1") || syscall.Kill(dnsPID, 0) != nil {
 		t.Fatal("DHCP ownership loss interrupted static DNS or restarted the listener")
 	}
 	if err := syscall.Kill(serverPID, 0); err != nil {
 		t.Fatalf("producer exited before independent ownership-expiry proof: %v", err)
+	}
+	for _, paused := range []int{controlPID, f.pid} {
+		if err := syscall.Kill(paused, syscall.SIGCONT); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if pid(status(), dnsName) != dnsPID {
+		t.Fatal("DNS restarted while its input actors were paused")
 	}
 	var expired runtimeplan.InstanceStatus
 	if err := f.control.Do(context.Background(), "GET", "/v1/services/"+serverName, nil, &expired); err != nil {
@@ -226,7 +274,7 @@ func testDaemonDHCPDNSOwnership(t *testing.T, migrated bool) {
 	if !hasAddress("workstation.lab.example.", lease.CurrentAddress) {
 		t.Fatal("renewed lease disappeared from the existing DNS TCP connection")
 	}
-	t.Log("real DHCP ACK and persistent DNS TCP: original active snapshot exposed expired ownership, and journal recovery restored the lease without restarting DNS")
+	t.Log("real DHCP ACK and persistent DNS TCP: original boot deadline removed DNS answers while server, control and supervisor were paused; journal recovery restored the lease on the same DNS connection")
 	if migrated {
 		t.Log("legacy resource YAML and explicit finite-source policy: real DHCP ACK, DNS publication, stopped-producer expiry and journal recovery passed")
 	}

@@ -4,18 +4,19 @@ package dhcpserverconfig
 
 import (
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"net/netip"
 	"strings"
 	"time"
+
+	"github.com/imksoo/routerd2/internal/boottime"
 )
 
 // ValidateSnapshot checks the worker's typed boundary. The caller separately
 // checks its service envelope, generation/digest, epoch/sequence ordering and
-// receipt monotonicity. Replaying an old snapshot must not renew ownership.
+// original boot-clock freshness. Replaying a snapshot cannot renew ownership.
 func ValidateSnapshot(c Config, s Snapshot) error {
 	c = Normalize(c)
 	if s.Resource != c.Resource || s.Interface != c.Interface || s.ServerAddress != c.ServerAddress {
@@ -31,12 +32,11 @@ func ValidateSnapshot(c Config, s Snapshot) error {
 	if len(s.Leases) > c.MaxLeases || s.Stats.Quarantined < 0 || s.Stats.Quarantined > c.MaxLeases || s.Stats.Offers < 0 || s.Stats.Offers > c.MaxLeases {
 		return errors.New("DHCP snapshot exceeds configured bounds")
 	}
-	if !s.Active {
-		if !s.ValidUntil.IsZero() || len(s.Leases) > 0 {
-			return errors.New("inactive DHCP snapshot cannot publish leases or a future ownership deadline")
-		}
-	} else if !s.ValidUntil.After(s.ObservedAt) || s.ValidUntil.After(s.ObservedAt.Add(5*time.Second)) {
-		return errors.New("DHCP active ownership must expire within five seconds")
+	if !boottime.ValidBootID(s.BootID) || s.ObservedNanos == 0 || s.ExpiresNanos <= s.ObservedNanos || s.ExpiresNanos-s.ObservedNanos > uint64(ObservationLifetime) {
+		return errors.New("DHCP observation requires a boot-scoped deadline of at most five seconds")
+	}
+	if !s.Active && len(s.Leases) != 0 {
+		return errors.New("inactive DHCP snapshot cannot publish leases")
 	}
 	ids, ips := map[string]bool{}, map[string]bool{}
 	for _, l := range s.Leases {
@@ -51,13 +51,6 @@ func ValidateSnapshot(c Config, s Snapshot) error {
 			return errors.New("DHCP snapshot has duplicate client or address bindings")
 		}
 		ids[key], ips[l.IPAddress] = true, true
-	}
-	b, err := json.Marshal(s)
-	if err != nil {
-		return err
-	}
-	if len(b) > MaxSnapshotBytes {
-		return errors.New("DHCP snapshot exceeds 1792 KiB")
 	}
 	return nil
 }

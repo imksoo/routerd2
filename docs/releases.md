@@ -40,10 +40,12 @@ The release identity record remains V1; its format is independent of manifest
 version and the runtime ABI record envelope.
 
 The current declaration has configuration schema 2 and semantics contract
-`resource-program-native-1`. Its named formats are configuration journal 1,
-events SQLite 6, network journal 2, release journal 1, snapshot 1 and SSH identity
-1. Configuration journal and SSH identity numbers name codec contracts; they
-are not extra fields inserted into existing files. A persistent-format or
+`resource-program-native-8`. Boot ABI is 1 and worker ABI is 2: DHCP server
+observations and DNS lease projections use original boot-scoped deadlines,
+without the discarded UTC ownership field or receipt leases. Its named formats
+are configuration journal 1, events SQLite 6, network journal 5, release journal
+1, snapshot 1 and SSH identity 1. Configuration journal and SSH identity numbers
+name codec contracts; they are not extra fields inserted into existing files. A persistent-format or
 breaking input-semantics change must update the declaration and qualification.
 Tests tie explicit format implementations to these claims without linking the
 configuration compiler into the declaration package or independent logger.

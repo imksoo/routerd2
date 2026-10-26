@@ -164,13 +164,13 @@ func TestOptionEncodingHasExactWireShapes(t *testing.T) {
 func TestSnapshotBoundaryRejectsStaleOrUnownedClaims(t *testing.T) {
 	c := validConfig()
 	now := time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
-	s := Snapshot{Resource: c.Resource, Interface: c.Interface, ServerAddress: c.ServerAddress, Epoch: strings.Repeat("a", 32), Sequence: 1, Active: true, ObservedAt: now, ValidUntil: now.Add(5 * time.Second), Leases: []Lease{{MACAddress: "02:00:00:00:00:01", IPAddress: "192.0.2.100", Hostname: "host", Scope: "default", AcquiredAt: now, RenewedAt: now, ExpiresAt: now.Add(120 * time.Second)}}}
+	s := Snapshot{Resource: c.Resource, Interface: c.Interface, ServerAddress: c.ServerAddress, Epoch: strings.Repeat("a", 32), Sequence: 1, Active: true, ObservedAt: now, BootID: "01234567-89ab-cdef-0123-456789abcdef", ObservedNanos: uint64(time.Second), ExpiresNanos: uint64(6 * time.Second), Leases: []Lease{{MACAddress: "02:00:00:00:00:01", IPAddress: "192.0.2.100", Hostname: "host", Scope: "default", AcquiredAt: now, RenewedAt: now, ExpiresAt: now.Add(120 * time.Second)}}}
 	if err := ValidateSnapshot(c, s); err != nil {
 		t.Fatal(err)
 	}
 	for _, edit := range []func(*Snapshot){
 		func(s *Snapshot) { s.Interface = "wan0" }, func(s *Snapshot) { s.Sequence = 0 }, func(s *Snapshot) { s.Epoch = "bad" },
-		func(s *Snapshot) { s.ValidUntil = s.ObservedAt.Add(6 * time.Second) },
+		func(s *Snapshot) { s.ExpiresNanos = s.ObservedNanos + uint64(6*time.Second) },
 		func(s *Snapshot) { s.Leases[0].ExpiresAt = now }, func(s *Snapshot) { s.Leases[0].ExpiresAt = now.Add(time.Hour) },
 		func(s *Snapshot) { s.Leases[0].IPAddress = "192.0.2.1" }, func(s *Snapshot) { s.Leases[0].Scope = "unknown" },
 		func(s *Snapshot) { s.Leases[0].ClientID = "x" }, func(s *Snapshot) { s.Leases[0].Reserved = true },
@@ -186,7 +186,6 @@ func TestSnapshotBoundaryRejectsStaleOrUnownedClaims(t *testing.T) {
 	}
 	s.Active = false
 	s.Leases = nil
-	s.ValidUntil = time.Time{}
 	if err := ValidateSnapshot(c, s); err != nil {
 		t.Fatal(err)
 	}

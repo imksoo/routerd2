@@ -59,15 +59,23 @@ Binding and renewal order:
 
 Persistence or effects errors stop the worker before ACK. A persisted binding
 remains an allocation exclusion even when its ACK was lost. Graceful shutdown
-publishes Active=false, no leases and zero ValidUntil, while retaining the
-journal. Stopping a server cannot revoke its clients' existing leases.
+publishes Active=false and no leases, while retaining the journal. Stopping a server cannot revoke its clients' existing leases.
 
-Each active snapshot has a new sequence, an instance epoch and an absolute
-ownership deadline at most five seconds after observation. It is refreshed
-every second and on lease changes. The service boundary fences committed
-digest/generation/epoch, rejects reordered messages and expires stale ownership.
-Replaying an old snapshot cannot extend its deadline. DNS records must also
-expire no later than their individual Lease.ExpiresAt.
+Every snapshot carries BootID, ObservedNanos and ExpiresNanos. CLOCK_BOOTTIME
+is captured before walking the lease table, and the original deadline is at
+most five seconds later. Publication refreshes every second and on lease changes.
+The worker checks the same budget after control acknowledges and before replying.
+Control decodes and validates a notification once, retaining typed lease data
+for DNS, conditions and status. Committed digest, supervisor instance, worker
+generation, producer epochs and sequence ordering fence retired publishers.
+DNS receives the unchanged source deadline and checks it at each A/PTR answer.
+There is no receipt lease in control or DNS; polling, replay, reload, UTC changes
+and delayed ACK cannot create extra source authority.
+
+Client allocation, journal retention and individual Lease.ExpiresAt still use
+UTC. This observation-clock change does not qualify client allocation across
+wall-clock correction, power loss or physical suspend. DNS also respects each
+client expiry separately from the source deadline.
 
 ## Allocation and wire behavior
 
@@ -142,7 +150,10 @@ routes suppress legacy router/static-route options for that client.
   clients, authentication and rapid commit need separate implementations.
 - Default 1,024 stored leases; maximum 2,048. Offers and quarantines are
   independently bounded by the same setting. Active snapshots are capped at
-  1,792 KiB before admission to fit the 2 MiB service envelope.
+  1,792 KiB at publication and the receiving boundary to fit the 2 MiB service
+  envelope. The worker stops before readiness or ACK if publication cannot fit;
+  durable allocation exclusions are retained. Reducing max_leases cannot discard
+  unexpired bindings to repair oversized state.
 - Maximum 64 selector scopes and 128 trusted relays, plus bounded option
   payloads. Relay scope selection uses configured MAC/OUI selectors. RFC 3527
   link selection, arbitrary relay pool discovery, backend-specific tags and
@@ -190,7 +201,7 @@ checksum verification, malformed packets and snapshot validation.
 
 Runtime race tests use private temporary sockets/files and verify readiness,
 fsync/effects-before-ACK ordering, failed-effects suppression, restart reuse,
-owner locks, symlink refusal, event bounds/rotation and snapshot admission caps.
+owner locks, symlink refusal, event bounds/rotation and snapshot publication caps.
 
 The integration fixture creates fresh user/network namespaces and veth peers
 and runs the actual server against dhcp4.Run. It exercises DORA, a real
