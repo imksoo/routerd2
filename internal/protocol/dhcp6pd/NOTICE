@@ -1,9 +1,0 @@
-This package imports github.com/imksoo/routerd/pkg/pdclient from the pinned
-module at commit 1329ef54f296507eda79bbbc3b853783dd27251e. The upstream protocol
-engine is BSD-3-Clause licensed. Its copyright/license is retained in the module
-distribution. The routerd2 native socket, persistence, validation and effects
-adapter is new code and does not execute the upstream standalone daemon.
-
-Transport behavior was checked against cmd/routerd-dhcpv6-client/main.go at
-that same commit. The adapter adds interface binding, retransmission handling
-for Request, elapsed-time, DUID/IAID validation and explicit effect withdrawal.

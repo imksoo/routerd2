@@ -30,7 +30,7 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/bfd"
 	"github.com/imksoo/routerd2/internal/protocol/bgpconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp4"
-	"github.com/imksoo/routerd2/internal/protocol/dhcp6pd"
+	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/health"
 	"github.com/imksoo/routerd2/internal/protocol/ra"
@@ -666,18 +666,16 @@ func validateSnapshot(instance serviceconfig.Instance, b json.RawMessage) error 
 			return err
 		}
 		return dhcp4.ValidateSnapshot(c, s)
-	case "dhcp6pd":
-		var c dhcp6pd.Config
-		var s dhcp6pd.Snapshot
+	case "dhcp6":
+		var c dhcp6config.Config
+		var s dhcp6config.Snapshot
 		if err := strict(instance.Config, &c); err != nil {
 			return err
 		}
 		if err := strict(b, &s); err != nil {
 			return err
 		}
-		if c.Resource != s.Resource || c.Interface != s.Interface || c.IAID != s.IAID {
-			return errors.New("DHCPv6 snapshot identity mismatch")
-		}
+		return dhcp6config.ValidateSnapshot(c, s)
 	case "ra":
 		var c ra.Config
 		var s ra.Snapshot

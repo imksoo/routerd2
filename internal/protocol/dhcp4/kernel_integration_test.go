@@ -18,7 +18,8 @@ import (
 
 	wire "github.com/imksoo/routerd/pkg/dhcpv4client"
 	"github.com/imksoo/routerd/pkg/pdclient"
-	"github.com/imksoo/routerd2/internal/protocol/dhcp6pd"
+	"github.com/imksoo/routerd2/internal/protocol/dhcp6"
+	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
 	"github.com/imksoo/routerd2/internal/protocol/ra"
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netns"
@@ -350,27 +351,27 @@ func nativePD(t *testing.T) {
 		}
 		serverDone <- nil
 	}()
-	updates := make(chan dhcp6pd.Snapshot, 32)
+	updates := make(chan dhcp6config.Snapshot, 32)
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		done <- dhcp6pd.Run(ctx, dhcp6pd.Config{Resource: "pd-test", Interface: "pdwan", StatePath: t.TempDir() + "/pd.json", IAID: 7}, dhcp6pd.EffectsFunc(func(_ context.Context, s dhcp6pd.Snapshot) error { updates <- s; return nil }), nil)
+		done <- dhcp6.Run(ctx, dhcp6config.Config{RequestPrefix: true, Resource: "pd-test", Interface: "pdwan", StatePath: t.TempDir() + "/pd.json", IAID: 7}, dhcp6.EffectsFunc(func(_ context.Context, s dhcp6config.Snapshot) error { updates <- s; return nil }), nil)
 	}()
 	var acquired time.Time
 	for {
 		select {
 		case s := <-updates:
-			if !s.Active {
+			if !s.Active(time.Now()) {
 				continue
 			}
-			if s.CurrentPrefix != "2001:db8:1200::/56" {
-				t.Fatalf("wrong PD prefix %q", s.CurrentPrefix)
+			if len(s.Prefixes) == 0 || s.Prefixes[0].Prefix != "2001:db8:1200::/56" {
+				t.Fatalf("wrong PD prefix %q", s.Prefixes)
 			}
 			if acquired.IsZero() {
-				acquired = s.AcquiredAt
+				acquired = s.Prefixes[0].ValidUntil
 			}
-			if s.AcquiredAt.After(acquired) && len(s.DNSServers) == 1 && s.InformationRefreshSeconds == 600 {
+			if s.Prefixes[0].ValidUntil.After(acquired) && len(s.DNSServers) == 1 && s.InformationRefreshSeconds == 600 {
 				cancel()
 				if err := <-done; !errors.Is(err, context.Canceled) {
 					t.Fatalf("stop PD: %v", err)

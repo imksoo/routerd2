@@ -635,7 +635,13 @@ BGPの再帰解決で共有し、VRF device自身とbridge配下のtableを正�
 独立DHCPv6 serverと実daemonでPDのrenew・再番号付け、同じRA workerの継続、LAN上の
 新旧prefix広告、利用者TCP/UDP、期限切れ時のRA停止・管理address撤去、再取得を確認した。
 再生成したRAも事前に準備した同じ設定digestを使う。`make check-pd-ra`で再実行できる。
-全link option/lifecycle・WAN選択・DHCPv6 IA_NA等は残り、NET-05全体は未完了。
+IA_NA clientをnative実装へ置換した。`request_address`と`request_prefix`は同一worker・UDP 546・
+DUID/IAID・stateful transactionを共有する。複数割当と個別preferred/valid、情報取得の別transaction、
+network writerへの/128投影を持つ。PD専用の外部state machine・補正wrapper・旧journal readerは削除した。
+独立dnsmasqとの実daemon試験で取得・DNS/search・DAD後のsource付きTCP/UDP・SIGKILL後の再取得・
+実Renew/Reply・サーバ停止中のRenew/Rebind・期限切れ撤去・復旧を確認した。
+`make check-dhcp6`で再実行できる。required/observe-only・RA trigger・resolver効果・DAD失敗・
+UTC補正/suspend・graceful Release・VRF・全link option/lifecycle・WAN選択は残り、NET-05全体は未完了。
 
 **受入条件**
 
@@ -646,7 +652,7 @@ BGPの再帰解決で共有し、VRF device自身とbridge配下のtableを正�
 
 再利用・比較元: [pkg/api/provides.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/provides.go), [pkg/lan](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/lan), [pkg/controller/chain/phase2.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/phase2.go), [pkg/controller/chain/bridge.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/bridge.go), [pkg/controller/chain/vxlan_tunnel.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/vxlan_tunnel.go), [pkg/vrf](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/vrf), [pkg/vxlan](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/vxlan), [pkg/render/netplan.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/render/netplan.go), [pkg/apply/engine.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/apply/engine.go), [pkg/hostdeps/hostdeps.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/hostdeps/hostdeps.go)。
 
-実装先の案: `internal/network`, `internal/runtimeplan`, `internal/protocol/raclient`, `internal/protocol/aftr`, `internal/legacyconfig`, `internal/protocol/dhcp6 (新設予定)`。
+実装先の案: `internal/network`, `internal/runtimeplan`, `internal/protocol/raclient`, `internal/protocol/aftr`, `internal/legacyconfig`, `internal/protocol/dhcp6`, `internal/protocol/dhcp6config`。
 
 #### NET-06 — LAN・DHCPv6・relay・DNS の resource 完全化
 
@@ -727,7 +733,7 @@ learned route先の利用者TCP/UDPも通信し、撤去中の接続拒否と復
 明示VRFではmultihop socketをVRF master、single-hopをmember interfaceへ束縛する。
 source domainとBGP FIB tableも検証する。同じendpointを持つ二つのVRFとdefault domainで
 実daemonを動かし、独立TCP/UDP・片側UDP障害・worker交替・main tableへの流出防止を確認した。
-single-hop VRFも実peerと障害・復旧を確認した。現在のcompiler contractはnative-12。
+single-hop VRFも実peerと障害・復旧を確認した。現在のcompiler contractはnative-13。
 IPv4/IPv6とも同じendpointを二つのVRFとdefault domainで同時使用し、BFD/BGPと三経路の
 TCP/UDPを確認した。defaultとVRFのUDP bind競合は受信socketだけの`SO_REUSEADDR`で修正した。
 domain/sourceの既存claimで二重ownerを拒否し、TX port専有と`SO_REUSEPORT`不使用を維持する。
@@ -835,7 +841,7 @@ track参照を宣言resource IDへ統一し、BFD/BGPも元の有限な状態観
 
 再利用・比較元: [pkg/controller/chain/filesync.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/filesync.go), [pkg/ha](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/ha)。
 
-実装先の案: `internal/ha/leasesync (新設予定)`, `internal/protocol/dhcpserver`, `internal/protocol/dhcp6pd`, `internal/runtimeplan`。
+実装先の案: `internal/ha/leasesync (新設予定)`, `internal/protocol/dhcpserver`, `internal/protocol/dhcp6`, `internal/runtimeplan`。
 
 #### HA-03 — NAT conntrack の同期と既存通信継続
 

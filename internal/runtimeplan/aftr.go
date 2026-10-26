@@ -15,7 +15,7 @@ import (
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/aftr"
-	"github.com/imksoo/routerd2/internal/protocol/dhcp6pd"
+	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
 	"github.com/imksoo/routerd2/internal/protocol/raclient"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 	"golang.org/x/sys/unix"
@@ -76,13 +76,13 @@ func aftrDependencies(doc config.Native, s serviceconfig.Service, records map[st
 			}
 		}
 	}
-	information := func(name string) (dhcp6pd.Snapshot, time.Time, bool) {
+	information := func(name string) (dhcp6config.Snapshot, time.Time, bool) {
 		u, ok := records["service."+name]
-		var snap dhcp6pd.Snapshot
-		if !ok || u.Role != "dhcp6pd" || json.Unmarshal(u.Snapshot, &snap) != nil {
+		var snap dhcp6config.Snapshot
+		if !ok || u.Role != "dhcp6" || json.Unmarshal(u.Snapshot, &snap) != nil {
 			return snap, time.Time{}, false
 		}
-		until, usable := informationDeadline(snap, now)
+		until, usable := snap.InformationUntil(now)
 		return snap, until, usable
 	}
 	if c.AFTRFrom != "" {

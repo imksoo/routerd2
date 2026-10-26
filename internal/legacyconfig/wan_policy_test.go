@@ -106,11 +106,11 @@ func TestExplicitWANPolicyJoinsRAInformationAFTRAndRoute(t *testing.T) {
 	if len(nativeProgram(t, d).Services) != 3 || len(nativeProgram(t, d).Network.Interfaces) != 2 || len(nativeProgram(t, d).Network.DSLite) != 0 || len(nativeProgram(t, d).Network.Routes) != 0 {
 		t.Fatal("dynamic ownership leaked into static network intent or created an extra socket owner")
 	}
-	raService, pd, ds := service(t, d, "ra_client"), service(t, d, "dhcp6pd"), service(t, d, "aftr")
+	raService, pd, ds := service(t, d, "ra_client"), service(t, d, "dhcp6"), service(t, d, "aftr")
 	if raService.RAClient.Interface != "eth0" || raService.RAClient.Table != 254 || raService.RAClient.Metric != 200 || raService.RAClient.InterfaceID != "::2" {
 		t.Fatal("explicit RA identity or route policy changed")
 	}
-	if pd.DHCP6.InformationOnly || pd.DHCP6.IAID != 1 || len(pd.DHCP6.Delegations) != 1 || pd.DHCP6.Delegations[0].SubnetID != 16 {
+	if !pd.DHCP6.RequestPrefix || pd.DHCP6.IAID != 1 || len(pd.DHCP6.Delegations) != 1 || pd.DHCP6.Delegations[0].SubnetID != 16 {
 		t.Fatal("PD was replaced by a second information socket or its delegation changed")
 	}
 	info := mapping(t, result, "DHCPv6Information/wan-info")
@@ -159,7 +159,7 @@ func TestPDInformationUsesOneIdentityAndExactLegacyInterfaceMatch(t *testing.T) 
 	if len(nativeProgram(t, result.Document).Services) != 2 {
 		t.Fatal("information resource opened a second DHCPv6 socket")
 	}
-	pd := service(t, result.Document, "dhcp6pd")
+	pd := service(t, result.Document, "dhcp6")
 	if !reflect.DeepEqual(mapping(t, result, "DHCPv6Information/info").Targets, []string{"services/" + pd.Name}) {
 		t.Fatal("information did not alias PD")
 	}

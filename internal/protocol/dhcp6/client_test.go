@@ -1,0 +1,159 @@
+//go:build linux
+
+package dhcp6
+
+import (
+	"bytes"
+	"encoding/binary"
+	"net/netip"
+	"testing"
+	"time"
+
+	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
+)
+
+func TestCombinedAddressAndPrefixExchange(t *testing.T) {
+	now := time.Unix(1700000000, 0)
+	c := client{cfg: dhcp6config.Config{IAID: 7, RequestAddress: true, RequestPrefix: true, PrefixLength: 56}, duid: []byte{0, 3, 0, 1}, server: []byte{0, 3, 0, 2}, snapshot: dhcp6config.Snapshot{State: "bound"}}
+	if err := c.begin(renew, now); err != nil {
+		t.Fatal(err)
+	}
+	m := message{kind: reply, xid: c.lease.xid, client: c.duid, server: c.server, refresh: 600,
+		na: &association{iaid: 7, t1: 2, t2: 4, leases: []assignment{{netip.MustParsePrefix("2001:db8:42::10/128"), 6, 10}, {netip.MustParsePrefix("2001:db8:42::11/128"), 8, 12}}},
+		pd: &association{iaid: 7, t1: 3, t2: 5, leases: []assignment{{netip.MustParsePrefix("2001:db8:100::/56"), 20, 30}}},
+	}
+	wrong := m
+	wrong.server = []byte{0, 3, 0, 9}
+	if err := c.accept(wrong, now); err != nil {
+		t.Fatal(err)
+	}
+	if len(c.snapshot.Addresses) != 0 {
+		t.Fatal("foreign server extended a Renew")
+	}
+	if err := c.accept(m, now); err != nil {
+		t.Fatal(err)
+	}
+	if len(c.snapshot.Addresses) != 2 || len(c.snapshot.Prefixes) != 1 || !c.snapshot.RenewAt.Equal(now.Add(2*time.Second)) || !c.snapshot.RebindAt.Equal(now.Add(4*time.Second)) {
+		t.Fatal(c.snapshot)
+	}
+	if err := c.advance(now.Add(2 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if c.lease.kind != renew {
+		t.Fatal("T1 did not renew")
+	}
+	packet := c.packet(&c.lease, now.Add(2*time.Second))
+	opts, err := options(packet[4:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, o := range opts {
+		if o.code == 8 && binary.BigEndian.Uint16(o.value) != 0 {
+			t.Fatal("first message elapsed time is not zero")
+		}
+	}
+	c.lease.attempts = 1
+	retry := c.packet(&c.lease, now.Add(2250*time.Millisecond))
+	opts, err = options(retry[4:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, o := range opts {
+		if o.code == 8 && binary.BigEndian.Uint16(o.value) != 25 {
+			t.Fatal("retry elapsed time includes the initial random delay")
+		}
+	}
+	decoded, err := decode(packet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.na == nil || decoded.pd == nil || decoded.na.iaid != 7 || decoded.pd.iaid != 7 || !bytes.Equal(decoded.client, c.duid) || len(decoded.na.leases) != 2 {
+		t.Fatal("IAs did not share transaction/identity", decoded)
+	}
+	for _, ia := range []*association{decoded.na, decoded.pd} {
+		if ia.t1 != 0 || ia.t2 != 0 {
+			t.Fatal("client selected server timers")
+		}
+		for _, a := range ia.leases {
+			if a.preferred != 0 || a.valid != 0 {
+				t.Fatal("client selected server lifetimes")
+			}
+		}
+	}
+	if err := c.advance(now.Add(4 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if c.lease.kind != rebind {
+		t.Fatal("unanswered Renew did not rebind")
+	}
+	// NoBinding during Rebind starts Request even after the old T2. That
+	// recovery exchange must not be overwritten by the old renewal timer.
+	missing := message{kind: reply, xid: c.lease.xid, client: c.duid, server: []byte{0, 3, 0, 9}, na: &association{iaid: 7, status: 3}}
+	if err := c.accept(missing, now.Add(5*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.advance(now.Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if c.lease.kind != request {
+		t.Fatal("old T2 replaced NoBinding recovery Request")
+	}
+	target, err := decode(c.packet(&c.lease, now.Add(5*time.Second)))
+	if err != nil || !bytes.Equal(target.server, missing.server) {
+		t.Fatal("NoBinding Request did not target the responding server", target, err)
+	}
+	if err := c.advance(now.Add(13 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if len(c.snapshot.Addresses) != 0 || len(c.snapshot.Prefixes) != 1 {
+		t.Fatal("IA_NA expiry removed surviving IA_PD", c.snapshot)
+	}
+}
+func TestRenumberRetainsOriginalOldPrefixDeadline(t *testing.T) {
+	now := time.Unix(1700000000, 0)
+	old := dhcp6config.Prefix{Prefix: "2001:db8:100::/56", PreferredUntil: now.Add(20 * time.Second), ValidUntil: now.Add(30 * time.Second)}
+	c := client{cfg: dhcp6config.Config{IAID: 7, RequestPrefix: true}, duid: []byte{0, 3, 0, 1}, server: []byte{0, 3, 0, 2}, snapshot: dhcp6config.Snapshot{State: "bound", Prefixes: []dhcp6config.Prefix{old}}}
+	if err := c.begin(renew, now); err != nil {
+		t.Fatal(err)
+	}
+	m := message{kind: reply, xid: c.lease.xid, client: c.duid, server: c.server, pd: &association{iaid: 7, t1: 2, t2: 4, leases: []assignment{{netip.MustParsePrefix("2001:db8:200::/56"), 40, 50}}}}
+	if err := c.accept(m, now); err != nil {
+		t.Fatal(err)
+	}
+	if len(c.snapshot.Prefixes) != 2 || !c.snapshot.Prefixes[0].PreferredUntil.Equal(now) || !c.snapshot.Prefixes[0].ValidUntil.Equal(old.ValidUntil) {
+		t.Fatal("renumber refreshed an old prefix", c.snapshot)
+	}
+	// Late replies from the completed exchange cannot extend either assignment.
+	if err := c.accept(m, now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if !c.snapshot.Prefixes[0].ValidUntil.Equal(old.ValidUntil) {
+		t.Fatal("late reply extended old lease")
+	}
+}
+func TestDecodeAddressAssociationAndRejectMalformedOptions(t *testing.T) {
+	raw := netip.MustParseAddr("2001:db8:42::10").As16()
+	address := append([]byte(nil), raw[:]...)
+	address = binary.BigEndian.AppendUint32(address, 6)
+	address = binary.BigEndian.AppendUint32(address, 10)
+	ia := binary.BigEndian.AppendUint32(nil, 7)
+	ia = binary.BigEndian.AppendUint32(ia, 2)
+	ia = binary.BigEndian.AppendUint32(ia, 4)
+	ia = appendOption(ia, 5, address)
+	b := appendOption([]byte{7, 1, 2, 3}, 3, ia)
+	m, err := decode(b)
+	if err != nil || m.na == nil || len(m.na.leases) != 1 || m.na.leases[0].prefix.String() != "2001:db8:42::10/128" {
+		t.Fatal(m, err)
+	}
+	if _, err := decode(append(b, 0, 1, 0)); err == nil {
+		t.Fatal("truncated option accepted")
+	}
+	if _, err := decode(appendOption(b, 3, ia)); err == nil {
+		t.Fatal("duplicate IA_NA accepted")
+	}
+	for _, name := range [][]byte{{0xc0, 0}, {4, 'a', 'b'}, {0}} {
+		if _, err := domainNames(name); err == nil {
+			t.Fatal("invalid/compressed domain accepted", name)
+		}
+	}
+}

@@ -17,7 +17,7 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/aftr"
 	"github.com/imksoo/routerd2/internal/protocol/bfd"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp4"
-	"github.com/imksoo/routerd2/internal/protocol/dhcp6pd"
+	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
 	"github.com/imksoo/routerd2/internal/protocol/ra"
 	"github.com/imksoo/routerd2/internal/protocol/raclient"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
@@ -161,48 +161,39 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 				}
 				p.network.Routes = append(p.network.Routes, network.Route{Destination: "0.0.0.0/0", Gateway: gw.String(), Interface: s.Interface(), Metric: s.DHCP4.Metric, Table: s.DHCP4.Table})
 			}
-		case "dhcp6pd":
+		case "dhcp6":
 			for _, lan := range s.DHCP6.Delegations {
 				ensureInterface(&p.network, lan.Interface)
 			}
 			if !has {
 				continue
 			}
-			var snap dhcp6pd.Snapshot
+			var snap dhcp6config.Snapshot
 			if err := json.Unmarshal(record.Snapshot, &snap); err != nil {
 				return p, err
 			}
+			for _, address := range snap.Addresses {
+				if !now.Before(address.ValidUntil) {
+					continue
+				}
+				if err := addAddressWithOptions(&p.network, s.DHCP6.Interface, address.Address+"/128", network.AddressOptions{PreferredUntil: address.PreferredUntil, ValidUntil: address.ValidUntil}); err != nil {
+					return p, err
+				}
+			}
 			for _, lan := range s.DHCP6.Delegations {
 				var prefixes []ra.Prefix
-				if snap.Active && now.Before(snap.ExpiresAt) {
-					prefix, addr, err := delegated(snap.CurrentPrefix, lan.SubnetID, lan.HostID)
+				for _, lease := range snap.Prefixes {
+					if !now.Before(lease.ValidUntil) {
+						continue
+					}
+					prefix, address, err := delegated(lease.Prefix, lan.SubnetID, lan.HostID)
 					if err != nil {
 						return p, fmt.Errorf("%s/%s: %w", s.Name, lan.Name, err)
 					}
-					preferred := snap.AcquiredAt.Add(time.Duration(snap.Preferred) * time.Second)
-					if preferred.After(snap.ExpiresAt) {
-						return p, errors.New("PD preferred deadline exceeds valid deadline")
-					}
-					if err := addAddressWithOptions(&p.network, lan.Interface, addr, network.AddressOptions{PreferredUntil: preferred, ValidUntil: snap.ExpiresAt}); err != nil {
+					if err := addAddressWithOptions(&p.network, lan.Interface, address, network.AddressOptions{PreferredUntil: lease.PreferredUntil, ValidUntil: lease.ValidUntil}); err != nil {
 						return p, err
 					}
-					prefixes = append(prefixes, ra.Prefix{Prefix: prefix, OnLink: true, Autonomous: true, ValidLifetimeSeconds: boundedSeconds(snap.Valid), PreferredLifetimeSeconds: boundedSeconds(snap.Preferred), ValidUntil: snap.ExpiresAt, PreferredUntil: preferred})
-				}
-				for _, old := range snap.PreviousPrefixes {
-					if !now.Before(old.ExpiresAt) || old.Prefix == snap.CurrentPrefix {
-						continue
-					}
-					prefix, addr, err := delegated(old.Prefix, lan.SubnetID, lan.HostID)
-					if err != nil {
-						return p, err
-					}
-					// A fixed past deadline keeps the generated identity stable.
-					if err := addAddressWithOptions(&p.network, lan.Interface, addr, network.AddressOptions{PreferredUntil: time.Unix(1, 0).UTC(), ValidUntil: old.ExpiresAt}); err != nil {
-						return p, err
-					}
-					// The absolute deadline bounds the retained prefix. A zero
-					// relative cap would instead withdraw it immediately on wire.
-					prefixes = append(prefixes, ra.Prefix{Prefix: prefix, OnLink: true, Autonomous: true, ValidLifetimeSeconds: ^uint32(0), ValidUntil: old.ExpiresAt, PreferredUntil: time.Unix(1, 0).UTC()})
+					prefixes = append(prefixes, ra.Prefix{Prefix: prefix, OnLink: true, Autonomous: true, ValidLifetimeSeconds: ^uint32(0), PreferredLifetimeSeconds: ^uint32(0), ValidUntil: lease.ValidUntil, PreferredUntil: lease.PreferredUntil})
 				}
 				if !lan.Advertise || len(prefixes) == 0 {
 					continue
@@ -212,7 +203,7 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 				c := protocols.lanRA[module]
 				c.Prefixes = prefixes
 				if lan.UseLearnedDNS {
-					if until, usable := informationDeadline(snap, now); usable {
+					if until, usable := snap.InformationUntil(now); usable {
 						for _, server := range unique(snap.DNSServers) {
 							c.LearnedRDNSS = append(c.LearnedRDNSS, ra.DNSServer{Address: server, ValidUntil: until})
 						}

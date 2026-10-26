@@ -28,7 +28,7 @@
       "artifact": "native-workers"
     },
     {
-      "role": "dhcp6pd",
+      "role": "dhcp6",
       "artifact": "native-workers"
     },
     {

@@ -20,7 +20,8 @@ import (
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/protocol/bfd"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp4"
-	"github.com/imksoo/routerd2/internal/protocol/dhcp6pd"
+	"github.com/imksoo/routerd2/internal/protocol/dhcp6"
+	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
 	"github.com/imksoo/routerd2/internal/protocol/dhcprelay"
 	"github.com/imksoo/routerd2/internal/protocol/dhcprelayconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserver"
@@ -90,7 +91,7 @@ func Run(ctx context.Context, runtimeDir, name, role, path, digest string, gener
 	defer cancel()
 	// Lease-owning HA engines refresh their own acknowledged deadline. A
 	// generic replay must never keep a dead election alive.
-	if role == "dhcp4" || role == "dhcp6pd" || role == "ra" || role == "ra_client" {
+	if role == "dhcp4" || role == "dhcp6" || role == "ra" || role == "ra_client" {
 		done := make(chan struct{})
 		defer func() { cancel(); <-done }()
 		go func() { defer close(done); c.replay(runCtx) }()
@@ -136,12 +137,12 @@ func Run(ctx context.Context, runtimeDir, name, role, path, digest string, gener
 			return err
 		}
 		return dhcp4.Run(runCtx, cfg, dhcp4.EffectsFunc(func(ctx context.Context, s dhcp4.Snapshot) error { return c.update(ctx, s) }), ready)
-	case "dhcp6pd":
-		var cfg dhcp6pd.Config
+	case "dhcp6":
+		var cfg dhcp6config.Config
 		if err := decode(instance.Config, &cfg); err != nil {
 			return err
 		}
-		return dhcp6pd.Run(runCtx, cfg, dhcp6pd.EffectsFunc(func(ctx context.Context, s dhcp6pd.Snapshot) error { return c.update(ctx, s) }), ready)
+		return dhcp6.Run(runCtx, cfg, dhcp6.EffectsFunc(func(ctx context.Context, s dhcp6config.Snapshot) error { return c.update(ctx, s) }), ready)
 	case "ra":
 		var cfg ra.Config
 		if err := decode(instance.Config, &cfg); err != nil {

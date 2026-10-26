@@ -295,12 +295,12 @@
         "pkg/controller/chain/phase2.go",
         "cmd/routerd-dhcpv6-client"
       ],
-      "native_replacement": "Reuse native DHCPv6 PD/information engine and durable lease behavior; route results through typed address/route modules.",
+      "native_replacement": "One native DHCPv6 client owns IA_NA, IA_PD and information on a shared interface socket; typed assignments feed the sole network writer and generated RA.",
       "target_workers": [
         "dhcp6-client"
       ],
       "parity_status": "not_integrated",
-      "known_gap": "Native IA_PD/information and delegated RA run through the actual daemon with an independent DHCPv6 wire peer. Renew/renumber retain the RA worker; expiry removes it and owned addresses; reacquisition reuses its prepared identity. Routed LAN client TCP/UDP is exercised. IA_NA, full resource selection/lifecycle, clock correction/suspend and complete option semantics remain incomplete."
+      "known_gap": "The PD state-machine wrapper and embedded upstream snapshot were replaced by a native client with explicit address/prefix requests and multiple assignments. Independent dnsmasq and actual supervisor/control/network/client processes passed IA_NA acquisition, DNS/search, source-bound TCP/UDP after DAD, SIGKILL recovery with stable DUID/IAID, Renew/Reply, unanswered Renew/Rebind, expiry and reacquisition. An independent wire server and real daemon also passed combined IA_NA/IA_PD transactions, current/deprecated LAN RA, routed client TCP/UDP, expiry/removal and reacquisition. Required/observe-only and full resource selection, RA triggers, resolver effects, DAD failure, UTC correction/suspend, Release, VRF and hardware qualification remain incomplete."
     },
     {
       "id": "wan.pppoe",
@@ -12192,9 +12192,9 @@
       "resource_parity": false
     },
     {
-      "package": "internal/protocol/dhcp6pd",
+      "package": "internal/protocol/dhcp6",
       "status": "integrated_supervised_worker",
-      "validation": "Unit/race plus fresh network namespace PD/information interoperability passed. Runtime prefix subdivision, preferred/valid deadlines, previous deprecated prefixes and derived RA identity tests passed.",
+      "validation": "Native client replaces the pinned PD state-machine wrapper. Independent dnsmasq with real daemon workers passed IA_NA acquisition, DNS/search, kernel DAD completion, source-bound TCP/UDP, stable-identity worker replacement, Renew/Reply, unanswered Renew/Rebind, expiry/removal and reacquisition. Unit/race verifies combined IA state/timer ownership, stale reply rejection, NoBinding recovery target and original old-prefix deadlines. Full resource parity, clock/suspend, DAD-failure, Release, VRF and hardware acceptance remain open.",
       "resource_parity": false
     },
     {

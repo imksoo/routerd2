@@ -23,6 +23,7 @@ resources:
     service:
       name: uplink-pd
       dhcp6:
+        request_prefix: true
         interface: eth0
         iaid: 1
         prefix_length: 56

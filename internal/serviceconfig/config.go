@@ -14,7 +14,7 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/bfd"
 	"github.com/imksoo/routerd2/internal/protocol/bgpconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp4"
-	"github.com/imksoo/routerd2/internal/protocol/dhcp6pd"
+	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
 	"github.com/imksoo/routerd2/internal/protocol/dhcprelayconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
@@ -52,12 +52,13 @@ type DHCP4 struct {
 }
 
 type DHCP6 struct {
-	Interface       string       `json:"interface"`
-	ClientDUID      string       `json:"client_duid,omitempty"`
-	IAID            uint32       `json:"iaid"`
-	PrefixLength    int          `json:"prefix_length,omitempty"`
-	InformationOnly bool         `json:"information_only,omitempty"`
-	Delegations     []Delegation `json:"delegations,omitempty"`
+	Interface      string       `json:"interface"`
+	ClientDUID     string       `json:"client_duid,omitempty"`
+	IAID           uint32       `json:"iaid"`
+	PrefixLength   int          `json:"prefix_length,omitempty"`
+	RequestAddress bool         `json:"request_address,omitempty"`
+	RequestPrefix  bool         `json:"request_prefix,omitempty"`
+	Delegations    []Delegation `json:"delegations,omitempty"`
 }
 
 // Delegation allocates a /64 inside an acquired prefix. SubnetID occupies the
@@ -119,7 +120,7 @@ func (s Service) Role() string {
 		return "dhcp4"
 	}
 	if s.DHCP6 != nil {
-		return "dhcp6pd"
+		return "dhcp6"
 	}
 	if s.RA != nil {
 		return "ra"
@@ -302,12 +303,12 @@ func Validate(services []Service) error {
 			if err := dhcp4.Validate(s.DHCP4Config("/var/lib/routerd")); err != nil {
 				return err
 			}
-		case "dhcp6pd":
-			if err := dhcp6pd.Validate(s.DHCP6Config("/var/lib/routerd")); err != nil {
+		case "dhcp6":
+			if err := dhcp6config.Validate(s.DHCP6Config("/var/lib/routerd")); err != nil {
 				return err
 			}
-			if s.DHCP6.InformationOnly && len(s.DHCP6.Delegations) > 0 {
-				return errors.New("information-only DHCPv6 cannot allocate delegated addresses")
+			if !s.DHCP6.RequestPrefix && len(s.DHCP6.Delegations) > 0 {
+				return errors.New("DHCPv6 delegations require request_prefix")
 			}
 			lanNames := map[string]bool{}
 			lanIDs := map[uint64]bool{}
@@ -372,9 +373,9 @@ func (s Service) DHCP4Config(stateDir string) dhcp4.Config {
 	c := s.DHCP4
 	return dhcp4.Config{Resource: s.Name, Interface: c.Interface, StatePath: filepath.Join(stateDir, "leases", s.Name+".dhcp4.json"), Hostname: c.Hostname, RequestedAddress: c.RequestedAddress, ClassID: c.ClassID, ClientID: c.ClientID}
 }
-func (s Service) DHCP6Config(stateDir string) dhcp6pd.Config {
+func (s Service) DHCP6Config(stateDir string) dhcp6config.Config {
 	c := s.DHCP6
-	return dhcp6pd.Config{Resource: s.Name, Interface: c.Interface, StatePath: filepath.Join(stateDir, "leases", s.Name+".dhcp6.json"), ClientDUID: c.ClientDUID, IAID: c.IAID, PrefixLength: c.PrefixLength, InformationOnly: c.InformationOnly}
+	return dhcp6config.Config{Resource: s.Name, Interface: c.Interface, StatePath: filepath.Join(stateDir, "identities", s.Name+".dhcp6.json"), ClientDUID: c.ClientDUID, IAID: c.IAID, PrefixLength: c.PrefixLength, RequestAddress: c.RequestAddress, RequestPrefix: c.RequestPrefix}
 }
 func (s Service) VRRPConfig() vrrp.Config {
 	c := *s.VRRP
@@ -409,7 +410,7 @@ func (s Service) Instance(runtimeDir, stateDir string) (Instance, error) {
 		b, err = json.Marshal(s.BGPConfig(runtimeDir, stateDir))
 	case "dhcp4":
 		b, err = json.Marshal(s.DHCP4Config(stateDir))
-	case "dhcp6pd":
+	case "dhcp6":
 		b, err = json.Marshal(s.DHCP6Config(stateDir))
 	case "ra":
 		v := *s.RA

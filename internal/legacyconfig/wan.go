@@ -48,7 +48,7 @@ func (c *compiler) dhcp6(r resource) {
 	c.ensureInterface(r, "interface", name)
 	service := serviceconfig.Service{
 		Name: c.serviceName(r, "pd"),
-		DHCP6: &serviceconfig.DHCP6{
+		DHCP6: &serviceconfig.DHCP6{RequestPrefix: true,
 			Interface: name, ClientDUID: s.ClientDUID, IAID: 1,
 			PrefixLength: api.EffectiveIPv6PDPrefixLength(s.Profile, s.PrefixLength),
 		},

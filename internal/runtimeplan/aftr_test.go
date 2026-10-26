@@ -9,11 +9,10 @@ import (
 	"testing"
 	"time"
 
-	old6 "github.com/imksoo/routerd/pkg/pdclient"
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/aftr"
-	"github.com/imksoo/routerd2/internal/protocol/dhcp6pd"
+	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 	"golang.org/x/sys/unix"
 )
@@ -251,10 +250,10 @@ func TestAFTRFiniteDependencyInvalidatesPriorResolution(t *testing.T) {
 	doc := aftrDocument()
 	doc.Services[0].DSLite.AFTRFrom = "wan-info"
 	doc.Services[0].DSLite.DNSFrom = []string{"wan-info"}
-	doc.Services = append(doc.Services, serviceconfig.Service{Name: "wan-info", DHCP6: &serviceconfig.DHCP6{Interface: "wan0", InformationOnly: true}})
-	info := dhcp6pd.Snapshot{Snapshot: old6.Snapshot{Resource: "wan-info", Interface: "wan0", AFTRName: "aftr.example", DNSServers: []string{"2001:db8:42::53"}, InfoUpdatedAt: now}, Active: true, InformationOnly: true, InformationRefreshAt: now.Add(30 * time.Second)}
+	doc.Services = append(doc.Services, serviceconfig.Service{Name: "wan-info", DHCP6: &serviceconfig.DHCP6{Interface: "wan0"}})
+	info := dhcp6config.Snapshot{Resource: "wan-info", Interface: "wan0", AFTRName: "aftr.example", DNSServers: []string{"2001:db8:42::53"}, InfoUpdatedAt: now, State: "information", InformationRefreshAt: now.Add(30 * time.Second)}
 	raw, _ := json.Marshal(info)
-	records := map[string]serviceconfig.Update{"service.wan-info": {Role: "dhcp6pd", Snapshot: raw}}
+	records := map[string]serviceconfig.Update{"service.wan-info": {Role: "dhcp6", Snapshot: raw}}
 	instance, err := doc.Services[0].Instance("/run/routerd", "/var/lib/routerd")
 	if err != nil {
 		t.Fatal(err)
@@ -294,23 +293,27 @@ func TestAFTRExplicitInfiniteInformationRefresh(t *testing.T) {
 	doc := aftrDocument()
 	doc.Services[0].DSLite.AFTRFrom = "wan-info"
 	doc.Services[0].DSLite.DNSFrom = []string{"wan-info"}
-	doc.Services = append(doc.Services, serviceconfig.Service{Name: "wan-info", DHCP6: &serviceconfig.DHCP6{Interface: "wan0", InformationOnly: true}})
+	doc.Services = append(doc.Services, serviceconfig.Service{Name: "wan-info", DHCP6: &serviceconfig.DHCP6{Interface: "wan0"}})
 	instance, err := doc.Services[0].Instance("/run/routerd", "/var/lib/routerd")
 	if err != nil {
 		t.Fatal(err)
 	}
 	bound, _ := encodeInstance(instance)
 	digest := bound.digest
-	info := dhcp6pd.Snapshot{Snapshot: old6.Snapshot{Resource: "wan-info", Interface: "wan0", AFTRName: "aftr.example", DNSServers: []string{"2001:db8:42::53"}, InfoUpdatedAt: now}, Active: true, InformationOnly: true, InformationRefreshSeconds: ^uint32(0)}
+	info := dhcp6config.Snapshot{Resource: "wan-info", Interface: "wan0", AFTRName: "aftr.example", DNSServers: []string{"2001:db8:42::53"}, InfoUpdatedAt: now, State: "information", InformationRefreshSeconds: ^uint32(0)}
 	for _, pd := range []bool{false, true} {
-		info.InformationOnly = !pd
+		info.State = "information"
+		info.Prefixes = nil
+		if pd {
+			info.State = "bound"
+		}
 		want := time.Time{}
 		if pd {
-			info.ExpiresAt = now.Add(90 * time.Second)
-			want = info.ExpiresAt
+			want = now.Add(90 * time.Second)
+			info.Prefixes = []dhcp6config.Prefix{{Prefix: "2001:db8:100::/56", PreferredUntil: want, ValidUntil: want}}
 		}
 		raw, _ := json.Marshal(info)
-		records := map[string]serviceconfig.Update{"service.wan-info": {Role: "dhcp6pd", Snapshot: raw}}
+		records := map[string]serviceconfig.Update{"service.wan-info": {Role: "dhcp6", Snapshot: raw}}
 		in, err := aftrDependencies(doc, doc.Services[0], records, digest, now)
 		if err != nil || len(in.Candidates) != 2 || in.Candidates[0].Value != "aftr.example" || len(in.Resolvers) != 1 {
 			t.Fatal("explicit infinite refresh lost valid information", in, err)
@@ -319,15 +322,15 @@ func TestAFTRExplicitInfiniteInformationRefresh(t *testing.T) {
 			t.Fatal("infinite refresh lost PD lease bound", in)
 		}
 		if pd {
-			in, err = aftrDependencies(doc, doc.Services[0], records, digest, info.ExpiresAt)
+			in, err = aftrDependencies(doc, doc.Services[0], records, digest, info.LeaseUntil())
 			if err != nil || len(in.Candidates) != 1 || len(in.Resolvers) != 0 {
 				t.Fatal("infinite refresh outlived its PD lease", in, err)
 			}
 		}
 	}
-	info.InformationOnly, info.InformationRefreshSeconds = true, 0
+	info.State, info.InformationRefreshSeconds = "information", 0
 	raw, _ := json.Marshal(info)
-	in, err := aftrDependencies(doc, doc.Services[0], map[string]serviceconfig.Update{"service.wan-info": {Role: "dhcp6pd", Snapshot: raw}}, digest, now)
+	in, err := aftrDependencies(doc, doc.Services[0], map[string]serviceconfig.Update{"service.wan-info": {Role: "dhcp6", Snapshot: raw}}, digest, now)
 	if err != nil || len(in.Candidates) != 1 || len(in.Resolvers) != 0 {
 		t.Fatal("missing refresh timestamp was mistaken for explicit infinity", in, err)
 	}

@@ -8,6 +8,7 @@ import (
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/protocol/bfd"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp4"
+	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/health"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
@@ -104,18 +105,19 @@ func (r *Runtime) recordGuardGrantLocked(u serviceconfig.Update, now time.Time) 
 		r.guardGrants[u.Name] = guardGrant{revision: r.config.revision, generation: u.Generation, sequence: u.Sequence, epoch: u.ProducerEpoch, bootID: snapshot.BootID, value: snapshot.Active, untilNanos: snapshot.ExpiresNanos, observedNanos: snapshot.ObservedNanos, health: &snapshot}
 		return
 	}
-	if u.Role != "dhcp6pd" {
+	if u.Role != "dhcp6" {
 		return
 	}
-	var snapshot struct {
-		Active    bool      `json:"active"`
-		ExpiresAt time.Time `json:"expiresAt"`
-	}
+	var snapshot dhcp6config.Snapshot
 	if json.Unmarshal(u.Snapshot, &snapshot) != nil {
 		return
 	}
-	deadline := snapshot.ExpiresAt
-	if !snapshot.Active {
+	active := snapshot.Active(now)
+	deadline := snapshot.LeaseUntil()
+	if snapshot.State == "information" {
+		deadline, _ = snapshot.InformationUntil(now)
+	}
+	if !active {
 		deadline = now.Add(5 * time.Second)
 	}
 	clock, err := bfd.ReadClock()
@@ -124,13 +126,16 @@ func (r *Runtime) recordGuardGrantLocked(u serviceconfig.Update, now time.Time) 
 		return
 	}
 	remaining := deadline.Sub(now)
+	if deadline.IsZero() {
+		remaining = time.Duration(1<<63-1) - time.Duration(clock.BoottimeNanoseconds)
+	}
 	if remaining <= 0 {
 		delete(r.guardGrants, u.Name)
 		return
 	}
 	until := uint64(clock.BoottimeNanoseconds) + uint64(remaining)
 	observed := uint64(clock.BoottimeNanoseconds)
-	if old, ok := r.guardGrants[u.Name]; ok && old.revision == r.config.revision && old.generation == u.Generation && old.epoch == u.ProducerEpoch && old.bootID == clock.BootID && old.value == snapshot.Active && (old.deadline.Equal(deadline) || bytes.Equal(r.records[u.Name].Snapshot, u.Snapshot)) {
+	if old, ok := r.guardGrants[u.Name]; ok && old.revision == r.config.revision && old.generation == u.Generation && old.epoch == u.ProducerEpoch && old.bootID == clock.BootID && old.value == active && (old.deadline.Equal(deadline) || bytes.Equal(r.records[u.Name].Snapshot, u.Snapshot)) {
 		until = old.untilNanos
 		observed = old.observedNanos
 		deadline = old.deadline
@@ -138,7 +143,7 @@ func (r *Runtime) recordGuardGrantLocked(u serviceconfig.Update, now time.Time) 
 	if r.guardGrants == nil {
 		r.guardGrants = make(map[string]guardGrant)
 	}
-	r.guardGrants[u.Name] = guardGrant{revision: r.config.revision, generation: u.Generation, sequence: u.Sequence, epoch: u.ProducerEpoch, bootID: clock.BootID, value: snapshot.Active, deadline: deadline, untilNanos: until, observedNanos: observed}
+	r.guardGrants[u.Name] = guardGrant{revision: r.config.revision, generation: u.Generation, sequence: u.Sequence, epoch: u.ProducerEpoch, bootID: clock.BootID, value: active, deadline: deadline, untilNanos: until, observedNanos: observed}
 
 }
 

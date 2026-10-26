@@ -12,12 +12,11 @@ import (
 	"testing"
 	"time"
 
-	old6 "github.com/imksoo/routerd/pkg/pdclient"
 	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp4"
-	"github.com/imksoo/routerd2/internal/protocol/dhcp6pd"
+	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
 	"github.com/imksoo/routerd2/internal/protocol/ra"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
@@ -216,8 +215,8 @@ func TestConcurrentRenewalSurvivesConfigurationCutover(t *testing.T) {
 
 func TestPDProjectionKeepsDeprecatedAddressesAndStableRAIdentity(t *testing.T) {
 	now := time.Now()
-	doc := config.Native{Services: []serviceconfig.Service{{Name: "pd", DHCP6: &serviceconfig.DHCP6{Interface: "wan0", IAID: 7, Delegations: []serviceconfig.Delegation{{Name: "lan", Interface: "lan0", SubnetID: 3, Advertise: true}}}}}}
-	snapshot := dhcp6pd.Snapshot{Active: true, Snapshot: old6.Snapshot{Resource: "pd", Interface: "wan0", IAID: 7, CurrentPrefix: "2001:db8:100::/56", AcquiredAt: now, Preferred: 100, Valid: 200, ExpiresAt: now.Add(200 * time.Second), PreviousPrefixes: []old6.PreviousPrefixSnapshot{{Prefix: "2001:db8:200::/56", ExpiresAt: now.Add(80 * time.Second)}}}}
+	doc := config.Native{Services: []serviceconfig.Service{{Name: "pd", DHCP6: &serviceconfig.DHCP6{RequestPrefix: true, Interface: "wan0", IAID: 7, Delegations: []serviceconfig.Delegation{{Name: "lan", Interface: "lan0", SubnetID: 3, Advertise: true}}}}}}
+	snapshot := dhcp6config.Snapshot{Resource: "pd", Interface: "wan0", IAID: 7, State: "bound", Prefixes: []dhcp6config.Prefix{{Prefix: "2001:db8:100::/56", PreferredUntil: now.Add(100 * time.Second), ValidUntil: now.Add(200 * time.Second)}, {Prefix: "2001:db8:200::/56", PreferredUntil: now.Add(-time.Second), ValidUntil: now.Add(80 * time.Second)}}}
 	raw, _ := json.Marshal(snapshot)
 	records := map[string]serviceconfig.Update{"service.pd": {Snapshot: raw}}
 	first, e := projectNative(doc, "/run/routerd", "/var/lib/routerd", records, now)
@@ -228,7 +227,7 @@ func TestPDProjectionKeepsDeprecatedAddressesAndStableRAIdentity(t *testing.T) {
 		t.Fatal("renumbering prefixes lost")
 	}
 	oldAdvertisement := first.liveRA["service.pd-lan-ra"].Prefixes[1]
-	if oldAdvertisement.ValidLifetimeSeconds == 0 || !oldAdvertisement.ValidUntil.Equal(snapshot.PreviousPrefixes[0].ExpiresAt) || oldAdvertisement.PreferredLifetimeSeconds != 0 {
+	if oldAdvertisement.ValidLifetimeSeconds == 0 || !oldAdvertisement.ValidUntil.Equal(snapshot.Prefixes[1].ValidUntil) || !oldAdvertisement.PreferredUntil.Before(now) {
 		t.Fatal("retained prefix must remain valid but deprecated on the LAN", oldAdvertisement)
 	}
 	var lan network.Interface
@@ -244,8 +243,8 @@ func TestPDProjectionKeepsDeprecatedAddressesAndStableRAIdentity(t *testing.T) {
 		t.Fatal("old prefix is still preferred")
 	}
 	digest := first.instances[1].digest
-	snapshot.ExpiresAt = snapshot.ExpiresAt.Add(time.Minute)
-	snapshot.AcquiredAt = snapshot.AcquiredAt.Add(time.Minute)
+	snapshot.Prefixes[0].ValidUntil = snapshot.Prefixes[0].ValidUntil.Add(time.Minute)
+	snapshot.Prefixes[0].PreferredUntil = snapshot.Prefixes[0].PreferredUntil.Add(time.Minute)
 	raw, _ = json.Marshal(snapshot)
 	records["service.pd"] = serviceconfig.Update{Snapshot: raw}
 	renewed, e := projectNative(doc, "/run/routerd", "/var/lib/routerd", records, now)

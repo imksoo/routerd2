@@ -18,12 +18,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/imksoo/routerd/pkg/pdclient"
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/aftr"
-	"github.com/imksoo/routerd2/internal/protocol/dhcp6pd"
+	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
 	"github.com/imksoo/routerd2/internal/protocol/raclient"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
@@ -210,14 +209,14 @@ func migrationInterface(t *testing.T, desired network.Desired, name string) netw
 func TestMigratedWANGraphThroughPublicRuntimeProjection(t *testing.T) {
 	result := compiledPolicy(t, fixture(t, "wan-dynamic"), wanPolicy(t))
 	doc := result.Document
-	raService, pdService, dsService := service(t, doc, "ra_client"), service(t, doc, "dhcp6pd"), service(t, doc, "aftr")
+	raService, pdService, dsService := service(t, doc, "ra_client"), service(t, doc, "dhcp6"), service(t, doc, "aftr")
 	runtime, n, manager := runtimeMigrationFixture(t, doc)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	manager.mu.Lock()
 	pdOwners, owners := 0, len(manager.modules)
 	for _, module := range manager.modules {
-		if module.Role == "dhcp6pd" {
+		if module.Role == "dhcp6" {
 			pdOwners++
 		}
 	}
@@ -240,11 +239,7 @@ func TestMigratedWANGraphThroughPublicRuntimeProjection(t *testing.T) {
 	if err := observeMigration(ctx, runtime, migrationUpdate(t, runtime, raService, 1, learned)); err != nil {
 		t.Fatal(err)
 	}
-	pd := dhcp6pd.Snapshot{Snapshot: pdclient.Snapshot{Resource: pdService.Name, Interface: "eth0", IAID: 1, State: pdclient.StateBound,
-		CurrentPrefix: "2001:db8:200::/56", AcquiredAt: now, Preferred: 480, Valid: 600, ExpiresAt: now.Add(10 * time.Minute), UpdatedAt: now,
-		AFTRName: "dhcp-aftr.example", DNSServers: []string{"2001:db8::55"}, InfoUpdatedAt: now}, Active: true,
-		InformationRefreshSeconds: 120, InformationRefreshAt: now.Add(120 * time.Second),
-	}
+	pd := dhcp6config.Snapshot{Resource: pdService.Name, Interface: "eth0", IAID: 1, ClientDUID: "00030001020000000001", State: "bound", Prefixes: []dhcp6config.Prefix{{Prefix: "2001:db8:200::/56", PreferredUntil: now.Add(480 * time.Second), ValidUntil: now.Add(600 * time.Second)}}, AFTRName: "dhcp-aftr.example", DNSServers: []string{"2001:db8::55"}, InfoUpdatedAt: now, InformationRefreshSeconds: 120, InformationRefreshAt: now.Add(120 * time.Second)}
 	if err := observeMigration(ctx, runtime, migrationUpdate(t, runtime, pdService, 1, pd)); err != nil {
 		t.Fatal(err)
 	}
@@ -264,7 +259,7 @@ func TestMigratedWANGraphThroughPublicRuntimeProjection(t *testing.T) {
 	}
 	projected := n.state()
 	lan := migrationInterface(t, projected, "eth1")
-	if option, ok := lan.AddressOptions["2001:db8:200:10::1/64"]; !ok || !option.ValidUntil.Equal(pd.ExpiresAt) {
+	if option, ok := lan.AddressOptions["2001:db8:200:10::1/64"]; !ok || !option.ValidUntil.Equal(pd.Prefixes[0].ValidUntil) {
 		t.Fatal("hexadecimal delegation or PD expiry was lost at runtime", lan)
 	}
 	var raRoute network.Route
@@ -304,7 +299,7 @@ func TestMigratedWANGraphThroughPublicRuntimeProjection(t *testing.T) {
 	}
 	// A newly stale information grant invalidates the original AFTR generation
 	// immediately, even though its earlier DNS answer has not yet expired.
-	pd.InformationStale = true
+	pd.InformationRefreshAt = now.Add(-time.Second)
 	if err := observeMigration(ctx, runtime, migrationUpdate(t, runtime, pdService, 2, pd)); err != nil {
 		t.Fatal(err)
 	}

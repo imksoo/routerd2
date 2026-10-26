@@ -49,7 +49,6 @@ resources:
       dhcp6:
         interface: wan0
         iaid: 1
-        information_only: true
   - id: service/wan-ra
     depends_on:
       - interface/wan0

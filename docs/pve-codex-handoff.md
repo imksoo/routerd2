@@ -72,59 +72,59 @@
 - Health監視と履歴配送は分離する。保存先障害・queue満杯でもprobeを止めず、欠落と保存エラーを表示する。
   全probeの無欠落保存は保証しない。
 
-現在のworker ABIは3、compiler contractは `resource-program-native-12`、network journalはformat 5。
+現在のworker ABIは3、compiler contractは `resource-program-native-13`、network journalはformat 5。
 `track.resource`は宣言IDであり、decisionはhealthy/unhealthy/neutral/unknownを明示する。
 破棄したservice-only形式のreader・混在運用・migrationは実装しない。
 
 ## 今回の実装と検証
 
-最新buildは `RELEASE_ID=relay-vrf`。NET-06のrelayは、server IPとgiaddrに加えて
-実際の受信interfaceのrouting domainを確認する。kernelの現在のbridge/VRF master chainを
-たどる同じ読み取りを、client interfaceの検査と応答の受理で使う。
-reply transaction cache、追加producer、domain snapshot管理、sysctlの製品側書換えはない。
+PD専用の外部state machine、補正wrapper、埋め込みsnapshot、旧lease journal readerを削除した。
+`internal/protocol/dhcp6`が一つのinterface・UDP 546・DUID/IAIDを所有する。
+`request_address`と`request_prefix`でIA_NAとIA_PDを同じstateful transactionへ入れる。
+両方falseならInformation-requestだけを行う。複数割当のpreferred/validは個別に保持し、
+IA_NAの/128とPD由来のLANアドレスを唯一のnetwork writerへ渡す。
+静的な契約は`dhcp6config`に置き、engineをboot/configへ持ち込まない。
 
-独立dnsmasq/BusyBoxのserver/clientをblue・red・defaultごとに別namespaceで動かした。
-全domainで同じserver IP `198.51.100.2`、giaddr `192.0.2.1`と同じclient subnetを使い、
-異なるDHCP domain optionとTCP/UDP responderで実際の経路を識別した。
-三つとも正しいDHCP設定を取得し、正しい相手とのTCP/UDPが成功した。
+永続化するのはresourceのDUID identityだけで、保存leaseを有効として復活させない。
+再起動後はfreshな取得を行う。proto互換reader・lease移行・仮producerはない。
+同じinterfaceのNA/PD/情報取得を別workerへ分割しない。
+元のprefix期限を保持したdeprecated化、T1/T2、個別失効、情報取得の別transactionを実装した。
+古いtransactionのReplyを採用せず、NoBindingでは返答serverへRequestを送る。
+初回送信のelapsed-timeは0で、初期random delayを再送経過時間へ混ぜない。
 
-試験では確認済みの隔離network namespace内だけで `udp_l3mdev_accept=1` を設定する。
-blue serverを実SIGSTOPし、INFORMを上流のsocket queueへ届けてからblue relayを宣言から外す。
-serverを再開すると、`3c28a9e` の実ELFでは遅いblue応答がdefault LANへ漏れた。
-packet captureではblue WANに1件、default LANにも1件あった。
-修正後も同じ応答はblue WANに1件届くが、全client LANでは0件であり、
-red/defaultはPID・generationを維持してDORAとTCP/UDPを続けた。
-blueの宣言を戻すと、同じ設定digestの新しいworker generationで再取得・TCP/UDPが復旧した。
+PVE隔離Linux VMの実supervisor/control/network/clientと独立dnsmasqで、IA_NA取得、
+DNS/search、DAD完了後のsource付きTCP/UDP、SIGKILL後のDUID/IAID・config digest維持、
+実Renew/Reply、server停止中のRenew/Rebind、kernel addressの失効撤去・同じworkerでの再取得を確認した。
+独立wire serverでも同じ要求内のIA_NA/IA_PDとIAIDを確認し、現在prefixとdeprecated旧prefixのRA、
+LAN TCP/UDP、同じRA workerでのrenew/renumber、失効時のRA退役とLANアドレス撤去、復旧を確認した。
+最初のIA_NA実行はfixture子プロセスの75秒制限で打ち切られたため、120秒leaseの失効を待てる
+fixture期限に修正した。打切りで残った専用namespace内のprocessは終了した。
+PD fixtureはRA退役をkernel撤去完了とみなしていたため、元の14秒budget内で両方の実状態を待つよう変更した。
+製品の期限や接続deadlineは延長していない。
 
-既存の二LAN試験も成功した。DORA、元のgiaddr/hops、hop制限、worker強制終了後の再取得、
-実TCP/UDPと、MTU 600での大きいunicast/broadcast応答の分割・client再組立てを含む。
-二つの200-byte optionがそのまま届く。実peerの起動・終了・lease取得処理は
-二つのfixtureで共有する。fixtureは製品のDHCP codec/state machineを使わない。
-詳しい設定と制限は [relay README](../internal/protocol/dhcprelay/README.md) を参照する。
+再実行コマンド:
 
-peerはdnsmasq 2.90、BusyBox 1.36.1。dnsmasqはuser namespace内のsetgroupsを避ける
-`--no-daemon`で起動する。build/testは規定のumask=022を使う。
-全体check・Race Detector・vet・6 ELF buildが成功した。
-同じamd64 ELFの最終relay 2ケースと、6 ELFのsigned bundle/catalog/publisher検査も成功した。
-最終stagingのsecrets scanも成功した。
+- `make check-dhcp6`: dnsmasqによるIA_NAの取得・更新・失効・復旧。
+- `make check-pd-ra`: 同じworkerのIA_NA/IA_PD、LAN RA・TCP/UDP、再番号付けと失効。
+- `make check-health-pbr`: 二WANの実通信、worker交替、古い通知・失効・confirmed rollback。
+- `make check-aftr`: 実daemonの依存失効・DNS・tunnel回復。
 
-現在の出力:
+全体`make check`（Python 33件、Race Detector、vetを含む）、amd64/arm64の6静的ELF build、
+関連する最終clientのrace/vet、低位DHCPv4/PD/RA kernel試験、Health/PBR・AFTR実daemon試験、
+6 ELFの署名bundle/catalog/publisher検査とstaged secrets scanは成功した。
+現在の出力は`dist/dhcp6-{check-build,final-related,final-build,kernel,health-pbr,aftr-final}.log`、
+`dist/dhcp6-address-final/`と`dist/dhcp6-pd-ra-final/`のログ・pcap、
+`dist/dhcp6-{bundle,secrets}.log`。
+compiler contractは`resource-program-native-13`、worker ABIは3、network journalは5。
 
-- `dist/relay-vrf-check-build.log`: 全体check・Race Detector・vet・6 ELF build。
-- `dist/relay-vrf-before/`: 修正前の実ELFによるdefault LANへの漏れのログとpcap。
-- `dist/relay-vrf-after/`: 修正後の基本・VRF 2ケースのログとpcap。
-- `dist/relay-vrf-final/`: 最終2ケースのログと3本／6本のpcap。
-- `dist/relay-vrf-{bundle,secrets}.log`: signed bundle、secrets scan。
-
-`make check-dhcp-relay`で両方を再実行できる。
-個別には `python3 scripts/daemon-tests.py dhcp-relay --test TestDaemonDHCPRelayVRFIsolation`。
-compiler contractは `resource-program-native-12`、worker ABIは3、network journalは5のままである。
-Health/PBR・PD/RA・native DHCP serverはこの修正で再実行していない。
-HA relay failover、動的なVRF/interface移動・置換、arm64実行、物理NIC・性能・suspendは未完了。
+IA_NAの有効leaseはworkerのsocket Readyとは異なる。required-address/observe-only、RA trigger、
+MTU/hop-limit、system resolver、DAD失敗/Decline、graceful Release、VRF、時計補正/suspend・実機は未受入。
+DHCPv6の割当・情報snapshotにはUTC期限が残る。今回の成功で製品全体・実機利用可能とは判断しない。
 
 ## 未完了と次の作業
 
 1. 全実装計画、全更新復旧経路、外部engine、配備先と対象実機の受入は未完了。
+   次はNET-05のDHCPv6期限を元のBOOTTIMEへ揃え、DAD失敗/Decline・Release・resource readiness/RA連携を実装・受入する。
    NET-06はrelayのHA・動的VRF/interface変更の受入、DHCPv6 server、dynamic pool/options・DNS・sticky/lease importが残る。
    今回の試験成功を製品全体・実機利用可能の判定には使わない。
 2. NET-07の旧resource/profile、動的source・VRF経路変更、大規模RIBを実装・受入する。

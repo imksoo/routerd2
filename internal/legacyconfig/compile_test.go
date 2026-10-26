@@ -131,7 +131,7 @@ func TestWANIdentityRoutesAndHexadecimalDelegation(t *testing.T) {
 	if v4.Interface != "eth0" || v4.DefaultRoute == nil || *v4.DefaultRoute || v4.Metric != 80 || v4.Hostname != "gateway" || v4.ClientID != "01020000000001" {
 		t.Fatal("DHCPv4 wire identity or route suppression changed")
 	}
-	v6 := service(t, d, "dhcp6pd").DHCP6
+	v6 := service(t, d, "dhcp6").DHCP6
 	if v6.Interface != "eth0" || v6.PrefixLength != 56 || v6.IAID != 1 || v6.ClientDUID != "00030001020000000001" || len(v6.Delegations) != 1 {
 		t.Fatal("PD identity/defaults or delegation relationship changed")
 	}

@@ -19,7 +19,7 @@ import (
 
 func TestPreparedWorkerFilesMatchSupervisorIdentities(t *testing.T) {
 	doc := config.Native{Services: []serviceconfig.Service{
-		{Name: "pd", DHCP6: &serviceconfig.DHCP6{Interface: "wan0", IAID: 7, Delegations: []serviceconfig.Delegation{{Name: "lan", Interface: "lan0", Advertise: true}}}},
+		{Name: "pd", DHCP6: &serviceconfig.DHCP6{RequestPrefix: true, Interface: "wan0", IAID: 7, Delegations: []serviceconfig.Delegation{{Name: "lan", Interface: "lan0", Advertise: true}}}},
 		{Name: "edge", BGP: &serviceconfig.BGP{Runtime: bgpconfig.AppliedConfig{Global: bgpconfig.AppliedGlobal{ASN: 64512, RouterID: "192.0.2.1", ListenPort: -1}}}},
 	}}
 	runtimeDir, stateDir := t.TempDir(), t.TempDir()

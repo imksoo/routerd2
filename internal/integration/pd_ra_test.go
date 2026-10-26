@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -137,7 +138,7 @@ func TestDaemonPDGeneratedRAWorkerLifetime(t *testing.T) {
 		},
 		Forwarding: network.Forwarding{IPv6: &forward},
 		Routes:     []network.Route{{Destination: "2001:db8:ffff::9/128", Gateway: "fe80::2", Interface: "wan0"}},
-	}, Services: []serviceconfig.Service{{Name: "pd", DHCP6: &serviceconfig.DHCP6{Interface: "wan0", IAID: 7, PrefixLength: 56, Delegations: []serviceconfig.Delegation{{Name: "lan", Interface: "lan0", SubnetID: 3, Advertise: true, UseLearnedDNS: true}}}}}}
+	}, Services: []serviceconfig.Service{{Name: "pd", DHCP6: &serviceconfig.DHCP6{RequestAddress: true, RequestPrefix: true, Interface: "wan0", IAID: 7, PrefixLength: 56, Delegations: []serviceconfig.Delegation{{Name: "lan", Interface: "lan0", SubnetID: 3, Advertise: true, UseLearnedDNS: true}}}}}}
 	started := time.Now()
 	f := startFixtureDaemon(t, config.FromNative(doc))
 	module := func(name string) (supervisor.ModuleStatus, bool) {
@@ -231,6 +232,22 @@ func TestDaemonPDGeneratedRAWorkerLifetime(t *testing.T) {
 	}
 	first := waitRA("2001:db8:1200:3::/64", "", started)
 	traffic("2001:db8:1200:3::")
+	until(t, 5*time.Second, func() bool {
+		wan, err := netlink.LinkByName("wan0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		addresses, err := netlink.AddrList(wan, netlink.FAMILY_V6)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, a := range addresses {
+			if a.IP.String() == "2001:db8:42::10" && a.Flags&(unix.IFA_F_TENTATIVE|unix.IFA_F_DADFAILED) == 0 {
+				return true
+			}
+		}
+		return false
+	})
 	pdWorker, _ := module("service.pd")
 	until(t, 6*time.Second, func() bool { checkPeer(); return renewals.Load() > 0 })
 	renumbering := time.Now()
@@ -241,20 +258,29 @@ func TestDaemonPDGeneratedRAWorkerLifetime(t *testing.T) {
 	}
 	traffic("2001:db8:1300:3::")
 	enabled.Store(false)
-	until(t, 14*time.Second, func() bool { checkPeer(); _, found := module("service.pd-lan-ra"); return !found })
-	link, err := netlink.LinkByName("lan0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	addresses, err := netlink.AddrList(link, netlink.FAMILY_V6)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, address := range addresses {
-		if address.IP.IsGlobalUnicast() {
-			t.Fatal("expired PD retained a delegated LAN address", address)
+	// RA retirement and kernel address removal are separate effects. Wait for
+	// both within the existing expiry budget; process disappearance is not an
+	// acknowledgement that the network writer has finished applying it.
+	until(t, 14*time.Second, func() bool {
+		checkPeer()
+		if _, found := module("service.pd-lan-ra"); found {
+			return false
 		}
-	}
+		link, err := netlink.LinkByName("lan0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		addresses, err := netlink.AddrList(link, netlink.FAMILY_V6)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, address := range addresses {
+			if address.IP.IsGlobalUnicast() {
+				return false
+			}
+		}
+		return true
+	})
 	reacquiring := time.Now()
 	enabled.Store(true)
 	recovered := waitRA("2001:db8:1300:3::/64", "", reacquiring)
@@ -323,6 +349,20 @@ func delegatedPrefixReply(packet []byte, selected uint32) ([]byte, error) {
 	prefix := netip.MustParseAddr(fmt.Sprintf("2001:db8:%x::", selected)).As16()
 	ia = append(ia, prefix[:]...)
 	option(25, ia)
+	if len(options[3]) < 12 || !bytes.Equal(options[3][:4], options[25][:4]) {
+		return nil, errors.New("address and prefix did not share an IAID/transaction")
+	}
+	if len(options[3]) >= 12 {
+		addressIA := append([]byte(nil), options[3][:4]...)
+		addressIA = binary.BigEndian.AppendUint32(addressIA, 2)
+		addressIA = binary.BigEndian.AppendUint32(addressIA, 4)
+		addressIA = append(addressIA, 0, 5, 0, 24)
+		raw := netip.MustParseAddr("2001:db8:42::10").As16()
+		addressIA = append(addressIA, raw[:]...)
+		addressIA = binary.BigEndian.AppendUint32(addressIA, 6)
+		addressIA = binary.BigEndian.AppendUint32(addressIA, 10)
+		option(3, addressIA)
+	}
 	return response, nil
 }
 

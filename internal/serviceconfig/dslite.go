@@ -139,7 +139,7 @@ func validateDSLiteSources(services []Service) error {
 		tunnels[c.Tunnel] = s.Name
 		check := func(name, role string) error {
 			other, ok := byName[name]
-			if !ok || other.Interface() != c.Interface || role != "" && other.Role() != role || role == "" && other.Role() != "ra_client" && other.Role() != "dhcp6pd" {
+			if !ok || other.Interface() != c.Interface || role != "" && other.Role() != role || role == "" && other.Role() != "ra_client" && other.Role() != "dhcp6" {
 				return fmt.Errorf("DS-Lite %s references unavailable or incompatible underlay service %q", s.Name, name)
 			}
 			return nil
@@ -150,7 +150,7 @@ func validateDSLiteSources(services []Service) error {
 			}
 		}
 		if c.AFTRFrom != "" {
-			if err := check(c.AFTRFrom, "dhcp6pd"); err != nil {
+			if err := check(c.AFTRFrom, "dhcp6"); err != nil {
 				return err
 			}
 		}
