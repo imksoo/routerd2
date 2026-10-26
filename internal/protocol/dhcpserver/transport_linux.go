@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/ethernet"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 )
@@ -66,7 +67,7 @@ func openTransport(c Config) (_ *nativeTransport, result error) {
 	if err != nil {
 		return nil, err
 	}
-	if err = unix.Bind(t.lockFD, &unix.SockaddrUnix{Name: fmt.Sprintf("\x00routerd2-dhcp-server:%d", t.index)}); err != nil {
+	if err = unix.Bind(t.lockFD, &unix.SockaddrUnix{Name: fmt.Sprintf("\x00routerd2-dhcp-listener:%d", t.index)}); err != nil {
 		return nil, fmt.Errorf("claim DHCP interface instance: %w", err)
 	}
 	lc := net.ListenConfig{Control: func(_, _ string, raw syscall.RawConn) error {
@@ -217,7 +218,7 @@ func (t *nativeTransport) Send(ctx context.Context, r response) error {
 		return err
 	}
 	t.ipID++
-	frame, err := udpFrame(t.mac, r.MAC, t.source, r.Destination, 67, uint16(r.Port), t.ipID, r.Data)
+	frame, err := ethernet.UDP4(t.mac, r.MAC, t.source, r.Destination, 67, uint16(r.Port), t.ipID, r.Data)
 	if err != nil {
 		return err
 	}
@@ -312,52 +313,4 @@ func arpConflict(b []byte, address netip.Addr, serverMAC, clientMAC net.Hardware
 	}
 	spa, tpa := addr4(b[28:32]), addr4(b[38:42])
 	return spa == address || spa.IsUnspecified() && tpa == address
-}
-func udpFrame(sourceMAC, destinationMAC net.HardwareAddr, source, destination netip.Addr, sourcePort, destinationPort, id uint16, payload []byte) ([]byte, error) {
-	if len(sourceMAC) != 6 || len(destinationMAC) != 6 || !source.Is4() || !destination.Is4() || len(payload) > 1472 {
-		return nil, errors.New("invalid DHCP Ethernet reply")
-	}
-	b := make([]byte, 42+len(payload))
-	copy(b[:6], destinationMAC)
-	copy(b[6:12], sourceMAC)
-	binary.BigEndian.PutUint16(b[12:14], unix.ETH_P_IP)
-	ip := b[14:34]
-	ip[0] = 0x45
-	binary.BigEndian.PutUint16(ip[2:4], uint16(28+len(payload)))
-	binary.BigEndian.PutUint16(ip[4:6], id)
-	ip[8], ip[9] = 64, 17
-	putAddress(ip[12:16], source)
-	putAddress(ip[16:20], destination)
-	binary.BigEndian.PutUint16(ip[10:12], checksum(ip))
-	udp := b[34:]
-	binary.BigEndian.PutUint16(udp[:2], sourcePort)
-	binary.BigEndian.PutUint16(udp[2:4], destinationPort)
-	binary.BigEndian.PutUint16(udp[4:6], uint16(len(udp)))
-	copy(udp[8:], payload)
-	pseudo := make([]byte, 12+len(udp))
-	putAddress(pseudo[:4], source)
-	putAddress(pseudo[4:8], destination)
-	pseudo[9] = 17
-	binary.BigEndian.PutUint16(pseudo[10:12], uint16(len(udp)))
-	copy(pseudo[12:], udp)
-	sum := checksum(pseudo)
-	if sum == 0 {
-		sum = 0xffff
-	}
-	binary.BigEndian.PutUint16(udp[6:8], sum)
-	return b, nil
-}
-func checksum(b []byte) uint16 {
-	var sum uint32
-	for len(b) >= 2 {
-		sum += uint32(binary.BigEndian.Uint16(b[:2]))
-		b = b[2:]
-	}
-	if len(b) > 0 {
-		sum += uint32(b[0]) << 8
-	}
-	for sum>>16 != 0 {
-		sum = (sum & 0xffff) + (sum >> 16)
-	}
-	return ^uint16(sum)
 }

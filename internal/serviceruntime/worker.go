@@ -21,6 +21,8 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/bfd"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp4"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6pd"
+	"github.com/imksoo/routerd2/internal/protocol/dhcprelay"
+	"github.com/imksoo/routerd2/internal/protocol/dhcprelayconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserver"
 	"github.com/imksoo/routerd2/internal/protocol/dns"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
@@ -114,6 +116,12 @@ func Run(ctx context.Context, runtimeDir, name, role, path, digest string, gener
 			return err
 		}
 		return raclient.Run(runCtx, cfg, raclient.EffectsFunc(func(ctx context.Context, snapshot raclient.Snapshot) error { return c.update(ctx, snapshot) }), ready)
+	case "dhcp_relay":
+		var cfg dhcprelayconfig.Config
+		if err := decode(instance.Config, &cfg); err != nil {
+			return err
+		}
+		return dhcprelay.Run(runCtx, cfg, ready)
 	case "dhcp_server":
 		var cfg dhcpserver.Config
 		if err := decode(instance.Config, &cfg); err != nil {

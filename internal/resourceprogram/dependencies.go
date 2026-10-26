@@ -77,6 +77,15 @@ func inferredDependencies(resources []Resource) map[string][]string {
 			}
 		case r.Service != nil:
 			iface(r.Service.Interface())
+			if relay := r.Service.DHCPRelay; relay != nil {
+				iface(relay.VRF)
+				for _, client := range relay.Interfaces {
+					iface(client.Name)
+					for _, id := range addresses[client.Name+"\x00"+client.Address] {
+						add(id)
+					}
+				}
+			}
 			if r.Service.BFD != nil {
 				iface(r.Service.BFD.VRF)
 			}

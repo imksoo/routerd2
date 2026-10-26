@@ -37,6 +37,7 @@
     "dhcp4": "/usr/libexec/routerd-modules",
     "dhcp6pd": "/usr/libexec/routerd-modules",
     "dhcp_server": "/usr/libexec/routerd-modules",
+    "dhcp_relay": "/usr/libexec/routerd-modules",
     "ra": "/usr/libexec/routerd-modules",
     "ra_client": "/usr/libexec/routerd-modules",
     "aftr": "/usr/libexec/routerd-modules",

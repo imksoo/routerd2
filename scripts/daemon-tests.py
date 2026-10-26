@@ -20,6 +20,8 @@ SUITES = {
         ("TestDaemonSinglehopBFDVRF", (), 120),
     ),
     "pd-ra": (("TestDaemonPDGeneratedRAWorkerLifetime", ("wan0", "lan0"), 120),),
+    "dhcp-relay": (("TestDaemonDHCPRelayIndependentClientsAndServer", ("wan0", "lan0", "lan1"), 120),),
+    "dhcp-server": (("TestDaemonDHCPDNSAndOwnershipExpiry", (), 120),),
     "aftr": (("TestDaemonAFTRResolutionAndExpiry", (), 120),),
 }
 

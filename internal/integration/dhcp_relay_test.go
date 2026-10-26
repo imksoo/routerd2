@@ -1,0 +1,311 @@
+//go:build linux && integration
+
+package integration
+
+import (
+	"context"
+	"encoding/binary"
+	"fmt"
+	"io"
+	"net"
+	"net/netip"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"syscall"
+	"testing"
+	"time"
+
+	"github.com/imksoo/routerd2/internal/config"
+	"github.com/imksoo/routerd2/internal/network"
+	"github.com/imksoo/routerd2/internal/protocol/dhcprelayconfig"
+	"github.com/imksoo/routerd2/internal/serviceconfig"
+	"github.com/imksoo/routerd2/internal/supervisor"
+	"github.com/vishvananda/netlink"
+	"github.com/vishvananda/netns"
+	"golang.org/x/net/ipv4"
+	"golang.org/x/sys/unix"
+)
+
+func TestDaemonDHCPRelayIndependentClientsAndServer(t *testing.T) {
+	if !isolateFixture(t, "TestDaemonDHCPRelayIndependentClientsAndServer") {
+		return
+	}
+	dnsmasq, err := exec.LookPath("dnsmasq")
+	if err != nil {
+		t.Fatal("independent dnsmasq server required", err)
+	}
+	busybox, err := exec.LookPath("busybox")
+	if err != nil {
+		t.Fatal("independent BusyBox udhcpc required", err)
+	}
+	provider := fixturePeerNamespace(t, "wan0", "server0")
+	clients := []netns.NsHandle{fixturePeerNamespace(t, "lan0", "client0"), fixturePeerNamespace(t, "lan1", "client1")}
+	if err := fixtureInsideNamespace(provider, func() error {
+		link, err := netlink.LinkByName("server0")
+		if err != nil {
+			return err
+		}
+		address, _ := netlink.ParseAddr("198.51.100.2/24")
+		if err := netlink.AddrAdd(link, address); err != nil {
+			return err
+		}
+		for _, prefix := range []string{"192.0.2.0/24", "203.0.113.0/24"} {
+			_, destination, _ := net.ParseCIDR(prefix)
+			if err := netlink.RouteAdd(&netlink.Route{Dst: destination, Gw: net.ParseIP("198.51.100.1"), LinkIndex: link.Attrs().Index}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	forward := true
+	relay := dhcprelayconfig.Config{Interfaces: []dhcprelayconfig.Interface{
+		{Name: "lan0", Address: "192.0.2.1", Servers: []string{"198.51.100.2"}},
+		{Name: "lan1", Address: "203.0.113.1", Servers: []string{"198.51.100.2"}},
+	}}
+	f := startFixtureDaemon(t, config.FromNative(config.Native{Network: network.Desired{Interfaces: []network.Interface{
+		{Name: "wan0", Addresses: []string{"198.51.100.1/24"}},
+		{Name: "lan0", Addresses: []string{"192.0.2.1/24"}},
+		{Name: "lan1", Addresses: []string{"203.0.113.1/24"}},
+	}, Forwarding: network.Forwarding{IPv4: &forward}}, Services: []serviceconfig.Service{{Name: "relay", DHCPRelay: &relay}}}))
+	captures := []*healthPBRCaptureState{healthPBRCapture(t, "wan0"), healthPBRCapture(t, "lan0"), healthPBRCapture(t, "lan1")}
+	work := t.TempDir()
+	serverLog, err := os.Create(filepath.Join(work, "dnsmasq.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { serverLog.Close() })
+	ctx, stopServer := context.WithCancel(context.Background())
+	// Debug mode keeps the peer in the foreground without setgroups(), which
+	// this isolated user namespace deliberately disallows.
+	server := exec.CommandContext(ctx, dnsmasq, "--no-daemon", "--conf-file=/dev/null", "--port=0", "--interface=server0", "--bind-interfaces", "--dhcp-authoritative", "--log-dhcp", "--log-facility=-", "--pid-file=", "--dhcp-leasefile="+filepath.Join(work, "leases"),
+		"--dhcp-range=set:lan0,192.0.2.100,192.0.2.110,255.255.255.0,60s", "--dhcp-option=tag:lan0,3,192.0.2.1",
+		"--dhcp-range=set:lan1,203.0.113.100,203.0.113.110,255.255.255.0,60s", "--dhcp-option=tag:lan1,3,203.0.113.1")
+	server.Stdout, server.Stderr = serverLog, serverLog
+	if err := fixtureInsideNamespace(provider, server.Start); err != nil {
+		stopServer()
+		t.Fatal(err)
+	}
+	serverDone := make(chan error, 1)
+	go func() { serverDone <- server.Wait() }()
+	t.Cleanup(func() { stopServer(); <-serverDone })
+	t.Cleanup(func() {
+		if t.Failed() {
+			log, _ := os.ReadFile(serverLog.Name())
+			t.Logf("independent server:\n%s", log)
+		}
+	})
+	script := filepath.Join(work, "lease.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\ncase \"$1\" in bound|renew) printf '%s\\n' \"$ip\" \"$serverid\" \"$router\" > \"$ROUTERD_RELAY_REPORT\";; esac\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	acquire := func(i int, requested string) string {
+		t.Helper()
+		report := filepath.Join(work, fmt.Sprintf("lease%d", i))
+		args := []string{"udhcpc", "-f", "-n", "-q", "-t", "5", "-T", "1", "-i", fmt.Sprintf("client%d", i), "-s", script, "-p", report + ".pid"}
+		if i == 1 {
+			args = append(args, "-B")
+		}
+		if requested != "" {
+			args = append(args, "-r", requested)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, busybox, args...)
+		cmd.Env = append(os.Environ(), "ROUTERD_RELAY_REPORT="+report)
+		var output strings.Builder
+		cmd.Stdout, cmd.Stderr = &output, &output
+		if err := fixtureInsideNamespace(clients[i], cmd.Start); err != nil {
+			t.Fatal(err)
+		}
+		if err := cmd.Wait(); err != nil {
+			t.Fatalf("independent client %d: %v\n%s", i, err, output.String())
+		}
+		data, err := os.ReadFile(report)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lease := strings.Fields(string(data))
+		prefix := []string{"192.0.2.0/24", "203.0.113.0/24"}[i]
+		if len(lease) != 3 || !netip.MustParsePrefix(prefix).Contains(netip.MustParseAddr(lease[0])) || lease[1] != "198.51.100.2" || lease[2] != relay.Interfaces[i].Address {
+			t.Fatal("wrong client subnet, upstream server or gateway", lease)
+		}
+		return lease[0]
+	}
+	vrrpVIPResponders(t, provider, "4", []string{"198.51.100.2"}, "D")
+	var leases []string
+	for i := range clients {
+		address := acquire(i, "")
+		leases = append(leases, address)
+		if err := fixtureInsideNamespace(clients[i], func() error {
+			link, err := netlink.LinkByName(fmt.Sprintf("client%d", i))
+			if err != nil {
+				return err
+			}
+			ip, _ := netlink.ParseAddr(address + "/24")
+			if err := netlink.AddrAdd(link, ip); err != nil {
+				return err
+			}
+			return netlink.RouteAdd(&netlink.Route{Gw: net.ParseIP(relay.Interfaces[i].Address), LinkIndex: link.Attrs().Index})
+		}); err != nil {
+			t.Fatal(err)
+		}
+		for _, protocol := range []string{"tcp4", "udp4"} {
+			port := "18093"
+			if protocol == "udp4" {
+				port = "18094"
+			}
+			var conn net.Conn
+			if err := fixtureInsideNamespace(clients[i], func() error {
+				var err error
+				conn, err = net.DialTimeout(protocol, "198.51.100.2:"+port, time.Second)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			conn.SetDeadline(time.Now().Add(time.Second))
+			_, writeErr := conn.Write([]byte("request"))
+			var response [1]byte
+			_, readErr := io.ReadFull(conn, response[:])
+			conn.Close()
+			if writeErr != nil || readErr != nil || response[0] != 'D' {
+				t.Fatal("leased client traffic", protocol, writeErr, readErr, response)
+			}
+		}
+	}
+	// An independent DHCPINFORM uses ciaddr without allocating another lease.
+	// The hop limit must discard a looped request before the valid exchange.
+	var socket net.PacketConn
+	var clientMAC net.HardwareAddr
+	if err := fixtureInsideNamespace(clients[0], func() error {
+		iface, err := net.InterfaceByName("client0")
+		if err != nil {
+			return err
+		}
+		clientMAC = iface.HardwareAddr
+		listen := net.ListenConfig{Control: func(_, _ string, raw syscall.RawConn) error {
+			var inner error
+			err := raw.Control(func(fd uintptr) {
+				inner = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_BROADCAST, 1)
+				if inner == nil {
+					inner = unix.SetsockoptString(int(fd), unix.SOL_SOCKET, unix.SO_BINDTODEVICE, "client0")
+				}
+			})
+			if err != nil {
+				return err
+			}
+			return inner
+		}}
+		socket, err = listen.ListenPacket(context.Background(), "udp4", "0.0.0.0:68")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	defer socket.Close()
+	conn := ipv4.NewPacketConn(socket)
+	if err := conn.SetControlMessage(ipv4.FlagDst, true); err != nil {
+		t.Fatal(err)
+	}
+	request := make([]byte, 300)
+	request[0], request[1], request[2], request[3] = 1, 1, 6, 5
+	binary.BigEndian.PutUint32(request[4:8], 0x71829304)
+	copy(request[12:16], net.ParseIP(leases[0]).To4())
+	copy(request[28:34], clientMAC)
+	copy(request[236:], []byte{99, 130, 83, 99, 53, 1, 8, 55, 2, 3, 6, 255})
+	send := func() {
+		t.Helper()
+		if _, err := conn.WriteTo(request, nil, &net.UDPAddr{IP: net.IPv4bcast, Port: 67}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	send()
+	conn.SetReadDeadline(time.Now().Add(250 * time.Millisecond))
+	response := make([]byte, 4096)
+	if _, _, _, err := conn.ReadFrom(response); err == nil {
+		t.Fatal("request beyond the hop limit reached the DHCP server")
+	} else if timeout, ok := err.(net.Error); !ok || !timeout.Timeout() {
+		t.Fatal(err)
+	}
+	request[3] = 0
+	send()
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	n, metadata, _, err := conn.ReadFrom(response)
+	if err != nil || n < 240 || metadata == nil || metadata.Dst.String() != leases[0] || response[0] != 2 || binary.BigEndian.Uint32(response[4:8]) != 0x71829304 || net.IP(response[16:20]).String() != "0.0.0.0" {
+		t.Fatal("DHCPINFORM requires an ACK to ciaddr with zero yiaddr", n, metadata, err)
+	}
+	module := func() supervisor.ModuleStatus {
+		var status supervisor.Status
+		if err := f.supervisor.Do(context.Background(), "GET", "/v1/status", nil, &status); err != nil {
+			t.Fatal(err)
+		}
+		for _, worker := range status.Modules {
+			if worker.Name == "service.relay" {
+				return worker
+			}
+		}
+		return supervisor.ModuleStatus{}
+	}
+	before := module()
+	if !before.Ready || before.PID <= 1 {
+		t.Fatal("relay worker is not running", before)
+	}
+	if err := syscall.Kill(before.PID, syscall.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	until(t, 8*time.Second, func() bool {
+		worker := module()
+		return worker.Ready && worker.Generation > before.Generation
+	})
+	acquire(0, leases[0])
+	until(t, time.Second, func() bool {
+		for i, iface := range relay.Interfaces {
+			if captures[0].count(iface.Address, "198.51.100.2", 17, 67) == 0 {
+				return false
+			}
+			captures[0].mu.Lock()
+			forwarded := false
+			for _, packet := range captures[0].packets {
+				b := packet.data
+				if len(b) < 278 || b[12] != 8 || b[13] != 0 || b[23] != 17 {
+					continue
+				}
+				h := 14 + int(b[14]&15)*4
+				if h+244 > len(b) || binary.BigEndian.Uint16(b[h+2:h+4]) != 67 || b[h+8] != 1 {
+					continue
+				}
+				if b[h+11] > 4 {
+					captures[0].mu.Unlock()
+					t.Fatal("packet capture shows a request beyond the hop limit")
+				}
+				forwarded = forwarded || net.IP(b[h+32:h+36]).String() == iface.Address && b[h+11] == 1
+			}
+			captures[0].mu.Unlock()
+			if !forwarded {
+				return false
+			}
+			captures[i+1].mu.Lock()
+			found := false
+			for _, packet := range captures[i+1].packets {
+				b := packet.data
+				if len(b) < 278 || b[12] != 8 || b[13] != 0 || b[23] != 17 {
+					continue
+				}
+				h := 14 + int(b[14]&15)*4
+				if h+244 > len(b) || binary.BigEndian.Uint16(b[h+2:h+4]) != 68 || b[h+8] != 2 {
+					continue
+				}
+				broadcast := b[30] == 255 && b[31] == 255 && b[32] == 255 && b[33] == 255
+				found = found || broadcast == (i == 1)
+			}
+			captures[i+1].mu.Unlock()
+			if !found {
+				return false
+			}
+		}
+		return true
+	})
+	t.Log("independent clients acquired both remote scopes; giaddr/hops, unicast/broadcast replies, DHCPINFORM ciaddr, hop-limit discard, TCP/UDP and worker restart passed")
+}

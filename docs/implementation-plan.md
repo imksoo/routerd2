@@ -659,6 +659,14 @@ BGPの再帰解決で共有し、VRF device自身とbridge配下のtableを正�
 - v4 scope/profile/reservation/options、旧global sticky、fingerprint、lease importをowned journalへ接続する。
 - DNS listener/zoneのdynamic addressFrom、VirtualAddress hostname、v4/v6 lease由来record、source優先順位、削除を既存resolverへ通知する。
 
+native DHCPv4 relayをservice・依存graph・supervisorへ接続した。routing domainごとに一つの
+UDP listenerを持ち、LAN別の上流一覧と宣言済みgiaddrを使う。lease表・再送queue・永続状態は持たない。
+旧DHCPv4Relayの静的interfaces/upstreamもこのworkerへ変換する。
+独立dnsmasqと二つのBusyBox clientでDORA、unicast/broadcast応答、DHCPINFORM、hop制限、
+worker再起動後の再取得、利用者TCP/UDPと3 interfaceのcaptureを確認した。
+`make check-dhcp-relay`で再実行できる。fragmentation・VRF/HAの受入と、
+DHCPv6 server・残るresource契約は未完了であり、NET-06全体の完了とはしない。
+
 **受入条件**
 
 - 独立client/relayでDORA/renew、v6、decline/release、renumbering、restart/INIT-REBOOTを確認する。
@@ -712,7 +720,7 @@ learned route先の利用者TCP/UDPも通信し、撤去中の接続拒否と復
 明示VRFではmultihop socketをVRF master、single-hopをmember interfaceへ束縛する。
 source domainとBGP FIB tableも検証する。同じendpointを持つ二つのVRFとdefault domainで
 実daemonを動かし、独立TCP/UDP・片側UDP障害・worker交替・main tableへの流出防止を確認した。
-single-hop VRFも実peerと障害・復旧を確認した。compiler contractはnative-11。
+single-hop VRFも実peerと障害・復旧を確認した。現在のcompiler contractはnative-12。
 IPv4/IPv6とも同じendpointを二つのVRFとdefault domainで同時使用し、BFD/BGPと三経路の
 TCP/UDPを確認した。defaultとVRFのUDP bind競合は受信socketだけの`SO_REUSEADDR`で修正した。
 domain/sourceの既存claimで二重ownerを拒否し、TX port専有と`SO_REUSEPORT`不使用を維持する。

@@ -428,7 +428,7 @@ ACTIVE成功には元boot IDと絶対期限を保持するVIP投影が必要で�
 旧世代・上書きされた通知や適用失敗を成功として返さない。
 
 このsource受入範囲の追加に伴い、署名されたconfiguration contractは
-`resource-program-native-11`とする。BFDの明示`multihop: true`はinterfaceを指定せず、
+`resource-program-native-12`とする。BFDの明示`multihop: true`はinterfaceを指定せず、
 宣言済みの送信元アドレスとUDP 4784のrouted endpoint pairを使う。single-hopは従来の
 interface・隣接route・TTL/Hop Limit 255の検証を維持する。BGPのmultihop参照も同じ
 endpoint pairへ束縛し、両transportはdevice bindingを指定しない。条件付きlink・address・routeと依存先の準備条件の

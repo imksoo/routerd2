@@ -72,76 +72,56 @@
 - Health監視と履歴配送は分離する。保存先障害・queue満杯でもprobeを止めず、欠落と保存エラーを表示する。
   全probeの無欠落保存は保証しない。
 
-現在のworker ABIは3、compiler contractは `resource-program-native-11`、network journalはformat 5。
+現在のworker ABIは3、compiler contractは `resource-program-native-12`、network journalはformat 5。
 `track.resource`は宣言IDであり、decisionはhealthy/unhealthy/neutral/unknownを明示する。
 破棄したservice-only形式のreader・混在運用・migrationは実装しない。
 
 ## 今回の実装と検証
 
-最新buildは `RELEASE_ID=projection-ownership`。CORE-03の通常投影で繰り返していたworker設定生成・
-JSON化・hashを除いた。受理したsourceごとに、条件除外中のworkerと生成予定のRAも含めて
-設定・canonicalな子process用bytes・digestを一度準備する。通常投影はその中から必要なworkerを
-選ぶ。新しいmanager、invalidation flag、旧形式adapterは作っていない。
+最新buildは `RELEASE_ID=dhcp-relay`。NET-06のDHCPv4 relayをnative serviceへ追加した。
+routing domainごとに一つのUDP 67 listenerを持ち、LAN別の上流一覧と宣言済みgiaddrで中継する。
+lease表、transaction map、再送queue、永続状態は持たない。client interfaceとgiaddrのaddress宣言を
+依存graphへ接続し、native DHCP serverとのlistener競合を設定とnamespace内のsocket claimで防ぐ。
+設定型はengineから分離し、boot/supervisorへrelay engineの依存を追加しない。
 
-BGP/VRRPの型付き設定とLAN RAの固定templateも同じ不変planに保持する。
-BGPのFIB投影とAFTRの入力digest確認でもworker設定を再構築しない。
-設定切替・停止待ちの前後は最新のmatching観測と選択したidentityを比較する。
-RAのprefix・期限・DNSはlive入力のままで、更新してもworker自身のidentityは変えない。
-childへ保存した実bytesのSHA-256とsupervisorへ渡すidentityの一致も確認した。
+旧DHCPv4Relayの静的interfaces/upstreamを同じnative workerへ変換する。
+要求はhopsと空のgiaddrだけを変更し、応答のpayloadはそのまま返す。
+Ethernet IPv4/UDP encoderは既存DHCP serverと共有する。worker設定のserializationから
+型なしの一時configを除き、各型を境界で直接JSON化する。
+詳しい設定と制限は [relay README](../internal/protocol/dhcprelay/README.md) を参照する。
 
-8つのBGP worker／各64 peerの静的投影＋worker選択を、このVMで3回測定した。
-中央値は2.531ms・540004B・1238 allocationsから、7.756µs・4021B・20 allocationsへ減った。
-準備は設定受理時へ移している。learned RIBの走査・kernel適用・packet性能の測定ではない。
-この比較は `protocol-plan` build時の測定である。
-残るprotocol snapshotのdecode、条件式の静的計算は未整理である。
-再測定は `go test ./internal/runtimeplan -run '^$' -bench BenchmarkProjectEightBGPRouters -benchmem`。
+PVE隔離amd64 VMで、実supervisor/control/network/relay worker、独立dnsmasq server、
+二つのBusyBox udhcpc clientを別々のnamespaceで動かした。
+DORAで二つのremote scopeから正しいaddress/server/routerを取得した。
+unicast/broadcastの応答、取得したaddressでの実TCP/UDP、worker強制終了後の再取得が成功した。
+独立wire要求のDHCPINFORMでは、yiaddrが空のACKがciaddrへ届いた。
+hops=5の要求は破棄され、同じclientの正しい要求は成功した。
+WAN/LAN2本のpcapで元のgiaddr・hopsと応答先を確認した。型付きaddress準備とUDP送信期限を含む最終buildで成功した。
 
-続いてprotocol投影のnetwork intentのJSON往復複製を削除した。interface・address・
-options・routeの変更する集合だけを複製し、追加だけを行うlink・tunnel・guardは
-元の配列へ書き込まない。残りの固定設定は読み取り専用で共有する。
-RA取得・学習情報撤去・address/route期限切れが、sourceや先に作った投影を変更しないことを
-ローカルで確認した。writer内部のsnapshot複製にはJSON往復が残る。
-
-PVE隔離amd64 VMで、CGO無効の実3 ELF、Race Detector付きharness、独立peerと実kernelを使用した。
-
-- 実2 WANのHealth→PBR、TCP/UDPとcapture、worker交替、古い通知、期限切れ、confirmed rollbackが成功した。
-- 直前の `61a2918` ではBFD/BGPの全6ケースが成功した。single-hop、routed IPv4/IPv6、
-  同一endpointを持つblue/red/default domain、片側UDP障害、source凍結、worker交替と復旧を含む。
-  最新buildではIPv6 VRFの独立domain・障害・撤去・復旧を再確認した。
-- KeepalivedとのHealth trackingでpriority 150/50、finite neutral、同じ選挙worker、VIP TCP/UDPを確認した。
-- AFTRの実DNS解決、source/instance identity、tunnelとrouteの期限処理が成功した。
-- 新しい独立DHCPv6 serverは製品のPD codec/state machineを使わずに応答を組み立てる。
-  実daemonのPD取得・renew・再番号付けで、同じRA workerから新旧LAN prefixの広告を確認した。
-  LAN clientの実TCP/UDPを転送し、PD期限切れでRA workerと管理addressが消えることを確認した。
-  再取得では新しいRA generationが、事前に準備した同じ設定digestとfreshな広告で動いた。
-  link-local addressは隔離された静的topologyで明示・協調している。host SLAACやIA_NAの受入ではない。
-
-Health/BFD/PD-RA/AFTRの実daemon起動は `scripts/daemon-tests.py` へ共通化し、旧scriptを削除した。
-`make check-health-pbr`、`make check-bfd`に加え、`make check-pd-ra`と`make check-aftr`で再実行できる。
-特定ケースは例として `python3 scripts/daemon-tests.py bfd --test TestDaemonBFDVRFIPv6Isolation`。
-製品とharnessはroot所有の一時0700へ配置し、成功／失敗双方のcaptureを回収する。
-rootまたはpasswordless sudoとLinux user/network namespaceが必要で、home権限は変えない。
-
-全体`make check`（Go/Python・Race Detector・vet）とamd64/arm64の6静的ELF buildが成功した。
-実daemon用amd64 ELFと、bundle検査用のELFは同一である。Health/PBR・PD/RA・AFTR・
-IPv6 VRF BFD・Keepalived Health trackingが最新buildで成功した。signed bundle/catalog/publisher検査も成功した。
-worker ABI 3、compiler contract native-11、network journal format 5は変更していない。
-arm64実行、物理NIC、性能、suspend、clock補正の受入は今回行っていない。
+peerはdnsmasq 2.90、BusyBox 1.36.1。dnsmasqはuser namespace内のsetgroupsを避ける
+`--no-daemon`で起動する。build/testは規定のumask=022を使う。
+最終の全体check・Race Detector・vet・6 ELF buildが成功した。
+同じamd64 ELFでrelay/既存DHCP→DNS/Health→PBR/PD→RAが成功した。
+6 ELFのsigned bundle/catalog/publisher検査も成功した。catalogの試験は、重複した手書きrole一覧を
+削除し、実際のfactory role catalogを使う。最終stagingのsecrets scanも成功した。
 
 現在の出力:
 
-- `dist/projection-ownership-{local,check-build,bundle}.log`: ローカル投影・全体check・6 ELF build・bundle。
-- `dist/projection-ownership-{health,pd-ra,aftr,bfd,vrrp}{.log,/}`: 実daemonのログとcapture。
-- `dist/protocol-plan-{before,after}.log`: 直前のworker準備変更の静的投影benchmark。
-- `dist/protocol-plan-final-bfd/`: `61a2918` の全6 BFDケース。
+- `dist/dhcp-relay-final-check-build.log`: 全体check・Race Detector・vet・6 ELF build。
+- `dist/dhcp-relay-final/`: 最終relayの独立client/serverログと3本のpcap。
+- `dist/dhcp-relay-{server,health,pd-ra}{.log,/}`: 既存DHCP→DNS、二WAN切替、PD/RA。
+- `dist/dhcp-relay-{bundle,tools,secrets}.log`: signed bundle、Python tools、secrets scan。
 
-過去の出力・checkpointは実装制約にしない。前buildで一度発生したdefault BFD凍結後の
-IPv4 client TCP 300ms timeoutは、原因未確定のままである。今回の高速化で解決したとは断定しない。
-自動IPv6 link-local DAD起動も未受入であり、明示NoDADのtopologyを一般化しない。
+`make check-dhcp-relay`、`make check-health-pbr`、`make check-pd-ra`で再実行できる。
+既存server経路は `python3 scripts/daemon-tests.py dhcp-server`。
+compiler contractは `resource-program-native-12` へ変更した。worker ABI 3とnetwork journal 5は同じ。
+prototype migration/readerは追加しない。fragmentation、HA/VRFの受入、
+arm64実行、物理NIC、性能、suspendは未完了である。
 
 ## 未完了と次の作業
 
 1. 全実装計画、全更新復旧経路、外部engine、配備先と対象実機の受入は未完了。
+   NET-06はrelayのfragmentation・HA/VRF受入、DHCPv6 server、dynamic pool/options・DNS・sticky/lease importが残る。
    今回の試験成功を製品全体・実機利用可能の判定には使わない。
 2. NET-07の旧resource/profile、動的source・VRF経路変更、大規模RIBを実装・受入する。
    IPv4/IPv6のmultihop BFD/BGPは実通信したが、自動link-local DAD起動、IPv6 single-hop VRF・link-local next-hop・ECMP等は未受入。

@@ -17,7 +17,7 @@ QEMU_SSH_KEY ?=
 LDFLAGS = -s -w -X github.com/imksoo/routerd2/internal/buildinfo.Identity=ROUTERD2-RELEASE-V1:$(RELEASE_ID):END
 BUILD_ARGS = --build-arg GO_VERSION=$(GO_VERSION) --build-arg ALPINE_VERSION=$(ALPINE_VERSION) --build-arg RELEASE_ID=$(RELEASE_ID)
 
-.PHONY: help fmt fmt-check test test-dependencies test-tools race vet check check-health-pbr check-vrrp-unicast check-bfd check-pd-ra check-aftr licenses build build-linux release-built-test container container-multi container-smoke apk image qemu-smoke qemu-network qemu-wireguard qemu-ra-dns qemu-daemon qemu-daemon-aftr qemu-dhcp4-clock qemu-vrrp-daemon qemu-vrrp-activation qemu-vrrp-conditional qemu-vrrp-clock qemu-eventrule qemu-derived qemu-protocols qemu-release-boot qemu-storage qemu-health-power clean
+.PHONY: help fmt fmt-check test test-dependencies test-tools race vet check check-health-pbr check-vrrp-unicast check-bfd check-pd-ra check-aftr check-dhcp-relay licenses build build-linux release-built-test container container-multi container-smoke apk image qemu-smoke qemu-network qemu-wireguard qemu-ra-dns qemu-daemon qemu-daemon-aftr qemu-dhcp4-clock qemu-vrrp-daemon qemu-vrrp-activation qemu-vrrp-conditional qemu-vrrp-clock qemu-eventrule qemu-derived qemu-protocols qemu-release-boot qemu-storage qemu-health-power clean
 
 help:
 	@printf '%s\n' \
@@ -27,6 +27,7 @@ help:
 	  'make check-bfd         Verify BFD/BGP routing domains with real workers' \
 	  'make check-pd-ra       Verify PD renewal, generated RA and client traffic' \
 	  'make check-aftr        Verify AFTR input identity, DNS and tunnel expiry' \
+	  'make check-dhcp-relay  Verify two LAN clients with an independent DHCP server' \
 	  'make licenses          Collect dependency licenses and their manifest' \
 	  'make build             Build the native commands for the current platform' \
 	  'make build-linux       Build static linux/amd64 and linux/arm64 binaries' \
@@ -96,6 +97,9 @@ check-pd-ra: build
 
 check-aftr: build
 	$(PYTHON) scripts/daemon-tests.py aftr --go '$(GO)'
+
+check-dhcp-relay: build
+	$(PYTHON) scripts/daemon-tests.py dhcp-relay --go '$(GO)'
 
 licenses:
 	$(PYTHON) scripts/licenses.py --go '$(GO)' --output dist/licenses

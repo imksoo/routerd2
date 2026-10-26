@@ -115,6 +115,11 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 		if s.Interface() != "" {
 			ensureInterface(&p.network, s.Interface())
 		}
+		if s.DHCPRelay != nil {
+			for _, iface := range s.DHCPRelay.Interfaces {
+				ensureInterface(&p.network, iface.Name)
+			}
+		}
 		record, has := records[s.ModuleName()]
 		switch s.Role() {
 		case "ra_client":

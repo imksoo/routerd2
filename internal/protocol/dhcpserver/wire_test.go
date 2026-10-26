@@ -2,6 +2,7 @@ package dhcpserver
 
 import (
 	"encoding/binary"
+	"github.com/imksoo/routerd2/internal/ethernet"
 	"net"
 	"net/netip"
 	"reflect"
@@ -135,7 +136,7 @@ func TestResponseDeliveryAndIndependentPacketChecksums(t *testing.T) {
 		t.Fatal("pre-address unicast must use client Ethernet MAC")
 	}
 	serverMAC := net.HardwareAddr{2, 0, 0, 0, 0, 2}
-	frame, err := udpFrame(serverMAC, r.MAC, source, yi, 67, 68, 5, payload)
+	frame, err := ethernet.UDP4(serverMAC, r.MAC, source, yi, 67, 68, 5, payload)
 	if err != nil {
 		t.Fatal(err)
 	}

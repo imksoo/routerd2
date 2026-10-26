@@ -143,7 +143,7 @@ func (c *compiler) dhcpServer(r resource, reservations []resource) (dhcpserverco
 	if !reflect.DeepEqual(s.DNS, api.DHCPv4ServerDNSSpec{}) {
 		c.reject(r, "dns", "unsupported_semantics", "embedded dnsmasq forwarding/cache settings require a separate explicitly compiled DNSResolver")
 	}
-	ifname := c.dhcpInterface(r, s.Interface)
+	ifname := c.dhcpInterface(r, "interface", s.Interface)
 	iface := c.ensureInterface(r, "interface", ifname)
 	if iface != nil && iface.Master != nil && *iface.Master != "" {
 		c.reject(r, "interface", "unsupported_semantics", "DHCP on a bridge port or VRF member requires explicit native binding intent; a master binding is not inferred from old dnsmasq")
@@ -299,22 +299,22 @@ func (c *compiler) dhcpStaticSource(r resource, path string, source api.StatusVa
 	return c.resolveStaticAddress(r, path, source, true)
 }
 
-func (c *compiler) dhcpInterface(r resource, ref string) string {
+func (c *compiler) dhcpInterface(r resource, field, ref string) string {
 	if ref == "" || strings.Contains(ref, "/") {
-		c.reject(r, "interface", "reference", "the active DHCP chain requires a bare Interface or Bridge resource name, not a qualified or literal kernel alias")
+		c.reject(r, field, "reference", "the active DHCP chain requires a bare Interface or Bridge resource name, not a qualified or literal kernel alias")
 		return ""
 	}
 	if c.byRef["Interface/"+ref] != nil {
-		return c.interfaceName(r, "interface", ref, false)
+		return c.interfaceName(r, field, ref, false)
 	}
 	if bridge := c.byRef["Bridge/"+ref]; bridge != nil {
 		spec := bridge.Spec.(api.BridgeSpec)
 		if spec.IfName != "" && spec.IfName != bridge.Metadata.Name {
-			c.reject(r, "interface", "unsupported_semantics", "the active DHCP chain uses a bridge's resource name as its kernel name; a different ifname is not an equivalent binding")
+			c.reject(r, field, "unsupported_semantics", "the active DHCP chain uses a bridge's resource name as its kernel name; a different ifname is not an equivalent binding")
 		}
-		return c.interfaceName(r, "interface", ref, false)
+		return c.interfaceName(r, field, ref, false)
 	}
-	c.reject(r, "interface", "unsupported_semantics", "the active DHCP chain does not resolve this alias as a static local Ethernet Interface or Bridge")
+	c.reject(r, field, "unsupported_semantics", "the active DHCP chain does not resolve this alias as a static local Ethernet Interface or Bridge")
 	return ""
 }
 

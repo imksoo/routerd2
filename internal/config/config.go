@@ -7,13 +7,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/imksoo/routerd2/internal/configref"
 	"io"
 	"net/netip"
 	"os"
 	"path/filepath"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/configref"
+	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
 )
 
@@ -113,6 +114,29 @@ func validateNative(d Native, source Document) error {
 	}
 	if err := validateBFDRouting(d); err != nil {
 		return err
+	}
+	domains := network.RoutingDomains(d.Network)
+	for _, service := range d.Services {
+		if relay := service.DHCPRelay; relay != nil {
+			if relay.VRF != "" && domains[relay.VRF].VRF != relay.VRF {
+				return fmt.Errorf("DHCP relay %s requires a declared VRF", service.Name)
+			}
+			for _, client := range relay.Interfaces {
+				owned := false
+				for _, iface := range d.Network.Interfaces {
+					if iface.Name != client.Name || domains[iface.Name].VRF != relay.VRF {
+						continue
+					}
+					for _, raw := range iface.Addresses {
+						prefix, err := netip.ParsePrefix(raw)
+						owned = owned || err == nil && prefix.Addr().String() == client.Address
+					}
+				}
+				if !owned {
+					return fmt.Errorf("DHCP relay %s requires giaddr committed on interface %s in its routing domain", service.Name, client.Name)
+				}
+			}
+		}
 	}
 	for _, service := range d.Services {
 		if service.RAClient == nil {

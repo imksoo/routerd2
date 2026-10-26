@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/imksoo/routerd2/internal/ethernet"
 	"net"
 	"net/http"
 	"net/netip"
@@ -377,7 +378,7 @@ func nativeClientWireLifecycle(t *testing.T) {
 	server := netip.MustParseAddr("192.0.2.1")
 	id := append([]byte{1}, iface.HardwareAddr...)
 	send := func(p packet) {
-		frame, err := udpFrame(iface.HardwareAddr, broadcastMAC, p.Source, p.Destination, 68, 67, 1, p.Data)
+		frame, err := ethernet.UDP4(iface.HardwareAddr, broadcastMAC, p.Source, p.Destination, 68, 67, 1, p.Data)
 		if err != nil {
 			t.Fatal(err)
 		}

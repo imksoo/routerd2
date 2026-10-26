@@ -15,6 +15,7 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/bgpconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp4"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6pd"
+	"github.com/imksoo/routerd2/internal/protocol/dhcprelayconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
 	"github.com/imksoo/routerd2/internal/protocol/health"
@@ -29,6 +30,7 @@ type Service struct {
 	DSLite     *DSLite                  `json:"ds_lite,omitempty"`
 	RAClient   *RAClient                `json:"ra_client,omitempty"`
 	DHCPServer *DHCPServer              `json:"dhcp_server,omitempty"`
+	DHCPRelay  *dhcprelayconfig.Config  `json:"dhcp_relay,omitempty"`
 	BGP        *BGP                     `json:"bgp,omitempty"`
 	Name       string                   `json:"name"`
 	DHCP4      *DHCP4                   `json:"dhcp4,omitempty"`
@@ -107,6 +109,9 @@ func (s Service) Role() string {
 	if s.DHCPServer != nil {
 		return "dhcp_server"
 	}
+	if s.DHCPRelay != nil {
+		return "dhcp_relay"
+	}
 	if s.BGP != nil {
 		return "bgp"
 	}
@@ -165,6 +170,7 @@ func Validate(services []Service) error {
 	}
 	names := map[string]bool{}
 	sockets := map[string]string{}
+	dhcpListeners := map[string]string{}
 	count := len(services)
 	generatedNames := map[string]string{}
 	for _, s := range services {
@@ -173,7 +179,7 @@ func Validate(services []Service) error {
 		}
 		names[s.Name] = true
 		n := 0
-		for _, set := range []bool{s.Health != nil, s.BFD != nil, s.DSLite != nil, s.RAClient != nil, s.DHCPServer != nil, s.DHCP4 != nil, s.DHCP6 != nil, s.RA != nil, s.DNS != nil, s.VRRP != nil, s.BGP != nil} {
+		for _, set := range []bool{s.Health != nil, s.BFD != nil, s.DSLite != nil, s.RAClient != nil, s.DHCPServer != nil, s.DHCPRelay != nil, s.DHCP4 != nil, s.DHCP6 != nil, s.RA != nil, s.DNS != nil, s.VRRP != nil, s.BGP != nil} {
 			if set {
 				n++
 			}
@@ -181,10 +187,26 @@ func Validate(services []Service) error {
 		if n != 1 {
 			return fmt.Errorf("service %s must select exactly one protocol", s.Name)
 		}
-		if s.DNS == nil && s.BGP == nil && !(s.BFD != nil && s.BFD.Multihop) && !interfaceName.MatchString(s.Interface()) {
+		if s.DNS == nil && s.BGP == nil && s.DHCPRelay == nil && !(s.BFD != nil && s.BFD.Multihop) && !interfaceName.MatchString(s.Interface()) {
 			return fmt.Errorf("service %s has an invalid interface", s.Name)
 		}
 		key := s.Role() + ":" + s.Interface()
+		var dhcpInterfaces []string
+		if s.DHCPServer != nil {
+			dhcpInterfaces = append(dhcpInterfaces, s.DHCPServer.Interface)
+		}
+		if s.DHCPRelay != nil {
+			key = "dhcp_relay:" + s.DHCPRelay.VRF
+			for _, iface := range s.DHCPRelay.Interfaces {
+				dhcpInterfaces = append(dhcpInterfaces, iface.Name)
+			}
+		}
+		for _, iface := range dhcpInterfaces {
+			if previous := dhcpListeners[iface]; previous != "" {
+				return fmt.Errorf("services %s and %s compete for DHCP on %s", previous, s.Name, iface)
+			}
+			dhcpListeners[iface] = s.Name
+		}
 		if s.DNS != nil || s.BGP != nil || s.DSLite != nil || s.Health != nil {
 			key = s.Role() + ":" + s.Name
 		}
@@ -234,6 +256,10 @@ func Validate(services []Service) error {
 			}
 		case "dhcp_server":
 			if err := dhcpserverconfig.Validate(s.DHCPServerConfig("/run/routerd", "/var/lib/routerd")); err != nil {
+				return err
+			}
+		case "dhcp_relay":
+			if err := dhcprelayconfig.Validate(*s.DHCPRelay); err != nil {
 				return err
 			}
 		case "bgp":
@@ -364,36 +390,38 @@ func (s Service) DNSConfig(runtimeDir, stateDir string) dnsconfig.Config {
 	return dnsconfig.Config{Runtime: c, SocketPath: filepath.Join(runtimeDir, "services", s.Name+".dns.sock"), StatePath: state, EventPath: filepath.Join(stateDir, "services", s.Name, "dns-events.jsonl")}
 }
 func (s Service) Instance(runtimeDir, stateDir string) (Instance, error) {
-	var c any
+	var b []byte
+	var err error
 	switch s.Role() {
 	case "health":
-		c = s.HealthConfig()
+		b, err = json.Marshal(s.HealthConfig())
 	case "bfd":
-		c = s.BFDConfig()
+		b, err = json.Marshal(s.BFDConfig())
 	case "aftr":
-		c = DSLiteInstance{Protocol: s.AFTRConfig(), Intent: *s.DSLite}
+		b, err = json.Marshal(DSLiteInstance{Protocol: s.AFTRConfig(), Intent: *s.DSLite})
 	case "ra_client":
-		c = s.RAClientConfig(stateDir)
+		b, err = json.Marshal(s.RAClientConfig(stateDir))
 	case "dhcp_server":
-		c = s.DHCPServerConfig(runtimeDir, stateDir)
+		b, err = json.Marshal(s.DHCPServerConfig(runtimeDir, stateDir))
+	case "dhcp_relay":
+		b, err = json.Marshal(*s.DHCPRelay)
 	case "bgp":
-		c = s.BGPConfig(runtimeDir, stateDir)
+		b, err = json.Marshal(s.BGPConfig(runtimeDir, stateDir))
 	case "dhcp4":
-		c = s.DHCP4Config(stateDir)
+		b, err = json.Marshal(s.DHCP4Config(stateDir))
 	case "dhcp6pd":
-		c = s.DHCP6Config(stateDir)
+		b, err = json.Marshal(s.DHCP6Config(stateDir))
 	case "ra":
 		v := *s.RA
 		v.Resource = s.Name
-		c = v
+		b, err = json.Marshal(v)
 	case "dns":
-		c = s.DNSConfig(runtimeDir, stateDir)
+		b, err = json.Marshal(s.DNSConfig(runtimeDir, stateDir))
 	case "vrrp":
-		c = s.VRRPConfig()
+		b, err = json.Marshal(s.VRRPConfig())
 	default:
 		return Instance{}, errors.New("unsupported service")
 	}
-	b, err := json.Marshal(c)
 	instance := Instance{Name: s.ModuleName(), Role: s.Role(), Config: b, DynamicDNS: s.HasDNSLeaseSources()}
 	if s.Health != nil {
 		instance.EventDirectory = HealthEventDirectory(stateDir, s.Name)
