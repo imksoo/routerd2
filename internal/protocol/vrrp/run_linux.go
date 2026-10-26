@@ -93,7 +93,6 @@ func applyActions(ctx context.Context, m *machine, a actions, device transport, 
 				return fmt.Errorf("VRRP neighbor announcement: %w", err)
 			}
 		}
-		m.deadline = time.Now().Add(m.config.interval())
 	}
 	return nil
 }

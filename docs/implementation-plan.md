@@ -740,6 +740,9 @@ IPv6の不安定動作を解決済みとは扱わない。Health serviceのtrack
 元の観測のmax ageを実装した。実probeで確認回数を進め、通知の再送・pollでは増やさない。
 監視喪失・期限切れ・世代交代は不明/penaltyとし、新しい正常観測で復旧する。既存の適用応答へ
 有限の判定を返し、設定変更やworker再起動を介さずwire priorityを変える。
+初回ACKが遅い場合も、neighbor通知後に既存timerを先延ばししない。実writerの550ms停止で
+変更前の期限切れを再現し、修正後の同じworkerとVIP TCP/UDP継続を確認した。
+初回適用自体のtimeoutも一度発生しており、負荷時・実機の余裕は未検証である。
 独立keepalivedとのHealth障害・元の観測期限切れ・Health worker交替と復旧、
 priority 150/50のcaptureと両所有者へのVIP TCP/UDPを実daemonで確認した。
 IPv4 VRRPv2の明示選択、秒単位広告、v2固有skew、任意PASSと認証不一致の拒否を実装した。

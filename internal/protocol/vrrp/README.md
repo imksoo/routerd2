@@ -106,6 +106,8 @@ necessary IPv6 ND; this package does not install that policy. Returning success
 without these effects violates the module contract.
 
 Every advertisement of published ownership follows an acknowledged renewal.
+Initial neighbor announcements retain the existing election timer: a slow but
+still-valid ownership ACK must not postpone renewal beyond original authority.
 A graceful election may advertise while withholding VIP publication.
 `BootID`, `ObservedNanos` and `ExpiresNanos` bind its original CLOCK_BOOTTIME
 observation and deadline. The bounded lifetime is three local advertisement

@@ -78,7 +78,7 @@
 
 ## 今回の検証
 
-製品buildは `RELEASE_ID=resource-track`。PVE隔離Linux VM、amd64で実行した。
+resource trackingの検証buildは `RELEASE_ID=resource-track`。PVE隔離Linux VM、amd64で実行した。
 独立したUDP BFD/TCP BGP peerと、別試験のKeepalivedを使用する。
 
 - BFD/BGPの実障害と復旧が二つのVRRPの広告priorityを150→50→150へ変える。
@@ -120,6 +120,30 @@ bridge診断は `dist/vrrp-multicast-bridge`。製品binaryは同じ `resource-t
 出力との一致を実装条件にしない。
 途中のcapture保存失敗は、namespaceからhomeへ書こうとしたfixture配置の問題だった。
 root所有の一時0700内へ保存し外側から取り出すことで解決し、homeの権限は変えていない。
+
+### 初回VRRP適用ACK後の更新
+
+最新buildは `RELEASE_ID=vrrp-renewal`。初回ownership ACKが遅い場合、neighbor通知の後に
+次回advert timerを再設定すると、まだ有効だった元のauthorityを次回更新前に使い切る。
+余分な再設定一行を削除し、既存の選挙timerで期限内に更新する。authorityもclient deadlineも延長しない。
+
+- ローカルでは約600msの元authority内の500ms ACKで変更前の停止を再現し、修正後は更新できる。
+- 実network workerをSIGSTOPし、初回Active観測から550ms待って再開した。同じharnessで
+  変更前の一行だけを含む製品（`vrrp-before-renewal`）が期限切れで停止する。
+  修正後は同じ選挙workerが元の期限を越えて更新し、Keepalivedへの引継ぎ・復旧、VIP TCP/UDPを完了する。
+  最終比較ではwriter再開時の元budget残りが変更前128ms・修正後105msだった。
+- 最初の修正後実行は適用ACK自体のtimeoutで失敗した。原因は未確定で、成功扱いにしない。
+  全体checkと分けた診断と最終比較は成功したが、負荷下の余裕・物理性能を保証する結果ではない。
+- 同じ修正後製品でIPv6 multicastとBFD/BGP→VRRPの実広告・停止・期限切れ・復旧も成功した
+  （`dist/vrrp-renewal-final-related.log`）。
+- 関連Race Detector、fmt・vet、amd64/arm64静的buildと全体`make check`が成功した。
+  worker ABI 3、compiler native-9、network journal 5は変更していない。
+  signed bundle/publisherの直近検査は上記resource-trackの6 ELFに対するものである。
+
+ログは `dist/vrrp-slow-ack-repro.log`、`dist/vrrp-renewal-{before,after}-final-native.log`、
+`dist/vrrp-renewal-{race,build,final-check}.log`。最初の修正後失敗は
+`dist/vrrp-renewal-after-native.log`。captureは `dist/vrrp-renewal-packets`。
+無注入の初回IPv6 unicast timeoutの原因を、このcontrolled ACK遅延だけで確定したとは扱わない。
 
 ## 未完了と次の作業
 

@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/health"
@@ -49,6 +50,12 @@ func TestDaemonVRRPUnicastIPv6(t *testing.T) {
 func TestDaemonVRRPMulticastIPv6(t *testing.T) {
 	if isolateFixture(t, "TestDaemonVRRPMulticastIPv6") {
 		runVRRPPeer(t, vrrpPeerTest{family: "ipv6", multicast: true})
+	}
+}
+
+func TestDaemonVRRPSlowInitialACK(t *testing.T) {
+	if isolateFixture(t, "TestDaemonVRRPSlowInitialACK") {
+		runVRRPPeer(t, vrrpPeerTest{family: "ipv6", slowACK: true})
 	}
 }
 
@@ -83,6 +90,7 @@ type vrrpPeerTest struct {
 	password  string
 	tracking  bool
 	multicast bool
+	slowACK   bool
 }
 
 func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
@@ -361,6 +369,40 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 		}
 		t.Cleanup(stop)
 		return stop
+	}
+	if spec.slowACK {
+		writer, election := module("network"), module("service.ha")
+		if snapshot().State != vrrp.StateBackup {
+			t.Fatal("fixture missed initial backup before writer pause")
+		}
+		if err := syscall.Kill(writer.PID, syscall.SIGSTOP); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = syscall.Kill(writer.PID, syscall.SIGCONT) })
+		var pending vrrp.Snapshot
+		until(t, 2*time.Second, func() bool {
+			pending = snapshot()
+			return pending.State == vrrp.StateActive
+		})
+		time.Sleep(550 * time.Millisecond)
+		clock, err := boottime.Read()
+		if err != nil || uint64(clock.BoottimeNanoseconds) >= pending.ExpiresNanos {
+			t.Fatal("fixture exhausted the original election before resuming writer", err)
+		}
+		t.Log("resuming writer", "pending election", pending, "age", time.Duration(uint64(clock.BoottimeNanoseconds)-pending.ObservedNanos), "remaining", time.Duration(pending.ExpiresNanos-uint64(clock.BoottimeNanoseconds)))
+		if err := syscall.Kill(writer.PID, syscall.SIGCONT); err != nil {
+			t.Fatal(err)
+		}
+		waitOwner(true)
+		until(t, 3*time.Second, func() bool {
+			current := module("service.ha")
+			if current.PID != election.PID || current.Generation != election.Generation {
+				t.Fatal("delayed initial ACK replaced election worker", election, current)
+			}
+			state := snapshot()
+			return state.Active && state.ObservedNanos > pending.ExpiresNanos && hasVIP()
+		})
+		t.Log("550 ms writer pause delayed the initial VIP ACK; same election renewed beyond its original deadline without extending authority")
 	}
 	waitOwner(true)
 	if wan != nil {

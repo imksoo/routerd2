@@ -212,6 +212,52 @@ func TestRuntimeWaitsForOwnershipAndWithdrawsGracefully(t *testing.T) {
 	}
 }
 
+func TestSlowInitialOwnershipACKDoesNotPostponeRenewalPastOriginalExpiry(t *testing.T) {
+	c := config4()
+	c.AddressOwner, c.Priority, c.AdvertIntervalCentiseconds = true, 255, 20
+	device := newFakeTransport()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	renewed := make(chan struct{})
+	active := 0
+	effects := EffectsFunc(func(call context.Context, s Snapshot) (Decision, error) {
+		if s.Active {
+			active++
+			if active == 1 {
+				// The ACK is still within the original 600 ms authority, but
+				// waiting another advert interval afterwards would exhaust it.
+				select {
+				case <-time.After(500 * time.Millisecond):
+				case <-call.Done():
+					return Decision{}, call.Err()
+				}
+			}
+			if active == 2 {
+				close(renewed)
+			}
+		}
+		device.mu.Lock()
+		device.active = s.Active
+		device.mu.Unlock()
+		return Decision{Active: s.Active, Track: s.Track}, nil
+	})
+	done := make(chan error, 1)
+	go func() {
+		done <- run(ctx, c, netip.MustParseAddr(c.SourceAddress), strings.Repeat("a", 32), device, effects, nil)
+	}()
+	select {
+	case <-renewed:
+	case err := <-done:
+		t.Fatal("valid but delayed ACK prevented election renewal", err)
+	case <-ctx.Done():
+		t.Fatal("ownership was not renewed", ctx.Err())
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestFailedOrExpiredActivationNeverAdvertises(t *testing.T) {
 	for _, mode := range []string{"apply", "verify", "expired acknowledgement"} {
 		t.Run(mode, func(t *testing.T) {
