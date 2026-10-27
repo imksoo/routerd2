@@ -70,8 +70,8 @@ func TestDaemonRAAFTRForwardingAndOriginalExpiry(t *testing.T) {
 	if err := h.LinkAdd(tunnel); err != nil {
 		t.Fatal(err)
 	}
-	inner, _ := netlink.ParseAddr("192.0.0.1/32")
-	inner.Peer = &net.IPNet{IP: net.ParseIP("192.0.0.2"), Mask: net.CIDRMask(32, 32)}
+	inner, _ := netlink.ParseAddr("169.254.42.1/32")
+	inner.Peer = &net.IPNet{IP: net.ParseIP("169.254.42.2"), Mask: net.CIDRMask(32, 32)}
 	if err := h.AddrAdd(tunnel, inner); err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +133,10 @@ func TestDaemonRAAFTRForwardingAndOriginalExpiry(t *testing.T) {
 		mu.Unlock()
 		answer := new(dns.Msg).SetReply(q)
 		answer.Authoritative = true
-		answer.Answer = []dns.RR{&dns.AAAA{Hdr: dns.RR_Header{Name: "aftr.test.", Rrtype: dns.TypeAAAA, Class: dns.ClassINET, Ttl: 60}, AAAA: net.ParseIP("2001:db8:42::2")}}
+		answer.Answer = []dns.RR{
+			&dns.AAAA{Hdr: dns.RR_Header{Name: "aftr.test.", Rrtype: dns.TypeAAAA, Class: dns.ClassINET, Ttl: 60}, AAAA: net.ParseIP("ff02::1")},
+			&dns.AAAA{Hdr: dns.RR_Header{Name: "aftr.test.", Rrtype: dns.TypeAAAA, Class: dns.ClassINET, Ttl: 60}, AAAA: net.ParseIP("2001:db8:42::2")},
+		}
 		_ = w.WriteMsg(answer)
 	})}
 	ready, done := make(chan struct{}), make(chan error, 1)
@@ -164,7 +167,7 @@ func TestDaemonRAAFTRForwardingAndOriginalExpiry(t *testing.T) {
 		Forwarding: network.Forwarding{IPv4: &yes}, Firewall: &network.Firewall{Forward: []network.Forward{{From: "lan0", To: "dslite0"}}, Masquerade: []network.Masquerade{{Source: "198.18.0.0/24", OutInterface: "dslite0"}}},
 	}, Services: []serviceconfig.Service{
 		{Name: "wan-ra", RAClient: &serviceconfig.RAClient{Interface: "wan0", SourceAddress: "fe80::1", InterfaceID: "::1234", AllowedRouters: []string{"fe80::2"}}},
-		{Name: "dslite", DSLite: &serviceconfig.DSLite{Interface: "wan0", Tunnel: "dslite0", SourceFrom: "wan-ra", DNSFrom: []string{"wan-ra"}, Candidates: []string{"aftr.test"}, TimeoutSeconds: 1, RetrySeconds: 1, MTU: 1460, B4Peer: "192.0.0.1/32", RouteGateway: "192.0.0.1", Metric: 200}},
+		{Name: "dslite", DSLite: &serviceconfig.DSLite{Interface: "wan0", Tunnel: "dslite0", SourceFrom: "wan-ra", DNSFrom: []string{"wan-ra"}, Candidates: []string{"aftr.test"}, TimeoutSeconds: 1, RetrySeconds: 1, MTU: 1460, B4Address: "169.254.42.2/32", B4Peer: "169.254.42.1/32", RouteGateway: "169.254.42.1", Metric: 200}},
 	}}
 	f := startFixtureDaemon(t, config.FromNative(doc))
 	module := func(name string) supervisor.ModuleStatus {
@@ -213,7 +216,7 @@ func TestDaemonRAAFTRForwardingAndOriginalExpiry(t *testing.T) {
 			return false
 		}
 		v, ok := l.(*netlink.Ip6tnl)
-		return ok && v.Local.String() == source && v.Remote.String() == "2001:db8:42::2" && v.Attrs().Flags&net.FlagUp != 0 && fixtureRoute(t, "0.0.0.0/0", "192.0.0.1", l.Attrs().Index)
+		return ok && v.Local.String() == source && v.Remote.String() == "2001:db8:42::2" && v.Attrs().Flags&net.FlagUp != 0 && fixtureRoute(t, "0.0.0.0/0", "169.254.42.1", l.Attrs().Index)
 	}
 	traffic := func() {
 		t.Helper()
@@ -339,7 +342,7 @@ func TestDaemonRAAFTRForwardingAndOriginalExpiry(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			return l.Attrs().Flags&net.FlagUp == 0 && len(addresses) == 0 && !fixtureRoute(t, "0.0.0.0/0", "192.0.0.1", 0)
+			return l.Attrs().Flags&net.FlagUp == 0 && len(addresses) == 0 && !fixtureRoute(t, "0.0.0.0/0", "169.254.42.1", 0)
 		})
 	}
 	original := status("service.wan-ra")
@@ -415,7 +418,7 @@ func TestDaemonRAAFTRForwardingAndOriginalExpiry(t *testing.T) {
 			if len(b) < 74 || binary.BigEndian.Uint16(b[12:14]) != unix.ETH_P_IPV6 || b[20] != unix.IPPROTO_IPIP || b[54]>>4 != 4 {
 				continue
 			}
-			if !net.IP(b[66:70]).Equal(net.ParseIP("192.0.0.2")) || !net.IP(b[70:74]).Equal(net.ParseIP("198.51.100.20")) {
+			if !net.IP(b[66:70]).Equal(net.ParseIP("169.254.42.2")) || !net.IP(b[70:74]).Equal(net.ParseIP("198.51.100.20")) {
 				continue
 			}
 			tcp = tcp || b[63] == unix.IPPROTO_TCP

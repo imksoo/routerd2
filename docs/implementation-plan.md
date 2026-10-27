@@ -7,6 +7,12 @@
 現在の変更・実行結果・残作業は [引き継ぎ](pve-codex-handoff.md) を参照する。
 機能範囲と作業単位は以下とJSONの台帳で管理し、既存試験の成功を全体完了に数えない。
 
+2026-10-27 `peer-receive` / native-30: 旧routerd/依存engineと比較し、IPv4リンクローカルの
+conntrack同期/B4対向、正当なIPv6表記、残存ciaddr、独立RA/IA/AAAA情報の受理を修正した。
+RAのDNS満杯処理は最短期限の除去へ閉じ、経路更新を維持する。既存の実worker・独立peer・
+実packetで切替/既存TCP/UDP、PD/RA、DNSとBFD→BGP→FIBを確認した。全経路の監査や
+HA-02/HA-03全体の完了ではなく、homertの残機能と相互接続を進めながら修正を継続する。
+
 ## 実行順序
 
 全34 work packageの範囲は維持し、次の順で実際の運用を完成させる。

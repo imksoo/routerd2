@@ -202,12 +202,60 @@ func runRAClientFixture(t *testing.T, clockClient *clocktest.Client) {
 	// Both options fit the packet; only their own contents are unusable.
 	packet = append(packet, 25, 1, 0, 0, 0, 0, 0, 5)
 	packet = append(packet, 31, 2, 0, 0, 0, 0, 0, 5, 0xc0, 0, 0, 0, 0, 0, 0, 0)
+	// Each option has valid framing, so its unusable contents do not invalidate
+	// the usable router, PIO or subsequent RIOs. Repeated RIOs update in order.
+	packet = append(packet, 3, 1, 0, 0, 0, 0, 0, 0)
+	packet = append(packet, 5, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+	packet = append(packet, 24, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+	packet = append(packet, 24, 1, 0, 8, 0, 0, 0, byte(valid))
+	packet = append(packet, 24, 1, 0, 0, 0, 0, 0, byte(valid))
+	initialSize := len(packet)
+	// Full DNS repositories must not discard this router's lifetime refresh.
+	extraDNS := make([]byte, 8+16*40)
+	extraDNS[0], extraDNS[1] = 25, byte(len(extraDNS)/8)
+	binary.BigEndian.PutUint32(extraDNS[4:8], valid-3)
+	for i := 0; i < 40; i++ {
+		a := netip.MustParseAddr(fmt.Sprintf("2001:db8:53::%x", i+256)).As16()
+		copy(extraDNS[8+16*i:], a[:])
+	}
+	packet = append(packet, extraDNS...)
+	search := make([]byte, 8)
+	search[0] = 31
+	binary.BigEndian.PutUint32(search[4:8], valid-3)
+	for i := 0; i < 40; i++ {
+		label := fmt.Sprintf("d%d", i)
+		search = append(search, byte(len(label)))
+		search = append(search, label...)
+		search = append(search, 4, 't', 'e', 's', 't', 0)
+	}
+	for len(search)%8 != 0 {
+		search = append(search, 0)
+	}
+	search[1] = byte(len(search) / 8)
+	packet = append(packet, search...)
 	send := func() {
 		t.Helper()
 		if err := unix.Sendto(fd, packet, 0, &unix.SockaddrInet6{Addr: netip.MustParseAddr("ff02::1").As16(), ZoneId: uint32(peer.Attrs().Index)}); err != nil {
 			t.Fatal(err)
 		}
 	}
+	refresh := packet
+	packet = append([]byte(nil), packet[:initialSize]...)
+	binary.BigEndian.PutUint16(packet[6:8], 1)
+	binary.BigEndian.PutUint32(packet[len(packet)-4:], 1)
+	send()
+	var first raclient.Snapshot
+	until(t, 3*time.Second, func() bool {
+		var initial runtimeplan.InstanceStatus
+		if err := f.control.Do(context.Background(), "GET", "/v1/services/service.wan-ra", nil, &initial); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(initial.Snapshot, &first); err != nil {
+			t.Fatal(err)
+		}
+		return first.Received == 1 && len(first.Routes) == 1
+	})
+	packet = refresh
 	send()
 	link, err := netlink.LinkByName("wan0")
 	if err != nil {
@@ -234,8 +282,18 @@ func runRAClientFixture(t *testing.T, clockClient *clocktest.Client) {
 		t.Fatal(err)
 	}
 	var snapshot raclient.Snapshot
-	if err := json.Unmarshal(state.Snapshot, &snapshot); err != nil || !snapshot.Active || snapshot.Received != 1 || len(snapshot.Addresses) != 1 || len(snapshot.DNSServers) != 1 {
+	if err := json.Unmarshal(state.Snapshot, &snapshot); err != nil || !snapshot.Active || snapshot.Received != 2 || len(snapshot.Addresses) != 1 || len(snapshot.DNSServers) != raclient.MaxDNSServers || len(snapshot.SearchDomains) != raclient.MaxSearchDomains {
 		t.Fatalf("wire RA did not reach the typed service state: %+v %v", snapshot, err)
+	}
+	if len(snapshot.Routes) != 1 || snapshot.Routes[0].ValidUntil.Nanos <= first.Routes[0].ValidUntil.Nanos {
+		t.Fatal("DNS capacity prevented default-route lifetime refresh", first.Routes, snapshot.Routes)
+	}
+	retainedResolver := false
+	for _, resolver := range snapshot.DNSServers {
+		retainedResolver = retainedResolver || resolver.Address == "2001:db8:53::53"
+	}
+	if !retainedResolver {
+		t.Fatal("full DNS repository evicted the later-expiring resolver", snapshot.DNSServers)
 	}
 	if clockClient != nil {
 		before := module("service.wan-ra")

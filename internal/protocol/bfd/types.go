@@ -117,10 +117,16 @@ func (f EffectsFunc) Update(ctx context.Context, snapshot Snapshot) error { retu
 
 func Normalize(c Config) Config {
 	c.Peers = append([]Peer(nil), c.Peers...)
+	if a, err := netip.ParseAddr(c.SourceAddress); err == nil {
+		c.SourceAddress = a.String()
+	}
 	if c.EffectTimeoutMilliseconds == 0 {
 		c.EffectTimeoutMilliseconds = 1000
 	}
 	for i := range c.Peers {
+		if a, err := netip.ParseAddr(c.Peers[i].Address); err == nil {
+			c.Peers[i].Address = a.String()
+		}
 		if c.Peers[i].MinTxMilliseconds == 0 {
 			c.Peers[i].MinTxMilliseconds = 300
 		}

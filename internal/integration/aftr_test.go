@@ -188,8 +188,8 @@ func TestDaemonAFTRResolutionAndExpiry(t *testing.T) {
 	doc := config.Native{
 		Network: network.Desired{Interfaces: []network.Interface{{Name: "wan0", Addresses: []string{"2001:db8:42::1/64"}, AddressOptions: map[string]network.AddressOptions{"2001:db8:42::1/64": {NoDAD: true}}}}},
 		Services: []serviceconfig.Service{{Name: "dslite", DSLite: &serviceconfig.DSLite{
-			Interface: "wan0", Tunnel: "dslite0", LocalAddress: "2001:db8:42::1", Candidates: []string{"aftr.test"},
-			Resolvers:      []serviceconfig.AFTRResolver{{Address: "2001:db8:42::53", Port: uint16(socket.LocalAddr().(*net.UDPAddr).Port)}},
+			Interface: "wan0", Tunnel: "dslite0", LocalAddress: "2001:0DB8:0042:0:0:0:0:1", Candidates: []string{"aftr.test"},
+			Resolvers:      []serviceconfig.AFTRResolver{{Address: "2001:0DB8:0042::53", Port: uint16(socket.LocalAddr().(*net.UDPAddr).Port)}},
 			TimeoutSeconds: 1, RetrySeconds: 1, MTU: 1460, Metric: 200,
 			B4Peer: "192.0.0.1/32", RouteGateway: "192.0.0.1",
 		}}},

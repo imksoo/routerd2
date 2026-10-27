@@ -218,6 +218,7 @@ func (s *state) handle(p packet, now boottime.Clock) error {
 					newServers = append(newServers, v.Address)
 				}
 				next.DNSServers = update(next.DNSServers, func(old DNSServer) bool { return old.Address == v.Address }, v, d.lifetime == 0)
+				next.DNSServers = limitDNS(next.DNSServers, MaxDNSServers, now, func(v DNSServer) lifetime.Deadline { return v.ValidUntil })
 			}
 			for _, domain := range d.domains {
 				v := SearchDomain{Domain: domain, Router: a.router.String(), ValidUntil: lifetime.After(now, d.lifetime)}
@@ -225,6 +226,7 @@ func (s *state) handle(p packet, now boottime.Clock) error {
 					newDomains = append(newDomains, v.Domain)
 				}
 				next.SearchDomains = update(next.SearchDomains, func(old SearchDomain) bool { return old.Domain == v.Domain }, v, d.lifetime == 0)
+				next.SearchDomains = limitDNS(next.SearchDomains, MaxSearchDomains, now, func(v SearchDomain) lifetime.Deadline { return v.ValidUntil })
 			}
 		}
 		// RFC 8106 section 6: refresh existing entries in place, and put new
@@ -232,7 +234,7 @@ func (s *state) handle(p packet, now boottime.Clock) error {
 		promoteDNS(next.DNSServers, newServers, func(v DNSServer) string { return v.Address })
 		promoteDNS(next.SearchDomains, newDomains, func(v SearchDomain) string { return v.Domain })
 	}
-	if len(next.Addresses) > MaxAddresses || len(next.Prefixes) > MaxPrefixes || len(next.Routes) > MaxRoutes || len(next.DNSServers) > MaxDNSServers || len(next.SearchDomains) > MaxSearchDomains {
+	if len(next.Addresses) > MaxAddresses || len(next.Prefixes) > MaxPrefixes || len(next.Routes) > MaxRoutes {
 		err := snapshotError("learned-state capacity exceeded; advertisement rejected atomically")
 		s.learned.Rejected++
 		s.learned.LastError = err.Error()
@@ -258,6 +260,21 @@ func (s *state) handle(p packet, now boottime.Clock) error {
 	}
 	s.learned = next
 	return nil
+}
+
+// RFC 8106 section 6: a full DNS repository evicts its earliest expiry, without
+// rejecting independent router, prefix or other DNS information in the RA.
+func limitDNS[T any](items []T, limit int, now boottime.Clock, until func(T) lifetime.Deadline) []T {
+	for len(items) > limit {
+		first := 0
+		for i := 1; i < len(items); i++ {
+			if until(items[i]).Remaining(now) <= until(items[first]).Remaining(now) {
+				first = i
+			}
+		}
+		items = append(items[:first], items[first+1:]...)
+	}
+	return items
 }
 
 func promoteDNS[T any](items []T, fresh []string, key func(T) string) {

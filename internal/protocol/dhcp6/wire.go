@@ -175,6 +175,7 @@ func decodeIA(kind uint16, b []byte) (association, error) {
 		return ia, err
 	}
 	seen := map[netip.Prefix]bool{}
+assignments:
 	for _, o := range opts {
 		if o.code == 13 {
 			if len(o.value) < 2 {
@@ -188,29 +189,30 @@ func decodeIA(kind uint16, b []byte) (association, error) {
 		switch {
 		case kind == 3 && o.code == 5:
 			if len(o.value) < 24 {
-				return ia, errors.New("short IA Address")
+				continue
 			}
 			a = assignment{netip.PrefixFrom(netip.AddrFrom16([16]byte(o.value[:16])), 128), binary.BigEndian.Uint32(o.value[16:]), binary.BigEndian.Uint32(o.value[20:])}
 			tail = o.value[24:]
 		case kind == 25 && o.code == 26:
 			if len(o.value) < 25 || o.value[8] > 128 {
-				return ia, errors.New("invalid IA Prefix")
+				continue
 			}
 			a = assignment{netip.PrefixFrom(netip.AddrFrom16([16]byte(o.value[9:25])), int(o.value[8])), binary.BigEndian.Uint32(o.value), binary.BigEndian.Uint32(o.value[4:])}
 			tail = o.value[25:]
 		default:
 			continue
 		}
-		if !usable(a.prefix.Addr()) || a.prefix != a.prefix.Masked() || a.preferred > a.valid || seen[a.prefix] || len(ia.leases) >= 64 {
-			return ia, errors.New("invalid/duplicate DHCPv6 assignment")
+		a.prefix = a.prefix.Masked()
+		if !usable(a.prefix.Addr()) || a.preferred > a.valid || seen[a.prefix] || len(ia.leases) >= 64 {
+			continue
 		}
 		sub, e := options(tail)
 		if e != nil {
-			return ia, e
+			continue
 		}
 		for _, s := range sub {
 			if s.code == 13 && (len(s.value) < 2 || binary.BigEndian.Uint16(s.value) != 0) {
-				return ia, errors.New("failed DHCPv6 assignment status")
+				continue assignments
 			}
 		}
 		seen[a.prefix] = true

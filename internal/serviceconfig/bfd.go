@@ -37,25 +37,28 @@ func validateBFDReferences(services []Service) error {
 				peer = address
 			}
 			found := false
+			bfdAddress, _ := netip.ParseAddr(peer)
 			for _, configured := range source.BFD.Peers {
-				found = found || configured.Address == peer
+				configuredAddress, _ := netip.ParseAddr(configured.Address)
+				found = found || configuredAddress == bfdAddress
 			}
 			if !found {
 				return fmt.Errorf("BGP %s peer %s has no matching BFD peer %s in service %s", service.Name, address, peer, ref.Service)
 			}
 			bgpAddress, _ := netip.ParseAddr(address)
-			bfdAddress, _ := netip.ParseAddr(peer)
 			if bgpAddress.Is4() != bfdAddress.Is4() {
 				return fmt.Errorf("BGP %s peer %s must use a BFD session of the same address family", service.Name, address)
 			}
 			// The explicit dependency protects this exact BGP endpoint pair.
 			// Monitoring an unrelated router requires a separate conditional
 			// policy contract and must not silently become BFD session binding.
-			if peer != address {
+			if bfdAddress != bgpAddress {
 				return fmt.Errorf("BGP %s BFD reference must monitor the BGP peer address", service.Name)
 			}
 			transport := service.BGP.PeerTransports[address]
-			if transport.LocalAddress != source.BFD.SourceAddress {
+			local, _ := netip.ParseAddr(transport.LocalAddress)
+			sourceAddress, _ := netip.ParseAddr(source.BFD.SourceAddress)
+			if local != sourceAddress {
 				return fmt.Errorf("BGP %s BFD-bound peer %s requires explicit local_address %s", service.Name, address, source.BFD.SourceAddress)
 			}
 			binding := transport.BindInterface

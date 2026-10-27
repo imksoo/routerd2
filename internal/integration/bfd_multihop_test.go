@@ -147,7 +147,7 @@ func TestDaemonMultihopBFDIPv6(t *testing.T) {
 	failures := make(chan error, 4)
 	path.peer.enabled.Store(true)
 	go path.peer.run(ctx, failures)
-	cfg := bfd.Config{Multihop: true, SourceAddress: path.source, Peers: []bfd.Peer{{Address: path.remote, MinTxMilliseconds: 200, MinRxMilliseconds: 200, DetectMultiplier: 5}}}
+	cfg := bfd.Config{Multihop: true, SourceAddress: "2001:0DB8:0100:0:0:0:0:1", Peers: []bfd.Peer{{Address: "2001:0DB8:0200::2", MinTxMilliseconds: 200, MinRxMilliseconds: 200, DetectMultiplier: 5}}}
 	f := startFixtureDaemon(t, config.FromNative(config.Native{Network: path.desired, Services: []serviceconfig.Service{{Name: "routed", BFD: &cfg}}}))
 	module := func() supervisor.ModuleStatus {
 		var status supervisor.Status

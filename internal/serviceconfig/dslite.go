@@ -57,6 +57,7 @@ func (s Service) AFTRConfig() aftr.Config {
 }
 
 func validateDSLite(s Service) error {
+	s = Normalize(s)
 	c := s.DSLite
 	if !interfaceName.MatchString(c.Tunnel) || c.Tunnel == c.Interface {
 		return errors.New("DS-Lite tunnel must be a distinct valid interface name")
@@ -79,7 +80,7 @@ func validateDSLite(s Service) error {
 	b4 := netip.MustParsePrefix("192.0.0.2/32")
 	if c.B4Address != "" {
 		p, err := netip.ParsePrefix(c.B4Address)
-		if err != nil || !p.Addr().Is4() || !p.Addr().IsGlobalUnicast() || p.String() != c.B4Address {
+		if err != nil || !p.Addr().Is4() || p.Addr().IsUnspecified() || p.Addr().IsMulticast() || p.Addr() == netip.AddrFrom4([4]byte{255, 255, 255, 255}) || p.String() != c.B4Address {
 			return errors.New("DS-Lite b4_address must be a canonical IPv4 host/prefix")
 		}
 		b4 = p
@@ -87,7 +88,7 @@ func validateDSLite(s Service) error {
 	var peer netip.Prefix
 	if c.B4Peer != "" {
 		p, err := netip.ParsePrefix(c.B4Peer)
-		if err != nil || !p.Addr().Is4() || !p.Addr().IsGlobalUnicast() || p.Bits() != 32 || p.String() != c.B4Peer || p.Addr() == b4.Addr() {
+		if err != nil || !p.Addr().Is4() || p.Addr().IsUnspecified() || p.Addr().IsMulticast() || p.Addr() == netip.AddrFrom4([4]byte{255, 255, 255, 255}) || p.Bits() != 32 || p.String() != c.B4Peer || p.Addr() == b4.Addr() {
 			return errors.New("DS-Lite b4_peer must be a canonical IPv4 unicast /32 distinct from b4_address")
 		}
 		if b4.Bits() != 32 {

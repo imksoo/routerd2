@@ -127,6 +127,12 @@ func (e *engine) handle(ctx context.Context, p packet) (*response, error) {
 		e.stats.Rejected++
 		return nil, nil
 	}
+	// Some clients retain an old ciaddr during discovery or an option-50
+	// request. Verify the actual sender first, then use the requested-address
+	// exchange, as dnsmasq does, without treating that old address as renewal.
+	if m.Type == msgDiscover || len(m.Options[50]) != 0 {
+		m.CIAddr = zero4
+	}
 	s, r, ok := e.scopeFor(m)
 	if !ok {
 		e.stats.Rejected++
@@ -138,7 +144,7 @@ func (e *engine) handle(ctx context.Context, p packet) (*response, error) {
 	selected := optionAddress(m, 54)
 	switch m.Type {
 	case msgDiscover:
-		if !m.CIAddr.IsUnspecified() || !selected.IsUnspecified() {
+		if !selected.IsUnspecified() {
 			e.stats.Rejected++
 			return nil, nil
 		}
@@ -179,7 +185,7 @@ func (e *engine) handle(ctx context.Context, p packet) (*response, error) {
 		var address netip.Addr
 		selecting := !selected.IsUnspecified()
 		if selecting {
-			if !m.CIAddr.IsUnspecified() || !hasRequested {
+			if !hasRequested {
 				e.stats.Rejected++
 				return nil, nil
 			}
@@ -217,10 +223,6 @@ func (e *engine) handle(ctx context.Context, p packet) (*response, error) {
 				return nil, nil
 			}
 		} else {
-			if hasRequested {
-				e.stats.Rejected++
-				return nil, nil
-			}
 			address = m.CIAddr
 			old, known := e.leases[key]
 			staticKnown := r != nil && r.IPAddress == address.String()

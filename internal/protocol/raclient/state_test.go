@@ -349,13 +349,13 @@ func TestDNSRepositoryPreservesWireOrderAndPromotesNewEntries(t *testing.T) {
 	}
 }
 
-func TestDuplicateRIOIsRejectedWithoutPartialWithdrawal(t *testing.T) {
+func TestRepeatedRIOUpdatesRouteInWireOrder(t *testing.T) {
 	s := testState(t, testConfig())
 	mustHandle(t, s, advert("fe80::2", 30, 0, rio("2001:db8:3::/48", 0, 50)), testClock(0))
-	before := learnedData(s.learned)
 	p := advert("fe80::2", 0, 0, rio("2001:db8:3::/48", 0, 0), rio("2001:db8:3::/48", 8, 100))
-	if err := s.handle(p, testClock(1)); err == nil || !reflect.DeepEqual(before, learnedData(s.learned)) {
-		t.Fatal("ambiguous duplicate RIO changed learned state")
+	snap := mustHandle(t, s, p, testClock(1))
+	if len(snap.Routes) != 1 || snap.Routes[0].Destination != "2001:db8:3::/48" || snap.Routes[0].Preference != 1 || snap.Routes[0].ValidUntil != lifetime.After(testClock(1), 100) {
+		t.Fatal("repeated RIO discarded the RA or did not update the route", snap.Routes)
 	}
 }
 

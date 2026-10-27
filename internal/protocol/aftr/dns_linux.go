@@ -262,7 +262,7 @@ func extractAnswers(response *dns.Msg, query string, chain *chainState, now boot
 		for _, record := range records {
 			a, ok := netip.AddrFromSlice(record.AAAA)
 			if !ok || !global(a.String()) {
-				return nil, "", errors.New("AFTR AAAA is not an eligible global IPv6 endpoint")
+				continue
 			}
 			value := Answer{Address: a.String(), TTL: rrsetTTL, ReceivedNanos: uint64(now.BoottimeNanoseconds), ValidUntil: lifetime.Minimum(now, chain.until, lifetime.After(now, rrsetTTL))}
 			if i, ok := positions[value.Address]; ok {
@@ -276,6 +276,9 @@ func extractAnswers(response *dns.Msg, query string, chain *chainState, now boot
 			if len(answers) > MaxAnswers {
 				return nil, "", errors.New("AFTR AAAA answer limit exceeded")
 			}
+		}
+		if len(answers) == 0 {
+			return nil, "", errors.New("AFTR DNS response has no eligible IPv6 endpoint")
 		}
 		return answers, "", nil
 	}

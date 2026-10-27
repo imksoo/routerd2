@@ -112,8 +112,12 @@ func testDaemonBFDVRFIsolation(t *testing.T, family string) {
 		path.desired.Routes[0].Table = domain.table
 		doc.Network.Interfaces = append(doc.Network.Interfaces, path.desired.Interfaces...)
 		doc.Network.Routes = append(doc.Network.Routes, path.desired.Routes...)
+		source, remote := path.source, path.remote
+		if family == "ipv6" {
+			source, remote = "2001:0DB8:0100:0:0:0:0:1", "2001:0DB8:0200::2"
+		}
 		doc.Services = append(doc.Services,
-			serviceconfig.Service{Name: domain.name + "-watch", BFD: &bfd.Config{VRF: domain.vrf, Multihop: true, SourceAddress: path.source, Peers: []bfd.Peer{{Address: path.remote, MinTxMilliseconds: 200, MinRxMilliseconds: 200, DetectMultiplier: 5}}}},
+			serviceconfig.Service{Name: domain.name + "-watch", BFD: &bfd.Config{VRF: domain.vrf, Multihop: true, SourceAddress: source, Peers: []bfd.Peer{{Address: remote, MinTxMilliseconds: 200, MinRxMilliseconds: 200, DetectMultiplier: 5}}}},
 			serviceconfig.Service{Name: domain.name + "-bgp", BGP: &serviceconfig.BGP{
 				Table: domain.table, RouteMetric: 200,
 				Runtime: bgpdaemon.AppliedConfig{
@@ -125,7 +129,7 @@ func testDaemonBFDVRFIsolation(t *testing.T, family string) {
 					}},
 				},
 				PeerTransports: map[string]bgpconfig.PeerTransport{path.remote: {LocalAddress: path.source, RemotePort: path.listener.Addr().(*net.TCPAddr).Port, BindInterface: domain.vrf}},
-				PeerBFD:        map[string]bgpconfig.BFDReference{path.remote: {Service: domain.name + "-watch"}},
+				PeerBFD:        map[string]bgpconfig.BFDReference{path.remote: {Service: domain.name + "-watch", Address: remote}},
 			}},
 		)
 		go path.peer.run(ctx, failures)

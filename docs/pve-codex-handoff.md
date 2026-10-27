@@ -5,7 +5,69 @@
 [機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を参照する。
 実行順序はhomert02/03、実態を確認したk8s-rt/pve-rt、その後既存文書に基づくCloud SAM。
 
-## 現在の変更: ha-conntrack / native-29
+## 現在の変更: peer-receive / native-30
+
+旧routerdの受理・利用経路と照合し、実通信を遮る追加制限を修正した。
+
+- `conntrackconfig.Validate`の`IsGlobalUnicast()`を外した。同期interfaceと異なる二つのIPv4
+  unicast addressを指定でき、IPv4リンクローカルも使える。未指定・multicast・limited broadcast
+  は対向unicast addressとして扱わない。旧`pkg/config/validate_firewall.go`と
+  `pkg/render/conntrackd.go`にはglobal-unicast制限がなかった。
+- DS-Liteの`b4_address`/`b4_peer`にも同じ追加制限があり、解除した。
+  旧`validateTunnelAddress`と`TunnelInterfaceController`はIPv4 prefix/addressを利用する。
+- RAのframingが成立する不正PIO/MTU/RIOだけを無視する。重複RIOはwire順で更新する。
+  以前はRA全体を拒否していた。旧`pkg/raobserver/raobserver.go`は観測専用であり、
+  旧Linux環境の実際のRA適用者はkernelである。観測器の受理だけを旧転送の実績には数えない。
+  checksum・hop limit・link-local送信元・packet境界の検査は保持する。
+- DHCPv6のIA_NA/IA_PDで、不正な一割当だけを無視し、同じIAの有効割当を保持する。
+  prefix外のhost bitsはmasked prefixへ正規化する。旧`pkg/pdclient/message.go`もmaskする。
+  [RFC 8415 §21.6/21.22](https://www.rfc-editor.org/rfc/rfc8415.html#section-21.22)の
+  不正preferred lifetimeの破棄対象は一つのaddress/prefixである。
+- AFTRのAAAA集合に使えないaddressがあっても、有効候補を利用する。旧
+  `cmd/routerd/runtime_network.go:resolveAAAA`と`chain/phase2.go:resolveAFTRIPv6`は
+  一つの不適格候補で集合全体を捨てる処理を持たない。DNS交換の識別・CNAMEとRRset寿命は保持する。
+- DHCPv4 serverは実送信元の確認後、DISCOVER/option50付き要求の残存`ciaddr`を0へ正規化する。
+  旧routerdのLAN配布はdnsmasqであり、公式dnsmasq2.90 `src/rfc2131.c:150–153`にも同じ処理がある。
+  これは特定端末での実観測や旧稼働dnsmasqの厳密な版を確認したという意味ではない。
+- RAのDNS server/search domainが満杯なら、[RFC 8106 §6](https://www.rfc-editor.org/rfc/rfc8106.html#section-6.2)
+  に従って最も早い期限を除く。32件ずつの上限を保ち、独立するdefault route更新を拒否しない。
+- 正当なIPv6の大文字・省略・先頭0表記をBFD/DS-Liteの入力で正規化する。
+  旧`pkg/controller/bfd/controller.go`と`phase2.go:localIPv6Address`も解析後に正規化する。
+  BGPのBFD参照/local addressも同じ値へ揃え、参照検査は文字列でなくaddressで比較する。
+  compilerはnative-30。新たな互換readerやadapterは持たない。
+
+PVE Linux6.8/amd64の`peer-receive`で、既存fixtureと実product processを使用した。
+二つの署名済みPID1 tree/実conntrackd、独立Linux client/server、専用`169.254.42.2/16`↔
+`169.254.42.3/16`同期linkで、同じTCP socket/UDP NAT対応のA→B→A、engine SIGKILL/復旧、
+設定削除時のsysctl復元が通った。captureは一つのTCP SYNとlink-local FTFWを確認し、UDP損失は0。
+修正前binaryでは同じlink-local設定がbootstrapで拒否された。
+不正独立RA option/重複RIOと不正IA siblingを含む実socket受信も、修正前では経路/PD取得に失敗し、
+修正後はRA経路、PD再番号付け/expiry/再取得、LAN RAと実TCP/UDPが通った。
+内側IPv4 link-localのDS-Liteでも、独立Linux AFTRへ実TCP/UDPを転送した。
+DNS AAAAにmulticastと有効AFTRを同梱しても同じ通信が通った。
+実supervisor配下のDHCP workerでは、既存IPv4を送信元と`ciaddr`に残したDISCOVER/REQUESTで
+同じ貸出へのOFFER/ACKが通り、DNS反映・元期限失効・journal復旧も確認した。
+RAの40 DNS server/40 search domainは32件ずつに収まり、既存default routeの1秒期限を
+更新して実TCP/UDPが通った。長い期限のresolverも保持した。新DNSを先頭へ置く順序と
+起動直後の空module一覧を試験観測側で誤認した先行runは失敗し、観測処理を直して再実行した。
+大文字/先頭0のIPv6設定では、独立Linux転送peerを越えるBFDの障害/復旧/worker交換と、
+同じendpointの二VRF/default domainでBFD→BGP→学習経路→TCP/UDPが通った。
+DS-Liteの大文字/先頭0 local/resolver設定も、独立DNS/Linux AFTRと転送・期限失効が通った。
+
+`make check`（Go/Python・Race Detector・vet）成功。`make build build-publisher`と
+`make build-linux RELEASE_ID=peer-receive`でamd64/arm64の6静的Go ELFを生成した。
+最後の参照正規化変更は関連packageのRace DetectorとIPv6 BFD/BGP実通信でも再確認した。
+`gitleaks protect --staged --redact --no-banner`成功。ARM64の実行・物理機の受入は未実施。
+
+これは全受信経路の監査完了ではない。DHCPv4 clientのsocket/BPF/decoderと旧実装の送信元port条件、
+DHCPv6の高位送信元port受理、RAのRS/RA送信元規則、HealthとVRRPの設定/受信経路も読み比べたが、
+残るDHCP server/relay、DNS、PPP、BGP/BFD、WireGuard等の全option・件数・寿命・失敗範囲は未監査。
+大容量時の拒否範囲も残る。AGENTS.mdには出力/保存表記を入力拒否へ転用せず、入力と参照を
+一緒に正規化する原則を一文だけ補足した。
+HA-02のDHCP/PD同期、HA-03の残受入、Tailscaleと全34 packageの残作業は継続する。
+raw診断・capture・一時署名catalogは試験終了後に削除する。物理NIC/ONU/負荷/電源断の資格確認ではない。
+
+## 直前の変更: ha-conntrack / native-29
 
 homertで使われるconntrackd FTFWを、IPv4 VRRP workerが所有するengineとして接続した。
 独立した新しいcoordinator・registry・shell hookは追加していない。

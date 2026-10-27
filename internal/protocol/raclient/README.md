@@ -88,9 +88,10 @@ repository is written by this package. Consumers of link-local RDNSS must use
 the snapshot's receiving interface as their scope.
 
 Learning is bounded to 128 addresses, 128 on-link prefixes, 256 route
-candidates, 32 DNS servers and 32 search domains. An advertisement exceeding a
-limit is rejected atomically and increments the rejection counter. The
-implementation does not silently truncate the learned set. Snapshots also
+candidates, 32 DNS servers and 32 search domains. A full DNS repository evicts
+its earliest-expiring entry as required by RFC 8106; independent route/prefix
+updates remain usable. Address/prefix/route capacity exhaustion still rejects
+the advertisement and increments the rejection counter. Snapshots also
 validate canonical identities, exact address derivation, uniqueness, feature
 scope and bounded metadata at the IPC boundary.
 

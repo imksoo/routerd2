@@ -22,6 +22,8 @@ with their existing owners; conntrackd is delegated the replicated conntrack
 and expectation entries. Local/peer control addresses and explicit management
 addresses are excluded from replication. The FTFW transport itself has no
 cryptographic authentication; use a trusted link or an authenticated tunnel.
+The sync interface can use IPv4 link-local addresses. There is no global-unicast
+requirement; local and peer must be distinct IPv4 unicast endpoints.
 
 The VRRP worker holds the engine through its final ownership withdrawal:
 
@@ -70,7 +72,9 @@ server namespaces. It checks continuous traffic over one TCP socket and one
 UDP socket through NAT, both takeover directions, worker/engine replacement,
 an actual engine SIGKILL, and configuration removal restoring the original
 sysctl. `tcp_loose=0` prevents reconstruction of an unreplicated midstream TCP
-flow. Packet capture checks the single client SYN and actual FTFW traffic.
+flow. A dedicated IPv4 link-local sync link exercises both the configuration
+path and actual engine replication. Packet capture checks the single client
+SYN and link-local FTFW traffic.
 UDP loss is reported separately from mapping preservation and recovery.
 Diagnostics, captures, catalogs and private namespaces are deleted afterward.
 

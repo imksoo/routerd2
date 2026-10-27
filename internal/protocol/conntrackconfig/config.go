@@ -23,8 +23,13 @@ func Validate(c Config) error {
 	if c.Interface == "" || len(c.Interface) > 15 || strings.ContainsAny(c.Interface, "/\x00 \t\r\n:") {
 		return errors.New("conntrack sync requires an interface")
 	}
-	if !c.LocalAddress.Is4() || !c.LocalAddress.IsGlobalUnicast() || !c.PeerAddress.Is4() || !c.PeerAddress.IsGlobalUnicast() || c.LocalAddress == c.PeerAddress {
+	if c.LocalAddress == c.PeerAddress {
 		return errors.New("conntrack sync requires distinct IPv4 local and peer addresses")
+	}
+	for _, addr := range []netip.Addr{c.LocalAddress, c.PeerAddress} {
+		if !addr.Is4() || addr.IsUnspecified() || addr.IsMulticast() || addr == netip.AddrFrom4([4]byte{255, 255, 255, 255}) {
+			return errors.New("conntrack sync requires IPv4 unicast local and peer addresses")
+		}
 	}
 	for _, addr := range c.IgnoreIPv4 {
 		if !addr.Is4() {

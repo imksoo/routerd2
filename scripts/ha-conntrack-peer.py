@@ -57,7 +57,7 @@ def peer(stage):
         return json.loads(output) if output.strip() else None
 
     def modules(node):
-        return {module["name"]: module for module in api(node, "supervisor.sock", "/v1/status")["modules"]}
+        return {module["name"]: module for module in (api(node, "supervisor.sock", "/v1/status")["modules"] or [])}
 
     def active(node):
         output = run(inside("ha-" + node, ["ip", "-j", "address", "show"])) if (stage / node / "run" / "supervisor.sock").exists() else "[]"
@@ -67,11 +67,11 @@ def peer(stage):
         for ns in namespaces:
             run(["ip", "netns", "add", ns])
             run(inside(ns, ["ip", "link", "set", "lo", "up"]))
-        for bridge in ("lan", "wan"):
+        for bridge in ("lan", "wan", "sync"):
             run(["ip", "link", "add", bridge, "type", "bridge"])
             run(["ip", "link", "set", bridge, "up"])
         for index, ns in enumerate(namespaces):
-            segments = ("lan", "wan") if index < 2 else (("lan",) if index == 2 else ("wan",))
+            segments = ("lan", "wan", "sync") if index < 2 else (("lan",) if index == 2 else ("wan",))
             for segment in segments:
                 port = segment + str(index)
                 run(["ip", "link", "add", port, "type", "veth", "peer", "name", "wire"])
@@ -104,14 +104,16 @@ def peer(stage):
             resources = [
                 {"id": "lan", "interface": {"name": "lan0"}},
                 {"id": "wan", "interface": {"name": "wan0"}},
+                {"id": "sync", "interface": {"name": "sync0"}},
                 {"id": "lan-base", "address": {"interface": "lan0", "cidr": "198.18.0." + str(index + 2) + "/24"}},
                 {"id": "wan-base", "address": {"interface": "wan0", "cidr": "203.0.113." + str(index + 2) + "/24"}},
+                {"id": "sync-base", "address": {"interface": "sync0", "cidr": "169.254.42." + str(index + 2) + "/16"}},
                 {"id": "forward", "forwarding": {"ipv4": True, "ipv4_rp_filter": 0, "conntrack_tcp_liberal": True}},
                 {"id": "ha", "service": {"name": "ha", "vrrp": {
                     "interface": "lan0", "family": "ipv4", "source_address": "198.18.0." + str(index + 2), "unicast_peers": ["198.18.0." + str(3 - index)],
                     "vip_interface": "lan-ha", "virtual_router_id": 42, "priority": 150 - index * 50, "preempt": False, "advert_interval_centiseconds": 20,
                     "addresses": ["198.18.0.1/24"], "accept_mode": True,
-                    "conntrack_sync": {"interface": "lan0", "local_address": "198.18.0." + str(index + 2), "peer_address": "198.18.0." + str(3 - index)}
+                    "conntrack_sync": {"interface": "sync0", "local_address": "169.254.42." + str(index + 2), "peer_address": "169.254.42." + str(3 - index)}
                 }}},
                 {"id": "wan-identity", "when": {"fact": "service.ha.elected"}, "link": {"name": "wan-ha", "kind": "macvlan", "parent": "wan0", "hardware_addr": "02:00:5e:00:01:43", "ipv6_addr_gen_mode": "none"}},
                 {"id": "wan-interface", "interface": {"name": "wan-ha"}},
@@ -147,7 +149,7 @@ while True:
  for line in f: f.write(line.rstrip()+b' '+str(peer).encode()+b'\n')
 '''
         start("ha-server", ["python3", "-u", "-c", server], "server")
-        for segment in ("lan", "wan"):
+        for segment in ("lan", "wan", "sync"):
             log = (stage / (segment + "-capture.log")).open("w")
             process = subprocess.Popen(["tcpdump", "--immediate-mode", "-U", "-n", "-i", segment, "-w", str(stage / (segment + ".pcap"))], stdout=log, stderr=log)
             children.append(process)
@@ -239,10 +241,10 @@ while True:
             process.wait(timeout=3)
         syn = run(["tcpdump", "-nn", "-r", str(stage / "wan.pcap"), "src host 203.0.113.1 and dst port 18080 and tcp[tcpflags] & tcp-syn != 0"])
         assert len(syn.splitlines()) == 1, "TCP connection was restarted or never established: " + syn
-        sync = run(["tcpdump", "-nn", "-r", str(stage / "lan.pcap"), "udp port 3780"])
+        sync = run(["tcpdump", "-nn", "-r", str(stage / "sync.pcap"), "src net 169.254.0.0/16 and dst net 169.254.0.0/16 and udp port 3780"])
         assert len(sync.splitlines()) > 0, "No actual conntrackd replication packets"
         assert (stage / "server.log").read_text().count("accepted") == 1, "server accepted a replacement TCP socket"
-        print("PASS captures: one TCP SYN, actual FTFW replication, unchanged UDP NAT tuple", flush=True)
+        print("PASS captures: one TCP SYN, IPv4 link-local FTFW replication, unchanged UDP NAT tuple", flush=True)
         print("PASS two-way state handoff without TCP reconnect", flush=True)
     finally:
         for process in reversed(children):

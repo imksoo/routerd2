@@ -49,7 +49,8 @@ func Compile(source Program) (Plan, error) {
 		return Plan{}, fmt.Errorf("unsupported config schema %d (expected %d)", source.SchemaVersion, SchemaVersion)
 	}
 	byID := make(map[string]Resource, len(source.Resources))
-	for _, r := range source.Resources {
+	source.Resources = slices.Clone(source.Resources)
+	for i, r := range source.Resources {
 		if !resourceID.MatchString(r.ID) {
 			return Plan{}, fmt.Errorf("invalid resource id %q (1..128 ASCII letters, digits, . _ : / -)", r.ID)
 		}
@@ -77,6 +78,11 @@ func Compile(source Program) (Plan, error) {
 					return Plan{}, fmt.Errorf("resource %s: provenance values must be UTF-8, at most 4096 bytes and contain no NUL or newline", r.ID)
 				}
 			}
+		}
+		if r.Service != nil {
+			s := serviceconfig.Normalize(*r.Service)
+			r.Service = &s
+			source.Resources[i] = r
 		}
 		byID[r.ID] = r
 	}

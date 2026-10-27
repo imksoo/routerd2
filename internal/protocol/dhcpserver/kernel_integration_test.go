@@ -448,6 +448,14 @@ func nativeClientWireLifecycle(t *testing.T) {
 	}
 	send(requestPacket(msgRequest, 100, iface.HardwareAddr, map[byte][]byte{61: id, 50: {192, 0, 2, 254}, 54: server.AsSlice()}, ""))
 	receive(100, msgNAK, false)
+	// Match dnsmasq's treatment of clients retaining their old ciaddr. These
+	// are real UDP68->67 frames with matching source IP and client identity.
+	send(requestPacket(msgDiscover, 104, iface.HardwareAddr, map[byte][]byte{61: id}, prior.CurrentAddress))
+	retained := receive(104, msgOffer, false)
+	send(requestPacket(msgRequest, 104, iface.HardwareAddr, map[byte][]byte{61: id, 50: retained.YIAddr.AsSlice(), 54: server.AsSlice()}, prior.CurrentAddress))
+	if ack := receive(104, msgACK, false); ack.YIAddr != netip.MustParseAddr(prior.CurrentAddress) {
+		t.Fatal("stale ciaddr selecting request lost the current binding", ack)
+	}
 	send(requestPacket(msgRelease, 101, iface.HardwareAddr, map[byte][]byte{61: id, 54: server.AsSlice()}, prior.CurrentAddress))
 	waitStatus(func(s Snapshot) bool { return s.Stats.Released == 1 && len(s.Leases) == 0 })
 	p := requestPacket(msgDiscover, 102, iface.HardwareAddr, map[byte][]byte{61: id, 50: netip.MustParseAddr(prior.CurrentAddress).AsSlice()}, "")

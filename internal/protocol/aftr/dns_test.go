@@ -110,7 +110,7 @@ func TestDNSIdentityAndAnswerLimit(t *testing.T) {
 }
 
 func TestDuplicateAAAAUsesShortestLifetime(t *testing.T) {
-	m := dnsReply(t, "aftr.example. 60 IN AAAA 2001:db8::1", "aftr.example. 10 IN AAAA 2001:db8::1")
+	m := dnsReply(t, "aftr.example. 60 IN AAAA ff02::1", "aftr.example. 60 IN AAAA 2001:db8::1", "aftr.example. 10 IN AAAA 2001:db8::1")
 	answers, _, err := extractAnswers(m, "aftr.example.", chainForTest(), clockForTest(0))
 	if err != nil || len(answers) != 1 || answers[0].TTL != 10 || answers[0].ValidUntil != lifetime.After(clockForTest(0), 10) {
 		t.Fatal("duplicate answer lifetime was extended")

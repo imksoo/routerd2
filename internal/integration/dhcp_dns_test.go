@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/imksoo/routerd/pkg/api"
+	wire "github.com/imksoo/routerd/pkg/dhcpv4client"
 	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/legacyconfig"
@@ -144,6 +145,7 @@ func testDaemonDHCPDNSOwnership(t *testing.T, migrated bool) {
 	if (lease.CurrentAddress != "192.0.2.100" && lease.CurrentAddress != "192.0.2.101" && lease.CurrentAddress != "192.0.2.102") || lease.ServerID != "192.0.2.1" || lease.LeaseTimeSeconds != 60 {
 		t.Fatalf("unexpected DHCP lease: %+v", lease)
 	}
+	retainedDHCPAddress(t, clientNS, lease)
 	conn, err := net.DialTimeout("tcp4", fmt.Sprintf("127.0.0.1:%d", dnsPort), time.Second)
 	if err != nil {
 		t.Fatal(err)
@@ -423,5 +425,60 @@ func TestDaemonDHCPClientChild(t *testing.T) {
 	}
 	if err := config.AtomicJSON(filepath.Join(os.Getenv("ROUTERD2_DAEMON_DHCP_WORK"), "report.json"), lease); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Exercise dnsmasq's retained-ciaddr behavior against the actual supervised
+// DHCP worker. The legacy wire codec supplies an independent packet builder.
+func retainedDHCPAddress(t *testing.T, namespace netns.NsHandle, lease dhcp4.Snapshot) {
+	t.Helper()
+	h, err := netlink.NewHandleAt(namespace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	link, err := h.LinkByName("client0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale, _ := netlink.ParseAddr("192.0.2.200/24")
+	if err := h.AddrAdd(link, stale); err != nil {
+		t.Fatal(err)
+	}
+	defer h.AddrDel(link, stale)
+	var conn *net.UDPConn
+	if err := fixtureInsideNamespace(namespace, func() error {
+		var err error
+		conn, err = net.ListenUDP("udp4", &net.UDPAddr{Port: 68})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if err := conn.SetDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	options := map[byte][]byte{wire.OptionClientID: append([]byte{1}, link.Attrs().HardwareAddr...), wire.OptionHostname: []byte("workstation")}
+	for i, typ := range []byte{wire.MessageDiscover, wire.MessageRequest} {
+		packet := wire.EncodeRequest(typ, 0x12345678, link.Attrs().HardwareAddr, options)
+		copy(packet[12:16], net.ParseIP("192.0.2.200").To4())
+		if _, err := conn.WriteToUDP(packet, &net.UDPAddr{IP: net.ParseIP(lease.ServerID), Port: 67}); err != nil {
+			t.Fatal(err)
+		}
+		buf := make([]byte, 4096)
+		n, _, err := conn.ReadFromUDP(buf)
+		if err != nil {
+			t.Fatal("retained ciaddr wire exchange", typ, err)
+		}
+		reply, err := wire.Decode(buf[:n])
+		want := byte(wire.MessageOffer)
+		if i == 1 {
+			want = wire.MessageACK
+		}
+		if err != nil || reply.XID != 0x12345678 || reply.MessageType() != want || reply.YIAddr.String() != lease.CurrentAddress {
+			t.Fatal("retained ciaddr changed the lease or did not receive OFFER/ACK", reply, err)
+		}
+		options[wire.OptionRequestedIP] = reply.YIAddr.AsSlice()
+		options[wire.OptionServerID] = net.ParseIP(lease.ServerID).To4()
 	}
 }

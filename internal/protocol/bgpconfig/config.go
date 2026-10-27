@@ -73,6 +73,12 @@ func Normalize(c Config) Config {
 		}
 	}
 	out.PeerTransports = maps.Clone(c.PeerTransports)
+	for peer, transport := range out.PeerTransports {
+		if a, err := netip.ParseAddr(transport.LocalAddress); err == nil {
+			transport.LocalAddress = a.String()
+			out.PeerTransports[peer] = transport
+		}
+	}
 	out.PeerBFD = maps.Clone(c.PeerBFD)
 	if out.Runtime.Global.ListenPort == 0 {
 		out.Runtime.Global.ListenPort = 179
@@ -95,8 +101,11 @@ func Normalize(c Config) Config {
 	for peer, ref := range out.PeerBFD {
 		if ref.Address == "" {
 			ref.Address = peer
-			out.PeerBFD[peer] = ref
 		}
+		if a, err := netip.ParseAddr(ref.Address); err == nil {
+			ref.Address = a.String()
+		}
+		out.PeerBFD[peer] = ref
 	}
 	return out
 }

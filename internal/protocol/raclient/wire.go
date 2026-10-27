@@ -53,10 +53,8 @@ func preference(flags byte) (int, bool) {
 	}
 }
 
-// parse validates the whole RA before returning any mutation. Unknown options
-// are ignored as RFC 4861 requires; malformed framing, checksums or known option
-// lengths reject the whole datagram. Unusable DNS options are discarded on
-// their own (RFC 8106 section 5.3.1), as are semantic-invalid PIO/RIO options.
+// Invalid framing or header checks reject the datagram. A framed but unusable
+// option is ignored without losing the router or independent usable options.
 func parse(p packet, index, linkMTU int) (advertisement, error) {
 	b := p.payload
 	if len(b) < 16 || len(b) > 65535 || b[0] != 134 || b[1] != 0 || p.hopLimit != 255 || p.ifindex != index || !p.source.Is6() || !p.source.IsLinkLocalUnicast() || p.source.Zone() != "" || !p.destination.Is6() || p.destination.Is4In6() || p.destination.IsUnspecified() || p.destination.Zone() != "" {
@@ -67,7 +65,6 @@ func parse(p packet, index, linkMTU int) (advertisement, error) {
 	}
 	pref, _ := preference(b[5]) // Reserved header preference is medium, RFC 4191.
 	a := advertisement{router: p.source, managed: b[5]&0x80 != 0, other: b[5]&0x40 != 0, preference: pref, lifetime: uint32(binary.BigEndian.Uint16(b[6:])), hopLimit: int(b[4]), reachable: binary.BigEndian.Uint32(b[8:]), retransmit: binary.BigEndian.Uint32(b[12:])}
-	routePrefixes := map[netip.Prefix]bool{}
 optionLoop:
 	for at := 16; at < len(b); {
 		if at+2 > len(b) || b[at+1] == 0 {
@@ -84,7 +81,7 @@ optionLoop:
 			// Source LLA is informational. The kernel remains the ND/NUD owner.
 		case 3:
 			if size != 32 {
-				return advertisement{}, snapshotError("PIO length")
+				continue
 			}
 			if o[2] > 128 {
 				continue
@@ -99,7 +96,7 @@ optionLoop:
 			a.prefixes = append(a.prefixes, prefixOption{prefix, o[3]&0x80 != 0, o[3]&0x40 != 0, valid, preferred})
 		case 5:
 			if size != 8 {
-				return advertisement{}, snapshotError("MTU length")
+				continue
 			}
 			mtu := uint64(binary.BigEndian.Uint32(o[4:]))
 			if mtu >= 1280 && mtu <= uint64(linkMTU) && mtu <= 65535 {
@@ -107,7 +104,7 @@ optionLoop:
 			}
 		case 24:
 			if size != 8 && size != 16 && size != 24 {
-				return advertisement{}, snapshotError("RIO length")
+				continue
 			}
 			bits := int(o[2])
 			pref, validPref := preference(o[3])
@@ -120,10 +117,6 @@ optionLoop:
 			if !validPrefix(prefix) {
 				continue
 			}
-			if routePrefixes[prefix] {
-				return advertisement{}, snapshotError("duplicate RIO prefix")
-			}
-			routePrefixes[prefix] = true
 			a.routes = append(a.routes, routeOption{prefix, pref, binary.BigEndian.Uint32(o[4:])})
 		case 25:
 			if size < 24 || (size-8)%16 != 0 {
