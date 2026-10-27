@@ -66,23 +66,24 @@ type NATRule struct {
 }
 
 // MSSClamp lowers an existing TCP MSS option on SYN/SYN-ACK packets crossing
-// one directed interface pair. MTU is the operator's path limit; IPv4 uses
-// MTU-40 and IPv6 MTU-60. Smaller options are retained. This does not authorize
+// one directed interface pair. MTU optionally caps the current interface MTUs;
+// IPv4 uses MTU-40 and IPv6 MTU-60. Smaller options are retained. This does not authorize
 // forwarding or change interface MTU, UDP fragmentation or PMTU discovery.
 type MSSClamp struct {
 	From   string `json:"from"`
 	To     string `json:"to"`
 	Family int    `json:"family"`
-	MTU    int    `json:"mtu"`
+	MTU    int    `json:"mtu,omitempty"`
 }
 
 // IPv4ClearDF allows the kernel to fragment an oversized unfragmented IPv4
 // packet on a selected path. The destination FIB lookup includes its current
-// source and mark. MTU is the threshold for clearing DF, not an interface MTU.
+// source and mark. MTU optionally caps the current egress MTU threshold for
+// clearing DF; it does not set an interface MTU.
 type IPv4ClearDF struct {
 	From string `json:"from"`
 	To   string `json:"to"`
-	MTU  int    `json:"mtu"`
+	MTU  int    `json:"mtu,omitempty"`
 }
 
 func normalizedPortRange(p PortRange) PortRange {
@@ -217,8 +218,8 @@ func validateFirewall(f *Firewall) error {
 		errs = append(errs, errors.New("firewall: disable_forward conflicts with forward_chain/forward pairs"))
 	}
 	for i, rule := range f.IPv4ClearDF {
-		if !validName(rule.From) || !validName(rule.To) || rule.MTU < 576 || rule.MTU > 65535 {
-			errs = append(errs, fmt.Errorf("IPv4 clear DF %d: from/to interfaces and MTU 576..65535 are required", i))
+		if !validName(rule.From) || !validName(rule.To) || rule.MTU != 0 && (rule.MTU < 576 || rule.MTU > 65535) {
+			errs = append(errs, fmt.Errorf("IPv4 clear DF %d: from/to interfaces and optional MTU 576..65535 are required", i))
 		}
 	}
 	for i, rule := range f.MSSClamp {
@@ -231,8 +232,8 @@ func validateFirewall(f *Firewall) error {
 		} else if rule.Family != 4 {
 			errs = append(errs, fmt.Errorf("MSS clamp %d: family must be 4 or 6", i))
 		}
-		if rule.MTU < minimum || rule.MTU > 65535 {
-			errs = append(errs, fmt.Errorf("MSS clamp %d: MTU must be %d..65535", i, minimum))
+		if rule.MTU != 0 && (rule.MTU < minimum || rule.MTU > 65535) {
+			errs = append(errs, fmt.Errorf("MSS clamp %d: MTU must be zero or %d..65535", i, minimum))
 		}
 	}
 	for _, item := range []struct {

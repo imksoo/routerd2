@@ -105,8 +105,10 @@ type Forwarding struct {
 
 // Firewall manages only the routerd2 inet table. A nil Firewall removes a
 // previously owned table, but never removes an unowned table. Input and Output
-// are opt-in; their nil values install no hooks. The legacy Forward pairs use
-// a default-drop forward chain unless ForwardChain overrides its policy.
+// are opt-in; their nil values install no hooks. Forward pairs use a
+// default-drop forward chain unless ForwardChain overrides its policy.
+// Directed forwarding pairs and accept rules also clamp TCP MSS in both
+// directions to the current interface MTUs, without granting extra traffic.
 type Firewall struct {
 	Forward      []Forward      `json:"forward,omitempty"`
 	Masquerade   []Masquerade   `json:"masquerade,omitempty"`

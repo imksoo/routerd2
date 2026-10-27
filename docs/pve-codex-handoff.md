@@ -11,7 +11,28 @@
 本文の旧`dist/`参照は履歴上の実行先であり、現存する証跡を意味しない。現在の診断・受入に必要な出力だけを一時保持する。
 2026-10-27には`/tmp`の旧試験結果・ISO展開・release検証物も約26GiB削除した。再保存しない。
 
-## 今回の確認と継続中の受入
+## 現在の開発版: path-mtu / native-22
+
+writerはforward pairと両interfaceを指定したaccept ACLから、両方向のMSSを導出する。
+interface適用後のkernel MTUを読み、PPP交渉結果とDS-LiteのMTUを使う。
+明示MSSの任意MTUは追加の上限となる。DF解除は引き続き明示選択で、閾値省略時は実egress MTU。
+導出結果をintentやjournalへ書き戻さず、link未生成時は通常の後続適用を待つ。
+
+独立ACのMRU1400と製品intent MTU1454をcaptureで確認し、IPv4 MSS/DF閾値なしで
+MSS1360、PPP1396+102-byte、DS-Lite MSS1420/1460+38-byte fragmentが通った。
+PPPはpaired accept ACL、DSLはforward pairを使う。元MSS1200、明示したIPv6上限、
+1MiB TCP双方向、UDP1450、障害切替・復旧、Health元期限と古い再送、rollback、AFTR再起動も成功した。
+RP-PPPoEはoptions fileより後にMTU/MRU1492を足すため、最初のfile1400指定は実際には1492だった。
+peerのpppd起動引数末尾で1400を指定し、実際のLCPで確認した。protocol engine自体は変更しない。
+Alpine kernel 6.18.58-0-virtでも1454→1400再適用後にTCP MSS両端とUDP再構成が通った。
+`make check build-linux RELEASE_ID=path-mtu`（Go/Python・全体Race Detector・vet・6静的ELF）、
+実6ELFの署名catalog/publisher検証も成功した。arm64は実行していない。
+現在の一時出力は`dist/path-mtu-current/`、`dist/path-mtu-qemu-network.log`、
+`dist/path-mtu-check-build.log`と`dist/path-mtu-built-release.log`。
+bridge、route PMTU、VRF/iif、低MTUと実NICの受入は残る。
+実上流の長時間試験は下記`fragment-readiness`/native-21のまま維持しており、native-22の実回線受入ではない。
+
+## 直前版の確認と継続中の受入
 
 `fragment-readiness`（native-21 / network journal 8）で`make check build-linux`を完了した。
 Go/Python、全体Race Detector、vet、amd64/arm64の6静的ELFが成功した。

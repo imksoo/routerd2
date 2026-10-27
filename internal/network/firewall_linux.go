@@ -11,6 +11,7 @@ import (
 	"github.com/google/nftables"
 	"github.com/google/nftables/binaryutil"
 	"github.com/google/nftables/expr"
+	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 )
 
@@ -67,9 +68,92 @@ func (k *linuxKernel) ReplaceFirewall(f *Firewall) error {
 		}
 	}
 	if f != nil {
-		buildFirewall(c, f)
+		actual, err := firewallPathMTUs(f)
+		if err != nil {
+			return err
+		}
+		buildFirewall(c, &actual)
 	}
 	return c.Flush()
+}
+
+// Resolve against the links after interfaceConfig, including PPP-owned links.
+// Only the nft batch uses these derived limits; intent and its journal retain
+// the operator's declarations. Missing dynamic links contribute no rules yet.
+func firewallPathMTUs(f *Firewall) (Firewall, error) {
+	out := *f
+	out.MSSClamp = append([]MSSClamp(nil), f.MSSClamp...)
+	addPair := func(from, to string, family int) {
+		if from == "" || to == "" || from == to {
+			return
+		}
+		for _, v := range []int{4, 6} {
+			if family == 0 || family == v {
+				out.MSSClamp = append(out.MSSClamp, MSSClamp{From: from, To: to, Family: v}, MSSClamp{From: to, To: from, Family: v})
+			}
+		}
+	}
+	for _, pair := range f.Forward {
+		addPair(pair.From, pair.To, 0)
+	}
+	if f.ForwardChain != nil {
+		for _, rule := range f.ForwardChain.Rules {
+			if rule.Action == "accept" && (rule.Match.Protocol == "" || rule.Match.Protocol == "tcp") {
+				addPair(rule.Match.InInterface, rule.Match.OutInterface, rule.Match.Family)
+			}
+		}
+	}
+	if len(out.MSSClamp) == 0 && len(f.IPv4ClearDF) == 0 {
+		return out, nil
+	}
+	links, err := netlink.LinkList()
+	if err != nil {
+		return out, fmt.Errorf("firewall path MTUs: %w", err)
+	}
+	mtus := make(map[string]int, len(links))
+	for _, link := range links {
+		mtus[link.Attrs().Name] = link.Attrs().MTU
+	}
+	type path struct {
+		from, to string
+		family   int
+	}
+	positions := make(map[path]int)
+	clamps := out.MSSClamp
+	out.MSSClamp = nil
+	for _, rule := range clamps {
+		from, to := mtus[rule.From], mtus[rule.To]
+		if from != 0 && to != 0 {
+			mtu := min(from, to)
+			if rule.MTU == 0 || mtu < rule.MTU {
+				rule.MTU = mtu
+			}
+		}
+		minimum := 576
+		if rule.Family == 6 {
+			minimum = 1280
+		}
+		if rule.MTU < minimum {
+			continue
+		}
+		key := path{rule.From, rule.To, rule.Family}
+		if index, exists := positions[key]; exists {
+			out.MSSClamp[index].MTU = min(out.MSSClamp[index].MTU, rule.MTU)
+		} else {
+			positions[key] = len(out.MSSClamp)
+			out.MSSClamp = append(out.MSSClamp, rule)
+		}
+	}
+	out.IPv4ClearDF = nil
+	for _, rule := range f.IPv4ClearDF {
+		if mtu := mtus[rule.To]; mtu != 0 && (rule.MTU == 0 || mtu < rule.MTU) {
+			rule.MTU = mtu
+		}
+		if rule.MTU >= 576 {
+			out.IPv4ClearDF = append(out.IPv4ClearDF, rule)
+		}
+	}
+	return out, nil
 }
 
 func buildFirewall(c *nftables.Conn, f *Firewall) {

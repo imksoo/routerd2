@@ -4,6 +4,7 @@
 Requires Linux root/sudo, pppd with pppoe.so, RP-PPPoE pppoe-server,
 iproute2, nft, tcpdump, curl and Python 3. Host PPP files and routes are isolated.
 Packet capture includes both real WAN paths and the separate LAN client.
+The independent AC negotiates MRU 1400 against product MTU 1454.
 WAN providers route to separate MTU-1500 application hosts and suppress IPv4
 fragmentation-needed messages. Check 1 MiB TCP in both directions and small MSS.
 """
@@ -154,7 +155,7 @@ print('PASS reassembled 1450-byte UDP payload with DF clear and DF set',sys.argv
 
     def marked_udp():
         # The primary source-policy rule is gone, but mark41 selects PPP.
-        # 1458 bytes exceed PPP1454 and fit DSL1460, so a FIB lookup that
+        # 1458 bytes exceed PPP1400 and fit DSL1460, so a FIB lookup that
         # ignores the packet mark cannot accidentally satisfy this exchange.
         code = r"""import socket
 s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.settimeout(2);s.bind(('0.0.0.0',18084));s.setsockopt(socket.IPPROTO_IP,10,3)
@@ -201,7 +202,11 @@ s.connect(('198.51.100.20',18081));body=b'm'*1430;s.send(body);assert s.recv(409
         {
             "id": "firewall",
             "firewall": {
-                "forward": [{"from": "lan0", "to": "ppp-wan"}, {"from": "lan0", "to": "dslite0"}],
+                "forward": [{"from": "lan0", "to": "dslite0"}],
+                "forward_chain": {
+                    "policy": "drop",
+                    "rules": [{"match": {"in_interface": "lan0", "out_interface": "ppp-wan"}, "action": "accept"}],
+                },
                 "masquerade": [
                     {"source": "10.42.0.0/24", "out_interface": "ppp-wan"},
                     {"source": "10.42.0.0/24", "out_interface": "dslite0"},
@@ -282,19 +287,14 @@ s.connect(('198.51.100.20',18081));body=b'm'*1430;s.send(body);assert s.recv(409
             },
         ]
     firewall = next(r["firewall"] for r in resources if r["id"] == "firewall")
-    firewall["mss_clamp"] = [
-        {"from": a, "to": b, "family": 4, "mtu": mtu}
-        for wan, mtu in [("ppp-wan", 1454), ("dslite0", 1460)]
-        for a, b in [("lan0", wan), (wan, "lan0")]
-    ]
     firewall["forward"].append({"from": "lan0", "to": "wan1"})
-    firewall["mss_clamp"] += [
+    firewall["mss_clamp"] = [
         {"from": a, "to": b, "family": 6, "mtu": 1460}
         for a, b in [("lan0", "wan1"), ("wan1", "lan0")]
     ]
     firewall["ipv4_clear_df"] = [
-        {"from": "lan0", "to": wan, "mtu": mtu}
-        for wan, mtu in [("ppp-wan", 1454), ("dslite0", 1460)]
+        {"from": "lan0", "to": wan}
+        for wan in ["ppp-wan", "dslite0"]
     ]
     configuration = {"schema_version": 2, "resources": resources}
     (stage / "config.json").write_text(json.dumps(configuration))
@@ -321,8 +321,13 @@ s.connect(('198.51.100.20',18081));body=b'm'*1430;s.send(body);assert s.recv(409
         (stage / "www").mkdir()
         run(["mount", "--bind", str(etc), "/etc/ppp"])
         run(["mount", "-t", "tmpfs", "-o", "mode=755", "tmpfs", "/run"])
+        # RP-PPPoE appends its own MTU/MRU after the options file. Configure
+        # the independent pppd at its command-line boundary, then verify LCP.
+        ac_pppd = stage / "ac-pppd"
+        ac_pppd.write_text('#!/bin/sh\nexec /usr/sbin/pppd "$@" mtu 1400 mru 1400\n')
+        ac_pppd.chmod(0o500)
         (stage / "server.conf").write_text(
-            "auth\nrequire-pap\nrefuse-chap\nmtu 1454\nmru 1454\nlogfd 1\nhide-password\nlcp-echo-interval 1\nlcp-echo-failure 3\n"
+            "auth\nrequire-pap\nrefuse-chap\nlogfd 1\nhide-password\nlcp-echo-interval 1\nlcp-echo-failure 3\n"
         )
         for n in [ns, ppp, dsl, lan, ppp_app, dsl_app]:
             run(["ip", "netns", "add", n])
@@ -447,6 +452,8 @@ s.connect(('198.51.100.20',18081));body=b'm'*1430;s.send(body);assert s.recv(409
             ppp,
             [
                 "/usr/sbin/pppoe-server",
+                "-q",
+                str(ac_pppd),
                 "-F",
                 "-k",
                 "-I",
@@ -511,7 +518,7 @@ s.connect(('198.51.100.20',18081));body=b'm'*1430;s.send(body);assert s.recv(409
         b = probe(dsl, "probe-dsl")
         wait(lambda: selected(1000, 101) and selected(1100, 102))
         traffic("PPP")
-        large_transfer("198.51.100.20", 1454)
+        large_transfer("198.51.100.20", 1400)
         udp_mtu("PPP")
         large_transfer("2001:db8:45::1", 1460)
         assert all(x["generation"] == 1 for x in modules().values())

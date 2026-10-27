@@ -577,6 +577,13 @@ network intentのprotocol投影もJSON往復を除き、変更する集合だけ
 
 #### NET-03 — Firewall・ingress・MTU/MSS・fragment policy
 
+2026-10-27追加: 明示したforward pairとaccept ACLのpairからMSSを自動生成し、writerの
+実link設定後のkernel MTUで両方向の上限を決める。DF解除は明示選択を維持し、閾値の省略時は
+実egress MTUを使う。導出結果をintentやjournalへ書き戻さない。製品MTU1454に対して
+独立ACがMRU1400を交渉し、設定にIPv4 MSS/DF閾値を記載せずにMSS1360とfragmentを確認した。
+DSL1460とともに大TCP/UDP、障害切替・復旧を通した。Alpine実kernelの1454→1400変更後も
+再適用が通った。compiler contractはnative-22。route PMTU、bridge、VRF/iifと実NICの受入は残る。
+
 2026-10-27: native `firewall.ipv4_clear_df`で入力・FIB出力・閾値を明示し、DNAT後・
 forward MTU判定前にDFだけを解除する。独立PPP/AFTRで1450-byte UDP payloadを往復し、
 PPP1452+46／DS-Lite1460+38-byteのkernel fragmentと元のID/offsetをcaptureで確認した。
@@ -847,7 +854,7 @@ learned route先の利用者TCP/UDPも通信し、撤去中の接続拒否と復
 明示VRFではmultihop socketをVRF master、single-hopをmember interfaceへ束縛する。
 source domainとBGP FIB tableも検証する。同じendpointを持つ二つのVRFとdefault domainで
 実daemonを動かし、独立TCP/UDP・片側UDP障害・worker交替・main tableへの流出防止を確認した。
-single-hop VRFも実peerと障害・復旧を確認した。現在のcompiler contractはnative-21。
+single-hop VRFも実peerと障害・復旧を確認した。現在のcompiler contractはnative-22。
 IPv4/IPv6とも同じendpointを二つのVRFとdefault domainで同時使用し、BFD/BGPと三経路の
 TCP/UDPを確認した。defaultとVRFのUDP bind競合は受信socketだけの`SO_REUSEADDR`で修正した。
 domain/sourceの既存claimで二重ownerを拒否し、TX port専有と`SO_REUSEPORT`不使用を維持する。

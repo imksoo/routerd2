@@ -407,25 +407,44 @@ func runNativeIPv4FragmentFixture(t *testing.T, e *Engine, base Desired, client,
 		t.Fatal(err)
 	}
 	before := link.Attrs().MTU
-	if err := peer.LinkSetMTU(link, 1454); err != nil {
-		t.Fatal(err)
-	}
 	defer func() {
 		if err := peer.LinkSetMTU(link, before); err != nil {
 			t.Error(err)
 		}
 	}()
 	d := cloneDesired(base)
-	d.Interfaces[1].MTU = 1454
-	d.Firewall.IPv4ClearDF = []IPv4ClearDF{{From: "lan0", To: "wan0", MTU: 1454}}
-	if _, err := e.Apply(context.Background(), 30, d); err != nil {
-		t.Fatal(err)
+	d.Firewall.IPv4ClearDF = []IPv4ClearDF{{From: "lan0", To: "wan0"}}
+	for _, mtu := range []int{1454, 1400} {
+		if err := peer.LinkSetMTU(link, mtu); err != nil {
+			t.Fatal(err)
+		}
+		d.Interfaces[1].MTU = mtu
+		if _, err := e.Apply(context.Background(), 30, d); err != nil {
+			t.Fatal(err)
+		}
+		nativeUDPExchange(t, client, server, "udp4", "192.0.2.2:0", "203.0.113.2:47002", "198.51.100.1", PortRange{Start: 1, End: 65535})
+		flow := openNativeTCP(t, client, server, "tcp4", "203.0.113.2:47003", "", "198.51.100.1", nil)
+		defer flow.close()
+		flow.exchange(t)
+		for _, conn := range []net.Conn{flow.client, flow.server} {
+			raw, err := conn.(*net.TCPConn).SyscallConn()
+			if err != nil {
+				t.Fatal(err)
+			}
+			var mss int
+			var optionErr error
+			if err := raw.Control(func(fd uintptr) {
+				mss, optionErr = unix.GetsockoptInt(int(fd), unix.IPPROTO_TCP, unix.TCP_MAXSEG)
+			}); err != nil || optionErr != nil || mss > mtu-40 || mss < 536 {
+				t.Fatalf("MTU %d TCP MSS %d: %v %v", mtu, mss, err, optionErr)
+			}
+		}
+		flow.close()
+		t.Logf("native IPv4 MTU %d derived TCP MSS and DF clearing; 1450-byte UDP reassembly passed", mtu)
 	}
-	nativeUDPExchange(t, client, server, "udp4", "192.0.2.2:0", "203.0.113.2:47002", "198.51.100.1", PortRange{Start: 1, End: 65535})
 	if _, err := e.Apply(context.Background(), 1, base); err != nil {
 		t.Fatal(err)
 	}
-	t.Log("native IPv4 DF clearing, kernel fragmentation and 1450-byte UDP reassembly passed")
 }
 
 func runNativeRAStateFixture(t *testing.T, e *Engine, base Desired, clientNS, serverNS netns.NsHandle) {

@@ -430,7 +430,7 @@ ACTIVE成功には元boot IDと絶対期限を保持するVIP投影が必要で�
 旧世代・上書きされた通知や適用失敗を成功として返さない。
 
 このsource受入範囲の追加に伴い、署名されたconfiguration contractは
-`resource-program-native-21`とする。PPPの有限`.active` factで依存workerを起動し、PPP unitの
+`resource-program-native-22`とする。PPPの有限`.active` factで依存workerを起動し、PPP unitの
 UP/addressはpppdが所有する。`forwarding.ipv4_rp_filter`はLinux all/defaultを明示して管理する
 （0:無効、1:strict、2:loose、省略:管理しない）。撤去時は記録した元の値へ戻す。
 BFDの明示`multihop: true`はinterfaceを指定せず、
@@ -519,53 +519,63 @@ IPv6 routeの`valid_until`は運用者の絶対期限なら`{utc: "2030-01-01T00
 writerは元のauthorityとkernelの相対timerを区別し、保存したCLOCK_MONOTONICのtimerで所有権を確認する。
 長い期限のkernel grant更新はwriterが担当し、元のprotocol期限は変更しない。
 
-## TCP MSSと明示したpath MTU
+## TCP MSSとpath MTU
 
-`firewall.mss_clamp`はIPv4/IPv6の転送TCP SYN/SYN-ACKにあるMSS optionだけを下げる。
-`from`・`to`は一方向のinterface pair、`family`は4/6、`mtu`はoperatorが指定するpath MTU。
-IPv4はMTU-40、IPv6はMTU-60を上限にし、元から小さいMSSは増やさない。
-両方向へ適用する場合は、それぞれのpairを指定する。動的PPP/tunnelの生成前にも名前で指定できる。
+`firewall.forward`と、入力・出力interfaceを両方指定した`forward_chain`のaccept ruleは、
+そのpairの両方向でTCP SYN/SYN-ACKの大きいMSSだけを下げる。後者はprotocol未指定/TCPを対象とし、
+指定したfamilyを維持する。writerはlink・interface設定後のkernel MTUを一度読み、両端の小さい方から
+IPv4は40、IPv6は60を引く。小さいMSSは増やさない。転送を許可する範囲は元のfilterが決める。
+PPPの交渉済みMTUやDS-Liteの現在のMTUを、別のMSS設定へ重複記載する必要はない。
 
 ```yaml
 id: firewall
 firewall:
   forward: [{from: lan0, to: ppp-wan}]
-  mss_clamp:
-    - {from: lan0, to: ppp-wan, family: 4, mtu: 1454}
-    - {from: ppp-wan, to: lan0, family: 4, mtu: 1454}
 ```
 
-既存のowned inet tableへforward/mangle hookを追加し、他のfirewall変更と同じnft batchで交換する。
-forward許可、interface MTU、UDP/QUICのfragment処理、PMTU探索の設定は変更しない。
-`disable_forward`はforwardのfilter hookを省略する指定で、明示したMSS/DF/NAT hookは有効である。
-これは固定の明示MTUに対するnative機能であり、bridge-family clampとinterface/tunnel宣言からの自動MTU導出は未完了である。
-固定版routerdでは`PathMTUPolicy`自体は廃止済みであり、その旧resourceのreaderは追加しない。
+別のpath上限が必要な場合や、interface pairを限定しないaccept policyを使う場合は、
+`firewall.mss_clamp`で`from`・`to`（一方向）と`family`（4/6）を指定する。
+任意の`mtu`は実interface MTUよりも小さい上限として使う。省略するとkernel MTUから導出する。
+明示ruleは一方向であり、両方向へ必要ならそれぞれ指定する。自動ruleと重なる場合は小さい上限を使う。
+まだない動的linkには自動ruleを作らず、link生成後の通常適用で導出する。
+導出値はnft batchだけで使い、operator intentやjournalへ書き戻さない。
+IPv4 MTU576未満・IPv6 MTU1280未満の自動clamp、bridge-family、route固有のPMTU、
+VRF/iif条件付きDF lookup、物理NICと性能の受入は未完了である。
+
+owned inet tableのforward/mangle hookを、他のfirewall変更と同じnft batchで交換する。
+interface MTU、UDPのDF、通常のPMTU探索はMSS処理では変更しない。
+`disable_forward`はforward filter hookを省略する指定で、明示したMSS/DF/NAT hookは有効である。
+固定版routerdでは`PathMTUPolicy`自体が廃止済みであり、その旧resourceのreaderは追加しない。
 
 `make check-dual-wan`は独立RP-PPPoE AC/Linux AFTRと、その先のMTU-1500端末を使う。
-IPv4 PMTU通知を上流で遮断した同じ構成で、修正前は小packetとHealthだけが通り、1MiB TCPは停止した。
-修正後はPPP/DS-Liteの両方で1MiB download/upload、IPv6、MSS1200、切替とworker再起動後の
-転送が通った。captureでPPP 1414、DS-Lite 1420、IPv6 1400、元の1200維持を確認した。
+製品MTU1454に対してACがMRU1400を交渉し、IPv4のMSSとDF閾値を記載せず、
+PPPのMSS1360・DS-Lite1420、IPv6の明示path上限による1400、元の1200維持をcaptureで確認した。
+上流がIPv4 PMTU通知を遮断する構成でも、両WANの1MiB download/upload、切替・復旧が通った。
+ACのpppd起動引数末尾へMTU/MRU1400を指定する。RP-PPPoE 3.15自身がoptions fileの後に
+1492を追加するため、file内だけの指定では実際のLCPが1492だったことをcaptureで確認した。
+使用する独立protocol engineは変更していない。
 
 ## IPv4 DF解除とkernelのfragment
 
-`firewall.ipv4_clear_df`は`from`（入力interface）、`to`（FIBが選ぶ出力interface）、
-`mtu`（DF解除の閾値）を明示する。global RPDBの宛先lookupへpacketの送信元と現在のmarkを
-渡し、指定pathで閾値を超えた未fragmentのDF付きIPv4 packetだけをDFなしへ変更する。
-preroutingのDNAT後・forwardのMTU判定前に適用し、IPv4 header checksumはkernelが更新する。
+`firewall.ipv4_clear_df`は`from`（入力interface）と`to`（FIBが選ぶ出力interface）で
+DF解除を明示的に選ぶ。閾値は出力のkernel MTUから導出し、任意の`mtu`でさらに小さくできる。
+global RPDBの宛先lookupへpacketの送信元と現在のmarkを渡し、そのpathで閾値を超えた
+未fragmentのDF付きIPv4だけを変更する。DNAT後・forwardのMTU判定前に適用し、
+IPv4 header checksumとfragmentはkernelが処理する。
 
 ```yaml
 ipv4_clear_df:
-  - {from: lan0, to: ppp-wan, mtu: 1454}
-  - {from: lan0, to: dslite0, mtu: 1460}
+  - {from: lan0, to: ppp-wan}
+  - {from: lan0, to: dslite0}
 ```
 
-これはinterface MTUを変更せず、packetを自前で分割しない。実際の出力MTUを超えたpacketは
+これはinterface MTUを変更せず、自前でpacketを分割しない。実際の出力MTUを超えたpacketは
 kernelがfragmentする。受信済みfragment、閾値以下、別の入力／FIB出力、IPv6は変更しない。
-この機能は通常のPMTU探索に代わりDFを解除するoperatorの明示選択で、既定では適用しない。
-VRF・iif条件付きRPDBや動的なMTU導出は未受入であり、global source/mark選択の試験と分ける。
+既定ではDFを解除しない。VRF・iif条件付きRPDBは未受入であり、global source/markの試験と分ける。
 
-`make check-dual-wan`では、接続UDPと`IP_PMTUDISC_PROBE`を使って1450-byte payloadを送る。
-probeは学習済みPMTUを無視して実際にDF付きpacketを送出するためのLinux socket設定である。
-PPPで1452+46、DS-Liteで1460+38-byteに分割され、独立Linux peerの再構成後に全payloadが往復した。
-sourceでDS-Liteを選ぶ間もmark41でPPPを選ぶ1458-byte DF packetが通り、入力markを使うlookupを確認した。
-独立したmark tableはrouterd2のowned table交換後も保持された。AFTR再起動後のUDPも確認した。
+`make check-dual-wan`は接続UDPと`IP_PMTUDISC_PROBE`を使って1450-byte payloadを送る。
+PROBEは学習済みPMTUを無視して実際にDF付きpacketを送出するためのLinux socket設定である。
+PPP1400では1396+102、DS-Lite1460では1460+38-byteへ分割され、再構成した全payloadが往復した。
+source policyがDS-Liteを選ぶ間も、mark41のPPPを選ぶ1458-byte DF packetが通った。
+独立mark tableはowned table交換後も保持され、AFTR worker再起動後のUDPも復旧した。
+Alpine kernel 6.18.58-0-virtでも1454→1400の再適用後にTCP MSSと1450-byte UDPを確認した。
