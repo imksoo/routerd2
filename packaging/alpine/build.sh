@@ -3,6 +3,7 @@ set -eu
 
 source_dir=${1:-/src}
 output_dir=${2:-/out}
+engine_image=${3:-/inputs/pppoe-engine.tar}
 # abuild expands $APK as a command plus arguments, so keep this path free of
 # whitespace even when the caller uses a different TMPDIR.
 work_dir=$(mktemp -d /tmp/routerd2-abuild.XXXXXX)
@@ -10,6 +11,7 @@ trap 'rm -rf "$work_dir"' EXIT HUP INT TERM
 mkdir -p "$work_dir/aports/main/routerd2" "$output_dir"
 cd "$work_dir/aports/main/routerd2"
 cp "$source_dir/packaging/alpine/APKBUILD" APKBUILD
+cp "$engine_image" pppoe-engine.tar
 pkgver=$(sed -n 's/^pkgver=//p' APKBUILD)
 
 tar --sort=name --format=posix --pax-option=delete=atime,delete=ctime \
@@ -17,7 +19,8 @@ tar --sort=name --format=posix --pax-option=delete=atime,delete=ctime \
   --exclude='./.git' --exclude='./dist' --exclude='./coverage*' \
   --exclude='*/__pycache__' --exclude='*.pyc' \
   --transform="s,^\.,routerd2-$pkgver," \
-  -czf "routerd2-$pkgver.tar.gz" -C "$source_dir" .
+  --transform="s,^pppoe-engine.tar$,routerd2-$pkgver/pppoe-engine.tar," \
+  -czf "routerd2-$pkgver.tar.gz" -C "$source_dir" . -C "$work_dir/aports/main/routerd2" pppoe-engine.tar
 
 export REPODEST="$work_dir/packages"
 export SRCDEST="$work_dir/distfiles"

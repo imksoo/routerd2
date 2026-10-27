@@ -34,10 +34,10 @@ they do not implement the policy, an operator workflow or paired boot by themsel
 
 An uncompressed USTAR bundle contains canonical `manifest.json`, raw 64-byte
 `manifest.sig`, then exactly the declared regular artifacts in manifest order.
-Manifest v3 signs release ID, publisher sequence, target, key ID, boot/worker
+Manifest v4 signs release ID, publisher sequence, target, key ID, boot/worker
 ABI, the native `runtime_abi` declaration, entrypoint, role catalog, artifact
 kinds, native Go command identities, SHA-256 and sizes. The domain is
-`routerd2 signed extracted runtime manifest v3\x00`. Former v1/v2 bytes are refused.
+`routerd2 signed extracted runtime manifest v4\x00`. Discarded manifest versions are refused.
 Native ABI records are extracted from readonly ELF data without execution;
 all native members must agree and match the signed manifest. There is no
 publisher layout override for the declaration. See the
@@ -51,8 +51,15 @@ before any memo lookup. Closing the Store discards the memo.
 The first extracted layout accepts bounded single filenames (no links or
 nested paths), static native Go ELF and non-executable regular data. Limits are
 64 artifacts, 64 roles, 64KiB manifest, 1GiB per artifact and 4GiB total payload.
-The receiving store defaults to a 512MiB per-artifact policy. Only boot/worker
-ABI 1 is accepted. Dynamic linking and external engines are not accepted yet.
+The receiving store defaults to a 512MiB per-artifact policy. Boot ABI 1 and worker ABI 4 are accepted. Native executables remain static.
+The PPPoE role requires a signed regular-file engine image and a distinct
+corresponding-source artifact in `engines`. The image contains its exact pppd,
+plugin, interpreter, libraries, OpenSSL provider, notices and package inventory.
+Publisher and receiver check the actual ELF closure and target architecture.
+The supervisor pins the image descriptor and passes it as worker FD 5; the
+engine helper extracts it into an empty private chroot. Host engine lookup is
+not supported. Other external-engine profiles and kernel capability contracts
+remain unfinished.
 
 `WriteBundle` takes an explicit layout and map of already opened files, verifies
 native command/ABI identity, signs metadata and rechecks bytes while writing. Its
@@ -107,7 +114,7 @@ profile. PIE, dynamic linking and marker-free development builds are not
 silently accepted. ELF validation does not establish that signed code is free
 of vulnerabilities; trust in the publisher remains necessary.
 
-The manifest is limited to 16 KiB. Each executable defaults to a 512 MiB limit,
+The manifest is limited to 64 KiB. Each executable defaults to a 512 MiB limit,
 with an explicit policy ceiling of 1 GiB. The store defaults to 32 installed
 release directories and 256 journal generations. Capacity failures are
 explicit; the store never silently evicts a fallback release.

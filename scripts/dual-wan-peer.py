@@ -333,6 +333,7 @@ print('PASS actual IPv6 UDP Packet Too Big MTU1280 and subsequent 1200-byte UDP 
         runtime_dir=str(stage / "run"),
         state_dir=str(stage / "state"),
         ssh={"user": "admin"},
+        engines={"pppoe": str(stage / "pppoe-engine.tar")},
         workers={
             r: str(stage / ("routerd-logging" if r == "logging" else "routerd-modules"))
             for r in ["logging", "network", "control", "management", "pppoe", "aftr", "health"]
@@ -736,6 +737,7 @@ def main():
     parser.add_argument("--inside", type=Path)
     parser.add_argument("--binary-dir", type=Path, default=Path("dist/bin"))
     parser.add_argument("--output", type=Path, default=Path("dist/dual-wan"))
+    parser.add_argument("--engine-image", type=Path, default=Path("dist/pppoe-engine.tar"))
     parser.add_argument("--bridge-wan", action="store_true", help="use an owned bridge WAN with an MTU-1400 member")
     args = parser.parse_args()
     if args.inside:
@@ -757,6 +759,7 @@ def main():
                 ]
             )
         run(root + ["install", "-m", "500", str(Path(__file__).resolve()), stage + "/peer.py"])
+        run(root + ["install", "-m", "400", str(args.engine_image.resolve()), stage + "/pppoe-engine.tar"])
         with (args.output / "peer.log").open("w") as output:
             result = subprocess.run(
                 root

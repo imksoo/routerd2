@@ -630,6 +630,19 @@ DS-Lite1420、IPv61400で、1200は不変。bridge向け処理とinterface/tunne
 
 #### NET-04 — PPPoE の engine 選定と session 運用
 
+2026-10-27配布profile追加: ppp-image/native-25・worker ABI4・manifest v4。
+固定pppd 2.5.3とloader/library/plugin/OpenSSL legacy providerをregular-file imageへ同梱し、
+対応source・APKBUILD・patch・noticeを別artifactとして署名bindingへ含めた。
+実接続で再現したprovider欠落はpublisherと署名済みbundle受信時に適用前拒否する。
+supervisorはengine FDを固定し、helperは空のprivate chrootへ展開する。host engineへのfallbackはない。
+amd64/arm64の実3ELF＋engine/sourceの署名・stage・initializeを確認した。arm64は実行していない。
+PVEで署名PID1 catalogからのPAP/CHAP＋PDと二WAN実通信を確認した。
+コンテナは起動/control/shutdownのみ確認し、PPP実通信は未受入。
+Alpine linux-virtにPPPoE moduleがないため、applianceはlinux-ltsの必要module閉包へ変更した。
+QEMU applianceはCHAP、PD→RA/SLAAC、両family TCP/UDPとRenew、PPP再起動後のPD再取得・通信復旧を確認した。
+`make qemu-pppoe DHCP6_SERVER=/path/to/dhcpd`で実イメージから再実行する。
+以下は直前版までの経緯であり、現行配布engineの未実装を意味しない。
+
 2026-10-26 実装中。既存 routerd の `LinuxPeer` を土台にした設定生成と foreground pppd を使い、
 supervisor/control/network/PPPoE worker を接続した。独立 RP-PPPoE 3.15 / pppd 2.4.9 で
 PAP/CHAP、DNS、MTU 1454、LAN TCP/UDP、IPv6CP link-local、元の観測期限での撤去、

@@ -3,10 +3,18 @@
   "config": "/etc/routerd/config.json",
   "runtime_dir": "/run/routerd",
   "state_dir": "/var/lib/routerd",
+  "engines": {
+    "pppoe": "/usr/lib/routerd/pppoe-engine.tar"
+  },
   "kernel_modules": [
     "virtio_pci",
     "virtio_net",
+    "virtio_blk",
+    "virtio_scsi",
+    "ext4",
     "af_packet",
+    "veth",
+    "dummy",
     "bridge",
     "8021q",
     "vrf",
@@ -22,7 +30,10 @@
     "nft_reject_inet",
     "nft_log",
     "nf_log_syslog",
-    "ip6_tunnel"
+    "ip6_tunnel",
+    "pppoe",
+    "ppp_deflate",
+    "bsd_comp"
   ],
   "ssh": {
     "listen": "0.0.0.0:22",

@@ -16,8 +16,6 @@ import (
 	"net/netip"
 	"os"
 	"os/exec"
-	"os/user"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -26,6 +24,7 @@ import (
 
 	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/lifetime"
+	"github.com/imksoo/routerd2/internal/pppimage"
 	"github.com/imksoo/routerd2/internal/protocol/pppoeconfig"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
@@ -63,31 +62,54 @@ func RunEngine() error {
 	if err := unix.Mount("", "/", "", unix.MS_REC|unix.MS_PRIVATE, ""); err != nil {
 		return fmt.Errorf("isolate pppd mount propagation: %w", err)
 	}
-	root, err := user.LookupId("0")
+	// All executable/library/configuration lookup stays in the pinned image.
+	// Its empty root lives only in this mount namespace, so even a killed
+	// helper leaves no extracted files or mountpoint directories in the host.
+	if err := os.MkdirAll("/tmp", 0700); err != nil {
+		return err
+	}
+	if err := unix.Mount("tmpfs", "/tmp", "tmpfs", unix.MS_NOSUID|unix.MS_NODEV, "mode=700"); err != nil {
+		return err
+	}
+	root, err := os.MkdirTemp("/tmp", "ppp-")
 	if err != nil {
 		return err
 	}
-	// pppd reads the real UID's ~/.ppprc even without HOME in its environment.
-	// Hide that independent host configuration in this private namespace too.
-	userOptions := filepath.Join(root.HomeDir, ".ppprc")
-	if _, err := os.Stat(userOptions); err == nil {
-		if err := unix.Mount("/dev/null", userOptions, "", unix.MS_BIND, ""); err != nil {
-			return fmt.Errorf("isolate pppd user options: %w", err)
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
+	if err := unix.Chroot(root); err != nil {
 		return err
 	}
-	for _, path := range []string{"/etc/ppp", "/run"} {
-		if err := unix.Mount("tmpfs", path, "tmpfs", unix.MS_NOSUID|unix.MS_NODEV|unix.MS_NOEXEC, "mode=700"); err != nil {
+	if err := os.Chdir("/"); err != nil {
+		return err
+	}
+	image := os.NewFile(4, "pppoe-image")
+	if err := pppimage.Extract(image); err != nil {
+		image.Close()
+		return err
+	}
+	if err := image.Close(); err != nil {
+		return err
+	}
+	for _, path := range []string{"/etc/ppp", "/run", "/dev"} {
+		if err := os.MkdirAll(path, 0700); err != nil {
+			return err
+		}
+		flags := unix.MS_NOSUID | unix.MS_NOEXEC
+		if path != "/dev" {
+			flags |= unix.MS_NODEV
+		}
+		if err := unix.Mount("tmpfs", path, "tmpfs", uintptr(flags), "mode=700"); err != nil {
 			return fmt.Errorf("isolate pppd %s: %w", path, err)
 		}
 	}
-	if err := os.Mkdir("/run/ppp", 0700); err != nil {
-		return err
+	for _, device := range []struct {
+		name         string
+		major, minor uint32
+	}{{"null", 1, 3}, {"ppp", 108, 0}, {"urandom", 1, 9}} {
+		if err := unix.Mknod("/dev/"+device.name, unix.S_IFCHR|0600, int(unix.Mkdev(device.major, device.minor))); err != nil {
+			return err
+		}
 	}
-	// pppd 2.4 writes /etc/ppp/resolv.conf; 2.5 writes /run/ppp/resolv.conf.
-	// Both reach one private file, without a second DNS state or log parser.
-	if err := os.Symlink("/run/ppp/resolv.conf", "/etc/ppp/resolv.conf"); err != nil {
+	if err := os.Mkdir("/run/ppp", 0700); err != nil {
 		return err
 	}
 	if err := os.WriteFile("/etc/ppp/options", peerOptions(cfg, secret), 0600); err != nil {
@@ -98,7 +120,7 @@ func RunEngine() error {
 	if err := unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0); err != nil {
 		return err
 	}
-	return syscall.Exec("/usr/sbin/pppd", []string{"pppd", "logfd", "1"}, []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C"})
+	return syscall.Exec("/"+pppimage.Command, []string{"pppd", "logfd", "1"}, []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C"})
 }
 
 // Adapted from routerd pkg/pppoeclient.LinuxPeer (BSD-3-Clause, 1329ef54f296).
@@ -117,7 +139,7 @@ func peerOptions(cfg pppoeconfig.Config, password string) []byte {
 		cfg.LCPEchoFailure = 4
 	}
 	var b bytes.Buffer
-	fmt.Fprintf(&b, "plugin pppoe.so\nnic-%s\nifname %s\nuser %s\npassword %s\n", cfg.Interface, cfg.PPPInterface, strconv.Quote(cfg.Username), strconv.Quote(password))
+	fmt.Fprintf(&b, "plugin /%s\nnic-%s\nifname %s\nuser %s\npassword %s\n", pppimage.Plugin, cfg.Interface, cfg.PPPInterface, strconv.Quote(cfg.Username), strconv.Quote(password))
 	b.WriteString("noauth\nhide-password\nnoipdefault\nusepeerdns\nnodetach\n")
 	switch cfg.AuthMethod {
 	case "pap":
@@ -140,7 +162,7 @@ func peerOptions(cfg pppoeconfig.Config, password string) []byte {
 	return b.Bytes()
 }
 
-func Run(ctx context.Context, cfg pppoeconfig.Config, publish func(context.Context, pppoeconfig.Snapshot) error, ready func()) error {
+func Run(ctx context.Context, cfg pppoeconfig.Config, image *os.File, publish func(context.Context, pppoeconfig.Snapshot) error, ready func()) error {
 	if err := pppoeconfig.Validate(cfg); err != nil {
 		return err
 	}
@@ -163,7 +185,7 @@ func Run(ctx context.Context, cfg pppoeconfig.Config, publish func(context.Conte
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	cmd := exec.Command("/proc/self/exe", "pppoe-engine")
-	cmd.ExtraFiles = []*os.File{f}
+	cmd.ExtraFiles = []*os.File{f, image}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
 	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
 	if err := cmd.Start(); err != nil {

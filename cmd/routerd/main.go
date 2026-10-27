@@ -228,6 +228,7 @@ func serveRuntime(b runtimeconfig.Boot, trial *releaseboot.Trial, authority *rel
 	err = supervisor.Run(ctx, supervisor.Options{
 		ReleaseAuthority: authority,
 		Startup:          b.Startup,
+		Engines:          b.Engines,
 		Executables:      b.Workers, ReleaseID: buildinfo.ReleaseID, RuntimeDir: b.RuntimeDir, StateDir: b.StateDir, ConfigPath: b.Config, Platform: b.Platform,
 		DynamicRoles: dynamicRoles,
 		Modules: []supervisor.Spec{

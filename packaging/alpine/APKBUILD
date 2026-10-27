@@ -5,7 +5,7 @@ pkgrel=0
 pkgdesc="Linux router supervisor and isolated protocol workers"
 url="https://github.com/imksoo/routerd2"
 arch="x86_64 aarch64"
-license="BSD-3-Clause"
+license="BSD-3-Clause AND BSD-4-Clause AND BSD-4-Clause-Shortened AND GPL-2.0-or-later AND LGPL-2.0-or-later AND Public-Domain AND RSA-MD AND Apache-2.0 AND MIT"
 depends=""
 makedepends="go>=1.27.3 python3"
 options="net !strip"
@@ -24,6 +24,7 @@ build() {
 }
 
 check() {
+	umask 022
 	local binary headers dynamic
 	# Go 1.27's testing.TempDir uses GOTMPDIR, which abuild sets beneath aports.
 	# Keep both roots short; tests still allocate private random directories.
@@ -41,6 +42,7 @@ check() {
 package() {
 	install -Dm755 routerd "$pkgdir/usr/sbin/routerd"
 	install -Dm755 routerd-modules "$pkgdir/usr/libexec/routerd-modules"
+	install -Dm644 pppoe-engine.tar "$pkgdir/usr/lib/routerd/pppoe-engine.tar"
  install -Dm755 routerd-logging "$pkgdir/usr/libexec/routerd-logging"
 	install -Dm644 images/config-empty.json "$pkgdir/etc/routerd/config.json"
 	install -Dm644 images/boot.json "$pkgdir/etc/routerd/boot.json"

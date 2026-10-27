@@ -14,7 +14,7 @@ import (
 	"github.com/imksoo/routerd2/internal/runtimeconfig"
 )
 
-// This gate uses the actual two command builds for both supported targets.
+// This gate uses the actual three command builds for both supported targets.
 // Unlike the small parser fixtures, these include the complete runtime modules.
 // Neither architecture's incoming binaries are executed.
 func TestBuiltRuntimeCatalog(t *testing.T) {
@@ -55,7 +55,7 @@ func TestBuiltRuntimeCatalog(t *testing.T) {
 				t.Fatal(err)
 			}
 			path := bundle.Name()
-			manifest, err := WriteBundle(ctx, bundle, BundleOptions{ReleaseID: id, Sequence: 42, GOOS: "linux", GOARCH: arch, BootABI: 1, WorkerABI: 3, Entrypoint: "routerd", Artifacts: []Artifact{{Name: "routerd", Kind: "native", Command: "routerd"}, {Name: "routerd-modules", Kind: "native", Command: "routerd-modules"}, {Name: "routerd-logging", Kind: "native", Command: "routerd-logging"}}, Roles: roles}, testKey(), map[string]*os.File{"routerd": input[0], "routerd-modules": input[1], "routerd-logging": input[2]})
+			manifest, err := WriteBundle(ctx, bundle, BundleOptions{ReleaseID: id, Sequence: 42, GOOS: "linux", GOARCH: arch, BootABI: 1, WorkerABI: 4, Entrypoint: "routerd", Artifacts: []Artifact{{Name: "routerd", Kind: "native", Command: "routerd"}, {Name: "routerd-modules", Kind: "native", Command: "routerd-modules"}, {Name: "routerd-logging", Kind: "native", Command: "routerd-logging"}}, Roles: roles}, testKey(), map[string]*os.File{"routerd": input[0], "routerd-modules": input[1], "routerd-logging": input[2]})
 			if err != nil {
 				bundle.Close()
 				t.Fatal(err)
@@ -76,10 +76,10 @@ func TestBuiltRuntimeCatalog(t *testing.T) {
 			if ref.ReleaseID != id || ref.Sequence != 42 || ref.GOARCH != arch {
 				t.Fatalf("staged actual bundle identity: %+v", ref)
 			}
-			if manifest.Version != 3 || !manifest.RuntimeABI.Equal(runtimeabi.Current()) {
+			if manifest.Version != 4 || !manifest.RuntimeABI.Equal(runtimeabi.Current()) {
 				t.Fatal("actual bundle lost native ABI declaration")
 			}
-			t.Logf("%s manifest_v3 ABI=%s configuration=%d state_schemas=%d verified in all three native artifacts", arch, manifest.RuntimeABI.Profile, manifest.RuntimeABI.Configuration.Write, len(manifest.RuntimeABI.State))
+			t.Logf("%s manifest_v4 ABI=%s configuration=%d state_schemas=%d verified in all three native artifacts", arch, manifest.RuntimeABI.Profile, manifest.RuntimeABI.Configuration.Write, len(manifest.RuntimeABI.State))
 			resolved, err := store.Lookup(ctx, ref.Digest)
 			if err != nil || resolved != ref {
 				t.Fatalf("digest lookup: %+v %v", resolved, err)

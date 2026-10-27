@@ -32,7 +32,7 @@ func variableRuntime(t *testing.T) (BundleOptions, map[string]*os.File) {
 		t.Cleanup(func() { _ = f.Close() })
 		files[name] = f
 	}
-	return BundleOptions{ReleaseID: fixtureRelease, Sequence: 7, GOOS: "linux", GOARCH: runtime.GOARCH, BootABI: 1, WorkerABI: 3, Entrypoint: "supervisor", Artifacts: []Artifact{{Name: "supervisor", Kind: "native", Command: "routerd"}, {Name: "coordinator", Kind: "native", Command: "routerd-modules"}, {Name: "kernel", Kind: "native", Command: "routerd-modules"}, {Name: "notices", Kind: "data"}}, Roles: []RoleBinding{{Role: "control", Artifact: "coordinator"}, {Role: "network", Artifact: "kernel"}, {Role: "health", Artifact: "kernel"}}}, files
+	return BundleOptions{ReleaseID: fixtureRelease, Sequence: 7, GOOS: "linux", GOARCH: runtime.GOARCH, BootABI: 1, WorkerABI: 4, Entrypoint: "supervisor", Artifacts: []Artifact{{Name: "supervisor", Kind: "native", Command: "routerd"}, {Name: "coordinator", Kind: "native", Command: "routerd-modules"}, {Name: "kernel", Kind: "native", Command: "routerd-modules"}, {Name: "notices", Kind: "data"}}, Roles: []RoleBinding{{Role: "control", Artifact: "coordinator"}, {Role: "network", Artifact: "kernel"}, {Role: "health", Artifact: "kernel"}}}, files
 }
 
 func TestVariableRuntimeCatalogStagesEveryDeclaredArtifactAndBindsRoles(t *testing.T) {

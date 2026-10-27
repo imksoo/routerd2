@@ -26,6 +26,7 @@ import (
 	"unsafe"
 
 	"github.com/imksoo/routerd2/internal/configref"
+	"github.com/imksoo/routerd2/internal/pppimage"
 	"github.com/imksoo/routerd2/internal/release"
 	"github.com/imksoo/routerd2/internal/worker"
 	"golang.org/x/sys/unix"
@@ -103,6 +104,24 @@ func Run(parent context.Context, options Options) error {
 			}
 		}
 		images[role] = image
+	}
+	engines := map[string]*os.File{}
+	for role, path := range o.Engines {
+		if role != "pppoe" || images[role] == nil {
+			return errors.New("engine archive requires the PPPoE role")
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		opened["engine:"+role] = f
+		if err := pppimage.Validate(f, runtime.GOARCH); err != nil {
+			return fmt.Errorf("%s engine: %w", role, err)
+		}
+		engines[role] = f
+	}
+	if images["pppoe"] != nil && engines["pppoe"] == nil {
+		return errors.New("PPPoE role requires its bundled engine archive")
 	}
 	// Pdeathsig follows the creating OS thread. Pin the process manager to one
 	// thread until every managed child has exited, rather than starting workers
@@ -195,7 +214,7 @@ func Run(parent context.Context, options Options) error {
 		now := time.Now()
 		for _, c := range children {
 			if !stopping && !c.retired && c.process == nil && !c.permanentFailure && !c.nextStart.IsZero() && !now.Before(c.nextStart) {
-				if err := startChild(ctx, o, images[c.spec.Role], c, events); err != nil {
+				if err := startChild(ctx, o, images[c.spec.Role], engines[c.spec.Role], c, events); err != nil {
 					c.status.LastError = err.Error()
 					c.failures++
 					c.status.State = "backoff"
@@ -381,6 +400,14 @@ func normalize(o Options) (Options, error) {
 		paths[role] = absolute
 	}
 	o.Executables = paths
+	engines := map[string]string{}
+	for role, path := range o.Engines {
+		if role != "pppoe" || paths[role] == "" || !filepath.IsAbs(path) || filepath.Clean(path) != path {
+			return o, errors.New("invalid engine role binding")
+		}
+		engines[role] = path
+	}
+	o.Engines = engines
 	o.DynamicRoles = append([]string(nil), o.DynamicRoles...)
 	for _, role := range o.DynamicRoles {
 		if _, ok := paths[role]; !ok {
@@ -437,7 +464,7 @@ func normalize(o Options) (Options, error) {
 	return o, nil
 }
 
-func startChild(ctx context.Context, o Options, image *os.File, c *child, events chan<- childEvent) error {
+func startChild(ctx context.Context, o Options, image, engine *os.File, c *child, events chan<- childEvent) error {
 	if image == nil {
 		return errors.New("role has no pinned executable")
 	}
@@ -474,8 +501,12 @@ func startChild(ctx context.Context, o Options, image *os.File, c *child, events
 	})
 	// fd 4 is the open module image, pinned at supervisor startup. Replacing
 	// A role path or its symlink cannot mix another generation into this tree.
+	files := []*os.File{os.Stdin, os.Stdout, os.Stderr, childFD, image}
+	if engine != nil {
+		files = append(files, engine) // fd 5 belongs to this role's pinned engine
+	}
 	process, err := os.StartProcess("/proc/self/fd/4", args, &os.ProcAttr{
-		Env: env, Files: []*os.File{os.Stdin, os.Stdout, os.Stderr, childFD, image},
+		Env: env, Files: files,
 		Sys: &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGKILL},
 	})
 	if err != nil {

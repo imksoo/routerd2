@@ -13,7 +13,49 @@
 続く容量整理では旧QAのISO・配布archive・log/captureと、未コミット変更のない試験用checkout65個を
 さらに約52GiB削除した。既存ソース、実行中の隔離試験、環境撤去に必要な状態は保護した。
 
-## 現在の開発版: ppp-pd / native-24
+## 現在の開発版: ppp-image / native-25（作業中）
+
+PPPoE engineをhost依存から固定配布imageへ変更した。manifest v4はPPP roleとengine/sourceを
+署名bindingで結び、worker ABI4のFD5で同じengine inodeを渡す。helperは空のprivate chrootに
+regular-file imageを展開し、固定pppd 2.5.3・plugin・musl loader/libc・libpcap・OpenSSLを使う。
+実接続で`Could not load legacy provider`を再現し、`legacy.so`も実依存として同梱した。
+旧host pppd fallback・root .ppprc処理・2.4向けDNS aliasは残さない。裸host既定catalogはPPPを広告しない。
+対応source archiveは実APKのaports commit、APKBUILD、SHA512検証したupstream source/patchを含む。
+`make pppoe-engine PPP_ARCH=arm64 PPP_DIR=dist/ppp-arm64`でforeign executableを実行せず作れる。
+
+確認済み:
+
+- `make check build build-publisher build-linux RELEASE_ID=ppp-image`成功。Go/Python、全体Race Detector、vet、6静的ELF。
+- amd64/arm64の実3ELF＋PPP image/sourceのpublisher→署名stage→initialize成功。arm64は実行していない。
+- 署名PID1 catalogから独立RP-PPPoE3.15/pppd2.4.9＋ISC DHCP4.4.3-P1へPAP/CHAP接続し、
+  PD→LAN RA/SLAAC→IPv6 TCP/UDP、Renew、worker/session再作成、同じDUID、元期限、古い通知、
+  server無応答・復旧、confirmed rollbackを確認した。通常DADを使う。
+- 再現したprovider欠落imageを、publisherと正しく署名したbundleの受信時に適用前拒否した。
+- 同梱engineで独立PPP/AFTR二WANの実TCP/UDP、大TCP/fragment、Health/PBR切替・復旧、worker再起動を確認した。
+- scratch containerのPID1/control/shutdown成功。Docker tmpfsの既定1777ではstate所有権検証が失敗したため、
+  試験起動を`/run:mode=0755`・`/var/lib/routerd:mode=0700`へ修正した。製品検証は緩めない。
+- Alpine linux-virtにはPPPoE moduleがないことを実bootで確認し、factoryをlinux-ltsの必要module閉包へ変更した。
+  QEMUの実PID1起動、独立ACのCHAP、ISC PD、別Linux SLAAC端末の両family TCP/UDPとRenewを確認した。
+  PPP再起動後も新session・新PD世代で両family TCP/UDPを確認した。
+  `make qemu-pppoe DHCP6_SERVER=/path/to/dhcpd`で再実行する。相手はIPv6CP完了→global addressのDAD→明示server DUIDが前提。
+
+未完了: PPP learned DNSのresolver反映、全resource field、全MTU/VRF条件、engine入り更新/fallback、
+kernel capability manifestと対応source配布、container PPP実通信、実ISP PPP、ARM実行、物理NIC/性能受入。
+これは全計画完了や対象実機利用可の判定ではない。
+現在の診断出力は`dist/pppoe-current*`・`dist/pppoe-baseline-current/`・`dist/dual-wan-current/`・
+`dist/ppp-image-*.log`・`dist/ppp-appliance-peer.log`。長期保存・archiveはしない。
+署名CHAP初回は負荷中の25秒起動待ちで失敗した。原因確定前に負荷だけの問題とは断定しない。
+同じ期限の別実行で全経路を通したが、起動遅延の受入を閉じたとはしない。
+
+実上流は別cohortのnative-24を稼働中。最初の同一TCPは約30分で上流FINを受け、
+そのFINがAFTRからLANへ転送された。新規HTTPS/UDPは直後も通ったが、同一TCP継続の合格にはしない。
+以後は新規HTTPSとUDP DNSを定期送信し、自然T1を待っている。終了を確認するまで長時間試験成功とは書かない。
+このcohortはnative-25の物理機/実回線qualificationを代替しない。
+
+直近の容量整理で古い試験出力・一時環境349件、完了peer出力/capture8件、旧OCI image2個と
+古いGo生成cacheを削除し、約21GiBを解放した。ソースと未コミット変更、実行中の試験は保護した。
+
+## 直前版: ppp-pd / native-24
 
 実PPP接続で、Ethernet MACのないinterfaceの自動DUID生成が失敗してDHCPv6 workerが
 再起動することを確認した。保存済み／明示DUIDを再利用し、Ethernetの自動DUID-LLは保つ。

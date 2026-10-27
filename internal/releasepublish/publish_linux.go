@@ -85,7 +85,7 @@ The trust command prints only the public trust map, for explicit installation.`)
 			_ = f.Close()
 		}
 	}()
-	options := release.BundleOptions{ReleaseID: id, Sequence: sequence, GOOS: "linux", GOARCH: arch, BootABI: layout.BootABI, WorkerABI: layout.WorkerABI, Entrypoint: layout.Entrypoint, Roles: layout.Roles}
+	options := release.BundleOptions{ReleaseID: id, Sequence: sequence, GOOS: "linux", GOARCH: arch, BootABI: layout.BootABI, WorkerABI: layout.WorkerABI, Entrypoint: layout.Entrypoint, Roles: layout.Roles, Engines: layout.Engines}
 	for _, a := range layout.Artifacts {
 		if _, exists := files[a.Name]; exists || a.File == *keyPath {
 			return errors.New("duplicate artifact or signing key selected as runtime payload")
@@ -125,11 +125,12 @@ The trust command prints only the public trust map, for explicit installation.`)
 // Layout is publisher input, not a runtime manifest. Local source paths never
 // enter the signed runtime, and neither arbitrary argv nor shell hooks exist.
 type Layout struct {
-	BootABI    int                   `json:"boot_abi"`
-	WorkerABI  int                   `json:"worker_abi"`
-	Entrypoint string                `json:"entrypoint"`
-	Roles      []release.RoleBinding `json:"roles"`
-	Artifacts  []ArtifactInput       `json:"artifacts"`
+	BootABI    int                     `json:"boot_abi"`
+	WorkerABI  int                     `json:"worker_abi"`
+	Entrypoint string                  `json:"entrypoint"`
+	Roles      []release.RoleBinding   `json:"roles"`
+	Engines    []release.EngineBinding `json:"engines,omitempty"`
+	Artifacts  []ArtifactInput         `json:"artifacts"`
 }
 type ArtifactInput struct {
 	Name    string `json:"name"`

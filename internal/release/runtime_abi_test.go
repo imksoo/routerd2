@@ -20,7 +20,7 @@ import (
 
 func TestSignedManifestABIMustMatchEveryNativeArtifact(t *testing.T) {
 	m, entries := entriesFor(t, "fixture-r1", 1)
-	if m.Version != 3 || !m.RuntimeABI.Equal(runtimeabi.Current()) {
+	if m.Version != 4 || !m.RuntimeABI.Equal(runtimeabi.Current()) {
 		t.Fatal("manifest omitted executable ABI declaration")
 	}
 	m.RuntimeABI.ConfigurationContract = "other-valid-contract"
@@ -158,7 +158,7 @@ func TestLegacyManifestV2AndMissingABIHaveNoCompatibilityReader(t *testing.T) {
 	m, raw, _ := signedFixture(t, "fixture-r1", 1, nil)
 	abi, _ := json.Marshal(m.RuntimeABI)
 	old := bytes.Replace(raw, append([]byte(`,"runtime_abi":`), abi...), nil, 1)
-	old = bytes.Replace(old, []byte(`"version":3`), []byte(`"version":2`), 1)
+	old = bytes.Replace(old, []byte(`"version":4`), []byte(`"version":2`), 1)
 	sig := ed25519.Sign(testKey(), append([]byte("routerd2 signed extracted runtime manifest v2\x00"), old...))
 	public := testKey().Public().(ed25519.PublicKey)
 	if _, _, err := VerifyManifest(old, sig, map[string]ed25519.PublicKey{KeyID(public): public}, "linux", runtime.GOARCH, DefaultMaxArtifactBytes); err == nil {
@@ -195,7 +195,7 @@ func TestOfflinePublisherRejectsMixedNativeABIsBeforeOutput(t *testing.T) {
 	}
 	m, _, _ := signedFixture(t, fixtureRelease, 1, nil)
 	var out bytes.Buffer
-	_, err = WriteBundle(context.Background(), &out, BundleOptions{ReleaseID: fixtureRelease, Sequence: 1, GOOS: "linux", GOARCH: runtime.GOARCH, BootABI: 1, WorkerABI: 3, Entrypoint: m.Entrypoint, Roles: m.Roles, Artifacts: m.Artifacts}, testKey(), files)
+	_, err = WriteBundle(context.Background(), &out, BundleOptions{ReleaseID: fixtureRelease, Sequence: 1, GOOS: "linux", GOARCH: runtime.GOARCH, BootABI: 1, WorkerABI: 4, Entrypoint: m.Entrypoint, Roles: m.Roles, Artifacts: m.Artifacts}, testKey(), files)
 	if err == nil || out.Len() != 0 {
 		t.Fatal("mixed native declarations reached published output", err)
 	}

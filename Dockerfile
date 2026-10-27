@@ -1,6 +1,9 @@
 # syntax=docker/dockerfile:1
 ARG GO_VERSION=1.27.3
 ARG ALPINE_VERSION=3.24.3
+ARG TARGETARCH
+
+FROM routerd2-pppoe-engine:${ALPINE_VERSION}-${TARGETARCH} AS ppp-artifacts
 
 FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine3.24 AS toolchain
 
@@ -27,6 +30,7 @@ RUN GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -buildvcs=false \
       -ldflags "-s -w -X github.com/imksoo/routerd2/internal/buildinfo.Identity=ROUTERD2-RELEASE-V1:$RELEASE_ID:END" \
       -o /out/routerd-logging ./cmd/routerd-logging \
  && GOOS=$TARGETOS GOARCH=$TARGETARCH python3 scripts/licenses.py --output dist/licenses
+RUN python3 -c 'import json; b=json.load(open("images/boot.json")); b["platform"]="container"; b.pop("kernel_modules"); b["ssh"]={"user":"admin"}; json.dump(b,open("/out/boot.json","w"))'
 
 FROM scratch AS runtime
 LABEL org.opencontainers.image.title="routerd2" \
@@ -35,10 +39,13 @@ LABEL org.opencontainers.image.title="routerd2" \
 COPY --from=build /out/routerd /usr/sbin/routerd
 COPY --from=build /out/routerd-modules /usr/libexec/routerd-modules
 COPY --from=build /out/routerd-logging /usr/libexec/routerd-logging
+COPY --from=ppp-artifacts /pppoe-engine.tar /usr/lib/routerd/pppoe-engine.tar
+COPY --from=ppp-artifacts /pppoe-sources.tar /usr/share/doc/routerd2/pppoe-sources.tar
+COPY --from=build /out/boot.json /etc/routerd/boot.json
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY images/config-empty.json /etc/routerd/config.json
 COPY LICENSE /usr/share/licenses/routerd2/LICENSE
 COPY --from=build /src/dist/licenses/ /usr/share/licenses/routerd2/dependencies/
 STOPSIGNAL SIGTERM
 ENTRYPOINT ["/usr/sbin/routerd"]
-CMD ["run", "--platform", "container", "--config", "/etc/routerd/config.json", "--runtime-dir", "/run/routerd", "--state-dir", "/var/lib/routerd"]
+CMD ["boot", "--file", "/etc/routerd/boot.json"]

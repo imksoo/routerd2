@@ -20,7 +20,7 @@ import (
 
 var componentName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$`)
 
-const signatureDomain = "routerd2 signed extracted runtime manifest v3\x00"
+const signatureDomain = "routerd2 signed extracted runtime manifest v4\x00"
 
 func KeyID(public ed25519.PublicKey) string {
 	sum := sha256.Sum256(public)
@@ -40,7 +40,7 @@ func ValidateManifest(m Manifest, maxArtifact int64) error {
 		return errors.New("invalid artifact size policy")
 	}
 	if m.Version != ManifestVersion || m.Sequence == 0 {
-		return errors.New("manifest requires version 3 and a nonzero release sequence")
+		return errors.New("manifest requires version 4 and a nonzero release sequence")
 	}
 	if _, err := buildinfo.ParseIdentity(buildinfo.IdentityPrefix + m.ReleaseID + buildinfo.IdentitySuffix); err != nil {
 		return fmt.Errorf("release ID: %w", err)
@@ -51,7 +51,7 @@ func ValidateManifest(m Manifest, maxArtifact int64) error {
 	if !validDigest(m.KeyID) {
 		return errors.New("manifest requires a full SHA256 signing key ID")
 	}
-	if m.BootABI != 1 || m.WorkerABI != 3 {
+	if m.BootABI != 1 || m.WorkerABI != 4 {
 		return errors.New("unsupported boot or worker ABI")
 	}
 	if _, err := runtimeabi.EncodeRecord(m.RuntimeABI); err != nil {
@@ -101,6 +101,18 @@ func ValidateManifest(m Manifest, maxArtifact int64) error {
 			return errors.New("invalid, duplicate or non-executable runtime role binding")
 		}
 		roles[binding.Role] = true
+	}
+	engines := map[string]bool{}
+	for _, binding := range m.Engines {
+		image, exists := artifacts[binding.Artifact]
+		source, hasSource := artifacts[binding.Sources]
+		if binding.Role != "pppoe" || !roles[binding.Role] || engines[binding.Role] || !exists || image.Kind != "data" || !hasSource || source.Kind != "data" || binding.Artifact == binding.Sources {
+			return errors.New("PPP engine requires one role binding, data image and corresponding source artifact")
+		}
+		engines[binding.Role] = true
+	}
+	if roles["pppoe"] && !engines["pppoe"] {
+		return errors.New("PPPoE role has no signed engine image and source binding")
 	}
 
 	return nil

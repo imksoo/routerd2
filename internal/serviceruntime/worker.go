@@ -105,7 +105,9 @@ func Run(ctx context.Context, runtimeDir, name, role, path, digest string, gener
 		if err := decode(instance.Config, &cfg); err != nil {
 			return err
 		}
-		return pppoe.Run(runCtx, cfg, func(ctx context.Context, s pppoeconfig.Snapshot) error { return c.update(ctx, s) }, ready)
+		engine := os.NewFile(5, "pppoe-engine")
+		defer engine.Close()
+		return pppoe.Run(runCtx, cfg, engine, func(ctx context.Context, s pppoeconfig.Snapshot) error { return c.update(ctx, s) }, ready)
 	case "health":
 		var cfg health.Config
 		if err := decode(instance.Config, &cfg); err != nil {

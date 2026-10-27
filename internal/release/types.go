@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	ManifestVersion               = 3
+	ManifestVersion               = 4
 	StateVersion                  = 1
 	MaxManifestBytes              = 64 << 10
 	MaxArtifacts                  = 64
@@ -54,6 +54,12 @@ type RoleBinding struct {
 	Artifact string `json:"artifact"`
 }
 
+type EngineBinding struct {
+	Role     string `json:"role"`
+	Artifact string `json:"artifact"`
+	Sources  string `json:"sources"`
+}
+
 // Sequence is a publisher-assigned, strictly increasing release counter. A
 // release ID is an opaque human-readable identity, never a version comparison.
 type Manifest struct {
@@ -68,6 +74,7 @@ type Manifest struct {
 	RuntimeABI runtimeabi.Descriptor `json:"runtime_abi"`
 	Entrypoint string                `json:"entrypoint"`
 	Roles      []RoleBinding         `json:"roles"`
+	Engines    []EngineBinding       `json:"engines,omitempty"`
 	Artifacts  []Artifact            `json:"artifacts"`
 }
 

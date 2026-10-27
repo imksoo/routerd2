@@ -1,78 +1,61 @@
-# ADR 0002: PPPoE は既存の foreground pppd 経路を統合する
+# ADR 0002: PPPoE uses a pinned foreground pppd image
 
-日付: 2026-10-26。状態: worker と隔離 Linux profile を実装、配布 engine は未完了。
+Date: 2026-10-27. Status: implemented; complete NET-04 qualification remains open.
 
-routerd の `pkg/pppoeclient` は PPP を独自実装せず、`pppd` と RP-PPPoE を使っている。
-routerd2 でも、この実装の `LinuxPeer` を土台にした設定生成を使う。未実装の native PPP engine を
-新規作成することは、相互接続を早く成立させる今回の目的に必要ない。
+routerd's `pkg/pppoeclient.LinuxPeer` supplies the operational basis for the
+pppd options, authentication and session lifecycle. routerd2 does not implement
+a second PPP protocol engine. Its worker owns one foreground pppd process;
+pppd owns the PPP unit, IPCP/IPv6CP and negotiated addresses. The network writer
+owns finite routes, forwarding and NAT. Route-only intent changes keep the
+session. Observations use actual kernel addresses, not log strings.
 
-- supervisor が PPPoE worker を所有し、worker が foreground pppd を一つ所有する。
-  child の終了を待ってから worker が終了する。強制終了時は Linux の親終了通知で
-  child も終了する。作成した OS thread は child の終了まで保持する。
-  setuid pppd への exec でも通知が消えないよう `NO_NEW_PRIVS` を設定する。
-- pppd が PPP unit と IPCP/IPv6CP の交渉・アドレスを所有する。network writer は
-  そのアドレスを再設定せず、有限の観測に基づく経路・転送・NAT を所有する。
-  LCP と再接続は pppd と既存 supervisor のそれぞれの寿命に属する。
-- 接続済みの判定はログ中の文字列ではなく、実際の kernel の local/peer address を使う。
-  観測が更新されなければ、writer は元の BOOTTIME 期限で経路を撤去する。
-- 資格情報は明示した private password file から読む。argv と観測へ password を入れない。
-  child 専用 mount namespace の `/etc/ppp` と `/run` に設定・DNS・PID file を閉じ込める。
-  pppd が読む root の `.ppprc` も隠し、ホストの既存設定や shell hook を実行しない。
-  `usepeerdns` の結果は child の private file から型付き観測へ渡す。
+The selected engine is Alpine 3.24.3 ppp-daemon/ppp-pppoe 2.5.3-r0. Its minimal
+regular-file tar image contains pppd, pppoe.so, musl's interpreter/libc, libpcap,
+OpenSSL libssl/libcrypto and its legacy provider. A real connection failed with
+“Could not load legacy provider” when only DT_NEEDED libraries were included.
+The builder and validator now include that actual dlopen dependency.
+`make pppoe-engine` builds amd64 or arm64 inputs without executing foreign code.
+The inventory names exact APK versions, aports commits and original notices.
+The separate corresponding-source tar includes upstream sources, APKBUILDs and
+patches checked against their SHA512 values. It is not mounted in the helper.
 
-PVE Linux 6.8 / amd64、pppd 2.4.9 と RP-PPPoE 3.15 の独立 AC で、PAP/CHAP、
-MTU 1454、DNS、LAN TCP/UDP、IPv6CP の link-local ping、worker の強制終了、
-元の観測期限、古い世代の通知、認証拒否・修復、AC 停止・復旧を実通信した。
-再実行は `make check-pppoe`。通常の DAD を無効にしない。
+Manifest v4 binds the PPP role to both image and source artifacts. Publisher,
+receiver and supervisor check the image's actual ELF architecture and dependency
+closure. Missing legacy.so is rejected before publication or installation,
+including a correctly signed bundle reproducing that omission. Native commands
+remain static Go ELF. Boot ABI is 1, worker ABI 4 and compiler contract native-25.
+Discarded manifest/worker formats have no compatibility readers.
 
-Alpine 3.24.3 / pppd 2.5.3-r0 の実 rootfs でも同じ PAP/CHAP・転送・障害復旧を確認した。
-旧 alias `rp-pppoe.so` はこの配布物に存在しないため、両 OS が持つ `pppoe.so` を使う。
-DNS 出力先は child 内の `/run/ppp/resolv.conf` に一本化し、pppd 2.4 の出力 path を
-同じファイルへ向ける。root の `.ppprc` に別 MTU がある fixture でも設定した 1454 を保つ。
-LCP capture でも client の MRU 1454 と peer の ACK を確認した。
+The supervisor pins engine and executable descriptors for the cohort. FD 5
+passes the engine to the PPP worker; its helper receives image/config descriptors,
+reads the explicit private password file and enters an empty private chroot
+before extraction. All loader/plugin/library lookup stays inside that image.
+Private /etc/ppp, /run and device nodes supply only this process's state. There
+is no shell, host pppd fallback, host hook or root .ppprc path. Passwords do not
+enter argv or observations. The creating thread outlives pppd; PDEATHSIG and
+bounded child cleanup prevent a second worker from inheriting a live old child.
 
-別 OS の確認は `make pppoe-peer-profile DOCKER='sudo -n docker'` で固定版 rootfs を出力し、
-`python3 scripts/pppoe-peer.py --engine-archive dist/pppoe-peer-profile.tar` で再実行する。
-この archive は試験用であり、署名 runtime や appliance の受入ではない。
+The appliance uses linux-lts: Alpine linux-virt omits CONFIG_PPPOE. The builder
+retains the configured module dependency closure rather than the full general
+purpose module tree. Kernel source distribution and physical NIC qualification
+remain separate unfinished release gates.
 
-この Linux profile は `/usr/sbin/pppd`、対応する `pppoe.so`、`/dev/ppp` と kernel の
-PPP/PPPoE 機能を必要とする。現時点の scratch runtime / appliance に engine を同梱した
-とは扱わない。配布する正確な engine・plugin・loader/library・license の閉包と署名契約は
-CORE-06 / NET-04 の残作業である。Go の静的 build 成功で代用しない。
+Independent peers are RP-PPPoE 3.15/pppd 2.4.9 and ISC DHCP 4.4.3-P1. On PVE
+Linux 6.8, signed PID 1 selection, PAP/CHAP, DNS observation, MTU1454, LAN TCP/UDP,
+IPv6CP, PD-to-LAN RA/SLAAC, Renew, worker/session recovery, original deadlines,
+stale notification rejection and confirmed rollback are exercised through the
+product. Normal DAD is enabled. The peer DHCP server must bind the recreated
+PPP interface after session replacement and have an explicit server DUID.
 
-PPP上のDHCPv6は、MACなしの自動DUID拒否を実接続で再現してDUID-UUIDを永続化した。
-IPv6CPの使用可能なlink-localをPPP観測へ追加し、writerは交渉済みfamilyだけに元の期限付き既定経路を作る。
-`default_route`・`metric`・`table`は両familyに適用する。独立ISC DHCP 4.4.3-P1との
-PD /60、LAN /64の生成RA、別Linux SLAAC端末のIPv6 TCP/UDP、Renew、DHCPv6 worker
-再起動とDUID維持、サーバー無応答によるrouter/clientの失効・復旧を確認した。
-`make check-pppoe-pd DHCP6_SERVER=/path/to/dhcpd`で再実行し、DADは無効にしない。
-peer側はPPPの再生成ごとにPD poolの戻り経路を明示設定する。製品側はPPP hookを使わない。
-最終版のPAP/CHAPはPPP session再作成、古いDHCPv6通知の拒否、元期限での両family経路撤去・復旧も通した。
-独立dhcpdは再作成したpeer PPP ifindexへ再bindする。経路intentはworker configへ渡さず、
-5秒confirmed rollbackで既定経路を撤去・復元してもPPP ifindex・worker世代を維持した。
+Reproduce with `make check-pppoe`, `make check-pppoe-pd DHCP6_SERVER=/path/to/dhcpd`
+and `make check-dual-wan`. The last uses independent PPP and Linux AFTR WANs,
+separate application/client kernels, real Health/PBR, large TCP, fragmented UDP,
+MTU changes, withdrawal, recovery and worker restarts. Relevant current results
+and untested scope are in [the handoff](../pve-codex-handoff.md).
 
-resolver への DNS 適用、完全な旧 resource field の意味、
-完全なMTU/fragment policy、実 ISP と物理 NIC の受入も未完了である。
-これらの結果に応じて今回の interface・配置・契約を変更する。prototype 互換層は作らない。
+Resolver application of learned DNS, complete resource fields, all path-MTU and
+VRF cases, real ISP PPP, container PPP permissions, physical hardware and complete
+engine/kernel update/fallback qualification remain unfinished. Building static
+Go commands or an OCI image does not close those gates.
 
-PPP の有限 `.active` fact と明示した依存関係で Health を起動する。PPP のアドレスと
-UP 状態は引き続き pppd が所有する。専用 routing table と marked probe を使う場合、
-Linux の RPF が応答を拒否し得る。旧 routerd の router profile と同様の効果は、明示した
-`forwarding.ipv4_rp_filter: 0` で選ぶ。all/default の元の値は journal が所有し、設定撤去で
-復元する。既存 interface の個別 RPF 値は変更しない。実 peer で Health→PBR→TCP/UDP と
-設定撤去・confirmed rollback を確認した。
-
-独立 RP-PPPoE AC と Linux AFTR を同時に用いる `make check-dual-wan` では、
-別 LAN client の TCP/UDP 応答で選択経路を識別した。主 probe 障害・復旧、Health の元期限、
-confirmed rollback、AFTR worker の再起動後の復旧を確認した。Health は PPP unit や
-DS-Lite tunnel の interface/address/UP を所有しない。AFTR の active fact は実 supervisor
-登録と元の endpoint 期限に従い、static endpoint に heartbeat を追加しない。
-後続試験ではWANの先のMTU-1500端末と1MiB TCPを往復し、上流ICMP MTU通知の遮断時に
-旧実装のdownload停止を再現した。native MSS clamp後はPPP/DS-Lite、切替・再起動後とも
-転送でき、captureでMSS1414/1420と元の1200維持を確認した。完全なpath MTU/fragment policyや
-実ISP・NICを受入したものではない。
-
-参照:
-
-- [再利用した routerd の設定生成](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/pppoeclient/client.go)
-- [pppd 2.4.9 の user option 読み込み](https://github.com/ppp-project/ppp/blob/ppp-2.4.9/pppd/options.c)
+Comparison source: [routerd LinuxPeer](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/pppoeclient/client.go).

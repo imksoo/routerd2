@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import shlex
 import subprocess
 import time
 import uuid
@@ -17,12 +18,12 @@ def main():
     name = "routerd2-smoke-" + uuid.uuid4().hex[:12]
 
     def run(*command, check=True):
-        return subprocess.run([args.engine, *command], check=check, text=True, capture_output=True, timeout=30)
+        return subprocess.run([*shlex.split(args.engine), *command], check=check, text=True, capture_output=True, timeout=30)
 
     try:
         run("run", "--detach", "--name", name, "--network", "none",
             "--cap-drop", "ALL", "--cap-add", "NET_ADMIN", "--cap-add", "NET_RAW",
-            "--read-only", "--tmpfs", "/run", "--tmpfs", "/var/lib/routerd", args.image)
+            "--read-only", "--tmpfs", "/run:mode=0755", "--tmpfs", "/var/lib/routerd:mode=0700", args.image)
         deadline = time.monotonic() + args.timeout
         while time.monotonic() < deadline:
             state = run("inspect", "--format", "{{.State.Running}}", name).stdout.strip()

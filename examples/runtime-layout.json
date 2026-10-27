@@ -1,6 +1,6 @@
 {
   "boot_abi": 1,
-  "worker_abi": 3,
+  "worker_abi": 4,
   "entrypoint": "supervisor",
   "roles": [
     {
@@ -62,6 +62,10 @@
     {
       "role": "bfd",
       "artifact": "native-workers"
+    },
+    {
+      "role": "pppoe",
+      "artifact": "native-workers"
     }
   ],
   "artifacts": [
@@ -87,6 +91,23 @@
       "name": "notices",
       "kind": "data",
       "file": "/build/licenses/manifest.json"
+    },
+    {
+      "name": "ppp-image",
+      "kind": "data",
+      "file": "/build/pppoe-engine.tar"
+    },
+    {
+      "name": "ppp-sources",
+      "kind": "data",
+      "file": "/build/pppoe-sources.tar"
+    }
+  ],
+  "engines": [
+    {
+      "role": "pppoe",
+      "artifact": "ppp-image",
+      "sources": "ppp-sources"
     }
   ]
 }

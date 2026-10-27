@@ -94,3 +94,14 @@ The selection is a bounded reference, not a ResourceProgram or executable path.
 A `startup` object together with `release` is rejected until selection and
 fallback for the runtime/configuration pair are implemented atomically. See
 [the startup contract](../../docs/startup-config.md).
+
+## PPP engine binding
+
+A factory catalog declaring `pppoe` must also declare
+`"engines":{"pppoe":"/usr/lib/routerd/pppoe-engine.tar"}`.
+`make pppoe-engine` supplies that pinned archive and its corresponding source
+archive. The bare host default catalog does not advertise PPPoE.
+Signed release selection replaces both worker and engine bindings from the
+verified manifest and passes their pinned descriptors to workers. The worker
+ABI is 4: FD 3 carries lifecycle IPC, FD 4 the native image and FD 5 the PPP
+engine image for that role. A restart keeps the same engine inode.

@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/pppimage"
 	"golang.org/x/sys/unix"
 )
 
@@ -432,6 +433,13 @@ func (s *Store) stageArtifact(ctx context.Context, dir *os.File, a Artifact, b b
 			return fmt.Errorf("%s: %w", a.Name, err)
 		}
 	}
+	for _, engine := range m.Engines {
+		if engine.Artifact == a.Name {
+			if err := pppimage.Validate(f, m.GOARCH); err != nil {
+				return fmt.Errorf("%s engine: %w", engine.Role, err)
+			}
+		}
+	}
 	mode := os.FileMode(0400)
 	if a.Kind == "native" {
 		mode = 0500
@@ -501,6 +509,11 @@ func (s *Store) openImage(ctx context.Context, ref Ref) (*Image, error) {
 			if err := s.verifyNative(f, a, m, ref.Digest); err != nil {
 				return fail(fmt.Errorf("%w: %v", ErrCorrupt, err))
 			}
+		}
+	}
+	for _, engine := range m.Engines {
+		if err := pppimage.Validate(image.Artifacts[engine.Artifact], m.GOARCH); err != nil {
+			return fail(fmt.Errorf("%s engine: %w", engine.Role, err))
 		}
 	}
 	return image, nil

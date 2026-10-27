@@ -13,6 +13,8 @@ QEMU_RELEASE_TIMEOUT ?= 240
 QEMU_STORAGE_TIMEOUT ?= 240
 RELEASE_BUILT_DIR ?= dist/bin
 DHCP6_SERVER ?= /usr/sbin/dhcpd
+PPP_ARCH ?= $(shell $(GO) env GOARCH)
+PPP_DIR ?= dist
 QEMU_SSH_KEY ?=
 
 LDFLAGS = -s -w -X github.com/imksoo/routerd2/internal/buildinfo.Identity=ROUTERD2-RELEASE-V1:$(RELEASE_ID):END
@@ -97,27 +99,27 @@ check: fmt-check test test-dependencies test-tools race vet
 check-health-pbr: build
 	$(PYTHON) scripts/daemon-tests.py health-pbr --go '$(GO)'
 
-check-dual-wan: build
+check-dual-wan: build pppoe-engine
 	$(PYTHON) scripts/dual-wan-peer.py
 
 .PHONY: check-dual-wan-bridge
-check-dual-wan-bridge: build
+check-dual-wan-bridge: build pppoe-engine
 	$(PYTHON) scripts/dual-wan-peer.py --bridge-wan --output dist/dual-wan-bridge
 
-check-pppoe: build
+check-pppoe: build build-publisher pppoe-engine
 	$(PYTHON) scripts/pppoe-peer.py
 
 .PHONY: check-pppoe-pd
-check-pppoe-pd: build
+check-pppoe-pd: build build-publisher pppoe-engine
 	$(PYTHON) scripts/pppoe-peer.py --dhcp6-server '$(DHCP6_SERVER)' --output dist/pppoe-pd
 
-.PHONY: pppoe-peer-profile
-pppoe-peer-profile:
-	$(DOCKER) build --build-arg ALPINE_VERSION=$(ALPINE_VERSION) -f packaging/alpine/pppoe-peer.Dockerfile -t routerd2-pppoe-peer:$(ALPINE_VERSION) .
-	mkdir -p dist
-	@set -eu; profile_id=$$($(DOCKER) create --network none routerd2-pppoe-peer:$(ALPINE_VERSION)); \
+.PHONY: pppoe-engine
+pppoe-engine:
+	$(DOCKER) build --platform linux/$(PPP_ARCH) --build-arg ALPINE_VERSION=$(ALPINE_VERSION) -f packaging/alpine/pppoe-engine.Dockerfile -t routerd2-pppoe-engine:$(ALPINE_VERSION)-$(PPP_ARCH) .
+	mkdir -p $(PPP_DIR)
+	@set -eu; profile_id=$$($(DOCKER) create --network none routerd2-pppoe-engine:$(ALPINE_VERSION)-$(PPP_ARCH) /not-executed); \
 	  trap '$(DOCKER) rm "$$profile_id" >/dev/null' EXIT HUP INT TERM; \
-	  $(DOCKER) export --output dist/pppoe-peer-profile.tar "$$profile_id"
+	  $(DOCKER) export "$$profile_id" | tar --no-same-owner -xf - -C $(PPP_DIR) pppoe-engine.tar pppoe-sources.tar
 
 check-vrrp-unicast: build
 	$(PYTHON) scripts/vrrp-unicast.py --go '$(GO)'
@@ -159,6 +161,11 @@ build: licenses
 	CGO_ENABLED=0 $(GO) build -trimpath -buildvcs=false -ldflags '$(LDFLAGS)' -o dist/bin/routerd-modules ./cmd/routerd-modules
 	CGO_ENABLED=0 $(GO) build -trimpath -buildvcs=false -ldflags '$(LDFLAGS)' -o dist/bin/routerd-logging ./cmd/routerd-logging
 
+.PHONY: build-publisher
+build-publisher: licenses
+	mkdir -p dist/bin
+	CGO_ENABLED=0 $(GO) build -trimpath -buildvcs=false -ldflags '$(LDFLAGS)' -o dist/bin/routerd-bundle ./cmd/routerd-bundle
+
 build-linux: licenses
 	@set -eu; for arch in amd64 arm64; do \
 	  mkdir -p "dist/bin/linux-$$arch"; \
@@ -170,24 +177,30 @@ build-linux: licenses
 release-built-test:
 	ROUTERD2_INTEGRATION_REQUIRED=1 ROUTERD2_RELEASE_BUILT_DIR='$(abspath $(RELEASE_BUILT_DIR))' ROUTERD2_RELEASE_BUILT_ID='$(RELEASE_ID)' $(GO) test -race -tags integration -run '^Test(BuiltRuntimeCatalog|PublishBuiltRelease)$$' -count=1 -v ./internal/release ./internal/releasepublish
 
-container:
+container: pppoe-engine
 	$(DOCKER) build $(BUILD_ARGS) -t $(CONTAINER_TAG) .
 
 container-multi:
+	$(MAKE) pppoe-engine PPP_ARCH=amd64 PPP_DIR=dist/ppp-amd64
+	$(MAKE) pppoe-engine PPP_ARCH=arm64 PPP_DIR=dist/ppp-arm64
 	mkdir -p dist
 	$(DOCKER) buildx build $(BUILD_ARGS) --platform linux/amd64,linux/arm64 --output type=oci,dest=dist/routerd2.oci.tar .
 
 container-smoke: container
-	$(PYTHON) images/container-smoke.py --engine $(DOCKER) --image $(CONTAINER_TAG)
+	$(PYTHON) images/container-smoke.py --engine '$(DOCKER)' --image $(CONTAINER_TAG)
 
-apk:
+apk: pppoe-engine
 	$(DOCKER) build $(BUILD_ARGS) -f packaging/alpine/Dockerfile --target apk-output --output type=local,dest=dist/apk .
 
-image:
+image: pppoe-engine
 	$(DOCKER) build $(BUILD_ARGS) --build-arg IMAGE_CONFIG=$(IMAGE_CONFIG) --build-arg SSH_AUTHORIZED_KEY -f packaging/alpine/Dockerfile --target appliance-output --output type=local,dest=$(IMAGE_DIR) .
 
 qemu-smoke:
 	$(PYTHON) scripts/qemu-smoke.py --image-dir $(IMAGE_DIR) --timeout $(QEMU_TIMEOUT) $(if $(QEMU_SSH_KEY),--ssh-key $(QEMU_SSH_KEY),)
+
+.PHONY: qemu-pppoe
+qemu-pppoe:
+	$(PYTHON) scripts/qemu-pppoe-peer.py --image-dir $(IMAGE_DIR) --dhcp6-server '$(DHCP6_SERVER)'
 
 qemu-network:
 	$(PYTHON) scripts/qemu-network.py --go '$(GO)' --image-dir $(IMAGE_DIR) --timeout $(QEMU_TIMEOUT)

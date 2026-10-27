@@ -8,14 +8,16 @@ generated LAN RA/SLAAC, IPv6 forwarding and recovery, with normal DAD.
 """
 import argparse
 import copy
+import hashlib
+import io
 import json
 import os
 from pathlib import Path
 import signal
 import subprocess
 import shutil
-import stat
 import time
+import tarfile
 
 
 def run(args):
@@ -39,7 +41,7 @@ def terminated(*_):
     raise KeyboardInterrupt()
 
 
-def peer(stage, auth, engine_archive, dhcp6_server):
+def peer(stage, auth, dhcp6_server):
     # This whole fixture has a private mount namespace. The product engine
     # must additionally create its own: AC secrets/hooks are not client input.
     signal.signal(signal.SIGALRM, deadline)
@@ -57,6 +59,11 @@ def peer(stage, auth, engine_archive, dhcp6_server):
             p = subprocess.Popen(inside(name, args), stdout=output, stderr=subprocess.STDOUT)
         children.append(p)
         return p
+
+    def signal_worker(pid, sig):
+        # Supervisor status uses its PID namespace. Enter that namespace for
+        # signals; those numbers must never be used as host process IDs.
+        run(["nsenter", "-t", str(pid1), "-m", "-p", "python3", "-c", "import os,sys;os.kill(int(sys.argv[1]),int(sys.argv[2]))", str(pid), str(int(sig))])
 
     def api(sock, path, body=None):
         args = ["curl", "--max-time", "3", "-sS", "--unix-socket", str(stage / "run" / sock), "http://localhost" + path]
@@ -156,6 +163,54 @@ def peer(stage, auth, engine_archive, dhcp6_server):
         boot = dict(platform="host", config=str(stage / "config.json"), runtime_dir=str(stage / "run"), state_dir=str(stage / "state"), ssh={"user": "admin"}, workers={r: str(stage.parent / ("routerd-logging" if r == "logging" else "routerd-modules")) for r in ["logging", "network", "control", "management", "pppoe", "health"]})
         if dhcp6_server:
             boot["workers"].update({r: str(stage.parent / "routerd-modules") for r in ("dhcp6", "ra")})
+        boot["engines"] = {"pppoe": str(stage.parent / "pppoe-engine.tar")}
+        key = stage / "key.pem"
+        run(["openssl", "genpkey", "-algorithm", "ED25519", "-out", str(key)])
+        key.chmod(0o600)
+        publisher = str(stage.parent / "routerd-bundle")
+        (stage / "trust.json").write_text(run([publisher, "trust", "--private-key-file", str(key)]))
+        (stage / "trust.json").chmod(0o600)
+        layout = {"boot_abi": 1, "worker_abi": 4, "entrypoint": "routerd",
+                  "roles": [{"role": r, "artifact": "routerd-logging" if r == "logging" else "routerd-modules"} for r in boot["workers"]],
+                  "engines": [{"role": "pppoe", "artifact": "ppp-image", "sources": "ppp-sources"}],
+                  "artifacts": [{"name": n, "kind": "native", "command": n, "file": str(stage.parent / n)} for n in ["routerd", "routerd-modules", "routerd-logging"]] +
+                               [{"name": "ppp-image", "kind": "data", "file": str(stage.parent / "pppoe-engine.tar")}, {"name": "ppp-sources", "kind": "data", "file": str(stage.parent / "pppoe-sources.tar")}]}
+        (stage / "layout.json").write_text(json.dumps(layout))
+        version = json.loads(run([str(stage.parent / "routerd"), "version"]))
+        packed = json.loads(run([publisher, "pack", "--private-key-file", str(key), "--layout", str(stage / "layout.json"), "--release-id", version["release_id"], "--sequence", "1", "--target-arch", "amd64", "--output", str(stage / "bundle.tar")]))
+        # Reproduce the actual dlopen failure, then verify both publication and
+        # receipt reject it before any network configuration or engine starts.
+        broken = stage / "missing-provider.tar"
+        with tarfile.open(stage.parent / "pppoe-engine.tar") as src, tarfile.open(broken, "w", format=tarfile.USTAR_FORMAT) as dst:
+            for h in src:
+                if h.name != "usr/lib/ossl-modules/legacy.so":
+                    dst.addfile(h, src.extractfile(h))
+        bad_layout = copy.deepcopy(layout)
+        next(a for a in bad_layout["artifacts"] if a["name"] == "ppp-image")["file"] = str(broken)
+        (stage / "bad-layout.json").write_text(json.dumps(bad_layout))
+        bad = subprocess.run([publisher, "pack", "--private-key-file", str(key), "--layout", str(stage / "bad-layout.json"), "--release-id", version["release_id"], "--sequence", "2", "--target-arch", "amd64", "--output", str(stage / "bad-published.tar")], capture_output=True, text=True)
+        assert bad.returncode != 0 and "legacy.so" in bad.stderr and not (stage / "bad-published.tar").exists()
+        malformed = copy.deepcopy(packed["manifest"])
+        artifact = next(a for a in malformed["artifacts"] if a["name"] == "ppp-image")
+        artifact.update(size=broken.stat().st_size, sha256=hashlib.sha256(broken.read_bytes()).hexdigest())
+        raw = json.dumps(malformed, separators=(",", ":")).encode()
+        (stage / "signing-input").write_bytes(b"routerd2 signed extracted runtime manifest v4\x00" + raw)
+        run(["openssl", "pkeyutl", "-sign", "-rawin", "-inkey", str(key), "-in", str(stage / "signing-input"), "-out", str(stage / "bad.sig")])
+        with tarfile.open(stage / "bad-signed.tar", "w", format=tarfile.USTAR_FORMAT) as dst:
+            for name, data in [("manifest.json", raw), ("manifest.sig", (stage / "bad.sig").read_bytes())]:
+                h = tarfile.TarInfo(name); h.size = len(data); dst.addfile(h, io.BytesIO(data))
+            for a in layout["artifacts"]:
+                file = broken if a["name"] == "ppp-image" else Path(a["file"])
+                h = tarfile.TarInfo(a["name"]); h.size = file.stat().st_size
+                with file.open("rb") as data:
+                    dst.addfile(h, data)
+        bad = subprocess.run([str(stage.parent / "routerd"), "release", "stage", "--root", str(stage / "bad-store"), "--trust-file", str(stage / "trust.json"), "--target-arch", "amd64", "--file", str(stage / "bad-signed.tar")], capture_output=True, text=True)
+        assert bad.returncode != 0 and "legacy.so" in bad.stderr
+        print("PASS publisher and signed store rejected the reproduced missing-provider image before application", flush=True)
+        selector = ["--root", str(stage / "releases"), "--trust-file", str(stage / "trust.json"), "--target-arch", "amd64"]
+        run([str(stage.parent / "routerd"), "release", "stage", *selector, "--file", str(stage / "bundle.tar")])
+        run([str(stage.parent / "routerd"), "release", "initialize", *selector, "--digest", packed["digest"]])
+        boot.update(platform="appliance", workers={}, engines={}, release={"root": str(stage / "releases"), "trust_file": str(stage / "trust.json")})
         (stage / "boot.json").write_text(json.dumps(boot))
         (stage / "server.conf").write_text("auth\nrequire-" + auth + "\nrefuse-" + ("chap" if auth == "pap" else "pap") + "\nmtu 1454\nmru 1454\nms-dns 203.0.113.53\nlogfd 1\nhide-password\nlcp-echo-interval 1\nlcp-echo-failure 3\n")
         if dhcp6_server:
@@ -178,32 +233,14 @@ def peer(stage, auth, engine_archive, dhcp6_server):
         run(["ip", "-n", acns, "addr", "add", "198.51.100.20/32", "dev", "lo"])
         capture = start(ns, ["tcpdump", "-Z", "root", "--immediate-mode", "-U", "-n", "-i", "any", "-w", str(stage / "pppoe.pcap")], "capture")
         ac = ac_start()
-        command = [str(stage.parent / "routerd"), "boot", "--file", str(stage / "boot.json")]
-        if engine_archive:
-            # Exercise a real alternate distribution root, including its ELF
-            # loader/libraries/plugin, without installing it into the host.
-            profile = stage.parent / ("engine-" + auth)
-            profile.mkdir()
-            run(["tar", "--no-same-owner", "-xf", str(engine_archive), "-C", str(profile)])
-            run(["mount", "--bind", str(profile), str(profile)])
-            for name in ("routerd", "routerd-modules", "routerd-logging"):
-                target = profile / str(stage.parent / name).lstrip("/")
-                target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(stage.parent / name, target)
-                target.chmod(0o500)
-            # Only this case's config/runtime/state crosses the chroot.
-            target = profile / str(stage).lstrip("/")
-            target.mkdir(parents=True, exist_ok=True)
-            run(["mount", "--bind", str(stage), str(target)])
-            run(["mount", "--bind", "/proc", str(profile / "proc")])
-            run(["mount", "--bind", str(root_options), str(profile / "root")])
-            for name, major, minor in (("null", 1, 3), ("ppp", 108, 0), ("urandom", 1, 9)):
-                path = profile / "dev" / name
-                if not path.exists():
-                    os.mknod(path, stat.S_IFCHR | 0o600, os.makedev(major, minor))
-            command = ["python3", "-I", "-c", "import os,sys;os.chroot(sys.argv[1]);os.chdir('/');os.execv(sys.argv[2],sys.argv[2:])", str(profile)] + command
+        command = ["unshare", "--mount", "--pid", "--fork", "--mount-proc", "--kill-child=TERM", str(stage.parent / "routerd"), "boot", "--file", str(stage / "boot.json")]
         daemon = start(ns, command, "console")
+        child_file = Path(f"/proc/{daemon.pid}/task/{daemon.pid}/children")
+        wait(lambda: child_file.read_text().strip())
+        pid1 = int(child_file.read_text().split()[0])
         wait(lambda: link() is not None and routed())
+        assert api("supervisor.sock", "/v1/status")["pid"] == 1
+        print("PASS signed runtime catalog selected its PPP engine under PID 1", flush=True)
         start(acns, ["python3", "-u", "-m", "http.server", "18080", "--bind", "198.51.100.20", "--directory", str(etc)], "http")
         start(acns, ["python3", "-u", "-c", 'import socket\ns=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.bind(("198.51.100.20",18081))\nwhile True:\n b,a=s.recvfrom(4096);s.sendto(b,a)'], "udp")
         probe_command = ["python3", "-u", "-m", "http.server", "18082", "--bind", "198.51.100.20", "--directory", str(etc)]
@@ -237,7 +274,7 @@ def peer(stage, auth, engine_archive, dhcp6_server):
             ipv6_traffic()
             print("PASS real ISC DHCP Renew extended the delegated prefix", flush=True)
             old = modules()["service.pd"]
-            os.kill(old["pid"], signal.SIGKILL)
+            signal_worker(old["pid"], signal.SIGKILL)
             wait(lambda: modules()["service.pd"]["generation"] > old["generation"] and pd_bound())
             assert pd_record()["snapshot"]["client_duid"] == duid
             ipv6_traffic()
@@ -248,12 +285,12 @@ def peer(stage, auth, engine_archive, dhcp6_server):
             saved = modules()
             frozen = [saved["control"]["pid"], saved["service.internet"]["pid"]]
             for pid in frozen:
-                os.kill(pid, signal.SIGSTOP)
+                signal_worker(pid, signal.SIGSTOP)
             wait(lambda: not routed() and not routed6(), 8)
             assert link() is not None
             assert subprocess.run(inside(lan, ["curl", "--noproxy", "*", "--max-time", "1", "-sS", "http://[2001:db8:ffff::20]:18080/"]), capture_output=True).returncode != 0
             for pid in frozen:
-                os.kill(pid, signal.SIGCONT)
+                signal_worker(pid, signal.SIGCONT)
             frozen = []
             wait(lambda: routed() and routed6())
             # The normal five-second watchdog can replace the frozen cohort.
@@ -269,7 +306,7 @@ def peer(stage, auth, engine_archive, dhcp6_server):
             server.terminate()
             server.wait(timeout=5)
             previous, old_index = modules()["service.internet"], link()["ifindex"]
-            os.kill(previous["pid"], signal.SIGKILL)
+            signal_worker(previous["pid"], signal.SIGKILL)
             wait(lambda: link() is not None and link()["ifindex"] != old_index and modules()["service.internet"]["generation"] > previous["generation"], 35)
             server = dhcp6_start()
             ipv6_traffic()
@@ -327,17 +364,17 @@ def peer(stage, auth, engine_archive, dhcp6_server):
         saved = modules()
         frozen = [saved["control"]["pid"], saved["service.internet"]["pid"]]
         for pid in frozen:
-            os.kill(pid, signal.SIGSTOP)
+            signal_worker(pid, signal.SIGSTOP)
         wait(lambda: not routed(), 8)
         assert link() is not None
         print("PASS original observation expiry withdrew writer route with live PPP and frozen producers", flush=True)
         for pid in frozen:
-            os.kill(pid, signal.SIGCONT)
+            signal_worker(pid, signal.SIGCONT)
         frozen = []
         wait(lambda: routed() and selected())
         traffic()
         previous, old_index = modules()["service.internet"], link()["ifindex"]
-        os.kill(previous["pid"], signal.SIGKILL)
+        signal_worker(previous["pid"], signal.SIGKILL)
         wait(lambda: modules()["service.internet"]["generation"] > previous["generation"] and routed() and selected() and link() is not None and link()["ifindex"] != old_index, 35)
         traffic()
         print("PASS killed worker removed old PPP child; replacement restored LAN TCP/UDP", flush=True)
@@ -372,7 +409,7 @@ def peer(stage, auth, engine_archive, dhcp6_server):
         raise
     finally:
         for pid in frozen:
-            os.kill(pid, signal.SIGCONT)
+            signal_worker(pid, signal.SIGCONT)
         for p in reversed(children):
             if p is capture:
                 continue
@@ -402,31 +439,30 @@ def main():
     parser.add_argument("--auth", choices=("pap", "chap"))
     parser.add_argument("--binary-dir", type=Path, default=Path("dist/bin"))
     parser.add_argument("--output", type=Path, default=Path("dist/pppoe-peer"))
-    parser.add_argument("--engine-archive", type=Path, help="Docker-exported distribution with pppd and its actual dependencies")
+    parser.add_argument("--engine-image", type=Path, default=Path("dist/pppoe-engine.tar"), help="Pinned pppd root filesystem archive")
     parser.add_argument("--dhcp6-server", type=Path, help="Run PPP DHCPv6 PD against this independent ISC dhcpd executable")
     args = parser.parse_args()
     if args.inside:
-        peer(args.inside, args.auth, args.engine_archive, args.dhcp6_server)
+        peer(args.inside, args.auth, args.dhcp6_server)
         return
     args.output.mkdir(parents=True, exist_ok=True)
     root = [] if os.geteuid() == 0 else ["sudo", "-n"]
     stage = run(root + ["mktemp", "-d", "/tmp/routerd-pppoe.XXXXXX"]).strip()
     try:
-        for name in ("routerd", "routerd-modules", "routerd-logging"):
+        for name in ("routerd", "routerd-modules", "routerd-logging", "routerd-bundle"):
             run(root + ["install", "-m", "500", str(args.binary_dir.resolve() / name), stage + "/" + name])
         run(root + ["install", "-m", "500", str(Path(__file__).resolve()), stage + "/peer.py"])
-        profile_args = []
-        if args.engine_archive:
-            run(root + ["install", "-m", "400", str(args.engine_archive.resolve()), stage + "/engine.tar"])
-            profile_args = ["--engine-archive", stage + "/engine.tar"]
+        peer_args = []
+        run(root + ["install", "-m", "400", str(args.engine_image.resolve()), stage + "/pppoe-engine.tar"])
+        run(root + ["install", "-m", "400", str(args.engine_image.resolve().with_name("pppoe-sources.tar")), stage + "/pppoe-sources.tar"])
         if args.dhcp6_server:
             run(root + ["install", "-m", "500", os.path.abspath(args.dhcp6_server), stage + "/dhcpd"])
-            profile_args += ["--dhcp6-server", stage + "/dhcpd"]
+            peer_args += ["--dhcp6-server", stage + "/dhcpd"]
         for auth in ((args.auth,) if args.auth else ("pap", "chap")):
             directory = stage + "/" + auth
             run(root + ["mkdir", "-m", "700", directory])
             with (args.output / (auth + ".log")).open("w") as output:
-                result = subprocess.run(root + ["unshare", "--mount", "--propagation", "private", "python3", "-I", stage + "/peer.py", "--inside", directory, "--auth", auth] + profile_args, stdout=output, stderr=subprocess.STDOUT, timeout=200)
+                result = subprocess.run(root + ["unshare", "--mount", "--propagation", "private", "python3", "-I", stage + "/peer.py", "--inside", directory, "--auth", auth] + peer_args, stdout=output, stderr=subprocess.STDOUT, timeout=200)
             packet = subprocess.run(root + ["cat", directory + "/pppoe.pcap"], capture_output=True)
             if packet.returncode == 0:
                 (args.output / (auth + ".pcap")).write_bytes(packet.stdout)

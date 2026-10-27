@@ -79,6 +79,10 @@ func bootConfigured(path string, b runtimeconfig.Boot) error {
 		}
 		b.Workers[binding.Role] = fmt.Sprintf("/proc/self/fd/%d", f.Fd())
 	}
+	b.Engines = map[string]string{}
+	for _, binding := range selection.Image.Manifest.Engines {
+		b.Engines[binding.Role] = fmt.Sprintf("/proc/self/fd/%d", selection.Image.Artifacts[binding.Artifact].Fd())
+	}
 	authority := &release.Authority{Root: b.Release.Root, TrustFile: b.Release.TrustFile, Digest: selection.Image.Release.Digest}
 	if !selection.Trial {
 		return serveRuntime(b, nil, authority)

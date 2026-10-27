@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/pppimage"
 	"github.com/imksoo/routerd2/internal/runtimeabi"
 )
 
@@ -181,6 +182,7 @@ type BundleOptions struct {
 	BootABI, WorkerABI int
 	Entrypoint         string
 	Roles              []RoleBinding
+	Engines            []EngineBinding
 	Artifacts          []Artifact
 }
 
@@ -189,7 +191,7 @@ type BundleOptions struct {
 // complete manifest. The caller must publish output only after a nil error,
 // normally using a temporary file + fsync + rename. No key is saved by this API.
 func WriteBundle(ctx context.Context, output io.Writer, options BundleOptions, key ed25519.PrivateKey, files map[string]*os.File) (Manifest, error) {
-	m := Manifest{Version: ManifestVersion, ReleaseID: options.ReleaseID, Sequence: options.Sequence, GOOS: options.GOOS, GOARCH: options.GOARCH, BootABI: options.BootABI, WorkerABI: options.WorkerABI, Entrypoint: options.Entrypoint, Roles: append([]RoleBinding(nil), options.Roles...)}
+	m := Manifest{Version: ManifestVersion, ReleaseID: options.ReleaseID, Sequence: options.Sequence, GOOS: options.GOOS, GOARCH: options.GOARCH, BootABI: options.BootABI, WorkerABI: options.WorkerABI, Entrypoint: options.Entrypoint, Roles: append([]RoleBinding(nil), options.Roles...), Engines: append([]EngineBinding(nil), options.Engines...)}
 	if ctx == nil || output == nil {
 		return m, errors.New("bundle context and output are required")
 	}
@@ -248,6 +250,11 @@ func WriteBundle(ctx context.Context, output io.Writer, options BundleOptions, k
 			}
 		}
 		m.Artifacts = append(m.Artifacts, Artifact{Name: name, Kind: a.Kind, Command: a.Command, Size: stat.Size(), SHA256: hex.EncodeToString(hash.Sum(nil))})
+	}
+	for _, engine := range m.Engines {
+		if err := pppimage.Validate(files[engine.Artifact], m.GOARCH); err != nil {
+			return m, fmt.Errorf("engine %s: %w", engine.Role, err)
+		}
 	}
 	raw, signature, err := SignManifest(m, key)
 	if err != nil {

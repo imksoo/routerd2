@@ -1,6 +1,9 @@
 # syntax=docker/dockerfile:1
 ARG GO_VERSION=1.27.3
 ARG ALPINE_VERSION=3.24.3
+ARG TARGETARCH
+
+FROM routerd2-pppoe-engine:${ALPINE_VERSION}-${TARGETARCH} AS ppp-artifacts
 
 FROM golang:${GO_VERSION}-alpine3.24 AS toolchain
 
@@ -11,6 +14,8 @@ RUN apk add --no-cache alpine-sdk ca-certificates tar python3 \
  && adduser -D -G abuild builder \
  && mkdir -p /out \
  && chown builder:abuild /out
+COPY --from=ppp-artifacts /pppoe-engine.tar /inputs/pppoe-engine.tar
+COPY --from=ppp-artifacts /pppoe-sources.tar /out/pppoe-sources.tar
 WORKDIR /src
 COPY . .
 ARG RELEASE_ID=dev
@@ -23,7 +28,7 @@ FROM scratch AS apk-output
 COPY --from=package-build /out/ /
 
 FROM alpine:${ALPINE_VERSION} AS image-build
-RUN apk add --no-cache linux-virt kmod python3 gzip xz zstd ca-certificates
+RUN apk add --no-cache linux-lts kmod python3 gzip xz zstd ca-certificates
 COPY --from=package-build /out/ /packages/
 COPY images/ /src/images/
 COPY scripts/build-image.sh /src/scripts/build-image.sh

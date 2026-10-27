@@ -2,9 +2,9 @@
 
 This document describes the **unreleased prototype** format. There are no
 deployed users of this format, and backward compatibility is not required.
-The signed manifest v3 declares a variable artifact set, its native command
+The signed manifest v4 declares a variable artifact set, its native command
 identities, entrypoint, role bindings and embedded runtime format declaration.
-Native static ELF and regular data are supported; former v1/v2 bytes are refused.
+Native static ELF and regular data are supported; discarded manifest versions are refused.
 Appliance boot
 executes the verified entrypoint inode and pins each declared worker role.
 Image staging, boot selection and explicit startup-configuration selection
@@ -35,12 +35,12 @@ It is bounded to 4KiB and 32 sorted unique state components; versions are positi
 and at most 65535, and each writer version must be readable by its own runtime.
 Scanning is streaming, rejects multiple complete valid records, caps malformed
 marker candidates, and bounds readers that stop making progress.
-The manifest signature domain is `routerd2 signed extracted runtime manifest v3\x00`.
+The manifest signature domain is `routerd2 signed extracted runtime manifest v4\x00`.
 The release identity record remains V1; its format is independent of manifest
 version and the runtime ABI record envelope.
 
 The current declaration has configuration schema 2 and semantics contract
-`resource-program-native-24`. Boot ABI is 1 and worker ABI is 3. PPP observations
+`resource-program-native-25`. Boot ABI is 1 and worker ABI is 4. PPP observations
 include negotiated IPv6 link-local readiness; the writer derives finite default
 routes only for negotiated address families. DHCPv6 on non-Ethernet links
 persists DUID-UUID identities. PPP route intent stays outside the worker
@@ -136,9 +136,14 @@ then contains every declared artifact in manifest order. Names are bounded
 single relative filenames in this initial layout, without links or directories.
 The limits are 64 artifacts, 64 roles, 64KiB manifest, 1GiB per artifact and 4GiB
 aggregate payload. Receiver artifact policy defaults to 512MiB per artifact.
-Native files are static project Go executables; external engines, dynamic
-loaders/libraries/plugins and nested artifact layouts need further work and
-are refused by this format. Regular data may contain notices or inventory;
+Native files are static project Go executables. The PPPoE role binds its
+regular data image and corresponding sources through `engines`, for example
+`{"role":"pppoe","artifact":"ppp-image","sources":"ppp-sources"}`.
+`make pppoe-engine` builds the pinned pppd 2.5.3 image, including its ELF
+loader, libraries, plugin and OpenSSL legacy provider. The publisher and
+receiver verify their actual ELF closure before application. The helper uses
+a private chroot, never host library or plugin lookup. Other external engines
+and complete kernel capability qualification remain unfinished. Regular data may contain notices or inventory;
 this is not a claim of complete source/SBOM/license distribution qualification.
 Distribute all required exact-build license and source materials.
 

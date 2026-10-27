@@ -22,6 +22,7 @@ type Boot struct {
 	Platform      string               `json:"platform"`
 	Config        string               `json:"config"`
 	Workers       map[string]string    `json:"workers"`
+	Engines       map[string]string    `json:"engines,omitempty"`
 	RuntimeDir    string               `json:"runtime_dir"`
 	StateDir      string               `json:"state_dir"`
 	KernelModules []string             `json:"kernel_modules,omitempty"`
@@ -126,6 +127,14 @@ func (b Boot) Validate() error {
 			return errors.New("worker roles require clean absolute executable paths")
 		}
 	}
+	for role, path := range b.Engines {
+		if role != "pppoe" || b.Workers[role] == "" || !filepath.IsAbs(path) || filepath.Clean(path) != path {
+			return errors.New("engine requires a declared PPPoE role and clean absolute archive path")
+		}
+	}
+	if b.Release == nil && b.Workers["pppoe"] != "" && b.Engines["pppoe"] == "" {
+		return errors.New("PPPoE role requires its bundled engine archive")
+	}
 	if b.RuntimeDir == b.StateDir {
 		return errors.New("runtime_dir and state_dir must be separate")
 	}
@@ -170,7 +179,7 @@ func pathContains(parent, child string) bool {
 // is a role catalog; there is no old module_path reader or implicit conversion.
 func NativeWorkers(path string) map[string]string {
 	out := map[string]string{}
-	for _, role := range []string{"logging", "network", "control", "management", "health", "pppoe", "dhcp4", "dhcp6", "dhcp_server", "dhcp_relay", "ra", "ra_client", "aftr", "dns", "vrrp", "bgp", "bfd"} {
+	for _, role := range []string{"logging", "network", "control", "management", "health", "dhcp4", "dhcp6", "dhcp_server", "dhcp_relay", "ra", "ra_client", "aftr", "dns", "vrrp", "bgp", "bfd"} {
 		if role == "logging" {
 			out[role] = filepath.Join(filepath.Dir(path), "routerd-logging")
 		} else {
