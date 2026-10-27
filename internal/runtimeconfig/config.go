@@ -128,9 +128,12 @@ func (b Boot) Validate() error {
 		}
 	}
 	for role, path := range b.Engines {
-		if role != "pppoe" && role != "vrrp" || b.Workers[role] == "" || !filepath.IsAbs(path) || filepath.Clean(path) != path {
-			return errors.New("engine requires a declared PPPoE or VRRP role and clean absolute archive path")
+		if role != "tailscale" && role != "pppoe" && role != "vrrp" || b.Workers[role] == "" || !filepath.IsAbs(path) || filepath.Clean(path) != path {
+			return errors.New("engine requires its declared role and a clean absolute archive path")
 		}
+	}
+	if b.Release == nil && b.Workers["tailscale"] != "" && b.Engines["tailscale"] == "" {
+		return errors.New("Tailscale requires its bundled engine archive")
 	}
 	if b.Release == nil && b.Workers["pppoe"] != "" && b.Engines["pppoe"] == "" {
 		return errors.New("PPPoE role requires its bundled engine archive")

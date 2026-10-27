@@ -36,6 +36,7 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/pppoeconfig"
 	"github.com/imksoo/routerd2/internal/protocol/ra"
 	"github.com/imksoo/routerd2/internal/protocol/raclient"
+	"github.com/imksoo/routerd2/internal/protocol/tailscaleconfig"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
@@ -689,6 +690,22 @@ func strict(b []byte, v any) error {
 }
 func validateSnapshot(instance serviceconfig.Instance, b json.RawMessage) error {
 	switch instance.Role {
+	case "tailscale":
+		var cfg tailscaleconfig.Config
+		var snapshot tailscaleconfig.Snapshot
+		if err := strict(instance.Config, &cfg); err != nil {
+			return err
+		}
+		if err := strict(b, &snapshot); err != nil {
+			return err
+		}
+		if snapshot.Resource != cfg.Resource || snapshot.Interface != cfg.Interface {
+			return errors.New("Tailscale observation identity mismatch")
+		}
+		if !boottime.ValidBootID(snapshot.BootID) || snapshot.ObservedNanos == 0 || snapshot.ExpiresNanos <= snapshot.ObservedNanos {
+			return errors.New("Tailscale observation requires a finite boot interval")
+		}
+		return nil
 	case "pppoe":
 		var cfg pppoeconfig.Config
 		var snapshot pppoeconfig.Snapshot
@@ -840,6 +857,7 @@ func (r *Runtime) Handler() http.Handler {
 	r.observationRoutes(mux)
 	r.aftrRoutes(mux)
 	r.dhcp6ServerRoutes(mux)
+	r.tailscaleRoutes(mux)
 	r.bfdRoutes(mux)
 	mux.HandleFunc("GET /v1/services", func(w http.ResponseWriter, req *http.Request) { localapi.JSON(w, 200, r.State()) })
 	mux.HandleFunc("POST /v1/services/state", func(w http.ResponseWriter, req *http.Request) {

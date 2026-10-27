@@ -167,6 +167,24 @@ func validateNative(d Native, source Document) error {
 	}
 	for _, service := range d.Services {
 		name := ""
+		if service.Tailscale != nil {
+			name = service.Tailscale.Interface
+			for _, wg := range d.Network.WireGuard {
+				if wg.ListenPort == 41641 {
+					return errors.New("Tailscale and WireGuard cannot share UDP41641")
+				}
+			}
+			for _, route := range d.Network.Routes {
+				if route.Table == 52 {
+					return errors.New("Tailscale owns routing table 52")
+				}
+			}
+			for _, rule := range d.Network.PolicyRules {
+				if rule.Table == 52 || rule.Priority >= 5210 && rule.Priority <= 5270 {
+					return errors.New("Tailscale owns table52 and rule priorities5210..5270")
+				}
+			}
+		}
 		if service.PPPoE != nil {
 			name = service.PPPoE.PPPInterface
 		}
@@ -232,7 +250,7 @@ func validateNative(d Native, source Document) error {
 			continue
 		}
 		service := resource.Service
-		if owner := reserved[service.Interface()]; owner != "" && !guardedDynamicResource(resource, owners[owner]) {
+		if owner := reserved[service.Interface()]; owner != "" && owner != service.Name && !guardedDynamicResource(resource, owners[owner]) {
 			if !(service.DHCPServer != nil && service.DHCPServer.HA != nil && service.DHCPServer.HA.Owner == owner) && !(service.DHCP6 != nil && service.DHCP6.HA != nil && service.DHCP6.HA.Owner == owner) {
 				return fmt.Errorf("service %s cannot use dynamic interface of %s without a dependency", service.Name, owner)
 			}

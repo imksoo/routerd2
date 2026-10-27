@@ -1500,6 +1500,29 @@ HA-02/EXT-02も未完了であり、今回の接続継続だけでhomert置換�
 範囲: 旧 routerd 互換 / track: engines / risk: high。
 前提: CORE-03, CORE-06, SYS-02, NET-03, NET-05, NET-06。 設計判断: D-01, D-02, D-03, D-07。
 
+状態: **実装・相互接続を進行中**。native-41 / worker ABI5。
+
+旧routerdの`pkg/tailscale`、`tailscale_systemd.go`、`chain/system.go`を比較し、
+固定Tailscale1.104.2 daemon＋typed LocalAPIを選んだ。boot/controlへengineを組み込まず、
+workerがdaemon・TUN・table52を所有する。起動時に古いpreferencesを有効にせず、保存identityを
+保持して現在の設定を一括適用する。network workerが明示FW/NATを所有する。
+私有CA/resolverと`/run`で通常のhost DNS管理経路を切り、namespace単位の所有を固定する。
+
+PVE Linux6.8/amd64の実署名catalog/PID1/control/network/Health/Tailscaleと、
+独立Headscale0.29.6・公式Tailscale1.104.2・dnsmasqでhostname/TLS/bootstrap DNSを確認した。
+IPv4/IPv6 subnet/exit TCP/UDP、実NAT送信元、直通とUDP遮断時のDERP、worker SIGKILL、
+control/daemon再起動、key削除後のidentity、広告route変更のconfirmed rollback、元条件期限切れと
+回復、node失効後のworker再起動による旧権限の不復活が通った。captureも確認する。
+`make check-tailscale RELEASE_ID=tailscale-routing`で再実行する。生ログ・鍵・captureは残さない。
+engineはGo1.27.3/CGO_ENABLED=0で両architectureをbuildし、実import71 moduleのsource/noticeを含める。
+最終core6静的ELFの署名catalog/publisher/stageがRace Detector付きで通り、engine/sourceを含む
+実署名publisher/stageも両architectureで通った。WAN source policy6000との併用でも転送した。
+ARM64実行・対象NIC・本番tailnetの受入とは区別する。
+
+`accept_routes`/tags/shields_upは実装済みだが実相互接続は未検証。
+acceptDNS/native DNS、Tailscale SSHの別権限/OS契約、旧resource一括importと既存identity移設、
+再認証・OS image/TUN setup統合・広い障害条件・対象実機受入は残る。EXT-02全体とhomert置換は完了していない。
+
 **成果物**
 
 - embedded backendと固定daemon＋typed local interfaceを比較し、旧TailscaleNode各fieldの実効経路を対応させる。
@@ -1514,7 +1537,7 @@ HA-02/EXT-02も未完了であり、今回の接続継続だけでhomert置換�
 
 再利用・比較元: [pkg/tailscale](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/tailscale), [pkg/controller/chain/system.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/system.go), [pkg/api/specs.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go)。
 
-実装先の案: `internal/protocol/tailscale (新設予定)`, `internal/network`, `internal/runtimeplan`, `internal/management`, `packaging/alpine`。
+実装先: `internal/protocol/tailscale`, `internal/network`, `internal/runtimeplan`, `internal/management`, `packaging/alpine`。
 
 ### M6 — 更新・OSイメージ・配備先
 

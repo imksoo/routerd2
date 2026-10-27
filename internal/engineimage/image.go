@@ -27,6 +27,8 @@ func commandPath(role string) string {
 		return PPPCommand
 	case "vrrp":
 		return "usr/sbin/conntrackd"
+	case "tailscale":
+		return "usr/sbin/tailscaled"
 	default:
 		return ""
 	}
@@ -61,7 +63,7 @@ func read(file *os.File) ([]entry, error) {
 			return nil, err
 		}
 		name := h.Name
-		if h.Typeflag != tar.TypeReg || name == "" || name == "." || path.IsAbs(name) || path.Clean(name) != name || name == ".." || strings.HasPrefix(name, "../") || seen[name] || len(entries) >= 128 || h.Size < 0 || h.Size > 16<<20 || h.Size > maxBytes-total {
+		if h.Typeflag != tar.TypeReg || name == "" || name == "." || path.IsAbs(name) || path.Clean(name) != name || name == ".." || strings.HasPrefix(name, "../") || seen[name] || len(entries) >= 128 || h.Size < 0 || h.Size > maxBytes-total {
 			return nil, errors.New("invalid engine image file, path, duplicate or size")
 		}
 		seen[name] = true
@@ -133,10 +135,13 @@ func Validate(file *os.File, arch, role string) error {
 					loader = strings.TrimRight(string(b), "\x00")
 				}
 			}
-			if !path.IsAbs(loader) {
+			if loader == "" && role == "tailscale" {
+				// The pinned upstream Go daemon is a static ELF.
+			} else if !path.IsAbs(loader) {
 				return errors.New("engine command requires its bundled ELF interpreter")
+			} else {
+				pending = append(pending, strings.TrimPrefix(loader, "/"))
 			}
-			pending = append(pending, strings.TrimPrefix(loader, "/"))
 		}
 		libraries, err := f.ImportedLibraries()
 		if err != nil {

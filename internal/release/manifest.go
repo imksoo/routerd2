@@ -106,10 +106,13 @@ func ValidateManifest(m Manifest, maxArtifact int64) error {
 	for _, binding := range m.Engines {
 		image, exists := artifacts[binding.Artifact]
 		source, hasSource := artifacts[binding.Sources]
-		if binding.Role != "pppoe" && binding.Role != "vrrp" || !roles[binding.Role] || engines[binding.Role] || !exists || image.Kind != "data" || !hasSource || source.Kind != "data" || binding.Artifact == binding.Sources {
+		if binding.Role != "tailscale" && binding.Role != "pppoe" && binding.Role != "vrrp" || !roles[binding.Role] || engines[binding.Role] || !exists || image.Kind != "data" || !hasSource || source.Kind != "data" || binding.Artifact == binding.Sources {
 			return errors.New("engine requires one supported role binding, data image and corresponding source artifact")
 		}
 		engines[binding.Role] = true
+	}
+	if roles["tailscale"] && !engines["tailscale"] {
+		return errors.New("Tailscale role has no signed engine and sources")
 	}
 	if roles["pppoe"] && !engines["pppoe"] {
 		return errors.New("PPPoE role has no signed engine image and source binding")

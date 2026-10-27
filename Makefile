@@ -38,6 +38,7 @@ help:
 	  'make check-ha-pd       Verify shared PD across two routers with different BOOTTIME clocks' \
 	  'make check-health-pbr  Required two-WAN real-daemon TCP/UDP failover gate' \
 	  'make check-vrrp-unicast Verify VRRP peer failover and finite WAN identity' \
+	  'make check-tailscale   Verify signed Tailscale subnet/exit traffic, identity and revoke with independent peers' \
 	  'make check-bfd         Verify BFD/BGP routing domains with real workers' \
 	  'make check-dhcp6-server Verify LAN information service and durable DUID with BusyBox' \
 	  'make check-dhcp6-ra-pd Verify shared IA_NA/PD, RA trigger and restart with ISC DHCP' \
@@ -310,3 +311,15 @@ check-ha-state: build build-publisher conntrack-engine
 .PHONY: check-ha-pd
 check-ha-pd: build build-publisher conntrack-engine
 	$(PYTHON) scripts/ha-state-peer.py --dhcp6-server '$(DHCP6_SERVER)'
+
+TAILSCALE_ARCH ?= $(shell $(GO) env GOARCH)
+TAILSCALE_DIR ?= dist
+.PHONY: tailscale-engine tailscale-peers check-tailscale
+tailscale-engine:
+	$(PYTHON) scripts/tailscale-image.py --go '$(GO)' --arch '$(TAILSCALE_ARCH)' --output '$(TAILSCALE_DIR)'
+
+tailscale-peers:
+	$(PYTHON) scripts/tailscale-peers.py
+
+check-tailscale: build build-publisher tailscale-engine tailscale-peers
+	$(PYTHON) scripts/tailscale-peer.py

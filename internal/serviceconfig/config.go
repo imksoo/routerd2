@@ -23,10 +23,12 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/pppoeconfig"
 	"github.com/imksoo/routerd2/internal/protocol/ra"
 	"github.com/imksoo/routerd2/internal/protocol/raclient"
+	"github.com/imksoo/routerd2/internal/protocol/tailscaleconfig"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
 )
 
 type Service struct {
+	Tailscale   *tailscaleconfig.Node    `json:"tailscale,omitempty"`
 	DHCP6Server *DHCP6Server             `json:"dhcp6_server,omitempty"`
 	PPPoE       *PPPoE                   `json:"pppoe,omitempty"`
 	Health      *health.Config           `json:"health,omitempty"`
@@ -111,6 +113,9 @@ var safeName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,23}$`)
 var interfaceName = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]{0,14}$`)
 
 func (s Service) Role() string {
+	if s.Tailscale != nil {
+		return "tailscale"
+	}
 	if s.DHCP6Server != nil {
 		return "dhcp6_server"
 	}
@@ -157,6 +162,9 @@ func (s Service) Role() string {
 }
 func (s Service) ModuleName() string { return "service." + s.Name }
 func (s Service) Interface() string {
+	if s.Tailscale != nil {
+		return s.Tailscale.Interface
+	}
 	if s.DHCP6Server != nil {
 		return s.DHCP6Server.Interface
 	}
@@ -208,7 +216,7 @@ func Validate(services []Service) error {
 		}
 		names[s.Name] = true
 		n := 0
-		for _, set := range []bool{s.PPPoE != nil, s.Health != nil, s.BFD != nil, s.DSLite != nil, s.RAClient != nil, s.DHCPServer != nil, s.DHCP6Server != nil, s.DHCPRelay != nil, s.DHCP4 != nil, s.DHCP6 != nil, s.RA != nil, s.DNS != nil, s.VRRP != nil, s.BGP != nil} {
+		for _, set := range []bool{s.Tailscale != nil, s.PPPoE != nil, s.Health != nil, s.BFD != nil, s.DSLite != nil, s.RAClient != nil, s.DHCPServer != nil, s.DHCP6Server != nil, s.DHCPRelay != nil, s.DHCP4 != nil, s.DHCP6 != nil, s.RA != nil, s.DNS != nil, s.VRRP != nil, s.BGP != nil} {
 			if set {
 				n++
 			}
@@ -220,6 +228,9 @@ func Validate(services []Service) error {
 			return fmt.Errorf("service %s has an invalid interface", s.Name)
 		}
 		key := s.Role() + ":" + s.Interface()
+		if s.Tailscale != nil {
+			key = "tailscale"
+		}
 		if s.PPPoE != nil {
 			key = "pppoe:" + s.PPPoE.PPPInterface
 		}
@@ -261,6 +272,10 @@ func Validate(services []Service) error {
 		}
 		sockets[key] = s.Name
 		switch s.Role() {
+		case "tailscale":
+			if err := tailscaleconfig.ValidateNode(*s.Tailscale); err != nil {
+				return err
+			}
 		case "pppoe":
 			if s.PPPoE.Resource != "" && s.PPPoE.Resource != s.Name {
 				return errors.New("PPPoE resource is managed by the service name")
@@ -458,6 +473,8 @@ func (s Service) Instance(runtimeDir, stateDir string) (Instance, error) {
 	var b []byte
 	var err error
 	switch s.Role() {
+	case "tailscale":
+		b, err = json.Marshal(tailscaleconfig.Config{Node: *s.Tailscale, Resource: s.Name, StateDir: filepath.Join(stateDir, "services", "tailscale"), RuntimeDir: filepath.Join(runtimeDir, "services", "tailscale")})
 	case "pppoe":
 		b, err = json.Marshal(s.PPPoEConfig())
 	case "health":

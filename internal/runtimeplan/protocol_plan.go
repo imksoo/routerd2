@@ -54,6 +54,9 @@ func prepareProtocols(doc config.Native, runtimeDir, stateDir string) (protocolP
 		return nil
 	}
 	for _, service := range doc.Services {
+		if service.Tailscale != nil {
+			plan.serviceLinks[service.Tailscale.Interface] = true
+		}
 		if service.PPPoE != nil {
 			plan.serviceLinks[service.PPPoE.PPPInterface] = true
 		}

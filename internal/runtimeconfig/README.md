@@ -110,3 +110,9 @@ A VRRP service using `conntrack_sync` binds its own `vrrp` engine archive.
 `make conntrack-engine` supplies the runtime and corresponding sources.
 Plain VRRP does not start this engine. See the
 [handoff contract](../protocol/conntracksync/README.md).
+
+A `tailscale` role also requires its `tailscale` engine archive. The engine-free
+host default omits this role. `make tailscale-engine` builds the fixed static
+daemon, full notices and matching source artifact; signed catalogs bind both.
+Its TUN/table52 ownership, explicit FW/NAT and private resolver setup are
+specified in [the Tailscale contract](../protocol/tailscale/README.md).

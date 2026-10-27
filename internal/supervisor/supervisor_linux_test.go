@@ -62,7 +62,6 @@ func helperMain() int {
 		return 0
 	}
 	if role == "orphan-leaf" {
-		_ = os.WriteFile(filepath.Join(state, "orphan.pid"), []byte(strconv.Itoa(os.Getpid())), 0600)
 		time.Sleep(200 * time.Millisecond)
 		return 0
 	}
@@ -97,11 +96,13 @@ func helperMain() int {
 			if err != nil {
 				return 73
 			}
-			_, err = os.StartProcess(executable, []string{executable, "--role=orphan-leaf"}, &os.ProcAttr{Env: os.Environ(), Files: []*os.File{os.Stdin, os.Stdout, os.Stderr}})
+			child, err := os.StartProcess(executable, []string{executable, "--role=orphan-leaf"}, &os.ProcAttr{Env: os.Environ(), Files: []*os.File{os.Stdin, os.Stdout, os.Stderr}})
 			if err != nil {
 				return 74
 			}
-			time.Sleep(40 * time.Millisecond)
+			if err := os.WriteFile(filepath.Join(state, "orphan.pid"), []byte(strconv.Itoa(child.Pid)), 0600); err != nil {
+				return 74
+			}
 			return 17 // Deliberately leave a descendant for the subreaper.
 		}
 		_, _ = worker.ReadMessage(conn)

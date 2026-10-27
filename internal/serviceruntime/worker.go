@@ -35,6 +35,8 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/pppoeconfig"
 	"github.com/imksoo/routerd2/internal/protocol/ra"
 	"github.com/imksoo/routerd2/internal/protocol/raclient"
+	"github.com/imksoo/routerd2/internal/protocol/tailscale"
+	"github.com/imksoo/routerd2/internal/protocol/tailscaleconfig"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 	"github.com/imksoo/routerd2/internal/worker"
@@ -205,6 +207,21 @@ func Run(ctx context.Context, runtimeDir, name, role, path, digest string, gener
 		defer func() { cancel(); <-done }()
 		go func() { defer close(done); defer close(updates); c.watchDNSInput(runCtx, name, digest, updates) }()
 		return dns.Run(runCtx, cfg, updates, ready)
+	case "tailscale":
+		var cfg tailscaleconfig.Config
+		if err := decode(instance.Config, &cfg); err != nil {
+			return err
+		}
+		image := os.NewFile(5, "tailscale-engine")
+		defer image.Close()
+		return tailscale.Run(runCtx, cfg, image, func(ctx context.Context) (tailscaleconfig.Input, error) {
+			var input tailscaleconfig.Input
+			err := c.client.Do(ctx, "GET", "/v1/services/"+name+"/tailscale-input", nil, &input)
+			if err == nil && input.ConfigDigest != digest {
+				err = errors.New("Tailscale input belongs to another configuration")
+			}
+			return input, err
+		}, func(ctx context.Context, s tailscaleconfig.Snapshot) error { return c.update(ctx, s) }, ready)
 	case "vrrp":
 		var cfg vrrp.Config
 		if err := decode(instance.Config, &cfg); err != nil {
