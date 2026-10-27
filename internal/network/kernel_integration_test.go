@@ -246,10 +246,35 @@ func runKernelFixture(t *testing.T) {
 		t.Fatalf("DS-Lite reapply: %v", err)
 	}
 	tcpExchange(t, clientNS, serverNS, "tcp4", "198.18.0.1", "192.0.0.2")
+	if err := server.LinkSetMTU(underlay, 1280); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.LinkSetMTU(aftr, 1240); err != nil {
+		t.Fatal(err)
+	}
+	tunneled.Interfaces[1].MTU = 1280
+	tunneled.Interfaces[len(tunneled.Interfaces)-1].MTU = 1460
+	tunneled.Firewall.IPv4ClearDF = []IPv4ClearDF{{From: "lan0", To: "dslite0"}}
+	for range 2 {
+		state, err := e.Apply(context.Background(), 3, tunneled)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, iface := range state.Interfaces {
+			if iface.Name == "dslite0" && iface.MTU != 1240 {
+				t.Fatalf("DS-Lite did not follow its live underlay: %d", iface.MTU)
+			}
+		}
+		nativeUDPExchange(t, clientNS, serverNS, "udp4", "192.0.2.2:0", "198.18.0.1:47004", "192.0.0.2", PortRange{Start: 1, End: 65535})
+		tcpExchange(t, clientNS, serverNS, "tcp4", "198.18.0.1", "192.0.0.2")
+	}
+	if err := server.LinkSetMTU(underlay, 1500); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := e.Apply(context.Background(), 1, d); err != nil {
 		t.Fatalf("DS-Lite removal: %v", err)
 	}
-	t.Log("native DS-Lite B4 /32 peer /32 TCP, reapply and removal passed")
+	t.Log("native DS-Lite TCP/UDP, live underlay1280/tunnel1240, reapply and removal passed")
 	if _, err := e.Apply(context.Background(), 0, Desired{}); err != nil {
 		t.Fatalf("restore original network: %v", err)
 	}

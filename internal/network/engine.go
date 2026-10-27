@@ -17,7 +17,7 @@ import (
 var errLinkNotFound = errors.New("link not found")
 
 // JournalVersion is the persisted network ownership/BOOTTIME contract.
-const JournalVersion = 8
+const JournalVersion = 9
 
 type settingKey struct {
 	Kind      string `json:"kind"`
@@ -584,6 +584,14 @@ func (p *apply) reconcile(d Desired) error {
 		return err
 	}
 	for _, l := range d.Interfaces {
+		if err := p.interfaceAttributes(l); err != nil {
+			return err
+		}
+	}
+	if err := p.interfaceMTUs(d); err != nil {
+		return err
+	}
+	for _, l := range d.Interfaces {
 		if err := p.interfaceConfig(l); err != nil {
 			return err
 		}
@@ -632,7 +640,7 @@ func boolInt(v bool) int {
 	}
 	return 0
 }
-func (p *apply) interfaceConfig(l Interface) error {
+func (p *apply) interfaceAttributes(l Interface) error {
 	if err := p.interfaceRASettings(l); err != nil {
 		return err
 	}
@@ -646,11 +654,10 @@ func (p *apply) interfaceConfig(l Interface) error {
 			}
 		}
 	}
-	if l.MTU != 0 {
-		if err := p.set(settingKey{Kind: "mtu", Interface: l.Name}, l.MTU); err != nil {
-			return err
-		}
-	}
+	return nil
+}
+
+func (p *apply) interfaceConfig(l Interface) error {
 	if err := p.set(settingKey{Kind: "up", Interface: l.Name}, 1); err != nil {
 		return err
 	}

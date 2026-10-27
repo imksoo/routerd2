@@ -11,7 +11,42 @@
 本文の旧`dist/`参照は履歴上の実行先であり、現存する証跡を意味しない。現在の診断・受入に必要な出力だけを一時保持する。
 2026-10-27には`/tmp`の旧試験結果・ISO展開・release検証物も約26GiB削除した。再保存しない。
 
-## 現在の開発版: path-mtu / native-22
+## 現在の開発版: underlay-mtu / native-23
+
+稼働中にWAN MTUを下げてもowned DS-LiteのMTUが1460のまま残り、小packet/Healthは
+正常でも1MiB TCPが停止することを独立AFTRで再現した。
+writerは所属設定→下位MTU→owned IPv4-in-IPv6 MTU→address/UP→firewallの順に適用する。
+MTUはparent-40と明示limitの小さい方とし、link所有者が適用する。
+撤去時にlink全体を削除するため、tunnel MTUのbefore-imageを別に重ねない。下位interfaceの
+明示MTUは既存setting journalで復元する。cacheやmanagerは追加しない。
+network ownership journalは9で、旧試作形式のreader/migrationは追加しない。
+
+実daemonの下位1500→1280→1500で、tunnel1460→1240→1460が通った。
+同じtunnel index/AFTR workerのまま、IPv4/IPv6の1MiB TCP双方向とIPv4 UDP1450が通った。
+実IPv6 UDPのPacket Too Big/MTU1280をerror queueで読み、その後のUDP1200も往復した。
+Alpine6.18.58-0-virtの実kernelでも、下位1280/tunnel1240の再適用とTCP/UDPが通った。
+初回Alpine実行は非ゼロ終了したが診断前にログを上書きしてしまい、原因未特定である。
+期限は延長せず拡張fixtureは成功し、元fixtureの別出力での再実行も成功した。
+初回の原因を解決したとは扱わず、断続的な問題の受入は閉じない。
+通常WANとowned bridge WAN（member MTU1400）を最終版で各々実行した。
+bridge版は`make check-dual-wan-bridge`で再現し、1360→1240→1360へ戻ることを確認する。
+所属設定でbridgeのMTUも変わるため、所属→下位MTU→tunnel MTUの順序を保つ。
+両captureでinner IPv4 fragment1236+262-byte・同じID、IPv4 MSS1200とIPv6 MSS1220、
+実Packet Too Big/1280を確認した。bridge内L2転送へのMSS処理を受入したものではない。
+`make check build-linux RELEASE_ID=underlay-mtu`、最終変更のnetwork/ABI race・全vet・6静的ELF、
+実6ELFの署名catalog/publisher検証も成功した。arm64は実行していない。
+MTUを下げた状態でnetwork writerをSIGKILLすると、bridge WANでtunnelが消えることも再現した。
+`SourceAddress`のRPC失敗をsource消失としてgenerationを進めていたのが原因だった。
+読み取り失敗はerrorとして返し、新しい依存inputを作らない。workerは元の絶対期限を維持し、
+実際のsource撤去/DAD失敗や元期限での失効はそのまま適用する。既存の誤ったtest期待も修正した。
+最終版では両WAN構成でnetwork workerの新世代後もMTU1240・同じtunnel indexを維持し、
+続くAFTR worker再起動後の大TCP/UDPも通った。
+現在の一時出力は`dist/underlay-current/`、`dist/underlay-bridge-current/`、
+`dist/underlay-qemu-network.log`、`dist/underlay-original-qemu.log`、
+`dist/underlay-complete-check-build.log`、`dist/underlay-built-release.log`。route固有PMTU、他encapsulation、bridge/VRF/実NICは未受入。
+実回線の長時間試験は`fragment-readiness`/native-21のままで、この版の実回線受入ではない。
+
+## 直前版: path-mtu / native-22
 
 writerはforward pairと両interfaceを指定したaccept ACLから、両方向のMSSを導出する。
 interface適用後のkernel MTUを読み、PPP交渉結果とDS-LiteのMTUを使う。

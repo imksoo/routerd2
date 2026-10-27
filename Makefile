@@ -98,6 +98,10 @@ check-health-pbr: build
 check-dual-wan: build
 	$(PYTHON) scripts/dual-wan-peer.py
 
+.PHONY: check-dual-wan-bridge
+check-dual-wan-bridge: build
+	$(PYTHON) scripts/dual-wan-peer.py --bridge-wan --output dist/dual-wan-bridge
+
 check-pppoe: build
 	$(PYTHON) scripts/pppoe-peer.py
 

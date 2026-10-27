@@ -32,7 +32,7 @@ def terminated(*_):
     raise KeyboardInterrupt()
 
 
-def peer(stage):
+def peer(stage, bridge_wan):
     signal.signal(signal.SIGALRM, deadline)
     signal.signal(signal.SIGTERM, terminated)
     signal.alarm(150)
@@ -44,6 +44,8 @@ def peer(stage):
     dsl_app = ns + "da"
     children = []
     capture = None
+    wan_port = "wire1" if bridge_wan else "wan1"
+    underlay_mtu = 1400 if bridge_wan else 1500
 
     def inside(n, a):
         return ["ip", "netns", "exec", n] + a
@@ -155,8 +157,8 @@ print('PASS reassembled 1450-byte UDP payload with DF clear and DF set',sys.argv
 
     def marked_udp():
         # The primary source-policy rule is gone, but mark41 selects PPP.
-        # 1458 bytes exceed PPP1400 and fit DSL1460, so a FIB lookup that
-        # ignores the packet mark cannot accidentally satisfy this exchange.
+        # With the default 1500-byte underlay, 1458 exceeds PPP1400 and fits
+        # DSL1460: ignoring the mark cannot accidentally satisfy the exchange.
         code = r"""import socket
 s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.settimeout(2);s.bind(('0.0.0.0',18084));s.setsockopt(socket.IPPROTO_IP,10,3)
 s.connect(('198.51.100.20',18081));body=b'm'*1430;s.send(body);assert s.recv(4096)==b'PPP:'+body
@@ -165,6 +167,25 @@ s.connect(('198.51.100.20',18081));body=b'm'*1430;s.send(body);assert s.recv(409
         print(
             "PASS marked1458-byte DF UDP selected PPP while source-policy selected DSL", flush=True
         )
+
+    def udp6_mtu():
+        code = r"""import errno,select,socket,struct
+s=socket.socket(socket.AF_INET6,socket.SOCK_DGRAM);s.settimeout(2)
+s.setsockopt(socket.IPPROTO_IPV6,25,1) # IPV6_RECVERR
+s.setsockopt(socket.IPPROTO_IPV6,23,3) # IPV6_MTU_DISCOVER, PROBE
+s.connect(('2001:db8:45::1',18081));s.send(b'u'*1450)
+p=select.poll();p.register(s,select.POLLERR);assert p.poll(2000),'missing ICMPv6 error'
+_,control,_,_=s.recvmsg(4096,256,socket.MSG_ERRQUEUE)
+e=next(struct.unpack('=IBBBBII',v[:16]) for level,kind,v in control if level==socket.IPPROTO_IPV6 and kind==25)
+assert e[0]==errno.EMSGSIZE and e[1:4]==(3,2,0) and e[5]==1280,e
+assert s.getsockopt(socket.IPPROTO_IPV6,24)==1280 # IPV6_MTU
+s.setsockopt(socket.IPPROTO_IPV6,23,2) # DO: respect learned PMTU
+body=b'u'*1200;s.send(body);assert s.recv(4096)==b'DSL:'+body
+print('PASS actual IPv6 UDP Packet Too Big MTU1280 and subsequent 1200-byte UDP exchange',flush=True)
+"""
+        result = subprocess.run(inside(lan, ["python3", "-u", "-c", code]), capture_output=True, text=True, timeout=6)
+        print(result.stdout, result.stderr, flush=True)
+        assert result.returncode == 0
 
     def probe(n, name):
         return start(
@@ -238,6 +259,7 @@ s.connect(('198.51.100.20',18081));body=b'm'*1430;s.send(body);assert s.recv(409
                 "ds_lite": {
                     "interface": "wan1",
                     "tunnel": "dslite0",
+                    "mtu": 1460,
                     "local_address": "2001:db8:42::2",
                     "candidates": ["2001:db8:42::1"],
                     "b4_peer": "192.0.0.1/32",
@@ -247,6 +269,11 @@ s.connect(('198.51.100.20',18081));body=b'm'*1430;s.send(body);assert s.recv(409
             },
         },
     ]
+    if bridge_wan:
+        resources += [
+            {"id": "wan1-link", "link": {"name": "wan1", "kind": "bridge"}},
+            {"id": "wan1-port", "interface": {"name": wan_port, "master": "wan1", "mtu": underlay_mtu}},
+        ]
     for name, iface, table, mark, prio in [
         ("ppp", "ppp-wan", 101, 41, 1000),
         ("dsl", "dslite0", 102, 42, 1100),
@@ -334,7 +361,7 @@ s.connect(('198.51.100.20',18081));body=b'm'*1430;s.send(body);assert s.recv(409
             run(["ip", "-n", n, "link", "set", "lo", "up"])
         for dev, peer, n in [
             ("wan0", "server0", ppp),
-            ("wan1", "server1", dsl),
+            (wan_port, "server1", dsl),
             ("lan0", "client0", lan),
         ]:
             run(
@@ -360,6 +387,7 @@ s.connect(('198.51.100.20',18081));body=b'm'*1430;s.send(body);assert s.recv(409
         run(["ip", "-n", lan, "-6", "addr", "add", "2001:db8:43::2/64", "dev", "client0"])
         run(["ip", "-n", lan, "-6", "route", "add", "default", "via", "2001:db8:43::1"])
         run(["ip", "-n", dsl, "addr", "add", "2001:db8:42::1/64", "dev", "server1"])
+        run(["ip", "-n", dsl, "link", "set", "server1", "mtu", str(underlay_mtu)])
         for provider, backend in [(ppp, ppp_app), (dsl, dsl_app)]:
             run(["ip", "-n", provider, "addr", "add", "198.51.100.10/32", "dev", "lo"])
             run(
@@ -492,14 +520,17 @@ s.connect(('198.51.100.20',18081));body=b'm'*1430;s.send(body);assert s.recv(409
                     self.send_header('Content-Length', str(len(answer)))
                     self.end_headers()
                     self.wfile.write(answer)
-            def udp():
-                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                s.setsockopt(socket.IPPROTO_IP,10,0)
-                s.bind(('198.51.100.20', 18081))
+            def udp(family, address):
+                s = socket.socket(family, socket.SOCK_DGRAM)
+                if family == socket.AF_INET:
+                    s.setsockopt(socket.IPPROTO_IP,10,0)
+                s.bind((address, 18081))
                 while True:
                     body, address = s.recvfrom(4096)
                     s.sendto(name+b':'+body if len(body)>100 else name,address)
-            threading.Thread(target=udp, daemon=True).start()
+            threading.Thread(target=udp, args=(socket.AF_INET,'198.51.100.20'), daemon=True).start()
+            if name == b'DSL':
+                threading.Thread(target=udp, args=(socket.AF_INET6,'2001:db8:45::1'), daemon=True).start()
             def small_mss_server(server):
                 server.socket.setsockopt(socket.IPPROTO_TCP,socket.TCP_MAXSEG,1200)
                 server.server_bind();server.server_activate()
@@ -570,7 +601,12 @@ s.connect(('198.51.100.20',18081));body=b'm'*1430;s.send(body);assert s.recv(409
             "PASS consumer expiry and stale replay preserved AFTR fallback; fresh probe restored PPP",
             flush=True,
         )
+        before_mtu = json.loads(run(["ip", "-n", ns, "-j", "link", "show", "dslite0"]))[0]
+        before_aftr = modules()["service.internet-dsl"]
+        run(["ip", "-n", dsl, "link", "set", "server1", "mtu", "1280"])
+        run(["ip", "-n", dsl, "link", "set", "aftr0", "mtu", "1240"])
         trial = copy.deepcopy(configuration)
+        next(r for r in trial["resources"] if r["id"] == "wan1")["interface"]["mtu"] = 1280
         next(r for r in trial["resources"] if r["id"] == "app-ppp")["policy_rule"]["table"] = 102
         api(
             "control.sock",
@@ -584,9 +620,41 @@ s.connect(('198.51.100.20',18081));body=b'm'*1430;s.send(body);assert s.recv(409
         )
         wait(lambda: selected(1000, 102))
         traffic("DSL")
+        changed = json.loads(run(["ip", "-n", ns, "-j", "link", "show", "dslite0"]))[0]
+        assert changed["mtu"] == 1240 and changed["ifindex"] == before_mtu["ifindex"], changed
+        assert modules()["service.internet-dsl"]["pid"] == before_aftr["pid"]
+        large_transfer("198.51.100.20", 1240)
+        udp_mtu("DSL")
+        large_transfer("2001:db8:45::1", 1280)
+        udp6_mtu()
         wait(lambda: api("control.sock", "/v1/config")["revision"] == 3 and selected(1000, 101), 12)
         traffic("PPP")
+        restored = json.loads(run(["ip", "-n", ns, "-j", "link", "show", "dslite0"]))[0]
+        assert restored["mtu"] == underlay_mtu - 40 and restored["ifindex"] == before_mtu["ifindex"], restored
+        assert modules()["service.internet-dsl"]["pid"] == before_aftr["pid"]
+        run(["ip", "-n", dsl, "link", "set", "server1", "mtu", str(underlay_mtu)])
+        run(["ip", "-n", dsl, "link", "set", "aftr0", "mtu", str(underlay_mtu - 40)])
+        print(f"PASS live underlay1280/tunnel1240 transfer and rollback{underlay_mtu - 40}; same tunnel index and AFTR worker", flush=True)
         print("PASS confirmed rollback restored actual preferred WAN TCP/UDP", flush=True)
+        # Keep the lower MTU committed while replacing the actual writer, so
+        # recovery must preserve the derived value rather than an old setting.
+        run(["ip", "-n", dsl, "link", "set", "server1", "mtu", "1280"])
+        run(["ip", "-n", dsl, "link", "set", "aftr0", "mtu", "1240"])
+        lower = copy.deepcopy(configuration)
+        next(r for r in lower["resources"] if r["id"] == "wan1")["interface"]["mtu"] = 1280
+        api("control.sock", "/v1/config/commit", dict(expected_revision=3, request_id="dual-wan-lower-mtu", config=lower))
+        writer = modules()["network"]
+        os.kill(writer["pid"], signal.SIGKILL)
+
+        def writer_recovered():
+            current = modules()["network"]
+            return current["generation"] > writer["generation"] and current["ready"] and api("control.sock", "/v1/services")["phase"] == "ready"
+
+        wait(writer_recovered)
+        current = json.loads(run(["ip", "-n", ns, "-j", "link", "show", "dslite0"]))[0]
+        assert current["mtu"] == 1240 and current["ifindex"] == before_mtu["ifindex"], current
+        traffic("PPP")
+        print("PASS actual network writer restart preserved tunnel1240 and preferred WAN forwarding", flush=True)
         original = modules()["service.internet-dsl"]
         prior_health = modules()["service.health-dsl"]["generation"]
         old_aftr = api("control.sock", "/v1/services/service.internet-dsl")
@@ -626,7 +694,7 @@ s.connect(('198.51.100.20',18081));body=b'm'*1430;s.send(body);assert s.recv(409
         a.wait(timeout=3)
         wait(lambda: not selected(1000, 101))
         traffic("DSL")
-        large_transfer("198.51.100.20", 1460)
+        large_transfer("198.51.100.20", 1240)
         udp_mtu("DSL")
         print(
             "PASS actual AFTR worker restart recovered backup forwarding; primary remained usable",
@@ -668,9 +736,10 @@ def main():
     parser.add_argument("--inside", type=Path)
     parser.add_argument("--binary-dir", type=Path, default=Path("dist/bin"))
     parser.add_argument("--output", type=Path, default=Path("dist/dual-wan"))
+    parser.add_argument("--bridge-wan", action="store_true", help="use an owned bridge WAN with an MTU-1400 member")
     args = parser.parse_args()
     if args.inside:
-        peer(args.inside)
+        peer(args.inside, args.bridge_wan)
         return
     args.output.mkdir(parents=True, exist_ok=True)
     root = [] if os.geteuid() == 0 else ["sudo", "-n"]
@@ -701,7 +770,7 @@ def main():
                     stage + "/peer.py",
                     "--inside",
                     stage,
-                ],
+                ] + (["--bridge-wan"] if args.bridge_wan else []),
                 stdout=output,
                 stderr=subprocess.STDOUT,
                 timeout=180,

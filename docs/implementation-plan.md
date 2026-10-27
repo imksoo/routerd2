@@ -577,6 +577,15 @@ network intentのprotocol投影もJSON往復を除き、変更する集合だけ
 
 #### NET-03 — Firewall・ingress・MTU/MSS・fragment policy
 
+2026-10-27追加: 稼働中の下位MTU変更でDS-Liteが1460のまま残り、大TCPだけが停止する問題を
+独立AFTRで再現した。writerの適用順を所属設定→下位MTU→owned IPv4-in-IPv6 MTU→address/UP→firewallとし、
+linkの所有権でtunnel MTUを管理し、下位1280/tunnel1240とrollback1460を適用する。
+作成したtunnelにMTUの復元記録を重ねず、下位interfaceの設定は既存journalで復元する。
+実daemonで同じtunnel index/AFTR workerを維持し、IPv4/IPv6の1MiB TCP双方向・IPv4 UDP1450、
+IPv6 UDPのPacket Too Big/1280と続くUDP1200が通った。Alpine実kernelも下位1280/tunnel1240の
+再適用・TCP/UDPを通した。compiler contractはnative-23、network journalは9。旧試作形式readerは追加しない。
+route固有PMTUと他encapsulationへの導出・bridge/VRF・実NICなど全受入は未完了。
+
 2026-10-27追加: 明示したforward pairとaccept ACLのpairからMSSを自動生成し、writerの
 実link設定後のkernel MTUで両方向の上限を決める。DF解除は明示選択を維持し、閾値の省略時は
 実egress MTUを使う。導出結果をintentやjournalへ書き戻さない。製品MTU1454に対して
@@ -854,7 +863,7 @@ learned route先の利用者TCP/UDPも通信し、撤去中の接続拒否と復
 明示VRFではmultihop socketをVRF master、single-hopをmember interfaceへ束縛する。
 source domainとBGP FIB tableも検証する。同じendpointを持つ二つのVRFとdefault domainで
 実daemonを動かし、独立TCP/UDP・片側UDP障害・worker交替・main tableへの流出防止を確認した。
-single-hop VRFも実peerと障害・復旧を確認した。現在のcompiler contractはnative-22。
+single-hop VRFも実peerと障害・復旧を確認した。現在のcompiler contractはnative-23。
 IPv4/IPv6とも同じendpointを二つのVRFとdefault domainで同時使用し、BFD/BGPと三経路の
 TCP/UDPを確認した。defaultとVRFのUDP bind競合は受信socketだけの`SO_REUSEADDR`で修正した。
 domain/sourceの既存claimで二重ownerを拒否し、TX port専有と`SO_REUSEPORT`不使用を維持する。

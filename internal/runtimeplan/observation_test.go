@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -40,17 +41,17 @@ func TestAFTRSourceIndependentOfUnrelatedLargeNetworkObservations(t *testing.T) 
 	if err != nil || input.Source != first.Source || input.Generation != first.Generation || n.sourceCalls != 2 {
 		t.Fatal("unrelated observation size or failure withdrew a valid WAN source", input, err)
 	}
-	// Only a failed minimal source observation withdraws the source, creating
-	// a new generation that rejects stale AFTR results until the source returns.
+	// A failed read supplies no new observation. The worker retains the original
+	// dependency deadlines; an observed missing/unusable address still withdraws.
 	n.sourceErr = errors.New("WAN address observation unavailable")
-	input, err = r.AFTRInput(context.Background(), "service.dslite")
-	if err != nil || input.Source.Address != "" || input.Generation != 2 {
-		t.Fatal("failed source query retained old authorization", input, err)
+	_, err = r.AFTRInput(context.Background(), "service.dslite")
+	if !errors.Is(err, n.sourceErr) || !reflect.DeepEqual(r.aftrInputs["service.dslite"], first) {
+		t.Fatal("failed source query replaced an accepted dependency", err)
 	}
 	n.sourceErr = nil
 	input, err = r.AFTRInput(context.Background(), "service.dslite")
-	if err != nil || input.Source != first.Source || input.Generation != 3 {
-		t.Fatal("source recovery reused a stale dependency generation", input, err)
+	if err != nil || input.Source != first.Source || input.Generation != first.Generation {
+		t.Fatal("source read recovery changed an unchanged dependency", input, err)
 	}
 }
 

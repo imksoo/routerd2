@@ -230,7 +230,10 @@ func (r *Runtime) AFTRInput(ctx context.Context, name string) (aftr.Input, error
 		// Unrelated routing tables and WireGuard peers cannot invalidate this
 		// dependency merely by exceeding the operator observation response cap.
 		observed, err := r.network.SourceAddress(ctx, definition.sourceInterface, in.Source.Address)
-		if err != nil || !sourceInstalled(definition.sourceInterface, in.Source.Address, observed) {
+		if err != nil {
+			return aftr.Input{}, fmt.Errorf("observe AFTR source: %w", err)
+		}
+		if !sourceInstalled(definition.sourceInterface, in.Source.Address, observed) {
 			in.Source = aftr.Source{}
 		}
 	}

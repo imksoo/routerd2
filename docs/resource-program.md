@@ -430,7 +430,7 @@ ACTIVE成功には元boot IDと絶対期限を保持するVIP投影が必要で�
 旧世代・上書きされた通知や適用失敗を成功として返さない。
 
 このsource受入範囲の追加に伴い、署名されたconfiguration contractは
-`resource-program-native-22`とする。PPPの有限`.active` factで依存workerを起動し、PPP unitの
+`resource-program-native-23`とする。PPPの有限`.active` factで依存workerを起動し、PPP unitの
 UP/addressはpppdが所有する。`forwarding.ipv4_rp_filter`はLinux all/defaultを明示して管理する
 （0:無効、1:strict、2:loose、省略:管理しない）。撤去時は記録した元の値へ戻す。
 BFDの明示`multihop: true`はinterfaceを指定せず、
@@ -518,6 +518,29 @@ IPv6 routeの`valid_until`は運用者の絶対期限なら`{utc: "2030-01-01T00
 学習したRAは同じ型で元のboot ID/nanosecondsを渡すが、operator resourceはboot期限を指定できない。
 writerは元のauthorityとkernelの相対timerを区別し、保存したCLOCK_MONOTONICのtimerで所有権を確認する。
 長い期限のkernel grant更新はwriterが担当し、元のprotocol期限は変更しない。
+
+## IPv4-in-IPv6 tunnelのMTU
+
+owned `ip6tnl`（DS-Liteを含む）は、bridge/VRFへの所属設定と下位interfaceのMTUを適用した後に
+`min(parent MTU, 65535) - 40`を上限とする。tunnel interfaceの明示`mtu`は、さらに小さい
+上限として扱う。省略時も現在のparentから導出し、下位MTUの変更とrollbackへ追従する。
+preexisting/unmanaged tunnelのMTUをこの規則で変更しない。writerはlink所有権を確認してtunnelのMTUを適用し、変更後にMSS/DF処理を計算する。
+tunnelは撤去時にlink全体を削除するため、MTUだけの復元記録を重ねない。下位interfaceの明示MTUは
+既存のsetting journalで復元する。network ownership journalは9とし、旧試作形式のreader/migrationは作らない。
+新しいMTU cacheやmanagerはない。
+AFTRのsource読み取りでwriter RPCが失敗した場合、新しいsource消失inputには変換しない。
+元のsource/candidate/DNS期限は延長せず、実際に観測したsource消失/DAD失敗と期限切れを適用する。
+IPv4-in-IPv6なので、下位IPv6 MTU1280に対する内側MTUは1240となる。
+
+Linuxはtunnel作成時にMTUを導出するが、この試験では下位MTU変更時に1460のまま残った。
+独立Linux AFTRとの小packet/Healthは成功しても、1MiB downloadが停止した。
+修正後の実daemonは1500→1280→1500の設定切替でtunnel1460→1240→1460へ追従し、
+同じtunnel index・同じAFTR workerでIPv4/IPv6の1MiB双方向TCPとIPv4 UDP1450が通った。
+IPv6 UDPは実Packet Too Big/MTU1280を受信し、その後の1200-byte UDPが通った。
+`make check-dual-wan`で実行する。`make check-dual-wan-bridge`はMTU1400のmemberを持つ
+owned bridgeをWANにし、同じ通信と1280への変更・1360へのrollbackを確認する。
+中間routerが作る、NIC MTUよりも小さいroute PMTUや
+WireGuard/VXLAN等の全encapsulationへの適用は未受入である。
 
 ## TCP MSSとpath MTU
 

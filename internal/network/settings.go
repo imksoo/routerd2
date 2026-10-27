@@ -73,6 +73,57 @@ func settingValueOwned(s ownedSetting, value int) bool {
 	return value == s.Before || value == s.Last || s.Attempted != nil && value == *s.Attempted
 }
 
+// Apply underlay MTUs before owned IPv4-in-IPv6 tunnels. Linux derives their
+// MTU on creation but does not track later underlay changes. The explicit tunnel
+// MTU is a ceiling; the outer IPv6 header needs another 40 bytes on its parent.
+func (p *apply) interfaceMTUs(d Desired) error {
+	limits := make(map[string]int)
+	for _, link := range d.Links {
+		if link.Kind == "ip6tnl" {
+			limits[link.Name] = 0
+		}
+	}
+	for _, iface := range d.Interfaces {
+		if _, owned := limits[iface.Name]; owned {
+			limits[iface.Name] = iface.MTU
+		} else if iface.MTU != 0 {
+			if err := p.set(settingKey{Kind: "mtu", Interface: iface.Name}, iface.MTU); err != nil {
+				return err
+			}
+		}
+	}
+	for _, link := range orderedLinks(d.Links) {
+		if link.Kind != "ip6tnl" {
+			continue
+		}
+		parent, err := p.e.kernel.Interface(link.Parent)
+		if err != nil {
+			return p.failure("tunnel underlay MTU", err)
+		}
+		live, err := p.e.kernel.Interface(link.Name)
+		if err != nil {
+			return p.failure("tunnel MTU", err)
+		}
+		if err := verifyOwnedLink(live, *p.e.linkRecord(link.Name)); err != nil {
+			return p.failure("tunnel MTU ownership", err)
+		}
+		mtu := min(parent.MTU, 65535) - 40
+		if limit := limits[link.Name]; limit != 0 {
+			mtu = min(mtu, limit)
+		}
+		// The entire created link is owned and removed on withdrawal. Its
+		// derived MTU has no preexisting value to restore or journal separately.
+		if live.MTU != mtu {
+			if err := p.change("tunnel MTU", func() error {
+				return p.e.kernel.WriteSetting(settingKey{Kind: "mtu", Interface: link.Name}, mtu)
+			}, nil); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func (p *apply) set(key settingKey, value int) error {
 	if key.Kind == "up" && value == 1 {
 		if link := p.e.linkRecord(key.Interface); link != nil && link.Definition.Authority != (lifetime.Deadline{}) {

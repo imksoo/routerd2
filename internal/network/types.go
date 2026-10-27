@@ -31,7 +31,9 @@ type Desired struct {
 	WireGuard   []WireGuard  `json:"wireguard,omitempty"`
 }
 
-// Interface brings an existing link up. MTU zero leaves its MTU unchanged.
+// Interface brings an existing link up. MTU zero leaves a preexisting link's
+// MTU unchanged. An owned IPv4-in-IPv6 link derives its MTU from its parent;
+// an explicit MTU is an additional ceiling on that tunnel.
 // Addresses are host/prefix values (for example 192.0.2.1/24, not the subnet).
 // Only addresses created and recorded by this engine are ever removed.
 type Interface struct {
