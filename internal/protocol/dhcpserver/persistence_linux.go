@@ -20,10 +20,14 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const maxJournalBytes = 8 << 20
+const (
+	maxJournalBytes = 8 << 20
+	journalVersion  = 2
+)
 
 type journal struct {
 	Version     int           `json:"version"`
+	Revision    uint64        `json:"revision"`
 	Resource    string        `json:"resource"`
 	Interface   string        `json:"interface"`
 	WrittenAt   time.Time     `json:"written_at"`
@@ -85,7 +89,7 @@ func openStore(c Config, now time.Time) (*journalStore, journal, error) {
 	if err != nil {
 		return fail(err)
 	}
-	j := journal{Version: 1, Resource: c.Resource, Interface: c.Interface, WrittenAt: now}
+	j := journal{Version: journalVersion, Resource: c.Resource, Interface: c.Interface, WrittenAt: now}
 	if !exists {
 		return store, j, nil
 	}
@@ -94,49 +98,56 @@ func openStore(c Config, now time.Time) (*journalStore, journal, error) {
 	if err := decoder.Decode(&j); err != nil {
 		return fail(fmt.Errorf("decode DHCP lease journal: %w", err))
 	}
-	var extra any
+	var extra json.RawMessage
 	if err := decoder.Decode(&extra); err != io.EOF {
 		return fail(errors.New("DHCP journal has trailing JSON"))
 	}
-	if j.Version != 1 || j.Resource != c.Resource || j.Interface != c.Interface {
-		return fail(errors.New("DHCP journal owner/version differs; an explicit lease migration is required"))
+	if err := validateJournal(c, j, now); err != nil {
+		return fail(err)
+	}
+	return store, j, nil
+}
+func validateJournal(c Config, j journal, now time.Time) error {
+	if j.Version != journalVersion || j.Resource != c.Resource || j.Interface != c.Interface {
+		return errors.New("DHCP journal owner/version differs; recreate disposable prerelease state")
 	}
 	if j.WrittenAt.After(now.Add(5 * time.Minute)) {
-		return fail(errors.New("DHCP wall clock precedes its durable journal; synchronize time before serving leases"))
+		return errors.New("DHCP wall clock precedes its durable journal; synchronize time before serving leases")
 	}
 	if len(j.Leases) > 2048 || len(j.Quarantines) > 2048 {
-		return fail(errors.New("DHCP lease journal exceeds its record bound"))
+		return errors.New("DHCP lease journal exceeds its record bound")
 	}
 	ids, ips := map[string]bool{}, map[string]bool{}
 	for _, l := range j.Leases {
 		m, e := net.ParseMAC(l.MACAddress)
 		if e != nil || len(m) != 6 || m[0]&1 != 0 {
-			return fail(errors.New("DHCP journal has invalid hardware identity"))
+			return errors.New("DHCP journal has invalid hardware identity")
 		}
 		if id, e := hex.DecodeString(l.ClientID); e != nil || len(id) > 255 || l.ClientID != "" && len(id) < 2 {
-			return fail(errors.New("DHCP journal has invalid client identifier"))
+			return errors.New("DHCP journal has invalid client identifier")
 		}
 		if _, e := dhcpserverconfig.IPv4(l.IPAddress); e != nil {
-			return fail(errors.New("DHCP journal has invalid leased address"))
+			return errors.New("DHCP journal has invalid leased address")
 		}
 		if l.Scope == "" || len(l.Scope) > 64 || l.Hostname != "" && !dhcpserverconfig.ValidHostname(l.Hostname) || l.AcquiredAt.IsZero() || l.RenewedAt.Before(l.AcquiredAt) || l.ExpiresAt.Before(l.RenewedAt) || l.HeldUntil.Before(l.ExpiresAt) {
-			return fail(errors.New("DHCP journal contains an invalid lease lifetime or scope"))
+			return errors.New("DHCP journal contains an invalid lease lifetime or scope")
 		}
 		key := leaseKey(l.Lease)
 		if ids[key] || ips[l.IPAddress] {
-			return fail(errors.New("DHCP journal contains conflicting bindings"))
+			return errors.New("DHCP journal contains conflicting bindings")
 		}
 		ids[key], ips[l.IPAddress] = true, true
 	}
 	qips := map[string]bool{}
 	for _, q := range j.Quarantines {
 		if _, e := dhcpserverconfig.IPv4(q.IPAddress); e != nil || q.Until.IsZero() || qips[q.IPAddress] || ips[q.IPAddress] {
-			return fail(errors.New("DHCP journal contains invalid/conflicting quarantines"))
+			return errors.New("DHCP journal contains invalid/conflicting quarantines")
 		}
 		qips[q.IPAddress] = true
 	}
-	return store, j, nil
+	return nil
 }
+
 func (s *journalStore) Close() error {
 	if s == nil || s.lock == nil {
 		return nil
@@ -144,16 +155,26 @@ func (s *journalStore) Close() error {
 	return s.lock.Close()
 }
 func (s *journalStore) Save(j journal) error {
-	sort.Slice(j.Leases, func(i, k int) bool { return leaseKey(j.Leases[i].Lease) < leaseKey(j.Leases[k].Lease) })
-	sort.Slice(j.Quarantines, func(i, k int) bool { return j.Quarantines[i].IPAddress < j.Quarantines[k].IPAddress })
-	b, err := json.Marshal(j)
+	b, err := encodeJournal(j)
 	if err != nil {
 		return err
 	}
-	if len(b) > maxJournalBytes {
-		return errors.New("DHCP lease journal exceeds size bound")
+	return writePrivate(s.path, b)
+}
+func encodeJournal(j journal) ([]byte, error) {
+	sortJournal(j)
+	b, err := json.Marshal(j)
+	if err != nil {
+		return nil, err
 	}
-	return writePrivate(s.path, append(b, '\n'))
+	if len(b) > maxJournalBytes {
+		return nil, errors.New("DHCP lease journal exceeds size bound")
+	}
+	return append(b, '\n'), nil
+}
+func sortJournal(j journal) {
+	sort.Slice(j.Leases, func(i, k int) bool { return leaseKey(j.Leases[i].Lease) < leaseKey(j.Leases[k].Lease) })
+	sort.Slice(j.Quarantines, func(i, k int) bool { return j.Quarantines[i].IPAddress < j.Quarantines[k].IPAddress })
 }
 func readPrivate(path string, maxBytes int) ([]byte, bool, error) {
 	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)

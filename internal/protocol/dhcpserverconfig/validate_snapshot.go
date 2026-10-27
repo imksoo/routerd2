@@ -35,6 +35,9 @@ func ValidateSnapshot(c Config, s Snapshot) error {
 	if !boottime.ValidBootID(s.BootID) || s.ObservedNanos == 0 || s.ExpiresNanos <= s.ObservedNanos || s.ExpiresNanos-s.ObservedNanos > uint64(ObservationLifetime) {
 		return errors.New("DHCP observation requires a boot-scoped deadline of at most five seconds")
 	}
+	if s.Standby != c.Standby || c.Standby && s.Active {
+		return errors.New("DHCP standby mode differs from committed intent")
+	}
 	if !s.Active && len(s.Leases) != 0 {
 		return errors.New("inactive DHCP snapshot cannot publish leases")
 	}

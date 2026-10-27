@@ -20,6 +20,8 @@ import (
 
 type engine struct {
 	config      Config
+	revision    uint64
+	writtenAt   time.Time
 	now         func() time.Time
 	leases      map[string]storedLease
 	quarantines map[string]quarantine
@@ -32,14 +34,20 @@ type engine struct {
 }
 
 func newEngine(c Config, j journal, now func() time.Time, persist func(journal) error) *engine {
-	e := &engine{config: c, now: now, leases: map[string]storedLease{}, quarantines: map[string]quarantine{}, offers: map[string]offer{}, persist: persist, mtu: 1500}
+	e := &engine{config: c, now: now, offers: map[string]offer{}, persist: persist, mtu: 1500}
+	e.restore(j)
+	return e
+}
+func (e *engine) restore(j journal) {
+	e.revision, e.writtenAt = j.Revision, j.WrittenAt
+	e.leases = make(map[string]storedLease, len(j.Leases))
+	e.quarantines = make(map[string]quarantine, len(j.Quarantines))
 	for _, l := range j.Leases {
 		e.leases[leaseKey(l.Lease)] = l
 	}
 	for _, q := range j.Quarantines {
 		e.quarantines[q.IPAddress] = q
 	}
-	return e
 }
 func identity(m message) string {
 	if b := m.Options[61]; len(b) > 0 {
@@ -520,17 +528,24 @@ func (e *engine) markConflict(a netip.Addr, now time.Time) error {
 	e.quarantines[a.String()] = quarantine{IPAddress: a.String(), Until: now.Add(time.Duration(e.config.DeclineSeconds) * time.Second)}
 	return e.save(now, Event{Type: "conflict", Lease: &Lease{IPAddress: a.String()}})
 }
-func (e *engine) save(now time.Time, events ...Event) error {
-	j := journal{Version: 1, Resource: e.config.Resource, Interface: e.config.Interface, WrittenAt: now}
+func (e *engine) journal() journal {
+	j := journal{Version: journalVersion, Resource: e.config.Resource, Interface: e.config.Interface, Revision: e.revision, WrittenAt: e.writtenAt}
 	for _, l := range e.leases {
 		j.Leases = append(j.Leases, l)
 	}
 	for _, q := range e.quarantines {
 		j.Quarantines = append(j.Quarantines, q)
 	}
+	return j
+}
+func (e *engine) save(now time.Time, events ...Event) error {
+	j := e.journal()
+	j.Revision++
+	j.WrittenAt = now
 	if err := e.persist(j); err != nil {
 		return fmt.Errorf("persist DHCP binding before reply: %w", err)
 	}
+	e.revision, e.writtenAt = j.Revision, j.WrittenAt
 	for _, event := range events {
 		event.Resource = e.config.Resource
 		event.At = now
@@ -575,6 +590,7 @@ func (e *engine) snapshot(epoch string, sequence uint64, clock boottime.Clock, a
 	now := clock.WallTime
 	s := Snapshot{Resource: e.config.Resource, Interface: e.config.Interface, ServerAddress: e.config.ServerAddress, Epoch: epoch, Sequence: sequence, Active: active, ObservedAt: now, BootID: clock.BootID, ObservedNanos: uint64(clock.BoottimeNanoseconds), ExpiresNanos: uint64(clock.BoottimeNanoseconds) + uint64(dhcpserverconfig.ObservationLifetime), Leases: []Lease{}, Stats: e.stats}
 	s.Stats.Offers = len(e.offers)
+	s.Standby, s.CheckpointRevision = e.config.Standby, e.revision
 	s.Stats.Quarantined = len(e.quarantines)
 	for _, l := range e.leases {
 		if active && dhcpserverconfig.ValidateLease(e.config, l.Lease, now) == nil {

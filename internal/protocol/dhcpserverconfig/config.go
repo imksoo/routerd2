@@ -5,12 +5,12 @@
 package dhcpserverconfig
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"net/netip"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/imksoo/routerd/pkg/api"
@@ -47,12 +47,23 @@ type Config struct {
 	MaxLeases      int      `json:"max_leases,omitempty"`
 	// Zero selects 300 ms. A negative value is invalid: conflict detection
 	// cannot silently be disabled for newly allocated on-link addresses.
-	ProbeTimeoutMilliseconds  int    `json:"probe_timeout_milliseconds,omitempty"`
-	EffectTimeoutMilliseconds int    `json:"effect_timeout_milliseconds,omitempty"`
-	StatePath                 string `json:"state_path"`
-	SocketPath                string `json:"socket_path,omitempty"`
-	StatusPath                string `json:"status_path,omitempty"`
-	EventPath                 string `json:"event_path,omitempty"`
+	ProbeTimeoutMilliseconds  int          `json:"probe_timeout_milliseconds,omitempty"`
+	EffectTimeoutMilliseconds int          `json:"effect_timeout_milliseconds,omitempty"`
+	StatePath                 string       `json:"state_path"`
+	SocketPath                string       `json:"socket_path,omitempty"`
+	StatusPath                string       `json:"status_path,omitempty"`
+	EventPath                 string       `json:"event_path,omitempty"`
+	Replication               *Replication `json:"replication,omitempty"`
+	// Standby owns the journal and replication listener, without DHCP sockets.
+	Standby bool `json:"standby,omitempty"`
+}
+
+type Replication struct {
+	ListenAddress       netip.AddrPort `json:"listen_address"`
+	PeerAddress         netip.AddrPort `json:"peer_address"`
+	CertificateFile     string         `json:"certificate_file"`
+	PrivateKeyFile      string         `json:"private_key_file"`
+	PeerCertificateFile string         `json:"peer_certificate_file"`
 }
 
 type Scope struct {
@@ -79,9 +90,21 @@ type Reservation struct {
 }
 
 func Normalize(c Config) Config {
-	b, _ := json.Marshal(c)
-	var out Config
-	_ = json.Unmarshal(b, &out)
+	out := c
+	out.Scopes = slices.Clone(c.Scopes)
+	out.Reservations = slices.Clone(c.Reservations)
+	out.TrustedRelays = slices.Clone(c.TrustedRelays)
+	out.Primary = cloneScope(c.Primary)
+	for i := range out.Scopes {
+		out.Scopes[i] = cloneScope(out.Scopes[i])
+	}
+	for i := range out.Reservations {
+		out.Reservations[i].Options = slices.Clone(out.Reservations[i].Options)
+	}
+	if c.Replication != nil {
+		r := *c.Replication
+		out.Replication = &r
+	}
 	if out.Primary.Name == "" {
 		out.Primary.Name = "default"
 	}
@@ -116,8 +139,35 @@ func Normalize(c Config) Config {
 	return out
 }
 
+func cloneScope(s Scope) Scope {
+	s.DNSServers = slices.Clone(s.DNSServers)
+	s.NTPServers = slices.Clone(s.NTPServers)
+	s.Options = slices.Clone(s.Options)
+	s.Match.MACAddresses = slices.Clone(s.Match.MACAddresses)
+	s.Match.OUIPrefixes = slices.Clone(s.Match.OUIPrefixes)
+	return s
+}
+
 func Validate(c Config) error {
 	c = Normalize(c)
+	if c.Standby && c.Replication == nil {
+		return errors.New("DHCP standby requires replication")
+	}
+	if r := c.Replication; r != nil {
+		for _, endpoint := range []netip.AddrPort{r.ListenAddress, r.PeerAddress} {
+			if !endpoint.IsValid() || endpoint.Port() == 0 || endpoint.Addr().IsUnspecified() || endpoint.Addr().IsMulticast() {
+				return errors.New("DHCP replication requires explicit local and peer unicast endpoints")
+			}
+		}
+		if r.ListenAddress == r.PeerAddress {
+			return errors.New("DHCP replication endpoints must differ")
+		}
+		for _, p := range []string{r.CertificateFile, r.PrivateKeyFile, r.PeerCertificateFile} {
+			if !filepath.IsAbs(p) || filepath.Clean(p) != p || strings.ContainsRune(p, 0) {
+				return errors.New("DHCP replication credentials require absolute file paths")
+			}
+		}
+	}
 	if !validName(c.Resource, 256) || !ValidInterface(c.Interface) || (c.VRF != "" && !ValidInterface(c.VRF)) || c.VRF == c.Interface {
 		return errors.New("DHCP server requires a bounded resource identity, interface and optional distinct VRF")
 	}

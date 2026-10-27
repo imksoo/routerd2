@@ -43,7 +43,8 @@ MTU, up state, exact VRF membership and presence of ServerAddress. It repeats
 checks while running and before sending replies. A namespace-local abstract
 socket lock rejects duplicate server instances on the same interface; a file
 lock protects the journal. The control plane must create the server address and
-any VRRP virtual interface first, and start/stop DHCP according to ownership.
+any VRRP virtual interface first. Standalone DHCP serves on that interface;
+configured HA keeps a replication worker running on the standby too.
 
 Readiness requires native sockets, an initialized/recovered durable journal,
 and acknowledgment of the first full lease snapshot. It does not assert that
@@ -53,7 +54,8 @@ Binding and renewal order:
 
 1. Reserve an address with a bounded lease lifetime.
 2. Write a private temporary journal, fsync it, atomically rename it and fsync
-   its directory.
+   its directory. With HA configured, send the same complete checkpoint to the
+   standby and wait for its durable acknowledgment.
 3. Publish the full typed snapshot and receive the control acknowledgment.
 4. Verify ownership deadline and interface identity, then send DHCPACK.
 
@@ -76,6 +78,68 @@ Client allocation, journal retention and individual Lease.ExpiresAt still use
 UTC. This observation-clock change does not qualify client allocation across
 wall-clock correction, power loss or physical suspend. DNS also respects each
 client expiry separately from the source deadline.
+
+## Two-node replication
+
+The operator's `dhcp_server` service can name its IPv4 VRRP owner:
+
+```json
+"ha": {
+  "owner": "lan-ha",
+  "replication": {
+    "listen_address": "169.254.42.2:8443",
+    "peer_address": "169.254.42.3:8443",
+    "certificate_file": "/etc/routerd/ha/local.crt",
+    "private_key_file": "/etc/routerd/ha/local.key",
+    "peer_certificate_file": "/etc/routerd/ha/peer.crt"
+  }
+}
+```
+
+Both nodes need stable, reachable sync addresses independent of the VIP. Reverse
+the endpoints and certificates on the other node. Use the same service name,
+server address, pools, reservations, options and sticky policy. The authenticated
+allocation-domain fingerprint covers these shared facts, excluding local paths
+and interface names. The DHCP interface and server address must belong to the
+named VRRP owner. Do not gate the DHCP resource with `when`: the standby needs
+its listener even while the VIP is absent.
+
+Replication uses TLS 1.3 with mutual certificate authentication and exact peer
+leaf pinning. Certificates need the endpoint IP SAN and both serverAuth and
+clientAuth usages. Keep private keys as private regular files with mode 0600.
+Credentials are read at worker startup; install replacement files and restart
+the worker to rotate them.
+
+The runtime prepares standby and serving configurations once. Current VRRP
+ownership selects the serving configuration through normal worker replacement.
+The standby opens no DHCP socket and does not independently sweep or advance
+the journal. Its status reports `standby=true`, `active=false` and no authoritative
+DNS leases. One DHCP loop owns the journal, including authenticated peer writes.
+PUT acknowledges only after local atomic persistence; duplicate checkpoints are
+idempotent, conflicting equal revisions and older revisions are rejected.
+Lease, sticky and quarantine deadlines are transferred unchanged. A serving
+worker pulls its standby's complete journal before allocation; equal peer
+revisions take precedence over an unacknowledged local branch. Serving endpoints
+reject replication writes. `checkpoint_revision` reports the last completed
+checkpoint; after a peer failure, the local file may contain a later provisional
+write which was never acknowledged to a client.
+
+This is an initial synchronous two-live-node implementation. Startup and new or
+extended grants require the peer: loss of the peer stops DHCP admission until
+it returns. This is not complete partner-down HA. Owner epochs, delta/gap
+recovery, safe disconnected allocation, DHCPv6/PD transfer and clock-skew/load/
+physical qualification remain open. VRRP alone is not split-brain fencing.
+The private journal is version 2 and the compiler contract is native-31. There
+is no reader or migration for discarded prerelease journals and no supported
+mixed old/new rollout. Recreate disposable development state; real deployments
+still need a validated maintenance cutover procedure.
+
+`make check-ha-state DOCKER='sudo -n docker'` uses two signed actual PID 1 trees,
+independent BusyBox udhcpc clients and Linux TCP/UDP peers. It checks renewal
+through takeover, worker replacement, interrupted uploads, authentication,
+replays, external sync-link loss and recovery, and actual 60-second expiry with
+sticky retention. Captures and temporary signed environments are deleted after
+inspection. It does not qualify a physical NIC or ONU.
 
 ## Allocation and wire behavior
 
@@ -159,9 +223,8 @@ routes suppress legacy router/static-route options for that client.
   link selection, arbitrary relay pool discovery, backend-specific tags and
   DHCP failover protocols are not implemented.
 - The private journal is not dnsmasq's text file. There is no implicit import,
-  SSH/rsync synchronization, HA replication or active/active lease sharing.
-  Shared dynamic pools require explicit coordination; VRRP alone does not
-  provide that coordination.
+  SSH/rsync synchronization or active/active lease sharing. The HA mode above
+  requires explicit coordination; VRRP alone does not provide it.
 - Changed configuration preserves unexpired old allocations as exclusions.
   Records outside current pool/scope/reservation/lifetime policy are withheld
   from DNS ownership, not silently discarded to free addresses.

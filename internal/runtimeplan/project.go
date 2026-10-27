@@ -123,6 +123,8 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 	}
 	for _, s := range doc.Services {
 		p.instances = append(p.instances, protocols.instances[s.ModuleName()])
+	}
+	for _, s := range doc.Services {
 		if s.Interface() != "" && !protocols.serviceLinks[s.Interface()] {
 			ensureInterface(&p.network, s.Interface())
 		}
@@ -267,6 +269,13 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 				continue
 			}
 			p.vrrpOwners[s.ModuleName()] = ownershipFor(record, snap)
+			if record.ConfigDigest == protocols.instances[s.ModuleName()].digest && vrrp.CurrentOwnership(snap, facts.bfdClock) {
+				for i, bound := range p.instances {
+					if ha, paired := protocols.dhcpHA[bound.instance.Name]; paired && ha.owner == s.ModuleName() {
+						p.instances[i] = ha.serving
+					}
+				}
+			}
 			p.network.Links = append(p.network.Links, network.Link{Authority: lifetime.Deadline{BootID: snap.BootID, Nanos: snap.ExpiresNanos}, Name: c.VIPInterface, Kind: "macvlan", Parent: c.Interface, MACVLANMode: "bridge", HardwareAddr: vrrp.VirtualMAC(c.Family, c.VirtualRouterID).String(), IPv6AddrGenMode: "none"})
 			ensureInterface(&p.network, c.VIPInterface)
 			if c.VRF != "" {

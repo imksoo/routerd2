@@ -34,7 +34,7 @@ help:
 	  'make check-dual-wan    Verify PPPoE/DS-Lite Health/PBR and TCP MSS with independent peers' \
 	  'make check-pppoe        Verify real PPPoE PAP/CHAP, LAN forwarding and recovery' \
 	  'make check-pppoe-pd     Verify PPP PD release, WAN replacement and LAN IPv6 with independent ISC DHCP' \
-	  'make check-ha-conntrack Preserve actual TCP/UDP state across two native routers' \
+	  'make check-ha-state    Preserve DHCP/TCP/UDP state across two native routers' \
 	  'make check-health-pbr  Required two-WAN real-daemon TCP/UDP failover gate' \
 	  'make check-vrrp-unicast Verify VRRP peer failover and finite WAN identity' \
 	  'make check-bfd         Verify BFD/BGP routing domains with real workers' \
@@ -287,6 +287,6 @@ conntrack-engine:
 	  trap '$(DOCKER) rm "$$profile_id" >/dev/null' EXIT HUP INT TERM; \
 	  $(DOCKER) export "$$profile_id" | tar --no-same-owner -xf - -C $(CONNTRACK_DIR) conntrack-engine.tar conntrack-sources.tar
 
-.PHONY: check-ha-conntrack
-check-ha-conntrack: build build-publisher conntrack-engine
-	$(PYTHON) scripts/ha-conntrack-peer.py
+.PHONY: check-ha-state
+check-ha-state: build build-publisher conntrack-engine
+	$(PYTHON) scripts/ha-state-peer.py

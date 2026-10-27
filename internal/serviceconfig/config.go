@@ -399,6 +399,9 @@ func Validate(services []Service) error {
 	if err := validateBFDReferences(services); err != nil {
 		return err
 	}
+	if err := validateDHCPHA(services); err != nil {
+		return err
+	}
 	return validateDNSSources(services)
 }
 

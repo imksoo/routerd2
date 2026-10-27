@@ -5,7 +5,38 @@
 [機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を参照する。
 実行順序はhomert02/03、実態を確認したk8s-rt/pve-rt、その後既存文書に基づくCloud SAM。
 
-## 現在の変更: peer-receive / native-30
+## 現在の変更: ha-dhcp / native-31
+
+HA-02のDHCPv4同期を実装した。設定・保存順序と制限は
+[DHCPv4 worker](../internal/protocol/dhcpserver/README.md#two-node-replication)を参照する。
+旧routerdの`chain/filesync.go`の15秒ファイルコピーと比較し、worker内の相互TLS認証付き
+complete checkpointへ置き換えた。主系・待機系のfsyncとcontrol反映を終えてからDHCPACKを返す。
+待機workerはVIP不在でも受信し、現VRRP所有観測で配布設定へ交換する。
+compiler native-31、worker ABI5、network journal10、DHCP private journal2。
+廃止した開発形式の互換readerは追加しない。
+
+PVE Linux6.8/amd64、二つの署名済み実PID1 tree、独立BusyBox udhcpc二端末とLinux TCP/UDP peerで
+DORA、A→B→Aの同一貸出更新、二端末の重複防止、待機worker交換、TLS送信途中の切替、
+誤証明書・重複/古い/競合revision、外側同期link断時のACK停止と復旧が通った。
+実60秒失効は、主系ファイルの更新だけでなくworkerの完了済みcheckpointを待って両系を比較する。
+主系保存直後を同期完了と誤認した先行runは最終比較で失敗したため、成功として扱わない。
+完了済みcheckpointで実失効とsticky保持の両系一致も通った。
+既存TCP/UDPは同じsocket/NAT対応を維持し、captureで単一SYNとFTFWを確認した。観測UDP損失は0。
+再実行は`make check-ha-state DOCKER='sudo -n docker'`。
+生ログ・capture・試験binary・一時catalogは確認後に削除し、蓄積しない。
+`make build build-publisher build-linux RELEASE_ID=ha-dhcp`成功。
+amd64/arm64の6静的Go ELFを生成した。ARM64での実行は未検証。
+`make check`（Go/Python・Race Detector・vet）と
+`gitleaks protect --staged --redact --no-banner`も成功した。
+
+現在は両node稼働を要する同期方式で、peer不在では起動/新規貸出/更新を止める。
+partner-down継続、owner epoch、delta/gap、PD/DUID/IAID・IPv6同期、maintenance切替、
+対象実機・ONU・負荷・clock skewの受入は未完了。homert置換可能とはまだ判断しない。
+次の受信経路確認にはDHCPv4 clientの要求送信時刻を含む。
+[RFC 2131 §4.4.5](https://www.rfc-editor.org/rfc/rfc2131.html#section-4.4.5)は要求送信時刻から
+lease期限を計算するが、現clientはACK受信時刻を基準にする。独立peerで遅延ACKを再現して修正する。
+
+## 直前の変更: peer-receive / native-30
 
 旧routerdの受理・利用経路と照合し、実通信を遮る追加制限を修正した。
 
@@ -119,7 +150,7 @@ factory imageへの同梱、同期link分断/gap/古いpeer、認証付き参加
 
 `umask 022`でproject Makefileのbuild経路を使う。
 
-- `make check-ha-conntrack DOCKER='sudo -n docker' RELEASE_ID=<release>`
+- `make check-ha-state DOCKER='sudo -n docker' RELEASE_ID=<release>`
 - `make conntrack-engine DOCKER='sudo -n docker' CONNTRACK_ARCH=<arch>`
 - `make check-health-pbr RELEASE_ID=<release>`
 

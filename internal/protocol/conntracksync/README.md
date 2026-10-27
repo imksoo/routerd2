@@ -66,7 +66,7 @@ that the peer has completed receiving a snapshot.
 
 ## Executed communication and limits
 
-`make check-ha-conntrack DOCKER='sudo -n docker'` runs two signed actual PID 1
+`make check-ha-state DOCKER='sudo -n docker'` runs two signed actual PID 1
 process trees on the PVE Linux kernel, with separate Linux TCP/UDP client and
 server namespaces. It checks continuous traffic over one TCP socket and one
 UDP socket through NAT, both takeover directions, worker/engine replacement,
@@ -77,8 +77,12 @@ path and actual engine replication. Packet capture checks the single client
 SYN and link-local FTFW traffic.
 UDP loss is reported separately from mapping preservation and recovery.
 Diagnostics, captures, catalogs and private namespaces are deleted afterward.
+The same fixture now includes independent BusyBox DHCP clients and the native
+[DHCPv4 checkpoint replication](../dhcpserver/README.md#two-node-replication),
+including sync-link loss, worker replacement and lease expiry. This does not
+authenticate the conntrackd FTFW transport itself.
 
-This is not homert replacement acceptance. DHCP/PD synchronization, authenticated
+This is not homert replacement acceptance. Complete DHCP/PD synchronization, authenticated
 peer admission, complete partition/gap/old-peer handling, large-state commits,
 VRF/zone profiles, ARM64 engine build/execution, factory image integration and hardware/load
 qualification remain open. The partial-commit result decoder has a focused

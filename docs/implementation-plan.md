@@ -7,7 +7,9 @@
 現在の変更・実行結果・残作業は [引き継ぎ](pve-codex-handoff.md) を参照する。
 機能範囲と作業単位は以下とJSONの台帳で管理し、既存試験の成功を全体完了に数えない。
 
-2026-10-27 `peer-receive` / native-30: 旧routerd/依存engineと比較し、IPv4リンクローカルの
+2026-10-27 `ha-dhcp` / native-31: DHCPv4貸出の相互TLS認証付きcheckpoint同期を追加した。
+実PID1二台と独立端末で切替・更新・同期断復旧を確認し、PD同期とpartner-down継続は残る。
+直前の`peer-receive` / native-30では、旧routerd/依存engineと比較し、IPv4リンクローカルの
 conntrack同期/B4対向、正当なIPv6表記、残存ciaddr、独立RA/IA/AAAA情報の受理を修正した。
 RAのDNS満杯処理は最短期限の除去へ閉じ、経路更新を維持する。既存の実worker・独立peer・
 実packetで切替/既存TCP/UDP、PD/RA、DNSとBFD→BGP→FIBを確認した。全経路の監査や
@@ -1151,7 +1153,21 @@ RFC 5798方式を明示できる。標準peerと現行方式peerのVIP TCP/UDP�
 
 再利用・比較元: [pkg/controller/chain/filesync.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/filesync.go), [pkg/ha](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/ha)。
 
-実装先の案: `internal/ha/leasesync (新設予定)`, `internal/protocol/dhcpserver`, `internal/protocol/dhcp6`, `internal/runtimeplan`。
+実装先: `internal/protocol/dhcpserver`, `internal/protocol/dhcpserverconfig`, `internal/runtimeplan`。
+PD同期の`internal/protocol/dhcp6`は未実装。別の同期managerは追加していない。
+
+部分実装: `ha-dhcp` / native-31。DHCPv4 workerがTLS1.3の相互認証とpeer certificate固定で
+complete journalを同期する。local fsync→standby fsync/ACK→control反映→DHCPACKの順序を持ち、
+lease/sticky/quarantineの元期限を保持する。VRRPの現所有観測で、事前生成した待機/配布設定を切り替える。
+待機系はDHCP socketを開かず、同期受信のため稼働する。旧routerdの`chain/filesync.go`を比較し、
+15秒のファイルコピーをshell/rsyncなしの意味付き永続化ACKへ置き換えた。
+二つの署名済み実PID1 treeと独立BusyBox udhcpcで、A→B→Aの同一貸出更新、二端末の重複防止、
+待機worker交換、snapshot送信途中の切替、認証・重複/古い/競合revision、同期link断時のACK停止と
+復旧、実60秒失効とsticky保持が通った。同時に同一TCP socketとUDP NAT対応を維持した。
+再実行は`make check-ha-state DOCKER='sudo -n docker'`。生ログ・capture・一時catalogは削除する。
+これは両node稼働時の同期方式であり、peer不在では起動/新規貸出/更新を停止する。
+partner-down時の安全な継続、owner epoch、delta/cursor/gap、PD/DUID/IAIDとIPv6同期、
+clock skew・物理機・負荷、maintenance切替手順は残る。HA-02完了やhomert置換可能とはしない。
 
 #### HA-03 — NAT conntrack の同期と既存通信継続
 
@@ -1175,7 +1191,7 @@ A→B→A・worker/engine再起動・engine SIGKILL後も継続した。capture�
 機能削除でworker終了と元sysctl0への復元も通った。型付きcommit結果の局所検査はあるが、kernel table枯渇は未試験。
 factory同梱・legacy import・認証/分断/gap/古いpeer・大量状態・VRF/zone・ARM64 engine/実機受入は残る。
 HA-02/EXT-02も未完了であり、今回の接続継続だけでhomert置換可能やHA-03完了とは判断しない。
-再実行は`make check-ha-conntrack DOCKER='sudo -n docker'`。完了したcapture/logは削除する。
+再実行は`make check-ha-state DOCKER='sudo -n docker'`。完了したcapture/logは削除する。
 
 **受入条件**
 

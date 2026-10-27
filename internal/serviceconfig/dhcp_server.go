@@ -1,6 +1,8 @@
 package serviceconfig
 
 import (
+	"fmt"
+	"net/netip"
 	"path/filepath"
 
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
@@ -23,12 +25,48 @@ type DHCPServer struct {
 	MaxLeases                 int                            `json:"max_leases,omitempty"`
 	ProbeTimeoutMilliseconds  int                            `json:"probe_timeout_milliseconds,omitempty"`
 	EffectTimeoutMilliseconds int                            `json:"effect_timeout_milliseconds,omitempty"`
+	HA                        *DHCPServerHA                  `json:"ha,omitempty"`
+}
+
+func validateDHCPHA(services []Service) error {
+	byName := make(map[string]Service, len(services))
+	for _, s := range services {
+		byName[s.Name] = s
+	}
+	for _, s := range services {
+		if s.DHCPServer == nil || s.DHCPServer.HA == nil {
+			continue
+		}
+		c := s.DHCPServer
+		service := byName[c.HA.Owner]
+		if service.VRRP == nil {
+			return fmt.Errorf("DHCP %s HA requires a configured VRRP owner", s.Name)
+		}
+		owner := service.VRRPConfig()
+		if owner.Family != "ipv4" || owner.VIPInterface != c.Interface {
+			return fmt.Errorf("DHCP %s HA owner must be the IPv4 VRRP service for its VIP interface", s.Name)
+		}
+		found := false
+		for _, raw := range owner.Addresses {
+			p, err := netip.ParsePrefix(raw)
+			found = found || err == nil && p.Addr().String() == c.ServerAddress
+		}
+		if !found {
+			return fmt.Errorf("DHCP %s server address must belong to its VRRP owner", s.Name)
+		}
+	}
+	return nil
+}
+
+type DHCPServerHA struct {
+	Owner       string                       `json:"owner"`
+	Replication dhcpserverconfig.Replication `json:"replication"`
 }
 
 func (s Service) DHCPServerConfig(runtimeDir, stateDir string) dhcpserverconfig.Config {
 	c := s.DHCPServer
 	private := filepath.Join(runtimeDir, "services", s.Name)
-	return dhcpserverconfig.Normalize(dhcpserverconfig.Config{
+	cfg := dhcpserverconfig.Config{
 		Resource: s.Name, Interface: c.Interface, VRF: c.VRF, ServerAddress: c.ServerAddress,
 		Primary: c.Primary, Scopes: c.Scopes, Reservations: c.Reservations, Authoritative: c.Authoritative,
 		StickyHoldDays: c.StickyHoldDays, LogDHCP: c.LogDHCP, TrustedRelays: c.TrustedRelays,
@@ -37,5 +75,10 @@ func (s Service) DHCPServerConfig(runtimeDir, stateDir string) dhcpserverconfig.
 		StatePath:  filepath.Join(stateDir, "services", s.Name, "dhcp-leases.json"),
 		SocketPath: filepath.Join(private, "dhcp.sock"), StatusPath: filepath.Join(private, "status.json"),
 		EventPath: filepath.Join(stateDir, "services", s.Name, "dhcp-events.jsonl"),
-	})
+	}
+	if c.HA != nil {
+		r := c.HA.Replication
+		cfg.Replication, cfg.Standby = &r, true
+	}
+	return dhcpserverconfig.Normalize(cfg)
 }

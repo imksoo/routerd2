@@ -21,8 +21,8 @@ import (
 
 // Run owns DHCP protocol sockets and its private journal. Effects is the only
 // control-plane publication path; the worker does not install client addresses
-// or mutate DNS directly. A response granting a lease is sent only after both
-// local fsync and a successful bounded Effects.Update.
+// or mutate DNS directly. A response granting a lease is sent only after
+// local fsync, configured standby persistence and a bounded Effects.Update.
 func Run(ctx context.Context, cfg Config, effects Effects, ready func()) error {
 	return run(ctx, cfg, effects, ready, func(c Config) (transport, error) { return openTransport(c) })
 }
@@ -50,24 +50,63 @@ func run(ctx context.Context, cfg Config, effects Effects, ready func(), open fu
 		return err
 	}
 	defer store.Close()
-	conn, err := open(cfg)
-	if err != nil {
+	var sync *replication
+	var requests <-chan replicationRequest
+	var replicationStopped <-chan struct{}
+	if cfg.Replication != nil {
+		sync, err = startReplication(ctx, cfg)
+		if err != nil {
+			return err
+		}
+		defer sync.close()
+		requests = sync.requests
+		replicationStopped = sync.done
+		if !cfg.Standby {
+			remote, err := sync.pull(ctx, cfg)
+			if err != nil {
+				return fmt.Errorf("read standby DHCP journal before serving: %w", err)
+			}
+			if remote.Revision >= j.Revision {
+				j = remote
+			}
+		}
+	}
+	persist := func(j journal) error {
+		data, err := encodeJournal(j)
+		if err != nil {
+			return err
+		}
+		if err := writePrivate(store.path, data); err != nil {
+			return err
+		}
+		if sync != nil {
+			_, err = sync.exchange(ctx, http.MethodPut, data)
+		}
 		return err
 	}
-	defer conn.Close()
-	e := newEngine(cfg, j, func() time.Time { return time.Now().UTC() }, store.Save)
-	e.probe = conn.Probe
-	if t, ok := conn.(*nativeTransport); ok {
-		e.mtu = t.mtu
-	}
-	if err = e.sweep(e.now()); err != nil {
-		return err
+	e := newEngine(cfg, j, func() time.Time { return time.Now().UTC() }, persist)
+	var conn transport
+	if !cfg.Standby {
+		conn, err = open(cfg)
+		if err != nil {
+			return err
+		}
+		defer conn.Close()
+		e.probe = conn.Probe
+		if t, ok := conn.(*nativeTransport); ok {
+			e.mtu = t.mtu
+		}
+		if err = e.sweep(e.now()); err != nil {
+			return err
+		}
 	}
 	if len(e.leases) > cfg.MaxLeases || len(e.quarantines) > cfg.MaxLeases {
 		return errors.New("DHCP journal exceeds the configured max_leases; retained leases cannot be discarded")
 	}
-	if err = e.save(e.now()); err != nil {
-		return err
+	if !cfg.Standby {
+		if err = e.save(e.now()); err != nil {
+			return err
+		}
 	}
 	var id [16]byte
 	if _, err = rand.Read(id[:]); err != nil {
@@ -140,10 +179,12 @@ func run(ctx context.Context, cfg Config, effects Effects, ready func(), open fu
 		}
 	}()
 	e.events = append(e.events, Event{Type: "started", Resource: cfg.Resource, At: e.now()})
-	if err = conn.Check(); err != nil {
-		return err
+	if !cfg.Standby {
+		if err = conn.Check(); err != nil {
+			return err
+		}
 	}
-	if err = publish(ctx, true, nil); err != nil {
+	if err = publish(ctx, !cfg.Standby, nil); err != nil {
 		return err
 	}
 
@@ -174,6 +215,9 @@ func run(ctx context.Context, cfg Config, effects Effects, ready func(), open fu
 	var dropped atomic.Uint64
 	go func() {
 		defer close(receiveDone)
+		if cfg.Standby {
+			return
+		}
 		for {
 			p, err := conn.Receive(runCtx)
 			if err != nil {
@@ -205,6 +249,24 @@ func run(ctx context.Context, cfg Config, effects Effects, ready func(), open fu
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-replicationStopped:
+			return fmt.Errorf("DHCP replication listener stopped: %w", sync.err)
+		case req := <-requests:
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			var result replicationResult
+			if req.write {
+				result.err = applyReplica(e, store, req.state)
+			} else {
+				result.data, result.err = encodeJournal(e.journal())
+			}
+			req.done <- result
+			if req.write && result.err == nil {
+				if err := publish(ctx, false, nil); err != nil {
+					return err
+				}
+			}
 		case err := <-apiDone:
 			if err == nil {
 				err = errors.New("DHCP private API closed unexpectedly")
@@ -216,16 +278,18 @@ func run(ctx context.Context, cfg Config, effects Effects, ready func(), open fu
 			}
 			return fmt.Errorf("receive DHCP request: %w", err)
 		case <-ticker.C:
-			if err := conn.Check(); err != nil {
-				return err
-			}
-			if err := e.sweep(e.now()); err != nil {
-				return err
+			if !cfg.Standby {
+				if err := conn.Check(); err != nil {
+					return err
+				}
+				if err := e.sweep(e.now()); err != nil {
+					return err
+				}
 			}
 			n := dropped.Load()
 			e.stats.Rejected += n - reportedDrops
 			reportedDrops = n
-			if err := publish(ctx, true, nil); err != nil {
+			if err := publish(ctx, !cfg.Standby, nil); err != nil {
 				return err
 			}
 		case p := <-packets:

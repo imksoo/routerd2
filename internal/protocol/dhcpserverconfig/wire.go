@@ -41,19 +41,21 @@ type Stats struct {
 }
 
 type Snapshot struct {
-	Resource      string    `json:"resource"`
-	Interface     string    `json:"interface"`
-	ServerAddress string    `json:"server_address"`
-	Epoch         string    `json:"epoch"`
-	Sequence      uint64    `json:"sequence"`
-	Active        bool      `json:"active"`
-	ObservedAt    time.Time `json:"observed_at"`
-	BootID        string    `json:"boot_id"`
-	ObservedNanos uint64    `json:"observed_nanos"`
-	ExpiresNanos  uint64    `json:"expires_nanos"`
-	Leases        []Lease   `json:"leases"`
-	Stats         Stats     `json:"stats"`
-	Error         string    `json:"error,omitempty"`
+	Resource           string    `json:"resource"`
+	Interface          string    `json:"interface"`
+	ServerAddress      string    `json:"server_address"`
+	Epoch              string    `json:"epoch"`
+	Sequence           uint64    `json:"sequence"`
+	Active             bool      `json:"active"`
+	Standby            bool      `json:"standby,omitempty"`
+	CheckpointRevision uint64    `json:"checkpoint_revision"`
+	ObservedAt         time.Time `json:"observed_at"`
+	BootID             string    `json:"boot_id"`
+	ObservedNanos      uint64    `json:"observed_nanos"`
+	ExpiresNanos       uint64    `json:"expires_nanos"`
+	Leases             []Lease   `json:"leases"`
+	Stats              Stats     `json:"stats"`
+	Error              string    `json:"error,omitempty"`
 }
 
 type Event struct {

@@ -14,6 +14,7 @@ import (
 // select its workers and supply live data; they do not rebuild worker identity.
 type protocolPlan struct {
 	instances    map[string]binding
+	dhcpHA       map[string]dhcpHAPlan
 	dns          map[string]dnsPlan
 	bgp          map[string]bgpconfig.Config
 	vrrp         map[string]vrrp.Config
@@ -22,11 +23,17 @@ type protocolPlan struct {
 	serviceLinks map[string]bool
 }
 
+type dhcpHAPlan struct {
+	owner   string
+	serving binding
+}
+
 // The complete Native source has passed config.Compile, including generated
 // worker-name collisions and the service/instance limits.
 func prepareProtocols(doc config.Native, runtimeDir, stateDir string) (protocolPlan, error) {
 	plan := protocolPlan{
 		instances:    make(map[string]binding),
+		dhcpHA:       make(map[string]dhcpHAPlan),
 		dns:          make(map[string]dnsPlan),
 		bgp:          make(map[string]bgpconfig.Config),
 		vrrp:         make(map[string]vrrp.Config),
@@ -56,6 +63,20 @@ func prepareProtocols(doc config.Native, runtimeDir, stateDir string) (protocolP
 		var instance serviceconfig.Instance
 		var err error
 		switch {
+		case service.DHCPServer != nil && service.DHCPServer.HA != nil:
+			cfg := service.DHCPServerConfig(runtimeDir, stateDir)
+			body, encodeErr := json.Marshal(cfg)
+			instance, err = serviceconfig.Instance{Name: name, Role: "dhcp_server", Config: body}, encodeErr
+			cfg.Standby = false
+			active, activeErr := json.Marshal(cfg)
+			if activeErr != nil {
+				return protocolPlan{}, activeErr
+			}
+			bound, bindErr := encodeInstance(serviceconfig.Instance{Name: name, Role: "dhcp_server", Config: active})
+			if bindErr != nil {
+				return protocolPlan{}, bindErr
+			}
+			plan.dhcpHA[name] = dhcpHAPlan{owner: "service." + service.DHCPServer.HA.Owner, serving: bound}
 		case service.DNS != nil:
 			cfg := service.DNSConfig(runtimeDir, stateDir)
 			prepared, prepareErr := prepareDNS(cfg.Runtime)
