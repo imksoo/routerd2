@@ -286,12 +286,12 @@ func TestStrictDocumentAndDuplicateHandling(t *testing.T) {
 	}
 }
 
-func TestAllUnknownFieldsAndUnsupportedKindsAreReported(t *testing.T) {
+func TestUnknownFieldsAndMissingPoliciesAreReportedTogether(t *testing.T) {
 	data := routerWith("    - apiVersion: net.routerd.net/v1alpha1\n      kind: Interface\n      metadata: {name: wan}\n      spec: {ifname: eth0, ownerTypo: external, mtuTypo: 9000}\n    - apiVersion: net.routerd.net/v1alpha1\n      kind: TailscaleNode\n      metadata: {name: overlay}\n      spec: {authKey: do-not-print-this-password}\n")
 	data = append(data, []byte("unknownRoot: true\n")...)
 	_, err := Migrate(data)
 	for _, want := range []struct{ path, code string }{
-		{"unknownRoot", "unknown_field"}, {"ownerTypo", "unknown_field"}, {"mtuTypo", "unknown_field"}, {"resources[1].spec", "unsupported_kind"},
+		{"unknownRoot", "unknown_field"}, {"ownerTypo", "unknown_field"}, {"mtuTypo", "unknown_field"}, {"resources[1].spec", "explicit_policy_required"},
 	} {
 		if !hasIssue(err, want.path, want.code) {
 			t.Fatalf("diagnostic collection stopped too early: %v", err)

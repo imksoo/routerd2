@@ -31,7 +31,7 @@ merge services.
 `Compile` never guesses a host network manager's RA defaults or silently adopts
 the new AFTR or DHCP-derived DNS lifetime contracts. `CompileWithOptions` permits
 **explicit replacement intent** for individual `IPv6RAAddress`, `DSLiteTunnel`,
-DHCP-consuming `DNSResolver`, and stateless `DHCPv6Server` resources. Each such mapping says which behavior
+DHCP-consuming `DNSResolver`, stateless `DHCPv6Server`, and `TailscaleNode` resources. Each such mapping says which behavior
 changes; a successful replacement is not a claim of
 automatic semantic parity. There is no global permissive mode. Policy cannot
 discard an unsupported field, resource, HA condition or ownership requirement.
@@ -565,3 +565,55 @@ implicit LAN RA, health checks and DHCP-derived DNS, so it is not a positive
 full-migration fixture. Their pinned source locations are
 [`docs/tutorials/wan-side-services.md`](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/docs/tutorials/wan-side-services.md)
 and [`website/fixtures/wizard/home/home-dslite-ipv6.yaml`](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/website/fixtures/wizard/home/home-dslite-ipv6.yaml).
+
+## Tailscale daemon replacement
+
+`TailscaleNode` with `acceptDNS:false` and SSH disabled is imported using an
+explicit resource-scoped policy:
+
+```yaml
+schema_version: 1
+tailscale:
+  TailscaleNode/overlay:
+    interface: tailscale0
+    bootstrap_dns: [192.0.2.53]
+    control_ca_file: /etc/ssl/certs/ca-certificates.crt
+    enrollment: saved_identity
+```
+
+Use reachable bootstrap resolvers and the intended trust bundle. Choose
+`enrollment: key_file` with `auth_key_file: /private/native.key` to enroll or
+reauthenticate with an owned raw key file. `saved_identity` requires no key path
+and uses previously provisioned vendor identity. The legacy `authKeyFile` is a
+systemd EnvironmentFile, not a raw native key. Legacy inline keys and environment
+references are deliberately replaced by this policy; no secret value or file
+content is copied into the output.
+
+Retained intent includes hostname, login server (the original public default
+when absent), advertised subnet/exit routes and tags, acceptRoutes and shieldsUp.
+An absent node creates no native service. Omitted acceptDNS defaults to true in
+`tailscale up`, so it is rejected along with explicit true until native tailnet
+DNS is implemented. Tailscale SSH and runtime conditions remain unsupported
+instead of being silently removed; any such issue rejects the entire batch.
+
+Stop the external daemon and verify its old kernel ownership has gone before
+provisioning its opaque `tailscaled.state` into the native persistent
+`services/tailscale/tailscaled.state` with owner-only permissions. Provisioning
+is an explicit deployment operation; this pure converter never reads state or
+stops a daemon. The checked case uses an independently enrolled official
+Tailscale1.104.2 state file with the pinned native1.104.2 engine; other versions
+and hardware-sealed state have not been qualified.
+
+The native engine owns TUN/table52 and uses netfilter off. Declare forwarding,
+FW/NAT and WAN policy ordering as native intent. Existing routerd-owned INPUT
+exceptions on UDP41641 retain the exact first-untrust interface scope before
+its ACL, sharing the WireGuard hole-index implementation. External daemon or
+foreign host netfilter rules are not adopted. No new INPUT hook is created for
+a standalone Tailscale declaration. The actual communication fixture combines
+the imported interface/INPUT policy and node with explicit native LAN/WAN
+forwarding/NAT and conditional activation before first boot.
+
+`make check-tailscale RELEASE_ID=tailscale-import` executes the real migration
+CLI, signed catalog and PID1 workers against Headscale/dnsmasq/official peer.
+It checks identity provisioning, key removal, rollback, original condition expiry,
+node revoke/reauthentication and accepted IPv4/IPv6 routes with real TCP/UDP.

@@ -1,0 +1,30 @@
+apiVersion: routerd.net/v1alpha1
+kind: Router
+metadata: {name: imported-tailnet}
+spec:
+  resources:
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: TailscaleNode
+      metadata: {name: overlay}
+      spec:
+        hostname: product-a
+        loginServer: https://control.test:8443
+        authKeyEnv: TS_AUTHKEY
+        authKeyFile: /discarded/systemd-environment-file
+        advertiseExitNode: true
+        advertiseRoutes: [10.42.0.0/24, "fd42::/64"]
+        acceptDNS: false
+        acceptRoutes: false
+        shieldsUp: false
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: Interface
+      metadata: {name: wan}
+      spec: {ifname: uplink0, managed: true, adminUp: true}
+    - apiVersion: firewall.routerd.net/v1alpha1
+      kind: FirewallZone
+      metadata: {name: outside}
+      spec: {role: untrust, interfaces: [Interface/wan]}
+    - apiVersion: firewall.routerd.net/v1alpha1
+      kind: FirewallRule
+      metadata: {name: deny-input}
+      spec: {fromZone: outside, toZone: self, action: drop}

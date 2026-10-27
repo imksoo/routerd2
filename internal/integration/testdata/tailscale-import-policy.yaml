@@ -1,0 +1,8 @@
+schema_version: 1
+tailscale:
+  TailscaleNode/overlay:
+    interface: tailscale0
+    bootstrap_dns: [192.0.2.1]
+    control_ca_file: /fixture/control.pem
+    enrollment: key_file
+    auth_key_file: /fixture/auth.key

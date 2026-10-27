@@ -83,3 +83,10 @@ The fixture isolates network/mount/PID namespaces,
 uses the product supervisor/control/network/worker, and destroys raw peer keys,
 logs and captures afterward. The handoff and implementation plan record which
 communication gates have actually passed and which remain unfinished.
+
+Legacy `TailscaleNode` import requires explicit enrollment and kernel/bootstrap
+ownership policy; see [the importer](../../legacyconfig/README.md). The actual
+CLI-to-PID1 fixture also checks stopped external-daemon state provisioning,
+identity reuse after reauthentication, and accepted IPv4/IPv6 subnet routes
+with LAN TCP/UDP forwarding without NAT. These checks use version 1.104.2 on
+both sides; they do not qualify older or hardware-sealed identity migration.

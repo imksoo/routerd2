@@ -137,6 +137,8 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 			c.ipv4Route(r)
 		case "DSLiteTunnel":
 			// Compiled before routes so dynamic tunnel ownership can be joined.
+		case "TailscaleNode":
+			c.tailscale(r)
 		case "IPv6RouterAdvertisement":
 			c.reject(r, "", "unsupported_semantics", "legacy dnsmasq RA uses interface address constructors and validLifetime as router lifetime; explicit native PIO/router/DNS lifetime intent is required")
 		case "FirewallZone", "FirewallPolicy", "FirewallRule", "NAT44Rule":
@@ -163,7 +165,7 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 	c.dns()
 	c.firewall()
 	c.firewallServices()
-	c.wireguardFirewall()
+	c.vpnListenerFirewall()
 	c.checkOptionsUsed()
 	c.checkAddressOverlap()
 	for _, iface := range c.interfaces {

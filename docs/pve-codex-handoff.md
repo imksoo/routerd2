@@ -5,7 +5,28 @@
 [機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
-## 現在の変更: tailscale-routing / native-41
+## 現在の変更: tailscale-import / native-41
+
+旧`TailscaleNode`をCLI importへ接続した。`tailscale` policyでowned TUN・bootstrap DNS/trustと
+`key_file`または`saved_identity`を明示する。旧`authKeyFile`はsystemd EnvironmentFileなので、
+生keyとして読まない。旧inline/env資格情報は選択したnative enrollmentへ置き換え、値を出力しない。
+旧routerd所有のUDP41641 INPUT例外は、WireGuardと共用する最初のuntrust interfaceの計算で、
+元ACLより前のscopeを保つ。外部daemonのnetfilterやkernel状態を引き取らない。
+
+実fixtureは旧sourceを製品CLIで変換し、そのinterface/INPUT/nodeを、明示native LAN/WAN・
+FW/NAT・PBR・条件と組み合わせて初回起動する。公式daemonを実CLIで先に登録し、停止・
+kernel所有解除後、その不透明なstate fileだけをprovisionしてnative PID1へ移した。
+同じnode ID/addressで実転送が通った。失効後の新keyによる再認証でもidentityを維持し、
+`acceptRoutes:false`時は受けなかった独立peerのIPv4/IPv6 prefixを、trueへ変更してtable52へ入れた。
+LANからpeer側subnetへNAT無しTCP/UDPが通り、相手が元LAN送信元を受信した。
+state fileの編集/削除、productへの手動route注入は行っていない。
+
+旧sourceの条件付きgating、acceptDNS省略/true、SSHは一括拒否する。nativeの条件付き実行とは区別する。
+移設の確認は公式/native双方1.104.2で、旧版・hardware-sealed identityの資格認定ではない。
+実装契約とpolicy例は[legacy importer](../internal/legacyconfig/README.md)を読む。
+公式peerにも`TS_LOGS_DIR`を一時directoryへ明示し、default先に残った試験用log設定209 bytesは削除した。
+
+### 既存のnative Tailscale経路
 
 旧routerdの`pkg/tailscale`、`pkg/render/tailscale_systemd.go`、
 `pkg/controller/chain/system.go`、`docs/how-to/tailscale.md`を読んだ。
@@ -21,7 +42,7 @@ CA・resolver・`/run`を私有化し、通常のDNS処理をhostのresolved/DBu
 条件付きserviceは、適用済みResourceStateの元期限で停止する。pollや通知の受信で期限を延ばさない。
 
 compiler native-41、worker ABI5、network journal11、DHCPv6 checkpoint2。
-`release_id=tailscale-routing`、4c410b7からの今回の変更で実行した。
+`release_id=tailscale-import`、936c3b5からの今回の変更で実行した。
 実装と必要な設定は[README](../internal/protocol/tailscale/README.md)を参照する。
 engine無しのdefault host catalogはTailscaleを広告しない。署名catalogにはengine/source両artifactを結ぶ。
 
@@ -42,7 +63,7 @@ supervisor/control/network/Health/Tailscale workerを起動した。
 - WAN source policyをlookup5270より後の6000に置いた構成で実転送を確認した。
 - captureでLAN/WANのTCP/UDP、DNS、暗号化underlay packetを確認した。
 
-再実行は`make check-tailscale RELEASE_ID=tailscale-routing`。
+再実行は`make check-tailscale RELEASE_ID=tailscale-import`。
 peerのchecksum検査・必要時の取得、製品build、engine/source生成、署名catalog/PID1試験を含む。
 資格情報・生ログ・capture・一時releaseは終了時に削除する。
 
@@ -52,22 +73,22 @@ peerのchecksum検査・必要時の取得、製品build、engine/source生成�
 設定transactionは完了を待つため12秒のclient上限を使い、意図した経路・転送の結果は弱めていない。
 Runningやpingだけをrouter機能の受入とは数えない。
 
-`make check`のGo/Python・Race Detector・vetが通った。最後の所有処理変更にも関連Race/vetと
-実PID1試験を再実行済み。Race中に既存grandchild試験の40ms待機依存が出たため、
-生成した親が既知のchild PIDを保存する形へ直した。子の起動速度でPID取得を判定しない。
-調査用に一時保存した7個の上流Go source断片は削除し、source archiveを再利用する。
+今回の`make check`でGo/Python・Race Detector・vetが通った。最終import変更にも
+関連Race/vetを実行し、`make build build-publisher build-linux RELEASE_ID=tailscale-import`で
+nativeとamd64/arm64 core6をCGO_ENABLED=0でbuildした。最終の実PID1試験は
+上記のCLI import・外部identity・再認証・経路受理を含めて成功した。
 
-engineはGo1.27.3/CGO_ENABLED=0でamd64/arm64ともbuild済み。
+engineは前回Go1.27.3/CGO_ENABLED=0でamd64/arm64ともbuild済み。今回amd64を再生成した。
 pinned upstream sourceと実import71 moduleのzip、全license notice、build資料を生成する。
-最終core6静的ELFの署名catalog/publisher/stageがRace Detector付きで通った。
-Tailscale engine/sourceを含む実署名publisher/stageもamd64/arm64双方で通った。
+今回のcore6静的ELFの署名catalog/publisher/stageが両architectureともRace Detector付きで通った。
+前回Tailscale engine/sourceを含む実署名publisher/stageもamd64/arm64双方で通った。
 ARM64での実行・対象NIC性能・本番tailnet受入とは区別する。
 
 ### Tailscaleの残作業
 
-`accept_routes`、tags、shields_upは実装済みだが実相互接続は未検証。
-acceptDNSとnative DNS、Tailscale SSHの別権限/OS契約、旧TailscaleNodeの一括import、
-既存daemonからのidentity移設、再認証、OS image/TUN setup統合、広い障害条件と対象実機受入は未完了。
+`accept_routes`の両familyの実経路/転送は確認済み。tags、shields_upの実相互接続は未検証。
+acceptDNSとnative DNS、Tailscale SSHの別権限/OS契約、旧TailscaleNodeの条件付きimport、
+旧版/sealed identityの移設、OS image/TUN setup統合、広い障害条件と対象実機受入は未完了。
 旧daemonが所有するtable52を実行中のまま引き取らない。切替条件とidentityの所有を明示する。
 EXT-02全体やhomert置換可能とは判断しない。
 

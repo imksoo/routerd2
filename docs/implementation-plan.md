@@ -1519,9 +1519,16 @@ engineはGo1.27.3/CGO_ENABLED=0で両architectureをbuildし、実import71 modul
 実署名publisher/stageも両architectureで通った。WAN source policy6000との併用でも転送した。
 ARM64実行・対象NIC・本番tailnetの受入とは区別する。
 
-`accept_routes`/tags/shields_upは実装済みだが実相互接続は未検証。
-acceptDNS/native DNS、Tailscale SSHの別権限/OS契約、旧resource一括importと既存identity移設、
-再認証・OS image/TUN setup統合・広い障害条件・対象実機受入は残る。EXT-02全体とhomert置換は完了していない。
+2026-10-27 `tailscale-import`: 旧EnvironmentFileと生keyを区別する明示policyで旧TailscaleNodeを
+CLI importし、旧INPUT UDP41641例外のscopeを保持した。公式daemonの実CLI登録→停止→
+state provisioning→native PID1で同じidentityと転送を確認した。失効後の新keyで再認証し、
+acceptRoutes:false/trueによる独立peerの両family route受理とNAT無しLAN TCP/UDPも通った。
+sourceの条件/acceptDNS省略・true/SSHは一括拒否し、native条件付き実行と区別する。
+再実行は`make check-tailscale RELEASE_ID=tailscale-import`。
+
+tags/shields_upの実相互接続は未検証。
+acceptDNS/native DNS、Tailscale SSHの別権限/OS契約、旧resourceの条件付き一括importと旧版/sealed identity移設、
+OS image/TUN setup統合・広い障害条件・対象実機受入は残る。EXT-02全体とhomert置換は完了していない。
 
 **成果物**
 

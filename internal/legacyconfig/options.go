@@ -4,8 +4,10 @@ package legacyconfig
 
 import (
 	"bytes"
+	"encoding"
 	"fmt"
 	"io"
+	"net/netip"
 	"reflect"
 	"sort"
 	"strings"
@@ -17,10 +19,29 @@ import (
 
 const OptionsSchemaVersion = 1
 
+type TailscaleEnrollment string
+
+const (
+	TailscaleKeyFile       TailscaleEnrollment = "key_file"
+	TailscaleSavedIdentity TailscaleEnrollment = "saved_identity"
+)
+
+// TailscalePolicy selects the new daemon's kernel and bootstrap ownership.
+// Enrollment is key_file or saved_identity; legacy environment files and
+// inline keys are never read or copied into the native configuration.
+type TailscalePolicy struct {
+	Interface     string              `json:"interface"`
+	BootstrapDNS  []netip.Addr        `json:"bootstrap_dns,omitempty"`
+	ControlCAFile string              `json:"control_ca_file"`
+	Enrollment    TailscaleEnrollment `json:"enrollment"`
+	AuthKeyFile   string              `json:"auth_key_file,omitempty"`
+}
+
 // Options contains explicit replacement intent, not switches to ignore errors.
 // Map keys are exact legacy Kind/name identities. Each entry must be consumed by
 // that one resource; unqualified aliases and extra entries are rejected.
 type Options struct {
+	Tailscale     map[string]TailscalePolicy        `json:"tailscale,omitempty"`
 	SchemaVersion int                               `json:"schema_version"`
 	RAClients     map[string]serviceconfig.RAClient `json:"ra_clients,omitempty"`
 	DSLite        map[string]DSLitePolicy           `json:"ds_lite,omitempty"`
@@ -97,6 +118,11 @@ func checkPolicyFields(d *decoder, n *yaml.Node, typ reflect.Type, path string) 
 		}
 		typ = typ.Elem()
 	}
+	// config.Decode already interpreted scalar text codecs (netip.Addr).
+	// Their private Go fields are not a nested policy mapping.
+	if reflect.PointerTo(typ).Implements(reflect.TypeFor[encoding.TextUnmarshaler]()) {
+		return
+	}
 	switch typ.Kind() {
 	case reflect.Struct:
 		if n.Kind != yaml.MappingNode {
@@ -137,7 +163,7 @@ func validateOptionsShape(d *decoder, options Options, explicit bool) {
 	if explicit && options.SchemaVersion != OptionsSchemaVersion {
 		d.issue(nil, "$policy.schema_version", "policy_version", "migration policy schema_version must be 1")
 	}
-	if len(options.RAClients)+len(options.DSLite)+len(options.DHCPDNS)+len(options.DHCP6Servers) > 4096 {
+	if len(options.RAClients)+len(options.DSLite)+len(options.DHCPDNS)+len(options.DHCP6Servers)+len(options.Tailscale) > 4096 {
 		d.issue(nil, "$policy", "policy_limit", "migration policy accepts at most 4096 resource entries")
 	}
 }
@@ -145,11 +171,11 @@ func validateOptionsShape(d *decoder, options Options, explicit bool) {
 func (c *compiler) initOptions(options Options, explicit bool) {
 	validateOptionsShape(c.decoder, options, explicit)
 	c.policyPaths, c.policyUsed = map[string]string{}, map[string]bool{}
-	if len(options.RAClients)+len(options.DSLite)+len(options.DHCPDNS)+len(options.DHCP6Servers) > 4096 {
+	if len(options.RAClients)+len(options.DSLite)+len(options.DHCPDNS)+len(options.DHCP6Servers)+len(options.Tailscale) > 4096 {
 		return
 	}
 	// Do not let a caller's later edit mutate a successfully compiled document.
-	c.options = Options{SchemaVersion: options.SchemaVersion, RAClients: map[string]serviceconfig.RAClient{}, DSLite: map[string]DSLitePolicy{}, DHCPDNS: map[string]DHCPDNSPolicy{}, DHCP6Servers: map[string]DHCP6ServerPolicy{}}
+	c.options = Options{SchemaVersion: options.SchemaVersion, RAClients: map[string]serviceconfig.RAClient{}, DSLite: map[string]DSLitePolicy{}, DHCPDNS: map[string]DHCPDNSPolicy{}, DHCP6Servers: map[string]DHCP6ServerPolicy{}, Tailscale: map[string]TailscalePolicy{}}
 	for key, value := range options.RAClients {
 		value.SLAAC, value.DefaultRoute = copyBool(value.SLAAC), copyBool(value.DefaultRoute)
 		value.OnLink, value.RouteInformation = copyBool(value.OnLink), copyBool(value.RouteInformation)
@@ -172,6 +198,10 @@ func (c *compiler) initOptions(options Options, explicit bool) {
 			value.RouterLifetimeSeconds = &lifetime
 		}
 		c.options.DHCP6Servers[key] = value
+	}
+	for key, value := range options.Tailscale {
+		value.BootstrapDNS = append([]netip.Addr(nil), value.BootstrapDNS...)
+		c.options.Tailscale[key] = value
 	}
 	check := func(section, kind string, keys []string) {
 		sort.Strings(keys)
@@ -206,6 +236,11 @@ func (c *compiler) initOptions(options Options, explicit bool) {
 		keys = append(keys, key)
 	}
 	check("dhcp6_servers", "DHCPv6Server", keys)
+	keys = make([]string, 0, len(options.Tailscale))
+	for key := range options.Tailscale {
+		keys = append(keys, key)
+	}
+	check("tailscale", "TailscaleNode", keys)
 }
 
 func copyBool(value *bool) *bool {

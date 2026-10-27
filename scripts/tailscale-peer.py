@@ -74,6 +74,7 @@ def peer(stage):
     children, namespaces = [], []
     frozen = []
     pid1 = 0
+    module = ""
 
     def signal_worker(pid, sig):
         run(["nsenter", "-t", str(pid1), "-m", "-p", "python3", "-c", "import os,sys;os.kill(int(sys.argv[1]),int(sys.argv[2]))", str(pid), str(int(sig))])
@@ -95,13 +96,13 @@ def peer(stage):
 
     def observation():
         instances = product_api("control.sock", "/v1/services")["instances"]
-        return next((x.get("snapshot", {}) for x in instances if x["name"] == "service.tailnet"), {})
+        return next((x.get("snapshot", {}) for x in instances if x["name"] == module), {})
 
     def pingable(host):
         return subprocess.run(inside("ts-b", ["ping", "-c", "1", "-W", "1", host]), capture_output=True).returncode == 0
 
-    def traffic(host, source):
-        run(inside("ts-b", ["python3", "-c", ECHO_CLIENT, host, source]))
+    def traffic(host, source, namespace="ts-b"):
+        run(inside(namespace, ["python3", "-c", ECHO_CLIENT, host, source]))
 
     try:
         run(["mount", "-t", "tmpfs", "-o", "mode=755", "tmpfs", "/run"])
@@ -164,18 +165,48 @@ def peer(stage):
         authfile = stage / "auth.key"
         authfile.write_text(auth["key"])
         authfile.chmod(0o600)
+        # Start from an independently enrolled external daemon's real state.
+        # Stop its old network ownership before provisioning the native owner.
+        seed = stage / "external-daemon"
+        seed.mkdir(mode=0o700)
+        seed_socket = seed / "local.sock"
+        run(inside("ts-a", ["ip", "addr", "add", "192.0.2.2/24", "dev", "uplink0"]))
+        external = start("ts-a", ["env", "TS_LOGS_DIR=" + str(seed), "SSL_CERT_FILE=" + str(cert), str(PEERS / "tailscaled"), "--state=" + str(seed / "tailscaled.state"), "--statedir=" + str(seed), "--socket=" + str(seed_socket), "--tun=tailscale0", "--port=41641", "--no-logs-no-support"], "external-daemon")
+        wait(seed_socket.exists)
+        run(inside("ts-a", ["env", "SSL_CERT_FILE=" + str(cert), str(PEERS/"tailscale"), "--socket="+str(seed_socket), "up", "--timeout=15s", "--login-server=https://control.test:8443", "--hostname=product-a", "--auth-key=file:"+str(authfile), "--accept-dns=false", "--netfilter-mode=off", "--advertise-exit-node", "--advertise-routes=10.42.0.0/24,fd42::/64"]))
+        wait(lambda: vendor_api(seed_socket,"status").get("BackendState")=="Running",30)
+        seed_identity = vendor_api(seed_socket,"status")["Self"]
+        external.terminate()
+        external.wait(timeout=5)
+        run(inside("ts-a", ["ip", "addr", "del", "192.0.2.2/24", "dev", "uplink0"]))
+        target = stage / "product-state/services/tailscale"
+        target.mkdir(mode=0o700, parents=True)
+        shutil.copyfile(seed / "tailscaled.state", target / "tailscaled.state")
+        (target / "tailscaled.state").chmod(0o600)
+        legacy = PRODUCT.parents[1] / "internal/integration/testdata/tailscale-import.yaml"
+        policyfile = stage / "import-policy.json"
+        policy = {"schema_version": 1, "tailscale": {"TailscaleNode/overlay": {
+            "interface": "tailscale0", "bootstrap_dns": ["192.0.2.1"], "control_ca_file": str(cert),
+            "enrollment": "key_file", "auth_key_file": str(authfile)}}}
+        def imported_native():
+            policyfile.write_text(json.dumps(policy))
+            file = stage / "imported.yaml"
+            file.write_text(run([str(PRODUCT / "routerd"), "config", "migrate", "--policy", str(policyfile), str(legacy)]))
+            plan = json.loads(run([str(PRODUCT / "routerd"), "config", "plan", str(file)]))
+            return plan["native"]
+        migrated = imported_native()
+        imported = next(s for s in migrated["services"] if "tailscale" in s)
+        firewall = migrated["network"]["firewall"]
+        firewall["forward"] = [{"from": "tailscale0", "to": "lan0"}, {"from": "tailscale0", "to": "uplink0"}, {"from": "lan0", "to": "tailscale0"}]
+        firewall["nat"] = [{"type": "masquerade", "match": {"family": family, "in_interface": "tailscale0", "out_interface": "uplink0"}} for family in (4,6)]
+        module = "service." + imported["name"]
         resources = [
-            {"id": "uplink", "interface": {"name": "uplink0"}},
+            {"id": "uplink", "interface": next(i for i in migrated["network"]["interfaces"] if i["name"] == "uplink0")},
             {"id": "lan", "interface": {"name": "lan0"}},
             {"id": "forwarding", "forwarding": {"ipv4": True, "ipv6": True, "ipv4_rp_filter": 0}},
-            {"id": "firewall", "firewall": {
-                "forward": [{"from": "tailscale0", "to": "lan0"}, {"from": "tailscale0", "to": "uplink0"}],
-                "nat": [{"type": "masquerade", "match": {"family": family, "in_interface": "tailscale0", "out_interface": "uplink0"}} for family in (4, 6)]}},
+            {"id": "firewall", "firewall": firewall},
             {"id": "gate", "service": {"name": "gate", "health": {"interface": "uplink0", "target": "192.0.2.1", "protocol": "tcp", "port": 8443, "interval_ms": 200, "timeout_ms": 100, "healthy_threshold": 1, "unhealthy_threshold": 1}}},
-            {"id": "tailnet", "when": {"fact": "service.gate.active", "max_age": "2s"}, "service": {"name": "tailnet", "tailscale": {
-                "interface": "tailscale0", "server_url": "https://control.test:8443", "hostname": "product-a",
-                "auth_key_file": str(authfile), "control_ca_file": str(cert), "bootstrap_dns": ["192.0.2.1"],
-                "advertise_routes": ["10.42.0.0/24", "fd42::/64"], "advertise_exit_node": True}}},
+            {"id": "tailnet", "when": {"fact": "service.gate.active", "max_age": "2s"}, "service": imported},
             {"id": "exit4", "route": {"destination": "198.51.100.20/32", "interface": "uplink0", "gateway": "192.0.2.1"}},
             {"id": "exit6", "route": {"destination": "2001:db8:ffff::20/128", "interface": "uplink0", "gateway": "fd0::1"}},
         ]
@@ -239,6 +270,8 @@ def peer(stage):
         print("PASS signed engine/image/source catalog selected under PID 1", flush=True)
         original = observation()
         assert original["online"]
+        assert original["node_id"]==seed_identity["ID"] and original["addresses"]==seed_identity["TailscaleIPs"]
+        print("PASS externally enrolled official daemon identity retained after stopped-state provisioning",flush=True)
         # The kernel scope has one owner even across different identity dirs.
         lock_probe = "import errno,socket\ns=socket.socket(socket.AF_UNIX,socket.SOCK_DGRAM)\ntry:s.bind('\\0routerd2.tailscale-owner')\nexcept OSError as e:assert e.errno==errno.EADDRINUSE\nelse:raise AssertionError('Tailscale kernel namespace was not claimed')"
         run(inside("ts-a",["python3","-c",lock_probe]))
@@ -248,15 +281,21 @@ def peer(stage):
         bootstrap = base / "bootstrap.json"
         bootstrap.write_text(json.dumps({"version": "alpha0", "locked": False, "enabled": False}))
         socket = base / "tailscaled.sock"
-        start("ts-b", ["env", "TS_DEBUG_FIREWALL_MODE=nftables", "SSL_CERT_FILE=" + str(cert), str(PEERS / "tailscaled"), "--state=" + str(base / "state"), "--statedir=" + str(base), "--socket=" + str(socket), "--tun=tailscale0", "--port=41641", "--no-logs-no-support", "--config=" + str(bootstrap)], "peer")
+        start("ts-b", ["env", "TS_DEBUG_FIREWALL_MODE=nftables", "TS_LOGS_DIR=" + str(base), "SSL_CERT_FILE=" + str(cert), str(PEERS / "tailscaled"), "--state=" + str(base / "state"), "--statedir=" + str(base), "--socket=" + str(socket), "--tun=tailscale0", "--port=41641", "--no-logs-no-support", "--config=" + str(bootstrap)], "peer")
         wait(socket.exists)
-        vendor_api(socket, "start", {"AuthKey": auth["key"], "UpdatePrefs": {"ControlURL": "https://control.test:8443", "Hostname": "independent-peer", "WantRunning": True, "CorpDNS": False, "RouteAll": True, "NetfilterMode": 0, "AdvertiseRoutes": []}})
+        vendor_api(socket, "start", {"AuthKey": auth["key"], "UpdatePrefs": {"ControlURL": "https://control.test:8443", "Hostname": "independent-peer", "WantRunning": True, "CorpDNS": False, "RouteAll": True, "NetfilterMode": 0, "AdvertiseRoutes": ["10.43.0.0/24", "fd43::/64"]}})
         wait(lambda: vendor_api(socket, "status").get("BackendState") == "Running", 30)
         peer_ips = {ipaddress.ip_address(value).version: value for value in vendor_api(socket, "status")["TailscaleIPs"]}
+        for address in ("10.43.0.1/32", "fd43::1/128"):
+            run(inside("ts-b", ["ip", "addr", "add", address, "dev", "lo"]))
         nodes = json.loads(run(inside("ts-control", head + ["nodes", "list", "-o", "json"])))
         router = next(node for node in nodes if node["name"] == "product-a")
+        remote = next(node for node in nodes if node["name"] == "independent-peer")
+        run(inside("ts-control", head + ["nodes", "approve-routes", "-i", str(remote["id"]), "-r", "10.43.0.0/24,fd43::/64"]))
+        for family,prefix in (("-4","10.43.0.0/24"),("-6","fd43::/64")):
+            assert not any(route.get("dst")==prefix for route in json.loads(run(inside("ts-a",["ip",family,"-j","route","show","table","52"]))))
         run(inside("ts-control", head + ["nodes", "approve-routes", "-i", str(router["id"]), "-r", "10.42.0.0/24,fd42::/64,0.0.0.0/0,::/0"]))
-        for namespace, host in (("ts-lan", "10.42.0.2"), ("ts-lan", "fd42::2"), ("ts-control", "198.51.100.20"), ("ts-control", "2001:db8:ffff::20")):
+        for namespace, host in (("ts-lan", "10.42.0.2"), ("ts-lan", "fd42::2"), ("ts-control", "198.51.100.20"), ("ts-control", "2001:db8:ffff::20"), ("ts-b", "10.43.0.1"), ("ts-b", "fd43::1")):
             name="app-" + host.replace(":", "_")
             start(namespace, ["python3", "-u", "-c", ECHO_SERVER, host], name)
             wait(lambda: "READY" in (stage/(name+".log")).read_text())
@@ -285,9 +324,9 @@ def peer(stage):
         traffic("2001:db8:ffff::20", "fd0::2")
         run(inside("ts-b", ["nft", "delete", "table", "inet", "fixture"]))
         print("PASS direct and forced DERP paths with real subnet/exit IPv4/IPv6 TCP/UDP", flush=True)
-        old = modules()["service.tailnet"]
+        old = modules()[module]
         signal_worker(old["pid"], signal.SIGKILL)
-        wait(lambda: modules()["service.tailnet"]["generation"] > old["generation"] and observation().get("backend_state") == "Running", 30)
+        wait(lambda: modules()[module]["generation"] > old["generation"] and observation().get("backend_state") == "Running", 30)
         assert observation()["node_id"] == original["node_id"] and observation()["addresses"] == original["addresses"]
         wait(lambda: pingable("10.42.0.2"))
         traffic("10.42.0.2", peer_ips[4])
@@ -298,10 +337,12 @@ def peer(stage):
         # Remove enrollment material from current intent. Restart must use the
         # persistent node identity, not silently enroll another node with a key.
         saved = copy.deepcopy(document)
-        node = next(r["service"]["tailscale"] for r in saved["resources"] if r["id"] == "tailnet")
-        node.pop("auth_key_file")
+        policy["tailscale"]["TailscaleNode/overlay"]["enrollment"] = "saved_identity"
+        policy["tailscale"]["TailscaleNode/overlay"].pop("auth_key_file")
+        saved_service = next(s for s in imported_native()["services"] if "tailscale" in s)
+        next(r for r in saved["resources"] if r["id"] == "tailnet")["service"] = saved_service
         product_api("control.sock", "/v1/config/commit", {"expected_revision": 1, "request_id": "saved-identity", "config": saved}, timeout=12)
-        wait(lambda: observation().get("backend_state") == "Running" and modules()["service.tailnet"]["generation"] > old["generation"] + 1, 30)
+        wait(lambda: observation().get("backend_state") == "Running" and modules()[module]["generation"] > old["generation"] + 1, 30)
         authfile.unlink()
         assert observation()["node_id"] == original["node_id"]
         # Observe route withdrawal at the independent peer, with exit routing
@@ -346,7 +387,7 @@ def peer(stage):
         print("PASS control and whole-daemon restart retained identity and real forwarding without an auth key file", flush=True)
         # Stop control while the worker keeps running; the last applied
         # condition deadline must expire without a new control notification.
-        authority = product_api("control.sock", "/v1/services/service.tailnet/tailscale-input")["authority"]
+        authority = product_api("control.sock", "/v1/services/" + module + "/tailscale-input")["authority"]
         assert authority["nanos"] > time.clock_gettime_ns(time.CLOCK_BOOTTIME)
         control = modules()["control"]
         signal_worker(control["pid"], signal.SIGSTOP)
@@ -365,11 +406,35 @@ def peer(stage):
         run(inside("ts-control", head + ["nodes", "expire", "-i", str(router["id"])]))
         wait(lambda: observation().get("backend_state") == "NeedsLogin", 30)
         assert not pingable("10.42.0.2")
-        old = modules()["service.tailnet"]
+        old = modules()[module]
         signal_worker(old["pid"], signal.SIGKILL)
-        wait(lambda: modules()["service.tailnet"]["generation"] > old["generation"] and observation().get("backend_state") == "NeedsLogin", 30)
+        wait(lambda: modules()[module]["generation"] > old["generation"] and observation().get("backend_state") == "NeedsLogin", 30)
         assert not pingable("10.42.0.2")
         print("PASS revoked node cannot restore old forwarding by restarting its worker without enrollment material", flush=True)
+        # Reauthenticate an expired existing identity with a newly issued key.
+        # No vendor state file is deleted, edited or replaced.
+        renewed = json.loads(run(inside("ts-control", head + ["preauthkeys", "create", "--user", str(user["id"]), "--reusable", "-o", "json"])))
+        renewed_file = stage / "renewed.key"
+        renewed_file.write_text(renewed["key"])
+        renewed_file.chmod(0o600)
+        policy["tailscale"]["TailscaleNode/overlay"].update(enrollment="key_file", auth_key_file=str(renewed_file))
+        accepted_source = stage / "accepted-routes.yaml"
+        accepted_source.write_text(legacy.read_text().replace("acceptRoutes: false", "acceptRoutes: true"))
+        legacy = accepted_source
+        reauthenticated = copy.deepcopy(saved)
+        next(r for r in reauthenticated["resources"] if r["id"] == "tailnet")["service"] = next(s for s in imported_native()["services"] if "tailscale" in s)
+        product_api("control.sock", "/v1/config/commit", {"expected_revision": 4, "request_id": "reauthenticated", "config": reauthenticated}, timeout=12)
+        wait(lambda: observation().get("backend_state") == "Running" and observation().get("online"), 30)
+        assert observation()["node_id"] == original["node_id"] and observation()["addresses"] == original["addresses"]
+        wait(lambda: pingable("10.42.0.2"))
+        traffic("10.42.0.2", peer_ips[4])
+        traffic("fd42::2", peer_ips[6])
+        print("PASS new enrollment key reauthenticated the expired saved node without changing identity", flush=True)
+        for family,prefix in (("-4","10.43.0.0/24"),("-6","fd43::/64")):
+            wait(lambda: any(route.get("dst")==prefix for route in json.loads(run(inside("ts-a",["ip",family,"-j","route","show","table","52"])))))
+        traffic("10.43.0.1", "10.42.0.2", "ts-lan")
+        traffic("fd43::1", "fd42::2", "ts-lan")
+        print("PASS imported acceptRoutes:true installed independent peer prefixes and routed LAN IPv4/IPv6 TCP/UDP without NAT", flush=True)
         capture.send_signal(signal.SIGINT)
         capture.wait(timeout=3)
         packets = run(["tcpdump", "-Z", "root", "-nn", "-r", str(stage / "tailnet.pcap")])
