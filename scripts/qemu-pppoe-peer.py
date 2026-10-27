@@ -5,7 +5,8 @@ The actual factory kernel/initramfs boots as PID 1 with two virtio NICs. Private
 TAP bridges connect its WAN to the AC and its LAN to a separate Linux client.
 Only fixture configuration/password/SSH public key are added to the initramfs.
 Requires root/sudo, QEMU x86_64, pppoe-server, pppd, iproute2, tcpdump, curl,
-OpenSSH, dnsmasq, dig and an independent ISC dhcpd supplied with --dhcp6-server.
+OpenSSH, dnsmasq, dig, mke2fs and an independent ISC dhcpd supplied with
+--dhcp6-server. A fresh regular-file ext4 disk supplies explicit persistent state.
 """
 import argparse
 import importlib.util
@@ -19,12 +20,12 @@ import subprocess
 import time
 
 
-def peer(stage):
+def peer(stage, power_action):
     children = []
     names = []
 
-    def run(a, timeout=8):
-        return subprocess.run(a, check=True, capture_output=True, text=True, timeout=timeout).stdout
+    def run(a, timeout=8, input=None):
+        return subprocess.run(a, check=True, capture_output=True, text=True, timeout=timeout, input=input).stdout
 
     def inside(ns, a):
         return ['ip', 'netns', 'exec', ns] + a
@@ -91,6 +92,12 @@ def peer(stage):
         boot = json.loads((stage / 'boot-base.json').read_text())
         boot['kernel_modules'] = json.loads((stage / 'input/manifest.json').read_text())['kernel_modules']
         boot['ssh']['authorized_keys'] = [(stage / 'key.pub').read_text().strip()]
+        boot['state_volume'] = {'device': '/dev/vda', 'wait_timeout_seconds': 10}
+        disk = stage / 'state.ext4'
+        with disk.open('xb') as out:
+            out.truncate(256 * 1024 * 1024)
+        disk.chmod(0o600)
+        run(['mke2fs', '-q', '-F', '-t', 'ext4', '-E', 'lazy_itable_init=0,lazy_journal_init=0', str(disk)], 20)
         (overlay / 'etc/routerd/boot.json').write_text(json.dumps(boot))
         (overlay / 'etc/routerd/password').write_text('routerd2-fixture\n')
         (overlay / 'etc/routerd/password').chmod(0o600)
@@ -107,7 +114,7 @@ def peer(stage):
         with (stage / 'initrd.gz').open('ab') as out:
             out.write((stage / 'overlay.gz').read_bytes())
         shutil.copyfile(stage / 'input/vmlinuz', stage / 'vmlinuz')
-        q = start(None, ['qemu-system-x86_64', '-machine', 'q35', '-accel', 'tcg', '-cpu', 'max', '-m', '512M', '-smp', '2', '-display', 'none', '-monitor', 'none', '-no-reboot', '-nodefaults', '-serial', 'file:' + str(stage / 'serial.log'), '-kernel', str(stage / 'vmlinuz'), '-initrd', str(stage / 'initrd.gz'), '-append', 'console=ttyS0,115200 panic=-1', '-netdev', 'tap,id=wan,ifname=tapwan,script=no,downscript=no', '-device', 'virtio-net-pci,netdev=wan,mac=52:54:00:12:34:56', '-netdev', 'tap,id=lan,ifname=taplan,script=no,downscript=no', '-device', 'virtio-net-pci,netdev=lan,mac=52:54:00:12:34:57'], 'qemu')
+        q = start(None, ['qemu-system-x86_64', '-machine', 'q35', '-accel', 'tcg', '-cpu', 'max', '-m', '512M', '-smp', '2', '-display', 'none', '-monitor', 'none', '-nodefaults', '-serial', 'file:' + str(stage / 'serial.log'), '-kernel', str(stage / 'vmlinuz'), '-initrd', str(stage / 'initrd.gz'), '-drive', 'file=' + str(disk) + ',if=virtio,format=raw', '-append', 'console=ttyS0,115200 panic=-1', '-netdev', 'tap,id=wan,ifname=tapwan,script=no,downscript=no', '-device', 'virtio-net-pci,netdev=wan,mac=52:54:00:12:34:56', '-netdev', 'tap,id=lan,ifname=taplan,script=no,downscript=no', '-device', 'virtio-net-pci,netdev=lan,mac=52:54:00:12:34:57'], 'qemu')
         print('Private appliance peer stage', stage, flush=True)
 
         def booted():
@@ -118,10 +125,13 @@ def peer(stage):
                 raise RuntimeError('guest panic')
             return 'ROUTERD_READY' in text
         wait(booted, 75)
-        ssh = ['ssh', '-F', '/dev/null', '-i', str(stage / 'key'), '-o', 'BatchMode=yes', '-o', 'IdentitiesOnly=yes', '-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile=/dev/null', '-o', 'ConnectTimeout=2', 'admin@10.42.0.1']
+        ssh = ['ssh', '-F', '/dev/null', '-i', str(stage / 'key'), '-o', 'BatchMode=yes', '-o', 'IdentitiesOnly=yes', '-o', 'StrictHostKeyChecking=accept-new', '-o', 'UserKnownHostsFile=' + str(stage / 'known-hosts'), '-o', 'ConnectTimeout=2', 'admin@10.42.0.1']
 
         def query(cmd):
             return json.loads(run(inside(lan, ssh + [cmd]), 12))
+
+        def pd_ready():
+            return any(x['name'] == 'service.pd' and x.get('snapshot', {}).get('state') == 'bound' for x in query('show services')['instances']) and query('show config')['healthy']
         status = query('show status')
         assert status['pid'] == 1 and status['platform'] == 'appliance'
         expected_release = json.loads((stage / 'input/manifest.json').read_text())['release_id']
@@ -164,6 +174,13 @@ def peer(stage):
         wait(lambda: query('show services pd')['snapshot']['renew_at'] != before, 15)
         traffic()
         print('PASS appliance DHCPv6 Renew preserved forwarding', flush=True)
+        if power_action == 'reboot':
+            resources[1]['interface']['mtu'] = 1400
+            request = {'expected_revision': query('show config')['revision'], 'request_id': 'appliance-persistent-mtu', 'config': {'schema_version': 2, 'resources': resources}}
+            committed = json.loads(run(inside(lan, ssh + ['configure']), 12, json.dumps(request)))
+            assert committed['revision'] == request['expected_revision'] + 1
+            wait(pd_ready)
+            traffic()
         old = next((x for x in query('show status')['modules'] if x['name'] == 'service.internet'))
         old_pd = query('show services pd')['generation']
         dns_generation=next(x['generation'] for x in query('show status')['modules'] if x['name']=='service.dns')
@@ -189,25 +206,79 @@ def peer(stage):
         for capture in (wan_capture, lan_capture):
             capture.send_signal(signal.SIGINT)
             capture.wait(timeout=3)
-        def packets(name):
+        def packets(name, since):
             records = []
             for line in run(['tcpdump', '-nn', '-tt', '-vv', '-r', str(stage / name)]).splitlines():
                 if line and line[0].isdigit():
                     records.append(line)
                 elif records:
                     records[-1] += ' ' + line.strip()
-            return [(float(line.split()[0]), line) for line in records if float(line.split()[0]) >= restart_at]
-        wan_packets = packets('wan.pcap')
-        releases = [(stamp, re.search('dhcp6 release [(]xid=([0-9a-f]+)', line)[1]) for stamp, line in wan_packets if 'dhcp6 release' in line]
-        assert releases, 'no appliance Release captured'
-        released, transaction = releases[0]
-        replies = [stamp for stamp, line in wan_packets if 'dhcp6 reply (xid=' + transaction + ' ' in line]
-        padts = [stamp for stamp, line in wan_packets if 'PPPoE PADT' in line]
-        withdrawals = [stamp for stamp, line in packets('lan.pcap') if 'router advertisement' in line and 'router lifetime 0s' in line and 'valid time 0s, pref. time 0s' in line]
-        assert withdrawals and replies and padts, 'missing RA withdrawal, matching Reply or PADT'
-        assert min(withdrawals) < released < min(replies) < min(padts), 'appliance restart violated RA/Release/Reply/PADT order'
+            return [(float(line.split()[0]), line) for line in records if float(line.split()[0]) >= since]
+        def release_order(wan_name, lan_name, since):
+            wan_packets = packets(wan_name, since)
+            releases = [(stamp, re.search('dhcp6 release [(]xid=([0-9a-f]+)', line)[1]) for stamp, line in wan_packets if 'dhcp6 release' in line]
+            assert releases, 'no appliance Release captured'
+            released, transaction = releases[0]
+            replies = [stamp for stamp, line in wan_packets if 'dhcp6 reply (xid=' + transaction + ' ' in line]
+            padts = [stamp for stamp, line in wan_packets if 'PPPoE PADT' in line]
+            withdrawals = [stamp for stamp, line in packets(lan_name, since) if 'router advertisement' in line and 'router lifetime 0s' in line and 'valid time 0s, pref. time 0s' in line]
+            assert withdrawals and replies and padts, 'missing RA withdrawal, matching Reply or PADT'
+            assert min(withdrawals) < released < min(replies) < min(padts), 'appliance restart violated RA/Release/Reply/PADT order'
+        release_order('wan.pcap', 'lan.pcap', restart_at)
         print('PASS actual appliance RA withdrawal -> Release -> matching Reply -> PADT; stable DUID, configuration and DNS worker', flush=True)
         (stage / 'status.json').write_text(json.dumps(query('show status')))
+        shutdown_captures = [start(None, ['tcpdump', '--immediate-mode', '-Z', 'root', '-U', '-n', '-i', nic, '-w', str(stage / name)], name)
+                             for nic, name in [('tapwan', 'shutdown-wan.pcap'), ('taplan', 'shutdown-lan.pcap')]]
+        wait(lambda: all((stage / name).exists() and (stage / name).stat().st_size >= 24 for name in ('shutdown-wan.pcap', 'shutdown-lan.pcap')))
+        power_at = time.time()
+        power_status = query('show status')
+        power_index = next(x['ifindex'] for x in json.loads(run(['ip', '-n', ac, '-j', 'link', 'show'])) if x['ifname'].startswith('ppp'))
+        assert query(power_action)['accepted']
+        if power_action == 'poweroff':
+            assert q.wait(timeout=40) == 0, 'QEMU failed during poweroff'
+        else:
+            def rebooted():
+                if q.poll() is not None:
+                    raise RuntimeError('QEMU exited during reboot')
+                text = (stage / 'serial.log').read_text(errors='replace')
+                assert 'Kernel panic' not in text
+                return text.count('Linux version ') >= 2 and text.rfind('ROUTERD_READY') > text.rfind('Linux version ')
+            wait(rebooted, 75)
+        serial = (stage / 'serial.log').read_text(errors='replace')
+        assert 'Kernel panic' not in serial
+        marker = 'Power down' if power_action == 'poweroff' else 'Restarting system'
+        assert marker in serial, 'kernel did not perform requested ' + power_action
+        for capture in shutdown_captures:
+            capture.send_signal(signal.SIGINT)
+            capture.wait(timeout=3)
+        release_order('shutdown-wan.pcap', 'shutdown-lan.pcap', power_at)
+        print('PASS appliance CLI ' + power_action + ': RA withdrawal, Release/Reply and PADT before kernel power action', flush=True)
+        if power_action == 'reboot':
+            wait(lambda: any(x['ifname'].startswith('ppp') and x['ifindex'] != power_index for x in json.loads(run(['ip', '-n', ac, '-j', 'link', 'show']))))
+            d.terminate()
+            d.wait(timeout=5)
+            d = server()
+            wait(pd_ready)
+            wait(client_ready)
+            traffic()
+            assert query('show status')['instance_id'] != power_status['instance_id']
+            config = query('show config')
+            assert config['revision'] == revision
+            assert next(r for r in config['config']['resources'] if r['id'] == 'lan')['interface']['mtu'] == 1400
+            assert query('show services pd')['snapshot']['client_duid'] == duid
+            print('PASS second appliance boot: ext4 persisted committed revision/MTU, DUID and pinned SSH host key; new PPP/PD restored both-family TCP/UDP/DNS', flush=True)
+            assert query('poweroff')['accepted']
+            assert q.wait(timeout=40) == 0
+            assert 'Power down' in (stage / 'serial.log').read_text(errors='replace')
+
+    except Exception:
+        if 'query' in locals() and q.poll() is None:
+            for command in ('show status', 'show config', 'show services', 'show logs level INFO limit 30'):
+                try:
+                    print('Failure diagnostic ' + command + ': ' + json.dumps(query(command)), flush=True)
+                except Exception as error:
+                    print('Failure diagnostic unavailable: ' + str(error), flush=True)
+        raise
     finally:
         for p in reversed(children):
             if p.poll() is None:
@@ -233,6 +304,7 @@ def main():
     parser.add_argument("--output", type=Path, default=Path("dist/pppoe-appliance"))
     parser.add_argument("--dhcp6-server", type=Path)
     parser.add_argument("--inside", type=Path)
+    parser.add_argument("--power-action", choices=("poweroff", "reboot"), default="poweroff")
     args = parser.parse_args()
     if args.inside:
         def deadline(*_):
@@ -242,7 +314,7 @@ def main():
         signal.signal(signal.SIGALRM, deadline)
         signal.signal(signal.SIGTERM, terminated)
         signal.alarm(180)
-        peer(args.inside)
+        peer(args.inside, args.power_action)
         return
     if args.dhcp6_server is None or not args.dhcp6_server.is_file():
         parser.error("--dhcp6-server must name an independent ISC dhcpd executable")
@@ -262,8 +334,8 @@ def main():
         ]:
             run(["install", "-m", "500", str(source.resolve()), stage + "/" + target])
         with (args.output / "peer.log").open("w") as output:
-            result = subprocess.run(root + ["unshare", "--mount", "--net", "--propagation", "private", "python3", "-I", stage + "/peer.py", "--inside", stage], stdout=output, stderr=subprocess.STDOUT, timeout=240)
-        for name in ("serial.log", "wan.pcap", "lan.pcap", "status.json"):
+            result = subprocess.run(root + ["unshare", "--mount", "--net", "--propagation", "private", "python3", "-I", stage + "/peer.py", "--inside", stage, "--power-action", args.power_action], stdout=output, stderr=subprocess.STDOUT, timeout=240)
+        for name in ("serial.log", "wan.pcap", "lan.pcap", "shutdown-wan.pcap", "shutdown-lan.pcap", "status.json"):
             artifact = subprocess.run(root + ["cat", stage + "/" + name], capture_output=True, timeout=10)
             if artifact.returncode == 0:
                 (args.output / name).write_bytes(artifact.stdout)

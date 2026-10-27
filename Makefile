@@ -213,8 +213,9 @@ qemu-smoke:
 	$(PYTHON) scripts/qemu-smoke.py --image-dir $(IMAGE_DIR) --timeout $(QEMU_TIMEOUT) $(if $(QEMU_SSH_KEY),--ssh-key $(QEMU_SSH_KEY),)
 
 .PHONY: qemu-pppoe
+QEMU_POWER_ACTION ?= poweroff
 qemu-pppoe:
-	$(PYTHON) scripts/qemu-pppoe-peer.py --image-dir $(IMAGE_DIR) --dhcp6-server '$(DHCP6_SERVER)'
+	$(PYTHON) scripts/qemu-pppoe-peer.py --image-dir $(IMAGE_DIR) --dhcp6-server '$(DHCP6_SERVER)' --power-action $(QEMU_POWER_ACTION)
 
 qemu-network:
 	$(PYTHON) scripts/qemu-network.py --go '$(GO)' --image-dir $(IMAGE_DIR) --timeout $(QEMU_TIMEOUT)

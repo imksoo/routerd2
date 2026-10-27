@@ -116,6 +116,8 @@ func run(args []string) error {
 			}
 		}
 		return serve(b)
+	case "poweroff", "reboot":
+		return remote(args[1:], args[0])
 	case "status":
 		return remote(args[1:], "show status")
 	case "events":
@@ -166,6 +168,7 @@ func usage() error {
   routerd events verify FILE
   routerd network show [--runtime-dir /run/routerd]
   routerd modules restart NAME [--runtime-dir /run/routerd]
+  routerd poweroff|reboot [--runtime-dir /run/routerd]
   routerd config show [--runtime-dir /run/routerd]
   routerd config export [--runtime-dir /run/routerd]
   routerd config confirm [--runtime-dir /run/routerd]
@@ -209,10 +212,14 @@ func serveRuntime(b runtimeconfig.Boot, trial *releaseboot.Trial, authority *rel
 	}
 	defer closeLogger()
 	var trialDone chan error
+	var stopTrial context.CancelFunc
 	if trial != nil {
+		trialCtx, stop := context.WithCancel(ctx)
+		defer stop()
+		stopTrial = stop
 		trialDone = make(chan error, 1)
 		go func() {
-			trialErr := trial.Watch(ctx)
+			trialErr := trial.Watch(trialCtx)
 			trialDone <- trialErr
 			if trialErr != nil {
 				cancel()
@@ -225,7 +232,8 @@ func serveRuntime(b runtimeconfig.Boot, trial *releaseboot.Trial, authority *rel
 			dynamicRoles = append(dynamicRoles, role)
 		}
 	}
-	err = supervisor.Run(ctx, supervisor.Options{
+	power, err := supervisor.Run(ctx, supervisor.Options{
+		OnShutdown:       stopTrial,
 		ReleaseAuthority: authority,
 		Startup:          b.Startup,
 		Engines:          b.Engines,
@@ -253,7 +261,7 @@ func serveRuntime(b runtimeconfig.Boot, trial *releaseboot.Trial, authority *rel
 			slog.Error("appliance runtime failed", "error", err)
 		}
 		closeLogger()
-		halt(err != nil)
+		halt(err != nil || power == supervisor.Reboot)
 	}
 	return err
 }

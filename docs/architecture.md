@@ -63,6 +63,10 @@ protocol投影は変更するnetwork集合を複製し、固定設定を読み�
 202の`accepted`は再起動要求の受理であり、PPP/DHCPの取得完了ではない。状態と通信を別途確認する。
 この操作で設定revisionを変更しない。core workerの再起動はsupervisorが受け、dynamic serviceを
 直接再起動する要求は拒否する。
+`poweroff`と`reboot`はappliance PID1のsupervisorが受け、受付応答をflushしてから
+更新候補の正常性監視を止め、既存の停止順序で全workerを終了・reapする。
+entrypointへ型付きの電源操作結果を返し、sync後にLinuxの電源syscallを実行する。
+再起動要求をruntime失敗のerrorで表現しない。host/containerでは要求を拒否する。
 `POST /v1/services/state` は観測の検証・受理を返し、kernel適用はcoordinatorが行う。
 BGP・VRRPの状態遷移と、DHCPv6の最終撤去は実適用が必要なため、
 `POST /v1/services/effects` の適用完了を待つ。DHCPv6は管理アドレス撤去と生成RAの寿命0送信後に

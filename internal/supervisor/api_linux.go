@@ -19,6 +19,12 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+type powerRequest struct {
+	action    PowerAction
+	reply     chan error
+	responded chan struct{}
+}
+
 type restartRequest struct {
 	name  string
 	reply chan error
@@ -32,6 +38,7 @@ type api struct {
 	mu         sync.RWMutex
 	status     Status
 	restarts   chan restartRequest
+	powers     chan powerRequest
 	reconciles chan reconcileRequest
 	ctx        context.Context
 	server     *http.Server
@@ -99,7 +106,7 @@ func openAPI(ctx context.Context, dir string, initial Status) (*api, error) {
 		_ = lock.Close()
 		return nil, err
 	}
-	a := &api{status: initial, restarts: make(chan restartRequest), reconciles: make(chan reconcileRequest), ctx: ctx, listener: listener, lock: lock, path: path}
+	a := &api{status: initial, restarts: make(chan restartRequest), powers: make(chan powerRequest), reconciles: make(chan reconcileRequest), ctx: ctx, listener: listener, lock: lock, path: path}
 	a.server = &http.Server{
 		Handler: a, ReadHeaderTimeout: 2 * time.Second, ReadTimeout: 3 * time.Second,
 		WriteTimeout: 3 * time.Second, IdleTimeout: 10 * time.Second, MaxHeaderBytes: 8192,
@@ -122,6 +129,47 @@ func (a *api) publish(s Status) {
 
 func (a *api) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+	if r.URL.Path == "/v1/power" {
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", "POST")
+			localapi.Fail(w, 405, errors.New("method not allowed"))
+			return
+		}
+		var request PowerRequest
+		if err := localapi.Decode(w, r, &request); err != nil {
+			localapi.Fail(w, 400, err)
+			return
+		}
+		if request.Action != PowerOff && request.Action != Reboot {
+			localapi.Fail(w, 400, errors.New("action must be poweroff or reboot"))
+			return
+		}
+		req := powerRequest{action: request.Action, reply: make(chan error, 1), responded: make(chan struct{})}
+		defer close(req.responded)
+		select {
+		case a.powers <- req:
+		case <-a.ctx.Done():
+			localapi.Fail(w, 503, errors.New("supervisor is stopping"))
+			return
+		case <-r.Context().Done():
+			return
+		}
+		select {
+		case err := <-req.reply:
+			if err != nil {
+				localapi.Fail(w, 409, err)
+				return
+			}
+			localapi.JSON(w, 202, struct {
+				Accepted bool `json:"accepted"`
+			}{Accepted: true})
+			_ = http.NewResponseController(w).Flush()
+		case <-a.ctx.Done():
+			localapi.Fail(w, 503, errors.New("supervisor is stopping"))
+		case <-r.Context().Done():
+		}
+		return
+	}
 	if r.URL.Path == "/v1/modules/reconcile" {
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", "POST")

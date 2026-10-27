@@ -19,6 +19,7 @@ import (
 	"github.com/imksoo/routerd2/internal/control"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/logging"
+	"github.com/imksoo/routerd2/internal/supervisor"
 )
 
 type Session struct{ RuntimeDir string }
@@ -35,7 +36,7 @@ func (s Session) Execute(ctx context.Context, command string, input io.Reader, o
 		return nil
 	}
 	if len(a) == 1 && a[0] == "help" {
-		_, err := fmt.Fprintln(out, "show status\nshow network [SECTION [FILTER VALUE ...]] (show network help for details)\nshow resources\nshow derived RESOURCE_ID\nshow observations [after CURSOR] [limit 1..16]\nshow event-store\nshow services [NAME]\nshow route-issues [offset N]\nshow config\nshow running-config\nshow logs [module NAME] [level INFO] [limit 100]\nshow logging\nshow version\nrestart <module>\nconfigure (exec: CommitRequest YAML/JSON on stdin; shell: candidate mode)\nconfirm\nhelp\nexit")
+		_, err := fmt.Fprintln(out, "show status\nshow network [SECTION [FILTER VALUE ...]] (show network help for details)\nshow resources\nshow derived RESOURCE_ID\nshow observations [after CURSOR] [limit 1..16]\nshow event-store\nshow services [NAME]\nshow route-issues [offset N]\nshow config\nshow running-config\nshow logs [module NAME] [level INFO] [limit 100]\nshow logging\nshow version\nrestart <module>\npoweroff\nreboot\nconfigure (exec: CommitRequest YAML/JSON on stdin; shell: candidate mode)\nconfirm\nhelp\nexit")
 		return err
 	}
 	var result json.RawMessage
@@ -131,6 +132,8 @@ func (s Session) Execute(ctx context.Context, command string, input io.Reader, o
 		default:
 			return errors.New("unknown show command; use help")
 		}
+	case len(a) == 1 && (a[0] == "poweroff" || a[0] == "reboot"):
+		err = super.Do(ctx, http.MethodPost, "/v1/power", supervisor.PowerRequest{Action: supervisor.PowerAction(a[0])}, &result)
 	case len(a) == 2 && a[0] == "restart":
 		if strings.ContainsAny(a[1], "/\\?") {
 			return errors.New("invalid module name")

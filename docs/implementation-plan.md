@@ -904,6 +904,16 @@ DHCPv6 server・残るresource契約は未完了であり、NET-06全体の完�
 
 #### OPS-01 — resource ControlAPI と基本 CLI
 
+部分実装: local/SSHの型付きCLI、設定transactionとservice再起動に加え、appliance PID1の
+`poweroff`/`reboot`を実装した。private supervisor APIの受付後、正常性監視とworkerを停止し、
+型付き結果を受けたentrypointがLinuxの電源操作を行う。host/containerでは要求を拒否する。
+隔離PID namespaceの実daemon・独立AC/ISC・別LAN端末では、local CLI poweroffの受付、
+寿命0 RA→Release/Reply→PPP切断と終了まで確認した。最終APK applianceでもpoweroffが通った。
+新規のregular-file ext4 diskを明示接続した実rebootでは、二回目のkernel/PID1でcommit済みrevision 2・
+LAN MTU1400・DUIDと固定SSHホスト鍵を維持し、新しいPPP/PDによる両family TCP/UDP・DNSが復旧した。
+最後の正常poweroffも通った。先行の永続state PPP再起動40秒timeoutは原因未確定であり、
+後続成功だけで解消済みとは扱わない。全運用API・権限分離・更新trial/実機の受入は未完了。
+
 範囲: 旧 routerd 互換 / track: operations / risk: high。
 前提: CORE-03, CORE-04。 設計判断: D-09。
 

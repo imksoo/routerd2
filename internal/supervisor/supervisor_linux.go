@@ -62,22 +62,22 @@ type childEvent struct {
 	origin     *child
 }
 
-// Run supervises the module process tree until canceled. Worker failures are
+// Run supervises the module process tree until canceled or a power request. Worker failures are
 // exposed through Status and recovered locally; they do not terminate PID 1.
 // The only child waiter is this function's central reaper. In particular, no
 // os.Process.Wait or exec.Cmd.Wait may race with it.
-func Run(parent context.Context, options Options) error {
+func Run(parent context.Context, options Options) (PowerAction, error) {
 	if !running.CompareAndSwap(false, true) {
-		return errors.New("only one supervisor may own process reaping in a process")
+		return PowerOff, errors.New("only one supervisor may own process reaping in a process")
 	}
 	defer running.Store(false)
 	o, err := normalize(options)
 	if err != nil {
-		return err
+		return PowerOff, err
 	}
 	var instance [16]byte
 	if _, err := rand.Read(instance[:]); err != nil {
-		return fmt.Errorf("create supervisor instance: %w", err)
+		return PowerOff, fmt.Errorf("create supervisor instance: %w", err)
 	}
 	o.instanceID = hex.EncodeToString(instance[:])
 	images := map[string]*os.File{}
@@ -92,15 +92,15 @@ func Run(parent context.Context, options Options) error {
 		if image == nil {
 			image, err = os.Open(path)
 			if err != nil {
-				return fmt.Errorf("open role %s image: %w", role, err)
+				return PowerOff, fmt.Errorf("open role %s image: %w", role, err)
 			}
 			opened[path] = image
 			info, statErr := image.Stat()
 			if statErr != nil {
-				return statErr
+				return PowerOff, statErr
 			}
 			if !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
-				return errors.New("role image must be a regular executable file")
+				return PowerOff, errors.New("role image must be a regular executable file")
 			}
 		}
 		images[role] = image
@@ -108,20 +108,20 @@ func Run(parent context.Context, options Options) error {
 	engines := map[string]*os.File{}
 	for role, path := range o.Engines {
 		if role != "pppoe" || images[role] == nil {
-			return errors.New("engine archive requires the PPPoE role")
+			return PowerOff, errors.New("engine archive requires the PPPoE role")
 		}
 		f, err := os.Open(path)
 		if err != nil {
-			return err
+			return PowerOff, err
 		}
 		opened["engine:"+role] = f
 		if err := pppimage.Validate(f, runtime.GOARCH); err != nil {
-			return fmt.Errorf("%s engine: %w", role, err)
+			return PowerOff, fmt.Errorf("%s engine: %w", role, err)
 		}
 		engines[role] = f
 	}
 	if images["pppoe"] != nil && engines["pppoe"] == nil {
-		return errors.New("PPPoE role requires its bundled engine archive")
+		return PowerOff, errors.New("PPPoE role requires its bundled engine archive")
 	}
 	// Pdeathsig follows the creating OS thread. Pin the process manager to one
 	// thread until every managed child has exited, rather than starting workers
@@ -131,10 +131,10 @@ func Run(parent context.Context, options Options) error {
 	if os.Getpid() != 1 {
 		var previous int32
 		if err := unix.Prctl(unix.PR_GET_CHILD_SUBREAPER, uintptr(unsafe.Pointer(&previous)), 0, 0, 0); err != nil {
-			return fmt.Errorf("get subreaper state: %w", err)
+			return PowerOff, fmt.Errorf("get subreaper state: %w", err)
 		}
 		if err := unix.Prctl(unix.PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0); err != nil {
-			return fmt.Errorf("become subreaper: %w", err)
+			return PowerOff, fmt.Errorf("become subreaper: %w", err)
 		}
 		defer unix.Prctl(unix.PR_SET_CHILD_SUBREAPER, uintptr(previous), 0, 0, 0)
 	}
@@ -146,7 +146,7 @@ func Run(parent context.Context, options Options) error {
 	initial := Status{InstanceID: o.instanceID, ReleaseID: o.ReleaseID, Platform: o.Platform, PID: os.Getpid(), StartedAt: started}
 	a, err := openAPI(apiCtx, o.RuntimeDir, initial)
 	if err != nil {
-		return fmt.Errorf("supervisor API: %w", err)
+		return PowerOff, fmt.Errorf("supervisor API: %w", err)
 	}
 	defer a.close()
 	apiErrors := make(chan error, 1)
@@ -171,6 +171,8 @@ func Run(parent context.Context, options Options) error {
 	defer ticker.Stop()
 	stopping, wasReady := false, false
 	var fatalErr error
+	power := PowerOff
+	var powerResponse <-chan struct{}
 	ctxDone := ctx.Done()
 
 	publish := func() {
@@ -198,6 +200,9 @@ func Run(parent context.Context, options Options) error {
 			return
 		}
 		stopping = true
+		if o.OnShutdown != nil {
+			o.OnShutdown()
+		}
 		ctxDone = nil
 	}
 	if ctx.Err() != nil {
@@ -272,7 +277,7 @@ func Run(parent context.Context, options Options) error {
 		children = kept
 		publish()
 		if stopping && len(byPID) == 0 {
-			return fatalErr
+			return power, fatalErr
 		}
 		select {
 		case <-ctxDone:
@@ -290,6 +295,22 @@ func Run(parent context.Context, options Options) error {
 				continue
 			}
 			handleEvent(c, event, o.ReleaseID, time.Now())
+		case request := <-a.powers:
+			if o.Platform != "appliance" || os.Getpid() != 1 {
+				request.reply <- errors.New("power operations require appliance PID 1")
+				continue
+			}
+			if stopping || powerResponse != nil {
+				request.reply <- errors.New("supervisor is stopping")
+				continue
+			}
+			power = request.action
+			powerResponse = request.responded
+			request.reply <- nil
+		case <-powerResponse:
+			// Flush the local API acceptance before draining its clients.
+			powerResponse = nil
+			beginShutdown()
 		case request := <-a.restarts:
 			c := byName[request.name]
 			if c == nil || c.retired || stopping {

@@ -4,12 +4,26 @@
 package supervisor
 
 import (
+	"context"
+	"time"
+
 	"github.com/imksoo/routerd2/internal/configref"
 	"github.com/imksoo/routerd2/internal/release"
-	"time"
 )
 
 const SocketName = "supervisor.sock"
+
+// PowerAction is performed by the appliance entrypoint after all workers exit.
+type PowerAction string
+
+const (
+	PowerOff PowerAction = "poweroff"
+	Reboot   PowerAction = "reboot"
+)
+
+type PowerRequest struct {
+	Action PowerAction `json:"action"`
+}
 
 type RestartPolicy string
 
@@ -33,6 +47,9 @@ type Spec struct {
 }
 
 type Options struct {
+	// OnShutdown stops entrypoint-owned readiness monitoring before workers drain.
+	OnShutdown context.CancelFunc
+
 	ReleaseAuthority *release.Authority
 	authorityJSON    string // canonical, reserved, control-only release selection
 	Startup          *configref.Selection

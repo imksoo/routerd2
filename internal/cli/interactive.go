@@ -752,7 +752,7 @@ func (s *interactiveShell) complete(line string, pos int, key rune) (string, int
 	var choices []string
 	switch len(words) {
 	case 0:
-		choices = []string{"help", "show", "configure", "confirm", "restart", "exit"}
+		choices = []string{"help", "show", "configure", "confirm", "restart", "poweroff", "reboot", "exit"}
 		if s.candidate != nil {
 			choices = append(choices, "set", "delete", "edit", "up", "top", "diff", "validate", "commit", "abort")
 		}
@@ -993,6 +993,7 @@ const interactiveHelp = `Operational commands:
   show event-store
   show derived RESOURCE_ID
   restart <module>
+  poweroff / reboot           drain workers, then power off or reboot appliance
   configure                  start a private candidate from the current revision
   confirm                    confirm a pending confirmed commit
   exit

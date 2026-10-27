@@ -54,7 +54,7 @@ func helperMain() int {
 			return 75
 		}
 		childRole := os.Getenv("ROUTERD_TEST_CHILD_ROLE")
-		err = Run(context.Background(), Options{Executables: map[string]string{childRole: executable}, ReleaseID: testRelease, RuntimeDir: os.Getenv("ROUTERD_TEST_RUNTIME"), StateDir: state, Platform: "host", Modules: []Spec{{Name: "network", Role: childRole}}})
+		_, err = Run(context.Background(), Options{Executables: map[string]string{childRole: executable}, ReleaseID: testRelease, RuntimeDir: os.Getenv("ROUTERD_TEST_RUNTIME"), StateDir: state, Platform: "host", Modules: []Spec{{Name: "network", Role: childRole}}})
 		if err != nil {
 			_, _ = fmt.Fprintln(os.Stderr, err)
 			return 76
@@ -185,7 +185,7 @@ func startTestSupervisorCustomized(t *testing.T, modules []Spec, roles []string,
 	s.client = &http.Client{Timeout: time.Second, Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", filepath.Join(o.RuntimeDir, SocketName))
 	}}}
-	go func() { s.done <- Run(ctx, o) }()
+	go func() { _, err := Run(ctx, o); s.done <- err }()
 	t.Cleanup(func() {
 		s.stop(t)
 		s.client.CloseIdleConnections()
@@ -572,4 +572,27 @@ func testRolePaths(path string, modules []Spec, roles []string) map[string]strin
 		paths[role] = path
 	}
 	return paths
+}
+
+func TestHostSupervisorRejectsPowerOperation(t *testing.T) {
+	s := startTestSupervisor(t, []Spec{{Name: "network", Role: "ready"}})
+	before := s.wait(t, func(status Status) bool { return status.Ready })
+	for _, action := range []PowerAction{PowerOff, Reboot} {
+		body, err := json.Marshal(PowerRequest{Action: action})
+		if err != nil {
+			t.Fatal(err)
+		}
+		response, err := s.client.Post("http://supervisor/v1/power", "application/json", bytes.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if response.StatusCode != http.StatusConflict {
+			t.Fatalf("%s status: %d", action, response.StatusCode)
+		}
+	}
+	after := s.wait(t, func(status Status) bool { return status.Ready })
+	if after.Stopping || after.Modules[0].PID != before.Modules[0].PID {
+		t.Fatal("rejected power request stopped the host-mode supervisor")
+	}
 }

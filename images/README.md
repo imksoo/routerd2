@@ -80,7 +80,14 @@ LAN client. It checks the manifest release ID, CHAP, learned UDP/TCP DNS,
 IPv4/IPv6 TCP/UDP, PD, Renew and operator-requested PPP restart. WAN/LAN captures
 must show zero-lifetime RA, Release, its matching Reply, then PPP PADT. The PD
 client keeps its DUID; configuration revision and the DNS worker remain stable.
-The fixture uses ordinary kernel DAD. Completed diagnostic output is disposable.
+The fixture uses ordinary kernel DAD and formats only a newly created private
+256 MiB regular-file ext4 disk for explicit `state_volume=/dev/vda`. It finishes
+with CLI `poweroff`, checking the same withdrawal order before the kernel's
+power-down marker and clean QEMU exit. `QEMU_POWER_ACTION=reboot` instead commits
+a LAN MTU change, requests a real guest reboot, then checks the second boot:
+the committed revision/MTU, PD DUID and pinned SSH host key must persist, and new
+PPP/PD must restore both-family TCP/UDP/DNS. It finally powers off the guest.
+Host block devices are never used. Completed diagnostic output is disposable.
 
 ## Native kernel packet tests
 

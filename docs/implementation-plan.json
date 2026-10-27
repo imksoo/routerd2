@@ -1199,7 +1199,7 @@
       "title": "resource ControlAPI と基本 CLI",
       "milestone": "M2",
       "track": "operations",
-      "status": "planned",
+      "status": "in_progress",
       "scope": "baseline_parity",
       "risk": "high",
       "depends_on": [
@@ -1230,7 +1230,15 @@
         "internal/cli",
         "internal/management",
         "internal/resourceprogram (新設予定)"
-      ]
+      ],
+      "implementation_notes": {
+        "implemented": "Typed local/SSH management CLI and control-owned service restart are present. Added explicit poweroff/reboot through private supervisor API, restricted to appliance PID1. After response flush, cancel entrypoint-owned release readiness monitoring, drain/reap the existing worker tree, return a typed ordinary power outcome, then sync and invoke the Linux syscall. No shell command, fake reboot error or alternate shutdown engine.",
+        "validation": "appliance-power: signed PID1 namespace on Linux6.8 with independent RP-PPPoE/ISC and separate Linux LAN passed CHAP/PD/Renew/TCP/UDP/DNS, replacement/expiry/recovery/rollback and local CLI poweroff after zero-lifetime RA, Release/matching Reply and PPP teardown. Host-mode real UDS rejected both power actions while retaining ready worker PID. Final APK/Linux6.18.58-lts appliance with fresh explicit256MiB regular-file ext4 state disk passed CLI poweroff:202, same packet order, kernel Power down and QEMU exit0. Another run committed LAN MTU1400/revision2, performed actual guest reboot, and recovered PPP/PD and both-family TCP/UDP/DNS on the second kernel/PID1 with the same committed revision/MTU, DUID and pinned SSH host key, then powered off cleanly. Initial persistent-state PPP service restart40s timeout remains unexplained despite later successful runs. MTU-commit curl before acquisition/application was a failed trial; fixture now waits for actual bound PD/application rather than retrying traffic. Full Go/Python/Race/vet and six static ELF builds passed; final six-ELF signed catalog/publisher/stage checks also passed under Race Detector.",
+        "remaining": [
+          "Complete resource ControlAPI operations and per-feature status/probe/event surfaces, concurrent/retried operation contracts and role authorization with SYS-03.",
+          "Resolve the initial persistent-state PPP restart timeout; qualify signed trial interruption/retry, whole-machine shutdown with silent peers, role separation and physical hardware. Actual factory poweroff and persistent second-boot communication passed."
+        ]
+      }
     },
     {
       "id": "OPS-02",
@@ -1464,7 +1472,15 @@
           "work_package": "SYS-03",
           "gate": "runtime-authority"
         }
-      ]
+      ],
+      "implementation_notes": {
+        "implemented": "Existing signed runtime catalog/selection and configuration snapshot machinery retained. Added explicit operator reboot/poweroff as a typed appliance operation after the existing worker drain; entrypoint-owned trial monitoring is canceled at shutdown start so planned drain is not itself treated as a failed health witness.",
+        "validation": "appliance-power: signed PID1 namespace on Linux6.8 with independent RP-PPPoE/ISC and separate Linux LAN passed CHAP/PD/Renew/TCP/UDP/DNS, replacement/expiry/recovery/rollback and local CLI poweroff after zero-lifetime RA, Release/matching Reply and PPP teardown. Host-mode real UDS rejected both power actions while retaining ready worker PID. Final APK/Linux6.18.58-lts appliance with fresh explicit256MiB regular-file ext4 state disk passed CLI poweroff:202, same packet order, kernel Power down and QEMU exit0. Another run committed LAN MTU1400/revision2, performed actual guest reboot, and recovered PPP/PD and both-family TCP/UDP/DNS on the second kernel/PID1 with the same committed revision/MTU, DUID and pinned SSH host key, then powered off cleanly. Initial persistent-state PPP service restart40s timeout remains unexplained despite later successful runs. MTU-commit curl before acquisition/application was a failed trial; fixture now waits for actual bound PD/application rather than retrying traffic. Full Go/Python/Race/vet and six static ELF builds passed; final six-ELF signed catalog/publisher/stage checks also passed under Race Detector.",
+        "remaining": [
+          "Real SSH bundle upload/stage/prepare/reboot/health confirmation as one product path; complete state/trust/lease fallback and power interruption gates.",
+          "Signed trial interruption, actual release update/second boot/fallback, complete target hardware/OS recovery acceptance. Factory same-release persistent reboot and communication recovery passed."
+        ]
+      }
     },
     {
       "id": "DIST-02",

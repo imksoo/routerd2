@@ -10,6 +10,18 @@ configuration or allocating a consumer. Local command
 archive; `routerd events verify FILE` checks it offline. See the [storage contract](../../docs/event-storage.md)
 for warning thresholds, atomic publication and remaining retention work.
 
+## Appliance power operations
+
+`poweroff` and `reboot` in the local/SSH shell, or `routerd poweroff` and
+`routerd reboot` locally, request an explicit power operation from appliance
+PID 1. The supervisor accepts `POST /v1/power` with `{"action":"poweroff"}` or
+`{"action":"reboot"}` over its private Unix socket. It flushes acceptance,
+stops release-readiness monitoring, drains/reaps workers in the normal order,
+then the entrypoint syncs and calls the Linux power syscall. A reboot request
+is a normal shutdown result, not a runtime failure. It does not confirm a trial.
+Host and container supervisors reject these operations; the management
+connection ends when its worker stops.
+
 ## Configuration editing and larger documents
 
 For interactive edits:
@@ -46,6 +58,9 @@ routerd config snapshot --expected-revision 12
 ```
 
 Use the current revision from `routerd config show` for `--expected-revision`.
+A commit acknowledgment records the revision. Inspect `show config` and
+`show services` for application and protocol state, including required address
+or prefix acquisition, before checking client traffic after a change.
 `config snapshot` captures an immutable confirmed revision without changing the
 running configuration. Its store/revision/digest reference is a prerequisite
 for explicit startup selection, which is not yet wired into boot. See

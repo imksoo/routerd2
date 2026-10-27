@@ -444,9 +444,9 @@ def peer(stage, auth, dhcp6_server):
             stale = {k: previous_pd[k] for k in ("supervisor_instance", "name", "role", "config_digest", "generation", "producer_epoch", "sequence", "snapshot")}
             api("control.sock", "/v1/services/state", stale, status=409)
             print("PASS control-owned operator restart released PD before PPP, rejected its old notification and preserved configuration/DNS", flush=True)
-            # Exercise actual PID 1 shutdown while the independent server and
+            # Request actual PID 1 poweroff while the independent server and
             # capture remain alive. Cleanup must not terminate the peer first.
-            os.kill(pid1, signal.SIGTERM)
+            assert json.loads(run([str(stage.parent / "routerd"), "poweroff", "--runtime-dir", str(stage / "run")]))["accepted"]
             daemon.wait(timeout=12)
             # reboot(POWER_OFF) in a PID namespace terminates its init with
             # SIGINT; util-linux unshare propagates that signal (reboot(2)).
