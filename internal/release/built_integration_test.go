@@ -55,7 +55,7 @@ func TestBuiltRuntimeCatalog(t *testing.T) {
 				t.Fatal(err)
 			}
 			path := bundle.Name()
-			manifest, err := WriteBundle(ctx, bundle, BundleOptions{ReleaseID: id, Sequence: 42, GOOS: "linux", GOARCH: arch, BootABI: 1, WorkerABI: 4, Entrypoint: "routerd", Artifacts: []Artifact{{Name: "routerd", Kind: "native", Command: "routerd"}, {Name: "routerd-modules", Kind: "native", Command: "routerd-modules"}, {Name: "routerd-logging", Kind: "native", Command: "routerd-logging"}}, Roles: roles}, testKey(), map[string]*os.File{"routerd": input[0], "routerd-modules": input[1], "routerd-logging": input[2]})
+			manifest, err := WriteBundle(ctx, bundle, BundleOptions{ReleaseID: id, Sequence: 42, GOOS: "linux", GOARCH: arch, BootABI: 1, WorkerABI: 5, Entrypoint: "routerd", Artifacts: []Artifact{{Name: "routerd", Kind: "native", Command: "routerd"}, {Name: "routerd-modules", Kind: "native", Command: "routerd-modules"}, {Name: "routerd-logging", Kind: "native", Command: "routerd-logging"}}, Roles: roles}, testKey(), map[string]*os.File{"routerd": input[0], "routerd-modules": input[1], "routerd-logging": input[2]})
 			if err != nil {
 				bundle.Close()
 				t.Fatal(err)

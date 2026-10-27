@@ -170,7 +170,7 @@ type vrrpACKManager struct {
 func (m *vrrpACKManager) Status(context.Context) (supervisor.Status, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	s := supervisor.Status{Ready: true, InstanceID: testSupervisorInstance}
+	s := supervisor.Status{Lifecycle: supervisor.Running, Ready: true, InstanceID: testSupervisorInstance}
 	for _, module := range m.modules {
 		s.Modules = append(s.Modules, module)
 		if !module.Ready {

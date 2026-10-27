@@ -592,7 +592,21 @@ func TestHostSupervisorRejectsPowerOperation(t *testing.T) {
 		}
 	}
 	after := s.wait(t, func(status Status) bool { return status.Ready })
-	if after.Stopping || after.Modules[0].PID != before.Modules[0].PID {
+	if after.Lifecycle != Running || after.Modules[0].PID != before.Modules[0].PID {
 		t.Fatal("rejected power request stopped the host-mode supervisor")
+	}
+}
+
+func TestControlRestartRetainsOtherCoreWorker(t *testing.T) {
+	s := startTestSupervisor(t, []Spec{{Name: "network", Role: "ready"}, {Name: "control", Role: "control"}})
+	before := s.wait(t, func(status Status) bool { return status.Ready })
+	if code := s.request(t, http.MethodPost, "/v1/modules/control/restart"); code != http.StatusAccepted {
+		t.Fatal("control restart rejected", code)
+	}
+	after := s.wait(t, func(status Status) bool {
+		return status.Lifecycle == Running && status.Ready && status.Modules[1].Generation == 2
+	})
+	if after.Modules[0].PID != before.Modules[0].PID || after.Modules[1].PID == before.Modules[1].PID {
+		t.Fatal("control restart did not retain network and replace control", before.Modules, after.Modules)
 	}
 }

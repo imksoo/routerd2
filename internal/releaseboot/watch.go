@@ -32,7 +32,7 @@ func (t Trial) witness(ctx context.Context) (string, error) {
 	if err := localapi.NewClient(filepath.Join(t.RuntimeDir, supervisor.SocketName)).Do(ctx, "GET", "/v1/status", nil, &processes); err != nil {
 		return "", err
 	}
-	if !processes.Ready || processes.Stopping || processes.PID != 1 || processes.Platform != "appliance" || processes.ReleaseID != t.Release.ReleaseID {
+	if !processes.Ready || processes.Lifecycle != supervisor.Running || processes.PID != 1 || processes.Platform != "appliance" || processes.ReleaseID != t.Release.ReleaseID {
 		return "", errors.New("selected appliance supervisor is not ready")
 	}
 	for _, module := range processes.Modules {

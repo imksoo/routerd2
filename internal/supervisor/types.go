@@ -70,6 +70,14 @@ type Options struct {
 	Env []string
 }
 
+type Lifecycle string
+
+const (
+	Running           Lifecycle = "running"
+	RestartingControl Lifecycle = "restarting_control"
+	Stopping          Lifecycle = "stopping"
+)
+
 type Status struct {
 	InstanceID string         `json:"instance_id"`
 	ReleaseID  string         `json:"release_id"`
@@ -77,7 +85,7 @@ type Status struct {
 	PID        int            `json:"pid"`
 	StartedAt  time.Time      `json:"started_at"`
 	Ready      bool           `json:"ready"`
-	Stopping   bool           `json:"stopping"`
+	Lifecycle  Lifecycle      `json:"lifecycle"`
 	Modules    []ModuleStatus `json:"modules"`
 }
 

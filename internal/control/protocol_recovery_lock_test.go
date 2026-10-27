@@ -45,7 +45,7 @@ func TestRecoveryOwnershipWaitDoesNotBlockControlAuthority(t *testing.T) {
 						return
 					}
 				}
-				localapi.JSON(w, 200, supervisor.Status{Ready: true})
+				localapi.JSON(w, 200, supervisor.Status{Lifecycle: supervisor.Running, Ready: true})
 			})
 			serverDone := make(chan error, 1)
 			go func() {

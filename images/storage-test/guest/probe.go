@@ -316,7 +316,7 @@ func awaitReady(ctx context.Context, phase string) (supervisor.Status, control.S
 			err := localapi.NewClient(filepath.Join(runtimeDir, supervisor.SocketName)).Do(call, "GET", "/v1/status", nil, &processes)
 			var health control.State
 			if err == nil {
-				if processes.PID != 1 || processes.Platform != "appliance" || !processes.Ready || processes.Stopping || processes.ReleaseID != want {
+				if processes.PID != 1 || processes.Platform != "appliance" || !processes.Ready || processes.Lifecycle != supervisor.Running || processes.ReleaseID != want {
 					err = errors.New("actual supervisor has not selected and started the expected release")
 				} else {
 					health, err = readHealthyConfig(call)

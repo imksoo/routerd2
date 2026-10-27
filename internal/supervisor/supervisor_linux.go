@@ -143,7 +143,7 @@ func Run(parent context.Context, options Options) (PowerAction, error) {
 	apiCtx, apiCancel := context.WithCancel(context.Background())
 	defer apiCancel()
 	started := time.Now()
-	initial := Status{InstanceID: o.instanceID, ReleaseID: o.ReleaseID, Platform: o.Platform, PID: os.Getpid(), StartedAt: started}
+	initial := Status{Lifecycle: Running, InstanceID: o.instanceID, ReleaseID: o.ReleaseID, Platform: o.Platform, PID: os.Getpid(), StartedAt: started}
 	a, err := openAPI(apiCtx, o.RuntimeDir, initial)
 	if err != nil {
 		return PowerOff, fmt.Errorf("supervisor API: %w", err)
@@ -169,7 +169,8 @@ func Run(parent context.Context, options Options) (PowerAction, error) {
 	defer signal.Stop(sigchld)
 	ticker := time.NewTicker(25 * time.Millisecond)
 	defer ticker.Stop()
-	stopping, wasReady := false, false
+	lifecycle, wasReady := Running, false
+	var restartingControl *child
 	var fatalErr error
 	power := PowerOff
 	var powerResponse <-chan struct{}
@@ -177,8 +178,8 @@ func Run(parent context.Context, options Options) (PowerAction, error) {
 
 	publish := func() {
 		s := initial
-		s.Stopping = stopping
-		s.Ready = !stopping
+		s.Lifecycle = lifecycle
+		s.Ready = lifecycle == Running
 		s.Modules = make([]ModuleStatus, 0, len(children))
 		for _, c := range children {
 			s.Modules = append(s.Modules, c.status)
@@ -196,10 +197,11 @@ func Run(parent context.Context, options Options) (PowerAction, error) {
 		wasReady = s.Ready
 	}
 	beginShutdown := func() {
-		if stopping {
+		if lifecycle == Stopping {
 			return
 		}
-		stopping = true
+		lifecycle = Stopping
+		restartingControl = nil
 		if o.OnShutdown != nil {
 			o.OnShutdown()
 		}
@@ -211,23 +213,38 @@ func Run(parent context.Context, options Options) (PowerAction, error) {
 
 	for {
 		now := time.Now()
-		if stopping {
-			// DHCPv6 releases over the still-live WAN. Other protocol workers
-			// then drain through control/network; logging is the final owner.
+		if lifecycle != Running {
+			// DHCPv6 releases with its coordinator and WAN alive. Control
+			// replacement drains only dynamic workers and that coordinator;
+			// whole-machine shutdown continues through network and logging.
 			phase := 5
+			if lifecycle == RestartingControl {
+				phase = shutdownPhase("control")
+			}
 			for _, c := range children {
-				if c.process != nil {
+				if c.process != nil && (lifecycle == Stopping || c.dynamic || c == restartingControl) {
 					phase = min(phase, shutdownPhase(c.spec.Role))
 				}
 			}
 			for _, c := range children {
-				if c.process != nil && shutdownPhase(c.spec.Role) == phase && c.stopDeadline.IsZero() {
-					stopChild(c, "", false, false, now)
+				if c.process != nil && (lifecycle == Stopping || c.dynamic || c == restartingControl) && shutdownPhase(c.spec.Role) == phase && c.stopDeadline.IsZero() {
+					stopChild(c, "", false, c == restartingControl, now)
 				}
+			}
+			if lifecycle == RestartingControl && phase == shutdownPhase("control") && restartingControl.process == nil {
+				// Retire old producer identities before the new coordinator
+				// can instantiate its configured workers.
+				for _, c := range children {
+					if c.dynamic {
+						c.retired = true
+					}
+				}
+				lifecycle, restartingControl = Running, nil
 			}
 		}
 		for _, c := range children {
-			if !stopping && !c.retired && c.process == nil && !c.permanentFailure && !c.nextStart.IsZero() && !now.Before(c.nextStart) {
+			heldForControl := lifecycle == RestartingControl && (c.dynamic || c == restartingControl)
+			if lifecycle != Stopping && !heldForControl && !c.retired && c.process == nil && !c.permanentFailure && !c.nextStart.IsZero() && !now.Before(c.nextStart) {
 				if err := startChild(ctx, o, images[c.spec.Role], engines[c.spec.Role], c, events); err != nil {
 					c.status.LastError = err.Error()
 					c.failures++
@@ -258,7 +275,7 @@ func Run(parent context.Context, options Options) (PowerAction, error) {
 				stopChild(c, "worker heartbeat timeout", false, false, now)
 			}
 		}
-		if err := reap(byPID, stopping); err != nil && fatalErr == nil {
+		if err := reap(byPID, lifecycle == Stopping); err != nil && fatalErr == nil {
 			fatalErr = err
 			beginShutdown()
 		}
@@ -276,7 +293,7 @@ func Run(parent context.Context, options Options) (PowerAction, error) {
 		}
 		children = kept
 		publish()
-		if stopping && len(byPID) == 0 {
+		if lifecycle == Stopping && len(byPID) == 0 {
 			return power, fatalErr
 		}
 		select {
@@ -300,7 +317,7 @@ func Run(parent context.Context, options Options) (PowerAction, error) {
 				request.reply <- errors.New("power operations require appliance PID 1")
 				continue
 			}
-			if stopping || powerResponse != nil {
+			if lifecycle != Running || powerResponse != nil {
 				request.reply <- errors.New("supervisor is stopping")
 				continue
 			}
@@ -313,7 +330,7 @@ func Run(parent context.Context, options Options) (PowerAction, error) {
 			beginShutdown()
 		case request := <-a.restarts:
 			c := byName[request.name]
-			if c == nil || c.retired || stopping {
+			if c == nil || c.retired || lifecycle != Running {
 				request.reply <- fmt.Errorf("module %q is not available", request.name)
 				continue
 			}
@@ -323,7 +340,10 @@ func Run(parent context.Context, options Options) (PowerAction, error) {
 			}
 			c.failures = 0
 			c.permanentFailure = false
-			if c.process == nil {
+			if c.spec.Role == "control" && c.process != nil {
+				lifecycle = RestartingControl
+				restartingControl = c
+			} else if c.process == nil {
 				c.nextStart = time.Now()
 				c.status.State = "pending"
 			} else {
@@ -331,7 +351,7 @@ func Run(parent context.Context, options Options) (PowerAction, error) {
 			}
 			request.reply <- nil
 		case request := <-a.reconciles:
-			if stopping {
+			if lifecycle != Running {
 				// During drain the coordinator may retire dependents, but cannot
 				// start or replace any process. Validate the whole batch first.
 				valid := true
@@ -343,7 +363,7 @@ func Run(parent context.Context, options Options) (PowerAction, error) {
 					}
 				}
 				if !valid {
-					request.reply <- errors.New("supervisor is stopping; only existing modules can be retained")
+					request.reply <- errors.New("supervisor is draining; only existing modules can be retained")
 					continue
 				}
 			}

@@ -51,7 +51,7 @@ before any memo lookup. Closing the Store discards the memo.
 The first extracted layout accepts bounded single filenames (no links or
 nested paths), static native Go ELF and non-executable regular data. Limits are
 64 artifacts, 64 roles, 64KiB manifest, 1GiB per artifact and 4GiB total payload.
-The receiving store defaults to a 512MiB per-artifact policy. Boot ABI 1 and worker ABI 4 are accepted. Native executables remain static.
+The receiving store defaults to a 512MiB per-artifact policy. Boot ABI 1 and worker ABI 5 are accepted. Native executables remain static.
 The PPPoE role requires a signed regular-file engine image and a distinct
 corresponding-source artifact in `engines`. The image contains its exact pppd,
 plugin, interpreter, libraries, OpenSSL provider, notices and package inventory.

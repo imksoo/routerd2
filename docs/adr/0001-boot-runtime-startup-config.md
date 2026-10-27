@@ -7,7 +7,7 @@
 現在の実装範囲と残作業は [開発引き継ぎ](../pve-codex-handoff.md) と
 [実装計画](../implementation-plan.md) で管理する。過去の個別試験記録は削除した。
 
-2026-10-27追記: 現行manifestはv4、worker ABIは4。PPP engineと対応sourceを署名bindingで固定する。
+2026-10-27追記: 現行manifestはv4、worker ABIは5。PPP engineと対応sourceを署名bindingで固定する。
 詳細は[ADR 0002](0002-pppoe-engine.md)。旧試作形式は読まない。
 
 2026-10-25追記: manifest v3でnative ELFのformat宣言を署名へ結び付ける。

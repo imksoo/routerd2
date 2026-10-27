@@ -70,8 +70,8 @@ func runProbe(phase string) error {
 		if err := manager.Do(ctx, "GET", "/v1/status", nil, &processes); err != nil {
 			return err
 		}
-		if processes.PID != 1 || processes.Platform != "appliance" || processes.ReleaseID != identity || !processes.Ready || processes.Stopping {
-			return fmt.Errorf("actual appliance PID 1 not ready: pid=%d platform=%q release=%q ready=%t stopping=%t", processes.PID, processes.Platform, processes.ReleaseID, processes.Ready, processes.Stopping)
+		if processes.PID != 1 || processes.Platform != "appliance" || processes.ReleaseID != identity || !processes.Ready || processes.Lifecycle != supervisor.Running {
+			return fmt.Errorf("actual appliance PID 1 not ready: pid=%d platform=%q release=%q ready=%t lifecycle=%s", processes.PID, processes.Platform, processes.ReleaseID, processes.Ready, processes.Lifecycle)
 		}
 		if err := verifyExecutables(processes); err != nil {
 			return err

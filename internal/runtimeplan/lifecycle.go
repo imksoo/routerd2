@@ -41,7 +41,7 @@ func (r *Runtime) restart(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
-	if status.Stopping {
+	if status.Lifecycle != supervisor.Running {
 		return errors.New("supervisor is stopping")
 	}
 	r.mu.Lock()

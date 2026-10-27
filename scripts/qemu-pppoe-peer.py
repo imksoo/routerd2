@@ -203,6 +203,26 @@ def peer(stage, power_action):
         assert next(x['generation'] for x in query('show status')['modules'] if x['name']=='service.dns')==dns_generation
         assert query('show services pd')['snapshot']['client_duid'] == duid
         assert query('show config')['revision'] == revision
+        before_control = {x['name']: x for x in query('show status')['modules']}
+        control_peer_index = next(x['ifindex'] for x in json.loads(run(['ip', '-n', ac, '-j', 'link', 'show'])) if x['ifname'].startswith('ppp'))
+        releases = (stage / 'dhcp6.log').read_text().count('releases prefix ')
+        control_restart_at = time.time()
+        assert query('restart control')['accepted']
+        wait(lambda: any(x['name'] == 'control' and x['generation'] > before_control['control']['generation'] and x['ready'] for x in query('show status')['modules']), 60)
+        wait(lambda: any(x['name'] == 'service.internet' and x['generation'] > before_control['service.internet']['generation'] and x['ready'] for x in query('show status')['modules']))
+        assert (stage / 'dhcp6.log').read_text().count('releases prefix ') > releases, 'control restarted before its PD child could release'
+        wait(lambda: any(x['ifname'].startswith('ppp') and x['ifindex'] != control_peer_index for x in json.loads(run(['ip', '-n', ac, '-j', 'link', 'show']))))
+        assert next(x for x in query('show status')['modules'] if x['name'] == 'network')['pid'] == before_control['network']['pid']
+        assert next(x for x in query('show status')['modules'] if x['name'] == 'management')['pid'] == before_control['management']['pid']
+        d.terminate()
+        d.wait(timeout=5)
+        d = server()
+        wait(pd_ready)
+        wait(client_ready)
+        traffic()
+        assert query('show services pd')['snapshot']['client_duid'] == duid
+        assert query('show config')['revision'] == revision
+        print('PASS control restart released old PD before PPP/control replacement, retained network/management and restored both-family TCP/UDP/DNS', flush=True)
         for capture in (wan_capture, lan_capture):
             capture.send_signal(signal.SIGINT)
             capture.wait(timeout=3)
@@ -225,6 +245,7 @@ def peer(stage, power_action):
             assert withdrawals and replies and padts, 'missing RA withdrawal, matching Reply or PADT'
             assert min(withdrawals) < released < min(replies) < min(padts), 'appliance restart violated RA/Release/Reply/PADT order'
         release_order('wan.pcap', 'lan.pcap', restart_at)
+        release_order('wan.pcap', 'lan.pcap', control_restart_at)
         print('PASS actual appliance RA withdrawal -> Release -> matching Reply -> PADT; stable DUID, configuration and DNS worker', flush=True)
         (stage / 'status.json').write_text(json.dumps(query('show status')))
         shutdown_captures = [start(None, ['tcpdump', '--immediate-mode', '-Z', 'root', '-U', '-n', '-i', nic, '-w', str(stage / name)], name)

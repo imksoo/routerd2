@@ -1,6 +1,6 @@
 {
   "boot_abi": 1,
-  "worker_abi": 4,
+  "worker_abi": 5,
   "entrypoint": "supervisor",
   "roles": [
     {

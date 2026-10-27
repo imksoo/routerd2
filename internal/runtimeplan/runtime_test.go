@@ -67,7 +67,7 @@ func (m *memoryManager) Reconcile(_ context.Context, v []supervisor.DynamicModul
 	return nil
 }
 func (m *memoryManager) Status(_ context.Context) (supervisor.Status, error) {
-	s := supervisor.Status{Ready: true, InstanceID: testSupervisorInstance}
+	s := supervisor.Status{Lifecycle: supervisor.Running, Ready: true, InstanceID: testSupervisorInstance}
 	for _, v := range m.modules {
 		generation := uint64(0)
 		if v.Role == "aftr" {

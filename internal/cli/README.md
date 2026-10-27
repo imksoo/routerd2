@@ -10,6 +10,16 @@ configuration or allocating a consumer. Local command
 archive; `routerd events verify FILE` checks it offline. See the [storage contract](../../docs/event-storage.md)
 for warning thresholds, atomic publication and remaining retention work.
 
+## Control restart
+
+`restart control` requests supervisor-owned replacement: stop DHCPv6 while the
+old control/network can acknowledge withdrawals, then the other dynamic
+workers, then control. Network, management and logging remain available. New
+dynamic workers wait until old producer identities have retired. Inspect
+supervisor `lifecycle` and protocol/application state before checking traffic;
+202 acknowledges the request, not completed reacquisition. Abrupt control death
+still uses cold recovery and cannot promise an acknowledged graceful Release.
+
 ## Appliance power operations
 
 `poweroff` and `reboot` in the local/SSH shell, or `routerd poweroff` and

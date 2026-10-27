@@ -3,6 +3,8 @@ package runtimeplan
 import (
 	"context"
 	"fmt"
+
+	"github.com/imksoo/routerd2/internal/supervisor"
 )
 
 // WithStoppedHealthRelays fences conditional reactivation through historical
@@ -39,7 +41,7 @@ func (r *Runtime) WithStoppedHealthRelays(ctx context.Context, names []string, d
 		return fmt.Errorf("observe stopped health workers: %w", err)
 	}
 	r.mu.Lock()
-	if !r.configured || status.Stopping {
+	if !r.configured || status.Lifecycle != supervisor.Running {
 		r.mu.Unlock()
 		return ErrStale
 	}

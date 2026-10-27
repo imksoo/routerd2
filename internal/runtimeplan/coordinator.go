@@ -252,7 +252,7 @@ func (r *Runtime) reconcileStep(ctx context.Context, ceiling map[string]supervis
 		return false, err
 	}
 	drainingDHCP := false
-	if status.Stopping {
+	if status.Lifecycle != supervisor.Running {
 		// Keep reconciliation within the current process set during shutdown.
 		ceiling = make(map[string]supervisor.DynamicModule)
 		for _, module := range status.Modules {

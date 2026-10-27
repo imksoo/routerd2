@@ -7,6 +7,34 @@
 現在の変更・実行結果・残作業は [引き継ぎ](pve-codex-handoff.md) を参照する。
 機能範囲と作業単位は以下とJSONの台帳で管理し、既存試験の成功を全体完了に数えない。
 
+## 実行順序
+
+全34 work packageの範囲は維持し、次の順で実際の運用を完成させる。
+
+1. **homert02/03**: 最新の実設定・条件で変わる稼働状態と旧routerdを読み、一台分の通信を完成させ、
+   次に二台の切替・復旧を通す。WAN/LANのIPv4/IPv6、DS-Lite、実際の経路選択と代替回線、
+   DHCP/PD/RA、学習DNSから上流の名前解決と端末配布、filter/NAT/MTU/MSS、BGP・管理経路を対象とする。
+   HA-01の現行運用上の不足、HA-02のDHCP/PD同期、HA-03の接続状態同期、EXT-02のTailscaleを優先する。
+   大項目の全機能を形式的な着手条件にしない。確認した実設定にないPPP方式追加は先行させない。
+   通常更新・回線断/復帰・再起動・二台切替/復旧を実相手と端末で確認し、必要なaddress・PD・貸出・
+   接続状態を引き継ぐ。既存TCP/UDPの継続と新規接続の復旧を分ける。配備・負荷・管理・更新復旧・
+   戻し方を確認し、手動補修や残存設定へ依存しない。本番切替はこの順序指定では実行しない。
+2. **k8s-rt / pve-rt**: homertの置換条件を満たした後、実設定・経路・接続先・冗長化・配備条件を
+   調べて差分を実装する。順番は実際の依存関係で決める。名前からCNIや仮想化構成を推測しない。
+3. **Cloud SAM**: `routerd-labs`の`docs/concepts/cloudedge-sam.md`、
+   `docs/operations/cloud-sam-rearchitecture-goal.md`、`cloud-sam-representative-redundancy.md`、
+   `cloud-sam-full-topology-minimal.md`（確認版`a0b1b3b`）と旧baselineとの差を読む。
+   参加認証/取消と構成配布、RR/接続nodeのWireGuard/FOU・BGP、/32所有判断とローカル転送/計画移動、
+   クラウド観測/操作・実通信/引継ぎ/復旧の順にCLOUD-01〜04を進める。入力を一度正規化し、
+   所有判断を一度行い、型付き決定を適用する。状態表示や合成旧resourceへ戻さない。
+   選択したIPv4 /32をオンプレミス・AWS・Azure・OCI間で移し、NATなしで送信元/宛先を保つ双方向通信を確認する。
+   経路・所有者・実捕捉を一致させ、同優先度の奪い返し抑制、意図した優先度復帰、計画移動の順序、
+   参加取消と分断/復旧を通す。突然のnode喪失時の新規復旧と既存TCP継続を分ける。
+   新しい有料環境や本番操作の許可は推定しない。
+
+直近はcontrol交換・永続再起動・影響するHealth→PBRを収束させ、homertの不足へ進む。
+全機能の監査台帳や専用試験基盤を先に作らず、実際に必要な依存経路を小さく完成させる。
+
 ## 1. 基準と到達点
 
 **routerd と routerd2 は別製品である。** routerd は稼働中の機能参照元、routerd2 は未リリースの開発対象。
@@ -750,8 +778,15 @@ PPPだけのMTU/MRU変更（1454→1452）でRelease→PADT→同じDUIDの再�
 寿命0 RA→Release→同一transactionのReply→PADTと、両family TCP/UDP・DNSの復旧を確認した。
 DUID・設定revision・無関係なDNS workerは維持する。202は要求受付であり、取得完了ではない。
 ビルド負荷と並行した3秒API待ちtimeoutは合格に数えず、最終版を単独再実行して確認した。
+`control-drain`ではsupervisorが旧controlを生かしたままDHCPv6、他のdynamic worker、controlの順に停止する。
+`Status.Lifecycle`へ契約を統一し、worker ABI5へ更新した。native-28と保存形式は維持する。
+独立RP-PPPoE/ISCと別Linux LAN端末を使い、実daemonとAPK由来Linux6.18.58-lts applianceで
+control交換前の旧PD Release、network/management PID維持、新control・PPP・PDでの両family TCP/UDP/DNS、
+旧producerの通知409を確認した。captureは寿命0 RA→Release→対応Reply→PADTとなった。
+同じfactory実装の永続ext4付きrebootでも二回目起動の設定・DUID・SSHホスト鍵と転送復旧を確認した。
+SIGKILLで旧controlを失った場合と無応答peerでのcontrol交換は別の未検証範囲である。
 複数割当/PDとのDAD共存、required/observe-only・RA trigger・resolver効果・全kernel-link再設定・
-control再起動中の解放・suspend/reboot・VRF・全link option/lifecycle・WAN選択は残り、NET-05全体は未完了。
+control強制終了時の復旧・実suspend・更新trial中のreboot・VRF・全link option/lifecycle・WAN選択は残り、NET-05全体は未完了。
 
 既存uplinkへ専用MAC/DUIDのmacvlanを隔離接続し、実上流RA・DHCPv4・PD /60と
 LAN kernel SLAAC端末のIPv4 NAT/委譲IPv6 HTTPS・UDP DNSを確認した。

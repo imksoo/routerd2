@@ -267,7 +267,7 @@ func TestBundleHeaderSizeDoesNotAllocateDeclaredArtifact(t *testing.T) {
 }
 
 func FuzzManifestVerification(f *testing.F) {
-	m := Manifest{Version: ManifestVersion, ReleaseID: "r1", Sequence: 1, GOOS: "linux", GOARCH: "amd64", KeyID: KeyID(testKey().Public().(ed25519.PublicKey)), BootABI: 1, WorkerABI: 4, Entrypoint: "routerd", Roles: []RoleBinding{{Role: "control", Artifact: "routerd-modules"}}, Artifacts: []Artifact{{Name: "routerd", Kind: "native", Command: "routerd", Size: 64, SHA256: strings.Repeat("a", 64)}, {Name: "routerd-modules", Kind: "native", Command: "routerd-modules", Size: 64, SHA256: strings.Repeat("b", 64)}}}
+	m := Manifest{Version: ManifestVersion, ReleaseID: "r1", Sequence: 1, GOOS: "linux", GOARCH: "amd64", KeyID: KeyID(testKey().Public().(ed25519.PublicKey)), BootABI: 1, WorkerABI: 5, Entrypoint: "routerd", Roles: []RoleBinding{{Role: "control", Artifact: "routerd-modules"}}, Artifacts: []Artifact{{Name: "routerd", Kind: "native", Command: "routerd", Size: 64, SHA256: strings.Repeat("a", 64)}, {Name: "routerd-modules", Kind: "native", Command: "routerd-modules", Size: 64, SHA256: strings.Repeat("b", 64)}}}
 	m.RuntimeABI = runtimeabi.Current()
 	raw, sig, _ := SignManifest(m, testKey())
 	f.Add(raw, sig)

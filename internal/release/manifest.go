@@ -51,7 +51,7 @@ func ValidateManifest(m Manifest, maxArtifact int64) error {
 	if !validDigest(m.KeyID) {
 		return errors.New("manifest requires a full SHA256 signing key ID")
 	}
-	if m.BootABI != 1 || m.WorkerABI != 4 {
+	if m.BootABI != 1 || m.WorkerABI != 5 {
 		return errors.New("unsupported boot or worker ABI")
 	}
 	if _, err := runtimeabi.EncodeRecord(m.RuntimeABI); err != nil {

@@ -183,7 +183,7 @@ def peer(stage, auth, dhcp6_server):
         publisher = str(stage.parent / "routerd-bundle")
         (stage / "trust.json").write_text(run([publisher, "trust", "--private-key-file", str(key)]))
         (stage / "trust.json").chmod(0o600)
-        layout = {"boot_abi": 1, "worker_abi": 4, "entrypoint": "routerd",
+        layout = {"boot_abi": 1, "worker_abi": 5, "entrypoint": "routerd",
                   "roles": [{"role": r, "artifact": "routerd-logging" if r == "logging" else "routerd-modules"} for r in boot["workers"]],
                   "engines": [{"role": "pppoe", "artifact": "ppp-image", "sources": "ppp-sources"}],
                   "artifacts": [{"name": n, "kind": "native", "command": n, "file": str(stage.parent / n)} for n in ["routerd", "routerd-modules", "routerd-logging"]] +
@@ -444,6 +444,29 @@ def peer(stage, auth, dhcp6_server):
             stale = {k: previous_pd[k] for k in ("supervisor_instance", "name", "role", "config_digest", "generation", "producer_epoch", "sequence", "snapshot")}
             api("control.sock", "/v1/services/state", stale, status=409)
             print("PASS control-owned operator restart released PD before PPP, rejected its old notification and preserved configuration/DNS", flush=True)
+            before = modules()
+            previous_pd = pd_record()
+            before_release = (stage / "dhcp6.log").read_text().count("releases prefix ")
+            control_restart_at = time.time()
+            assert api("supervisor.sock", "/v1/modules/control/restart", {}, status=202)["accepted"]
+            wait(lambda: modules()["control"]["generation"] > before["control"]["generation"] and modules()["control"]["ready"])
+            wait(lambda: modules().get("service.internet", {}).get("generation", 0) > before["service.internet"]["generation"] and link() is not None)
+            assert (stage / "dhcp6.log").read_text().count("releases prefix ") > before_release
+            assert modules()["network"]["pid"] == before["network"]["pid"]
+            assert modules()["management"]["pid"] == before["management"]["pid"]
+            server.terminate()
+            server.wait(timeout=3)
+            wait(lambda: any(x["ifname"].startswith("ppp") and x["addr_info"] for x in peer_links()))
+            ppp = next(x["ifname"] for x in peer_links() if x["ifname"].startswith("ppp"))
+            server = dhcp6_start()
+            ipv6_traffic()
+            traffic()
+            dns_traffic()
+            assert api("control.sock", "/v1/config")["revision"] == revision
+            assert pd_record()["snapshot"]["client_duid"] == duid
+            stale = {k: previous_pd[k] for k in ("supervisor_instance", "name", "role", "config_digest", "generation", "producer_epoch", "sequence", "snapshot")}
+            api("control.sock", "/v1/services/state", stale, status=409)
+            print("PASS control restart released old PD, retained writer/management, rejected the old producer and restored TCP/UDP/DNS", flush=True)
             # Request actual PID 1 poweroff while the independent server and
             # capture remain alive. Cleanup must not terminate the peer first.
             assert json.loads(run([str(stage.parent / "routerd"), "poweroff", "--runtime-dir", str(stage / "run")]))["accepted"]
@@ -474,12 +497,14 @@ def peer(stage, auth, dhcp6_server):
                     releases.append((float(line.split()[0]), release[1]))
                 if reply:
                     replies.append((float(line.split()[0]), reply[1]))
-            assert len(releases) >= 5, packets
+            assert len(releases) >= 6, packets
             discovery = run(["tcpdump", "-n", "-tt", "-r", str(stage / "pppoe.pcap"), "pppoed"])
             teardown = [float(line.split()[0]) for line in discovery.splitlines() if "PADT" in line and float(line.split()[0]) >= wan_change_at]
             assert teardown and any(wan_change_at <= stamp < min(teardown) for stamp, _ in releases), "WAN teardown preceded DHCPv6 Release"
             teardown = [stamp for stamp in teardown if stamp >= operator_restart_at]
             assert teardown and any(operator_restart_at <= stamp < min(teardown) for stamp, _ in releases), "operator restart tore down WAN before Release"
+            teardown = [stamp for stamp in teardown if stamp >= control_restart_at]
+            assert teardown and any(control_restart_at <= stamp < min(teardown) for stamp, _ in releases), "control restart tore down WAN before Release"
             assert len(withdrawals) >= 2, packets
             assert all(any(w < stamp and stamp - w < 6 for w in withdrawals) for stamp, _ in releases), packets
             assert all(any(reply > stamp and reply - stamp < 2 and rxid == xid for reply, rxid in replies) for stamp, xid in releases), packets

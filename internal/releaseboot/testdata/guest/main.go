@@ -242,7 +242,7 @@ func stagePair(ctx context.Context, store *release.Store, key ed25519.PrivateKey
 		return release.Ref{}, err
 	}
 	defer notices.Close()
-	runtimeOptions := release.BundleOptions{ReleaseID: identity, Sequence: sequence, GOOS: "linux", GOARCH: "amd64", BootABI: 1, WorkerABI: 4, Entrypoint: "supervisor", Artifacts: []release.Artifact{{Name: "supervisor", Kind: "native", Command: "routerd"}, {Name: "services", Kind: "native", Command: "routerd-modules"}, {Name: "logger", Kind: "native", Command: "routerd-logging"}, {Name: "notices", Kind: "data"}}}
+	runtimeOptions := release.BundleOptions{ReleaseID: identity, Sequence: sequence, GOOS: "linux", GOARCH: "amd64", BootABI: 1, WorkerABI: 5, Entrypoint: "supervisor", Artifacts: []release.Artifact{{Name: "supervisor", Kind: "native", Command: "routerd"}, {Name: "services", Kind: "native", Command: "routerd-modules"}, {Name: "logger", Kind: "native", Command: "routerd-logging"}, {Name: "notices", Kind: "data"}}}
 	roles := runtimeconfig.NativeWorkers("services")
 	roles["logging"] = "logger"
 	names := make([]string, 0, len(roles))
@@ -496,7 +496,7 @@ func observe(ctx context.Context, store **release.Store, keys map[string]ed25519
 		if err := localapi.NewClient(filepath.Join(runtimeDir, supervisor.SocketName)).Do(ctx, "GET", "/v1/status", nil, &processes); err != nil {
 			return err
 		}
-		if processes.PID != 1 || processes.Platform != "appliance" || !processes.Ready || processes.Stopping || processes.ReleaseID != expected.Trial.ReleaseID {
+		if processes.PID != 1 || processes.Platform != "appliance" || !processes.Ready || processes.Lifecycle != supervisor.Running || processes.ReleaseID != expected.Trial.ReleaseID {
 			return fmt.Errorf("unexpected supervisor readiness: %+v", processes)
 		}
 		if len(processes.Modules) != 4 {

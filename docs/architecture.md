@@ -17,10 +17,11 @@ IP の転送は Linux、ルーティングプロトコルと設定制御は rout
 Alpine は kernel/firmware/パッケージと image assembly の供給元として利用する。
 apk/OpenRC をパケットの処理経路や daemon の起動管理に挟まない。
 
-## 現在の実装: 2 つの ELF と複数の障害単位
+## 現在の実装: 複数の ELF と障害単位
 
 - `routerd`: init/supervisor と運用 CLI。構成をまとめて読み、固定の worker ELF を開く。
-- `routerd-modules`: logging/network/control/management と protocol worker を選択起動する。
+- `routerd-modules`: network/control/management と protocol worker を選択起動する。
+- `routerd-logging`: ログ収集・保存。protocol engineの依存を含めない。
 
 core 4 プロセスに加え、DHCP4 client/server、PD、RA server/client、AFTR、DNS、VRRP、BFD、BGP をインスタンスごとの
 プロセスとして追加する。GoBGP/QUIC/SQLite は worker ELF に置き、PID 1 の import
@@ -64,6 +65,11 @@ protocol投影は変更するnetwork集合を複製し、固定設定を読み�
 202の`accepted`は再起動要求の受理であり、PPP/DHCPの取得完了ではない。状態と通信を別途確認する。
 この操作で設定revisionを変更しない。core workerの再起動はsupervisorが受け、dynamic serviceを
 直接再起動する要求は拒否する。
+`restart control`はsupervisorが所有する。旧controlとnetworkを維持してDHCPv6を先に終了し、
+他の動的workerを終了・reapしてからcontrolを交代する。network/management/loggingは保持する。
+この間は新しい動的workerを起動せず、旧producerを退役してから新controlへ設定を渡す。
+supervisorの`lifecycle`は`running`/`restarting_control`/`stopping`の一つである。
+内部契約はworker ABI5へ更新し、旧`stopping` booleanのreaderや互換経路は置かない。
 `poweroff`と`reboot`はappliance PID1のsupervisorが受け、受付応答をflushしてから
 更新候補の正常性監視を止め、既存の停止順序で全workerを終了・reapする。
 entrypointへ型付きの電源操作結果を返し、sync後にLinuxの電源syscallを実行する。

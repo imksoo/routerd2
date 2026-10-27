@@ -80,6 +80,11 @@ LAN client. It checks the manifest release ID, CHAP, learned UDP/TCP DNS,
 IPv4/IPv6 TCP/UDP, PD, Renew and operator-requested PPP restart. WAN/LAN captures
 must show zero-lifetime RA, Release, its matching Reply, then PPP PADT. The PD
 client keeps its DUID; configuration revision and the DNS worker remain stable.
+It also restarts control with the old independent DHCP server alive. PD must be
+released before PPP/control replacement; network and management PIDs remain
+unchanged, and TCP/UDP/DNS must recover with the same DUID and configuration
+revision. The shutdown sequence is checked on both WAN and LAN captures.
+
 The fixture uses ordinary kernel DAD and formats only a newly created private
 256 MiB regular-file ext4 disk for explicit `state_volume=/dev/vda`. It finishes
 with CLI `poweroff`, checking the same withdrawal order before the kernel's
