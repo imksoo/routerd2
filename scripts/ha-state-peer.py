@@ -141,7 +141,7 @@ def peer(stage, dhcp6_server):
                         "ha": {"owner": "ha", "replication": pd_peer}, "delegations": [{"name": "lan", "interface": "lan0", "subnet_id": 1, "advertise": True, "other_config": True, "router_lifetime_seconds": 10}]}}}
                 ]
                 resources.append({"id": "lan-info", "when": {"fact": "service.ha.active"}, "service": {"name": "lan-info", "dhcp6_server": {
-                    "interface": "lan0", "server_duid": "000400112233445546778899aabbccddeeff", "options_from": ["pd"], "domain_search": ["local.test"], "refresh_seconds": 600
+                    "interface": "lan0", "server_duid": "000400112233445546778899aabbccddeeff", "dns_from": ["pd"], "search_from": ["pd"], "domain_search": ["local.test"], "refresh_seconds": 600
                 }}})
             (directory / "config.json").write_text(json.dumps({"schema_version": 2, "resources": resources}))
             workers = {role: str(stage / ("routerd-logging" if role == "logging" else "routerd-modules")) for role in roles}

@@ -943,6 +943,12 @@ host suffixもmanaged bindingへ変換する。native address maskは/64で、�
 
 #### NET-06 — LAN・DHCPv6・relay・DNS の resource 完全化
 
+2026-10-27 native-39: 旧routerdの実dnsmasq構築経路を参照し、一括`options_from`を削除した。
+`dns_from`・`sntp_from`・`search_from`で個別に選び、元期限と指定順を保持する。
+独立ISC/radvd/BusyBoxの実Replyで、PD DNSとRA検索ドメインを選び、不要なPD SNTP/検索値を
+配らないこと、5秒confirmed rollbackと実TCP/UDP・DNS復旧が通った。
+旧resource importには暗黙RA/寿命の明示置換も必要であり未完了。実ONU/対象NIC受入も残る。
+
 2026-10-27 native-38: 旧routerdのDUID/lease保存を参照し、WAN自動DUIDを選択中のcheckpointから
 分離した。明示DUID trialのrollbackで候補IDが残る問題を独立ISCで再現し、修正後は元IDと
 LAN TCP/UDP・DNSへ復帰した。LAN serverと保存処理を共有し、明示値は自動値を上書きしない。

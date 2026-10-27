@@ -15,7 +15,9 @@ type DHCP6Server struct {
 	DNSServers     []netip.Addr `json:"dns_servers,omitempty"`
 	SNTPServers    []netip.Addr `json:"sntp_servers,omitempty"`
 	DomainSearch   []string     `json:"domain_search,omitempty"`
-	OptionsFrom    []string     `json:"options_from,omitempty"`
+	DNSFrom        []string     `json:"dns_from,omitempty"`
+	SNTPFrom       []string     `json:"sntp_from,omitempty"`
+	SearchFrom     []string     `json:"search_from,omitempty"`
 	RefreshSeconds uint32       `json:"refresh_seconds,omitempty"`
 }
 
@@ -43,10 +45,19 @@ func validateDHCP6Servers(services []Service) error {
 				return err
 			}
 		}
-		for _, name := range s.DHCP6Server.OptionsFrom {
-			source := byName[name]
-			if source.DHCP6 == nil && source.RAClient == nil {
-				return fmt.Errorf("DHCPv6 server %s options_from %s must name a DHCPv6 or RA client", s.Name, name)
+		for _, sourceSet := range []struct {
+			field string
+			names []string
+		}{
+			{"dns_from", s.DHCP6Server.DNSFrom},
+			{"sntp_from", s.DHCP6Server.SNTPFrom},
+			{"search_from", s.DHCP6Server.SearchFrom},
+		} {
+			for _, name := range sourceSet.names {
+				source := byName[name]
+				if source.DHCP6 == nil && (sourceSet.field == "sntp_from" || source.RAClient == nil) {
+					return fmt.Errorf("DHCPv6 server %s %s %s has no matching information provider", s.Name, sourceSet.field, name)
+				}
 			}
 		}
 	}

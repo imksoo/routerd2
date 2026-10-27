@@ -5,7 +5,42 @@
 [機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を参照する。
 実行順序はhomert02/03、実態を確認したk8s-rt/pve-rt、その後既存文書に基づくCloud SAM。
 
-## 現在の変更: dhcp6-identity / native-38
+## 現在の変更: dhcp6-option-sources / native-39
+
+旧routerdの稼働経路`pkg/controller/chain/chain.go`の`writeDnsmasqConfig`/
+`dhcpv6ServerPending`を読んだ。各optionの取得元を個別に指定する意図を、従来の一括
+`options_from`では表現できず、不要なSNTP/検索ドメインまで配っていた。
+このprototype設定を削除し、`dns_from`・`sntp_from`・`search_from`へ置換した。
+DNS/検索ドメインはDHCPv6/RA、SNTPはDHCPv6から選ぶ。各項目の指定順を保ち、
+共有する取得元は一回のinput読み取りにつき一度decodeする。永続cacheや追加workerは作らない。
+元期限・別LANへのlink-local除外・独立した静的option・条件付き配布権限は維持する。
+compiler native-39、worker ABI5、network journal11、DHCPv6 checkpoint2。旧設定readerは追加しない。
+
+PVE Linux6.8/amd64の隔離namespace、実supervisor/control/network/DHCPv6/RA/DNSと
+独立ISC4.4.3-P1/radvd2.19/BusyBox/Linux端末で、PD由来DNSとRA由来検索ドメインを選択し、
+PDが併せて通知するSNTP/検索ドメインを混入させない実Replyをcaptureで確認した。
+5秒confirmed trialのrollback後は元のPD情報とLAN TCP/UDP・DNSへ復帰した。
+既存のDUID trial rollback、DAD/DeclineとPD共存、worker SIGKILL後の元期限復旧、
+control停止中の元option期限失効と静的option保持も同じ実行で通った。
+最初の新しいassertionはcommit受付直後にworkerの入力更新完了まで仮定し失敗した。
+既存200ms入力pollに従い、実clientの収束を同じ5秒trial内に確認する形へ直した。
+製品の更新周期・権限期限・試験のconfirmed予算は延ばしていない。
+再実行は`make check-dhcp6-ra-pd DHCP6_SERVER=/path/to/isc/dhcpd RELEASE_ID=dhcp6-option-sources`。
+
+全体`make check`のGo/Python・Race Detector・vetが通った。
+CGO_ENABLED=0のamd64/arm64静的buildと6 ELFの署名catalog/publisher/stageが通った。
+ARM64では実行していない。
+最終の署名PID1二台と独立ISC/dnsmasq/BusyBox/Linux端末は、個別取得元の設定で
+条件付き配布の元権限失効、両方向PD引継ぎ、同期断/復旧、60秒DHCPv4失効、
+BOOTTIME差と元PD期限失効/再取得、古い通知を確認した。同じTCP socket/UDP mappingを維持し、
+captureはSYN一つと実FTFWを示した。この試行のUDP欠落は0件で、性能や任意分断条件の保証ではない。
+再実行は`make check-ha-pd DHCP6_SERVER=/path/to/isc/dhcpd RELEASE_ID=dhcp6-option-sources`。
+
+旧resource importでは暗黙RA constructorと寿命の明示置換も必要であり、取り込み完了とはしない。
+stateful serving、広いHA partition/fencing、今回応答のなかった実上流と対象NIC受入、
+全34 work packageの残作業を継続する。
+
+## 前回の変更: dhcp6-identity / native-38
 
 旧routerdの`pkg/state/freebsd_duid.go`と`pkg/pdclient/snapshot.go`を読み、
 WAN自動DUIDと選択中のリース識別子を分けた。独立ISCとのconfirmed trialで、修正前のrouterd2 (`e592918`) が

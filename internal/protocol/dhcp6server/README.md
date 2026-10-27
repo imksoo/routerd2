@@ -10,14 +10,19 @@ DAD before opening service. It does not assign addresses or emit RA.
 ```json
 {"name":"lan-info","dhcp6_server":{
   "interface":"lan0",
-  "options_from":["wan-pd"],
+  "dns_from":["wan-pd"],
+  "search_from":["wan-ra"],
   "domain_search":["home.arpa"],
   "refresh_seconds":600
 }}
 ```
 
-`options_from` names configured DHCPv6 or RA clients. Static `dns_servers`,
-`sntp_servers` and `domain_search` precede learned values. Each option supports
+`dns_from` and `search_from` independently name configured DHCPv6 or RA
+clients. `sntp_from` names DHCPv6 clients, since RA carries no SNTP option.
+An unselected option is never copied merely because the same peer provides it.
+Each source list retains its configured order; one shared provider is decoded
+once per input read. Static `dns_servers`, `sntp_servers` and `domain_search`
+precede learned values. Each option supports
 32 static and 32 distinct learned values. Learned values keep their original
 boot deadlines; each request rechecks expiry after receiving the datagram.
 WAN link-local addresses are not advertised on a different LAN. Source failure,
@@ -63,7 +68,11 @@ No discarded routerd2 format readers or prototype adapters are present.
 `udhcpc6 -l`, captures packets, and checks static options and DUID preservation
 through worker/control replacement, whole-daemon restart and confirmed rollback. `make check-dhcp6-ra-pd DHCP6_SERVER=/path/to/isc/dhcpd` connects independent ISC DHCP, radvd and Linux
 SLAAC peers, then BusyBox on the delegated LAN, including UDP/TCP DNS and option
-expiry while control is paused. Both fixtures use normal DAD
+expiry while control is paused. It also selects PD DNS and independent radvd
+search domains without copying PD SNTP/search, observes actual Reply convergence
+within a five-second confirmed trial, and restores the original policy on
+rollback. Commit acceptance does not mean the periodic worker input update has
+already completed. Both fixtures use normal DAD
 and discard raw logs/captures/binaries after inspection.
 
 `make check-ha-pd DHCP6_SERVER=/path/to/isc/dhcpd` checks actual two-node
@@ -72,5 +81,5 @@ direct UDP request targets the paused old node separately from the legitimate
 new master; multicast BusyBox responses cannot establish that distinction.
 
 Stateful address/prefix pools, Rapid Commit, DHCPv6 relay, client Reconfigure,
-legacy resource import, wider HA partition policy and full hardware qualification remain
+legacy resource import (including its implicit RA), wider HA partition policy and full hardware qualification remain
 outside the implemented stateless path.

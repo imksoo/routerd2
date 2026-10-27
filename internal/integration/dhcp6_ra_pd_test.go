@@ -82,7 +82,7 @@ func TestDaemonDHCP6RAAddsAddressToPD(t *testing.T) {
 	lan := healthPBRCapture(t, "lan0")
 	bridge := "wan0"
 	doc := config.Native{Network: network.Desired{Links: []network.Link{{Name: bridge, Kind: "bridge"}}, Interfaces: []network.Interface{{Name: "wire0", Master: &bridge}, {Name: "dup0", Master: &bridge}, {Name: "wan0"}, {Name: "lan0"}}, Forwarding: network.Forwarding{IPv6: new(true)}}, Services: []serviceconfig.Service{
-		{Name: "lan-info", DHCP6Server: &serviceconfig.DHCP6Server{Interface: "lan0", OptionsFrom: []string{"wan"}, DomainSearch: []string{"local.test"}}},
+		{Name: "lan-info", DHCP6Server: &serviceconfig.DHCP6Server{Interface: "lan0", DNSFrom: []string{"wan"}, SNTPFrom: []string{"wan"}, SearchFrom: []string{"wan"}, DomainSearch: []string{"local.test"}}},
 		{Name: "wan-ra", RAClient: &serviceconfig.RAClient{Interface: "wan0", SLAAC: new(false)}},
 		{Name: "wan", DHCP6: &serviceconfig.DHCP6{Interface: "wan0", RAFrom: "wan-ra", IAID: 7, RequestPrefix: true, RequestAddress: true, PrefixLength: 60, Delegations: []serviceconfig.Delegation{{Name: "lan", Interface: "lan0", Advertise: true, OtherConfig: true}}}},
 	}}
@@ -150,7 +150,7 @@ func TestDaemonDHCP6RAAddsAddressToPD(t *testing.T) {
 		if managed {
 			flag = "on"
 		}
-		if err := os.WriteFile(raPath, []byte(fmt.Sprintf("interface server0 { AdvSendAdvert on; MinRtrAdvInterval 3; MaxRtrAdvInterval 4; AdvDefaultLifetime 12; AdvManagedFlag %s; prefix 2001:db8:42::/64 { AdvOnLink on; AdvAutonomous off; }; };\n", flag)), 0600); err != nil {
+		if err := os.WriteFile(raPath, []byte(fmt.Sprintf("interface server0 { AdvSendAdvert on; MinRtrAdvInterval 3; MaxRtrAdvInterval 4; AdvDefaultLifetime 12; AdvManagedFlag %s; prefix 2001:db8:42::/64 { AdvOnLink on; AdvAutonomous off; }; DNSSL ra.test { AdvDNSSLLifetime 30; }; };\n", flag)), 0600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -509,6 +509,64 @@ func TestDaemonDHCP6RAAddsAddressToPD(t *testing.T) {
 	}
 	traffic()
 	information()
+	// The WAN still supplies all three options. Select its DNS and the RA
+	// search domain independently, without the WAN SNTP/search values.
+	selective := doc
+	selective.Services = slices.Clone(doc.Services)
+	for i, service := range selective.Services {
+		if service.DHCP6Server != nil {
+			cfg := *service.DHCP6Server
+			cfg.SNTPFrom, cfg.SearchFrom = nil, []string{"wan-ra"}
+			selective.Services[i].DHCP6Server = &cfg
+		}
+	}
+	if err := f.control.Do(ctx, "POST", "/v1/config/commit", control.CommitRequest{ExpectedRevision: 3, RequestID: "option-source-trial", Config: config.FromNative(selective), ConfirmTimeoutSeconds: 5}, nil); err != nil {
+		t.Fatal(err)
+	}
+	lan.mu.Lock()
+	firstSelective := len(lan.packets)
+	lan.mu.Unlock()
+	// Commit acceptance precedes the existing periodic input update. Require
+	// actual client convergence inside the same confirmed trial budget.
+	until(t, 3*time.Second, func() bool {
+		got = fixtureDHCP6Information(t, client, "client0")
+		return len(got.dns) == 1 && slices.Equal(got.search, []string{"local.test", "ra.test"})
+	})
+	until(t, time.Second, func() bool {
+		lan.mu.Lock()
+		defer lan.mu.Unlock()
+		for _, p := range lan.packets[firstSelective:] {
+			b := p.data
+			if len(b) < 66 || b[20] != 17 || binary.BigEndian.Uint16(b[54:]) != 547 || binary.BigEndian.Uint16(b[56:]) != 546 || b[62] != 7 {
+				continue
+			}
+			opts, err := dhcp6FixtureOptions(b[66:])
+			if err != nil {
+				t.Fatal(err)
+			}
+			selectedSearch, dns, sntp := false, false, false
+			for _, o := range opts {
+				selectedSearch = selectedSearch || o.code == 24 && bytes.Equal(o.value, []byte("\x05local\x04test\x00\x02ra\x04test\x00"))
+				dns = dns || o.code == 23 && bytes.Equal(o.value, netip.MustParseAddr("2001:db8:42::1").AsSlice())
+				sntp = sntp || o.code == 31
+			}
+			if !selectedSearch {
+				continue
+			}
+			if sntp {
+				t.Fatal("unselected learned SNTP leaked into converged Reply")
+			}
+			return dns
+		}
+		return false
+	})
+	until(t, 12*time.Second, func() bool {
+		operator = control.State{}
+		return f.control.Do(ctx, "GET", "/v1/config", nil, &operator) == nil && operator.Revision == 5 && operator.Confirmation == nil && operator.Healthy
+	})
+	information()
+	traffic()
+
 	f.stop()
 	t.Log("ISC/radvd: explicit PD before M, same-worker IA_NA addition, Linux duplicate/DAD/Decline without losing delegated LAN SLAAC/TCP/UDP, original combined grants after SIGKILL and Rebind recovery; BusyBox PD-derived DNS/search with actual UDP/TCP DNS and original expiry during stopped control, static option retention and recovery")
 }

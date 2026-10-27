@@ -19,7 +19,9 @@ import (
 type dhcp6ServerPlan struct {
 	resourceID string
 	iface      string
-	sources    []string
+	dns        []string
+	sntp       []string
+	search     []string
 }
 
 func (r *Runtime) dhcp6ServerInput(name string) (serviceconfig.DHCP6ServerInput, error) {
@@ -46,75 +48,113 @@ func (r *Runtime) dhcp6ServerInput(name string) (serviceconfig.DHCP6ServerInput,
 	if out.Options.Authority == (lifetime.Deadline{}) {
 		out.Options.Authority.BootID = clock.BootID
 	}
-	for _, source := range plan.sources {
+	// Decode a shared provider once per input read, while preserving the
+	// independently configured ordering of each advertised option.
+	sources := make(map[string]dhcp6serverconfig.Input)
+	read := func(source string) (dhcp6serverconfig.Input, error) {
+		if data, ok := sources[source]; ok {
+			return data, nil
+		}
+		var data dhcp6serverconfig.Input
 		u, has := r.records[source]
 		bound, configured := r.bindings[source]
-		if !has || !configured || u.ConfigDigest != bound.digest {
-			continue
-		}
-		add := func(target *[]dhcp6serverconfig.Address, value, iface string, until lifetime.Deadline) {
-			ip, err := netip.ParseAddr(value)
-			if err != nil || !dhcp6serverconfig.UsableAddress(ip) || !until.Live(clock) || ip.IsLinkLocalUnicast() && iface != plan.iface {
-				return
-			}
-			for i, entry := range *target {
-				if entry.Address == ip {
-					if entry.ValidUntil.Nanos != 0 && (until.Nanos == 0 || until.Nanos > entry.ValidUntil.Nanos) {
-						(*target)[i].ValidUntil = until
+		if has && configured && u.ConfigDigest == bound.digest {
+			addresses := func(values []string, iface string, until lifetime.Deadline) []dhcp6serverconfig.Address {
+				if !until.Live(clock) {
+					return nil
+				}
+				var entries []dhcp6serverconfig.Address
+				for _, value := range values {
+					ip, err := netip.ParseAddr(value)
+					if err == nil && dhcp6serverconfig.UsableAddress(ip) && (!ip.IsLinkLocalUnicast() || iface == plan.iface) {
+						entries = append(entries, dhcp6serverconfig.Address{Address: ip, ValidUntil: until})
 					}
-					return
 				}
+				return entries
 			}
-			if len(*target) < 32 {
-				*target = append(*target, dhcp6serverconfig.Address{Address: ip, ValidUntil: until})
-			}
-		}
-		addDomain := func(name string, until lifetime.Deadline) {
-			if !until.Live(clock) {
-				return
-			}
-			name = strings.TrimSuffix(strings.ToLower(name), ".")
-			for i, entry := range out.Options.DomainSearch {
-				if entry.Name == name {
-					if entry.ValidUntil.Nanos != 0 && (until.Nanos == 0 || until.Nanos > entry.ValidUntil.Nanos) {
-						out.Options.DomainSearch[i].ValidUntil = until
+			switch u.Role {
+			case "dhcp6":
+				var s dhcp6config.Snapshot
+				if err := json.Unmarshal(u.Snapshot, &s); err != nil {
+					return data, err
+				}
+				if until, live := s.InformationUntil(clock); live {
+					data.DNSServers = addresses(s.DNSServers, s.Interface, until)
+					data.SNTPServers = addresses(s.SNTPServers, s.Interface, until)
+					for _, name := range s.DomainSearch {
+						data.DomainSearch = append(data.DomainSearch, dhcp6serverconfig.Domain{Name: name, ValidUntil: until})
 					}
-					return
 				}
-			}
-			if len(out.Options.DomainSearch) < 32 {
-				out.Options.DomainSearch = append(out.Options.DomainSearch, dhcp6serverconfig.Domain{Name: name, ValidUntil: until})
+			case "ra_client":
+				var s raclient.Snapshot
+				if err := json.Unmarshal(u.Snapshot, &s); err != nil {
+					return data, err
+				}
+				if s.Active && s.BootID == clock.BootID {
+					for _, value := range s.DNSServers {
+						data.DNSServers = append(data.DNSServers, addresses([]string{value.Address}, s.Interface, value.ValidUntil)...)
+					}
+					for _, value := range s.SearchDomains {
+						if value.ValidUntil.Live(clock) {
+							data.DomainSearch = append(data.DomainSearch, dhcp6serverconfig.Domain{Name: value.Domain, ValidUntil: value.ValidUntil})
+						}
+					}
+				}
 			}
 		}
-		switch u.Role {
-		case "dhcp6":
-			var s dhcp6config.Snapshot
-			if err := json.Unmarshal(u.Snapshot, &s); err != nil {
-				return out, err
-			}
-			if until, live := s.InformationUntil(clock); live {
-				for _, value := range s.DNSServers {
-					add(&out.Options.DNSServers, value, s.Interface, until)
-				}
-				for _, value := range s.SNTPServers {
-					add(&out.Options.SNTPServers, value, s.Interface, until)
-				}
-				for _, value := range s.DomainSearch {
-					addDomain(value, until)
+		sources[source] = data
+		return data, nil
+	}
+	addAddresses := func(target *[]dhcp6serverconfig.Address, entries []dhcp6serverconfig.Address) {
+		for _, entry := range entries {
+			found := false
+			for i, old := range *target {
+				if old.Address == entry.Address {
+					if old.ValidUntil.Nanos != 0 && (entry.ValidUntil.Nanos == 0 || entry.ValidUntil.Nanos > old.ValidUntil.Nanos) {
+						(*target)[i].ValidUntil = entry.ValidUntil
+					}
+					found = true
+					break
 				}
 			}
-		case "ra_client":
-			var s raclient.Snapshot
-			if err := json.Unmarshal(u.Snapshot, &s); err != nil {
-				return out, err
+			if !found && len(*target) < 32 {
+				*target = append(*target, entry)
 			}
-			if s.Active && s.BootID == clock.BootID {
-				for _, value := range s.DNSServers {
-					add(&out.Options.DNSServers, value.Address, s.Interface, value.ValidUntil)
+		}
+	}
+	for _, name := range plan.dns {
+		data, err := read(name)
+		if err != nil {
+			return out, err
+		}
+		addAddresses(&out.Options.DNSServers, data.DNSServers)
+	}
+	for _, name := range plan.sntp {
+		data, err := read(name)
+		if err != nil {
+			return out, err
+		}
+		addAddresses(&out.Options.SNTPServers, data.SNTPServers)
+	}
+	for _, name := range plan.search {
+		data, err := read(name)
+		if err != nil {
+			return out, err
+		}
+		for _, entry := range data.DomainSearch {
+			entry.Name = strings.TrimSuffix(strings.ToLower(entry.Name), ".")
+			found := false
+			for i, old := range out.Options.DomainSearch {
+				if old.Name == entry.Name {
+					if old.ValidUntil.Nanos != 0 && (entry.ValidUntil.Nanos == 0 || entry.ValidUntil.Nanos > old.ValidUntil.Nanos) {
+						out.Options.DomainSearch[i].ValidUntil = entry.ValidUntil
+					}
+					found = true
+					break
 				}
-				for _, value := range s.SearchDomains {
-					addDomain(value.Domain, value.ValidUntil)
-				}
+			}
+			if !found && len(out.Options.DomainSearch) < 32 {
+				out.Options.DomainSearch = append(out.Options.DomainSearch, entry)
 			}
 		}
 	}

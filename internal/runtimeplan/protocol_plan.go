@@ -65,11 +65,15 @@ func prepareProtocols(doc config.Native, runtimeDir, stateDir string) (protocolP
 		}
 		name := service.ModuleName()
 		if service.DHCP6Server != nil {
-			refs := make([]string, 0, len(service.DHCP6Server.OptionsFrom))
-			for _, name := range service.DHCP6Server.OptionsFrom {
-				refs = append(refs, "service."+name)
+			refs := func(names []string) []string {
+				out := make([]string, len(names))
+				for i, name := range names {
+					out[i] = "service." + name
+				}
+				return out
 			}
-			plan.dhcp6Servers[name] = dhcp6ServerPlan{iface: service.DHCP6Server.Interface, sources: refs}
+			c := service.DHCP6Server
+			plan.dhcp6Servers[name] = dhcp6ServerPlan{iface: c.Interface, dns: refs(c.DNSFrom), sntp: refs(c.SNTPFrom), search: refs(c.SearchFrom)}
 		}
 		if service.DHCP6 != nil && service.DHCP6.RAFrom != "" {
 			plan.dhcp6RA[name] = "service." + service.DHCP6.RAFrom
