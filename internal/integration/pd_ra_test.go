@@ -177,7 +177,7 @@ func runPDRAFixture(t *testing.T, clockClient *clocktest.Client) {
 		},
 		Forwarding: network.Forwarding{IPv6: &forward},
 		Routes:     []network.Route{{Destination: "2001:db8:ffff::9/128", Gateway: "fe80::2", Interface: "wan0"}},
-	}, Services: []serviceconfig.Service{{Name: "pd", DHCP6: &serviceconfig.DHCP6{RequestAddress: true, RequestPrefix: true, Interface: "wan0", IAID: 7, PrefixLength: 56, Delegations: []serviceconfig.Delegation{{Name: "lan", Interface: "lan0", SubnetID: 3, Advertise: true, UseLearnedDNS: true}}}}}}
+	}, Services: []serviceconfig.Service{{Name: "pd", DHCP6: &serviceconfig.DHCP6{RequestAddress: true, RequestPrefix: true, Interface: "wan0", IAID: 7, PrefixLength: 56, Delegations: []serviceconfig.Delegation{{Name: "lan", Interface: "lan0", SubnetID: 3, Advertise: true, UseLearnedRDNSS: true, UseLearnedDNSSL: true}}}}}}
 	started := time.Now()
 	f := startFixtureDaemon(t, config.FromNative(doc))
 	module := func(name string) (supervisor.ModuleStatus, bool) {

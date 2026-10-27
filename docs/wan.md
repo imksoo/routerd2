@@ -116,7 +116,8 @@ link fencing and process supervision remain distinct mechanisms.
 
 ## Learned DNS in LAN advertisements
 
-A DHCPv6 delegation with `use_learned_dns: true` keeps configured `rdnss` and
+A DHCPv6 delegation independently selects `use_learned_rdnss` and
+`use_learned_dnssl`. It keeps configured `rdnss` and
 `dnssl` entries separate from learned DNS. Learned entries carry the earlier of
 the information freshness deadline and the PD lease expiry into the RA worker.
 Each outgoing RDNSS/DNSSL lifetime is capped by that absolute deadline. Closing

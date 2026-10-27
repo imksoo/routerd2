@@ -5,6 +5,7 @@ package integration
 import (
 	"bytes"
 	"context"
+	_ "embed"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -29,6 +30,12 @@ import (
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 )
+
+//go:embed testdata/dhcp6-pd-import.yaml
+var legacyDHCP6PD []byte
+
+//go:embed testdata/dhcp6-pd-import-policy.yaml
+var legacyDHCP6PDPolicy []byte
 
 func TestDaemonDHCP6RAAddsAddressToPD(t *testing.T) {
 	if !isolateFixtureTimeout(t, "TestDaemonDHCP6RAAddsAddressToPD", 140*time.Second) {
@@ -81,11 +88,45 @@ func TestDaemonDHCP6RAAddsAddressToPD(t *testing.T) {
 	wan := healthPBRCapture(t, "wire0")
 	lan := healthPBRCapture(t, "lan0")
 	bridge := "wan0"
-	doc := config.Native{Network: network.Desired{Links: []network.Link{{Name: bridge, Kind: "bridge"}}, Interfaces: []network.Interface{{Name: "wire0", Master: &bridge}, {Name: "dup0", Master: &bridge}, {Name: "wan0"}, {Name: "lan0"}}, Forwarding: network.Forwarding{IPv6: new(true)}}, Services: []serviceconfig.Service{
-		{Name: "lan-info", DHCP6Server: &serviceconfig.DHCP6Server{Interface: "lan0", DNSFrom: []string{"wan"}, SNTPFrom: []string{"wan"}, SearchFrom: []string{"wan"}, DomainSearch: []string{"local.test"}}},
-		{Name: "wan-ra", RAClient: &serviceconfig.RAClient{Interface: "wan0", SLAAC: new(false)}},
-		{Name: "wan", DHCP6: &serviceconfig.DHCP6{Interface: "wan0", RAFrom: "wan-ra", IAID: 7, RequestPrefix: true, RequestAddress: true, PrefixLength: 60, Delegations: []serviceconfig.Delegation{{Name: "lan", Interface: "lan0", Advertise: true, OtherConfig: true}}}},
-	}}
+	work := t.TempDir()
+	sourcePath, policyPath := filepath.Join(work, "legacy.yaml"), filepath.Join(work, "policy.yaml")
+	if err := os.WriteFile(sourcePath, legacyDHCP6PD, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(policyPath, legacyDHCP6PDPolicy, 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctxMigrate, cancelMigrate := context.WithTimeout(context.Background(), 5*time.Second)
+	cmd := exec.CommandContext(ctxMigrate, filepath.Join(os.Getenv("ROUTERD2_TEST_BIN_DIR"), "routerd"), "config", "migrate", "--policy", policyPath, sourcePath)
+	var review bytes.Buffer
+	cmd.Stderr = &review
+	migrated, err := cmd.Output()
+	cancelMigrate()
+	if err != nil {
+		t.Fatal(err, review.String())
+	}
+	var imported config.Document
+	if err := config.Decode(bytes.NewReader(migrated), &imported); err != nil {
+		t.Fatal(err)
+	}
+	compiled, err := config.Compile(imported)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := compiled.Native
+	// The imported graph owns PD, LAN serving and advertisements. Add only
+	// the fixture's duplicate-host bridge and explicit native RA/IA_NA scenario.
+	doc.Network.Links = append(doc.Network.Links, network.Link{Name: bridge, Kind: "bridge"})
+	doc.Network.Interfaces = append(doc.Network.Interfaces, network.Interface{Name: "wire0", Master: &bridge}, network.Interface{Name: "dup0", Master: &bridge})
+	var wanName string
+	var wanIAID uint32
+	for _, service := range doc.Services {
+		if service.DHCP6 != nil {
+			wanName, wanIAID = service.ModuleName(), service.DHCP6.IAID
+			service.DHCP6.RAFrom, service.DHCP6.RequestAddress = "wan-ra", true
+		}
+	}
+	doc.Services = append(doc.Services, serviceconfig.Service{Name: "wan-ra", RAClient: &serviceconfig.RAClient{Interface: "wan0", SLAAC: new(false)}})
 	f := startFixtureDaemon(t, config.FromNative(doc))
 	until(t, 5*time.Second, func() bool {
 		ready := false
@@ -105,7 +146,6 @@ func TestDaemonDHCP6RAAddsAddressToPD(t *testing.T) {
 		}
 		return ready
 	})
-	work := t.TempDir()
 	start := func(name, executable string, args ...string) *exec.Cmd {
 		t.Helper()
 		log, err := os.Create(filepath.Join(work, name+".log"))
@@ -160,7 +200,7 @@ func TestDaemonDHCP6RAAddsAddressToPD(t *testing.T) {
 	var state runtimeplan.InstanceStatus
 	read := func() dhcp6config.Snapshot {
 		t.Helper()
-		if err := f.control.Do(ctx, "GET", "/v1/services/service.wan", nil, &state); err != nil {
+		if err := f.control.Do(ctx, "GET", "/v1/services/"+wanName, nil, &state); err != nil {
 			t.Fatal(err)
 		}
 		var s dhcp6config.Snapshot
@@ -333,7 +373,7 @@ func TestDaemonDHCP6RAAddsAddressToPD(t *testing.T) {
 	}
 	until(t, 8*time.Second, func() bool {
 		var flags dhcp6config.RouterFlags
-		if err := f.control.Do(ctx, "GET", "/v1/services/service.wan/dhcp6-input", nil, &flags); err != nil {
+		if err := f.control.Do(ctx, "GET", "/v1/services/"+wanName+"/dhcp6-input", nil, &flags); err != nil {
 			t.Fatal(err)
 		}
 		return !flags.Managed
@@ -343,7 +383,7 @@ func TestDaemonDHCP6RAAddsAddressToPD(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, m := range modules.Modules {
-		if m.Name == "service.wan" {
+		if m.Name == wanName {
 			if err := unix.Kill(m.PID, unix.SIGKILL); err != nil {
 				t.Fatal(err)
 			}
@@ -381,7 +421,7 @@ func TestDaemonDHCP6RAAddsAddressToPD(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, o := range opts {
-			if (o.code == 3 || o.code == 25) && len(o.value) >= 12 && binary.BigEndian.Uint32(o.value) == 7 {
+			if (o.code == 3 || o.code == 25) && len(o.value) >= 12 && binary.BigEndian.Uint32(o.value) == wanIAID {
 				na, pd = na || o.code == 3, pd || o.code == 25
 			}
 		}
@@ -458,10 +498,23 @@ func TestDaemonDHCP6RAAddsAddressToPD(t *testing.T) {
 	traffic()
 	information()
 	lan.mu.Lock()
-	learnedSNTP, otherConfig := false, false
+	learnedSNTP, otherConfig, rdnss, dnssl := false, false, false, false
 	for _, p := range lan.packets {
 		b := p.data
 		otherConfig = otherConfig || len(b) >= 70 && b[20] == 58 && b[54] == 134 && b[59]&0x40 != 0
+		if len(b) >= 70 && b[20] == 58 && b[54] == 134 {
+			for at := 70; at+2 <= len(b); {
+				n := int(b[at+1]) * 8
+				if n == 0 || at+n > len(b) {
+					break
+				}
+				if n >= 8 && binary.BigEndian.Uint32(b[at+4:]) > 0 && binary.BigEndian.Uint32(b[at+4:]) <= 30 {
+					rdnss = rdnss || b[at] == 25 && bytes.Contains(b[at+8:at+n], netip.MustParseAddr("2001:db8:42::1").AsSlice())
+					dnssl = dnssl || b[at] == 31 && bytes.Contains(b[at+8:at+n], []byte("\x03wan\x04test\x00"))
+				}
+				at += n
+			}
+		}
 		if len(b) < 66 || b[20] != 17 || binary.BigEndian.Uint16(b[54:]) != 547 || binary.BigEndian.Uint16(b[56:]) != 546 || b[62] != 7 {
 			continue
 		}
@@ -475,8 +528,8 @@ func TestDaemonDHCP6RAAddsAddressToPD(t *testing.T) {
 		}
 	}
 	lan.mu.Unlock()
-	if !learnedSNTP || !otherConfig {
-		t.Fatal("missing learned SNTP or configured RA O flag", learnedSNTP, otherConfig)
+	if !learnedSNTP || !otherConfig || !rdnss || !dnssl {
+		t.Fatal("missing imported DHCPv6/RA information or original DNS budgets", learnedSNTP, otherConfig, rdnss, dnssl)
 	}
 	// An explicit client identity is trial intent; reverting it must not
 	// adopt that trial's checkpoint identity as the new automatic default.

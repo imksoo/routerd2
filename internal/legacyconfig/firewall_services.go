@@ -3,6 +3,7 @@
 package legacyconfig
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/imksoo/routerd/pkg/api"
@@ -44,11 +45,21 @@ func (c *compiler) firewallServices() {
 			zones[ref] = r
 		}
 	}
-	pending := map[string]bool{}
-	for _, r := range c.resourcesOfKind("DHCPv4Server") {
-		s := r.Spec.(api.DHCPv4ServerSpec)
+	pending := map[string][]network.PortRange{}
+	for _, r := range c.resources {
+		var iface string
+		var listen []string
+		var port int
+		switch s := r.Spec.(type) {
+		case api.DHCPv4ServerSpec:
+			iface, listen, port = s.Interface, s.ListenInterfaces, 67
+		case api.DHCPv6ServerSpec:
+			iface, listen, port = s.Interface, s.ListenInterfaces, 547
+		default:
+			continue
+		}
 		seen := map[string]bool{}
-		for _, ref := range append([]string{s.Interface}, s.ListenInterfaces...) {
+		for _, ref := range append([]string{iface}, listen...) {
 			ref = strings.TrimSpace(ref)
 			if ref == "" || seen[ref] {
 				continue
@@ -59,15 +70,24 @@ func (c *compiler) firewallServices() {
 				continue
 			}
 			for _, ifname := range c.firewallServiceInterfaces(r, zone, ref) {
-				pending[ifname] = true
+				present := false
+				for _, old := range pending[ifname] {
+					present = present || old.Start == port
+				}
+				if !present {
+					pending[ifname] = append(pending[ifname], network.PortRange{Start: port})
+				}
 			}
 		}
-		c.note(r, "Preserves the original dual-family UDP/67 INPUT exception before untrust ACLs when the hole index resolves an interface; trust/mgmt ACLs remain authoritative. Empty-interface legacy holes do not create new accepts.")
+		c.note(r, "Preserves the original dual-family UDP/"+strconv.Itoa(port)+" INPUT exception before untrust ACLs when the hole index resolves an interface; trust/mgmt ACLs remain authoritative. Empty-interface legacy holes do not create new accepts.")
 	}
 	if len(pending) == 0 {
 		return
 	}
-	count := len(pending)
+	count := 0
+	for _, ports := range pending {
+		count += len(ports)
+	}
 	for _, chain := range []*network.FirewallChain{f.Input, f.Output, f.ForwardChain} {
 		if chain != nil {
 			for _, rule := range chain.Rules {
@@ -83,8 +103,8 @@ func (c *compiler) firewallServices() {
 	for i, rule := range f.Input.Rules {
 		// Keep the original global loopback and ICMPv6 rules first. Each
 		// disjoint zone interface gets its exception before its first ACL.
-		if i >= 2 && pending[rule.Match.InInterface] {
-			rules = append(rules, network.FirewallRule{Match: network.PacketMatch{InInterface: rule.Match.InInterface, Protocol: "udp", DestinationPorts: []network.PortRange{{Start: 67}}}, Action: "accept"})
+		if ports := pending[rule.Match.InInterface]; i >= 2 && len(ports) != 0 {
+			rules = append(rules, network.FirewallRule{Match: network.PacketMatch{InInterface: rule.Match.InInterface, Protocol: "udp", DestinationPorts: ports}, Action: "accept"})
 			delete(pending, rule.Match.InInterface)
 		}
 		rules = append(rules, rule)

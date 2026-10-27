@@ -943,6 +943,13 @@ host suffixもmanaged bindingへ変換する。native address maskは/64で、�
 
 #### NET-06 — LAN・DHCPv6・relay・DNS の resource 完全化
 
+2026-10-27 native-40: 旧stateless serverのCLI importでPD割当とRA寿命を明示し、情報配布とRA/O、
+untrust UDP/547例外を生成した。独立dnsmasqのRAでDNS/検索配布と未指定DNSの扱いを確認し、
+RA RDNSS/DNSSLの個別学習と元期限も接続した。製品CLI出力→実daemon→ISC/radvd/BusyBox/Linuxで
+ACL付きLANのSLAAC、情報、TCP/UDP/DNS、DAD、失効/復旧、DUID/option confirmed rollbackが通った。
+custom lease/RA、別providerの暗黙RA DNS、条件付きHAを含む旧全設定のimportは未完了。
+実上流/対象NICも未受入。対応外をprefixだけの成功にしない。
+
 2026-10-27 native-39: 旧routerdの実dnsmasq構築経路を参照し、一括`options_from`を削除した。
 `dns_from`・`sntp_from`・`search_from`で個別に選び、元期限と指定順を保持する。
 独立ISC/radvd/BusyBoxの実Replyで、PD DNSとRA検索ドメインを選び、不要なPD SNTP/検索値を

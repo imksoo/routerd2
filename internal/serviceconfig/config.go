@@ -89,7 +89,8 @@ type Delegation struct {
 	RouterLifetimeSeconds *int     `json:"router_lifetime_seconds,omitempty"`
 	RDNSS                 []string `json:"rdnss,omitempty"`
 	DNSSL                 []string `json:"dnssl,omitempty"`
-	UseLearnedDNS         bool     `json:"use_learned_dns,omitempty"`
+	UseLearnedRDNSS       bool     `json:"use_learned_rdnss,omitempty"`
+	UseLearnedDNSSL       bool     `json:"use_learned_dnssl,omitempty"`
 }
 
 // Instance is the immutable private configuration received by a child. Its

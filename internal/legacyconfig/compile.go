@@ -147,7 +147,7 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 			c.reject(r, "", "unsupported_semantics", "legacy VXLAN FDB peers, L2 filtering and outer-DF defaults require explicit native conversion; a single remote is not a lossless substitute")
 		case "DNSResolver", "DNSForwarder", "DNSUpstream", "DNSZone":
 			// Compiled together below so graph references are checked.
-		case "DHCPv4Server", "DHCPv4Reservation", "DHCPv4Relay":
+		case "DHCPv4Server", "DHCPv4Reservation", "DHCPv4Relay", "DHCPv6Server":
 			// Compile the complete static server/reservation graph before DNS.
 		case "Interface", "Link", "VRF", "Bridge", "Sysctl", "IPv4StaticAddress",
 			"WireGuardInterface", "WireGuardPeer",
@@ -157,6 +157,7 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 			c.reject(r, "", "unsupported_kind", "no native migration is implemented for this resource kind; the resource was not discarded")
 		}
 	}
+	c.dhcp6Servers()
 	c.dhcpServers()
 	c.dhcpRelays()
 	c.dns()

@@ -30,8 +30,8 @@ merge services.
 
 `Compile` never guesses a host network manager's RA defaults or silently adopts
 the new AFTR or DHCP-derived DNS lifetime contracts. `CompileWithOptions` permits
-**explicit replacement intent** for individual `IPv6RAAddress`, `DSLiteTunnel`
-and DHCP-consuming `DNSResolver` resources. Each such mapping says which behavior
+**explicit replacement intent** for individual `IPv6RAAddress`, `DSLiteTunnel`,
+DHCP-consuming `DNSResolver`, and stateless `DHCPv6Server` resources. Each such mapping says which behavior
 changes; a successful replacement is not a claim of
 automatic semantic parity. There is no global permissive mode. Policy cannot
 discard an unsupported field, resource, HA condition or ownership requirement.
@@ -50,6 +50,56 @@ adopts live resources from the old daemon.
 
 The CLI entry point is `routerd config migrate [--policy FILE] FILE`. It emits native YAML on
 success. Code that also needs the mapping report should use `Compile`.
+
+## Stateless DHCPv6 and delegated LAN RA
+
+The active routerd chain enables dnsmasq RA together with its stateless DHCPv6
+range. Importing only UDP/547 would lose SLAAC and DNS for RA-only clients.
+The explicit policy replaces the interface-prefix constructor and unbounded
+retained information with one managed PD allocation and original lease/option
+budgets. Static values remain independent when learned information expires;
+missing information no longer stops all serving. This is deliberate native
+replacement behavior, not byte-for-byte dnsmasq parity.
+
+```yaml
+schema_version: 1
+dhcp6_servers:
+  DHCPv6Server/lan-info:
+    delegated_address: IPv6DelegatedAddress/lan-address
+    router_lifetime_seconds: 30
+```
+
+The reference must select the serving interface's compiled allocation. A declared
+`delegatedAddress` or `defaultRoute` must agree with it. Delegated-address
+`sendRA`/`announce` declarations require this explicit selecting policy; the
+selected RA implements that intent. Router lifetime must be
+zero or 10..9000 seconds. PIO and learned DNS lifetimes retain their original
+PD/information deadlines; `leaseTime` overrides are not imported. Static
+`dnsServers`, `sntpServers`, `domainSearch` and exact PD/Information
+`dnsServerFrom`, `sntpServerFrom`, `domainSearchFrom` are converted. RA DNS/search
+references must use this selected PD; native serving can independently select
+other providers, but the old implicit RA conversion does not invent that graph.
+No DNS declaration means no learned RDNSS, while search and SNTP remain usable.
+Server DUID is a new persistent native identity; old dnsmasq state is not adopted.
+
+The shared synthetic fixture runs through the actual product CLI:
+
+```sh
+dist/bin/routerd config migrate \
+  --policy internal/integration/testdata/dhcp6-pd-import-policy.yaml \
+  internal/integration/testdata/dhcp6-pd-import.yaml > /tmp/imported-router.yaml
+dist/bin/routerd config plan /tmp/imported-router.yaml
+make check-dhcp6-ra-pd DHCP6_SERVER=/path/to/isc/dhcpd RELEASE_ID=dhcp6-import
+```
+
+The real communication fixture applies that CLI result, adds only its bridge/
+duplicate-host wiring and the explicit native RA-triggered IA_NA scenario, then
+uses independent ISC/radvd/BusyBox and a Linux SLAAC client. Its LAN INPUT ACL
+drops all other traffic to self: UDP/547 is the migrated service exception.
+It checks actual RA RDNSS/DNSSL and finite DNS lifetimes, DHCPv6 options,
+TCP/UDP and DNS, expiry/recovery and confirmed rollback. The source fixture's
+IAID is preserved in packet assertions. Conditional HA, stateful/both/RA-only
+serving, custom lease/RA settings and full deployed-router import remain open.
 
 ## Implemented conversions
 
@@ -70,8 +120,9 @@ success. Code that also needs the mapping report should use `Compile`.
 | `DHCPv4Relay` | Explicit `interfaces` and numeric IPv4 `upstream` become one native relay service. Each client interface requires one unconditional owned static IPv4 address for `giaddr`. Multiple relay declarations retain per-interface upstream sets. Conditional/dynamic source selection and ambiguous legacy VRF binding remain unsupported. |
 | `DHCPv6PrefixDelegation` | Native IA_PD service, pinned DUID-LL/IAID 1 defaults, explicit DUID, provider profile and prefix-length preference. Explicit external clients and required-prefix readiness semantics are rejected. |
 | `DHCPv6Information` with one matching PD | An alias of that PD service, sharing its DUID/IAID, UDP 546 socket and supplementary Information-Request. The original **literal interface reference** must match exactly; merely resolving two different aliases to the same NIC does not reproduce the old association. Standalone, ambiguous and nonempty `request` declarations are rejected. |
+| `DHCPv6Server` in stateless mode | Explicit `dhcp6_servers` policy selects one compiled PD LAN allocation and router lifetime. Imports static DNS/SNTP/search and PD/information references, generates RA with O plus independently selected RDNSS/DNSSL, and preserves the original untrust UDP/547 INPUT exception. The RA DNS sources must be the selected PD; unsupported fields and HA conditions reject the entire input. |
 | `IPv6RAAddress` with explicit policy | One native `ra_client`, using the policy's same-interface SLAAC/default-route/on-link/RIO/DNS flags, source/IID/router filters and explicit route table/metric. Requires managed RA, independently managed/admin-up underlay, and `required: false`. Host defaults and learned state are not imported. |
-| `IPv6DelegatedAddress` | A /64 allocation under its PD service, retaining the suffix and **hexadecimal** subnet ID. In the old schema, `subnetID: "10"` means hexadecimal 0x10, not decimal 10. IDs must fit within the provider prefix. /128 installation, zero host ID and implicit advertisement flags are rejected. |
+| `IPv6DelegatedAddress` | A /64 allocation under its PD service, retaining the suffix and **hexadecimal** subnet ID. In the old schema, `subnetID: "10"` means hexadecimal 0x10, not decimal 10. IDs must fit within the provider prefix. /128 installation and zero host ID are rejected. Advertisement declarations require a `dhcp6_servers` policy selecting this allocation. |
 | `DSLiteTunnel` | Fixed outer IPv6 endpoints, inner IPv4 /32 **peer 192.0.0.1/32**, explicit tunnel identity, no encapsulation-limit option and original fixed default MTU of **1460**. The default inner address is 192.0.0.2. `localAddressFrom` means the **inner IPv4** source in the pinned controller, not the outer IPv6 endpoint. |
 | `DSLiteTunnel` with explicit policy | One native `ds_lite` service, preserving candidate precedence and B4/MTU identity while explicitly changing DNS bootstrap, source ownership/selection and endpoint expiry. Accepts an owned static IPv6 source or the policy's compiled RA source. Information references map to their existing PD service. One independently declared IPv4 default route can join the dynamic tunnel's lifetime owner. PD-derived/HA/suffix sources remain rejected. |
 | `DNSResolver` + `DNSForwarder` + `DNSUpstream` + `DNSZone` | Resolves the static resource graph into native DNS runtime intent. Preserves source order, listener selection, transport/TLS identity, bootstrap servers, interface binding, cache/timeouts/health checks, query-log enablement, zones and static records/reverse zones. Statically known address references are resolved; learned/delegated references are rejected. DHCP-derived zones require successfully migrated DHCP producers and an explicit per-resolver `dhcp_dns` replacement policy. |
@@ -440,7 +491,7 @@ kernel log events and do not imply NFLOG sampling or old log-retention behavior.
   election-owned VMACs require an explicit peer-aware transition. Authentication,
   unicast peers, tracking, graceful activation and additional failover VMACs are
   not erased.
-- VXLAN FDB peers, L2 filtering, outer-DF defaults, PPPoE, DHCPv6 servers/relays
+- VXLAN FDB peers, L2 filtering, outer-DF defaults, PPPoE, stateful/both/RA-only DHCPv6 servers, DHCPv6 relays
   and unsupported DHCPv4 server modes, dynamic route protocols, other
   tunnel/VPN types, cluster synchronization, plugins,
   cloud/federation/mobility resources, logging/retention/system services and

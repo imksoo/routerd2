@@ -34,4 +34,5 @@ resources:
             host_id: 1
             advertise: true
             router_lifetime_seconds: 1800
-            use_learned_dns: true
+            use_learned_rdnss: true
+            use_learned_dnssl: true

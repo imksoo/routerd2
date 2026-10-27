@@ -25,6 +25,15 @@ type Options struct {
 	RAClients     map[string]serviceconfig.RAClient `json:"ra_clients,omitempty"`
 	DSLite        map[string]DSLitePolicy           `json:"ds_lite,omitempty"`
 	DHCPDNS       map[string]DHCPDNSPolicy          `json:"dhcp_dns,omitempty"`
+	DHCP6Servers  map[string]DHCP6ServerPolicy      `json:"dhcp6_servers,omitempty"`
+}
+
+// DHCP6ServerPolicy replaces dnsmasq's implicit interface-prefix constructor
+// and retained options with an explicitly selected PD allocation and bounded
+// native information. It does not override the legacy advertised values.
+type DHCP6ServerPolicy struct {
+	DelegatedAddress      string `json:"delegated_address"`
+	RouterLifetimeSeconds *int   `json:"router_lifetime_seconds"`
 }
 
 // DHCPDNSPolicy explicitly replaces the old resolver's global lease-event and
@@ -128,7 +137,7 @@ func validateOptionsShape(d *decoder, options Options, explicit bool) {
 	if explicit && options.SchemaVersion != OptionsSchemaVersion {
 		d.issue(nil, "$policy.schema_version", "policy_version", "migration policy schema_version must be 1")
 	}
-	if len(options.RAClients)+len(options.DSLite)+len(options.DHCPDNS) > 4096 {
+	if len(options.RAClients)+len(options.DSLite)+len(options.DHCPDNS)+len(options.DHCP6Servers) > 4096 {
 		d.issue(nil, "$policy", "policy_limit", "migration policy accepts at most 4096 resource entries")
 	}
 }
@@ -136,11 +145,11 @@ func validateOptionsShape(d *decoder, options Options, explicit bool) {
 func (c *compiler) initOptions(options Options, explicit bool) {
 	validateOptionsShape(c.decoder, options, explicit)
 	c.policyPaths, c.policyUsed = map[string]string{}, map[string]bool{}
-	if len(options.RAClients)+len(options.DSLite)+len(options.DHCPDNS) > 4096 {
+	if len(options.RAClients)+len(options.DSLite)+len(options.DHCPDNS)+len(options.DHCP6Servers) > 4096 {
 		return
 	}
 	// Do not let a caller's later edit mutate a successfully compiled document.
-	c.options = Options{SchemaVersion: options.SchemaVersion, RAClients: map[string]serviceconfig.RAClient{}, DSLite: map[string]DSLitePolicy{}, DHCPDNS: map[string]DHCPDNSPolicy{}}
+	c.options = Options{SchemaVersion: options.SchemaVersion, RAClients: map[string]serviceconfig.RAClient{}, DSLite: map[string]DSLitePolicy{}, DHCPDNS: map[string]DHCPDNSPolicy{}, DHCP6Servers: map[string]DHCP6ServerPolicy{}}
 	for key, value := range options.RAClients {
 		value.SLAAC, value.DefaultRoute = copyBool(value.SLAAC), copyBool(value.DefaultRoute)
 		value.OnLink, value.RouteInformation = copyBool(value.OnLink), copyBool(value.RouteInformation)
@@ -156,6 +165,13 @@ func (c *compiler) initOptions(options Options, explicit bool) {
 	for key, value := range options.DHCPDNS {
 		value.SourceScopedFiniteLeases = copyBool(value.SourceScopedFiniteLeases)
 		c.options.DHCPDNS[key] = value
+	}
+	for key, value := range options.DHCP6Servers {
+		if value.RouterLifetimeSeconds != nil {
+			lifetime := *value.RouterLifetimeSeconds
+			value.RouterLifetimeSeconds = &lifetime
+		}
+		c.options.DHCP6Servers[key] = value
 	}
 	check := func(section, kind string, keys []string) {
 		sort.Strings(keys)
@@ -185,6 +201,11 @@ func (c *compiler) initOptions(options Options, explicit bool) {
 		keys = append(keys, key)
 	}
 	check("dhcp_dns", "DNSResolver", keys)
+	keys = make([]string, 0, len(options.DHCP6Servers))
+	for key := range options.DHCP6Servers {
+		keys = append(keys, key)
+	}
+	check("dhcp6_servers", "DHCPv6Server", keys)
 }
 
 func copyBool(value *bool) *bool {

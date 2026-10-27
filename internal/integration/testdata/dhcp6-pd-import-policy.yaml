@@ -1,0 +1,5 @@
+schema_version: 1
+dhcp6_servers:
+  DHCPv6Server/lan-info:
+    delegated_address: IPv6DelegatedAddress/lan-address
+    router_lifetime_seconds: 30

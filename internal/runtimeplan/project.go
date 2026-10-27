@@ -240,8 +240,8 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 				c := protocols.lanRA[module]
 				c.Prefixes = prefixes
 				c.Authority, _ = snap.LeaseUntil()
-				if lan.UseLearnedDNS {
-					if until, usable := snap.InformationUntil(facts.bfdClock); usable {
+				if until, usable := snap.InformationUntil(facts.bfdClock); usable {
+					if lan.UseLearnedRDNSS {
 						for _, server := range unique(snap.DNSServers) {
 							address, _ := netip.ParseAddr(server)
 							if address.IsLinkLocalUnicast() && lan.Interface != s.Interface() {
@@ -249,6 +249,8 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 							}
 							c.LearnedRDNSS = append(c.LearnedRDNSS, ra.DNSServer{Address: server, ValidUntil: until})
 						}
+					}
+					if lan.UseLearnedDNSSL {
 						for _, name := range unique(snap.DomainSearch) {
 							c.LearnedDNSSL = append(c.LearnedDNSSL, ra.SearchDomain{Domain: name, ValidUntil: until})
 						}

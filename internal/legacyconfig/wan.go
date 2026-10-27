@@ -138,7 +138,13 @@ func (c *compiler) delegation(r resource) {
 		c.reject(r, "prefixLength", "unsupported_semantics", "native delegated address intent allocates /64; /128 and other installed masks are not interchangeable")
 	}
 	if s.SendRA || s.Announce {
-		c.reject(r, "sendRA", "unsupported_semantics", "legacy implicit RA/dnsmasq constructor behavior requires explicit native router, prefix and DNS lifetime choices")
+		selected := false
+		for _, policy := range c.options.DHCP6Servers {
+			selected = selected || policy.DelegatedAddress == r.Kind+"/"+r.Metadata.Name
+		}
+		if !selected {
+			c.reject(r, "sendRA", "unsupported_semantics", "RA declaration requires a stateless server policy selecting this allocation and its native lifetime intent")
+		}
 	}
 	ref := c.getRef(r, "prefixDelegation", s.PrefixDelegation, "DHCPv6PrefixDelegation")
 	if ref == nil {

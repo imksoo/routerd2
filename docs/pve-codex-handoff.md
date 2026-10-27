@@ -5,7 +5,47 @@
 [機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を参照する。
 実行順序はhomert02/03、実態を確認したk8s-rt/pve-rt、その後既存文書に基づくCloud SAM。
 
-## 現在の変更: dhcp6-option-sources / native-39
+## 現在の変更: dhcp6-import / native-40
+
+旧routerdの`chain.go`の実dnsmasq構築/待機経路と`firewall_holes.go`を読み、
+PD LANのstateless `DHCPv6Server`をCLI importへ接続した。`dhcp6_servers` policyで
+`IPv6DelegatedAddress/名前`とrouter lifetimeを明示し、同じ割当のRA/Oと情報serverを生成する。
+静的DNS/SNTP/検索値とPD/Information参照を別保持し、追加MAC/host状態/古いleaseは取り込まない。
+既存のuntrust INPUT例外はUDP/67に加えUDP/547を変換し、他のACLを維持する。
+
+独立dnsmasq2.90の隔離vethで実RAをcaptureし、宣言したDHCPv6 DNS/検索値をRDNSS/DNSSLにも
+配ることを確認した。port0および旧chainのport1053で、DNS未指定ならRDNSS無しも確認した。
+この知見からRA DNSの取りこぼしを修正し、未指定DNSを理由とする拒否は追加しない。
+native PDの一括`use_learned_dns`を撤去し、`use_learned_rdnss`/`use_learned_dnssl`へ分けた。
+importでは静的RA DNSと、選択したPDからの各学習項目を接続し、元の情報期限で送る。
+別PD由来の暗黙RA DNS、custom lease/RA設定、stateful/both/RA-onlyと条件付きHAの旧入力は未対応。
+これらは入力全体を拒否し、prefixだけの部分設定を返さない。nativeでの条件付き配布とは区別する。
+選択した割当の`sendRA`/`announce`は明示policyで接続し、policy無しの暗黙RAは引き続き取り込まない。
+compiler native-40、worker ABI5、network journal11、DHCPv6 checkpoint2。prototype readerは追加しない。
+
+PVE Linux6.8/amd64の隔離環境で、製品の`routerd config migrate --policy ...`の出力を実daemonへ適用した。
+fixture固有のbridge/重複端末配線とnative RA-trigger/IA_NAを加え、独立ISC4.4.3-P1/radvd2.19/
+BusyBox/Linux SLAAC端末でPD→LAN RA、情報取得、TCP/UDP・UDP/TCP DNS、DAD/DeclineとPD共存、
+worker SIGKILL、元期限失効/復旧、DUIDとoption-sourceの5秒confirmed rollbackが通った。
+LANからselfを拒否するACLでも、変換したUDP/547例外から実clientが取得した。
+実RAはRDNSS/DNSSLと30秒以下の元DNS予算を示した。IAID判定は旧fixtureの固定7ではなく
+実際に取り込んだ意図と照合する。最初の固定値による試験失敗は製品の不具合とは数えない。
+既存の実PD/RA期限試験もnative-40で通り、静的値保持・元RDNSS/PIO期限・停止control/producerと
+writer単独撤去・古い通知・更新/再取得を確認した。
+
+再実行は`make check-dhcp6-ra-pd DHCP6_SERVER=/path/to/isc/dhcpd RELEASE_ID=dhcp6-import`と
+`make check-pd-ra RELEASE_ID=dhcp6-import`。
+[手順と対応範囲](../internal/legacyconfig/README.md#stateless-dhcpv6-and-delegated-lan-ra)を参照する。
+最終の全体`make check`（Go/Python・Race Detector・vet）、CGO_ENABLED=0 amd64/arm64静的buildと
+6 ELFの署名catalog/publisher/stageが通った。ARM64では実行していない。最終CLIはDNS指定あり・無しの
+両方で変換とnative planを通し、未指定DNSが独立した検索情報を消さないことを確認した。
+最終の`sendRA`/`announce`を含むCLI→実worker試験、関連package/CLIのRace/vet、
+6静的ELFの再buildと最終署名検証も通った。
+
+実際のhomert全設定の変換、未対応server/RA契約、広いHA partition/fencing、
+無応答だった実上流の切り分け・対象NIC受入と全34 packageの残作業は継続する。
+
+## 前回の変更: dhcp6-option-sources / native-39
 
 旧routerdの稼働経路`pkg/controller/chain/chain.go`の`writeDnsmasqConfig`/
 `dhcpv6ServerPending`を読んだ。各optionの取得元を個別に指定する意図を、従来の一括
