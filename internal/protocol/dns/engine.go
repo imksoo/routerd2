@@ -138,14 +138,12 @@ func buildRuntimeSources(config dnsresolver.RuntimeConfig) ([]runtimeSource, err
 			timeout, _ := time.ParseDuration(firstNonEmpty(source.Healthcheck.Timeout, "3s"))
 			queryTimeout, _ := time.ParseDuration(firstNonEmpty(source.QueryTimeout, source.Healthcheck.Timeout, "3s"))
 			interval, _ := time.ParseDuration(firstNonEmpty(source.Healthcheck.Interval, "15s"))
-			pool, err := newUpstreamPool(source.Upstreams, upstreamPoolConfig{
-				ProbeInterval:     interval,
-				ProbeTimeout:      timeout,
-				QueryTimeout:      queryTimeout,
-				FailThreshold:     source.Healthcheck.FailThreshold,
-				PassThreshold:     source.Healthcheck.PassThreshold,
-				ViaInterface:      source.ViaInterface,
-				BootstrapResolver: source.BootstrapResolver,
+			pool, err := newUpstreamPool(source, upstreamPoolConfig{
+				ProbeInterval: interval,
+				ProbeTimeout:  timeout,
+				QueryTimeout:  queryTimeout,
+				FailThreshold: source.Healthcheck.FailThreshold,
+				PassThreshold: source.Healthcheck.PassThreshold,
 			})
 			if err != nil {
 				return nil, err
@@ -731,14 +729,16 @@ func (d *daemon) observedStatus() map[string]string {
 	} else {
 		observed["queryLogEnabled"] = "false"
 	}
-	var parts []string
+	var parts, bootstrap []string
 	for _, source := range sources {
 		if source.Pool != nil {
 			parts = append(parts, source.Spec.Name+"="+source.Pool.Summary())
+			bootstrap = append(bootstrap, source.Spec.Name+"="+source.Pool.bootstrapSummary())
 		}
 	}
 	if len(parts) > 0 {
 		observed["upstreams"] = strings.Join(parts, ";")
+		observed["bootstrapResolvers"] = strings.Join(bootstrap, ";")
 	}
 	return observed
 }

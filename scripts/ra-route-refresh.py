@@ -169,6 +169,29 @@ def peer(stage):
             },
         },
     ]
+    resources[-1]["service"]["dns"]["spec"]["sources"].append(
+        {
+            "name": "boot",
+            "kind": "forward",
+            "match": ["boot.example"],
+            "queryTimeout": "1s",
+            "upstreams": ["udp://upstream.router.test:53"],
+            "bootstrapResolverFrom": [{"resource": "IPv6RAAddress/wan-ra"}],
+        }
+    )
+    for name, providers in [
+        ("first4", ["DHCPv4Client/wan4", "IPv6RAAddress/wan-ra"]),
+        ("first6", ["IPv6RAAddress/wan-ra", "DHCPv4Client/wan4"]),
+    ]:
+        resources[-1]["service"]["dns"]["spec"]["sources"].append(
+            {
+                "name": name,
+                "kind": "forward",
+                "match": [name + ".example"],
+                "queryTimeout": "1s",
+                "upstreamFrom": [{"resource": provider} for provider in providers],
+            }
+        )
     (stage / "config.json").write_text(
         json.dumps({"schema_version": 2, "resources": resources})
     )
@@ -318,6 +341,7 @@ def peer(stage):
                 "--bind-interfaces",
                 "--interface=server0",
                 "--address=/#/198.51.100.77",
+                "--address=/upstream.router.test/192.0.2.1",
                 "--local-ttl=0",
             ],
             "dns",
@@ -381,7 +405,7 @@ def peer(stage):
 
         wait(
             lambda: {u["source"] for u in dns_input()["upstreams"]}
-            == {"ra", "v4", "v6"}
+            == {"ra", "v4", "v6", "first4", "first6"}
         )
 
         def dns_traffic():
@@ -405,10 +429,13 @@ def peer(stage):
                     )
                 )
                 pools = status["resources"][0]["observed"].get("upstreams", "")
-                return all(name + "=0:udp://" in pools for name in ["ra", "v4", "v6"])
+                return all(
+                    name + "=0:udp://" in pools
+                    for name in ["ra", "v4", "v6", "first4", "first6"]
+                )
 
             wait(applied)
-            for source in ["ra", "v4", "v6"]:
+            for source in ["ra", "v4", "v6", "boot", "first4", "first6"]:
                 for transport in [[], ["+tcp"]]:
                     answer = run(
                         inside(
@@ -429,6 +456,14 @@ def peer(stage):
 
         dns_traffic()
         original_dns = dns_input()
+        first4 = [
+            u["address"] for u in original_dns["upstreams"] if u["source"] == "first4"
+        ]
+        first6 = [
+            u["address"] for u in original_dns["upstreams"] if u["source"] == "first6"
+        ]
+        assert first4[0] == "192.0.2.1" and "%wan0" in first6[0]
+        assert first4 == list(reversed(first6)), (first4, first6)
         assert all(
             "%wan0" in u["address"]
             for u in original_dns["upstreams"]
@@ -564,6 +599,24 @@ def peer(stage):
             )
         )
         assert "status: SERVFAIL" in response
+        bootstrap = run(
+            inside(
+                client,
+                [
+                    "dig",
+                    "@10.42.0.1",
+                    "expired.boot.example",
+                    "A",
+                    "+tries=1",
+                    "+time=3",
+                ],
+            )
+        )
+        assert "status: SERVFAIL" in bootstrap
+        print(
+            "PASS expired learned bootstrap stopped new hostname resolution without host DNS fallback",
+            flush=True,
+        )
         print(
             "PASS original RDNSS expiry stopped resolver forwarding while independent DNS stayed reachable",
             flush=True,
@@ -624,7 +677,7 @@ def peer(stage):
         )
         wait(
             lambda: {u["source"] for u in dns_input()["upstreams"]}
-            == {"ra", "v4", "v6"}
+            == {"ra", "v4", "v6", "first4", "first6"}
         )
         dns_traffic()
         print(

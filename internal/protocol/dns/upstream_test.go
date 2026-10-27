@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/imksoo/routerd/pkg/api"
 	"github.com/miekg/dns"
 
-	"github.com/imksoo/routerd/pkg/api"
 	resolvercfg "github.com/imksoo/routerd/pkg/dnsresolver"
 )
 
@@ -133,7 +133,7 @@ func TestUpstreamPoolFallsBackToSecondUpstream(t *testing.T) {
 		}
 	}()
 
-	pool, err := newUpstreamPool([]string{"udp://" + failed.LocalAddr().String(), "udp://" + ok.LocalAddr().String()}, upstreamPoolConfig{
+	pool, err := newUpstreamPool(api.DNSResolverSourceSpec{Upstreams: []string{"udp://" + failed.LocalAddr().String(), "udp://" + ok.LocalAddr().String()}}, upstreamPoolConfig{
 		ProbeInterval: time.Hour,
 		ProbeTimeout:  50 * time.Millisecond,
 		QueryTimeout:  time.Second, // Query failover, not a probe-latency qualification.

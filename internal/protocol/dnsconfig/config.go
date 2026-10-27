@@ -171,8 +171,10 @@ func ValidateRuntime(c dnsresolver.RuntimeConfig) error {
 				return err
 			}
 		}
-		if len(source.BootstrapResolverFrom) != 0 {
-			return fmt.Errorf("DNS source %q has unresolved upstream references", source.Name)
+		for _, ref := range source.BootstrapResolverFrom {
+			if _, _, err := UpstreamProvider(ref); err != nil {
+				return err
+			}
 		}
 		for _, ref := range source.ZoneRef {
 			if !zones[refName(ref)] && !zoneNames[strings.ToLower(mdns.Fqdn(ref))] {

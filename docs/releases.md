@@ -40,7 +40,7 @@ The release identity record remains V1; its format is independent of manifest
 version and the runtime ABI record envelope.
 
 The current declaration has configuration schema 2 and semantics contract
-`resource-program-native-27`. Boot ABI is 1 and worker ABI is 4. PPP observations
+`resource-program-native-28`. Boot ABI is 1 and worker ABI is 4. PPP observations
 include negotiated IPv6 link-local readiness; the writer derives finite default
 routes only for negotiated address families. DHCPv6 on non-Ethernet links
 persists DUID-UUID identities. PPP route intent stays outside the worker

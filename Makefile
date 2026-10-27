@@ -15,6 +15,10 @@ RELEASE_BUILT_DIR ?= dist/bin
 DHCP6_SERVER ?= /usr/sbin/dhcpd
 PPP_ARCH ?= $(shell $(GO) env GOARCH)
 PPP_DIR ?= dist
+UPLINK_INTERFACE ?=
+UPLINK_AFTR ?=
+UPLINK_SECONDS ?= 7800
+UPLINK_DNS_UPSTREAM ?=
 QEMU_SSH_KEY ?=
 
 LDFLAGS = -s -w -X github.com/imksoo/routerd2/internal/buildinfo.Identity=ROUTERD2-RELEASE-V1:$(RELEASE_ID):END
@@ -38,6 +42,7 @@ help:
 	  'make check-ra-client   Verify real RA, source/default-route TCP/UDP and expiry' \
 	  'make check-ra-aftr     Verify learned RA/DNS to DS-Lite LAN forwarding and expiry' \
 	  'make check-ra-route-refresh Verify routed AFTR TCP/UDP during independent RA renewal' \
+	  'make check-uplink UPLINK_INTERFACE=... UPLINK_AFTR=...  Use an explicit local uplink with a private MAC/LAN' \
 	  'make check-dhcp-relay  Verify DHCP peers, fragmentation and VRF isolation' \
 	  'make licenses          Collect dependency licenses and their manifest' \
 	  'make build             Build the native commands for the current platform' \
@@ -142,6 +147,11 @@ check-pd-ra: build
 
 check-ra-aftr: build
 	$(PYTHON) scripts/daemon-tests.py ra-aftr --go '$(GO)'
+
+.PHONY: check-uplink
+check-uplink: build
+	@test -n '$(UPLINK_INTERFACE)' -a -n '$(UPLINK_AFTR)' || { printf '%s\n' 'UPLINK_INTERFACE and UPLINK_AFTR must select the authorized local access network'; exit 1; }
+	$(PYTHON) scripts/uplink-smoke.py --uplink '$(UPLINK_INTERFACE)' --aftr '$(UPLINK_AFTR)' --seconds '$(UPLINK_SECONDS)' --dns-upstream '$(UPLINK_DNS_UPSTREAM)'
 
 .PHONY: check-ra-route-refresh
 check-ra-route-refresh: build

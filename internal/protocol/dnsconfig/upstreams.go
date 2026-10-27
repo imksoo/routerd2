@@ -35,7 +35,11 @@ func UpstreamProvider(ref api.StatusValueSourceSpec) (name, role string, err err
 
 func validateUpstreams(c RuntimeConfig, p Input, clock boottime.Clock) error {
 	allowed := map[string]bool{}
+	bootstrap := map[string]bool{}
+	upstreamCounts, bootstrapCounts := map[string]int{}, map[string]int{}
 	for _, source := range c.Spec.Sources {
+		upstreamCounts[source.Name] = len(source.Upstreams)
+		bootstrapCounts[source.Name] = len(source.BootstrapResolver)
 		for _, ref := range source.UpstreamFrom {
 			provider, _, err := UpstreamProvider(ref)
 			if err != nil {
@@ -44,24 +48,36 @@ func validateUpstreams(c RuntimeConfig, p Input, clock boottime.Clock) error {
 			allowed[source.Name+"/"+provider] = true
 		}
 	}
-	seen := map[string]bool{}
-	counts := map[string]int{}
 	for _, source := range c.Spec.Sources {
-		counts[source.Name] = len(source.Upstreams)
+		for _, ref := range source.BootstrapResolverFrom {
+			provider, _, err := UpstreamProvider(ref)
+			if err != nil {
+				return err
+			}
+			bootstrap[source.Name+"/"+provider] = true
+		}
 	}
-	if len(p.Upstreams) > 16384 {
+	if err := validateLearnedServers(bootstrap, bootstrapCounts, p.Bootstraps, clock); err != nil {
+		return err
+	}
+	return validateLearnedServers(allowed, upstreamCounts, p.Upstreams, clock)
+}
+
+func validateLearnedServers(allowed map[string]bool, counts map[string]int, servers []LearnedUpstream, clock boottime.Clock) error {
+	seen := map[string]bool{}
+	if len(servers) > 16384 {
 		return errors.New("DNS input exceeds 16384 learned endpoints")
 	}
-	for _, set := range p.Upstreams {
+	for _, set := range servers {
 		key := set.Source + "/" + set.Provider
 		endpoint := key + "/" + set.Address.String()
 		if !allowed[key] || seen[endpoint] {
-			return fmt.Errorf("DNS upstream source %s is unauthorized, duplicate or oversized", key)
+			return fmt.Errorf("DNS upstream source %s is unauthorized or duplicate", key)
 		}
 		seen[endpoint] = true
 		counts[set.Source]++
 		if counts[set.Source] > 64 {
-			return errors.New("DNS source exceeds 64 static and learned upstreams")
+			return errors.New("DNS source exceeds 64 static and learned servers")
 		}
 		if err := set.ValidUntil.Validate(); err != nil {
 			return err
@@ -79,7 +95,7 @@ func validateUpstreams(c RuntimeConfig, p Input, clock boottime.Clock) error {
 
 func NeedsInput(c RuntimeConfig) bool {
 	for _, source := range c.Spec.Sources {
-		if len(source.UpstreamFrom) != 0 {
+		if len(source.UpstreamFrom) != 0 || len(source.BootstrapResolverFrom) != 0 {
 			return true
 		}
 	}

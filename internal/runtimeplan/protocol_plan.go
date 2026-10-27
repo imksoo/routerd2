@@ -5,7 +5,6 @@ import (
 
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/protocol/bgpconfig"
-	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
 	"github.com/imksoo/routerd2/internal/protocol/ra"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
@@ -15,7 +14,7 @@ import (
 // select its workers and supply live data; they do not rebuild worker identity.
 type protocolPlan struct {
 	instances    map[string]binding
-	dns          map[string]dnsconfig.Config
+	dns          map[string]dnsPlan
 	bgp          map[string]bgpconfig.Config
 	vrrp         map[string]vrrp.Config
 	lanRA        map[string]ra.Config
@@ -28,7 +27,7 @@ type protocolPlan struct {
 func prepareProtocols(doc config.Native, runtimeDir, stateDir string) (protocolPlan, error) {
 	plan := protocolPlan{
 		instances:    make(map[string]binding),
-		dns:          make(map[string]dnsconfig.Config),
+		dns:          make(map[string]dnsPlan),
 		bgp:          make(map[string]bgpconfig.Config),
 		vrrp:         make(map[string]vrrp.Config),
 		lanRA:        make(map[string]ra.Config),
@@ -59,7 +58,11 @@ func prepareProtocols(doc config.Native, runtimeDir, stateDir string) (protocolP
 		switch {
 		case service.DNS != nil:
 			cfg := service.DNSConfig(runtimeDir, stateDir)
-			plan.dns[name] = cfg
+			prepared, prepareErr := prepareDNS(cfg.Runtime)
+			if prepareErr != nil {
+				return protocolPlan{}, prepareErr
+			}
+			plan.dns[name] = prepared
 			body, encodeErr := json.Marshal(cfg)
 			instance, err = serviceconfig.Instance{Name: name, Role: "dns", Config: body}, encodeErr
 		case service.BGP != nil:

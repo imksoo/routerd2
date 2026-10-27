@@ -73,5 +73,24 @@ DHCPv6 information and RA advertisements plus a separate DNS peer. It checks
 LAN UDP/TCP DNS, scoped link-local queries, original RDNSS expiry while the
 peer remains reachable and recovery alongside actual AFTR forwarding.
 
-Dynamic bootstrap/listen references, local DNSSEC and all remaining
+`bootstrapResolverFrom` accepts the same provider references. Its typed endpoints
+keep original deadlines and WAN scopes. Each pool retains one Go resolver for
+its lifetime and binds bootstrap traffic to `viaInterface` too. When declared
+bootstrap sources are absent/expired, new hostname lookups fail rather than
+using the host resolver. Existing HTTP/TLS connections remain ordinary transport
+connections; DNS expiry alone does not revoke them. Status exposes
+`bootstrapResolvers` separately from upstream health. The deadline-aware socket
+preserves UDP's `net.PacketConn` contract, which Go uses to select DNS framing.
+
+The coordinator prepares provider/target bindings once per configuration and
+decodes each referenced provider once per input view. Each source's provider
+order remains its own; sharing one provider does not reorder another source.
+The worker's IPC boundary validates a complete input before applying it.
+`make check-uplink UPLINK_INTERFACE=... UPLINK_AFTR=... UPLINK_SECONDS=...`
+uses a local authorized access network with a separate MAC and LAN. Set
+`UPLINK_DNS_UPSTREAM=https://cloudflare-dns.com/dns-query` to exercise learned
+bootstrap against that independent DoH implementation. This does not qualify
+physical hardware or every encrypted-DNS transport.
+
+Dynamic listen/record references, local DNSSEC and all remaining
 resource fields still require implementation and interoperability qualification.

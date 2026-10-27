@@ -821,6 +821,14 @@ host suffixもmanaged bindingへ変換する。native address maskは/64で、�
 
 #### NET-06 — LAN・DHCPv6・relay・DNS の resource 完全化
 
+2026-10-27 native-28: 学習DNSを`bootstrapResolverFrom`からhostname upstreamへ接続した。
+provider/targetの結合を設定時に準備し、観測を一度decodeしてsourceごとの順で配る。
+元期限・interface scopeを保ち、bootstrap失効時にhost DNSへ流さない。
+独立dnsmasqと実LANで解決・元期限失効・復旧、逆順のprovider選択、AFTRの30,000 UDPと同じTCPを確認した。
+実上流の新規native-28起動でも学習bootstrap→実Cloudflare DoH、LAN UDP/TCP DNS、両family HTTPS、
+実FIBとAFTR戻りcaptureを確認した。短期の相互接続であり、長時間・DoT/QUIC・VRF・実機性能は未受入。
+外部回線の手順は明示uplink/AFTRを指定する`make check-uplink`へまとめ、終了後のstateを残さない。
+
 2026-10-27 native-27: PPPに加え、DHCPv4/DHCPv6/RAの`dnsServers`をresolverへ接続した。
 一つのendpointへ元のboot期限を渡し、RAはserver別の期限とinterface scopeを保つ。
 DHCPv4はACK期限、DHCPv6は元の情報期限と割当期限の交差を使う。取得順を保ち、

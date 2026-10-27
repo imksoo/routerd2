@@ -25,6 +25,7 @@ import (
 	"github.com/miekg/dns"
 	"github.com/quic-go/quic-go"
 
+	"github.com/imksoo/routerd/pkg/api"
 	"github.com/imksoo/routerd/pkg/daemonapi"
 	resolvercfg "github.com/imksoo/routerd/pkg/dnsresolver"
 	"github.com/imksoo/routerd2/internal/boottime"
@@ -44,21 +45,23 @@ const (
 var errTruncatedUpstreamResponse = errors.New("DNS upstream response is truncated")
 
 type upstreamPoolConfig struct {
-	ProbeInterval     time.Duration
-	ProbeTimeout      time.Duration
-	QueryTimeout      time.Duration
-	FailThreshold     int
-	PassThreshold     int
-	ViaInterface      string
-	BootstrapResolver []string
-	RootCAs           *x509.CertPool // nil uses the platform trust store; injectable for protocol tests.
+	ProbeInterval time.Duration
+	ProbeTimeout  time.Duration
+	QueryTimeout  time.Duration
+	FailThreshold int
+	PassThreshold int
+	RootCAs       *x509.CertPool // nil uses the platform trust store; injectable for protocol tests.
 }
 
 type upstreamPool struct {
-	mu        sync.Mutex
-	upstreams []*dnsUpstream
-	config    upstreamPoolConfig
-	client    *http.Client
+	mu            sync.Mutex
+	upstreams     []*dnsUpstream
+	config        upstreamPoolConfig
+	client        *http.Client
+	spec          api.DNSResolverSourceSpec
+	bootstrap     []bootstrapServer
+	resolver      *net.Resolver
+	nextBootstrap atomic.Uint64
 }
 
 type dnsUpstream struct {
@@ -77,7 +80,73 @@ type dnsUpstream struct {
 	Failures    int               `json:"failures,omitempty"`
 }
 
-func newUpstreamPool(raw []string, cfg upstreamPoolConfig) (*upstreamPool, error) {
+type bootstrapServer struct {
+	Address    string
+	Provider   string
+	ValidUntil lifetime.Deadline
+}
+
+// BOOTTIME is checked after a read too: a guest can suspend while DNS IO waits.
+type bootstrapConn struct {
+	net.Conn
+	until lifetime.Deadline
+}
+
+func (c *bootstrapConn) current() error {
+	clock, err := boottime.Read()
+	if err != nil {
+		return err
+	}
+	if !c.until.Live(clock) {
+		return errors.New("DNS bootstrap observation expired")
+	}
+	return nil
+}
+
+func (c *bootstrapConn) Read(b []byte) (int, error) {
+	if err := c.current(); err != nil {
+		return 0, err
+	}
+	n, err := c.Conn.Read(b)
+	if expired := c.current(); expired != nil {
+		return 0, expired
+	}
+	return n, err
+}
+
+func (c *bootstrapConn) Write(b []byte) (int, error) {
+	if err := c.current(); err != nil {
+		return 0, err
+	}
+	return c.Conn.Write(b)
+}
+
+// net.Resolver chooses DNS datagram framing through net.PacketConn. Keep that
+// method set when bounding a UDP socket; hiding it adds a TCP length on UDP.
+type bootstrapPacketConn struct {
+	*bootstrapConn
+	packet net.PacketConn
+}
+
+func (c *bootstrapPacketConn) ReadFrom(b []byte) (int, net.Addr, error) {
+	if err := c.current(); err != nil {
+		return 0, nil, err
+	}
+	n, address, err := c.packet.ReadFrom(b)
+	if expired := c.current(); expired != nil {
+		return 0, nil, expired
+	}
+	return n, address, err
+}
+
+func (c *bootstrapPacketConn) WriteTo(b []byte, address net.Addr) (int, error) {
+	if err := c.current(); err != nil {
+		return 0, err
+	}
+	return c.packet.WriteTo(b, address)
+}
+
+func newUpstreamPool(spec api.DNSResolverSourceSpec, cfg upstreamPoolConfig) (*upstreamPool, error) {
 	if cfg.ProbeInterval <= 0 {
 		cfg.ProbeInterval = 15 * time.Second
 	}
@@ -94,20 +163,26 @@ func newUpstreamPool(raw []string, cfg upstreamPoolConfig) (*upstreamPool, error
 		cfg.PassThreshold = 2
 	}
 	var upstreams []*dnsUpstream
-	for i, value := range raw {
+	for i, value := range spec.Upstreams {
 		upstream, err := parseDNSUpstream(i, value)
 		if err != nil {
 			return nil, err
 		}
 		upstreams = append(upstreams, upstream)
 	}
-	return &upstreamPool{
-		upstreams: upstreams,
-		config:    cfg,
-		// Each exchange supplies its own deadline: ordinary queries and health
-		// probes may intentionally have different timeouts.
-		client: &http.Client{Transport: &http.Transport{DialContext: (&net.Dialer{Resolver: resolverForBootstrap(cfg.BootstrapResolver), Control: interfaceControl(cfg.ViaInterface)}).DialContext, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: cfg.RootCAs}, ForceAttemptHTTP2: true, MaxIdleConns: 32, MaxIdleConnsPerHost: 4, IdleConnTimeout: 30 * time.Second}},
-	}, nil
+	p := &upstreamPool{upstreams: upstreams, config: cfg, spec: spec}
+	for _, value := range spec.BootstrapResolver {
+		address := strings.TrimSpace(value)
+		if _, _, err := net.SplitHostPort(address); err != nil {
+			address = net.JoinHostPort(address, "53")
+		}
+		p.bootstrap = append(p.bootstrap, bootstrapServer{Address: address})
+	}
+	if len(spec.BootstrapResolver) != 0 || len(spec.BootstrapResolverFrom) != 0 {
+		p.resolver = &net.Resolver{PreferGo: true, Dial: p.dialBootstrap}
+	}
+	p.client = &http.Client{Transport: &http.Transport{DialContext: (&net.Dialer{Resolver: p.resolver, Control: interfaceControl(spec.ViaInterface)}).DialContext, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: cfg.RootCAs}, ForceAttemptHTTP2: true, MaxIdleConns: 32, MaxIdleConnsPerHost: 4, IdleConnTimeout: 30 * time.Second}}
+	return p, nil
 }
 
 func parseDNSUpstream(index int, raw string) (*dnsUpstream, error) {
@@ -179,7 +254,7 @@ func (p *upstreamPool) Start(ctx context.Context, publish func(string, string, s
 
 // SetLearned preserves health for unchanged endpoints. Only the originating
 // protocol deadline changes on a fresh observation; receipt never rebases it.
-func (p *upstreamPool) setLearned(sets []dnsconfig.LearnedUpstream) {
+func (p *upstreamPool) setLearned(sets, bootstrap []dnsconfig.LearnedUpstream) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	var next []*dnsUpstream
@@ -203,6 +278,16 @@ func (p *upstreamPool) setLearned(sets []dnsconfig.LearnedUpstream) {
 		next = append(next, upstream)
 	}
 	p.upstreams = next
+	fixed := p.bootstrap[:0]
+	for _, server := range p.bootstrap {
+		if server.Provider == "" {
+			fixed = append(fixed, server)
+		}
+	}
+	for _, server := range bootstrap {
+		fixed = append(fixed, bootstrapServer{Address: net.JoinHostPort(server.Address.String(), "53"), Provider: server.Provider, ValidUntil: server.ValidUntil})
+	}
+	p.bootstrap = fixed
 }
 
 func (p *upstreamPool) queryBudget(upstream *dnsUpstream) (time.Duration, error) {
@@ -385,7 +470,7 @@ func (p *upstreamPool) exchangeDoH(ctx context.Context, upstream *dnsUpstream, q
 }
 
 func (p *upstreamPool) exchangeDoT(ctx context.Context, upstream *dnsUpstream, query []byte) ([]byte, error) {
-	dialer := tls.Dialer{NetDialer: &net.Dialer{Resolver: resolverForBootstrap(p.config.BootstrapResolver), Control: interfaceControl(p.config.ViaInterface)}, Config: &tls.Config{ServerName: upstream.ServerName, MinVersion: tls.VersionTLS12, RootCAs: p.config.RootCAs}}
+	dialer := tls.Dialer{NetDialer: &net.Dialer{Resolver: p.resolver, Control: interfaceControl(p.spec.ViaInterface)}, Config: &tls.Config{ServerName: upstream.ServerName, MinVersion: tls.VersionTLS12, RootCAs: p.config.RootCAs}}
 	conn, err := dialer.DialContext(ctx, "tcp", upstream.Address)
 	if err != nil {
 		return nil, err
@@ -395,7 +480,10 @@ func (p *upstreamPool) exchangeDoT(ctx context.Context, upstream *dnsUpstream, q
 }
 
 func (p *upstreamPool) exchangeDoQ(ctx context.Context, upstream *dnsUpstream, query []byte) ([]byte, error) {
-	resolver := resolverForBootstrap(p.config.BootstrapResolver)
+	resolver := p.resolver
+	if resolver == nil {
+		resolver = net.DefaultResolver
+	}
 	host, port, err := net.SplitHostPort(upstream.Address)
 	if err != nil {
 		return nil, err
@@ -411,7 +499,7 @@ func (p *upstreamPool) exchangeDoQ(ctx context.Context, upstream *dnsUpstream, q
 	if err != nil {
 		return nil, err
 	}
-	listenConfig := net.ListenConfig{Control: interfaceControl(p.config.ViaInterface)}
+	listenConfig := net.ListenConfig{Control: interfaceControl(p.spec.ViaInterface)}
 	packetConn, err := listenConfig.ListenPacket(ctx, udpNetworkForIP(addrs[0].IP), "")
 	if err != nil {
 		return nil, err
@@ -432,7 +520,7 @@ func (p *upstreamPool) exchangeDoQ(ctx context.Context, upstream *dnsUpstream, q
 }
 
 func (p *upstreamPool) exchangeUDP(ctx context.Context, upstream *dnsUpstream, query []byte) ([]byte, error) {
-	dialer := net.Dialer{Resolver: resolverForBootstrap(p.config.BootstrapResolver), Control: interfaceControl(p.config.ViaInterface)}
+	dialer := net.Dialer{Resolver: p.resolver, Control: interfaceControl(p.spec.ViaInterface)}
 	conn, err := dialer.DialContext(ctx, "udp", upstream.Address)
 	if err != nil {
 		return nil, err
@@ -452,7 +540,7 @@ func (p *upstreamPool) exchangeUDP(ctx context.Context, upstream *dnsUpstream, q
 }
 
 func (p *upstreamPool) exchangeTCP(ctx context.Context, upstream *dnsUpstream, query []byte) ([]byte, error) {
-	dialer := net.Dialer{Resolver: resolverForBootstrap(p.config.BootstrapResolver), Control: interfaceControl(p.config.ViaInterface)}
+	dialer := net.Dialer{Resolver: p.resolver, Control: interfaceControl(p.spec.ViaInterface)}
 	conn, err := dialer.DialContext(ctx, "tcp", upstream.Address)
 	if err != nil {
 		return nil, err
@@ -461,30 +549,38 @@ func (p *upstreamPool) exchangeTCP(ctx context.Context, upstream *dnsUpstream, q
 	return exchangeLengthPrefixed(ctx, conn, query)
 }
 
-func resolverForBootstrap(servers []string) *net.Resolver {
-	cleaned := make([]string, 0, len(servers))
-	for _, server := range servers {
-		server = strings.TrimSpace(server)
-		if server == "" {
-			continue
+func (p *upstreamPool) dialBootstrap(ctx context.Context, network, _ string) (net.Conn, error) {
+	clock, err := boottime.Read()
+	if err != nil {
+		return nil, err
+	}
+	p.mu.Lock()
+	live := make([]bootstrapServer, 0, len(p.bootstrap))
+	for _, server := range p.bootstrap {
+		if server.ValidUntil.Live(clock) {
+			live = append(live, server)
 		}
-		if _, _, err := net.SplitHostPort(server); err != nil {
-			server = net.JoinHostPort(server, "53")
-		}
-		cleaned = append(cleaned, server)
 	}
-	if len(cleaned) == 0 {
-		return net.DefaultResolver
+	p.mu.Unlock()
+	if len(live) == 0 {
+		return nil, errors.New("no live DNS bootstrap resolver")
 	}
-	var next atomic.Uint64
-	return &net.Resolver{
-		PreferGo: true,
-		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
-			server := cleaned[(next.Add(1)-1)%uint64(len(cleaned))]
-			dialer := net.Dialer{Control: interfaceControl("")}
-			return dialer.DialContext(ctx, network, server)
-		},
+	server := live[(p.nextBootstrap.Add(1)-1)%uint64(len(live))]
+	budget := min(p.config.QueryTimeout, server.ValidUntil.Remaining(clock))
+	call, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+	conn, err := (&net.Dialer{Control: interfaceControl(p.spec.ViaInterface)}).DialContext(call, network, server.Address)
+	if err != nil {
+		return nil, err
 	}
+	if server.ValidUntil == (lifetime.Deadline{}) {
+		return conn, nil
+	}
+	bounded := &bootstrapConn{Conn: conn, until: server.ValidUntil}
+	if packet, ok := conn.(net.PacketConn); ok {
+		return &bootstrapPacketConn{bootstrapConn: bounded, packet: packet}, nil
+	}
+	return bounded, nil
 }
 
 func udpNetworkForIP(ip net.IP) string {
@@ -666,6 +762,25 @@ func (p *upstreamPool) Snapshot() []dnsUpstream {
 		out = append(out, value)
 	}
 	return out
+}
+
+func (p *upstreamPool) bootstrapSummary() string {
+	clock, clockErr := boottime.Read()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	var parts []string
+	for _, server := range p.bootstrap {
+		phase := "Current"
+		if server.Provider != "" {
+			if clockErr != nil {
+				phase = "Unknown"
+			} else if !server.ValidUntil.Live(clock) {
+				phase = "Expired"
+			}
+		}
+		parts = append(parts, server.Address+":"+phase)
+	}
+	return strings.Join(parts, ",")
 }
 
 func (p *upstreamPool) Summary() string {

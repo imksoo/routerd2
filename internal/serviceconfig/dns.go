@@ -3,6 +3,8 @@ package serviceconfig
 import (
 	"errors"
 	"fmt"
+
+	"github.com/imksoo/routerd/pkg/api"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
 )
@@ -20,7 +22,7 @@ func validateDNSSources(services []Service) error {
 		}
 
 		for _, source := range s.DNS.Spec.Sources {
-			for _, ref := range source.UpstreamFrom {
+			for _, ref := range append(append([]api.StatusValueSourceSpec(nil), source.UpstreamFrom...), source.BootstrapResolverFrom...) {
 				name, role, err := dnsconfig.UpstreamProvider(ref)
 				if err != nil {
 					return err

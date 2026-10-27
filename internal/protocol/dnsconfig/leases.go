@@ -29,6 +29,7 @@ type Input struct {
 	ConfigDigest string            `json:"config_digest"`
 	Sets         []LeaseSet        `json:"sets"`
 	Upstreams    []LearnedUpstream `json:"upstreams"`
+	Bootstraps   []LearnedUpstream `json:"bootstraps"`
 }
 
 type LearnedUpstream struct {
@@ -92,6 +93,7 @@ func ValidLeaseHostname(name string) bool {
 func NormalizeInput(p Input) Input {
 	out := p
 	out.Upstreams = slices.Clone(p.Upstreams)
+	out.Bootstraps = slices.Clone(p.Bootstraps)
 	out.Sets = slices.Clone(p.Sets)
 	for i := range out.Sets {
 		s := &out.Sets[i]

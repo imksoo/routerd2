@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/imksoo/routerd/pkg/api"
 	mdns "github.com/miekg/dns"
 	"github.com/quic-go/quic-go"
 )
@@ -72,7 +73,7 @@ func TestDNSOverTLSNativeExchange(t *testing.T) {
 			return err
 		}()
 	}()
-	pool, err := newUpstreamPool([]string{"tls://" + l.Addr().String()}, upstreamPoolConfig{RootCAs: roots, QueryTimeout: 2 * time.Second})
+	pool, err := newUpstreamPool(api.DNSResolverSourceSpec{Upstreams: []string{"tls://" + l.Addr().String()}}, upstreamPoolConfig{RootCAs: roots, QueryTimeout: 2 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +145,7 @@ func TestDNSOverQUICZeroIDRequestFINAndResponseFIN(t *testing.T) {
 			return stream.Close()
 		}()
 	}()
-	pool, err := newUpstreamPool([]string{"quic://" + l.Addr().String()}, upstreamPoolConfig{RootCAs: roots, QueryTimeout: 2 * time.Second})
+	pool, err := newUpstreamPool(api.DNSResolverSourceSpec{Upstreams: []string{"quic://" + l.Addr().String()}}, upstreamPoolConfig{RootCAs: roots, QueryTimeout: 2 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}

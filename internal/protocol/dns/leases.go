@@ -64,7 +64,13 @@ func (d *daemon) applyInput(raw dnsconfig.Input) error {
 				sets = append(sets, set)
 			}
 		}
-		source.Pool.setLearned(sets)
+		var bootstrap []dnsconfig.LearnedUpstream
+		for _, server := range p.Bootstraps {
+			if server.Source == source.Spec.Name {
+				bootstrap = append(bootstrap, server)
+			}
+		}
+		source.Pool.setLearned(sets, bootstrap)
 	}
 	changed := d.nativeInput == nil || !sameInputContent(*d.nativeInput, p)
 	d.nativeInput = &p
@@ -122,7 +128,11 @@ func (d *daemon) populateNativeZones(table *zoneTable, clock boottime.Clock) {
 func sameInputContent(a, b dnsconfig.Input) bool {
 	return slices.EqualFunc(a.Sets, b.Sets, func(a, b dnsconfig.LeaseSet) bool {
 		return a.Zone == b.Zone && a.Source == b.Source && slices.Equal(a.Records, b.Records)
-	}) && slices.EqualFunc(a.Upstreams, b.Upstreams, func(a, b dnsconfig.LearnedUpstream) bool {
+	}) && sameServers(a.Upstreams, b.Upstreams) && sameServers(a.Bootstraps, b.Bootstraps)
+}
+
+func sameServers(a, b []dnsconfig.LearnedUpstream) bool {
+	return slices.EqualFunc(a, b, func(a, b dnsconfig.LearnedUpstream) bool {
 		return a.Source == b.Source && a.Provider == b.Provider && a.Address == b.Address
 	})
 }

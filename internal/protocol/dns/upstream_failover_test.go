@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/imksoo/routerd/pkg/api"
 	"github.com/miekg/dns"
 )
 
@@ -62,7 +63,7 @@ func failoverDoHPool(t *testing.T, cfg upstreamPoolConfig, servers ...*httptest.
 		urls = append(urls, server.URL+"/dns-query")
 		roots.AddCert(server.Certificate())
 	}
-	pool, err := newUpstreamPool(urls, cfg)
+	pool, err := newUpstreamPool(api.DNSResolverSourceSpec{Upstreams: urls}, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +145,7 @@ func TestUpstreamTruncatedUDPRetriesSameServerOverTCP(t *testing.T) {
 			t.Errorf("write DNS fixture response: %v", err)
 		}
 	}))
-	pool, err := newUpstreamPool([]string{"udp://" + address}, upstreamPoolConfig{QueryTimeout: time.Second})
+	pool, err := newUpstreamPool(api.DNSResolverSourceSpec{Upstreams: []string{"udp://" + address}}, upstreamPoolConfig{QueryTimeout: time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -337,7 +338,7 @@ func TestUpstreamCancellationStopsUDPAndDoesNotTryFallback(t *testing.T) {
 		backupCalls.Add(1)
 		failoverWriteDNS(t, w, failoverSuccessfulReply(query))
 	})
-	pool, err := newUpstreamPool([]string{"udp://" + primary.LocalAddr().String(), backup.URL}, upstreamPoolConfig{QueryTimeout: time.Minute})
+	pool, err := newUpstreamPool(api.DNSResolverSourceSpec{Upstreams: []string{"udp://" + primary.LocalAddr().String(), backup.URL}}, upstreamPoolConfig{QueryTimeout: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -388,7 +389,11 @@ func TestBootstrapResolverConcurrentSelection(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = second.Close() })
-	resolver := resolverForBootstrap([]string{first.LocalAddr().String(), second.LocalAddr().String()})
+	pool, err := newUpstreamPool(api.DNSResolverSourceSpec{BootstrapResolver: []string{first.LocalAddr().String(), second.LocalAddr().String()}}, upstreamPoolConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver := pool.resolver
 	var firstCalls, secondCalls atomic.Int32
 	var wg sync.WaitGroup
 	for i := 0; i < 32; i++ {

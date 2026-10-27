@@ -47,6 +47,7 @@ resources:
             interface: lan0
             host_id: 256 # ::100 in the same delegated /64; no extra RA worker.
   - id: service/internet
+    ready_when: {fact: service.internet.active}
     service:
       name: internet
       ds_lite:

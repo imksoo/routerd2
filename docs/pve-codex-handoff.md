@@ -5,7 +5,51 @@
 [機械可読台帳](implementation-plan.json)に従う。[AGENTS.md](../AGENTS.md)を優先する。
 過去のAPI・保存形式・試験結果を守るための実装は残さない。
 
-## 現在の変更: wan-dns / native-27
+## 現在の変更: dns-bootstrap / native-28
+
+`957c964`までmainへpush済み。追加変更は、WANから学習したDNSを`bootstrapResolverFrom`で
+名前指定のupstreamの解決に使う経路である。forwarding用とbootstrap用は別のtyped inputで渡し、
+元のboot期限・リンクローカルscopeを維持する。宣言したbootstrapが不在・失効した場合、
+新しい名前解決をhost resolverへ流さない。`viaInterface`はbootstrapのsocketにも適用する。
+既存HTTP/TLS接続をDNS情報の失効だけで切断する設計ではない。
+
+設定時にprovider/targetを一度結び、同じproviderの観測を一度だけdecodeして、sourceごとの
+宣言順で配る。coordinatorで入力を作って再clone/再検証する重複を除き、workerのIPC境界では
+全inputの認可と期限を検証してから適用する。poolとresolverはworkerと同じ寿命を持つ。
+boot ABI1・worker ABI4・manifest v4・network journal9は維持し、compiler contractはnative-28。
+
+確認済み:
+
+- 独立dnsmasqのRA/DHCPv4/DHCPv6情報取得と別LAN端末で、hostname upstreamのbootstrap、
+  UDP/TCP DNS、異なるprovider優先順、30,000 UDP欠落なし・同じTCP、元のRDNSS期限での
+  forwarding/bootstrap失効、host DNSへのfallbackなし、情報再取得後の復旧を確認した。
+  `make check-ra-route-refresh RELEASE_ID=dns-bootstrap`で再実行する。
+- 追加実装の期限付きconnectionが`net.PacketConn`を隠し、Go resolverがUDPにもTCPの長さprefixを
+  付ける不具合を実socket/captureで発見した。実際のdatagram契約を保つよう修正し、同じ相手で再確認した。
+- 新規stateの実上流native-28起動で、実RA・DHCPv4・PD、LAN kernel SLAAC、IPv4/IPv6 HTTPS、
+  LAN UDP/TCP DNS、選択FIB `dslite0`とAFTRのカプセル化された戻りpacketを確認した。全worker世代1。
+  WAN-learned bootstrapで`https://cloudflare-dns.com/dns-query`を使う別の新規起動でも同じ経路が通った。
+  どちらも短い通信確認で、自然T1・長時間・実機性能の合格ではない。DoT/QUICのdynamic bootstrap、
+  VRF・suspend/時刻変更、最新applianceは未検証。
+- 最初の短期試験はprocess readyを見た直後のIPv4 curlがexit7だった。
+  [設定例](../examples/wan-dslite-pd.yaml)にもAFTRの`ready_when`を明示し、実FIBとDNS poolの反映を
+  確認してから端末の通信を始める。通信失敗をretryで成功扱いにしていない。
+- `make check build-publisher build-linux RELEASE_ID=dns-bootstrap`成功。全Go/Python、Race Detector、
+  vet、6静的ELFを含む。実6ELFの署名catalog/publisher検査も成功した。
+
+実上流の再実行は`make check-uplink UPLINK_INTERFACE=<authorized-interface> UPLINK_AFTR=<provider-name>`。
+専用MACのmacvlanと別LAN namespaceを作り、管理address/route/clockは変えない。
+`UPLINK_SECONDS`は1..10800秒、既定7800秒。`UPLINK_DNS_UPSTREAM`を指定すると、WAN-learned
+bootstrapでそのhostname upstreamを解決する。ownerは時間上限と終了時cleanupを持ち、captureは最大8MB。
+失敗したcaptureは成功とせず、終了した試験用state/captureは削除する。
+
+別cohortのnative-27長時間試験は継続中。実上流RA/DHCPv4/PDと両family HTTPS・UDP/TCP DNSを
+定期実行し、選択FIB `dslite0`と全worker世代1を観測している。自然T1は未確認。
+初期captureはdown状態のWANへbindして失敗したため、稼働中の隔離namespaceで診断captureを開始した。
+手順は起動前から使える`any`へ修正した。後続の新規native-28起動でその手順と実戻りpacketを確認した。
+このcohortを最新版native-28の長時間受入や、ONU直結配線・物理NICの資格判定へ拡大しない。
+
+## 直前版: wan-dns / native-27
 
 `7769bc5`はmainへpush済み。その版でPPP学習DNSをresolverへ接続し、設定write/file reload、
 raw lease注入、dnsmasq lease file/sticky sidecar、`dryRun`経路と不要な試験を削除した。
@@ -105,6 +149,8 @@ Go/Docker cacheを削除した。整理直後の空き容量は約208GiB。
 1. 全実装計画、全更新復旧経路、外部engine、配備先と対象実機の受入は未完了。
    旧routerdの各モジュールとの比較を続け、任意optionの不良で有効な割当・経路まで捨てる受信処理を修正する。
    複数IA_NA/PDのDAD共存・Release・resource readiness/RA連携も未完了。
+   次はgraceful DHCPv6 Releaseを優先する。終了時の解放が未実装なので、上流の割当枠を
+   無駄に消費しないよう、同機能の実装・検証前に新しいDUIDの実回線試験を増やし続けない。
    NET-06はrelayのHA・動的VRF/interface変更の受入、DHCPv6 server、dynamic pool/options・DNS・sticky/lease importが残る。
    今回の試験成功を製品全体・実機利用可能の判定には使わない。
 2. NET-07の旧resource/profile、動的source・VRF経路変更、大規模RIBを実装・受入する。
