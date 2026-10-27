@@ -430,16 +430,19 @@ ACTIVE成功には元boot IDと絶対期限を保持するVIP投影が必要で�
 旧世代・上書きされた通知や適用失敗を成功として返さない。
 
 このsource受入範囲の追加に伴い、署名されたconfiguration contractは
-`resource-program-native-23`とする。PPPの有限`.active` factで依存workerを起動し、PPP unitの
+`resource-program-native-24`とする。PPPの有限`.active` factで依存workerを起動し、PPP unitの
 UP/addressはpppdが所有する。`forwarding.ipv4_rp_filter`はLinux all/defaultを明示して管理する
 （0:無効、1:strict、2:loose、省略:管理しない）。撤去時は記録した元の値へ戻す。
+PPPは交渉済みIPv4とIPv6 link-localを別々に観測し、有効なfamilyの既定経路をwriterが管理する。
+`pppoe.default_route`（省略時true）・`table`・`metric`は両familyに適用し、IPv6CPが未完了ならIPv6既定経路を作らない。
+PPP上のDHCPv6 clientも同じ永続identityを使い、Ethernet MACがない場合の自動生成はDUID-UUIDとする。
 BFDの明示`multihop: true`はinterfaceを指定せず、
 宣言済みの送信元アドレスとUDP 4784のrouted endpoint pairを使う。single-hopは従来の
 interface・隣接route・TTL/Hop Limit 255の検証を維持する。BGPのmultihop参照も同じ
 endpoint pairへ束縛し、両transportはdevice bindingを指定しない。条件付きlink・address・routeと依存先の準備条件の
 元のboot期限をwriterへ渡す。期限切れのowned linkをDOWNにし、管理address・routeを撤去する。
 address／routeを直接条件付きにした場合も物理interface上で失効する。
-この内部期限はoperator resourceへ記述できない。network journalはformat 7とする。
+この内部期限はoperator resourceへ記述できない。network journalはformat 9とする。
 VRRPの明示version、IPv4 v2の秒単位広告・
 任意のPASS認証、unicast peer、宣言resource IDを参照するtrackのpenalty・連続回数・
 元の観測のmax ageを受け入れる。現在のtrack providerはHealth・BFD・BGPで、

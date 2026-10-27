@@ -10,8 +10,40 @@
 容量不足へのユーザー指示で、過去の`dist/goal-validation`・停止済みfixture・旧log/captureは削除した。
 本文の旧`dist/`参照は履歴上の実行先であり、現存する証跡を意味しない。現在の診断・受入に必要な出力だけを一時保持する。
 2026-10-27には`/tmp`の旧試験結果・ISO展開・release検証物も約26GiB削除した。再保存しない。
+続く容量整理では旧QAのISO・配布archive・log/captureと、未コミット変更のない試験用checkout65個を
+さらに約52GiB削除した。既存ソース、実行中の隔離試験、環境撤去に必要な状態は保護した。
 
-## 現在の開発版: underlay-mtu / native-23
+## 現在の開発版: ppp-pd / native-24
+
+実PPP接続で、Ethernet MACのないinterfaceの自動DUID生成が失敗してDHCPv6 workerが
+再起動することを確認した。保存済み／明示DUIDを再利用し、Ethernetの自動DUID-LLは保つ。
+MACのないlinkではDUID-UUIDを生成し、同じidentity所有者で永続化する。
+PPPは使用可能なIPv6CP link-localも観測し、writerは交渉済みfamilyの既定経路を元のPPP期限で管理する。
+`default_route`・`table`・`metric`は両familyに適用し、経路intentはworker configから外した。
+経路変更だけでPPP sessionを再起動しない。署名compiler contractはnative-24、network journalは9のまま。
+
+PVE Ubuntu Linux6.8/amd64、RP-PPPoE3.15/pppd2.4.9と独立ISC DHCP4.4.3-P1で、
+PAP/CHAPともPD /60→LAN /64 RA→別Linux SLAAC端末のIPv6 TCP/UDPを通した。
+実Renew、DHCPv6 worker再起動と同じDUID、古い通知の拒否、元のPPP期限による両family経路の撤去、
+PPP session再作成とPD再取得、サーバー無応答によるrouter/client prefix失効・復旧を確認した。
+通常DADを無効にしない。5秒producer停止は同じ5秒watchdogの対象にもなり、supervisorがcohortを
+再作成し得る。独立dhcpdは旧PPP ifindexへbindしたままでは動かないため、相手側を新sessionへ再bindする。
+これは相手側の設定で、製品のPPP hookや手動address修復は使わない。
+Kea2.4.1はこのPPP peerで相手のlink-localへのbindに失敗したため、PPP受入には使っていない。
+再実行は`make check-pppoe-pd DHCP6_SERVER=/path/to/dhcpd`。Ubuntu packageのextractした
+実executableも使える。hostへのDHCP service追加は不要。一時診断出力は`dist/pppoe-pd/`。
+最終版のPAP/CHAPで5秒confirmed rollbackによる両family既定経路とTCP/UDPの復旧を通した。
+PPPの同じifindex・worker世代を維持した。captureの実PPPoE frameでRenew・IPv6 TCP/UDP・MSS1394を確認した。
+`umask 022`で`make check build build-linux RELEASE_ID=ppp-pd`が成功し、全体Race Detector・vet・6静的ELF、
+実6ELFの署名catalog/publisherも成功した。既存の`make check-pppoe`もPAP/CHAPとも成功した。既定umask0002ではGo TempDirの001が0775となりevent境界で拒否された。
+022で同じ単独試験と全体checkを通し、MakefileのGo test/raceがそのumaskを指定するようにした。
+製品の権限検証は緩めていない。arm64は実行していない。
+engine配布・署名、resolverへのDNS反映、全field、実ISP PPP／対象物理機の受入は未完了。
+実上流の長時間試験は別の`fragment-readiness`/native-21 cohortであり、この版の受入とは区別する。
+02:27:11 UTCの自然T1 Renewと49153からのReplyをcaptureで確認し、その後も同一TCP/UDPとcontrol readyが続いた。
+長時間試験は継続中で、130回の全観測完了や対象物理機のqualificationはまだ主張しない。
+
+## 直前版: underlay-mtu / native-23
 
 稼働中にWAN MTUを下げてもowned DS-LiteのMTUが1460のまま残り、小packet/Healthは
 正常でも1MiB TCPが停止することを独立AFTRで再現した。

@@ -25,9 +25,6 @@ type Config struct {
 	LCPEchoInterval int    `json:"lcp_echo_interval,omitempty"`
 	LCPEchoFailure  int    `json:"lcp_echo_failure,omitempty"`
 	IPv6            bool   `json:"ipv6,omitempty"`
-	DefaultRoute    *bool  `json:"default_route,omitempty"`
-	Metric          int    `json:"metric,omitempty"`
-	Table           int    `json:"table,omitempty"`
 }
 
 type Snapshot struct {
@@ -38,6 +35,7 @@ type Snapshot struct {
 	Active        bool              `json:"active"`
 	Address       string            `json:"address,omitempty"`
 	Peer          string            `json:"peer,omitempty"`
+	IPv6Address   string            `json:"ipv6_address,omitempty"`
 	DNSServers    []string          `json:"dns_servers,omitempty"`
 	ValidUntil    lifetime.Deadline `json:"valid_until,omitzero"`
 }
@@ -71,8 +69,8 @@ func Validate(c Config) error {
 			return errors.New("PPPoE MTU/MRU must be 128..1492 (at least 1280 with IPv6)")
 		}
 	}
-	if c.LCPEchoInterval < 0 || c.LCPEchoFailure < 0 || c.Metric < 0 || uint64(c.Metric) > 1<<32-1 || c.Table < 0 || uint64(c.Table) > 1<<32-1 || c.Table == 255 {
-		return errors.New("invalid PPPoE echo or route settings")
+	if c.LCPEchoInterval < 0 || c.LCPEchoFailure < 0 {
+		return errors.New("invalid PPPoE echo settings")
 	}
 	return nil
 }
@@ -88,15 +86,28 @@ func ValidateSnapshot(c Config, s Snapshot) error {
 		return errors.New("PPPoE observation requires an original finite boot interval")
 	}
 	if !s.Active {
-		if s.Address != "" || s.Peer != "" || len(s.DNSServers) != 0 {
+		if s.Address != "" || s.Peer != "" || s.IPv6Address != "" || len(s.DNSServers) != 0 {
 			return errors.New("inactive PPPoE observation retains negotiated state")
 		}
 		return nil
 	}
-	for _, text := range append([]string{s.Address, s.Peer}, s.DNSServers...) {
+	if s.Address == "" && s.IPv6Address == "" || (s.Address == "") != (s.Peer == "") {
+		return errors.New("active PPPoE observation requires negotiated addresses")
+	}
+	addresses := s.DNSServers
+	if s.Address != "" {
+		addresses = append([]string{s.Address, s.Peer}, addresses...)
+	}
+	for _, text := range addresses {
 		a, err := netip.ParseAddr(text)
 		if err != nil || !a.Is4() || a.IsUnspecified() || a.IsMulticast() {
 			return errors.New("invalid negotiated PPP IPv4 address")
+		}
+	}
+	if s.IPv6Address != "" {
+		a, err := netip.ParseAddr(s.IPv6Address)
+		if err != nil || !a.Is6() || !a.IsLinkLocalUnicast() || !c.IPv6 {
+			return errors.New("invalid negotiated PPP IPv6 address")
 		}
 	}
 	return nil

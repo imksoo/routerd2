@@ -223,9 +223,14 @@ func observe(cfg pppoeconfig.Config, pid int) (pppoeconfig.Snapshot, error) {
 		}
 		return s, err
 	}
-	addresses, err := netlink.AddrList(link, netlink.FAMILY_V4)
+	addresses, err := netlink.AddrList(link, netlink.FAMILY_ALL)
 	if err != nil {
 		return s, err
+	}
+	for _, a := range addresses {
+		if cfg.IPv6 && a.IP.IsLinkLocalUnicast() && a.IP.To4() == nil && a.Flags&(unix.IFA_F_TENTATIVE|unix.IFA_F_DADFAILED) == 0 {
+			s.Active, s.IPv6Address = true, a.IP.String()
+		}
 	}
 	for _, a := range addresses {
 		if a.Peer == nil || a.IP.To4() == nil || a.Peer.IP.To4() == nil {

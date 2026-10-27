@@ -26,7 +26,7 @@ import (
 )
 
 type Service struct {
-	PPPoE      *pppoeconfig.Config      `json:"pppoe,omitempty"`
+	PPPoE      *PPPoE                   `json:"pppoe,omitempty"`
 	Health     *health.Config           `json:"health,omitempty"`
 	BFD        *bfd.Config              `json:"bfd,omitempty"`
 	DSLite     *DSLite                  `json:"ds_lite,omitempty"`
@@ -40,6 +40,15 @@ type Service struct {
 	RA         *ra.Config               `json:"ra,omitempty"`
 	DNS        *dnsconfig.RuntimeConfig `json:"dns,omitempty"`
 	VRRP       *vrrp.Config             `json:"vrrp,omitempty"`
+}
+
+// PPPoE keeps route intent with the network projection. These fields do not
+// configure pppd and must not replace its session when routing policy changes.
+type PPPoE struct {
+	pppoeconfig.Config
+	DefaultRoute *bool `json:"default_route,omitempty"`
+	Metric       int   `json:"metric,omitempty"`
+	Table        int   `json:"table,omitempty"`
 }
 
 type DHCP4 struct {
@@ -248,6 +257,9 @@ func Validate(services []Service) error {
 			if err := pppoeconfig.Validate(s.PPPoEConfig()); err != nil {
 				return err
 			}
+			if s.PPPoE.Metric < 0 || uint64(s.PPPoE.Metric) > 1<<32-1 || s.PPPoE.Table < 0 || uint64(s.PPPoE.Table) > 1<<32-1 || s.PPPoE.Table == 255 {
+				return errors.New("invalid PPPoE route settings")
+			}
 		case "health":
 			if s.Health.Resource != "" && s.Health.Resource != s.Name {
 				return errors.New("health resource is managed by service name")
@@ -449,7 +461,7 @@ func (s Service) Instance(runtimeDir, stateDir string) (Instance, error) {
 }
 
 func (s Service) PPPoEConfig() pppoeconfig.Config {
-	c := *s.PPPoE
+	c := s.PPPoE.Config
 	c.Resource = s.Name
 	return c
 }

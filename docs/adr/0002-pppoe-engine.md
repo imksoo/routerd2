@@ -40,7 +40,18 @@ PPP/PPPoE 機能を必要とする。現時点の scratch runtime / appliance �
 とは扱わない。配布する正確な engine・plugin・loader/library・license の閉包と署名契約は
 CORE-06 / NET-04 の残作業である。Go の静的 build 成功で代用しない。
 
-PPP 上の DHCPv6 PD、resolver への DNS 適用、完全な旧 resource field の意味、
+PPP上のDHCPv6は、MACなしの自動DUID拒否を実接続で再現してDUID-UUIDを永続化した。
+IPv6CPの使用可能なlink-localをPPP観測へ追加し、writerは交渉済みfamilyだけに元の期限付き既定経路を作る。
+`default_route`・`metric`・`table`は両familyに適用する。独立ISC DHCP 4.4.3-P1との
+PD /60、LAN /64の生成RA、別Linux SLAAC端末のIPv6 TCP/UDP、Renew、DHCPv6 worker
+再起動とDUID維持、サーバー無応答によるrouter/clientの失効・復旧を確認した。
+`make check-pppoe-pd DHCP6_SERVER=/path/to/dhcpd`で再実行し、DADは無効にしない。
+peer側はPPPの再生成ごとにPD poolの戻り経路を明示設定する。製品側はPPP hookを使わない。
+最終版のPAP/CHAPはPPP session再作成、古いDHCPv6通知の拒否、元期限での両family経路撤去・復旧も通した。
+独立dhcpdは再作成したpeer PPP ifindexへ再bindする。経路intentはworker configへ渡さず、
+5秒confirmed rollbackで既定経路を撤去・復元してもPPP ifindex・worker世代を維持した。
+
+resolver への DNS 適用、完全な旧 resource field の意味、
 完全なMTU/fragment policy、実 ISP と物理 NIC の受入も未完了である。
 これらの結果に応じて今回の interface・配置・契約を変更する。prototype 互換層は作らない。
 

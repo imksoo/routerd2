@@ -428,11 +428,18 @@ func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, ready fun
 		if err != nil {
 			return err
 		}
-	} else {
-		if len(ifi.HardwareAddr) != 6 {
-			return errors.New("automatic DHCPv6 DUID-LL requires Ethernet; configure client_duid")
-		}
+	} else if len(ifi.HardwareAddr) == 6 {
 		duid = append([]byte{0, 3, 0, 1}, ifi.HardwareAddr...)
+	} else {
+		// PPP has no Ethernet address. Persist a DUID-UUID (RFC 6355)
+		// through the same identity owner so reconnects keep their identity.
+		duid = make([]byte, 18)
+		binary.BigEndian.PutUint16(duid, 4)
+		if _, err := rand.Read(duid[2:]); err != nil {
+			return err
+		}
+		duid[8] = duid[8]&0x0f | 0x40
+		duid[10] = duid[10]&0x3f | 0x80
 	}
 	if err := writeIdentity(cfg.StatePath, identity{Resource: cfg.Resource, ClientDUID: hex.EncodeToString(duid)}); err != nil {
 		return err

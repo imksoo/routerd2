@@ -12,6 +12,7 @@ QEMU_DAEMON_TIMEOUT ?= 180
 QEMU_RELEASE_TIMEOUT ?= 240
 QEMU_STORAGE_TIMEOUT ?= 240
 RELEASE_BUILT_DIR ?= dist/bin
+DHCP6_SERVER ?= /usr/sbin/dhcpd
 QEMU_SSH_KEY ?=
 
 LDFLAGS = -s -w -X github.com/imksoo/routerd2/internal/buildinfo.Identity=ROUTERD2-RELEASE-V1:$(RELEASE_ID):END
@@ -24,6 +25,7 @@ help:
 	  'make check             Format, unit tests, race detector, and vet' \
 	  'make check-dual-wan    Verify PPPoE/DS-Lite Health/PBR and TCP MSS with independent peers' \
 	  'make check-pppoe        Verify real PPPoE PAP/CHAP, LAN forwarding and recovery' \
+	  'make check-pppoe-pd     Verify PPP DHCPv6 PD and LAN IPv6 with independent ISC DHCP' \
 	  'make check-health-pbr  Required two-WAN real-daemon TCP/UDP failover gate' \
 	  'make check-vrrp-unicast Verify VRRP peer failover and finite WAN identity' \
 	  'make check-bfd         Verify BFD/BGP routing domains with real workers' \
@@ -73,8 +75,8 @@ fmt-check:
 	  if [ -n "$$unformatted" ]; then printf '%s\n' "$$unformatted"; printf '%s\n' 'Run make fmt.'; exit 1; fi
 
 test:
-	$(GO) test ./...
-	$(GO) test ./internal/releaseboot/testdata/guest
+	umask 022; $(GO) test ./...
+	umask 022; $(GO) test ./internal/releaseboot/testdata/guest
 
 test-dependencies:
 	$(GO) test github.com/google/nftables/expr
@@ -83,8 +85,8 @@ test-tools:
 	$(PYTHON) -m unittest discover -s scripts -p '*_test.py'
 
 race:
-	CGO_ENABLED=1 $(GO) test -race ./...
-	CGO_ENABLED=1 $(GO) test -race ./internal/releaseboot/testdata/guest
+	umask 022; CGO_ENABLED=1 $(GO) test -race ./...
+	umask 022; CGO_ENABLED=1 $(GO) test -race ./internal/releaseboot/testdata/guest
 
 vet:
 	$(GO) vet ./...
@@ -104,6 +106,10 @@ check-dual-wan-bridge: build
 
 check-pppoe: build
 	$(PYTHON) scripts/pppoe-peer.py
+
+.PHONY: check-pppoe-pd
+check-pppoe-pd: build
+	$(PYTHON) scripts/pppoe-peer.py --dhcp6-server '$(DHCP6_SERVER)' --output dist/pppoe-pd
 
 .PHONY: pppoe-peer-profile
 pppoe-peer-profile:

@@ -27,6 +27,14 @@ listing current addresses cannot detect the failure reliably. A valid Decline
 Reply completes the exchange even with NoBinding. Worker readiness means the
 socket is open, not that an address has completed DAD.
 
+Without an explicit or saved DUID, Ethernet uses DUID-LL. Links without an
+Ethernet address, including PPP, generate and persist a random DUID-UUID
+([RFC 6355](https://www.rfc-editor.org/rfc/rfc6355.html)). Both worker and PPP
+session replacements reuse the stored identity; learned leases remain live
+observations rather than persisted intent. `make check-pppoe-pd` exercises PPP
+PD with independent ISC DHCP and a separate Linux SLAAC client. It requires
+`dhcpd`; an extracted binary can be selected with `DHCP6_SERVER=/path/to/dhcpd`.
+
 `make check-dhcp6` uses the real supervisor/control/network/client processes,
 independent dnsmasq, source-bound TCP/UDP, worker replacement, actual lease
 renewal and server silence through Rebind/expiry/recovery. It also connects an

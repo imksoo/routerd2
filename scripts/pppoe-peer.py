@@ -3,6 +3,8 @@
 
 Requires Linux root/sudo, pppd 2.4.9 + rp-pppoe.so, pppoe-server, iproute2,
 curl, tcpdump and ping. Host PPP files, hooks and routes are not used.
+The optional --dhcp6-server selects an independent ISC dhcpd for PPP PD,
+generated LAN RA/SLAAC, IPv6 forwarding and recovery, with normal DAD.
 """
 import argparse
 import copy
@@ -37,7 +39,7 @@ def terminated(*_):
     raise KeyboardInterrupt()
 
 
-def peer(stage, auth, engine_archive):
+def peer(stage, auth, engine_archive, dhcp6_server):
     # This whole fixture has a private mount namespace. The product engine
     # must additionally create its own: AC secrets/hooks are not client input.
     signal.signal(signal.SIGALRM, deadline)
@@ -74,6 +76,9 @@ def peer(stage, auth, engine_archive):
     def routed():
         return any(r.get("dev") == "ppp-wan" and r.get("dst") == "default" and str(r.get("table")) == "100" for r in json.loads(run(["ip", "-n", ns, "-j", "route", "show", "table", "all"])))
 
+    def routed6():
+        return any(r.get("dev") == "ppp-wan" and r.get("dst") == "default" and str(r.get("table")) == "100" for r in json.loads(run(["ip", "-n", ns, "-j", "-6", "route", "show", "table", "all"])))
+
     def selected():
         return any(r.get("priority") == 1000 and str(r.get("table")) == "100" for r in json.loads(run(["ip", "-n", ns, "-j", "rule", "show"])))
 
@@ -90,6 +95,29 @@ def peer(stage, auth, engine_archive):
     def ac_start():
         return start(acns, ["/usr/sbin/pppoe-server", "-F", "-k", "-I", "server0", "-C", "ROUTERD2-AC", "-S", "ROUTERD2-LAB", "-L", "192.0.2.1", "-R", "192.0.2.2", "-N", "1", "-O", str(stage / "server.conf"), "-X", str(stage / "ac.pid")], "ac")
 
+    def pd_record():
+        return next((x for x in api("control.sock", "/v1/services")["instances"] if x["name"] == "service.pd"), {})
+
+    def pd_bound():
+        current, observed = modules().get("service.pd", {}), pd_record()
+        return current.get("ready") and observed.get("generation") == current.get("generation") and observed.get("snapshot", {}).get("state") == "bound"
+
+    def delegated():
+        return [a for link in json.loads(run(["ip", "-n", ns, "-j", "-6", "addr", "show", "dev", "lan0"])) for a in link["addr_info"] if a.get("scope") == "global" and not a.get("tentative") and not a.get("dadfailed")]
+
+    def client_addresses():
+        return [a for link in json.loads(run(["ip", "-n", lan, "-j", "-6", "addr", "show", "dev", "client0"])) for a in link["addr_info"] if a.get("scope") == "global" and not a.get("tentative") and not a.get("dadfailed")]
+
+    def ipv6_traffic():
+        wait(lambda: pd_bound() and delegated() and client_addresses())
+        assert run(inside(lan, ["curl", "--noproxy", "*", "--max-time", "2", "-sS", "-o", "/dev/null", "-w", "%{http_code}", "http://[2001:db8:ffff::20]:18080/"])) == "200"
+        code = 'import socket;s=socket.socket(socket.AF_INET6,socket.SOCK_DGRAM);s.settimeout(2);s.connect(("2001:db8:ffff::20",18081));s.send(b"delegated-ppp");assert s.recv(100)==b"delegated-ppp"'
+        run(inside(lan, ["python3", "-c", code]))
+
+    def dhcp6_start():
+        run(["ip", "-n", acns, "-6", "addr", "replace", "2001:db8:ffff::1/64", "dev", ppp])
+        return start(acns, [str(dhcp6_server), "-6", "-f", "-d", "-cf", str(stage / "dhcp6.conf"), "-lf", str(stage / "dhcp6.leases"), "-pf", str(stage / "dhcp6.pid"), ppp], "dhcp6")
+
     try:
         etc = stage / "etc-ppp"
         etc.mkdir()
@@ -105,7 +133,7 @@ def peer(stage, auth, engine_archive):
         run(["mount", "--bind", str(root_options), "/root"])
         (stage / "password").write_text("routerd2-fixture\n")
         (stage / "password").chmod(0o600)
-        service = dict(interface="wan0", ppp_interface="ppp-wan", username="routerd2", password_file=str(stage / "password"), auth_method=auth, ipv6=auth == "chap", service_name="ROUTERD2-LAB", ac_name="ROUTERD2-AC", mtu=1454, mru=1454, lcp_echo_interval=1, lcp_echo_failure=3, metric=20, table=100)
+        service = dict(interface="wan0", ppp_interface="ppp-wan", username="routerd2", password_file=str(stage / "password"), auth_method=auth, ipv6=bool(dhcp6_server) or auth == "chap", service_name="ROUTERD2-LAB", ac_name="ROUTERD2-AC", mtu=1454, mru=1454, lcp_echo_interval=1, lcp_echo_failure=3, metric=20, table=100)
         resources = [
             {"id": "wan", "interface": {"name": "wan0"}},
             {"id": "lan", "interface": {"name": "lan0"}},
@@ -117,11 +145,26 @@ def peer(stage, auth, engine_archive):
             {"id": "probe", "depends_on": ["internet", "probe-policy"], "when": {"fact": "service.internet.active"}, "service": {"name": "reachability", "health": {"interface": "ppp-wan", "target": "198.51.100.20", "protocol": "tcp", "port": 18082, "mark": 42, "interval_ms": 200, "timeout_ms": 100, "unhealthy_threshold": 1}}},
             {"id": "application-policy", "when": {"fact": "service.reachability.active", "max_age": "1s"}, "policy_rule": {"family": 4, "priority": 1000, "table": 100, "source": "10.42.0.0/24"}},
         ]
+        if dhcp6_server:
+            next(r for r in resources if r["id"] == "forwarding")["forwarding"]["ipv6"] = True
+            resources += [
+                {"id": "ipv6-policy", "policy_rule": {"family": 6, "priority": 1000, "table": 100, "in_interface": "lan0"}},
+                {"id": "pd", "depends_on": ["internet", "lan"], "when": {"fact": "service.internet.active"}, "service": {"name": "pd", "dhcp6": {"interface": "ppp-wan", "iaid": 1, "request_prefix": True, "prefix_length": 60, "delegations": [{"name": "lan", "interface": "lan0", "subnet_id": 1, "advertise": True}]}}},
+            ]
         configuration = {"schema_version": 2, "resources": resources}
         (stage / "config.json").write_text(json.dumps(configuration))
         boot = dict(platform="host", config=str(stage / "config.json"), runtime_dir=str(stage / "run"), state_dir=str(stage / "state"), ssh={"user": "admin"}, workers={r: str(stage.parent / ("routerd-logging" if r == "logging" else "routerd-modules")) for r in ["logging", "network", "control", "management", "pppoe", "health"]})
+        if dhcp6_server:
+            boot["workers"].update({r: str(stage.parent / "routerd-modules") for r in ("dhcp6", "ra")})
         (stage / "boot.json").write_text(json.dumps(boot))
         (stage / "server.conf").write_text("auth\nrequire-" + auth + "\nrefuse-" + ("chap" if auth == "pap" else "pap") + "\nmtu 1454\nmru 1454\nms-dns 203.0.113.53\nlogfd 1\nhide-password\nlcp-echo-interval 1\nlcp-echo-failure 3\n")
+        if dhcp6_server:
+            with (stage / "server.conf").open("a") as out:
+                out.write("+ipv6\n")
+            # An access concentrator must route the delegated pool back to its
+            # subscriber. This is peer setup; the product uses no PPP hooks.
+            (etc / "ipv6-up").write_text('#!/bin/sh\nexec /usr/sbin/ip -6 route replace 2001:db8:80::/56 dev "$1"\n')
+            (etc / "ipv6-up").chmod(0o700)
         for name in (ns, acns, lan):
             run(["ip", "netns", "add", name])
             namespaces.append(name)
@@ -170,9 +213,90 @@ def peer(stage, auth, engine_archive):
         traffic()
         initial = record()
         assert set(initial["snapshot"]["dns_servers"]) == {"203.0.113.53"}
-        assert all(x["generation"] == 1 for x in modules().values())
+        assert all(x["generation"] == 1 for name, x in modules().items() if not dhcp6_server or name != "service.pd")
         assert link()["mtu"] == 1454
         print("PASS native " + auth + ": negotiated DNS, LAN TCP/UDP, MTU 1454, generation 1", flush=True)
+        if dhcp6_server:
+            peer_links = lambda: json.loads(run(["ip", "-n", acns, "-j", "-6", "addr", "show"]))
+            wait(lambda: any(x["ifname"].startswith("ppp") and x["addr_info"] for x in peer_links()))
+            ppp = next(x["ifname"] for x in peer_links() if x["ifname"].startswith("ppp"))
+            mac = json.loads(run(["ip", "-n", acns, "-j", "link", "show", "dev", "server0"]))[0]["address"]
+            (stage / "dhcp6.conf").write_text("default-lease-time 18;\npreferred-lifetime 12;\noption dhcp-renewal-time 5;\noption dhcp-rebinding-time 9;\nsubnet6 2001:db8:ffff::/64 {\n prefix6 2001:db8:80:: 2001:db8:80:f0:: /60;\n}\nserver-duid LL ethernet " + mac + ";\n")
+            run([str(dhcp6_server), "-6", "-t", "-cf", str(stage / "dhcp6.conf")])
+            (stage / "dhcp6.leases").touch()
+            run(["ip", "-n", acns, "-6", "addr", "add", "2001:db8:ffff::20/128", "dev", "lo"])
+            start(acns, ["python3", "-u", "-m", "http.server", "18080", "--bind", "2001:db8:ffff::20", "--directory", str(etc)], "http6")
+            start(acns, ["python3", "-u", "-c", 'import socket\ns=socket.socket(socket.AF_INET6,socket.SOCK_DGRAM);s.bind(("2001:db8:ffff::20",18081))\nwhile True:\n b,a=s.recvfrom(4096);s.sendto(b,a)'], "udp6")
+            server = dhcp6_start()
+            ipv6_traffic()
+            first = pd_record()
+            duid = first["snapshot"]["client_duid"]
+            assert duid.startswith("0004") and len(duid) == 36
+            print("PASS PPP IPv6CP, ISC DHCP IA_PD, generated LAN RA/SLAAC, routed IPv6 TCP/UDP", flush=True)
+            wait(lambda: pd_record()["snapshot"]["renew_at"] != first["snapshot"]["renew_at"], 12)
+            ipv6_traffic()
+            print("PASS real ISC DHCP Renew extended the delegated prefix", flush=True)
+            old = modules()["service.pd"]
+            os.kill(old["pid"], signal.SIGKILL)
+            wait(lambda: modules()["service.pd"]["generation"] > old["generation"] and pd_bound())
+            assert pd_record()["snapshot"]["client_duid"] == duid
+            ipv6_traffic()
+            print("PASS DHCPv6 worker replacement reused persisted DUID and restored routed traffic", flush=True)
+            stale = {k: first[k] for k in ["supervisor_instance", "name", "role", "config_digest", "generation", "producer_epoch", "sequence", "snapshot"]}
+            assert "stale" in json.dumps(api("control.sock", "/v1/services/state", stale)).lower()
+            print("PASS old DHCPv6 worker notification rejected", flush=True)
+            saved = modules()
+            frozen = [saved["control"]["pid"], saved["service.internet"]["pid"]]
+            for pid in frozen:
+                os.kill(pid, signal.SIGSTOP)
+            wait(lambda: not routed() and not routed6(), 8)
+            assert link() is not None
+            assert subprocess.run(inside(lan, ["curl", "--noproxy", "*", "--max-time", "1", "-sS", "http://[2001:db8:ffff::20]:18080/"]), capture_output=True).returncode != 0
+            for pid in frozen:
+                os.kill(pid, signal.SIGCONT)
+            frozen = []
+            wait(lambda: routed() and routed6())
+            # The normal five-second watchdog can replace the frozen cohort.
+            # ISC DHCP binds a specific PPP ifindex and must follow that peer
+            # session replacement too; it cannot serve through its old socket.
+            server.terminate()
+            server.wait(timeout=5)
+            server = dhcp6_start()
+            ipv6_traffic()
+            print("PASS original PPP deadline withdrew both family routes; supervision recovery and peer rebind restored IPv6 traffic", flush=True)
+            # The independent server binds this peer's PPP interface. Restart
+            # it with the recreated access session, preserving its lease file.
+            server.terminate()
+            server.wait(timeout=5)
+            previous, old_index = modules()["service.internet"], link()["ifindex"]
+            os.kill(previous["pid"], signal.SIGKILL)
+            wait(lambda: link() is not None and link()["ifindex"] != old_index and modules()["service.internet"]["generation"] > previous["generation"], 35)
+            server = dhcp6_start()
+            ipv6_traffic()
+            assert pd_record()["snapshot"]["client_duid"] == duid
+            print("PASS PPP worker/session replacement reacquired PD with the same DUID and restored IPv6 TCP/UDP", flush=True)
+            server.terminate()
+            server.wait(timeout=5)
+            wait(lambda: not delegated(), 24)
+            wait(lambda: not client_addresses())
+            print("PASS server silence expired router and independent SLAAC client prefixes", flush=True)
+            server = dhcp6_start()
+            ipv6_traffic()
+            assert pd_record()["snapshot"]["client_duid"] == duid
+            print("PASS independent ISC DHCP restart reacquired PD and restored IPv6 TCP/UDP", flush=True)
+            stable = modules()["service.internet"]
+            stable_index = link()["ifindex"]
+            trial = copy.deepcopy(configuration)
+            next(r for r in trial["resources"] if r["id"] == "internet")["service"]["pppoe"]["default_route"] = False
+            api("control.sock", "/v1/config/commit", {"expected_revision": 1, "request_id": "pppoe-dual-family-route-trial", "config": trial, "confirm_timeout_seconds": 5})
+            wait(lambda: not routed() and not routed6(), 3)
+            assert subprocess.run(inside(lan, ["curl", "--noproxy", "*", "--max-time", "1", "-sS", "http://[2001:db8:ffff::20]:18080/"]), capture_output=True).returncode != 0
+            wait(lambda: api("control.sock", "/v1/config")["revision"] == 3 and routed() and routed6(), 12)
+            ipv6_traffic()
+            traffic()
+            assert link()["ifindex"] == stable_index and modules()["service.internet"]["generation"] == stable["generation"]
+            print("PASS confirmed rollback restored both family routes and TCP/UDP without replacing the PPP session", flush=True)
+            return
         probe.terminate()
         probe.wait(timeout=3)
         wait(lambda: not selected())
@@ -241,7 +365,7 @@ def peer(stage, auth, engine_archive):
             print("rules", run(["ip", "-n", ns, "-j", "rule", "show"]), flush=True)
         except (OSError, subprocess.SubprocessError):
             pass
-        for name in ("console", "ac", "capture"):
+        for name in ("console", "ac", "capture", "dhcp6", "http6", "udp6"):
             p = stage / (name + ".log")
             if p.exists():
                 print(name, p.read_text(), flush=True)
@@ -279,9 +403,10 @@ def main():
     parser.add_argument("--binary-dir", type=Path, default=Path("dist/bin"))
     parser.add_argument("--output", type=Path, default=Path("dist/pppoe-peer"))
     parser.add_argument("--engine-archive", type=Path, help="Docker-exported distribution with pppd and its actual dependencies")
+    parser.add_argument("--dhcp6-server", type=Path, help="Run PPP DHCPv6 PD against this independent ISC dhcpd executable")
     args = parser.parse_args()
     if args.inside:
-        peer(args.inside, args.auth, args.engine_archive)
+        peer(args.inside, args.auth, args.engine_archive, args.dhcp6_server)
         return
     args.output.mkdir(parents=True, exist_ok=True)
     root = [] if os.geteuid() == 0 else ["sudo", "-n"]
@@ -294,6 +419,9 @@ def main():
         if args.engine_archive:
             run(root + ["install", "-m", "400", str(args.engine_archive.resolve()), stage + "/engine.tar"])
             profile_args = ["--engine-archive", stage + "/engine.tar"]
+        if args.dhcp6_server:
+            run(root + ["install", "-m", "500", os.path.abspath(args.dhcp6_server), stage + "/dhcpd"])
+            profile_args += ["--dhcp6-server", stage + "/dhcpd"]
         for auth in ((args.auth,) if args.auth else ("pap", "chap")):
             directory = stage + "/" + auth
             run(root + ["mkdir", "-m", "700", directory])

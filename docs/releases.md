@@ -40,7 +40,11 @@ The release identity record remains V1; its format is independent of manifest
 version and the runtime ABI record envelope.
 
 The current declaration has configuration schema 2 and semantics contract
-`resource-program-native-23`. Boot ABI is 1 and worker ABI is 3. Explicit
+`resource-program-native-24`. Boot ABI is 1 and worker ABI is 3. PPP observations
+include negotiated IPv6 link-local readiness; the writer derives finite default
+routes only for negotiated address families. DHCPv6 on non-Ethernet links
+persists DUID-UUID identities. PPP route intent stays outside the worker
+configuration, so route-only changes do not replace the session. Explicit
 multihop BFD uses committed local sources and routed UDP 4784 endpoint pairs;
 single-hop retains its device-bound UDP 3784 scope. VRRP tracking
 resolves declared resource IDs, shares finite Health/BFD/BGP observations, and

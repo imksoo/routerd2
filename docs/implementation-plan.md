@@ -635,7 +635,17 @@ supervisor/control/network/PPPoE worker を接続した。独立 RP-PPPoE 3.15 /
 PAP/CHAP、DNS、MTU 1454、LAN TCP/UDP、IPv6CP link-local、元の観測期限での撤去、
 worker 強制終了・古い通知・認証拒否/修復・AC 停止/復旧を確認した。
 `make check-pppoe` で実 daemon と packet capture を再実行する。
-engine の配布・署名・依存 library、PPP 上の PD、DNS の resolver 適用、完全な旧 field、
+2026-10-27追加: Ethernet MACのないPPPで自動DUID生成が失敗することを実接続で確認し、
+永続DUID-UUIDを追加した。IPv6CPの使用可能なlink-localも観測し、writerは元のPPP期限で
+交渉済みfamilyの既定経路を作る。`default_route`・`table`・`metric`は両family共通である。
+独立ISC DHCP 4.4.3-P1でPD /60→LAN /64のRA→Linux SLAAC端末のIPv6 TCP/UDP、
+実Renew、DHCPv6 worker再起動時のDUID維持、サーバー無応答によるrouter/clientの失効と復旧を通した。
+通常DADを使い、`make check-pppoe-pd DHCP6_SERVER=/path/to/dhcpd`で再実行する。
+最終native-24版のPAP/CHAPで、PPP再接続・元期限での両family既定経路撤去・古いDHCPv6通知拒否も通した。
+route intentをworker configから除き、5秒confirmed rollbackで両family経路とTCP/UDPを復旧しても
+PPP ifindex・worker世代を維持する。実PPPoE frameのRenew、IPv6 TCP/UDP、MSS1394を確認した。
+独立dhcpdは相手PPPの再作成時に新ifindexへ再bindする。製品側のPPP hookや手動修復は使わない。
+engine の配布・署名・依存 library、DNS の resolver 適用、完全な旧 field、
 完全なMTU/fragment policyと実 ISP は未完了。[ADR 0002](adr/0002-pppoe-engine.md) を参照。
 
 範囲: 旧 routerd 互換 / track: network / risk: high。
