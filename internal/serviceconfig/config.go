@@ -15,6 +15,7 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/bgpconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp4"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
+	"github.com/imksoo/routerd2/internal/protocol/dhcp6serverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dhcprelayconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
@@ -26,20 +27,21 @@ import (
 )
 
 type Service struct {
-	PPPoE      *PPPoE                   `json:"pppoe,omitempty"`
-	Health     *health.Config           `json:"health,omitempty"`
-	BFD        *bfd.Config              `json:"bfd,omitempty"`
-	DSLite     *DSLite                  `json:"ds_lite,omitempty"`
-	RAClient   *RAClient                `json:"ra_client,omitempty"`
-	DHCPServer *DHCPServer              `json:"dhcp_server,omitempty"`
-	DHCPRelay  *dhcprelayconfig.Config  `json:"dhcp_relay,omitempty"`
-	BGP        *BGP                     `json:"bgp,omitempty"`
-	Name       string                   `json:"name"`
-	DHCP4      *DHCP4                   `json:"dhcp4,omitempty"`
-	DHCP6      *DHCP6                   `json:"dhcp6,omitempty"`
-	RA         *ra.Config               `json:"ra,omitempty"`
-	DNS        *dnsconfig.RuntimeConfig `json:"dns,omitempty"`
-	VRRP       *vrrp.Config             `json:"vrrp,omitempty"`
+	DHCP6Server *DHCP6Server             `json:"dhcp6_server,omitempty"`
+	PPPoE       *PPPoE                   `json:"pppoe,omitempty"`
+	Health      *health.Config           `json:"health,omitempty"`
+	BFD         *bfd.Config              `json:"bfd,omitempty"`
+	DSLite      *DSLite                  `json:"ds_lite,omitempty"`
+	RAClient    *RAClient                `json:"ra_client,omitempty"`
+	DHCPServer  *DHCPServer              `json:"dhcp_server,omitempty"`
+	DHCPRelay   *dhcprelayconfig.Config  `json:"dhcp_relay,omitempty"`
+	BGP         *BGP                     `json:"bgp,omitempty"`
+	Name        string                   `json:"name"`
+	DHCP4       *DHCP4                   `json:"dhcp4,omitempty"`
+	DHCP6       *DHCP6                   `json:"dhcp6,omitempty"`
+	RA          *ra.Config               `json:"ra,omitempty"`
+	DNS         *dnsconfig.RuntimeConfig `json:"dns,omitempty"`
+	VRRP        *vrrp.Config             `json:"vrrp,omitempty"`
 }
 
 // PPPoE keeps route intent with the network projection. These fields do not
@@ -83,6 +85,7 @@ type Delegation struct {
 	SubnetID              uint64   `json:"subnet_id,omitempty"`
 	HostID                uint64   `json:"host_id,omitempty"`
 	Advertise             bool     `json:"advertise,omitempty"`
+	OtherConfig           bool     `json:"other_config,omitempty"`
 	RouterLifetimeSeconds *int     `json:"router_lifetime_seconds,omitempty"`
 	RDNSS                 []string `json:"rdnss,omitempty"`
 	DNSSL                 []string `json:"dnssl,omitempty"`
@@ -107,6 +110,9 @@ var safeName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,23}$`)
 var interfaceName = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]{0,14}$`)
 
 func (s Service) Role() string {
+	if s.DHCP6Server != nil {
+		return "dhcp6_server"
+	}
 	if s.PPPoE != nil {
 		return "pppoe"
 	}
@@ -150,6 +156,9 @@ func (s Service) Role() string {
 }
 func (s Service) ModuleName() string { return "service." + s.Name }
 func (s Service) Interface() string {
+	if s.DHCP6Server != nil {
+		return s.DHCP6Server.Interface
+	}
 	if s.PPPoE != nil {
 		return s.PPPoE.Interface
 	}
@@ -198,7 +207,7 @@ func Validate(services []Service) error {
 		}
 		names[s.Name] = true
 		n := 0
-		for _, set := range []bool{s.PPPoE != nil, s.Health != nil, s.BFD != nil, s.DSLite != nil, s.RAClient != nil, s.DHCPServer != nil, s.DHCPRelay != nil, s.DHCP4 != nil, s.DHCP6 != nil, s.RA != nil, s.DNS != nil, s.VRRP != nil, s.BGP != nil} {
+		for _, set := range []bool{s.PPPoE != nil, s.Health != nil, s.BFD != nil, s.DSLite != nil, s.RAClient != nil, s.DHCPServer != nil, s.DHCP6Server != nil, s.DHCPRelay != nil, s.DHCP4 != nil, s.DHCP6 != nil, s.RA != nil, s.DNS != nil, s.VRRP != nil, s.BGP != nil} {
 			if set {
 				n++
 			}
@@ -284,6 +293,10 @@ func Validate(services []Service) error {
 				return errors.New("invalid RA client route metric/table")
 			}
 			if err := raclient.Validate(s.RAClientConfig("/var/lib/routerd")); err != nil {
+				return err
+			}
+		case "dhcp6_server":
+			if err := dhcp6serverconfig.Validate(s.DHCP6ServerConfig("/var/lib/routerd")); err != nil {
 				return err
 			}
 		case "dhcp_server":
@@ -401,6 +414,9 @@ func Validate(services []Service) error {
 	if err := validateBFDReferences(services); err != nil {
 		return err
 	}
+	if err := validateDHCP6Servers(services); err != nil {
+		return err
+	}
 	if err := validateDHCPRA(services); err != nil {
 		return err
 	}
@@ -451,6 +467,8 @@ func (s Service) Instance(runtimeDir, stateDir string) (Instance, error) {
 		b, err = json.Marshal(DSLiteInstance{Protocol: s.AFTRConfig(), Intent: *s.DSLite})
 	case "ra_client":
 		b, err = json.Marshal(s.RAClientConfig(stateDir))
+	case "dhcp6_server":
+		b, err = json.Marshal(s.DHCP6ServerConfig(stateDir))
 	case "dhcp_server":
 		b, err = json.Marshal(s.DHCPServerConfig(runtimeDir, stateDir))
 	case "dhcp_relay":

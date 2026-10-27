@@ -31,6 +31,7 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/bgpconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp4"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
+	"github.com/imksoo/routerd2/internal/protocol/dhcp6serverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/health"
 	"github.com/imksoo/routerd2/internal/protocol/pppoeconfig"
@@ -505,7 +506,7 @@ func (r *Runtime) observe(ctx context.Context, u serviceconfig.Update) (*pending
 		return nil, r.acceptBFD(ctx, u)
 	}
 	var producerStatus *supervisor.Status
-	if u.Role == "bgp" || u.Role == "dhcp4" || u.Role == "dhcp6" || u.Role == "ra" || u.Role == "vrrp" || u.Role == "dhcp_server" || u.Role == "pppoe" || u.Role == "aftr" {
+	if u.Role == "bgp" || u.Role == "dhcp4" || u.Role == "dhcp6" || u.Role == "ra" || u.Role == "vrrp" || u.Role == "dhcp_server" || u.Role == "dhcp6_server" || u.Role == "pppoe" || u.Role == "aftr" {
 		// A restarted control has no remembered generations. Authenticate even
 		// its first publication against the current process-tree registry;
 		// initial publication precedes worker Ready, so Ready is not required.
@@ -712,6 +713,20 @@ func validateSnapshot(instance serviceconfig.Instance, b json.RawMessage) error 
 			return err
 		}
 		return bfd.ValidateSnapshot(cfg, snapshot)
+	case "dhcp6_server":
+		var cfg dhcp6serverconfig.Config
+		var s dhcp6serverconfig.Snapshot
+		if err := strict(instance.Config, &cfg); err != nil {
+			return err
+		}
+		if err := strict(b, &s); err != nil {
+			return err
+		}
+		if s.Resource != cfg.Resource || s.Interface != cfg.Interface {
+			return errors.New("DHCPv6 server snapshot identity mismatch")
+		}
+		_, err := dhcp6config.ParseDUID(s.ServerDUID)
+		return err
 	case "ra_client":
 		var cfg raclient.Config
 		var snapshot raclient.Snapshot
@@ -814,6 +829,7 @@ func (r *Runtime) Handler() http.Handler {
 	r.lifecycleRoutes(mux)
 	r.observationRoutes(mux)
 	r.aftrRoutes(mux)
+	r.dhcp6ServerRoutes(mux)
 	r.bfdRoutes(mux)
 	mux.HandleFunc("GET /v1/services", func(w http.ResponseWriter, req *http.Request) { localapi.JSON(w, 200, r.State()) })
 	mux.HandleFunc("POST /v1/services/state", func(w http.ResponseWriter, req *http.Request) {

@@ -5,7 +5,49 @@
 [機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を参照する。
 実行順序はhomert02/03、実態を確認したk8s-rt/pve-rt、その後既存文書に基づくCloud SAM。
 
-## 現在の変更: dhcp6-confirm / native-35
+## 現在の変更: dhcp6-serving / native-36
+
+旧routerdの`pkg/render/dnsmasq.go`・`pkg/controller/chain/phase2.go`と、
+`pkg/state/freebsd_duid.go`・`pkg/pdclient/snapshot.go`のDUID/lease保持を比較した。
+LANのstateless DHCPv6 serverを実supervisor/controlへ接続した。静的設定と学習値を分け、
+明示したDHCPv6/RA clientからDNS・検索ドメイン・SNTPを元のboot期限で配る。
+WANのlink-local情報を別LANへ転送せず、一項目の失効で静的設定を消さない。
+server DUIDは配信前に原子的に保存し、再生成時も再利用する。WAN clientのDUID/IAIDとは別所有。
+PD生成RAには明示`delegations[].other_config`を加え、情報取得を促すOフラグを宣言できる。
+compiler native-36、worker ABI5、network journal11、DHCPv6 checkpoint2。旧形式readerは追加しない。
+
+PVE Linux6.8/amd64の隔離namespace、実製品workerとBusyBox1.36.1 `udhcpc6 -l`で
+DNS/検索ドメイン取得、capture上のSNTP/refreshとDUIDを確認した。worker SIGKILL・
+control交換・daemon全体再起動でも同じserver DUIDと実client応答を確認した。
+独立ISC DHCP4.4.3-P1・radvd2.19・Linux SLAAC端末のIA_NA/PD試験にも接続し、
+PD由来情報によるLAN UDP/TCP DNS、IPv6 TCP/UDP、元期限失効・静的情報保持・再取得が通った。
+LAN captureではPD生成RAのOフラグと学習SNTPも確認した。端末OSの自動DHCPv6起動の受入は残る。
+control停止中の期限前/後に同じserverへ実requestを送り、学習情報だけが消えることを確認した。
+通常DADを使い、製品側やLAN端末の経路を手動注入しない。
+再実行は`make check-dhcp6-server`と
+`make check-dhcp6-ra-pd DHCP6_SERVER=/path/to/isc/dhcpd RELEASE_ID=dhcp6-serving`。
+
+初回の確認スクリプトはBusyBoxの通知名とIPv6表示を誤認していたため、peerの実通知に合わせ、
+addressを解析して比較するよう修正した。controlの長時間停止ではsupervisorが回復を開始し、
+supervisorも停止すると再開時にheartbeat期限で子を交換するため、その試行を期限試験の成功に含めない。
+期限直前からcontrolだけを止め、監視は稼働したまま、元期限を跨ぐ二つの応答を確認した。
+control交換時は既存方針に従い動的workerを再生成する。稼働worker維持を求める新しい制約や、
+そのための状態再送goroutineは追加していない。PD再取得の通知だけでは周期的なLAN入力更新は
+完了していないため、実clientの受信を待ってからDNS通信を判定する。
+
+最終`make check`はGo/Python、Race Detector、vetまで通った。非公開名の整理後も関連packageを
+再確認し、`make build build-publisher build-linux RELEASE_ID=dhcp6-serving`でamd64/arm64の
+6静的ELFを生成した。最終6 ELFの`release-built-test`署名catalog/publisher/stageもRace Detectorで成功。
+最初のpublisher試行は入力copyのgroup書込み権限を理由に拒否された。検査を緩めず、home配下の
+private一時directoryへcopyし、ファイルを0755にして再実行した。copy/bundleは確認後削除した。
+ARM64では実行していない。新しいLAN機能を含む最新版の外部回線/実ONU試験はまだ行っていない。
+
+学習情報のサーバー送信停止は、受信済みclient cacheの即時撤回ではない。
+stateful/both/RA-only・Rapid Commit・Reconfigure・旧resource import・HA条件、
+実link変更・別boot・最新版の実ONU/対象NIC受入と全34 packageの残作業は未完了。
+生ログ・capture・一時binaryは確認後削除し、無用な試験互換処理を残さない。
+
+## 直前の変更: dhcp6-confirm / native-35
 
 旧routerdのnetworkd IA_NA生成、DUID/PD保存・Restoreを再確認した。PD/RA連動を
 独立ISC DHCP4.4.3-P1/radvd2.19と別Linux SLAAC端末で接続し、M解除中のPD取得→MでIA_NA追加、

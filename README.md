@@ -17,7 +17,7 @@ Alpineのパッケージをビルドとイメージ組み立てに利用しま�
 | logging | journald を使わない独立ログプロセス、構造化ログ、回転・復旧、bounded queue、console fallback、appliance の `/dev/kmsg` 収集。ログ障害を必須ルーティングプロセスの停止条件にしない |
 | network | Netlink による IPv4/IPv6、有限アドレス寿命、静的経路・ECMP、policy routing、bridge/VLAN/VRF/VXLAN/macvlan/dummy、MTU・リンク・forwarding。nftables の INPUT/OUTPUT/FORWARD ACL、DNAT/SNAT/masquerade とポート範囲 |
 | WAN | native DHCPv4、DHCPv6 IA_PD / Information-request、DUID/IAID とリースの永続化、renew/rebind/失効。WAN RA クライアント、SLAAC、default/RIO/on-link routes、RDNSS/DNSSL。PD から LAN /64 を割り当て、旧 prefix を deprecated で維持 |
-| DHCP server | native DHCPv4、scope・予約・sticky lease、ARP conflict probe、信頼する relay の限定、永続 journal を保存してから ACK。worker 再起動後の INIT-REBOOT / renew に対応 |
+| DHCP server | stateless DHCPv6でDNS・検索ドメイン・SNTPを配布し、学習元の期限と永続DUIDを保持。native DHCPv4、scope・予約・sticky lease、ARP conflict probe、信頼する relay の限定、永続 journal を保存してから ACK。worker 再起動後の INIT-REBOOT / renew に対応 |
 | RA | native ICMPv6、RS 応答、RDNSS/DNSSL、絶対寿命、PD 更新時に同じプロセス・socket で prefix を変更。削除した prefix だけを withdraw |
 | DS-Lite | kernel IPv4-in-IPv6、B4 アドレス、IPv4 route。明示した RA/DHCPv6 依存から AFTR を IPv6 DNS で解決し、source・情報・DNS TTL の期限に従って接続・更新・撤去 |
 | VRRPv3 | native IPv4/IPv6 election、VMAC、GARP/NA、preempt、優先度、有限 ownership lease、NoDAD の明示 VIP、Accept_Mode の入力制御 |

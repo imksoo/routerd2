@@ -3,17 +3,22 @@
 package integration
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
@@ -25,7 +30,7 @@ import (
 )
 
 func TestDaemonDHCP6RAAddsAddressToPD(t *testing.T) {
-	if !isolateFixtureTimeout(t, "TestDaemonDHCP6RAAddsAddressToPD", 100*time.Second) {
+	if !isolateFixtureTimeout(t, "TestDaemonDHCP6RAAddsAddressToPD", 140*time.Second) {
 		return
 	}
 	provider := fixturePeerNamespace(t, "wire0", "server0")
@@ -73,11 +78,12 @@ func TestDaemonDHCP6RAAddsAddressToPD(t *testing.T) {
 	}
 	vrrpVIPResponders(t, provider, "6", []string{"2001:db8:ffff::9"}, "A")
 	wan := healthPBRCapture(t, "wire0")
-	healthPBRCapture(t, "lan0")
+	lan := healthPBRCapture(t, "lan0")
 	bridge := "wan0"
 	doc := config.Native{Network: network.Desired{Links: []network.Link{{Name: bridge, Kind: "bridge"}}, Interfaces: []network.Interface{{Name: "wire0", Master: &bridge}, {Name: "dup0", Master: &bridge}, {Name: "wan0"}, {Name: "lan0"}}, Forwarding: network.Forwarding{IPv6: new(true)}}, Services: []serviceconfig.Service{
+		{Name: "lan-info", DHCP6Server: &serviceconfig.DHCP6Server{Interface: "lan0", OptionsFrom: []string{"wan"}, DomainSearch: []string{"local.test"}}},
 		{Name: "wan-ra", RAClient: &serviceconfig.RAClient{Interface: "wan0", SLAAC: new(false)}},
-		{Name: "wan", DHCP6: &serviceconfig.DHCP6{Interface: "wan0", RAFrom: "wan-ra", IAID: 7, RequestPrefix: true, RequestAddress: true, PrefixLength: 60, Delegations: []serviceconfig.Delegation{{Name: "lan", Interface: "lan0", Advertise: true}}}},
+		{Name: "wan", DHCP6: &serviceconfig.DHCP6{Interface: "wan0", RAFrom: "wan-ra", IAID: 7, RequestPrefix: true, RequestAddress: true, PrefixLength: 60, Delegations: []serviceconfig.Delegation{{Name: "lan", Interface: "lan0", Advertise: true, OtherConfig: true}}}},
 	}}
 	f := startFixtureDaemon(t, config.FromNative(doc))
 	until(t, 5*time.Second, func() bool {
@@ -129,12 +135,13 @@ func TestDaemonDHCP6RAAddsAddressToPD(t *testing.T) {
 		t.Fatal("independent ISC DHCP server required")
 	}
 	cf, leases := filepath.Join(work, "dhcp6.conf"), filepath.Join(work, "dhcp6.leases")
-	if err := os.WriteFile(cf, []byte("default-lease-time 30; preferred-lifetime 20; option dhcp-renewal-time 10; option dhcp-rebinding-time 20; subnet6 2001:db8:42::/64 { range6 2001:db8:42::100 2001:db8:42::101; prefix6 2001:db8:80:: 2001:db8:80:f0:: /60; }\n"), 0600); err != nil {
+	if err := os.WriteFile(cf, []byte("default-lease-time 30; preferred-lifetime 20; option dhcp-renewal-time 10; option dhcp-rebinding-time 20; option dhcp6.name-servers 2001:db8:42::1; option dhcp6.domain-search \"wan.test\"; option dhcp6.sntp-servers 2001:db8:42::1; subnet6 2001:db8:42::/64 { range6 2001:db8:42::100 2001:db8:42::101; prefix6 2001:db8:80:: 2001:db8:80:f0:: /60; }\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(leases, nil, 0600); err != nil {
 		t.Fatal(err)
 	}
+	startFixtureDNSMasq(t, provider, []string{"--port=53", "--no-resolv", "--no-hosts", "--address=/wan.test/2001:db8:ffff::9"})
 	server := start("isc", isc, "-6", "-f", "-d", "-cf", cf, "-lf", leases, "-pf", filepath.Join(work, "dhcp6.pid"), "server0")
 	raPath := filepath.Join(work, "radvd.conf")
 	advertise := func(managed bool) {
@@ -229,6 +236,28 @@ func TestDaemonDHCP6RAAddsAddressToPD(t *testing.T) {
 		}
 	}
 	traffic()
+	information := func() {
+		t.Helper()
+		// WAN acquisition precedes the server's periodic input refresh. Wait for
+		// its actual client-visible options, not just the producer's bound state.
+		var got dhcp6FixtureInformation
+		until(t, 4*time.Second, func() bool {
+			got = fixtureDHCP6Information(t, client, "client0")
+			return slices.Equal(got.dns, []netip.Addr{netip.MustParseAddr("2001:db8:42::1")}) && slices.Contains(got.search, "wan.test") && slices.Contains(got.search, "local.test")
+		})
+		if err := fixtureInsideNamespace(client, func() error {
+			for _, transport := range []string{"+notcp", "+tcp"} {
+				answer, err := exec.Command("dig", "-6", "@"+got.dns[0].String(), "host.wan.test", "AAAA", "+short", "+time=2", "+tries=1", transport).CombinedOutput()
+				if err != nil || !strings.Contains(string(answer), "2001:db8:ffff::9") {
+					return fmt.Errorf("client DNS %s: %v: %s", transport, err, answer)
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	information()
 	changed := time.Now()
 	advertise(true)
 	if err := router.Process.Signal(unix.SIGHUP); err != nil {
@@ -336,6 +365,7 @@ func TestDaemonDHCP6RAAddsAddressToPD(t *testing.T) {
 		return current.State == "bound" && len(current.Prefixes) == 1 && len(current.Addresses) > 0 && current.Prefixes[0].ValidUntil.Nanos > retained.Prefixes[0].ValidUntil.Nanos
 	})
 	traffic()
+	information()
 	wan.mu.Lock()
 	combined := false
 	for _, packet := range wan.packets {
@@ -361,6 +391,92 @@ func TestDaemonDHCP6RAAddsAddressToPD(t *testing.T) {
 	if !combined {
 		t.Fatal("no actual request carried both IA_NA and IA_PD with the shared IAID")
 	}
+	// Freeze the original authority and input owner. The information server
+	// must expire its learned bytes itself while static search remains usable.
+	if err := unix.Kill(server.Process.Pid, unix.SIGSTOP); err != nil {
+		t.Fatal(err)
+	}
+	clock, err := boottime.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline, live := current.InformationUntil(clock)
+	if !live {
+		t.Fatal("no live information grant", current)
+	}
+	if err := f.supervisor.Do(ctx, "GET", "/v1/status", nil, &modules); err != nil {
+		t.Fatal(err)
+	}
+	controlPID := 0
+	for _, m := range modules.Modules {
+		if m.Name == "control" {
+			controlPID = m.PID
+		}
+	}
+	if controlPID == 0 {
+		t.Fatal("missing control")
+	}
+	// Leave the supervisor running. Pause control shortly before the finite
+	// deadline so both client requests fit inside its real heartbeat budget.
+	until(t, 35*time.Second, func() bool {
+		clock, err := boottime.Read()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return deadline.Nanos != 0 && uint64(clock.BoottimeNanoseconds)+uint64(2*time.Second) >= deadline.Nanos
+	})
+	if err := unix.Kill(controlPID, unix.SIGSTOP); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = unix.Kill(controlPID, unix.SIGCONT) })
+	beforeExpiry := fixtureDHCP6Information(t, client, "client0")
+	if !slices.Contains(beforeExpiry.search, "wan.test") || len(beforeExpiry.dns) != 1 {
+		t.Fatal("learned authority was absent before paused-control expiry", beforeExpiry)
+	}
+	until(t, 4*time.Second, func() bool {
+		clock, err := boottime.Read()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return !deadline.Live(clock)
+	})
+	got := fixtureDHCP6Information(t, client, "client0")
+	if len(got.dns) != 0 || !slices.Equal(got.search, []string{"local.test"}) {
+		t.Fatal("expired learned options survived or static search disappeared", got)
+	}
+	if err := unix.Kill(controlPID, unix.SIGCONT); err != nil {
+		t.Fatal(err)
+	}
+	if err := unix.Kill(server.Process.Pid, unix.SIGCONT); err != nil {
+		t.Fatal(err)
+	}
+	until(t, 12*time.Second, func() bool {
+		current = read()
+		return len(current.Prefixes) > 0 && current.Prefixes[0].ValidUntil.Nanos > deadline.Nanos
+	})
+	traffic()
+	information()
+	lan.mu.Lock()
+	learnedSNTP, otherConfig := false, false
+	for _, p := range lan.packets {
+		b := p.data
+		otherConfig = otherConfig || len(b) >= 70 && b[20] == 58 && b[54] == 134 && b[59]&0x40 != 0
+		if len(b) < 66 || b[20] != 17 || binary.BigEndian.Uint16(b[54:]) != 547 || binary.BigEndian.Uint16(b[56:]) != 546 || b[62] != 7 {
+			continue
+		}
+		opts, err := dhcp6FixtureOptions(b[66:])
+		if err != nil {
+			lan.mu.Unlock()
+			t.Fatal(err)
+		}
+		for _, o := range opts {
+			learnedSNTP = learnedSNTP || o.code == 31 && bytes.Equal(o.value, netip.MustParseAddr("2001:db8:42::1").AsSlice())
+		}
+	}
+	lan.mu.Unlock()
+	if !learnedSNTP || !otherConfig {
+		t.Fatal("missing learned SNTP or configured RA O flag", learnedSNTP, otherConfig)
+	}
 	f.stop()
-	t.Log("ISC/radvd: explicit PD before M, same-worker IA_NA addition, Linux duplicate/DAD/Decline without losing delegated LAN SLAAC/TCP/UDP, original combined grants after SIGKILL and Rebind recovery")
+	t.Log("ISC/radvd: explicit PD before M, same-worker IA_NA addition, Linux duplicate/DAD/Decline without losing delegated LAN SLAAC/TCP/UDP, original combined grants after SIGKILL and Rebind recovery; BusyBox PD-derived DNS/search with actual UDP/TCP DNS and original expiry during stopped control, static option retention and recovery")
 }

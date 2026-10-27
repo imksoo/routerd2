@@ -13,6 +13,7 @@ import (
 // A protocol plan belongs to one immutable source configuration. Observations
 // select its workers and supply live data; they do not rebuild worker identity.
 type protocolPlan struct {
+	dhcp6Servers map[string]dhcp6ServerPlan
 	instances    map[string]binding
 	leaseHA      map[string]leaseHAPlan
 	dhcp6RA      map[string]string
@@ -33,6 +34,7 @@ type leaseHAPlan struct {
 // worker-name collisions and the service/instance limits.
 func prepareProtocols(doc config.Native, runtimeDir, stateDir string) (protocolPlan, error) {
 	plan := protocolPlan{
+		dhcp6Servers: make(map[string]dhcp6ServerPlan),
 		instances:    make(map[string]binding),
 		leaseHA:      make(map[string]leaseHAPlan),
 		dhcp6RA:      make(map[string]string),
@@ -62,6 +64,13 @@ func prepareProtocols(doc config.Native, runtimeDir, stateDir string) (protocolP
 			plan.serviceLinks[service.VRRP.VIPInterface] = true
 		}
 		name := service.ModuleName()
+		if service.DHCP6Server != nil {
+			refs := make([]string, 0, len(service.DHCP6Server.OptionsFrom))
+			for _, name := range service.DHCP6Server.OptionsFrom {
+				refs = append(refs, "service."+name)
+			}
+			plan.dhcp6Servers[name] = dhcp6ServerPlan{iface: service.DHCP6Server.Interface, sources: refs}
+		}
 		if service.DHCP6 != nil && service.DHCP6.RAFrom != "" {
 			plan.dhcp6RA[name] = "service." + service.DHCP6.RAFrom
 		}
@@ -140,7 +149,7 @@ func prepareProtocols(doc config.Native, runtimeDir, stateDir string) (protocolP
 			if lan.RouterLifetimeSeconds != nil {
 				lifetime = *lan.RouterLifetimeSeconds
 			}
-			cfg := ra.Config{Resource: resource, Interface: lan.Interface, RouterLifetimeSeconds: lifetime, DNSSLifetimeSeconds: 1800, MinIntervalSeconds: 3, MaxIntervalSeconds: 10, RDNSS: unique(lan.RDNSS), DNSSL: unique(lan.DNSSL)}
+			cfg := ra.Config{Resource: resource, Interface: lan.Interface, OtherConfig: lan.OtherConfig, RouterLifetimeSeconds: lifetime, DNSSLifetimeSeconds: 1800, MinIntervalSeconds: 3, MaxIntervalSeconds: 10, RDNSS: unique(lan.RDNSS), DNSSL: unique(lan.DNSSL)}
 			plan.lanRA[module] = cfg
 			// All prefix and DNS data travels through the live RA input. Its
 			// immutable worker contains only the interface/template identity.

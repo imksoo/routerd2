@@ -943,6 +943,15 @@ host suffixもmanaged bindingへ変換する。native address maskは/64で、�
 
 #### NET-06 — LAN・DHCPv6・relay・DNS の resource 完全化
 
+2026-10-27 native-36: 旧dnsmasq servingとDUID保存を比較し、LAN stateless DHCPv6を追加した。
+静的DNS/検索ドメイン/SNTPと、明示したDHCPv6/RA clientの学習情報を別保持し、元のboot期限で配る。
+PD生成RAのOフラグは`delegations[].other_config`で明示する。
+BusyBoxの実Information-request/Reply、独立ISC/radvdのPD由来LAN UDP/TCP DNSとIPv6 TCP/UDP、
+control停止中の元期限失効・静的情報維持・復旧を確認した。通常DADを使い、生出力は削除する。
+実行条件と失敗した試行の範囲は[引き継ぎ](pve-codex-handoff.md)を参照する。
+stateful/both/RA-only・Rapid Commit・Reconfigure・旧server resource import・HA条件と
+最新の実ONU/対象NICでの受入は残り、NET-06全体を完了とはしない。
+
 2026-10-27 native-28: 学習DNSを`bootstrapResolverFrom`からhostname upstreamへ接続した。
 provider/targetの結合を設定時に準備し、観測を一度decodeしてsourceごとの順で配る。
 元期限・interface scopeを保ち、bootstrap失効時にhost DNSへ流さない。

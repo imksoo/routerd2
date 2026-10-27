@@ -136,6 +136,8 @@ func Run(ctx context.Context, runtimeDir, name, role, path, digest string, gener
 			return err
 		}
 		return dhcprelay.Run(runCtx, cfg, ready)
+	case "dhcp6_server":
+		return c.runDHCP6Server(runCtx, instance, digest, ready)
 	case "dhcp_server":
 		var cfg dhcpserver.Config
 		if err := decode(instance.Config, &cfg); err != nil {

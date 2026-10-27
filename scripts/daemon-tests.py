@@ -29,7 +29,8 @@ SUITES = {
         ("TestDaemonDHCP6RAIndependentPeers", ("wan0",), 300),
         ("TestDaemonDHCP6DuplicateAddressDecline", ("wire0",), 90),
     ),
-    "dhcp6-ra-pd": (("TestDaemonDHCP6RAAddsAddressToPD", ("wire0", "lan0"), 120),),
+    "dhcp6-server": (("TestDaemonDHCP6InformationIndependentClient", ("lan0",), 100),),
+    "dhcp6-ra-pd": (("TestDaemonDHCP6RAAddsAddressToPD", ("wire0", "lan0"), 160),),
     "pd-ra": (("TestDaemonPDGeneratedRAWorkerLifetime", ("wan0", "lan0"), 120),),
     "dhcp-relay": (
         ("TestDaemonDHCPRelayIndependentClientsAndServer", ("wan0", "lan0", "lan1"), 120),
