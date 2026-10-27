@@ -31,11 +31,11 @@ help:
 	  'make check             Format, unit tests, race detector, and vet' \
 	  'make check-dual-wan    Verify PPPoE/DS-Lite Health/PBR and TCP MSS with independent peers' \
 	  'make check-pppoe        Verify real PPPoE PAP/CHAP, LAN forwarding and recovery' \
-	  'make check-pppoe-pd     Verify PPP DHCPv6 PD and LAN IPv6 with independent ISC DHCP' \
+	  'make check-pppoe-pd     Verify PPP PD release, WAN replacement and LAN IPv6 with independent ISC DHCP' \
 	  'make check-health-pbr  Required two-WAN real-daemon TCP/UDP failover gate' \
 	  'make check-vrrp-unicast Verify VRRP peer failover and finite WAN identity' \
 	  'make check-bfd         Verify BFD/BGP routing domains with real workers' \
-	  'make check-dhcp6       Verify native IA_NA with independent dnsmasq' \
+	  'make check-dhcp6       Verify IA_NA and bounded Release with independent dnsmasq' \
 	  'make check-pd-ra       Verify PD renewal, generated RA and client traffic' \
 	  'make check-bgp         Verify actual BGP FIB, reporting failure and ownership expiry' \
 	  'make check-aftr        Verify AFTR input identity, DNS and tunnel expiry' \

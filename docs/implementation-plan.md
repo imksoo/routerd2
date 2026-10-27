@@ -739,8 +739,14 @@ RA→Release→同一transactionのReplyと同じDUIDの再取得/IPv6 TCP/UDP�
 独立dnsmasqではIA_NA停止時の/128撤去とRelease/Replyを確認した。実上流の短い通信試験でも
 LAN両family HTTPS/DNS・AFTR往復と、停止時のRA撤去・Release/Reply（送信元49153）が通った。
 先行capture判定の失敗原因は未確定であり、その実行は合格としない。
-複数割当/PDとのDAD共存、required/observe-only・RA trigger・resolver効果・無応答Release・
-WAN再設定・suspend/reboot・VRF・全link option/lifecycle・WAN選択は残り、NET-05全体は未完了。
+`fc76a4a`のPPP/PD同時削除の合格は、HTTP422を試験が無視していたため取り下げた。
+停止済みPPPの古いactive観測が消えたlinkへのrouteを追加する原因を修正し、現在の登録workerと
+一致する観測だけを投影する。既存依存グラフで子も先に停止し、HTTP200の同時削除・再取得と、
+PPPだけのMTU/MRU変更（1454→1452）でRelease→PADT→同じDUIDの再取得・両family TCP/UDPを確認した。
+独立dnsmasqのIA_NA無応答Releaseは、期限120秒に対して同じtransactionで4送信・Replyなし、
+13..22秒の停止・管理アドレス撤去が通った。fixtureの終了待ちだけを35秒にし、protocol期限は変えていない。
+複数割当/PDとのDAD共存、required/observe-only・RA trigger・resolver効果・全kernel-link再設定・
+control再起動中の解放・suspend/reboot・VRF・全link option/lifecycle・WAN選択は残り、NET-05全体は未完了。
 
 既存uplinkへ専用MAC/DUIDのmacvlanを隔離接続し、実上流RA・DHCPv4・PD /60と
 LAN kernel SLAAC端末のIPv4 NAT/委譲IPv6 HTTPS・UDP DNSを確認した。

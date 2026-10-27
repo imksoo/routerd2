@@ -294,6 +294,26 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 		for _, module := range instances.modules {
 			ceiling[module.Name] = module
 		}
+		r.mu.Lock()
+		// A retained child still belongs to the old dependency's lifetime.
+		// Drain it before replacing that owner, even if its own file is equal.
+		draining := make(map[string]bool)
+		for _, id := range r.config.plan.Order {
+			resource := r.config.resources[id]
+			if resource.Service != nil {
+				name := resource.Service.ModuleName()
+				old := r.config.protocols.instances[name]
+				next, retained := ceiling[name]
+				draining[id] = !retained || old.digest != next.ConfigDigest
+			}
+			for _, dependency := range r.config.plan.Dependencies[id] {
+				draining[id] = draining[id] || draining[dependency]
+			}
+			if draining[id] && resource.Service != nil {
+				delete(ceiling, resource.Service.ModuleName())
+			}
+		}
+		r.mu.Unlock()
 		if err := r.wait(ctx, ceiling); err != nil {
 			return r.failure(err)
 		}

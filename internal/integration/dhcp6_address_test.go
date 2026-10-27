@@ -234,6 +234,55 @@ func TestDaemonDHCP6AddressIndependentServer(t *testing.T) {
 		}
 		return false
 	})
+	// The independent server keeps the new lease for 120 seconds but cannot
+	// answer Release. Exercise the real retry/shutdown budget before expiry.
+	f = f.restart()
+	until(t, 12*time.Second, func() bool {
+		current, _ = snapshot()
+		return len(current.Addresses) > 0 && installed(current.Addresses[0].Address)
+	})
+	if current.ClientDUID != first.ClientDUID {
+		t.Fatal("daemon restart changed DHCPv6 identity")
+	}
+	address = current.Addresses[0].Address
+	if err := unix.Kill(server.Process.Pid, unix.SIGSTOP); err != nil {
+		t.Fatal(err)
+	}
+	shutdown = time.Now()
+	f.stop()
+	if elapsed := time.Since(shutdown); elapsed < 13*time.Second || elapsed > 22*time.Second {
+		t.Fatal("unanswered Release did not use its bounded four-transmission exchange", elapsed)
+	}
+	if installed(address) {
+		t.Fatal("unanswered Release retained its IA_NA address", address)
+	}
+	var transaction []byte
+	transmissions, replies := 0, 0
+	capture.mu.Lock()
+	for _, packet := range capture.packets {
+		b := packet.data
+		if packet.at.Before(shutdown) || len(b) < 66 || b[20] != 17 {
+			continue
+		}
+		if b[54] == 2 && b[55] == 34 && b[56] == 2 && b[57] == 35 && b[62] == 8 {
+			if transaction != nil && !bytes.Equal(transaction, b[63:66]) {
+				t.Error("Release retransmission changed transaction")
+			}
+			transaction = b[63:66]
+			transmissions++
+		}
+		if transaction != nil && b[54] == 2 && b[55] == 35 && b[56] == 2 && b[57] == 34 && b[62] == 7 && bytes.Equal(transaction, b[63:66]) {
+			replies++
+		}
+	}
+	capture.mu.Unlock()
+	if transmissions != 4 || replies != 0 {
+		t.Fatal("unanswered Release wire exchange", transmissions, replies)
+	}
+	if err := unix.Kill(server.Process.Pid, unix.SIGCONT); err != nil {
+		t.Fatal(err)
+	}
+	t.Log("paused dnsmasq: four Release transmissions with one transaction, no matching Reply, bounded shutdown and no retained address")
 	t.Log("dnsmasq IA_NA: source-bound TCP/UDP, stable restart identity, Renew/Rebind/expiry/recovery and graceful kernel withdrawal with link-local Release/Reply")
 }
 

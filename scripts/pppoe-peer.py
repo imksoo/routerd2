@@ -70,11 +70,17 @@ def peer(stage, auth, dhcp6_server):
         # signals; those numbers must never be used as host process IDs.
         run(["nsenter", "-t", str(pid1), "-m", "-p", "python3", "-c", "import os,sys;os.kill(int(sys.argv[1]),int(sys.argv[2]))", str(pid), str(int(sig))])
 
-    def api(sock, path, body=None):
-        args = ["curl", "--max-time", "3", "-sS", "--unix-socket", str(stage / "run" / sock), "http://localhost" + path]
+    def api(sock, path, body=None, timeout=3, status=200):
+        args = ["curl", "--max-time", str(timeout), "-w", "\n%{http_code}", "-sS", "--unix-socket", str(stage / "run" / sock), "http://localhost" + path]
         if body is not None:
             args += ["-X", "POST", "-H", "Content-Type: application/json", "--data", json.dumps(body)]
-        return json.loads(run(args))
+        response = subprocess.run(args, capture_output=True, text=True, timeout=timeout + 1)
+        if response.returncode:
+            raise RuntimeError(path + ": " + response.stdout.strip() + " " + response.stderr.strip())
+        content, actual = response.stdout.rsplit("\n", 1)
+        if actual != str(status):
+            raise RuntimeError(path + ": HTTP " + actual + " " + content)
+        return json.loads(content)
 
     def modules():
         return {x["name"]: x for x in api("supervisor.sock", "/v1/status")["modules"]}
@@ -300,7 +306,7 @@ def peer(stage, auth, dhcp6_server):
             ipv6_traffic()
             print("PASS DHCPv6 worker replacement reused persisted DUID and restored routed traffic", flush=True)
             stale = {k: first[k] for k in ["supervisor_instance", "name", "role", "config_digest", "generation", "producer_epoch", "sequence", "snapshot"]}
-            assert "stale" in json.dumps(api("control.sock", "/v1/services/state", stale)).lower()
+            assert "stale" in json.dumps(api("control.sock", "/v1/services/state", stale, status=409)).lower()
             print("PASS old DHCPv6 worker notification rejected", flush=True)
             saved = modules()
             frozen = [saved["control"]["pid"], saved["service.internet"]["pid"]]
@@ -386,6 +392,31 @@ def peer(stage, auth, dhcp6_server):
             ipv6_traffic()
             traffic()
             assert pd_record()["snapshot"]["client_duid"] == duid
+            # A PPP-only configuration change also invalidates its unchanged
+            # DHCPv6 child: release it before replacing the underlying link.
+            changing = copy.deepcopy(configuration)
+            wan = next(r for r in changing["resources"] if r["id"] == "internet")["service"]["pppoe"]
+            wan.update(mtu=1452, mru=1452)
+            before_release = (stage / "dhcp6.log").read_text().count("releases prefix ")
+            before = modules()
+            previous_ppp, previous_pd, previous_dns = (before[name] for name in ("service.internet", "service.pd", "service.dns"))
+            wan_change_at = time.time()
+            api("control.sock", "/v1/config/commit", {"expected_revision": 7, "request_id": "wan-mtu-change", "config": changing}, timeout=20)
+            wait(lambda: modules().get("service.internet", {}).get("generation", 0) > previous_ppp["generation"] and link() is not None and link()["mtu"] == 1452)
+            assert (stage / "dhcp6.log").read_text().count("releases prefix ") > before_release, "PPP was replaced before its DHCPv6 lease was released"
+            if server.poll() is None:
+                server.terminate()
+                server.wait(timeout=3)
+            wait(lambda: any(x["ifname"].startswith("ppp") and x["addr_info"] for x in peer_links()))
+            ppp = next(x["ifname"] for x in peer_links() if x["ifname"].startswith("ppp"))
+            server = dhcp6_start()
+            ipv6_traffic()
+            traffic()
+            assert pd_record()["snapshot"]["client_duid"] == duid
+            assert modules()["service.pd"]["generation"] > previous_pd["generation"]
+            assert modules()["service.dns"]["pid"] == previous_dns["pid"] and modules()["service.dns"]["generation"] == previous_dns["generation"]
+            dns_traffic()
+            print("PASS PPP-only MTU reconfiguration released and reacquired the unchanged PD child", flush=True)
             # Exercise actual PID 1 shutdown while the independent server and
             # capture remain alive. Cleanup must not terminate the peer first.
             os.kill(pid1, signal.SIGTERM)
@@ -416,7 +447,10 @@ def peer(stage, auth, dhcp6_server):
                     releases.append((float(line.split()[0]), release[1]))
                 if reply:
                     replies.append((float(line.split()[0]), reply[1]))
-            assert len(releases) >= 3, packets
+            assert len(releases) >= 4, packets
+            discovery = run(["tcpdump", "-n", "-tt", "-r", str(stage / "pppoe.pcap"), "pppoed"])
+            teardown = [float(line.split()[0]) for line in discovery.splitlines() if "PADT" in line and float(line.split()[0]) >= wan_change_at]
+            assert teardown and any(wan_change_at <= stamp < min(teardown) for stamp, _ in releases), "WAN teardown preceded DHCPv6 Release"
             assert len(withdrawals) >= 2, packets
             assert all(any(w < stamp and stamp - w < 6 for w in withdrawals) for stamp, _ in releases), packets
             assert all(any(reply > stamp and reply - stamp < 2 and rxid == xid for reply, rxid in replies) for stamp, xid in releases), packets

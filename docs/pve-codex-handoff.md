@@ -5,7 +5,42 @@
 [機械可読台帳](implementation-plan.json)に従う。[AGENTS.md](../AGENTS.md)を優先する。
 過去のAPI・保存形式・試験結果を守るための実装は残さない。
 
-## 現在の変更: dhcp6-release / native-28
+## 現在の変更: wan-drain / native-28
+
+`fc76a4a`のPPP/PD同時削除についての合格は取り下げた。試験のHTTP helperが422を無視し、
+一時的なworker撤去と、その後の自動復旧をcommit成功と誤認していた。HTTP状態を必ず確認し、
+古い通知の試験だけは期待する409を明示した。確認した実際の失敗は、PPP worker停止後にも
+最後のactive観測で消えた`ppp-wan`へのrouteを追加し、設定変更とrollbackが422になることだった。
+
+PPP観測は現在の登録worker・世代・設定digest・Readyと一致する間だけ投影する。
+設定変更では既存の静的依存グラフを使い、交換するserviceに依存するworkerも先に止める。
+子の設定が同じでも、その古い親の寿命をまたいでleaseやsocketを保持しない。
+
+`wan-drain` / PVE Linux6.8/amd64で確認済み:
+
+- 独立ISC DHCP/RP-PPPoE・別LAN端末で、HTTP200を確認したPD単独削除、PPP/PD同時削除と再取得が通った。
+  PPPだけのMTU/MRU変更（1454→1452）でも、子PDをReleaseしてからPPPをPADTで切断し、
+  新しいPPP/PD worker・同じDUIDでIPv4/IPv6 TCP/UDPが復旧した。DNS workerのPID/世代は不変で、
+  UDP/TCP DNSも復旧した。PID1の正常停止でもRA→Release→
+  同じtransactionのReplyを確認した。既存のRenew、古い通知409、元期限、server復旧、
+  5秒confirmed rollbackも通った。`make check-pppoe-pd DHCP6_SERVER=<ISC-dhcpd> RELEASE_ID=wan-drain`が対象。
+- 独立dnsmasqのIA_NAで、通常のRelease/Replyの後、同じDUIDでdaemonを再起動して再取得した。
+  serverをSIGSTOPした正常停止では、同じtransactionのReleaseが4回、対応Replyが0回、
+  停止は13..22秒の範囲、管理アドレスは撤去済みだった。leaseは120秒なので期限切れで代用していない。
+  fixtureだけの終了待ちは、実装済み20秒cleanupを許す35秒へ変更した。protocolの期限は変えていない。
+  `make check-dhcp6 RELEASE_ID=wan-drain`で再実行する。
+
+- 実PPP/DS-Lite二WANのHealth/PBR切替・復旧、confirmed rollback、network/AFTR worker再起動が通った。
+  独立ACのMRU1400、実1MiB TCP往復、UDP断片化、IPv6 PTB、下位MTU1280と同じtunnel indexも確認した。
+  `python3 scripts/dual-wan-peer.py`が対象。
+- `make check build-linux RELEASE_ID=wan-drain`成功。全Go/Python、Race Detector、vet、6静的ELFと、
+  実6ELFの署名catalog/publisher検査を含む。arm64は実行していない。
+
+まだ未受入: 全kernel-link設定変更の依存順序、control再起動中の解放、VRF・suspend/reboot、
+最新appliance・対象物理機。実上流の継続中cohortはnative-27であり、今回の変更の長時間受入ではない。
+完了したlog/captureは削除し、結果と再実行手順だけを残す。
+
+## 直前版: dhcp6-release / native-28
 
 正常停止では、DHCPv6の最終観測とその完了待ちを同じoperationへ結ぶ。network writerの
 アドレス撤去と、生成RAの寿命0送信を確認してから、元のlink-local socketでReleaseを送る。
@@ -17,8 +52,9 @@ control→network→loggingの順で終える。PPPとPDを同時削除する設
 
 `dhcp6-release`のPVE Linux6.8/amd64で確認済み:
 
-- 独立ISC DHCP4.4.3-P1/RP-PPPoE/別LAN端末で、PDだけの削除、PPP/PD同時削除、PID1正常停止の
-  それぞれに寿命0のRA→Release→同じtransactionのReplyがあった。管理LANアドレスも撤去した。
+- 独立ISC DHCP4.4.3-P1/RP-PPPoE/別LAN端末で、PDだけの削除とPID1正常停止の
+  寿命0のRA→Release→同じtransactionのReplyを確認した。管理LANアドレスも撤去した。
+  PPP/PD同時削除の当時の合格は取り下げた（上記）。
   再取得は同じDUIDでIPv6 TCP/UDPを復旧した。既存のRenew、worker再作成、古い通知の拒否、
   元期限の失効、server復旧、5秒confirmed rollbackも通った。
   `python3 scripts/pppoe-peer.py --auth chap --dhcp6-server <ISC-dhcpd>`で再実行する。
@@ -38,7 +74,7 @@ control→network→loggingの順で終える。PPPとPDを同時削除する設
   二WAN Health/PBR、実TCP/UDP、worker再起動、古い通知、期限切れ、confirmed rollbackも通った。
   `python3 scripts/daemon-tests.py health-pbr`で再実行する。
 
-未検証: 無応答Releaseの全retry/停止時間、WAN設定変更での全依存関係、VRF・実suspend/reboot、
+この時点の未検証は無応答ReleaseとWAN再設定だった。最新の確認範囲は上記。VRF・実suspend/reboot、
 最新appliance・物理機/ONU直結配線の受入。全実装計画の完了・実機利用可能という判断ではない。
 完了済みのlog/captureは削除し、結果と再実行手順だけを残す。
 
@@ -186,8 +222,9 @@ Go/Docker cacheを削除した。直近の整理で旧QA記録と一時bundle約
 1. 全実装計画、全更新復旧経路、外部engine、配備先と対象実機の受入は未完了。
    旧routerdの各モジュールとの比較を続け、任意optionの不良で有効な割当・経路まで捨てる受信処理を修正する。
    複数IA_NA/PDのDAD共存・resource readiness/RA連携も未完了。
-   graceful Releaseの正常経路は上記で確認した。次は無応答時のretry/停止時間と、
-   WAN設定変更時の依存順序を実peerで確認する。新しいDUIDの実回線試験を無用に増やさない。
+   graceful Release、IA_NAの無応答時retry/停止時間、PPP交換時の子PD解放は上記で確認した。
+   次は全kernel-link再設定・control再起動中の解放と、最新applianceを受入する。
+   新しいDUIDの実回線試験を無用に増やさない。
    NET-06はrelayのHA・動的VRF/interface変更の受入、DHCPv6 server、dynamic pool/options・DNS・sticky/lease importが残る。
    今回の試験成功を製品全体・実機利用可能の判定には使わない。
 2. NET-07の旧resource/profile、動的source・VRF経路変更、大規模RIBを実装・受入する。

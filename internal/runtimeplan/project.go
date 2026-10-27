@@ -56,6 +56,16 @@ func (r *Runtime) projectLocked(protocols protocolPlan, doc config.Native, recor
 	}
 	ownedRecords := make(map[string]serviceconfig.Update, len(records))
 	for name, record := range records {
+		if record.Role == "pppoe" {
+			// The PPP worker owns the link itself. Its last finite observation
+			// cannot authorize adding routes after that owner starts stopping.
+			module, registered := r.guardStatus[name]
+			if !registered || !module.Ready || module.Role != record.Role || module.Generation != record.Generation || module.ConfigDigest != record.ConfigDigest {
+				continue
+			}
+			ownedRecords[name] = record
+			continue
+		}
 		if record.Role != "vrrp" {
 			ownedRecords[name] = record
 			continue

@@ -472,7 +472,9 @@ func startFixtureDaemonSelected(t *testing.T, doc config.Document, dir string, s
 			if err != nil {
 				t.Errorf("daemon exit: %v", err)
 			}
-		case <-time.After(12 * time.Second):
+		// DHCPv6 owns a 20-second withdrawal/Release budget. Allow it to
+		// finish before the remaining worker shutdown phases are reaped.
+		case <-time.After(35 * time.Second):
 			_ = cmd.Process.Kill()
 			<-done
 			t.Error("daemon failed to drain workers")
