@@ -911,8 +911,14 @@ DHCPv6 server・残るresource契約は未完了であり、NET-06全体の完�
 寿命0 RA→Release/Reply→PPP切断と終了まで確認した。最終APK applianceでもpoweroffが通った。
 新規のregular-file ext4 diskを明示接続した実rebootでは、二回目のkernel/PID1でcommit済みrevision 2・
 LAN MTU1400・DUIDと固定SSHホスト鍵を維持し、新しいPPP/PDによる両family TCP/UDP・DNSが復旧した。
-最後の正常poweroffも通った。先行の永続state PPP再起動40秒timeoutは原因未確定であり、
-後続成功だけで解消済みとは扱わない。全運用API・権限分離・更新trial/実機の受入は未完了。
+最後の正常poweroffも通った。先行の永続state PPP再起動40秒timeoutを後続成功だけで解消とはせず、
+`ca0b9bd`の同じapplianceで再現し、PDだけが世代2へ戻り、
+PPP世代1を残したまま202となることを確認した。中間DHCP停止のfile準備中にPDがreapされると、
+後で読んだstatusとの一致を全停止の完了と誤判定していた。中間passでは完了せず、元の停止対象を
+新しいpassで処理するよう修正した。局所再現は修正前に失敗し、修正後は親WANの停止まで待つ。
+最終`wan-retirement`の同じ永続applianceでPPP世代/interface交代、captureの撤去順序とTCP/UDP・DNS復旧を
+確認した。MTU/revision変更・実reboot後の二回目起動、DUID/固定SSH鍵保持と通信復旧、poweroffも通った。
+全運用API・権限分離・更新trial/実機の受入は未完了。
 
 範囲: 旧 routerd 互換 / track: operations / risk: high。
 前提: CORE-03, CORE-04。 設計判断: D-09。

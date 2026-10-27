@@ -5,7 +5,25 @@
 [機械可読台帳](implementation-plan.json)に従う。[AGENTS.md](../AGENTS.md)を優先する。
 過去のAPI・保存形式・試験結果を維持するための実装は残さない。
 
-## 現在の変更: appliance-power / native-28
+## 現在の変更: wan-retirement / native-28
+
+永続stateのPPP再起動40秒timeoutを`ca0b9bd`の実applianceで再現した。202を受けた後も
+PPPが世代1のまま残り、PDだけが世代2へ戻っていた。子PD停止の中間段階でworker設定ファイルを
+準備し、その間にsupervisorがPDをreapすると、後のstatusには親PPPだけが残る。
+中間の保持集合への一致を全停止の完了と誤判定し、元のPPPを止めずPDを再取得していた。
+
+中間DHCP停止のpassでは全停止を完了にせず、次の新しいstatusで元の停止対象を処理する。
+新しい状態owner・registry・compatibility API・timeout延長・retryは追加していない。
+二つのstatus取得の間にPDが消える局所再現は修正前に失敗し、修正後は親WANの停止まで待つ。
+最終`wan-retirement`は全Go/Python・Race Detector・vet・amd64/arm64静的buildが成功した。
+同じAPK由来Linux6.18.58-0-lts、明示ext4 state volume、独立RP-PPPoE/ISC・別Linux LAN端末で、
+CHAP・PD/Renew・PPP再起動と両family TCP/UDP・UDP/TCP DNS復旧が通った。PPPの世代・
+interfaceが実際に交代し、config revision/DUID/DNS workerを維持した。
+WAN/LAN captureの寿命0 RA→Release→対応Reply→PADTと、最後のCLI poweroffも確認した。
+別起動のLAN MTU1400/revision 2へのcommitと実rebootも成功した。同じVMの二回目kernel/PID1で
+revision・MTU・DUIDと固定SSHホスト鍵を維持し、新しいPPP/PDでTCP/UDP・DNSが復旧した。
+最後のCLI poweroffも成功した。最終6 ELFの署名catalog/publisher/stageもRace Detector付きで成功した。
+下記は直前`appliance-power`の追加確認範囲として区別する。
 
 local/SSH CLIの`poweroff`と`reboot`、localの`routerd poweroff/reboot`を追加した。
 private supervisor APIへ型付きの操作を送り、appliance PID1だけが受け付ける。
@@ -46,8 +64,7 @@ boot ABI1・worker ABI4・manifest v4・network journal9・compiler native-28は
   全Go/Python・Race Detector・vet、amd64/arm64の6静的ELFを含む。arm64は実行していない。
   最終6 ELFの署名catalog・publisher・stage検査もRace Detector付きで成功した。
 
-最初の永続state試験では、PPP service再起動が40秒でtimeoutした。原因未確定。
-同じ実装の後続実行は通ったが、先行失敗を解消済みとは数えない。失敗時のstatus/config/services/logを
+PPP service再起動40秒timeoutの原因と修正中の範囲は上記。失敗時のstatus/config/services/logを
 取得する。MTU commit直後のcurl失敗ではPDが再取得中でconfiguration phaseもapplyingだった。
 fixtureはprocess Readyだけで通信を始めず、現在のPDと適用完了を待つ。通信失敗のretryで代用しない。
 以前のビルド並行実行の3秒API timeoutも、高負荷時の応答時間の合格には数えない。
@@ -85,7 +102,7 @@ host engine・設定・hookへfallbackしない。対応source/APKBUILD/patchと
 
 全work packageは台帳の範囲を維持する。今回の相互接続だけで全体を完了にしない。
 
-- 原因未確定の永続state PPP再起動timeout、全kernel-link再設定の依存順序、control再起動中の解放、
+- 全kernel-link再設定の依存順序、control再起動中の解放、
   実suspend/更新trial中の電源操作・無応答peer時の全機停止、VRF、複数IAの
   DAD共存、resource readiness/RA連携、全link optionとWAN選択。
 - DHCPv6 server、relayのHA/動的interface・VRF、動的pool/options/DNS、lease import。

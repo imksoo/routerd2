@@ -251,6 +251,7 @@ func (r *Runtime) reconcileStep(ctx context.Context, ceiling map[string]supervis
 		r.mu.Unlock()
 		return false, err
 	}
+	drainingDHCP := false
 	if status.Stopping {
 		// Keep reconciliation within the current process set during shutdown.
 		ceiling = make(map[string]supervisor.DynamicModule)
@@ -265,6 +266,7 @@ func (r *Runtime) reconcileStep(ctx context.Context, ceiling map[string]supervis
 			}
 			// Retire DHCPv6 first while the old WAN and its other consumers
 			// still exist. The stopped observation retires its generated RA.
+			drainingDHCP = true
 			ceiling = maps.Clone(ceiling)
 			for _, peer := range status.Modules {
 				if peer.Role != "dhcp6" {
@@ -391,7 +393,10 @@ func (r *Runtime) reconcileStep(ctx context.Context, ceiling map[string]supervis
 	// Cutover waits for old identities to exit. Readiness of a retained worker
 	// can depend on the new configuration, so it cannot gate accepting it.
 	if ceiling != nil {
-		return matching, nil
+		// A child can be reaped during preparation, before the second status
+		// read. Matching the intermediate DHCP drain still retains its WAN;
+		// only a fresh pass against the requested ceiling can finish cutover.
+		return matching && !drainingDHCP, nil
 	}
 	if !matching || len(keep) != len(set.modules) {
 		if err := r.manager.Reconcile(ctx, set.modules); err != nil {

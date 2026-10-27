@@ -56,6 +56,7 @@ protocol投影は変更するnetwork集合を複製し、固定設定を読み�
 元の宣言を変えずに学習情報と期限切れを反映し、JSON往復による複製は行わない。
 
 変更した worker と、その寿命に依存する worker は停止・reap を待って置換する。
+子を先に停止する中間段階で親を保持している間は、切替全体の完了を返さない。
 それ以外の変更していない protocol config の取得状態は維持する。停止中に DHCP が更新した場合も、
 継続するworkerについてはcutover時点で最後に受理したリースを採用する。
 `restart service.NAME` はcontrolの `POST /v1/services/service.NAME/restart` に届く。
