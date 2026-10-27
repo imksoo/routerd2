@@ -381,6 +381,11 @@ func RunWithUpdates(ctx context.Context, cfg Config, updates <-chan Config, effe
 		snapshot.LastSent = lastSentAt.UTC()
 		snapshot.Withdrawing = withdraw
 		snapshot.WithdrawingPrefixes = pending.prefixNames()
+		if withdraw {
+			for _, prefix := range cfg.Prefixes {
+				snapshot.WithdrawingPrefixes = append(snapshot.WithdrawingPrefixes, prefix.Prefix)
+			}
+		}
 		if !withdraw {
 			pending.sent()
 		}

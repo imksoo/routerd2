@@ -5,9 +5,46 @@
 [機械可読台帳](implementation-plan.json)に従う。[AGENTS.md](../AGENTS.md)を優先する。
 過去のAPI・保存形式・試験結果を守るための実装は残さない。
 
-## 現在の変更: dns-bootstrap / native-28
+## 現在の変更: dhcp6-release / native-28
 
-`957c964`までmainへpush済み。追加変更は、WANから学習したDNSを`bootstrapResolverFrom`で
+正常停止では、DHCPv6の最終観測とその完了待ちを同じoperationへ結ぶ。network writerの
+アドレス撤去と、生成RAの寿命0送信を確認してから、元のlink-local socketでReleaseを送る。
+選択Server IDと有効なIAだけを使い、同じclient/transaction/serverのReplyで完了する。
+最大4送信・cleanup全体20秒。停止中もcontrol/network/APIを維持し、DHCPv6→他protocol→
+control→network→loggingの順で終える。PPPとPDを同時削除する設定変更でも先にPDを解放する。
+旧routerdの`pkg/pdclient.Client.Release/send`と
+[RFC9915のRelease手順](https://www.rfc-editor.org/rfc/rfc9915.html#section-18.2.7)を比較した。
+
+`dhcp6-release`のPVE Linux6.8/amd64で確認済み:
+
+- 独立ISC DHCP4.4.3-P1/RP-PPPoE/別LAN端末で、PDだけの削除、PPP/PD同時削除、PID1正常停止の
+  それぞれに寿命0のRA→Release→同じtransactionのReplyがあった。管理LANアドレスも撤去した。
+  再取得は同じDUIDでIPv6 TCP/UDPを復旧した。既存のRenew、worker再作成、古い通知の拒否、
+  元期限の失効、server復旧、5秒confirmed rollbackも通った。
+  `python3 scripts/pppoe-peer.py --auth chap --dhcp6-server <ISC-dhcpd>`で再実行する。
+- 独立dnsmasq2.90のIA_NAで、実Renew/Rebind・失効/復旧・source付きTCP/UDPに加え、
+  daemon停止後の/128撤去とlink-local Release/Replyを確認した。`make check-dhcp6`が対象。
+- 実上流の新規起動で、実RA/DHCPv4/PD→LAN SLAAC、IPv4/IPv6 HTTPS、UDP/TCP DNS、
+  選択FIB `dslite0`と実AFTR戻りpacketを確認した。停止時にも寿命0のRA、管理アドレス撤去、
+  Release/Replyがあり、Reply送信元は49153だった。全workerは世代1、1回の短い通信確認である。
+  最初のcapture判定は失敗し、その原因は確定していない。診断出力を追加した実行と、
+  `--immediate-mode`でpacketの受信バッファをなくした実行は成功した。前者の失敗を成功へ数えない。
+- PID namespaceの電源断は、Linux `reboot(POWER_OFF)`によりSIGINTとして親へ返る。
+  試験の終了コード0/130という期待を、実際の`unshare`のsignal伝播である`-SIGINT`へ修正した。
+
+- `make check build-publisher build-linux RELEASE_ID=dhcp6-release`成功。全Go/Python、
+  Race Detector、vet、amd64/arm64の6静的ELFを含む。実6ELFの署名catalog/publisher検査も成功した。
+  停止順序変更の回帰確認として、実daemonの
+  二WAN Health/PBR、実TCP/UDP、worker再起動、古い通知、期限切れ、confirmed rollbackも通った。
+  `python3 scripts/daemon-tests.py health-pbr`で再実行する。
+
+未検証: 無応答Releaseの全retry/停止時間、WAN設定変更での全依存関係、VRF・実suspend/reboot、
+最新appliance・物理機/ONU直結配線の受入。全実装計画の完了・実機利用可能という判断ではない。
+完了済みのlog/captureは削除し、結果と再実行手順だけを残す。
+
+## 直前版: dns-bootstrap / native-28
+
+`25d54e9`までmainへpush済み。この変更は、WANから学習したDNSを`bootstrapResolverFrom`で
 名前指定のupstreamの解決に使う経路である。forwarding用とbootstrap用は別のtyped inputで渡し、
 元のboot期限・リンクローカルscopeを維持する。宣言したbootstrapが不在・失効した場合、
 新しい名前解決をhost resolverへ流さない。`viaInterface`はbootstrapのsocketにも適用する。
@@ -140,7 +177,7 @@ ONU直結の配線確認や物理NICのqualificationを意味しない。
 ## 出力の扱い
 
 容量整理の指示に従い、過去のlog/capture・停止済みfixture・旧archive・不要な開発imageと
-Go/Docker cacheを削除した。整理直後の空き容量は約208GiB。
+Go/Docker cacheを削除した。直近の整理で旧QA記録と一時bundle約2.1GiB、再生成可能なcacheを削除した。
 過去の証跡は再保存しない。現在の診断に使う出力も完了後に削除し、ソース・実行手順と
 結果・未検証範囲だけを簡潔に残す。対応sourceやlicenseは配布に必要なので保持する。
 
@@ -148,9 +185,9 @@ Go/Docker cacheを削除した。整理直後の空き容量は約208GiB。
 
 1. 全実装計画、全更新復旧経路、外部engine、配備先と対象実機の受入は未完了。
    旧routerdの各モジュールとの比較を続け、任意optionの不良で有効な割当・経路まで捨てる受信処理を修正する。
-   複数IA_NA/PDのDAD共存・Release・resource readiness/RA連携も未完了。
-   次はgraceful DHCPv6 Releaseを優先する。終了時の解放が未実装なので、上流の割当枠を
-   無駄に消費しないよう、同機能の実装・検証前に新しいDUIDの実回線試験を増やし続けない。
+   複数IA_NA/PDのDAD共存・resource readiness/RA連携も未完了。
+   graceful Releaseの正常経路は上記で確認した。次は無応答時のretry/停止時間と、
+   WAN設定変更時の依存順序を実peerで確認する。新しいDUIDの実回線試験を無用に増やさない。
    NET-06はrelayのHA・動的VRF/interface変更の受入、DHCPv6 server、dynamic pool/options・DNS・sticky/lease importが残る。
    今回の試験成功を製品全体・実機利用可能の判定には使わない。
 2. NET-07の旧resource/profile、動的source・VRF経路変更、大規模RIBを実装・受入する。

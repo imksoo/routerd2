@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"io"
 	"net"
+	"net/netip"
 	"os/exec"
 	"testing"
 	"time"
@@ -206,7 +207,34 @@ func TestDaemonDHCP6AddressIndependentServer(t *testing.T) {
 	if final := module(); final.PID != replacement.PID || final.Generation != replacement.Generation {
 		t.Fatal("lease expiry/recovery restarted the client", replacement, final)
 	}
-	t.Log("dnsmasq IA_NA: acquired address and DNS/search, kernel DAD, source-bound TCP/UDP, SIGKILL recovery with stable DUID/IAID, actual Renew/Reply, unanswered Renew/Rebind, expiry and fresh acquisition")
+	address = current.Addresses[0].Address
+	shutdown := time.Now()
+	f.stop()
+	if installed(address) {
+		t.Fatal("graceful shutdown retained its IA_NA address", address)
+	}
+	until(t, time.Second, func() bool {
+		capture.mu.Lock()
+		defer capture.mu.Unlock()
+		var transaction []byte
+		for _, packet := range capture.packets {
+			b := packet.data
+			if packet.at.Before(shutdown) || len(b) < 66 || b[20] != 17 {
+				continue
+			}
+			if b[54] == 2 && b[55] == 34 && b[56] == 2 && b[57] == 35 && b[62] == 8 {
+				if source := netip.AddrFrom16([16]byte(b[22:38])); !source.IsLinkLocalUnicast() {
+					t.Fatal("Release used a released address", source)
+				}
+				transaction = b[63:66]
+			}
+			if transaction != nil && b[54] == 2 && b[55] == 35 && b[56] == 2 && b[57] == 34 && b[62] == 7 && bytes.Equal(transaction, b[63:66]) {
+				return true
+			}
+		}
+		return false
+	})
+	t.Log("dnsmasq IA_NA: source-bound TCP/UDP, stable restart identity, Renew/Rebind/expiry/recovery and graceful kernel withdrawal with link-local Release/Reply")
 }
 
 func fixtureDHCP6Traffic(t *testing.T, source string) {

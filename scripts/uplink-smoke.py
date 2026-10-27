@@ -10,6 +10,7 @@ its namespaces and private state on completion. This is not NIC qualification.
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 import signal
 import subprocess
@@ -254,6 +255,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
             router,
             [
                 "tcpdump",
+                "--immediate-mode",
                 "-Z",
                 "root",
                 "-n",
@@ -465,6 +467,59 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
         )
         if not returned:
             raise RuntimeError("no actual AFTR encapsulated return packet captured")
+        shutdown_at = time.time()
+        daemon.send_signal(signal.SIGTERM)
+        daemon.wait(timeout=30)
+        assert daemon.returncode == 0, "actual uplink daemon failed to stop"
+        capture.send_signal(signal.SIGINT)
+        capture.wait(timeout=3)
+        records = []
+        for path in stage.glob("wan.pcap*"):
+            packets = run(["tcpdump", "-nn", "-tt", "-vv", "-r", str(path), "ip6"])
+            for line in packets.splitlines():
+                if line and line[0].isdigit():
+                    records.append(line)
+                elif records:
+                    records[-1] += " " + line.strip()
+        records.sort(key=lambda line: float(line.split()[0]))
+        withdrawal = None
+        transaction = None
+        release_at = None
+        reply_port = None
+        for line in records:
+            stamp = float(line.split()[0])
+            if stamp < shutdown_at:
+                continue
+            if "router advertisement" in line and "router lifetime 0s" in line:
+                assert "valid time 0s, pref. time 0s" in line, "final RA retained its prefix lifetime"
+                withdrawal = stamp
+            match = re.search(r"dhcp6 release \(xid=([0-9a-f]+)", line)
+            if match:
+                assert withdrawal is not None and withdrawal < stamp, "Release preceded LAN withdrawal"
+                assert re.search(r"fe80:[^ ]+\.546 >", line), "Release did not use a link-local source"
+                transaction, release_at = match[1], stamp
+            if transaction and "dhcp6 reply (xid=" + transaction + " " in line:
+                match = re.search(r" ([^ ]+)\.(\d+) > [^ ]+\.546:", line)
+                assert match, "could not identify Release Reply source port"
+                reply_port = int(match[2])
+                break
+        if release_at is None or reply_port is None:
+            print("Release diagnosis: zero RA", withdrawal is not None, "Release", release_at is not None, "Reply", reply_port is not None, flush=True)
+            for path in (stage / "console.log", *sorted((stage / "state/logs").glob("*"))):
+                if path.is_file():
+                    for line in path.read_text(errors="replace").splitlines()[-100:]:
+                        if "ERROR" in line or "withdraw" in line or "Release" in line:
+                            print(line, flush=True)
+            for line in records:
+                if float(line.split()[0]) >= shutdown_at and ("dhcp6" in line or "router advertisement" in line):
+                    print(line, flush=True)
+            raise RuntimeError("actual uplink did not acknowledge Release")
+        assert not any(
+            a["scope"] == "global"
+            for link in json.loads(run(["ip", "-n", router, "-j", "-6", "addr", "show", "dev", "lan0"]))
+            for a in link.get("addr_info", [])
+        ), "shutdown retained the delegated LAN address"
+        print("PASS actual uplink zero-lifetime RA, kernel withdrawal and link-local Release/Reply; server port", reply_port, flush=True)
         print(
             "PASS actual uplink periodic IPv4/IPv6 HTTPS, UDP/TCP learned DNS; rounds",
             rounds,
@@ -481,7 +536,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
             if p.poll() is None:
                 p.send_signal(signal.SIGINT if p is capture else signal.SIGTERM)
                 try:
-                    p.wait(timeout=12)
+                    p.wait(timeout=30)
                 except subprocess.TimeoutExpired:
                     p.kill()
                     p.wait()

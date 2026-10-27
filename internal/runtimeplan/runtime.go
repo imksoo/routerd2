@@ -480,31 +480,37 @@ var ErrStale = errors.New("stale protocol producer or configuration")
 // Observe acknowledges a validated observation. Kernel application belongs to
 // the serialized coordinator, independently of whether the source has guards.
 func (r *Runtime) Observe(ctx context.Context, u serviceconfig.Update) error {
+	_, err := r.observe(ctx, u)
+	return err
+}
+
+func (r *Runtime) observe(ctx context.Context, u serviceconfig.Update) (*pendingApplication, error) {
+	var effect *pendingApplication
 	// This check precedes both the main mutex and the independent BFD path.
 	// Old counters cannot seed an empty cache after a supervisor restart.
 	if !serviceconfig.ValidSupervisorInstance(r.supervisorInstance) || u.SupervisorInstance != r.supervisorInstance {
-		return ErrStale
+		return nil, ErrStale
 	}
 	if u.Generation == 0 || u.Sequence == 0 || len(u.ProducerEpoch) != 32 {
-		return errors.New("invalid producer generation, sequence or epoch")
+		return nil, errors.New("invalid producer generation, sequence or epoch")
 	}
 	if b, err := hex.DecodeString(u.ProducerEpoch); err != nil || len(b) != 16 {
-		return errors.New("invalid producer epoch")
+		return nil, errors.New("invalid producer epoch")
 	}
 	if u.Role == "bfd" {
-		return r.acceptBFD(ctx, u)
+		return nil, r.acceptBFD(ctx, u)
 	}
 	var producerStatus *supervisor.Status
-	if u.Role == "bgp" || u.Role == "dhcp4" || u.Role == "vrrp" || u.Role == "dhcp_server" || u.Role == "pppoe" || u.Role == "aftr" {
+	if u.Role == "bgp" || u.Role == "dhcp4" || u.Role == "dhcp6" || u.Role == "ra" || u.Role == "vrrp" || u.Role == "dhcp_server" || u.Role == "pppoe" || u.Role == "aftr" {
 		// A restarted control has no remembered generations. Authenticate even
 		// its first publication against the current process-tree registry;
 		// initial publication precedes worker Ready, so Ready is not required.
 		status, err := r.manager.Status(ctx)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		matched := false
-		if status.InstanceID == r.supervisorInstance && !status.Stopping {
+		if status.InstanceID == r.supervisorInstance {
 			for _, module := range status.Modules {
 				if module.Name == u.Name && module.Role == u.Role && module.Generation == u.Generation && module.ConfigDigest == u.ConfigDigest {
 					matched = true
@@ -513,7 +519,7 @@ func (r *Runtime) Observe(ctx context.Context, u serviceconfig.Update) error {
 			}
 		}
 		if !matched {
-			return ErrStale
+			return nil, ErrStale
 		}
 		if u.Role == "vrrp" {
 			producerStatus = &status
@@ -526,21 +532,21 @@ func (r *Runtime) Observe(ctx context.Context, u serviceconfig.Update) error {
 	}
 	b, ok := r.bindings[u.Name]
 	if !r.configured || !ok || b.instance.Role != u.Role || b.digest != u.ConfigDigest {
-		return ErrStale
+		return nil, ErrStale
 	}
 	if old, ok := r.records[u.Name]; ok {
 		if u.Generation < old.Generation || (u.Generation == old.Generation && u.ProducerEpoch != old.ProducerEpoch) {
-			return ErrStale
+			return nil, ErrStale
 		}
 		if u.Generation == old.Generation {
 			if u.Sequence < old.Sequence {
-				return ErrStale
+				return nil, ErrStale
 			}
 			if u.Sequence == old.Sequence {
 				if bytes.Equal(u.Snapshot, old.Snapshot) {
-					return nil
+					return nil, nil
 				}
-				return errors.New("protocol sequence reused with different snapshot")
+				return nil, errors.New("protocol sequence reused with different snapshot")
 			}
 		}
 	}
@@ -549,61 +555,85 @@ func (r *Runtime) Observe(ctx context.Context, u serviceconfig.Update) error {
 		var err error
 		server, err = r.validateDHCPServerSnapshotLocked(b, u)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	} else if u.Role == "aftr" {
 		if err := r.validateAFTRSnapshotLocked(b, u.Snapshot); err != nil {
-			return err
+			return nil, err
 		}
 	} else if err := validateSnapshot(b.instance, u.Snapshot); err != nil {
-		return err
+		return nil, err
 	}
 	previous := r.records[u.Name]
 	if u.Role == "vrrp" {
 		if err := validateVRRPTransition(previous, u); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	if u.Role == "dhcp4" {
 		if err := validateDHCP4Transition(previous, u); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	if u.Role == "bgp" {
 		if err := validateBGPTransition(previous, u); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	candidateRecords := r.observationsLocked()
 	candidateRecords[u.Name] = u
 	if _, err := r.projectLocked(r.config.protocols, r.config.plan.Native, candidateRecords, time.Now(), resourceprogram.FactSnapshot{}); err != nil {
-		return err
+		return nil, err
 	}
 	if u.Role == "dhcp_server" {
 		r.dhcpServers[u.Name] = server
 	}
 	r.recordGuardGrantLocked(u, time.Now())
 	r.records[u.Name] = u
+	if u.Role == "dhcp6" {
+		var snapshot dhcp6config.Snapshot
+		if err := json.Unmarshal(u.Snapshot, &snapshot); err != nil {
+			return nil, err
+		}
+		if snapshot.State == "stopped" {
+			effect = r.queueApplicationLocked(u)
+		}
+	}
 	r.observationVersion++
 	// Observe flaps when accepted; a periodic projection must not hide them.
 	if _, err := r.conditionFactsLocked(r.config, time.Now()); err != nil {
-		return err
+		return nil, err
 	}
 	r.wakeCoordinatorLocked()
-	return nil
+	return effect, nil
 }
 
-// Apply waits for the current BGP FIB or VRRP VIP projection. These protocols
-// require application completion before advancing their state machines.
+// Apply waits for protocol effects that require kernel application completion.
 func (r *Runtime) Apply(ctx context.Context, u serviceconfig.Update) (serviceconfig.ApplicationReceipt, error) {
-	if u.Role != "vrrp" && u.Role != "bgp" {
-		return serviceconfig.ApplicationReceipt{}, errors.New("application requests support only BGP and VRRP")
+	if u.Role != "vrrp" && u.Role != "bgp" && u.Role != "dhcp6" {
+		return serviceconfig.ApplicationReceipt{}, errors.New("application requests support BGP, VRRP and DHCPv6 withdrawal")
 	}
-	if err := r.Observe(ctx, u); err != nil {
+	if u.Role == "dhcp6" {
+		var snapshot dhcp6config.Snapshot
+		if err := strict(u.Snapshot, &snapshot); err != nil {
+			return serviceconfig.ApplicationReceipt{}, err
+		}
+		if snapshot.State != "stopped" {
+			return serviceconfig.ApplicationReceipt{}, errors.New("DHCPv6 application request must withdraw assignments")
+		}
+	}
+	effect, err := r.observe(ctx, u)
+	if err != nil {
 		return serviceconfig.ApplicationReceipt{}, err
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if u.Role == "dhcp6" {
+		if effect == nil {
+			return serviceconfig.ApplicationReceipt{}, ErrStale
+		}
+		return r.waitEffectLocked(ctx, effect)
+	}
 	current, ok := r.records[u.Name]
 	binding, bound := r.bindings[u.Name]
 	if !ok || !bound || binding.digest != u.ConfigDigest || !sameUpdate(current, u) {

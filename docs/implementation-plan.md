@@ -732,8 +732,15 @@ network writerへの/128投影を持つ。PD専用の外部state machine・補�
 一覧pollが見逃す不具合を修正した。割当通知前にkernelへsubscribeし、既存loopで失敗通知を読む。
 実DAD/Decline・失敗address撤去・同じworkerで別のdnsmasq割当へのTCP/UDP復旧を確認した。
 DeclineのNoBinding応答で完了し、無関係なPD期限を変えないこともローカルで確認した。
-複数割当/PDとのDAD共存、required/observe-only・RA trigger・resolver効果・
-suspend/reboot・graceful Release・VRF・全link option/lifecycle・WAN選択は残り、NET-05全体は未完了。
+正常停止のReleaseを実装した。最終観測の受付とapplication待ちを同じoperationへ結び、
+network writerのアドレス撤去と生成RAの寿命0送信後に、link-localから有効なIAを解放する。
+control/network/APIとPPPを先に止めない。独立ISC/RP-PPPoEでPD削除・PPP/PD同時削除・PID1停止の
+RA→Release→同一transactionのReplyと同じDUIDの再取得/IPv6 TCP/UDPを確認した。
+独立dnsmasqではIA_NA停止時の/128撤去とRelease/Replyを確認した。実上流の短い通信試験でも
+LAN両family HTTPS/DNS・AFTR往復と、停止時のRA撤去・Release/Reply（送信元49153）が通った。
+先行capture判定の失敗原因は未確定であり、その実行は合格としない。
+複数割当/PDとのDAD共存、required/observe-only・RA trigger・resolver効果・無応答Release・
+WAN再設定・suspend/reboot・VRF・全link option/lifecycle・WAN選択は残り、NET-05全体は未完了。
 
 既存uplinkへ専用MAC/DUIDのmacvlanを隔離接続し、実上流RA・DHCPv4・PD /60と
 LAN kernel SLAAC端末のIPv4 NAT/委譲IPv6 HTTPS・UDP DNSを確認した。
@@ -746,7 +753,7 @@ bridge MAC変更後の古いSLLA広告を修正した。保存状態なしの起
 独立RA/DNS/Linux AFTRとの期限切れ撤去・再取得・worker交替も通った。
 製品`ntt-aftr`では実回線T1=7200秒の自然なRenew/Reply（上流source 49153）とPD期限更新を確認した。
 同じDS-Lite TCP接続とUDP DNSが100分継続し、更新後のLAN IPv4/IPv6 HTTPSも通った。
-tunnel indexは不変、PD workerはgeneration 1だった。Rebind/失効/Releaseの実回線受入、
+tunnel indexは不変、PD workerはgeneration 1だった。Rebind/失効の実回線受入、
 ONU型番・直結配線・NIC資格判定、以降の修正を含む最新版の実回線受入は未完了。
 2026-10-27の別`fragment-readiness/native-21`では、DHCPv4 defaultを無効にした実AFTR経路で
 130回（約132分）の観測が終了コード0で完了した。HTTPS HEAD780回を同じTCP接続で続け、

@@ -16,8 +16,16 @@ var ErrParentDisconnected = errors.New("supervisor lifecycle channel closed")
 const (
 	heartbeatInterval = time.Second
 	writeTimeout      = 2 * time.Second
-	shutdownTimeout   = 3 * time.Second
 )
+
+// ShutdownTimeout leaves the DHCPv6 owner time to withdraw dependent effects
+// and complete its bounded Release exchange before the process is terminated.
+func ShutdownTimeout(role string) time.Duration {
+	if role == "dhcp6" {
+		return 22 * time.Second
+	}
+	return 3 * time.Second
+}
 
 // Run identifies this worker with its compiled release ID, reports readiness,
 // emits heartbeats, and cancels service when its supervisor disappears. The
@@ -126,7 +134,7 @@ func run(ctx context.Context, conn net.Conn, name, role, releaseID string, servi
 	cancel()
 	// Closing also interrupts a reader blocked on a dead or unresponsive peer.
 	_ = conn.Close()
-	timer := time.NewTimer(shutdownTimeout)
+	timer := time.NewTimer(ShutdownTimeout(role))
 	defer timer.Stop()
 	select {
 	case err := <-serviceDone:

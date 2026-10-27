@@ -9,18 +9,21 @@ import (
 	"maps"
 	"math"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/bgpconfig"
+	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
+	"github.com/imksoo/routerd2/internal/protocol/ra"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 	"github.com/imksoo/routerd2/internal/supervisor"
 )
 
-// One pending application per bound BGP/VRRP producer. Observe records input;
+// One pending application per bound producer. Observe records input;
 // only the serialized coordinator can acknowledge its kernel effects. In
 // particular, no protocol callback acquires op or changes the module set.
 type pendingApplication struct {
@@ -29,6 +32,7 @@ type pendingApplication struct {
 	done        chan struct{}
 	err         error
 	receipt     serviceconfig.ApplicationReceipt
+	withdrawRA  map[string][]string
 }
 
 func sameUpdate(a, b serviceconfig.Update) bool {
@@ -62,18 +66,10 @@ func (r *Runtime) waitApplicationLocked(ctx context.Context, u serviceconfig.Upd
 			return serviceconfig.ApplicationReceipt{}, ErrStale
 		}
 	}
-	if r.applications == nil {
-		r.applications = make(map[string]*pendingApplication)
-	}
-	effect := r.applications[u.Name]
-	if effect == nil || effect.sourceEpoch != r.sourceEpoch || !sameUpdate(effect.update, u) {
-		if effect != nil {
-			r.finishApplicationLocked(u.Name, ErrStale)
-		}
-		u.Snapshot = append(json.RawMessage(nil), u.Snapshot...)
-		effect = &pendingApplication{update: u, sourceEpoch: r.sourceEpoch, done: make(chan struct{})}
-		r.applications[u.Name] = effect
-	}
+	return r.waitEffectLocked(ctx, r.queueApplicationLocked(u))
+}
+
+func (r *Runtime) waitEffectLocked(ctx context.Context, effect *pendingApplication) (serviceconfig.ApplicationReceipt, error) {
 	r.wakeCoordinatorLocked()
 	r.mu.Unlock()
 	select {
@@ -87,6 +83,25 @@ func (r *Runtime) waitApplicationLocked(ctx context.Context, u serviceconfig.Upd
 		return serviceconfig.ApplicationReceipt{}, err
 	}
 	return effect.receipt, effect.err
+}
+
+func (r *Runtime) queueApplicationLocked(u serviceconfig.Update) *pendingApplication {
+	if r.applications == nil {
+		r.applications = make(map[string]*pendingApplication)
+	}
+	effect := r.applications[u.Name]
+	if effect == nil || effect.sourceEpoch != r.sourceEpoch || !sameUpdate(effect.update, u) {
+		if effect != nil {
+			r.finishApplicationLocked(u.Name, ErrStale)
+		}
+		u.Snapshot = append(json.RawMessage(nil), u.Snapshot...)
+		effect = &pendingApplication{update: u, sourceEpoch: r.sourceEpoch, done: make(chan struct{})}
+		if u.Role == "dhcp6" {
+			effect.withdrawRA = r.dhcp6WithdrawalsLocked(u.Name)
+		}
+		r.applications[u.Name] = effect
+	}
+	return effect
 }
 
 func (r *Runtime) finishApplicationLocked(name string, err error) {
@@ -137,6 +152,8 @@ func (r *Runtime) finishApplicationsLocked(p projection, applications map[string
 				}
 			case "bgp":
 				err = bgpApplicationApplied(effect.update, p)
+			case "dhcp6":
+				err = r.dhcp6WithdrawalAppliedLocked(effect.withdrawRA)
 			}
 		}
 		effect.receipt.Applied = err == nil
@@ -204,6 +221,10 @@ func (r *Runtime) pendingWithdrawalLocked(name string) bool {
 		var s vrrp.Snapshot
 		return json.Unmarshal(current.Snapshot, &s) == nil && s.State != vrrp.StateActive
 	}
+	if current.Role == "dhcp6" {
+		var s dhcp6config.Snapshot
+		return json.Unmarshal(current.Snapshot, &s) == nil && s.State == "stopped"
+	}
 	var s struct {
 		Active bool `json:"active"`
 	}
@@ -229,6 +250,29 @@ func (r *Runtime) reconcileStep(ctx context.Context, ceiling map[string]supervis
 	if err != nil {
 		r.mu.Unlock()
 		return false, err
+	}
+	if status.Stopping {
+		// Keep reconciliation within the current process set during shutdown.
+		ceiling = make(map[string]supervisor.DynamicModule)
+		for _, module := range status.Modules {
+			ceiling[module.Name] = supervisor.DynamicModule{Name: module.Name, Role: module.Role, ConfigDigest: module.ConfigDigest}
+		}
+	} else if ceiling != nil {
+		for _, module := range status.Modules {
+			actual := supervisor.DynamicModule{Name: module.Name, Role: module.Role, ConfigDigest: module.ConfigDigest}
+			if module.Role != "dhcp6" || ceiling[module.Name] == actual {
+				continue
+			}
+			// Retire DHCPv6 first while the old WAN and its other consumers
+			// still exist. The stopped observation retires its generated RA.
+			ceiling = maps.Clone(ceiling)
+			for _, peer := range status.Modules {
+				if peer.Role != "dhcp6" {
+					ceiling[peer.Name] = supervisor.DynamicModule{Name: peer.Name, Role: peer.Role, ConfigDigest: peer.ConfigDigest}
+				}
+			}
+			break
+		}
 	}
 	set := selectInstances(p.instances, ceiling)
 	changed := len(set.bindings) != len(r.bindings)
@@ -437,6 +481,40 @@ func (r *Runtime) applyProjectionLocked(ctx context.Context, p projection) (proj
 	}
 	r.finishApplicationsLocked(p, applications, err)
 	return p, err
+}
+
+// Capture the advertised prefixes before accepting the stopped observation.
+// The coordinator may run before the HTTP handler starts waiting for its ACK.
+func (r *Runtime) dhcp6WithdrawalsLocked(name string) map[string][]string {
+	required := make(map[string][]string)
+	for _, service := range r.config.plan.Native.Services {
+		if service.ModuleName() != name || service.DHCP6 == nil {
+			continue
+		}
+		for _, lan := range service.DHCP6.Delegations {
+			module := name + "-" + lan.Name + "-ra"
+			for _, prefix := range r.liveRA[module].Prefixes {
+				required[module] = append(required[module], prefix.Prefix)
+			}
+		}
+	}
+	return required
+}
+
+func (r *Runtime) dhcp6WithdrawalAppliedLocked(required map[string][]string) error {
+	for module, prefixes := range required {
+		var snapshot ra.Snapshot
+		record, ok := r.records[module]
+		if !ok || json.Unmarshal(record.Snapshot, &snapshot) != nil || !snapshot.Withdrawing || snapshot.Sent == 0 {
+			return fmt.Errorf("%s has not acknowledged its final RA withdrawal", module)
+		}
+		for _, prefix := range prefixes {
+			if !slices.Contains(snapshot.WithdrawingPrefixes, prefix) {
+				return fmt.Errorf("%s has not withdrawn prefix %s", module, prefix)
+			}
+		}
+	}
+	return nil
 }
 
 func bgpApplicationApplied(u serviceconfig.Update, p projection) error {

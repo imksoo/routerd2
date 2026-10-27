@@ -32,10 +32,8 @@ import (
 
 type Effects interface {
 	Update(context.Context, dhcp6config.Snapshot) error
+	Withdraw(context.Context, dhcp6config.Snapshot) error
 }
-type EffectsFunc func(context.Context, dhcp6config.Snapshot) error
-
-func (f EffectsFunc) Update(ctx context.Context, s dhcp6config.Snapshot) error { return f(ctx, s) }
 
 type exchange struct {
 	kind          byte
@@ -86,12 +84,12 @@ func (c *client) packet(e *exchange, now time.Time) []byte {
 	}
 	b := []byte{e.kind, byte(e.xid >> 16), byte(e.xid >> 8), byte(e.xid)}
 	b = appendOption(b, 1, c.duid)
-	if e.kind == request || e.kind == renew || e.kind == decline {
+	if e.kind == request || e.kind == renew || e.kind == decline || e.kind == release {
 		b = appendOption(b, 2, c.server)
 	}
 	elapsed := min(65535, max(0, int(now.Sub(e.started)/(10*time.Millisecond))))
 	b = appendOption(b, 8, binary.BigEndian.AppendUint16(nil, uint16(elapsed)))
-	if e.kind != decline {
+	if e.kind != decline && e.kind != release {
 		b = appendOption(b, 6, []byte{0, 23, 0, 24, 0, 31, 0, 64, 0, 32, 0, 82, 0, 83})
 	}
 	if e.kind == information {
@@ -120,10 +118,10 @@ func (c *client) packet(e *exchange, now time.Time) []byte {
 	if e.kind == decline {
 		return appendOption(b, 3, encodeIA(3, c.cfg.IAID, c.declined))
 	}
-	if c.cfg.RequestAddress {
+	if c.cfg.RequestAddress && (e.kind != release || len(addresses) > 0) {
 		b = appendOption(b, 3, encodeIA(3, c.cfg.IAID, addresses))
 	}
-	if c.cfg.RequestPrefix {
+	if c.cfg.RequestPrefix && (e.kind != release || len(prefixes) > 0) {
 		if len(prefixes) == 0 {
 			prefixes = []assignment{{prefix: netip.PrefixFrom(netip.IPv6Unspecified(), c.cfg.PrefixLength)}}
 		}
@@ -158,6 +156,64 @@ func (c *client) transmit(conn *net.UDPConn, e *exchange, now time.Time) error {
 	e.attempts++
 	return nil
 }
+
+// release has one bounded retry owner. Any matching Reply, including NoBinding,
+// completes it; expiry or an unavailable server cannot hold shutdown forever.
+func (c *client) release(ctx context.Context, conn *net.UDPConn) error {
+	clock, err := boottime.ReadForBoot(c.snapshot.BootID)
+	if err != nil {
+		return err
+	}
+	until, assigned := c.snapshot.LeaseUntil()
+	if !assigned || !until.Live(clock) {
+		return nil
+	}
+	if err := c.lease.begin(release, time.Unix(0, clock.BoottimeNanoseconds)); err != nil {
+		return err
+	}
+	buf := make([]byte, 65536)
+	for c.lease.kind != 0 {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("DHCPv6 Release: %w", err)
+		}
+		clock, err = boottime.ReadForBoot(c.snapshot.BootID)
+		if err != nil {
+			return err
+		}
+		if !until.Live(clock) {
+			return nil
+		}
+		now := time.Unix(0, clock.BoottimeNanoseconds)
+		if !now.Before(c.lease.next) {
+			if c.lease.attempts == 4 {
+				return errors.New("DHCPv6 Release was not acknowledged after four transmissions")
+			}
+			if err := c.transmit(conn, &c.lease, now); err != nil {
+				return fmt.Errorf("send DHCPv6 Release: %w", err)
+			}
+		}
+		if err := conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond)); err != nil {
+			return err
+		}
+		n, _, err := conn.ReadFromUDP(buf)
+		if err != nil {
+			var ne net.Error
+			if errors.As(err, &ne) && ne.Timeout() {
+				continue
+			}
+			return err
+		}
+		m, err := decode(buf[:n], c.cfg.IAID)
+		if err != nil {
+			continue
+		}
+		if err := c.accept(m, clock); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func timers(ia *association) (uint32, uint32) {
 	basis := ^uint32(0)
 	for _, a := range ia.leases {
@@ -189,7 +245,7 @@ func (c *client) accept(m message, clock boottime.Clock) error {
 	if e.kind == 0 || m.xid != e.xid || (e.kind == solicit && m.kind != advertise) || (e.kind != solicit && m.kind != reply) {
 		return nil
 	}
-	if e.kind == request || e.kind == renew || e.kind == decline {
+	if e.kind == request || e.kind == renew || e.kind == decline || e.kind == release {
 		if !bytes.Equal(m.server, c.server) {
 			return nil
 		}
@@ -198,6 +254,10 @@ func (c *client) accept(m message, clock boottime.Clock) error {
 	// including NoBinding after a lost acknowledgement (RFC 8415 18.2.10.2).
 	if e.kind == decline {
 		return c.begin(solicit, now)
+	}
+	if e.kind == release {
+		c.lease = exchange{}
+		return nil
 	}
 	if m.status == 3 && (e.kind == renew || e.kind == rebind) {
 		c.server = slices.Clone(m.server)
@@ -490,7 +550,10 @@ func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, ready fun
 		return nil
 	}
 	defer func() {
-		cleanup, cancel := context.WithTimeout(context.Background(), time.Second)
+		if ctx.Err() != nil && errors.Is(result, ctx.Err()) {
+			result = nil
+		}
+		cleanup, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
 		clock, err := boottime.ReadForBoot(c.snapshot.BootID)
 		if err != nil {
@@ -498,7 +561,13 @@ func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, ready fun
 			return
 		}
 		withdrawn := dhcp6config.Snapshot{ObservedNanos: uint64(clock.BoottimeNanoseconds), BootID: clock.BootID, Resource: cfg.Resource, Interface: cfg.Interface, IAID: cfg.IAID, ClientDUID: hex.EncodeToString(duid), State: "stopped"}
-		result = errors.Join(result, effects.Update(cleanup, withdrawn))
+		// Release must follow acknowledged kernel removal and zero-lifetime
+		// LAN advertisements. Keep the socket's link-local source until done.
+		if err := effects.Withdraw(cleanup, withdrawn); err != nil {
+			result = errors.Join(result, fmt.Errorf("withdraw DHCPv6 assignments: %w", err))
+			return
+		}
+		result = errors.Join(result, c.release(cleanup, conn))
 	}()
 	if err := publish(); err != nil {
 		return err

@@ -199,12 +199,6 @@ func Run(parent context.Context, options Options) error {
 		}
 		stopping = true
 		ctxDone = nil
-		apiCancel()
-		now := time.Now()
-		// Stop in reverse declaration order; timeouts still run concurrently.
-		for i := len(children) - 1; i >= 0; i-- {
-			stopChild(children[i], "", false, false, now)
-		}
 	}
 	if ctx.Err() != nil {
 		beginShutdown()
@@ -212,6 +206,21 @@ func Run(parent context.Context, options Options) error {
 
 	for {
 		now := time.Now()
+		if stopping {
+			// DHCPv6 releases over the still-live WAN. Other protocol workers
+			// then drain through control/network; logging is the final owner.
+			phase := 5
+			for _, c := range children {
+				if c.process != nil {
+					phase = min(phase, shutdownPhase(c.spec.Role))
+				}
+			}
+			for _, c := range children {
+				if c.process != nil && shutdownPhase(c.spec.Role) == phase && c.stopDeadline.IsZero() {
+					stopChild(c, "", false, false, now)
+				}
+			}
+		}
 		for _, c := range children {
 			if !stopping && !c.retired && c.process == nil && !c.permanentFailure && !c.nextStart.IsZero() && !now.Before(c.nextStart) {
 				if err := startChild(ctx, o, images[c.spec.Role], engines[c.spec.Role], c, events); err != nil {
@@ -298,8 +307,20 @@ func Run(parent context.Context, options Options) error {
 			request.reply <- nil
 		case request := <-a.reconciles:
 			if stopping {
-				request.reply <- errors.New("supervisor is stopping")
-				continue
+				// During drain the coordinator may retire dependents, but cannot
+				// start or replace any process. Validate the whole batch first.
+				valid := true
+				for _, module := range request.request.Modules {
+					c := byName[module.Name]
+					if c == nil || c.retired || !c.dynamic || c.spec.Role != module.Role || c.status.ConfigDigest != module.ConfigDigest {
+						valid = false
+						break
+					}
+				}
+				if !valid {
+					request.reply <- errors.New("supervisor is stopping; only existing modules can be retained")
+					continue
+				}
 			}
 			specs, err := dynamicSpecs(o, request.request)
 			if err != nil {
@@ -347,6 +368,21 @@ func Run(parent context.Context, options Options) error {
 			publish()
 			request.reply <- nil
 		}
+	}
+}
+
+func shutdownPhase(role string) int {
+	switch role {
+	case "dhcp6":
+		return 1
+	case "control":
+		return 3
+	case "network":
+		return 4
+	case "logging":
+		return 5
+	default:
+		return 2
 	}
 }
 
@@ -442,7 +478,7 @@ func normalize(o Options) (Options, error) {
 		for _, d := range []struct {
 			value *time.Duration
 			def   time.Duration
-		}{{&s.StartupTimeout, 10 * time.Second}, {&s.HeartbeatTimeout, 5 * time.Second}, {&s.StopTimeout, 5 * time.Second}, {&s.BackoffMin, 100 * time.Millisecond}, {&s.BackoffMax, 30 * time.Second}} {
+		}{{&s.StartupTimeout, 10 * time.Second}, {&s.HeartbeatTimeout, 5 * time.Second}, {&s.StopTimeout, worker.ShutdownTimeout(s.Role) + 2*time.Second}, {&s.BackoffMin, 100 * time.Millisecond}, {&s.BackoffMax, 30 * time.Second}} {
 			if *d.value < 0 {
 				return o, fmt.Errorf("negative timeout for %s", s.Name)
 			}

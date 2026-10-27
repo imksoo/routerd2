@@ -153,7 +153,7 @@ func Run(ctx context.Context, runtimeDir, name, role, path, digest string, gener
 		if err := decode(instance.Config, &cfg); err != nil {
 			return err
 		}
-		return dhcp6.Run(runCtx, cfg, dhcp6.EffectsFunc(func(ctx context.Context, s dhcp6config.Snapshot) error { return c.update(ctx, s) }), ready)
+		return dhcp6.Run(runCtx, cfg, dhcp6Effects{client: c}, ready)
 	case "ra":
 		var cfg ra.Config
 		if err := decode(instance.Config, &cfg); err != nil {
@@ -245,6 +245,38 @@ type effectsClient struct {
 	client   *localapi.Client
 	identity serviceconfig.Update
 	latest   json.RawMessage
+}
+
+type dhcp6Effects struct{ client *effectsClient }
+
+func (e dhcp6Effects) Update(ctx context.Context, s dhcp6config.Snapshot) error {
+	return e.client.update(ctx, s)
+}
+
+func (e dhcp6Effects) Withdraw(ctx context.Context, s dhcp6config.Snapshot) error {
+	b, err := json.Marshal(s)
+	if err != nil {
+		return err
+	}
+	c := e.client
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	// A queued heartbeat must never replay the previous assignment after its
+	// final withdrawal, including an engine failure without context cancellation.
+	c.latest = nil
+	c.identity.Sequence++
+	u := c.identity
+	u.Snapshot = b
+	call, cancel := context.WithTimeout(ctx, 6*time.Second)
+	defer cancel()
+	var receipt serviceconfig.ApplicationReceipt
+	if err := c.client.Do(call, "POST", "/v1/services/effects", u, &receipt); err != nil {
+		return err
+	}
+	if !receipt.Applied {
+		return errors.New("DHCPv6 withdrawal was not applied")
+	}
+	return nil
 }
 
 func (c *effectsClient) update(ctx context.Context, v any) error {

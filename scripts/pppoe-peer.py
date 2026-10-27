@@ -13,6 +13,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import signal
 import subprocess
 import shutil
@@ -355,6 +356,72 @@ def peer(stage, auth, dhcp6_server):
             traffic()
             assert link()["ifindex"] == stable_index and modules()["service.internet"]["generation"] == stable["generation"]
             print("PASS confirmed rollback restored both family routes and TCP/UDP without replacing the PPP session", flush=True)
+            retired_at = time.time()
+            retired = copy.deepcopy(configuration)
+            retired["resources"] = [r for r in retired["resources"] if r["id"] != "pd"]
+            api("control.sock", "/v1/config/commit", {"expected_revision": 3, "request_id": "pd-retire", "config": retired})
+            wait(lambda: "service.pd" not in modules() and "service.pd-lan-ra" not in modules())
+            assert not delegated() and link()["ifindex"] == stable_index
+            print("PASS PD retirement withdrew generated RA and LAN addresses while PPP stayed up", flush=True)
+            api("control.sock", "/v1/config/commit", {"expected_revision": 4, "request_id": "pd-restore", "config": configuration})
+            ipv6_traffic()
+            assert pd_record()["snapshot"]["client_duid"] == duid
+            assert link()["ifindex"] == stable_index
+            # Remove the WAN and its dependents in one operator transaction.
+            # The DHCPv6 child must release while PPP is still available.
+            offline = copy.deepcopy(configuration)
+            offline["resources"] = [r for r in offline["resources"] if r["id"] in ("wan", "lan", "lan-address", "forwarding")]
+            api("control.sock", "/v1/config/commit", {"expected_revision": 5, "request_id": "wan-retire", "config": offline})
+            wait(lambda: "service.internet" not in modules() and "service.pd" not in modules() and link() is None)
+            assert not delegated()
+            print("PASS removing PPP and PD together drained DHCPv6 before its WAN", flush=True)
+            if server.poll() is None:
+                server.terminate()
+                server.wait(timeout=3)
+            api("control.sock", "/v1/config/commit", {"expected_revision": 6, "request_id": "wan-restore", "config": configuration})
+            wait(lambda: link() is not None and routed())
+            wait(lambda: any(x["ifname"].startswith("ppp") and x["addr_info"] for x in peer_links()))
+            ppp = next(x["ifname"] for x in peer_links() if x["ifname"].startswith("ppp"))
+            server = dhcp6_start()
+            ipv6_traffic()
+            traffic()
+            assert pd_record()["snapshot"]["client_duid"] == duid
+            # Exercise actual PID 1 shutdown while the independent server and
+            # capture remain alive. Cleanup must not terminate the peer first.
+            os.kill(pid1, signal.SIGTERM)
+            daemon.wait(timeout=12)
+            # reboot(POWER_OFF) in a PID namespace terminates its init with
+            # SIGINT; util-linux unshare propagates that signal (reboot(2)).
+            assert daemon.returncode == -signal.SIGINT, daemon.returncode
+            assert "appliance runtime failed" not in (stage / "console.log").read_text()
+            capture.send_signal(signal.SIGINT)
+            capture.wait(timeout=3)
+            packets = run(["tcpdump", "-n", "-tt", "-vv", "-r", str(stage / "pppoe.pcap"), "ip6"])
+            withdrawals = []
+            releases = []
+            replies = []
+            records = []
+            for line in packets.splitlines():
+                if line and line[0].isdigit():
+                    records.append(line)
+                elif records:
+                    records[-1] += " " + line.strip()
+            for line in records:
+                if "router advertisement" in line and "router lifetime 0s" in line:
+                    assert "valid time 0s, pref. time 0s" in line, line
+                    withdrawals.append(float(line.split()[0]))
+                release = re.search(r"dhcp6 release \(xid=([0-9a-f]+)", line)
+                reply = re.search(r"dhcp6 reply \(xid=([0-9a-f]+)", line)
+                if release and float(line.split()[0]) >= retired_at:
+                    releases.append((float(line.split()[0]), release[1]))
+                if reply:
+                    replies.append((float(line.split()[0]), reply[1]))
+            assert len(releases) >= 3, packets
+            assert len(withdrawals) >= 2, packets
+            assert all(any(w < stamp and stamp - w < 6 for w in withdrawals) for stamp, _ in releases), packets
+            assert all(any(reply > stamp and reply - stamp < 2 and rxid == xid for reply, rxid in replies) for stamp, xid in releases), packets
+            assert (stage / "dhcp6.log").read_text().count("releases prefix ") >= 3
+            print("PASS ISC PD Release/Reply after zero-lifetime RA on config retirement and PID 1 shutdown; stable-DUID reacquisition restored IPv6 TCP/UDP", flush=True)
             return
         probe.terminate()
         probe.wait(timeout=3)

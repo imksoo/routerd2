@@ -48,7 +48,7 @@ func dynamicProgram(source config.Document) bool {
 func (r *Runtime) installGuardStatusLocked(status supervisor.Status, err error) {
 	clock, clockErr := bfd.ReadClock()
 	r.guardStatus = make(map[string]supervisor.ModuleStatus)
-	if err == nil && clockErr == nil && !status.Stopping {
+	if err == nil && clockErr == nil {
 		for _, module := range status.Modules {
 			r.guardStatus[module.Name] = module
 		}
