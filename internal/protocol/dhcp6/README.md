@@ -2,18 +2,35 @@
 
 One worker owns UDP 546 on one interface. `request_address` requests IA_NA,
 `request_prefix` requests IA_PD, and both can be enabled in the same exchange.
-With neither enabled, the client performs Information-request only. DUID and
+With neither enabled and no RA gating, the client performs Information-request only. DUID and
 IAID belong to this client; additional workers cannot own separate IA types on
 the same interface. The network writer installs learned IA_NA addresses as /128
 and derives configured LAN addresses and advertisements from IA_PD prefixes.
 The client does not infer a default router from DHCPv6.
+
+The optional `ra_from` names a native RA client on the same interface. With
+this explicit policy, IA_NA waits for M, and information-only acquisition waits
+for M or O ([RFC 4861 section 4.2](https://www.rfc-editor.org/rfc/rfc4861.html#section-4.2)).
+O can start Information-request before M adds IA_NA in the same worker, socket,
+DUID and IAID. A configured IA_PD starts explicitly, independently of these
+flags. Current flags are projected from the RA owner; the DHCP owner persists
+its latched start decisions as `ra_started`. Later clear flags do not revoke a
+grant or erase those decisions. Worker and operator restarts on the same
+boot/interface/IAID/DUID retain them; a different boot/identity waits again.
+A stopped checkpoint retains identity and start decisions, never assignments.
+Without `ra_from`, requested IA types start immediately as before.
+
+This opt-in was compared with routerd's netplan rendering and
+`networkdAdoptionDropin`: its `DHCPv6Client=no` deliberately disables RA-driven
+DHCP while retaining RA. Merely declaring an RA receiver must not enable DHCP.
 
 The native parser and exchange implement [RFC 8415](https://www.rfc-editor.org/rfc/rfc8415.html):
 Solicit/Advertise/Request/Reply, server-bound Renew, multicast Rebind, individual
 assignment validity, zero-lifetime withdrawal, retained deprecated old prefixes,
 and a separate information transaction. Server-selected timers and lifetimes
 are not echoed as client-selected values. Invalid identities, transaction IDs,
-IAIDs, duplicate/truncated options and unusable assignments are discarded.
+IAIDs and malformed option framing are discarded. An unusable IA assignment
+is ignored independently of usable sibling assignments.
 Multiple addresses and prefixes are retained, up to 64 of each per client.
 A completed or replaced transaction cannot refresh an assignment.
 
@@ -28,7 +45,7 @@ Different boots, changed identity/interface/IAID, expired PD and IA_NA-only
 clients use fresh acquisition. IA_NA-only Confirm recovery remains unimplemented.
 Graceful shutdown acknowledges kernel/RA withdrawal, persists an empty stopped
 checkpoint, then sends Release. SIGKILL leaves the last saved grant for recovery.
-The current contract is compiler native-33, checkpoint version 2; no discarded
+The current contract is compiler native-34, checkpoint version 2; no discarded
 identity-file or PD-wrapper journal reader is retained.
 
 This path was compared with routerd's `cmd/routerd-dhcpv6-client` DUID selection,
@@ -59,12 +76,13 @@ expired PD. Existing stale-notification, rollback, PPP/control/operator restart
 and RA-withdrawal/Release ordering checks passed.
 
 `make check-dhcp6` uses the real supervisor/control/network/client processes,
-independent dnsmasq, source-bound TCP/UDP, worker replacement, actual lease
+independent radvd and dnsmasq, RA M/O transitions, source-bound TCP/UDP, worker replacement, actual lease
 renewal and server silence through Rebind/expiry/recovery. It also connects an
 independent Linux duplicate host and verifies actual DAD/Decline packets, failed
 address withdrawal and a usable replacement lease with TCP/UDP on the same
 worker. The product configures the WAN bridge; no address flags are injected.
-Both independent-server and DAD/Decline fixtures passed with `pd-recovery`.
+The RA fixture also checks RA-learned default/on-link routes, IPv6 MTU/hop-limit
+application, writer restart, physical-MTU confirmed rollback and shutdown restoration.
 `make check-pd-ra`
 uses an independent wire server and captures generated LAN advertisements;
 IA_NA and IA_PD must share each stateful transaction and IAID.
@@ -85,8 +103,8 @@ Expired higher-sequence delivery cannot restore ownership; fresh acquisition
 recovers the same prepared RA identity. Only dedicated guest PID 1 can change
 the guest clock, and restores its original baseline on exit.
 
-These are isolated amd64 Linux VM checks. Actual suspend, automatic
-RA-triggered DHCPv6, required-address readiness, complete legacy resource
+These are isolated amd64 Linux VM checks. Actual suspend, RA gating combined with PD/HA,
+required-address readiness, complete legacy resource
 selection, DAD failure alongside other IA_NA/IA_PD bindings, VRF and physical NIC
 qualification remain separate work. Two-node transfer is described below. Separate-VM reboot,
 partition/fencing, load, ARM64 execution and latest ONU/target-device acceptance

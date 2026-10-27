@@ -5,6 +5,7 @@ package network
 import (
 	"errors"
 	"fmt"
+	"math"
 	"net/netip"
 	"regexp"
 
@@ -56,6 +57,10 @@ type Interface struct {
 	// Changed settings are restored only on the same interface instance.
 	IPv6AcceptRA *int  `json:"ipv6_accept_ra,omitempty"`
 	IPv6Autoconf *bool `json:"ipv6_autoconf,omitempty"`
+	// IPv6MTU is a ceiling on the IPv6 stack's MTU, also capped by the link.
+	// It does not lower the physical link's MTU or IPv4's MTU.
+	IPv6MTU      *int `json:"ipv6_mtu,omitempty"`
+	IPv6HopLimit *int `json:"ipv6_hop_limit,omitempty"`
 }
 
 type Route struct {
@@ -271,7 +276,13 @@ func Validate(d Desired) error {
 		if l.IPv6AcceptRA != nil && (*l.IPv6AcceptRA < 0 || *l.IPv6AcceptRA > 2) {
 			add("interface %s: ipv6_accept_ra must be 0, 1 or 2", l.Name)
 		}
-		if (l.IPv6AcceptRA != nil || l.IPv6Autoconf != nil) && (l.Name == "all" || l.Name == "default") {
+		if l.IPv6MTU != nil && (*l.IPv6MTU < 1280 || *l.IPv6MTU > math.MaxInt32 || l.MTU != 0 && l.MTU < 1280) {
+			add("interface %s: IPv6 MTU requires a ceiling >=1280 and an IPv6-capable link", l.Name)
+		}
+		if l.IPv6HopLimit != nil && (*l.IPv6HopLimit < 0 || *l.IPv6HopLimit > 255) {
+			add("interface %s: IPv6 hop limit must be 0..255", l.Name)
+		}
+		if (l.IPv6AcceptRA != nil || l.IPv6Autoconf != nil || l.IPv6MTU != nil || l.IPv6HopLimit != nil) && (l.Name == "all" || l.Name == "default") {
 			add("interface %s: reserved IPv6 sysctl name", l.Name)
 		}
 		seen := map[string]bool{}

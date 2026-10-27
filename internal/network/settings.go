@@ -3,6 +3,8 @@ package network
 import (
 	"errors"
 	"fmt"
+	"math"
+	"sort"
 
 	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/lifetime"
@@ -15,6 +17,10 @@ func validateSettingRecord(s ownedSetting) error {
 	switch s.Key.Kind {
 	case "mtu":
 		minimum, maximum = 68, 65535
+	case "ipv6_mtu":
+		minimum, maximum = 1280, math.MaxInt32
+	case "hop_limit":
+		maximum = 255
 	case "up", "autoconf":
 	case "accept_ra":
 		maximum = 2
@@ -31,7 +37,7 @@ func validateSettingRecord(s ownedSetting) error {
 		return fmt.Errorf("unknown setting kind %q", s.Key.Kind)
 	}
 	if s.Key.Interface != "" {
-		if !validName(s.Key.Interface) || s.Index < 0 || raSetting(s.Key) && s.Index == 0 {
+		if !validName(s.Key.Interface) || s.Index < 0 || (raSetting(s.Key) || s.Key.Kind == "ipv6_mtu" || s.Key.Kind == "hop_limit") && s.Index == 0 {
 			return fmt.Errorf("invalid saved interface setting identity")
 		}
 	} else if s.Key.Kind != "forwarding4" && s.Key.Kind != "forwarding6" && s.Key.Kind != "rp_filter_all" && s.Key.Kind != "rp_filter_default" && s.Key.Kind != "conntrack_tcp_liberal" {
@@ -165,16 +171,37 @@ func (p *apply) set(key settingKey, value int) error {
 	} else if old.Attempted != nil && live == *old.Attempted {
 		old.Last = live
 	}
+	coupled, err := p.prepareIPv6MTUReset(key, value, index)
+	if err != nil {
+		return err
+	}
 	old.Attempted = &value
 	if err := p.checkpoint("setting intent"); err != nil {
 		return err
 	}
 	return p.change("set "+key.Kind, func() error { return p.e.kernel.WriteSetting(key, value) }, func() {
 		old.Last, old.Index, old.Attempted = value, index, nil
+		if coupled != nil {
+			coupled.Last, coupled.Attempted = value, nil
+		}
 	})
 }
 
 func (p *apply) restoreSettings(want map[settingKey]int) error {
+	// Restoring a physical MTU resets Linux's IPv6 MTU as a side effect.
+	// Restore it before the independently recorded IPv6 baseline.
+	rank := func(kind string) int {
+		if kind == "mtu" {
+			return 0
+		}
+		if kind == "ipv6_mtu" {
+			return 2
+		}
+		return 1
+	}
+	sort.SliceStable(p.e.state.Settings, func(i, j int) bool {
+		return rank(p.e.state.Settings[i].Key.Kind) < rank(p.e.state.Settings[j].Key.Kind)
+	})
 	for i := 0; i < len(p.e.state.Settings); {
 		s := &p.e.state.Settings[i]
 		if _, ok := want[s.Key]; ok {
@@ -203,16 +230,32 @@ func (p *apply) restoreSettings(want map[settingKey]int) error {
 		if !settingValueOwned(*s, live) {
 			return p.failure("restore "+s.Key.Kind, fmt.Errorf("%s changed outside routerd2: have %d, last set %d; refusing to overwrite", s.Key.Interface, live, s.Last))
 		}
-		if live != s.Before {
+		before := s.Before
+		if s.Key.Kind == "ipv6_mtu" {
+			link, err := p.e.kernel.Interface(s.Key.Interface)
+			if err != nil {
+				return p.failure("IPv6 MTU restore", err)
+			}
+			before = min(before, link.MTU)
+		}
+		if live != before {
 			if s.Attempted != nil && live == *s.Attempted {
 				s.Last = live
 			}
-			before := s.Before
+			coupled, err := p.prepareIPv6MTUReset(s.Key, before, index)
+			if err != nil {
+				return err
+			}
 			s.Attempted = &before
 			if err := p.checkpoint("setting restore intent"); err != nil {
 				return err
 			}
-			if err := p.change("restore "+s.Key.Kind, func() error { return p.e.kernel.WriteSetting(s.Key, s.Before) }, forget); err != nil {
+			if err := p.change("restore "+s.Key.Kind, func() error { return p.e.kernel.WriteSetting(s.Key, before) }, func() {
+				if coupled != nil {
+					coupled.Last, coupled.Attempted = before, nil
+				}
+				forget()
+			}); err != nil {
 				return err
 			}
 		} else {
@@ -237,4 +280,24 @@ func (p *apply) interfaceRASettings(l Interface) error {
 		}
 	}
 	return nil
+}
+
+// NETDEV_CHANGEMTU resets the IPv6 MTU to the physical MTU. The same intent
+// checkpoint must own that side effect, including a crash before its ACK.
+func (p *apply) prepareIPv6MTUReset(key settingKey, value, index int) (*ownedSetting, error) {
+	if key.Kind != "mtu" {
+		return nil, nil
+	}
+	coupled := p.e.settingRecord(settingKey{Kind: "ipv6_mtu", Interface: key.Interface})
+	if coupled == nil {
+		return nil, nil
+	}
+	if coupled.Index != index {
+		return nil, p.failure("IPv6 MTU ownership", fmt.Errorf("interface %s was replaced", key.Interface))
+	}
+	if value < 1280 {
+		return nil, p.failure("IPv6 MTU", fmt.Errorf("managed IPv6 interface %s requires physical MTU >=1280", key.Interface))
+	}
+	coupled.Attempted = &value
+	return coupled, nil
 }

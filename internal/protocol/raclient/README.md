@@ -17,8 +17,9 @@ A callback error is fatal; there is no silent partial-success fallback.
 the initial snapshot. It does **not** mean that a router, prefix or default
 route has been learned. `Active` distinguishes an operational worker from
 address/route availability. Cancellation sends one `Active=false` snapshot
-through a cleanup context bounded to one second. The callback must honor its
-context. The journal deliberately retains the learned leases for same-boot
+through `Effects.Withdraw`, bounded to six seconds. The runtime waits for the
+network writer to acknowledge removal/restoration before the worker exits.
+The callback must honor its context. The journal deliberately retains the learned leases for same-boot
 worker restart.
 
 The runtime compiler supplies `StatePath`, an absolute path in private durable
@@ -46,6 +47,22 @@ pins the local link-local address. `InterfaceID` is a nonzero IPv6 suffix whose
 upper 64 bits are zero, such as `::1234`. When omitted, Ethernet modified
 EUI-64 is used; non-Ethernet links require an explicit ID.
 
+The service's explicit `use_mtu` and `use_hop_limit` enable learned settings;
+both default false. MTU changes only the IPv6 stack's per-interface MTU, not the
+physical link or IPv4. Its ceiling is the minimum of learned MTU, any configured
+`ipv6_mtu` and current physical MTU. A nonzero advertised hop limit sets the
+per-interface `ipv6_hop_limit`. Omitted/zero observations do not replace a
+previously learned value. They remain learned parameters until the RA owner
+withdraws; Router Lifetime controls routes, not these parameters.
+
+The single writer journals before-images and interface identity. Withdrawal
+restores original values on that interface, even across writer replacement.
+Linux resets its IPv6 MTU when physical MTU changes, so the same intent/ACK
+records that side effect; restoration orders physical MTU before IPv6 MTU.
+The IPv6 restore value remains capped by the current physical MTU. This is
+network ownership journal 11; disposable previous development journals must
+be recreated, with no compatibility reader.
+
 ## Protocol behavior
 
 | Learned item | Snapshot representation and lifetime |
@@ -56,7 +73,9 @@ EUI-64 is used; non-Ethernet links require an explicit ID.
 | PIO on-link prefix | Independent `Prefixes` entry; its L flag and lifetime do not imply that the address itself has a connected /64 |
 | RDNSS | IPv6 DNS server with receiving-interface scope, last advertiser and its own lifetime |
 | DNSSL | Ordered canonical ASCII/punycode search domain with its own lifetime |
-| M/O flags, MTU, hop limit, reachable/retransmit timers | Observations, not network-writer mutations |
+| M/O flags | Optional same-interface DHCPv6 `ra_from` input |
+| MTU, current hop limit | Optional `use_mtu` / `use_hop_limit` writer settings |
+| Reachable/retransmit timers | Observations only |
 
 The /128 SLAAC representation avoids an implicit Linux /64 route when the
 advertised L bit is clear. The projector must install the separate on-link
@@ -68,9 +87,9 @@ Each packet is validated completely before modifying learned collections:
 source must be link-local, hop limit 255, ICMPv6 type/code and checksum valid,
 and the receiving interface must match. Multicast destination must be
 `ff02::1`; unicast destination must be the worker's selected link-local source.
-Malformed option framing or known option lengths, invalid RDNSS/DNSSL encoding,
-and duplicate RIO prefixes reject the whole packet. Unknown options and
-semantic-invalid PIO/RIO entries are ignored. Prefix routes and generated
+Malformed option framing or known option lengths and invalid RDNSS/DNSSL
+encoding reject the whole packet. Repeated RIO prefixes update in wire order.
+Unknown options and semantic-invalid PIO/MTU/RIO entries are ignored. Prefix routes and generated
 addresses exclude link-local, multicast, loopback and unspecified prefixes,
 with `::/0` permitted as the default route.
 
@@ -134,8 +153,7 @@ reachability and DAD. The package does not implement SEND, privacy/stable-opaque
 address generation, duplicate-ID retries, redirects, DHCPv6 IA_NA, or a full
 RFC 4191 reachability-driven router-selection algorithm. All live router
 candidates and preference values are passed to the control service; its
-selection/ECMP policy is separate. A source allowlist is not SEND. MTU and
-other RA header observations currently do not reconfigure kernel timers.
+selection/ECMP policy is separate. A source allowlist is not SEND. Reachable/retransmit observations do not reconfigure kernel timers.
 
 ## Verification
 
@@ -184,3 +202,11 @@ actual UTC +/-24h, unchanged frozen-producer notifications, RA/network worker
 restarts, all owners stopped during kernel expiry, expired replay rejection,
 fresh advertisement recovery and original guest-clock restoration. This does
 not qualify physical suspend, target NICs or the complete WAN resource model.
+
+`make check-dhcp6` connects independent radvd2.19 and dnsmasq2.90 to actual
+supervisor/control/network/RA/DHCP/DNS workers on PVE Linux6.8/amd64. It checks
+M0O0 waiting, O information, M address acquisition, subsequent cleared flags,
+normal DAD, IPv6 TCP/UDP and scoped DNS, MTU1400/hop42 and actual packet hops,
+writer replacement, physical MTU1300 and confirmed rollback, original lease
+expiry/recovery, standalone Release and final baseline restoration. This is VM
+kernel interoperability, not physical NIC or ONU qualification.

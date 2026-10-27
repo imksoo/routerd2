@@ -96,7 +96,7 @@ func (c *compiler) raClient(r resource) {
 	c.raClients[r.Kind+"/"+r.Metadata.Name] = len(c.document.Services)
 	c.addService(r, service)
 	c.note(r, "Explicit migration policy replaces host-network-manager RA defaults with native SLAAC, default/on-link/RIO route, DNS and route-metric/table intent; this is a deliberate behavior change, not automatic legacy parity.")
-	c.note(r, "The sole network writer disables kernel RA/autoconf before the native receiver starts. Learned DNS remains bounded typed state; it does not update resolv.conf. RA MTU/hop-limit application and automatic IA_NA/DHCPv6 triggering are not enabled.")
+	c.note(r, "The sole network writer disables kernel RA/autoconf before the native receiver starts. Learned DNS remains bounded typed state; it does not update resolv.conf. Native use_mtu/use_hop_limit and DHCPv6 ra_from are explicit optional policies; this import does not infer them from host-network-manager defaults.")
 	c.note(r, "An omitted native interface_id uses EUI-64; an omitted source_address selects the interface link-local address. Required-address readiness and legacy observed addresses are not imported.")
 }
 

@@ -14,6 +14,7 @@ import (
 )
 
 type Config struct {
+	UseRA          bool            `json:"use_ra,omitempty"`
 	Standby        bool            `json:"standby,omitempty"`
 	Replication    *peertls.Config `json:"replication,omitempty"`
 	Resource       string          `json:"resource"`
@@ -44,7 +45,13 @@ type SyncStatus struct {
 	Error         string `json:"error,omitempty"`
 }
 
+type RouterFlags struct {
+	Managed     bool `json:"managed,omitempty"`
+	OtherConfig bool `json:"other_config,omitempty"`
+}
+
 type Snapshot struct {
+	RAStarted                 RouterFlags       `json:"ra_started,omitzero"`
 	Sync                      *SyncStatus       `json:"sync,omitempty"`
 	ObservedNanos             uint64            `json:"observed_nanos"`
 	BootID                    string            `json:"boot_id"`
@@ -154,14 +161,15 @@ func ValidateSnapshot(c Config, s Snapshot) error {
 		return err
 	}
 	switch s.State {
-	case "standby", "soliciting", "requesting", "bound", "renewing", "rebinding", "declining", "information", "stopped":
+	case "waiting_ra", "standby", "soliciting", "requesting", "bound", "renewing", "rebinding", "declining", "information", "stopped":
 	default:
 		return errors.New("invalid DHCPv6 client state")
 	}
 	if (s.State == "stopped" || s.State == "standby") && (len(s.Addresses)+len(s.Prefixes) > 0 || s.InfoReceivedNanos != 0) {
 		return errors.New("inactive DHCPv6 client retains assignments/information")
 	}
-	if s.State == "information" && (c.RequestAddress || c.RequestPrefix) {
+	wantsAddress := c.RequestAddress && (!c.UseRA || s.RAStarted.Managed)
+	if s.State == "information" && (wantsAddress || c.RequestPrefix) {
 		return errors.New("DHCPv6 state does not match requested associations")
 	}
 	if s.State == "standby" && s.Sync == nil || s.Sync != nil && (s.State != "standby" || s.Sync.ReceivedNanos > s.ObservedNanos) {
@@ -186,7 +194,7 @@ func ValidateSnapshot(c Config, s Snapshot) error {
 	seen := map[string]bool{}
 	for _, a := range s.Addresses {
 		ip, err := netip.ParseAddr(a.Address)
-		if err != nil || !usable(ip) || a.Address != ip.String() || !c.RequestAddress || seen[a.Address] || !validLease(s.BootID, a.PreferredUntil, a.ValidUntil) {
+		if err != nil || !usable(ip) || a.Address != ip.String() || !wantsAddress || seen[a.Address] || !validLease(s.BootID, a.PreferredUntil, a.ValidUntil) {
 			return errors.New("invalid DHCPv6 address assignment")
 		}
 		seen[a.Address] = true

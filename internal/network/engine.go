@@ -17,7 +17,7 @@ import (
 var errLinkNotFound = errors.New("link not found")
 
 // JournalVersion is the persisted network ownership/BOOTTIME contract.
-const JournalVersion = 10
+const JournalVersion = 11
 
 type settingKey struct {
 	Kind      string `json:"kind"`
@@ -520,6 +520,12 @@ func (p *apply) reconcile(d Desired) error {
 		if l.IPv6Autoconf != nil {
 			wantedSettings[settingKey{Kind: "autoconf", Interface: l.Name}] = boolInt(*l.IPv6Autoconf)
 		}
+		if l.IPv6MTU != nil {
+			wantedSettings[settingKey{Kind: "ipv6_mtu", Interface: l.Name}] = *l.IPv6MTU
+		}
+		if l.IPv6HopLimit != nil {
+			wantedSettings[settingKey{Kind: "hop_limit", Interface: l.Name}] = *l.IPv6HopLimit
+		}
 	}
 	if d.Forwarding.ConntrackTCPLiberal != nil {
 		wantedSettings[settingKey{Kind: "conntrack_tcp_liberal"}] = boolInt(*d.Forwarding.ConntrackTCPLiberal)
@@ -661,6 +667,20 @@ func (p *apply) interfaceAttributes(l Interface) error {
 }
 
 func (p *apply) interfaceConfig(l Interface) error {
+	if l.IPv6MTU != nil {
+		live, err := p.e.kernel.Interface(l.Name)
+		if err != nil {
+			return p.failure("IPv6 MTU interface", err)
+		}
+		if err := p.set(settingKey{Kind: "ipv6_mtu", Interface: l.Name}, min(*l.IPv6MTU, live.MTU)); err != nil {
+			return err
+		}
+	}
+	if l.IPv6HopLimit != nil {
+		if err := p.set(settingKey{Kind: "hop_limit", Interface: l.Name}, *l.IPv6HopLimit); err != nil {
+			return err
+		}
+	}
 	if err := p.set(settingKey{Kind: "up", Interface: l.Name}, 1); err != nil {
 		return err
 	}

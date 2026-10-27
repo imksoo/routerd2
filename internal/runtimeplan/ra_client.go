@@ -28,6 +28,23 @@ func projectRAClient(p *projection, service serviceconfig.Service, snapshot racl
 	if !has || !snapshot.Active || snapshot.BootID != clock.BootID || snapshot.ObservedNanos > uint64(clock.BoottimeNanoseconds) {
 		return nil
 	}
+	for i := range p.network.Interfaces {
+		iface := &p.network.Interfaces[i]
+		if iface.Name != c.Interface {
+			continue
+		}
+		if c.UseMTU && snapshot.MTU != 0 {
+			mtu := snapshot.MTU
+			if iface.IPv6MTU != nil {
+				mtu = min(mtu, *iface.IPv6MTU)
+			}
+			iface.IPv6MTU = &mtu
+		}
+		if c.UseHopLimit && snapshot.CurrentHopLimit != 0 {
+			hop := snapshot.CurrentHopLimit
+			iface.IPv6HopLimit = &hop
+		}
+	}
 	for _, address := range snapshot.Addresses {
 		if address.DADFailed || !address.ValidUntil.Live(clock) {
 			continue

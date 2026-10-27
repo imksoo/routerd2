@@ -822,7 +822,7 @@ control交換前の旧PD Release、network/management PID維持、新control・P
 旧producerの通知409を確認した。captureは寿命0 RA→Release→対応Reply→PADTとなった。
 同じfactory実装の永続ext4付きrebootでも二回目起動の設定・DUID・SSHホスト鍵と転送復旧を確認した。
 SIGKILLで旧controlを失った場合と無応答peerでのcontrol交換は別の未検証範囲である。
-複数割当/PDとのDAD共存、required/observe-only・RA trigger・resolver効果・全kernel-link再設定・
+複数割当/PDとのDAD共存、required/observe-only・resolver効果・RA triggerのPD/HA組合せ・全kernel-link再設定・
 control強制終了時の復旧・実suspend・更新trial中のreboot・VRF・全link option/lifecycle・WAN選択は残り、NET-05全体は未完了。
 
 既存uplinkへ専用MAC/DUIDのmacvlanを隔離接続し、実上流RA・DHCPv4・PD /60と
@@ -887,7 +887,22 @@ RA→RDNSS→AFTRの連結では、独立したRA/DNS/Linux AFTRと別namespace�
 新prefixでの復旧、RA/network worker再起動を確認した。`make check-ra-aftr`で再実行できる。
 firewallの名前照合に存在確認を要求して起動を阻害していた制約・補助collectorを削除した。
 AFTR source選択の全件sortを一回の走査へ変え、同じRAのsource/DNSでdecodeを共有する。
-required/observe-only・RA trigger/resolver、suspend/reboot・VRF・対象実機の受入はまだ残る。
+required/observe-only・system resolver、RA triggerのPD/HA組合せ、suspend/reboot・VRF・対象実機の受入はまだ残る。
+
+2026-10-27追加: `ra-dhcp6/native-34`は、旧routerdのnetplan生成・networkd adoptionと
+DUID/lease保存経路を比較し、同一interfaceの明示`ra_from`でM/Oを一つのDHCPv6 workerへ渡す。
+Oで情報取得、Mで設定されたIA_NAを開始し、明示PDはフラグと独立して取得する。
+後続のフラグ解除は貸出を撤回しない。同じboot/identityの開始履歴とDUID/IAIDをcheckpointへ保持する。
+RAの`use_mtu`/`use_hop_limit`は単一writerへIPv6設定を投影し、元値を保存/復元する。
+MTUはIPv6 stackだけを変更し、物理MTUとの小さい方を適用する。Linuxの物理MTU変更に伴う
+IPv6 MTU resetも同じjournal intent/ACKへ含める。RA撤去はwriterの適用完了を待つ。
+network journal11へ変更し、旧開発stateの互換readerは作らない。
+PVE Linux6.8/amd64、独立radvd2.19/dnsmasq2.90、通常DADの実daemonで、
+M0O0待機→O情報取得→Mアドレス取得→解除後維持、学習経路のIPv6 TCP/UDP・UDP/TCP DNSが通った。
+同一worker内の遷移、worker交換時のDUID/IAID保持、自然Renew・Rebind・120秒失効/復旧とReleaseも確認した。
+IPv6 MTU1400/hop42・実packet hop42、writer交換、物理MTU1300による制限とconfirmed rollback、
+終了時の元1500/64復元が通った。先行終了試験の失敗は元値紛失ではなく、RA通知受付だけで
+worker/controlが終了する競合だった。適用ACKへ接続して修正し、一時診断コード・生ログ・captureを削除した。
 
 **受入条件**
 

@@ -6,16 +6,23 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/netip"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"slices"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/imksoo/routerd/pkg/api"
 	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/config"
+	"github.com/imksoo/routerd2/internal/control"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
@@ -26,8 +33,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func TestDaemonDHCP6AddressIndependentServer(t *testing.T) {
-	if !isolateFixtureTimeout(t, "TestDaemonDHCP6AddressIndependentServer", 285*time.Second) {
+func TestDaemonDHCP6RAIndependentPeers(t *testing.T) {
+	if !isolateFixtureTimeout(t, "TestDaemonDHCP6RAIndependentPeers", 285*time.Second) {
 		return
 	}
 	provider := fixturePeerNamespace(t, "wan0", "server0")
@@ -41,7 +48,6 @@ func TestDaemonDHCP6AddressIndependentServer(t *testing.T) {
 		}
 		for _, value := range []string{"fe80::2/64", "2001:db8:42::1/64"} {
 			a, _ := netlink.ParseAddr(value)
-			a.Flags = unix.IFA_F_NODAD
 			if err := netlink.AddrAdd(link, a); err != nil {
 				return err
 			}
@@ -58,16 +64,40 @@ func TestDaemonDHCP6AddressIndependentServer(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	server := startFixtureDNSMasq(t, provider, []string{"--dhcp-range=2001:db8:42::100,2001:db8:42::110,64,120s", "--dhcp-option=option6:dns-server,[fe80::2]", "--dhcp-option=option6:domain-search,wan.test", "--port=53", "--no-resolv", "--no-hosts", "--address=/wan.test/2001:db8:ffff::9"})
+
 	vrrpVIPResponders(t, provider, "6", []string{"2001:db8:ffff::9"}, "A")
 	capture := healthPBRCapture(t, "wan0")
-	doc := config.Native{Network: network.Desired{Interfaces: []network.Interface{{Name: "wan0"}}, Routes: []network.Route{{Destination: "2001:db8:ffff::9/128", Gateway: "fe80::2", Interface: "wan0"}}}, Services: []serviceconfig.Service{{Name: "wan", DHCP6: &serviceconfig.DHCP6{Interface: "wan0", IAID: 7, RequestAddress: true}}}}
+	doc := config.Native{Network: network.Desired{Interfaces: []network.Interface{{Name: "wan0"}}}, Services: []serviceconfig.Service{{Name: "wan", DHCP6: &serviceconfig.DHCP6{RAFrom: "wan-ra", Interface: "wan0", IAID: 7, RequestAddress: true}}, {Name: "wan-ra", RAClient: &serviceconfig.RAClient{Interface: "wan0", SLAAC: new(false), UseMTU: true, UseHopLimit: true}}}}
 	resolver := dnsconfig.Runtime{Spec: api.DNSResolverSpec{
 		Listen:  []api.DNSResolverListenSpec{{Name: "local", Addresses: []string{"127.0.0.1"}, Port: 1053}},
 		Sources: []api.DNSResolverSourceSpec{{Name: "wan", Kind: "forward", Match: []string{"."}, QueryTimeout: "1s", UpstreamFrom: []api.StatusValueSourceSpec{{Resource: "DHCPv6Address/wan", Field: "dnsServers"}}}},
 	}}
 	doc.Services = append(doc.Services, serviceconfig.Service{Name: "dns", DNS: &resolver})
 	f := startFixtureDaemon(t, config.FromNative(doc))
+
+	until(t, 5*time.Second, func() bool {
+		ready := false
+		err := fixtureInsideNamespace(provider, func() error {
+			link, err := netlink.LinkByName("server0")
+			if err != nil {
+				return err
+			}
+			addresses, err := netlink.AddrList(link, netlink.FAMILY_V6)
+			if err != nil {
+				return err
+			}
+			ready = len(addresses) > 0
+			for _, a := range addresses {
+				ready = ready && a.Flags&(unix.IFA_F_TENTATIVE|unix.IFA_F_DADFAILED) == 0
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ready
+	})
+	server := startFixtureDNSMasq(t, provider, []string{"--dhcp-range=2001:db8:42::100,2001:db8:42::110,64,120s", "--dhcp-option=option6:dns-server,[fe80::2]", "--dhcp-option=option6:domain-search,wan.test", "--port=53", "--no-resolv", "--no-hosts", "--address=/wan.test/2001:db8:ffff::9"})
 	ctx := context.Background()
 	snapshot := func() (dhcp6config.Snapshot, uint64) {
 		t.Helper()
@@ -83,14 +113,14 @@ func TestDaemonDHCP6AddressIndependentServer(t *testing.T) {
 		}
 		return s, out.Generation
 	}
-	module := func() supervisor.ModuleStatus {
+	module := func(name string) supervisor.ModuleStatus {
 		t.Helper()
 		var out supervisor.Status
 		if err := f.supervisor.Do(ctx, "GET", "/v1/status", nil, &out); err != nil {
 			t.Fatal(err)
 		}
 		for _, m := range out.Modules {
-			if m.Name == "service.wan" {
+			if m.Name == name {
 				return m
 			}
 		}
@@ -112,6 +142,116 @@ func TestDaemonDHCP6AddressIndependentServer(t *testing.T) {
 			}
 		}
 		return false
+	}
+	// DHCP is already reachable, but the configured RA-controlled client
+	// must wait for the peer's M/O indication before its first exchange.
+	until(t, 8*time.Second, func() bool { s, _ := snapshot(); return s.State == "waiting_ra" && module("service.wan").Ready })
+	time.Sleep(time.Second)
+	capture.mu.Lock()
+	for _, p := range capture.packets {
+		if len(p.data) >= 63 && p.data[20] == 17 && p.data[54] == 2 && p.data[55] == 34 && p.data[56] == 2 && p.data[57] == 35 {
+			t.Error("DHCPv6 started before any RA indication")
+		}
+	}
+	capture.mu.Unlock()
+	radvd, err := exec.LookPath("radvd")
+	if err != nil {
+		t.Fatal("independent radvd required", err)
+	}
+	work := t.TempDir()
+	path := filepath.Join(work, "radvd.conf")
+	advertise := func(managed, other bool) {
+		flag := func(on bool) string {
+			if on {
+				return "on"
+			}
+			return "off"
+		}
+		body := fmt.Sprintf("interface server0 { AdvSendAdvert on; MinRtrAdvInterval 3; MaxRtrAdvInterval 4; AdvDefaultLifetime 12; AdvManagedFlag %s; AdvOtherConfigFlag %s; AdvCurHopLimit 42; AdvLinkMTU 1400; prefix 2001:db8:42::/64 { AdvOnLink on; AdvAutonomous off; }; };\n", flag(managed), flag(other))
+		if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ipv6Parameter := func(name string) int {
+		b, err := os.ReadFile("/proc/sys/net/ipv6/conf/wan0/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		value, err := strconv.Atoi(strings.TrimSpace(string(b)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return value
+	}
+	baselineMTU, baselineHop := ipv6Parameter("mtu"), ipv6Parameter("hop_limit")
+	advertise(false, false)
+	log, err := os.Create(filepath.Join(work, "radvd.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { log.Close() })
+	peerCtx, cancelPeer := context.WithCancel(context.Background())
+	router := exec.CommandContext(peerCtx, radvd, "-n", "-m", "stderr", "-d", "1", "-C", path, "-p", filepath.Join(work, "radvd.pid"))
+	router.Stdout, router.Stderr = log, log
+	if err := fixtureInsideNamespace(provider, func() error {
+		if err := os.WriteFile("/proc/sys/net/ipv6/conf/all/forwarding", []byte("1"), 0600); err != nil {
+			return err
+		}
+		return router.Start()
+	}); err != nil {
+		cancelPeer()
+		t.Fatal(err)
+	}
+	peerDone := make(chan error, 1)
+	go func() { peerDone <- router.Wait() }()
+	t.Cleanup(func() {
+		cancelPeer()
+		<-peerDone
+		if t.Failed() {
+			data, _ := os.ReadFile(log.Name())
+			t.Logf("independent radvd: %s", data)
+		}
+	})
+	flags := func() dhcp6config.RouterFlags {
+		var out dhcp6config.RouterFlags
+		if err := f.control.Do(ctx, "GET", "/v1/services/service.wan/dhcp6-input", nil, &out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	until(t, 8*time.Second, func() bool {
+		routes, err := netlink.RouteList(nil, netlink.FAMILY_V6)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range routes {
+			if (r.Dst == nil || r.Dst.String() == "::/0") && r.Gw.IsLinkLocalUnicast() {
+				return true
+			}
+		}
+		return false
+	})
+	until(t, 5*time.Second, func() bool { return ipv6Parameter("mtu") == 1400 && ipv6Parameter("hop_limit") == 42 })
+	link, err := netlink.LinkByName("wan0")
+	if err != nil || link.Attrs().MTU != 1500 {
+		t.Fatal("RA MTU changed physical/IPv4 MTU", link, err)
+	}
+	s, _ := snapshot()
+	if s.State != "waiting_ra" {
+		t.Fatal("clear M/O started DHCP", s)
+	}
+	advertise(false, true)
+	if err := router.Process.Signal(unix.SIGHUP); err != nil {
+		t.Fatal(err)
+	}
+	until(t, 8*time.Second, func() bool {
+		s, _ := snapshot()
+		return flags().OtherConfig && s.State == "information" && len(s.DNSServers) > 0 && len(s.Addresses) == 0
+	})
+	generation := module("service.wan").Generation
+	advertise(true, true)
+	if err := router.Process.Signal(unix.SIGHUP); err != nil {
+		t.Fatal(err)
 	}
 	var first dhcp6config.Snapshot
 	until(t, 12*time.Second, func() bool {
@@ -135,10 +275,61 @@ func TestDaemonDHCP6AddressIndependentServer(t *testing.T) {
 			})
 		}
 	}
+	if module("service.wan").Generation != generation || !first.RAStarted.Managed || !first.RAStarted.OtherConfig {
+		t.Fatal("RA modes replaced the client or lost its start decision", first, module("service.wan"))
+	}
+	advertise(false, false)
+	if err := router.Process.Signal(unix.SIGHUP); err != nil {
+		t.Fatal(err)
+	}
+	until(t, 8*time.Second, func() bool { return flags() == (dhcp6config.RouterFlags{}) })
+	if s, _ := snapshot(); len(s.Addresses) == 0 || !s.RAStarted.Managed || module("service.wan").Generation != generation {
+		t.Fatal("cleared RA flags revoked a live DHCP grant", s)
+	}
+	t.Log("independent radvd M/O: clear waits, O starts information, M acquires IA_NA on one worker; later clear retains the grant")
 	address := first.Addresses[0].Address
 	fixtureDHCP6Traffic(t, address)
 	resolverTraffic()
-	initial := module()
+	// The writer must retain the same original IPv6 baselines after SIGKILL.
+	networkBefore := module("network")
+	if err := unix.Kill(networkBefore.PID, unix.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	until(t, 8*time.Second, func() bool {
+		m := module("network")
+		return m.Ready && m.Generation > networkBefore.Generation && ipv6Parameter("mtu") == 1400 && ipv6Parameter("hop_limit") == 42
+	})
+	fixtureDHCP6Traffic(t, address)
+	lower := doc
+	lower.Network.Interfaces = slices.Clone(doc.Network.Interfaces)
+	lower.Network.Interfaces[0].MTU = 1300
+	if err := f.control.Do(ctx, "POST", "/v1/config/commit", control.CommitRequest{ExpectedRevision: 1, RequestID: "ra-physical-mtu", ConfirmTimeoutSeconds: 5, Config: config.FromNative(lower)}, nil); err != nil {
+		t.Fatal(err)
+	}
+	until(t, 4*time.Second, func() bool {
+		l, err := netlink.LinkByName("wan0")
+		return err == nil && l.Attrs().MTU == 1300 && ipv6Parameter("mtu") == 1300
+	})
+	fixtureDHCP6Traffic(t, address)
+	until(t, 10*time.Second, func() bool {
+		l, err := netlink.LinkByName("wan0")
+		return err == nil && l.Attrs().MTU == 1500 && ipv6Parameter("mtu") == 1400 && ipv6Parameter("hop_limit") == 42
+	})
+	fixtureDHCP6Traffic(t, address)
+	capture.mu.Lock()
+	hopSeen := false
+	for _, packet := range capture.packets {
+		b := packet.data
+		if len(b) >= 54 && b[20] == 6 && b[21] == 42 && netip.AddrFrom16([16]byte(b[22:38])).String() == address {
+			hopSeen = true
+		}
+	}
+	capture.mu.Unlock()
+	if !hopSeen {
+		t.Fatal("no actual TCP packet used the advertised hop limit")
+	}
+	t.Log("RA IPv6 MTU/hop limit applied without changing physical MTU, survived writer crash and physical MTU1300/confirmed rollback")
+	initial := module("service.wan")
 	if initial.PID == 0 || !initial.Ready {
 		t.Fatal("missing DHCPv6 worker", initial)
 	}
@@ -148,7 +339,7 @@ func TestDaemonDHCP6AddressIndependentServer(t *testing.T) {
 	var replacement supervisor.ModuleStatus
 	var current dhcp6config.Snapshot
 	until(t, 12*time.Second, func() bool {
-		replacement = module()
+		replacement = module("service.wan")
 		s, generation := snapshot()
 		current = s
 		return replacement.Ready && replacement.PID != initial.PID && replacement.Generation > initial.Generation && generation == replacement.Generation && len(s.Addresses) > 0 && s.Addresses[0].ValidUntil.Nanos > first.Addresses[0].ValidUntil.Nanos && installed(s.Addresses[0].Address)
@@ -204,12 +395,17 @@ func TestDaemonDHCP6AddressIndependentServer(t *testing.T) {
 	})
 	fixtureDHCP6Traffic(t, current.Addresses[0].Address)
 	resolverTraffic()
-	if final := module(); final.PID != replacement.PID || final.Generation != replacement.Generation {
+	if final := module("service.wan"); final.PID != replacement.PID || final.Generation != replacement.Generation {
 		t.Fatal("lease expiry/recovery restarted the client", replacement, final)
 	}
 	address = current.Addresses[0].Address
+	cancelPeer()
+	until(t, 2*time.Second, func() bool { return unix.Kill(router.Process.Pid, 0) == unix.ESRCH })
 	shutdown := time.Now()
 	f.stop()
+	if ipv6Parameter("mtu") != baselineMTU || ipv6Parameter("hop_limit") != baselineHop {
+		t.Fatal("RA parameter withdrawal lost the original kernel baselines", baselineMTU, baselineHop, ipv6Parameter("mtu"), ipv6Parameter("hop_limit"))
+	}
 	if installed(address) {
 		t.Fatal("graceful shutdown retained its IA_NA address", address)
 	}

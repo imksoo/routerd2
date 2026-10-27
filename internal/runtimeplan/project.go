@@ -38,6 +38,7 @@ type projection struct {
 	network            network.Desired
 	instances          []binding
 	liveRA             map[string]ra.Config
+	liveDHCP6          map[string]dhcp6config.RouterFlags
 }
 
 type projectionFacts struct {
@@ -109,7 +110,7 @@ func (r *Runtime) projectLocked(protocols protocolPlan, doc config.Native, recor
 // Pure projection combines active intent with the source's immutable workers
 // and current protocol evidence. Producers cannot submit arbitrary effects.
 func projectWithFacts(doc config.Native, protocols protocolPlan, records map[string]serviceconfig.Update, now time.Time, facts projectionFacts) (projection, error) {
-	p := projection{network: doc.Network, liveRA: map[string]ra.Config{}, native: doc, vrrpOwners: make(map[string]vrrpOwnership)}
+	p := projection{network: doc.Network, liveRA: map[string]ra.Config{}, liveDHCP6: make(map[string]dhcp6config.RouterFlags), native: doc, vrrpOwners: make(map[string]vrrpOwnership)}
 	// Own the collections changed by protocol projection and lifetime removal.
 	// Links and guards are only appended; all other intent is read-only.
 	p.network.Links = slices.Clip(p.network.Links)
@@ -156,6 +157,13 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 			if has {
 				if err := json.Unmarshal(record.Snapshot, &snapshot); err != nil {
 					return p, err
+				}
+			}
+			if has && snapshot.Active && snapshot.BootID == facts.bfdClock.BootID && snapshot.ObservedNanos <= uint64(facts.bfdClock.BoottimeNanoseconds) {
+				for consumer, source := range protocols.dhcp6RA {
+					if source == s.ModuleName() {
+						p.liveDHCP6[consumer] = dhcp6config.RouterFlags{Managed: snapshot.Managed, OtherConfig: snapshot.OtherConfig}
+					}
 				}
 			}
 			if err := projectRAClient(&p, s, snapshot, has, facts.bfdClock); err != nil {

@@ -15,6 +15,7 @@ import (
 type protocolPlan struct {
 	instances    map[string]binding
 	leaseHA      map[string]leaseHAPlan
+	dhcp6RA      map[string]string
 	dns          map[string]dnsPlan
 	bgp          map[string]bgpconfig.Config
 	vrrp         map[string]vrrp.Config
@@ -34,6 +35,7 @@ func prepareProtocols(doc config.Native, runtimeDir, stateDir string) (protocolP
 	plan := protocolPlan{
 		instances:    make(map[string]binding),
 		leaseHA:      make(map[string]leaseHAPlan),
+		dhcp6RA:      make(map[string]string),
 		dns:          make(map[string]dnsPlan),
 		bgp:          make(map[string]bgpconfig.Config),
 		vrrp:         make(map[string]vrrp.Config),
@@ -60,6 +62,9 @@ func prepareProtocols(doc config.Native, runtimeDir, stateDir string) (protocolP
 			plan.serviceLinks[service.VRRP.VIPInterface] = true
 		}
 		name := service.ModuleName()
+		if service.DHCP6 != nil && service.DHCP6.RAFrom != "" {
+			plan.dhcp6RA[name] = "service." + service.DHCP6.RAFrom
+		}
 		var instance serviceconfig.Instance
 		var err error
 		switch {

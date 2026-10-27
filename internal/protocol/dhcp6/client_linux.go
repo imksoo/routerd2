@@ -63,6 +63,29 @@ func (e *exchange) begin(kind byte, now time.Time) error {
 	}
 	return nil
 }
+func (c *client) wantsAddress() bool {
+	return c.cfg.RequestAddress && (!c.cfg.UseRA || c.snapshot.RAStarted.Managed)
+}
+
+// A later clear M/O flag does not revoke an upstream DHCP grant. Keep the
+// observed start decision with the lease owner, including worker replacement.
+func (c *client) routerFlags(flags dhcp6config.RouterFlags, now time.Time) error {
+	wasManaged := c.snapshot.RAStarted.Managed
+	c.snapshot.RAStarted.Managed = c.snapshot.RAStarted.Managed || flags.Managed
+	c.snapshot.RAStarted.OtherConfig = c.snapshot.RAStarted.OtherConfig || flags.OtherConfig
+	if !wasManaged && c.snapshot.RAStarted.Managed && c.cfg.RequestAddress {
+		if _, live := c.snapshot.LeaseUntil(); live && len(c.server) > 0 {
+			return c.begin(renew, now)
+		}
+		return c.begin(solicit, now)
+	}
+	if c.snapshot.State == "waiting_ra" && (c.snapshot.RAStarted.Managed || c.snapshot.RAStarted.OtherConfig) {
+		c.snapshot.State = "information"
+		return c.info.begin(information, now)
+	}
+	return nil
+}
+
 func (c *client) begin(kind byte, now time.Time) error {
 	switch kind {
 	case solicit:
@@ -118,7 +141,7 @@ func (c *client) packet(e *exchange, now time.Time) []byte {
 	if e.kind == decline {
 		return appendOption(b, 3, encodeIA(3, c.cfg.IAID, c.declined))
 	}
-	if c.cfg.RequestAddress && (e.kind != release || len(addresses) > 0) {
+	if c.wantsAddress() && (e.kind != release || len(addresses) > 0) {
 		b = appendOption(b, 3, encodeIA(3, c.cfg.IAID, addresses))
 	}
 	if c.cfg.RequestPrefix && (e.kind != release || len(prefixes) > 0) {
@@ -269,7 +292,7 @@ func (c *client) accept(m message, clock boottime.Clock) error {
 	if m.status != 0 {
 		return nil
 	}
-	if !c.cfg.RequestAddress {
+	if !c.wantsAddress() {
 		m.na = nil
 	}
 	if !c.cfg.RequestPrefix {
@@ -350,7 +373,7 @@ func (c *client) accept(m message, clock boottime.Clock) error {
 	// A partial Renew/Rebind Reply updates its own bindings but does not
 	// acknowledge missing IAs or postpone their original retry/T2 budget
 	// (RFC 8415 section 18.2.10.1).
-	partial := (e.kind == renew || e.kind == rebind) && (c.cfg.RequestAddress && (m.na == nil || m.na.status != 0) || c.cfg.RequestPrefix && (m.pd == nil || m.pd.status != 0))
+	partial := (e.kind == renew || e.kind == rebind) && (c.wantsAddress() && (m.na == nil || m.na.status != 0) || c.cfg.RequestPrefix && (m.pd == nil || m.pd.status != 0))
 	if partial {
 		renewAt = lifetime.Minimum(clock, next.RenewAt, renewAt)
 		rebindAt = lifetime.Minimum(clock, next.RebindAt, rebindAt)
@@ -416,7 +439,7 @@ func (c *client) advance(clock boottime.Clock) error {
 		c.snapshot.State = "bound"
 	}
 	_, hasLease := c.snapshot.LeaseUntil()
-	if c.cfg.RequestAddress || c.cfg.RequestPrefix {
+	if c.wantsAddress() || c.cfg.RequestPrefix {
 		switch {
 		case c.lease.kind == decline:
 			if now.Sub(c.lease.started) >= 10*time.Second {
@@ -440,7 +463,7 @@ func (c *client) advance(clock boottime.Clock) error {
 	return nil
 }
 
-func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, ready func()) (result error) {
+func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, updates <-chan dhcp6config.RouterFlags, ready func()) (result error) {
 	if err := dhcp6config.Validate(cfg); err != nil {
 		return err
 	}
@@ -525,13 +548,19 @@ func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, ready fun
 	}
 	c := client{cfg: cfg, duid: duid, maxSolicit: 3600 * time.Second, maxInformation: 3600 * time.Second, snapshot: dhcp6config.Snapshot{BootID: clock.BootID, Resource: cfg.Resource, Interface: cfg.Interface, IAID: cfg.IAID, ClientDUID: hex.EncodeToString(duid)}}
 	now := time.Unix(0, clock.BoottimeNanoseconds)
-	restored, err := c.restorePD(saved.localSnapshot(clock, cfg.Interface), clock)
+	previous := saved.localSnapshot(clock, cfg.Interface)
+	if previous.BootID == clock.BootID && previous.ObservedNanos <= uint64(clock.BoottimeNanoseconds) && previous.Interface == cfg.Interface && previous.IAID == cfg.IAID && previous.ClientDUID == hex.EncodeToString(duid) {
+		c.snapshot.RAStarted = previous.RAStarted
+	}
+	restored, err := c.restorePD(previous, clock)
 	if err != nil {
 		return err
 	}
 	if !restored {
-		if cfg.RequestAddress || cfg.RequestPrefix {
+		if c.wantsAddress() || cfg.RequestPrefix {
 			err = c.begin(solicit, now)
+		} else if cfg.UseRA && !c.snapshot.RAStarted.Managed && !c.snapshot.RAStarted.OtherConfig {
+			c.snapshot.State = "waiting_ra"
 		} else {
 			c.snapshot.State = "information"
 			err = c.info.begin(information, now)
@@ -572,7 +601,7 @@ func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, ready fun
 			result = errors.Join(result, err)
 			return
 		}
-		withdrawn := dhcp6config.Snapshot{ObservedNanos: uint64(clock.BoottimeNanoseconds), BootID: clock.BootID, Resource: cfg.Resource, Interface: cfg.Interface, IAID: cfg.IAID, ClientDUID: hex.EncodeToString(duid), State: "stopped"}
+		withdrawn := dhcp6config.Snapshot{ObservedNanos: uint64(clock.BoottimeNanoseconds), BootID: clock.BootID, Resource: cfg.Resource, Interface: cfg.Interface, IAID: cfg.IAID, ClientDUID: hex.EncodeToString(duid), RAStarted: c.snapshot.RAStarted, State: "stopped"}
 		// Release must follow acknowledged kernel removal and zero-lifetime
 		// LAN advertisements. Keep the socket's link-local source until done.
 		if err := effects.Withdraw(cleanup, withdrawn); err != nil {
@@ -611,6 +640,15 @@ func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, ready fun
 			return err
 		}
 		now = time.Unix(0, clock.BoottimeNanoseconds)
+		select {
+		case flags, open := <-updates:
+			if !open {
+				updates = nil
+			} else if err := c.routerFlags(flags, now); err != nil {
+				return err
+			}
+		default:
+		}
 		if err := c.advance(clock); err != nil {
 			return err
 		}

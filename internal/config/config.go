@@ -146,6 +146,9 @@ func validateNative(d Native, source Document) error {
 			continue
 		}
 		for _, link := range d.Network.Interfaces {
+			if link.Name == service.Interface() && link.MTU != 0 && link.MTU < 1280 {
+				return fmt.Errorf("RA client %s requires physical MTU >=1280", service.Name)
+			}
 			if link.Name == service.Interface() && (link.IPv6AcceptRA != nil && *link.IPv6AcceptRA != 0 || link.IPv6Autoconf != nil && *link.IPv6Autoconf) {
 				return fmt.Errorf("RA client %s requires exclusive RA/SLAAC ownership; disable kernel ipv6_accept_ra and ipv6_autoconf", service.Name)
 			}

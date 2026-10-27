@@ -445,6 +445,7 @@ func (r *Runtime) applyProjectionLocked(ctx context.Context, p projection) (proj
 	err := r.applyNetworkLocked(ctx, p.network)
 	if err == nil {
 		r.resourceStates, r.liveRA, r.routeIssues, r.bgpApplied = p.resources, p.liveRA, p.routeIssues, p.bgpStatus
+		r.liveDHCP6 = p.liveDHCP6
 		r.vrrpOwners = p.vrrpOwners
 		r.applied.observationVersion = p.observationVersion
 		r.applied.sourceEpoch = r.sourceEpoch

@@ -55,11 +55,11 @@ func startReplication(ctx context.Context, cfg dhcp6config.Config) (*replication
 	}
 	duidText := hex.EncodeToString(duid)
 	domain, err := json.Marshal(struct {
-		Resource, DUID  string
-		IAID            uint32
-		Address, Prefix bool
-		PrefixLength    int
-	}{cfg.Resource, duidText, cfg.IAID, cfg.RequestAddress, cfg.RequestPrefix, cfg.PrefixLength})
+		Resource, DUID      string
+		IAID                uint32
+		Address, Prefix, RA bool
+		PrefixLength        int
+	}{cfg.Resource, duidText, cfg.IAID, cfg.RequestAddress, cfg.RequestPrefix, cfg.UseRA, cfg.PrefixLength})
 	if err != nil {
 		return nil, err
 	}
@@ -179,7 +179,7 @@ func (r *replication) pull(ctx context.Context, cfg dhcp6config.Config, current 
 	if next.Version != stateVersion || next.Mapping != nil || next.Epoch == 0 || next.Revision == 0 || reply.ClockNanos < next.Snapshot.ObservedNanos || reply.ClockNanos > uint64(1<<63-1) {
 		return checkpoint{}, errors.New("invalid PD owner checkpoint")
 	}
-	if err := dhcp6config.ValidateSnapshot(dhcp6config.Config{Resource: cfg.Resource, Interface: next.Snapshot.Interface, IAID: cfg.IAID, RequestAddress: cfg.RequestAddress, RequestPrefix: cfg.RequestPrefix}, next.Snapshot); err != nil {
+	if err := dhcp6config.ValidateSnapshot(dhcp6config.Config{UseRA: cfg.UseRA, Resource: cfg.Resource, Interface: next.Snapshot.Interface, IAID: cfg.IAID, RequestAddress: cfg.RequestAddress, RequestPrefix: cfg.RequestPrefix}, next.Snapshot); err != nil {
 		return checkpoint{}, err
 	}
 	if next.Snapshot.ClientDUID != r.duid {

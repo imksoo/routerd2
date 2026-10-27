@@ -142,6 +142,7 @@ type Runtime struct {
 	vrrpOwners           map[string]vrrpOwnership
 	vrrpTracks           map[string][]vrrpTrackState
 	liveRA               map[string]ra.Config
+	liveDHCP6            map[string]dhcp6config.RouterFlags
 	aftrInputs           map[string]aftr.Input
 	dhcpServers          map[string]dhcpserverconfig.Snapshot
 	routeIssues          []RouteIssue
@@ -601,6 +602,14 @@ func (r *Runtime) observe(ctx context.Context, u serviceconfig.Update) (*pending
 		if snapshot.State == "stopped" {
 			effect = r.queueApplicationLocked(u)
 		}
+	} else if u.Role == "ra_client" {
+		var snapshot raclient.Snapshot
+		if err := json.Unmarshal(u.Snapshot, &snapshot); err != nil {
+			return nil, err
+		}
+		if !snapshot.Active {
+			effect = r.queueApplicationLocked(u)
+		}
 	}
 	r.observationVersion++
 	// Observe flaps when accepted; a periodic projection must not hide them.
@@ -613,8 +622,8 @@ func (r *Runtime) observe(ctx context.Context, u serviceconfig.Update) (*pending
 
 // Apply waits for protocol effects that require kernel application completion.
 func (r *Runtime) Apply(ctx context.Context, u serviceconfig.Update) (serviceconfig.ApplicationReceipt, error) {
-	if u.Role != "vrrp" && u.Role != "bgp" && u.Role != "dhcp6" {
-		return serviceconfig.ApplicationReceipt{}, errors.New("application requests support BGP, VRRP and DHCPv6 withdrawal")
+	if u.Role != "vrrp" && u.Role != "bgp" && u.Role != "dhcp6" && u.Role != "ra_client" {
+		return serviceconfig.ApplicationReceipt{}, errors.New("application requests support BGP, VRRP and DHCPv6/RA withdrawal")
 	}
 	if u.Role == "dhcp6" {
 		var snapshot dhcp6config.Snapshot
@@ -625,13 +634,22 @@ func (r *Runtime) Apply(ctx context.Context, u serviceconfig.Update) (servicecon
 			return serviceconfig.ApplicationReceipt{}, errors.New("DHCPv6 application request must withdraw assignments")
 		}
 	}
+	if u.Role == "ra_client" {
+		var snapshot raclient.Snapshot
+		if err := strict(u.Snapshot, &snapshot); err != nil {
+			return serviceconfig.ApplicationReceipt{}, err
+		}
+		if snapshot.Active {
+			return serviceconfig.ApplicationReceipt{}, errors.New("RA application request must withdraw learned state")
+		}
+	}
 	effect, err := r.observe(ctx, u)
 	if err != nil {
 		return serviceconfig.ApplicationReceipt{}, err
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if u.Role == "dhcp6" {
+	if u.Role == "dhcp6" || u.Role == "ra_client" {
 		if effect == nil {
 			return serviceconfig.ApplicationReceipt{}, ErrStale
 		}
@@ -841,6 +859,17 @@ func (r *Runtime) Handler() http.Handler {
 			return
 		}
 		localapi.JSON(w, 200, projection)
+	})
+	mux.HandleFunc("GET /v1/services/{name}/dhcp6-input", func(w http.ResponseWriter, req *http.Request) {
+		r.mu.Lock()
+		_, ok := r.config.protocols.dhcp6RA[req.PathValue("name")]
+		flags := r.liveDHCP6[req.PathValue("name")]
+		r.mu.Unlock()
+		if !ok {
+			localapi.Fail(w, 404, errors.New("no RA-controlled DHCPv6 service"))
+			return
+		}
+		localapi.JSON(w, 200, flags)
 	})
 	mux.HandleFunc("GET /v1/services/{name}/ra", func(w http.ResponseWriter, req *http.Request) {
 		r.mu.Lock()

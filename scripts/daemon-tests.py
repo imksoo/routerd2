@@ -26,7 +26,7 @@ SUITES = {
         ("TestDaemonSinglehopBFDVRF", (), 120),
     ),
     "dhcp6": (
-        ("TestDaemonDHCP6AddressIndependentServer", ("wan0",), 300),
+        ("TestDaemonDHCP6RAIndependentPeers", ("wan0",), 300),
         ("TestDaemonDHCP6DuplicateAddressDecline", ("wire0",), 90),
     ),
     "pd-ra": (("TestDaemonPDGeneratedRAWorkerLifetime", ("wan0", "lan0"), 120),),

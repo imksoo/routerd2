@@ -5,7 +5,48 @@
 [機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を参照する。
 実行順序はhomert02/03、実態を確認したk8s-rt/pve-rt、その後既存文書に基づくCloud SAM。
 
-## 現在の変更: ha-pd / native-33
+## 現在の変更: ra-dhcp6 / native-34
+
+旧routerdのnetplan RA/DHCP生成、`networkdAdoptionDropin`の`DHCPv6Client=no`と、
+DHCPv6 DUID/lease保存・復旧経路を比較した。明示`dhcp6.ra_from`で同じinterfaceのRAを指定し、
+一つのDHCPv6 worker/socket/DUID/IAIDのまま、Oで情報取得、Mで設定されたIA_NAを開始する。
+明示PDはM/Oと独立して取得する。後続の解除は取得済みgrantを撤回しない。
+開始履歴を同boot/identityのcheckpointへ保存し、worker/operator再起動で失わない。
+RA宣言だけでDHCPを起動せず、旧networkdの明示無効設定と両立する。
+
+RA `use_mtu`/`use_hop_limit`は既定false。単一writerがIPv6 stack MTUとhop limitを所有し、
+元値をjournalへ保存する。物理MTU/IPv4はRAから変更しない。IPv6 MTUは設定/物理上限で制限する。
+Linuxの物理MTU変更はIPv6 MTUもresetするため、その副作用を同じintent/ACKへ記録し、
+物理MTU→IPv6 MTUの順で復元する。RA worker停止は最終撤去のwriter適用ACKを待つ。
+compiler native-34、worker ABI5、network journal11、DHCPv6 checkpoint2。
+破棄可能な旧開発journalは再作成し、互換readerは追加しない。
+
+PVE Linux6.8/amd64の隔離namespace、実supervisor/control/network/RA/DHCP/DNS workerと、
+独立radvd2.19/dnsmasq2.90を使用した。対向・製品とも通常DADを使い、残存経路を注入しない。
+M0O0でDHCP送信なし、Oで情報/DNS、MでIA_NA、解除後も同workerのgrant維持が通った。
+RA学習のdefault/on-link経路でIPv6 TCP/UDPとUDP/TCP DNS、実Renew・Rebind・120秒失効と
+復旧、client交換時のDUID/IAID保持、Release/Replyと無応答4送信の停止が通った。
+IPv6 MTU1400/hop42（物理1500）、実TCP hop42、writer SIGKILL、物理1300への変更と
+confirmed rollback、終了後の元MTU1500/hop64復元を確認した。
+再実行は`make check-dhcp6`（独立`radvd`、`dnsmasq`、`dig`が必要）。
+
+先行終了試験では元値がjournalに残っても復元されなかった。RAの最終通知が受付ACKだけで
+worker/controlを終了させる原因を修正し、DHCPv6と同じwriter適用ACKへ接続した。
+独立peerのDADは製品側vethのUP後に完了を待つ。radvdの送信元は実選択されたlink-localを使う。
+先行失敗を成功に含めず、一時診断コード・生ログ・capture・試験binaryは削除する。
+既存の実daemon DAD/DeclineとRA経路失効/設定撤去も通った。`make check`はGo/Python・
+Race Detector・vetまで成功し、`make build build-publisher build-linux RELEASE_ID=ra-dhcp6`で
+amd64/arm64の6静的ELFを生成した。`release-built-test`の署名catalog/publisher/stageも
+Race Detectorで通った。入力はgroup書込み不能なhome配下の一時directoryへ6ファイルだけ
+コピーし、`RELEASE_BUILT_DIR`で指定する。group書込み可能なrepoからの署名は意図どおり拒否された。
+一時copy/bundleは削除した。ARM64では実行していない。
+
+required/observe-only readiness、system resolver効果、RA triggerとPD/HAの組合せ、
+VRF・実suspend・別VM再起動・最新版の実ONU/対象NIC受入は未完了。
+HA-02のpartition/fencing・切断peer復帰・delta/gap等も継続する。
+全34 packageの完了・対象実機での利用可能とは判断しない。
+
+## 直前の変更: ha-pd / native-33
 
 HA-02のPD checkpoint移送を実装した。旧routerdの`chain/filesync.go`と共有DUIDを使う
 PDの保存/復旧経路を比較し、worker内の相互TLS認証付きcomplete snapshotへ置き換えた。

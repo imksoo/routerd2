@@ -358,7 +358,7 @@ func nativePD(t *testing.T) {
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		done <- dhcp6.Run(ctx, dhcp6config.Config{RequestPrefix: true, Resource: "pd-test", Interface: "pdwan", StatePath: t.TempDir() + "/pd.json", IAID: 7}, dhcp6.EffectsFunc(func(_ context.Context, s dhcp6config.Snapshot) error { updates <- s; return nil }), nil)
+		done <- dhcp6.Run(ctx, dhcp6config.Config{RequestPrefix: true, Resource: "pd-test", Interface: "pdwan", StatePath: t.TempDir() + "/pd.json", IAID: 7}, dhcp6EffectsFunc(func(_ context.Context, s dhcp6config.Snapshot) error { updates <- s; return nil }), nil, nil)
 	}()
 	var acquired uint64
 	for {
@@ -429,7 +429,7 @@ func nativeRA(t *testing.T) {
 		{Prefix: "2001:db8:7::/64", ValidLifetimeSeconds: 100, PreferredLifetimeSeconds: 50, Autonomous: true, OnLink: true},
 	}}
 	go func() {
-		done <- ra.Run(ctx, initial, configs, ra.EffectsFunc(func(_ context.Context, s ra.Snapshot) error { statuses <- s; return nil }), nil)
+		done <- ra.RunWithUpdates(ctx, initial, configs, ra.EffectsFunc(func(_ context.Context, s ra.Snapshot) error { statuses <- s; return nil }), nil)
 	}()
 	read := func(wantWithdrawal bool) []byte {
 		t.Helper()
@@ -572,4 +572,15 @@ func nativeRA(t *testing.T) {
 			t.Fatal("RA solicitation not serviced after closing updates")
 		}
 	}
+}
+
+// Both notifications are consumed by this fixture; kernel application is
+// exercised by the real-daemon fixtures.
+type dhcp6EffectsFunc func(context.Context, dhcp6config.Snapshot) error
+
+func (f dhcp6EffectsFunc) Update(ctx context.Context, s dhcp6config.Snapshot) error {
+	return f(ctx, s)
+}
+func (f dhcp6EffectsFunc) Withdraw(ctx context.Context, s dhcp6config.Snapshot) error {
+	return f(ctx, s)
 }

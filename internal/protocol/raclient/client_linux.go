@@ -92,9 +92,9 @@ func Run(ctx context.Context, cfg Config, effects Effects, ready func()) (result
 		}
 		snap := s.snapshot(now)
 		snap.Active = false
-		cleanup, cancel := context.WithTimeout(context.Background(), time.Second)
+		cleanup, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 		defer cancel()
-		if err := effects.Update(cleanup, snap); err != nil {
+		if err := effects.Withdraw(cleanup, snap); err != nil {
 			result = errors.Join(result, fmt.Errorf("withdraw RA client effects: %w", err))
 		}
 	}()

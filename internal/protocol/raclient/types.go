@@ -116,10 +116,8 @@ type Snapshot struct {
 
 type Effects interface {
 	Update(context.Context, Snapshot) error
+	Withdraw(context.Context, Snapshot) error
 }
-type EffectsFunc func(context.Context, Snapshot) error
-
-func (f EffectsFunc) Update(ctx context.Context, s Snapshot) error { return f(ctx, s) }
 
 func enabled(v *bool) bool { return v == nil || *v }
 

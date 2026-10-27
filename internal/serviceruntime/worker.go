@@ -129,7 +129,7 @@ func Run(ctx context.Context, runtimeDir, name, role, path, digest string, gener
 		if err := decode(instance.Config, &cfg); err != nil {
 			return err
 		}
-		return raclient.Run(runCtx, cfg, raclient.EffectsFunc(func(ctx context.Context, snapshot raclient.Snapshot) error { return c.update(ctx, snapshot) }), ready)
+		return raclient.Run(runCtx, cfg, raClientEffects{client: c}, ready)
 	case "dhcp_relay":
 		var cfg dhcprelayconfig.Config
 		if err := decode(instance.Config, &cfg); err != nil {
@@ -155,7 +155,14 @@ func Run(ctx context.Context, runtimeDir, name, role, path, digest string, gener
 		if err := decode(instance.Config, &cfg); err != nil {
 			return err
 		}
-		return dhcp6.Run(runCtx, cfg, dhcp6Effects{client: c}, ready)
+		var updates chan dhcp6config.RouterFlags
+		if cfg.UseRA {
+			updates = make(chan dhcp6config.RouterFlags, 1)
+			done := make(chan struct{})
+			defer func() { cancel(); <-done }()
+			go func() { defer close(done); c.watchDHCP6RA(runCtx, name, updates) }()
+		}
+		return dhcp6.Run(runCtx, cfg, dhcp6Effects{client: c}, updates, ready)
 	case "ra":
 		var cfg ra.Config
 		if err := decode(instance.Config, &cfg); err != nil {
@@ -273,7 +280,24 @@ func (e dhcp6Effects) Withdraw(ctx context.Context, s dhcp6config.Snapshot) erro
 	if err != nil {
 		return err
 	}
-	c := e.client
+	return e.client.withdraw(ctx, b)
+}
+
+type raClientEffects struct{ client *effectsClient }
+
+func (e raClientEffects) Update(ctx context.Context, s raclient.Snapshot) error {
+	return e.client.update(ctx, s)
+}
+func (e raClientEffects) Withdraw(ctx context.Context, s raclient.Snapshot) error {
+	b, err := json.Marshal(s)
+	if err != nil {
+		return err
+	}
+	return e.client.withdraw(ctx, b)
+}
+
+// Stop replaying the previous state before waiting for the final kernel ACK.
+func (c *effectsClient) withdraw(ctx context.Context, b json.RawMessage) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	// A queued heartbeat must never replay the previous assignment after its
@@ -289,7 +313,7 @@ func (e dhcp6Effects) Withdraw(ctx context.Context, s dhcp6config.Snapshot) erro
 		return err
 	}
 	if !receipt.Applied {
-		return errors.New("DHCPv6 withdrawal was not applied")
+		return errors.New("protocol withdrawal was not applied")
 	}
 	return nil
 }
@@ -372,6 +396,29 @@ func (c *effectsClient) watchDNSInput(ctx context.Context, name, digest string, 
 			case <-ctx.Done():
 				return
 			}
+		}
+	}
+}
+
+func (c *effectsClient) watchDHCP6RA(ctx context.Context, name string, updates chan dhcp6config.RouterFlags) {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		var flags dhcp6config.RouterFlags
+		call, cancel := context.WithTimeout(ctx, 2*time.Second)
+		err := c.client.Do(call, "GET", "/v1/services/"+name+"/dhcp6-input", nil, &flags)
+		cancel()
+		if err == nil {
+			select {
+			case updates <- flags:
+			case <-ctx.Done():
+				return
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
 		}
 	}
 }

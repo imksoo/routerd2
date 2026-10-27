@@ -269,7 +269,7 @@ func nativeRAClient(t *testing.T) {
 		finished := make(chan struct{})
 		go func() {
 			defer close(finished)
-			done <- Run(ctx, cfg, EffectsFunc(func(ctx context.Context, s Snapshot) error {
+			done <- Run(ctx, cfg, effectsFunc(func(ctx context.Context, s Snapshot) error {
 				select {
 				case updates <- s:
 					return nil
@@ -384,15 +384,20 @@ func nativeRAClient(t *testing.T) {
 	})
 	stop(updates, done, cancel)
 	calledReady := false
-	err = Run(context.Background(), cfg, EffectsFunc(func(context.Context, Snapshot) error { return errors.New("injected single-writer failure") }), func() { calledReady = true })
+	err = Run(context.Background(), cfg, effectsFunc(func(context.Context, Snapshot) error { return errors.New("injected single-writer failure") }), func() { calledReady = true })
 	if err == nil || !strings.Contains(err.Error(), "injected single-writer failure") || calledReady {
 		t.Fatal("effect failure was swallowed or readiness was announced")
 	}
 	if err = os.WriteFile("/proc/sys/net/ipv6/conf/rawan/accept_ra", []byte("1"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	err = Run(context.Background(), cfg, EffectsFunc(func(context.Context, Snapshot) error { t.Fatal("published without sysctl ownership"); return nil }), nil)
+	err = Run(context.Background(), cfg, effectsFunc(func(context.Context, Snapshot) error { t.Fatal("published without sysctl ownership"); return nil }), nil)
 	if err == nil || !strings.Contains(err.Error(), "accept_ra=0") {
 		t.Fatal("competing kernel RA ownership was accepted")
 	}
 }
+
+type effectsFunc func(context.Context, Snapshot) error
+
+func (f effectsFunc) Update(ctx context.Context, s Snapshot) error   { return f(ctx, s) }
+func (f effectsFunc) Withdraw(ctx context.Context, s Snapshot) error { return f(ctx, s) }
