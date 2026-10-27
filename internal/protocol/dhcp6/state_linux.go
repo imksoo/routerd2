@@ -8,7 +8,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/imksoo/routerd2/internal/lifetime"
 	"io"
+	"math"
 	mathrand "math/rand/v2"
 	"os"
 	"path/filepath"
@@ -20,46 +22,66 @@ import (
 	"github.com/imksoo/routerd2/internal/statefs"
 )
 
-const stateVersion = 1
+const stateVersion = 2
+
+type clockMapping struct {
+	LocalBootID string `json:"local_boot_id"`
+	LocalNanos  uint64 `json:"local_nanos"`
+	SourceNanos uint64 `json:"source_nanos"`
+}
 
 type checkpoint struct {
+	Epoch    uint64               `json:"epoch,omitempty"`
+	Source   string               `json:"source,omitempty"`
+	Revision uint64               `json:"revision,omitempty"`
+	Mapping  *clockMapping        `json:"mapping,omitempty"`
 	Version  int                  `json:"version"`
 	Snapshot dhcp6config.Snapshot `json:"snapshot"`
 }
 
-func readState(ctx context.Context, cfg dhcp6config.Config) (dhcp6config.Snapshot, error) {
+func readState(ctx context.Context, cfg dhcp6config.Config) (checkpoint, error) {
 	dir, err := os.Open(filepath.Dir(cfg.StatePath))
 	if err != nil {
-		return dhcp6config.Snapshot{}, err
+		return checkpoint{}, err
 	}
 	defer dir.Close()
 	raw, err := statefs.ReadPrivate(ctx, dir, filepath.Base(cfg.StatePath), 2<<20)
 	if errors.Is(err, os.ErrNotExist) {
-		return dhcp6config.Snapshot{}, nil
+		return checkpoint{}, nil
 	}
 	if err != nil {
-		return dhcp6config.Snapshot{}, err
+		return checkpoint{}, err
 	}
+	return decodeState(cfg, raw)
+}
+
+func decodeState(cfg dhcp6config.Config, raw []byte) (checkpoint, error) {
 	var saved checkpoint
 	d := json.NewDecoder(bytes.NewReader(raw))
 	d.DisallowUnknownFields()
 	if err := d.Decode(&saved); err != nil {
-		return dhcp6config.Snapshot{}, err
+		return checkpoint{}, err
 	}
 	var trailing json.RawMessage
 	if d.Decode(&trailing) != io.EOF || saved.Version != stateVersion {
-		return dhcp6config.Snapshot{}, errors.New("unsupported or trailing DHCPv6 checkpoint")
+		return checkpoint{}, errors.New("unsupported or trailing DHCPv6 checkpoint")
 	}
 	s := saved.Snapshot
 	if s.Resource != cfg.Resource {
-		return dhcp6config.Snapshot{}, errors.New("DHCPv6 checkpoint belongs to another resource")
+		return checkpoint{}, errors.New("DHCPv6 checkpoint belongs to another resource")
 	}
 	// Validate the stored facts independently of changed operator intent.
 	previous := dhcp6config.Config{Resource: s.Resource, Interface: s.Interface, IAID: s.IAID, RequestAddress: len(s.Addresses) > 0, RequestPrefix: len(s.Prefixes) > 0}
 	if err := dhcp6config.ValidateSnapshot(previous, s); err != nil {
-		return dhcp6config.Snapshot{}, err
+		return checkpoint{}, err
 	}
-	return s, nil
+	if saved.Mapping != nil {
+		m := saved.Mapping
+		if !boottime.ValidBootID(m.LocalBootID) || m.LocalNanos == 0 || m.LocalNanos > math.MaxInt64 || m.SourceNanos < s.ObservedNanos || m.SourceNanos > math.MaxInt64 {
+			return checkpoint{}, errors.New("invalid DHCPv6 replica clock mapping")
+		}
+	}
+	return saved, nil
 }
 
 func (c *client) restorePD(saved dhcp6config.Snapshot, clock boottime.Clock) (bool, error) {
@@ -91,14 +113,14 @@ func (c *client) restorePD(saved dhcp6config.Snapshot, clock boottime.Clock) (bo
 	return true, nil
 }
 
-func writeState(path string, s dhcp6config.Snapshot) error {
+func writeState(path string, s checkpoint) error {
 	f, err := os.CreateTemp(filepath.Dir(path), ".dhcp6-state-*")
 	if err != nil {
 		return err
 	}
 	defer os.Remove(f.Name())
 	if err = f.Chmod(0600); err == nil {
-		err = json.NewEncoder(f).Encode(checkpoint{Version: stateVersion, Snapshot: s})
+		err = json.NewEncoder(f).Encode(s)
 	}
 	if err == nil {
 		err = f.Sync()
@@ -116,4 +138,57 @@ func writeState(path string, s dhcp6config.Snapshot) error {
 	}
 	defer dir.Close()
 	return dir.Sync()
+}
+
+// localSnapshot derives local deadlines once from the recorded pull exchange.
+// The source snapshot remains unchanged in standby storage, so identical
+// revisions never get a fresh receive-time budget.
+func (s checkpoint) localSnapshot(clock boottime.Clock, iface string) dhcp6config.Snapshot {
+	out := s.Snapshot
+	if s.Mapping == nil {
+		return out
+	}
+	m := s.Mapping
+	if m.LocalBootID != clock.BootID {
+		return dhcp6config.Snapshot{ClientDUID: out.ClientDUID}
+	}
+	stamp := func(n uint64) uint64 {
+		delta := int64(n) - int64(m.SourceNanos)
+		if delta > math.MaxInt64-int64(m.LocalNanos) {
+			return math.MaxInt64
+		}
+		return uint64(max(1, int64(m.LocalNanos)+delta))
+	}
+	deadline := func(d lifetime.Deadline) lifetime.Deadline {
+		if d == (lifetime.Deadline{}) {
+			return d
+		}
+		d.BootID = m.LocalBootID
+		if d.Nanos != 0 {
+			d.Nanos = stamp(d.Nanos)
+		}
+		return d
+	}
+	out.BootID = m.LocalBootID
+	out.Interface = iface
+	out.ObservedNanos = stamp(out.ObservedNanos)
+	out.Addresses = slices.Clone(out.Addresses)
+	for i := range out.Addresses {
+		a := &out.Addresses[i]
+		a.PreferredUntil = deadline(a.PreferredUntil)
+		a.ValidUntil = deadline(a.ValidUntil)
+	}
+	out.Prefixes = slices.Clone(out.Prefixes)
+	for i := range out.Prefixes {
+		p := &out.Prefixes[i]
+		p.PreferredUntil = deadline(p.PreferredUntil)
+		p.ValidUntil = deadline(p.ValidUntil)
+	}
+	out.RenewAt = deadline(out.RenewAt)
+	out.RebindAt = deadline(out.RebindAt)
+	if out.InfoReceivedNanos != 0 {
+		out.InfoReceivedNanos = stamp(out.InfoReceivedNanos)
+	}
+	out.InformationRefreshAt = deadline(out.InformationRefreshAt)
+	return out
 }

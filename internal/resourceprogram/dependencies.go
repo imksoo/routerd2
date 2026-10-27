@@ -76,7 +76,8 @@ func inferredDependencies(resources []Resource) map[string][]string {
 			}
 		case r.Service != nil:
 			// HA DHCP must receive state while its owner's VIP is absent.
-			if r.Service.DHCPServer == nil || r.Service.DHCPServer.HA == nil {
+			sharedLease := (r.Service.DHCPServer != nil && r.Service.DHCPServer.HA != nil) || (r.Service.DHCP6 != nil && r.Service.DHCP6.HA != nil)
+			if !sharedLease {
 				iface(r.Service.Interface())
 			}
 			if r.Service.VRRP != nil && r.Service.VRRP.ConntrackSync != nil {

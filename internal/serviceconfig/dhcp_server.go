@@ -5,6 +5,7 @@ import (
 	"net/netip"
 	"path/filepath"
 
+	"github.com/imksoo/routerd2/internal/peertls"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 )
 
@@ -25,7 +26,7 @@ type DHCPServer struct {
 	MaxLeases                 int                            `json:"max_leases,omitempty"`
 	ProbeTimeoutMilliseconds  int                            `json:"probe_timeout_milliseconds,omitempty"`
 	EffectTimeoutMilliseconds int                            `json:"effect_timeout_milliseconds,omitempty"`
-	HA                        *DHCPServerHA                  `json:"ha,omitempty"`
+	HA                        *LeaseHA                       `json:"ha,omitempty"`
 }
 
 func validateDHCPHA(services []Service) error {
@@ -34,6 +35,11 @@ func validateDHCPHA(services []Service) error {
 		byName[s.Name] = s
 	}
 	for _, s := range services {
+		if s.DHCP6 != nil && s.DHCP6.HA != nil {
+			if byName[s.DHCP6.HA.Owner].VRRP == nil {
+				return fmt.Errorf("DHCPv6 %s HA requires a configured VRRP owner", s.Name)
+			}
+		}
 		if s.DHCPServer == nil || s.DHCPServer.HA == nil {
 			continue
 		}
@@ -58,9 +64,9 @@ func validateDHCPHA(services []Service) error {
 	return nil
 }
 
-type DHCPServerHA struct {
-	Owner       string                       `json:"owner"`
-	Replication dhcpserverconfig.Replication `json:"replication"`
+type LeaseHA struct {
+	Owner       string         `json:"owner"`
+	Replication peertls.Config `json:"replication"`
 }
 
 func (s Service) DHCPServerConfig(runtimeDir, stateDir string) dhcpserverconfig.Config {

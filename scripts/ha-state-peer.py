@@ -20,11 +20,11 @@ def run(command):
     return subprocess.run(command, check=True, capture_output=True, text=True, timeout=10).stdout
 
 
-def peer(stage):
+def peer(stage, dhcp6_server):
     def deadline(*_):
         raise TimeoutError("HA connection-state communication deadline")
     signal.signal(signal.SIGALRM, deadline)
-    signal.alarm(160)
+    signal.alarm(230 if dhcp6_server else 160)
     # Keep iproute2's named-namespace files off the host filesystem too.
     Path("/run/netns").mkdir(parents=True, exist_ok=True)
     run(["mount", "-t", "tmpfs", "-o", "mode=700", "tmpfs", "/run/netns"])
@@ -87,7 +87,7 @@ def peer(stage):
         publisher = str(stage / "routerd-bundle")
         (stage / "trust.json").write_text(run([publisher, "trust", "--private-key-file", str(key)]))
         (stage / "trust.json").chmod(0o600)
-        roles = ("logging", "network", "control", "management", "vrrp", "dhcp_server")
+        roles = ("logging", "network", "control", "management", "vrrp", "dhcp_server") + (("dhcp6", "ra") if dhcp6_server else ())
         layout = {"boot_abi": 1, "worker_abi": 5, "entrypoint": "routerd",
                   "roles": [{"role": role, "artifact": "routerd-logging" if role == "logging" else "routerd-modules"} for role in roles],
                   "engines": [{"role": "vrrp", "artifact": "ct-image", "sources": "ct-sources"}],
@@ -131,6 +131,15 @@ def peer(stage):
             # Select the shared WAN identity rather than the physical-port
             # connected route installed by the product's physical-port intent.
             resources.append({"id": "wan-route", "route": {"destination": "203.0.113.50/32", "interface": "wan-ha"}})
+            if dhcp6_server:
+                resources[6]["forwarding"]["ipv6"] = True
+                pd_peer = {"listen_address": "169.254.42." + str(index + 2) + ":8444", "peer_address": "169.254.42." + str(3 - index) + ":8444", "certificate_file": str(stage / (node + ".crt")), "private_key_file": str(stage / (node + ".key")), "peer_certificate_file": str(stage / (("b" if node == "a" else "a") + ".crt"))}
+                resources += [
+                    {"id": "wan-linklocal", "when": {"fact": "service.ha.elected"}, "address": {"interface": "wan-ha", "cidr": "fe80::1/64"}},
+                    {"id": "wan6-route", "when": {"fact": "service.ha.elected"}, "route": {"destination": "2001:db8:ffff::/64", "interface": "wan-ha", "gateway": "fe80::2"}},
+                    {"id": "pd", "service": {"name": "pd", "dhcp6": {"interface": "wan-ha", "request_prefix": True, "prefix_length": 60, "client_duid": "0003000102005e000143", "iaid": 7,
+                        "ha": {"owner": "ha", "replication": pd_peer}, "delegations": [{"name": "lan", "interface": "lan0", "subnet_id": 1, "advertise": True, "router_lifetime_seconds": 10}]}}}
+                ]
             (directory / "config.json").write_text(json.dumps({"schema_version": 2, "resources": resources}))
             workers = {role: str(stage / ("routerd-logging" if role == "logging" else "routerd-modules")) for role in roles}
             boot = {"platform": "host", "config": str(directory / "config.json"), "runtime_dir": str(directory / "run"), "state_dir": str(directory / "state"), "workers": workers, "engines": {"vrrp": str(stage / "conntrack-engine.tar")}, "ssh": {"user": "admin"}}
@@ -157,6 +166,38 @@ while True:
  for line in f: f.write(line.rstrip()+b' '+str(peer).encode()+b'\n')
 '''
         start("ha-server", ["python3", "-u", "-c", server], "server")
+        if dhcp6_server:
+            run(inside("ha-server", ["ip", "-6", "address", "add", "fe80::2/64", "dev", "wan0"]))
+            run(inside("ha-server", ["ip", "-6", "address", "add", "2001:db8:ffff::20/64", "dev", "wan0"]))
+            run(inside("ha-server", ["ip", "-6", "route", "add", "2001:db8:80::/56", "via", "fe80::1", "dev", "wan0"]))
+            run(inside("ha-client", ["sysctl", "-w", "net.ipv6.conf.lan0.accept_ra=2"]))
+            mac = json.loads(run(inside("ha-server", ["ip", "-j", "link", "show", "dev", "wan0"])))[0]["address"]
+            (stage / "dhcp6.conf").write_text("default-lease-time 60;\npreferred-lifetime 40;\noption dhcp-renewal-time 20;\noption dhcp-rebinding-time 40;\nsubnet6 2001:db8:ffff::/64 { prefix6 2001:db8:80:: 2001:db8:80:f0:: /60; }\nserver-duid LL ethernet " + mac + ";\n")
+            (stage / "dhcp6.leases").touch()
+            wait(lambda: all(not a.get("tentative") and not a.get("dadfailed") for link in json.loads(run(inside("ha-server", ["ip", "-j", "-6", "address", "show", "dev", "wan0"]))) for a in link["addr_info"]))
+            def pd_start():
+                return start("ha-server", [str(dhcp6_server), "-6", "-f", "-d", "-cf", str(stage / "dhcp6.conf"), "-lf", str(stage / "dhcp6.leases"), "-pf", str(stage / "dhcp6.pid"), "wan0"], "dhcp6")
+            pd_server = pd_start()
+            start("ha-server", ["python3", "-u", "-m", "http.server", "18080", "--bind", "2001:db8:ffff::20", "--directory", str(stage)], "http6")
+            start("ha-server", ["python3", "-u", "-c", 'import socket\ns=socket.socket(socket.AF_INET6,socket.SOCK_DGRAM);s.bind(("2001:db8:ffff::20",18081))\nwhile True:\n b,a=s.recvfrom(4096);s.sendto(b,a)'], "udp6")
+
+        def pd_saved(node):
+            path = stage / node / "state/leases/pd.dhcp6.json"
+            return json.loads(path.read_text()) if path.exists() else {}
+
+        def pd_observed(node):
+            return api(node, "control.sock", "/v1/services/service.pd")["snapshot"]
+
+        def pd_traffic(node):
+            def usable():
+                observation = pd_observed(node)
+                routes = json.loads(run(inside("ha-client", ["ip", "-j", "-6", "route", "show", "default"])))
+                addresses = json.loads(run(inside("ha-client", ["ip", "-j", "-6", "addr", "show", "dev", "lan0"])))
+                return observation.get("prefixes") and observation["state"] in ("bound", "renewing", "rebinding") and any(route.get("dev") == "lan0" for route in routes) and any(a["scope"] == "global" and not a.get("tentative") for link in addresses for a in link["addr_info"]) and modules(node).get("service.pd", {}).get("ready")
+            wait(usable)
+            assert run(inside("ha-client", ["curl", "--noproxy", "*", "--max-time", "3", "-sS", "-o", "/dev/null", "-w", "%{http_code}", "http://[2001:db8:ffff::20]:18080/"])) == "200"
+            run(inside("ha-client", ["python3", "-c", 'import socket;s=socket.socket(socket.AF_INET6,socket.SOCK_DGRAM);s.settimeout(3);s.connect(("2001:db8:ffff::20",18081));s.send(b"ha-pd");assert s.recv(100)==b"ha-pd"']))
+
         for segment in ("lan", "wan", "sync"):
             log = (stage / (segment + "-capture.log")).open("w")
             process = subprocess.Popen(["tcpdump", "--immediate-mode", "-U", "-n", "-i", segment, "-w", str(stage / (segment + ".pcap"))], stdout=log, stderr=log)
@@ -167,10 +208,20 @@ while True:
         wait(lambda: (stage / "a/run/supervisor.sock").exists())
         wait(lambda: modules("a").get("service.ha", {}).get("ready") is True)
         wait(lambda: active("a"))
-        start("ha-b", ["unshare", "--pid", "--fork", "--mount-proc", "--kill-child=SIGTERM", str(stage / "routerd"), "boot", "--file", str(stage / "b/boot.json")], "b")
+        start("ha-b", ["unshare"] + (["--time", "--boottime", "7200"] if dhcp6_server else []) + ["--pid", "--fork", "--mount-proc", "--kill-child=SIGTERM", str(stage / "routerd"), "boot", "--file", str(stage / "b/boot.json")], "b")
         wait(lambda: (stage / "b/run/supervisor.sock").exists())
         wait(lambda: modules("b").get("service.ha", {}).get("ready") is True)
         wait(lambda: modules("a").get("service.leases", {}).get("ready") is True and modules("b").get("service.leases", {}).get("ready") is True)
+        if dhcp6_server:
+            wait(lambda: modules("a").get("service.pd", {}).get("ready") and modules("b").get("service.pd", {}).get("ready"))
+            pd_traffic("a")
+            wait(lambda: pd_saved("a").get("revision") == pd_saved("b").get("revision") and pd_saved("a").get("snapshot", {}).get("prefixes"))
+            original = pd_saved("b")
+            before = modules("b")["service.pd"]["generation"]
+            api("b", "control.sock", "/v1/services/service.pd/restart", {})
+            wait(lambda: modules("b").get("service.pd", {}).get("generation", 0) > before and modules("b").get("service.pd", {}).get("ready"))
+            assert pd_saved("b") == original, "standby restart rebased PD or lost the source revision"
+            print("PASS ISC PD, independent SLAAC TCP/UDP, authenticated standby checkpoint with BOOTTIME +7200s and restart with original mapping", flush=True)
         hook = stage / "dhcp-hook.sh"
         hook.write_text('#!/bin/sh\ncase "$1" in\n bound|renew) ip address replace "$ip/24" dev "$interface"; printf "%s %s\\n" "$1" "$ip" >> "' + str(stage) + '/$interface.progress";;\nesac\n')
         hook.chmod(0o500)
@@ -270,10 +321,31 @@ while True:
                 diagnostic.close()
                 children.append(partial)
                 time.sleep(0.2)
+            if dhcp6_server:
+                pd_server.send_signal(signal.SIGSTOP)
+                time.sleep(0.2)
+                wait(lambda: pd_saved(previous).get("epoch") == pd_saved(owner).get("epoch") and pd_saved(previous).get("revision") == pd_saved(owner).get("revision"))
+                retained = pd_saved(previous)
+                old_pd_record = api(previous, "control.sock", "/v1/services/service.pd")
             before = modules(previous)["service.ha"]["generation"]
             api(previous, "control.sock", "/v1/services/service.ha/restart", {})
             wait(lambda: active(owner))
             wait(lambda: modules(previous).get("service.ha", {}).get("generation", 0) > before and modules(previous).get("service.ha", {}).get("ready"))
+            if dhcp6_server:
+                pd_traffic(owner)
+                recovered = pd_saved(owner)
+                assert recovered["epoch"] > retained["epoch"]
+                assert recovered["snapshot"]["client_duid"] == retained["snapshot"]["client_duid"] and recovered["snapshot"]["iaid"] == retained["snapshot"]["iaid"]
+                assert [p["prefix"] for p in recovered["snapshot"]["prefixes"]] == [p["prefix"] for p in retained["snapshot"]["prefixes"]]
+                for old, new in zip(retained["snapshot"]["prefixes"], recovered["snapshot"]["prefixes"]):
+                    assert 0 <= (old["valid_until"]["nanos"] - (7_200_000_000_000 if previous == "b" else 0)) - (new["valid_until"]["nanos"] - (7_200_000_000_000 if owner == "b" else 0)) < 3_000_000_000, "PD takeover extended or lost the original deadline"
+                stale = {key: old_pd_record[key] for key in ("supervisor_instance", "name", "role", "config_digest", "generation", "producer_epoch", "sequence", "snapshot")}
+                status = run(["curl", "--max-time", "3", "-sS", "-o", "/dev/null", "-w", "%{http_code}", "--unix-socket", str(stage / previous / "run/control.sock"), "-H", "Content-Type: application/json", "--data-binary", json.dumps(stale), "http://localhost/v1/services/state"])
+                assert status == "409", "old PD owner notification survived demotion"
+                pd_server.send_signal(signal.SIGCONT)
+                wait(lambda: pd_observed(owner)["state"] == "bound")
+                pd_traffic(owner)
+                print("PASS " + previous + " -> " + owner + " PD handoff with ISC paused, same DUID/IAID/prefix and bounded original deadlines, then Rebind/Reply", flush=True)
             sequence = latest()["sequence"]
             assert progress(sequence) == mapping, "existing connection mapping changed during takeover"
             wait(lambda: modules(owner).get("service.leases", {}).get("ready") is True and api(owner, "control.sock", "/v1/services/service.leases")["snapshot"]["active"] is True)
@@ -338,6 +410,9 @@ while True:
         time.sleep(4)
         assert "UP" not in json.loads(run(["ip", "-j", "link", "show", "sync0"]))[0]["flags"], "sync outage was not maintained"
         assert len(lease_events(0)) == before_renew, "client received a renewal ACK without standby persistence"
+        if dhcp6_server:
+            wait(lambda: bool(pd_observed("a").get("sync", {}).get("error")))
+            pd_traffic("b")
         sync_up = time.time()
         run(["ip", "link", "set", "sync0", "up"])
         wait(lambda: modules("b").get("service.leases", {}).get("ready") is True)
@@ -345,6 +420,9 @@ while True:
         wait(lambda: len(lease_events(0)) > before_renew)
         assert lease_events(0)[-1].split()[1] == first_address
         print("PASS sync-link loss withheld renewal ACK; restoration recovered the existing client lease", flush=True)
+        if dhcp6_server:
+            wait(lambda: pd_observed("a").get("sync") and not pd_observed("a")["sync"].get("error"))
+            print("PASS PD sync outage reported on standby without interrupting the owner's IPv6 forwarding; recovery refreshed synchronization", flush=True)
         for process in (first_client, second_client):
             process.terminate()
             process.wait(timeout=3)
@@ -360,6 +438,31 @@ while True:
         assert saved("a")["leases"] == expired, "completed expiry checkpoint differs on the standby"
         assert len(expired) == 2 and all(lease["held_until"] > lease["expires_at"] for lease in expired)
         print("PASS real 60-second lease expiry replicated without rebasing sticky hold deadlines", flush=True)
+        if dhcp6_server:
+            wait(lambda: pd_observed("b")["state"] == "bound")
+            pd_server.terminate()
+            pd_server.wait(timeout=5)
+            wait(lambda: pd_saved("a").get("epoch") == pd_saved("b").get("epoch") and pd_saved("a").get("revision") == pd_saved("b").get("revision"))
+            original = pd_saved("b")
+            before = modules("b")["service.ha"]["generation"]
+            api("b", "control.sock", "/v1/services/service.ha/restart", {})
+            wait(lambda: active("a"))
+            wait(lambda: modules("b").get("service.ha", {}).get("generation", 0) > before and modules("b").get("service.ha", {}).get("ready"))
+            pd_traffic("a")
+            restored = pd_saved("a")["snapshot"]
+            original_deadline = original["snapshot"]["prefixes"][0]["valid_until"]["nanos"] - 7_200_000_000_000
+            assert restored["prefixes"][0]["valid_until"]["nanos"] <= original_deadline
+            def no_global(node, iface):
+                return all(a["scope"] != "global" for link in json.loads(run(inside(node, ["ip", "-j", "-6", "addr", "show", "dev", iface]))) for a in link["addr_info"])
+            remaining = max(0, (original_deadline - time.clock_gettime_ns(time.CLOCK_BOOTTIME)) / 1_000_000_000)
+            wait(lambda: not pd_observed("a").get("prefixes") and no_global("ha-a", "lan0") and no_global("ha-client", "lan0"), remaining + 8)
+            before = modules("a")["service.pd"]["generation"]
+            api("a", "control.sock", "/v1/services/service.pd/restart", {})
+            wait(lambda: modules("a").get("service.pd", {}).get("generation", 0) > before and modules("a").get("service.pd", {}).get("ready"))
+            assert not pd_observed("a").get("prefixes") and no_global("ha-a", "lan0") and no_global("ha-client", "lan0"), "expired replicated PD revived on restart"
+            pd_server = pd_start()
+            pd_traffic("a")
+            print("PASS server-absent cross-clock PD takeover expired at original deadline on router/SLAAC client; restart did not revive PD and ISC recovery restored TCP/UDP", flush=True)
         print("Observed UDP datagrams lost during transitions:", latest()["udp_lost"], flush=True)
         client.terminate()
         client.wait(timeout=3)
@@ -393,6 +496,10 @@ while True:
         assert requests > 0 and acknowledgments == 0, "capture did not prove requested-but-unacknowledged renewal during the sync outage"
         print("PASS captures: one TCP SYN, IPv4 link-local FTFW replication, unchanged UDP NAT tuple", flush=True)
         print("PASS two-way state handoff without TCP reconnect", flush=True)
+        if dhcp6_server:
+            packets = run(["tcpdump", "-n", "-tt", "-vv", "-r", str(stage / "wan.pcap"), "ip6"])
+            assert "dhcp6 rebind" in packets and "dhcp6 release" not in packets
+            print("PASS capture: recovery Rebind and no shared-lease Release on member demotion/restart", flush=True)
     finally:
         for process in reversed(children):
             if process.poll() is None:
@@ -410,9 +517,10 @@ while True:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--inside", type=Path)
+    parser.add_argument("--dhcp6-server", type=Path)
     args = parser.parse_args()
     if args.inside:
-        peer(args.inside)
+        peer(args.inside, args.dhcp6_server)
         return
     os.chdir(Path(__file__).resolve().parent.parent)
     root = [] if os.geteuid() == 0 else ["sudo", "-n"]
@@ -422,9 +530,13 @@ def main():
     try:
         for source, name in [(Path(__file__), "peer.py"), (Path("dist/conntrack-engine.tar"), "conntrack-engine.tar"), (Path("dist/conntrack-sources.tar"), "conntrack-sources.tar"), *[(Path("dist/bin") / name, name) for name in ("routerd", "routerd-modules", "routerd-logging", "routerd-bundle")]]:
             run(root + ["install", "-m", "500", str(source.resolve()), stage + "/" + name])
-        result = subprocess.run(root + ["unshare", "--mount", "--net", "--pid", "--fork", "--mount-proc", "--kill-child=SIGKILL", "--propagation", "private", "python3", "-I", stage + "/peer.py", "--inside", stage], timeout=180)
+        peer_args = []
+        if args.dhcp6_server:
+            run(root + ["install", "-m", "500", str(args.dhcp6_server.resolve()), stage + "/dhcpd"])
+            peer_args = ["--dhcp6-server", stage + "/dhcpd"]
+        result = subprocess.run(root + ["unshare", "--mount", "--net", "--pid", "--fork", "--mount-proc", "--kill-child=SIGKILL", "--propagation", "private", "python3", "-I", stage + "/peer.py", "--inside", stage] + peer_args, timeout=250 if args.dhcp6_server else 180)
         if result.returncode:
-            for name in ("a.log", "b.log", "client.log", "server.log"):
+            for name in ("a.log", "b.log", "client.log", "server.log", "dhcp6.log", "http6.log", "udp6.log"):
                 log = subprocess.run(root + ["tail", "-30", stage + "/" + name], capture_output=True, text=True)
                 print(name + ":\n" + log.stdout)
             raise RuntimeError("HA communication failed")

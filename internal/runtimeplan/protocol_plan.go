@@ -14,7 +14,7 @@ import (
 // select its workers and supply live data; they do not rebuild worker identity.
 type protocolPlan struct {
 	instances    map[string]binding
-	dhcpHA       map[string]dhcpHAPlan
+	leaseHA      map[string]leaseHAPlan
 	dns          map[string]dnsPlan
 	bgp          map[string]bgpconfig.Config
 	vrrp         map[string]vrrp.Config
@@ -23,7 +23,7 @@ type protocolPlan struct {
 	serviceLinks map[string]bool
 }
 
-type dhcpHAPlan struct {
+type leaseHAPlan struct {
 	owner   string
 	serving binding
 }
@@ -33,7 +33,7 @@ type dhcpHAPlan struct {
 func prepareProtocols(doc config.Native, runtimeDir, stateDir string) (protocolPlan, error) {
 	plan := protocolPlan{
 		instances:    make(map[string]binding),
-		dhcpHA:       make(map[string]dhcpHAPlan),
+		leaseHA:      make(map[string]leaseHAPlan),
 		dns:          make(map[string]dnsPlan),
 		bgp:          make(map[string]bgpconfig.Config),
 		vrrp:         make(map[string]vrrp.Config),
@@ -63,6 +63,20 @@ func prepareProtocols(doc config.Native, runtimeDir, stateDir string) (protocolP
 		var instance serviceconfig.Instance
 		var err error
 		switch {
+		case service.DHCP6 != nil && service.DHCP6.HA != nil:
+			cfg := service.DHCP6Config(stateDir)
+			body, encodeErr := json.Marshal(cfg)
+			instance, err = serviceconfig.Instance{Name: name, Role: "dhcp6", Config: body}, encodeErr
+			cfg.Standby = false
+			active, activeErr := json.Marshal(cfg)
+			if activeErr != nil {
+				return protocolPlan{}, activeErr
+			}
+			bound, bindErr := encodeInstance(serviceconfig.Instance{Name: name, Role: "dhcp6", Config: active})
+			if bindErr != nil {
+				return protocolPlan{}, bindErr
+			}
+			plan.leaseHA[name] = leaseHAPlan{owner: "service." + service.DHCP6.HA.Owner, serving: bound}
 		case service.DHCPServer != nil && service.DHCPServer.HA != nil:
 			cfg := service.DHCPServerConfig(runtimeDir, stateDir)
 			body, encodeErr := json.Marshal(cfg)
@@ -76,7 +90,7 @@ func prepareProtocols(doc config.Native, runtimeDir, stateDir string) (protocolP
 			if bindErr != nil {
 				return protocolPlan{}, bindErr
 			}
-			plan.dhcpHA[name] = dhcpHAPlan{owner: "service." + service.DHCPServer.HA.Owner, serving: bound}
+			plan.leaseHA[name] = leaseHAPlan{owner: "service." + service.DHCPServer.HA.Owner, serving: bound}
 		case service.DNS != nil:
 			cfg := service.DNSConfig(runtimeDir, stateDir)
 			prepared, prepareErr := prepareDNS(cfg.Runtime)

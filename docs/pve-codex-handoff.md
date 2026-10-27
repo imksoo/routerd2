@@ -5,7 +5,49 @@
 [機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を参照する。
 実行順序はhomert02/03、実態を確認したk8s-rt/pve-rt、その後既存文書に基づくCloud SAM。
 
-## 現在の変更: pd-recovery / native-32
+## 現在の変更: ha-pd / native-33
+
+HA-02のPD checkpoint移送を実装した。旧routerdの`chain/filesync.go`と共有DUIDを使う
+PDの保存/復旧経路を比較し、worker内の相互TLS認証付きcomplete snapshotへ置き換えた。
+既存VRRPの現所有観測で、事前生成した主系/待機系workerを選ぶ。待機系はWANがなくても
+同期受信のため稼働し、DHCP/DAD socketや受信用TCP listenerを開かない。
+TLSの証明書固定・鍵読取・endpoint検証はDHCPv4/PDで共用する。別の同期managerは増やしていない。
+設定・順序と制限は[DHCPv6 worker](../internal/protocol/dhcp6/README.md#two-node-pd-checkpoint-transfer)を参照する。
+compiler native-33、worker ABI5、network journal10、DHCPv6 checkpoint2。
+旧checkpoint1のreaderは残さない。破棄可能な開発stateは再作成する。
+
+送信元のsnapshotとBOOTTIMEを保存し、受信側の要求開始時刻へ残り期限を対応させる。
+UTCを使わず、往復/処理遅延で貸出を延ばさない。同じrevisionの再受信や待機worker交換では
+時計対応を作り直さない。昇格は保存したepochを進め、有効なPDをRebindで確認する。
+古いepoch/revision・同一revisionの競合を拒否する。同期link断でも主系の上流通信は続け、
+待機系の`snapshot.sync`へ最終受信時刻と同期エラーを表示する。
+メンバー停止はkernel/RA撤去をACKしても共有リースをReleaseしない。単独clientのRelease順序は維持する。
+
+PVE Linux6.8/amd64、二つの署名済み実PID1 tree、独立ISC DHCP4.4.3-P1とLinux SLAAC端末を使用。
+片側だけLinux time namespaceでBOOTTIMEを+7200秒にした。host時計は変更していない。
+ISC応答停止中のA→B→Aで同じDUID/IAID/prefix、延長しない元期限と実IPv6 TCP/UDPが通った。
+待機worker交換、古いPD通知409、同期link断のエラー表示と復旧、peer不在の追加切替後の
+router/clientの元期限失効、失効後再起動の非復活、ISC復旧後のTCP/UDPも確認した。
+captureでRebindと、メンバー切替時の共有リースRelease不在を確認した。
+同じ試験内で既存DHCPv4の実60秒失効・sticky同期、証明書/古い/競合revision拒否と
+同一TCP socket・UDP NAT対応も維持した。最終runの観測UDP損失は0。先行runでは1 datagramの損失も観測し、損失ゼロの保証とはしない。
+再実行は`make check-ha-pd DHCP6_SERVER=/path/to/isc/dhcpd DOCKER='sudo -n docker'`。
+最終形の`make check`（Go/Python・Race Detector・vet）とamd64/arm64の6静的ELF buildも成功した。
+単独IA_NAの独立dnsmasq試験も成功し、取得/更新/失効/復旧・worker交換・DAD/Decline・正常停止Releaseを確認した。
+
+初回は生成RAの最大間隔10秒と設定側の最小寿命600秒が食い違い、600秒制限を10秒へ揃えた。
+独立peerも通常DAD完了を待ってからsocketを開く。次に、WAN不在が待機serviceまで除外する
+暗黙依存を修正した。同期link断では意図的にDHCPv4が非Readyになるため、PD転送を全serviceの
+Readyで待つ手順を廃棄し、対象workerと独立SLAAC端末・実TCP/UDPで確認する。
+失敗した先行runを成功結果には含めない。生ログ・capture・一時catalogは確認後削除する。
+
+これは周期的complete checkpoint移送で、poll間に未同期の更新が残り得る。
+異なるkernel/boot IDのVM再起動、partition/fencing・切断peer復帰、delta/gap、pair全体を明示的に
+Releaseする操作、最新版の実ONU/対象NIC・負荷・ARM64実行の受入は未完了。
+PD replicaの古い/同revision競合を受信側へ直接再送する負試験も残る（今回の409確認は旧worker通知）。
+HA-02と全34 packageのゴールは継続し、実機置換可能とはまだ判断しない。
+
+## 直前の変更: pd-recovery / native-32
 
 旧routerdの`cmd/routerd-dhcpv6-client`のDUID選択、`restoreLease`/`saveLeaseLocked`、
 `pkg/pdclient.Restore`と設定照合を読み、PDの保存・再起動復旧を実装した。

@@ -80,7 +80,7 @@ func Compile(source Program) (Plan, error) {
 			}
 		}
 		if r.Service != nil {
-			if r.Service.DHCPServer != nil && r.Service.DHCPServer.HA != nil && r.When != nil {
+			if ((r.Service.DHCPServer != nil && r.Service.DHCPServer.HA != nil) || (r.Service.DHCP6 != nil && r.Service.DHCP6.HA != nil)) && r.When != nil {
 				return Plan{}, fmt.Errorf("DHCP %s HA service must remain running on standby; use ha.owner instead of when", r.ID)
 			}
 			s := serviceconfig.Normalize(*r.Service)

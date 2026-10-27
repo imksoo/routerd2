@@ -462,13 +462,27 @@ func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, ready fun
 	if err != nil {
 		return err
 	}
+	var replica *replication
+	if cfg.Replication != nil {
+		replica, err = startReplication(ctx, cfg)
+		if err != nil {
+			return err
+		}
+		defer replica.close()
+		if cfg.Standby {
+			return runStandby(ctx, cfg, replica, saved, effects, ready)
+		}
+		saved.Epoch++
+		saved.Revision = 0
+		saved.Source = cfg.Replication.ListenAddress.String()
+	}
 	ifi, source, err := linklocal.Wait(ctx, cfg.Interface, netip.Addr{})
 	if err != nil {
 		return err
 	}
 	duidText := cfg.ClientDUID
 	if duidText == "" {
-		duidText = saved.ClientDUID
+		duidText = saved.Snapshot.ClientDUID
 	}
 	var duid []byte
 	if duidText != "" {
@@ -511,7 +525,7 @@ func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, ready fun
 	}
 	c := client{cfg: cfg, duid: duid, maxSolicit: 3600 * time.Second, maxInformation: 3600 * time.Second, snapshot: dhcp6config.Snapshot{BootID: clock.BootID, Resource: cfg.Resource, Interface: cfg.Interface, IAID: cfg.IAID, ClientDUID: hex.EncodeToString(duid)}}
 	now := time.Unix(0, clock.BoottimeNanoseconds)
-	restored, err := c.restorePD(saved, clock)
+	restored, err := c.restorePD(saved.localSnapshot(clock, cfg.Interface), clock)
 	if err != nil {
 		return err
 	}
@@ -534,7 +548,11 @@ func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, ready fun
 			return nil
 		}
 		c.snapshot.ObservedNanos = uint64(clock.BoottimeNanoseconds)
-		if err := writeState(cfg.StatePath, c.snapshot); err != nil {
+		saved.Version = stateVersion
+		saved.Revision++
+		saved.Snapshot = c.snapshot
+		saved.Mapping = nil
+		if err := writeState(cfg.StatePath, saved); err != nil {
 			return fmt.Errorf("persist DHCPv6 assignments: %w", err)
 		}
 		if err := effects.Update(ctx, c.snapshot); err != nil {
@@ -561,8 +579,17 @@ func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, ready fun
 			result = errors.Join(result, fmt.Errorf("withdraw DHCPv6 assignments: %w", err))
 			return
 		}
+		// A member must not Release the pair's upstream grant on demotion or
+		// process replacement. Its acknowledged local withdrawal still happens.
+		if cfg.Replication != nil {
+			return
+		}
 		// Never leave a recoverable checkpoint for a lease sent in Release.
-		if err := writeState(cfg.StatePath, withdrawn); err != nil {
+		saved.Version = stateVersion
+		saved.Revision++
+		saved.Snapshot = withdrawn
+		saved.Mapping = nil
+		if err := writeState(cfg.StatePath, saved); err != nil {
 			result = errors.Join(result, err)
 			return
 		}
@@ -610,6 +637,11 @@ func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, ready fun
 		}
 		if err := publish(); err != nil {
 			return err
+		}
+		if replica != nil {
+			if err := replica.serve(saved); err != nil {
+				return err
+			}
 		}
 		for _, e := range []*exchange{&c.lease, &c.info} {
 			if e.kind != 0 && !now.Before(e.next) {

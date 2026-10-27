@@ -230,7 +230,7 @@ func validateNative(d Native, source Document) error {
 		}
 		service := resource.Service
 		if owner := reserved[service.Interface()]; owner != "" && !guardedDynamicResource(resource, owners[owner]) {
-			if service.DHCPServer == nil || service.DHCPServer.HA == nil || service.DHCPServer.HA.Owner != owner {
+			if !(service.DHCPServer != nil && service.DHCPServer.HA != nil && service.DHCPServer.HA.Owner == owner) && !(service.DHCP6 != nil && service.DHCP6.HA != nil && service.DHCP6.HA.Owner == owner) {
 				return fmt.Errorf("service %s cannot use dynamic interface of %s without a dependency", service.Name, owner)
 			}
 		}

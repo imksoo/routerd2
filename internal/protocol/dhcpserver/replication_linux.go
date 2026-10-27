@@ -8,19 +8,18 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
-	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"slices"
 	"time"
+
+	"github.com/imksoo/routerd2/internal/peertls"
 )
 
 const replicationTimeout = 2 * time.Second
@@ -49,37 +48,9 @@ type replication struct {
 
 func startReplication(ctx context.Context, cfg Config) (*replication, error) {
 	c := cfg.Replication
-	key, exists, err := readPrivate(c.PrivateKeyFile, 64<<10)
-	if err != nil || !exists {
-		return nil, errors.Join(errors.New("read private DHCP replication key"), err)
-	}
-	cert, err := os.ReadFile(c.CertificateFile)
+	serverTLS, clientTLS, err := peertls.Load(ctx, *c)
 	if err != nil {
 		return nil, err
-	}
-	identity, err := tls.X509KeyPair(cert, key)
-	if err != nil {
-		return nil, err
-	}
-	peerPEM, err := os.ReadFile(c.PeerCertificateFile)
-	if err != nil {
-		return nil, err
-	}
-	block, _ := pem.Decode(peerPEM)
-	if block == nil || block.Type != "CERTIFICATE" {
-		return nil, errors.New("DHCP replication requires the peer's certificate")
-	}
-	peer, err := x509.ParseCertificate(block.Bytes)
-	if err != nil {
-		return nil, err
-	}
-	trusted := x509.NewCertPool()
-	trusted.AddCert(peer)
-	verifyPeer := func(cs tls.ConnectionState) error {
-		if len(cs.PeerCertificates) == 0 || !bytes.Equal(cs.PeerCertificates[0].Raw, peer.Raw) {
-			return errors.New("DHCP replication peer certificate does not match")
-		}
-		return nil
 	}
 	// Interface names and local file paths are host-specific. The allocation
 	// domain must agree before either side accepts the other's semantic state.
@@ -97,14 +68,14 @@ func startReplication(ctx context.Context, cfg Config) (*replication, error) {
 	sum := sha256.Sum256(body)
 	endpoint := (&url.URL{Scheme: "https", Host: c.PeerAddress.String(), Path: "/v1/leases"}).String()
 	r := &replication{domain: hex.EncodeToString(sum[:]), peer: endpoint, requests: make(chan replicationRequest, 1), done: make(chan struct{})}
-	transport := &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{identity}, RootCAs: trusted, ServerName: c.PeerAddress.Addr().WithZone("").String(), VerifyConnection: verifyPeer}}
+	transport := &http.Transport{TLSClientConfig: clientTLS}
 	r.client = &http.Client{Transport: transport, Timeout: replicationTimeout}
 	r.server = &http.Server{Handler: r.handler(cfg), ReadHeaderTimeout: time.Second, ReadTimeout: replicationTimeout, WriteTimeout: 2 * replicationTimeout, IdleTimeout: 5 * time.Second, MaxHeaderBytes: 8192}
 	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", c.ListenAddress.String())
 	if err != nil {
 		return nil, err
 	}
-	secured := tls.NewListener(listener, &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{identity}, ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: trusted, VerifyConnection: verifyPeer})
+	secured := tls.NewListener(listener, serverTLS)
 	go func() { r.err = r.server.Serve(secured); close(r.done) }()
 	return r, nil
 }

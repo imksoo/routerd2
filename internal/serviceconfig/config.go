@@ -63,6 +63,7 @@ type DHCP4 struct {
 }
 
 type DHCP6 struct {
+	HA             *LeaseHA     `json:"ha,omitempty"`
 	Interface      string       `json:"interface"`
 	ClientDUID     string       `json:"client_duid,omitempty"`
 	IAID           uint32       `json:"iaid"`
@@ -351,8 +352,8 @@ func Validate(services []Service) error {
 					return fmt.Errorf("service %s has invalid/duplicate delegation name or invalid interface", s.Name)
 				}
 				lanNames[lan.Name] = true
-				if lan.RouterLifetimeSeconds != nil && (*lan.RouterLifetimeSeconds < 0 || *lan.RouterLifetimeSeconds > 9000 || (*lan.RouterLifetimeSeconds > 0 && *lan.RouterLifetimeSeconds < 600)) {
-					return errors.New("delegated RA lifetime must be zero or 600..9000 seconds")
+				if lan.RouterLifetimeSeconds != nil && (*lan.RouterLifetimeSeconds < 0 || *lan.RouterLifetimeSeconds > 9000 || (*lan.RouterLifetimeSeconds > 0 && *lan.RouterLifetimeSeconds < 10)) {
+					return errors.New("delegated RA lifetime must be zero or 10..9000 seconds")
 				}
 				for _, addr := range lan.RDNSS {
 					a, e := netip.ParseAddr(addr)
@@ -411,7 +412,13 @@ func (s Service) DHCP4Config(stateDir string) dhcp4.Config {
 }
 func (s Service) DHCP6Config(stateDir string) dhcp6config.Config {
 	c := s.DHCP6
-	return dhcp6config.Config{Resource: s.Name, Interface: c.Interface, StatePath: filepath.Join(stateDir, "leases", s.Name+".dhcp6.json"), ClientDUID: c.ClientDUID, IAID: c.IAID, PrefixLength: c.PrefixLength, RequestAddress: c.RequestAddress, RequestPrefix: c.RequestPrefix}
+	cfg := dhcp6config.Config{Resource: s.Name, Interface: c.Interface, StatePath: filepath.Join(stateDir, "leases", s.Name+".dhcp6.json"), ClientDUID: c.ClientDUID, IAID: c.IAID, PrefixLength: c.PrefixLength, RequestAddress: c.RequestAddress, RequestPrefix: c.RequestPrefix}
+	if c.HA != nil {
+		r := c.HA.Replication
+		cfg.Replication = &r
+		cfg.Standby = true
+	}
+	return cfg
 }
 func (s Service) VRRPConfig() vrrp.Config {
 	c := *s.VRRP

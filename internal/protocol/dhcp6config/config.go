@@ -10,17 +10,20 @@ import (
 
 	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/lifetime"
+	"github.com/imksoo/routerd2/internal/peertls"
 )
 
 type Config struct {
-	Resource       string `json:"resource"`
-	Interface      string `json:"interface"`
-	StatePath      string `json:"state_path"`
-	ClientDUID     string `json:"client_duid,omitempty"`
-	IAID           uint32 `json:"iaid"`
-	RequestAddress bool   `json:"request_address,omitempty"`
-	RequestPrefix  bool   `json:"request_prefix,omitempty"`
-	PrefixLength   int    `json:"prefix_length,omitempty"`
+	Standby        bool            `json:"standby,omitempty"`
+	Replication    *peertls.Config `json:"replication,omitempty"`
+	Resource       string          `json:"resource"`
+	Interface      string          `json:"interface"`
+	StatePath      string          `json:"state_path"`
+	ClientDUID     string          `json:"client_duid,omitempty"`
+	IAID           uint32          `json:"iaid"`
+	RequestAddress bool            `json:"request_address,omitempty"`
+	RequestPrefix  bool            `json:"request_prefix,omitempty"`
+	PrefixLength   int             `json:"prefix_length,omitempty"`
 }
 
 type Address struct {
@@ -34,7 +37,15 @@ type Prefix struct {
 	ValidUntil     lifetime.Deadline `json:"valid_until"`
 }
 
+type SyncStatus struct {
+	Epoch         uint64 `json:"epoch"`
+	Revision      uint64 `json:"revision"`
+	ReceivedNanos uint64 `json:"received_nanos"`
+	Error         string `json:"error,omitempty"`
+}
+
 type Snapshot struct {
+	Sync                      *SyncStatus       `json:"sync,omitempty"`
 	ObservedNanos             uint64            `json:"observed_nanos"`
 	BootID                    string            `json:"boot_id"`
 	Resource                  string            `json:"resource"`
@@ -57,6 +68,17 @@ type Snapshot struct {
 }
 
 func Validate(c Config) error {
+	if c.Standby && c.Replication == nil {
+		return errors.New("DHCPv6 standby requires replication")
+	}
+	if c.Replication != nil {
+		if !c.RequestPrefix || c.ClientDUID == "" {
+			return errors.New("DHCPv6 replication requires PD and an explicit shared DUID")
+		}
+		if err := peertls.Validate(*c.Replication); err != nil {
+			return err
+		}
+	}
 	if strings.TrimSpace(c.Resource) == "" || c.Interface == "" || len(c.Interface) > 15 || strings.ContainsAny(c.Interface, "/\x00 \t\r\n") || !filepath.IsAbs(c.StatePath) {
 		return errors.New("DHCPv6 requires a resource, valid interface and absolute state_path")
 	}
@@ -97,7 +119,7 @@ func (s Snapshot) LeaseUntil() (lifetime.Deadline, bool) {
 	return until, found
 }
 func (s Snapshot) Active(clock boottime.Clock) bool {
-	if s.State == "stopped" || s.BootID != clock.BootID {
+	if s.State == "stopped" || s.State == "standby" || s.BootID != clock.BootID {
 		return false
 	}
 	if s.State == "information" {
@@ -108,7 +130,7 @@ func (s Snapshot) Active(clock boottime.Clock) bool {
 	return found && until.Live(clock)
 }
 func (s Snapshot) InformationUntil(clock boottime.Clock) (lifetime.Deadline, bool) {
-	if s.State == "stopped" || s.BootID != clock.BootID || s.InfoReceivedNanos == 0 {
+	if s.State == "stopped" || s.State == "standby" || s.BootID != clock.BootID || s.InfoReceivedNanos == 0 {
 		return lifetime.Deadline{}, false
 	}
 	until := s.InformationRefreshAt
@@ -132,15 +154,18 @@ func ValidateSnapshot(c Config, s Snapshot) error {
 		return err
 	}
 	switch s.State {
-	case "soliciting", "requesting", "bound", "renewing", "rebinding", "declining", "information", "stopped":
+	case "standby", "soliciting", "requesting", "bound", "renewing", "rebinding", "declining", "information", "stopped":
 	default:
 		return errors.New("invalid DHCPv6 client state")
 	}
-	if s.State == "stopped" && (len(s.Addresses)+len(s.Prefixes) > 0 || s.InfoReceivedNanos != 0) {
-		return errors.New("stopped DHCPv6 client retains assignments/information")
+	if (s.State == "stopped" || s.State == "standby") && (len(s.Addresses)+len(s.Prefixes) > 0 || s.InfoReceivedNanos != 0) {
+		return errors.New("inactive DHCPv6 client retains assignments/information")
 	}
 	if s.State == "information" && (c.RequestAddress || c.RequestPrefix) {
 		return errors.New("DHCPv6 state does not match requested associations")
+	}
+	if s.State == "standby" && s.Sync == nil || s.Sync != nil && (s.State != "standby" || s.Sync.ReceivedNanos > s.ObservedNanos) {
+		return errors.New("invalid DHCPv6 synchronization observation")
 	}
 	if s.ServerDUID != "" {
 		if _, err := ParseDUID(s.ServerDUID); err != nil {

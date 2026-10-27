@@ -28,7 +28,7 @@ Different boots, changed identity/interface/IAID, expired PD and IA_NA-only
 clients use fresh acquisition. IA_NA-only Confirm recovery remains unimplemented.
 Graceful shutdown acknowledges kernel/RA withdrawal, persists an empty stopped
 checkpoint, then sends Release. SIGKILL leaves the last saved grant for recovery.
-The current contract is compiler native-32, checkpoint version 1; no discarded
+The current contract is compiler native-33, checkpoint version 2; no discarded
 identity-file or PD-wrapper journal reader is retained.
 
 This path was compared with routerd's `cmd/routerd-dhcpv6-client` DUID selection,
@@ -88,9 +88,56 @@ the guest clock, and restores its original baseline on exit.
 These are isolated amd64 Linux VM checks. Actual suspend, automatic
 RA-triggered DHCPv6, required-address readiness, complete legacy resource
 selection, DAD failure alongside other IA_NA/IA_PD bindings, VRF and physical NIC
-qualification remain separate work. Authenticated two-node PD transfer,
-cross-boot deadline transfer, HA ownership/fencing and demotion without Release
-remain unimplemented; local recovery does not complete HA-02. Latest native-32
-ONU/target-device acceptance is not established. The former pinned PD state-machine
+qualification remain separate work. Two-node transfer is described below. Separate-VM reboot,
+partition/fencing, load, ARM64 execution and latest ONU/target-device acceptance
+remain open. The former pinned PD state-machine
 wrapper, timer corrections and prototype journal reader were removed; there is
 no compatibility path.
+
+## Two-node PD checkpoint transfer
+
+The `dhcp6` service accepts `ha` with `owner` naming its configured VRRP service
+and `replication` containing the same endpoint/certificate fields as
+[DHCPv4 replication](../dhcpserver/README.md#two-node-replication). Use a separate
+TCP port for each service. Both nodes need the same resource name, explicit
+`client_duid`, IAID, requested IA types and prefix length. Reverse the local and
+peer endpoints/certificates. Keep sync addresses independent of the shared WAN.
+The shared WAN link and its link-local address must follow the same VRRP owner.
+Do not put `when` on the PD service: its standby must run without the WAN link.
+
+The compiler prepares active and standby workers once; current acknowledged
+VRRP ownership selects through ordinary worker replacement. Standby opens no
+DHCP or DAD socket and projects no WAN/LAN assignment or RA. It pulls the active
+member's complete checkpoint once a second over mutually authenticated TLS1.3
+with the configured peer leaf pinned. An identity fingerprint covers the shared
+PD contract. The active DHCP loop owns each response and samples its own
+BOOTTIME; HTTP handlers never access mutable client state directly.
+
+A received checkpoint retains the source snapshot unchanged and records the
+source clock sample together with the local request-start clock. Takeover
+derives local deadlines from this mapping; network/processing delay shortens
+rather than extends the grant. UTC is not involved. An identical revision keeps
+its original mapping even after repeated fetches or standby restart. Active
+startup advances the persisted ownership epoch; snapshots advance revision.
+Older epochs/revisions and conflicting equal revisions are rejected. These
+counters prevent accepted checkpoint replay; they do not fence two isolated
+VRRP masters. The active member continues its ordinary upstream protocol when
+sync is unavailable. Standby reports the last successful receive time and any
+sync error in `snapshot.sync`.
+
+A member withdraws its local kernel/RA effects before stopping, but never
+Releases the pair's shared upstream grant on demotion, process replacement or
+member removal. Its last checkpoint remains recoverable. Standalone clients
+still clear their checkpoint and perform bounded Release. An explicit pair-wide
+release operation is not yet implemented. A standby reboot invalidates its
+saved local clock mapping; it must fetch again or acquire afresh on promotion.
+
+`make check-ha-pd DHCP6_SERVER=/path/to/isc/dhcpd DOCKER='sudo -n docker'`
+uses two signed actual PID1 trees, independent ISC DHCP, Linux SLAAC and actual
+IPv6 TCP/UDP. One router has a real Linux time namespace with BOOTTIME +7200s;
+the host clock is unchanged. The existing DHCPv4/conntrack handoff checks also
+exercise the shared TLS implementation. This establishes independent kernel
+clock domains on one PVE amd64 VM, not qualification of two physical routers.
+Cross-node transfer remains periodic complete snapshots, with an unreplicated
+window between polls. Delta/gap recovery, disconnected-peer return/fencing and
+target-hardware acceptance remain unfinished HA-02 work.

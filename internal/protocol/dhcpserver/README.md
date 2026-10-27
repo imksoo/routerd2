@@ -127,9 +127,10 @@ write which was never acknowledged to a client.
 This is an initial synchronous two-live-node implementation. Startup and new or
 extended grants require the peer: loss of the peer stops DHCP admission until
 it returns. This is not complete partner-down HA. Owner epochs, delta/gap
-recovery, safe disconnected allocation, DHCPv6/PD transfer and clock-skew/load/
-physical qualification remain open. VRRP alone is not split-brain fencing.
-The private journal is version 2 and the compiler contract is native-31. There
+recovery, safe disconnected allocation and clock-skew/load/physical qualification remain
+open. PD checkpoint transfer is implemented separately by the
+[DHCPv6 worker](../dhcp6/README.md#two-node-pd-checkpoint-transfer). VRRP alone is not split-brain fencing.
+The private journal is version 2 and the compiler contract is native-33. There
 is no reader or migration for discarded prerelease journals and no supported
 mixed old/new rollout. Recreate disposable development state; real deployments
 still need a validated maintenance cutover procedure.

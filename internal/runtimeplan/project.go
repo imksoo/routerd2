@@ -125,7 +125,8 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 		p.instances = append(p.instances, protocols.instances[s.ModuleName()])
 	}
 	for _, s := range doc.Services {
-		if s.Interface() != "" && !protocols.serviceLinks[s.Interface()] {
+		_, sharedLease := protocols.leaseHA[s.ModuleName()]
+		if !sharedLease && s.Interface() != "" && !protocols.serviceLinks[s.Interface()] {
 			ensureInterface(&p.network, s.Interface())
 		}
 		if s.DHCPRelay != nil {
@@ -196,6 +197,9 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 			var snap dhcp6config.Snapshot
 			if err := json.Unmarshal(record.Snapshot, &snap); err != nil {
 				return p, err
+			}
+			if !snap.Active(facts.bfdClock) {
+				continue
 			}
 			for _, address := range snap.Addresses {
 				if !address.ValidUntil.Live(facts.bfdClock) {
@@ -271,7 +275,7 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 			p.vrrpOwners[s.ModuleName()] = ownershipFor(record, snap)
 			if record.ConfigDigest == protocols.instances[s.ModuleName()].digest && vrrp.CurrentOwnership(snap, facts.bfdClock) {
 				for i, bound := range p.instances {
-					if ha, paired := protocols.dhcpHA[bound.instance.Name]; paired && ha.owner == s.ModuleName() {
+					if ha, paired := protocols.leaseHA[bound.instance.Name]; paired && ha.owner == s.ModuleName() {
 						p.instances[i] = ha.serving
 					}
 				}

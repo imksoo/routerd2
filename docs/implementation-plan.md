@@ -1146,6 +1146,17 @@ RFC 5798方式を明示できる。標準peerと現行方式peerのVIP TCP/UDP�
 
 #### HA-02 — DHCP/PD lease の認証付き同期
 
+2026-10-27追加: `ha-pd/native-33`はPD workerの相互TLS complete checkpoint移送を実装した。
+旧routerdのファイル同期と共有DUID/Restoreを比較した。既存VRRP所有観測で主系/待機系を選び、
+待機系はWANなしで受信する。送信元snapshotと時計・受信側要求開始時計を保持し、
+異なるBOOTTIMEの残り期限を延ばさず移す。同一revisionは時計対応を保持し、昇格epochと
+更新revisionで古い/競合checkpointを拒否する。メンバー撤去は共有PDをReleaseしない。
+二つの実PID1、BOOTTIME差7200秒、独立ISC/SLAAC端末で、応答停止中のA→B→A・元期限と
+DUID/IAID/prefix・実TCP/UDP、待機交換、同期link断、古い通知、元期限失効と非復活・復旧を確認した。
+再実行は`make check-ha-pd DHCP6_SERVER=/path/to/isc/dhcpd DOCKER='sudo -n docker'`。
+同じ試験のDHCPv4・同一TCP/UDP・認証と実失効も通った。周期pollの未同期窓、delta/gap、
+partition/fencing・切断peer復帰、別kernelのrebootと物理機受入は残り、HA-02完了とはしない。
+
 範囲: 旧 routerd 互換 / track: network / risk: high。
 前提: CORE-04, NET-06, HA-01。 設計判断: D-05。
 
@@ -1168,7 +1179,7 @@ RFC 5798方式を明示できる。標準peerと現行方式peerのVIP TCP/UDP�
 旧routerdのDUID選択・`restoreLease`/`saveLeaseLocked`・`pdclient.Restore`と照合した。
 明示/保存済みDUID、IAID、server、元期限を保持し、ISC無応答中のworker交換でも転送でき、
 Rebind/Replyで更新する。router/clientの元期限失効と失効後再起動、正常停止時のRelease順序も確認した。
-これは同期の前提部分で、二台間PD移送・異なるboot時計間の期限移送・HA demotion時のRelease抑止は未実装。
+このローカル復旧へ、上記native-33の二台間PD移送・時計対応・HAメンバーRelease抑止を接続した。
 別の同期managerは追加していない。
 
 部分実装: `ha-dhcp` / native-31。DHCPv4 workerがTLS1.3の相互認証とpeer certificate固定で
@@ -1181,7 +1192,7 @@ lease/sticky/quarantineの元期限を保持する。VRRPの現所有観測で�
 復旧、実60秒失効とsticky保持が通った。同時に同一TCP socketとUDP NAT対応を維持した。
 再実行は`make check-ha-state DOCKER='sudo -n docker'`。生ログ・capture・一時catalogは削除する。
 これは両node稼働時の同期方式であり、peer不在では起動/新規貸出/更新を停止する。
-partner-down時の安全な継続、owner epoch、delta/cursor/gap、PD/DUID/IAIDとIPv6同期、
+DHCPv4 partner-down時の安全な継続・owner epoch、delta/cursor/gap、PDの切断peer復帰/fencingと残るIPv6契約、
 clock skew・物理機・負荷、maintenance切替手順は残る。HA-02完了やhomert置換可能とはしない。
 
 #### HA-03 — NAT conntrack の同期と既存通信継続
