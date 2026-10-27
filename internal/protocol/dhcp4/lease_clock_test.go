@@ -92,6 +92,51 @@ func TestRenewalACKCreatesOneNewBootDeadline(t *testing.T) {
 	}
 }
 
+func TestExpiredACKStartsFreshExchangeWithoutExtendingPreviousGrant(t *testing.T) {
+	for _, state := range []wire.State{wire.StateRequesting, wire.StateRenewing} {
+		t.Run(string(state), func(t *testing.T) {
+			c, _, _, _ := fixture(t)
+			clock := independentClock(t, c)
+			ctx := context.Background()
+			if state == wire.StateRequesting {
+				if err := c.start(ctx, nil); err != nil {
+					t.Fatal(err)
+				}
+				if err := c.handle(ctx, reply(c, wire.MessageOffer)); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				bind(t, c)
+				clock.BoottimeNanoseconds += int64(40 * time.Second)
+				if err := c.tick(ctx); err != nil {
+					t.Fatal(err)
+				}
+			}
+			previous, transaction := c.leaseClock, c.transaction
+			m, err := wire.Decode(reply(c, wire.MessageACK))
+			if err != nil {
+				t.Fatal(err)
+			}
+			m.Options[wire.OptionLeaseTime] = []byte{0, 0, 0, 3}
+			m.Options[wire.OptionT1] = []byte{0, 0, 0, 1}
+			m.Options[wire.OptionT2] = []byte{0, 0, 0, 2}
+			ack := wire.EncodeRequest(wire.MessageACK, transaction, c.hardware, m.Options)
+			ack[0] = 2
+			copy(ack[16:20], m.YIAddr.AsSlice())
+			clock.BoottimeNanoseconds += int64(5 * time.Second)
+			if err := c.handle(ctx, ack); err != nil {
+				t.Fatal(err)
+			}
+			if c.transaction == transaction || c.leaseClock != previous {
+				t.Fatal("expired ACK retained an unrecoverable transaction or changed the preceding grant")
+			}
+			if state == wire.StateRequesting && (c.state != wire.StateDiscovering || c.snapshot().Active) || state == wire.StateRenewing && (c.state != wire.StateRenewing || !c.snapshot().Active) {
+				t.Fatal("fresh exchange lost the preceding lease or activated an expired grant", c.state)
+			}
+		})
+	}
+}
+
 func TestRebootRequestTimeoutAndPacketSecondsUseBootClock(t *testing.T) {
 	c, _, _, _ := fixture(t)
 	independentClock(t, c)

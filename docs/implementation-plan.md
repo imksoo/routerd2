@@ -7,7 +7,10 @@
 現在の変更・実行結果・残作業は [引き継ぎ](pve-codex-handoff.md) を参照する。
 機能範囲と作業単位は以下とJSONの台帳で管理し、既存試験の成功を全体完了に数えない。
 
-2026-10-27 `ha-dhcp` / native-31: DHCPv4貸出の相互TLS認証付きcheckpoint同期を追加した。
+2026-10-27 `dhcp-request-clock` / native-31: 独立dnsmasqと実5.2秒遅延でDHCPv4の期限延長を
+再現し、元のREQUEST時刻へ修正した。通常取得/再起動再取得/自然更新と、QEMUの実UTC補正・
+元期限失効・worker/control交換後のTCP/UDPも通った。生ログ・capture・試験binaryは削除する。
+直前の`ha-dhcp` / native-31ではDHCPv4貸出の相互TLS認証付きcheckpoint同期を追加した。
 実PID1二台と独立端末で切替・更新・同期断復旧を確認し、PD同期とpartner-down継続は残る。
 直前の`peer-receive` / native-30では、旧routerd/依存engineと比較し、IPv4リンクローカルの
 conntrack同期/B4対向、正当なIPv6表記、残存ciaddr、独立RA/IA/AAAA情報の受理を修正した。

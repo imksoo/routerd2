@@ -28,7 +28,12 @@ leases require an ACK before becoming active. Normal stop withdraws effects but
 retains the server lease record for the next INIT-REBOOT exchange.
 
 Within a running client, a validated server ACK establishes T1, T2 and expiry
-once from `CLOCK_BOOTTIME`. UTC corrections cannot change these deadlines.
+from the original DHCPREQUEST's `CLOCK_BOOTTIME`, as required by RFC 2131
+sections 4.4.1, 4.4.2 and 4.4.5. Retransmissions retain that request's clock;
+ACK transit/queue delay cannot extend the lease. An ACK whose grant has already
+expired starts a fresh exchange; renewal/rebind retain the preceding lease
+while it remains valid. UTC display timestamps use
+the same request's wall time. UTC corrections cannot change boot deadlines.
 Retransmission, transaction timeout and the DHCP `secs` field also use boot
 time. An expired lease is withdrawn before processing a queued reply; the old
 transaction cannot renew it after a process stall. A clock read failure,
@@ -40,7 +45,7 @@ Snapshots carry the original boot observation, logical epoch/sequence and
 ACK-scoped lease clock. The controller authenticates even the first publication
 against the current supervisor generation. Transport retries cannot change the
 source observation, lease payload or original deadline. Active facts retain
-the ACK age through renewal/rebind phase publications. A final stopped snapshot
+the original grant's age through renewal/rebind phase publications. A final stopped snapshot
 cannot become active again in the same worker incarnation.
 
 The network writer persists boot-scoped address lifetimes and computes kernel
@@ -65,6 +70,17 @@ DHCPv4 acquisition/renewal/expiry with a kernel UDP server, DHCPv6 PD/informatio
 renewal, and RA solicitation/shutdown withdrawal. It never mutates the host
 network. Set `ROUTERD2_INTEGRATION_REQUIRED=1` to fail if isolation is unavailable.
 Interoperability with independent vendor DHCP servers remains a separate gate.
+
+`make check-dhcp4` uses independent dnsmasq 2.90 with an actual 5.2-second
+Linux netem delay on UDP replies, including REQUEST retransmission. ARP is
+left undelayed so neighbor resolution cannot discard queued requests. Captured REQUEST/ACK
+times are compared to published lease clocks for initial acquisition,
+INIT-REBOOT and unicast renewal. The other daemon case checks kernel ownership,
+TCP/UDP, expiry and recovery. Requires Linux root/sudo, dnsmasq and the `sch_netem`, `sch_prio` and
+`cls_flower` modules; the runner loads them before entering its private network namespaces.
+Logs, packet captures and the test executable are deleted after inspection
+unless `scripts/daemon-tests.py --output` explicitly requests retention.
+This does not qualify a physical server, NIC or ONU.
 
 `make qemu-dhcp4-clock` requires an existing appliance kernel image in
 `IMAGE_DIR` and boots a separate no-NIC guest. Its test-only PID 1 changes actual

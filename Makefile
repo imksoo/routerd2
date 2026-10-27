@@ -39,6 +39,7 @@ help:
 	  'make check-vrrp-unicast Verify VRRP peer failover and finite WAN identity' \
 	  'make check-bfd         Verify BFD/BGP routing domains with real workers' \
 	  'make check-dhcp6       Verify IA_NA and bounded Release with independent dnsmasq' \
+	  'make check-dhcp4       Verify delayed independent ACKs, lease expiry and recovery' \
 	  'make check-pd-ra       Verify PD renewal, generated RA and client traffic' \
 	  'make check-bgp         Verify actual BGP FIB, reporting failure and ownership expiry' \
 	  'make check-aftr        Verify AFTR input identity, DNS and tunnel expiry' \
@@ -106,6 +107,10 @@ check: fmt-check test test-dependencies test-tools race vet
 
 check-health-pbr: build
 	$(PYTHON) scripts/daemon-tests.py health-pbr --go '$(GO)'
+
+.PHONY: check-dhcp4
+check-dhcp4: build
+	$(PYTHON) scripts/daemon-tests.py dhcp4 --go '$(GO)'
 
 check-dual-wan: build pppoe-engine
 	$(PYTHON) scripts/dual-wan-peer.py

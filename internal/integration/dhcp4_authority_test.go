@@ -9,7 +9,6 @@ import (
 	"io"
 	"net"
 	"os"
-	"path/filepath"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -27,6 +26,7 @@ import (
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 	"github.com/imksoo/routerd2/internal/supervisor"
 	"github.com/vishvananda/netlink"
+	"github.com/vishvananda/netlink/nl"
 	"golang.org/x/sys/unix"
 )
 
@@ -35,6 +35,118 @@ func TestDaemonDHCPv4OriginalLeaseAuthority(t *testing.T) {
 		return
 	}
 	runDHCPv4Authority(t, nil)
+}
+
+func TestDaemonDHCPv4DelayedACK(t *testing.T) {
+	if !isolateFixtureTimeout(t, "TestDaemonDHCPv4DelayedACK", 180*time.Second) {
+		return
+	}
+	ctx := context.Background()
+	peerNS := fixturePeerNamespace(t, "wan0", "server0")
+	peer, err := netlink.NewHandleAt(peerNS, unix.NETLINK_ROUTE)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer peer.Close()
+	link, err := peer.LinkByName("server0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	address, _ := netlink.ParseAddr("192.0.2.1/24")
+	if err := peer.AddrAdd(link, address); err != nil {
+		t.Fatal(err)
+	}
+	// Delay DHCP replies past the first retry, without changing the server.
+	// ARP must remain ordinary: delaying it too can discard queued REQUESTs
+	// before they reach the wire, confounding the ACK timing measurement.
+	if err := peer.QdiscAdd(netlink.NewPrio(netlink.QdiscAttrs{LinkIndex: link.Attrs().Index, Parent: netlink.HANDLE_ROOT, Handle: netlink.MakeHandle(1, 0)})); err != nil {
+		t.Fatal(err)
+	}
+	if err := peer.QdiscAdd(netlink.NewNetem(netlink.QdiscAttrs{LinkIndex: link.Attrs().Index, Parent: netlink.MakeHandle(1, 3), Handle: netlink.MakeHandle(30, 0)}, netlink.NetemQdiscAttrs{Latency: 5200000})); err != nil {
+		t.Fatal(err)
+	}
+	udp := nl.IPPROTO_UDP
+	if err := peer.FilterAdd(&netlink.Flower{FilterAttrs: netlink.FilterAttrs{LinkIndex: link.Attrs().Index, Parent: netlink.MakeHandle(1, 0), Protocol: unix.ETH_P_IP, Priority: 1}, ClassId: netlink.MakeHandle(1, 3), EthType: unix.ETH_P_IP, IPProto: &udp, SrcPort: 67, DestPort: 68}); err != nil {
+		t.Fatal(err)
+	}
+	startFixtureDNSMasq(t, peerNS, []string{"--port=0", "--dhcp-range=192.0.2.10,192.0.2.20,255.255.255.0,60s"})
+	capture := healthPBRCapture(t, "wan0")
+	f := startFixtureDaemon(t, config.FromNative(config.Native{Network: network.Desired{Interfaces: []network.Interface{{Name: "wan0"}}}, Services: []serviceconfig.Service{{Name: "wan", DHCP4: &serviceconfig.DHCP4{Interface: "wan0"}}}}))
+	snapshot := func() dhcp4.Snapshot {
+		var status runtimeplan.InstanceStatus
+		if err := f.control.Do(ctx, "GET", "/v1/services/service.wan", nil, &status); err != nil {
+			t.Fatal(err)
+		}
+		var s dhcp4.Snapshot
+		if len(status.Snapshot) != 0 {
+			if err := json.Unmarshal(status.Snapshot, &s); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return s
+	}
+	check := func(s dhcp4.Snapshot) {
+		t.Helper()
+		capture.mu.Lock()
+		packets := append([]healthPBRPacket(nil), capture.packets...)
+		capture.mu.Unlock()
+		requests := map[uint32]time.Time{}
+		counts := map[uint32]int{}
+		var transaction uint32
+		var sent, received time.Time
+		for _, packet := range packets {
+			b := packet.data
+			if len(b) < 282 || binary.BigEndian.Uint16(b[12:14]) != unix.ETH_P_IP || b[23] != unix.IPPROTO_UDP {
+				continue
+			}
+			h := 14 + int(b[14]&15)*4
+			if h+8 > len(b) {
+				continue
+			}
+			m, err := wire.Decode(b[h+8:])
+			if err != nil {
+				continue
+			}
+			switch m.MessageType() {
+			case wire.MessageRequest:
+				counts[m.XID]++
+				if requests[m.XID].IsZero() {
+					requests[m.XID] = packet.at
+				}
+			case wire.MessageACK:
+				sent, received = requests[m.XID], packet.at
+				transaction = m.XID
+			}
+		}
+		if sent.IsZero() || received.Sub(sent) < 5*time.Second || counts[transaction] < 2 {
+			t.Fatal("capture did not observe the delayed independent ACK and REQUEST retry", sent, received)
+		}
+		if offset := s.AcquiredAt.Sub(sent); offset < -250*time.Millisecond || offset > 250*time.Millisecond {
+			t.Fatalf("lease anchored %s after original REQUEST; captured ACK delay %s", offset, received.Sub(sent))
+		}
+		if s.ObservedNanos-s.LeaseClock.AcquiredNanos < uint64(5*time.Second) {
+			t.Fatal("ACK delay extended the boot lease", s.LeaseClock, s.ObservedNanos)
+		}
+		t.Logf("lease %s: ACK delay %s, %d REQUEST transmissions, expiry anchored to original REQUEST", s.CurrentAddress, received.Sub(sent), counts[transaction])
+	}
+	until(t, 30*time.Second, func() bool { return snapshot().Active })
+	first := snapshot()
+	check(first)
+	if err := f.control.Do(ctx, "POST", "/v1/services/service.wan/restart", struct{}{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	until(t, 30*time.Second, func() bool { s := snapshot(); return s.Active && s.Epoch != first.Epoch })
+	rebooted := snapshot()
+	check(rebooted)
+	if rebooted.CurrentAddress != first.CurrentAddress {
+		t.Fatal("INIT-REBOOT changed the saved address")
+	}
+	until(t, 90*time.Second, func() bool {
+		s := snapshot()
+		return s.Active && s.State == wire.StateBound && s.LeaseClock.AcquiredNanos > rebooted.LeaseClock.AcquiredNanos
+	})
+	check(snapshot())
+	t.Log("independent dnsmasq: initial acquisition, INIT-REBOOT and unicast renewal retain original REQUEST time despite 5.2-second kernel delay and retransmission")
 }
 
 // The positive clock mutation is available only through the dedicated guest
@@ -181,9 +293,6 @@ func runDHCPv4Authority(t *testing.T, clockClient *clocktest.Client) {
 	if err = netlink.AddrAdd(wan, foreign); err != nil {
 		t.Fatal(err)
 	}
-	if dir := os.Getenv("ROUTERD2_TEST_EVIDENCE_DIR"); dir != "" {
-		t.Setenv("ROUTERD2_TEST_EVIDENCE_DIR", filepath.Join(dir, "dhcp4-authority"))
-	}
 	f := startFixtureDaemon(t, config.FromNative(config.Native{Network: network.Desired{Interfaces: []network.Interface{{Name: "wan0"}}}, Services: []serviceconfig.Service{{Name: "wan", DHCP4: &serviceconfig.DHCP4{Interface: "wan0"}}}}))
 	// Stop capture before daemon shutdown can change its interface state.
 	capture := healthPBRCapture(t, "wan0")
@@ -254,6 +363,15 @@ func runDHCPv4Authority(t *testing.T, clockClient *clocktest.Client) {
 	}
 	traffic := func() {
 		t.Helper()
+		// Source snapshots are accepted before kernel application. In a
+		// restart, the old projection can still be withdrawing at that point.
+		until(t, 10*time.Second, func() bool {
+			var status runtimeplan.Status
+			if err := f.control.Do(ctx, "GET", "/v1/services", nil, &status); err != nil {
+				t.Fatal(err)
+			}
+			return status.Phase == "ready" && kernel(true)
+		})
 		for _, protocol := range []string{"tcp4", "udp4"} {
 			port := "18091"
 			if protocol == "udp4" {
@@ -410,6 +528,10 @@ func runDHCPv4Authority(t *testing.T, clockClient *clocktest.Client) {
 	// Withhold ACKs: their cached positive lease must remain only a hint in
 	// the replacement worker, even if its original deadline is still future.
 	expired := healthPBRUpdate(instance())
+	clock, err := boottime.Read()
+	if err != nil || !dhcp4.CurrentLease(snapshot(), clock) {
+		t.Fatal("control restart requires a live cached grant", err)
+	}
 	acknowledge.Store(false)
 	stableGeneration := module("service.wan").Generation
 	restart("control")

@@ -2,9 +2,11 @@
 """Exercise native workers and independent peers in private Linux namespaces."""
 
 import argparse
+from contextlib import ExitStack
 import os
 from pathlib import Path
 import subprocess
+import tempfile
 
 
 # Each fixture verifies its disposable user/network namespace before mutation.
@@ -36,6 +38,10 @@ SUITES = {
         ("TestDaemonDHCPDNSAndOwnershipExpiry", (), 120),
         ("TestDaemonMigratedDHCPDNSAndOwnershipExpiry", (), 120),
     ),
+    "dhcp4": (
+        ("TestDaemonDHCPv4DelayedACK", ("wan0",), 180),
+        ("TestDaemonDHCPv4OriginalLeaseAuthority", ("wan0",), 180),
+    ),
     "aftr": (("TestDaemonAFTRResolutionAndExpiry", ("wan0",), 120),),
     "ra-client": (("TestDaemonRAClientConfigurationAndExpiry", ("wan0",), 120),),
     "ra-aftr": (("TestDaemonRAAFTRForwardingAndOriginalExpiry", ("wan0", "lan0"), 150),),
@@ -48,7 +54,7 @@ def main():
     parser.add_argument("--test", help="Run one named fixture from the selected suite")
     parser.add_argument("--go", default="go")
     parser.add_argument("--binary-dir", type=Path, default=Path("dist/bin"))
-    parser.add_argument("--output", type=Path)
+    parser.add_argument("--output", type=Path, help="Retain logs/captures here; otherwise remove them after inspection")
     args = parser.parse_args()
     tests = SUITES[args.suite]
     if args.test:
@@ -57,36 +63,42 @@ def main():
             parser.error("--test is not in the selected suite")
     os.chdir(Path(__file__).resolve().parent.parent)
     os.umask(0o022)
-    output = (args.output or Path("dist/daemon-" + args.suite)).resolve()
-    output.mkdir(parents=True, exist_ok=True)
-    harness = output / "integration.test"
-    subprocess.run([args.go, "test", "-race", "-tags", "integration", "-c", "-o", str(harness), "./internal/integration"], check=True)
-    root = [] if os.geteuid() == 0 else ["sudo", "-n"]
-    stage = subprocess.check_output(root + ["mktemp", "-d", "/tmp/routerd-daemon.XXXXXX"], text=True).strip()
-    try:
-        subprocess.run(root + ["mkdir", stage + "/bin"], check=True)
-        for name in ("routerd", "routerd-modules", "routerd-logging"):
-            subprocess.run(root + ["install", "-m", "755", str(args.binary_dir.resolve() / name), stage + "/bin/" + name], check=True)
-        subprocess.run(root + ["install", "-m", "755", str(harness), stage + "/integration.test"], check=True)
-        for name, interfaces, timeout in tests:
-            packets = stage + "/" + name
-            subprocess.run(root + ["mkdir", packets], check=True)
-            log_path = output / (name + ".log")
-            with log_path.open("w") as log:
-                result = subprocess.run(root + ["env", "ROUTERD2_INTEGRATION_REQUIRED=1", "ROUTERD2_TEST_BIN_DIR=" + stage + "/bin", "ROUTERD2_TEST_EVIDENCE_DIR=" + packets, stage + "/integration.test", "-test.run=^" + name + "$", "-test.v", "-test.timeout=" + str(timeout) + "s"], stdout=log, stderr=subprocess.STDOUT, timeout=timeout + 15)
-            content = log_path.read_text()
-            for interface in interfaces:
-                packet = subprocess.run(root + ["cat", packets + "/" + interface + ".pcap"], capture_output=True)
-                if packet.returncode == 0:
-                    (output / (name + "-" + interface + ".pcap")).write_bytes(packet.stdout)
-                if result.returncode == 0 and (packet.returncode or len(packet.stdout) <= 24):
-                    raise RuntimeError("missing packet capture for " + name + ": " + interface)
-            if result.returncode or "--- PASS: " + name not in content or "--- SKIP:" in content:
-                print(content, end="")
-                raise RuntimeError(name + " failed; see " + str(log_path))
-            print(name + ": PASS; " + str(log_path), flush=True)
-    finally:
-        subprocess.run(root + ["python3", "-c", "import shutil,sys; shutil.rmtree(sys.argv[1])", stage], check=True)
+    with ExitStack() as cleanup:
+        output = args.output
+        if output is None:
+            output = Path(cleanup.enter_context(tempfile.TemporaryDirectory(prefix="routerd-daemon-output.")))
+        output = output.resolve()
+        output.mkdir(parents=True, exist_ok=True)
+        harness = output / "integration.test"
+        subprocess.run([args.go, "test", "-race", "-tags", "integration", "-c", "-o", str(harness), "./internal/integration"], check=True)
+        root = [] if os.geteuid() == 0 else ["sudo", "-n"]
+        if any(name == "TestDaemonDHCPv4DelayedACK" for name, _, _ in tests):
+            subprocess.run(root + ["modprobe", "-a", "sch_netem", "sch_prio", "cls_flower"], check=True)
+        stage = subprocess.check_output(root + ["mktemp", "-d", "/tmp/routerd-daemon.XXXXXX"], text=True).strip()
+        try:
+            subprocess.run(root + ["mkdir", stage + "/bin"], check=True)
+            for name in ("routerd", "routerd-modules", "routerd-logging"):
+                subprocess.run(root + ["install", "-m", "755", str(args.binary_dir.resolve() / name), stage + "/bin/" + name], check=True)
+            subprocess.run(root + ["install", "-m", "755", str(harness), stage + "/integration.test"], check=True)
+            for name, interfaces, timeout in tests:
+                packets = stage + "/" + name
+                subprocess.run(root + ["mkdir", packets], check=True)
+                log_path = output / (name + ".log")
+                with log_path.open("w") as log:
+                    result = subprocess.run(root + ["env", "ROUTERD2_INTEGRATION_REQUIRED=1", "ROUTERD2_TEST_BIN_DIR=" + stage + "/bin", "ROUTERD2_TEST_EVIDENCE_DIR=" + packets, stage + "/integration.test", "-test.run=^" + name + "$", "-test.v", "-test.timeout=" + str(timeout) + "s"], stdout=log, stderr=subprocess.STDOUT, timeout=timeout + 15)
+                content = log_path.read_text()
+                for interface in interfaces:
+                    packet = subprocess.run(root + ["cat", packets + "/" + interface + ".pcap"], capture_output=True)
+                    if packet.returncode == 0:
+                        (output / (name + "-" + interface + ".pcap")).write_bytes(packet.stdout)
+                    if result.returncode == 0 and (packet.returncode or len(packet.stdout) <= 24):
+                        raise RuntimeError("missing packet capture for " + name + ": " + interface)
+                if result.returncode or "--- PASS: " + name not in content or "--- SKIP:" in content:
+                    print(content, end="")
+                    raise RuntimeError(name + " failed")
+                print(name + ": PASS" + ("; " + str(log_path) if args.output else ""), flush=True)
+        finally:
+            subprocess.run(root + ["python3", "-c", "import shutil,sys; shutil.rmtree(sys.argv[1])", stage], check=True)
 
 
 if __name__ == "__main__":

@@ -5,7 +5,31 @@
 [機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を参照する。
 実行順序はhomert02/03、実態を確認したk8s-rt/pve-rt、その後既存文書に基づくCloud SAM。
 
-## 現在の変更: ha-dhcp / native-31
+## 現在の変更: dhcp-request-clock / native-31
+
+独立dnsmasq2.90とkernel netemの5.2秒遅延で、WAN DHCPv4 clientがACK待ち時間を
+貸出期限へ加算する問題を再現した（要求から約5.21秒後を取得時刻にしていた）。
+旧routerdの`cmd/routerd-dhcpv4-client:bind`も受信時刻を渡していたため、wire/lease型は再利用しつつ
+[RFC 2131 §4.4.1/4.4.2/4.4.5](https://www.rfc-editor.org/rfc/rfc2131.html#section-4.4.5)の
+最初のREQUEST送信時刻を保存する。再送で更新せず、boot期限とUTC表示を同じ要求へ揃えた。
+到着時に既に期限切れのACKでは新しい交換を始める。更新中の旧貸出が有効なら、その元期限を保持する。
+`dhcp-request-clock`の実supervisor/control/network/DHCP workerは、独立dnsmasqとの通常取得、
+INIT-REBOOT、自然更新を遅延・再送込みで通した。ARPは遅延させず、captureで要求/応答時刻と
+貸出時刻を比較する。再実行は`make check-dhcp4`。kernel経路、TCP/UDP、失効・再起動復旧も通った。
+
+QEMUの新鮮な`qemu-daemon-test` binaryでも、実UTC±24h補正・同じboot期限・kernel再適用、
+SIGSTOP中の3秒貸出失効・古い通知拒否・worker/control交換後の実TCP/UDPが通った。
+先行試験は再起動後の転送/復旧で失敗した。20秒に延ばす一時手順は廃棄し、3秒条件を保持した。
+貸出観測はkernel適用完了ではないため、転送確認はcontrolの適用完了と実kernelを待つ。
+ACKを止めた後の再送で3秒の貸出を受けても、元REQUESTから既に失効している場合があった。
+捨てるだけでは同じ古い要求を60秒まで続けるため、新しい交換へ進むよう実装を修正した。
+最終QEMUは3秒の失効・worker/control復旧まで通り、TCP/UDPも同じ条件で通った。
+基準`ecf8eae`の既存QEMU試験も別worktreeで実行して成功した。物理機の故障再現ではない。
+`make check`（Race Detector・vetを含む）、amd64/arm64の6静的ELF buildも成功。
+daemon runnerは通常実行の試験binary/log/captureを終了時に削除する。明示`--output`時だけ残す。
+ARM64実行・最新binaryでの実ONU長時間通信・対象機器の受入は未完了で、全34 packageを継続する。
+
+## 直前の変更: ha-dhcp / native-31
 
 HA-02のDHCPv4同期を実装した。設定・保存順序と制限は
 [DHCPv4 worker](../internal/protocol/dhcpserver/README.md#two-node-replication)を参照する。
@@ -32,11 +56,8 @@ amd64/arm64の6静的Go ELFを生成した。ARM64での実行は未検証。
 現在は両node稼働を要する同期方式で、peer不在では起動/新規貸出/更新を止める。
 partner-down継続、owner epoch、delta/gap、PD/DUID/IAID・IPv6同期、maintenance切替、
 対象実機・ONU・負荷・clock skewの受入は未完了。homert置換可能とはまだ判断しない。
-次の受信経路確認にはDHCPv4 clientの要求送信時刻を含む。
-[RFC 2131 §4.4.5](https://www.rfc-editor.org/rfc/rfc2131.html#section-4.4.5)は要求送信時刻から
-lease期限を計算するが、現clientはACK受信時刻を基準にする。独立peerで遅延ACKを再現して修正する。
 
-## 直前の変更: peer-receive / native-30
+## それ以前の変更: peer-receive / native-30
 
 旧routerdの受理・利用経路と照合し、実通信を遮る追加制限を修正した。
 
