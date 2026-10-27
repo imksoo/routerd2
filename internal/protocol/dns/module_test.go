@@ -73,7 +73,7 @@ func queryModule(t *testing.T, c Config, network, qname, want string) {
 	}
 }
 
-func TestPublicRunUDPAndTCPConfigUpdateRollbackQueryLogAndStop(t *testing.T) {
+func TestPublicRunUDPAndTCPQueryLogAndStop(t *testing.T) {
 	c := moduleConfig(t)
 	c.Runtime.Spec.QueryLog.Enabled = true
 	c.Runtime.Spec.QueryLog.Path = filepath.Join(filepath.Dir(c.StatePath), "queries.db")

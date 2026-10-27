@@ -820,7 +820,18 @@ host suffixもmanaged bindingへ変換する。native address maskは/64で、�
 [設定例](../examples/wan-dslite-pd.yaml)と[引き継ぎ](pve-codex-handoff.md)を参照する。
 
 #### NET-06 — LAN・DHCPv6・relay・DNS の resource 完全化
- PPP learned DNSを宣言したresolver sourceへ、元期限付きのtyped inputで反映した。
+
+2026-10-27 native-27: PPPに加え、DHCPv4/DHCPv6/RAの`dnsServers`をresolverへ接続した。
+一つのendpointへ元のboot期限を渡し、RAはserver別の期限とinterface scopeを保つ。
+DHCPv4はACK期限、DHCPv6は元の情報期限と割当期限の交差を使う。取得順を保ち、
+JSONの内部round-tripや旧形式readerは追加しない。独立dnsmasqの実ACK/Information Reply/RAと
+別LAN端末で、三つのsourceのUDP/TCP DNSとリンクローカル上流への到達を確認した。
+元期限のRDNSS失効・復旧、30,000 UDP欠落なし・同じTCPのAFTR通信、
+IA_NA更新/再取得時のresolver通信、全体Race/vet/6静的ELF・署名catalogも確認した。
+初回の外側60秒timeoutと、router lifetime90秒/RDNSS120秒の違いは引き継ぎへ記録した。
+DNSのbootstrap/listen/record参照とNET-06の残る全resourceは未完了。
+
+PPP learned DNSを宣言したresolver sourceへ、元期限付きのtyped inputで反映した。
 独立dnsmasqと実LANのUDP/TCP、peer到達性を保ったままの失効、新server取得、同じdig TCP接続の維持を確認した。
 DNS workerの設定write/file reload/raw lease注入とsticky sidecarは廃止し、controlの設定transactionと
 有限inputへ一本化した。条件付きrouteがPPP等のowned linkを利用するための依存・active条件を受け入れる。

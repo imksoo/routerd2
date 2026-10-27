@@ -32,7 +32,16 @@ A DNS source may select negotiated IPCP servers with:
 }
 ```
 
-`internet` names a configured PPP service. Static `upstreams` may coexist with
+`internet` names a configured PPP service. The same `dnsServers` reference accepts
+`DHCPv4Client/NAME`, `DHCPv6Address/NAME`, `DHCPv6PrefixDelegation/NAME`,
+`DHCPv6Information/NAME` and `IPv6RAAddress/NAME`, each bound to its declared
+service role. Each endpoint carries its own original boot deadline. RA RDNSS
+entries can expire independently; DHCPv4 uses its ACK lease, and DHCPv6 uses
+its information budget capped by surviving assignments. IPv6 link-local DNS
+addresses retain the provider interface scope. Provider and wire address order
+are preserved. No protocol budget is replaced with a receipt timeout.
+
+Static `upstreams` may coexist with
 learned servers. Routing remains explicit operator intent, including a routing
 table or `viaInterface` when needed; the resolver installs no hidden routes.
 An incoming-interface condition keeps a LAN forwarding PBR rule from matching
@@ -59,6 +68,10 @@ PAP/CHAP communication is reproduced with `make check-pppoe`; PD with
 peers exercise actual LAN UDP/TCP queries, original expiry with a reachable
 peer, changed negotiated servers and the same dig TCP connection.
 
-Only PPP upstream references are implemented here. DHCPv4/DHCPv6/RA upstream
-references, dynamic bootstrap/listen references, local DNSSEC and all remaining
+`make check-ra-route-refresh` additionally uses independent dnsmasq DHCPv4,
+DHCPv6 information and RA advertisements plus a separate DNS peer. It checks
+LAN UDP/TCP DNS, scoped link-local queries, original RDNSS expiry while the
+peer remains reachable and recovery alongside actual AFTR forwarding.
+
+Dynamic bootstrap/listen references, local DNSSEC and all remaining
 resource fields still require implementation and interoperability qualification.

@@ -12,10 +12,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/imksoo/routerd/pkg/api"
 	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
+	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 	"github.com/imksoo/routerd2/internal/supervisor"
@@ -59,6 +61,11 @@ func TestDaemonDHCP6AddressIndependentServer(t *testing.T) {
 	vrrpVIPResponders(t, provider, "6", []string{"2001:db8:ffff::9"}, "A")
 	capture := healthPBRCapture(t, "wan0")
 	doc := config.Native{Network: network.Desired{Interfaces: []network.Interface{{Name: "wan0"}}, Routes: []network.Route{{Destination: "2001:db8:ffff::9/128", Gateway: "fe80::2", Interface: "wan0"}}}, Services: []serviceconfig.Service{{Name: "wan", DHCP6: &serviceconfig.DHCP6{Interface: "wan0", IAID: 7, RequestAddress: true}}}}
+	resolver := dnsconfig.Runtime{Spec: api.DNSResolverSpec{
+		Listen:  []api.DNSResolverListenSpec{{Name: "local", Addresses: []string{"127.0.0.1"}, Port: 1053}},
+		Sources: []api.DNSResolverSourceSpec{{Name: "wan", Kind: "forward", Match: []string{"."}, QueryTimeout: "1s", UpstreamFrom: []api.StatusValueSourceSpec{{Resource: "DHCPv6Address/wan", Field: "dnsServers"}}}},
+	}}
+	doc.Services = append(doc.Services, serviceconfig.Service{Name: "dns", DNS: &resolver})
 	f := startFixtureDaemon(t, config.FromNative(doc))
 	ctx := context.Background()
 	snapshot := func() (dhcp6config.Snapshot, uint64) {
@@ -117,8 +124,19 @@ func TestDaemonDHCP6AddressIndependentServer(t *testing.T) {
 	if err != nil || !bytes.Contains(answer, []byte("2001:db8:ffff::9")) {
 		t.Fatalf("learned link-local DNS failed on the WAN scope: %s %v", answer, err)
 	}
+	resolverTraffic := func() {
+		t.Helper()
+		for _, transport := range [][]string{nil, {"+tcp"}} {
+			until(t, 5*time.Second, func() bool {
+				args := append([]string{"@127.0.0.1", "-p", "1053", "host.wan.test", "AAAA", "+short", "+time=2", "+tries=1"}, transport...)
+				answer, err := exec.Command("dig", args...).CombinedOutput()
+				return err == nil && bytes.Equal(bytes.TrimSpace(answer), []byte("2001:db8:ffff::9"))
+			})
+		}
+	}
 	address := first.Addresses[0].Address
 	fixtureDHCP6Traffic(t, address)
+	resolverTraffic()
 	initial := module()
 	if initial.PID == 0 || !initial.Ready {
 		t.Fatal("missing DHCPv6 worker", initial)
@@ -139,6 +157,7 @@ func TestDaemonDHCP6AddressIndependentServer(t *testing.T) {
 	}
 	address = current.Addresses[0].Address
 	fixtureDHCP6Traffic(t, address)
+	resolverTraffic()
 	// Wait for an actual Renew/Reply from the independent server, rather than
 	// treating Request after restart as renewal coverage.
 	acquired := current.Addresses[0].ValidUntil
@@ -147,6 +166,7 @@ func TestDaemonDHCP6AddressIndependentServer(t *testing.T) {
 		return len(current.Addresses) > 0 && current.Addresses[0].ValidUntil.Nanos > acquired.Nanos+uint64(10*time.Second)
 	})
 	fixtureDHCP6Traffic(t, address)
+	resolverTraffic()
 	paused := time.Now()
 	if err := unix.Kill(server.Process.Pid, unix.SIGSTOP); err != nil {
 		t.Fatal(err)
@@ -182,6 +202,7 @@ func TestDaemonDHCP6AddressIndependentServer(t *testing.T) {
 		return len(current.Addresses) > 0 && installed(current.Addresses[0].Address)
 	})
 	fixtureDHCP6Traffic(t, current.Addresses[0].Address)
+	resolverTraffic()
 	if final := module(); final.PID != replacement.PID || final.Generation != replacement.Generation {
 		t.Fatal("lease expiry/recovery restarted the client", replacement, final)
 	}

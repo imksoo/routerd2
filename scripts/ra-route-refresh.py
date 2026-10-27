@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Check finite RA route refresh against dnsmasq and a routed Linux AFTR.
+"""Check RA refresh and learned DNS against dnsmasq and a routed Linux AFTR.
 
 Uses the actual supervisor/control/network/RA/AFTR workers, ordinary DAD, a
 separate LAN client, one persistent TCP connection and 30,000 distinct UDP
 exchanges. No lost exchange is retried. This is not a latency benchmark.
-Requires Linux root/sudo, iproute2, dnsmasq, tcpdump, curl and Python 3.
+RA/DHCPv4/DHCPv6 learned DNS uses a separate dnsmasq peer that remains reachable
+during RDNSS expiry. Requires root/sudo, iproute2, dnsmasq, dig, tcpdump, curl
+and Python 3.
 """
 
 import argparse
@@ -35,7 +37,7 @@ def peer(stage):
 
     signal.signal(signal.SIGALRM, expired)
     signal.signal(signal.SIGTERM, terminated)
-    signal.alarm(200)
+    signal.alarm(240)
     run(["mount", "-t", "tmpfs", "-o", "mode=755", "tmpfs", "/run"])
     ns = "r2ragap-" + str(os.getpid())
     peer = ns + "p"
@@ -79,6 +81,9 @@ def peer(stage):
                 "management",
                 "ra_client",
                 "aftr",
+                "dns",
+                "dhcp4",
+                "dhcp6",
             ]
         },
     )
@@ -120,6 +125,46 @@ def peer(stage):
                     "b4_peer": "192.0.0.1/32",
                     "route_gateway": "192.0.0.1",
                     "metric": 20,
+                },
+            },
+        },
+    ]
+    resources += [
+        {
+            "id": "wan4",
+            "service": {
+                "name": "wan4",
+                "dhcp4": {"interface": "wan0", "default_route": False},
+            },
+        },
+        {
+            "id": "info",
+            "service": {"name": "info", "dhcp6": {"interface": "wan0", "iaid": 1}},
+        },
+        {
+            "id": "dns",
+            "service": {
+                "name": "dns",
+                "dns": {
+                    "spec": {
+                        "listen": [
+                            {"name": "lan", "addresses": ["10.42.0.1"], "port": 53}
+                        ],
+                        "sources": [
+                            {
+                                "name": name,
+                                "kind": "forward",
+                                "match": [name + ".example"],
+                                "queryTimeout": "1s",
+                                "upstreamFrom": [{"resource": provider}],
+                            }
+                            for name, provider in [
+                                ("ra", "IPv6RAAddress/wan-ra"),
+                                ("v4", "DHCPv4Client/wan4"),
+                                ("v6", "DHCPv6Information/info"),
+                            ]
+                        ],
+                    }
                 },
             },
         },
@@ -169,6 +214,7 @@ def peer(stage):
             run(["ip", "-n", n, "link", "set", iface, "up"])
         for addr, iface in [
             ("2001:db8:42::1/64", "server0"),
+            ("192.0.2.1/24", "server0"),
             ("2001:db8:99::1/128", "lo"),
             ("198.51.100.20/32", "lo"),
         ]:
@@ -253,6 +299,29 @@ def peer(stage):
                 for a in l["addr_info"]
             )
         )
+        link_local = next(
+            a["local"]
+            for l in json.loads(
+                run(["ip", "-n", peer, "-j", "-6", "addr", "show", "dev", "server0"])
+            )
+            for a in l["addr_info"]
+            if a["scope"] == "link"
+        )
+        start(
+            peer,
+            [
+                "dnsmasq",
+                "--no-daemon",
+                "--conf-file=/dev/null",
+                "--no-resolv",
+                "--no-hosts",
+                "--bind-interfaces",
+                "--interface=server0",
+                "--address=/#/198.51.100.77",
+                "--local-ttl=0",
+            ],
+            "dns",
+        )
         ra_command = [
             "dnsmasq",
             "--no-daemon",
@@ -261,8 +330,11 @@ def peer(stage):
             "--interface=server0",
             "--bind-interfaces",
             "--enable-ra",
-            "--dhcp-range=::,constructor:server0,ra-only,64,2m",
+            "--dhcp-range=::,constructor:server0,ra-stateless,64,2m",
             "--ra-param=server0,20,90",
+            "--dhcp-range=192.0.2.100,192.0.2.110,120s",
+            "--dhcp-option=option:dns-server,192.0.2.1",
+            "--dhcp-option=option6:dns-server,[" + link_local + "]",
             "--pid-file=",
         ]
         ra = start(peer, ra_command, "ra")
@@ -287,6 +359,84 @@ def peer(stage):
                 r.get("dst") == "default"
                 for r in json.loads(run(["ip", "-n", ns, "-j", "-6", "route", "show"]))
             )
+        )
+
+        def dns_input():
+            return json.loads(
+                run(
+                    inside(
+                        ns,
+                        [
+                            "curl",
+                            "--max-time",
+                            "3",
+                            "-sS",
+                            "--unix-socket",
+                            str(stage / "run/control.sock"),
+                            "http://localhost/v1/services/service.dns/dns-input",
+                        ],
+                    )
+                )
+            )
+
+        wait(
+            lambda: {u["source"] for u in dns_input()["upstreams"]}
+            == {"ra", "v4", "v6"}
+        )
+
+        def dns_traffic():
+            # The coordinator publishes input before the DNS worker's next
+            # poll. Wait for the consumer to apply all three endpoint sets.
+            def applied():
+                status = json.loads(
+                    run(
+                        inside(
+                            ns,
+                            [
+                                "curl",
+                                "--max-time",
+                                "3",
+                                "-sS",
+                                "--unix-socket",
+                                str(stage / "run/services/dns.dns.sock"),
+                                "http://localhost/v1/status",
+                            ],
+                        )
+                    )
+                )
+                pools = status["resources"][0]["observed"].get("upstreams", "")
+                return all(name + "=0:udp://" in pools for name in ["ra", "v4", "v6"])
+
+            wait(applied)
+            for source in ["ra", "v4", "v6"]:
+                for transport in [[], ["+tcp"]]:
+                    answer = run(
+                        inside(
+                            client,
+                            [
+                                "dig",
+                                "@10.42.0.1",
+                                "host." + source + ".example",
+                                "A",
+                                "+short",
+                                "+time=2",
+                                "+tries=1",
+                            ]
+                            + transport,
+                        )
+                    ).strip()
+                    assert answer == "198.51.100.77", (source, transport, answer)
+
+        dns_traffic()
+        original_dns = dns_input()
+        assert all(
+            "%wan0" in u["address"]
+            for u in original_dns["upstreams"]
+            if u["source"] in {"ra", "v6"}
+        )
+        print(
+            "PASS actual RA/DHCP4/DHCP6 DNS: scoped link-local upstreams, LAN UDP/TCP answers",
+            flush=True,
         )
         first_route = next(
             r
@@ -343,6 +493,7 @@ def peer(stage):
             "PASS RA refresh advanced the actual kernel route timer and kept AFTR TCP/UDP",
             flush=True,
         )
+        dns_traffic()
         ra.terminate()
         ra.wait(timeout=3)
         status = json.loads(
@@ -359,6 +510,14 @@ def peer(stage):
             )
         )
         assert all(x["generation"] == 1 for x in status["modules"])
+        dns_deadline = (
+            max(
+                u["valid_until"]["nanos"]
+                for u in dns_input()["upstreams"]
+                if u["source"] == "ra"
+            )
+            / 1e9
+        )
         frozen = [daemon.pid] + [
             x["pid"] for x in status["modules"] if x["name"] in ["control", "network"]
         ]
@@ -371,6 +530,43 @@ def peer(stage):
             ).returncode
             != 0,
             100,
+        )
+        # The DNS peer remains reachable on the connected WAN. The original
+        # RDNSS deadline, not a receipt timeout or the route loss, must stop use.
+        assert (
+            run(
+                inside(
+                    ns,
+                    [
+                        "dig",
+                        "-6",
+                        "@" + link_local + "%wan0",
+                        "peer.ra.example",
+                        "A",
+                        "+short",
+                        "+tries=1",
+                        "+time=2",
+                    ],
+                )
+            ).strip()
+            == "198.51.100.77"
+        )
+        # dnsmasq advertises RDNSS for 120s while its router lifetime is 90s.
+        # Use the received DNS budget independently of the expired route.
+        wait(
+            lambda: time.clock_gettime(time.CLOCK_BOOTTIME) > dns_deadline + 1,
+            max(2, dns_deadline - time.clock_gettime(time.CLOCK_BOOTTIME) + 2),
+        )
+        response = run(
+            inside(
+                client,
+                ["dig", "@10.42.0.1", "expired.ra.example", "A", "+tries=1", "+time=2"],
+            )
+        )
+        assert "status: SERVFAIL" in response
+        print(
+            "PASS original RDNSS expiry stopped resolver forwarding while independent DNS stayed reachable",
+            flush=True,
         )
         failed = subprocess.run(
             inside(
@@ -426,6 +622,11 @@ def peer(stage):
             )
             == "200"
         )
+        wait(
+            lambda: {u["source"] for u in dns_input()["upstreams"]}
+            == {"ra", "v4", "v6"}
+        )
+        dns_traffic()
         print(
             "PASS fresh independent RA restored routed AFTR TCP after expiry and process recovery",
             flush=True,
@@ -512,7 +713,7 @@ def main():
                 ],
                 stdout=output,
                 stderr=subprocess.STDOUT,
-                timeout=240,
+                timeout=280,
             )
         for name in ("traffic.pcap", "routes.log"):
             artifact = subprocess.run(

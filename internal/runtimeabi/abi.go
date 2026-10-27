@@ -24,7 +24,7 @@ const MaxStateSchemas = 32
 // publisher metadata. A breaking reader/writer or input-semantics change must
 // change this declaration and its qualification. Configuration's implicit
 // journal contract includes identity/adoption fences; it is not a file header.
-const CurrentRecord = Prefix + `{"version":1,"profile":"routerd-native-v1","boot_abi":1,"worker_abi":4,"configuration_contract":"resource-program-native-26","configuration":{"read_min":2,"read_max":2,"write":2},"state":[{"name":"configuration","format":{"read_min":1,"read_max":1,"write":1}},{"name":"events","format":{"read_min":6,"read_max":6,"write":6}},{"name":"network","format":{"read_min":9,"read_max":9,"write":9}},{"name":"release","format":{"read_min":1,"read_max":1,"write":1}},{"name":"snapshot","format":{"read_min":1,"read_max":1,"write":1}},{"name":"ssh_identity","format":{"read_min":1,"read_max":1,"write":1}}]}` + Suffix
+const CurrentRecord = Prefix + `{"version":1,"profile":"routerd-native-v1","boot_abi":1,"worker_abi":4,"configuration_contract":"resource-program-native-27","configuration":{"read_min":2,"read_max":2,"write":2},"state":[{"name":"configuration","format":{"read_min":1,"read_max":1,"write":1}},{"name":"events","format":{"read_min":6,"read_max":6,"write":6}},{"name":"network","format":{"read_min":9,"read_max":9,"write":9}},{"name":"release","format":{"read_min":1,"read_max":1,"write":1}},{"name":"snapshot","format":{"read_min":1,"read_max":1,"write":1}},{"name":"ssh_identity","format":{"read_min":1,"read_max":1,"write":1}}]}` + Suffix
 
 type Format struct {
 	ReadMin uint32 `json:"read_min"`

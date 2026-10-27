@@ -62,3 +62,20 @@ resources:
         route_gateway: 192.0.0.1
         default_route: true
         metric: 200
+  - id: service/dns
+    depends_on: [interface/lan0, address/lan-v4]
+    service:
+      name: dns
+      dns:
+        spec:
+          listen:
+            - name: lan
+              addresses: [192.168.50.1]
+              port: 53
+          sources:
+            - name: provider
+              kind: forward
+              match: ["."]
+              upstreamFrom:
+                - {resource: DHCPv6PrefixDelegation/wan-pd, field: dnsServers}
+                - {resource: IPv6RAAddress/wan-ra, field: dnsServers}

@@ -123,6 +123,6 @@ func sameInputContent(a, b dnsconfig.Input) bool {
 	return slices.EqualFunc(a.Sets, b.Sets, func(a, b dnsconfig.LeaseSet) bool {
 		return a.Zone == b.Zone && a.Source == b.Source && slices.Equal(a.Records, b.Records)
 	}) && slices.EqualFunc(a.Upstreams, b.Upstreams, func(a, b dnsconfig.LearnedUpstream) bool {
-		return a.Source == b.Source && a.Provider == b.Provider && slices.Equal(a.Servers, b.Servers)
+		return a.Source == b.Source && a.Provider == b.Provider && a.Address == b.Address
 	})
 }

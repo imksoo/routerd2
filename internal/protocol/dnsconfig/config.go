@@ -167,7 +167,7 @@ func ValidateRuntime(c dnsresolver.RuntimeConfig) error {
 		}
 		sources[source.Name] = true
 		for _, ref := range source.UpstreamFrom {
-			if _, err := UpstreamProvider(ref); err != nil {
+			if _, _, err := UpstreamProvider(ref); err != nil {
 				return err
 			}
 		}

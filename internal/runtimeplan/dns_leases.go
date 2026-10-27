@@ -3,11 +3,16 @@ package runtimeplan
 import (
 	"encoding/json"
 	"errors"
+	"net/netip"
 
 	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/lifetime"
+	"github.com/imksoo/routerd2/internal/protocol/dhcp4"
+	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
 	"github.com/imksoo/routerd2/internal/protocol/pppoeconfig"
+	"github.com/imksoo/routerd2/internal/protocol/raclient"
 )
 
 // DNSInput returns only the sources authorized by this committed DNS instance.
@@ -53,20 +58,74 @@ func (r *Runtime) DNSInput(moduleName string) (dnsconfig.Input, error) {
 
 	for _, source := range cfg.Runtime.Spec.Sources {
 		for _, ref := range source.UpstreamFrom {
-			name, err := dnsconfig.UpstreamProvider(ref)
+			name, role, err := dnsconfig.UpstreamProvider(ref)
 			if err != nil {
 				return out, err
 			}
 			update, found := r.records["service."+name]
-			if !found || update.Role != "pppoe" {
+			if !found || update.Role != role {
 				continue
 			}
-			var observed pppoeconfig.Snapshot
-			if err := json.Unmarshal(update.Snapshot, &observed); err != nil {
-				return out, err
+			add := func(address, iface string, until lifetime.Deadline) {
+				if !until.Live(clock) {
+					return
+				}
+				ip, err := netip.ParseAddr(address)
+				if err != nil || ip.Is4In6() || ip.IsUnspecified() || ip.IsMulticast() {
+					return
+				}
+				if ip.Is6() && ip.IsLinkLocalUnicast() {
+					ip = ip.WithZone(iface)
+				}
+				for _, old := range out.Upstreams {
+					if old.Source == source.Name && old.Provider == name && old.Address == ip {
+						return
+					}
+				}
+				out.Upstreams = append(out.Upstreams, dnsconfig.LearnedUpstream{Source: source.Name, Provider: name, Address: ip, ValidUntil: until})
 			}
-			if observed.Active && observed.ValidUntil.Live(clock) {
-				out.Upstreams = append(out.Upstreams, dnsconfig.LearnedUpstream{Source: source.Name, Provider: name, Servers: observed.DNSServers, ValidUntil: observed.ValidUntil})
+			switch role {
+			case "pppoe":
+				var observed pppoeconfig.Snapshot
+				if err := json.Unmarshal(update.Snapshot, &observed); err != nil {
+					return out, err
+				}
+				if observed.Active {
+					for _, server := range observed.DNSServers {
+						add(server, "", observed.ValidUntil)
+					}
+				}
+			case "dhcp4":
+				var observed dhcp4.Snapshot
+				if err := json.Unmarshal(update.Snapshot, &observed); err != nil {
+					return out, err
+				}
+				if dhcp4.CurrentLease(observed, clock) {
+					until := lifetime.Deadline{BootID: observed.LeaseClock.BootID, Nanos: observed.LeaseClock.ExpiresNanos}
+					for _, server := range observed.DNSServers {
+						add(server, observed.Interface, until)
+					}
+				}
+			case "dhcp6":
+				var observed dhcp6config.Snapshot
+				if err := json.Unmarshal(update.Snapshot, &observed); err != nil {
+					return out, err
+				}
+				if until, current := observed.InformationUntil(clock); current {
+					for _, server := range observed.DNSServers {
+						add(server, observed.Interface, until)
+					}
+				}
+			case "ra_client":
+				var observed raclient.Snapshot
+				if err := json.Unmarshal(update.Snapshot, &observed); err != nil {
+					return out, err
+				}
+				if observed.Active && observed.BootID == clock.BootID {
+					for _, server := range observed.DNSServers {
+						add(server.Address, observed.Interface, server.ValidUntil)
+					}
+				}
 			}
 		}
 	}

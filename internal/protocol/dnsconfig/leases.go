@@ -20,7 +20,7 @@ import (
 
 const MaxLeaseRecords = 4096
 
-// Input is a complete, source-scoped view of active DHCP bindings.
+// Input is a complete, source-scoped view of DHCP bindings and learned DNS.
 // It is delivered separately from immutable DNS configuration, so renewing a
 // lease does not replace the listener or upstream pools. ConfigDigest fences an
 // old worker from consuming a different committed DNS instance's projection.
@@ -34,7 +34,7 @@ type Input struct {
 type LearnedUpstream struct {
 	Source     string            `json:"source"`
 	Provider   string            `json:"provider"`
-	Servers    []string          `json:"servers"`
+	Address    netip.Addr        `json:"address"`
 	ValidUntil lifetime.Deadline `json:"valid_until"`
 }
 
@@ -92,15 +92,6 @@ func ValidLeaseHostname(name string) bool {
 func NormalizeInput(p Input) Input {
 	out := p
 	out.Upstreams = slices.Clone(p.Upstreams)
-	for i := range out.Upstreams {
-		out.Upstreams[i].Servers = slices.Clone(p.Upstreams[i].Servers)
-	}
-	sort.Slice(out.Upstreams, func(i, j int) bool {
-		if out.Upstreams[i].Source != out.Upstreams[j].Source {
-			return out.Upstreams[i].Source < out.Upstreams[j].Source
-		}
-		return out.Upstreams[i].Provider < out.Upstreams[j].Provider
-	})
 	out.Sets = slices.Clone(p.Sets)
 	for i := range out.Sets {
 		s := &out.Sets[i]

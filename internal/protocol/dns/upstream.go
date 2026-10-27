@@ -192,16 +192,15 @@ func (p *upstreamPool) setLearned(sets []dnsconfig.LearnedUpstream) {
 		}
 	}
 	for _, set := range sets {
-		for _, server := range set.Servers {
-			raw := "udp://" + net.JoinHostPort(server, "53")
-			upstream := previous[set.Provider+"/"+raw]
-			if upstream == nil {
-				upstream = &dnsUpstream{URL: raw, Scheme: "udp", Address: net.JoinHostPort(server, "53"), Provider: set.Provider, Phase: upstreamProbing}
-			}
-			upstream.Index = len(next)
-			upstream.ValidUntil = set.ValidUntil
-			next = append(next, upstream)
+		address := net.JoinHostPort(set.Address.String(), "53")
+		raw := "udp://" + address
+		upstream := previous[set.Provider+"/"+raw]
+		if upstream == nil {
+			upstream = &dnsUpstream{URL: raw, Scheme: "udp", Address: address, Provider: set.Provider, Phase: upstreamProbing}
 		}
+		upstream.Index = len(next)
+		upstream.ValidUntil = set.ValidUntil
+		next = append(next, upstream)
 	}
 	p.upstreams = next
 }

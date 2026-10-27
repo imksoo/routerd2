@@ -21,19 +21,19 @@ func validateDNSSources(services []Service) error {
 
 		for _, source := range s.DNS.Spec.Sources {
 			for _, ref := range source.UpstreamFrom {
-				name, err := dnsconfig.UpstreamProvider(ref)
+				name, role, err := dnsconfig.UpstreamProvider(ref)
 				if err != nil {
 					return err
 				}
 				found := false
 				for _, provider := range services {
-					if provider.Name == name && provider.PPPoE != nil {
+					if provider.Name == name && provider.Role() == role {
 						found = true
 						break
 					}
 				}
 				if !found {
-					return fmt.Errorf("DNS service %s requires configured PPP provider %s", s.Name, name)
+					return fmt.Errorf("DNS service %s requires configured DNS provider %s", s.Name, name)
 				}
 			}
 		}

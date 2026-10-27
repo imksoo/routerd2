@@ -25,10 +25,6 @@ func normalizedRuntime(c dnsresolver.RuntimeConfig, statePath string) dnsresolve
 	return dnsconfig.NormalizeRuntime(c, statePath)
 }
 func validateRuntime(c dnsresolver.RuntimeConfig) error { return dnsconfig.ValidateRuntime(c) }
-func validateRuntimePaths(c dnsresolver.RuntimeConfig, opts options) error {
-	return dnsconfig.ValidateRuntimePaths(c, Config{SocketPath: opts.socketPath, StatePath: opts.stateFile, EventPath: opts.eventFile})
-}
-func validHostname(name string) bool { return dnsconfig.ValidHostname(name) }
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if strings.TrimSpace(value) != "" {
@@ -38,7 +34,7 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-// Run consumes complete native DHCP projections independently
+// Run consumes complete learned DNS and DHCP lease inputs independently
 // of DNS listeners and upstream pools. Closing the channel retains only the
 // already received finite deadlines; it never makes a lease permanent.
 func Run(ctx context.Context, cfg Config, updates <-chan dnsconfig.Input, ready func()) error {
@@ -71,7 +67,7 @@ func Run(ctx context.Context, cfg Config, updates <-chan dnsconfig.Input, ready 
 		select {
 		case initial, ok := <-updates:
 			if !ok {
-				return errors.New("DNS native lease input closed before initial projection")
+				return errors.New("DNS input closed before its initial snapshot")
 			}
 			if err := d.applyInput(initial); err != nil {
 				return err
@@ -93,7 +89,7 @@ func Run(ctx context.Context, cfg Config, updates <-chan dnsconfig.Input, ready 
 					}
 					if err := d.applyInput(projection); err != nil {
 						d.inputRejected.Add(1)
-						slog.Warn("DNS lease projection rejected", "resource", cfg.Runtime.Resource, "error", err)
+						slog.Warn("DNS input rejected", "resource", cfg.Runtime.Resource, "error", err)
 					}
 				}
 			}
