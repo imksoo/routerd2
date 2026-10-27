@@ -68,6 +68,14 @@ protocol投影は変更するnetwork集合を複製し、固定設定を読み�
 `restart control`はsupervisorが所有する。旧controlとnetworkを維持してDHCPv6を先に終了し、
 他の動的workerを終了・reapしてからcontrolを交代する。network/management/loggingは保持する。
 この間は新しい動的workerを起動せず、旧producerを退役してから新controlへ設定を渡す。
+IPv4 VRRPの`conntrack_sync`は、そのworkerが固定conntrackdの寿命を持つ。
+peerのcacheをkernelへcommitし、rescan/broadcastを要求してから、WAN identity準備とVIP公開へ進む。
+降格は既存writerの撤去ACK後にpurge/resyncを要求する。engineの異常終了もVRRP撤去とworker交換へ結び、
+別のcoordinatorやregistryを置かない。conntrack/expectationだけをこのengineへ委譲し、
+address・route・firewallはnetwork writerが持つ。`conntrack_tcp_liberal`もwriterが元値を記録して管理する。
+現在のcompilerはnative-29、network journalは10。旧開発形式へのreaderやmigrationは作らない。
+署名付きruntimeがengineと対応sourceを結び、ELF閉包を検査した固定FD5を使う。
+詳しくは[接続状態の引継ぎ](../internal/protocol/conntracksync/README.md)を参照する。
 supervisorの`lifecycle`は`running`/`restarting_control`/`stopping`の一つである。
 内部契約はworker ABI5へ更新し、旧`stopping` booleanのreaderや互換経路は置かない。
 `poweroff`と`reboot`はappliance PID1のsupervisorが受け、受付応答をflushしてから

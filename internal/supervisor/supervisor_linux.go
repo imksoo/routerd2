@@ -26,7 +26,7 @@ import (
 	"unsafe"
 
 	"github.com/imksoo/routerd2/internal/configref"
-	"github.com/imksoo/routerd2/internal/pppimage"
+	"github.com/imksoo/routerd2/internal/engineimage"
 	"github.com/imksoo/routerd2/internal/release"
 	"github.com/imksoo/routerd2/internal/worker"
 	"golang.org/x/sys/unix"
@@ -107,15 +107,15 @@ func Run(parent context.Context, options Options) (PowerAction, error) {
 	}
 	engines := map[string]*os.File{}
 	for role, path := range o.Engines {
-		if role != "pppoe" || images[role] == nil {
-			return PowerOff, errors.New("engine archive requires the PPPoE role")
+		if role != "pppoe" && role != "vrrp" || images[role] == nil {
+			return PowerOff, errors.New("engine archive requires its PPPoE or VRRP role")
 		}
 		f, err := os.Open(path)
 		if err != nil {
 			return PowerOff, err
 		}
 		opened["engine:"+role] = f
-		if err := pppimage.Validate(f, runtime.GOARCH); err != nil {
+		if err := engineimage.Validate(f, runtime.GOARCH, role); err != nil {
 			return PowerOff, fmt.Errorf("%s engine: %w", role, err)
 		}
 		engines[role] = f
@@ -483,7 +483,7 @@ func normalize(o Options) (Options, error) {
 	o.Executables = paths
 	engines := map[string]string{}
 	for role, path := range o.Engines {
-		if role != "pppoe" || paths[role] == "" || !filepath.IsAbs(path) || filepath.Clean(path) != path {
+		if role != "pppoe" && role != "vrrp" || paths[role] == "" || !filepath.IsAbs(path) || filepath.Clean(path) != path {
 			return o, errors.New("invalid engine role binding")
 		}
 		engines[role] = path

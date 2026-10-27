@@ -317,6 +317,12 @@ func Validate(services []Service) error {
 				return err
 			}
 		case "vrrp":
+			if s.VRRP.ConntrackSync != nil {
+				if previous := sockets["conntrack_sync"]; previous != "" {
+					return fmt.Errorf("services %s and %s compete for conntrack replication", previous, s.Name)
+				}
+				sockets["conntrack_sync"] = s.Name
+			}
 			c := s.VRRPConfig()
 			if s.VRRP.Resource != "" && s.VRRP.Resource != s.Name {
 				return errors.New("VRRP resource is managed by the service name")

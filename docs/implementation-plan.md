@@ -1158,6 +1158,19 @@ RFC 5798方式を明示できる。標準peerと現行方式peerのVIP TCP/UDP�
 - 旧event-streamとconntrackd modeの能力差を保持し、tuple登録だけをfull state同期と呼ばない。
 - lease同期とは別の状態機械・欠落検出・再同期・観測を持ち、同じ認証と世代fencing契約を再利用する。
 
+部分実装: `ha-conntrack` / native-29 / network journal10。
+現行homertのconntrackd FTFWをVRRP workerへ接続し、既存の昇格/撤去ACKの順序でpeer stateを適用する。
+署名付きengine/source、固定FD5とprivate chrootを使い、別のcoordinatorやregistryを追加しない。
+元のCLI exit0に依存せず、実kernel commit完了時の失敗件数を返すGPL patchを同梱する。
+network writerは`conntrack_tcp_liberal`の適用と元値復元を持つ。
+二つの署名済み実PID1 tree・独立Linux端末/serverで連続TCP/UDP NATを通し、同じTCP socketとUDP tupleが
+A→B→A・worker/engine再起動・engine SIGKILL後も継続した。captureはclient SYN一つと実FTFWを確認した。
+最終UDP損失は0、先行実行では1 datagramを失った。同期なし比較は最初の切替で元TCPがtimeoutした。
+機能削除でworker終了と元sysctl0への復元も通った。型付きcommit結果の局所検査はあるが、kernel table枯渇は未試験。
+factory同梱・legacy import・認証/分断/gap/古いpeer・大量状態・VRF/zone・ARM64 engine/実機受入は残る。
+HA-02/EXT-02も未完了であり、今回の接続継続だけでhomert置換可能やHA-03完了とは判断しない。
+再実行は`make check-ha-conntrack DOCKER='sudo -n docker'`。完了したcapture/logは削除する。
+
 **受入条件**
 
 - 既にESTABLISHEDのTCPで連続データを流し、VRRP切替後も接続を維持する。UDP NAT mappingも確認する。

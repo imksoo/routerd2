@@ -12,8 +12,11 @@ import (
 func inferredDependencies(resources []Resource) map[string][]string {
 	interfaces, links := map[string]string{}, map[string]string{}
 	addresses := map[string][]string{}
+	var conntrackSetting string
 	for _, r := range resources {
 		switch {
+		case r.Forwarding != nil && r.Forwarding.ConntrackTCPLiberal != nil:
+			conntrackSetting = r.ID
 		case r.Interface != nil:
 			interfaces[r.Interface.Name] = r.ID
 		case r.Link != nil:
@@ -73,6 +76,14 @@ func inferredDependencies(resources []Resource) map[string][]string {
 			}
 		case r.Service != nil:
 			iface(r.Service.Interface())
+			if r.Service.VRRP != nil && r.Service.VRRP.ConntrackSync != nil {
+				sync := r.Service.VRRP.ConntrackSync
+				add(conntrackSetting)
+				iface(sync.Interface)
+				for _, id := range addresses[sync.Interface+"\x00"+sync.LocalAddress.String()] {
+					add(id)
+				}
+			}
 			if relay := r.Service.DHCPRelay; relay != nil {
 				iface(relay.VRF)
 				for _, client := range relay.Interfaces {

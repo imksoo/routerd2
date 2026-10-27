@@ -33,7 +33,7 @@ func TestDeclarationTracksImplementedFormatVersions(t *testing.T) {
 
 func TestConditionalNetworkLifetimesRequireAnExplicitCompilerContract(t *testing.T) {
 	current := runtimeabi.Current()
-	if current.ConfigurationContract != "resource-program-native-28" {
+	if current.ConfigurationContract != "resource-program-native-29" {
 		t.Fatal("Conditional network lifetime semantics require their signed compiler contract")
 	}
 	facts := runtimeabi.Facts{Configuration: current.Configuration.Write, ConfigurationContract: current.ConfigurationContract}
@@ -44,7 +44,7 @@ func TestConditionalNetworkLifetimesRequireAnExplicitCompilerContract(t *testing
 		t.Fatal(err)
 	}
 	previous := current
-	previous.ConfigurationContract = "resource-program-native-7"
+	previous.ConfigurationContract = "resource-program-native-28"
 	facts.ConfigurationContract = previous.ConfigurationContract
 	if err := runtimeabi.CheckTransition(previous, current, facts); err == nil {
 		t.Fatal("unqualified prototype compiler transition accepted")

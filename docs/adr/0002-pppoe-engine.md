@@ -23,7 +23,7 @@ Manifest v4 binds the PPP role to both image and source artifacts. Publisher,
 receiver and supervisor check the image's actual ELF architecture and dependency
 closure. Missing legacy.so is rejected before publication or installation,
 including a correctly signed bundle reproducing that omission. Native commands
-remain static Go ELF. Boot ABI is 1, worker ABI is 5 and compiler contract is native-28.
+remain static Go ELF. Boot ABI is 1, worker ABI is 5 and compiler contract is native-29.
 Discarded manifest/worker formats have no compatibility readers.
 
 The supervisor pins engine and executable descriptors for the cohort. FD 5

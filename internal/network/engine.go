@@ -17,7 +17,7 @@ import (
 var errLinkNotFound = errors.New("link not found")
 
 // JournalVersion is the persisted network ownership/BOOTTIME contract.
-const JournalVersion = 9
+const JournalVersion = 10
 
 type settingKey struct {
 	Kind      string `json:"kind"`
@@ -521,6 +521,9 @@ func (p *apply) reconcile(d Desired) error {
 			wantedSettings[settingKey{Kind: "autoconf", Interface: l.Name}] = boolInt(*l.IPv6Autoconf)
 		}
 	}
+	if d.Forwarding.ConntrackTCPLiberal != nil {
+		wantedSettings[settingKey{Kind: "conntrack_tcp_liberal"}] = boolInt(*d.Forwarding.ConntrackTCPLiberal)
+	}
 	if d.Forwarding.IPv4 != nil {
 		wantedSettings[settingKey{Kind: "forwarding4"}] = boolInt(*d.Forwarding.IPv4)
 	}
@@ -623,7 +626,7 @@ func (p *apply) reconcile(d Desired) error {
 		}
 	}
 	// Apply after ip_forward, before protocol workers can create their units.
-	for _, kind := range []string{"rp_filter_all", "rp_filter_default"} {
+	for _, kind := range []string{"rp_filter_all", "rp_filter_default", "conntrack_tcp_liberal"} {
 		key := settingKey{Kind: kind}
 		if v, ok := wantedSettings[key]; ok {
 			if err := p.set(key, v); err != nil {

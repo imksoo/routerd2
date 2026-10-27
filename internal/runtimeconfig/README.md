@@ -95,7 +95,7 @@ A `startup` object together with `release` is rejected until selection and
 fallback for the runtime/configuration pair are implemented atomically. See
 [the startup contract](../../docs/startup-config.md).
 
-## PPP engine binding
+## Engine binding
 
 A factory catalog declaring `pppoe` must also declare
 `"engines":{"pppoe":"/usr/lib/routerd/pppoe-engine.tar"}`.
@@ -103,5 +103,10 @@ A factory catalog declaring `pppoe` must also declare
 archive. The bare host default catalog does not advertise PPPoE.
 Signed release selection replaces both worker and engine bindings from the
 verified manifest and passes their pinned descriptors to workers. The worker
-ABI is 4: FD 3 carries lifecycle IPC, FD 4 the native image and FD 5 the PPP
-engine image for that role. A restart keeps the same engine inode.
+ABI is 5: FD 3 carries lifecycle IPC, FD 4 the native image and FD 5 that
+role's engine image. A restart keeps the same engine inode.
+
+A VRRP service using `conntrack_sync` binds its own `vrrp` engine archive.
+`make conntrack-engine` supplies the runtime and corresponding sources.
+Plain VRRP does not start this engine. See the
+[handoff contract](../protocol/conntracksync/README.md).

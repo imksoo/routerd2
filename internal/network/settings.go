@@ -23,7 +23,7 @@ func validateSettingRecord(s ownedSetting) error {
 		if s.Key.Interface != "" || s.Index != 0 {
 			return fmt.Errorf("invalid saved global RPF setting identity")
 		}
-	case "forwarding4", "forwarding6":
+	case "forwarding4", "forwarding6", "conntrack_tcp_liberal":
 		if s.Key.Interface != "" || s.Index != 0 {
 			return fmt.Errorf("invalid saved global setting identity")
 		}
@@ -34,7 +34,7 @@ func validateSettingRecord(s ownedSetting) error {
 		if !validName(s.Key.Interface) || s.Index < 0 || raSetting(s.Key) && s.Index == 0 {
 			return fmt.Errorf("invalid saved interface setting identity")
 		}
-	} else if s.Key.Kind != "forwarding4" && s.Key.Kind != "forwarding6" && s.Key.Kind != "rp_filter_all" && s.Key.Kind != "rp_filter_default" {
+	} else if s.Key.Kind != "forwarding4" && s.Key.Kind != "forwarding6" && s.Key.Kind != "rp_filter_all" && s.Key.Kind != "rp_filter_default" && s.Key.Kind != "conntrack_tcp_liberal" {
 		return fmt.Errorf("missing saved setting interface")
 	}
 	values := []int{s.Before, s.Last}

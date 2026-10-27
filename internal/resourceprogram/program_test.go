@@ -71,7 +71,7 @@ func TestRejectInvalidProgramBeforeReturningProjection(t *testing.T) {
 		{"owner cycle", Program{SchemaVersion: 2, Resources: []Resource{{ID: "a", Owner: "b", Interface: base.Interface}, {ID: "b", Owner: "a", Interface: &network.Interface{Name: "wan0"}}}}, "cycle"},
 		{"mixed cycle", Program{SchemaVersion: 2, Resources: []Resource{{ID: "a", Owner: "b", Interface: base.Interface}, {ID: "b", DependsOn: []string{"a"}, Interface: &network.Interface{Name: "wan0"}}}}, "cycle"},
 		{"embedded address", Program{SchemaVersion: 2, Resources: []Resource{{ID: "lan", Interface: &network.Interface{Name: "lan0", Addresses: []string{"192.0.2.1/24"}}}}}, "separate address resources"},
-		{"empty forwarding", Program{SchemaVersion: 2, Resources: []Resource{{ID: "forwarding", Forwarding: &network.Forwarding{}}}}, "requires ipv4 or ipv6"},
+		{"empty forwarding", Program{SchemaVersion: 2, Resources: []Resource{{ID: "forwarding", Forwarding: &network.Forwarding{}}}}, "requires at least one setting"},
 		{"invalid provenance", Program{SchemaVersion: 2, Resources: []Resource{{ID: "lan", Provenance: &Provenance{Path: "a\nb"}, Interface: base.Interface}}}, "provenance"},
 	}
 	for _, tc := range cases {

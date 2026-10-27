@@ -97,8 +97,10 @@ type NextHop struct {
 // previously changed by this engine becomes nil, its recorded original value is
 // restored, unless another actor changed the live value in the meantime.
 type Forwarding struct {
-	IPv4 *bool `json:"ipv4,omitempty"`
-	IPv6 *bool `json:"ipv6,omitempty"`
+	// ConntrackTCPLiberal permits in-flight TCP segments during stateful handoff.
+	ConntrackTCPLiberal *bool `json:"conntrack_tcp_liberal,omitempty"`
+	IPv4                *bool `json:"ipv4,omitempty"`
+	IPv6                *bool `json:"ipv6,omitempty"`
 	// IPv4RPFilter sets Linux conf/all and conf/default rp_filter. Zero disables
 	// reverse-path filtering for policy-routed/asymmetric router paths. Existing
 	// interfaces keep their individual setting; new PPP units inherit default.

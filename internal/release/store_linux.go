@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/imksoo/routerd2/internal/pppimage"
+	"github.com/imksoo/routerd2/internal/engineimage"
 	"golang.org/x/sys/unix"
 )
 
@@ -435,7 +435,7 @@ func (s *Store) stageArtifact(ctx context.Context, dir *os.File, a Artifact, b b
 	}
 	for _, engine := range m.Engines {
 		if engine.Artifact == a.Name {
-			if err := pppimage.Validate(f, m.GOARCH); err != nil {
+			if err := engineimage.Validate(f, m.GOARCH, engine.Role); err != nil {
 				return fmt.Errorf("%s engine: %w", engine.Role, err)
 			}
 		}
@@ -512,7 +512,7 @@ func (s *Store) openImage(ctx context.Context, ref Ref) (*Image, error) {
 		}
 	}
 	for _, engine := range m.Engines {
-		if err := pppimage.Validate(image.Artifacts[engine.Artifact], m.GOARCH); err != nil {
+		if err := engineimage.Validate(image.Artifacts[engine.Artifact], m.GOARCH, engine.Role); err != nil {
 			return fail(fmt.Errorf("%s engine: %w", engine.Role, err))
 		}
 	}

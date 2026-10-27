@@ -15,6 +15,8 @@ RELEASE_BUILT_DIR ?= dist/bin
 DHCP6_SERVER ?= /usr/sbin/dhcpd
 PPP_ARCH ?= $(shell $(GO) env GOARCH)
 PPP_DIR ?= dist
+CONNTRACK_ARCH ?= $(shell $(GO) env GOARCH)
+CONNTRACK_DIR ?= dist
 UPLINK_INTERFACE ?=
 UPLINK_AFTR ?=
 UPLINK_SECONDS ?= 7800
@@ -32,6 +34,7 @@ help:
 	  'make check-dual-wan    Verify PPPoE/DS-Lite Health/PBR and TCP MSS with independent peers' \
 	  'make check-pppoe        Verify real PPPoE PAP/CHAP, LAN forwarding and recovery' \
 	  'make check-pppoe-pd     Verify PPP PD release, WAN replacement and LAN IPv6 with independent ISC DHCP' \
+	  'make check-ha-conntrack Preserve actual TCP/UDP state across two native routers' \
 	  'make check-health-pbr  Required two-WAN real-daemon TCP/UDP failover gate' \
 	  'make check-vrrp-unicast Verify VRRP peer failover and finite WAN identity' \
 	  'make check-bfd         Verify BFD/BGP routing domains with real workers' \
@@ -275,3 +278,15 @@ qemu-health-power:
 
 clean:
 	rm -rf dist
+
+.PHONY: conntrack-engine
+conntrack-engine:
+	$(DOCKER) build --platform linux/$(CONNTRACK_ARCH) --build-arg ALPINE_VERSION=$(ALPINE_VERSION) -f packaging/alpine/conntrack-engine.Dockerfile -t routerd2-conntrack-engine:$(ALPINE_VERSION)-$(CONNTRACK_ARCH) .
+	mkdir -p $(CONNTRACK_DIR)
+	@set -eu; profile_id=$$($(DOCKER) create --network none routerd2-conntrack-engine:$(ALPINE_VERSION)-$(CONNTRACK_ARCH) /not-executed); \
+	  trap '$(DOCKER) rm "$$profile_id" >/dev/null' EXIT HUP INT TERM; \
+	  $(DOCKER) export "$$profile_id" | tar --no-same-owner -xf - -C $(CONNTRACK_DIR) conntrack-engine.tar conntrack-sources.tar
+
+.PHONY: check-ha-conntrack
+check-ha-conntrack: build build-publisher conntrack-engine
+	$(PYTHON) scripts/ha-conntrack-peer.py

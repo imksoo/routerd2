@@ -128,8 +128,8 @@ func (b Boot) Validate() error {
 		}
 	}
 	for role, path := range b.Engines {
-		if role != "pppoe" || b.Workers[role] == "" || !filepath.IsAbs(path) || filepath.Clean(path) != path {
-			return errors.New("engine requires a declared PPPoE role and clean absolute archive path")
+		if role != "pppoe" && role != "vrrp" || b.Workers[role] == "" || !filepath.IsAbs(path) || filepath.Clean(path) != path {
+			return errors.New("engine requires a declared PPPoE or VRRP role and clean absolute archive path")
 		}
 	}
 	if b.Release == nil && b.Workers["pppoe"] != "" && b.Engines["pppoe"] == "" {

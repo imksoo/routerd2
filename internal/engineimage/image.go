@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
-// Package pppimage describes the fixed pppd root filesystem shipped with PPPoE.
+// Package engineimage validates and extracts bundled protocol-engine filesystems.
 // It contains no protocol engine or process orchestration.
-package pppimage
+package engineimage
 
 import (
 	"archive/tar"
@@ -16,10 +16,23 @@ import (
 	"strings"
 )
 
-const Command = "usr/sbin/pppd"
+const PPPCommand = "usr/sbin/pppd"
 const Plugin = "usr/lib/pppd/2.5.3/pppoe.so"
-const LegacyProvider = "usr/lib/ossl-modules/legacy.so"
-const MaxBytes = 64 << 20
+const legacyProvider = "usr/lib/ossl-modules/legacy.so"
+
+// commandPath identifies the executable required by each supported engine role.
+func commandPath(role string) string {
+	switch role {
+	case "pppoe":
+		return PPPCommand
+	case "vrrp":
+		return "usr/sbin/conntrackd"
+	default:
+		return ""
+	}
+}
+
+const maxBytes = 64 << 20
 
 type entry struct {
 	name string
@@ -32,8 +45,8 @@ func read(file *os.File) ([]entry, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !stat.Mode().IsRegular() || stat.Size() < 1024 || stat.Size() > MaxBytes {
-		return nil, errors.New("PPP image must be a bounded regular tar archive")
+	if !stat.Mode().IsRegular() || stat.Size() < 1024 || stat.Size() > maxBytes {
+		return nil, errors.New("engine image must be a bounded regular tar archive")
 	}
 	r := tar.NewReader(io.NewSectionReader(file, 0, stat.Size()))
 	var entries []entry
@@ -48,8 +61,8 @@ func read(file *os.File) ([]entry, error) {
 			return nil, err
 		}
 		name := h.Name
-		if h.Typeflag != tar.TypeReg || name == "" || name == "." || path.IsAbs(name) || path.Clean(name) != name || name == ".." || strings.HasPrefix(name, "../") || seen[name] || len(entries) >= 128 || h.Size < 0 || h.Size > 16<<20 || h.Size > MaxBytes-total {
-			return nil, errors.New("invalid PPP image file, path, duplicate or size")
+		if h.Typeflag != tar.TypeReg || name == "" || name == "." || path.IsAbs(name) || path.Clean(name) != name || name == ".." || strings.HasPrefix(name, "../") || seen[name] || len(entries) >= 128 || h.Size < 0 || h.Size > 16<<20 || h.Size > maxBytes-total {
+			return nil, errors.New("invalid engine image file, path, duplicate or size")
 		}
 		seen[name] = true
 		e := entry{name: name, mode: os.FileMode(h.Mode & 0777)}
@@ -64,7 +77,7 @@ func read(file *os.File) ([]entry, error) {
 
 // Validate checks the actual ELF loader/library/plugin closure before a role
 // is advertised. The archive is immutable and pinned by its owning catalog.
-func Validate(file *os.File, arch string) error {
+func Validate(file *os.File, arch, role string) error {
 	entries, err := read(file)
 	if err != nil {
 		return err
@@ -77,9 +90,16 @@ func Validate(file *os.File, arch string) error {
 	if arch == "arm64" {
 		machine = elf.EM_AARCH64
 	} else if arch != "amd64" {
-		return errors.New("unsupported PPP image architecture")
+		return errors.New("unsupported engine image architecture")
 	}
-	pending := []string{Command, Plugin, LegacyProvider}
+	command := commandPath(role)
+	if command == "" {
+		return errors.New("unsupported engine role")
+	}
+	pending := []string{command}
+	if role == "pppoe" {
+		pending = append(pending, Plugin, legacyProvider)
+	}
 	checked := map[string]bool{}
 	for len(pending) != 0 {
 		name := pending[0]
@@ -90,18 +110,18 @@ func Validate(file *os.File, arch string) error {
 		checked[name] = true
 		e, ok := files[name]
 		if !ok {
-			return fmt.Errorf("PPP image is missing %s", name)
+			return fmt.Errorf("engine image is missing %s", name)
 		}
 		f, err := elf.NewFile(bytes.NewReader(e.data))
 		if err != nil {
-			return fmt.Errorf("PPP ELF %s: %w", name, err)
+			return fmt.Errorf("engine ELF %s: %w", name, err)
 		}
 		if f.Class != elf.ELFCLASS64 || f.Machine != machine || f.Type != elf.ET_EXEC && f.Type != elf.ET_DYN {
-			return fmt.Errorf("PPP ELF %s has the wrong architecture or type", name)
+			return fmt.Errorf("engine ELF %s has the wrong architecture or type", name)
 		}
-		if name == Command {
+		if name == command {
 			if e.mode&0111 == 0 {
-				return errors.New("PPP command is not executable")
+				return errors.New("engine command is not executable")
 			}
 			loader := ""
 			for _, p := range f.Progs {
@@ -114,7 +134,7 @@ func Validate(file *os.File, arch string) error {
 				}
 			}
 			if !path.IsAbs(loader) {
-				return errors.New("PPP command requires its bundled ELF interpreter")
+				return errors.New("engine command requires its bundled ELF interpreter")
 			}
 			pending = append(pending, strings.TrimPrefix(loader, "/"))
 		}
@@ -133,7 +153,7 @@ func Validate(file *os.File, arch string) error {
 				}
 			}
 			if !found {
-				return fmt.Errorf("PPP image is missing library %s", library)
+				return fmt.Errorf("engine image is missing library %s", library)
 			}
 		}
 	}

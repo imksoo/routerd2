@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/imksoo/routerd2/internal/factcondition"
+	"github.com/imksoo/routerd2/internal/protocol/conntrackconfig"
 )
 
 const (
@@ -36,26 +37,27 @@ type GracefulActivation struct {
 }
 
 type Config struct {
-	Version                    int                 `json:"version,omitempty"`
-	IPv4Checksum               IPv4Checksum        `json:"ipv4_checksum,omitempty"`
-	AuthPassword               string              `json:"auth_password,omitempty"`
-	Track                      []Track             `json:"track,omitempty"`
-	GracefulActivation         *GracefulActivation `json:"graceful_activation,omitempty"`
-	Resource                   string              `json:"resource"`
-	Interface                  string              `json:"interface"`
-	VIPInterface               string              `json:"vip_interface,omitempty"`
-	VRF                        string              `json:"vrf,omitempty"`
-	Family                     string              `json:"family"`
-	SourceAddress              string              `json:"source_address,omitempty"`
-	UnicastPeers               []netip.Addr        `json:"unicast_peers,omitempty"`
-	VirtualRouterID            int                 `json:"virtual_router_id"`
-	Priority                   int                 `json:"priority,omitempty"`
-	AdvertIntervalCentiseconds int                 `json:"advert_interval_centiseconds,omitempty"`
-	EffectTimeoutMilliseconds  int                 `json:"effect_timeout_milliseconds,omitempty"`
-	Addresses                  []string            `json:"addresses"`
-	Preempt                    *bool               `json:"preempt,omitempty"`
-	AddressOwner               bool                `json:"address_owner,omitempty"`
-	AcceptMode                 bool                `json:"accept_mode,omitempty"`
+	ConntrackSync              *conntrackconfig.Config `json:"conntrack_sync,omitempty"`
+	Version                    int                     `json:"version,omitempty"`
+	IPv4Checksum               IPv4Checksum            `json:"ipv4_checksum,omitempty"`
+	AuthPassword               string                  `json:"auth_password,omitempty"`
+	Track                      []Track                 `json:"track,omitempty"`
+	GracefulActivation         *GracefulActivation     `json:"graceful_activation,omitempty"`
+	Resource                   string                  `json:"resource"`
+	Interface                  string                  `json:"interface"`
+	VIPInterface               string                  `json:"vip_interface,omitempty"`
+	VRF                        string                  `json:"vrf,omitempty"`
+	Family                     string                  `json:"family"`
+	SourceAddress              string                  `json:"source_address,omitempty"`
+	UnicastPeers               []netip.Addr            `json:"unicast_peers,omitempty"`
+	VirtualRouterID            int                     `json:"virtual_router_id"`
+	Priority                   int                     `json:"priority,omitempty"`
+	AdvertIntervalCentiseconds int                     `json:"advert_interval_centiseconds,omitempty"`
+	EffectTimeoutMilliseconds  int                     `json:"effect_timeout_milliseconds,omitempty"`
+	Addresses                  []string                `json:"addresses"`
+	Preempt                    *bool                   `json:"preempt,omitempty"`
+	AddressOwner               bool                    `json:"address_owner,omitempty"`
+	AcceptMode                 bool                    `json:"accept_mode,omitempty"`
 }
 
 // Snapshot reports election state and the worker's requested publication state.
@@ -165,6 +167,14 @@ func validInterface(s string) bool {
 
 func Validate(c Config) error {
 	c = Normalize(c)
+	if c.ConntrackSync != nil {
+		if c.Family != "ipv4" {
+			return errors.New("conntrack sync belongs to the IPv4 VRRP owner")
+		}
+		if err := conntrackconfig.Validate(*c.ConntrackSync); err != nil {
+			return err
+		}
+	}
 	if len(c.Track) > 16 || len(c.Track) > 0 && c.AddressOwner {
 		return errors.New("VRRP track supports at most 16 sources and cannot change an address owner's priority 255")
 	}

@@ -108,6 +108,9 @@ func Compile(d Document) (resourceprogram.Plan, error) {
 
 func validateNative(d Native, source Document) error {
 	for _, service := range d.Services {
+		if service.VRRP != nil && service.VRRP.ConntrackSync != nil && (d.Network.Forwarding.ConntrackTCPLiberal == nil || !*d.Network.Forwarding.ConntrackTCPLiberal) {
+			return fmt.Errorf("VRRP %s conntrack_sync requires forwarding.conntrack_tcp_liberal=true", service.Name)
+		}
 		if service.VRRP != nil && service.VRRP.GracefulActivation != nil && conditionRequiresFact(&service.VRRP.GracefulActivation.ReadyWhen, service.ModuleName()+".active") {
 			return fmt.Errorf("VRRP %s publication cannot require its own unpublished active fact", service.Name)
 		}

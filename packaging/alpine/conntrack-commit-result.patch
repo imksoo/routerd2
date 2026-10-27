@@ -1,0 +1,26 @@
+SPDX-License-Identifier: GPL-2.0-or-later
+conntrack-tools 1.4.9: return the completed kernel commit outcome to its owner.
+Original copyright and license notices remain in the corresponding sources.
+
+--- a/src/cache-ct.c
++++ b/src/cache-ct.c
+@@ -308,0 +309,8 @@
++		/* routerd2, 2026-10-27: report kernel commit failures to the owner. */
++		if (STATE_SYNC(commit).clientfd != -1) {
++			char result[128];
++			int length = snprintf(result, sizeof(result),
++				"{\"cache\":\"conntrack\",\"failed\":%u}\n", commit_fail);
++			send(STATE_SYNC(commit).clientfd, result, length, MSG_NOSIGNAL);
++		}
++
+--- a/src/cache-exp.c
++++ b/src/cache-exp.c
+@@ -271,0 +272,8 @@
++		/* routerd2, 2026-10-27: report kernel commit failures to the owner. */
++		if (STATE_SYNC(commit).clientfd != -1) {
++			char result[128];
++			int length = snprintf(result, sizeof(result),
++				"{\"cache\":\"expectation\",\"failed\":%u}\n", commit_fail);
++			send(STATE_SYNC(commit).clientfd, result, length, MSG_NOSIGNAL);
++		}
++

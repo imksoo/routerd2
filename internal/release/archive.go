@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/imksoo/routerd2/internal/pppimage"
+	"github.com/imksoo/routerd2/internal/engineimage"
 	"github.com/imksoo/routerd2/internal/runtimeabi"
 )
 
@@ -252,7 +252,7 @@ func WriteBundle(ctx context.Context, output io.Writer, options BundleOptions, k
 		m.Artifacts = append(m.Artifacts, Artifact{Name: name, Kind: a.Kind, Command: a.Command, Size: stat.Size(), SHA256: hex.EncodeToString(hash.Sum(nil))})
 	}
 	for _, engine := range m.Engines {
-		if err := pppimage.Validate(files[engine.Artifact], m.GOARCH); err != nil {
+		if err := engineimage.Validate(files[engine.Artifact], m.GOARCH, engine.Role); err != nil {
 			return m, fmt.Errorf("engine %s: %w", engine.Role, err)
 		}
 	}

@@ -21,6 +21,7 @@ import (
 	"github.com/imksoo/routerd2/internal/control"
 	"github.com/imksoo/routerd2/internal/logging"
 	"github.com/imksoo/routerd2/internal/management"
+	"github.com/imksoo/routerd2/internal/protocol/conntracksync"
 	"github.com/imksoo/routerd2/internal/protocol/pppoe"
 	"github.com/imksoo/routerd2/internal/release"
 	"github.com/imksoo/routerd2/internal/runtimeconfig"
@@ -38,6 +39,12 @@ func main() {
 }
 
 func run(args []string) error {
+	if len(args) == 1 && args[0] == "conntrackd-engine" {
+		return conntracksync.RunEngine()
+	}
+	if len(args) == 2 && args[0] == "conntrackd-command" {
+		return conntracksync.RunCommand(args[1])
+	}
 	if len(args) == 1 && args[0] == "pppoe-engine" {
 		return pppoe.RunEngine()
 	}

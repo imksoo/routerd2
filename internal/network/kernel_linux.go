@@ -338,6 +338,8 @@ func (k *linuxKernel) DeleteRoute(r Route) error {
 
 func settingPath(key settingKey) (string, error) {
 	switch key.Kind {
+	case "conntrack_tcp_liberal":
+		return "/proc/sys/net/netfilter/nf_conntrack_tcp_be_liberal", nil
 	case "forwarding4":
 		return "/proc/sys/net/ipv4/ip_forward", nil
 	case "forwarding6":

@@ -23,8 +23,8 @@ import (
 	"time"
 
 	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/engineimage"
 	"github.com/imksoo/routerd2/internal/lifetime"
-	"github.com/imksoo/routerd2/internal/pppimage"
 	"github.com/imksoo/routerd2/internal/protocol/pppoeconfig"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
@@ -82,7 +82,7 @@ func RunEngine() error {
 		return err
 	}
 	image := os.NewFile(4, "pppoe-image")
-	if err := pppimage.Extract(image); err != nil {
+	if err := engineimage.Extract(image); err != nil {
 		image.Close()
 		return err
 	}
@@ -120,7 +120,7 @@ func RunEngine() error {
 	if err := unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0); err != nil {
 		return err
 	}
-	return syscall.Exec("/"+pppimage.Command, []string{"pppd", "logfd", "1"}, []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C"})
+	return syscall.Exec("/"+engineimage.PPPCommand, []string{"pppd", "logfd", "1"}, []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C"})
 }
 
 // Adapted from routerd pkg/pppoeclient.LinuxPeer (BSD-3-Clause, 1329ef54f296).
@@ -139,7 +139,7 @@ func peerOptions(cfg pppoeconfig.Config, password string) []byte {
 		cfg.LCPEchoFailure = 4
 	}
 	var b bytes.Buffer
-	fmt.Fprintf(&b, "plugin /%s\nnic-%s\nifname %s\nuser %s\npassword %s\n", pppimage.Plugin, cfg.Interface, cfg.PPPInterface, strconv.Quote(cfg.Username), strconv.Quote(password))
+	fmt.Fprintf(&b, "plugin /%s\nnic-%s\nifname %s\nuser %s\npassword %s\n", engineimage.Plugin, cfg.Interface, cfg.PPPInterface, strconv.Quote(cfg.Username), strconv.Quote(password))
 	b.WriteString("noauth\nhide-password\nnoipdefault\nusepeerdns\nnodetach\n")
 	switch cfg.AuthMethod {
 	case "pap":

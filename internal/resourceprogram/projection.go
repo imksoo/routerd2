@@ -217,6 +217,9 @@ func renderNative(nodes []compiledResource) Native {
 		case r.PolicyRule != nil:
 			out.Network.PolicyRules = append(out.Network.PolicyRules, *r.PolicyRule)
 		case r.Forwarding != nil:
+			if r.Forwarding.ConntrackTCPLiberal != nil {
+				out.Network.Forwarding.ConntrackTCPLiberal = r.Forwarding.ConntrackTCPLiberal
+			}
 			if r.Forwarding.IPv4 != nil {
 				out.Network.Forwarding.IPv4 = r.Forwarding.IPv4
 			}

@@ -1,6 +1,6 @@
 // Package serviceruntime connects protocol engines to the control plane. It
-// never owns netlink mutations. The PPP engine owns its negotiated PPP unit;
-// routes and forwarding always belong to the network writer.
+// delegates PPP units and configured conntrack replication to bundled engines.
+// Addresses, routes and firewall rules belong to the network writer.
 package serviceruntime
 
 import (
@@ -15,11 +15,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"time"
 
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/protocol/bfd"
+	"github.com/imksoo/routerd2/internal/protocol/conntracksync"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp4"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
@@ -199,7 +201,20 @@ func Run(ctx context.Context, runtimeDir, name, role, path, digest string, gener
 		if err := decode(instance.Config, &cfg); err != nil {
 			return err
 		}
-		return vrrp.Run(runCtx, cfg, vrrpEffects{client: c}, ready)
+		if cfg.ConntrackSync == nil {
+			return vrrp.Run(runCtx, cfg, vrrpEffects{client: c}, ready)
+		}
+		runtime.LockOSThread()
+		defer runtime.UnlockOSThread()
+		image := os.NewFile(5, "conntrackd-engine")
+		defer image.Close()
+		sync, err := conntracksync.Start(runCtx, *cfg.ConntrackSync, image)
+		if err != nil {
+			return err
+		}
+		defer sync.Close()
+		err = vrrp.Run(sync.Context(), cfg, syncedVRRPEffects{effects: vrrpEffects{client: c}, sync: sync}, ready)
+		return errors.Join(err, sync.Err())
 	default:
 		return fmt.Errorf("unavailable bundled service role %q", role)
 	}
