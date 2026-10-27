@@ -753,6 +753,13 @@ Healthの元期限、古い通知、5秒confirmed rollback、AFTR worker再起�
 
 #### NET-05 — link・address・WAN resource の完全化
 
+2026-10-27追加: `pd-recovery/native-32`は旧routerdのDUID選択・lease保存/Restoreを比較し、
+private checkpointへDUID/IAID/PDと元BOOTTIME期限を保存する。同じbootのworker交換では
+有効PDを復旧してRebindする。明示DUIDを優先し、保存済みDUIDはMAC/PPP session交換でも保持する。
+独立ISC/RP-PPPoEとLinux SLAAC clientで、peer停止中の復旧・元期限一致・実TCP/UDP・
+Rebind capture・元期限失効・失効後再起動の非復活を確認した。正常停止の空保存はReleaseに先行する。
+専用QEMUの実UTC±24h、元期限の自律撤去と新規取得も通った。二台間PD同期と最新実機受入は残る。
+
 2026-10-26追加: 実PD-sourceで111分後に生じたDS-Lite UDP失敗から、RA routeの期限更新時の
 削除・再追加による一時的なIPv6経路喪失を特定した。独立dnsmasq/Linux AFTRでも再現し、
 kernel timerのin-place更新へ変更した。更新途中のphysical timerをjournalに記録し、ACK前後の
@@ -1157,7 +1164,12 @@ RFC 5798方式を明示できる。標準peerと現行方式peerのVIP TCP/UDP�
 再利用・比較元: [pkg/controller/chain/filesync.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/filesync.go), [pkg/ha](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/ha)。
 
 実装先: `internal/protocol/dhcpserver`, `internal/protocol/dhcpserverconfig`, `internal/runtimeplan`。
-PD同期の`internal/protocol/dhcp6`は未実装。別の同期managerは追加していない。
+`internal/protocol/dhcp6`のローカルPD checkpoint/同boot復旧を`pd-recovery/native-32`で追加した。
+旧routerdのDUID選択・`restoreLease`/`saveLeaseLocked`・`pdclient.Restore`と照合した。
+明示/保存済みDUID、IAID、server、元期限を保持し、ISC無応答中のworker交換でも転送でき、
+Rebind/Replyで更新する。router/clientの元期限失効と失効後再起動、正常停止時のRelease順序も確認した。
+これは同期の前提部分で、二台間PD移送・異なるboot時計間の期限移送・HA demotion時のRelease抑止は未実装。
+別の同期managerは追加していない。
 
 部分実装: `ha-dhcp` / native-31。DHCPv4 workerがTLS1.3の相互認証とpeer certificate固定で
 complete journalを同期する。local fsync→standby fsync/ACK→control反映→DHCPACKの順序を持ち、

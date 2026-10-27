@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"slices"
 	"strconv"
 	"sync/atomic"
 	"syscall"
@@ -316,8 +317,16 @@ func runPDRAFixture(t *testing.T, clockClient *clocktest.Client) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = unix.Kill(pid, unix.SIGCONT) })
+			until(t, time.Second, func() bool {
+				status, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", pid))
+				return err == nil && bytes.Contains(status, []byte("State:\tT"))
+			})
 		}
 		stop(pdWorker.PID)
+		pausedClock, err := boottime.Read()
+		if err != nil {
+			t.Fatal(err)
+		}
 		// RS uses an independent client socket; no product configuration or
 		// observation is rewritten to make the RA worker send a packet.
 		solicit := func() {
@@ -406,8 +415,21 @@ func runPDRAFixture(t *testing.T, clockClient *clocktest.Client) {
 			if err := f.control.Do(ctx, "GET", "/v1/services/service.pd", nil, &current); err != nil {
 				t.Fatal(err)
 			}
-			if current.Sequence != original.Sequence || !bytes.Equal(current.Snapshot, original.Snapshot) {
-				t.Fatal("clock/poll rewrote a frozen producer observation", original, current)
+			var observed dhcp6config.Snapshot
+			if err := json.Unmarshal(current.Snapshot, &observed); err != nil {
+				t.Fatal(err)
+			}
+			// A pre-stop information publication or transport replay can
+			// still arrive. Its source clock must precede the actual stop;
+			// neither that delivery nor UTC steps can renew the frozen IAs.
+			if current.Generation != original.Generation || current.ProducerEpoch != original.ProducerEpoch || current.Sequence < original.Sequence {
+				t.Fatal("clock/poll changed producer identity or rewound delivery", original, current)
+			}
+			if observed.ObservedNanos > uint64(pausedClock.BoottimeNanoseconds) || observed.InfoReceivedNanos > uint64(pausedClock.BoottimeNanoseconds) {
+				t.Fatal("source observation advanced beyond the stopped producer", observed, pausedClock)
+			}
+			if observed.BootID != source.BootID || observed.ClientDUID != source.ClientDUID || observed.ServerDUID != source.ServerDUID || observed.RenewAt != source.RenewAt || observed.RebindAt != source.RebindAt || !slices.Equal(observed.Addresses, source.Addresses) || !slices.Equal(observed.Prefixes, source.Prefixes) {
+				t.Fatal("clock/poll rewrote the original lease", source, observed)
 			}
 			t.Log("actual guest UTC step", action, result.Clock.WallTime, result.Clock.BoottimeNanoseconds)
 		}
@@ -484,7 +506,9 @@ func runPDRAFixture(t *testing.T, clockClient *clocktest.Client) {
 			t.Fatal("delivery sequence renewed expired producer authority")
 		}
 		var waiting supervisor.ModuleStatus
-		until(t, 6*time.Second, func() bool { waiting, _ = module("service.pd"); return waiting.Ready && waiting.PID > 1 })
+		// The deliberately stopped producer may already be retiring after
+		// its heartbeat expired. Crash it without waiting for Ready again.
+		until(t, 6*time.Second, func() bool { waiting, _ = module("service.pd"); return waiting.PID > 1 })
 		if err := unix.Kill(waiting.PID, unix.SIGKILL); err != nil {
 			t.Fatal(err)
 		}

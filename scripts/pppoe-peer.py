@@ -120,14 +120,23 @@ def peer(stage, auth, dhcp6_server):
         current, observed = modules().get("service.pd", {}), pd_record()
         return current.get("ready") and observed.get("generation") == current.get("generation") and observed.get("snapshot", {}).get("state") == "bound"
 
+    def pd_active():
+        current, observed = modules().get("service.pd", {}), pd_record()
+        snapshot = observed.get("snapshot", {})
+        return current.get("ready") and observed.get("generation") == current.get("generation") and snapshot.get("state") in ("bound", "renewing", "rebinding") and bool(snapshot.get("prefixes"))
+
     def delegated():
         return [a for link in json.loads(run(["ip", "-n", ns, "-j", "-6", "addr", "show", "dev", "lan0"])) for a in link["addr_info"] if a.get("scope") == "global" and not a.get("tentative") and not a.get("dadfailed")]
 
     def client_addresses():
         return [a for link in json.loads(run(["ip", "-n", lan, "-j", "-6", "addr", "show", "dev", "client0"])) for a in link["addr_info"] if a.get("scope") == "global" and not a.get("tentative") and not a.get("dadfailed")]
 
+    def client_routed():
+        routes = json.loads(run(["ip", "-n", lan, "-j", "-6", "route", "show", "default"]))
+        return any(route.get("dev") == "client0" for route in routes)
+
     def ipv6_traffic():
-        wait(lambda: pd_bound() and delegated() and client_addresses())
+        wait(lambda: pd_active() and delegated() and client_addresses() and client_routed() and api("control.sock", "/v1/services")["phase"] == "ready")
         assert run(inside(lan, ["curl", "--noproxy", "*", "--max-time", "2", "-sS", "-o", "/dev/null", "-w", "%{http_code}", "http://[2001:db8:ffff::20]:18080/"])) == "200"
         code = 'import socket;s=socket.socket(socket.AF_INET6,socket.SOCK_DGRAM);s.settimeout(2);s.connect(("2001:db8:ffff::20",18081));s.send(b"delegated-ppp");assert s.recv(100)==b"delegated-ppp"'
         run(inside(lan, ["python3", "-c", code]))
@@ -299,12 +308,22 @@ def peer(stage, auth, dhcp6_server):
             wait(lambda: pd_record()["snapshot"]["renew_at"] != first["snapshot"]["renew_at"], 12)
             ipv6_traffic()
             print("PASS real ISC DHCP Renew extended the delegated prefix", flush=True)
+            server.send_signal(signal.SIGSTOP)
+            time.sleep(0.1)
+            retained = pd_record()["snapshot"]
+            recovery_at = time.time()
             old = modules()["service.pd"]
             signal_worker(old["pid"], signal.SIGKILL)
-            wait(lambda: modules()["service.pd"]["generation"] > old["generation"] and pd_bound())
+            wait(lambda: modules()["service.pd"]["generation"] > old["generation"] and pd_active())
             assert pd_record()["snapshot"]["client_duid"] == duid
+            assert pd_record()["snapshot"]["prefixes"] == retained["prefixes"], "worker restart changed original PD deadlines without a server Reply"
             ipv6_traffic()
-            print("PASS DHCPv6 worker replacement reused persisted DUID and restored routed traffic", flush=True)
+            time.sleep(1.2)  # allow the randomized Rebind to reach the paused peer
+            recovery_reply_at = time.time()
+            server.send_signal(signal.SIGCONT)
+            wait(lambda: pd_bound() and pd_record()["snapshot"]["renew_at"] != retained["renew_at"])
+            ipv6_traffic()
+            print("PASS DHCPv6 crash recovery retained DUID/IAID/PD and exact deadlines while ISC was paused, then Rebind/Reply restored renewal", flush=True)
             stale = {k: first[k] for k in ["supervisor_instance", "name", "role", "config_digest", "generation", "producer_epoch", "sequence", "snapshot"]}
             assert "stale" in json.dumps(api("control.sock", "/v1/services/state", stale, status=409)).lower()
             print("PASS old DHCPv6 worker notification rejected", flush=True)
@@ -341,10 +360,20 @@ def peer(stage, auth, dhcp6_server):
             dns_traffic()
             assert modules()["service.dns"]["generation"] == stable_dns["generation"]
             print("PASS PPP worker/session replacement reacquired PD with the same DUID and restored IPv6 TCP/UDP", flush=True)
+            wait(pd_bound)
+            retained = pd_record()["snapshot"]["prefixes"]
             server.terminate()
             server.wait(timeout=5)
+            previous = modules()["service.pd"]
+            signal_worker(previous["pid"], signal.SIGKILL)
+            wait(lambda: modules()["service.pd"]["generation"] > previous["generation"] and pd_active())
+            assert pd_record()["snapshot"]["prefixes"] == retained, "recovery while the server was absent rebased PD deadlines"
             wait(lambda: not delegated(), 24)
             wait(lambda: not client_addresses())
+            previous = modules()["service.pd"]
+            signal_worker(previous["pid"], signal.SIGKILL)
+            wait(lambda: modules()["service.pd"]["generation"] > previous["generation"] and modules()["service.pd"]["ready"])
+            assert not pd_record()["snapshot"].get("prefixes") and not delegated() and not client_addresses(), "worker restart revived an expired delegation"
             print("PASS server silence expired router and independent SLAAC client prefixes", flush=True)
             server = dhcp6_start()
             ipv6_traffic()
@@ -478,6 +507,7 @@ def peer(stage, auth, dhcp6_server):
             capture.send_signal(signal.SIGINT)
             capture.wait(timeout=3)
             packets = run(["tcpdump", "-n", "-tt", "-vv", "-r", str(stage / "pppoe.pcap"), "ip6"])
+            assert any("dhcp6 rebind" in line and recovery_at <= float(line.split()[0]) < recovery_reply_at for line in packets.splitlines() if re.match(r"^\d+\.\d+ ", line)), "no real recovery Rebind reached the paused ISC peer"
             withdrawals = []
             releases = []
             replies = []
@@ -628,6 +658,8 @@ def peer(stage, auth, dhcp6_server):
         try:
             print("services", api("control.sock", "/v1/services"), flush=True)
             print("rules", run(["ip", "-n", ns, "-j", "rule", "show"]), flush=True)
+            print("client6routes", run(["ip", "-n", lan, "-j", "-6", "route", "show"]), flush=True)
+            print("client6addresses", run(["ip", "-n", lan, "-j", "-6", "address", "show"]), flush=True)
         except (OSError, subprocess.SubprocessError):
             pass
         for name in ("console", "ac", "capture", "dhcp6", "http6", "udp6", "dns", "dns-tcp"):

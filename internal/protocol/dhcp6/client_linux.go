@@ -10,7 +10,6 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	mathrand "math/rand/v2"
@@ -42,6 +41,7 @@ type exchange struct {
 	timeout       time.Duration
 	attempts      int
 	offer         *message
+	verifyUntil   time.Time
 }
 type client struct {
 	cfg                        dhcp6config.Config
@@ -146,6 +146,9 @@ func (c *client) transmit(conn *net.UDPConn, e *exchange, now time.Time) error {
 		maximum = 30 * time.Second
 	case decline:
 		maximum = time.Second
+	}
+	if !e.verifyUntil.IsZero() {
+		maximum = 4 * time.Second
 	}
 	if e.timeout == 0 {
 		e.timeout = time.Second
@@ -408,6 +411,10 @@ func (c *client) advance(clock boottime.Clock) error {
 	if slices.ContainsFunc(c.snapshot.Prefixes, expiredPrefix) {
 		c.snapshot.Prefixes = slices.DeleteFunc(slices.Clone(c.snapshot.Prefixes), expiredPrefix)
 	}
+	if !c.lease.verifyUntil.IsZero() && !now.Before(c.lease.verifyUntil) {
+		c.lease = exchange{}
+		c.snapshot.State = "bound"
+	}
 	_, hasLease := c.snapshot.LeaseUntil()
 	if c.cfg.RequestAddress || c.cfg.RequestPrefix {
 		switch {
@@ -433,13 +440,6 @@ func (c *client) advance(clock boottime.Clock) error {
 	return nil
 }
 
-// Only the durable identity is stored. Restart always obtains a fresh server
-// Reply; a saved lease is neither proof of address ownership nor a new lease.
-type identity struct {
-	Resource   string `json:"resource"`
-	ClientDUID string `json:"client_duid"`
-}
-
 func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, ready func()) (result error) {
 	if err := dhcp6config.Validate(cfg); err != nil {
 		return err
@@ -458,20 +458,8 @@ func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, ready fun
 	if err = unix.Flock(int(lock.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
 		return fmt.Errorf("DHCPv6 identity is already owned: %w", err)
 	}
-	var saved identity
-	f, err := os.Open(cfg.StatePath)
-	if err == nil {
-		dec := json.NewDecoder(f)
-		dec.DisallowUnknownFields()
-		err = dec.Decode(&saved)
-		err = errors.Join(err, f.Close())
-		if err != nil {
-			return fmt.Errorf("read DHCPv6 identity: %w", err)
-		}
-		if saved.Resource != cfg.Resource {
-			return errors.New("DHCPv6 identity belongs to another resource")
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
+	saved, err := readState(ctx, cfg)
+	if err != nil {
 		return err
 	}
 	ifi, source, err := linklocal.Wait(ctx, cfg.Interface, netip.Addr{})
@@ -501,9 +489,6 @@ func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, ready fun
 		duid[8] = duid[8]&0x0f | 0x40
 		duid[10] = duid[10]&0x3f | 0x80
 	}
-	if err := writeIdentity(cfg.StatePath, identity{Resource: cfg.Resource, ClientDUID: hex.EncodeToString(duid)}); err != nil {
-		return err
-	}
 	conn, err := listen(ctx, cfg.Interface, ifi.Index, source)
 	if err != nil {
 		return err
@@ -526,11 +511,17 @@ func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, ready fun
 	}
 	c := client{cfg: cfg, duid: duid, maxSolicit: 3600 * time.Second, maxInformation: 3600 * time.Second, snapshot: dhcp6config.Snapshot{BootID: clock.BootID, Resource: cfg.Resource, Interface: cfg.Interface, IAID: cfg.IAID, ClientDUID: hex.EncodeToString(duid)}}
 	now := time.Unix(0, clock.BoottimeNanoseconds)
-	if cfg.RequestAddress || cfg.RequestPrefix {
-		err = c.begin(solicit, now)
-	} else {
-		c.snapshot.State = "information"
-		err = c.info.begin(information, now)
+	restored, err := c.restorePD(saved, clock)
+	if err != nil {
+		return err
+	}
+	if !restored {
+		if cfg.RequestAddress || cfg.RequestPrefix {
+			err = c.begin(solicit, now)
+		} else {
+			c.snapshot.State = "information"
+			err = c.info.begin(information, now)
+		}
 	}
 	if err != nil {
 		return err
@@ -543,6 +534,9 @@ func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, ready fun
 			return nil
 		}
 		c.snapshot.ObservedNanos = uint64(clock.BoottimeNanoseconds)
+		if err := writeState(cfg.StatePath, c.snapshot); err != nil {
+			return fmt.Errorf("persist DHCPv6 assignments: %w", err)
+		}
 		if err := effects.Update(ctx, c.snapshot); err != nil {
 			return fmt.Errorf("publish DHCPv6 assignments: %w", err)
 		}
@@ -565,6 +559,11 @@ func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, ready fun
 		// LAN advertisements. Keep the socket's link-local source until done.
 		if err := effects.Withdraw(cleanup, withdrawn); err != nil {
 			result = errors.Join(result, fmt.Errorf("withdraw DHCPv6 assignments: %w", err))
+			return
+		}
+		// Never leave a recoverable checkpoint for a lease sent in Release.
+		if err := writeState(cfg.StatePath, withdrawn); err != nil {
+			result = errors.Join(result, err)
 			return
 		}
 		result = errors.Join(result, c.release(cleanup, conn))
@@ -722,30 +721,4 @@ func listen(ctx context.Context, name string, index int, source netip.Addr) (*ne
 		return nil, err
 	}
 	return pc.(*net.UDPConn), nil
-}
-func writeIdentity(path string, s identity) error {
-	f, err := os.CreateTemp(filepath.Dir(path), ".dhcp6-identity-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(f.Name())
-	if err = f.Chmod(0600); err == nil {
-		err = json.NewEncoder(f).Encode(s)
-	}
-	if err == nil {
-		err = f.Sync()
-	}
-	err = errors.Join(err, f.Close())
-	if err != nil {
-		return err
-	}
-	if err = os.Rename(f.Name(), path); err != nil {
-		return err
-	}
-	dir, err := os.Open(filepath.Dir(path))
-	if err != nil {
-		return err
-	}
-	defer dir.Close()
-	return dir.Sync()
 }

@@ -411,7 +411,7 @@ func (s Service) DHCP4Config(stateDir string) dhcp4.Config {
 }
 func (s Service) DHCP6Config(stateDir string) dhcp6config.Config {
 	c := s.DHCP6
-	return dhcp6config.Config{Resource: s.Name, Interface: c.Interface, StatePath: filepath.Join(stateDir, "identities", s.Name+".dhcp6.json"), ClientDUID: c.ClientDUID, IAID: c.IAID, PrefixLength: c.PrefixLength, RequestAddress: c.RequestAddress, RequestPrefix: c.RequestPrefix}
+	return dhcp6config.Config{Resource: s.Name, Interface: c.Interface, StatePath: filepath.Join(stateDir, "leases", s.Name+".dhcp6.json"), ClientDUID: c.ClientDUID, IAID: c.IAID, PrefixLength: c.PrefixLength, RequestAddress: c.RequestAddress, RequestPrefix: c.RequestPrefix}
 }
 func (s Service) VRRPConfig() vrrp.Config {
 	c := *s.VRRP

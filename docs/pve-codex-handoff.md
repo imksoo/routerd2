@@ -5,7 +5,43 @@
 [機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を参照する。
 実行順序はhomert02/03、実態を確認したk8s-rt/pve-rt、その後既存文書に基づくCloud SAM。
 
-## 現在の変更: dhcp-request-clock / native-31
+## 現在の変更: pd-recovery / native-32
+
+旧routerdの`cmd/routerd-dhcpv6-client`のDUID選択、`restoreLease`/`saveLeaseLocked`、
+`pkg/pdclient.Restore`と設定照合を読み、PDの保存・再起動復旧を実装した。
+明示DUID→保存済みDUID→Ethernet DUID-LL/PPP DUID-UUIDの順に選択する。
+DUID/IAID・server・割当・元BOOTTIME期限を一つのprivate checkpointへ保存し、
+fsync後に公開する。同じboot/interface/IAID/DUIDで有効なPDだけ復旧し、Rebindで確認する。
+サーバー無応答でも元期限を延ばさない。正常停止はkernel/RA撤去ACK→空checkpoint保存→Release。
+別boot・変更されたidentity・失効PDは新規取得する。旧identity形式のreaderは残さない。
+設定と詳細は[DHCPv6 worker](../internal/protocol/dhcp6/README.md)を参照する。
+compiler native-32、worker ABI5、network journal10、DHCPv6 checkpoint1。
+
+PVE Linux6.8/amd64の隔離namespaceで、署名済み実PID1とRP-PPPoE、独立ISC DHCP4.4.3-P1、
+Linux SLAAC clientを接続した。PAP/CHAPでworker・PPP交換時のDUID保持とIPv6 TCP/UDPが通った。
+ISC停止中のSIGKILL復旧ではprefixと元期限が完全一致し、captureで応答前のRebindを確認した。
+最終CHAPではpeer終了中の復旧・router/clientの元期限失効・再起動による失効PDの非復活も確認した。
+古い通知拒否・confirmed rollback・control/operator/PID1停止・RA撤去→Release/Replyも通った。
+先行CHAPは復旧直後のcurlで失敗した。SLAAC addressがあってもclientの短いdefault routeが
+切れている場合があり、実clientのRA学習とcontrol適用完了を確認してから転送を検査する。
+routeの手動注入やDAD無効化はしていない。再実行は`make check-pppoe-pd DHCP6_SERVER=/path/to/isc/dhcpd`（PAP/CHAPの両方）。
+
+最新ソースの専用QEMUでは実UTC±24h、停止したproducer/controlと独立writerの元期限失効、
+RA router/PIO/RDNSS撤去、期限切れ再送拒否と新規取得/TCP/UDPが通った。
+停止直前の情報通知やtransport再送の到着はあり得るため、外側sequenceの完全固定ではなく
+実停止時のBOOTTIME以前の観測と元IA期限を検査する。heartbeatで既に停止処理中のproducerを
+Ready待ちしていた試験手順も直し、同じ期限・後続の新規取得条件で通した。
+再実行は`make qemu-dhcp6-clock`。host時計は変更していない。
+`make check-dhcp6`も成功し、独立dnsmasqとのIA_NA取得・worker交換・TCP/UDP・実Renew/Rebind・
+失効/復旧・DAD/Declineと正常停止Releaseを同じ保存経路で確認した。
+`make check`（Race Detector・vetを含む）とamd64/arm64の6静的ELF buildは成功した。
+生ログ・capture・一時catalogは確認後削除し、蓄積しない。
+
+これはHA-02のローカル保存・復旧部分であり、二台間PD同期は未実装。
+異なるboot時計間の期限移送、owner/fencing、待機系移行時のRelease抑止、IA_NA-only Confirm、
+最新版の実ONU/対象実機受入は残る。全34 packageの完了・実機利用可能とはしない。
+
+## 直前の変更: dhcp-request-clock / native-31
 
 独立dnsmasq2.90とkernel netemの5.2秒遅延で、WAN DHCPv4 clientがACK待ち時間を
 貸出期限へ加算する問題を再現した（要求から約5.21秒後を取得時刻にしていた）。
