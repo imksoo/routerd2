@@ -40,7 +40,7 @@ func sameUpdate(a, b serviceconfig.Update) bool {
 }
 
 // Caller holds mu. Wait releases it so the actor can apply and acknowledge.
-func (r *Runtime) waitApplicationLocked(ctx context.Context, u serviceconfig.Update) (serviceconfig.ApplicationReceipt, error) {
+func (r *Runtime) waitApplicationLocked(ctx context.Context, effect *pendingApplication) (serviceconfig.ApplicationReceipt, error) {
 	if err := ctx.Err(); err != nil {
 		return serviceconfig.ApplicationReceipt{}, err
 	}
@@ -48,6 +48,7 @@ func (r *Runtime) waitApplicationLocked(ctx context.Context, u serviceconfig.Upd
 	if err != nil {
 		return serviceconfig.ApplicationReceipt{}, err
 	}
+	u := effect.update
 	switch u.Role {
 	case "vrrp":
 		var s vrrp.Snapshot
@@ -66,7 +67,7 @@ func (r *Runtime) waitApplicationLocked(ctx context.Context, u serviceconfig.Upd
 			return serviceconfig.ApplicationReceipt{}, ErrStale
 		}
 	}
-	return r.waitEffectLocked(ctx, r.queueApplicationLocked(u))
+	return r.waitEffectLocked(ctx, effect)
 }
 
 func (r *Runtime) waitEffectLocked(ctx context.Context, effect *pendingApplication) (serviceconfig.ApplicationReceipt, error) {

@@ -5,7 +5,51 @@
 [機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を参照する。
 実行順序はhomert02/03、実態を確認したk8s-rt/pve-rt、その後既存文書に基づくCloud SAM。
 
-## 現在の変更: ra-dhcp6 / native-34
+## 現在の変更: dhcp6-confirm / native-35
+
+旧routerdのnetworkd IA_NA生成、DUID/PD保存・Restoreを再確認した。PD/RA連動を
+独立ISC DHCP4.4.3-P1/radvd2.19と別Linux SLAAC端末で接続し、M解除中のPD取得→MでIA_NA追加、
+同じDUID/IAID/workerの維持とWAN/LANのIPv6 TCP/UDPが通った。さらに別Linux端末との実DAD失敗・
+Decline中も委譲LANのTCP/UDPが通り、重複端末の撤去後に同じworkerでIA_NAを取得した。
+サーバ停止・M解除後のSIGKILLから、同じIA_NA/PDと元期限を復旧し、Rebindで更新できた。
+peerがPD poolへの戻り経路を実clientのlink-localへ設定し、製品側とLAN端末への経路注入はしない。
+再実行は`make check-dhcp6-ra-pd DHCP6_SERVER=/path/to/isc/dhcpd RELEASE_ID=dhcp6-confirm`。
+
+IA_NA単独の同boot復旧をConfirmへ実装した。保存値のboot/interface/IAID/DUID照合と
+RA開始履歴の復旧を一か所にまとめ、元preferred/valid・T1/T2・lease serverは変えない。
+Confirmingは使用可能として投影しない。初回送信から10秒以内のSuccessで再開し、無応答なら
+生存する元grantだけを使用する。NotOnLinkだけなら待機window後に旧addressを捨てて新規取得する。
+別serverからの後続Successは先行NotOnLinkより優先する。期限切れは確認中でも新規取得へ進む。
+PDを要求するclientは従来どおりRebindを使う。[RFC 9915 §18.2.3/18.2.10.3/18.2.12](https://www.rfc-editor.org/rfc/rfc9915.html#section-18.2.3)と
+独立ISC clientの`start_confirm6`/`do_confirm6`を比較した。compiler native-35、worker ABI5、
+network journal11、DHCPv6 checkpoint2。旧開発形式の互換処理は追加しない。
+
+最初のIA_NA取得試験は、試験がworkerのbound通知をkernel適用/DAD完了と誤認して失敗した。
+実kernelのaddress非tentative状態を待つ。DAD peerをISC自身に置く案は、ISCが自interfaceのaddressを
+poolから除外するため廃棄し、独立Linux端末へ分離した。通常DADを無効にして通していない。
+独立dnsmasqとのConfirm/Reply・元期限/T1/T2保持・TCP/UDPが通った。無応答Confirmも
+初回送信から10秒の待機後、同じ元期限と通信を保持した。対向の実prefixを42→43へ変更した
+NotOnLinkでは、旧IA_NA撤去→同DUIDの新規取得→IPv6 TCP/UDP・DNS復旧が通った。
+従来の自然Renew・Rebind・120秒失効/復旧、worker交換、MTU rollback・最終復元、Releaseと
+実DAD/Declineも維持した。生ログ/capture/一時binaryは確認後削除する。
+
+全体Race Detectorで既存VRRPのretired-generation試験がACK待ちで失敗した。修正前の単独10回は
+通る一方、受付と適用待ち登録が別lock区間で、世代更新により完了した待ちを後から再作成し得た。
+VRRP/BGPも受付時に一つの適用待ちを作り、callbackがその完了を待つ形へ統一した。
+同じ観測のtransport再送は進行中の処理を共有する。callbackの後からの登録と状態再構築を撤去し、
+待ち時間は延ばしていない。修正後の同試験10回とruntimeplan全体のRace Detectorは通った。
+独立BGPのFIB/所有期限・再帰依存期限、keepalivedの初回ACK遅延・追加WAN identityとTCP/UDPも通った。
+最終`make check`はGo/Python・Race Detector・vetまで通った。
+`make build build-publisher build-linux RELEASE_ID=dhcp6-confirm`も通り、amd64/arm64の6静的ELFを生成した。
+署名catalog/publisher/stageもRace Detectorで成功した。
+`make release-built-test RELEASE_ID=dhcp6-confirm RELEASE_BUILT_DIR=<private input>`には、
+group書込み不能なhome配下の一時directoryへ6 ELFだけコピーして渡す。copy/bundleは確認後削除した。
+ARM64では実行していない。
+
+required/observe-only readiness、system resolver効果、RA triggerとHAの組合せ、複数IA_NAのDAD共存、
+実link切断/VM reboot/suspend、最新版の実ONU/対象NIC受入と全34 packageの残作業は継続する。
+
+## 直前の変更: ra-dhcp6 / native-34
 
 旧routerdのnetplan RA/DHCP生成、`networkdAdoptionDropin`の`DHCPv6Client=no`と、
 DHCPv6 DUID/lease保存・復旧経路を比較した。明示`dhcp6.ra_from`で同じinterfaceのRAを指定し、

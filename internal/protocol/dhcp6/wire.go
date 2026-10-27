@@ -13,6 +13,7 @@ const (
 	solicit     byte = 1
 	advertise   byte = 2
 	request     byte = 3
+	confirm     byte = 4
 	renew       byte = 5
 	rebind      byte = 6
 	reply       byte = 7

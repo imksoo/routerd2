@@ -126,7 +126,7 @@ func (s Snapshot) LeaseUntil() (lifetime.Deadline, bool) {
 	return until, found
 }
 func (s Snapshot) Active(clock boottime.Clock) bool {
-	if s.State == "stopped" || s.State == "standby" || s.BootID != clock.BootID {
+	if s.State == "stopped" || s.State == "standby" || s.State == "confirming" || s.BootID != clock.BootID {
 		return false
 	}
 	if s.State == "information" {
@@ -137,7 +137,7 @@ func (s Snapshot) Active(clock boottime.Clock) bool {
 	return found && until.Live(clock)
 }
 func (s Snapshot) InformationUntil(clock boottime.Clock) (lifetime.Deadline, bool) {
-	if s.State == "stopped" || s.State == "standby" || s.BootID != clock.BootID || s.InfoReceivedNanos == 0 {
+	if s.State == "stopped" || s.State == "standby" || s.State == "confirming" || s.BootID != clock.BootID || s.InfoReceivedNanos == 0 {
 		return lifetime.Deadline{}, false
 	}
 	until := s.InformationRefreshAt
@@ -161,7 +161,7 @@ func ValidateSnapshot(c Config, s Snapshot) error {
 		return err
 	}
 	switch s.State {
-	case "waiting_ra", "standby", "soliciting", "requesting", "bound", "renewing", "rebinding", "declining", "information", "stopped":
+	case "waiting_ra", "standby", "soliciting", "requesting", "confirming", "bound", "renewing", "rebinding", "declining", "information", "stopped":
 	default:
 		return errors.New("invalid DHCPv6 client state")
 	}

@@ -2,8 +2,8 @@
 
 One worker owns UDP 546 on one interface. `request_address` requests IA_NA,
 `request_prefix` requests IA_PD, and both can be enabled in the same exchange.
-With neither enabled and no RA gating, the client performs Information-request only. DUID and
-IAID belong to this client; additional workers cannot own separate IA types on
+With neither enabled and no RA gating, the client performs Information-request
+only. DUID and IAID belong to this client; additional workers cannot own separate IA types on
 the same interface. The network writer installs learned IA_NA addresses as /128
 and derives configured LAN addresses and advertisements from IA_PD prefixes.
 The client does not infer a default router from DHCPv6.
@@ -24,7 +24,8 @@ This opt-in was compared with routerd's netplan rendering and
 `networkdAdoptionDropin`: its `DHCPv6Client=no` deliberately disables RA-driven
 DHCP while retaining RA. Merely declaring an RA receiver must not enable DHCP.
 
-The native parser and exchange implement [RFC 8415](https://www.rfc-editor.org/rfc/rfc8415.html):
+The native parser and exchanges follow [RFC 8415](https://www.rfc-editor.org/rfc/rfc8415.html)
+and the corresponding [RFC 9915](https://www.rfc-editor.org/rfc/rfc9915.html) recovery exchanges:
 Solicit/Advertise/Request/Reply, server-bound Renew, multicast Rebind, individual
 assignment validity, zero-lifetime withdrawal, retained deprecated old prefixes,
 and a separate information transaction. Server-selected timers and lifetimes
@@ -37,15 +38,23 @@ A completed or replaced transaction cannot refresh an assignment.
 One private checkpoint under `state/leases/NAME.dhcp6.json` stores the full typed
 snapshot, including DUID/IAID, server identity and original BOOTTIME deadlines.
 Atomic rename and file/directory fsync precede publication and the first packet.
-On the same boot, matching interface/IAID/DUID and live PD restore the remaining
-grant without extending it. Startup sends Rebind with Confirm's bounded retry
-parameters, as specified in [RFC 8415 section 18.2.12](https://www.rfc-editor.org/rfc/rfc8415.html#section-18.2.12).
-Silence does not renew assignments; ordinary original T1/T2/expiry still apply.
-Different boots, changed identity/interface/IAID, expired PD and IA_NA-only
-clients use fresh acquisition. IA_NA-only Confirm recovery remains unimplemented.
+On the same boot, matching interface/IAID/DUID and live assignments restore
+their original remaining budgets. A client requesting PD uses Rebind; an
+address-only client uses Confirm, following
+[RFC 9915 sections 18.2.3/18.2.12](https://www.rfc-editor.org/rfc/rfc9915.html#section-18.2.3).
+Both have a random initial delay and a ten-second verification window measured
+from first transmission. Confirming addresses and their derived DNS are not
+projected as usable until Success or the silent exchange's end. Confirm never
+changes the assignment, original T1/T2, expiry or saved lease server. Success
+from any matching-transaction server wins over earlier NotOnLink replies.
+Only NotOnLink replies through the window discard old IA_NA and trigger fresh
+discovery. Silence retains only still-valid original grants; expiry during
+confirmation starts discovery immediately. Different boots, changed
+identity/interface/IAID and expired grants use fresh acquisition. No UTC lease
+rebasing or cross-boot restoration is implemented.
 Graceful shutdown acknowledges kernel/RA withdrawal, persists an empty stopped
 checkpoint, then sends Release. SIGKILL leaves the last saved grant for recovery.
-The current contract is compiler native-34, checkpoint version 2; no discarded
+The current contract is compiler native-35, checkpoint version 2; no discarded
 identity-file or PD-wrapper journal reader is retained.
 
 This path was compared with routerd's `cmd/routerd-dhcpv6-client` DUID selection,
@@ -83,6 +92,16 @@ address withdrawal and a usable replacement lease with TCP/UDP on the same
 worker. The product configures the WAN bridge; no address flags are injected.
 The RA fixture also checks RA-learned default/on-link routes, IPv6 MTU/hop-limit
 application, writer restart, physical-MTU confirmed rollback and shutdown restoration.
+`make check-dhcp6-ra-pd DHCP6_SERVER=/path/to/isc/dhcpd` connects independent
+ISC DHCP4.4.3-P1/radvd2.19, a Linux duplicate host and a Linux SLAAC LAN client.
+Explicit PD begins with M clear; M adds IA_NA in the same worker/socket/IAID.
+Actual DAD/Decline leaves delegated LAN TCP/UDP usable; removing the duplicate
+lets that worker acquire IA_NA. A paused server, cleared RA flag and worker
+SIGKILL exercise identical combined grants/deadlines and Rebind recovery.
+The delegating peer explicitly routes its PD pool via the client's real
+link-local address. The product learns its WAN routes from radvd and the LAN
+client learns its address/default route from the product, with normal DAD.
+
 `make check-pd-ra`
 uses an independent wire server and captures generated LAN advertisements;
 IA_NA and IA_PD must share each stateful transaction and IAID.
@@ -103,9 +122,9 @@ Expired higher-sequence delivery cannot restore ownership; fresh acquisition
 recovers the same prepared RA identity. Only dedicated guest PID 1 can change
 the guest clock, and restores its original baseline on exit.
 
-These are isolated amd64 Linux VM checks. Actual suspend, RA gating combined with PD/HA,
+These are isolated amd64 Linux VM checks. Actual suspend, RA gating combined with HA,
 required-address readiness, complete legacy resource
-selection, DAD failure alongside other IA_NA/IA_PD bindings, VRF and physical NIC
+selection, DAD failure alongside multiple IA_NA bindings, VRF and physical NIC
 qualification remain separate work. Two-node transfer is described below. Separate-VM reboot,
 partition/fencing, load, ARM64 execution and latest ONU/target-device acceptance
 remain open. The former pinned PD state-machine

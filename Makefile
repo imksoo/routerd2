@@ -39,6 +39,7 @@ help:
 	  'make check-health-pbr  Required two-WAN real-daemon TCP/UDP failover gate' \
 	  'make check-vrrp-unicast Verify VRRP peer failover and finite WAN identity' \
 	  'make check-bfd         Verify BFD/BGP routing domains with real workers' \
+	  'make check-dhcp6-ra-pd Verify shared IA_NA/PD, RA trigger and restart with ISC DHCP' \
 	  'make check-dhcp6       Verify RA-triggered IA_NA, kernel parameters and Release with radvd/dnsmasq' \
 	  'make check-dhcp4       Verify delayed independent ACKs, lease expiry and recovery' \
 	  'make check-pd-ra       Verify PD renewal, generated RA and client traffic' \
@@ -143,6 +144,10 @@ check-bgp: build
 
 check-bfd: build
 	$(PYTHON) scripts/daemon-tests.py bfd --go '$(GO)'
+
+.PHONY: check-dhcp6-ra-pd
+check-dhcp6-ra-pd: build
+	$(PYTHON) scripts/daemon-tests.py dhcp6-ra-pd --go '$(GO)' --dhcp6-server '$(DHCP6_SERVER)'
 
 check-dhcp6: build
 	$(PYTHON) scripts/daemon-tests.py dhcp6 --go '$(GO)'

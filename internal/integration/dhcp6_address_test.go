@@ -5,6 +5,7 @@ package integration
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -160,6 +161,7 @@ func TestDaemonDHCP6RAIndependentPeers(t *testing.T) {
 	}
 	work := t.TempDir()
 	path := filepath.Join(work, "radvd.conf")
+	advertisedPrefix := "2001:db8:42::/64"
 	advertise := func(managed, other bool) {
 		flag := func(on bool) string {
 			if on {
@@ -167,7 +169,7 @@ func TestDaemonDHCP6RAIndependentPeers(t *testing.T) {
 			}
 			return "off"
 		}
-		body := fmt.Sprintf("interface server0 { AdvSendAdvert on; MinRtrAdvInterval 3; MaxRtrAdvInterval 4; AdvDefaultLifetime 12; AdvManagedFlag %s; AdvOtherConfigFlag %s; AdvCurHopLimit 42; AdvLinkMTU 1400; prefix 2001:db8:42::/64 { AdvOnLink on; AdvAutonomous off; }; };\n", flag(managed), flag(other))
+		body := fmt.Sprintf("interface server0 { AdvSendAdvert on; MinRtrAdvInterval 3; MaxRtrAdvInterval 4; AdvDefaultLifetime 12; AdvManagedFlag %s; AdvOtherConfigFlag %s; AdvCurHopLimit 42; AdvLinkMTU 1400; prefix %s { AdvOnLink on; AdvAutonomous off; }; };\n", flag(managed), flag(other), advertisedPrefix)
 		if err := os.WriteFile(path, []byte(body), 0600); err != nil {
 			t.Fatal(err)
 		}
@@ -333,6 +335,8 @@ func TestDaemonDHCP6RAIndependentPeers(t *testing.T) {
 	if initial.PID == 0 || !initial.Ready {
 		t.Fatal("missing DHCPv6 worker", initial)
 	}
+	beforeRestart, _ := snapshot()
+	restartAt := time.Now()
 	if err := unix.Kill(initial.PID, unix.SIGKILL); err != nil {
 		t.Fatal(err)
 	}
@@ -342,14 +346,76 @@ func TestDaemonDHCP6RAIndependentPeers(t *testing.T) {
 		replacement = module("service.wan")
 		s, generation := snapshot()
 		current = s
-		return replacement.Ready && replacement.PID != initial.PID && replacement.Generation > initial.Generation && generation == replacement.Generation && len(s.Addresses) > 0 && s.Addresses[0].ValidUntil.Nanos > first.Addresses[0].ValidUntil.Nanos && installed(s.Addresses[0].Address)
+		return replacement.Ready && replacement.PID != initial.PID && replacement.Generation > initial.Generation && generation == replacement.Generation && s.State == "bound" && len(s.Addresses) > 0 && installed(s.Addresses[0].Address)
 	})
-	if current.ClientDUID != first.ClientDUID || current.IAID != first.IAID || replacement.ConfigDigest != initial.ConfigDigest {
+	if current.ClientDUID != first.ClientDUID || current.IAID != first.IAID || replacement.ConfigDigest != initial.ConfigDigest || !slices.Equal(current.Addresses, beforeRestart.Addresses) || current.RenewAt != beforeRestart.RenewAt || current.RebindAt != beforeRestart.RebindAt {
 		t.Fatal("worker restart changed client or prepared identity", first, current, initial, replacement)
 	}
+	capture.mu.Lock()
+	confirmations := map[string]bool{}
+	confirmed := false
+	for _, p := range capture.packets {
+		b := p.data
+		if p.at.Before(restartAt) || len(b) < 66 || b[20] != 17 {
+			continue
+		}
+		xid := string(b[63:66])
+		if binary.BigEndian.Uint16(b[54:56]) == 546 && binary.BigEndian.Uint16(b[56:58]) == 547 && b[62] == 4 {
+			confirmations[xid] = true
+		}
+		if binary.BigEndian.Uint16(b[54:56]) == 547 && binary.BigEndian.Uint16(b[56:58]) == 546 && b[62] == 7 && confirmations[xid] {
+			options, err := dhcp6FixtureOptions(b[66:])
+			if err != nil {
+				capture.mu.Unlock()
+				t.Fatal(err)
+			}
+			status := uint16(0)
+			for _, o := range options {
+				if o.code == 13 && len(o.value) >= 2 {
+					status = binary.BigEndian.Uint16(o.value)
+				}
+			}
+			confirmed = confirmed || status == 0
+		}
+	}
+	capture.mu.Unlock()
+	if !confirmed {
+		t.Fatal("no successful real Confirm/Reply after IA_NA worker replacement")
+	}
+	t.Log("independent dnsmasq Confirm accepted the same saved IA_NA without changing T1/T2 or assignment deadlines")
 	address = current.Addresses[0].Address
 	fixtureDHCP6Traffic(t, address)
 	resolverTraffic()
+	// A silent server cannot turn a Confirm into a renewed grant. After
+	// the bounded exchange, the same original lease can be used again.
+	quiet := current
+	priorWorker := replacement
+	if err := unix.Kill(server.Process.Pid, unix.SIGSTOP); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = unix.Kill(server.Process.Pid, unix.SIGCONT) })
+	quietAt := time.Now()
+	if err := unix.Kill(priorWorker.PID, unix.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	until(t, 5*time.Second, func() bool {
+		replacement = module("service.wan")
+		current, generation := snapshot()
+		return replacement.Generation > priorWorker.Generation && generation == replacement.Generation && current.State == "confirming"
+	})
+	until(t, 15*time.Second, func() bool {
+		current, _ = snapshot()
+		return (current.State == "bound" || current.State == "renewing" || current.State == "rebinding") && len(current.Addresses) > 0 && installed(current.Addresses[0].Address)
+	})
+	if time.Since(quietAt) < 10*time.Second || !slices.Equal(current.Addresses, quiet.Addresses) || current.RenewAt != quiet.RenewAt || current.RebindAt != quiet.RebindAt || current.ClientDUID != quiet.ClientDUID {
+		t.Fatal("silent Confirm changed the original grant or skipped its reply window", quiet, current, time.Since(quietAt))
+	}
+	fixtureDHCP6Traffic(t, address)
+	if err := unix.Kill(server.Process.Pid, unix.SIGCONT); err != nil {
+		t.Fatal(err)
+	}
+	resolverTraffic()
+	t.Log("silent Confirm completed its ten-second window and retained the same original deadlines and usable TCP/UDP")
 	// Wait for an actual Renew/Reply from the independent server, rather than
 	// treating Request after restart as renewal coverage.
 	acquired := current.Addresses[0].ValidUntil
@@ -398,6 +464,84 @@ func TestDaemonDHCP6RAIndependentPeers(t *testing.T) {
 	if final := module("service.wan"); final.PID != replacement.PID || final.Generation != replacement.Generation {
 		t.Fatal("lease expiry/recovery restarted the client", replacement, final)
 	}
+	// Move the independent server/router to another on-link prefix. Its
+	// real NotOnLink must discard the old IA_NA and discover on the new link.
+	oldAddress := current.Addresses[0].Address
+	if err := fixtureInsideNamespace(provider, func() error {
+		l, err := netlink.LinkByName("server0")
+		if err != nil {
+			return err
+		}
+		a, _ := netlink.ParseAddr("2001:db8:43::1/64")
+		if err := netlink.AddrAdd(l, a); err != nil {
+			return err
+		}
+		old, _ := netlink.ParseAddr("2001:db8:42::1/64")
+		return netlink.AddrDel(l, old)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.Process.Signal(unix.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	until(t, 2*time.Second, func() bool { return unix.Kill(server.Process.Pid, 0) == unix.ESRCH })
+	until(t, 5*time.Second, func() bool {
+		ready := false
+		if err := fixtureInsideNamespace(provider, func() error {
+			l, err := netlink.LinkByName("server0")
+			if err != nil {
+				return err
+			}
+			all, err := netlink.AddrList(l, netlink.FAMILY_V6)
+			for _, a := range all {
+				ready = ready || a.IP.String() == "2001:db8:43::1" && a.Flags&(unix.IFA_F_TENTATIVE|unix.IFA_F_DADFAILED) == 0
+			}
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return ready
+	})
+	server = startFixtureDNSMasq(t, provider, []string{"--dhcp-range=2001:db8:43::100,2001:db8:43::110,64,120s", "--dhcp-option=option6:dns-server,[fe80::2]", "--dhcp-option=option6:domain-search,wan.test", "--port=53", "--no-resolv", "--no-hosts", "--address=/wan.test/2001:db8:ffff::9"})
+	advertisedPrefix = "2001:db8:43::/64"
+	advertise(false, false)
+	if err := router.Process.Signal(unix.SIGHUP); err != nil {
+		t.Fatal(err)
+	}
+	movedAt := time.Now()
+	if err := unix.Kill(replacement.PID, unix.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	until(t, 20*time.Second, func() bool {
+		current, _ = snapshot()
+		return current.State == "bound" && len(current.Addresses) > 0 && strings.HasPrefix(current.Addresses[0].Address, "2001:db8:43:") && installed(current.Addresses[0].Address)
+	})
+	if installed(oldAddress) || current.ClientDUID != first.ClientDUID {
+		t.Fatal("NotOnLink retained the old address or changed DUID", oldAddress, current)
+	}
+	fixtureDHCP6Traffic(t, current.Addresses[0].Address)
+	resolverTraffic()
+	capture.mu.Lock()
+	rejected := false
+	for _, p := range capture.packets {
+		b := p.data
+		if p.at.Before(movedAt) || len(b) < 66 || b[20] != 17 || binary.BigEndian.Uint16(b[54:56]) != 547 || binary.BigEndian.Uint16(b[56:58]) != 546 || b[62] != 7 {
+			continue
+		}
+		opts, err := dhcp6FixtureOptions(b[66:])
+		if err != nil {
+			capture.mu.Unlock()
+			t.Fatal(err)
+		}
+		for _, o := range opts {
+			rejected = rejected || o.code == 13 && len(o.value) >= 2 && binary.BigEndian.Uint16(o.value) == 4
+		}
+	}
+	capture.mu.Unlock()
+	if !rejected {
+		t.Fatal("independent moved-link server did not send NotOnLink")
+	}
+	t.Log("independent dnsmasq NotOnLink withdrew the old IA_NA and reacquired on the new prefix with the same DUID and TCP/UDP")
 	address = current.Addresses[0].Address
 	cancelPeer()
 	until(t, 2*time.Second, func() bool { return unix.Kill(router.Process.Pid, 0) == unix.ESRCH })

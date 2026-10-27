@@ -548,7 +548,11 @@ func (r *Runtime) observe(ctx context.Context, u serviceconfig.Update) (*pending
 			}
 			if u.Sequence == old.Sequence {
 				if bytes.Equal(u.Snapshot, old.Snapshot) {
-					return nil, nil
+					effect := r.applications[u.Name]
+					if effect == nil && (u.Role == "vrrp" || u.Role == "bgp") {
+						effect = r.queueApplicationLocked(u)
+					}
+					return effect, nil
 				}
 				return nil, errors.New("protocol sequence reused with different snapshot")
 			}
@@ -594,7 +598,9 @@ func (r *Runtime) observe(ctx context.Context, u serviceconfig.Update) (*pending
 	}
 	r.recordGuardGrantLocked(u, time.Now())
 	r.records[u.Name] = u
-	if u.Role == "dhcp6" {
+	if u.Role == "vrrp" || u.Role == "bgp" {
+		effect = r.queueApplicationLocked(u)
+	} else if u.Role == "dhcp6" {
 		var snapshot dhcp6config.Snapshot
 		if err := json.Unmarshal(u.Snapshot, &snapshot); err != nil {
 			return nil, err
@@ -649,18 +655,13 @@ func (r *Runtime) Apply(ctx context.Context, u serviceconfig.Update) (servicecon
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if u.Role == "dhcp6" || u.Role == "ra_client" {
-		if effect == nil {
-			return serviceconfig.ApplicationReceipt{}, ErrStale
-		}
-		return r.waitEffectLocked(ctx, effect)
-	}
-	current, ok := r.records[u.Name]
-	binding, bound := r.bindings[u.Name]
-	if !ok || !bound || binding.digest != u.ConfigDigest || !sameUpdate(current, u) {
+	if effect == nil {
 		return serviceconfig.ApplicationReceipt{}, ErrStale
 	}
-	return r.waitApplicationLocked(ctx, u)
+	if u.Role == "vrrp" || u.Role == "bgp" {
+		return r.waitApplicationLocked(ctx, effect)
+	}
+	return r.waitEffectLocked(ctx, effect)
 }
 
 func strict(b []byte, v any) error {

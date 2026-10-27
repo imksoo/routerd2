@@ -29,6 +29,7 @@ SUITES = {
         ("TestDaemonDHCP6RAIndependentPeers", ("wan0",), 300),
         ("TestDaemonDHCP6DuplicateAddressDecline", ("wire0",), 90),
     ),
+    "dhcp6-ra-pd": (("TestDaemonDHCP6RAAddsAddressToPD", ("wire0", "lan0"), 120),),
     "pd-ra": (("TestDaemonPDGeneratedRAWorkerLifetime", ("wan0", "lan0"), 120),),
     "dhcp-relay": (
         ("TestDaemonDHCPRelayIndependentClientsAndServer", ("wan0", "lan0", "lan1"), 120),
@@ -52,6 +53,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("suite", choices=SUITES)
     parser.add_argument("--test", help="Run one named fixture from the selected suite")
+    parser.add_argument("--dhcp6-server", type=Path, default=Path("/usr/sbin/dhcpd"))
     parser.add_argument("--go", default="go")
     parser.add_argument("--binary-dir", type=Path, default=Path("dist/bin"))
     parser.add_argument("--output", type=Path, help="Retain logs/captures here; otherwise remove them after inspection")
@@ -79,13 +81,15 @@ def main():
             subprocess.run(root + ["mkdir", stage + "/bin"], check=True)
             for name in ("routerd", "routerd-modules", "routerd-logging"):
                 subprocess.run(root + ["install", "-m", "755", str(args.binary_dir.resolve() / name), stage + "/bin/" + name], check=True)
+            if args.suite == "dhcp6-ra-pd":
+                subprocess.run(root + ["install", "-m", "755", str(args.dhcp6_server.resolve()), stage + "/bin/dhcpd"], check=True)
             subprocess.run(root + ["install", "-m", "755", str(harness), stage + "/integration.test"], check=True)
             for name, interfaces, timeout in tests:
                 packets = stage + "/" + name
                 subprocess.run(root + ["mkdir", packets], check=True)
                 log_path = output / (name + ".log")
                 with log_path.open("w") as log:
-                    result = subprocess.run(root + ["env", "ROUTERD2_INTEGRATION_REQUIRED=1", "ROUTERD2_TEST_BIN_DIR=" + stage + "/bin", "ROUTERD2_TEST_EVIDENCE_DIR=" + packets, stage + "/integration.test", "-test.run=^" + name + "$", "-test.v", "-test.timeout=" + str(timeout) + "s"], stdout=log, stderr=subprocess.STDOUT, timeout=timeout + 15)
+                    result = subprocess.run(root + ["env", "ROUTERD2_INTEGRATION_REQUIRED=1", "ROUTERD2_DHCP6_SERVER=" + stage + "/bin/dhcpd", "ROUTERD2_TEST_BIN_DIR=" + stage + "/bin", "ROUTERD2_TEST_EVIDENCE_DIR=" + packets, stage + "/integration.test", "-test.run=^" + name + "$", "-test.v", "-test.timeout=" + str(timeout) + "s"], stdout=log, stderr=subprocess.STDOUT, timeout=timeout + 15)
                 content = log_path.read_text()
                 for interface in interfaces:
                     packet = subprocess.run(root + ["cat", packets + "/" + interface + ".pcap"], capture_output=True)

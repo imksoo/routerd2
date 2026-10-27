@@ -272,3 +272,54 @@ func TestInformationInfinityDoesNotScheduleRefreshOrSurviveBootChange(t *testing
 		t.Fatal("infinite information survived another boot")
 	}
 }
+
+func TestConfirmKeepsOriginalGrantAndSuccessOverridesNotOnLink(t *testing.T) {
+	clock := clockAt(time.Unix(1000, 0))
+	saved := dhcp6config.Snapshot{BootID: clock.BootID, ObservedNanos: uint64(clock.BoottimeNanoseconds), Interface: "wan0", IAID: 7, ClientDUID: "00030001", ServerDUID: "00030002", State: "bound", Addresses: []dhcp6config.Address{{Address: "2001:db8:42::100", PreferredUntil: lifetime.After(clock, 20), ValidUntil: lifetime.After(clock, 30)}}, RenewAt: lifetime.After(clock, 15), RebindAt: lifetime.After(clock, 24)}
+	c := client{cfg: dhcp6config.Config{Interface: "wan0", IAID: 7, RequestAddress: true}, duid: []byte{0, 3, 0, 1}}
+	restored, err := c.restoreLease(saved, clock)
+	if err != nil || !restored || c.lease.kind != confirm || c.snapshot.Active(clock) {
+		t.Fatal("address recovery skipped link confirmation", restored, err, c.snapshot)
+	}
+	packet := c.packet(&c.lease, time.Unix(0, clock.BoottimeNanoseconds))
+	opts, err := options(packet[4:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, o := range opts {
+		if o.code == 2 || o.code == 25 {
+			t.Fatal("Confirm included server identity or PD", o.code)
+		}
+	}
+	response := message{kind: reply, xid: c.lease.xid, client: c.duid, server: []byte{0, 3, 0, 2}, status: 4}
+	if err := c.accept(response, clock); err != nil || c.snapshot.Active(clock) {
+		t.Fatal("NotOnLink enabled the saved address", err, c.snapshot)
+	}
+	response.server = []byte{0, 3, 0, 3}
+	response.status = 0
+	if err := c.accept(response, clock); err != nil || !c.snapshot.Active(clock) {
+		t.Fatal("another server's Success did not complete Confirm", err, c.snapshot)
+	}
+	if c.snapshot.Addresses[0] != saved.Addresses[0] || c.snapshot.RenewAt != saved.RenewAt || c.snapshot.RebindAt != saved.RebindAt || c.snapshot.ServerDUID != saved.ServerDUID {
+		t.Fatal("Confirm changed the original grant or lease server", saved, c.snapshot)
+	}
+}
+
+func TestConfirmNotOnLinkDiscardsGrantAtEndOfReplyWindow(t *testing.T) {
+	now := time.Unix(1000, 0)
+	clock := clockAt(now)
+	c := client{cfg: dhcp6config.Config{RequestAddress: true}, duid: []byte{0, 3, 0, 1}, snapshot: dhcp6config.Snapshot{BootID: clock.BootID, Addresses: []dhcp6config.Address{{Address: "2001:db8:42::100", ValidUntil: lifetime.After(clock, 30)}}}}
+	if err := c.begin(confirm, now); err != nil {
+		t.Fatal(err)
+	}
+	c.lease.verifyUntil = now.Add(10 * time.Second)
+	if err := c.accept(message{kind: reply, xid: c.lease.xid, client: c.duid, server: []byte{0, 3, 0, 2}, status: 4}, clock); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.advance(clockAt(now.Add(9 * time.Second))); err != nil || c.lease.kind != confirm {
+		t.Fatal("NotOnLink prevented a later Success", err, c.snapshot)
+	}
+	if err := c.advance(clockAt(now.Add(10 * time.Second))); err != nil || len(c.snapshot.Addresses) != 0 || c.lease.kind != solicit {
+		t.Fatal("NotOnLink did not discard the old grant and discover again", err, c.snapshot)
+	}
+}

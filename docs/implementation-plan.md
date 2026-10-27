@@ -822,7 +822,7 @@ control交換前の旧PD Release、network/management PID維持、新control・P
 旧producerの通知409を確認した。captureは寿命0 RA→Release→対応Reply→PADTとなった。
 同じfactory実装の永続ext4付きrebootでも二回目起動の設定・DUID・SSHホスト鍵と転送復旧を確認した。
 SIGKILLで旧controlを失った場合と無応答peerでのcontrol交換は別の未検証範囲である。
-複数割当/PDとのDAD共存、required/observe-only・resolver効果・RA triggerのPD/HA組合せ・全kernel-link再設定・
+複数IA_NAとのDAD共存、required/observe-only・resolver効果・RA triggerのHA組合せ・全kernel-link再設定・
 control強制終了時の復旧・実suspend・更新trial中のreboot・VRF・全link option/lifecycle・WAN選択は残り、NET-05全体は未完了。
 
 既存uplinkへ専用MAC/DUIDのmacvlanを隔離接続し、実上流RA・DHCPv4・PD /60と
@@ -887,7 +887,7 @@ RA→RDNSS→AFTRの連結では、独立したRA/DNS/Linux AFTRと別namespace�
 新prefixでの復旧、RA/network worker再起動を確認した。`make check-ra-aftr`で再実行できる。
 firewallの名前照合に存在確認を要求して起動を阻害していた制約・補助collectorを削除した。
 AFTR source選択の全件sortを一回の走査へ変え、同じRAのsource/DNSでdecodeを共有する。
-required/observe-only・system resolver、RA triggerのPD/HA組合せ、suspend/reboot・VRF・対象実機の受入はまだ残る。
+required/observe-only・system resolver、RA triggerのHA組合せ、suspend/reboot・VRF・対象実機の受入はまだ残る。
 
 2026-10-27追加: `ra-dhcp6/native-34`は、旧routerdのnetplan生成・networkd adoptionと
 DUID/lease保存経路を比較し、同一interfaceの明示`ra_from`でM/Oを一つのDHCPv6 workerへ渡す。
@@ -903,6 +903,20 @@ M0O0待機→O情報取得→Mアドレス取得→解除後維持、学習経�
 IPv6 MTU1400/hop42・実packet hop42、writer交換、物理MTU1300による制限とconfirmed rollback、
 終了時の元1500/64復元が通った。先行終了試験の失敗は元値紛失ではなく、RA通知受付だけで
 worker/controlが終了する競合だった。適用ACKへ接続して修正し、一時診断コード・生ログ・captureを削除した。
+
+2026-10-27追加: `dhcp6-confirm/native-35`はIA_NA単独の同boot再起動でConfirmを使い、
+元grant/期限・T1/T2・lease serverを保つ。Successまたは無応答10秒の終了まで使用可能とは投影しない。
+NotOnLinkだけの終了では旧addressを撤去して新規取得する。PD要求時は同じ復旧経路のRebindを使う。
+旧routerdのDUID/PD保存・networkd委譲と、RFC9915/ISC clientを比較した。
+独立ISC/radvd・別Linuxの重複端末/SLAAC端末で、PD→RA MによるIA_NA追加、実DAD/Declineと
+PD側TCP/UDPの共存、server停止・M解除後の元NA/PD期限復旧とRebind更新が通った。
+独立dnsmasqのConfirm/Reply・元期限/T1/T2保持・TCP/UDP、無応答10秒後の元grant使用、
+実prefix変更のNotOnLinkによる旧NA撤去・同DUIDの新規取得とTCP/UDP/DNS復旧も通った。
+自然更新・120秒失効/復旧、Release、RA MTUのrollback/元値復元も維持した。
+最終`make check`（Go/Python・Race Detector・vet）とamd64/arm64静的buildは通った。
+全体Raceで見つかったVRRP/BGPの受付/適用待ち登録の競合も同時化して修正し、
+独立BGPのFIB/所有期限・再帰依存期限、keepalivedの初回ACK遅延と追加WAN identity/TCP/UDPが通った。
+最新実ONU/対象NICの受入へ拡大しない。
 
 **受入条件**
 

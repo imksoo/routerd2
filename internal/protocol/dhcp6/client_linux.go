@@ -42,6 +42,7 @@ type exchange struct {
 	attempts      int
 	offer         *message
 	verifyUntil   time.Time
+	notOnLink     bool
 }
 type client struct {
 	cfg                        dhcp6config.Config
@@ -92,6 +93,8 @@ func (c *client) begin(kind byte, now time.Time) error {
 		c.snapshot.State = "soliciting"
 	case request:
 		c.snapshot.State = "requesting"
+	case confirm:
+		c.snapshot.State = "confirming"
 	case renew:
 		c.snapshot.State = "renewing"
 	case rebind:
@@ -112,7 +115,7 @@ func (c *client) packet(e *exchange, now time.Time) []byte {
 	}
 	elapsed := min(65535, max(0, int(now.Sub(e.started)/(10*time.Millisecond))))
 	b = appendOption(b, 8, binary.BigEndian.AppendUint16(nil, uint16(elapsed)))
-	if e.kind != decline && e.kind != release {
+	if e.kind != decline && e.kind != release && e.kind != confirm {
 		b = appendOption(b, 6, []byte{0, 23, 0, 24, 0, 31, 0, 64, 0, 32, 0, 82, 0, 83})
 	}
 	if e.kind == information {
@@ -153,6 +156,9 @@ func (c *client) packet(e *exchange, now time.Time) []byte {
 	return b
 }
 func (c *client) transmit(conn *net.UDPConn, e *exchange, now time.Time) error {
+	if e.attempts == 0 && !e.verifyUntil.IsZero() {
+		e.verifyUntil = now.Add(10 * time.Second)
+	}
 	if err := conn.SetWriteDeadline(time.Now().Add(time.Second)); err != nil {
 		return err
 	}
@@ -275,6 +281,18 @@ func (c *client) accept(m message, clock boottime.Clock) error {
 		if !bytes.Equal(m.server, c.server) {
 			return nil
 		}
+	}
+	// Confirm checks link suitability, not the grant's server or lifetimes.
+	// A later Success from any server wins over an earlier NotOnLink.
+	if e.kind == confirm {
+		switch m.status {
+		case 0:
+			c.lease = exchange{}
+			c.snapshot.State = "bound"
+		case 4:
+			e.notOnLink = true
+		}
+		return nil
 	}
 	// A valid Decline Reply completes the exchange regardless of status,
 	// including NoBinding after a lost acknowledgement (RFC 8415 18.2.10.2).
@@ -435,6 +453,13 @@ func (c *client) advance(clock boottime.Clock) error {
 		c.snapshot.Prefixes = slices.DeleteFunc(slices.Clone(c.snapshot.Prefixes), expiredPrefix)
 	}
 	if !c.lease.verifyUntil.IsZero() && !now.Before(c.lease.verifyUntil) {
+		if c.lease.kind == confirm && c.lease.notOnLink {
+			c.snapshot.Addresses = nil
+			c.snapshot.RenewAt, c.snapshot.RebindAt = lifetime.Deadline{}, lifetime.Deadline{}
+			c.snapshot.InfoReceivedNanos = 0
+			c.info = exchange{}
+			return c.begin(solicit, now)
+		}
 		c.lease = exchange{}
 		c.snapshot.State = "bound"
 	}
@@ -449,7 +474,7 @@ func (c *client) advance(clock boottime.Clock) error {
 			return c.begin(rebind, now)
 		case hasLease && c.lease.kind == 0 && c.snapshot.RenewAt.BootID != "" && !c.snapshot.RenewAt.Live(clock):
 			return c.begin(renew, now)
-		case !hasLease && (c.lease.kind == 0 || c.lease.kind == renew || c.lease.kind == rebind):
+		case !hasLease && (c.lease.kind == 0 || c.lease.kind == renew || c.lease.kind == rebind || c.lease.kind == confirm):
 			return c.begin(solicit, now)
 		case c.lease.kind == solicit && c.lease.offer != nil && !now.Before(c.lease.next):
 			return c.selectOffer(now)
@@ -548,11 +573,7 @@ func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, updates <
 	}
 	c := client{cfg: cfg, duid: duid, maxSolicit: 3600 * time.Second, maxInformation: 3600 * time.Second, snapshot: dhcp6config.Snapshot{BootID: clock.BootID, Resource: cfg.Resource, Interface: cfg.Interface, IAID: cfg.IAID, ClientDUID: hex.EncodeToString(duid)}}
 	now := time.Unix(0, clock.BoottimeNanoseconds)
-	previous := saved.localSnapshot(clock, cfg.Interface)
-	if previous.BootID == clock.BootID && previous.ObservedNanos <= uint64(clock.BoottimeNanoseconds) && previous.Interface == cfg.Interface && previous.IAID == cfg.IAID && previous.ClientDUID == hex.EncodeToString(duid) {
-		c.snapshot.RAStarted = previous.RAStarted
-	}
-	restored, err := c.restorePD(previous, clock)
+	restored, err := c.restoreLease(saved.localSnapshot(clock, cfg.Interface), clock)
 	if err != nil {
 		return err
 	}

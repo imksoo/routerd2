@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"github.com/imksoo/routerd2/internal/lifetime"
 	"io"
 	"math"
 	mathrand "math/rand/v2"
@@ -18,6 +17,7 @@ import (
 	"time"
 
 	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/lifetime"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
 	"github.com/imksoo/routerd2/internal/statefs"
 )
@@ -84,15 +84,16 @@ func decodeState(cfg dhcp6config.Config, raw []byte) (checkpoint, error) {
 	return saved, nil
 }
 
-func (c *client) restorePD(saved dhcp6config.Snapshot, clock boottime.Clock) (bool, error) {
-	if !c.cfg.RequestPrefix || saved.BootID != clock.BootID || saved.Interface != c.cfg.Interface || saved.IAID != c.cfg.IAID || saved.ClientDUID != hex.EncodeToString(c.duid) || saved.ObservedNanos > uint64(clock.BoottimeNanoseconds) {
+func (c *client) restoreLease(saved dhcp6config.Snapshot, clock boottime.Clock) (bool, error) {
+	if saved.BootID != clock.BootID || saved.Interface != c.cfg.Interface || saved.IAID != c.cfg.IAID || saved.ClientDUID != hex.EncodeToString(c.duid) || saved.ObservedNanos > uint64(clock.BoottimeNanoseconds) {
 		return false, nil
 	}
-	saved.Prefixes = slices.DeleteFunc(slices.Clone(saved.Prefixes), func(p dhcp6config.Prefix) bool { return !p.ValidUntil.Live(clock) })
-	if len(saved.Prefixes) == 0 {
+	c.snapshot.RAStarted = saved.RAStarted
+	saved.Prefixes = slices.DeleteFunc(slices.Clone(saved.Prefixes), func(p dhcp6config.Prefix) bool { return !c.cfg.RequestPrefix || !p.ValidUntil.Live(clock) })
+	saved.Addresses = slices.DeleteFunc(slices.Clone(saved.Addresses), func(a dhcp6config.Address) bool { return !c.wantsAddress() || !a.ValidUntil.Live(clock) })
+	if len(saved.Prefixes)+len(saved.Addresses) == 0 {
 		return false, nil
 	}
-	saved.Addresses = slices.DeleteFunc(slices.Clone(saved.Addresses), func(a dhcp6config.Address) bool { return !c.cfg.RequestAddress || !a.ValidUntil.Live(clock) })
 	c.snapshot = saved
 	var err error
 	c.server, err = hex.DecodeString(saved.ServerDUID)
@@ -100,11 +101,15 @@ func (c *client) restorePD(saved dhcp6config.Snapshot, clock boottime.Clock) (bo
 		return false, err
 	}
 	now := time.Unix(0, clock.BoottimeNanoseconds)
-	if err := c.begin(rebind, now); err != nil {
+	kind := confirm
+	if c.cfg.RequestPrefix {
+		kind = rebind
+	}
+	if err := c.begin(kind, now); err != nil {
 		return false, err
 	}
-	// RFC 8415 18.2.12 verifies persisted PD with Rebind using Confirm's
-	// bounded retry parameters. Neither recovery nor silence renews a lease.
+	// RFC 9915 18.2.3/18.2.12: address-only recovery uses Confirm; PD uses
+	// Rebind with the same bounded retry parameters. Neither rebases a grant.
 	c.lease.next = now.Add(time.Duration(mathrand.Int64N(int64(time.Second))))
 	c.lease.verifyUntil = now.Add(10 * time.Second)
 	if saved.InformationRefreshAt.Nanos != 0 {
