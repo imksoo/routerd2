@@ -728,6 +728,11 @@ bridge MAC変更後の古いSLLA広告を修正した。保存状態なしの起
 同じDS-Lite TCP接続とUDP DNSが100分継続し、更新後のLAN IPv4/IPv6 HTTPSも通った。
 tunnel indexは不変、PD workerはgeneration 1だった。Rebind/失効/Releaseの実回線受入、
 ONU型番・直結配線・NIC資格判定、以降の修正を含む最新版の実回線受入は未完了。
+2026-10-27の別`fragment-readiness/native-21`では、DHCPv4 defaultを無効にした実AFTR経路で
+130回（約132分）の観測が終了コード0で完了した。HTTPS HEAD780回を同じTCP接続で続け、
+UDP DNS3900回も通った。自然T1のRenew/送信元49153 Reply、captureの開始SYN sequence1種類、
+30秒ごとの転送先`dslite0`、最終control ready・全protocol worker世代1を確認した。
+これはnative-21での結果であり、最新版native-24や物理ONU/NICの受入へ拡大しない。
 [既存routerdとの比較](routerd-reuse-review.md)を各モジュールで継続する。
 受信IAIDはdecoderで選択し、不良・無関係IAや独立optionで有効な割当全体を捨てない。
 リンクローカルDNS/SNTPを許可し、独立dnsmasqと通常DAD・scope付きDNS実問い合わせ・

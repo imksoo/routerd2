@@ -41,7 +41,10 @@ PPPの同じifindex・worker世代を維持した。captureの実PPPoE frameでR
 engine配布・署名、resolverへのDNS反映、全field、実ISP PPP／対象物理機の受入は未完了。
 実上流の長時間試験は別の`fragment-readiness`/native-21 cohortであり、この版の受入とは区別する。
 02:27:11 UTCの自然T1 Renewと49153からのReplyをcaptureで確認し、その後も同一TCP/UDPとcontrol readyが続いた。
-長時間試験は継続中で、130回の全観測完了や対象物理機のqualificationはまだ主張しない。
+130回（約132分）の全観測と監視processの終了コード0を確認した。HTTPS HEAD780回・UDP DNS3900回が通った。
+TCP source portは同じで、captureの開始SYN sequenceも1種類だった。実forward lookupは30秒ごとにdslite0を確認し、
+DHCPv4 defaultを無効にして代替経路での成功を除いた。最終control ready、全protocol worker世代1を確認した。
+対象物理機・ONU直結・NIC qualification、以降の最新版での同じ長時間受入は未完了。
 
 ## 直前版: underlay-mtu / native-23
 
@@ -194,7 +197,9 @@ publisher入力はprivate temporary directoryの変更不可copyとし、group-w
   未適用の状態をReady/confirmed扱いにはしない。
   新`fragment-readiness`版を00:26 UTCにfresh stateで起動し、DHCPv4 default無効、
   `ready`と`dslite0`選択を確認した。00:27 UTCから同一TCP/UDPの130分試験を再開始した。
-  `dist/live-ready-continuity.log`へ出力中で、自然T1・長時間通信はまだ受入扱いにしない。
+  02:27 UTCの自然T1 Renew/49153 Reply後も同じTCP/UDPが通り、130回（約132分）の監視が終了コード0で完了した。
+  `dist/live-ready-continuity.log`に現在の診断結果がある。最終control ready・全protocol worker世代1。
+  native-21での実AFTR経由の受入であり、native-24や物理ONU/NICの受入ではない。
   停止済みの旧試験のlog/captureはユーザー指示で削除した。
   kernel比較は`dist/route-request-kernel-before.log` / `route-request-kernel-root.log`、
   RA実daemonは`dist/route-request-ra-peer/`。物理ONU identity・直接配線・NIC受入は未確認。
