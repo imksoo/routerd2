@@ -430,7 +430,7 @@ ACTIVE成功には元boot IDと絶対期限を保持するVIP投影が必要で�
 旧世代・上書きされた通知や適用失敗を成功として返さない。
 
 このsource受入範囲の追加に伴い、署名されたconfiguration contractは
-`resource-program-native-20`とする。PPPの有限`.active` factで依存workerを起動し、PPP unitの
+`resource-program-native-21`とする。PPPの有限`.active` factで依存workerを起動し、PPP unitの
 UP/addressはpppdが所有する。`forwarding.ipv4_rp_filter`はLinux all/defaultを明示して管理する
 （0:無効、1:strict、2:loose、省略:管理しない）。撤去時は記録した元の値へ戻す。
 BFDの明示`multihop: true`はinterfaceを指定せず、
@@ -537,11 +537,35 @@ firewall:
 
 既存のowned inet tableへforward/mangle hookを追加し、他のfirewall変更と同じnft batchで交換する。
 forward許可、interface MTU、UDP/QUICのfragment処理、PMTU探索の設定は変更しない。
-`disable_forward`はforwardのfilter hookを省略する指定で、明示したMSS/NAT hookは有効である。
-これは固定の明示MTUに対するnative機能であり、bridge-family clamp、旧PathMTUPolicyの変換、
-動的なpath MTU導出、IPv4 force-fragmentの受入は未完了である。
+`disable_forward`はforwardのfilter hookを省略する指定で、明示したMSS/DF/NAT hookは有効である。
+これは固定の明示MTUに対するnative機能であり、bridge-family clampとinterface/tunnel宣言からの自動MTU導出は未完了である。
+固定版routerdでは`PathMTUPolicy`自体は廃止済みであり、その旧resourceのreaderは追加しない。
 
 `make check-dual-wan`は独立RP-PPPoE AC/Linux AFTRと、その先のMTU-1500端末を使う。
 IPv4 PMTU通知を上流で遮断した同じ構成で、修正前は小packetとHealthだけが通り、1MiB TCPは停止した。
 修正後はPPP/DS-Liteの両方で1MiB download/upload、IPv6、MSS1200、切替とworker再起動後の
 転送が通った。captureでPPP 1414、DS-Lite 1420、IPv6 1400、元の1200維持を確認した。
+
+## IPv4 DF解除とkernelのfragment
+
+`firewall.ipv4_clear_df`は`from`（入力interface）、`to`（FIBが選ぶ出力interface）、
+`mtu`（DF解除の閾値）を明示する。global RPDBの宛先lookupへpacketの送信元と現在のmarkを
+渡し、指定pathで閾値を超えた未fragmentのDF付きIPv4 packetだけをDFなしへ変更する。
+preroutingのDNAT後・forwardのMTU判定前に適用し、IPv4 header checksumはkernelが更新する。
+
+```yaml
+ipv4_clear_df:
+  - {from: lan0, to: ppp-wan, mtu: 1454}
+  - {from: lan0, to: dslite0, mtu: 1460}
+```
+
+これはinterface MTUを変更せず、packetを自前で分割しない。実際の出力MTUを超えたpacketは
+kernelがfragmentする。受信済みfragment、閾値以下、別の入力／FIB出力、IPv6は変更しない。
+この機能は通常のPMTU探索に代わりDFを解除するoperatorの明示選択で、既定では適用しない。
+VRF・iif条件付きRPDBや動的なMTU導出は未受入であり、global source/mark選択の試験と分ける。
+
+`make check-dual-wan`では、接続UDPと`IP_PMTUDISC_PROBE`を使って1450-byte payloadを送る。
+probeは学習済みPMTUを無視して実際にDF付きpacketを送出するためのLinux socket設定である。
+PPPで1452+46、DS-Liteで1460+38-byteに分割され、独立Linux peerの再構成後に全payloadが往復した。
+sourceでDS-Liteを選ぶ間もmark41でPPPを選ぶ1458-byte DF packetが通り、入力markを使うlookupを確認した。
+独立したmark tableはrouterd2のowned table交換後も保持された。AFTR再起動後のUDPも確認した。

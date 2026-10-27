@@ -92,6 +92,9 @@ func buildFirewall(c *nftables.Conn, f *Firewall) {
 	if len(f.MSSClamp) > 0 {
 		buildMSSClamp(c, t, f.MSSClamp)
 	}
+	if len(f.IPv4ClearDF) > 0 {
+		buildIPv4ClearDF(c, t, f.IPv4ClearDF)
+	}
 	var pre, post *nftables.Chain
 	accept := nftables.ChainPolicyAccept
 	for _, rule := range f.NAT {
@@ -224,6 +227,31 @@ func buildMSSClamp(c *nftables.Conn, table *nftables.Table, rules []MSSClamp) {
 				&expr.Cmp{Op: expr.CmpOpGt, Register: 1, Data: mss},
 				&expr.Immediate{Register: 1, Data: mss},
 				&expr.Exthdr{SourceRegister: 1, Type: 2, Offset: 2, Len: 2, Op: expr.ExthdrOpTcpopt},
+				&expr.Counter{},
+			)
+			c.AddRule(&nftables.Rule{Table: table, Chain: chain, Exprs: match})
+		}
+	}
+}
+
+// IPv4 checks DF/MTU before the forward hook. Match after DNAT so the FIB sees
+// the translated destination, and include packet marks used by policy routing.
+func buildIPv4ClearDF(c *nftables.Conn, table *nftables.Table, rules []IPv4ClearDF) {
+	accept := nftables.ChainPolicyAccept
+	chain := c.AddChain(&nftables.Chain{Name: "ipv4_clear_df", Table: table, Type: nftables.ChainTypeFilter, Hooknum: nftables.ChainHookPrerouting, Priority: nftables.ChainPriorityRef(-99), Policy: &accept})
+	for _, rule := range rules {
+		for _, match := range packetExpressions(PacketMatch{Family: 4, InInterface: rule.From}) {
+			name := make([]byte, 16)
+			copy(name, rule.To)
+			match = append(match,
+				&expr.Fib{Register: 1, ResultOIFNAME: true, FlagDADDR: true, FlagMARK: true},
+				&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: name},
+				&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseNetworkHeader, Offset: 2, Len: 2},
+				&expr.Cmp{Op: expr.CmpOpGt, Register: 1, Data: binaryutil.BigEndian.PutUint16(uint16(rule.MTU))},
+				&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseNetworkHeader, Offset: 6, Len: 2},
+				&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{0x40, 0}},
+				&expr.Immediate{Register: 1, Data: []byte{0, 0}},
+				&expr.Payload{OperationType: expr.PayloadWrite, SourceRegister: 1, Base: expr.PayloadBaseNetworkHeader, Offset: 6, Len: 2, CsumType: expr.CsumTypeInet, CsumOffset: 10},
 				&expr.Counter{},
 			)
 			c.AddRule(&nftables.Rule{Table: table, Chain: chain, Exprs: match})

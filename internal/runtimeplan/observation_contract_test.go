@@ -30,6 +30,10 @@ func TestObservationReceiptDoesNotDependOnUnrelatedConditions(t *testing.T) {
 		if err := r.Observe(ctx, update(t, r, "service.wan", 1, lease4(time.Now().Add(time.Hour)))); err != nil {
 			t.Fatal(err)
 		}
+		r.reportReadiness(ctx)
+		if status := r.Health(); status.Phase != "applying" || status.LastError != "" {
+			t.Fatal("ordinary observation/application progress reported a failure", status)
+		}
 		if n.calls != calls || r.CheckReady(ctx) == nil {
 			t.Fatal("observation receipt performed kernel IO or advertised unapplied readiness", conditional)
 		}

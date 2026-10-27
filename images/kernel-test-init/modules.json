@@ -8,6 +8,7 @@
   "macvlan",
   "wireguard",
   "nf_tables",
+  "nft_fib_inet",
   "nft_ct",
   "nft_chain_nat",
   "nft_masq",

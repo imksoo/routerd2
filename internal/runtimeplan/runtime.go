@@ -153,6 +153,8 @@ func New(dir, stateDir string, n Network, supervisorInstance string) *Runtime {
 	return &Runtime{reconcileWake: make(chan struct{}, 1), waitWake: make(chan struct{}, 1), op: semaphore.NewWeighted(1), supervisorInstance: supervisorInstance, dir: dir, stateDir: stateDir, network: n, manager: managerClient{localapi.NewClient(filepath.Join(dir, supervisor.SocketName))}, bindings: map[string]binding{}, records: map[string]serviceconfig.Update{}, liveRA: map[string]ra.Config{}, dhcpServers: map[string]dhcpserverconfig.Snapshot{}, phase: "starting"}
 }
 
+var errApplicationPending = errors.New("accepted protocol observations await network application")
+
 // CheckReady queries the process manager at confirmation time. A previously
 // successful configuration cannot be confirmed while one of its required
 // protocol processes has since crashed or entered restart backoff.
@@ -167,7 +169,7 @@ func (r *Runtime) CheckReady(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.applied.hash == "" || r.applied.sourceEpoch != r.sourceEpoch || r.applied.observationVersion != r.observationVersion {
-		return errors.New("accepted protocol observations await network application")
+		return errApplicationPending
 	}
 	if r.applied.untilNanos != 0 {
 		clock, err := boottime.Read()
@@ -212,7 +214,7 @@ func (r *Runtime) CheckReady(ctx context.Context) error {
 		// A new prerequisite may have released dependents since the last
 		// network ACK. Confirmation waits until that projection is applied.
 		if !reflect.DeepEqual(p.resources, r.resourceStates) {
-			return errors.New("resource projection has not converged")
+			return errApplicationPending
 		}
 	}
 	return nil
@@ -855,11 +857,15 @@ func (r *Runtime) reconcileDynamic(ctx context.Context) error {
 // still be waiting for admission. Configuration and monitoring report the same
 // current readiness rather than advertising Ready from a successful write alone.
 func (r *Runtime) reportReadiness(ctx context.Context) {
-	if err := r.CheckReady(ctx); err != nil {
-		r.failure(err)
-		return
-	}
+	err := r.CheckReady(ctx)
 	r.mu.Lock()
-	r.phase, r.lastError = "ready", ""
-	r.mu.Unlock()
+	defer r.mu.Unlock()
+	switch {
+	case err == nil:
+		r.phase, r.lastError = "ready", ""
+	case errors.Is(err, errApplicationPending):
+		r.phase, r.lastError = "applying", ""
+	default:
+		r.phase, r.lastError = "degraded", err.Error()
+	}
 }

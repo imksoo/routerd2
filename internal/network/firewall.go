@@ -76,6 +76,15 @@ type MSSClamp struct {
 	MTU    int    `json:"mtu"`
 }
 
+// IPv4ClearDF allows the kernel to fragment an oversized unfragmented IPv4
+// packet on a selected path. The destination FIB lookup includes its current
+// source and mark. MTU is the threshold for clearing DF, not an interface MTU.
+type IPv4ClearDF struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+	MTU  int    `json:"mtu"`
+}
+
 func normalizedPortRange(p PortRange) PortRange {
 	if p.End == 0 {
 		p.End = p.Start
@@ -206,6 +215,11 @@ func validateFirewall(f *Firewall) error {
 	var errs []error
 	if f.DisableForward && (f.ForwardChain != nil || len(f.Forward) > 0) {
 		errs = append(errs, errors.New("firewall: disable_forward conflicts with forward_chain/forward pairs"))
+	}
+	for i, rule := range f.IPv4ClearDF {
+		if !validName(rule.From) || !validName(rule.To) || rule.MTU < 576 || rule.MTU > 65535 {
+			errs = append(errs, fmt.Errorf("IPv4 clear DF %d: from/to interfaces and MTU 576..65535 are required", i))
+		}
 	}
 	for i, rule := range f.MSSClamp {
 		if !validName(rule.From) || !validName(rule.To) {

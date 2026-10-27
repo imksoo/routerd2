@@ -342,10 +342,31 @@ func nativeUDPExchange(t *testing.T, clientNS, serverNS netns.NsHandle, network,
 	for _, c := range []*net.UDPConn{client, server} {
 		_ = c.SetDeadline(time.Now().Add(2 * time.Second))
 	}
-	if _, err := client.Write([]byte("udp-probe")); err != nil {
+	if network == "udp4" {
+		for _, item := range []struct {
+			conn *net.UDPConn
+			mode int
+		}{{client, unix.IP_PMTUDISC_PROBE}, {server, unix.IP_PMTUDISC_DONT}} {
+			raw, err := item.conn.SyscallConn()
+			if err != nil {
+				t.Fatal(err)
+			}
+			var optionErr error
+			if err := raw.Control(func(fd uintptr) {
+				optionErr = unix.SetsockoptInt(int(fd), unix.IPPROTO_IP, unix.IP_MTU_DISCOVER, item.mode)
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if optionErr != nil {
+				t.Fatal(optionErr)
+			}
+		}
+	}
+	payload := bytes.Repeat([]byte("u"), 1450)
+	if _, err := client.Write(payload); err != nil {
 		t.Fatal(err)
 	}
-	buffer := make([]byte, 128)
+	buffer := make([]byte, len(payload)+1)
 	n, source, err := server.ReadFromUDP(buffer)
 	if err != nil {
 		t.Fatalf("UDP exchange %s: %v", destination, err)
@@ -354,7 +375,7 @@ func nativeUDPExchange(t *testing.T, clientNS, serverNS netns.NsHandle, network,
 	if source.IP.String() != wantSource || source.Port < p.Start || source.Port > p.End {
 		t.Fatalf("UDP source %s want %s ports %+v", source, wantSource, p)
 	}
-	if string(buffer[:n]) != "udp-probe" {
+	if !bytes.Equal(buffer[:n], payload) {
 		t.Fatalf("UDP payload %q", buffer[:n])
 	}
 	if _, err := server.WriteToUDP(buffer[:n], source); err != nil {
@@ -364,7 +385,7 @@ func nativeUDPExchange(t *testing.T, clientNS, serverNS netns.NsHandle, network,
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(buffer[:n]) != "udp-probe" {
+	if !bytes.Equal(buffer[:n], payload) {
 		t.Fatal("UDP echo mismatch")
 	}
 }

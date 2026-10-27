@@ -106,7 +106,7 @@ class GuestResultTest(unittest.TestCase):
     def test_fixed_kernel_module_roots_are_declared_once(self):
         roots = json.loads((GATE.PROJECT / "images/kernel-test-init/modules.json").read_text())
         self.assertEqual(len(roots), len(set(roots)))
-        self.assertTrue({"af_packet", "wireguard", "veth", "ip6_tunnel", "nft_ct", "nft_chain_nat"}.issubset(roots))
+        self.assertTrue({"af_packet", "wireguard", "veth", "ip6_tunnel", "nft_ct", "nft_chain_nat", "nft_fib_inet"}.issubset(roots))
         init = (GATE.PROJECT / "images/kernel-test-init/main.go").read_text()
         self.assertIn("go:embed modules.json", init)
 

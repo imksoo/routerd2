@@ -1,6 +1,6 @@
 # 現行 routerd と同等の製品にするための実装計画
 
-作成日: 2026-10-24。更新日: 2026-10-26。開発中。全体ゴールは継続中。
+作成日: 2026-10-24。更新日: 2026-10-27。開発中。全体ゴールは継続中。
 
 過去のcheckpoint列挙を削除した。過去の試験・API・保存形式の維持を実装制約にしない。
 [AGENTS.md](../AGENTS.md) に従い、機能と実通信を満たす簡潔な構造へ作り直す。
@@ -577,12 +577,21 @@ network intentのprotocol投影もJSON往復を除き、変更する集合だけ
 
 #### NET-03 — Firewall・ingress・MTU/MSS・fragment policy
 
+2026-10-27: native `firewall.ipv4_clear_df`で入力・FIB出力・閾値を明示し、DNAT後・
+forward MTU判定前にDFだけを解除する。独立PPP/AFTRで1450-byte UDP payloadを往復し、
+PPP1452+46／DS-Lite1460+38-byteのkernel fragmentと元のID/offsetをcaptureで確認した。
+source policyのDSLよりmark41のPPPを優先するDF packet、AFTR再起動後のUDPも通った。
+Alpine linux-virt 6.18.58-r0の実kernelでも1450-byte UDP/NATを確認し、
+製品imageのmodule rootへ`nft_fib_inet`を追加した。
+VRF/iif経路、動的導出、IPv6 PTB/QUICなど全体受入は残る。固定routerdはPathMTUPolicyを
+廃止しており、必要なのは実在するinterface/tunnel宣言からの導出であって旧kind readerではない。
+
 2026-10-26: 旧`writeTCPMSSClampTable`のSYN/SYN-ACK・小MSS維持をnativeの
 `firewall.mss_clamp`へ移した。明示MTUと一方向のinterface pairを既存owned nft batchで管理する。
 独立RP-PPPoE/Linux AFTRの先のMTU-1500端末と通信し、ICMP MTU通知の遮断時に修正前の
 1MiB download停止を再現した。修正後は両WANの1MiB download/upload、IPv6 TCP、
 MSS1200、障害切替・AFTR再起動後の大転送を確認した。captureのSYN/SYN-ACKはPPP1414、
-DS-Lite1420、IPv61400で、1200は不変。bridge/force-fragment/動的path導出/旧resource変換は未完了。
+DS-Lite1420、IPv61400で、1200は不変。bridge向け処理とinterface/tunnelからの自動MTU導出は未完了。
 
 範囲: 旧 routerd 互換 / track: network / risk: high。
 前提: CORE-03, CORE-04。
@@ -753,7 +762,10 @@ host suffixもmanaged bindingへ変換する。native address maskは/64で、�
 静的source/delegationはcompile時に解決し、sourceの実owner interfaceでDAD・所有権を確認する。
 独立Kea/DNS/Linux AFTRでPDとIA_NA双方のTCP/UDP、更新中の同一TCP、元期限撤去・復旧を確認した。
 実上流のPD `::100` sourceでも実AFTR往復とLAN IPv4/IPv6 HTTPS/UDPが通った。
-この版の自然T1を含む長時間試験は継続中。全SelfAddressPolicy/HA/VRFは未完了。
+`route-request-fix`の長時間試験は49分で通常の適用待ちを誤ってdegraded表示し、監視が停止した。
+長時間受入は未完了。適用待ちはapplyingと表示し、未適用のconfirmedは引き続き拒否する。
+新`fragment-readiness`をfresh stateで実上流へ起動し、DHCPv4 default無効・dslite0経路で
+同一TCP/UDPを再試験中。全SelfAddressPolicy/HA/VRFは未完了。
 [設定例](../examples/wan-dslite-pd.yaml)と[引き継ぎ](pve-codex-handoff.md)を参照する。
 
 #### NET-06 — LAN・DHCPv6・relay・DNS の resource 完全化
@@ -835,7 +847,7 @@ learned route先の利用者TCP/UDPも通信し、撤去中の接続拒否と復
 明示VRFではmultihop socketをVRF master、single-hopをmember interfaceへ束縛する。
 source domainとBGP FIB tableも検証する。同じendpointを持つ二つのVRFとdefault domainで
 実daemonを動かし、独立TCP/UDP・片側UDP障害・worker交替・main tableへの流出防止を確認した。
-single-hop VRFも実peerと障害・復旧を確認した。現在のcompiler contractはnative-20。
+single-hop VRFも実peerと障害・復旧を確認した。現在のcompiler contractはnative-21。
 IPv4/IPv6とも同じendpointを二つのVRFとdefault domainで同時使用し、BFD/BGPと三経路の
 TCP/UDPを確認した。defaultとVRFのUDP bind競合は受信socketだけの`SO_REUSEADDR`で修正した。
 domain/sourceの既存claimで二重ownerを拒否し、TX port専有と`SO_REUSEPORT`不使用を維持する。

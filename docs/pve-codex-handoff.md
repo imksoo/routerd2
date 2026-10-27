@@ -1,6 +1,6 @@
 # routerd2 開発引き継ぎ
 
-2026-10-26。全体ゴールは継続中。対象実機で利用可能とは判断していない。
+2026-10-27。全体ゴールは継続中。対象実機で利用可能とは判断していない。
 機能範囲は [implementation-plan.md](implementation-plan.md) と
 [implementation-plan.json](implementation-plan.json) を参照する。
 
@@ -8,9 +8,39 @@
 維持するための実装は残さない。過去の `docs/evidence` は削除済み。
 現在の設計に合わせてfixtureを更新し、prototype reader・adapter・migrationは作らない。
 容量不足へのユーザー指示で、過去の`dist/goal-validation`・停止済みfixture・旧log/captureは削除した。
-本文の旧`dist/`参照は履歴上の実行先であり、現存する証跡を意味しない。現在の実行中試験のみ保持する。
+本文の旧`dist/`参照は履歴上の実行先であり、現存する証跡を意味しない。現在の診断・受入に必要な出力だけを一時保持する。
+2026-10-27には`/tmp`の旧試験結果・ISO展開・release検証物も約26GiB削除した。再保存しない。
+
+## 今回の確認と継続中の受入
+
+`fragment-readiness`（native-21 / network journal 8）で`make check build-linux`を完了した。
+Go/Python、全体Race Detector、vet、amd64/arm64の6静的ELFが成功した。
+`make release-built-test`も実6ELFの署名・catalog・publisher検証を通った。
+publisher入力はprivate temporary directoryの変更不可copyとし、group-writableな作業領域の
+拒否を回避するために製品側の検証を緩めていない。arm64は実行していない。
+現在の一時出力は`dist/fragment-final-check-build.log`、`dist/fragment-built-release.log`。
+実peer結果は`dist/fragment-current/`、Alpine実kernelは`dist/fragment-qemu-network.log`。
+これらは今回の診断用であり、長期保存やバックアップを行わない。
+`make image DOCKER='sudo -n docker' RELEASE_ID=fragment-readiness`もAPK検査を含めて成功した。
+このAPK由来image（Alpine kernel 6.18.58-0-virt）は`make qemu-smoke`で実PID 1起動と
+`ROUTERD_READY`を確認した。これはPPPoE engine同梱や全profileの更新受入ではない。
+実上流の自然T1/長時間受入と物理機のqualificationは未完了である。
 
 ## 現在の実装
+
+- `firewall.ipv4_clear_df`は明示した入力・FIB出力・MTU閾値で大きいDF付きIPv4だけを変更する。
+  旧routerdのprerouting処理を土台にし、source/markを含むglobal宛先lookupをDNAT後に行う。
+  kernelがheader checksumとfragmentを処理する。新しいfragment器・状態・managerはない。
+  独立PPP/Linux AFTRとの1450-byte UDP payloadはDFあり／なし双方で往復した。
+  captureではPPP1452+46、DS-Lite1460+38-byte、同じID・正しいoffset、実AFTRカプセル化を確認した。
+  source policyがDSLを選ぶ間のmark41→PPP（1458-byte DF）と、AFTR再起動後のUDPも通った。
+  再実行は`make check-dual-wan`、現在の結果は`dist/fragment-current/`。
+  最終`fragment-readiness`版でも独立peerとの全経路を再実行した。
+  Alpine linux-virt 6.18.58-r0（6.18.58-0-virt）のQEMUでも1450-byte UDP/NATが通った。
+  `nft_fib_inet`を製品と試験のmodule rootへ追加した。試験用peer handleは必要な
+  `NETLINK_ROUTE`だけを開く。ホストでは不要なNetlink familyまで使えていた。
+  VRF/iif条件付きRPDB、自動MTU導出、IPv6 PTB/QUIC/物理NICの受入は未完了。
+  固定比較元1329ef54f296は`PathMTUPolicy`を廃止しているため、「旧resource変換」という前記を訂正した。
 
 - `firewall.mss_clamp`で明示MTUと一方向のinterface pairを指定し、IPv4/IPv6 TCPの
   SYN/SYN-ACKにある大きいMSSだけを下げる。旧routerdの同処理を土台にした。
@@ -19,13 +49,16 @@
   修正前はHealthと小packetが正常でも1MiB downloadが停止した。修正後は両WANで
   1MiB download/upload、IPv6、MSS1200、切替・AFTR worker再起動後の転送が通った。
   captureのSYN/SYN-ACKはPPP1414、DS-Lite1420、IPv61400、元の1200を維持した。
-  再実行は`make check-dual-wan`。現在の結果は`dist/mss-current/`、capture要約は
-  `dist/mss-capture-summary.json`。小payloadだけの旧fixtureは追加backendへ置き換えた。
-  bridge-family clamp、旧PathMTUPolicy変換、動的MTU導出、force-fragment、UDP/QUIC/実NICは未受入。
-  実回線の長時間試験はMSS追加前の`route-request-fix`（native-19）で継続中であり、
-  今回のMSS版を実回線へdeployしたものではない。
+  再実行は`make check-dual-wan`。今回の`dist/fragment-current/traffic.pcap`でも
+  MSS1414/1420/1400と1200維持を確認した。旧MSS出力は削除済み。
+  小payloadだけの旧fixtureは追加backendへ置き換えた。
+  bridge-family clamp、interface/tunnelからの自動MTU導出、QUIC/実NICは未受入。
+  実回線は新しい`fragment-readiness`（native-21）の隔離状態へ切り替えた。
+  MSS/DFを明示した版でLANから実Cloudflare HTTPSの1MiB download/uploadも成功した。
+  実回線captureのIPv4-in-IPv6とTCP MSS1420を確認した。
+  実回線での大きなUDP/QUIC受入は未完了。
   `make check build-linux RELEASE_ID=mss-clamp`（Go/Python、race、vet、6静的ELF）が通った。
-  記録は`dist/mss-check-build.log`、実行したELFのhashは`dist/mss-executed-hashes.json`。
+  これらの旧ログ・hashファイルは削除済みである。
 
 - 実 PPPoE と独立 Linux AFTR の二経路を、別 LAN client から native Health/PBR 経由で
   通信した。TCP/UDP の応答で PPP/DS-Lite の選択を識別し、主 probe だけの停止・復旧、
@@ -66,8 +99,14 @@
   LAN TCPで確認する。30,000 UDP・同一TCP、writer/control/supervisor停止中の失効と復旧が通った。
   修正版 `route-request-fix` はDHCPv4 default routeを明示的に無効にした新しい隔離状態で
   `ready`、全worker第1世代、LAN IPv4/IPv6 HTTPSとUDP DNSが通った。`dslite0`選択と
-  実AFTRのIPv4-in-IPv6往復、RX/TXをcapture/経路で確認した。新しい130分試験は
-  `dist/live-route-request-continuity.log`へ出力中で、完了扱いにしない。
+  実AFTRのIPv4-in-IPv6往復、RX/TXをcapture/経路で確認した。
+  同一TCP/UDP試験は49分後、通常の観測適用待ちを`degraded`と表示したため監視が停止した。
+  この停止はpacket lossを示さないが、TCPも閉じたため130分受入は未完了である。
+  `reportReadiness`は通常の適用待ちを`applying`、実際の失敗を`degraded`に分けた。
+  未適用の状態をReady/confirmed扱いにはしない。
+  新`fragment-readiness`版を00:26 UTCにfresh stateで起動し、DHCPv4 default無効、
+  `ready`と`dslite0`選択を確認した。00:27 UTCから同一TCP/UDPの130分試験を再開始した。
+  `dist/live-ready-continuity.log`へ出力中で、自然T1・長時間通信はまだ受入扱いにしない。
   停止済みの旧試験のlog/captureはユーザー指示で削除した。
   kernel比較は`dist/route-request-kernel-before.log` / `route-request-kernel-root.log`、
   RA実daemonは`dist/route-request-ra-peer/`。物理ONU identity・直接配線・NIC受入は未確認。
@@ -148,7 +187,7 @@
 - Health監視と履歴配送は分離する。保存先障害・queue満杯でもprobeを止めず、欠落と保存エラーを表示する。
   全probeの無欠落保存は保証しない。
 
-現在のworker ABIは3、compiler contractは `resource-program-native-20`、network journalはformat 8。
+現在のworker ABIは3、compiler contractは `resource-program-native-21`、network journalはformat 8。
 `track.resource`は宣言IDであり、decisionはhealthy/unhealthy/neutral/unknownを明示する。
 破棄したservice-only形式のreader・混在運用・migrationは実装しない。
 
@@ -370,10 +409,8 @@ tunnel index不変、元preferred期限での撤去、Kea再開後のTCP/UDP復�
 通常DAD・fresh stateで全workerがgeneration 1。PD内`::100`から実DNS/AFTRを使い、
 LAN IPv4/IPv6 HTTPS 301とUDP DNSが通った。route getはdslite0、captureはPD source/実AFTR間の
 IPv4-in-IPv6往復を確認した。別のIPv4 defaultによる成功とは数えていない。
-現行の場所は`dist/live-pd-source-location.json`、captureはそのprivate stage、
-実行ELFのSHAは`dist/live-pd-source-executed-hashes.json`。
-同一TCP/UDPの130分試験は`dist/live-pd-source-continuity.log`へ経過を出す。
-元T1=7200秒の自然更新を含むこの版の完走はまだ確認していない。所有者は3時間上限でcleanupする。
+この旧PD-source版の試験は111分後のUDP失敗で停止した。完走ではない。
+旧log/captureは削除済み。現在の実回線試験と未完了範囲は冒頭の状態を参照する。
 対象ONU型番・直結配線・物理NIC/性能のqualificationとは区別する。
 
 ## 未完了と次の作業

@@ -217,6 +217,7 @@ func runKernelFixture(t *testing.T) {
 	runNativePolicyFixture(t, e, d, clientNS, serverNS)
 	runNativeECMPFixture(t, e, d, clientNS, serverNS)
 	runNativeACLNATFixture(t, e, d, clientNS, serverNS)
+	runNativeIPv4FragmentFixture(t, e, d, clientNS, serverNS)
 	runNativeRAStateFixture(t, e, d, clientNS, serverNS)
 	runNativeAddressLifetimeFixture(t, e, d)
 	peerRoute(t, server, "server0", "192.0.2.0/24", "198.51.100.1")
@@ -392,6 +393,39 @@ func runNativeECMPFixture(t *testing.T, e *Engine, base Desired, clientNS, serve
 		t.Fatal("foreign ECMP route was removed")
 	}
 	t.Log("IPv4/IPv6 ECMP TCP over both NICs, IPv6 kernel expiry, weights 256/3, reapply, rollback and foreign route preservation passed")
+}
+
+func runNativeIPv4FragmentFixture(t *testing.T, e *Engine, base Desired, client, server netns.NsHandle) {
+	t.Helper()
+	peer, err := netlink.NewHandleAt(server, unix.NETLINK_ROUTE)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer peer.Close()
+	link, err := peer.LinkByName("server0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := link.Attrs().MTU
+	if err := peer.LinkSetMTU(link, 1454); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := peer.LinkSetMTU(link, before); err != nil {
+			t.Error(err)
+		}
+	}()
+	d := cloneDesired(base)
+	d.Interfaces[1].MTU = 1454
+	d.Firewall.IPv4ClearDF = []IPv4ClearDF{{From: "lan0", To: "wan0", MTU: 1454}}
+	if _, err := e.Apply(context.Background(), 30, d); err != nil {
+		t.Fatal(err)
+	}
+	nativeUDPExchange(t, client, server, "udp4", "192.0.2.2:0", "203.0.113.2:47002", "198.51.100.1", PortRange{Start: 1, End: 65535})
+	if _, err := e.Apply(context.Background(), 1, base); err != nil {
+		t.Fatal(err)
+	}
+	t.Log("native IPv4 DF clearing, kernel fragmentation and 1450-byte UDP reassembly passed")
 }
 
 func runNativeRAStateFixture(t *testing.T, e *Engine, base Desired, clientNS, serverNS netns.NsHandle) {

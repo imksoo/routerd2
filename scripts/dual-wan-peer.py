@@ -133,6 +133,38 @@ print('PASS actual 1 MiB TCP download/upload',host,'TCP_MAXSEG',mss,'and smaller
         print(result.stdout, result.stderr, flush=True)
         assert result.returncode == 0
 
+    def udp_mtu(expected):
+        code = r"""import socket,sys
+s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.settimeout(2)
+s.setsockopt(socket.IPPROTO_IP,10,0)
+s.connect(('198.51.100.20',18081));body=b'u'*1450;s.send(body);assert s.recv(4096)==sys.argv[1].encode()+b':'+body
+s.close()
+s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.settimeout(2);s.setsockopt(socket.IPPROTO_IP,10,3)
+s.connect(('198.51.100.20',18081));s.send(body);assert s.recv(4096)==sys.argv[1].encode()+b':'+body
+print('PASS reassembled 1450-byte UDP payload with DF clear and DF set',sys.argv[1],flush=True)
+"""
+        result = subprocess.run(
+            inside(lan, ["python3", "-u", "-c", code, expected]),
+            capture_output=True,
+            text=True,
+            timeout=8,
+        )
+        print(result.stdout, result.stderr, flush=True)
+        assert result.returncode == 0
+
+    def marked_udp():
+        # The primary source-policy rule is gone, but mark41 selects PPP.
+        # 1458 bytes exceed PPP1454 and fit DSL1460, so a FIB lookup that
+        # ignores the packet mark cannot accidentally satisfy this exchange.
+        code = r"""import socket
+s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.settimeout(2);s.bind(('0.0.0.0',18084));s.setsockopt(socket.IPPROTO_IP,10,3)
+s.connect(('198.51.100.20',18081));body=b'm'*1430;s.send(body);assert s.recv(4096)==b'PPP:'+body
+"""
+        run(inside(lan, ["python3", "-c", code]))
+        print(
+            "PASS marked1458-byte DF UDP selected PPP while source-policy selected DSL", flush=True
+        )
+
     def probe(n, name):
         return start(
             n,
@@ -259,6 +291,10 @@ print('PASS actual 1 MiB TCP download/upload',host,'TCP_MAXSEG',mss,'and smaller
     firewall["mss_clamp"] += [
         {"from": a, "to": b, "family": 6, "mtu": 1460}
         for a, b in [("lan0", "wan1"), ("wan1", "lan0")]
+    ]
+    firewall["ipv4_clear_df"] = [
+        {"from": "lan0", "to": wan, "mtu": mtu}
+        for wan, mtu in [("ppp-wan", 1454), ("dslite0", 1460)]
     ]
     configuration = {"schema_version": 2, "resources": resources}
     (stage / "config.json").write_text(json.dumps(configuration))
@@ -387,6 +423,10 @@ print('PASS actual 1 MiB TCP download/upload',host,'TCP_MAXSEG',mss,'and smaller
             ["ip", "-n", dsl, "addr", "add", "192.0.0.1/32", "peer", "192.0.0.2/32", "dev", "aftr0"]
         )
         run(["ip", "-n", dsl, "link", "set", "aftr0", "up"])
+        # An independently owned marking table supplies a real incoming mark.
+        # The product must preserve it when replacing its own firewall table.
+        marking = 'table inet fixture_mark { chain input_mark { type filter hook prerouting priority -150; policy accept; iifname "lan0" udp sport 18084 meta mark set 41; }; }\n'
+        subprocess.run(inside(ns, ["nft", "-f", "-"]), input=marking, text=True, check=True)
         capture = start(
             ns,
             [
@@ -447,10 +487,11 @@ print('PASS actual 1 MiB TCP download/upload',host,'TCP_MAXSEG',mss,'and smaller
                     self.wfile.write(answer)
             def udp():
                 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.setsockopt(socket.IPPROTO_IP,10,0)
                 s.bind(('198.51.100.20', 18081))
                 while True:
                     body, address = s.recvfrom(4096)
-                    s.sendto(name, address)
+                    s.sendto(name+b':'+body if len(body)>100 else name,address)
             threading.Thread(target=udp, daemon=True).start()
             def small_mss_server(server):
                 server.socket.setsockopt(socket.IPPROTO_TCP,socket.TCP_MAXSEG,1200)
@@ -471,6 +512,7 @@ print('PASS actual 1 MiB TCP download/upload',host,'TCP_MAXSEG',mss,'and smaller
         wait(lambda: selected(1000, 101) and selected(1100, 102))
         traffic("PPP")
         large_transfer("198.51.100.20", 1454)
+        udp_mtu("PPP")
         large_transfer("2001:db8:45::1", 1460)
         assert all(x["generation"] == 1 for x in modules().values())
         print(
@@ -482,6 +524,8 @@ print('PASS actual 1 MiB TCP download/upload',host,'TCP_MAXSEG',mss,'and smaller
         wait(lambda: not selected(1000, 101))
         traffic("DSL")
         large_transfer("198.51.100.20", 1460)
+        udp_mtu("DSL")
+        marked_udp()
         print(
             "PASS primary reachability loss selected real AFTR TCP/UDP while PPP stayed up",
             flush=True,
@@ -576,6 +620,7 @@ print('PASS actual 1 MiB TCP download/upload',host,'TCP_MAXSEG',mss,'and smaller
         wait(lambda: not selected(1000, 101))
         traffic("DSL")
         large_transfer("198.51.100.20", 1460)
+        udp_mtu("DSL")
         print(
             "PASS actual AFTR worker restart recovered backup forwarding; primary remained usable",
             flush=True,
