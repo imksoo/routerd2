@@ -5,7 +5,51 @@
 [機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を参照する。
 実行順序はhomert02/03、実態を確認したk8s-rt/pve-rt、その後既存文書に基づくCloud SAM。
 
-## 現在の変更: dhcp6-serving / native-36
+## 現在の変更: dhcp6-ha-authority / native-37
+
+旧routerdの`DHCPv6ServerController.reconcile`/`effectiveRouter`がWhenFalseを配布設定から外す
+経路を読み、nativeの条件付きserviceへ接続した。`when: {fact: service.ha.active}`を使い、
+二台で同じ明示server DUIDを設定する。配布権限は既存の適用済みResourceStateの元期限を使う。
+条件と依存先の期限を一度計算し、networkとserverが同じ値を消費する。新しい権限表は作らない。
+serverは受信待ち後に元期限を検査し、control停止中も期限後は応答しない。無条件設定と
+学習DNS等の元期限は独立に維持する。権限だけの更新でoption bytesを再生成しない。
+状態には永続DUIDを出し、実際の配布権限を表さない固定active flagと終了時の状態送信を撤去した。
+compiler native-37、worker ABI5、network journal11、DHCPv6 checkpoint2。旧形式readerは追加しない。
+
+PVE Linux6.8/amd64の隔離環境、実署名releaseのPID1二台・VRRP/conntrackd・control/network/PD/RA/
+DHCPv4/新DHCPv6 workerと、独立ISC4.4.3-P1・dnsmasq・BusyBox・Linux SLAAC端末を使った。
+旧`7f26fa0`では、旧ノードのlink-localへunicastした実Information-requestへcontrol停止2秒後も
+Replyを返すことを再現した。native-37では同じノードは応答を止め、移行先の配布とTCP/UDPが復旧した。
+最初のmulticast判定は移行先の正常応答も拾うため、旧ノードの停止証明には使わない。
+BusyBoxは別途PD由来DNS/検索ドメインを取得し、実UDP/TCP DNSを確認する。
+各切替でIPv4 VIPの存在だけをIPv6復旧とせず、PD/端末SLAACと実IPv6通信を確認してからDNSを判定する。
+
+通常の両方向引継ぎ、engine SIGKILL、待機worker交換、同期断/復旧、60秒貸出失効、
+別BOOTTIME(+7200秒)のPD元期限失効/再取得、旧PD/情報server通知HTTP409が通った。
+同じTCP socket/UDP mappingを維持し、captureはTCP SYN一つ、実FTFW同期、降格時Releaseなしを示した。
+この試行のUDP欠落は0件。NIC性能・任意の分断条件・長期稼働の保証とはしない。
+再実行は`make check-ha-pd DHCP6_SERVER=/path/to/isc/dhcpd RELEASE_ID=dhcp6-ha-authority`。
+比較版は隔離worktreeでproject buildを行い、`scripts/ha-state-peer.py --binary-dir <built-bin-dir> --dhcp6-server /path/to/isc/dhcpd`で指定できる。比較用worktree/61MBのbuildと生出力は削除済み。
+
+独立BusyBoxでworker/control/daemon再起動とconfirmed rollbackの実option/DUID保持、
+ISC/radvdとのIA_NA/PD・元option期限、実Health→PBR二WANのTCP/UDP/再起動/古い通知/失効/rollbackも通った。
+ResourceStateへ期限を接続した際は日時の更新だけでCheckReadyが収束しなくなったため、
+適用済み選択の比較と、既存のACK済みkernel期限検査を分けた。関連回帰と全体`make check`の
+Go/Python・Race Detector・vetが通った。待ち時間や必要な結果は緩めていない。
+
+DUID変更を含む実confirmed trialでは、明示DUIDが自動DUID保存値を上書きし、rollback後も
+試行IDが残ることを再現した。明示DUIDは設定journalを権威とし、自動生成IDのファイルへ書かない。
+設定された値の保持と、自動生成した永続識別子の所有を分けた。修正後は独立BusyBoxとcaptureで
+候補の明示DUID/optionへの変更と元DUID/optionへの自動復帰が通った。関連Race Detector・vetを再確認し、
+最終`build build-publisher build-linux`の6静的ELFと署名catalog/publisher/stageも通った。
+最終二台試験もこのDUID修正後の成果物で通り、同じTCP socket/UDP mappingを保持した。
+ARM64では実行していない。WAN clientの明示DUID変更rollbackは
+このLAN server試験には含めず、別途確認する。
+
+旧resource import、stateful/both/RA-only・Rapid Commit・Reconfigure、広いHA partition/fencing、
+最新版の実ONU/対象NIC受入・実suspend/別bootと全34 packageの残作業は継続する。
+
+## 前回の変更: dhcp6-serving / native-36
 
 旧routerdの`pkg/render/dnsmasq.go`・`pkg/controller/chain/phase2.go`と、
 `pkg/state/freebsd_duid.go`・`pkg/pdclient/snapshot.go`のDUID/lease保持を比較した。

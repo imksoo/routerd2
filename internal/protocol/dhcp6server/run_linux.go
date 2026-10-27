@@ -66,20 +66,12 @@ func Run(ctx context.Context, cfg dhcp6serverconfig.Config, initial dhcp6serverc
 		conn.Close()
 		return err
 	}
-	snapshot := dhcp6serverconfig.Snapshot{Resource: cfg.Resource, Interface: cfg.Interface, ServerDUID: hex.EncodeToString(server), Active: true}
+	snapshot := dhcp6serverconfig.Snapshot{Resource: cfg.Resource, Interface: cfg.Interface, ServerDUID: hex.EncodeToString(server)}
 	if err := report(ctx, snapshot); err != nil {
 		conn.Close()
 		return err
 	}
-	defer func() {
-		conn.Close()
-		snapshot.Active = false
-		cleanup, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-		if err := report(cleanup, snapshot); err != nil {
-			slog.Warn("report DHCPv6 server stop", "error", err)
-		}
-	}()
+	defer conn.Close()
 	if ready != nil {
 		ready()
 	}
@@ -105,11 +97,12 @@ func Run(ctx context.Context, cfg dhcp6serverconfig.Config, initial dhcp6serverc
 				}
 				return errors.New("DHCPv6 server input owner stopped")
 			}
-			if !slices.Equal(updated.DNSServers, in.DNSServers) || !slices.Equal(updated.SNTPServers, in.SNTPServers) || !slices.Equal(updated.DomainSearch, in.DomainSearch) {
-				if err := dhcp6serverconfig.ValidateInput(updated); err != nil {
-					return err
-				}
-				in = updated
+			if err := dhcp6serverconfig.ValidateInput(updated); err != nil {
+				return err
+			}
+			changed := !slices.Equal(updated.DNSServers, in.DNSServers) || !slices.Equal(updated.SNTPServers, in.SNTPServers) || !slices.Equal(updated.DomainSearch, in.DomainSearch)
+			in = updated
+			if changed {
 				clock, err = boottime.Read()
 				if err != nil {
 					return err
@@ -145,6 +138,9 @@ func Run(ctx context.Context, cfg dhcp6serverconfig.Config, initial dhcp6serverc
 		current, err := boottime.Read()
 		if err != nil {
 			return err
+		}
+		if !in.Authority.Live(current) {
+			continue
 		}
 		if data.expires != 0 && uint64(current.BoottimeNanoseconds) >= data.expires {
 			data, err = prepare(cfg, in, current)
@@ -187,14 +183,22 @@ func loadIdentity(ctx context.Context, cfg dhcp6serverconfig.Config) (serverIden
 	if err := unix.Flock(int(lock.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
 		return saved, err
 	}
+	// Explicit identity is durable operator intent in the configuration journal.
+	// Preserve the automatic identity across temporary overrides and rollback.
+	if cfg.ServerDUID != "" {
+		saved.duid, err = dhcp6config.ParseDUID(cfg.ServerDUID)
+		if err != nil {
+			return saved, err
+		}
+		saved.lock = lock
+		ok = true
+		return saved, nil
+	}
 	raw, err := statefs.ReadPrivate(ctx, dir, name, 256)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return saved, err
 	}
-	text := cfg.ServerDUID
-	if text == "" && err == nil {
-		text = string(raw)
-	}
+	text := string(raw)
 	if text != "" {
 		saved.duid, err = dhcp6config.ParseDUID(text)
 		if err != nil {

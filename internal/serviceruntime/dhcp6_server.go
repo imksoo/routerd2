@@ -30,7 +30,7 @@ func (c *effectsClient) runDHCP6Server(ctx context.Context, instance serviceconf
 	go func() {
 		defer close(done)
 		defer close(updates)
-		ticker := time.NewTicker(time.Second)
+		ticker := time.NewTicker(200 * time.Millisecond)
 		defer ticker.Stop()
 		for {
 			select {

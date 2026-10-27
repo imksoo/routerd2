@@ -67,19 +67,19 @@ func (s FactSnapshot) evaluate(c *FactCondition) Truth {
 // ResourceState describes the desired projection, not a kernel acknowledgement.
 // ready_when gates dependents; it never prevents its own resource from starting.
 type ResourceState struct {
-	Active     bool   `json:"active"`
-	Ready      Truth  `json:"ready"`
-	When       Truth  `json:"when"`
-	Reason     string `json:"reason,omitempty"`
-	Dependency string `json:"dependency,omitempty"`
+	ActiveUntil lifetime.Deadline `json:"active_until,omitzero"`
+	Active      bool              `json:"active"`
+	Ready       Truth             `json:"ready"`
+	When        Truth             `json:"when"`
+	Reason      string            `json:"reason,omitempty"`
+	Dependency  string            `json:"dependency,omitempty"`
 }
 
 // Project evaluates only observations and dependency readiness. Configuration
 // validation, graph construction and protocol compilation belong to Compile.
 func (p Plan) Project(facts FactSnapshot) (Native, map[string]ResourceState) {
 	states := make(map[string]ResourceState, len(p.nodes))
-	type deadline struct{ active, ready uint64 }
-	bounds := make(map[string]deadline, len(p.nodes))
+	bounds := make(map[string]uint64, len(p.nodes))
 	var selected []compiledResource
 	for _, node := range p.nodes {
 		r := node.source
@@ -97,7 +97,7 @@ func (p Plan) Project(facts FactSnapshot) (Native, map[string]ResourceState) {
 		}
 		for _, dep := range p.Dependencies[r.ID] {
 			gate = All(gate, states[dep].Ready)
-			untilNanos = min(untilNanos, bounds[dep].ready)
+			untilNanos = min(untilNanos, bounds[dep])
 			if state.When == True && states[dep].Ready != True && (state.Dependency == "" || state.Reason == "dependency_indeterminate" && states[dep].Ready == False) {
 				state.Reason, state.Dependency = conditionReason("dependency", states[dep].Ready), dep
 			}
@@ -133,8 +133,11 @@ func (p Plan) Project(facts FactSnapshot) (Native, map[string]ResourceState) {
 			}
 			selected = append(selected, node)
 		}
+		if state.Active && untilNanos != math.MaxUint64 {
+			state.ActiveUntil = lifetime.Deadline{BootID: facts.Scope.BootID, Nanos: untilNanos}
+		}
 		states[r.ID] = state
-		bounds[r.ID] = deadline{active: untilNanos, ready: readyUntilNanos}
+		bounds[r.ID] = readyUntilNanos
 	}
 	native := renderNative(selected)
 	interfaces := make(map[string]*network.Interface, len(native.Network.Interfaces))
@@ -145,26 +148,26 @@ func (p Plan) Project(facts FactSnapshot) (Native, map[string]ResourceState) {
 	clock := boottime.Clock{BootID: facts.Scope.BootID, BoottimeNanoseconds: int64(facts.NowNanos), WallTime: facts.WallTime}
 	linkIndex, routeIndex := 0, 0
 	for _, node := range selected {
-		until := bounds[node.source.ID].active
+		authority := states[node.source.ID].ActiveUntil
 		switch {
 		case node.source.Link != nil:
-			if until != math.MaxUint64 {
-				native.Network.Links[linkIndex].Authority = lifetime.Deadline{BootID: facts.Scope.BootID, Nanos: until}
+			if authority != (lifetime.Deadline{}) {
+				native.Network.Links[linkIndex].Authority = authority
 			}
 			linkIndex++
 		case node.source.Route != nil:
-			if until != math.MaxUint64 {
+			if authority != (lifetime.Deadline{}) {
 				route := &native.Network.Routes[routeIndex]
-				route.BootID, route.ExpiresNanos = facts.Scope.BootID, until
+				route.BootID, route.ExpiresNanos = authority.BootID, authority.Nanos
 			}
 			routeIndex++
-		case node.source.Address != nil && until != math.MaxUint64:
+		case node.source.Address != nil && authority != (lifetime.Deadline{}):
 			address := node.source.Address
 			iface := interfaces[address.Interface]
 			if iface.AddressOptions == nil {
 				iface.AddressOptions = make(map[string]network.AddressOptions)
 			}
-			iface.AddressOptions[address.CIDR] = network.BoundAddressLifetime(iface.AddressOptions[address.CIDR], clock, until)
+			iface.AddressOptions[address.CIDR] = network.BoundAddressLifetime(iface.AddressOptions[address.CIDR], clock, authority.Nanos)
 		}
 	}
 	return native, states

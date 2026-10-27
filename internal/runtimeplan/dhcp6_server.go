@@ -17,8 +17,9 @@ import (
 )
 
 type dhcp6ServerPlan struct {
-	iface   string
-	sources []string
+	resourceID string
+	iface      string
+	sources    []string
 }
 
 func (r *Runtime) dhcp6ServerInput(name string) (serviceconfig.DHCP6ServerInput, error) {
@@ -33,6 +34,17 @@ func (r *Runtime) dhcp6ServerInput(name string) (serviceconfig.DHCP6ServerInput,
 	clock, err := boottime.Read()
 	if err != nil {
 		return out, err
+	}
+	// This is the last applied source selection, with its original condition
+	// deadline. A poll cannot renew it or authorize an unapplied source epoch.
+	out.Options.Authority = lifetime.Deadline{BootID: clock.BootID, Nanos: uint64(clock.BoottimeNanoseconds)}
+	state, selected := r.resourceStates[plan.resourceID]
+	if r.applied.sourceEpoch != r.sourceEpoch || !selected || !state.Active {
+		return out, nil
+	}
+	out.Options.Authority = state.ActiveUntil
+	if out.Options.Authority == (lifetime.Deadline{}) {
+		out.Options.Authority.BootID = clock.BootID
 	}
 	for _, source := range plan.sources {
 		u, has := r.records[source]

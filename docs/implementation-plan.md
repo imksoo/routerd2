@@ -943,6 +943,15 @@ host suffixもmanaged bindingへ変換する。native address maskは/64で、�
 
 #### NET-06 — LAN・DHCPv6・relay・DNS の resource 完全化
 
+2026-10-27 native-37: stateless serverを既存の条件評価の元期限へ接続した。
+旧7f26fa0でcontrol停止後も旧node自身がunicast応答することを再現し、修正後は停止した。
+署名PID1二台と独立ISC/dnsmasq/BusyBoxで、masterだけの配布、両方向切替、PD由来の実DNS、
+BOOTTIME差・古い通知拒否・元期限失効/復旧と、同じTCP socket/UDP mappingを確認した。
+fixed active flagと終了時の状態送信を撤去し、kernelとserverが同じ条件期限を消費する。
+無条件設定の静的情報保持、confirmed rollback、既存Health→PBRと全体Race/vetも通った。
+LAN serverの明示DUID試行が自動IDを上書きする問題も実通信で再現し、明示値と自動IDの保存を分けた。
+旧resource import、広いHA partition/fencing、最新版の実ONU/対象NIC受入は残る。
+
 2026-10-27 native-36: 旧dnsmasq servingとDUID保存を比較し、LAN stateless DHCPv6を追加した。
 静的DNS/検索ドメイン/SNTPと、明示したDHCPv6/RA clientの学習情報を別保持し、元のboot期限で配る。
 PD生成RAのOフラグは`delegations[].other_config`で明示する。

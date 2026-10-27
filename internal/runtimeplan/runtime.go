@@ -16,7 +16,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"reflect"
 	"sync"
 	"time"
 
@@ -208,15 +207,20 @@ func (r *Runtime) CheckReady(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		if len(p.resources) != len(r.resourceStates) {
+			return errApplicationPending
+		}
 		for id, state := range p.resources {
 			if state.Active && state.Ready != resourceprogram.True {
 				return fmt.Errorf("resource %s ready_when is not true", id)
 			}
-		}
-		// A new prerequisite may have released dependents since the last
-		// network ACK. Confirmation waits until that projection is applied.
-		if !reflect.DeepEqual(p.resources, r.resourceStates) {
-			return errApplicationPending
+			applied, ok := r.resourceStates[id]
+			// Selection must be applied; freshness alone may advance while readiness
+			// is checked. The acknowledged network deadline is checked above.
+			state.ActiveUntil = applied.ActiveUntil
+			if !ok || state != applied {
+				return errApplicationPending
+			}
 		}
 	}
 	return nil
@@ -244,12 +248,18 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 	sourceDigest := hex.EncodeToString(sourceSum[:])
 	next := configuration{source: source, plan: plan, digest: sourceDigest, revision: revision}
 	next.resources = make(map[string]resourceprogram.Resource, len(source.Resources))
-	for _, resource := range source.Resources {
-		next.resources[resource.ID] = resource
-	}
 	next.protocols, err = prepareProtocols(doc, r.dir, r.stateDir)
 	if err != nil {
 		return err
+	}
+	for _, resource := range source.Resources {
+		next.resources[resource.ID] = resource
+		if resource.Service != nil && resource.Service.DHCP6Server != nil {
+			name := resource.Service.ModuleName()
+			server := next.protocols.dhcp6Servers[name]
+			server.resourceID = resource.ID
+			next.protocols.dhcp6Servers[name] = server
+		}
 	}
 	if err := r.op.Acquire(ctx, 1); err != nil {
 		return r.failure(err)

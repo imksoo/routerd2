@@ -33,15 +33,15 @@ type Domain struct {
 	ValidUntil lifetime.Deadline `json:"valid_until"`
 }
 type Input struct {
-	DNSServers   []Address `json:"dns_servers,omitempty"`
-	SNTPServers  []Address `json:"sntp_servers,omitempty"`
-	DomainSearch []Domain  `json:"domain_search,omitempty"`
+	Authority    lifetime.Deadline `json:"authority"`
+	DNSServers   []Address         `json:"dns_servers,omitempty"`
+	SNTPServers  []Address         `json:"sntp_servers,omitempty"`
+	DomainSearch []Domain          `json:"domain_search,omitempty"`
 }
 type Snapshot struct {
 	Resource   string `json:"resource"`
 	Interface  string `json:"interface"`
 	ServerDUID string `json:"server_duid"`
-	Active     bool   `json:"active"`
 }
 
 func Validate(c Config) error {
@@ -81,6 +81,9 @@ func validDomain(name string) bool {
 }
 
 func ValidateInput(in Input) error {
+	if in.Authority.Validate() != nil || in.Authority.BootID == "" || !in.Authority.UTC.IsZero() {
+		return errors.New("DHCPv6 serving requires original boot authority")
+	}
 	if len(in.DNSServers) > 32 || len(in.SNTPServers) > 32 || len(in.DomainSearch) > 32 {
 		return errors.New("too many learned DHCPv6 option values")
 	}

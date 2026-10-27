@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/imksoo/routerd2/internal/config"
+	"github.com/imksoo/routerd2/internal/control"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6serverconfig"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
@@ -57,7 +58,7 @@ func TestDaemonDHCP6InformationIndependentClient(t *testing.T) {
 	}
 	var original runtimeplan.InstanceStatus
 	var identity string
-	until(t, 12*time.Second, func() bool { state, s := read(); original = state; identity = s.ServerDUID; return s.Active })
+	until(t, 12*time.Second, func() bool { state, s := read(); original = state; identity = s.ServerDUID; return s.ServerDUID != "" })
 	until(t, 5*time.Second, func() bool {
 		ready := false
 		if err := fixtureInsideNamespace(client, func() error {
@@ -75,14 +76,14 @@ func TestDaemonDHCP6InformationIndependentClient(t *testing.T) {
 		}
 		return ready
 	})
-	request := func() {
+	request := func(domain string) {
 		t.Helper()
 		got := fixtureDHCP6Information(t, client, "client0")
-		if !slices.Equal(got.dns, []netip.Addr{netip.MustParseAddr("2001:db8:80::53")}) || !slices.Equal(got.search, []string{"lan.test"}) {
+		if !slices.Equal(got.dns, []netip.Addr{netip.MustParseAddr("2001:db8:80::53")}) || !slices.Equal(got.search, []string{domain}) {
 			t.Fatal("client options", got)
 		}
 	}
-	request()
+	request("lan.test")
 	var modules supervisor.Status
 	if err := f.supervisor.Do(ctx, "GET", "/v1/status", nil, &modules); err != nil {
 		t.Fatal(err)
@@ -101,7 +102,7 @@ func TestDaemonDHCP6InformationIndependentClient(t *testing.T) {
 	}
 	until(t, 12*time.Second, func() bool {
 		state, s := read()
-		if state.Generation <= original.Generation || !s.Active {
+		if state.Generation <= original.Generation || s.ServerDUID == "" {
 			return false
 		}
 		if s.ServerDUID != identity {
@@ -109,7 +110,7 @@ func TestDaemonDHCP6InformationIndependentClient(t *testing.T) {
 		}
 		return true
 	})
-	request()
+	request("lan.test")
 	// Control recovery deliberately quiesces dynamic workers. Recreated
 	// serving must retain its durable identity and actual client behavior.
 	var before supervisor.ModuleStatus
@@ -132,7 +133,7 @@ func TestDaemonDHCP6InformationIndependentClient(t *testing.T) {
 			return false
 		}
 		var s dhcp6serverconfig.Snapshot
-		return state.Generation > before.Generation && len(state.Snapshot) > 0 && json.Unmarshal(state.Snapshot, &s) == nil && s.Active && s.ServerDUID == identity
+		return state.Generation > before.Generation && len(state.Snapshot) > 0 && json.Unmarshal(state.Snapshot, &s) == nil && s.ServerDUID != "" && s.ServerDUID == identity
 	})
 	if err := f.supervisor.Do(ctx, "GET", "/v1/status", nil, &modules); err != nil {
 		t.Fatal(err)
@@ -142,11 +143,11 @@ func TestDaemonDHCP6InformationIndependentClient(t *testing.T) {
 			t.Fatal("control recovery did not recreate serving", before, m)
 		}
 	}
-	request()
+	request("lan.test")
 	f = f.restart()
 	until(t, 12*time.Second, func() bool {
 		_, s := read()
-		if !s.Active {
+		if s.ServerDUID == "" {
 			return false
 		}
 		if s.ServerDUID != identity {
@@ -154,13 +155,57 @@ func TestDaemonDHCP6InformationIndependentClient(t *testing.T) {
 		}
 		return true
 	})
-	request()
+	request("lan.test")
+	// A different source epoch must apply before it can authorize serving;
+	// confirmed rollback must restore actual client options with the same DUID.
+	var current control.State
+
+	if err := f.control.Do(ctx, "GET", "/v1/config", nil, &current); err != nil {
+		t.Fatal(err)
+	}
+	trialIdentity := "000400112233445546778899aabbccddeeff"
+	candidate := current.Config
+	candidate.Resources = slices.Clone(candidate.Resources)
+	for i, r := range candidate.Resources {
+		if r.Service == nil || r.Service.DHCP6Server == nil {
+			continue
+		}
+		service := *r.Service
+		settings := *service.DHCP6Server
+		settings.DomainSearch = []string{"candidate.test"}
+		settings.ServerDUID = trialIdentity
+		service.DHCP6Server = &settings
+		candidate.Resources[i].Service = &service
+	}
+	beforeTrial, _ := read()
+	if err := f.control.Do(ctx, "POST", "/v1/config/commit", control.CommitRequest{ExpectedRevision: current.Revision, RequestID: "information-trial", Config: candidate, ConfirmTimeoutSeconds: 5}, nil); err != nil {
+		t.Fatal(err)
+	}
+	until(t, 4*time.Second, func() bool {
+		state, s := read()
+		return state.ConfigDigest != beforeTrial.ConfigDigest && s.ServerDUID == trialIdentity
+	})
+	request("candidate.test")
+	until(t, 12*time.Second, func() bool {
+		current = control.State{}
+		return f.control.Do(ctx, "GET", "/v1/config", nil, &current) == nil && current.Revision == 3 && current.Confirmation == nil && current.Healthy
+	})
+	request("lan.test")
+	_, restored := read()
+	if restored.ServerDUID != identity {
+		t.Fatal("confirmed rollback changed server identity", identity, restored.ServerDUID)
+	}
 	capture.mu.Lock()
 	defer capture.mu.Unlock()
 	serverID, err := hex.DecodeString(identity)
 	if err != nil {
 		t.Fatal(err)
 	}
+	trialID, err := hex.DecodeString(trialIdentity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trialReply := false
 	replies := 0
 	for _, p := range capture.packets {
 		b := p.data
@@ -175,7 +220,8 @@ func TestDaemonDHCP6InformationIndependentClient(t *testing.T) {
 		for _, o := range opts {
 			switch o.code {
 			case 2:
-				duid = bytes.Equal(o.value, serverID)
+				trialReply = trialReply || bytes.Equal(o.value, trialID)
+				duid = bytes.Equal(o.value, serverID) || bytes.Equal(o.value, trialID)
 			case 31:
 				ntp = bytes.Equal(o.value, netip.MustParseAddr("2001:db8:80::123").AsSlice())
 			case 32:
@@ -187,10 +233,10 @@ func TestDaemonDHCP6InformationIndependentClient(t *testing.T) {
 		}
 		replies++
 	}
-	if replies < 4 {
+	if replies < 6 || !trialReply {
 		t.Fatal("missing real Replies", replies)
 	}
-	t.Log("BusyBox DNS/search plus wire SNTP/refresh; worker/control/daemon recovery retained server DUID", identity)
+	t.Log("BusyBox DNS/search plus wire SNTP/refresh; worker/control/daemon recovery and confirmed rollback retained server DUID", identity)
 }
 
 // BusyBox decodes server options for its ordinary script hook. Keep this
