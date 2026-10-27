@@ -20,6 +20,7 @@ import (
 
 	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/config"
+	"github.com/imksoo/routerd2/internal/control"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
@@ -477,6 +478,37 @@ func TestDaemonDHCP6RAAddsAddressToPD(t *testing.T) {
 	if !learnedSNTP || !otherConfig {
 		t.Fatal("missing learned SNTP or configured RA O flag", learnedSNTP, otherConfig)
 	}
+	// An explicit client identity is trial intent; reverting it must not
+	// adopt that trial's checkpoint identity as the new automatic default.
+	trial := doc
+	trial.Services = slices.Clone(doc.Services)
+	const trialDUID = "00030001020000000199"
+	for i, s := range trial.Services {
+		if s.DHCP6 == nil {
+			continue
+		}
+		cfg := *s.DHCP6
+		cfg.ClientDUID = trialDUID
+		trial.Services[i].DHCP6 = &cfg
+	}
+	if err := f.control.Do(ctx, "POST", "/v1/config/commit", control.CommitRequest{ExpectedRevision: 1, RequestID: "wan-identity-trial", Config: config.FromNative(trial), ConfirmTimeoutSeconds: 5}, nil); err != nil {
+		t.Fatal(err)
+	}
+	until(t, 4*time.Second, func() bool {
+		current = read()
+		return current.ClientDUID == trialDUID && len(current.Prefixes) == 1 && current.State == "bound"
+	})
+	var operator control.State
+	until(t, 12*time.Second, func() bool {
+		operator = control.State{}
+		return f.control.Do(ctx, "GET", "/v1/config", nil, &operator) == nil && operator.Revision == 3 && operator.Confirmation == nil && operator.Healthy
+	})
+	until(t, 8*time.Second, func() bool { current = read(); return len(current.Prefixes) == 1 && current.State == "bound" })
+	if current.ClientDUID != first.ClientDUID {
+		t.Fatal("WAN rollback replaced automatic DUID with trial identity", first.ClientDUID, current.ClientDUID)
+	}
+	traffic()
+	information()
 	f.stop()
 	t.Log("ISC/radvd: explicit PD before M, same-worker IA_NA addition, Linux duplicate/DAD/Decline without losing delegated LAN SLAAC/TCP/UDP, original combined grants after SIGKILL and Rebind recovery; BusyBox PD-derived DNS/search with actual UDP/TCP DNS and original expiry during stopped control, static option retention and recovery")
 }

@@ -5,7 +5,43 @@
 [機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を参照する。
 実行順序はhomert02/03、実態を確認したk8s-rt/pve-rt、その後既存文書に基づくCloud SAM。
 
-## 現在の変更: dhcp6-ha-authority / native-37
+## 現在の変更: dhcp6-identity / native-38
+
+旧routerdの`pkg/state/freebsd_duid.go`と`pkg/pdclient/snapshot.go`を読み、
+WAN自動DUIDと選択中のリース識別子を分けた。独立ISCとのconfirmed trialで、修正前のrouterd2 (`e592918`) が
+明示DUIDをcheckpointへ保存し、rollback後も試行DUIDを自動値として採用する問題を再現した。
+自動DUIDは初回通信前に専用ファイルへ原子的に保存し、その後はリンクのMACより保存値を優先する。
+明示DUIDは設定journalの意図であり、自動値を上書きしない。LAN serverも同じ小さな保存処理を使う。
+各workerの既存lockが所有者を一つにする。lease復旧は引き続きDUID/IAIDと元期限を照合する。
+compiler native-38、worker ABI5、network journal11、DHCPv6 checkpoint2。旧prototype readerは作らない。
+
+PVE Linux6.8/amd64の隔離namespace、実supervisor/control/network/DHCPv6/RA/DNSと
+独立ISC/radvd/BusyBox/Linux端末で、候補DUIDのPD取得、5秒confirmed timeoutによる
+元の自動DUIDへの復帰とLAN TCP/UDP・DNS復旧が通った。LAN serverのworker/control/daemon再起動、
+明示DUID/optionsの試行と元の自動DUID/optionsへのrollbackも通った。
+再実行は`make check-dhcp6-ra-pd DHCP6_SERVER=/path/to/isc/dhcpd RELEASE_ID=dhcp6-identity`と
+`make check-dhcp6-server RELEASE_ID=dhcp6-identity`。
+
+実上流は`make check-uplink UPLINK_INTERFACE=ens20 UPLINK_AFTR=gw.transix.jp UPLINK_SECONDS=30`で
+隔離macvlan/LANから試したが、今回はRA・DHCPv4・PDの応答がなく起動条件を満たさなかった。
+captureはRSとDHCPv6 Solicitの送信を示した。元のens20のMACでもRSを3回送信し9秒間RAを受信せず、
+一方IPv4 gatewayへのpingは2回とも通った。追加MAC制限・接続先変更・IPv6の提供状態は未確定で、
+接続条件をユーザーへ確認中。AFTR名は既存手順の候補であり今回のISP情報として確定していない。
+管理ens18・host address/route/clockは変更していない。失敗時の状態とwireを有限出力し、生データは削除する。
+この失敗を実ONUの受入成功に数えず、過去の短期成功を最新版の結果へ転記しない。
+
+全体`make check`のGo/Python・Race Detector・vet、CGO_ENABLED=0のamd64/arm64静的buildと
+6 ELFの署名catalog/publisher/stageが通った。ARM64では実行していない。
+二台の最終再実行はBOOTTIME差・元PD期限・条件権限失効・両方向引継ぎ・同期断/復旧・
+古い通知・60秒DHCPv4失効・同じTCP socket/UDP mappingを維持した。captureはSYN一つと実FTFWを示し、
+観測UDP欠落は2件。初回の二台試行とPPPのRenew後試行は失敗し、末尾のみの出力で原因を確定できなかった。
+二台の再実行成功で初回失敗を取り消さず、負荷の影響も未確定とする。
+IA_NAの独立dnsmasq/radvd試験はConfirm/無応答/NotOnLink・元期限・120秒失効/復旧・
+DAD/Decline・MTU rollbackが通った。
+独立RP-PPPoE/ISCのPAP再実行とCHAPは、MACのないPPPで生成したDUID-UUIDをworker/session/control交換後も
+保持し、元PD期限・失効/復旧・Release順序・実LAN IPv4/IPv6 TCP/UDP/DNSまで通った。
+
+## 前回の変更: dhcp6-ha-authority / native-37
 
 旧routerdの`DHCPv6ServerController.reconcile`/`effectiveRouter`がWhenFalseを配布設定から外す
 経路を読み、nativeの条件付きserviceへ接続した。`when: {fact: service.ha.active}`を使い、

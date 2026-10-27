@@ -26,6 +26,8 @@ import (
 	"github.com/imksoo/routerd2/internal/lifetime"
 	"github.com/imksoo/routerd2/internal/linklocal"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
+	"github.com/imksoo/routerd2/internal/protocol/dhcp6identity"
+	"github.com/imksoo/routerd2/internal/statefs"
 	"golang.org/x/sys/unix"
 )
 
@@ -528,28 +530,14 @@ func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, updates <
 	if err != nil {
 		return err
 	}
-	duidText := cfg.ClientDUID
-	if duidText == "" {
-		duidText = saved.Snapshot.ClientDUID
+	identityDir, identityName, err := statefs.OpenParent(cfg.StatePath+".duid", true)
+	if err != nil {
+		return err
 	}
-	var duid []byte
-	if duidText != "" {
-		duid, err = dhcp6config.ParseDUID(duidText)
-		if err != nil {
-			return err
-		}
-	} else if len(ifi.HardwareAddr) == 6 {
-		duid = append([]byte{0, 3, 0, 1}, ifi.HardwareAddr...)
-	} else {
-		// PPP has no Ethernet address. Persist a DUID-UUID (RFC 6355)
-		// through the same identity owner so reconnects keep their identity.
-		duid = make([]byte, 18)
-		binary.BigEndian.PutUint16(duid, 4)
-		if _, err := rand.Read(duid[2:]); err != nil {
-			return err
-		}
-		duid[8] = duid[8]&0x0f | 0x40
-		duid[10] = duid[10]&0x3f | 0x80
+	duid, identityErr := dhcp6identity.Load(ctx, identityDir, identityName, cfg.ClientDUID, ifi.HardwareAddr)
+	err = errors.Join(identityErr, identityDir.Close())
+	if err != nil {
+		return err
 	}
 	conn, err := listen(ctx, cfg.Interface, ifi.Index, source)
 	if err != nil {

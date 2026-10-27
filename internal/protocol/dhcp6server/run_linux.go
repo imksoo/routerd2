@@ -5,21 +5,19 @@ package dhcp6server
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"log/slog"
 	"net"
 	"net/netip"
 	"os"
-	"path/filepath"
 	"slices"
 	"syscall"
 	"time"
 
 	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/linklocal"
-	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
+	"github.com/imksoo/routerd2/internal/protocol/dhcp6identity"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6serverconfig"
 	"github.com/imksoo/routerd2/internal/statefs"
 	"golang.org/x/net/ipv6"
@@ -183,54 +181,9 @@ func loadIdentity(ctx context.Context, cfg dhcp6serverconfig.Config) (serverIden
 	if err := unix.Flock(int(lock.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
 		return saved, err
 	}
-	// Explicit identity is durable operator intent in the configuration journal.
-	// Preserve the automatic identity across temporary overrides and rollback.
-	if cfg.ServerDUID != "" {
-		saved.duid, err = dhcp6config.ParseDUID(cfg.ServerDUID)
-		if err != nil {
-			return saved, err
-		}
-		saved.lock = lock
-		ok = true
-		return saved, nil
-	}
-	raw, err := statefs.ReadPrivate(ctx, dir, name, 256)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
+	saved.duid, err = dhcp6identity.Load(ctx, dir, name, cfg.ServerDUID, nil)
+	if err != nil {
 		return saved, err
-	}
-	text := string(raw)
-	if text != "" {
-		saved.duid, err = dhcp6config.ParseDUID(text)
-		if err != nil {
-			return saved, err
-		}
-	} else {
-		saved.duid = make([]byte, 18)
-		saved.duid[1] = 4
-		if _, err := rand.Read(saved.duid[2:]); err != nil {
-			return saved, err
-		}
-		saved.duid[8] = saved.duid[8]&15 | 64
-		saved.duid[10] = saved.duid[10]&63 | 128
-	}
-	text = hex.EncodeToString(saved.duid)
-	if string(raw) != text {
-		file, err := os.CreateTemp(filepath.Dir(cfg.StatePath), ".dhcp6-server-*")
-		if err != nil {
-			return saved, err
-		}
-		defer os.Remove(file.Name())
-		_, writeErr := file.WriteString(text)
-		err = errors.Join(writeErr, file.Sync(), file.Close())
-		if err != nil {
-			return saved, err
-		}
-		if err := os.Rename(file.Name(), cfg.StatePath); err != nil {
-			return saved, err
-		}
-		if err := dir.Sync(); err != nil {
-			return saved, err
-		}
 	}
 	saved.lock = lock
 	ok = true

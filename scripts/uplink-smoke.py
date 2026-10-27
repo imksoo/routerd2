@@ -531,6 +531,24 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
             "No continuous TCP, direct-ONU wiring or physical NIC qualification is claimed",
             flush=True,
         )
+    except Exception:
+        try:
+            if (stage / "run/control.sock").exists():
+                status = query("control.sock", "/v1/services")
+                print("Failed uplink projection", status.get("phase"), status.get("last_error"), flush=True)
+                for instance in status.get("instances", []):
+                    print("Failed uplink service", instance.get("name"), instance.get("phase"), instance.get("snapshot"), flush=True)
+            for path in (stage / "console.log", *sorted((stage / "state/logs").glob("*.ndjson"))):
+                if path.is_file():
+                    for line in path.read_text(errors="replace").splitlines()[-60:]:
+                        if '"ERROR"' in line or '"WARN"' in line:
+                            print(line, flush=True)
+            for path in stage.glob("wan.pcap*"):
+                packets = run(["tcpdump", "-nn", "-vv", "-r", str(path), "-c", "20", "icmp6 or udp port 546 or udp port 547 or udp port 67 or udp port 68"])
+                print("Failed uplink wire", packets, flush=True)
+        except Exception as diagnostic_error:
+            print("Uplink diagnostics failed", diagnostic_error, flush=True)
+        raise
     finally:
         for p in reversed(children):
             if p.poll() is None:

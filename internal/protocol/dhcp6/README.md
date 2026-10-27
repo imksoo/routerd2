@@ -35,7 +35,15 @@ is ignored independently of usable sibling assignments.
 Multiple addresses and prefixes are retained, up to 64 of each per client.
 A completed or replaced transaction cannot refresh an assignment.
 
-One private checkpoint under `state/leases/NAME.dhcp6.json` stores the full typed
+The private automatic-identity file `state/leases/NAME.dhcp6.json.duid` is written
+once before communication, then reused independently of the current lease or
+link MAC. Explicit `client_duid` belongs to the configuration journal and never
+overwrites that file, so confirmed rollback restores the automatic selection.
+The WAN client and LAN server share the atomic identity writer under their
+existing locks. A missing automatic file creates a fresh identity; discarded
+prototype checkpoints are not used as an identity migration source.
+
+The checkpoint `state/leases/NAME.dhcp6.json` stores the full typed
 snapshot, including DUID/IAID, server identity and original BOOTTIME deadlines.
 Atomic rename and file/directory fsync precede publication and the first packet.
 On the same boot, matching interface/IAID/DUID and live assignments restore
@@ -54,8 +62,8 @@ identity/interface/IAID and expired grants use fresh acquisition. No UTC lease
 rebasing or cross-boot restoration is implemented.
 Graceful shutdown acknowledges kernel/RA withdrawal, persists an empty stopped
 checkpoint, then sends Release. SIGKILL leaves the last saved grant for recovery.
-The current contract is compiler native-35, checkpoint version 2; no discarded
-identity-file or PD-wrapper journal reader is retained.
+The current contract is compiler native-38, checkpoint version 2; no discarded
+prototype reader is retained.
 
 This path was compared with routerd's `cmd/routerd-dhcpv6-client` DUID selection,
 `restoreLease`/`saveLeaseLocked`, `pkg/pdclient.Restore` and configuration matching.

@@ -943,6 +943,12 @@ host suffixもmanaged bindingへ変換する。native address maskは/64で、�
 
 #### NET-06 — LAN・DHCPv6・relay・DNS の resource 完全化
 
+2026-10-27 native-38: 旧routerdのDUID/lease保存を参照し、WAN自動DUIDを選択中のcheckpointから
+分離した。明示DUID trialのrollbackで候補IDが残る問題を独立ISCで再現し、修正後は元IDと
+LAN TCP/UDP・DNSへ復帰した。LAN serverと保存処理を共有し、明示値は自動値を上書きしない。
+今回の実ens20上流はRS/Solicit送信後もRA/DHCP応答がなく未成立。元MACのRSも今回9秒無応答で、
+接続条件を確認中。過去の実上流結果を最新版/対象NICの受入へ拡大しない。
+
 2026-10-27 native-37: stateless serverを既存の条件評価の元期限へ接続した。
 旧7f26fa0でcontrol停止後も旧node自身がunicast応答することを再現し、修正後は停止した。
 署名PID1二台と独立ISC/dnsmasq/BusyBoxで、masterだけの配布、両方向切替、PD由来の実DNS、
