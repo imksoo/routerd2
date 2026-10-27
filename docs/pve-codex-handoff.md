@@ -84,6 +84,25 @@ host engine・設定・hookへfallbackしない。対応source/APKBUILD/patchと
   自然T1のRenew/Reply（送信元49153）と期限更新、全worker世代1を確認した。
   最新native-28の長時間受入、同一TCP継続、ONU直結配線や物理NICの資格判定には数えない。
 
+### homertの現状確認（2026-10-27、読み取り専用）
+
+現行設定とControl APIを両nodeで確認した。homert02はmaster/activation Ready、homert03は
+backup/Standby。いずれもpreempt=falseで、優先度は150/100。主系はPD取得中で、選択経路は
+PDを使うDS-Liteの分散経路。待機系は代替経路を選んでいる。設定にPPPはない。
+両系でTailscaleはRunning/online、conntrackdのserviceはactive。conntrackdはFTFW、外部cache有効、
+起動時再同期、TCP window tracking無効、expectation同期有効という設定だった。
+表示上Runningであることを、同期内容や既存TCP継続の確認とは扱わない。
+主系のDHCPv4/PD同期はSyncedで15秒間隔。DHCPv6 serverはstatelessで、
+PD由来DNSとdomain-searchを配り、待機系ではWhenFalseにより停止する。
+この運用のためにstateful DHCPv6の全pool機能を先行条件へ追加しない。
+
+次の実装は、既存VRRP admissionとwriterの責任範囲に沿ったHA-03の接続状態引継ぎと、
+HA-02の貸出・PD identity/期限の引継ぎを対象とする。実績のあるconntrackdの実装・昇格経路と
+native workerを比較し、外部cacheのkernel適用を終えてからVIP/転送を公開する。
+同じTCP socketとUDP mappingで切替・復帰を確認し、新規接続の成功とは区別する。
+DNS配布・管理経路を保った一台分の通信、二nodeのWAN/LAN identityとPD、実際の
+standby時の停止条件も合わせて通す。routerd2による置換や本番切替はまだ行っていない。
+
 ## 優先順と残作業
 
 全work packageは台帳の範囲を維持する。今回の相互接続だけで全体を完了にしない。

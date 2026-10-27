@@ -35,6 +35,25 @@
 直近はcontrol交換・永続再起動・影響するHealth→PBRを収束させ、homertの不足へ進む。
 全機能の監査台帳や専用試験基盤を先に作らず、実際に必要な依存経路を小さく完成させる。
 
+### homertの現状確認（2026-10-27、読み取り専用）
+
+現行設定とControl APIを両nodeで確認した。homert02はmaster/activation Ready、homert03は
+backup/Standby。いずれもpreempt=falseで、優先度は150/100。主系はPD取得中で、選択経路は
+PDを使うDS-Liteの分散経路。待機系は代替経路を選んでいる。設定にPPPはない。
+両系でTailscaleはRunning/online、conntrackdのserviceはactive。conntrackdはFTFW、外部cache有効、
+起動時再同期、TCP window tracking無効、expectation同期有効という設定だった。
+表示上Runningであることを、同期内容や既存TCP継続の確認とは扱わない。
+主系のDHCPv4/PD同期はSyncedで15秒間隔。DHCPv6 serverはstatelessで、
+PD由来DNSとdomain-searchを配り、待機系ではWhenFalseにより停止する。
+この運用のためにstateful DHCPv6の全pool機能を先行条件へ追加しない。
+
+次の実装は、既存VRRP admissionとwriterの責任範囲に沿ったHA-03の接続状態引継ぎと、
+HA-02の貸出・PD identity/期限の引継ぎを対象とする。実績のあるconntrackdの実装・昇格経路と
+native workerを比較し、外部cacheのkernel適用を終えてからVIP/転送を公開する。
+同じTCP socketとUDP mappingで切替・復帰を確認し、新規接続の成功とは区別する。
+DNS配布・管理経路を保った一台分の通信、二nodeのWAN/LAN identityとPD、実際の
+standby時の停止条件も合わせて通す。routerd2による置換や本番切替はまだ行っていない。
+
 ## 1. 基準と到達点
 
 **routerd と routerd2 は別製品である。** routerd は稼働中の機能参照元、routerd2 は未リリースの開発対象。
