@@ -21,7 +21,7 @@ Alpineのパッケージをビルドとイメージ組み立てに利用しま�
 | RA | native ICMPv6、RS 応答、RDNSS/DNSSL、絶対寿命、PD 更新時に同じプロセス・socket で prefix を変更。削除した prefix だけを withdraw |
 | DS-Lite | kernel IPv4-in-IPv6、B4 アドレス、IPv4 route。明示した RA/DHCPv6 依存から AFTR を IPv6 DNS で解決し、source・情報・DNS TTL の期限に従って接続・更新・撤去 |
 | VRRPv3 | native IPv4/IPv6 election、VMAC、GARP/NA、preempt、優先度、有限 ownership lease、NoDAD の明示 VIP、Accept_Mode の入力制御 |
-| DNS | 現行 routerd の resolver engine を再利用。UDP/TCP サーバー、cache、zones、query log、UDP/TCP/TLS/HTTPS/QUIC upstream。型付き DHCP リースによる A/PTR を、listener 再起動なしで更新・失効。虚偽の AD bit を防ぐため未実装の local DNSSEC signing は拒否 |
+| DNS | 現行 routerd の resolver engine を再利用。UDP/TCP サーバー、cache、zones、query log、UDP/TCP/TLS/HTTPS/QUIC upstream。型付き DHCP リースによる A/PTR と PPP から学習した DNS 上流を、listener 再起動なしで更新・失効。虚偽の AD bit を防ぐため未実装の local DNSSEC signing は拒否 |
 | BGP | GoBGP v4 を独立 worker に統合。IPv4/IPv6 unicast、policy、選択経路の kernel 投影、recursive next hop、ECMP、期限付き FIB ownership。未解決 next hop は状態に表示し、未解決のまま FIB に入れない |
 | BFD | native IPv4/IPv6 single-hop・明示multihop asynchronous BFDとVRF scope。BGP の明示peerを管理し、受信期限・producer世代・Down counterで実セッションと学習経路を制御。旧profile/resource契約、認証・echoは未実装。VRF multihopの実通信試験はIPv4/IPv6 |
 | Health / events | ICMP/TCP/DNS/HTTPの有限Health snapshotと最小Health→PBR。probe履歴の永続queue・安定ID再送・永久削除・条件停止中の回収、EventRule、Health/BFD/BGPRouter参照DerivedEventと現在値表示。retention・他producer/providerは未完了 |

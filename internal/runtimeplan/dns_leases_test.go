@@ -34,7 +34,7 @@ func TestDHCPServerDNSProjectionFencesSourcesAndExpiresReplays(t *testing.T) {
 	if err := r.ApplyConfig(ctx, 1, source); err != nil {
 		t.Fatal(err)
 	}
-	initial, err := r.DNSLeases("service.dns")
+	initial, err := r.DNSInput("service.dns")
 	if err != nil || len(initial.Sets) != 0 || initial.ConfigDigest != r.bindings["service.dns"].digest {
 		t.Fatalf("initial fenced empty projection: %+v %v", initial, err)
 	}
@@ -51,7 +51,7 @@ func TestDHCPServerDNSProjectionFencesSourcesAndExpiresReplays(t *testing.T) {
 	if err := r.reconcileDynamic(ctx); err != nil || len(networkWriter.applied.Routes) != 1 {
 		t.Fatal("fresh DHCP server did not release its dependent", err)
 	}
-	projected, err := r.DNSLeases("service.dns")
+	projected, err := r.DNSInput("service.dns")
 	if err != nil || len(projected.Sets) != 1 || len(projected.Sets[0].Records) != 1 || projected.Sets[0].Records[0].Address != "192.0.2.123" {
 		t.Fatalf("accepted lease not projected: %+v %v", projected, err)
 	}
@@ -61,7 +61,7 @@ func TestDHCPServerDNSProjectionFencesSourcesAndExpiresReplays(t *testing.T) {
 		t.Fatal("lease source identity spoof was accepted")
 	}
 	time.Sleep(350 * time.Millisecond)
-	projected, err = r.DNSLeases("service.dns")
+	projected, err = r.DNSInput("service.dns")
 	if err != nil || len(projected.Sets) != 1 || len(projected.Sets[0].Records) != 1 || !projected.Sets[0].Records[0].ExpiresAt.Equal(snapshot.Leases[0].ExpiresAt) {
 		t.Fatal("client expiry changed the original source sequence contents", projected, err)
 	}
@@ -83,11 +83,11 @@ func TestDHCPServerDNSProjectionFencesSourcesAndExpiresReplays(t *testing.T) {
 	if err := r.reconcileDynamic(ctx); err != nil || len(networkWriter.applied.Routes) != 0 {
 		t.Fatal("replayed observation reactivated the expired server after cutover", err)
 	}
-	projected, err = r.DNSLeases("service.dns")
+	projected, err = r.DNSInput("service.dns")
 	if err != nil || len(projected.Sets) != 0 {
 		t.Fatalf("replay extended DNS ownership: %+v %v", projected, err)
 	}
-	if _, err := r.DNSLeases("service.leases"); err == nil {
+	if _, err := r.DNSInput("service.leases"); err == nil {
 		t.Fatal("DHCP server obtained an unauthorized DNS consumer projection")
 	}
 }

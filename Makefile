@@ -133,6 +133,10 @@ check-bfd: build
 check-dhcp6: build
 	$(PYTHON) scripts/daemon-tests.py dhcp6 --go '$(GO)'
 
+.PHONY: check-dhcp-dns
+check-dhcp-dns: build
+	$(PYTHON) scripts/daemon-tests.py dhcp-server --go '$(GO)'
+
 check-pd-ra: build
 	$(PYTHON) scripts/daemon-tests.py pd-ra --go '$(GO)'
 

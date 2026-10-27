@@ -26,7 +26,7 @@ func normalizedRuntime(c dnsresolver.RuntimeConfig, statePath string) dnsresolve
 }
 func validateRuntime(c dnsresolver.RuntimeConfig) error { return dnsconfig.ValidateRuntime(c) }
 func validateRuntimePaths(c dnsresolver.RuntimeConfig, opts options) error {
-	return dnsconfig.ValidateRuntimePaths(c, Config{SocketPath: opts.socketPath, StatePath: opts.stateFile, EventPath: opts.eventFile, RuntimeConfigPath: opts.configFile})
+	return dnsconfig.ValidateRuntimePaths(c, Config{SocketPath: opts.socketPath, StatePath: opts.stateFile, EventPath: opts.eventFile})
 }
 func validHostname(name string) bool { return dnsconfig.ValidHostname(name) }
 func firstNonEmpty(values ...string) string {
@@ -38,14 +38,10 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-func Run(ctx context.Context, cfg Config, ready func()) error {
-	return RunWithLeaseUpdates(ctx, cfg, nil, ready)
-}
-
-// RunWithLeaseUpdates consumes complete native DHCP projections independently
+// Run consumes complete native DHCP projections independently
 // of DNS listeners and upstream pools. Closing the channel retains only the
 // already received finite deadlines; it never makes a lease permanent.
-func RunWithLeaseUpdates(ctx context.Context, cfg Config, updates <-chan dnsconfig.LeaseProjection, ready func()) error {
+func Run(ctx context.Context, cfg Config, updates <-chan dnsconfig.Input, ready func()) error {
 	if err := Validate(cfg); err != nil {
 		return err
 	}
@@ -64,7 +60,7 @@ func RunWithLeaseUpdates(ctx context.Context, cfg Config, updates <-chan dnsconf
 	if err := unix.Flock(int(lock.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
 		return fmt.Errorf("DNS state is already owned: %w", err)
 	}
-	d, err := newDaemon(options{resource: cfg.Runtime.Resource, configFile: cfg.RuntimeConfigPath, socketPath: cfg.SocketPath, stateFile: cfg.StatePath, eventFile: cfg.EventPath}, normalizedRuntime(cfg.Runtime, cfg.StatePath))
+	d, err := newDaemon(options{resource: cfg.Runtime.Resource, socketPath: cfg.SocketPath, stateFile: cfg.StatePath, eventFile: cfg.EventPath}, normalizedRuntime(cfg.Runtime, cfg.StatePath))
 	if err != nil {
 		return err
 	}
@@ -72,13 +68,12 @@ func RunWithLeaseUpdates(ctx context.Context, cfg Config, updates <-chan dnsconf
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	if updates != nil {
-		d.nativeLeaseMode = true
 		select {
 		case initial, ok := <-updates:
 			if !ok {
 				return errors.New("DNS native lease input closed before initial projection")
 			}
-			if err := d.applyLeaseProjection(initial); err != nil {
+			if err := d.applyInput(initial); err != nil {
 				return err
 			}
 		case <-runCtx.Done():
@@ -96,8 +91,8 @@ func RunWithLeaseUpdates(ctx context.Context, cfg Config, updates <-chan dnsconf
 					if !ok {
 						return
 					}
-					if err := d.applyLeaseProjection(projection); err != nil {
-						d.leaseRejected.Add(1)
+					if err := d.applyInput(projection); err != nil {
+						d.inputRejected.Add(1)
 						slog.Warn("DNS lease projection rejected", "resource", cfg.Runtime.Resource, "error", err)
 					}
 				}

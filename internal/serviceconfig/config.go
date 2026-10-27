@@ -98,8 +98,7 @@ type Instance struct {
 	Config         json.RawMessage `json:"config"`
 	// DynamicRA obtains its prefix/lifetime data from the control service;
 	// the immutable config contains only the interface/template identity.
-	DynamicRA  bool `json:"dynamic_ra,omitempty"`
-	DynamicDNS bool `json:"dynamic_dns,omitempty"`
+	DynamicRA bool `json:"dynamic_ra,omitempty"`
 }
 
 var safeName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,23}$`)
@@ -394,7 +393,7 @@ func Validate(services []Service) error {
 	if err := validateBFDReferences(services); err != nil {
 		return err
 	}
-	return validateDNSLeaseSources(services)
+	return validateDNSSources(services)
 }
 
 func (s Service) DHCP4Config(stateDir string) dhcp4.Config {
@@ -453,7 +452,7 @@ func (s Service) Instance(runtimeDir, stateDir string) (Instance, error) {
 	default:
 		return Instance{}, errors.New("unsupported service")
 	}
-	instance := Instance{Name: s.ModuleName(), Role: s.Role(), Config: b, DynamicDNS: s.HasDNSLeaseSources()}
+	instance := Instance{Name: s.ModuleName(), Role: s.Role(), Config: b}
 	if s.Health != nil {
 		instance.EventDirectory = HealthEventDirectory(stateDir, s.Name)
 	}

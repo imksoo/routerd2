@@ -4,12 +4,9 @@ package dns
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -19,7 +16,6 @@ import (
 	"github.com/miekg/dns"
 
 	"github.com/imksoo/routerd/pkg/api"
-	"github.com/imksoo/routerd/pkg/daemonapi"
 	resolvercfg "github.com/imksoo/routerd/pkg/dnsresolver"
 	"github.com/imksoo/routerd/pkg/logstore"
 )
@@ -51,62 +47,6 @@ func TestNormalizeDaemonExit(t *testing.T) {
 	}
 }
 
-func TestReloadAddsListenAddressWithoutRebindingExisting(t *testing.T) {
-	port1 := freeTCPPort(t)
-	port2 := freeTCPPort(t)
-	configPath := filepath.Join(t.TempDir(), "resolver.json")
-	initial := testResolverConfig([]int{port1})
-	writeRuntimeConfig(t, configPath, initial)
-	d := newTestDaemon(t, configPath, initial, false)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	if err := d.startDNS(ctx); err != nil {
-		skipIfListenNotPermitted(t, err)
-		t.Fatal(err)
-	}
-	defer d.shutdownDNSServers()
-
-	addr1 := net.JoinHostPort("127.0.0.1", fmt.Sprintf("%d", port1))
-	addr2 := net.JoinHostPort("127.0.0.1", fmt.Sprintf("%d", port2))
-	assertDNSAnswer(t, addr1, "router.lab.example.", "192.0.2.1")
-	d.stateMu.RLock()
-	oldListener := d.listeners[addr1]
-	d.stateMu.RUnlock()
-
-	updated := testResolverConfig([]int{port1, port2})
-	writeRuntimeConfig(t, configPath, updated)
-	summary, err := d.reload(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if summary.Listeners != 2 {
-		t.Fatalf("listeners = %d, want 2", summary.Listeners)
-	}
-	d.stateMu.RLock()
-	sameListener := d.listeners[addr1] == oldListener
-	d.stateMu.RUnlock()
-	if !sameListener {
-		t.Fatalf("existing listener was rebound")
-	}
-	assertDNSAnswer(t, addr1, "router.lab.example.", "192.0.2.1")
-	assertDNSAnswer(t, addr2, "router.lab.example.", "192.0.2.1")
-}
-
-func TestReloadClearsDNSCache(t *testing.T) {
-	configPath := filepath.Join(t.TempDir(), "resolver.json")
-	config := testResolverConfig(nil)
-	writeRuntimeConfig(t, configPath, config)
-	d := newTestDaemon(t, configPath, config, true)
-	d.cacheSet("stale", []byte("old-answer"), time.Hour, 10, d.generation)
-
-	if _, err := d.reload(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := d.cacheGet("stale", d.generation); ok {
-		t.Fatal("cache entry survived successful reload")
-	}
-}
-
 func TestCacheRejectsResponseFromPreviousGeneration(t *testing.T) {
 	d := &daemon{cache: map[string]cacheEntry{}, generation: 1}
 	d.cacheSet("answer", []byte("old"), time.Hour, 10, 1)
@@ -122,281 +62,6 @@ func TestCacheRejectsResponseFromPreviousGeneration(t *testing.T) {
 	d.cacheSet("answer", []byte("late-old"), time.Hour, 10, 1)
 	if _, ok := d.cacheGet("answer", 2); ok {
 		t.Fatal("response from previous runtime generation entered current cache")
-	}
-}
-
-func TestReloadRemovesListenAddress(t *testing.T) {
-	port1 := freeTCPPort(t)
-	port2 := freeTCPPort(t)
-	configPath := filepath.Join(t.TempDir(), "resolver.json")
-	initial := testResolverConfig([]int{port1, port2})
-	writeRuntimeConfig(t, configPath, initial)
-	d := newTestDaemon(t, configPath, initial, false)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	if err := d.startDNS(ctx); err != nil {
-		skipIfListenNotPermitted(t, err)
-		t.Fatal(err)
-	}
-	defer d.shutdownDNSServers()
-
-	addr1 := net.JoinHostPort("127.0.0.1", fmt.Sprintf("%d", port1))
-	addr2 := net.JoinHostPort("127.0.0.1", fmt.Sprintf("%d", port2))
-	assertDNSAnswer(t, addr1, "router.lab.example.", "192.0.2.1")
-	assertDNSAnswer(t, addr2, "router.lab.example.", "192.0.2.1")
-
-	updated := testResolverConfig([]int{port1})
-	writeRuntimeConfig(t, configPath, updated)
-	summary, err := d.reload(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if summary.Listeners != 1 {
-		t.Fatalf("listeners = %d, want 1", summary.Listeners)
-	}
-	assertDNSAnswer(t, addr1, "router.lab.example.", "192.0.2.1")
-	assertDNSNoResponse(t, addr2, "router.lab.example.")
-}
-
-func TestReloadInvalidConfigKeepsServingOldState(t *testing.T) {
-	port := freeTCPPort(t)
-	configPath := filepath.Join(t.TempDir(), "resolver.json")
-	initial := testResolverConfig([]int{port})
-	writeRuntimeConfig(t, configPath, initial)
-	d := newTestDaemon(t, configPath, initial, false)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	if err := d.startDNS(ctx); err != nil {
-		skipIfListenNotPermitted(t, err)
-		t.Fatal(err)
-	}
-	defer d.shutdownDNSServers()
-
-	addr := net.JoinHostPort("127.0.0.1", fmt.Sprintf("%d", port))
-	assertDNSAnswer(t, addr, "router.lab.example.", "192.0.2.1")
-	d.stateMu.RLock()
-	oldListener := d.listeners[addr]
-	d.stateMu.RUnlock()
-
-	writeRuntimeConfig(t, configPath, resolvercfg.RuntimeConfig{
-		Resource: "lab",
-		Spec: api.DNSResolverSpec{
-			Listen: []api.DNSResolverListenSpec{{Addresses: []string{"127.0.0.1"}, Port: port}},
-		},
-	})
-	if _, err := d.reload(ctx); err == nil {
-		t.Fatal("reload succeeded with invalid config")
-	}
-	d.stateMu.RLock()
-	sameListener := d.listeners[addr] == oldListener
-	d.stateMu.RUnlock()
-	if !sameListener {
-		t.Fatalf("listener changed after failed reload")
-	}
-	assertDNSAnswer(t, addr, "router.lab.example.", "192.0.2.1")
-}
-
-func TestReloadSwapsForwardSources(t *testing.T) {
-	configPath := filepath.Join(t.TempDir(), "resolver.json")
-	initial := testForwardConfig("old", "udp://127.0.0.1:5301")
-	writeRuntimeConfig(t, configPath, initial)
-	d := newTestDaemon(t, configPath, initial, true)
-
-	updated := testForwardConfig("new", "udp://127.0.0.1:5302")
-	writeRuntimeConfig(t, configPath, updated)
-	if _, err := d.reload(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	d.stateMu.RLock()
-	defer d.stateMu.RUnlock()
-	if len(d.sources) != 1 || d.sources[0].Spec.Name != "new" {
-		t.Fatalf("sources = %#v, want swapped source named new", d.sources)
-	}
-	if d.sources[0].Pool == nil || d.sources[0].Pool.Snapshot()[0].Address != "127.0.0.1:5302" {
-		t.Fatalf("source pool was not rebuilt: %#v", d.sources[0].Pool)
-	}
-}
-
-func TestReloadPreservesDynamicLeaseRecords(t *testing.T) {
-	configPath := filepath.Join(t.TempDir(), "resolver.json")
-	initial := testResolverConfig([]int{5053})
-	writeRuntimeConfig(t, configPath, initial)
-	d := newTestDaemon(t, configPath, initial, true)
-	d.zones.ApplyLease(dhcpLeaseEvent{Action: daemonapi.DHCPLeaseActionAdded, MAC: "02:00:00:00:00:01", IP: "192.0.2.55", Hostname: "leasehost"})
-
-	writeRuntimeConfig(t, configPath, initial)
-	if _, err := d.reload(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	req := new(dns.Msg)
-	req.SetQuestion("leasehost.lab.example.", dns.TypeA)
-	d.stateMu.RLock()
-	zones := d.zones
-	d.stateMu.RUnlock()
-	resp, ok := zones.Answer(req, []string{"DNSZone/lan-zone"})
-	if !ok || len(resp.Answer) != 1 {
-		t.Fatalf("dynamic record was not preserved: ok=%v resp=%v", ok, resp)
-	}
-	if a, isA := resp.Answer[0].(*dns.A); !isA || a.A.String() != "192.0.2.55" {
-		t.Fatalf("dynamic answer = %v, want 192.0.2.55", resp.Answer[0])
-	}
-}
-
-func TestReloadActiveLeaseEventTakesPrecedenceOverNewStickySnapshot(t *testing.T) {
-	configPath := filepath.Join(t.TempDir(), "resolver.json")
-	initial := testResolverConfig([]int{5053})
-	initial.Zones[0].DHCPHostRecords = []resolvercfg.RuntimeDHCPHostRecord{{
-		Hostname: "client",
-		IP:       "192.0.2.127",
-	}}
-	writeRuntimeConfig(t, configPath, initial)
-	d := newTestDaemon(t, configPath, initial, true)
-	d.zones.ApplyLease(dhcpLeaseEvent{
-		Action:   daemonapi.DHCPLeaseActionAdded,
-		MAC:      "02:00:00:00:00:01",
-		IP:       "192.0.2.128",
-		Hostname: "client",
-	})
-
-	writeRuntimeConfig(t, configPath, initial)
-	if _, err := d.reload(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	d.stateMu.RLock()
-	zones := d.zones
-	d.stateMu.RUnlock()
-	assertZoneARecord(t, zones, "client.lab.example.", "192.0.2.128")
-	assertZonePTRRecord(t, zones, "128.2.0.192.in-addr.arpa.", "client.lab.example.")
-	assertZoneNoPTRRecord(t, zones, "127.2.0.192.in-addr.arpa.")
-}
-
-func TestReloadStaticAndLeaseFileTakePrecedenceOverOldActiveEvent(t *testing.T) {
-	tests := []struct {
-		name      string
-		configure func(*testing.T, *resolvercfg.RuntimeConfig)
-		wantIP    string
-		wantPTR   string
-	}{
-		{
-			name: "static",
-			configure: func(t *testing.T, config *resolvercfg.RuntimeConfig) {
-				config.Zones[0].Spec.Records = append(config.Zones[0].Spec.Records, api.DNSZoneRecordSpec{
-					Hostname: "client",
-					IPv4:     "192.0.2.129",
-				})
-			},
-			wantIP:  "192.0.2.129",
-			wantPTR: "client.lab.example.",
-		},
-		{
-			name: "active lease file",
-			configure: func(t *testing.T, config *resolvercfg.RuntimeConfig) {
-				leaseFile := filepath.Join(t.TempDir(), "dnsmasq.leases")
-				if err := os.WriteFile(leaseFile, []byte("1789306800 02:00:00:00:00:02 192.0.2.130 client *\n"), 0o644); err != nil {
-					t.Fatal(err)
-				}
-				config.Zones[0].Spec.DHCPDerived.LeaseFile = leaseFile
-			},
-			wantIP:  "192.0.2.130",
-			wantPTR: "client.lab.example.",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			configPath := filepath.Join(t.TempDir(), "resolver.json")
-			initial := testResolverConfig([]int{5053})
-			writeRuntimeConfig(t, configPath, initial)
-			d := newTestDaemon(t, configPath, initial, true)
-			d.zones.ApplyLease(dhcpLeaseEvent{
-				Action:   daemonapi.DHCPLeaseActionAdded,
-				MAC:      "02:00:00:00:00:01",
-				IP:       "192.0.2.128",
-				Hostname: "client",
-			})
-
-			updated := testResolverConfig([]int{5053})
-			tt.configure(t, &updated)
-			writeRuntimeConfig(t, configPath, updated)
-			if _, err := d.reload(context.Background()); err != nil {
-				t.Fatal(err)
-			}
-			d.stateMu.RLock()
-			zones := d.zones
-			d.stateMu.RUnlock()
-			assertZoneARecord(t, zones, "client.lab.example.", tt.wantIP)
-			ptr, err := dns.ReverseAddr(tt.wantIP)
-			if err != nil {
-				t.Fatal(err)
-			}
-			assertZonePTRRecord(t, zones, ptr, tt.wantPTR)
-			assertZoneNoPTRRecord(t, zones, "128.2.0.192.in-addr.arpa.")
-		})
-	}
-}
-
-func TestActiveLeaseEventUpdatesLoadedLeaseFileBeforeReload(t *testing.T) {
-	leaseFile := filepath.Join(t.TempDir(), "dnsmasq.leases")
-	if err := os.WriteFile(leaseFile, []byte("1789306800 02:00:00:00:00:02 192.0.2.127 client *\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	config := testResolverConfig(nil)
-	config.Zones[0].Spec.DHCPDerived.LeaseFile = leaseFile
-	zones := newZoneTable(config.Zones)
-	zones.ApplyLease(dhcpLeaseEvent{
-		Action:   daemonapi.DHCPLeaseActionAdded,
-		MAC:      "02:00:00:00:00:02",
-		IP:       "192.0.2.128",
-		Hostname: "client",
-	})
-
-	assertZoneARecord(t, zones, "client.lab.example.", "192.0.2.128")
-	assertZonePTRRecord(t, zones, "128.2.0.192.in-addr.arpa.", "client.lab.example.")
-	assertZoneNoPTRRecord(t, zones, "127.2.0.192.in-addr.arpa.")
-}
-
-func TestReloadPrefersUpdatedRecoveredLeaseOverOldDynamicRecord(t *testing.T) {
-	configPath := filepath.Join(t.TempDir(), "resolver.json")
-	initial := testResolverConfig([]int{5053})
-	initial.Zones[0].DHCPHostRecords = []resolvercfg.RuntimeDHCPHostRecord{{
-		Hostname: "leasehost",
-		IP:       "192.0.2.127",
-	}}
-	writeRuntimeConfig(t, configPath, initial)
-	d := newTestDaemon(t, configPath, initial, true)
-
-	updated := testResolverConfig([]int{5053})
-	updated.Zones[0].DHCPHostRecords = []resolvercfg.RuntimeDHCPHostRecord{{
-		Hostname: "leasehost",
-		IP:       "192.0.2.128",
-	}}
-	writeRuntimeConfig(t, configPath, updated)
-	if _, err := d.reload(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-
-	req := new(dns.Msg)
-	req.SetQuestion("leasehost.lab.example.", dns.TypeA)
-	d.stateMu.RLock()
-	zones := d.zones
-	d.stateMu.RUnlock()
-	resp, ok := zones.Answer(req, []string{"DNSZone/lan-zone"})
-	if !ok || len(resp.Answer) != 1 {
-		t.Fatalf("updated recovered record missing: ok=%v resp=%v", ok, resp)
-	}
-	if a, isA := resp.Answer[0].(*dns.A); !isA || a.A.String() != "192.0.2.128" {
-		t.Fatalf("answer after reload = %v, want 192.0.2.128", resp.Answer[0])
-	}
-	oldPTR := new(dns.Msg)
-	oldPTR.SetQuestion("127.2.0.192.in-addr.arpa.", dns.TypePTR)
-	if stale, answered := zones.Answer(oldPTR, []string{"DNSZone/lan-zone"}); answered {
-		t.Fatalf("old PTR survived reload: %v", stale)
-	}
-	newPTR := new(dns.Msg)
-	newPTR.SetQuestion("128.2.0.192.in-addr.arpa.", dns.TypePTR)
-	ptrResp, answered := zones.Answer(newPTR, []string{"DNSZone/lan-zone"})
-	if !answered || len(ptrResp.Answer) != 1 {
-		t.Fatalf("updated PTR missing after reload: answered=%v resp=%v", answered, ptrResp)
 	}
 }
 
@@ -435,45 +100,9 @@ func assertZoneNoPTRRecord(t *testing.T, zones *zoneTable, name string) {
 	}
 }
 
-func TestReloadHandlerStatusCodes(t *testing.T) {
-	configPath := filepath.Join(t.TempDir(), "resolver.json")
-	initial := testResolverConfig([]int{5053})
-	writeRuntimeConfig(t, configPath, initial)
-	d := newTestDaemon(t, configPath, initial, true)
-
-	okReq := httptest.NewRequest(http.MethodPost, "/v1/reload", nil)
-	okResp := httptest.NewRecorder()
-	d.reloadHandler(okResp, okReq)
-	if okResp.Code != http.StatusOK {
-		t.Fatalf("success status = %d body=%s", okResp.Code, okResp.Body.String())
-	}
-	var summary reloadSummary
-	if err := json.Unmarshal(okResp.Body.Bytes(), &summary); err != nil {
-		t.Fatal(err)
-	}
-	if !summary.Reloaded || summary.Sources != 1 {
-		t.Fatalf("summary = %#v", summary)
-	}
-
-	writeRuntimeConfig(t, configPath, resolvercfg.RuntimeConfig{
-		Resource: "lab",
-		Spec: api.DNSResolverSpec{
-			Listen: []api.DNSResolverListenSpec{{Addresses: []string{"127.0.0.1"}, Port: 5053}},
-		},
-	})
-	failReq := httptest.NewRequest(http.MethodPost, "/v1/reload", nil)
-	failResp := httptest.NewRecorder()
-	d.reloadHandler(failResp, failReq)
-	if failResp.Code != http.StatusBadRequest {
-		t.Fatalf("failure status = %d body=%s", failResp.Code, failResp.Body.String())
-	}
-}
-
 func TestObservedStatusIncludesQueryLogStats(t *testing.T) {
-	configPath := filepath.Join(t.TempDir(), "resolver.json")
-	config := testResolverConfig([]int{5053})
-	writeRuntimeConfig(t, configPath, config)
-	d := newTestDaemon(t, configPath, config, true)
+	config := testResolverConfig(t, []int{5053})
+	d := newTestDaemon(t, config)
 	queryLog, err := logstore.OpenDNSQueryLog(filepath.Join(t.TempDir(), "dns-queries.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -507,10 +136,8 @@ func TestObservedStatusIncludesQueryLogStats(t *testing.T) {
 }
 
 func TestRecordQueryReopensClosedQueryLog(t *testing.T) {
-	configPath := filepath.Join(t.TempDir(), "resolver.json")
-	config := testResolverConfig([]int{5053})
-	writeRuntimeConfig(t, configPath, config)
-	d := newTestDaemon(t, configPath, config, true)
+	config := testResolverConfig(t, []int{5053})
+	d := newTestDaemon(t, config)
 	path := filepath.Join(t.TempDir(), "dns-queries.db")
 	queryLog, err := logstore.OpenDNSQueryLog(path)
 	if err != nil {
@@ -543,7 +170,7 @@ func TestRecordQueryReopensClosedQueryLog(t *testing.T) {
 	}
 }
 
-func testResolverConfig(ports []int) resolvercfg.RuntimeConfig {
+func testResolverConfig(t *testing.T, ports []int) resolvercfg.RuntimeConfig {
 	listen := make([]api.DNSResolverListenSpec, 0, len(ports))
 	for _, port := range ports {
 		listen = append(listen, api.DNSResolverListenSpec{
@@ -577,11 +204,11 @@ func testResolverConfig(ports []int) resolvercfg.RuntimeConfig {
 	}
 }
 
-func testForwardConfig(name, upstream string) resolvercfg.RuntimeConfig {
+func testForwardConfig(t *testing.T, name, upstream string) resolvercfg.RuntimeConfig {
 	return resolvercfg.RuntimeConfig{
 		Resource: "lab",
 		Spec: api.DNSResolverSpec{
-			Listen: []api.DNSResolverListenSpec{{Name: "loopback", Addresses: []string{"127.0.0.1"}, Port: 5053}},
+			Listen: []api.DNSResolverListenSpec{{Name: "loopback", Addresses: []string{"127.0.0.1"}, Port: freeTCPPort(t)}},
 			Sources: []api.DNSResolverSourceSpec{{
 				Name:      name,
 				Kind:      "forward",
@@ -592,30 +219,22 @@ func testForwardConfig(name, upstream string) resolvercfg.RuntimeConfig {
 	}
 }
 
-func newTestDaemon(t *testing.T, configPath string, config resolvercfg.RuntimeConfig, dryRun bool) *daemon {
+func newTestDaemon(t *testing.T, config resolvercfg.RuntimeConfig) *daemon {
 	t.Helper()
 	d, err := newDaemon(options{
-		resource:   "lab",
-		configFile: configPath,
-		stateFile:  filepath.Join(t.TempDir(), "state.json"),
-		eventFile:  filepath.Join(t.TempDir(), "events.jsonl"),
-		dryRun:     dryRun,
+		resource: "lab",
+
+		stateFile: filepath.Join(t.TempDir(), "state.json"),
+		eventFile: filepath.Join(t.TempDir(), "events.jsonl"),
 	}, config)
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		d.shutdownDNSServers()
+		d.closeQueryLog()
+	})
 	return d
-}
-
-func writeRuntimeConfig(t *testing.T, path string, config resolvercfg.RuntimeConfig) {
-	t.Helper()
-	data, err := json.Marshal(config)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		t.Fatal(err)
-	}
 }
 
 func freeTCPPort(t *testing.T) int {

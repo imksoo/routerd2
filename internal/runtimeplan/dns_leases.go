@@ -1,29 +1,28 @@
 package runtimeplan
 
 import (
+	"encoding/json"
 	"errors"
 
 	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
+	"github.com/imksoo/routerd2/internal/protocol/pppoeconfig"
 )
 
-// DNSLeases returns only the sources authorized by this committed DNS instance.
+// DNSInput returns only the sources authorized by this committed DNS instance.
 // The result is complete: a missing, stopped or expired producer contributes no
 // records. Client expiry remains original and DNS checks it when answering.
 // Worker polling is separate from lease ACK and never holds up DHCP.
-func (r *Runtime) DNSLeases(moduleName string) (dnsconfig.LeaseProjection, error) {
+func (r *Runtime) DNSInput(moduleName string) (dnsconfig.Input, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	binding, ok := r.bindings[moduleName]
-	if !r.configured || !ok || binding.instance.Role != "dns" || !binding.instance.DynamicDNS {
-		return dnsconfig.LeaseProjection{}, errors.New("no committed native DNS lease consumer")
+	if !r.configured || !ok || binding.instance.Role != "dns" {
+		return dnsconfig.Input{}, errors.New("no committed DNS consumer")
 	}
-	var cfg dnsconfig.Config
-	if err := strict(binding.instance.Config, &cfg); err != nil {
-		return dnsconfig.LeaseProjection{}, err
-	}
-	out := dnsconfig.LeaseProjection{Resource: cfg.Runtime.Resource, ConfigDigest: binding.digest, Sets: []dnsconfig.LeaseSet{}}
+	cfg := r.config.protocols.dns[moduleName]
+	out := dnsconfig.Input{Resource: cfg.Runtime.Resource, ConfigDigest: binding.digest, Sets: []dnsconfig.LeaseSet{}}
 	clock, err := boottime.Read()
 	if err != nil {
 		return out, err
@@ -51,6 +50,26 @@ func (r *Runtime) DNSLeases(moduleName string) (dnsconfig.LeaseProjection, error
 			out.Sets = append(out.Sets, set)
 		}
 	}
-	out = dnsconfig.NormalizeLeaseProjection(out)
-	return out, dnsconfig.ValidateLeaseProjection(cfg.Runtime, out, clock)
+
+	for _, source := range cfg.Runtime.Spec.Sources {
+		for _, ref := range source.UpstreamFrom {
+			name, err := dnsconfig.UpstreamProvider(ref)
+			if err != nil {
+				return out, err
+			}
+			update, found := r.records["service."+name]
+			if !found || update.Role != "pppoe" {
+				continue
+			}
+			var observed pppoeconfig.Snapshot
+			if err := json.Unmarshal(update.Snapshot, &observed); err != nil {
+				return out, err
+			}
+			if observed.Active && observed.ValidUntil.Live(clock) {
+				out.Upstreams = append(out.Upstreams, dnsconfig.LearnedUpstream{Source: source.Name, Provider: name, Servers: observed.DNSServers, ValidUntil: observed.ValidUntil})
+			}
+		}
+	}
+	out = dnsconfig.NormalizeInput(out)
+	return out, dnsconfig.ValidateInput(cfg.Runtime, out, clock)
 }

@@ -8,8 +8,9 @@ import (
 	"github.com/miekg/dns"
 
 	"github.com/imksoo/routerd/pkg/api"
-	"github.com/imksoo/routerd/pkg/daemonapi"
 	resolvercfg "github.com/imksoo/routerd/pkg/dnsresolver"
+	"github.com/imksoo/routerd2/internal/boottime"
+	"time"
 )
 
 func TestZoneStaticAliasesShareAddress(t *testing.T) {
@@ -55,48 +56,41 @@ func TestZoneStaticAliasesShareAddress(t *testing.T) {
 						},
 					}}
 					zones := newZoneTable(config)
-					for _, phase := range []string{"initial", "reload"} {
-						t.Run(phase, func(t *testing.T) {
-							for _, record := range []api.DNSZoneRecordSpec{first, second} {
-								name := record.Hostname + ".example.test."
-								for _, address := range []struct {
-									qtype uint16
-									ip    string
-								}{{dns.TypeA, record.IPv4}, {dns.TypeAAAA, record.IPv6}} {
-									if address.ip == "" {
-										continue
-									}
-									req := new(dns.Msg)
-									req.SetQuestion(name, address.qtype)
-									resp, ok := zones.Answer(req, []string{"DNSZone/lan-zone"})
-									if !ok || resp.Rcode != dns.RcodeSuccess || len(resp.Answer) != 1 {
-										t.Fatalf("%s %s: answered=%v response=%v", name, dns.TypeToString[address.qtype], ok, resp)
-									}
-									var got string
-									switch answer := resp.Answer[0].(type) {
-									case *dns.A:
-										got = answer.A.String()
-									case *dns.AAAA:
-										got = answer.AAAA.String()
-									}
-									if got != address.ip {
-										t.Fatalf("%s %s = %q, want %q", name, dns.TypeToString[address.qtype], got, address.ip)
-									}
-									ptr, err := dns.ReverseAddr(address.ip)
-									if err != nil {
-										t.Fatal(err)
-									}
-									wantPTR := name
-									if address.ip == first.IPv4 || address.ip == first.IPv6 {
-										wantPTR = first.Hostname + ".example.test."
-									}
-									assertZonePTRRecord(t, zones, ptr, wantPTR)
-								}
+					for _, record := range []api.DNSZoneRecordSpec{first, second} {
+						name := record.Hostname + ".example.test."
+						for _, address := range []struct {
+							qtype uint16
+							ip    string
+						}{{dns.TypeA, record.IPv4}, {dns.TypeAAAA, record.IPv6}} {
+							if address.ip == "" {
+								continue
 							}
-						})
-						previous := zones
-						zones = newZoneTable(config)
-						zones.CopyDynamicFrom(previous)
+							req := new(dns.Msg)
+							req.SetQuestion(name, address.qtype)
+							resp, ok := zones.Answer(req, []string{"DNSZone/lan-zone"})
+							if !ok || resp.Rcode != dns.RcodeSuccess || len(resp.Answer) != 1 {
+								t.Fatalf("%s %s: answered=%v response=%v", name, dns.TypeToString[address.qtype], ok, resp)
+							}
+							var got string
+							switch answer := resp.Answer[0].(type) {
+							case *dns.A:
+								got = answer.A.String()
+							case *dns.AAAA:
+								got = answer.AAAA.String()
+							}
+							if got != address.ip {
+								t.Fatalf("%s %s = %q, want %q", name, dns.TypeToString[address.qtype], got, address.ip)
+							}
+							ptr, err := dns.ReverseAddr(address.ip)
+							if err != nil {
+								t.Fatal(err)
+							}
+							wantPTR := name
+							if address.ip == first.IPv4 || address.ip == first.IPv6 {
+								wantPTR = first.Hostname + ".example.test."
+							}
+							assertZonePTRRecord(t, zones, ptr, wantPTR)
+						}
 					}
 				})
 			}
@@ -104,33 +98,21 @@ func TestZoneStaticAliasesShareAddress(t *testing.T) {
 	}
 }
 
-func TestZoneStaticAliasesSurviveDHCPLeaseEvents(t *testing.T) {
-	config := []resolvercfg.RuntimeZone{{
-		Name: "lan-zone",
-		Spec: api.DNSZoneSpec{
-			Zone:        "example.test",
-			DHCPDerived: api.DNSZoneDHCPDerivedSpec{Sources: []string{"DHCPv4Server/lan"}},
-			Records: []api.DNSZoneRecordSpec{
-				{Hostname: "router", IPv4: "192.0.2.1"},
-				{Hostname: "node", IPv4: "192.0.2.1"},
-			},
-		},
-		DHCPHostRecords: []resolvercfg.RuntimeDHCPHostRecord{{Hostname: "sticky", IP: "192.0.2.1"}},
-	}}
-	zones := newZoneTable(config)
-	for _, action := range []string{daemonapi.DHCPLeaseActionAdded, daemonapi.DHCPLeaseActionRemoved} {
-		zones.ApplyLease(dhcpLeaseEvent{Action: action, IP: "192.0.2.1", Hostname: "dynamic"})
-		assertZoneARecord(t, zones, "router.example.test.", "192.0.2.1")
-		assertZoneARecord(t, zones, "node.example.test.", "192.0.2.1")
-		assertZonePTRRecord(t, zones, "1.2.0.192.in-addr.arpa.", "router.example.test.")
-		for _, name := range []string{"sticky.example.test.", "dynamic.example.test."} {
-			req := new(dns.Msg)
-			req.SetQuestion(name, dns.TypeA)
-			resp, ok := zones.Answer(req, []string{"DNSZone/lan-zone"})
-			if !ok || resp.Rcode != dns.RcodeNameError {
-				t.Fatalf("%s after %s: answered=%v response=%v, want NXDOMAIN", name, action, ok, resp)
-			}
-		}
+func TestZoneStaticAliasesSurviveTypedLeaseCollision(t *testing.T) {
+	zones := newZoneTable([]resolvercfg.RuntimeZone{{Name: "lan-zone", Spec: api.DNSZoneSpec{Zone: "example.test", Records: []api.DNSZoneRecordSpec{{Hostname: "router", IPv4: "192.0.2.1"}, {Hostname: "node", IPv4: "192.0.2.1"}}}}})
+	clock, err := boottime.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	zones.zones["example.test."].mergeRecord(zoneRecord{Hostname: "dynamic.example.test.", IPv4: []string{"192.0.2.1"}, TTL: 60, Source: zoneRecordSourceTypedLease, BootID: clock.BootID, ExpiresNanos: uint64(clock.BoottimeNanoseconds) + uint64(time.Second), ExpiresAt: clock.WallTime.Add(time.Second)})
+	assertZoneARecord(t, zones, "router.example.test.", "192.0.2.1")
+	assertZoneARecord(t, zones, "node.example.test.", "192.0.2.1")
+	assertZonePTRRecord(t, zones, "1.2.0.192.in-addr.arpa.", "router.example.test.")
+	req := new(dns.Msg)
+	req.SetQuestion("dynamic.example.test.", dns.TypeA)
+	resp, ok := zones.Answer(req, []string{"DNSZone/lan-zone"})
+	if !ok || resp.Rcode != dns.RcodeNameError {
+		t.Fatal("typed lease displaced static aliases", resp)
 	}
 }
 

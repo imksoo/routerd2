@@ -5,7 +5,7 @@ The actual factory kernel/initramfs boots as PID 1 with two virtio NICs. Private
 TAP bridges connect its WAN to the AC and its LAN to a separate Linux client.
 Only fixture configuration/password/SSH public key are added to the initramfs.
 Requires root/sudo, QEMU x86_64, pppoe-server, pppd, iproute2, tcpdump, curl,
-OpenSSH and an independent ISC dhcpd supplied with --dhcp6-server.
+OpenSSH, dnsmasq, dig and an independent ISC dhcpd supplied with --dhcp6-server.
 """
 import argparse
 import importlib.util
@@ -75,7 +75,7 @@ def peer(stage):
         run(['ip', '-n', ac, 'addr', 'add', '198.51.100.20/32', 'dev', 'lo'])
         run(['ip', '-n', ac, '-6', 'addr', 'add', '2001:db8:ffff::20/128', 'dev', 'lo'])
         run(inside(ac, ['sysctl', '-qw', 'net.ipv6.conf.all.forwarding=1']))
-        (stage / 'server.conf').write_text('auth\nrequire-chap\nrefuse-pap\n+ipv6\nmtu 1454\nmru 1454\nms-dns 203.0.113.53\nlogfd 1\nhide-password\nlcp-echo-interval 1\nlcp-echo-failure 3\n')
+        (stage / 'server.conf').write_text('auth\nrequire-chap\nrefuse-pap\n+ipv6\nmtu 1454\nmru 1454\nms-dns 192.0.2.1\nlogfd 1\nhide-password\nlcp-echo-interval 1\nlcp-echo-failure 3\n')
         start(ac, ['pppoe-server', '-F', '-k', '-I', 'server0', '-C', 'ROUTERD2-AC', '-S', 'ROUTERD2-LAB', '-L', '192.0.2.1', '-R', '192.0.2.2', '-N', '1', '-O', str(stage / 'server.conf')], 'ac')
         for addr in ['198.51.100.20', '2001:db8:ffff::20']:
             start(ac, ['python3', '-u', '-m', 'http.server', '18080', '--bind', addr, '--directory', str(etc)], 'http')
@@ -94,6 +94,8 @@ def peer(stage):
         (overlay / 'etc/routerd/password').chmod(0o600)
         service = dict(interface='eth0', ppp_interface='ppp-wan', username='routerd2', password_file='/etc/routerd/password', auth_method='chap', ipv6=True, service_name='ROUTERD2-LAB', ac_name='ROUTERD2-AC', mtu=1454, mru=1454, lcp_echo_interval=1, lcp_echo_failure=3)
         resources = [{'id': 'wan', 'interface': {'name': 'eth0'}}, {'id': 'lan', 'interface': {'name': 'eth1'}}, {'id': 'lan-address', 'address': {'interface': 'eth1', 'cidr': '10.42.0.1/24'}}, {'id': 'forwarding', 'forwarding': {'ipv4': True, 'ipv6': True, 'ipv4_rp_filter': 0}}, {'id': 'firewall', 'firewall': {'forward': [{'from': 'eth1', 'to': 'ppp-wan'}], 'masquerade': [{'source': '10.42.0.0/24', 'out_interface': 'ppp-wan'}]}}, {'id': 'internet', 'service': {'name': 'internet', 'pppoe': service}}, {'id': 'pd', 'depends_on': ['internet', 'lan'], 'when': {'fact': 'service.internet.active'}, 'service': {'name': 'pd', 'dhcp6': {'interface': 'ppp-wan', 'iaid': 1, 'request_prefix': True, 'prefix_length': 60, 'delegations': [{'name': 'lan', 'interface': 'eth1', 'subnet_id': 1, 'advertise': True}]}}}]
+        resources.append({"id":"dns","service":{"name":"dns","dns":{"spec":{"listen":[{"name":"lan","addresses":["10.42.0.1"],"port":53}],"sources":[{"name":"provider","kind":"forward","match":["."],"upstreamFrom":[{"resource":"PPPoESession/internet","field":"dnsServers"}],"queryTimeout":"1s"}]}}}})
+        start(ac,["dnsmasq","--keep-in-foreground","--conf-file=/dev/null","--no-hosts","--no-resolv","--bind-dynamic","--listen-address=192.0.2.1","--address=/ppp.example/198.51.100.77","--local-ttl=0"],"dns")
         (overlay / 'etc/routerd/config.json').write_text(json.dumps({'schema_version': 2, 'resources': resources}))
         spec = importlib.util.spec_from_file_location('mk', stage / 'mkinitramfs.py')
         mk = importlib.util.module_from_spec(spec)
@@ -127,6 +129,9 @@ def peer(stage):
             for family, addr in [('AF_INET', '198.51.100.20'), ('AF_INET6', '2001:db8:ffff::20')]:
                 run(inside(lan, ['python3', '-c', f'import socket;s=socket.socket(socket.{family},socket.SOCK_DGRAM);s.settimeout(3);s.connect(({addr!r},18081));s.send(b"actual-appliance");assert s.recv(100)==b"actual-appliance"']))
 
+            for transport in ([],["+tcp"]):
+                assert run(inside(lan,["dig","@10.42.0.1","peer.ppp.example","A","+tries=1","+time=2","+short"]+transport)).strip()=="198.51.100.77"
+
         def ppp_ready():
             return bool([x for x in json.loads(run(['ip', '-n', ac, '-j', 'link', 'show'])) if x['ifname'].startswith('ppp')])
         wait(ppp_ready)
@@ -156,6 +161,7 @@ def peer(stage):
         print('PASS appliance DHCPv6 Renew preserved forwarding', flush=True)
         old = next((x for x in query('show status')['modules'] if x['name'] == 'service.internet'))
         old_pd = query('show services pd')['generation']
+        dns_generation=next(x['generation'] for x in query('show status')['modules'] if x['name']=='service.dns')
         old_index = next((x['ifindex'] for x in json.loads(run(['ip', '-n', ac, '-j', 'link', 'show'])) if x['ifname'].startswith('ppp')))
         d.terminate()
         d.wait(timeout=5)
@@ -167,6 +173,7 @@ def peer(stage):
         wait(client_ready)
         traffic()
         print('PASS appliance PPP worker/session restart reacquired PD and restored IPv4/IPv6 TCP/UDP', flush=True)
+        assert next(x['generation'] for x in query('show status')['modules'] if x['name']=='service.dns')==dns_generation
         (stage / 'status.json').write_text(json.dumps(query('show status')))
     finally:
         for p in reversed(children):

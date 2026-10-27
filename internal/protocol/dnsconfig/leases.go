@@ -14,19 +14,28 @@ import (
 	"time"
 
 	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/lifetime"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 )
 
 const MaxLeaseRecords = 4096
 
-// LeaseProjection is a complete, source-scoped view of active DHCP bindings.
+// Input is a complete, source-scoped view of active DHCP bindings.
 // It is delivered separately from immutable DNS configuration, so renewing a
 // lease does not replace the listener or upstream pools. ConfigDigest fences an
 // old worker from consuming a different committed DNS instance's projection.
-type LeaseProjection struct {
-	Resource     string     `json:"resource"`
-	ConfigDigest string     `json:"config_digest"`
-	Sets         []LeaseSet `json:"sets"`
+type Input struct {
+	Resource     string            `json:"resource"`
+	ConfigDigest string            `json:"config_digest"`
+	Sets         []LeaseSet        `json:"sets"`
+	Upstreams    []LearnedUpstream `json:"upstreams"`
+}
+
+type LearnedUpstream struct {
+	Source     string            `json:"source"`
+	Provider   string            `json:"provider"`
+	Servers    []string          `json:"servers"`
+	ValidUntil lifetime.Deadline `json:"valid_until"`
 }
 
 type LeaseSet struct {
@@ -78,10 +87,20 @@ func ValidLeaseHostname(name string) bool {
 	return true
 }
 
-// NormalizeLeaseProjection copies, canonicalizes and sorts the snapshot. It
+// NormalizeInput copies, canonicalizes and sorts the snapshot. It
 // never repairs an invalid identity or deadline; validation still rejects it.
-func NormalizeLeaseProjection(p LeaseProjection) LeaseProjection {
+func NormalizeInput(p Input) Input {
 	out := p
+	out.Upstreams = slices.Clone(p.Upstreams)
+	for i := range out.Upstreams {
+		out.Upstreams[i].Servers = slices.Clone(p.Upstreams[i].Servers)
+	}
+	sort.Slice(out.Upstreams, func(i, j int) bool {
+		if out.Upstreams[i].Source != out.Upstreams[j].Source {
+			return out.Upstreams[i].Source < out.Upstreams[j].Source
+		}
+		return out.Upstreams[i].Provider < out.Upstreams[j].Provider
+	})
 	out.Sets = slices.Clone(p.Sets)
 	for i := range out.Sets {
 		s := &out.Sets[i]
@@ -112,7 +131,7 @@ func NormalizeLeaseProjection(p LeaseProjection) LeaseProjection {
 	return out
 }
 
-func ValidateLeaseProjection(c RuntimeConfig, p LeaseProjection, clock boottime.Clock) error {
+func ValidateInput(c RuntimeConfig, p Input, clock boottime.Clock) error {
 	if p.Resource != c.Resource || len(p.Sets) > 128 {
 		return errors.New("DNS lease projection has an invalid resource identity or exceeds 128 source sets")
 	}
@@ -162,6 +181,9 @@ func ValidateLeaseProjection(c RuntimeConfig, p LeaseProjection, clock boottime.
 				return errors.New("DNS lease record requires a valid hostname and finite expiry")
 			}
 		}
+	}
+	if err := validateUpstreams(c, p, clock); err != nil {
+		return err
 	}
 	b, err := json.Marshal(p)
 	if err != nil || len(b) > 1792<<10 {

@@ -6,28 +6,25 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"net/http"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/imksoo/routerd/pkg/daemonapi"
 	mdns "github.com/miekg/dns"
 
 	"github.com/imksoo/routerd2/internal/boottime"
-	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
 )
 
-func nativeProjection(t *testing.T) dnsconfig.LeaseProjection {
+func nativeProjection(t *testing.T) dnsconfig.Input {
 	t.Helper()
 	clock, err := boottime.Read()
 	if err != nil {
 		t.Fatal(err)
 	}
 	now := clock.WallTime
-	return dnsconfig.LeaseProjection{Resource: "lab", ConfigDigest: strings.Repeat("a", 64), Sets: []dnsconfig.LeaseSet{{Zone: "lan-zone", Source: "DHCPv4Server/dhcpv4", Epoch: strings.Repeat("b", 32), Sequence: 1, ObservedAt: now, BootID: clock.BootID, ObservedNanos: uint64(clock.BoottimeNanoseconds), ExpiresNanos: uint64(clock.BoottimeNanoseconds) + uint64(5*time.Second), Records: []dnsconfig.LeaseRecord{{Hostname: "laptop", Address: "192.0.2.73", ExpiresAt: now.Add(time.Hour)}}}}}
+	return dnsconfig.Input{Resource: "lab", ConfigDigest: strings.Repeat("a", 64), Sets: []dnsconfig.LeaseSet{{Zone: "lan-zone", Source: "DHCPv4Server/dhcpv4", Epoch: strings.Repeat("b", 32), Sequence: 1, ObservedAt: now, BootID: clock.BootID, ObservedNanos: uint64(clock.BoottimeNanoseconds), ExpiresNanos: uint64(clock.BoottimeNanoseconds) + uint64(5*time.Second), Records: []dnsconfig.LeaseRecord{{Hostname: "laptop", Address: "192.0.2.73", ExpiresAt: now.Add(time.Hour)}}}}}
 }
 
 func answerNative(t *testing.T, d *daemon, name string, typ uint16) *mdns.Msg {
@@ -43,11 +40,10 @@ func answerNative(t *testing.T, d *daemon, name string, typ uint16) *mdns.Msg {
 }
 
 func TestNativeLeaseSourceScopeStaticPrecedenceAndMonotonicExpiry(t *testing.T) {
-	d := newTestDaemon(t, "", testResolverConfig(nil), true)
-	d.nativeLeaseMode = true
+	d := newTestDaemon(t, testResolverConfig(t, nil))
 	p := nativeProjection(t)
 	p.Sets[0].Records = append(p.Sets[0].Records, dnsconfig.LeaseRecord{Hostname: "router", Address: "192.0.2.99", ExpiresAt: time.Now().Add(time.Hour)})
-	if err := d.applyLeaseProjection(p); err != nil {
+	if err := d.applyInput(p); err != nil {
 		t.Fatal(err)
 	}
 	a := answerNative(t, d, "laptop.lab.example.", mdns.TypeA)
@@ -62,9 +58,9 @@ func TestNativeLeaseSourceScopeStaticPrecedenceAndMonotonicExpiry(t *testing.T) 
 	if static.Answer[0].(*mdns.A).A.String() != "192.0.2.1" {
 		t.Fatal("DHCP hostname replaced static ownership", static)
 	}
-	bad := dnsconfig.NormalizeLeaseProjection(p)
+	bad := dnsconfig.NormalizeInput(p)
 	bad.Sets[0].Source = "unauthorized"
-	if err := d.applyLeaseProjection(bad); err == nil {
+	if err := d.applyInput(bad); err == nil {
 		t.Fatal("unconfigured DHCP source reached the DNS zone")
 	}
 	generation := d.generation
@@ -77,7 +73,7 @@ func TestNativeLeaseSourceScopeStaticPrecedenceAndMonotonicExpiry(t *testing.T) 
 	p.Sets[0].ObservedAt = clock.WallTime
 	p.Sets[0].ObservedNanos = uint64(clock.BoottimeNanoseconds)
 	p.Sets[0].ExpiresNanos = p.Sets[0].ObservedNanos + uint64(300*time.Millisecond)
-	if err := d.applyLeaseProjection(p); err != nil {
+	if err := d.applyInput(p); err != nil {
 		t.Fatal(err)
 	}
 	if d.generation != generation || len(d.cache) != 1 {
@@ -85,10 +81,7 @@ func TestNativeLeaseSourceScopeStaticPrecedenceAndMonotonicExpiry(t *testing.T) 
 	}
 	// Neither reload nor replay may renew the publisher's original budget.
 	time.Sleep(350 * time.Millisecond)
-	if _, err := d.applyRuntime(context.Background(), d.config); err != nil {
-		t.Fatal(err)
-	}
-	if err := d.applyLeaseProjection(p); err != nil {
+	if err := d.applyInput(p); err != nil {
 		t.Fatal(err)
 	}
 	if out := answerNative(t, d, "laptop.lab.example.", mdns.TypeA); out == nil || out.Rcode != mdns.RcodeNameError {
@@ -98,7 +91,7 @@ func TestNativeLeaseSourceScopeStaticPrecedenceAndMonotonicExpiry(t *testing.T) 
 		t.Fatal("expired native lease retained its PTR", out)
 	}
 	p.Sets[0].Sequence++
-	if err := d.applyLeaseProjection(p); err != nil {
+	if err := d.applyInput(p); err != nil {
 		t.Fatal(err)
 	}
 	if out := answerNative(t, d, "laptop.lab.example.", mdns.TypeA); out.Rcode != mdns.RcodeNameError {
@@ -112,14 +105,14 @@ func TestNativeLeaseSourceScopeStaticPrecedenceAndMonotonicExpiry(t *testing.T) 
 	p.Sets[0].ObservedAt = clock.WallTime
 	p.Sets[0].ObservedNanos = uint64(clock.BoottimeNanoseconds)
 	p.Sets[0].ExpiresNanos = p.Sets[0].ObservedNanos + uint64(5*time.Second)
-	if err := d.applyLeaseProjection(p); err != nil {
+	if err := d.applyInput(p); err != nil {
 		t.Fatal(err)
 	}
 	if out := answerNative(t, d, "laptop.lab.example.", mdns.TypeA); len(out.Answer) != 1 {
 		t.Fatal("new acknowledged source did not restore lease")
 	}
 	p.Sets = nil
-	if err := d.applyLeaseProjection(p); err != nil {
+	if err := d.applyInput(p); err != nil {
 		t.Fatal(err)
 	}
 	if out := answerNative(t, d, "laptop.lab.example.", mdns.TypeA); out.Rcode != mdns.RcodeNameError {
@@ -129,12 +122,12 @@ func TestNativeLeaseSourceScopeStaticPrecedenceAndMonotonicExpiry(t *testing.T) 
 
 func TestNativeLeaseUpdatesKeepTCPConnectionAndExpireWhenInputCloses(t *testing.T) {
 	cfg := moduleConfig(t)
-	updates := make(chan dnsconfig.LeaseProjection, 1)
+	updates := make(chan dnsconfig.Input, 1)
 	p := nativeProjection(t)
 	updates <- p
 	ctx, cancel := context.WithCancel(context.Background())
 	ready, done := make(chan struct{}), make(chan error, 1)
-	go func() { done <- RunWithLeaseUpdates(ctx, cfg, updates, func() { close(ready) }) }()
+	go func() { done <- Run(ctx, cfg, updates, func() { close(ready) }) }()
 	defer func() {
 		cancel()
 		select {
@@ -191,10 +184,7 @@ func TestNativeLeaseUpdatesKeepTCPConnectionAndExpireWhenInputCloses(t *testing.
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	client := localapi.NewClient(cfg.SocketPath)
-	if err := client.Do(ctx, http.MethodPost, "/v1/leases", dhcpLeaseEvent{Action: daemonapi.DHCPLeaseActionAdded, IP: "192.0.2.55", Hostname: "bypass"}, nil); err == nil {
-		t.Fatal("unscoped compatibility event bypassed native lease ownership")
-	}
+
 	close(updates)
 	deadline = time.Now().Add(3 * time.Second)
 	for {

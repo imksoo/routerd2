@@ -5,11 +5,11 @@
 package dnsconfig
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -21,16 +21,13 @@ type RuntimeConfig = dnsresolver.RuntimeConfig
 type Runtime = dnsresolver.RuntimeConfig
 type RuntimeZone = dnsresolver.RuntimeZone
 
-// Config contains already resolved runtime intent. The owning compiler resolves
-// addressFrom/upstreamFrom and resource dependencies before starting this module.
-// RuntimeConfigPath is an optional, explicit compatibility input for POST reload;
-// initial state is always Runtime. It is never implicitly read from /etc.
+// Config contains immutable intent and module-owned paths. Learned protocol
+// observations arrive through Input; no external configuration file is reread.
 type Config struct {
-	Runtime           dnsresolver.RuntimeConfig `json:"runtime"`
-	SocketPath        string                    `json:"socket_path"`
-	StatePath         string                    `json:"state_path"`
-	EventPath         string                    `json:"event_path,omitempty"`
-	RuntimeConfigPath string                    `json:"runtime_config_path,omitempty"`
+	Runtime    dnsresolver.RuntimeConfig `json:"runtime"`
+	SocketPath string                    `json:"socket_path"`
+	StatePath  string                    `json:"state_path"`
+	EventPath  string                    `json:"event_path,omitempty"`
 }
 
 func firstNonEmpty(values ...string) string {
@@ -43,10 +40,11 @@ func firstNonEmpty(values ...string) string {
 }
 
 func NormalizeRuntime(cfg dnsresolver.RuntimeConfig, statePath string) dnsresolver.RuntimeConfig {
-	// Do not allow normalization to modify a caller's shared slices.
-	data, _ := json.Marshal(cfg)
-	var copied dnsresolver.RuntimeConfig
-	_ = json.Unmarshal(data, &copied)
+	// NormalizeSpec writes listener/source fields only. Own those slices;
+	// all nested values and zones remain read-only intent.
+	copied := cfg
+	copied.Spec.Listen = slices.Clone(cfg.Spec.Listen)
+	copied.Spec.Sources = slices.Clone(cfg.Spec.Sources)
 	if copied.Spec.QueryLog.Enabled && copied.Spec.QueryLog.Path == "" && statePath != "" {
 		copied.Spec.QueryLog.Path = filepath.Join(filepath.Dir(statePath), "dns-queries.db")
 	}
@@ -56,8 +54,8 @@ func NormalizeRuntime(cfg dnsresolver.RuntimeConfig, statePath string) dnsresolv
 
 func Validate(c Config) error {
 	paths := map[string]bool{}
-	for name, path := range map[string]string{"socket_path": c.SocketPath, "state_path": c.StatePath, "event_path": c.EventPath, "runtime_config_path": c.RuntimeConfigPath} {
-		if path == "" && (name == "event_path" || name == "runtime_config_path") {
+	for name, path := range map[string]string{"socket_path": c.SocketPath, "state_path": c.StatePath, "event_path": c.EventPath} {
+		if path == "" && name == "event_path" {
 			continue
 		}
 		if !filepath.IsAbs(path) || filepath.Clean(path) != path || path == "/" {
@@ -76,7 +74,7 @@ func ValidateRuntimePaths(c dnsresolver.RuntimeConfig, paths Config) error {
 		return err
 	}
 	if c.Spec.QueryLog.Enabled {
-		for _, path := range []string{paths.SocketPath, paths.StatePath, paths.StatePath + ".lock", paths.EventPath, paths.EventPath + ".1", paths.RuntimeConfigPath} {
+		for _, path := range []string{paths.SocketPath, paths.StatePath, paths.StatePath + ".lock", paths.EventPath, paths.EventPath + ".1"} {
 			for _, dbPath := range []string{c.Spec.QueryLog.Path, c.Spec.QueryLog.Path + "-wal", c.Spec.QueryLog.Path + "-shm"} {
 				if dbPath == path {
 					return errors.New("DNS query log and module paths must be distinct")
@@ -133,8 +131,8 @@ func ValidateRuntime(c dnsresolver.RuntimeConfig) error {
 		if zone.Spec.DNSSEC.Enabled || zone.Spec.DNSSEC.Mode != "" {
 			return fmt.Errorf("DNS zone %q: local DNSSEC signing/validation is not implemented; refusing to assert authenticated data without verification", zone.Name)
 		}
-		if path := zone.Spec.DHCPDerived.LeaseFile; path != "" && !filepath.IsAbs(path) {
-			return fmt.Errorf("DNS zone %q leaseFile must be absolute", zone.Name)
+		if zone.Spec.DHCPDerived.LeaseFile != "" || len(zone.DHCPHostRecords) != 0 {
+			return fmt.Errorf("DNS zone %q accepts lease observations only through its native input", zone.Name)
 		}
 		for _, record := range zone.Spec.Records {
 			if !ValidHostname(record.Hostname) {
@@ -168,7 +166,12 @@ func ValidateRuntime(c dnsresolver.RuntimeConfig) error {
 			return fmt.Errorf("duplicate DNS source %q", source.Name)
 		}
 		sources[source.Name] = true
-		if len(source.UpstreamFrom) != 0 || len(source.BootstrapResolverFrom) != 0 {
+		for _, ref := range source.UpstreamFrom {
+			if _, err := UpstreamProvider(ref); err != nil {
+				return err
+			}
+		}
+		if len(source.BootstrapResolverFrom) != 0 {
 			return fmt.Errorf("DNS source %q has unresolved upstream references", source.Name)
 		}
 		for _, ref := range source.ZoneRef {

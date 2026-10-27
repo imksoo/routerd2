@@ -5,21 +5,8 @@ import "github.com/imksoo/routerd2/internal/resourceprogram"
 // A worker may use a protocol-owned link only when the source graph ties its
 // lifetime to that owner and requires current positive ownership. Process
 // readiness alone does not establish an elected VIP or a negotiated PPP unit.
-func guardedDynamicDependency(source Document, consumerName, ownerName string) bool {
-	var owner, consumer *resourceprogram.Resource
-	for i := range source.Resources {
-		resource := &source.Resources[i]
-		if resource.Service == nil {
-			continue
-		}
-		if resource.Service.Name == ownerName {
-			owner = resource
-		}
-		if resource.Service.Name == consumerName {
-			consumer = resource
-		}
-	}
-	if owner == nil || owner.Service.VRRP == nil && owner.Service.PPPoE == nil && owner.Service.DSLite == nil || consumer == nil {
+func guardedDynamicResource(consumer, owner *resourceprogram.Resource) bool {
+	if owner.Service.VRRP == nil && owner.Service.PPPoE == nil && owner.Service.DSLite == nil {
 		return false
 	}
 	edge := consumer.Owner == owner.ID

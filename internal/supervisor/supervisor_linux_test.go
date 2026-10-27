@@ -53,7 +53,8 @@ func helperMain() int {
 		if err != nil {
 			return 75
 		}
-		err = Run(context.Background(), Options{Executables: map[string]string{"ready": executable}, ReleaseID: testRelease, RuntimeDir: os.Getenv("ROUTERD_TEST_RUNTIME"), StateDir: state, Platform: "host", Modules: []Spec{{Name: "network", Role: "ready"}}})
+		childRole := os.Getenv("ROUTERD_TEST_CHILD_ROLE")
+		err = Run(context.Background(), Options{Executables: map[string]string{childRole: executable}, ReleaseID: testRelease, RuntimeDir: os.Getenv("ROUTERD_TEST_RUNTIME"), StateDir: state, Platform: "host", Modules: []Spec{{Name: "network", Role: childRole}}})
 		if err != nil {
 			_, _ = fmt.Fprintln(os.Stderr, err)
 			return 76
@@ -440,8 +441,15 @@ func TestParentDeathSignalKillsWorkerAndSIGTERMDrainsTree(t *testing.T) {
 				t.Fatal(err)
 			}
 			runtimeDir := filepath.Join(dir, "run")
+			childRole := "ready"
+			if termination == syscall.SIGKILL {
+				// A cooperative worker can exit on socket EOF before the
+				// kernel delivers SIGKILL. Use the existing stuck worker to
+				// measure the parent-death signal itself.
+				childRole = "nohello"
+			}
 			process, err := os.StartProcess(executable, []string{executable, "--role=supervisor"}, &os.ProcAttr{
-				Env:   mergeEnv(os.Environ(), []string{"ROUTERD_SUPERVISOR_HELPER=1", "ROUTERD_TEST_RUNTIME=" + runtimeDir, "ROUTERD_STATE_DIR=" + dir}),
+				Env:   mergeEnv(os.Environ(), []string{"ROUTERD_SUPERVISOR_HELPER=1", "ROUTERD_TEST_RUNTIME=" + runtimeDir, "ROUTERD_STATE_DIR=" + dir, "ROUTERD_TEST_CHILD_ROLE=" + childRole}),
 				Files: []*os.File{os.Stdin, os.Stdout, os.Stderr},
 			})
 			if err != nil {
@@ -453,7 +461,9 @@ func TestParentDeathSignalKillsWorkerAndSIGTERMDrainsTree(t *testing.T) {
 			}}}
 			defer client.CloseIdleConnections()
 			s := &testSupervisor{client: client}
-			status := s.wait(t, func(status Status) bool { return status.Ready && len(status.Modules) == 1 })
+			status := s.wait(t, func(status Status) bool {
+				return len(status.Modules) == 1 && status.Modules[0].PID > 0 && (termination == syscall.SIGKILL || status.Ready)
+			})
 			pid := status.Modules[0].PID
 			if err := process.Signal(termination); err != nil {
 				t.Fatal(err)

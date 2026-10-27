@@ -429,7 +429,7 @@ func nativeRA(t *testing.T) {
 		{Prefix: "2001:db8:7::/64", ValidLifetimeSeconds: 100, PreferredLifetimeSeconds: 50, Autonomous: true, OnLink: true},
 	}}
 	go func() {
-		done <- ra.RunWithUpdates(ctx, initial, configs, ra.EffectsFunc(func(_ context.Context, s ra.Snapshot) error { statuses <- s; return nil }), nil)
+		done <- ra.Run(ctx, initial, configs, ra.EffectsFunc(func(_ context.Context, s ra.Snapshot) error { statuses <- s; return nil }), nil)
 	}()
 	read := func(wantWithdrawal bool) []byte {
 		t.Helper()

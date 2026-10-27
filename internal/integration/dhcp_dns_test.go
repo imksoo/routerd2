@@ -199,14 +199,14 @@ func testDaemonDHCPDNSOwnership(t *testing.T, migrated bool) {
 	var accepted dhcpserverconfig.Snapshot
 	wait(2*time.Second, func() bool {
 		var source runtimeplan.InstanceStatus
-		var projection dnsconfig.LeaseProjection
+		var projection dnsconfig.Input
 		if err := f.control.Do(context.Background(), "GET", "/v1/services/"+serverName, nil, &source); err != nil {
 			t.Fatal(err)
 		}
 		if err := json.Unmarshal(source.Snapshot, &accepted); err != nil {
 			t.Fatal(err)
 		}
-		if err := f.control.Do(context.Background(), "GET", "/v1/services/"+dnsName+"/dns-leases", nil, &projection); err != nil {
+		if err := f.control.Do(context.Background(), "GET", "/v1/services/"+dnsName+"/dns-input", nil, &projection); err != nil {
 			t.Fatal(err)
 		}
 		if len(projection.Sets) != 1 {

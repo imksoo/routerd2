@@ -73,10 +73,10 @@ func failureTestAnswer(w dns.ResponseWriter, req *dns.Msg) {
 
 func TestResolutionFailureIsSERVFAILWithSourceAndEvent(t *testing.T) {
 	upstream := startFailureTestUpstream(t, func(dns.ResponseWriter, *dns.Msg) {})
-	config := testForwardConfig("primary", upstream)
+	config := testForwardConfig(t, "primary", upstream)
 	config.Spec.Sources[0].QueryTimeout = "30ms"
 	config.Spec.Sources[0].Healthcheck.Timeout = "3s"
-	d := newTestDaemon(t, "", config, true)
+	d := newTestDaemon(t, config)
 	queryLog, err := logstore.OpenDNSQueryLog(filepath.Join(t.TempDir(), "queries.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -113,11 +113,11 @@ func TestTwoTierResolverRecoversWithoutCachingUpstreamFailure(t *testing.T) {
 			failureTestAnswer(w, req)
 		}
 	})
-	coreConfig := testForwardConfig("external", upstream)
+	coreConfig := testForwardConfig(t, "external", upstream)
 	coreConfig.Spec.Listen[0].Port = freeTCPPort(t)
 	coreConfig.Spec.Sources[0].QueryTimeout = "30ms"
 	coreConfig.Spec.Cache = api.DNSResolverCacheSpec{Enabled: true, MinTTL: "60s", NegativeTTL: "30s"}
-	core := newTestDaemon(t, "", coreConfig, false)
+	core := newTestDaemon(t, coreConfig)
 	if err := core.startDNS(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -126,10 +126,10 @@ func TestTwoTierResolverRecoversWithoutCachingUpstreamFailure(t *testing.T) {
 	for addr := range core.listeners {
 		coreAddr = addr
 	}
-	lanConfig := testForwardConfig("core", "udp://"+coreAddr)
+	lanConfig := testForwardConfig(t, "core", "udp://"+coreAddr)
 	lanConfig.Spec.Sources[0].QueryTimeout = "500ms"
 	lanConfig.Spec.Cache = coreConfig.Spec.Cache
-	lan := newTestDaemon(t, "", lanConfig, true)
+	lan := newTestDaemon(t, lanConfig)
 	req := failureTestRequest()
 	first := &failureResponseWriter{}
 	lan.handleDNS(first, req)
@@ -151,13 +151,13 @@ func TestFailedConditionalForwarderDoesNotLeakToPublicSource(t *testing.T) {
 		publicRequests.Add(1)
 		failureTestAnswer(w, req)
 	})
-	config := testForwardConfig("private", private)
+	config := testForwardConfig(t, "private", private)
 	config.Spec.Sources[0].Match = []string{"corp.example"}
 	config.Spec.Sources[0].QueryTimeout = "30ms"
 	config.Spec.Sources = append(config.Spec.Sources, api.DNSResolverSourceSpec{
 		Name: "public", Kind: "forward", Match: []string{"."}, Upstreams: []string{public},
 	})
-	d := newTestDaemon(t, "", config, true)
+	d := newTestDaemon(t, config)
 	req := new(dns.Msg)
 	req.SetQuestion("secret.corp.example.", dns.TypeA)
 	w := &failureResponseWriter{}
@@ -176,9 +176,9 @@ func TestForwardedNXDOMAINIsPreservedAndCached(t *testing.T) {
 		resp.Ns = []dns.RR{&dns.SOA{Hdr: dns.RR_Header{Name: "example.", Rrtype: dns.TypeSOA, Class: dns.ClassINET, Ttl: 30}, Ns: "ns.example.", Mbox: "hostmaster.example.", Minttl: 30}}
 		_ = w.WriteMsg(resp)
 	})
-	config := testForwardConfig("filtered", upstream)
+	config := testForwardConfig(t, "filtered", upstream)
 	config.Spec.Cache = api.DNSResolverCacheSpec{Enabled: true, NegativeTTL: "30s"}
-	d := newTestDaemon(t, "", config, true)
+	d := newTestDaemon(t, config)
 	for i := 0; i < 2; i++ {
 		result, err := d.resolve("127.0.0.1:5053", failureTestRequest())
 		if err != nil || result.Response.Rcode != dns.RcodeNameError || result.CacheHit != (i == 1) {

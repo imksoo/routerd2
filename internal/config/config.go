@@ -152,6 +152,13 @@ func validateNative(d Native, source Document) error {
 	// matches may refer to them before creation; static links/routes/services
 	// must not keep them alive while their protocol dependency is unavailable.
 	reserved := map[string]string{}
+	owners := map[string]*resourceprogram.Resource{}
+	for i := range source.Resources {
+		r := &source.Resources[i]
+		if r.Service != nil {
+			owners[r.Service.Name] = r
+		}
+	}
 	for _, service := range d.Services {
 		name := ""
 		if service.PPPoE != nil {
@@ -198,18 +205,28 @@ func validateNative(d Native, source Document) error {
 			return fmt.Errorf("static interface %s conflicts with dynamic service %s", link.Name, owner)
 		}
 	}
-	for _, route := range d.Network.Routes {
-		if owner := reserved[route.Interface]; owner != "" {
-			return fmt.Errorf("static route cannot use dynamic interface owned by %s", owner)
+	for i := range source.Resources {
+		resource := &source.Resources[i]
+		if resource.Route == nil {
+			continue
 		}
-		for _, hop := range route.NextHops {
-			if owner := reserved[hop.Interface]; owner != "" {
-				return fmt.Errorf("static route cannot use dynamic interface owned by %s", owner)
+		interfaces := []string{resource.Route.Interface}
+		for _, hop := range resource.Route.NextHops {
+			interfaces = append(interfaces, hop.Interface)
+		}
+		for _, iface := range interfaces {
+			if owner := reserved[iface]; owner != "" && !guardedDynamicResource(resource, owners[owner]) {
+				return fmt.Errorf("route %s requires active ownership and a dependency on %s", resource.ID, owner)
 			}
 		}
 	}
-	for _, service := range d.Services {
-		if owner := reserved[service.Interface()]; owner != "" && !guardedDynamicDependency(source, service.Name, owner) {
+	for i := range source.Resources {
+		resource := &source.Resources[i]
+		if resource.Service == nil {
+			continue
+		}
+		service := resource.Service
+		if owner := reserved[service.Interface()]; owner != "" && !guardedDynamicResource(resource, owners[owner]) {
 			return fmt.Errorf("service %s cannot use dynamic interface of %s without a dependency", service.Name, owner)
 		}
 	}

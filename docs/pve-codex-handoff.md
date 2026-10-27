@@ -13,7 +13,70 @@
 続く容量整理では旧QAのISO・配布archive・log/captureと、未コミット変更のない試験用checkout65個を
 さらに約52GiB削除した。既存ソース、実行中の隔離試験、環境撤去に必要な状態は保護した。
 
-## 現在の開発版: ppp-image / native-25（作業中）
+## 現在の開発版: learned-dns / native-26
+
+PPPの`dns_servers`を、宣言したDNS sourceの`upstreamFrom`へ反映した。
+`PPPoESession/internet`はPPP service名を参照し、`field`は`dnsServers`（省略時も同じ）。
+coordinatorはDNS設定を一度準備し、immutable configとは別の`dnsconfig.Input`で有限の
+DHCP leaseとPPP DNS上流を渡す。DNS専用の能力flag・設定のJSON clone・更新ごとの設定decodeは使わない。
+元のboot期限をquery/probeの前後で確認し、poll失敗・同じ通知の再受信で期限を延ばさない。
+同じserverのhealth/pool、listener、変化のないcacheと静的zoneを維持する。
+endpoint URLと期限切れを表示し、未観測・失効したsourceをhealthyとは表示しない。
+
+製品の設定所有者はcontrolだけとした。moduleのPUT config、file reload、raw DHCP event、
+dnsmasq lease file・sticky sidecar、`dryRun`経路と、それらだけを守る試験は削除した。
+旧routerdのupstream transport・問い合わせ・静的zone・alias/PTRの相互接続知識は継続利用する。
+PPP link上の設定routeは、ownerへの依存とactive factで寿命を明示したものを受け入れる。
+この実通信に必要だったrouteまで一律拒否する制約を除き、interface自体の二重所有は引き続き拒否する。
+既存のresource期限処理でrouteを撤去する。PBRのLAN転送ruleには入力interfaceを明示し、
+router自身のDNS応答までPPPへ送ってしまう試験設定も修正した。
+
+確認済み:
+
+- PVE Linux6.8、独立RP-PPPoE3.15/pppd2.4.9＋dnsmasq2.90で、署名PID1 catalogからの
+  PAP/CHAP接続とLANの実UDP/TCP DNS問い合わせを確認した。
+- supervisor/control/PPP producerを止め、PPPと相手DNSへの直接問い合わせが通る状態で、
+  元期限後にresolverがSERVFAILを返し上流へ送信しないことを確認した。
+- 再接続のIPCPで別DNS addressを取得し、旧DNS listenerを停止した状態で問い合わせを復旧した。
+  DNS workerを再起動せず、ローカルzoneへの問い合わせでactiveに保った同じdig TCP接続も維持した。
+  DNSの通常8秒idle timeoutを、接続切断の不具合とは扱わない。
+- `make check-dhcp-dns RELEASE_ID=learned-dns`で、実DHCP→journal/ACK→coordinator→DNS、
+  producer失効・復旧・既存TCP維持を、native intentと旧routerd設定のimport双方で確認した。
+- CHAP＋ISC DHCP4.4.3-P1でPD/RA/SLAAC、両family TCP/UDP、DNS、Renew、worker/session再作成、
+  元期限・古い通知・server失効復旧・5秒confirmed rollbackを通した。
+  同時build中の試験はcommit HTTP clientの3秒で失敗し、終了後の同じ期限の単独実行で通した。
+  3秒以内の性能を一般保証したものではなく、負荷時の遅延原因を解決したとはしない。
+- 新APK由来linux-lts6.18.58-0-ltsのQEMUで、PPP learned DNSのUDP/TCP、PD→LAN IPv6、Renew、
+  PPP worker再起動後のDNS/両family通信復旧を確認した。
+- `make check build build-publisher build-linux RELEASE_ID=learned-dns`成功。
+  全体Race Detector・vet・6静的ELFを含む。最後に追加した受信後期限再確認も同じcheckを通した。
+  大documentのACKサイズ試験は30秒のconfirmed期限をRace中に使い切っていたため、サイズ検証用の
+  期限を300秒にした。実5秒rollbackの期限・期待動作は変更していない。
+  parent-death試験は、Unix socket EOFで先に終了する協調workerではなく、既存の停止workerで
+  SIGKILL自体を確認するようにした。製品の終了処理は変えていない。
+
+最終受信後チェック入りapplianceの再buildと実6ELFのcatalog確認は完了した。
+同applianceの再実通信も成功し、PPPoE captureで学習DNSへの問い合わせと応答を確認した。
+native-26の独立二WAN試験も成功した。
+worker ABI4・manifest v4・network journal9は同じで、compiler contractだけnative-26へ進めた。
+DHCPv4/DHCPv6/RAのDNS上流参照、dynamic bootstrap/listen、全resource field、suspend/時刻変更、
+container PPP、ARM実行、全engine入り更新/fallback、kernel source配布、実ISP PPP・物理NIC/性能は未完了。
+この版を実上流へ切り替えた長時間受入も未完了である。
+
+別cohortのnative-24実上流試験は130回、約134分を終了コード0で完了した。
+実captureで780個の新規HTTPS SYN pairと3900個のUDP DNS query pairを確認した。
+最初/最後のHTTPS SYNは03:29:57.917062/05:43:36.416163 UTC。
+自然T1は04:47:59.302617のRenew、04:47:59.330974のReply（送信元49153）。
+その後も定期通信が続き、最後のcontrol ready・supervisor ready・全protocol世代1を確認した。
+先行する同一TCP試験は上流FINで終了しており、この定期試験で同一TCP継続を合格にはしない。
+3時間の隔離試験ownerは終了し、旧cohortは停止した。management回線は変更していない。
+最新native-26・ONU直結配線・物理NICのqualificationを代替しない。
+
+容量整理の指示に従い、上記を含む停止済み試験のlog/capture・隔離試験用一時ファイルは削除した。
+Go/Dockerのビルドcacheと不要な開発用container imageも削除し、空き容量は約208GiBになった。
+過去の証跡は再保存しない。ソースと現在の配布物・必要な依存sourceは保持した。
+
+## 直前版: ppp-image / native-25
 
 PPPoE engineをhost依存から固定配布imageへ変更した。manifest v4はPPP roleとengine/sourceを
 署名bindingで結び、worker ABI4のFD5で同じengine inodeを渡す。helperは空のprivate chrootに
@@ -42,14 +105,13 @@ regular-file imageを展開し、固定pppd 2.5.3・plugin・musl loader/libc・
 未完了: PPP learned DNSのresolver反映、全resource field、全MTU/VRF条件、engine入り更新/fallback、
 kernel capability manifestと対応source配布、container PPP実通信、実ISP PPP、ARM実行、物理NIC/性能受入。
 これは全計画完了や対象実機利用可の判定ではない。
-現在の診断出力は`dist/pppoe-current*`・`dist/pppoe-baseline-current/`・`dist/dual-wan-current/`・
-`dist/ppp-image-*.log`・`dist/ppp-appliance-peer.log`。長期保存・archiveはしない。
+この旧版の診断出力は削除済みであり、再保存しない。
 署名CHAP初回は負荷中の25秒起動待ちで失敗した。原因確定前に負荷だけの問題とは断定しない。
 同じ期限の別実行で全経路を通したが、起動遅延の受入を閉じたとはしない。
 
-実上流は別cohortのnative-24を稼働中。最初の同一TCPは約30分で上流FINを受け、
+以下は旧版実行時の経過である。別cohortのnative-24はその後停止した。最初の同一TCPは約30分で上流FINを受け、
 そのFINがAFTRからLANへ転送された。新規HTTPS/UDPは直後も通ったが、同一TCP継続の合格にはしない。
-以後は新規HTTPSとUDP DNSを定期送信し、自然T1を待っている。終了を確認するまで長時間試験成功とは書かない。
+後続の定期通信と自然T1の結果は冒頭のnative-26節に記載した。
 このcohortはnative-25の物理機/実回線qualificationを代替しない。
 
 直近の容量整理で古い試験出力・一時環境349件、完了peer出力/capture8件、旧OCI image2個と

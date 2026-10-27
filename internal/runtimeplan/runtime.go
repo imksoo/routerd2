@@ -800,8 +800,8 @@ func (r *Runtime) Handler() http.Handler {
 		}
 		localapi.JSON(w, 200, receipt)
 	})
-	mux.HandleFunc("GET /v1/services/{name}/dns-leases", func(w http.ResponseWriter, req *http.Request) {
-		projection, err := r.DNSLeases(req.PathValue("name"))
+	mux.HandleFunc("GET /v1/services/{name}/dns-input", func(w http.ResponseWriter, req *http.Request) {
+		projection, err := r.DNSInput(req.PathValue("name"))
 		if err != nil {
 			localapi.Fail(w, 409, err)
 			return

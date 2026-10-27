@@ -2,7 +2,7 @@
 """Run routerd2 against an independent RP-PPPoE AC in private mount/network namespaces.
 
 Requires Linux root/sudo, pppd 2.4.9 + rp-pppoe.so, pppoe-server, iproute2,
-curl, tcpdump and ping. Host PPP files, hooks and routes are not used.
+curl, tcpdump, ping, dnsmasq and dig. Host PPP files, hooks and routes are not used.
 The optional --dhcp6-server selects an independent ISC dhcpd for PPP PD,
 generated LAN RA/SLAAC, IPv6 forwarding and recovery, with normal DAD.
 """
@@ -18,6 +18,7 @@ import subprocess
 import shutil
 import time
 import tarfile
+import threading
 
 
 def run(args):
@@ -50,6 +51,9 @@ def peer(stage, auth, dhcp6_server):
     ns, acns, lan = (prefix + str(os.getpid()) for prefix in ("r2ppp-", "r2ac-", "r2lan-"))
     children, namespaces, frozen = [], [], []
     capture = None
+    supervisor_frozen = False
+    keepalive_thread = None
+    dns_address = "192.0.2.1"
 
     def inside(name, args):
         return ["ip", "netns", "exec", name] + args
@@ -150,8 +154,10 @@ def peer(stage, auth, dhcp6_server):
             {"id": "internet", "service": {"name": "internet", "pppoe": service}},
             {"id": "probe-policy", "policy_rule": {"family": 4, "priority": 100, "table": 100, "mark": 42}},
             {"id": "probe", "depends_on": ["internet", "probe-policy"], "when": {"fact": "service.internet.active"}, "service": {"name": "reachability", "health": {"interface": "ppp-wan", "target": "198.51.100.20", "protocol": "tcp", "port": 18082, "mark": 42, "interval_ms": 200, "timeout_ms": 100, "unhealthy_threshold": 1}}},
-            {"id": "application-policy", "when": {"fact": "service.reachability.active", "max_age": "1s"}, "policy_rule": {"family": 4, "priority": 1000, "table": 100, "source": "10.42.0.0/24"}},
+            {"id": "application-policy", "when": {"fact": "service.reachability.active", "max_age": "1s"}, "policy_rule": {"family": 4, "priority": 1000, "table": 100, "source": "10.42.0.0/24", "in_interface": "lan0"}},
         ]
+        resources.append({"id": "provider-dns-route", "depends_on": ["internet"], "when": {"fact": "service.internet.active"}, "route": {"destination": "192.0.2.53/32", "interface": "ppp-wan"}})
+        resources.append({"id": "dns", "service": {"name": "dns", "dns": {"spec": {"listen": [{"name": "lan", "addresses": ["10.42.0.1"], "port": 53}], "sources": [{"name": "local", "kind": "zone", "match": ["router.test"], "zoneRef": ["local"]}, {"name": "provider", "kind": "forward", "match": ["."], "upstreamFrom": [{"resource": "PPPoESession/internet", "field": "dnsServers"}], "queryTimeout": "1s"}]}, "zones": [{"name": "local", "spec": {"zone": "router.test", "records": [{"hostname": "gateway", "ipv4": "10.42.0.1"}]}}]}}})
         if dhcp6_server:
             next(r for r in resources if r["id"] == "forwarding")["forwarding"]["ipv6"] = True
             resources += [
@@ -160,7 +166,7 @@ def peer(stage, auth, dhcp6_server):
             ]
         configuration = {"schema_version": 2, "resources": resources}
         (stage / "config.json").write_text(json.dumps(configuration))
-        boot = dict(platform="host", config=str(stage / "config.json"), runtime_dir=str(stage / "run"), state_dir=str(stage / "state"), ssh={"user": "admin"}, workers={r: str(stage.parent / ("routerd-logging" if r == "logging" else "routerd-modules")) for r in ["logging", "network", "control", "management", "pppoe", "health"]})
+        boot = dict(platform="host", config=str(stage / "config.json"), runtime_dir=str(stage / "run"), state_dir=str(stage / "state"), ssh={"user": "admin"}, workers={r: str(stage.parent / ("routerd-logging" if r == "logging" else "routerd-modules")) for r in ["logging", "network", "control", "management", "pppoe", "health", "dns"]})
         if dhcp6_server:
             boot["workers"].update({r: str(stage.parent / "routerd-modules") for r in ("dhcp6", "ra")})
         boot["engines"] = {"pppoe": str(stage.parent / "pppoe-engine.tar")}
@@ -212,7 +218,7 @@ def peer(stage, auth, dhcp6_server):
         run([str(stage.parent / "routerd"), "release", "initialize", *selector, "--digest", packed["digest"]])
         boot.update(platform="appliance", workers={}, engines={}, release={"root": str(stage / "releases"), "trust_file": str(stage / "trust.json")})
         (stage / "boot.json").write_text(json.dumps(boot))
-        (stage / "server.conf").write_text("auth\nrequire-" + auth + "\nrefuse-" + ("chap" if auth == "pap" else "pap") + "\nmtu 1454\nmru 1454\nms-dns 203.0.113.53\nlogfd 1\nhide-password\nlcp-echo-interval 1\nlcp-echo-failure 3\n")
+        (stage / "server.conf").write_text("auth\nrequire-" + auth + "\nrefuse-" + ("chap" if auth == "pap" else "pap") + "\nmtu 1454\nmru 1454\nms-dns 192.0.2.1\nlogfd 1\nhide-password\nlcp-echo-interval 1\nlcp-echo-failure 3\n")
         if dhcp6_server:
             with (stage / "server.conf").open("a") as out:
                 out.write("+ipv6\n")
@@ -231,6 +237,7 @@ def peer(stage, auth, dhcp6_server):
         run(["ip", "-n", lan, "addr", "add", "10.42.0.2/24", "dev", "client0"])
         run(["ip", "-n", lan, "route", "add", "default", "via", "10.42.0.1", "dev", "client0"])
         run(["ip", "-n", acns, "addr", "add", "198.51.100.20/32", "dev", "lo"])
+        run(["ip", "-n", acns, "addr", "add", "192.0.2.53/32", "dev", "lo"])
         capture = start(ns, ["tcpdump", "-Z", "root", "--immediate-mode", "-U", "-n", "-i", "any", "-w", str(stage / "pppoe.pcap")], "capture")
         ac = ac_start()
         command = ["unshare", "--mount", "--pid", "--fork", "--mount-proc", "--kill-child=TERM", str(stage.parent / "routerd"), "boot", "--file", str(stage / "boot.json")]
@@ -248,8 +255,20 @@ def peer(stage, auth, dhcp6_server):
         wait(lambda: ":18080 " in run(inside(acns, ["ss", "-lnt"])))
         wait(selected)
         traffic()
+        dns_peer = start(acns, ["dnsmasq", "--keep-in-foreground", "--conf-file=/dev/null", "--no-hosts", "--no-resolv", "--bind-dynamic", "--listen-address=192.0.2.1,192.0.2.53", "--address=/ppp.example/198.51.100.77", "--local-ttl=0", "--log-queries=extra", "--log-facility=-"], "dns")
+        def dns_traffic():
+            def usable():
+                summary = api("services/dns.dns.sock", "/v1/status")["resources"][0]["observed"].get("upstreams", "")
+                return "udp://" + dns_address + ":53" in summary and "Expired" not in summary and "Unknown" not in summary
+            wait(usable)
+            for transport in ([], ["+tcp"]):
+                assert run(inside(lan, ["dig", "@10.42.0.1", "peer.ppp.example", "A", "+tries=1", "+time=2", "+short"] + transport)).strip() == "198.51.100.77"
+        wait(lambda: any(x.get("name") == "service.dns" and x.get("ready") for x in modules().values()))
+        wait(lambda: bool(api("control.sock", "/v1/services/service.dns/dns-input").get("upstreams")))
+        dns_traffic()
+        print("PASS negotiated PPP DNS drives independent UDP/TCP resolver queries from LAN", flush=True)
         initial = record()
-        assert set(initial["snapshot"]["dns_servers"]) == {"203.0.113.53"}
+        assert set(initial["snapshot"]["dns_servers"]) == {"192.0.2.1"}
         assert all(x["generation"] == 1 for name, x in modules().items() if not dhcp6_server or name != "service.pd")
         assert link()["mtu"] == 1454
         print("PASS native " + auth + ": negotiated DNS, LAN TCP/UDP, MTU 1454, generation 1", flush=True)
@@ -305,12 +324,15 @@ def peer(stage, auth, dhcp6_server):
             # it with the recreated access session, preserving its lease file.
             server.terminate()
             server.wait(timeout=5)
+            stable_dns = modules()["service.dns"]
             previous, old_index = modules()["service.internet"], link()["ifindex"]
             signal_worker(previous["pid"], signal.SIGKILL)
             wait(lambda: link() is not None and link()["ifindex"] != old_index and modules()["service.internet"]["generation"] > previous["generation"], 35)
             server = dhcp6_start()
             ipv6_traffic()
             assert pd_record()["snapshot"]["client_duid"] == duid
+            dns_traffic()
+            assert modules()["service.dns"]["generation"] == stable_dns["generation"]
             print("PASS PPP worker/session replacement reacquired PD with the same DUID and restored IPv6 TCP/UDP", flush=True)
             server.terminate()
             server.wait(timeout=5)
@@ -362,21 +384,72 @@ def peer(stage, auth, dhcp6_server):
             run(inside(ns, ["ping", "-6", "-I", "ppp-wan", "-c", "1", "-W", "2", ll]))
             print("PASS actual IPv6CP peer link-local ping", flush=True)
         saved = modules()
+        os.kill(pid1, signal.SIGSTOP)
+        supervisor_frozen = True
         frozen = [saved["control"]["pid"], saved["service.internet"]["pid"]]
         for pid in frozen:
             signal_worker(pid, signal.SIGSTOP)
         wait(lambda: not routed(), 8)
         assert link() is not None
+        # The peer's connected PPP route remains usable after writer expiry.
+        # A SERVFAIL therefore demonstrates DNS input expiry, not path loss.
+        assert run(inside(ns, ["dig", "@192.0.2.1", "direct.ppp.example", "A", "+tries=1", "+time=2", "+short"])).strip() == "198.51.100.77"
+        expired = run(inside(lan, ["dig", "@10.42.0.1", "expired.ppp.example", "A", "+tries=1", "+time=2", "+noall", "+comments"]))
+        assert "status: SERVFAIL" in expired
+        assert "expired.ppp.example" not in (stage / "dns.log").read_text()
+        print("PASS original DNS deadline stopped upstream queries while peer DNS and PPP remained reachable", flush=True)
         print("PASS original observation expiry withdrew writer route with live PPP and frozen producers", flush=True)
         for pid in frozen:
             signal_worker(pid, signal.SIGCONT)
         frozen = []
+        os.kill(pid1, signal.SIGCONT)
+        supervisor_frozen = False
         wait(lambda: routed() and selected())
         traffic()
+        dns_traffic()
+        stable_dns = modules()["service.dns"]
+        with (stage / "dns-tcp.log").open("w") as output:
+            persistent = subprocess.Popen(inside(lan, ["stdbuf", "-oL", "dig", "@10.42.0.1", "+tcp", "+keepopen", "+short", "+tries=1", "+time=2", "-f", "-"]), stdin=subprocess.PIPE, stdout=output, stderr=subprocess.STDOUT, text=True)
+        children.append(persistent)
+        tcp_lock = threading.Lock()
+        def send_tcp(name):
+            with tcp_lock:
+                persistent.stdin.write(name + " A\n")
+                persistent.stdin.flush()
+        send_tcp("before.ppp.example")
+        wait(lambda: (stage / "dns-tcp.log").read_text().splitlines() == ["198.51.100.77"])
+        # DNS TCP has a normal eight-second idle timeout. Keep this real client
+        # active with a local-zone question while PPP is reconnecting.
+        keepalive_stop = threading.Event()
+        def keepalive():
+            while not keepalive_stop.wait(2):
+                send_tcp("gateway.router.test")
+        keepalive_thread = threading.Thread(target=keepalive)
+        keepalive_thread.start()
+        dns_address = "192.0.2.53"
+        dns_peer.terminate()
+        dns_peer.wait(timeout=5)
+        dns_peer = start(acns, ["dnsmasq", "--keep-in-foreground", "--conf-file=/dev/null", "--no-hosts", "--no-resolv", "--bind-dynamic", "--listen-address=192.0.2.53", "--address=/ppp.example/198.51.100.77", "--local-ttl=0", "--log-queries=extra", "--log-facility=-"], "dns")
+        server_options = stage / "server.conf"
+        server_options.write_text(server_options.read_text().replace("ms-dns 192.0.2.1", "ms-dns 192.0.2.53"))
         previous, old_index = modules()["service.internet"], link()["ifindex"]
         signal_worker(previous["pid"], signal.SIGKILL)
         wait(lambda: modules()["service.internet"]["generation"] > previous["generation"] and routed() and selected() and link() is not None and link()["ifindex"] != old_index, 35)
         traffic()
+        wait(lambda: record().get("snapshot", {}).get("dns_servers") == ["192.0.2.53"])
+        wait(lambda: bool(api("control.sock", "/v1/services/service.dns/dns-input").get("upstreams")))
+        dns_traffic()
+        assert modules()["service.dns"]["generation"] == stable_dns["generation"]
+        send_tcp("after.ppp.example")
+        wait(lambda: (stage / "dns-tcp.log").read_text().splitlines().count("198.51.100.77") == 2)
+        keepalive_stop.set()
+        keepalive_thread.join(timeout=3)
+        assert not keepalive_thread.is_alive()
+        assert all(line in {"198.51.100.77", "10.42.0.1"} for line in (stage / "dns-tcp.log").read_text().splitlines())
+        persistent.stdin.close()
+        assert persistent.wait(timeout=5) == 0
+        print("PASS the same dig TCP connection survived the learned DNS address change", flush=True)
+        print("PASS new negotiated DNS address restored UDP/TCP queries without restarting the DNS worker", flush=True)
         print("PASS killed worker removed old PPP child; replacement restored LAN TCP/UDP", flush=True)
         stale = {k: initial[k] for k in ["supervisor_instance", "name", "role", "config_digest", "generation", "producer_epoch", "sequence", "snapshot"]}
         assert "stale" in json.dumps(api("control.sock", "/v1/services/state", stale)).lower()
@@ -402,12 +475,17 @@ def peer(stage, auth, dhcp6_server):
             print("rules", run(["ip", "-n", ns, "-j", "rule", "show"]), flush=True)
         except (OSError, subprocess.SubprocessError):
             pass
-        for name in ("console", "ac", "capture", "dhcp6", "http6", "udp6"):
+        for name in ("console", "ac", "capture", "dhcp6", "http6", "udp6", "dns", "dns-tcp"):
             p = stage / (name + ".log")
             if p.exists():
-                print(name, p.read_text(), flush=True)
+                print(name, p.read_text(errors="replace"), flush=True)
         raise
     finally:
+        if keepalive_thread is not None:
+            keepalive_stop.set()
+            keepalive_thread.join(timeout=3)
+        if supervisor_frozen:
+            os.kill(pid1, signal.SIGCONT)
         for pid in frozen:
             signal_worker(pid, signal.SIGCONT)
         for p in reversed(children):

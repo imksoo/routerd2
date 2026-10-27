@@ -32,7 +32,10 @@ SUITES = {
         ("TestDaemonDHCPRelayIndependentClientsAndServer", ("wan0", "lan0", "lan1"), 120),
         ("TestDaemonDHCPRelayVRFIsolation", ("wan0", "lan0", "wan1", "lan1", "wan2", "lan2"), 120),
     ),
-    "dhcp-server": (("TestDaemonDHCPDNSAndOwnershipExpiry", (), 120),),
+    "dhcp-server": (
+        ("TestDaemonDHCPDNSAndOwnershipExpiry", (), 120),
+        ("TestDaemonMigratedDHCPDNSAndOwnershipExpiry", (), 120),
+    ),
     "aftr": (("TestDaemonAFTRResolutionAndExpiry", ("wan0",), 120),),
     "ra-client": (("TestDaemonRAClientConfigurationAndExpiry", ("wan0",), 120),),
     "ra-aftr": (("TestDaemonRAAFTRForwardingAndOriginalExpiry", ("wan0", "lan0"), 150),),

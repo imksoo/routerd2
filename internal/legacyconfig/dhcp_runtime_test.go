@@ -51,7 +51,7 @@ func TestMigratedDHCPDNSGraphThroughPublicRuntimeOwnership(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	initialNetwork := network.state()
-	initial, err := runtime.DNSLeases(dns.ModuleName())
+	initial, err := runtime.DNSInput(dns.ModuleName())
 	if err != nil || initial.Resource != dns.Name || initial.ConfigDigest == "" || len(initial.Sets) != 0 {
 		t.Fatal("DNS started with unauthenticated or unfenced lease records", initial, err)
 	}
@@ -68,7 +68,7 @@ func TestMigratedDHCPDNSGraphThroughPublicRuntimeOwnership(t *testing.T) {
 	if err := observeMigration(ctx, runtime, migrationUpdate(t, runtime, guest, 1, other)); err != nil {
 		t.Fatal(err)
 	}
-	projection, err := runtime.DNSLeases(dns.ModuleName())
+	projection, err := runtime.DNSInput(dns.ModuleName())
 	if err != nil || len(projection.Sets) != 0 {
 		t.Fatal("unreferenced DHCP producer leaked across the zone's source allowlist", projection, err)
 	}
@@ -82,11 +82,11 @@ func TestMigratedDHCPDNSGraphThroughPublicRuntimeOwnership(t *testing.T) {
 	if err := observeMigration(ctx, runtime, update); err != nil {
 		t.Fatal(err)
 	}
-	projection, err = runtime.DNSLeases(dns.ModuleName())
+	projection, err = runtime.DNSInput(dns.ModuleName())
 	if err != nil || len(projection.Sets) != 1 || projection.Sets[0].Source != dhcp.Name || projection.Sets[0].Zone != "home" || len(projection.Sets[0].Records) != 1 || projection.Sets[0].Records[0].Hostname != "laptop" || projection.Sets[0].Records[0].Address != "192.0.2.100" {
 		t.Fatal("accepted lease did not reach only its configured DNS consumer", projection, err)
 	}
-	if _, err := runtime.DNSLeases(dhcp.ModuleName()); err == nil {
+	if _, err := runtime.DNSInput(dhcp.ModuleName()); err == nil {
 		t.Fatal("DHCP producer obtained a DNS consumer projection")
 	}
 	// The producer stops publishing while its client lease remains valid. Its
@@ -98,7 +98,7 @@ func TestMigratedDHCPDNSGraphThroughPublicRuntimeOwnership(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
-	projection, err = runtime.DNSLeases(dns.ModuleName())
+	projection, err = runtime.DNSInput(dns.ModuleName())
 	if err != nil || len(projection.Sets) != 0 {
 		t.Fatal("stopped producer retained live DHCP DNS records", projection, err)
 	}
@@ -111,7 +111,7 @@ func TestMigratedDHCPDNSGraphThroughPublicRuntimeOwnership(t *testing.T) {
 	if err := observeMigration(ctx, runtime, migrationUpdate(t, runtime, dhcp, 3, active)); err != nil {
 		t.Fatal("fresh producer could not recover", err)
 	}
-	projection, err = runtime.DNSLeases(dns.ModuleName())
+	projection, err = runtime.DNSInput(dns.ModuleName())
 	if err != nil || len(projection.Sets) != 1 || projection.Sets[0].Sequence != 2 {
 		t.Fatal("fresh ownership did not restore the current lease", projection, err)
 	}
@@ -121,7 +121,7 @@ func TestMigratedDHCPDNSGraphThroughPublicRuntimeOwnership(t *testing.T) {
 	if err := observeMigration(ctx, runtime, migrationUpdate(t, runtime, dhcp, 4, inactive)); err != nil {
 		t.Fatal(err)
 	}
-	projection, err = runtime.DNSLeases(dns.ModuleName())
+	projection, err = runtime.DNSInput(dns.ModuleName())
 	if err != nil || len(projection.Sets) != 0 {
 		t.Fatal("explicit producer withdrawal retained records", projection, err)
 	}
@@ -143,7 +143,8 @@ func TestMigratedDHCPDNSGraphThroughPublicRuntimeOwnership(t *testing.T) {
 	if err := runtime.ApplyConfig(ctx, 2, changed); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runtime.DNSLeases(dns.ModuleName()); err == nil {
-		t.Fatal("removed source subscription remained authorized")
+	remaining, err := runtime.DNSInput(dns.ModuleName())
+	if err != nil || len(remaining.Sets) != 0 || len(remaining.Upstreams) != 0 {
+		t.Fatal("removed source still contributed DNS input", remaining, err)
 	}
 }

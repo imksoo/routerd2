@@ -30,7 +30,7 @@ func moduleConfig(t *testing.T) Config {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-	c := Config{Runtime: testResolverConfig([]int{freeTCPPort(t)}), SocketPath: filepath.Join(dir, "api.sock"), StatePath: filepath.Join(dir, "state.json"), EventPath: filepath.Join(dir, "events.jsonl")}
+	c := Config{Runtime: testResolverConfig(t, []int{freeTCPPort(t)}), SocketPath: filepath.Join(dir, "api.sock"), StatePath: filepath.Join(dir, "state.json"), EventPath: filepath.Join(dir, "events.jsonl")}
 	return c
 }
 
@@ -38,7 +38,7 @@ func launchModule(t *testing.T, c Config) (context.CancelFunc, <-chan error) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	ready, done := make(chan struct{}), make(chan error, 1)
-	go func() { done <- Run(ctx, c, func() { close(ready) }) }()
+	go func() { done <- Run(ctx, c, nil, func() { close(ready) }) }()
 	t.Cleanup(cancel)
 	select {
 	case <-ready:
@@ -98,41 +98,6 @@ func TestPublicRunUDPAndTCPConfigUpdateRollbackQueryLogAndStop(t *testing.T) {
 	queryModule(t, c, "udp", "router.lab.example.", "192.0.2.1")
 	queryModule(t, c, "tcp", "router.lab.example.", "192.0.2.1")
 	client := localapi.NewClient(c.SocketPath)
-	var summary reloadSummary
-	updated := normalizedRuntime(c.Runtime, c.StatePath)
-	updated.Zones[0].Spec.Records[0].IPv4 = "192.0.2.2"
-	if err := client.Do(context.Background(), http.MethodPut, "/v1/config", updated, &summary); err != nil {
-		t.Fatal(err)
-	}
-	if !summary.Reloaded || summary.Listeners != 1 {
-		t.Fatalf("summary: %+v", summary)
-	}
-	queryModule(t, c, "tcp", "router.lab.example.", "192.0.2.2")
-	bad := normalizedRuntime(updated, c.StatePath)
-	bad.Zones[0].Spec.Records[0].IPv4 = "192.0.2.99"
-	bad.Spec.QueryLog.Path = filepath.Dir(c.StatePath) // Existing directory cannot be a SQLite file.
-	if err := client.Do(context.Background(), http.MethodPut, "/v1/config", bad, nil); err == nil {
-		t.Fatal("invalid log path update succeeded")
-	}
-	queryModule(t, c, "udp", "router.lab.example.", "192.0.2.2")
-	bad = normalizedRuntime(updated, c.StatePath)
-	bad.Resource = "different"
-	if err := client.Do(context.Background(), http.MethodPut, "/v1/config", bad, nil); err == nil {
-		t.Fatal("identity change succeeded")
-	}
-	if err := client.Do(context.Background(), http.MethodPost, "/v1/reload", nil, nil); err == nil {
-		t.Fatal("reload silently succeeded without explicit input path")
-	}
-	lease := dhcpLeaseEvent{Action: daemonapi.DHCPLeaseActionAdded, IP: "192.0.2.73", Hostname: "live"}
-	if err := client.Do(context.Background(), http.MethodPost, "/v1/leases", lease, nil); err != nil {
-		t.Fatal(err)
-	}
-	queryModule(t, c, "udp", "live.lab.example.", lease.IP)
-	updated.Spec.QueryLog.Path = filepath.Join(filepath.Dir(c.StatePath), "replacement.db")
-	if err := client.Do(context.Background(), http.MethodPut, "/v1/config", updated, nil); err != nil {
-		t.Fatal(err)
-	}
-	queryModule(t, c, "tcp", "live.lab.example.", lease.IP)
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		var status daemonapi.DaemonStatus
@@ -140,7 +105,7 @@ func TestPublicRunUDPAndTCPConfigUpdateRollbackQueryLogAndStop(t *testing.T) {
 			t.Fatal(err)
 		}
 		observed := status.Resources[0].Observed
-		if observed["queryLogPath"] == updated.Spec.QueryLog.Path && observed["queryLogRecords"] != "0" {
+		if observed["queryLogPath"] == c.Runtime.Spec.QueryLog.Path && observed["queryLogRecords"] != "0" {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -160,7 +125,7 @@ func TestPublicRunCancelsInFlightUpstream(t *testing.T) {
 	})
 	c := moduleConfig(t)
 	port := c.Runtime.Spec.Listen[0].Port
-	c.Runtime = testForwardConfig("waiting", upstream)
+	c.Runtime = testForwardConfig(t, "waiting", upstream)
 	c.Runtime.Spec.Listen[0].Port = port
 	c.Runtime.Spec.Sources[0].QueryTimeout = "30s"
 	cancel, done := launchModule(t, c)
@@ -275,7 +240,7 @@ func TestMinimumRRAndNegativeSOATTL(t *testing.T) {
 }
 
 func TestLocalZonesRequireLabelBoundaryAndNeverInventAD(t *testing.T) {
-	c := testResolverConfig(nil)
+	c := testResolverConfig(t, nil)
 	c.Zones[0].Spec.DNSSEC.Enabled = true
 	if err := validateRuntime(normalizedRuntime(c, "/tmp/state")); err == nil {
 		t.Fatal("unsupported local DNSSEC accepted")
@@ -301,7 +266,7 @@ func TestWildcardListenerKeepsSourceRestriction(t *testing.T) {
 	}
 }
 
-func TestModuleRejectsPathCollisionAndMissingLeaseInput(t *testing.T) {
+func TestModuleRejectsPathCollisionAndUnownedLeaseFile(t *testing.T) {
 	c := moduleConfig(t)
 	c.Runtime.Spec.QueryLog = api.DNSResolverQueryLogSpec{Enabled: true, Path: c.StatePath}
 	if err := Validate(c); err == nil {
@@ -309,8 +274,8 @@ func TestModuleRejectsPathCollisionAndMissingLeaseInput(t *testing.T) {
 	}
 	c.Runtime.Spec.QueryLog.Enabled = false
 	c.Runtime.Zones[0].Spec.DHCPDerived.LeaseFile = filepath.Join(filepath.Dir(c.StatePath), "missing.leases")
-	err := Run(context.Background(), c, nil)
-	if err == nil || !strings.Contains(err.Error(), "leases") {
-		t.Fatal(fmt.Sprintf("missing explicit lease input: %v", err))
+	err := Run(context.Background(), c, nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "native input") {
+		t.Fatal(fmt.Sprintf("unowned lease file: %v", err))
 	}
 }

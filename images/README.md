@@ -298,7 +298,9 @@ with two virtio NICs. Private TAP bridges connect an independent RP-PPPoE AC
 and a separate Linux LAN client. The fixture adds only its router intent,
 password and SSH public key; it supplies no guest shell or alternate PPP engine.
 CHAP, IPv4/IPv6 TCP/UDP, ISC DHCPv6 PD, generated RA/SLAAC, natural Renew and
-PPP worker/session replacement are exercised. The independent server has an
+PPP worker/session replacement are exercised. LAN DNS queries over UDP and TCP
+use DNS learned through IPCP and an independent dnsmasq peer. The DNS worker
+retains its generation across PPP replacement. The independent server has an
 explicit DUID and binds after peer IPv6CP/DAD, then follows the new PPP ifindex
 after restart. Current diagnostic serial/capture/status output is disposable
 under `dist/pppoe-appliance`; do not treat this as physical NIC qualification.

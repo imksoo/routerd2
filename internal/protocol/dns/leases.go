@@ -3,20 +3,16 @@
 package dns
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"slices"
 
-	"github.com/imksoo/routerd/pkg/dnsresolver"
 	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
 )
 
-func (d *daemon) applyLeaseProjection(raw dnsconfig.LeaseProjection) error {
-	d.reloadMu.Lock()
-	defer d.reloadMu.Unlock()
+func (d *daemon) applyInput(raw dnsconfig.Input) error {
+	d.inputMu.Lock()
+	defer d.inputMu.Unlock()
 	d.stateMu.RLock()
 	cfg := d.config
 	d.stateMu.RUnlock()
@@ -24,13 +20,13 @@ func (d *daemon) applyLeaseProjection(raw dnsconfig.LeaseProjection) error {
 	if err != nil {
 		return err
 	}
-	p := dnsconfig.NormalizeLeaseProjection(raw)
-	if err := dnsconfig.ValidateLeaseProjection(cfg, p, clock); err != nil {
+	p := dnsconfig.NormalizeInput(raw)
+	if err := dnsconfig.ValidateInput(cfg, p, clock); err != nil {
 		return err
 	}
 	previous := make(map[string]dnsconfig.LeaseSet)
-	if d.nativeLeases != nil {
-		for _, set := range d.nativeLeases.Sets {
+	if d.nativeInput != nil {
+		for _, set := range d.nativeInput.Sets {
 			previous[set.Zone+"/"+set.Source] = set
 		}
 	}
@@ -46,49 +42,60 @@ func (d *daemon) applyLeaseProjection(raw dnsconfig.LeaseProjection) error {
 			return errors.New("DNS lease source reused an observation with changed contents or deadline")
 		}
 	}
-	zones := newZoneTable(cfg.Zones)
-	if zones.err != nil {
-		return zones.err
+	d.stateMu.RLock()
+	zones := d.zones
+	d.stateMu.RUnlock()
+	leaseUpdate := len(p.Sets) > 0 || d.nativeInput != nil && len(d.nativeInput.Sets) > 0
+	if leaseUpdate {
+		zones = newZoneTable(cfg.Zones)
 	}
-	d.nativeLeases = &p
-	d.populateNativeZones(zones, cfg, clock)
-	fingerprint := leaseContentFingerprint(p)
+	// Only input changes under this lock; configured pools and listeners retain
+	// their lifetimes while learned server ownership changes.
+	d.stateMu.RLock()
+	sources := append([]runtimeSource(nil), d.sources...)
+	d.stateMu.RUnlock()
+	for _, source := range sources {
+		if source.Pool == nil {
+			continue
+		}
+		var sets []dnsconfig.LearnedUpstream
+		for _, set := range p.Upstreams {
+			if set.Source == source.Spec.Name {
+				sets = append(sets, set)
+			}
+		}
+		source.Pool.setLearned(sets)
+	}
+	changed := d.nativeInput == nil || !sameInputContent(*d.nativeInput, p)
+	d.nativeInput = &p
+	if leaseUpdate {
+		d.populateNativeZones(zones, clock)
+	}
 	d.stateMu.Lock()
 	d.zones = zones
-	if fingerprint != d.leaseFingerprint {
+	if changed {
 		d.generation++
 	}
 	d.stateMu.Unlock()
-	if fingerprint != d.leaseFingerprint {
+	if changed {
 		// An ownership heartbeat alone must not evict the forwarding cache.
 		// Changed bindings must invalidate a cached upstream PTR/NXDOMAIN.
 		d.mu.Lock()
 		clear(d.cache)
 		d.cacheBytes = 0
 		d.mu.Unlock()
-		d.leaseFingerprint = fingerprint
 	}
 	return nil
 }
 
-// Caller holds reloadMu; table is newly built and not yet published. Applying
-// the same projection during a configuration reload honors the new source
-// allowlist and retains the original publisher boot deadlines.
-func (d *daemon) populateNativeZones(table *zoneTable, cfg dnsresolver.RuntimeConfig, clock boottime.Clock) {
-	if d.nativeLeases == nil {
+// Caller holds inputMu. Source authorization was checked for this complete
+// input; the new zone table retains the original publisher deadlines.
+func (d *daemon) populateNativeZones(table *zoneTable, clock boottime.Clock) {
+	if d.nativeInput == nil {
 		return
 	}
-	allowed := map[string]bool{}
-	for _, zone := range cfg.Zones {
-		for _, ref := range zone.Spec.DHCPDerived.Sources {
-			if name, ok := dnsconfig.LeaseSourceName(ref); ok {
-				allowed[zone.Name+"/"+name] = true
-			}
-		}
-	}
-	for _, set := range d.nativeLeases.Sets {
-		key := set.Zone + "/" + set.Source
-		if !allowed[key] || set.BootID != clock.BootID || uint64(clock.BoottimeNanoseconds) >= set.ExpiresNanos {
+	for _, set := range d.nativeInput.Sets {
+		if uint64(clock.BoottimeNanoseconds) >= set.ExpiresNanos {
 			continue
 		}
 		for _, zone := range table.zones {
@@ -111,16 +118,11 @@ func (d *daemon) populateNativeZones(table *zoneTable, cfg dnsresolver.RuntimeCo
 	}
 }
 
-func leaseContentFingerprint(p dnsconfig.LeaseProjection) string {
-	type entry struct {
-		Zone, Source string
-		Records      []dnsconfig.LeaseRecord
-	}
-	entries := make([]entry, 0, len(p.Sets))
-	for _, set := range p.Sets {
-		entries = append(entries, entry{Zone: set.Zone, Source: set.Source, Records: set.Records})
-	}
-	b, _ := json.Marshal(entries)
-	hash := sha256.Sum256(b)
-	return hex.EncodeToString(hash[:])
+// Heartbeat deadlines change without changing answers or cached RR content.
+func sameInputContent(a, b dnsconfig.Input) bool {
+	return slices.EqualFunc(a.Sets, b.Sets, func(a, b dnsconfig.LeaseSet) bool {
+		return a.Zone == b.Zone && a.Source == b.Source && slices.Equal(a.Records, b.Records)
+	}) && slices.EqualFunc(a.Upstreams, b.Upstreams, func(a, b dnsconfig.LearnedUpstream) bool {
+		return a.Source == b.Source && a.Provider == b.Provider && slices.Equal(a.Servers, b.Servers)
+	})
 }

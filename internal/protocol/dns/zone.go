@@ -4,28 +4,21 @@ package dns
 
 import (
 	"crypto/sha256"
-	"errors"
 	"fmt"
-	"io"
 	"net"
-	"os"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/miekg/dns"
 
 	"github.com/imksoo/routerd/pkg/api"
-	"github.com/imksoo/routerd/pkg/daemonapi"
 	"github.com/imksoo/routerd/pkg/dnsresolver"
 	"github.com/imksoo/routerd2/internal/boottime"
 )
 
 type zoneTable struct {
-	mu    sync.RWMutex
 	zones map[string]*zoneData
-	err   error
 }
 
 type zoneData struct {
@@ -55,27 +48,9 @@ type zoneRecord struct {
 type zoneRecordSource uint8
 
 const (
-	// Numeric order is the reload merge priority. Do not reorder without
-	// updating CopyDynamicFrom's precedence contract.
-	zoneRecordSourceOldSticky       zoneRecordSource = 10
-	zoneRecordSourceStickySnapshot  zoneRecordSource = 20
-	zoneRecordSourceActiveEvent     zoneRecordSource = 30
-	zoneRecordSourceActiveLeaseFile zoneRecordSource = 40
-	zoneRecordSourceTypedLease      zoneRecordSource = 46
-	zoneRecordSourceStatic          zoneRecordSource = 50
-
-	// A newly received event is newer than the lease file loaded into the
-	// current table, but becomes a retained event below the newly read lease
-	// file when it crosses a reload boundary.
-	zoneRecordPriorityLiveActiveEvent zoneRecordSource = 45
+	zoneRecordSourceTypedLease zoneRecordSource = iota
+	zoneRecordSourceStatic
 )
-
-type dhcpLeaseEvent struct {
-	Action   string `json:"action"`
-	MAC      string `json:"mac,omitempty"`
-	IP       string `json:"ip"`
-	Hostname string `json:"hostname,omitempty"`
-}
 
 func newZoneTable(zones []dnsresolver.RuntimeZone) *zoneTable {
 	table := &zoneTable{zones: map[string]*zoneData{}}
@@ -100,72 +75,19 @@ func newZoneTable(zones []dnsresolver.RuntimeZone) *zoneTable {
 			zone.ReverseZone[dns.Fqdn(reverse.Name)] = true
 		}
 		for _, record := range spec.Records {
-			zone.addRecord(record.Hostname, record.IPv4, record.IPv6, uint32(record.TTL), zoneRecordSourceStatic)
+			zone.addRecord(record.Hostname, record.IPv4, record.IPv6, uint32(record.TTL))
 		}
 		zone.rebuildStaticPTR(spec.Records)
-		if spec.DHCPDerived.LeaseFile != "" {
-			if err := zone.loadDnsmasqLeases(spec.DHCPDerived.LeaseFile); err != nil {
-				table.err = errors.Join(table.err, fmt.Errorf("DNS zone %q leases: %w", runtime.Name, err))
-			}
-		}
-		for _, record := range runtime.DHCPHostRecords {
-			zone.addRecoveredLease(record)
-		}
 		table.zones[name] = zone
 	}
 	return table
 }
 
 func (t *zoneTable) ZoneCount() int {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
 	return len(t.zones)
 }
 
-func (t *zoneTable) CopyDynamicFrom(old *zoneTable) {
-	if old == nil {
-		return
-	}
-	type dynamicRecord struct {
-		zoneName string
-		record   zoneRecord
-	}
-	var records []dynamicRecord
-	old.mu.RLock()
-	for zoneName, zone := range old.zones {
-		for _, record := range zone.Records {
-			switch record.Source {
-			case zoneRecordSourceActiveEvent:
-				records = append(records, dynamicRecord{zoneName: zoneName, record: cloneZoneRecord(record)})
-			case zoneRecordSourceStickySnapshot, zoneRecordSourceOldSticky:
-				cloned := cloneZoneRecord(record)
-				cloned.Source = zoneRecordSourceOldSticky
-				records = append(records, dynamicRecord{zoneName: zoneName, record: cloned})
-			}
-		}
-	}
-	old.mu.RUnlock()
-
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	for _, item := range records {
-		zone := t.zones[item.zoneName]
-		if zone == nil {
-			continue
-		}
-		zone.mergeRecord(item.record)
-	}
-}
-
-func cloneZoneRecord(record zoneRecord) zoneRecord {
-	record.IPv4 = append([]string(nil), record.IPv4...)
-	record.IPv6 = append([]string(nil), record.IPv6...)
-	return record
-}
-
 func (t *zoneTable) Answer(req *dns.Msg, refs []string) (*dns.Msg, bool) {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
 	if len(req.Question) == 0 {
 		return nil, false
 	}
@@ -209,22 +131,6 @@ func (z *zoneData) matchesRef(ref, name string) bool {
 	rawRef := strings.TrimSuffix(ref, ".")
 	resourceName := strings.TrimSuffix(z.ResourceName, ".")
 	return zoneName == refName || zoneName == rawRef || resourceName == refName || rawRef == "DNSZone/"+resourceName
-}
-
-func (t *zoneTable) ApplyLease(lease dhcpLeaseEvent) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	for _, zone := range t.zones {
-		if len(zone.DHCP.Sources) == 0 {
-			continue
-		}
-		switch lease.Action {
-		case daemonapi.DHCPLeaseActionRemoved:
-			zone.deleteDynamic(lease.IP)
-		default:
-			zone.addLeaseWithPriority(lease, zoneRecordSourceActiveEvent, zoneRecordPriorityLiveActiveEvent)
-		}
-	}
 }
 
 func (z *zoneData) answer(req *dns.Msg, q dns.Question) (*dns.Msg, bool) {
@@ -314,25 +220,21 @@ func (z *zoneData) liveRecord(name string) (zoneRecord, bool) {
 	return r, true
 }
 
-func (z *zoneData) addRecord(hostname, ipv4, ipv6 string, ttl uint32, source zoneRecordSource) {
-	z.addRecordWithPriority(hostname, ipv4, ipv6, ttl, source, source)
-}
-
-func (z *zoneData) addRecordWithPriority(hostname, ipv4, ipv6 string, ttl uint32, source, priority zoneRecordSource) {
+func (z *zoneData) addRecord(hostname, ipv4, ipv6 string, ttl uint32) {
 	if hostname == "" {
 		return
 	}
 	if ttl == 0 {
 		ttl = z.TTL
 	}
-	record := zoneRecord{Hostname: z.recordName(hostname), TTL: ttl, Source: source}
+	record := zoneRecord{Hostname: z.recordName(hostname), TTL: ttl, Source: zoneRecordSourceStatic}
 	if ipv4 != "" {
 		record.IPv4 = append(record.IPv4, ipv4)
 	}
 	if ipv6 != "" {
 		record.IPv6 = append(record.IPv6, ipv6)
 	}
-	z.mergeRecordWithPriority(record, priority)
+	z.mergeRecord(record)
 }
 
 func (z *zoneData) recordName(hostname string) string {
@@ -361,41 +263,7 @@ func (z *zoneData) rebuildStaticPTR(records []api.DNSZoneRecordSpec) {
 	}
 }
 
-func (z *zoneData) addLease(lease dhcpLeaseEvent, source zoneRecordSource) {
-	z.addLeaseWithPriority(lease, source, source)
-}
-
-func (z *zoneData) addLeaseWithPriority(lease dhcpLeaseEvent, source, priority zoneRecordSource) {
-	if lease.IP == "" || lease.Hostname == "" {
-		return
-	}
-	ttl := uint32(z.DHCP.TTL)
-	if ttl == 0 {
-		ttl = 60
-	}
-	ip := net.ParseIP(lease.IP)
-	if ip == nil {
-		return
-	}
-	if ip.To4() != nil {
-		z.addRecordWithPriority(lease.Hostname, lease.IP, "", ttl, source, priority)
-		return
-	}
-	z.addRecordWithPriority(lease.Hostname, "", lease.IP, ttl, source, priority)
-}
-
-func (z *zoneData) addRecoveredLease(record dnsresolver.RuntimeDHCPHostRecord) {
-	if record.Hostname == "" || record.IP == "" {
-		return
-	}
-	z.addLease(dhcpLeaseEvent{IP: record.IP, Hostname: record.Hostname}, zoneRecordSourceStickySnapshot)
-}
-
 func (z *zoneData) mergeRecord(record zoneRecord) {
-	z.mergeRecordWithPriority(record, record.Source)
-}
-
-func (z *zoneData) mergeRecordWithPriority(record zoneRecord, priority zoneRecordSource) {
 	if record.Hostname == "" {
 		return
 	}
@@ -404,8 +272,7 @@ func (z *zoneData) mergeRecordWithPriority(record zoneRecord, priority zoneRecor
 	conflicts := map[string]zoneRecord{}
 	sharedStaticPTR := map[string]bool{}
 	if existing, exists := z.Records[name]; exists {
-		if existing.Source > priority ||
-			(existing.Source == priority && record.Source == zoneRecordSourceStickySnapshot) {
+		if existing.Source > record.Source {
 			return
 		}
 		conflicts[name] = existing
@@ -427,7 +294,7 @@ func (z *zoneData) mergeRecordWithPriority(record zoneRecord, priority zoneRecor
 			sharedStaticPTR[dns.Fqdn(ptr)] = true
 			continue
 		}
-		if !exists || existing.Source >= priority {
+		if !exists || existing.Source >= record.Source {
 			return
 		}
 		conflicts[existingName] = existing
@@ -463,61 +330,8 @@ func (z *zoneData) removeRecord(name string) {
 	}
 }
 
-func (z *zoneData) deleteDynamic(ip string) {
-	for name, record := range z.Records {
-		if record.Source == zoneRecordSourceStatic {
-			continue
-		}
-		if contains(record.IPv4, ip) || contains(record.IPv6, ip) {
-			delete(z.Records, name)
-		}
-	}
-	if ptr, err := dns.ReverseAddr(ip); err == nil {
-		ptrName := dns.Fqdn(ptr)
-		if target := z.PTR[ptrName]; target != "" {
-			if record, exists := z.Records[strings.ToLower(dns.Fqdn(target))]; exists && record.Source == zoneRecordSourceStatic {
-				return
-			}
-		}
-		delete(z.PTR, ptrName)
-	}
-}
-
 func withinZone(name, zone string) bool {
 	return zone == "." || name == zone || strings.HasSuffix(name, "."+zone)
-}
-
-func (z *zoneData) loadDnsmasqLeases(path string) error {
-	file, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	stat, err := file.Stat()
-	if err != nil {
-		return err
-	}
-	if !stat.Mode().IsRegular() || stat.Size() > 64<<20 {
-		return errors.New("lease input must be a regular file no larger than 64 MiB")
-	}
-	data, err := io.ReadAll(io.LimitReader(file, (64<<20)+1))
-	if err != nil {
-		return err
-	}
-	if len(data) > 64<<20 {
-		return errors.New("lease input exceeds 64 MiB")
-	}
-	for _, line := range strings.Split(string(data), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 4 || fields[3] == "*" {
-			continue
-		}
-		if !validHostname(fields[3]) || net.ParseIP(fields[2]) == nil {
-			continue
-		}
-		z.addLease(dhcpLeaseEvent{MAC: fields[1], IP: fields[2], Hostname: fields[3]}, zoneRecordSourceActiveLeaseFile)
-	}
-	return nil
 }
 
 func sourceMatches(matches []string, qname string) bool {

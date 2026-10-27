@@ -76,7 +76,9 @@ func TestConfigurationLargeConfirmedACKDocumentFenceAndLightHealth(t *testing.T)
 	if err != nil || first.Revision != 2 {
 		t.Fatal(first.Revision, err)
 	}
-	req := CommitRequest{ExpectedRevision: 2, RequestID: "large-confirmed", Config: doc, ConfirmTimeoutSeconds: 30}
+	// This checks response size and durable acknowledgement, not serialization
+	// latency under the race detector. Timed rollback has separate checks.
+	req := CommitRequest{ExpectedRevision: 2, RequestID: "large-confirmed", Config: doc, ConfirmTimeoutSeconds: 300}
 	h := e.Handler()
 	ack := callView(t, h, http.MethodPost, "/v1/config/commit", req)
 	if ack.Code != http.StatusOK || ack.Body.Len() > 4096 {

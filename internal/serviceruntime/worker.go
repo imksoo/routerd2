@@ -178,22 +178,22 @@ func Run(ctx context.Context, runtimeDir, name, role, path, digest string, gener
 		if err := decode(instance.Config, &cfg); err != nil {
 			return err
 		}
-		if !instance.DynamicDNS {
-			return dns.Run(runCtx, cfg, ready)
+		if !dnsconfig.NeedsInput(cfg.Runtime) {
+			return dns.Run(runCtx, cfg, nil, ready)
 		}
-		var initial dnsconfig.LeaseProjection
-		if err := c.client.Do(runCtx, "GET", "/v1/services/"+name+"/dns-leases", nil, &initial); err != nil {
+		var initial dnsconfig.Input
+		if err := c.client.Do(runCtx, "GET", "/v1/services/"+name+"/dns-input", nil, &initial); err != nil {
 			return err
 		}
 		if initial.ConfigDigest != digest {
-			return errors.New("DNS lease projection belongs to a different configuration")
+			return errors.New("DNS input belongs to a different configuration")
 		}
-		updates := make(chan dnsconfig.LeaseProjection, 1)
+		updates := make(chan dnsconfig.Input, 1)
 		updates <- initial
 		done := make(chan struct{})
 		defer func() { cancel(); <-done }()
-		go func() { defer close(done); defer close(updates); c.watchDNSLeases(runCtx, name, digest, updates) }()
-		return dns.RunWithLeaseUpdates(runCtx, cfg, updates, ready)
+		go func() { defer close(done); defer close(updates); c.watchDNSInput(runCtx, name, digest, updates) }()
+		return dns.Run(runCtx, cfg, updates, ready)
 	case "vrrp":
 		var cfg vrrp.Config
 		if err := decode(instance.Config, &cfg); err != nil {
@@ -295,7 +295,7 @@ func (c *effectsClient) replay(ctx context.Context) {
 	}
 }
 
-func (c *effectsClient) watchDNSLeases(ctx context.Context, name, digest string, updates chan dnsconfig.LeaseProjection) {
+func (c *effectsClient) watchDNSInput(ctx context.Context, name, digest string, updates chan dnsconfig.Input) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
@@ -304,9 +304,9 @@ func (c *effectsClient) watchDNSLeases(ctx context.Context, name, digest string,
 			return
 		case <-ticker.C:
 		}
-		var projection dnsconfig.LeaseProjection
+		var projection dnsconfig.Input
 		call, cancel := context.WithTimeout(ctx, 2*time.Second)
-		err := c.client.Do(call, "GET", "/v1/services/"+name+"/dns-leases", nil, &projection)
+		err := c.client.Do(call, "GET", "/v1/services/"+name+"/dns-input", nil, &projection)
 		cancel()
 		if err != nil || projection.ConfigDigest != digest {
 			continue // Existing ownership and lease deadlines continue to expire.

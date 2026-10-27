@@ -7,11 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"net/http"
-	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -23,18 +21,15 @@ import (
 	"github.com/imksoo/routerd/pkg/daemonapi"
 	"github.com/imksoo/routerd/pkg/dnsresolver"
 	"github.com/imksoo/routerd/pkg/logstore"
-	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
 )
 
 type options struct {
 	resource   string
-	configFile string
 	socketPath string
 	stateFile  string
 	eventFile  string
-	dryRun     bool
 }
 
 type daemon struct {
@@ -48,7 +43,6 @@ type daemon struct {
 	cond           *sync.Cond
 	events         []daemonapi.DaemonEvent
 	nextCursor     uint64
-	cancel         context.CancelFunc
 	runCtx         context.Context
 	ready          func()
 	fatal          chan error
@@ -59,24 +53,21 @@ type daemon struct {
 	eventErrors    atomic.Uint64
 	eventMu        sync.Mutex
 
-	stateMu      sync.RWMutex
-	reloadMu     sync.Mutex
-	zones        *zoneTable
-	sources      []runtimeSource
-	listeners    map[string]*boundListener
-	sourceCancel context.CancelFunc
-	generation   uint64
-	cache        map[string]cacheEntry
-	cacheBytes   int
-	queryLogMu   sync.Mutex
-	queryLog     *logstore.DNSQueryLog
+	stateMu    sync.RWMutex
+	inputMu    sync.Mutex
+	zones      *zoneTable
+	sources    []runtimeSource
+	listeners  map[string]*boundListener
+	generation uint64
+	cache      map[string]cacheEntry
+	cacheBytes int
+	queryLogMu sync.Mutex
+	queryLog   *logstore.DNSQueryLog
 
-	// Native lease snapshots are serialized by reloadMu. Receipt deadlines
+	// Native lease snapshots are serialized by inputMu. Receipt deadlines
 	// retain monotonic time and are never extended by a duplicate sequence.
-	nativeLeaseMode  bool
-	nativeLeases     *dnsconfig.LeaseProjection
-	leaseFingerprint string
-	leaseRejected    atomic.Uint64
+	nativeInput   *dnsconfig.Input
+	inputRejected atomic.Uint64
 }
 
 type runtimeSource struct {
@@ -98,20 +89,6 @@ type cacheEntry struct {
 	Generation uint64
 }
 
-type reloadSummary struct {
-	Reloaded  bool `json:"reloaded"`
-	Listeners int  `json:"listeners"`
-	Sources   int  `json:"sources"`
-}
-
-type reloadError struct {
-	status int
-	err    error
-}
-
-func (e *reloadError) Error() string { return e.err.Error() }
-func (e *reloadError) Unwrap() error { return e.err }
-
 type resolveResult struct {
 	Response     *dns.Msg
 	Upstream     string
@@ -131,39 +108,6 @@ func normalizeDaemonExit(ctx context.Context, err error) error {
 	return err
 }
 
-func loadConfig(opts options) (dnsresolver.RuntimeConfig, error) {
-	if opts.configFile == "" {
-		return dnsresolver.RuntimeConfig{}, errors.New("runtime_config_path is not configured; use PUT /v1/config")
-	}
-	file, err := os.Open(opts.configFile)
-	if err != nil {
-		return dnsresolver.RuntimeConfig{}, err
-	}
-	defer file.Close()
-	stat, err := file.Stat()
-	if err != nil {
-		return dnsresolver.RuntimeConfig{}, err
-	}
-	if !stat.Mode().IsRegular() || stat.Size() > localapi.MaxBody {
-		return dnsresolver.RuntimeConfig{}, errors.New("DNS runtime config must be a regular file no larger than 2 MiB")
-	}
-	var config dnsresolver.RuntimeConfig
-	decoder := json.NewDecoder(io.LimitReader(file, localapi.MaxBody+1))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&config); err != nil {
-		return dnsresolver.RuntimeConfig{}, err
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		return dnsresolver.RuntimeConfig{}, errors.New("expected one DNS runtime config JSON document")
-	}
-	if config.Resource == "" {
-		config.Resource = opts.resource
-	}
-	config = normalizedRuntime(config, opts.stateFile)
-	return config, validateRuntime(config)
-}
-
 func newDaemon(opts options, config dnsresolver.RuntimeConfig) (*daemon, error) {
 	d := &daemon{
 		opts:       opts,
@@ -178,9 +122,6 @@ func newDaemon(opts options, config dnsresolver.RuntimeConfig) (*daemon, error) 
 	}
 	d.cond = sync.NewCond(&d.mu)
 	d.zones = newZoneTable(config.Zones)
-	if d.zones.err != nil {
-		return nil, d.zones.err
-	}
 	sources, err := buildRuntimeSources(config)
 	if err != nil {
 		return nil, err
@@ -218,20 +159,14 @@ func buildRuntimeSources(config dnsresolver.RuntimeConfig) ([]runtimeSource, err
 
 func (d *daemon) Run(ctx context.Context) (result error) {
 	runCtx, cancel := context.WithCancel(ctx)
-	d.runCtx, d.cancel = runCtx, cancel
+	d.runCtx = runCtx
 	var apiDone chan error
 	apiStopped := false
 	defer func() {
 		cancel()
-		d.reloadMu.Lock()
-		d.stateMu.RLock()
-		sourceCancel := d.sourceCancel
-		d.stateMu.RUnlock()
-		if sourceCancel != nil {
-			sourceCancel()
-		}
+		d.inputMu.Lock()
 		d.shutdownDNSServers()
-		d.reloadMu.Unlock()
+		d.inputMu.Unlock()
 		d.closeQueryLog()
 		if apiDone != nil && !apiStopped {
 			// localapi bounds graceful shutdown to two seconds and then closes.
@@ -249,32 +184,25 @@ func (d *daemon) Run(ctx context.Context) (result error) {
 		d.publish(daemonapi.EventDaemonStopped, daemonapi.SeverityInfo, "Stopped", "DNS resolver module stopped", nil)
 	}()
 	d.publish(daemonapi.EventDaemonStarted, daemonapi.SeverityInfo, "Started", "DNS resolver module started", nil)
-	if !d.opts.dryRun {
-		if d.config.Spec.QueryLog.Enabled {
-			queryLog, err := openQueryLog(d.config.Spec.QueryLog.Path)
-			if err != nil {
-				return fmt.Errorf("open DNS query log: %w", err)
-			}
-			d.queryLogMu.Lock()
-			d.queryLog = queryLog
-			d.queryLogMu.Unlock()
+	if d.config.Spec.QueryLog.Enabled {
+		queryLog, err := openQueryLog(d.config.Spec.QueryLog.Path)
+		if err != nil {
+			return fmt.Errorf("open DNS query log: %w", err)
 		}
-		sourceCtx, sourceCancel := context.WithCancel(runCtx)
-		d.stateMu.Lock()
-		d.sourceCancel = sourceCancel
-		sources := append([]runtimeSource(nil), d.sources...)
-		d.stateMu.Unlock()
-		for _, source := range sources {
-			if source.Pool != nil {
-				source.Pool.Start(sourceCtx, d.publish)
-			}
+		d.queryLogMu.Lock()
+		d.queryLog = queryLog
+		d.queryLogMu.Unlock()
+	}
+	for _, source := range d.sources {
+		if source.Pool != nil {
+			source.Pool.Start(runCtx, d.publish)
 		}
-		if err := d.startDNS(runCtx); err != nil {
-			return err
-		}
-		if d.listenerCount() == 0 {
-			return errors.New("DNS module has no bound listeners")
-		}
+	}
+	if err := d.startDNS(runCtx); err != nil {
+		return err
+	}
+	if d.listenerCount() == 0 {
+		return errors.New("DNS module has no bound listeners")
 	}
 	if err := d.setState(daemonapi.PhaseRunning, daemonapi.HealthOK); err != nil {
 		return err
@@ -751,245 +679,15 @@ func (d *daemon) routes() http.Handler {
 		config, _, _, _ := d.runtimeSnapshot()
 		localapi.JSON(w, http.StatusOK, config)
 	})
-	mux.HandleFunc("PUT /v1/config", d.configHandler)
-	mux.HandleFunc("/v1/leases", d.leaseHandler)
-	mux.HandleFunc("/v1/reload", d.reloadHandler)
 	return mux
-}
-
-func (d *daemon) configHandler(w http.ResponseWriter, r *http.Request) {
-	defer r.Body.Close()
-	var config dnsresolver.RuntimeConfig
-	if err := localapi.Decode(w, r, &config); err != nil {
-		localapi.Fail(w, http.StatusBadRequest, err)
-		return
-	}
-	ctx := d.runCtx
-	if ctx == nil {
-		ctx = r.Context()
-	}
-	summary, err := d.applyRuntime(ctx, config)
-	writeReloadResult(w, summary, err)
-}
-
-func writeReloadResult(w http.ResponseWriter, summary reloadSummary, err error) {
-	if err != nil {
-		status := http.StatusInternalServerError
-		var reloadErr *reloadError
-		if errors.As(err, &reloadErr) {
-			status = reloadErr.status
-		}
-		localapi.Fail(w, status, err)
-		return
-	}
-	localapi.JSON(w, http.StatusOK, summary)
-}
-
-func (d *daemon) reloadHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		localapi.Fail(w, http.StatusMethodNotAllowed, errors.New("method not allowed"))
-		return
-	}
-	defer r.Body.Close()
-	ctx := d.runCtx
-	if ctx == nil {
-		ctx = r.Context()
-	}
-	summary, err := d.reload(ctx)
-	writeReloadResult(w, summary, err)
-}
-
-func (d *daemon) leaseHandler(w http.ResponseWriter, r *http.Request) {
-	if d.nativeLeaseMode {
-		localapi.Fail(w, http.StatusConflict, errors.New("this instance accepts only source-scoped native lease snapshots"))
-		return
-	}
-	if r.Method != http.MethodPost {
-		localapi.Fail(w, http.StatusMethodNotAllowed, errors.New("method not allowed"))
-		return
-	}
-	defer r.Body.Close()
-	var lease dhcpLeaseEvent
-	if err := localapi.Decode(w, r, &lease); err != nil {
-		localapi.Fail(w, http.StatusBadRequest, err)
-		return
-	}
-	topic, ok := daemonapi.DHCPLeaseEventType(lease.Action)
-	if !ok {
-		localapi.Fail(w, http.StatusBadRequest, errors.New("unsupported DHCP lease action"))
-		return
-	}
-	if net.ParseIP(lease.IP) == nil {
-		localapi.Fail(w, http.StatusBadRequest, errors.New("invalid lease address"))
-		return
-	}
-	if lease.Hostname != "" && !validHostname(lease.Hostname) {
-		localapi.Fail(w, http.StatusBadRequest, errors.New("invalid lease hostname"))
-		return
-	}
-	// Serialize copying the old zone table and applying a live lease. Otherwise
-	// an event received during reload could be acknowledged but lost in the swap.
-	d.reloadMu.Lock()
-	d.stateMu.RLock()
-	zones := d.zones
-	d.stateMu.RUnlock()
-	zones.ApplyLease(lease)
-	d.reloadMu.Unlock()
-	d.publish(topic, daemonapi.SeverityInfo, "LeaseUpdated", lease.Hostname, map[string]string{"mac": lease.MAC, "ip": lease.IP, "hostname": lease.Hostname})
-	localapi.JSON(w, http.StatusOK, map[string]bool{"accepted": true})
-}
-
-func (d *daemon) reload(ctx context.Context) (reloadSummary, error) {
-	config, err := loadConfig(d.opts)
-	if err != nil {
-		return reloadSummary{}, &reloadError{status: http.StatusBadRequest, err: err}
-	}
-	return d.applyRuntime(ctx, config)
-}
-
-func (d *daemon) applyRuntime(ctx context.Context, config dnsresolver.RuntimeConfig) (reloadSummary, error) {
-	d.reloadMu.Lock()
-	defer d.reloadMu.Unlock()
-	config = normalizedRuntime(config, d.opts.stateFile)
-	if err := validateRuntimePaths(config, d.opts); err != nil {
-		return reloadSummary{}, &reloadError{status: http.StatusBadRequest, err: err}
-	}
-	if config.Resource != d.opts.resource {
-		return reloadSummary{}, &reloadError{status: http.StatusBadRequest, err: errors.New("DNS resource identity cannot change during reload")}
-	}
-	if err := ctx.Err(); err != nil {
-		return reloadSummary{}, err
-	}
-	sources, err := buildRuntimeSources(config)
-	if err != nil {
-		return reloadSummary{}, &reloadError{status: http.StatusBadRequest, err: err}
-	}
-	zones := newZoneTable(config.Zones)
-	if zones.err != nil {
-		return reloadSummary{}, &reloadError{status: http.StatusBadRequest, err: zones.err}
-	}
-	d.stateMu.RLock()
-	oldZones, oldListeners, oldSourceCancel := d.zones, d.listeners, d.sourceCancel
-	d.stateMu.RUnlock()
-	zones.CopyDynamicFrom(oldZones)
-	if d.nativeLeaseMode {
-		clock, err := boottime.Read()
-		if err != nil {
-			return reloadSummary{}, err
-		}
-		d.populateNativeZones(zones, config, clock)
-	}
-
-	// Prepare the new query database before any live state changes. Permission,
-	// schema and lock errors leave the previous runtime and logging active.
-	d.queryLogMu.Lock()
-	oldQueryLog := d.queryLog
-	sameQueryLog := oldQueryLog != nil && config.Spec.QueryLog.Enabled && oldQueryLog.Stats().Path == config.Spec.QueryLog.Path
-	d.queryLogMu.Unlock()
-	var newQueryLog *logstore.DNSQueryLog
-	if !d.opts.dryRun && config.Spec.QueryLog.Enabled && !sameQueryLog {
-		newQueryLog, err = openQueryLog(config.Spec.QueryLog.Path)
-		if err != nil {
-			return reloadSummary{}, &reloadError{status: http.StatusInternalServerError, err: fmt.Errorf("open DNS query log: %w", err)}
-		}
-	}
-	committed := false
-	defer func() {
-		if !committed && newQueryLog != nil {
-			_ = newQueryLog.Close()
-		}
-	}()
-	desired := listenAddressSet(config.Spec.Listen)
-	additions := map[string]struct{}{}
-	removals := map[string]*boundListener{}
-	for addr := range desired {
-		if _, ok := oldListeners[addr]; !ok {
-			additions[addr] = struct{}{}
-		}
-	}
-	for addr, listener := range oldListeners {
-		if _, ok := desired[addr]; !ok {
-			removals[addr] = listener
-		}
-	}
-	newListeners := map[string]*boundListener{}
-	if !d.opts.dryRun {
-		newListeners, err = d.openBoundListeners(ctx, additions)
-		if err != nil {
-			return reloadSummary{}, &reloadError{status: http.StatusInternalServerError, err: err}
-		}
-	}
-	defer func() {
-		if !committed {
-			shutdownBoundListeners(newListeners)
-		}
-	}()
-	if err := ctx.Err(); err != nil {
-		return reloadSummary{}, err
-	}
-	var sourceCtx context.Context
-	var sourceCancel context.CancelFunc
-	if !d.opts.dryRun {
-		sourceCtx, sourceCancel = context.WithCancel(ctx)
-	}
-	mergedListeners := map[string]*boundListener{}
-	for addr, listener := range oldListeners {
-		if _, remove := removals[addr]; !remove {
-			mergedListeners[addr] = listener
-		}
-	}
-	for addr, listener := range newListeners {
-		mergedListeners[addr] = listener
-	}
-	d.stateMu.Lock()
-	d.config, d.sources, d.zones, d.listeners, d.sourceCancel = config, sources, zones, mergedListeners, sourceCancel
-	d.generation++
-	d.stateMu.Unlock()
-	d.mu.Lock()
-	clear(d.cache)
-	d.cacheBytes = 0
-	d.mu.Unlock()
-	d.queryLogMu.Lock()
-	if !sameQueryLog {
-		oldQueryLog = d.queryLog
-		d.queryLog = newQueryLog
-	}
-	d.queryLogMu.Unlock()
-	committed = true
-	if !sameQueryLog && oldQueryLog != nil {
-		_ = oldQueryLog.Close()
-	}
-	if !d.opts.dryRun {
-		for _, source := range sources {
-			if source.Pool != nil {
-				source.Pool.Start(sourceCtx, d.publish)
-			}
-		}
-	}
-	if oldSourceCancel != nil {
-		oldSourceCancel()
-	}
-	shutdownBoundListeners(removals)
-	if !d.opts.dryRun {
-		if err := d.setState(daemonapi.PhaseRunning, daemonapi.HealthOK); err != nil {
-			select {
-			case d.fatal <- err:
-			default:
-			}
-			return reloadSummary{}, &reloadError{status: http.StatusInternalServerError, err: fmt.Errorf("DNS runtime changed but state persistence failed; worker stopping: %w", err)}
-		}
-	}
-	summary := reloadSummary{Reloaded: true, Listeners: len(mergedListeners), Sources: len(sources)}
-	d.publish("routerd.dns.resolver.reloaded", daemonapi.SeverityInfo, "Reloaded", "DNS resolver config reloaded", map[string]string{"listeners": fmt.Sprint(summary.Listeners), "sources": fmt.Sprint(summary.Sources)})
-	return summary, nil
 }
 
 func (d *daemon) status() daemonapi.DaemonStatus {
 	d.mu.Lock()
 	phase := d.phase
-	health := d.health
 	startedAt := d.startedAt
 	d.mu.Unlock()
+	health := d.currentHealth()
 	status := daemonapi.NewStatus(daemonapi.DaemonRef{Name: d.opts.resource, Kind: dnsresolver.DaemonKind, Instance: d.opts.resource})
 	status.Phase = phase
 	status.Health = health
@@ -1012,7 +710,7 @@ func (d *daemon) observedStatus() map[string]string {
 	zones := d.zones
 	sources := append([]runtimeSource(nil), d.sources...)
 	d.stateMu.RUnlock()
-	observed := map[string]string{"leaseSnapshotsRejected": fmt.Sprint(d.leaseRejected.Load()), "listeners": fmt.Sprint(listenerCount), "zones": fmt.Sprint(zones.ZoneCount()), "queryOverloads": fmt.Sprint(d.queryOverloads.Load()), "queryLogDropped": fmt.Sprint(d.queryLogDrops.Load()), "queryLogErrors": fmt.Sprint(d.queryLogErrors.Load()), "eventPersistenceErrors": fmt.Sprint(d.eventErrors.Load())}
+	observed := map[string]string{"inputSnapshotsRejected": fmt.Sprint(d.inputRejected.Load()), "listeners": fmt.Sprint(listenerCount), "zones": fmt.Sprint(zones.ZoneCount()), "queryOverloads": fmt.Sprint(d.queryOverloads.Load()), "queryLogDropped": fmt.Sprint(d.queryLogDrops.Load()), "queryLogErrors": fmt.Sprint(d.queryLogErrors.Load()), "eventPersistenceErrors": fmt.Sprint(d.eventErrors.Load())}
 	d.mu.Lock()
 	observed["cacheEntries"], observed["cacheBytes"] = fmt.Sprint(len(d.cache)), fmt.Sprint(d.cacheBytes)
 	d.mu.Unlock()
@@ -1097,7 +795,12 @@ func (d *daemon) setState(phase, health string) error {
 	d.mu.Lock()
 	d.phase, d.health = phase, health
 	d.mu.Unlock()
-	state := map[string]any{"phase": phase, "health": health, "listeners": listenerCount, "zones": zoneCount}
+	state := struct {
+		Phase     string `json:"phase"`
+		Health    string `json:"health"`
+		Listeners int    `json:"listeners"`
+		Zones     int    `json:"zones"`
+	}{phase, health, listenerCount, zoneCount}
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return err
@@ -1110,8 +813,33 @@ func (d *daemon) setState(phase, health string) error {
 
 func (d *daemon) currentHealth() string {
 	d.mu.Lock()
-	defer d.mu.Unlock()
-	return d.health
+	health := d.health
+	d.mu.Unlock()
+	if health != daemonapi.HealthOK {
+		return health
+	}
+	d.stateMu.RLock()
+	sources := append([]runtimeSource(nil), d.sources...)
+	d.stateMu.RUnlock()
+	for _, source := range sources {
+		if source.Pool == nil {
+			continue
+		}
+		healthy, unknown := false, false
+		entries := source.Pool.Snapshot()
+		for _, endpoint := range entries {
+			healthy = healthy || endpoint.Phase == upstreamHealthy
+			unknown = unknown || endpoint.Phase == upstreamProbing || endpoint.Phase == "Expired" || endpoint.Phase == "Unknown"
+		}
+		if healthy {
+			continue
+		}
+		if len(entries) == 0 || unknown {
+			return daemonapi.HealthUnknown
+		}
+		return daemonapi.HealthDegraded
+	}
+	return health
 }
 
 func conditionStatus(ok bool) string {

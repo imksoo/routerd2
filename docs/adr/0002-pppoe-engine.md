@@ -53,7 +53,12 @@ separate application/client kernels, real Health/PBR, large TCP, fragmented UDP,
 MTU changes, withdrawal, recovery and worker restarts. Relevant current results
 and untested scope are in [the handoff](../pve-codex-handoff.md).
 
-Resolver application of learned DNS, complete resource fields, all path-MTU and
+PPP learned DNS now reaches the resolver through typed input with original finite
+deadlines. Independent dnsmasq peers verify LAN UDP/TCP queries, changed negotiated
+servers, expiry while the peer remains reachable and recovery without DNS worker
+replacement. The factory appliance exercises this path with PD and PPP recovery.
+
+Complete resource fields, all path-MTU and
 VRF cases, real ISP PPP, container PPP permissions, physical hardware and complete
 engine/kernel update/fallback qualification remain unfinished. Building static
 Go commands or an OCI image does not close those gates.

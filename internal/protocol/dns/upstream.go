@@ -27,6 +27,9 @@ import (
 
 	"github.com/imksoo/routerd/pkg/daemonapi"
 	resolvercfg "github.com/imksoo/routerd/pkg/dnsresolver"
+	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/lifetime"
+	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
 )
 
 const (
@@ -59,17 +62,19 @@ type upstreamPool struct {
 }
 
 type dnsUpstream struct {
-	Index       int       `json:"index"`
-	URL         string    `json:"url"`
-	Scheme      string    `json:"scheme"`
-	Address     string    `json:"address"`
-	ServerName  string    `json:"serverName,omitempty"`
-	Phase       string    `json:"phase"`
-	LastError   string    `json:"lastError,omitempty"`
-	LastSuccess time.Time `json:"lastSuccess,omitempty"`
-	LastFailure time.Time `json:"lastFailure,omitempty"`
-	Successes   int       `json:"successes,omitempty"`
-	Failures    int       `json:"failures,omitempty"`
+	Provider    string            `json:"provider,omitempty"`
+	ValidUntil  lifetime.Deadline `json:"validUntil,omitzero"`
+	Index       int               `json:"index"`
+	URL         string            `json:"url"`
+	Scheme      string            `json:"scheme"`
+	Address     string            `json:"address"`
+	ServerName  string            `json:"serverName,omitempty"`
+	Phase       string            `json:"phase"`
+	LastError   string            `json:"lastError,omitempty"`
+	LastSuccess time.Time         `json:"lastSuccess,omitempty"`
+	LastFailure time.Time         `json:"lastFailure,omitempty"`
+	Successes   int               `json:"successes,omitempty"`
+	Failures    int               `json:"failures,omitempty"`
 }
 
 func newUpstreamPool(raw []string, cfg upstreamPoolConfig) (*upstreamPool, error) {
@@ -95,9 +100,6 @@ func newUpstreamPool(raw []string, cfg upstreamPoolConfig) (*upstreamPool, error
 			return nil, err
 		}
 		upstreams = append(upstreams, upstream)
-	}
-	if len(upstreams) == 0 {
-		return nil, fmt.Errorf("no DNS upstream configured")
 	}
 	return &upstreamPool{
 		upstreams: upstreams,
@@ -153,32 +155,93 @@ func parseDNSUpstream(index int, raw string) (*dnsUpstream, error) {
 	return &dnsUpstream{Index: index, URL: trimmed, Scheme: scheme, Address: address, ServerName: serverName, Phase: upstreamProbing}, nil
 }
 
+// One probe cycle owns its concurrent exchanges and waits for all of them.
+// Updating learned endpoints needs no extra per-endpoint background lifecycle.
 func (p *upstreamPool) Start(ctx context.Context, publish func(string, string, string, string, map[string]string)) {
-	go func() { <-ctx.Done(); p.client.CloseIdleConnections() }()
-	for _, upstream := range p.snapshotPointers() {
-		go p.probeLoop(ctx, upstream, publish)
-	}
+	go func() {
+		defer p.client.CloseIdleConnections()
+		ticker := time.NewTicker(p.config.ProbeInterval)
+		defer ticker.Stop()
+		for {
+			var probes sync.WaitGroup
+			for _, upstream := range p.snapshotPointers() {
+				probes.Go(func() { p.probe(ctx, upstream, publish) })
+			}
+			probes.Wait()
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
 }
 
-func (p *upstreamPool) probeLoop(ctx context.Context, upstream *dnsUpstream, publish func(string, string, string, string, map[string]string)) {
-	p.probe(ctx, upstream, publish)
-	ticker := time.NewTicker(p.config.ProbeInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			p.probe(ctx, upstream, publish)
+// SetLearned preserves health for unchanged endpoints. Only the originating
+// protocol deadline changes on a fresh observation; receipt never rebases it.
+func (p *upstreamPool) setLearned(sets []dnsconfig.LearnedUpstream) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	var next []*dnsUpstream
+	previous := map[string]*dnsUpstream{}
+	for _, upstream := range p.upstreams {
+		if upstream.Provider == "" {
+			next = append(next, upstream)
+		} else {
+			previous[upstream.Provider+"/"+upstream.URL] = upstream
 		}
 	}
+	for _, set := range sets {
+		for _, server := range set.Servers {
+			raw := "udp://" + net.JoinHostPort(server, "53")
+			upstream := previous[set.Provider+"/"+raw]
+			if upstream == nil {
+				upstream = &dnsUpstream{URL: raw, Scheme: "udp", Address: net.JoinHostPort(server, "53"), Provider: set.Provider, Phase: upstreamProbing}
+			}
+			upstream.Index = len(next)
+			upstream.ValidUntil = set.ValidUntil
+			next = append(next, upstream)
+		}
+	}
+	p.upstreams = next
+}
+
+func (p *upstreamPool) queryBudget(upstream *dnsUpstream) (time.Duration, error) {
+	p.mu.Lock()
+	for _, current := range p.upstreams {
+		if current == upstream {
+			deadline := current.ValidUntil
+			p.mu.Unlock()
+			if deadline == (lifetime.Deadline{}) {
+				return p.config.QueryTimeout, nil
+			}
+			clock, err := boottime.Read()
+			if err != nil {
+				return 0, err
+			}
+			remaining := deadline.Remaining(clock)
+			if remaining <= 0 {
+				return 0, errors.New("DNS upstream observation expired")
+			}
+			return min(p.config.QueryTimeout, remaining), nil
+		}
+	}
+	p.mu.Unlock()
+	return 0, errors.New("DNS upstream withdrawn")
 }
 
 func (p *upstreamPool) probe(ctx context.Context, upstream *dnsUpstream, publish func(string, string, string, string, map[string]string)) {
-	queryCtx, cancel := context.WithTimeout(ctx, p.config.ProbeTimeout)
+	budget, err := p.queryBudget(upstream)
+	if err != nil {
+		return
+	}
+	queryCtx, cancel := context.WithTimeout(ctx, min(p.config.ProbeTimeout, budget))
 	defer cancel()
-	_, err := p.exchangeOne(queryCtx, upstream, dnsProbeQuery())
+	_, err = p.exchangeOne(queryCtx, upstream, dnsProbeQuery())
 	if ctx.Err() != nil {
+		return
+	}
+	if _, err := p.queryBudget(upstream); err != nil {
 		return
 	}
 	if err != nil {
@@ -200,13 +263,22 @@ func (p *upstreamPool) Exchange(ctx context.Context, query []byte, publish func(
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		queryCtx, cancel := context.WithTimeout(ctx, p.config.QueryTimeout)
+		budget, budgetErr := p.queryBudget(upstream)
+		if budgetErr != nil {
+			errs = append(errs, budgetErr.Error())
+			continue
+		}
+		queryCtx, cancel := context.WithTimeout(ctx, budget)
 		resp, err := p.exchangeOne(queryCtx, upstream, query)
 		cancel()
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		if err == nil {
+			if _, err := p.queryBudget(upstream); err != nil {
+				errs = append(errs, err.Error())
+				continue
+			}
 			p.markSuccess(upstream)
 			return resp, nil
 		}
@@ -578,11 +650,21 @@ func (p *upstreamPool) markFailure(upstream *dnsUpstream, err error) string {
 }
 
 func (p *upstreamPool) Snapshot() []dnsUpstream {
+	clock, clockErr := boottime.Read()
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	out := make([]dnsUpstream, 0, len(p.upstreams))
 	for _, upstream := range p.upstreams {
-		out = append(out, *upstream)
+		value := *upstream
+		if value.Provider != "" {
+			if clockErr != nil {
+				value.Phase = "Unknown"
+				value.LastError = clockErr.Error()
+			} else if !value.ValidUntil.Live(clock) {
+				value.Phase = "Expired"
+			}
+		}
+		out = append(out, value)
 	}
 	return out
 }
@@ -590,7 +672,7 @@ func (p *upstreamPool) Snapshot() []dnsUpstream {
 func (p *upstreamPool) Summary() string {
 	var parts []string
 	for _, upstream := range p.Snapshot() {
-		parts = append(parts, fmt.Sprintf("%d:%s:%s", upstream.Index, upstream.Scheme, upstream.Phase))
+		parts = append(parts, fmt.Sprintf("%d:%s:%s", upstream.Index, upstream.URL, upstream.Phase))
 	}
 	return strings.Join(parts, ",")
 }

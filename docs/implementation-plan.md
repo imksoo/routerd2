@@ -630,6 +630,13 @@ DS-Lite1420、IPv61400で、1200は不変。bridge向け処理とinterface/tunne
 
 #### NET-04 — PPPoE の engine 選定と session 運用
 
+2026-10-27 native-26: PPP learned DNSを宣言したresolver sourceへ、元期限付きのtyped inputで反映した。
+独立dnsmasqと実LANのUDP/TCP、peer到達性を保ったままの失効、新server取得、同じdig TCP接続の維持を確認した。
+DNS workerの設定write/file reload/raw lease注入とsticky sidecarは廃止し、controlの設定transactionと
+有限inputへ一本化した。条件付きrouteがPPP等のowned linkを利用するための依存・active条件を受け入れる。
+実DHCP→DNSと旧routerd importも確認した。最新の受入範囲・負荷時に残る遅延・物理機の限界は
+[引き継ぎ](pve-codex-handoff.md)を参照する。NET-04全体の完了ではない。
+
 2026-10-27配布profile追加: ppp-image/native-25・worker ABI4・manifest v4。
 固定pppd 2.5.3とloader/library/plugin/OpenSSL legacy providerをregular-file imageへ同梱し、
 対応source・APKBUILD・patch・noticeを別artifactとして署名bindingへ含めた。
@@ -813,6 +820,13 @@ host suffixもmanaged bindingへ変換する。native address maskは/64で、�
 [設定例](../examples/wan-dslite-pd.yaml)と[引き継ぎ](pve-codex-handoff.md)を参照する。
 
 #### NET-06 — LAN・DHCPv6・relay・DNS の resource 完全化
+ PPP learned DNSを宣言したresolver sourceへ、元期限付きのtyped inputで反映した。
+独立dnsmasqと実LANのUDP/TCP、peer到達性を保ったままの失効、新server取得、同じdig TCP接続の維持を確認した。
+DNS workerの設定write/file reload/raw lease注入とsticky sidecarは廃止し、controlの設定transactionと
+有限inputへ一本化した。条件付きrouteがPPP等のowned linkを利用するための依存・active条件を受け入れる。
+実DHCP→DNSと旧routerd importも確認した。最新の受入範囲・負荷時に残る遅延・物理機の限界は
+[引き継ぎ](pve-codex-handoff.md)を参照する。NET-06全体の完了ではない。
+
 
 範囲: 旧 routerd 互換 / track: network / risk: high。
 前提: CORE-03, CORE-04, NET-05。 設計判断: D-04。

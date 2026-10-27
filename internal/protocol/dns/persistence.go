@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/imksoo/routerd/pkg/daemonapi"
 	"github.com/imksoo/routerd/pkg/logstore"
 )
 
@@ -43,7 +44,7 @@ func writeAtomicPrivate(path string, data []byte) error {
 
 // Event history is bounded in memory and on disk. Persistence is optional;
 // failures are counted in status and sent to the module logger by the caller.
-func appendEvent(path string, event any) error {
+func appendEvent(path string, event daemonapi.DaemonEvent) error {
 	if path == "" {
 		return nil
 	}
