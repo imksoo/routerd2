@@ -417,6 +417,33 @@ def peer(stage, auth, dhcp6_server):
             assert modules()["service.dns"]["pid"] == previous_dns["pid"] and modules()["service.dns"]["generation"] == previous_dns["generation"]
             dns_traffic()
             print("PASS PPP-only MTU reconfiguration released and reacquired the unchanged PD child", flush=True)
+            # Operator restart uses the same control-owned dependency drain.
+            before = modules()
+            previous_ppp, previous_dns = before["service.internet"], before["service.dns"]
+            previous_pd = pd_record()
+            revision = api("control.sock", "/v1/config")["revision"]
+            before_release = (stage / "dhcp6.log").read_text().count("releases prefix ")
+            api("supervisor.sock", "/v1/modules/service.internet/restart", {}, status=404)
+            assert modules()["service.internet"]["pid"] == previous_ppp["pid"]
+            operator_restart_at = time.time()
+            assert api("control.sock", "/v1/services/service.internet/restart", {}, timeout=12, status=202)["accepted"]
+            wait(lambda: modules().get("service.internet", {}).get("generation", 0) > previous_ppp["generation"] and link() is not None)
+            assert (stage / "dhcp6.log").read_text().count("releases prefix ") > before_release
+            server.terminate()
+            server.wait(timeout=3)
+            wait(lambda: any(x["ifname"].startswith("ppp") and x["addr_info"] for x in peer_links()))
+            ppp = next(x["ifname"] for x in peer_links() if x["ifname"].startswith("ppp"))
+            server = dhcp6_start()
+            ipv6_traffic()
+            traffic()
+            dns_traffic()
+            assert api("control.sock", "/v1/config")["revision"] == revision
+            assert modules()["service.dns"]["pid"] == previous_dns["pid"]
+            assert pd_record()["snapshot"]["client_duid"] == duid
+            assert pd_record()["generation"] > previous_pd["generation"]
+            stale = {k: previous_pd[k] for k in ("supervisor_instance", "name", "role", "config_digest", "generation", "producer_epoch", "sequence", "snapshot")}
+            api("control.sock", "/v1/services/state", stale, status=409)
+            print("PASS control-owned operator restart released PD before PPP, rejected its old notification and preserved configuration/DNS", flush=True)
             # Exercise actual PID 1 shutdown while the independent server and
             # capture remain alive. Cleanup must not terminate the peer first.
             os.kill(pid1, signal.SIGTERM)
@@ -447,10 +474,12 @@ def peer(stage, auth, dhcp6_server):
                     releases.append((float(line.split()[0]), release[1]))
                 if reply:
                     replies.append((float(line.split()[0]), reply[1]))
-            assert len(releases) >= 4, packets
+            assert len(releases) >= 5, packets
             discovery = run(["tcpdump", "-n", "-tt", "-r", str(stage / "pppoe.pcap"), "pppoed"])
             teardown = [float(line.split()[0]) for line in discovery.splitlines() if "PADT" in line and float(line.split()[0]) >= wan_change_at]
             assert teardown and any(wan_change_at <= stamp < min(teardown) for stamp, _ in releases), "WAN teardown preceded DHCPv6 Release"
+            teardown = [stamp for stamp in teardown if stamp >= operator_restart_at]
+            assert teardown and any(operator_restart_at <= stamp < min(teardown) for stamp, _ in releases), "operator restart tore down WAN before Release"
             assert len(withdrawals) >= 2, packets
             assert all(any(w < stamp and stamp - w < 6 for w in withdrawals) for stamp, _ in releases), packets
             assert all(any(reply > stamp and reply - stamp < 2 and rxid == xid for reply, rxid in replies) for stamp, xid in releases), packets

@@ -135,7 +135,11 @@ func (s Session) Execute(ctx context.Context, command string, input io.Reader, o
 		if strings.ContainsAny(a[1], "/\\?") {
 			return errors.New("invalid module name")
 		}
-		err = super.Do(ctx, http.MethodPost, "/v1/modules/"+url.PathEscape(a[1])+"/restart", struct{}{}, &result)
+		if strings.HasPrefix(a[1], "service.") {
+			err = ctl.Do(ctx, http.MethodPost, "/v1/services/"+url.PathEscape(a[1])+"/restart", nil, &result)
+		} else {
+			err = super.Do(ctx, http.MethodPost, "/v1/modules/"+url.PathEscape(a[1])+"/restart", struct{}{}, &result)
+		}
 	case len(a) == 1 && a[0] == "configure":
 		if input == nil {
 			return errors.New("configure requires an exec request with JSON on stdin")

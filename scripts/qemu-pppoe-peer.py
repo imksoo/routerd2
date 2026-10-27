@@ -11,6 +11,7 @@ import argparse
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import signal
@@ -82,7 +83,8 @@ def peer(stage):
             family = 'AF_INET6' if ':' in addr else 'AF_INET'
             code = f'import socket\ns=socket.socket(socket.{family},socket.SOCK_DGRAM);s.bind(({addr!r},18081))\nwhile True:\n b,a=s.recvfrom(4096);s.sendto(b,a)'
             start(ac, ['python3', '-u', '-c', code], 'udp')
-        start(None, ['tcpdump', '-Z', 'root', '-U', '-n', '-i', 'tapwan', '-w', str(stage / 'wan.pcap')], 'capture')
+        wan_capture = start(None, ['tcpdump', '--immediate-mode', '-Z', 'root', '-U', '-n', '-i', 'tapwan', '-w', str(stage / 'wan.pcap')], 'capture')
+        lan_capture = start(None, ['tcpdump', '--immediate-mode', '-Z', 'root', '-U', '-n', '-i', 'taplan', '-w', str(stage / 'lan.pcap')], 'lan-capture')
         overlay = stage / 'overlay'
         (overlay / 'etc/routerd').mkdir(parents=True)
         run(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-f', str(stage / 'key')])
@@ -122,6 +124,9 @@ def peer(stage):
             return json.loads(run(inside(lan, ssh + [cmd]), 12))
         status = query('show status')
         assert status['pid'] == 1 and status['platform'] == 'appliance'
+        expected_release = json.loads((stage / 'input/manifest.json').read_text())['release_id']
+        assert status['release_id'] == expected_release
+        assert all(m['release_id'] == expected_release for m in status['modules'] if m['required'])
 
         def traffic():
             for addr in ['198.51.100.20', '[2001:db8:ffff::20]']:
@@ -163,17 +168,45 @@ def peer(stage):
         old_pd = query('show services pd')['generation']
         dns_generation=next(x['generation'] for x in query('show status')['modules'] if x['name']=='service.dns')
         old_index = next((x['ifindex'] for x in json.loads(run(['ip', '-n', ac, '-j', 'link', 'show'])) if x['ifname'].startswith('ppp')))
-        d.terminate()
-        d.wait(timeout=5)
-        query('restart service.internet')
+        releases = (stage / 'dhcp6.log').read_text().count('releases prefix ')
+        duid = query('show services pd')['snapshot']['client_duid']
+        revision = query('show config')['revision']
+        restart_at = time.time()
+        assert query('restart service.internet')['accepted']
         wait(lambda: any((x['name'] == 'service.internet' and x['generation'] > old['generation'] and x['ready'] for x in query('show status')['modules'])), 40)
         wait(lambda: any((x['ifname'].startswith('ppp') and x['ifindex'] != old_index for x in json.loads(run(['ip', '-n', ac, '-j', 'link', 'show'])))))
+        assert (stage / 'dhcp6.log').read_text().count('releases prefix ') > releases, 'operator restart cut PPP before releasing its PD child'
+        d.terminate()
+        d.wait(timeout=5)
         d = server()
         wait(lambda: any((x['name'] == 'service.pd' and x.get('generation', 0) > old_pd and (x.get('snapshot', {}).get('state') == 'bound') for x in query('show services')['instances'])) and query('show config')['healthy'])
         wait(client_ready)
         traffic()
         print('PASS appliance PPP worker/session restart reacquired PD and restored IPv4/IPv6 TCP/UDP', flush=True)
         assert next(x['generation'] for x in query('show status')['modules'] if x['name']=='service.dns')==dns_generation
+        assert query('show services pd')['snapshot']['client_duid'] == duid
+        assert query('show config')['revision'] == revision
+        for capture in (wan_capture, lan_capture):
+            capture.send_signal(signal.SIGINT)
+            capture.wait(timeout=3)
+        def packets(name):
+            records = []
+            for line in run(['tcpdump', '-nn', '-tt', '-vv', '-r', str(stage / name)]).splitlines():
+                if line and line[0].isdigit():
+                    records.append(line)
+                elif records:
+                    records[-1] += ' ' + line.strip()
+            return [(float(line.split()[0]), line) for line in records if float(line.split()[0]) >= restart_at]
+        wan_packets = packets('wan.pcap')
+        releases = [(stamp, re.search('dhcp6 release [(]xid=([0-9a-f]+)', line)[1]) for stamp, line in wan_packets if 'dhcp6 release' in line]
+        assert releases, 'no appliance Release captured'
+        released, transaction = releases[0]
+        replies = [stamp for stamp, line in wan_packets if 'dhcp6 reply (xid=' + transaction + ' ' in line]
+        padts = [stamp for stamp, line in wan_packets if 'PPPoE PADT' in line]
+        withdrawals = [stamp for stamp, line in packets('lan.pcap') if 'router advertisement' in line and 'router lifetime 0s' in line and 'valid time 0s, pref. time 0s' in line]
+        assert withdrawals and replies and padts, 'missing RA withdrawal, matching Reply or PADT'
+        assert min(withdrawals) < released < min(replies) < min(padts), 'appliance restart violated RA/Release/Reply/PADT order'
+        print('PASS actual appliance RA withdrawal -> Release -> matching Reply -> PADT; stable DUID, configuration and DNS worker', flush=True)
         (stage / 'status.json').write_text(json.dumps(query('show status')))
     finally:
         for p in reversed(children):
@@ -230,7 +263,7 @@ def main():
             run(["install", "-m", "500", str(source.resolve()), stage + "/" + target])
         with (args.output / "peer.log").open("w") as output:
             result = subprocess.run(root + ["unshare", "--mount", "--net", "--propagation", "private", "python3", "-I", stage + "/peer.py", "--inside", stage], stdout=output, stderr=subprocess.STDOUT, timeout=240)
-        for name in ("serial.log", "wan.pcap", "status.json"):
+        for name in ("serial.log", "wan.pcap", "lan.pcap", "status.json"):
             artifact = subprocess.run(root + ["cat", stage + "/" + name], capture_output=True, timeout=10)
             if artifact.returncode == 0:
                 (args.output / name).write_bytes(artifact.stdout)

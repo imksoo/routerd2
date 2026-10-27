@@ -55,11 +55,18 @@ instanceファイルとBFD設定は観測用mutexの外で準備し、worker停�
 protocol投影は変更するnetwork集合を複製し、固定設定を読み取り専用で共有する。
 元の宣言を変えずに学習情報と期限切れを反映し、JSON往復による複製は行わない。
 
-変更した worker は停止・reap を待って置換する。変更していない protocol config の取得状態は
-維持する。停止中に DHCP が更新した場合も、cutover 時点で最後に受理したリースを採用する。
+変更した worker と、その寿命に依存する worker は停止・reap を待って置換する。
+それ以外の変更していない protocol config の取得状態は維持する。停止中に DHCP が更新した場合も、
+継続するworkerについてはcutover時点で最後に受理したリースを採用する。
+`restart service.NAME` はcontrolの `POST /v1/services/service.NAME/restart` に届く。
+設定切替と同じ依存グラフ・coordinatorで古いworkerを止め、現在の設定に従う起動を再要求する。
+202の`accepted`は再起動要求の受理であり、PPP/DHCPの取得完了ではない。状態と通信を別途確認する。
+この操作で設定revisionを変更しない。core workerの再起動はsupervisorが受け、dynamic serviceを
+直接再起動する要求は拒否する。
 `POST /v1/services/state` は観測の検証・受理を返し、kernel適用はcoordinatorが行う。
-BGPとVRRPはプロトコルを次へ進める前に実適用が必要なため、
-`POST /v1/services/effects` の適用完了を待つ。起動・停止待ち中も同じ適用処理を進め、
+BGP・VRRPの状態遷移と、DHCPv6の最終撤去は実適用が必要なため、
+`POST /v1/services/effects` の適用完了を待つ。DHCPv6は管理アドレス撤去と生成RAの寿命0送信後に
+元のlink-local socketからReleaseする。起動・停止待ち中も同じ適用処理を進め、
 初回Readyや最終withdrawalと循環させない。条件の有無で通知の意味を変えない。
 通常監視・設定切替・起動停止待ちは同じ一回分のreconcileを進める。supervisorの実登録を
 使い、別のinstalled集合は保持しない。通常監視は停止要求後に戻り、次回に実際の終了を

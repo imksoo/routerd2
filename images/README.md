@@ -72,6 +72,16 @@ The generated fixture contains the test public key and fixed test addressing.
 Do not deploy it as a production configuration. The private key is never copied
 into an image or uploaded as a CI artifact.
 
+## Appliance PPP interoperability
+
+`make qemu-pppoe DHCP6_SERVER=/path/to/isc-dhcpd` boots the actual APK-derived
+kernel/initramfs as PID 1, with independent RP-PPPoE/ISC DHCP and a separate Linux
+LAN client. It checks the manifest release ID, CHAP, learned UDP/TCP DNS,
+IPv4/IPv6 TCP/UDP, PD, Renew and operator-requested PPP restart. WAN/LAN captures
+must show zero-lifetime RA, Release, its matching Reply, then PPP PADT. The PD
+client keeps its DUID; configuration revision and the DNS worker remain stable.
+The fixture uses ordinary kernel DAD. Completed diagnostic output is disposable.
+
 ## Native kernel packet tests
 
 ```sh

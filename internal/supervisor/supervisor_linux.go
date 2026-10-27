@@ -296,6 +296,10 @@ func Run(parent context.Context, options Options) error {
 				request.reply <- fmt.Errorf("module %q is not available", request.name)
 				continue
 			}
+			if c.dynamic {
+				request.reply <- errors.New("restart services through the control API so dependents can stop first")
+				continue
+			}
 			c.failures = 0
 			c.permanentFailure = false
 			if c.process == nil {

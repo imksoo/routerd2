@@ -745,6 +745,11 @@ LAN両family HTTPS/DNS・AFTR往復と、停止時のRA撤去・Release/Reply（
 PPPだけのMTU/MRU変更（1454→1452）でRelease→PADT→同じDUIDの再取得・両family TCP/UDPを確認した。
 独立dnsmasqのIA_NA無応答Releaseは、期限120秒に対して同じtransactionで4送信・Replyなし、
 13..22秒の停止・管理アドレス撤去が通った。fixtureの終了待ちだけを35秒にし、protocol期限は変えていない。
+`restart service.NAME`もcontrolの同じ依存停止経路へ統一し、supervisorの直接service再起動を廃止した。
+最終`service-restart`の実daemonとAPK由来Linux6.18.58-0-lts applianceで、独立AC/ISC・別Linux LAN端末により
+寿命0 RA→Release→同一transactionのReply→PADTと、両family TCP/UDP・DNSの復旧を確認した。
+DUID・設定revision・無関係なDNS workerは維持する。202は要求受付であり、取得完了ではない。
+ビルド負荷と並行した3秒API待ちtimeoutは合格に数えず、最終版を単独再実行して確認した。
 複数割当/PDとのDAD共存、required/observe-only・RA trigger・resolver効果・全kernel-link再設定・
 control再起動中の解放・suspend/reboot・VRF・全link option/lifecycle・WAN選択は残り、NET-05全体は未完了。
 
@@ -766,6 +771,9 @@ ONU型番・直結配線・NIC資格判定、以降の修正を含む最新版�
 UDP DNS3900回も通った。自然T1のRenew/送信元49153 Reply、captureの開始SYN sequence1種類、
 30秒ごとの転送先`dslite0`、最終control ready・全protocol worker世代1を確認した。
 これはnative-21での結果であり、最新版native-24や物理ONU/NICの受入へ拡大しない。
+別native-27 cohortは約130分・756回の定期両family HTTPS/UDP・TCP DNSを終了コード0で完了した。
+自然T1のRenew/送信元49153 ReplyとPD期限更新、全worker世代1を確認した。最新native-28の長時間受入、
+同一TCP継続、ONU直結配線・物理NICのqualificationには数えない。
 [既存routerdとの比較](routerd-reuse-review.md)を各モジュールで継続する。
 受信IAIDはdecoderで選択し、不良・無関係IAや独立optionで有効な割当全体を捨てない。
 リンクローカルDNS/SNTPを許可し、独立dnsmasqと通常DAD・scope付きDNS実問い合わせ・
