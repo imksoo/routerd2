@@ -229,13 +229,22 @@ IPv4 HTTPS、IPv6 HTTPS、学習DNSへのUDP/TCP、RA撤去とRelease/Replyが�
 file準備変更前`ha-pd-admission`での7800秒試験は、自然更新に達する前に
 `example.net A`のDNS応答判定で失敗して終了した。約30分の時点まではreadyかつ全worker世代1だった。
 元のassertに応答本文がなくRCODE/Answerを特定できなかったため、作業差分で失敗時に本文と
-UDP/TCPの種別を出すようにした。判定は変更しない。最新版ee50461/`ha-pd-prepared`で再実行中。
-最初の更新期限は約7200秒後。完了・自然Renew成功とはまだ扱わない。
+UDP/TCPの種別を出すようにした。DNSの判定は変更しない。ee50461/`ha-pd-prepared`の再試行は
+約42分まで実通信を継続し、途中でPD workerをSIGKILLしてDUID保持・Rebind復旧を確認した。
+captureは同じDUID/PDでのRebindと、49153からのReplyを示した。新しいReplyが期限を更新したので、
+元期限との単純一致assertは失敗したが製品の誤延長ではない。その後LAN両family HTTPSとUDP/TCP DNSも通った。
+自然Renewは未到達で、この試行は意図して中断・削除した。失敗や完走として扱わない。
+
+現在は3affd07/`health-import`と更新fixtureで7800秒を再実行中。worker SIGKILLは観測期間の最後に行う。
+`renew_at`変更を自然Renewに数える表示を除き、captureのRenew/対応Replyを起動復旧のRebind/Replyと
+区別する。初期期限を含む長さの試験では、再起動前の自然Renew/Replyが無ければ失敗する。
+30秒の実HGW試験はDUID/IAID保持、Rebind/Reply、LAN両family HTTPS・UDP/TCP DNS、
+RA/Release撤去まで成功した。`make test-tools`も成功。長時間試験の完走・自然Renewは未確認。
 失敗版のnamespace・stageは削除され、host管理address/MAC/default routeは開始前と一致した。
 現在のownerがbounded captureとprivate stateを所有し、終了時に削除する。
 前の長時間試験側の独立LANではpublic DNSへのIPv4 UDP/TCP応答とAFTR内packetも確認した。
 DHCPv4の有効貸出が隔離WANへ入ることも確認したが、server identifierはHGWのIPv4とは異なった。
-まだ実HGW上でのPD worker crash/restartは行っていない。ONU直結・物理NIC・継続TCPの資格認定とは区別する。
+ONU直結・物理NIC・継続TCPの資格認定とは区別する。
 ens20の無応答を上流全体の利用不能へ外挿せず、未回答のens20質問を実HGW試験の前提にしない。
 
 ## 既存実装から維持する実運用の知見
@@ -257,7 +266,7 @@ ens20の無応答を上流全体の利用不能へ外挿せず、未回答のens
 1. homert02/03の現行設定・旧routerdを比較し、残る一台分の通信と二台の切替/復旧を完成させる。
    Tailscaleの残項目、旧stateless DHCPv6入力の条件付きHA/import不足、VRRP/PDの分断・復旧、
    管理・更新・戻し方を実際の相手で確認する。本番切替は行わない。
-2. 実行中の実HGW自然更新試験を完了まで確認し、その後PD worker crash/restartとDUID保持も実HGWで確認する。
+2. 実行中の実HGW自然更新試験を完了まで確認し、最後のPD worker crash/restartとDUID保持も確認する。
    ONU/HGW側のRA/DHCPv4/DHCPv6 PDからLAN・DNS・DS-Liteまで、実相手と対象版を区別して進める。
    仮想peerとの成功を、この回線や物理NICの合格に置き換えない。
 3. その後k8s-rt/pve-rtの実設定を確認し、Cloud SAMへ進む。

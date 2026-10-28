@@ -133,6 +133,18 @@ socket. Static DNS continues to use its configured advertisement lifetime.
 
 ## Inspection
 
+For an explicitly authorized local access network, run `make check-uplink
+UPLINK_INTERFACE=... UPLINK_AFTR=... UPLINK_SECONDS=7800`. A separate MAC and LAN
+namespace use the actual daemon; host management addresses and routes are not
+reconfigured. The observation interval exercises IPv4 DS-Lite and IPv6 HTTPS
+and learned DNS over UDP/TCP. It then kills the PD worker, checks retained
+DUID/IAID and recovered communication, and verifies Rebind/Reply in capture.
+When the interval includes the initial T1, a captured natural Renew/Reply before
+the restart is required. A changed deadline alone is not counted as Renew:
+Rebind can legitimately obtain a new grant. Short runs do not prove natural
+renewal. Graceful shutdown must withdraw LAN RA/addresses and obtain a Release
+Reply. Temporary state and bounded captures are removed on exit.
+
 Use `show services` for a bounded summary, `show services wan-ra` or
 `show services internet` for the complete individual snapshot, and `show
 network` for kernel observations. Large service snapshots are omitted from the

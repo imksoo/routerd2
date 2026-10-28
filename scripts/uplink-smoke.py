@@ -364,11 +364,8 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
             )
 
         wait(dns_ready)
-        initial = query("control.sock", "/v1/services/service.wan-pd")["snapshot"][
-            "renew_at"
-        ]
-        start_time, rounds, renewals = time.monotonic(), 0, 0
-        while time.monotonic() - start_time < seconds:
+
+        def check_traffic():
             for family, address in [
                 ("-4", "1.1.1.1"),
                 ("-6", "[2606:4700:4700::1111]"),
@@ -430,12 +427,21 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
                 )
             )
             assert selected[0]["dev"] == "dslite0", "IPv4 traffic bypassed the AFTR"
+
+        initial = query("control.sock", "/v1/services/service.wan-pd")["snapshot"][
+            "renew_at"
+        ]
+        renew_due = initial["nanos"] / 1e9 - time.clock_gettime(time.CLOCK_BOOTTIME)
+        started_at = time.time()
+        start_time, rounds, updates = time.monotonic(), 0, 0
+        while time.monotonic() - start_time < seconds:
+            check_traffic()
             renewed = query("control.sock", "/v1/services/service.wan-pd")["snapshot"][
                 "renew_at"
             ]
             if renewed != initial:
-                initial, renewals = renewed, renewals + 1
-                print("Observed actual DHCPv6 renewal", renewals, flush=True)
+                initial, updates = renewed, updates + 1
+                print("Observed actual DHCPv6 grant update", updates, flush=True)
             rounds += 1
             if rounds % 6 == 1:
                 status = query("supervisor.sock", "/v1/status")
@@ -451,6 +457,28 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
                     flush=True,
                 )
             time.sleep(min(10, max(0, seconds - (time.monotonic() - start_time))))
+        before = query("control.sock", "/v1/services/service.wan-pd")["snapshot"]
+        previous = next(
+            m for m in query("supervisor.sock", "/v1/status")["modules"]
+            if m["name"] == "service.wan-pd"
+        )
+        restarted_at = time.time()
+        os.kill(previous["pid"], signal.SIGKILL)
+
+        def recovered():
+            instance = query("control.sock", "/v1/services/service.wan-pd")
+            return (
+                instance["generation"] > previous["generation"]
+                and instance.get("snapshot", {}).get("state") == "bound"
+            )
+
+        wait(recovered, 30)
+        after = query("control.sock", "/v1/services/service.wan-pd")["snapshot"]
+        assert (after["client_duid"], after["iaid"]) == (before["client_duid"], before["iaid"]), "PD worker restart lost client identity"
+        wait(forwarding_ready)
+        wait(dns_ready)
+        check_traffic()
+        print("PASS actual uplink PD worker SIGKILL recovery, retained DUID/IAID and restored LAN communication", flush=True)
         returned = any(
             run(
                 [
@@ -482,6 +510,25 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
                 elif records:
                     records[-1] += " " + line.strip()
         records.sort(key=lambda line: float(line.split()[0]))
+        renews, rebinds, replies = set(), set(), set()
+        for line in records:
+            stamp = float(line.split()[0])
+            if not started_at <= stamp < shutdown_at:
+                continue
+            match = re.search(r"dhcp6 (renew|rebind|reply) \(xid=([0-9a-f]+)", line)
+            if not match:
+                continue
+            kind, xid = match.groups()
+            if kind == "renew" and stamp < restarted_at:
+                renews.add(xid)
+            if kind == "rebind" and stamp >= restarted_at:
+                rebinds.add(xid)
+            if kind == "reply":
+                replies.add(xid)
+        natural_renewals = len(renews & replies)
+        assert rebinds & replies, "PD worker restart had no captured Rebind/Reply"
+        if renew_due < seconds:
+            assert natural_renewals, "natural Renew/Reply was not captured before worker restart"
         withdrawal = None
         transaction = None
         release_at = None
@@ -523,8 +570,8 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
         print(
             "PASS actual uplink periodic IPv4/IPv6 HTTPS, UDP/TCP learned DNS; rounds",
             rounds,
-            "renewals",
-            renewals,
+            "captured natural Renew/Reply",
+            natural_renewals,
             flush=True,
         )
         print(

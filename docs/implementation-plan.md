@@ -763,9 +763,14 @@ Healthの元期限、古い通知、5秒confirmed rollback、AFTR worker再起�
 RA/PD、DS-Lite経由IPv4 HTTPSとIPv6 HTTPS、学習DNSのUDP/TCP、終了時のRA撤去と
 Release/Replyが成功した。Replyは送信元49153。管理address/MAC/default routeは不変だった。
 変更前`ha-pd-admission`の7800秒試験は自然更新前のDNS応答判定で失敗し、
-応答本文を採取する差分を加えてee50461で再実行中。自然更新成功とはまだ扱わない。独立端末のpublic DNSへの
+応答本文を採取する差分を加えた。ee50461再試行では約42分の実通信と途中のPD worker SIGKILL・
+同じDUID/PDでのRebind/49153 Reply・LAN通信復旧を確認し、自然更新前に意図して中断した。
+Rebindによる新しい期限を自然Renewと誤表示するfixtureを修正し、現在は3affd07/`health-import`で
+7800秒を再実行中。最後にworkerを交換し、その前の自然Renew/対応Replyをcaptureで判定する。
+30秒の自動試験はworker交換・DUID/IAID保持・Rebind/Replyと全通信・終了処理まで成功した。
+自然更新成功とはまだ扱わない。独立端末のpublic DNSへの
 IPv4 UDP/TCPも応答し、AFTR内の実packetを確認した。DHCPv4貸出の隔離WANへの適用も確認したが、
-そのserverはHGWのIPv4 identityとは別。実HGW上のPD worker crash/restart、ONU直結・物理NICは未検証。
+そのserverはHGWのIPv4 identityとは別。ONU直結・物理NICは未検証。
 
 2026-10-27追加: `pd-recovery/native-32`は旧routerdのDUID選択・lease保存/Restoreを比較し、
 private checkpointへDUID/IAID/PDと元BOOTTIME期限を保存する。同じbootのworker交換では
