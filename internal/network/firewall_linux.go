@@ -232,7 +232,9 @@ func buildNATAffinity(c *nftables.Conn, table *nftables.Table, rules []NATRule) 
 		}
 		mark := binaryutil.NativeEndian.PutUint32(rule.ConnectionMark)
 		for _, match := range packetExpressions(PacketMatch{Family: 4, Source: rule.Match.Source}) {
-			marked := append(match, &expr.Ct{Register: 1, Key: expr.CtKeyMARK}, &expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: mark})
+			// Linux conntrack direction 0 is the original direction; reply
+			// packets must follow the route back to the LAN, even for source /0.
+			marked := append(match, &expr.Ct{Register: 1, Key: expr.CtKeyDIRECTION}, &expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{0}}, &expr.Ct{Register: 1, Key: expr.CtKeyMARK}, &expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: mark})
 			restore := append(append([]expr.Any(nil), marked...), &expr.Immediate{Register: 1, Data: mark}, &expr.Meta{Key: expr.MetaKeyMARK, Register: 1, SourceRegister: true})
 			c.AddRule(&nftables.Rule{Table: table, Chain: prerouting, Exprs: restore})
 			name := make([]byte, 16)

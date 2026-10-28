@@ -197,7 +197,7 @@ def peer(stage, dhcp6_server, pd_dslite, stale_owner, preparation):
                 ]
                 resources.append({"id": "backup-parent-address", "address": {"interface": "backup0", "cidr": "192.0.2." + str(2 + index) + "/24"}})
                 firewall = next(r["firewall"] for r in resources if r["id"] == "firewall")
-                firewall["nat"] = [{"type": "snat", "match": {"family": 4, "source": "198.18.0.0/24", "out_interface": name}, "address": address, "connection_mark": mark}
+                firewall["nat"] = [{"type": "snat", "match": {"family": 4, "source": "0.0.0.0/0", "out_interface": name}, "address": address, "connection_mark": mark}
                                    for name, address, mark in (("dslite0", "203.0.113.1", 41), ("backup-ha", "192.0.2.1", 42))]
                 # The AFTR underlay is IPv6-only. Do not inherit the direct
                 # profile's IPv4 route around the tunnel during handoff.
