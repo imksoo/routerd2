@@ -473,6 +473,11 @@ for protocol,port in ((socket.SOCK_STREAM,18082),(socket.SOCK_DGRAM,18083)):
             if delegated_dns:
                 advertisements = run(["tcpdump", "-nn", "-v", "-r", str(stage / "lan.pcap"), "icmp6 and ip6[40] == 134"])
                 assert "rdnss" in advertisements.lower() and dns_address in advertisements, "RA did not advertise the delegated router DNS"
+                run(inside("ha-server", ["ping", "-6", "-c", "1", "-W", "2", dns_address]))
+                for transport in ("+notcp", "+tcp"):
+                    wan_query = subprocess.run(inside("ha-server", ["dig", "-6", "@" + dns_address, "host.wan.test", "AAAA", "+time=1", "+tries=1", transport]), capture_output=True, text=True)
+                    assert wan_query.returncode != 0, "WAN client reached the LAN-bound DNS listener"
+                print("PASS routed WAN peer reached the router address but not its LAN-bound UDP/TCP DNS listener", flush=True)
                 print("PASS delegated LAN DNS in RA and DHCPv6, queried by an independent client over UDP/TCP", flush=True)
                 original = api("a", "control.sock", "/v1/services/service.pd")["snapshot"]["prefixes"][0]["valid_until"]["nanos"]
                 pd_server.terminate()
