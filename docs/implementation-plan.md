@@ -1352,22 +1352,23 @@ partition/fencing・切断peer復帰、別kernelのrebootと物理機受入は�
 `internal/protocol/dhcp6`のローカルPD checkpoint/同boot復旧を`pd-recovery/native-32`で追加した。
 旧routerdのDUID選択・`restoreLease`/`saveLeaseLocked`・`pdclient.Restore`と照合した。
 明示/保存済みDUID、IAID、server、元期限を保持し、ISC無応答中のworker交換でも転送でき、
-Rebind/Replyで更新する。router/clientの元期限失効と失効後再起動、正常停止時のRelease順序も確認した。
+Rebind/Replyで更新する。router/clientの元期限失効と失効後再起動も確認した。
 このローカル復旧へ、上記native-33の二台間PD移送・時計対応・HAメンバーRelease抑止を接続した。
 別の同期managerは追加していない。
 
-部分実装: `ha-dhcp` / native-31。DHCPv4 workerがTLS1.3の相互認証とpeer certificate固定で
-complete journalを同期する。local fsync→standby fsync/ACK→control反映→DHCPACKの順序を持ち、
-lease/sticky/quarantineの元期限を保持する。VRRPの現所有観測で、事前生成した待機/配布設定を切り替える。
-待機系はDHCP socketを開かず、同期受信のため稼働する。旧routerdの`chain/filesync.go`を比較し、
-15秒のファイルコピーをshell/rsyncなしの意味付き永続化ACKへ置き換えた。
-二つの署名済み実PID1 treeと独立BusyBox udhcpcで、A→B→Aの同一貸出更新、二端末の重複防止、
-待機worker交換、snapshot送信途中の切替、認証・重複/古い/競合revision、同期link断時のACK停止と
-復旧、実60秒失効とsticky保持が通った。同時に同一TCP socketとUDP NAT対応を維持した。
-再実行は`make check-ha-state DOCKER='sudo -n docker'`。生ログ・capture・一時catalogは削除する。
-これは両node稼働時の同期方式であり、peer不在では起動/新規貸出/更新を停止する。
-DHCPv4 partner-down時の安全な継続・owner epoch、delta/cursor/gap、PDの切断peer復帰/fencingと残るIPv6契約、
-clock skew・物理機・負荷、maintenance切替手順は残る。HA-02完了やhomert置換可能とはしない。
+部分実装: `ha-dhcp` / native-50。旧routerdではdnsmasqが配布し、`chain/filesync.go`の独立した
+定期処理がリースを同期する。routerd2もローカルfsync後のDHCP応答を同期相手から切り離し、最新の
+永続journalをTLS相互認証で非同期に転送する。同期済みrevisionとエラーをstatusに示し、古い・競合
+revisionを拒否する。待機系はDHCP socketを開かない。lease/sticky/quarantineの元期限を保持する。
+署名済み実PID1と独立BusyBoxで、相手不在での起動・配布、同期断中の更新・worker再起動・第三端末への
+重複しない配布、同期復旧を確認した。A→B→A、途中切断、認証と古いrevisionも同じ実試験で確認中。
+未同期の貸出を持つ休止clientがいるまま所有系を失うと、同じアドレスが別端末へ配られる問題を再現した。
+所有者の永続記録と引き継ぎ時の相手確認を導入し、同期できない待機系が昇格した場合は新規動的貸出を
+保留する。既知貸出は更新でき、相手復帰時は保持期限を照合してから所有権を記録し、配布を再開する。
+実二台試験で所有側の強制終了、保留・worker再起動・同期復旧・休止clientの元アドレス更新を確認した。
+通常二台運用では同期断・復旧、60秒の実失効とPD失効時の予備WAN通信・復帰を確認した。
+永続状態喪失やbootstrapの誤設定、広い分断、PDの切断peer復帰、clock skew・物理機・負荷、
+maintenance切替手順は残る。HA-02完了やhomert置換可能とはしない。
 
 #### HA-03 — NAT conntrack の同期と既存通信継続
 

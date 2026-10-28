@@ -21,6 +21,8 @@ import (
 type engine struct {
 	config      Config
 	revision    uint64
+	owner       string
+	blockNew    bool
 	writtenAt   time.Time
 	now         func() time.Time
 	leases      map[string]storedLease
@@ -40,6 +42,7 @@ func newEngine(c Config, j journal, now func() time.Time, persist func(journal) 
 }
 func (e *engine) restore(j journal) {
 	e.revision, e.writtenAt = j.Revision, j.WrittenAt
+	e.owner = j.Owner
 	e.leases = make(map[string]storedLease, len(j.Leases))
 	e.quarantines = make(map[string]quarantine, len(j.Quarantines))
 	for _, l := range j.Leases {
@@ -155,6 +158,11 @@ func (e *engine) handle(ctx context.Context, p packet) (*response, error) {
 		if !selected.IsUnspecified() {
 			e.stats.Rejected++
 			return nil, nil
+		}
+		if e.blockNew && r == nil {
+			if _, known := e.leases[key]; !known {
+				return nil, nil
+			}
 		}
 		address, ok := e.chooseAddress(s, r, m, key, now)
 		if !ok {
@@ -444,7 +452,7 @@ func (e *engine) inUse(a netip.Addr, key string, now time.Time) bool {
 }
 func (e *engine) alreadyBound(a netip.Addr, key string, now time.Time) bool {
 	l, ok := e.leases[key]
-	return ok && l.IPAddress == a.String() && l.ExpiresAt.After(now)
+	return ok && !l.Expired && l.IPAddress == a.String() && l.ExpiresAt.After(now)
 }
 func (e *engine) chooseAddress(s Scope, r *Reservation, m message, key string, now time.Time) (netip.Addr, bool) {
 	valid := func(a netip.Addr) bool { return a.IsValid() && e.legal(s, r, a) && !e.inUse(a, key, now) }
@@ -529,7 +537,7 @@ func (e *engine) markConflict(a netip.Addr, now time.Time) error {
 	return e.save(now, Event{Type: "conflict", Lease: &Lease{IPAddress: a.String()}})
 }
 func (e *engine) journal() journal {
-	j := journal{Version: journalVersion, Resource: e.config.Resource, Interface: e.config.Interface, Revision: e.revision, WrittenAt: e.writtenAt}
+	j := journal{Version: journalVersion, Resource: e.config.Resource, Interface: e.config.Interface, Owner: e.owner, Revision: e.revision, WrittenAt: e.writtenAt}
 	for _, l := range e.leases {
 		j.Leases = append(j.Leases, l)
 	}
@@ -593,7 +601,7 @@ func (e *engine) snapshot(epoch string, sequence uint64, clock boottime.Clock, a
 	s.Standby, s.CheckpointRevision = e.config.Standby, e.revision
 	s.Stats.Quarantined = len(e.quarantines)
 	for _, l := range e.leases {
-		if active && dhcpserverconfig.ValidateLease(e.config, l.Lease, now) == nil {
+		if active && !l.Expired && dhcpserverconfig.ValidateLease(e.config, l.Lease, now) == nil {
 			s.Leases = append(s.Leases, l.Lease)
 		}
 	}

@@ -21,8 +21,8 @@ import (
 
 // Run owns DHCP protocol sockets and its private journal. Effects is the only
 // control-plane publication path; the worker does not install client addresses
-// or mutate DNS directly. A response granting a lease is sent only after
-// local fsync, configured standby persistence and a bounded Effects.Update.
+// or mutate DNS directly. A response granting a lease is sent after local
+// fsync and a bounded Effects.Update. Standby replication runs independently.
 func Run(ctx context.Context, cfg Config, effects Effects, ready func()) error {
 	return run(ctx, cfg, effects, ready, func(c Config) (transport, error) { return openTransport(c) })
 }
@@ -53,6 +53,12 @@ func run(ctx context.Context, cfg Config, effects Effects, ready func(), open fu
 	var sync *replication
 	var requests <-chan replicationRequest
 	var replicationStopped <-chan struct{}
+	var updates chan replicationUpdate
+	var outcomes <-chan replicationOutcome
+	var reconciliations <-chan reconciliation
+	var stopReconciliation context.CancelFunc
+	var syncStatus dhcpserverconfig.SyncStatus
+	var blocked bool
 	if cfg.Replication != nil {
 		sync, err = startReplication(ctx, cfg)
 		if err != nil {
@@ -62,12 +68,63 @@ func run(ctx context.Context, cfg Config, effects Effects, ready func(), open fu
 		requests = sync.requests
 		replicationStopped = sync.done
 		if !cfg.Standby {
+			owner := cfg.Replication.ListenAddress.String()
 			remote, err := sync.pull(ctx, cfg)
 			if err != nil {
-				return fmt.Errorf("read standby DHCP journal before serving: %w", err)
+				if !peerUnavailable(err) || ctx.Err() != nil {
+					return fmt.Errorf("read standby DHCP journal before serving: %w", err)
+				}
+				syncStatus.Error = err.Error()
+				blocked = j.Owner != owner && !(j.Owner == "" && cfg.Bootstrap)
+				if !blocked {
+					j.Owner = owner
+				}
+			} else {
+				now := time.Now().UTC()
+				merged, mergeErr := reconcileJournals(j, remote, now, cfg.MaxLeases)
+				if mergeErr != nil {
+					blocked = true
+					syncStatus.Error = mergeErr.Error()
+				} else {
+					j = merged
+				}
+				if !blocked && (j.Owner != owner || remote.Owner != owner) {
+					candidate := j
+					candidate.Owner = owner
+					candidate.Revision++
+					candidate.WrittenAt = now
+					data, encodeErr := encodeJournal(candidate)
+					if encodeErr != nil {
+						return encodeErr
+					}
+					if _, err := sync.exchange(ctx, http.MethodPut, data); err != nil {
+						blocked = true
+						syncStatus.Error = err.Error()
+					} else {
+						if err := store.Save(candidate); err != nil {
+							return fmt.Errorf("persist DHCP ownership: %w", err)
+						}
+						j = candidate
+						syncStatus.AcknowledgedRevision = j.Revision
+					}
+				}
 			}
-			if remote.Revision >= j.Revision {
-				j = remote
+			syncStatus.AllocationBlocked = blocked
+			updates = make(chan replicationUpdate, 1)
+			results := make(chan replicationOutcome, 1)
+			outcomes = results
+			pushCtx, cancel := context.WithCancel(ctx)
+			done := make(chan struct{})
+			go func() { defer close(done); sync.push(pushCtx, updates, results) }()
+			defer func() { cancel(); <-done }()
+			if blocked {
+				pollCtx, stop := context.WithCancel(ctx)
+				stopReconciliation = stop
+				pollResults := make(chan reconciliation, 1)
+				reconciliations = pollResults
+				pollDone := make(chan struct{})
+				go func() { defer close(pollDone); sync.poll(pollCtx, cfg, pollResults) }()
+				defer func() { stop(); <-pollDone }()
 			}
 		}
 	}
@@ -79,12 +136,22 @@ func run(ctx context.Context, cfg Config, effects Effects, ready func(), open fu
 		if err := writePrivate(store.path, data); err != nil {
 			return err
 		}
-		if sync != nil {
-			_, err = sync.exchange(ctx, http.MethodPut, data)
+		if updates != nil && !blocked {
+			update := replicationUpdate{revision: j.Revision, data: data}
+			select {
+			case updates <- update:
+			default:
+				select {
+				case <-updates:
+				default:
+				}
+				updates <- update
+			}
 		}
-		return err
+		return nil
 	}
 	e := newEngine(cfg, j, func() time.Time { return time.Now().UTC() }, persist)
+	e.blockNew = blocked
 	var conn transport
 	if !cfg.Standby {
 		conn, err = open(cfg)
@@ -123,6 +190,10 @@ func run(ctx context.Context, cfg Config, effects Effects, ready func(), open fu
 			return err
 		}
 		s := e.snapshot(epoch, seq, clock, active)
+		if updates != nil {
+			status := syncStatus
+			s.Sync = &status
+		}
 		if reason != nil {
 			s.Error = reason.Error()
 		}
@@ -251,6 +322,45 @@ func run(ctx context.Context, cfg Config, effects Effects, ready func(), open fu
 			return ctx.Err()
 		case <-replicationStopped:
 			return fmt.Errorf("DHCP replication listener stopped: %w", sync.err)
+		case outcome := <-outcomes:
+			if outcome.err != nil {
+				syncStatus.Error = outcome.err.Error()
+			} else {
+				syncStatus.AcknowledgedRevision = outcome.revision
+				syncStatus.Error = ""
+			}
+		case outcome := <-reconciliations:
+			if outcome.err != nil {
+				syncStatus.Error = outcome.err.Error()
+				continue
+			}
+			merged, err := reconcileJournals(e.journal(), outcome.journal, e.now(), cfg.MaxLeases)
+			if err != nil {
+				syncStatus.Error = err.Error()
+				continue
+			}
+			merged.Owner = cfg.Replication.ListenAddress.String()
+			merged.Revision++
+			merged.WrittenAt = e.now()
+			data, err := encodeJournal(merged)
+			if err == nil {
+				_, err = sync.exchange(ctx, http.MethodPut, data)
+			}
+			if err != nil {
+				syncStatus.Error = err.Error()
+				continue
+			}
+			if err := store.Save(merged); err != nil {
+				return fmt.Errorf("persist reconciled DHCP journal: %w", err)
+			}
+			e.restore(merged)
+			e.blockNew, blocked = false, false
+			syncStatus = dhcpserverconfig.SyncStatus{AcknowledgedRevision: merged.Revision}
+			stopReconciliation()
+			reconciliations = nil
+			if err := publish(ctx, true, nil); err != nil {
+				return err
+			}
 		case req := <-requests:
 			if err := ctx.Err(); err != nil {
 				return err

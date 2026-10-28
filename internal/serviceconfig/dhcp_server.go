@@ -26,7 +26,15 @@ type DHCPServer struct {
 	MaxLeases                 int                            `json:"max_leases,omitempty"`
 	ProbeTimeoutMilliseconds  int                            `json:"probe_timeout_milliseconds,omitempty"`
 	EffectTimeoutMilliseconds int                            `json:"effect_timeout_milliseconds,omitempty"`
-	HA                        *LeaseHA                       `json:"ha,omitempty"`
+	HA                        *DHCPServerHA                  `json:"ha,omitempty"`
+}
+
+// DHCPServerHA designates which member may initialize an empty journal while
+// its peer is absent. The operator must configure this on only one member.
+type DHCPServerHA struct {
+	Owner       string         `json:"owner"`
+	Replication peertls.Config `json:"replication"`
+	Bootstrap   bool           `json:"bootstrap,omitempty"`
 }
 
 func validateDHCPHA(services []Service) error {
@@ -84,7 +92,7 @@ func (s Service) DHCPServerConfig(runtimeDir, stateDir string) dhcpserverconfig.
 	}
 	if c.HA != nil {
 		r := c.HA.Replication
-		cfg.Replication, cfg.Standby = &r, true
+		cfg.Replication, cfg.Standby, cfg.Bootstrap = &r, true, c.HA.Bootstrap
 	}
 	return dhcpserverconfig.Normalize(cfg)
 }

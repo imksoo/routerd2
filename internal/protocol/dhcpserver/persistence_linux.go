@@ -22,7 +22,7 @@ import (
 
 const (
 	maxJournalBytes = 8 << 20
-	journalVersion  = 2
+	journalVersion  = 3
 )
 
 type journal struct {
@@ -30,6 +30,7 @@ type journal struct {
 	Revision    uint64        `json:"revision"`
 	Resource    string        `json:"resource"`
 	Interface   string        `json:"interface"`
+	Owner       string        `json:"owner,omitempty"`
 	WrittenAt   time.Time     `json:"written_at"`
 	Leases      []storedLease `json:"leases"`
 	Quarantines []quarantine  `json:"quarantines,omitempty"`
@@ -110,6 +111,9 @@ func openStore(c Config, now time.Time) (*journalStore, journal, error) {
 func validateJournal(c Config, j journal, now time.Time) error {
 	if j.Version != journalVersion || j.Resource != c.Resource || j.Interface != c.Interface {
 		return errors.New("DHCP journal owner/version differs; recreate disposable prerelease state")
+	}
+	if j.Owner != "" && (c.Replication == nil || j.Owner != c.Replication.ListenAddress.String() && j.Owner != c.Replication.PeerAddress.String()) {
+		return errors.New("DHCP journal owner differs from the configured pair")
 	}
 	if j.WrittenAt.After(now.Add(5 * time.Minute)) {
 		return errors.New("DHCP wall clock precedes its durable journal; synchronize time before serving leases")

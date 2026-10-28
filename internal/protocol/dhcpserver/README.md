@@ -54,14 +54,28 @@ Binding and renewal order:
 
 1. Reserve an address with a bounded lease lifetime.
 2. Write a private temporary journal, fsync it, atomically rename it and fsync
-   its directory. With HA configured, send the same complete checkpoint to the
-   standby and wait for its durable acknowledgment.
+   its directory.
 3. Publish the full typed snapshot and receive the control acknowledgment.
 4. Verify ownership deadline and interface identity, then send DHCPACK.
 
 Persistence or effects errors stop the worker before ACK. A persisted binding
 remains an allocation exclusion even when its ACK was lost. Graceful shutdown
 publishes Active=false and no leases, while retaining the journal. Stopping a server cannot revoke its clients' existing leases.
+
+With HA configured, the elected worker sends its latest durable checkpoint to
+the standby independently of client replies. It retries while the peer is
+unavailable and reports the last acknowledged revision and any error in `sync`.
+Set `ha.bootstrap` on only one member to permit initialization of an empty
+journal while the peer is absent. An established owner continues locally when
+the peer is unavailable. A member promoted from a peer-owned or empty journal
+without proof of ownership serves known bindings but blocks new dynamic leases.
+It polls the peer and resumes new allocations after reconciling the journals and
+durably recording the ownership transition on both members. Reconciliation
+retains unmatched leases as non-authoritative holds; conflicting addresses or
+client identities stay blocked. Authentication, domain and invalid-journal
+errors remain fatal at startup. Loss of persistent state, a wrongly configured
+bootstrap member, wider partitions and physical qualification remain open;
+ARP probing cannot establish that an offline client relinquished an address.
 
 Every snapshot carries BootID, ObservedNanos and ExpiresNanos. CLOCK_BOOTTIME
 is captured before walking the lease table, and the original deadline is at
@@ -86,6 +100,7 @@ The operator's `dhcp_server` service can name its IPv4 VRRP owner:
 ```json
 "ha": {
   "owner": "lan-ha",
+  "bootstrap": true,
   "replication": {
     "listen_address": "169.254.42.2:8443",
     "peer_address": "169.254.42.3:8443",
@@ -97,7 +112,7 @@ The operator's `dhcp_server` service can name its IPv4 VRRP owner:
 ```
 
 Both nodes need stable, reachable sync addresses independent of the VIP. Reverse
-the endpoints and certificates on the other node. Use the same service name,
+the endpoints and certificates on the other node and omit `bootstrap` there. Use the same service name,
 server address, pools, reservations, options and sticky policy. The authenticated
 allocation-domain fingerprint covers these shared facts, excluding local paths
 and interface names. The DHCP interface and server address must belong to the
@@ -117,20 +132,15 @@ the journal. Its status reports `standby=true`, `active=false` and no authoritat
 DNS leases. One DHCP loop owns the journal, including authenticated peer writes.
 PUT acknowledges only after local atomic persistence; duplicate checkpoints are
 idempotent, conflicting equal revisions and older revisions are rejected.
-Lease, sticky and quarantine deadlines are transferred unchanged. A serving
-worker pulls its standby's complete journal before allocation; equal peer
-revisions take precedence over an unacknowledged local branch. Serving endpoints
-reject replication writes. `checkpoint_revision` reports the last completed
-checkpoint; after a peer failure, the local file may contain a later provisional
-write which was never acknowledged to a client.
+Lease, sticky and quarantine deadlines are transferred unchanged. Serving
+endpoints reject replication writes. `checkpoint_revision` is the locally
+durable revision; `sync.acknowledged_revision` is the last revision acknowledged
+by the standby. They can differ while the peer is unavailable.
 
-This is an initial synchronous two-live-node implementation. Startup and new or
-extended grants require the peer: loss of the peer stops DHCP admission until
-it returns. This is not complete partner-down HA. Owner epochs, delta/gap
-recovery, safe disconnected allocation and clock-skew/load/physical qualification remain
-open. PD checkpoint transfer is implemented separately by the
+Owner fencing, conflict recovery after disconnected failover, clock-skew, load
+and physical qualification remain open. PD checkpoint transfer is implemented separately by the
 [DHCPv6 worker](../dhcp6/README.md#two-node-pd-checkpoint-transfer). VRRP alone is not split-brain fencing.
-The private journal is version 2 and the compiler contract is native-33. There
+The private journal is version 3 and the compiler contract is native-50. There
 is no reader or migration for discarded prerelease journals and no supported
 mixed old/new rollout. Recreate disposable development state; real deployments
 still need a validated maintenance cutover procedure.
@@ -138,7 +148,7 @@ still need a validated maintenance cutover procedure.
 `make check-ha-state DOCKER='sudo -n docker'` uses two signed actual PID 1 trees,
 independent BusyBox udhcpc clients and Linux TCP/UDP peers. It checks renewal
 through takeover, worker replacement, interrupted uploads, authentication,
-replays, external sync-link loss and recovery, and actual 60-second expiry with
+replays, partner-down allocation and recovery, and actual 60-second expiry with
 sticky retention. Captures and temporary signed environments are deleted after
 inspection. It does not qualify a physical NIC or ONU.
 

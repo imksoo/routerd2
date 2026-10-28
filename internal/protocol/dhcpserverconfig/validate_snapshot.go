@@ -29,6 +29,9 @@ func ValidateSnapshot(c Config, s Snapshot) error {
 	if len(s.Error) > 2048 {
 		return errors.New("DHCP snapshot error text is too large")
 	}
+	if s.Sync != nil && (c.Replication == nil || c.Standby || s.Sync.AcknowledgedRevision > s.CheckpointRevision || len(s.Sync.Error) > 2048) {
+		return errors.New("invalid DHCP replication status")
+	}
 	if len(s.Leases) > c.MaxLeases || s.Stats.Quarantined < 0 || s.Stats.Quarantined > c.MaxLeases || s.Stats.Offers < 0 || s.Stats.Offers > c.MaxLeases {
 		return errors.New("DHCP snapshot exceeds configured bounds")
 	}

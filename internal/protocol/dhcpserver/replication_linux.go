@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"syscall"
 	"time"
 
 	"github.com/imksoo/routerd2/internal/peertls"
@@ -32,6 +33,85 @@ type replicationRequest struct {
 type replicationResult struct {
 	data []byte
 	err  error
+}
+
+type replicationUpdate struct {
+	revision uint64
+	data     []byte
+}
+
+type replicationOutcome struct {
+	revision uint64
+	err      error
+}
+
+type reconciliation struct {
+	journal journal
+	err     error
+}
+
+func (r *replication) poll(ctx context.Context, cfg Config, results chan<- reconciliation) {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		remote, err := r.pull(ctx, cfg)
+		select {
+		case results <- reconciliation{journal: remote, err: err}:
+		case <-ctx.Done():
+			return
+		}
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+// Only transport unavailability permits starting from the local journal.
+// Authentication, allocation-domain and journal errors remain fatal.
+func peerUnavailable(err error) bool {
+	var verification *tls.CertificateVerificationError
+	if errors.As(err, &verification) {
+		return false
+	}
+	var networkError net.Error
+	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, syscall.ECONNREFUSED) ||
+		errors.Is(err, syscall.ENETUNREACH) || errors.Is(err, syscall.EHOSTUNREACH) ||
+		errors.Is(err, syscall.ECONNRESET) || errors.As(err, &networkError) && networkError.Timeout()
+}
+
+// push owns the latest unsent durable journal and retries while the peer is
+// unavailable. The DHCP loop never waits on the network to answer a client.
+func (r *replication) push(ctx context.Context, updates <-chan replicationUpdate, outcomes chan replicationOutcome) {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	var pending replicationUpdate
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case pending = <-updates:
+		case <-ticker.C:
+		}
+		if pending.data == nil {
+			continue
+		}
+		_, err := r.exchange(ctx, http.MethodPut, pending.data)
+		outcome := replicationOutcome{revision: pending.revision, err: err}
+		select {
+		case outcomes <- outcome:
+		default:
+			select {
+			case <-outcomes:
+			default:
+			}
+			outcomes <- outcome
+		}
+		if err == nil {
+			pending = replicationUpdate{}
+		}
+	}
 }
 
 // The DHCP loop alone owns the journal and applies peer writes. HTTP handlers
@@ -120,6 +200,9 @@ func (r *replication) handler(cfg Config) http.Handler {
 			if err == nil {
 				err = validateJournal(cfg, item.state, time.Now().UTC())
 			}
+			if err == nil && item.state.Owner != cfg.Replication.PeerAddress.String() {
+				err = errors.New("DHCP journal does not belong to the authenticated peer")
+			}
 			if err != nil || len(item.state.Leases) > cfg.MaxLeases || len(item.state.Quarantines) > cfg.MaxLeases {
 				http.Error(w, "invalid DHCP replication state", http.StatusBadRequest)
 				return
@@ -202,12 +285,7 @@ func applyReplica(e *engine, store *journalStore, next journal) error {
 		return errors.New("stale DHCP replication revision")
 	}
 	if next.Revision == e.revision {
-		current := e.journal()
-		// Both sides may retransmit after an ACK was lost. Compare canonical
-		// facts, independent of map traversal order, before accepting that retry.
-		sortJournal(current)
-		sortJournal(next)
-		if !current.WrittenAt.Equal(next.WrittenAt) || !slices.Equal(current.Leases, next.Leases) || !slices.Equal(current.Quarantines, next.Quarantines) {
+		if !sameJournal(e.journal(), next) {
 			return errors.New("conflicting DHCP replication revision")
 		}
 		return nil
@@ -217,4 +295,129 @@ func applyReplica(e *engine, store *journalStore, next journal) error {
 	}
 	e.restore(next)
 	return nil
+}
+
+func sameJournal(a, b journal) bool {
+	// Both sides may retransmit after an ACK was lost. Compare facts independent
+	// of map traversal order, while retaining the original write time.
+	sortJournal(a)
+	sortJournal(b)
+	return a.Owner == b.Owner && a.WrittenAt.Equal(b.WrittenAt) && slices.Equal(a.Leases, b.Leases) && slices.Equal(a.Quarantines, b.Quarantines)
+}
+
+// containsJournal prevents a newer revision from discarding a still-held local
+// binding or quarantine from a disconnected owner.
+func containsJournal(next, previous journal, now time.Time) bool {
+	leases := make(map[string]storedLease, len(next.Leases))
+	for _, lease := range next.Leases {
+		leases[leaseKey(lease.Lease)] = lease
+	}
+	for _, old := range previous.Leases {
+		if !old.HeldUntil.After(now) {
+			continue
+		}
+		current, ok := leases[leaseKey(old.Lease)]
+		if !ok || current.IPAddress != old.IPAddress || current.ExpiresAt.Before(old.ExpiresAt) || current.HeldUntil.Before(old.HeldUntil) || old.Expired && !current.Expired {
+			return false
+		}
+	}
+	quarantines := make(map[string]time.Time, len(next.Quarantines))
+	for _, q := range next.Quarantines {
+		quarantines[q.IPAddress] = q.Until
+	}
+	for _, old := range previous.Quarantines {
+		if old.Until.After(now) && quarantines[old.IPAddress].Before(old.Until) {
+			return false
+		}
+	}
+	return true
+}
+
+// mergeJournal retains unmatched bindings as non-authoritative holds. A client
+// can renew its own address, but an unseen release cannot become a DNS claim or
+// a free address. Ambiguous addresses or identities require operator resolution.
+func mergeJournal(a, b journal, now time.Time) (journal, error) {
+	leases := make(map[string]storedLease)
+	addresses := make(map[string]string)
+	seen := make(map[string]int)
+	live := make(map[string]int)
+	for _, source := range []journal{a, b} {
+		for _, lease := range source.Leases {
+			if !lease.HeldUntil.After(now) {
+				continue
+			}
+			key := leaseKey(lease.Lease)
+			seen[key]++
+			if !lease.Expired {
+				live[key]++
+			}
+			if other, ok := addresses[lease.IPAddress]; ok && other != key {
+				return journal{}, errors.New("conflicting DHCP lease addresses require reconciliation")
+			}
+			addresses[lease.IPAddress] = key
+			if old, ok := leases[key]; ok {
+				if old.IPAddress != lease.IPAddress {
+					return journal{}, errors.New("conflicting DHCP client addresses require reconciliation")
+				}
+				heldUntil := old.HeldUntil
+				if lease.HeldUntil.After(heldUntil) {
+					heldUntil = lease.HeldUntil
+				}
+				if lease.ExpiresAt.After(old.ExpiresAt) || lease.ExpiresAt.Equal(old.ExpiresAt) && lease.HeldUntil.After(old.HeldUntil) {
+					old = lease
+				}
+				old.HeldUntil = heldUntil
+				leases[key] = old
+			} else {
+				leases[key] = lease
+			}
+		}
+	}
+	quarantines := make(map[string]quarantine)
+	for _, source := range []journal{a, b} {
+		for _, q := range source.Quarantines {
+			if !q.Until.After(now) {
+				continue
+			}
+			if _, occupied := addresses[q.IPAddress]; occupied {
+				return journal{}, errors.New("DHCP quarantine conflicts with a retained lease")
+			}
+			if old, ok := quarantines[q.IPAddress]; !ok || q.Until.After(old.Until) {
+				quarantines[q.IPAddress] = q
+			}
+		}
+	}
+	out := journal{Version: journalVersion, Resource: a.Resource, Interface: a.Interface, Owner: a.Owner, Revision: max(a.Revision, b.Revision), WrittenAt: now}
+	for key, lease := range leases {
+		lease.Expired = seen[key] < 2 || live[key] < 2
+		out.Leases = append(out.Leases, lease)
+	}
+	for _, q := range quarantines {
+		out.Quarantines = append(out.Quarantines, q)
+	}
+	return out, nil
+}
+
+func reconcileJournals(local, peer journal, now time.Time, limit int) (journal, error) {
+	var result journal
+	var err error
+	switch {
+	case peer.Revision > local.Revision && containsJournal(peer, local, now):
+		result = peer
+	case local.Revision > peer.Revision && containsJournal(local, peer, now):
+		result = local
+	case local.Revision == 0 && peer.Revision == 0:
+		result = local
+	case local.Revision == peer.Revision && sameJournal(local, peer):
+		result = local
+	default:
+		result, err = mergeJournal(local, peer, now)
+	}
+	if err != nil {
+		return journal{}, err
+	}
+	if len(result.Leases) > limit || len(result.Quarantines) > limit {
+		return journal{}, errors.New("reconciled DHCP journal exceeds the configured lease limit")
+	}
+	return result, nil
 }

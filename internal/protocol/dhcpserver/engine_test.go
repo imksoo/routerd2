@@ -22,6 +22,30 @@ import (
 var testMAC = net.HardwareAddr{2, 0, 0, 0, 0, 1}
 var testID = []byte{1, 2, 0, 0, 0, 0, 1}
 
+func TestReconcileRetainsUnmatchedLeasesAndRejectsDuplicateAddresses(t *testing.T) {
+	now := time.Now().UTC()
+	first := storedLease{Lease: Lease{MACAddress: "02:00:00:00:00:01", IPAddress: "192.0.2.100", Scope: "lan", ExpiresAt: now.Add(time.Minute)}, HeldUntil: now.Add(time.Hour)}
+	second := storedLease{Lease: Lease{MACAddress: "02:00:00:00:00:02", IPAddress: "192.0.2.101", Scope: "lan", ExpiresAt: now.Add(time.Minute)}, HeldUntil: now.Add(time.Hour)}
+	a := journal{Leases: []storedLease{first}}
+	b := journal{Leases: []storedLease{second}}
+	merged, err := mergeJournal(a, b, now)
+	if err != nil || len(merged.Leases) != 2 || !merged.Leases[0].Expired || !merged.Leases[1].Expired {
+		t.Fatal("unmatched leases were not retained as non-authoritative holds", merged, err)
+	}
+	renewed := first
+	renewed.ExpiresAt = now.Add(2 * time.Minute)
+	renewed.HeldUntil = now.Add(30 * time.Minute)
+	merged, err = mergeJournal(a, journal{Leases: []storedLease{renewed}}, now)
+	if err != nil || len(merged.Leases) != 1 || merged.Leases[0].ExpiresAt != renewed.ExpiresAt || merged.Leases[0].HeldUntil != first.HeldUntil || merged.Leases[0].Expired {
+		t.Fatal("reconciliation shortened a binding or sticky hold", merged, err)
+	}
+	second.IPAddress = first.IPAddress
+	b.Leases[0] = second
+	if _, err := mergeJournal(a, b, now); err == nil {
+		t.Fatal("conflicting clients sharing an address were reconciled")
+	}
+}
+
 func TestManyOptionRoutersDoNotCauseFalsePoolExhaustion(t *testing.T) {
 	c := testConfig(t)
 	c.Primary.End = "192.0.2.120"
