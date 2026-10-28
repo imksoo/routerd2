@@ -4,7 +4,8 @@
 The actual product owns RA, DHCPv4, DHCPv6 PD, LAN RA, DNS and DS-Lite. The host's
 management addresses/routes/clock are not changed. Requires explicit uplink and
 AFTR intent, root/sudo, iproute2, BusyBox, dhcpcd, dnsmasq, curl, dig and tcpdump. A bounded owner removes
-its namespaces and private state on completion. This is not NIC qualification.
+its namespaces on completion. An optional private state directory retains the
+test router's identity and WAN leases. This is not NIC qualification.
 """
 
 import argparse
@@ -25,7 +26,7 @@ def run(args, timeout=12):
     return result.stdout
 
 
-def owner(stage, uplink, aftr, seconds, dns_upstream):
+def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac):
     def stop(*_):
         raise KeyboardInterrupt()
 
@@ -273,7 +274,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
         )
         # Repeated runs represent one test router. Its DUID-LL must not change
         # with each newly created macvlan and consume additional HGW leases.
-        run(["ip", "-n", router, "link", "set", "wan0", "address", "02:72:6f:75:74:02"])
+        run(["ip", "-n", router, "link", "set", "wan0", "address", wan_mac])
         run(
             [
                 "ip",
@@ -769,16 +770,33 @@ def main():
     )
     parser.add_argument("--seconds", type=int, default=7800)
     parser.add_argument("--binary-dir", type=Path, default=Path("dist/bin"))
+    parser.add_argument("--state-dir", type=Path, help="Private persistent test identity and lease directory")
+    parser.add_argument("--wan-mac", default="02:72:6f:75:74:02")
     parser.add_argument("--inside", type=Path)
     args = parser.parse_args()
     if not 1 <= args.seconds <= 10800:
         parser.error("--seconds must be 1..10800")
     if args.inside:
-        owner(args.inside, args.uplink, args.aftr, args.seconds, args.dns_upstream)
+        owner(args.inside, args.uplink, args.aftr, args.seconds, args.dns_upstream, args.wan_mac)
         return
     root = [] if os.geteuid() == 0 else ["sudo", "-n"]
+    persistent = args.state_dir.resolve() if args.state_dir else None
+    lease_files = ("wan-pd.dhcp6.json", "wan-pd.dhcp6.json.duid", "wan4.dhcp4.json", "lan-info.dhcp6-server-duid")
+    if persistent:
+        (persistent / "leases").mkdir(parents=True, mode=0o700, exist_ok=True)
+        mac_file = persistent / "wan-mac"
+        if mac_file.exists():
+            args.wan_mac = mac_file.read_text().strip()
+        else:
+            mac_file.write_text(args.wan_mac + "\n")
+            mac_file.chmod(0o600)
     stage = Path(run(root + ["mktemp", "-d", "/tmp/routerd-live.XXXXXX"]).strip())
     try:
+        if persistent:
+            for name in lease_files:
+                source = persistent / "leases" / name
+                if source.exists():
+                    run(root + ["install", "-D", "-m", "600", str(source), str(stage / "state/leases" / name)])
         for source, name in [(Path(__file__), "owner.py")] + [
             (args.binary_dir / n, n)
             for n in ["routerd", "routerd-modules", "routerd-logging"]
@@ -808,21 +826,30 @@ def main():
                 str(args.seconds),
                 "--dns-upstream",
                 args.dns_upstream,
+                "--wan-mac",
+                args.wan_mac,
             ],
             check=True,
             timeout=args.seconds + 240,
         )
     finally:
-        run(
-            root
-            + [
-                "python3",
-                "-I",
-                "-c",
-                "import shutil,sys;shutil.rmtree(sys.argv[1])",
-                str(stage),
-            ]
-        )
+        try:
+            if persistent:
+                for name in lease_files:
+                    source = stage / "state/leases" / name
+                    if subprocess.run(root + ["test", "-f", str(source)]).returncode == 0:
+                        run(root + ["install", "-m", "600", "-o", str(os.getuid()), "-g", str(os.getgid()), str(source), str(persistent / "leases" / name)])
+        finally:
+            run(
+                root
+                + [
+                    "python3",
+                    "-I",
+                    "-c",
+                    "import shutil,sys;shutil.rmtree(sys.argv[1])",
+                    str(stage),
+                ]
+            )
 
 
 if __name__ == "__main__":

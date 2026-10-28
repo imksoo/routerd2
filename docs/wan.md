@@ -159,7 +159,10 @@ UPLINK_INTERFACE=... UPLINK_AFTR=... UPLINK_SECONDS=7800`. A separate MAC and LA
 namespaces use the actual daemon, independent BusyBox and dhcpcd clients, and a
 dnsmasq conditional upstream. Host management addresses, routes and resolver
 settings are not reconfigured. The DHCP clients obtain their LAN configuration;
-the dhcpcd hook installs the received DNS in a private resolver mount. The test
+the dhcpcd hook installs the received DNS in a private resolver mount.
+`UPLINK_STATE_DIR` can select a private directory that retains the test WAN MAC,
+PD and DHCPv4 leases, and LAN DHCPv6 server DUID between runs. The directory
+must not be shared with another active test or a production router. The test
 checks IPv4 DS-Lite and IPv6 HTTPS, UDP/TCP DNS, conditional forwarding,
 upstream failure and recovery. Set `UPLINK_DNS_UPSTREAM` to exercise a DoH
 endpoint using WAN-learned bootstrap DNS. RA and DHCPv6 information advertise

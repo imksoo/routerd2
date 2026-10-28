@@ -21,6 +21,7 @@ UPLINK_INTERFACE ?=
 UPLINK_AFTR ?=
 UPLINK_SECONDS ?= 7800
 UPLINK_DNS_UPSTREAM ?=
+UPLINK_STATE_DIR ?=
 QEMU_SSH_KEY ?=
 
 LDFLAGS = -s -w -X github.com/imksoo/routerd2/internal/buildinfo.Identity=ROUTERD2-RELEASE-V1:$(RELEASE_ID):END
@@ -174,7 +175,7 @@ check-ra-aftr: build
 .PHONY: check-uplink
 check-uplink: build
 	@test -n '$(UPLINK_INTERFACE)' -a -n '$(UPLINK_AFTR)' || { printf '%s\n' 'UPLINK_INTERFACE and UPLINK_AFTR must select the authorized local access network'; exit 1; }
-	$(PYTHON) scripts/uplink-smoke.py --uplink '$(UPLINK_INTERFACE)' --aftr '$(UPLINK_AFTR)' --seconds '$(UPLINK_SECONDS)' --dns-upstream '$(UPLINK_DNS_UPSTREAM)'
+	$(PYTHON) scripts/uplink-smoke.py --uplink '$(UPLINK_INTERFACE)' --aftr '$(UPLINK_AFTR)' --seconds '$(UPLINK_SECONDS)' --dns-upstream '$(UPLINK_DNS_UPSTREAM)' $(if $(UPLINK_STATE_DIR),--state-dir '$(UPLINK_STATE_DIR)')
 
 .PHONY: check-ra-route-refresh
 check-ra-route-refresh: build
