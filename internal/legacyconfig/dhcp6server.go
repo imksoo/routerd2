@@ -59,12 +59,34 @@ func (c *compiler) dhcp6Servers() {
 		if !ok {
 			continue // The provider's diagnostic already prevents publication.
 		}
+		allocation := c.serviceName(*delegated, "lan")
 		cfg := &serviceconfig.DHCP6Server{Interface: ifname, ServerDUID: policy.ServerDUID, DomainSearch: append([]string(nil), s.DomainSearch...)}
 		cfg.DNSServers = c.dhcp6ServerAddresses(r, "dnsServers", s.DNSServers)
 		cfg.SNTPServers = c.dhcp6ServerAddresses(r, "sntpServers", s.SNTPServers)
-		cfg.DNSFrom = c.dhcp6ServerSources(r, "dnsServerFrom", "dnsServers", s.DNSServerFrom)
 		cfg.SNTPFrom = c.dhcp6ServerSources(r, "sntpServerFrom", "sntpServers", s.SNTPServerFrom)
 		cfg.SearchFrom = c.dhcp6ServerSources(r, "domainSearchFrom", "domainSearch", s.DomainSearchFrom)
+		for i, source := range s.DNSServerFrom {
+			path := "dnsServerFrom[" + strconv.Itoa(i) + "]"
+			if source.Field == "address" {
+				ref := c.getRef(r, path+".resource", source.Resource, "IPv6DelegatedAddress")
+				if ref == nil {
+					continue
+				}
+				if ref.ID() != delegated.ID() {
+					c.reject(r, path, "unsupported_semantics", "router DNS must select the serving LAN's delegated allocation")
+					continue
+				}
+				cfg.DNSDelegation = &serviceconfig.DNSDelegation{Service: c.document.Services[index].Name, Delegation: allocation}
+				continue
+			}
+			if source.Field != "dnsServers" {
+				c.reject(r, path+".field", "unsupported_semantics", "DNS source must select dnsServers or a delegated LAN address")
+				continue
+			}
+			if provider, ok := c.dhcp6Source(r, path+".resource", source.Resource); ok {
+				cfg.DNSFrom = append(cfg.DNSFrom, c.document.Services[provider].Name)
+			}
+		}
 		for _, refs := range [][]string{cfg.DNSFrom, cfg.SearchFrom} {
 			for _, ref := range refs {
 				if ref != c.document.Services[index].Name {
@@ -72,7 +94,6 @@ func (c *compiler) dhcp6Servers() {
 				}
 			}
 		}
-		allocation := c.serviceName(*delegated, "lan")
 		found := false
 		for i := range c.document.Services[index].DHCP6.Delegations {
 			lan := &c.document.Services[index].DHCP6.Delegations[i]
@@ -87,6 +108,7 @@ func (c *compiler) dhcp6Servers() {
 				c.reject(r, "interface", "socket_owner", "another DHCPv6 server already owns this delegated RA")
 			}
 			lan.Advertise, lan.OtherConfig, lan.RouterLifetimeSeconds = true, true, policy.RouterLifetimeSeconds
+			lan.RDNSSRouter = cfg.DNSDelegation != nil
 			for _, ip := range cfg.DNSServers {
 				lan.RDNSS = append(lan.RDNSS, ip.String())
 			}

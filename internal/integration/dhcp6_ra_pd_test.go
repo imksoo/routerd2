@@ -19,11 +19,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/imksoo/routerd/pkg/api"
 	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/control"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
+	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 	"github.com/imksoo/routerd2/internal/supervisor"
@@ -90,30 +92,34 @@ func TestDaemonDHCP6RAAddsAddressToPD(t *testing.T) {
 	bridge := "wan0"
 	work := t.TempDir()
 	sourcePath, policyPath := filepath.Join(work, "legacy.yaml"), filepath.Join(work, "policy.yaml")
-	if err := os.WriteFile(sourcePath, legacyDHCP6PD, 0600); err != nil {
-		t.Fatal(err)
-	}
 	if err := os.WriteFile(policyPath, legacyDHCP6PDPolicy, 0600); err != nil {
 		t.Fatal(err)
 	}
-	ctxMigrate, cancelMigrate := context.WithTimeout(context.Background(), 5*time.Second)
-	cmd := exec.CommandContext(ctxMigrate, filepath.Join(os.Getenv("ROUTERD2_TEST_BIN_DIR"), "routerd"), "config", "migrate", "--policy", policyPath, sourcePath)
-	var review bytes.Buffer
-	cmd.Stderr = &review
-	migrated, err := cmd.Output()
-	cancelMigrate()
-	if err != nil {
-		t.Fatal(err, review.String())
+	migrate := func(source []byte) config.Native {
+		t.Helper()
+		if err := os.WriteFile(sourcePath, source, 0600); err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, filepath.Join(os.Getenv("ROUTERD2_TEST_BIN_DIR"), "routerd"), "config", "migrate", "--policy", policyPath, sourcePath)
+		var review bytes.Buffer
+		cmd.Stderr = &review
+		migrated, err := cmd.Output()
+		if err != nil {
+			t.Fatal(err, review.String())
+		}
+		var imported config.Document
+		if err := config.Decode(bytes.NewReader(migrated), &imported); err != nil {
+			t.Fatal(err)
+		}
+		compiled, err := config.Compile(imported)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return compiled.Native
 	}
-	var imported config.Document
-	if err := config.Decode(bytes.NewReader(migrated), &imported); err != nil {
-		t.Fatal(err)
-	}
-	compiled, err := config.Compile(imported)
-	if err != nil {
-		t.Fatal(err)
-	}
-	doc := compiled.Native
+	doc := migrate(legacyDHCP6PD)
 	// The imported graph owns PD, LAN serving and advertisements. Add only
 	// the fixture's duplicate-host bridge and explicit native RA/IA_NA scenario.
 	doc.Network.Links = append(doc.Network.Links, network.Link{Name: bridge, Kind: "bridge"})
@@ -247,6 +253,7 @@ func TestDaemonDHCP6RAAddsAddressToPD(t *testing.T) {
 		t.Helper()
 		var source string
 		until(t, 12*time.Second, func() bool {
+			source = ""
 			ready := false
 			if err := fixtureInsideNamespace(client, func() error {
 				l, err := netlink.LinkByName("client0")
@@ -668,6 +675,83 @@ func TestDaemonDHCP6RAAddsAddressToPD(t *testing.T) {
 		return f.control.Do(ctx, "GET", "/v1/config", nil, &operator) == nil && operator.Revision == 5 && operator.Confirmation == nil && operator.Healthy
 	})
 	information()
+	traffic()
+
+	self := migrate(bytes.Replace(legacyDHCP6PD, []byte("dnsServerFrom: [{resource: DHCPv6Information/wan-info, field: dnsServers}]"), []byte("dnsServerFrom: [{resource: IPv6DelegatedAddress/lan-address, field: address}]"), 1))
+	for i, service := range doc.Services {
+		for _, replacement := range self.Services {
+			if service.Name != replacement.Name {
+				continue
+			}
+			if service.DHCP6Server != nil {
+				doc.Services[i] = replacement
+			}
+			if service.DHCP6 != nil {
+				service.DHCP6.Delegations = replacement.DHCP6.Delegations
+			}
+		}
+	}
+	doc.Services = append(doc.Services, serviceconfig.Service{Name: "lan-dns", DNS: &serviceconfig.DNS{ListenInterface: "lan0", RuntimeConfig: dnsconfig.RuntimeConfig{
+		Resource: "lan-dns", Spec: api.DNSResolverSpec{
+			Listen:  []api.DNSResolverListenSpec{{Name: "lan", Addresses: []string{"::"}, Port: 53}},
+			Sources: []api.DNSResolverSourceSpec{{Name: "wan", Kind: "forward", Match: []string{"."}, Upstreams: []string{"udp://[2001:db8:42::1]:53"}}},
+		},
+	}}})
+	for _, protocol := range []string{"tcp", "udp"} {
+		doc.Network.Firewall.Input.Rules = slices.Insert(doc.Network.Firewall.Input.Rules, 0, network.FirewallRule{Match: network.PacketMatch{InInterface: "lan0", Protocol: protocol, DestinationPorts: []network.PortRange{{Start: 53}}}, Action: "accept"})
+	}
+	if err := f.control.Do(ctx, "POST", "/v1/config/commit", control.CommitRequest{ExpectedRevision: 5, RequestID: "delegated-self-dns", Config: config.FromNative(doc)}, nil); err != nil {
+		t.Fatal(err)
+	}
+	until(t, 8*time.Second, func() bool {
+		got = fixtureDHCP6Information(t, client, "client0")
+		return len(got.dns) == 1 && got.dns[0] != netip.MustParseAddr("2001:db8:42::1")
+	})
+	lanLink, err := netlink.LinkByName("lan0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	installed, err := netlink.AddrList(lanLink, netlink.FAMILY_V6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(installed, func(a netlink.Addr) bool {
+		return a.IP.Equal(net.IP(got.dns[0].AsSlice())) && a.Flags&(unix.IFA_F_TENTATIVE|unix.IFA_F_DADFAILED) == 0
+	}) {
+		t.Fatal("self DNS was not an installed, usable LAN router address", got.dns, installed)
+	}
+	until(t, 8*time.Second, func() bool {
+		lan.mu.Lock()
+		defer lan.mu.Unlock()
+		for _, packet := range lan.packets {
+			b := packet.data
+			if len(b) < 70 || b[20] != 58 || b[54] != 134 {
+				continue
+			}
+			for at := 70; at+2 <= len(b); {
+				n := int(b[at+1]) * 8
+				if n == 0 || at+n > len(b) {
+					break
+				}
+				if b[at] == 25 && n >= 24 && binary.BigEndian.Uint32(b[at+4:]) > 0 && bytes.Contains(b[at+8:at+n], got.dns[0].AsSlice()) {
+					return true
+				}
+				at += n
+			}
+		}
+		return false
+	})
+	if err := fixtureInsideNamespace(client, func() error {
+		for _, transport := range []string{"+notcp", "+tcp"} {
+			answer, err := exec.Command("dig", "-6", "@"+got.dns[0].String(), "host.wan.test", "AAAA", "+short", "+time=2", "+tries=1", transport).CombinedOutput()
+			if err != nil || !strings.Contains(string(answer), "2001:db8:ffff::9") {
+				return fmt.Errorf("imported self DNS %s: %v: %s", transport, err, answer)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 	traffic()
 
 	f.stop()

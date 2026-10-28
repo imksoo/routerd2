@@ -13,6 +13,12 @@ DHCPv4/DHCPv6情報・SLAAC、条件付きDNS・DoH、IPv4/IPv6通信を確認�
 実HGWでの自然PD更新を含む7800秒試験は実行中。ONU直結・対象機器での受入は未実施。
 細分化した試験を増やすことより、homertに必要な機能を端末から使える構成に組み込み、実通信の失敗を直す。
 
+`homert-dns-reference` は稼働homertと同じ `dnsServerFrom: IPv6DelegatedAddress/...` の `address` 参照を
+既存の `DNSDelegation` に接続した。旧routerdの `chain.go` のDHCPv6Server処理と `expandServerSources` を参照した。
+独立ISC・Linux端末・実daemonで、変換した設定によるRA/DHCPv6の同じ委譲DNSアドレスとUDP/TCP名前解決を確認した。
+既存試験の古い端末アドレス保持を修正し、元期限失効・再取得・worker交換・confirmed rollbackも含め完走した。
+Race Detector、vet、amd64/arm64静的ビルドが成功。条件付きHAの設定変換とhomert全体の受入は残る。
+
 `pd-prep-native53` の実 HGW 90秒試験で、独立 BusyBox 端末の DHCPv4による address・gateway・DNS取得と
 自然更新、DHCPv6 Information-request/Reply、SLAAC、IPv4 NAT/IPv6 HTTPS、IPv4/IPv6 DNSを確認した。
 公開名は実 Cloudflare DoH、条件付き名前は独立 dnsmasq へ送り、条件付き上流の停止時に公開上流へ

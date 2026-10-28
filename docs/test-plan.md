@@ -115,6 +115,9 @@
 - 同版の別の実HGW試験で、隔離routerのWAN通信を遮断して復旧後、両端末のIPv4/IPv6通信が復帰した。
   daemon全体の停止・再起動後も同じPD識別子とprefixで両端末の通信が復旧した。物理リンク断や機器の再起動ではない。
   dhcpcdは隔離されたresolverファイルに標準hookでDNSを反映した。systemd-resolvedとの統合は未検証。
+- 稼働中の実HGW構成では、独立dhcpcd端末からIPv4/IPv6それぞれ1 MiBのHTTPSダウンロードも完了した。
+  `homert-dns-reference` は、homertが使う委譲アドレスの `address` 参照を変換し、独立ISCとLinux端末で
+  RA/DHCPv6の同じDNSアドレスとUDP/TCP名前解決を確認した。旧設定の条件付きHA全体は未受入。
 - `0f27e29` / `pd-prep-native53` は、独立 ISC DHCP、Linux AFTR、二台の実 daemon、LAN端末と二WANで通常の切替・復旧を完走した。
   同じTCPの最長応答待ちは一試行で約6.8秒、UDP損失0件。連続した切替では15秒のTCPタイムアウトを再現しており未解決。
 - 同版を実 HGW に接続した90秒の単体試験は、独立 BusyBox 端末の DHCPv4取得・自然更新、DHCPv6情報応答、

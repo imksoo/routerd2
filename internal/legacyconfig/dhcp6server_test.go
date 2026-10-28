@@ -43,6 +43,15 @@ func TestDHCP6ImportBindsServingAndRAToSelectedPD(t *testing.T) {
 			t.Fatal("PD/information alias did not retain one source identity", sources, pd.Name)
 		}
 	}
+	self, err := CompileWithOptions(bytes.Replace(data, []byte("dnsServerFrom: [{resource: DHCPv6Information/wan-info, field: dnsServers}]"), []byte("dnsServerFrom: [{resource: IPv6DelegatedAddress/lan-address, field: address}]"), 1), options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selfPD, selfServer := service(t, self.Document, "dhcp6"), service(t, self.Document, "dhcp6_server")
+	ref := selfServer.DHCP6Server.DNSDelegation
+	if ref == nil || ref.Service != selfPD.Name || ref.Delegation != selfPD.DHCP6.Delegations[0].Name || !selfPD.DHCP6.Delegations[0].RDNSSRouter || len(selfServer.DHCP6Server.DNSFrom) != 0 || selfPD.DHCP6.Delegations[0].UseLearnedRDNSS {
+		t.Fatal("delegated address source did not select the installed router DNS", selfServer, selfPD)
+	}
 	// Independent dnsmasq capture has no RA DNS option when none is declared.
 	withoutDNS := bytes.Replace(data, []byte("        dnsServerFrom: [{resource: DHCPv6Information/wan-info, field: dnsServers}]\n"), nil, 1)
 	dnsAbsent, err := CompileWithOptions(withoutDNS, options)
