@@ -151,7 +151,14 @@ The shared WAN link and its link-local address must follow the same VRRP owner.
 Do not put `when` on the PD service: its standby must run without the WAN link.
 
 The compiler prepares active and standby workers once; current acknowledged
-VRRP ownership selects through ordinary worker replacement. Standby opens no
+The live VRRP election selects PD acquisition through ordinary worker
+replacement, before VIP publication. Graceful activation can therefore wait
+for `service.pd.active` without waiting for its own unpublished VIP. LAN DHCPv4
+allocation still waits for published ownership. Removing the owner or expiring
+its election returns PD to standby; a poll does not extend the election.
+Both immutable HA role files are prepared when accepting the source configuration;
+observation updates select a role without rewriting worker configuration files.
+Standby opens no
 DHCP or DAD socket and projects no WAN/LAN assignment or RA. It pulls the active
 member's complete checkpoint once a second over mutually authenticated TLS1.3
 with the configured peer leaf pinned. An identity fingerprint covers the shared

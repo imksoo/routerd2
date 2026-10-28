@@ -281,6 +281,11 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 	var instances instanceSet
 	var bfdSources map[string]bfdBinding
 	var bfdRecipients map[string]bfdRecipient
+	// Every worker variant belongs to this source, including inactive services
+	// and both HA roles. Prepare once before retiring any current worker.
+	if err := r.prepare(next.protocols); err != nil {
+		return r.failure(err)
+	}
 	for {
 		if err := ctx.Err(); err != nil {
 			return r.failure(err)
@@ -292,14 +297,9 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 		if err != nil {
 			return r.failure(err)
 		}
-		// Preparing immutable files and BFD bindings does not own observations.
-		// Finish it before stopping workers so a write error leaves them running.
 		instances = selectInstances(p.instances, nil)
-		err = r.prepare(instances)
 		bindings = instances.bindings
-		if err == nil {
-			bfdSources, bfdRecipients, err = compileBFDCache(bindings)
-		}
+		bfdSources, bfdRecipients, err = compileBFDCache(bindings)
 		if err != nil {
 			return r.failure(err)
 		}
@@ -426,13 +426,21 @@ func selectInstances(instances []binding, ceiling map[string]supervisor.DynamicM
 	return set
 }
 
-func (r *Runtime) prepare(set instanceSet) error {
-	for _, module := range set.modules {
-		dir := filepath.Join(r.dir, "instances", module.Name)
+func (r *Runtime) prepare(plan protocolPlan) error {
+	write := func(bound binding) error {
+		dir := filepath.Join(r.dir, "instances", bound.instance.Name)
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			return err
 		}
-		if err := config.AtomicWrite(filepath.Join(dir, module.ConfigDigest+".json"), set.bindings[module.Name].encoded); err != nil {
+		return config.AtomicWrite(filepath.Join(dir, bound.digest+".json"), bound.encoded)
+	}
+	for _, bound := range plan.instances {
+		if err := write(bound); err != nil {
+			return err
+		}
+	}
+	for _, ha := range plan.leaseHA {
+		if err := write(ha.serving); err != nil {
 			return err
 		}
 	}

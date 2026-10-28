@@ -292,24 +292,12 @@ func (r *Runtime) reconcileStep(ctx context.Context, ceiling map[string]supervis
 		if err != nil {
 			return false, err
 		}
-		if err := r.prepare(set); err != nil {
-			return false, err
-		}
-		// Filesystem work can outlast the observation used to choose this set.
-		status, err = r.manager.Status(ctx)
-		if err != nil {
-			return false, err
-		}
 	}
 	keep := make([]supervisor.DynamicModule, 0, len(status.Modules))
 	retire, blocked, matching := false, false, true
 	ready := true
 	var moduleFailure error
 	r.mu.Lock()
-	if changed {
-		r.installGuardStatusLocked(status, nil)
-		r.fenceApplicationsLocked()
-	}
 	for _, module := range status.Modules {
 		if !strings.HasPrefix(module.Name, "service.") {
 			continue

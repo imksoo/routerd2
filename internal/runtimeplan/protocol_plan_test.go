@@ -5,21 +5,28 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/imksoo/routerd2/internal/config"
+	"github.com/imksoo/routerd2/internal/peertls"
 	"github.com/imksoo/routerd2/internal/protocol/aftr"
 	"github.com/imksoo/routerd2/internal/protocol/bfd"
 	"github.com/imksoo/routerd2/internal/protocol/bgpconfig"
+	"github.com/imksoo/routerd2/internal/protocol/vrrp"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
 
 func TestPreparedWorkerFilesMatchSupervisorIdentities(t *testing.T) {
 	doc := config.Native{Services: []serviceconfig.Service{
-		{Name: "pd", DHCP6: &serviceconfig.DHCP6{RequestPrefix: true, Interface: "wan0", IAID: 7, Delegations: []serviceconfig.Delegation{{Name: "lan", Interface: "lan0", Advertise: true}}}},
+		{Name: "pd", DHCP6: &serviceconfig.DHCP6{RequestPrefix: true, Interface: "wan0", IAID: 7, ClientDUID: "00030001020000000042", Delegations: []serviceconfig.Delegation{{Name: "lan", Interface: "lan0", Advertise: true}}, HA: &serviceconfig.LeaseHA{Owner: "ha", Replication: peertls.Config{
+			ListenAddress: netip.MustParseAddrPort("192.0.2.2:8444"), PeerAddress: netip.MustParseAddrPort("192.0.2.3:8444"),
+			CertificateFile: "/keys/local.crt", PrivateKeyFile: "/keys/local.key", PeerCertificateFile: "/keys/peer.crt",
+		}}}},
+		{Name: "ha", VRRP: &vrrp.Config{Interface: "lan0", Family: "ipv4", SourceAddress: "192.0.2.2", VirtualRouterID: 42, Addresses: []string{"192.0.2.1/24"}}},
 		{Name: "edge", BGP: &serviceconfig.BGP{Runtime: bgpconfig.AppliedConfig{Global: bgpconfig.AppliedGlobal{ASN: 64512, RouterID: "192.0.2.1", ListenPort: -1}}}},
 	}}
 	runtimeDir, stateDir := t.TempDir(), t.TempDir()
@@ -28,13 +35,15 @@ func TestPreparedWorkerFilesMatchSupervisorIdentities(t *testing.T) {
 	for _, bound := range plan.instances {
 		workers = append(workers, bound)
 	}
-	set := selectInstances(workers, nil)
+	for _, ha := range plan.leaseHA {
+		workers = append(workers, ha.serving)
+	}
 	r := &Runtime{dir: runtimeDir}
-	if err := r.prepare(set); err != nil {
+	if err := r.prepare(plan); err != nil {
 		t.Fatal(err)
 	}
-	for _, module := range set.modules {
-		body, err := os.ReadFile(filepath.Join(runtimeDir, "instances", module.Name, module.ConfigDigest+".json"))
+	for _, bound := range workers {
+		body, err := os.ReadFile(filepath.Join(runtimeDir, "instances", bound.instance.Name, bound.digest+".json"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -43,8 +52,8 @@ func TestPreparedWorkerFilesMatchSupervisorIdentities(t *testing.T) {
 		if err := json.Unmarshal(body, &instance); err != nil {
 			t.Fatal(err)
 		}
-		if module.ConfigDigest != hex.EncodeToString(sum[:]) || instance.Name != module.Name || instance.Role != module.Role {
-			t.Fatal("supervisor identity differs from actual child file", module, instance)
+		if bound.digest != hex.EncodeToString(sum[:]) || instance.Name != bound.instance.Name || instance.Role != bound.instance.Role {
+			t.Fatal("supervisor identity differs from actual child file", bound.instance.Name, instance)
 		}
 	}
 }

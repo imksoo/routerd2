@@ -62,7 +62,8 @@ def peer(stage, dhcp6_server):
 
     def active(node):
         output = run(inside("ha-" + node, ["ip", "-j", "address", "show"])) if (stage / node / "run" / "supervisor.sock").exists() else "[]"
-        return any(address.get("local") == "203.0.113.1" for link in json.loads(output) for address in link.get("addr_info", []))
+        addresses = {address.get("local") for link in json.loads(output) for address in link.get("addr_info", [])}
+        return {"203.0.113.1", "198.18.0.1"} <= addresses
 
     try:
         for ns in namespaces:
@@ -133,6 +134,7 @@ def peer(stage, dhcp6_server):
             resources.append({"id": "wan-route", "route": {"destination": "203.0.113.50/32", "interface": "wan-ha"}})
             if dhcp6_server:
                 resources[6]["forwarding"]["ipv6"] = True
+                resources[7]["service"]["vrrp"]["graceful_activation"] = {"ready_when": {"fact": "service.pd.active"}, "timeout": "1s"}
                 pd_peer = {"listen_address": "169.254.42." + str(index + 2) + ":8444", "peer_address": "169.254.42." + str(3 - index) + ":8444", "certificate_file": str(stage / (node + ".crt")), "private_key_file": str(stage / (node + ".key")), "peer_certificate_file": str(stage / (("b" if node == "a" else "a") + ".crt"))}
                 resources += [
                     {"id": "wan-linklocal", "when": {"fact": "service.ha.elected"}, "address": {"interface": "wan-ha", "cidr": "fe80::1/64"}},
@@ -190,7 +192,7 @@ while True:
             return json.loads(path.read_text()) if path.exists() else {}
 
         def pd_observed(node):
-            return api(node, "control.sock", "/v1/services/service.pd")["snapshot"]
+            return api(node, "control.sock", "/v1/services/service.pd").get("snapshot", {})
 
         def pd_traffic(node):
             def usable():
@@ -248,10 +250,21 @@ except socket.timeout:
             children.append(process)
             captures.append(process)
             log.close()
+        if dhcp6_server:
+            pd_server.send_signal(signal.SIGSTOP)
         start("ha-a", ["unshare", "--pid", "--fork", "--mount-proc", "--kill-child=SIGTERM", str(stage / "routerd"), "boot", "--file", str(stage / "a/boot.json")], "a")
         wait(lambda: (stage / "a/run/supervisor.sock").exists())
         wait(lambda: modules("a").get("service.ha", {}).get("ready") is True)
+        if dhcp6_server:
+            wait(lambda: api("a", "control.sock", "/v1/services/service.ha")["snapshot"].get("activation_state") == "ReadinessTimeout")
+            wait(lambda: pd_observed("a").get("state") == "soliciting")
+            addresses = {a["local"] for link in json.loads(run(inside("ha-a", ["ip", "-j", "address", "show"]))) for a in link.get("addr_info", [])}
+            assert "203.0.113.1" in addresses and "198.18.0.1" not in addresses, "PD preparation did not retain WAN election separately from VIP publication"
+            pd_server.send_signal(signal.SIGCONT)
         wait(lambda: active("a"))
+        if dhcp6_server:
+            assert pd_observed("a").get("prefixes"), "VIP published without the required PD"
+            print("PASS elected WAN acquired PD before graceful VIP publication; timeout withheld VIP until ISC resumed", flush=True)
         start("ha-b", ["unshare"] + (["--time", "--boottime", "7200"] if dhcp6_server else []) + ["--pid", "--fork", "--mount-proc", "--kill-child=SIGTERM", str(stage / "routerd"), "boot", "--file", str(stage / "b/boot.json")], "b")
         wait(lambda: (stage / "b/run/supervisor.sock").exists())
         wait(lambda: modules("b").get("service.ha", {}).get("ready") is True)
@@ -393,10 +406,12 @@ while True:
                 upload = stage / "partial-replica.json"
                 upload.write_text(json.dumps(partial_state))
                 diagnostic = (stage / "partial-replica.log").open("w")
-                partial = subprocess.Popen(inside("ha-b", ["curl", "--max-time", "8", "--noproxy", "*", "-sS", "--cert", str(stage / "b.crt"), "--key", str(stage / "b.key"), "--cacert", str(stage / "a.crt"), "-X", "PUT", "-H", "X-Routerd-DHCP-Domain: " + partial_domain, "--limit-rate", "1", "--data-binary", "@" + str(upload), "https://169.254.42.2:8443/v1/leases"]), stdout=diagnostic, stderr=diagnostic)
+                partial_headers = stage / "partial-replica-headers"
+                partial = subprocess.Popen(inside("ha-b", ["curl", "--max-time", "8", "--fail-with-body", "--noproxy", "*", "-sS", "--cert", str(stage / "b.crt"), "--key", str(stage / "b.key"), "--cacert", str(stage / "a.crt"), "-X", "PUT", "-H", "X-Routerd-DHCP-Domain: " + partial_domain, "-H", "Expect: 100-continue", "-D", str(partial_headers), "--limit-rate", "1", "--data-binary", "@" + str(upload), "https://169.254.42.2:8443/v1/leases"]), stdout=diagnostic, stderr=diagnostic)
                 diagnostic.close()
                 children.append(partial)
-                time.sleep(0.2)
+                wait(lambda: partial.poll() is not None or partial_headers.exists() and " 100 " in partial_headers.read_text(), timeout=4)
+                assert partial.poll() is None and " 100 " in partial_headers.read_text(), "snapshot upload did not reach the old worker's body reader"
             if dhcp6_server:
                 pd_server.send_signal(signal.SIGSTOP)
                 time.sleep(0.2)
@@ -538,7 +553,14 @@ while True:
             def no_global(node, iface):
                 return all(a["scope"] != "global" for link in json.loads(run(inside(node, ["ip", "-j", "-6", "addr", "show", "dev", iface]))) for a in link["addr_info"])
             remaining = max(0, (original_deadline - time.clock_gettime_ns(time.CLOCK_BOOTTIME)) / 1_000_000_000)
-            wait(lambda: not pd_observed("a").get("prefixes") and no_global("ha-a", "lan0") and no_global("ha-client", "lan0"), remaining + 8)
+            try:
+                wait(lambda: not pd_observed("a").get("prefixes") and no_global("ha-a", "lan0") and no_global("ha-client", "lan0"), remaining + 8)
+            except TimeoutError:
+                for node in ("a", "b"):
+                    print("PD expiry observation", node, pd_observed(node), flush=True)
+                    print("PD expiry LAN", node, run(inside("ha-" + node, ["ip", "-j", "-6", "address", "show", "dev", "lan0"])), flush=True)
+                print("PD expiry client", run(inside("ha-client", ["ip", "-j", "-6", "address", "show", "dev", "lan0"])), flush=True)
+                raise
             before = modules("a")["service.pd"]["generation"]
             api("a", "control.sock", "/v1/services/service.pd/restart", {})
             wait(lambda: modules("a").get("service.pd", {}).get("generation", 0) > before and modules("a").get("service.pd", {}).get("ready"))

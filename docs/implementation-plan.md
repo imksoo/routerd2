@@ -753,6 +753,13 @@ Healthの元期限、古い通知、5秒confirmed rollback、AFTR worker再起�
 
 #### NET-05 — link・address・WAN resource の完全化
 
+2026-10-28 `ha-pd-admission`と`ha-pd-prepared` / native-43をens18の実HGWに接続した。別MAC・隔離LANで
+RA/PD、DS-Lite経由IPv4 HTTPSとIPv6 HTTPS、学習DNSのUDP/TCP、終了時のRA撤去と
+Release/Replyが成功した。Replyは送信元49153。管理address/MAC/default routeは不変だった。
+同じsetupの7800秒試験は変更前`ha-pd-admission`のまま実行中で、自然更新成功とはまだ扱わない。独立端末のpublic DNSへの
+IPv4 UDP/TCPも応答し、AFTR内の実packetを確認した。DHCPv4貸出の隔離WANへの適用も確認したが、
+そのserverはHGWのIPv4 identityとは別。実HGW上のPD worker crash/restart、ONU直結・物理NICは未検証。
+
 2026-10-27追加: `pd-recovery/native-32`は旧routerdのDUID選択・lease保存/Restoreを比較し、
 private checkpointへDUID/IAID/PDと元BOOTTIME期限を保存する。同じbootのworker交換では
 有効PDを復旧してRebindする。明示DUIDを優先し、保存済みDUIDはMAC/PPP session交換でも保持する。
@@ -1218,6 +1225,13 @@ RFC 5798方式を明示できる。標準peerと現行方式peerのVIP TCP/UDP�
 標準checksumでのHealth連動・追加WAN identityもcapture付きで通った。全HA受入完了ではない。
 
 #### HA-02 — DHCP/PD lease の認証付き同期
+
+2026-10-28 `ha-pd-prepared` / native-43: 実homert02の設定と旧routerdを比較し、HA PD取得と
+VIP公開の循環を実PID1二台・ISCで再現した。PDは有効な選出で取得を開始し、DHCPv4配布は
+公開後に始める。不変worker設定の繰返しfsyncを除き、全variantを設定受理時に一度準備する。
+修正後は20cs広告の二台PD試験が二回完走し、同じTCP/UDP、BOOTTIME差・元期限・同期断・
+古い通知・再起動・復旧が通った。PD無しHA、Tailscale全実通信、make check、両architectureの
+static buildと署名artifact検査も成功した。広い分断/fencing、旧条件付きinput import、対象NICは残る。
 
 2026-10-27追加: `ha-pd/native-33`はPD workerの相互TLS complete checkpoint移送を実装した。
 旧routerdのファイル同期と共有DUID/Restoreを比較した。既存VRRP所有観測で主系/待機系を選び、

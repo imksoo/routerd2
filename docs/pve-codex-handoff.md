@@ -5,7 +5,33 @@
 [機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
-## 現在の変更: duid-import / native-43
+## 現在の変更: ha-pd-prepared / native-43
+
+変更の起点は75650e4。homert02の稼働中設定を読み取り専用で確認し、PD clientがVRRP master条件で
+動き、graceful activationがPD等の準備を待つことを確認した。本番設定は変更していない。
+旧nativeではHA PDがVIP公開を待って循環することを実署名PID1二台・独立ISCで再現した。
+現在は有効な選出でPD取得を始め、LAN DHCPv4配布はVIP公開後に始める。
+
+最初の修正試行では間欠的なTCP停止やPD期限/復旧待ち失敗が残った。controlを計測すると、
+不変のVRRP worker設定まで数十回書き直していた。設定受理時に全workerと両HA roleのfileを一度準備し、
+観測更新からfile書込みとその後の二重status取得を除いた。別のcacheや有効flagは追加していない。
+切替を繰り返した後も各設定fileの更新時刻が初期準備時から変わらないことを実プロセスで確認した。
+
+PVE Linux6.8/amd64、20csのVRRP広告で、PD付き二台試験は修正後二回完走した。
+上流ISC停止中の準備待ちtimeoutはVIPを公開せず、復帰後にPD取得→公開した。
+同じTCP socket/UDP mapping、両方向切替、BOOTTIME +7200sの同期と元PD期限撤去・復旧、
+古い通知/同期断/不完全TLS upload/worker・engine交換も通った。PD無しHAも成功した。
+`make check`のGo/Python/Race/vet、両architectureのCGO_ENABLED=0 buildと署名catalog/publisher/stage、
+Tailscaleの実PID1/独立peerの全通信・失効・rollback試験も成功した。ARM64実行と対象NICは未検証。
+
+再実行は`make check-ha-pd check-ha-state RELEASE_ID=ha-pd-prepared DOCKER='sudo -n docker'
+DHCP6_SERVER=dist/peer-env/isc-dhcp/root/usr/sbin/dhcpd`。fixtureはWAN選出とLAN VIP公開を
+実addressで区別し、低速TLS uploadは100 Continueでbody読取開始を確認してから切替える。
+期限やTCP待機上限は延長していない。調査trace・raw出力・完了済みstageは削除する。
+実HGWの自然更新試験は下記の通り別ownerで継続し、その生存中のstate/captureは保持する。
+旧条件付きinputのimport、広い分断/fencingと対象機器の受入は残る。
+
+## 直前の完了変更: duid-import / native-43
 
 旧routerdのDUID選択・PD snapshotとdnsmasqの永続lease設定を再確認した。
 WANの明示`clientDUID`は既に変換する。LANの移行policyにも`server_duid`を追加し、
@@ -175,16 +201,23 @@ EXT-02全体やhomert置換可能とは判断しない。
 - `git add .`や`git add -A`を使わず変更pathを明示する。main commit/pushは既に許可されている。
   GitHub Actions待ちを実装・修正の前提にしない。
 
-## 実上流の不足
+## 実上流: ens18の実HGW接続を確認、長時間試験は実行中
 
-ens20を使う許可済み隔離macvlan/LAN試行では、RS/Solicitの送信に対するRA/DHCPv6応答が無く、
-DHCPv4も取得できなかった。元のens20 MACからのRSにもRAが無かった。
-hostのIPv4 gateway到達性はあるが、回線・PVEの追加MAC制約・接続変更のどれが原因かは未確定。
-ONU/PD配布側との現在の接続条件を尋ねた質問は未回答。SSH先を繰り返し要求しない。
-同じ無応答試行を成功扱いせず、setupが変わるまで独立作業を続ける。
-`make check-uplink UPLINK_INTERFACE=ens20 UPLINK_AFTR=...`には実際の回線のAFTR指定が必要。
-`gw.transix.jp`は過去の例であり、この回線の確定値ではない。
-最新版の実ONU・対象NIC受入は未完了。
+既存`get-hgw-pd`の読取専用問い合わせで実HGWのPD配布を確認した。到達経路はens18であり、
+以前に無応答だったens20とは別の経路だった。homert02の設定から実AFTR intentを確認して使った。
+`ha-pd-admission` / native-43で初回確認後、`ha-pd-prepared`でも再検証した。`make check-uplink UPLINK_INTERFACE=ens18
+UPLINK_AFTR=<確認したAFTR> UPLINK_SECONDS=30 RELEASE_ID=ha-pd-prepared`で実行した。
+管理address/MAC/default routeを保持した別MAC・隔離LANで、実HGWのRA/PD、LANからDS-Lite経由の
+IPv4 HTTPS、IPv6 HTTPS、学習DNSへのUDP/TCP、RA撤去とRelease/Replyが通った。Replyの送信元は49153。
+終了後のhost管理状態は開始前と一致し、短期試験のnamespace・raw出力は削除済み。
+
+同じsetupで`UPLINK_SECONDS=7800`の長時間試験を実行中。これはfile準備変更前の
+`ha-pd-admission` binaryに固定している。最初の更新期限は約7200秒後。
+完了・自然Renew成功とはまだ扱わない。生存中のownerがcaptureとprivate stateを所有し、終了時に削除する。
+この試験の独立LANからpublic DNSへIPv4 UDP/TCP問い合わせも実行し、A応答とAFTR内の実packetを確認した。
+DHCPv4の有効貸出が隔離WANへ入ることも確認したが、そのserverはHGWのIPv4 identityとは別だった。
+まだ実HGW上でのPD worker crash/restartは行っていない。ONU直結・物理NIC・継続TCPの資格認定とは区別する。
+ens20の無応答を上流全体の利用不能へ外挿せず、未回答のens20質問を実HGW試験の前提にしない。
 
 ## 既存実装から維持する実運用の知見
 
@@ -205,7 +238,8 @@ ONU/PD配布側との現在の接続条件を尋ねた質問は未回答。SSH�
 1. homert02/03の現行設定・旧routerdを比較し、残る一台分の通信と二台の切替/復旧を完成させる。
    Tailscaleの残項目、旧stateless DHCPv6入力の条件付きHA/import不足、VRRP/PDの分断・復旧、
    管理・更新・戻し方を実際の相手で確認する。本番切替は行わない。
-2. 実上流のsetupが使えれば、ONU/HGW側のRA/DHCPv4/DHCPv6 PDからLAN・DNS・DS-Liteまで通す。
+2. 実行中の実HGW自然更新試験を完了まで確認し、その後PD worker crash/restartとDUID保持も実HGWで確認する。
+   ONU/HGW側のRA/DHCPv4/DHCPv6 PDからLAN・DNS・DS-Liteまで、実相手と対象版を区別して進める。
    仮想peerとの成功を、この回線や物理NICの合格に置き換えない。
 3. その後k8s-rt/pve-rtの実設定を確認し、Cloud SAMへ進む。
    SAMは旧docsの再設計目標を読み、認証/取消、構成配布、/32所有とNAT無し転送、移動・復旧を完成させる。

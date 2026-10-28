@@ -271,25 +271,29 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 				return p, err
 			}
 			c := protocols.vrrp[s.ModuleName()]
-			if c.GracefulActivation != nil {
-				until, allowed := facts.vrrpActivation[s.ModuleName()]
-				if !allowed || !vrrp.CurrentElection(snap, facts.bfdClock) {
-					continue
-				}
-				if until != 0 && (p.activationUntil == 0 || until < p.activationUntil) {
-					p.activationUntil = until
-				}
-			} else if !vrrp.CurrentOwnership(snap, facts.bfdClock) {
+			if !vrrp.CurrentElection(snap, facts.bfdClock) {
 				continue
 			}
-			p.vrrpOwners[s.ModuleName()] = ownershipFor(record, snap)
-			if record.ConfigDigest == protocols.instances[s.ModuleName()].digest && vrrp.CurrentOwnership(snap, facts.bfdClock) {
+			until, admitted := uint64(0), snap.Active
+			if c.GracefulActivation != nil {
+				until, admitted = facts.vrrpActivation[s.ModuleName()]
+			}
+			// PD acquisition prepares the uplink for admission. LAN DHCP
+			// allocation still requires the published VIP, not just election.
+			if record.ConfigDigest == protocols.instances[s.ModuleName()].digest {
 				for i, bound := range p.instances {
-					if ha, paired := protocols.leaseHA[bound.instance.Name]; paired && ha.owner == s.ModuleName() {
+					if ha, paired := protocols.leaseHA[bound.instance.Name]; paired && ha.owner == s.ModuleName() && (bound.instance.Role == "dhcp6" || admitted && snap.Active) {
 						p.instances[i] = ha.serving
 					}
 				}
 			}
+			if !admitted {
+				continue
+			}
+			if until != 0 && (p.activationUntil == 0 || until < p.activationUntil) {
+				p.activationUntil = until
+			}
+			p.vrrpOwners[s.ModuleName()] = ownershipFor(record, snap)
 			p.network.Links = append(p.network.Links, network.Link{Authority: lifetime.Deadline{BootID: snap.BootID, Nanos: snap.ExpiresNanos}, Name: c.VIPInterface, Kind: "macvlan", Parent: c.Interface, MACVLANMode: "bridge", HardwareAddr: vrrp.VirtualMAC(c.Family, c.VirtualRouterID).String(), IPv6AddrGenMode: "none"})
 			ensureInterface(&p.network, c.VIPInterface)
 			if c.VRF != "" {
