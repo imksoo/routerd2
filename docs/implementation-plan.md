@@ -1539,7 +1539,7 @@ MagicDNSの実観測を公開した。CLI importしたshieldsUp:trueでhost/subn
 personal keyの広告要求だけではtagが付かず、承認済みtagged keyの登録でserverと観測が一致した。
 要求とkey削除後の保存identity、独立peerのDNS名/tags観測と実転送、
 tagged nodeの管理者失効とworker再起動による旧権限の不復活も確認した。
-初回のcontrol socket待機20秒timeout1回は原因未特定で、後続成功だけで解消とは扱わない。
+初回のcontrol socket待機timeoutは、後述DIST-01の選択metadata読取修正で旧版を再現・比較した。
 再実行は`make check-tailscale RELEASE_ID=tailscale-policy`。
 
 OS acceptDNS/global・split resolver/search domainの取り込み、Tailscale SSHの別権限/OS契約、旧resourceの条件付き一括importと旧版/sealed identity移設、
@@ -1569,6 +1569,13 @@ OS image/TUN setup統合・広い障害条件・対象実機受入は残る。EX
 前提: CORE-02, CORE-06, OPS-01, CORE-04。 設計判断: D-02, D-08, D-09。
 
 部分成果物の前提: SYS-03/runtime-authority。
+
+2026-10-28 `startup-io-fixed`: 実署名catalog/PID1の起動で、旧b498dbdのOpen/WithStateが選択読取の度に
+全artifactを再取得・検証し、controlだけで約899MBを読んでいた。1 CPUで関連Race検査を並行すると
+20秒のcontrol socket待機timeoutを再現した。journalのopenと選択fenceはmetadataだけを検証し、
+runtime取得・prepare・bootでpayloadを検証する責任へ整理した。lock・署名/payload検査は残る。
+同条件の修正版は15.732秒・control read106,942 bytesで起動し、その後の独立peer実通信と復旧試験が通った。
+比較用worktreeとraw成果物は削除する。`make check-tailscale RELEASE_ID=startup-io-fixed`で再実行する。
 
 **成果物**
 

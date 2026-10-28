@@ -32,7 +32,8 @@ type Store struct {
 
 // Open anchors all operations to directory descriptors and creates the empty
 // journal if this is a genuinely new store. An absent or corrupt selector in an
-// existing store is never silently treated as a new installation.
+// existing store is never silently treated as a new installation. This opens
+// selection metadata; acquiring or selecting a runtime verifies its payloads.
 func Open(options Options) (*Store, error) {
 	s, err := openStoreHandles(options)
 	if err != nil {
@@ -43,7 +44,7 @@ func Open(options Options) (*Store, error) {
 	if err != nil {
 		return fail(err)
 	}
-	_, err = s.readState(context.Background())
+	_, err = s.readJournal(context.Background())
 	if errors.Is(err, os.ErrNotExist) {
 		names, listErr := directoryNames(s.generations, s.options.MaxGenerations)
 		if listErr != nil {
@@ -178,6 +179,8 @@ func (s *Store) Status(ctx context.Context) (State, error) {
 // and finish a configuration transaction without racing prepare/boot/confirm.
 // The callback must not call another method on this Store. Competing operations
 // return ErrBusy rather than waiting. The supplied state is not persisted.
+// This authenticates the journal and exact reference links, not payload bytes:
+// the configuration writer is already running the supervisor's pinned runtime.
 func (s *Store) WithState(ctx context.Context, fn func(State) error) error {
 	if fn == nil {
 		return errors.New("nil release state callback")
@@ -187,7 +190,7 @@ func (s *Store) WithState(ctx context.Context, fn func(State) error) error {
 		return err
 	}
 	defer unlock()
-	state, err := s.readState(ctx)
+	state, err := s.readJournal(ctx)
 	if err != nil {
 		return err
 	}

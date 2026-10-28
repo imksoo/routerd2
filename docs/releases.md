@@ -18,10 +18,10 @@ Every native executable contains one complete canonical
 The publisher derives `runtime_abi` from those actual input bytes and requires
 all native members to agree. There is no layout flag that substitutes a claim.
 The receiver checks the signed declaration against each native artifact at
-stage and whenever the installed set is reopened. The executing supervisor also
+stage and whenever the installed runtime image is acquired. The executing supervisor also
 checks its own declaration against the selected signed manifest.
 
-Each reopen still reads and hashes every complete payload and verifies the signed
+Each runtime image acquisition reads and hashes every complete payload and verifies the signed
 manifest. Within one Store lifetime, successful ELF/identity/ABI parsing of those
 same bytes may be reused under the manifest-digest/artifact-name key. That key
 binds every expected command, release, architecture and ABI claim. It never
@@ -302,6 +302,13 @@ The worker opens the protected trust policy and release store independently.
 Before opening/adopting configuration it checks the exact selected runtime and
 startup intent under the release lock; a bound store identity must already match.
 This context is not an operator boot-config field or an authorization credential.
+
+Opening a release store and `WithState` authenticate the selection journal and
+its exact links. They do not acquire a runtime image. The running configuration
+writer uses the supervisor's pinned selection and fences its whole transaction
+with that journal lock; it does not reread the engine and corresponding-source
+payloads for configuration commits. Explicit runtime inspection/acquisition,
+preparation and boot selection keep their complete payload checks.
 
 Control holds its own writer mutex, then the release process mutex and file lock,
 through stage, kernel/protocol apply, journal save, and any failed-apply restoration.

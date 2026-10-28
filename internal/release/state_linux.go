@@ -139,8 +139,8 @@ func (s *Store) readState(ctx context.Context) (State, error) {
 
 // readJournal authenticates the selector, canonical record, checksum, state
 // invariants and every exact reference link. It does not qualify an executable.
-// Operational callers use readState; only the boot transaction may distinguish
-// a damaged candidate payload from a damaged journal before choosing fallback.
+// Selection-only readers use this directly. Runtime acquisition and selection
+// qualify payloads separately; a configuration transaction does not reload them.
 func (s *Store) readJournal(ctx context.Context) (State, error) {
 	if err := s.checkContext(ctx); err != nil {
 		return State{}, err

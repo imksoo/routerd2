@@ -354,10 +354,14 @@ func TestBootRecoversDamagedPendingPayloadWithoutExecutingIt(t *testing.T) {
 				}
 				before := mustState(t, s)
 				damageBootArtifact(t, s, target, missing)
-				if opened, err := Open(s.options); err == nil {
-					opened.Close()
-					t.Fatal("ordinary operational open hid damaged candidate")
+				opened, err := Open(s.options)
+				if err != nil {
+					t.Fatal("selection metadata open inspected candidate payload:", err)
 				}
+				if _, err := opened.Status(ctx); err == nil {
+					t.Fatal("runtime inspection hid damaged candidate")
+				}
+				opened.Close()
 				selected, err := s.BeginBoot(ctx, "boot-recovery")
 				if err != nil {
 					t.Fatal("damaged candidate prevented verified fallback:", err)

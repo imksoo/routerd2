@@ -5,7 +5,28 @@
 [機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
-## 現在の変更: tailscale-policy / native-43
+## 現在の変更: startup-io-fixed / native-43
+
+起動待機timeoutを旧b498dbdの実PID1で再現した。PVE Linux6.8/amd64、全試験processを
+CPU0へ固定し、同CPUで関連release Race検査を並行した。network/logging/managementはReady、
+controlは世代1・再起動0で起動中、read量362,516,067 bytesの時点で20秒上限に達した。
+負荷無しの1 CPU旧版では14.669秒、controlのread量898,844,195 bytesだった。
+`/proc/PID/io`の`rchar`は論理read量であり、物理disk I/O量ではない。
+
+release `Open`→`WithState`→writer構築が、選択metadataを読む度に全artifactを3回取得・検証していた。
+`Open`と`WithState`はcanonical journal・checksum・exact linkを検証し、runtimeの取得・prepare・
+boot選択でpayloadを検証する責任へ整理した。設定writerの選択/store/startup fenceとtransaction lockは維持する。
+20秒の待機上限で比較した。
+
+修正版は同じ1 CPU/Race並行条件で15.732秒、control read量106,942 bytesでsocketを公開し、
+その後の実通信・再起動・rollback・失効/再認証・tags/shields・DNSが通った。
+独立Headscale0.29.6・公式Tailscale1.104.2・dnsmasq・TCP/UDP相手を使った。
+関連release Raceも成功。破損payloadの取得/boot拒否、選択journalのfenceは局所検査で維持した。
+再実行は`make check-tailscale RELEASE_ID=startup-io-fixed`。1 CPU比較ではCPU0へtasksetし、
+別terminalで同CPUの`go test -race -count=1 ./internal/release`を並行する。
+比較用b498dbd worktreeには同じfixtureと共有peer/engine/sourceを使い、終了後に削除した。
+
+### 既存のTailscale観測・制御
 
 旧routerdのstatus/controller/renderを読み、nodeとpeerのDNS名・付与済みtags、
 現在のtailnet名・DNS suffix・MagicDNS設定を実daemonから観測するようにした。
@@ -76,7 +97,7 @@ CA・resolver・`/run`を私有化し、通常のDNS処理をhostのresolved/DBu
 条件付きserviceは、適用済みResourceStateの元期限で停止する。pollや通知の受信で期限を延ばさない。
 
 compiler native-43、worker ABI5、network journal11、DHCPv6 checkpoint2。
-`release_id=tailscale-policy`、fc12c56からの今回の変更で実行した。
+`release_id=startup-io-fixed`、b498dbdからの今回の変更で実行した。
 実装と必要な設定は[README](../internal/protocol/tailscale/README.md)を参照する。
 engine無しのdefault host catalogはTailscaleを広告しない。署名catalogにはengine/source両artifactを結ぶ。
 
@@ -97,7 +118,7 @@ supervisor/control/network/Health/Tailscale workerを起動した。
 - WAN source policyをlookup5270より後の6000に置いた構成で実転送を確認した。
 - captureでLAN/WANのTCP/UDP、DNS、暗号化underlay packetを確認した。
 
-再実行は`make check-tailscale RELEASE_ID=tailscale-policy`。
+再実行は`make check-tailscale RELEASE_ID=startup-io-fixed`。
 peerのchecksum検査・必要時の取得、製品build、engine/source生成、署名catalog/PID1試験を含む。
 資格情報・生ログ・capture・一時releaseは終了時に削除する。
 
@@ -107,8 +128,8 @@ peerのchecksum検査・必要時の取得、製品build、engine/source生成�
 設定transactionは完了を待つため12秒のclient上限を使い、意図した経路・転送の結果は弱めていない。
 Runningやpingだけをrouter機能の受入とは数えない。
 
-今回の`make check`でGo/Python・Race Detector・vetが通った。今回の観測contract変更にも
-関連Race/vetを実行し、`make build build-publisher build-linux RELEASE_ID=tailscale-policy`で
+今回の`make check`でGo/Python・Race Detector・vetが通った。今回のrelease選択読取変更にも
+関連Race/vetを実行し、`make build build-publisher build-linux RELEASE_ID=startup-io-fixed`で
 nativeとamd64/arm64 core6をCGO_ENABLED=0でbuildした。最終の実PID1試験は
 上記のCLI import・外部identity・再認証・経路受理・LAN DNS・shieldsUp/rollback・tagged登録と失効を含めて成功した。
 
@@ -164,10 +185,6 @@ ONU/PD配布側との現在の接続条件を尋ねた質問は未回答。SSH�
 - `make check`は補助検査。実workerと独立ISC/radvd/dnsmasq/BusyBox/Linux端末、
   実Health→PBR二WAN、conntrackd/VRRPと実TCP/UDPのfixtureを必要な変更に合わせて使う。
   コマンドは`make help`と対応scriptを読む。過去の成功は今回の実行成功として転記しない。
-
-初回試行でcontrol socketの20秒待機timeoutが1回あった。原因は未特定で、後続成功だけで
-解消扱いにしない。失敗時に実supervisor状態を表示するようにし、再現時のworker状態を調べる。
-生ログや一時stateは保存していない。
 
 ## 次の作業
 

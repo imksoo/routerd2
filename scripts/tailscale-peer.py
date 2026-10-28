@@ -106,6 +106,10 @@ def peer(stage):
     def modules():
         return {x["name"]: x for x in product_api("supervisor.sock", "/v1/status")["modules"]}
 
+    def control_io(control):
+        raw = Path(f"/proc/{pid1}/root/proc/{control}/io").read_text()
+        return {k: int(v) for k, v in (line.split(":") for line in raw.splitlines()) if k in ("rchar", "syscr")}
+
     def observation():
         instances = product_api("control.sock", "/v1/services")["instances"]
         return next((x.get("snapshot", {}) for x in instances if x["name"] == module), {})
@@ -312,15 +316,18 @@ def peer(stage):
         bootfile.write_text(json.dumps(boot))
         capture = start("ts-a", ["tcpdump", "-Z", "root", "--immediate-mode", "-U", "-n", "-i", "any", "-w", str(stage / "tailnet.pcap")], "capture")
         command = ["unshare", "--mount", "--pid", "--fork", "--mount-proc", "--kill-child=TERM", str(inputs / "routerd"), "boot", "--file", str(bootfile)]
+        startup_start = time.monotonic()
         daemon = start("ts-a", command, "product")
         child_file = Path(f"/proc/{daemon.pid}/task/{daemon.pid}/children")
         wait(lambda: child_file.read_text().strip())
         pid1 = int(child_file.read_text().split()[0])
         wait(lambda: (stage / "product-run/control.sock").exists())
+        socket_seconds = round(time.monotonic()-startup_start, 3)
         wait(lambda: observation().get("backend_state") == "Running", 35)
         assert product_api("supervisor.sock", "/v1/status")["pid"] == 1
         print("PASS signed engine/image/source catalog selected under PID 1", flush=True)
         original = observation()
+        print("CONTROL startup:", socket_seconds, control_io(modules()["control"]["pid"]), flush=True)
         assert original["online"]
         assert original["dns_name"] == "product-a.test.invalid."
         assert original["tailnet"]["dns_domain"] == "test.invalid" and original["tailnet"]["magic_dns_enabled"]
@@ -610,6 +617,10 @@ def peer(stage):
         if supervisor.exists():
             status = subprocess.run(["curl", "--max-time", "2", "-fsS", "--unix-socket", str(supervisor), "http://localhost/v1/status"], capture_output=True, text=True)
             print("SUPERVISOR:", status.stdout or status.stderr, flush=True)
+            if status.returncode == 0:
+                control = next((m for m in json.loads(status.stdout)["modules"] if m["name"] == "control"), None)
+                if control and control.get("pid") and Path(f"/proc/{pid1}/root/proc/{control['pid']}/io").exists():
+                    print("CONTROL failed-start I/O:", control_io(control["pid"]), flush=True)
         for log in stage.glob("*.log"):
             lines=log.read_text(errors="replace").splitlines()[-25:]
             print(log.name, "\n".join("[private enrollment detail omitted]" if "/register/" in line or "tskey-" in line else line for line in lines), flush=True)

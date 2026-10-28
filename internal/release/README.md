@@ -12,8 +12,11 @@ queues changes; a successful prepare or rollback does not mean that the running
 process tree has already changed.
 
 `WithState` holds the process mutex and interprocess file lock across a callback,
-after verifying the current state and referenced runtimes. It does not publish
-callback changes. The configuration writer uses it for selection checks and its
+after authenticating the current journal and exact reference links. It does
+not reread runtime payloads: the writer is already executing the supervisor's
+pinned, qualified runtime. Runtime acquisition, preparation and boot selection
+retain their payload verification. Callback changes are not published.
+The configuration writer uses it for selection checks and its
 complete apply/save/restore transaction; a separate prepare cannot enter midway.
 Callbacks must not recursively call this store. Contention returns `ErrBusy`,
 and callback errors/canceled acquisition release or avoid both locks.
@@ -42,7 +45,7 @@ Native ABI records are extracted from readonly ELF data without execution;
 all native members must agree and match the signed manifest. There is no
 publisher layout override for the declaration. See the
 [format declaration contract](../../docs/releases.md#native-format-declarations).
-Every reopen rehashes complete payloads; only successful structural parsing is
+Every runtime image acquisition rehashes complete payloads; only successful structural parsing is
 memoized within the Store, under the signed manifest digest and artifact name,
 with a 256-entry bound and no cached payload bytes. A changed signature claim
 cannot borrow another manifest's inspection, and changed bytes fail the hash

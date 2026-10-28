@@ -363,8 +363,10 @@ func TestCorruptionAndMissingContentFailClosed(t *testing.T) {
 			}
 			reopened, err := Open(store.options)
 			if err == nil {
-				reopened.Close()
-				t.Fatal("corrupt store was silently reinitialized")
+				defer reopened.Close()
+				if _, err := reopened.Status(context.Background()); err == nil {
+					t.Fatal("corrupt store was accepted or silently reinitialized after reopening")
+				}
 			}
 		})
 	}

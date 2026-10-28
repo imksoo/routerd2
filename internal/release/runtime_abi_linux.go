@@ -16,7 +16,7 @@ type nativeCheck struct{ Manifest, Artifact string }
 // Caller holds s.mu and has just checked the complete current payload digest,
 // regular-file mode/size and signed manifest. That manifest digest binds all
 // inspection expectations, not just an artifact's bytes. No result crosses a
-// Store lifetime; every reopen still reads and hashes every artifact.
+// Store lifetime; every runtime image acquisition still hashes every artifact.
 func (s *Store) verifyNative(file *os.File, artifact Artifact, manifest Manifest, digest string) error {
 	key := nativeCheck{Manifest: digest, Artifact: artifact.Name}
 	if _, ok := s.nativeChecks[key]; ok {

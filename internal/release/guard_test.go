@@ -47,3 +47,29 @@ func TestWithStateKeepsProcessAndFileLocksUntilCallbackFinishes(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// A configuration writer uses the already executing runtime. Reading its
+// selection must not reopen every payload or require a healthy unused image.
+func TestWithStateKeepsSelectionAuthoritySeparateFromPayloadQualification(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	active := initializeFixture(t, s)
+	damageBootArtifact(t, s, active, false)
+	reopened, err := Open(s.options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	if err := reopened.WithState(ctx, func(state State) error {
+		if state.Active == nil || *state.Active != active {
+			t.Fatal("wrong selected runtime", state.Active)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if image, err := reopened.Verify(ctx, active); err == nil {
+		image.Close()
+		t.Fatal("runtime acquisition accepted changed payload")
+	}
+}
