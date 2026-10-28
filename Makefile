@@ -36,6 +36,7 @@ help:
 	  'make check-pppoe-pd     Verify PPP PD release, WAN replacement and LAN IPv6 with independent ISC DHCP' \
 	  'make check-ha-state    Preserve DHCP/TCP/UDP state across two native routers' \
 	  'make check-ha-pd       Verify shared PD across two routers with different BOOTTIME clocks' \
+	  'make check-ha-egress   Verify shared PD, DS-Lite and independent backup WAN handoff' \
 	  'make check-health-pbr  Required two-WAN real-daemon TCP/UDP failover gate' \
 	  'make check-vrrp-unicast Verify VRRP peer failover and finite WAN identity' \
 	  'make check-tailscale   Verify signed Tailscale subnet/exit traffic, identity and revoke with independent peers' \
@@ -311,6 +312,10 @@ check-ha-state: build build-publisher conntrack-engine
 .PHONY: check-ha-pd
 check-ha-pd: build build-publisher conntrack-engine
 	$(PYTHON) scripts/ha-state-peer.py --dhcp6-server '$(DHCP6_SERVER)'
+
+.PHONY: check-ha-egress
+check-ha-egress: build build-publisher conntrack-engine
+	$(PYTHON) scripts/ha-state-peer.py --dhcp6-server '$(DHCP6_SERVER)' --pd-dslite
 
 TAILSCALE_ARCH ?= $(shell $(GO) env GOARCH)
 TAILSCALE_DIR ?= dist

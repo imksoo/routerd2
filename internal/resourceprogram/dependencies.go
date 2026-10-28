@@ -80,6 +80,8 @@ func inferredDependencies(resources []Resource) map[string][]string {
 			if !sharedLease {
 				iface(r.Service.Interface())
 			}
+			// Delegation destinations are outputs of PD, not prerequisites
+			// for acquisition or standby checkpoint synchronization.
 			if r.Service.VRRP != nil && r.Service.VRRP.ConntrackSync != nil {
 				sync := r.Service.VRRP.ConntrackSync
 				add(conntrackSetting)
@@ -105,11 +107,6 @@ func inferredDependencies(resources []Resource) map[string][]string {
 					for _, id := range addresses[r.Service.Health.Interface+"\x00"+source.String()] {
 						add(id)
 					}
-				}
-			}
-			if r.Service.DHCP6 != nil {
-				for _, delegation := range r.Service.DHCP6.Delegations {
-					iface(delegation.Interface)
 				}
 			}
 		}

@@ -27,6 +27,23 @@ func TestExcludedVRFStopsItsMultihopBFD(t *testing.T) {
 	}
 }
 
+func TestPDAcquisitionDoesNotWaitForDelegationDestination(t *testing.T) {
+	program := Program{SchemaVersion: SchemaVersion, Resources: []Resource{
+		{ID: "wan", Interface: &network.Interface{Name: "wan0"}},
+		{ID: "b4", When: &FactCondition{Fact: "elected"}, Link: &network.Link{Name: "wan-ha", Kind: "macvlan", Parent: "wan0"}},
+		{ID: "pd", Service: &serviceconfig.Service{Name: "pd", DHCP6: &serviceconfig.DHCP6{Interface: "wan0", RequestPrefix: true, IAID: 7,
+			Delegations: []serviceconfig.Delegation{{Name: "b4", Interface: "wan-ha", PrefixLength: 128, HostID: 33}},
+		}}},
+	}}
+	native, states, err := projectSource(program, truthSnapshot(map[string]Truth{"elected": False}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !states["pd"].Active || states["b4"].Active || len(native.Services) != 1 {
+		t.Fatal("absent delegation destination prevented PD from starting", states, native.Services)
+	}
+}
+
 func guardedProgram() Program {
 	return Program{SchemaVersion: SchemaVersion, Resources: []Resource{
 		{ID: "wan", When: &FactCondition{Fact: "health"}, ReadyWhen: &FactCondition{Fact: "address"}, Interface: &network.Interface{Name: "wan0"}},

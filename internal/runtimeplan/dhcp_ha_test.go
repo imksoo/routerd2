@@ -81,6 +81,7 @@ func TestHAPDAcquiresWhileGracefulVIPPublicationAwaitsPrefix(t *testing.T) {
 	}}
 	pd := serviceconfig.Service{Name: "pd", DHCP6: &serviceconfig.DHCP6{
 		Interface: "wan0", RequestPrefix: true, IAID: 1, ClientDUID: "00030001020000000042",
+		Delegations: []serviceconfig.Delegation{{Name: "b4", Interface: "wan-ha", PrefixLength: 128, HostID: 33}},
 		HA: &serviceconfig.LeaseHA{Owner: "ha", Replication: peertls.Config{
 			ListenAddress: netip.MustParseAddrPort("192.0.2.2:8444"), PeerAddress: netip.MustParseAddrPort("192.0.2.3:8444"),
 			CertificateFile: "/keys/local.crt", PrivateKeyFile: "/keys/local.key", PeerCertificateFile: "/keys/peer.crt",
@@ -113,6 +114,11 @@ func TestHAPDAcquiresWhileGracefulVIPPublicationAwaitsPrefix(t *testing.T) {
 		}
 		if len(p.network.Links) != 0 {
 			t.Fatal("PD preparation published an unadmitted VIP", p.network.Links)
+		}
+		for _, iface := range p.network.Interfaces {
+			if iface.Name == "wan-ha" {
+				t.Fatal("PD without an active grant managed its delegation destination")
+			}
 		}
 		for _, b := range p.instances {
 			if b.instance.Name == pd.ModuleName() {

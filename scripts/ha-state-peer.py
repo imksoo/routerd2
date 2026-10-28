@@ -20,7 +20,7 @@ def run(command):
     return subprocess.run(command, check=True, capture_output=True, text=True, timeout=10).stdout
 
 
-def peer(stage, dhcp6_server):
+def peer(stage, dhcp6_server, pd_dslite):
     def deadline(*_):
         raise TimeoutError("HA connection-state communication deadline")
     signal.signal(signal.SIGALRM, deadline)
@@ -29,6 +29,9 @@ def peer(stage, dhcp6_server):
     Path("/run/netns").mkdir(parents=True, exist_ok=True)
     run(["mount", "-t", "tmpfs", "-o", "mode=700", "tmpfs", "/run/netns"])
     namespaces = ["ha-a", "ha-b", "ha-client", "ha-server"]
+    if pd_dslite:
+        namespaces.append("ha-backup")
+    segments = ("lan", "wan", "sync", "backup") if pd_dslite else ("lan", "wan", "sync")
     children = []
     captures = []
 
@@ -69,12 +72,12 @@ def peer(stage, dhcp6_server):
         for ns in namespaces:
             run(["ip", "netns", "add", ns])
             run(inside(ns, ["ip", "link", "set", "lo", "up"]))
-        for bridge in ("lan", "wan", "sync"):
+        for bridge in segments:
             run(["ip", "link", "add", bridge, "type", "bridge"])
             run(["ip", "link", "set", bridge, "up"])
         for index, ns in enumerate(namespaces):
-            segments = ("lan", "wan", "sync") if index < 2 else (("lan",) if index == 2 else ("wan",))
-            for segment in segments:
+            attachments = segments if index < 2 else (("lan",) if index == 2 else ("wan",) if index == 3 else ("backup",))
+            for segment in attachments:
                 port = segment + str(index)
                 run(["ip", "link", "add", port, "type", "veth", "peer", "name", "wire"])
                 run(["ip", "link", "set", "wire", "netns", ns])
@@ -88,7 +91,7 @@ def peer(stage, dhcp6_server):
         publisher = str(stage / "routerd-bundle")
         (stage / "trust.json").write_text(run([publisher, "trust", "--private-key-file", str(key)]))
         (stage / "trust.json").chmod(0o600)
-        roles = ("logging", "network", "control", "management", "vrrp", "dhcp_server") + (("dhcp6", "dhcp6_server", "ra") if dhcp6_server else ())
+        roles = ("logging", "network", "control", "management", "vrrp", "dhcp_server") + (("dhcp6", "dhcp6_server", "ra") if dhcp6_server else ()) + (("aftr", "health") if pd_dslite else ())
         layout = {"boot_abi": 1, "worker_abi": 5, "entrypoint": "routerd",
                   "roles": [{"role": role, "artifact": "routerd-logging" if role == "logging" else "routerd-modules"} for role in roles],
                   "engines": [{"role": "vrrp", "artifact": "ct-image", "sources": "ct-sources"}],
@@ -145,6 +148,46 @@ def peer(stage, dhcp6_server):
                 resources.append({"id": "lan-info", "when": {"fact": "service.ha.active"}, "service": {"name": "lan-info", "dhcp6_server": {
                     "interface": "lan0", "server_duid": "000400112233445546778899aabbccddeeff", "dns_from": ["pd"], "search_from": ["pd"], "domain_search": ["local.test"], "refresh_seconds": 600
                 }}})
+            if pd_dslite:
+                # Match homert's default one-second advertisement interval.
+                # The existing direct/PD profiles retain their 20cs checks.
+                resources[7]["service"]["vrrp"]["advert_interval_centiseconds"] = 100
+                resources[6]["forwarding"]["ipv4_ecmp_hash"] = "source"
+                # Existing primary-WAN sessions need that path prepared before
+                # publishing the VIP. Backup uses a different public identity.
+                resources[7]["service"]["vrrp"]["graceful_activation"]["ready_when"] = {"all": [
+                    {"fact": "service.pd.active"}, {"fact": "service.health-primary.active"}]}
+                pd = next(r["service"]["dhcp6"] for r in resources if r["id"] == "pd")
+                pd["delegations"].append({"name": "b4", "interface": "wan-ha", "subnet_id": 1, "host_id": 33, "prefix_length": 128})
+                resources += [
+                    {"id": "backup", "interface": {"name": "backup0"}},
+                    {"id": "backup-identity", "when": {"fact": "service.ha.elected"}, "link": {"name": "backup-ha", "kind": "macvlan", "parent": "backup0", "hardware_addr": "02:00:5e:00:01:44"}},
+                    {"id": "backup-interface", "interface": {"name": "backup-ha"}},
+                    {"id": "backup-address", "address": {"interface": "backup-ha", "cidr": "192.0.2.1/24"}},
+                    {"id": "internet", "when": {"fact": "service.pd.active"}, "ready_when": {"fact": "service.internet.active"}, "service": {"name": "internet", "ds_lite": {
+                        "interface": "wan-ha", "tunnel": "dslite0", "source_from": "pd", "source_delegation": "b4", "candidates": ["2001:db8:ffff::20"],
+                        "b4_peer": "192.0.0.1/32", "route_gateway": "192.0.0.1", "table": 110, "mtu": 1460}}},
+                    {"id": "backup-default", "route": {"destination": "0.0.0.0/0", "gateway": "192.0.2.50", "interface": "backup-ha", "table": 120}},
+                    {"id": "probe-primary", "policy_rule": {"family": 4, "priority": 110, "table": 110, "mark": 41}},
+                    {"id": "probe-backup", "policy_rule": {"family": 4, "priority": 120, "table": 120, "mark": 42}},
+                    {"id": "health-primary", "depends_on": ["internet", "probe-primary"], "when": {"fact": "service.internet.active"}, "service": {"name": "health-primary", "health": {
+                        "interface": "dslite0", "source_address": "192.0.0.2", "target": "203.0.113.50", "protocol": "tcp", "port": 18082, "mark": 41,
+                        "interval_ms": 200, "timeout_ms": 200, "healthy_threshold": 2, "unhealthy_threshold": 2}}},
+                    {"id": "health-backup", "depends_on": ["probe-backup"], "service": {"name": "health-backup", "health": {
+                        "interface": "backup-ha", "source_address": "192.0.2.1", "target": "203.0.113.50", "protocol": "tcp", "port": 18082, "mark": 42,
+                        "interval_ms": 200, "timeout_ms": 200, "healthy_threshold": 2, "unhealthy_threshold": 2}}},
+                    {"id": "egress", "egress_route": {"destination": "0.0.0.0/0", "table": 100, "metric": 100, "candidates": [
+                        {"preference": 120, "when": {"fact": "service.health-primary.active"}, "next_hop": {"interface": "dslite0", "gateway": "192.0.0.1", "weight": 1}},
+                        {"preference": 60, "when": {"fact": "service.health-backup.active"}, "next_hop": {"interface": "backup-ha", "gateway": "192.0.2.50", "weight": 1}}]}},
+                    {"id": "lan-egress", "policy_rule": {"family": 4, "priority": 1000, "table": 100, "source": "198.18.0.0/24"}},
+                ]
+                firewall = next(r["firewall"] for r in resources if r["id"] == "firewall")
+                firewall["nat"] = [{"type": "snat", "match": {"family": 4, "source": "198.18.0.0/24", "out_interface": name}, "address": address}
+                                   for name, address in (("dslite0", "203.0.113.1"), ("backup-ha", "192.0.2.1"))]
+                # The AFTR underlay is IPv6-only. Do not inherit the direct
+                # profile's IPv4 route around the tunnel during handoff.
+                resources = [r for r in resources if r["id"] not in ("wan-base", "wan-route")]
+                next(r["address"] for r in resources if r["id"] == "wan-address")["cidr"] = "203.0.113.1/32"
             (directory / "config.json").write_text(json.dumps({"schema_version": 2, "resources": resources}))
             workers = {role: str(stage / ("routerd-logging" if role == "logging" else "routerd-modules")) for role in roles}
             boot = {"platform": "host", "config": str(directory / "config.json"), "runtime_dir": str(directory / "run"), "state_dir": str(directory / "state"), "workers": workers, "engines": {"vrrp": str(stage / "conntrack-engine.tar")}, "ssh": {"user": "admin"}}
@@ -155,7 +198,7 @@ def peer(stage, dhcp6_server):
             (directory / "boot.json").write_text(json.dumps(boot))
         run(inside("ha-client", ["ip", "address", "add", "198.18.0.50/24", "dev", "lan0"]))
         run(inside("ha-client", ["ip", "route", "add", "default", "via", "198.18.0.1"]))
-        run(inside("ha-server", ["ip", "address", "add", "203.0.113.50/24", "dev", "wan0"]))
+        run(inside("ha-server", ["ip", "address", "add", "203.0.113.50/32" if pd_dslite else "203.0.113.50/24", "dev", "lo" if pd_dslite else "wan0"]))
         server = r'''
 import socket, threading
 def udp():
@@ -171,6 +214,23 @@ while True:
  for line in f: f.write(line.rstrip()+b' '+str(peer).encode()+b'\n')
 '''
         start("ha-server", ["python3", "-u", "-c", server], "server")
+        if pd_dslite:
+            run(inside("ha-backup", ["ip", "address", "add", "192.0.2.50/24", "dev", "backup0"]))
+            run(inside("ha-backup", ["ip", "address", "add", "203.0.113.50/32", "dev", "lo"]))
+            egress_server = r'''
+import socket,threading,sys
+value=sys.argv[1].encode()
+def udp():
+ s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.bind(('203.0.113.50',18083))
+ while True:
+  data,peer=s.recvfrom(2048);s.sendto(value,peer)
+threading.Thread(target=udp,daemon=True).start()
+s=socket.socket();s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);s.bind(('203.0.113.50',18082));s.listen()
+while True:
+ c,_=s.accept();c.sendall(value);c.close()
+'''
+            start("ha-server", ["python3", "-u", "-c", egress_server, "DSLite"], "egress-primary")
+            start("ha-backup", ["python3", "-u", "-c", egress_server, "backup"], "egress-backup")
         if dhcp6_server:
             run(inside("ha-server", ["ip", "-6", "address", "add", "fe80::2/64", "dev", "wan0"]))
             run(inside("ha-server", ["ip", "-6", "address", "add", "2001:db8:ffff::20/64", "dev", "wan0"]))
@@ -244,7 +304,7 @@ except socket.timeout:
             for transport in ("+notcp", "+tcp"):
                 assert "2001:db8:ffff::20" in run(inside("ha-client", ["dig", "-6", "@2001:db8:ffff::20", "host.wan.test", "AAAA", "+short", "+time=2", "+tries=1", transport]))
 
-        for segment in ("lan", "wan", "sync"):
+        for segment in segments:
             log = (stage / (segment + "-capture.log")).open("w")
             process = subprocess.Popen(["tcpdump", "--immediate-mode", "-U", "-n", "-i", segment, "-w", str(stage / (segment + ".pcap"))], stdout=log, stderr=log)
             children.append(process)
@@ -261,6 +321,43 @@ except socket.timeout:
             addresses = {a["local"] for link in json.loads(run(inside("ha-a", ["ip", "-j", "address", "show"]))) for a in link.get("addr_info", [])}
             assert "203.0.113.1" in addresses and "198.18.0.1" not in addresses, "PD preparation did not retain WAN election separately from VIP publication"
             pd_server.send_signal(signal.SIGCONT)
+        if pd_dslite:
+            wait(lambda: pd_observed("a").get("prefixes"))
+            def b4_addresses():
+                addresses = json.loads(run(inside("ha-a", ["ip", "-j", "-6", "address", "show", "dev", "wan-ha"])))
+                return [a["local"] for link in addresses for a in link["addr_info"] if a["scope"] == "global" and a["prefixlen"] == 128]
+            wait(lambda: len(b4_addresses()) == 1)
+            b4 = b4_addresses()
+            run(inside("ha-server", ["ip", "-6", "tunnel", "add", "aftr0", "mode", "ipip6", "local", "2001:db8:ffff::20", "remote", b4[0], "dev", "wan0", "encaplimit", "none"]))
+            run(inside("ha-server", ["ip", "link", "set", "aftr0", "up"]))
+            run(inside("ha-server", ["ip", "address", "add", "192.0.0.1/32", "peer", "192.0.0.2/32", "dev", "aftr0"]))
+            run(inside("ha-server", ["ip", "route", "add", "203.0.113.1/32", "dev", "aftr0"]))
+
+            def egress_traffic(expected):
+                code = r'''
+import socket,sys
+for protocol,port in ((socket.SOCK_STREAM,18082),(socket.SOCK_DGRAM,18083)):
+ s=socket.socket(socket.AF_INET,protocol);s.settimeout(2);s.connect(('203.0.113.50',port))
+ if protocol==socket.SOCK_DGRAM:s.send(b'egress')
+ assert s.recv(100)==sys.argv[1].encode()
+ s.close()
+'''
+                run(inside("ha-client", ["python3", "-c", code, expected]))
+
+            def egress_path(node, interface):
+                routes = json.loads(run(inside("ha-" + node, ["ip", "-j", "route", "show", "table", "100"])))
+                return len(routes) == 1 and routes[0].get("dev") == interface
+
+            wait(lambda: active("a"))
+            wait(lambda: egress_path("a", "dslite0"))
+            egress_traffic("DSLite")
+            run(inside("ha-server", ["ip", "-6", "route", "add", "blackhole", b4[0] + "/128"]))
+            wait(lambda: egress_path("a", "backup-ha"))
+            egress_traffic("backup")
+            run(inside("ha-server", ["ip", "-6", "route", "del", "blackhole", b4[0] + "/128"]))
+            wait(lambda: egress_path("a", "dslite0"))
+            egress_traffic("DSLite")
+            print("PASS PD-derived B4/independent Linux AFTR and independent backup WAN: real TCP/UDP failure/recovery", flush=True)
         wait(lambda: active("a"))
         if dhcp6_server:
             assert pd_observed("a").get("prefixes"), "VIP published without the required PD"
@@ -327,11 +424,12 @@ except socket.timeout:
         client_code = r'''
 import socket,time,json
 s=socket.create_connection(('203.0.113.50',18080),timeout=5);f=s.makefile('rwb',buffering=0)
+s.settimeout(15)
 u=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);u.bind(('198.18.0.50',30001));u.connect(('203.0.113.50',18081))
-sequence=0;udp_sequence=0;udp_peer='';lost=0
+sequence=0;udp_sequence=0;udp_peer='';lost=0;longest=0
 while True:
  sequence+=1;data=str(sequence).encode();prefix=data+b' '
- f.write(data+b'\n');tcp=f.readline().strip()
+ began=time.monotonic();f.write(data+b'\n');tcp=f.readline().strip();longest=max(longest,time.monotonic()-began)
  if not tcp.startswith(prefix):raise RuntimeError('TCP stream closed or changed')
  u.send(data);end=time.monotonic()+0.2
  while True:
@@ -341,7 +439,7 @@ while True:
   try:reply=u.recv(2048)
   except socket.timeout:lost+=1;break
   if reply.startswith(prefix):udp_peer=reply[len(prefix):].decode();udp_sequence=sequence;break
- print(json.dumps({'sequence':sequence,'udp_sequence':udp_sequence,'tcp_peer':tcp[len(prefix):].decode(),'udp_peer':udp_peer,'udp_lost':lost}),flush=True)
+ print(json.dumps({'sequence':sequence,'udp_sequence':udp_sequence,'tcp_peer':tcp[len(prefix):].decode(),'udp_peer':udp_peer,'udp_lost':lost,'longest_tcp_reply_seconds':longest}),flush=True)
  time.sleep(0.05)
 '''
         with (stage / "client.progress").open("w") as output, (stage / "client.log").open("w") as diagnostic:
@@ -376,9 +474,10 @@ while True:
             addresses = json.loads(run(inside("ha-a", ["ip", "-j", "-6", "address", "show", "dev", "lan0"])))
             target = next(a["local"] for link in addresses for a in link["addr_info"] if a["scope"] == "link" and not a.get("tentative"))
             direct_information(target, True)
+            authority = api("a", "control.sock", "/v1/services/service.ha")["snapshot"]["expires_nanos"]
             os.kill(controller, signal.SIGSTOP)
             try:
-                time.sleep(2)
+                time.sleep(max(0, (authority - time.clock_gettime_ns(time.CLOCK_BOOTTIME)) / 1_000_000_000) + 0.3)
                 direct_information(target, False)
             finally:
                 os.kill(controller, signal.SIGCONT)
@@ -536,6 +635,12 @@ while True:
         assert saved("a")["leases"] == expired, "completed expiry checkpoint differs on the standby"
         assert len(expired) == 2 and all(lease["held_until"] > lease["expires_at"] for lease in expired)
         print("PASS real 60-second lease expiry replicated without rebasing sticky hold deadlines", flush=True)
+        final_observation = None
+        if pd_dslite:
+            assert progress(latest()["sequence"]) == mapping
+            final_observation = latest()
+            client.terminate()
+            client.wait(timeout=3)
         if dhcp6_server:
             wait(lambda: pd_observed("b")["state"] == "bound")
             pd_server.terminate()
@@ -565,12 +670,21 @@ while True:
             api("a", "control.sock", "/v1/services/service.pd/restart", {})
             wait(lambda: modules("a").get("service.pd", {}).get("generation", 0) > before and modules("a").get("service.pd", {}).get("ready"))
             assert not pd_observed("a").get("prefixes") and no_global("ha-a", "lan0") and no_global("ha-client", "lan0"), "expired replicated PD revived on restart"
+            if pd_dslite:
+                wait(lambda: egress_path("a", "backup-ha"))
+                egress_traffic("backup")
             pd_server = pd_start()
             pd_traffic("a")
+            if pd_dslite:
+                wait(lambda: egress_path("a", "dslite0"))
+                egress_traffic("DSLite")
+                print("PASS expired PD withdrew the B4 source; fresh IPv4 TCP/UDP used backup WAN and recovered through DS-Lite", flush=True)
             print("PASS server-absent cross-clock PD takeover expired at original deadline on router/SLAAC client; restart did not revive PD and ISC recovery restored TCP/UDP", flush=True)
-        print("Observed UDP datagrams lost during transitions:", latest()["udp_lost"], flush=True)
-        client.terminate()
-        client.wait(timeout=3)
+        print("Observed UDP datagrams lost during transitions:", (final_observation or latest())["udp_lost"], flush=True)
+        print("Longest TCP reply wait across transitions:", (final_observation or latest())["longest_tcp_reply_seconds"], "seconds", flush=True)
+        if client.poll() is None:
+            client.terminate()
+            client.wait(timeout=3)
         retired = {"schema_version": 2, "resources": [
             {"id": "lan", "interface": {"name": "lan0"}},
             {"id": "wan", "interface": {"name": "wan0"}},
@@ -584,7 +698,8 @@ while True:
         for process in captures:
             process.send_signal(signal.SIGINT)
             process.wait(timeout=3)
-        syn = run(["tcpdump", "-nn", "-r", str(stage / "wan.pcap"), "src host 203.0.113.1 and dst port 18080 and tcp[tcpflags] & tcp-syn != 0"])
+        segment, source = ("lan", "198.18.0.50") if pd_dslite else ("wan", "203.0.113.1")
+        syn = run(["tcpdump", "-nn", "-r", str(stage / (segment + ".pcap")), "src host " + source + " and dst port 18080 and tcp[tcpflags] & tcp-syn != 0"])
         assert len(syn.splitlines()) == 1, "TCP connection was restarted or never established: " + syn
         sync = run(["tcpdump", "-nn", "-r", str(stage / "sync.pcap"), "src net 169.254.0.0/16 and dst net 169.254.0.0/16 and udp port 3780"])
         assert len(sync.splitlines()) > 0, "No actual conntrackd replication packets"
@@ -605,6 +720,23 @@ while True:
             packets = run(["tcpdump", "-n", "-tt", "-vv", "-r", str(stage / "wan.pcap"), "ip6"])
             assert "dhcp6 rebind" in packets and "dhcp6 release" not in packets
             print("PASS capture: recovery Rebind and no shared-lease Release on member demotion/restart", flush=True)
+        if pd_dslite:
+            encapsulated = run(["tcpdump", "-nn", "-r", str(stage / "wan.pcap"), "ip6 proto 4"]).splitlines()
+            for port in (18080, 18081):
+                for direction in ("IP6 2001:db8:ffff::20 >", " > 2001:db8:ffff::20:"):
+                    assert any(direction in line and "203.0.113.50." + str(port) in line for line in encapsulated), "persistent application traffic did not traverse DS-Lite in both directions"
+            assert not run(["tcpdump", "-nn", "-r", str(stage / "wan.pcap"), "ip and host 203.0.113.50 and (port 18080 or port 18081)"]), "persistent application bypassed the AFTR tunnel"
+            for port in (18082, 18083):
+                assert run(["tcpdump", "-nn", "-r", str(stage / "backup.pcap"), "src host 192.0.2.1 and dst host 203.0.113.50 and dst port " + str(port)]), "missing backup WAN application traffic"
+            print("PASS captures: bidirectional IPv4-in-IPv6 and independent backup WAN TCP/UDP", flush=True)
+    except Exception:
+        for node in ("a", "b"):
+            if not (stage / node / "run/control.sock").exists():
+                continue
+            for socket, path in (("supervisor.sock", "/v1/status"), ("control.sock", "/v1/services"), ("control.sock", "/v1/network")):
+                result = subprocess.run(["curl", "--max-time", "2", "-sS", "--unix-socket", str(stage / node / "run" / socket), "http://localhost" + path], capture_output=True, text=True)
+                print("failure", node, path, result.stdout, flush=True)
+        raise
     finally:
         for process in reversed(children):
             if process.poll() is None:
@@ -623,12 +755,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--inside", type=Path)
     parser.add_argument("--dhcp6-server", type=Path)
+    parser.add_argument("--pd-dslite", action="store_true")
     parser.add_argument("--binary-dir", type=Path, default=Path("dist/bin"))
     args = parser.parse_args()
     if args.inside:
-        peer(args.inside, args.dhcp6_server)
+        peer(args.inside, args.dhcp6_server, args.pd_dslite)
         return
     os.chdir(Path(__file__).resolve().parent.parent)
+    if args.pd_dslite and not args.dhcp6_server:
+        parser.error("--pd-dslite requires --dhcp6-server")
     root = [] if os.geteuid() == 0 else ["sudo", "-n"]
     for module in ("nf_conntrack", "nf_conntrack_netlink"):
         run(root + ["modprobe", module])
@@ -640,11 +775,16 @@ def main():
         if args.dhcp6_server:
             run(root + ["install", "-m", "500", str(args.dhcp6_server.resolve()), stage + "/dhcpd"])
             peer_args = ["--dhcp6-server", stage + "/dhcpd"]
+        if args.pd_dslite:
+            peer_args.append("--pd-dslite")
         result = subprocess.run(root + ["unshare", "--mount", "--net", "--pid", "--fork", "--mount-proc", "--kill-child=SIGKILL", "--propagation", "private", "python3", "-I", stage + "/peer.py", "--inside", stage] + peer_args, timeout=250 if args.dhcp6_server else 180)
         if result.returncode:
-            for name in ("a.log", "b.log", "client.log", "server.log", "dhcp6.log", "http6.log", "udp6.log"):
+            for name in ("a.log", "b.log", "client.log", "server.log", "dhcp6.log", "http6.log", "udp6.log", "egress-primary.log", "egress-backup.log"):
                 log = subprocess.run(root + ["tail", "-30", stage + "/" + name], capture_output=True, text=True)
                 print(name + ":\n" + log.stdout)
+            for segment in ("wan", "lan"):
+                packets = subprocess.run(root + ["tcpdump", "-nn", "-tt", "-r", stage + "/" + segment + ".pcap", "ip6 proto 4" if segment == "wan" else "tcp port 18080"], capture_output=True, text=True)
+                print(segment + " packet tail:\n" + "\n".join(packets.stdout.splitlines()[-35:]))
             raise RuntimeError("HA communication failed")
     finally:
         run(root + ["python3", "-I", "-c", "import shutil,sys;shutil.rmtree(sys.argv[1])", stage])

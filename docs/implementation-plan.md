@@ -1305,6 +1305,11 @@ information/server 条件、homert 全体・対象 NIC は未完了。
 
 #### HA-02 — DHCP/PD lease の認証付き同期
 
+2026-10-28 `ha-egress` / native-48: PD の適用先 link を取得・待機同期の前提から外した。
+二台の実 daemon と独立 ISC で同じ DUID/IAID・prefix・元期限を保ち、PD 由来 B4・Linux AFTR・
+独立予備 WAN を使う実 TCP/UDP の切替、期限切れと復旧を確認した。実 HGW 30秒でも同 identity の
+worker 復旧が成功した。自然 Renew、ONU 直結と実機の HA 受入は未検証。
+
 2026-10-28 `ha-pd-prepared` / native-43: 実homert02の設定と旧routerdを比較し、HA PD取得と
 VIP公開の循環を実PID1二台・ISCで再現した。PDは有効な選出で取得を開始し、DHCPv4配布は
 公開後に始める。不変worker設定の繰返しfsyncを除き、全variantを設定受理時に一度準備する。
@@ -1362,6 +1367,11 @@ DHCPv4 partner-down時の安全な継続・owner epoch、delta/cursor/gap、PD�
 clock skew・物理機・負荷、maintenance切替手順は残る。HA-02完了やhomert置換可能とはしない。
 
 #### HA-03 — NAT conntrack の同期と既存通信継続
+
+`ha-egress` の同一 TCP socket と UDP 対応は双方向切替・conntrackd 強制終了後も継続し、
+capture は双方向トンネル通信と直結経路への迂回なしを確認した。最長応答待ちは約13秒、
+同試行の UDP 損失は0件。homert の既定1秒広告と主 WAN 準備完了を使った結果であり、
+20cs の統合構成で観測した不安定さ、切替遅延、対象実機の性能は未解決。
 
 範囲: 旧 routerd 互換 / track: network / risk: high。
 前提: CORE-04, NET-03, HA-01。 設計判断: D-05。

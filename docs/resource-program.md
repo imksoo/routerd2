@@ -347,6 +347,10 @@ compiler は明示された辺に加え、program 内で管理する link/interf
 `ready_when` は自身の起動を止めず、依存先への準備完了を制御する。省略時は network transaction の成功が境界になる。
 サービスのプロセス準備完了を依存条件にするときは、明示的に `ready_when: {fact: service.NAME.ready}` を指定する。
 
+DHCPv6 の delegation 先 interface は取得結果の適用先であり、client の起動依存にはしない。
+HA の待機系は WAN identity や delegation 先がなくても checkpoint を受信する。
+有効な grant の観測後に delegation の address/RA を投影する。適用先 link の作成条件は operator の設定で表す。
+
 現在の実行時 fact は `service.NAME.ready` と `service.NAME.active`。
 ready は supervisor の現在 generation / config digest と有限の観測期限を検査する。
 active は DHCP4 / DHCP6-PD / VRRP / BGP / DHCP server / PPPoE / AFTR の受理済み snapshot から作り、

@@ -5,7 +5,29 @@
 [機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
-## 現在の変更: source-hash / native-47 / network journal12
+## 現在の変更: HA・PD・DS-Lite / native-48 / network journal12
+
+旧 routerd の DHCPv6 client と DUID・lease 保存を参照した。自動 DUID は lease と別に永続化し、
+明示 DUID は自動 identity を上書きしない。HA では設定した同じ DUID/IAID と元の grant 期限を共有する。
+PD の delegation 先を client 起動の依存から外し、待機系が未作成の WAN identity を待たずに同期できるようにした。
+DHCPv6 server は受信待ち中に届いた最新の入力を処理してから、応答の authority と option を判定する。
+
+PVE Linux 6.8/amd64、`ha-egress` の署名済み実 daemon 二台、独立 ISC DHCP、Linux AFTR、
+IPv6-only の主 WAN、独立 IPv4 予備 WAN と LAN client で検証した。PD 由来 B4、Health→PBR の
+障害・復旧、同じ DUID/IAID・prefix と期限を保つ双方向切替、conntrackd 強制終了後の復旧、
+同期断、古い通知、PD 失効と新規 TCP/UDP の予備 WAN・主 WAN 復旧が通った。capture は既存 TCP/UDP の
+双方向 IPv4-in-IPv6、直結 IPv4 経路への迂回なし、TCP SYN 一回と同期 packet を確認した。
+既存 TCP の最長応答待ちは約13秒、UDP 損失はこの試行で0件だった。広告間隔は homert の既定1秒で、
+主 WAN の Health 成立を VIP 公開条件とした。既存接続を維持できない別の WAN へ切り替えた後は新規通信を確認した。
+20cs の統合構成では worker の再起動と復旧の不安定さを観測しており、原因と切替遅延の改善は残る。
+初期試行で対向 AFTR の link down が戻り経路を削除し、IPv4 の直結迂回が生じたため、その試行は合格から除外した。
+
+`make check`、既存の Health→PBR、直接 WAN と PD の HA 試験、独立 DHCPv6 information client、
+amd64/arm64 の CGO_ENABLED=0 build、六 ELF の署名 catalog/publisher/stage Race 検査が成功した。
+同版の実 HGW 30秒試験は DUID/IAID を保つ worker 復旧、IPv4/IPv6 HTTPS、学習 DNS、RA/Release 撤去が成功し、
+自然 Renew は観測していない。ONU 直結、物理 NIC、ARM64 実行、homert 全体の受入は未検証。
+
+## 直前の確認: source-hash / native-47 / network journal12
 
 `forwarding.ipv4_ecmp_hash: source` を既存の writer/setting owner へ接続した。
 namespace 全体の IPv4 ECMP に Linux custom source-only hash を使い、別の nft/connmark 経路は追加しない。
@@ -92,6 +114,7 @@ ONU 直結・物理 NIC・継続 TCP の資格認定は別である。ens20 の�
 ## 次の作業
 
 1. homert02/03の現行設定・旧routerdを比較し、残る一台分の通信と二台の切替/復旧を完成させる。
+   統合構成の20cs広告時の不安定さと既存 TCP の最大約13秒の応答待ちを調査する。
    Tailscaleの残項目、旧stateless DHCPv6入力の条件付きHA/import不足、VRRP/PDの分断・復旧、
    管理・更新・戻し方を実際の相手で確認する。本番切替は行わない。
 2. 実HGWの完走結果と最新版の短期結果を区別し、変更に必要な実回線検証を続ける。

@@ -196,9 +196,6 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 				p.network.Routes = append(p.network.Routes, network.Route{Destination: "0.0.0.0/0", Gateway: gw.String(), Interface: s.Interface(), Metric: s.DHCP4.Metric, Table: s.DHCP4.Table})
 			}
 		case "dhcp6":
-			for _, lan := range s.DHCP6.Delegations {
-				ensureInterface(&p.network, lan.Interface)
-			}
 			if !has {
 				continue
 			}
@@ -218,6 +215,7 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 				}
 			}
 			for _, lan := range s.DHCP6.Delegations {
+				ensureInterface(&p.network, lan.Interface)
 				var prefixes []ra.Prefix
 				for _, lease := range snap.Prefixes {
 					if !lease.ValidUntil.Live(facts.bfdClock) {

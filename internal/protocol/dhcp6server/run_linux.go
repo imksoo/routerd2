@@ -87,6 +87,12 @@ func Run(ctx context.Context, cfg dhcp6serverconfig.Config, initial dhcp6serverc
 		if ctx.Err() != nil {
 			return nil
 		}
+		if err := conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond)); err != nil {
+			return err
+		}
+		n, control, from, readErr := packet.ReadFrom(buffer)
+		// Consume input received during the socket wait before deciding whether
+		// this request may use the current serving authority and options.
 		select {
 		case updated, open := <-updates:
 			if !open {
@@ -112,16 +118,12 @@ func Run(ctx context.Context, cfg dhcp6serverconfig.Config, initial dhcp6serverc
 			}
 		default:
 		}
-		if err := conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond)); err != nil {
-			return err
-		}
-		n, control, from, err := packet.ReadFrom(buffer)
-		if err != nil {
+		if readErr != nil {
 			var ne net.Error
-			if errors.As(err, &ne) && ne.Timeout() {
+			if errors.As(readErr, &ne) && ne.Timeout() {
 				continue
 			}
-			return err
+			return readErr
 		}
 		peer := from.(*net.UDPAddr)
 		if control == nil || control.IfIndex != iface.Index || peer.IP.IsUnspecified() || peer.IP.IsMulticast() {

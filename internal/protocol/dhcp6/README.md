@@ -62,7 +62,7 @@ identity/interface/IAID and expired grants use fresh acquisition. No UTC lease
 rebasing or cross-boot restoration is implemented.
 Graceful shutdown acknowledges kernel/RA withdrawal, persists an empty stopped
 checkpoint, then sends Release. SIGKILL leaves the last saved grant for recovery.
-The current contract is compiler native-47, checkpoint version 2; no discarded
+The current contract is compiler native-48, checkpoint version 2; no discarded
 prototype reader is retained.
 
 This path was compared with routerd's `cmd/routerd-dhcpv6-client` DUID selection,
@@ -199,3 +199,14 @@ clock domains on one PVE amd64 VM, not qualification of two physical routers.
 Cross-node transfer remains periodic complete snapshots, with an unreplicated
 window between polls. Delta/gap recovery, disconnected-peer return/fencing and
 target-hardware acceptance remain unfinished HA-02 work.
+
+`make check-ha-egress DHCP6_SERVER=/path/to/isc/dhcpd DOCKER='sudo -n docker'`
+adds a PD-derived B4, independent Linux AFTR and a separate backup WAN to the
+same actual two-router fixture. This profile uses homert's default one-second
+VRRP advertisements and waits for primary-WAN Health before publishing the VIP;
+backup has a different external IPv4 identity. Existing direct/PD profiles keep
+their 20cs advertisements. The persistent TCP socket has a 15-second read bound
+and reports its longest reply wait; this is continuity, not a fast-failover SLA.
+At PD expiry the old session is deliberately closed and fresh TCP/UDP checks
+verify backup and subsequent primary recovery. Captures must show the persistent
+applications encapsulated in both directions, with no plaintext bypass.
