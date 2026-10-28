@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/netip"
 	"os"
 	"sort"
 	"sync"
@@ -17,7 +18,7 @@ import (
 var errLinkNotFound = errors.New("link not found")
 
 // JournalVersion is the persisted network ownership/BOOTTIME contract.
-const JournalVersion = 12
+const JournalVersion = 13
 
 type settingKey struct {
 	Kind      string `json:"kind"`
@@ -506,9 +507,13 @@ func (p *apply) reconcile(d Desired) error {
 	}
 	wantedSettings := map[settingKey]int{}
 	wantedAddresses := map[addressKey]bool{}
+	ipv4Interfaces := map[string]bool{}
 	for _, l := range d.Interfaces {
 		for _, address := range l.Addresses {
 			wantedAddresses[addressKey{l.Name, address}] = true
+			if netip.MustParsePrefix(address).Addr().Is4() {
+				ipv4Interfaces[l.Name] = true
+			}
 		}
 		wantedSettings[settingKey{Kind: "up", Interface: l.Name}] = 1
 		if l.MTU != 0 {
@@ -525,6 +530,16 @@ func (p *apply) reconcile(d Desired) error {
 		}
 		if l.IPv6HopLimit != nil {
 			wantedSettings[settingKey{Kind: "hop_limit", Interface: l.Name}] = *l.IPv6HopLimit
+		}
+	}
+	// Linux otherwise answers or sends ARP on a parent using an IPv4 address
+	// owned by its macvlan, exposing the wrong MAC for that address.
+	for _, link := range d.Links {
+		if link.Kind == "macvlan" && ipv4Interfaces[link.Name] {
+			for _, name := range []string{link.Parent, link.Name} {
+				wantedSettings[settingKey{Kind: "arp_ignore", Interface: name}] = 1
+				wantedSettings[settingKey{Kind: "arp_announce", Interface: name}] = 2
+			}
 		}
 	}
 	if d.Forwarding.ConntrackTCPLiberal != nil {
@@ -544,14 +559,14 @@ func (p *apply) reconcile(d Desired) error {
 		wantedSettings[settingKey{Kind: "multipath_hash_fields4"}] = 1
 		wantedSettings[settingKey{Kind: "multipath_hash_policy4"}] = 3
 	}
-	// Keep the kernel RA/SLAAC writers disabled while removing the client-owned
-	// routes and addresses. Restore these settings after reconciliation finishes.
+	// Keep RA/SLAAC writers disabled and shared VIP ARP restricted until the
+	// corresponding addresses have been removed. Restore them afterwards.
 	earlySettings := make(map[settingKey]int, len(wantedSettings))
 	for key, value := range wantedSettings {
 		earlySettings[key] = value
 	}
 	for _, old := range p.e.state.Settings {
-		if raSetting(old.Key) {
+		if raSetting(old.Key) || old.Key.Kind == "arp_ignore" || old.Key.Kind == "arp_announce" {
 			earlySettings[old.Key] = old.Last
 		}
 	}
@@ -603,6 +618,24 @@ func (p *apply) reconcile(d Desired) error {
 	}
 	if err := p.interfaceMTUs(d); err != nil {
 		return err
+	}
+	// Set parent and macvlan restrictions before any IPv4 address is added.
+	var arpSettings []settingKey
+	for key := range wantedSettings {
+		if key.Kind == "arp_ignore" || key.Kind == "arp_announce" {
+			arpSettings = append(arpSettings, key)
+		}
+	}
+	sort.Slice(arpSettings, func(i, j int) bool {
+		if arpSettings[i].Interface != arpSettings[j].Interface {
+			return arpSettings[i].Interface < arpSettings[j].Interface
+		}
+		return arpSettings[i].Kind < arpSettings[j].Kind
+	})
+	for _, key := range arpSettings {
+		if err := p.set(key, wantedSettings[key]); err != nil {
+			return err
+		}
 	}
 	for _, l := range d.Interfaces {
 		if err := p.interfaceConfig(l); err != nil {

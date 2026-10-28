@@ -25,6 +25,10 @@ func validateSettingRecord(s ownedSetting) error {
 	case "up", "autoconf":
 	case "accept_ra":
 		maximum = 2
+	case "arp_ignore":
+		maximum = 8
+	case "arp_announce":
+		maximum = 2
 	case "rp_filter_all", "rp_filter_default":
 		maximum = 2
 		global = true
@@ -42,7 +46,7 @@ func validateSettingRecord(s ownedSetting) error {
 			return fmt.Errorf("invalid saved global setting identity")
 		}
 	} else if s.Key.Interface != "" {
-		if !validName(s.Key.Interface) || s.Index < 0 || (raSetting(s.Key) || s.Key.Kind == "ipv6_mtu" || s.Key.Kind == "hop_limit") && s.Index == 0 {
+		if !validName(s.Key.Interface) || s.Index < 0 || (raSetting(s.Key) || s.Key.Kind == "ipv6_mtu" || s.Key.Kind == "hop_limit" || s.Key.Kind == "arp_ignore" || s.Key.Kind == "arp_announce") && s.Index == 0 {
 			return fmt.Errorf("invalid saved interface setting identity")
 		}
 	} else {

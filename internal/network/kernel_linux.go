@@ -352,6 +352,11 @@ func settingPath(key settingKey) (string, error) {
 		return "/proc/sys/net/ipv4/conf/all/rp_filter", nil
 	case "rp_filter_default":
 		return "/proc/sys/net/ipv4/conf/default/rp_filter", nil
+	case "arp_ignore", "arp_announce":
+		if !validName(key.Interface) || key.Interface == "all" || key.Interface == "default" {
+			return "", fmt.Errorf("invalid per-interface IPv4 sysctl identity %q", key.Interface)
+		}
+		return "/proc/sys/net/ipv4/conf/" + key.Interface + "/" + key.Kind, nil
 	case "accept_ra", "autoconf", "ipv6_mtu", "hop_limit":
 		if !validName(key.Interface) || key.Interface == "all" || key.Interface == "default" {
 			return "", fmt.Errorf("invalid per-interface IPv6 sysctl identity %q", key.Interface)

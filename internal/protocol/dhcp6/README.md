@@ -64,7 +64,7 @@ Graceful shutdown acknowledges kernel/RA withdrawal without sending Release.
 The saved grant remains available for restart until its original expiry; SIGKILL
 also leaves the last saved grant for recovery. An explicit Release operation is
 not yet implemented.
-The current contract is compiler native-50, checkpoint version 2; no discarded
+The current contract is compiler native-51, checkpoint version 2; no discarded
 prototype reader is retained.
 
 This path was compared with routerd's `cmd/routerd-dhcpv6-client` DUID selection,
@@ -158,8 +158,8 @@ peer endpoints/certificates. Keep sync addresses independent of the shared WAN.
 The shared WAN link and its link-local address must follow the same VRRP owner.
 Do not put `when` on the PD service: its standby must run without the WAN link.
 
-The compiler prepares active and standby workers once; current acknowledged
-The live VRRP election selects PD acquisition through ordinary worker
+The compiler prepares active and standby workers once. The live VRRP election
+selects PD acquisition through ordinary worker
 replacement, before VIP publication. Graceful activation can therefore wait
 for `service.pd.active` without waiting for its own unpublished VIP. LAN DHCPv4
 allocation still waits for published ownership. Removing the owner or expiring
@@ -188,8 +188,8 @@ sync error in `snapshot.sync`.
 A member withdraws its local kernel/RA effects before stopping, but never
 Releases the pair's shared upstream grant on demotion, process replacement or
 member removal. Its last checkpoint remains recoverable. Standalone clients
-still clear their checkpoint and perform bounded Release. An explicit pair-wide
-release operation is not yet implemented. A standby reboot invalidates its
+also retain their checkpoint without sending Release. An explicit release
+operation is not yet implemented. A standby reboot invalidates its
 saved local clock mapping; it must fetch again or acquire afresh on promotion.
 
 `make check-ha-pd DHCP6_SERVER=/path/to/isc/dhcpd DOCKER='sudo -n docker'`

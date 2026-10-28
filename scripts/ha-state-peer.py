@@ -186,6 +186,7 @@ def peer(stage, dhcp6_server, pd_dslite, stale_owner):
                         {"preference": 60, "when": {"fact": "service.health-backup.active"}, "next_hop": {"interface": "backup-ha", "gateway": "192.0.2.50", "weight": 1}}]}},
                     {"id": "lan-egress", "policy_rule": {"family": 4, "priority": 1000, "table": 100, "source": "198.18.0.0/24"}},
                 ]
+                resources.append({"id": "backup-parent-address", "address": {"interface": "backup0", "cidr": "192.0.2." + str(2 + index) + "/24"}})
                 firewall = next(r["firewall"] for r in resources if r["id"] == "firewall")
                 firewall["nat"] = [{"type": "snat", "match": {"family": 4, "source": "198.18.0.0/24", "out_interface": name}, "address": address}
                                    for name, address in (("dslite0", "203.0.113.1"), ("backup-ha", "192.0.2.1"))]
@@ -489,6 +490,29 @@ while True:
         for node in ("a","b"):
             assert run(inside("ha-"+node,["sysctl","-n","net.netfilter.nf_conntrack_tcp_be_liberal"])).strip() == "1", "product did not apply conntrack handoff intent"
         mapping = progress(0)
+        run(inside("ha-client", ["ip", "-4", "neigh", "flush", "to", "198.18.0.1", "dev", "lan0"]))
+        assert progress(latest()["sequence"]) == mapping
+        neighbor = run(inside("ha-client", ["ip", "-4", "neigh", "show", "198.18.0.1", "dev", "lan0"]))
+        assert "00:00:5e:00:01:2a" in neighbor.lower(), "client learned a physical MAC for the shared VIP: " + neighbor
+        for link in ("lan0", "lan-ha"):
+            assert run(inside("ha-a", ["sysctl", "-n", "net.ipv4.conf." + link + ".arp_ignore"])).strip() == "1"
+        def check_backup_arp(owner):
+            for link in ("backup0", "backup-ha"):
+                assert run(inside("ha-" + owner, ["sysctl", "-n", "net.ipv4.conf." + link + ".arp_ignore"])).strip() == "1"
+                assert run(inside("ha-" + owner, ["sysctl", "-n", "net.ipv4.conf." + link + ".arp_announce"])).strip() == "2"
+            run(inside("ha-backup", ["ip", "-4", "neigh", "flush", "to", "192.0.2.1", "dev", "backup0"]))
+            run(inside("ha-backup", ["python3", "-c", "import socket;s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.sendto(b'arp',('192.0.2.1',9))"]))
+            def neighbor():
+                return run(inside("ha-backup", ["ip", "-4", "neigh", "show", "192.0.2.1", "dev", "backup0"]))
+            wait(lambda: "lladdr" in neighbor(), timeout=5)
+            packets = run(["tcpdump", "-nn", "-e", "-r", str(stage / "backup.pcap"), "arp and host 192.0.2.1"])
+            replies = [line for line in packets.splitlines() if "Reply 192.0.2.1 is-at" in line]
+            assert "02:00:5e:00:01:44" in neighbor().lower(), "backup WAN learned a physical MAC: " + neighbor() + "\n" + packets
+            assert replies and all("is-at 02:00:5e:00:01:44" in line for line in replies), "backup WAN saw a physical-MAC ARP reply: " + packets
+            requests = [line for line in packets.splitlines() if "tell 192.0.2.1" in line]
+            assert all("02:00:5e:00:01:44 >" in line for line in requests), "backup WAN saw a physical-MAC ARP request for the shared address: " + packets
+        if pd_dslite:
+            check_backup_arp("a")
         if dhcp6_server:
             information("a")
             local_pid = modules("a")["control"]["pid"]
@@ -575,6 +599,15 @@ while True:
                 print("PASS " + previous + " -> " + owner + " PD handoff with ISC paused, same DUID/IAID/prefix and bounded original deadlines, then Rebind/Reply", flush=True)
             sequence = latest()["sequence"]
             assert progress(sequence) == mapping, "existing connection mapping changed during takeover"
+            run(inside("ha-client", ["ip", "-4", "neigh", "flush", "to", "198.18.0.1", "dev", "lan0"]))
+            assert progress(latest()["sequence"]) == mapping
+            neighbor = run(inside("ha-client", ["ip", "-4", "neigh", "show", "198.18.0.1", "dev", "lan0"]))
+            assert "00:00:5e:00:01:2a" in neighbor.lower(), "new owner answered with a physical MAC: " + neighbor
+            wait(lambda: run(inside("ha-" + previous, ["sysctl", "-n", "net.ipv4.conf.lan0.arp_ignore"])).strip() == "0")
+            if pd_dslite:
+                check_backup_arp(owner)
+                wait(lambda: run(inside("ha-" + previous, ["sysctl", "-n", "net.ipv4.conf.backup0.arp_ignore"])).strip() == "0")
+                wait(lambda: run(inside("ha-" + previous, ["sysctl", "-n", "net.ipv4.conf.backup0.arp_announce"])).strip() == "0")
             wait(lambda: modules(owner).get("service.leases", {}).get("ready") is True and api(owner, "control.sock", "/v1/services/service.leases")["snapshot"]["active"] is True)
             before_renew = len(lease_events(0))
             first_client.send_signal(signal.SIGUSR1)
@@ -791,6 +824,7 @@ while True:
             {"id": "forward", "forwarding": {"ipv4": True, "ipv4_rp_filter": 0}}]}
         api("a", "control.sock", "/v1/config/commit", {"expected_revision": 1, "request_id": "retire-ha", "config": retired})
         assert run(inside("ha-a", ["sysctl", "-n", "net.netfilter.nf_conntrack_tcp_be_liberal"])).strip() == "0", "retired managed sysctl was not restored"
+        assert run(inside("ha-a", ["sysctl", "-n", "net.ipv4.conf.lan0.arp_ignore"])).strip() == "0", "retired VRRP ARP setting was not restored"
         assert "service.ha" not in modules("a"), "retired sync worker remains registered"
         print("PASS configuration removal reaped sync worker and restored original conntrack sysctl", flush=True)
         for process in captures:

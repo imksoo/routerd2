@@ -15,6 +15,8 @@ import (
 
 type fakeKernel struct {
 	links                        map[string]InterfaceState
+	arpIgnore                    map[string]int
+	arpAnnounce                  map[string]int
 	routes                       []RouteState
 	rules                        []PolicyRuleState
 	forward4, forward6           int
@@ -28,7 +30,7 @@ type fakeKernel struct {
 func (f *fakeKernel) AnnounceLink(linkAnnouncement) error { return f.op("link-announcement") }
 
 func fake() *fakeKernel {
-	return &fakeKernel{links: map[string]InterfaceState{"lan0": {Name: "lan0", Index: 1, Kind: "dummy", MTU: 1500}, "wan0": {Name: "wan0", Index: 2, Kind: "dummy", MTU: 1500}}, firewall: FirewallState{Table: FirewallTable}}
+	return &fakeKernel{links: map[string]InterfaceState{"lan0": {Name: "lan0", Index: 1, Kind: "dummy", MTU: 1500}, "wan0": {Name: "wan0", Index: 2, Kind: "dummy", MTU: 1500}}, arpIgnore: make(map[string]int), arpAnnounce: make(map[string]int), firewall: FirewallState{Table: FirewallTable}}
 }
 func (f *fakeKernel) op(name string) error {
 	if f.fail == name {
@@ -177,6 +179,12 @@ func (f *fakeKernel) ReadSetting(k settingKey) (int, error) {
 	if k.Kind == "mtu" {
 		return l.MTU, nil
 	}
+	if k.Kind == "arp_ignore" {
+		return f.arpIgnore[k.Interface], nil
+	}
+	if k.Kind == "arp_announce" {
+		return f.arpAnnounce[k.Interface], nil
+	}
 	if k.Kind == "accept_ra" {
 		if l.IPv6AcceptRA == nil {
 			return 1, nil
@@ -209,6 +217,10 @@ func (f *fakeKernel) WriteSetting(k settingKey, v int) error {
 		switch k.Kind {
 		case "mtu":
 			l.MTU = v
+		case "arp_ignore":
+			f.arpIgnore[k.Interface] = v
+		case "arp_announce":
+			f.arpAnnounce[k.Interface] = v
 		case "accept_ra":
 			l.IPv6AcceptRA = &v
 		case "autoconf":
