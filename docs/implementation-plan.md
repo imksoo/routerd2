@@ -756,7 +756,8 @@ Healthの元期限、古い通知、5秒confirmed rollback、AFTR worker再起�
 2026-10-28 `ha-pd-admission`と`ha-pd-prepared` / native-43をens18の実HGWに接続した。別MAC・隔離LANで
 RA/PD、DS-Lite経由IPv4 HTTPSとIPv6 HTTPS、学習DNSのUDP/TCP、終了時のRA撤去と
 Release/Replyが成功した。Replyは送信元49153。管理address/MAC/default routeは不変だった。
-同じsetupの7800秒試験は変更前`ha-pd-admission`のまま実行中で、自然更新成功とはまだ扱わない。独立端末のpublic DNSへの
+変更前`ha-pd-admission`の7800秒試験は自然更新前のDNS応答判定で失敗し、
+応答本文を採取する差分を加えてee50461で再実行中。自然更新成功とはまだ扱わない。独立端末のpublic DNSへの
 IPv4 UDP/TCPも応答し、AFTR内の実packetを確認した。DHCPv4貸出の隔離WANへの適用も確認したが、
 そのserverはHGWのIPv4 identityとは別。実HGW上のPD worker crash/restart、ONU直結・物理NICは未検証。
 

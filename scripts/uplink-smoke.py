@@ -411,7 +411,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
                         + transport,
                     )
                 )
-                assert "status: NOERROR" in response and "ANSWER: 0" not in response
+                assert "status: NOERROR" in response and "ANSWER: 0" not in response, (transport, response)
             selected = json.loads(
                 run(
                     [

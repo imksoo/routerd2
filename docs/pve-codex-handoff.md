@@ -28,7 +28,7 @@ Tailscaleの実PID1/独立peerの全通信・失効・rollback試験も成功し
 DHCP6_SERVER=dist/peer-env/isc-dhcp/root/usr/sbin/dhcpd`。fixtureはWAN選出とLAN VIP公開を
 実addressで区別し、低速TLS uploadは100 Continueでbody読取開始を確認してから切替える。
 期限やTCP待機上限は延長していない。調査trace・raw出力・完了済みstageは削除する。
-実HGWの自然更新試験は下記の通り別ownerで継続し、その生存中のstate/captureは保持する。
+実HGWの長時間試験は下記のDNS失敗調査へ進んでいる。生存中のownerのstate/captureだけ保持する。
 旧条件付きinputのimport、広い分断/fencingと対象機器の受入は残る。
 
 ## 直前の完了変更: duid-import / native-43
@@ -211,11 +211,15 @@ UPLINK_AFTR=<確認したAFTR> UPLINK_SECONDS=30 RELEASE_ID=ha-pd-prepared`で�
 IPv4 HTTPS、IPv6 HTTPS、学習DNSへのUDP/TCP、RA撤去とRelease/Replyが通った。Replyの送信元は49153。
 終了後のhost管理状態は開始前と一致し、短期試験のnamespace・raw出力は削除済み。
 
-同じsetupで`UPLINK_SECONDS=7800`の長時間試験を実行中。これはfile準備変更前の
-`ha-pd-admission` binaryに固定している。最初の更新期限は約7200秒後。
-完了・自然Renew成功とはまだ扱わない。生存中のownerがcaptureとprivate stateを所有し、終了時に削除する。
-この試験の独立LANからpublic DNSへIPv4 UDP/TCP問い合わせも実行し、A応答とAFTR内の実packetを確認した。
-DHCPv4の有効貸出が隔離WANへ入ることも確認したが、そのserverはHGWのIPv4 identityとは別だった。
+file準備変更前`ha-pd-admission`での7800秒試験は、自然更新に達する前に
+`example.net A`のDNS応答判定で失敗して終了した。約30分の時点まではreadyかつ全worker世代1だった。
+元のassertに応答本文がなくRCODE/Answerを特定できなかったため、作業差分で失敗時に本文と
+UDP/TCPの種別を出すようにした。判定は変更しない。最新版ee50461/`ha-pd-prepared`で再実行中。
+最初の更新期限は約7200秒後。完了・自然Renew成功とはまだ扱わない。
+失敗版のnamespace・stageは削除され、host管理address/MAC/default routeは開始前と一致した。
+現在のownerがbounded captureとprivate stateを所有し、終了時に削除する。
+前の長時間試験側の独立LANではpublic DNSへのIPv4 UDP/TCP応答とAFTR内packetも確認した。
+DHCPv4の有効貸出が隔離WANへ入ることも確認したが、server identifierはHGWのIPv4とは異なった。
 まだ実HGW上でのPD worker crash/restartは行っていない。ONU直結・物理NIC・継続TCPの資格認定とは区別する。
 ens20の無応答を上流全体の利用不能へ外挿せず、未回答のens20質問を実HGW試験の前提にしない。
 
