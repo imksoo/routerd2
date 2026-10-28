@@ -4,6 +4,7 @@
   "as_of": "2026-10-28",
   "timezone": "Asia/Tokyo",
   "status": "implementation_in_progress",
+  "user_deadline_utc": "2026-10-29T16:57:06Z",
   "baselines": {
     "routerd": {
       "commit": "1329ef54f296507eda79bbbc3b853783dd27251e",
