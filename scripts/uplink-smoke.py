@@ -26,7 +26,7 @@ def run(args, timeout=12):
     return result.stdout
 
 
-def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac):
+def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_restart):
     def stop(*_):
         raise KeyboardInterrupt()
 
@@ -404,12 +404,13 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac):
         auto_hook = stage / "automatic-client-hook.sh"
         auto_hook.write_text(
             '#!/bin/sh\ncase "$reason" in\n'
-            'BOUND|RENEW) printf "v4|%s|%s|%s|%s\\n" "$reason" "$new_ip_address" "$new_routers" "$new_domain_name_servers" >> "' + str(auto_events) + '"; '
-            ': > "' + str(resolver_file) + '"; for server in $new_domain_name_servers; do printf "nameserver %s\\n" "$server" >> "' + str(resolver_file) + '"; done;;\n'
+            'BOUND|RENEW) printf "v4|%s|%s|%s|%s\\n" "$reason" "$new_ip_address" "$new_routers" "$new_domain_name_servers" >> "' + str(auto_events) + '";;\n'
             'ROUTERADVERT) printf "ra|%s\\n" "$nd1_rdnss1_servers" >> "' + str(auto_events) + '";;\n'
-            'INFORM6) printf "v6|%s|%s\\n" "$new_dhcp6_name_servers" "$new_dhcp6_domain_search" >> "' + str(auto_events) + '"; '
-            ': > "' + str(resolver_file) + '"; for server in $new_dhcp6_name_servers; do printf "nameserver %s\\n" "$server" >> "' + str(resolver_file) + '"; done;;\n'
+            'INFORM6) printf "v6|%s|%s\\n" "$new_dhcp6_name_servers" "$new_dhcp6_domain_search" >> "' + str(auto_events) + '";;\n'
             'esac\n'
+            'resolvconf=/nonexistent; skip_hooks="01-test 30-hostname 50-ntp.conf 50-timesyncd.conf dhcpcd.enter-hook dhcpcd.exit-hook"\n'
+            'export resolvconf skip_hooks\n'
+            'exec /usr/lib/dhcpcd/dhcpcd-run-hooks "$@"\n'
         )
         auto_hook.chmod(0o500)
         auto_config = stage / "automatic-client.conf"
@@ -565,6 +566,36 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac):
             )
             assert selected[0]["dev"] == "dslite0", "IPv4 traffic bypassed the AFTR"
 
+        if wan_outage:
+            check_traffic()
+            before_outage = query("control.sock", "/v1/services/service.wan-pd")["snapshot"]
+            rules = (
+                'add table inet r2_outage\n'
+                'add chain inet r2_outage input { type filter hook input priority -300; policy accept; }\n'
+                'add chain inet r2_outage output { type filter hook output priority -300; policy accept; }\n'
+                'add rule inet r2_outage input iifname "wan0" drop\n'
+                'add rule inet r2_outage output oifname "wan0" drop\n'
+            )
+            subprocess.run(inside(router, ["nft", "-f", "-"]), input=rules, text=True, capture_output=True, check=True, timeout=10)
+            try:
+                for family in ("-4", "-6"):
+                    blocked = subprocess.run(inside(automatic, ["curl", family, "--noproxy", "*", "--max-time", "4", "-sS", "-I", "https://one.one.one.one/"]), capture_output=True, text=True)
+                    assert blocked.returncode != 0, family + " communication survived the isolated WAN blackhole"
+            finally:
+                run(inside(router, ["nft", "delete", "table", "inet", "r2_outage"]))
+            recovered_at = time.monotonic()
+            def usable():
+                for family in ("-4", "-6"):
+                    result = subprocess.run(inside(automatic, ["curl", family, "--noproxy", "*", "--max-time", "4", "-sS", "-I", "-o", "/dev/null", "https://one.one.one.one/"]), capture_output=True, text=True)
+                    if result.returncode:
+                        return False
+                return True
+            wait(usable, 60)
+            after_outage = query("control.sock", "/v1/services/service.wan-pd")["snapshot"]
+            assert (after_outage["client_duid"], after_outage["iaid"]) == (before_outage["client_duid"], before_outage["iaid"]), "WAN recovery changed PD identity"
+            check_traffic()
+            print("PASS actual HGW WAN blackhole and IPv4/IPv6 recovery; retained PD identity; seconds", round(time.monotonic() - recovered_at, 2), flush=True)
+
         initial = query("control.sock", "/v1/services/service.wan-pd")["snapshot"][
             "renew_at"
         ]
@@ -622,7 +653,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac):
         wait(forwarding_ready)
         wait(dns_ready)
         check_traffic()
-        print("PASS actual uplink PD worker SIGKILL recovery, retained DUID/IAID and restored LAN communication", flush=True)
+        print("PASS actual uplink PD worker SIGKILL recovery, retained DUID/IAID and restored LAN communication; seconds", round(time.time() - restarted_at, 2), flush=True)
         previous = next(
             m for m in query("supervisor.sock", "/v1/status")["modules"]
             if m["name"] == "service.wan-pd"
@@ -640,7 +671,24 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac):
         wait(forwarding_ready)
         wait(dns_ready)
         check_traffic()
-        print("PASS actual uplink graceful PD restart, retained DUID/IAID and prefix, restored LAN communication", flush=True)
+        print("PASS actual uplink graceful PD restart, retained DUID/IAID and prefix, restored LAN communication; seconds", round(time.time() - graceful_at, 2), flush=True)
+        if full_restart:
+            restart_at = time.monotonic()
+            daemon.send_signal(signal.SIGTERM)
+            daemon.wait(timeout=30)
+            assert daemon.returncode == 0, "router daemon failed to shut down before restart"
+            daemon = start(router, [str(stage / "routerd"), "boot", "--file", str(stage / "boot.json")], "console")
+            def control_available():
+                return subprocess.run(["curl", "--max-time", "2", "-sS", "--unix-socket", str(stage / "run/control.sock"), "http://localhost/v1/config"], capture_output=True).returncode == 0
+            wait(control_available, 30)
+            wait(ready, 120)
+            restored = query("control.sock", "/v1/services/service.wan-pd")["snapshot"]
+            assert (restored["client_duid"], restored["iaid"]) == (before["client_duid"], before["iaid"]), "router restart changed PD identity"
+            assert {p["prefix"] for p in restored["prefixes"]} == {p["prefix"] for p in before["prefixes"]}, "router restart changed the retained delegation"
+            wait(forwarding_ready)
+            wait(dns_ready)
+            check_traffic()
+            print("PASS actual HGW full daemon restart retained identity and restored both clients; seconds", round(time.monotonic() - restart_at, 2), flush=True)
         returned = any(
             run(
                 [
@@ -724,6 +772,13 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac):
         )
     except Exception:
         try:
+            for name in ("automatic-client-events", "automatic-resolv.conf"):
+                path = stage / name
+                if path.exists():
+                    print("Failed uplink", name, "\n".join(path.read_text(errors="replace").splitlines()[-25:]), flush=True)
+            if automatic in namespaces:
+                print("Failed uplink client IPv6", run(["ip", "-n", automatic, "-j", "-6", "address", "show", "dev", "client1"]), flush=True)
+                print("Failed uplink client routes", run(["ip", "-n", automatic, "-j", "-6", "route", "show"]), flush=True)
             if (stage / "run/control.sock").exists():
                 status = query("control.sock", "/v1/services")
                 print("Failed uplink projection", status.get("phase"), status.get("last_error"), flush=True)
@@ -772,12 +827,14 @@ def main():
     parser.add_argument("--binary-dir", type=Path, default=Path("dist/bin"))
     parser.add_argument("--state-dir", type=Path, help="Private persistent test identity and lease directory")
     parser.add_argument("--wan-mac", default="02:72:6f:75:74:02")
+    parser.add_argument("--wan-outage", action="store_true", help="Blackhole this isolated router WAN and verify recovery")
+    parser.add_argument("--full-restart", action="store_true", help="Restart the entire router with the same state and clients")
     parser.add_argument("--inside", type=Path)
     args = parser.parse_args()
     if not 1 <= args.seconds <= 10800:
         parser.error("--seconds must be 1..10800")
     if args.inside:
-        owner(args.inside, args.uplink, args.aftr, args.seconds, args.dns_upstream, args.wan_mac)
+        owner(args.inside, args.uplink, args.aftr, args.seconds, args.dns_upstream, args.wan_mac, args.wan_outage, args.full_restart)
         return
     root = [] if os.geteuid() == 0 else ["sudo", "-n"]
     persistent = args.state_dir.resolve() if args.state_dir else None
@@ -806,9 +863,7 @@ def main():
                 + ["install", "-m", "500", str(source.resolve()), str(stage / name)]
             )
         print("Current private live stage:", stage, flush=True)
-        subprocess.run(
-            root
-            + [
+        command = root + [
                 "unshare",
                 "--mount",
                 "--propagation",
@@ -828,7 +883,13 @@ def main():
                 args.dns_upstream,
                 "--wan-mac",
                 args.wan_mac,
-            ],
+            ]
+        if args.wan_outage:
+            command.append("--wan-outage")
+        if args.full_restart:
+            command.append("--full-restart")
+        subprocess.run(
+            command,
             check=True,
             timeout=args.seconds + 240,
         )

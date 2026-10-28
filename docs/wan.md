@@ -159,7 +159,8 @@ UPLINK_INTERFACE=... UPLINK_AFTR=... UPLINK_SECONDS=7800`. A separate MAC and LA
 namespaces use the actual daemon, independent BusyBox and dhcpcd clients, and a
 dnsmasq conditional upstream. Host management addresses, routes and resolver
 settings are not reconfigured. The DHCP clients obtain their LAN configuration;
-the dhcpcd hook installs the received DNS in a private resolver mount.
+the standard dhcpcd resolver hook installs the received DNS in a private
+resolver mount; integration with systemd-resolved is not exercised.
 `UPLINK_STATE_DIR` can select a private directory that retains the test WAN MAC,
 PD and DHCPv4 leases, and LAN DHCPv6 server DUID between runs. The directory
 must not be shared with another active test or a production router. The test
@@ -168,6 +169,10 @@ upstream failure and recovery. Set `UPLINK_DNS_UPSTREAM` to exercise a DoH
 endpoint using WAN-learned bootstrap DNS. RA and DHCPv6 information advertise
 the delegated router address. The DNS server listens on the IPv6 wildcard
 bound to the LAN interface; the test firewall also blocks WAN DNS input.
+Set `UPLINK_WAN_OUTAGE=1` to blackhole only the isolated router's WAN packets,
+then verify client connectivity and PD identity after removing the blackhole.
+Set `UPLINK_FULL_RESTART=1` to restart the daemon with the same state and
+verify that the connected clients regain communication.
 
 The test kills and gracefully restarts the PD worker, checks retained DUID/IAID
 and recovered communication, and verifies Rebind/Reply in capture. When the
