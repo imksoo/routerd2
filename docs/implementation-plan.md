@@ -1259,6 +1259,12 @@ backupは有限の実BACKUP観測で、masterの否定ではない。通常DAD�
 最終三case、make check、両architecture static build/署名検査も成功。RAはnative宣言を追加したもので、
 旧RA inputのimportや既存接続継続の証明ではない。GR/track、時間条件とPD/Info/serverの条件付きimportは残る。
 
+2026-10-28 `pd-role` / native-45: 旧 PD の VRRP role 条件も同じ typed source guard へ接続した。
+製品 CLI →実 worker と独立 Keepalived/ISC で、master の取得、backup/元観測期限の停止、
+同じ自動 DUID・IAID での復旧、PD 由来 WAN /128 の TCP/UDP が成功した。
+単独 client の条件付き起動であり、共有 grant の native HA 同期を自動推定しない。
+GR、information/server 条件、homert 全体と対象 NIC は残る。
+
 #### HA-02 — DHCP/PD lease の認証付き同期
 
 2026-10-28 `ha-pd-prepared` / native-43: 実homert02の設定と旧routerdを比較し、HA PD取得と

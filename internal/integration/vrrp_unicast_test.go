@@ -8,6 +8,7 @@ import (
 	"embed"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -24,6 +25,7 @@ import (
 	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/network"
+	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
 	"github.com/imksoo/routerd2/internal/protocol/health"
 	"github.com/imksoo/routerd2/internal/protocol/ra"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
@@ -216,6 +218,7 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 		}
 		program.Resources = append(program.Resources, resourceprogram.Resource{ID: "wan-ra", When: &resourceprogram.FactCondition{Fact: haName + ".active"}, Service: &serviceconfig.Service{Name: "wan-ra", RA: &ra.Config{Interface: "wan-ha", SourceAddress: vrrpWANLL, MinIntervalSeconds: 3, MaxIntervalSeconds: 4, RouterLifetimeSeconds: 12}}})
 		if spec.migrate {
+			startVRRPPDPeer(t, wan.client)
 			healthPBRListener(t, wan.client, "198.51.100.10:18097", "H")
 			healthPBRListener(t, peerNS, peer+":18098", "B")
 			healthPBRListener(t, peerNS, peer+":18099", "E")
@@ -264,6 +267,7 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 		}
 		return false
 	}
+	var pdDUID string
 	waitOwner := func(router bool) {
 		t.Helper()
 		until(t, 8*time.Second, func() bool {
@@ -282,6 +286,60 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 			return s.State == vrrp.StateBackup && !s.Active && !hasVIP() && peerOwns
 		})
 		if spec.migrate && wan != nil {
+			until(t, 8*time.Second, func() bool {
+				var state supervisor.Status
+				if err := f.supervisor.Do(context.Background(), "GET", "/v1/status", nil, &state); err != nil {
+					t.Fatal(err)
+				}
+				for _, resource := range program.Resources {
+					if resource.Service == nil || resource.Service.DHCP6 == nil {
+						continue
+					}
+					name := resource.Service.ModuleName()
+					present := false
+					for _, m := range state.Modules {
+						present = present || m.Name == name
+					}
+					if !router {
+						return !present
+					}
+					if !present {
+						return false
+					}
+					var instance runtimeplan.InstanceStatus
+					if err := f.control.Do(context.Background(), "GET", "/v1/services/"+name, nil, &instance); err != nil {
+						t.Fatal(err)
+					}
+					var pd dhcp6config.Snapshot
+					if err := json.Unmarshal(instance.Snapshot, &pd); err != nil || len(pd.Prefixes) != 1 || pd.State != "bound" {
+						return false
+					}
+					if pdDUID == "" {
+						pdDUID = pd.ClientDUID
+					} else if pd.ClientDUID != pdDUID {
+						t.Fatal("master recovery changed automatic DUID", pdDUID, pd.ClientDUID)
+					}
+					link, err := netlink.LinkByName("wan-ha")
+					if err != nil {
+						return false
+					}
+					addresses, err := netlink.AddrList(link, unix.AF_INET6)
+					if errors.Is(err, netlink.ErrDumpInterrupted) {
+						return false
+					}
+					if err != nil {
+						t.Fatal(err)
+					}
+					for _, a := range addresses {
+						if a.IP.String() == "2001:db8:80::21" && a.Flags&(unix.IFA_F_TENTATIVE|unix.IFA_F_DADFAILED) == 0 {
+							return pd.IAID == 1
+						}
+					}
+					return false
+				}
+				t.Fatal("missing imported PD declaration")
+				return false
+			})
 			until(t, 6*time.Second, func() bool {
 				link, err := netlink.LinkByName("lan-extra")
 				if router {
@@ -340,6 +398,9 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 	}
 	vrrpVIPResponders(t, routerNS, suffix, targets, "R")
 	vrrpVIPResponders(t, peerNS, suffix, targets, "K")
+	if spec.migrate && wan != nil {
+		vrrpVIPResponders(t, routerNS, "6", []string{"2001:db8:80::21"}, "R")
+	}
 	traffic := func(ns netns.NsHandle, target, want string) {
 		t.Helper()
 		for _, protocol := range []string{"tcp", "udp"} {
@@ -351,7 +412,11 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 			}
 			if err := fixtureInsideNamespace(ns, func() error {
 				var err error
-				conn, err = net.DialTimeout(protocol+suffix, net.JoinHostPort(target, port), time.Second)
+				family := "4"
+				if netip.MustParseAddr(target).Is6() {
+					family = "6"
+				}
+				conn, err = net.DialTimeout(protocol+family, net.JoinHostPort(target, port), time.Second)
 				return err
 			}); err != nil {
 				if wan != nil && target == vrrpWANVIP {
@@ -531,6 +596,7 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 	}
 	traffic(peerNS, vip, "R")
 	if spec.migrate && wan != nil {
+		traffic(wan.client, "2001:db8:80::21", "R")
 		paused := module(haName)
 		original := snapshot()
 		clock, err := boottime.Read()
@@ -549,7 +615,7 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 			}
 			for _, m := range status.Modules {
 				for _, resource := range program.Resources {
-					if resource.Service != nil && resource.Service.Health != nil && m.Name == resource.Service.ModuleName() {
+					if resource.Service != nil && (resource.Service.Health != nil || resource.Service.DHCP6 != nil) && m.Name == resource.Service.ModuleName() {
 						return false
 					}
 				}
@@ -566,7 +632,8 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 		waitOwner(true)
 		wan.waitNative(t, true)
 		traffic(wan.client, vrrpWANVIP, "R")
-		t.Log("expired role stopped master, backup and either-role probes before producer replacement; fresh election restored scoped communication")
+		traffic(wan.client, "2001:db8:80::21", "R")
+		t.Log("expired role stopped PD and role-scoped probes before producer replacement; fresh election restored communication with the same automatic DUID")
 	}
 	if spec.migrate && wan == nil {
 		// An actual listener makes timeout prove the inherited zone's deny,
@@ -756,6 +823,9 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 			wan.waitNative(t, true)
 			wan.waitForwarder(t, true)
 			traffic(wan.client, vrrpWANVIP, "R")
+			if spec.migrate {
+				traffic(wan.client, "2001:db8:80::21", "R")
+			}
 		}
 		startPeer(100, c.AuthPassword)
 		time.Sleep(4 * time.Duration(c.AdvertIntervalCentiseconds) * 10 * time.Millisecond) // More than a complete peer master-down interval.

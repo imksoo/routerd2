@@ -139,7 +139,7 @@ pppoe-engine:
 	  $(DOCKER) export "$$profile_id" | tar --no-same-owner -xf - -C $(PPP_DIR) pppoe-engine.tar pppoe-sources.tar
 
 check-vrrp-unicast: build
-	$(PYTHON) scripts/vrrp-unicast.py --go '$(GO)'
+	$(PYTHON) scripts/vrrp-unicast.py --go '$(GO)' --dhcp6-server '$(DHCP6_SERVER)'
 
 check-bgp: build
 	$(PYTHON) scripts/daemon-tests.py bgp --go '$(GO)'

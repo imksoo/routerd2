@@ -186,6 +186,20 @@ creates and retains its own automatic identity. An explicit override never
 overwrites that automatic identity; confirmed rollback restores its selection.
 The example DUID is fixture data and must be replaced with the intended identity.
 
+Imported PD can use the same VRRP master/backup role selectors as probes and
+static addresses. The existing source graph starts and stops the one client;
+expired or missing election observations do not retain its assignments.
+Automatic DUID and IAID survive role-driven replacement. This standalone client
+releases on an ordinary stop; a link already withdrawn by its original authority
+deadline may prevent transmitting Release. No shared-grant replication is
+inferred from `when`. Configure native PD HA explicitly for a pair that must
+retain and replicate the upstream grant while standby.
+
+The actual CLI-converted VRRP/WAN case runs Keepalived2.2.8 and ISC4.4.3-P1.
+It checks master acquisition, backup/expired-role removal and recovery with the
+same automatic identity, then TCP/UDP to the delegated WAN /128. The fixture's
+RA remains an explicit native declaration, not an old RA import.
+
 WAN identity is independent: `DHCPv6PrefixDelegation.spec.clientDUID` is copied
 into the native client. Set it to the old client's observed DUID when changing
 NICs or moving to a new state directory. Without it, a new Ethernet client starts
@@ -576,10 +590,10 @@ kernel log events and do not imply NFLOG sampling or old log-retention behavior.
 
 ## Explicitly incompatible areas
 
-- Nonempty `when`, `dependsOn` and `ready_when` conditions, metadata ownership,
-  dynamic annotations and observed `status` are rejected. Static migration must
-  not convert a conditional address, tunnel or advertisement into an always-on
-  resource.
+- `when` supports observed VRRP master/backup selectors on HealthCheck, static
+  VirtualAddress and DHCPv6PrefixDelegation. Other conditions, `dependsOn`,
+  `ready_when`, metadata ownership, dynamic annotations and observed `status`
+  are rejected; conditional intent must not become an always-on resource.
 - Firewall address sets, flow pinholes, connection/rate limits, NFLOG sampling,
   client policy, packet marks, NAT pools/persistent port mappings, port-forward
   and hairpin composition are not migration rules yet. Self-originating ACLs

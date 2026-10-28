@@ -4,8 +4,12 @@ package integration
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"net"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -13,6 +17,59 @@ import (
 	"github.com/vishvananda/netns"
 	"golang.org/x/sys/unix"
 )
+
+func startVRRPPDPeer(t *testing.T, ns netns.NsHandle) {
+	t.Helper()
+	if err := fixtureInsideNamespace(ns, func() error {
+		link, err := netlink.LinkByName("client0")
+		if err != nil {
+			return err
+		}
+		address, _ := netlink.ParseAddr("2001:db8:42::1/64")
+		if err := netlink.AddrAdd(link, address); err != nil {
+			return err
+		}
+		return netlink.RouteAdd(&netlink.Route{LinkIndex: link.Attrs().Index, Dst: &net.IPNet{IP: net.ParseIP("2001:db8:80::"), Mask: net.CIDRMask(60, 128)}, Gw: net.ParseIP(vrrpWANLL)})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	config := filepath.Join(dir, "dhcp6.conf")
+	leases := filepath.Join(dir, "dhcp6.leases")
+	if err := os.WriteFile(config, []byte("default-lease-time 120; preferred-lifetime 90; subnet6 2001:db8:42::/64 { prefix6 2001:db8:80:: 2001:db8:80:: /60; }\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(leases, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	server := os.Getenv("ROUTERD2_DHCP6_SERVER")
+	if server == "" {
+		t.Fatal("independent ISC DHCP server required")
+	}
+	log, err := os.Create(filepath.Join(dir, "dhcp6.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cmd := exec.CommandContext(ctx, server, "-6", "-f", "-d", "-cf", config, "-lf", leases, "-pf", filepath.Join(dir, "dhcp6.pid"), "client0")
+	cmd.Stdout, cmd.Stderr = log, log
+	if err := fixtureInsideNamespace(ns, cmd.Start); err != nil {
+		cancel()
+		log.Close()
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+		log.Close()
+		if t.Failed() {
+			b, _ := os.ReadFile(log.Name())
+			t.Log("ISC DHCP", string(b))
+		}
+	})
+}
 
 const (
 	vrrpWANVIP = "198.51.100.254"

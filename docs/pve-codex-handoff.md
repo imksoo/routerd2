@@ -5,7 +5,29 @@
 [機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
-## 現在の変更: vrrp-role / native-45
+## 現在の変更: pd-role / native-45
+
+routerd の PD 起動経路と role 条件を読み、旧 DHCPv6PrefixDelegation の master/backup 条件を
+既存 typed source guard へ接続した。DUID-LL・IAID 1 と永続 identity の所有者は変えず、
+新しい選出監視・identity 管理・互換 reader は追加していない。
+
+PVE Linux6.8/amd64、製品 CLI の変換結果からの実 worker と独立 Keepalived2.2.8・ISC4.4.3-P1 で、
+master の PD 取得、backup と元観測の期限切れでの停止、復帰後の同じ自動 DUID/IAID での
+再取得が成功した。PD 由来 WAN /128 への実 TCP/UDP も初回・期限切れ後・peer 停止後に成功した。
+初回試行はアドレス変化中の kernel dump 中断で試験側が停止した。中断だけを次の観測で確認するよう
+直し、同じケースを完走した。元の権限期限を延長していない。
+
+これは単独 PD client の条件付き起動であり、共有 grant を Release せず待機系へ同期する native HA の
+自動変換ではない。期限切れで元 link-local を既に撤去した場合、Release 送信は失敗し得る。
+GR/track、information/server の条件付き import、homert 全体、ARM64 実行と対象 NIC は残る。
+`make check` の Go/Python/Race/vet と両 architecture の CGO_ENABLED=0 build は成功した。
+最終六 ELF の署名 catalog/publisher/stage Race 検査と basic IPv4 v2/PASS・IPv6 v3 も成功した。
+実 HGW の自然 Renew は native-43 の別試験である。
+
+再実行: `make check-vrrp-unicast RELEASE_ID=pd-role
+DHCP6_SERVER=dist/peer-env/isc-dhcp/root/usr/sbin/dhcpd`。
+
+## 直前の完了変更: vrrp-role / native-45
 
 旧`resourcequery/when.go`とVMAC hookの生成経路を読み、HealthCheckと静的VirtualAddressの
 master/backup条件、primary/追加VMACを既存native条件・link/addressへ変換した。

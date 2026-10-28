@@ -116,7 +116,8 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 		case "DHCPv4Client":
 			c.dhcp4(r)
 		case "DHCPv6PrefixDelegation":
-			c.dhcp6(r)
+			name := c.dhcp6(r)
+			conditions = append(conditions, resourceCondition{id: "service/" + name, source: r, when: r.Spec.(api.DHCPv6PrefixDelegationSpec).When})
 		case "IPv6RAAddress":
 			c.raClient(r)
 		}
@@ -280,7 +281,7 @@ func (c *compiler) allow(r resource, fields ...string) {
 		}
 	}
 	for _, field := range []string{"when", "dependsOn", "ready_when"} {
-		if field == "when" && (r.Kind == "HealthCheck" || r.Kind == "VirtualAddress" && r.Spec.(api.VirtualAddressSpec).Mode != "vrrp") {
+		if field == "when" && (r.Kind == "HealthCheck" || r.Kind == "DHCPv6PrefixDelegation" || r.Kind == "VirtualAddress" && r.Spec.(api.VirtualAddressSpec).Mode != "vrrp") {
 			continue // These declarations are translated into source graph guards.
 		}
 		if meaningful(child(r.node, field)) {

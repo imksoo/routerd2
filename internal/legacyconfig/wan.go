@@ -30,7 +30,7 @@ func (c *compiler) dhcp4(r resource) {
 	c.note(r, "DHCP ownership starts from a new native journal; runtime lease files are not imported.")
 }
 
-func (c *compiler) dhcp6(r resource) {
+func (c *compiler) dhcp6(r resource) string {
 	c.allow(r, "interface", "client", "profile", "prefixLength", "clientDUID", "required")
 	s := r.Spec.(api.DHCPv6PrefixDelegationSpec)
 	if s.Client != "" && s.Client != "routerd" {
@@ -56,6 +56,7 @@ func (c *compiler) dhcp6(r resource) {
 	c.pd[r.Kind+"/"+r.Metadata.Name] = len(c.document.Services)
 	c.addService(r, service)
 	c.note(r, "DUID-LL and IAID 1 defaults are retained; historical leases and resource status are not imported.")
+	return service.Name
 }
 
 func (c *compiler) raClient(r resource) {

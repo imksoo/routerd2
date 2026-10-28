@@ -32,6 +32,21 @@ spec:
       metadata: {name: wan-client}
       spec: {destination: 198.51.100.0/24, interface: wan-identity}
     - apiVersion: net.routerd.net/v1alpha1
+      kind: DHCPv6PrefixDelegation
+      metadata: {name: wan-pd}
+      spec:
+        interface: wan-identity
+        prefixLength: 60
+        when: {state: {VirtualAddress/gateway.role: {equals: master}}}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: IPv6DelegatedAddress
+      metadata: {name: wan-source}
+      spec: {prefixDelegation: DHCPv6PrefixDelegation/wan-pd, interface: wan-identity, subnetID: "0", addressSuffix: "::21", prefixLength: 128}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: IPv6StaticRoute
+      metadata: {name: wan6-client}
+      spec: {destination: '2001:db8:42::/64', interface: wan-identity}
+    - apiVersion: net.routerd.net/v1alpha1
       kind: HealthCheck
       metadata: {name: master-probe}
       spec:
