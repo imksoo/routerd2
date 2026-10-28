@@ -3,7 +3,7 @@
 
 The actual product owns RA, DHCPv4, DHCPv6 PD, LAN RA, DNS and DS-Lite. The host's
 management addresses/routes/clock are not changed. Requires explicit uplink and
-AFTR intent, root/sudo, iproute2, BusyBox, dnsmasq, curl, dig and tcpdump. A bounded owner removes
+AFTR intent, root/sudo, iproute2, BusyBox, dhcpcd, dnsmasq, curl, dig and tcpdump. A bounded owner removes
 its namespaces and private state on completion. This is not NIC qualification.
 """
 
@@ -34,7 +34,17 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
     signal.signal(signal.SIGALRM, stop)
     signal.alarm(seconds + 180)
     run(["mount", "-t", "tmpfs", "-o", "mode=755", "tmpfs", "/run"])
-    router, client = "r2uplink-" + str(os.getpid()), "r2client-" + str(os.getpid())
+    run(["mount", "-t", "tmpfs", "-o", "mode=755", "tmpfs", "/var/lib/dhcpcd"])
+    resolver_file = stage / "automatic-resolv.conf"
+    resolver_file.write_text("")
+    resolver_target = Path("/etc/resolv.conf").resolve()
+    if not resolver_target.exists():
+        if not resolver_target.is_relative_to("/run"):
+            raise RuntimeError("resolver target is absent outside the private runtime mount")
+        resolver_target.parent.mkdir(parents=True, exist_ok=True)
+        resolver_target.touch()
+    run(["mount", "--bind", str(resolver_file), str(resolver_target)])
+    router, client, automatic = "r2uplink-" + str(os.getpid()), "r2client-" + str(os.getpid()), "r2auto-" + str(os.getpid())
     children, namespaces = [], []
 
     def inside(ns, command):
@@ -185,8 +195,9 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
             "id": "leases",
             "service": {"name": "leases", "dhcp_server": {
                 "interface": "lan0", "server_address": "198.18.0.1", "authoritative": True,
-                "primary": {"prefix": "198.18.0.0/24", "start": "198.18.0.2", "end": "198.18.0.2",
+                "primary": {"prefix": "198.18.0.0/24", "start": "198.18.0.2", "end": "198.18.0.20",
                             "lease_seconds": 60, "router": "198.18.0.1", "dns_servers": ["198.18.0.1"]},
+                "reservations": [{"mac_address": "02:00:00:00:00:02", "ip_address": "198.18.0.2"}],
             }},
         },
         {
@@ -235,7 +246,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
         json.dumps({"schema_version": 2, "resources": resources})
     )
     try:
-        for ns in [router, client]:
+        for ns in [router, client, automatic]:
             run(["ip", "netns", "add", ns])
             namespaces.append(ns)
             run(["ip", "-n", ns, "link", "set", "lo", "up"])
@@ -273,7 +284,11 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
                 client,
             ]
         )
+        run(["ip", "-n", client, "link", "set", "client0", "address", "02:00:00:00:00:02"])
         run(["ip", "-n", client, "link", "set", "client0", "up"])
+        run(["ip", "-n", client, "link", "add", "link", "client0", "name", "client1", "type", "macvlan", "mode", "bridge"])
+        run(["ip", "-n", client, "link", "set", "client1", "netns", automatic])
+        run(["ip", "-n", automatic, "link", "set", "client1", "up"])
         capture = start(
             router,
             [
@@ -376,6 +391,37 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
         servers = [ipaddress.IPv6Address(value) for value in options.get("dns", "").split()]
         assert servers == [ipaddress.IPv6Address("fd42:726f:7574::1")] and "home.arpa" in options.get("search", "").split(), "LAN DHCPv6 information did not supply the router DNS and search domain: " + str(options)
         print("PASS independent LAN client received router DNS and search domain via DHCPv6", flush=True)
+
+        auto_events = stage / "automatic-client-events"
+        auto_hook = stage / "automatic-client-hook.sh"
+        auto_hook.write_text(
+            '#!/bin/sh\ncase "$reason" in\n'
+            'BOUND|RENEW) printf "v4|%s|%s|%s|%s\\n" "$reason" "$new_ip_address" "$new_routers" "$new_domain_name_servers" >> "' + str(auto_events) + '"; '
+            ': > "' + str(resolver_file) + '"; for server in $new_domain_name_servers; do printf "nameserver %s\\n" "$server" >> "' + str(resolver_file) + '"; done;;\n'
+            'INFORM6) printf "v6|%s|%s\\n" "$new_dhcp6_name_servers" "$new_dhcp6_domain_search" >> "' + str(auto_events) + '"; '
+            ': > "' + str(resolver_file) + '"; for server in $new_dhcp6_name_servers; do printf "nameserver %s\\n" "$server" >> "' + str(resolver_file) + '"; done;;\n'
+            'esac\n'
+        )
+        auto_hook.chmod(0o500)
+        auto_config = stage / "automatic-client.conf"
+        auto_config.write_text("ipv6rs\nslaac hwaddr\nnoipv4ll\noption domain_name_servers, domain_name, domain_search\n")
+        automatic_client = start(automatic, ["dhcpcd", "-B", "-d", "-f", str(auto_config), "-c", str(auto_hook), "client1"], "automatic-client")
+
+        def automatic_ready():
+            if automatic_client.poll() is not None:
+                raise RuntimeError("automatic independent LAN client exited")
+            if not auto_events.exists():
+                return False
+            events = [line.split("|") for line in auto_events.read_text().splitlines()]
+            return any(len(event) == 5 and event[0] == "v4" and event[3:] == ["198.18.0.1", "198.18.0.1"] for event in events) and any(len(event) == 3 and event[0] == "v6" and event[1] and ipaddress.IPv6Address(event[1]) == ipaddress.IPv6Address("fd42:726f:7574::1") and "home.arpa" in event[2].split() for event in events)
+        wait(automatic_ready, 60)
+        auto_options = [line.split("|") for line in auto_events.read_text().splitlines()]
+        auto_dns4 = next(event[4] for event in reversed(auto_options) if event[0] == "v4")
+        auto_dns6 = next(event[1] for event in reversed(auto_options) if event[0] == "v6")
+        auto_addresses = json.loads(run(["ip", "-n", automatic, "-j", "address", "show", "dev", "client1"]))
+        delegated = [ipaddress.IPv6Network(p["prefix"]) for p in query("control.sock", "/v1/services/service.wan-pd")["snapshot"]["prefixes"]]
+        assert any(a["family"] == "inet6" and not a.get("tentative") and any(ipaddress.IPv6Address(a["local"]) in prefix for prefix in delegated) for link in auto_addresses for a in link["addr_info"]), "automatic LAN client has no usable delegated SLAAC address"
+        print("PASS independent dhcpcd automatically acquired DHCPv4 and RA-triggered DHCPv6 with delegated SLAAC", flush=True)
 
         def forwarding_ready():
             observed = query("control.sock", "/v1/services/service.internet").get(
@@ -480,6 +526,11 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
             for transport in [[], ["+tcp"]]:
                 response = run(inside(client, ["dig", "-6", "@fd42:726f:7574::1", "example.net", "AAAA", "+tries=1", "+time=3"] + transport))
                 assert "status: NOERROR" in response and "ANSWER: 0" not in response, (transport, response)
+            for family, server in (("-4", auto_dns4), ("-6", auto_dns6)):
+                result = run(inside(automatic, ["curl", family, "--noproxy", "*", "--max-time", "8", "-sS", "-I", "-o", "/dev/null", "-w", "%{http_code}", "https://one.one.one.one/"]))
+                assert result in ["200", "301", "302", "308"], (family, result)
+                response = run(inside(automatic, ["dig", family, "@" + server, "example.net", "A", "+tries=1", "+time=3"]))
+                assert "status: NOERROR" in response and "ANSWER: 0" not in response, (family, response)
             selected = json.loads(
                 run(
                     [
@@ -506,7 +557,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
         started_at = time.time()
         start_time, rounds, updates = time.monotonic(), 0, 0
         while time.monotonic() - start_time < seconds:
-            if dhcp_client.poll() is not None:
+            if dhcp_client.poll() is not None or automatic_client.poll() is not None:
                 raise RuntimeError("independent LAN DHCP client exited")
             check_traffic()
             renewed = query("control.sock", "/v1/services/service.wan-pd")["snapshot"][
@@ -533,7 +584,8 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
         events = [line.split() for line in lease_events.read_text().splitlines()]
         if seconds >= 75:
             assert any(event == ["renew", "198.18.0.2", "198.18.0.1", "198.18.0.1"] for event in events), "LAN DHCP client did not renew its address, gateway and DNS"
-            print("PASS independent LAN DHCP client naturally renewed the same address, gateway and DNS", flush=True)
+            assert any(line.startswith("v4|RENEW|") for line in auto_events.read_text().splitlines()), "automatic LAN client did not naturally renew DHCPv4"
+            print("PASS both independent LAN DHCP clients naturally renewed their addresses, gateway and DNS", flush=True)
         before = query("control.sock", "/v1/services/service.wan-pd")["snapshot"]
         previous = next(
             m for m in query("supervisor.sock", "/v1/status")["modules"]

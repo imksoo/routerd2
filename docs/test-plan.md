@@ -90,8 +90,10 @@
 - 同版を実 HGW に接続した90秒の単体試験は、独立 BusyBox 端末の DHCPv4取得・自然更新、DHCPv6情報応答、
   SLAAC、IPv4 NAT/IPv6 HTTPS、IPv4/IPv6 DNS、実Cloudflare DoH、独立dnsmasqへの条件付き転送・
   上流障害時の分離・復旧とPD worker再起動を一構成で通した。DHCPv6クライアントは明示起動した。
-- 同版の20秒実HGW試験では独立dhcpcd端末がRAを受け、自動的にDHCPv4・DHCPv6情報・SLAACを取得し、
-  IPv4/IPv6 HTTPSとDNSを使えた。端末のDNS設定はhookで観測しており、OS resolverへの自動反映は未検証。
+- 同版の90秒実HGW試験では独立dhcpcd端末がRAを受け、自動的にDHCPv4・DHCPv6情報・SLAACを取得した。
+  取得したDNSを端末の隔離resolverに反映し、名前を手動指定せずIPv4/IPv6 HTTPSに接続した。
+  BusyBox端末とdhcpcd端末の両方でDHCPv4自然更新を確認し、管理hostのresolver設定は不変だった。
+  使用したresolver hookは試験用であり、対象端末のOS標準resolverとの統合は未検証。
 - 初回は試験側のIPv6表記比較、固定IPv6アドレスの撤去判定、条件付きDNSの設定順、動的DHCP poolの固定値前提、
   dhcpcdのオプション要求不足が誤って失敗した。試験を修正して再実行した。長時間安定性は未検証。
 - 以前の版で実 HGW の7800秒試験と自然 DHCPv6 Renew を確認している。最新版での長時間安定性には数えない。

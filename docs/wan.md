@@ -146,15 +146,22 @@ socket. Static DNS continues to use its configured advertisement lifetime.
 
 For an explicitly authorized local access network, run `make check-uplink
 UPLINK_INTERFACE=... UPLINK_AFTR=... UPLINK_SECONDS=7800`. A separate MAC and LAN
-namespace use the actual daemon; host management addresses and routes are not
-reconfigured. The observation interval exercises IPv4 DS-Lite and IPv6 HTTPS
-and learned DNS over UDP/TCP. It then kills the PD worker, checks retained
-DUID/IAID and recovered communication, and verifies Rebind/Reply in capture.
-When the interval includes the initial T1, a captured natural Renew/Reply before
-the restart is required. A changed deadline alone is not counted as Renew:
-Rebind can legitimately obtain a new grant. Short runs do not prove natural
-renewal. Graceful shutdown must withdraw LAN RA/addresses and obtain a Release
-Reply. Temporary state and bounded captures are removed on exit.
+namespaces use the actual daemon, independent BusyBox and dhcpcd clients, and a
+dnsmasq conditional upstream. Host management addresses, routes and resolver
+settings are not reconfigured. The DHCP clients obtain their LAN configuration;
+the dhcpcd hook installs the received DNS in a private resolver mount. The test
+checks IPv4 DS-Lite and IPv6 HTTPS, UDP/TCP DNS, conditional forwarding,
+upstream failure and recovery. Set `UPLINK_DNS_UPSTREAM` to exercise a DoH
+endpoint using WAN-learned bootstrap DNS. The IPv6 LAN DNS address is currently
+a static ULA, not homert's delegated-address listener.
+
+The test kills and gracefully restarts the PD worker, checks retained DUID/IAID
+and recovered communication, and verifies Rebind/Reply in capture. When the
+interval includes the initial T1, a captured natural Renew/Reply before restart
+is required. A changed deadline alone is not counted as Renew: Rebind can
+legitimately obtain a new grant. Short runs do not prove natural renewal.
+Graceful shutdown must withdraw the delegated LAN RA/address without releasing
+the upstream grant. Temporary state and bounded captures are removed on exit.
 
 Use `show services` for a bounded summary, `show services wan-ra` or
 `show services internet` for the complete individual snapshot, and `show
