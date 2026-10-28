@@ -76,7 +76,12 @@ global/split resolvers and search-domain installation are not exposed yet.
 Tailscale SSH is not enabled and is separate from routerd management SSH. `BackendState=Running`, the daemon's self `Online` flag and `.active` describe
 the observed engine state. They do not prove a live control-server connection,
 a usable subnet or an exit path; Health can check the required communication.
-Status includes original finite boot observation times and actual peer traffic counters.
+Status includes original finite boot observation times, actual peer traffic
+counters, each peer's DNS name and assigned tags. The node snapshot exposes
+`dns_name`, `tags` and the current `tailnet` (`name`, `dns_domain`,
+`magic_dns_enabled`). Disconnected membership is omitted. These are daemon
+observations; `advertise_tags` stays in configuration as a request. Cached
+metadata in a NeedsLogin or expired snapshot does not establish permission.
 
 Run `make check-tailscale` with Linux root/sudo, TUN, iproute2, nft, curl,
 OpenSSL, tcpdump, dig, dnsmasq and Python 3. `make tailscale-peers` downloads checksum-pinned
@@ -101,3 +106,16 @@ source stays usable during withdrawal, with no private-query fallthrough. This i
 explicit native DNS source, not an import of the old daemon's OS resolver
 mutation. See the [upstream DNS behavior](https://tailscale.com/docs/reference/faq/dns-resolv-conf)
 and [Headscale node attributes](https://headscale.net/stable/ref/policy/#node-attributes).
+
+`shields_up` controls the daemon's inbound packet filter in addition to the
+explicit native kernel firewall. It blocks new peer connections to the router
+and its advertised subnets; LAN-initiated connections and their replies remain
+possible. It does not replace the native INPUT/FORWARD policy.
+
+Tags are granted by the control server. In Headscale 0.29.6, a personal
+preauth key does not assign tags merely because a client advertises them.
+Use a control-approved tagged enrollment key for that registration. Removing
+the client request is not administrative tag revocation; use the control
+server's identity/authorization operations. See [Headscale registration](https://headscale.net/stable/ref/registration/)
+and [tag ownership](https://headscale.net/stable/ref/tags/). Native configuration
+rollback does not roll back the control server's authorization decisions.

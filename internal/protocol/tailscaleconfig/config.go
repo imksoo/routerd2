@@ -43,6 +43,8 @@ type Config struct {
 type Peer struct {
 	ID              string         `json:"id"`
 	Hostname        string         `json:"hostname,omitempty"`
+	DNSName         string         `json:"dns_name,omitempty"`
+	Tags            []string       `json:"tags,omitempty"`
 	Online          bool           `json:"online"`
 	Addresses       []netip.Addr   `json:"addresses,omitempty"`
 	AllowedPrefixes []netip.Prefix `json:"allowed_prefixes,omitempty"`
@@ -52,11 +54,21 @@ type Peer struct {
 	TxBytes         int64          `json:"tx_bytes"`
 }
 
+// Tailnet describes the daemon's observed membership, not requested intent.
+type Tailnet struct {
+	Name            string `json:"name"`
+	DNSDomain       string `json:"dns_domain"`
+	MagicDNSEnabled bool   `json:"magic_dns_enabled"`
+}
+
 type Snapshot struct {
 	Resource      string       `json:"resource"`
 	Interface     string       `json:"interface"`
 	BackendState  string       `json:"backend_state"`
 	NodeID        string       `json:"node_id,omitempty"`
+	DNSName       string       `json:"dns_name,omitempty"`
+	Tags          []string     `json:"tags,omitempty"`
+	Tailnet       *Tailnet     `json:"tailnet,omitempty"`
 	Online        bool         `json:"online"`
 	Addresses     []netip.Addr `json:"addresses,omitempty"`
 	Peers         []Peer       `json:"peers,omitempty"`

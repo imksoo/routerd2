@@ -70,6 +70,18 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
 """
 
 
+BLOCKED_CLIENT = r"""import socket,sys
+host=sys.argv[1];family=socket.AF_INET6 if ':' in host else socket.AF_INET
+for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
+ s=socket.socket(family,kind);s.settimeout(1)
+ try:
+  s.connect((host,port));s.sendall(b'blocked-connection');s.recv(4096)
+ except socket.timeout:pass
+ else:raise AssertionError('shields-up accepted a new inbound connection')
+ finally:s.close()
+"""
+
+
 def peer(stage):
     children, namespaces = [], []
     frozen = []
@@ -160,7 +172,7 @@ def peer(stage):
         run(["openssl", "req", "-config", "/dev/null", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1", "-keyout", str(key), "-out", str(cert), "-subj", "/CN=routerd-fixture", "-addext", "subjectAltName=IP:192.0.2.1,DNS:control.test"])
         access = stage / "policy.json"
         access.write_text(json.dumps({"acls": [{"action": "accept", "src": ["*"], "dst": ["*:*"]}],
-            "nodeAttrs": [{"target": ["*"], "attr": ["magicdns-aaaa"]}]}))
+            "nodeAttrs": [{"target": ["*"], "attr": ["magicdns-aaaa"]}], "tagOwners": {"tag:router": ["fixture@"]}}))
         config = {
             "policy": {"mode": "file", "path": str(access)},
             "server_url": "https://control.test:8443", "listen_addr": "192.0.2.1:8443",
@@ -231,6 +243,7 @@ def peer(stage):
         firewall = migrated["network"]["firewall"]
         # New LAN DNS listener: authorize only its declared transport/port.
         firewall["input"]["rules"] += [{"match": {"in_interface": "lan0", "protocol": protocol, "destination_ports": [{"start": 53}]}, "action": "accept"} for protocol in ("udp", "tcp")]
+        firewall["input"]["rules"] += [{"match": {"in_interface": "tailscale0", "protocol": protocol, "destination_ports": [{"start": port}]}, "action": "accept"} for protocol, port in (("tcp", 18080), ("udp", 18081))]
         firewall["forward"] = [{"from": "tailscale0", "to": "lan0"}, {"from": "tailscale0", "to": "uplink0"}, {"from": "lan0", "to": "tailscale0"}]
         firewall["nat"] = [{"type": "masquerade", "match": {"family": family, "in_interface": "tailscale0", "out_interface": "uplink0"}} for family in (4,6)]
         module = "service." + imported["name"]
@@ -309,6 +322,8 @@ def peer(stage):
         print("PASS signed engine/image/source catalog selected under PID 1", flush=True)
         original = observation()
         assert original["online"]
+        assert original["dns_name"] == "product-a.test.invalid."
+        assert original["tailnet"]["dns_domain"] == "test.invalid" and original["tailnet"]["magic_dns_enabled"]
         assert original["node_id"]==seed_identity["ID"] and original["addresses"]==seed_identity["TailscaleIPs"]
         print("PASS externally enrolled official daemon identity retained after stopped-state provisioning",flush=True)
         # The kernel scope has one owner even across different identity dirs.
@@ -334,7 +349,7 @@ def peer(stage):
         for family,prefix in (("-4","10.43.0.0/24"),("-6","fd43::/64")):
             assert not any(route.get("dst")==prefix for route in json.loads(run(inside("ts-a",["ip",family,"-j","route","show","table","52"]))))
         run(inside("ts-control", head + ["nodes", "approve-routes", "-i", str(router["id"]), "-r", "10.42.0.0/24,fd42::/64,0.0.0.0/0,::/0"]))
-        for namespace, host in (("ts-lan", "10.42.0.2"), ("ts-lan", "fd42::2"), ("ts-control", "198.51.100.20"), ("ts-control", "2001:db8:ffff::20"), ("ts-b", "10.43.0.1"), ("ts-b", "fd43::1")):
+        for namespace, host in (("ts-lan", "10.42.0.2"), ("ts-lan", "fd42::2"), ("ts-control", "198.51.100.20"), ("ts-control", "2001:db8:ffff::20"), ("ts-b", "10.43.0.1"), ("ts-b", "fd43::1"), ("ts-a", original["addresses"][0]), ("ts-a", original["addresses"][1])):
             name="app-" + host.replace(":", "_")
             start(namespace, ["python3", "-u", "-c", ECHO_SERVER, host], name)
             wait(lambda: "READY" in (stage/(name+".log")).read_text())
@@ -492,6 +507,91 @@ def peer(stage):
         traffic("10.43.0.1", "10.42.0.2", "ts-lan")
         traffic("fd43::1", "fd42::2", "ts-lan")
         print("PASS imported acceptRoutes:true installed independent peer prefixes and routed LAN IPv4/IPv6 TCP/UDP without NAT", flush=True)
+        # First establish incoming host traffic before enabling shieldsUp.
+        for host in original["addresses"]:
+            traffic(host, peer_ips[ipaddress.ip_address(host).version])
+        shielded_source = stage / "shielded.yaml"
+        shielded_source.write_text(legacy.read_text().replace("shieldsUp: false", "shieldsUp: true"))
+        legacy = shielded_source
+        shielded = copy.deepcopy(reauthenticated)
+        next(r for r in shielded["resources"] if r["id"] == "tailnet")["service"] = next(s for s in imported_native()["services"] if "tailscale" in s)
+        product_api("control.sock", "/v1/config/commit", {"expected_revision": 5, "request_id": "shields-up", "config": shielded, "confirm_timeout_seconds": 30}, timeout=12)
+        wait(lambda: observation().get("backend_state") == "Running" and observation().get("online"), 30)
+        for host in original["addresses"] + ["10.42.0.2", "fd42::2"]:
+            run(inside("ts-b", ["python3", "-c", BLOCKED_CLIENT, host]))
+        traffic("10.43.0.1", "10.42.0.2", "ts-lan")
+        traffic("fd43::1", "fd42::2", "ts-lan")
+        print("PASS shieldsUp blocked new inbound host/subnet IPv4/IPv6 TCP/UDP and retained outbound LAN flows", flush=True)
+        wait(lambda: product_api("control.sock", "/v1/config")["revision"] == 7, 40)
+        wait(lambda: observation().get("backend_state") == "Running" and observation().get("online"), 30)
+        wait(lambda: pingable("10.42.0.2"))
+        for host in original["addresses"] + ["10.42.0.2", "fd42::2"]:
+            traffic(host, peer_ips[ipaddress.ip_address(host).version])
+        assert observation()["node_id"] == original["node_id"]
+        print("PASS confirmed rollback restored inbound host/subnet traffic with the same identity", flush=True)
+        legacy = accepted_source
+        tagged_source = stage / "tagged.yaml"
+        tagged_source.write_text(legacy.read_text().replace("hostname: product-a", "hostname: product-a\n        advertiseTags: [tag:router]"))
+        legacy = tagged_source
+        tagged = copy.deepcopy(reauthenticated)
+        next(r for r in tagged["resources"] if r["id"] == "tailnet")["service"] = next(s for s in imported_native()["services"] if "tailscale" in s)
+        product_api("control.sock", "/v1/config/commit", {"expected_revision": 7, "request_id": "tagged", "config": tagged}, timeout=12)
+        wait(lambda: observation().get("backend_state") == "Running" and observation().get("online"), 30)
+        assert not observation().get("tags")
+        print("PASS requested tags were not reported as assigned with a personal enrollment key", flush=True)
+        # Headscale's preauth contract assigns tags from the approved key.
+        # Expire the personal registration before explicit tagged enrollment.
+        run(inside("ts-control", head + ["nodes", "expire", "-i", str(router["id"])]))
+        wait(lambda: observation().get("backend_state") == "NeedsLogin", 30)
+        tag_key = json.loads(run(inside("ts-control", head + ["preauthkeys", "create", "--tags", "tag:router", "-o", "json"])))
+        tagged_keyfile = stage / "tagged.key"
+        tagged_keyfile.write_text(tag_key["key"])
+        tagged_keyfile.chmod(0o600)
+        policy["tailscale"]["TailscaleNode/overlay"]["auth_key_file"] = str(tagged_keyfile)
+        approved = copy.deepcopy(tagged)
+        next(r for r in approved["resources"] if r["id"] == "tailnet")["service"] = next(s for s in imported_native()["services"] if "tailscale" in s)
+        product_api("control.sock", "/v1/config/commit", {"expected_revision": 8, "request_id": "approved-tag", "config": approved}, timeout=12)
+        wait(lambda: observation().get("backend_state") == "Running" and observation().get("tags") == ["tag:router"], 30)
+        tagged_id = observation()["node_id"]
+        nodes = json.loads(run(inside("ts-control", head + ["nodes", "list", "-o", "json"])))
+        tagged_node = next(n for n in nodes if str(n["id"]) == tagged_id)
+        assert tagged_node["tags"] == ["tag:router"], tagged_node
+        run(inside("ts-control", head + ["nodes", "approve-routes", "-i", tagged_id, "-r", "10.42.0.0/24,fd42::/64,0.0.0.0/0,::/0"]))
+        wait(lambda: pingable("10.42.0.2"))
+        traffic("10.42.0.2", peer_ips[4])
+        traffic("fd42::2", peer_ips[6])
+        print("PASS approved tagged enrollment was exposed as observed tags with real IPv4/IPv6 forwarding", flush=True)
+        # Removing a client request is not server-side tag revocation.
+        legacy = accepted_source
+        policy["tailscale"]["TailscaleNode/overlay"].update(enrollment="saved_identity")
+        policy["tailscale"]["TailscaleNode/overlay"].pop("auth_key_file")
+        retained = copy.deepcopy(approved)
+        next(r for r in retained["resources"] if r["id"] == "tailnet")["service"] = next(s for s in imported_native()["services"] if "tailscale" in s)
+        product_api("control.sock", "/v1/config/commit", {"expected_revision": 9, "request_id": "retained-server-tags", "config": retained}, timeout=12)
+        tagged_keyfile.unlink()
+        renewed_file.unlink()
+        wait(lambda: observation().get("backend_state") == "Running" and observation().get("tags") == ["tag:router"], 30)
+        assert observation()["node_id"] == tagged_id
+        wait(lambda: pingable("10.42.0.2"))
+        traffic("10.42.0.2", peer_ips[4])
+        print("PASS saved identity retained server-assigned tags after removing the client request and enrollment files", flush=True)
+        # Observe independent peer metadata too, not only the local node.
+        run(inside("ts-control", head + ["nodes", "tag", "-i", str(remote["id"]), "-t", "tag:router"]))
+        wait(lambda: any(p["id"] == str(remote["id"]) and p.get("tags") == ["tag:router"] and p.get("dns_name") == "independent-peer.test.invalid." for p in observation().get("peers", [])))
+        traffic("10.43.0.1", "10.42.0.2", "ts-lan")
+        traffic("fd43::1", "fd42::2", "ts-lan")
+        print("PASS independent peer DNS name and assigned tags were observed with both-family LAN forwarding", flush=True)
+        run(inside("ts-control", head + ["nodes", "expire", "-i", tagged_id]))
+        wait(lambda: observation().get("backend_state") == "NeedsLogin", 30)
+        assert not pingable("10.42.0.2")
+        old = modules()[module]
+        signal_worker(old["pid"], signal.SIGKILL)
+        wait(lambda: modules()[module]["generation"] > old["generation"] and observation().get("backend_state") == "NeedsLogin", 30)
+        assert not pingable("10.42.0.2")
+        wait(lambda: not dns_input())
+        wait(lambda: "100.100.100.100" not in product_api("services/resolver.dns.sock", "/v1/status")["resources"][0]["observed"].get("upstreams", ""))
+        dns_unavailable()
+        print("PASS admin-expired tagged identity could not regain forwarding or tailnet DNS by restarting without an auth key", flush=True)
         capture.send_signal(signal.SIGINT)
         capture.wait(timeout=3)
         packets = run(["tcpdump", "-Z", "root", "-nn", "-r", str(stage / "tailnet.pcap")])
@@ -506,6 +606,10 @@ def peer(stage):
         assert Path("/etc/resolv.conf").read_text() == "nameserver 192.0.2.1\n"
         print("PASS capture: LAN and WAN TCP/UDP plus encrypted underlay packets", flush=True)
     except BaseException:
+        supervisor = stage / "product-run/supervisor.sock"
+        if supervisor.exists():
+            status = subprocess.run(["curl", "--max-time", "2", "-fsS", "--unix-socket", str(supervisor), "http://localhost/v1/status"], capture_output=True, text=True)
+            print("SUPERVISOR:", status.stdout or status.stderr, flush=True)
         for log in stage.glob("*.log"):
             lines=log.read_text(errors="replace").splitlines()[-25:]
             print(log.name, "\n".join("[private enrollment detail omitted]" if "/register/" in line or "tskey-" in line else line for line in lines), flush=True)

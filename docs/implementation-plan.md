@@ -1500,7 +1500,7 @@ HA-02/EXT-02も未完了であり、今回の接続継続だけでhomert置換�
 範囲: 旧 routerd 互換 / track: engines / risk: high。
 前提: CORE-03, CORE-06, SYS-02, NET-03, NET-05, NET-06。 設計判断: D-01, D-02, D-03, D-07。
 
-状態: **実装・相互接続を進行中**。native-42 / worker ABI5。
+状態: **実装・相互接続を進行中**。native-43 / worker ABI5。
 
 旧routerdの`pkg/tailscale`、`tailscale_systemd.go`、`chain/system.go`を比較し、
 固定Tailscale1.104.2 daemon＋typed LocalAPIを選んだ。boot/controlへengineを組み込まず、
@@ -1533,7 +1533,15 @@ sourceの条件/acceptDNS省略・true/SSHは一括拒否し、native条件付�
 同じresolverの別WAN sourceは障害中もUDP/TCPで応答し、private queryはそこへ漏れなかった。
 再実行は`make check-tailscale RELEASE_ID=tailscale-dns`。
 
-tags/shields_upの実相互接続は未検証。
+2026-10-28 `tailscale-policy`: 旧status経路を比較し、DNS名、付与済みtags、tailnet名・DNS suffix・
+MagicDNSの実観測を公開した。CLI importしたshieldsUp:trueでhost/subnet宛の両family新規TCP/UDPを
+遮断し、LAN発の新規TCP/UDPと返信、confirmed rollback後の着信復旧を確認した。
+personal keyの広告要求だけではtagが付かず、承認済みtagged keyの登録でserverと観測が一致した。
+要求とkey削除後の保存identity、独立peerのDNS名/tags観測と実転送、
+tagged nodeの管理者失効とworker再起動による旧権限の不復活も確認した。
+初回のcontrol socket待機20秒timeout1回は原因未特定で、後続成功だけで解消とは扱わない。
+再実行は`make check-tailscale RELEASE_ID=tailscale-policy`。
+
 OS acceptDNS/global・split resolver/search domainの取り込み、Tailscale SSHの別権限/OS契約、旧resourceの条件付き一括importと旧版/sealed identity移設、
 OS image/TUN setup統合・広い障害条件・対象実機受入は残る。EXT-02全体とhomert置換は完了していない。
 

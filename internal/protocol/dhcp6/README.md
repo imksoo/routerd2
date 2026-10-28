@@ -62,7 +62,7 @@ identity/interface/IAID and expired grants use fresh acquisition. No UTC lease
 rebasing or cross-boot restoration is implemented.
 Graceful shutdown acknowledges kernel/RA withdrawal, persists an empty stopped
 checkpoint, then sends Release. SIGKILL leaves the last saved grant for recovery.
-The current contract is compiler native-42, checkpoint version 2; no discarded
+The current contract is compiler native-43, checkpoint version 2; no discarded
 prototype reader is retained.
 
 This path was compared with routerd's `cmd/routerd-dhcpv6-client` DUID selection,

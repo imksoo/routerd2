@@ -592,8 +592,8 @@ content is copied into the output.
 Retained intent includes hostname, login server (the original public default
 when absent), advertised subnet/exit routes and tags, acceptRoutes and shieldsUp.
 An absent node creates no native service. Omitted acceptDNS defaults to true in
-`tailscale up`, so it is rejected along with explicit true until native tailnet
-DNS is implemented. Tailscale SSH and runtime conditions remain unsupported
+`tailscale up`, so it is rejected along with explicit true: that OS resolver mutation differs
+from explicit native MagicDNS forwarding. Tailscale SSH and runtime conditions remain unsupported
 instead of being silently removed; any such issue rejects the entire batch.
 
 Stop the external daemon and verify its old kernel ownership has gone before

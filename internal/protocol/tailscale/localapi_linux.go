@@ -50,6 +50,8 @@ func startOptions(n tailscaleconfig.Node, key string) startRequest {
 type peerStatus struct {
 	ID           string
 	HostName     string
+	DNSName      string
+	Tags         []string
 	Online       bool
 	TailscaleIPs []netip.Addr
 	AllowedIPs   []netip.Prefix
@@ -59,9 +61,14 @@ type peerStatus struct {
 	TxBytes      int64
 }
 type status struct {
-	BackendState string
-	Self         *peerStatus
-	Peer         map[string]peerStatus
+	BackendState   string
+	CurrentTailnet *struct {
+		Name            string
+		MagicDNSSuffix  string
+		MagicDNSEnabled bool
+	}
+	Self *peerStatus
+	Peer map[string]peerStatus
 }
 
 func parseStatus(data []byte) (tailscaleconfig.Snapshot, error) {
@@ -70,13 +77,18 @@ func parseStatus(data []byte) (tailscaleconfig.Snapshot, error) {
 		return tailscaleconfig.Snapshot{}, err
 	}
 	out := tailscaleconfig.Snapshot{BackendState: state.BackendState}
+	if state.CurrentTailnet != nil {
+		out.Tailnet = &tailscaleconfig.Tailnet{Name: state.CurrentTailnet.Name, DNSDomain: state.CurrentTailnet.MagicDNSSuffix, MagicDNSEnabled: state.CurrentTailnet.MagicDNSEnabled}
+	}
 	if state.Self != nil {
 		out.NodeID = state.Self.ID
+		out.DNSName = state.Self.DNSName
+		out.Tags = state.Self.Tags
 		out.Online = state.Self.Online
 		out.Addresses = state.Self.TailscaleIPs
 	}
 	for _, peer := range state.Peer {
-		out.Peers = append(out.Peers, tailscaleconfig.Peer{ID: peer.ID, Hostname: peer.HostName, Online: peer.Online, Addresses: peer.TailscaleIPs, AllowedPrefixes: peer.AllowedIPs, HomeDERP: peer.Relay, DirectAddress: peer.CurAddr, RxBytes: peer.RxBytes, TxBytes: peer.TxBytes})
+		out.Peers = append(out.Peers, tailscaleconfig.Peer{ID: peer.ID, Hostname: peer.HostName, DNSName: peer.DNSName, Tags: peer.Tags, Online: peer.Online, Addresses: peer.TailscaleIPs, AllowedPrefixes: peer.AllowedIPs, HomeDERP: peer.Relay, DirectAddress: peer.CurAddr, RxBytes: peer.RxBytes, TxBytes: peer.TxBytes})
 	}
 	sort.Slice(out.Peers, func(i, j int) bool { return out.Peers[i].ID < out.Peers[j].ID })
 	return out, nil

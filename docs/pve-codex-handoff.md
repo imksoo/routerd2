@@ -5,7 +5,24 @@
 [機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
-## 現在の変更: tailscale-dns / native-42
+## 現在の変更: tailscale-policy / native-43
+
+旧routerdのstatus/controller/renderを読み、nodeとpeerのDNS名・付与済みtags、
+現在のtailnet名・DNS suffix・MagicDNS設定を実daemonから観測するようにした。
+接続先tailnetが無い場合は省略し、設定の`advertise_tags`を付与済みtagsとして表示しない。
+
+実PID1/独立Headscale/公式peerで、CLI importしたshieldsUp:trueがホスト宛・広告LAN宛の
+IPv4/IPv6新規TCP/UDPを遮断し、LAN発の新規TCP/UDPと返信は通ることを確認した。
+confirmed rollback後は同じidentityで着信が復旧した。INPUTの許可と、着信成立を先に確認している。
+
+Headscale0.29.6ではpersonal keyと広告要求だけではtagsが付かないことを実測した。
+personal登録を管理者が失効させ、承認済みtagged keyで登録すると、serverの付与結果と
+製品の観測が一致し、両familyの転送が通った。広告要求とkey fileを除いても保存identityは
+server付与tagsを保持した。tagged nodeの管理者失効後、key無しのworker再起動では
+転送とtailnet DNSが復活しない。serverの登録・承認を製品の設定rollbackで巻き戻さない。
+独立peerのDNS名と管理者付与tagsも観測に反映され、LAN発の両family通信が通った。
+
+### 既存のnative DNS統合
 
 native DNSの`upstreamFrom`に`TailscaleNode/NAME`の`dnsServers`を接続した。
 固定daemonのlocal MagicDNS `100.100.100.100`を、Running/Onlineかつ元観測期限内だけ使う。
@@ -58,8 +75,8 @@ daemonがTUN・address・table52/rule5210..5270を、network workerが明示FW/N
 CA・resolver・`/run`を私有化し、通常のDNS処理をhostのresolved/DBusへ向けない。
 条件付きserviceは、適用済みResourceStateの元期限で停止する。pollや通知の受信で期限を延ばさない。
 
-compiler native-42、worker ABI5、network journal11、DHCPv6 checkpoint2。
-`release_id=tailscale-dns`、5768093からの今回の変更で実行した。
+compiler native-43、worker ABI5、network journal11、DHCPv6 checkpoint2。
+`release_id=tailscale-policy`、fc12c56からの今回の変更で実行した。
 実装と必要な設定は[README](../internal/protocol/tailscale/README.md)を参照する。
 engine無しのdefault host catalogはTailscaleを広告しない。署名catalogにはengine/source両artifactを結ぶ。
 
@@ -80,7 +97,7 @@ supervisor/control/network/Health/Tailscale workerを起動した。
 - WAN source policyをlookup5270より後の6000に置いた構成で実転送を確認した。
 - captureでLAN/WANのTCP/UDP、DNS、暗号化underlay packetを確認した。
 
-再実行は`make check-tailscale RELEASE_ID=tailscale-dns`。
+再実行は`make check-tailscale RELEASE_ID=tailscale-policy`。
 peerのchecksum検査・必要時の取得、製品build、engine/source生成、署名catalog/PID1試験を含む。
 資格情報・生ログ・capture・一時releaseは終了時に削除する。
 
@@ -90,10 +107,10 @@ peerのchecksum検査・必要時の取得、製品build、engine/source生成�
 設定transactionは完了を待つため12秒のclient上限を使い、意図した経路・転送の結果は弱めていない。
 Runningやpingだけをrouter機能の受入とは数えない。
 
-今回の`make check`でGo/Python・Race Detector・vetが通った。最終DNS polling変更にも
-関連Race/vetを実行し、`make build build-publisher build-linux RELEASE_ID=tailscale-dns`で
+今回の`make check`でGo/Python・Race Detector・vetが通った。今回の観測contract変更にも
+関連Race/vetを実行し、`make build build-publisher build-linux RELEASE_ID=tailscale-policy`で
 nativeとamd64/arm64 core6をCGO_ENABLED=0でbuildした。最終の実PID1試験は
-上記のCLI import・外部identity・再認証・経路受理・LAN DNSを含めて成功した。
+上記のCLI import・外部identity・再認証・経路受理・LAN DNS・shieldsUp/rollback・tagged登録と失効を含めて成功した。
 
 engineは前回Go1.27.3/CGO_ENABLED=0でamd64/arm64ともbuild済み。今回amd64を再生成した。
 pinned upstream sourceと実import71 moduleのzip、全license notice、build資料を生成する。
@@ -103,7 +120,7 @@ ARM64での実行・対象NIC性能・本番tailnet受入とは区別する。
 
 ### Tailscaleの残作業
 
-`accept_routes`の両familyの実経路/転送は確認済み。tags、shields_upの実相互接続は未検証。
+`accept_routes`、承認済みtags、shields_upの両family実転送/遮断・復旧は確認済み。
 OS acceptDNS/global・split resolver/search domainの取り込み、Tailscale SSHの別権限/OS契約、旧TailscaleNodeの条件付きimport、
 旧版/sealed identityの移設、OS image/TUN setup統合、広い障害条件と対象実機受入は未完了。
 旧daemonが所有するtable52を実行中のまま引き取らない。切替条件とidentityの所有を明示する。
@@ -147,6 +164,10 @@ ONU/PD配布側との現在の接続条件を尋ねた質問は未回答。SSH�
 - `make check`は補助検査。実workerと独立ISC/radvd/dnsmasq/BusyBox/Linux端末、
   実Health→PBR二WAN、conntrackd/VRRPと実TCP/UDPのfixtureを必要な変更に合わせて使う。
   コマンドは`make help`と対応scriptを読む。過去の成功は今回の実行成功として転記しない。
+
+初回試行でcontrol socketの20秒待機timeoutが1回あった。原因は未特定で、後続成功だけで
+解消扱いにしない。失敗時に実supervisor状態を表示するようにし、再現時のworker状態を調べる。
+生ログや一時stateは保存していない。
 
 ## 次の作業
 
