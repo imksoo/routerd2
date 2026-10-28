@@ -315,7 +315,7 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 						t.Fatal(err)
 					}
 					var pd dhcp6config.Snapshot
-					if err := json.Unmarshal(instance.Snapshot, &pd); err != nil || len(pd.Prefixes) != 1 || pd.State != "bound" {
+					if err := json.Unmarshal(instance.Snapshot, &pd); err != nil || len(pd.Prefixes) != 1 || pd.State != "bound" || len(pd.DNSServers) != 1 || pd.DNSServers[0] != "2001:db8:42::1" {
 						return false
 					}
 					if pdDUID == "" {

@@ -101,7 +101,7 @@ func (c *compiler) raClient(r resource) {
 	c.note(r, "An omitted native interface_id uses EUI-64; an omitted source_address selects the interface link-local address. Required-address readiness and legacy observed addresses are not imported.")
 }
 
-func (c *compiler) dhcp6Information(r resource) {
+func (c *compiler) dhcp6Information(r resource) string {
 	c.allow(r, "interface", "request")
 	s := r.Spec.(api.DHCPv6InformationSpec)
 	for _, option := range s.Request {
@@ -126,13 +126,30 @@ func (c *compiler) dhcp6Information(r resource) {
 	}
 	if len(providers) != 1 {
 		c.reject(r, "interface", "information_provider", "information requires exactly one compiled PD resource with the same literal interface reference, matching the pinned Linux controller; standalone information and ambiguous PD ownership are not activated")
-		return
+		return ""
 	}
 	index := providers[0]
+	for _, dependency := range s.DependsOn {
+		ref := c.getRef(r, "dependsOn", dependency.Resource, "DHCPv6PrefixDelegation")
+		if ref == nil {
+			continue
+		}
+		field, expected := dependency.Field, dependency.Equals
+		if dependency.Phase != "" {
+			field, expected = "phase", dependency.Phase
+		}
+		if field == "" {
+			field = "phase"
+		}
+		if c.pd[ref.Kind+"/"+ref.Metadata.Name] != index || strings.TrimPrefix(field, "status.") != "phase" || expected != "Bound" {
+			c.reject(r, "dependsOn", "unsupported_semantics", "information can depend only on its own PD client's Bound lease")
+		}
+	}
 	c.information[r.Kind+"/"+r.Metadata.Name] = index
 	c.target(r, "services/"+c.document.Services[index].Name)
 	c.note(r, "Information is an alias of the matching PD service: one DUID/IAID identity and one UDP 546 socket perform IA_PD and supplementary Information-Request; no second information-only service is created.")
 	c.note(r, "DNS, domain-search, SNTP and AFTR options retain the fixed client request set. Native freshness additionally requests and obeys the information-refresh option, bounded by the active PD lease; legacy status and lease files are not imported.")
+	return c.document.Services[index].Name
 }
 
 func (c *compiler) delegation(r resource) {

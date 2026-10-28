@@ -36,7 +36,7 @@ func startVRRPPDPeer(t *testing.T, ns netns.NsHandle) *exec.Cmd {
 	dir := t.TempDir()
 	config := filepath.Join(dir, "dhcp6.conf")
 	leases := filepath.Join(dir, "dhcp6.leases")
-	if err := os.WriteFile(config, []byte("default-lease-time 120; preferred-lifetime 90; subnet6 2001:db8:42::/64 { prefix6 2001:db8:80:: 2001:db8:80:: /60; }\n"), 0600); err != nil {
+	if err := os.WriteFile(config, []byte("default-lease-time 120; preferred-lifetime 90; option dhcp6.name-servers 2001:db8:42::1; option dhcp6.domain-search \"wan.test\"; subnet6 2001:db8:42::/64 { prefix6 2001:db8:80:: 2001:db8:80:: /60; }\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(leases, nil, 0600); err != nil {

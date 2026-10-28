@@ -5,18 +5,25 @@
 [機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
-## 現在の変更: info-options / native-45
+## 現在の変更: info-owner / native-45
 
-旧 Information controller と PD client の固定要求を比較し、homert が指定する
-`aftr-name, dns-servers, sntp-servers, domain-search` を一律拒否しないようにした。
-既存の固定要求で満たす項目だけを受け付け、別 socket や option 管理は追加しない。
-独立 ISC/radvd/BusyBox/Linux の既存実通信試験へ、この宣言と WAN の実 ORO 確認を加えた。
-PVE Linux6.8/amd64、`make check-dhcp6-ra-pd RELEASE_ID=info-options
-DHCP6_SERVER=dist/peer-env/isc-dhcp/root/usr/sbin/dhcpd` が成功した。実 ORO に四項目があり、
-PD/IA_NA・LAN RA/情報配布・TCP/UDP/DNS、元期限での撤去と復旧、DUID rollback も通った。
-`make check` の Go/Python/Race/vet、両 architecture static build、最終六 ELF の署名
-catalog/publisher/stage Race 検査も成功した。ARM64 実行と対象 NIC は未検証。
-条件付き Information/server と homert 全体の変換は残る。
+旧 Information controller と PD client の固定要求・Bound 連動を比較した。
+`request` の四項目を既存一 client の ORO で満たす。Information が PD と同じ master 条件を持ち、
+その PD の Bound に依存する構成も同じ owner へ接続する。条件は変換後の型付き値を比較し、
+`all` wrapper や `.status.role` の表記差で別 client を作らない。独立した別条件は消さずに拒否する。
+
+PVE Linux6.8/amd64、`info-owner` の製品 CLI 変換→実 worker と独立 Keepalived2.2.8・ISC4.4.3-P1 で、
+PD/情報取得、準備待ち、同じ DUID/IAID での切替復旧、WAN /128・VIP の新規 TCP/UDP、
+元期限での WAN/Health 停止と PD の停止処理開始、RA 撤去が成功した。
+Information の別条件を PD alias へ捨てて適用しないことも局所検査で確認する。
+`make check` の Go/Python/Race/vet、両 architecture の CGO_ENABLED=0 build と最終六 ELF の
+署名 catalog/publisher/stage Race 検査も成功した。
+直前 `info-options` の独立 ISC/radvd/BusyBox/Linux 試験では実 ORO 四項目、PD/IA_NA・LAN RA/配布、
+TCP/UDP/DNS、元期限撤去・復旧、DUID rollback と署名成果物まで成功している。
+条件付き server、他の依存/準備条件、homert 全体、ARM64 実行と対象 NIC は残る。
+
+実 HGW の別 `health-import` / native-43 長時間試験では、worker 再起動前に自然 T1 を迎え、
+capture に一致する Renew/Reply 一組を確認した。終了時の crash/restart・撤去は引き続き待つ。
 
 ## 直前の完了変更: pd-admission / native-45
 
@@ -86,7 +93,7 @@ captureは同じDUID/PDでのRebindと、49153からのReplyを示した。新�
 `renew_at`変更を自然Renewに数える表示を除き、captureのRenew/対応Replyを起動復旧のRebind/Replyと
 区別する。初期期限を含む長さの試験では、再起動前の自然Renew/Replyが無ければ失敗する。
 30秒の実HGW試験はDUID/IAID保持、Rebind/Reply、LAN両family HTTPS・UDP/TCP DNS、
-RA/Release撤去まで成功した。`make test-tools`も成功。長時間試験の完走・自然Renewは未確認。
+RA/Release撤去まで成功した。`make test-tools`も成功。長時間試験の完走は未確認。自然 Renew/対応 Reply は再起動前の実 capture で一組確認した。
 失敗版のnamespace・stageは削除され、host管理address/MAC/default routeは開始前と一致した。
 現在のownerがbounded captureとprivate stateを所有し、終了時に削除する。
 前の長時間試験側の独立LANではpublic DNSへのIPv4 UDP/TCP応答とAFTR内packetも確認した。

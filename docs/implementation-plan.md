@@ -973,6 +973,12 @@ host suffixもmanaged bindingへ変換する。native address maskは/64で、�
 DUID rollback、make check・両 architecture build/署名検査が成功した。
 Information/server の条件付き import と homert 全体・対象 NIC は残る。
 
+2026-10-28 `info-owner` / native-45: Information が PD と同じ role 条件とその Bound 依存を持つ
+構成も、一つの client・socket・期限へ接続した。独立した別条件は消さずに batch を拒否する。
+製品 CLI/実 worker と独立 Keepalived/ISC の取得待ち・情報取得・切替復旧、DUID/IAID 保持、
+WAN /128・VIP TCP/UDP・元期限での停止が成功。make check と両 architecture build/署名検査も成功した。
+条件付き server とその他の依存・準備条件、homert 全体・対象 NIC は残る。
+
 #### NET-06 — LAN・DHCPv6・relay・DNS の resource 完全化
 
 2026-10-28 `duid-import` / native-43: 旧routerdのDUID/PD保存とdnsmasqの永続lease設定を参照した。

@@ -113,7 +113,7 @@ loss does not revoke an admitted election. No second readiness controller is
 created. Other phase/status fields, existence/contains selectors and match
 `for`/`maxAge` remain unsupported. The original role matcher measures transition age, which
 cannot silently become native sample freshness or a new consumer's hold time.
-Conditional information/server import and full deployed readiness graphs remain open.
+Information aliases may repeat their PD owner's condition; independent information lifetimes, conditional server import and full deployed readiness graphs remain open.
 
 `make check-vrrp-unicast RELEASE_ID=vrrp-import` includes actual CLI-converted
 IPv4 v2/PASS and IPv6 v3 graphs. Independent Keepalived, real workers and capture
@@ -508,6 +508,17 @@ migration preserves that graph: downstream `aftrFrom` and policy `dns_from`
 references to the information resource become references to the same native PD
 service. Two aliases of one provider cannot appear as duplicate DNS sources.
 
+An information declaration may be unconditional or repeat the PD owner's typed
+condition. The compiler compares the translated facts, so `all` wrappers and
+`.status.role` spellings need not match textually. A different condition is
+rejected rather than silently erased or made into another client. `dependsOn`
+may require **this same PD's Bound phase** (including its original `phase`
+shorthand); the shared information lease is already bounded by that grant.
+Other dependencies and `ready_when` need their own complete execution path.
+The CLI-converted VRRP/WAN fixture exercises these declarations against real
+Keepalived and ISC peers, retaining one DUID/IAID and socket through recovery.
+
+
 The controller never reads `spec.request`; its client always requests the fixed
 DNS, domain-search, SNTP and AFTR option set. Explicit `request` entries naming
 `dns-servers`, `domain-search`, `sntp-servers` or `aftr-name` are therefore already
@@ -602,7 +613,8 @@ kernel log events and do not imply NFLOG sampling or old log-retention behavior.
 
 - `when` supports observed VRRP master/backup and PD Bound selectors on
   HealthCheck, static VirtualAddress and DHCPv6PrefixDelegation. VRRP admission
-  uses the same selectors. Other conditions, `dependsOn`,
+  uses the same selectors. Information aliases can repeat their owner guard
+  and depend on that owner's Bound phase. Other conditions/dependencies,
   `ready_when`, metadata ownership, dynamic annotations and observed `status`
   are rejected; conditional intent must not become an always-on resource.
 - Firewall address sets, flow pinholes, connection/rate limits, NFLOG sampling,

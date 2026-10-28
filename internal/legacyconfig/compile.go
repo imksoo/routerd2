@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"net/netip"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -80,6 +81,7 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 	c.collectAliases()
 	var extra []resourceprogram.Resource
 	var conditions []resourceCondition
+	var informationConditions []resourceCondition
 	vrrpNames := map[string]string{}
 	c.wireguard()
 	for _, r := range resources {
@@ -128,7 +130,9 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 		case "IPv6DelegatedAddress":
 			c.delegation(r)
 		case "DHCPv6Information":
-			c.dhcp6Information(r)
+			if name := c.dhcp6Information(r); name != "" {
+				informationConditions = append(informationConditions, resourceCondition{id: "service/" + name, source: r, when: r.Spec.(api.DHCPv6InformationSpec).When})
+			}
 		}
 	}
 	// AFTR references may point to a PD information alias declared later in
@@ -230,6 +234,19 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 			}
 		}
 	}
+	// Information shares its PD client's socket and information lease. An
+	// unconditional alias or the same guard adds no independent lifetime.
+	for _, condition := range informationConditions {
+		when := c.when(condition.source, condition.when, vrrpNames)
+		if when == nil {
+			continue
+		}
+		for _, resource := range program.Resources {
+			if resource.ID == condition.id && !reflect.DeepEqual(when, resource.When) {
+				c.reject(condition.source, "when", "unsupported_semantics", "information sharing a PD socket must have the same condition as its PD owner")
+			}
+		}
+	}
 	if len(c.issues) == 0 {
 		if err := config.Validate(program); err != nil {
 			// Native validators sometimes include the invalid value. The
@@ -305,8 +322,18 @@ func (c *compiler) allow(r resource, fields ...string) {
 		}
 	}
 	for _, field := range []string{"when", "dependsOn", "ready_when"} {
-		if field == "when" && (r.Kind == "HealthCheck" || r.Kind == "DHCPv6PrefixDelegation" || r.Kind == "VirtualAddress" && r.Spec.(api.VirtualAddressSpec).Mode != "vrrp") {
-			continue // These declarations are translated into source graph guards.
+		if field == "when" {
+			switch r.Kind {
+			case "HealthCheck", "DHCPv6PrefixDelegation", "DHCPv6Information":
+				continue
+			case "VirtualAddress":
+				if r.Spec.(api.VirtualAddressSpec).Mode != "vrrp" {
+					continue
+				}
+			}
+		}
+		if field == "dependsOn" && r.Kind == "DHCPv6Information" {
+			continue // Checked against the client's existing PD lease below.
 		}
 		if meaningful(child(r.node, field)) {
 			c.reject(r, field, "unsupported_semantics", "runtime gating/dependency conditions cannot be erased by a static migration")

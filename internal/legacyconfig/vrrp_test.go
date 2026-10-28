@@ -52,3 +52,25 @@ func TestVRRPImportPreservesKeepalivedWireAndPreemptionDefaults(t *testing.T) {
 		}
 	}
 }
+
+func TestInformationAliasCannotEraseIndependentRoleCondition(t *testing.T) {
+	input, err := os.ReadFile("../integration/testdata/vrrp-import-wan.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy, err := os.ReadFile("../integration/testdata/vrrp-import-wan-policy.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	options, err := DecodeOptions(bytes.NewReader(policy))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The PD owner requires master. Serving information only while backup
+	// needs a different lifetime and cannot be represented by its alias.
+	input = bytes.Replace(input, []byte("VirtualAddress/gateway.status.role: {equals: master}"), []byte("VirtualAddress/gateway.status.role: {equals: backup}"), 1)
+	result, err := CompileWithOptions(input, options)
+	if !hasIssue(err, "when", "unsupported_semantics") || len(result.Document.Resources) != 0 {
+		t.Fatal("independent information condition returned usable intent", result, err)
+	}
+}
