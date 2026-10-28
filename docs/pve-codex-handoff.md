@@ -5,7 +5,22 @@
 [機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
-## 現在の変更: ha-pd-prepared / native-43
+## 現在の変更: health-import / native-43
+
+旧routerdのHealthCheck engineとhomert02の現行設定を比較した。native workerは既に旧probe・
+threshold処理を再利用している。今回、固定targetの旧HealthCheckをそのworkerへ変換し、
+省略時の旧interval 30秒・timeout 3秒とthresholdを保持した。interfaceが無指定なら移行policyの
+`health_checks`で対象interfaceを明示し、必要なsource/markも渡す。別WANへの迂回を健康と誤認しない。
+interfaceの管理権限は独立宣言が必要。条件付き起動・動的target・旧EgressRoutePolicyの変換は未完了。
+
+PVE Linux6.8/amd64、`make check-health-pbr RELEASE_ID=health-import`が成功した。
+製品CLIで変換した二probeを実supervisor/control/network/healthへ渡し、独立した二WANとLAN端末・
+packet captureでTCP/UDP切替・復旧を確認した。worker/control/network交換、古い通知、元期限の
+撤去、confirmed rollbackも通った。これは旧homert条件全体の移行完了や物理NIC受入ではない。
+`make check`のGo/Python/Race/vet、CGO_ENABLED=0の両architecture build、最終六ELFの
+署名catalog/publisher/stageのRace検査も成功した。ARM64実行は未検証。
+
+## 直前の完了変更: ha-pd-prepared / native-43
 
 変更の起点は75650e4。homert02の稼働中設定を読み取り専用で確認し、PD clientがVRRP master条件で
 動き、graceful activationがPD等の準備を待つことを確認した。本番設定は変更していない。

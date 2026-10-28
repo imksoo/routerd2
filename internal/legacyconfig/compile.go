@@ -139,6 +139,8 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 			// Compiled before routes so dynamic tunnel ownership can be joined.
 		case "TailscaleNode":
 			c.tailscale(r)
+		case "HealthCheck":
+			c.healthCheck(r)
 		case "IPv6RouterAdvertisement":
 			c.reject(r, "", "unsupported_semantics", "legacy dnsmasq RA uses interface address constructors and validLifetime as router lifetime; explicit native PIO/router/DNS lifetime intent is required")
 		case "FirewallZone", "FirewallPolicy", "FirewallRule", "NAT44Rule":

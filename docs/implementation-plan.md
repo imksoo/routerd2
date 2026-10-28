@@ -610,6 +610,12 @@ network intentのprotocol投影もJSON往復を除き、変更する集合だけ
 
 再利用・比較元: [pkg/healthcheck](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/healthcheck), [cmd/routerd-healthcheck](https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/cmd/routerd-healthcheck)。
 
+2026-10-28追加: `health-import` / native-43は旧固定targetのHealthCheckを既存native workerへ変換する。
+旧engine・thresholdと省略時の30秒/3秒を保持し、未指定のinterfaceは明示移行policyで選ぶ。
+製品CLIの変換結果を使う`make check-health-pbr RELEASE_ID=health-import`で、実daemon・二WAN・
+独立端末・captureによるTCP/UDP切替/復旧、worker/control/network交換、古い通知・元期限撤去・
+confirmed rollbackが通った。旧条件付き起動・動的target・EgressRoutePolicy importは残る。
+
 実装先の案: `internal/protocol/health (新設予定)`, `internal/serviceconfig`, `internal/runtimeplan`, `internal/network`。
 
 #### NET-02 — EgressRoutePolicy・PBR・経路選択

@@ -1,0 +1,10 @@
+schema_version: 1
+health_checks:
+  HealthCheck/health-a:
+    interface: Interface/wan-a
+    source_address: 192.0.2.2
+    mark: 42
+  HealthCheck/health-b:
+    interface: Interface/wan-b
+    source_address: 203.0.113.2
+    mark: 42

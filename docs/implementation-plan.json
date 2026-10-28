@@ -594,7 +594,9 @@
         "internal/serviceconfig",
         "internal/runtimeplan",
         "internal/network"
-      ]
+      ],
+      "implementation": "health-import/native-43: fixed literal HealthCheck imports use the existing routerd probe/threshold engine, retain omitted interval/timeout defaults of 30s/3s, and require declared managed/admin-up interface scope. Explicit health_checks policy supplies missing interface and optional source/mark. Conditional activation, live target discovery and EgressRoutePolicy import remain incomplete.",
+      "validation": "2026-10-28 PVE Linux6.8/amd64: make check-health-pbr RELEASE_ID=health-import passed with actual CLI-converted probes, supervisor/control/network/health processes, two independent WANs, LAN TCP/UDP and packet capture. Failure/recovery, worker/control/network replacement, stale notifications, original observation expiry and confirmed rollback passed. make check (Go/Python/Race/vet), six CGO_ENABLED=0 Linux ELFs and final signed catalog/publisher/stage Race checks passed. ARM64 execution, physical NIC and full legacy HA input acceptance remain unverified."
     },
     {
       "id": "NET-02",
@@ -4047,7 +4049,7 @@
         "CORE-03",
         "CORE-04"
       ],
-      "status": "planned",
+      "status": "in_progress",
       "spec_source": {
         "path": "pkg/api/specs.go",
         "line": 2194,

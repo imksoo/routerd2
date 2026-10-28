@@ -31,7 +31,7 @@ merge services.
 `Compile` never guesses a host network manager's RA defaults or silently adopts
 the new AFTR or DHCP-derived DNS lifetime contracts. `CompileWithOptions` permits
 **explicit replacement intent** for individual `IPv6RAAddress`, `DSLiteTunnel`,
-DHCP-consuming `DNSResolver`, stateless `DHCPv6Server`, and `TailscaleNode` resources. Each such mapping says which behavior
+DHCP-consuming `DNSResolver`, stateless `DHCPv6Server`, `HealthCheck`, and `TailscaleNode` resources. Each such mapping says which behavior
 changes; a successful replacement is not a claim of
 automatic semantic parity. There is no global permissive mode. Policy cannot
 discard an unsupported field, resource, HA condition or ownership requirement.
@@ -50,6 +50,36 @@ adopts live resources from the old daemon.
 
 The CLI entry point is `routerd config migrate [--policy FILE] FILE`. It emits native YAML on
 success. Code that also needs the mapping report should use `Compile`.
+
+## Scoped HealthCheck probes
+
+Literal unicast targets use the existing routerd probe and threshold engine.
+The importer retains protocol, port, thresholds and the original omitted
+interval/timeout defaults of 30s/3s. Native health defaults differ, so these
+values are explicit in the generated configuration. Legacy `role` describes
+the check; it does not become a native activation condition.
+
+An unscoped legacy probe needs explicit routing intent so a failed WAN cannot
+appear healthy through another WAN. The interface must be independently managed
+and administratively enabled. An existing legacy interface must agree with the
+policy. Source address and mark are optional explicit probe settings.
+
+```yaml
+schema_version: 1
+health_checks:
+  HealthCheck/wan-probe:
+    interface: Interface/wan
+    source_address: 192.0.2.2
+    mark: 42
+```
+
+The example source and mark must match the intended address and probe route.
+Conditional activation, hostname/automatic targets and live gateway/DS-Lite
+target discovery remain unsupported; they reject the whole migration rather
+than losing their meaning. Disabled checks create no healthy observation.
+`make check-health-pbr RELEASE_ID=health-import` feeds the actual CLI-converted
+probes into the two-WAN daemon fixture, alongside native routing resources.
+That does not establish import of legacy `EgressRoutePolicy` or HA conditions.
 
 ## Stateless DHCPv6 and delegated LAN RA
 
@@ -128,6 +158,7 @@ serving, custom lease/RA settings and full deployed-router import remain open.
 | `IPv4StaticRoute`, `IPv6StaticRoute` | Same destination, gateway, device and metric; interface aliases are resolved. |
 | `IPv4Route` | Static unicast routes. A static DS-Lite device reference and explicit static address gateway reference can be resolved. Blackhole, preferred-source and dynamic references are rejected in this compiler. |
 | `Sysctl` | Required runtime `net.ipv4.ip_forward` and `net.ipv6.conf.all.forwarding` with exact 0/1 values. No implicit forwarding is enabled. Other sysctls, optional/non-exact policies and persistent host files are rejected. |
+| `HealthCheck` | Literal scoped ICMP/TCP/DNS/HTTP probes retain routerd's engine, thresholds and 30s/3s timing defaults. Explicit `health_checks` policy supplies missing interface/source/mark intent. Conditional activation and dynamic targets remain unsupported. |
 | `DHCPv4Client` | Native wire identity, requested address, hostname/class/client ID, default-route policy and metric. Requires `useDNS: false` because the old default of true changes the host resolver. Native learned DNS is status data rather than a substitute for that side effect. |
 | `DHCPv4Server` + `DHCPv4Reservation` | Static local servers become separate native DHCP workers with owned journals. Retains finite pool leases, disjoint MAC/OUI profile scopes, explicit/static-source gateway/DNS/NTP/domain options, and MAC/IP/hostname reservations with typed options. Requires one owned static IPv4 address per interface; no live lease import, HA conditions or ambiguous backend directives. The active-chain/default distinctions are detailed below. |
 | `DHCPv4Relay` | Explicit `interfaces` and numeric IPv4 `upstream` become one native relay service. Each client interface requires one unconditional owned static IPv4 address for `giaddr`. Multiple relay declarations retain per-interface upstream sets. Conditional/dynamic source selection and ambiguous legacy VRF binding remain unsupported. |

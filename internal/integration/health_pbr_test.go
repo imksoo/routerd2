@@ -5,14 +5,17 @@ package integration
 import (
 	"bytes"
 	"context"
+	_ "embed"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -33,6 +36,12 @@ import (
 	"github.com/vishvananda/netns"
 	"golang.org/x/sys/unix"
 )
+
+//go:embed testdata/health-import.yaml
+var legacyHealth []byte
+
+//go:embed testdata/health-import-policy.yaml
+var legacyHealthPolicy []byte
 
 // The router, LAN and two providers have independent network namespaces. Both
 // providers offer the same application address and probe address; a probe that
@@ -87,10 +96,7 @@ func TestDaemonHealthPBRFailoverAndRecovery(t *testing.T) {
 	if err := netlink.RuleAdd(foreignRule); err != nil {
 		t.Fatal(err)
 	}
-	program, err := config.Parse([]byte(healthPBRProgram))
-	if err != nil {
-		t.Fatal(err)
-	}
+	program, healthA, healthB := importedHealthPBRProgram(t)
 	f := startFixtureDaemon(t, program)
 	routerNS, err := netns.Get()
 	if err != nil {
@@ -153,7 +159,7 @@ func TestDaemonHealthPBRFailoverAndRecovery(t *testing.T) {
 				Runtime runtimeplan.Status           `json:"runtime"`
 				Health  []runtimeplan.InstanceStatus `json:"health"`
 				Routes  []netlink.Route              `json:"routes"`
-			}{stage, read(), []runtimeplan.InstanceStatus{instance("service.health-a"), instance("service.health-b")}, routes}, "", "  ")
+			}{stage, read(), []runtimeplan.InstanceStatus{instance(healthA), instance(healthB)}, routes}, "", "  ")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -269,7 +275,7 @@ func TestDaemonHealthPBRFailoverAndRecovery(t *testing.T) {
 	}
 	until(t, 12*time.Second, func() bool {
 		var a, b health.Snapshot
-		return json.Unmarshal(instance("service.health-a").Snapshot, &a) == nil && json.Unmarshal(instance("service.health-b").Snapshot, &b) == nil && a.State.Phase == "Healthy" && b.State.Phase == "Healthy" && primary()
+		return json.Unmarshal(instance(healthA).Snapshot, &a) == nil && json.Unmarshal(instance(healthB).Snapshot, &b) == nil && a.State.Phase == "Healthy" && b.State.Phase == "Healthy" && primary()
 	})
 	traffic("A")
 	record("initial-primary")
@@ -277,24 +283,24 @@ func TestDaemonHealthPBRFailoverAndRecovery(t *testing.T) {
 	if initial.Revision != 1 || initial.ProjectionGeneration == 0 {
 		t.Fatal("missing independent operator/projection generations", initial)
 	}
-	old := healthPBRUpdate(instance("service.health-a"))
+	old := healthPBRUpdate(instance(healthA))
 	probeA.Close()
 	// A consumer freshness deadline can withdraw before the producer's third
 	// failed probe, especially under TCG scheduling. Wait for both observations
 	// to prove threshold failure rather than assuming simultaneous publication.
 	until(t, 12*time.Second, func() bool {
 		var sample health.Snapshot
-		return json.Unmarshal(instance("service.health-a").Snapshot, &sample) == nil && sample.State.Phase == "Unhealthy" && !sample.Active && !primary()
+		return json.Unmarshal(instance(healthA).Snapshot, &sample) == nil && sample.State.Phase == "Unhealthy" && !sample.Active && !primary()
 	})
 	traffic("B")
 	record("wan-a-failed")
 	var down health.Snapshot
-	i := instance("service.health-a")
+	i := instance(healthA)
 	if err := json.Unmarshal(i.Snapshot, &down); err != nil || down.Active || down.State.Phase != "Unhealthy" {
 		t.Fatalf("status disagrees with real fallback: %+v %v", down, err)
 	}
 	var upB health.Snapshot
-	_ = json.Unmarshal(instance("service.health-b").Snapshot, &upB)
+	_ = json.Unmarshal(instance(healthB).Snapshot, &upB)
 	current := read()
 	if !upB.Active || current.Revision != 1 || current.ProjectionGeneration <= initial.ProjectionGeneration {
 		t.Fatalf("independent WAN health or projection generation incorrect: b=%+v initial=%+v current=%+v", upB, initial, current)
@@ -322,12 +328,12 @@ func TestDaemonHealthPBRFailoverAndRecovery(t *testing.T) {
 	record("wan-a-recovered")
 	t.Log("two independent health workers: primary -> outage -> backup -> threshold recovery -> consumer hold -> primary; operator revision stays 1")
 
-	for _, name := range []string{"service.health-a", "control", "network"} {
+	for _, name := range []string{healthA, "control", "network"} {
 		victim := module(name)
 		if victim.PID <= 0 || !victim.Ready {
 			t.Fatal("missing real worker", name, victim)
 		}
-		stale := healthPBRUpdate(instance("service.health-a"))
+		stale := healthPBRUpdate(instance(healthA))
 		if err := syscall.Kill(victim.PID, syscall.SIGKILL); err != nil {
 			t.Fatal(err)
 		}
@@ -338,16 +344,16 @@ func TestDaemonHealthPBRFailoverAndRecovery(t *testing.T) {
 		until(t, 12*time.Second, func() bool {
 			// Ready can precede the replacement producer's first healthy
 			// sample. A retained old snapshot/route cannot prove recovery.
-			producer := module("service.health-a")
+			producer := module(healthA)
 			var i runtimeplan.InstanceStatus
 			var sample health.Snapshot
-			if !producer.Ready || f.control.Do(ctx, "GET", "/v1/services/service.health-a", nil, &i) != nil || i.Generation != producer.Generation || i.ConfigDigest != producer.ConfigDigest || json.Unmarshal(i.Snapshot, &sample) != nil || !sample.Active || sample.State.Phase != "Healthy" {
+			if !producer.Ready || f.control.Do(ctx, "GET", "/v1/services/"+healthA, nil, &i) != nil || i.Generation != producer.Generation || i.ConfigDigest != producer.ConfigDigest || json.Unmarshal(i.Snapshot, &sample) != nil || !sample.Active || sample.State.Phase != "Healthy" {
 				return false
 			}
 			var s runtimeplan.Status
 			return f.control.Do(ctx, "GET", "/v1/services", nil, &s) == nil && s.Phase == "ready" && primary()
 		})
-		if name == "service.health-a" || name == "control" {
+		if name == healthA || name == "control" {
 			if err := f.control.Do(ctx, "POST", "/v1/services/state", stale, nil); !localapi.IsHTTPStatus(err, 409) {
 				t.Fatal("previous worker generation accepted", err)
 			}
@@ -360,13 +366,13 @@ func TestDaemonHealthPBRFailoverAndRecovery(t *testing.T) {
 	// Fault injection shortens a real accepted observation's lease through the
 	// real control socket. The producer remains stopped and supervisor-ready;
 	// CLOCK_BOOTTIME expiry, rather than heartbeat death, must withdraw PBR.
-	victim := module("service.health-a")
+	victim := module(healthA)
 	if err := syscall.Kill(victim.PID, syscall.SIGSTOP); err != nil {
 		t.Fatal(err)
 	}
 	expiryPID := victim.PID
 	t.Cleanup(func() { _ = syscall.Kill(expiryPID, syscall.SIGCONT) })
-	expiring := healthPBRUpdate(instance("service.health-a"))
+	expiring := healthPBRUpdate(instance(healthA))
 	var observation health.Snapshot
 	if err := json.Unmarshal(expiring.Snapshot, &observation); err != nil {
 		t.Fatal(err)
@@ -389,7 +395,7 @@ func TestDaemonHealthPBRFailoverAndRecovery(t *testing.T) {
 		}
 		return uint64(clock.BoottimeNanoseconds) >= observation.ExpiresNanos && !primary() && inactiveReason("when_indeterminate")
 	})
-	if m := module("service.health-a"); !m.Ready || m.PID != victim.PID || m.Generation != victim.Generation {
+	if m := module(healthA); !m.Ready || m.PID != victim.PID || m.Generation != victim.Generation {
 		t.Fatal("heartbeat loss masked finite fact expiry", m)
 	}
 	if err := f.control.Do(ctx, "POST", "/v1/services/state", expiring, nil); err != nil {
@@ -414,13 +420,13 @@ func TestDaemonHealthPBRFailoverAndRecovery(t *testing.T) {
 	// A real healthy observation still has its two-minute producer lease, but
 	// this consumer requires a sample no older than 2.5 seconds. Keep the worker
 	// supervisor-ready so only max_age can cause this independent withdrawal.
-	victim = module("service.health-a")
+	victim = module(healthA)
 	if err := syscall.Kill(victim.PID, syscall.SIGSTOP); err != nil {
 		t.Fatal(err)
 	}
 	stoppedPID := victim.PID
 	t.Cleanup(func() { _ = syscall.Kill(stoppedPID, syscall.SIGCONT) })
-	stale := healthPBRUpdate(instance("service.health-a"))
+	stale := healthPBRUpdate(instance(healthA))
 	if err := json.Unmarshal(stale.Snapshot, &observation); err != nil || !observation.Active {
 		t.Fatal("missing real healthy sample", err)
 	}
@@ -435,7 +441,7 @@ func TestDaemonHealthPBRFailoverAndRecovery(t *testing.T) {
 	if err != nil || uint64(clock.BoottimeNanoseconds) >= observation.ExpiresNanos || uint64(clock.BoottimeNanoseconds)-observation.ObservedNanos <= uint64(2500*time.Millisecond) {
 		t.Fatal("max_age withdrawal was not independent of the producer lease", observation, clock, err)
 	}
-	if m := module("service.health-a"); !m.Ready || m.PID != victim.PID || m.Generation != victim.Generation {
+	if m := module(healthA); !m.Ready || m.PID != victim.PID || m.Generation != victim.Generation {
 		t.Fatal("heartbeat loss masked max_age", m)
 	}
 	stale.Sequence++
@@ -498,10 +504,10 @@ func TestDaemonHealthPBRFailoverAndRecovery(t *testing.T) {
 	})
 	// A completely new supervisor legitimately starts generation 1 again.
 	// The former tree's larger counters must not overwrite its first reports.
-	oldTree := healthPBRUpdate(instance("service.health-a"))
+	oldTree := healthPBRUpdate(instance(healthA))
 	f = f.restart()
 	waitPrimary(true)
-	fresh := healthPBRUpdate(instance("service.health-a"))
+	fresh := healthPBRUpdate(instance(healthA))
 	var tree supervisor.Status
 	if err := f.supervisor.Do(ctx, "GET", "/v1/status", nil, &tree); err != nil {
 		t.Fatal(err)
@@ -543,7 +549,7 @@ func TestDaemonHealthPBRFailoverAndRecovery(t *testing.T) {
 	}
 	identityTraffic()
 	var frozen []supervisor.ModuleStatus
-	for _, name := range []string{"service.health-a", "service.health-b"} {
+	for _, name := range []string{healthA, healthB} {
 		process := module(name)
 		if process.PID <= 0 {
 			t.Fatal("missing final probe worker", name)
@@ -555,7 +561,7 @@ func TestDaemonHealthPBRFailoverAndRecovery(t *testing.T) {
 		frozen = append(frozen, process)
 	}
 	var original health.Snapshot
-	if err := json.Unmarshal(instance("service.health-a").Snapshot, &original); err != nil {
+	if err := json.Unmarshal(instance(healthA).Snapshot, &original); err != nil {
 		t.Fatal(err)
 	}
 	controller, writer := module("control"), module("network")
@@ -648,7 +654,7 @@ func TestDaemonHealthPBRFailoverAndRecovery(t *testing.T) {
 	waitPrimary(true)
 	until(t, 3*time.Second, func() bool { return resourceProgramAddress(t, wan, "192.0.2.42/32") })
 	var renewed health.Snapshot
-	if err := json.Unmarshal(instance("service.health-a").Snapshot, &renewed); err != nil || renewed.ObservedNanos <= original.ObservedNanos {
+	if err := json.Unmarshal(instance(healthA).Snapshot, &renewed); err != nil || renewed.ObservedNanos <= original.ObservedNanos {
 		t.Fatal("recovery lacked a fresh real health observation", err)
 	}
 	traffic("A")
@@ -947,6 +953,67 @@ func (c *healthPBRCaptureState) assertTraffic(t *testing.T, source, target strin
 		}
 		t.Logf("capture %s -> %s protocol=%d port=%d packets=%d", expected.source, expected.target, expected.protocol, expected.port, n)
 	}
+}
+
+func importedHealthPBRProgram(t *testing.T) (config.Document, string, string) {
+	t.Helper()
+	work := t.TempDir()
+	input, policy := filepath.Join(work, "legacy.yaml"), filepath.Join(work, "policy.yaml")
+	if err := os.WriteFile(input, legacyHealth, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(policy, legacyHealthPolicy, 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, filepath.Join(os.Getenv("ROUTERD2_TEST_BIN_DIR"), "routerd"), "config", "migrate", "--policy", policy, input)
+	var review bytes.Buffer
+	command.Stderr = &review
+	body, err := command.Output()
+	if err != nil {
+		t.Fatal(err, review.String())
+	}
+	imported, err := config.Parse(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var a, b *serviceconfig.Service
+	for _, resource := range imported.Resources {
+		if resource.Service == nil || resource.Service.Health == nil {
+			continue
+		}
+		switch resource.Service.Health.Interface {
+		case "wan0":
+			a = resource.Service
+		case "wan1":
+			b = resource.Service
+		}
+	}
+	if a == nil || b == nil {
+		t.Fatal("migration omitted a scoped WAN probe")
+	}
+	healthA, healthB := a.ModuleName(), b.ModuleName()
+	source := strings.ReplaceAll(healthPBRProgram, "service.health-a.", healthA+".")
+	source = strings.ReplaceAll(source, "service.health-b.", healthB+".")
+	program, err := config.Parse([]byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The CLI supplies the complete probe settings. Native resources supply
+	// this fixture's addresses, routes, marks and conditional failover policy.
+	for i := range program.Resources {
+		r := &program.Resources[i]
+		if r.Service == nil || r.Service.Health == nil {
+			continue
+		}
+		if r.Service.Health.Interface == "wan0" {
+			r.Service = a
+		} else {
+			r.Service = b
+		}
+	}
+	return program, healthA, healthB
 }
 
 const healthPBRProgram = `schema_version: 2
