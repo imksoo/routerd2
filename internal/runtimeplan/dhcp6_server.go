@@ -17,11 +17,12 @@ import (
 )
 
 type dhcp6ServerPlan struct {
-	resourceID string
-	iface      string
-	dns        []string
-	sntp       []string
-	search     []string
+	resourceID    string
+	iface         string
+	dns           []string
+	sntp          []string
+	search        []string
+	dnsDelegation string
 }
 
 func (r *Runtime) dhcp6ServerInput(name string) (serviceconfig.DHCP6ServerInput, error) {
@@ -120,6 +121,12 @@ func (r *Runtime) dhcp6ServerInput(name string) (serviceconfig.DHCP6ServerInput,
 			if !found && len(*target) < 32 {
 				*target = append(*target, entry)
 			}
+		}
+	}
+	for _, entry := range r.delegatedDNS[plan.dnsDelegation] {
+		address := entry.address
+		if address.ValidUntil.Live(clock) {
+			addAddresses(&out.Options.DNSServers, []dhcp6serverconfig.Address{address})
 		}
 	}
 	for _, name := range plan.dns {

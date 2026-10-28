@@ -19,6 +19,7 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/bfd"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp4"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
+	"github.com/imksoo/routerd2/internal/protocol/dhcp6serverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/pppoeconfig"
 	"github.com/imksoo/routerd2/internal/protocol/ra"
 	"github.com/imksoo/routerd2/internal/protocol/raclient"
@@ -39,6 +40,13 @@ type projection struct {
 	instances          []binding
 	liveRA             map[string]ra.Config
 	liveDHCP6          map[string]dhcp6config.RouterFlags
+	delegatedDNS       map[string][]delegatedDNSAddress
+}
+
+type delegatedDNSAddress struct {
+	interfaceName string
+	raModule      string
+	address       dhcp6serverconfig.Address
 }
 
 type projectionFacts struct {
@@ -110,7 +118,7 @@ func (r *Runtime) projectLocked(protocols protocolPlan, doc config.Native, recor
 // Pure projection combines active intent with the source's immutable workers
 // and current protocol evidence. Producers cannot submit arbitrary effects.
 func projectWithFacts(doc config.Native, protocols protocolPlan, records map[string]serviceconfig.Update, now time.Time, facts projectionFacts) (projection, error) {
-	p := projection{network: doc.Network, liveRA: map[string]ra.Config{}, liveDHCP6: make(map[string]dhcp6config.RouterFlags), native: doc, vrrpOwners: make(map[string]vrrpOwnership)}
+	p := projection{network: doc.Network, liveRA: map[string]ra.Config{}, liveDHCP6: make(map[string]dhcp6config.RouterFlags), delegatedDNS: make(map[string][]delegatedDNSAddress), native: doc, vrrpOwners: make(map[string]vrrpOwnership)}
 	// Own the collections changed by protocol projection and lifetime removal.
 	// Links and guards are only appended; all other intent is read-only.
 	p.network.Links = slices.Clip(p.network.Links)
@@ -227,6 +235,11 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 				}
 			}
 			for _, lan := range s.DHCP6.Delegations {
+				dnsKey := s.Name + "/" + lan.Name
+				needsDNS := lan.RDNSSRouter
+				for _, server := range protocols.dhcp6Servers {
+					needsDNS = needsDNS || server.dnsDelegation == dnsKey
+				}
 				dsliteSource := false
 				for _, definition := range protocols.aftr {
 					if lan.PrefixLength == 128 && definition.service.DSLite.SourceFrom == s.Name && definition.service.DSLite.SourceDelegation == lan.Name {
@@ -263,6 +276,13 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 					}
 					if err := addAddressWithOptions(&p.network, lan.Interface, address.String(), options); err != nil {
 						return p, err
+					}
+					if !preparing && needsDNS {
+						entry := delegatedDNSAddress{interfaceName: lan.Interface, address: dhcp6serverconfig.Address{Address: address.Addr(), ValidUntil: lease.ValidUntil}}
+						if lan.RDNSSRouter {
+							entry.raModule = "service." + s.Name + "-" + lan.Name + "-ra"
+						}
+						p.delegatedDNS[dnsKey] = append(p.delegatedDNS[dnsKey], entry)
 					}
 					if !preparing && lan.Advertise {
 						prefixes = append(prefixes, ra.Prefix{Prefix: prefix.String(), OnLink: true, Autonomous: true, ValidLifetimeSeconds: ^uint32(0), PreferredLifetimeSeconds: ^uint32(0), ValidUntil: lease.ValidUntil, PreferredUntil: lease.PreferredUntil})

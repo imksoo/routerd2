@@ -14,12 +14,12 @@ import (
 func TestConditionMaxAgeSurvivesSourceRoundTripAndInvalidInputIsRejected(t *testing.T) {
 	source := Document{SchemaVersion: SchemaVersion, Resources: []resourceprogram.Resource{{
 		ID: "dns", When: &resourceprogram.FactCondition{Fact: "service.wan.ready", MaxAge: "1500ms", For: "375ms"},
-		Service: &serviceconfig.Service{Name: "dns", DNS: &dnsconfig.RuntimeConfig{
+		Service: &serviceconfig.Service{Name: "dns", DNS: &serviceconfig.DNS{RuntimeConfig: dnsconfig.RuntimeConfig{
 			Spec: api.DNSResolverSpec{
 				Listen:  []api.DNSResolverListenSpec{{Addresses: []string{"127.0.0.1"}, Port: 5353}},
 				Sources: []api.DNSResolverSourceSpec{{Name: "default", Kind: "forward", Match: []string{"."}, Upstreams: []string{"udp://192.0.2.53:53"}}},
 			},
-		}},
+		}}},
 	}}}
 	encoded, err := YAML(source)
 	if err != nil {
@@ -43,12 +43,12 @@ func TestConditionMaxAgeSurvivesSourceRoundTripAndInvalidInputIsRejected(t *test
 // A gate must never be accepted and then discarded during native compilation.
 func TestUnsupportedDNSConditionsCannotStartAnUnconditionalWorker(t *testing.T) {
 	base := func() Native {
-		return Native{Services: []serviceconfig.Service{{Name: "dns", DNS: &dnsconfig.RuntimeConfig{
+		return Native{Services: []serviceconfig.Service{{Name: "dns", DNS: &serviceconfig.DNS{RuntimeConfig: dnsconfig.RuntimeConfig{
 			Spec: api.DNSResolverSpec{
 				Listen:  []api.DNSResolverListenSpec{{Addresses: []string{"127.0.0.1"}, Port: 5353}},
 				Sources: []api.DNSResolverSourceSpec{{Name: "default", Kind: "forward", Match: []string{"."}, Upstreams: []string{"udp://192.0.2.53:53"}}},
 			},
-		}}}}
+		}}}}}
 	}
 	if err := Validate(FromNative(base())); err != nil {
 		t.Fatal("unconditional DNS fixture is invalid", err)

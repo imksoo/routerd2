@@ -129,8 +129,13 @@ import, and a distinct DS-Lite host-suffix override creates a /128 endpoint.
 
 A delegation with `rdnss_router` advertises its own delegated LAN address as
 an RDNSS server. Its advertisement expires with the delegated prefix. The DNS
-service must actually listen on that address; a wildcard listener also accepts
-traffic on other interfaces, so configure the firewall to restrict access.
+service must actually listen on that address. Set its `listen_interface` to
+the LAN interface when using a wildcard listener: Linux then accepts DNS only
+on that link and follows the addresses installed and removed there. A wildcard
+still accepts other addresses on the same link. A DHCPv6 information server
+can select the same allocation with `dns_delegation`, specifying its service
+and delegation names. It supplies only addresses in the applied network
+projection and retains their original expiry.
 
 A DHCPv6 delegation independently selects `use_learned_rdnss` and
 `use_learned_dnssl`. It keeps configured `rdnss` and
@@ -157,11 +162,9 @@ settings are not reconfigured. The DHCP clients obtain their LAN configuration;
 the dhcpcd hook installs the received DNS in a private resolver mount. The test
 checks IPv4 DS-Lite and IPv6 HTTPS, UDP/TCP DNS, conditional forwarding,
 upstream failure and recovery. Set `UPLINK_DNS_UPSTREAM` to exercise a DoH
-endpoint using WAN-learned bootstrap DNS. RA advertises the delegated router
-address; DHCPv6 information still supplies a static ULA. The DNS server listens
-on the IPv6 wildcard, with WAN DNS access blocked by the test firewall. Binding
-only dynamically delegated addresses and supplying them through DHCPv6
-information remain unimplemented.
+endpoint using WAN-learned bootstrap DNS. RA and DHCPv6 information advertise
+the delegated router address. The DNS server listens on the IPv6 wildcard
+bound to the LAN interface; the test firewall also blocks WAN DNS input.
 
 The test kills and gracefully restarts the PD worker, checks retained DUID/IAID
 and recovered communication, and verifies Rebind/Reply in capture. When the

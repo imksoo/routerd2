@@ -31,7 +31,7 @@ func TestDHCPDNSReplacementRetainsStaticGraphAndScopedProducerIdentity(t *testin
 	result := compiledPolicy(t, data, options)
 	dhcp := service(t, result.Document, "dhcp_server")
 	dns := service(t, result.Document, "dns")
-	if !dnsconfig.NeedsInput(*dns.DNS) || len(dns.DNS.Zones) != 1 || !reflect.DeepEqual(dns.DNS.Zones[0].Spec.DHCPDerived.Sources, []string{"DHCPv4Server/" + dhcp.Name}) {
+	if !dnsconfig.NeedsInput(dns.DNS.RuntimeConfig) || len(dns.DNS.Zones) != 1 || !reflect.DeepEqual(dns.DNS.Zones[0].Spec.DHCPDerived.Sources, []string{"DHCPv4Server/" + dhcp.Name}) {
 		t.Fatal("source reference did not join the compiled DHCP producer", dns.DNS)
 	}
 	zone := dns.DNS.Zones[0].Spec
@@ -174,7 +174,7 @@ func TestDHCPDNSPolicyMustCoverEachResolverReceivingLeaseZones(t *testing.T) {
 	result := compiledPolicy(t, data, options)
 	consumers := 0
 	for _, s := range nativeProgram(t, result.Document).Services {
-		if s.DNS != nil && dnsconfig.NeedsInput(*s.DNS) {
+		if s.DNS != nil && dnsconfig.NeedsInput(s.DNS.RuntimeConfig) {
 			consumers++
 		}
 	}

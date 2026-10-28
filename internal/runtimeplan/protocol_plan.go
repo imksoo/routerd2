@@ -76,7 +76,11 @@ func prepareProtocols(doc config.Native, runtimeDir, stateDir string) (protocolP
 				return out
 			}
 			c := service.DHCP6Server
-			plan.dhcp6Servers[name] = dhcp6ServerPlan{iface: c.Interface, dns: refs(c.DNSFrom), sntp: refs(c.SNTPFrom), search: refs(c.SearchFrom)}
+			serverPlan := dhcp6ServerPlan{iface: c.Interface, dns: refs(c.DNSFrom), sntp: refs(c.SNTPFrom), search: refs(c.SearchFrom)}
+			if c.DNSDelegation != nil {
+				serverPlan.dnsDelegation = c.DNSDelegation.Service + "/" + c.DNSDelegation.Delegation
+			}
+			plan.dhcp6Servers[name] = serverPlan
 		}
 		if service.DHCP6 != nil && service.DHCP6.RAFrom != "" {
 			plan.dhcp6RA[name] = "service." + service.DHCP6.RAFrom

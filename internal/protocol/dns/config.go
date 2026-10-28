@@ -56,7 +56,7 @@ func Run(ctx context.Context, cfg Config, updates <-chan dnsconfig.Input, ready 
 	if err := unix.Flock(int(lock.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
 		return fmt.Errorf("DNS state is already owned: %w", err)
 	}
-	d, err := newDaemon(options{resource: cfg.Runtime.Resource, socketPath: cfg.SocketPath, stateFile: cfg.StatePath, eventFile: cfg.EventPath}, normalizedRuntime(cfg.Runtime, cfg.StatePath))
+	d, err := newDaemon(options{resource: cfg.Runtime.Resource, socketPath: cfg.SocketPath, stateFile: cfg.StatePath, eventFile: cfg.EventPath, listenInterface: cfg.ListenInterface}, normalizedRuntime(cfg.Runtime, cfg.StatePath))
 	if err != nil {
 		return err
 	}

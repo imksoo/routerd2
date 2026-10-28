@@ -28,22 +28,27 @@ import (
 )
 
 type Service struct {
-	Tailscale   *tailscaleconfig.Node    `json:"tailscale,omitempty"`
-	DHCP6Server *DHCP6Server             `json:"dhcp6_server,omitempty"`
-	PPPoE       *PPPoE                   `json:"pppoe,omitempty"`
-	Health      *health.Config           `json:"health,omitempty"`
-	BFD         *bfd.Config              `json:"bfd,omitempty"`
-	DSLite      *DSLite                  `json:"ds_lite,omitempty"`
-	RAClient    *RAClient                `json:"ra_client,omitempty"`
-	DHCPServer  *DHCPServer              `json:"dhcp_server,omitempty"`
-	DHCPRelay   *dhcprelayconfig.Config  `json:"dhcp_relay,omitempty"`
-	BGP         *BGP                     `json:"bgp,omitempty"`
-	Name        string                   `json:"name"`
-	DHCP4       *DHCP4                   `json:"dhcp4,omitempty"`
-	DHCP6       *DHCP6                   `json:"dhcp6,omitempty"`
-	RA          *ra.Config               `json:"ra,omitempty"`
-	DNS         *dnsconfig.RuntimeConfig `json:"dns,omitempty"`
-	VRRP        *vrrp.Config             `json:"vrrp,omitempty"`
+	Tailscale   *tailscaleconfig.Node   `json:"tailscale,omitempty"`
+	DHCP6Server *DHCP6Server            `json:"dhcp6_server,omitempty"`
+	PPPoE       *PPPoE                  `json:"pppoe,omitempty"`
+	Health      *health.Config          `json:"health,omitempty"`
+	BFD         *bfd.Config             `json:"bfd,omitempty"`
+	DSLite      *DSLite                 `json:"ds_lite,omitempty"`
+	RAClient    *RAClient               `json:"ra_client,omitempty"`
+	DHCPServer  *DHCPServer             `json:"dhcp_server,omitempty"`
+	DHCPRelay   *dhcprelayconfig.Config `json:"dhcp_relay,omitempty"`
+	BGP         *BGP                    `json:"bgp,omitempty"`
+	Name        string                  `json:"name"`
+	DHCP4       *DHCP4                  `json:"dhcp4,omitempty"`
+	DHCP6       *DHCP6                  `json:"dhcp6,omitempty"`
+	RA          *ra.Config              `json:"ra,omitempty"`
+	DNS         *DNS                    `json:"dns,omitempty"`
+	VRRP        *vrrp.Config            `json:"vrrp,omitempty"`
+}
+
+type DNS struct {
+	dnsconfig.RuntimeConfig
+	ListenInterface string `json:"listen_interface,omitempty"`
 }
 
 // PPPoE keeps route intent with the network projection. These fields do not
@@ -335,7 +340,7 @@ func Validate(services []Service) error {
 				return err
 			}
 		case "dns":
-			c := *s.DNS
+			c := s.DNS.RuntimeConfig
 			if c.Resource != "" && c.Resource != s.Name {
 				return errors.New("DNS resource is managed by the service name")
 			}
@@ -472,12 +477,12 @@ func (s Service) VRRPConfig() vrrp.Config {
 	return vrrp.Normalize(c)
 }
 func (s Service) DNSConfig(runtimeDir, stateDir string) dnsconfig.Config {
-	c := *s.DNS
+	c := s.DNS.RuntimeConfig
 	c.Resource = s.Name
 	// Normalization deep-copies slices before assigning module-owned paths.
 	state := filepath.Join(stateDir, "services", s.Name, "dns.json")
 	c = dnsconfig.NormalizeRuntime(c, state)
-	return dnsconfig.Config{Runtime: c, SocketPath: filepath.Join(runtimeDir, "services", s.Name+".dns.sock"), StatePath: state, EventPath: filepath.Join(stateDir, "services", s.Name, "dns-events.jsonl")}
+	return dnsconfig.Config{Runtime: c, ListenInterface: s.DNS.ListenInterface, SocketPath: filepath.Join(runtimeDir, "services", s.Name+".dns.sock"), StatePath: state, EventPath: filepath.Join(stateDir, "services", s.Name, "dns-events.jsonl")}
 }
 func (s Service) Instance(runtimeDir, stateDir string) (Instance, error) {
 	var b []byte

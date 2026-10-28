@@ -432,9 +432,39 @@ func (r *Runtime) applyProjectionLocked(ctx context.Context, p projection) (proj
 	// Admission is consumed at the start of this kernel operation. Subsequent
 	// readiness loss does not revoke a successfully applied election.
 	err := r.applyNetworkLocked(ctx, p.network)
+	if err == nil && len(p.delegatedDNS) > 0 {
+		// Installing an IPv6 address starts DAD; it does not make the address
+		// usable yet. Publish it only after the kernel reports DAD completion.
+		r.mu.Unlock()
+		for key, addresses := range p.delegatedDNS {
+			usable := addresses[:0]
+			for _, entry := range addresses {
+				observed, observeErr := r.network.SourceAddress(ctx, entry.interfaceName, entry.address.Address.String())
+				if observeErr != nil {
+					err = observeErr
+					break
+				}
+				if sourceInstalled(entry.interfaceName, entry.address.Address.String(), observed, true) {
+					usable = append(usable, entry)
+					continue
+				}
+				if entry.raModule != "" {
+					config := p.liveRA[entry.raModule]
+					config.LearnedRDNSS = slices.DeleteFunc(config.LearnedRDNSS, func(server ra.DNSServer) bool { return server.Address == entry.address.Address.String() })
+					p.liveRA[entry.raModule] = config
+				}
+			}
+			p.delegatedDNS[key] = usable
+			if err != nil {
+				break
+			}
+		}
+		r.mu.Lock()
+	}
 	if err == nil {
 		r.resourceStates, r.liveRA, r.routeIssues, r.bgpApplied = p.resources, p.liveRA, p.routeIssues, p.bgpStatus
 		r.liveDHCP6 = p.liveDHCP6
+		r.delegatedDNS = p.delegatedDNS
 		r.vrrpOwners = p.vrrpOwners
 		r.applied.observationVersion = p.observationVersion
 		r.applied.sourceEpoch = r.sourceEpoch

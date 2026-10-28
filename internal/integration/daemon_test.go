@@ -88,7 +88,7 @@ func TestDaemonConfigurationAndRecovery(t *testing.T) {
 	runDir, stateDir := filepath.Join(dir, "run"), filepath.Join(dir, "state")
 	dnsPort, sshPort := port(t), port(t)
 	dns := dnsconfig.RuntimeConfig{Resource: "dns", Spec: api.DNSResolverSpec{Listen: []api.DNSResolverListenSpec{{Name: "local", Addresses: []string{"127.0.0.1"}, Port: dnsPort}}, Sources: []api.DNSResolverSourceSpec{{Name: "zones", Kind: "zone", Match: []string{"lab.example"}, ZoneRef: []string{"DNSZone/lan-zone"}}}}, Zones: []dnsconfig.RuntimeZone{{Name: "lan-zone", Spec: api.DNSZoneSpec{Zone: "lab.example", Records: []api.DNSZoneRecordSpec{{Hostname: "router", IPv4: "192.0.2.1"}}}}}}
-	doc := config.FromNative(config.Native{Services: []serviceconfig.Service{{Name: "dns", DNS: &dns}}})
+	doc := config.FromNative(config.Native{Services: []serviceconfig.Service{{Name: "dns", DNS: &serviceconfig.DNS{RuntimeConfig: dns}}}})
 	configPath := filepath.Join(dir, "config.json")
 	if err = config.AtomicJSON(configPath, doc); err != nil {
 		t.Fatal(err)

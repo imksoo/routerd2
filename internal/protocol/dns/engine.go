@@ -26,10 +26,11 @@ import (
 )
 
 type options struct {
-	resource   string
-	socketPath string
-	stateFile  string
-	eventFile  string
+	resource        string
+	socketPath      string
+	stateFile       string
+	eventFile       string
+	listenInterface string
 }
 
 type daemon struct {
@@ -260,7 +261,7 @@ func (d *daemon) startDNS(ctx context.Context) error {
 
 func (d *daemon) openBoundListeners(ctx context.Context, addrs map[string]struct{}) (map[string]*boundListener, error) {
 	handler := dns.HandlerFunc(d.handleDNS)
-	listenConfig := dnsListenConfig()
+	listenConfig := dnsListenConfig(d.opts.listenInterface)
 	listeners := map[string]*boundListener{}
 	for addr := range addrs {
 		packetConn, err := listenConfig.ListenPacket(ctx, "udp", addr)

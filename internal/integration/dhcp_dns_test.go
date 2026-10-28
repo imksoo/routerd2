@@ -65,7 +65,7 @@ func testDaemonDHCPDNSOwnership(t *testing.T, migrated bool) {
 	}
 	native := config.Native{
 		Network:  network.Desired{Interfaces: []network.Interface{{Name: "lan0", Addresses: []string{"192.0.2.1/24"}}}},
-		Services: []serviceconfig.Service{{Name: "leases", DHCPServer: &server}, {Name: "dns", DNS: &dns}},
+		Services: []serviceconfig.Service{{Name: "leases", DHCPServer: &server}, {Name: "dns", DNS: &serviceconfig.DNS{RuntimeConfig: dns}}},
 	}
 	doc := config.FromNative(native)
 	if migrated {

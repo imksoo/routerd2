@@ -144,6 +144,7 @@ type Runtime struct {
 	vrrpTracks           map[string][]vrrpTrackState
 	liveRA               map[string]ra.Config
 	liveDHCP6            map[string]dhcp6config.RouterFlags
+	delegatedDNS         map[string][]delegatedDNSAddress
 	aftrInputs           map[string]aftr.Input
 	dhcpServers          map[string]dhcpserverconfig.Snapshot
 	routeIssues          []RouteIssue

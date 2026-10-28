@@ -24,10 +24,11 @@ type RuntimeZone = dnsresolver.RuntimeZone
 // Config contains immutable intent and module-owned paths. Learned protocol
 // observations arrive through Input; no external configuration file is reread.
 type Config struct {
-	Runtime    dnsresolver.RuntimeConfig `json:"runtime"`
-	SocketPath string                    `json:"socket_path"`
-	StatePath  string                    `json:"state_path"`
-	EventPath  string                    `json:"event_path,omitempty"`
+	Runtime         dnsresolver.RuntimeConfig `json:"runtime"`
+	ListenInterface string                    `json:"listen_interface,omitempty"`
+	SocketPath      string                    `json:"socket_path"`
+	StatePath       string                    `json:"state_path"`
+	EventPath       string                    `json:"event_path,omitempty"`
 }
 
 func firstNonEmpty(values ...string) string {
@@ -53,6 +54,9 @@ func NormalizeRuntime(cfg dnsresolver.RuntimeConfig, statePath string) dnsresolv
 }
 
 func Validate(c Config) error {
+	if c.ListenInterface != "" && (len(c.ListenInterface) > 15 || strings.ContainsAny(c.ListenInterface, "/\x00 \t\r\n")) {
+		return errors.New("DNS listen interface must be a valid Linux interface name")
+	}
 	paths := map[string]bool{}
 	for name, path := range map[string]string{"socket_path": c.SocketPath, "state_path": c.StatePath, "event_path": c.EventPath} {
 		if path == "" && name == "event_path" {

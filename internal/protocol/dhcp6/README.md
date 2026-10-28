@@ -70,7 +70,7 @@ prepare only the dedicated B4 address under the original PD and election
 deadlines. This observation grants no LAN RA, DHCP serving, or tunnel authority;
 normal publication follows socket readiness. Interruption withdraws preparation,
 and the writer independently expires it if control stops.
-The current contract is compiler native-54, checkpoint version 2; no discarded
+The current contract is compiler native-55, checkpoint version 2; no discarded
 prototype reader is retained.
 
 This path was compared with routerd's `cmd/routerd-dhcpv6-client` DUID selection,

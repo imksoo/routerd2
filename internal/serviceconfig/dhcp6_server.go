@@ -10,15 +10,22 @@ import (
 )
 
 type DHCP6Server struct {
-	Interface      string       `json:"interface"`
-	ServerDUID     string       `json:"server_duid,omitempty"`
-	DNSServers     []netip.Addr `json:"dns_servers,omitempty"`
-	SNTPServers    []netip.Addr `json:"sntp_servers,omitempty"`
-	DomainSearch   []string     `json:"domain_search,omitempty"`
-	DNSFrom        []string     `json:"dns_from,omitempty"`
-	SNTPFrom       []string     `json:"sntp_from,omitempty"`
-	SearchFrom     []string     `json:"search_from,omitempty"`
-	RefreshSeconds uint32       `json:"refresh_seconds,omitempty"`
+	Interface      string         `json:"interface"`
+	ServerDUID     string         `json:"server_duid,omitempty"`
+	DNSServers     []netip.Addr   `json:"dns_servers,omitempty"`
+	SNTPServers    []netip.Addr   `json:"sntp_servers,omitempty"`
+	DomainSearch   []string       `json:"domain_search,omitempty"`
+	DNSFrom        []string       `json:"dns_from,omitempty"`
+	DNSDelegation  *DNSDelegation `json:"dns_delegation,omitempty"`
+	SNTPFrom       []string       `json:"sntp_from,omitempty"`
+	SearchFrom     []string       `json:"search_from,omitempty"`
+	RefreshSeconds uint32         `json:"refresh_seconds,omitempty"`
+}
+
+// DNSDelegation selects the router address installed from a PD allocation.
+type DNSDelegation struct {
+	Service    string `json:"service"`
+	Delegation string `json:"delegation"`
 }
 
 type DHCP6ServerInput struct {
@@ -43,6 +50,20 @@ func validateDHCP6Servers(services []Service) error {
 		if s.DHCP6Server.ServerDUID != "" {
 			if _, err := dhcp6config.ParseDUID(s.DHCP6Server.ServerDUID); err != nil {
 				return err
+			}
+		}
+		if ref := s.DHCP6Server.DNSDelegation; ref != nil {
+			provider := byName[ref.Service]
+			found := false
+			if provider.DHCP6 != nil {
+				for _, allocation := range provider.DHCP6.Delegations {
+					if allocation.Name == ref.Delegation && allocation.Interface == s.DHCP6Server.Interface && allocation.PrefixLength != 128 {
+						found = true
+					}
+				}
+			}
+			if !found {
+				return fmt.Errorf("DHCPv6 server %s DNS delegation must select a LAN allocation on its interface", s.Name)
 			}
 		}
 		for _, sourceSet := range []struct {

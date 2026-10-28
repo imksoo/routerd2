@@ -112,7 +112,6 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
         {"id": "wan", "interface": {"name": "wan0"}},
         {"id": "lan", "interface": {"name": "lan0"}},
         {"id": "lan-ip", "address": {"interface": "lan0", "cidr": "198.18.0.1/24"}},
-        {"id": "lan-dns6", "address": {"interface": "lan0", "cidr": "fd42:726f:7574::1/64"}},
         {
             "id": "forwarding",
             "forwarding": {"ipv4": True, "ipv6": True, "ipv4_rp_filter": 0},
@@ -207,7 +206,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
         {
             "id": "lan-info",
             "service": {"name": "lan-info", "dhcp6_server": {
-                "interface": "lan0", "dns_servers": ["fd42:726f:7574::1"],
+                "interface": "lan0", "dns_delegation": {"service": "wan-pd", "delegation": "lan"},
                 "domain_search": ["home.arpa"], "refresh_seconds": 600,
             }},
         },
@@ -216,6 +215,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
             "service": {
                 "name": "dns",
                 "dns": {
+                    "listen_interface": "lan0",
                     "spec": {
                         "listen": [
                             {"name": "lan", "addresses": ["::"], "port": 53}
@@ -271,6 +271,9 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
                 "bridge",
             ]
         )
+        # Repeated runs represent one test router. Its DUID-LL must not change
+        # with each newly created macvlan and consume additional HGW leases.
+        run(["ip", "-n", router, "link", "set", "wan0", "address", "02:72:6f:75:74:02"])
         run(
             [
                 "ip",
@@ -393,7 +396,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
         information = run(inside(client, ["busybox", "udhcpc6", "-l", "-f", "-n", "-q", "-i", "client0", "-s", str(info_hook), "-t", "3", "-T", "1"]))
         options = dict(line.split("=", 1) for line in information.splitlines() if line.startswith(("dns=", "search=")))
         servers = [ipaddress.IPv6Address(value) for value in options.get("dns", "").split()]
-        assert servers == [ipaddress.IPv6Address("fd42:726f:7574::1")] and "home.arpa" in options.get("search", "").split(), "LAN DHCPv6 information did not supply the router DNS and search domain: " + str(options)
+        assert len(servers) == 1 and "home.arpa" in options.get("search", "").split(), "LAN DHCPv6 information did not supply the router DNS and search domain: " + str(options)
         print("PASS independent LAN client received router DNS and search domain via DHCPv6", flush=True)
 
         auto_events = stage / "automatic-client-events"
@@ -418,7 +421,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
             if not auto_events.exists():
                 return False
             events = [line.split("|") for line in auto_events.read_text().splitlines()]
-            return any(len(event) == 5 and event[0] == "v4" and event[3:] == ["198.18.0.1", "198.18.0.1"] for event in events) and any(len(event) == 3 and event[0] == "v6" and event[1] and ipaddress.IPv6Address(event[1]) == ipaddress.IPv6Address("fd42:726f:7574::1") and "home.arpa" in event[2].split() for event in events) and any(event[0] == "ra" and len(event) == 2 and event[1] for event in events)
+            return any(len(event) == 5 and event[0] == "v4" and event[3:] == ["198.18.0.1", "198.18.0.1"] for event in events) and any(len(event) == 3 and event[0] == "v6" and event[1] and "home.arpa" in event[2].split() for event in events) and any(event[0] == "ra" and len(event) == 2 and event[1] for event in events)
         wait(automatic_ready, 60)
         auto_options = [line.split("|") for line in auto_events.read_text().splitlines()]
         auto_dns4 = next(event[4] for event in reversed(auto_options) if event[0] == "v4")
@@ -426,6 +429,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
         auto_addresses = json.loads(run(["ip", "-n", automatic, "-j", "address", "show", "dev", "client1"]))
         delegated = [ipaddress.IPv6Network(p["prefix"]) for p in query("control.sock", "/v1/services/service.wan-pd")["snapshot"]["prefixes"]]
         router_dns = ipaddress.IPv6Address(next(event[1] for event in reversed(auto_options) if event[0] == "ra" and len(event) == 2 and event[1]))
+        assert servers == [router_dns] and ipaddress.IPv6Address(auto_dns6) == router_dns, "RA and DHCPv6 DNS disagree"
         router_addresses = json.loads(run(["ip", "-n", router, "-j", "-6", "address", "show", "dev", "lan0"]))
         assert any(ipaddress.IPv6Address(a["local"]) == router_dns and any(router_dns in prefix for prefix in delegated) for link in router_addresses for a in link["addr_info"]), "RA DNS is not the delegated LAN router address"
         assert any(a["family"] == "inet6" and not a.get("tentative") and any(ipaddress.IPv6Address(a["local"]) in prefix for prefix in delegated) for link in auto_addresses for a in link["addr_info"]), "automatic LAN client has no usable delegated SLAAC address"
@@ -476,7 +480,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
             )
 
         wait(dns_ready)
-        for server, family in ((lease[3], "-4"), ("fd42:726f:7574::1", "-6")):
+        for server, family in ((lease[3], "-4"), (str(router_dns), "-6")):
             answer = run(inside(client, ["dig", family, "@" + server, "available.split.test", "A", "+short", "+time=3", "+tries=1"]))
             assert answer.strip() == "192.0.2.77", "conditional DNS query reached the wrong upstream: " + answer
         private_dns.terminate()
@@ -532,7 +536,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
                 )
                 assert "status: NOERROR" in response and "ANSWER: 0" not in response, (transport, response)
             for transport in [[], ["+tcp"]]:
-                response = run(inside(client, ["dig", "-6", "@fd42:726f:7574::1", "example.net", "AAAA", "+tries=1", "+time=3"] + transport))
+                response = run(inside(client, ["dig", "-6", "@" + str(router_dns), "example.net", "AAAA", "+tries=1", "+time=3"] + transport))
                 assert "status: NOERROR" in response and "ANSWER: 0" not in response, (transport, response)
             response = run(inside(automatic, ["dig", "-6", "@" + str(router_dns), "example.net", "AAAA", "+tries=1", "+time=3"]))
             assert "status: NOERROR" in response and "ANSWER: 0" not in response, "delegated router DNS failed: " + response

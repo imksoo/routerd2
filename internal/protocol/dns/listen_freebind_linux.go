@@ -12,8 +12,22 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func dnsListenConfig() net.ListenConfig {
-	return net.ListenConfig{Control: enableFreebind}
+func dnsListenConfig(iface string) net.ListenConfig {
+	return net.ListenConfig{Control: func(network, address string, c syscall.RawConn) error {
+		if err := enableFreebind(network, address, c); err != nil {
+			return err
+		}
+		if iface == "" {
+			return nil
+		}
+		var sockErr error
+		if err := c.Control(func(fd uintptr) {
+			sockErr = unix.SetsockoptString(int(fd), unix.SOL_SOCKET, unix.SO_BINDTODEVICE, iface)
+		}); err != nil {
+			return err
+		}
+		return sockErr
+	}}
 }
 
 func enableFreebind(_, _ string, c syscall.RawConn) error {

@@ -11,7 +11,7 @@ import (
 )
 
 func TestDNSListenConfigBindsNonLocalIPv4Address(t *testing.T) {
-	config := dnsListenConfig()
+	config := dnsListenConfig("")
 	ctx := context.Background()
 	addr := net.JoinHostPort("192.0.2.248", "0")
 	packetConn, err := config.ListenPacket(ctx, "udp", addr)
@@ -30,7 +30,7 @@ func TestDNSListenConfigBindsNonLocalIPv4Address(t *testing.T) {
 }
 
 func TestDNSListenConfigBindsNonLocalIPv6Address(t *testing.T) {
-	config := dnsListenConfig()
+	config := dnsListenConfig("")
 	addr := net.JoinHostPort("2001:db8::248", "0")
 	packetConn, err := config.ListenPacket(context.Background(), "udp6", addr)
 	if err != nil {

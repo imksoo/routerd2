@@ -175,7 +175,7 @@ func (c *compiler) dns() {
 				c.note(r, "Explicit DHCP DNS replacement: only leases from each zone's named native DHCP sources are published. Producer loss or lease expiry removes records; global lease events, sticky host recovery and lease-file import are not retained.")
 			}
 		}
-		service := serviceconfig.Service{Name: runtime.Resource, DNS: &runtime}
+		service := serviceconfig.Service{Name: runtime.Resource, DNS: &serviceconfig.DNS{RuntimeConfig: runtime}}
 		services := append(append([]serviceconfig.Service(nil), c.document.Services...), service)
 		if err := serviceconfig.Validate(services); err != nil {
 			c.reject(r, "", "native_validation", "composed DNS listeners, sources, zones or cache settings fail native DNS validation")

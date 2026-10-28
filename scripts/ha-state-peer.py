@@ -20,7 +20,7 @@ def run(command):
     return subprocess.run(command, check=True, capture_output=True, text=True, timeout=10).stdout
 
 
-def peer(stage, dhcp6_server, pd_dslite, stale_owner, preparation):
+def peer(stage, dhcp6_server, pd_dslite, stale_owner, preparation, delegated_dns):
     def deadline(*_):
         raise TimeoutError("HA connection-state communication deadline")
     signal.signal(signal.SIGALRM, deadline)
@@ -104,7 +104,7 @@ def peer(stage, dhcp6_server, pd_dslite, stale_owner, preparation):
         publisher = str(stage / "routerd-bundle")
         (stage / "trust.json").write_text(run([publisher, "trust", "--private-key-file", str(key)]))
         (stage / "trust.json").chmod(0o600)
-        roles = ("logging", "network", "control", "management", "vrrp", "dhcp_server") + (("dhcp6", "dhcp6_server", "ra") if dhcp6_server else ()) + (("aftr", "health") if pd_dslite else ())
+        roles = ("logging", "network", "control", "management", "vrrp", "dhcp_server") + (("dhcp6", "dhcp6_server", "ra") if dhcp6_server else ()) + (("aftr", "health") if pd_dslite else ()) + (("dns",) if delegated_dns else ())
         layout = {"boot_abi": 1, "worker_abi": 5, "entrypoint": "routerd",
                   "roles": [{"role": role, "artifact": "routerd-logging" if role == "logging" else "routerd-modules"} for role in roles],
                   "engines": [{"role": "vrrp", "artifact": "ct-image", "sources": "ct-sources"}],
@@ -161,6 +161,16 @@ def peer(stage, dhcp6_server, pd_dslite, stale_owner, preparation):
                 resources.append({"id": "lan-info", "when": {"fact": "service.ha.active"}, "service": {"name": "lan-info", "dhcp6_server": {
                     "interface": "lan0", "server_duid": "000400112233445546778899aabbccddeeff", "dns_from": ["pd"], "search_from": ["pd"], "domain_search": ["local.test"], "refresh_seconds": 600
                 }}})
+                if delegated_dns:
+                    pd = next(r["service"]["dhcp6"] for r in resources if r["id"] == "pd")
+                    pd["delegations"][0]["rdnss_router"] = True
+                    info = resources[-1]["service"]["dhcp6_server"]
+                    info.pop("dns_from")
+                    info["dns_delegation"] = {"service": "pd", "delegation": "lan"}
+                    resources.append({"id": "dns", "when": {"fact": "service.ha.active"}, "service": {"name": "dns", "dns": {
+                        "listen_interface": "lan0", "spec": {"listen": [{"name": "lan", "addresses": ["::"], "port": 53}],
+                        "sources": [{"name": "upstream", "kind": "forward", "match": ["."], "upstreams": ["udp://[2001:db8:ffff::20]:53"]}]}
+                    }}})
             if pd_dslite:
                 # Match homert's default one-second advertisement interval.
                 # The existing direct/PD profiles retain their 20cs checks.
@@ -306,18 +316,34 @@ except socket.timeout:
 
         def information(owner):
             import ipaddress
+            def expected_dns():
+                if not delegated_dns:
+                    return "2001:db8:ffff::20"
+                observed = api(owner, "control.sock", "/v1/services/service.pd")["snapshot"]
+                prefixes = [ipaddress.IPv6Network(p["prefix"]) for p in observed.get("prefixes", [])]
+                addresses = json.loads(run(inside("ha-" + owner, ["ip", "-j", "-6", "addr", "show", "dev", "lan0"])))
+                return next((a["local"] for link in addresses for a in link["addr_info"] if any(ipaddress.IPv6Address(a["local"]) in p for p in prefixes)), "")
             def received():
                 reply = information_request()
                 if reply.returncode:
                     return False
                 options = dict(line.split("=", 1) for line in reply.stdout.splitlines() if line.startswith(("dns=", "search=")))
-                return [str(ipaddress.IPv6Address(ip)) for ip in options.get("dns", "").split()] == ["2001:db8:ffff::20"] and set(options.get("search", "").split()) == {"wan.test", "local.test"}
+                return [str(ipaddress.IPv6Address(ip)) for ip in options.get("dns", "").split()] == [expected_dns()] and set(options.get("search", "").split()) == {"wan.test", "local.test"}
             wait(received, timeout=6)
             assert modules(owner).get("service.lan-info", {}).get("ready"), "master information server absent"
             standby = "b" if owner == "a" else "a"
             assert "service.lan-info" not in modules(standby), "standby information server still active"
             for transport in ("+notcp", "+tcp"):
-                assert "2001:db8:ffff::20" in run(inside("ha-client", ["dig", "-6", "@2001:db8:ffff::20", "host.wan.test", "AAAA", "+short", "+time=2", "+tries=1", transport]))
+                query = subprocess.run(inside("ha-client", ["dig", "-6", "@" + expected_dns(), "host.wan.test", "AAAA", "+short", "+time=2", "+tries=1", transport]), capture_output=True, text=True)
+                if query.returncode or "2001:db8:ffff::20" not in query.stdout:
+                    for command in (["ip", "-6", "address", "show", "dev", "lan0"], ["ip", "-6", "route", "show"], ["ip", "-6", "neigh", "show", "dev", "lan0"]):
+                        print("client", *command, run(inside("ha-client", command)), flush=True)
+                    print("DNS query", query.stdout, query.stderr, flush=True)
+                    print("DNS packets", run(["tcpdump", "-nn", "-tt", "-r", str(stage / "lan.pcap"), "udp port 53 or tcp port 53"]), flush=True)
+                    nd = run(["tcpdump", "-nn", "-tt", "-vv", "-r", str(stage / "lan.pcap"), "icmp6 and (ip6[40] == 135 or ip6[40] == 136)"])
+                    print("Neighbor discovery", "\n".join(nd.splitlines()[-50:]), flush=True)
+                    raise RuntimeError("delegated DNS query failed")
+            return expected_dns()
 
         for segment in segments:
             log = (stage / (segment + "-capture.log")).open("w")
@@ -409,6 +435,9 @@ for protocol,port in ((socket.SOCK_STREAM,18082),(socket.SOCK_DGRAM,18083)):
             run(["ip", "link", "set", port, "master", "lan"])
             run(["ip", "link", "set", port, "up"])
             run(["ip", "link", "set", name, "netns", "ha-client"])
+            # These are IPv4-only extra clients in the same namespace. Their
+            # RA routes must not compete with the separate IPv6 test client.
+            run(inside("ha-client", ["sysctl", "-w", "net.ipv6.conf." + name + ".accept_ra=0"]))
             run(inside("ha-client", ["ip", "link", "set", name, "up"]))
             command = ["busybox", "udhcpc", "-f", "-i", name, "-s", str(hook), "-p", str(stage / (name + ".pid")), "-t", "3", "-T", "1", "-A", "1"]
             if requested:
@@ -440,7 +469,35 @@ for protocol,port in ((socket.SOCK_STREAM,18082),(socket.SOCK_DGRAM,18083)):
         if dhcp6_server:
             wait(lambda: modules("a").get("service.pd", {}).get("ready") and modules("b").get("service.pd", {}).get("ready"))
             pd_traffic("a")
-            information("a")
+            dns_address = information("a")
+            if delegated_dns:
+                advertisements = run(["tcpdump", "-nn", "-v", "-r", str(stage / "lan.pcap"), "icmp6 and ip6[40] == 134"])
+                assert "rdnss" in advertisements.lower() and dns_address in advertisements, "RA did not advertise the delegated router DNS"
+                print("PASS delegated LAN DNS in RA and DHCPv6, queried by an independent client over UDP/TCP", flush=True)
+                original = api("a", "control.sock", "/v1/services/service.pd")["snapshot"]["prefixes"][0]["valid_until"]["nanos"]
+                pd_server.terminate()
+                pd_server.wait(timeout=5)
+                remaining = max(0, (original - time.clock_gettime_ns(time.CLOCK_BOOTTIME)) / 1_000_000_000)
+                def withdrawn():
+                    addresses = json.loads(run(inside("ha-a", ["ip", "-j", "-6", "addr", "show", "dev", "lan0"])))
+                    return all(a["local"] != dns_address for link in addresses for a in link["addr_info"])
+                wait(withdrawn, timeout=remaining + 8)
+                reply = information_request()
+                assert reply.returncode == 0 and not any(line.startswith("dns=") and line[4:].strip() for line in reply.stdout.splitlines()), "expired delegated DNS was still supplied"
+                old_query = subprocess.run(inside("ha-client", ["dig", "-6", "@" + dns_address, "host.wan.test", "AAAA", "+time=1", "+tries=1"]), capture_output=True, text=True)
+                assert old_query.returncode != 0, "expired delegated DNS still answered"
+                print("PASS expired delegation removed DNS from the interface and DHCPv6 replies", flush=True)
+                config_path = stage / "dhcp6.conf"
+                config_path.write_text(config_path.read_text().replace("prefix6 2001:db8:80:: 2001:db8:80:f0:: /60", "prefix6 2001:db8:80:40:: 2001:db8:80:40:: /60"))
+                pd_server = pd_start()
+                wait(lambda: any(p["prefix"].startswith("2001:db8:80:40:") for p in api("a", "control.sock", "/v1/services/service.pd")["snapshot"].get("prefixes", [])), timeout=60)
+                new_dns = information("a")
+                assert new_dns != dns_address, "delegated DNS did not change with the new prefix"
+                # A changed RA is sent no sooner than three seconds after
+                # the preceding advertisement, so observe that packet.
+                wait(lambda: new_dns in run(["tcpdump", "-nn", "-v", "-r", str(stage / "lan.pcap"), "icmp6 and ip6[40] == 134"]), timeout=6)
+                print("PASS changed delegation updated RA, DHCPv6 and UDP/TCP DNS", flush=True)
+                return
             wait(lambda: pd_saved("a").get("revision") == pd_saved("b").get("revision") and pd_saved("a").get("snapshot", {}).get("prefixes"))
             original = pd_saved("b")
             before = modules("b")["service.pd"]["generation"]
@@ -947,10 +1004,11 @@ def main():
     parser.add_argument("--pd-dslite", action="store_true")
     parser.add_argument("--stale-owner", action="store_true")
     parser.add_argument("--preparation", action="store_true")
+    parser.add_argument("--delegated-dns", action="store_true")
     parser.add_argument("--binary-dir", type=Path, default=Path("dist/bin"))
     args = parser.parse_args()
     if args.inside:
-        peer(args.inside, args.dhcp6_server, args.pd_dslite, args.stale_owner, args.preparation)
+        peer(args.inside, args.dhcp6_server, args.pd_dslite, args.stale_owner, args.preparation, args.delegated_dns)
         return
     os.chdir(Path(__file__).resolve().parent.parent)
     if args.pd_dslite and not args.dhcp6_server:
@@ -959,6 +1017,8 @@ def main():
         parser.error("--stale-owner requires --pd-dslite")
     if args.preparation and not args.pd_dslite:
         parser.error("--preparation requires --pd-dslite")
+    if args.delegated_dns and not args.dhcp6_server:
+        parser.error("--delegated-dns requires --dhcp6-server")
     root = [] if os.geteuid() == 0 else ["sudo", "-n"]
     for module in ("nf_conntrack", "nf_conntrack_netlink"):
         run(root + ["modprobe", module])
@@ -976,6 +1036,8 @@ def main():
             peer_args.append("--stale-owner")
         if args.preparation:
             peer_args.append("--preparation")
+        if args.delegated_dns:
+            peer_args.append("--delegated-dns")
         result = subprocess.run(root + ["unshare", "--mount", "--net", "--pid", "--fork", "--mount-proc", "--kill-child=SIGKILL", "--propagation", "private", "python3", "-I", stage + "/peer.py", "--inside", stage] + peer_args, timeout=250 if args.dhcp6_server else 180)
         if result.returncode:
             for name in ("a.log", "b.log", "client.log", "server.log", "dhcp6.log", "http6.log", "udp6.log", "egress-primary.log", "egress-backup.log"):

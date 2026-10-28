@@ -73,7 +73,7 @@ func TestDaemonDHCP6RAIndependentPeers(t *testing.T) {
 		Listen:  []api.DNSResolverListenSpec{{Name: "local", Addresses: []string{"127.0.0.1"}, Port: 1053}},
 		Sources: []api.DNSResolverSourceSpec{{Name: "wan", Kind: "forward", Match: []string{"."}, QueryTimeout: "1s", UpstreamFrom: []api.StatusValueSourceSpec{{Resource: "DHCPv6Address/wan", Field: "dnsServers"}}}},
 	}}
-	doc.Services = append(doc.Services, serviceconfig.Service{Name: "dns", DNS: &resolver})
+	doc.Services = append(doc.Services, serviceconfig.Service{Name: "dns", DNS: &serviceconfig.DNS{RuntimeConfig: resolver}})
 	f := startFixtureDaemon(t, config.FromNative(doc))
 
 	until(t, 5*time.Second, func() bool {
