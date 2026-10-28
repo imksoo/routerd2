@@ -191,13 +191,13 @@ func (c *compiler) dynamicDSLiteSource(r resource, s api.DSLiteTunnelSpec, polic
 					return
 				}
 				if host != lan.HostID {
-					lan = serviceconfig.Delegation{Name: c.serviceName(r, "b4-source"), Interface: lan.Interface, SubnetID: lan.SubnetID, HostID: host}
+					lan = serviceconfig.Delegation{Name: c.serviceName(r, "b4-source"), Interface: lan.Interface, SubnetID: lan.SubnetID, HostID: host, PrefixLength: 128}
 					service.DHCP6.Delegations = append(service.DHCP6.Delegations, lan)
 					c.target(r, "services/"+service.Name+"/delegations/"+lan.Name)
 				}
 			}
 			out.SourceFrom, out.SourceDelegation = service.Name, lan.Name
-			c.note(r, "The declared PD provider and LAN allocation own the DS-Lite source and its original lifetimes. A different source suffix creates another managed address on that LAN, without another DHCP socket or address-selection daemon; native delegation addresses use /64.")
+			c.note(r, "The declared PD provider and allocation own the DS-Lite source and its original lifetimes, retaining its installed /64 or /128 mask. A different source suffix creates a managed /128 endpoint on the selected interface without another DHCP socket, connected /64 route or address-selection daemon.")
 			return
 		}
 		c.reject(r, "localDelegatedAddress", "reference", "delegated LAN allocation was not compiled")

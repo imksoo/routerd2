@@ -759,6 +759,13 @@ Healthの元期限、古い通知、5秒confirmed rollback、AFTR worker再起�
 
 #### NET-05 — link・address・WAN resource の完全化
 
+2026-10-28 `pd-host` / native-44: 旧routerdのPD由来/128処理と実homert設定を比較し、
+native delegationの設置maskを/64と/128から選べるようにした。旧指定を保持し、別DS-Lite suffixも
+余計な接続/64 routeを作らない/128とする。製品CLI→実daemon・独立ISC/radvd/Linuxで、
+同じ/64内の二WAN endpointのTCP/UDPとLAN向け経路、worker交換・失効復旧・DUID rollbackが通った。
+実HGWの30秒試験もWAN /128を使ったDS-Lite IPv4 HTTPSとnative IPv6 HTTPS、DNS、PD再起動・撤去まで成功。
+長時間自然Renewは別のnative-43試験が実行中であり、native-44の完走には数えない。
+
 2026-10-28 `ha-pd-admission`と`ha-pd-prepared` / native-43をens18の実HGWに接続した。別MAC・隔離LANで
 RA/PD、DS-Lite経由IPv4 HTTPSとIPv6 HTTPS、学習DNSのUDP/TCP、終了時のRA撤去と
 Release/Replyが成功した。Replyは送信元49153。管理address/MAC/default routeは不変だった。

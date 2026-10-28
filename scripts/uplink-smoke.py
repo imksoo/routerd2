@@ -150,7 +150,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
                             "host_id": 1,
                             "advertise": True,
                         },
-                        {"name": "b4", "interface": "lan0", "host_id": 256},
+                        {"name": "b4", "interface": "wan0", "host_id": 256, "prefix_length": 128},
                     ],
                 },
             },
@@ -345,10 +345,15 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
                 capture_output=True,
                 text=True,
             )
+            wan = json.loads(run(["ip", "-n", router, "-j", "-6", "addr", "show", "dev", "wan0"]))
             return (
                 observed.get("available", False)
                 and route.returncode == 0
                 and json.loads(route.stdout)[0]["dev"] == "dslite0"
+                and any(
+                    a["local"] == observed.get("local") and a["prefixlen"] == 128
+                    for link in wan for a in link["addr_info"]
+                )
             )
 
         wait(forwarding_ready)

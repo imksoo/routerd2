@@ -114,6 +114,17 @@ projection; fresh DNS can recreate it. Linux ip6tnl has no DNS TTL timer, so a
 stopped network writer cannot enforce this IPv4 expiry. Kernel address timers,
 link fencing and process supervision remain distinct mechanisms.
 
+## PD-derived host endpoints
+
+PD allocations select their installed address mask with
+`delegations[].prefix_length`: zero/64 installs a LAN address, and 128 installs
+a host endpoint without another connected /64 route. This permits multiple
+DS-Lite sources on WAN while the same delegated /64 remains connected to LAN.
+Set the DS-Lite `source_delegation` to the selected allocation name. Its address
+and lifetime still belong to the one PD client; a host endpoint does not generate
+LAN advertisements. Original `IPv6DelegatedAddress.prefixLength` is retained on
+import, and a distinct DS-Lite host-suffix override creates a /128 endpoint.
+
 ## Learned DNS in LAN advertisements
 
 A DHCPv6 delegation independently selects `use_learned_rdnss` and

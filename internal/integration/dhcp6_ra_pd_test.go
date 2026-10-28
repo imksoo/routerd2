@@ -275,6 +275,39 @@ func TestDaemonDHCP6RAAddsAddressToPD(t *testing.T) {
 		if err := fixtureInsideNamespace(client, func() error { fixtureDHCP6Traffic(t, source); return nil }); err != nil {
 			t.Fatal(err)
 		}
+		// These endpoints share the LAN's delegated /64, as homert's DS-Lite
+		// sources do. Installing them on WAN must not create a competing /64.
+		grant := read()
+		if len(grant.Prefixes) != 1 {
+			t.Fatal("missing prefix for WAN endpoints", grant)
+		}
+		base := netip.MustParsePrefix(grant.Prefixes[0].Prefix).Addr().As16()
+		for _, host := range []byte{0x21, 0x22} {
+			base[15] = host
+			endpoint := netip.AddrFrom16(base).String()
+			until(t, 3*time.Second, func() bool {
+				addresses, err := netlink.AddrList(link, netlink.FAMILY_V6)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, address := range addresses {
+					if address.IP.String() == endpoint && address.Flags&(unix.IFA_F_TENTATIVE|unix.IFA_F_DADFAILED) == 0 {
+						if ones, _ := address.Mask.Size(); ones != 128 {
+							t.Fatal("WAN endpoint acquired a connected subnet", address)
+						}
+						return true
+					}
+				}
+				return false
+			})
+			fixtureDHCP6Traffic(t, endpoint)
+		}
+		base[15] = 0x7e
+		routes, err := netlink.RouteGet(net.IP(base[:]))
+		lanLink, lanErr := netlink.LinkByName("lan0")
+		if err != nil || lanErr != nil || len(routes) != 1 || routes[0].LinkIndex != lanLink.Attrs().Index {
+			t.Fatal("WAN host endpoints stole the delegated LAN route", routes, err, lanErr)
+		}
 	}
 	traffic()
 	information := func() {

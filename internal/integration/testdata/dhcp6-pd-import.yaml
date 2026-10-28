@@ -34,6 +34,14 @@ spec:
         dnsServerFrom: [{resource: DHCPv6Information/wan-info, field: dnsServers}]
         sntpServerFrom: [{resource: DHCPv6PrefixDelegation/wan-pd, field: sntpServers}]
         domainSearchFrom: [{resource: DHCPv6Information/wan-info, field: domainSearch}]
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: IPv6DelegatedAddress
+      metadata: {name: wan-source-a}
+      spec: {prefixDelegation: DHCPv6PrefixDelegation/wan-pd, interface: wan, subnetID: "0", addressSuffix: "::21", prefixLength: 128}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: IPv6DelegatedAddress
+      metadata: {name: wan-source-b}
+      spec: {prefixDelegation: DHCPv6PrefixDelegation/wan-pd, interface: wan, subnetID: "0", addressSuffix: "::22", prefixLength: 128}
     - apiVersion: system.routerd.net/v1alpha1
       kind: Sysctl
       metadata: {name: forwarding-v6}

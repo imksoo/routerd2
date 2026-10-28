@@ -111,7 +111,7 @@ func aftrDependencies(d aftrDefinition, records map[string]serviceconfig.Update,
 					if !prefix.PreferredUntil.Live(clock) || !prefix.ValidUntil.Live(clock) {
 						continue
 					}
-					_, address, err := delegated(prefix.Prefix, d.delegation.SubnetID, d.delegation.HostID)
+					_, address, err := delegated(prefix.Prefix, *d.delegation)
 					if err != nil {
 						return in, err
 					}

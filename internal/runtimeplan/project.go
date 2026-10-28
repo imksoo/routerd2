@@ -223,7 +223,7 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 					if !lease.ValidUntil.Live(facts.bfdClock) {
 						continue
 					}
-					prefix, address, err := delegated(lease.Prefix, lan.SubnetID, lan.HostID)
+					prefix, address, err := delegated(lease.Prefix, lan)
 					if err != nil {
 						return p, fmt.Errorf("%s/%s: %w", s.Name, lan.Name, err)
 					}
@@ -377,23 +377,28 @@ func addAddressWithOptions(d *network.Desired, name, address string, options net
 	}
 	return errors.New("dynamic address interface is missing")
 }
-func delegated(prefix string, subnet, host uint64) (netip.Prefix, netip.Prefix, error) {
+func delegated(prefix string, allocation serviceconfig.Delegation) (netip.Prefix, netip.Prefix, error) {
 	p, err := netip.ParsePrefix(prefix)
 	if err != nil || !p.Addr().Is6() || p.Addr().Is4In6() || p.Addr().IsUnspecified() || p.Addr().IsMulticast() || p.Bits() > 64 || p != p.Masked() {
 		return netip.Prefix{}, netip.Prefix{}, errors.New("delegated prefix must be a canonical IPv6 prefix no longer than /64")
 	}
 	bits := 64 - p.Bits()
-	if bits < 64 && subnet >= uint64(1)<<bits {
+	if bits < 64 && allocation.SubnetID >= uint64(1)<<bits {
 		return netip.Prefix{}, netip.Prefix{}, errors.New("subnet_id does not fit acquired prefix")
 	}
 	b := p.Addr().As16()
-	binary.BigEndian.PutUint64(b[:8], binary.BigEndian.Uint64(b[:8])|subnet)
+	binary.BigEndian.PutUint64(b[:8], binary.BigEndian.Uint64(b[:8])|allocation.SubnetID)
 	base := netip.AddrFrom16(b)
+	host := allocation.HostID
 	if host == 0 {
 		host = 1
 	}
 	binary.BigEndian.PutUint64(b[8:], host)
-	return netip.PrefixFrom(base, 64), netip.PrefixFrom(netip.AddrFrom16(b), 64), nil
+	length := allocation.PrefixLength
+	if length == 0 {
+		length = 64
+	}
+	return netip.PrefixFrom(base, 64), netip.PrefixFrom(netip.AddrFrom16(b), length), nil
 }
 func boundedSeconds(v int64) uint32 {
 	if v <= 0 {

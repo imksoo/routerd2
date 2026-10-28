@@ -305,7 +305,6 @@ func TestSemanticRestrictionsAndDNSFailureAreAtomic(t *testing.T) {
 		{"exclusive-address", "static", "exclusive: false", "exclusive: true", "exclusive", "unsupported_semantics"},
 		{"bridge-default-stp", "static", "        stp: false\n", "", "stp", "unsupported_semantics"},
 		{"zero-host", "wan", `addressSuffix: "::1234"`, `addressSuffix: "::"`, "addressSuffix", "unsupported_semantics"},
-		{"host-only-pd", "wan", "prefixLength: 64", "prefixLength: 128", "prefixLength", "unsupported_semantics"},
 		{"implicit-ra", "wan", "sendRA: false", "sendRA: true", "sendRA", "unsupported_semantics"},
 		{"dns-path", "dns", "queryLog: {enabled: true}", "queryLog: {enabled: true, path: /tmp/legacy.db}", "queryLog.path", "unsupported_semantics"},
 		{"local-dnssec", "dns", "        ttl: 60", "        ttl: 60\n        dnssec: {enabled: true, mode: sign}", "dnssec", "unsupported_semantics"},

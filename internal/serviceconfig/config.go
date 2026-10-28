@@ -80,12 +80,15 @@ type DHCP6 struct {
 
 // Delegation allocates a /64 inside an acquired prefix. SubnetID occupies the
 // bits between the delegated prefix length and bit 64; HostID defaults to 1.
+// PrefixLength selects the installed address mask: zero/64 for a LAN, 128 for
+// a host endpoint without an additional connected /64 route.
 // Advertisements use absolute lease deadlines, including deprecated prefixes.
 type Delegation struct {
 	Name                  string   `json:"name"`
 	Interface             string   `json:"interface"`
 	SubnetID              uint64   `json:"subnet_id,omitempty"`
 	HostID                uint64   `json:"host_id,omitempty"`
+	PrefixLength          int      `json:"prefix_length,omitempty"`
 	Advertise             bool     `json:"advertise,omitempty"`
 	OtherConfig           bool     `json:"other_config,omitempty"`
 	RouterLifetimeSeconds *int     `json:"router_lifetime_seconds,omitempty"`
@@ -382,6 +385,9 @@ func Validate(services []Service) error {
 					return fmt.Errorf("service %s has invalid/duplicate delegation name or invalid interface", s.Name)
 				}
 				lanNames[lan.Name] = true
+				if lan.PrefixLength != 0 && lan.PrefixLength != 64 && lan.PrefixLength != 128 || lan.PrefixLength == 128 && lan.Advertise {
+					return errors.New("delegation prefix_length must be 64 or 128; a host endpoint cannot advertise a LAN prefix")
+				}
 				if lan.RouterLifetimeSeconds != nil && (*lan.RouterLifetimeSeconds < 0 || *lan.RouterLifetimeSeconds > 9000 || (*lan.RouterLifetimeSeconds > 0 && *lan.RouterLifetimeSeconds < 10)) {
 					return errors.New("delegated RA lifetime must be zero or 10..9000 seconds")
 				}

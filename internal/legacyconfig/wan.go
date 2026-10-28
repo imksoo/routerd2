@@ -134,8 +134,8 @@ func (c *compiler) delegation(r resource) {
 	if s.PrefixSource != "" {
 		c.reject(r, "prefixSource", "unsupported_semantics", "deprecated status expressions must be replaced with prefixDelegation references")
 	}
-	if s.PrefixLength != 0 && s.PrefixLength != 64 {
-		c.reject(r, "prefixLength", "unsupported_semantics", "native delegated address intent allocates /64; /128 and other installed masks are not interchangeable")
+	if s.PrefixLength != 0 && s.PrefixLength != 64 && s.PrefixLength != 128 {
+		c.reject(r, "prefixLength", "unsupported_semantics", "delegated addresses require the original /64 LAN or /128 host mask")
 	}
 	if s.SendRA || s.Announce {
 		selected := false
@@ -188,7 +188,7 @@ func (c *compiler) delegation(r resource) {
 	}
 	name := c.interfaceName(r, "interface", s.Interface, false)
 	c.ensureInterface(r, "interface", name)
-	delegation := serviceconfig.Delegation{Name: c.serviceName(r, "lan"), Interface: name, SubnetID: subnet, HostID: host}
+	delegation := serviceconfig.Delegation{Name: c.serviceName(r, "lan"), Interface: name, SubnetID: subnet, HostID: host, PrefixLength: s.PrefixLength}
 	pd.Delegations = append(pd.Delegations, delegation)
 	c.target(r, "services/"+c.document.Services[index].Name+"/delegations/"+delegation.Name)
 }

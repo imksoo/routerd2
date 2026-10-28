@@ -31,7 +31,7 @@ func TestDHCP6ImportBindsServingAndRAToSelectedPD(t *testing.T) {
 	if server.DHCP6Server.ServerDUID != "00030001020000000042" {
 		t.Fatal("migration changed selected server DUID", server.DHCP6Server.ServerDUID)
 	}
-	if pd.DHCP6.IAID != 1 || pd.DHCP6.PrefixLength != 60 || len(pd.DHCP6.Delegations) != 1 {
+	if pd.DHCP6.IAID != 1 || pd.DHCP6.PrefixLength != 60 || len(pd.DHCP6.Delegations) != 3 {
 		t.Fatal("changed provider identity or allocation", pd)
 	}
 	lan := pd.DHCP6.Delegations[0]

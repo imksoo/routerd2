@@ -62,7 +62,7 @@ identity/interface/IAID and expired grants use fresh acquisition. No UTC lease
 rebasing or cross-boot restoration is implemented.
 Graceful shutdown acknowledges kernel/RA withdrawal, persists an empty stopped
 checkpoint, then sends Release. SIGKILL leaves the last saved grant for recovery.
-The current contract is compiler native-43, checkpoint version 2; no discarded
+The current contract is compiler native-44, checkpoint version 2; no discarded
 prototype reader is retained.
 
 This path was compared with routerd's `cmd/routerd-dhcpv6-client` DUID selection,
@@ -109,6 +109,12 @@ SIGKILL exercise identical combined grants/deadlines and Rebind recovery.
 The delegating peer explicitly routes its PD pool via the client's real
 link-local address. The product learns its WAN routes from radvd and the LAN
 client learns its address/default route from the product, with normal DAD.
+The same imported graph installs two PD-derived /128 endpoints on the WAN in
+the LAN's delegated /64. Both endpoints pass source-bound TCP/UDP after normal
+DAD, acquisition, worker recovery and expiry recovery. Kernel lookup for another
+host in that /64 still selects LAN; the WAN endpoints add no competing subnet
+route. Their installed mask comes from `delegations[].prefix_length` (zero/64
+for LAN, 128 for a host endpoint). Host endpoints cannot generate LAN RA.
 
 `make check-pd-ra`
 uses an independent wire server and captures generated LAN advertisements;

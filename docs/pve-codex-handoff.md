@@ -5,7 +5,26 @@
 [機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
-## 現在の変更: health-import / native-43
+## 現在の変更: pd-host / native-44
+
+homert02の現行設定と旧routerdの`delegatedAddressWithPrefixLength`・DS-Lite用source処理を
+読み直した。homertはPDからWAN用の複数/128を設置するが、旧nativeは一律/64で、importも拒否していた。
+`delegations[].prefix_length`でLAN /64とhost /128を区別し、旧指定をそのまま渡す。
+別のDS-Lite host suffixを作る場合も/128とし、余計な接続/64 routeを増やさない。
+既存のPD client・寿命・writerを使い、別のstate/選択処理や互換readerは追加しない。
+
+PVE Linux6.8/amd64、`make check-dhcp6-ra-pd RELEASE_ID=pd-host
+DHCP6_SERVER=dist/peer-env/isc-dhcp/root/usr/sbin/dhcpd`が成功した。製品CLIの変換結果と独立ISC/radvd/Linuxで、
+同じ/64内のWAN /128を二つ設置し、両送信元のTCP/UDPとLAN向けkernel routeを確認した。
+通常DAD、RA/IA_NA追加、worker交換・元期限・失効/復旧、DNS、DUID trial rollbackも通った。
+実HGWでも30秒の`make check-uplink`を行い、WAN /128を使う実AFTR/DS-Lite IPv4 HTTPS、
+IPv6 HTTPS、DNS UDP/TCP、worker SIGKILL/RebindのDUID保持、RA/Release撤去が通った。
+同時実行中の別PDのgeneration/epoch/DUID/prefix/期限とhost管理状態は不変だった。
+長時間試験は引き続きnative-43であり、このnative-44の自然Renew受入とは扱わない。
+`make check`のGo/Python/Race/vet、両architectureのCGO_ENABLED=0 buildと最終六ELFの
+署名catalog/publisher/stageのRace検査も成功した。ARM64実行、旧条件/VRRP importやhomert全体の置換は未完了。
+
+## 直前の完了変更: health-import / native-43
 
 旧routerdのHealthCheck engineとhomert02の現行設定を比較した。native workerは既に旧probe・
 threshold処理を再利用している。今回、固定targetの旧HealthCheckをそのworkerへ変換し、
