@@ -5,11 +5,12 @@ The actual factory kernel/initramfs boots as PID 1 with two virtio NICs. Private
 TAP bridges connect its WAN to the AC and its LAN to a separate Linux client.
 Only fixture configuration/password/SSH public key are added to the initramfs.
 Requires root/sudo, QEMU x86_64, pppoe-server, pppd, iproute2, tcpdump, curl,
-OpenSSH, dnsmasq, dig, mke2fs and an independent ISC dhcpd supplied with
+OpenSSH, BusyBox, dnsmasq, dig, mke2fs and an independent ISC dhcpd supplied with
 --dhcp6-server. A fresh regular-file ext4 disk supplies explicit persistent state.
 """
 import argparse
 import importlib.util
+import ipaddress
 import json
 import os
 import re
@@ -72,8 +73,6 @@ def peer(stage, power_action):
             run(['ip', 'link', 'set', br + 'p', 'master', br])
             run(['ip', 'link', 'set', br + 'p', 'up'])
             run(['ip', '-n', ns, 'link', 'set', dev, 'up'])
-        run(['ip', '-n', lan, 'addr', 'add', '10.42.0.2/24', 'dev', 'client0'])
-        run(['ip', '-n', lan, 'route', 'add', 'default', 'via', '10.42.0.1'])
         run(['ip', '-n', ac, 'addr', 'add', '198.51.100.20/32', 'dev', 'lo'])
         run(['ip', '-n', ac, '-6', 'addr', 'add', '2001:db8:ffff::20/128', 'dev', 'lo'])
         run(inside(ac, ['sysctl', '-qw', 'net.ipv6.conf.all.forwarding=1']))
@@ -104,6 +103,10 @@ def peer(stage, power_action):
         service = dict(interface='eth0', ppp_interface='ppp-wan', username='routerd2', password_file='/etc/routerd/password', auth_method='chap', ipv6=True, service_name='ROUTERD2-LAB', ac_name='ROUTERD2-AC', mtu=1454, mru=1454, lcp_echo_interval=1, lcp_echo_failure=3)
         resources = [{'id': 'wan', 'interface': {'name': 'eth0'}}, {'id': 'lan', 'interface': {'name': 'eth1'}}, {'id': 'lan-address', 'address': {'interface': 'eth1', 'cidr': '10.42.0.1/24'}}, {'id': 'forwarding', 'forwarding': {'ipv4': True, 'ipv6': True, 'ipv4_rp_filter': 0}}, {'id': 'firewall', 'firewall': {'forward': [{'from': 'eth1', 'to': 'ppp-wan'}], 'masquerade': [{'source': '10.42.0.0/24', 'out_interface': 'ppp-wan'}]}}, {'id': 'internet', 'service': {'name': 'internet', 'pppoe': service}}, {'id': 'pd', 'depends_on': ['internet', 'lan'], 'when': {'fact': 'service.internet.active'}, 'service': {'name': 'pd', 'dhcp6': {'interface': 'ppp-wan', 'iaid': 1, 'request_prefix': True, 'prefix_length': 60, 'delegations': [{'name': 'lan', 'interface': 'eth1', 'subnet_id': 1, 'advertise': True}]}}}]
         resources.append({"id":"dns","service":{"name":"dns","dns":{"spec":{"listen":[{"name":"lan","addresses":["10.42.0.1"],"port":53}],"sources":[{"name":"provider","kind":"forward","match":["."],"upstreamFrom":[{"resource":"PPPoESession/internet","field":"dnsServers"}],"queryTimeout":"1s"}]}}}})
+        resources.append({'id': 'leases', 'service': {'name': 'leases', 'dhcp_server': {
+            'interface': 'eth1', 'server_address': '10.42.0.1', 'authoritative': True, 'sticky_hold_days': 3,
+            'primary': {'prefix': '10.42.0.0/24', 'start': '10.42.0.50', 'end': '10.42.0.100',
+                        'lease_seconds': 120, 'router': '10.42.0.1', 'dns_servers': ['10.42.0.1']}}}})
         start(ac,["dnsmasq","--keep-in-foreground","--conf-file=/dev/null","--no-hosts","--no-resolv","--bind-dynamic","--listen-address=192.0.2.1","--address=/ppp.example/198.51.100.77","--local-ttl=0"],"dns")
         (overlay / 'etc/routerd/config.json').write_text(json.dumps({'schema_version': 2, 'resources': resources}))
         spec = importlib.util.spec_from_file_location('mk', stage / 'mkinitramfs.py')
@@ -125,6 +128,20 @@ def peer(stage, power_action):
                 raise RuntimeError('guest panic')
             return 'ROUTERD_READY' in text
         wait(booted, 75)
+        dhcp_events = stage / 'client-dhcp-events'
+        hook = stage / 'client-dhcp.sh'
+        hook.write_text('#!/bin/sh\ncase "$1" in bound|renew)\n'
+                        'ip address replace "$ip/24" dev "$interface" || exit 1\n'
+                        'ip route replace default via "$router" dev "$interface" || exit 1\n'
+                        'printf "%s %s %s %s\\n" "$1" "$ip" "$router" "$dns" >> "' + str(dhcp_events) + '";;\nesac\n')
+        hook.chmod(0o500)
+        start(lan, ['busybox', 'udhcpc', '-f', '-i', 'client0', '-s', str(hook), '-p', str(stage / 'client-dhcp.pid')], 'client-dhcp')
+        wait(lambda: dhcp_events.exists() and bool(dhcp_events.read_text().splitlines()))
+        lease = dhcp_events.read_text().splitlines()[-1].split()
+        assert ipaddress.ip_address(lease[1]) in ipaddress.ip_network('10.42.0.0/24')
+        assert lease[2:] == ['10.42.0.1', '10.42.0.1'], 'appliance DHCP did not supply its router and DNS'
+        client_dns = lease[3]
+        print('PASS independent LAN DHCP acquired address/gateway/DNS from the packaged engine under PID 1', flush=True)
         ssh = ['ssh', '-F', '/dev/null', '-i', str(stage / 'key'), '-o', 'BatchMode=yes', '-o', 'IdentitiesOnly=yes', '-o', 'StrictHostKeyChecking=accept-new', '-o', 'UserKnownHostsFile=' + str(stage / 'known-hosts'), '-o', 'ConnectTimeout=2', 'admin@10.42.0.1']
 
         def query(cmd):
@@ -145,7 +162,7 @@ def peer(stage, power_action):
                 run(inside(lan, ['python3', '-c', f'import socket;s=socket.socket(socket.{family},socket.SOCK_DGRAM);s.settimeout(3);s.connect(({addr!r},18081));s.send(b"actual-appliance");assert s.recv(100)==b"actual-appliance"']))
 
             for transport in ([],["+tcp"]):
-                assert run(inside(lan,["dig","@10.42.0.1","peer.ppp.example","A","+tries=1","+time=2","+short"]+transport)).strip()=="198.51.100.77"
+                assert run(inside(lan,["dig","@"+client_dns,"peer.ppp.example","A","+tries=1","+time=2","+short"]+transport)).strip()=="198.51.100.77"
 
         def ppp_ready():
             return bool([x for x in json.loads(run(['ip', '-n', ac, '-j', 'link', 'show'])) if x['ifname'].startswith('ppp')])

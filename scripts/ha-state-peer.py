@@ -909,34 +909,38 @@ while True:
             client.terminate()
             client.wait(timeout=3)
         if dhcp6_server:
-            wait(lambda: pd_observed("b")["state"] == "bound")
+            owner = next(node for node in ("a", "b") if active(node))
+            successor = "b" if owner == "a" else "a"
+            owner_offset = 7_200_000_000_000 if owner == "b" else 0
+            successor_offset = 7_200_000_000_000 if successor == "b" else 0
+            wait(lambda: pd_observed(owner)["state"] == "bound")
             pd_server.terminate()
             pd_server.wait(timeout=5)
             wait(lambda: pd_saved("a").get("epoch") == pd_saved("b").get("epoch") and pd_saved("a").get("revision") == pd_saved("b").get("revision"))
-            original = pd_saved("b")
-            before = modules("b")["service.ha"]["generation"]
-            api("b", "control.sock", "/v1/services/service.ha/restart", {})
-            wait(lambda: active("a"))
-            wait(lambda: modules("b").get("service.ha", {}).get("generation", 0) > before and modules("b").get("service.ha", {}).get("ready"))
-            pd_traffic("a")
-            restored = pd_saved("a")["snapshot"]
-            original_deadline = original["snapshot"]["prefixes"][0]["valid_until"]["nanos"] - 7_200_000_000_000
-            assert restored["prefixes"][0]["valid_until"]["nanos"] <= original_deadline
+            original = pd_saved(owner)
+            before = modules(owner)["service.ha"]["generation"]
+            api(owner, "control.sock", "/v1/services/service.ha/restart", {})
+            wait(lambda: active(successor))
+            wait(lambda: modules(owner).get("service.ha", {}).get("generation", 0) > before and modules(owner).get("service.ha", {}).get("ready"))
+            pd_traffic(successor)
+            restored = pd_saved(successor)["snapshot"]
+            original_deadline = original["snapshot"]["prefixes"][0]["valid_until"]["nanos"] - owner_offset
+            assert restored["prefixes"][0]["valid_until"]["nanos"] - successor_offset <= original_deadline
             def no_global(node, iface):
                 return all(a["scope"] != "global" for link in json.loads(run(inside(node, ["ip", "-j", "-6", "addr", "show", "dev", iface]))) for a in link["addr_info"])
             remaining = max(0, (original_deadline - time.clock_gettime_ns(time.CLOCK_BOOTTIME)) / 1_000_000_000)
             try:
-                wait(lambda: not pd_observed("a").get("prefixes") and no_global("ha-a", "lan0") and no_global("ha-client", "lan0"), remaining + 8)
+                wait(lambda: not pd_observed(successor).get("prefixes") and no_global("ha-" + successor, "lan0") and no_global("ha-client", "lan0"), remaining + 8)
             except TimeoutError:
                 for node in ("a", "b"):
                     print("PD expiry observation", node, pd_observed(node), flush=True)
                     print("PD expiry LAN", node, run(inside("ha-" + node, ["ip", "-j", "-6", "address", "show", "dev", "lan0"])), flush=True)
                 print("PD expiry client", run(inside("ha-client", ["ip", "-j", "-6", "address", "show", "dev", "lan0"])), flush=True)
                 raise
-            before = modules("a")["service.pd"]["generation"]
-            api("a", "control.sock", "/v1/services/service.pd/restart", {})
-            wait(lambda: modules("a").get("service.pd", {}).get("generation", 0) > before and modules("a").get("service.pd", {}).get("ready"))
-            assert not pd_observed("a").get("prefixes") and no_global("ha-a", "lan0") and no_global("ha-client", "lan0"), "expired replicated PD revived on restart"
+            before = modules(successor)["service.pd"]["generation"]
+            api(successor, "control.sock", "/v1/services/service.pd/restart", {})
+            wait(lambda: modules(successor).get("service.pd", {}).get("generation", 0) > before and modules(successor).get("service.pd", {}).get("ready"))
+            assert not pd_observed(successor).get("prefixes") and no_global("ha-" + successor, "lan0") and no_global("ha-client", "lan0"), "expired replicated PD revived on restart"
             if pd_dslite:
                 def current_egress(interface):
                     return next((node for node in ("a", "b") if active(node) and egress_path(node, interface)), "")
@@ -949,7 +953,7 @@ while True:
                 egress_traffic("DSLite", current_egress("dslite0"))
                 print("PASS expired PD withdrew the B4 source; fresh IPv4 TCP/UDP used backup WAN and recovered through DS-Lite", flush=True)
             else:
-                pd_traffic("a")
+                pd_traffic(successor)
             print("PASS server-absent cross-clock PD takeover expired at original deadline on router/SLAAC client; restart did not revive PD and ISC recovery restored TCP/UDP", flush=True)
         print("Observed UDP datagrams lost during transitions:", (final_observation or latest())["udp_lost"], flush=True)
         print("Longest TCP reply wait across transitions:", (final_observation or latest())["longest_tcp_reply_seconds"], "seconds", flush=True)

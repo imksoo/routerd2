@@ -7,6 +7,25 @@
 
 ## 現在のLAN実装: routerdの再利用（2026-10-28）
 
+`handoff-stop` / native-56は、同期断中のDHCP再起動で停止時PUTとHTTP接続待ちが残り、
+3秒の管理API期限とVRRP適用確認が失敗する実経路を修正した。停止時のpeer送信を削除し、
+同期ソケットを閉じ、受理済み保存を終えてから状態lockを解放する。解放通知のローカル保存と
+次回の認証付き同期で回復し、切断peerを停止処理で待たない。
+実署名PID 1二台・ISC・Linux AFTR・独立二WAN・BusyBox・実captureを使った
+`ha-state-peer.py --pd-dslite --release-holds`が完走した。停止controlの元権限失効、双方向切替、
+古い通知、engine強制終了、同期断中の更新・再起動・新規別割当、3日保持と再取得、上流停止中の
+PD引継ぎ・元期限での端末失効、予備WANの新規TCP/UDP、PD復旧後DS-Liteが成立した。
+同じTCPはSYN一回・再接続なし、UDP損失0件、最長TCP応答待ち6.82秒。今回の最終設定撤去は待機系である。
+試験が最終PD所有者を常にbと仮定して止まる不具合も直し、実際の所有者・引継ぎ先・clock差を使った。
+1秒広告のこの実行結果であり、従来の連続障害15秒・200ms広告・実設定全体・対象機器を一律に閉じない。
+make checkと両architecture静的ビルド成功。Alpine3.24.3/Linux6.18.59-0-ltsの同梱DHCP engineを含む
+イメージもQEMU/amd64で実起動した。独立BusyBoxの自動IPv4/gateway/DNS、独立RP-PPPoEのCHAP、
+ISC PD自然更新、SLAAC、IPv4/IPv6 TCP/UDPと取得DNSでの問い合わせ、PPP/control交換と通常電源断の
+RA撤去→PADTが通った。固定LAN設定を除き、端末は実割当値を使う。OS標準resolverの試験ではない。
+これはPPPを使う配布経路で、homertのDS-Lite/conntrackd/Tailscale全体イメージ・実機の資格ではない。
+19:44開始の実HGW7800秒版は
+先行`lan-reuse`バイナリーで動作中であり、本変更の長時間合格にはしない。
+
 `reuse-routerd-lan` は独自DHCPv4割当器・wire処理・JSON台帳・私設状態APIと対応する旧試験を削除し、
 旧 `RenderDnsmasqLines` と固定版dnsmasq/muslを接続した。配布archiveと対応sourceを同梱し、
 supervisorが検証したFDを渡す。PID 1から管理し、host dnsmasqやsystemd/OpenRCには依存しない。

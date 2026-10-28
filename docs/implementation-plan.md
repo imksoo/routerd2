@@ -20,6 +20,9 @@
 再利用を避ける理由にしない。必要な第三者のlicense・noticeは保持する。
 
 現在はnative-56で旧routerdのDHCPv4描画・保持履歴と固定dnsmasqを取り込み、独自割当器と台帳を削除した。
+`handoff-stop`では停止時の不要なpeer通信待ちを除き、同期断中の再起動でVRRP適用を止める実障害を修正した。
+署名二台・ISC/AFTR・二WANで双方向切替、同じTCP/UDP、保持、元PD期限の失効と上流復旧を完走した。
+TCP再接続なし、UDP損失0、最長応答待ち6.82秒。1秒広告の一構成で、全homert受入ではない。
 実署名PID 1二台と独立端末で切替・更新・保持・停止中通知の保存・再取得、実HGWで自動取得とDNS利用、
 IPv4/IPv6、PD交換と全体再起動後の通信が成立した。詳細と未受入は [引き継ぎ](pve-codex-handoff.md)。
 同じnative-56で独立Headscale/公式Tailscaleとの署名PID 1試験と、実HGWの自動WAN/PD・LAN/DNS/DS-Liteに

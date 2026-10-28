@@ -181,6 +181,11 @@ DNS利用とIPv4/IPv6通信、自然DHCPv4更新、PD通常/強制交換と製�
 
 ## 3. HA: 単体の機能が動く構成を二台にする
 
+`handoff-stop` / native-56は、同期断中のDHCP再起動が停止時の通信待ちでVRRP適用を止める経路を修正し、
+署名PID 1二台・独立ISC/AFTR・二WANで、両方向切替、元PD期限失効と回復、解放・保持・再取得まで完走した。
+同じTCPはSYN一回、UDP損失0、最長応答待ち6.82秒。最終設定撤去は待機系。1秒広告の一構成であり、
+旧15秒失敗の全条件、200ms広告、現行homert全設定・実機の受入に拡張しない。
+
 - 独立clientと独立VRRP peerまたは実二台で、選出、非preempt/preempt、track、GARP/NA、VIPとWAN/LAN VMAC、
   アドレス/DAD、RA公開と撤去、切替後の端末経路をpacketとkernelで確認する。
 - DHCPv4の取得・更新・予約・期限切れ、DHCPv6情報、WAN DUID/IAID・PDと元期限を両方向へ引き継ぐ。
@@ -210,6 +215,11 @@ DNS利用とIPv4/IPv6通信、自然DHCPv4更新、PD通常/強制交換と製�
 - 権限境界、credential失効、管理外のkernel資源の保護、watchdog、停止順序、バックアップと復元を確認する。
 
 ## 6. 配布・対象機器・更新
+
+`handoff-stop`はAlpine3.24.3/Linux6.18.59-0-ltsの実QEMU/amd64起動で、同梱DHCP engine→独立端末の
+自動IPv4/gateway/DNS→PPPoE/PD/SLAAC→両family TCP/UDPとDNS、PPP/control交換、通常電源断まで通った。
+端末のDNS問い合わせ先は受信値を使用するが、OS標準resolver統合の試験ではない。署名更新・失敗復旧、
+homert全engineのイメージ、対象実機の受入は別に残る。
 
 - `CGO_ENABLED=0` のamd64/arm64製品ビルドと署名catalogを検査し、実bootで必要worker・engineを起動する。
   コンパイル・署名成功と対象architectureでの実行は別に記録する。

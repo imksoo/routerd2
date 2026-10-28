@@ -44,8 +44,10 @@ A recorded established owner continues through a sync-link outage.
 
 Cancellation starts bounded notification draining. The worker remains the
 subreaper and history writer until dnsmasq and its script children finish;
-queued removal events are acknowledged before the listener closes. A final
-peer transfer is attempted from the retained history. The hook reuses verified
+queued removal events are acknowledged before the listener closes. Shutdown
+does not wait for a peer transfer or idle HTTP connections. Replication closes
+its sockets and finishes an admitted atomic write before releasing state;
+the next authenticated exchange reconciles retained history. The hook reuses verified
 Go executable bytes in the private root; there is no host helper lookup.
 
 Current real communication: `lan-dnsmasq-history` on PVE Linux/amd64 with two

@@ -219,14 +219,6 @@ func Run(ctx context.Context, cfg Config, image *os.File, publish func(context.C
 			defer cancel()
 			if err := child.close(cleanup, cfg, events); err != nil {
 				runErr = fmt.Errorf("DHCP cleanup: %w (service: %v)", err, runErr)
-			} else if replica != nil && !cfg.Standby {
-				state, err := readTransfer(cleanup, cfg)
-				if err == nil {
-					_, err = replica.exchange(cleanup, http.MethodPut, state)
-				}
-				if err != nil {
-					slog.Warn("final DHCP lease synchronization failed", "error", err)
-				}
 			}
 		}
 		if events != nil {

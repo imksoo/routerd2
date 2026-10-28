@@ -45,6 +45,7 @@ type replication struct {
 	done         chan struct{}
 	err          error      // written before done closes
 	mu           sync.Mutex // serializes standby file replacement and reads
+	cancel       context.CancelFunc
 }
 
 func replaceFile(path string, data []byte) error {
@@ -131,7 +132,8 @@ func startReplication(ctx context.Context, cfg Config) (*replication, error) {
 		return nil, err
 	}
 	sum := sha256.Sum256(shared)
-	r := &replication{domain: hex.EncodeToString(sum[:]), peer: (&url.URL{Scheme: "https", Host: cfg.Replication.PeerAddress.String(), Path: "/leases"}).String(), done: make(chan struct{})}
+	ctx, cancel := context.WithCancel(ctx)
+	r := &replication{domain: hex.EncodeToString(sum[:]), peer: (&url.URL{Scheme: "https", Host: cfg.Replication.PeerAddress.String(), Path: "/leases"}).String(), done: make(chan struct{}), cancel: cancel}
 	r.client = &http.Client{Transport: &http.Transport{TLSClientConfig: clientTLS}, Timeout: replicaTimeout}
 	r.server = &http.Server{ReadHeaderTimeout: time.Second, ReadTimeout: replicaTimeout, WriteTimeout: 2 * replicaTimeout, IdleTimeout: 5 * time.Second, MaxHeaderBytes: 8192, Handler: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if req.URL.Path != "/leases" {
@@ -144,6 +146,10 @@ func startReplication(ctx context.Context, cfg Config) (*replication, error) {
 		}
 		r.mu.Lock()
 		defer r.mu.Unlock()
+		if ctx.Err() != nil {
+			http.Error(w, "DHCP replication stopped", http.StatusServiceUnavailable)
+			return
+		}
 		state, err := readTransfer(req.Context(), cfg)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -184,6 +190,7 @@ func startReplication(ctx context.Context, cfg Config) (*replication, error) {
 	})}
 	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", cfg.Replication.ListenAddress.String())
 	if err != nil {
+		cancel()
 		r.client.CloseIdleConnections()
 		return nil, err
 	}
@@ -192,12 +199,16 @@ func startReplication(ctx context.Context, cfg Config) (*replication, error) {
 }
 
 func (r *replication) close() {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	if err := r.server.Shutdown(ctx); err != nil {
-		r.server.Close()
-	}
+	// Ownership is ending. Cancel peer requests now; local atomic state and
+	// the next authenticated exchange handle recovery after a lost reply.
+	r.cancel()
+	r.server.Close()
 	<-r.done
+	// Closing sockets interrupts body reads; let an admitted atomic write
+	// finish before the worker releases its file lock. Later handlers cannot
+	// start a write after cancellation.
+	r.mu.Lock()
+	r.mu.Unlock()
 	r.client.CloseIdleConnections()
 }
 
