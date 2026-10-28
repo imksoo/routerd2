@@ -17,7 +17,6 @@ const (
 	renew       byte = 5
 	rebind      byte = 6
 	reply       byte = 7
-	release     byte = 8
 	decline     byte = 9
 	information byte = 11
 )

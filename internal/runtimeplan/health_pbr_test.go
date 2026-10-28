@@ -66,7 +66,11 @@ func TestHealthPBRProjectionFailureFallbackAndRecovery(t *testing.T) {
 			t.Fatal(err)
 		}
 		ticks := uint64(clock.BoottimeNanoseconds)
-		snapshot := health.Snapshot{Resource: cfg.Resource, Interface: cfg.Interface, BootID: clock.BootID, ObservedNanos: ticks, ExpiresNanos: ticks + uint64(cfg.Freshness()), Active: active, State: old.State{Phase: phase, ConsecutivePassed: passed, ConsecutiveFailed: failed, LastCheckedAt: time.Now()}}
+		state := old.State{Phase: phase, ConsecutivePassed: passed, ConsecutiveFailed: failed, LastCheckedAt: time.Now()}
+		if active {
+			state.LastSuccessTime = state.LastCheckedAt
+		}
+		snapshot := health.Snapshot{Resource: cfg.Resource, Interface: cfg.Interface, BootID: clock.BootID, ObservedNanos: ticks, ExpiresNanos: ticks + uint64(cfg.Freshness()), Active: active, State: state}
 		if err := r.Observe(ctx, update(t, r, "service.health-a", sequence, snapshot)); err != nil {
 			t.Fatal(err)
 		}

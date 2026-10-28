@@ -192,7 +192,7 @@ def peer(stage, power_action):
         assert query('restart service.internet')['accepted']
         wait(lambda: any((x['name'] == 'service.internet' and x['generation'] > old['generation'] and x['ready'] for x in query('show status')['modules'])), 40)
         wait(lambda: any((x['ifname'].startswith('ppp') and x['ifindex'] != old_index for x in json.loads(run(['ip', '-n', ac, '-j', 'link', 'show'])))))
-        assert (stage / 'dhcp6.log').read_text().count('releases prefix ') > releases, 'operator restart cut PPP before releasing its PD child'
+        assert (stage / 'dhcp6.log').read_text().count('releases prefix ') == releases, 'operator restart released the PD lease'
         d.terminate()
         d.wait(timeout=5)
         d = server()
@@ -210,7 +210,7 @@ def peer(stage, power_action):
         assert query('restart control')['accepted']
         wait(lambda: any(x['name'] == 'control' and x['generation'] > before_control['control']['generation'] and x['ready'] for x in query('show status')['modules']), 60)
         wait(lambda: any(x['name'] == 'service.internet' and x['generation'] > before_control['service.internet']['generation'] and x['ready'] for x in query('show status')['modules']))
-        assert (stage / 'dhcp6.log').read_text().count('releases prefix ') > releases, 'control restarted before its PD child could release'
+        assert (stage / 'dhcp6.log').read_text().count('releases prefix ') == releases, 'control restart released the PD lease'
         wait(lambda: any(x['ifname'].startswith('ppp') and x['ifindex'] != control_peer_index for x in json.loads(run(['ip', '-n', ac, '-j', 'link', 'show']))))
         assert next(x for x in query('show status')['modules'] if x['name'] == 'network')['pid'] == before_control['network']['pid']
         assert next(x for x in query('show status')['modules'] if x['name'] == 'management')['pid'] == before_control['management']['pid']
@@ -222,7 +222,7 @@ def peer(stage, power_action):
         traffic()
         assert query('show services pd')['snapshot']['client_duid'] == duid
         assert query('show config')['revision'] == revision
-        print('PASS control restart released old PD before PPP/control replacement, retained network/management and restored both-family TCP/UDP/DNS', flush=True)
+        print('PASS control restart withdrew old PD before PPP/control replacement, retained network/management and restored both-family TCP/UDP/DNS', flush=True)
         for capture in (wan_capture, lan_capture):
             capture.send_signal(signal.SIGINT)
             capture.wait(timeout=3)
@@ -234,19 +234,15 @@ def peer(stage, power_action):
                 elif records:
                     records[-1] += ' ' + line.strip()
             return [(float(line.split()[0]), line) for line in records if float(line.split()[0]) >= since]
-        def release_order(wan_name, lan_name, since):
+        def withdrawal_order(wan_name, lan_name, since):
             wan_packets = packets(wan_name, since)
-            releases = [(stamp, re.search('dhcp6 release [(]xid=([0-9a-f]+)', line)[1]) for stamp, line in wan_packets if 'dhcp6 release' in line]
-            assert releases, 'no appliance Release captured'
-            released, transaction = releases[0]
-            replies = [stamp for stamp, line in wan_packets if 'dhcp6 reply (xid=' + transaction + ' ' in line]
+            assert not any('dhcp6 release' in line for _, line in wan_packets), 'normal stop released the PD lease'
             padts = [stamp for stamp, line in wan_packets if 'PPPoE PADT' in line]
             withdrawals = [stamp for stamp, line in packets(lan_name, since) if 'router advertisement' in line and 'router lifetime 0s' in line and 'valid time 0s, pref. time 0s' in line]
-            assert withdrawals and replies and padts, 'missing RA withdrawal, matching Reply or PADT'
-            assert min(withdrawals) < released < min(replies) < min(padts), 'appliance restart violated RA/Release/Reply/PADT order'
-        release_order('wan.pcap', 'lan.pcap', restart_at)
-        release_order('wan.pcap', 'lan.pcap', control_restart_at)
-        print('PASS actual appliance RA withdrawal -> Release -> matching Reply -> PADT; stable DUID, configuration and DNS worker', flush=True)
+            assert withdrawals and padts and min(withdrawals) < min(padts), 'PPP teardown preceded RA withdrawal'
+        withdrawal_order('wan.pcap', 'lan.pcap', restart_at)
+        withdrawal_order('wan.pcap', 'lan.pcap', control_restart_at)
+        print('PASS actual appliance RA withdrawal before PADT without Release; stable DUID, configuration and DNS worker', flush=True)
         (stage / 'status.json').write_text(json.dumps(query('show status')))
         shutdown_captures = [start(None, ['tcpdump', '--immediate-mode', '-Z', 'root', '-U', '-n', '-i', nic, '-w', str(stage / name)], name)
                              for nic, name in [('tapwan', 'shutdown-wan.pcap'), ('taplan', 'shutdown-lan.pcap')]]
@@ -272,8 +268,8 @@ def peer(stage, power_action):
         for capture in shutdown_captures:
             capture.send_signal(signal.SIGINT)
             capture.wait(timeout=3)
-        release_order('shutdown-wan.pcap', 'shutdown-lan.pcap', power_at)
-        print('PASS appliance CLI ' + power_action + ': RA withdrawal, Release/Reply and PADT before kernel power action', flush=True)
+        withdrawal_order('shutdown-wan.pcap', 'shutdown-lan.pcap', power_at)
+        print('PASS appliance CLI ' + power_action + ': RA withdrawal and PADT without Release before kernel power action', flush=True)
         if power_action == 'reboot':
             wait(lambda: any(x['ifname'].startswith('ppp') and x['ifindex'] != power_index for x in json.loads(run(['ip', '-n', ac, '-j', 'link', 'show']))))
             d.terminate()

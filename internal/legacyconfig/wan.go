@@ -134,14 +134,7 @@ func (c *compiler) dhcp6Information(r resource) string {
 		if ref == nil {
 			continue
 		}
-		field, expected := dependency.Field, dependency.Equals
-		if dependency.Phase != "" {
-			field, expected = "phase", dependency.Phase
-		}
-		if field == "" {
-			field = "phase"
-		}
-		if c.pd[ref.Kind+"/"+ref.Metadata.Name] != index || strings.TrimPrefix(field, "status.") != "phase" || expected != "Bound" {
+		if c.pd[ref.Kind+"/"+ref.Metadata.Name] != index || !dependencyPhase(dependency, "Bound") {
 			c.reject(r, "dependsOn", "unsupported_semantics", "information can depend only on its own PD client's Bound lease")
 		}
 	}
@@ -173,6 +166,15 @@ func (c *compiler) delegation(r resource) {
 	ref := c.getRef(r, "prefixDelegation", s.PrefixDelegation, "DHCPv6PrefixDelegation")
 	if ref == nil {
 		return
+	}
+	for _, dependency := range s.DependsOn {
+		provider := c.getRef(r, "dependsOn", dependency.Resource, "DHCPv6PrefixDelegation")
+		if provider == nil {
+			continue
+		}
+		if provider.ID() != ref.ID() || !dependencyPhase(dependency, "Bound") {
+			c.reject(r, "dependsOn", "unsupported_semantics", "delegation can depend only on its own PD client's Bound lease")
+		}
 	}
 	index, ok := c.pd[ref.Kind+"/"+ref.Metadata.Name]
 	if !ok {
@@ -215,4 +217,15 @@ func (c *compiler) delegation(r resource) {
 	delegation := serviceconfig.Delegation{Name: c.serviceName(r, "lan"), Interface: name, SubnetID: subnet, HostID: host, PrefixLength: s.PrefixLength}
 	pd.Delegations = append(pd.Delegations, delegation)
 	c.target(r, "services/"+c.document.Services[index].Name+"/delegations/"+delegation.Name)
+}
+
+func dependencyPhase(dependency api.ResourceDependencySpec, phase string) bool {
+	field, expected := dependency.Field, dependency.Equals
+	if dependency.Phase != "" {
+		field, expected = "phase", dependency.Phase
+	}
+	if field == "" {
+		field = "phase"
+	}
+	return field == "phase" && expected == phase
 }

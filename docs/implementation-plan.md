@@ -841,12 +841,15 @@ network writerへの/128投影を持つ。PD専用の外部state machine・補�
 一覧pollが見逃す不具合を修正した。割当通知前にkernelへsubscribeし、既存loopで失敗通知を読む。
 実DAD/Decline・失敗address撤去・同じworkerで別のdnsmasq割当へのTCP/UDP復旧を確認した。
 DeclineのNoBinding応答で完了し、無関係なPD期限を変えないこともローカルで確認した。
-正常停止のReleaseを実装した。最終観測の受付とapplication待ちを同じoperationへ結び、
-network writerのアドレス撤去と生成RAの寿命0送信後に、link-localから有効なIAを解放する。
-control/network/APIとPPPを先に止めない。独立ISC/RP-PPPoEでPD削除・PPP/PD同時削除・PID1停止の
-RA→Release→同一transactionのReplyと同じDUIDの再取得/IPv6 TCP/UDPを確認した。
-独立dnsmasqではIA_NA停止時の/128撤去とRelease/Replyを確認した。実上流の短い通信試験でも
-LAN両family HTTPS/DNS・AFTR往復と、停止時のRA撤去・Release/Reply（送信元49153）が通った。
+旧routerdとの比較を踏まえ、通常停止・役割変更では上流へReleaseせず、DUIDと期限付きリースを
+保持する。ローカルのアドレスとRAは撤去し、同一bootでの再起動時は元の期限を保って確認する。
+実HGWでSIGKILLと通常停止後の同じDUID/IAID・prefix・LAN通信、独立dnsmasqでIA_NAの停止・
+再起動、独立ISC/RP-PPPoEでPAP/CHAPの通信・復旧とRA撤去後のPPP切断を確認した。
+明示Release操作、異なるbootでのリース復元、ONU直結と実機受入は未検証または未実装。
+二台の独立WANを使う試験では、初回probe失敗の`Failing`を利用可能としてVIPを誤公開する問題が
+見つかった。Healthが一度Healthyになる前は不許可とし、Healthy後の一時失敗は閾値まで維持する。
+両WAN停止時にVIPを公開せず、相手復旧後にPDと転送が戻ることを実daemonで確認した。
+以下に残る旧Release試験の記録は当時の実装に対する結果であり、現在の停止動作ではない。
 先行capture判定の失敗原因は未確定であり、その実行は合格としない。
 `fc76a4a`のPPP/PD同時削除の合格は、HTTP422を試験が無視していたため取り下げた。
 停止済みPPPの古いactive観測が消えたlinkへのrouteを追加する原因を修正し、現在の登録workerと
@@ -1372,6 +1375,8 @@ clock skew・物理機・負荷、maintenance切替手順は残る。HA-02完了
 capture は双方向トンネル通信と直結経路への迂回なしを確認した。最長応答待ちは約13秒、
 同試行の UDP 損失は0件。homert の既定1秒広告と主 WAN 準備完了を使った結果であり、
 20cs の統合構成で観測した不安定さ、切替遅延、対象実機の性能は未解決。
+追加試行では復旧途中に次の切替を重ねると既存 TCP が15秒で応答せず失敗した。
+各切替で復旧を確認した再試行は完走し、最長応答待ちは約8.4秒、個別切替の VIP 公開まで約6秒だった。
 
 範囲: 旧 routerd 互換 / track: network / risk: high。
 前提: CORE-04, NET-03, HA-01。 設計判断: D-05。

@@ -216,6 +216,13 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 			}
 			for _, lan := range s.DHCP6.Delegations {
 				ensureInterface(&p.network, lan.Interface)
+				dsliteSource := false
+				for _, definition := range protocols.aftr {
+					if lan.PrefixLength == 128 && definition.service.DSLite.SourceFrom == s.Name && definition.service.DSLite.SourceDelegation == lan.Name {
+						dsliteSource = true
+						break
+					}
+				}
 				var prefixes []ra.Prefix
 				for _, lease := range snap.Prefixes {
 					if !lease.ValidUntil.Live(facts.bfdClock) {
@@ -225,7 +232,17 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 					if err != nil {
 						return p, fmt.Errorf("%s/%s: %w", s.Name, lan.Name, err)
 					}
-					if err := addAddressWithOptions(&p.network, lan.Interface, address.String(), addressLifetimes(lease.PreferredUntil, lease.ValidUntil)); err != nil {
+					options := addressLifetimes(lease.PreferredUntil, lease.ValidUntil)
+					if dsliteSource {
+						// This dedicated endpoint is explicitly bound by the tunnel;
+						// it must not become a preferred source for other IPv6 flows.
+						if options.BootLifetime.BootID != "" {
+							options.BootLifetime.PreferredNanos = 0
+						} else {
+							options.PreferredUntil = time.Unix(0, 0).UTC()
+						}
+					}
+					if err := addAddressWithOptions(&p.network, lan.Interface, address.String(), options); err != nil {
 						return p, err
 					}
 					prefixes = append(prefixes, ra.Prefix{Prefix: prefix.String(), OnLink: true, Autonomous: true, ValidLifetimeSeconds: ^uint32(0), PreferredLifetimeSeconds: ^uint32(0), ValidUntil: lease.ValidUntil, PreferredUntil: lease.PreferredUntil})

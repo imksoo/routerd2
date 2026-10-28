@@ -302,7 +302,7 @@ func TestPolicyRefusalsAreResourceScopedAndAtomic(t *testing.T) {
 		{"source-suffix", ".localAddressSource", "unsupported_semantics", func(t *testing.T, d []byte, _ *Options) []byte {
 			return changed(t, d, "localAddressSource: interface", "localAddressSource: interface\n        localAddressSuffix: '::100'")
 		}},
-		{"ha-gating", ".when", "unsupported_semantics", func(t *testing.T, d []byte, _ *Options) []byte {
+		{"missing-ha", ".when", "reference", func(t *testing.T, d []byte, _ *Options) []byte {
 			return changed(t, d, "encapsulationLimit: none", "encapsulationLimit: none\n        when: {state: {VirtualAddress/ha.role: {equals: master}}}")
 		}},
 		{"aftr-default-field", ".aftrFrom", "unsupported_semantics", func(t *testing.T, d []byte, _ *Options) []byte { return changed(t, d, ", field: aftrName", "") }},

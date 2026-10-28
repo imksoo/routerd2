@@ -40,7 +40,7 @@ func TestRunThresholdRecoveryDeadlineAndShutdown(t *testing.T) {
 	c := fixture()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	results := []bool{true, true, false, false, true, true}
+	results := []bool{false, true, false, true, true, false, false, true, true}
 	var phases []string
 	var active []bool
 	var observed []uint64
@@ -83,8 +83,8 @@ func TestRunThresholdRecoveryDeadlineAndShutdown(t *testing.T) {
 	if err := RunWithProbe(ctx, c, effects, func() { ready = true }, probe); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"Passing", "Healthy", "Failing", "Unhealthy", "Passing", "Healthy"}
-	if !reflect.DeepEqual(phases, want) || !reflect.DeepEqual(active, []bool{false, true, true, false, false, true}) {
+	want := []string{"Failing", "Passing", "Failing", "Passing", "Healthy", "Failing", "Unhealthy", "Passing", "Healthy"}
+	if !reflect.DeepEqual(phases, want) || !reflect.DeepEqual(active, []bool{false, false, false, false, true, true, false, false, true}) {
 		t.Fatal(phases, active)
 	}
 	if !stopped {

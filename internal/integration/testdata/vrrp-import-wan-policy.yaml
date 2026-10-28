@@ -3,6 +3,12 @@ vrrp:
   VirtualAddress/gateway:
     source_address: 192.0.2.2
     vip_interface: ha
+ds_lite:
+  DSLiteTunnel/provider:
+    source_from: DHCPv6PrefixDelegation/wan-pd
+    selection: first
+    timeout_seconds: 2
+    retry_seconds: 10
 health_checks:
   HealthCheck/master-probe:
     interface: Interface/wan-identity

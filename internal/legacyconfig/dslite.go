@@ -62,6 +62,19 @@ func (c *compiler) dynamicDSLite(r resource, policy DSLitePolicy) {
 		Resolvers: append([]serviceconfig.AFTRResolver(nil), policy.Resolvers...),
 	}
 	c.dynamicDSLiteSource(r, s, policy, &intent)
+	for _, dependency := range s.DependsOn {
+		ref := c.getRef(r, "dependsOn", dependency.Resource, "IPv6DelegatedAddress")
+		if ref == nil {
+			continue
+		}
+		source := c.getRef(r, "localDelegatedAddress", s.LocalDelegatedAddress, "IPv6DelegatedAddress")
+		if source == nil {
+			continue
+		}
+		if ref.ID() != source.ID() || intent.SourceDelegation != c.serviceName(*source, "lan") || !dependencyPhase(dependency, "Applied") {
+			c.reject(r, "dependsOn", "unsupported_semantics", "DS-Lite can depend only on its own delegated source being Applied")
+		}
+	}
 
 	if meaningful(child(r.node, "aftrFrom")) {
 		if s.AFTRFrom.Field != "aftrName" || s.AFTRFrom.Optional {

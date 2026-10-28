@@ -140,6 +140,9 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 	for _, r := range resources {
 		if r.Kind == "DSLiteTunnel" {
 			c.dslite(r)
+			if _, dynamic := c.options.DSLite[r.Kind+"/"+r.Metadata.Name]; dynamic {
+				conditions = append(conditions, resourceCondition{id: "service/" + c.serviceName(r, "aftr"), source: r, when: r.Spec.(api.DSLiteTunnelSpec).When})
+			}
 		}
 	}
 	for _, r := range resources {
@@ -326,14 +329,25 @@ func (c *compiler) allow(r resource, fields ...string) {
 			switch r.Kind {
 			case "HealthCheck", "DHCPv6PrefixDelegation", "DHCPv6Information":
 				continue
+			case "DSLiteTunnel":
+				if _, dynamic := c.options.DSLite[r.Kind+"/"+r.Metadata.Name]; dynamic {
+					continue
+				}
 			case "VirtualAddress":
 				if r.Spec.(api.VirtualAddressSpec).Mode != "vrrp" {
 					continue
 				}
 			}
 		}
-		if field == "dependsOn" && r.Kind == "DHCPv6Information" {
-			continue // Checked against the client's existing PD lease below.
+		if field == "dependsOn" {
+			if r.Kind == "DHCPv6Information" || r.Kind == "IPv6DelegatedAddress" {
+				continue // Checked against the allocation's PD owner.
+			}
+			if r.Kind == "DSLiteTunnel" {
+				if _, dynamic := c.options.DSLite[r.Kind+"/"+r.Metadata.Name]; dynamic {
+					continue // Checked against the tunnel's actual source.
+				}
+			}
 		}
 		if meaningful(child(r.node, field)) {
 			c.reject(r, field, "unsupported_semantics", "runtime gating/dependency conditions cannot be erased by a static migration")

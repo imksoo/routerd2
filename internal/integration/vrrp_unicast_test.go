@@ -226,6 +226,21 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 			healthPBRListener(t, wan.client, "198.51.100.10:18097", "H")
 			healthPBRListener(t, peerNS, peer+":18098", "B")
 			healthPBRListener(t, peerNS, peer+":18099", "E")
+			if err := fixtureInsideNamespace(wan.client, func() error {
+				for _, args := range [][]string{
+					{"-6", "tunnel", "add", "peeraftr", "mode", "ipip6", "local", "2001:db8:42::1", "remote", "2001:db8:80::21", "dev", "client0", "encaplimit", "none"},
+					{"link", "set", "peeraftr", "up"},
+					{"address", "add", "192.0.0.1/32", "peer", "192.0.0.2/32", "dev", "peeraftr"},
+				} {
+					if output, err := exec.Command("ip", args...).CombinedOutput(); err != nil {
+						return fmt.Errorf("independent AFTR: %w: %s", err, output)
+					}
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			vrrpVIPResponders(t, wan.client, "4", []string{"192.0.0.1"}, "A")
 		}
 	}
 	f := startFixtureDaemon(t, program)
@@ -453,6 +468,17 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 			}
 		}
 	}
+	waitDSLite := func() {
+		t.Helper()
+		until(t, 8*time.Second, func() bool {
+			link, err := netlink.LinkByName("ds0")
+			if err != nil || link.Attrs().Flags&net.FlagUp == 0 {
+				return false
+			}
+			routes, err := netlink.RouteGet(net.ParseIP("192.0.0.1"))
+			return err == nil && len(routes) > 0 && routes[0].LinkIndex == link.Attrs().Index
+		})
+	}
 	dir := t.TempDir()
 	peerLog := filepath.Join(dir, "keepalived.log")
 	t.Cleanup(func() {
@@ -615,6 +641,21 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 	traffic(peerNS, vip, "R")
 	if spec.migrate && wan != nil {
 		traffic(wan.client, "2001:db8:80::21", "R")
+		link, err := netlink.LinkByName("wan-ha")
+		if err != nil {
+			t.Fatal(err)
+		}
+		addresses, err := netlink.AddrList(link, unix.AF_INET6)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, address := range addresses {
+			if address.IP.String() == "2001:db8:80::21" && address.Flags&unix.IFA_F_DEPRECATED == 0 {
+				t.Fatal("DS-Lite-only source remained eligible as a preferred IPv6 source", address)
+			}
+		}
+		waitDSLite()
+		traffic(routerNS, "192.0.0.1", "A")
 		paused := module(haName)
 		original := snapshot()
 		clock, err := boottime.Read()
@@ -665,6 +706,8 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 		wan.waitNative(t, true)
 		traffic(wan.client, vrrpWANVIP, "R")
 		traffic(wan.client, "2001:db8:80::21", "R")
+		waitDSLite()
+		traffic(routerNS, "192.0.0.1", "A")
 		t.Log("expired role stopped PD and role-scoped probes before producer replacement; fresh election restored communication with the same automatic DUID")
 	}
 	if spec.migrate && wan == nil {
@@ -857,6 +900,8 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 			traffic(wan.client, vrrpWANVIP, "R")
 			if spec.migrate {
 				traffic(wan.client, "2001:db8:80::21", "R")
+				waitDSLite()
+				traffic(routerNS, "192.0.0.1", "A")
 			}
 		}
 		startPeer(100, c.AuthPassword)

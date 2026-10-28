@@ -553,77 +553,26 @@ func TestDaemonDHCP6RAIndependentPeers(t *testing.T) {
 	if installed(address) {
 		t.Fatal("graceful shutdown retained its IA_NA address", address)
 	}
-	until(t, time.Second, func() bool {
-		capture.mu.Lock()
-		defer capture.mu.Unlock()
-		var transaction []byte
-		for _, packet := range capture.packets {
-			b := packet.data
-			if packet.at.Before(shutdown) || len(b) < 66 || b[20] != 17 {
-				continue
-			}
-			if b[54] == 2 && b[55] == 34 && b[56] == 2 && b[57] == 35 && b[62] == 8 {
-				if source := netip.AddrFrom16([16]byte(b[22:38])); !source.IsLinkLocalUnicast() {
-					t.Fatal("Release used a released address", source)
-				}
-				transaction = b[63:66]
-			}
-			if transaction != nil && b[54] == 2 && b[55] == 35 && b[56] == 2 && b[57] == 34 && b[62] == 7 && bytes.Equal(transaction, b[63:66]) {
-				return true
-			}
+	// A normal stop withdraws local state without releasing the upstream grant.
+	capture.mu.Lock()
+	for _, packet := range capture.packets {
+		b := packet.data
+		if !packet.at.Before(shutdown) && len(b) >= 66 && b[20] == 17 && b[54] == 2 && b[55] == 34 && b[56] == 2 && b[57] == 35 && b[62] == 8 {
+			capture.mu.Unlock()
+			t.Fatal("normal shutdown released the DHCPv6 lease")
 		}
-		return false
-	})
-	// The independent server keeps the new lease for 120 seconds but cannot
-	// answer Release. Exercise the real retry/shutdown budget before expiry.
+	}
+	capture.mu.Unlock()
 	f = f.restart()
 	until(t, 12*time.Second, func() bool {
 		current, _ = snapshot()
 		return len(current.Addresses) > 0 && installed(current.Addresses[0].Address)
 	})
-	if current.ClientDUID != first.ClientDUID {
-		t.Fatal("daemon restart changed DHCPv6 identity")
+	if current.ClientDUID != first.ClientDUID || current.Addresses[0].Address != address {
+		t.Fatal("restart did not restore the same DHCPv6 identity and address", current)
 	}
-	address = current.Addresses[0].Address
-	if err := unix.Kill(server.Process.Pid, unix.SIGSTOP); err != nil {
-		t.Fatal(err)
-	}
-	shutdown = time.Now()
-	f.stop()
-	if elapsed := time.Since(shutdown); elapsed < 13*time.Second || elapsed > 22*time.Second {
-		t.Fatal("unanswered Release did not use its bounded four-transmission exchange", elapsed)
-	}
-	if installed(address) {
-		t.Fatal("unanswered Release retained its IA_NA address", address)
-	}
-	var transaction []byte
-	transmissions, replies := 0, 0
-	capture.mu.Lock()
-	for _, packet := range capture.packets {
-		b := packet.data
-		if packet.at.Before(shutdown) || len(b) < 66 || b[20] != 17 {
-			continue
-		}
-		if b[54] == 2 && b[55] == 34 && b[56] == 2 && b[57] == 35 && b[62] == 8 {
-			if transaction != nil && !bytes.Equal(transaction, b[63:66]) {
-				t.Error("Release retransmission changed transaction")
-			}
-			transaction = b[63:66]
-			transmissions++
-		}
-		if transaction != nil && b[54] == 2 && b[55] == 35 && b[56] == 2 && b[57] == 34 && b[62] == 7 && bytes.Equal(transaction, b[63:66]) {
-			replies++
-		}
-	}
-	capture.mu.Unlock()
-	if transmissions != 4 || replies != 0 {
-		t.Fatal("unanswered Release wire exchange", transmissions, replies)
-	}
-	if err := unix.Kill(server.Process.Pid, unix.SIGCONT); err != nil {
-		t.Fatal(err)
-	}
-	t.Log("paused dnsmasq: four Release transmissions with one transaction, no matching Reply, bounded shutdown and no retained address")
-	t.Log("dnsmasq IA_NA: source-bound TCP/UDP, stable restart identity, Renew/Rebind/expiry/recovery and graceful kernel withdrawal with link-local Release/Reply")
+	fixtureDHCP6Traffic(t, current.Addresses[0].Address)
+	t.Log("dnsmasq IA_NA: local withdrawal without Release, same identity and address on restart, TCP/UDP restored")
 }
 
 func fixtureDHCP6Traffic(t *testing.T, source string) {

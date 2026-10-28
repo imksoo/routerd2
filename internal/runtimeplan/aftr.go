@@ -198,13 +198,16 @@ func sameAFTRInput(a, b aftr.Input) bool {
 	return reflect.DeepEqual(a, b)
 }
 
-func sourceInstalled(sourceInterface, requested string, observed network.SourceObservation) bool {
+func sourceInstalled(sourceInterface, requested string, observed network.SourceObservation, allowDeprecated bool) bool {
 	if observed.Interface != sourceInterface || observed.RequestedAddress != requested || !observed.InterfacePresent || observed.Index <= 0 || !observed.Up || !observed.Found || observed.Address == nil {
 		return false
 	}
 	address := observed.Address
 	p, err := netip.ParsePrefix(address.Address)
-	return err == nil && p.Addr().String() == requested && address.Owned && address.PreferredLifetime > 0 && address.ValidLifetime > 0 && address.Flags&(unix.IFA_F_TENTATIVE|unix.IFA_F_DADFAILED|unix.IFA_F_DEPRECATED) == 0
+	if err != nil || p.Addr().String() != requested || !address.Owned || address.ValidLifetime == 0 || address.Flags&(unix.IFA_F_TENTATIVE|unix.IFA_F_DADFAILED) != 0 {
+		return false
+	}
+	return allowDeprecated || address.PreferredLifetime > 0 && address.Flags&unix.IFA_F_DEPRECATED == 0
 }
 
 // AFTRInput increments generation when endpoint dependencies change. A
@@ -233,7 +236,8 @@ func (r *Runtime) AFTRInput(ctx context.Context, name string) (aftr.Input, error
 		if err != nil {
 			return aftr.Input{}, fmt.Errorf("observe AFTR source: %w", err)
 		}
-		if !sourceInstalled(definition.sourceInterface, in.Source.Address, observed) {
+		allowDeprecated := definition.delegation != nil && definition.delegation.PrefixLength == 128
+		if !sourceInstalled(definition.sourceInterface, in.Source.Address, observed, allowDeprecated) {
 			in.Source = aftr.Source{}
 		}
 	}

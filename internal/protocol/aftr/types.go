@@ -61,8 +61,9 @@ type Resolver struct {
 // Input is one complete, compiler-authorized dependency snapshot. Generation
 // increases when endpoint dependencies change. Renewed lifetimes keep the same
 // generation and update the budget without changing the DNS question.
-// The selected Source must already be installed, preferred, non-tentative and
-// DAD-usable. Empty Source/Candidates/Resolvers express waiting for dependencies.
+// The selected Source must be installed and DAD-usable with a preferred grant.
+// A dedicated PD /128 can be deprecated locally to prevent automatic source
+// selection. Empty Source/Candidates/Resolvers express waiting for dependencies.
 // Zero deadlines are explicit infinite/static lifetimes, never a TTL default.
 type Input struct {
 	Resource     string      `json:"resource"`

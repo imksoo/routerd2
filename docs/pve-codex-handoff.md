@@ -5,6 +5,45 @@
 [機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
+## 作業中: 旧 routerd の PD / DS-Lite を反映 / native-49
+
+旧 routerd の DHCPv6 client は明示 DUID を優先し、それ以外は interface の MAC から
+DUID-LL を生成する。保存リースは DUID・IAID・interface・期限が一致する場合に復元し、
+通常停止では自動 Release しない。NTT 回線の旧調査でも DUID-LL の利用と識別子の維持が必要だった。
+routerd2 は自動 DUID をリースと別に保持する。通常停止・切替ではローカルのアドレスと RA を撤去し、
+上流への Release は送らず、元の期限を持つリースを再起動用に残すよう変更した。
+PVE Linux 6.8/amd64 の実 HGW 30秒試験では、SIGKILL と通常停止後に同じ DUID・IAID、
+通常停止後に同じ prefix と LAN IPv4/IPv6 HTTPS・DNS の復旧を確認した。寿命0 RA と kernel 撤去を
+確認し、停止時の Release は観測されなかった。自然 Renew、ONU 直結と物理機器の受入は未検証。
+明示 Release 操作は未実装。
+独立 dnsmasq の IA_NA 試験でも通常停止後のローカル撤去、同じ DUID とアドレスでの再起動、
+TCP/UDP の復旧を確認した。自然更新、失効と再取得、NotOnLink と DAD failure も同試験で通った。
+独立 PPPoE・ISC DHCP による PAP / CHAP でも PD 更新、期限切れ、同じ識別子での復旧、
+PPP 交換と rollback を確認し、RA 撤去が PPP 切断に先行し Release を送らないことを確認した。
+QEMU appliance の同条件での停止・再起動は未再検証。
+
+旧 routerd の専用 DS-Lite 送信元 `/128` は他の IPv6 通信に自動選択されないよう非優先化される。
+routerd2 も同様にし、元の PD の優先期限と有効期限、アドレス所有、DAD 完了を確認してから使う。
+旧設定の PD Bound と専用アドレス Applied の依存を取り込み、role 条件とともに適用する。
+旧実装の待機系での事前アドレス準備は未実装。PVE 上の実プロセスと独立 ISC DHCP・Keepalived・
+Linux AFTR では、実 kernel の deprecated 状態、切替・期限切れ後の復旧、IPv4 TCP/UDP を確認した。
+capture では双方の IPv4-in-IPv6 を確認した。複数障害の重なりによる既存 TCP の失敗は未解決。
+変更後の二台試験では、PD と主 WAN の Health を必須とした VIP 公開条件のため、PD 失効時に
+予備 WAN が使えても VIP が撤去された。主 WAN または予備 WAN のどちらかが使える条件へ試験設定を
+修正し、PD 失効後の予備 WAN TCP/UDP と再取得後の DS-Lite 復帰を確認した。旧 homert の PD 必須条件も
+同じ意図の確認が必要。
+予備 WAN の通信を止めた再試験では、最初の失敗で旧 HealthCheck 状態機械が返す `Failing` を、
+routerd2 が無条件に利用可能と判定して VIP を誤公開した。十分な連続成功で Healthy になった後の
+一時的な失敗だけを猶予するよう変更した。修正後、両 WAN の相手が停止した起動時は VIP を公開せず、
+相手の復旧後は PD と IPv4 TCP/UDP が戻った。二台の既存 TCP・UDP は双方向切替と worker/engine
+再起動後も継続し、この試行の TCP 最長応答待ちは約13.3秒、UDP 損失は0件だった。
+変更後の `make check`、独立 Health→PBR と複数 WAN 試験、amd64/arm64 の静的ビルド、
+実行ファイルの署名・publisher・配置検証も通った。
+
+旧 dnsmasq のリース同期は別の定期処理で、同期先の停止は配布応答を止めない。現行 routerd2 は
+同期先への書き込み失敗で DHCPv4 応答を止めるため、片系運転の実装と実クライアント検証が残る。
+同期間隔中の障害や分断で未同期の割当が生じる問題を、旧実装が解決済みとは判断しない。
+
 ## 現在の変更: HA・PD・DS-Lite / native-48 / network journal12
 
 旧 routerd の DHCPv6 client と DUID・lease 保存を参照した。自動 DUID は lease と別に永続化し、
@@ -20,6 +59,11 @@ IPv6-only の主 WAN、独立 IPv4 予備 WAN と LAN client で検証した。P
 既存 TCP の最長応答待ちは約13秒、UDP 損失はこの試行で0件だった。広告間隔は homert の既定1秒で、
 主 WAN の Health 成立を VIP 公開条件とした。既存接続を維持できない別の WAN へ切り替えた後は新規通信を確認した。
 20cs の統合構成では worker の再起動と復旧の不安定さを観測しており、原因と切替遅延の改善は残る。
+1秒広告で control 停止からの復帰中に次の切替を重ねた試行では、既存 TCP が15秒で応答せず失敗した。
+各切替で同じ TCP/UDP の復旧を確認してから次を起こした再試行は完走し、最長応答待ちは約8.4秒だった。
+その再試行では個別切替の VIP 公開まで約6秒、TCP 応答まで公開後約1秒以内だった。
+別途観測した昇格では、選出から PD 再開まで約1.4秒、続く B4 の DAD と AFTR 準備に約2.4秒、
+Health と VIP 公開に約1.1秒を要した。DAD の待機を省かず、連続障害の失敗と改善余地を追う。
 初期試行で対向 AFTR の link down が戻り経路を削除し、IPv4 の直結迂回が生じたため、その試行は合格から除外した。
 
 `make check`、既存の Health→PBR、直接 WAN と PD の HA 試験、独立 DHCPv6 information client、

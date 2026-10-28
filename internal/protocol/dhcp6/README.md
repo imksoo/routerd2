@@ -60,9 +60,11 @@ discovery. Silence retains only still-valid original grants; expiry during
 confirmation starts discovery immediately. Different boots, changed
 identity/interface/IAID and expired grants use fresh acquisition. No UTC lease
 rebasing or cross-boot restoration is implemented.
-Graceful shutdown acknowledges kernel/RA withdrawal, persists an empty stopped
-checkpoint, then sends Release. SIGKILL leaves the last saved grant for recovery.
-The current contract is compiler native-48, checkpoint version 2; no discarded
+Graceful shutdown acknowledges kernel/RA withdrawal without sending Release.
+The saved grant remains available for restart until its original expiry; SIGKILL
+also leaves the last saved grant for recovery. An explicit Release operation is
+not yet implemented.
+The current contract is compiler native-49, checkpoint version 2; no discarded
 prototype reader is retained.
 
 This path was compared with routerd's `cmd/routerd-dhcpv6-client` DUID selection,

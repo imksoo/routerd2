@@ -10,7 +10,8 @@ retains the pinned reachability contract (2xx–4xx).
 The pinned `healthcheck.ApplyResult` supplies Passing/Healthy/Failing/Unhealthy
 thresholds and history. Output history is bounded to 20 entries. The `.active`
 fact follows the existing egress readiness contract: Healthy and pre-threshold
-Failing are eligible. Passing and Unhealthy are not eligible. Missing/expired
+Failing retains eligibility only after a healthy observation; an initial failure
+does not establish health. Passing and Unhealthy are not eligible. Missing/expired
 facts remain indeterminate. The finite CLOCK_BOOTTIME lifetime is
 `max(2 minutes, 3*interval + timeout)`; supervisor readiness/generation also gates
 consumption. There is no generic replay renewal. Shutdown publishes withdrawal.

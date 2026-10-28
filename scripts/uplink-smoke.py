@@ -484,6 +484,24 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
         wait(dns_ready)
         check_traffic()
         print("PASS actual uplink PD worker SIGKILL recovery, retained DUID/IAID and restored LAN communication", flush=True)
+        previous = next(
+            m for m in query("supervisor.sock", "/v1/status")["modules"]
+            if m["name"] == "service.wan-pd"
+        )
+        graceful_at = time.time()
+        os.kill(previous["pid"], signal.SIGTERM)
+        # The old AFTR observation can briefly remain available while the PD
+        # worker withdraws its source. Observe withdrawal before waiting for the
+        # replacement, so a stale pre-stop snapshot cannot satisfy readiness.
+        wait(lambda: not query("control.sock", "/v1/services/service.internet").get("snapshot", {}).get("available", False), 30)
+        wait(recovered, 30)
+        graceful = query("control.sock", "/v1/services/service.wan-pd")["snapshot"]
+        assert (graceful["client_duid"], graceful["iaid"]) == (before["client_duid"], before["iaid"]), "graceful restart lost PD identity"
+        assert {p["prefix"] for p in graceful["prefixes"]} == {p["prefix"] for p in before["prefixes"]}, "graceful restart changed the delegated prefix"
+        wait(forwarding_ready)
+        wait(dns_ready)
+        check_traffic()
+        print("PASS actual uplink graceful PD restart, retained DUID/IAID and prefix, restored LAN communication", flush=True)
         returned = any(
             run(
                 [
@@ -515,6 +533,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
                 elif records:
                     records[-1] += " " + line.strip()
         records.sort(key=lambda line: float(line.split()[0]))
+        assert not any(float(line.split()[0]) >= graceful_at and "dhcp6 release (xid=" in line for line in records), "graceful stop released the upstream grant"
         renews, rebinds, replies = set(), set(), set()
         for line in records:
             stamp = float(line.split()[0])
@@ -535,9 +554,6 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
         if renew_due < seconds:
             assert natural_renewals, "natural Renew/Reply was not captured before worker restart"
         withdrawal = None
-        transaction = None
-        release_at = None
-        reply_port = None
         for line in records:
             stamp = float(line.split()[0])
             if stamp < shutdown_at:
@@ -545,33 +561,14 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
             if "router advertisement" in line and "router lifetime 0s" in line:
                 assert "valid time 0s, pref. time 0s" in line, "final RA retained its prefix lifetime"
                 withdrawal = stamp
-            match = re.search(r"dhcp6 release \(xid=([0-9a-f]+)", line)
-            if match:
-                assert withdrawal is not None and withdrawal < stamp, "Release preceded LAN withdrawal"
-                assert re.search(r"fe80:[^ ]+\.546 >", line), "Release did not use a link-local source"
-                transaction, release_at = match[1], stamp
-            if transaction and "dhcp6 reply (xid=" + transaction + " " in line:
-                match = re.search(r" ([^ ]+)\.(\d+) > [^ ]+\.546:", line)
-                assert match, "could not identify Release Reply source port"
-                reply_port = int(match[2])
-                break
-        if release_at is None or reply_port is None:
-            print("Release diagnosis: zero RA", withdrawal is not None, "Release", release_at is not None, "Reply", reply_port is not None, flush=True)
-            for path in (stage / "console.log", *sorted((stage / "state/logs").glob("*"))):
-                if path.is_file():
-                    for line in path.read_text(errors="replace").splitlines()[-100:]:
-                        if "ERROR" in line or "withdraw" in line or "Release" in line:
-                            print(line, flush=True)
-            for line in records:
-                if float(line.split()[0]) >= shutdown_at and ("dhcp6" in line or "router advertisement" in line):
-                    print(line, flush=True)
-            raise RuntimeError("actual uplink did not acknowledge Release")
+            assert "dhcp6 release (xid=" not in line, "normal shutdown released the upstream grant"
+        assert withdrawal is not None, "missing zero-lifetime RA at shutdown"
         assert not any(
             a["scope"] == "global"
             for link in json.loads(run(["ip", "-n", router, "-j", "-6", "addr", "show", "dev", "lan0"]))
             for a in link.get("addr_info", [])
         ), "shutdown retained the delegated LAN address"
-        print("PASS actual uplink zero-lifetime RA, kernel withdrawal and link-local Release/Reply; server port", reply_port, flush=True)
+        print("PASS actual uplink zero-lifetime RA and kernel withdrawal without releasing the upstream grant", flush=True)
         print(
             "PASS actual uplink periodic IPv4/IPv6 HTTPS, UDP/TCP learned DNS; rounds",
             rounds,

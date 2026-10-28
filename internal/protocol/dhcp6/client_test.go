@@ -34,44 +34,6 @@ func TestDeclineNoBindingCompletesWithoutLosingDelegation(t *testing.T) {
 	}
 }
 
-func TestReleaseIncludesOnlyGrantedLiveIAsAndCompletesOnNoBinding(t *testing.T) {
-	now := time.Unix(1000, 0)
-	clock := clockAt(now)
-	c := client{
-		cfg:  dhcp6config.Config{IAID: 7, RequestAddress: true, RequestPrefix: true},
-		duid: []byte{0, 3, 0, 1}, server: []byte{0, 3, 0, 2},
-		snapshot: dhcp6config.Snapshot{BootID: clock.BootID,
-			Addresses: []dhcp6config.Address{{Address: "2001:db8:42::10", ValidUntil: lifetime.After(clock, 1)}},
-			Prefixes:  []dhcp6config.Prefix{{Prefix: "2001:db8:100::/56", ValidUntil: lifetime.After(clock, 30)}},
-		},
-	}
-	if err := c.lease.begin(release, now.Add(2*time.Second)); err != nil {
-		t.Fatal(err)
-	}
-	packet := c.packet(&c.lease, now.Add(2*time.Second))
-	m, err := decode(packet, 7)
-	if err != nil || m.kind != release || !bytes.Equal(m.client, c.duid) || !bytes.Equal(m.server, c.server) || m.na != nil || m.pd == nil || len(m.pd.leases) != 1 || m.pd.leases[0].prefix.String() != "2001:db8:100::/56" {
-		t.Fatal("Release lost the selected server or included unassigned/expired IA data", m, err)
-	}
-	opts, err := options(packet[4:])
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, option := range opts {
-		if option.code == 6 {
-			t.Fatal("Release requested unrelated configuration")
-		}
-	}
-	response := message{kind: reply, xid: c.lease.xid, client: c.duid, server: []byte{0, 3, 0, 9}, status: 3}
-	if err := c.accept(response, clock); err != nil || c.lease.kind != release {
-		t.Fatal("foreign server completed Release", err)
-	}
-	response.server = c.server
-	if err := c.accept(response, clock); err != nil || c.lease.kind != 0 {
-		t.Fatal("NoBinding left Release pending or restarted acquisition", err)
-	}
-}
-
 func TestPartialRenewKeepsMissingPrefixExchangeAndOriginalT2(t *testing.T) {
 	now := time.Unix(1000, 0)
 	clock := clockAt(now)

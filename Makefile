@@ -33,7 +33,7 @@ help:
 	  'make check             Format, unit tests, race detector, and vet' \
 	  'make check-dual-wan    Verify PPPoE/DS-Lite Health/PBR and TCP MSS with independent peers' \
 	  'make check-pppoe        Verify real PPPoE PAP/CHAP, LAN forwarding and recovery' \
-	  'make check-pppoe-pd     Verify PPP PD release, WAN replacement and LAN IPv6 with independent ISC DHCP' \
+	  'make check-pppoe-pd     Verify PPP PD recovery, WAN replacement and LAN IPv6 with independent ISC DHCP' \
 	  'make check-ha-state    Preserve DHCP/TCP/UDP state across two native routers' \
 	  'make check-ha-pd       Verify shared PD across two routers with different BOOTTIME clocks' \
 	  'make check-ha-egress   Verify shared PD, DS-Lite and independent backup WAN handoff' \
@@ -43,7 +43,7 @@ help:
 	  'make check-bfd         Verify BFD/BGP routing domains with real workers' \
 	  'make check-dhcp6-server Verify LAN information service and durable DUID with BusyBox' \
 	  'make check-dhcp6-ra-pd Verify shared IA_NA/PD, RA trigger and restart with ISC DHCP' \
-	  'make check-dhcp6       Verify RA-triggered IA_NA, kernel parameters and Release with radvd/dnsmasq' \
+	  'make check-dhcp6       Verify RA-triggered IA_NA, kernel parameters and restart with radvd/dnsmasq' \
 	  'make check-dhcp4       Verify delayed independent ACKs, lease expiry and recovery' \
 	  'make check-pd-ra       Verify PD renewal, generated RA and client traffic' \
 	  'make check-bgp         Verify actual BGP FIB, reporting failure and ownership expiry' \

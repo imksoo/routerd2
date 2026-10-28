@@ -391,7 +391,6 @@ def peer(stage, auth, dhcp6_server):
             traffic()
             assert link()["ifindex"] == stable_index and modules()["service.internet"]["generation"] == stable["generation"]
             print("PASS confirmed rollback restored both family routes and TCP/UDP without replacing the PPP session", flush=True)
-            retired_at = time.time()
             retired = copy.deepcopy(configuration)
             retired["resources"] = [r for r in retired["resources"] if r["id"] != "pd"]
             api("control.sock", "/v1/config/commit", {"expected_revision": 3, "request_id": "pd-retire", "config": retired})
@@ -403,7 +402,7 @@ def peer(stage, auth, dhcp6_server):
             assert pd_record()["snapshot"]["client_duid"] == duid
             assert link()["ifindex"] == stable_index
             # Remove the WAN and its dependents in one operator transaction.
-            # The DHCPv6 child must release while PPP is still available.
+            # The DHCPv6 child withdraws local state before PPP is removed.
             offline = copy.deepcopy(configuration)
             offline["resources"] = [r for r in offline["resources"] if r["id"] in ("wan", "lan", "lan-address", "forwarding")]
             api("control.sock", "/v1/config/commit", {"expected_revision": 5, "request_id": "wan-retire", "config": offline})
@@ -422,7 +421,7 @@ def peer(stage, auth, dhcp6_server):
             traffic()
             assert pd_record()["snapshot"]["client_duid"] == duid
             # A PPP-only configuration change also invalidates its unchanged
-            # DHCPv6 child: release it before replacing the underlying link.
+            # DHCPv6 child: withdraw its local state before replacing the link.
             changing = copy.deepcopy(configuration)
             wan = next(r for r in changing["resources"] if r["id"] == "internet")["service"]["pppoe"]
             wan.update(mtu=1452, mru=1452)
@@ -432,7 +431,7 @@ def peer(stage, auth, dhcp6_server):
             wan_change_at = time.time()
             api("control.sock", "/v1/config/commit", {"expected_revision": 7, "request_id": "wan-mtu-change", "config": changing}, timeout=20)
             wait(lambda: modules().get("service.internet", {}).get("generation", 0) > previous_ppp["generation"] and link() is not None and link()["mtu"] == 1452)
-            assert (stage / "dhcp6.log").read_text().count("releases prefix ") > before_release, "PPP was replaced before its DHCPv6 lease was released"
+            assert (stage / "dhcp6.log").read_text().count("releases prefix ") == before_release, "PPP replacement released its DHCPv6 lease"
             if server.poll() is None:
                 server.terminate()
                 server.wait(timeout=3)
@@ -445,7 +444,7 @@ def peer(stage, auth, dhcp6_server):
             assert modules()["service.pd"]["generation"] > previous_pd["generation"]
             assert modules()["service.dns"]["pid"] == previous_dns["pid"] and modules()["service.dns"]["generation"] == previous_dns["generation"]
             dns_traffic()
-            print("PASS PPP-only MTU reconfiguration released and reacquired the unchanged PD child", flush=True)
+            print("PASS PPP-only MTU reconfiguration retained the PD identity and restored the child", flush=True)
             # Operator restart uses the same control-owned dependency drain.
             before = modules()
             previous_ppp, previous_dns = before["service.internet"], before["service.dns"]
@@ -457,7 +456,7 @@ def peer(stage, auth, dhcp6_server):
             operator_restart_at = time.time()
             assert api("control.sock", "/v1/services/service.internet/restart", {}, timeout=12, status=202)["accepted"]
             wait(lambda: modules().get("service.internet", {}).get("generation", 0) > previous_ppp["generation"] and link() is not None)
-            assert (stage / "dhcp6.log").read_text().count("releases prefix ") > before_release
+            assert (stage / "dhcp6.log").read_text().count("releases prefix ") == before_release
             server.terminate()
             server.wait(timeout=3)
             wait(lambda: any(x["ifname"].startswith("ppp") and x["addr_info"] for x in peer_links()))
@@ -472,7 +471,7 @@ def peer(stage, auth, dhcp6_server):
             assert pd_record()["generation"] > previous_pd["generation"]
             stale = {k: previous_pd[k] for k in ("supervisor_instance", "name", "role", "config_digest", "generation", "producer_epoch", "sequence", "snapshot")}
             api("control.sock", "/v1/services/state", stale, status=409)
-            print("PASS control-owned operator restart released PD before PPP, rejected its old notification and preserved configuration/DNS", flush=True)
+            print("PASS control-owned operator restart withdrew PD before PPP, rejected its old notification and preserved configuration/DNS", flush=True)
             before = modules()
             previous_pd = pd_record()
             before_release = (stage / "dhcp6.log").read_text().count("releases prefix ")
@@ -480,7 +479,7 @@ def peer(stage, auth, dhcp6_server):
             assert api("supervisor.sock", "/v1/modules/control/restart", {}, status=202)["accepted"]
             wait(lambda: modules()["control"]["generation"] > before["control"]["generation"] and modules()["control"]["ready"])
             wait(lambda: modules().get("service.internet", {}).get("generation", 0) > before["service.internet"]["generation"] and link() is not None)
-            assert (stage / "dhcp6.log").read_text().count("releases prefix ") > before_release
+            assert (stage / "dhcp6.log").read_text().count("releases prefix ") == before_release
             assert modules()["network"]["pid"] == before["network"]["pid"]
             assert modules()["management"]["pid"] == before["management"]["pid"]
             server.terminate()
@@ -495,7 +494,7 @@ def peer(stage, auth, dhcp6_server):
             assert pd_record()["snapshot"]["client_duid"] == duid
             stale = {k: previous_pd[k] for k in ("supervisor_instance", "name", "role", "config_digest", "generation", "producer_epoch", "sequence", "snapshot")}
             api("control.sock", "/v1/services/state", stale, status=409)
-            print("PASS control restart released old PD, retained writer/management, rejected the old producer and restored TCP/UDP/DNS", flush=True)
+            print("PASS control restart withdrew old PD, retained writer/management, rejected the old producer and restored TCP/UDP/DNS", flush=True)
             # Request actual PID 1 poweroff while the independent server and
             # capture remain alive. Cleanup must not terminate the peer first.
             assert json.loads(run([str(stage.parent / "routerd"), "poweroff", "--runtime-dir", str(stage / "run")]))["accepted"]
@@ -509,8 +508,6 @@ def peer(stage, auth, dhcp6_server):
             packets = run(["tcpdump", "-n", "-tt", "-vv", "-r", str(stage / "pppoe.pcap"), "ip6"])
             assert any("dhcp6 rebind" in line and recovery_at <= float(line.split()[0]) < recovery_reply_at for line in packets.splitlines() if re.match(r"^\d+\.\d+ ", line)), "no real recovery Rebind reached the paused ISC peer"
             withdrawals = []
-            releases = []
-            replies = []
             records = []
             for line in packets.splitlines():
                 if line and line[0].isdigit():
@@ -521,25 +518,14 @@ def peer(stage, auth, dhcp6_server):
                 if "router advertisement" in line and "router lifetime 0s" in line:
                     assert "valid time 0s, pref. time 0s" in line, line
                     withdrawals.append(float(line.split()[0]))
-                release = re.search(r"dhcp6 release \(xid=([0-9a-f]+)", line)
-                reply = re.search(r"dhcp6 reply \(xid=([0-9a-f]+)", line)
-                if release and float(line.split()[0]) >= retired_at:
-                    releases.append((float(line.split()[0]), release[1]))
-                if reply:
-                    replies.append((float(line.split()[0]), reply[1]))
-            assert len(releases) >= 6, packets
+            assert not any("dhcp6 release" in line for line in records), "ordinary retirement released the PD lease"
             discovery = run(["tcpdump", "-n", "-tt", "-r", str(stage / "pppoe.pcap"), "pppoed"])
-            teardown = [float(line.split()[0]) for line in discovery.splitlines() if "PADT" in line and float(line.split()[0]) >= wan_change_at]
-            assert teardown and any(wan_change_at <= stamp < min(teardown) for stamp, _ in releases), "WAN teardown preceded DHCPv6 Release"
-            teardown = [stamp for stamp in teardown if stamp >= operator_restart_at]
-            assert teardown and any(operator_restart_at <= stamp < min(teardown) for stamp, _ in releases), "operator restart tore down WAN before Release"
-            teardown = [stamp for stamp in teardown if stamp >= control_restart_at]
-            assert teardown and any(control_restart_at <= stamp < min(teardown) for stamp, _ in releases), "control restart tore down WAN before Release"
+            teardowns = [float(line.split()[0]) for line in discovery.splitlines() if "PADT" in line]
+            for started in (wan_change_at, operator_restart_at, control_restart_at):
+                teardown = next((stamp for stamp in teardowns if stamp >= started), None)
+                assert teardown is not None and any(started <= stamp < teardown for stamp in withdrawals), "PPP teardown preceded local RA withdrawal"
             assert len(withdrawals) >= 2, packets
-            assert all(any(w < stamp and stamp - w < 6 for w in withdrawals) for stamp, _ in releases), packets
-            assert all(any(reply > stamp and reply - stamp < 2 and rxid == xid for reply, rxid in replies) for stamp, xid in releases), packets
-            assert (stage / "dhcp6.log").read_text().count("releases prefix ") >= 3
-            print("PASS ISC PD Release/Reply after zero-lifetime RA on config retirement and PID 1 shutdown; stable-DUID reacquisition restored IPv6 TCP/UDP", flush=True)
+            print("PASS local PD withdrawal before PPP teardown without Release; stable-DUID reacquisition restored IPv6 TCP/UDP", flush=True)
             return
         probe.terminate()
         probe.wait(timeout=3)

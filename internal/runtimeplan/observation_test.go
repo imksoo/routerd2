@@ -58,7 +58,7 @@ func TestAFTRSourceIndependentOfUnrelatedLargeNetworkObservations(t *testing.T) 
 func TestAFTRSourceObservationRequiresExactUsableOwnedAddress(t *testing.T) {
 	in := aftr.Input{Interface: "wan0", Source: aftr.Source{Address: "2001:db8::1"}}
 	baseline := network.SourceObservation{Interface: "wan0", RequestedAddress: "2001:db8::1", InterfacePresent: true, Index: 42, Up: true, Found: true, Address: &network.AddressState{Address: "2001:db8::1/64", Owned: true, PreferredLifetime: ^uint32(0), ValidLifetime: ^uint32(0)}}
-	if !sourceInstalled(in.Interface, in.Source.Address, baseline) {
+	if !sourceInstalled(in.Interface, in.Source.Address, baseline, false) {
 		t.Fatal("owned usable source was rejected")
 	}
 	cases := []struct {
@@ -87,10 +87,22 @@ func TestAFTRSourceObservationRequiresExactUsableOwnedAddress(t *testing.T) {
 			address := *baseline.Address
 			value.Address = &address
 			tc.change(&value)
-			if sourceInstalled(in.Interface, in.Source.Address, value) {
+			if sourceInstalled(in.Interface, in.Source.Address, value, false) {
 				t.Fatal("unusable source accepted")
 			}
 		})
+	}
+}
+
+func TestDedicatedAFTRSourceAcceptsDeprecationButNotDADFailure(t *testing.T) {
+	address := network.AddressState{Address: "2001:db8::1/128", Owned: true, ValidLifetime: 60, Flags: unix.IFA_F_DEPRECATED}
+	observed := network.SourceObservation{Interface: "wan0", RequestedAddress: "2001:db8::1", InterfacePresent: true, Index: 42, Up: true, Found: true, Address: &address}
+	if !sourceInstalled("wan0", "2001:db8::1", observed, true) {
+		t.Fatal("dedicated deprecated source rejected")
+	}
+	address.Flags |= unix.IFA_F_DADFAILED
+	if sourceInstalled("wan0", "2001:db8::1", observed, true) {
+		t.Fatal("DAD-failed source accepted")
 	}
 }
 

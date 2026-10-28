@@ -111,7 +111,6 @@ type Snapshot struct {
 	State          old.State              `json:"state"`
 }
 
-func eligible(phase string) bool { return phase == old.PhaseHealthy || phase == old.PhaseFailing }
 func ValidateSnapshot(raw Config, s Snapshot, clock bfd.Clock) error {
 	c := Normalize(raw)
 	if err := Validate(c); err != nil {
@@ -148,12 +147,15 @@ func ValidateSnapshot(raw Config, s Snapshot, clock bfd.Clock) error {
 		if s.State.ConsecutiveFailed < 1 || s.State.ConsecutiveFailed >= c.UnhealthyThreshold || s.State.ConsecutivePassed != 0 {
 			return errors.New("invalid failing threshold state")
 		}
+		if s.Active && s.State.LastSuccessTime.IsZero() {
+			return errors.New("failing health cannot be active before a successful probe")
+		}
 	case old.PhaseUnhealthy:
 		if s.State.ConsecutiveFailed < c.UnhealthyThreshold || s.State.ConsecutivePassed != 0 {
 			return errors.New("invalid unhealthy threshold state")
 		}
 	}
-	if s.Active != eligible(s.State.Phase) {
+	if s.State.Phase == old.PhaseHealthy && !s.Active || (s.State.Phase == old.PhasePassing || s.State.Phase == old.PhaseUnhealthy) && s.Active {
 		return errors.New("health eligibility does not match phase")
 	}
 	return nil
@@ -174,13 +176,14 @@ func RunWithProbe(ctx context.Context, raw Config, effects Effects, ready func()
 		return errors.New("health effects and probe are required")
 	}
 	var state old.State
+	active := false
 	publish := func(ctx context.Context, stopped bool, event *daemonapi.DaemonEvent) error {
 		clock, err := bfd.ReadClock()
 		if err != nil {
 			return err
 		}
 		ticks := uint64(clock.BoottimeNanoseconds)
-		return effects(ctx, Snapshot{ProbeEvent: event, Resource: c.Resource, Interface: c.Interface, BootID: clock.BootID, ObservedNanos: ticks, ExpiresNanos: ticks + uint64(c.Freshness()), Active: !stopped && eligible(state.Phase), Stopped: stopped, State: state})
+		return effects(ctx, Snapshot{ProbeEvent: event, Resource: c.Resource, Interface: c.Interface, BootID: clock.BootID, ObservedNanos: ticks, ExpiresNanos: ticks + uint64(c.Freshness()), Active: !stopped && active, Stopped: stopped, State: state})
 	}
 	if _, err := bfd.ReadClock(); err != nil {
 		return err
@@ -211,6 +214,12 @@ func RunWithProbe(ctx context.Context, raw Config, effects Effects, ready func()
 		evaluation := old.ApplyResult(resource, c.spec(), state, result, time.Now())
 		evaluation.Event.Time = evaluation.State.LastCheckedAt
 		state = evaluation.State
+		switch state.Phase {
+		case old.PhaseHealthy:
+			active = true
+		case old.PhasePassing, old.PhaseUnhealthy:
+			active = false
+		}
 		if len(state.History) > 20 {
 			state.History = append([]old.ProbeRecord(nil), state.History[len(state.History)-20:]...)
 		}

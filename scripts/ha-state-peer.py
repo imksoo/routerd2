@@ -153,10 +153,11 @@ def peer(stage, dhcp6_server, pd_dslite):
                 # The existing direct/PD profiles retain their 20cs checks.
                 resources[7]["service"]["vrrp"]["advert_interval_centiseconds"] = 100
                 resources[6]["forwarding"]["ipv4_ecmp_hash"] = "source"
-                # Existing primary-WAN sessions need that path prepared before
-                # publishing the VIP. Backup uses a different public identity.
-                resources[7]["service"]["vrrp"]["graceful_activation"]["ready_when"] = {"all": [
-                    {"fact": "service.pd.active"}, {"fact": "service.health-primary.active"}]}
+                # Publish only when a complete primary path or the independent
+                # backup path is usable. The backup has a different identity.
+                resources[7]["service"]["vrrp"]["graceful_activation"]["ready_when"] = {"any": [
+                    {"all": [{"fact": "service.pd.active"}, {"fact": "service.health-primary.active"}]},
+                    {"fact": "service.health-backup.active"}]}
                 pd = next(r["service"]["dhcp6"] for r in resources if r["id"] == "pd")
                 pd["delegations"].append({"name": "b4", "interface": "wan-ha", "subnet_id": 1, "host_id": 33, "prefix_length": 128})
                 resources += [
@@ -312,15 +313,28 @@ except socket.timeout:
             log.close()
         if dhcp6_server:
             pd_server.send_signal(signal.SIGSTOP)
+        if pd_dslite:
+            run(inside("ha-backup", ["ip", "link", "set", "backup0", "down"]))
         start("ha-a", ["unshare", "--pid", "--fork", "--mount-proc", "--kill-child=SIGTERM", str(stage / "routerd"), "boot", "--file", str(stage / "a/boot.json")], "a")
         wait(lambda: (stage / "a/run/supervisor.sock").exists())
         wait(lambda: modules("a").get("service.ha", {}).get("ready") is True)
         if dhcp6_server:
-            wait(lambda: api("a", "control.sock", "/v1/services/service.ha")["snapshot"].get("activation_state") == "ReadinessTimeout")
+            if pd_dslite:
+                def admission_timed_out():
+                    services = api("a", "control.sock", "/v1/services")["instances"]
+                    ha = next(i for i in services if i["name"] == "service.ha")["snapshot"]
+                    if ha.get("active"):
+                        raise AssertionError("VIP published without an available WAN")
+                    return ha.get("activation_state") == "ReadinessTimeout"
+                wait(admission_timed_out)
+            else:
+                wait(lambda: api("a", "control.sock", "/v1/services/service.ha")["snapshot"].get("activation_state") == "ReadinessTimeout")
             wait(lambda: pd_observed("a").get("state") == "soliciting")
             addresses = {a["local"] for link in json.loads(run(inside("ha-a", ["ip", "-j", "address", "show"]))) for a in link.get("addr_info", [])}
             assert "203.0.113.1" in addresses and "198.18.0.1" not in addresses, "PD preparation did not retain WAN election separately from VIP publication"
             pd_server.send_signal(signal.SIGCONT)
+            if pd_dslite:
+                run(inside("ha-backup", ["ip", "link", "set", "backup0", "up"]))
         if pd_dslite:
             wait(lambda: pd_observed("a").get("prefixes"))
             def b4_addresses():
@@ -360,8 +374,11 @@ for protocol,port in ((socket.SOCK_STREAM,18082),(socket.SOCK_DGRAM,18083)):
             print("PASS PD-derived B4/independent Linux AFTR and independent backup WAN: real TCP/UDP failure/recovery", flush=True)
         wait(lambda: active("a"))
         if dhcp6_server:
-            assert pd_observed("a").get("prefixes"), "VIP published without the required PD"
-            print("PASS elected WAN acquired PD before graceful VIP publication; timeout withheld VIP until ISC resumed", flush=True)
+            assert pd_observed("a").get("prefixes"), "PD did not recover after WAN startup"
+            if pd_dslite:
+                print("PASS both WANs unavailable withheld VIP; PD and forwarding recovered after peers resumed", flush=True)
+            else:
+                print("PASS elected WAN acquired PD before graceful VIP publication; timeout withheld VIP until ISC resumed", flush=True)
         start("ha-b", ["unshare"] + (["--time", "--boottime", "7200"] if dhcp6_server else []) + ["--pid", "--fork", "--mount-proc", "--kill-child=SIGTERM", str(stage / "routerd"), "boot", "--file", str(stage / "b/boot.json")], "b")
         wait(lambda: (stage / "b/run/supervisor.sock").exists())
         wait(lambda: modules("b").get("service.ha", {}).get("ready") is True)
@@ -492,6 +509,8 @@ while True:
                 wait(lambda: active("a"))
                 pd_traffic("a")
                 information("a")
+                sequence = latest()["sequence"]
+                assert progress(sequence) == mapping, "return to the original owner did not restore the established connection"
             print("PASS original conditional serving authority expired on the stopped-control node; peer serving and the same TCP/UDP mapping recovered", flush=True)
         print("PASS continuous actual VRRP/NAT TCP and UDP; tcp_loose=0", flush=True)
         for previous, owner in (("a", "b"), ("b", "a")):
