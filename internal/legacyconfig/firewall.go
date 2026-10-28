@@ -78,16 +78,27 @@ func (c *compiler) firewall() {
 		seen := map[string]bool{}
 		for _, ref := range s.Interfaces {
 			name := c.filterInterface(r, "interfaces", ref)
-			if name == "" || seen[name] {
+			if name == "" {
 				continue
 			}
-			seen[name] = true
-			if previous := ifOwner[name]; previous != "" && previous != r.Metadata.Name {
-				c.reject(r, "interfaces", "unsupported_semantics", "an interface in multiple zones has order-dependent legacy service holes; split the overlapping zone membership before migration")
+			names := []string{name}
+			for _, service := range c.document.Services {
+				if service.VRRP != nil && service.VRRP.Interface == name {
+					names = append(names, service.VRRP.VIPInterface)
+				}
 			}
-			ifOwner[name] = r.Metadata.Name
 			zoneByRef[legacyRefName(ref)] = r.Metadata.Name
-			z.ifnames = append(z.ifnames, name)
+			for _, name := range names {
+				if seen[name] {
+					continue
+				}
+				seen[name] = true
+				if previous := ifOwner[name]; previous != "" && previous != r.Metadata.Name {
+					c.reject(r, "interfaces", "unsupported_semantics", "an interface in multiple zones has order-dependent legacy service holes; split the overlapping zone membership before migration")
+				}
+				ifOwner[name] = r.Metadata.Name
+				z.ifnames = append(z.ifnames, name)
+			}
 		}
 		sort.Strings(z.ifnames)
 		interfaces += len(z.ifnames)

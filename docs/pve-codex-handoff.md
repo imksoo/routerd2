@@ -5,7 +5,27 @@
 [機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
-## 現在の変更: pd-host / native-44
+## 現在の変更: vrrp-import / native-44
+
+旧Keepalived rendererを読み、IPv4 v2/IPv6 v3、1秒広告、優先度とpeer、preempt省略時falseを
+移行処理へ保持した。`vrrp` policyでlocal sourceとVIP VMAC interfaceを選ぶ。
+IPv6ではvirtual link-localも選ぶ。物理interfaceへ置く旧VIPとの明示的な置換であり、
+元zoneのACLを新VMACにも適用する。protocol112例外は旧family/選出interfaceの範囲へ限定する。
+条件・graceful readiness・track・追加VMAC・secret providerのimportは未完了で、入力を黙って捨てない。
+
+PVE Linux6.8/amd64で、製品CLIの変換結果から実supervisor/control/network/VRRPを起動し、
+独立Keepalived2.2.8とのIPv4 v2/PASS・IPv6 v3 unicastが成功した。実VIP TCP/UDP、
+高優先度peerへの切替、worker SIGKILL/交換、peer停止からの復旧、wireのversion/interval/authを確認した。
+許可ポートと、実待受がある拒否ポートにより、元のACLが新VMACにも効くことを確認した。
+追加IPv6拒否試験の初回はIPv4専用helperによる待受起動が失敗した。familyを指定する実socketへ直し、
+両familyを再実行して成功した。製品の通信結果を失敗したfixtureで判定していない。
+再実行は`make check-vrrp-unicast RELEASE_ID=vrrp-import`。今回実行したのは上記二caseであり、
+全VRRP case・homert条件全体・物理NICの新規受入とは区別する。`make check`のGo/Python/Race/vet、
+両architectureのCGO_ENABLED=0 buildと最終六ELFの署名catalog/publisher/stageのRace検査も成功。
+ARM64実行は未検証。共通service例外の変更後も独立ISCのDHCPv6/RA・WAN /128・DUID/失効復旧が成功した。
+最終見直しでgratuitousARP指定の不要な拒否とservice名の二重指定を除き、両familyとmake check/buildを再確認した。
+
+## 直前の完了変更: pd-host / native-44
 
 homert02の現行設定と旧routerdの`delegatedAddressWithPrefixLength`・DS-Lite用source処理を
 読み直した。homertはPDからWAN用の複数/128を設置するが、旧nativeは一律/64で、importも拒否していた。

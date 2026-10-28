@@ -1243,6 +1243,13 @@ track参照を宣言resource IDへ統一し、BFD/BGPも元の有限な状態観
 RFC 5798方式を明示できる。標準peerと現行方式peerのVIP TCP/UDP・切替/再起動/復旧、
 標準checksumでのHealth連動・追加WAN identityもcapture付きで通った。全HA受入完了ではない。
 
+2026-10-28 `vrrp-import` / native-44: 旧KeepalivedのIPv4 v2/IPv6 v3、1秒広告、優先度/peerと
+preempt省略時falseを保持したbasic importを実装した。明示policyでlocal source/新VIP VMACを選び、
+元zoneのACLをVMACへ引き継ぐ。protocol112例外は元のfamily/選出interfaceに限定する。
+製品CLI→実daemonと独立Keepalived2.2.8で両familyのVIP TCP/UDP、切替・worker交換・復旧と
+wire、実待受があるポートのACL拒否が通った。条件・ready/track・追加VMAC・secret参照の移行、
+homert全体・物理機受入は残る。
+
 #### HA-02 — DHCP/PD lease の認証付き同期
 
 2026-10-28 `ha-pd-prepared` / native-43: 実homert02の設定と旧routerdを比較し、HA PD取得と

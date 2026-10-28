@@ -1,0 +1,42 @@
+apiVersion: routerd.net/v1alpha1
+kind: Router
+metadata: {name: imported-vrrp-ipv6}
+spec:
+  resources:
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: Interface
+      metadata: {name: lan}
+      spec: {ifname: lan0, managed: true, adminUp: true}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: VirtualAddress
+      metadata: {name: local}
+      spec: {family: ipv6, interface: lan, address: 2001:db8:42::2/128, mode: static}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: IPv6StaticRoute
+      metadata: {name: peer-subnet}
+      spec: {destination: "2001:db8:42::/64", interface: lan}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: VirtualAddress
+      metadata: {name: gateway}
+      spec:
+        family: ipv6
+        interface: lan
+        address: 2001:db8:42::254
+        mode: vrrp
+        vrrp: {virtualRouterID: 42, priority: 150, peers: [2001:db8:42::3]}
+    - apiVersion: firewall.routerd.net/v1alpha1
+      kind: FirewallZone
+      metadata: {name: edge}
+      spec: {role: untrust, interfaces: [Interface/lan]}
+    - apiVersion: firewall.routerd.net/v1alpha1
+      kind: FirewallRule
+      metadata: {name: allow-tcp}
+      spec: {fromZone: edge, toZone: self, protocol: tcp, port: 18093, action: accept}
+    - apiVersion: firewall.routerd.net/v1alpha1
+      kind: FirewallRule
+      metadata: {name: allow-udp}
+      spec: {fromZone: edge, toZone: self, protocol: udp, port: 18094, action: accept}
+    - apiVersion: firewall.routerd.net/v1alpha1
+      kind: FirewallRule
+      metadata: {name: deny-others}
+      spec: {fromZone: edge, toZone: self, action: drop}

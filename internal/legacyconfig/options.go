@@ -41,6 +41,7 @@ type TailscalePolicy struct {
 // Map keys are exact legacy Kind/name identities. Each entry must be consumed by
 // that one resource; unqualified aliases and extra entries are rejected.
 type Options struct {
+	VRRP          map[string]VRRPPolicy             `json:"vrrp,omitempty"`
 	HealthChecks  map[string]HealthCheckPolicy      `json:"health_checks,omitempty"`
 	Tailscale     map[string]TailscalePolicy        `json:"tailscale,omitempty"`
 	SchemaVersion int                               `json:"schema_version"`
@@ -48,6 +49,14 @@ type Options struct {
 	DSLite        map[string]DSLitePolicy           `json:"ds_lite,omitempty"`
 	DHCPDNS       map[string]DHCPDNSPolicy          `json:"dhcp_dns,omitempty"`
 	DHCP6Servers  map[string]DHCP6ServerPolicy      `json:"dhcp6_servers,omitempty"`
+}
+
+// VRRPPolicy selects explicit local identities for the native election and
+// VMAC. Wire version, priority, peers and preemption retain legacy semantics.
+type VRRPPolicy struct {
+	SourceAddress       string `json:"source_address"`
+	VIPInterface        string `json:"vip_interface"`
+	VIPLinkLocalAddress string `json:"vip_link_local_address,omitempty"`
 }
 
 // HealthCheckPolicy makes probe routing scope explicit. An old unscoped check
@@ -174,7 +183,7 @@ func validateOptionsShape(d *decoder, options Options, explicit bool) {
 	if explicit && options.SchemaVersion != OptionsSchemaVersion {
 		d.issue(nil, "$policy.schema_version", "policy_version", "migration policy schema_version must be 1")
 	}
-	if len(options.RAClients)+len(options.DSLite)+len(options.DHCPDNS)+len(options.DHCP6Servers)+len(options.Tailscale)+len(options.HealthChecks) > 4096 {
+	if len(options.RAClients)+len(options.DSLite)+len(options.DHCPDNS)+len(options.DHCP6Servers)+len(options.Tailscale)+len(options.HealthChecks)+len(options.VRRP) > 4096 {
 		d.issue(nil, "$policy", "policy_limit", "migration policy accepts at most 4096 resource entries")
 	}
 }
@@ -182,11 +191,14 @@ func validateOptionsShape(d *decoder, options Options, explicit bool) {
 func (c *compiler) initOptions(options Options, explicit bool) {
 	validateOptionsShape(c.decoder, options, explicit)
 	c.policyPaths, c.policyUsed = map[string]string{}, map[string]bool{}
-	if len(options.RAClients)+len(options.DSLite)+len(options.DHCPDNS)+len(options.DHCP6Servers)+len(options.Tailscale)+len(options.HealthChecks) > 4096 {
+	if len(options.RAClients)+len(options.DSLite)+len(options.DHCPDNS)+len(options.DHCP6Servers)+len(options.Tailscale)+len(options.HealthChecks)+len(options.VRRP) > 4096 {
 		return
 	}
 	// Do not let a caller's later edit mutate a successfully compiled document.
-	c.options = Options{SchemaVersion: options.SchemaVersion, RAClients: map[string]serviceconfig.RAClient{}, DSLite: map[string]DSLitePolicy{}, DHCPDNS: map[string]DHCPDNSPolicy{}, DHCP6Servers: map[string]DHCP6ServerPolicy{}, Tailscale: map[string]TailscalePolicy{}, HealthChecks: map[string]HealthCheckPolicy{}}
+	c.options = Options{SchemaVersion: options.SchemaVersion, RAClients: map[string]serviceconfig.RAClient{}, DSLite: map[string]DSLitePolicy{}, DHCPDNS: map[string]DHCPDNSPolicy{}, DHCP6Servers: map[string]DHCP6ServerPolicy{}, Tailscale: map[string]TailscalePolicy{}, HealthChecks: map[string]HealthCheckPolicy{}, VRRP: map[string]VRRPPolicy{}}
+	for key, value := range options.VRRP {
+		c.options.VRRP[key] = value
+	}
 	for key, value := range options.HealthChecks {
 		c.options.HealthChecks[key] = value
 	}
@@ -260,6 +272,11 @@ func (c *compiler) initOptions(options Options, explicit bool) {
 		keys = append(keys, key)
 	}
 	check("health_checks", "HealthCheck", keys)
+	keys = make([]string, 0, len(options.VRRP))
+	for key := range options.VRRP {
+		keys = append(keys, key)
+	}
+	check("vrrp", "VirtualAddress", keys)
 }
 
 func copyBool(value *bool) *bool {

@@ -31,7 +31,7 @@ merge services.
 `Compile` never guesses a host network manager's RA defaults or silently adopts
 the new AFTR or DHCP-derived DNS lifetime contracts. `CompileWithOptions` permits
 **explicit replacement intent** for individual `IPv6RAAddress`, `DSLiteTunnel`,
-DHCP-consuming `DNSResolver`, stateless `DHCPv6Server`, `HealthCheck`, and `TailscaleNode` resources. Each such mapping says which behavior
+DHCP-consuming `DNSResolver`, stateless `DHCPv6Server`, `HealthCheck`, VRRP `VirtualAddress`, and `TailscaleNode` resources. Each such mapping says which behavior
 changes; a successful replacement is not a claim of
 automatic semantic parity. There is no global permissive mode. Policy cannot
 discard an unsupported field, resource, HA condition or ownership requirement.
@@ -50,6 +50,44 @@ adopts live resources from the old daemon.
 
 The CLI entry point is `routerd config migrate [--policy FILE] FILE`. It emits native YAML on
 success. Code that also needs the mapping report should use `Compile`.
+
+## VRRP election and VIP identity
+
+Basic `VirtualAddress` VRRP elections retain the original Keepalived defaults:
+IPv4 uses v2, IPv6 uses v3, advertisements are one second, priority defaults to
+100, and omitted preempt remains **false**. Declared peers and priority are
+retained. IPv4 PASS accepts the native 1..8 printable-byte password contract;
+secret-provider references remain unsupported.
+
+The native engine owns a separate VIP VMAC rather than putting the VIP directly
+on the physical interface. Supply explicit local identities for that change:
+
+```yaml
+schema_version: 1
+vrrp:
+  VirtualAddress/gateway:
+    source_address: 192.0.2.2
+    vip_interface: ha
+```
+
+The election interface must be independently managed/admin-up and the source
+must be available there. An IPv6 policy also selects
+`vip_link_local_address: fe80::42/64` for the first virtual address. VIP literals
+accept a host CIDR or bare IP and are normalized. The original interface's zone
+ACL also covers its new VIP VMAC; the original family-scoped protocol112 service
+exception remains on the election interface. No global INPUT accept is added.
+
+Runtime `when`/dependencies, tracking, graceful readiness, additional failover
+identities, dynamic VIPs and hostname publication remain unsupported by this
+conversion. The complete batch rejects those declarations rather than erasing
+them. Native implementations of these functions have separate acceptance;
+basic migration is not full homert/cluster import.
+
+`make check-vrrp-unicast RELEASE_ID=vrrp-import` includes actual CLI-converted
+IPv4 v2/PASS and IPv6 v3 graphs. Independent Keepalived, real workers and capture
+check VIP TCP/UDP, takeover, worker replacement and recovery. The imported INPUT
+policy permits the declared application ports and denies another port with a
+real listener on the VIP VMAC.
 
 ## Scoped HealthCheck probes
 
@@ -155,6 +193,7 @@ serving, custom lease/RA settings and full deployed-router import remain open.
 | `WireGuardInterface` + `WireGuardPeer` | Static interfaces with explicit private-key file paths and complete peer sets. Preserves MTU, numeric/scoped endpoints, passive peers, keepalive, AllowedIPs and explicit routes without inferring routes or marks. Fixed listen ports require an owned INPUT filter so the original service-hole policy can be preserved; see the static WireGuard section. |
 | `IPv4StaticAddress` | Preserves host/prefix bits. `exclusive: true` is rejected because it removes addresses owned by other managers. Explicit overlap policy and its justification are checked. |
 | `VirtualAddress` in static mode | IPv4 /32 or IPv6 /128, including a provably static resource address reference. Runtime tracking, automatic hostname publication and gratuitous-ARP intent are rejected. |
+| `VirtualAddress` in VRRP mode | Explicit `vrrp` policy selects local election and VIP VMAC identities. Retains IPv4 v2/IPv6 v3, one-second advertisements, priority, peers and the original non-preempt default. Zone ACLs follow the VIP VMAC while protocol112 exceptions remain family/interface scoped. Conditions, readiness, tracking, additional identities and secret-provider references remain unsupported. |
 | `IPv4StaticRoute`, `IPv6StaticRoute` | Same destination, gateway, device and metric; interface aliases are resolved. |
 | `IPv4Route` | Static unicast routes. A static DS-Lite device reference and explicit static address gateway reference can be resolved. Blackhole, preferred-source and dynamic references are rejected in this compiler. |
 | `Sysctl` | Required runtime `net.ipv4.ip_forward` and `net.ipv6.conf.all.forwarding` with exact 0/1 values. No implicit forwarding is enabled. Other sysctls, optional/non-exact policies and persistent host files are rejected. |

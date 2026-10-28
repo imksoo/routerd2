@@ -5,6 +5,7 @@ package integration
 import (
 	"bytes"
 	"context"
+	"embed"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -35,6 +36,9 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+//go:embed testdata/vrrp-import-*.yaml
+var legacyVRRP embed.FS
+
 func TestDaemonVRRPUnicastIPv4(t *testing.T) {
 	if isolateFixture(t, "TestDaemonVRRPUnicastIPv4") {
 		runVRRPPeer(t, vrrpPeerTest{family: "ipv4"})
@@ -49,7 +53,7 @@ func TestDaemonVRRPRFC9568IPv4(t *testing.T) {
 
 func TestDaemonVRRPUnicastIPv6(t *testing.T) {
 	if isolateFixture(t, "TestDaemonVRRPUnicastIPv6") {
-		runVRRPPeer(t, vrrpPeerTest{family: "ipv6"})
+		runVRRPPeer(t, vrrpPeerTest{family: "ipv6", migrate: true})
 	}
 }
 
@@ -79,7 +83,7 @@ func TestDaemonVRRPv2(t *testing.T) {
 
 func TestDaemonVRRPv2PASS(t *testing.T) {
 	if isolateFixture(t, "TestDaemonVRRPv2PASS") {
-		runVRRPPeer(t, vrrpPeerTest{family: "ipv4", version: 2, password: "labpass"})
+		runVRRPPeer(t, vrrpPeerTest{family: "ipv4", version: 2, password: "labpass", migrate: true})
 	}
 }
 
@@ -90,6 +94,7 @@ func TestDaemonVRRPAdditionalIdentity(t *testing.T) {
 }
 
 type vrrpPeerTest struct {
+	migrate   bool
 	checksum  vrrp.IPv4Checksum
 	wan       bool
 	family    string
@@ -173,6 +178,12 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 		services = append(services, serviceconfig.Service{Name: "probe", Health: &health.Config{Interface: "lan0", SourceAddress: local, Target: peer, Protocol: "tcp", Port: 18097, IntervalMillis: 300, TimeoutMillis: 50, HealthyThreshold: 1, UnhealthyThreshold: 1}})
 	}
 	program := config.FromNative(config.Native{Network: network.Desired{Interfaces: []network.Interface{iface}}, Services: services})
+	haName := "service.ha"
+	if spec.migrate {
+		var imported serviceconfig.Service
+		program, imported = importedVRRPProgram(t, family)
+		c, haName = imported.VRRPConfig(), imported.ModuleName()
+	}
 	if tracking {
 		for i := range program.Resources {
 			if program.Resources[i].ID == "service/probe" {
@@ -186,11 +197,11 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 	if spec.wan {
 		wan = setupVRRPWAN(t, peerNS)
 		program.Resources = append(program.Resources,
-			resourceprogram.Resource{ID: "wan-identity", When: &resourceprogram.FactCondition{Fact: "service.ha.elected"}, Link: &network.Link{Name: "wan-ha", Kind: "macvlan", Parent: "wan0", HardwareAddr: vrrpWANMAC, IPv6AddrGenMode: "none"}},
+			resourceprogram.Resource{ID: "wan-identity", When: &resourceprogram.FactCondition{Fact: haName + ".elected"}, Link: &network.Link{Name: "wan-ha", Kind: "macvlan", Parent: "wan0", HardwareAddr: vrrpWANMAC, IPv6AddrGenMode: "none"}},
 			resourceprogram.Resource{ID: "wan-interface", Interface: &network.Interface{Name: "wan-ha"}},
 			resourceprogram.Resource{ID: "wan-address", Address: &resourceprogram.Address{Interface: "wan-ha", CIDR: vrrpWANVIP + "/24"}},
 			resourceprogram.Resource{ID: "wan-linklocal", Address: &resourceprogram.Address{Interface: "wan-ha", CIDR: vrrpWANLL + "/64", Options: &network.AddressOptions{NoDAD: true}}},
-			resourceprogram.Resource{ID: "wan-ra", When: &resourceprogram.FactCondition{Fact: "service.ha.active"}, Service: &serviceconfig.Service{Name: "wan-ra", RA: &ra.Config{Interface: "wan-ha", SourceAddress: vrrpWANLL, MinIntervalSeconds: 3, MaxIntervalSeconds: 4, RouterLifetimeSeconds: 12}}},
+			resourceprogram.Resource{ID: "wan-ra", When: &resourceprogram.FactCondition{Fact: haName + ".active"}, Service: &serviceconfig.Service{Name: "wan-ra", RA: &ra.Config{Interface: "wan-ha", SourceAddress: vrrpWANLL, MinIntervalSeconds: 3, MaxIntervalSeconds: 4, RouterLifetimeSeconds: 12}}},
 		)
 	}
 	f := startFixtureDaemon(t, program)
@@ -211,7 +222,7 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 	snapshot := func() vrrp.Snapshot {
 		t.Helper()
 		var instance runtimeplan.InstanceStatus
-		if err := f.control.Do(context.Background(), "GET", "/v1/services/service.ha", nil, &instance); err != nil {
+		if err := f.control.Do(context.Background(), "GET", "/v1/services/"+haName, nil, &instance); err != nil {
 			t.Fatal(err)
 		}
 		var s vrrp.Snapshot
@@ -379,7 +390,7 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 		return stop
 	}
 	if spec.slowACK {
-		writer, election := module("network"), module("service.ha")
+		writer, election := module("network"), module(haName)
 		if snapshot().State != vrrp.StateBackup {
 			t.Fatal("fixture missed initial backup before writer pause")
 		}
@@ -403,7 +414,7 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 		}
 		waitOwner(true)
 		until(t, 3*time.Second, func() bool {
-			current := module("service.ha")
+			current := module(haName)
 			if current.PID != election.PID || current.Generation != election.Generation {
 				t.Fatal("delayed initial ACK replaced election worker", election, current)
 			}
@@ -413,7 +424,7 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 		t.Log("550 ms writer pause delayed the initial VIP ACK; same election renewed beyond its original deadline without extending authority")
 	}
 	waitOwner(true)
-	if first := module("service.ha"); first.Generation != 1 {
+	if first := module(haName); first.Generation != 1 {
 		t.Fatal("normal address DAD replaced the initial VRRP worker", first)
 	}
 	if wan != nil {
@@ -450,9 +461,32 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 		})
 	}
 	traffic(peerNS, vip, "R")
+	if spec.migrate {
+		// An actual listener makes timeout prove the inherited zone's deny,
+		// rather than an absent service or a blanket VMAC accept.
+		var listener net.Listener
+		if err := fixtureInsideNamespace(routerNS, func() error {
+			var err error
+			listener, err = net.Listen("tcp"+suffix, net.JoinHostPort(vip, "18095"))
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { listener.Close() })
+		if err := fixtureInsideNamespace(peerNS, func() error {
+			conn, err := net.DialTimeout("tcp"+suffix, net.JoinHostPort(vip, "18095"), 300*time.Millisecond)
+			if err == nil {
+				conn.Close()
+				t.Fatal("migration lost the original zone deny on the VIP VMAC")
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if tracking {
 
-		native, source := module("service.ha"), module("service.probe")
+		native, source := module(haName), module("service.probe")
 		startPeer(120, c.AuthPassword)
 		waitTrack := func(known, penalized bool, priority int) {
 			t.Helper()
@@ -506,7 +540,7 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 		waitTrack(true, false, 150)
 		waitOwner(true)
 		traffic(peerNS, vip, "R")
-		current := module("service.ha")
+		current := module(haName)
 		if current.PID != native.PID || current.Generation != native.Generation {
 			t.Fatal("tracking restarted the election worker", native, current)
 		}
@@ -539,7 +573,7 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 		waitTrack(true, false, 150)
 		waitOwner(true)
 		traffic(peerNS, vip, "R")
-		if current := module("service.ha"); current.PID != native.PID || current.Generation != native.Generation {
+		if current := module(haName); current.PID != native.PID || current.Generation != native.Generation {
 			t.Fatal("conditional source exclusion restarted the election", current, native)
 		}
 		t.Log("Health failure/recovery and source replacement changed priority 150/50; conditional source exclusion preserved the finite neutral decision, counters, same election worker and VIP TCP/UDP")
@@ -588,7 +622,7 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 			t.Fatal(err)
 		}
 		for _, module := range status.Modules {
-			if module.Name == "service.ha" {
+			if module.Name == haName {
 				if err := syscall.Kill(module.PID, syscall.SIGKILL); err != nil {
 					t.Fatal(err)
 				}
@@ -621,7 +655,7 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 		waitOwner(true)
 		traffic(peerNS, vip, "R")
 		if wan != nil {
-			native, control, writer := module("service.ha"), module("control"), module("network")
+			native, control, writer := module(haName), module("control"), module("network")
 			for _, process := range []supervisor.ModuleStatus{control, native} {
 				if err := syscall.Kill(process.PID, syscall.SIGSTOP); err != nil {
 					t.Fatal(err)
@@ -660,7 +694,7 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 					t.Fatal(err)
 				}
 			}
-			until(t, 8*time.Second, func() bool { return module("service.ha").Generation > native.Generation })
+			until(t, 8*time.Second, func() bool { return module(haName).Generation > native.Generation })
 			waitOwner(true)
 			wan.waitNative(t, true)
 			wan.waitForwarder(t, true)
@@ -741,6 +775,41 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 		return
 	}
 	t.Logf("%s VRRPv%d keepalived interoperability: adverts=%v, VIP TCP/UDP, higher-priority takeover, SIGKILL/rebind, priority-zero recovery and lower-priority preemption passed", family, c.Version, counts)
+}
+
+func importedVRRPProgram(t *testing.T, family string) (config.Document, serviceconfig.Service) {
+	t.Helper()
+	work := t.TempDir()
+	for _, suffix := range []string{"", "-policy"} {
+		name := "vrrp-import-" + family + suffix + ".yaml"
+		data, err := legacyVRRP.ReadFile("testdata/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(work, name), data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, filepath.Join(os.Getenv("ROUTERD2_TEST_BIN_DIR"), "routerd"), "config", "migrate", "--policy", filepath.Join(work, "vrrp-import-"+family+"-policy.yaml"), filepath.Join(work, "vrrp-import-"+family+".yaml"))
+	var review bytes.Buffer
+	cmd.Stderr = &review
+	data, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err, review.String())
+	}
+	program, err := config.Parse(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, resource := range program.Resources {
+		if resource.Service != nil && resource.Service.VRRP != nil {
+			return program, *resource.Service
+		}
+	}
+	t.Fatal("CLI migration omitted VRRP")
+	return config.Document{}, serviceconfig.Service{}
 }
 
 func vrrpVIPResponders(t *testing.T, ns netns.NsHandle, suffix string, vips []string, response string) {

@@ -188,7 +188,7 @@ func (c *compiler) virtualAddress(r resource) {
 	c.allow(r, "family", "interface", "address", "hostname", "externalDNS", "mode", "vrrp", "track", "addressFrom", "gratuitousARP")
 	s := r.Spec.(api.VirtualAddressSpec)
 	if s.Mode == "vrrp" {
-		c.reject(r, "mode", "unsupported_semantics", "legacy Keepalived defaults, physical-interface VIPs and non-preempt default require explicit peer-aware migration to native VRRP/VMAC with a selected wire version")
+		c.vrrp(r, s)
 		return
 	}
 	if s.Mode != "" && s.Mode != "static" {

@@ -1,0 +1,39 @@
+apiVersion: routerd.net/v1alpha1
+kind: Router
+metadata: {name: imported-vrrp-ipv4}
+spec:
+  resources:
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: Interface
+      metadata: {name: lan}
+      spec: {ifname: lan0, managed: true, adminUp: true}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: IPv4StaticAddress
+      metadata: {name: local}
+      spec: {interface: lan, address: 192.0.2.2/24}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: VirtualAddress
+      metadata: {name: gateway}
+      spec:
+        family: ipv4
+        interface: lan
+        address: 192.0.2.254
+        mode: vrrp
+        gratuitousARP: true
+        vrrp: {virtualRouterID: 42, priority: 150, peers: [192.0.2.3], authentication: labpass}
+    - apiVersion: firewall.routerd.net/v1alpha1
+      kind: FirewallZone
+      metadata: {name: edge}
+      spec: {role: untrust, interfaces: [Interface/lan]}
+    - apiVersion: firewall.routerd.net/v1alpha1
+      kind: FirewallRule
+      metadata: {name: allow-tcp}
+      spec: {fromZone: edge, toZone: self, protocol: tcp, port: 18093, action: accept}
+    - apiVersion: firewall.routerd.net/v1alpha1
+      kind: FirewallRule
+      metadata: {name: allow-udp}
+      spec: {fromZone: edge, toZone: self, protocol: udp, port: 18094, action: accept}
+    - apiVersion: firewall.routerd.net/v1alpha1
+      kind: FirewallRule
+      metadata: {name: deny-others}
+      spec: {fromZone: edge, toZone: self, action: drop}

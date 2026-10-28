@@ -45,18 +45,30 @@ func (c *compiler) firewallServices() {
 			zones[ref] = r
 		}
 	}
-	pending := map[string][]network.PortRange{}
+	pending := map[string][]network.PacketMatch{}
 	for _, r := range c.resources {
 		var iface string
 		var listen []string
 		var port int
+		match := network.PacketMatch{Protocol: "udp"}
 		switch s := r.Spec.(type) {
 		case api.DHCPv4ServerSpec:
 			iface, listen, port = s.Interface, s.ListenInterfaces, 67
 		case api.DHCPv6ServerSpec:
 			iface, listen, port = s.Interface, s.ListenInterfaces, 547
+		case api.VirtualAddressSpec:
+			if s.Mode != "vrrp" {
+				continue
+			}
+			iface, match.Protocol, match.Family = s.Interface, "vrrp", 4
+			if s.Family == "ipv6" {
+				match.Family = 6
+			}
 		default:
 			continue
+		}
+		if port != 0 {
+			match.DestinationPorts = []network.PortRange{{Start: port}}
 		}
 		seen := map[string]bool{}
 		for _, ref := range append([]string{iface}, listen...) {
@@ -72,14 +84,19 @@ func (c *compiler) firewallServices() {
 			for _, ifname := range c.firewallServiceInterfaces(r, zone, ref) {
 				present := false
 				for _, old := range pending[ifname] {
-					present = present || old.Start == port
+					present = present || old.Protocol == match.Protocol && old.Family == match.Family && (port == 0 || old.DestinationPorts[0].Start == port)
 				}
 				if !present {
-					pending[ifname] = append(pending[ifname], network.PortRange{Start: port})
+					match.InInterface = ifname
+					pending[ifname] = append(pending[ifname], match)
 				}
 			}
 		}
-		c.note(r, "Preserves the original dual-family UDP/"+strconv.Itoa(port)+" INPUT exception before untrust ACLs when the hole index resolves an interface; trust/mgmt ACLs remain authoritative. Empty-interface legacy holes do not create new accepts.")
+		if match.Protocol == "vrrp" {
+			c.note(r, "Preserves the original family-scoped protocol112 INPUT exception on the election interface before untrust ACLs; trust/mgmt ACLs remain authoritative.")
+		} else {
+			c.note(r, "Preserves the original dual-family UDP/"+strconv.Itoa(port)+" INPUT exception before untrust ACLs when the hole index resolves an interface; trust/mgmt ACLs remain authoritative. Empty-interface legacy holes do not create new accepts.")
+		}
 	}
 	if len(pending) == 0 {
 		return
@@ -96,21 +113,23 @@ func (c *compiler) firewallServices() {
 		}
 	}
 	if count > maxFirewallProjection {
-		c.issue(nil, "$.spec.resources", "resource_limit", "DHCP server exceptions exceed the bounded native firewall projection")
+		c.issue(nil, "$.spec.resources", "resource_limit", "service exceptions exceed the bounded native firewall projection")
 		return
 	}
 	var rules []network.FirewallRule
 	for i, rule := range f.Input.Rules {
 		// Keep the original global loopback and ICMPv6 rules first. Each
 		// disjoint zone interface gets its exception before its first ACL.
-		if ports := pending[rule.Match.InInterface]; i >= 2 && len(ports) != 0 {
-			rules = append(rules, network.FirewallRule{Match: network.PacketMatch{InInterface: rule.Match.InInterface, Protocol: "udp", DestinationPorts: ports}, Action: "accept"})
+		if matches := pending[rule.Match.InInterface]; i >= 2 && len(matches) != 0 {
+			for _, match := range matches {
+				rules = append(rules, network.FirewallRule{Match: match, Action: "accept"})
+			}
 			delete(pending, rule.Match.InInterface)
 		}
 		rules = append(rules, rule)
 	}
 	if len(pending) != 0 {
-		c.issue(nil, "$.spec.resources", "unsupported_semantics", "DHCP server exception has no matching owned INPUT zone projection")
+		c.issue(nil, "$.spec.resources", "unsupported_semantics", "service exception has no matching owned INPUT zone projection")
 		return
 	}
 	f.Input.Rules = rules
@@ -122,7 +141,7 @@ func (c *compiler) firewallServiceInterfaces(server, zone resource, ref string) 
 	if owner := c.byRef["Interface/"+name]; owner != nil {
 		scope = strings.TrimSpace(owner.Spec.(api.InterfaceSpec).IfName)
 		if scope == "" {
-			c.reject(server, "interface", "unsupported_semantics", "DHCP service hole requires the original explicit interface name")
+			c.reject(server, "interface", "unsupported_semantics", "service hole requires the original explicit interface name")
 			return nil
 		}
 	} else if c.byRef["Bridge/"+name] != nil {
@@ -131,10 +150,10 @@ func (c *compiler) firewallServiceInterfaces(server, zone resource, ref string) 
 		// it: the renderer emits iifname "", not an unscoped zone-wide rule.
 		// That match cannot select a real ingress interface. Omitting the
 		// ineffective hole preserves ACL decisions without widening access.
-		c.note(server, "The original Bridge DHCP exception rendered an empty iifname match and accepted no real ingress; the migrated INPUT ACL remains authoritative for that bridge and its other zone members.")
+		c.note(server, "The original Bridge service exception rendered an empty iifname match and accepted no real ingress; the migrated INPUT ACL remains authoritative for that bridge and its other zone members.")
 		return nil
 	} else {
-		c.reject(server, "interface", "unsupported_semantics", "DHCP service hole requires a migrated Interface or Bridge resource")
+		c.reject(server, "interface", "unsupported_semantics", "service hole requires a migrated Interface or Bridge resource")
 		return nil
 	}
 	var out []string
@@ -147,7 +166,7 @@ func (c *compiler) firewallServiceInterfaces(server, zone resource, ref string) 
 		}
 	}
 	if len(out) == 0 {
-		c.reject(server, "interface", "unsupported_semantics", "legacy DHCP hole scope differs from the owned zone interface projection")
+		c.reject(server, "interface", "unsupported_semantics", "legacy service hole scope differs from the owned zone interface projection")
 		return nil
 	}
 	c.target(server, "network.firewall.input")

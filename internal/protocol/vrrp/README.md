@@ -97,8 +97,11 @@ PASS is a cleartext legacy mechanism from RFC 2338, removed by RFC 3768. It is
 provided for existing peers, not cryptographic authentication or replay
 protection. IPv6/v3 PASS, AH and Keepalived's HMAC extension are not implemented;
 unsupported declarations are rejected rather than downgraded. Secret-provider
-resolution and peer-aware import of original `VirtualAddress` declarations
-remain separate work.
+resolution remains separate work. The original-resource importer supports
+basic IPv4 v2/PASS and IPv6 v3 elections with explicit local/VMAC identities,
+retained non-preempt defaults and zone ACLs. Conditional readiness, tracking and
+additional identities still require their complete migration graph; see the
+[import contract](../../legacyconfig/README.md#vrrp-election-and-vip-identity).
 
 ## Single-writer effects and liveness contract
 
@@ -319,8 +322,11 @@ writer's deliberate NoDAD policy. A traffic probe does not query control, so it
 also works during the test's intentional control SIGSTOP.
 
 Run `make check-vrrp-unicast` on the isolated Linux VM with keepalived installed
-and root or noninteractive sudo available. The runner builds as the caller and
-stages execution in a root-owned 0700 temporary directory; it never changes home
+and root or noninteractive sudo available. The IPv6 unicast and v2/PASS cases
+boot the actual CLI-migrated resource graph, including its owned firewall.
+They verify a real listener on an undeclared VIP port is denied while declared
+TCP/UDP ports work. This qualifies basic import, not conditional HA/cluster input.
+The runner builds as the caller and stages execution in a root-owned 0700 temporary directory; it never changes home
 permissions or host interface configuration. Current logs go to
 `dist/vrrp-unicast/ipv4.log`, `ipv6.log`, `health-track.log`, `v2.log` and
 `v2-pass.log`, `additional-identity.log` and `ipv4-rfc9568.log`. The runner also
