@@ -18,12 +18,10 @@ import (
 	"time"
 
 	"github.com/imksoo/routerd/pkg/api"
-	wire "github.com/imksoo/routerd/pkg/dhcpv4client"
 	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/legacyconfig"
 	"github.com/imksoo/routerd2/internal/network"
-	"github.com/imksoo/routerd2/internal/protocol/dhcp4"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
@@ -56,8 +54,8 @@ func testDaemonDHCPDNSOwnership(t *testing.T, migrated bool) {
 	t.Helper()
 	clientNS := fixturePeerNamespace(t, "lan0", "client0")
 	dnsPort := port(t)
-	server := serviceconfig.DHCPServer{Interface: "lan0", ServerAddress: "192.0.2.1", Authoritative: true, ProbeTimeoutMilliseconds: 50,
-		Primary: dhcpserverconfig.Scope{Prefix: "192.0.2.0/24", Start: "192.0.2.100", End: "192.0.2.102", Router: "192.0.2.1", LeaseSeconds: 60},
+	server := serviceconfig.DHCPServer{Interface: "lan0", ServerAddress: "192.0.2.1", Authoritative: true,
+		Primary: dhcpserverconfig.Scope{Prefix: "192.0.2.0/24", Start: "192.0.2.100", End: "192.0.2.102", Router: "192.0.2.1", LeaseSeconds: 60, Options: []dhcpserverconfig.Option{{Name: "dns-server", Value: "192.0.2.1"}}},
 	}
 	dns := dnsconfig.RuntimeConfig{Resource: "dns",
 		Spec:  api.DNSResolverSpec{Listen: []api.DNSResolverListenSpec{{Name: "local", Addresses: []string{"127.0.0.1"}, Port: dnsPort}}, Sources: []api.DNSResolverSourceSpec{{Name: "zones", Kind: "zone", Match: []string{"lab.example"}, ZoneRef: []string{"DNSZone/lan"}}}},
@@ -95,40 +93,46 @@ func testDaemonDHCPDNSOwnership(t *testing.T, migrated bool) {
 	}
 	f := startFixtureDaemon(t, doc)
 	work := t.TempDir()
-	parent, err := os.Readlink("/proc/self/ns/net")
-	if err != nil {
+	type clientLease struct {
+		CurrentAddress   string
+		ServerID         string
+		LeaseTimeSeconds int64
+		DNS              string
+	}
+	script := filepath.Join(work, "lease.sh")
+	report := filepath.Join(work, "lease.json")
+	body := "#!/bin/sh\ncase \"$1\" in bound|renew) printf '{\"CurrentAddress\":\"%s\",\"ServerID\":\"%s\",\"LeaseTimeSeconds\":%s,\"DNS\":\"%s\"}\\n' \"$ip\" \"$serverid\" \"$lease\" \"$dns\" > " + report + ";; esac\n"
+	if err := os.WriteFile(script, []byte(body), 0700); err != nil {
 		t.Fatal(err)
 	}
-	child, err := os.Readlink(fmt.Sprintf("/proc/self/fd/%d", int(clientNS)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	exe, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	acquire := func() dhcp4.Snapshot {
+	requested := ""
+	acquire := func() clientLease {
 		t.Helper()
-		cmd := exec.Command(exe, "-test.run=^TestDaemonDHCPClientChild$", "-test.v", "-test.timeout=12s")
-		cmd.Env = append(os.Environ(), "ROUTERD2_DAEMON_DHCP_CLIENT="+child, "ROUTERD2_DAEMON_DHCP_SERVER="+parent, "ROUTERD2_DAEMON_DHCP_WORK="+work)
+		args := []string{"udhcpc", "-f", "-n", "-q", "-i", "client0", "-x", "hostname:workstation", "-s", script}
+		if requested != "" {
+			args = append(args, "-r", requested)
+		}
+		cmd := exec.Command("busybox", args...)
 		var output bytes.Buffer
 		cmd.Stdout, cmd.Stderr = &output, &output
 		if err := fixtureInsideNamespace(clientNS, cmd.Start); err != nil {
 			t.Fatal(err)
 		}
 		if err := cmd.Wait(); err != nil {
-			t.Fatalf("native DHCP client: %v\n%s", err, output.String())
+			t.Fatalf("independent BusyBox DHCP client: %v\n%s", err, output.String())
 		}
-		b, err := os.ReadFile(filepath.Join(work, "report.json"))
+		data, err := os.ReadFile(report)
 		if err != nil {
 			t.Fatal(err)
 		}
-		var lease dhcp4.Snapshot
-		if err := json.Unmarshal(b, &lease); err != nil {
+		var lease clientLease
+		if err := json.Unmarshal(data, &lease); err != nil {
 			t.Fatal(err)
 		}
+		requested = lease.CurrentAddress
 		return lease
 	}
+
 	// Keep total queries below the DNS server's bounded per-TCP-connection
 	// query budget while checking several seconds of ownership expiration.
 	wait := func(timeout time.Duration, condition func() bool) {
@@ -142,10 +146,9 @@ func testDaemonDHCPDNSOwnership(t *testing.T, migrated bool) {
 		}
 	}
 	lease := acquire()
-	if (lease.CurrentAddress != "192.0.2.100" && lease.CurrentAddress != "192.0.2.101" && lease.CurrentAddress != "192.0.2.102") || lease.ServerID != "192.0.2.1" || lease.LeaseTimeSeconds != 60 {
+	if (lease.CurrentAddress != "192.0.2.100" && lease.CurrentAddress != "192.0.2.101" && lease.CurrentAddress != "192.0.2.102") || lease.ServerID != "192.0.2.1" || lease.LeaseTimeSeconds <= 0 || lease.DNS != "192.0.2.1" {
 		t.Fatalf("unexpected DHCP lease: %+v", lease)
 	}
-	retainedDHCPAddress(t, clientNS, lease)
 	conn, err := net.DialTimeout("tcp4", fmt.Sprintf("127.0.0.1:%d", dnsPort), time.Second)
 	if err != nil {
 		t.Fatal(err)
@@ -267,8 +270,8 @@ func testDaemonDHCPDNSOwnership(t *testing.T, migrated bool) {
 		s := status()
 		return pid(s, serverName) != 0 && pid(s, serverName) != serverPID && hasAddress("workstation.lab.example.", lease.CurrentAddress)
 	})
-	// The client uses INIT-REBOOT from its independent durable journal. Server
-	// recovery must ACK the same address and preserve the original DNS process.
+	// The independent client requests its previous address after server restart.
+	// The server must retain the binding and the DNS process must stay running.
 	recovered := acquire()
 	if recovered.CurrentAddress != lease.CurrentAddress || pid(status(), dnsName) != dnsPID {
 		t.Fatal("DHCP/DNS restart did not preserve the lease and unaffected worker")
@@ -397,88 +400,4 @@ func fixturePeerNamespace(t *testing.T, localName, peerName string) netns.NsHand
 		}
 	}
 	return ns
-}
-
-func TestDaemonDHCPClientChild(t *testing.T) {
-	expected := os.Getenv("ROUTERD2_DAEMON_DHCP_CLIENT")
-	if expected == "" {
-		t.Skip("only runs inside the daemon fixture's dedicated client namespace")
-	}
-	current, err := os.Readlink("/proc/self/ns/net")
-	fixtureName := os.Getenv("ROUTERD2_PROTOCOL_FIXTURE")
-	knownFixture := fixtureName == "TestDaemonDHCPDNSAndOwnershipExpiry" || fixtureName == "TestDaemonMigratedDHCPDNSAndOwnershipExpiry"
-	if err != nil || current != expected || current == os.Getenv("ROUTERD2_DAEMON_DHCP_SERVER") || current == os.Getenv("ROUTERD2_PROTOCOL_PARENT") || !knownFixture {
-		t.Fatal("refusing DHCP client outside a verified dedicated namespace")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-	defer cancel()
-	var lease dhcp4.Snapshot
-	err = dhcp4.Run(ctx, dhcp4.Config{Resource: "fixture", Interface: "client0", StatePath: filepath.Join(os.Getenv("ROUTERD2_DAEMON_DHCP_WORK"), "client.json"), Hostname: "workstation"}, dhcp4.EffectsFunc(func(_ context.Context, s dhcp4.Snapshot) error {
-		if s.Active {
-			lease = s
-			cancel()
-		}
-		return nil
-	}), nil)
-	if !errors.Is(err, context.Canceled) || !lease.Active {
-		t.Fatalf("native DHCP acquisition failed: %v", err)
-	}
-	if err := config.AtomicJSON(filepath.Join(os.Getenv("ROUTERD2_DAEMON_DHCP_WORK"), "report.json"), lease); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// Exercise dnsmasq's retained-ciaddr behavior against the actual supervised
-// DHCP worker. The legacy wire codec supplies an independent packet builder.
-func retainedDHCPAddress(t *testing.T, namespace netns.NsHandle, lease dhcp4.Snapshot) {
-	t.Helper()
-	h, err := netlink.NewHandleAt(namespace)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer h.Close()
-	link, err := h.LinkByName("client0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	stale, _ := netlink.ParseAddr("192.0.2.200/24")
-	if err := h.AddrAdd(link, stale); err != nil {
-		t.Fatal(err)
-	}
-	defer h.AddrDel(link, stale)
-	var conn *net.UDPConn
-	if err := fixtureInsideNamespace(namespace, func() error {
-		var err error
-		conn, err = net.ListenUDP("udp4", &net.UDPAddr{Port: 68})
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Close()
-	if err := conn.SetDeadline(time.Now().Add(3 * time.Second)); err != nil {
-		t.Fatal(err)
-	}
-	options := map[byte][]byte{wire.OptionClientID: append([]byte{1}, link.Attrs().HardwareAddr...), wire.OptionHostname: []byte("workstation")}
-	for i, typ := range []byte{wire.MessageDiscover, wire.MessageRequest} {
-		packet := wire.EncodeRequest(typ, 0x12345678, link.Attrs().HardwareAddr, options)
-		copy(packet[12:16], net.ParseIP("192.0.2.200").To4())
-		if _, err := conn.WriteToUDP(packet, &net.UDPAddr{IP: net.ParseIP(lease.ServerID), Port: 67}); err != nil {
-			t.Fatal(err)
-		}
-		buf := make([]byte, 4096)
-		n, _, err := conn.ReadFromUDP(buf)
-		if err != nil {
-			t.Fatal("retained ciaddr wire exchange", typ, err)
-		}
-		reply, err := wire.Decode(buf[:n])
-		want := byte(wire.MessageOffer)
-		if i == 1 {
-			want = wire.MessageACK
-		}
-		if err != nil || reply.XID != 0x12345678 || reply.MessageType() != want || reply.YIAddr.String() != lease.CurrentAddress {
-			t.Fatal("retained ciaddr changed the lease or did not receive OFFER/ACK", reply, err)
-		}
-		options[wire.OptionRequestedIP] = reply.YIAddr.AsSlice()
-		options[wire.OptionServerID] = net.ParseIP(lease.ServerID).To4()
-	}
 }

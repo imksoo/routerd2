@@ -137,9 +137,7 @@ func (c *compiler) dhcpServer(r resource, reservations []resource) (dhcpserverco
 	if s.LeaseFile != "" {
 		c.reject(r, "leaseFile", "unsupported_semantics", "a legacy lease file is not a native journal; importing active or HA-replicated leases is a separate migration")
 	}
-	if s.StickyHoldDays > 0 {
-		c.reject(r, "stickyHoldDays", "unsupported_semantics", "the old daemon applies a global maximum hold and replays sticky hosts with a fixed lease; per-worker native sticky policy requires explicit replacement intent")
-	}
+
 	if !reflect.DeepEqual(s.DNS, api.DHCPv4ServerDNSSpec{}) {
 		c.reject(r, "dns", "unsupported_semantics", "embedded dnsmasq forwarding/cache settings require a separate explicitly compiled DNSResolver")
 	}
@@ -258,7 +256,7 @@ func (c *compiler) dhcpServer(r resource, reservations []resource) (dhcpserverco
 	if len(c.issues) != before {
 		return dhcpserverconfig.Config{}, false
 	}
-	cfg, err := dhcpserverconfig.FromSpec(service.DHCPServerConfig("/run/routerd", "/var/lib/routerd"), s, inputReservations)
+	cfg, err := dhcpserverconfig.FromSpec(service.DHCPServerConfig("/var/lib/routerd"), s, inputReservations)
 	if err != nil {
 		c.reject(r, "", "native_validation", "DHCP pool, scope, reservation, option or duration cannot be represented by the native server")
 		return dhcpserverconfig.Config{}, false
@@ -284,7 +282,7 @@ func (c *compiler) dhcpServer(r resource, reservations []resource) (dhcpserverco
 	service.DHCPServer.Primary, service.DHCPServer.Scopes, service.DHCPServer.Reservations = cfg.Primary, cfg.Scopes, cfg.Reservations
 	service.DHCPServer.StickyHoldDays = cfg.StickyHoldDays
 	c.addService(r, service)
-	c.note(r, "Static DHCP intent follows the pinned active chain. One native worker owns the interface, journal and leases; old lease/sticky/HA state is not imported. The dnsmasq router, DNS and broadcast defaults and 1000-lease limit are explicit.")
+	c.note(r, "Static DHCP intent follows the pinned active chain. One worker supervises the pinned dnsmasq engine and observes its lease file; old lease/sticky/HA state is not imported. The dnsmasq router, DNS and broadcast defaults and 1000-lease limit are explicit.")
 	for _, item := range reservations {
 		c.target(item, "services/"+service.Name+"/dhcp_server/reservations")
 	}
@@ -344,33 +342,11 @@ func (c *compiler) dhcpStaticDomain(r resource, source api.StatusValueSourceSpec
 	return zone.Spec.(api.DNSZoneSpec).Zone
 }
 
-// Native options intentionally support more syntax than the old config parser.
-// Only the shared typed subset is admitted here. Unknown backend text, quoting,
-// native hex: notation and implicit numeric/string coercion are not guessed.
+// Options retain routerd's dnsmasq syntax. The engine parses them; importing
+// intent must not impose an unrelated native wire encoder's restrictions.
 func (c *compiler) dhcpOptions(r resource, path string, options []api.DHCPv4OptionSpec) {
-	for i, option := range options {
-		p := path + "[" + strconv.Itoa(i) + "]"
-		if option.Code != 0 && option.Name != "" || option.Code == 0 && option.Name == "" || option.Value == "" {
-			c.reject(r, p, "invalid_value", "legacy DHCP options require one name or code and a nonempty value")
-			continue
-		}
-		if option.Name != strings.ToLower(strings.TrimSpace(option.Name)) || option.Value != strings.TrimSpace(option.Value) || strings.ContainsAny(option.Value, ":\"'\\#\r\n\t") {
-			c.reject(r, p, "unsupported_semantics", "backend option quoting, raw/hex syntax and noncanonical text need explicit native wire intent")
-			continue
-		}
-		encoded, err := dhcpserverconfig.EncodeOptions([]dhcpserverconfig.Option{option})
-		if err != nil {
-			c.reject(r, p, "unsupported_semantics", "this DHCP option is protocol-owned, unrecognized or has no shared typed native encoding")
-			continue
-		}
-		for code := range encoded {
-			switch code {
-			case 19, 20, 27, 29, 30, 31, 34, 36, 39:
-				if option.Value != "0" && option.Value != "1" {
-					c.reject(r, p, "unsupported_semantics", "legacy boolean wire options require decimal 0 or 1; native text aliases would reinterpret backend text")
-				}
-			}
-		}
+	if err := dhcpserverconfig.ValidateOptions(options); err != nil {
+		c.reject(r, path, "invalid_value", err.Error())
 	}
 }
 
@@ -432,9 +408,10 @@ func dhcpSelectorsOverlap(a, b dhcpserverconfig.Match) bool {
 
 func dhcpBroadcastDefault(scope dhcpserverconfig.Scope) []dhcpserverconfig.Option {
 	options := append([]dhcpserverconfig.Option(nil), scope.Options...)
-	encoded, _ := dhcpserverconfig.EncodeOptions(options)
-	if _, set := encoded[28]; set {
-		return options
+	for _, option := range options {
+		if option.Code == 28 || strings.EqualFold(option.Name, "broadcast") {
+			return options
+		}
 	}
 	prefix, _ := netip.ParsePrefix(scope.Prefix)
 	address := prefix.Addr().As4()

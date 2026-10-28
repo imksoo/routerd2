@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"net/netip"
 	"strings"
 	"time"
 
@@ -29,10 +28,10 @@ func ValidateSnapshot(c Config, s Snapshot) error {
 	if len(s.Error) > 2048 {
 		return errors.New("DHCP snapshot error text is too large")
 	}
-	if s.Sync != nil && (c.Replication == nil || c.Standby || s.Sync.AcknowledgedRevision > s.CheckpointRevision || len(s.Sync.Error) > 2048) {
+	if s.Sync != nil && (c.Replication == nil || c.Standby || len(s.Sync.Error) > 2048) {
 		return errors.New("invalid DHCP replication status")
 	}
-	if len(s.Leases) > c.MaxLeases || s.Stats.Quarantined < 0 || s.Stats.Quarantined > c.MaxLeases || s.Stats.Offers < 0 || s.Stats.Offers > c.MaxLeases {
+	if len(s.Leases) > c.MaxLeases {
 		return errors.New("DHCP snapshot exceeds configured bounds")
 	}
 	if !boottime.ValidBootID(s.BootID) || s.ObservedNanos == 0 || s.ExpiresNanos <= s.ObservedNanos || s.ExpiresNanos-s.ObservedNanos > uint64(ObservationLifetime) {
@@ -44,27 +43,22 @@ func ValidateSnapshot(c Config, s Snapshot) error {
 	if !s.Active && len(s.Leases) != 0 {
 		return errors.New("inactive DHCP snapshot cannot publish leases")
 	}
-	ids, ips := map[string]bool{}, map[string]bool{}
+	ips := map[string]bool{}
 	for _, l := range s.Leases {
-		if err := ValidateLease(c, l, s.ObservedAt); err != nil {
+		if err := validateLease(l, s.ObservedAt); err != nil {
 			return fmt.Errorf("DHCP snapshot lease: %w", err)
 		}
-		key := l.Scope + "|" + l.ClientID
-		if l.ClientID == "" {
-			key = l.Scope + "|mac:" + l.MACAddress
+		if ips[l.IPAddress] {
+			return errors.New("DHCP snapshot has duplicate address bindings")
 		}
-		if ids[key] || ips[l.IPAddress] {
-			return errors.New("DHCP snapshot has duplicate client or address bindings")
-		}
-		ids[key], ips[l.IPAddress] = true, true
+		ips[l.IPAddress] = true
 	}
 	return nil
 }
 
-// ValidateLease accepts normalized configuration. Old unexpired journal records
-// that no longer fit committed intent remain allocation exclusions, but are not
-// published as current DNS ownership until the client obtains a current lease.
-func ValidateLease(c Config, l Lease, observed time.Time) error {
+// Only externally consumed lease facts cross this boundary. Pool selection
+// and reservation policy belong to dnsmasq, not a second Go allocator.
+func validateLease(l Lease, observed time.Time) error {
 	mac, err := net.ParseMAC(l.MACAddress)
 	if err != nil || len(mac) != 6 || mac[0]&1 != 0 || mac.String() != l.MACAddress {
 		return errors.New("invalid Ethernet client identity")
@@ -76,67 +70,14 @@ func ValidateLease(c Config, l Lease, observed time.Time) error {
 	if len(id) == 0 && l.MACAddress == "00:00:00:00:00:00" {
 		return errors.New("missing client identity")
 	}
-	a, err := ipv4(l.IPAddress)
-	if err != nil {
+	if _, err := ipv4(l.IPAddress); err != nil {
 		return err
-	}
-	scope := SelectScope(c, mac)
-	var reservation *Reservation
-	for i := range c.Reservations {
-		r := &c.Reservations[i]
-		if r.MACAddress == l.MACAddress {
-			reservation = r
-			if r.Scope != "" {
-				if c.Primary.Name == r.Scope {
-					scope = c.Primary
-				}
-				for _, s := range c.Scopes {
-					if s.Name == r.Scope {
-						scope = s
-					}
-				}
-			}
-			break
-		}
-	}
-	if l.Scope != scope.Name {
-		return errors.New("lease is outside the client's selected scope")
-	}
-	prefix, err := netip.ParsePrefix(scope.Prefix)
-	if err != nil || !Usable(prefix, a) || l.IPAddress == c.ServerAddress {
-		return errors.New("lease is not a usable address in its scope")
-	}
-	if InfrastructureAddress(c, l.IPAddress) {
-		return errors.New("lease assigns the server or a configured router address")
-	}
-	seconds := scope.LeaseSeconds
-	if reservation != nil {
-		if !l.Reserved || l.IPAddress != reservation.IPAddress {
-			return errors.New("lease does not match its reservation")
-		}
-		if reservation.Hostname != "" && l.Hostname != reservation.Hostname {
-			return errors.New("lease hostname differs from its reservation")
-		}
-		if reservation.LeaseSeconds != 0 {
-			seconds = reservation.LeaseSeconds
-		}
-	} else {
-		start, e1 := netip.ParseAddr(scope.Start)
-		end, e2 := netip.ParseAddr(scope.End)
-		if l.Reserved || e1 != nil || e2 != nil || a.Compare(start) < 0 || a.Compare(end) > 0 {
-			return errors.New("dynamic lease is outside the pool")
-		}
-		for _, r := range c.Reservations {
-			if r.IPAddress == l.IPAddress {
-				return errors.New("dynamic lease uses another client's reservation")
-			}
-		}
 	}
 	if l.Hostname != "" && !ValidHostname(l.Hostname) {
 		return errors.New("invalid lease hostname")
 	}
-	if l.AcquiredAt.IsZero() || l.RenewedAt.Before(l.AcquiredAt) || l.RenewedAt.After(observed) || !l.ExpiresAt.After(observed) || !l.ExpiresAt.After(l.RenewedAt) || l.ExpiresAt.After(l.RenewedAt.Add(time.Duration(seconds)*time.Second)) {
-		return errors.New("lease timestamps exceed committed finite duration")
+	if !l.ExpiresAt.After(observed) {
+		return errors.New("lease has expired")
 	}
 	return nil
 }

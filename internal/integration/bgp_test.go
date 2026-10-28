@@ -377,6 +377,11 @@ func isolateFixtureTimeout(t *testing.T, name string, timeout time.Duration) boo
 		}
 		cmd.ExtraFiles = files
 		cmd.SysProcAttr = &syscall.SysProcAttr{Cloneflags: unix.CLONE_NEWUSER | unix.CLONE_NEWNET, UidMappings: []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getuid(), Size: 1}}, GidMappings: []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getgid(), Size: 1}}, GidMappingsEnableSetgroups: false}
+		// Root fixtures use a real privileged network namespace. A user namespace
+		// with setgroups denied cannot exercise an engine's normal privilege setup.
+		if os.Geteuid() == 0 {
+			cmd.SysProcAttr = &syscall.SysProcAttr{Cloneflags: unix.CLONE_NEWNET}
+		}
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			if (errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES)) && os.Getenv("ROUTERD2_INTEGRATION_REQUIRED") != "1" {
@@ -442,6 +447,18 @@ func startFixtureDaemonSelected(t *testing.T, doc config.Document, dir string, s
 		t.Fatal(err)
 	}
 	boot := runtimeconfig.Boot{Platform: "host", Config: configPath, Workers: runtimeconfig.NativeWorkers(filepath.Join(os.Getenv("ROUTERD2_TEST_BIN_DIR"), "routerd-modules")), RuntimeDir: runDir, StateDir: stateDir, SSH: runtimeconfig.SSH{User: "admin"}}
+	plan, err := config.Compile(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, service := range plan.Native.Services {
+		if service.DHCPServer != nil {
+			boot.Workers["dhcp_server"] = filepath.Join(os.Getenv("ROUTERD2_TEST_BIN_DIR"), "routerd-modules")
+			boot.Engines = map[string]string{"dhcp_server": filepath.Join(os.Getenv("ROUTERD2_TEST_BIN_DIR"), "dnsmasq-engine.tar")}
+			break
+		}
+	}
+
 	boot.Startup = startup
 	bootPath := filepath.Join(dir, "boot.json")
 	if err := config.AtomicJSON(bootPath, boot); err != nil {

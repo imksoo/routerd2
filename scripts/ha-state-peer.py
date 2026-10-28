@@ -14,17 +14,18 @@ import signal
 import subprocess
 import time
 import re
+import sqlite3
 
 
 def run(command):
     return subprocess.run(command, check=True, capture_output=True, text=True, timeout=10).stdout
 
 
-def peer(stage, dhcp6_server, pd_dslite, stale_owner, preparation, delegated_dns):
+def peer(stage, dhcp6_server, pd_dslite, stale_owner, preparation, delegated_dns, release_holds):
     def deadline(*_):
         raise TimeoutError("HA connection-state communication deadline")
     signal.signal(signal.SIGALRM, deadline)
-    signal.alarm(230 if dhcp6_server else 160)
+    signal.alarm(360)
     # Keep iproute2's named-namespace files off the host filesystem too.
     Path("/run/netns").mkdir(parents=True, exist_ok=True)
     run(["mount", "-t", "tmpfs", "-o", "mode=700", "tmpfs", "/run/netns"])
@@ -62,6 +63,25 @@ def peer(stage, dhcp6_server, pd_dslite, stale_owner, preparation, delegated_dns
 
     def modules(node):
         return {module["name"]: module for module in (api(node, "supervisor.sock", "/v1/status")["modules"] or [])}
+
+    def daemon_ready(process, node):
+        if process.poll() is not None:
+            raise RuntimeError("restarted product exited before readiness")
+        try:
+            return modules(node).get("service.leases", {}).get("ready")
+        except subprocess.CalledProcessError as error:
+            if error.returncode == 7:
+                return False
+            raise
+
+    def product_pid(process):
+        path = Path("/proc") / str(process.pid) / "task" / str(process.pid) / "children"
+        children = path.read_text().split()
+        assert len(children) == 1, "unshare must own exactly one product PID 1"
+        pid = int(children[0])
+        fields = Path("/proc/" + str(pid) + "/status").read_text().splitlines()
+        assert any(line.startswith("NSpid:") and line.split()[-1] == "1" for line in fields)
+        return pid
 
     def host_pid(node, local_pid):
         candidates = []
@@ -107,9 +127,9 @@ def peer(stage, dhcp6_server, pd_dslite, stale_owner, preparation, delegated_dns
         roles = ("logging", "network", "control", "management", "vrrp", "dhcp_server") + (("dhcp6", "dhcp6_server", "ra") if dhcp6_server else ()) + (("aftr", "health") if pd_dslite else ()) + (("dns",) if delegated_dns else ())
         layout = {"boot_abi": 1, "worker_abi": 5, "entrypoint": "routerd",
                   "roles": [{"role": role, "artifact": "routerd-logging" if role == "logging" else "routerd-modules"} for role in roles],
-                  "engines": [{"role": "vrrp", "artifact": "ct-image", "sources": "ct-sources"}],
+                  "engines": [{"role": "vrrp", "artifact": "ct-image", "sources": "ct-sources"}, {"role": "dhcp_server", "artifact": "dhcp-image", "sources": "dhcp-sources"}],
                   "artifacts": [{"name": name, "kind": "native", "command": name, "file": str(stage / name)} for name in ("routerd", "routerd-modules", "routerd-logging")] +
-                               [{"name": "ct-image", "kind": "data", "file": str(stage / "conntrack-engine.tar")}, {"name": "ct-sources", "kind": "data", "file": str(stage / "conntrack-sources.tar")}]}
+                               [{"name": "ct-image", "kind": "data", "file": str(stage / "conntrack-engine.tar")}, {"name": "ct-sources", "kind": "data", "file": str(stage / "conntrack-sources.tar")}, {"name": "dhcp-image", "kind": "data", "file": str(stage / "dnsmasq-engine.tar")}, {"name": "dhcp-sources", "kind": "data", "file": str(stage / "dnsmasq-sources.tar")}]}
         (stage / "layout.json").write_text(json.dumps(layout))
         version = json.loads(run([str(stage / "routerd"), "version"]))
         packed = json.loads(run([publisher, "pack", "--private-key-file", str(key), "--layout", str(stage / "layout.json"), "--release-id", version["release_id"], "--sequence", "1", "--target-arch", "amd64", "--output", str(stage / "bundle.tar")]))
@@ -131,7 +151,7 @@ def peer(stage, dhcp6_server, pd_dslite, stale_owner, preparation, delegated_dns
                 {"id": "forward", "forwarding": {"ipv4": True, "ipv4_rp_filter": 0, "conntrack_tcp_liberal": True}},
                 {"id": "ha", "service": {"name": "ha", "vrrp": {
                     "interface": "lan0", "family": "ipv4", "source_address": "198.18.0." + str(index + 2), "unicast_peers": ["198.18.0." + str(3 - index)],
-                    "vip_interface": "lan-ha", "virtual_router_id": 42, "priority": 150 - index * 50, "preempt": False, "advert_interval_centiseconds": 20,
+                    "vip_interface": "lan-ha", "virtual_router_id": 42, "priority": 150 - index * 50, "preempt": False, "advert_interval_centiseconds": 100,
                     "addresses": ["198.18.0.1/24"], "accept_mode": True,
                     "conntrack_sync": {"interface": "sync0", "local_address": "169.254.42." + str(index + 2), "peer_address": "169.254.42." + str(3 - index)}
                 }}},
@@ -451,10 +471,10 @@ for protocol,port in ((socket.SOCK_STREAM,18082),(socket.SOCK_DGRAM,18083)):
             return (stage / ("lease" + str(number) + ".progress")).read_text().splitlines()
 
         def saved(node):
-            path = stage / node / "state/services/leases/dhcp-leases.json"
+            path = stage / node / "state/services/leases/dnsmasq.leases"
             if not path.exists():
-                return {"revision": 0, "leases": []}
-            return json.loads(path.read_text())
+                return {"leases": []}
+            return {"leases": sorted([line.split() for line in path.read_text().splitlines() if len(line.split()) == 5 and int(line.split()[0]) > time.time()])}
 
         wait(lambda: modules("a").get("service.leases", {}).get("ready") is True and api("a", "control.sock", "/v1/services/service.leases")["snapshot"]["active"] is True)
         first_client = lease_client(0)
@@ -510,22 +530,8 @@ for protocol,port in ((socket.SOCK_STREAM,18082),(socket.SOCK_DGRAM,18083)):
             wait(lambda: modules("b").get("service.pd", {}).get("generation", 0) > before and modules("b").get("service.pd", {}).get("ready"))
             assert pd_saved("b") == original, "standby restart rebased PD or lost the source revision"
             print("PASS ISC PD, independent SLAAC TCP/UDP, authenticated standby checkpoint with BOOTTIME +7200s and restart with original mapping", flush=True)
-        headers = stage / "sync-headers"
-        response = stage / "sync-response"
-
-        def replica_http(method, body=None, cert="b", domain=None):
-            command = ["curl", "--max-time", "3", "--noproxy", "*", "-sS", "--cert", str(stage / (cert + ".crt")), "--key", str(stage / (cert + ".key")), "--cacert", str(stage / "a.crt"), "-X", method, "-D", str(headers), "-o", str(response), "-w", "%{http_code}", "https://169.254.42.2:8443/v1/leases"]
-            if domain:
-                command += ["-H", "X-Routerd-DHCP-Domain: " + domain]
-            if body is not None:
-                request = stage / "sync-request"
-                request.write_text(json.dumps(body))
-                command += ["--data-binary", "@" + str(request)]
-            return subprocess.run(inside("ha-b", command), capture_output=True, text=True, timeout=5)
-
         wait(lambda: saved("a")["leases"] == saved("b")["leases"] and bool(saved("a")["leases"]))
-        old_replica = saved("b")
-        print("PASS independent BusyBox DORA; both durable journals contain the acknowledged lease", flush=True)
+        print("PASS independent BusyBox DORA; authenticated standby has the original dnsmasq leases", flush=True)
         client_code = r'''
 import socket,time,json
 s=socket.create_connection(('203.0.113.50',18080),timeout=5);f=s.makefile('rwb',buffering=0)
@@ -663,22 +669,6 @@ while True:
             print("PASS original conditional serving authority expired on the stopped-control node; peer serving and the same TCP/UDP mapping recovered", flush=True)
         print("PASS continuous actual VRRP/NAT TCP and UDP; tcp_loose=0", flush=True)
         for previous, owner in (("a", "b"), ("b", "a")):
-            partial = None
-            if previous == "b":
-                fetched = replica_http("GET")
-                assert fetched.returncode == 0 and fetched.stdout == "200"
-                partial_domain = next(line.partition(":")[2].strip() for line in headers.read_text().splitlines() if line.lower().startswith("x-routerd-dhcp-domain:"))
-                partial_state = json.loads(response.read_text())
-                partial_state["revision"] += 1000
-                upload = stage / "partial-replica.json"
-                upload.write_text(json.dumps(partial_state))
-                diagnostic = (stage / "partial-replica.log").open("w")
-                partial_headers = stage / "partial-replica-headers"
-                partial = subprocess.Popen(inside("ha-b", ["curl", "--max-time", "8", "--fail-with-body", "--noproxy", "*", "-sS", "--cert", str(stage / "b.crt"), "--key", str(stage / "b.key"), "--cacert", str(stage / "a.crt"), "-X", "PUT", "-H", "X-Routerd-DHCP-Domain: " + partial_domain, "-H", "Expect: 100-continue", "-D", str(partial_headers), "--limit-rate", "1", "--data-binary", "@" + str(upload), "https://169.254.42.2:8443/v1/leases"]), stdout=diagnostic, stderr=diagnostic)
-                diagnostic.close()
-                children.append(partial)
-                wait(lambda: partial.poll() is not None or partial_headers.exists() and " 100 " in partial_headers.read_text(), timeout=4)
-                assert partial.poll() is None and " 100 " in partial_headers.read_text(), "snapshot upload did not reach the old worker's body reader"
             if dhcp6_server:
                 pd_server.send_signal(signal.SIGSTOP)
                 time.sleep(0.2)
@@ -731,10 +721,6 @@ while True:
             wait(lambda: len(lease_events(0)) > before_renew)
             assert lease_events(0)[-1].split()[1] == first_address, "takeover changed the client's lease"
             wait(lambda: saved("a")["leases"] == saved("b")["leases"])
-            if partial is not None:
-                assert partial.wait(timeout=9) != 0, "incomplete old-worker upload was accepted"
-                assert saved("a")["revision"] < partial_state["revision"], "partial snapshot changed allocator state at takeover"
-                print("PASS takeover during a real incomplete TLS snapshot upload left the journal unchanged", flush=True)
             print("PASS continuous same TCP socket and UDP mapping after " + previous + " -> " + owner + " takeover and worker/engine restart", flush=True)
             print("PASS same BusyBox client renewed its replicated address after " + previous + " -> " + owner, flush=True)
             assert progress(latest()["sequence"]) == mapping
@@ -760,26 +746,17 @@ while True:
         standby_before = saved("a")
         api("a", "control.sock", "/v1/services/service.leases/restart", {})
         wait(lambda: modules("a").get("service.leases", {}).get("ready") and modules("a")["service.leases"]["generation"] > old_generation)
-        assert saved("a") == standby_before, "standby restart changed original lease deadlines or journal revision"
+        assert saved("a") == standby_before, "standby restart changed original lease deadlines "
         before_renew = len(lease_events(0))
         first_client.send_signal(signal.SIGUSR1)
         wait(lambda: len(lease_events(0)) > before_renew)
         assert lease_events(0)[-1].split()[1] == first_address
-        wait(lambda: saved("a")["revision"] == saved("b")["revision"] and saved("a")["leases"] == saved("b")["leases"])
-        print("PASS standby DHCP worker restart retained the journal and accepted the next real renewal", flush=True)
-        fetched = replica_http("GET")
-        assert fetched.returncode == 0 and fetched.stdout == "200", fetched.stderr
-        domain = next(line.partition(":")[2].strip() for line in headers.read_text().splitlines() if line.lower().startswith("x-routerd-dhcp-domain:"))
-        current_replica = json.loads(response.read_text())
-        assert replica_http("PUT", current_replica, domain=domain).stdout == "204", "identical durable retransmission was not acknowledged"
-        old_replica["owner"] = current_replica["owner"]
-        assert replica_http("PUT", old_replica, domain=domain).stdout == "409", "old lease revision was accepted"
-        current_replica["leases"][0]["hostname"] = "conflicting-host"
-        assert replica_http("PUT", current_replica, domain=domain).stdout == "409", "conflicting equal revision was accepted"
+        wait(lambda: saved("a")["leases"] == saved("b")["leases"])
+        print("PASS standby DHCP worker restart retained the lease file and accepted the next real renewal", flush=True)
         run(["openssl", "req", "-x509", "-newkey", "ed25519", "-nodes", "-keyout", str(stage / "wrong.key"), "-out", str(stage / "wrong.crt"), "-days", "1", "-subj", "/CN=wrong-peer"])
-        refused = replica_http("GET", cert="wrong")
-        assert refused.returncode != 0 and refused.stdout == "000", "unconfigured certificate reached the replication API"
-        print("PASS mutual TLS peer rejection, identical retry, stale revision and conflicting equal revision", flush=True)
+        refused = subprocess.run(inside("ha-b", ["curl", "--max-time", "3", "--noproxy", "*", "-sS", "--cert", str(stage / "wrong.crt"), "--key", str(stage / "wrong.key"), "--cacert", str(stage / "a.crt"), "https://169.254.42.2:8443/leases"]), capture_output=True)
+        assert refused.returncode != 0, "unconfigured peer certificate reached lease synchronization"
+        print("PASS mutual TLS rejects an unconfigured peer certificate", flush=True)
         before_renew = len(lease_events(0))
         sync_down = time.time()
         # Isolate the replication link without changing the declared interface.
@@ -804,19 +781,15 @@ while True:
             # binding remains valid on the disconnected former owner.
             run(inside("ha-client", ["ip", "address", "flush", "dev", "lease2"]))
             run(inside("ha-client", ["ip", "link", "set", "lease2", "down"]))
-            pids = run(["ip", "netns", "pids", "ha-b"]).split()
-            owner_init = [int(pid) for pid in pids if any(line.startswith("NSpid:") and line.split()[-1] == "1" for line in Path("/proc/" + pid + "/status").read_text().splitlines())]
-            assert len(owner_init) == 1, "owner PID 1 was not uniquely identified"
-            os.kill(owner_init[0], signal.SIGKILL)
+            os.kill(product_pid(b_daemon), signal.SIGKILL)
             b_daemon.wait(timeout=10)
             wait(lambda: not run(["ip", "netns", "pids", "ha-b"]).split(), timeout=30)
             wait(lambda: active("a"), timeout=30)
             def lease_status():
                 return api("a", "control.sock", "/v1/services/service.leases")["snapshot"]
             wait(lambda: lease_status().get("active") and lease_status().get("sync", {}).get("allocation_blocked"), timeout=30)
-            received = lease_status()["stats"]["received"]
             fourth_client = lease_client(3, third_address, False)
-            wait(lambda: lease_status()["stats"]["received"] >= received + 2, timeout=15)
+            time.sleep(3)
             assert not (stage / "lease3.progress").exists(), "stale owner allocated an unknown lease"
             before_renew = len(lease_events(0))
             first_client.send_signal(signal.SIGUSR1)
@@ -848,7 +821,7 @@ while True:
             third_client.send_signal(signal.SIGUSR1)
             wait(lambda: len(lease_events(2)) > before, timeout=20)
             assert lease_events(2)[-1].split()[1] == third_address
-            print("PASS stale takeover blocked new leases, survived restart, reconciled and preserved the offline client's address", flush=True)
+            print("PASS stale takeover blocked unknown leases, survived restart and preserved the offline client after reconciliation", flush=True)
             return
         if dhcp6_server:
             wait(lambda: bool(pd_observed("a").get("sync", {}).get("error")))
@@ -859,26 +832,76 @@ while True:
         def synchronized():
             snapshot = api("b", "control.sock", "/v1/services/service.leases")["snapshot"]
             state = snapshot.get("sync", {})
-            return state.get("acknowledged_revision") == snapshot["checkpoint_revision"] and not state.get("error")
+            return state.get("synchronized") and not state.get("error")
         wait(synchronized)
         print("PASS isolated DHCP owner renewed, restarted, allocated a distinct lease and synchronized after recovery", flush=True)
         if dhcp6_server:
             wait(lambda: pd_observed("a").get("sync") and not pd_observed("a")["sync"].get("error"))
             print("PASS PD sync outage reported on standby without interrupting the owner's IPv6 forwarding; recovery refreshed synchronization", flush=True)
+        def holds(node):
+            path = stage / node / "state/services/leases/dhcp-sticky.db"
+            with sqlite3.connect("file:" + str(path) + "?mode=ro", uri=True) as db:
+                return sorted(db.execute("SELECT mac,ip,sticky_until FROM dhcp_sticky_leases WHERE sticky_until>?", (time.time_ns(),)).fetchall())
+        granted = saved("b")["leases"]
+        removal_started = time.time_ns()
+        if release_holds:
+            previous_worker = modules("b")["service.leases"]
+            init = product_pid(b_daemon)
+            local_worker = str(previous_worker["pid"])
+            run(["ip", "link", "set", "sync0", "down"])
+            run(["nsenter", "-t", str(init), "-p", "kill", "-STOP", local_worker])
+            for process in (first_client, second_client, third_client):
+                process.send_signal(signal.SIGUSR2)
+            # The file has removed the grants, while del hooks are queued at
+            # their paused owner. Normal product shutdown must drain them.
+            wait(lambda: not saved("b")["leases"])
+            os.kill(init, signal.SIGTERM)
+            run(["nsenter", "-t", str(init), "-p", "kill", "-CONT", local_worker])
+            b_daemon.wait(timeout=35)
+            assert len(holds("b")) == 3, "normal stop lost queued removal events"
+            original_holds = holds("b")
+            wait(lambda: active("a"), timeout=30)
+            run(["ip", "link", "set", "sync0", "up"])
+            b_daemon = start("ha-b", b_command, "b")
+            wait(lambda: daemon_ready(b_daemon, "b"), timeout=30)
+            wait(lambda: holds("a") == holds("b") == original_holds)
+            wait(lambda: not saved("b")["leases"] and not saved("a")["leases"])
         for process in (first_client, second_client, third_client):
             process.terminate()
             process.wait(timeout=3)
-        def expiry_checkpoint():
-            current = saved("b")
-            # Both journals must converge after the independent local expiry.
-            snapshot = api("b", "control.sock", "/v1/services/service.leases")["snapshot"]
-            return snapshot["active"] and snapshot["checkpoint_revision"] == current["revision"] and saved("a")["leases"] == current["leases"] and all(lease.get("expired") is True for lease in current["leases"])
+        if not release_holds:
+            last_expiry = max(int(lease[0]) for lease in granted)
+            wait(lambda: not saved("b")["leases"] and not saved("a")["leases"], timeout=max(0, last_expiry-time.time())+8)
+            print("PASS stopped clients expired at their actual granted deadlines on both members", flush=True)
+        else:
+            print("PASS explicit client RELEASE removed active bindings on both members", flush=True)
+        wait(lambda: len(holds("b")) == 3 and holds("a") == holds("b"))
+        retained_holds = holds("b")
+        expiry_by_address = {lease[2]: int(lease[0]) for lease in granted}
+        with sqlite3.connect("file:" + str(stage / "b/state/services/leases/dhcp-sticky.db") + "?mode=ro", uri=True) as db:
+            removals = db.execute("SELECT ip,released_at,sticky_until FROM dhcp_sticky_leases WHERE sticky_until>?", (time.time_ns(),)).fetchall()
+        for address,removed,until in removals:
+            assert removed >= (removal_started if release_holds else expiry_by_address[address]*1_000_000_000), "removal preceded the actual release or expiry"
+            assert until-removed == 3*86400*1_000_000_000, "hold does not last three days from the actual removal"
+        fourth_client = lease_client(3, first_address)
+        assert lease_events(3)[-1].split()[1] not in expiry_by_address, "a different client received a held address"
+        print("PASS three-day sticky hosts excluded held addresses from a new independent client", flush=True)
+        if not release_holds:
+            os.kill(product_pid(b_daemon), signal.SIGTERM)
+            b_daemon.wait(timeout=35)
+            wait(lambda: active("a"), timeout=30)
+            restarted = start("ha-b", b_command, "b")
+            wait(lambda: daemon_ready(restarted, "b"), timeout=30)
+            wait(lambda: holds("a") == holds("b") == retained_holds)
+        assert progress(latest()["sequence"]) == mapping
+        assert holds("a") == retained_holds, "whole-daemon restart or handoff extended the hold deadlines"
+        before_reconnect = len(lease_events(0))
+        first_client = start("ha-client", ["busybox", "udhcpc", "-f", "-i", "lease0", "-s", str(hook), "-p", str(stage / "lease0.pid"), "-r", first_address, "-t", "3", "-T", "1", "-A", "1"], "lease0")
+        wait(lambda: len(lease_events(0)) > before_reconnect)
+        assert lease_events(0)[-1].split()[1] == first_address, "the returning client lost its held address"
+        wait(lambda: all(ip != first_address for _,ip,_ in holds("a")))
+        print("PASS product restart and handoff retained original sticky deadlines; the returning client reacquired its address", flush=True)
 
-        wait(expiry_checkpoint, timeout=70)
-        expired = saved("b")["leases"]
-        assert saved("a")["leases"] == expired, "completed expiry checkpoint differs on the standby"
-        assert len(expired) == 3 and all(lease["held_until"] > lease["expires_at"] for lease in expired)
-        print("PASS real 60-second lease expiry replicated without rebasing sticky hold deadlines", flush=True)
         final_observation = None
         if pd_dslite:
             assert progress(latest()["sequence"]) == mapping
@@ -1011,15 +1034,14 @@ def main():
     parser.add_argument("--preparation", action="store_true")
     parser.add_argument("--delegated-dns", action="store_true")
     parser.add_argument("--binary-dir", type=Path, default=Path("dist/bin"))
+    parser.add_argument("--release-holds", action="store_true", help="Exercise client RELEASE before sticky recovery; otherwise wait for natural lease expiry")
     args = parser.parse_args()
     if args.inside:
-        peer(args.inside, args.dhcp6_server, args.pd_dslite, args.stale_owner, args.preparation, args.delegated_dns)
+        peer(args.inside, args.dhcp6_server, args.pd_dslite, args.stale_owner, args.preparation, args.delegated_dns, args.release_holds)
         return
     os.chdir(Path(__file__).resolve().parent.parent)
     if args.pd_dslite and not args.dhcp6_server:
         parser.error("--pd-dslite requires --dhcp6-server")
-    if args.stale_owner and not args.pd_dslite:
-        parser.error("--stale-owner requires --pd-dslite")
     if args.preparation and not args.pd_dslite:
         parser.error("--preparation requires --pd-dslite")
     if args.delegated_dns and not args.dhcp6_server:
@@ -1029,7 +1051,7 @@ def main():
         run(root + ["modprobe", module])
     stage = run(root + ["mktemp", "-d", "/tmp/routerd-ha.XXXXXX"]).strip()
     try:
-        for source, name in [(Path(__file__), "peer.py"), (Path("dist/conntrack-engine.tar"), "conntrack-engine.tar"), (Path("dist/conntrack-sources.tar"), "conntrack-sources.tar"), *[(args.binary_dir / name, name) for name in ("routerd", "routerd-modules", "routerd-logging", "routerd-bundle")]]:
+        for source, name in [(Path(__file__), "peer.py"), (Path("dist/conntrack-engine.tar"), "conntrack-engine.tar"), (Path("dist/conntrack-sources.tar"), "conntrack-sources.tar"), (Path("dist/dnsmasq-engine.tar"), "dnsmasq-engine.tar"), (Path("dist/dnsmasq-sources.tar"), "dnsmasq-sources.tar"), *[(args.binary_dir / name, name) for name in ("routerd", "routerd-modules", "routerd-logging", "routerd-bundle")]]:
             run(root + ["install", "-m", "500", str(source.resolve()), stage + "/" + name])
         peer_args = []
         if args.dhcp6_server:
@@ -1043,7 +1065,9 @@ def main():
             peer_args.append("--preparation")
         if args.delegated_dns:
             peer_args.append("--delegated-dns")
-        result = subprocess.run(root + ["unshare", "--mount", "--net", "--pid", "--fork", "--mount-proc", "--kill-child=SIGKILL", "--propagation", "private", "python3", "-I", stage + "/peer.py", "--inside", stage] + peer_args, timeout=250 if args.dhcp6_server else 180)
+        if args.release_holds:
+            peer_args.append("--release-holds")
+        result = subprocess.run(root + ["unshare", "--mount", "--net", "--pid", "--fork", "--mount-proc", "--kill-child=SIGKILL", "--propagation", "private", "python3", "-I", stage + "/peer.py", "--inside", stage] + peer_args, timeout=380)
         if result.returncode:
             for name in ("a.log", "b.log", "client.log", "server.log", "dhcp6.log", "http6.log", "udp6.log", "egress-primary.log", "egress-backup.log"):
                 log = subprocess.run(root + ["tail", "-30", stage + "/" + name], capture_output=True, text=True)

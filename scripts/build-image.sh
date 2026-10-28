@@ -10,6 +10,8 @@ boot_file="$project_dir/images/boot.json"
 kernel_root=/
 engine_image="$project_dir/dist/pppoe-engine.tar"
 engine_sources="$project_dir/dist/pppoe-sources.tar"
+dhcp_image="$project_dir/dist/dnsmasq-engine.tar"
+dhcp_sources="$project_dir/dist/dnsmasq-sources.tar"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -43,6 +45,7 @@ if [ -n "$package_dir" ]; then
   fi
   package_file=$1
   engine_sources="$package_dir/pppoe-sources.tar"
+  dhcp_sources="$package_dir/dnsmasq-sources.tar"
   # The APK is generated in the same build. --no-scripts prevents packaging hooks
   # from introducing runtime init or service-manager dependencies.
   apk --root "$package_root" --initdb --no-scripts --no-network --allow-untrusted add "$package_file"
@@ -51,6 +54,7 @@ else
   # distinguishes it from an APK build; it does not skip or claim abuild checks.
   mkdir -p "$package_root/usr/sbin" "$package_root/usr/libexec" "$package_root/usr/share/licenses/routerd2" "$package_root/usr/lib/routerd"
   cp "$engine_image" "$package_root/usr/lib/routerd/pppoe-engine.tar"
+  cp "$dhcp_image" "$package_root/usr/lib/routerd/dnsmasq-engine.tar"
   cp "$binary_dir/routerd" "$package_root/usr/sbin/routerd"
   cp "$binary_dir/routerd-modules" "$package_root/usr/libexec/routerd-modules"
   cp "$binary_dir/routerd-logging" "$package_root/usr/libexec/routerd-logging"
@@ -73,6 +77,8 @@ cp "$package_root/usr/libexec/routerd-modules" "$rootfs/usr/libexec/routerd-modu
 cp "$package_root/usr/libexec/routerd-logging" "$rootfs/usr/libexec/routerd-logging"
 cp "$package_root/usr/lib/routerd/pppoe-engine.tar" "$rootfs/usr/lib/routerd/pppoe-engine.tar"
 cp "$engine_sources" "$output_dir/pppoe-sources.tar"
+cp "$package_root/usr/lib/routerd/dnsmasq-engine.tar" "$rootfs/usr/lib/routerd/dnsmasq-engine.tar"
+cp "$dhcp_sources" "$output_dir/dnsmasq-sources.tar"
 cp "$package_root/usr/share/licenses/routerd2/LICENSE" "$rootfs/usr/share/licenses/routerd2/LICENSE"
 cp -a "$package_root/usr/share/licenses/routerd2/dependencies" "$rootfs/usr/share/licenses/routerd2/"
 cp "$config_file" "$rootfs/etc/routerd/config.json"
@@ -185,6 +191,12 @@ manifest = {
         "sha256": hashlib.sha256((root / "usr/lib/routerd/pppoe-engine.tar").read_bytes()).hexdigest(),
         "sources_file": "pppoe-sources.tar",
         "sources_sha256": hashlib.sha256((output / "pppoe-sources.tar").read_bytes()).hexdigest(),
+    },
+    "dhcp_engine": {
+        "path": "/usr/lib/routerd/dnsmasq-engine.tar",
+        "sha256": hashlib.sha256((root / "usr/lib/routerd/dnsmasq-engine.tar").read_bytes()).hexdigest(),
+        "sources_file": "dnsmasq-sources.tar",
+        "sources_sha256": hashlib.sha256((output / "dnsmasq-sources.tar").read_bytes()).hexdigest(),
     },
     "platform": boot["platform"],
     "kernel_modules": boot["kernel_modules"],

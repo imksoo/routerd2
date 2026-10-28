@@ -4,6 +4,7 @@ ARG ALPINE_VERSION=3.24.3
 ARG TARGETARCH
 
 FROM routerd2-pppoe-engine:${ALPINE_VERSION}-${TARGETARCH} AS ppp-artifacts
+FROM routerd2-dnsmasq-engine:${ALPINE_VERSION}-${TARGETARCH} AS dhcp-artifacts
 
 FROM golang:${GO_VERSION}-alpine3.24 AS toolchain
 
@@ -14,6 +15,8 @@ RUN apk add --no-cache alpine-sdk ca-certificates tar python3 \
  && adduser -D -G abuild builder \
  && mkdir -p /out \
  && chown builder:abuild /out
+COPY --from=dhcp-artifacts /dnsmasq-engine.tar /inputs/dnsmasq-engine.tar
+COPY --from=dhcp-artifacts /dnsmasq-sources.tar /out/dnsmasq-sources.tar
 COPY --from=ppp-artifacts /pppoe-engine.tar /inputs/pppoe-engine.tar
 COPY --from=ppp-artifacts /pppoe-sources.tar /out/pppoe-sources.tar
 WORKDIR /src

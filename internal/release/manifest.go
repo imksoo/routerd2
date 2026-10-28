@@ -106,10 +106,13 @@ func ValidateManifest(m Manifest, maxArtifact int64) error {
 	for _, binding := range m.Engines {
 		image, exists := artifacts[binding.Artifact]
 		source, hasSource := artifacts[binding.Sources]
-		if binding.Role != "tailscale" && binding.Role != "pppoe" && binding.Role != "vrrp" || !roles[binding.Role] || engines[binding.Role] || !exists || image.Kind != "data" || !hasSource || source.Kind != "data" || binding.Artifact == binding.Sources {
+		if binding.Role != "tailscale" && binding.Role != "pppoe" && binding.Role != "vrrp" && binding.Role != "dhcp_server" || !roles[binding.Role] || engines[binding.Role] || !exists || image.Kind != "data" || !hasSource || source.Kind != "data" || binding.Artifact == binding.Sources {
 			return errors.New("engine requires one supported role binding, data image and corresponding source artifact")
 		}
 		engines[binding.Role] = true
+	}
+	if roles["dhcp_server"] && !engines["dhcp_server"] {
+		return errors.New("DHCP server role has no signed dnsmasq engine and sources")
 	}
 	if roles["tailscale"] && !engines["tailscale"] {
 		return errors.New("Tailscale role has no signed engine and sources")

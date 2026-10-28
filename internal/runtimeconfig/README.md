@@ -116,3 +116,9 @@ host default omits this role. `make tailscale-engine` builds the fixed static
 daemon, full notices and matching source artifact; signed catalogs bind both.
 Its TUN/table52 ownership, explicit FW/NAT and private resolver setup are
 specified in [the Tailscale contract](../protocol/tailscale/README.md).
+
+The factory image also binds `dhcp_server` to its signed/bundled
+`/usr/lib/routerd/dnsmasq-engine.tar` and corresponding sources. The generic
+native host catalog omits this role; declare both worker and engine explicitly
+when enabling it. `make dnsmasq-engine` builds its amd64/arm64 runtime and source
+archives. DNS, DHCPv6/RA and VRRP election retain their Go implementations.

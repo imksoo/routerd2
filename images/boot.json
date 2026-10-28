@@ -4,7 +4,8 @@
   "runtime_dir": "/run/routerd",
   "state_dir": "/var/lib/routerd",
   "engines": {
-    "pppoe": "/usr/lib/routerd/pppoe-engine.tar"
+    "pppoe": "/usr/lib/routerd/pppoe-engine.tar",
+    "dhcp_server": "/usr/lib/routerd/dnsmasq-engine.tar"
   },
   "kernel_modules": [
     "virtio_pci",
@@ -57,6 +58,7 @@
     "dns": "/usr/libexec/routerd-modules",
     "vrrp": "/usr/libexec/routerd-modules",
     "bgp": "/usr/libexec/routerd-modules",
-    "bfd": "/usr/libexec/routerd-modules"
+    "bfd": "/usr/libexec/routerd-modules",
+    "dhcp6_server": "/usr/libexec/routerd-modules"
   }
 }

@@ -107,7 +107,7 @@ func Run(parent context.Context, options Options) (PowerAction, error) {
 	}
 	engines := map[string]*os.File{}
 	for role, path := range o.Engines {
-		if role != "tailscale" && role != "pppoe" && role != "vrrp" || images[role] == nil {
+		if role != "tailscale" && role != "pppoe" && role != "vrrp" && role != "dhcp_server" || images[role] == nil {
 			return PowerOff, errors.New("engine archive requires its fixed engine role")
 		}
 		f, err := os.Open(path)
@@ -125,6 +125,9 @@ func Run(parent context.Context, options Options) (PowerAction, error) {
 	}
 	if images["pppoe"] != nil && engines["pppoe"] == nil {
 		return PowerOff, errors.New("PPPoE role requires its bundled engine archive")
+	}
+	if images["dhcp_server"] != nil && engines["dhcp_server"] == nil {
+		return PowerOff, errors.New("DHCP server requires its bundled dnsmasq engine archive")
 	}
 	// Pdeathsig follows the creating OS thread. Pin the process manager to one
 	// thread until every managed child has exited, rather than starting workers
@@ -486,7 +489,7 @@ func normalize(o Options) (Options, error) {
 	o.Executables = paths
 	engines := map[string]string{}
 	for role, path := range o.Engines {
-		if role != "tailscale" && role != "pppoe" && role != "vrrp" || paths[role] == "" || !filepath.IsAbs(path) || filepath.Clean(path) != path {
+		if role != "tailscale" && role != "pppoe" && role != "vrrp" && role != "dhcp_server" || paths[role] == "" || !filepath.IsAbs(path) || filepath.Clean(path) != path {
 			return o, errors.New("invalid engine role binding")
 		}
 		engines[role] = path

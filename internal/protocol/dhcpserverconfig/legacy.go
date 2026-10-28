@@ -51,8 +51,8 @@ func FromSpec(seed Config, s api.DHCPv4ServerSpec, reservations []api.DHCPv4Rese
 	}
 	c := Normalize(seed)
 	c.Authoritative = s.Authoritative
-	c.StickyHoldDays = s.StickyHoldDays
 	c.LogDHCP = s.LogDHCP
+	c.StickyHoldDays = s.StickyHoldDays
 	c.Primary.Start = first(s.AddressPool.Start, s.RangeStart, c.Primary.Start)
 	c.Primary.End = first(s.AddressPool.End, s.RangeEnd, c.Primary.End)
 	lease, e := ParseLeaseTime(first(s.AddressPool.LeaseTime, s.LeaseTime))

@@ -4,6 +4,7 @@ ARG ALPINE_VERSION=3.24.3
 ARG TARGETARCH
 
 FROM routerd2-pppoe-engine:${ALPINE_VERSION}-${TARGETARCH} AS ppp-artifacts
+FROM routerd2-dnsmasq-engine:${ALPINE_VERSION}-${TARGETARCH} AS dhcp-artifacts
 
 FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine3.24 AS toolchain
 
@@ -39,6 +40,8 @@ LABEL org.opencontainers.image.title="routerd2" \
 COPY --from=build /out/routerd /usr/sbin/routerd
 COPY --from=build /out/routerd-modules /usr/libexec/routerd-modules
 COPY --from=build /out/routerd-logging /usr/libexec/routerd-logging
+COPY --from=dhcp-artifacts /dnsmasq-engine.tar /usr/lib/routerd/dnsmasq-engine.tar
+COPY --from=dhcp-artifacts /dnsmasq-sources.tar /usr/share/doc/routerd2/dnsmasq-sources.tar
 COPY --from=ppp-artifacts /pppoe-engine.tar /usr/lib/routerd/pppoe-engine.tar
 COPY --from=ppp-artifacts /pppoe-sources.tar /usr/share/doc/routerd2/pppoe-sources.tar
 COPY --from=build /out/boot.json /etc/routerd/boot.json

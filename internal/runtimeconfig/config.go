@@ -128,7 +128,7 @@ func (b Boot) Validate() error {
 		}
 	}
 	for role, path := range b.Engines {
-		if role != "tailscale" && role != "pppoe" && role != "vrrp" || b.Workers[role] == "" || !filepath.IsAbs(path) || filepath.Clean(path) != path {
+		if role != "tailscale" && role != "pppoe" && role != "vrrp" && role != "dhcp_server" || b.Workers[role] == "" || !filepath.IsAbs(path) || filepath.Clean(path) != path {
 			return errors.New("engine requires its declared role and a clean absolute archive path")
 		}
 	}
@@ -137,6 +137,9 @@ func (b Boot) Validate() error {
 	}
 	if b.Release == nil && b.Workers["pppoe"] != "" && b.Engines["pppoe"] == "" {
 		return errors.New("PPPoE role requires its bundled engine archive")
+	}
+	if b.Release == nil && b.Workers["dhcp_server"] != "" && b.Engines["dhcp_server"] == "" {
+		return errors.New("DHCP server requires its bundled dnsmasq engine archive")
 	}
 	if b.RuntimeDir == b.StateDir {
 		return errors.New("runtime_dir and state_dir must be separate")
@@ -182,7 +185,7 @@ func pathContains(parent, child string) bool {
 // is a role catalog; there is no old module_path reader or implicit conversion.
 func NativeWorkers(path string) map[string]string {
 	out := map[string]string{}
-	for _, role := range []string{"logging", "network", "control", "management", "health", "dhcp4", "dhcp6", "dhcp6_server", "dhcp_server", "dhcp_relay", "ra", "ra_client", "aftr", "dns", "vrrp", "bgp", "bfd"} {
+	for _, role := range []string{"logging", "network", "control", "management", "health", "dhcp4", "dhcp6", "dhcp6_server", "dhcp_relay", "ra", "ra_client", "aftr", "dns", "vrrp", "bgp", "bfd"} {
 		if role == "logging" {
 			out[role] = filepath.Join(filepath.Dir(path), "routerd-logging")
 		} else {

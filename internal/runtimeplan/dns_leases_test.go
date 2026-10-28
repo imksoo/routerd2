@@ -43,7 +43,7 @@ func TestDHCPServerDNSProjectionFencesSourcesAndExpiresReplays(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := clock.WallTime
-	snapshot := dhcpserverconfig.Snapshot{Resource: "leases", Interface: "lan0", ServerAddress: "192.0.2.1", Epoch: strings.Repeat("b", 32), Sequence: 1, Active: true, ObservedAt: now, BootID: clock.BootID, ObservedNanos: uint64(clock.BoottimeNanoseconds), ExpiresNanos: uint64(clock.BoottimeNanoseconds) + uint64(500*time.Millisecond), Leases: []dhcpserverconfig.Lease{{MACAddress: "02:00:00:00:00:02", IPAddress: "192.0.2.123", Hostname: "laptop", Scope: "default", AcquiredAt: now, RenewedAt: now, ExpiresAt: now.Add(300 * time.Millisecond)}}}
+	snapshot := dhcpserverconfig.Snapshot{Resource: "leases", Interface: "lan0", ServerAddress: "192.0.2.1", Epoch: strings.Repeat("b", 32), Sequence: 1, Active: true, ObservedAt: now, BootID: clock.BootID, ObservedNanos: uint64(clock.BoottimeNanoseconds), ExpiresNanos: uint64(clock.BoottimeNanoseconds) + uint64(500*time.Millisecond), Leases: []dhcpserverconfig.Lease{{MACAddress: "02:00:00:00:00:02", IPAddress: "192.0.2.123", Hostname: "laptop", ExpiresAt: now.Add(300 * time.Millisecond)}}}
 	u := update(t, r, "service.leases", 1, snapshot)
 	if err := r.Observe(context.Background(), u); err != nil {
 		t.Fatal(err)

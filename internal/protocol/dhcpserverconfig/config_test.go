@@ -25,22 +25,16 @@ func TestConfigRejectsAmbiguousOrUnsupportedIntent(t *testing.T) {
 	}{
 		{"empty-identity", func(c *Config) { c.Resource = "" }},
 		{"bad-interface", func(c *Config) { c.Interface = "../lan" }},
-		{"vrf-interface", func(c *Config) { c.VRF = c.Interface }},
 		{"v6-server", func(c *Config) { c.ServerAddress = "2001:db8::1" }},
-		{"host-prefix", func(c *Config) { c.Primary.Prefix = "192.0.2.1/24" }},
 		{"reverse-pool", func(c *Config) { c.Primary.Start = "192.0.2.201" }},
 		{"network-pool", func(c *Config) { c.Primary.Start = "192.0.2.0" }},
 		{"broadcast-pool", func(c *Config) { c.Primary.End = "192.0.2.255" }},
 		{"offlink-router", func(c *Config) { c.Primary.Router = "198.51.100.1" }},
 		{"short-lease", func(c *Config) { c.Primary.LeaseSeconds = 1 }},
 		{"snapshot-bound", func(c *Config) { c.MaxLeases = 2049 }},
-		{"negative-probe", func(c *Config) { c.ProbeTimeoutMilliseconds = -1 }},
 		{"state-path", func(c *Config) { c.StatePath = "leases.json" }},
-		{"path-overlap", func(c *Config) { c.StatusPath = c.StatePath + ".lock" }},
 		{"scope-selector", func(c *Config) { s := c.Primary; s.Name = "secondary"; c.Scopes = []Scope{s} }},
 		{"option-width", func(c *Config) { c.Primary.Options = []Option{{Code: 65535, Value: "1"}} }},
-		{"protocol-option", func(c *Config) { c.Primary.Options = []Option{{Code: 54, Value: "192.0.2.2"}} }},
-		{"backend-text", func(c *Config) { c.Primary.Options = []Option{{Code: 200, Value: "unknown,text"}} }},
 		{"reservation-gateway", func(c *Config) {
 			c.Reservations = []Reservation{{MACAddress: "02:00:00:00:00:01", IPAddress: "192.0.2.1"}}
 		}},
@@ -50,7 +44,6 @@ func TestConfigRejectsAmbiguousOrUnsupportedIntent(t *testing.T) {
 		{"multicast-mac", func(c *Config) {
 			c.Reservations = []Reservation{{MACAddress: "01:00:00:00:00:01", IPAddress: "192.0.2.50"}}
 		}},
-		{"duplicate-relay", func(c *Config) { c.TrustedRelays = []string{"192.0.2.2", "192.0.2.2"} }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := validConfig()
@@ -145,35 +138,19 @@ func TestLegacyAdapterPreservesDefaultsProfilesAndOptions(t *testing.T) {
 	}
 }
 
-func TestOptionEncodingHasExactWireShapes(t *testing.T) {
-	out, err := EncodeOptions([]Option{{Name: "router", Value: "192.0.2.1,192.0.2.2"}, {Name: "mtu", Value: "1450"}, {Name: "domain-search", Value: "lan.example,corp.example"}, {Name: "classless-static-route", Value: "0.0.0.0/0,192.0.2.1,198.51.100.0/24,192.0.2.2"}, {Code: 224, Value: "hex:01:02:ff"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(out[3], []byte{192, 0, 2, 1, 192, 0, 2, 2}) || !reflect.DeepEqual(out[26], []byte{5, 170}) || !reflect.DeepEqual(out[121], []byte{0, 192, 0, 2, 1, 24, 198, 51, 100, 192, 0, 2, 2}) || !reflect.DeepEqual(out[224], []byte{1, 2, 255}) {
-		t.Fatalf("%#v", out)
-	}
-	if !strings.Contains(string(out[119]), "\x03lan\x07example\x00") {
-		t.Fatal(out[119])
-	}
-	if _, err := EncodeOptions([]Option{{Code: 26, Name: "router", Value: "192.0.2.1"}}); err == nil {
-		t.Fatal("name/code mismatch")
-	}
-}
-
 func TestSnapshotBoundaryRejectsStaleOrUnownedClaims(t *testing.T) {
 	c := validConfig()
 	now := time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
-	s := Snapshot{Resource: c.Resource, Interface: c.Interface, ServerAddress: c.ServerAddress, Epoch: strings.Repeat("a", 32), Sequence: 1, Active: true, ObservedAt: now, BootID: "01234567-89ab-cdef-0123-456789abcdef", ObservedNanos: uint64(time.Second), ExpiresNanos: uint64(6 * time.Second), Leases: []Lease{{MACAddress: "02:00:00:00:00:01", IPAddress: "192.0.2.100", Hostname: "host", Scope: "default", AcquiredAt: now, RenewedAt: now, ExpiresAt: now.Add(120 * time.Second)}}}
+	s := Snapshot{Resource: c.Resource, Interface: c.Interface, ServerAddress: c.ServerAddress, Epoch: strings.Repeat("a", 32), Sequence: 1, Active: true, ObservedAt: now, BootID: "01234567-89ab-cdef-0123-456789abcdef", ObservedNanos: uint64(time.Second), ExpiresNanos: uint64(6 * time.Second), Leases: []Lease{{MACAddress: "02:00:00:00:00:01", IPAddress: "192.0.2.100", Hostname: "host", ExpiresAt: now.Add(120 * time.Second)}}}
 	if err := ValidateSnapshot(c, s); err != nil {
 		t.Fatal(err)
 	}
 	for _, edit := range []func(*Snapshot){
 		func(s *Snapshot) { s.Interface = "wan0" }, func(s *Snapshot) { s.Sequence = 0 }, func(s *Snapshot) { s.Epoch = "bad" },
 		func(s *Snapshot) { s.ExpiresNanos = s.ObservedNanos + uint64(6*time.Second) },
-		func(s *Snapshot) { s.Leases[0].ExpiresAt = now }, func(s *Snapshot) { s.Leases[0].ExpiresAt = now.Add(time.Hour) },
-		func(s *Snapshot) { s.Leases[0].IPAddress = "192.0.2.1" }, func(s *Snapshot) { s.Leases[0].Scope = "unknown" },
-		func(s *Snapshot) { s.Leases[0].ClientID = "x" }, func(s *Snapshot) { s.Leases[0].Reserved = true },
+		func(s *Snapshot) { s.Leases[0].ExpiresAt = now },
+		func(s *Snapshot) { s.Leases[0].IPAddress = "bad" },
+		func(s *Snapshot) { s.Leases[0].ClientID = "x" },
 		func(s *Snapshot) { s.Leases = append(s.Leases, s.Leases[0]) }, func(s *Snapshot) { s.Active = false },
 	} {
 		b, _ := json.Marshal(s)

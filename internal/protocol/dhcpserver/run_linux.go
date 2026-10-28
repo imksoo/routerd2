@@ -10,429 +10,423 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
-	"sync/atomic"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
+	"syscall"
 	"time"
 
 	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
+	"golang.org/x/sys/unix"
 )
 
-// Run owns DHCP protocol sockets and its private journal. Effects is the only
-// control-plane publication path; the worker does not install client addresses
-// or mutate DNS directly. A response granting a lease is sent after local
-// fsync and a bounded Effects.Update. Standby replication runs independently.
-func Run(ctx context.Context, cfg Config, effects Effects, ready func()) error {
-	return run(ctx, cfg, effects, ready, func(c Config) (transport, error) { return openTransport(c) })
+type engineSettings struct {
+	Intent      Config  `json:"intent"`
+	Restricted  bool    `json:"restricted,omitempty"`
+	Bindings    []Lease `json:"bindings,omitempty"`
+	EventSocket string  `json:"event_socket,omitempty"`
 }
 
-func run(ctx context.Context, cfg Config, effects Effects, ready func(), open func(Config) (transport, error)) (result error) {
-	if err := Validate(cfg); err != nil {
+type engineProcess struct {
+	child  *exec.Cmd
+	done   chan error
+	exited bool
+}
+
+// dnsmasq flushes its script queue on TERM, but its helper can outlive the
+// main process. This worker is their subreaper and keeps saving events until
+// every child has exited. Cleanup has its own bounded lifetime after cancel.
+func (p *engineProcess) close(ctx context.Context, cfg Config, events *leaseEvents) error {
+	var requests <-chan leaseEventCall
+	if events != nil {
+		requests = events.requests
+	}
+	var mainDone <-chan error
+	if !p.exited {
+		_ = p.child.Process.Signal(syscall.SIGTERM)
+		mainDone = p.done
+	}
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	var firstErr error
+	for {
+		if p.exited {
+			for {
+				pid, err := unix.Wait4(-1, nil, unix.WNOHANG, nil)
+				if errors.Is(err, unix.ECHILD) {
+					return firstErr
+				}
+				if err != nil {
+					return err
+				}
+				if pid == 0 {
+					break
+				}
+			}
+		}
+		select {
+		case <-mainDone:
+			p.exited = true
+			mainDone = nil
+		case call := <-requests:
+			err := recordLeaseEvent(ctx, cfg, call.event)
+			call.done <- err
+			if firstErr == nil {
+				firstErr = err
+			}
+		case <-ticker.C:
+		case <-ctx.Done():
+			if !p.exited {
+				_ = p.child.Process.Kill()
+				<-p.done
+				p.exited = true
+			}
+			return fmt.Errorf("drain dnsmasq lease notifications: %w", ctx.Err())
+		}
+	}
+}
+
+func startEngine(ctx context.Context, settings engineSettings, image *os.File, events *leaseEvents) (_ *engineProcess, startErr error) {
+	fd, err := unix.MemfdCreate("dnsmasq-config", unix.MFD_CLOEXEC)
+	if err != nil {
+		return nil, err
+	}
+	config := os.NewFile(uintptr(fd), "dnsmasq-config")
+	defer config.Close()
+	if err := json.NewEncoder(config).Encode(settings); err != nil {
+		return nil, err
+	}
+	if _, err := config.Seek(0, io.SeekStart); err != nil {
+		return nil, err
+	}
+	// PDEATHSIG is attached to the creating thread, which owns this child
+	// until it is reaped, including cancellation and startup failures.
+	child := exec.Command("/proc/self/exe", "dnsmasq-engine")
+	child.ExtraFiles = []*os.File{config, image}
+	child.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
+	log := slog.NewLogLogger(slog.Default().Handler(), slog.LevelInfo).Writer()
+	child.Stdout, child.Stderr = log, log
+	if err := child.Start(); err != nil {
+		return nil, err
+	}
+	p := &engineProcess{child: child, done: make(chan error, 1)}
+	go func() { p.done <- child.Wait() }()
+	success := false
+	defer func() {
+		if !success {
+			cleanup, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			if err := p.close(cleanup, settings.Intent, events); err != nil {
+				startErr = fmt.Errorf("DHCP startup cleanup: %w (startup: %v)", err, startErr)
+			}
+		}
+	}()
+	pidfile := filepath.Join(filepath.Dir(settings.Intent.StatePath), "dnsmasq.pid")
+	startup := time.NewTimer(5 * time.Second)
+	defer startup.Stop()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case err := <-p.done:
+			p.exited = true
+			return nil, fmt.Errorf("dnsmasq startup exited: %v", err)
+		case <-startup.C:
+			return nil, errors.New("dnsmasq did not create its PID file")
+		case <-ticker.C:
+			pid, err := os.ReadFile(pidfile)
+			if err == nil && strings.TrimSpace(string(pid)) == strconv.Itoa(child.Process.Pid) {
+				success = true
+				return p, nil
+			}
+		}
+	}
+}
+
+// Run owns process lifetime and observes dnsmasq's lease file. A standby
+// receives that same file and opens no DHCP socket.
+func Run(ctx context.Context, cfg Config, image *os.File, publish func(context.Context, Snapshot) error, ready func()) (runErr error) {
+	if err := dhcpserverconfig.Validate(cfg); err != nil {
 		return err
 	}
-	if effects == nil {
-		return errors.New("DHCP server effects are required")
-	}
-	cfg = Normalize(cfg)
-	if err := ctx.Err(); err != nil {
+	cfg = dhcpserverconfig.Normalize(cfg)
+	if err := os.MkdirAll(filepath.Dir(cfg.StatePath), 0700); err != nil {
 		return err
 	}
-	for _, path := range []string{cfg.SocketPath, cfg.StatusPath, cfg.EventPath} {
-		if path != "" {
-			if err := privateParent(path); err != nil {
+	lock, err := os.OpenFile(cfg.StatePath+".lock", os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+	if err := unix.Flock(int(lock.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
+		return fmt.Errorf("claim DHCP state: %w", err)
+	}
+	if cfg.StickyHoldDays > 0 {
+		state, err := readTransfer(ctx, cfg)
+		if err != nil {
+			return err
+		}
+		if err := saveHistory(ctx, cfg, state.History); err != nil {
+			return err
+		}
+		active, err := mergeLeases(state.Leases, "", state.History, time.Now())
+		if err != nil {
+			return err
+		}
+		if active != state.Leases {
+			if err := replaceFile(cfg.StatePath, []byte(active)); err != nil {
 				return err
 			}
 		}
 	}
-	store, j, err := openStore(cfg, time.Now().UTC())
-	if err != nil {
+	if err := unix.Prctl(unix.PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0); err != nil {
 		return err
 	}
-	defer store.Close()
-	var sync *replication
-	var requests <-chan replicationRequest
-	var replicationStopped <-chan struct{}
-	var updates chan replicationUpdate
-	var outcomes <-chan replicationOutcome
-	var reconciliations <-chan reconciliation
-	var stopReconciliation context.CancelFunc
-	var syncStatus dhcpserverconfig.SyncStatus
-	var blocked bool
+	var replica *replication
 	if cfg.Replication != nil {
-		sync, err = startReplication(ctx, cfg)
+		replica, err = startReplication(ctx, cfg)
 		if err != nil {
 			return err
 		}
-		defer sync.close()
-		requests = sync.requests
-		replicationStopped = sync.done
-		if !cfg.Standby {
-			owner := cfg.Replication.ListenAddress.String()
-			remote, err := sync.pull(ctx, cfg)
-			if err != nil {
-				if !peerUnavailable(err) || ctx.Err() != nil {
-					return fmt.Errorf("read standby DHCP journal before serving: %w", err)
-				}
-				syncStatus.Error = err.Error()
-				blocked = j.Owner != owner && !(j.Owner == "" && cfg.Bootstrap)
-				if !blocked {
-					j.Owner = owner
-				}
-			} else {
-				now := time.Now().UTC()
-				merged, mergeErr := reconcileJournals(j, remote, now, cfg.MaxLeases)
-				if mergeErr != nil {
-					blocked = true
-					syncStatus.Error = mergeErr.Error()
-				} else {
-					j = merged
-				}
-				if !blocked && (j.Owner != owner || remote.Owner != owner) {
-					candidate := j
-					candidate.Owner = owner
-					candidate.Revision++
-					candidate.WrittenAt = now
-					data, encodeErr := encodeJournal(candidate)
-					if encodeErr != nil {
-						return encodeErr
-					}
-					if _, err := sync.exchange(ctx, http.MethodPut, data); err != nil {
-						blocked = true
-						syncStatus.Error = err.Error()
-					} else {
-						if err := store.Save(candidate); err != nil {
-							return fmt.Errorf("persist DHCP ownership: %w", err)
-						}
-						j = candidate
-						syncStatus.AcknowledgedRevision = j.Revision
-					}
-				}
-			}
-			syncStatus.AllocationBlocked = blocked
-			updates = make(chan replicationUpdate, 1)
-			results := make(chan replicationOutcome, 1)
-			outcomes = results
-			pushCtx, cancel := context.WithCancel(ctx)
-			done := make(chan struct{})
-			go func() { defer close(done); sync.push(pushCtx, updates, results) }()
-			defer func() { cancel(); <-done }()
-			if blocked {
-				pollCtx, stop := context.WithCancel(ctx)
-				stopReconciliation = stop
-				pollResults := make(chan reconciliation, 1)
-				reconciliations = pollResults
-				pollDone := make(chan struct{})
-				go func() { defer close(pollDone); sync.poll(pollCtx, cfg, pollResults) }()
-				defer func() { stop(); <-pollDone }()
-			}
-		}
+		defer replica.close()
 	}
-	persist := func(j journal) error {
-		data, err := encodeJournal(j)
+	var epoch [16]byte
+	if _, err := rand.Read(epoch[:]); err != nil {
+		return err
+	}
+	epochText := hex.EncodeToString(epoch[:])
+	var sequence uint64
+	syncStatus := dhcpserverconfig.SyncStatus{}
+	var child *engineProcess
+	// PDEATHSIG belongs to this creating thread throughout child lifetime.
+	if !cfg.Standby {
+		runtime.LockOSThread()
+		defer runtime.UnlockOSThread()
+	}
+	var events *leaseEvents
+	defer func() {
+		if child != nil {
+			cleanup, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			if err := child.close(cleanup, cfg, events); err != nil {
+				runErr = fmt.Errorf("DHCP cleanup: %w (service: %v)", err, runErr)
+			} else if replica != nil && !cfg.Standby {
+				state, err := readTransfer(cleanup, cfg)
+				if err == nil {
+					_, err = replica.exchange(cleanup, http.MethodPut, state)
+				}
+				if err != nil {
+					slog.Warn("final DHCP lease synchronization failed", "error", err)
+				}
+			}
+		}
+		if events != nil {
+			events.close()
+		}
+	}()
+	claim := func(peer leaseTransfer) error {
+		state, err := readTransfer(ctx, cfg)
 		if err != nil {
 			return err
 		}
-		if err := writePrivate(store.path, data); err != nil {
+		state.History = mergeHistory(state.History, peer.History)
+		state.Leases, err = mergeLeases(state.Leases, peer.Leases, state.History, time.Now())
+		if err != nil {
 			return err
 		}
-		if updates != nil && !blocked {
-			update := replicationUpdate{revision: j.Revision, data: data}
-			select {
-			case updates <- update:
-			default:
-				select {
-				case <-updates:
-				default:
-				}
-				updates <- update
-			}
+		state.Owner = cfg.Replication.ListenAddress.String()
+		if _, err := replica.exchange(ctx, http.MethodPut, state); err != nil {
+			return err
 		}
+		if err := saveTransfer(ctx, cfg, state); err != nil {
+			return err
+		}
+		syncStatus.Synchronized = true
+		syncStatus.AllocationBlocked = false
+		syncStatus.Error = ""
 		return nil
 	}
-	e := newEngine(cfg, j, func() time.Time { return time.Now().UTC() }, persist)
-	e.blockNew = blocked
-	var conn transport
-	if !cfg.Standby {
-		conn, err = open(cfg)
+	start := func() error {
+		if events != nil {
+			events.close()
+			events = nil
+		}
+		if cfg.StickyHoldDays > 0 {
+			events, err = listenLeaseEvents(ctx, cfg)
+			if err != nil {
+				return err
+			}
+		}
+		if _, err := updateHeldHosts(ctx, cfg); err != nil {
+			return err
+		}
+		bindings, err := readDNSMasqLeases(cfg, time.Now())
 		if err != nil {
 			return err
 		}
-		defer conn.Close()
-		e.probe = conn.Probe
-		if t, ok := conn.(*nativeTransport); ok {
-			e.mtu = t.mtu
+		settings := engineSettings{Intent: cfg, Restricted: syncStatus.AllocationBlocked, Bindings: bindings}
+		if events != nil {
+			settings.EventSocket = "/state/" + events.name
 		}
-		if err = e.sweep(e.now()); err != nil {
-			return err
-		}
-	}
-	if len(e.leases) > cfg.MaxLeases || len(e.quarantines) > cfg.MaxLeases {
-		return errors.New("DHCP journal exceeds the configured max_leases; retained leases cannot be discarded")
-	}
-	if !cfg.Standby {
-		if err = e.save(e.now()); err != nil {
-			return err
-		}
-	}
-	var id [16]byte
-	if _, err = rand.Read(id[:]); err != nil {
+		child, err = startEngine(ctx, settings, image, events)
 		return err
 	}
-	epoch := hex.EncodeToString(id[:])
-	monitor := &observation{epoch: epoch}
-	var seq uint64
-	var lastExpiresNanos uint64
-	publish := func(ctx context.Context, active bool, reason error) error {
-		seq++
+	if !cfg.Standby {
+		if replica != nil {
+			peer, exchangeErr := replica.exchange(ctx, http.MethodGet, leaseTransfer{})
+			if exchangeErr == nil {
+				if err := claim(peer); err != nil {
+					return err
+				}
+			} else {
+				state, err := readTransfer(ctx, cfg)
+				if err != nil {
+					return err
+				}
+				syncStatus.Error = exchangeErr.Error()
+				syncStatus.AllocationBlocked = state.Owner != cfg.Replication.ListenAddress.String()
+				_, stateErr := os.Stat(cfg.StatePath)
+				if errors.Is(stateErr, os.ErrNotExist) && cfg.Bootstrap {
+					state.Owner = cfg.Replication.ListenAddress.String()
+					if err := saveTransfer(ctx, cfg, state); err != nil {
+						return err
+					}
+					syncStatus.AllocationBlocked = false
+				}
+			}
+		}
+		if err := start(); err != nil {
+			return err
+		}
+	}
+
+	update := func() error {
 		clock, err := boottime.Read()
 		if err != nil {
 			return err
 		}
-		s := e.snapshot(epoch, seq, clock, active)
-		if updates != nil {
-			status := syncStatus
-			s.Sync = &status
-		}
-		if reason != nil {
-			s.Error = reason.Error()
-		}
-		b, err := json.Marshal(s)
-		if err != nil {
-			return err
-		}
-		if len(b) > dhcpserverconfig.MaxSnapshotBytes {
-			return errors.New("DHCP snapshot exceeds its IPC bound")
-		}
-		effectCtx, cancel := context.WithTimeout(ctx, time.Duration(cfg.EffectTimeoutMilliseconds)*time.Millisecond)
-		err = effects.Update(effectCtx, s)
-		cancel()
-		if err == nil && active {
-			clock, err = boottime.ReadForBoot(s.BootID)
-			if err == nil && !dhcpserverconfig.CurrentObservation(s, clock) {
-				err = errors.New("DHCP effects acknowledgment arrived after its original observation expired")
-			}
-		}
-		if err != nil {
-			return fmt.Errorf("publish DHCP lease snapshot: %w", err)
-		}
-		lastExpiresNanos = s.ExpiresNanos
-		monitor.setSnapshot(s)
-		if cfg.StatusPath != "" {
-			if err := writePrivate(cfg.StatusPath, append(b, '\n')); err != nil {
+		sequence++
+		snapshot := Snapshot{Resource: cfg.Resource, Interface: cfg.Interface, ServerAddress: cfg.ServerAddress, Epoch: epochText, Sequence: sequence, Active: !cfg.Standby, Standby: cfg.Standby, ObservedAt: clock.WallTime, BootID: clock.BootID, ObservedNanos: uint64(clock.BoottimeNanoseconds), ExpiresNanos: uint64(clock.BoottimeNanoseconds) + uint64(dhcpserverconfig.ObservationLifetime)}
+		if !cfg.Standby {
+			snapshot.Leases, err = readDNSMasqLeases(cfg, clock.WallTime)
+			if err != nil {
 				return err
 			}
-		}
-		for _, event := range e.events {
-			event = monitor.addEvent(event)
-			if cfg.LogDHCP {
-				attrs := []any{"resource", cfg.Resource, "event", event.Type, "sequence", event.Sequence}
-				if event.Lease != nil {
-					attrs = append(attrs, "address", event.Lease.IPAddress, "hardware_address", event.Lease.MACAddress, "hostname", event.Lease.Hostname, "scope", event.Lease.Scope)
-				}
-				slog.Info("dhcp.server.event", attrs...)
-			}
-			if cfg.EventPath != "" {
-				if err := appendEvent(cfg.EventPath, event); err != nil {
-					return err
-				}
+			if replica != nil {
+				copy := syncStatus
+				snapshot.Sync = &copy
 			}
 		}
-		e.events = nil
-		return nil
-	}
-	defer func() {
-		e.events = append(e.events, Event{Type: "stopped", Resource: cfg.Resource, At: e.now()})
-		cleanup, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.EffectTimeoutMilliseconds)*time.Millisecond)
+		call, cancel := context.WithTimeout(ctx, time.Duration(cfg.EffectTimeoutMilliseconds)*time.Millisecond)
 		defer cancel()
-		if err := publish(cleanup, false, result); err != nil {
-			result = errors.Join(result, err)
-		}
-	}()
-	e.events = append(e.events, Event{Type: "started", Resource: cfg.Resource, At: e.now()})
-	if !cfg.Standby {
-		if err = conn.Check(); err != nil {
-			return err
-		}
+		return publish(call, snapshot)
 	}
-	if err = publish(ctx, !cfg.Standby, nil); err != nil {
+	if err := update(); err != nil {
 		return err
 	}
-
-	var apiDone <-chan error
-	if cfg.SocketPath != "" {
-		listener, cleanup, err := listenPrivate(cfg.SocketPath)
-		if err != nil {
-			return err
-		}
-		defer cleanup()
-		server := &http.Server{Handler: monitor.handler(), ReadHeaderTimeout: time.Second, ReadTimeout: 2 * time.Second, WriteTimeout: 3 * time.Second, IdleTimeout: 5 * time.Second, MaxHeaderBytes: 8192}
-		done := make(chan error, 1)
-		apiDone = done
-		go func() {
-			err := server.Serve(listener)
-			if errors.Is(err, http.ErrServerClosed) {
-				err = nil
-			}
-			done <- err
-		}()
-		defer server.Close()
-	}
-	runCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	packets := make(chan packet, 64)
-	receiveError := make(chan error, 1)
-	receiveDone := make(chan struct{})
-	var dropped atomic.Uint64
-	go func() {
-		defer close(receiveDone)
-		if cfg.Standby {
-			return
-		}
-		for {
-			p, err := conn.Receive(runCtx)
-			if err != nil {
-				select {
-				case receiveError <- err:
-				default:
-				}
-				return
-			}
-			select {
-			case packets <- p:
-			case <-runCtx.Done():
-				return
-			default:
-				dropped.Add(1)
-			}
-		}
-	}()
-	// Native Receive checks its context at least every 200 ms. Waiting before
-	// Close keeps transport fields and descriptor reuse race-free.
-	defer func() { cancel(); <-receiveDone }()
-	if ready != nil {
-		ready()
-	}
+	ready()
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
-	var reportedDrops uint64
+	var childDone <-chan error
+	if child != nil {
+		childDone = child.done
+	}
+	var replicaDone <-chan struct{}
+	if replica != nil {
+		replicaDone = replica.done
+	}
+	var eventRequests <-chan leaseEventCall
+	var eventDone <-chan struct{}
+	if events != nil {
+		eventRequests, eventDone = events.requests, events.done
+	}
 	for {
 		select {
+		case call := <-eventRequests:
+			err := recordLeaseEvent(ctx, cfg, call.event)
+			if err == nil {
+				var changed bool
+				changed, err = updateHeldHosts(ctx, cfg)
+				if err == nil && changed {
+					err = child.child.Process.Signal(syscall.SIGHUP)
+				}
+			}
+			call.done <- err
+			if err != nil {
+				return err
+			}
+		case <-eventDone:
+			return fmt.Errorf("DHCP event listener: %w", events.err)
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-replicationStopped:
-			return fmt.Errorf("DHCP replication listener stopped: %w", sync.err)
-		case outcome := <-outcomes:
-			if outcome.err != nil {
-				syncStatus.Error = outcome.err.Error()
-			} else {
-				syncStatus.AcknowledgedRevision = outcome.revision
-				syncStatus.Error = ""
-			}
-		case outcome := <-reconciliations:
-			if outcome.err != nil {
-				syncStatus.Error = outcome.err.Error()
-				continue
-			}
-			merged, err := reconcileJournals(e.journal(), outcome.journal, e.now(), cfg.MaxLeases)
-			if err != nil {
-				syncStatus.Error = err.Error()
-				continue
-			}
-			merged.Owner = cfg.Replication.ListenAddress.String()
-			merged.Revision++
-			merged.WrittenAt = e.now()
-			data, err := encodeJournal(merged)
-			if err == nil {
-				_, err = sync.exchange(ctx, http.MethodPut, data)
-			}
-			if err != nil {
-				syncStatus.Error = err.Error()
-				continue
-			}
-			if err := store.Save(merged); err != nil {
-				return fmt.Errorf("persist reconciled DHCP journal: %w", err)
-			}
-			e.restore(merged)
-			e.blockNew, blocked = false, false
-			syncStatus = dhcpserverconfig.SyncStatus{AcknowledgedRevision: merged.Revision}
-			stopReconciliation()
-			reconciliations = nil
-			if err := publish(ctx, true, nil); err != nil {
-				return err
-			}
-		case req := <-requests:
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			var result replicationResult
-			if req.write {
-				result.err = applyReplica(e, store, req.state)
-			} else {
-				result.data, result.err = encodeJournal(e.journal())
-			}
-			req.done <- result
-			if req.write && result.err == nil {
-				if err := publish(ctx, false, nil); err != nil {
-					return err
-				}
-			}
-		case err := <-apiDone:
-			if err == nil {
-				err = errors.New("DHCP private API closed unexpectedly")
-			}
-			return err
-		case err := <-receiveError:
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			return fmt.Errorf("receive DHCP request: %w", err)
+		case err := <-childDone:
+			child.exited = true
+			return fmt.Errorf("dnsmasq stopped: %v", err)
+		case <-replicaDone:
+			return fmt.Errorf("DHCP replication listener: %w", replica.err)
 		case <-ticker.C:
-			if !cfg.Standby {
-				if err := conn.Check(); err != nil {
-					return err
-				}
-				if err := e.sweep(e.now()); err != nil {
-					return err
-				}
-			}
-			n := dropped.Load()
-			e.stats.Rejected += n - reportedDrops
-			reportedDrops = n
-			if err := publish(ctx, !cfg.Standby, nil); err != nil {
-				return err
-			}
-		case p := <-packets:
-			if err := e.sweep(e.now()); err != nil {
-				return err
-			}
-			reply, err := e.handle(ctx, p)
-			if err != nil {
-				return err
-			}
-			clock, err := boottime.Read()
-			if err != nil {
-				return err
-			}
-			if len(e.events) > 0 || reply != nil && uint64(clock.BoottimeNanoseconds)+uint64(time.Second) >= lastExpiresNanos {
-				if err := publish(ctx, true, nil); err != nil {
-					return err
-				}
-			}
-			if reply != nil {
-				if err := ctx.Err(); err != nil {
-					return err
-				}
-				clock, err := boottime.Read()
+			if child != nil {
+				changed, err := updateHeldHosts(ctx, cfg)
 				if err != nil {
 					return err
 				}
-				if uint64(clock.BoottimeNanoseconds) >= lastExpiresNanos {
-					return errors.New("DHCP original observation expired before reply")
+				if changed {
+					if err := child.child.Process.Signal(syscall.SIGHUP); err != nil {
+						return err
+					}
 				}
-				if err := conn.Send(ctx, *reply); err != nil {
-					return fmt.Errorf("send DHCP reply: %w", err)
+			}
+			if replica != nil && !cfg.Standby {
+				if syncStatus.AllocationBlocked {
+					peer, exchangeErr := replica.exchange(ctx, http.MethodGet, leaseTransfer{})
+					if exchangeErr == nil {
+						// Only handoff changes the file or serving mode; ordinary link
+						// outages leave the known-client engine running.
+						cleanup, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+						err := child.close(cleanup, cfg, events)
+						cancel()
+						child = nil
+						if err != nil {
+							return err
+						}
+						if err := claim(peer); err != nil {
+							return err
+						}
+						if err := start(); err != nil {
+							return err
+						}
+						childDone = child.done
+						if events != nil {
+							eventRequests, eventDone = events.requests, events.done
+						}
+					} else {
+						syncStatus.Error = exchangeErr.Error()
+					}
+
+				} else {
+					state, err := readTransfer(ctx, cfg)
+					if err != nil {
+						return err
+					}
+					_, err = replica.exchange(ctx, http.MethodPut, state)
+					syncStatus.Synchronized = err == nil
+					syncStatus.Error = ""
+					if err != nil {
+						syncStatus.Error = err.Error()
+					}
 				}
+			}
+			if err := update(); err != nil {
+				return err
 			}
 		}
 	}

@@ -13,7 +13,7 @@ func validateDNSSources(services []Service) error {
 	servers := map[string]dhcpserverconfig.Config{}
 	for _, s := range services {
 		if s.DHCPServer != nil {
-			servers[s.Name] = s.DHCPServerConfig("/run/routerd", "/var/lib/routerd")
+			servers[s.Name] = s.DHCPServerConfig("/var/lib/routerd")
 		}
 	}
 	for _, s := range services {

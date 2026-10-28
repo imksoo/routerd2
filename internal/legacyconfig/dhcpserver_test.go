@@ -3,7 +3,6 @@
 package legacyconfig
 
 import (
-	"encoding/binary"
 	"encoding/json"
 	"net"
 	"reflect"
@@ -47,7 +46,7 @@ func dhcpTestSpec(t *testing.T, resources []map[string]any, kind string) map[str
 func TestDHCPStaticServerProfilesReservationsAndWireOptions(t *testing.T) {
 	result := compiled(t, "dhcp-server")
 	s := service(t, result.Document, "dhcp_server")
-	c := s.DHCPServerConfig("/run/routerd", "/var/lib/routerd")
+	c := s.DHCPServerConfig("/var/lib/routerd")
 	if c.Interface != "eth1" || c.ServerAddress != "192.0.2.1" || c.Primary.Prefix != "192.0.2.0/24" || c.MaxLeases != 1000 || c.Authoritative {
 		t.Fatalf("server identity, subnet or old daemon defaults changed: %+v", c)
 	}
@@ -64,14 +63,13 @@ func TestDHCPStaticServerProfilesReservationsAndWireOptions(t *testing.T) {
 	if len(c.Reservations) != 1 || c.Reservations[0].IPAddress != "192.0.2.20" || c.Reservations[0].Hostname != "printer" || c.Reservations[0].LeaseSeconds != 0 {
 		t.Fatal("out-of-pool reservation or inherited lease changed", c.Reservations)
 	}
-	options, err := dhcpserverconfig.EncodeOptions(c.Primary.Options)
-	if err != nil || !reflect.DeepEqual(options[28], []byte{192, 0, 2, 255}) || string(options[119]) != "\x03lab\x07example\x00\x04corp\x07example\x00" {
-		t.Fatal("typed DHCP option wire encoding or default broadcast changed", options, err)
+	if !reflect.DeepEqual(c.Primary.Options, []dhcpserverconfig.Option{{Name: "domain-search", Value: "lab.example,corp.example"}, {Code: 28, Value: "192.0.2.255"}}) {
+		t.Fatal("dnsmasq options changed", c.Primary.Options)
 	}
-	reserved, err := dhcpserverconfig.EncodeOptions(c.Reservations[0].Options)
-	if err != nil || binary.BigEndian.Uint16(reserved[26]) != 1450 {
-		t.Fatal("reservation option override lost", reserved, err)
+	if !reflect.DeepEqual(c.Reservations[0].Options, []dhcpserverconfig.Option{{Name: "mtu", Value: "1450"}}) {
+		t.Fatal("reservation option override lost", c.Reservations[0].Options)
 	}
+
 	if len(mapping(t, result, "DHCPv4Reservation/printer").Targets) != 1 || !strings.Contains(strings.Join(mapping(t, result, "DHCPv4Server/lan-v4").Notes, " "), "not imported") {
 		t.Fatal("reservation ownership and lease state boundary were not reported")
 	}
@@ -116,7 +114,6 @@ func TestDHCPMigrationRejectsIgnoredDynamicOrBackendFields(t *testing.T) {
 		{"backend", "DHCPv4Server", "server", "server", "unsupported_semantics", "kea"},
 		{"relay", "DHCPv4Server", "role", "role", "unsupported_semantics", "transit"},
 		{"legacy-journal", "DHCPv4Server", "leaseFile", "leaseFile", "unsupported_semantics", "/" + secret},
-		{"global-sticky-policy", "DHCPv4Server", "stickyHoldDays", "stickyHoldDays", "unsupported_semantics", 7},
 		{"embedded-dns", "DHCPv4Server", "dns", "dns", "unsupported_semantics", map[string]any{"enabled": true}},
 		{"multi-interface", "DHCPv4Server", "listenInterfaces", "listenInterfaces", "unsupported_semantics", []string{"lan", "wan"}},
 		{"qualified-interface", "DHCPv4Server", "interface", "interface", "reference", "Interface/lan"},
@@ -132,13 +129,6 @@ func TestDHCPMigrationRejectsIgnoredDynamicOrBackendFields(t *testing.T) {
 		{"reservation-lease", "DHCPv4Reservation", "leaseTime", "leaseTime", "unsupported_semantics", "1h"},
 		{"reservation-qualified-server", "DHCPv4Reservation", "server", "server", "reference", "DHCPv4Server/lan-v4"},
 		{"reservation-missing-server", "DHCPv4Reservation", "server", "server", "reference", secret},
-		{"option-name-code", "DHCPv4Server", "options", "options", "invalid_value", []any{map[string]any{"name": "mtu", "code": 26, "value": "1400"}}},
-		{"empty-option", "DHCPv4Server", "options", "options", "invalid_value", []any{map[string]any{"name": "router", "value": ""}}},
-		{"quoted-option", "DHCPv4Server", "options", "options", "unsupported_semantics", []any{map[string]any{"name": "vendor-class", "value": "\"" + secret + "\""}}},
-		{"native-hex", "DHCPv4Server", "options", "options", "unsupported_semantics", []any{map[string]any{"code": 224, "value": "hex:01:02"}}},
-		{"boolean-text", "DHCPv4Server", "options", "options", "unsupported_semantics", []any{map[string]any{"name": "ip-forward-enable", "value": "true"}}},
-		{"protocol-option", "DHCPv4Server", "options", "options", "unsupported_semantics", []any{map[string]any{"code": 54, "value": "192.0.2.1"}}},
-		{"opaque-text", "DHCPv4Server", "options", "options", "unsupported_semantics", []any{map[string]any{"code": 224, "value": secret}}},
 		{"invalid-range", "DHCPv4Server", "addressPool", "spec", "native_validation", map[string]any{"start": "192.0.2.200", "end": "192.0.2.100"}},
 		{"infinite-lease", "DHCPv4Server", "addressPool", "spec", "native_validation", map[string]any{"start": "192.0.2.100", "end": "192.0.2.119", "leaseTime": "infinite"}},
 	}

@@ -102,6 +102,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
         runtime_dir=str(stage / "run"),
         state_dir=str(stage / "state"),
         ssh={"user": "admin"},
+        engines={"dhcp_server": str(stage / "dnsmasq-engine.tar")},
         workers={
             role: str(
                 stage / ("routerd-logging" if role == "logging" else "routerd-modules")
@@ -198,7 +199,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
         {
             "id": "leases",
             "service": {"name": "leases", "dhcp_server": {
-                "interface": "lan0", "server_address": "198.18.0.1", "authoritative": True,
+                "interface": "lan0", "server_address": "198.18.0.1", "sticky_hold_days": 3, "authoritative": True,
                 "primary": {"prefix": "198.18.0.0/24", "start": "198.18.0.2", "end": "198.18.0.20",
                             "lease_seconds": 60, "router": "198.18.0.1", "dns_servers": ["198.18.0.1"]},
                 "reservations": [{"mac_address": "02:00:00:00:00:02", "ip_address": "198.18.0.2"}],
@@ -787,7 +788,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             for path in (stage / "console.log", *sorted((stage / "state/logs").glob("*.ndjson"))):
                 if path.is_file():
                     for line in path.read_text(errors="replace").splitlines()[-60:]:
-                        if '"ERROR"' in line or '"WARN"' in line:
+                        if '"ERROR"' in line or '"WARN"' in line or "dnsmasq" in line:
                             print(line, flush=True)
             for path in stage.glob("wan.pcap*"):
                 packets = run(["tcpdump", "-nn", "-vv", "-r", str(path), "-c", "20", "icmp6 or udp port 546 or udp port 547 or udp port 67 or udp port 68"])
@@ -854,7 +855,7 @@ def main():
                 source = persistent / "leases" / name
                 if source.exists():
                     run(root + ["install", "-D", "-m", "600", str(source), str(stage / "state/leases" / name)])
-        for source, name in [(Path(__file__), "owner.py")] + [
+        for source, name in [(Path(__file__), "owner.py"), (Path("dist/dnsmasq-engine.tar"), "dnsmasq-engine.tar")] + [
             (args.binary_dir / n, n)
             for n in ["routerd", "routerd-modules", "routerd-logging"]
         ]:

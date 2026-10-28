@@ -16,408 +16,288 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"slices"
-	"syscall"
+	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/imksoo/routerd2/internal/peertls"
 )
 
-const replicationTimeout = 2 * time.Second
+const replicaTimeout = 2 * time.Second
+const maxLeaseFile = 8 << 20
 
-type replicationRequest struct {
-	write bool
-	state journal
-	done  chan replicationResult
-}
-type replicationResult struct {
-	data []byte
-	err  error
-}
-
-type replicationUpdate struct {
-	revision uint64
-	data     []byte
+// The lease file remains dnsmasq's format and allocation authority. The owner
+// marker records only who may continue allocating during a sync-link outage.
+type leaseTransfer struct {
+	Owner   string         `json:"owner"`
+	Leases  string         `json:"leases"`
+	History []leaseHistory `json:"history,omitempty"`
 }
 
-type replicationOutcome struct {
-	revision uint64
-	err      error
-}
-
-type reconciliation struct {
-	journal journal
-	err     error
-}
-
-func (r *replication) poll(ctx context.Context, cfg Config, results chan<- reconciliation) {
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-	for {
-		remote, err := r.pull(ctx, cfg)
-		select {
-		case results <- reconciliation{journal: remote, err: err}:
-		case <-ctx.Done():
-			return
-		}
-		select {
-		case <-ticker.C:
-		case <-ctx.Done():
-			return
-		}
-	}
-}
-
-// Only transport unavailability permits starting from the local journal.
-// Authentication, allocation-domain and journal errors remain fatal.
-func peerUnavailable(err error) bool {
-	var verification *tls.CertificateVerificationError
-	if errors.As(err, &verification) {
-		return false
-	}
-	var networkError net.Error
-	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, syscall.ECONNREFUSED) ||
-		errors.Is(err, syscall.ENETUNREACH) || errors.Is(err, syscall.EHOSTUNREACH) ||
-		errors.Is(err, syscall.ECONNRESET) || errors.As(err, &networkError) && networkError.Timeout()
-}
-
-// push owns the latest unsent durable journal and retries while the peer is
-// unavailable. The DHCP loop never waits on the network to answer a client.
-func (r *replication) push(ctx context.Context, updates <-chan replicationUpdate, outcomes chan replicationOutcome) {
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-	var pending replicationUpdate
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case pending = <-updates:
-		case <-ticker.C:
-		}
-		if pending.data == nil {
-			continue
-		}
-		_, err := r.exchange(ctx, http.MethodPut, pending.data)
-		outcome := replicationOutcome{revision: pending.revision, err: err}
-		select {
-		case outcomes <- outcome:
-		default:
-			select {
-			case <-outcomes:
-			default:
-			}
-			outcomes <- outcome
-		}
-		if err == nil {
-			pending = replicationUpdate{}
-		}
-	}
-}
-
-// The DHCP loop alone owns the journal and applies peer writes. HTTP handlers
-// authenticate/decode the boundary and wait for that owner's durable result.
 type replication struct {
-	server   *http.Server
-	client   *http.Client
-	peer     string
-	domain   string
-	requests chan replicationRequest
-	done     chan struct{}
-	err      error // written before done is closed
+	server       *http.Server
+	client       *http.Client
+	peer, domain string
+	done         chan struct{}
+	err          error      // written before done closes
+	mu           sync.Mutex // serializes standby file replacement and reads
 }
 
+func replaceFile(path string, data []byte) error {
+	f, err := os.CreateTemp(filepath.Dir(path), ".lease-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	err = errors.Join(f.Sync(), f.Close())
+	if err != nil {
+		return err
+	}
+	if err := os.Rename(f.Name(), path); err != nil {
+		return err
+	}
+	dir, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
+}
+
+func readTransfer(ctx context.Context, cfg Config) (leaseTransfer, error) {
+	var state leaseTransfer
+	data, err := os.ReadFile(cfg.StatePath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return state, err
+	}
+	state.Leases = string(data)
+	owner, err := os.ReadFile(cfg.StatePath + ".owner")
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return state, err
+	}
+	state.Owner = string(owner)
+	state.History, err = readHistory(ctx, cfg, time.Now())
+	if err == nil {
+		state.History = mergeHistory(state.History, expiredHistory(cfg, state.Leases, time.Now()))
+	}
+	return state, err
+}
+
+func saveTransfer(ctx context.Context, cfg Config, state leaseTransfer) error {
+	current, err := readTransfer(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	if current.Owner == state.Owner && current.Leases == state.Leases && slices.Equal(current.History, state.History) {
+		return nil
+	}
+	// A crash between the two files must leave ownership unknown, rather than
+	// allowing allocation from a different owner's incomplete transfer.
+	if err := replaceFile(cfg.StatePath+".owner", nil); err != nil {
+		return err
+	}
+	if err := replaceFile(cfg.StatePath, []byte(state.Leases)); err != nil {
+		return err
+	}
+	if err := saveHistory(ctx, cfg, state.History); err != nil {
+		return err
+	}
+	return replaceFile(cfg.StatePath+".owner", []byte(state.Owner))
+}
+
+// Like routerd's file-sync path, this transfers the engine's own lease file.
+// Unlike a shell/rsync job, the existing peer TLS contract authenticates it.
 func startReplication(ctx context.Context, cfg Config) (*replication, error) {
-	c := cfg.Replication
-	serverTLS, clientTLS, err := peertls.Load(ctx, *c)
+	serverTLS, clientTLS, err := peertls.Load(ctx, *cfg.Replication)
 	if err != nil {
 		return nil, err
 	}
-	// Interface names and local file paths are host-specific. The allocation
-	// domain must agree before either side accepts the other's semantic state.
-	body, err := json.Marshal(struct {
-		Resource      string
-		ServerAddress string
-		Primary       Scope
-		Scopes        []Scope       `json:"scopes,omitempty"`
-		Reservations  []Reservation `json:"reservations,omitempty"`
-		StickyDays    int
+	shared, err := json.Marshal(struct {
+		Resource, Server string
+		Primary          Scope
+		Scopes           []Scope
+		Reservations     []Reservation
+		StickyHoldDays   int
 	}{cfg.Resource, cfg.ServerAddress, cfg.Primary, cfg.Scopes, cfg.Reservations, cfg.StickyHoldDays})
 	if err != nil {
 		return nil, err
 	}
-	sum := sha256.Sum256(body)
-	endpoint := (&url.URL{Scheme: "https", Host: c.PeerAddress.String(), Path: "/v1/leases"}).String()
-	r := &replication{domain: hex.EncodeToString(sum[:]), peer: endpoint, requests: make(chan replicationRequest, 1), done: make(chan struct{})}
-	transport := &http.Transport{TLSClientConfig: clientTLS}
-	r.client = &http.Client{Transport: transport, Timeout: replicationTimeout}
-	r.server = &http.Server{Handler: r.handler(cfg), ReadHeaderTimeout: time.Second, ReadTimeout: replicationTimeout, WriteTimeout: 2 * replicationTimeout, IdleTimeout: 5 * time.Second, MaxHeaderBytes: 8192}
-	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", c.ListenAddress.String())
+	sum := sha256.Sum256(shared)
+	r := &replication{domain: hex.EncodeToString(sum[:]), peer: (&url.URL{Scheme: "https", Host: cfg.Replication.PeerAddress.String(), Path: "/leases"}).String(), done: make(chan struct{})}
+	r.client = &http.Client{Transport: &http.Transport{TLSClientConfig: clientTLS}, Timeout: replicaTimeout}
+	r.server = &http.Server{ReadHeaderTimeout: time.Second, ReadTimeout: replicaTimeout, WriteTimeout: 2 * replicaTimeout, IdleTimeout: 5 * time.Second, MaxHeaderBytes: 8192, Handler: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path != "/leases" {
+			http.NotFound(w, req)
+			return
+		}
+		if !cfg.Standby || req.Header.Get("X-Routerd-DHCP-Domain") != r.domain {
+			http.Error(w, "not standby or different allocation domain", http.StatusConflict)
+			return
+		}
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		state, err := readTransfer(req.Context(), cfg)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		switch req.Method {
+		case http.MethodGet:
+			w.Header().Set("X-Routerd-DHCP-Domain", r.domain)
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(state)
+		case http.MethodPut:
+			var incoming leaseTransfer
+			decoder := json.NewDecoder(http.MaxBytesReader(w, req.Body, maxLeaseFile))
+			err := decoder.Decode(&incoming)
+			if err == nil {
+				err = normalizeHistory(incoming.History)
+			}
+			if err == nil && incoming.Owner != cfg.Replication.PeerAddress.String() {
+				err = errors.New("lease owner differs from authenticated peer")
+			}
+			if err == nil {
+				incoming.History = mergeHistory(state.History, incoming.History)
+				incoming.Leases, err = mergeLeases(state.Leases, incoming.Leases, incoming.History, time.Now())
+			}
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if err := saveTransfer(req.Context(), cfg, incoming); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("X-Routerd-DHCP-Domain", r.domain)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	})}
+	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", cfg.Replication.ListenAddress.String())
 	if err != nil {
+		r.client.CloseIdleConnections()
 		return nil, err
 	}
-	secured := tls.NewListener(listener, serverTLS)
-	go func() { r.err = r.server.Serve(secured); close(r.done) }()
+	go func() { r.err = r.server.Serve(tls.NewListener(listener, serverTLS)); close(r.done) }()
 	return r, nil
 }
 
 func (r *replication) close() {
-	r.server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := r.server.Shutdown(ctx); err != nil {
+		r.server.Close()
+	}
 	<-r.done
 	r.client.CloseIdleConnections()
 }
 
-func (r *replication) handler(cfg Config) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if req.URL.Path != "/v1/leases" {
-			http.NotFound(w, req)
-			return
-		}
-		if req.Method == http.MethodPut && req.Header.Get("X-Routerd-DHCP-Domain") != r.domain {
-			http.Error(w, "different DHCP allocation domain", http.StatusConflict)
-			return
-		}
-		if !cfg.Standby {
-			http.Error(w, "DHCP allocator is serving", http.StatusConflict)
-			return
-		}
-		item := replicationRequest{done: make(chan replicationResult, 1)}
-		switch req.Method {
-		case http.MethodGet:
-		case http.MethodPut:
-			item.write = true
-			d := json.NewDecoder(http.MaxBytesReader(w, req.Body, maxJournalBytes))
-			d.DisallowUnknownFields()
-			err := d.Decode(&item.state)
-			if err == nil {
-				var trailing json.RawMessage
-				if d.Decode(&trailing) != io.EOF {
-					err = errors.New("trailing DHCP replication state")
-				}
-			}
-			// Journal file ownership is local; the authenticated allocation-domain
-			// fingerprint covers the shared pools, reservations and sticky policy.
-			item.state.Interface = cfg.Interface
-			if err == nil {
-				err = validateJournal(cfg, item.state, time.Now().UTC())
-			}
-			if err == nil && item.state.Owner != cfg.Replication.PeerAddress.String() {
-				err = errors.New("DHCP journal does not belong to the authenticated peer")
-			}
-			if err != nil || len(item.state.Leases) > cfg.MaxLeases || len(item.state.Quarantines) > cfg.MaxLeases {
-				http.Error(w, "invalid DHCP replication state", http.StatusBadRequest)
-				return
-			}
-		default:
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			return
-		}
-		ctx, cancel := context.WithTimeout(req.Context(), replicationTimeout)
-		defer cancel()
-		select {
-		case r.requests <- item:
-		case <-ctx.Done():
-			return
-		}
-		select {
-		case result := <-item.done:
-			if result.err != nil {
-				http.Error(w, result.err.Error(), http.StatusConflict)
-				return
-			}
-			w.Header().Set("X-Routerd-DHCP-Domain", r.domain)
-			w.Header().Set("Content-Type", "application/json")
-			if item.write {
-				w.WriteHeader(http.StatusNoContent)
-			} else {
-				_, _ = w.Write(result.data)
-			}
-		case <-ctx.Done():
-		}
-	})
-}
-
-func (r *replication) exchange(ctx context.Context, method string, data []byte) ([]byte, error) {
+func (r *replication) exchange(ctx context.Context, method string, state leaseTransfer) (leaseTransfer, error) {
+	var result leaseTransfer
+	data, err := json.Marshal(state)
+	if err != nil {
+		return result, err
+	}
 	req, err := http.NewRequestWithContext(ctx, method, r.peer, bytes.NewReader(data))
 	if err != nil {
-		return nil, err
+		return result, err
 	}
 	req.Header.Set("X-Routerd-DHCP-Domain", r.domain)
-	req.Header.Set("Content-Type", "application/json")
 	resp, err := r.client.Do(req)
 	if err != nil {
-		return nil, err
+		return result, err
 	}
 	defer resp.Body.Close()
 	if resp.Header.Get("X-Routerd-DHCP-Domain") != r.domain || resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		return nil, fmt.Errorf("DHCP peer did not acknowledge standby state: HTTP %d", resp.StatusCode)
+		return result, fmt.Errorf("DHCP standby: HTTP %d", resp.StatusCode)
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxJournalBytes+1))
-	if err != nil {
-		return nil, err
+	if method == http.MethodPut {
+		return result, nil
 	}
-	if len(body) > maxJournalBytes {
-		return nil, errors.New("DHCP peer snapshot exceeds size bound")
+	err = json.NewDecoder(io.LimitReader(resp.Body, maxLeaseFile)).Decode(&result)
+	if err == nil {
+		err = normalizeHistory(result.History)
 	}
-	return body, nil
+	return result, err
 }
 
-func (r *replication) pull(ctx context.Context, cfg Config) (journal, error) {
-	data, err := r.exchange(ctx, http.MethodGet, nil)
-	if err != nil {
-		return journal{}, err
-	}
-	var j journal
-	d := json.NewDecoder(bytes.NewReader(data))
-	d.DisallowUnknownFields()
-	if err := d.Decode(&j); err != nil {
-		return journal{}, err
-	}
-	var trailing json.RawMessage
-	if d.Decode(&trailing) != io.EOF {
-		return journal{}, errors.New("trailing DHCP peer snapshot")
-	}
-	j.Interface = cfg.Interface
-	return j, validateJournal(cfg, j, time.Now().UTC())
-}
-
-func applyReplica(e *engine, store *journalStore, next journal) error {
-	if next.Revision < e.revision {
-		return errors.New("stale DHCP replication revision")
-	}
-	if next.Revision == e.revision {
-		if !sameJournal(e.journal(), next) {
-			return errors.New("conflicting DHCP replication revision")
-		}
-		return nil
-	}
-	if err := store.Save(next); err != nil {
-		return err
-	}
-	e.restore(next)
-	return nil
-}
-
-func sameJournal(a, b journal) bool {
-	// Both sides may retransmit after an ACK was lost. Compare facts independent
-	// of map traversal order, while retaining the original write time.
-	sortJournal(a)
-	sortJournal(b)
-	return a.Owner == b.Owner && a.WrittenAt.Equal(b.WrittenAt) && slices.Equal(a.Leases, b.Leases) && slices.Equal(a.Quarantines, b.Quarantines)
-}
-
-// containsJournal prevents a newer revision from discarding a still-held local
-// binding or quarantine from a disconnected owner.
-func containsJournal(next, previous journal, now time.Time) bool {
-	leases := make(map[string]storedLease, len(next.Leases))
-	for _, lease := range next.Leases {
-		leases[leaseKey(lease.Lease)] = lease
-	}
-	for _, old := range previous.Leases {
-		if !old.HeldUntil.After(now) {
-			continue
-		}
-		current, ok := leases[leaseKey(old.Lease)]
-		if !ok || current.IPAddress != old.IPAddress || current.ExpiresAt.Before(old.ExpiresAt) || current.HeldUntil.Before(old.HeldUntil) || old.Expired && !current.Expired {
-			return false
+// Retain unexpired, unmatched bindings until their original expiry. A file
+// copy concurrent with dnsmasq's rewrite must not free an offline client's IP.
+func mergeLeases(a, b string, history []leaseHistory, now time.Time) (string, error) {
+	removed := map[[2]string]bool{}
+	for _, record := range history {
+		if record.RemovedAt.After(record.ContactAt) {
+			removed[[2]string{record.MAC, record.IP}] = true
 		}
 	}
-	quarantines := make(map[string]time.Time, len(next.Quarantines))
-	for _, q := range next.Quarantines {
-		quarantines[q.IPAddress] = q.Until
-	}
-	for _, old := range previous.Quarantines {
-		if old.Until.After(now) && quarantines[old.IPAddress].Before(old.Until) {
-			return false
-		}
-	}
-	return true
-}
-
-// mergeJournal retains unmatched bindings as non-authoritative holds. A client
-// can renew its own address, but an unseen release cannot become a DNS claim or
-// a free address. Ambiguous addresses or identities require operator resolution.
-func mergeJournal(a, b journal, now time.Time) (journal, error) {
-	leases := make(map[string]storedLease)
-	addresses := make(map[string]string)
-	seen := make(map[string]int)
-	live := make(map[string]int)
-	for _, source := range []journal{a, b} {
-		for _, lease := range source.Leases {
-			if !lease.HeldUntil.After(now) {
+	records := map[string][]string{}
+	clients := map[string]string{}
+	for _, data := range []string{a, b} {
+		for _, line := range strings.Split(data, "\n") {
+			fields := strings.Fields(line)
+			if len(fields) == 0 {
 				continue
 			}
-			key := leaseKey(lease.Lease)
-			seen[key]++
-			if !lease.Expired {
-				live[key]++
-			}
-			if other, ok := addresses[lease.IPAddress]; ok && other != key {
-				return journal{}, errors.New("conflicting DHCP lease addresses require reconciliation")
-			}
-			addresses[lease.IPAddress] = key
-			if old, ok := leases[key]; ok {
-				if old.IPAddress != lease.IPAddress {
-					return journal{}, errors.New("conflicting DHCP client addresses require reconciliation")
-				}
-				heldUntil := old.HeldUntil
-				if lease.HeldUntil.After(heldUntil) {
-					heldUntil = lease.HeldUntil
-				}
-				if lease.ExpiresAt.After(old.ExpiresAt) || lease.ExpiresAt.Equal(old.ExpiresAt) && lease.HeldUntil.After(old.HeldUntil) {
-					old = lease
-				}
-				old.HeldUntil = heldUntil
-				leases[key] = old
-			} else {
-				leases[key] = lease
-			}
-		}
-	}
-	quarantines := make(map[string]quarantine)
-	for _, source := range []journal{a, b} {
-		for _, q := range source.Quarantines {
-			if !q.Until.After(now) {
+			if fields[0] == "agent-info" || fields[0] == "vendorclass" {
 				continue
 			}
-			if _, occupied := addresses[q.IPAddress]; occupied {
-				return journal{}, errors.New("DHCP quarantine conflicts with a retained lease")
+			if len(fields) != 5 {
+				return "", errors.New("incomplete dnsmasq lease record")
 			}
-			if old, ok := quarantines[q.IPAddress]; !ok || q.Until.After(old.Until) {
-				quarantines[q.IPAddress] = q
+			if removed[[2]string{fields[1], fields[2]}] {
+				continue
 			}
+			expires, err := strconv.ParseInt(fields[0], 10, 64)
+			if err != nil || expires == 0 {
+				return "", errors.New("DHCP handoff requires finite lease expiries")
+			}
+			if expires <= now.Unix() {
+				continue
+			}
+			if _, err := net.ParseMAC(fields[1]); err != nil {
+				return "", err
+			}
+			if ip := net.ParseIP(fields[2]); ip == nil || ip.To4() == nil {
+				return "", errors.New("invalid DHCP lease address")
+			}
+			key := fields[4]
+			if key == "*" {
+				key = fields[1]
+			}
+			if previous := clients[key]; previous != "" && previous != fields[2] {
+				return "", errors.New("conflicting DHCP client addresses")
+			}
+			clients[key] = fields[2]
+			if old, ok := records[fields[2]]; ok {
+				if old[1] != fields[1] || old[4] != fields[4] {
+					return "", errors.New("conflicting DHCP address owners")
+				}
+				oldExpiry, _ := strconv.ParseInt(old[0], 10, 64)
+				if oldExpiry > expires {
+					continue
+				}
+			}
+			records[fields[2]] = fields
 		}
 	}
-	out := journal{Version: journalVersion, Resource: a.Resource, Interface: a.Interface, Owner: a.Owner, Revision: max(a.Revision, b.Revision), WrittenAt: now}
-	for key, lease := range leases {
-		lease.Expired = seen[key] < 2 || live[key] < 2
-		out.Leases = append(out.Leases, lease)
+	addresses := make([]string, 0, len(records))
+	for address := range records {
+		addresses = append(addresses, address)
 	}
-	for _, q := range quarantines {
-		out.Quarantines = append(out.Quarantines, q)
+	slices.Sort(addresses)
+	var lines strings.Builder
+	for _, address := range addresses {
+		lines.WriteString(strings.Join(records[address], " "))
+		lines.WriteByte('\n')
 	}
-	return out, nil
-}
-
-func reconcileJournals(local, peer journal, now time.Time, limit int) (journal, error) {
-	var result journal
-	var err error
-	switch {
-	case peer.Revision > local.Revision && containsJournal(peer, local, now):
-		result = peer
-	case local.Revision > peer.Revision && containsJournal(local, peer, now):
-		result = local
-	case local.Revision == 0 && peer.Revision == 0:
-		result = local
-	case local.Revision == peer.Revision && sameJournal(local, peer):
-		result = local
-	default:
-		result, err = mergeJournal(local, peer, now)
-	}
-	if err != nil {
-		return journal{}, err
-	}
-	if len(result.Leases) > limit || len(result.Quarantines) > limit {
-		return journal{}, errors.New("reconciled DHCP journal exceeds the configured lease limit")
-	}
-	return result, nil
+	return lines.String(), nil
 }

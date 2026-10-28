@@ -27,36 +27,24 @@ const (
 
 // Config is one server on one Ethernet interface in the worker's network
 // namespace. The compiler resolves all resource/status dependencies first.
-// The worker verifies that ServerAddress is already on Interface and that its
-// VRF membership is exact; it never creates addresses or changes routing.
+// The network writer provisions ServerAddress and interface topology before
+// serving. The engine never creates addresses or changes routing.
 type Config struct {
-	Resource       string        `json:"resource"`
-	Interface      string        `json:"interface"`
-	VRF            string        `json:"vrf,omitempty"`
-	ServerAddress  string        `json:"server_address"`
-	Primary        Scope         `json:"primary"`
-	Scopes         []Scope       `json:"scopes,omitempty"`
-	Reservations   []Reservation `json:"reservations,omitempty"`
-	Authoritative  bool          `json:"authoritative,omitempty"`
-	StickyHoldDays int           `json:"sticky_hold_days,omitempty"`
-	LogDHCP        bool          `json:"log_dhcp,omitempty"`
-	// Relay requests are accepted only from these exact IPv4 source addresses,
-	// with giaddr also in this list and a matching configured pool subnet.
-	TrustedRelays  []string `json:"trusted_relays,omitempty"`
-	OfferSeconds   int      `json:"offer_seconds,omitempty"`
-	DeclineSeconds int      `json:"decline_seconds,omitempty"`
-	MaxLeases      int      `json:"max_leases,omitempty"`
-	// Zero selects 300 ms. A negative value is invalid: conflict detection
-	// cannot silently be disabled for newly allocated on-link addresses.
-	ProbeTimeoutMilliseconds  int             `json:"probe_timeout_milliseconds,omitempty"`
+	Resource                  string          `json:"resource"`
+	Interface                 string          `json:"interface"`
+	ServerAddress             string          `json:"server_address"`
+	Primary                   Scope           `json:"primary"`
+	Scopes                    []Scope         `json:"scopes,omitempty"`
+	Reservations              []Reservation   `json:"reservations,omitempty"`
+	Authoritative             bool            `json:"authoritative,omitempty"`
+	StickyHoldDays            int             `json:"sticky_hold_days,omitempty"`
+	LogDHCP                   bool            `json:"log_dhcp,omitempty"`
+	MaxLeases                 int             `json:"max_leases,omitempty"`
 	EffectTimeoutMilliseconds int             `json:"effect_timeout_milliseconds,omitempty"`
 	StatePath                 string          `json:"state_path"`
-	SocketPath                string          `json:"socket_path,omitempty"`
-	StatusPath                string          `json:"status_path,omitempty"`
-	EventPath                 string          `json:"event_path,omitempty"`
 	Replication               *peertls.Config `json:"replication,omitempty"`
 	Bootstrap                 bool            `json:"bootstrap,omitempty"`
-	// Standby owns the journal and replication listener, without DHCP sockets.
+	// Standby owns the lease file and replication listener, without DHCP sockets.
 	Standby bool `json:"standby,omitempty"`
 }
 
@@ -87,7 +75,6 @@ func Normalize(c Config) Config {
 	out := c
 	out.Scopes = slices.Clone(c.Scopes)
 	out.Reservations = slices.Clone(c.Reservations)
-	out.TrustedRelays = slices.Clone(c.TrustedRelays)
 	out.Primary = cloneScope(c.Primary)
 	for i := range out.Scopes {
 		out.Scopes[i] = cloneScope(out.Scopes[i])
@@ -110,17 +97,8 @@ func Normalize(c Config) Config {
 			out.Scopes[i].LeaseSeconds = out.Primary.LeaseSeconds
 		}
 	}
-	if out.OfferSeconds == 0 {
-		out.OfferSeconds = 60
-	}
-	if out.DeclineSeconds == 0 {
-		out.DeclineSeconds = 600
-	}
 	if out.MaxLeases == 0 {
 		out.MaxLeases = 1024
-	}
-	if out.ProbeTimeoutMilliseconds == 0 {
-		out.ProbeTimeoutMilliseconds = 300
 	}
 	if out.EffectTimeoutMilliseconds == 0 {
 		out.EffectTimeoutMilliseconds = 2000
@@ -134,11 +112,24 @@ func Normalize(c Config) Config {
 }
 
 func cloneScope(s Scope) Scope {
+	if prefix, err := netip.ParsePrefix(s.Prefix); err == nil {
+		s.Prefix = prefix.Masked().String()
+	}
 	s.DNSServers = slices.Clone(s.DNSServers)
 	s.NTPServers = slices.Clone(s.NTPServers)
 	s.Options = slices.Clone(s.Options)
 	s.Match.MACAddresses = slices.Clone(s.Match.MACAddresses)
 	s.Match.OUIPrefixes = slices.Clone(s.Match.OUIPrefixes)
+	for i, v := range s.Match.MACAddresses {
+		if mac, err := net.ParseMAC(v); err == nil {
+			s.Match.MACAddresses[i] = mac.String()
+		}
+	}
+	for i, v := range s.Match.OUIPrefixes {
+		if oui, err := ParseOUI(v); err == nil {
+			s.Match.OUIPrefixes[i] = oui.String()
+		}
+	}
 	return s
 }
 
@@ -153,8 +144,8 @@ func Validate(c Config) error {
 		}
 	}
 
-	if !validName(c.Resource, 256) || !ValidInterface(c.Interface) || (c.VRF != "" && !ValidInterface(c.VRF)) || c.VRF == c.Interface {
-		return errors.New("DHCP server requires a bounded resource identity, interface and optional distinct VRF")
+	if !validName(c.Resource, 256) || !ValidInterface(c.Interface) {
+		return errors.New("DHCP server requires a bounded resource identity, interface")
 	}
 	server, err := ipv4(c.ServerAddress)
 	if err != nil {
@@ -166,32 +157,14 @@ func Validate(c Config) error {
 	if c.StickyHoldDays < 0 || c.StickyHoldDays > 3650 {
 		return errors.New("DHCP sticky_hold_days must be 0..3650")
 	}
-	if c.OfferSeconds < 1 || c.OfferSeconds > 600 || c.DeclineSeconds < 60 || c.DeclineSeconds > 604800 {
-		return errors.New("DHCP offer_seconds must be 1..600 and decline_seconds 60..604800")
+	if c.EffectTimeoutMilliseconds < 10 || c.EffectTimeoutMilliseconds > 4000 {
+		return errors.New("DHCP effect timeout must be 10..4000 ms")
 	}
-	if c.ProbeTimeoutMilliseconds < 50 || c.ProbeTimeoutMilliseconds > 2000 || c.EffectTimeoutMilliseconds < 10 || c.EffectTimeoutMilliseconds > 4000 {
-		return errors.New("DHCP probe timeout must be 50..2000 ms and effect timeout 10..4000 ms")
-	}
-	if len(c.Scopes) > 64 || len(c.Reservations) > c.MaxLeases || len(c.TrustedRelays) > 128 {
+	if len(c.Scopes) > 64 || len(c.Reservations) > c.MaxLeases {
 		return errors.New("DHCP scope, reservation or relay limit exceeded")
 	}
-	paths := map[string]string{}
-	for name, p := range map[string]string{"state_path": c.StatePath, "socket_path": c.SocketPath, "status_path": c.StatusPath, "event_path": c.EventPath} {
-		if p == "" && name != "state_path" {
-			continue
-		}
-		if !filepath.IsAbs(p) || filepath.Clean(p) != p || p == "/" || strings.ContainsRune(p, 0) {
-			return fmt.Errorf("DHCP %s must be a clean absolute file path", name)
-		}
-		if name == "socket_path" && len(p) > 100 {
-			return errors.New("DHCP socket_path is too long")
-		}
-		for _, owned := range []string{p, p + ".lock", p + ".1"} {
-			if prev, ok := paths[owned]; ok {
-				return fmt.Errorf("DHCP %s overlaps %s", name, prev)
-			}
-			paths[owned] = name
-		}
+	if !filepath.IsAbs(c.StatePath) || filepath.Clean(c.StatePath) != c.StatePath || c.StatePath == "/" || strings.ContainsRune(c.StatePath, 0) {
+		return errors.New("DHCP state_path must be a clean absolute file path")
 	}
 	scopes := append([]Scope{c.Primary}, c.Scopes...)
 	names := map[string]Scope{}
@@ -235,7 +208,7 @@ func Validate(c Config) error {
 		if s.Domain != "" && !ValidHostname(s.Domain) {
 			return errors.New("DHCP domain is invalid")
 		}
-		if _, e := EncodeOptions(s.Options); e != nil {
+		if e := ValidateOptions(s.Options); e != nil {
 			return fmt.Errorf("DHCP scope %s: %w", s.Name, e)
 		}
 		if i == 0 && (len(s.Match.MACAddresses) != 0 || len(s.Match.OUIPrefixes) != 0) {
@@ -305,17 +278,9 @@ func Validate(c Config) error {
 		if r.LeaseSeconds != 0 && (r.LeaseSeconds < 60 || uint64(r.LeaseSeconds) > uint64(^uint32(0)-1)) {
 			return errors.New("DHCP reservation lease_seconds must be 60..4294967294")
 		}
-		if _, e := EncodeOptions(r.Options); e != nil {
+		if e := ValidateOptions(r.Options); e != nil {
 			return fmt.Errorf("DHCP reservation: %w", e)
 		}
-	}
-	relays := map[string]bool{}
-	for _, v := range c.TrustedRelays {
-		a, e := ipv4(v)
-		if e != nil || relays[a.String()] {
-			return errors.New("DHCP trusted_relays must contain distinct unicast IPv4 addresses")
-		}
-		relays[a.String()] = true
 	}
 	return nil
 }
@@ -413,18 +378,11 @@ func InfrastructureAddress(c Config, address string) bool {
 			if o.Code != 3 && !strings.EqualFold(strings.TrimSpace(o.Name), "router") {
 				continue
 			}
-			encoded, err := EncodeOptions([]Option{o})
-			if err != nil {
-				continue
-			}
-			b := encoded[3]
-			for len(b) >= 4 {
-				var raw [4]byte
-				copy(raw[:], b[:4])
-				if netip.AddrFrom4(raw).String() == address {
+			for _, text := range strings.Split(o.Value, ",") {
+				ip, err := netip.ParseAddr(strings.TrimSpace(text))
+				if err == nil && ip.String() == address {
 					return true
 				}
-				b = b[4:]
 			}
 		}
 		return false

@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"syscall"
 	"time"
@@ -22,6 +23,7 @@ import (
 	"github.com/imksoo/routerd2/internal/logging"
 	"github.com/imksoo/routerd2/internal/management"
 	"github.com/imksoo/routerd2/internal/protocol/conntracksync"
+	"github.com/imksoo/routerd2/internal/protocol/dhcpserver"
 	"github.com/imksoo/routerd2/internal/protocol/pppoe"
 	"github.com/imksoo/routerd2/internal/protocol/tailscale"
 	"github.com/imksoo/routerd2/internal/release"
@@ -40,6 +42,12 @@ func main() {
 }
 
 func run(args []string) error {
+	if filepath.Base(os.Args[0]) == "routerd-dhcp-event" {
+		return dhcpserver.SendLeaseEvent(args)
+	}
+	if len(args) == 1 && args[0] == "dnsmasq-engine" {
+		return dhcpserver.RunEngine()
+	}
 	if len(args) == 1 && args[0] == "tailscale-engine" {
 		return tailscale.RunEngine()
 	}

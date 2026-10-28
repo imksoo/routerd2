@@ -18,10 +18,10 @@ const (
 	writeTimeout      = 2 * time.Second
 )
 
-// ShutdownTimeout leaves the DHCPv6 owner time to withdraw dependent effects
-// and complete its bounded Release exchange before the process is terminated.
+// ShutdownTimeout lets lease owners complete bounded withdrawal or script
+// notification draining before the process and its children are terminated.
 func ShutdownTimeout(role string) time.Duration {
-	if role == "dhcp6" {
+	if role == "dhcp6" || role == "dhcp_server" {
 		return 22 * time.Second
 	}
 	return 3 * time.Second

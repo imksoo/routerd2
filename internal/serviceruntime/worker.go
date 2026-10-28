@@ -146,7 +146,9 @@ func Run(ctx context.Context, runtimeDir, name, role, path, digest string, gener
 		if err := decode(instance.Config, &cfg); err != nil {
 			return err
 		}
-		return dhcpserver.Run(runCtx, cfg, dhcpserver.EffectsFunc(func(ctx context.Context, s dhcpserver.Snapshot) error { return c.update(ctx, s) }), ready)
+		engine := os.NewFile(5, "dnsmasq-engine")
+		defer engine.Close()
+		return dhcpserver.Run(runCtx, cfg, engine, func(ctx context.Context, s dhcpserver.Snapshot) error { return c.update(ctx, s) }, ready)
 	case "bgp":
 		return c.runBGP(runCtx, instance, digest, ready)
 	case "dhcp4":

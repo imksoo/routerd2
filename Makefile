@@ -18,6 +18,8 @@ PPP_ARCH ?= $(shell $(GO) env GOARCH)
 PPP_DIR ?= dist
 CONNTRACK_ARCH ?= $(shell $(GO) env GOARCH)
 CONNTRACK_DIR ?= dist
+DNSMASQ_ARCH ?= $(shell $(GO) env GOARCH)
+DNSMASQ_DIR ?= dist
 UPLINK_INTERFACE ?=
 UPLINK_AFTR ?=
 UPLINK_SECONDS ?= 7800
@@ -171,7 +173,7 @@ check-dhcp6: build
 	$(PYTHON) scripts/daemon-tests.py dhcp6 --go '$(GO)'
 
 .PHONY: check-dhcp-dns
-check-dhcp-dns: build
+check-dhcp-dns: build dnsmasq-engine
 	$(PYTHON) scripts/daemon-tests.py dhcp-server --go '$(GO)'
 
 check-pd-ra: build
@@ -181,7 +183,7 @@ check-ra-aftr: build
 	$(PYTHON) scripts/daemon-tests.py ra-aftr --go '$(GO)'
 
 .PHONY: check-uplink
-check-uplink: build
+check-uplink: build dnsmasq-engine
 	@test -n '$(UPLINK_INTERFACE)' -a -n '$(UPLINK_AFTR)' || { printf '%s\n' 'UPLINK_INTERFACE and UPLINK_AFTR must select the authorized local access network'; exit 1; }
 	$(PYTHON) scripts/uplink-smoke.py --uplink '$(UPLINK_INTERFACE)' --aftr '$(UPLINK_AFTR)' --seconds '$(UPLINK_SECONDS)' --dns-upstream '$(UPLINK_DNS_UPSTREAM)' $(if $(UPLINK_STATE_DIR),--state-dir '$(UPLINK_STATE_DIR)') $(if $(filter 1,$(UPLINK_WAN_OUTAGE)),--wan-outage) $(if $(filter 1,$(UPLINK_FULL_RESTART)),--full-restart)
 
@@ -223,22 +225,24 @@ build-linux: licenses
 release-built-test:
 	ROUTERD2_INTEGRATION_REQUIRED=1 ROUTERD2_RELEASE_BUILT_DIR='$(abspath $(RELEASE_BUILT_DIR))' ROUTERD2_RELEASE_BUILT_ID='$(RELEASE_ID)' $(GO) test -race -tags integration -run '^Test(BuiltRuntimeCatalog|PublishBuiltRelease)$$' -count=1 -v ./internal/release ./internal/releasepublish
 
-container: pppoe-engine
+container: pppoe-engine dnsmasq-engine
 	$(DOCKER) build $(BUILD_ARGS) -t $(CONTAINER_TAG) .
 
 container-multi:
 	$(MAKE) pppoe-engine PPP_ARCH=amd64 PPP_DIR=dist/ppp-amd64
 	$(MAKE) pppoe-engine PPP_ARCH=arm64 PPP_DIR=dist/ppp-arm64
+	$(MAKE) dnsmasq-engine DNSMASQ_ARCH=amd64
+	$(MAKE) dnsmasq-engine DNSMASQ_ARCH=arm64 DNSMASQ_DIR=dist/arm64
 	mkdir -p dist
 	$(DOCKER) buildx build $(BUILD_ARGS) --platform linux/amd64,linux/arm64 --output type=oci,dest=dist/routerd2.oci.tar .
 
 container-smoke: container
 	$(PYTHON) images/container-smoke.py --engine '$(DOCKER)' --image $(CONTAINER_TAG)
 
-apk: pppoe-engine
+apk: pppoe-engine dnsmasq-engine
 	$(DOCKER) build $(BUILD_ARGS) -f packaging/alpine/Dockerfile --target apk-output --output type=local,dest=dist/apk .
 
-image: pppoe-engine
+image: pppoe-engine dnsmasq-engine
 	$(DOCKER) build $(BUILD_ARGS) --build-arg IMAGE_CONFIG=$(IMAGE_CONFIG) --build-arg SSH_AUTHORIZED_KEY -f packaging/alpine/Dockerfile --target appliance-output --output type=local,dest=$(IMAGE_DIR) .
 
 qemu-smoke:
@@ -316,24 +320,32 @@ conntrack-engine:
 	  trap '$(DOCKER) rm "$$profile_id" >/dev/null' EXIT HUP INT TERM; \
 	  $(DOCKER) export "$$profile_id" | tar --no-same-owner -xf - -C $(CONNTRACK_DIR) conntrack-engine.tar conntrack-sources.tar
 
+.PHONY: dnsmasq-engine
+dnsmasq-engine:
+	$(DOCKER) build --platform linux/$(DNSMASQ_ARCH) --build-arg ALPINE_VERSION=$(ALPINE_VERSION) -f packaging/alpine/dnsmasq-engine.Dockerfile -t routerd2-dnsmasq-engine:$(ALPINE_VERSION)-$(DNSMASQ_ARCH) .
+	mkdir -p $(DNSMASQ_DIR)
+	@set -eu; engine_id=$$($(DOCKER) create --network none routerd2-dnsmasq-engine:$(ALPINE_VERSION)-$(DNSMASQ_ARCH) /not-executed); \
+	  trap '$(DOCKER) rm "$$engine_id" >/dev/null' EXIT HUP INT TERM; \
+	  $(DOCKER) export "$$engine_id" | tar --no-same-owner -xf - -C $(DNSMASQ_DIR) dnsmasq-engine.tar dnsmasq-sources.tar
+
 .PHONY: check-ha-state
-check-ha-state: build build-publisher conntrack-engine
+check-ha-state: build build-publisher conntrack-engine dnsmasq-engine
 	$(PYTHON) scripts/ha-state-peer.py
 
 .PHONY: check-ha-pd
-check-ha-pd: build build-publisher conntrack-engine
+check-ha-pd: build build-publisher conntrack-engine dnsmasq-engine
 	$(PYTHON) scripts/ha-state-peer.py --dhcp6-server '$(DHCP6_SERVER)'
 
 .PHONY: check-ha-egress
-check-ha-egress: build build-publisher conntrack-engine
+check-ha-egress: build build-publisher conntrack-engine dnsmasq-engine
 	$(PYTHON) scripts/ha-state-peer.py --dhcp6-server '$(DHCP6_SERVER)' --pd-dslite
 
 .PHONY: check-ha-pd-preparation
-check-ha-pd-preparation: build build-publisher conntrack-engine
+check-ha-pd-preparation: build build-publisher conntrack-engine dnsmasq-engine
 	$(PYTHON) scripts/ha-state-peer.py --dhcp6-server '$(DHCP6_SERVER)' --pd-dslite --preparation
 
 .PHONY: check-ha-dhcp-failover
-check-ha-dhcp-failover: build build-publisher conntrack-engine
+check-ha-dhcp-failover: build build-publisher conntrack-engine dnsmasq-engine
 	$(PYTHON) scripts/ha-state-peer.py --dhcp6-server '$(DHCP6_SERVER)' --pd-dslite --stale-owner
 
 TAILSCALE_ARCH ?= $(shell $(GO) env GOARCH)

@@ -325,7 +325,7 @@ func Validate(services []Service) error {
 				return err
 			}
 		case "dhcp_server":
-			if err := dhcpserverconfig.Validate(s.DHCPServerConfig("/run/routerd", "/var/lib/routerd")); err != nil {
+			if err := dhcpserverconfig.Validate(s.DHCPServerConfig("/var/lib/routerd")); err != nil {
 				return err
 			}
 		case "dhcp_relay":
@@ -503,7 +503,7 @@ func (s Service) Instance(runtimeDir, stateDir string) (Instance, error) {
 	case "dhcp6_server":
 		b, err = json.Marshal(s.DHCP6ServerConfig(stateDir))
 	case "dhcp_server":
-		b, err = json.Marshal(s.DHCPServerConfig(runtimeDir, stateDir))
+		b, err = json.Marshal(s.DHCPServerConfig(stateDir))
 	case "dhcp_relay":
 		b, err = json.Marshal(*s.DHCPRelay)
 	case "bgp":

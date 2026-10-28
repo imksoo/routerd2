@@ -29,6 +29,8 @@ func commandPath(role string) string {
 		return "usr/sbin/conntrackd"
 	case "tailscale":
 		return "usr/sbin/tailscaled"
+	case "dhcp_server":
+		return "usr/sbin/dnsmasq"
 	default:
 		return ""
 	}

@@ -5,12 +5,47 @@
 [試験計画](test-plan.md)、[機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
+## 現在のLAN実装: routerdの再利用（2026-10-28）
+
+`reuse-routerd-lan` は独自DHCPv4割当器・wire処理・JSON台帳・私設状態APIと対応する旧試験を削除し、
+旧 `RenderDnsmasqLines` と固定版dnsmasq/muslを接続した。配布archiveと対応sourceを同梱し、
+supervisorが検証したFDを渡す。PID 1から管理し、host dnsmasqやsystemd/OpenRCには依存しない。
+DNS・DHCPv6・RA・VRRP選出は既存Go worker、接続状態同期はconntrackdを使う。
+外部依存が増えた事実とGo中心の目標は区別し、他protocolの一律外部化は決めていない。
+
+貸出の正本は `dnsmasq.leases`。Go workerは旧routerdの実要求・解放履歴を一つの所有者として記録し、
+保持hostをdnsmasqへ渡す。起動ファイルの再通知を再取得にしない。通常停止時は最後の通知を保存し、
+script子プロセスを回収してから通知口を閉じる。古いpeer貸出が確定した解放を消す経路を除いた。
+内部contractはnative-56。破棄したprototype状態の互換readerは作らない。
+
+`lan-dnsmasq-history` の署名付きPID 1二台・独立BusyBox・kernel NAT・captureで、両方向切替と同じ
+TCP/UDP、更新・別端末の異なる割当・同期断復旧、worker/engine交換、3日保持と再取得を確認した。
+実RELEASE中に履歴workerを止め、同期回線断と製品停止を重ねても、通知の保存、古いpeer貸出の排除、
+両側の元保持期限、第三者への割当防止、再起動と元端末の再取得が成立した。
+先行版では自然貸出失効と古い所有者の再昇格も確認したが、最新版の全分断条件の資格にはしない。
+1秒広告の範囲の結果であり、200msで旧ノードが再選出された事象は未解決。
+
+同版の実HGW・独立BusyBox/dhcpcd二端末では、標準resolver hookによる自動取得、DNS/条件付き上流/DoH、
+IPv4/IPv6 HTTPSとDHCPv4自然更新、PD強制終了1.89秒・通常交換3.79秒・全体再起動3.84秒での通信復旧が
+成立した。通信区間75秒。ONU直結・対象物理NIC・長時間安定性・homert全体の置換は未受入。
+`lan-reuse` は明示option 6を含む独立BusyBoxのnative/移行DHCP→DNS、元観測期限、復旧も通った。
+`lan-reuse` の make check（Go/Python・Race Detector・vet）、両architectureのCGO_ENABLED=0ビルド、
+実6 ELFの署名catalog/publisher/stage検査、DHCP engine/sourceを含む両architectureの実CLI pack/stageが成功。
+初回publisher検査は開発worktree/build先のgroup書込権限で拒否され、所有build先を直して同じ検査が通った。
+ARM64実行と、この変更を含むappliance実行は未検証。次はTailscale・homert全体二台、k8s/pve差分、
+Cloud SAM、配備更新復旧を計画順に進める。新しい有料環境・本番切替の許可は推定しない。
+
+旧 `hgwdns-e2364af` の7800秒試験は通信727回と自然PD更新1回まで進み、PD SIGKILL復旧も通ったが、
+最後の通常PD交換後に自動端末の `curl(6)` で終了1。完走とは扱わない。旧resolver hookを使った実行であり、
+新しい標準hookの上記75秒結果と混同しない。長時間の最新版受入と実機の資格は残る。必要なWAN識別子と
+更新済みgrantだけをprivate stateへ保持し、解析後の生ログ・capture・一時環境は削除する。
+
 ## 単体 router・LAN 端末を優先
 
 `hgwdns-e2364af` は実HGWと独立Linux端末で、委譲IPv6アドレスによるDNS配布、
 DHCPv4/DHCPv6情報・SLAAC、条件付きDNS・DoH、IPv4/IPv6通信を確認した。
 隔離WANの通信遮断からの復旧、daemon全体の再起動と保存状態を使った別実行でも通信・PD識別子が復旧した。
-実HGWでの自然PD更新を含む7800秒試験は実行中。ONU直結・対象機器での受入は未実施。
+旧版の7800秒試験は自然更新後、最終通常交換の名前解決失敗で終了1。ONU直結・対象機器での受入は未実施。
 細分化した試験を増やすことより、homertに必要な機能を端末から使える構成に組み込み、実通信の失敗を直す。
 
 `homert-dns-reference` は稼働homertと同じ `dnsServerFrom: IPv6DelegatedAddress/...` の `address` 参照を

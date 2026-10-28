@@ -103,7 +103,7 @@ func prepareProtocols(doc config.Native, runtimeDir, stateDir string) (protocolP
 			}
 			plan.leaseHA[name] = leaseHAPlan{owner: "service." + service.DHCP6.HA.Owner, serving: bound}
 		case service.DHCPServer != nil && service.DHCPServer.HA != nil:
-			cfg := service.DHCPServerConfig(runtimeDir, stateDir)
+			cfg := service.DHCPServerConfig(stateDir)
 			body, encodeErr := json.Marshal(cfg)
 			instance, err = serviceconfig.Instance{Name: name, Role: "dhcp_server", Config: body}, encodeErr
 			cfg.Standby = false

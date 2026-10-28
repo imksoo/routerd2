@@ -62,7 +62,7 @@ func TestMigratedDHCPDNSGraphThroughPublicRuntimeOwnership(t *testing.T) {
 		}
 		now := clock.WallTime
 		return dhcpserverconfig.Snapshot{Resource: s.Name, Interface: s.DHCPServer.Interface, ServerAddress: s.DHCPServer.ServerAddress, Epoch: strings.Repeat("b", 32), Sequence: 1, Active: true, ObservedAt: now, BootID: clock.BootID, ObservedNanos: uint64(clock.BoottimeNanoseconds), ExpiresNanos: uint64(clock.BoottimeNanoseconds) + uint64(lifetime),
-			Leases: []dhcpserverconfig.Lease{{MACAddress: "02:00:00:00:00:11", IPAddress: address, Hostname: name, Scope: "default", AcquiredAt: now, RenewedAt: now, ExpiresAt: now.Add(60 * time.Second)}}}
+			Leases: []dhcpserverconfig.Lease{{MACAddress: "02:00:00:00:00:11", IPAddress: address, Hostname: name, ExpiresAt: now.Add(60 * time.Second)}}}
 	}
 	other := makeSnapshot(guest, "not-authorized", "198.51.100.100", 4*time.Second)
 	if err := observeMigration(ctx, runtime, migrationUpdate(t, runtime, guest, 1, other)); err != nil {
