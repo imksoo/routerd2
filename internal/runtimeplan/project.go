@@ -239,6 +239,7 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 				}
 				ensureInterface(&p.network, lan.Interface)
 				var prefixes []ra.Prefix
+				var routerDNS []ra.DNSServer
 				for _, lease := range snap.Prefixes {
 					if !lease.ValidUntil.Live(facts.bfdClock) {
 						continue
@@ -265,6 +266,9 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 					}
 					if !preparing && lan.Advertise {
 						prefixes = append(prefixes, ra.Prefix{Prefix: prefix.String(), OnLink: true, Autonomous: true, ValidLifetimeSeconds: ^uint32(0), PreferredLifetimeSeconds: ^uint32(0), ValidUntil: lease.ValidUntil, PreferredUntil: lease.PreferredUntil})
+						if lan.RDNSSRouter {
+							routerDNS = append(routerDNS, ra.DNSServer{Address: address.Addr().String(), ValidUntil: lease.ValidUntil})
+						}
 					}
 				}
 				if preparing || !lan.Advertise || len(prefixes) == 0 {
@@ -274,6 +278,7 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 				module := "service." + name
 				c := protocols.lanRA[module]
 				c.Prefixes = prefixes
+				c.LearnedRDNSS = routerDNS
 				c.Authority, _ = snap.LeaseUntil()
 				if until, usable := snap.InformationUntil(facts.bfdClock); usable {
 					if lan.UseLearnedRDNSS {

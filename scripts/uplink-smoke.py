@@ -120,6 +120,10 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
         {
             "id": "firewall",
             "firewall": {
+                "input": {"policy": "accept", "rules": [
+                    {"match": {"in_interface": "wan0", "protocol": protocol, "destination_ports": [{"start": 53}]}, "action": "drop"}
+                    for protocol in ("tcp", "udp")
+                ]},
                 "forward": [
                     {"from": "lan0", "to": "wan0"},
                     {"from": "lan0", "to": "dslite0"},
@@ -164,7 +168,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
                             "host_id": 1,
                             "advertise": True,
                             "other_config": True,
-                            "rdnss": ["fd42:726f:7574::1"],
+                            "rdnss_router": True,
                         },
                         {"name": "b4", "interface": "wan0", "host_id": 256, "prefix_length": 128},
                     ],
@@ -214,7 +218,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
                 "dns": {
                     "spec": {
                         "listen": [
-                            {"name": "lan", "addresses": ["198.18.0.1", "fd42:726f:7574::1"], "port": 53}
+                            {"name": "lan", "addresses": ["::"], "port": 53}
                         ],
                         "sources": [
                             {
@@ -398,6 +402,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
             '#!/bin/sh\ncase "$reason" in\n'
             'BOUND|RENEW) printf "v4|%s|%s|%s|%s\\n" "$reason" "$new_ip_address" "$new_routers" "$new_domain_name_servers" >> "' + str(auto_events) + '"; '
             ': > "' + str(resolver_file) + '"; for server in $new_domain_name_servers; do printf "nameserver %s\\n" "$server" >> "' + str(resolver_file) + '"; done;;\n'
+            'ROUTERADVERT) printf "ra|%s\\n" "$nd1_rdnss1_servers" >> "' + str(auto_events) + '";;\n'
             'INFORM6) printf "v6|%s|%s\\n" "$new_dhcp6_name_servers" "$new_dhcp6_domain_search" >> "' + str(auto_events) + '"; '
             ': > "' + str(resolver_file) + '"; for server in $new_dhcp6_name_servers; do printf "nameserver %s\\n" "$server" >> "' + str(resolver_file) + '"; done;;\n'
             'esac\n'
@@ -413,13 +418,16 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
             if not auto_events.exists():
                 return False
             events = [line.split("|") for line in auto_events.read_text().splitlines()]
-            return any(len(event) == 5 and event[0] == "v4" and event[3:] == ["198.18.0.1", "198.18.0.1"] for event in events) and any(len(event) == 3 and event[0] == "v6" and event[1] and ipaddress.IPv6Address(event[1]) == ipaddress.IPv6Address("fd42:726f:7574::1") and "home.arpa" in event[2].split() for event in events)
+            return any(len(event) == 5 and event[0] == "v4" and event[3:] == ["198.18.0.1", "198.18.0.1"] for event in events) and any(len(event) == 3 and event[0] == "v6" and event[1] and ipaddress.IPv6Address(event[1]) == ipaddress.IPv6Address("fd42:726f:7574::1") and "home.arpa" in event[2].split() for event in events) and any(event[0] == "ra" and len(event) == 2 and event[1] for event in events)
         wait(automatic_ready, 60)
         auto_options = [line.split("|") for line in auto_events.read_text().splitlines()]
         auto_dns4 = next(event[4] for event in reversed(auto_options) if event[0] == "v4")
         auto_dns6 = next(event[1] for event in reversed(auto_options) if event[0] == "v6")
         auto_addresses = json.loads(run(["ip", "-n", automatic, "-j", "address", "show", "dev", "client1"]))
         delegated = [ipaddress.IPv6Network(p["prefix"]) for p in query("control.sock", "/v1/services/service.wan-pd")["snapshot"]["prefixes"]]
+        router_dns = ipaddress.IPv6Address(next(event[1] for event in reversed(auto_options) if event[0] == "ra" and len(event) == 2 and event[1]))
+        router_addresses = json.loads(run(["ip", "-n", router, "-j", "-6", "address", "show", "dev", "lan0"]))
+        assert any(ipaddress.IPv6Address(a["local"]) == router_dns and any(router_dns in prefix for prefix in delegated) for link in router_addresses for a in link["addr_info"]), "RA DNS is not the delegated LAN router address"
         assert any(a["family"] == "inet6" and not a.get("tentative") and any(ipaddress.IPv6Address(a["local"]) in prefix for prefix in delegated) for link in auto_addresses for a in link["addr_info"]), "automatic LAN client has no usable delegated SLAAC address"
         print("PASS independent dhcpcd automatically acquired DHCPv4 and RA-triggered DHCPv6 with delegated SLAAC", flush=True)
 
@@ -526,6 +534,8 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
             for transport in [[], ["+tcp"]]:
                 response = run(inside(client, ["dig", "-6", "@fd42:726f:7574::1", "example.net", "AAAA", "+tries=1", "+time=3"] + transport))
                 assert "status: NOERROR" in response and "ANSWER: 0" not in response, (transport, response)
+            response = run(inside(automatic, ["dig", "-6", "@" + str(router_dns), "example.net", "AAAA", "+tries=1", "+time=3"]))
+            assert "status: NOERROR" in response and "ANSWER: 0" not in response, "delegated router DNS failed: " + response
             for family, server in (("-4", auto_dns4), ("-6", auto_dns6)):
                 result = run(inside(automatic, ["curl", family, "--noproxy", "*", "--max-time", "8", "-sS", "-I", "-o", "/dev/null", "-w", "%{http_code}", "https://one.one.one.one/"]))
                 assert result in ["200", "301", "302", "308"], (family, result)

@@ -93,6 +93,7 @@ type Delegation struct {
 	OtherConfig           bool     `json:"other_config,omitempty"`
 	RouterLifetimeSeconds *int     `json:"router_lifetime_seconds,omitempty"`
 	RDNSS                 []string `json:"rdnss,omitempty"`
+	RDNSSRouter           bool     `json:"rdnss_router,omitempty"`
 	DNSSL                 []string `json:"dnssl,omitempty"`
 	UseLearnedRDNSS       bool     `json:"use_learned_rdnss,omitempty"`
 	UseLearnedDNSSL       bool     `json:"use_learned_dnssl,omitempty"`
@@ -387,6 +388,9 @@ func Validate(services []Service) error {
 				lanNames[lan.Name] = true
 				if lan.PrefixLength != 0 && lan.PrefixLength != 64 && lan.PrefixLength != 128 || lan.PrefixLength == 128 && lan.Advertise {
 					return errors.New("delegation prefix_length must be 64 or 128; a host endpoint cannot advertise a LAN prefix")
+				}
+				if lan.RDNSSRouter && !lan.Advertise {
+					return errors.New("delegated router DNS requires an advertised LAN prefix")
 				}
 				if lan.RouterLifetimeSeconds != nil && (*lan.RouterLifetimeSeconds < 0 || *lan.RouterLifetimeSeconds > 9000 || (*lan.RouterLifetimeSeconds > 0 && *lan.RouterLifetimeSeconds < 10)) {
 					return errors.New("delegated RA lifetime must be zero or 10..9000 seconds")
