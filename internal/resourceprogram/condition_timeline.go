@@ -95,10 +95,8 @@ func (t *ConditionTimeline) Observe(program Program, facts FactSnapshot) (FactSn
 		facts.held[key] = result
 	}
 	for _, resource := range program.Resources {
-		visit(resource.When)
-		visit(resource.ReadyWhen)
-		if resource.Service != nil && resource.Service.VRRP != nil && resource.Service.VRRP.GracefulActivation != nil {
-			visit(&resource.Service.VRRP.GracefulActivation.ReadyWhen)
+		for _, condition := range resourceConditions(resource) {
+			visit(condition)
 		}
 	}
 	t.scope, t.lastNow, t.holds = scope, facts.NowNanos, next
@@ -195,6 +193,11 @@ func (s FactSnapshot) timedCondition(c *FactCondition, ignoreOwnHold bool) timed
 
 func resourceConditions(resource Resource) []*FactCondition {
 	conditions := []*FactCondition{resource.When, resource.ReadyWhen}
+	if resource.EgressRoute != nil {
+		for _, candidate := range resource.EgressRoute.Candidates {
+			conditions = append(conditions, candidate.When)
+		}
+	}
 	if resource.Service != nil && resource.Service.VRRP != nil && resource.Service.VRRP.GracefulActivation != nil {
 		conditions = append(conditions, &resource.Service.VRRP.GracefulActivation.ReadyWhen)
 	}

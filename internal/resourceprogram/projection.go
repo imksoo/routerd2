@@ -116,6 +116,15 @@ func (p Plan) Project(facts FactSnapshot) (Native, map[string]ResourceState) {
 				state.Reason, state.Dependency = "lifetime_expired", ""
 			}
 		}
+		if gate == True && r.EgressRoute != nil {
+			route, until, available := r.EgressRoute.selectRoute(facts)
+			if available {
+				node.egress = &route
+				untilNanos = min(untilNanos, until)
+			} else {
+				gate, state.Reason = False, "no_ready_egress"
+			}
+		}
 		state.Active = gate == True
 		state.Ready = gate
 		readyUntilNanos := untilNanos
@@ -155,7 +164,7 @@ func (p Plan) Project(facts FactSnapshot) (Native, map[string]ResourceState) {
 				native.Network.Links[linkIndex].Authority = authority
 			}
 			linkIndex++
-		case node.source.Route != nil:
+		case node.source.Route != nil || node.source.EgressRoute != nil:
 			if authority != (lifetime.Deadline{}) {
 				route := &native.Network.Routes[routeIndex]
 				route.BootID, route.ExpiresNanos = authority.BootID, authority.Nanos
@@ -217,6 +226,8 @@ func renderNative(nodes []compiledResource) Native {
 			out.Network.Links = append(out.Network.Links, *r.Link)
 		case r.Route != nil:
 			out.Network.Routes = append(out.Network.Routes, *r.Route)
+		case r.EgressRoute != nil:
+			out.Network.Routes = append(out.Network.Routes, *node.egress)
 		case r.PolicyRule != nil:
 			out.Network.PolicyRules = append(out.Network.PolicyRules, *r.PolicyRule)
 		case r.Forwarding != nil:

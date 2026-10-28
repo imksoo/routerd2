@@ -45,6 +45,7 @@ type Resource struct {
 	Address      *Address               `json:"address,omitempty"`
 	Link         *network.Link          `json:"link,omitempty"`
 	Route        *network.Route         `json:"route,omitempty"`
+	EgressRoute  *EgressRoute           `json:"egress_route,omitempty"`
 	PolicyRule   *network.PolicyRule    `json:"policy_rule,omitempty"`
 	Forwarding   *network.Forwarding    `json:"forwarding,omitempty"`
 	Firewall     *network.Firewall      `json:"firewall,omitempty"`
@@ -128,7 +129,7 @@ func (r Resource) kind() (string, int) {
 		set  bool
 	}{
 		{"interface", r.Interface != nil}, {"address", r.Address != nil},
-		{"link", r.Link != nil}, {"route", r.Route != nil},
+		{"link", r.Link != nil}, {"route", r.Route != nil}, {"egress_route", r.EgressRoute != nil},
 		{"policy_rule", r.PolicyRule != nil}, {"forwarding", r.Forwarding != nil},
 		{"firewall", r.Firewall != nil},
 		{"vrrp_guard", r.VRRPGuard != nil}, {"wireguard", r.WireGuard != nil},
@@ -145,6 +146,7 @@ func (r Resource) kind() (string, int) {
 
 type compiledResource struct {
 	source  Resource
+	egress  *network.Route
 	rule    EventRule
 	derived DerivedEvent
 }

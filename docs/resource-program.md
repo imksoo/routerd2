@@ -74,6 +74,7 @@ resources:
 | `address` | 一つの host/prefix、対象 interface、任意の address options |
 | `link` | bridge、VLAN、VRF、VXLAN、macvlan、WireGuard などの既存 native link intent |
 | `route` | 静的経路と ECMP next hops |
+| `egress_route` | 有効な候補の優先度で選ぶ一つの経路。同順位を kernel ECMP にまとめる |
 | `policy_rule` | policy routing rule |
 | `forwarding` | IPv4/IPv6 forwarding の管理 |
 | `firewall` | 順序を持つ既存 ACL/NAT intent |
@@ -88,6 +89,46 @@ resources:
 これにより同じ interface の設定と複数のアドレスを別の宣言へ帰属させられる。
 明示的な `interface` resource がないアドレスは、必要最小限の UP 設定を生成する。
 ほかの native field と protocol の制約は引き続き検証する。
+
+## Health と連動する経路選択
+
+`egress_route` は一つの destination/table/metric を所有する。現在の条件が真の候補のうち、
+`preference` が最大のものを選び、同順位の next hop を kernel ECMP へ渡す。
+`next_hop.weight` は選択した集合内の相対重み（1〜256）であり、候補の優先度とは別である。
+利用可能な候補が無ければ経路を撤去し、resource の理由を `no_ready_egress` とする。
+別の選択 process や状態台帳は作らず、通常の型付き条件と network writer を使う。
+
+以下は WAN address と、各 WAN に拘束した Health サービス・probe 用経路を既に宣言した構成の断片である。
+完全な再実行用 setup は `internal/integration/egress_route_test.go` にある。
+
+```yaml
+- id: internet-egress
+  egress_route:
+    destination: 0.0.0.0/0
+    table: 100
+    metric: 100
+    candidates:
+      - preference: 120
+        when: {fact: service.health-a.active, for: 300ms}
+        next_hop: {interface: wan0, gateway: 192.0.2.1, weight: 1}
+      - preference: 120
+        when: {fact: service.health-b.active}
+        next_hop: {interface: wan1, gateway: 203.0.113.1, weight: 2}
+- id: lan-egress-rule
+  policy_rule: {family: 4, priority: 1000, table: 100, source: 198.18.0.0/24}
+```
+
+candidate の `when` は通常の有限 fact・`all`/`any`・`max_age`・`for` を使う。
+`for` は回復後の継続条件で、旧 advisory selector の最終切替時刻に基づく hysteresis とは異なる。
+選択した候補の元期限の最小値を経路へ渡し、control が止まっても writer がその期限で撤去する。
+新しい観測が無いまま writer を再起動しても期限を延長しない。
+route と rule の所有は別であり、table を指定しただけで policy rule は生成しない。
+
+compiler contract は native-46、network journal は既存の11。既存 route の ECMP 実装を使う。
+`make check-health-pbr` は独立二 WAN・実 worker・Linux kernel と capture で、重み1:2、
+新規 TCP/UDP、障害除外・復旧、上位 preference、confirmed rollback、control/Health 停止中の
+writer 交換と元期限撤去を確認する。今回の動的経路選択は IPv4 で実行した。
+既存接続継続、IPv6 動的選択、source-only hash、旧 EgressRoutePolicy 全体の import と実 NIC は未検証・未完了である。
 
 ## EventRule
 

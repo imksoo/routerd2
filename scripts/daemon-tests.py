@@ -12,7 +12,10 @@ import tempfile
 # Each fixture verifies its disposable user/network namespace before mutation.
 # Timeout is the outer harness budget, not a protocol or client deadline.
 SUITES = {
-    "health-pbr": (("TestDaemonHealthPBRFailoverAndRecovery", ("wan0", "wan1"), 195),),
+    "health-pbr": (
+        ("TestDaemonHealthPBRFailoverAndRecovery", ("wan0", "wan1"), 195),
+        ("TestDaemonEgressRouteHealthyMultipath", ("wan0", "wan1"), 120),
+    ),
     "bgp": (
         ("TestDaemonBGPFIBAndOwnershipExpiry", (), 120),
         ("TestDaemonBGPRecursivePrerequisiteExpiry", (), 120),

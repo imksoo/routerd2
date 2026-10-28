@@ -5,56 +5,28 @@
 [機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
-## 現在の変更: info-owner / native-45
+## 現在の変更: egress-route / native-46
 
-旧 Information controller と PD client の固定要求・Bound 連動を比較した。
-`request` の四項目を既存一 client の ORO で満たす。Information が PD と同じ master 条件を持ち、
-その PD の Bound に依存する構成も同じ owner へ接続する。条件は変換後の型付き値を比較し、
-`all` wrapper や `.status.role` の表記差で別 client を作らない。独立した別条件は消さずに拒否する。
+旧 routerd の advisory 選択と実 `policyroute` 適用、既存の native ECMP を参照した。
+`egress_route` は条件が真の最高 preference 候補を選び、同順位を一つの kernel route にまとめる。
+相対重みは既存 next hop の `weight`、条件と元期限は既存 fact/hold と writer を使う。
+別の worker・選択状態・互換経路は追加しない。入力と境界は [ResourceProgram](resource-program.md) を読む。
 
-PVE Linux6.8/amd64、`info-owner` の製品 CLI 変換→実 worker と独立 Keepalived2.2.8・ISC4.4.3-P1 で、
-PD/情報取得、準備待ち、同じ DUID/IAID での切替復旧、WAN /128・VIP の新規 TCP/UDP、
-元期限での WAN/Health 停止と PD の停止処理開始、RA 撤去が成功した。
-Information の別条件を PD alias へ捨てて適用しないことも局所検査で確認する。
-`make check` の Go/Python/Race/vet、両 architecture の CGO_ENABLED=0 build と最終六 ELF の
-署名 catalog/publisher/stage Race 検査も成功した。
-直前 `info-options` の独立 ISC/radvd/BusyBox/Linux 試験では実 ORO 四項目、PD/IA_NA・LAN RA/配布、
-TCP/UDP/DNS、元期限撤去・復旧、DUID rollback と署名成果物まで成功している。
-条件付き server、他の依存/準備条件、homert 全体、ARM64 実行と対象 NIC は残る。
+PVE Linux6.8/amd64、`egress-route` の実 supervisor/control/network/Health、独立二 WAN・LAN と capture で、
+kernel の重み1:2、新規 TCP/UDP の両 WAN 分散、障害除外・復旧、上位 preference の選択と
+confirmed rollback が成功した。control/Health を止め、network writer を交換しても元期限で撤去し、
+同じ producer PID/世代の復帰後に通信が戻った。candidate の `for: 300ms` も実経路で使っている。
+初回 rollback 判定は試験が古い応答構造体へ decode して confirmation を残したため timeout した。
+応答ごとに初期化する既存の方法へ直し、経路・設定の復旧まで通した。製品期限は延長していない。
+`make check-health-pbr` の既存切替/古い通知/元期限/rollback と新しい分散試験、`make check` の
+Go/Python/Race/vet、両 architecture の CGO_ENABLED=0 build、最終六 ELF の署名
+catalog/publisher/stage Race 検査も成功した。network journal は既存11、worker ABI は5。
+IPv6 動的選択、source-only hash、既存接続継続、旧 EgressRoutePolicy 全体と homert 全体の受入は残る。
 
-実 HGW の別 `health-import` / native-43 長時間試験では、worker 再起動前に自然 T1 を迎え、
-capture に一致する Renew/Reply 一組を確認した。終了時の crash/restart・撤去は引き続き待つ。
-
-## 直前の完了変更: pd-admission / native-45
-
-routerd の `resourcequery/when.go`、PD client、VRRP backend・VMAC hook と現行 homert の設定を参照した。
-旧 HealthCheck・静的 VirtualAddress・PD の master/backup 条件を、既存の型付き条件へ接続している。
-master は VIP 公開ではなく選出を意味する。backup は有限の実 BACKUP 観測であり、master の否定ではない。
-primary/追加 VMAC は通常 DAD・元の権限期限を使う。仮想 link の所有は宣言し、物理 parent の管理権限は独立に必要。
-
-`gracefulActivation.readyWhen` は同じ条件変換を使い、PD の `phase: Bound` を有効な既存 PD fact へ接続する。
-旧 Bound/Renewing/Rebinding の区分と timeout 既定値45秒を維持する。timeout は公開を強制しない。
-VIP 公開後の準備状態低下は、その選出での公開を取り消さない。新しい readiness controller や状態台帳は作らない。
-
-PVE Linux6.8/amd64、`pd-admission` で製品 CLI 変換→実 supervisor/control/network/protocol worker と
-独立 Keepalived2.2.8・ISC4.4.3-P1 を使い、取得待ち中の WAN 準備と VIP 非公開、ISC 復帰後の公開が成功した。
-切替・VRRP worker 交換・復旧、同じ自動 DUID/IAID での PD 再取得、PD 由来 WAN /128 と VIP の新規 TCP/UDP、
-通常 DAD、RA 撤去を確認した。VRRP の元観測期限では WAN の撤去/DOWN、Health の終了、PD の停止処理開始を確認する。
-PD の停止処理は既存の20秒上限で撤去 ACK・Release を処理する。期限切れで元 link-local が無ければ Release は送れない。
-単独 PD の role guard は、共有 grant を Release せず待機系へ同期する native HA 設定の自動推定ではない。
-
-初回の GR 試行は、期限内に全依存 process の消滅を待つ箇所で timeout した。その後の同条件三試行では未再現。
-最終試験は転送権限の失効と PD cleanup を分け、元期限での WAN 停止と worker 停止処理を要求する。
-製品期限・試験待機時間は延長していない。最終コードでもこの実通信試験は成功した。
-`make check` の Go/Python/Race/vet、両 architecture の CGO_ENABLED=0 build、最終六 ELF の署名
-catalog/publisher/stage Race 検査と basic IPv4 v2/PASS・IPv6 v3 は成功した。
-ARM64 実行、対象 NIC、homert 全体と既存接続継続の今回の受入は未実施。
-
-再実行: `make check-vrrp-unicast RELEASE_ID=pd-admission
-DHCP6_SERVER=dist/peer-env/isc-dhcp/root/usr/sbin/dhcpd`。
-契約と残制限は [legacy importer](../internal/legacyconfig/README.md) と各 protocol の README を読む。
-過去の逐次試験記録はここへ積み増さない。native HA の既存接続・共有 grant 試験は
-`make check-ha-pd check-ha-state`、関連設定と未完了範囲は実装計画を参照する。
+旧入力の PD/Information は、同じ master 条件と自分の PD の Bound 依存を一 client/socket へ接続する。
+四つの Information 要求も既存 ORO を使う。DUID-LL・IAID・永続 identity・期限の owner は変えない。
+独立した別条件は消して適用しない。conditional server と残る準備条件は [import contract](../internal/legacyconfig/README.md) を参照。
+ARM64 実行、ONU 直結と対象 NIC の資格認定は未実施であり、本番 homert は置き換えていない。
 
 ## 開発環境と保護するもの
 
@@ -70,36 +42,24 @@ DHCP6_SERVER=dist/peer-env/isc-dhcp/root/usr/sbin/dhcpd`。
 - `git add .`や`git add -A`を使わず変更pathを明示する。main commit/pushは既に許可されている。
   GitHub Actions待ちを実装・修正の前提にしない。
 
-## 実上流: ens18の実HGW接続を確認、長時間試験は実行中
+## 実上流: ens18 の実 HGW
 
-既存`get-hgw-pd`の読取専用問い合わせで実HGWのPD配布を確認した。到達経路はens18であり、
-以前に無応答だったens20とは別の経路だった。homert02の設定から実AFTR intentを確認して使った。
-`ha-pd-admission` / native-43で初回確認後、`ha-pd-prepared`でも再検証した。`make check-uplink UPLINK_INTERFACE=ens18
-UPLINK_AFTR=<確認したAFTR> UPLINK_SECONDS=30 RELEASE_ID=ha-pd-prepared`で実行した。
-管理address/MAC/default routeを保持した別MAC・隔離LANで、実HGWのRA/PD、LANからDS-Lite経由の
-IPv4 HTTPS、IPv6 HTTPS、学習DNSへのUDP/TCP、RA撤去とRelease/Replyが通った。Replyの送信元は49153。
-終了後のhost管理状態は開始前と一致し、短期試験のnamespace・raw出力は削除済み。
+`get-hgw-pd` の読取専用確認と homert の AFTR intent を使った。ens18 は管理経路でもあるため、
+別 MAC・隔離 router/LAN namespace で試験する。host address/route/sysctl/clock は変更しない。
+DHCPv6 Reply の送信元は49153。有効な DHCPv4 貸出も受けるが server identifier は HGW の IPv4 と異なる。
 
-file準備変更前`ha-pd-admission`での7800秒試験は、自然更新に達する前に
-`example.net A`のDNS応答判定で失敗して終了した。約30分の時点まではreadyかつ全worker世代1だった。
-元のassertに応答本文がなくRCODE/Answerを特定できなかったため、作業差分で失敗時に本文と
-UDP/TCPの種別を出すようにした。DNSの判定は変更しない。ee50461/`ha-pd-prepared`の再試行は
-約42分まで実通信を継続し、途中でPD workerをSIGKILLしてDUID保持・Rebind復旧を確認した。
-captureは同じDUID/PDでのRebindと、49153からのReplyを示した。新しいReplyが期限を更新したので、
-元期限との単純一致assertは失敗したが製品の誤延長ではない。その後LAN両family HTTPSとUDP/TCP DNSも通った。
-自然Renewは未到達で、この試行は意図して中断・削除した。失敗や完走として扱わない。
+`3affd07` / `health-import` native-43 の7800秒試験が完走した。758回の LAN IPv4/IPv6 HTTPS と
+学習 DNS UDP/TCP、再起動前の自然 Renew/対応 Reply 一組、最後の PD worker SIGKILL 後の
+同じ DUID/IAID・Rebind/Reply・通信復旧、zero-lifetime RA・kernel 撤去・Release/Reply が成功した。
+host 管理 address/MAC/default route は不変。private stage・capture は終了時に削除済みで、生存 owner は無い。
+過去の長時間試験で起きた DNS 応答判定失敗の原因は未特定であり、今回の成功を修正済みとは扱わない。
 
-現在は3affd07/`health-import`と更新fixtureで7800秒を再実行中。worker SIGKILLは観測期間の最後に行う。
-`renew_at`変更を自然Renewに数える表示を除き、captureのRenew/対応Replyを起動復旧のRebind/Replyと
-区別する。初期期限を含む長さの試験では、再起動前の自然Renew/Replyが無ければ失敗する。
-30秒の実HGW試験はDUID/IAID保持、Rebind/Reply、LAN両family HTTPS・UDP/TCP DNS、
-RA/Release撤去まで成功した。`make test-tools`も成功。長時間試験の完走は未確認。自然 Renew/対応 Reply は再起動前の実 capture で一組確認した。
-失敗版のnamespace・stageは削除され、host管理address/MAC/default routeは開始前と一致した。
-現在のownerがbounded captureとprivate stateを所有し、終了時に削除する。
-前の長時間試験側の独立LANではpublic DNSへのIPv4 UDP/TCP応答とAFTR内packetも確認した。
-DHCPv4の有効貸出が隔離WANへ入ることも確認したが、server identifierはHGWのIPv4とは異なった。
-ONU直結・物理NIC・継続TCPの資格認定とは区別する。
-ens20の無応答を上流全体の利用不能へ外挿せず、未回答のens20質問を実HGW試験の前提にしない。
+最新 native-46 / `egress-route` でも30秒の `make check-uplink` が成功した。両 family HTTPS、
+DNS UDP/TCP、DUID/IAID を保つ SIGKILL/Rebind 復旧、RA/Release 撤去と host 管理状態不変を確認した。
+この短期試験では自然 Renew は未到達。7800秒の結果を最新実行版の結果に置き換えない。
+再実行: `make check-uplink UPLINK_INTERFACE=ens18 UPLINK_AFTR=<確認したAFTR>
+UPLINK_SECONDS=7800 RELEASE_ID=<実行版>`。
+ONU 直結・物理 NIC・継続 TCP の資格認定は別である。ens20 の以前の無応答を上流全体へ外挿しない。
 
 ## 既存実装から維持する実運用の知見
 
@@ -120,7 +80,7 @@ ens20の無応答を上流全体の利用不能へ外挿せず、未回答のens
 1. homert02/03の現行設定・旧routerdを比較し、残る一台分の通信と二台の切替/復旧を完成させる。
    Tailscaleの残項目、旧stateless DHCPv6入力の条件付きHA/import不足、VRRP/PDの分断・復旧、
    管理・更新・戻し方を実際の相手で確認する。本番切替は行わない。
-2. 実行中の実HGW自然更新試験を完了まで確認し、最後のPD worker crash/restartとDUID保持も確認する。
+2. 実HGWの完走結果と最新版の短期結果を区別し、変更に必要な実回線検証を続ける。
    ONU/HGW側のRA/DHCPv4/DHCPv6 PDからLAN・DNS・DS-Liteまで、実相手と対象版を区別して進める。
    仮想peerとの成功を、この回線や物理NICの合格に置き換えない。
 3. その後k8s-rt/pve-rtの実設定を確認し、Cloud SAMへ進む。

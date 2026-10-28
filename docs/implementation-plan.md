@@ -639,6 +639,16 @@ confirmed rollbackが通った。旧条件付き起動・動的target・EgressRo
 
 実装先の案: `internal/policy/egress (新設予定)`, `internal/network`, `internal/runtimeplan`, `internal/legacyconfig`。
 
+2026-10-28 `egress-route` / native-46: 旧 advisory 選択と実 policyroute 適用を読み、
+条件が真の最高 preference 候補を、同順位の kernel ECMP として一つの route owner へ投影する。
+別 worker/選択状態を作らず、既存 next-hop weight・fact/hold・writer の元期限を使う。
+PVE Linux6.8/amd64 の実 worker・独立二 WAN/LAN・capture で、重み1:2、新規 TCP/UDP の両経路、
+障害除外・復旧、上位候補、confirmed rollback、control/Health 停止中の writer 交換と元期限撤去が成功した。
+既存 Health→PBR 全経路、make check、両 architecture build/署名検査も成功した。
+最新 native-46 は実 HGW の30秒・両 family HTTPS/DNS・DUID を保つ crash/Rebind・撤去を通した。
+native-43 の7800秒は758回の通信と再起動前の自然 Renew/Reply 一組まで完走した。両実行版を区別する。
+IPv6 動的選択、source-only hash、mark/connmark、旧 EgressRoutePolicy 全体、homert 統合と実 NIC は残る。
+
 #### NET-03 — Firewall・ingress・MTU/MSS・fragment policy
 
 2026-10-27追加: 稼働中の下位MTU変更でDS-Liteが1460のまま残り、大TCPだけが停止する問題を

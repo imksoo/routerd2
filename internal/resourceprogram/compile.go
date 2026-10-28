@@ -141,6 +141,13 @@ func Compile(source Program) (Plan, error) {
 			err = claim(r, "link", r.Link.Name)
 		case r.Route != nil:
 			err = claim(r, "route", routeKey(*r.Route))
+		case r.EgressRoute != nil:
+			route, compileErr := r.EgressRoute.compile()
+			err = compileErr
+			if err == nil {
+				err = claim(r, "route", routeKey(route))
+				node.egress = &route
+			}
 		case r.PolicyRule != nil:
 			err = claim(r, "policy_rule", fmt.Sprintf("%d/%d", r.PolicyRule.Family, r.PolicyRule.Priority))
 		case r.Forwarding != nil:

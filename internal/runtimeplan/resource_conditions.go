@@ -36,7 +36,7 @@ type guardGrant struct {
 
 func dynamicProgram(source config.Document) bool {
 	for _, r := range source.Resources {
-		if r.When != nil || r.ReadyWhen != nil || r.Service != nil && r.Service.VRRP != nil && r.Service.VRRP.GracefulActivation != nil {
+		if r.When != nil || r.ReadyWhen != nil || r.EgressRoute != nil || r.Service != nil && r.Service.VRRP != nil && r.Service.VRRP.GracefulActivation != nil {
 			return true
 		}
 		if r.Address != nil && r.Address.Options != nil && !r.Address.Options.ValidUntil.IsZero() || r.Route != nil && r.Route.ValidUntil != (lifetime.Deadline{}) {
