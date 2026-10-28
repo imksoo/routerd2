@@ -42,6 +42,20 @@ Cloud SAM、配備更新復旧を計画順に進める。新しい有料環境�
 
 ## 単体 router・LAN 端末を優先
 
+`lan-reuse` / native-56の新統合版は、独立Headscale0.29.6・公式Tailscale1.104.2による
+署名PID 1の既存試験を完走した。固定WAN/LANでの両family subnet/exit、DERP、worker/control/全体交換、
+identity、期限・取消・再認証、DNS、tags/shieldsUp、confirmed rollbackとcaptureの範囲である。
+さらに実HGWの同一製品でWAN DHCPv4/RA/PD→LAN DHCPv4/SLAAC/DHCPv6情報/DNS/DS-LiteとTailscaleを
+同時に使い、独立自動端末からのIPv4/IPv6 TCP/UDP、広告IPv4 LANへの着信、両familyのInternet出口を
+通信75秒で確認した。PD強制交換1.27秒・通常交換4.09秒、全体再起動4.06秒で端末通信が戻り、
+全体交換後のTailscale identityと上記通信も保持した。`make check`と両architectureの静的ビルドも成功した。
+Headscale/公式peerの専用underlayは試験用固定192.0.2.0/24。IPv6 LANは広告せず、LAN発IPv6には
+明示masqueradeを追加した。このNATは現行homert intentとの差分であり、同一設定の置換合格とはしない。
+出口だけでは未広告LANへの着信・返信を許可しないupstream動作を、両端captureと
+1.104.2の`ipn/ipnlocal/local.go`で確認した。未広告の委譲IPv6 LANへの着信を受入条件へ加えない。
+19:44 UTC開始の同構成7800秒試験は進行中。観測T1は開始後約7180秒で、完走・自然更新は未確定。
+PD専用captureを加え、traffic用captureの循環で更新packetを失わない。次は二台全体と残る配備・更新へ進む。
+
 `hgwdns-e2364af` は実HGWと独立Linux端末で、委譲IPv6アドレスによるDNS配布、
 DHCPv4/DHCPv6情報・SLAAC、条件付きDNS・DoH、IPv4/IPv6通信を確認した。
 隔離WANの通信遮断からの復旧、daemon全体の再起動と保存状態を使った別実行でも通信・PD識別子が復旧した。

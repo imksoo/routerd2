@@ -22,7 +22,10 @@
 現在はnative-56で旧routerdのDHCPv4描画・保持履歴と固定dnsmasqを取り込み、独自割当器と台帳を削除した。
 実署名PID 1二台と独立端末で切替・更新・保持・停止中通知の保存・再取得、実HGWで自動取得とDNS利用、
 IPv4/IPv6、PD交換と全体再起動後の通信が成立した。詳細と未受入は [引き継ぎ](pve-codex-handoff.md)。
-DNS/DHCPv6/RA/VRRP選出の一律外部化は決めていない。Tailscale・homert全体二台、k8s/pve、Cloud SAM、
+同じnative-56で独立Headscale/公式Tailscaleとの署名PID 1試験と、実HGWの自動WAN/PD・LAN/DNS/DS-Liteに
+Tailscaleを合わせた75秒通信・PD交換・全体再起動も通った。対向underlay固定・LAN発IPv6 NAT追加を
+現行homertとの差分として記録する。19:44 UTC開始の7800秒・自然PD更新試験は進行中で未合格。
+DNS/DHCPv6/RA/VRRP選出の一律外部化は決めていない。homert全体二台、Tailscaleの残機能、k8s/pve、Cloud SAM、
 配備更新復旧と対象実機を含む全34項目のゴールは未完了。旧版の130分試験は自然PD更新を観測したが、
 最終通常PD交換後の名前解決失敗で終了1。最新版の長時間安定性やONU直結の受入には数えない。
 

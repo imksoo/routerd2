@@ -140,6 +140,12 @@ DNS利用とIPv4/IPv6通信、自然DHCPv4更新、PD通常/強制交換と製�
 同じTCP/UDPを確認した。先行版の自然貸出失効・古い所有者の試験と区別する。200ms広告、最新版の長時間、
 全体の二台実回線・物理NIC・後続環境の資格は残る。旧7800秒試験は自然PD更新後の最終復旧で終了1だった。
 
+`lan-reuse`は独立Headscale/公式Tailscaleとの署名PID 1試験も完走した。さらに実HGWの同一製品で
+自動WAN/PD・LAN配布・DNS/DS-LiteとTailscaleを同時に75秒使い、PD通常/強制交換と全体再起動後の
+通信とidentityを確認した。専用対向underlayは固定値、LAN発IPv6には明示NATを追加したため、
+現行homert設定と同一とはしない。広告IPv4 LAN着信・LAN発両family・両familyの出口が対象である。
+19:44 UTC開始の7800秒版は進行中で、自然PD更新・完走をまだ合格に数えない。
+
 ## 1. 単体の基本ルーター: homert02/03
 
 **環境**: 実HGWまたはNTT ONUと隔離された実routerd2、独立した有線端末またはLinux/BusyBox端末。

@@ -174,6 +174,19 @@ then verify client connectivity and PD identity after removing the blackhole.
 Set `UPLINK_FULL_RESTART=1` to restart the daemon with the same state and
 verify that the connected clients regain communication.
 
+Set `UPLINK_TAILNET=1` to combine the automatic WAN/PD and LAN services with
+independent Headscale and an official Tailscale peer. Their dedicated test
+underlay is fixed at `192.0.2.0/24`; Internet exit traffic uses the actual HGW,
+DS-Lite and native IPv6. The test advertises the IPv4 LAN, matching the observed
+homert profile. LAN-originated IPv6 uses an explicit masquerade rule toward
+`tailscale0`. An exit route alone does not authorize unadvertised LAN access:
+upstream Tailscale excludes local LANs from its default-route filter, including
+replies addressed to an unadvertised delegated prefix. This fixture does not
+establish inbound access to the delegated IPv6 LAN. It checks TCP/UDP application
+traffic, both-family Internet HTTPS/UDP DNS and the same node identity after a
+whole-daemon restart. The fixed-underlay `make check-tailscale` additionally
+checks both-family advertised subnets, DERP, revocation and rollback.
+
 The test kills and gracefully restarts the PD worker, checks retained DUID/IAID
 and recovered communication, and verifies Rebind/Reply in capture. When the
 interval includes the initial T1, a captured natural Renew/Reply before restart

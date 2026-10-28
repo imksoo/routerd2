@@ -13,6 +13,7 @@ import ipaddress
 import json
 import os
 import re
+import runpy
 from pathlib import Path
 import signal
 import subprocess
@@ -26,7 +27,7 @@ def run(args, timeout=12):
     return result.stdout
 
 
-def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_restart):
+def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_restart, tailnet):
     def stop(*_):
         raise KeyboardInterrupt()
 
@@ -47,6 +48,8 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
     run(["mount", "--bind", str(resolver_file), str(resolver_target)])
     router, client, automatic = "r2uplink-" + str(os.getpid()), "r2client-" + str(os.getpid()), "r2auto-" + str(os.getpid())
     children, namespaces = [], []
+    capture = None
+    pd_capture = None
 
     def inside(ns, command):
         return ["ip", "netns", "exec", ns] + command
@@ -298,6 +301,73 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
         run(["ip", "-n", client, "link", "add", "link", "client0", "name", "client1", "type", "macvlan", "mode", "bridge"])
         run(["ip", "-n", client, "link", "set", "client1", "netns", automatic])
         run(["ip", "-n", automatic, "link", "set", "client1", "up"])
+        if tailnet:
+            # A separate, explicitly fixed test underlay reaches the independent
+            # control/peer. Product Internet traffic still uses the real HGW.
+            remote = "r2tail-" + str(os.getpid())
+            run(["ip", "netns", "add", remote])
+            namespaces.append(remote)
+            run(["ip", "-n", remote, "link", "set", "lo", "up"])
+            run(["ip", "link", "add", "peer0", "netns", router, "type", "veth", "peer", "name", "underlay0", "netns", remote])
+            run(["ip", "-n", remote, "addr", "add", "192.0.2.1/24", "dev", "underlay0"])
+            run(["ip", "-n", remote, "link", "set", "underlay0", "up"])
+            peerbin = stage / "tailnet"
+            cert, key = peerbin / "cert.pem", peerbin / "key.pem"
+            run(["openssl", "req", "-config", "/dev/null", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1", "-keyout", str(key), "-out", str(cert), "-subj", "/CN=routerd-uplink", "-addext", "subjectAltName=IP:192.0.2.1"])
+            hsconfig = peerbin / "headscale.json"
+            hsconfig.write_text(json.dumps({
+                "server_url": "https://192.0.2.1:8443", "listen_addr": "192.0.2.1:8443",
+                "noise": {"private_key_path": str(peerbin / "noise.key")},
+                "prefixes": {"v4": "100.64.0.0/10", "v6": "fd7a:115c:a1e0::/48"},
+                "database": {"type": "sqlite", "sqlite": {"path": str(peerbin / "db.sqlite")}},
+                "derp": {"urls": [], "paths": [], "auto_update_enabled": False, "server": {
+                    "enabled": True, "region_id": 999, "region_code": "fixture", "region_name": "isolated DERP",
+                    "stun_listen_addr": "0.0.0.0:3478", "private_key_path": str(peerbin / "derp.key"),
+                    "automatically_add_embedded_derp_region": True, "ipv4": "192.0.2.1"}},
+                "dns": {"override_local_dns": False, "magic_dns": True, "base_domain": "test.invalid"},
+                "unix_socket": str(peerbin / "headscale.sock"), "tls_cert_path": str(cert), "tls_key_path": str(key),
+                "disable_check_updates": True, "log": {"level": "warn"},
+            }))
+            head = [str(peerbin / "headscale"), "-c", str(hsconfig)]
+            start(remote, head + ["serve"], "tailnet-control")
+            wait(lambda: (peerbin / "headscale.sock").exists())
+            user = json.loads(run(inside(remote, head + ["users", "create", "fixture", "-o", "json"])))
+            auth = json.loads(run(inside(remote, head + ["preauthkeys", "create", "--user", str(user["id"]), "--reusable", "-o", "json"])))
+            authfile = peerbin / "auth.key"
+            authfile.write_text(auth["key"])
+            authfile.chmod(0o600)
+            boot["workers"]["tailscale"] = str(stage / "routerd-modules")
+            boot["engines"]["tailscale"] = str(peerbin / "tailscale-engine.tar")
+            resources += [
+                {"id": "tailnet-underlay", "interface": {"name": "peer0"}},
+                {"id": "tailnet-underlay-ip", "address": {"interface": "peer0", "cidr": "192.0.2.2/24"}},
+                {"id": "tailnet", "service": {"name": "tailnet", "tailscale": {
+                    "interface": "tailscale0", "server_url": "https://192.0.2.1:8443", "hostname": "hgw-router",
+                    "auth_key_file": str(authfile), "control_ca_file": str(cert),
+                    "advertise_routes": ["198.18.0.0/24"], "advertise_exit_node": True,
+                }}},
+            ]
+            firewall = next(r["firewall"] for r in resources if "firewall" in r)
+            firewall["forward"] += [{"from": "tailscale0", "to": name} for name in ("lan0", "dslite0", "wan0")]
+            firewall["forward"].append({"from": "lan0", "to": "tailscale0"})
+            firewall["masquerade"] += [
+                {"source": "100.64.0.0/10", "out_interface": "dslite0"},
+                {"source": "fd7a:115c:a1e0::/48", "out_interface": "wan0"},
+            ]
+            # No delegated IPv6 subnet is advertised in this profile. Make
+            # outbound LAN IPv6 use the router's tailnet identity explicitly;
+            # upstream's local-destination filter otherwise drops its replies.
+            firewall["nat"] = [{"type": "masquerade", "match": {
+                "family": 6, "in_interface": "lan0", "out_interface": "tailscale0"}}]
+            (stage / "boot.json").write_text(json.dumps(boot))
+            (stage / "config.json").write_text(json.dumps({"schema_version": 2, "resources": resources}))
+            peer_socket = peerbin / "peer.sock"
+            start(remote, ["tcpdump", "--immediate-mode", "-Z", "root", "-U", "-n", "-i", "any", "-w", str(stage / "peer.pcap"), "ip6 or udp port 41641"], "tailnet-capture")
+            start(remote, ["env", "SSL_CERT_FILE=" + str(cert), "TS_LOGS_DIR=" + str(peerbin), str(peerbin / "tailscaled"), "--state=" + str(peerbin / "peer.state"), "--statedir=" + str(peerbin), "--socket=" + str(peer_socket), "--tun=tailscale0", "--port=41641", "--no-logs-no-support"], "tailnet-peer")
+            wait(peer_socket.exists)
+            peer_cli = [str(peerbin / "tailscale"), "--socket=" + str(peer_socket)]
+            run(inside(remote, ["env", "SSL_CERT_FILE=" + str(cert)] + peer_cli + ["up", "--timeout=15s", "--login-server=https://192.0.2.1:8443", "--hostname=independent-peer", "--auth-key=file:" + str(authfile), "--accept-dns=false", "--accept-routes=true", "--netfilter-mode=off"]), timeout=20)
+            echo = runpy.run_path(str(peerbin / "peer-fixture.py"))
         capture = start(
             router,
             [
@@ -318,6 +388,8 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             ],
             "capture",
         )
+        pd_capture = start(router, ["tcpdump", "--immediate-mode", "-Z", "root", "-n", "-U",
+                                   "-i", "wan0", "-w", str(stage / "pd.pcap"), "udp port 546"], "pd-capture")
         daemon = start(
             router,
             [str(stage / "routerd"), "boot", "--file", str(stage / "boot.json")],
@@ -483,6 +555,60 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             )
 
         wait(dns_ready)
+        if tailnet:
+            def tailnet_observation():
+                return query("control.sock", "/v1/services/service.tailnet").get("snapshot", {})
+
+            wait(lambda: tailnet_observation().get("backend_state") == "Running")
+            tailnet_identity = tailnet_observation()["node_id"]
+            product_ips = tailnet_observation()["addresses"]
+            peer_status = json.loads(run(inside(remote, peer_cli + ["status", "--json"])))
+            peer_ips = {ipaddress.ip_address(a).version: a for a in peer_status["TailscaleIPs"]}
+            nodes = json.loads(run(inside(remote, head + ["nodes", "list", "-o", "json"])))
+            node = next(n for n in nodes if n["name"] == "hgw-router")
+            run(inside(remote, head + ["nodes", "approve-routes", "-i", str(node["id"]), "-r", "198.18.0.0/24,0.0.0.0/0,::/0"]))
+            wait(lambda: any(product_ips[0] in p.get("TailscaleIPs", []) and p.get("ExitNodeOption")
+                             for p in json.loads(run(inside(remote, peer_cli + ["status", "--json"]))).get("Peer", {}).values()))
+            run(inside(remote, peer_cli + ["set", "--exit-node=" + product_ips[0], "--exit-node-allow-lan-access=true"]))
+            auto4 = next(a["local"] for link in auto_addresses for a in link["addr_info"] if a["family"] == "inet")
+            auto6 = next(a["local"] for link in auto_addresses for a in link["addr_info"] if a["family"] == "inet6" and any(ipaddress.IPv6Address(a["local"]) in p for p in delegated))
+            for ns, addresses in ((automatic, (auto4,)), (remote, tuple(peer_ips.values()))):
+                for address in addresses:
+                    name = "tailnet-echo-" + address.replace(":", "_")
+                    start(ns, ["python3", "-u", "-c", echo["ECHO_SERVER"], address], name)
+                    wait(lambda: "READY" in (stage / (name + ".log")).read_text())
+
+            def check_tailnet():
+                assert tailnet_observation().get("node_id") == tailnet_identity, "router restart changed tailnet identity"
+                for family, address in ((4, auto4), (6, auto6)):
+                    # homert advertises IPv4 LANs only. Exit routes deliberately
+                    # exclude unadvertised local LANs in upstream Tailscale.
+                    source = next(a for a in product_ips if ipaddress.ip_address(a).version == 6) if family == 6 else address
+                    flows = [(automatic, peer_ips[family], source)]
+                    if family == 4:
+                        flows.append((remote, address, peer_ips[family]))
+                    for ns, destination, source in flows:
+                        try:
+                            run(inside(ns, ["python3", "-c", echo["ECHO_CLIENT"], destination, source]))
+                        except RuntimeError:
+                            print("Failed tailnet direction", "peer-to-LAN" if ns == remote else "LAN-to-peer", "family", family, flush=True)
+                            for target in (remote, router, automatic):
+                                print("Failed tailnet routes", target, run(inside(target, ["ip", "-6" if family == 6 else "-4", "route", "show", "table", "all"])), flush=True)
+                            status = json.loads(run(inside(remote, peer_cli + ["status", "--json"])))
+                            print("Failed tailnet peer state", {k: status.get(k) for k in ("BackendState", "Health")},
+                                  [{k: p.get(k) for k in ("HostName", "ExitNode", "ExitNodeOption", "AllowedIPs", "PrimaryRoutes", "RxBytes", "TxBytes")} for p in status.get("Peer", {}).values()], flush=True)
+                            for path in (*stage.glob("wan.pcap*"), stage / "peer.pcap"):
+                                print("Failed tailnet packets", run(["tcpdump", "-nn", "-r", str(path), "-c", "30", ("ip6" if family == 6 else "ip") + " and (tcp port 18080 or udp port 18081)"]), flush=True)
+                            print("Failed tailnet peer log", "\n".join((stage / "tailnet-peer.log").read_text().splitlines()[-20:]), flush=True)
+                            raise
+                for family, address in (("-4", "1.1.1.1"), ("-6", "[2606:4700:4700::1111]")):
+                    response = run(inside(remote, ["curl", family, "--noproxy", "*", "--max-time", "8", "--resolve", "one.one.one.one:443:" + address, "-sS", "-I", "-o", "/dev/null", "-w", "%{http_code}", "https://one.one.one.one/"]))
+                    assert response in ("200", "301", "302", "308"), (family, response)
+                    server = address.strip("[]")
+                    response = run(inside(remote, ["dig", family, "@" + server, "example.net", "A", "+tries=1", "+time=3"]))
+                    assert "status: NOERROR" in response, (family, response)
+            check_tailnet()
+            print("PASS actual HGW automatic LAN -> Tailscale peer IPv4/IPv6 (explicit IPv6 NAT), advertised IPv4 LAN <- peer TCP/UDP; IPv4/IPv6 exit HTTPS/UDP DNS", flush=True)
         for server, family in ((lease[3], "-4"), (str(router_dns), "-6")):
             answer = run(inside(client, ["dig", family, "@" + server, "available.split.test", "A", "+short", "+time=3", "+tries=1"]))
             assert answer.strip() == "192.0.2.77", "conditional DNS query reached the wrong upstream: " + answer
@@ -569,6 +695,8 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
 
         if wan_outage:
             check_traffic()
+            if tailnet:
+                check_tailnet()
             before_outage = query("control.sock", "/v1/services/service.wan-pd")["snapshot"]
             rules = (
                 'add table inet r2_outage\n'
@@ -601,12 +729,15 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             "renew_at"
         ]
         renew_due = initial["nanos"] / 1e9 - time.clock_gettime(time.CLOCK_BOOTTIME)
+        print("Observed natural PD renewal due in seconds", round(renew_due), flush=True)
         started_at = time.time()
         start_time, rounds, updates = time.monotonic(), 0, 0
         while time.monotonic() - start_time < seconds:
             if dhcp_client.poll() is not None or automatic_client.poll() is not None:
                 raise RuntimeError("independent LAN DHCP client exited")
             check_traffic()
+            if tailnet:
+                check_tailnet()
             renewed = query("control.sock", "/v1/services/service.wan-pd")["snapshot"][
                 "renew_at"
             ]
@@ -690,6 +821,10 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             wait(dns_ready)
             check_traffic()
             print("PASS actual HGW full daemon restart retained identity and restored both clients; seconds", round(time.monotonic() - restart_at, 2), flush=True)
+            if tailnet:
+                wait(lambda: tailnet_observation().get("backend_state") == "Running")
+                check_tailnet()
+                print("PASS combined WAN/PD/LAN/tailnet whole-daemon restart retained identity and restored bidirectional TCP/UDP and Internet exit", flush=True)
         returned = any(
             run(
                 [
@@ -712,8 +847,10 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
         assert daemon.returncode == 0, "actual uplink daemon failed to stop"
         capture.send_signal(signal.SIGINT)
         capture.wait(timeout=3)
+        pd_capture.send_signal(signal.SIGINT)
+        pd_capture.wait(timeout=3)
         records = []
-        for path in stage.glob("wan.pcap*"):
+        for path in (*stage.glob("wan.pcap*"), stage / "pd.pcap"):
             packets = run(["tcpdump", "-nn", "-tt", "-vv", "-r", str(path), "ip6"])
             for line in packets.splitlines():
                 if line and line[0].isdigit():
@@ -830,12 +967,13 @@ def main():
     parser.add_argument("--wan-mac", default="02:72:6f:75:74:02")
     parser.add_argument("--wan-outage", action="store_true", help="Blackhole this isolated router WAN and verify recovery")
     parser.add_argument("--full-restart", action="store_true", help="Restart the entire router with the same state and clients")
+    parser.add_argument("--tailnet", action="store_true", help="Add independent Headscale/Tailscale with a fixed private underlay; exercise automatic LAN and real WAN exit together")
     parser.add_argument("--inside", type=Path)
     args = parser.parse_args()
     if not 1 <= args.seconds <= 10800:
         parser.error("--seconds must be 1..10800")
     if args.inside:
-        owner(args.inside, args.uplink, args.aftr, args.seconds, args.dns_upstream, args.wan_mac, args.wan_outage, args.full_restart)
+        owner(args.inside, args.uplink, args.aftr, args.seconds, args.dns_upstream, args.wan_mac, args.wan_outage, args.full_restart, args.tailnet)
         return
     root = [] if os.geteuid() == 0 else ["sudo", "-n"]
     persistent = args.state_dir.resolve() if args.state_dir else None
@@ -863,6 +1001,12 @@ def main():
                 root
                 + ["install", "-m", "500", str(source.resolve()), str(stage / name)]
             )
+        if args.tailnet:
+            run(root + ["mkdir", "-m", "700", str(stage / "tailnet")])
+            sources = [(Path("dist/peer-env/tailscale") / name, name) for name in ("headscale", "tailscale", "tailscaled")]
+            sources += [(Path("dist/tailscale-engine.tar"), "tailscale-engine.tar"), (Path("scripts/tailscale-peer.py"), "peer-fixture.py")]
+            for source, name in sources:
+                run(root + ["install", "-m", "500", str(source.resolve()), str(stage / "tailnet" / name)])
         print("Current private live stage:", stage, flush=True)
         command = root + [
                 "unshare",
@@ -889,6 +1033,8 @@ def main():
             command.append("--wan-outage")
         if args.full_restart:
             command.append("--full-restart")
+        if args.tailnet:
+            command.append("--tailnet")
         subprocess.run(
             command,
             check=True,
