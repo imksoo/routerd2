@@ -14,6 +14,7 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
 	"github.com/imksoo/routerd2/internal/protocol/pppoeconfig"
 	"github.com/imksoo/routerd2/internal/protocol/raclient"
+	"github.com/imksoo/routerd2/internal/protocol/tailscaleconfig"
 )
 
 type dnsPlan struct {
@@ -173,6 +174,18 @@ func (r *Runtime) DNSInput(moduleName string) (dnsconfig.Input, error) {
 				for _, server := range observed.DNSServers {
 					add(server, observed.Interface, until)
 				}
+			}
+		case "tailscale":
+			var observed tailscaleconfig.Snapshot
+			if err := json.Unmarshal(update.Snapshot, &observed); err != nil {
+				return out, err
+			}
+			if observed.BackendState == "Running" && observed.Online {
+				// The pinned daemon serves MagicDNS at its local virtual
+				// resolver even with OS DNS management disabled. Consume
+				// it only for this observation's original authority.
+				until := lifetime.Deadline{BootID: observed.BootID, Nanos: observed.ExpiresNanos}
+				add("100.100.100.100", "", until)
 			}
 		case "ra_client":
 			var observed raclient.Snapshot

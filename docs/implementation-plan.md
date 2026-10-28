@@ -1500,7 +1500,7 @@ HA-02/EXT-02も未完了であり、今回の接続継続だけでhomert置換�
 範囲: 旧 routerd 互換 / track: engines / risk: high。
 前提: CORE-03, CORE-06, SYS-02, NET-03, NET-05, NET-06。 設計判断: D-01, D-02, D-03, D-07。
 
-状態: **実装・相互接続を進行中**。native-41 / worker ABI5。
+状態: **実装・相互接続を進行中**。native-42 / worker ABI5。
 
 旧routerdの`pkg/tailscale`、`tailscale_systemd.go`、`chain/system.go`を比較し、
 固定Tailscale1.104.2 daemon＋typed LocalAPIを選んだ。boot/controlへengineを組み込まず、
@@ -1526,8 +1526,15 @@ acceptRoutes:false/trueによる独立peerの両family route受理とNAT無しLA
 sourceの条件/acceptDNS省略・true/SSHは一括拒否し、native条件付き実行と区別する。
 再実行は`make check-tailscale RELEASE_ID=tailscale-import`。
 
+2026-10-28 `tailscale-dns`: native DNSの明示sourceがTailscaleのlocal MagicDNSを元観測期限で
+使う。実LAN UDP/TCP A/AAAA、control停止中の元期限切れとSERVFAIL、node失効時撤去、
+同じidentityの再認証後の復旧を確認した。Headscaleのmagicdns-aaaaを明示する。
+約0.7〜0.9秒の元権限に固定1秒pollが追いつかない実不具合を、既知の期限に応じたpollへ直した。
+同じresolverの別WAN sourceは障害中もUDP/TCPで応答し、private queryはそこへ漏れなかった。
+再実行は`make check-tailscale RELEASE_ID=tailscale-dns`。
+
 tags/shields_upの実相互接続は未検証。
-acceptDNS/native DNS、Tailscale SSHの別権限/OS契約、旧resourceの条件付き一括importと旧版/sealed identity移設、
+OS acceptDNS/global・split resolver/search domainの取り込み、Tailscale SSHの別権限/OS契約、旧resourceの条件付き一括importと旧版/sealed identity移設、
 OS image/TUN setup統合・広い障害条件・対象実機受入は残る。EXT-02全体とhomert置換は完了していない。
 
 **成果物**

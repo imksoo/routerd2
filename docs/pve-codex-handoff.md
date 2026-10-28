@@ -1,11 +1,28 @@
 # routerd2 開発引き継ぎ
 
-2026-10-27。全34 work packageのゴールは継続中。homert本番の置換は未実施であり、
+2026-10-28。全34 work packageのゴールは継続中。homert本番の置換は未実施であり、
 対象実機で利用可能とはまだ判断していない。[実装計画](implementation-plan.md)と
 [機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
-## 現在の変更: tailscale-import / native-41
+## 現在の変更: tailscale-dns / native-42
+
+native DNSの`upstreamFrom`に`TailscaleNode/NAME`の`dnsServers`を接続した。
+固定daemonのlocal MagicDNS `100.100.100.100`を、Running/Onlineかつ元観測期限内だけ使う。
+OSの`acceptDNS`はfalseのままで、domainとTUNへのbindは明示native DNS sourceが所有する。
+controlが配るglobal/split resolverやsearch domainの自動取り込みとは区別する。
+
+実PID1/独立Headscale peerで、LAN UDP/TCPのA/AAAA、元条件期限切れ時のSERVFAIL、
+node失効時の上流撤去、新keyによる同一identityの再認証後のDNS復旧が通った。
+AAAA応答にはHeadscaleの`magicdns-aaaa` node attributeを設定する。
+製品のDNS listenerにはLAN INPUT許可を明示する。
+実測で約0.7〜0.9秒の元権限に対しDNSの固定1秒pollが遅く、周期的な期限切れを検出した。
+既知の入力期限の半分を基に50ms〜1秒でpollする形へ直した。期限は延長しない。
+連続した未cache問い合わせを複数更新周期にまたがって確認した。
+同じresolverの別WAN sourceは障害中もUDP/TCPで応答し、private tailnet名はそこへ流れなかった。
+packet captureでA/AAAA質問とlocal MagicDNSへの実通信も確認した。
+
+### 既存のimportとidentity
 
 旧`TailscaleNode`をCLI importへ接続した。`tailscale` policyでowned TUN・bootstrap DNS/trustと
 `key_file`または`saved_identity`を明示する。旧`authKeyFile`はsystemd EnvironmentFileなので、
@@ -24,7 +41,7 @@ state fileの編集/削除、productへの手動route注入は行っていない
 旧sourceの条件付きgating、acceptDNS省略/true、SSHは一括拒否する。nativeの条件付き実行とは区別する。
 移設の確認は公式/native双方1.104.2で、旧版・hardware-sealed identityの資格認定ではない。
 実装契約とpolicy例は[legacy importer](../internal/legacyconfig/README.md)を読む。
-公式peerにも`TS_LOGS_DIR`を一時directoryへ明示し、default先に残った試験用log設定209 bytesは削除した。
+公式peerの`TS_LOGS_DIR`も一時directoryへ固定する。
 
 ### 既存のnative Tailscale経路
 
@@ -41,8 +58,8 @@ daemonがTUN・address・table52/rule5210..5270を、network workerが明示FW/N
 CA・resolver・`/run`を私有化し、通常のDNS処理をhostのresolved/DBusへ向けない。
 条件付きserviceは、適用済みResourceStateの元期限で停止する。pollや通知の受信で期限を延ばさない。
 
-compiler native-41、worker ABI5、network journal11、DHCPv6 checkpoint2。
-`release_id=tailscale-import`、936c3b5からの今回の変更で実行した。
+compiler native-42、worker ABI5、network journal11、DHCPv6 checkpoint2。
+`release_id=tailscale-dns`、5768093からの今回の変更で実行した。
 実装と必要な設定は[README](../internal/protocol/tailscale/README.md)を参照する。
 engine無しのdefault host catalogはTailscaleを広告しない。署名catalogにはengine/source両artifactを結ぶ。
 
@@ -63,7 +80,7 @@ supervisor/control/network/Health/Tailscale workerを起動した。
 - WAN source policyをlookup5270より後の6000に置いた構成で実転送を確認した。
 - captureでLAN/WANのTCP/UDP、DNS、暗号化underlay packetを確認した。
 
-再実行は`make check-tailscale RELEASE_ID=tailscale-import`。
+再実行は`make check-tailscale RELEASE_ID=tailscale-dns`。
 peerのchecksum検査・必要時の取得、製品build、engine/source生成、署名catalog/PID1試験を含む。
 資格情報・生ログ・capture・一時releaseは終了時に削除する。
 
@@ -73,10 +90,10 @@ peerのchecksum検査・必要時の取得、製品build、engine/source生成�
 設定transactionは完了を待つため12秒のclient上限を使い、意図した経路・転送の結果は弱めていない。
 Runningやpingだけをrouter機能の受入とは数えない。
 
-今回の`make check`でGo/Python・Race Detector・vetが通った。最終import変更にも
-関連Race/vetを実行し、`make build build-publisher build-linux RELEASE_ID=tailscale-import`で
+今回の`make check`でGo/Python・Race Detector・vetが通った。最終DNS polling変更にも
+関連Race/vetを実行し、`make build build-publisher build-linux RELEASE_ID=tailscale-dns`で
 nativeとamd64/arm64 core6をCGO_ENABLED=0でbuildした。最終の実PID1試験は
-上記のCLI import・外部identity・再認証・経路受理を含めて成功した。
+上記のCLI import・外部identity・再認証・経路受理・LAN DNSを含めて成功した。
 
 engineは前回Go1.27.3/CGO_ENABLED=0でamd64/arm64ともbuild済み。今回amd64を再生成した。
 pinned upstream sourceと実import71 moduleのzip、全license notice、build資料を生成する。
@@ -87,7 +104,7 @@ ARM64での実行・対象NIC性能・本番tailnet受入とは区別する。
 ### Tailscaleの残作業
 
 `accept_routes`の両familyの実経路/転送は確認済み。tags、shields_upの実相互接続は未検証。
-acceptDNSとnative DNS、Tailscale SSHの別権限/OS契約、旧TailscaleNodeの条件付きimport、
+OS acceptDNS/global・split resolver/search domainの取り込み、Tailscale SSHの別権限/OS契約、旧TailscaleNodeの条件付きimport、
 旧版/sealed identityの移設、OS image/TUN setup統合、広い障害条件と対象実機受入は未完了。
 旧daemonが所有するtable52を実行中のまま引き取らない。切替条件とidentityの所有を明示する。
 EXT-02全体やhomert置換可能とは判断しない。

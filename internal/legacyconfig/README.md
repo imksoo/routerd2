@@ -617,3 +617,8 @@ forwarding/NAT and conditional activation before first boot.
 CLI, signed catalog and PID1 workers against Headscale/dnsmasq/official peer.
 It checks identity provisioning, key removal, rollback, original condition expiry,
 node revoke/reauthentication and accepted IPv4/IPv6 routes with real TCP/UDP.
+
+For MagicDNS, add an explicit native DNS source referring to the imported native
+service name with `TailscaleNode/NAME` and `field: dnsServers`; see
+[DNS forwarding](../protocol/dns/README.md). This does not import the old
+`acceptDNS:true` OS resolver mutation, global/split resolvers or search domains.

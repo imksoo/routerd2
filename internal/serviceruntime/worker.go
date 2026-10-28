@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/protocol/bfd"
 	"github.com/imksoo/routerd2/internal/protocol/conntracksync"
@@ -205,7 +206,7 @@ func Run(ctx context.Context, runtimeDir, name, role, path, digest string, gener
 		updates <- initial
 		done := make(chan struct{})
 		defer func() { cancel(); <-done }()
-		go func() { defer close(done); defer close(updates); c.watchDNSInput(runCtx, name, digest, updates) }()
+		go func() { defer close(done); defer close(updates); c.watchDNSInput(runCtx, name, initial, updates) }()
 		return dns.Run(runCtx, cfg, updates, ready)
 	case "tailscale":
 		var cfg tailscaleconfig.Config
@@ -385,22 +386,35 @@ func (c *effectsClient) replay(ctx context.Context) {
 	}
 }
 
-func (c *effectsClient) watchDNSInput(ctx context.Context, name, digest string, updates chan dnsconfig.Input) {
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
+func (c *effectsClient) watchDNSInput(ctx context.Context, name string, current dnsconfig.Input, updates chan dnsconfig.Input) {
 	for {
+		// Conditional producers can have less than a second of authority.
+		// Poll before the original endpoint deadline, without extending it.
+		delay := time.Second
+		if clock, err := boottime.Read(); err == nil {
+			for _, servers := range [][]dnsconfig.LearnedUpstream{current.Upstreams, current.Bootstraps} {
+				for _, server := range servers {
+					if remaining := server.ValidUntil.Remaining(clock); remaining > 0 {
+						delay = min(delay, max(50*time.Millisecond, remaining/2))
+					}
+				}
+			}
+		}
+		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return
-		case <-ticker.C:
+		case <-timer.C:
 		}
 		var projection dnsconfig.Input
 		call, cancel := context.WithTimeout(ctx, 2*time.Second)
 		err := c.client.Do(call, "GET", "/v1/services/"+name+"/dns-input", nil, &projection)
 		cancel()
-		if err != nil || projection.ConfigDigest != digest {
+		if err != nil || projection.ConfigDigest != current.ConfigDigest {
 			continue // Existing ownership and lease deadlines continue to expire.
 		}
+		current = projection
 		select {
 		case updates <- projection:
 		case <-ctx.Done():

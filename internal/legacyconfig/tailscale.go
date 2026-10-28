@@ -24,7 +24,7 @@ func (c *compiler) tailscale(r resource) {
 	// tailscale up defaults to accept-dns=true, unlike the private native
 	// resolver. Do not silently turn an omitted flag into acceptDNS:false.
 	if s.AcceptDNS == nil || *s.AcceptDNS {
-		c.reject(r, "acceptDNS", "unsupported_semantics", "legacy acceptDNS defaults to true; native tailnet DNS integration is not implemented, so explicit acceptDNS:false is required")
+		c.reject(r, "acceptDNS", "unsupported_semantics", "legacy acceptDNS defaults to true and changes the OS resolver; explicit acceptDNS:false is required, with native DNS forwarding configured separately")
 	}
 	if s.SSH {
 		c.reject(r, "ssh", "unsupported_semantics", "Tailscale SSH requires its own OS/user/authorization contract and is not native management SSH")

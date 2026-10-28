@@ -82,6 +82,10 @@ connections; DNS expiry alone does not revoke them. Status exposes
 `bootstrapResolvers` separately from upstream health. The deadline-aware socket
 preserves UDP's `net.PacketConn` contract, which Go uses to select DNS framing.
 
+The input watcher uses half the remaining original authority for its polling
+interval, clamped between 50 ms and one second. A failed poll
+leaves the old deadline in force. It does not renew the source.
+
 The coordinator prepares provider/target bindings once per configuration and
 decodes each referenced provider once per input view. Each source's provider
 order remains its own; sharing one provider does not reorder another source.
@@ -94,3 +98,26 @@ physical hardware or every encrypted-DNS transport.
 
 Dynamic listen/record references, local DNSSEC and all remaining
 resource fields still require implementation and interoperability qualification.
+
+A source can explicitly forward the configured tailnet domain to the local
+Tailscale resolver with `TailscaleNode/NAME` and `field: dnsServers`:
+
+```json
+{
+  "name": "tailnet",
+  "kind": "forward",
+  "match": ["your-tailnet.ts.net"],
+  "viaInterface": "tailscale0",
+  "upstreamFrom": [{"resource": "TailscaleNode/tailnet", "field": "dnsServers"}]
+}
+```
+
+`NAME` is the native Tailscale service name. The fixed daemon handles MagicDNS
+at `100.100.100.100` while its OS DNS management remains disabled. The
+coordinator supplies that endpoint only for a Running/Online observation and
+retains its original boot deadline, capped by the applied service authority.
+A stopped, expired or revoked producer contributes no endpoint. Scope the
+source to the intended tailnet domain; this is not automatic installation of
+control-server global/split resolvers or search domains. Host DNS and other
+native sources keep their own configuration. Allow LAN UDP/TCP 53 explicitly
+when the native INPUT policy drops other traffic.

@@ -27,6 +27,8 @@ func UpstreamProvider(ref api.StatusValueSourceSpec) (name, role string, err err
 		role = "dhcp6"
 	case "IPv6RAAddress":
 		role = "ra_client"
+	case "TailscaleNode":
+		role = "tailscale"
 	default:
 		return "", "", fmt.Errorf("unsupported DNS upstream provider %s", kind)
 	}

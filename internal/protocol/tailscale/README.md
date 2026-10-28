@@ -68,15 +68,18 @@ bypass Tailscale's lookup; choose rules for the intended forwarding path.
 WireGuard cannot explicitly bind the same UDP41641 port.
 
 The engine has a private filesystem, resolver and `/run`. Its normal DNS
-setup does not access the host's resolved/DBus or rewrite its resolver. `acceptDNS` and Tailscale SSH
-are not exposed yet. Neither is equivalent to native DNS or routerd management
-SSH. `BackendState=Running`, the daemon's self `Online` flag and `.active` describe
+setup does not access the host's resolved/DBus or rewrite its resolver. A native
+DNS source can explicitly consume MagicDNS through `TailscaleNode/NAME` and
+`dnsServers`; see [DNS integration](../dns/README.md). This uses the existing
+finite observation and service authority. OS-level `acceptDNS`, control-server
+global/split resolvers and search-domain installation are not exposed yet.
+Tailscale SSH is not enabled and is separate from routerd management SSH. `BackendState=Running`, the daemon's self `Online` flag and `.active` describe
 the observed engine state. They do not prove a live control-server connection,
 a usable subnet or an exit path; Health can check the required communication.
 Status includes original finite boot observation times and actual peer traffic counters.
 
 Run `make check-tailscale` with Linux root/sudo, TUN, iproute2, nft, curl,
-OpenSSL, tcpdump, dnsmasq and Python 3. `make tailscale-peers` downloads checksum-pinned
+OpenSSL, tcpdump, dig, dnsmasq and Python 3. `make tailscale-peers` downloads checksum-pinned
 Headscale 0.29.6 and official Tailscale 1.104.2 Linux/amd64 peers into
 `dist/peer-env/tailscale`; `make check-tailscale` includes this prerequisite.
 The fixture isolates network/mount/PID namespaces,
@@ -90,3 +93,11 @@ CLI-to-PID1 fixture also checks stopped external-daemon state provisioning,
 identity reuse after reauthentication, and accepted IPv4/IPv6 subnet routes
 with LAN TCP/UDP forwarding without NAT. These checks use version 1.104.2 on
 both sides; they do not qualify older or hardware-sealed identity migration.
+
+The MagicDNS fixture enables Headscale's `magicdns-aaaa` node attribute for
+IPv6 answers and tests LAN UDP/TCP A/AAAA queries across producer refreshes,
+original authority expiry, node revocation and reauthentication. Another WAN
+source stays usable during withdrawal, with no private-query fallthrough. This is an
+explicit native DNS source, not an import of the old daemon's OS resolver
+mutation. See the [upstream DNS behavior](https://tailscale.com/docs/reference/faq/dns-resolv-conf)
+and [Headscale node attributes](https://headscale.net/stable/ref/policy/#node-attributes).

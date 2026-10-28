@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Exercise the product router with isolated Headscale and an official peer.
 
-Requires Linux root/sudo, TUN, iproute2, nft, curl, OpenSSL, tcpdump, and pinned
+Requires Linux root/sudo, TUN, iproute2, nft, curl, OpenSSL, tcpdump, dig, and pinned
 Headscale/Tailscale peers below dist/peer-env/tailscale. No host network or DNS
 settings are used. Peer credentials, logs and captures are temporary.
 """
@@ -104,6 +104,34 @@ def peer(stage):
     def traffic(host, source, namespace="ts-b"):
         run(inside(namespace, ["python3", "-c", ECHO_CLIENT, host, source]))
 
+    def resolve_peer():
+        for transport in ("+notcp", "+tcp"):
+            for record, family in (("A", 4), ("AAAA", 6)):
+                result = subprocess.run(inside("ts-lan", ["dig", "@10.42.0.1", "independent-peer.test.invalid", record, transport, "+noall", "+answer", "+comments", "+tries=1", "+time=2"]), capture_output=True, text=True, timeout=4)
+                if result.returncode or peer_ips[family] not in result.stdout.split():
+                    print("DNS response:", record, transport, result.stdout, flush=True)
+                    print("DNS peer name:", vendor_api(socket, "status").get("Self", {}).get("DNSName"), flush=True)
+                    print("DNS input:", dns_input(), flush=True)
+                    print("DNS status:", product_api("services/resolver.dns.sock", "/v1/status"), flush=True)
+                    print("DNS routing:", run(inside("ts-a", ["ip", "route", "get", "100.100.100.100"])), flush=True)
+                assert result.returncode == 0 and peer_ips[family] in result.stdout.split(), (result.stdout, result.stderr)
+
+    def dns_input():
+        return product_api("control.sock", "/v1/services/service.resolver/dns-input")["upstreams"] or []
+
+    def dns_ready():
+        upstreams = product_api("services/resolver.dns.sock", "/v1/status")["resources"][0]["observed"].get("upstreams", "")
+        return "100.100.100.100" in upstreams and "Expired" not in upstreams
+
+    def dns_unavailable():
+        result = run(inside("ts-lan", ["dig", "@10.42.0.1", "independent-peer.test.invalid", "A", "+noall", "+answer", "+comments", "+tries=1", "+time=2"]))
+        assert "status: SERVFAIL" in result and peer_ips[4] not in result, result
+        # The independent access-network DNS stays usable with no tailnet.
+        for transport in ("+notcp", "+tcp"):
+            result = run(inside("ts-lan", ["dig", "@10.42.0.1", "control.test", "A", transport, "+short", "+tries=1", "+time=2"]))
+            assert "192.0.2.1" in result.splitlines(), result
+        assert "independent-peer.test.invalid" not in (stage / "bootstrap-dns.log").read_text()
+
     try:
         run(["mount", "-t", "tmpfs", "-o", "mode=755", "tmpfs", "/run"])
         run(["mount", "-t", "tmpfs", "-o", "mode=755", "tmpfs", "/etc"])
@@ -130,7 +158,11 @@ def peer(stage):
             run(inside("ts-control", ["ip", "addr", "add", address, "dev", device]))
         cert, key = stage / "cert.pem", stage / "key.pem"
         run(["openssl", "req", "-config", "/dev/null", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1", "-keyout", str(key), "-out", str(cert), "-subj", "/CN=routerd-fixture", "-addext", "subjectAltName=IP:192.0.2.1,DNS:control.test"])
+        access = stage / "policy.json"
+        access.write_text(json.dumps({"acls": [{"action": "accept", "src": ["*"], "dst": ["*:*"]}],
+            "nodeAttrs": [{"target": ["*"], "attr": ["magicdns-aaaa"]}]}))
         config = {
+            "policy": {"mode": "file", "path": str(access)},
             "server_url": "https://control.test:8443", "listen_addr": "192.0.2.1:8443",
             "noise": {"private_key_path": str(stage / "noise.key")},
             "prefixes": {"v4": "100.64.0.0/10", "v6": "fd7a:115c:a1e0::/48"},
@@ -139,7 +171,7 @@ def peer(stage):
                 "enabled": True, "region_id": 999, "region_code": "fixture", "region_name": "isolated DERP",
                 "stun_listen_addr": "0.0.0.0:3478", "private_key_path": str(stage / "derp.key"),
                 "automatically_add_embedded_derp_region": True, "ipv4": "192.0.2.1"}},
-            "dns": {"override_local_dns": False, "magic_dns": False, "base_domain": "test.invalid"},
+            "dns": {"override_local_dns": False, "magic_dns": True, "base_domain": "test.invalid"},
             "unix_socket": str(stage / "headscale.sock"), "tls_cert_path": str(cert), "tls_key_path": str(key),
             "disable_check_updates": True, "log": {"level": "warn"},
         }
@@ -197,6 +229,8 @@ def peer(stage):
         migrated = imported_native()
         imported = next(s for s in migrated["services"] if "tailscale" in s)
         firewall = migrated["network"]["firewall"]
+        # New LAN DNS listener: authorize only its declared transport/port.
+        firewall["input"]["rules"] += [{"match": {"in_interface": "lan0", "protocol": protocol, "destination_ports": [{"start": 53}]}, "action": "accept"} for protocol in ("udp", "tcp")]
         firewall["forward"] = [{"from": "tailscale0", "to": "lan0"}, {"from": "tailscale0", "to": "uplink0"}, {"from": "lan0", "to": "tailscale0"}]
         firewall["nat"] = [{"type": "masquerade", "match": {"family": family, "in_interface": "tailscale0", "out_interface": "uplink0"}} for family in (4,6)]
         module = "service." + imported["name"]
@@ -207,6 +241,11 @@ def peer(stage):
             {"id": "firewall", "firewall": firewall},
             {"id": "gate", "service": {"name": "gate", "health": {"interface": "uplink0", "target": "192.0.2.1", "protocol": "tcp", "port": 8443, "interval_ms": 200, "timeout_ms": 100, "healthy_threshold": 1, "unhealthy_threshold": 1}}},
             {"id": "tailnet", "when": {"fact": "service.gate.active", "max_age": "2s"}, "service": imported},
+            {"id": "resolver", "service": {"name": "resolver", "dns": {"resource": "resolver", "spec": {
+                "listen": [{"name": "lan", "addresses": ["10.42.0.1"], "port": 53}],
+                "sources": [{"name": "tailnet", "kind": "forward", "match": ["test.invalid"], "viaInterface": "tailscale0",
+                    "upstreamFrom": [{"resource": "TailscaleNode/" + imported["name"], "field": "dnsServers"}]},
+                    {"name": "access", "kind": "forward", "match": ["."], "viaInterface": "uplink0", "upstreams": ["udp://192.0.2.1:53"]}]}}}},
             {"id": "exit4", "route": {"destination": "198.51.100.20/32", "interface": "uplink0", "gateway": "192.0.2.1"}},
             {"id": "exit6", "route": {"destination": "2001:db8:ffff::20/128", "interface": "uplink0", "gateway": "fd0::1"}},
         ]
@@ -223,7 +262,7 @@ def peer(stage):
         configfile = stage / "product.json"
         configfile.write_text(json.dumps(document))
         boot = {"platform": "host", "config": str(configfile), "runtime_dir": str(stage / "product-run"), "state_dir": str(stage / "product-state"), "ssh": {"user": "admin"},
-                "workers": {role: str(PRODUCT / ("routerd-logging" if role == "logging" else "routerd-modules")) for role in ("logging", "network", "control", "management", "health", "tailscale")},
+                "workers": {role: str(PRODUCT / ("routerd-logging" if role == "logging" else "routerd-modules")) for role in ("logging", "network", "control", "management", "health", "tailscale", "dns")},
                 "engines": {"tailscale": str(PRODUCT.parent / "tailscale-engine.tar")}}
         # Exercise the signed catalog's actual role/image/source binding. These
         # private input copies and extracted runtime are removed with the stage.
@@ -303,6 +342,14 @@ def peer(stage):
         traffic("10.42.0.2", peer_ips[4])
         traffic("fd42::2", peer_ips[6])
         print("PASS independent peer -> product -> LAN IPv4/IPv6 TCP and UDP", flush=True)
+        wait(lambda: len(dns_input()) == 1)
+        wait(dns_ready)
+        # Span several producer and consumer refreshes with uncached queries.
+        for _ in range(12):
+            resolve_peer()
+            time.sleep(.15)
+        assert Path("/etc/resolv.conf").read_text() == "nameserver 192.0.2.1\n"
+        print("PASS LAN UDP/TCP native DNS resolved independent peer A/AAAA through MagicDNS without changing OS resolver", flush=True)
         cli = [str(PEERS / "tailscale"), "--socket=" + str(socket)]
         run(inside("ts-b", cli + ["set", "--exit-node=" + original["addresses"][0], "--exit-node-allow-lan-access=true"]))
         wait(lambda: pingable("198.51.100.20"))
@@ -396,15 +443,22 @@ def peer(stage):
             wait(lambda: not any(link["ifname"] == "tailscale0" for link in json.loads(run(inside("ts-a", ["ip", "-j", "link"])))))
             assert time.clock_gettime_ns(time.CLOCK_BOOTTIME) <= authority["nanos"] + 1_000_000_000
             assert modules()["control"]["generation"] == control["generation"]
+            wait(lambda: "Expired" in product_api("services/resolver.dns.sock", "/v1/status")["resources"][0]["observed"].get("upstreams", ""))
+            dns_unavailable()
         finally:
             signal_worker(control["pid"], signal.SIGCONT)
             frozen.remove(control["pid"])
         wait(lambda: observation().get("backend_state") == "Running", 30)
         wait(lambda: pingable("10.42.0.2"))
         traffic("10.42.0.2", peer_ips[4])
-        print("PASS original condition authority expired with control stopped, then actual forwarding recovered", flush=True)
+        wait(dns_ready)
+        resolve_peer()
+        print("PASS original condition authority expired with control stopped, then actual forwarding and LAN DNS recovered", flush=True)
         run(inside("ts-control", head + ["nodes", "expire", "-i", str(router["id"])]))
         wait(lambda: observation().get("backend_state") == "NeedsLogin", 30)
+        wait(lambda: not dns_input())
+        wait(lambda: "100.100.100.100" not in product_api("services/resolver.dns.sock", "/v1/status")["resources"][0]["observed"].get("upstreams", ""))
+        dns_unavailable()
         assert not pingable("10.42.0.2")
         old = modules()[module]
         signal_worker(old["pid"], signal.SIGKILL)
@@ -429,7 +483,10 @@ def peer(stage):
         wait(lambda: pingable("10.42.0.2"))
         traffic("10.42.0.2", peer_ips[4])
         traffic("fd42::2", peer_ips[6])
-        print("PASS new enrollment key reauthenticated the expired saved node without changing identity", flush=True)
+        wait(lambda: len(dns_input()) == 1)
+        wait(dns_ready)
+        resolve_peer()
+        print("PASS new enrollment key restored the same identity, forwarding and LAN DNS", flush=True)
         for family,prefix in (("-4","10.43.0.0/24"),("-6","fd43::/64")):
             wait(lambda: any(route.get("dst")==prefix for route in json.loads(run(inside("ts-a",["ip",family,"-j","route","show","table","52"])))))
         traffic("10.43.0.1", "10.42.0.2", "ts-lan")
@@ -443,6 +500,10 @@ def peer(stage):
                 assert host + "." + str(port) in packets
         assert "A? control.test." in packets
         assert ".41641 >" in packets
+        assert "A? independent-peer.test.invalid." in packets
+        assert "AAAA? independent-peer.test.invalid." in packets
+        assert "100.100.100.100.53" in packets
+        assert Path("/etc/resolv.conf").read_text() == "nameserver 192.0.2.1\n"
         print("PASS capture: LAN and WAN TCP/UDP plus encrypted underlay packets", flush=True)
     except BaseException:
         for log in stage.glob("*.log"):
