@@ -18,7 +18,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func startVRRPPDPeer(t *testing.T, ns netns.NsHandle) {
+func startVRRPPDPeer(t *testing.T, ns netns.NsHandle) *exec.Cmd {
 	t.Helper()
 	if err := fixtureInsideNamespace(ns, func() error {
 		link, err := netlink.LinkByName("client0")
@@ -69,6 +69,7 @@ func startVRRPPDPeer(t *testing.T, ns netns.NsHandle) {
 			t.Log("ISC DHCP", string(b))
 		}
 	})
+	return cmd
 }
 
 const (

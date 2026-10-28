@@ -206,6 +206,7 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 	}
 
 	var wan *vrrpWANTest
+	var pdPeer *exec.Cmd
 	if spec.wan {
 		wan = setupVRRPWAN(t, peerNS)
 		if !spec.migrate {
@@ -218,7 +219,10 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 		}
 		program.Resources = append(program.Resources, resourceprogram.Resource{ID: "wan-ra", When: &resourceprogram.FactCondition{Fact: haName + ".active"}, Service: &serviceconfig.Service{Name: "wan-ra", RA: &ra.Config{Interface: "wan-ha", SourceAddress: vrrpWANLL, MinIntervalSeconds: 3, MaxIntervalSeconds: 4, RouterLifetimeSeconds: 12}}})
 		if spec.migrate {
-			startVRRPPDPeer(t, wan.client)
+			pdPeer = startVRRPPDPeer(t, wan.client)
+			if err := pdPeer.Process.Signal(syscall.SIGSTOP); err != nil {
+				t.Fatal(err)
+			}
 			healthPBRListener(t, wan.client, "198.51.100.10:18097", "H")
 			healthPBRListener(t, peerNS, peer+":18098", "B")
 			healthPBRListener(t, peerNS, peer+":18099", "E")
@@ -557,6 +561,20 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 		})
 		t.Log("550 ms writer pause delayed the initial VIP ACK; same election renewed beyond its original deadline without extending authority")
 	}
+	if pdPeer != nil {
+		until(t, 8*time.Second, func() bool {
+			s := snapshot()
+			return s.State == vrrp.StateActive && !s.Active && s.ActivationState == "ReadinessTimeout"
+		})
+		if hasVIP() {
+			t.Fatal("PD admission timeout published the VIP")
+		}
+		wan.waitNative(t, true)
+		if err := pdPeer.Process.Signal(syscall.SIGCONT); err != nil {
+			t.Fatal(err)
+		}
+		t.Log("elected WAN remained usable for PD acquisition while admission timeout withheld the LAN VIP")
+	}
 	waitOwner(true)
 	if first := module(haName); first.Generation != 1 {
 		t.Fatal("normal address DAD replaced the initial VRRP worker", first)
@@ -604,6 +622,12 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 			t.Fatal(err)
 		}
 		budget := time.Duration(original.ExpiresNanos-uint64(clock.BoottimeNanoseconds)) + time.Second
+		var lingering []string
+		defer func() {
+			if t.Failed() {
+				t.Log("role expiry pending modules", lingering, "original", original)
+			}
+		}()
 		if err := syscall.Kill(paused.PID, syscall.SIGSTOP); err != nil {
 			t.Fatal(err)
 		}
@@ -613,14 +637,22 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 			if err := f.supervisor.Do(context.Background(), "GET", "/v1/status", nil, &status); err != nil {
 				t.Fatal(err)
 			}
+			lingering = lingering[:0]
 			for _, m := range status.Modules {
 				for _, resource := range program.Resources {
 					if resource.Service != nil && (resource.Service.Health != nil || resource.Service.DHCP6 != nil) && m.Name == resource.Service.ModuleName() {
-						return false
+						// PD cleanup acknowledges withdrawal and can wait for
+						// Release. It must already be stopping when its WAN
+						// authority expires; cleanup cannot retain that link.
+						if resource.Service.DHCP6 != nil && m.State == "stopping" && !m.Ready {
+							continue
+						}
+						lingering = append(lingering, m.Name+":"+m.State)
 					}
 				}
 			}
-			return true
+			link, err := netlink.LinkByName("wan-ha")
+			return len(lingering) == 0 && (err != nil || link.Attrs().Flags&net.FlagUp == 0)
 		})
 		if current := module(haName); current.PID != paused.PID || current.Generation != paused.Generation {
 			t.Fatal("unknown role was caused by replacement rather than original observation expiry", current, paused)

@@ -12,6 +12,7 @@ import (
 	"github.com/imksoo/routerd/pkg/api"
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/network"
+	"github.com/imksoo/routerd2/internal/protocol/vrrp"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
@@ -183,6 +184,29 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 	c.firewall()
 	c.firewallServices()
 	c.vpnListenerFirewall()
+	// Admission references can name a PD declared after its VRRP election.
+	for _, r := range resources {
+		s, ok := r.Spec.(api.VirtualAddressSpec)
+		if !ok || s.VRRP.GracefulActivation == nil {
+			continue
+		}
+		activation := s.VRRP.GracefulActivation
+		if len(activation.ReadyWhen.All) == 0 && len(activation.ReadyWhen.Any) == 0 && len(activation.ReadyWhen.State) == 0 {
+			c.reject(r, "vrrp.gracefulActivation.readyWhen", "invalid_value", "graceful activation requires a readiness expression")
+			continue
+		}
+		when := c.when(r, activation.ReadyWhen, vrrpNames)
+		if when == nil {
+			continue // A nonempty constant-true expression needs no gate.
+		}
+		for i := range c.document.Services {
+			service := &c.document.Services[i]
+			if service.VRRP != nil && service.Name == vrrpNames[r.Kind+"/"+r.Metadata.Name] {
+				service.VRRP.GracefulActivation = &vrrp.GracefulActivation{ReadyWhen: *when, Timeout: activation.Timeout}
+				break
+			}
+		}
+	}
 	c.checkOptionsUsed()
 	c.checkAddressOverlap()
 	for _, iface := range c.interfaces {

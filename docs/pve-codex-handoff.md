@@ -5,285 +5,36 @@
 [機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
-## 現在の変更: pd-role / native-45
+## 現在の実装と確認範囲: pd-admission / native-45
 
-routerd の PD 起動経路と role 条件を読み、旧 DHCPv6PrefixDelegation の master/backup 条件を
-既存 typed source guard へ接続した。DUID-LL・IAID 1 と永続 identity の所有者は変えず、
-新しい選出監視・identity 管理・互換 reader は追加していない。
+routerd の `resourcequery/when.go`、PD client、VRRP backend・VMAC hook と現行 homert の設定を参照した。
+旧 HealthCheck・静的 VirtualAddress・PD の master/backup 条件を、既存の型付き条件へ接続している。
+master は VIP 公開ではなく選出を意味する。backup は有限の実 BACKUP 観測であり、master の否定ではない。
+primary/追加 VMAC は通常 DAD・元の権限期限を使う。仮想 link の所有は宣言し、物理 parent の管理権限は独立に必要。
 
-PVE Linux6.8/amd64、製品 CLI の変換結果からの実 worker と独立 Keepalived2.2.8・ISC4.4.3-P1 で、
-master の PD 取得、backup と元観測の期限切れでの停止、復帰後の同じ自動 DUID/IAID での
-再取得が成功した。PD 由来 WAN /128 への実 TCP/UDP も初回・期限切れ後・peer 停止後に成功した。
-初回試行はアドレス変化中の kernel dump 中断で試験側が停止した。中断だけを次の観測で確認するよう
-直し、同じケースを完走した。元の権限期限を延長していない。
+`gracefulActivation.readyWhen` は同じ条件変換を使い、PD の `phase: Bound` を有効な既存 PD fact へ接続する。
+旧 Bound/Renewing/Rebinding の区分と timeout 既定値45秒を維持する。timeout は公開を強制しない。
+VIP 公開後の準備状態低下は、その選出での公開を取り消さない。新しい readiness controller や状態台帳は作らない。
 
-これは単独 PD client の条件付き起動であり、共有 grant を Release せず待機系へ同期する native HA の
-自動変換ではない。期限切れで元 link-local を既に撤去した場合、Release 送信は失敗し得る。
-GR/track、information/server の条件付き import、homert 全体、ARM64 実行と対象 NIC は残る。
-`make check` の Go/Python/Race/vet と両 architecture の CGO_ENABLED=0 build は成功した。
-最終六 ELF の署名 catalog/publisher/stage Race 検査と basic IPv4 v2/PASS・IPv6 v3 も成功した。
-実 HGW の自然 Renew は native-43 の別試験である。
+PVE Linux6.8/amd64、`pd-admission` で製品 CLI 変換→実 supervisor/control/network/protocol worker と
+独立 Keepalived2.2.8・ISC4.4.3-P1 を使い、取得待ち中の WAN 準備と VIP 非公開、ISC 復帰後の公開が成功した。
+切替・VRRP worker 交換・復旧、同じ自動 DUID/IAID での PD 再取得、PD 由来 WAN /128 と VIP の新規 TCP/UDP、
+通常 DAD、RA 撤去を確認した。VRRP の元観測期限では WAN の撤去/DOWN、Health の終了、PD の停止処理開始を確認する。
+PD の停止処理は既存の20秒上限で撤去 ACK・Release を処理する。期限切れで元 link-local が無ければ Release は送れない。
+単独 PD の role guard は、共有 grant を Release せず待機系へ同期する native HA 設定の自動推定ではない。
 
-再実行: `make check-vrrp-unicast RELEASE_ID=pd-role
+初回の GR 試行は、期限内に全依存 process の消滅を待つ箇所で timeout した。その後の同条件三試行では未再現。
+最終試験は転送権限の失効と PD cleanup を分け、元期限での WAN 停止と worker 停止処理を要求する。
+製品期限・試験待機時間は延長していない。最終コードでもこの実通信試験は成功した。
+`make check` の Go/Python/Race/vet、両 architecture の CGO_ENABLED=0 build、最終六 ELF の署名
+catalog/publisher/stage Race 検査と basic IPv4 v2/PASS・IPv6 v3 は成功した。
+ARM64 実行、対象 NIC、homert 全体と既存接続継続の今回の受入は未実施。
+
+再実行: `make check-vrrp-unicast RELEASE_ID=pd-admission
 DHCP6_SERVER=dist/peer-env/isc-dhcp/root/usr/sbin/dhcpd`。
-
-## 直前の完了変更: vrrp-role / native-45
-
-旧`resourcequery/when.go`とVMAC hookの生成経路を読み、HealthCheckと静的VirtualAddressの
-master/backup条件、primary/追加VMACを既存native条件・link/addressへ変換した。
-masterはVIP公開ではなく選出へ接続する。backupは新しい有限factで、masterの否定ではない。
-追加MACは正規化し、指定LLは通常DADを使う。元のInterfaceがobserve-onlyでもVMAC宣言が
-仮想linkを所有する。物理parentの管理権限は独立宣言が必要。RA撤去は依存するRA ownerが担当する。
-条件は設定構築時にtyped graphへ渡すだけで、別の実行stateやrole pollerは追加していない。
-
-PVE Linux6.8/amd64、`TestDaemonVRRPMigratedAdditionalIdentity`が成功した。製品CLI変換後の
-実worker・独立Keepalived2.2.8/Linux端末で、WAN/LAN二VMACとLL、条件付きWAN address、
-master/backup/either-roleの実TCP probe、両ownerのVIP TCP/UDP、切替・worker交換・RA撤去を確認した。
-VRRPだけをSIGSTOPすると、同じPID/世代の元観測が期限切れとなり全三probeが停止した。
-復帰後は新しい選出で通信が復旧した。controlも止めた場合は生存network writerが元期限で
-両VMACとVIPをDOWN/撤去し、新規TCP/UDPがpeerへ切り替わった。
-RAは既存native宣言をfixtureへ追加しており、旧IPv6RouterAdvertisementのimportや既存接続継続の証明ではない。
-試験の待機は1秒広告の元期限から算出し、別native caseの20csを前提にしない。製品期限は延長していない。
-GR/track、時間条件、PD/information/serverの条件付きimportとhomert全体は未完了。
-最終コードで追加identity・IPv4 v2/PASS・IPv6 v3の三case、`make check`のGo/Python/Race/vet、
-両architectureのCGO_ENABLED=0 buildと最終六ELFの署名catalog/publisher/stage Race検査も成功した。
-ARM64実行と対象NICは未検証。実HGW自然Renewは引き続きnative-43の別試験である。
-
-## 直前の完了変更: vrrp-import / native-44
-
-旧Keepalived rendererを読み、IPv4 v2/IPv6 v3、1秒広告、優先度とpeer、preempt省略時falseを
-移行処理へ保持した。`vrrp` policyでlocal sourceとVIP VMAC interfaceを選ぶ。
-IPv6ではvirtual link-localも選ぶ。物理interfaceへ置く旧VIPとの明示的な置換であり、
-元zoneのACLを新VMACにも適用する。protocol112例外は旧family/選出interfaceの範囲へ限定する。
-条件・graceful readiness・track・追加VMAC・secret providerのimportは未完了で、入力を黙って捨てない。
-
-PVE Linux6.8/amd64で、製品CLIの変換結果から実supervisor/control/network/VRRPを起動し、
-独立Keepalived2.2.8とのIPv4 v2/PASS・IPv6 v3 unicastが成功した。実VIP TCP/UDP、
-高優先度peerへの切替、worker SIGKILL/交換、peer停止からの復旧、wireのversion/interval/authを確認した。
-許可ポートと、実待受がある拒否ポートにより、元のACLが新VMACにも効くことを確認した。
-追加IPv6拒否試験の初回はIPv4専用helperによる待受起動が失敗した。familyを指定する実socketへ直し、
-両familyを再実行して成功した。製品の通信結果を失敗したfixtureで判定していない。
-再実行は`make check-vrrp-unicast RELEASE_ID=vrrp-import`。今回実行したのは上記二caseであり、
-全VRRP case・homert条件全体・物理NICの新規受入とは区別する。`make check`のGo/Python/Race/vet、
-両architectureのCGO_ENABLED=0 buildと最終六ELFの署名catalog/publisher/stageのRace検査も成功。
-ARM64実行は未検証。共通service例外の変更後も独立ISCのDHCPv6/RA・WAN /128・DUID/失効復旧が成功した。
-最終見直しでgratuitousARP指定の不要な拒否とservice名の二重指定を除き、両familyとmake check/buildを再確認した。
-
-## 直前の完了変更: pd-host / native-44
-
-homert02の現行設定と旧routerdの`delegatedAddressWithPrefixLength`・DS-Lite用source処理を
-読み直した。homertはPDからWAN用の複数/128を設置するが、旧nativeは一律/64で、importも拒否していた。
-`delegations[].prefix_length`でLAN /64とhost /128を区別し、旧指定をそのまま渡す。
-別のDS-Lite host suffixを作る場合も/128とし、余計な接続/64 routeを増やさない。
-既存のPD client・寿命・writerを使い、別のstate/選択処理や互換readerは追加しない。
-
-PVE Linux6.8/amd64、`make check-dhcp6-ra-pd RELEASE_ID=pd-host
-DHCP6_SERVER=dist/peer-env/isc-dhcp/root/usr/sbin/dhcpd`が成功した。製品CLIの変換結果と独立ISC/radvd/Linuxで、
-同じ/64内のWAN /128を二つ設置し、両送信元のTCP/UDPとLAN向けkernel routeを確認した。
-通常DAD、RA/IA_NA追加、worker交換・元期限・失効/復旧、DNS、DUID trial rollbackも通った。
-実HGWでも30秒の`make check-uplink`を行い、WAN /128を使う実AFTR/DS-Lite IPv4 HTTPS、
-IPv6 HTTPS、DNS UDP/TCP、worker SIGKILL/RebindのDUID保持、RA/Release撤去が通った。
-同時実行中の別PDのgeneration/epoch/DUID/prefix/期限とhost管理状態は不変だった。
-長時間試験は引き続きnative-43であり、このnative-44の自然Renew受入とは扱わない。
-`make check`のGo/Python/Race/vet、両architectureのCGO_ENABLED=0 buildと最終六ELFの
-署名catalog/publisher/stageのRace検査も成功した。ARM64実行、旧条件/VRRP importやhomert全体の置換は未完了。
-
-## 直前の完了変更: health-import / native-43
-
-旧routerdのHealthCheck engineとhomert02の現行設定を比較した。native workerは既に旧probe・
-threshold処理を再利用している。今回、固定targetの旧HealthCheckをそのworkerへ変換し、
-省略時の旧interval 30秒・timeout 3秒とthresholdを保持した。interfaceが無指定なら移行policyの
-`health_checks`で対象interfaceを明示し、必要なsource/markも渡す。別WANへの迂回を健康と誤認しない。
-interfaceの管理権限は独立宣言が必要。条件付き起動・動的target・旧EgressRoutePolicyの変換は未完了。
-
-PVE Linux6.8/amd64、`make check-health-pbr RELEASE_ID=health-import`が成功した。
-製品CLIで変換した二probeを実supervisor/control/network/healthへ渡し、独立した二WANとLAN端末・
-packet captureでTCP/UDP切替・復旧を確認した。worker/control/network交換、古い通知、元期限の
-撤去、confirmed rollbackも通った。これは旧homert条件全体の移行完了や物理NIC受入ではない。
-`make check`のGo/Python/Race/vet、CGO_ENABLED=0の両architecture build、最終六ELFの
-署名catalog/publisher/stageのRace検査も成功した。ARM64実行は未検証。
-
-## 直前の完了変更: ha-pd-prepared / native-43
-
-変更の起点は75650e4。homert02の稼働中設定を読み取り専用で確認し、PD clientがVRRP master条件で
-動き、graceful activationがPD等の準備を待つことを確認した。本番設定は変更していない。
-旧nativeではHA PDがVIP公開を待って循環することを実署名PID1二台・独立ISCで再現した。
-現在は有効な選出でPD取得を始め、LAN DHCPv4配布はVIP公開後に始める。
-
-最初の修正試行では間欠的なTCP停止やPD期限/復旧待ち失敗が残った。controlを計測すると、
-不変のVRRP worker設定まで数十回書き直していた。設定受理時に全workerと両HA roleのfileを一度準備し、
-観測更新からfile書込みとその後の二重status取得を除いた。別のcacheや有効flagは追加していない。
-切替を繰り返した後も各設定fileの更新時刻が初期準備時から変わらないことを実プロセスで確認した。
-
-PVE Linux6.8/amd64、20csのVRRP広告で、PD付き二台試験は修正後二回完走した。
-上流ISC停止中の準備待ちtimeoutはVIPを公開せず、復帰後にPD取得→公開した。
-同じTCP socket/UDP mapping、両方向切替、BOOTTIME +7200sの同期と元PD期限撤去・復旧、
-古い通知/同期断/不完全TLS upload/worker・engine交換も通った。PD無しHAも成功した。
-`make check`のGo/Python/Race/vet、両architectureのCGO_ENABLED=0 buildと署名catalog/publisher/stage、
-Tailscaleの実PID1/独立peerの全通信・失効・rollback試験も成功した。ARM64実行と対象NICは未検証。
-
-再実行は`make check-ha-pd check-ha-state RELEASE_ID=ha-pd-prepared DOCKER='sudo -n docker'
-DHCP6_SERVER=dist/peer-env/isc-dhcp/root/usr/sbin/dhcpd`。fixtureはWAN選出とLAN VIP公開を
-実addressで区別し、低速TLS uploadは100 Continueでbody読取開始を確認してから切替える。
-期限やTCP待機上限は延長していない。調査trace・raw出力・完了済みstageは削除する。
-実HGWの長時間試験は下記のDNS失敗調査へ進んでいる。生存中のownerのstate/captureだけ保持する。
-旧条件付きinputのimport、広い分断/fencingと対象機器の受入は残る。
-
-## 直前の完了変更: duid-import / native-43
-
-旧routerdのDUID選択・PD snapshotとdnsmasqの永続lease設定を再確認した。
-WANの明示`clientDUID`は既に変換する。LANの移行policyにも`server_duid`を追加し、
-既存のnative明示DUIDへ直接渡す。旧lease fileのreaderやidentity移行層は作らない。
-省略時は自動identityを永続化し、明示値・trialはそれを上書きしない。
-
-PVE Linux6.8/amd64、`make check-dhcp6-ra-pd check-dhcp6-server RELEASE_ID=duid-import
-DHCP6_SERVER=dist/peer-env/isc-dhcp/root/usr/sbin/dhcpd`が成功した。製品CLIの変換結果から
-実daemonを起動し、独立ISC/radvd/BusyBox/Linuxと実Replyの指定server DUID、PD/RA・TCP/UDP・
-DNS・WAN DUID rollbackを確認した。自動server DUIDはworker/control/daemon交換とrollbackで保持した。
-`make check`、CGO_ENABLED=0の両architectureビルドと署名catalog/publisher/stageのRace検査も成功。
-実homertのidentity移設、最新のNTT実回線・対象NIC受入は未検証。raw出力・capture・一時releaseは残さない。
-
-### 直前の起動read修正
-
-起動待機timeoutを旧b498dbdの実PID1で再現した。PVE Linux6.8/amd64、全試験processを
-CPU0へ固定し、同CPUで関連release Race検査を並行した。network/logging/managementはReady、
-controlは世代1・再起動0で起動中、read量362,516,067 bytesの時点で20秒上限に達した。
-負荷無しの1 CPU旧版では14.669秒、controlのread量898,844,195 bytesだった。
-`/proc/PID/io`の`rchar`は論理read量であり、物理disk I/O量ではない。
-
-release `Open`→`WithState`→writer構築が、選択metadataを読む度に全artifactを3回取得・検証していた。
-`Open`と`WithState`はcanonical journal・checksum・exact linkを検証し、runtimeの取得・prepare・
-boot選択でpayloadを検証する責任へ整理した。設定writerの選択/store/startup fenceとtransaction lockは維持する。
-20秒の待機上限で比較した。
-
-修正版は同じ1 CPU/Race並行条件で15.732秒、control read量106,942 bytesでsocketを公開し、
-その後の実通信・再起動・rollback・失効/再認証・tags/shields・DNSが通った。
-独立Headscale0.29.6・公式Tailscale1.104.2・dnsmasq・TCP/UDP相手を使った。
-関連release Raceも成功。破損payloadの取得/boot拒否、選択journalのfenceは局所検査で維持した。
-再実行は`make check-tailscale RELEASE_ID=startup-io-fixed`。1 CPU比較ではCPU0へtasksetし、
-別terminalで同CPUの`go test -race -count=1 ./internal/release`を並行する。
-比較用b498dbd worktreeには同じfixtureと共有peer/engine/sourceを使い、終了後に削除した。
-
-### 既存のTailscale観測・制御
-
-旧routerdのstatus/controller/renderを読み、nodeとpeerのDNS名・付与済みtags、
-現在のtailnet名・DNS suffix・MagicDNS設定を実daemonから観測するようにした。
-接続先tailnetが無い場合は省略し、設定の`advertise_tags`を付与済みtagsとして表示しない。
-
-実PID1/独立Headscale/公式peerで、CLI importしたshieldsUp:trueがホスト宛・広告LAN宛の
-IPv4/IPv6新規TCP/UDPを遮断し、LAN発の新規TCP/UDPと返信は通ることを確認した。
-confirmed rollback後は同じidentityで着信が復旧した。INPUTの許可と、着信成立を先に確認している。
-
-Headscale0.29.6ではpersonal keyと広告要求だけではtagsが付かないことを実測した。
-personal登録を管理者が失効させ、承認済みtagged keyで登録すると、serverの付与結果と
-製品の観測が一致し、両familyの転送が通った。広告要求とkey fileを除いても保存identityは
-server付与tagsを保持した。tagged nodeの管理者失効後、key無しのworker再起動では
-転送とtailnet DNSが復活しない。serverの登録・承認を製品の設定rollbackで巻き戻さない。
-独立peerのDNS名と管理者付与tagsも観測に反映され、LAN発の両family通信が通った。
-
-### 既存のnative DNS統合
-
-native DNSの`upstreamFrom`に`TailscaleNode/NAME`の`dnsServers`を接続した。
-固定daemonのlocal MagicDNS `100.100.100.100`を、Running/Onlineかつ元観測期限内だけ使う。
-OSの`acceptDNS`はfalseのままで、domainとTUNへのbindは明示native DNS sourceが所有する。
-controlが配るglobal/split resolverやsearch domainの自動取り込みとは区別する。
-
-実PID1/独立Headscale peerで、LAN UDP/TCPのA/AAAA、元条件期限切れ時のSERVFAIL、
-node失効時の上流撤去、新keyによる同一identityの再認証後のDNS復旧が通った。
-AAAA応答にはHeadscaleの`magicdns-aaaa` node attributeを設定する。
-製品のDNS listenerにはLAN INPUT許可を明示する。
-実測で約0.7〜0.9秒の元権限に対しDNSの固定1秒pollが遅く、周期的な期限切れを検出した。
-既知の入力期限の半分を基に50ms〜1秒でpollする形へ直した。期限は延長しない。
-連続した未cache問い合わせを複数更新周期にまたがって確認した。
-同じresolverの別WAN sourceは障害中もUDP/TCPで応答し、private tailnet名はそこへ流れなかった。
-packet captureでA/AAAA質問とlocal MagicDNSへの実通信も確認した。
-
-### 既存のimportとidentity
-
-旧`TailscaleNode`をCLI importへ接続した。`tailscale` policyでowned TUN・bootstrap DNS/trustと
-`key_file`または`saved_identity`を明示する。旧`authKeyFile`はsystemd EnvironmentFileなので、
-生keyとして読まない。旧inline/env資格情報は選択したnative enrollmentへ置き換え、値を出力しない。
-旧routerd所有のUDP41641 INPUT例外は、WireGuardと共用する最初のuntrust interfaceの計算で、
-元ACLより前のscopeを保つ。外部daemonのnetfilterやkernel状態を引き取らない。
-
-実fixtureは旧sourceを製品CLIで変換し、そのinterface/INPUT/nodeを、明示native LAN/WAN・
-FW/NAT・PBR・条件と組み合わせて初回起動する。公式daemonを実CLIで先に登録し、停止・
-kernel所有解除後、その不透明なstate fileだけをprovisionしてnative PID1へ移した。
-同じnode ID/addressで実転送が通った。失効後の新keyによる再認証でもidentityを維持し、
-`acceptRoutes:false`時は受けなかった独立peerのIPv4/IPv6 prefixを、trueへ変更してtable52へ入れた。
-LANからpeer側subnetへNAT無しTCP/UDPが通り、相手が元LAN送信元を受信した。
-state fileの編集/削除、productへの手動route注入は行っていない。
-
-旧sourceの条件付きgating、acceptDNS省略/true、SSHは一括拒否する。nativeの条件付き実行とは区別する。
-移設の確認は公式/native双方1.104.2で、旧版・hardware-sealed identityの資格認定ではない。
-実装契約とpolicy例は[legacy importer](../internal/legacyconfig/README.md)を読む。
-公式peerの`TS_LOGS_DIR`も一時directoryへ固定する。
-
-### 既存のnative Tailscale経路
-
-旧routerdの`pkg/tailscale`、`pkg/render/tailscale_systemd.go`、
-`pkg/controller/chain/system.go`、`docs/how-to/tailscale.md`を読んだ。
-旧実装と同じく実績あるdaemonを使い、製品workerが固定Tailscale1.104.2とidentityを所有する。
-boot/controlへengineを組み込まない。起動はdisabledとし、typed LocalAPIの
-`Start(UpdatePrefs)`で現在の設定を一括適用する。上流のPersistを保持し、vendor stateを手編集しない。
-instance名変更でもidentityの保存先を変えない。設定と保存identityを別に扱う。
-
-daemonがTUN・address・table52/rule5210..5270を、network workerが明示FW/NATを所有する。
-既存foreign scopeとnative intentの競合を拒否する。namespace socketで別state directoryとの
-同時所有を排除し、原子的なboot/network-namespace markerでSIGKILL後の専用scopeを回収する。
-CA・resolver・`/run`を私有化し、通常のDNS処理をhostのresolved/DBusへ向けない。
-条件付きserviceは、適用済みResourceStateの元期限で停止する。pollや通知の受信で期限を延ばさない。
-
-compiler native-43、worker ABI5、network journal11、DHCPv6 checkpoint2。
-`release_id=startup-io-fixed`、b498dbdからの今回の変更で実行した。
-実装と必要な設定は[README](../internal/protocol/tailscale/README.md)を参照する。
-engine無しのdefault host catalogはTailscaleを広告しない。署名catalogにはengine/source両artifactを結ぶ。
-
-### 実通信で確認した範囲
-
-PVE Linux6.8/amd64の隔離network/mount/PID namespaceで、実署名catalogからPID1・
-supervisor/control/network/Health/Tailscale workerを起動した。
-独立Headscale0.29.6、公式Tailscale1.104.2 peer、dnsmasq、別LAN/WANのTCP/UDP相手を使った。
-
-- hostnameのcontrol serverへ、私有bootstrap DNSとTLS trustから接続した。
-- IPv4/IPv6 subnetとexit-nodeのTCP/UDPが通り、WAN側serverが実NAT送信元を受信した。
-- 実UDP遮断でDERPへ移り、同じsubnet/exitのIPv4/IPv6 TCP/UDPが通った。直通も確認した。
-- worker SIGKILL後、同じnode ID/addressで転送が復旧し、table52のlookup ruleが重複しなかった。
-- auth keyを設定から除きファイルも削除した後、control交換とPID1全体の再起動でidentityを再利用した。
-- 広告routeを変えるconfirmed trialで独立peerのroute撤去を確認し、rollback後に元routeとIPv6通信が戻った。
-- control停止中、元条件期限でTUNを撤去した。controlの世代交換前に観測し、復帰後の通信も確認した。
-- nodeを失効させると通信が止まり、keyのないworker再起動でも旧権限が復活しなかった。
-- WAN source policyをlookup5270より後の6000に置いた構成で実転送を確認した。
-- captureでLAN/WANのTCP/UDP、DNS、暗号化underlay packetを確認した。
-
-再実行は`make check-tailscale RELEASE_ID=startup-io-fixed`。
-peerのchecksum検査・必要時の取得、製品build、engine/source生成、署名catalog/PID1試験を含む。
-資格情報・生ログ・capture・一時releaseは終了時に削除する。
-
-実試行では、継承directory FDを別mount namespaceへbindできないこと、上流daemonが
-ログ設定の保存先も必要とすることを確認し、所有する子の起動経路を修正した。
-試験側の初期設定・app listener待機・capture reader・UDP遮断直後の経路待機も修正した。
-設定transactionは完了を待つため12秒のclient上限を使い、意図した経路・転送の結果は弱めていない。
-Runningやpingだけをrouter機能の受入とは数えない。
-
-今回の`make check`でGo/Python・Race Detector・vetが通った。今回のrelease選択読取変更にも
-関連Race/vetを実行し、`make build build-publisher build-linux RELEASE_ID=startup-io-fixed`で
-nativeとamd64/arm64 core6をCGO_ENABLED=0でbuildした。最終の実PID1試験は
-上記のCLI import・外部identity・再認証・経路受理・LAN DNS・shieldsUp/rollback・tagged登録と失効を含めて成功した。
-
-engineは前回Go1.27.3/CGO_ENABLED=0でamd64/arm64ともbuild済み。今回amd64を再生成した。
-pinned upstream sourceと実import71 moduleのzip、全license notice、build資料を生成する。
-今回のcore6静的ELFの署名catalog/publisher/stageが両architectureともRace Detector付きで通った。
-前回Tailscale engine/sourceを含む実署名publisher/stageもamd64/arm64双方で通った。
-ARM64での実行・対象NIC性能・本番tailnet受入とは区別する。
-
-### Tailscaleの残作業
-
-`accept_routes`、承認済みtags、shields_upの両family実転送/遮断・復旧は確認済み。
-OS acceptDNS/global・split resolver/search domainの取り込み、Tailscale SSHの別権限/OS契約、旧TailscaleNodeの条件付きimport、
-旧版/sealed identityの移設、OS image/TUN setup統合、広い障害条件と対象実機受入は未完了。
-旧daemonが所有するtable52を実行中のまま引き取らない。切替条件とidentityの所有を明示する。
-EXT-02全体やhomert置換可能とは判断しない。
+契約と残制限は [legacy importer](../internal/legacyconfig/README.md) と各 protocol の README を読む。
+過去の逐次試験記録はここへ積み増さない。native HA の既存接続・共有 grant 試験は
+`make check-ha-pd check-ha-state`、関連設定と未完了範囲は実装計画を参照する。
 
 ## 開発環境と保護するもの
 

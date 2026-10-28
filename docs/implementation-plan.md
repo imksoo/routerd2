@@ -1265,6 +1265,14 @@ backupは有限の実BACKUP観測で、masterの否定ではない。通常DAD�
 単独 client の条件付き起動であり、共有 grant の native HA 同期を自動推定しない。
 GR、information/server 条件、homert 全体と対象 NIC は残る。
 
+2026-10-28 `pd-admission` / native-45: 旧 `gracefulActivation.readyWhen` の PD Bound 条件を
+既存の有限 fact と admission へ接続した。独立 ISC を止めた取得待ちでは VIP を公開せず、
+復帰後に公開した。role 条件・DUID/IAID・WAN /128・新規 TCP/UDP・切替復旧も通った。
+初回の process 消滅待ち timeout は同条件三試行で未再現。最終期限検査は WAN 停止と Health 終了を
+元期限で要求し、停止処理中の PD cleanup と区別する。製品期限・試験待機時間は延長しない。
+make check、両 architecture build/署名検査と basic VRRP は成功。その他の準備条件、track、
+information/server 条件、homert 全体・対象 NIC は未完了。
+
 #### HA-02 — DHCP/PD lease の認証付き同期
 
 2026-10-28 `ha-pd-prepared` / native-43: 実homert02の設定と旧routerdを比較し、HA PD取得と

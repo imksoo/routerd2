@@ -57,7 +57,7 @@ func (c *compiler) when(r resource, w api.ResourceWhenSpec, vrrpNames map[string
 	for _, key := range keys {
 		match := w.State[key]
 		if match.Exists != nil || match.Status != "" || match.Contains != "" || match.For != "" || match.MaxAge != "" {
-			c.reject(r, "when", "unsupported_semantics", "only VRRP role equals/in selectors are imported; status/existence and transition-age timing require their own typed native contract")
+			c.reject(r, "when", "unsupported_semantics", "only VRRP role and PD Bound equals/in selectors are imported; status/existence and transition-age timing require their own typed native contract")
 			continue
 		}
 		if match.Equals == "" && len(match.In) == 0 {
@@ -65,42 +65,53 @@ func (c *compiler) when(r resource, w api.ResourceWhenSpec, vrrpNames map[string
 		}
 		ref := strings.TrimSpace(key)
 		ref = strings.TrimSuffix(strings.TrimPrefix(ref, "${"), "}")
-		base, ok := strings.CutSuffix(ref, ".status.role")
-		if !ok {
-			base, ok = strings.CutSuffix(ref, ".role")
-		}
-		if !ok || !strings.HasPrefix(base, "VirtualAddress/") {
-			c.reject(r, "when", "unsupported_semantics", "condition must name the role of a declared VRRP VirtualAddress")
+		separator := strings.LastIndexByte(ref, '.')
+		if separator < 0 {
+			c.reject(r, "when", "unsupported_semantics", "condition must name a VRRP role or PD Bound phase")
 			continue
 		}
-		provider := c.getRef(r, "when", base, "VirtualAddress")
+		base, field := strings.TrimSuffix(ref[:separator], ".status"), ref[separator+1:]
+		kind := "VirtualAddress"
+		if field == "phase" {
+			kind = "DHCPv6PrefixDelegation"
+		}
+		if field != "role" && field != "phase" {
+			c.reject(r, "when", "unsupported_semantics", "condition must name a VRRP role or PD Bound phase")
+			continue
+		}
+		provider := c.getRef(r, "when", base, kind)
 		if provider == nil {
 			continue
 		}
-		name := vrrpNames[provider.Kind+"/"+provider.Metadata.Name]
+		var name string
+		var values map[string]string
+		if kind == "DHCPv6PrefixDelegation" {
+			name = c.serviceName(*provider, "pd")
+			// routerd resourcePhase maps Bound/Renewing/Rebinding to Bound.
+			// Native active additionally requires an unexpired grant.
+			values = map[string]string{"Bound": ".active"}
+		} else {
+			name = vrrpNames[provider.Kind+"/"+provider.Metadata.Name]
+			values = map[string]string{"master": ".elected", "backup": ".backup"}
+		}
 		if name == "" {
 			c.reject(r, "when", "reference", "role condition requires a successfully compiled VRRP election")
 			continue
 		}
-		role := func(value string) resourceprogram.FactCondition {
-			suffix := ""
-			switch value {
-			case "master":
-				suffix = ".elected"
-			case "backup":
-				suffix = ".backup"
-			default:
-				c.reject(r, "when", "unsupported_semantics", "only observed master and backup roles are imported; unknown is not the negation of master")
+		condition := func(value string) resourceprogram.FactCondition {
+			suffix, ok := values[value]
+			if !ok {
+				c.reject(r, "when", "unsupported_semantics", "only observed master/backup roles and PD Bound are imported; unknown is not their negation")
 			}
 			return resourceprogram.FactCondition{Fact: "service." + name + suffix}
 		}
 		if match.Equals != "" {
-			terms = append(terms, role(match.Equals))
+			terms = append(terms, condition(match.Equals))
 		}
 		if len(match.In) > 0 {
 			var alternatives []resourceprogram.FactCondition
 			for _, value := range match.In {
-				alternatives = append(alternatives, role(value))
+				alternatives = append(alternatives, condition(value))
 			}
 			terms = append(terms, resourceprogram.FactCondition{Any: alternatives})
 		}

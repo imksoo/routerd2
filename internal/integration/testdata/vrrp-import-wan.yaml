@@ -89,6 +89,9 @@ spec:
           priority: 150
           preempt: true
           peers: [192.0.2.3]
+          gracefulActivation:
+            readyWhen: {state: {DHCPv6PrefixDelegation/wan-pd.phase: {equals: Bound}}}
+            timeout: 1s
           failoverVMAC:
             parentInterface: wan
             interface: wan-ha
