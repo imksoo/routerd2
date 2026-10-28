@@ -340,6 +340,10 @@ func settingPath(key settingKey) (string, error) {
 	switch key.Kind {
 	case "conntrack_tcp_liberal":
 		return "/proc/sys/net/netfilter/nf_conntrack_tcp_be_liberal", nil
+	case "multipath_hash_fields4":
+		return "/proc/sys/net/ipv4/fib_multipath_hash_fields", nil
+	case "multipath_hash_policy4":
+		return "/proc/sys/net/ipv4/fib_multipath_hash_policy", nil
 	case "forwarding4":
 		return "/proc/sys/net/ipv4/ip_forward", nil
 	case "forwarding6":

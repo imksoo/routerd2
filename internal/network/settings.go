@@ -14,6 +14,7 @@ func raSetting(key settingKey) bool { return key.Kind == "accept_ra" || key.Kind
 
 func validateSettingRecord(s ownedSetting) error {
 	minimum, maximum := 0, 1
+	global := false
 	switch s.Key.Kind {
 	case "mtu":
 		minimum, maximum = 68, 65535
@@ -26,21 +27,25 @@ func validateSettingRecord(s ownedSetting) error {
 		maximum = 2
 	case "rp_filter_all", "rp_filter_default":
 		maximum = 2
-		if s.Key.Interface != "" || s.Index != 0 {
-			return fmt.Errorf("invalid saved global RPF setting identity")
-		}
+		global = true
+	case "multipath_hash_fields4":
+		maximum, global = math.MaxUint32, true
+	case "multipath_hash_policy4":
+		maximum, global = 3, true
 	case "forwarding4", "forwarding6", "conntrack_tcp_liberal":
-		if s.Key.Interface != "" || s.Index != 0 {
-			return fmt.Errorf("invalid saved global setting identity")
-		}
+		global = true
 	default:
 		return fmt.Errorf("unknown setting kind %q", s.Key.Kind)
 	}
-	if s.Key.Interface != "" {
+	if global {
+		if s.Key.Interface != "" || s.Index != 0 {
+			return fmt.Errorf("invalid saved global setting identity")
+		}
+	} else if s.Key.Interface != "" {
 		if !validName(s.Key.Interface) || s.Index < 0 || (raSetting(s.Key) || s.Key.Kind == "ipv6_mtu" || s.Key.Kind == "hop_limit") && s.Index == 0 {
 			return fmt.Errorf("invalid saved interface setting identity")
 		}
-	} else if s.Key.Kind != "forwarding4" && s.Key.Kind != "forwarding6" && s.Key.Kind != "rp_filter_all" && s.Key.Kind != "rp_filter_default" && s.Key.Kind != "conntrack_tcp_liberal" {
+	} else {
 		return fmt.Errorf("missing saved setting interface")
 	}
 	values := []int{s.Before, s.Last}
@@ -191,10 +196,10 @@ func (p *apply) restoreSettings(want map[settingKey]int) error {
 	// Restoring a physical MTU resets Linux's IPv6 MTU as a side effect.
 	// Restore it before the independently recorded IPv6 baseline.
 	rank := func(kind string) int {
-		if kind == "mtu" {
+		if kind == "mtu" || kind == "multipath_hash_policy4" {
 			return 0
 		}
-		if kind == "ipv6_mtu" {
+		if kind == "ipv6_mtu" || kind == "multipath_hash_fields4" {
 			return 2
 		}
 		return 1

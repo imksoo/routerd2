@@ -649,6 +649,14 @@ PVE Linux6.8/amd64 の実 worker・独立二 WAN/LAN・capture で、重み1:2�
 native-43 の7800秒は758回の通信と再起動前の自然 Renew/Reply 一組まで完走した。両実行版を区別する。
 IPv6 動的選択、source-only hash、mark/connmark、旧 EgressRoutePolicy 全体、homert 統合と実 NIC は残る。
 
+2026-10-28 `source-hash` / native-47・network journal12: namespace 全体の IPv4 ECMP を送信元だけで
+振り分ける明示設定を、既存 writer/setting owner へ接続した。mask→policy の有効化と、
+元 policy→元 mask の解除、journal 復旧は既存の書込み所有を使う。
+実二 WAN・三宛先で TCP/UDP の送信元別経路固定、両系利用、障害/復旧、kernel 元値復元・
+confirmed rollback 再適用と writer 交換・元期限撤去が成功した。capture4096 frameの上限は維持する。
+make check/Race/vet、両 architecture build と最終六 ELF の署名検査も成功した。
+policy ごとの mark/hash、IPv6 動的選択、homert 全体と対象 NIC は残る。
+
 #### NET-03 — Firewall・ingress・MTU/MSS・fragment policy
 
 2026-10-27追加: 稼働中の下位MTU変更でDS-Liteが1460のまま残り、大TCPだけが停止する問題を

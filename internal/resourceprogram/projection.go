@@ -243,6 +243,9 @@ func renderNative(nodes []compiledResource) Native {
 			if r.Forwarding.IPv4RPFilter != nil {
 				out.Network.Forwarding.IPv4RPFilter = r.Forwarding.IPv4RPFilter
 			}
+			if r.Forwarding.IPv4ECMPHash != "" {
+				out.Network.Forwarding.IPv4ECMPHash = r.Forwarding.IPv4ECMPHash
+			}
 		case r.Firewall != nil:
 			out.Network.Firewall = r.Firewall
 		case r.VRRPGuard != nil:

@@ -110,6 +110,9 @@ type Forwarding struct {
 	// reverse-path filtering for policy-routed/asymmetric router paths. Existing
 	// interfaces keep their individual setting; new PPP units inherit default.
 	IPv4RPFilter *int `json:"ipv4_rp_filter,omitempty"`
+	// IPv4ECMPHash "source" selects source-address-only hashing for all IPv4
+	// multipath routes in this network namespace. Empty leaves it unmanaged.
+	IPv4ECMPHash string `json:"ipv4_ecmp_hash,omitempty"`
 }
 
 // Firewall manages only the routerd2 inet table. A nil Firewall removes a
@@ -239,6 +242,9 @@ func validName(s string) bool { return interfaceName.MatchString(s) && s != "." 
 // Validate is side-effect free and does not require Linux or privileges.
 func Validate(d Desired) error {
 	var errs []error
+	if d.Forwarding.IPv4ECMPHash != "" && d.Forwarding.IPv4ECMPHash != "source" {
+		errs = append(errs, errors.New("ipv4_ecmp_hash must be source or empty"))
+	}
 	if v := d.Forwarding.IPv4RPFilter; v != nil && (*v < 0 || *v > 2) {
 		errs = append(errs, errors.New("ipv4_rp_filter must be 0 (disabled), 1 (strict) or 2 (loose)"))
 	}

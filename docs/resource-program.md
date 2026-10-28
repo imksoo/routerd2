@@ -124,11 +124,33 @@ candidate の `when` は通常の有限 fact・`all`/`any`・`max_age`・`for` �
 新しい観測が無いまま writer を再起動しても期限を延長しない。
 route と rule の所有は別であり、table を指定しただけで policy rule は生成しない。
 
-compiler contract は native-46、network journal は既存の11。既存 route の ECMP 実装を使う。
+compiler contract は native-47、network journal は12。既存 route の ECMP 実装を使う。
 `make check-health-pbr` は独立二 WAN・実 worker・Linux kernel と capture で、重み1:2、
 新規 TCP/UDP、障害除外・復旧、上位 preference、confirmed rollback、control/Health 停止中の
-writer 交換と元期限撤去を確認する。今回の動的経路選択は IPv4 で実行した。
-既存接続継続、IPv6 動的選択、source-only hash、旧 EgressRoutePolicy 全体の import と実 NIC は未検証・未完了である。
+writer 交換と元期限撤去を確認した。今回の動的経路選択は IPv4 で実行した。
+既存接続継続、IPv6 動的選択、policy ごとの mark/connmark hash、旧 EgressRoutePolicy 全体の import と実 NIC は未検証・未完了である。
+
+### IPv4 の送信元専用 hash
+
+`forwarding.ipv4_ecmp_hash: source` は、その network namespace の **全 IPv4 ECMP 経路**を
+送信元アドレスだけで振り分ける。同じ送信元の宛先・TCP/UDP・ポートが変わっても、
+同じ候補集合の中では同じ WAN を使う。rule ごとに別の hash を選ぶ機能ではない。
+
+```yaml
+- id: forwarding
+  forwarding:
+    ipv4: true
+    ipv4_ecmp_hash: source
+```
+
+Linux の custom hash policy と source-address field mask を network writer が所有する。
+有効化では mask → policy、解除では元 policy → 元 mask の順で適用し、元値を既存 journal に保持する。
+空欄は管理しない指定であり、解除時は他者が変更していない元値を復元する。
+再起動・失敗時の書込み記録と復旧も既存の setting owner を使う。旧試作形式の reader は追加しない。
+
+PVE Linux6.8/amd64 の実 worker、独立二 WAN と三つの宛先で、送信元ごとの TCP/UDP 経路固定、
+両 WAN の利用、障害切替・復旧、kernel 値の解除/rollback 復元、writer 交換と元期限撤去を確認した。
+試験の capture 上限は4096 frameを維持し、必要な両経路を確認した後は同じ通信を増やさない。
 
 ## EventRule
 

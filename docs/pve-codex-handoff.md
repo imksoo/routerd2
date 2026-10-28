@@ -5,7 +5,21 @@
 [機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
-## 現在の変更: egress-route / native-46
+## 現在の変更: source-hash / native-47 / network journal12
+
+`forwarding.ipv4_ecmp_hash: source` を既存の writer/setting owner へ接続した。
+namespace 全体の IPv4 ECMP に Linux custom source-only hash を使い、別の nft/connmark 経路は追加しない。
+元 policy/mask を記録し、有効化と解除の順序、writer 交換・rollback を既存 journal で処理する。
+独立二 WAN・三宛先の実 TCP/UDP で、送信元ごとの経路固定、両 WAN 利用、障害/復旧、
+kernel 元値の解除と rollback 再適用、writer 交換・元期限撤去が成功した。
+初回は不要な反復通信が capture の4096 frame上限に達したため、上限を維持して必要な通信へ絞った。
+`make check` の Go/Python/Race/vet、両 architecture の CGO_ENABLED=0 build と最終六 ELF の
+署名 catalog/publisher/stage Race 検査も成功した。旧 journal11 の開発 fixture は12へ更新し、互換 reader は作らない。
+新形式でも既存 Health→PBR の切替・古い通知・元期限・rollback 試験が成功した。
+実 HGW の30秒試験も PD/両 family HTTPS/DNS、DUID/IAID を保つ crash/Rebind、RA/Release 撤去を通し、
+host 管理 address/MAC/default route は不変だった。native-47 の自然 Renew は未到達。
+
+## 直前の確認: egress-route / native-46
 
 旧 routerd の advisory 選択と実 `policyroute` 適用、既存の native ECMP を参照した。
 `egress_route` は条件が真の最高 preference 候補を選び、同順位を一つの kernel route にまとめる。
@@ -21,7 +35,7 @@ confirmed rollback が成功した。control/Health を止め、network writer �
 `make check-health-pbr` の既存切替/古い通知/元期限/rollback と新しい分散試験、`make check` の
 Go/Python/Race/vet、両 architecture の CGO_ENABLED=0 build、最終六 ELF の署名
 catalog/publisher/stage Race 検査も成功した。network journal は既存11、worker ABI は5。
-IPv6 動的選択、source-only hash、既存接続継続、旧 EgressRoutePolicy 全体と homert 全体の受入は残る。
+IPv6 動的選択、policy ごとの mark/hash、既存接続継続、旧 EgressRoutePolicy 全体と homert 全体の受入は残る。
 
 旧入力の PD/Information は、同じ master 条件と自分の PD の Bound 依存を一 client/socket へ接続する。
 四つの Information 要求も既存 ORO を使う。DUID-LL・IAID・永続 identity・期限の owner は変えない。

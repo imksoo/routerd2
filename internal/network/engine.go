@@ -17,7 +17,7 @@ import (
 var errLinkNotFound = errors.New("link not found")
 
 // JournalVersion is the persisted network ownership/BOOTTIME contract.
-const JournalVersion = 11
+const JournalVersion = 12
 
 type settingKey struct {
 	Kind      string `json:"kind"`
@@ -540,6 +540,10 @@ func (p *apply) reconcile(d Desired) error {
 		wantedSettings[settingKey{Kind: "rp_filter_all"}] = *d.Forwarding.IPv4RPFilter
 		wantedSettings[settingKey{Kind: "rp_filter_default"}] = *d.Forwarding.IPv4RPFilter
 	}
+	if d.Forwarding.IPv4ECMPHash == "source" {
+		wantedSettings[settingKey{Kind: "multipath_hash_fields4"}] = 1
+		wantedSettings[settingKey{Kind: "multipath_hash_policy4"}] = 3
+	}
 	// Keep the kernel RA/SLAAC writers disabled while removing the client-owned
 	// routes and addresses. Restore these settings after reconciliation finishes.
 	earlySettings := make(map[settingKey]int, len(wantedSettings))
@@ -632,7 +636,7 @@ func (p *apply) reconcile(d Desired) error {
 		}
 	}
 	// Apply after ip_forward, before protocol workers can create their units.
-	for _, kind := range []string{"rp_filter_all", "rp_filter_default", "conntrack_tcp_liberal"} {
+	for _, kind := range []string{"rp_filter_all", "rp_filter_default", "conntrack_tcp_liberal", "multipath_hash_fields4", "multipath_hash_policy4"} {
 		key := settingKey{Kind: kind}
 		if v, ok := wantedSettings[key]; ok {
 			if err := p.set(key, v); err != nil {
