@@ -1,0 +1,15 @@
+schema_version: 1
+vrrp:
+  VirtualAddress/gateway:
+    source_address: 192.0.2.2
+    vip_interface: ha
+health_checks:
+  HealthCheck/master-probe:
+    interface: Interface/wan-identity
+    source_address: 198.51.100.254
+  HealthCheck/backup-probe:
+    interface: Interface/lan
+    source_address: 192.0.2.2
+  HealthCheck/role-probe:
+    interface: Interface/lan
+    source_address: 192.0.2.2

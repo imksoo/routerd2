@@ -5,7 +5,29 @@
 [機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
-## 現在の変更: vrrp-import / native-44
+## 現在の変更: vrrp-role / native-45
+
+旧`resourcequery/when.go`とVMAC hookの生成経路を読み、HealthCheckと静的VirtualAddressの
+master/backup条件、primary/追加VMACを既存native条件・link/addressへ変換した。
+masterはVIP公開ではなく選出へ接続する。backupは新しい有限factで、masterの否定ではない。
+追加MACは正規化し、指定LLは通常DADを使う。元のInterfaceがobserve-onlyでもVMAC宣言が
+仮想linkを所有する。物理parentの管理権限は独立宣言が必要。RA撤去は依存するRA ownerが担当する。
+条件は設定構築時にtyped graphへ渡すだけで、別の実行stateやrole pollerは追加していない。
+
+PVE Linux6.8/amd64、`TestDaemonVRRPMigratedAdditionalIdentity`が成功した。製品CLI変換後の
+実worker・独立Keepalived2.2.8/Linux端末で、WAN/LAN二VMACとLL、条件付きWAN address、
+master/backup/either-roleの実TCP probe、両ownerのVIP TCP/UDP、切替・worker交換・RA撤去を確認した。
+VRRPだけをSIGSTOPすると、同じPID/世代の元観測が期限切れとなり全三probeが停止した。
+復帰後は新しい選出で通信が復旧した。controlも止めた場合は生存network writerが元期限で
+両VMACとVIPをDOWN/撤去し、新規TCP/UDPがpeerへ切り替わった。
+RAは既存native宣言をfixtureへ追加しており、旧IPv6RouterAdvertisementのimportや既存接続継続の証明ではない。
+試験の待機は1秒広告の元期限から算出し、別native caseの20csを前提にしない。製品期限は延長していない。
+GR/track、時間条件、PD/information/serverの条件付きimportとhomert全体は未完了。
+最終コードで追加identity・IPv4 v2/PASS・IPv6 v3の三case、`make check`のGo/Python/Race/vet、
+両architectureのCGO_ENABLED=0 buildと最終六ELFの署名catalog/publisher/stage Race検査も成功した。
+ARM64実行と対象NICは未検証。実HGW自然Renewは引き続きnative-43の別試験である。
+
+## 直前の完了変更: vrrp-import / native-44
 
 旧Keepalived rendererを読み、IPv4 v2/IPv6 v3、1秒広告、優先度とpeer、preempt省略時falseを
 移行処理へ保持した。`vrrp` policyでlocal sourceとVIP VMAC interfaceを選ぶ。

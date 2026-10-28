@@ -19,6 +19,7 @@ TESTS = (
     ("TestDaemonVRRPv2", "v2"),
     ("TestDaemonVRRPv2PASS", "v2-pass"),
     ("TestDaemonVRRPAdditionalIdentity", "additional-identity"),
+    ("TestDaemonVRRPMigratedAdditionalIdentity", "additional-import"),
 )
 
 

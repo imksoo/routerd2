@@ -1250,6 +1250,15 @@ preempt省略時falseを保持したbasic importを実装した。明示policy�
 wire、実待受があるポートのACL拒否が通った。条件・ready/track・追加VMAC・secret参照の移行、
 homert全体・物理機受入は残る。
 
+2026-10-28 `vrrp-role` / native-45: 旧role条件とVMAC hookを読み、HealthCheck/静的VirtualAddressの
+master/backup条件とprimary/追加VMACを既存typed resource条件へ接続した。masterはelectedであり、
+backupは有限の実BACKUP観測で、masterの否定ではない。通常DADと元期限・依存RA撤去を使う。
+製品CLI→実worker・独立Keepalived/LinuxでWAN/LAN二VMACと三role probe、VIP新規TCP/UDP、
+切替・worker交換・RA撤去が成功した。同一PID/世代のVRRPを止め、元観測の期限で全probe停止、
+新選出による復旧も確認した。control停止時はwriterが元期限でVMAC/VIPを隔離した。
+最終三case、make check、両architecture static build/署名検査も成功。RAはnative宣言を追加したもので、
+旧RA inputのimportや既存接続継続の証明ではない。GR/track、時間条件とPD/Info/serverの条件付きimportは残る。
+
 #### HA-02 — DHCP/PD lease の認証付き同期
 
 2026-10-28 `ha-pd-prepared` / native-43: 実homert02の設定と旧routerdを比較し、HA PD取得と

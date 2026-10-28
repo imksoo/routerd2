@@ -99,8 +99,9 @@ protection. IPv6/v3 PASS, AH and Keepalived's HMAC extension are not implemented
 unsupported declarations are rejected rather than downgraded. Secret-provider
 resolution remains separate work. The original-resource importer supports
 basic IPv4 v2/PASS and IPv6 v3 elections with explicit local/VMAC identities,
-retained non-preempt defaults and zone ACLs. Conditional readiness, tracking and
-additional identities still require their complete migration graph; see the
+retained non-preempt defaults and zone ACLs. It also converts additional VMACs
+and master/backup guards on HealthCheck/static addresses. Conditional readiness,
+tracking and the complete homert graph remain open; see the
 [import contract](../../legacyconfig/README.md#vrrp-election-and-vip-identity).
 
 ## Single-writer effects and liveness contract
@@ -281,6 +282,13 @@ are not sent by backups. Activation notifications contain the virtual MAC;
 IPv6 unsolicited NAs set Router and Override while clearing Solicited.
 
 ## Scope and compatibility limits
+
+`service.NAME.backup` is a finite fact for an observed BACKUP state. It is
+indeterminate when the producer is absent, initialized or expired, and is not
+the negation of `elected`. It shares the original observation deadline, boot,
+generation and producer epoch. Configuration contract native-45 includes this
+fact. The legacy role importer uses `elected` for master so preparation does not
+wait for the VIP it is preparing.
 
 This is a native election engine, **not full original `VirtualAddress` or
 `RouterdCluster` parity**. Integration must preserve the original resource

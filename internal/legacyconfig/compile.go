@@ -12,6 +12,7 @@ import (
 	"github.com/imksoo/routerd/pkg/api"
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/network"
+	"github.com/imksoo/routerd2/internal/resourceprogram"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
 
@@ -76,6 +77,9 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 	}
 	c.initOptions(options, explicit)
 	c.collectAliases()
+	var extra []resourceprogram.Resource
+	var conditions []resourceCondition
+	vrrpNames := map[string]string{}
 	c.wireguard()
 	for _, r := range resources {
 		switch r.Kind {
@@ -99,7 +103,16 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 		case "IPv4StaticAddress":
 			c.static4(r)
 		case "VirtualAddress":
-			c.virtualAddress(r)
+			name, nodes := c.virtualAddress(r)
+			if name != "" {
+				vrrpNames[r.Kind+"/"+r.Metadata.Name] = name
+			}
+			if source := r.Spec.(api.VirtualAddressSpec); source.Mode != "vrrp" {
+				for _, node := range nodes {
+					conditions = append(conditions, resourceCondition{id: node.ID, source: r, when: source.When})
+				}
+			}
+			extra = append(extra, nodes...)
 		case "DHCPv4Client":
 			c.dhcp4(r)
 		case "DHCPv6PrefixDelegation":
@@ -140,7 +153,8 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 		case "TailscaleNode":
 			c.tailscale(r)
 		case "HealthCheck":
-			c.healthCheck(r)
+			name := c.healthCheck(r)
+			conditions = append(conditions, resourceCondition{id: "service/" + name, source: r, when: r.Spec.(api.HealthCheckSpec).When})
 		case "IPv6RouterAdvertisement":
 			c.reject(r, "", "unsupported_semantics", "legacy dnsmasq RA uses interface address constructors and validLifetime as router lifetime; explicit native PIO/router/DNS lifetime intent is required")
 		case "FirewallZone", "FirewallPolicy", "FirewallRule", "NAT44Rule":
@@ -178,6 +192,19 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 	})
 	sort.Slice(c.document.Services, func(i, j int) bool { return c.document.Services[i].Name < c.document.Services[j].Name })
 	program := config.FromNative(c.document)
+	program.Resources = append(program.Resources, extra...)
+	for _, condition := range conditions {
+		when := c.when(condition.source, condition.when, vrrpNames)
+		if when == nil {
+			continue
+		}
+		for i := range program.Resources {
+			if program.Resources[i].ID == condition.id {
+				program.Resources[i].When = when
+				break
+			}
+		}
+	}
 	if len(c.issues) == 0 {
 		if err := config.Validate(program); err != nil {
 			// Native validators sometimes include the invalid value. The
@@ -253,6 +280,9 @@ func (c *compiler) allow(r resource, fields ...string) {
 		}
 	}
 	for _, field := range []string{"when", "dependsOn", "ready_when"} {
+		if field == "when" && (r.Kind == "HealthCheck" || r.Kind == "VirtualAddress" && r.Spec.(api.VirtualAddressSpec).Mode != "vrrp") {
+			continue // These declarations are translated into source graph guards.
+		}
 		if meaningful(child(r.node, field)) {
 			c.reject(r, field, "unsupported_semantics", "runtime gating/dependency conditions cannot be erased by a static migration")
 		}

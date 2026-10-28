@@ -77,17 +77,47 @@ accept a host CIDR or bare IP and are normalized. The original interface's zone
 ACL also covers its new VIP VMAC; the original family-scoped protocol112 service
 exception remains on the election interface. No global INPUT accept is added.
 
-Runtime `when`/dependencies, tracking, graceful readiness, additional failover
-identities, dynamic VIPs and hostname publication remain unsupported by this
-conversion. The complete batch rejects those declarations rather than erasing
-them. Native implementations of these functions have separate acceptance;
-basic migration is not full homert/cluster import.
+Primary `failoverVMAC` and `additionalFailoverVMACs` become ordinary conditional
+macvlan links with their declared MAC/link-local identities. MAC spellings are
+normalized. These declarations own their virtual links even when a separate
+legacy Interface is observe-only; physical parents still require independent
+administrative ownership. Normal DAD runs for the declared link-local address.
+Address, route and service dependencies inherit the election's finite authority.
+The dependent RA owner withdraws before link deletion, implementing
+`withdrawRouterAdvertisement` without a second RA sender.
+
+Tracking, graceful readiness, dynamic VIPs, hostname publication and general
+resource dependencies remain unsupported by this conversion. The complete
+batch rejects those declarations rather than erasing them. Native implementations
+of those functions have separate acceptance; this is not full homert/cluster import.
+
+### VRRP role guards
+
+`HealthCheck` and static `VirtualAddress` import `when.state` role selectors,
+including `all`/`any`. References may use `VirtualAddress/name.role` or
+`VirtualAddress/name.status.role`. `equals` and `in` support `master` and `backup`.
+Master maps to **elected**, allowing WAN preparation before VIP publication;
+backup requires an actual current BACKUP observation. Missing, initialized,
+expired or stopped producers cannot authorize either role. Backup is never
+constructed as the negation of master. The output uses ordinary typed resource
+conditions and existing worker/kernel lifetime owners.
+
+Other status fields, existence/contains selectors and match `for`/`maxAge`
+remain unsupported. The original role matcher measures transition age, which
+cannot silently become native sample freshness or a new consumer's hold time.
+Conditional PD/information/server import and graceful preparation remain open.
 
 `make check-vrrp-unicast RELEASE_ID=vrrp-import` includes actual CLI-converted
 IPv4 v2/PASS and IPv6 v3 graphs. Independent Keepalived, real workers and capture
 check VIP TCP/UDP, takeover, worker replacement and recovery. The imported INPUT
 policy permits the declared application ports and denies another port with a
 real listener on the VIP VMAC.
+The `TestDaemonVRRPMigratedAdditionalIdentity` case also uses CLI-converted WAN
+and LAN VMACs, a conditional WAN address and master/backup/either-role probes.
+It checks demotion, producer expiry without replacement, fresh-election recovery,
+normal DAD, RA withdrawal, actual TCP/UDP and surviving-writer link fencing.
+Its expiry wait follows the original grant for the imported one-second v2
+advertisement, instead of assuming the separate native fixture's 20cs interval.
 
 ## Scoped HealthCheck probes
 
@@ -112,12 +142,12 @@ health_checks:
 ```
 
 The example source and mark must match the intended address and probe route.
-Conditional activation, hostname/automatic targets and live gateway/DS-Lite
-target discovery remain unsupported; they reject the whole migration rather
+Activation can follow the VRRP role guards above. Hostname/automatic targets,
+other conditions and live gateway/DS-Lite target discovery remain unsupported; they reject the whole migration rather
 than losing their meaning. Disabled checks create no healthy observation.
 `make check-health-pbr RELEASE_ID=health-import` feeds the actual CLI-converted
 probes into the two-WAN daemon fixture, alongside native routing resources.
-That does not establish import of legacy `EgressRoutePolicy` or HA conditions.
+That does not establish import of legacy `EgressRoutePolicy` or full HA input.
 
 ## Stateless DHCPv6 and delegated LAN RA
 
@@ -192,12 +222,12 @@ serving, custom lease/RA settings and full deployed-router import remain open.
 | `Bridge` | A native bridge with explicit members, MAC, MTU and the original multicast-snooping default of false. Requires `stp: false` and `rstp: false`. Custom timers are rejected; dormant timing attributes use kernel defaults. |
 | `WireGuardInterface` + `WireGuardPeer` | Static interfaces with explicit private-key file paths and complete peer sets. Preserves MTU, numeric/scoped endpoints, passive peers, keepalive, AllowedIPs and explicit routes without inferring routes or marks. Fixed listen ports require an owned INPUT filter so the original service-hole policy can be preserved; see the static WireGuard section. |
 | `IPv4StaticAddress` | Preserves host/prefix bits. `exclusive: true` is rejected because it removes addresses owned by other managers. Explicit overlap policy and its justification are checked. |
-| `VirtualAddress` in static mode | IPv4 /32 or IPv6 /128, including a provably static resource address reference. Runtime tracking, automatic hostname publication and gratuitous-ARP intent are rejected. |
-| `VirtualAddress` in VRRP mode | Explicit `vrrp` policy selects local election and VIP VMAC identities. Retains IPv4 v2/IPv6 v3, one-second advertisements, priority, peers and the original non-preempt default. Zone ACLs follow the VIP VMAC while protocol112 exceptions remain family/interface scoped. Conditions, readiness, tracking, additional identities and secret-provider references remain unsupported. |
+| `VirtualAddress` in static mode | IPv4 /32 or IPv6 /128, including a provably static resource address reference. VRRP master/backup `when` guards become source address conditions. Runtime tracking, automatic hostname publication and gratuitous-ARP intent are rejected. |
+| `VirtualAddress` in VRRP mode | Explicit `vrrp` policy selects local election and VIP VMAC identities. Retains IPv4 v2/IPv6 v3, one-second advertisements, priority, peers and the original non-preempt default. Additional VMAC identities inherit elected authority and normal DAD. Zone ACLs follow the primary VIP VMAC while protocol112 exceptions remain family/interface scoped. Election gating, readiness, tracking and secret-provider references remain unsupported. |
 | `IPv4StaticRoute`, `IPv6StaticRoute` | Same destination, gateway, device and metric; interface aliases are resolved. |
 | `IPv4Route` | Static unicast routes. A static DS-Lite device reference and explicit static address gateway reference can be resolved. Blackhole, preferred-source and dynamic references are rejected in this compiler. |
 | `Sysctl` | Required runtime `net.ipv4.ip_forward` and `net.ipv6.conf.all.forwarding` with exact 0/1 values. No implicit forwarding is enabled. Other sysctls, optional/non-exact policies and persistent host files are rejected. |
-| `HealthCheck` | Literal scoped ICMP/TCP/DNS/HTTP probes retain routerd's engine, thresholds and 30s/3s timing defaults. Explicit `health_checks` policy supplies missing interface/source/mark intent. Conditional activation and dynamic targets remain unsupported. |
+| `HealthCheck` | Literal scoped ICMP/TCP/DNS/HTTP probes retain routerd's engine, thresholds and 30s/3s timing defaults. Explicit `health_checks` policy supplies missing interface/source/mark intent. VRRP master/backup conditions use finite producer facts; other selectors and dynamic targets remain unsupported. |
 | `DHCPv4Client` | Native wire identity, requested address, hostname/class/client ID, default-route policy and metric. Requires `useDNS: false` because the old default of true changes the host resolver. Native learned DNS is status data rather than a substitute for that side effect. |
 | `DHCPv4Server` + `DHCPv4Reservation` | Static local servers become separate native DHCP workers with owned journals. Retains finite pool leases, disjoint MAC/OUI profile scopes, explicit/static-source gateway/DNS/NTP/domain options, and MAC/IP/hostname reservations with typed options. Requires one owned static IPv4 address per interface; no live lease import, HA conditions or ambiguous backend directives. The active-chain/default distinctions are detailed below. |
 | `DHCPv4Relay` | Explicit `interfaces` and numeric IPv4 `upstream` become one native relay service. Each client interface requires one unconditional owned static IPv4 address for `giaddr`. Multiple relay declarations retain per-interface upstream sets. Conditional/dynamic source selection and ambiguous legacy VRF binding remain unsupported. |

@@ -93,6 +93,12 @@ func TestDaemonVRRPAdditionalIdentity(t *testing.T) {
 	}
 }
 
+func TestDaemonVRRPMigratedAdditionalIdentity(t *testing.T) {
+	if isolateFixture(t, "TestDaemonVRRPMigratedAdditionalIdentity") {
+		runVRRPPeer(t, vrrpPeerTest{family: "ipv4", version: 2, wan: true, migrate: true})
+	}
+}
+
 type vrrpPeerTest struct {
 	migrate   bool
 	checksum  vrrp.IPv4Checksum
@@ -181,7 +187,11 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 	haName := "service.ha"
 	if spec.migrate {
 		var imported serviceconfig.Service
-		program, imported = importedVRRPProgram(t, family)
+		profile := family
+		if spec.wan {
+			profile = "wan"
+		}
+		program, imported = importedVRRPProgram(t, profile)
 		c, haName = imported.VRRPConfig(), imported.ModuleName()
 	}
 	if tracking {
@@ -196,13 +206,20 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 	var wan *vrrpWANTest
 	if spec.wan {
 		wan = setupVRRPWAN(t, peerNS)
-		program.Resources = append(program.Resources,
-			resourceprogram.Resource{ID: "wan-identity", When: &resourceprogram.FactCondition{Fact: haName + ".elected"}, Link: &network.Link{Name: "wan-ha", Kind: "macvlan", Parent: "wan0", HardwareAddr: vrrpWANMAC, IPv6AddrGenMode: "none"}},
-			resourceprogram.Resource{ID: "wan-interface", Interface: &network.Interface{Name: "wan-ha"}},
-			resourceprogram.Resource{ID: "wan-address", Address: &resourceprogram.Address{Interface: "wan-ha", CIDR: vrrpWANVIP + "/24"}},
-			resourceprogram.Resource{ID: "wan-linklocal", Address: &resourceprogram.Address{Interface: "wan-ha", CIDR: vrrpWANLL + "/64", Options: &network.AddressOptions{NoDAD: true}}},
-			resourceprogram.Resource{ID: "wan-ra", When: &resourceprogram.FactCondition{Fact: haName + ".active"}, Service: &serviceconfig.Service{Name: "wan-ra", RA: &ra.Config{Interface: "wan-ha", SourceAddress: vrrpWANLL, MinIntervalSeconds: 3, MaxIntervalSeconds: 4, RouterLifetimeSeconds: 12}}},
-		)
+		if !spec.migrate {
+			program.Resources = append(program.Resources,
+				resourceprogram.Resource{ID: "wan-identity", When: &resourceprogram.FactCondition{Fact: haName + ".elected"}, Link: &network.Link{Name: "wan-ha", Kind: "macvlan", Parent: "wan0", HardwareAddr: vrrpWANMAC, IPv6AddrGenMode: "none"}},
+				resourceprogram.Resource{ID: "wan-interface", Interface: &network.Interface{Name: "wan-ha"}},
+				resourceprogram.Resource{ID: "wan-address", Address: &resourceprogram.Address{Interface: "wan-ha", CIDR: vrrpWANVIP + "/24"}},
+				resourceprogram.Resource{ID: "wan-linklocal", Address: &resourceprogram.Address{Interface: "wan-ha", CIDR: vrrpWANLL + "/64", Options: &network.AddressOptions{NoDAD: true}}},
+			)
+		}
+		program.Resources = append(program.Resources, resourceprogram.Resource{ID: "wan-ra", When: &resourceprogram.FactCondition{Fact: haName + ".active"}, Service: &serviceconfig.Service{Name: "wan-ra", RA: &ra.Config{Interface: "wan-ha", SourceAddress: vrrpWANLL, MinIntervalSeconds: 3, MaxIntervalSeconds: 4, RouterLifetimeSeconds: 12}}})
+		if spec.migrate {
+			healthPBRListener(t, wan.client, "198.51.100.10:18097", "H")
+			healthPBRListener(t, peerNS, peer+":18098", "B")
+			healthPBRListener(t, peerNS, peer+":18099", "E")
+		}
 	}
 	f := startFixtureDaemon(t, program)
 	module := func(name string) supervisor.ModuleStatus {
@@ -264,6 +281,58 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 			}
 			return s.State == vrrp.StateBackup && !s.Active && !hasVIP() && peerOwns
 		})
+		if spec.migrate && wan != nil {
+			until(t, 6*time.Second, func() bool {
+				link, err := netlink.LinkByName("lan-extra")
+				if router {
+					if err != nil || link.Attrs().HardwareAddr.String() != "02:00:5e:00:42:02" {
+						return false
+					}
+					addresses, err := netlink.AddrList(link, unix.AF_INET6)
+					if err != nil {
+						t.Fatal(err)
+					}
+					ready := false
+					for _, address := range addresses {
+						ready = ready || address.IP.String() == "fe80::42:2" && address.Flags&(unix.IFA_F_TENTATIVE|unix.IFA_F_DADFAILED) == 0
+					}
+					if !ready {
+						return false
+					}
+				} else if err == nil {
+					return false
+				}
+				var status supervisor.Status
+				if err := f.supervisor.Do(context.Background(), "GET", "/v1/status", nil, &status); err != nil {
+					t.Fatal(err)
+				}
+				for _, resource := range program.Resources {
+					if resource.Service == nil || resource.Service.Health == nil {
+						continue
+					}
+					service := resource.Service
+					want := service.Health.Port == 18099 || service.Health.Port == 18097 && router || service.Health.Port == 18098 && !router
+					present := false
+					for _, m := range status.Modules {
+						present = present || m.Name == service.ModuleName()
+					}
+					if present != want {
+						return false
+					}
+					if want {
+						var state runtimeplan.InstanceStatus
+						if err := f.control.Do(context.Background(), "GET", "/v1/services/"+service.ModuleName(), nil, &state); err != nil {
+							t.Fatal(err)
+						}
+						var probe health.Snapshot
+						if json.Unmarshal(state.Snapshot, &probe) != nil || !probe.Active {
+							return false
+						}
+					}
+				}
+				return true
+			})
+		}
 	}
 	targets := []string{vip}
 	if wan != nil {
@@ -461,7 +530,45 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 		})
 	}
 	traffic(peerNS, vip, "R")
-	if spec.migrate {
+	if spec.migrate && wan != nil {
+		paused := module(haName)
+		original := snapshot()
+		clock, err := boottime.Read()
+		if err != nil {
+			t.Fatal(err)
+		}
+		budget := time.Duration(original.ExpiresNanos-uint64(clock.BoottimeNanoseconds)) + time.Second
+		if err := syscall.Kill(paused.PID, syscall.SIGSTOP); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = syscall.Kill(paused.PID, syscall.SIGCONT) })
+		until(t, budget, func() bool {
+			var status supervisor.Status
+			if err := f.supervisor.Do(context.Background(), "GET", "/v1/status", nil, &status); err != nil {
+				t.Fatal(err)
+			}
+			for _, m := range status.Modules {
+				for _, resource := range program.Resources {
+					if resource.Service != nil && resource.Service.Health != nil && m.Name == resource.Service.ModuleName() {
+						return false
+					}
+				}
+			}
+			return true
+		})
+		if current := module(haName); current.PID != paused.PID || current.Generation != paused.Generation {
+			t.Fatal("unknown role was caused by replacement rather than original observation expiry", current, paused)
+		}
+		if err := syscall.Kill(paused.PID, syscall.SIGCONT); err != nil {
+			t.Fatal(err)
+		}
+		until(t, 8*time.Second, func() bool { return module(haName).Generation > paused.Generation })
+		waitOwner(true)
+		wan.waitNative(t, true)
+		traffic(wan.client, vrrpWANVIP, "R")
+		t.Log("expired role stopped master, backup and either-role probes before producer replacement; fresh election restored scoped communication")
+	}
+	if spec.migrate && wan == nil {
 		// An actual listener makes timeout prove the inherited zone's deny,
 		// rather than an absent service or a blanket VMAC accept.
 		var listener net.Listener
@@ -656,14 +763,26 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 		traffic(peerNS, vip, "R")
 		if wan != nil {
 			native, control, writer := module(haName), module("control"), module("network")
+			original := snapshot()
+			clock, err := boottime.Read()
+			if err != nil {
+				t.Fatal(err)
+			}
+			// The migrated v2 instance has one-second adverts. Wait for its
+			// actual original authority, rather than assuming the 20cs fixture.
+			budget := time.Duration(original.ExpiresNanos-uint64(clock.BoottimeNanoseconds)) + time.Second
 			for _, process := range []supervisor.ModuleStatus{control, native} {
 				if err := syscall.Kill(process.PID, syscall.SIGSTOP); err != nil {
 					t.Fatal(err)
 				}
 				t.Cleanup(func() { _ = syscall.Kill(process.PID, syscall.SIGCONT) })
 			}
-			until(t, 2*time.Second, func() bool {
-				for _, name := range []string{"ha", "wan-ha"} {
+			until(t, budget, func() bool {
+				names := []string{"ha", "wan-ha"}
+				if spec.migrate {
+					names = append(names, "lan-extra")
+				}
+				for _, name := range names {
 					link, err := netlink.LinkByName(name)
 					if err != nil || link.Attrs().Flags&net.FlagUp != 0 {
 						return false

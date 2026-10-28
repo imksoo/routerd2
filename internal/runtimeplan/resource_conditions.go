@@ -218,6 +218,11 @@ func (r *Runtime) conditionFactsLocked(cfg configuration, now time.Time) (result
 				fact.Value = resourceprogram.True
 			}
 			facts.Facts[name+".elected"] = fact
+			fact.Value = resourceprogram.False
+			if election.State == vrrp.StateBackup {
+				fact.Value = resourceprogram.True
+			}
+			facts.Facts[name+".backup"] = fact
 			continue
 		}
 		if record.Role == "dhcp6" {

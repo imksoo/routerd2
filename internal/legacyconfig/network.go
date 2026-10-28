@@ -8,6 +8,7 @@ import (
 
 	"github.com/imksoo/routerd/pkg/api"
 	"github.com/imksoo/routerd2/internal/network"
+	"github.com/imksoo/routerd2/internal/resourceprogram"
 )
 
 func (c *compiler) collectAliases() {
@@ -47,6 +48,14 @@ func (c *compiler) collectAliases() {
 			c.upAllowed[name] = true
 		}
 	}
+	for _, r := range c.resources {
+		if s, ok := r.Spec.(api.VirtualAddressSpec); ok && s.Mode == "vrrp" {
+			for _, v := range failoverVMACs(s.VRRP) {
+				c.upAllowed[v.Interface] = true
+			}
+		}
+	}
+
 }
 
 func first(values ...string) string {
@@ -184,12 +193,11 @@ func (c *compiler) static4(r resource) {
 	}
 }
 
-func (c *compiler) virtualAddress(r resource) {
+func (c *compiler) virtualAddress(r resource) (string, []resourceprogram.Resource) {
 	c.allow(r, "family", "interface", "address", "hostname", "externalDNS", "mode", "vrrp", "track", "addressFrom", "gratuitousARP")
 	s := r.Spec.(api.VirtualAddressSpec)
 	if s.Mode == "vrrp" {
-		c.vrrp(r, s)
-		return
+		return c.vrrp(r, s)
 	}
 	if s.Mode != "" && s.Mode != "static" {
 		c.reject(r, "mode", "invalid_value", "expected static or vrrp")
@@ -206,7 +214,7 @@ func (c *compiler) virtualAddress(r resource) {
 	ipv4 := s.Family == "ipv4"
 	if !ipv4 && s.Family != "ipv6" {
 		c.reject(r, "family", "invalid_value", "family must be ipv4 or ipv6")
-		return
+		return "", nil
 	}
 	addr := s.Address
 	if meaningful(child(r.node, "addressFrom")) && s.AddressFrom.Resource == "" {
@@ -232,13 +240,20 @@ func (c *compiler) virtualAddress(r resource) {
 	}
 	if err != nil || prefix.Addr().Is4() != ipv4 || prefix.Addr().Is4In6() || prefix.Bits() != bits {
 		c.reject(r, "address", "invalid_value", "VirtualAddress must be one host prefix of its declared address family")
-		return
+		return "", nil
 	}
 	name := c.interfaceName(r, "interface", s.Interface, false)
-	if iface := c.ensureInterface(r, "interface", name); iface != nil {
+	iface := c.ensureInterface(r, "interface", name)
+	if meaningful(child(r.node, "when")) {
+		id := "address/" + c.serviceName(r, "vip")
+		c.target(r, "resources/"+id)
+		return "", []resourceprogram.Resource{{ID: id, Address: &resourceprogram.Address{Interface: name, CIDR: prefix.String()}}}
+	}
+	if iface != nil {
 		iface.Addresses = append(iface.Addresses, prefix.String())
 		c.target(r, "network.interfaces/"+name+"/addresses")
 	}
+	return "", nil
 }
 
 func (c *compiler) route(r resource, destination, gateway, dev string, metric, family int, literal bool) {

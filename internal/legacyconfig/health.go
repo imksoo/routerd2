@@ -11,7 +11,7 @@ import (
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
 
-func (c *compiler) healthCheck(r resource) {
+func (c *compiler) healthCheck(r resource) string {
 	c.allow(r, "enabled", "type", "role", "addressFamily", "target", "targetSource", "interface", "protocol", "port", "interval", "timeout", "healthyThreshold", "unhealthyThreshold")
 	s := r.Spec.(api.HealthCheckSpec)
 	policy, explicit := c.options.HealthChecks[r.Kind+"/"+r.Metadata.Name]
@@ -20,7 +20,7 @@ func (c *compiler) healthCheck(r resource) {
 	}
 	if s.Enabled != nil && !*s.Enabled {
 		c.note(r, "Disabled check creates no native probe or healthy observation. Re-enabling requires declaring the native scoped service.")
-		return
+		return ""
 	}
 	if s.Type != "" && s.Type != "ping" {
 		c.reject(r, "type", "unsupported_semantics", "only the original ping type with an explicit supported protocol can be imported")
@@ -31,7 +31,7 @@ func (c *compiler) healthCheck(r resource) {
 	target, err := netip.ParseAddr(s.Target)
 	if err != nil || target.IsUnspecified() || target.IsMulticast() || target.Is4In6() || target.Zone() != "" {
 		c.reject(r, "target", "unsupported_semantics", "a unicast IPv4/IPv6 literal target is required; automatic or hostname targets need a native live binding")
-		return
+		return ""
 	}
 	if s.AddressFamily != "" && s.AddressFamily != "ipv4" && s.AddressFamily != "ipv6" || s.AddressFamily == "ipv4" && !target.Is4() || s.AddressFamily == "ipv6" && !target.Is6() {
 		c.reject(r, "addressFamily", "invalid_value", "addressFamily must agree with the literal probe target")
@@ -54,7 +54,7 @@ func (c *compiler) healthCheck(r resource) {
 	}
 	if name == "" {
 		c.reject(r, "interface", "explicit_policy_required", "health_checks policy must select the probe's interface instead of following an unscoped default route")
-		return
+		return ""
 	}
 	c.ensureInterface(r, "interface", name)
 	interval := c.healthDuration(r, "interval", s.Interval, 30*time.Second)
@@ -66,7 +66,8 @@ func (c *compiler) healthCheck(r resource) {
 		IntervalMillis: interval, TimeoutMillis: timeout,
 		HealthyThreshold: s.HealthyThreshold, UnhealthyThreshold: s.UnhealthyThreshold,
 	}})
-	c.note(r, "The native worker uses routerd's probe and threshold engine. Empty intervals/timeouts retain routerd's 30s/3s defaults; thresholds retain 1/3. Probe interface, optional source and mark are explicit routing intent. Legacy role is classification, not a native activation condition; finite status identifies the scoped worker. Conditional activation and live target discovery are not silently dropped.")
+	c.note(r, "The native worker uses routerd's probe and threshold engine. Empty intervals/timeouts retain routerd's 30s/3s defaults; thresholds retain 1/3. Probe interface, optional source and mark are explicit routing intent. Legacy role is classification, not activation policy. VRRP master/backup conditions use finite election facts; unsupported conditions and live target discovery are not silently dropped.")
+	return service
 }
 
 func (c *compiler) healthDuration(r resource, field, value string, fallback time.Duration) int {

@@ -1,0 +1,87 @@
+apiVersion: routerd.net/v1alpha1
+kind: Router
+metadata: {name: imported-vrrp-wan}
+spec:
+  resources:
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: Interface
+      metadata: {name: lan}
+      spec: {ifname: lan0, managed: true, adminUp: true}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: Interface
+      metadata: {name: wan}
+      spec: {ifname: wan0, managed: true, adminUp: true}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: Interface
+      metadata: {name: wan-identity}
+      spec: {ifname: wan-ha, managed: false}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: IPv4StaticAddress
+      metadata: {name: local}
+      spec: {interface: lan, address: 192.0.2.2/24}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: VirtualAddress
+      metadata: {name: wan-address}
+      spec:
+        family: ipv4
+        interface: wan-identity
+        address: 198.51.100.254/32
+        when: {state: {VirtualAddress/gateway.role: {equals: master}}}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: IPv4StaticRoute
+      metadata: {name: wan-client}
+      spec: {destination: 198.51.100.0/24, interface: wan-identity}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: HealthCheck
+      metadata: {name: master-probe}
+      spec:
+        when: {all: [{state: {VirtualAddress/gateway.role: {equals: master}}}]}
+        target: 198.51.100.10
+        protocol: tcp
+        port: 18097
+        interval: 300ms
+        timeout: 100ms
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: HealthCheck
+      metadata: {name: backup-probe}
+      spec:
+        when: {state: {VirtualAddress/gateway.status.role: {equals: backup}}}
+        target: 192.0.2.3
+        protocol: tcp
+        port: 18098
+        interval: 300ms
+        timeout: 100ms
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: HealthCheck
+      metadata: {name: role-probe}
+      spec:
+        when: {any: [{state: {VirtualAddress/gateway.role: {in: [master, backup]}}}]}
+        target: 192.0.2.3
+        protocol: tcp
+        port: 18099
+        interval: 300ms
+        timeout: 100ms
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: VirtualAddress
+      metadata: {name: gateway}
+      spec:
+        family: ipv4
+        interface: lan
+        address: 192.0.2.254/32
+        mode: vrrp
+        vrrp:
+          virtualRouterID: 42
+          priority: 150
+          preempt: true
+          peers: [192.0.2.3]
+          failoverVMAC:
+            parentInterface: wan
+            interface: wan-ha
+            macAddress: '02:00:5E:00:42:01'
+            linkLocalAddress: fe80::42:1
+            withdrawRouterAdvertisement: true
+          additionalFailoverVMACs:
+            - parentInterface: lan
+              interface: lan-extra
+              macAddress: '02:00:5E:00:42:02'
+              linkLocalAddress: fe80::42:2

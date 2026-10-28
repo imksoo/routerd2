@@ -73,7 +73,7 @@ peerのcacheをkernelへcommitし、rescan/broadcastを要求してから、WAN 
 降格は既存writerの撤去ACK後にpurge/resyncを要求する。engineの異常終了もVRRP撤去とworker交換へ結び、
 別のcoordinatorやregistryを置かない。conntrack/expectationだけをこのengineへ委譲し、
 address・route・firewallはnetwork writerが持つ。`conntrack_tcp_liberal`もwriterが元値を記録して管理する。
-現在のcompilerはnative-29、network journalは10。旧開発形式へのreaderやmigrationは作らない。
+現在のcompilerはnative-45、network journalは11。旧開発形式へのreaderやmigrationは作らない。
 署名付きruntimeがengineと対応sourceを結び、ELF閉包を検査した固定FD5を使う。
 詳しくは[接続状態の引継ぎ](../internal/protocol/conntracksync/README.md)を参照する。
 supervisorの`lifecycle`は`running`/`restarting_control`/`stopping`の一つである。
