@@ -498,7 +498,7 @@ func TestDaemonDHCP6RAAddsAddressToPD(t *testing.T) {
 	traffic()
 	information()
 	lan.mu.Lock()
-	learnedSNTP, otherConfig, rdnss, dnssl := false, false, false, false
+	learnedSNTP, otherConfig, rdnss, dnssl, selectedIdentity := false, false, false, false, false
 	for _, p := range lan.packets {
 		b := p.data
 		otherConfig = otherConfig || len(b) >= 70 && b[20] == 58 && b[54] == 134 && b[59]&0x40 != 0
@@ -524,12 +524,19 @@ func TestDaemonDHCP6RAAddsAddressToPD(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, o := range opts {
+			if o.code == 2 {
+				if !bytes.Equal(o.value, []byte{0, 3, 0, 1, 2, 0, 0, 0, 0, 0x42}) {
+					lan.mu.Unlock()
+					t.Fatalf("imported server changed selected DUID on wire: %x", o.value)
+				}
+				selectedIdentity = true
+			}
 			learnedSNTP = learnedSNTP || o.code == 31 && bytes.Equal(o.value, netip.MustParseAddr("2001:db8:42::1").AsSlice())
 		}
 	}
 	lan.mu.Unlock()
-	if !learnedSNTP || !otherConfig || !rdnss || !dnssl {
-		t.Fatal("missing imported DHCPv6/RA information or original DNS budgets", learnedSNTP, otherConfig, rdnss, dnssl)
+	if !learnedSNTP || !otherConfig || !rdnss || !dnssl || !selectedIdentity {
+		t.Fatal("missing imported DHCPv6/RA information, original DNS budgets or selected DUID", learnedSNTP, otherConfig, rdnss, dnssl, selectedIdentity)
 	}
 	// An explicit client identity is trial intent; reverting it must not
 	// adopt that trial's checkpoint identity as the new automatic default.

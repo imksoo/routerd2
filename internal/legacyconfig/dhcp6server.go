@@ -59,7 +59,7 @@ func (c *compiler) dhcp6Servers() {
 		if !ok {
 			continue // The provider's diagnostic already prevents publication.
 		}
-		cfg := &serviceconfig.DHCP6Server{Interface: ifname, DomainSearch: append([]string(nil), s.DomainSearch...)}
+		cfg := &serviceconfig.DHCP6Server{Interface: ifname, ServerDUID: policy.ServerDUID, DomainSearch: append([]string(nil), s.DomainSearch...)}
 		cfg.DNSServers = c.dhcp6ServerAddresses(r, "dnsServers", s.DNSServers)
 		cfg.SNTPServers = c.dhcp6ServerAddresses(r, "sntpServers", s.SNTPServers)
 		cfg.DNSFrom = c.dhcp6ServerSources(r, "dnsServerFrom", "dnsServers", s.DNSServerFrom)
@@ -99,7 +99,7 @@ func (c *compiler) dhcp6Servers() {
 		}
 
 		c.addService(r, serviceconfig.Service{Name: c.serviceName(r, "dhcp6"), DHCP6Server: cfg})
-		c.note(r, "Explicit replacement: the selected PD allocation owns LAN RA with O set and configured router lifetime, retaining original PD PIO budgets. RA RDNSS/DNSSL retain independently selected static/DHCPv6 options and original information deadlines. Static and learned DHCPv6 options are independent; missing/expired information removes only that source's values instead of stopping all serving. No interface-prefix scan, status snapshot, dnsmasq lease file or server identity is imported. A new persistent native server DUID is created before serving.")
+		c.note(r, "Explicit replacement: the selected PD allocation owns LAN RA with O set and configured router lifetime, retaining original PD PIO budgets. RA RDNSS/DNSSL retain independently selected static/DHCPv6 options and original information deadlines. Static and learned DHCPv6 options are independent; missing/expired information removes only that source's values instead of stopping all serving. No interface-prefix scan, status snapshot or dnsmasq lease file is imported. The policy's explicit server_duid selects the serving identity; when omitted, a persistent native server DUID is created before serving.")
 	}
 }
 

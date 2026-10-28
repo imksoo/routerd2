@@ -28,6 +28,9 @@ func TestDHCP6ImportBindsServingAndRAToSelectedPD(t *testing.T) {
 		t.Fatal(err)
 	}
 	pd, server := service(t, result.Document, "dhcp6"), service(t, result.Document, "dhcp6_server")
+	if server.DHCP6Server.ServerDUID != "00030001020000000042" {
+		t.Fatal("migration changed selected server DUID", server.DHCP6Server.ServerDUID)
+	}
 	if pd.DHCP6.IAID != 1 || pd.DHCP6.PrefixLength != 60 || len(pd.DHCP6.Delegations) != 1 {
 		t.Fatal("changed provider identity or allocation", pd)
 	}

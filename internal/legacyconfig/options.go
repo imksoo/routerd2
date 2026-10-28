@@ -52,7 +52,9 @@ type Options struct {
 // DHCP6ServerPolicy replaces dnsmasq's implicit interface-prefix constructor
 // and retained options with an explicitly selected PD allocation and bounded
 // native information. It does not override the legacy advertised values.
+// ServerDUID selects an existing identity without adopting a lease database.
 type DHCP6ServerPolicy struct {
+	ServerDUID            string `json:"server_duid,omitempty"`
 	DelegatedAddress      string `json:"delegated_address"`
 	RouterLifetimeSeconds *int   `json:"router_lifetime_seconds"`
 }

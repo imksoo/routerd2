@@ -67,6 +67,7 @@ dhcp6_servers:
   DHCPv6Server/lan-info:
     delegated_address: IPv6DelegatedAddress/lan-address
     router_lifetime_seconds: 30
+    server_duid: "00030001020000000042"
 ```
 
 The reference must select the serving interface's compiled allocation. A declared
@@ -80,7 +81,19 @@ PD/information deadlines; `leaseTime` overrides are not imported. Static
 references must use this selected PD; native serving can independently select
 other providers, but the old implicit RA conversion does not invent that graph.
 No DNS declaration means no learned RDNSS, while search and SNTP remain usable.
-Server DUID is a new persistent native identity; old dnsmasq state is not adopted.
+Set `server_duid` to the existing server's DUID when that identity must survive
+the move, or use the same explicit DUID on HA partners. This is operator intent,
+not an import of the old dnsmasq lease database. When omitted, the native server
+creates and retains its own automatic identity. An explicit override never
+overwrites that automatic identity; confirmed rollback restores its selection.
+The example DUID is fixture data and must be replaced with the intended identity.
+
+WAN identity is independent: `DHCPv6PrefixDelegation.spec.clientDUID` is copied
+into the native client. Set it to the old client's observed DUID when changing
+NICs or moving to a new state directory. Without it, a new Ethernet client starts
+with DUID-LL from its MAC, then retains that value across MAC changes and
+restarts. Lease deadlines and server bindings are not transferred by selecting
+an identity, and the upstream decides which prefix it grants.
 
 The shared synthetic fixture runs through the actual product CLI:
 

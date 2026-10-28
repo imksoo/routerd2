@@ -1,6 +1,6 @@
 # 現行 routerd と同等の製品にするための実装計画
 
-作成日: 2026-10-24。更新日: 2026-10-27。開発中。全体ゴールは継続中。
+作成日: 2026-10-24。更新日: 2026-10-28。開発中。全体ゴールは継続中。
 
 過去のcheckpoint列挙を削除した。過去の試験・API・保存形式の維持を実装制約にしない。
 [AGENTS.md](../AGENTS.md) に従い、機能と実通信を満たす簡潔な構造へ作り直す。
@@ -942,6 +942,13 @@ host suffixもmanaged bindingへ変換する。native address maskは/64で、�
 [設定例](../examples/wan-dslite-pd.yaml)と[引き継ぎ](pve-codex-handoff.md)を参照する。
 
 #### NET-06 — LAN・DHCPv6・relay・DNS の resource 完全化
+
+2026-10-28 `duid-import` / native-43: 旧routerdのDUID/PD保存とdnsmasqの永続lease設定を参照した。
+LAN移行policyの`server_duid`を既存native設定へ直接接続し、旧identityを明示して移せるようにした。
+旧lease readerは追加しない。実CLI→daemonと独立ISC/radvd/BusyBox/Linuxで指定DUIDのReply、
+PD/RA・TCP/UDP・DNS・WAN DUID rollback、自動server DUIDのworker/control/daemon交換とrollbackが通った。
+全体`make check`と両architecture static build・署名artifact検査も成功。
+実homertのidentity移設と最新版のNTT実回線/対象NIC受入は未検証。
 
 2026-10-27 native-40: 旧stateless serverのCLI importでPD割当とRA寿命を明示し、情報配布とRA/O、
 untrust UDP/547例外を生成した。独立dnsmasqのRAでDNS/検索配布と未指定DNSの扱いを確認し、

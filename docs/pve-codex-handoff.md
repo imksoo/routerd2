@@ -5,7 +5,21 @@
 [機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
-## 現在の変更: startup-io-fixed / native-43
+## 現在の変更: duid-import / native-43
+
+旧routerdのDUID選択・PD snapshotとdnsmasqの永続lease設定を再確認した。
+WANの明示`clientDUID`は既に変換する。LANの移行policyにも`server_duid`を追加し、
+既存のnative明示DUIDへ直接渡す。旧lease fileのreaderやidentity移行層は作らない。
+省略時は自動identityを永続化し、明示値・trialはそれを上書きしない。
+
+PVE Linux6.8/amd64、`make check-dhcp6-ra-pd check-dhcp6-server RELEASE_ID=duid-import
+DHCP6_SERVER=dist/peer-env/isc-dhcp/root/usr/sbin/dhcpd`が成功した。製品CLIの変換結果から
+実daemonを起動し、独立ISC/radvd/BusyBox/Linuxと実Replyの指定server DUID、PD/RA・TCP/UDP・
+DNS・WAN DUID rollbackを確認した。自動server DUIDはworker/control/daemon交換とrollbackで保持した。
+`make check`、CGO_ENABLED=0の両architectureビルドと署名catalog/publisher/stageのRace検査も成功。
+実homertのidentity移設、最新のNTT実回線・対象NIC受入は未検証。raw出力・capture・一時releaseは残さない。
+
+### 直前の起動read修正
 
 起動待機timeoutを旧b498dbdの実PID1で再現した。PVE Linux6.8/amd64、全試験processを
 CPU0へ固定し、同CPUで関連release Race検査を並行した。network/logging/managementはReady、
