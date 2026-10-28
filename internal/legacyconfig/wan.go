@@ -104,8 +104,14 @@ func (c *compiler) raClient(r resource) {
 func (c *compiler) dhcp6Information(r resource) {
 	c.allow(r, "interface", "request")
 	s := r.Spec.(api.DHCPv6InformationSpec)
-	if len(s.Request) != 0 {
-		c.reject(r, "request", "unsupported_semantics", "the pinned Linux information controller ignores request and always exposes its PD client's fixed option set; nonempty selection intent must be resolved explicitly before migration")
+	for _, option := range s.Request {
+		switch option {
+		case "dns-servers", "domain-search", "sntp-servers", "aftr-name":
+			// Both clients request this fixed set. These declarations are
+			// fulfilled without another option-selection or socket owner.
+		default:
+			c.reject(r, "request", "unsupported_semantics", "requested information must be one of dns-servers, domain-search, sntp-servers or aftr-name")
+		}
 	}
 	c.interfaceName(r, "interface", s.Interface, false)
 	var providers []int

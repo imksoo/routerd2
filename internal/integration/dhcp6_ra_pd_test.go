@@ -441,7 +441,7 @@ func TestDaemonDHCP6RAAddsAddressToPD(t *testing.T) {
 	traffic()
 	information()
 	wan.mu.Lock()
-	combined := false
+	combined, requestedInformation := false, false
 	for _, packet := range wan.packets {
 		b := packet.data
 		if packet.at.Before(changed) || len(b) < 66 || b[20] != 17 || binary.BigEndian.Uint16(b[54:56]) != 546 || binary.BigEndian.Uint16(b[56:58]) != 547 {
@@ -454,6 +454,13 @@ func TestDaemonDHCP6RAAddsAddressToPD(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, o := range opts {
+			if o.code == 6 {
+				var codes []uint16
+				for at := 0; at+2 <= len(o.value); at += 2 {
+					codes = append(codes, binary.BigEndian.Uint16(o.value[at:]))
+				}
+				requestedInformation = requestedInformation || slices.Contains(codes, 23) && slices.Contains(codes, 24) && slices.Contains(codes, 31) && slices.Contains(codes, 64)
+			}
 			if (o.code == 3 || o.code == 25) && len(o.value) >= 12 && binary.BigEndian.Uint32(o.value) == wanIAID {
 				na, pd = na || o.code == 3, pd || o.code == 25
 			}
@@ -464,6 +471,9 @@ func TestDaemonDHCP6RAAddsAddressToPD(t *testing.T) {
 	wan.mu.Unlock()
 	if !combined {
 		t.Fatal("no actual request carried both IA_NA and IA_PD with the shared IAID")
+	}
+	if !requestedInformation {
+		t.Fatal("imported information selection was absent from the WAN option request list")
 	}
 	// Freeze the original authority and input owner. The information server
 	// must expire its learned bytes itself while static search remains usable.

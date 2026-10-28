@@ -197,7 +197,7 @@ func TestPDInformationUsesOneIdentityAndExactLegacyInterfaceMatch(t *testing.T) 
 		path, code string
 	}{
 		{"standalone", removeResource(t, data, "DHCPv6PrefixDelegation", "ipv6-provider"), "interface", "information_provider"},
-		{"ignored-request", changed(t, data, "spec: {interface: wan}", "spec: {interface: wan, request: [dns, aftr]}"), "request", "unsupported_semantics"},
+		{"unknown-request", changed(t, data, "spec: {interface: wan}", "spec: {interface: wan, request: [unknown-option]}"), "request", "unsupported_semantics"},
 		{"multiple-pd", append(append([]byte(nil), data...), []byte("    - apiVersion: net.routerd.net/v1alpha1\n      kind: DHCPv6PrefixDelegation\n      metadata: {name: second-pd}\n      spec: {interface: wan}\n")...), "interface", "information_provider"},
 	} {
 		t.Run(test.name, func(t *testing.T) {

@@ -18,7 +18,7 @@ spec:
     - apiVersion: net.routerd.net/v1alpha1
       kind: DHCPv6Information
       metadata: {name: wan-info}
-      spec: {interface: wan}
+      spec: {interface: wan, request: [aftr-name, dns-servers, sntp-servers, domain-search]}
     - apiVersion: net.routerd.net/v1alpha1
       kind: IPv6DelegatedAddress
       metadata: {name: lan-address}

@@ -967,6 +967,12 @@ host suffixもmanaged bindingへ変換する。native address maskは/64で、�
 同一TCP/UDPを再試験中。全SelfAddressPolicy/HA/VRFは未完了。
 [設定例](../examples/wan-dslite-pd.yaml)と[引き継ぎ](pve-codex-handoff.md)を参照する。
 
+2026-10-28 `info-options` / native-45: 旧 Information/PD client の固定要求を比較し、homert の
+明示 `request: [aftr-name, dns-servers, sntp-servers, domain-search]` を受け付ける。
+既存一 client の実 ORO、独立 ISC/radvd/BusyBox/Linux の PD/RA・配布・通信・失効復旧と
+DUID rollback、make check・両 architecture build/署名検査が成功した。
+Information/server の条件付き import と homert 全体・対象 NIC は残る。
+
 #### NET-06 — LAN・DHCPv6・relay・DNS の resource 完全化
 
 2026-10-28 `duid-import` / native-43: 旧routerdのDUID/PD保存とdnsmasqの永続lease設定を参照した。

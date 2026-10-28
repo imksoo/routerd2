@@ -254,7 +254,7 @@ serving, custom lease/RA settings and full deployed-router import remain open.
 | `DHCPv4Server` + `DHCPv4Reservation` | Static local servers become separate native DHCP workers with owned journals. Retains finite pool leases, disjoint MAC/OUI profile scopes, explicit/static-source gateway/DNS/NTP/domain options, and MAC/IP/hostname reservations with typed options. Requires one owned static IPv4 address per interface; no live lease import, HA conditions or ambiguous backend directives. The active-chain/default distinctions are detailed below. |
 | `DHCPv4Relay` | Explicit `interfaces` and numeric IPv4 `upstream` become one native relay service. Each client interface requires one unconditional owned static IPv4 address for `giaddr`. Multiple relay declarations retain per-interface upstream sets. Conditional/dynamic source selection and ambiguous legacy VRF binding remain unsupported. |
 | `DHCPv6PrefixDelegation` | Native IA_PD service, pinned DUID-LL/IAID 1 defaults, explicit DUID, provider profile, prefix-length preference and finite role guards. Explicit external clients and required-prefix readiness semantics are rejected. |
-| `DHCPv6Information` with one matching PD | An alias of that PD service, sharing its DUID/IAID, UDP 546 socket and supplementary Information-Request. The original **literal interface reference** must match exactly; merely resolving two different aliases to the same NIC does not reproduce the old association. Standalone, ambiguous and nonempty `request` declarations are rejected. |
+| `DHCPv6Information` with one matching PD | An alias of that PD service, sharing its DUID/IAID, UDP 546 socket and supplementary Information-Request. The original **literal interface reference** must match exactly; merely resolving two different aliases to the same NIC does not reproduce the old association. Standalone and ambiguous owners are rejected. `request` may name dns-servers, domain-search, sntp-servers and aftr-name, all already present in the fixed client request set. |
 | `DHCPv6Server` in stateless mode | Explicit `dhcp6_servers` policy selects one compiled PD LAN allocation and router lifetime. Imports static DNS/SNTP/search and PD/information references, generates RA with O plus independently selected RDNSS/DNSSL, and preserves the original untrust UDP/547 INPUT exception. The RA DNS sources must be the selected PD; unsupported fields and HA conditions reject the entire input. |
 | `IPv6RAAddress` with explicit policy | One native `ra_client`, using the policy's same-interface SLAAC/default-route/on-link/RIO/DNS flags, source/IID/router filters and explicit route table/metric. Requires managed RA, independently managed/admin-up underlay, and `required: false`. Host defaults and learned state are not imported. |
 | `IPv6DelegatedAddress` | A /64 LAN address or /128 host endpoint under its PD service, retaining the installed mask, suffix and **hexadecimal** subnet ID. In the old schema, `subnetID: "10"` means hexadecimal 0x10, not decimal 10. IDs must fit within the provider prefix; zero host ID remains unsupported. LAN advertisement declarations require a `dhcp6_servers` policy selecting that /64 allocation. |
@@ -509,10 +509,12 @@ references to the information resource become references to the same native PD
 service. Two aliases of one provider cannot appear as duplicate DNS sources.
 
 The controller never reads `spec.request`; its client always requests the fixed
-DNS, domain-search, SNTP and AFTR option set. A nonempty selection could represent
-unfulfilled operator intent, so the compiler rejects it with that reason instead
-of silently ignoring it. Native information-refresh tracking adds the refresh
-option and bounds the learned facts by their absolute information/PD deadlines.
+DNS, domain-search, SNTP and AFTR option set. Explicit `request` entries naming
+`dns-servers`, `domain-search`, `sntp-servers` or `aftr-name` are therefore already
+fulfilled and are accepted. This includes the four-item declaration used by
+homert. Other selections remain unsupported. There is no second socket or
+parallel option-selection state. Native information-refresh tracking adds the
+refresh option and bounds learned facts by their absolute information/PD deadlines.
 No current status or historical lease database is imported. See pinned
 [`pkg/controller/chain/phase2.go`](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/phase2.go)
 for the actual Linux association and request path.
@@ -618,7 +620,7 @@ kernel log events and do not imply NFLOG sampling or old log-retention behavior.
   Resource-scoped replacement policy is required; observe-only ownership,
   required-address readiness and HA conditions are still not convertible.
 - Standalone `DHCPv6Information`, ambiguous PD ownership, differing literal
-  interface references and nonempty ignored request selections are rejected.
+  interface references and request options outside the supported fixed set are rejected.
 - PD-derived/HA/suffix DS-Lite sources, arbitrary dynamic status references,
   unowned literal sources and non-default dynamically owned tunnel routes need
   additional native ownership APIs; explicit policy cannot erase those gaps.

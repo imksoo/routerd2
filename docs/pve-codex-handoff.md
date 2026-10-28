@@ -5,7 +5,20 @@
 [機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
-## 現在の実装と確認範囲: pd-admission / native-45
+## 現在の変更: info-options / native-45
+
+旧 Information controller と PD client の固定要求を比較し、homert が指定する
+`aftr-name, dns-servers, sntp-servers, domain-search` を一律拒否しないようにした。
+既存の固定要求で満たす項目だけを受け付け、別 socket や option 管理は追加しない。
+独立 ISC/radvd/BusyBox/Linux の既存実通信試験へ、この宣言と WAN の実 ORO 確認を加えた。
+PVE Linux6.8/amd64、`make check-dhcp6-ra-pd RELEASE_ID=info-options
+DHCP6_SERVER=dist/peer-env/isc-dhcp/root/usr/sbin/dhcpd` が成功した。実 ORO に四項目があり、
+PD/IA_NA・LAN RA/情報配布・TCP/UDP/DNS、元期限での撤去と復旧、DUID rollback も通った。
+`make check` の Go/Python/Race/vet、両 architecture static build、最終六 ELF の署名
+catalog/publisher/stage Race 検査も成功した。ARM64 実行と対象 NIC は未検証。
+条件付き Information/server と homert 全体の変換は残る。
+
+## 直前の完了変更: pd-admission / native-45
 
 routerd の `resourcequery/when.go`、PD client、VRRP backend・VMAC hook と現行 homert の設定を参照した。
 旧 HealthCheck・静的 VirtualAddress・PD の master/backup 条件を、既存の型付き条件へ接続している。
