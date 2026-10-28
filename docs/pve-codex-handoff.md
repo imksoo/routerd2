@@ -7,6 +7,12 @@
 
 ## 単体 router・LAN 端末を優先
 
+`hgwdns-e2364af` は実HGWと独立Linux端末で、委譲IPv6アドレスによるDNS配布、
+DHCPv4/DHCPv6情報・SLAAC、条件付きDNS・DoH、IPv4/IPv6通信を確認した。
+隔離WANの通信遮断からの復旧、daemon全体の再起動と保存状態を使った別実行でも通信・PD識別子が復旧した。
+実HGWでの自然PD更新を含む7800秒試験は実行中。ONU直結・対象機器での受入は未実施。
+細分化した試験を増やすことより、homertに必要な機能を端末から使える構成に組み込み、実通信の失敗を直す。
+
 `pd-prep-native53` の実 HGW 90秒試験で、独立 BusyBox 端末の DHCPv4による address・gateway・DNS取得と
 自然更新、DHCPv6 Information-request/Reply、SLAAC、IPv4 NAT/IPv6 HTTPS、IPv4/IPv6 DNSを確認した。
 公開名は実 Cloudflare DoH、条件付き名前は独立 dnsmasq へ送り、条件付き上流の停止時に公開上流へ
