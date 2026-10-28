@@ -11,8 +11,9 @@
 自然更新、DHCPv6 Information-request/Reply、SLAAC、IPv4 NAT/IPv6 HTTPS、IPv4/IPv6 DNSを確認した。
 公開名は実 Cloudflare DoH、条件付き名前は独立 dnsmasq へ送り、条件付き上流の停止時に公開上流へ
 問い合わせを流さず SERVFAIL、復旧後に応答することを確認した。PD workerの強制終了・通常停止後も
-同じDUID/IAIDと通信が復旧した。DHCPv6 clientは明示起動、IPv6 DNSは固定ULAであり、homertの
-委譲IPv6アドレスをDNSに使う設定と一般端末での自動起動は未受入。90秒は長時間安定性ではない。
+同じDUID/IAIDと通信が復旧した。別の20秒試験では独立dhcpcd端末がRAからDHCPv6情報取得を自動起動し、
+DHCPv4とSLAAC、両family HTTPS/DNSを使用した。DNS設定はhookで観測しておりOS resolverへの自動反映は未検証。
+IPv6 DNSは固定ULAであり、homertの委譲IPv6アドレスをDNSに使う設定は未受入。90秒は長時間安定性ではない。
 初回試験はIPv6表記の文字列比較、固定IPv6アドレスを含めた撤去判定と条件付きDNS設定順の誤りで失敗し、
 各試験を修正して再実行した。実ONU直結・対象物理機器での受入は未実施。
 
