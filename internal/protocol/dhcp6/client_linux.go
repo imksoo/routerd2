@@ -465,7 +465,7 @@ func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, updates <
 		saved.Revision = 0
 		saved.Source = cfg.Replication.ListenAddress.String()
 	}
-	ifi, source, err := linklocal.Wait(ctx, cfg.Interface, netip.Addr{})
+	ifi, err := net.InterfaceByName(cfg.Interface)
 	if err != nil {
 		return err
 	}
@@ -478,11 +478,6 @@ func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, updates <
 	if err != nil {
 		return err
 	}
-	conn, err := listen(ctx, cfg.Interface, ifi.Index, source)
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
 	dadFD := -1
 	if cfg.RequestAddress {
 		dadFD, err = unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW|unix.SOCK_NONBLOCK|unix.SOCK_CLOEXEC, unix.NETLINK_ROUTE)
@@ -518,6 +513,7 @@ func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, updates <
 		return err
 	}
 	var last dhcp6config.Snapshot
+	attemptedPublish := false
 	publish := func() error {
 		previous, current := last, c.snapshot
 		previous.ObservedNanos, current.ObservedNanos = 0, 0
@@ -532,6 +528,7 @@ func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, updates <
 		if err := writeState(cfg.StatePath, saved); err != nil {
 			return fmt.Errorf("persist DHCPv6 assignments: %w", err)
 		}
+		attemptedPublish = true
 		if err := effects.Update(ctx, c.snapshot); err != nil {
 			return fmt.Errorf("publish DHCPv6 assignments: %w", err)
 		}
@@ -541,6 +538,9 @@ func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, updates <
 	defer func() {
 		if ctx.Err() != nil && errors.Is(result, ctx.Err()) {
 			result = nil
+		}
+		if !attemptedPublish {
+			return
 		}
 		cleanup, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
@@ -557,6 +557,41 @@ func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, updates <
 			return
 		}
 	}()
+	// A live replicated grant can prepare the dedicated tunnel address while
+	// the WAN link-local address completes DAD. It grants no serving or RA
+	// authority until the socket is open and the normal observation is sent.
+	if restored && cfg.RequestPrefix && cfg.Replication != nil {
+		if _, _, err := linklocal.Read(cfg.Interface, netip.Addr{}); err != nil {
+			return err
+		}
+		prepared := c.snapshot
+		prepared.State = "preparing"
+		prepared.ObservedNanos = uint64(clock.BoottimeNanoseconds)
+		attemptedPublish = true
+		if err := effects.Update(ctx, prepared); err != nil {
+			return fmt.Errorf("prepare DHCPv6 tunnel address: %w", err)
+		}
+	}
+	ifi, source, err := linklocal.Wait(ctx, cfg.Interface, netip.Addr{})
+	if err != nil {
+		return err
+	}
+	conn, err := listen(ctx, cfg.Interface, ifi.Index, source)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	clock, err = boottime.ReadForBoot(c.snapshot.BootID)
+	if err != nil {
+		return err
+	}
+	now = time.Unix(0, clock.BoottimeNanoseconds)
+	if c.lease.attempts == 0 && !c.lease.verifyUntil.IsZero() {
+		c.lease.verifyUntil = now.Add(10 * time.Second)
+	}
+	if err := c.advance(clock); err != nil {
+		return err
+	}
 	if err := publish(); err != nil {
 		return err
 	}

@@ -7,6 +7,10 @@
 現在の変更・実行結果・残作業は [引き継ぎ](pve-codex-handoff.md) を参照する。
 機能範囲と作業単位は以下とJSONの台帳で管理し、既存試験の成功を全体完了に数えない。
 
+現在は旧 routerd の識別子・リース保持を踏まえた PD/HA と実通信を継続中。native-53 の実 HGW
+短時間試験では同じ DUID/IAID による再起動復旧を確認した。実二台の連続障害では TCP の15秒
+タイムアウトを再現し、別試行では設定撤去が期限内に完了しなかった。ONU 直結と対象実機の受入は未実施。
+
 2026-10-27 `dhcp-request-clock` / native-31: 独立dnsmasqと実5.2秒遅延でDHCPv4の期限延長を
 再現し、元のREQUEST時刻へ修正した。通常取得/再起動再取得/自然更新と、QEMUの実UTC補正・
 元期限失効・worker/control交換後のTCP/UDPも通った。生ログ・capture・試験binaryは削除する。

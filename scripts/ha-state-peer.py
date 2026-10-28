@@ -20,7 +20,7 @@ def run(command):
     return subprocess.run(command, check=True, capture_output=True, text=True, timeout=10).stdout
 
 
-def peer(stage, dhcp6_server, pd_dslite, stale_owner):
+def peer(stage, dhcp6_server, pd_dslite, stale_owner, preparation):
     def deadline(*_):
         raise TimeoutError("HA connection-state communication deadline")
     signal.signal(signal.SIGALRM, deadline)
@@ -62,6 +62,15 @@ def peer(stage, dhcp6_server, pd_dslite, stale_owner):
 
     def modules(node):
         return {module["name"]: module for module in (api(node, "supervisor.sock", "/v1/status")["modules"] or [])}
+
+    def host_pid(node, local_pid):
+        candidates = []
+        for value in run(["ip", "netns", "pids", "ha-" + node]).split():
+            fields = Path("/proc/" + value + "/status").read_text().splitlines()
+            if any(line.startswith("NSpid:") and int(line.split()[-1]) == local_pid for line in fields):
+                candidates.append(int(value))
+        assert len(candidates) == 1, "control process mapping is not unique"
+        return candidates[0]
 
     def active(node):
         output = run(inside("ha-" + node, ["ip", "-j", "address", "show"])) if (stage / node / "run" / "supervisor.sock").exists() else "[]"
@@ -521,16 +530,51 @@ while True:
             assert all("02:00:5e:00:01:44 >" in line for line in requests), "backup WAN saw a physical-MAC ARP request for the shared address: " + packets
         if pd_dslite:
             check_backup_arp("a")
+        if preparation:
+            api("a", "control.sock", "/v1/services/service.ha/restart", {})
+            def preparing():
+                try:
+                    return api("b", "control.sock", "/v1/services/service.pd")["snapshot"].get("state") == "preparing"
+                except (subprocess.CalledProcessError, KeyError):
+                    return False
+            wait(preparing, timeout=30)
+            assert "service.pd-lan-ra" not in modules("b"), "preparation started the LAN RA service"
+            def prepared_addresses():
+                output = subprocess.run(inside("ha-b", ["ip", "-j", "-6", "address", "show", "dev", "wan-ha"]), capture_output=True, text=True)
+                return json.loads(output.stdout) if output.returncode == 0 else []
+            wait(lambda: any(a.get("local") == "2001:db8:80:f1::21" for link in prepared_addresses() for a in link.get("addr_info", [])), timeout=3)
+            assert preparing(), "B4 was added only after DHCP serving began"
+            addresses = {a.get("local"): a for link in prepared_addresses() for a in link.get("addr_info", [])}
+            assert addresses.get("fe80::1", {}).get("tentative") and addresses["2001:db8:80:f1::21"].get("tentative"), "link-local and B4 DAD did not overlap"
+            api("b", "control.sock", "/v1/services/service.ha/restart", {})
+            wait(lambda: active("a"), timeout=30)
+            wait(lambda: modules("b").get("service.pd", {}).get("ready") is True, timeout=30)
+            pd_traffic("a")
+            assert not any(a.get("local") == "2001:db8:80:f1::21" for link in prepared_addresses() for a in link.get("addr_info", [])), "cancelled preparation retained the B4 address"
+            assert "service.pd-lan-ra" not in modules("b"), "cancelled preparation left an RA worker"
+            assert progress(latest()["sequence"]) == mapping
+            print("PASS overlapping DAD, interrupted preparation, B4 withdrawal and real TCP/UDP recovery", flush=True)
+
+            api("a", "control.sock", "/v1/services/service.ha/restart", {})
+            wait(preparing, timeout=30)
+            wait(lambda: any(a.get("local") == "2001:db8:80:f1::21" for link in prepared_addresses() for a in link.get("addr_info", [])), timeout=3)
+            assert preparing() and "service.pd-lan-ra" not in modules("b"), "preparation started serving before the control-stop test"
+            authority = api("b", "control.sock", "/v1/services/service.ha")["snapshot"]["expires_nanos"]
+            controller = host_pid("b", modules("b")["control"]["pid"])
+            os.kill(controller, signal.SIGSTOP)
+            try:
+                time.sleep(max(0, (authority - 7_200_000_000_000 - time.clock_gettime_ns(time.CLOCK_BOOTTIME)) / 1_000_000_000) + 0.5)
+                assert not any(a.get("local") == "2001:db8:80:f1::21" for link in prepared_addresses() for a in link.get("addr_info", [])), "expired preparation retained the B4 address while control was stopped"
+            finally:
+                try:
+                    os.kill(controller, signal.SIGCONT)
+                except ProcessLookupError:
+                    pass
+            print("PASS prepared B4 authority expired while control was stopped", flush=True)
+            return
         if dhcp6_server:
             information("a")
-            local_pid = modules("a")["control"]["pid"]
-            candidates = []
-            for value in run(["ip", "netns", "pids", "ha-a"]).split():
-                fields = Path("/proc/" + value + "/status").read_text().splitlines()
-                if any(line.startswith("NSpid:") and int(line.split()[-1]) == local_pid for line in fields):
-                    candidates.append(int(value))
-            assert len(candidates) == 1, "control process mapping is not unique"
-            controller = candidates[0]
+            controller = host_pid("a", modules("a")["control"]["pid"])
             addresses = json.loads(run(inside("ha-a", ["ip", "-j", "-6", "address", "show", "dev", "lan0"])))
             target = next(a["local"] for link in addresses for a in link["addr_info"] if a["scope"] == "link" and not a.get("tentative"))
             direct_information(target, True)
@@ -902,16 +946,19 @@ def main():
     parser.add_argument("--dhcp6-server", type=Path)
     parser.add_argument("--pd-dslite", action="store_true")
     parser.add_argument("--stale-owner", action="store_true")
+    parser.add_argument("--preparation", action="store_true")
     parser.add_argument("--binary-dir", type=Path, default=Path("dist/bin"))
     args = parser.parse_args()
     if args.inside:
-        peer(args.inside, args.dhcp6_server, args.pd_dslite, args.stale_owner)
+        peer(args.inside, args.dhcp6_server, args.pd_dslite, args.stale_owner, args.preparation)
         return
     os.chdir(Path(__file__).resolve().parent.parent)
     if args.pd_dslite and not args.dhcp6_server:
         parser.error("--pd-dslite requires --dhcp6-server")
     if args.stale_owner and not args.pd_dslite:
         parser.error("--stale-owner requires --pd-dslite")
+    if args.preparation and not args.pd_dslite:
+        parser.error("--preparation requires --pd-dslite")
     root = [] if os.geteuid() == 0 else ["sudo", "-n"]
     for module in ("nf_conntrack", "nf_conntrack_netlink"):
         run(root + ["modprobe", module])
@@ -927,6 +974,8 @@ def main():
             peer_args.append("--pd-dslite")
         if args.stale_owner:
             peer_args.append("--stale-owner")
+        if args.preparation:
+            peer_args.append("--preparation")
         result = subprocess.run(root + ["unshare", "--mount", "--net", "--pid", "--fork", "--mount-proc", "--kill-child=SIGKILL", "--propagation", "private", "python3", "-I", stage + "/peer.py", "--inside", stage] + peer_args, timeout=250 if args.dhcp6_server else 180)
         if result.returncode:
             for name in ("a.log", "b.log", "client.log", "server.log", "dhcp6.log", "http6.log", "udp6.log", "egress-primary.log", "egress-backup.log"):

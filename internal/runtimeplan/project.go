@@ -203,19 +203,30 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 			if err := json.Unmarshal(record.Snapshot, &snap); err != nil {
 				return p, err
 			}
-			if !snap.Active(facts.bfdClock) {
-				continue
-			}
-			for _, address := range snap.Addresses {
-				if !address.ValidUntil.Live(facts.bfdClock) {
+			preparing := snap.State == "preparing"
+			var preparationUntil uint64
+			if preparing {
+				ha, ok := protocols.leaseHA[s.ModuleName()]
+				owner, present := records[ha.owner]
+				var election vrrp.Snapshot
+				if !ok || !present || owner.ConfigDigest != protocols.instances[ha.owner].digest || json.Unmarshal(owner.Snapshot, &election) != nil || !vrrp.CurrentElection(election, facts.bfdClock) {
 					continue
 				}
-				if err := addAddressWithOptions(&p.network, s.DHCP6.Interface, address.Address+"/128", addressLifetimes(address.PreferredUntil, address.ValidUntil)); err != nil {
-					return p, err
+				preparationUntil = election.ExpiresNanos
+			} else if !snap.Active(facts.bfdClock) {
+				continue
+			}
+			if !preparing {
+				for _, address := range snap.Addresses {
+					if !address.ValidUntil.Live(facts.bfdClock) {
+						continue
+					}
+					if err := addAddressWithOptions(&p.network, s.DHCP6.Interface, address.Address+"/128", addressLifetimes(address.PreferredUntil, address.ValidUntil)); err != nil {
+						return p, err
+					}
 				}
 			}
 			for _, lan := range s.DHCP6.Delegations {
-				ensureInterface(&p.network, lan.Interface)
 				dsliteSource := false
 				for _, definition := range protocols.aftr {
 					if lan.PrefixLength == 128 && definition.service.DSLite.SourceFrom == s.Name && definition.service.DSLite.SourceDelegation == lan.Name {
@@ -223,6 +234,10 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 						break
 					}
 				}
+				if preparing && !dsliteSource {
+					continue
+				}
+				ensureInterface(&p.network, lan.Interface)
 				var prefixes []ra.Prefix
 				for _, lease := range snap.Prefixes {
 					if !lease.ValidUntil.Live(facts.bfdClock) {
@@ -242,12 +257,17 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 							options.PreferredUntil = time.Unix(0, 0).UTC()
 						}
 					}
+					if preparing {
+						options = network.BoundAddressLifetime(options, facts.bfdClock, preparationUntil)
+					}
 					if err := addAddressWithOptions(&p.network, lan.Interface, address.String(), options); err != nil {
 						return p, err
 					}
-					prefixes = append(prefixes, ra.Prefix{Prefix: prefix.String(), OnLink: true, Autonomous: true, ValidLifetimeSeconds: ^uint32(0), PreferredLifetimeSeconds: ^uint32(0), ValidUntil: lease.ValidUntil, PreferredUntil: lease.PreferredUntil})
+					if !preparing && lan.Advertise {
+						prefixes = append(prefixes, ra.Prefix{Prefix: prefix.String(), OnLink: true, Autonomous: true, ValidLifetimeSeconds: ^uint32(0), PreferredLifetimeSeconds: ^uint32(0), ValidUntil: lease.ValidUntil, PreferredUntil: lease.PreferredUntil})
+					}
 				}
-				if !lan.Advertise || len(prefixes) == 0 {
+				if preparing || !lan.Advertise || len(prefixes) == 0 {
 					continue
 				}
 				name := s.Name + "-" + lan.Name + "-ra"

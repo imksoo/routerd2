@@ -36,6 +36,7 @@ help:
 	  'make check-pppoe-pd     Verify PPP PD recovery, WAN replacement and LAN IPv6 with independent ISC DHCP' \
 	  'make check-ha-state    Preserve DHCP/TCP/UDP state across two native routers' \
 	  'make check-ha-pd       Verify shared PD across two routers with different BOOTTIME clocks' \
+	  'make check-ha-pd-preparation Verify interrupted B4 preparation and overlapping DAD' \
 	  'make check-ha-egress   Verify shared PD, DS-Lite and independent backup WAN handoff' \
 	  'make check-ha-dhcp-failover Verify stale-owner DHCP protection and reconciliation' \
 	  'make check-health-pbr  Required two-WAN real-daemon TCP/UDP failover gate' \
@@ -317,6 +318,10 @@ check-ha-pd: build build-publisher conntrack-engine
 .PHONY: check-ha-egress
 check-ha-egress: build build-publisher conntrack-engine
 	$(PYTHON) scripts/ha-state-peer.py --dhcp6-server '$(DHCP6_SERVER)' --pd-dslite
+
+.PHONY: check-ha-pd-preparation
+check-ha-pd-preparation: build build-publisher conntrack-engine
+	$(PYTHON) scripts/ha-state-peer.py --dhcp6-server '$(DHCP6_SERVER)' --pd-dslite --preparation
 
 .PHONY: check-ha-dhcp-failover
 check-ha-dhcp-failover: build build-publisher conntrack-engine

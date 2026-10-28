@@ -126,7 +126,7 @@ func (s Snapshot) LeaseUntil() (lifetime.Deadline, bool) {
 	return until, found
 }
 func (s Snapshot) Active(clock boottime.Clock) bool {
-	if s.State == "stopped" || s.State == "standby" || s.State == "confirming" || s.BootID != clock.BootID {
+	if s.State == "stopped" || s.State == "standby" || s.State == "preparing" || s.State == "confirming" || s.BootID != clock.BootID {
 		return false
 	}
 	if s.State == "information" {
@@ -137,7 +137,7 @@ func (s Snapshot) Active(clock boottime.Clock) bool {
 	return found && until.Live(clock)
 }
 func (s Snapshot) InformationUntil(clock boottime.Clock) (lifetime.Deadline, bool) {
-	if s.State == "stopped" || s.State == "standby" || s.State == "confirming" || s.BootID != clock.BootID || s.InfoReceivedNanos == 0 {
+	if s.State == "stopped" || s.State == "standby" || s.State == "preparing" || s.State == "confirming" || s.BootID != clock.BootID || s.InfoReceivedNanos == 0 {
 		return lifetime.Deadline{}, false
 	}
 	until := s.InformationRefreshAt
@@ -161,12 +161,15 @@ func ValidateSnapshot(c Config, s Snapshot) error {
 		return err
 	}
 	switch s.State {
-	case "waiting_ra", "standby", "soliciting", "requesting", "confirming", "bound", "renewing", "rebinding", "declining", "information", "stopped":
+	case "waiting_ra", "standby", "preparing", "soliciting", "requesting", "confirming", "bound", "renewing", "rebinding", "declining", "information", "stopped":
 	default:
 		return errors.New("invalid DHCPv6 client state")
 	}
 	if (s.State == "stopped" || s.State == "standby") && (len(s.Addresses)+len(s.Prefixes) > 0 || s.InfoReceivedNanos != 0) {
 		return errors.New("inactive DHCPv6 client retains assignments/information")
+	}
+	if s.State == "preparing" && (c.Standby || c.Replication == nil || !c.RequestPrefix || len(s.Prefixes) == 0) {
+		return errors.New("DHCPv6 preparation requires an active replicated prefix")
 	}
 	wantsAddress := c.RequestAddress && (!c.UseRA || s.RAStarted.Managed)
 	if s.State == "information" && (wantsAddress || c.RequestPrefix) {

@@ -64,7 +64,13 @@ Graceful shutdown acknowledges kernel/RA withdrawal without sending Release.
 The saved grant remains available for restart until its original expiry; SIGKILL
 also leaves the last saved grant for recovery. An explicit Release operation is
 not yet implemented.
-The current contract is compiler native-52, checkpoint version 2; no discarded
+For a live replicated PD grant, an elected owner can publish a `preparing`
+observation before its link-local address completes DAD. The network writer can
+prepare only the dedicated B4 address under the original PD and election
+deadlines. This observation grants no LAN RA, DHCP serving, or tunnel authority;
+normal publication follows socket readiness. Interruption withdraws preparation,
+and the writer independently expires it if control stops.
+The current contract is compiler native-53, checkpoint version 2; no discarded
 prototype reader is retained.
 
 This path was compared with routerd's `cmd/routerd-dhcpv6-client` DUID selection,

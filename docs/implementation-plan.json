@@ -11085,7 +11085,7 @@
     {
       "stage": 1,
       "profile": "homert02/03",
-      "next": "control-drain is published. HA-03 first conntrackd/VRRP same-TCP handoff slice is implemented and exercised in isolated signed PID1 trees. Continue actual homert one-router communication and HA-02 DHCP/PD state transfer, then complete HA-03 protection/resync/load and EXT-02 Tailscale for two-node replacement.",
+      "next": "Continue homert real-peer and two-node acceptance. Native-53 preserves DUID/IAID on the real HGW and prepares the B4 address under the original PD/election deadlines. An overlapping-failure run still timed out an existing TCP at 15 seconds; another reached PD expiry/recovery but timed out retiring HA configuration. Diagnose both and complete HA-02/HA-03 and EXT-02. ONU-direct and target hardware acceptance remain untested.",
       "required_focus": [
         "WAN/LAN IPv4/IPv6, DS-Lite, actual route selection/backup WAN, DHCP/PD/RA, learned DNS resolution/distribution, firewall/NAT/MTU/MSS, BGP and management",
         "HA-01 current election/track dependencies, HA-02 DHCP/PD synchronization, HA-03 NAT/connection synchronization and EXT-02 Tailscale used by this deployment"

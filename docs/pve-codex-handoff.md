@@ -5,6 +5,26 @@
 [機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
+## 作業中: PD 引き継ぎ準備 / native-53
+
+旧 routerd の DUID 明示値優先、DUID-LL、DUID/IAID と期限を照合したリース復元を参照した。
+保存した自動 DUID はリースと別に保持し、HA では同じ DUID/IAID と元の grant 期限を使う。
+昇格時、共有済みの生存 PD から B4 のみを先に準備し、WAN link-local と B4 の DAD を並行させる。
+準備中は LAN RA、DHCP serving、AFTR を公開せず、B4 の有効期間は元の PD と選出期限の短い方に制限する。
+実二台と独立 ISC DHCP・Linux AFTR・LAN client の試験では両 DAD の重複、準備中断時の B4 撤去、
+元の TCP/UDP の復旧、および control 停止中の選出期限による B4 撤去を確認した。
+通常の二台 HA 全体も、独立 peer との双方向切替、TCP/UDP、DHCPv4・PD の元期限失効、
+予備 WAN と DS-Lite の復旧、設定撤去および packet capture を含めて完走した。同一 TCP の最長応答待ちは
+この一試行で約6.8秒、観測された UDP 損失は0件だった。`make check` の Race Detector と vet、
+amd64/arm64 の静的ビルドと実バイナリの署名・配置検証も成功した。arm64 実行は未検証。
+
+同版を ens18 の隔離 namespace から実 HGW に接続し、30秒の IPv4/IPv6 HTTPS、学習 DNS、
+PD worker の SIGKILL と通常再起動後の同じ DUID/IAID・prefix と通信復旧、寿命0 RA・kernel 撤去と
+上流への Release がないことを確認した。自然 Renew は未到達。ONU 直結、対象物理 NIC と本番受入は未実施。
+連続障害の一試行では TCP が15秒で失敗し、予備 WAN への元の主 WAN アドレスの誤送出は観測されなかった。
+別試行では同じ TCP の双方向切替と PD の元期限失効・再取得まで到達したが、最後の HA 設定撤去で
+control API が3秒以内に完了せず失敗した。連続障害と設定撤去の原因調査を継続する。
+
 ## 作業中: VRRP の ARP 応答と連続障害
 
 旧 `routerd-vrrp-vmac` は Linux が親インターフェースの MAC で子の VIP に
@@ -72,7 +92,7 @@ QEMU appliance の同条件での停止・再起動は未再検証。
 旧 routerd の専用 DS-Lite 送信元 `/128` は他の IPv6 通信に自動選択されないよう非優先化される。
 routerd2 も同様にし、元の PD の優先期限と有効期限、アドレス所有、DAD 完了を確認してから使う。
 旧設定の PD Bound と専用アドレス Applied の依存を取り込み、role 条件とともに適用する。
-旧実装の待機系での事前アドレス準備は未実装。PVE 上の実プロセスと独立 ISC DHCP・Keepalived・
+旧実装の待機系での事前アドレス準備は採用せず、昇格後に期限付き B4 を準備する。PVE 上の実プロセスと独立 ISC DHCP・Keepalived・
 Linux AFTR では、実 kernel の deprecated 状態、切替・期限切れ後の復旧、IPv4 TCP/UDP を確認した。
 capture では双方の IPv4-in-IPv6 を確認した。複数障害の重なりによる既存 TCP の失敗は未解決。
 変更後の二台試験では、PD と主 WAN の Health を必須とした VIP 公開条件のため、PD 失効時に
