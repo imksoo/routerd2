@@ -3,11 +3,12 @@
 
 The actual product owns RA, DHCPv4, DHCPv6 PD, LAN RA, DNS and DS-Lite. The host's
 management addresses/routes/clock are not changed. Requires explicit uplink and
-AFTR intent, root/sudo, iproute2, curl, dig and tcpdump. A bounded owner removes
+AFTR intent, root/sudo, iproute2, BusyBox, dnsmasq, curl, dig and tcpdump. A bounded owner removes
 its namespaces and private state on completion. This is not NIC qualification.
 """
 
 import argparse
+import ipaddress
 import json
 import os
 import re
@@ -77,6 +78,8 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
         "management",
         "ra_client",
         "dhcp4",
+        "dhcp_server",
+        "dhcp6_server",
         "dhcp6",
         "aftr",
         "ra",
@@ -99,6 +102,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
         {"id": "wan", "interface": {"name": "wan0"}},
         {"id": "lan", "interface": {"name": "lan0"}},
         {"id": "lan-ip", "address": {"interface": "lan0", "cidr": "198.18.0.1/24"}},
+        {"id": "lan-dns6", "address": {"interface": "lan0", "cidr": "fd42:726f:7574::1/64"}},
         {
             "id": "forwarding",
             "forwarding": {"ipv4": True, "ipv6": True, "ipv4_rp_filter": 0},
@@ -149,6 +153,8 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
                             "interface": "lan0",
                             "host_id": 1,
                             "advertise": True,
+                            "other_config": True,
+                            "rdnss": ["fd42:726f:7574::1"],
                         },
                         {"name": "b4", "interface": "wan0", "host_id": 256, "prefix_length": 128},
                     ],
@@ -176,13 +182,28 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
             },
         },
         {
+            "id": "leases",
+            "service": {"name": "leases", "dhcp_server": {
+                "interface": "lan0", "server_address": "198.18.0.1", "authoritative": True,
+                "primary": {"prefix": "198.18.0.0/24", "start": "198.18.0.2", "end": "198.18.0.2",
+                            "lease_seconds": 60, "router": "198.18.0.1", "dns_servers": ["198.18.0.1"]},
+            }},
+        },
+        {
+            "id": "lan-info",
+            "service": {"name": "lan-info", "dhcp6_server": {
+                "interface": "lan0", "dns_servers": ["fd42:726f:7574::1"],
+                "domain_search": ["home.arpa"], "refresh_seconds": 600,
+            }},
+        },
+        {
             "id": "dns",
             "service": {
                 "name": "dns",
                 "dns": {
                     "spec": {
                         "listen": [
-                            {"name": "lan", "addresses": ["198.18.0.1"], "port": 53}
+                            {"name": "lan", "addresses": ["198.18.0.1", "fd42:726f:7574::1"], "port": 53}
                         ],
                         "sources": [
                             {
@@ -201,8 +222,12 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
             },
         },
     ]
+    resources[-1]["service"]["dns"]["spec"]["sources"].insert(0, {
+        "name": "private", "kind": "forward", "match": ["split.test"],
+        "upstreams": ["udp://198.18.0.2:5353"], "queryTimeout": "1s",
+    })
     if dns_upstream:
-        source = resources[-1]["service"]["dns"]["spec"]["sources"][0]
+        source = resources[-1]["service"]["dns"]["spec"]["sources"][-1]
         source["upstreams"] = [dns_upstream]
         source["bootstrapResolverFrom"] = source.pop("upstreamFrom")
     (stage / "boot.json").write_text(json.dumps(boot))
@@ -249,8 +274,6 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
             ]
         )
         run(["ip", "-n", client, "link", "set", "client0", "up"])
-        run(["ip", "-n", client, "addr", "add", "198.18.0.2/24", "dev", "client0"])
-        run(["ip", "-n", client, "route", "add", "default", "via", "198.18.0.1"])
         capture = start(
             router,
             [
@@ -300,6 +323,27 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
             )
 
         wait(ready, 120)
+        lease_events = stage / "client-lease-events"
+        hook = stage / "client-dhcp-hook.sh"
+        hook.write_text(
+            '#!/bin/sh\ncase "$1" in\n'
+            'bound|renew)\n'
+            '  ip address replace "$ip/24" dev "$interface" || exit 1\n'
+            '  ip route replace default via "$router" dev "$interface" || exit 1\n'
+            '  printf "%s %s %s %s\\n" "$1" "$ip" "$router" "$dns" >> "' + str(lease_events) + '";;\n'
+            'esac\n'
+        )
+        hook.chmod(0o500)
+        dhcp_client = start(client, ["busybox", "udhcpc", "-f", "-i", "client0", "-s", str(hook), "-p", str(stage / "client-dhcp.pid"), "-t", "3", "-T", "1", "-A", "1", "-x", "hostname:uplink-client"], "client-dhcp")
+        wait(lambda: lease_events.exists() and bool(lease_events.read_text().splitlines()))
+        lease = lease_events.read_text().splitlines()[-1].split()
+        assert lease[0] == "bound" and lease[1:] == ["198.18.0.2", "198.18.0.1", "198.18.0.1"], "LAN DHCP did not supply the expected address, gateway and DNS: " + str(lease)
+        print("PASS independent LAN client acquired IPv4 address, gateway and DNS from routerd2 DHCP", flush=True)
+
+        def start_private_dns():
+            return start(client, ["dnsmasq", "--keep-in-foreground", "--conf-file=/dev/null", "--no-hosts", "--no-resolv", "--bind-interfaces", "--listen-address=198.18.0.2", "--port=5353", "--local-ttl=1", "--address=/split.test/192.0.2.77"], "private-dns")
+        private_dns = start_private_dns()
+        wait(lambda: subprocess.run(inside(router, ["dig", "@198.18.0.2", "-p", "5353", "ready.split.test", "A", "+short", "+time=1", "+tries=1"]), capture_output=True, text=True).stdout.strip() == "192.0.2.77")
         if capture.poll() is not None:
             raise RuntimeError("uplink packet capture exited before readiness")
         wait(
@@ -323,6 +367,15 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
                 for a in link["addr_info"]
             )
         )
+
+        info_hook = stage / "client-dhcp6-hook.sh"
+        info_hook.write_text('#!/bin/sh\ncase "$1" in bound|renew) printf "dns=%s\\nsearch=%s\\n" "$dns" "$search";; esac\n')
+        info_hook.chmod(0o500)
+        information = run(inside(client, ["busybox", "udhcpc6", "-l", "-f", "-n", "-q", "-i", "client0", "-s", str(info_hook), "-t", "3", "-T", "1"]))
+        options = dict(line.split("=", 1) for line in information.splitlines() if line.startswith(("dns=", "search=")))
+        servers = [ipaddress.IPv6Address(value) for value in options.get("dns", "").split()]
+        assert servers == [ipaddress.IPv6Address("fd42:726f:7574::1")] and "home.arpa" in options.get("search", "").split(), "LAN DHCPv6 information did not supply the router DNS and search domain: " + str(options)
+        print("PASS independent LAN client received router DNS and search domain via DHCPv6", flush=True)
 
         def forwarding_ready():
             observed = query("control.sock", "/v1/services/service.internet").get(
@@ -369,6 +422,16 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
             )
 
         wait(dns_ready)
+        for server, family in ((lease[3], "-4"), ("fd42:726f:7574::1", "-6")):
+            answer = run(inside(client, ["dig", family, "@" + server, "available.split.test", "A", "+short", "+time=3", "+tries=1"]))
+            assert answer.strip() == "192.0.2.77", "conditional DNS query reached the wrong upstream: " + answer
+        private_dns.terminate()
+        private_dns.wait(timeout=3)
+        failed = run(inside(client, ["dig", "@" + lease[3], "offline.split.test", "A", "+time=3", "+tries=1"]))
+        assert "status: SERVFAIL" in failed, "unavailable conditional DNS source fell through to the default upstream"
+        private_dns = start_private_dns()
+        wait(lambda: subprocess.run(inside(client, ["dig", "@" + lease[3], "recovered.split.test", "A", "+short", "+time=2", "+tries=1"]), capture_output=True, text=True).stdout.strip() == "192.0.2.77")
+        print("PASS independent conditional DNS source, failure isolation and recovery over LAN IPv4/IPv6", flush=True)
 
         def check_traffic():
             for family, address in [
@@ -404,7 +467,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
                         client,
                         [
                             "dig",
-                            "@198.18.0.1",
+                            "@" + lease[3],
                             "example.net",
                             "A",
                             "+tries=1",
@@ -413,6 +476,9 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
                         + transport,
                     )
                 )
+                assert "status: NOERROR" in response and "ANSWER: 0" not in response, (transport, response)
+            for transport in [[], ["+tcp"]]:
+                response = run(inside(client, ["dig", "-6", "@fd42:726f:7574::1", "example.net", "AAAA", "+tries=1", "+time=3"] + transport))
                 assert "status: NOERROR" in response and "ANSWER: 0" not in response, (transport, response)
             selected = json.loads(
                 run(
@@ -440,6 +506,8 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
         started_at = time.time()
         start_time, rounds, updates = time.monotonic(), 0, 0
         while time.monotonic() - start_time < seconds:
+            if dhcp_client.poll() is not None:
+                raise RuntimeError("independent LAN DHCP client exited")
             check_traffic()
             renewed = query("control.sock", "/v1/services/service.wan-pd")["snapshot"][
                 "renew_at"
@@ -462,6 +530,10 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
                     flush=True,
                 )
             time.sleep(min(10, max(0, seconds - (time.monotonic() - start_time))))
+        events = [line.split() for line in lease_events.read_text().splitlines()]
+        if seconds >= 75:
+            assert any(event == ["renew", "198.18.0.2", "198.18.0.1", "198.18.0.1"] for event in events), "LAN DHCP client did not renew its address, gateway and DNS"
+            print("PASS independent LAN DHCP client naturally renewed the same address, gateway and DNS", flush=True)
         before = query("control.sock", "/v1/services/service.wan-pd")["snapshot"]
         previous = next(
             m for m in query("supervisor.sock", "/v1/status")["modules"]
@@ -563,11 +635,14 @@ def owner(stage, uplink, aftr, seconds, dns_upstream):
                 withdrawal = stamp
             assert "dhcp6 release (xid=" not in line, "normal shutdown released the upstream grant"
         assert withdrawal is not None, "missing zero-lifetime RA at shutdown"
-        assert not any(
-            a["scope"] == "global"
+        delegated = [ipaddress.IPv6Network(prefix["prefix"]) for prefix in before["prefixes"]]
+        remaining = [
+            a["local"]
             for link in json.loads(run(["ip", "-n", router, "-j", "-6", "addr", "show", "dev", "lan0"]))
             for a in link.get("addr_info", [])
-        ), "shutdown retained the delegated LAN address"
+            if any(ipaddress.IPv6Address(a["local"]) in prefix for prefix in delegated)
+        ]
+        assert not remaining, "shutdown retained delegated LAN addresses: " + str(remaining)
         print("PASS actual uplink zero-lifetime RA and kernel withdrawal without releasing the upstream grant", flush=True)
         print(
             "PASS actual uplink periodic IPv4/IPv6 HTTPS, UDP/TCP learned DNS; rounds",

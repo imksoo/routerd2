@@ -1,9 +1,20 @@
 # routerd2 開発引き継ぎ
 
 2026-10-28。全34 work packageのゴールは継続中。homert本番の置換は未実施であり、
-対象実機で利用可能とはまだ判断していない。[実装計画](implementation-plan.md)と
-[機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
+対象実機で利用可能とはまだ判断していない。[実装計画](implementation-plan.md)、
+[試験計画](test-plan.md)、[機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
+
+## 単体 router・LAN 端末を優先
+
+`pd-prep-native53` の実 HGW 90秒試験で、独立 BusyBox 端末の DHCPv4による address・gateway・DNS取得と
+自然更新、DHCPv6 Information-request/Reply、SLAAC、IPv4 NAT/IPv6 HTTPS、IPv4/IPv6 DNSを確認した。
+公開名は実 Cloudflare DoH、条件付き名前は独立 dnsmasq へ送り、条件付き上流の停止時に公開上流へ
+問い合わせを流さず SERVFAIL、復旧後に応答することを確認した。PD workerの強制終了・通常停止後も
+同じDUID/IAIDと通信が復旧した。DHCPv6 clientは明示起動、IPv6 DNSは固定ULAであり、homertの
+委譲IPv6アドレスをDNSに使う設定と一般端末での自動起動は未受入。90秒は長時間安定性ではない。
+初回試験はIPv6表記の文字列比較、固定IPv6アドレスを含めた撤去判定と条件付きDNS設定順の誤りで失敗し、
+各試験を修正して再実行した。実ONU直結・対象物理機器での受入は未実施。
 
 ## 作業中: PD 引き継ぎ準備 / native-53
 
@@ -24,6 +35,10 @@ PD worker の SIGKILL と通常再起動後の同じ DUID/IAID・prefix と通�
 連続障害の一試行では TCP が15秒で失敗し、予備 WAN への元の主 WAN アドレスの誤送出は観測されなかった。
 別試行では同じ TCP の双方向切替と PD の元期限失効・再取得まで到達したが、最後の HA 設定撤去で
 control API が3秒以内に完了せず失敗した。連続障害と設定撤去の原因調査を継続する。
+追加の連続障害試験では、一回は既存 TCP が約13.3秒で復旧し、別の一回は15秒で終了した。
+別試行の昇格直後には既存 conntrack は復元済みだったが、主 WAN 用 route table はまだ存在せず、
+mark 付き route lookup は予備 WAN に向いた。誤送出防止がその TCP を止め、主 WAN 復帰後の
+再送で通信が回復した。再送間隔も長くなるため、VIP の復帰時刻だけでは TCP の復旧を示せない。
 
 ## 作業中: VRRP の ARP 応答と連続障害
 
