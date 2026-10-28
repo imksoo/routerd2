@@ -1385,7 +1385,11 @@ IPv4 がある場合は、親が子の共有アドレスを名乗る ARP 要求�
 `arp_announce=2` を設定する。修正後は実二台のそれぞれで LAN と予備 WAN の ARP、
 仮想 MAC、同一 TCP/UDP の継続と設定復元を確認した。
 別の連続障害では修正後も15秒で TCP がタイムアウトした。再送時の仮想 MAC、
-切替先の conntrack、主 WAN 準備中の予備 WAN 選択を観測し、原因の確定は残る。
+切替先の conntrack と、主 WAN 用 NAT アドレスを維持した再送が予備 WAN に出ることを
+実パケットで確認した。IPv4 source NAT の `connection_mark` と対応する policy rule による
+経路保持を実装中。実二台の通常 HA 試験では主・予備の新規接続に別 mark が付き、既存
+接続の mark が引き継がれた。連続障害では予備 WAN への誤送信は消えたが、主 WAN の準備が
+遅れ同じ15秒期限に失敗した。安全な準備時間の改善は残る。
 
 範囲: 旧 routerd 互換 / track: network / risk: high。
 前提: CORE-04, NET-03, HA-01。 設計判断: D-05。

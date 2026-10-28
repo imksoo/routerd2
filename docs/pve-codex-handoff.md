@@ -30,8 +30,23 @@ PVE Linux 6.8/amd64、`arp-vip-final` の実 daemon 二台と独立 Linux client
 
 別の連続障害試験は変更後も TCP の15秒タイムアウトで失敗した。再送時には切替先に
 conntrack と経路が存在し、クライアントは仮想 MAC を使用していたが、主 WAN の準備中に
-予備 WAN が選択されていた。これが通信断にどう影響するかは未確定。旧 routerd の
-conntrack mark と異なる WAN 間での接続維持条件を確認し、実パケットで原因を確定する。
+予備 WAN が選択されていた。`97d761a` の再試験では、主 WAN の NAT 元アドレスを
+保持したまま既存 TCP の再送が予備 WAN に3回出て応答がなく、主 WAN 復旧時には
+client が15秒でタイムアウトしていた。旧 routerd の conntrack mark を参照し、IPv4
+source NAT の `connection_mark` と対応する policy rule を使って、新規接続の WAN と
+既存接続の WAN を分ける変更を実装中。`nat-affinity-probe` の実二台試験では、主 WAN と
+予備 WAN の新規接続に各 mark が付き、既存接続の mark も切替先へ渡った。通常 HA 全体は
+通過した。別の連続障害では予備 WAN への誤送信が消えたが、TCP は15秒でタイムアウトした。
+この変更は compiler native-52・network journal 14 とする。旧開発用記録は再作成する。
+`nat-affinity-native52` の独立 Linux AFTR・予備 WAN 試験では、主 WAN 障害中に既存 TCP が
+予備 WAN に出ず、新規 TCP/UDP は予備 WAN の mark で通信し、主 WAN 復旧後に元の TCP が
+回復した。通常 HA 全体も実 conntrack の mark、両方向切替と packet capture を含めて
+通過し、同一 TCP の最長応答待ちは約6.82秒、観測した UDP 損失は0件だった。
+連続障害での同 TCP は、予備 WAN へ誤送信されなかったものの15秒で失敗した。
+診断用に既存 TCP を主 WAN に固定すると予備 WAN への誤送信は止まったが、連続する
+三回の所有切替では同じ15秒期限に失敗した。WAN の link-local と B4 の DAD が直列に
+進むことを確認したが、PD を先に公開する試作はインターフェース停止時の RA 撤去を
+壊したため削除した。DAD を省かず、所有権と撤去順序を保つ設計が必要。
 通常二台試験の別試行では、1秒広告でも A の VRRP 更新が2秒の応答期限を超えて
 worker が再起動し、B でも古いネットワーク適用期限の失効を観測した。計測付きの
 再試験では同じ再起動は再現せず、原因は未確定。応答期限を延ばしていない。

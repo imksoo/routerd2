@@ -188,8 +188,8 @@ def peer(stage, dhcp6_server, pd_dslite, stale_owner):
                 ]
                 resources.append({"id": "backup-parent-address", "address": {"interface": "backup0", "cidr": "192.0.2." + str(2 + index) + "/24"}})
                 firewall = next(r["firewall"] for r in resources if r["id"] == "firewall")
-                firewall["nat"] = [{"type": "snat", "match": {"family": 4, "source": "198.18.0.0/24", "out_interface": name}, "address": address}
-                                   for name, address in (("dslite0", "203.0.113.1"), ("backup-ha", "192.0.2.1"))]
+                firewall["nat"] = [{"type": "snat", "match": {"family": 4, "source": "198.18.0.0/24", "out_interface": name}, "address": address, "connection_mark": mark}
+                                   for name, address, mark in (("dslite0", "203.0.113.1", 41), ("backup-ha", "192.0.2.1", 42))]
                 # The AFTR underlay is IPv6-only. Do not inherit the direct
                 # profile's IPv4 route around the tunnel during handoff.
                 resources = [r for r in resources if r["id"] not in ("wan-base", "wan-route")]
@@ -352,7 +352,7 @@ except socket.timeout:
             run(inside("ha-server", ["ip", "address", "add", "192.0.0.1/32", "peer", "192.0.0.2/32", "dev", "aftr0"]))
             run(inside("ha-server", ["ip", "route", "add", "203.0.113.1/32", "dev", "aftr0"]))
 
-            def egress_traffic(expected):
+            def egress_traffic(expected, node="a"):
                 code = r'''
 import socket,sys
 for protocol,port in ((socket.SOCK_STREAM,18082),(socket.SOCK_DGRAM,18083)):
@@ -362,6 +362,11 @@ for protocol,port in ((socket.SOCK_STREAM,18082),(socket.SOCK_DGRAM,18083)):
  s.close()
 '''
                 run(inside("ha-client", ["python3", "-c", code, expected]))
+                mark = 41 if expected == "DSLite" else 42
+                def marked():
+                    entries = run(inside("ha-" + node, ["conntrack", "-L", "-p", "tcp", "--orig-src", "198.18.0.50", "--dport", "18082"]))
+                    return any("mark=" + str(mark) + " " in line for line in entries.splitlines())
+                wait(marked)
 
             def egress_path(node, interface):
                 routes = json.loads(run(inside("ha-" + node, ["ip", "-j", "route", "show", "table", "100"])))
@@ -490,6 +495,9 @@ while True:
         for node in ("a","b"):
             assert run(inside("ha-"+node,["sysctl","-n","net.netfilter.nf_conntrack_tcp_be_liberal"])).strip() == "1", "product did not apply conntrack handoff intent"
         mapping = progress(0)
+        if pd_dslite:
+            entries = run(inside("ha-a", ["conntrack", "-L", "-p", "tcp", "--orig-src", "198.18.0.50", "--dport", "18080"]))
+            assert "mark=41 " in entries, "established primary TCP has no primary connection mark"
         run(inside("ha-client", ["ip", "-4", "neigh", "flush", "to", "198.18.0.1", "dev", "lan0"]))
         assert progress(latest()["sequence"]) == mapping
         neighbor = run(inside("ha-client", ["ip", "-4", "neigh", "show", "198.18.0.1", "dev", "lan0"]))
@@ -599,6 +607,9 @@ while True:
                 print("PASS " + previous + " -> " + owner + " PD handoff with ISC paused, same DUID/IAID/prefix and bounded original deadlines, then Rebind/Reply", flush=True)
             sequence = latest()["sequence"]
             assert progress(sequence) == mapping, "existing connection mapping changed during takeover"
+            if pd_dslite:
+                entries = run(inside("ha-" + owner, ["conntrack", "-L", "-p", "tcp", "--orig-src", "198.18.0.50", "--dport", "18080"]))
+                assert "mark=41 " in entries, "takeover lost the primary TCP connection mark"
             run(inside("ha-client", ["ip", "-4", "neigh", "flush", "to", "198.18.0.1", "dev", "lan0"]))
             assert progress(latest()["sequence"]) == mapping
             neighbor = run(inside("ha-client", ["ip", "-4", "neigh", "show", "198.18.0.1", "dev", "lan0"]))
@@ -801,12 +812,12 @@ while True:
                 def current_egress(interface):
                     return next((node for node in ("a", "b") if active(node) and egress_path(node, interface)), "")
                 wait(lambda: current_egress("backup-ha"))
-                egress_traffic("backup")
+                egress_traffic("backup", current_egress("backup-ha"))
             pd_server = pd_start()
             if pd_dslite:
                 wait(lambda: current_egress("dslite0"))
                 pd_traffic(current_egress("dslite0"))
-                egress_traffic("DSLite")
+                egress_traffic("DSLite", current_egress("dslite0"))
                 print("PASS expired PD withdrew the B4 source; fresh IPv4 TCP/UDP used backup WAN and recovered through DS-Lite", flush=True)
             else:
                 pd_traffic("a")
@@ -858,6 +869,7 @@ while True:
                 for direction in ("IP6 2001:db8:ffff::20 >", " > 2001:db8:ffff::20:"):
                     assert any(direction in line and "203.0.113.50." + str(port) in line for line in encapsulated), "persistent application traffic did not traverse DS-Lite in both directions"
             assert not run(["tcpdump", "-nn", "-r", str(stage / "wan.pcap"), "ip and host 203.0.113.50 and (port 18080 or port 18081)"]), "persistent application bypassed the AFTR tunnel"
+            assert not run(["tcpdump", "-nn", "-r", str(stage / "backup.pcap"), "tcp port 18080"]), "primary TCP escaped through the backup WAN"
             for port in (18082, 18083):
                 assert run(["tcpdump", "-nn", "-r", str(stage / "backup.pcap"), "src host 192.0.2.1 and dst host 203.0.113.50 and dst port " + str(port)]), "missing backup WAN application traffic"
             print("PASS captures: bidirectional IPv4-in-IPv6 and independent backup WAN TCP/UDP", flush=True)

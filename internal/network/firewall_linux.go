@@ -179,6 +179,7 @@ func buildFirewall(c *nftables.Conn, f *Firewall) {
 	if len(f.IPv4ClearDF) > 0 {
 		buildIPv4ClearDF(c, t, f.IPv4ClearDF)
 	}
+	buildNATAffinity(c, t, f.NAT)
 	var pre, post *nftables.Chain
 	accept := nftables.ChainPolicyAccept
 	for _, rule := range f.NAT {
@@ -196,6 +197,9 @@ func buildFirewall(c *nftables.Conn, f *Firewall) {
 		}
 		for _, match := range packetExpressions(rule.Match) {
 			es := append(match, &expr.Counter{})
+			if rule.ConnectionMark != 0 {
+				es = append(es, &expr.Immediate{Register: 1, Data: binaryutil.NativeEndian.PutUint32(rule.ConnectionMark)}, &expr.Ct{Register: 1, SourceRegister: true, Key: expr.CtKeyMARK})
+			}
 			es = append(es, natExpressions(rule)...)
 			c.AddRule(&nftables.Rule{Table: t, Chain: chain, Exprs: es})
 		}
@@ -209,6 +213,33 @@ func buildFirewall(c *nftables.Conn, f *Firewall) {
 		es = append(es, interfaceMatch(expr.MetaKeyOIFNAME, rule.OutInterface)...)
 		es = append(es, &expr.Counter{}, &expr.Masq{})
 		c.AddRule(&nftables.Rule{Table: t, Chain: post, Exprs: es})
+	}
+}
+
+// Restore each connection's original source-NAT path before routing. If the
+// marked lookup would fall through to a different interface, drop the packet
+// rather than send the original WAN's translated address through another WAN.
+func buildNATAffinity(c *nftables.Conn, table *nftables.Table, rules []NATRule) {
+	var prerouting, forward *nftables.Chain
+	accept := nftables.ChainPolicyAccept
+	for _, rule := range rules {
+		if rule.ConnectionMark == 0 {
+			continue
+		}
+		if prerouting == nil {
+			prerouting = c.AddChain(&nftables.Chain{Name: "nat_affinity", Table: table, Type: nftables.ChainTypeFilter, Hooknum: nftables.ChainHookPrerouting, Priority: nftables.ChainPriorityRef(-99), Policy: &accept})
+			forward = c.AddChain(&nftables.Chain{Name: "nat_affinity_guard", Table: table, Type: nftables.ChainTypeFilter, Hooknum: nftables.ChainHookForward, Priority: nftables.ChainPriorityRef(-150), Policy: &accept})
+		}
+		mark := binaryutil.NativeEndian.PutUint32(rule.ConnectionMark)
+		for _, match := range packetExpressions(PacketMatch{Family: 4, Source: rule.Match.Source}) {
+			marked := append(match, &expr.Ct{Register: 1, Key: expr.CtKeyMARK}, &expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: mark})
+			restore := append(append([]expr.Any(nil), marked...), &expr.Immediate{Register: 1, Data: mark}, &expr.Meta{Key: expr.MetaKeyMARK, Register: 1, SourceRegister: true})
+			c.AddRule(&nftables.Rule{Table: table, Chain: prerouting, Exprs: restore})
+			name := make([]byte, 16)
+			copy(name, rule.Match.OutInterface)
+			guard := append(marked, &expr.Meta{Key: expr.MetaKeyOIFNAME, Register: 1}, &expr.Cmp{Op: expr.CmpOpNeq, Register: 1, Data: name}, &expr.Counter{}, &expr.Verdict{Kind: expr.VerdictDrop})
+			c.AddRule(&nftables.Rule{Table: table, Chain: forward, Exprs: guard})
+		}
 	}
 }
 
@@ -322,7 +353,7 @@ func buildMSSClamp(c *nftables.Conn, table *nftables.Table, rules []MSSClamp) {
 // the translated destination, and include packet marks used by policy routing.
 func buildIPv4ClearDF(c *nftables.Conn, table *nftables.Table, rules []IPv4ClearDF) {
 	accept := nftables.ChainPolicyAccept
-	chain := c.AddChain(&nftables.Chain{Name: "ipv4_clear_df", Table: table, Type: nftables.ChainTypeFilter, Hooknum: nftables.ChainHookPrerouting, Priority: nftables.ChainPriorityRef(-99), Policy: &accept})
+	chain := c.AddChain(&nftables.Chain{Name: "ipv4_clear_df", Table: table, Type: nftables.ChainTypeFilter, Hooknum: nftables.ChainHookPrerouting, Priority: nftables.ChainPriorityRef(-98), Policy: &accept})
 	for _, rule := range rules {
 		for _, match := range packetExpressions(PacketMatch{Family: 4, InInterface: rule.From}) {
 			name := make([]byte, 16)

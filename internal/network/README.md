@@ -39,6 +39,16 @@ arbitrary Linux networking command interface.
 - Configure the Linux WireGuard data plane through its IFINDEX generic-netlink
   API, with owned-device enforcement, public status and bounded peer sets.
 
+IPv4 source-NAT rules can set a nonzero `connection_mark` when they specify
+both a source prefix and output interface. Configure a policy rule for that
+mark and the WAN's routing table, and reserve each mark for one NAT rule. The
+first packet still follows the current egress selection. Later packets restore
+the connection mark before routing; if the selected interface differs from the
+original WAN, they are dropped until that WAN is usable. This retains existing
+NAT state through conntrack synchronization while new connections can select a
+healthy alternative. It cannot preserve a connection whose remote peer or
+client times out during the outage. Zero leaves this behavior disabled.
+
 `Firewall: nil` leaves an unowned firewall untouched, but removes a table that
 this engine previously created and recorded. A non-nil empty firewall enables
 the default-drop forwarding chain. Global forwarding changes affect the whole

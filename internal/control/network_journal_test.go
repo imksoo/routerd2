@@ -18,7 +18,7 @@ import (
 
 func TestNetworkJournalAPIInspectsDiskAndDoesNotReturnCachedState(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "network.json")
-	raw := []byte(`{"version":13,"revision":7,"attempted_revision":7,"status":"applied"}`)
+	raw := []byte(`{"version":14,"revision":7,"attempted_revision":7,"status":"applied"}`)
 	if err := os.WriteFile(path, raw, 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestNetworkJournalAPIInspectsDiskAndDoesNotReturnCachedState(t *testing.T) 
 			t.Fatal("journal endpoint accepted caller-selected inputs", r.Code)
 		}
 	}
-	if err := os.WriteFile(path, []byte(`{"version":13,"version":13,"status":"applied"}`), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"version":14,"version":14,"status":"applied"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	r = httptest.NewRecorder()

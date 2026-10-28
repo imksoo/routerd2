@@ -57,12 +57,16 @@ type PortRange struct {
 // not implicitly authorize forwarding. Match.Family must explicitly be 4/6;
 // Address is a same-family unicast IP for DNAT/SNAT and empty for masquerade.
 // Ports optionally selects a translated TCP/UDP port or inclusive port range.
-// Existing conntrack mappings survive a ruleset replacement.
+// Existing conntrack mappings survive a ruleset replacement. ConnectionMark
+// pins forwarded IPv4 source-NAT connections to Match.OutInterface through a
+// matching policy rule. The mark must be unique to this rule and is replicated
+// with conntrack; zero leaves routing unpinned.
 type NATRule struct {
-	Type    string      `json:"type"`
-	Match   PacketMatch `json:"match"`
-	Address string      `json:"address,omitempty"`
-	Ports   *PortRange  `json:"ports,omitempty"`
+	Type           string      `json:"type"`
+	Match          PacketMatch `json:"match"`
+	Address        string      `json:"address,omitempty"`
+	Ports          *PortRange  `json:"ports,omitempty"`
+	ConnectionMark uint32      `json:"connection_mark,omitempty"`
 }
 
 // MSSClamp lowers an existing TCP MSS option on SYN/SYN-ACK packets crossing
@@ -262,6 +266,7 @@ func validateFirewall(f *Firewall) error {
 			}
 		}
 	}
+	marks := make(map[uint32]bool)
 	for i, rule := range f.NAT {
 		hook := "postrouting"
 		if rule.Type == "dnat" {
@@ -291,6 +296,16 @@ func validateFirewall(f *Firewall) error {
 		}
 		if rule.Ports != nil && (!validPortRange(*rule.Ports) || rule.Match.Protocol != "tcp" && rule.Match.Protocol != "udp") {
 			errs = append(errs, fmt.Errorf("NAT rule %d: translated ports require a valid range and tcp/udp", i))
+		}
+		if rule.ConnectionMark != 0 {
+			prefix, err := netip.ParsePrefix(rule.Match.Source)
+			if rule.Type == "dnat" || rule.Match.Family != 4 || err != nil || !prefix.Addr().Is4() || rule.Match.OutInterface == "" {
+				errs = append(errs, fmt.Errorf("NAT rule %d: connection_mark requires IPv4 source NAT with a source prefix and output interface", i))
+			}
+			if marks[rule.ConnectionMark] {
+				errs = append(errs, fmt.Errorf("NAT rule %d: duplicate connection_mark %d", i, rule.ConnectionMark))
+			}
+			marks[rule.ConnectionMark] = true
 		}
 	}
 	return errors.Join(errs...)

@@ -8,6 +8,22 @@ import (
 	"testing"
 )
 
+func TestNATConnectionMarksRequireDistinctSourcePaths(t *testing.T) {
+	primary := NATRule{Type: "snat", Match: PacketMatch{Family: 4, Source: "198.18.0.0/24", OutInterface: "wan0"}, Address: "192.0.2.1", ConnectionMark: 41}
+	backup := NATRule{Type: "snat", Match: PacketMatch{Family: 4, Source: "198.18.0.0/24", OutInterface: "wan1"}, Address: "192.0.2.2", ConnectionMark: 42}
+	if err := validateFirewall(&Firewall{NAT: []NATRule{primary, backup}}); err != nil {
+		t.Fatal(err)
+	}
+	backup.ConnectionMark = primary.ConnectionMark
+	if err := validateFirewall(&Firewall{NAT: []NATRule{primary, backup}}); err == nil {
+		t.Fatal("two WANs accepted the same connection mark")
+	}
+	primary.Match.Source = ""
+	if err := validateFirewall(&Firewall{NAT: []NATRule{primary}}); err == nil {
+		t.Fatal("connection mark accepted without a forwarded source prefix")
+	}
+}
+
 func TestFirewallValidationRejectsAmbiguousHooksAndTranslations(t *testing.T) {
 	bad := []*Firewall{
 		{DisableForward: true, Forward: []Forward{{From: "lan0", To: "wan0"}}},

@@ -64,7 +64,7 @@ Graceful shutdown acknowledges kernel/RA withdrawal without sending Release.
 The saved grant remains available for restart until its original expiry; SIGKILL
 also leaves the last saved grant for recovery. An explicit Release operation is
 not yet implemented.
-The current contract is compiler native-51, checkpoint version 2; no discarded
+The current contract is compiler native-52, checkpoint version 2; no discarded
 prototype reader is retained.
 
 This path was compared with routerd's `cmd/routerd-dhcpv6-client` DUID selection,
