@@ -14,6 +14,12 @@ and [library documentation](https://github.com/osrg/gobgp/blob/v4.7.0/docs/sourc
 
 ## Integration
 
+`make check-bgp-frr` exercises the real daemon against an independent FRR
+`bgpd` and checks BGP exchange, client TCP/UDP forwarding, withdrawal and
+restart. It requires FRR `bgpd` and `vtysh`; set `FRR_BGPD` if the daemon is
+not installed at `/usr/lib/frr/bgpd`. The isolated FRR peer uses a static
+return route to the client and does not run zebra.
+
 ```go
 err := bgp.Run(ctx, cfg, bgp.EffectsFunc(func(ctx context.Context, s bgp.Snapshot) error {
     return writer.ReplaceBGP(ctx, s)

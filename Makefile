@@ -13,6 +13,7 @@ QEMU_RELEASE_TIMEOUT ?= 240
 QEMU_STORAGE_TIMEOUT ?= 240
 RELEASE_BUILT_DIR ?= dist/bin
 DHCP6_SERVER ?= /usr/sbin/dhcpd
+FRR_BGPD ?= /usr/lib/frr/bgpd
 PPP_ARCH ?= $(shell $(GO) env GOARCH)
 PPP_DIR ?= dist
 CONNTRACK_ARCH ?= $(shell $(GO) env GOARCH)
@@ -50,6 +51,7 @@ help:
 	  'make check-dhcp4       Verify delayed independent ACKs, lease expiry and recovery' \
 	  'make check-pd-ra       Verify PD renewal, generated RA and client traffic' \
 	  'make check-bgp         Verify actual BGP FIB, reporting failure and ownership expiry' \
+	  'make check-bgp-frr     Verify real FRR BGP exchange, forwarding and restart' \
 	  'make check-aftr        Verify AFTR input identity, DNS and tunnel expiry' \
 	  'make check-ra-client   Verify real RA, source/default-route TCP/UDP and expiry' \
 	  'make check-ra-aftr     Verify learned RA/DNS to DS-Lite LAN forwarding and expiry' \
@@ -147,6 +149,10 @@ check-vrrp-unicast: build
 
 check-bgp: build
 	$(PYTHON) scripts/daemon-tests.py bgp --go '$(GO)'
+
+.PHONY: check-bgp-frr
+check-bgp-frr: build
+	$(PYTHON) scripts/daemon-tests.py bgp-frr --go '$(GO)' --frr '$(FRR_BGPD)'
 
 check-bfd: build
 	$(PYTHON) scripts/daemon-tests.py bfd --go '$(GO)'

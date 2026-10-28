@@ -85,6 +85,10 @@
 
 ## 現在の状況
 
+- `bgp-frr-e2364af` は隔離Linux上の独立FRRと、homertのLANプレフィックス広告に相当するIPv4 BGP交換を実施した。
+  FRRの経路をLinux FIBに反映し、LAN端末のTCP/UDP転送、daemon停止時の広告撤回、再起動後の広告と通信復旧を
+  確認し、BGP・端末通信のpacketを採取した。FRR側はzebraを使わず、端末への戻り経路を試験用に静的設定した。
+  homert実対向、IPv6 BGP、性能と全BGP機能の受入ではない。
 - `lan-dns-dad-native55` は、隔離Linux上の独立ISC DHCPv6と端末で、委譲LANアドレスをRA・DHCPv6情報で
   配布し、端末からUDP/TCPでDNSを利用できた。委譲期限切れで旧アドレスとDHCPv6のDNSが撤去され、
   異なるプレフィックスの再取得後に新アドレスで配布と名前解決が復旧した。変更直後にアドレスが

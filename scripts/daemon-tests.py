@@ -20,6 +20,7 @@ SUITES = {
         ("TestDaemonBGPFIBAndOwnershipExpiry", (), 120),
         ("TestDaemonBGPRecursivePrerequisiteExpiry", (), 120),
     ),
+    "bgp-frr": (("TestDaemonBGPWithFRR", ("wan0", "lan0"), 110),),
     "bfd": (
         ("TestDaemonBFDControlsBGPSessionAndExpiry", (), 120),
         ("TestDaemonMultihopBFDControlsBGPSessionAndExpiry", ("wan0",), 120),
@@ -58,6 +59,7 @@ def main():
     parser.add_argument("suite", choices=SUITES)
     parser.add_argument("--test", help="Run one named fixture from the selected suite")
     parser.add_argument("--dhcp6-server", type=Path, default=Path("/usr/sbin/dhcpd"))
+    parser.add_argument("--frr", type=Path, default=Path("/usr/lib/frr/bgpd"))
     parser.add_argument("--go", default="go")
     parser.add_argument("--binary-dir", type=Path, default=Path("dist/bin"))
     parser.add_argument("--output", type=Path, help="Retain logs/captures here; otherwise remove them after inspection")
@@ -93,7 +95,7 @@ def main():
                 subprocess.run(root + ["mkdir", packets], check=True)
                 log_path = output / (name + ".log")
                 with log_path.open("w") as log:
-                    result = subprocess.run(root + ["env", "ROUTERD2_INTEGRATION_REQUIRED=1", "ROUTERD2_DHCP6_SERVER=" + stage + "/bin/dhcpd", "ROUTERD2_TEST_BIN_DIR=" + stage + "/bin", "ROUTERD2_TEST_EVIDENCE_DIR=" + packets, stage + "/integration.test", "-test.run=^" + name + "$", "-test.v", "-test.timeout=" + str(timeout) + "s"], stdout=log, stderr=subprocess.STDOUT, timeout=timeout + 15)
+                    result = subprocess.run(root + ["env", "ROUTERD2_INTEGRATION_REQUIRED=1", "ROUTERD2_DHCP6_SERVER=" + stage + "/bin/dhcpd", "ROUTERD2_FRR_BGPD=" + str(args.frr.resolve()), "ROUTERD2_TEST_BIN_DIR=" + stage + "/bin", "ROUTERD2_TEST_EVIDENCE_DIR=" + packets, stage + "/integration.test", "-test.run=^" + name + "$", "-test.v", "-test.timeout=" + str(timeout) + "s"], stdout=log, stderr=subprocess.STDOUT, timeout=timeout + 15)
                 content = log_path.read_text()
                 for interface in interfaces:
                     packet = subprocess.run(root + ["cat", packets + "/" + interface + ".pcap"], capture_output=True)
