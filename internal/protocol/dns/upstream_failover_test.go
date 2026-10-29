@@ -4,6 +4,7 @@ package dns
 
 import (
 	"context"
+	"crypto/tls"
 	"crypto/x509"
 	"errors"
 	"io"
@@ -419,5 +420,84 @@ func TestBootstrapResolverConcurrentSelection(t *testing.T) {
 	wg.Wait()
 	if firstCalls.Load() != 16 || secondCalls.Load() != 16 {
 		t.Fatalf("bootstrap selection counts=%d/%d, want 16/16", firstCalls.Load(), secondCalls.Load())
+	}
+}
+
+func TestDoHReusedConnectionResetReplaysQueryOnce(t *testing.T) {
+	for _, http2 := range []bool{false, true} {
+		name := "HTTP1"
+		if http2 {
+			name = "HTTP2"
+		}
+		t.Run(name, func(t *testing.T) {
+			var mu sync.Mutex
+			var connection net.Conn
+			requests := 0
+			server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if (r.ProtoMajor == 2) != http2 {
+					t.Errorf("unexpected negotiated HTTP version %s", r.Proto)
+				}
+				body, err := io.ReadAll(r.Body)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				var query dns.Msg
+				if err := query.Unpack(body); err != nil {
+					t.Error(err)
+					return
+				}
+				mu.Lock()
+				requests++
+				attempt := requests
+				current := connection
+				mu.Unlock()
+				if attempt == 2 {
+					tcp := current.(*tls.Conn).NetConn().(*net.TCPConn)
+					if err := tcp.SetLinger(0); err != nil {
+						t.Error(err)
+					}
+					if err := tcp.Close(); err != nil {
+						t.Error(err)
+					}
+					return
+				}
+				failoverWriteDNS(t, w, new(dns.Msg).SetReply(&query))
+			}))
+			server.EnableHTTP2 = http2
+			server.Config.ConnState = func(conn net.Conn, state http.ConnState) {
+				if state == http.StateNew {
+					mu.Lock()
+					connection = conn
+					mu.Unlock()
+				}
+			}
+			server.StartTLS()
+			t.Cleanup(server.Close)
+			pool := failoverDoHPool(t, upstreamPoolConfig{QueryTimeout: time.Second}, server)
+			for _, question := range []string{"warm.test.", "after-reset.test."} {
+				query := new(dns.Msg)
+				query.SetQuestion(question, dns.TypeA)
+				wire, err := query.Pack()
+				if err != nil {
+					t.Fatal(err)
+				}
+				ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+				response, err := pool.exchangeOne(ctx, pool.upstreams[0], wire)
+				cancel()
+				if err != nil {
+					t.Fatal("query over reused TLS connection", err)
+				}
+				var answer dns.Msg
+				if err := answer.Unpack(response); err != nil || answer.Rcode != dns.RcodeSuccess {
+					t.Fatal(answer.Rcode, err)
+				}
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if requests != 3 {
+				t.Fatal("reset query was not replayed exactly once", requests)
+			}
+		})
 	}
 }

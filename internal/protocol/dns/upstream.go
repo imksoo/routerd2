@@ -14,6 +14,7 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"sort"
 	"strings"
@@ -447,7 +448,22 @@ func (p *upstreamPool) exchangeDoH(ctx context.Context, upstream *dnsUpstream, q
 	}
 	req.Header.Set("Content-Type", "application/dns-message")
 	req.Header.Set("Accept", "application/dns-message")
-	resp, err := p.client.Do(req)
+	reused := false
+	first := req.WithContext(httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{GotConn: func(info httptrace.GotConnInfo) { reused = info.Reused }}))
+	resp, err := p.client.Do(first)
+	var transportError *net.OpError
+	if err != nil && reused && ctx.Err() == nil && (errors.As(err, &transportError) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)) {
+		// A reused TLS connection can be reset while a DNS query is in flight.
+		// Queries are safe to repeat. Rewind once within the original deadline;
+		// the HTTP transport discards the broken connection. Fresh-dial failure,
+		// HTTP failure and DNS rcodes do not enter another retry cycle.
+		fresh := req.Clone(ctx)
+		fresh.Body, err = req.GetBody()
+		if err != nil {
+			return nil, err
+		}
+		resp, err = p.client.Do(fresh)
+	}
 	if err != nil {
 		return nil, err
 	}

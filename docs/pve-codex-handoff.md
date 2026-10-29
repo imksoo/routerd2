@@ -5,6 +5,25 @@
 [試験計画](test-plan.md)、[機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
+## 実HGWのDoH切断修正（2026-10-29、doh-reset-native69）
+
+native-67で再利用TLSへの対向RST→LAN SERVFAILを観測した。旧routerdも同じ単発POSTであり、
+同一上流の再利用接続で起きたtransport errorだけ、元の照会context/期限内に一度再送する。
+新規接続の失敗、HTTP status、DNS rcodeはこの再送対象にしない。別情報源への迂回は追加していない。
+実TLSのHTTP/1.1・HTTP/2でRSTと一度の再送を再現し、DNS全packageのRaceが終了0。
+
+修正版の製品daemonと実HGW・独立LAN clientで、既存DoH接続の送信portだけを隔離namespaceの
+一時nft reject tcp resetへ指定した。counter=1、端末の新規照会が83msでNXDOMAIN/正常応答、
+別portでのTLS再接続と後続TCP/UDP DNSを確認し、一時ruleは撤去した。DNS worker交換はしていない。
+条件付き情報源の分離・停止中SERVFAIL・復旧も同版の実HGW端末で成功した。
+native/旧設定DHCP-DNS実daemon、全vet、両CGO0 Linux build、署名六ELF検査も終了0。
+この局所切断の回復は、上流・実回線を含む長期無障害の証明ではない。
+
+同版の実HGW長期観測は14:50 UTC頃開始、二つの自動LAN clientとHeadscale/公式Tailscaleを併用。
+観測時間7300秒、実測T1残7182秒で自然更新は16:50 UTC頃の見込み。保存したDUID/MACを維持するが、
+更新待ち時間は短縮できなかった。自然更新後の通信とPD worker/全daemon再起動まで未完了。
+従来の130分試験と観測時間を区別する。全34項目の期限16:56:38 UTCは変更しない。
+
 ## 旧経路参照に従うHealth（2026-10-29、native-69）
 
 旧routerdのResolveSpecForResourceへ、境界でdecodeしたRouterを直接渡し、EgressRoutePolicy由来の
