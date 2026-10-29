@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -181,6 +182,58 @@ func TestDaemonImportedConditionalLAN(t *testing.T) {
 		})
 		return stop
 	}
+	// An independent RA-only client owns client configuration and resolver
+	// observations. Its runtime/lease files live in a private mount namespace.
+	raDNS := filepath.Join(work, "ra-dns")
+	raHook := filepath.Join(work, "ra-hook.sh")
+	hook := `#!/bin/sh
+resolvconf=/nonexistent
+skip_hooks="01-test 30-hostname 50-ntp.conf 50-timesyncd.conf dhcpcd.enter-hook dhcpcd.exit-hook"
+export resolvconf skip_hooks
+exec /usr/lib/dhcpcd/dhcpcd-run-hooks "$@"
+`
+	if err := os.WriteFile(raHook, []byte(hook), 0700); err != nil {
+		t.Fatal(err)
+	}
+	raConfig := filepath.Join(work, "ra-client.conf")
+	if err := os.WriteFile(raConfig, []byte("ipv6only\nnodhcp6\nslaac hwaddr\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(raDNS, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	start(client, "ra-client", "unshare", "--mount", "--propagation", "private", "sh", "-c", `
+resolver_target=$(readlink -f /etc/resolv.conf)
+mount -t tmpfs -o mode=755 tmpfs /run || exit
+mount -t tmpfs -o mode=755 tmpfs /var/lib/dhcpcd || exit
+if [ ! -e "$resolver_target" ]; then mkdir -p "${resolver_target%/*}" && touch "$resolver_target" || exit; fi
+mount --bind "$1" "$resolver_target" || exit
+shift
+exec "$@"
+`, "ra-client", raDNS, "dhcpcd", "-B", "-d", "-f", raConfig, "-c", raHook, "client0")
+	readRADNS := func() []netip.Addr {
+		t.Helper()
+		raw, err := os.ReadFile(raDNS)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		var addresses []netip.Addr
+		for _, line := range strings.Split(string(raw), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) != 2 || fields[0] != "nameserver" {
+				continue
+			}
+			address, err := netip.ParseAddr(fields[1])
+			if err != nil {
+				t.Fatal(err)
+			}
+			addresses = append(addresses, address)
+		}
+		return addresses
+	}
 	cf, leases := filepath.Join(work, "dhcp6.conf"), filepath.Join(work, "dhcp6.leases")
 	if err := os.WriteFile(cf, []byte("default-lease-time 60; preferred-lifetime 40; option dhcp-renewal-time 20; option dhcp-rebinding-time 40; option dhcp6.name-servers 2001:db8:ffff::9; subnet6 2001:db8:ffff::/64 { prefix6 2001:db8:80:: 2001:db8:80:: /60; }\n"), 0600); err != nil {
 		t.Fatal(err)
@@ -245,14 +298,12 @@ func TestDaemonImportedConditionalLAN(t *testing.T) {
 			}
 			return false
 		})
-		got := fixtureDHCP6Information(t, client, "client0")
-		if len(got.dns) != 1 {
-			t.Fatal("client did not acquire the router DNS", got)
-		}
+		var servers []netip.Addr
+		until(t, 8*time.Second, func() bool { servers = readRADNS(); return len(servers) > 0 })
 		if err := fixtureInsideNamespace(client, func() error {
 			for _, transport := range []string{"+notcp", "+tcp"} {
 				for _, domain := range []string{"home.test", "learned.test", "boot.test"} {
-					out, err := exec.Command("dig", "-6", "@"+got.dns[0].String(), "destination."+domain, "AAAA", "+short", "+time=2", "+tries=1", transport).CombinedOutput()
+					out, err := exec.Command("dig", "-6", "@"+servers[0].String(), "destination."+domain, "AAAA", "+short", "+time=2", "+tries=1", transport).CombinedOutput()
 					if err != nil || !strings.Contains(string(out), "2001:db8:ffff::9") {
 						return fmt.Errorf("acquired DNS %s: %v: %s", domain, err, out)
 					}
@@ -266,6 +317,10 @@ func TestDaemonImportedConditionalLAN(t *testing.T) {
 			return nil
 		}); err != nil {
 			t.Fatal(err)
+		}
+		got := fixtureDHCP6Information(t, client, "client0")
+		if len(got.dns) == 0 || got.dns[0] != servers[0] {
+			t.Fatal("DHCPv6 and RA did not supply the same usable DNS", got, servers)
 		}
 	}
 	until(t, 8*time.Second, func() bool { return role() == vrrp.StateActive })
@@ -429,6 +484,7 @@ func TestDaemonImportedConditionalLAN(t *testing.T) {
 		time.Sleep(500 * time.Millisecond)
 		return false
 	})
+	until(t, 5*time.Second, func() bool { return len(readRADNS()) == 0 })
 	for _, domain := range []string{"learned.test", "boot.test"} {
 		if err := fixtureInsideNamespace(client, func() error {
 			out, err := exec.Command("dig", "-4", "@192.0.2.2", "destination."+domain, "AAAA", "+time=2", "+tries=1").CombinedOutput()

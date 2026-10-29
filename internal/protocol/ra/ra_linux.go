@@ -181,7 +181,10 @@ func Validate(c Config) error {
 	for _, entry := range servers {
 		s := entry.Name
 		for _, d := range entry.Lifetimes {
-			if err := d.Validate(); err != nil {
+			if err := d.ValidUntil.Validate(); err != nil {
+				return err
+			}
+			if err := d.ActiveUntil.Validate(); err != nil {
 				return err
 			}
 		}
@@ -192,7 +195,10 @@ func Validate(c Config) error {
 	}
 	for _, entry := range domains {
 		for _, d := range entry.Lifetimes {
-			if err := d.Validate(); err != nil {
+			if err := d.ValidUntil.Validate(); err != nil {
+				return err
+			}
+			if err := d.ActiveUntil.Validate(); err != nil {
 				return err
 			}
 		}
@@ -357,6 +363,7 @@ func RunWithUpdates(ctx context.Context, cfg Config, updates <-chan Config, effe
 	snapshot := Snapshot{Resource: cfg.Resource, Interface: cfg.Interface, Generation: 1, LastConfigUpdate: time.Now().UTC()}
 	pending := withdrawals{}
 	var lastSentAt time.Time
+	var lastSentNanos uint64
 	destination := &unix.SockaddrInet6{ZoneId: uint32(ifi.Index)}
 	copy(destination.Addr[:], net.ParseIP("ff02::1").To16())
 	send := func(updateCtx context.Context, withdraw bool) error {
@@ -381,6 +388,7 @@ func RunWithUpdates(ctx context.Context, cfg Config, updates <-chan Config, effe
 		if _, err = unix.SendmsgN(fd, payload, packetInfo, destination, 0); err != nil {
 			return fmt.Errorf("send RA: %w", err)
 		}
+		lastSentNanos = uint64(clock.BoottimeNanoseconds)
 		snapshot.Sent++
 		lastSentAt = time.Now()
 		snapshot.LastSent = lastSentAt.UTC()
@@ -472,6 +480,19 @@ func RunWithUpdates(ctx context.Context, cfg Config, updates <-chan Config, effe
 			if !cfg.ActiveUntil.Live(clock) {
 				if err := send(ctx, true); err != nil {
 					return err
+				}
+			}
+		}
+		if nextChanged.IsZero() {
+			clock, err := boottime.Read()
+			if err != nil {
+				return err
+			}
+			for _, server := range cfg.LearnedRDNSS {
+				until := server.ActiveUntil
+				if until.BootID == clock.BootID && until.Nanos > lastSentNanos && until.Nanos <= uint64(clock.BoottimeNanoseconds) {
+					nextChanged = lastSentAt.Add(3 * time.Second)
+					break
 				}
 			}
 		}

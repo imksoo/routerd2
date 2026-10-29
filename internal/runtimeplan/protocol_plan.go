@@ -29,6 +29,7 @@ type protocolPlan struct {
 }
 
 type advertisementPlan struct {
+	selfDNS    []string
 	config     ra.Config
 	from       serviceconfig.RADelegation
 	allocation string
@@ -192,33 +193,23 @@ func prepareProtocols(doc config.Native, runtimeDir, stateDir string) (protocolP
 		if server.dnsDelegation == "" {
 			continue
 		}
-		for module, resolver := range plan.dns {
-			selected := false
-			for _, source := range resolver.listeners {
-				if resolver.runtime.Spec.Listen[source.Listener].Port != 53 {
-					continue
-				}
-				selected = selected || source.Service+"/"+source.Delegation == server.dnsDelegation || source.Interface == server.iface && source.Family != 4
-			}
-			if resolver.listenInterface == "" || resolver.listenInterface == server.iface {
-				for _, listener := range resolver.runtime.Spec.Listen {
-					if listener.Port != 53 {
-						continue
-					}
-					for _, value := range listener.Addresses {
-						address, err := netip.ParseAddr(value)
-						if err != nil {
-							return protocolPlan{}, err
-						}
-						selected = selected || address.Is6() && address.IsUnspecified()
-					}
-				}
-			}
-			if selected {
-				server.selfDNS = append(server.selfDNS, module)
-			}
+		var err error
+		server.selfDNS, err = delegatedDNSProviders(plan.dns, server.dnsDelegation, server.iface)
+		if err != nil {
+			return protocolPlan{}, err
 		}
 		plan.dhcp6Servers[name] = server
+	}
+	for module, advertisement := range plan.lanRA {
+		if !advertisement.from.RDNSSRouter {
+			continue
+		}
+		var err error
+		advertisement.selfDNS, err = delegatedDNSProviders(plan.dns, advertisement.allocation, advertisement.config.Interface)
+		if err != nil {
+			return protocolPlan{}, err
+		}
+		plan.lanRA[module] = advertisement
 	}
 	return plan, nil
 }
@@ -235,4 +226,35 @@ func sameInstances(a, b []binding) bool {
 		}
 	}
 	return true
+}
+
+func delegatedDNSProviders(resolvers map[string]dnsPlan, allocation, iface string) ([]string, error) {
+	var providers []string
+	for module, resolver := range resolvers {
+		selected := false
+		for _, source := range resolver.listeners {
+			if resolver.runtime.Spec.Listen[source.Listener].Port != 53 {
+				continue
+			}
+			selected = selected || source.Service+"/"+source.Delegation == allocation || source.Interface == iface && source.Family != 4
+		}
+		if resolver.listenInterface == "" || resolver.listenInterface == iface {
+			for _, listener := range resolver.runtime.Spec.Listen {
+				if listener.Port != 53 {
+					continue
+				}
+				for _, value := range listener.Addresses {
+					address, err := netip.ParseAddr(value)
+					if err != nil {
+						return nil, err
+					}
+					selected = selected || address.Is6() && address.IsUnspecified()
+				}
+			}
+		}
+		if selected {
+			providers = append(providers, module)
+		}
+	}
+	return providers, nil
 }

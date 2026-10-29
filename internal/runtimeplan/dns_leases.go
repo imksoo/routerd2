@@ -16,6 +16,7 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/raclient"
 	"github.com/imksoo/routerd2/internal/protocol/tailscaleconfig"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
+	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
 
 type dnsPlan struct {
@@ -248,4 +249,43 @@ func (r *Runtime) DNSInput(moduleName string) (dnsconfig.Input, error) {
 		}
 	}
 	return out, nil
+}
+
+// Resolve the current socket observations once for this consumer operation.
+func listeningDNS(providers []string, records map[string]serviceconfig.Update, clock boottime.Clock) ([]dnsEndpoint, error) {
+	var out []dnsEndpoint
+	for _, provider := range providers {
+		update, found := records[provider]
+		if !found {
+			continue
+		}
+		var snapshot dnsconfig.Snapshot
+		if err := json.Unmarshal(update.Snapshot, &snapshot); err != nil {
+			return nil, err
+		}
+		if !snapshot.Current(clock) {
+			continue
+		}
+		for _, endpoint := range snapshot.Listeners {
+			if endpoint.Port() == 53 {
+				out = append(out, dnsEndpoint{address: endpoint.Addr(), until: lifetime.Deadline{BootID: snapshot.BootID, Nanos: snapshot.ExpiresNanos}})
+			}
+		}
+	}
+	return out, nil
+}
+
+func dnsReadyUntil(address netip.Addr, listeners []dnsEndpoint, clock boottime.Clock) (lifetime.Deadline, bool) {
+	var until lifetime.Deadline
+	found := false
+	for _, listener := range listeners {
+		if listener.address != address && !(listener.address.Is6() && listener.address.IsUnspecified()) {
+			continue
+		}
+		if !found || listener.until.Remaining(clock) > until.Remaining(clock) {
+			until = listener.until
+			found = true
+		}
+	}
+	return until, found
 }

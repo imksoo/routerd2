@@ -1,4 +1,4 @@
-2026-10-29 native-64: 実DNS待受の期限付き通知と自己DNS配布を連携した。PD失効/再取得・配布直後の最初のDNS照会・TCP/UDP・固定DNS TCP維持の実経路と既存関連4試験が成功。全make check・両architecture静的build・実ELF署名検査も完了。全homert二台と後続項目は未受入。[現在の成立範囲](pve-codex-handoff.md)。
+2026-10-29 native-65: RAの自己DNS広告も実待受へ接続した。独立RA専用dhcpcdの取得DNSでPD喪失/再取得とUDP/TCP・固定TCP維持が成功し、同版の実HGW短期・全体再起動も終了0。旧native61の7800秒/自然PD更新1回も終了0。全homert二台と後続項目は未受入。[現在の成立範囲](pve-codex-handoff.md)。
 
 2026-10-29 09:47 UTC: native-61の実配布版で保存・再起動・独立端末通信と履歴の併用、同版の実HGW/Tailscale短期・全体再起動が終了0。起動時の履歴整理、Health履歴の一時配送超過、長期・全homert・SAM・実機の未受入を[引き継ぎ](pve-codex-handoff.md)で区別する。
 

@@ -89,3 +89,12 @@ DNS is usable only after an information reply and until the controller's
 DHCPv6 information freshness deadline, additionally capped by the PD lease.
 Explicit infinite information refresh still has that PD cap. Kernel addresses include
 both current and still-valid deprecated prefixes, with finite Linux lifetimes.
+
+Self-RDNSS entries also carry `ActiveUntil`, the DNS worker's original socket
+observation deadline. It authorizes advertising the address; it does not cap the
+positive wire lifetime to two seconds. `ValidUntil` remains the original PD
+budget. Expired permission produces zero lifetime for that DNS entry without
+withdrawing unrelated prefixes or the router. Permission renewal alone retains
+the worker configuration generation. Pending withdrawal respects multicast
+spacing. `make check-dhcp6-ra-pd` includes an independent RA-only dhcpcd client
+using its standard private resolver hook, original PD loss and reacquisition.

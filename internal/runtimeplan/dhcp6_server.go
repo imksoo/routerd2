@@ -12,7 +12,6 @@ import (
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6serverconfig"
-	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
 	"github.com/imksoo/routerd2/internal/protocol/raclient"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
@@ -125,24 +124,9 @@ func (r *Runtime) dhcp6ServerInput(name string) (serviceconfig.DHCP6ServerInput,
 			}
 		}
 	}
-	var listening []dhcp6serverconfig.Address
-	for _, provider := range plan.selfDNS {
-		update, found := r.records[provider]
-		if !found {
-			continue
-		}
-		var snapshot dnsconfig.Snapshot
-		if err := json.Unmarshal(update.Snapshot, &snapshot); err != nil {
-			return out, err
-		}
-		if !snapshot.Current(clock) {
-			continue
-		}
-		for _, endpoint := range snapshot.Listeners {
-			if endpoint.Port() == 53 {
-				listening = append(listening, dhcp6serverconfig.Address{Address: endpoint.Addr(), ValidUntil: lifetime.Deadline{BootID: snapshot.BootID, Nanos: snapshot.ExpiresNanos}})
-			}
-		}
+	listening, err := listeningDNS(plan.selfDNS, r.records, clock)
+	if err != nil {
+		return out, err
 	}
 	delegatedReady := false
 	var readyUntil lifetime.Deadline
@@ -152,17 +136,7 @@ func (r *Runtime) dhcp6ServerInput(name string) (serviceconfig.DHCP6ServerInput,
 			continue
 		}
 		if len(plan.selfDNS) > 0 {
-			found := false
-			var until lifetime.Deadline
-			for _, listener := range listening {
-				if listener.Address != address.Address && !(listener.Address.Is6() && listener.Address.IsUnspecified()) {
-					continue
-				}
-				if !found || listener.ValidUntil.Remaining(clock) > until.Remaining(clock) {
-					until = listener.ValidUntil
-					found = true
-				}
-			}
+			until, found := dnsReadyUntil(address.Address, listening, clock)
 			if !found {
 				continue
 			}

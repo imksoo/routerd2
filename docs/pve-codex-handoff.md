@@ -5,6 +5,30 @@
 [試験計画](test-plan.md)、[機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
+## RAで取得する自己DNS（native-65）
+
+RAのRDNSSも、DHCPv6と同じ実DNS待受の観測に接続した。観測の2秒期限は広告許可であり、
+正のRDNSS寿命は元PD期限で決める。期限切れではDNSだけを撤回し、既存の最小広告間隔を保つ。
+更新時に許可期限だけが変わってもRAの設定世代を増やさない。DNS起動入力のアドレスは
+待受確認で絞らず、循環待ちを作らない。両consumerの設定参照と観測解釈を共有した。
+
+独立dhcpcd10.0.6をDHCPv6無効のRA専用clientとして起動し、標準resolver hookが私有ファイルへ
+書いたDNSを使用した。製品process・ISC・keepalived・dnsmasq・Linux端末で70.50秒、終了0。
+RA由来DNSへの最初のUDP/TCP照会、PD喪失時のresolverからの撤去、再取得・名前解決・
+IPv6 TCP/UDP、VIP DNS、同じ固定DNS TCPの維持まで成立した。初回失敗は試験側がdhcpcdの
+変数名を誤って固定していた。送出RAの55秒RDNSSと標準hookを照合し、独自解釈を削除した。
+関連RA/runtimeplanのRace、全make check（Go/Python・全Race・vet）、
+既存PDとRA端末のMake再実行、両architecture CGO_ENABLED=0 build、実6 ELFの署名検査は終了0。
+
+同版の実HGW＋独立2端末＋Headscale/公式Tailscaleは75秒/7巡、全体再起動まで終了0。
+自動DHCP/RA/配布DNS、条件付きDNS/DoH、IPv4/IPv6 HTTPS、双方向TCP/UDPとexitを確認した。
+underlay固定と追加IPv6 NATの差は残り、全homert・直接ONU・NIC/ARM資格とは区別する。
+
+別に`d5e87bd-hgw-native61`の7800秒/700巡が終了0。自然PD Renew/Reply1回、LAN両clientの自然更新、
+PD強制交換1.38秒・通常交換2.91秒・全体再起動4.17秒で通信が復旧した。
+旧版の長期観測であり、native-65の長期安定性には置き換えない。以前の外部IPv6 UDP DNS失敗の
+原因はこの成功で解消扱いにしない。全34項目と対象環境での利用可能性は未達。
+
 ## 動的DNS待受・自己DNS配布と端末復旧（2026-10-29、native-64）
 
 旧routerdのDNS controller/engineの参照展開と待受差分処理を照合した。

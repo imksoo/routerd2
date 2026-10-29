@@ -46,7 +46,7 @@ type projection struct {
 
 type delegatedLAN struct {
 	prefixes  []ra.Prefix
-	routerDNS []ra.DNSServer
+	routerDNS []dnsEndpoint
 	snapshot  *dhcp6config.Snapshot
 }
 
@@ -273,7 +273,7 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 				}
 				ensureInterface(&p.network, lan.Interface)
 				var prefixes []ra.Prefix
-				var routerDNS []ra.DNSServer
+				var routerDNS []dnsEndpoint
 				for _, lease := range snap.Prefixes {
 					if !lease.ValidUntil.Live(facts.bfdClock) {
 						continue
@@ -309,7 +309,7 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 					}
 					if !preparing && lan.PrefixLength != 128 {
 						prefixes = append(prefixes, ra.Prefix{Prefix: prefix.String(), OnLink: true, Autonomous: true, ValidLifetimeSeconds: ^uint32(0), PreferredLifetimeSeconds: ^uint32(0), ValidUntil: lease.ValidUntil, PreferredUntil: lease.PreferredUntil})
-						routerDNS = append(routerDNS, ra.DNSServer{Address: address.Addr().String(), ValidUntil: lease.ValidUntil})
+						routerDNS = append(routerDNS, dnsEndpoint{address: address.Addr(), until: lease.ValidUntil})
 					}
 				}
 				if len(prefixes) > 0 {
@@ -409,7 +409,21 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 			c.Prefixes = append(c.Prefixes, prefix)
 		}
 		if advertisement.from.RDNSSRouter {
-			c.LearnedRDNSS = slices.Clone(allocation.routerDNS)
+			listeners, err := listeningDNS(advertisement.selfDNS, records, facts.bfdClock)
+			if err != nil {
+				return p, err
+			}
+			for _, server := range allocation.routerDNS {
+				var activeUntil lifetime.Deadline
+				if len(advertisement.selfDNS) > 0 {
+					var ready bool
+					activeUntil, ready = dnsReadyUntil(server.address, listeners, facts.bfdClock)
+					if !ready {
+						continue
+					}
+				}
+				c.LearnedRDNSS = append(c.LearnedRDNSS, ra.DNSServer{Address: server.address.String(), ValidUntil: server.until, ActiveUntil: activeUntil})
+			}
 		}
 		c.Authority, _ = allocation.snapshot.LeaseUntil()
 		if until, usable := allocation.snapshot.InformationUntil(facts.bfdClock); usable {

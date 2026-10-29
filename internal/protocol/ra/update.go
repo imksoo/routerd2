@@ -72,6 +72,13 @@ func equivalentAt(a, b Config, clock boottime.Clock) bool {
 	a, b = normalized(a), normalized(b)
 	for _, c := range []*Config{&a, &b} {
 		c.ActiveUntil = lifetime.Deadline{}
+		for i := range c.LearnedRDNSS {
+			if c.LearnedRDNSS[i].ActiveUntil.Live(clock) {
+				c.LearnedRDNSS[i].ActiveUntil = lifetime.Deadline{}
+			} else {
+				c.LearnedRDNSS[i].ActiveUntil = lifetime.Deadline{BootID: clock.BootID, Nanos: uint64(clock.BoottimeNanoseconds)}
+			}
+		}
 		for i := range c.Prefixes {
 			p := &c.Prefixes[i]
 			p.ValidLifetimeSeconds = p.ValidUntil.Seconds(p.ValidLifetimeSeconds, clock)
