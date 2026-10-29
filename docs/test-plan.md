@@ -85,11 +85,12 @@
 
 ## 現在の状況
 
-- `conditional-nat-native75` はWAN zone/条件付きNAT、IPv6 LAN応答経路、nftables ACK溢れを修正した。
-  実5 WAN 77.77秒、kernelの途中操作失敗時の全体拒否・NAT等26.14秒、host-route3構成は終了0。
-  実HGWの90秒通信・PD交換/全体再起動は通過し、採取不備の修正後1巡は終了0。
-  LAN DNS返信のWAN送信packet0と最終RA撤去を確認。03:08開始の7800秒観測は、保存T1が05:08:50 JST、終了は05:19頃以降の予定。自然更新前で未合格。
-  全check/Race/vet・両build/署名検査は終了0。全homert/同構成二台・対象実機/全34項目の受入とは分ける。
+- `election-authority-native76` は条件付きIPv4/SNAT/B4所有、VRRP元期限、不要nft応答とVIP公開順序を修正した。
+  最新実5 WAN85.69秒、実HGWの4出口/120→80→120・60秒復帰抑制、取得DNS/両IP・90秒/9巡、
+  PD交換/全体再起動後の両自動端末通信が終了0。元期限後の停止・writer交換と既存TCP/UDP復帰も確認した。
+  独立peerの短い停止/元期限後のRA撤回・復帰は72.37秒、実kernelの原子性/NAT等は24.26秒で終了0。
+  03:56開始の自然PD観測はEcho削減/即時公開より前の別バイナリで継続中。T1は実貸出から05:56:22 JST予定。
+  IX2215/全homert/同構成二台・対象実機/全34項目の受入とは分ける。
 - `pd-authority-native74` はPD元期限と監視照会の1秒期限を分離した。実APKでcontrol交換後に端末のIPv6既定経路が戻り、
   18秒のISCリース一周期を越える20秒以上の両IP TCP/UDP/DNSと、RA再撤回なしが終了0。段階全体66.37秒は継続観測を含む。
   実HGW長期は02:18 JST頃のLAN IPv6 UDP DNS timeoutで終了1。自然更新前に停止し、LAN返信経路の修正後に再開する。

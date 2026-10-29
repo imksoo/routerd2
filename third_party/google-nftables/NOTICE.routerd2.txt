@@ -24,8 +24,10 @@ The conn.go patch requests one success acknowledgement on the last batch
 operation. Linux reports errors from every failed operation regardless of the
 ACK flag, after committing or aborting the complete batch. Actual zone policies
 reproduced ENOBUFS from per-operation success acknowledgements after commit.
-One success ACK retains atomicity and error handling without raising socket
-limits or adding concurrent I/O.
+A four-tunnel zone policy also overflowed the queue with the unused full-rule
+echoes requested by NLM_F_ECHO. Flush suppresses those requests; it does not
+consume or return their data. One success ACK retains atomicity and error
+handling without raising socket limits or adding concurrent I/O.
 The public API remains unchanged.
 
 Reference for the kernel interfaces:

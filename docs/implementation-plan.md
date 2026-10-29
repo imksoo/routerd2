@@ -1,4 +1,6 @@
-2026-10-30 JST conditional-nat-native75: WAN zone/条件付きNATを既存writerへ接続し、LAN宛てIPv6応答をWANへ向ける規則とnftablesのACK溢れを修正した。実5 WAN・kernel、実HGWの両自動端末/PD交換/全体再起動・LAN直接DNS返信が通過。全check/Race/vet・両build・署名検査は終了0。自然PD更新観測は03:08開始で未合格、全34項目・同じ構成の二台/対象実機は未受入。[現在の結果と残作業](pve-codex-handoff.md)。
+2026-10-30 JST election-authority-native76: 条件付きIPv4/SNAT/B4所有を接続し、VRRP元期限の切り詰め、未使用nftルール応答、連続通知によるVIP公開待ちを修正した。最新実5 WAN85.69秒、実HGWの4出口/自動端末/60秒復帰抑制・90秒通信とPD/全体再起動後の復帰は終了0。03:56開始の別バイナリの自然PD観測は継続中。全34項目・同構成二台/対象実機は未受入。[現在の結果と残作業](pve-codex-handoff.md)。
+
+
 
 # 現行 routerd と同等の製品にするための実装計画
 

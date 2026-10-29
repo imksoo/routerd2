@@ -18,7 +18,7 @@ import (
 // DNS listener and first AAAA selection, and retains a pending tunnel indefinitely.
 // Explicit migration policy may override resolution. A declared PD source
 // already supplies ownership; its native resolver uses bounded defaults.
-func (c *compiler) dynamicDSLite(r resource, policy DSLitePolicy) {
+func (c *compiler) dynamicDSLite(r resource, policy DSLitePolicy) api.ResourceWhenSpec {
 	c.allow(r, "interface", "tunnelName", "enabled", "aftrFQDN", "aftrIPv6", "aftrDNSServers", "aftrAddressOrdinal", "aftrAddressSelection", "remoteAddress", "localAddress", "localAddressFrom", "localIPv6Source", "aftrFrom", "aftrSource", "localAddressSource", "localDelegatedAddress", "localAddressSuffix", "defaultRoute", "routeMetric", "mtu", "encapsulationLimit")
 	if _, explicit := c.options.DSLite[r.Kind+"/"+r.Metadata.Name]; explicit {
 		c.usePolicy(r, "ds_lite")
@@ -50,8 +50,9 @@ func (c *compiler) dynamicDSLite(r resource, policy DSLitePolicy) {
 		c.reject(r, "mtu", "invalid_value", "MTU must satisfy both the pinned DSLiteTunnel range and the native IPv6 encapsulation limit")
 	}
 	inner := "192.0.0.2"
+	var innerWhen api.ResourceWhenSpec
 	if meaningful(child(r.node, "localAddressFrom")) {
-		inner = c.dsliteInnerAddress(r, s.LocalAddressFrom)
+		inner, innerWhen = c.resolveAddress(r, "localAddressFrom", s.LocalAddressFrom, true)
 	}
 	ip, err := netip.ParseAddr(inner)
 	if err != nil || !ip.Is4() || !ip.IsGlobalUnicast() {
@@ -149,18 +150,7 @@ func (c *compiler) dynamicDSLite(r resource, policy DSLitePolicy) {
 	c.addService(r, service)
 	c.note(r, "Native ownership replaces local-resolver lookup and indefinite pending-tunnel retention with scoped IPv6 DNS, finite DNS/dependency expiry, and withdrawal when the owned source is no longer preferred; this is deliberate new native intent, not automatic legacy parity. Declared PD sources need no repeated source policy; their defaults are first selection, 2-second lookup and 5-second retry.")
 	c.note(r, "AFTR candidate precedence remains information aftrName, aftrFQDN, aftrIPv6, remoteAddress. The B4 /32 peer 192.0.0.1/32 and fixed 1460-byte default MTU are retained; only independent route resources can authorize a default route.")
-}
-
-// The pinned configuration validator requires an explicit source field. Its
-// controller has a historical static-address fallback for an omitted field,
-// but relying on that fallback would accept a configuration the original
-// validator rejects. The migration boundary keeps the public contract.
-func (c *compiler) dsliteInnerAddress(r resource, source api.StatusValueSourceSpec) string {
-	if source.Field != "address" {
-		c.reject(r, "localAddressFrom.field", "unsupported_semantics", "inner IPv4 source must explicitly select address, as required by the pinned configuration validator; controller-only fallback behavior is not imported")
-		return ""
-	}
-	return c.resolveStaticAddress(r, "localAddressFrom", source, true)
+	return api.ResourceWhenSpec{All: []api.ResourceWhenSpec{s.When, innerWhen}}
 }
 
 func (c *compiler) dynamicDSLiteSource(r resource, s api.DSLiteTunnelSpec, policy DSLitePolicy, out *serviceconfig.DSLite) {

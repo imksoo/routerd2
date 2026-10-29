@@ -455,7 +455,7 @@ func TestCanonicalRAStatusReferenceRequiresMatchingPolicy(t *testing.T) {
 	}
 }
 
-func TestDSLiteInnerSourceRequiresExplicitLegacyAddressField(t *testing.T) {
+func TestDSLiteInnerSourceUsesAddressField(t *testing.T) {
 	base := changed(t, fixture(t, "dslite"), "localAddressSource: static", "localAddressFrom: {resource: IPv4StaticAddress/inner, field: address}\n        localAddressSource: static")
 	base = append(base, []byte("    - apiVersion: net.routerd.net/v1alpha1\n      kind: IPv4StaticAddress\n      metadata: {name: inner}\n      spec: {interface: wan, address: 198.51.100.7/32}\n")...)
 	virtual := changed(t, base, "IPv4StaticAddress/inner", "VirtualAddress/inner")
@@ -484,12 +484,14 @@ func TestDSLiteInnerSourceRequiresExplicitLegacyAddressField(t *testing.T) {
 					} else if iface(t, result.Document, "ds0").AddressOptions["198.51.100.7/32"].Peer != "192.0.0.1/32" {
 						t.Fatal("fixed inner IPv4 source changed")
 					}
-					for _, replacement := range []string{"", ", field: phase"} {
-						bad := changed(t, source.data, ", field: address", replacement)
-						result, err := compile(bad)
-						if !hasIssue(err, "localAddressFrom.field", "unsupported_semantics") || !reflect.DeepEqual(result, Result{}) {
-							t.Fatal("invalid public source field was accepted through controller-only fallback:", err)
-						}
+					omitted := changed(t, source.data, ", field: address", "")
+					if _, err := compile(omitted); err != nil {
+						t.Fatal("default address field was rejected:", err)
+					}
+					bad := changed(t, source.data, ", field: address", ", field: phase")
+					result, err = compile(bad)
+					if !hasIssue(err, "localAddressFrom.field", "unsupported_semantics") || !reflect.DeepEqual(result, Result{}) {
+						t.Fatal("non-address source field was accepted:", err)
 					}
 				})
 			}

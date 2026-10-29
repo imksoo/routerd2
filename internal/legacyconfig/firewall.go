@@ -190,14 +190,14 @@ func (c *compiler) firewall(vrrpNames map[string]string) []resourceprogram.Resou
 	var translations []resourceprogram.Resource
 	natRules := 0
 	for _, r := range nrs {
-		rules := c.nat44(r)
-		natRules += len(rules)
+		translation := c.nat44(r, vrrpNames)
+		natRules += len(translation.NAT)
 		if natRules > maxFirewallProjection {
 			c.reject(r, "", "resource_limit", "NAT expansion exceeds 8192 native packet rules")
 			return nil
 		}
-		if len(rules) > 0 {
-			translations = append(translations, resourceprogram.Resource{ID: "nat/" + r.Metadata.Name, NAT: rules, When: c.when(r, r.Spec.(api.NAT44RuleSpec).When, vrrpNames)})
+		if len(translation.NAT) > 0 {
+			translations = append(translations, translation)
 		}
 	}
 	return translations
@@ -473,20 +473,20 @@ func (c *compiler) rendererWouldDeriveNAT(zones []resource) bool {
 	return false
 }
 
-func (c *compiler) nat44(r resource) []network.NATRule {
-	var rules []network.NATRule
+func (c *compiler) nat44(r resource, elections map[string]string) resourceprogram.Resource {
 	c.allow(r, "type", "egressInterface", "sourceRanges", "destinationCIDRs", "excludeDestinationCIDRs", "snatAddress", "snatAddressFrom", "outboundInterface", "sourceCIDRs", "translation", "when")
 	s := r.Spec.(api.NAT44RuleSpec)
+	out := resourceprogram.Resource{ID: "nat/" + r.Metadata.Name, When: c.when(r, s.When, elections)}
 	if meaningful(child(r.node, "translation")) || s.OutboundInterface != "" || len(s.SourceCIDRs) > 0 {
 		c.reject(r, "translation", "unsupported_semantics", "legacy source-NAT translation form is rendered by the combined exporter but not reconciled by the pinned running Linux NAT controller; rewrite its intended semantics as explicit type/egressInterface/sourceRanges")
-		return nil
+		return resourceprogram.Resource{}
 	}
 	if s.Type != "masquerade" && s.Type != "snat" {
 		c.reject(r, "type", "invalid_value", "NAT type must be masquerade or snat")
 	}
 	if s.EgressInterface == "" || strings.Contains(s.EgressInterface, "/") {
 		c.reject(r, "egressInterface", "required", "an explicit bare resource or kernel interface name is required; dynamic egress selection cannot be frozen")
-		return nil
+		return resourceprogram.Resource{}
 	}
 	ifname := c.aliases[s.EgressInterface]
 	if ifname == "" {
@@ -520,19 +520,19 @@ func (c *compiler) nat44(r resource) []network.NATRule {
 	exclusions := c.packetCIDRs(r, "excludeDestinationCIDRs", s.ExcludeDestinationCIDRs, 4, false)
 	if len(exclusions) > 128 {
 		c.reject(r, "excludeDestinationCIDRs", "resource_limit", "at most 128 unique destination exclusions can be projected")
-		return nil
+		return resourceprogram.Resource{}
 	}
 	var err bool
 	for _, excluded := range exclusions {
 		destinations, err = subtractIPv4Prefixes(destinations, excluded, maxFirewallProjection)
 		if err {
 			c.reject(r, "excludeDestinationCIDRs", "resource_limit", "CIDR subtraction exceeds 8192 destination prefixes")
-			return nil
+			return resourceprogram.Resource{}
 		}
 	}
 	if len(sources)*len(destinations) > maxFirewallProjection {
 		c.reject(r, "sourceRanges", "resource_limit", "NAT expansion exceeds 8192 native packet rules")
-		return nil
+		return resourceprogram.Resource{}
 	}
 	address := s.SNATAddress
 	if s.SNATAddressFrom.Resource != "" {
@@ -542,7 +542,9 @@ func (c *compiler) nat44(r resource) []network.NATRule {
 		if address != "" {
 			c.reject(r, "snatAddressFrom", "conflict", "literal and resource-derived SNAT addresses cannot be combined")
 		}
-		address = c.resolveStaticAddress(r, "snatAddressFrom", s.SNATAddressFrom, true)
+		var sourceWhen api.ResourceWhenSpec
+		address, sourceWhen = c.resolveAddress(r, "snatAddressFrom", s.SNATAddressFrom, true)
+		out.When = egressAll(out.When, c.when(r, sourceWhen, elections))
 	} else if meaningful(child(r.node, "snatAddressFrom")) {
 		c.reject(r, "snatAddressFrom", "required", "static address source requires a resource reference")
 	}
@@ -557,7 +559,7 @@ func (c *compiler) nat44(r resource) []network.NATRule {
 	}
 	for _, source := range sources {
 		for _, destination := range destinations {
-			rules = append(rules, network.NATRule{Type: s.Type, Match: network.PacketMatch{Family: 4, Source: source.String(), Destination: destination.String(), OutInterface: ifname}, Address: address})
+			out.NAT = append(out.NAT, network.NATRule{Type: s.Type, Match: network.PacketMatch{Family: 4, Source: source.String(), Destination: destination.String(), OutInterface: ifname}, Address: address})
 		}
 	}
 	c.target(r, "nat/"+r.Metadata.Name)
@@ -565,7 +567,7 @@ func (c *compiler) nat44(r resource) []network.NATRule {
 	if len(destinations) == 0 {
 		c.note(r, "Destination exclusions cover the complete destination set, so this rule matches no packets.")
 	}
-	return rules
+	return out
 }
 
 // subtractIPv4Prefixes returns the same address set minus excluded. Splitting

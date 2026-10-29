@@ -170,7 +170,7 @@ func (c *compiler) bridge(r resource) {
 	c.note(r, "STP/RSTP must be disabled; dormant bridge timing attributes use kernel defaults.")
 }
 
-func (c *compiler) static4(r resource) {
+func (c *compiler) static4(r resource) []resourceprogram.Resource {
 	c.allow(r, "interface", "address", "exclusive", "allowOverlap", "allowOverlapReason")
 	s := r.Spec.(api.IPv4StaticAddressSpec)
 	if s.Exclusive {
@@ -186,13 +186,29 @@ func (c *compiler) static4(r resource) {
 	prefix, err := netip.ParsePrefix(s.Address)
 	if err != nil || !prefix.Addr().Is4() {
 		c.reject(r, "address", "invalid_value", "expected an IPv4 host/prefix address")
-		return
+		return nil
 	}
 	c.static = append(c.static, staticPrefix{resource: r, iface: name, prefix: prefix, allow: s.AllowOverlap})
+	for _, provider := range c.resources {
+		tunnel, ok := provider.Spec.(api.DSLiteTunnelSpec)
+		_, explicit := c.options.DSLite[provider.Kind+"/"+provider.Metadata.Name]
+		if ok && (explicit || tunnel.LocalAddressSource == "delegatedAddress") && tunnel.LocalAddressFrom.Resource == r.Kind+"/"+r.Metadata.Name && c.aliases[provider.Kind+"/"+provider.Metadata.Name] == name {
+			// The tunnel's B4Address owns this exact address and its lifetime.
+			// A second static interface would race the tunnel's creation/removal.
+			c.target(r, "services/"+c.serviceName(provider, "aftr")+"/ds_lite/b4_address")
+			return nil
+		}
+	}
 	if iface := c.ensureInterface(r, "interface", name); iface != nil {
+		if meaningful(child(r.node, "when")) {
+			id := "address/" + c.serviceName(r, "static4")
+			c.target(r, "resources/"+id)
+			return []resourceprogram.Resource{{ID: id, Address: &resourceprogram.Address{Interface: name, CIDR: prefix.String()}}}
+		}
 		iface.Addresses = append(iface.Addresses, prefix.String())
 		c.target(r, "network.interfaces/"+name+"/addresses")
 	}
+	return nil
 }
 
 func (c *compiler) virtualAddress(r resource) (string, []resourceprogram.Resource) {
@@ -381,10 +397,9 @@ func (c *compiler) sysctl(r resource) {
 	c.target(r, "network.forwarding")
 }
 
-func (c *compiler) dslite(r resource) {
+func (c *compiler) dslite(r resource) api.ResourceWhenSpec {
 	if policy, ok := c.options.DSLite[r.Kind+"/"+r.Metadata.Name]; ok {
-		c.dynamicDSLite(r, policy)
-		return
+		return c.dynamicDSLite(r, policy)
 	}
 	source := r.Spec.(api.DSLiteTunnelSpec)
 	if source.LocalAddressSource == "delegatedAddress" {
@@ -396,10 +411,10 @@ func (c *compiler) dslite(r resource) {
 				}
 			}
 		}
-		c.dynamicDSLite(r, policy)
-		return
+		return c.dynamicDSLite(r, policy)
 	}
 	c.staticDSLite(r)
+	return source.When
 }
 
 func (c *compiler) staticDSLite(r resource) {
@@ -438,7 +453,7 @@ func (c *compiler) staticDSLite(r resource) {
 	if meaningful(child(r.node, "localAddressFrom")) {
 		// Despite its name, this source selects the inner IPv4 endpoint in
 		// the pinned Linux controller; it is not the outer IPv6 source.
-		inner = c.dsliteInnerAddress(r, s.LocalAddressFrom)
+		inner = c.resolveStaticAddress(r, "localAddressFrom", s.LocalAddressFrom, true)
 	}
 	innerIP, err := netip.ParseAddr(inner)
 	if err != nil || !innerIP.Is4() || innerIP.IsUnspecified() || innerIP.IsMulticast() || innerIP.IsLoopback() {

@@ -19,6 +19,7 @@ spec:
     spec:
       interface: wan0
       address: 192.0.2.2/24
+      when: {state: {VirtualAddress/gateway.role: {equals: master}}}
   - apiVersion: net.routerd.net/v1alpha1
     kind: HealthCheck
     metadata:
@@ -255,9 +256,10 @@ spec:
     kind: NAT44Rule
     metadata: {name: wan0}
     spec:
-      type: masquerade
+      type: snat
       egressInterface: wan0
       sourceRanges: [198.18.0.0/24]
+      snatAddressFrom: {resource: IPv4StaticAddress/address0, field: address}
       when: {state: {VirtualAddress/gateway.role: {equals: master}}}
   - apiVersion: net.routerd.net/v1alpha1
     kind: NAT44Rule

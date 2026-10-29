@@ -5,7 +5,47 @@
 [試験計画](test-plan.md)、[機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
-## 現在の候補版: conditional-nat-native75（2026-10-30 JST）
+## 現在の候補版: election-authority-native76（2026-10-30 JST）
+
+契約76/journal18/worker ABI5。条件付き静的IPv4アドレスの値と起動条件をSNATとDS-Liteへ引き継ぎ、
+内側アドレスは既存B4Address所有へ集約した。Healthを実際の動的トンネル所有者へ依存させた。
+元PD/VRRP期限が生きているのにRAを撤回していた原因は、VRRP条件を監視照会の1秒期限で切り詰める処理だった。
+元の`election.ExpiresNanos`を保持し、独立ISC/Keepalived/dhcpcdとの短い停止中の通信/RA維持、
+元期限後の撤回・復帰が72.37秒で終了0。grace追加や元期限延長はしていない。
+
+4本目のDS-Liteを実設定から取り込むと、nftablesのENOBUFSが再現した。成功ACK削減後も残っていた
+未使用のルール全文応答要求`NLM_F_ECHO`を除いた。実kernelの途中操作失敗による全体拒否と
+NAT/ACL/DS-Lite等はRace付き24.26秒で終了0。受信buffer増設や受信goroutineは追加していない。
+同版の5 WANで、適用完了後も次の通知を待つとHealth通知の連続でVIP公開が進まない問題を再現した。
+実適用内容を現在の観測と照合し、変更のない内容では元の適用期限を保ったまま、その場で公開条件を消費する。
+FlowRouteの期限延長も他の適用済みgrantと同じ規則で比較し、bucket変更や期限短縮を一致扱いにしない。
+最新の実5 WANはVIP公開・120→80→60/60秒復帰抑制・confirmed rollback、元期限内UDP維持、
+元期限後の停止・writer再起動後の停止維持、所有権復帰後の同じTCP/UDPが85.69秒で終了0。
+LAN6631 packet/kernel drop0。元期限のBOOTTIME値と実停止を照合した。
+
+最新の実HGW試験は、保存済homert03のPD由来4 DS-Lite・Health・120/80群・SNAT/zone/VIPを使用した。
+独立BusyBox/dhcpcd端末の自動DHCPv4/SLAAC/DHCPv6/DNS、UDP/TCP DNS・条件付き転送/DoHと両IP HTTPS、
+1.5秒control停止中のIPv6/DNS維持・寿命0 RAなし、3 AFTR個別選択を確認した。
+優先3出口の遮断で第4出口/mark275へ切替え、実IP-in-IPv6 packetと通信を確認した。
+設定60秒の復帰抑制中も通信を維持し、59.06秒で優先120群へ戻った。その後90秒/9巡と両端末の自然DHCPv4更新、
+PD強制終了1.62秒・通常交換5.97秒・全体再起動12.73秒での復帰、DUID/IAID/prefix保持、
+LAN直接DNS返信/WAN側漏出なし・最終RA撤去/上流Releaseなしまで終了0。
+同じHGWを使う複数AFTRであり、独立物理WAN・継続TCP・同構成二台の受入ではない。
+名前が`ds-lite-ra`でも、保存済homert02/03の実宣言はPD由来だった。名前から別のRA送信元経路を作らない。
+試験値に合わせてアドレス/ifnameとVRRP参照を置き換え、生成物のownerRefsを除いた構成であり、109宣言全体ではない。
+
+03:56:16 JST開始の7800秒自然PD観測は継続中。T1は実貸出から05:56:22 JST予定。
+これはVRRP元期限修正後、Echo削減/即時VIP公開より前の別バイナリであり、最新版全体の長期受入とは区別する。
+旧native75の両長期観測は失敗し、旧予定は無効。私有ログは
+`/tmp/routerd-election-authority-native76-hgw-natural.log`、最新4出口は
+`/tmp/routerd-homert-four-immediate-admission-native76-live.log`。
+3出口identityは`~/.local/state/routerd2-homert-multi`、4出口は`~/.local/state/routerd2-homert-four`に保持する。
+同じMAC/DUIDを並行起動しない。私有source/policy/program/uplinkは`/tmp/routerd-homert-{multi,four}-native76-*`。
+最終全make check/Race/vet、CGO0 amd64/arm64 build、署名六ELF検査は終了0。
+自然PD更新・長期安定性、IX2215、同構成HA/管理更新復旧、k8s/pve、Cloud SAM、全34項目と対象実機は未完了。
+現行homertの再取得は未完了で保存済snapshotを使用した。診断専用のvalidation error出力は削除した。
+
+## 直前版: conditional-nat-native75（2026-10-30 JST）
 
 契約75/journal18/worker ABI5。外部VRRP daemonは追加せず、Goの選出・広告と単一network writerを維持した。
 実設定由来のWAN zone参照は旧routerdのsuffix解決に合わせ、条件付きNAT44Ruleを独立した宣言から
@@ -38,7 +78,11 @@ LAN向けIPv6 DNSのmain経路とWAN送信側の該当packet0、最終RA寿命0/
 この版でAPK/署名PID1二台を再受入したとは扱わない。直前native74の実Alpine3.24.3/kernel6.18.59
 APK/PID1/2 NICではPD期限を1秒の監視照会期限で切り詰めるRA再撤回を修正し、control交換後20秒以上の
 両IP通信とISC18秒リース更新・再撤回なしが終了0だった。native74のHGW長期は02:18頃のIPv6 UDP DNS timeoutで
-終了1、自然更新前に停止した。03:08 JSTにnative75の7800秒観測を開始した。保存されたT1は05:08:50 JST、観測終了は05:19頃以降の予定で、自然更新は未合格。
+終了1、自然更新前に停止した。03:08開始のnative75観測も03:27頃、1096秒/103巡後の端末IPv6非推奨化で終了1。旧05:08/05:19予定は無効。
+未変更native75を03:36:58に再構築・再観測し、03:45:08.028の寿命0 RA、直後の両端末の非推奨化/既定経路削除、
+03:45:10.774の試験停止を記録した。後片付け前の撤回であり、試験の例外だけが原因ではない。
+PD Bound・VRRP ACTIVE/Readyは元期限内だった。VRRP factを照会の1秒期限で切り詰め、RA ActiveUntilへ渡す経路を
+修正中。native76で元のelection.ExpiresNanosを保持する。元期限内のcontrol短期停止・実期限切れの撤回と再観測は未判定。
 私有logは`/tmp/routerd-host-lan-native75-hgw-natural.log`、fixtureは
 `/tmp/routerd-homert-single-native75-uplink.py`と同program/source/policy。実回線値を公開しない。
 永続identity/leaseは`~/.local/state/routerd2-homert-single`。同じWAN MAC/DUIDを重複使用しない。

@@ -260,10 +260,11 @@ func (cc *Conn) Flush() error {
 	// The kernel commits or aborts the whole batch before delivering its
 	// queued errors and requested acknowledgements. Request one success ACK
 	// on the last operation; errors from any operation are still delivered.
-	// Per-operation success ACKs can overflow the socket after commit.
+	// Flush does not consume rule echoes. Suppress those as well as per-
+	// operation success ACKs, which can overflow the socket after commit.
 	messages := batch(cc.messages)
 	for i := 1; i < len(messages)-1; i++ {
-		messages[i].Header.Flags &^= netlink.Acknowledge
+		messages[i].Header.Flags &^= netlink.Acknowledge | netlink.Echo
 	}
 	messages[len(messages)-2].Header.Flags |= netlink.Acknowledge
 	if _, err := conn.SendMessages(messages); err != nil {

@@ -18,8 +18,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/control"
+	"github.com/imksoo/routerd2/internal/lifetime"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
@@ -375,6 +377,14 @@ func TestDaemonConnectionMarkedEgressPolicy(t *testing.T) {
 	})
 	waitMarks(272, 273, 274)
 	traffic("ABC")
+	var owner runtimeplan.InstanceStatus
+	if err := f.control.Do(ctx, "GET", "/v1/services/"+election, nil, &owner); err != nil {
+		t.Fatal(err)
+	}
+	var grant vrrp.Snapshot
+	if err := json.Unmarshal(owner.Snapshot, &grant); err != nil {
+		t.Fatal(err)
+	}
 	var processes supervisor.Status
 	if err := f.supervisor.Do(ctx, "GET", "/v1/status", nil, &processes); err != nil {
 		t.Fatal(err)
@@ -393,7 +403,49 @@ func TestDaemonConnectionMarkedEgressPolicy(t *testing.T) {
 			t.Cleanup(func() { _ = syscall.Kill(process.PID, syscall.SIGCONT) })
 		}
 	}
-	waitMarks() // The writer independently blocks new flows at original expiry.
+	var applied network.DesiredPage
+	if err := f.network.Do(ctx, "GET", "/v1/observations/desired", nil, &applied); err != nil {
+		t.Fatal(err)
+	}
+	var desired network.Desired
+	if err := json.Unmarshal(applied.Data, &desired); err != nil {
+		t.Fatal(err)
+	}
+	var authority lifetime.Deadline
+	for _, link := range desired.Links {
+		if link.Name == "lan-ha" {
+			authority = link.Authority
+		}
+	}
+	clock, err := boottime.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if authority.BootID != clock.BootID || authority.Nanos <= uint64(clock.BoottimeNanoseconds) {
+		t.Fatal("missing live applied gateway authority", authority, clock)
+	}
+	t.Logf("frozen election observed=%d expires=%d; applied gateway expires=%d; now=%d", grant.ObservedNanos, grant.ExpiresNanos, authority.Nanos, clock.BoottimeNanoseconds)
+	for path, conn := range existing {
+		if got := read(conn.udp, true); got != path {
+			t.Fatal("live gateway authority lost established UDP", path, got)
+		}
+	}
+	waitMarks() // Health expiry blocks new flows before the election expires.
+	until(t, 5*time.Second, func() bool {
+		clock, err = boottime.Read()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if authority.Live(clock) {
+			return false
+		}
+		link, err := netlink.LinkByName("lan-ha")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return link.Attrs().Flags&net.FlagUp == 0
+	})
+	t.Logf("gateway fenced at boottime=%d, original applied expiry=%d", clock.BoottimeNanoseconds, authority.Nanos)
 	if err := syscall.Kill(writer.PID, syscall.SIGKILL); err != nil {
 		t.Fatal(err)
 	}

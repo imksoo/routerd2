@@ -31,6 +31,7 @@ import (
 type projection struct {
 	observationVersion uint64
 	activationUntil    uint64
+	pendingAdmission   bool
 	vrrpOwners         map[string]vrrpOwnership
 	egressSelections   map[string]resourceprogram.EgressSelection
 	native             config.Native
@@ -344,6 +345,7 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 				}
 			}
 			if !admitted {
+				p.pendingAdmission = snap.State == vrrp.StateActive && c.GracefulActivation != nil || p.pendingAdmission
 				continue
 			}
 			if until != 0 && (p.activationUntil == 0 || until < p.activationUntil) {

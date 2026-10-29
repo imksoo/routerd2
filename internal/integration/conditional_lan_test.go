@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
@@ -429,32 +430,63 @@ exec "$@"
 			controller = module.PID
 		}
 	}
+	// A short control stall must not revoke an otherwise live election grant.
+	// Synchronize with the actual activation deadline, not the status RPC budget.
+	until(t, 3*time.Second, func() bool {
+		if err := f.control.Do(ctx, "GET", "/v1/services/"+advertisement+"/ra", nil, &input); err != nil {
+			t.Fatal(err)
+		}
+		clock, err := boottime.Read()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return input.ActiveUntil.Remaining(clock) > 2*time.Second
+	})
+	func() {
+		capture.mu.Lock()
+		first := len(capture.packets)
+		capture.mu.Unlock()
+		if err := unix.Kill(controller, unix.SIGSTOP); err != nil {
+			t.Fatal(err)
+		}
+		defer unix.Kill(controller, unix.SIGCONT)
+		time.Sleep(1500 * time.Millisecond)
+		capture.mu.Lock()
+		defer capture.mu.Unlock()
+		for _, packet := range capture.packets[first:] {
+			if b := packet.data; len(b) >= 70 && b[54] == 134 && binary.BigEndian.Uint16(b[60:]) == 0 {
+				t.Fatal("RA revoked a live election during a short control stall")
+			}
+		}
+	}()
+	communication()
 	func() {
 		if err := unix.Kill(controller, unix.SIGSTOP); err != nil {
 			t.Fatal(err)
 		}
 		defer unix.Kill(controller, unix.SIGCONT)
-		stopped := time.Now()
 		capture.mu.Lock()
 		first := len(capture.packets)
 		capture.mu.Unlock()
-		until(t, 2*time.Second, func() bool {
+		var withdrawnAt time.Time
+		until(t, 5*time.Second, func() bool {
 			capture.mu.Lock()
 			defer capture.mu.Unlock()
 			for _, p := range capture.packets[first:] {
 				b := p.data
 				if len(b) >= 70 && b[54] == 134 && binary.BigEndian.Uint16(b[60:]) == 0 {
+					withdrawnAt = p.at
 					return true
 				}
 			}
 			return false
 		})
-		time.Sleep(time.Until(stopped.Add(1500 * time.Millisecond)))
+		time.Sleep(500 * time.Millisecond)
 		capture.mu.Lock()
 		defer capture.mu.Unlock()
 		for _, p := range capture.packets[first:] {
 			b := p.data
-			if len(b) >= 70 && b[54] == 134 && p.at.After(stopped.Add(time.Second)) && binary.BigEndian.Uint16(b[60:]) != 0 {
+			if len(b) >= 70 && b[54] == 134 && p.at.After(withdrawnAt) && binary.BigEndian.Uint16(b[60:]) != 0 {
 				t.Fatal("RA advertised after stopped control's authority expired")
 			}
 		}
@@ -544,5 +576,5 @@ exec "$@"
 	communication()
 	localQuery()
 	f.stop()
-	t.Log("legacy import: independent ISC/keepalived/Linux client acquired SLAAC/default/DNS, used UDP/TCP DNS and IPv6 TCP/UDP, withdrew and restored serving on role change and original control authority expiry; configured7200s router lifetime kept distinct from1s activation; imported dynamic listen addresses, learned forwarding/bootstrap, original PD loss/reacquisition and the same fixed DNS TCP connection")
+	t.Log("legacy import: independent ISC/keepalived/Linux client acquired SLAAC/default/DNS, used UDP/TCP DNS and IPv6 TCP/UDP, withdrew and restored serving on role change and original control authority expiry; short control stall kept serving and actual election expiry withdrew; configured7200s wire lifetime distinct from activation; imported dynamic listen addresses, learned forwarding/bootstrap, original PD loss/reacquisition and the same fixed DNS TCP connection")
 }

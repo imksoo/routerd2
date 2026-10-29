@@ -246,7 +246,9 @@ func (r *Runtime) conditionFactsLocked(cfg configuration) (result resourceprogra
 			if !module.Ready || record.Generation != module.Generation || record.ConfigDigest != binding.digest || json.Unmarshal(record.Snapshot, &election) != nil || election.BootID != clock.BootID {
 				continue
 			}
-			fact := resourceprogram.Fact{Value: resourceprogram.False, ObservedNanos: election.ObservedNanos, ExpiresNanos: min(election.ExpiresNanos, r.guard.untilNanos), WorkerGeneration: module.Generation, ProducerEpoch: record.ProducerEpoch}
+			// The election owns this grant. The supervisor query budget is
+			// checked above; it must not shorten the RA worker's activation.
+			fact := resourceprogram.Fact{Value: resourceprogram.False, ObservedNanos: election.ObservedNanos, ExpiresNanos: election.ExpiresNanos, WorkerGeneration: module.Generation, ProducerEpoch: record.ProducerEpoch}
 			if r.ownsVRRPLocked(record, election) {
 				fact.Value = resourceprogram.True
 			}

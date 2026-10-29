@@ -105,7 +105,11 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 	for _, r := range resources {
 		switch r.Kind {
 		case "IPv4StaticAddress":
-			c.static4(r)
+			nodes := c.static4(r)
+			for _, node := range nodes {
+				conditions = append(conditions, resourceCondition{id: node.ID, source: r, when: r.Spec.(api.IPv4StaticAddressSpec).When})
+			}
+			extra = append(extra, nodes...)
 		case "VirtualAddress":
 			name, nodes := c.virtualAddress(r)
 			if name != "" {
@@ -141,9 +145,9 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 	// the source. Compile all aliases before resolving the tunnel graph.
 	for _, r := range resources {
 		if r.Kind == "DSLiteTunnel" {
-			c.dslite(r)
+			when := c.dslite(r)
 			if _, dynamic := c.dynamicTunnels[c.aliases[r.Kind+"/"+r.Metadata.Name]]; dynamic {
-				conditions = append(conditions, resourceCondition{id: "service/" + c.serviceName(r, "aftr"), source: r, when: r.Spec.(api.DSLiteTunnelSpec).When})
+				conditions = append(conditions, resourceCondition{id: "service/" + c.serviceName(r, "aftr"), source: r, when: when})
 			}
 		}
 	}
@@ -267,6 +271,7 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 		}
 		for _, provider := range c.document.Services {
 			if provider.DSLite != nil && provider.DSLite.Tunnel == resource.Service.Health.Interface {
+				resource.DependsOn = append(resource.DependsOn, "service/"+provider.Name)
 				resource.When = egressAll(resource.When, &resourceprogram.FactCondition{Fact: provider.ModuleName() + ".active"})
 				break
 			}
@@ -363,7 +368,7 @@ func (c *compiler) allow(r resource, fields ...string) {
 	for _, field := range []string{"when", "dependsOn", "ready_when"} {
 		if field == "when" {
 			switch r.Kind {
-			case "NAT44Rule", "BGPRouter", "EgressRoutePolicy", "HealthCheck", "DHCPv6PrefixDelegation", "DHCPv6Information", "NTPClient", "DHCPv6Server", "IPv6RouterAdvertisement":
+			case "IPv4StaticAddress", "NAT44Rule", "BGPRouter", "EgressRoutePolicy", "HealthCheck", "DHCPv6PrefixDelegation", "DHCPv6Information", "NTPClient", "DHCPv6Server", "IPv6RouterAdvertisement":
 				continue
 			case "DSLiteTunnel":
 				if _, dynamic := c.options.DSLite[r.Kind+"/"+r.Metadata.Name]; dynamic || r.Spec.(api.DSLiteTunnelSpec).LocalAddressSource == "delegatedAddress" {
@@ -455,36 +460,48 @@ func (c *compiler) getRef(r resource, field, value, kind string) *resource {
 }
 
 func (c *compiler) resolveStaticAddress(r resource, field string, source api.StatusValueSourceSpec, ipv4 bool) string {
+	address, when := c.resolveAddress(r, field, source, ipv4)
+	if len(when.All)+len(when.Any)+len(when.State) != 0 {
+		c.reject(r, field, "unsupported_semantics", "this static consumer cannot retain the source address activation condition")
+		return ""
+	}
+	return address
+}
+
+// A literal address and its activation are separate intent. Consumers which
+// retain activation can prepare the value without publishing it unconditionally.
+func (c *compiler) resolveAddress(r resource, field string, source api.StatusValueSourceSpec, ipv4 bool) (string, api.ResourceWhenSpec) {
 	if source.Optional {
 		c.reject(r, field, "unsupported_semantics", "optional status-source fallback cannot be frozen into a static address")
-		return ""
+		return "", api.ResourceWhenSpec{}
 	}
 	if source.Field != "" && source.Field != "address" {
 		c.reject(r, field+".field", "unsupported_semantics", "only an explicit static resource address can be resolved during migration")
-		return ""
+		return "", api.ResourceWhenSpec{}
 	}
 	ref := c.byRef[source.Resource]
 	if ref == nil {
 		c.reject(r, field+".resource", "reference", "static address source is missing or not a Kind/name reference")
-		return ""
+		return "", api.ResourceWhenSpec{}
 	}
 	value := ""
+	var when api.ResourceWhenSpec
 	switch s := ref.Spec.(type) {
 	case api.IPv4StaticAddressSpec:
-		if ipv4 && !meaningful(child(ref.node, "when")) {
-			value = s.Address
+		if ipv4 {
+			value, when = s.Address, s.When
 		}
 	case api.VirtualAddressSpec:
-		if (s.Mode == "" || s.Mode == "static") && s.AddressFrom.Resource == "" && !meaningful(child(ref.node, "when")) {
-			value = s.Address
+		if (s.Mode == "" || s.Mode == "static") && s.AddressFrom.Resource == "" {
+			value, when = s.Address, s.When
 		}
 	}
 	prefix, err := netip.ParsePrefix(value)
 	if err != nil || prefix.Addr().Is4() != ipv4 || prefix.Addr().Is4In6() {
-		c.reject(r, field, "unsupported_semantics", "address source is dynamic, conditional, invalid, or of the wrong address family")
-		return ""
+		c.reject(r, field, "unsupported_semantics", "address source is dynamic, invalid, or of the wrong address family")
+		return "", api.ResourceWhenSpec{}
 	}
-	return prefix.Addr().String()
+	return prefix.Addr().String(), when
 }
 
 func (c *compiler) checkAddressOverlap() {

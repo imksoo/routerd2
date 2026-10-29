@@ -382,6 +382,25 @@ func (r *Runtime) reconcileStep(ctx context.Context, ceiling map[string]supervis
 			r.mu.Unlock()
 			return false, nil
 		}
+		// These newer observations have the same acknowledged effects.
+		// Retain the actual applied deadlines; do not acknowledge extensions.
+		r.applied.observationVersion = current.observationVersion
+	}
+	if p.pendingAdmission {
+		// Consume admission immediately after acknowledging its prerequisites.
+		// Another worker notification invalidates network.applied again and can
+		// starve VIP publication under continuous Health input.
+		admitted, err := r.projectProgramLocked(r.config, r.observationsLocked(), time.Now())
+		if err != nil {
+			r.mu.Unlock()
+			return false, err
+		}
+		if admitted.activationUntil != 0 {
+			_, err = r.applyProjectionLocked(ctx, admitted)
+			r.wakeCoordinatorLocked()
+			r.mu.Unlock()
+			return false, err
+		}
 	}
 	if changed {
 		r.bindings = set.bindings

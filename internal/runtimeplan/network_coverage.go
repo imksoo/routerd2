@@ -65,6 +65,15 @@ func networkCovered(applied, desired network.Desired) bool {
 				current.Authority = old.Authority
 			}
 		}
+		if len(applied.Firewall.FlowRoutes) == len(firewall.FlowRoutes) {
+			firewall.FlowRoutes = slices.Clone(firewall.FlowRoutes)
+			for i, old := range applied.Firewall.FlowRoutes {
+				current := &firewall.FlowRoutes[i]
+				if old.Authority.BootID != "" && current.Authority.BootID == old.Authority.BootID && current.Authority.Nanos >= old.Authority.Nanos {
+					current.Authority = old.Authority
+				}
+			}
+		}
 		desired.Firewall = &firewall
 	}
 	return reflect.DeepEqual(applied, desired)
