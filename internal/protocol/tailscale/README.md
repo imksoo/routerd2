@@ -76,6 +76,12 @@ global/split resolvers and search-domain installation are not exposed yet.
 Tailscale SSH is not enabled and is separate from routerd management SSH. `BackendState=Running`, the daemon's self `Online` flag and `.active` describe
 the observed engine state. They do not prove a live control-server connection,
 a usable subnet or an exit path; Health can check the required communication.
+A failed observation publication is reported as a warning. It does not revoke
+or extend the engine's current activation grant. The loop continues to check
+that original deadline and stops the engine when it expires, including when
+control is unavailable. Missing reports still expire in control's observation
+view; a reporting failure is not reported as healthy connectivity.
+
 Status includes original finite boot observation times, actual peer traffic
 counters, each peer's DNS name and assigned tags. The node snapshot exposes
 `dns_name`, `tags` and the current `tailnet` (`name`, `dns_domain`,

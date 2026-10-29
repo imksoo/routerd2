@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"runtime"
 	"strings"
@@ -181,7 +182,9 @@ func Run(ctx context.Context, cfg tailscaleconfig.Config, image *os.File, input 
 				err = observe(call, snapshot)
 				cancel()
 				if err != nil {
-					return err
+					// Reporting does not revoke the engine's original authority.
+					// The next iteration still stops it if that grant expired.
+					slog.Warn("publish Tailscale observation", "error", err)
 				}
 			} else if err = stop(); err != nil {
 				return err
