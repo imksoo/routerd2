@@ -185,6 +185,19 @@ func (e *Engine) expireAuthority(ctx context.Context) (time.Duration, error) {
 	if firewall := e.state.Desired.Firewall; firewall != nil {
 		changed := false
 		next := *firewall
+		next.NAT = nil
+		for _, rule := range firewall.NAT {
+			if !rule.Authority.Live(clock.Clock) {
+				changed = true
+				continue
+			}
+			next.NAT = append(next.NAT, rule)
+			if rule.Authority != (lifetime.Deadline{}) {
+				if remaining := rule.Authority.Remaining(clock.Clock); delay == 0 || remaining < delay {
+					delay = remaining
+				}
+			}
+		}
 		next.FlowRoutes = slices.Clone(firewall.FlowRoutes)
 		for i, flow := range next.FlowRoutes {
 			if flow.Authority == (lifetime.Deadline{}) {

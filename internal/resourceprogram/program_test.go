@@ -153,7 +153,7 @@ func TestFromNativePreservesEverySupportedProjection(t *testing.T) {
 			Routes:      []network.Route{{Destination: "0.0.0.0/0", Interface: "b4", Table: 100}, {Destination: "2001:db8:1::/64", NextHops: []network.NextHop{{Gateway: "2001:db8::2", Interface: "wan0", Weight: 1}, {Gateway: "2001:db8::3", Interface: "wan0", Weight: 2}}, Metric: 50}},
 			PolicyRules: []network.PolicyRule{{Family: 4, Priority: 100, Table: 100, Source: "10.0.0.0/24", Mark: pointer(uint32(1)), Mask: pointer(uint32(255))}},
 			Forwarding:  network.Forwarding{IPv4: pointer(true), IPv6: pointer(false)},
-			Firewall:    &network.Firewall{Forward: []network.Forward{{From: "lan0", To: "b4"}}, Masquerade: []network.Masquerade{{Source: "10.0.0.0/24", OutInterface: "b4"}}},
+			Firewall:    &network.Firewall{Forward: []network.Forward{{From: "lan0", To: "b4"}}, NAT: []network.NATRule{{Type: "masquerade", Match: network.PacketMatch{Family: 4, Source: "10.0.0.0/24", OutInterface: "b4"}}}},
 			VRRPGuards:  []network.VRRPGuard{{Family: 4, Interface: "wan0", Addresses: []string{"192.0.2.3"}}},
 			WireGuard:   []network.WireGuard{{Interface: "wg0", PrivateKeyFile: "/var/lib/routerd/keys/wg0", GeneratePrivateKey: true, ListenPort: 51820, FirewallMark: 200}},
 		},

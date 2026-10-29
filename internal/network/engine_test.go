@@ -262,7 +262,7 @@ func engineFor(t *testing.T, k *fakeKernel) (*Engine, Options) {
 }
 func yes() *bool { v := true; return &v }
 func exampleDesired() Desired {
-	return Desired{Interfaces: []Interface{{Name: "lan0", MTU: 1400, Addresses: []string{"192.0.2.1/24", "2001:db8:1::1/64"}}, {Name: "wan0", Addresses: []string{"198.51.100.2/24"}}}, Routes: []Route{{Destination: "0.0.0.0/0", Gateway: "198.51.100.1", Interface: "wan0", Metric: 100}}, Forwarding: Forwarding{IPv4: yes(), IPv6: yes()}, Firewall: &Firewall{Forward: []Forward{{From: "lan0", To: "wan0"}}, Masquerade: []Masquerade{{Source: "192.0.2.0/24", OutInterface: "wan0"}}}}
+	return Desired{Interfaces: []Interface{{Name: "lan0", MTU: 1400, Addresses: []string{"192.0.2.1/24", "2001:db8:1::1/64"}}, {Name: "wan0", Addresses: []string{"198.51.100.2/24"}}}, Routes: []Route{{Destination: "0.0.0.0/0", Gateway: "198.51.100.1", Interface: "wan0", Metric: 100}}, Forwarding: Forwarding{IPv4: yes(), IPv6: yes()}, Firewall: &Firewall{Forward: []Forward{{From: "lan0", To: "wan0"}}, NAT: []NATRule{{Type: "masquerade", Match: PacketMatch{Family: 4, Source: "192.0.2.0/24", OutInterface: "wan0"}}}}}
 }
 
 func TestRestartReconcileAndRollbackPreserveForeignState(t *testing.T) {
@@ -435,7 +435,7 @@ func TestValidateRejectsUnsafeOrAmbiguousIntent(t *testing.T) {
 		{Routes: []Route{{Destination: "192.0.2.1/24", Interface: "lan0"}}},
 		{Routes: []Route{{Destination: "::/0", Gateway: "192.0.2.1", Interface: "lan0"}}},
 		{Routes: []Route{{Destination: "2001:0db8::/32", Interface: "lan0"}, {Destination: "2001:db8::/32", Interface: "wan0"}}},
-		{Firewall: &Firewall{Masquerade: []Masquerade{{Source: "192.0.2.1/24", OutInterface: "wan0"}}}},
+		{Firewall: &Firewall{NAT: []NATRule{{Type: "masquerade", Match: PacketMatch{Family: 4, Source: "192.0.2.1/24", OutInterface: "wan0"}}}}},
 		{Links: []Link{{Name: "t0", Kind: "ip6tnl", Parent: "wan0", Local: "192.0.2.1", Remote: "2001:db8::2"}}},
 	} {
 		if err := Validate(d); err == nil {

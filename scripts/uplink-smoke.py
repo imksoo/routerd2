@@ -114,6 +114,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             for role in roles
         },
     )
+    nat_rules = [{"type": "masquerade", "match": {"family": 4, "source": "198.18.0.0/24", "out_interface": "dslite0"}}]
     resources = [
         {"id": "wan", "interface": {"name": "wan0", "ipv4_rp_filter": 0}},
         {"id": "lan", "interface": {"name": "lan0"}},
@@ -133,7 +134,6 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
                     {"from": "lan0", "to": "wan0"},
                     {"from": "lan0", "to": "dslite0"},
                 ],
-                "masquerade": [{"source": "198.18.0.0/24", "out_interface": "dslite0"}],
                 "mss_clamp": [
                     {"from": a, "to": b, "family": f, "mtu": mtu}
                     for a, b, f, mtu in [
@@ -250,6 +250,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
         source = resources[-1]["service"]["dns"]["spec"]["sources"][-1]
         source["upstreams"] = [dns_upstream]
         source["bootstrapResolverFrom"] = source.pop("upstreamFrom")
+    resources.append({"id": "nat", "nat": nat_rules})
     resources.append({"id": "host-wan", "host_route": {
         "interface": "wan0", "router_from": "service.wan-ra", "table": 120, "priority": 10120,
         "bypasses": [{"service": "service.internet", "priority": 10100}],
@@ -354,15 +355,15 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             firewall = next(r["firewall"] for r in resources if "firewall" in r)
             firewall["forward"] += [{"from": "tailscale0", "to": name} for name in ("lan0", "dslite0", "wan0")]
             firewall["forward"].append({"from": "lan0", "to": "tailscale0"})
-            firewall["masquerade"] += [
-                {"source": "100.64.0.0/10", "out_interface": "dslite0"},
-                {"source": "fd7a:115c:a1e0::/48", "out_interface": "wan0"},
+            nat_rules += [
+                {"type": "masquerade", "match": {"family": 4, "source": "100.64.0.0/10", "out_interface": "dslite0"}},
+                {"type": "masquerade", "match": {"family": 6, "source": "fd7a:115c:a1e0::/48", "out_interface": "wan0"}},
             ]
             # No delegated IPv6 subnet is advertised in this profile. Make
             # outbound LAN IPv6 use the router's tailnet identity explicitly;
             # upstream's local-destination filter otherwise drops its replies.
-            firewall["nat"] = [{"type": "masquerade", "match": {
-                "family": 6, "in_interface": "lan0", "out_interface": "tailscale0"}}]
+            nat_rules.append({"type": "masquerade", "match": {
+                "family": 6, "in_interface": "lan0", "out_interface": "tailscale0"}})
             (stage / "boot.json").write_text(json.dumps(boot))
             (stage / "config.json").write_text(json.dumps({"schema_version": 2, "resources": resources}))
             peer_socket = peerbin / "peer.sock"
@@ -521,6 +522,12 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
         print("PASS independent dhcpcd automatically acquired DHCPv4 and RA-triggered DHCPv6 with delegated SLAAC", flush=True)
 
         def forwarding_ready():
+            for namespace, interface in ((client, "client0"), (automatic, "client1")):
+                links = json.loads(run(["ip", "-n", namespace, "-j", "-6", "addr", "show", "dev", interface]))
+                if not any(a.get("scope") == "global" and not a.get("tentative") and not a.get("deprecated") for link in links for a in link["addr_info"]):
+                    return False
+                if not json.loads(run(["ip", "-n", namespace, "-j", "-6", "route", "show", "default"])):
+                    return False
             observed = query("control.sock", "/v1/services/service.internet").get(
                 "snapshot", {}
             )
@@ -805,7 +812,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
         def recovered():
             instance = query("control.sock", "/v1/services/service.wan-pd")
             return (
-                instance["generation"] > previous["generation"]
+                instance.get("generation", 0) > previous["generation"]
                 and instance.get("snapshot", {}).get("state") == "bound"
             )
 

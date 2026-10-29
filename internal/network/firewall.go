@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/netip"
 	"strings"
+
+	"github.com/imksoo/routerd2/internal/lifetime"
 )
 
 // FirewallChain first drops invalid conntrack state, then accepts established
@@ -53,7 +55,7 @@ type PortRange struct {
 
 // NATRule translates new connections in the routerd2 inet table. Type is
 // dnat/snat/masquerade. DNAT runs at prerouting; SNAT and masquerade run at
-// postrouting, in the order declared before legacy Masquerade entries. It does
+// postrouting, in the order declared. It does
 // not implicitly authorize forwarding. Match.Family must explicitly be 4/6;
 // Address is a same-family unicast IP for DNAT/SNAT and empty for masquerade.
 // Ports optionally selects a translated TCP/UDP port or inclusive port range.
@@ -62,11 +64,12 @@ type PortRange struct {
 // matching policy rule. The mark must be unique to this rule and is replicated
 // with conntrack; zero leaves routing unpinned.
 type NATRule struct {
-	Type           string      `json:"type"`
-	Match          PacketMatch `json:"match"`
-	Address        string      `json:"address,omitempty"`
-	Ports          *PortRange  `json:"ports,omitempty"`
-	ConnectionMark uint32      `json:"connection_mark,omitempty"`
+	Authority      lifetime.Deadline `json:"authority,omitzero"`
+	Type           string            `json:"type"`
+	Match          PacketMatch       `json:"match"`
+	Address        string            `json:"address,omitempty"`
+	Ports          *PortRange        `json:"ports,omitempty"`
+	ConnectionMark uint32            `json:"connection_mark,omitempty"`
 }
 
 // MSSClamp lowers an existing TCP MSS option on SYN/SYN-ACK packets crossing
@@ -271,6 +274,9 @@ func validateFirewall(f *Firewall) error {
 	}
 	marks := make(map[uint32]bool)
 	for i, rule := range f.NAT {
+		if err := rule.Authority.Validate(); err != nil {
+			errs = append(errs, fmt.Errorf("NAT rule %d authority: %w", i, err))
+		}
 		hook := "postrouting"
 		if rule.Type == "dnat" {
 			hook = "prerouting"

@@ -158,7 +158,7 @@ func (p Plan) Project(facts FactSnapshot) (Native, map[string]ResourceState) {
 		interfaces[iface.Name] = iface
 	}
 	clock := boottime.Clock{BootID: facts.Scope.BootID, BoottimeNanoseconds: int64(facts.NowNanos), WallTime: facts.WallTime}
-	linkIndex, routeIndex, ruleIndex := 0, 0, 0
+	linkIndex, routeIndex, ruleIndex, natIndex := 0, 0, 0, 0
 	for _, node := range selected {
 		authority := states[node.source.ID].ActiveUntil
 		switch {
@@ -176,6 +176,11 @@ func (p Plan) Project(facts FactSnapshot) (Native, map[string]ResourceState) {
 		case node.source.PolicyRule != nil:
 			native.Network.PolicyRules[ruleIndex].Authority = authority
 			ruleIndex++
+		case node.source.NAT != nil:
+			for range node.source.NAT {
+				native.Network.Firewall.NAT[natIndex].Authority = authority
+				natIndex++
+			}
 		case node.source.Address != nil && authority != (lifetime.Deadline{}):
 			address := node.source.Address
 			iface := interfaces[address.Interface]
@@ -199,6 +204,7 @@ func conditionReason(prefix string, value Truth) string {
 // collections are mutable; configuration payloads remain owned by their plan.
 func renderNative(nodes []compiledResource) Native {
 	var out Native
+	var nat []network.NATRule
 	interfaces := make(map[string]int)
 	ensureInterface := func(name string) int {
 		if index, exists := interfaces[name]; exists {
@@ -254,6 +260,8 @@ func renderNative(nodes []compiledResource) Native {
 			}
 		case r.Firewall != nil:
 			out.Network.Firewall = r.Firewall
+		case r.NAT != nil:
+			nat = append(nat, r.NAT...)
 		case r.VRRPGuard != nil:
 			out.Network.VRRPGuards = append(out.Network.VRRPGuards, *r.VRRPGuard)
 		case r.WireGuard != nil:
@@ -265,6 +273,14 @@ func renderNative(nodes []compiledResource) Native {
 		case r.DerivedEvent != nil:
 			out.DerivedEvents = append(out.DerivedEvents, node.derived)
 		}
+	}
+	if len(nat) > 0 {
+		firewall := network.Firewall{DisableForward: true}
+		if out.Network.Firewall != nil {
+			firewall = *out.Network.Firewall
+		}
+		firewall.NAT = nat
+		out.Network.Firewall = &firewall
 	}
 	return out
 }

@@ -228,10 +228,6 @@ print('PASS actual IPv6 UDP Packet Too Big MTU1280 and subsequent 1200-byte UDP 
                     "policy": "drop",
                     "rules": [{"match": {"in_interface": "lan0", "out_interface": "ppp-wan"}, "action": "accept"}],
                 },
-                "masquerade": [
-                    {"source": "10.42.0.0/24", "out_interface": "ppp-wan"},
-                    {"source": "10.42.0.0/24", "out_interface": "dslite0"},
-                ],
             },
         },
         {
@@ -323,6 +319,10 @@ print('PASS actual IPv6 UDP Packet Too Big MTU1280 and subsequent 1200-byte UDP 
         {"from": "lan0", "to": wan}
         for wan in ["ppp-wan", "dslite0"]
     ]
+    resources.append({"id": "nat", "nat": [
+        {"type": "masquerade", "match": {"family": 4, "source": "10.42.0.0/24", "out_interface": name}}
+        for name in ("ppp-wan", "dslite0")
+    ]})
     configuration = {"schema_version": 2, "resources": resources}
     (stage / "config.json").write_text(json.dumps(configuration))
     (stage / "password").write_text("routerd2-fixture\n")

@@ -81,6 +81,11 @@ func decodeNativePolicyRule(raw []byte) (PolicyRuleState, error) {
 				out.Mark = &n
 			case nl.FRA_FWMASK:
 				out.Mask = &n
+			case nl.FRA_SUPPRESS_PREFIXLEN:
+				if n != ^uint32(0) {
+					prefixLength := int(n)
+					out.SuppressPrefixLength = &prefixLength
+				}
 			default:
 				if n != ^uint32(0) {
 					out.Advanced = true
@@ -144,6 +149,9 @@ func nativePolicyRule(r PolicyRule) (*netlink.Rule, error) {
 	out.IifName = r.InInterface
 	out.OifName = r.OutInterface
 	out.Invert = r.Invert
+	if r.SuppressPrefixLength != nil {
+		out.SuppressPrefixlen = *r.SuppressPrefixLength
+	}
 	if r.Source != "" {
 		_, prefix, err := net.ParseCIDR(r.Source)
 		if err != nil {

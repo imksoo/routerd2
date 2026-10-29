@@ -237,3 +237,57 @@ spec:
         mark: 276
         healthCheck: health4
         weight: 60
+
+  - apiVersion: firewall.routerd.net/v1alpha1
+    kind: FirewallZone
+    metadata: {name: lan}
+    spec: {role: trust, interfaces: [Interface/lan]}
+  - apiVersion: firewall.routerd.net/v1alpha1
+    kind: FirewallZone
+    metadata: {name: wan}
+    # The pinned zone renderer resolves the suffix, including a legacy kind prefix.
+    spec: {role: untrust, interfaces: [DSLiteTunnel/wan0, Interface/wan1, Interface/wan2, Interface/wan3, Interface/wan4]}
+  - apiVersion: firewall.routerd.net/v1alpha1
+    kind: FirewallPolicy
+    metadata: {name: filter}
+    spec: {sameRoleAccept: true}
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: NAT44Rule
+    metadata: {name: wan0}
+    spec:
+      type: masquerade
+      egressInterface: wan0
+      sourceRanges: [198.18.0.0/24]
+      when: {state: {VirtualAddress/gateway.role: {equals: master}}}
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: NAT44Rule
+    metadata: {name: wan1}
+    spec:
+      type: masquerade
+      egressInterface: wan1
+      sourceRanges: [198.18.0.0/24]
+      when: {state: {VirtualAddress/gateway.role: {equals: master}}}
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: NAT44Rule
+    metadata: {name: wan2}
+    spec:
+      type: masquerade
+      egressInterface: wan2
+      sourceRanges: [198.18.0.0/24]
+      when: {state: {VirtualAddress/gateway.role: {equals: master}}}
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: NAT44Rule
+    metadata: {name: wan3}
+    spec:
+      type: masquerade
+      egressInterface: wan3
+      sourceRanges: [198.18.0.0/24]
+      when: {state: {VirtualAddress/gateway.role: {equals: master}}}
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: NAT44Rule
+    metadata: {name: wan4}
+    spec:
+      type: masquerade
+      egressInterface: wan4
+      sourceRanges: [198.18.0.0/24]
+      when: {state: {VirtualAddress/gateway.role: {equals: master}}}

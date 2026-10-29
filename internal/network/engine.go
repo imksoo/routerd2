@@ -18,7 +18,7 @@ import (
 var errLinkNotFound = errors.New("link not found")
 
 // JournalVersion is the persisted network ownership/BOOTTIME contract.
-const JournalVersion = 17
+const JournalVersion = 18
 
 type settingKey struct {
 	Kind      string `json:"kind"`

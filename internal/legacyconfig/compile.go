@@ -203,7 +203,7 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 	c.dns()
 	conditions = append(conditions, c.bgp()...)
 	c.ntp(vrrpNames)
-	c.firewall()
+	extra = append(extra, c.firewall(vrrpNames)...)
 	c.firewallServices()
 	c.vpnListenerFirewall()
 	// Admission references can name a PD declared after its VRRP election.
@@ -363,7 +363,7 @@ func (c *compiler) allow(r resource, fields ...string) {
 	for _, field := range []string{"when", "dependsOn", "ready_when"} {
 		if field == "when" {
 			switch r.Kind {
-			case "BGPRouter", "EgressRoutePolicy", "HealthCheck", "DHCPv6PrefixDelegation", "DHCPv6Information", "NTPClient", "DHCPv6Server", "IPv6RouterAdvertisement":
+			case "NAT44Rule", "BGPRouter", "EgressRoutePolicy", "HealthCheck", "DHCPv6PrefixDelegation", "DHCPv6Information", "NTPClient", "DHCPv6Server", "IPv6RouterAdvertisement":
 				continue
 			case "DSLiteTunnel":
 				if _, dynamic := c.options.DSLite[r.Kind+"/"+r.Metadata.Name]; dynamic || r.Spec.(api.DSLiteTunnelSpec).LocalAddressSource == "delegatedAddress" {

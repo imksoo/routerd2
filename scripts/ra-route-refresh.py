@@ -98,7 +98,6 @@ def peer(stage):
             "id": "firewall",
             "firewall": {
                 "forward": [{"from": "lan0", "to": "dslite0"}],
-                "masquerade": [{"source": "10.42.0.0/24", "out_interface": "dslite0"}],
             },
         },
         {
@@ -192,6 +191,7 @@ def peer(stage):
                 "upstreamFrom": [{"resource": provider} for provider in providers],
             }
         )
+    resources.append({"id": "nat", "nat": [{"type": "masquerade", "match": {"family": 4, "source": "10.42.0.0/24", "out_interface": "dslite0"}}]})
     (stage / "config.json").write_text(
         json.dumps({"schema_version": 2, "resources": resources})
     )

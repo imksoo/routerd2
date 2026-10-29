@@ -50,6 +50,7 @@ type Resource struct {
 	EgressRoute  *EgressRoute           `json:"egress_route,omitempty"`
 	PolicyRule   *network.PolicyRule    `json:"policy_rule,omitempty"`
 	Forwarding   *network.Forwarding    `json:"forwarding,omitempty"`
+	NAT          []network.NATRule      `json:"nat,omitempty"`
 	Firewall     *network.Firewall      `json:"firewall,omitempty"`
 	VRRPGuard    *network.VRRPGuard     `json:"vrrp_guard,omitempty"`
 	WireGuard    *network.WireGuard     `json:"wireguard,omitempty"`
@@ -135,7 +136,7 @@ func (r Resource) kind() (string, int) {
 		{"interface", r.Interface != nil}, {"address", r.Address != nil},
 		{"host_route", r.HostRoute != nil}, {"egress_policy", r.EgressPolicy != nil}, {"link", r.Link != nil}, {"route", r.Route != nil}, {"egress_route", r.EgressRoute != nil},
 		{"policy_rule", r.PolicyRule != nil}, {"forwarding", r.Forwarding != nil},
-		{"firewall", r.Firewall != nil},
+		{"firewall", r.Firewall != nil}, {"nat", r.NAT != nil},
 		{"vrrp_guard", r.VRRPGuard != nil}, {"wireguard", r.WireGuard != nil},
 		{"service", r.Service != nil},
 		{"event_rule", r.EventRule != nil},

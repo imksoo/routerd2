@@ -1,6 +1,4 @@
-2026-10-30 JST pd-authority-native74: PD期限を1秒の監視照会期限で切り詰めていたRA再撤回を修正。実APKでcontrol交換後20秒以上の両IP通信・再撤回なし、ISC対向PD/IA_NA/条件付きLAN、全make check/Race/vet・両署名buildが終了0。実HGWの自然更新観測を02:12頃に再開し、04:12頃の更新・04:22頃以降の終了は未判定。全34項目の期限内完成は未達。[現在の範囲](pve-codex-handoff.md)。
-
-2026-10-29 admission-native73: homertの主系公開条件を実適用ACK・元PD期限・RA実送信へ接続した。独立peerの条件付きLAN、VIP経由5 WAN、署名PID 1二台のPD/DHCP/同じTCP/UDPと障害復旧が終了0。同じ最終版の実HGW単一出口+準備条件/VIP、90秒/9巡と全体再起動後の端末通信も終了0。全homert取込は119 issue、全34項目は未達。[現在の実装・実通信・未受入](pve-codex-handoff.md)。
+2026-10-30 JST conditional-nat-native75: WAN zone/条件付きNATを既存writerへ接続し、LAN宛てIPv6応答をWANへ向ける規則とnftablesのACK溢れを修正した。実5 WAN・kernel、実HGWの両自動端末/PD交換/全体再起動・LAN直接DNS返信が通過。全check/Race/vet・両build・署名検査は終了0。自然PD更新観測は03:08開始で未合格、全34項目・同じ構成の二台/対象実機は未受入。[現在の結果と残作業](pve-codex-handoff.md)。
 
 # 現行 routerd と同等の製品にするための実装計画
 

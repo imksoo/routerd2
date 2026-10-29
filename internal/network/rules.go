@@ -11,21 +11,22 @@ import (
 )
 
 // PolicyRule selects a routing table. This API implements the to-table action;
-// goto, suppression, l3mdev, uid/port ranges and other actions are not inferred.
+// goto, l3mdev, uid/port ranges and other actions are not inferred.
 // Family is 4 or 6. Each family/priority slot is exclusive to one rule and must
 // not collide with a rule installed by another controller.
 type PolicyRule struct {
-	Family       int               `json:"family"`
-	Priority     int               `json:"priority"`
-	Table        int               `json:"table"`
-	Source       string            `json:"source,omitempty"`
-	Destination  string            `json:"destination,omitempty"`
-	InInterface  string            `json:"in_interface,omitempty"`
-	OutInterface string            `json:"out_interface,omitempty"`
-	Mark         *uint32           `json:"mark,omitempty"`
-	Mask         *uint32           `json:"mask,omitempty"`
-	Invert       bool              `json:"invert,omitempty"`
-	Authority    lifetime.Deadline `json:"authority,omitzero"`
+	Family               int               `json:"family"`
+	Priority             int               `json:"priority"`
+	Table                int               `json:"table"`
+	Source               string            `json:"source,omitempty"`
+	Destination          string            `json:"destination,omitempty"`
+	InInterface          string            `json:"in_interface,omitempty"`
+	OutInterface         string            `json:"out_interface,omitempty"`
+	Mark                 *uint32           `json:"mark,omitempty"`
+	Mask                 *uint32           `json:"mask,omitempty"`
+	SuppressPrefixLength *int              `json:"suppress_prefix_length,omitempty"`
+	Invert               bool              `json:"invert,omitempty"`
+	Authority            lifetime.Deadline `json:"authority,omitzero"`
 }
 
 type PolicyRuleState struct {
@@ -75,6 +76,15 @@ func validatePolicyRules(rules []PolicyRule) error {
 		for _, name := range []string{r.InInterface, r.OutInterface} {
 			if name != "" && !validName(name) {
 				add("policy rule %d: invalid interface %q", r.Priority, name)
+			}
+		}
+		if r.SuppressPrefixLength != nil {
+			maximum := 128
+			if r.Family == 4 {
+				maximum = 32
+			}
+			if *r.SuppressPrefixLength < 0 || *r.SuppressPrefixLength > maximum {
+				add("policy rule %d: invalid suppressed prefix length", r.Priority)
 			}
 		}
 		if r.Mask != nil && r.Mark == nil {

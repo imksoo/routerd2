@@ -17,9 +17,7 @@ package nftables
 import (
 	"errors"
 	"fmt"
-	"os"
 	"sync"
-	"syscall"
 
 	"github.com/google/nftables/binaryutil"
 	"github.com/google/nftables/expr"
@@ -259,24 +257,20 @@ func (cc *Conn) Flush() error {
 	}
 	defer func() { _ = closer() }()
 
-	if _, err := conn.SendMessages(batch(cc.messages)); err != nil {
+	// The kernel commits or aborts the whole batch before delivering its
+	// queued errors and requested acknowledgements. Request one success ACK
+	// on the last operation; errors from any operation are still delivered.
+	// Per-operation success ACKs can overflow the socket after commit.
+	messages := batch(cc.messages)
+	for i := 1; i < len(messages)-1; i++ {
+		messages[i].Header.Flags &^= netlink.Acknowledge
+	}
+	messages[len(messages)-2].Header.Flags |= netlink.Acknowledge
+	if _, err := conn.SendMessages(messages); err != nil {
 		return fmt.Errorf("SendMessages: %w", err)
 	}
-
-	var errs error
-	// Fetch the requested acknowledgement for each message we sent.
-	for _, msg := range cc.messages {
-		if _, err := receiveAckAware(conn, msg.Header.Flags); err != nil {
-			if errors.Is(err, os.ErrPermission) || errors.Is(err, syscall.ENOBUFS) {
-				// Kernel will only send one error to user space.
-				return err
-			}
-			errs = errors.Join(errs, err)
-		}
-	}
-
-	if errs != nil {
-		return fmt.Errorf("conn.Receive: %w", errs)
+	if _, err := receiveAckAware(conn, netlink.Acknowledge); err != nil {
+		return fmt.Errorf("conn.Receive: %w", err)
 	}
 
 	return nil

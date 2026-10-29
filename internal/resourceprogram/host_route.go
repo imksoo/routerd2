@@ -30,6 +30,7 @@ type HostRoutePlan struct {
 	ID         string
 	RouterFrom string
 	Route      network.Route
+	LocalRule  network.PolicyRule
 	Rule       network.PolicyRule
 	Bypasses   []HostRouteBypass
 }
@@ -49,7 +50,11 @@ func prepareHostRoute(id string, spec HostRoute) (HostRoutePlan, error) {
 		return HostRoutePlan{}, errors.New("host route requires an IPv6 destination and explicit routing table")
 	}
 	p := HostRoutePlan{ID: id, RouterFrom: spec.RouterFrom, Route: network.Route{Destination: spec.Destination, Interface: spec.Interface, Gateway: spec.Gateway, Table: spec.Table, Metric: spec.Metric}, Rule: network.PolicyRule{Family: 6, Priority: spec.Priority, Table: spec.Table, InInterface: "lo"}, Bypasses: spec.Bypasses}
-	if err := network.Validate(network.Desired{Routes: []network.Route{p.Route}, PolicyRules: []network.PolicyRule{p.Rule}}); err != nil {
+	// A host WAN default must not steal replies to directly connected LANs
+	// or explicit main-table destinations. Suppress only main's default.
+	prefixLength := 0
+	p.LocalRule = network.PolicyRule{Family: 6, Priority: spec.Priority - 1, Table: 254, InInterface: "lo", SuppressPrefixLength: &prefixLength}
+	if err := network.Validate(network.Desired{Routes: []network.Route{p.Route}, PolicyRules: []network.PolicyRule{p.LocalRule, p.Rule}}); err != nil {
 		return p, err
 	}
 	return p, nil

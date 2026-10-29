@@ -253,13 +253,13 @@ def peer(stage):
         firewall["input"]["rules"] += [{"match": {"in_interface": "lan0", "protocol": protocol, "destination_ports": [{"start": 53}]}, "action": "accept"} for protocol in ("udp", "tcp")]
         firewall["input"]["rules"] += [{"match": {"in_interface": "tailscale0", "protocol": protocol, "destination_ports": [{"start": port}]}, "action": "accept"} for protocol, port in (("tcp", 18080), ("udp", 18081))]
         firewall["forward"] = [{"from": "tailscale0", "to": "lan0"}, {"from": "tailscale0", "to": "uplink0"}, {"from": "lan0", "to": "tailscale0"}]
-        firewall["nat"] = [{"type": "masquerade", "match": {"family": family, "in_interface": "tailscale0", "out_interface": "uplink0"}} for family in (4,6)]
         module = "service." + imported["name"]
         resources = [
             {"id": "uplink", "interface": next(i for i in migrated["network"]["interfaces"] if i["name"] == "uplink0")},
             {"id": "lan", "interface": {"name": "lan0"}},
             {"id": "forwarding", "forwarding": {"ipv4": True, "ipv6": True, "ipv4_rp_filter": 0}},
             {"id": "firewall", "firewall": firewall},
+            {"id": "exit-nat", "nat": [{"type": "masquerade", "match": {"family": family, "in_interface": "tailscale0", "out_interface": "uplink0"}} for family in (4, 6)]},
             {"id": "gate", "service": {"name": "gate", "health": {"interface": "uplink0", "target": "192.0.2.1", "protocol": "tcp", "port": 8443, "interval_ms": 200, "timeout_ms": 100, "healthy_threshold": 1, "unhealthy_threshold": 1}}},
             {"id": "tailnet", "when": {"fact": "service.gate.active", "max_age": "2s"}, "service": imported},
             {"id": "resolver", "service": {"name": "resolver", "dns": {"resource": "resolver", "spec": {

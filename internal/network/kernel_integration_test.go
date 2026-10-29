@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/google/nftables"
+	"github.com/google/nftables/expr"
 	"github.com/imksoo/routerd2/internal/lifetime"
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netns"
@@ -160,6 +161,25 @@ func peerRoute(t *testing.T, h *netlink.Handle, name, destination, gateway strin
 }
 
 func runKernelFixture(t *testing.T) {
+	// An error before the final operation must reject the entire batch even
+	// when only the final operation requests a success acknowledgement.
+	batch := &nftables.Conn{}
+	table := batch.AddTable(&nftables.Table{Name: "rejected_batch", Family: nftables.TableFamilyINet})
+	chain := batch.AddChain(&nftables.Chain{Name: "valid", Table: table})
+	batch.AddRule(&nftables.Rule{Table: table, Chain: &nftables.Chain{Name: "missing", Table: table}, Exprs: []expr.Any{&expr.Counter{}}})
+	batch.AddRule(&nftables.Rule{Table: table, Chain: chain, Exprs: []expr.Any{&expr.Counter{}}})
+	if err := batch.Flush(); !errors.Is(err, unix.ENOENT) {
+		t.Fatalf("batch did not report the earlier missing chain: %v", err)
+	}
+	rejectedTables, err := batch.ListTables()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, current := range rejectedTables {
+		if current.Name == table.Name {
+			t.Fatal("rejected batch left a partially applied table")
+		}
+	}
 	clientNS, serverNS := newPeerNamespace(t), newPeerNamespace(t)
 	for _, v := range []struct {
 		name, peer string
@@ -203,7 +223,7 @@ func runKernelFixture(t *testing.T) {
 		Interfaces: []Interface{{Name: "lan0", Addresses: []string{"192.0.2.1/24", "2001:db8:1::1/64"}}, {Name: "wan0", Addresses: []string{"198.51.100.1/24", "2001:db8:2::1/64"}}},
 		Routes:     []Route{{Destination: "203.0.113.0/24", Gateway: "198.51.100.2", Interface: "wan0", Metric: 100}, {Destination: "2001:db8:3::/64", Gateway: "2001:db8:2::2", Interface: "wan0"}},
 		Forwarding: Forwarding{IPv4: yes(), IPv6: yes()},
-		Firewall:   &Firewall{Forward: []Forward{{From: "lan0", To: "wan0"}}, Masquerade: []Masquerade{{Source: "192.0.2.0/24", OutInterface: "wan0"}, {Source: "2001:db8:1::/64", OutInterface: "wan0"}}},
+		Firewall:   &Firewall{Forward: []Forward{{From: "lan0", To: "wan0"}}, NAT: []NATRule{{Type: "masquerade", Match: PacketMatch{Family: 4, Source: "192.0.2.0/24", OutInterface: "wan0"}}, {Type: "masquerade", Match: PacketMatch{Family: 6, Source: "2001:db8:1::/64", OutInterface: "wan0"}}}},
 	}
 	if _, err := e.Apply(context.Background(), 1, d); err != nil {
 		t.Fatal(err)
@@ -238,7 +258,7 @@ func runKernelFixture(t *testing.T) {
 	tunneled.Interfaces = append(tunneled.Interfaces, Interface{Name: "dslite0", Addresses: []string{"192.0.0.2/32"}, AddressOptions: map[string]AddressOptions{"192.0.0.2/32": {Peer: "192.0.0.1/32"}}})
 	tunneled.Routes = append(tunneled.Routes, Route{Destination: "198.18.0.0/24", Gateway: "192.0.0.1", Interface: "dslite0", Metric: 100})
 	tunneled.Firewall.Forward = append(tunneled.Firewall.Forward, Forward{From: "lan0", To: "dslite0"})
-	tunneled.Firewall.Masquerade = append(tunneled.Firewall.Masquerade, Masquerade{Source: "192.0.2.0/24", OutInterface: "dslite0"})
+	tunneled.Firewall.NAT = append(tunneled.Firewall.NAT, NATRule{Type: "masquerade", Match: PacketMatch{Family: 4, Source: "192.0.2.0/24", OutInterface: "dslite0"}})
 	if _, err := e.Apply(context.Background(), 2, tunneled); err != nil {
 		t.Fatal(err)
 	}
@@ -329,7 +349,7 @@ func runNativeECMPFixture(t *testing.T, e *Engine, base Desired, clientNS, serve
 	d := cloneDesired(base)
 	d.Interfaces = append(d.Interfaces, Interface{Name: "wan1", Addresses: []string{"198.51.101.1/24", "2001:db8:22::1/64"}})
 	d.Firewall.Forward = append(d.Firewall.Forward, Forward{From: "lan0", To: "wan1"})
-	d.Firewall.Masquerade = append(d.Firewall.Masquerade, Masquerade{Source: "192.0.2.0/24", OutInterface: "wan1"}, Masquerade{Source: "2001:db8:1::/64", OutInterface: "wan1"})
+	d.Firewall.NAT = append(d.Firewall.NAT, NATRule{Type: "masquerade", Match: PacketMatch{Family: 4, Source: "192.0.2.0/24", OutInterface: "wan1"}}, NATRule{Type: "masquerade", Match: PacketMatch{Family: 6, Source: "2001:db8:1::/64", OutInterface: "wan1"}})
 	d.Routes[0].Gateway, d.Routes[0].Interface = "", ""
 	d.Routes[0].NextHops = []NextHop{{Gateway: "198.51.100.2", Interface: "wan0", Weight: 1}, {Gateway: "198.51.101.2", Interface: "wan1", Weight: 1}}
 	d.Routes[1].Gateway, d.Routes[1].Interface = "", ""

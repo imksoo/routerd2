@@ -164,7 +164,7 @@ func TestDaemonRAAFTRForwardingAndOriginalExpiry(t *testing.T) {
 	yes := true
 	doc := config.Native{Network: network.Desired{
 		Interfaces: []network.Interface{{Name: "wan0", Addresses: []string{"fe80::1/64"}, AddressOptions: map[string]network.AddressOptions{"fe80::1/64": {NoDAD: true}}}, {Name: "lan0", Addresses: []string{"198.18.0.1/24"}}},
-		Forwarding: network.Forwarding{IPv4: &yes}, Firewall: &network.Firewall{Forward: []network.Forward{{From: "lan0", To: "dslite0"}}, Masquerade: []network.Masquerade{{Source: "198.18.0.0/24", OutInterface: "dslite0"}}},
+		Forwarding: network.Forwarding{IPv4: &yes}, Firewall: &network.Firewall{Forward: []network.Forward{{From: "lan0", To: "dslite0"}}, NAT: []network.NATRule{{Type: "masquerade", Match: network.PacketMatch{Family: 4, Source: "198.18.0.0/24", OutInterface: "dslite0"}}}},
 	}, Services: []serviceconfig.Service{
 		{Name: "wan-ra", RAClient: &serviceconfig.RAClient{Interface: "wan0", SourceAddress: "fe80::1", InterfaceID: "::1234", AllowedRouters: []string{"fe80::2"}}},
 		{Name: "dslite", DSLite: &serviceconfig.DSLite{Interface: "wan0", Tunnel: "dslite0", SourceFrom: "wan-ra", DNSFrom: []string{"wan-ra"}, Candidates: []string{"aftr.test"}, TimeoutSeconds: 1, RetrySeconds: 1, MTU: 1460, B4Address: "169.254.42.2/32", B4Peer: "169.254.42.1/32", RouteGateway: "169.254.42.1", Metric: 200}},

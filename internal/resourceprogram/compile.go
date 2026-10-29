@@ -63,6 +63,19 @@ func Compile(source Program) (Plan, error) {
 		if r.Interface != nil && (len(r.Interface.Addresses) != 0 || len(r.Interface.AddressOptions) != 0) {
 			return Plan{}, fmt.Errorf("resource %s: interface addresses and address_options belong in separate address resources", r.ID)
 		}
+		if r.Firewall != nil && len(r.Firewall.NAT) != 0 {
+			return Plan{}, fmt.Errorf("resource %s: NAT rules belong in a nat resource", r.ID)
+		}
+		if r.NAT != nil {
+			if len(r.NAT) == 0 {
+				return Plan{}, fmt.Errorf("resource %s: nat requires at least one rule", r.ID)
+			}
+			for _, rule := range r.NAT {
+				if rule.Authority != (lifetime.Deadline{}) {
+					return Plan{}, fmt.Errorf("resource %s: NAT authority is internal projection authority", r.ID)
+				}
+			}
+		}
 		if r.Address != nil && r.Address.Options != nil && r.Address.Options.BootLifetime != (network.BootLifetime{}) {
 			return Plan{}, fmt.Errorf("resource %s: boot lifetime is internal projection authority", r.ID)
 		}
@@ -167,7 +180,7 @@ func Compile(source Program) (Plan, error) {
 				}
 			}
 			if err == nil {
-				err = errors.Join(claim(r, "route", routeKey(host.Route)), claim(r, "policy_rule", fmt.Sprintf("6/%d", host.Rule.Priority)))
+				err = errors.Join(claim(r, "route", routeKey(host.Route)), claim(r, "policy_rule", fmt.Sprintf("6/%d", host.Rule.Priority)), claim(r, "policy_rule", fmt.Sprintf("6/%d", host.LocalRule.Priority)))
 				for _, bypass := range host.Bypasses {
 					found := false
 					for _, provider := range source.Resources {
@@ -220,6 +233,8 @@ func Compile(source Program) (Plan, error) {
 			}
 		case r.Firewall != nil:
 			err = claim(r, "firewall", network.FirewallTable)
+		case r.NAT != nil:
+			err = claim(r, "nat", r.ID)
 		case r.VRRPGuard != nil:
 			for _, a := range r.VRRPGuard.Addresses {
 				if ip, parseErr := netip.ParseAddr(a); parseErr == nil {

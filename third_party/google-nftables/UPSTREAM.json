@@ -9,6 +9,7 @@
   "selection": "Production Go packages (excluding test-only integration helpers), expr unit tests, go.mod, go.sum, README.md and LICENSE.",
   "changes": [
     "expr/expr.go: preserve masquerade flags with translated ports; set NF_NAT_RANGE_PROTO_SPECIFIED when ToPorts is true.",
-    "expr/masq_routerd2_test.go: regressions for exact kernel flags and round trips with port ranges."
+    "expr/masq_routerd2_test.go: regressions for exact kernel flags and round trips with port ranges.",
+    "conn.go: request success ACK only for the final batch operation; retain unconditional kernel error reporting and atomic commit, avoiding ACK queue overflow."
   ]
 }

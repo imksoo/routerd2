@@ -13,16 +13,23 @@ The existing upstream LICENSE and copyright headers are preserved. This tree
 contains production Go packages, expr unit tests, and module metadata. Unrelated
 upstream integration tests and their test-only helpers are omitted. UPSTREAM.json records the exact source and selection.
 
-Modified file: expr/expr.go
+Modified files: expr/expr.go, conn.go
 New regression tests: expr/masq_routerd2_test.go
 
 The local patch sets NF_NAT_RANGE_PROTO_SPECIFIED when Masq.ToPorts is true,
 and preserves Random, FullyRandom and Persistent flags alongside port ranges.
 Linux nft_masq does not infer the flag from protocol-register attributes; the
 unmodified library therefore encodes a port range that the kernel ignores.
-The public API and all other production source files remain unchanged.
+The conn.go patch requests one success acknowledgement on the last batch
+operation. Linux reports errors from every failed operation regardless of the
+ACK flag, after committing or aborting the complete batch. Actual zone policies
+reproduced ENOBUFS from per-operation success acknowledgements after commit.
+One success ACK retains atomicity and error handling without raising socket
+limits or adding concurrent I/O.
+The public API remains unchanged.
 
-Reference for the kernel interface:
+Reference for the kernel interfaces:
+https://github.com/torvalds/linux/blob/v6.8/net/netfilter/nfnetlink.c
 https://github.com/torvalds/linux/blob/v6.18/net/netfilter/nft_masq.c
 
 Run the library regressions from the routerd2 module with:

@@ -210,16 +210,7 @@ func buildFirewall(c *nftables.Conn, f *Firewall) error {
 			c.AddRule(&nftables.Rule{Table: t, Chain: chain, Exprs: es})
 		}
 	}
-	if len(f.Masquerade) > 0 && post == nil {
-		post = c.AddChain(&nftables.Chain{Name: "postrouting", Table: t, Type: nftables.ChainTypeNAT, Hooknum: nftables.ChainHookPostrouting, Priority: nftables.ChainPriorityNATSource, Policy: &accept})
-	}
-	for _, rule := range f.Masquerade {
-		prefix, _ := netip.ParsePrefix(rule.Source)
-		es := prefixMatch(prefix)
-		es = append(es, interfaceMatch(expr.MetaKeyOIFNAME, rule.OutInterface)...)
-		es = append(es, &expr.Counter{}, &expr.Masq{})
-		c.AddRule(&nftables.Rule{Table: t, Chain: post, Exprs: es})
-	}
+
 	return nil
 }
 

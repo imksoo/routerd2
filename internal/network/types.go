@@ -129,7 +129,6 @@ type Firewall struct {
 	FlowRoutes   []FlowRoute    `json:"flow_routes,omitempty"`
 	FlowPaths    []FlowPath     `json:"flow_paths,omitempty"`
 	Forward      []Forward      `json:"forward,omitempty"`
-	Masquerade   []Masquerade   `json:"masquerade,omitempty"`
 	Input        *FirewallChain `json:"input,omitempty"`
 	Output       *FirewallChain `json:"output,omitempty"`
 	ForwardChain *FirewallChain `json:"forward_chain,omitempty"`
@@ -145,13 +144,6 @@ type Firewall struct {
 type Forward struct {
 	From string `json:"from"`
 	To   string `json:"to"`
-}
-
-// Masquerade is explicitly scoped to a source prefix and egress interface.
-// IPv4 and IPv6 prefixes are supported; IPv6 NAT is never implicitly enabled.
-type Masquerade struct {
-	Source       string `json:"source"`
-	OutInterface string `json:"out_interface"`
 }
 
 type Options struct {
@@ -330,20 +322,7 @@ func Validate(d Desired) error {
 			}
 			seen[f] = true
 		}
-		nats := map[Masquerade]bool{}
-		for _, n := range d.Firewall.Masquerade {
-			p, err := netip.ParsePrefix(n.Source)
-			if err != nil || !p.IsValid() || p.Addr().Is4In6() || p != p.Masked() {
-				add("masquerade: invalid source network %q", n.Source)
-			}
-			if !validName(n.OutInterface) {
-				add("masquerade: invalid output interface %q", n.OutInterface)
-			}
-			if nats[n] {
-				add("masquerade: duplicate rule for %q", n.Source)
-			}
-			nats[n] = true
-		}
+
 	}
 	return errors.Join(errs...)
 }
@@ -407,10 +386,7 @@ func normalized(d Desired) Desired {
 	}
 	if d.Firewall != nil {
 		normalizeFirewall(d.Firewall)
-		for i := range d.Firewall.Masquerade {
-			p, _ := netip.ParsePrefix(d.Firewall.Masquerade[i].Source)
-			d.Firewall.Masquerade[i].Source = p.Masked().String()
-		}
+
 	}
 	return d
 }

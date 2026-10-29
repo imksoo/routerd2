@@ -92,11 +92,6 @@ func TestDaemonConnectionMarkedEgressPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	firewall := &network.Firewall{ForwardChain: &network.FirewallChain{Policy: "accept"}}
-	for i := range blocks {
-		firewall.Masquerade = append(firewall.Masquerade, network.Masquerade{Source: "198.18.0.0/24", OutInterface: fmt.Sprintf("wan%d", i)})
-	}
-	program.Resources = append(program.Resources, resourceprogram.Resource{ID: "firewall", Firewall: firewall})
 	// A real election with no reachable WAN must wait for an applied egress.
 	for _, probe := range probes {
 		probe.Close()
@@ -282,6 +277,27 @@ func TestDaemonConnectionMarkedEgressPolicy(t *testing.T) {
 	}
 	waitMarks(272, 273, 274)
 	waitGateway()
+	blocked, err := net.Listen("tcp4", "192.0.2.2:18096")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { blocked.Close() })
+	if err := fixtureInsideNamespace(peers[0], func() error {
+		connection, err := net.DialTimeout("tcp4", "192.0.2.2:18096", 300*time.Millisecond)
+		if err == nil {
+			connection.Close()
+			return fmt.Errorf("untrust peer reached a real WAN listener")
+		}
+		if failure, ok := err.(net.Error); !ok || !failure.Timeout() {
+			return err
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if captures[0].count("192.0.2.1", "192.0.2.2", 6, 18096) == 0 {
+		t.Fatal("WAN denial probe did not reach the product interface")
+	}
 	existing := traffic("ABC")
 	for i := 0; i < 3; i++ {
 		probes[i].Close()

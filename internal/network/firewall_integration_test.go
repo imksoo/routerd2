@@ -83,6 +83,8 @@ func runNativeACLNATFixture(t *testing.T, e *Engine, base Desired, clientNS, ser
 	t.Log("INPUT/OUTPUT IPv4/IPv6 CIDR/interface/TCP/UDP port-range ACLs, drop/reject, ordered FORWARD rules and established-flow preservation passed")
 
 	nat := cloneDesired(d)
+	defaultNAT := nat.Firewall.NAT
+	nat.Firewall.NAT = nil
 	for _, v := range []struct {
 		family                           int
 		lan, wan, client, source, server string
@@ -98,6 +100,8 @@ func runNativeACLNATFixture(t *testing.T, e *Engine, base Desired, clientNS, ser
 		)
 		nat.Firewall.ForwardChain.Rules = append(nat.Firewall.ForwardChain.Rules, FirewallRule{Match: PacketMatch{Family: v.family, InInterface: "wan0", OutInterface: "lan0", Source: v.source + v.hostBits, Destination: v.client + v.hostBits, Protocol: "tcp", DestinationPorts: []PortRange{{Start: 45001}}}, Action: "accept"})
 	}
+	// Specific translations precede the general outbound masquerade rules.
+	nat.Firewall.NAT = append(nat.Firewall.NAT, defaultNAT...)
 	if _, err := e.Apply(context.Background(), 31, nat); err != nil {
 		t.Fatalf("native DNAT/SNAT install: %v", err)
 	}

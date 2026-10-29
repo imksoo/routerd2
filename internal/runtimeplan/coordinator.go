@@ -512,6 +512,11 @@ func (r *Runtime) applyProjectionLocked(ctx context.Context, p projection) (proj
 			}
 		}
 		if p.network.Firewall != nil {
+			for _, rule := range p.network.Firewall.NAT {
+				if rule.Authority.BootID != "" {
+					until = min(until, rule.Authority.Nanos)
+				}
+			}
 			for _, flow := range p.network.Firewall.FlowRoutes {
 				if flow.Authority.BootID != "" {
 					until = min(until, flow.Authority.Nanos)

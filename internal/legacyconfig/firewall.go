@@ -11,6 +11,7 @@ import (
 
 	"github.com/imksoo/routerd/pkg/api"
 	"github.com/imksoo/routerd2/internal/network"
+	"github.com/imksoo/routerd2/internal/resourceprogram"
 )
 
 // The projection flattens the old terminal zone-pair chains. It retains the
@@ -41,10 +42,10 @@ func (c *compiler) resourcesOfKind(kind string) []resource {
 	return out
 }
 
-func (c *compiler) firewall() {
+func (c *compiler) firewall(vrrpNames map[string]string) []resourceprogram.Resource {
 	zrs, prs, rrs, nrs := c.resourcesOfKind("FirewallZone"), c.resourcesOfKind("FirewallPolicy"), c.resourcesOfKind("FirewallRule"), c.resourcesOfKind("NAT44Rule")
 	if len(zrs)+len(prs)+len(rrs)+len(nrs) == 0 {
-		return
+		return nil
 	}
 	f := &network.Firewall{DisableForward: true}
 	c.document.Network.Firewall = f
@@ -109,7 +110,7 @@ func (c *compiler) firewall() {
 	}
 	if len(zones) > 64 || interfaces > 90 || interfaces*interfaces+interfaces > maxFirewallProjection {
 		c.issue(nil, "$.spec.resources", "resource_limit", "zone/interface projection exceeds the bounded native firewall size")
-		return
+		return nil
 	}
 	var acls []migrationACL
 	for _, r := range rrs {
@@ -162,21 +163,21 @@ func (c *compiler) firewall() {
 					if port > 0 && zoneByRef[legacyRefName(ref)] == from.resource.Metadata.Name {
 						name := c.filterInterface(r, "interface", ref)
 						if name != "" && !appendRule(f.Input, network.FirewallRule{Match: network.PacketMatch{InInterface: name, Protocol: "udp", DestinationPorts: []network.PortRange{{Start: port}}}, Action: "accept"}) {
-							return
+							return nil
 						}
 					}
 				}
 			}
 			for _, in := range from.ifnames {
 				if !c.firewallPair(from, migrationZone{resource: resource{Resource: api.Resource{Metadata: api.ObjectMeta{Name: "self"}}}, role: "self"}, in, "", acls, logDeny, f.Input, appendRule) {
-					return
+					return nil
 				}
 			}
 			for _, to := range zones {
 				for _, in := range from.ifnames {
 					for _, out := range to.ifnames {
 						if !c.firewallPair(from, to, in, out, acls, logDeny, f.ForwardChain, appendRule) {
-							return
+							return nil
 						}
 					}
 				}
@@ -186,13 +187,20 @@ func (c *compiler) firewall() {
 	if len(nrs) == 0 && c.rendererWouldDeriveNAT(zrs) {
 		c.issue(nil, "$.spec.resources", "unsupported_semantics", "legacy combined renderer derives trust-to-untrust masquerade here, while the running Linux NAT controller does not; declare explicit NAT44Rule resources to resolve this difference")
 	}
+	var translations []resourceprogram.Resource
+	natRules := 0
 	for _, r := range nrs {
-		c.nat44(r, f)
-		if len(f.NAT) > maxFirewallProjection {
+		rules := c.nat44(r)
+		natRules += len(rules)
+		if natRules > maxFirewallProjection {
 			c.reject(r, "", "resource_limit", "NAT expansion exceeds 8192 native packet rules")
-			return
+			return nil
+		}
+		if len(rules) > 0 {
+			translations = append(translations, resourceprogram.Resource{ID: "nat/" + r.Metadata.Name, NAT: rules, When: c.when(r, r.Spec.(api.NAT44RuleSpec).When, vrrpNames)})
 		}
 	}
+	return translations
 }
 
 func (c *compiler) firewallPair(from, to migrationZone, in, out string, rules []migrationACL, logDeny bool, chain *network.FirewallChain, appendRule func(*network.FirewallChain, network.FirewallRule) bool) bool {
@@ -253,10 +261,6 @@ func (c *compiler) filterInterface(r resource, field, ref string) string {
 	}
 	if owner == nil {
 		c.reject(r, field, "reference", "filter interface must resolve to an original supported link resource")
-		return ""
-	}
-	if kind, _, qualified := strings.Cut(strings.TrimSpace(ref), "/"); qualified && kind != owner.Kind {
-		c.reject(r, field, "reference", "qualified interface reference does not match the resource kind")
 		return ""
 	}
 	switch s := owner.Spec.(type) {
@@ -469,19 +473,20 @@ func (c *compiler) rendererWouldDeriveNAT(zones []resource) bool {
 	return false
 }
 
-func (c *compiler) nat44(r resource, f *network.Firewall) {
-	c.allow(r, "type", "egressInterface", "sourceRanges", "destinationCIDRs", "excludeDestinationCIDRs", "snatAddress", "snatAddressFrom", "outboundInterface", "sourceCIDRs", "translation")
+func (c *compiler) nat44(r resource) []network.NATRule {
+	var rules []network.NATRule
+	c.allow(r, "type", "egressInterface", "sourceRanges", "destinationCIDRs", "excludeDestinationCIDRs", "snatAddress", "snatAddressFrom", "outboundInterface", "sourceCIDRs", "translation", "when")
 	s := r.Spec.(api.NAT44RuleSpec)
 	if meaningful(child(r.node, "translation")) || s.OutboundInterface != "" || len(s.SourceCIDRs) > 0 {
 		c.reject(r, "translation", "unsupported_semantics", "legacy source-NAT translation form is rendered by the combined exporter but not reconciled by the pinned running Linux NAT controller; rewrite its intended semantics as explicit type/egressInterface/sourceRanges")
-		return
+		return nil
 	}
 	if s.Type != "masquerade" && s.Type != "snat" {
 		c.reject(r, "type", "invalid_value", "NAT type must be masquerade or snat")
 	}
 	if s.EgressInterface == "" || strings.Contains(s.EgressInterface, "/") {
 		c.reject(r, "egressInterface", "required", "an explicit bare resource or kernel interface name is required; dynamic egress selection cannot be frozen")
-		return
+		return nil
 	}
 	ifname := c.aliases[s.EgressInterface]
 	if ifname == "" {
@@ -515,19 +520,19 @@ func (c *compiler) nat44(r resource, f *network.Firewall) {
 	exclusions := c.packetCIDRs(r, "excludeDestinationCIDRs", s.ExcludeDestinationCIDRs, 4, false)
 	if len(exclusions) > 128 {
 		c.reject(r, "excludeDestinationCIDRs", "resource_limit", "at most 128 unique destination exclusions can be projected")
-		return
+		return nil
 	}
 	var err bool
 	for _, excluded := range exclusions {
 		destinations, err = subtractIPv4Prefixes(destinations, excluded, maxFirewallProjection)
 		if err {
 			c.reject(r, "excludeDestinationCIDRs", "resource_limit", "CIDR subtraction exceeds 8192 destination prefixes")
-			return
+			return nil
 		}
 	}
-	if len(sources)*len(destinations)+len(f.NAT) > maxFirewallProjection {
+	if len(sources)*len(destinations) > maxFirewallProjection {
 		c.reject(r, "sourceRanges", "resource_limit", "NAT expansion exceeds 8192 native packet rules")
-		return
+		return nil
 	}
 	address := s.SNATAddress
 	if s.SNATAddressFrom.Resource != "" {
@@ -552,14 +557,15 @@ func (c *compiler) nat44(r resource, f *network.Firewall) {
 	}
 	for _, source := range sources {
 		for _, destination := range destinations {
-			f.NAT = append(f.NAT, network.NATRule{Type: s.Type, Match: network.PacketMatch{Family: 4, Source: source.String(), Destination: destination.String(), OutInterface: ifname}, Address: address})
+			rules = append(rules, network.NATRule{Type: s.Type, Match: network.PacketMatch{Family: 4, Source: source.String(), Destination: destination.String(), OutInterface: ifname}, Address: address})
 		}
 	}
-	c.target(r, "network.firewall.nat")
+	c.target(r, "nat/"+r.Metadata.Name)
 	c.note(r, "Preserves explicit source NAT without adding filter hooks to NAT-only configurations; destination exclusions are compiled into bounded positive CIDRs.")
 	if len(destinations) == 0 {
 		c.note(r, "Destination exclusions cover the complete destination set, so this rule matches no packets.")
 	}
+	return rules
 }
 
 // subtractIPv4Prefixes returns the same address set minus excluded. Splitting

@@ -87,6 +87,10 @@ func FromNative(native Native) Program {
 	}
 	if native.Network.Firewall != nil {
 		v := *native.Network.Firewall
+		if len(v.NAT) > 0 {
+			add(Resource{ID: "nat", NAT: slices.Clone(v.NAT)})
+			v.NAT = nil
+		}
 		add(Resource{ID: "firewall", Firewall: &v})
 	}
 	for _, original := range native.Network.VRRPGuards {

@@ -194,8 +194,17 @@ func runHostRouteFixture(t *testing.T, mode string) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		rules, err := netlink.RuleList(unix.AF_INET6)
+		if err != nil {
+			t.Fatal(err)
+		}
+		local, wan := false, false
+		for _, rule := range rules {
+			local = local || rule.Priority == 10119 && rule.Table == 254 && rule.IifName == "lo" && rule.SuppressPrefixlen == 0
+			wan = wan || rule.Priority == 10120 && rule.Table == 120 && rule.IifName == "lo"
+		}
 		for _, route := range routes {
-			if route.Dst != nil && route.Dst.String() == "::/0" && route.Src != nil {
+			if local && wan && route.Dst != nil && route.Dst.String() == "::/0" && route.Src != nil {
 				return network.Route{PreferredSource: route.Src.String()}, true
 			}
 		}

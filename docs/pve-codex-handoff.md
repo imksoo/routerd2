@@ -5,69 +5,47 @@
 [試験計画](test-plan.md)、[機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
-## PDの元期限とRA再撤回の修正（2026-10-30 JST、pd-authority-native74）
+## 現在の候補版: conditional-nat-native75（2026-10-30 JST）
 
-native73実APKのcontrol交換後、01:56:16.248に寿命13秒のRA、18.046に寿命0撤回、
-18.668に正常AAAA応答と端末IPv6 TCP失敗、21.223に再撤回、24.321に有効RAを捕捉した。
-端末は既定経路を失いSYNを送っていなかった。RA workerは同じgeneration3、PDはBoundで元期限内だった。
-コードではPD active/prefix_boundをsupervisor照会の1秒期限で切り詰め、その期限をRA ActiveUntilへ渡していた。
-元のprefix期限とこの起動条件の期限を混同した実装を修正した。PPPoEの既存と同様、PDの元のgrant期限を保持し、
-producer照合・supervisorの現観測・元期限切れ・下位PPP/VRRPの条件は維持する。新しい猶予時間を設けない。
-contract74/journal17。実Alpine3.24.3/kernel6.18.59、APK/PID 1・2 NIC QEMUで再試験は終了0。
-自動DHCP/DNS・両IP TCP/UDP・PD/Renew・PPP交換後31.84秒、control交換と復帰後20秒以上の連続確認を
-含む段階全体66.37秒、元DUID/設定/DNS worker、RA撤回→PADT→正常電源断を確認した。
-66.37秒は純粋な復旧時間ではない。端末の有効address/default routeを共に要求し、独立ISCの18秒リース一周期を
-越えて両IP TCP/UDP/DNSを利用し、その区間にRA再撤回がないことをcaptureで確認した。
-ISC対向PD/IA_NAと旧設定の条件付きLANも終了0。全make check（Race/vet）、両CGO0 Linux buildと署名六ELFも終了0。
-同じ候補版の実HGW+準備条件/VIP、両自動端末、単一DS-Lite/Health/egressで7800秒の観測を02:12 JST頃に再開。
-T1約7186秒なので04:12頃に自然更新、04:22頃以降に終了予定。現時点は進行中・自然更新0・未合格。
-私有logは`/tmp/routerd-pd-authority-native74-hgw-natural.log`、永続identity/leaseは
-`~/.local/state/routerd2-homert-single`。別試験は同じWAN MAC/DUIDを重複使用しない。
-次はこの動作を維持し、実WAN zone参照・条件付きNATを別の隔離peer構成で接続する。
+契約75/journal18/worker ABI5。外部VRRP daemonは追加せず、Goの選出・広告と単一network writerを維持した。
+実設定由来のWAN zone参照は旧routerdのsuffix解決に合わせ、条件付きNAT44Ruleを独立した宣言から
+同じfirewall transactionへ接続した。古いMasquerade型・描画・validatorを削除し、NATRuleへ一本化した。
+NATの元条件期限をwriterが独立して失効させる。既存のconntrackは表の置換で消さない。
 
-01:56:38 JSTの全体完成期限は未達のまま。HGW自然PD観測は進行中であり、短期ISCのRenewで代替しない。
+ルーター発IPv6のWAN規則がLAN宛てDNS応答までtable120へ送る設定を修正した。
+WAN lookupの直前にmainの具体経路だけを引く規則（suppress_prefix_length=0）を置き、同じ所有期限で撤去する。
+独立radvd/dnsmasqの3構成で取得送信元・DNS/Health/TCP/UDP・所有者停止中の失効・復帰が終了0。
 
-## 主系の公開準備と実通信（2026-10-29、admission-native73）
+実5 WANのzone policyでnftables適用後にENOBUFSを再現した。成功ACKを読み始める前に受信queueがあふれ、
+表だけが作成され所有記録が残らなかった。並行受信でも再現したため、その案は破棄した。
+Linuxのbatch処理を確認し、最後の操作だけに成功ACKを要求する小さい修正にした。操作失敗の通知は維持する。
+実kernelで途中の存在しないchainへの操作がENOENTとなり、表全体が残らないことを確認した。
+独立WAN端末から実listenerへのSYNを採取して着信拒否を確認し、VIP gateway/条件付きNAT、
+120→80→60、60秒復帰抑制、confirmed rollback、所有期限/writer交換と同じTCP/UDPの復旧が77.77秒で終了0。
+LAN 5947 packet/kernel drop0。既存のkernel NAT/ACL/DS-Lite等もRace付き26.14秒で終了0。
 
-旧homertのPD Bound、IPv4/委譲IPv6 Applied、RA Applied、egress datapath Readyを既存の準備条件へ接続した。
-networkは現在のsource/観測選択を実適用したACKだけを使い、PDは元期限内のprefixを要求する。
-RAは成功した送信のtemplate世代をworkerが通知し、古いtemplate・撤回・交換前workerの通知を使わない。
-観測境界で一度decodeしたRAを直接保持する。新しい準備管理者や外部VRRP daemonは追加していない。
+実HGWでは同じ版・旧設定由来の単一DS-Lite/PD/DNSへWAN zones・条件付きNAT・準備条件/VIPを組み合わせた。
+90秒、両端末の自動DHCP/DNS、IPv4/IPv6 HTTPS・UDP/TCP DNS、DoH/条件付き転送、PD交換と
+全体再起動後の復帰は通過したが、その実行全体は採取ファイル不備で終了1。
+採取開始と端末SLAAC/DAD・既定経路の準備待ちを直した1巡の再実行は終了0。
+PD強制終了後1.64秒、通常交換8.68秒、全体再起動9.61秒で通信が復帰し、DUID/IAID/prefix保持、
+LAN向けIPv6 DNSのmain経路とWAN送信側の該当packet0、最終RA寿命0/撤去・上流Releaseなしを確認した。
+途中の失敗には、短いAFTR停止状態のポーリング要求、Release必須という誤った追加条件、
+交換中のgeneration欠落を扱えない試験も含まれた。これらは修正し、通信の不成立と混同しない。
+この構成は全homert設定・複数WAN・二台を同じ実回線に接続した受入ではない。
 
-PVE Linux/amd64の実supervisor/control/network/worker、独立ISC/Keepalived/dhcpcdで、PD応答前のVIP非公開、
-取得・RA送信後の公開、SLAAC/取得DNS、UDP/TCP DNSとIPv6転送、元期限撤去・役割変更・復帰が終了0。
-独立5 WANでは端末の既定gatewayを実VIPへ設定し、egress実適用後の公開、3出口/120→80→60、
-60秒復帰抑制、confirmed rollback、所有期限切れとwriter交換中の転送停止、復帰後の同じTCP/UDPが終了0。
-WAN captureとLANの5865 packet（kernel drop 0）を照合した。経路の予定値だけでVIPの実装着を判断しない。
+全make check（Race/vet）、CGO0 Linux amd64/arm64 build、署名六ELF検査は終了0。
+この版でAPK/署名PID1二台を再受入したとは扱わない。直前native74の実Alpine3.24.3/kernel6.18.59
+APK/PID1/2 NICではPD期限を1秒の監視照会期限で切り詰めるRA再撤回を修正し、control交換後20秒以上の
+両IP通信とISC18秒リース更新・再撤回なしが終了0だった。native74のHGW長期は02:18頃のIPv6 UDP DNS timeoutで
+終了1、自然更新前に停止した。03:08 JSTにnative75の7800秒観測を開始した。保存されたT1は05:08:50 JST、観測終了は05:19頃以降の予定で、自然更新は未合格。
+私有logは`/tmp/routerd-host-lan-native75-hgw-natural.log`、fixtureは
+`/tmp/routerd-homert-single-native75-uplink.py`と同program/source/policy。実回線値を公開しない。
+永続identity/leaseは`~/.local/state/routerd2-homert-single`。同じWAN MAC/DUIDを重複使用しない。
 
-署名PID 1二台・ISC/AFTR/代替WAN・独立BusyBoxで、双方向引継ぎ、同じTCP/UDP、PD identity/元期限、
-DHCP更新、engine/worker強制終了、同期断・製品再起動、貸出の自然失効とsticky保持まで終了0。
-別の二台DNS profileは、委譲失効後に住所・応答・DNS待受を止め、別prefix取得でRA/DHCPv6/DNSを復旧した。
-この結果は同じ全homert設定を二台にした受入ではない。全設定のread-only取込は119 issueで拒否される。
-
-試験側では、role失効後も転送を要求した旧期待、自己DNS喪失後の空Reply要求、未作成tableの読取りと
-CLIの文字列table番号、LAN採取のメモリー上限/起動順を修正した。通信失敗と採取/試験不備を混同しない。
-全make check（Race/vet）、最終fmt/Python、両CGO0 Linux build・署名六ELF検査が終了0。contract73/journal17。
-実HGWでは同じ最終候補版で、homert由来PD/LAN/RAへ上記5種類の準備条件・単一DS-Lite/Health/egress・
-VIP gatewayを接続し、両端末の自動取得DNS/IPv4/IPv6、DoH/条件付き転送、90秒/9巡が終了0。
-DHCPv4は実VIPをgatewayとして配り、VIP interfaceの転送/MSSも設定で宣言した。PD強制終了1.40秒、
-通常再起動5.26秒、全体再起動9.53秒で両端末通信が復帰し、全体再起動後の公衆IPv4/IPv6 UDP DNS、
-最終RA lifetime 0も確認した。自然PD更新0。単一uplink/一出口・独立MAC/DUID・役割名の置換を含む。
-全設定/複数WAN/二台をこのHGW構成へ接続した受入ではない。私の補助設定のfield名/依存指定誤りは
-設定検証で修正し、全体再起動時に条件付きPDの起動を待たずsnapshotを読んだ試験も実取得待ちへ修正した。
-追加HGW構成と再実行用スクリプトは私有の`/tmp/routerd-homert-single-native73-program.json`と
-`/tmp/routerd-homert-single-native73-uplink.py`（600）。実回線値を含むため公開対象にしない。
-同じソースの`make qemu-release-boot`も128.37秒で終了0。Alpine kernel/QEMU TCG、1GiB/2 CPU、
-NICなしで署名pairのPID 1実行・自動health確認・更新中commit排他/古いrevision拒否・正常電源断を確認した。
-これは実APKで全ルーター機能を通した試験やdisk/kernel A/B復旧、対象実機の受入ではない。
-`make apk RELEASE_ID=admission-native73`も終了0。開発用APKは`dist/apk/routerd2-0.1.0-r0.apk`。
-Go/ELF検査とengine同梱を確認したが、全Go・最少バイナリーという依存削減の目標達成とは扱わない。
-同じcodeのAlpine imageも`dist/image-native73`へ生成したが、実APK/PID 1・2 NIC QEMUのworker-recoveryは
-終了1。初回の自動LAN DHCP/DNS、CHAP、両IP TCP/UDP、独立ISCの短期PD Renewは通過した一方、
-PPP worker交換後の両IP通信は復旧したが、次のcontrol交換・PD再取得後の端末IPv6 TCPがcurl exit7で失敗した。保存captureでは失敗時の端末に既定経路がなくSYN未送信であり、対向の接続拒否とは判断しない。`dist/native73-appliance/peer.log`と
-同dirのserial/captureを次に照合する。このimageの通信・復旧受入は不合格とし、配備/完成品公開を進めない。
-ユーザー期限2026-10-29 16:56:38 UTCで全34項目の完成は未達。期限や完了範囲を変更しない。
-自然PD更新、全homert/管理/複数WAN、対象NIC/直接ONU、k8s/pve、Cloud SAM等の全34項目は未受入。
+全34項目の期限01:56:38 JSTは未達。次は長期観測を止めず同じ構成の二台同期・管理更新復旧と
+全homert差分を進め、その後k8s-rt/pve-rt、Cloud SAMへ進む。所要工数・不足する対象環境は未確定。
+自然PD更新、ONU直結、対象NIC/ARM機器の資格と全体完成を、この部分成功から推定しない。
 
 ## 旧BGP設定と独立FRR（2026-10-29、bgp-import-native72）
 

@@ -46,6 +46,7 @@ func ProjectLifetimes(d Desired, clock boottime.Clock) Desired {
 	d.PolicyRules = rules
 	if d.Firewall != nil {
 		f := *d.Firewall
+		f.NAT = slices.DeleteFunc(slices.Clone(f.NAT), func(rule NATRule) bool { return !rule.Authority.Live(clock) })
 		f.FlowRoutes = slices.Clone(f.FlowRoutes)
 		for i := range f.FlowRoutes {
 			if !f.FlowRoutes[i].Authority.Live(clock) {

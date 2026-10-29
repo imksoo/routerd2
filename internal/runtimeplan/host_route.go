@@ -146,7 +146,9 @@ func (r *Runtime) projectHostRoutesLocked(cfg configuration, facts resourceprogr
 		} else {
 			rule.Authority = bound
 		}
-		p.network.PolicyRules = append(p.network.PolicyRules, rule)
+		localRule := host.LocalRule
+		localRule.Authority = rule.Authority
+		p.network.PolicyRules = append(p.network.PolicyRules, localRule, rule)
 		state.Ready, state.Reason = ready, reason
 		p.resources[host.ID] = state
 		for _, bypass := range host.Bypasses {
