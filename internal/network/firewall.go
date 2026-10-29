@@ -218,6 +218,9 @@ func validateFirewall(f *Firewall) error {
 		return nil
 	}
 	var errs []error
+	if err := validateFlowRoutes(*f); err != nil {
+		errs = append(errs, err)
+	}
 	if f.DisableForward && (f.ForwardChain != nil || len(f.Forward) > 0) {
 		errs = append(errs, errors.New("firewall: disable_forward conflicts with forward_chain/forward pairs"))
 	}

@@ -140,6 +140,9 @@ func (p Plan) Project(facts FactSnapshot) (Native, map[string]ResourceState) {
 					state.Reason = "ready_when_hold"
 				}
 			}
+			if r.EgressPolicy != nil && !r.EgressPolicy.available(facts) {
+				state.Ready, state.Reason = False, "no_ready_egress"
+			}
 			selected = append(selected, node)
 		}
 		if state.Active && untilNanos != math.MaxUint64 {

@@ -40,6 +40,11 @@ func (k *linuxKernel) Interface(name string) (InterfaceState, error) {
 	if err != nil {
 		return out, err
 	}
+	if value, readErr := k.ReadSetting(settingKey{Kind: "rp_filter", Interface: name}); readErr == nil {
+		out.IPv4RPFilter = &value
+	} else {
+		return out, readErr
+	}
 	if value, readErr := k.ReadSetting(settingKey{Kind: "accept_ra", Interface: name}); readErr == nil {
 		out.IPv6AcceptRA = &value
 	} else if !errors.Is(readErr, os.ErrNotExist) {
@@ -352,7 +357,7 @@ func settingPath(key settingKey) (string, error) {
 		return "/proc/sys/net/ipv4/conf/all/rp_filter", nil
 	case "rp_filter_default":
 		return "/proc/sys/net/ipv4/conf/default/rp_filter", nil
-	case "arp_ignore", "arp_announce":
+	case "rp_filter", "arp_ignore", "arp_announce":
 		if !validName(key.Interface) || key.Interface == "all" || key.Interface == "default" {
 			return "", fmt.Errorf("invalid per-interface IPv4 sysctl identity %q", key.Interface)
 		}

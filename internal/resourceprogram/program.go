@@ -45,6 +45,7 @@ type Resource struct {
 	Address      *Address               `json:"address,omitempty"`
 	Link         *network.Link          `json:"link,omitempty"`
 	Route        *network.Route         `json:"route,omitempty"`
+	EgressPolicy *EgressPolicy          `json:"egress_policy,omitempty"`
 	EgressRoute  *EgressRoute           `json:"egress_route,omitempty"`
 	PolicyRule   *network.PolicyRule    `json:"policy_rule,omitempty"`
 	Forwarding   *network.Forwarding    `json:"forwarding,omitempty"`
@@ -96,11 +97,12 @@ type EventRule struct {
 // Consumers treat its input data as read-only; projections allocate new output
 // collections and reuse the immutable configuration payloads.
 type Plan struct {
-	nodes        []compiledResource
-	Native       Native              `json:"native"`
-	Order        []string            `json:"order"`
-	Dependencies map[string][]string `json:"dependencies"`
-	Ownership    []Ownership         `json:"ownership"`
+	nodes          []compiledResource
+	EgressPolicies []EgressPolicyPlan
+	Native         Native              `json:"native"`
+	Order          []string            `json:"order"`
+	Dependencies   map[string][]string `json:"dependencies"`
+	Ownership      []Ownership         `json:"ownership"`
 }
 
 // Ownership attributes an exact output to its declaration and lifecycle owner.
@@ -129,7 +131,7 @@ func (r Resource) kind() (string, int) {
 		set  bool
 	}{
 		{"interface", r.Interface != nil}, {"address", r.Address != nil},
-		{"link", r.Link != nil}, {"route", r.Route != nil}, {"egress_route", r.EgressRoute != nil},
+		{"egress_policy", r.EgressPolicy != nil}, {"link", r.Link != nil}, {"route", r.Route != nil}, {"egress_route", r.EgressRoute != nil},
 		{"policy_rule", r.PolicyRule != nil}, {"forwarding", r.Forwarding != nil},
 		{"firewall", r.Firewall != nil},
 		{"vrrp_guard", r.VRRPGuard != nil}, {"wireguard", r.WireGuard != nil},

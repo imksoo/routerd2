@@ -46,7 +46,7 @@ func dynamicProgram(source config.Document) bool {
 				}
 			}
 		}
-		if r.When != nil || r.ReadyWhen != nil || r.EgressRoute != nil || r.Service != nil && r.Service.VRRP != nil && r.Service.VRRP.GracefulActivation != nil {
+		if r.When != nil || r.ReadyWhen != nil || r.EgressRoute != nil || r.EgressPolicy != nil || r.Service != nil && r.Service.VRRP != nil && r.Service.VRRP.GracefulActivation != nil {
 			return true
 		}
 		if r.Address != nil && r.Address.Options != nil && !r.Address.Options.ValidUntil.IsZero() || r.Route != nil && r.Route.ValidUntil != (lifetime.Deadline{}) {
@@ -302,6 +302,7 @@ func (r *Runtime) projectProgramLocked(cfg configuration, records map[string]ser
 	p, err := r.projectLocked(cfg.protocols, native, records, now, facts)
 	p.observationVersion = r.observationVersion
 	p.resources = states
+	r.projectEgressPoliciesLocked(cfg, facts, &p)
 	clock := boottime.Clock{BootID: facts.Scope.BootID, BoottimeNanoseconds: int64(facts.NowNanos), WallTime: facts.WallTime}
 	for _, resource := range cfg.source.Resources {
 		if resource.Service == nil || resource.Service.RA == nil || resource.Service.RA.From == nil {

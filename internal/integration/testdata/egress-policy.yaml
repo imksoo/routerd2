@@ -1,0 +1,283 @@
+apiVersion: routerd.net/v1alpha1
+kind: Router
+metadata:
+  name: connection-routing
+spec:
+  resources:
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: Interface
+    metadata:
+      name: wan0
+    spec:
+      ifname: wan0
+      managed: true
+      adminUp: true
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: IPv4StaticAddress
+    metadata:
+      name: address0
+    spec:
+      interface: wan0
+      address: 192.0.2.2/24
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: HealthCheck
+    metadata:
+      name: health0
+    spec:
+      interface: wan0
+      target: 198.51.100.10
+      protocol: tcp
+      port: 18080
+      interval: 250ms
+      timeout: 250ms
+      healthyThreshold: 1
+      unhealthyThreshold: 2
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: Interface
+    metadata:
+      name: wan1
+    spec:
+      ifname: wan1
+      managed: true
+      adminUp: true
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: IPv4StaticAddress
+    metadata:
+      name: address1
+    spec:
+      interface: wan1
+      address: 203.0.113.2/24
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: HealthCheck
+    metadata:
+      name: health1
+    spec:
+      interface: wan1
+      target: 198.51.100.10
+      protocol: tcp
+      port: 18080
+      interval: 250ms
+      timeout: 250ms
+      healthyThreshold: 1
+      unhealthyThreshold: 2
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: Interface
+    metadata:
+      name: wan2
+    spec:
+      ifname: wan2
+      managed: true
+      adminUp: true
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: IPv4StaticAddress
+    metadata:
+      name: address2
+    spec:
+      interface: wan2
+      address: 198.19.1.2/24
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: HealthCheck
+    metadata:
+      name: health2
+    spec:
+      interface: wan2
+      target: 198.51.100.10
+      protocol: tcp
+      port: 18080
+      interval: 250ms
+      timeout: 250ms
+      healthyThreshold: 1
+      unhealthyThreshold: 2
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: Interface
+    metadata:
+      name: wan3
+    spec:
+      ifname: wan3
+      managed: true
+      adminUp: true
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: IPv4StaticAddress
+    metadata:
+      name: address3
+    spec:
+      interface: wan3
+      address: 198.19.2.2/24
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: HealthCheck
+    metadata:
+      name: health3
+    spec:
+      interface: wan3
+      target: 198.51.100.10
+      protocol: tcp
+      port: 18080
+      interval: 250ms
+      timeout: 250ms
+      healthyThreshold: 1
+      unhealthyThreshold: 2
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: Interface
+    metadata:
+      name: wan4
+    spec:
+      ifname: wan4
+      managed: true
+      adminUp: true
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: IPv4StaticAddress
+    metadata:
+      name: address4
+    spec:
+      interface: wan4
+      address: 198.19.3.2/24
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: HealthCheck
+    metadata:
+      name: health4
+    spec:
+      interface: wan4
+      target: 198.51.100.10
+      protocol: tcp
+      port: 18080
+      interval: 250ms
+      timeout: 250ms
+      healthyThreshold: 1
+      unhealthyThreshold: 2
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: Interface
+    metadata:
+      name: lan
+    spec:
+      ifname: lan0
+      managed: true
+      adminUp: true
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: IPv4StaticAddress
+    metadata:
+      name: lan-address
+    spec:
+      interface: lan
+      address: 198.18.0.1/24
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: EgressRoutePolicy
+    metadata:
+      name: default
+    spec:
+      family: ipv4
+      mode: priority
+      sourceCIDRs:
+      - 198.18.0.0/24
+      destinationCIDRs:
+      - 0.0.0.0/0
+      excludeDestinationCIDRs:
+      - 10.0.0.0/8
+      - 172.16.0.0/12
+      - 192.168.0.0/16
+      - 198.18.0.0/24
+      hashFields:
+      - sourceAddress
+      selection: highest-weight-ready
+      hysteresis: 60s
+      candidates:
+      - name: balanced
+        weight: 120
+        targets:
+        - name: path0
+          interface: wan0
+          gateway: 192.0.2.1
+          gatewaySource: static
+          table: 110
+          priority: 10110
+          mark: 272
+          healthCheck: health0
+        - name: path1
+          interface: wan1
+          gateway: 203.0.113.1
+          gatewaySource: static
+          table: 111
+          priority: 10111
+          mark: 273
+          healthCheck: health1
+        - name: path2
+          interface: wan2
+          gateway: 198.19.1.1
+          gatewaySource: static
+          table: 112
+          priority: 10112
+          mark: 274
+          healthCheck: health2
+      - name: secondary
+        interface: wan3
+        gateway: 198.19.2.1
+        gatewaySource: static
+        table: 113
+        priority: 10113
+        mark: 275
+        healthCheck: health3
+        weight: 80
+      - name: last
+        interface: wan4
+        gateway: 198.19.3.1
+        gatewaySource: static
+        table: 114
+        priority: 10114
+        mark: 276
+        healthCheck: health4
+        weight: 60
+  - apiVersion: system.routerd.net/v1alpha1
+    kind: Sysctl
+    metadata:
+      name: rpf-0
+    spec:
+      key: net.ipv4.conf.all.rp_filter
+      value: '0'
+  - apiVersion: system.routerd.net/v1alpha1
+    kind: Sysctl
+    metadata:
+      name: rpf-1
+    spec:
+      key: net.ipv4.conf.default.rp_filter
+      value: '0'
+  - apiVersion: system.routerd.net/v1alpha1
+    kind: Sysctl
+    metadata:
+      name: rpf-2
+    spec:
+      key: net.ipv4.conf.lan0.rp_filter
+      value: '0'
+  - apiVersion: system.routerd.net/v1alpha1
+    kind: Sysctl
+    metadata:
+      name: rpf-3
+    spec:
+      key: net.ipv4.conf.wan0.rp_filter
+      value: '0'
+  - apiVersion: system.routerd.net/v1alpha1
+    kind: Sysctl
+    metadata:
+      name: rpf-4
+    spec:
+      key: net.ipv4.conf.wan1.rp_filter
+      value: '0'
+  - apiVersion: system.routerd.net/v1alpha1
+    kind: Sysctl
+    metadata:
+      name: rpf-5
+    spec:
+      key: net.ipv4.conf.wan2.rp_filter
+      value: '0'
+  - apiVersion: system.routerd.net/v1alpha1
+    kind: Sysctl
+    metadata:
+      name: rpf-6
+    spec:
+      key: net.ipv4.conf.wan3.rp_filter
+      value: '0'
+  - apiVersion: system.routerd.net/v1alpha1
+    kind: Sysctl
+    metadata:
+      name: rpf-7
+    spec:
+      key: net.ipv4.conf.wan4.rp_filter
+      value: '0'

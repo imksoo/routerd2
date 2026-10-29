@@ -185,6 +185,12 @@ func (f *fakeKernel) ReadSetting(k settingKey) (int, error) {
 	if k.Kind == "arp_announce" {
 		return f.arpAnnounce[k.Interface], nil
 	}
+	if k.Kind == "rp_filter" {
+		if l.IPv4RPFilter == nil {
+			return 0, nil
+		}
+		return *l.IPv4RPFilter, nil
+	}
 	if k.Kind == "accept_ra" {
 		if l.IPv6AcceptRA == nil {
 			return 1, nil
@@ -221,6 +227,8 @@ func (f *fakeKernel) WriteSetting(k settingKey, v int) error {
 			f.arpIgnore[k.Interface] = v
 		case "arp_announce":
 			f.arpAnnounce[k.Interface] = v
+		case "rp_filter":
+			l.IPv4RPFilter = &v
 		case "accept_ra":
 			l.IPv6AcceptRA = &v
 		case "autoconf":

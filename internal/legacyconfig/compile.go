@@ -169,7 +169,7 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 		case "FirewallZone", "FirewallPolicy", "FirewallRule", "NAT44Rule":
 			// Compiled together to preserve ordered zone jumps and NAT-only hooks.
 		case "EgressRoutePolicy":
-			c.reject(r, "", "unsupported_semantics", "candidate health, gateway/source discovery, nft marks and failover selection cannot be reduced to static native policy rules")
+			extra = append(extra, c.egressPolicy(r, vrrpNames))
 		case "VXLANSegment", "VXLANTunnel":
 			c.reject(r, "", "unsupported_semantics", "legacy VXLAN FDB peers, L2 filtering and outer-DF defaults require explicit native conversion; a single remote is not a lossless substitute")
 		case "NTPClient", "NTPServer":
@@ -338,7 +338,7 @@ func (c *compiler) allow(r resource, fields ...string) {
 	for _, field := range []string{"when", "dependsOn", "ready_when"} {
 		if field == "when" {
 			switch r.Kind {
-			case "HealthCheck", "DHCPv6PrefixDelegation", "DHCPv6Information", "NTPClient", "DHCPv6Server", "IPv6RouterAdvertisement":
+			case "EgressRoutePolicy", "HealthCheck", "DHCPv6PrefixDelegation", "DHCPv6Information", "NTPClient", "DHCPv6Server", "IPv6RouterAdvertisement":
 				continue
 			case "DSLiteTunnel":
 				if _, dynamic := c.options.DSLite[r.Kind+"/"+r.Metadata.Name]; dynamic {

@@ -151,6 +151,17 @@ func Compile(source Program) (Plan, error) {
 				err = claim(r, "route", routeKey(route))
 				node.egress = &route
 			}
+		case r.EgressPolicy != nil:
+			policy, compileErr := prepareEgressPolicy(r.ID, *r.EgressPolicy)
+			err = compileErr
+			if err == nil {
+				for _, group := range policy.spec.Groups {
+					for _, target := range group.Targets {
+						err = errors.Join(err, claim(r, "route", routeKey(network.Route{Destination: "0.0.0.0/0", Table: target.Table, Metric: target.Metric})), claim(r, "policy_rule", fmt.Sprintf("4/%d", target.Priority)), claim(r, "flow_mark", fmt.Sprint(target.Mark)))
+					}
+				}
+				plan.EgressPolicies = append(plan.EgressPolicies, policy)
+			}
 		case r.PolicyRule != nil:
 			err = claim(r, "policy_rule", fmt.Sprintf("%d/%d", r.PolicyRule.Family, r.PolicyRule.Priority))
 		case r.Forwarding != nil:

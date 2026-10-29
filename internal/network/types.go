@@ -38,9 +38,12 @@ type Desired struct {
 // Addresses are host/prefix values (for example 192.0.2.1/24, not the subnet).
 // Only addresses created and recorded by this engine are ever removed.
 type Interface struct {
-	Name      string   `json:"name"`
-	MTU       int      `json:"mtu,omitempty"`
-	Addresses []string `json:"addresses,omitempty"`
+	// IPv4RPFilter explicitly owns this interface's reverse-path filter.
+	// Linux uses max(conf/all, conf/interface); all=0 alone is insufficient.
+	IPv4RPFilter *int     `json:"ipv4_rp_filter,omitempty"`
+	Name         string   `json:"name"`
+	MTU          int      `json:"mtu,omitempty"`
+	Addresses    []string `json:"addresses,omitempty"`
 	// AddressOptions keys are entries in Addresses. Omitted options mean an
 	// infinite static address with normal duplicate-address detection.
 	AddressOptions map[string]AddressOptions `json:"address_options,omitempty"`
@@ -122,6 +125,8 @@ type Forwarding struct {
 // Directed forwarding pairs and accept rules also clamp TCP MSS in both
 // directions to the current interface MTUs, without granting extra traffic.
 type Firewall struct {
+	FlowRoutes   []FlowRoute    `json:"flow_routes,omitempty"`
+	FlowPaths    []FlowPath     `json:"flow_paths,omitempty"`
 	Forward      []Forward      `json:"forward,omitempty"`
 	Masquerade   []Masquerade   `json:"masquerade,omitempty"`
 	Input        *FirewallChain `json:"input,omitempty"`
@@ -177,6 +182,7 @@ type InterfaceState struct {
 	Link         *Link          `json:"link,omitempty"`
 	Owned        bool           `json:"owned"`
 	Addresses    []AddressState `json:"addresses,omitempty"`
+	IPv4RPFilter *int           `json:"ipv4_rp_filter,omitempty"`
 	IPv6AcceptRA *int           `json:"ipv6_accept_ra,omitempty"`
 	IPv6Autoconf *bool          `json:"ipv6_autoconf,omitempty"`
 }
@@ -278,6 +284,9 @@ func Validate(d Desired) error {
 		links[l.Name] = l
 		if l.MTU != 0 && (l.MTU < 68 || l.MTU > 65535) {
 			add("interface %s: MTU must be 68..65535 or zero", l.Name)
+		}
+		if l.IPv4RPFilter != nil && (*l.IPv4RPFilter < 0 || *l.IPv4RPFilter > 2 || l.Name == "all" || l.Name == "default") {
+			add("interface %s: ipv4_rp_filter requires a device and value 0, 1 or 2", l.Name)
 		}
 		if l.IPv6AcceptRA != nil && (*l.IPv6AcceptRA < 0 || *l.IPv6AcceptRA > 2) {
 			add("interface %s: ipv6_accept_ra must be 0, 1 or 2", l.Name)

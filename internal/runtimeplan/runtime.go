@@ -149,6 +149,7 @@ type Runtime struct {
 	records              map[string]serviceconfig.Update
 	applications         map[string]*pendingApplication
 	vrrpOwners           map[string]vrrpOwnership
+	egressSelections     map[string]resourceprogram.EgressSelection
 	vrrpTracks           map[string][]vrrpTrackState
 	liveRA               map[string]ra.Config
 	liveDHCP6            map[string]dhcp6config.RouterFlags
@@ -209,7 +210,7 @@ func (r *Runtime) CheckReady(ctx context.Context) error {
 		}
 		for id, state := range p.resources {
 			if state.Active && state.Ready != resourceprogram.True {
-				return fmt.Errorf("resource %s ready_when is not true", id)
+				return fmt.Errorf("resource %s is not ready: %s", id, state.Reason)
 			}
 			applied, ok := r.resourceStates[id]
 			// Selection must be applied; freshness alone may advance while readiness
@@ -382,6 +383,7 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 			r.finishApplicationLocked(name, ErrStale)
 		}
 		r.sourceEpoch++
+		r.egressSelections = nil
 		r.guardGrants = nil
 		r.vrrpTracks = nil
 		r.guard = supervisorObservation{}

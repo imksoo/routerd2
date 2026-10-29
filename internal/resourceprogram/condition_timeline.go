@@ -193,6 +193,14 @@ func (s FactSnapshot) timedCondition(c *FactCondition, ignoreOwnHold bool) timed
 
 func resourceConditions(resource Resource) []*FactCondition {
 	conditions := []*FactCondition{resource.When, resource.ReadyWhen}
+	if resource.EgressPolicy != nil {
+		for _, group := range resource.EgressPolicy.Groups {
+			conditions = append(conditions, group.When)
+			for _, target := range group.Targets {
+				conditions = append(conditions, target.When, target.OwnerWhen)
+			}
+		}
+	}
 	if resource.EgressRoute != nil {
 		for _, candidate := range resource.EgressRoute.Candidates {
 			conditions = append(conditions, candidate.When)

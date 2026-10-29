@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"slices"
 	"time"
 
 	"github.com/imksoo/routerd2/internal/lifetime"
@@ -179,6 +180,33 @@ func (e *Engine) expireAuthority(ctx context.Context) (time.Duration, error) {
 		if err := p.removePolicyRule(i); err != nil {
 			e.state.Status, e.state.LastError = "degraded", err.Error()
 			return 0, errors.Join(err, e.save())
+		}
+	}
+	if firewall := e.state.Desired.Firewall; firewall != nil {
+		changed := false
+		next := *firewall
+		next.FlowRoutes = slices.Clone(firewall.FlowRoutes)
+		for i, flow := range next.FlowRoutes {
+			if flow.Authority == (lifetime.Deadline{}) {
+				continue
+			}
+			if flow.Authority.Live(clock.Clock) {
+				if remaining := flow.Authority.Remaining(clock.Clock); delay == 0 || remaining < delay {
+					delay = remaining
+				}
+				continue
+			}
+			next.FlowRoutes[i].Buckets, next.FlowRoutes[i].Authority = nil, lifetime.Deadline{}
+			changed = true
+		}
+		if changed {
+			if err := p.firewall(&next); err != nil {
+				return 0, err
+			}
+			e.state.Desired.Firewall = &next
+			if err := e.save(); err != nil {
+				return 0, err
+			}
 		}
 	}
 	keep := make(map[addressKey]bool, len(e.state.Addresses))

@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -18,7 +19,7 @@ import (
 
 func TestNetworkJournalAPIInspectsDiskAndDoesNotReturnCachedState(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "network.json")
-	raw := []byte(`{"version":15,"revision":7,"attempted_revision":7,"status":"applied"}`)
+	raw := []byte(fmt.Sprintf(`{"version":%d,"revision":7,"attempted_revision":7,"status":"applied"}`, network.JournalVersion))
 	if err := os.WriteFile(path, raw, 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +50,7 @@ func TestNetworkJournalAPIInspectsDiskAndDoesNotReturnCachedState(t *testing.T) 
 			t.Fatal("journal endpoint accepted caller-selected inputs", r.Code)
 		}
 	}
-	if err := os.WriteFile(path, []byte(`{"version":15,"version":15,"status":"applied"}`), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(fmt.Sprintf(`{"version":%d,"version":%d,"status":"applied"}`, network.JournalVersion, network.JournalVersion)), 0600); err != nil {
 		t.Fatal(err)
 	}
 	r = httptest.NewRecorder()

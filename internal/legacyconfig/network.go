@@ -4,6 +4,7 @@ package legacyconfig
 
 import (
 	"net/netip"
+	"strconv"
 	"strings"
 
 	"github.com/imksoo/routerd/pkg/api"
@@ -330,6 +331,30 @@ func (c *compiler) sysctl(r resource) {
 	if s.Compare != "" && s.Compare != "exact" || s.ExpectedValue != "" && s.ExpectedValue != s.Value {
 		c.reject(r, "compare", "unsupported_semantics", "native forwarding does not implement non-exact observed-value policies")
 	}
+	if strings.HasPrefix(s.Key, "net.ipv4.conf.") && strings.HasSuffix(s.Key, ".rp_filter") {
+		value, err := strconv.Atoi(s.Value)
+		if err != nil || value < 0 || value > 2 {
+			c.reject(r, "value", "invalid_value", "rp_filter must be 0, 1 or 2")
+			return
+		}
+		name := strings.TrimSuffix(strings.TrimPrefix(s.Key, "net.ipv4.conf."), ".rp_filter")
+		if name == "all" || name == "default" {
+			previous := c.document.Network.Forwarding.IPv4RPFilter
+			if previous != nil && *previous != value {
+				c.reject(r, "value", "conflict", "native global reverse-path filtering uses the same all/default setting")
+				return
+			}
+			c.document.Network.Forwarding.IPv4RPFilter = &value
+		} else if iface := c.ensureInterface(r, "key", c.interfaceName(r, "key", name, true)); iface != nil {
+			if iface.IPv4RPFilter != nil {
+				c.reject(r, "key", "duplicate_sysctl", "each interface reverse-path filter must have one owner")
+				return
+			}
+			iface.IPv4RPFilter = &value
+		}
+		c.target(r, "network.reverse_path_filter")
+		return
+	}
 	if s.Value != "0" && s.Value != "1" {
 		c.reject(r, "value", "invalid_value", "forwarding value must be the string 0 or 1")
 		return
@@ -337,6 +362,8 @@ func (c *compiler) sysctl(r resource) {
 	value := s.Value == "1"
 	var target **bool
 	switch s.Key {
+	case "net.netfilter.nf_conntrack_tcp_be_liberal":
+		target = &c.document.Network.Forwarding.ConntrackTCPLiberal
 	case "net.ipv4.ip_forward":
 		target = &c.document.Network.Forwarding.IPv4
 	case "net.ipv6.conf.all.forwarding":

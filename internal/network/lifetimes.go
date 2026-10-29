@@ -1,6 +1,11 @@
 package network
 
-import "github.com/imksoo/routerd2/internal/boottime"
+import (
+	"slices"
+
+	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/lifetime"
+)
 
 // ProjectLifetimes removes expired addresses, routes and rules at one paired clock.
 // The caller owns the slices and address-option maps: projection mutates these
@@ -39,5 +44,16 @@ func ProjectLifetimes(d Desired, clock boottime.Clock) Desired {
 		}
 	}
 	d.PolicyRules = rules
+	if d.Firewall != nil {
+		f := *d.Firewall
+		f.FlowRoutes = slices.Clone(f.FlowRoutes)
+		for i := range f.FlowRoutes {
+			if !f.FlowRoutes[i].Authority.Live(clock) {
+				f.FlowRoutes[i].Buckets = nil
+				f.FlowRoutes[i].Authority = lifetime.Deadline{}
+			}
+		}
+		d.Firewall = &f
+	}
 	return d
 }

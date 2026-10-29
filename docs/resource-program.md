@@ -130,6 +130,32 @@ compiler contract は native-47、network journal は12。既存 route の ECMP 
 writer 交換と元期限撤去を確認した。今回の動的経路選択は IPv4 で実行した。
 既存接続継続、IPv6 動的選択、policy ごとの mark/connmark hash、旧 EgressRoutePolicy 全体の import と実 NIC は未検証・未完了である。
 
+### 接続マークによる候補グループ
+
+`egress_policy` はIPv4の新規転送接続を候補グループへ割り当てる。`groups` は `name`、
+`weight`、`priority`、`when` と `targets` を持つ。各targetは `name`、`interface`、
+`gateway`、`table`、`priority`、`mark`、`metric`、`when`、`owner_when` を持つ。
+Health条件は `when`、基盤トンネルの元期限は `owner_when` へ分ける。
+対象は `sources` / `destinations`、除外は `exclude_destinations` で明示する。
+
+現在使える最大weightのグループを選び、同順位はpriority・name・宣言順で決める。
+グループ内は旧routerdの256バケットrendezvousとnftables Jenkins hashを使う。
+標準は送信元アドレス、`hash_destination: true` は宛先も含む。
+`hysteresis_millis` は最後の切替から、現在のグループが使える間だけ選択を維持する。
+障害では待たずに次のグループへ移る。`mark_only: true` は転送接続を分類せず、
+指定markの経路表・ruleを用意する。
+
+既存接続はconntrack markから元経路へ送り、元WANと異なるinterfaceへ落ちる転送を拒否する。
+Health喪失で基盤経路を消さない。全候補が不明・異常なら対象の新規接続を遮断する。
+controlが停止しても元期限で新規分類を遮断し、writer再起動はその期限を延長しない。
+既存の所有経路を使うTCP/UDPは維持するが、WAN自体が失われたTCPの継続を保証するものではない。
+
+Linuxの逆引き経路検査はall/interfaceの大きい値を使う。必要な構成では
+`forwarding.ipv4_rp_filter: 0` と各 `interface.ipv4_rp_filter: 0` を明示する。
+書込みと復元は既存のsetting ownerが行う。暗黙のOS修復や外部選択daemonは使わない。
+実行例は公開値の `internal/integration/testdata/egress-policy.yaml` と対応fixtureにある。
+compiler contract66/network journal16。IPv6 hostTrafficと全homert構成の受入は残る。
+
 ### IPv4 の送信元専用 hash
 
 `forwarding.ipv4_ecmp_hash: source` は、その network namespace の **全 IPv4 ECMP 経路**を

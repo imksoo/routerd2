@@ -32,6 +32,7 @@ type projection struct {
 	observationVersion uint64
 	activationUntil    uint64
 	vrrpOwners         map[string]vrrpOwnership
+	egressSelections   map[string]resourceprogram.EgressSelection
 	native             config.Native
 	resources          map[string]resourceprogram.ResourceState
 	routeIssues        []RouteIssue

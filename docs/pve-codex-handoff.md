@@ -5,6 +5,34 @@
 [試験計画](test-plan.md)、[機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
+## 接続マークを使うIPv4候補グループ（2026-10-29、native-66）
+
+`egress-policy-native66` は旧routerdの候補順位と256バケットのrendezvous計算を取り込み、
+旧EgressRoutePolicyのIPv4 priority/hash・mark用tableを既存resource/control/networkへ接続した。
+固定の分散計算は設定時に準備する。新規接続は選出グループへ送り、既存接続はconntrack markで
+元の経路表を使う。Health喪失で旧接続の経路を消さず、基盤トンネルの所有期限とは分ける。
+別の外部daemonや選択管理processは追加していない。VRRPは引き続きGo実装である。
+
+公開値の旧設定を実CLIで取り込み、Linux kernelと製品supervisor/control/network/Health、
+独立した5 WAN peerとLANで71.76秒の試験が終了0。3出口への送信元別TCP/UDP分散、
+重み120→80→60、障害時は60秒抑制を待たない切替、旧TCP/UDPの維持、60秒後の上位復帰を確認した。
+confirmed rollback、control/Health停止中の元期限で新規通信を遮断、network worker交換後も
+期限を延ばさないことと既存TCP/UDP維持、再開後の新規通信復旧まで通り、5 WANのcaptureを照合した。
+実WAN断ではなくHealth用受信口を停止した試験であり、異なる公衆WANの同一TCP維持は示していない。
+
+初回はSYN-ACKが線上へ返ってもrp_filterで接続が成立しなかった。all=0だけでは既存interfaceの
+値が残るため、明示したinterface値を既存の所有・復元journalで適用する。試験は全前提を旧Sysctlへ
+記載し、手動sysctl修復は使わない。旧hostdeps.derivedInterfaceSysctlsとrouter-linux profileも読んだ。
+旧routerdはrouting時のall/default=0とtunnelごとの0を暗黙に補うが、その全派生profileの取込みは残る。
+途中のcapture照合は別fixtureのポートを参照し、次の実行はSysctlのapiVersionを誤った。
+いずれも訂正後に同じ通信条件で完走した。旧試作readerは加えず、compiler contract66/network journal16とした。
+
+関連する既存Health/PBRとkernel ECMPの実試験、全make check（全Race・vetを含む）、
+Linux amd64/arm64のCGO_ENABLED=0 build、最終六ELFの署名catalog/publisher/stage検査はすべて終了0。
+次はルーター自身のIPv6 hostTraffic/preferred source、動的Health target、暗黙OS設定の明示化と
+homert単体全構成を接続する。今回の固定IPv4・模擬WANはPD/DS-Lite実回線の受入に数えない。
+全homert二台、k8s/pve、SAM、配備・更新・復旧の全34項目は未完了である。
+
 ## RAで取得する自己DNS（native-65）
 
 RAのRDNSSも、DHCPv6と同じ実DNS待受の観測に接続した。観測の2秒期限は広告許可であり、

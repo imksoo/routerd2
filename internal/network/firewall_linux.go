@@ -72,7 +72,9 @@ func (k *linuxKernel) ReplaceFirewall(f *Firewall) error {
 		if err != nil {
 			return err
 		}
-		buildFirewall(c, &actual)
+		if err := buildFirewall(c, &actual); err != nil {
+			return err
+		}
 	}
 	return c.Flush()
 }
@@ -156,7 +158,8 @@ func firewallPathMTUs(f *Firewall) (Firewall, error) {
 	return out, nil
 }
 
-func buildFirewall(c *nftables.Conn, f *Firewall) {
+func buildFirewall(c *nftables.Conn, f *Firewall) error {
+
 	t := c.CreateTable(&nftables.Table{Name: FirewallTable, Family: nftables.TableFamilyINet})
 	marker := c.AddChain(&nftables.Chain{Name: ownerChain, Table: t})
 	c.AddRule(&nftables.Rule{Table: t, Chain: marker, Exprs: []expr.Any{&expr.Counter{}}, UserData: firewallMarker})
@@ -178,6 +181,9 @@ func buildFirewall(c *nftables.Conn, f *Firewall) {
 	}
 	if len(f.IPv4ClearDF) > 0 {
 		buildIPv4ClearDF(c, t, f.IPv4ClearDF)
+	}
+	if err := buildFlowRoutes(c, t, f); err != nil {
+		return err
 	}
 	buildNATAffinity(c, t, f.NAT)
 	var pre, post *nftables.Chain
@@ -214,6 +220,7 @@ func buildFirewall(c *nftables.Conn, f *Firewall) {
 		es = append(es, &expr.Counter{}, &expr.Masq{})
 		c.AddRule(&nftables.Rule{Table: t, Chain: post, Exprs: es})
 	}
+	return nil
 }
 
 // Restore each connection's original source-NAT path before routing. If the

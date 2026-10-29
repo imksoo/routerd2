@@ -155,7 +155,16 @@ other conditions and live gateway/DS-Lite target discovery remain unsupported; t
 than losing their meaning. Disabled checks create no healthy observation.
 `make check-health-pbr RELEASE_ID=health-import` feeds the actual CLI-converted
 probes into the two-WAN daemon fixture, alongside native routing resources.
-That does not establish import of legacy `EgressRoutePolicy` or full HA input.
+IPv4 `EgressRoutePolicy` now imports priority/hash groups with static gateways
+or owned DS-Lite interfaces, and mark-only probe tables. Group weight/priority,
+HealthCheck conditions, source/destination prefixes, exclusions, routing marks,
+tables, per-target priorities and last-transition hysteresis become native
+`egress_policy` intent. Unsupported dynamic gateways, IPv6 hostTraffic and
+address sets still reject the complete import. Full HA input remains incomplete.
+`TestDaemonConnectionMarkedEgressPolicy` exercises the CLI and actual worker/kernel
+path with five independent WAN peers, established TCP/UDP, rollback and expiry.
+Required runtime Sysctl values, including interface-specific `rp_filter`, are
+explicit intent. Automatic router-linux profile expansion remains unimplemented.
 
 ## Stateless DHCPv6 and delegated LAN RA
 

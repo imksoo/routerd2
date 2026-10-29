@@ -484,6 +484,7 @@ func (r *Runtime) applyProjectionLocked(ctx context.Context, p projection) (proj
 		r.liveDHCP6 = p.liveDHCP6
 		r.delegatedDNS = p.delegatedDNS
 		r.vrrpOwners = p.vrrpOwners
+		r.egressSelections = p.egressSelections
 		r.applied.observationVersion = p.observationVersion
 		r.applied.sourceEpoch = r.sourceEpoch
 		until := uint64(math.MaxUint64)
@@ -504,6 +505,13 @@ func (r *Runtime) applyProjectionLocked(ctx context.Context, p projection) (proj
 			for _, address := range iface.Addresses {
 				if lifetime := iface.AddressOptions[address].BootLifetime; lifetime.BootID != "" {
 					until = min(until, lifetime.ValidNanos)
+				}
+			}
+		}
+		if p.network.Firewall != nil {
+			for _, flow := range p.network.Firewall.FlowRoutes {
+				if flow.Authority.BootID != "" {
+					until = min(until, flow.Authority.Nanos)
 				}
 			}
 		}
