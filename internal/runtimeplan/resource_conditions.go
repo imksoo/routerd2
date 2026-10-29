@@ -297,7 +297,10 @@ func (r *Runtime) conditionFactsLocked(cfg configuration) (result resourceprogra
 			if active {
 				value = resourceprogram.True
 			}
-			facts.Facts[name+".active"] = resourceprogram.Fact{Value: value, ObservedNanos: source.ObservedNanos, ExpiresNanos: min(until, r.guard.untilNanos), WorkerGeneration: module.Generation, ProducerEpoch: record.ProducerEpoch}
+			// Supervisor freshness is checked above before using this producer.
+			// Its poll budget is not the PD lease: exported authority retains
+			// the original grant, just as the underlying PPP session does.
+			facts.Facts[name+".active"] = resourceprogram.Fact{Value: value, ObservedNanos: source.ObservedNanos, ExpiresNanos: until, WorkerGeneration: module.Generation, ProducerEpoch: record.ProducerEpoch}
 			prefixBound := resourceprogram.False
 			prefixUntil := uint64(0)
 			if active {
@@ -311,7 +314,7 @@ func (r *Runtime) conditionFactsLocked(cfg configuration) (result resourceprogra
 			if prefixBound == resourceprogram.False {
 				prefixUntil = r.guard.untilNanos
 			}
-			facts.Facts[name+".prefix_bound"] = resourceprogram.Fact{Value: prefixBound, ObservedNanos: source.ObservedNanos, ExpiresNanos: min(prefixUntil, r.guard.untilNanos), WorkerGeneration: module.Generation, ProducerEpoch: record.ProducerEpoch}
+			facts.Facts[name+".prefix_bound"] = resourceprogram.Fact{Value: prefixBound, ObservedNanos: source.ObservedNanos, ExpiresNanos: prefixUntil, WorkerGeneration: module.Generation, ProducerEpoch: record.ProducerEpoch}
 
 			continue
 		}

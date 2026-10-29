@@ -280,7 +280,9 @@ def peer(stage, power_action, updates, profile):
         d = server()
 
         def client_ready():
-            return any((a.get('scope') == 'global' and (not a.get('tentative')) for x in json.loads(run(['ip', '-n', lan, '-j', '-6', 'addr', 'show', 'dev', 'client0'])) for a in x['addr_info']))
+            addresses = json.loads(run(['ip', '-n', lan, '-j', '-6', 'addr', 'show', 'dev', 'client0']))
+            routes = json.loads(run(['ip', '-n', lan, '-j', '-6', 'route', 'show', 'default']))
+            return any(a.get('scope') == 'global' and not a.get('tentative') and not a.get('deprecated') for link in addresses for a in link['addr_info']) and any(route.get('dev') == 'client0' and route.get('gateway') for route in routes)
         wait(client_ready)
         traffic()
         print('PASS factory appliance: CHAP, IPv4/IPv6 TCP/UDP, ISC PD and independent Linux SLAAC client', flush=True)
@@ -393,10 +395,17 @@ def peer(stage, power_action, updates, profile):
             wait(lambda: any(x['name'] == 'control' and x['generation'] > before_control['control']['generation'] and x['ready'] for x in query('show status')['modules']))
             wait(pd_ready)
             wait(client_ready)
-            traffic()
+            recovered_at = time.time()
+            # Cross a complete ISP lease while using the actual client route.
+            # Waiting for an address alone hid withdrawal of the default router.
+            while time.time() - recovered_at < 20:
+                assert client_ready(), 'recovered client lost its usable IPv6 source/default route'
+                traffic()
+                time.sleep(1)
+            assert not any('router advertisement' in line and 'router lifetime 0s' in line for _, line in packets('lan.pcap', recovered_at)), 'live PD was withdrawn again after control recovery'
             assert query('show services pd')['snapshot']['client_duid'] == duid
             assert query('show config')['revision'] == revision
-            print('Observed control restart communication seconds', round(time.monotonic() - control_restart_started, 2), flush=True)
+            print('Observed control restart and 20s stability check seconds', round(time.monotonic() - control_restart_started, 2), flush=True)
             print('PASS control restart withdrew old PD before PPP/control replacement, retained network/management and restored both-family TCP/UDP/DNS', flush=True)
             for capture in (wan_capture, lan_capture):
                 capture.send_signal(signal.SIGINT)

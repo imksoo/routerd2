@@ -1,9 +1,31 @@
 # routerd2 開発引き継ぎ
 
-2026-10-29。全34 work packageのゴールは継続中。homert本番の置換は未実施であり、
+2026-10-30 JST。全34 work packageのゴールは継続中。homert本番の置換は未実施であり、
 対象実機で利用可能とはまだ判断していない。[実装計画](implementation-plan.md)、
 [試験計画](test-plan.md)、[機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
+
+## PDの元期限とRA再撤回の修正（2026-10-30 JST、pd-authority-native74）
+
+native73実APKのcontrol交換後、01:56:16.248に寿命13秒のRA、18.046に寿命0撤回、
+18.668に正常AAAA応答と端末IPv6 TCP失敗、21.223に再撤回、24.321に有効RAを捕捉した。
+端末は既定経路を失いSYNを送っていなかった。RA workerは同じgeneration3、PDはBoundで元期限内だった。
+コードではPD active/prefix_boundをsupervisor照会の1秒期限で切り詰め、その期限をRA ActiveUntilへ渡していた。
+元のprefix期限とこの起動条件の期限を混同した実装を修正した。PPPoEの既存と同様、PDの元のgrant期限を保持し、
+producer照合・supervisorの現観測・元期限切れ・下位PPP/VRRPの条件は維持する。新しい猶予時間を設けない。
+contract74/journal17。実Alpine3.24.3/kernel6.18.59、APK/PID 1・2 NIC QEMUで再試験は終了0。
+自動DHCP/DNS・両IP TCP/UDP・PD/Renew・PPP交換後31.84秒、control交換と復帰後20秒以上の連続確認を
+含む段階全体66.37秒、元DUID/設定/DNS worker、RA撤回→PADT→正常電源断を確認した。
+66.37秒は純粋な復旧時間ではない。端末の有効address/default routeを共に要求し、独立ISCの18秒リース一周期を
+越えて両IP TCP/UDP/DNSを利用し、その区間にRA再撤回がないことをcaptureで確認した。
+ISC対向PD/IA_NAと旧設定の条件付きLANも終了0。全make check（Race/vet）、両CGO0 Linux buildと署名六ELFも終了0。
+同じ候補版の実HGW+準備条件/VIP、両自動端末、単一DS-Lite/Health/egressで7800秒の観測を02:12 JST頃に再開。
+T1約7186秒なので04:12頃に自然更新、04:22頃以降に終了予定。現時点は進行中・自然更新0・未合格。
+私有logは`/tmp/routerd-pd-authority-native74-hgw-natural.log`、永続identity/leaseは
+`~/.local/state/routerd2-homert-single`。別試験は同じWAN MAC/DUIDを重複使用しない。
+次はこの動作を維持し、実WAN zone参照・条件付きNATを別の隔離peer構成で接続する。
+
+01:56:38 JSTの全体完成期限は未達のまま。HGW自然PD観測は進行中であり、短期ISCのRenewで代替しない。
 
 ## 主系の公開準備と実通信（2026-10-29、admission-native73）
 
@@ -42,7 +64,7 @@ NICなしで署名pairのPID 1実行・自動health確認・更新中commit排�
 Go/ELF検査とengine同梱を確認したが、全Go・最少バイナリーという依存削減の目標達成とは扱わない。
 同じcodeのAlpine imageも`dist/image-native73`へ生成したが、実APK/PID 1・2 NIC QEMUのworker-recoveryは
 終了1。初回の自動LAN DHCP/DNS、CHAP、両IP TCP/UDP、独立ISCの短期PD Renewは通過した一方、
-PPP worker交換後の両IP通信は復旧したが、次のcontrol交換・PD再取得後の端末IPv6 TCPがcurl exit7で接続拒否となった。原因未確定で、`dist/native73-appliance/peer.log`と
+PPP worker交換後の両IP通信は復旧したが、次のcontrol交換・PD再取得後の端末IPv6 TCPがcurl exit7で失敗した。保存captureでは失敗時の端末に既定経路がなくSYN未送信であり、対向の接続拒否とは判断しない。`dist/native73-appliance/peer.log`と
 同dirのserial/captureを次に照合する。このimageの通信・復旧受入は不合格とし、配備/完成品公開を進めない。
 ユーザー期限2026-10-29 16:56:38 UTCで全34項目の完成は未達。期限や完了範囲を変更しない。
 自然PD更新、全homert/管理/複数WAN、対象NIC/直接ONU、k8s/pve、Cloud SAM等の全34項目は未受入。
