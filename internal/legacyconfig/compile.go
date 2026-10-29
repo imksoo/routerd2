@@ -126,6 +126,7 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 			c.raClient(r)
 		}
 	}
+	c.implicitRAClients()
 	for _, r := range resources {
 		switch r.Kind {
 		case "IPv6DelegatedAddress":

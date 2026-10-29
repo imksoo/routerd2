@@ -23,6 +23,7 @@ func (c *compiler) hostRoute(r resource, elections map[string]string) resourcepr
 		c.reject(r, "candidates", "unsupported_semantics", "host candidate interface must be explicit")
 	}
 	c.ensureInterface(r, "candidates.interface", iface)
+	c.ensureRAClient(r, iface)
 	out.When = egressAll(out.When, c.when(r, candidate.When, elections))
 	intent := resourceprogram.HostRoute{Interface: iface, Gateway: candidate.Gateway, Table: candidate.EffectiveTable(), Priority: candidate.Priority, Metric: candidate.EffectiveMetric()}
 	priority := 10100

@@ -12,7 +12,7 @@ import tempfile
 # Each fixture verifies its disposable user/network namespace before mutation.
 # Timeout is the outer harness budget, not a protocol or client deadline.
 SUITES = {
-    "host-route": (("TestDaemonImportedIPv6HostRoute", ("wan0",), 75), ("TestDaemonRAHostRoute", ("wan0",), 75)),
+    "host-route": (("TestDaemonImportedIPv6HostRoute", ("wan0",), 75), ("TestDaemonRAHostRoute", ("wan0",), 75), ("TestDaemonImplicitIPv6HostRoute", ("wan0",), 75)),
     "health-pbr": (
         ("TestDaemonConnectionMarkedEgressPolicy", ("wan0", "wan1", "wan2", "wan3", "wan4"), 165),
         ("TestDaemonHealthPBRFailoverAndRecovery", ("wan0", "wan1"), 195),

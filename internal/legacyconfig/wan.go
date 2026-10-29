@@ -9,8 +9,61 @@ import (
 	"strings"
 
 	"github.com/imksoo/routerd/pkg/api"
+	"github.com/imksoo/routerd/pkg/hostdeps"
+	"github.com/imksoo/routerd/pkg/platform"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
+
+// implicitRAClients retains routerd's WAN receive targets while moving their
+// effects from kernel autoconf to the existing RA worker and sole writer.
+func (c *compiler) implicitRAClients() {
+	targets := map[string]bool{}
+	for _, derived := range hostdeps.DerivedSysctlResourcesForOS(&c.legacy, platform.OSLinux) {
+		setting, ok := derived.Spec.(api.SysctlSpec)
+		if !ok || setting.Value != "2" || !strings.HasPrefix(setting.Key, "net.ipv6.conf.") || !strings.HasSuffix(setting.Key, ".accept_ra") {
+			continue
+		}
+		name := strings.TrimSuffix(strings.TrimPrefix(setting.Key, "net.ipv6.conf."), ".accept_ra")
+		targets[name] = true
+	}
+	for _, r := range c.resources {
+		var iface string
+		switch s := r.Spec.(type) {
+		case api.DHCPv6PrefixDelegationSpec:
+			iface = s.Interface
+		case api.DHCPv6InformationSpec:
+			iface = s.Interface
+		case api.IPv6DelegatedAddressSpec:
+			iface = s.Interface
+		default:
+			continue
+		}
+		if alias, ok := c.aliases[iface]; ok {
+			iface = alias
+		}
+		if targets[iface] {
+			c.ensureRAClient(r, iface)
+		}
+	}
+}
+
+func (c *compiler) ensureRAClient(r resource, iface string) {
+	for _, service := range c.document.Services {
+		if service.RAClient != nil && service.RAClient.Interface == iface {
+			return
+		}
+	}
+	if c.ensureInterface(r, "interface", iface) == nil {
+		return
+	}
+	yes := true
+	service := serviceconfig.Service{Name: c.serviceName(r, "ra-auto"), RAClient: &serviceconfig.RAClient{
+		Interface: iface, SLAAC: &yes, DefaultRoute: &yes, OnLink: &yes, RouteInformation: &yes, DNS: &yes,
+		UseMTU: true, UseHopLimit: true, Table: 254, Metric: 1024,
+	}}
+	c.addService(r, service)
+	c.note(r, "routerd hostdeps WAN RA reception is owned by one native worker per interface: SLAAC, default/on-link/RIO routes, DNS, MTU and hop limit; main table metric1024. Explicit RA policy takes precedence; kernel autoconf remains disabled.")
+}
 
 func (c *compiler) dhcp4(r resource) {
 	c.allow(r, "interface", "hostname", "requestedAddress", "classID", "clientID", "useRoutes", "useDNS", "routeMetric")

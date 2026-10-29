@@ -123,10 +123,16 @@ func TestWANPolicyPreservesDelegatedDSLiteSourceAndHostSuffix(t *testing.T) {
 func TestExplicitWANPolicyJoinsRAInformationAFTRAndRoute(t *testing.T) {
 	result := compiledPolicy(t, fixture(t, "wan-dynamic"), wanPolicy(t))
 	d := result.Document
-	if len(nativeProgram(t, d).Services) != 3 || len(nativeProgram(t, d).Network.Interfaces) != 2 || len(nativeProgram(t, d).Network.Links) != 0 || len(nativeProgram(t, d).Network.Routes) != 0 {
+	if len(nativeProgram(t, d).Network.Interfaces) != 2 || len(nativeProgram(t, d).Network.Links) != 0 || len(nativeProgram(t, d).Network.Routes) != 0 {
 		t.Fatal("dynamic ownership leaked into static network intent or created an extra socket owner")
 	}
-	raService, pd, ds := service(t, d, "ra_client"), service(t, d, "dhcp6"), service(t, d, "aftr")
+	pd, ds := service(t, d, "dhcp6"), service(t, d, "aftr")
+	var raService serviceconfig.Service
+	for _, candidate := range nativeProgram(t, d).Services {
+		if candidate.Name == ds.DSLite.SourceFrom {
+			raService = candidate
+		}
+	}
 	if raService.RAClient.Interface != "eth0" || raService.RAClient.Table != 254 || raService.RAClient.Metric != 200 || raService.RAClient.InterfaceID != "::2" {
 		t.Fatal("explicit RA identity or route policy changed")
 	}
@@ -176,7 +182,13 @@ func TestPDInformationUsesOneIdentityAndExactLegacyInterfaceMatch(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(nativeProgram(t, result.Document).Services) != 2 {
+	owners := 0
+	for _, candidate := range nativeProgram(t, result.Document).Services {
+		if candidate.DHCP6 != nil {
+			owners++
+		}
+	}
+	if owners != 1 {
 		t.Fatal("information resource opened a second DHCPv6 socket")
 	}
 	pd := service(t, result.Document, "dhcp6")

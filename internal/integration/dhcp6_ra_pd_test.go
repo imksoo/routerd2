@@ -122,18 +122,26 @@ func TestDaemonDHCP6RAAddsAddressToPD(t *testing.T) {
 	}
 	doc := migrate(legacyDHCP6PD)
 	// The imported graph owns PD, LAN serving and advertisements. Add only
-	// the fixture's duplicate-host bridge and explicit native RA/IA_NA scenario.
+	// the fixture's duplicate-host bridge and IA_NA scenario. Reuse imported RA.
 	doc.Network.Links = append(doc.Network.Links, network.Link{Name: bridge, Kind: "bridge"})
 	doc.Network.Interfaces = append(doc.Network.Interfaces, network.Interface{Name: "wire0", Master: &bridge}, network.Interface{Name: "dup0", Master: &bridge})
-	var wanName string
+	var wanName, wanRA string
+	for _, service := range doc.Services {
+		if service.RAClient != nil && service.RAClient.Interface == "wan0" {
+			wanRA = service.Name
+			service.RAClient.SLAAC = new(false)
+		}
+	}
+	if wanRA == "" {
+		t.Fatal("PD import did not provide its implicit WAN RA owner")
+	}
 	var wanIAID uint32
 	for _, service := range doc.Services {
 		if service.DHCP6 != nil {
 			wanName, wanIAID = service.ModuleName(), service.DHCP6.IAID
-			service.DHCP6.RAFrom, service.DHCP6.RequestAddress = "wan-ra", true
+			service.DHCP6.RAFrom, service.DHCP6.RequestAddress = wanRA, true
 		}
 	}
-	doc.Services = append(doc.Services, serviceconfig.Service{Name: "wan-ra", RAClient: &serviceconfig.RAClient{Interface: "wan0", SLAAC: new(false)}})
 	f := startFixtureDaemon(t, config.FromNative(doc))
 	until(t, 5*time.Second, func() bool {
 		ready := false
@@ -630,7 +638,7 @@ func TestDaemonDHCP6RAAddsAddressToPD(t *testing.T) {
 	for i, service := range selective.Services {
 		if service.DHCP6Server != nil {
 			cfg := *service.DHCP6Server
-			cfg.SNTPFrom, cfg.SearchFrom = nil, []string{"wan-ra"}
+			cfg.SNTPFrom, cfg.SearchFrom = nil, []string{wanRA}
 			selective.Services[i].DHCP6Server = &cfg
 		}
 	}

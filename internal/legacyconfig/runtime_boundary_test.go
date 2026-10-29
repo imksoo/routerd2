@@ -211,19 +211,25 @@ func migrationInterface(t *testing.T, desired network.Desired, name string) netw
 func TestMigratedWANGraphThroughPublicRuntimeProjection(t *testing.T) {
 	result := compiledPolicy(t, fixture(t, "wan-dynamic"), wanPolicy(t))
 	doc := result.Document
-	raService, pdService, dsService := service(t, doc, "ra_client"), service(t, doc, "dhcp6"), service(t, doc, "aftr")
+	pdService, dsService := service(t, doc, "dhcp6"), service(t, doc, "aftr")
+	var raService serviceconfig.Service
+	for _, candidate := range nativeProgram(t, doc).Services {
+		if candidate.Name == dsService.DSLite.SourceFrom {
+			raService = candidate
+		}
+	}
 	runtime, n, manager := runtimeMigrationFixture(t, doc)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	manager.mu.Lock()
-	pdOwners, owners := 0, len(manager.modules)
+	pdOwners := 0
 	for _, module := range manager.modules {
 		if module.Role == "dhcp6" {
 			pdOwners++
 		}
 	}
 	manager.mu.Unlock()
-	if owners != 3 || pdOwners != 1 {
+	if pdOwners != 1 {
 		t.Fatal("compiled aliases did not retain one native UDP 546 owner")
 	}
 	initial := n.state()

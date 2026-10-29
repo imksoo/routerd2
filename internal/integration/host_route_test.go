@@ -36,17 +36,24 @@ func TestDaemonImportedIPv6HostRoute(t *testing.T) {
 	if !isolateFixtureTimeout(t, "TestDaemonImportedIPv6HostRoute", 60*time.Second) {
 		return
 	}
-	runHostRouteFixture(t, false)
+	runHostRouteFixture(t, "static")
 }
 
 func TestDaemonRAHostRoute(t *testing.T) {
 	if !isolateFixtureTimeout(t, "TestDaemonRAHostRoute", 60*time.Second) {
 		return
 	}
-	runHostRouteFixture(t, true)
+	runHostRouteFixture(t, "learned")
 }
 
-func runHostRouteFixture(t *testing.T, routerFromRA bool) {
+func TestDaemonImplicitIPv6HostRoute(t *testing.T) {
+	if !isolateFixtureTimeout(t, "TestDaemonImplicitIPv6HostRoute", 60*time.Second) {
+		return
+	}
+	runHostRouteFixture(t, "implicit")
+}
+
+func runHostRouteFixture(t *testing.T, mode string) {
 	peerNS := fixturePeerNamespace(t, "wan0", "provider0")
 	if err := fixtureInsideNamespace(peerNS, func() error {
 		peer, err := netlink.LinkByName("provider0")
@@ -118,10 +125,27 @@ func runHostRouteFixture(t *testing.T, routerFromRA bool) {
 	}
 	start("dnsmasq", dnsmasqPath, "--no-daemon", "--conf-file=/dev/null", "--no-hosts", "--no-resolv", "--bind-interfaces", "--listen-address=2001:db8:ffff::9", "--host-record=destination.provider.test,2001:db8:ffff::9", "--log-facility=-")
 	input, options := filepath.Join(work, "legacy.yaml"), filepath.Join(work, "options.yaml")
-	if err := os.WriteFile(input, legacyHostRoute, 0600); err != nil {
+	legacySource, policy := legacyHostRoute, legacyHostRouteOptions
+	if mode == "implicit" {
+		// This operator declares only the host path, without an RA resource/policy.
+		// Its DNS upstream is static; the other modes retain learned RA DNS.
+		legacySource = bytes.Replace(legacySource, []byte(`  - apiVersion: net.routerd.net/v1alpha1
+    kind: IPv6RAAddress
+    metadata:
+      name: wan-ra
+    spec:
+      interface: wan
+      managed: true
+`), nil, 1)
+		legacySource = bytes.Replace(legacySource, []byte(`      addressFrom:
+      - resource: IPv6RAAddress/wan-ra
+        field: dnsServers`), []byte(`      address: 2001:db8:ffff::9`), 1)
+		policy = []byte("schema_version: 1\n")
+	}
+	if err := os.WriteFile(input, legacySource, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(options, legacyHostRouteOptions, 0600); err != nil {
+	if err := os.WriteFile(options, policy, 0600); err != nil {
 		t.Fatal(err)
 	}
 	command := exec.CommandContext(t.Context(), filepath.Join(os.Getenv("ROUTERD2_TEST_BIN_DIR"), "routerd"), "config", "migrate", "--policy", options, input)
@@ -135,7 +159,7 @@ func runHostRouteFixture(t *testing.T, routerFromRA bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if routerFromRA {
+	if mode == "learned" {
 		var source string
 		for i := range program.Resources {
 			if service := program.Resources[i].Service; service != nil && service.RAClient != nil {
@@ -249,7 +273,7 @@ func runHostRouteFixture(t *testing.T, routerFromRA bool) {
 			query.SetQuestion("destination.provider.test.", dns.TypeAAAA)
 			answer, _, err := client.Exchange(query, "127.0.0.1:1053")
 			if err != nil || answer.Rcode != dns.RcodeSuccess || len(answer.Answer) != 1 {
-				t.Fatal("learned DNS through host route", protocol, answer, err)
+				t.Fatal("DNS through host route", protocol, answer, err)
 			}
 		}
 	}

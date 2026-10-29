@@ -5,6 +5,24 @@
 [試験計画](test-plan.md)、[機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
+## 明示RAのない旧WANの受信口（2026-10-29、implicit-ra-native70）
+
+旧hostdeps.DerivedSysctlResourcesForOSのRA受信対象を直接使い、PD/Informationと、LAN配布に使わない
+delegated interfaceへ既存RA workerを接続する。IPv6 host policyのinterfaceも受信口を持つ。
+明示RA policyが同じinterfaceを所有している場合はそれを優先し、socketを重複しない。
+暗黙受信口の新しいnative intentはSLAAC/default/on-link/RIO/DNS/MTU/hop-limit、main table/metric1024。
+旧NetworkManagerの全既定値との同一性は主張しない。kernel RA/autoconfを再び有効にはしない。
+
+明示RAなし/補足policyなしの旧host設定を実CLIで取り込み、独立radvd/dnsmasqと通常DAD、
+IPv6 TCP/UDP、静的DNS upstream経由の端末照会、Health、元期限撤去・IPv4継続・復帰が終了0。
+元の固定/学習gateway・RA学習DNSの両試験も終了0。PD試験の手動RA追加は製品生成のRAと競合したため
+除去し、その受信口を使うISC対向PD/IA_NA/実DAD重複/端末通信・rollback/worker交換も終了0。
+同版の旧設定取込み条件付きLAN、独立端末のRA/SLAAC/DHCPv6・取得DNS・期限と復帰も終了0。
+そのPD試験はIA_NA観測のためSLAAC無効化を明示する。homertそのものの一貫した構成の合格ではない。
+
+全make check（Race/vet）と両CGO0 build・署名六ELF検査が終了0。compiler contract70/journal17。
+全homert取込み・単体構成の通し通信と二台は未完了。長期HGWは変更前のdoh-reset-native69を固定して継続する。
+
 ## 実HGWのDoH切断修正（2026-10-29、doh-reset-native69）
 
 native-67で再利用TLSへの対向RST→LAN SERVFAILを観測した。旧routerdも同じ単発POSTであり、
