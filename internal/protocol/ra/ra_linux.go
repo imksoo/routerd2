@@ -56,6 +56,7 @@ type Snapshot struct {
 	Resource            string    `json:"resource"`
 	Interface           string    `json:"interface"`
 	Sent                uint64    `json:"sent"`
+	SentGeneration      uint64    `json:"sent_generation"`
 	LastSent            time.Time `json:"last_sent,omitempty"`
 	LastSolicitation    time.Time `json:"last_solicitation,omitempty"`
 	Withdrawing         bool      `json:"withdrawing"`
@@ -390,6 +391,7 @@ func RunWithUpdates(ctx context.Context, cfg Config, updates <-chan Config, effe
 		}
 		lastSentNanos = uint64(clock.BoottimeNanoseconds)
 		snapshot.Sent++
+		snapshot.SentGeneration = snapshot.Generation
 		lastSentAt = time.Now()
 		snapshot.LastSent = lastSentAt.UTC()
 		snapshot.Withdrawing = withdraw

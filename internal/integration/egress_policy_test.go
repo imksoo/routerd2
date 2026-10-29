@@ -21,6 +21,7 @@ import (
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/control"
 	"github.com/imksoo/routerd2/internal/network"
+	"github.com/imksoo/routerd2/internal/protocol/vrrp"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
 	"github.com/imksoo/routerd2/internal/supervisor"
@@ -69,7 +70,7 @@ func TestDaemonConnectionMarkedEgressPolicy(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := h.RouteAdd(&netlink.Route{LinkIndex: client.Attrs().Index, Gw: net.ParseIP("198.18.0.1")}); err != nil {
+	if err := h.RouteAdd(&netlink.Route{LinkIndex: client.Attrs().Index, Gw: net.ParseIP("198.18.0.254")}); err != nil {
 		t.Fatal(err)
 	}
 	work := t.TempDir()
@@ -96,14 +97,76 @@ func TestDaemonConnectionMarkedEgressPolicy(t *testing.T) {
 		firewall.Masquerade = append(firewall.Masquerade, network.Masquerade{Source: "198.18.0.0/24", OutInterface: fmt.Sprintf("wan%d", i)})
 	}
 	program.Resources = append(program.Resources, resourceprogram.Resource{ID: "firewall", Firewall: firewall})
+	// A real election with no reachable WAN must wait for an applied egress.
+	for _, probe := range probes {
+		probe.Close()
+	}
 	f := startFixtureDaemon(t, program)
+	until(t, 3*time.Second, func() bool {
+		link, err := netlink.LinkByName("lan0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return link.Attrs().Flags&net.FlagUp != 0
+	})
+	captureDir := os.Getenv("ROUTERD2_TEST_EVIDENCE_DIR")
+	if captureDir == "" {
+		captureDir = work
+	}
+	// The LAN aggregates all 64 clients and five exits. Stream its headers to
+	// disk instead of retaining every frame in the per-WAN in-memory fixture.
+	lanCapture := exec.Command("tcpdump", "-U", "-n", "-s", "128", "-i", "lan0", "-w", filepath.Join(captureDir, "lan0.pcap"))
+	var captureLog bytes.Buffer
+	lanCapture.Stderr = &captureLog
+	if err := lanCapture.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := lanCapture.Process.Signal(os.Interrupt); err != nil {
+			t.Error(err)
+		}
+		if err := lanCapture.Wait(); err != nil {
+			t.Error(err)
+		}
+		t.Logf("LAN capture: %s", captureLog.String())
+	})
 	ctx := context.Background()
+	var election string
+	for _, resource := range program.Resources {
+		if resource.Service != nil && resource.Service.VRRP != nil {
+			election = resource.Service.ModuleName()
+		}
+	}
+	until(t, 6*time.Second, func() bool {
+		var status runtimeplan.InstanceStatus
+		if err := f.control.Do(ctx, "GET", "/v1/services/"+election, nil, &status); err != nil {
+			t.Fatal(err)
+		}
+		var snapshot vrrp.Snapshot
+		_ = json.Unmarshal(status.Snapshot, &snapshot)
+		if snapshot.Active {
+			t.Fatal("gateway published without a ready WAN")
+		}
+		return snapshot.State == vrrp.StateActive && snapshot.ActivationState == "Preparing"
+	})
+	for i, peer := range peers {
+		probes[i] = healthPBRListener(t, peer, "198.51.100.10:18080", "probe")
+	}
 	t.Cleanup(func() {
 		if !t.Failed() {
 			return
 		}
+		_ = fixtureInsideNamespace(lan, func() error {
+			for _, args := range [][]string{{"-4", "address", "show"}, {"-4", "route", "show"}, {"-4", "neigh", "show"}} {
+				output, err := exec.Command("ip", args...).CombinedOutput()
+				t.Logf("client %v: %s %v", args, output, err)
+			}
+			return nil
+		})
+		output, err := exec.Command("ip", "-4", "address", "show", "dev", "lan-ha").CombinedOutput()
+		t.Logf("gateway: %s %v", output, err)
 		var page network.DesiredPage
-		err := f.network.Do(ctx, "GET", "/v1/observations/desired", nil, &page)
+		err = f.network.Do(ctx, "GET", "/v1/observations/desired", nil, &page)
 		t.Logf("writer: %s %v", page.Data, err)
 		var status runtimeplan.Status
 		err = f.control.Do(ctx, "GET", "/v1/services", nil, &status)
@@ -202,7 +265,23 @@ func TestDaemonConnectionMarkedEgressPolicy(t *testing.T) {
 		}
 		return seen
 	}
+	waitGateway := func() {
+		t.Helper()
+		until(t, 5*time.Second, func() bool {
+			addresses, err := netlink.AddrList(nil, netlink.FAMILY_V4)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, address := range addresses {
+				if address.IP.Equal(net.ParseIP("198.18.0.254")) {
+					return true
+				}
+			}
+			return false
+		})
+	}
 	waitMarks(272, 273, 274)
+	waitGateway()
 	existing := traffic("ABC")
 	for i := 0; i < 3; i++ {
 		probes[i].Close()
@@ -326,12 +405,20 @@ func TestDaemonConnectionMarkedEgressPolicy(t *testing.T) {
 		unexpected.Close()
 		t.Fatal("expired flow authority allowed a new TCP connection after writer restart")
 	}
-	for path, conn := range existing {
-		if got := read(conn.tcp, true); got != path {
-			t.Fatal("writer restart moved existing TCP", path, got)
+	// This graph explicitly owns the gateway and egress through the election.
+	// Its expired owner must stop forwarding even established marked flows.
+	for _, conn := range existing {
+		if err := conn.udp.SetDeadline(time.Now().Add(300 * time.Millisecond)); err != nil {
+			t.Fatal(err)
 		}
-		if got := read(conn.udp, true); got != path {
-			t.Fatal("writer restart moved existing UDP", path, got)
+		if _, err := conn.udp.Write([]byte("path")); err != nil {
+			t.Fatal(err)
+		}
+		var reply [1]byte
+		if _, err := conn.udp.Read(reply[:]); err == nil {
+			t.Fatal("expired election still forwarded an established UDP flow")
+		} else if failure, ok := err.(net.Error); !ok || !failure.Timeout() {
+			t.Fatal(err)
 		}
 	}
 	for _, process := range frozen {
@@ -340,7 +427,16 @@ func TestDaemonConnectionMarkedEgressPolicy(t *testing.T) {
 		}
 	}
 	waitMarks(272, 273, 274)
+	waitGateway()
 	traffic("ABC")
+	for path, conn := range existing {
+		if got := read(conn.tcp, true); got != path {
+			t.Fatal("recovered owner or writer restart moved existing TCP", path, got)
+		}
+		if got := read(conn.udp, true); got != path {
+			t.Fatal("recovered owner or writer restart moved existing UDP", path, got)
+		}
+	}
 	for i, capture := range captures {
 		for _, packet := range []struct {
 			target   string

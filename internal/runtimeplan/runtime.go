@@ -640,6 +640,7 @@ func (r *Runtime) observe(ctx context.Context, u serviceconfig.Update) (*pending
 
 	var server dhcpserverconfig.Snapshot
 	var lease dhcp6config.Snapshot
+	var advertisement ra.Snapshot
 	if u.Role == "dhcp_server" {
 		var err error
 		server, err = r.validateDHCPServerSnapshotLocked(b, u)
@@ -656,6 +657,20 @@ func (r *Runtime) observe(ctx context.Context, u serviceconfig.Update) (*pending
 		}
 		if err := dhcp6config.ValidateSnapshot(*b.dhcp6, lease); err != nil {
 			return nil, err
+		}
+	} else if u.Role == "ra" {
+		var cfg ra.Config
+		if err := strict(b.instance.Config, &cfg); err != nil {
+			return nil, err
+		}
+		if err := strict(u.Snapshot, &advertisement); err != nil {
+			return nil, err
+		}
+		if cfg.Resource != advertisement.Resource || cfg.Interface != advertisement.Interface {
+			return nil, errors.New("RA snapshot identity mismatch")
+		}
+		if advertisement.Generation == 0 || advertisement.SentGeneration > advertisement.Generation {
+			return nil, errors.New("RA snapshot has an invalid send generation")
 		}
 	} else if err := validateSnapshot(b.instance, u.Snapshot); err != nil {
 		return nil, err
@@ -684,11 +699,13 @@ func (r *Runtime) observe(ctx context.Context, u serviceconfig.Update) (*pending
 	if u.Role == "dhcp_server" {
 		r.dhcpServers[u.Name] = server
 	}
+	if (u.Role == "dhcp6" || u.Role == "ra") && r.guardGrants == nil {
+		r.guardGrants = make(map[string]guardGrant)
+	}
 	if u.Role == "dhcp6" {
-		if r.guardGrants == nil {
-			r.guardGrants = make(map[string]guardGrant)
-		}
 		r.guardGrants[u.Name] = guardGrant{dhcp6: &lease}
+	} else if u.Role == "ra" {
+		r.guardGrants[u.Name] = guardGrant{revision: r.config.revision, generation: u.Generation, sequence: u.Sequence, epoch: u.ProducerEpoch, ra: &advertisement}
 	} else {
 		r.recordGuardGrantLocked(u)
 	}
@@ -875,18 +892,6 @@ func validateSnapshot(instance serviceconfig.Instance, b json.RawMessage) error 
 			return err
 		}
 		return dhcp4.ValidateSnapshot(c, s)
-	case "ra":
-		var c ra.Config
-		var s ra.Snapshot
-		if err := strict(instance.Config, &c); err != nil {
-			return err
-		}
-		if err := strict(b, &s); err != nil {
-			return err
-		}
-		if c.Resource != s.Resource || c.Interface != s.Interface {
-			return errors.New("RA snapshot identity mismatch")
-		}
 	case "bgp":
 		var c bgpconfig.Config
 		var s bgpconfig.Snapshot

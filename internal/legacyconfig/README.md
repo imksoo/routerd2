@@ -106,17 +106,29 @@ expired or stopped producers cannot authorize either role. Backup is never
 constructed as the negation of master. The output uses ordinary typed resource
 conditions and existing worker/kernel lifetime owners.
 
-`gracefulActivation.readyWhen` uses the same typed condition compiler.
-`DHCPv6PrefixDelegation/name.phase` (or `.status.phase`) with `equals: Bound`
-or `in: [Bound]` selects the existing unexpired native PD fact. This retains
-routerd's Bound/Renewing/Rebinding phase grouping while refusing stale grants.
+`gracefulActivation.readyWhen` uses the same typed condition compiler:
+
+| Legacy state selector | Required native observation |
+| --- | --- |
+| `DHCPv6PrefixDelegation/name.phase: Bound` | At least one prefix with its original live lease deadline, in a bound/renewing/rebinding client. An active IA_NA or information exchange alone is insufficient. |
+| `IPv4StaticAddress/name.phase: Applied` | The current configuration's acknowledged network projection. Imported static IPv4 addresses are unconditional. |
+| `IPv6DelegatedAddress/name.phase: Applied` | The acknowledged projection containing its allocation and its owning PD prefix still bound. |
+| `IPv6RouterAdvertisement/name.phase: Applied` | The current worker actually sent its current template, without withdrawal. A template change invalidates the previous send generation. |
+| `EgressRoutePolicy/name.datapathState: Ready` | The acknowledged projection's ready egress selection; host policies also require their observed usable IPv6 source. |
+
+Selectors accept `.status.phase` too, and `equals`/`in`. Kernel acknowledgement
+must belong to the current source and observation selection; planned readiness
+or a failed application cannot admit the VIP. RA snapshots are decoded once at
+the observation boundary and retain the actual successful send generation.
+No new readiness registry, external daemon or clock-based send comparison exists.
 The original 45-second timeout default is retained; timeout reports waiting
 without publishing, late readiness admits the VIP, and subsequent readiness
-loss does not revoke an admitted election. No second readiness controller is
-created. Other phase/status fields, existence/contains selectors and match
-`for`/`maxAge` remain unsupported. The original role matcher measures transition age, which
-cannot silently become native sample freshness or a new consumer's hold time.
-Information aliases may repeat their PD owner's condition; independent information lifetimes, conditional server import and full deployed readiness graphs remain open.
+loss does not revoke an admitted election. Worker replacement and expired
+observations cannot reuse the old authority. Other phase/status fields,
+existence/contains selectors and `for`/`maxAge` remain unsupported. The original
+role matcher measures transition age, which cannot silently become native
+sample freshness or a new consumer's hold time. Full deployed readiness graphs
+and independent information lifetimes remain open.
 
 `make check-vrrp-unicast RELEASE_ID=vrrp-import` includes actual CLI-converted
 IPv4 v2/PASS and IPv6 v3 graphs. Independent Keepalived, real workers and capture

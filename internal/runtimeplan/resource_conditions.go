@@ -14,6 +14,7 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/health"
 	"github.com/imksoo/routerd2/internal/protocol/pppoeconfig"
+	"github.com/imksoo/routerd2/internal/protocol/ra"
 	"github.com/imksoo/routerd2/internal/protocol/tailscaleconfig"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
@@ -35,6 +36,7 @@ type guardGrant struct {
 	dhcp4                          *dhcp4.Snapshot
 	health                         *health.Snapshot
 	dhcp6                          *dhcp6config.Snapshot
+	ra                             *ra.Snapshot
 }
 
 func dynamicProgram(source config.Document) bool {
@@ -160,6 +162,22 @@ func (r *Runtime) conditionFactsLocked(cfg configuration) (result resourceprogra
 		return facts, nil
 	}
 	facts.Facts = make(map[string]resourceprogram.Fact, 2*len(r.bindings))
+	// These describe the acknowledged projection, never a planned Ready state.
+	// A pending observation or failed/old application cannot satisfy admission.
+	network := r.guard.modules["network"]
+	if network.Ready && r.applied.network != nil && r.applied.sourceEpoch == r.sourceEpoch && r.applied.observationVersion == r.observationVersion {
+		until := r.guard.untilNanos
+		if r.applied.untilNanos != 0 {
+			until = min(until, r.applied.untilNanos)
+		}
+		fact := resourceprogram.Fact{Value: resourceprogram.True, ObservedNanos: r.guard.untilNanos - uint64(time.Second), ExpiresNanos: until, WorkerGeneration: network.Generation, ProducerEpoch: r.supervisorInstance}
+		facts.Facts["network.applied"] = fact
+		for id, state := range r.resourceStates {
+			fact.Value = state.Ready
+			facts.Facts["resource."+id+".applied"] = fact
+		}
+	}
+
 	for name, binding := range r.bindings {
 		module, ok := r.guard.modules[name]
 		if !ok || module.Generation == 0 || module.ConfigDigest != binding.digest {
@@ -245,6 +263,19 @@ func (r *Runtime) conditionFactsLocked(cfg configuration) (result resourceprogra
 			facts.Facts[name+".backup"] = fact
 			continue
 		}
+
+		if record.Role == "ra" {
+			grant := r.guardGrants[name]
+			if !module.Ready || grant.revision != cfg.revision || grant.generation != module.Generation || grant.epoch != record.ProducerEpoch || grant.sequence != record.Sequence || grant.ra == nil {
+				continue
+			}
+			value := resourceprogram.False
+			if grant.ra.Sent > 0 && grant.ra.SentGeneration == grant.ra.Generation && !grant.ra.Withdrawing {
+				value = resourceprogram.True
+			}
+			facts.Facts[name+".sent"] = resourceprogram.Fact{Value: value, ObservedNanos: r.guard.untilNanos - uint64(time.Second), ExpiresNanos: r.guard.untilNanos, WorkerGeneration: module.Generation, ProducerEpoch: record.ProducerEpoch}
+			continue
+		}
 		if record.Role == "dhcp6" {
 			source := r.guardGrants[name].dhcp6
 			if source == nil || !module.Ready || record.Generation != module.Generation || record.ConfigDigest != binding.digest || source.BootID != clock.BootID || source.ObservedNanos > ticks {
@@ -267,6 +298,21 @@ func (r *Runtime) conditionFactsLocked(cfg configuration) (result resourceprogra
 				value = resourceprogram.True
 			}
 			facts.Facts[name+".active"] = resourceprogram.Fact{Value: value, ObservedNanos: source.ObservedNanos, ExpiresNanos: min(until, r.guard.untilNanos), WorkerGeneration: module.Generation, ProducerEpoch: record.ProducerEpoch}
+			prefixBound := resourceprogram.False
+			prefixUntil := uint64(0)
+			if active {
+				for _, prefix := range source.Prefixes {
+					if prefix.ValidUntil.Live(clock) {
+						prefixBound = resourceprogram.True
+						prefixUntil = max(prefixUntil, prefix.ValidUntil.Nanos)
+					}
+				}
+			}
+			if prefixBound == resourceprogram.False {
+				prefixUntil = r.guard.untilNanos
+			}
+			facts.Facts[name+".prefix_bound"] = resourceprogram.Fact{Value: prefixBound, ObservedNanos: source.ObservedNanos, ExpiresNanos: min(prefixUntil, r.guard.untilNanos), WorkerGeneration: module.Generation, ProducerEpoch: record.ProducerEpoch}
+
 			continue
 		}
 		grant, ok := r.guardGrants[name]

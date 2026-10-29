@@ -57,7 +57,7 @@ func (c *compiler) when(r resource, w api.ResourceWhenSpec, vrrpNames map[string
 	for _, key := range keys {
 		match := w.State[key]
 		if match.Exists != nil || match.Status != "" || match.Contains != "" || match.For != "" || match.MaxAge != "" {
-			c.reject(r, "when", "unsupported_semantics", "only VRRP role and PD Bound equals/in selectors are imported; status/existence and transition-age timing require their own typed native contract")
+			c.reject(r, "when", "unsupported_semantics", "only supported role/readiness equals/in selectors are imported; status/existence and transition-age timing require their own typed native contract")
 			continue
 		}
 		if match.Equals == "" && len(match.In) == 0 {
@@ -67,7 +67,7 @@ func (c *compiler) when(r resource, w api.ResourceWhenSpec, vrrpNames map[string
 		ref = strings.TrimSuffix(strings.TrimPrefix(ref, "${"), "}")
 		separator := strings.LastIndexByte(ref, '.')
 		if separator < 0 {
-			c.reject(r, "when", "unsupported_semantics", "condition must name a VRRP role or PD Bound phase")
+			c.reject(r, "when", "unsupported_semantics", "condition must name a resource role, phase or datapathState")
 			continue
 		}
 		base, field := strings.TrimSuffix(ref[:separator], ".status"), ref[separator+1:]
@@ -75,35 +75,53 @@ func (c *compiler) when(r resource, w api.ResourceWhenSpec, vrrpNames map[string
 		if field == "phase" {
 			kind = "DHCPv6PrefixDelegation"
 		}
-		if field != "role" && field != "phase" {
-			c.reject(r, "when", "unsupported_semantics", "condition must name a VRRP role or PD Bound phase")
-			continue
+		if declared, _, qualified := strings.Cut(base, "/"); qualified {
+			kind = declared
 		}
 		provider := c.getRef(r, "when", base, kind)
 		if provider == nil {
 			continue
 		}
-		var name string
-		var values map[string]string
-		if kind == "DHCPv6PrefixDelegation" {
-			name = c.serviceName(*provider, "pd")
-			// routerd resourcePhase maps Bound/Renewing/Rebinding to Bound.
-			// Native active additionally requires an unexpired grant.
-			values = map[string]string{"Bound": ".active"}
-		} else {
-			name = vrrpNames[provider.Kind+"/"+provider.Metadata.Name]
-			values = map[string]string{"master": ".elected", "backup": ".backup"}
-		}
-		if name == "" {
-			c.reject(r, "when", "reference", "role condition requires a successfully compiled VRRP election")
+		values := map[string]resourceprogram.FactCondition{}
+		fact := func(name string) resourceprogram.FactCondition { return resourceprogram.FactCondition{Fact: name} }
+		applied := fact("network.applied")
+		switch {
+		case kind == "VirtualAddress" && field == "role":
+			name := vrrpNames[provider.Kind+"/"+provider.Metadata.Name]
+			if name == "" {
+				c.reject(r, "when", "reference", "role condition requires a compiled VRRP election")
+				continue
+			}
+			values["master"], values["backup"] = fact("service."+name+".elected"), fact("service."+name+".backup")
+		case kind == "DHCPv6PrefixDelegation" && field == "phase":
+			values["Bound"] = fact("service." + c.serviceName(*provider, "pd") + ".prefix_bound")
+		case kind == "IPv4StaticAddress" && field == "phase":
+			values["Applied"] = applied
+		case kind == "IPv6DelegatedAddress" && field == "phase":
+			allocation := provider.Spec.(api.IPv6DelegatedAddressSpec)
+			pd := c.getRef(*provider, "prefixDelegation", allocation.PrefixDelegation, "DHCPv6PrefixDelegation")
+			if pd == nil {
+				continue
+			}
+			values["Applied"] = resourceprogram.FactCondition{All: []resourceprogram.FactCondition{applied, fact("service." + c.serviceName(*pd, "pd") + ".prefix_bound")}}
+		case kind == "IPv6RouterAdvertisement" && field == "phase":
+			values["Applied"] = fact("service." + c.serviceName(*provider, "ra") + ".sent")
+		case kind == "EgressRoutePolicy" && field == "datapathState":
+			id := "egress/" + provider.Metadata.Name
+			if provider.Spec.(api.EgressRoutePolicySpec).HostTraffic {
+				id = "host-route/" + provider.Metadata.Name
+			}
+			values["Ready"] = fact("resource." + id + ".applied")
+		default:
+			c.reject(r, "when", "unsupported_semantics", "condition must select a supported role, bound prefix or acknowledged address/RA/egress readiness")
 			continue
 		}
 		condition := func(value string) resourceprogram.FactCondition {
-			suffix, ok := values[value]
+			term, ok := values[value]
 			if !ok {
-				c.reject(r, "when", "unsupported_semantics", "only observed master/backup roles and PD Bound are imported; unknown is not their negation")
+				c.reject(r, "when", "unsupported_semantics", "condition value is unsupported; missing readiness is not its negation")
 			}
-			return resourceprogram.FactCondition{Fact: "service." + name + suffix}
+			return term
 		}
 		if match.Equals != "" {
 			terms = append(terms, condition(match.Equals))

@@ -23,7 +23,17 @@ spec:
         interface: lan
         address: 192.0.2.254
         mode: vrrp
-        vrrp: {virtualRouterID: 42, priority: 100}
+        vrrp:
+          virtualRouterID: 42
+          priority: 100
+          gracefulActivation:
+            timeout: 5s
+            readyWhen:
+              state:
+                DHCPv6PrefixDelegation/wan-pd.phase: {equals: Bound}
+                IPv6DelegatedAddress/lan-address.phase: {equals: Applied}
+                IPv6RouterAdvertisement/announcement.phase: {equals: Applied}
+                IPv4StaticAddress/local.phase: {equals: Applied}
     - apiVersion: net.routerd.net/v1alpha1
       kind: DHCPv6PrefixDelegation
       metadata: {name: wan-pd}

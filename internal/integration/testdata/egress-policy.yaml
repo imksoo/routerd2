@@ -155,12 +155,29 @@ spec:
       interface: lan
       address: 198.18.0.1/24
   - apiVersion: net.routerd.net/v1alpha1
+    kind: VirtualAddress
+    metadata: {name: gateway}
+    spec:
+      family: ipv4
+      interface: lan
+      address: 198.18.0.254
+      mode: vrrp
+      vrrp:
+        virtualRouterID: 43
+        priority: 100
+        gracefulActivation:
+          timeout: 5s
+          readyWhen:
+            state:
+              EgressRoutePolicy/default.datapathState: {equals: Ready}
+  - apiVersion: net.routerd.net/v1alpha1
     kind: EgressRoutePolicy
     metadata:
       name: default
     spec:
       family: ipv4
       mode: priority
+      when: {state: {VirtualAddress/gateway.role: {equals: master}}}
       sourceCIDRs:
       - 198.18.0.0/24
       destinationCIDRs:

@@ -247,6 +247,31 @@ exec "$@"
 	}
 	start(provider, "dnsmasq", dnsmasq, "--no-daemon", "--conf-file=/dev/null", "--no-hosts", "--no-resolv", "--bind-interfaces", "--listen-address=2001:db8:ffff::9", "--log-queries", "--log-facility=-", "--host-record=peer.provider.test,2001:db8:ffff::9", "--host-record=destination.learned.test,2001:db8:ffff::9", "--host-record=destination.boot.test,2001:db8:ffff::9")
 	iscArgs := []string{"-6", "-f", "-d", "-cf", cf, "-lf", leases, "-pf", filepath.Join(work, "dhcp6.pid"), "server0"}
+	// Election alone must not publish the gateway before an ISP grant and
+	// the resulting LAN address and advertisement are actually applied.
+	until(t, 5*time.Second, func() bool {
+		var status runtimeplan.InstanceStatus
+		if err := f.control.Do(ctx, "GET", "/v1/services/"+election, nil, &status); err != nil {
+			t.Fatal(err)
+		}
+		var snapshot vrrp.Snapshot
+		if err := json.Unmarshal(status.Snapshot, &snapshot); err != nil {
+			return false
+		}
+		if snapshot.Active {
+			t.Fatal("gateway published before independent PD server started")
+		}
+		return snapshot.State == vrrp.StateActive && snapshot.ActivationState == "Preparing"
+	})
+	addresses, err := netlink.AddrList(nil, netlink.FAMILY_V4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, address := range addresses {
+		if address.IP.Equal(net.ParseIP("192.0.2.254")) {
+			t.Fatal("gateway VIP installed before admission")
+		}
+	}
 	stopISC := start(provider, "isc", os.Getenv("ROUTERD2_DHCP6_SERVER"), iscArgs...)
 	role := func() string {
 		var s runtimeplan.InstanceStatus

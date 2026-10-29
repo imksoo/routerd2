@@ -1,22 +1,4 @@
-2026-10-29 bgp-import-native72: 旧BGPRouter/BGPPeer→既存GoBGP workerの実CLI取込みで、独立FRRの広告/学習/FIB→LAN TCP/UDP、全体停止/再起動後の撤回/再学習/復帰が成功。全make check/Race/vet・両署名buildも終了0。IPv4一対向の確認で、全homertは未受入。[現在の範囲](pve-codex-handoff.md)。
-
-2026-10-29 prefsrc-order-native71: 宣言済みPD→DS-Liteを補足policyなしで接続。DNS明示順と、送信元削除前の経路撤去を実失敗から修正。実HGW単体90秒/両端末/PD交換/全体再起動が終了0。自然更新・長期・全homertは未受入。[現在の範囲](pve-codex-handoff.md)。
-
-2026-10-29 implicit-ra-native70: 旧hostdepsのRA対象をGo workerへ接続。明示RAなしhost経路の実radvd通信、ISC対向PD/IA_NA/実DAD/端末通信と旧条件付きLANが成功。全make check/Race/vet、両静的build・署名も終了0。全homert通し構成は未達。[引き継ぎ](pve-codex-handoff.md)。
-
-2026-10-29 doh-reset-native69: 実HGWで観測した再利用DoH TLS切断へ元期限内一度の再送を追加。実TLS両HTTP版、製品daemon・LAN端末へのTCP resetと後続TCP/UDP DNSが成功。7300秒の実HGW観測は進行中、自然PD更新・完走は未判定。[現在の範囲](pve-codex-handoff.md)。
-
-2026-10-29 native-69: 旧ResolveSpecForResourceでHealth interface/markを導き、補足指定のない旧設定から独立5 WANの実通信・障害復旧を確認した。全make check/Race/vet・両静的build・署名検査も終了0。全homertと全34項目は未達。[引き継ぎ](pve-codex-handoff.md)。
-
-2026-10-29 native-68: 旧Goのrouting判定から必要な転送/rp_filterを明示native intentへ導き、試験用Sysctl・転送resourceを除いた旧設定の実通信が成功した。全34項目は未達。[現在の範囲](pve-codex-handoff.md)。
-
-2026-10-29 native-67: 実RA取得値・通常DADを使うIPv6 host source/table、期限撤去・復帰、IPv4継続を独立radvd/dnsmasqと確認した。同版の実HGWは14:35:46 UTCに再利用DoH TLS接続のRST→LAN DNS SERVFAILで終了1。自然PD更新前であり、旧終了予定は無効。全homert・全34項目は未達。[成立範囲](pve-codex-handoff.md)。
-
-2026-10-29 native-66: 旧IPv4 EgressRoutePolicyを接続マーク・回線別tableへ接続した。実CLI取込みと独立5 WANのTCP/UDP、3出口・120/80/60・60秒抑制・旧接続維持・rollback・元期限/worker交換が終了0。固定IPv4の隔離試験で、IPv6 host経路と全homert受入は残る。[現在の範囲](pve-codex-handoff.md)。
-
-2026-10-29 native-65: RAの自己DNS広告も実待受へ接続した。独立RA専用dhcpcdの取得DNSでPD喪失/再取得とUDP/TCP・固定TCP維持が成功し、同版の実HGW短期・全体再起動も終了0。旧native61の7800秒/自然PD更新1回も終了0。全homert二台と後続項目は未受入。[現在の成立範囲](pve-codex-handoff.md)。
-
-2026-10-29 09:47 UTC: native-61の実配布版で保存・再起動・独立端末通信と履歴の併用、同版の実HGW/Tailscale短期・全体再起動が終了0。起動時の履歴整理、Health履歴の一時配送超過、長期・全homert・SAM・実機の未受入を[引き継ぎ](pve-codex-handoff.md)で区別する。
+2026-10-29 admission-native73: homertの主系公開条件を実適用ACK・元PD期限・RA実送信へ接続した。独立peerの条件付きLAN、VIP経由5 WAN、署名PID 1二台のPD/DHCP/同じTCP/UDPと障害復旧が終了0。同じ最終版の実HGW単一出口+準備条件/VIP、90秒/9巡と全体再起動後の端末通信も終了0。全homert取込は119 issue、全34項目は未達。[現在の実装・実通信・未受入](pve-codex-handoff.md)。
 
 # 現行 routerd と同等の製品にするための実装計画
 
@@ -48,7 +30,7 @@ IPv4/IPv6、PD交換と全体再起動後の通信が成立した。詳細と未
 同じnative-56で独立Headscale/公式Tailscaleとの署名PID 1試験と、実HGWの自動WAN/PD・LAN/DNS/DS-Liteに
 Tailscaleを合わせた75秒通信・PD交換・全体再起動も通った。対向underlay固定・LAN発IPv6 NAT追加を
 現行homertとの差分として記録する。19:44 UTC開始の7800秒試験は21:31:52 UTCのLAN DNS SERVFAILで失敗した。約577回の通信が通ったが、自然PD更新前に終了し、原因は未確定。
-DNS/DHCPv6/RA/VRRP選出の一律外部化は決めていない。homert全体二台、Tailscaleの残機能、k8s/pve、Cloud SAM、
+DNS/DoH/条件付き転送、stateless DHCPv6、RAとVRRPは既存Go workerを使う。dnsmasqはDNS無効のDHCPv4 engineであり、systemdを介さずworkerが所有する。外部依存削減の当初目標を達成したとは扱わず、VRRP等を一律外部化する方針にも変えていない。homert全体二台、Tailscaleの残機能、k8s/pve、Cloud SAM、
 配備更新復旧と対象実機を含む全34項目のゴールは未完了。旧版の130分試験は自然PD更新を観測したが、
 最終通常PD交換後の名前解決失敗で終了1。最新版の長時間安定性やONU直結の受入には数えない。
 

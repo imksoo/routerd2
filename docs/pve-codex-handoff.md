@@ -5,6 +5,36 @@
 [試験計画](test-plan.md)、[機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
+## 主系の公開準備と実通信（2026-10-29、admission-native73）
+
+旧homertのPD Bound、IPv4/委譲IPv6 Applied、RA Applied、egress datapath Readyを既存の準備条件へ接続した。
+networkは現在のsource/観測選択を実適用したACKだけを使い、PDは元期限内のprefixを要求する。
+RAは成功した送信のtemplate世代をworkerが通知し、古いtemplate・撤回・交換前workerの通知を使わない。
+観測境界で一度decodeしたRAを直接保持する。新しい準備管理者や外部VRRP daemonは追加していない。
+
+PVE Linux/amd64の実supervisor/control/network/worker、独立ISC/Keepalived/dhcpcdで、PD応答前のVIP非公開、
+取得・RA送信後の公開、SLAAC/取得DNS、UDP/TCP DNSとIPv6転送、元期限撤去・役割変更・復帰が終了0。
+独立5 WANでは端末の既定gatewayを実VIPへ設定し、egress実適用後の公開、3出口/120→80→60、
+60秒復帰抑制、confirmed rollback、所有期限切れとwriter交換中の転送停止、復帰後の同じTCP/UDPが終了0。
+WAN captureとLANの5865 packet（kernel drop 0）を照合した。経路の予定値だけでVIPの実装着を判断しない。
+
+署名PID 1二台・ISC/AFTR/代替WAN・独立BusyBoxで、双方向引継ぎ、同じTCP/UDP、PD identity/元期限、
+DHCP更新、engine/worker強制終了、同期断・製品再起動、貸出の自然失効とsticky保持まで終了0。
+別の二台DNS profileは、委譲失効後に住所・応答・DNS待受を止め、別prefix取得でRA/DHCPv6/DNSを復旧した。
+この結果は同じ全homert設定を二台にした受入ではない。全設定のread-only取込は119 issueで拒否される。
+
+試験側では、role失効後も転送を要求した旧期待、自己DNS喪失後の空Reply要求、未作成tableの読取りと
+CLIの文字列table番号、LAN採取のメモリー上限/起動順を修正した。通信失敗と採取/試験不備を混同しない。
+全make check（Race/vet）、最終fmt/Python、両CGO0 Linux build・署名六ELF検査が終了0。contract73/journal17。
+実HGWでは同じ最終候補版で、homert由来PD/LAN/RAへ上記5種類の準備条件・単一DS-Lite/Health/egress・
+VIP gatewayを接続し、両端末の自動取得DNS/IPv4/IPv6、DoH/条件付き転送、90秒/9巡が終了0。
+DHCPv4は実VIPをgatewayとして配り、VIP interfaceの転送/MSSも設定で宣言した。PD強制終了1.40秒、
+通常再起動5.26秒、全体再起動9.53秒で両端末通信が復帰し、全体再起動後の公衆IPv4/IPv6 UDP DNS、
+最終RA lifetime 0も確認した。自然PD更新0。単一uplink/一出口・独立MAC/DUID・役割名の置換を含む。
+全設定/複数WAN/二台をこのHGW構成へ接続した受入ではない。私の補助設定のfield名/依存指定誤りは
+設定検証で修正し、全体再起動時に条件付きPDの起動を待たずsnapshotを読んだ試験も実取得待ちへ修正した。
+自然PD更新、全homert/管理/複数WAN、対象NIC/直接ONU、k8s/pve、Cloud SAM等の全34項目は未受入。
+
 ## 旧BGP設定と独立FRR（2026-10-29、bgp-import-native72）
 
 旧pkg/controller/bgpのpolicy継承、広告prefix集合、peerとgraceful restartを既存GoBGP workerへ接続した。
@@ -69,7 +99,7 @@ IPv6 TCP/UDP、静的DNS upstream経由の端末照会、Health、元期限撤�
 そのPD試験はIA_NA観測のためSLAAC無効化を明示する。homertそのものの一貫した構成の合格ではない。
 
 全make check（Race/vet）と両CGO0 build・署名六ELF検査が終了0。compiler contract70/journal17。
-全homert取込み・単体構成の通し通信と二台は未完了。長期HGWは変更前のdoh-reset-native69を固定して継続する。
+全homert取込み・単体構成の通し通信と二台は未完了。長期HGWのdoh-reset-native69は15:24 UTC頃に終了1となった。上の長期結果と未確定事項を参照する。
 
 ## 実HGWのDoH切断修正（2026-10-29、doh-reset-native69）
 

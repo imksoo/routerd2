@@ -425,8 +425,11 @@ for protocol,port in ((socket.SOCK_STREAM,18082),(socket.SOCK_DGRAM,18083)):
                 wait(marked)
 
             def egress_path(node, interface):
-                routes = json.loads(run(inside("ha-" + node, ["ip", "-j", "route", "show", "table", "100"])))
-                return len(routes) == 1 and routes[0].get("dev") == interface
+                # Querying a not-yet-created table exits 2. Observe all tables
+                # so ordinary startup absence remains a pending route selection.
+                routes = json.loads(run(inside("ha-" + node, ["ip", "-N", "-j", "route", "show", "table", "all"])))
+                selected = [route for route in routes if route.get("table") == "100"]
+                return len(selected) == 1 and selected[0].get("dev") == interface
 
             wait(lambda: active("a"))
             wait(lambda: egress_path("a", "dslite0"))
@@ -509,10 +512,12 @@ for protocol,port in ((socket.SOCK_STREAM,18082),(socket.SOCK_DGRAM,18083)):
                     return all(a["local"] != dns_address for link in addresses for a in link["addr_info"])
                 wait(withdrawn, timeout=remaining + 8)
                 reply = information_request()
-                assert reply.returncode == 0 and not any(line.startswith("dns=") and line[4:].strip() for line in reply.stdout.splitlines()), "expired delegated DNS was still supplied"
+                # This configured self-DNS service has no usable address now;
+                # its original authority expires rather than sending an empty Reply.
+                assert reply.returncode == 1 and "no lease, failing" in reply.stderr, "expected client acquisition timeout after delegated DNS expiry: " + reply.stdout + reply.stderr
                 old_query = subprocess.run(inside("ha-client", ["dig", "-6", "@" + dns_address, "host.wan.test", "AAAA", "+time=1", "+tries=1"]), capture_output=True, text=True)
                 assert old_query.returncode != 0, "expired delegated DNS still answered"
-                print("PASS expired delegation removed DNS from the interface and DHCPv6 replies", flush=True)
+                print("PASS expired delegation removed the DNS address and stopped DHCPv6 replies and DNS serving", flush=True)
                 config_path = stage / "dhcp6.conf"
                 config_path.write_text(config_path.read_text().replace("prefix6 2001:db8:80:: 2001:db8:80:f0:: /60", "prefix6 2001:db8:80:40:: 2001:db8:80:40:: /60"))
                 pd_server = pd_start()

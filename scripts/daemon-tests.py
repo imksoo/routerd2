@@ -14,7 +14,7 @@ import tempfile
 SUITES = {
     "host-route": (("TestDaemonImportedIPv6HostRoute", ("wan0",), 75), ("TestDaemonRAHostRoute", ("wan0",), 75), ("TestDaemonImplicitIPv6HostRoute", ("wan0",), 75)),
     "health-pbr": (
-        ("TestDaemonConnectionMarkedEgressPolicy", ("wan0", "wan1", "wan2", "wan3", "wan4"), 165),
+        ("TestDaemonConnectionMarkedEgressPolicy", ("wan0", "wan1", "wan2", "wan3", "wan4", "lan0"), 165),
         ("TestDaemonHealthPBRFailoverAndRecovery", ("wan0", "wan1"), 195),
         ("TestDaemonEgressRouteHealthyMultipath", ("wan0", "wan1"), 120),
     ),
