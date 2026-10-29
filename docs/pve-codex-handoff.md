@@ -40,6 +40,11 @@ NICなしで署名pairのPID 1実行・自動health確認・更新中commit排�
 これは実APKで全ルーター機能を通した試験やdisk/kernel A/B復旧、対象実機の受入ではない。
 `make apk RELEASE_ID=admission-native73`も終了0。開発用APKは`dist/apk/routerd2-0.1.0-r0.apk`。
 Go/ELF検査とengine同梱を確認したが、全Go・最少バイナリーという依存削減の目標達成とは扱わない。
+同じcodeのAlpine imageも`dist/image-native73`へ生成したが、実APK/PID 1・2 NIC QEMUのworker-recoveryは
+終了1。初回の自動LAN DHCP/DNS、CHAP、両IP TCP/UDP、独立ISCの短期PD Renewは通過した一方、
+PPP worker交換後の両IP通信は復旧したが、次のcontrol交換・PD再取得後の端末IPv6 TCPがcurl exit7で接続拒否となった。原因未確定で、`dist/native73-appliance/peer.log`と
+同dirのserial/captureを次に照合する。このimageの通信・復旧受入は不合格とし、配備/完成品公開を進めない。
+ユーザー期限2026-10-29 16:56:38 UTCで全34項目の完成は未達。期限や完了範囲を変更しない。
 自然PD更新、全homert/管理/複数WAN、対象NIC/直接ONU、k8s/pve、Cloud SAM等の全34項目は未受入。
 
 ## 旧BGP設定と独立FRR（2026-10-29、bgp-import-native72）
