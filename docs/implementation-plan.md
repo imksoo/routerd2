@@ -1,6 +1,4 @@
-2026-10-30 JST election-authority-native76: 条件付きIPv4/SNAT/B4所有を接続し、VRRP元期限の切り詰め、未使用nftルール応答、連続通知によるVIP公開待ちを修正した。最新実5 WAN85.69秒、実HGWの4出口/自動端末/60秒復帰抑制・90秒通信とPD/全体再起動後の復帰は終了0。03:56開始の別バイナリの自然PD観測は継続中。全34項目・同構成二台/対象実機は未受入。[現在の結果と残作業](pve-codex-handoff.md)。
-
-
+2026-10-30 JST original-egress-native76: 旧設定のVIPプレフィックスを保持し、大きいnft transactionの実サイズに送信bufferを合わせた。実4 AFTR・署名PID1二台ではHealth正常でも経路を1秒の監視照会期限で失う問題を修正。主系停止、同じTCP/UDPと新規IPv4/IPv6/DNS、旧主系の待機復帰・PD/DHCP再同期を完走し、UDP損失0、TCP最長5.41秒。Linux/ISCの隔離構成であり全homert/実二回線の受入ではない。03:56の旧自然観測は05:05に寿命0 RA/IPv6経路喪失で失敗。05:27の別候補・実HGW観測は継続中、実貸出T1は07:27:21 JST。全34項目は未完了。[現在の結果と残作業](pve-codex-handoff.md)。
 
 # 現行 routerd と同等の製品にするための実装計画
 

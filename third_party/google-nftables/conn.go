@@ -263,10 +263,18 @@ func (cc *Conn) Flush() error {
 	// Flush does not consume rule echoes. Suppress those as well as per-
 	// operation success ACKs, which can overflow the socket after commit.
 	messages := batch(cc.messages)
-	for i := 1; i < len(messages)-1; i++ {
+	batchSize := 0
+	for i := range messages {
 		messages[i].Header.Flags &^= netlink.Acknowledge | netlink.Echo
+		size := unix.NLMSG_HDRLEN + len(messages[i].Data)
+		batchSize += (size + unix.NLMSG_ALIGNTO - 1) &^ (unix.NLMSG_ALIGNTO - 1)
 	}
 	messages[len(messages)-2].Header.Flags |= netlink.Acknowledge
+	// The complete transaction is one datagram. Size this socket for the
+	// actual batch instead of splitting the transaction or changing sysctls.
+	if err := conn.SetWriteBuffer(batchSize); err != nil {
+		return fmt.Errorf("set batch write buffer: %w", err)
+	}
 	if _, err := conn.SendMessages(messages); err != nil {
 		return fmt.Errorf("SendMessages: %w", err)
 	}

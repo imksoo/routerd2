@@ -161,7 +161,7 @@ spec:
     spec:
       family: ipv4
       interface: lan
-      address: 198.18.0.254
+      address: 198.18.0.254/24
       mode: vrrp
       vrrp:
         virtualRouterID: 43

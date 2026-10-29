@@ -5,7 +5,38 @@
 [試験計画](test-plan.md)、[機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
-## 現在の候補版: election-authority-native76（2026-10-30 JST）
+## 現在の候補版: original-egress-native76（2026-10-30 JST）
+
+契約76/journal18/worker ABI5。旧routerdのVRRP設定で有効なIPv4 /24・IPv6 /64等を拒否していた
+host-prefix限定を削除し、入力のプレフィックスを保持する。Go VRRPの選出・広告処理は外部化していない。
+DHCPv4 engineはdnsmasq、接続状態同期/NTP/PPPoE/Tailscaleにはconntrackd/chronyd/pppd/tailscaledが残り、
+少数Goバイナリーによる外部依存削減の当初目標は未達。PID1運用・kernel writerの統一だけで完成とはしない。
+
+実4 AFTRと共通WAN/LAN VMACを持つ署名PID1二台で、大きいnft transactionが既定の送信bufferを越え、
+`sendmsg: message too long`となった。既存netlink接続の送信bufferを実際の整列済みbatch byte数へ設定し、
+一つの原子的datagramを維持する。受信側の不要なEcho/成功ACK削減とは別の修正で、sysctl変更・分割・再試行は加えない。
+旧主系復帰時のIPv6経路には旧設定の共通LAN VMAC/リンクローカルアドレスが必要であり、実設定から取り込んだ。
+物理ポートを試験側で先にUPにして作った競合RA経路や、DNS worker指定漏れは試験側の誤りとして解消した。
+
+続く新規IPv4確認では、Health正常なのに実PBR経路/振り分け先が失効していた。
+AFTRとHealth/DHCPv4/BGPのfactをsupervisor照会の1秒期限で短縮する処理を除き、元の観測期限を渡す。
+実世代照合・元期限切れ・ネットワーク適用ACKは残す。単に待ち時間を延ばした修正ではない。
+署名PID1二台、独立ISC/4本のLinux AFTR/BusyBox/実kernel/captureで、主系停止から同じTCP接続・UDP変換を保持し、
+新規IPv4、IPv6、取得DNSのUDP/TCP応答、旧主系の待機復帰、PD/DHCP再同期を完走した。
+元期限のUTC/BOOTTIME表現を含む最終候補でも同経路が再度終了0。UDP損失0、TCP最長応答5.41秒。captureは一つのTCP sequence spaceと実IPv4-in-IPv6を確認した。
+上流DNSは独立UDP peer、同一kernelの隔離構成。実HGW二台/IX2215/全109設定/DoHを合わせたHA、異なる起動時計、
+対象物理機器と全34項目の受入とは分ける。VIP /24と公開状態を待つ5 WAN試験は84.61秒で終了0だったが、
+この期限修正より前の候補だった。最終候補の同試験も85.86秒で終了0。
+
+03:56:16 JSTに開始した旧候補の自然PD観測は、05:05:11.755の寿命0 RA、05:05:12頃のIPv6既定経路喪失を伴い失敗した。
+T1到達前であり、旧05:56/06:07予定は無効。最新修正でこの旧障害を解消したとの判定はまだしていない。
+05:27:15開始の4出口・実HGW自然観測は継続中。実貸出のT1は07:27:21 JST。
+これは元観測期限修正より前に起動した別のバイナリーで、途中差し替えや中断はしていない。
+私有logは`/tmp/routerd-four-sized-batch-native76-natural.log`、identityは`~/.local/state/routerd2-homert-four`。
+同じWAN MAC/DUIDを重複使用しない。最終候補のfmt/vet・CGO0両architecture・署名六ELFは終了0。Alpine3.24.3/kernel6.18.59のイメージ生成も終了0。
+署名更新/採用後失敗復旧は実行中で未受入。実HGW長期の版とは区別する。
+
+## 直前版: election-authority-native76（2026-10-30 JST）
 
 契約76/journal18/worker ABI5。条件付き静的IPv4アドレスの値と起動条件をSNATとDS-Liteへ引き継ぎ、
 内側アドレスは既存B4Address所有へ集約した。Healthを実際の動的トンネル所有者へ依存させた。
@@ -34,7 +65,7 @@ LAN直接DNS返信/WAN側漏出なし・最終RA撤去/上流Releaseなしまで
 名前が`ds-lite-ra`でも、保存済homert02/03の実宣言はPD由来だった。名前から別のRA送信元経路を作らない。
 試験値に合わせてアドレス/ifnameとVRRP参照を置き換え、生成物のownerRefsを除いた構成であり、109宣言全体ではない。
 
-03:56:16 JST開始の7800秒自然PD観測は継続中。T1は実貸出から05:56:22 JST予定。
+03:56:16 JST開始の7800秒自然PD観測は05:05に失敗した。T1前であり旧05:56:22予定は無効。
 これはVRRP元期限修正後、Echo削減/即時VIP公開より前の別バイナリであり、最新版全体の長期受入とは区別する。
 旧native75の両長期観測は失敗し、旧予定は無効。私有ログは
 `/tmp/routerd-election-authority-native76-hgw-natural.log`、最新4出口は

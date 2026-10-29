@@ -86,8 +86,13 @@ func TestAFTRObservedSourceGenerationAndProjection(t *testing.T) {
 	}
 	snapshot.BootID = clock.BootID
 	snapshot.ObservedNanos = uint64(clock.BoottimeNanoseconds)
+	snapshot.ValidUntil = lifetime.Deadline{BootID: clock.BootID, Nanos: snapshot.ObservedNanos + uint64(30*time.Second)}
 	if err := observeAndProject(ctx, r, update(t, r, "service.dslite", 1, snapshot)); err != nil {
 		t.Fatal(err)
+	}
+	facts, err := r.conditionFactsLocked(r.config)
+	if err != nil || facts.Facts["service.dslite.active"].ExpiresNanos != snapshot.ValidUntil.Nanos {
+		t.Fatal("supervisor poll shortened AFTR authority", facts, err)
 	}
 	if len(n.applied.Links) != 1 || len(n.applied.Routes) != 1 || n.applied.Links[0].Name != "dslite0" || n.applied.Routes[0].Interface != "dslite0" {
 		t.Fatalf("complete B4 projection missing: %+v", n.applied)

@@ -41,8 +41,8 @@ func (c *compiler) vrrp(r resource, s api.VirtualAddressSpec) (string, []resourc
 			address, err = netip.PrefixFrom(a, a.BitLen()), nil
 		}
 	}
-	if err != nil || address.Addr().Is4In6() || address.Bits() != address.Addr().BitLen() || s.Family != "ipv4" && s.Family != "ipv6" || address.Addr().Is4() != (s.Family == "ipv4") {
-		c.reject(r, "address", "invalid_value", "VRRP requires a literal host address of its declared family")
+	if err != nil || address.Addr().Is4In6() || s.Family != "ipv4" && s.Family != "ipv6" || address.Addr().Is4() != (s.Family == "ipv4") {
+		c.reject(r, "address", "invalid_value", "VRRP requires a literal address or address/prefix of its declared family")
 		return "", nil
 	}
 	name := c.interfaceName(r, "interface", s.Interface, false)

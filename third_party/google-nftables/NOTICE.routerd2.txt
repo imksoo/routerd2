@@ -28,10 +28,16 @@ A four-tunnel zone policy also overflowed the queue with the unused full-rule
 echoes requested by NLM_F_ECHO. Flush suppresses those requests; it does not
 consume or return their data. One success ACK retains atomicity and error
 handling without raising socket limits or adding concurrent I/O.
+A shared-LAN four-tunnel policy also exceeded the default send buffer. Flush
+sets the socket write buffer from the actual aligned batch length before
+sending its single atomic datagram. The existing netlink/socket dependency
+uses SO_SNDBUFFORCE with the worker's existing privileges; no global sysctl or
+send retry is introduced.
 The public API remains unchanged.
 
 Reference for the kernel interfaces:
 https://github.com/torvalds/linux/blob/v6.8/net/netfilter/nfnetlink.c
+https://github.com/torvalds/linux/blob/v6.8/net/netlink/af_netlink.c
 https://github.com/torvalds/linux/blob/v6.18/net/netfilter/nft_masq.c
 
 Run the library regressions from the routerd2 module with:

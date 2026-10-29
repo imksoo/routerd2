@@ -265,6 +265,17 @@ func TestDaemonConnectionMarkedEgressPolicy(t *testing.T) {
 	waitGateway := func() {
 		t.Helper()
 		until(t, 5*time.Second, func() bool {
+			var status runtimeplan.InstanceStatus
+			if err := f.control.Do(ctx, "GET", "/v1/services/"+election, nil, &status); err != nil {
+				t.Fatal(err)
+			}
+			var published vrrp.Snapshot
+			if err := json.Unmarshal(status.Snapshot, &published); err != nil {
+				t.Fatal(err)
+			}
+			if !published.Active {
+				return false
+			}
 			addresses, err := netlink.AddrList(nil, netlink.FAMILY_V4)
 			if err != nil {
 				t.Fatal(err)

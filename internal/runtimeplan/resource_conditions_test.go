@@ -142,6 +142,10 @@ func TestConditionalRuntimeStartWithdrawRecover(t *testing.T) {
 	if !conditionalRoute(n) || len(m.modules) != 2 {
 		t.Fatal("ready live fact failed to start dependents", n.applied, m.modules)
 	}
+	facts, err := r.conditionFactsLocked(r.config)
+	if err != nil || facts.Facts["service.wan.active"].ExpiresNanos != r.guardGrants[up.Name].untilNanos {
+		t.Fatal("supervisor poll shortened the acquired lease", facts, err)
+	}
 	// Crash of the producing worker revokes the route and dependent worker.
 	stoppedBeforeWithdrawal := false
 	m.before = func(modules []supervisor.DynamicModule) {

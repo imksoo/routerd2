@@ -211,8 +211,11 @@ func (r *Runtime) conditionFactsLocked(cfg configuration) (result resourceprogra
 			if endpoint.Active && endpoint.Available && endpoint.ValidUntil.Live(clock) {
 				value = resourceprogram.True
 			}
-			until := ticks + uint64(min(time.Second, endpoint.ValidUntil.Remaining(clock)))
-			facts.Facts[name+".active"] = resourceprogram.Fact{Value: value, ObservedNanos: endpoint.ObservedNanos, ExpiresNanos: min(until, r.guard.untilNanos), WorkerGeneration: module.Generation, ProducerEpoch: record.ProducerEpoch}
+			until := ^uint64(0)
+			if endpoint.ValidUntil != (lifetime.Deadline{}) {
+				until = ticks + uint64(endpoint.ValidUntil.Remaining(clock))
+			}
+			facts.Facts[name+".active"] = resourceprogram.Fact{Value: value, ObservedNanos: endpoint.ObservedNanos, ExpiresNanos: until, WorkerGeneration: module.Generation, ProducerEpoch: record.ProducerEpoch}
 			continue
 		}
 		if record.Role == "pppoe" {
@@ -328,7 +331,7 @@ func (r *Runtime) conditionFactsLocked(cfg configuration) (result resourceprogra
 		if grant.value {
 			value = resourceprogram.True
 		}
-		facts.Facts[name+".active"] = resourceprogram.Fact{Value: value, ObservedNanos: grant.observedNanos, ExpiresNanos: min(grant.untilNanos, r.guard.untilNanos), WorkerGeneration: module.Generation, ProducerEpoch: record.ProducerEpoch}
+		facts.Facts[name+".active"] = resourceprogram.Fact{Value: value, ObservedNanos: grant.observedNanos, ExpiresNanos: grant.untilNanos, WorkerGeneration: module.Generation, ProducerEpoch: record.ProducerEpoch}
 	}
 	return r.conditionTimeline.Observe(cfg.source, facts)
 }

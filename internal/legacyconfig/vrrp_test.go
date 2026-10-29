@@ -5,6 +5,7 @@ package legacyconfig
 import (
 	"bytes"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/imksoo/routerd2/internal/config"
@@ -20,6 +21,11 @@ func TestVRRPImportPreservesKeepalivedWireAndPreemptionDefaults(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		vip := "192.0.2.254/24"
+		if family == "ipv6" {
+			vip = "2001:db8:42::254/64"
+		}
+		input = bytes.Replace(input, []byte("address: "+strings.Split(vip, "/")[0]+"\n"), []byte("address: "+vip+"\n"), 1)
 		options, err := DecodeOptions(bytes.NewReader(policy))
 		if err != nil {
 			t.Fatal(err)
@@ -39,6 +45,9 @@ func TestVRRPImportPreservesKeepalivedWireAndPreemptionDefaults(t *testing.T) {
 			}
 			found = true
 			c := service.VRRPConfig()
+			if c.Addresses[len(c.Addresses)-1] != vip {
+				t.Fatal("migration changed the configured VIP prefix", c.Addresses, vip)
+			}
 			version := 2
 			if family == "ipv6" {
 				version = 3
