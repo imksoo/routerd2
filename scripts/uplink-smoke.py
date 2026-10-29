@@ -24,7 +24,7 @@ import time
 def run(args, timeout=12):
     result = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
     if result.returncode:
-        raise RuntimeError(result.stderr.strip() or str(args[0]) + " failed")
+        raise RuntimeError(f"{args[0]} exited {result.returncode}: stderr={result.stderr.strip()!r}; stdout={result.stdout.strip()!r}")
     return result.stdout
 
 
@@ -613,8 +613,19 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
                     response = run(inside(remote, ["curl", family, "--noproxy", "*", "--max-time", "8", "--resolve", "one.one.one.one:443:" + address, "-sS", "-I", "-o", "/dev/null", "-w", "%{http_code}", "https://one.one.one.one/"]))
                     assert response in ("200", "301", "302", "308"), (family, response)
                     server = address.strip("[]")
-                    response = run(inside(remote, ["dig", family, "@" + server, "example.net", "A", "+tries=1", "+time=3"]))
-                    assert "status: NOERROR" in response, (family, response)
+                    try:
+                        response = run(inside(remote, ["dig", family, "@" + server, "example.net", "A", "+tries=1", "+time=3"]))
+                        assert "status: NOERROR" in response, (family, response)
+                    except (RuntimeError, AssertionError):
+                        packet_filter = ("ip6" if family == "-6" else "ip") + " and host " + server + " and udp port 53"
+                        for path in (*stage.glob("wan.pcap*"), stage / "peer.pcap"):
+                            capture = subprocess.run(["tcpdump", "-nn", "-r", str(path), packet_filter], capture_output=True, text=True, timeout=10)
+                            print("Failed tailnet exit DNS packets", str(path.name), capture.returncode, capture.stdout.splitlines()[-30:], capture.stderr.strip(), flush=True)
+                        for namespace in (remote, router):
+                            for command in (["ip", "-6", "route", "get", server], ["conntrack", "-L", "-f", "ipv6", "-p", "udp", "--dport", "53"], ["nft", "list", "ruleset"]):
+                                observed = subprocess.run(inside(namespace, command), capture_output=True, text=True, timeout=10)
+                                print("Failed tailnet exit DNS state", namespace, command, observed.returncode, observed.stdout[-12000:], observed.stderr[-1000:], flush=True)
+                        raise
             check_tailnet()
             print("PASS actual HGW automatic LAN -> Tailscale peer IPv4/IPv6 (explicit IPv6 NAT), advertised IPv4 LAN <- peer TCP/UDP; IPv4/IPv6 exit HTTPS/UDP DNS", flush=True)
         for server, family in ((lease[3], "-4"), (str(router_dns), "-6")):

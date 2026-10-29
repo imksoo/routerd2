@@ -9,6 +9,11 @@
 
 最新作業版は`authority-history-native61`（worker ABI5、network journal15）。
 
+追試`dbf4a6e-hgw-native61`の7800秒観測は、自然PD更新前の10:05 UTCに終了2。
+最後の定期正常記録は609秒/55巡。Tailscale対向から外部IPv6 DNSへのUDP照会で失敗した。
+標準出力が捨てられており、製品・外部経路・試験の原因は未確定。終了値/出力と
+同じ照会のpeer/WAN capture・経路・接続追跡・NATを失敗時に採る。長期安定化とは扱わない。
+
 - **実装**: 認証で取得済みのsupervisor情報を共有し、問い合わせ開始時のBOOTTIMEから1秒で失効する。
   遅い応答やlock待ちで更新せず、古い照会で新しい観測を上書きしない。確定成功の直前にも期限を確認する。
   NTP入力は要求workerの実世代・PID・digestへ結び付け、旧世代や起動待ちの登録を渡さない。
