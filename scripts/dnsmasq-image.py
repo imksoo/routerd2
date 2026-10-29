@@ -18,7 +18,7 @@ def main():
     parser.add_argument("--output", type=Path, default=Path("/out"))
     args = parser.parse_args()
     machine = "x86_64" if args.arch == "amd64" else "aarch64"
-    runtime = {name: (args.root / name).read_bytes() for name in ("usr/sbin/dnsmasq", "lib/ld-musl-" + machine + ".so.1", "lib/libc.musl-" + machine + ".so.1")}
+    runtime = {name: (args.root / name).read_bytes() for name in ("usr/sbin/dnsmasq", "usr/sbin/routerd-dhcp-event", "lib/ld-musl-" + machine + ".so.1", "lib/libc.musl-" + machine + ".so.1")}
     packages = []
     for paragraph in (args.root / "lib/apk/db/installed").read_text().split("\n\n"):
         fields = dict(line.split(":", 1) for line in paragraph.splitlines() if len(line) > 1 and line[1] == ":")
@@ -27,6 +27,14 @@ def main():
     if len(packages) != 2:
         raise ValueError("missing dnsmasq package provenance")
     materials = {"routerd/" + name: Path(__file__).parent / name for name in ("dnsmasq-image.py", "engine_sources.py", "dnsmasq-engine.Dockerfile")}
+    hook = Path(__file__).parent / "hook"
+    for source, target in (("main.go", "cmd/routerd-dhcp-event/main.go"), ("event.go", "internal/protocol/dhcpevent/event.go"),
+                           ("go.mod", "go.mod"), ("go.sum", "go.sum"), ("LICENSE", "LICENSE"), ("toolchain.txt", "hook-toolchain.txt")):
+        materials["routerd/" + target] = hook / source
+    for name in ("LICENSE", "Go-LICENSE", "Go-PATENTS"):
+        runtime["usr/share/licenses/routerd-dhcp-event/" + name] = (hook / name).read_bytes()
+        materials["routerd/hook-notices/" + name] = hook / name
+
     for package in packages:
         origin = package["origin"]
         version = package["version"].rsplit("-r", 1)[0].replace("_p", "rel")
@@ -55,7 +63,7 @@ def main():
             runtime["usr/share/licenses/dnsmasq-engine/" + origin + "/" + notice] = source.extractfile(origin + "-" + version + "/" + notice).read()
     runtime["etc/passwd"] = b"root:x:0:0:root:/:/sbin/nologin\n"
     runtime["etc/group"] = b"root:x:0:\n"
-    inventory = (json.dumps({"format": 1, "architecture": args.arch, "packages": packages}, sort_keys=True, indent=2) + "\n").encode()
+    inventory = (json.dumps({"format": 1, "architecture": args.arch, "packages": packages, "hook_toolchain": (hook / "toolchain.txt").read_text().strip()}, sort_keys=True, indent=2) + "\n").encode()
     runtime["usr/share/routerd/dnsmasq-image.json"] = inventory
     args.output.mkdir(parents=True, exist_ok=True)
     with tarfile.open(args.output / "dnsmasq-engine.tar", "w", format=tarfile.USTAR_FORMAT) as out:

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/imksoo/routerd/pkg/logstore"
+	"github.com/imksoo/routerd2/internal/protocol/dhcpevent"
 )
 
 type leaseHistory struct {
@@ -30,7 +31,7 @@ type leaseHistory struct {
 
 // Apply the event at the worker that owns this engine lifetime. The old
 // routerd log store supplies the actual removal/hold and reacquisition rules.
-func recordLeaseEvent(ctx context.Context, cfg Config, event leaseEvent) error {
+func recordLeaseEvent(ctx context.Context, cfg Config, event dhcpevent.Event) error {
 	// The pinned dnsmasq contract marks startup replay explicitly. Reading an
 	// old file does not establish a new request and cannot cancel a removal.
 	if event.Action == "old" && event.FromFile {

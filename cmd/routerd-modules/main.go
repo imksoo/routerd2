@@ -11,7 +11,6 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strconv"
 	"syscall"
 	"time"
@@ -42,9 +41,6 @@ func main() {
 }
 
 func run(args []string) error {
-	if filepath.Base(os.Args[0]) == "routerd-dhcp-event" {
-		return dhcpserver.SendLeaseEvent(args)
-	}
 	if len(args) == 1 && args[0] == "dnsmasq-engine" {
 		return dhcpserver.RunEngine()
 	}

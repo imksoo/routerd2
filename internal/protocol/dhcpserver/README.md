@@ -47,8 +47,10 @@ subreaper and history writer until dnsmasq and its script children finish;
 queued removal events are acknowledged before the listener closes. Shutdown
 does not wait for a peer transfer or idle HTTP connections. Replication closes
 its sockets and finishes an admitted atomic write before releasing state;
-the next authenticated exchange reconciles retained history. The hook reuses verified
-Go executable bytes in the private root; there is no host helper lookup.
+the next authenticated exchange reconciles retained history. The hook is a small
+Go executable included in the verified engine archive, with its source and
+license notices. Startup does not copy the full worker into the engine root;
+there is no host helper lookup.
 
 Current real communication: `lan-dnsmasq-history` on PVE Linux/amd64 with two
 signed PID 1 product trees, independent BusyBox clients, kernel NAT and capture.
@@ -72,3 +74,11 @@ execution, load/clock/power/NIC qualification and the complete release plan.
 DHCPv6 and RA still use the existing Go workers; choosing dnsmasq for DHCPv4
 does not decide their implementation. Compare their production paths with
 routerd while completing the actual homert acceptance profile.
+
+On 2026-10-29, the bundled small hook passed the actual Alpine 3.24.3/Linux
+6.18.59-0-lts signed PID 1 worker-recovery profile in QEMU/amd64 (512 MiB,
+2 virtual CPUs, TCG). Independent dhcpcd, RP-PPPoE/pppd and ISC DHCP peers
+exercised automatic client DNS and IPv4/IPv6 TCP/UDP, prefix renewal, PPP worker
+replacement and control replacement with retained DUID and restored client
+communication. This establishes that profile, not normal signed-update
+confirmation, the full homert configuration, or physical-device qualification.

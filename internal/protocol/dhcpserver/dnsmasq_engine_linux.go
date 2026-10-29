@@ -64,34 +64,6 @@ func RunEngine() error {
 	if err := unix.Mount("/dev/urandom", root+"/dev/urandom", "", unix.MS_BIND, ""); err != nil {
 		return err
 	}
-	if settings.Intent.StickyHoldDays > 0 {
-		executable, err := os.Open("/proc/self/exe")
-		if err != nil {
-			return err
-		}
-		defer executable.Close()
-		if err := os.MkdirAll(root+"/usr/sbin", 0755); err != nil {
-			return err
-		}
-		// The executable descriptor belongs to the supervisor's mount namespace
-		// (and may be a sealed memfd). It cannot be bind-mounted into this one.
-		// Copy the already verified executable bytes for dnsmasq's direct hook.
-		helper, err := os.OpenFile(root+"/usr/sbin/routerd-dhcp-event", os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0500)
-		if err != nil {
-			return err
-		}
-		_, copyErr := io.Copy(helper, executable)
-		closeErr := helper.Close()
-		if copyErr != nil {
-			return copyErr
-		}
-		if closeErr != nil {
-			return closeErr
-		}
-		if err := os.Mkdir(root+"/tmp", 0700); err != nil {
-			return err
-		}
-	}
 	if err := unix.Chroot(root); err != nil {
 		return err
 	}

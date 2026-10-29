@@ -8,60 +8,19 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"strconv"
 	"time"
+
+	"github.com/imksoo/routerd2/internal/protocol/dhcpevent"
 )
 
-type leaseEvent struct {
-	Action   string    `json:"action"`
-	MAC      string    `json:"mac"`
-	IP       string    `json:"ip"`
-	Hostname string    `json:"hostname,omitempty"`
-	At       time.Time `json:"at"`
-	FromFile bool      `json:"from_file,omitempty"`
-}
-type leaseEventReply struct {
-	Error string `json:"error,omitempty"`
-}
 type leaseEventCall struct {
-	event leaseEvent
+	event dhcpevent.Event
 	done  chan error
-}
-
-// SendLeaseEvent is dnsmasq's direct executable hook, using the existing
-// verified Go command. It reports to its exact engine lifetime; it owns no DB.
-func SendLeaseEvent(args []string) error {
-	if len(args) < 3 {
-		return errors.New("DHCP event requires action, MAC and address")
-	}
-	event := leaseEvent{Action: args[0], MAC: args[1], IP: args[2], At: time.Now().UTC(), FromFile: os.Getenv("DNSMASQ_DATA_MISSING") == "1"}
-	if len(args) > 3 && args[3] != "*" {
-		event.Hostname = args[3]
-	}
-	conn, err := net.DialTimeout("unix", os.Getenv("ROUTERD_DHCP_EVENT_SOCKET"), time.Second)
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-	if err := conn.SetDeadline(time.Now().Add(6 * time.Second)); err != nil {
-		return err
-	}
-	if err := json.NewEncoder(conn).Encode(event); err != nil {
-		return err
-	}
-	var reply leaseEventReply
-	if err := json.NewDecoder(conn).Decode(&reply); err != nil {
-		return err
-	}
-	if reply.Error != "" {
-		return errors.New(reply.Error)
-	}
-	return nil
 }
 
 type leaseEvents struct {
@@ -125,7 +84,7 @@ func (r *leaseEvents) receive(ctx context.Context, conn net.Conn) {
 	stop := context.AfterFunc(ctx, func() { conn.Close() })
 	defer stop()
 	err := conn.SetDeadline(time.Now().Add(6 * time.Second))
-	var event leaseEvent
+	var event dhcpevent.Event
 	if err == nil {
 		err = json.NewDecoder(io.LimitReader(conn, 2048)).Decode(&event)
 	}
@@ -142,7 +101,7 @@ func (r *leaseEvents) receive(ctx context.Context, conn net.Conn) {
 			return
 		}
 	}
-	reply := leaseEventReply{}
+	reply := dhcpevent.Reply{}
 	if err != nil {
 		reply.Error = err.Error()
 	}

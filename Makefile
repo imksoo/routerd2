@@ -323,7 +323,7 @@ conntrack-engine:
 
 .PHONY: dnsmasq-engine
 dnsmasq-engine:
-	$(DOCKER) build --platform linux/$(DNSMASQ_ARCH) --build-arg ALPINE_VERSION=$(ALPINE_VERSION) -f packaging/alpine/dnsmasq-engine.Dockerfile -t routerd2-dnsmasq-engine:$(ALPINE_VERSION)-$(DNSMASQ_ARCH) .
+	$(DOCKER) build --platform linux/$(DNSMASQ_ARCH) --build-arg ALPINE_VERSION=$(ALPINE_VERSION) --build-arg GO_VERSION=$(GO_VERSION) -f packaging/alpine/dnsmasq-engine.Dockerfile -t routerd2-dnsmasq-engine:$(ALPINE_VERSION)-$(DNSMASQ_ARCH) .
 	mkdir -p $(DNSMASQ_DIR)
 	@set -eu; engine_id=$$($(DOCKER) create --network none routerd2-dnsmasq-engine:$(ALPINE_VERSION)-$(DNSMASQ_ARCH) /not-executed); \
 	  trap '$(DOCKER) rm "$$engine_id" >/dev/null' EXIT HUP INT TERM; \

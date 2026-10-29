@@ -129,8 +129,8 @@ func startEngine(ctx context.Context, settings engineSettings, image *os.File, e
 		}
 	}()
 	pidfile := filepath.Join(filepath.Dir(settings.Intent.StatePath), "dnsmasq.pid")
-	startup := time.NewTimer(5 * time.Second)
-	defer startup.Stop()
+	// The supervisor owns the complete worker startup deadline, including
+	// verified hook/image preparation before dnsmasq writes its PID file.
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	for {
@@ -140,8 +140,6 @@ func startEngine(ctx context.Context, settings engineSettings, image *os.File, e
 		case err := <-p.done:
 			p.exited = true
 			return nil, fmt.Errorf("dnsmasq startup exited: %v", err)
-		case <-startup.C:
-			return nil, errors.New("dnsmasq did not create its PID file")
 		case <-ticker.C:
 			pid, err := os.ReadFile(pidfile)
 			if err == nil && strings.TrimSpace(string(pid)) == strconv.Itoa(child.Process.Pid) {

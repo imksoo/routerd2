@@ -101,6 +101,10 @@ func Validate(file *os.File, arch, role string) error {
 		return errors.New("unsupported engine role")
 	}
 	pending := []string{command}
+	const hook = "usr/sbin/routerd-dhcp-event"
+	if role == "dhcp_server" {
+		pending = append(pending, hook)
+	}
 	if role == "pppoe" {
 		pending = append(pending, Plugin, legacyProvider)
 	}
@@ -123,7 +127,7 @@ func Validate(file *os.File, arch, role string) error {
 		if f.Class != elf.ELFCLASS64 || f.Machine != machine || f.Type != elf.ET_EXEC && f.Type != elf.ET_DYN {
 			return fmt.Errorf("engine ELF %s has the wrong architecture or type", name)
 		}
-		if name == command {
+		if name == command || name == hook {
 			if e.mode&0111 == 0 {
 				return errors.New("engine command is not executable")
 			}
@@ -137,7 +141,7 @@ func Validate(file *os.File, arch, role string) error {
 					loader = strings.TrimRight(string(b), "\x00")
 				}
 			}
-			if loader == "" && role == "tailscale" {
+			if loader == "" && (role == "tailscale" || name == hook) {
 				// The pinned upstream Go daemon is a static ELF.
 			} else if !path.IsAbs(loader) {
 				return errors.New("engine command requires its bundled ELF interpreter")
