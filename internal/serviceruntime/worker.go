@@ -197,7 +197,7 @@ func Run(ctx context.Context, runtimeDir, name, role, path, digest string, gener
 			return err
 		}
 		if !dnsconfig.NeedsInput(cfg.Runtime) {
-			return dns.Run(runCtx, cfg, nil, ready)
+			return dns.Run(runCtx, cfg, nil, func(ctx context.Context, s dnsconfig.Snapshot) error { return c.update(ctx, s) }, ready)
 		}
 		var initial dnsconfig.Input
 		if err := c.client.Do(runCtx, "GET", "/v1/services/"+name+"/dns-input", nil, &initial); err != nil {
@@ -211,7 +211,7 @@ func Run(ctx context.Context, runtimeDir, name, role, path, digest string, gener
 		done := make(chan struct{})
 		defer func() { cancel(); <-done }()
 		go func() { defer close(done); defer close(updates); c.watchDNSInput(runCtx, name, initial, updates) }()
-		return dns.Run(runCtx, cfg, updates, ready)
+		return dns.Run(runCtx, cfg, updates, func(ctx context.Context, s dnsconfig.Snapshot) error { return c.update(ctx, s) }, ready)
 	case "tailscale":
 		var cfg tailscaleconfig.Config
 		if err := decode(instance.Config, &cfg); err != nil {
@@ -396,6 +396,11 @@ func (c *effectsClient) watchDNSInput(ctx context.Context, name string, current 
 		// Poll before the original endpoint deadline, without extending it.
 		delay := time.Second
 		if clock, err := boottime.Read(); err == nil {
+			for _, address := range current.Listeners {
+				if remaining := address.ValidUntil.Remaining(clock); remaining > 0 {
+					delay = min(delay, max(50*time.Millisecond, remaining/2))
+				}
+			}
 			for _, servers := range [][]dnsconfig.LearnedUpstream{current.Upstreams, current.Bootstraps} {
 				for _, server := range servers {
 					if remaining := server.ValidUntil.Remaining(clock); remaining > 0 {

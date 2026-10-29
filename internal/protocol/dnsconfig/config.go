@@ -186,11 +186,12 @@ func ValidateRuntime(c dnsresolver.RuntimeConfig) error {
 			}
 		}
 	}
+	if _, err := ListenSources(c); err != nil {
+		return err
+	}
 	bindings := map[string]bool{}
 	for _, listener := range c.Spec.Listen {
-		if len(listener.AddressFrom) != 0 {
-			return fmt.Errorf("DNS listener %q has unresolved addressFrom", listener.Name)
-		}
+
 		for _, source := range listener.Sources {
 			if !sources[source] {
 				return fmt.Errorf("DNS listener %q references missing source %q", listener.Name, source)

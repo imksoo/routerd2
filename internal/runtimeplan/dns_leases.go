@@ -15,12 +15,16 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/pppoeconfig"
 	"github.com/imksoo/routerd2/internal/protocol/raclient"
 	"github.com/imksoo/routerd2/internal/protocol/tailscaleconfig"
+	"github.com/imksoo/routerd2/internal/protocol/vrrp"
 )
 
 type dnsPlan struct {
-	runtime   dnsconfig.RuntimeConfig
-	providers []dnsProvider
-	targets   []dnsTarget
+	listenInterface string
+	vips            map[string][]netip.Addr
+	listeners       []dnsconfig.ListenSource
+	runtime         dnsconfig.RuntimeConfig
+	providers       []dnsProvider
+	targets         []dnsTarget
 }
 
 type dnsProvider struct {
@@ -37,6 +41,11 @@ type dnsTarget struct {
 // decoded once per observation view, then delivered to its configured targets.
 func prepareDNS(runtime dnsconfig.RuntimeConfig) (dnsPlan, error) {
 	plan := dnsPlan{runtime: runtime}
+	var err error
+	plan.listeners, err = dnsconfig.ListenSources(runtime)
+	if err != nil {
+		return plan, err
+	}
 	providers := map[string]int{}
 	add := func(source string, ref api.StatusValueSourceSpec, bootstrap bool) error {
 		name, role, err := dnsconfig.UpstreamProvider(ref)
@@ -94,6 +103,34 @@ func (r *Runtime) DNSInput(moduleName string) (dnsconfig.Input, error) {
 	clock, err := boottime.Read()
 	if err != nil {
 		return out, err
+	}
+	if r.applied.sourceEpoch == r.sourceEpoch {
+		for index, source := range cfg.listeners {
+			if source.VRRP != "" {
+				module := "service." + source.VRRP
+				update, found := r.records[module]
+				var state vrrp.Snapshot
+				if found {
+					if err := json.Unmarshal(update.Snapshot, &state); err != nil {
+						return out, err
+					}
+					if state.Active && vrrp.CurrentElection(state, clock) && r.ownsVRRPLocked(update, state) {
+						until := lifetime.Deadline{BootID: state.BootID, Nanos: state.ExpiresNanos}
+						for _, address := range cfg.vips[module] {
+							out.Listeners = append(out.Listeners, dnsconfig.ListenAddress{Source: index, Address: address, ValidUntil: until})
+						}
+					}
+				}
+			}
+			if source.Service == "" {
+				continue
+			}
+			for _, entry := range r.delegatedDNS[source.Service+"/"+source.Delegation] {
+				if entry.address.ValidUntil.Live(clock) {
+					out.Listeners = append(out.Listeners, dnsconfig.ListenAddress{Source: index, Address: entry.address.Address, ValidUntil: entry.address.ValidUntil})
+				}
+			}
+		}
 	}
 	for _, zone := range cfg.runtime.Zones {
 		for _, ref := range zone.Spec.DHCPDerived.Sources {

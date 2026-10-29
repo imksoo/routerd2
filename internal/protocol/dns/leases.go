@@ -24,6 +24,9 @@ func (d *daemon) applyInput(raw dnsconfig.Input) error {
 	if err := dnsconfig.ValidateInput(cfg, p, clock); err != nil {
 		return err
 	}
+	if err := dnsconfig.ValidateListenInput(d.listenSources, p.Listeners, clock); err != nil {
+		return err
+	}
 	previous := make(map[string]dnsconfig.LeaseSet)
 	if d.nativeInput != nil {
 		for _, set := range d.nativeInput.Sets {
@@ -42,6 +45,12 @@ func (d *daemon) applyInput(raw dnsconfig.Input) error {
 			return errors.New("DNS lease source reused an observation with changed contents or deadline")
 		}
 	}
+	if d.nativeInput == nil || !slices.Equal(d.nativeInput.Listeners, p.Listeners) {
+		if err := d.updateListeners(p.Listeners, clock); err != nil {
+			return err
+		}
+	}
+
 	d.stateMu.RLock()
 	zones := d.zones
 	d.stateMu.RUnlock()
@@ -126,7 +135,7 @@ func (d *daemon) populateNativeZones(table *zoneTable, clock boottime.Clock) {
 
 // Heartbeat deadlines change without changing answers or cached RR content.
 func sameInputContent(a, b dnsconfig.Input) bool {
-	return slices.EqualFunc(a.Sets, b.Sets, func(a, b dnsconfig.LeaseSet) bool {
+	return slices.EqualFunc(a.Listeners, b.Listeners, func(a, b dnsconfig.ListenAddress) bool { return a.Source == b.Source && a.Address == b.Address }) && slices.EqualFunc(a.Sets, b.Sets, func(a, b dnsconfig.LeaseSet) bool {
 		return a.Zone == b.Zone && a.Source == b.Source && slices.Equal(a.Records, b.Records)
 	}) && sameServers(a.Upstreams, b.Upstreams) && sameServers(a.Bootstraps, b.Bootstraps)
 }

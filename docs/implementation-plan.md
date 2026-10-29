@@ -1,4 +1,4 @@
-2026-10-29 native-62: PD内の暗黙RAを削除し、独立した条件付きRAへ置換した。実CLI取込→ISC/keepalived/Linux端末で自動SLAAC・DNS・TCP/UDP、PDを維持した主従変更、control停止時の元期限撤回・復帰が成立した。動的DNS参照の取込と全homert受入は未完了。[成立範囲と残作業](pve-codex-handoff.md)を区別する。
+2026-10-29 native-64: 実DNS待受の期限付き通知と自己DNS配布を連携した。PD失効/再取得・配布直後の最初のDNS照会・TCP/UDP・固定DNS TCP維持の実経路と既存関連4試験が成功。全make check・両architecture静的build・実ELF署名検査も完了。全homert二台と後続項目は未受入。[現在の成立範囲](pve-codex-handoff.md)。
 
 2026-10-29 09:47 UTC: native-61の実配布版で保存・再起動・独立端末通信と履歴の併用、同版の実HGW/Tailscale短期・全体再起動が終了0。起動時の履歴整理、Health履歴の一時配送超過、長期・全homert・SAM・実機の未受入を[引き継ぎ](pve-codex-handoff.md)で区別する。
 

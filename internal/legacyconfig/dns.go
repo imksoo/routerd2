@@ -32,10 +32,6 @@ func (c *compiler) dns() {
 			forwarders = append(forwarders, r)
 		case "DNSUpstream":
 			c.allow(r, "protocol", "address", "addressFrom", "port", "path", "tlsName", "bootstrap", "bootstrapFrom", "sourceInterface")
-			s := r.Spec.(api.DNSUpstreamSpec)
-			if len(s.AddressFrom) > 0 || len(s.BootstrapFrom) > 0 {
-				c.reject(r, "addressFrom", "unsupported_semantics", "learned DNS/bootstrap sources require runtime resource subscriptions, not a frozen upstream list")
-			}
 			upstreams[r.Metadata.Name] = r
 		case "DNSZone":
 			c.allow(r, "zone", "ttl", "dnssec", "records", "dhcpDerived", "reverseZones", "ownerRefs")
@@ -54,14 +50,27 @@ func (c *compiler) dns() {
 				c.reject(r, "listen["+strconv.Itoa(i)+"].addressSources", "unsupported_semantics", "deprecated address expressions must be replaced by explicit static addresses")
 			}
 			listen.Addresses = append([]string(nil), listen.Addresses...)
+			var dynamic []api.StatusValueSourceSpec
 			for j, source := range listen.AddressFrom {
 				path := "listen[" + strconv.Itoa(i) + "].addressFrom[" + strconv.Itoa(j) + "]"
-				if address := c.dnsStaticAddress(r, path, source); address != "" {
+				ref := c.byRef[source.Resource]
+				if ref != nil && ref.Kind == "Interface" {
+					dynamic = append(dynamic, api.StatusValueSourceSpec{Resource: "Interface/" + c.interfaceName(r, path, source.Resource, false), Field: source.Field, Optional: source.Optional})
+				} else if ref != nil && ref.Kind == "VirtualAddress" && ref.Spec.(api.VirtualAddressSpec).Mode == "vrrp" {
+					dynamic = append(dynamic, api.StatusValueSourceSpec{Resource: "VirtualAddress/" + c.serviceName(*ref, "vrrp"), Field: source.Field, Optional: source.Optional})
+				} else if ref != nil && ref.Kind == "IPv6DelegatedAddress" {
+					ds := ref.Spec.(api.IPv6DelegatedAddressSpec)
+					if index, ok := c.pd[ds.PrefixDelegation]; ok {
+						dynamic = append(dynamic, api.StatusValueSourceSpec{Resource: "IPv6DelegatedAddress/" + c.document.Services[index].Name + "/" + c.serviceName(*ref, "lan"), Field: source.Field, Optional: source.Optional})
+					} else {
+						c.reject(r, path, "reference", "delegated DNS listener requires a compiled PD provider")
+					}
+				} else if address := c.dnsStaticAddress(r, path, source); address != "" {
 					listen.Addresses = append(listen.Addresses, address)
 				}
 			}
 			listen.Addresses = uniqueStrings(listen.Addresses)
-			listen.AddressFrom = nil
+			listen.AddressFrom = dynamic
 			listen.AddressSources = nil
 		}
 		for _, forward := range forwarders {
@@ -100,9 +109,19 @@ func (c *compiler) dns() {
 					}
 					usedUpstreams[upstream.Metadata.Name] = true
 					us := upstream.Spec.(api.DNSUpstreamSpec)
-					if raw := c.dnsUpstreamURL(*upstream, us); raw != "" {
-						source.Upstreams = append(source.Upstreams, raw)
+					if strings.TrimSpace(us.Address) != "" {
+						if raw := c.dnsUpstreamURL(*upstream, us); raw != "" {
+							source.Upstreams = append(source.Upstreams, raw)
+						}
+					} else if len(us.AddressFrom) == 0 {
+						c.reject(*upstream, "address", "required", "DNS upstream requires an address or learned DNS source")
 					}
+					source.UpstreamFrom = append(source.UpstreamFrom, c.dnsLearnedSources(*upstream, "addressFrom", us.AddressFrom)...)
+					var bootstrap []api.StatusValueSourceSpec
+					for _, ref := range us.BootstrapFrom {
+						bootstrap = append(bootstrap, ref.StatusValueSourceSpec())
+					}
+					source.BootstrapResolverFrom = append(source.BootstrapResolverFrom, c.dnsLearnedSources(*upstream, "bootstrapFrom", bootstrap)...)
 					source.BootstrapResolver = append(source.BootstrapResolver, us.Bootstrap...)
 					if us.SourceInterface != "" {
 						ifname := c.interfaceName(*upstream, "sourceInterface", us.SourceInterface, true)
@@ -332,4 +351,43 @@ func validServerName(value string) bool {
 	// DNS wire-label validation alone permits characters such as @ and :.
 	// They must not turn an address into URL userinfo, a port, or a query.
 	return dnsconfig.ValidHostname(value) && !strings.ContainsAny(value, "@/\\?#[]:%")
+}
+
+// Translate producer identities once; live endpoints and their original
+// deadlines continue through the same DNS input as native configuration.
+func (c *compiler) dnsLearnedSources(r resource, path string, sources []api.StatusValueSourceSpec) []api.StatusValueSourceSpec {
+	var result []api.StatusValueSourceSpec
+	for i, source := range sources {
+		field := path + "[" + strconv.Itoa(i) + "]"
+		if source.Field != "" && source.Field != "dnsServers" {
+			c.reject(r, field, "reference", "DNS sources select dnsServers")
+			continue
+		}
+		provider := c.byRef[source.Resource]
+		if provider == nil {
+			c.reject(r, field, "reference", "DNS source must identify a configured producer")
+			continue
+		}
+		var name string
+		switch provider.Kind {
+		case "DHCPv6PrefixDelegation", "DHCPv6Information":
+			if index, ok := c.dhcp6Source(r, field, source.Resource); ok {
+				name = c.document.Services[index].Name
+			}
+		case "IPv6RAAddress":
+			if index, ok := c.raClients[source.Resource]; ok {
+				name = c.document.Services[index].Name
+			}
+		case "DHCPv4Client":
+			name = c.serviceName(*provider, "dhcp4")
+		case "TailscaleNode":
+			name = c.serviceName(*provider, "tail")
+		default:
+			c.reject(r, field, "unsupported_semantics", "DNS source requires a compiled DHCP, RA or Tailscale producer")
+		}
+		if name != "" {
+			result = append(result, api.StatusValueSourceSpec{Resource: provider.Kind + "/" + name, Field: "dnsServers", Optional: source.Optional})
+		}
+	}
+	return result
 }

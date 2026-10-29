@@ -127,7 +127,7 @@ func TestNativeLeaseUpdatesKeepTCPConnectionAndExpireWhenInputCloses(t *testing.
 	updates <- p
 	ctx, cancel := context.WithCancel(context.Background())
 	ready, done := make(chan struct{}), make(chan error, 1)
-	go func() { done <- Run(ctx, cfg, updates, func() { close(ready) }) }()
+	go func() { done <- Run(ctx, cfg, updates, discardDNSObservation, func() { close(ready) }) }()
 	defer func() {
 		cancel()
 		select {

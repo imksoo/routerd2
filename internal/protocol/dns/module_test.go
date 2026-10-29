@@ -20,6 +20,7 @@ import (
 	"github.com/imksoo/routerd/pkg/daemonapi"
 	"github.com/imksoo/routerd/pkg/dnsresolver"
 	"github.com/imksoo/routerd2/internal/localapi"
+	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
 	mdns "github.com/miekg/dns"
 )
 
@@ -38,7 +39,7 @@ func launchModule(t *testing.T, c Config) (context.CancelFunc, <-chan error) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	ready, done := make(chan struct{}), make(chan error, 1)
-	go func() { done <- Run(ctx, c, nil, func() { close(ready) }) }()
+	go func() { done <- Run(ctx, c, nil, discardDNSObservation, func() { close(ready) }) }()
 	t.Cleanup(cancel)
 	select {
 	case <-ready:
@@ -257,10 +258,10 @@ func TestLocalZonesRequireLabelBoundaryAndNeverInventAD(t *testing.T) {
 	}
 }
 
-func TestWildcardListenerKeepsSourceRestriction(t *testing.T) {
+func TestListenerKeepsSourceRestriction(t *testing.T) {
 	c := dnsresolver.RuntimeConfig{Spec: api.DNSResolverSpec{Listen: []api.DNSResolverListenSpec{{Addresses: []string{"0.0.0.0"}, Port: 53, Sources: []string{"private"}}}}}
 	s := []runtimeSource{{Spec: api.DNSResolverSourceSpec{Name: "private"}}, {Spec: api.DNSResolverSourceSpec{Name: "public"}}}
-	got := sourcesForListen(c, s, "192.0.2.1:53")
+	got := sourcesForListen(s, c.Spec.Listen[0].Sources)
 	if len(got) != 1 || got[0].Spec.Name != "private" {
 		t.Fatalf("wildcard policy bypass: %v", got)
 	}
@@ -274,8 +275,10 @@ func TestModuleRejectsPathCollisionAndUnownedLeaseFile(t *testing.T) {
 	}
 	c.Runtime.Spec.QueryLog.Enabled = false
 	c.Runtime.Zones[0].Spec.DHCPDerived.LeaseFile = filepath.Join(filepath.Dir(c.StatePath), "missing.leases")
-	err := Run(context.Background(), c, nil, nil)
+	err := Run(context.Background(), c, nil, discardDNSObservation, nil)
 	if err == nil || !strings.Contains(err.Error(), "native input") {
 		t.Fatal(fmt.Sprintf("unowned lease file: %v", err))
 	}
 }
+
+func discardDNSObservation(context.Context, dnsconfig.Snapshot) error { return nil }

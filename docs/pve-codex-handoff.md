@@ -5,6 +5,56 @@
 [試験計画](test-plan.md)、[機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
+## 動的DNS待受・自己DNS配布と端末復旧（2026-10-29、native-64）
+
+旧routerdのDNS controller/engineの参照展開と待受差分処理を照合した。
+Interface、VRRP VirtualAddress、IPv6DelegatedAddress由来のDNS待受と、DNSUpstreamの
+addressFrom/bootstrapFromを既存Go resolverへ接続した。Interfaceはworkerが実kernelを観測し、
+PDは適用済み・DAD完了後のアドレス、VIPは適用済みの保持者・世代・元期限だけを渡す。
+追加/撤去したソケットだけを変更し、固定待受のTCP接続と上流poolを維持する。
+ソケットに論理listenerの転送元選択と元期限を結び付け、期限後の問い合わせも拒否する。
+新しい外部DNS daemonや独立した状態管理機構は追加していない。
+
+実CLIで公開値の旧設定を取り込み、製品supervisor/control/network/workerと独立ISC・
+keepalived・dnsmasq・BusyBox・Linux端末で67.55秒の試験が終了0。
+自動SLAAC/default/配布DNS、IPv6 UDP/TCP DNSとTCP/UDP、IPv4 VIP宛てDNS、
+主従変更・control停止の元期限撤回/復帰、PD失効時の学習転送先/hostname bootstrapのSERVFAIL、
+同じ固定DNS TCP接続を保ったPD再取得と端末通信復旧を確認した。固定TCPのSYNはcaptureで1回。
+
+PD再取得時のDNSなし応答を実際に検出し、自己の委譲アドレスをDNSに指定するDHCPv6は
+DADで使えるまで配布許可を渡さないよう修正した。線上ではPD Reply11:48:33.591、
+router自身のDAD NS33.743、Information-request33.863/34.675、DNSを含むReply35.687だった。
+無応答の間にDNSなしのReplyは送らず、独立clientの通常再送で取得した。
+試験の修正: IPv6 defaultの表記とDAD待ち、選出完了と実DNS待受の差、TCP既定128照会の過剰消費、
+古いLAN経路と新しいWAN取得を区別した。製品の期限・TCP上限・client再送数は延長していない。
+
+全make check（Go/Python・全Race・vet）は終了0。DAD修正後の関連5packageのRace、
+Linux amd64/arm64 CGO_ENABLED=0 buildとvetも終了0。最後のMake再実行は既存PD試験が成功し、新しい実経路はPD再取得後の
+配布DNSへの最初の照会が接続拒否で終了1。DAD後とDNSソケット準備完了の差が残り、
+native-63の単発成功を安定受入とはしない。
+
+native-64では、DNS workerが実際のUDP/TCP待受を既存worker通知へ報告する。
+DHCPv6は適用済み・DAD完了と実待受の両方を要し、配布許可は元PD期限と観測期限を超えない。
+観測は2秒で失効し、古い通知の再送では延ばさない。配信が失敗しても固定DNSは動作を続け、
+制御側は過去の観測を失効させる。静的待受のアドレス/ソケット情報は設定時に準備する。
+新台帳・ファイル再読込・新daemonは追加していない。
+
+この版の絞った実試験は70.04秒で終了0。さらに最終`make check-dhcp6-ra-pd check-dhcp-dns`で
+既存PD、新しい取込/失効/再取得、native/取込DHCP-DNSの全4試験が終了0。
+再取得後に配布されたDNSへの最初のUDP/TCP照会とIPv6 TCP/UDP、VIP宛てIPv4 DNSが成功し、
+同じ固定DNS TCPを維持した。絞った試験のcaptureでも固定TCPのSYNは1回だった。
+新しい通知の配信失敗時にも、既存のcontrol/supervisor停止試験で固定TCPが継続した。
+全`make check`（Go/Python・全Race・vet）、関連5packageのRace、両architectureのCGO_ENABLED=0 build、
+実6 ELFを使う署名catalog/publisher/stageのRace検査も終了0。
+
+これはhomert設定の当該構造を公開値で確認した範囲であり、全homert二台・実HGW最新版・
+ONU直結・対象NIC・ARM実行の受入ではない。全34項目と実環境での利用可能性は未達。
+
+旧routerdのorigin/main `e3b49dbb`（2026-10-27）も取得し、baselineとのpkg/cmd差分を確認した。
+追加は配布conntrackdのsystemd unit競合防止とそのartifact出力だった。
+routerd2はPID 1が同梱engineを直接所有するため、そのsystemd処理は導入しない。
+全homertの残る構成、k8s/pve/SAM、全34項目と配備・更新・復旧のゴールは継続中。
+
 ## 条件付きLAN配布（2026-10-29、native-62）
 
 RAをPD内の暗黙生成から独立serviceへ変更した。`ra.from.service/delegation`で選択し、
@@ -29,14 +79,13 @@ Linux SLAAC/BusyBox/digで、実CLI取込から自動SLAAC/default/DNS、UDP/TCP
 `make check`（Go/Python・全Race Detector・vet）と関連7packageのRace検査、
 Linux amd64/arm64のCGO_ENABLED=0製品buildも終了0。ARM実行は未検証。
 
-未接続: 実homert DNSのInterface/IPv6DelegatedAddress由来待受、learned upstream/bootstrapの旧参照取込。
-今回の取込試験は静的DNS待受であり、試験側でDNSを後付けしてその不足を合格へ置き換えない。
+native-62の当初試験は静的DNS待受だった。動的参照は上記native-63で接続し、別に確認した。
 ルートmainの`d5e87bd-hgw-native61`は変更から分離して7800秒の実HGW/Tailscale観測を継続中。
 自然PD更新・新版native-62の実HGW受入とは区別する。
 
 ## 現在の成立範囲と残作業（2026-10-29 09:47 UTC）
 
-最新作業版は`authority-history-native61`（worker ABI5、network journal15）。
+この配布試験で実行した版は`authority-history-native61`（worker ABI5、network journal15）。
 
 追試`dbf4a6e-hgw-native61`の7800秒観測は、自然PD更新前の10:05 UTCに終了2。
 最後の定期正常記録は609秒/55巡。Tailscale対向から外部IPv6 DNSへのUDP照会で失敗した。

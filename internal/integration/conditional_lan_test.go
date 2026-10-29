@@ -26,6 +26,7 @@ import (
 	"github.com/imksoo/routerd2/internal/resourceprogram"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
 	"github.com/imksoo/routerd2/internal/supervisor"
+	mdns "github.com/miekg/dns"
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netns"
 	"golang.org/x/sys/unix"
@@ -158,6 +159,9 @@ func TestDaemonImportedConditionalLAN(t *testing.T) {
 		}
 		owner, cancel := context.WithCancel(ctx)
 		cmd := exec.CommandContext(owner, path, args...)
+		// Peer daemons must remove their own VIP/sockets on normal termination.
+		cmd.Cancel = func() error { return cmd.Process.Signal(unix.SIGTERM) }
+		cmd.WaitDelay = 2 * time.Second
 		cmd.Stdout, cmd.Stderr = log, log
 		if err := fixtureInsideNamespace(namespace, cmd.Start); err != nil {
 			cancel()
@@ -178,13 +182,19 @@ func TestDaemonImportedConditionalLAN(t *testing.T) {
 		return stop
 	}
 	cf, leases := filepath.Join(work, "dhcp6.conf"), filepath.Join(work, "dhcp6.leases")
-	if err := os.WriteFile(cf, []byte("default-lease-time 60; preferred-lifetime 40; option dhcp-renewal-time 20; option dhcp-rebinding-time 40; subnet6 2001:db8:ffff::/64 { prefix6 2001:db8:80:: 2001:db8:80:: /60; }\n"), 0600); err != nil {
+	if err := os.WriteFile(cf, []byte("default-lease-time 60; preferred-lifetime 40; option dhcp-renewal-time 20; option dhcp-rebinding-time 40; option dhcp6.name-servers 2001:db8:ffff::9; subnet6 2001:db8:ffff::/64 { prefix6 2001:db8:80:: 2001:db8:80:: /60; }\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(leases, nil, 0600); err != nil {
 		t.Fatal(err)
 	}
-	start(provider, "isc", os.Getenv("ROUTERD2_DHCP6_SERVER"), "-6", "-f", "-d", "-cf", cf, "-lf", leases, "-pf", filepath.Join(work, "dhcp6.pid"), "server0")
+	dnsmasq, err := exec.LookPath("dnsmasq")
+	if err != nil {
+		t.Fatal(err)
+	}
+	start(provider, "dnsmasq", dnsmasq, "--no-daemon", "--conf-file=/dev/null", "--no-hosts", "--no-resolv", "--bind-interfaces", "--listen-address=2001:db8:ffff::9", "--log-queries", "--log-facility=-", "--host-record=peer.provider.test,2001:db8:ffff::9", "--host-record=destination.learned.test,2001:db8:ffff::9", "--host-record=destination.boot.test,2001:db8:ffff::9")
+	iscArgs := []string{"-6", "-f", "-d", "-cf", cf, "-lf", leases, "-pf", filepath.Join(work, "dhcp6.pid"), "server0"}
+	stopISC := start(provider, "isc", os.Getenv("ROUTERD2_DHCP6_SERVER"), iscArgs...)
 	role := func() string {
 		var s runtimeplan.InstanceStatus
 		if err := f.control.Do(ctx, "GET", "/v1/services/"+election, nil, &s); err != nil {
@@ -198,8 +208,16 @@ func TestDaemonImportedConditionalLAN(t *testing.T) {
 		t.Helper()
 		var source string
 		until(t, 10*time.Second, func() bool {
+			// Election and kernel VIP publication precede DNS subscription delivery.
+			// Observe the actual bound UDP socket before issuing the client query.
+			bound, err := exec.Command("ss", "-H", "-lnu", "src 192.0.2.254 and sport = :53").CombinedOutput()
+			if err != nil {
+				t.Fatalf("inspect DNS sockets: %v: %s", err, bound)
+			}
+			if len(bytes.TrimSpace(bound)) == 0 {
+				return false
+			}
 			var routes []netlink.Route
-			var err error
 			var addresses []netlink.Addr
 			if err = fixtureInsideNamespace(client, func() error {
 				routes, err = netlink.RouteList(nil, netlink.FAMILY_V6)
@@ -233,10 +251,16 @@ func TestDaemonImportedConditionalLAN(t *testing.T) {
 		}
 		if err := fixtureInsideNamespace(client, func() error {
 			for _, transport := range []string{"+notcp", "+tcp"} {
-				out, err := exec.Command("dig", "-6", "@"+got.dns[0].String(), "destination.home.test", "AAAA", "+short", "+time=2", "+tries=1", transport).CombinedOutput()
-				if err != nil || !strings.Contains(string(out), "2001:db8:ffff::9") {
-					return fmt.Errorf("acquired DNS: %v: %s", err, out)
+				for _, domain := range []string{"home.test", "learned.test", "boot.test"} {
+					out, err := exec.Command("dig", "-6", "@"+got.dns[0].String(), "destination."+domain, "AAAA", "+short", "+time=2", "+tries=1", transport).CombinedOutput()
+					if err != nil || !strings.Contains(string(out), "2001:db8:ffff::9") {
+						return fmt.Errorf("acquired DNS %s: %v: %s", domain, err, out)
+					}
 				}
+			}
+			out, err := exec.Command("dig", "-4", "@192.0.2.254", "destination.home.test", "AAAA", "+short", "+time=2", "+tries=1").CombinedOutput()
+			if err != nil || !strings.Contains(string(out), "2001:db8:ffff::9") {
+				return fmt.Errorf("virtual DNS listener: %v: %s", err, out)
 			}
 			fixtureDHCP6Traffic(t, source)
 			return nil
@@ -356,6 +380,88 @@ func TestDaemonImportedConditionalLAN(t *testing.T) {
 		}
 	}()
 	communication()
+	// Keep a real TCP DNS connection to the interface-derived IPv4 listener
+	// through PD loss and recovery. The fixed local zone remains useful.
+	var connection net.Conn
+	if err := fixtureInsideNamespace(client, func() error {
+		var err error
+		connection, err = net.DialTimeout("tcp4", "192.0.2.2:53", time.Second)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	dnsTCP := &mdns.Conn{Conn: connection}
+	localQuery := func() {
+		t.Helper()
+		if err := connection.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		question := new(mdns.Msg).SetQuestion("destination.home.test.", mdns.TypeAAAA)
+		if err := dnsTCP.WriteMsg(question); err != nil {
+			t.Fatal(err)
+		}
+		reply, err := dnsTCP.ReadMsg()
+		if err != nil {
+			t.Fatal("fixed DNS TCP connection was lost", err)
+		}
+		if reply.Id != question.Id || len(reply.Answer) != 1 {
+			t.Fatal("fixed local zone failed", reply)
+		}
+	}
+	localQuery()
+	stopISC()
+	until(t, 65*time.Second, func() bool {
+		localQuery()
+		var state runtimeplan.InstanceStatus
+		if err := f.control.Do(ctx, "GET", "/v1/services/"+pd, nil, &state); err != nil {
+			t.Fatal(err)
+		}
+		var current dhcp6config.Snapshot
+		if err := json.Unmarshal(state.Snapshot, &current); err != nil {
+			t.Fatal(err)
+		}
+		if len(current.Prefixes) == 0 {
+			return true
+		}
+		// Sample liveness without exhausting the normal128-query TCP budget
+		// before this60-second lease expires.
+		time.Sleep(500 * time.Millisecond)
+		return false
+	})
+	for _, domain := range []string{"learned.test", "boot.test"} {
+		if err := fixtureInsideNamespace(client, func() error {
+			out, err := exec.Command("dig", "-4", "@192.0.2.2", "destination."+domain, "AAAA", "+time=2", "+tries=1").CombinedOutput()
+			if err != nil || !strings.Contains(string(out), "status: SERVFAIL") {
+				return fmt.Errorf("expired learned DNS %s: %v: %s", domain, err, out)
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	localQuery()
+	start(provider, "isc-recovered", os.Getenv("ROUTERD2_DHCP6_SERVER"), iscArgs...)
+	// Await WAN reacquisition, not a client route left from before withdrawal.
+	// The one Information-request client then starts while LAN DAD may be pending.
+	until(t, 10*time.Second, func() bool {
+		localQuery()
+		var state runtimeplan.InstanceStatus
+		if err := f.control.Do(ctx, "GET", "/v1/services/"+pd, nil, &state); err != nil {
+			t.Fatal(err)
+		}
+		var current dhcp6config.Snapshot
+		if err := json.Unmarshal(state.Snapshot, &current); err != nil {
+			t.Fatal(err)
+		}
+		if len(current.Prefixes) > 0 {
+			return true
+		}
+		time.Sleep(500 * time.Millisecond)
+		return false
+	})
+	communication()
+	localQuery()
 	f.stop()
-	t.Log("legacy import: independent ISC/keepalived/Linux client acquired SLAAC/default/DNS, used UDP/TCP DNS and IPv6 TCP/UDP, withdrew and restored serving on role change and original control authority expiry; configured7200s router lifetime kept distinct from1s activation")
+	t.Log("legacy import: independent ISC/keepalived/Linux client acquired SLAAC/default/DNS, used UDP/TCP DNS and IPv6 TCP/UDP, withdrew and restored serving on role change and original control authority expiry; configured7200s router lifetime kept distinct from1s activation; imported dynamic listen addresses, learned forwarding/bootstrap, original PD loss/reacquisition and the same fixed DNS TCP connection")
 }

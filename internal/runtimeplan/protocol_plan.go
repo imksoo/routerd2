@@ -2,6 +2,7 @@ package runtimeplan
 
 import (
 	"encoding/json"
+	"net/netip"
 
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/protocol/bgpconfig"
@@ -134,6 +135,7 @@ func prepareProtocols(doc config.Native, runtimeDir, stateDir string) (protocolP
 			if prepareErr != nil {
 				return protocolPlan{}, prepareErr
 			}
+			prepared.listenInterface = cfg.ListenInterface
 			plan.dns[name] = prepared
 			body, encodeErr := json.Marshal(cfg)
 			instance, err = serviceconfig.Instance{Name: name, Role: "dns", Config: body}, encodeErr
@@ -165,6 +167,58 @@ func prepareProtocols(doc config.Native, runtimeDir, stateDir string) (protocolP
 			from := *service.RA.From
 			plan.lanRA[name] = advertisementPlan{config: cfg, from: from, allocation: from.Service + "/" + from.Delegation}
 		}
+	}
+	for name, resolver := range plan.dns {
+		resolver.vips = make(map[string][]netip.Addr)
+		for _, source := range resolver.listeners {
+			if source.VRRP == "" {
+				continue
+			}
+			module := "service." + source.VRRP
+			if _, prepared := resolver.vips[module]; prepared {
+				continue
+			}
+			for _, value := range plan.vrrp[module].Addresses {
+				address, err := netip.ParsePrefix(value)
+				if err != nil {
+					return protocolPlan{}, err
+				}
+				resolver.vips[module] = append(resolver.vips[module], address.Addr())
+			}
+		}
+		plan.dns[name] = resolver
+	}
+	for name, server := range plan.dhcp6Servers {
+		if server.dnsDelegation == "" {
+			continue
+		}
+		for module, resolver := range plan.dns {
+			selected := false
+			for _, source := range resolver.listeners {
+				if resolver.runtime.Spec.Listen[source.Listener].Port != 53 {
+					continue
+				}
+				selected = selected || source.Service+"/"+source.Delegation == server.dnsDelegation || source.Interface == server.iface && source.Family != 4
+			}
+			if resolver.listenInterface == "" || resolver.listenInterface == server.iface {
+				for _, listener := range resolver.runtime.Spec.Listen {
+					if listener.Port != 53 {
+						continue
+					}
+					for _, value := range listener.Addresses {
+						address, err := netip.ParseAddr(value)
+						if err != nil {
+							return protocolPlan{}, err
+						}
+						selected = selected || address.Is6() && address.IsUnspecified()
+					}
+				}
+			}
+			if selected {
+				server.selfDNS = append(server.selfDNS, module)
+			}
+		}
+		plan.dhcp6Servers[name] = server
 	}
 	return plan, nil
 }

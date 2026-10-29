@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -21,6 +22,8 @@ import (
 	"github.com/imksoo/routerd/pkg/daemonapi"
 	"github.com/imksoo/routerd/pkg/dnsresolver"
 	"github.com/imksoo/routerd/pkg/logstore"
+	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/lifetime"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
 )
@@ -54,16 +57,20 @@ type daemon struct {
 	eventErrors    atomic.Uint64
 	eventMu        sync.Mutex
 
-	stateMu    sync.RWMutex
-	inputMu    sync.Mutex
-	zones      *zoneTable
-	sources    []runtimeSource
-	listeners  map[string]*boundListener
-	generation uint64
-	cache      map[string]cacheEntry
-	cacheBytes int
-	queryLogMu sync.Mutex
-	queryLog   *logstore.DNSQueryLog
+	stateMu         sync.RWMutex
+	inputMu         sync.Mutex
+	zones           *zoneTable
+	sources         []runtimeSource
+	listenSources   []dnsconfig.ListenSource
+	staticListeners map[string]listenBinding
+	report          func(context.Context, dnsconfig.Snapshot) error
+	apiReady        chan struct{}
+	listeners       map[string]*boundListener
+	generation      uint64
+	cache           map[string]cacheEntry
+	cacheBytes      int
+	queryLogMu      sync.Mutex
+	queryLog        *logstore.DNSQueryLog
 
 	// Native lease snapshots are serialized by inputMu. Receipt deadlines
 	// retain monotonic time and are never extended by a duplicate sequence.
@@ -76,8 +83,14 @@ type runtimeSource struct {
 	Pool *upstreamPool
 }
 
+type listenBinding struct {
+	address  netip.AddrPort
+	listener int
+	until    lifetime.Deadline
+}
+
 type boundListener struct {
-	Addr     string
+	listenBinding
 	UDP      *dns.Server
 	TCP      *dns.Server
 	Stopping atomic.Bool
@@ -113,6 +126,7 @@ func newDaemon(opts options, config dnsresolver.RuntimeConfig) (*daemon, error) 
 	d := &daemon{
 		opts:       opts,
 		config:     config,
+		apiReady:   make(chan struct{}),
 		startedAt:  time.Now().UTC(),
 		phase:      daemonapi.PhaseStarting,
 		health:     daemonapi.HealthUnknown,
@@ -120,6 +134,21 @@ func newDaemon(opts options, config dnsresolver.RuntimeConfig) (*daemon, error) 
 		listeners:  map[string]*boundListener{},
 		fatal:      make(chan error, 1),
 		querySlots: make(chan struct{}, 256),
+	}
+	var err error
+	d.listenSources, err = dnsconfig.ListenSources(config)
+	if err != nil {
+		return nil, err
+	}
+	d.staticListeners = make(map[string]listenBinding)
+	for i, listener := range config.Spec.Listen {
+		for _, value := range listener.Addresses {
+			address, err := netip.ParseAddrPort(net.JoinHostPort(value, fmt.Sprint(listener.Port)))
+			if err != nil {
+				return nil, err
+			}
+			d.staticListeners[address.String()] = listenBinding{listener: i, address: address}
+		}
 	}
 	d.cond = sync.NewCond(&d.mu)
 	d.zones = newZoneTable(config.Zones)
@@ -158,7 +187,6 @@ func buildRuntimeSources(config dnsresolver.RuntimeConfig) ([]runtimeSource, err
 
 func (d *daemon) Run(ctx context.Context) (result error) {
 	runCtx, cancel := context.WithCancel(ctx)
-	d.runCtx = runCtx
 	var apiDone chan error
 	apiStopped := false
 	defer func() {
@@ -197,16 +225,21 @@ func (d *daemon) Run(ctx context.Context) (result error) {
 			source.Pool.Start(runCtx, d.publish)
 		}
 	}
-	if err := d.startDNS(runCtx); err != nil {
+	d.inputMu.Lock()
+	d.runCtx = runCtx
+	clock, err := boottime.Read()
+	if err == nil {
+		var addresses []dnsconfig.ListenAddress
+		if d.nativeInput != nil {
+			addresses = d.nativeInput.Listeners
+		}
+		err = d.updateListeners(addresses, clock)
+	}
+	d.inputMu.Unlock()
+	if err != nil {
 		return err
 	}
-	if d.listenerCount() == 0 {
-		return errors.New("DNS module has no bound listeners")
-	}
-	if err := d.setState(daemonapi.PhaseRunning, daemonapi.HealthOK); err != nil {
-		return err
-	}
-	apiReady := make(chan struct{})
+	apiReady := d.apiReady
 	apiDone = make(chan error, 1)
 	go func() { apiDone <- localapi.Serve(runCtx, d.opts.socketPath, d.routes(), func() { close(apiReady) }) }()
 	select {
@@ -219,10 +252,13 @@ func (d *daemon) Run(ctx context.Context) (result error) {
 		return runCtx.Err()
 	case <-apiReady:
 	}
-	d.publish(daemonapi.EventDaemonReady, daemonapi.SeverityInfo, "Ready", "DNS resolver module is ready", nil)
-	if d.ready != nil {
-		d.ready()
+	d.inputMu.Lock()
+	err = d.reportListening()
+	d.inputMu.Unlock()
+	if err != nil {
+		return err
 	}
+	d.publish(daemonapi.EventDaemonReady, daemonapi.SeverityInfo, "Ready", "DNS resolver private API is ready", nil)
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -244,26 +280,27 @@ func unexpectedAPIExit(ctx context.Context, err error) error {
 	return errors.New("DNS private API stopped unexpectedly")
 }
 
-func (d *daemon) startDNS(ctx context.Context) error {
-	d.stateMu.RLock()
-	desired := listenAddressSet(d.config.Spec.Listen)
-	d.stateMu.RUnlock()
-	listeners, err := d.openBoundListeners(ctx, desired)
-	if err != nil {
-		shutdownBoundListeners(listeners)
-		return err
-	}
-	d.stateMu.Lock()
-	d.listeners = listeners
-	d.stateMu.Unlock()
-	return ctx.Err()
-}
-
-func (d *daemon) openBoundListeners(ctx context.Context, addrs map[string]struct{}) (map[string]*boundListener, error) {
-	handler := dns.HandlerFunc(d.handleDNS)
+func (d *daemon) openBoundListeners(ctx context.Context, addrs map[string]listenBinding) (map[string]*boundListener, error) {
 	listenConfig := dnsListenConfig(d.opts.listenInterface)
 	listeners := map[string]*boundListener{}
-	for addr := range addrs {
+	for addr, binding := range addrs {
+		bound := &boundListener{listenBinding: binding}
+		handler := dns.HandlerFunc(func(w dns.ResponseWriter, req *dns.Msg) {
+			d.stateMu.RLock()
+			deadline := bound.until
+			listener := bound.listener
+			d.stateMu.RUnlock()
+			if deadline != (lifetime.Deadline{}) {
+				clock, err := boottime.Read()
+				if err != nil || !deadline.Live(clock) {
+					response := new(dns.Msg)
+					response.SetRcode(req, dns.RcodeRefused)
+					_ = w.WriteMsg(response)
+					return
+				}
+			}
+			d.handleDNS(listener, w, req)
+		})
 		packetConn, err := listenConfig.ListenPacket(ctx, "udp", addr)
 		if err != nil {
 			shutdownBoundListeners(listeners)
@@ -275,11 +312,8 @@ func (d *daemon) openBoundListeners(ctx context.Context, addrs map[string]struct
 			shutdownBoundListeners(listeners)
 			return nil, fmt.Errorf("listen tcp %s: %w", addr, err)
 		}
-		bound := &boundListener{
-			Addr: addr,
-			UDP:  &dns.Server{PacketConn: packetConn, Net: "udp", Handler: handler},
-			TCP:  &dns.Server{Listener: listener, Net: "tcp", Handler: handler},
-		}
+		bound.UDP = &dns.Server{PacketConn: packetConn, Net: "udp", Handler: handler}
+		bound.TCP = &dns.Server{Listener: listener, Net: "tcp", Handler: handler}
 		listeners[addr] = bound
 		started := make(chan struct{}, 2)
 		bound.UDP.NotifyStartedFunc = func() { started <- struct{}{} }
@@ -335,7 +369,7 @@ func shutdownBoundListeners(listeners map[string]*boundListener) {
 	}
 }
 
-func (d *daemon) handleDNS(w dns.ResponseWriter, req *dns.Msg) {
+func (d *daemon) handleDNS(listener int, w dns.ResponseWriter, req *dns.Msg) {
 	select {
 	case d.querySlots <- struct{}{}:
 		defer func() { <-d.querySlots }()
@@ -347,7 +381,7 @@ func (d *daemon) handleDNS(w dns.ResponseWriter, req *dns.Msg) {
 		return
 	}
 	started := time.Now()
-	result, err := d.resolve(w.LocalAddr().String(), req)
+	result, err := d.resolve(listener, req)
 	resp := result.Response
 	if err != nil {
 		resp = new(dns.Msg)
@@ -369,7 +403,7 @@ func (d *daemon) handleDNS(w dns.ResponseWriter, req *dns.Msg) {
 	d.recordQuery(w.RemoteAddr().String(), req, result, time.Since(started))
 }
 
-func (d *daemon) resolve(localAddr string, req *dns.Msg) (resolveResult, error) {
+func (d *daemon) resolve(listener int, req *dns.Msg) (resolveResult, error) {
 	config, sources, zones, generation := d.runtimeSnapshot()
 	if req.Opcode != dns.OpcodeQuery {
 		resp := new(dns.Msg)
@@ -381,7 +415,7 @@ func (d *daemon) resolve(localAddr string, req *dns.Msg) (resolveResult, error) 
 		resp.SetRcode(req, dns.RcodeFormatError)
 		return resolveResult{Response: resp, ResponseCode: dns.RcodeToString[resp.Rcode]}, nil
 	}
-	cacheKey := dnsCacheKey(localAddr, req)
+	cacheKey := dnsCacheKey(fmt.Sprint(listener), req)
 	if config.Spec.Cache.Enabled {
 		if cached, ok := d.cacheGet(cacheKey, generation); ok {
 			var msg dns.Msg
@@ -392,7 +426,7 @@ func (d *daemon) resolve(localAddr string, req *dns.Msg) (resolveResult, error) 
 		}
 	}
 	question := req.Question[0]
-	for _, source := range sourcesForListen(config, sources, localAddr) {
+	for _, source := range sourcesForListen(sources, config.Spec.Listen[listener].Sources) {
 		if !sourceMatches(source.Spec.Match, question.Name) {
 			continue
 		}
@@ -559,23 +593,7 @@ func dnsAnswerStrings(msg *dns.Msg) []string {
 	return out
 }
 
-func sourcesForListen(config dnsresolver.RuntimeConfig, sources []runtimeSource, localAddr string) []runtimeSource {
-	host, port, err := net.SplitHostPort(localAddr)
-	if err != nil {
-		return sources
-	}
-	var selected []string
-	for _, listen := range config.Spec.Listen {
-		if fmt.Sprintf("%d", listen.Port) != port {
-			continue
-		}
-		for _, address := range listen.Addresses {
-			ip := net.ParseIP(host)
-			if address == host || address == "0.0.0.0" && ip != nil && ip.To4() != nil || address == "::" && ip != nil && ip.To4() == nil {
-				selected = listen.Sources
-			}
-		}
-	}
+func sourcesForListen(sources []runtimeSource, selected []string) []runtimeSource {
 	if len(selected) == 0 {
 		return sources
 	}
@@ -848,14 +866,4 @@ func conditionStatus(ok bool) string {
 		return daemonapi.ConditionTrue
 	}
 	return daemonapi.ConditionFalse
-}
-
-func listenAddressSet(listen []api.DNSResolverListenSpec) map[string]struct{} {
-	out := map[string]struct{}{}
-	for _, item := range listen {
-		for _, address := range item.Addresses {
-			out[net.JoinHostPort(address, fmt.Sprintf("%d", item.Port))] = struct{}{}
-		}
-	}
-	return out
 }

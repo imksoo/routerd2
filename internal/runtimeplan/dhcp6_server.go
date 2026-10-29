@@ -12,11 +12,13 @@ import (
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6serverconfig"
+	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
 	"github.com/imksoo/routerd2/internal/protocol/raclient"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
 
 type dhcp6ServerPlan struct {
+	selfDNS       []string
 	resourceID    string
 	iface         string
 	dns           []string
@@ -123,10 +125,63 @@ func (r *Runtime) dhcp6ServerInput(name string) (serviceconfig.DHCP6ServerInput,
 			}
 		}
 	}
+	var listening []dhcp6serverconfig.Address
+	for _, provider := range plan.selfDNS {
+		update, found := r.records[provider]
+		if !found {
+			continue
+		}
+		var snapshot dnsconfig.Snapshot
+		if err := json.Unmarshal(update.Snapshot, &snapshot); err != nil {
+			return out, err
+		}
+		if !snapshot.Current(clock) {
+			continue
+		}
+		for _, endpoint := range snapshot.Listeners {
+			if endpoint.Port() == 53 {
+				listening = append(listening, dhcp6serverconfig.Address{Address: endpoint.Addr(), ValidUntil: lifetime.Deadline{BootID: snapshot.BootID, Nanos: snapshot.ExpiresNanos}})
+			}
+		}
+	}
+	delegatedReady := false
+	var readyUntil lifetime.Deadline
 	for _, entry := range r.delegatedDNS[plan.dnsDelegation] {
 		address := entry.address
-		if address.ValidUntil.Live(clock) {
-			addAddresses(&out.Options.DNSServers, []dhcp6serverconfig.Address{address})
+		if !address.ValidUntil.Live(clock) {
+			continue
+		}
+		if len(plan.selfDNS) > 0 {
+			found := false
+			var until lifetime.Deadline
+			for _, listener := range listening {
+				if listener.Address != address.Address && !(listener.Address.Is6() && listener.Address.IsUnspecified()) {
+					continue
+				}
+				if !found || listener.ValidUntil.Remaining(clock) > until.Remaining(clock) {
+					until = listener.ValidUntil
+					found = true
+				}
+			}
+			if !found {
+				continue
+			}
+			address.ValidUntil = lifetime.Minimum(clock, address.ValidUntil, until)
+		}
+		addAddresses(&out.Options.DNSServers, []dhcp6serverconfig.Address{address})
+		if !delegatedReady || address.ValidUntil.Remaining(clock) > readyUntil.Remaining(clock) {
+			readyUntil = address.ValidUntil
+		}
+		delegatedReady = true
+	}
+	// A prefix installed in the kernel is not yet a working self-DNS service.
+	// Await DAD and actual sockets, then retain both original deadlines through
+	// the worker's receive wait. A stale report cannot authorize an empty Reply.
+	if plan.dnsDelegation != "" {
+		if !delegatedReady {
+			out.Options.Authority = lifetime.Deadline{BootID: clock.BootID, Nanos: uint64(clock.BoottimeNanoseconds)}
+		} else {
+			out.Options.Authority = lifetime.Minimum(clock, out.Options.Authority, readyUntil)
 		}
 	}
 	for _, name := range plan.dns {

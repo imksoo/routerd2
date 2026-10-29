@@ -70,7 +70,16 @@ spec:
     - apiVersion: net.routerd.net/v1alpha1
       kind: DNSResolver
       metadata: {name: resolver}
-      spec: {listen: [{name: local, addresses: ["::"], port: 53, sources: [local]}]}
+      spec:
+        listen:
+          - name: local
+            addresses: ["127.0.0.1"]
+            addressFrom:
+              - {resource: Interface/lan, field: ipv4Addresses}
+              - {resource: VirtualAddress/gateway, field: address}
+              - {resource: IPv6DelegatedAddress/lan-address, field: address}
+            port: 53
+            sources: [local, learned, bootstrap]
     - apiVersion: net.routerd.net/v1alpha1
       kind: DNSZone
       metadata: {name: home}
@@ -83,3 +92,25 @@ spec:
       kind: Sysctl
       metadata: {name: forwarding}
       spec: {key: net.ipv6.conf.all.forwarding, value: "1"}
+
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: DNSUpstream
+      metadata: {name: learned}
+      spec:
+        protocol: udp
+        addressFrom: [{resource: DHCPv6PrefixDelegation/wan-pd, field: dnsServers}]
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: DNSForwarder
+      metadata: {name: learned}
+      spec: {resolver: DNSResolver/resolver, match: [learned.test], upstreams: [DNSUpstream/learned]}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: DNSUpstream
+      metadata: {name: bootstrap}
+      spec:
+        protocol: udp
+        address: peer.provider.test
+        bootstrapFrom: [{resource: DHCPv6PrefixDelegation/wan-pd, field: dnsServers}]
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: DNSForwarder
+      metadata: {name: bootstrap}
+      spec: {resolver: DNSResolver/resolver, match: [boot.test], upstreams: [DNSUpstream/bootstrap]}

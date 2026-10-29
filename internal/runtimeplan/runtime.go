@@ -33,6 +33,7 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6serverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
+	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
 	"github.com/imksoo/routerd2/internal/protocol/health"
 	"github.com/imksoo/routerd2/internal/protocol/ntpconfig"
 	"github.com/imksoo/routerd2/internal/protocol/pppoeconfig"
@@ -764,6 +765,19 @@ func strict(b []byte, v any) error {
 }
 func validateSnapshot(instance serviceconfig.Instance, b json.RawMessage) error {
 	switch instance.Role {
+	case "dns":
+		var cfg dnsconfig.Config
+		var snapshot dnsconfig.Snapshot
+		if err := strict(instance.Config, &cfg); err != nil {
+			return err
+		}
+		if err := strict(b, &snapshot); err != nil {
+			return err
+		}
+		if snapshot.Resource != cfg.Runtime.Resource {
+			return errors.New("DNS snapshot identity mismatch")
+		}
+		return dnsconfig.ValidateSnapshot(snapshot)
 	case "ntp":
 		var snapshot ntpconfig.Snapshot
 		if err := strict(b, &snapshot); err != nil {

@@ -25,6 +25,7 @@ const MaxLeaseRecords = 4096
 // lease does not replace the listener or upstream pools. ConfigDigest fences an
 // old worker from consuming a different committed DNS instance's projection.
 type Input struct {
+	Listeners    []ListenAddress   `json:"listeners"`
 	Resource     string            `json:"resource"`
 	ConfigDigest string            `json:"config_digest"`
 	Sets         []LeaseSet        `json:"sets"`
@@ -92,6 +93,7 @@ func ValidLeaseHostname(name string) bool {
 // never repairs an invalid identity or deadline; validation still rejects it.
 func NormalizeInput(p Input) Input {
 	out := p
+	out.Listeners = slices.Clone(p.Listeners)
 	out.Upstreams = slices.Clone(p.Upstreams)
 	out.Bootstraps = slices.Clone(p.Bootstraps)
 	out.Sets = slices.Clone(p.Sets)

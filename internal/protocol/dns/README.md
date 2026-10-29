@@ -1,7 +1,7 @@
 # Native DNS worker
 
 The worker reuses routerd's resolver, upstream transports and static-zone
-behavior. `Run(ctx, cfg, input, ready)` owns its listeners and pools until
+behavior. `Run(ctx, cfg, input, report, ready)` owns its listeners and pools until
 cancellation. The control resource transaction owns immutable configuration;
 this module has no file-reload, config-write or raw DHCP-event API.
 
@@ -18,6 +18,35 @@ boot deadlines. A failed poll retains those deadlines; it does not renew them.
 Missing sources contribute no records or servers. Repeated ownership heartbeats
 keep existing pools and caches. Changed bindings invalidate affected-generation
 cache entries while existing TCP listeners stay open.
+
+Listener `addressFrom` accepts `Interface/IFNAME` with `addresses`,
+`ipv4Addresses` or `ipv6Addresses`; `VirtualAddress/VRRP_SERVICE` with `address`;
+and `IPv6DelegatedAddress/PD_SERVICE/ALLOCATION` with `address`.
+The compiler resolves these references once. The DNS worker observes interface
+addresses; control supplies only applied delegated addresses after DAD and
+currently published VIPs with their original deadlines. Missing dynamic
+addresses leave the process pending when no other listener exists.
+
+Only added sockets are opened and removed sockets shut down. Retained sockets,
+TCP connections and upstream pools stay alive. Each socket retains its logical
+listener's source selection, including during publication of a new binding.
+VIP and delegated sockets reject queries after the original grant expires,
+including on retained TCP connections when control is unavailable. A worker-owned
+observation tick removes expired sockets and follows interface changes without
+creating another producer or storing learned values in operator intent.
+
+The worker reports its actual typed socket endpoints through the existing
+service observation channel. The two-second BOOTTIME observation is generated
+by the worker; retransmission cannot renew it. A DHCPv6 server selecting its own
+delegated DNS address waits for both DAD and matching port53 listeners, and its
+serving input keeps the original prefix/observation deadlines. Delivery failure
+expires readiness at the consumer while fixed DNS sockets keep serving intent.
+
+Legacy DNSUpstream `addressFrom` and `bootstrapFrom` are translated to the same
+prepared native provider references. They do not become frozen endpoint lists.
+`make check-dhcp6-ra-pd` exercises CLI import and independent ISC, keepalived,
+dnsmasq, BusyBox and Linux clients. Product/fixture results and unqualified scope
+are recorded in `docs/pve-codex-handoff.md`.
 
 A DNS source may select negotiated IPCP servers with:
 

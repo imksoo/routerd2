@@ -15,6 +15,7 @@ import (
 
 	"github.com/imksoo/routerd/pkg/api"
 	"github.com/imksoo/routerd/pkg/logstore"
+	"github.com/imksoo/routerd2/internal/boottime"
 )
 
 type failureResponseWriter struct{ response *dns.Msg }
@@ -84,7 +85,7 @@ func TestResolutionFailureIsSERVFAILWithSourceAndEvent(t *testing.T) {
 	d.queryLog = queryLog
 	t.Cleanup(d.closeQueryLog)
 	w := &failureResponseWriter{}
-	d.handleDNS(w, failureTestRequest())
+	d.handleDNS(0, w, failureTestRequest())
 	if w.response == nil || w.response.Rcode != dns.RcodeServerFailure {
 		t.Fatalf("upstream timeout response = %v, want SERVFAIL", w.response)
 	}
@@ -118,7 +119,12 @@ func TestTwoTierResolverRecoversWithoutCachingUpstreamFailure(t *testing.T) {
 	coreConfig.Spec.Sources[0].QueryTimeout = "30ms"
 	coreConfig.Spec.Cache = api.DNSResolverCacheSpec{Enabled: true, MinTTL: "60s", NegativeTTL: "30s"}
 	core := newTestDaemon(t, coreConfig)
-	if err := core.startDNS(context.Background()); err != nil {
+	core.runCtx = context.Background()
+	clock, err := boottime.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := core.updateListeners(nil, clock); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(core.shutdownDNSServers)
@@ -132,13 +138,13 @@ func TestTwoTierResolverRecoversWithoutCachingUpstreamFailure(t *testing.T) {
 	lan := newTestDaemon(t, lanConfig)
 	req := failureTestRequest()
 	first := &failureResponseWriter{}
-	lan.handleDNS(first, req)
+	lan.handleDNS(0, first, req)
 	if first.response.Rcode != dns.RcodeServerFailure {
 		t.Fatalf("initial LAN response = %v, want SERVFAIL", first.response)
 	}
 	recovered.Store(true)
 	second := &failureResponseWriter{}
-	lan.handleDNS(second, req)
+	lan.handleDNS(0, second, req)
 	if second.response.Rcode != dns.RcodeSuccess || len(second.response.Answer) != 1 || requests.Load() != 2 {
 		t.Fatalf("recovery was hidden by a cached error: response=%v upstream requests=%d", second.response, requests.Load())
 	}
@@ -161,7 +167,7 @@ func TestFailedConditionalForwarderDoesNotLeakToPublicSource(t *testing.T) {
 	req := new(dns.Msg)
 	req.SetQuestion("secret.corp.example.", dns.TypeA)
 	w := &failureResponseWriter{}
-	d.handleDNS(w, req)
+	d.handleDNS(0, w, req)
 	if w.response.Rcode != dns.RcodeServerFailure || publicRequests.Load() != 0 {
 		t.Fatalf("private failure escaped source boundary: response=%v public requests=%d", w.response, publicRequests.Load())
 	}
@@ -180,7 +186,7 @@ func TestForwardedNXDOMAINIsPreservedAndCached(t *testing.T) {
 	config.Spec.Cache = api.DNSResolverCacheSpec{Enabled: true, NegativeTTL: "30s"}
 	d := newTestDaemon(t, config)
 	for i := 0; i < 2; i++ {
-		result, err := d.resolve("127.0.0.1:5053", failureTestRequest())
+		result, err := d.resolve(0, failureTestRequest())
 		if err != nil || result.Response.Rcode != dns.RcodeNameError || result.CacheHit != (i == 1) {
 			t.Fatalf("valid NXDOMAIN changed: result=%+v error=%v", result, err)
 		}

@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/imksoo/routerd/pkg/dnsresolver"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
@@ -37,7 +38,7 @@ func firstNonEmpty(values ...string) string {
 // Run consumes complete learned DNS and DHCP lease inputs independently
 // of DNS listeners and upstream pools. Closing the channel retains only the
 // already received finite deadlines; it never makes a lease permanent.
-func Run(ctx context.Context, cfg Config, updates <-chan dnsconfig.Input, ready func()) error {
+func Run(ctx context.Context, cfg Config, updates <-chan dnsconfig.Input, report func(context.Context, dnsconfig.Snapshot) error, ready func()) error {
 	if err := Validate(cfg); err != nil {
 		return err
 	}
@@ -61,6 +62,7 @@ func Run(ctx context.Context, cfg Config, updates <-chan dnsconfig.Input, ready 
 		return err
 	}
 	d.ready = ready
+	d.report = report
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	if updates != nil {
@@ -75,25 +77,39 @@ func Run(ctx context.Context, cfg Config, updates <-chan dnsconfig.Input, ready 
 		case <-runCtx.Done():
 			return nil
 		}
-		done := make(chan struct{})
-		defer func() { cancel(); <-done }()
-		go func() {
-			defer close(done)
-			for {
-				select {
-				case <-runCtx.Done():
-					return
-				case projection, ok := <-updates:
-					if !ok {
-						return
-					}
-					if err := d.applyInput(projection); err != nil {
-						d.inputRejected.Add(1)
-						slog.Warn("DNS input rejected", "resource", cfg.Runtime.Resource, "error", err)
+	}
+	done := make(chan struct{})
+	defer func() { cancel(); <-done }()
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-runCtx.Done():
+				return
+			case <-ticker.C:
+				if len(d.listenSources) > 0 {
+					if err := d.refreshListeners(); err != nil {
+						slog.Warn("DNS listener observation failed", "resource", cfg.Runtime.Resource, "error", err)
 					}
 				}
+			case projection, ok := <-updates:
+				if !ok {
+					updates = nil
+					continue
+				}
+				if err := d.applyInput(projection); err != nil {
+					d.inputRejected.Add(1)
+					slog.Warn("DNS input rejected", "resource", cfg.Runtime.Resource, "error", err)
+				}
 			}
-		}()
-	}
+			if err := d.publishListeners(runCtx); err != nil && runCtx.Err() == nil {
+				// The consumer's original observation expires on delivery failure.
+				// Static DNS sockets remain owned by configured intent during control loss.
+				slog.Warn("DNS listener observation delivery failed", "resource", cfg.Runtime.Resource, "error", err)
+			}
+		}
+	}()
 	return normalizeDaemonExit(ctx, d.Run(runCtx))
 }

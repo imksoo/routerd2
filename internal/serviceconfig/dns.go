@@ -21,6 +21,39 @@ func validateDNSSources(services []Service) error {
 			continue
 		}
 
+		listeners, err := dnsconfig.ListenSources(s.DNS.RuntimeConfig)
+		if err != nil {
+			return err
+		}
+		for _, ref := range listeners {
+			if ref.VRRP != "" {
+				found := false
+				for _, provider := range services {
+					found = found || provider.Name == ref.VRRP && provider.VRRP != nil
+				}
+				if !found {
+					return fmt.Errorf("DNS service %s requires virtual listener %s", s.Name, ref.VRRP)
+				}
+			}
+			if ref.Service == "" {
+				continue
+			}
+			found := false
+			for _, provider := range services {
+				if provider.Name != ref.Service || provider.DHCP6 == nil {
+					continue
+				}
+				for _, allocation := range provider.DHCP6.Delegations {
+					if allocation.Name == ref.Delegation {
+						found = true
+					}
+				}
+			}
+			if !found {
+				return fmt.Errorf("DNS service %s requires delegated listener %s/%s", s.Name, ref.Service, ref.Delegation)
+			}
+		}
+
 		for _, source := range s.DNS.Spec.Sources {
 			for _, ref := range append(append([]api.StatusValueSourceSpec(nil), source.UpstreamFrom...), source.BootstrapResolverFrom...) {
 				name, role, err := dnsconfig.UpstreamProvider(ref)

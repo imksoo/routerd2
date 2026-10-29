@@ -96,6 +96,11 @@ func validateLearnedServers(allowed map[string]bool, counts map[string]int, serv
 }
 
 func NeedsInput(c RuntimeConfig) bool {
+	for _, listener := range c.Spec.Listen {
+		if len(listener.AddressFrom) > 0 {
+			return true
+		}
+	}
 	for _, source := range c.Spec.Sources {
 		if len(source.UpstreamFrom) != 0 || len(source.BootstrapResolverFrom) != 0 {
 			return true

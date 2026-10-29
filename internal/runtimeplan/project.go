@@ -253,6 +253,11 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 				for _, advertisement := range protocols.lanRA {
 					needsDNS = needsDNS || advertisement.allocation == dnsKey && advertisement.from.RDNSSRouter
 				}
+				for _, resolver := range protocols.dns {
+					for _, source := range resolver.listeners {
+						needsDNS = needsDNS || source.Service+"/"+source.Delegation == dnsKey
+					}
+				}
 				for _, server := range protocols.dhcp6Servers {
 					needsDNS = needsDNS || server.dnsDelegation == dnsKey
 				}
