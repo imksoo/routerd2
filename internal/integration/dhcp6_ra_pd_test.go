@@ -8,6 +8,7 @@ import (
 	_ "embed"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -294,6 +295,9 @@ func TestDaemonDHCP6RAAddsAddressToPD(t *testing.T) {
 			endpoint := netip.AddrFrom16(base).String()
 			until(t, 3*time.Second, func() bool {
 				addresses, err := netlink.AddrList(link, netlink.FAMILY_V6)
+				if errors.Is(err, netlink.ErrDumpInterrupted) {
+					return false
+				}
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -686,8 +690,8 @@ func TestDaemonDHCP6RAAddsAddressToPD(t *testing.T) {
 			if service.DHCP6Server != nil {
 				doc.Services[i] = replacement
 			}
-			if service.DHCP6 != nil {
-				service.DHCP6.Delegations = replacement.DHCP6.Delegations
+			if service.RA != nil {
+				doc.Services[i] = replacement
 			}
 		}
 	}

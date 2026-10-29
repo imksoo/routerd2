@@ -127,7 +127,8 @@ import, and a distinct DS-Lite host-suffix override creates a /128 endpoint.
 
 ## Learned DNS in LAN advertisements
 
-A delegation with `rdnss_router` advertises its own delegated LAN address as
+An explicit RA service selects its delegated LAN using `from.service` and
+`from.delegation`. Setting `from.rdnss_router` advertises its own LAN address as
 an RDNSS server. Its advertisement expires with the delegated prefix. The DNS
 service must actually listen on that address. Set its `listen_interface` to
 the LAN interface when using a wildcard listener: Linux then accepts DNS only
@@ -137,8 +138,8 @@ can select the same allocation with `dns_delegation`, specifying its service
 and delegation names. It supplies only addresses in the applied network
 projection and retains their original expiry.
 
-A DHCPv6 delegation independently selects `use_learned_rdnss` and
-`use_learned_dnssl`. It keeps configured `rdnss` and
+The RA service independently selects `from.use_learned_rdnss` and
+`from.use_learned_dnssl`. It keeps configured `rdnss` and
 `dnssl` entries separate from learned DNS. Learned entries carry the earlier of
 the information freshness deadline and the PD lease expiry into the RA worker.
 Each outgoing RDNSS/DNSSL lifetime is capped by that absolute deadline. Closing
@@ -151,6 +152,13 @@ entry never sends a conflicting zero lifetime, and removing one name does not
 withdraw the others. Prefix and DNS renewals update the running RA worker's
 live configuration without changing its immutable template or restarting its
 socket. Static DNS continues to use its configured advertisement lifetime.
+
+The RA resource has its own serving condition. `active_until` is the original
+conditional serving deadline: expiry withdraws the router, PIO and DNS options.
+It is separate from the PD `authority` and packet lifetimes; a one-second
+control authority must not create a one-second default route between periodic
+advertisements. A recovered grant restores advertisements without recreating
+the socket. A removed PD provider drains its explicitly named RA consumers.
 
 ## Inspection
 

@@ -8,14 +8,17 @@ import (
 	"strings"
 
 	"github.com/imksoo/routerd/pkg/api"
+	"github.com/imksoo/routerd2/internal/protocol/ra"
+	"github.com/imksoo/routerd2/internal/resourceprogram"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
 
 // The active chain emits both a stateless DHCP range and implicit RA. Import
 // both through one selected PD allocation, never just the UDP server half.
-func (c *compiler) dhcp6Servers() {
+func (c *compiler) dhcp6Servers(vrrpNames map[string]string) map[string]*resourceprogram.FactCondition {
+	conditions := make(map[string]*resourceprogram.FactCondition)
 	for _, r := range c.resourcesOfKind("DHCPv6Server") {
-		c.allow(r, "server", "managed", "role", "interface", "listenInterfaces", "mode", "delegatedAddress", "defaultRoute", "dnsServers", "dnsServerFrom", "sntpServers", "sntpServerFrom", "domainSearch", "domainSearchFrom")
+		c.allow(r, "server", "managed", "role", "interface", "listenInterfaces", "mode", "delegatedAddress", "defaultRoute", "dnsServers", "dnsServerFrom", "sntpServers", "sntpServerFrom", "domainSearch", "domainSearchFrom", "logDHCP", "leaseTime", "stickyHoldDays")
 		s := r.Spec.(api.DHCPv6ServerSpec)
 		if s.Server != "" && s.Server != "dnsmasq" || s.Role != "" && s.Role != "server" || s.Mode != "" && s.Mode != "stateless" {
 			c.reject(r, "", "unsupported_semantics", "only the local stateless dnsmasq serving path is implemented; stateful, both and transit behavior cannot be dropped")
@@ -26,7 +29,7 @@ func (c *compiler) dhcp6Servers() {
 			continue
 		}
 		c.usePolicy(r, "dhcp6_servers")
-		if policy.RouterLifetimeSeconds == nil || *policy.RouterLifetimeSeconds < 0 || *policy.RouterLifetimeSeconds > 9000 || *policy.RouterLifetimeSeconds > 0 && *policy.RouterLifetimeSeconds < 10 {
+		if policy.RouterLifetimeSeconds != nil && (*policy.RouterLifetimeSeconds < 0 || *policy.RouterLifetimeSeconds > 9000 || *policy.RouterLifetimeSeconds > 0 && *policy.RouterLifetimeSeconds < 10) {
 			c.policyIssue(r, "dhcp6_servers", "router_lifetime_seconds", "policy_required", "choose zero or a router lifetime of 10..9000 seconds; native PIO lifetimes retain the original PD budgets")
 		}
 		ifname := c.interfaceName(r, "interface", s.Interface, false)
@@ -60,11 +63,21 @@ func (c *compiler) dhcp6Servers() {
 			continue // The provider's diagnostic already prevents publication.
 		}
 		allocation := c.serviceName(*delegated, "lan")
-		cfg := &serviceconfig.DHCP6Server{Interface: ifname, ServerDUID: policy.ServerDUID, DomainSearch: append([]string(nil), s.DomainSearch...)}
+		cfg := &serviceconfig.DHCP6Server{Interface: ifname, LogDHCP: s.LogDHCP, ServerDUID: policy.ServerDUID, DomainSearch: append([]string(nil), s.DomainSearch...)}
 		cfg.DNSServers = c.dhcp6ServerAddresses(r, "dnsServers", s.DNSServers)
 		cfg.SNTPServers = c.dhcp6ServerAddresses(r, "sntpServers", s.SNTPServers)
 		cfg.SNTPFrom = c.dhcp6ServerSources(r, "sntpServerFrom", "sntpServers", s.SNTPServerFrom)
-		cfg.SearchFrom = c.dhcp6ServerSources(r, "domainSearchFrom", "domainSearch", s.DomainSearchFrom)
+		var dynamicSearch []api.StatusValueSourceSpec
+		for _, source := range s.DomainSearchFrom {
+			if strings.HasPrefix(source.Resource, "DNSZone/") && source.Field == "zone" {
+				if zone := c.getRef(r, "domainSearchFrom", source.Resource, "DNSZone"); zone != nil {
+					cfg.DomainSearch = append(cfg.DomainSearch, strings.TrimSuffix(zone.Spec.(api.DNSZoneSpec).Zone, "."))
+				}
+			} else {
+				dynamicSearch = append(dynamicSearch, source)
+			}
+		}
+		cfg.SearchFrom = c.dhcp6ServerSources(r, "domainSearchFrom", "domainSearch", dynamicSearch)
 		for i, source := range s.DNSServerFrom {
 			path := "dnsServerFrom[" + strconv.Itoa(i) + "]"
 			if source.Field == "address" {
@@ -104,25 +117,44 @@ func (c *compiler) dhcp6Servers() {
 			if lan.Interface != ifname {
 				c.reject(r, "interface", "reference", "selected delegated address must belong to the serving interface")
 			}
-			if lan.Advertise {
-				c.reject(r, "interface", "socket_owner", "another DHCPv6 server already owns this delegated RA")
+			explicit := false
+			for _, service := range c.document.Services {
+				if service.RA != nil && service.RA.Interface == ifname {
+					explicit = true
+					if service.RA.From.Service != c.document.Services[index].Name || service.RA.From.Delegation != allocation {
+						c.reject(r, "interface", "reference", "DHCPv6 and RA must select the same delegated LAN")
+					}
+				}
 			}
-			lan.Advertise, lan.OtherConfig, lan.RouterLifetimeSeconds = true, true, policy.RouterLifetimeSeconds
-			lan.RDNSSRouter = cfg.DNSDelegation != nil
-			for _, ip := range cfg.DNSServers {
-				lan.RDNSS = append(lan.RDNSS, ip.String())
+			if !explicit && policy.RouterLifetimeSeconds == nil {
+				c.policyIssue(r, "dhcp6_servers", "router_lifetime_seconds", "policy_required", "implicit RA requires an explicit router lifetime")
 			}
-			lan.DNSSL = append([]string(nil), cfg.DomainSearch...)
-			lan.UseLearnedRDNSS, lan.UseLearnedDNSSL = len(cfg.DNSFrom) > 0, len(cfg.SearchFrom) > 0
-			c.target(r, "services/"+c.document.Services[index].Name+"/delegations/"+allocation)
+			if !explicit && policy.RouterLifetimeSeconds != nil {
+				name := c.serviceName(r, "ra")
+				advertisement := &serviceconfig.RouterAdvertisement{Config: ra.Config{Interface: ifname, OtherConfig: true, RouterLifetimeSeconds: *policy.RouterLifetimeSeconds, DNSSLifetimeSeconds: 1800, MinIntervalSeconds: 3, MaxIntervalSeconds: 10}, From: &serviceconfig.RADelegation{Service: c.document.Services[index].Name, Delegation: allocation, RDNSSRouter: cfg.DNSDelegation != nil, UseLearnedRDNSS: len(cfg.DNSFrom) > 0, UseLearnedDNSSL: len(cfg.SearchFrom) > 0}}
+				advertisement.RDNSS = make([]string, len(cfg.DNSServers))
+				for j, ip := range cfg.DNSServers {
+					advertisement.RDNSS[j] = ip.String()
+				}
+				advertisement.DNSSL = append([]string(nil), cfg.DomainSearch...)
+				c.addService(r, serviceconfig.Service{Name: name, RA: advertisement})
+				conditions["service/"+name] = c.appliedDelegationCondition(r, *delegated, s.DependsOn, c.when(r, s.When, vrrpNames))
+			}
 		}
 		if !found {
 			c.reject(r, "delegated_address", "reference", "selected delegated allocation was not compiled")
 		}
 
-		c.addService(r, serviceconfig.Service{Name: c.serviceName(r, "dhcp6"), DHCP6Server: cfg})
-		c.note(r, "Explicit replacement: the selected PD allocation owns LAN RA with O set and configured router lifetime, retaining original PD PIO budgets. RA RDNSS/DNSSL retain independently selected static/DHCPv6 options and original information deadlines. Static and learned DHCPv6 options are independent; missing/expired information removes only that source's values instead of stopping all serving. No interface-prefix scan, status snapshot or dnsmasq lease file is imported. The policy's explicit server_duid selects the serving identity; when omitted, a persistent native server DUID is created before serving.")
+		name := c.serviceName(r, "dhcp6")
+		c.addService(r, serviceconfig.Service{Name: name, DHCP6Server: cfg})
+		when := c.when(r, s.When, vrrpNames)
+		if len(s.DependsOn) > 0 {
+			when = c.appliedDelegationCondition(r, *delegated, s.DependsOn, when)
+		}
+		conditions["service/"+name] = when
+		c.note(r, "Explicit replacement: the selected PD allocation owns LAN RA with O set and configured router lifetime, retaining original PD PIO budgets. Stateless DHCPv6 allocates no address leases; leaseTime and stickyHoldDays do not create an IA_NA allocator. The explicit RA service owns its own conditions and packet template. RA RDNSS/DNSSL retain independently selected static/DHCPv6 options and original information deadlines. Static and learned DHCPv6 options are independent; missing/expired information removes only that source's values instead of stopping all serving. No interface-prefix scan, status snapshot or dnsmasq lease file is imported. The policy's explicit server_duid selects the serving identity; when omitted, a persistent native server DUID is created before serving.")
 	}
+	return conditions
 }
 
 func (c *compiler) dhcp6ServerAddresses(r resource, field string, values []string) []netip.Addr {

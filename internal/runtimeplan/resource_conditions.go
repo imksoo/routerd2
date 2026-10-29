@@ -302,5 +302,16 @@ func (r *Runtime) projectProgramLocked(cfg configuration, records map[string]ser
 	p, err := r.projectLocked(cfg.protocols, native, records, now, facts)
 	p.observationVersion = r.observationVersion
 	p.resources = states
+	clock := boottime.Clock{BootID: facts.Scope.BootID, BoottimeNanoseconds: int64(facts.NowNanos), WallTime: facts.WallTime}
+	for _, resource := range cfg.source.Resources {
+		if resource.Service == nil || resource.Service.RA == nil || resource.Service.RA.From == nil {
+			continue
+		}
+		name := resource.Service.ModuleName()
+		if advertisement, ok := p.liveRA[name]; ok {
+			advertisement.ActiveUntil = lifetime.Minimum(clock, advertisement.ActiveUntil, states[resource.ID].ActiveUntil)
+			p.liveRA[name] = advertisement
+		}
+	}
 	return p, err
 }

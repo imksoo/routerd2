@@ -22,9 +22,15 @@ type protocolPlan struct {
 	dns          map[string]dnsPlan
 	bgp          map[string]bgpconfig.Config
 	vrrp         map[string]vrrp.Config
-	lanRA        map[string]ra.Config
+	lanRA        map[string]advertisementPlan
 	aftr         map[string]aftrDefinition
 	serviceLinks map[string]bool
+}
+
+type advertisementPlan struct {
+	config     ra.Config
+	from       serviceconfig.RADelegation
+	allocation string
 }
 
 type leaseHAPlan struct {
@@ -32,8 +38,8 @@ type leaseHAPlan struct {
 	serving binding
 }
 
-// The complete Native source has passed config.Compile, including generated
-// worker-name collisions and the service/instance limits.
+// The complete Native source has passed config.Compile, including worker
+// ownership and service limits.
 func prepareProtocols(doc config.Native, runtimeDir, stateDir string) (protocolPlan, error) {
 	plan := protocolPlan{
 		ntp:          make(map[string]ntpconfig.Node),
@@ -44,7 +50,7 @@ func prepareProtocols(doc config.Native, runtimeDir, stateDir string) (protocolP
 		dns:          make(map[string]dnsPlan),
 		bgp:          make(map[string]bgpconfig.Config),
 		vrrp:         make(map[string]vrrp.Config),
-		lanRA:        make(map[string]ra.Config),
+		lanRA:        make(map[string]advertisementPlan),
 		aftr:         make(map[string]aftrDefinition),
 		serviceLinks: make(map[string]bool),
 	}
@@ -153,31 +159,11 @@ func prepareProtocols(doc config.Native, runtimeDir, stateDir string) (protocolP
 		if service.DSLite != nil {
 			plan.aftr[name] = prepareAFTR(doc, service)
 		}
-		if service.DHCP6 == nil {
-			continue
-		}
-		for _, lan := range service.DHCP6.Delegations {
-			if !lan.Advertise {
-				continue
-			}
-			resource := service.Name + "-" + lan.Name + "-ra"
-			module := "service." + resource
-			lifetime := 1800
-			if lan.RouterLifetimeSeconds != nil {
-				lifetime = *lan.RouterLifetimeSeconds
-			}
-			cfg := ra.Config{Resource: resource, Interface: lan.Interface, OtherConfig: lan.OtherConfig, RouterLifetimeSeconds: lifetime, DNSSLifetimeSeconds: 1800, MinIntervalSeconds: 3, MaxIntervalSeconds: 10, RDNSS: unique(lan.RDNSS), DNSSL: unique(lan.DNSSL)}
-			plan.lanRA[module] = cfg
-			// All prefix and DNS data travels through the live RA input. Its
-			// immutable worker contains only the interface/template identity.
-			cfg.RDNSS, cfg.DNSSL = nil, nil
-			body, err := json.Marshal(cfg)
-			if err != nil {
-				return protocolPlan{}, err
-			}
-			if err := add(serviceconfig.Instance{Name: module, Role: "ra", Config: body, DynamicRA: true}); err != nil {
-				return protocolPlan{}, err
-			}
+		if service.RA != nil && service.RA.From != nil {
+			cfg := service.RA.Config
+			cfg.Resource = service.Name
+			from := *service.RA.From
+			plan.lanRA[name] = advertisementPlan{config: cfg, from: from, allocation: from.Service + "/" + from.Delegation}
 		}
 	}
 	return plan, nil

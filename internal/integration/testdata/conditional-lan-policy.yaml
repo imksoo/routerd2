@@ -1,0 +1,9 @@
+schema_version: 1
+vrrp:
+  VirtualAddress/gateway:
+    source_address: 192.0.2.2
+    vip_interface: gateway
+dhcp6_servers:
+  DHCPv6Server/information:
+    delegated_address: IPv6DelegatedAddress/lan-address
+    server_duid: "00030001020000000042"

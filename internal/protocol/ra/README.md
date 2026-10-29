@@ -16,7 +16,7 @@ defaults are min 200/max 600 seconds; DNS lifetime is also explicit. Prefix
 remaining lifetime renewed by every advertisement. Each deadline is a
 `lifetime.Deadline`: an operator `{"utc":"..."}` cutoff or a learned
 `{"boot_id":"...","nanos":...}` budget. Clock kinds are mutually exclusive.
-Generated RA `Authority` carries the original PD budget and also bounds router,
+Delegated RA `Authority` carries the original PD budget and also bounds router,
 PIO and DNS lifetimes, even if control stops delivering updates. Autonomous prefixes must be
 /64. The worker does not configure the interface, enable forwarding, allocate
 DHCPv6 addresses or install routes.
@@ -44,11 +44,18 @@ Tests validate packet options, absolute lifetime decay, withdrawal and
 solicitation rejection without opening a socket. The isolated native test in
 `../dhcp4/kernel_integration_test.go` additionally verifies kernel multicast
 delivery with hop limit 255, a received RS and shutdown packet reception across
-private veth peers. `make check-pd-ra` exercises actual generated RA and PD
+private veth peers. `make check-pd-ra` exercises actual delegated RA and PD
 renumbering. `make qemu-dhcp6-clock` verifies original budgets during actual
 guest UTC changes, independent writer expiry and control failure. Client SLAAC
 behavior and complete resource lifecycle still require
 control-plane integration evidence. An RA engine is not DHCPv6 server parity.
+
+`ActiveUntil` carries the original conditional serving deadline separately from
+packet lifetimes. Expiry sends a zero-lifetime withdrawal even when control is
+unavailable; refreshing that grant alone does not change the configuration
+generation. `make check-dhcp6-ra-pd` also imports public RA/DHCPv6 intent through
+the actual CLI and uses independent ISC, keepalived and Linux SLAAC clients to
+exercise communication, role changes and control suspension.
 
 ## Prefix updates without restarting the process
 

@@ -71,6 +71,7 @@ func (w withdrawals) sent() {
 func equivalentAt(a, b Config, clock boottime.Clock) bool {
 	a, b = normalized(a), normalized(b)
 	for _, c := range []*Config{&a, &b} {
+		c.ActiveUntil = lifetime.Deadline{}
 		for i := range c.Prefixes {
 			p := &c.Prefixes[i]
 			p.ValidLifetimeSeconds = p.ValidUntil.Seconds(p.ValidLifetimeSeconds, clock)
@@ -92,7 +93,7 @@ func planUpdate(current, candidate Config, pending withdrawals, hardware net.Har
 		return current, pending, false, errors.New("advertised RA MTU exceeds interface MTU")
 	}
 	if equivalentAt(current, candidate, clock) {
-		return current, pending, false, nil
+		return candidate, pending, false, nil
 	}
 	updated := pending.clone()
 	nextPrefixes := map[string]bool{}

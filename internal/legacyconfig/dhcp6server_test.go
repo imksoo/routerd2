@@ -35,7 +35,8 @@ func TestDHCP6ImportBindsServingAndRAToSelectedPD(t *testing.T) {
 		t.Fatal("changed provider identity or allocation", pd)
 	}
 	lan := pd.DHCP6.Delegations[0]
-	if !lan.Advertise || !lan.OtherConfig || !lan.UseLearnedRDNSS || !lan.UseLearnedDNSSL || lan.RouterLifetimeSeconds == nil || *lan.RouterLifetimeSeconds != 30 || lan.Interface != server.DHCP6Server.Interface {
+	advertisement := service(t, result.Document, "ra").RA
+	if !advertisement.OtherConfig || !advertisement.From.UseLearnedRDNSS || !advertisement.From.UseLearnedDNSSL || advertisement.RouterLifetimeSeconds != 30 || lan.Interface != server.DHCP6Server.Interface {
 		t.Fatal("serving and RA did not select the same LAN allocation", lan, server)
 	}
 	for _, sources := range [][]string{server.DHCP6Server.DNSFrom, server.DHCP6Server.SNTPFrom, server.DHCP6Server.SearchFrom} {
@@ -49,7 +50,7 @@ func TestDHCP6ImportBindsServingAndRAToSelectedPD(t *testing.T) {
 	}
 	selfPD, selfServer := service(t, self.Document, "dhcp6"), service(t, self.Document, "dhcp6_server")
 	ref := selfServer.DHCP6Server.DNSDelegation
-	if ref == nil || ref.Service != selfPD.Name || ref.Delegation != selfPD.DHCP6.Delegations[0].Name || !selfPD.DHCP6.Delegations[0].RDNSSRouter || len(selfServer.DHCP6Server.DNSFrom) != 0 || selfPD.DHCP6.Delegations[0].UseLearnedRDNSS {
+	if ref == nil || ref.Service != selfPD.Name || ref.Delegation != selfPD.DHCP6.Delegations[0].Name || !service(t, self.Document, "ra").RA.From.RDNSSRouter || len(selfServer.DHCP6Server.DNSFrom) != 0 || service(t, self.Document, "ra").RA.From.UseLearnedRDNSS {
 		t.Fatal("delegated address source did not select the installed router DNS", selfServer, selfPD)
 	}
 	// Independent dnsmasq capture has no RA DNS option when none is declared.
@@ -58,9 +59,9 @@ func TestDHCP6ImportBindsServingAndRAToSelectedPD(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pdAbsent, serverAbsent := service(t, dnsAbsent.Document, "dhcp6"), service(t, dnsAbsent.Document, "dhcp6_server")
-	if len(serverAbsent.DHCP6Server.DNSFrom) != 0 || pdAbsent.DHCP6.Delegations[0].UseLearnedRDNSS || !pdAbsent.DHCP6.Delegations[0].UseLearnedDNSSL {
-		t.Fatal("absent DNS suppressed independent search or enabled implicit DNS", pdAbsent, serverAbsent)
+	serverAbsent := service(t, dnsAbsent.Document, "dhcp6_server")
+	if len(serverAbsent.DHCP6Server.DNSFrom) != 0 || service(t, dnsAbsent.Document, "ra").RA.From.UseLearnedRDNSS || !service(t, dnsAbsent.Document, "ra").RA.From.UseLearnedDNSSL {
+		t.Fatal("absent DNS suppressed independent search or enabled implicit DNS", serverAbsent)
 	}
 	// An operator must see the unsupported batch, never a usable prefix-only
 	// partial result with its required serving/RA half silently absent.

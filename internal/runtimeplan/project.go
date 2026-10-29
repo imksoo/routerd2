@@ -41,6 +41,13 @@ type projection struct {
 	liveRA             map[string]ra.Config
 	liveDHCP6          map[string]dhcp6config.RouterFlags
 	delegatedDNS       map[string][]delegatedDNSAddress
+	delegatedLAN       map[string]delegatedLAN
+}
+
+type delegatedLAN struct {
+	prefixes  []ra.Prefix
+	routerDNS []ra.DNSServer
+	snapshot  *dhcp6config.Snapshot
 }
 
 type delegatedDNSAddress struct {
@@ -118,7 +125,7 @@ func (r *Runtime) projectLocked(protocols protocolPlan, doc config.Native, recor
 // Pure projection combines active intent with the source's immutable workers
 // and current protocol evidence. Producers cannot submit arbitrary effects.
 func projectWithFacts(doc config.Native, protocols protocolPlan, records map[string]serviceconfig.Update, now time.Time, facts projectionFacts) (projection, error) {
-	p := projection{network: doc.Network, liveRA: map[string]ra.Config{}, liveDHCP6: make(map[string]dhcp6config.RouterFlags), delegatedDNS: make(map[string][]delegatedDNSAddress), native: doc, vrrpOwners: make(map[string]vrrpOwnership)}
+	p := projection{network: doc.Network, liveRA: map[string]ra.Config{}, liveDHCP6: make(map[string]dhcp6config.RouterFlags), delegatedDNS: make(map[string][]delegatedDNSAddress), delegatedLAN: make(map[string]delegatedLAN), native: doc, vrrpOwners: make(map[string]vrrpOwnership)}
 	// Own the collections changed by protocol projection and lifetime removal.
 	// Links and guards are only appended; all other intent is read-only.
 	p.network.Links = slices.Clip(p.network.Links)
@@ -131,7 +138,9 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 		iface.AddressOptions = maps.Clone(iface.AddressOptions)
 	}
 	for _, s := range doc.Services {
-		p.instances = append(p.instances, protocols.instances[s.ModuleName()])
+		if s.RA == nil || s.RA.From == nil {
+			p.instances = append(p.instances, protocols.instances[s.ModuleName()])
+		}
 	}
 	for _, s := range doc.Services {
 		_, sharedLease := protocols.leaseHA[s.ModuleName()]
@@ -240,7 +249,10 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 			}
 			for _, lan := range s.DHCP6.Delegations {
 				dnsKey := s.Name + "/" + lan.Name
-				needsDNS := lan.RDNSSRouter
+				needsDNS := false
+				for _, advertisement := range protocols.lanRA {
+					needsDNS = needsDNS || advertisement.allocation == dnsKey && advertisement.from.RDNSSRouter
+				}
 				for _, server := range protocols.dhcp6Servers {
 					needsDNS = needsDNS || server.dnsDelegation == dnsKey
 				}
@@ -283,48 +295,21 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 					}
 					if !preparing && needsDNS {
 						entry := delegatedDNSAddress{interfaceName: lan.Interface, address: dhcp6serverconfig.Address{Address: address.Addr(), ValidUntil: lease.ValidUntil}}
-						if lan.RDNSSRouter {
-							entry.raModule = "service." + s.Name + "-" + lan.Name + "-ra"
+						for module, advertisement := range protocols.lanRA {
+							if advertisement.allocation == dnsKey && advertisement.from.RDNSSRouter {
+								entry.raModule = module
+							}
 						}
 						p.delegatedDNS[dnsKey] = append(p.delegatedDNS[dnsKey], entry)
 					}
-					if !preparing && lan.Advertise {
+					if !preparing && lan.PrefixLength != 128 {
 						prefixes = append(prefixes, ra.Prefix{Prefix: prefix.String(), OnLink: true, Autonomous: true, ValidLifetimeSeconds: ^uint32(0), PreferredLifetimeSeconds: ^uint32(0), ValidUntil: lease.ValidUntil, PreferredUntil: lease.PreferredUntil})
-						if lan.RDNSSRouter {
-							routerDNS = append(routerDNS, ra.DNSServer{Address: address.Addr().String(), ValidUntil: lease.ValidUntil})
-						}
+						routerDNS = append(routerDNS, ra.DNSServer{Address: address.Addr().String(), ValidUntil: lease.ValidUntil})
 					}
 				}
-				if preparing || !lan.Advertise || len(prefixes) == 0 {
-					continue
+				if len(prefixes) > 0 {
+					p.delegatedLAN[dnsKey] = delegatedLAN{prefixes: prefixes, routerDNS: routerDNS, snapshot: &snap}
 				}
-				name := s.Name + "-" + lan.Name + "-ra"
-				module := "service." + name
-				c := protocols.lanRA[module]
-				c.Prefixes = prefixes
-				c.LearnedRDNSS = routerDNS
-				c.Authority, _ = snap.LeaseUntil()
-				if until, usable := snap.InformationUntil(facts.bfdClock); usable {
-					if lan.UseLearnedRDNSS {
-						for _, server := range unique(snap.DNSServers) {
-							address, _ := netip.ParseAddr(server)
-							if address.IsLinkLocalUnicast() && lan.Interface != s.Interface() {
-								continue // The WAN link-local scope is not the LAN link.
-							}
-							c.LearnedRDNSS = append(c.LearnedRDNSS, ra.DNSServer{Address: server, ValidUntil: until})
-						}
-					}
-					if lan.UseLearnedDNSSL {
-						for _, name := range unique(snap.DomainSearch) {
-							c.LearnedDNSSL = append(c.LearnedDNSSL, ra.SearchDomain{Domain: name, ValidUntil: until})
-						}
-					}
-				}
-				if err := ra.Validate(c); err != nil {
-					return p, err
-				}
-				p.liveRA[module] = c
-				p.instances = append(p.instances, protocols.instances[module])
 			}
 		case "vrrp":
 			if !has {
@@ -393,6 +378,56 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 		if err := projectDSLite(&p, doc, protocols, records, facts.aftr, facts.bfdClock); err != nil {
 			return p, err
 		}
+	}
+	for _, service := range doc.Services {
+		if service.RA == nil || service.RA.From == nil {
+			continue
+		}
+		module := service.ModuleName()
+		advertisement := protocols.lanRA[module]
+		allocation, available := p.delegatedLAN[advertisement.allocation]
+		if !available {
+			continue
+		}
+		c := advertisement.config
+		c.Prefixes = slices.Clone(c.Prefixes)
+		c.LearnedRDNSS = slices.Clone(c.LearnedRDNSS)
+		c.LearnedDNSSL = slices.Clone(c.LearnedDNSSL)
+		for _, prefix := range allocation.prefixes {
+			if advertisement.from.ValidLifetimeSeconds != nil {
+				prefix.ValidLifetimeSeconds = *advertisement.from.ValidLifetimeSeconds
+			}
+			prefix.PreferredLifetimeSeconds = prefix.ValidLifetimeSeconds
+			if advertisement.from.PreferredLifetimeSeconds != nil {
+				prefix.PreferredLifetimeSeconds = *advertisement.from.PreferredLifetimeSeconds
+			}
+			c.Prefixes = append(c.Prefixes, prefix)
+		}
+		if advertisement.from.RDNSSRouter {
+			c.LearnedRDNSS = slices.Clone(allocation.routerDNS)
+		}
+		c.Authority, _ = allocation.snapshot.LeaseUntil()
+		if until, usable := allocation.snapshot.InformationUntil(facts.bfdClock); usable {
+			if advertisement.from.UseLearnedRDNSS {
+				for _, server := range unique(allocation.snapshot.DNSServers) {
+					address, _ := netip.ParseAddr(server)
+					if address.IsLinkLocalUnicast() && c.Interface != allocation.snapshot.Interface {
+						continue
+					}
+					c.LearnedRDNSS = append(c.LearnedRDNSS, ra.DNSServer{Address: server, ValidUntil: until})
+				}
+			}
+			if advertisement.from.UseLearnedDNSSL {
+				for _, name := range unique(allocation.snapshot.DomainSearch) {
+					c.LearnedDNSSL = append(c.LearnedDNSSL, ra.SearchDomain{Domain: name, ValidUntil: until})
+				}
+			}
+		}
+		if err := ra.Validate(c); err != nil {
+			return p, err
+		}
+		p.liveRA[module] = c
+		p.instances = append(p.instances, protocols.instances[module])
 	}
 	sort.Slice(p.instances, func(i, j int) bool { return p.instances[i].instance.Name < p.instances[j].instance.Name })
 	if err := network.Validate(p.network); err != nil {

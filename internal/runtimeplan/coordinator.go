@@ -265,7 +265,7 @@ func (r *Runtime) reconcileStep(ctx context.Context, ceiling map[string]supervis
 				continue
 			}
 			// Retire DHCPv6 first while the old WAN and its other consumers
-			// still exist. The stopped observation retires its generated RA.
+			// still exist. The stopped observation retires its delegated RA consumers.
 			drainingDHCP = true
 			ceiling = maps.Clone(ceiling)
 			for _, peer := range status.Modules {
@@ -530,15 +530,12 @@ func (r *Runtime) applyProjectionLocked(ctx context.Context, p projection) (proj
 // The coordinator may run before the HTTP handler starts waiting for its ACK.
 func (r *Runtime) dhcp6WithdrawalsLocked(name string) map[string][]string {
 	required := make(map[string][]string)
-	for _, service := range r.config.plan.Native.Services {
-		if service.ModuleName() != name || service.DHCP6 == nil {
+	for module, advertisement := range r.config.protocols.lanRA {
+		if "service."+advertisement.from.Service != name {
 			continue
 		}
-		for _, lan := range service.DHCP6.Delegations {
-			module := name + "-" + lan.Name + "-ra"
-			for _, prefix := range r.liveRA[module].Prefixes {
-				required[module] = append(required[module], prefix.Prefix)
-			}
+		for _, prefix := range r.liveRA[module].Prefixes {
+			required[module] = append(required[module], prefix.Prefix)
 		}
 	}
 	return required

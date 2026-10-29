@@ -178,7 +178,8 @@ def peer(stage, auth, dhcp6_server):
             next(r for r in resources if r["id"] == "forwarding")["forwarding"]["ipv6"] = True
             resources += [
                 {"id": "ipv6-policy", "policy_rule": {"family": 6, "priority": 1000, "table": 100, "in_interface": "lan0"}},
-                {"id": "pd", "depends_on": ["internet", "lan"], "when": {"fact": "service.internet.active"}, "service": {"name": "pd", "dhcp6": {"interface": "ppp-wan", "iaid": 1, "request_prefix": True, "prefix_length": 60, "delegations": [{"name": "lan", "interface": "lan0", "subnet_id": 1, "advertise": True}]}}},
+                {"id": "pd", "depends_on": ["internet", "lan"], "when": {"fact": "service.internet.active"}, "service": {"name": "pd", "dhcp6": {"interface": "ppp-wan", "iaid": 1, "request_prefix": True, "prefix_length": 60, "delegations": [{"name": "lan", "interface": "lan0", "subnet_id": 1}]}}},
+                {"id": "pd-lan-ra", "when": {"fact": "service.pd.active"}, "service": {"name": "pd-lan-ra", "ra": {"interface": "lan0", "router_lifetime_seconds": 1800, "dns_lifetime_seconds": 1800, "min_interval_seconds": 3, "max_interval_seconds": 10, "from": {"service": "pd", "delegation": "lan"}}}},
             ]
         configuration = {"schema_version": 2, "resources": resources}
         (stage / "config.json").write_text(json.dumps(configuration))

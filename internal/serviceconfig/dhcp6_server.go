@@ -10,6 +10,7 @@ import (
 )
 
 type DHCP6Server struct {
+	LogDHCP        bool           `json:"log_dhcp,omitempty"`
 	Interface      string         `json:"interface"`
 	ServerDUID     string         `json:"server_duid,omitempty"`
 	DNSServers     []netip.Addr   `json:"dns_servers,omitempty"`
@@ -35,7 +36,7 @@ type DHCP6ServerInput struct {
 
 func (s Service) DHCP6ServerConfig(stateDir string) dhcp6serverconfig.Config {
 	c := s.DHCP6Server
-	return dhcp6serverconfig.Config{Resource: s.Name, Interface: c.Interface, StatePath: filepath.Join(stateDir, "leases", s.Name+".dhcp6-server-duid"), ServerDUID: c.ServerDUID, DNSServers: c.DNSServers, SNTPServers: c.SNTPServers, DomainSearch: c.DomainSearch, RefreshSeconds: c.RefreshSeconds}
+	return dhcp6serverconfig.Config{LogDHCP: c.LogDHCP, Resource: s.Name, Interface: c.Interface, StatePath: filepath.Join(stateDir, "leases", s.Name+".dhcp6-server-duid"), ServerDUID: c.ServerDUID, DNSServers: c.DNSServers, SNTPServers: c.SNTPServers, DomainSearch: c.DomainSearch, RefreshSeconds: c.RefreshSeconds}
 }
 
 func validateDHCP6Servers(services []Service) error {

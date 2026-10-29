@@ -252,7 +252,7 @@ func Run(ctx context.Context, runtimeDir, name, role, path, digest string, gener
 }
 
 func (c *effectsClient) watchRA(ctx context.Context, name string, updates chan ra.Config) {
-	ticker := time.NewTicker(time.Second)
+	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		select {

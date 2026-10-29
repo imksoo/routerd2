@@ -57,7 +57,7 @@ help:
 	  'make check-dhcp6-ra-pd Verify shared IA_NA/PD, RA trigger and restart with ISC DHCP' \
 	  'make check-dhcp6       Verify RA-triggered IA_NA, kernel parameters and restart with radvd/dnsmasq' \
 	  'make check-dhcp4       Verify delayed independent ACKs, lease expiry and recovery' \
-	  'make check-pd-ra       Verify PD renewal, generated RA and client traffic' \
+	  'make check-pd-ra       Verify PD renewal, delegated RA and client traffic' \
 	  'make check-bgp         Verify actual BGP FIB, reporting failure and ownership expiry' \
 	  'make check-bgp-frr     Verify real FRR BGP exchange, forwarding and restart' \
 	  'make check-aftr        Verify AFTR input identity, DNS and tunnel expiry' \

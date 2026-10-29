@@ -1,3 +1,5 @@
+2026-10-29 native-62: PD内の暗黙RAを削除し、独立した条件付きRAへ置換した。実CLI取込→ISC/keepalived/Linux端末で自動SLAAC・DNS・TCP/UDP、PDを維持した主従変更、control停止時の元期限撤回・復帰が成立した。動的DNS参照の取込と全homert受入は未完了。[成立範囲と残作業](pve-codex-handoff.md)を区別する。
+
 2026-10-29 09:47 UTC: native-61の実配布版で保存・再起動・独立端末通信と履歴の併用、同版の実HGW/Tailscale短期・全体再起動が終了0。起動時の履歴整理、Health履歴の一時配送超過、長期・全homert・SAM・実機の未受入を[引き継ぎ](pve-codex-handoff.md)で区別する。
 
 # 現行 routerd と同等の製品にするための実装計画
@@ -1087,7 +1089,7 @@ LAN serverの明示DUID試行が自動IDを上書きする問題も実通信で�
 
 2026-10-27 native-36: 旧dnsmasq servingとDUID保存を比較し、LAN stateless DHCPv6を追加した。
 静的DNS/検索ドメイン/SNTPと、明示したDHCPv6/RA clientの学習情報を別保持し、元のboot期限で配る。
-PD生成RAのOフラグは`delegations[].other_config`で明示する。
+RAは独立serviceとし、`ra.from.service/delegation`でPD割当を選択し、Oフラグは`ra.other_config`で明示する。
 BusyBoxの実Information-request/Reply、独立ISC/radvdのPD由来LAN UDP/TCP DNSとIPv6 TCP/UDP、
 control停止中の元期限失効・静的情報維持・復旧を確認した。通常DADを使い、生出力は削除する。
 実行条件と失敗した試行の範囲は[引き継ぎ](pve-codex-handoff.md)を参照する。

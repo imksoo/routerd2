@@ -165,7 +165,7 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 			name := c.healthCheck(r)
 			conditions = append(conditions, resourceCondition{id: "service/" + name, source: r, when: r.Spec.(api.HealthCheckSpec).When})
 		case "IPv6RouterAdvertisement":
-			c.reject(r, "", "unsupported_semantics", "legacy dnsmasq RA uses interface address constructors and validLifetime as router lifetime; explicit native PIO/router/DNS lifetime intent is required")
+			// Compiled with delegated LAN advertisements below.
 		case "FirewallZone", "FirewallPolicy", "FirewallRule", "NAT44Rule":
 			// Compiled together to preserve ordered zone jumps and NAT-only hooks.
 		case "EgressRoutePolicy":
@@ -186,7 +186,10 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 			c.reject(r, "", "unsupported_kind", "no native migration is implemented for this resource kind; the resource was not discarded")
 		}
 	}
-	c.dhcp6Servers()
+	servingConditions := c.routerAdvertisements(vrrpNames)
+	for id, when := range c.dhcp6Servers(vrrpNames) {
+		servingConditions[id] = when
+	}
 	c.dhcpServers()
 	c.dhcpRelays()
 	c.dns()
@@ -228,6 +231,11 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 	sort.Slice(c.document.Services, func(i, j int) bool { return c.document.Services[i].Name < c.document.Services[j].Name })
 	program := config.FromNative(c.document)
 	program.Resources = append(program.Resources, extra...)
+	for i := range program.Resources {
+		if when := servingConditions[program.Resources[i].ID]; when != nil {
+			program.Resources[i].When = when
+		}
+	}
 	for _, condition := range conditions {
 		when := c.when(condition.source, condition.when, vrrpNames)
 		if when == nil {
@@ -330,7 +338,7 @@ func (c *compiler) allow(r resource, fields ...string) {
 	for _, field := range []string{"when", "dependsOn", "ready_when"} {
 		if field == "when" {
 			switch r.Kind {
-			case "HealthCheck", "DHCPv6PrefixDelegation", "DHCPv6Information", "NTPClient":
+			case "HealthCheck", "DHCPv6PrefixDelegation", "DHCPv6Information", "NTPClient", "DHCPv6Server", "IPv6RouterAdvertisement":
 				continue
 			case "DSLiteTunnel":
 				if _, dynamic := c.options.DSLite[r.Kind+"/"+r.Metadata.Name]; dynamic {
@@ -343,7 +351,7 @@ func (c *compiler) allow(r resource, fields ...string) {
 			}
 		}
 		if field == "dependsOn" {
-			if r.Kind == "DHCPv6Information" || r.Kind == "IPv6DelegatedAddress" {
+			if r.Kind == "DHCPv6Information" || r.Kind == "IPv6DelegatedAddress" || r.Kind == "DHCPv6Server" || r.Kind == "IPv6RouterAdvertisement" {
 				continue // Checked against the allocation's PD owner.
 			}
 			if r.Kind == "DSLiteTunnel" {

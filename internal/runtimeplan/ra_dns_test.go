@@ -17,7 +17,7 @@ import (
 func TestPDLearnedDNSDeadlineAndStableRAIdentity(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
 	clock := boottime.Clock{BootID: "11111111-2222-4333-8444-555555555555", BoottimeNanoseconds: int64(time.Hour), WallTime: now}
-	doc := config.Native{Services: []serviceconfig.Service{{Name: "pd", DHCP6: &serviceconfig.DHCP6{RequestPrefix: true, Interface: "wan0", IAID: 7, Delegations: []serviceconfig.Delegation{{Name: "lan", Interface: "lan0", SubnetID: 3, Advertise: true, UseLearnedRDNSS: true, UseLearnedDNSSL: true, RDNSS: []string{"2001:db8::1"}, DNSSL: []string{"static.example"}}}}}}}
+	doc := config.Native{Services: []serviceconfig.Service{{Name: "pd", DHCP6: &serviceconfig.DHCP6{RequestPrefix: true, Interface: "wan0", IAID: 7, Delegations: []serviceconfig.Delegation{{Name: "lan", Interface: "lan0", SubnetID: 3}}}}, {Name: "pd-lan-ra", RA: &serviceconfig.RouterAdvertisement{Config: ra.Config{Interface: "lan0", RouterLifetimeSeconds: 1800, DNSSLifetimeSeconds: 1800, MinIntervalSeconds: 3, MaxIntervalSeconds: 10, RDNSS: []string{"2001:db8::1"}, DNSSL: []string{"static.example"}}, From: &serviceconfig.RADelegation{Service: "pd", Delegation: "lan", UseLearnedRDNSS: true, UseLearnedDNSSL: true}}}}}
 	protocols := protocolsFor(t, doc, "/run/routerd", "/var/lib/routerd")
 	snapshot := dhcp6config.Snapshot{BootID: clock.BootID, Resource: "pd", Interface: "wan0", IAID: 7, State: "bound", Prefixes: []dhcp6config.Prefix{{Prefix: "2001:db8:100::/56", PreferredUntil: lifetime.After(clock, 400), ValidUntil: lifetime.After(clock, 600)}}, InformationRefreshSeconds: 600, InformationRefreshAt: lifetime.After(clock, 180), InfoReceivedNanos: uint64(clock.BoottimeNanoseconds), DNSServers: []string{"2001:db8::1", "2001:db8::53", "fe80::53"}, DomainSearch: []string{"static.example", "learned.example"}}
 	projectAt := func(value dhcp6config.Snapshot, at time.Time) (ra.Config, string) {
@@ -41,7 +41,7 @@ func TestPDLearnedDNSDeadlineAndStableRAIdentity(t *testing.T) {
 				if err := json.Unmarshal(instance.Config, &template); err != nil {
 					t.Fatal(err)
 				}
-				if len(template.RDNSS)+len(template.DNSSL)+len(template.LearnedRDNSS)+len(template.LearnedDNSSL) != 0 {
+				if len(template.Prefixes)+len(template.LearnedRDNSS)+len(template.LearnedDNSSL) != 0 {
 					t.Fatal("live DNS leaked into immutable worker template")
 				}
 				return live, bound.digest
@@ -71,13 +71,13 @@ func TestPDLearnedDNSDeadlineAndStableRAIdentity(t *testing.T) {
 		}
 	}
 	check(first, snapshot.InformationRefreshAt)
-	doc.Services[0].DHCP6.Delegations[0].UseLearnedDNSSL = false
+	doc.Services[1].RA.From.UseLearnedDNSSL = false
 	protocols = protocolsFor(t, doc, "/run/routerd", "/var/lib/routerd")
 	dnsOnly, _ := projectAt(snapshot, now)
 	if len(dnsOnly.LearnedRDNSS) != 2 || len(dnsOnly.LearnedDNSSL) != 0 || len(dnsOnly.DNSSL) != 1 {
 		t.Fatal("RDNSS selection enabled unrelated learned DNSSL or removed static search", dnsOnly)
 	}
-	doc.Services[0].DHCP6.Delegations[0].UseLearnedDNSSL = true
+	doc.Services[1].RA.From.UseLearnedDNSSL = true
 	protocols = protocolsFor(t, doc, "/run/routerd", "/var/lib/routerd")
 	polled, polledIdentity := projectAt(snapshot, now.Add(50*time.Second))
 	if !reflect.DeepEqual(first, polled) || polledIdentity != identity {

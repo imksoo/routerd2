@@ -154,6 +154,10 @@ func Run(ctx context.Context, cfg dhcp6serverconfig.Config, initial dhcp6serverc
 		}
 		if _, err := packet.WriteTo(reply(r, server, data, cfg.RefreshSeconds), &ipv6.ControlMessage{IfIndex: iface.Index, Src: net.IP(source.AsSlice())}, to); err != nil {
 			slog.Warn("send DHCPv6 information", "error", err)
+			continue
+		}
+		if cfg.LogDHCP {
+			slog.Info("DHCPv6 information reply", "client", peer.IP.String(), "client_duid", hex.EncodeToString(r.client))
 		}
 	}
 }

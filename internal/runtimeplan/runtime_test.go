@@ -194,7 +194,7 @@ func TestLeaseObservationSurvivesApplyFailureAndExpiresWithoutRenewal(t *testing
 
 func TestConcurrentRenewalSurvivesConfigurationCutover(t *testing.T) {
 	doc := wanDoc()
-	doc.Services = append(doc.Services, serviceconfig.Service{Name: "lan", RA: &ra.Config{Interface: "lan0", RouterLifetimeSeconds: 1800}})
+	doc.Services = append(doc.Services, serviceconfig.Service{Name: "lan", RA: &serviceconfig.RouterAdvertisement{Config: ra.Config{Interface: "lan0", RouterLifetimeSeconds: 1800}}})
 	r, n, m := fixture(t, doc)
 	expires := time.Now().Add(time.Hour)
 	if e := r.Observe(context.Background(), update(t, r, "service.wan", 1, lease4(expires))); e != nil {
@@ -224,7 +224,7 @@ func TestConcurrentRenewalSurvivesConfigurationCutover(t *testing.T) {
 func TestPDProjectionKeepsDeprecatedAddressesAndStableRAIdentity(t *testing.T) {
 	clock := boottime.Clock{BootID: "11111111-2222-4333-8444-555555555555", BoottimeNanoseconds: int64(time.Hour), WallTime: time.Unix(1700000000, 0)}
 	now := clock.WallTime
-	doc := config.Native{Services: []serviceconfig.Service{{Name: "pd", DHCP6: &serviceconfig.DHCP6{RequestPrefix: true, Interface: "wan0", IAID: 7, Delegations: []serviceconfig.Delegation{{Name: "lan", Interface: "lan0", SubnetID: 3, Advertise: true}}}}}}
+	doc := config.Native{Services: []serviceconfig.Service{{Name: "pd", DHCP6: &serviceconfig.DHCP6{RequestPrefix: true, Interface: "wan0", IAID: 7, Delegations: []serviceconfig.Delegation{{Name: "lan", Interface: "lan0", SubnetID: 3}}}}, {Name: "pd-lan-ra", RA: &serviceconfig.RouterAdvertisement{Config: ra.Config{Interface: "lan0", RouterLifetimeSeconds: 1800, DNSSLifetimeSeconds: 1800, MinIntervalSeconds: 3, MaxIntervalSeconds: 10}, From: &serviceconfig.RADelegation{Service: "pd", Delegation: "lan"}}}}}
 	snapshot := dhcp6config.Snapshot{BootID: clock.BootID, Resource: "pd", Interface: "wan0", IAID: 7, State: "bound", Prefixes: []dhcp6config.Prefix{{Prefix: "2001:db8:100::/56", PreferredUntil: lifetime.After(clock, 100), ValidUntil: lifetime.After(clock, 200)}, {Prefix: "2001:db8:200::/56", PreferredUntil: lifetime.After(clock, 0), ValidUntil: lifetime.After(clock, 80)}}}
 	protocols := protocolsFor(t, doc, "/run/routerd", "/var/lib/routerd")
 	raw, _ := json.Marshal(snapshot)

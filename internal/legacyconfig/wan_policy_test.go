@@ -111,7 +111,7 @@ func TestWANPolicyPreservesDelegatedDSLiteSourceAndHostSuffix(t *testing.T) {
 	}
 	for _, lan := range pd.DHCP6.Delegations {
 		if lan.Name == ds.DSLite.SourceDelegation {
-			if lan.HostID != 256 || lan.SubnetID != 16 || lan.Interface != "eth1" || lan.PrefixLength != 128 || lan.Advertise {
+			if lan.HostID != 256 || lan.SubnetID != 16 || lan.Interface != "eth1" || lan.PrefixLength != 128 {
 				t.Fatal("DS-Lite source suffix changed LAN allocation or enabled extra RA", lan)
 			}
 			return

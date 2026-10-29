@@ -38,7 +38,7 @@ func TestVRRPTrackReferencesBindAllDeclarationsWithoutGatingTheVIP(t *testing.T)
 			if _, err := Compile(program); err == nil {
 				t.Fatal("missing declaration accepted")
 			}
-			program.Resources = append(program.Resources, Resource{ID: "input", Service: &serviceconfig.Service{Name: "input", RA: &ra.Config{Interface: "wan0", RouterLifetimeSeconds: 1800}}})
+			program.Resources = append(program.Resources, Resource{ID: "input", Service: &serviceconfig.Service{Name: "input", RA: &serviceconfig.RouterAdvertisement{Config: ra.Config{Interface: "wan0", RouterLifetimeSeconds: 1800}}}})
 			if _, err := Compile(program); err == nil {
 				t.Fatal("unobserved provider accepted as a health source")
 			}

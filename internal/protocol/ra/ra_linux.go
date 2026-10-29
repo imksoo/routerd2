@@ -22,6 +22,7 @@ import (
 )
 
 type Config struct {
+	ActiveUntil           lifetime.Deadline `json:"active_until,omitzero"`
 	Authority             lifetime.Deadline `json:"authority,omitzero"`
 	Resource              string            `json:"resource"`
 	Interface             string            `json:"interface"`
@@ -114,6 +115,9 @@ func normalized(c Config) Config {
 	return c
 }
 func Validate(c Config) error {
+	if err := c.ActiveUntil.Validate(); err != nil {
+		return err
+	}
 	if err := c.Authority.Validate(); err != nil {
 		return err
 	}
@@ -366,6 +370,7 @@ func RunWithUpdates(ctx context.Context, cfg Config, updates <-chan Config, effe
 		if err != nil {
 			return err
 		}
+		withdraw = withdraw || !cfg.ActiveUntil.Live(clock)
 		payload, err := encodeWithWithdrawals(cfg, pending, link.HardwareAddr, clock, withdraw)
 		if err != nil {
 			return err
@@ -430,6 +435,7 @@ func RunWithUpdates(ctx context.Context, cfg Config, updates <-chan Config, effe
 			if err != nil {
 				return err
 			}
+			wasExpired := !cfg.ActiveUntil.Live(clock)
 			next, withdrawals, changed, err := planUpdate(cfg, candidate, pending, ifi.HardwareAddr, ifi.MTU, clock)
 			if err != nil {
 				snapshot.RejectedUpdates++
@@ -439,10 +445,11 @@ func RunWithUpdates(ctx context.Context, cfg Config, updates <-chan Config, effe
 				}
 				break
 			}
+			changed = changed || wasExpired && next.ActiveUntil.Live(clock)
+			cfg, pending = next, withdrawals
 			previousError := snapshot.LastUpdateError
 			snapshot.LastUpdateError = ""
 			if changed {
-				cfg, pending = next, withdrawals
 				snapshot.Generation++
 				snapshot.LastConfigUpdate = time.Now().UTC()
 				nextChanged = lastSentAt.Add(3 * time.Second)
@@ -456,6 +463,17 @@ func RunWithUpdates(ctx context.Context, cfg Config, updates <-chan Config, effe
 				}
 			}
 		default:
+		}
+		if cfg.ActiveUntil != (lifetime.Deadline{}) && !snapshot.Withdrawing {
+			clock, err := boottime.Read()
+			if err != nil {
+				return err
+			}
+			if !cfg.ActiveUntil.Live(clock) {
+				if err := send(ctx, true); err != nil {
+					return err
+				}
+			}
 		}
 		now := time.Now()
 		if !now.Before(nextPeriodic) || !nextSolicited.IsZero() && !now.Before(nextSolicited) || !nextChanged.IsZero() && !now.Before(nextChanged) {

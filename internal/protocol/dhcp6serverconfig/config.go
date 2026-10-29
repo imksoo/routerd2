@@ -12,6 +12,7 @@ import (
 )
 
 type Config struct {
+	LogDHCP        bool         `json:"log_dhcp,omitempty"`
 	Resource       string       `json:"resource"`
 	Interface      string       `json:"interface"`
 	StatePath      string       `json:"state_path"`

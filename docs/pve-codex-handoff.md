@@ -5,6 +5,35 @@
 [試験計画](test-plan.md)、[機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
+## 条件付きLAN配布（2026-10-29、native-62）
+
+RAをPD内の暗黙生成から独立serviceへ変更した。`ra.from.service/delegation`で選択し、
+RA自身のwhenと配布設定を持つ。旧prototypeのnested advertise形式は削除した。
+旧routerdのchain/dnsmasq描画と現homert設定を参照し、明示RAのM/O・MTU・優先度・寿命・
+PD由来RDNSSとDNSZone由来DNSSL、stateless DHCPv6の独立when/Applied依存・logDHCPを取込へ接続した。
+明示RAがない旧DHCPv6Serverの暗黙RAは、取込境界で一つの明示serviceへ変換する。
+
+実Linux名前空間の製品supervisor/control/network/workerと独立ISC4.4.3-P1・keepalived2.2.8・
+Linux SLAAC/BusyBox/digで、実CLI取込から自動SLAAC/default/DNS、UDP/TCP DNS、IPv6 TCP/UDP、
+主従変更時のRA/DHCPv6停止と復帰が成立した。主従変更中もPDはboundを維持した。
+任意名のRA消費者を実際の参照で撤回し、旧生成名を推測しない。
+`active_until`は元の配布許可期限であり、PD/パケット寿命とは別に保持する。
+7200秒の設定に対し線上の正のrouter lifetimeが1秒より長いこと、controlだけのSIGSTOPで
+2秒以内のゼロRA、停止1秒以降の正のRAなし、SIGCONT後の端末通信復旧を確認した。
+これは通常DADを使う隔離試験であり、homert本番全体・ONU直結・対象NICの受入ではない。
+
+`make check-dhcp6-ra-pd`は既存PD/IA_NA/RA/DUID/期限試験と新しい取込試験の両方が終了0。
+最後の線上寿命の判定を含む絞った再実行も終了0。WAN/LAN captureを確認した。
+同版の`make check-ha-pd`も署名二台PID 1・独立ISC/Linux端末で終了0。
+同じTCP、双方向PD/lease/conntrack引継ぎ、元期限と復旧が成立し、UDP損失7、最長応答3.504秒だった。
+`make check`（Go/Python・全Race Detector・vet）と関連7packageのRace検査、
+Linux amd64/arm64のCGO_ENABLED=0製品buildも終了0。ARM実行は未検証。
+
+未接続: 実homert DNSのInterface/IPv6DelegatedAddress由来待受、learned upstream/bootstrapの旧参照取込。
+今回の取込試験は静的DNS待受であり、試験側でDNSを後付けしてその不足を合格へ置き換えない。
+ルートmainの`d5e87bd-hgw-native61`は変更から分離して7800秒の実HGW/Tailscale観測を継続中。
+自然PD更新・新版native-62の実HGW受入とは区別する。
+
 ## 現在の成立範囲と残作業（2026-10-29 09:47 UTC）
 
 最新作業版は`authority-history-native61`（worker ABI5、network journal15）。

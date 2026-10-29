@@ -176,14 +176,15 @@ def peer(stage, dhcp6_server, pd_dslite, stale_owner, preparation, delegated_dns
                     {"id": "wan-linklocal", "when": {"fact": "service.ha.elected"}, "address": {"interface": "wan-ha", "cidr": "fe80::1/64"}},
                     {"id": "wan6-route", "when": {"fact": "service.ha.elected"}, "route": {"destination": "2001:db8:ffff::/64", "interface": "wan-ha", "gateway": "fe80::2"}},
                     {"id": "pd", "service": {"name": "pd", "dhcp6": {"interface": "wan-ha", "request_prefix": True, "prefix_length": 60, "client_duid": "0003000102005e000143", "iaid": 7,
-                        "ha": {"owner": "ha", "replication": pd_peer}, "delegations": [{"name": "lan", "interface": "lan0", "subnet_id": 1, "advertise": True, "other_config": True, "router_lifetime_seconds": 10}]}}}
+                        "ha": {"owner": "ha", "replication": pd_peer}, "delegations": [{"name": "lan", "interface": "lan0", "subnet_id": 1}]}}},
+                    {"id": "pd-lan-ra", "when": {"fact": "service.ha.active"}, "service": {"name": "pd-lan-ra", "ra": {"interface": "lan0", "other_config": True, "router_lifetime_seconds": 10, "dns_lifetime_seconds": 1800, "min_interval_seconds": 3, "max_interval_seconds": 10, "from": {"service": "pd", "delegation": "lan"}}}}
                 ]
                 resources.append({"id": "lan-info", "when": {"fact": "service.ha.active"}, "service": {"name": "lan-info", "dhcp6_server": {
                     "interface": "lan0", "server_duid": "000400112233445546778899aabbccddeeff", "dns_from": ["pd"], "search_from": ["pd"], "domain_search": ["local.test"], "refresh_seconds": 600
                 }}})
                 if delegated_dns:
                     pd = next(r["service"]["dhcp6"] for r in resources if r["id"] == "pd")
-                    pd["delegations"][0]["rdnss_router"] = True
+                    next(r["service"]["ra"] for r in resources if r["id"] == "pd-lan-ra")["from"]["rdnss_router"] = True
                     info = resources[-1]["service"]["dhcp6_server"]
                     info.pop("dns_from")
                     info["dns_delegation"] = {"service": "pd", "delegation": "lan"}

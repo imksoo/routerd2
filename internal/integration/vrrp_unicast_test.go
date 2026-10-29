@@ -217,7 +217,7 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 				resourceprogram.Resource{ID: "wan-linklocal", Address: &resourceprogram.Address{Interface: "wan-ha", CIDR: vrrpWANLL + "/64", Options: &network.AddressOptions{NoDAD: true}}},
 			)
 		}
-		program.Resources = append(program.Resources, resourceprogram.Resource{ID: "wan-ra", When: &resourceprogram.FactCondition{Fact: haName + ".active"}, Service: &serviceconfig.Service{Name: "wan-ra", RA: &ra.Config{Interface: "wan-ha", SourceAddress: vrrpWANLL, MinIntervalSeconds: 3, MaxIntervalSeconds: 4, RouterLifetimeSeconds: 12}}})
+		program.Resources = append(program.Resources, resourceprogram.Resource{ID: "wan-ra", When: &resourceprogram.FactCondition{Fact: haName + ".active"}, Service: &serviceconfig.Service{Name: "wan-ra", RA: &serviceconfig.RouterAdvertisement{Config: ra.Config{Interface: "wan-ha", SourceAddress: vrrpWANLL, MinIntervalSeconds: 3, MaxIntervalSeconds: 4, RouterLifetimeSeconds: 12}}}})
 		if spec.migrate {
 			pdPeer = startVRRPPDPeer(t, wan.client)
 			if err := pdPeer.Process.Signal(syscall.SIGSTOP); err != nil {

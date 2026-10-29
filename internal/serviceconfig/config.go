@@ -43,7 +43,7 @@ type Service struct {
 	Name        string                  `json:"name"`
 	DHCP4       *DHCP4                  `json:"dhcp4,omitempty"`
 	DHCP6       *DHCP6                  `json:"dhcp6,omitempty"`
-	RA          *ra.Config              `json:"ra,omitempty"`
+	RA          *RouterAdvertisement    `json:"ra,omitempty"`
 	DNS         *DNS                    `json:"dns,omitempty"`
 	VRRP        *vrrp.Config            `json:"vrrp,omitempty"`
 }
@@ -89,21 +89,12 @@ type DHCP6 struct {
 // bits between the delegated prefix length and bit 64; HostID defaults to 1.
 // PrefixLength selects the installed address mask: zero/64 for a LAN, 128 for
 // a host endpoint without an additional connected /64 route.
-// Advertisements use absolute lease deadlines, including deprecated prefixes.
 type Delegation struct {
-	Name                  string   `json:"name"`
-	Interface             string   `json:"interface"`
-	SubnetID              uint64   `json:"subnet_id,omitempty"`
-	HostID                uint64   `json:"host_id,omitempty"`
-	PrefixLength          int      `json:"prefix_length,omitempty"`
-	Advertise             bool     `json:"advertise,omitempty"`
-	OtherConfig           bool     `json:"other_config,omitempty"`
-	RouterLifetimeSeconds *int     `json:"router_lifetime_seconds,omitempty"`
-	RDNSS                 []string `json:"rdnss,omitempty"`
-	RDNSSRouter           bool     `json:"rdnss_router,omitempty"`
-	DNSSL                 []string `json:"dnssl,omitempty"`
-	UseLearnedRDNSS       bool     `json:"use_learned_rdnss,omitempty"`
-	UseLearnedDNSSL       bool     `json:"use_learned_dnssl,omitempty"`
+	Name         string `json:"name"`
+	Interface    string `json:"interface"`
+	SubnetID     uint64 `json:"subnet_id,omitempty"`
+	HostID       uint64 `json:"host_id,omitempty"`
+	PrefixLength int    `json:"prefix_length,omitempty"`
 }
 
 // Instance is the immutable private configuration received by a child. Its
@@ -216,14 +207,12 @@ func (s Service) Interface() string {
 }
 
 func Validate(services []Service) error {
-	if len(services) > 64 {
-		return errors.New("at most 64 configured services are supported")
+	if len(services) > 128 {
+		return errors.New("at most 128 configured services are supported")
 	}
 	names := map[string]bool{}
 	sockets := map[string]string{}
 	dhcpListeners := map[string]string{}
-	count := len(services)
-	generatedNames := map[string]string{}
 	for _, s := range services {
 		if !safeName.MatchString(s.Name) || names[s.Name] {
 			return fmt.Errorf("invalid or duplicate service name %q (lowercase letters, digits and hyphens; max 24)", s.Name)
@@ -400,37 +389,12 @@ func Validate(services []Service) error {
 					return fmt.Errorf("service %s has invalid/duplicate delegation name or invalid interface", s.Name)
 				}
 				lanNames[lan.Name] = true
-				if lan.PrefixLength != 0 && lan.PrefixLength != 64 && lan.PrefixLength != 128 || lan.PrefixLength == 128 && lan.Advertise {
-					return errors.New("delegation prefix_length must be 64 or 128; a host endpoint cannot advertise a LAN prefix")
-				}
-				if lan.RDNSSRouter && !lan.Advertise {
-					return errors.New("delegated router DNS requires an advertised LAN prefix")
-				}
-				if lan.RouterLifetimeSeconds != nil && (*lan.RouterLifetimeSeconds < 0 || *lan.RouterLifetimeSeconds > 9000 || (*lan.RouterLifetimeSeconds > 0 && *lan.RouterLifetimeSeconds < 10)) {
-					return errors.New("delegated RA lifetime must be zero or 10..9000 seconds")
-				}
-				for _, addr := range lan.RDNSS {
-					a, e := netip.ParseAddr(addr)
-					if e != nil || !a.Is6() || a.Is4In6() || a.IsUnspecified() || a.IsMulticast() {
-						return fmt.Errorf("invalid delegated RDNSS %q", addr)
-					}
-				}
-				if lan.Advertise {
-					count++
-					generated := s.Name + "-" + lan.Name + "-ra"
-					if previous, ok := generatedNames[generated]; ok {
-						return fmt.Errorf("delegations %s and %s/%s generate the same service %s", previous, s.Name, lan.Name, generated)
-					}
-					generatedNames[generated] = s.Name + "/" + lan.Name
-					key := "ra:" + lan.Interface
-					if other, ok := sockets[key]; ok {
-						return fmt.Errorf("delegation on %s competes with %s", lan.Interface, other)
-					}
-					sockets[key] = s.Name + "/" + lan.Name
+				if lan.PrefixLength != 0 && lan.PrefixLength != 64 && lan.PrefixLength != 128 {
+					return errors.New("delegation prefix_length must be 64 or 128")
 				}
 			}
 		case "ra":
-			c := *s.RA
+			c := s.RA.Config
 			if c.Resource != "" && c.Resource != s.Name {
 				return errors.New("ra.resource is managed by the service name")
 			}
@@ -440,13 +404,8 @@ func Validate(services []Service) error {
 			}
 		}
 	}
-	for generated, owner := range generatedNames {
-		if names[generated] {
-			return fmt.Errorf("delegation %s generates service %s which is already configured", owner, generated)
-		}
-	}
-	if count > 128 {
-		return errors.New("services plus delegated RA instances exceed 128")
+	if err := validateAdvertisementSources(services); err != nil {
+		return err
 	}
 	for _, service := range services {
 		if service.NTP == nil {
@@ -543,7 +502,7 @@ func (s Service) Instance(runtimeDir, stateDir string) (Instance, error) {
 	case "dhcp6":
 		b, err = json.Marshal(s.DHCP6Config(stateDir))
 	case "ra":
-		v := *s.RA
+		v := s.RA.Config
 		v.Resource = s.Name
 		b, err = json.Marshal(v)
 	case "dns":
@@ -553,7 +512,7 @@ func (s Service) Instance(runtimeDir, stateDir string) (Instance, error) {
 	default:
 		return Instance{}, errors.New("unsupported service")
 	}
-	instance := Instance{Name: s.ModuleName(), Role: s.Role(), Config: b}
+	instance := Instance{Name: s.ModuleName(), Role: s.Role(), Config: b, DynamicRA: s.RA != nil && s.RA.From != nil}
 	if s.Health != nil {
 		instance.EventDirectory = HealthEventDirectory(stateDir, s.Name)
 	}

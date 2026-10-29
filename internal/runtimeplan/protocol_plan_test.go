@@ -1,5 +1,7 @@
 package runtimeplan
 
+import "github.com/imksoo/routerd2/internal/protocol/ra"
+
 import (
 	"crypto/sha256"
 	"encoding/hex"
@@ -22,12 +24,12 @@ import (
 
 func TestPreparedWorkerFilesMatchSupervisorIdentities(t *testing.T) {
 	doc := config.Native{Services: []serviceconfig.Service{
-		{Name: "pd", DHCP6: &serviceconfig.DHCP6{RequestPrefix: true, Interface: "wan0", IAID: 7, ClientDUID: "00030001020000000042", Delegations: []serviceconfig.Delegation{{Name: "lan", Interface: "lan0", Advertise: true}}, HA: &serviceconfig.LeaseHA{Owner: "ha", Replication: peertls.Config{
+		{Name: "pd", DHCP6: &serviceconfig.DHCP6{RequestPrefix: true, Interface: "wan0", IAID: 7, ClientDUID: "00030001020000000042", Delegations: []serviceconfig.Delegation{{Name: "lan", Interface: "lan0"}}, HA: &serviceconfig.LeaseHA{Owner: "ha", Replication: peertls.Config{
 			ListenAddress: netip.MustParseAddrPort("192.0.2.2:8444"), PeerAddress: netip.MustParseAddrPort("192.0.2.3:8444"),
 			CertificateFile: "/keys/local.crt", PrivateKeyFile: "/keys/local.key", PeerCertificateFile: "/keys/peer.crt",
 		}}}},
 		{Name: "ha", VRRP: &vrrp.Config{Interface: "lan0", Family: "ipv4", SourceAddress: "192.0.2.2", VirtualRouterID: 42, Addresses: []string{"192.0.2.1/24"}}},
-		{Name: "edge", BGP: &serviceconfig.BGP{Runtime: bgpconfig.AppliedConfig{Global: bgpconfig.AppliedGlobal{ASN: 64512, RouterID: "192.0.2.1", ListenPort: -1}}}},
+		{Name: "edge", BGP: &serviceconfig.BGP{Runtime: bgpconfig.AppliedConfig{Global: bgpconfig.AppliedGlobal{ASN: 64512, RouterID: "192.0.2.1", ListenPort: -1}}}}, {Name: "pd-lan-ra", RA: &serviceconfig.RouterAdvertisement{Config: ra.Config{Interface: "lan0", RouterLifetimeSeconds: 1800, DNSSLifetimeSeconds: 1800, MinIntervalSeconds: 3, MaxIntervalSeconds: 10}, From: &serviceconfig.RADelegation{Service: "pd", Delegation: "lan"}}},
 	}}
 	runtimeDir, stateDir := t.TempDir(), t.TempDir()
 	plan := protocolsFor(t, doc, runtimeDir, stateDir)

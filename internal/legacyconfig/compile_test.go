@@ -136,7 +136,7 @@ func TestWANIdentityRoutesAndHexadecimalDelegation(t *testing.T) {
 		t.Fatal("PD identity/defaults or delegation relationship changed")
 	}
 	lan := v6.Delegations[0]
-	if lan.SubnetID != 16 || lan.HostID != 0x1234 || lan.Interface != "eth1" || lan.Advertise {
+	if lan.SubnetID != 16 || lan.HostID != 0x1234 || lan.Interface != "eth1" {
 		t.Fatal("legacy hexadecimal subnetID, host ID or announcement policy changed")
 	}
 	data := strings.Replace(string(fixture(t, "wan")), "prefixLength: 56", "prefixLength: 60", 1)
@@ -241,7 +241,6 @@ func TestRefusalNeverReturnsPartialIntentOrSecrets(t *testing.T) {
 		{"status", "    - apiVersion: net.routerd.net/v1alpha1\n      kind: Interface\n      metadata: {name: wan}\n      spec: {ifname: eth0, managed: false}\n      status: {privateKey: " + secret + "}\n", "status", "observed_state"},
 		{"scalar-secret", "    - apiVersion: net.routerd.net/v1alpha1\n      kind: Interface\n      metadata: {name: wan}\n      spec: {ifname: eth0, managed: true, mtu: " + secret + "}\n", "mtu", "yaml_type"},
 		{"legacy-default-useDNS", "    - apiVersion: net.routerd.net/v1alpha1\n      kind: DHCPv4Client\n      metadata: {name: wan}\n      spec: {interface: eth0}\n", "useDNS", "unsupported_semantics"},
-		{"unsupported-ra-lifetimes", "    - apiVersion: net.routerd.net/v1alpha1\n      kind: IPv6RouterAdvertisement\n      metadata: {name: lan}\n      spec: {interface: eth0, prefix: '2001:db8::/64', validLifetime: 1800}\n", "spec", "unsupported_semantics"},
 		{"wrong-version", "    - apiVersion: future.routerd.net/v9\n      kind: Interface\n      metadata: {name: wan}\n      spec: {ifname: eth0}\n", "resources[0]", "unsupported_kind"},
 	}
 	for _, tc := range cases {
