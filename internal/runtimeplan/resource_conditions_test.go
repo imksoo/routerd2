@@ -215,12 +215,14 @@ func TestConditionalFactExpiryReplayAndRevisionFence(t *testing.T) {
 	if !conditionalRoute(n) {
 		t.Fatal("fresh lease did not recover")
 	}
-	if err := r.ApplyConfig(ctx, 2, conditionSource()); err != nil {
+	replacement := conditionSource()
+	replacement.Resources[0].Service.DHCP4.Interface = "wan1"
+	if err := r.ApplyConfig(ctx, 2, replacement); err != nil {
 		t.Fatal(err)
 	}
 	reconcileConditions(t, r)
 	if conditionalRoute(n) {
-		t.Fatal("previous operator revision authorized route")
+		t.Fatal("replaced DHCP producer retained its old route")
 	}
 }
 
@@ -342,7 +344,7 @@ func TestConditionalChangedFactDuringStopRestartsQuiescedWorker(t *testing.T) {
 	}
 }
 
-func TestConditionalSourceDigestCutoverRevokesSameRevisionFacts(t *testing.T) {
+func TestConditionalUnchangedProducerSurvivesSourceDigestCutover(t *testing.T) {
 	ctx := context.Background()
 	r, n, _ := conditionalFixture(t)
 	if err := r.Observe(ctx, update(t, r, "service.wan", 1, lease4(time.Now().Add(time.Hour)))); err != nil {
@@ -358,14 +360,14 @@ func TestConditionalSourceDigestCutoverRevokesSameRevisionFacts(t *testing.T) {
 		t.Fatal(err)
 	}
 	reconcileConditions(t, r)
-	if conditionalRoute(n) {
-		t.Fatal("source digest cutover reused old fact")
+	if !conditionalRoute(n) {
+		t.Fatal("unrelated MTU change discarded the current DHCP lease")
 	}
 }
 
 func (r *Runtime) refreshGuardStatus(ctx context.Context) {
-	status, observed, err := r.supervisorStatus(ctx)
+	status, err := r.manager.Status(ctx)
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.installGuardStatusLocked(status, observed, err)
+	r.installGuardStatusLocked(status, err)
 }

@@ -13,7 +13,7 @@ Every command requires explicit `--root`, `--trust-file` and
 | --- | --- | --- |
 | `stage` | `--file /absolute/path/release.tar` | Verify and install the signed runtime. This is the store creation entry. |
 | `verify` | `--digest SHA256` | Re-verify a previously installed runtime and return its reference. |
-| `status` | None | Return verified selection and attempt state. |
+| `status` | None | Authenticate the journal and return selection/attempt state; payload inspection is a separate `verify` operation. |
 | `initialize` | `--digest SHA256` | Register an installer-approved baseline, only in an empty store. |
 | `prepare` | `--digest SHA256 --expected-generation N [--max-attempts 1..5]` | Queue a strictly newer publisher sequence for the next boot. |
 | `cancel` | `--expected-generation N` | Cancel a pending release that has not started a boot trial. |

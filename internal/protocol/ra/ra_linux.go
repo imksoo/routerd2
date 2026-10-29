@@ -367,6 +367,7 @@ func RunWithUpdates(ctx context.Context, cfg Config, updates <-chan Config, effe
 	var lastSentNanos uint64
 	destination := &unix.SockaddrInet6{ZoneId: uint32(ifi.Index)}
 	copy(destination.Addr[:], net.ParseIP("ff02::1").To16())
+	var nextPeriodic time.Time
 	send := func(updateCtx context.Context, withdraw bool) error {
 		// A bridge can select a different MAC when ports join or leave. Do
 		// not advertise the constructor's obsolete neighbor-cache address.
@@ -393,6 +394,15 @@ func RunWithUpdates(ctx context.Context, cfg Config, updates <-chan Config, effe
 		snapshot.Sent++
 		snapshot.SentGeneration = snapshot.Generation
 		lastSentAt = time.Now()
+		minimum := time.Duration(cfg.MinIntervalSeconds) * time.Second
+		maximum := time.Duration(cfg.MaxIntervalSeconds) * time.Second
+		if snapshot.Sent < 3 {
+			minimum, maximum = 3*time.Second, min(maximum, 16*time.Second)
+		}
+		// A renewed short PD must reach clients before the previous advertised
+		// budget runs out. Schedule from the packet, before reporting its status.
+		maximum = min(maximum, max(3*time.Second, cfg.Authority.Remaining(clock)/3))
+		nextPeriodic = lastSentAt.Add(jitter(min(minimum, maximum), maximum))
 		snapshot.LastSent = lastSentAt.UTC()
 		snapshot.Withdrawing = withdraw
 		snapshot.WithdrawingPrefixes = pending.prefixNames()
@@ -422,11 +432,6 @@ func RunWithUpdates(ctx context.Context, cfg Config, updates <-chan Config, effe
 	if ready != nil {
 		ready()
 	}
-	initialMax := time.Duration(cfg.MaxIntervalSeconds) * time.Second
-	if initialMax > 16*time.Second {
-		initialMax = 16 * time.Second
-	}
-	nextPeriodic := time.Now().Add(jitter(3*time.Second, initialMax))
 	var nextSolicited time.Time
 	var nextChanged time.Time
 	payload := make([]byte, 2048)
@@ -508,11 +513,6 @@ func RunWithUpdates(ctx context.Context, cfg Config, updates <-chan Config, effe
 			if pending.any() {
 				nextChanged = lastSentAt.Add(3 * time.Second)
 			}
-			interval := jitter(time.Duration(cfg.MinIntervalSeconds)*time.Second, time.Duration(cfg.MaxIntervalSeconds)*time.Second)
-			if snapshot.Sent < 3 && interval > 16*time.Second {
-				interval = 16 * time.Second
-			}
-			nextPeriodic = time.Now().Add(interval)
 		}
 		poll := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
 		wake := nextPeriodic

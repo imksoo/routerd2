@@ -1,4 +1,4 @@
-2026-10-30 JST original-egress-native76: 旧設定のVIPプレフィックスを保持し、大きいnft transactionの実サイズに送信bufferを合わせた。実4 AFTR・署名PID1二台ではHealth正常でも経路を1秒の監視照会期限で失う問題を修正。主系停止、同じTCP/UDPと新規IPv4/IPv6/DNS、旧主系の待機復帰・PD/DHCP再同期を完走し、UDP損失0、TCP最長5.41秒。Linux/ISCの隔離構成であり全homert/実二回線の受入ではない。03:56の旧自然観測は05:05に寿命0 RA/IPv6経路喪失で失敗。05:27の別候補・実HGW観測は継続中、実貸出T1は07:27:21 JST。全34項目は未完了。[現在の結果と残作業](pve-codex-handoff.md)。
+2026-10-30 JST journal-read-native76候補: 共通観測再送を削除し、アーカイブ検証と状態照会の排他を分離した。18秒PDの実Alpineで署名転送から145.81秒の準備完了まで管理照会・取得DNS・両IP TCP/UDPが通過。全make check・関連Race・vet・両architecture build・署名検査は終了0。新版採用/採用後復旧と全34項目・期限達成は未完了。実HGW自然観測は07:07 JST開始の別診断版で継続。[現在の結果と残作業](pve-codex-handoff.md)。
 
 # 現行 routerd と同等の製品にするための実装計画
 

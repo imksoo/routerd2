@@ -221,7 +221,7 @@ func (g *gateReader) Read([]byte) (int, error) {
 	return 0, io.EOF
 }
 
-func TestConcurrentAndClosedStoreRefuseWithoutWaiting(t *testing.T) {
+func TestStagingAllowsStatusButExcludesSelectionWritesAndClose(t *testing.T) {
 	store := newTestStore(t)
 	other, err := Open(store.options)
 	if err != nil {
@@ -232,11 +232,14 @@ func TestConcurrentAndClosedStoreRefuseWithoutWaiting(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { _, err := store.Stage(context.Background(), reader); done <- err }()
 	<-reader.started
-	if _, err := store.Status(context.Background()); !errors.Is(err, ErrBusy) {
-		t.Fatalf("same store not busy: %v", err)
-	}
-	if _, err := other.Status(context.Background()); !errors.Is(err, ErrBusy) {
-		t.Fatalf("independent flock not busy: %v", err)
+	for _, readerStore := range []*Store{store, other} {
+		state, err := readerStore.Status(context.Background())
+		if err != nil || state.Generation != 0 {
+			t.Fatalf("selection unavailable during archive receive: %+v, %v", state, err)
+		}
+		if err := readerStore.WithState(context.Background(), func(State) error { return nil }); !errors.Is(err, ErrBusy) {
+			t.Fatalf("selection write was not excluded: %v", err)
+		}
 	}
 	if err := store.Close(); !errors.Is(err, ErrBusy) {
 		t.Fatalf("concurrent close: %v", err)

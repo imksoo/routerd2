@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/imksoo/routerd2/internal/events"
 	"github.com/imksoo/routerd2/internal/localapi"
@@ -20,9 +19,6 @@ func TestProtocolSenderRequiresAnExplicitMatchingDurableACK(t *testing.T) {
 	c := &effectsClient{identity: serviceconfig.Update{SupervisorInstance: strings.Repeat("a", 32), Name: "service.wan", Role: "health", ConfigDigest: strings.Repeat("b", 64), Generation: 7, ProducerEpoch: strings.Repeat("c", 32), Sequence: 99}, client: &localapi.Client{HTTP: &http.Client{Transport: bfdRoundTripFunc(func(r *http.Request) (*http.Response, error) {
 		if r.Method != "POST" || r.URL.Path != "/v1/protocol-events" {
 			t.Fatal(r.Method, r.URL)
-		}
-		if d, ok := r.Context().Deadline(); !ok || time.Until(d) > 1100*time.Millisecond {
-			t.Fatal("unbounded relay request")
 		}
 		var batch protocolevents.Batch
 		if err := json.NewDecoder(r.Body).Decode(&batch); err != nil {

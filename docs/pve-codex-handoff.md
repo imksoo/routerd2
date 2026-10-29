@@ -5,36 +5,55 @@
 [試験計画](test-plan.md)、[機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
-## 現在の候補版: original-egress-native76（2026-10-30 JST）
+## 現在の候補版: journal-read-native76（2026-10-30 JST）
 
-契約76/journal18/worker ABI5。旧routerdのVRRP設定で有効なIPv4 /24・IPv6 /64等を拒否していた
-host-prefix限定を削除し、入力のプレフィックスを保持する。Go VRRPの選出・広告処理は外部化していない。
-DHCPv4 engineはdnsmasq、接続状態同期/NTP/PPPoE/Tailscaleにはconntrackd/chronyd/pppd/tailscaledが残り、
-少数Goバイナリーによる外部依存削減の当初目標は未達。PID1運用・kernel writerの統一だけで完成とはしない。
+main/originは`984b4c6`。その後の未コミット候補は契約76/journal18/worker ABI5。
+VRRP/DNS/DoH/DHCPv6/RAはGo実装。dnsmasq/conntrackd/chronyd/pppd/tailscaledは残り、
+少数Goバイナリーによる外部依存削減は未達。PID1運用・kernel writer統一だけで製品完成とはしない。
 
-実4 AFTRと共通WAN/LAN VMACを持つ署名PID1二台で、大きいnft transactionが既定の送信bufferを越え、
-`sendmsg: message too long`となった。既存netlink接続の送信bufferを実際の整列済みbatch byte数へ設定し、
-一つの原子的datagramを維持する。受信側の不要なEcho/成功ACK削減とは別の修正で、sysctl変更・分割・再試行は加えない。
-旧主系復帰時のIPv6経路には旧設定の共通LAN VMAC/リンクローカルアドレスが必要であり、実設定から取り込んだ。
-物理ポートを試験側で先にUPにして作った競合RA経路や、DNS worker指定漏れは試験側の誤りとして解消した。
+実Alpineで設定再適用後に`supervisor status validity expired`となった。
+照会開始から1秒の独自期限を破棄し、supervisorが所有する起動期限/heartbeat期限と観測時刻を渡す。
+元期限・世代照合は維持し、照会や待ち時間で更新しない。変更のないproducerの保持済み観測も元期限のまま引き継ぐ。
+Health履歴は既存HTTP clientの20秒制限に重ねていた送受信各1秒の制限を除いた。durable ACKと再送IDは維持する。
+5 WANは120→80→60・60秒復帰抑制・confirmed rollback後の復帰、元選出期限・writer交換と同じTCP/UDPまで85.01秒で終了0。
+署名PID1二台/独立ISC/4 Linux AFTRは旧主系の待機復帰、同じTCP/UDP変換、取得DNSと新規IPv4/IPv6、
+PD/DHCP再同期まで終了0。UDP損失0、TCP最長応答5.83秒。一つのTCP sequence spaceと実IPv4-in-IPv6を採取した。
+これは共通LAN VMAC/LL・通常DAD・独立UDP DNS・同一kernelの隔離構成で、実二回線/全homert/DoH HA/対象物理機器ではない。
 
-続く新規IPv4確認では、Health正常なのに実PBR経路/振り分け先が失効していた。
-AFTRとHealth/DHCPv4/BGPのfactをsupervisor照会の1秒期限で短縮する処理を除き、元の観測期限を渡す。
-実世代照合・元期限切れ・ネットワーク適用ACKは残す。単に待ち時間を延ばした修正ではない。
-署名PID1二台、独立ISC/4本のLinux AFTR/BusyBox/実kernel/captureで、主系停止から同じTCP接続・UDP変換を保持し、
-新規IPv4、IPv6、取得DNSのUDP/TCP応答、旧主系の待機復帰、PD/DHCP再同期を完走した。
-元期限のUTC/BOOTTIME表現を含む最終候補でも同経路が再度終了0。UDP損失0、TCP最長応答5.41秒。captureは一つのTCP sequence spaceと実IPv4-in-IPv6を確認した。
-上流DNSは独立UDP peer、同一kernelの隔離構成。実HGW二台/IX2215/全109設定/DoHを合わせたHA、異なる起動時計、
-対象物理機器と全34項目の受入とは分ける。VIP /24と公開状態を待つ5 WAN試験は84.61秒で終了0だったが、
-この期限修正より前の候補だった。最終候補の同試験も85.86秒で終了0。
+実Alpine3.24.3/kernel6.18.59、512MiB/2 vCPU/TCGの署名選択PID1で、再適用12.84秒後の準備完了、
+自動取得DNS/両IP TCP/UDP、SSH転送中断後の通信と選択維持、128205312 byteの署名転送まで成立した。
+転送中に独立端末の取得resolverで両IP TCP/UDPを20巡確認し、別の読取ではHealth世代2・履歴欠落0/エラーなしだった。
+ただし`update prepare`中にIPv6 TCPが失敗。RAの有効9秒に対し次送信は約9.25秒後となり、
+端末がアドレスを削除・再DADし、リンクローカル送信元に対してrouterがbeyond-scopeを返した。上流はPDを更新していた。
+無停止の再適用、更新準備中の継続、更新採用・不良採用後の自動復旧は未受入。
 
-03:56:16 JSTに開始した旧候補の自然PD観測は、05:05:11.755の寿命0 RA、05:05:12頃のIPv6既定経路喪失を伴い失敗した。
-T1到達前であり、旧05:56/06:07予定は無効。最新修正でこの旧障害を解消したとの判定はまだしていない。
-05:27:15開始の4出口・実HGW自然観測は継続中。実貸出のT1は07:27:21 JST。
-これは元観測期限修正より前に起動した別のバイナリーで、途中差し替えや中断はしていない。
-私有logは`/tmp/routerd-four-sized-batch-native76-natural.log`、identityは`~/.local/state/routerd2-homert-four`。
-同じWAN MAC/DUIDを重複使用しない。最終候補のfmt/vet・CGO0両architecture・署名六ELFは終了0。Alpine3.24.3/kernel6.18.59のイメージ生成も終了0。
-署名更新/採用後失敗復旧は実行中で未受入。実HGW長期の版とは区別する。
+RAの次回予定は実送信時刻で決定し、状態応答待ちを加算しない。元PD残時間の1/3と3秒の最小間隔で上限を決める。
+この修正後も更新準備中にIPv6 UDP断が再発した。LANでは元予算が6→3→0秒となり、約4.5秒後に9秒へ復帰した。
+上流はその間も18秒の更新Replyを返していた。間隔修正だけで解消とはしない。
+診断で同じPDの期限193357590129に対し、Reply 06:55:56.776→保存56.983→control受理58.522→
+network適用/liveRA公開06:56:03.413→RA受信04.751→送信06.787となり、18秒の予算を約10秒消費した。
+同一観測の1秒ごとの共通再送を削除した。native engineが初期/更新状態を送信し、元期限と停止適用ACKは維持する。
+同版は独立ISC/Keepalived/dhcpcdの実daemonで短いcontrol停止・元期限撤回・復帰を72.48秒で通過した。
+ただし同版の更新試験はSSH転送中断直後の`update status`が503となり停止した。準備中の照会とは別で、
+この503の後、アーカイブ検証と状態照会が同じ排他を使う原因を修正した。
+`Status`は現在のjournalと参照を読み、journalの公開/整理とだけファイルロックを共有する。
+設定/採用の書き込み排他と実行ファイルの検証は維持する。一時計測ログはGoから削除した。
+生存期限や試験待ち時間を追加していない。`journal-read-native76`は同じ18秒PD/通常DADで、
+転送中断後の照会/通信、128209408 byteの完全転送と145.81秒の`update prepare`まで管理照会・取得DNS・
+両IP TCP/UDPを維持し通過した。転送164.19秒、保存/検証120.88秒。別の同じ独立端末観測も30巡/45.63秒で通過。
+新版起動/正常採用と採用後障害の自動復旧は実行中で未受入。
+factory bootstrapは直前の`dist/image-native76`で、署名選択する三ELFは現候補。bootstrap ABIは変えていない。
+最新版のfactoryイメージ全体/物理機器を合格したとは扱わない。
+同じno-replay/照会修正後の全`make check`、関連6 packageのRace、vet、両architecture CGO0 build、署名六ELF検査は終了0。
+補助検査の成功を更新採用/長時間/対象機器の合格へ置き換えない。
+
+05:27:15 JST開始の旧HGW観測は07:03頃、5728秒/529巡後のHTTPS timeoutで終了1。T1未到達。
+VRRP適用要求のtimeout後にgatewayがBACKUPとなり、元の07:27予定は無効。
+07:07:11 JSTにno-replay診断バイナリーで同じ保存MAC/DUIDの観測を開始した。旧processの終了を確認し、重複起動しない。
+私有logは`/tmp/routerd-no-replay-native76-hgw-natural.log`。T1は09:07頃、自然更新はまだ未確認。
+状態は`~/.local/state/routerd2-homert-four`。現在のコードを途中で差し替えない。
+03:56の旧観測は05:05に寿命0 RA/IPv6経路喪失で失敗しT1未到達。最新修正で解消したとはまだ判断しない。
+全34項目、全homert/IX2215/実二回線・対象実機・k8s/pve・Cloud SAMは未受入。固定期限01:56:38 JSTは未達。
 
 ## 直前版: election-authority-native76（2026-10-30 JST）
 

@@ -24,7 +24,7 @@ func TestWithStateKeepsProcessAndFileLocksUntilCallbackFinishes(t *testing.T) {
 		if state.Generation != before.Generation {
 			t.Fatal("wrong state")
 		}
-		if _, err := s.Status(ctx); !errors.Is(err, ErrBusy) {
+		if err := s.WithState(ctx, func(State) error { return nil }); !errors.Is(err, ErrBusy) {
 			t.Fatalf("process lock: %v", err)
 		}
 		if _, err := other.Prepare(ctx, next, state.Generation, PrepareOptions{}); !errors.Is(err, ErrBusy) {

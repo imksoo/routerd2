@@ -21,6 +21,12 @@ PIO and DNS lifetimes, even if control stops delivering updates. Autonomous pref
 /64. The worker does not configure the interface, enable forwarding, allocate
 DHCPv6 addresses or install routes.
 
+Periodic advertisements are scheduled from the actual packet transmission,
+before its status report. A short delegated budget also limits the interval to
+one third of its remaining lifetime, with the protocol's three-second multicast
+minimum. This refreshes clients before a previous advertisement expires without
+extending the delegated lease.
+
 Configured DNS uses `RDNSS []string` and `DNSSL []string`. Learned DNS uses
 `LearnedRDNSS []DNSServer{Address, ValidUntil}` and
 `LearnedDNSSL []SearchDomain{Domain, ValidUntil}`. The sender caps each learned

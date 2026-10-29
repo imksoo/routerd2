@@ -109,7 +109,13 @@ func (m *migrationSupervisor) ServeHTTP(w http.ResponseWriter, req *http.Request
 		m.modules = append([]supervisor.DynamicModule(nil), set.Modules...)
 		localapi.JSON(w, http.StatusOK, struct{}{})
 	case "GET /v1/status":
+		clock, err := boottime.Read()
+		if err != nil {
+			localapi.Fail(w, http.StatusInternalServerError, err)
+			return
+		}
 		state := supervisor.Status{Lifecycle: supervisor.Running, InstanceID: "11111111111111111111111111111111", Ready: true}
+		state.BootID, state.ObservedNanos, state.ExpiresNanos = clock.BootID, uint64(clock.BoottimeNanoseconds), uint64(clock.BoottimeNanoseconds)+uint64(5*time.Second)
 		for _, module := range m.modules {
 			state.Modules = append(state.Modules, supervisor.ModuleStatus{Name: module.Name, Role: module.Role, ConfigDigest: module.ConfigDigest, Ready: true, State: "running", Generation: 1})
 		}

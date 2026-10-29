@@ -11,6 +11,12 @@ supervisor and control health to confirm a trial. The local management CLI
 queues changes; a successful prepare or rollback does not mean that the running
 process tree has already changed.
 
+`Status` reads the authenticated committed selection without inspecting runtime
+payloads or taking the archive/selection-writer lock. A separate journal file
+lock coordinates readers with generation publication and pruning. Each read
+pins its own root descriptor, so closing a Store cannot invalidate that read.
+Payload acquisition, preparation and boot still qualify the selected images.
+
 `WithState` holds the process mutex and interprocess file lock across a callback,
 after authenticating the current journal and exact reference links. It does
 not reread runtime payloads: the writer is already executing the supervisor's

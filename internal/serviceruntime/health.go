@@ -79,13 +79,8 @@ func (c *effectsClient) runHealth(ctx context.Context, dir, eventDir string, cfg
 }
 
 func (c *effectsClient) sendProtocolEvents(ctx context.Context, resource string, page []events.Event) error {
-	if len(page) == 0 || len(page) > protocolevents.PageSize {
-		return errors.New("invalid bounded protocol publication page")
-	}
-	call, cancel := context.WithTimeout(ctx, time.Second)
-	defer cancel()
 	var ack protocolevents.Acknowledgement
-	if err := c.client.Do(call, http.MethodPost, "/v1/protocol-events", protocolevents.Batch{Resource: resource, Events: page}, &ack); err != nil {
+	if err := c.client.Do(ctx, http.MethodPost, "/v1/protocol-events", protocolevents.Batch{Resource: resource, Events: page}, &ack); err != nil {
 		return err
 	}
 	if len(ack.IDs) != len(page) {

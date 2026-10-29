@@ -50,11 +50,7 @@ func (e *Engine) releaseRoutes(parent *http.ServeMux) {
 		mux.ServeHTTP(w, r.WithContext(ctx))
 	}))
 	mux.HandleFunc("GET /v1/releases/status", func(w http.ResponseWriter, r *http.Request) {
-		var state release.State
-		err := e.releaseStore.WithState(r.Context(), func(current release.State) error {
-			state = current
-			return nil
-		})
+		state, err := e.releaseStore.Status(r.Context())
 		if err != nil {
 			releaseFailure(w, err)
 			return

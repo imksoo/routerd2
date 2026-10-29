@@ -79,14 +79,17 @@ const (
 )
 
 type Status struct {
-	InstanceID string         `json:"instance_id"`
-	ReleaseID  string         `json:"release_id"`
-	Platform   string         `json:"platform"`
-	PID        int            `json:"pid"`
-	StartedAt  time.Time      `json:"started_at"`
-	Ready      bool           `json:"ready"`
-	Lifecycle  Lifecycle      `json:"lifecycle"`
-	Modules    []ModuleStatus `json:"modules"`
+	BootID        string         `json:"boot_id"`
+	ObservedNanos uint64         `json:"observed_nanos"`
+	ExpiresNanos  uint64         `json:"expires_nanos"`
+	InstanceID    string         `json:"instance_id"`
+	ReleaseID     string         `json:"release_id"`
+	Platform      string         `json:"platform"`
+	PID           int            `json:"pid"`
+	StartedAt     time.Time      `json:"started_at"`
+	Ready         bool           `json:"ready"`
+	Lifecycle     Lifecycle      `json:"lifecycle"`
+	Modules       []ModuleStatus `json:"modules"`
 }
 
 type ModuleStatus struct {

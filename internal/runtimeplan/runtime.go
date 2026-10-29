@@ -111,10 +111,11 @@ type appliedProjection struct {
 }
 
 type supervisorObservation struct {
-	modules    map[string]supervisor.ModuleStatus
-	ready      bool
-	bootID     string
-	untilNanos uint64
+	modules       map[string]supervisor.ModuleStatus
+	ready         bool
+	bootID        string
+	observedNanos uint64
+	untilNanos    uint64
 }
 
 type Runtime struct {
@@ -172,13 +173,13 @@ var errApplicationPending = errors.New("accepted protocol observations await net
 // successful configuration cannot be confirmed while one of its required
 // protocol processes has since crashed or entered restart backoff.
 func (r *Runtime) CheckReady(ctx context.Context) error {
-	s, observed, err := r.supervisorStatus(ctx)
+	s, err := r.manager.Status(ctx)
 	if err != nil {
 		return err
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.installGuardStatusLocked(s, observed, nil)
+	r.installGuardStatusLocked(s, nil)
 	if !r.guard.ready {
 		return errors.New("required routerd modules are not ready")
 	}
@@ -394,12 +395,11 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 	r.configured = true
 	r.records = retained
 	r.bindings = bindings
-	for name, record := range retained {
-		if record.Role == "dhcp6" {
-			if r.guardGrants == nil {
-				r.guardGrants = make(map[string]guardGrant)
-			}
-			r.guardGrants[name] = previousGrants[name]
+	r.guardGrants = make(map[string]guardGrant, len(retained))
+	for name := range retained {
+		if grant, ok := previousGrants[name]; ok {
+			grant.revision = revision
+			r.guardGrants[name] = grant
 		}
 	}
 	for name := range r.dhcpServers {
@@ -585,12 +585,11 @@ func (r *Runtime) observe(ctx context.Context, u serviceconfig.Update) (*pending
 		return nil, r.acceptBFD(ctx, u)
 	}
 	var producerStatus *supervisor.Status
-	var producerClock boottime.Clock
 	if u.Role == "ntp" || u.Role == "bgp" || u.Role == "dhcp4" || u.Role == "dhcp6" || u.Role == "ra" || u.Role == "vrrp" || u.Role == "dhcp_server" || u.Role == "dhcp6_server" || u.Role == "pppoe" || u.Role == "aftr" {
 		// A restarted control has no remembered generations. Authenticate even
 		// its first publication against the current process-tree registry;
 		// initial publication precedes worker Ready, so Ready is not required.
-		status, observed, err := r.supervisorStatus(ctx)
+		status, err := r.manager.Status(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -606,7 +605,7 @@ func (r *Runtime) observe(ctx context.Context, u serviceconfig.Update) (*pending
 		if !matched {
 			return nil, ErrStale
 		}
-		producerStatus, producerClock = &status, observed
+		producerStatus = &status
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -635,7 +634,7 @@ func (r *Runtime) observe(ctx context.Context, u serviceconfig.Update) (*pending
 		}
 	}
 	if producerStatus != nil {
-		r.installGuardStatusLocked(*producerStatus, producerClock, nil)
+		r.installGuardStatusLocked(*producerStatus, nil)
 	}
 
 	var server dhcpserverconfig.Snapshot

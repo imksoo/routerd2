@@ -22,7 +22,6 @@ func (e vrrpEffects) Apply(ctx context.Context, s vrrp.Snapshot) (vrrp.Decision,
 	if err != nil {
 		return vrrp.Decision{}, err
 	}
-	c.latest = encoded
 	return receipt.VRRP, nil
 }
 

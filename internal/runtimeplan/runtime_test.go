@@ -67,7 +67,12 @@ func (m *memoryManager) Reconcile(_ context.Context, v []supervisor.DynamicModul
 	return nil
 }
 func (m *memoryManager) Status(_ context.Context) (supervisor.Status, error) {
+	clock, err := boottime.Read()
+	if err != nil {
+		return supervisor.Status{}, err
+	}
 	s := supervisor.Status{Lifecycle: supervisor.Running, Ready: true, InstanceID: testSupervisorInstance}
+	s.BootID, s.ObservedNanos, s.ExpiresNanos = clock.BootID, uint64(clock.BoottimeNanoseconds), uint64(clock.BoottimeNanoseconds)+uint64(5*time.Second)
 	for _, v := range m.modules {
 		generation := uint64(0)
 		if v.Role == "aftr" {

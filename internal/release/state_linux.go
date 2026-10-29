@@ -127,7 +127,7 @@ func validateState(state State) error {
 }
 
 func (s *Store) readState(ctx context.Context) (State, error) {
-	state, err := s.readJournal(ctx)
+	state, err := readJournal(ctx, s.root, s.generations)
 	if err != nil {
 		return State{}, err
 	}
@@ -141,11 +141,11 @@ func (s *Store) readState(ctx context.Context) (State, error) {
 // invariants and every exact reference link. It does not qualify an executable.
 // Selection-only readers use this directly. Runtime acquisition and selection
 // qualify payloads separately; a configuration transaction does not reload them.
-func (s *Store) readJournal(ctx context.Context) (State, error) {
-	if err := s.checkContext(ctx); err != nil {
+func readJournal(ctx context.Context, root, generations *os.File) (State, error) {
+	if err := ctx.Err(); err != nil {
 		return State{}, err
 	}
-	target, err := readLink(s.root, "current")
+	target, err := readLink(root, "current")
 	if err != nil {
 		if errors.Is(err, unix.ENOENT) {
 			return State{}, os.ErrNotExist
@@ -159,7 +159,7 @@ func (s *Store) readJournal(ctx context.Context) (State, error) {
 	if !generationName.MatchString(name) {
 		return State{}, fmt.Errorf("%w: invalid generation selector", ErrCorrupt)
 	}
-	dir, err := openDirectory(s.generations, name)
+	dir, err := openDirectory(generations, name)
 	if err != nil {
 		return State{}, fmt.Errorf("%w: open generation: %v", ErrCorrupt, err)
 	}
@@ -233,6 +233,11 @@ func (s *Store) next(state State, operation string) (State, error) {
 }
 
 func (s *Store) commit(state State) error {
+	lock, err := lockJournal(s.root, unix.LOCK_EX)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
 	if err := validateState(state); err != nil {
 		return err
 	}
@@ -493,7 +498,7 @@ func (s *Store) BeginBoot(ctx context.Context, bootID string) (Selection, error)
 		return Selection{}, err
 	}
 	defer unlock()
-	state, err := s.readJournal(ctx)
+	state, err := readJournal(ctx, s.root, s.generations)
 	if err != nil {
 		return Selection{}, err
 	}
@@ -586,7 +591,7 @@ func (s *Store) confirm(ctx context.Context, bootID, token, digest string, inspe
 		return State{}, err
 	}
 	defer unlock()
-	state, err := s.readJournal(ctx)
+	state, err := readJournal(ctx, s.root, s.generations)
 	if err != nil {
 		return State{}, err
 	}
@@ -723,7 +728,7 @@ func (s *Store) FailBoot(ctx context.Context, bootID, token, reason string) (Sta
 		return State{}, err
 	}
 	defer unlock()
-	state, err := s.readJournal(ctx)
+	state, err := readJournal(ctx, s.root, s.generations)
 	if err != nil {
 		return State{}, err
 	}
@@ -819,6 +824,11 @@ func (s *Store) Prune(ctx context.Context, expectedGeneration uint64, releaseDig
 	if err != nil {
 		return CleanupResult{}, err
 	}
+	lock, err := lockJournal(s.root, unix.LOCK_EX)
+	if err != nil {
+		return CleanupResult{}, err
+	}
+	defer lock.Close()
 	var result CleanupResult
 	for _, name := range generationNames {
 		if "generations/"+name == current {

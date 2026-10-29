@@ -85,11 +85,14 @@
 
 ## 現在の状況
 
-- `original-egress-native76` はVIPプレフィックスを保持し、大きい原子nft batchの送信容量とAFTR/Health等の元期限を修正した。
-  署名PID1二台・独立ISC/4 Linux AFTRで主系停止、同じTCP/UDP、新規IPv4/IPv6/取得DNS、旧主系待機復帰とPD/DHCP再同期が終了0。
-  UDP損失0、TCP最長5.41秒。共通LAN VMAC/LLと通常DADを使用した。全homert/実二回線/対象実機ではない。
-  03:56の旧自然観測は05:05に寿命0 RA/IPv6経路喪失で失敗、T1未到達。05:27の4出口HGW観測は別バイナリーで継続しT1は07:27:21 JST。
-  前候補のVIP /24・5 WANは84.61秒で終了0。最終候補の5 WANも85.86秒で終了0、イメージ構築も終了0。署名更新/採用後失敗復旧と全34項目は残る。
+- `journal-read-native76`: 短期PDの準備中IPv6断を追い、同一観測の1秒ごとの共通再送を削除した。
+  元期限・停止適用ACKを維持し、独立ISC/Keepalived/dhcpcdで72.48秒のcontrol停止/元期限撤回/復帰が通過。
+  アーカイブ検証と照会の排他を分離し、18秒PDのAlpineで転送中断後の状態照会、128209408 byteの転送、
+  145.81秒の更新準備まで管理照会・取得DNS・両IP TCP/UDPを維持し通過。独立端末の追加30巡/45.63秒も通過。
+  全make check・関連Race・vet・両architecture build・署名六ELFは終了0。新版採用/採用後自動復旧は実行中、未受入。
+  前段の5 WAN85.01秒/二台TCP最長5.83秒とは版を区別する。
+  05:27の旧HGW観測は07:03頃5728秒で失敗し、T1未到達。07:07:11開始のno-replay診断版は自然更新前で継続中。
+  無停止再適用・全homert/対象機器・全34項目は未受入。
 - `pd-authority-native74` はPD元期限と監視照会の1秒期限を分離した。実APKでcontrol交換後に端末のIPv6既定経路が戻り、
   18秒のISCリース一周期を越える20秒以上の両IP TCP/UDP/DNSと、RA再撤回なしが終了0。段階全体66.37秒は継続観測を含む。
   実HGW長期は02:18 JST頃のLAN IPv6 UDP DNS timeoutで終了1。自然更新前に停止し、LAN返信経路の修正後に再開する。

@@ -33,7 +33,7 @@ func TestCheckedPrepareValidatesPinnedTargetUnderFileLockBeforePublication(t *te
 		if _, err := borrowed.Stat(); err != nil {
 			t.Fatal("candidate descriptor was closed", err)
 		}
-		if _, err := other.Status(ctx); !errors.Is(err, ErrBusy) {
+		if err := other.WithState(ctx, func(State) error { return nil }); !errors.Is(err, ErrBusy) {
 			t.Fatalf("file lock was not held during preflight: %v", err)
 		}
 		return want

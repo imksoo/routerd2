@@ -45,7 +45,7 @@ func Open(options Options) (*Store, error) {
 	if err != nil {
 		return fail(err)
 	}
-	_, err = s.readJournal(context.Background())
+	_, err = readJournal(context.Background(), s.root, s.generations)
 	if errors.Is(err, os.ErrNotExist) {
 		names, listErr := directoryNames(s.generations, s.options.MaxGenerations)
 		if listErr != nil {
@@ -166,13 +166,54 @@ func (s *Store) acquire(ctx context.Context) (func(), error) {
 	return func() { _ = unix.Flock(int(s.lock.Fd()), unix.LOCK_UN); s.mu.Unlock() }, nil
 }
 
+// Status reads the committed selection without waiting for archive verification.
+// The directory descriptors belong to this read, independently of Store.Close.
 func (s *Store) Status(ctx context.Context) (State, error) {
-	unlock, err := s.acquire(ctx)
+	if err := s.checkContext(ctx); err != nil {
+		return State{}, err
+	}
+	raw, err := s.root.SyscallConn()
+	if err != nil {
+		return State{}, ErrClosed
+	}
+	var fd int
+	var pinErr error
+	if err = raw.Control(func(root uintptr) {
+		fd, pinErr = unix.FcntlInt(root, unix.F_DUPFD_CLOEXEC, 0)
+	}); err != nil {
+		return State{}, ErrClosed
+	}
+	if pinErr != nil {
+		return State{}, pinErr
+	}
+	root := os.NewFile(uintptr(fd), "release status root")
+	defer root.Close()
+	lock, err := lockJournal(root, unix.LOCK_SH)
 	if err != nil {
 		return State{}, err
 	}
-	defer unlock()
-	return s.readState(ctx)
+	defer lock.Close()
+	generations, err := openDirectory(root, "generations")
+	if err != nil {
+		return State{}, err
+	}
+	defer generations.Close()
+	return readJournal(ctx, root, generations)
+}
+
+// Journal publication and removal exclude readers only while changing metadata.
+// A separate open description is needed for each flock, including same-process
+// readers; duplicating a lock descriptor would share its lock ownership.
+func lockJournal(root *os.File, operation int) (*os.File, error) {
+	file, err := openRegular(root, ".journal-lock", unix.O_RDWR|unix.O_CREAT, 0600, 0)
+	if err != nil {
+		return nil, err
+	}
+	if err := unix.Flock(int(file.Fd()), operation); err != nil {
+		file.Close()
+		return nil, err
+	}
+	return file, nil
 }
 
 // WithState keeps both the process mutex and the interprocess file lock until
@@ -191,7 +232,7 @@ func (s *Store) WithState(ctx context.Context, fn func(State) error) error {
 		return err
 	}
 	defer unlock()
-	state, err := s.readJournal(ctx)
+	state, err := readJournal(ctx, s.root, s.generations)
 	if err != nil {
 		return err
 	}
@@ -236,7 +277,7 @@ func (s *Store) Stage(ctx context.Context, input io.Reader) (Ref, error) {
 	// Staging publishes an unselected candidate. Selection and boot verify the
 	// selected payloads; rereading them here neither validates this input nor
 	// changes the active choice. Authenticate the journal without hashing them.
-	if _, err := s.readJournal(ctx); err != nil {
+	if _, err := readJournal(ctx, s.root, s.generations); err != nil {
 		return Ref{}, err
 	}
 	slog.Info("release stage started", "lock_seconds", time.Since(started).Seconds())

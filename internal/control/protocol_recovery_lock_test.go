@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
 	"github.com/imksoo/routerd2/internal/supervisor"
@@ -44,7 +45,12 @@ func TestRecoveryOwnershipWaitDoesNotBlockControlAuthority(t *testing.T) {
 						return
 					}
 				}
-				localapi.JSON(w, 200, supervisor.Status{Lifecycle: supervisor.Running, Ready: true})
+				clock, err := boottime.Read()
+				if err != nil {
+					localapi.Fail(w, 500, err)
+					return
+				}
+				localapi.JSON(w, 200, supervisor.Status{Lifecycle: supervisor.Running, Ready: true, BootID: clock.BootID, ObservedNanos: uint64(clock.BoottimeNanoseconds), ExpiresNanos: uint64(clock.BoottimeNanoseconds) + uint64(5*time.Second)})
 			})
 			serverDone := make(chan error, 1)
 			go func() {

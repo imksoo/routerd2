@@ -97,13 +97,6 @@ func Run(ctx context.Context, runtimeDir, name, role, path, digest string, gener
 	c := &effectsClient{client: localapi.NewClient(filepath.Join(runtimeDir, "control.sock")), identity: serviceconfig.Update{SupervisorInstance: instanceID, Name: name, Role: role, ConfigDigest: digest, Generation: generation, ProducerEpoch: hex.EncodeToString(epoch[:])}}
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	// Lease-owning HA engines refresh their own acknowledged deadline. A
-	// generic replay must never keep a dead election alive.
-	if role == "dhcp4" || role == "dhcp6" || role == "ra" || role == "ra_client" {
-		done := make(chan struct{})
-		defer func() { cancel(); <-done }()
-		go func() { defer close(done); c.replay(runCtx) }()
-	}
 	switch role {
 	case "ntp":
 		return c.runNTP(runCtx, instance, ready)
@@ -290,7 +283,6 @@ type effectsClient struct {
 	mu       sync.Mutex
 	client   *localapi.Client
 	identity serviceconfig.Update
-	latest   json.RawMessage
 }
 
 type dhcp6Effects struct{ client *effectsClient }
@@ -320,13 +312,9 @@ func (e raClientEffects) Withdraw(ctx context.Context, s raclient.Snapshot) erro
 	return e.client.withdraw(ctx, b)
 }
 
-// Stop replaying the previous state before waiting for the final kernel ACK.
 func (c *effectsClient) withdraw(ctx context.Context, b json.RawMessage) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	// A queued heartbeat must never replay the previous assignment after its
-	// final withdrawal, including an engine failure without context cancellation.
-	c.latest = nil
 	c.identity.Sequence++
 	u := c.identity
 	u.Snapshot = b
@@ -352,7 +340,6 @@ func (c *effectsClient) update(ctx context.Context, v any) error {
 	if _, err := c.send(ctx, b); err != nil {
 		return err
 	}
-	c.latest = append(c.latest[:0], b...)
 	return nil
 }
 func (c *effectsClient) send(ctx context.Context, b json.RawMessage) (serviceconfig.ApplicationReceipt, error) {
@@ -372,22 +359,6 @@ func (c *effectsClient) send(ctx context.Context, b json.RawMessage) (servicecon
 		return ack, nil
 	}
 	return serviceconfig.ApplicationReceipt{}, c.client.Do(callCtx, "POST", "/v1/services/state", r, nil)
-}
-func (c *effectsClient) replay(ctx context.Context) {
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			c.mu.Lock()
-			if len(c.latest) > 0 {
-				_, _ = c.send(ctx, c.latest)
-			}
-			c.mu.Unlock()
-		}
-	}
 }
 
 func (c *effectsClient) watchDNSInput(ctx context.Context, name string, current dnsconfig.Input, updates chan dnsconfig.Input) {

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
-	"time"
 
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/localapi"
@@ -169,9 +168,7 @@ func (e *Engine) protocolEventRoutes(mux *http.ServeMux) {
 			localapi.Fail(w, 503, errors.New("protocol journal unavailable"))
 			return
 		}
-		ctx, cancel := context.WithTimeout(r.Context(), time.Second)
-		defer cancel()
-		ack, err := relays.Deliver(ctx, batch)
+		ack, err := relays.Deliver(r.Context(), batch)
 		e.mu.Lock()
 		if e.protocolRelays == relays && (err == nil || !errors.Is(err, protocolevents.ErrInvalidBatch) && !errors.Is(err, protocolevents.ErrUnregistered)) {
 			e.setProtocolErrorLocked("service."+batch.Resource, err)

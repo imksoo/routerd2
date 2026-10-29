@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
@@ -170,7 +171,12 @@ type vrrpACKManager struct {
 func (m *vrrpACKManager) Status(context.Context) (supervisor.Status, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	clock, err := boottime.Read()
+	if err != nil {
+		return supervisor.Status{}, err
+	}
 	s := supervisor.Status{Lifecycle: supervisor.Running, Ready: true, InstanceID: testSupervisorInstance}
+	s.BootID, s.ObservedNanos, s.ExpiresNanos = clock.BootID, uint64(clock.BoottimeNanoseconds), uint64(clock.BoottimeNanoseconds)+uint64(5*time.Second)
 	for _, module := range m.modules {
 		s.Modules = append(s.Modules, module)
 		if !module.Ready {

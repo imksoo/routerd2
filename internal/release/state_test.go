@@ -355,7 +355,7 @@ func TestCorruptionAndMissingContentFailClosed(t *testing.T) {
 			store := newTestStore(t)
 			ref := initializeFixture(t, store)
 			tc.damage(t, store, ref)
-			if _, err := store.Status(context.Background()); err == nil {
+			if _, err := store.readState(context.Background()); err == nil {
 				t.Fatal("corrupt state returned success")
 			}
 			if _, err := store.BeginBoot(context.Background(), "boot-1"); err == nil {
@@ -364,7 +364,7 @@ func TestCorruptionAndMissingContentFailClosed(t *testing.T) {
 			reopened, err := Open(store.options)
 			if err == nil {
 				defer reopened.Close()
-				if _, err := reopened.Status(context.Background()); err == nil {
+				if _, err := reopened.readState(context.Background()); err == nil {
 					t.Fatal("corrupt store was accepted or silently reinitialized after reopening")
 				}
 			}
@@ -406,7 +406,7 @@ func TestStoreRefusesSymlinkAncestorsPrivateViolationsAndHardLinks(t *testing.T)
 	if err := os.Link(artifact, filepath.Join(root, "alias")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.Status(context.Background()); err == nil {
+	if _, err := store.readState(context.Background()); err == nil {
 		t.Fatal("hard-linked installed image accepted")
 	}
 }
@@ -545,7 +545,7 @@ func TestStageCandidateDoesNotRequireSelectedPayload(t *testing.T) {
 	if err := os.WriteFile(path, []byte("corrupt selected payload"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.Status(ctx); err == nil {
+	if _, err := store.readState(ctx); err == nil {
 		t.Fatal("corrupt selected image was accepted")
 	}
 	candidate := stageFixture(t, store, "fixture-r2", 2)

@@ -25,6 +25,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/configref"
 	"github.com/imksoo/routerd2/internal/engineimage"
 	"github.com/imksoo/routerd2/internal/release"
@@ -185,16 +186,34 @@ func Run(parent context.Context, options Options) (PowerAction, error) {
 	var powerResponse <-chan struct{}
 	ctxDone := ctx.Done()
 
-	publish := func() {
+	publish := func() error {
+		clock, err := boottime.Read()
+		if err != nil {
+			return err
+		}
+		now := time.Now()
 		s := initial
+		s.BootID, s.ObservedNanos = clock.BootID, uint64(clock.BoottimeNanoseconds)
+		s.ExpiresNanos = ^uint64(0)
 		s.Lifecycle = lifecycle
 		s.Ready = lifecycle == Running
 		s.Modules = make([]ModuleStatus, 0, len(children))
 		for _, c := range children {
 			s.Modules = append(s.Modules, c.status)
+			if !c.retired && c.spec.Required && c.process != nil {
+				deadline := c.heartbeat.Add(c.spec.HeartbeatTimeout)
+				if !c.hello {
+					deadline = c.startTime.Add(c.spec.StartupTimeout)
+				}
+				remaining := max(deadline.Sub(now), 0)
+				s.ExpiresNanos = min(s.ExpiresNanos, s.ObservedNanos+uint64(remaining))
+			}
 			if !c.retired && c.spec.Required && !c.status.Ready {
 				s.Ready = false
 			}
+		}
+		if s.ExpiresNanos == ^uint64(0) {
+			s.ExpiresNanos = s.ObservedNanos
 		}
 		a.publish(s)
 		if s.Ready && !wasReady {
@@ -204,6 +223,7 @@ func Run(parent context.Context, options Options) (PowerAction, error) {
 			_, _ = fmt.Fprintln(os.Stdout, "ROUTERD_READY")
 		}
 		wasReady = s.Ready
+		return nil
 	}
 	beginShutdown := func() {
 		if lifecycle == Stopping {
@@ -301,7 +321,9 @@ func Run(parent context.Context, options Options) (PowerAction, error) {
 			kept = append(kept, c)
 		}
 		children = kept
-		publish()
+		if err := publish(); err != nil {
+			return power, err
+		}
 		if lifecycle == Stopping && len(byPID) == 0 {
 			return power, fatalErr
 		}
@@ -419,7 +441,10 @@ func Run(parent context.Context, options Options) (PowerAction, error) {
 					c.status.State = "pending"
 				}
 			}
-			publish()
+			if err := publish(); err != nil {
+				request.reply <- err
+				return power, err
+			}
 			request.reply <- nil
 		}
 	}

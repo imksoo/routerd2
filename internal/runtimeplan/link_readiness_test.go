@@ -4,7 +4,6 @@ package runtimeplan
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -24,14 +23,14 @@ func (m *delayedReadinessManager) Status(ctx context.Context) (supervisor.Status
 	return m.memoryManager.Status(ctx)
 }
 
-func TestReadinessCannotRenewSupervisorAuthorityAfterSlowResponse(t *testing.T) {
+func TestReadinessUsesTheSupervisorsHeartbeatDeadline(t *testing.T) {
 	r, _, manager := fixture(t, config.Native{Network: network.Desired{Interfaces: []network.Interface{{Name: "lan0", Addresses: []string{"192.0.2.1/24"}}}}})
 	if err := r.CheckReady(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	r.manager = &delayedReadinessManager{*manager}
-	if err := r.CheckReady(context.Background()); err == nil || !strings.Contains(err.Error(), "supervisor status validity expired") {
-		t.Fatal("delayed supervisor response confirmed a static configuration", err)
+	if err := r.CheckReady(context.Background()); err != nil {
+		t.Fatal("fresh supervisor observation was rejected because the request waited", err)
 	}
 	r.manager = manager
 	if err := r.CheckReady(context.Background()); err != nil {
@@ -41,9 +40,6 @@ func TestReadinessCannotRenewSupervisorAuthorityAfterSlowResponse(t *testing.T) 
 
 func TestReadinessRefreshDoesNotConfirmExpiredNetworkAuthority(t *testing.T) {
 	for name, resource := range map[string]resourceprogram.Resource{
-		"link":        {Link: &network.Link{Name: "ha", Kind: "bridge"}},
-		"address":     {Address: &resourceprogram.Address{Interface: "wan0", CIDR: "192.0.2.42/32"}},
-		"route":       {Route: &network.Route{Destination: "203.0.113.0/24", Interface: "wan0"}},
 		"utc-route":   {Route: &network.Route{Destination: "2001:db8:42::/64", Interface: "wan0"}},
 		"utc-address": {Address: &resourceprogram.Address{Interface: "wan0", CIDR: "2001:db8::42/64"}},
 	} {

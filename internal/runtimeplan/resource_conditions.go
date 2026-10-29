@@ -1,7 +1,6 @@
 package runtimeplan
 
 import (
-	"context"
 	"encoding/json"
 	"time"
 
@@ -58,29 +57,19 @@ func dynamicProgram(source config.Document) bool {
 	return false
 }
 
-// Capture the original observation budget before transport or lock waits.
-// An older concurrent query cannot overwrite a newer process-tree observation.
-func (r *Runtime) supervisorStatus(ctx context.Context) (supervisor.Status, boottime.Clock, error) {
-	clock, err := boottime.Read()
-	if err != nil {
-		return supervisor.Status{}, clock, err
-	}
-	status, err := r.manager.Status(ctx)
-	return status, clock, err
-}
-
-func (r *Runtime) installGuardStatusLocked(status supervisor.Status, clock boottime.Clock, err error) {
-	until := uint64(clock.BoottimeNanoseconds) + uint64(time.Second)
-	if clock.BootID != "" && clock.BootID == r.guard.bootID && until <= r.guard.untilNanos {
-		return
-	}
-	view := supervisorObservation{modules: make(map[string]supervisor.ModuleStatus), ready: err == nil && status.Ready, bootID: clock.BootID, untilNanos: until}
+// The supervisor owns heartbeat deadlines. Preserve its observation through
+// transport and lock waits instead of inventing a local process lease.
+func (r *Runtime) installGuardStatusLocked(status supervisor.Status, err error) {
+	view := supervisorObservation{}
 	if err == nil {
+		if status.BootID == r.guard.bootID && status.ObservedNanos <= r.guard.observedNanos {
+			return
+		}
+		view = supervisorObservation{modules: make(map[string]supervisor.ModuleStatus), ready: status.Ready, bootID: status.BootID, observedNanos: status.ObservedNanos, untilNanos: status.ExpiresNanos}
 		for _, module := range status.Modules {
 			view.modules[module.Name] = module
 		}
 	}
-	// Unavailable observations remain unknown, with no renewal after a wait.
 	r.guard = view
 	if len(r.config.plan.Native.DerivedEvents) > 0 {
 		_, _ = r.conditionFactsLocked(r.config)
@@ -170,7 +159,7 @@ func (r *Runtime) conditionFactsLocked(cfg configuration) (result resourceprogra
 		if r.applied.untilNanos != 0 {
 			until = min(until, r.applied.untilNanos)
 		}
-		fact := resourceprogram.Fact{Value: resourceprogram.True, ObservedNanos: r.guard.untilNanos - uint64(time.Second), ExpiresNanos: until, WorkerGeneration: network.Generation, ProducerEpoch: r.supervisorInstance}
+		fact := resourceprogram.Fact{Value: resourceprogram.True, ObservedNanos: r.guard.observedNanos, ExpiresNanos: until, WorkerGeneration: network.Generation, ProducerEpoch: r.supervisorInstance}
 		facts.Facts["network.applied"] = fact
 		for id, state := range r.resourceStates {
 			fact.Value = state.Ready
@@ -187,7 +176,7 @@ func (r *Runtime) conditionFactsLocked(cfg configuration) (result resourceprogra
 		if module.Ready {
 			ready = resourceprogram.True
 		}
-		facts.Facts[name+".ready"] = resourceprogram.Fact{Value: ready, ObservedNanos: r.guard.untilNanos - uint64(time.Second), ExpiresNanos: r.guard.untilNanos, WorkerGeneration: module.Generation, ProducerEpoch: r.supervisorInstance}
+		facts.Facts[name+".ready"] = resourceprogram.Fact{Value: ready, ObservedNanos: r.guard.observedNanos, ExpiresNanos: r.guard.untilNanos, WorkerGeneration: module.Generation, ProducerEpoch: r.supervisorInstance}
 		record := r.records[name]
 
 		if record.Role == "tailscale" {
@@ -278,7 +267,7 @@ func (r *Runtime) conditionFactsLocked(cfg configuration) (result resourceprogra
 			if grant.ra.Sent > 0 && grant.ra.SentGeneration == grant.ra.Generation && !grant.ra.Withdrawing {
 				value = resourceprogram.True
 			}
-			facts.Facts[name+".sent"] = resourceprogram.Fact{Value: value, ObservedNanos: r.guard.untilNanos - uint64(time.Second), ExpiresNanos: r.guard.untilNanos, WorkerGeneration: module.Generation, ProducerEpoch: record.ProducerEpoch}
+			facts.Facts[name+".sent"] = resourceprogram.Fact{Value: value, ObservedNanos: r.guard.observedNanos, ExpiresNanos: r.guard.untilNanos, WorkerGeneration: module.Generation, ProducerEpoch: record.ProducerEpoch}
 			continue
 		}
 		if record.Role == "dhcp6" {

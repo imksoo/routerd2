@@ -218,7 +218,7 @@ func TestBootRecoveryDropsDamagedPreviousWhenItWasThePreparedRollbackTarget(t *t
 	if selected.Image.Release != target || selected.State.Previous != nil || selected.State.PreviousStartup != nil || selected.State.Startup != nil || selected.State.ConfigHighWatermark != prepared.ConfigHighWatermark {
 		t.Fatal("rejected rollback retained a damaged executable reference or adopted its configuration")
 	}
-	if _, err := s.Status(ctx); err != nil {
+	if _, err := s.readState(ctx); err != nil {
 		t.Fatal("boot returned an unusable operational store", err)
 	}
 }
@@ -273,7 +273,7 @@ func TestBootRecoveryErrorBoundariesKeepOneCompleteSelection(t *testing.T) {
 			if errors.Is(err, ErrUncertain) != published {
 				t.Fatal("wrong publication uncertainty", err)
 			}
-			observed, err := s.readJournal(ctx)
+			observed, err := readJournal(ctx, s.root, s.generations)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -309,7 +309,7 @@ func TestBootRecoveryProcessExitAtJournalBoundaries(t *testing.T) {
 			}
 			damageBootArtifact(t, s, target, false)
 			crashChild(t, s.options.Root, point, "boot-recovery", Ref{}, "")
-			observed, err := s.readJournal(context.Background())
+			observed, err := readJournal(context.Background(), s.root, s.generations)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -358,7 +358,7 @@ func TestBootRecoversDamagedPendingPayloadWithoutExecutingIt(t *testing.T) {
 				if err != nil {
 					t.Fatal("selection metadata open inspected candidate payload:", err)
 				}
-				if _, err := opened.Status(ctx); err == nil {
+				if _, err := opened.readState(ctx); err == nil {
 					t.Fatal("runtime inspection hid damaged candidate")
 				}
 				opened.Close()

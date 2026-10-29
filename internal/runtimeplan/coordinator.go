@@ -238,9 +238,9 @@ func (r *Runtime) reconcileStep(ctx context.Context, ceiling map[string]supervis
 	if err := r.observeHostSources(ctx); err != nil {
 		return false, err
 	}
-	status, observed, err := r.supervisorStatus(ctx)
+	status, err := r.manager.Status(ctx)
 	r.mu.Lock()
-	r.installGuardStatusLocked(status, observed, err)
+	r.installGuardStatusLocked(status, err)
 	if err != nil {
 		r.mu.Unlock()
 		return false, err
@@ -361,9 +361,9 @@ func (r *Runtime) reconcileStep(ctx context.Context, ceiling map[string]supervis
 	refresh := r.guard.bootID != clock.BootID || uint64(clock.BoottimeNanoseconds) >= r.guard.untilNanos
 	if refresh {
 		r.mu.Unlock()
-		status, observed, statusErr := r.supervisorStatus(ctx)
+		status, statusErr := r.manager.Status(ctx)
 		r.mu.Lock()
-		r.installGuardStatusLocked(status, observed, statusErr)
+		r.installGuardStatusLocked(status, statusErr)
 		if statusErr != nil {
 			r.mu.Unlock()
 			return false, statusErr

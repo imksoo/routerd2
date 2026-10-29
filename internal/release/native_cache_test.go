@@ -27,9 +27,11 @@ func TestNativeInspectionMemoRequiresFreshHashAndSignedManifest(t *testing.T) {
 		t.Fatalf("first qualification inspected %d native members, want 2", inspections)
 	}
 	for i := 0; i < 3; i++ {
-		if _, err := s.Status(ctx); err != nil {
+		image, err := s.Verify(ctx, ref)
+		if err != nil {
 			t.Fatal(err)
 		}
+		image.Close()
 	}
 	if inspections != 2 {
 		t.Fatal("unchanged fully hashed members were repeatedly parsed", inspections)
@@ -63,7 +65,7 @@ func TestNativeInspectionMemoRequiresFreshHashAndSignedManifest(t *testing.T) {
 	if err := os.Chmod(path, 0500); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Status(ctx); !errors.Is(err, ErrCorrupt) || !strings.Contains(err.Error(), "artifact digest changed") {
+	if _, err := s.Verify(ctx, ref); !errors.Is(err, ErrCorrupt) || !strings.Contains(err.Error(), "artifact digest changed") {
 		t.Fatal("memo bypassed a fresh payload hash", err)
 	}
 }
