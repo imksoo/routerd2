@@ -5,75 +5,43 @@
 [試験計画](test-plan.md)、[機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
-## 最新の成立範囲と残障害（2026-10-29 03:50 UTC）
+## 現在の成立範囲と残作業（2026-10-29 04:20 UTC）
 
-- main `f253575`: 小型Go DHCP通知コマンドと静的NTP client/serverを反映。
-  NTPは独立chronyd・LAN chronyd -Q・実worker・captureで成立。host時計調整は無効。
-  隔離した同一sourceでmake check、両architectureのCGO無効build、秘密情報検査が終了0。
-  DHCP学習・主従条件・appliance時計調整・標準imageへのNTP同梱は未受入。native-57。
-- 先行固定版の実HGW 7800秒は終了0。独立端末2台で728回の両family HTTPS・UDP/TCP DNS、
-  自然PD Renew/Reply、端末の自然DHCP更新、PD交換・daemon再起動後の復旧を確認した。
-  Tailscaleを含まない。直接ONU・連続TCP・対象NICの資格ではない。
-- 未commitの全4engine同梱Alpineは、構築とQEMU/PID 1起動22秒まで成立。
-  全engine同時通信・対象実機の合格ではない。
-- Health履歴のページを一つのatomic transactionへまとめ、履歴受信中のjournal I/Oをcontrol全体のlockから
-  外した。登録情報は構築時に復元し、登録/削除の永続化後に更新する。定期回収でDBを再読込しない。
-  この14 source fileだけを隔離してmake check・Race・vet・両architecture build・秘密情報検査が終了0。
-  停止済みキュー回収のI/Oにはruntime操作とconfigurationのlockが残る。全分離完了とはしない。
-- 未commitの署名更新は通常更新の確定まで成立した。127MB転送、99.53秒のprepare中の状態照会・DNS・
-  両family TCP/UDP、新版/revision3での通信・正常確定・DUID/SSH identity保持を確認した。
-  90秒の判定期限は変更していない。PPPのdefault経路へ通知の5秒期限を設定していた原因を除いた。
-  再起動でPPP unitが消える経路寿命と、Health条件の期限は区別する。
-- 破損候補の復帰は未合格。offline debugfs編集後の再起動でext4 bitmap checksum異常となった。
-  PID 1はsync後に停止するが、ext4 journalは再生を要し得る。journal未再生のfilesystemへdebugfsを使う
-  試験前提を修正し、journalのみ再生した後と編集後のread-only fsckを追加した。この前後検査を入れた実VMの再検証を継続中。
-- 停止/交換の追加試験は、QEMU側では停止操作前のPD更新後UDPで失敗。まだ原因未確定。
-  ホスト側では旧試験がPPPの架空の5秒route期限を要求していた。期待を実session寿命へ直す過程で、
-  条件付きPolicyRule自体の期限がnetwork writerへ渡っていない不足も確認した。
-  本変更のnative-58/network journal15では元の条件期限をwriterへ渡して撤去する。独立RP-PPPoEのPAP/CHAPで
-  制御停止中のPBR撤去とPPP route維持、DNS元期限の失効、同じDNS TCP接続の保持、旧通知409、
-  PPP強制終了とAC停止・認証失敗・復帰後のTCP/UDPまで終了0。PDを含まない試験であり両系PD復旧の合格ではない。
-  二WANの既存make check-health-pbrも失効/交換/rollback・複数経路が終了0。29 source fileを隔離した
-  make check・Race・vet・Linux両architecture buildとstaged秘密情報検査は終了0。旧readerや移行は追加しない。
-- 最新固定版のHGW/Tailscale複合試験は初期DNSでSERVFAILとなった。DoH要求のcontext deadlineを取得。
-  問い合わせ履歴・DNS/HTTPS packetを追加した次の観測では初期DNS/Tailscale通信が成立し、長時間試験を継続中。以前の48分Tailscale障害・106分DNS障害も未解決。
-- VRRPの選出/広告/VIPはGo実装でkeepalived依存なし。DNSも旧routerd由来のGo実装。
-  DHCP=dnsmasq、PPP=pppd、接続状態同期=conntrackd、NTP=chronyd、Tailscale=公式engineの依存が残る。
-  PID 1管理・設定適用・単一network writerの統一と、外部依存削減の達成は区別する。
+- main `935369d`: native-58/network journal15。PPP default経路は実unitの寿命に従い、条件付きPolicyRuleは
+  元のBOOTTIME期限をwriterが独立して撤去する。PAP/CHAP・二WANのHealth/PBR・元期限・旧通知409・
+  control停止・PPP強制終了・AC停止/認証失敗/復旧と、同じDNS TCP接続の保持が成立した。PDなしの試験を
+  両系PD復旧の合格にはしない。隔離した変更単位のmake check/Race/vet/Linux amd64+arm64 buildは終了0。
+- 署名SSH更新を製品経路へ接続した。127MBの転送、中断後の通信、175.15秒の準備中の状態照会・DNS・
+  両family TCP/UDP、新版/revision3の採用・正常確定・DUID/SSH identity保持が成立。90秒の判定期限は不変。
+  prepareは重い検証前にcontrol全体のlockを解放する。確定/失敗記録は検証済み選択情報をatomic更新し、
+  判定期限内に全payloadを再hashする重複を除いた。実際の稼働世代・採用記録・元期限を確認する。
+- 整合したext4上の候補ELFを1 byte破損させ、実行前拒否・既知の正常版への復帰・失敗対象記録・
+  自動DNS・両family TCP/UDP・DUID/SSH・最後の正常電源断まで終了0。`corrupt-recovery`はこの残工程に絞る。
+  通常更新後の確定版へ戻る元の実行も通信まで成立したが、未採用候補でもrevision増加を要求する試験の誤りで
+  終了2だった。候補を実行前拒否した場合、既に採用済みの設定とrevisionは変わらない。期待を修正した。
+  PID 1のsync後もext4 journal再生を要し得るため、offline編集前にjournalのみ再生し、編集前後のread-only
+  fsckを要求する。未再生journalへdebugfsを使った以前のfilesystem破損を製品fallbackの失敗には数えない。
+- 全4engine（PPP/DHCP/conntrack/Tailscale）のAPK/imageを固定同梱し、native-58のAlpineを構築した。
+  実QEMU/PID 1起動は34.3秒で終了0。全engineの同時通信・arm64実行・対象実機・kernel/rootfs更新復旧は未受入。
+  コアはCGO無効で両architectureを構築。署名試験の独立対向はRP-PPPoE/pppd・ISC DHCP・dhcpcdと実packet。
+- 静的NTP client/serverはnative-57で、独立chronyd・LAN chronyd -Q・実worker・captureまで成立した。
+  host時計調整は無効。`time-sources` worktreeでDHCPv6時刻源・元期限・代替先・主系条件を接続中。
+  chronyd 4.8のsource再読込で、engine再起動なしの代替先切替を実観測したが、製品の動的経路の受入はまだ。
+  DHCPv4時刻源・appliance clock discipline・NTP標準image同梱も残る。
+- 先行固定版のHGW 7800秒は終了0。独立2端末728回・自然PD Renew/Reply・端末DHCP自然更新・
+  PD交換/daemon再起動後の復旧が成立した。Tailscaleを含まない。最新固定版のHGW/Tailscale複合観測は継続中。
+  直前の初期DoH期限切れ、以前の48分Tailscale障害・106分DNS障害は未解決。直接ONU・対象NICは未資格。
+- VRRPの選出/広告/VIPとDNSはGo実装。keepalivedやsystemdは使わない。DHCP=dnsmasq、PPP=pppd、
+  接続状態同期=conntrackd、NTP=chronyd、Tailscale=公式engineの依存は残る。PID 1による所有・
+  一括適用・署名runtime全体の固定/更新復旧と、外部依存削減の達成は区別する。
 
-## 作業中: 署名SSH更新と実通信（2026-10-28）
-
-未commitの `appliance-update` では、SSH exec stdinの署名bundle転送とstatus/prepare/cancelを実装中。
-選択情報は既存journal読取を使い、転送は一時fileへspoolする。prepareは実際の検証済みtargetで
-設定をcompileし、現在snapshotと条件付き復旧参照を次bootへ束ねる。転送は無通信30秒、受信後の検証とprepareは各5分以内。進行中の転送を一律5分で切らない。
-通常の約124MB転送は署名検査後の結果と終了0まで成立した。更新再起動で製品bootがpaired Startupを明示拒否していたことを発見し、その未接続を修正した。
-選択後はrelease selectorを消費し、検証したFDとStartupをruntimeへ渡す。正常確定ではpayload検証後に
-実際の採用記録・process世代を再取得する。新bootstrapを再構築して実VMで試験中。更新後通信・正常確定・破損版fallbackは未合格。
-
-実VMで判明した原因を修正した。正常判定は全通知counterの静止を要求せず、適用済みの型付き経路・
-worker・resource状態を比較する。元の適用期限が生きている間の同じlink・address・routeのboot期限延長は、
-適用済みの効果を無効にしない。適用中の再確認も同じ判定を使い、継続するPPP/PD更新が
-RA等のworker起動を永久に保留しない。実VMのPPP交換後のPD・DNS・両family TCP/UDPは復旧した。撤去・短縮・変更・元期限切れは正常にしない。適用時の未使用の全kernel観測を
-除き、DHCP起動の重複5秒timerを除いてsupervisorの起動期限に統一した。通知hookの準備だけで
-約3秒、再起動時に5秒を超える実行を観測した。一時診断codeは削除した。遅延Advertise試験の待ち順を、新control起動→Solicit再送→上流再開→PD/正常/通信へ変更した。
-以前のcontrol正常待ちの停止をPD待ちの循環と断定したが、ソース上は未取得でも起動可能であり原因は未確定。
-
-control交換後の遅いAdvertiseが次のSolicit再送時刻まで待つ原因も修正した。旧routerdの
-`pkg/pdclient/client.go` とRFC8415 18.2.1を照合し、初回RT後の有効なAdvertiseでは即Requestへ進む。
-同じDUID/IAIDでのPD再取得と取得DNSを使う両family TCP/UDPが再試験で成立した。
-
-`appliance-update` の実HGW・独立BusyBox/dhcpcd・Cloudflare DoH・条件付きDNS・DS-Liteの90秒試験は
-終了0。9回のIPv4/IPv6 HTTPS・UDP/TCP DNS、DHCPv4自然更新、PD強制交換2.03秒、
-通常PD交換4.76秒、全daemon再起動4.22秒後の両端末通信と最終RA/経路撤去が成立した。
-自然PD Renewは期限前で0回。最初の実行は通信復旧後に専用capture不在で終了1だった。
-製品がWANをupにする前のcaptureを `any` のUDP546取得に直し、開始を確認してから進める。
-19:44開始の長時間版のSERVFAILは未解決。query logと失敗時の既存DNS status/eventsを有効にした。
-22:41開始の7800秒HGW＋Tailscale観測は、48分・253回まで進み、LAN→peer IPv4でtimeoutとなり終了1。
-自然PD更新前であり長時間受入は未合格。TCP/UDPのどちらかと損失境界はまだ特定できていない。これはpaired boot接続前に固定したforwarding buildで、
-routerd SHA256 `3cb0bccd0776206c894e75d8d4818730f304c60115ba1e270235310179ca50c3`。
-自然更新と最終復旧は未合格。起動/確定処理を変更した後の署名VMとは区別する。
-homert03実設定を移行処理に入力すると147指摘で拒否された。これは機能欠落数ではなく、明示policy、
-動的条件、owner関係、schema差分等を含む。実設定全体の意図をnative構成へ整理して受け入れる作業は残る。
+更新試験はprojectのMake経路で生成した`base/next/damaged`の3 command setを
+`QEMU_UPDATE_BINARIES`へ指定する。`make qemu-pppoe QEMU_PROFILE=update`は通常更新と復帰、
+`QEMU_PROFILE=corrupt-recovery`は既知の正常版からの破損候補拒否と最終停止、
+`QEMU_PROFILE=worker-recovery`はworker交換を対象とする。更新/復帰profileには
+`QEMU_POWER_ACTION=reboot`、構築済み`IMAGE_DIR`、独立ISCの`DHCP6_SERVER`が必要。
+全command/publisherのnative ABIとarchitectureを揃える。試験中の入力はprivate stageへ固定する。
+QEMUの512MiB/2 CPU/TCGでのPD更新後UDP失敗は別のworker-recovery実行で未解決であり、全性能の合格とはしない。
 
 ## 現在のLAN実装: routerdの再利用（2026-10-28）
 

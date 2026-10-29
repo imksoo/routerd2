@@ -5,7 +5,9 @@
   "state_dir": "/var/lib/routerd",
   "engines": {
     "pppoe": "/usr/lib/routerd/pppoe-engine.tar",
-    "dhcp_server": "/usr/lib/routerd/dnsmasq-engine.tar"
+    "dhcp_server": "/usr/lib/routerd/dnsmasq-engine.tar",
+    "vrrp": "/usr/lib/routerd/conntrack-engine.tar",
+    "tailscale": "/usr/lib/routerd/tailscale-engine.tar"
   },
   "kernel_modules": [
     "virtio_pci",
@@ -34,7 +36,8 @@
     "ip6_tunnel",
     "pppoe",
     "ppp_deflate",
-    "bsd_comp"
+    "bsd_comp",
+    "tun"
   ],
   "ssh": {
     "listen": "0.0.0.0:22",
@@ -59,6 +62,7 @@
     "vrrp": "/usr/libexec/routerd-modules",
     "bgp": "/usr/libexec/routerd-modules",
     "bfd": "/usr/libexec/routerd-modules",
-    "dhcp6_server": "/usr/libexec/routerd-modules"
+    "dhcp6_server": "/usr/libexec/routerd-modules",
+    "tailscale": "/usr/libexec/routerd-modules"
   }
 }

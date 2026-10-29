@@ -1,4 +1,4 @@
-2026-10-29 03:50 UTC: native-58/network journal15。PPP default経路の寿命を実sessionへ戻し、Health条件付きPolicyRuleには元の期限を渡してwriterで撤去する。独立RP-PPPoEのPAP/CHAP、Health/PBR切替・失効・制御停止・PPP強制終了/対向停止復帰、同じDNS TCP接続の保持が成立。二WANのHealth/PBR切替・複数経路も成立。隔離した変更単位のmake check・Race・vet・Linux両architecture buildは終了0。未commitの署名更新は正常確定まで成立したが、破損候補復帰は再検証中。HGW/Tailscale自然更新を含む長時間観測、NTPの学習先接続、全homert受入・対象実機・他対象・cloud等の全体ゴールは未完了。[引き継ぎ](pve-codex-handoff.md)を参照。
+2026-10-29 04:20 UTC: native-58の署名SSH通常更新・正常確定と、破損候補の実行前拒否・既知正常版での自動DNS/両family TCP/UDP/SSH/DUID復帰・正常電源断を確認した。全4engine同梱Alpineの構築/PID 1起動と、make check/Race/vet/両architecture静的buildも終了0。HGW/Tailscale長時間観測、NTP学習先・主系条件、全homert受入と対象実機・他対象・cloudを含む全体ゴールは未完了。現在の結果と限界は[引き継ぎ](pve-codex-handoff.md)の最新節を参照。
 
 # 現行 routerd と同等の製品にするための実装計画
 

@@ -531,3 +531,35 @@ func TestPrepareReservesEveryAllowedBootAndFinalSelection(t *testing.T) {
 		})
 	}
 }
+
+// A currently executing sealed image remains independent of disk corruption.
+// Uploading another candidate must not need that unrelated file to be readable.
+func TestStageCandidateDoesNotRequireSelectedPayload(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	active := initializeFixture(t, store)
+	path := filepath.Join(store.options.Root, "releases", active.Digest, "routerd")
+	if err := os.Chmod(path, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("corrupt selected payload"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Status(ctx); err == nil {
+		t.Fatal("corrupt selected image was accepted")
+	}
+	candidate := stageFixture(t, store, "fixture-r2", 2)
+	if err := store.WithState(ctx, func(state State) error {
+		if state.Active == nil || *state.Active != active || state.Pending != nil {
+			t.Fatal("staging changed selection", state)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	image, err := store.openImage(ctx, candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	image.Close()
+}

@@ -18,11 +18,17 @@ The APK installs:
 - `/usr/sbin/routerd`
 - `/usr/libexec/routerd-modules`
 - `/usr/libexec/routerd-logging` (independently built logging worker)
+- `/usr/lib/routerd/{pppoe,dnsmasq,conntrack,tailscale}-engine.tar` with pinned
+  private engine filesystems; their matching source archives accompany the APK
 - `/etc/routerd/config.json` with an empty network configuration
 - `/etc/routerd/boot.json` for explicit appliance startup
 - `/usr/share/licenses/routerd2/LICENSE`
 - `/usr/share/licenses/routerd2/dependencies/` with dependency license texts,
   notices, and their manifest
+
+VRRP election, DNS and DHCPv6 run in Go workers. The conntrack engine supplies
+connection-state synchronization, not the VRRP election. The supervisor owns the
+engine processes; they do not require host services.
 
 It has no runtime package dependencies or init scripts and does not replace an
 existing host's init. Only the custom appliance assembly creates `/init`.

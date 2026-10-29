@@ -5,7 +5,7 @@ The actual factory kernel/initramfs boots as PID 1 with two virtio NICs. Private
 TAP bridges connect its WAN to the AC and its LAN to a separate Linux client.
 Only fixture configuration/password/SSH public key are added to the initramfs.
 Requires root/sudo, QEMU x86_64, pppoe-server, pppd, iproute2, tcpdump, curl,
-OpenSSH, BusyBox, dnsmasq, dig, mke2fs and an independent ISC dhcpd supplied with
+OpenSSH, dhcpcd, dnsmasq, dig, mke2fs and an independent ISC dhcpd supplied with
 --dhcp6-server. A fresh regular-file ext4 disk supplies explicit persistent state.
 """
 import argparse
@@ -18,15 +18,19 @@ from pathlib import Path
 import shutil
 import signal
 import subprocess
+import tempfile
 import time
 
 
-def peer(stage, power_action):
+def peer(stage, power_action, updates, profile):
     children = []
     names = []
 
     def run(a, timeout=8, input=None):
-        return subprocess.run(a, check=True, capture_output=True, text=True, timeout=timeout, input=input).stdout
+        result = subprocess.run(a, capture_output=True, text=True, timeout=timeout, input=input)
+        if result.returncode:
+            raise RuntimeError(f'{a[0]} exited {result.returncode}: {result.stdout}{result.stderr}')
+        return result.stdout
 
     def inside(ns, a):
         return ['ip', 'netns', 'exec', ns] + a
@@ -48,6 +52,16 @@ def peer(stage, power_action):
     try:
         run(['mount', '--make-rprivate', '/'])
         run(['mount', '-t', 'tmpfs', 'tmpfs', '/run'])
+        run(['mount', '-t', 'tmpfs', 'tmpfs', '/var/lib/dhcpcd'])
+        resolver = stage / 'client-resolv.conf'
+        resolver.write_text('')
+        target = Path('/etc/resolv.conf').resolve()
+        if not target.exists():
+            if not target.is_relative_to('/run'):
+                raise RuntimeError('resolver target is absent outside private /run')
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.touch()
+        run(['mount', '--bind', str(resolver), str(target)])
         etc = stage / 'etc'
         etc.mkdir()
         (etc / 'options').write_text('')
@@ -73,6 +87,9 @@ def peer(stage, power_action):
             run(['ip', 'link', 'set', br + 'p', 'master', br])
             run(['ip', 'link', 'set', br + 'p', 'up'])
             run(['ip', '-n', ns, 'link', 'set', dev, 'up'])
+        # A separate management station remains available when client DHCP
+        # startup is the failing behavior. The application client stays dynamic.
+        run(['ip', 'address', 'add', '10.42.0.254/24', 'dev', 'lanbr'])
         run(['ip', '-n', ac, 'addr', 'add', '198.51.100.20/32', 'dev', 'lo'])
         run(['ip', '-n', ac, '-6', 'addr', 'add', '2001:db8:ffff::20/128', 'dev', 'lo'])
         run(inside(ac, ['sysctl', '-qw', 'net.ipv6.conf.all.forwarding=1']))
@@ -89,26 +106,72 @@ def peer(stage, power_action):
         (overlay / 'etc/routerd').mkdir(parents=True)
         run(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-f', str(stage / 'key')])
         boot = json.loads((stage / 'boot-base.json').read_text())
+        # This fixture selects the PPP/DHCP profile; Tailscale/HA engines have
+        # separate communication checks and are not part of these update bundles.
+        boot['workers'].pop('tailscale', None)
+        boot['engines'] = {role: boot['engines'][role] for role in ('pppoe', 'dhcp_server')}
         boot['kernel_modules'] = json.loads((stage / 'input/manifest.json').read_text())['kernel_modules']
         boot['ssh']['authorized_keys'] = [(stage / 'key.pub').read_text().strip()]
         boot['state_volume'] = {'device': '/dev/vda', 'wait_timeout_seconds': 10}
         disk = stage / 'state.ext4'
         with disk.open('xb') as out:
-            out.truncate(256 * 1024 * 1024)
+            out.truncate((1024 if updates else 256) * 1024 * 1024)
         disk.chmod(0o600)
-        run(['mke2fs', '-q', '-F', '-t', 'ext4', '-E', 'lazy_itable_init=0,lazy_journal_init=0', str(disk)], 20)
         (overlay / 'etc/routerd/boot.json').write_text(json.dumps(boot))
         (overlay / 'etc/routerd/password').write_text('routerd2-fixture\n')
         (overlay / 'etc/routerd/password').chmod(0o600)
         service = dict(interface='eth0', ppp_interface='ppp-wan', username='routerd2', password_file='/etc/routerd/password', auth_method='chap', ipv6=True, service_name='ROUTERD2-LAB', ac_name='ROUTERD2-AC', mtu=1454, mru=1454, lcp_echo_interval=1, lcp_echo_failure=3)
-        resources = [{'id': 'wan', 'interface': {'name': 'eth0'}}, {'id': 'lan', 'interface': {'name': 'eth1'}}, {'id': 'lan-address', 'address': {'interface': 'eth1', 'cidr': '10.42.0.1/24'}}, {'id': 'forwarding', 'forwarding': {'ipv4': True, 'ipv6': True, 'ipv4_rp_filter': 0}}, {'id': 'firewall', 'firewall': {'forward': [{'from': 'eth1', 'to': 'ppp-wan'}], 'masquerade': [{'source': '10.42.0.0/24', 'out_interface': 'ppp-wan'}]}}, {'id': 'internet', 'service': {'name': 'internet', 'pppoe': service}}, {'id': 'pd', 'depends_on': ['internet', 'lan'], 'when': {'fact': 'service.internet.active'}, 'service': {'name': 'pd', 'dhcp6': {'interface': 'ppp-wan', 'iaid': 1, 'request_prefix': True, 'prefix_length': 60, 'delegations': [{'name': 'lan', 'interface': 'eth1', 'subnet_id': 1, 'advertise': True}]}}}]
+        resources = [{'id': 'wan', 'interface': {'name': 'eth0'}}, {'id': 'lan', 'interface': {'name': 'eth1'}}, {'id': 'lan-address', 'address': {'interface': 'eth1', 'cidr': '10.42.0.1/24'}}, {'id': 'forwarding', 'forwarding': {'ipv4': True, 'ipv6': True, 'ipv4_rp_filter': 0}}, {'id': 'firewall', 'firewall': {'forward': [{'from': 'eth1', 'to': 'ppp-wan'}], 'masquerade': [{'source': '10.42.0.0/24', 'out_interface': 'ppp-wan'}]}}, {'id': 'internet', 'service': {'name': 'internet', 'pppoe': service}}, {'id': 'pd', 'depends_on': ['internet', 'lan'], 'when': {'fact': 'service.internet.active'}, 'ready_when': {'fact': 'service.pd.active'}, 'service': {'name': 'pd', 'dhcp6': {'interface': 'ppp-wan', 'iaid': 1, 'request_prefix': True, 'prefix_length': 60, 'delegations': [{'name': 'lan', 'interface': 'eth1', 'subnet_id': 1, 'advertise': True}]}}}]
         resources.append({"id":"dns","service":{"name":"dns","dns":{"spec":{"listen":[{"name":"lan","addresses":["10.42.0.1"],"port":53}],"sources":[{"name":"provider","kind":"forward","match":["."],"upstreamFrom":[{"resource":"PPPoESession/internet","field":"dnsServers"}],"queryTimeout":"1s"}]}}}})
         resources.append({'id': 'leases', 'service': {'name': 'leases', 'dhcp_server': {
             'interface': 'eth1', 'server_address': '10.42.0.1', 'authoritative': True, 'sticky_hold_days': 3,
             'primary': {'prefix': '10.42.0.0/24', 'start': '10.42.0.50', 'end': '10.42.0.100',
                         'lease_seconds': 120, 'router': '10.42.0.1', 'dns_servers': ['10.42.0.1']}}}})
-        start(ac,["dnsmasq","--keep-in-foreground","--conf-file=/dev/null","--no-hosts","--no-resolv","--bind-dynamic","--listen-address=192.0.2.1","--address=/ppp.example/198.51.100.77","--local-ttl=0"],"dns")
+        resources.append({'id': 'uplink-health', 'depends_on': ['internet'], 'when': {'fact': 'service.internet.active'}, 'service': {'name': 'uplink-health', 'health': {
+            'interface': 'ppp-wan', 'target': '198.51.100.20', 'protocol': 'tcp', 'port': 18080,
+            'interval_ms': 500, 'timeout_ms': 300, 'healthy_threshold': 1, 'unhealthy_threshold': 2}}})
+        start(ac,["dnsmasq","--keep-in-foreground","--conf-file=/dev/null","--no-hosts","--no-resolv","--bind-dynamic","--listen-address=192.0.2.1","--address=/ppp.example/198.51.100.20","--address=/ppp.example/2001:db8:ffff::20","--local-ttl=0"],"dns")
         (overlay / 'etc/routerd/config.json').write_text(json.dumps({'schema_version': 2, 'resources': resources}))
+        mkfs = ['mke2fs', '-q', '-F', '-t', 'ext4', '-E', 'lazy_itable_init=0,lazy_journal_init=0']
+        if updates:
+            run([str(updates / 'base/routerd'), 'config', 'validate', str(overlay / 'etc/routerd/config.json')])
+            signing = stage / 'release-signing.pem'
+            run(['openssl', 'genpkey', '-algorithm', 'ED25519', '-out', str(signing)])
+            signing.chmod(0o600)
+            publisher = str(stage / 'publisher')
+            trust = stage / 'release-keys.json'
+            trust.write_text(run([publisher, 'trust', '--private-key-file', str(signing)]))
+            trust.chmod(0o600)
+            (overlay / 'etc/routerd/release-keys.json').write_text(trust.read_text())
+            (overlay / 'etc/routerd/release-keys.json').chmod(0o600)
+            bundles, packed, versions = {}, {}, {}
+            roles = [{'role': role, 'artifact': 'routerd-logging' if role == 'logging' else 'routerd-modules'} for role in boot['workers']]
+            for sequence, name in enumerate(('base', 'next', 'damaged'), 1):
+                versions[name] = json.loads(run([str(updates / name / 'routerd'), 'version']))['release_id']
+                layout = {'boot_abi': 1, 'worker_abi': 5, 'entrypoint': 'routerd', 'roles': roles,
+                          'engines': [{'role': role, 'artifact': role + '-image', 'sources': role + '-sources'} for role in ('pppoe', 'dhcp_server')],
+                          'artifacts': [{'name': command, 'kind': 'native', 'command': command, 'file': str(updates / name / command)}
+                                        for command in ('routerd', 'routerd-modules', 'routerd-logging')] +
+                                       [{'name': role + '-' + kind, 'kind': 'data', 'file': str(stage / file)}
+                                        for role, kind, file in (('pppoe', 'image', 'pppoe-engine.tar'), ('pppoe', 'sources', 'pppoe-sources.tar'),
+                                                                 ('dhcp_server', 'image', 'dnsmasq-engine.tar'), ('dhcp_server', 'sources', 'dnsmasq-sources.tar'))]}
+                layoutfile = stage / (name + '-layout.json')
+                layoutfile.write_text(json.dumps(layout))
+                bundles[name] = stage / (name + '.tar')
+                packed[name] = json.loads(run([publisher, 'pack', '--private-key-file', str(signing), '--layout', str(layoutfile),
+                                              '--release-id', versions[name], '--sequence', str(sequence), '--target-arch', 'amd64',
+                                              '--output', str(bundles[name])], 120))
+            initial = stage / 'initial-state'
+            initial.mkdir(mode=0o700)
+            selector = ['--root', str(initial / 'releases'), '--trust-file', str(trust), '--target-arch', 'amd64']
+            installer = str(updates / 'base/routerd')
+            baseline = json.loads(run([installer, 'release', 'stage', *selector, '--file', str(bundles['base'])], 120))
+            run([installer, 'release', 'initialize', *selector, '--digest', baseline['digest']], 120)
+            boot.update(workers={}, engines={}, release={'root': '/var/lib/routerd/releases', 'trust_file': '/etc/routerd/release-keys.json',
+                                                        'ready_timeout_seconds': 90, 'stable_seconds': 2})
+            (overlay / 'etc/routerd/boot.json').write_text(json.dumps(boot))
+            mkfs += ['-d', str(initial)]
+        run(mkfs + [str(disk)], 30)
         spec = importlib.util.spec_from_file_location('mk', stage / 'mkinitramfs.py')
         mk = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mk)
@@ -117,8 +180,13 @@ def peer(stage, power_action):
         with (stage / 'initrd.gz').open('ab') as out:
             out.write((stage / 'overlay.gz').read_bytes())
         shutil.copyfile(stage / 'input/vmlinuz', stage / 'vmlinuz')
+        boot_started = time.monotonic()
         q = start(None, ['qemu-system-x86_64', '-machine', 'q35', '-accel', 'tcg', '-cpu', 'max', '-m', '512M', '-smp', '2', '-display', 'none', '-monitor', 'none', '-nodefaults', '-serial', 'file:' + str(stage / 'serial.log'), '-kernel', str(stage / 'vmlinuz'), '-initrd', str(stage / 'initrd.gz'), '-drive', 'file=' + str(disk) + ',if=virtio,format=raw', '-append', 'console=ttyS0,115200 panic=-1', '-netdev', 'tap,id=wan,ifname=tapwan,script=no,downscript=no', '-device', 'virtio-net-pci,netdev=wan,mac=52:54:00:12:34:56', '-netdev', 'tap,id=lan,ifname=taplan,script=no,downscript=no', '-device', 'virtio-net-pci,netdev=lan,mac=52:54:00:12:34:57'], 'qemu')
         print('Private appliance peer stage', stage, flush=True)
+        ssh = ['ssh', '-F', '/dev/null', '-i', str(stage / 'key'), '-o', 'BatchMode=yes', '-o', 'IdentitiesOnly=yes', '-o', 'StrictHostKeyChecking=accept-new', '-o', 'UserKnownHostsFile=' + str(stage / 'known-hosts'), '-o', 'ConnectTimeout=2', 'admin@10.42.0.1']
+
+        def query(cmd):
+            return json.loads(run(ssh + [cmd], 12))
 
         def booted():
             if q.poll() is not None:
@@ -127,42 +195,52 @@ def peer(stage, power_action):
             if 'Kernel panic' in text:
                 raise RuntimeError('guest panic')
             return 'ROUTERD_READY' in text
-        wait(booted, 75)
+        wait(booted, 180 if updates else 75)
+        print('Observed appliance boot readiness seconds', round(time.monotonic() - boot_started, 2), flush=True)
         dhcp_events = stage / 'client-dhcp-events'
         hook = stage / 'client-dhcp.sh'
-        hook.write_text('#!/bin/sh\ncase "$1" in bound|renew)\n'
-                        'ip address replace "$ip/24" dev "$interface" || exit 1\n'
-                        'ip route replace default via "$router" dev "$interface" || exit 1\n'
-                        'printf "%s %s %s %s\\n" "$1" "$ip" "$router" "$dns" >> "' + str(dhcp_events) + '";;\nesac\n')
+        hook.write_text('#!/bin/sh\ncase "$reason" in BOUND|RENEW|REBIND|REBOOT)\n'
+                        'printf "%s %s %s %s\\n" "$reason" "$new_ip_address" "$new_routers" "$new_domain_name_servers" >> "' + str(dhcp_events) + '";;\nesac\n'
+                        'resolvconf=/nonexistent; skip_hooks="01-test 30-hostname 50-ntp.conf 50-timesyncd.conf dhcpcd.enter-hook dhcpcd.exit-hook"\n'
+                        'export resolvconf skip_hooks\nexec /usr/lib/dhcpcd/dhcpcd-run-hooks "$@"\n')
         hook.chmod(0o500)
-        start(lan, ['busybox', 'udhcpc', '-f', '-i', 'client0', '-s', str(hook), '-p', str(stage / 'client-dhcp.pid')], 'client-dhcp')
+        client_config = stage / 'client-dhcp.conf'
+        client_config.write_text('ipv6rs\nslaac hwaddr\nnoipv4ll\noption domain_name_servers, domain_name, domain_search\n')
+        start(lan, ['dhcpcd', '-B', '-d', '-f', str(client_config), '-c', str(hook), 'client0'], 'client-dhcp')
         wait(lambda: dhcp_events.exists() and bool(dhcp_events.read_text().splitlines()))
         lease = dhcp_events.read_text().splitlines()[-1].split()
         assert ipaddress.ip_address(lease[1]) in ipaddress.ip_network('10.42.0.0/24')
         assert lease[2:] == ['10.42.0.1', '10.42.0.1'], 'appliance DHCP did not supply its router and DNS'
         client_dns = lease[3]
-        print('PASS independent LAN DHCP acquired address/gateway/DNS from the packaged engine under PID 1', flush=True)
-        ssh = ['ssh', '-F', '/dev/null', '-i', str(stage / 'key'), '-o', 'BatchMode=yes', '-o', 'IdentitiesOnly=yes', '-o', 'StrictHostKeyChecking=accept-new', '-o', 'UserKnownHostsFile=' + str(stage / 'known-hosts'), '-o', 'ConnectTimeout=2', 'admin@10.42.0.1']
-
-        def query(cmd):
-            return json.loads(run(inside(lan, ssh + [cmd]), 12))
-
+        wait(lambda: 'nameserver ' + client_dns in resolver.read_text())
+        print('PASS independent LAN DHCP and standard resolver hook acquired address/gateway/DNS from the packaged engine under PID 1', flush=True)
         def pd_ready():
             return any(x['name'] == 'service.pd' and x.get('snapshot', {}).get('state') == 'bound' for x in query('show services')['instances']) and query('show config')['healthy']
-        status = query('show status')
+        status = None
+        def required_workers_ready():
+            nonlocal status
+            status = query('show status')
+            return status['ready']
+        wait(required_workers_ready)
         assert status['pid'] == 1 and status['platform'] == 'appliance'
-        expected_release = json.loads((stage / 'input/manifest.json').read_text())['release_id']
+        expected_release = versions['base'] if updates else json.loads((stage / 'input/manifest.json').read_text())['release_id']
         assert status['release_id'] == expected_release
         assert all(m['release_id'] == expected_release for m in status['modules'] if m['required'])
 
         def traffic():
-            for addr in ['198.51.100.20', '[2001:db8:ffff::20]']:
-                assert run(inside(lan, ['curl', '--noproxy', '*', '--max-time', '4', '-sS', '-o', '/dev/null', '-w', '%{http_code}', f'http://{addr}:18080/'])) == '200'
-            for family, addr in [('AF_INET', '198.51.100.20'), ('AF_INET6', '2001:db8:ffff::20')]:
-                run(inside(lan, ['python3', '-c', f'import socket;s=socket.socket(socket.{family},socket.SOCK_DGRAM);s.settimeout(3);s.connect(({addr!r},18081));s.send(b"actual-appliance");assert s.recv(100)==b"actual-appliance"']))
+            for family in ('-4', '-6'):
+                try:
+                    assert run(inside(lan, ['curl', family, '--noproxy', '*', '--max-time', '4', '-sS', '-o', '/dev/null', '-w', '%{http_code}', 'http://peer.ppp.example:18080/'])) == '200'
+                except Exception as error:
+                    raise RuntimeError(f'LAN TCP {family} failed: {error}') from error
+            for family in ('AF_INET', 'AF_INET6'):
+                try:
+                    run(inside(lan, ['python3', '-c', f'import socket;s=socket.socket(socket.{family},socket.SOCK_DGRAM);s.settimeout(3);s.connect(socket.getaddrinfo("peer.ppp.example",18081,socket.{family},socket.SOCK_DGRAM)[0][4]);s.send(b"actual-appliance");assert s.recv(100)==b"actual-appliance"']))
+                except Exception as error:
+                    raise RuntimeError(f'LAN UDP {family} failed: {error}') from error
 
             for transport in ([],["+tcp"]):
-                assert run(inside(lan,["dig","@"+client_dns,"peer.ppp.example","A","+tries=1","+time=2","+short"]+transport)).strip()=="198.51.100.77"
+                assert run(inside(lan,["dig","@"+client_dns,"peer.ppp.example","A","+tries=1","+time=2","+short"]+transport)).strip()=="198.51.100.20"
 
         def ppp_ready():
             return bool([x for x in json.loads(run(['ip', '-n', ac, '-j', 'link', 'show'])) if x['ifname'].startswith('ppp')])
@@ -194,55 +272,12 @@ def peer(stage, power_action):
         if power_action == 'reboot':
             resources[1]['interface']['mtu'] = 1400
             request = {'expected_revision': query('show config')['revision'], 'request_id': 'appliance-persistent-mtu', 'config': {'schema_version': 2, 'resources': resources}}
-            committed = json.loads(run(inside(lan, ssh + ['configure']), 12, json.dumps(request)))
+            configure_at = time.monotonic()
+            committed = json.loads(run(ssh + ['configure'], 30, json.dumps(request)))
+            print('Appliance configuration applied in', round(time.monotonic() - configure_at, 2), 'seconds', flush=True)
             assert committed['revision'] == request['expected_revision'] + 1
             wait(pd_ready)
             traffic()
-        old = next((x for x in query('show status')['modules'] if x['name'] == 'service.internet'))
-        old_pd = query('show services pd')['generation']
-        dns_generation=next(x['generation'] for x in query('show status')['modules'] if x['name']=='service.dns')
-        old_index = next((x['ifindex'] for x in json.loads(run(['ip', '-n', ac, '-j', 'link', 'show'])) if x['ifname'].startswith('ppp')))
-        releases = (stage / 'dhcp6.log').read_text().count('releases prefix ')
-        duid = query('show services pd')['snapshot']['client_duid']
-        revision = query('show config')['revision']
-        restart_at = time.time()
-        assert query('restart service.internet')['accepted']
-        wait(lambda: any((x['name'] == 'service.internet' and x['generation'] > old['generation'] and x['ready'] for x in query('show status')['modules'])), 40)
-        wait(lambda: any((x['ifname'].startswith('ppp') and x['ifindex'] != old_index for x in json.loads(run(['ip', '-n', ac, '-j', 'link', 'show'])))))
-        assert (stage / 'dhcp6.log').read_text().count('releases prefix ') == releases, 'operator restart released the PD lease'
-        d.terminate()
-        d.wait(timeout=5)
-        d = server()
-        wait(lambda: any((x['name'] == 'service.pd' and x.get('generation', 0) > old_pd and (x.get('snapshot', {}).get('state') == 'bound') for x in query('show services')['instances'])) and query('show config')['healthy'])
-        wait(client_ready)
-        traffic()
-        print('PASS appliance PPP worker/session restart reacquired PD and restored IPv4/IPv6 TCP/UDP', flush=True)
-        assert next(x['generation'] for x in query('show status')['modules'] if x['name']=='service.dns')==dns_generation
-        assert query('show services pd')['snapshot']['client_duid'] == duid
-        assert query('show config')['revision'] == revision
-        before_control = {x['name']: x for x in query('show status')['modules']}
-        control_peer_index = next(x['ifindex'] for x in json.loads(run(['ip', '-n', ac, '-j', 'link', 'show'])) if x['ifname'].startswith('ppp'))
-        releases = (stage / 'dhcp6.log').read_text().count('releases prefix ')
-        control_restart_at = time.time()
-        assert query('restart control')['accepted']
-        wait(lambda: any(x['name'] == 'control' and x['generation'] > before_control['control']['generation'] and x['ready'] for x in query('show status')['modules']), 60)
-        wait(lambda: any(x['name'] == 'service.internet' and x['generation'] > before_control['service.internet']['generation'] and x['ready'] for x in query('show status')['modules']))
-        assert (stage / 'dhcp6.log').read_text().count('releases prefix ') == releases, 'control restart released the PD lease'
-        wait(lambda: any(x['ifname'].startswith('ppp') and x['ifindex'] != control_peer_index for x in json.loads(run(['ip', '-n', ac, '-j', 'link', 'show']))))
-        assert next(x for x in query('show status')['modules'] if x['name'] == 'network')['pid'] == before_control['network']['pid']
-        assert next(x for x in query('show status')['modules'] if x['name'] == 'management')['pid'] == before_control['management']['pid']
-        d.terminate()
-        d.wait(timeout=5)
-        d = server()
-        wait(pd_ready)
-        wait(client_ready)
-        traffic()
-        assert query('show services pd')['snapshot']['client_duid'] == duid
-        assert query('show config')['revision'] == revision
-        print('PASS control restart withdrew old PD before PPP/control replacement, retained network/management and restored both-family TCP/UDP/DNS', flush=True)
-        for capture in (wan_capture, lan_capture):
-            capture.send_signal(signal.SIGINT)
-            capture.wait(timeout=3)
         def packets(name, since):
             records = []
             for line in run(['tcpdump', '-nn', '-tt', '-vv', '-r', str(stage / name)]).splitlines():
@@ -257,16 +292,142 @@ def peer(stage, power_action):
             padts = [stamp for stamp, line in wan_packets if 'PPPoE PADT' in line]
             withdrawals = [stamp for stamp, line in packets(lan_name, since) if 'router advertisement' in line and 'router lifetime 0s' in line and 'valid time 0s, pref. time 0s' in line]
             assert withdrawals and padts and min(withdrawals) < min(padts), 'PPP teardown preceded RA withdrawal'
-        withdrawal_order('wan.pcap', 'lan.pcap', restart_at)
-        withdrawal_order('wan.pcap', 'lan.pcap', control_restart_at)
-        print('PASS actual appliance RA withdrawal before PADT without Release; stable DUID, configuration and DNS worker', flush=True)
+        duid = query('show services pd')['snapshot']['client_duid']
+        revision = query('show config')['revision']
+        if profile == 'worker-recovery':
+            old = next((x for x in query('show status')['modules'] if x['name'] == 'service.internet'))
+            old_pd = query('show services pd')['generation']
+            dns_generation=next(x['generation'] for x in query('show status')['modules'] if x['name']=='service.dns')
+            old_index = next((x['ifindex'] for x in json.loads(run(['ip', '-n', ac, '-j', 'link', 'show'])) if x['ifname'].startswith('ppp')))
+            releases = (stage / 'dhcp6.log').read_text().count('releases prefix ')
+            restart_at = time.time()
+            restart_started = time.monotonic()
+            assert query('restart service.internet')['accepted']
+            wait(lambda: any((x['name'] == 'service.internet' and x['generation'] > old['generation'] and x['ready'] for x in query('show status')['modules'])), 40)
+            wait(lambda: any((x['ifname'].startswith('ppp') and x['ifindex'] != old_index for x in json.loads(run(['ip', '-n', ac, '-j', 'link', 'show'])))))
+            assert (stage / 'dhcp6.log').read_text().count('releases prefix ') == releases, 'operator restart released the PD lease'
+            d.terminate()
+            d.wait(timeout=5)
+            d = server()
+            wait(lambda: any((x['name'] == 'service.pd' and x.get('generation', 0) > old_pd and (x.get('snapshot', {}).get('state') == 'bound') for x in query('show services')['instances'])) and query('show config')['healthy'])
+            wait(client_ready)
+            traffic()
+            print('Observed PPP restart communication seconds', round(time.monotonic() - restart_started, 2), flush=True)
+            print('PASS appliance PPP worker/session restart reacquired PD and restored IPv4/IPv6 TCP/UDP', flush=True)
+            assert next(x['generation'] for x in query('show status')['modules'] if x['name']=='service.dns')==dns_generation
+            assert query('show services pd')['snapshot']['client_duid'] == duid
+            assert query('show config')['revision'] == revision
+            before_control = {x['name']: x for x in query('show status')['modules']}
+            control_peer_index = next(x['ifindex'] for x in json.loads(run(['ip', '-n', ac, '-j', 'link', 'show'])) if x['ifname'].startswith('ppp'))
+            releases = (stage / 'dhcp6.log').read_text().count('releases prefix ')
+            d.terminate()
+            d.wait(timeout=5)
+            late_solicits = start(None, ['tcpdump', '-l', '-nn', '-tt', '-vv', '-i', 'tapwan', '-c', '2',
+                                        'pppoes and ip6 and udp src port 546 and ip6[48] = 1'], 'late-solicits')
+            control_restart_at = time.time()
+            control_restart_started = time.monotonic()
+            assert query('restart control')['accepted']
+            wait(lambda: any(x['name'] == 'control' and x['generation'] > before_control['control']['generation'] and x.get('pid', 0) > 1 for x in query('show status')['modules']), 60)
+            wait(lambda: any(x['name'] == 'service.internet' and x['generation'] > before_control['service.internet']['generation'] and x['ready'] for x in query('show status')['modules']))
+            assert (stage / 'dhcp6.log').read_text().count('releases prefix ') == releases, 'control restart released the PD lease'
+            wait(lambda: any(x['ifname'].startswith('ppp') and x['ifindex'] != control_peer_index for x in json.loads(run(['ip', '-n', ac, '-j', 'link', 'show']))))
+            assert next(x for x in query('show status')['modules'] if x['name'] == 'network')['pid'] == before_control['network']['pid']
+            assert next(x for x in query('show status')['modules'] if x['name'] == 'management')['pid'] == before_control['management']['pid']
+            wait(lambda: late_solicits.poll() is not None)
+            assert late_solicits.returncode == 0, (stage / 'late-solicits.log').read_text()
+            transactions = re.findall(r'dhcp6 solicit \(xid=([0-9a-f]+)', (stage / 'late-solicits.log').read_text())
+            assert len(transactions) == 2 and transactions[0] == transactions[1], 'PD worker changed exchange during peer outage'
+            late_server_at = time.time()
+            d = server()
+            wait(lambda: any(x['name'] == 'control' and x['generation'] > before_control['control']['generation'] and x['ready'] for x in query('show status')['modules']))
+            wait(pd_ready)
+            wait(client_ready)
+            traffic()
+            assert query('show services pd')['snapshot']['client_duid'] == duid
+            assert query('show config')['revision'] == revision
+            print('Observed control restart communication seconds', round(time.monotonic() - control_restart_started, 2), flush=True)
+            print('PASS control restart withdrew old PD before PPP/control replacement, retained network/management and restored both-family TCP/UDP/DNS', flush=True)
+            for capture in (wan_capture, lan_capture):
+                capture.send_signal(signal.SIGINT)
+                capture.wait(timeout=3)
+            withdrawal_order('wan.pcap', 'lan.pcap', restart_at)
+            withdrawal_order('wan.pcap', 'lan.pcap', control_restart_at)
+            later = packets('wan.pcap', late_server_at)
+            offered = min(t for t, packet in later if 'dhcp6 advertise' in packet)
+            requested = min(t for t, packet in later if t >= offered and 'dhcp6 request' in packet)
+            print('Observed recovered ISC Advertise -> Request seconds', round(requested - offered, 3), flush=True)
+            print('PASS actual appliance RA withdrawal before PADT without Release; stable DUID, configuration and DNS worker', flush=True)
+        else:
+            # Update acceptance starts from working client communication. Worker
+            # restart faults remain the separate default communication profile.
+            for capture in (wan_capture, lan_capture):
+                capture.send_signal(signal.SIGINT)
+                capture.wait(timeout=3)
         (stage / 'status.json').write_text(json.dumps(query('show status')))
-        shutdown_captures = [start(None, ['tcpdump', '--immediate-mode', '-Z', 'root', '-U', '-n', '-i', nic, '-w', str(stage / name)], name)
-                             for nic, name in [('tapwan', 'shutdown-wan.pcap'), ('taplan', 'shutdown-lan.pcap')]]
+        shutdown_captures = [start(None, ['tcpdump', '--immediate-mode', '-Z', 'root', '-U', '-n', '-i', nic, '-w', str(stage / name)] + capture_filter, name)
+                             for nic, name, capture_filter in [('tapwan', 'shutdown-wan.pcap', []), ('taplan', 'shutdown-lan.pcap', ['icmp or icmp6 or port 53 or port 18080 or port 18081'])]]
         wait(lambda: all((stage / name).exists() and (stage / name).stat().st_size >= 24 for name in ('shutdown-wan.pcap', 'shutdown-lan.pcap')))
+        if profile == 'update':
+            initial_selection = query('update status')
+            interrupted = subprocess.Popen(ssh + ['update stage'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            children.append(interrupted)
+            with bundles['next'].open('rb') as source:
+                interrupted.stdin.write(source.read(3 << 20))
+                interrupted.stdin.flush()
+            interrupted.terminate()
+            interrupted.stdin.close()
+            interrupted.wait(timeout=10)
+            traffic()
+            assert query('update status')['generation'] == initial_selection['generation'], 'interrupted upload changed selection'
+            print('PASS SSH upload interruption preserved current selection and client communication', flush=True)
+
+            uploading = subprocess.Popen(ssh + ['update stage'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            children.append(uploading)
+            health = query('show services uplink-health')
+            with bundles['next'].open('rb') as source:
+                # Exceed the former SSH input limit and ordinary HTTP read
+                # deadline while actually using forwarding and management.
+                for _ in range(4):
+                    uploading.stdin.write(source.read(1 << 20))
+                    uploading.stdin.flush()
+                    traffic()
+                    assert query('update status')['generation'] == initial_selection['generation']
+                    time.sleep(4)
+                shutil.copyfileobj(source, uploading.stdin)
+            uploading.stdin.close()
+            uploading.stdin = None
+            output, diagnostic = uploading.communicate(timeout=300)
+            assert uploading.returncode == 0, diagnostic
+            staged = json.loads(output)
+            assert staged['digest'] == packed['next']['digest']
+            current_health = query('show services uplink-health')
+            assert current_health['generation'] == health['generation'] and current_health['sequence'] > health['sequence'], 'upload stopped Health observations'
+            traffic()
+            selection = query('update status')
+            request = {'release': staged, 'expected_generation': selection['generation'], 'expected_revision': query('show config')['revision']}
+            prepare_started = time.monotonic()
+            with tempfile.TemporaryFile(mode='w+') as preparation:
+                json.dump(request, preparation)
+                preparation.seek(0)
+                preparing = subprocess.Popen(ssh + ['update prepare'], stdin=preparation, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                children.append(preparing)
+                while preparing.poll() is None:
+                    if time.monotonic() - prepare_started > 300:
+                        raise RuntimeError('signed update preparation deadline')
+                    assert query('show config')['revision'] == request['expected_revision']
+                    traffic()
+                    time.sleep(1)
+                output, diagnostic = preparing.communicate(timeout=5)
+            assert preparing.returncode == 0, diagnostic
+            prepared = json.loads(output)
+            print('Observed signed preparation seconds', round(time.monotonic() - prepare_started, 2), flush=True)
+            assert prepared['pending']['release']['digest'] == staged['digest'] and prepared['active'] == selection['active']
+            traffic()
+            print('PASS signed SSH upload returned its result/exit status; forwarding/Health continued; target preflight prepared the next runtime/configuration pair', flush=True)
         power_at = time.time()
         power_status = query('show status')
         power_index = next(x['ifindex'] for x in json.loads(run(['ip', '-n', ac, '-j', 'link', 'show'])) if x['ifname'].startswith('ppp'))
+        power_started = time.monotonic()
         assert query(power_action)['accepted']
         if power_action == 'poweroff':
             assert q.wait(timeout=40) == 0, 'QEMU failed during poweroff'
@@ -277,7 +438,8 @@ def peer(stage, power_action):
                 text = (stage / 'serial.log').read_text(errors='replace')
                 assert 'Kernel panic' not in text
                 return text.count('Linux version ') >= 2 and text.rfind('ROUTERD_READY') > text.rfind('Linux version ')
-            wait(rebooted, 75)
+            wait(rebooted, 180 if updates else 75)
+            print('Observed kernel/runtime reboot readiness seconds', round(time.monotonic() - power_started, 2), flush=True)
         serial = (stage / 'serial.log').read_text(errors='replace')
         assert 'Kernel panic' not in serial
         marker = 'Power down' if power_action == 'poweroff' else 'Restarting system'
@@ -297,21 +459,115 @@ def peer(stage, power_action):
             traffic()
             assert query('show status')['instance_id'] != power_status['instance_id']
             config = query('show config')
-            assert config['revision'] == revision
+            assert config['revision'] == revision + (1 if profile == 'update' else 0)
             assert next(r for r in config['config']['resources'] if r['id'] == 'lan')['interface']['mtu'] == 1400
             assert query('show services pd')['snapshot']['client_duid'] == duid
             print('PASS second appliance boot: ext4 persisted committed revision/MTU, DUID and pinned SSH host key; new PPP/PD restored both-family TCP/UDP/DNS', flush=True)
+            if profile == 'update':
+                assert query('show status')['release_id'] == versions['next']
+                print('Observed selected trial supervisor: ' + json.dumps(query('show status')), flush=True)
+                trial_health = None
+                trial_log_sequence = 0
+                def update_confirmed():
+                    nonlocal trial_health, trial_log_sequence
+                    config = query('show config')
+                    services = config['services']
+                    current = (config['healthy'], config['revision'], services['phase'], services.get('last_error'))
+                    if current != trial_health:
+                        print('Observed update trial health', round(time.monotonic() - power_started, 2), current, flush=True)
+                        trial_health = current
+                    records = query('show logs module supervisor level INFO limit 200')['records']
+                    for record in records:
+                        if record['sequence'] > trial_log_sequence and record['message'].startswith('runtime update trial'):
+                            print('Observed update trial audit', record['timestamp'], record['message'], record.get('attributes'), flush=True)
+                        trial_log_sequence = max(trial_log_sequence, record['sequence'])
+                        if record['message'] == 'runtime update confirmed' and record.get('attributes', {}).get('release') == versions['next']:
+                            return True
+                    return False
+                wait(update_confirmed, 120)
+                assert query('update status').get('pending') is None
+                assert query('update status')['active']['digest'] == staged['digest']
+                print('PASS SSH-prepared signed update booted and confirmed with automatic client DNS, IPv4/IPv6 traffic and retained DUID/SSH identity', flush=True)
+            if profile in ('update', 'corrupt-recovery'):
+                with bundles['damaged'].open('rb') as source:
+                    uploaded = subprocess.run(ssh + ['update stage'], stdin=source, capture_output=True, text=True, timeout=330)
+                assert uploaded.returncode == 0, uploaded.stderr
+                damaged = json.loads(uploaded.stdout)
+                selection = query('update status')
+                known_good = selection['active']
+                known_release = query('show status')['release_id']
+                recovery_revision = query('show config')['revision']
+                request = {'release': damaged, 'expected_generation': selection['generation'], 'expected_revision': recovery_revision}
+                json.loads(run(ssh + ['update prepare'], 300, json.dumps(request)))
             assert query('poweroff')['accepted']
             assert q.wait(timeout=40) == 0
             assert 'Power down' in (stage / 'serial.log').read_text(errors='replace')
+            if profile in ('update', 'corrupt-recovery'):
+                # PID 1 syncs before poweroff; ext4 may still need journal
+                # replay. debugfs must not edit blocks that a later replay
+                # would overwrite. Replay only the journal, then require a
+                # clean filesystem before and after changing the executable.
+                replay = subprocess.run(['e2fsck', '-p', '-E', 'journal_only', str(disk)], capture_output=True, text=True, timeout=30)
+                assert replay.returncode in (0, 1), replay.stdout + replay.stderr
+                run(['e2fsck', '-f', '-n', str(disk)], 30)
+                path = '/releases/releases/' + damaged['digest'] + '/routerd'
+                broken = stage / 'damaged-entrypoint'
+                run(['debugfs', '-R', 'dump -p ' + path + ' ' + str(broken), str(disk)], 30)
+                with broken.open('r+b') as file:
+                    file.seek(4096)
+                    value = file.read(1)
+                    file.seek(4096)
+                    file.write(bytes([value[0] ^ 1]))
+                run(['debugfs', '-w', '-R', 'rm ' + path, str(disk)], 30)
+                run(['debugfs', '-w', '-R', 'write ' + str(broken) + ' ' + path, str(disk)], 30)
+                run(['debugfs', '-w', '-R', 'set_inode_field ' + path + ' mode 0100500', str(disk)], 30)
+                run(['e2fsck', '-f', '-n', str(disk)], 30)
+                (stage / 'serial.log').unlink()
+                q = start(None, q.args, 'qemu-recovery')
+                wait(booted, 180)
+                wait(ppp_ready)
+                d.terminate()
+                d.wait(timeout=5)
+                d = server()
+                wait(pd_ready, 90)
+                wait(client_ready)
+                traffic()
+                recovered = query('update status')
+                print('Observed rejected-candidate selection: ' + json.dumps(recovered), flush=True)
+                assert recovered['active'] == known_good and recovered.get('pending') is None
+                assert recovered.get('last_failure'), 'corrupt trial left no durable failure'
+                assert query('show status')['release_id'] == known_release
+                assert query('show services pd')['snapshot']['client_duid'] == duid
+                # Rejection precedes candidate execution and startup adoption.
+                # The already adopted known-good configuration stays unchanged.
+                assert query('show config')['revision'] == recovery_revision
+                assert query('poweroff')['accepted']
+                assert q.wait(timeout=40) == 0
+                print('PASS corrupt signed trial automatically fell back to the confirmed runtime/configuration; SSH identity, DUID and automatic DNS/IPv4/IPv6 TCP/UDP recovered', flush=True)
 
-    except Exception:
+    except Exception as failure:
+        print('FAIL appliance communication: ' + repr(failure), flush=True)
+        for command in (['ip', '-n', lan, '-j', 'address'], ['ip', '-n', lan, '-j', 'route'], ['ip', '-n', lan, '-j', '-6', 'route']):
+            try:
+                print('Failure client kernel ' + ' '.join(command) + ': ' + run(command), flush=True)
+            except Exception as error:
+                print('Failure client kernel unavailable: ' + str(error), flush=True)
         if 'query' in locals() and q.poll() is None:
-            for command in ('show status', 'show config', 'show services', 'show logs level INFO limit 30'):
+            for command in ('show network routes', 'show network interfaces', 'show status', 'show config', 'show services', 'show logs module supervisor level INFO limit 60', 'show logs module kernel level WARN limit 60', 'show logs module control level INFO limit 30', 'show logs module service.pd level INFO limit 40', 'show logs module service.leases level INFO limit 30'):
                 try:
                     print('Failure diagnostic ' + command + ': ' + json.dumps(query(command)), flush=True)
                 except Exception as error:
                     print('Failure diagnostic unavailable: ' + str(error), flush=True)
+        if profile == 'update' and 'power_started' in locals() and q.poll() is None:
+            # Preserve the actual trial failure, including its bounded journal
+            # cleanup, before fixture cleanup terminates the guest.
+            until = time.monotonic() + 60
+            while q.poll() is None and time.monotonic() < until:
+                console = (stage / 'serial.log').read_text(errors='replace')
+                if 'runtime update trial failed:' in console:
+                    print(console[console.rfind('runtime update trial failed:'):].strip(), flush=True)
+                    break
+                time.sleep(0.25)
         raise
     finally:
         for p in reversed(children):
@@ -339,7 +595,14 @@ def main():
     parser.add_argument("--dhcp6-server", type=Path)
     parser.add_argument("--inside", type=Path)
     parser.add_argument("--power-action", choices=("poweroff", "reboot"), default="poweroff")
+    parser.add_argument("--update-binaries", type=Path, help="base/next/damaged static command sets for signed SSH updates")
+    parser.add_argument("--profile", choices=("update", "worker-recovery", "corrupt-recovery"))
     args = parser.parse_args()
+    args.profile = args.profile or ("update" if args.update_binaries else "worker-recovery")
+    if args.profile in ('update', 'corrupt-recovery') and not args.update_binaries:
+        parser.error("update/recovery profile requires --update-binaries")
+    if args.profile in ('update', 'corrupt-recovery') and args.power_action != 'reboot':
+        parser.error('--update-binaries requires --power-action reboot')
     if args.inside:
         def deadline(*_):
             raise TimeoutError("appliance PPP communication deadline")
@@ -347,8 +610,8 @@ def main():
             raise KeyboardInterrupt()
         signal.signal(signal.SIGALRM, deadline)
         signal.signal(signal.SIGTERM, terminated)
-        signal.alarm(180)
-        peer(args.inside, args.power_action)
+        signal.alarm(1800 if args.update_binaries else 180)
+        peer(args.inside, args.power_action, args.update_binaries, args.profile)
         return
     if args.dhcp6_server is None or not args.dhcp6_server.is_file():
         parser.error("--dhcp6-server must name an independent ISC dhcpd executable")
@@ -357,6 +620,9 @@ def main():
         return subprocess.run(root + command, check=True, text=True, capture_output=True, timeout=10).stdout
     stage = run(["mktemp", "-d", "/tmp/routerd-pppoe-appliance.XXXXXX"]).strip()
     args.output.mkdir(parents=True, exist_ok=True)
+    artifacts = ("serial.log", "wan.pcap", "lan.pcap", "shutdown-wan.pcap", "shutdown-lan.pcap", "status.json", "ac.log", "dhcp6.log", "client-dhcp.log", "late-solicits.log")
+    for name in artifacts:
+        (args.output / name).unlink(missing_ok=True)
     try:
         run(["mkdir", "-m", "700", stage + "/input"])
         for source, target in [
@@ -367,15 +633,26 @@ def main():
             *[(args.image_dir / name, "input/" + name) for name in ("vmlinuz", "initramfs.cpio.gz", "manifest.json")],
         ]:
             run(["install", "-m", "500", str(source.resolve()), stage + "/" + target])
+        update_args = []
+        if args.update_binaries:
+            run(['mkdir', '-m', '700', stage + '/updates'])
+            for name in ('base', 'next', 'damaged'):
+                run(['mkdir', '-m', '700', stage + '/updates/' + name])
+                for command in ('routerd', 'routerd-modules', 'routerd-logging'):
+                    run(['install', '-m', '500', str((args.update_binaries / name / command).resolve()), stage + '/updates/' + name + '/' + command])
+            for source, target in [(Path('dist/bin/routerd-bundle'), 'publisher'), *[(Path('dist') / name, name) for name in
+                                  ('pppoe-engine.tar', 'pppoe-sources.tar', 'dnsmasq-engine.tar', 'dnsmasq-sources.tar')]]:
+                run(['install', '-m', '500', str(source.resolve()), stage + '/' + target])
+            update_args = ['--update-binaries', stage + '/updates']
         with (args.output / "peer.log").open("w") as output:
-            result = subprocess.run(root + ["unshare", "--mount", "--net", "--propagation", "private", "python3", "-I", stage + "/peer.py", "--inside", stage, "--power-action", args.power_action], stdout=output, stderr=subprocess.STDOUT, timeout=240)
-        for name in ("serial.log", "wan.pcap", "lan.pcap", "shutdown-wan.pcap", "shutdown-lan.pcap", "status.json"):
+            result = subprocess.run(root + ["unshare", "--mount", "--net", "--propagation", "private", "python3", "-I", stage + "/peer.py", "--inside", stage, "--power-action", args.power_action] + ["--profile", args.profile] + update_args, stdout=output, stderr=subprocess.STDOUT, timeout=1860 if args.update_binaries else 240)
+        for name in artifacts:
             artifact = subprocess.run(root + ["cat", stage + "/" + name], capture_output=True, timeout=10)
             if artifact.returncode == 0:
                 (args.output / name).write_bytes(artifact.stdout)
         if result.returncode:
             raise RuntimeError("appliance PPP failed; see " + str(args.output / "peer.log"))
-        print("PASS appliance PPP/PD/TCP/UDP/Renew/session recovery; " + str(args.output / "peer.log"))
+        print(("PASS appliance signed update and fallback; " if args.profile == "update" else "PASS appliance PPP/PD/TCP/UDP/Renew/session recovery; ") + str(args.output / "peer.log"))
     finally:
         run(["python3", "-I", "-c", "import shutil,sys;shutil.rmtree(sys.argv[1])", stage])
 

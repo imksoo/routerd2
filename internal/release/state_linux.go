@@ -398,12 +398,6 @@ func (s *Store) PrepareRollbackChecked(ctx context.Context, expectedGeneration u
 }
 
 func (s *Store) prepare(ctx context.Context, ref Ref, expectedGeneration uint64, options PrepareOptions, rollback bool, check Preflight) (State, error) {
-	// Bind the caller's references before any callback can change its options.
-	options.Startup = cloneStartup(options.Startup)
-	if options.KnownGood != nil {
-		known := *options.KnownGood
-		options.KnownGood = &known
-	}
 	unlock, err := s.acquire(ctx)
 	if err != nil {
 		return State{}, err
@@ -454,20 +448,9 @@ func (s *Store) prepare(ctx context.Context, ref Ref, expectedGeneration uint64,
 		return State{}, err
 	}
 	defer image.Close()
-	var current State
+	current := state
 	if state.Active != nil {
 		if err := s.requireSameABI(ctx, *state.Active, image.Manifest.RuntimeABI); err != nil {
-			return State{}, err
-		}
-	}
-	if check != nil {
-		// State contains nested pointers. A shallow callback copy must not be
-		// able to modify the state subsequently published by this transaction.
-		raw, err := json.Marshal(state)
-		if err != nil {
-			return State{}, err
-		}
-		if err := decodeCanonical(raw, &current); err != nil {
 			return State{}, err
 		}
 	}
@@ -588,17 +571,22 @@ func (s *Store) Confirm(ctx context.Context, bootID, token, digest string) (Stat
 	return s.confirm(ctx, bootID, token, digest, nil)
 }
 
-func (s *Store) ConfirmConfiguration(ctx context.Context, bootID, token, digest string, proof ConfigurationConfirmation) (State, error) {
-	return s.confirm(ctx, bootID, token, digest, &proof)
+// Inspect rechecks the executing pair immediately before confirmation is
+// published. Payload qualification belongs to BeginBoot and image acquisition.
+func (s *Store) ConfirmConfiguration(ctx context.Context, bootID, token, digest string, inspect func(context.Context) (ConfigurationConfirmation, error)) (State, error) {
+	if inspect == nil {
+		return State{}, ErrConfigurationRequired
+	}
+	return s.confirm(ctx, bootID, token, digest, inspect)
 }
 
-func (s *Store) confirm(ctx context.Context, bootID, token, digest string, proof *ConfigurationConfirmation) (State, error) {
+func (s *Store) confirm(ctx context.Context, bootID, token, digest string, inspect func(context.Context) (ConfigurationConfirmation, error)) (State, error) {
 	unlock, err := s.acquire(ctx)
 	if err != nil {
 		return State{}, err
 	}
 	defer unlock()
-	state, err := s.readState(ctx)
+	state, err := s.readJournal(ctx)
 	if err != nil {
 		return State{}, err
 	}
@@ -606,13 +594,17 @@ func (s *Store) confirm(ctx context.Context, bootID, token, digest string, proof
 		return State{}, ErrStale
 	}
 	if state.Startup != nil {
-		if proof == nil {
+		if inspect == nil {
 			return State{}, ErrConfigurationRequired
+		}
+		proof, err := inspect(ctx)
+		if err != nil {
+			return State{}, err
 		}
 		if proof.Adoption.Validate(state.ConfigStoreID, proof.Revision) != nil || proof.Adoption.Recovered || !proof.Adoption.Selection.Equal(*state.Startup) || proof.Revision != proof.Adoption.Revision {
 			return State{}, ErrStale
 		}
-	} else if proof != nil {
+	} else if inspect != nil {
 		return State{}, ErrStale
 	}
 	state, err = s.next(state, "confirm")
@@ -621,11 +613,10 @@ func (s *Store) confirm(ctx context.Context, bootID, token, digest string, proof
 	}
 	state.Attempt = nil
 	state.Pending = nil
-	// Verification reads both selected executable pairs and can take longer
-	// than a health deadline on slow storage. Do not start a new durable
-	// confirmation after that caller's decision window has expired. Once the
-	// commit begins, its fsync/rename transaction cannot be rolled back by
-	// context cancellation.
+	// BeginBoot qualified the immutable selected images before issuing this
+	// attempt. Confirmation records current running health; it does not acquire
+	// executable bytes again. Do not publish after the decision window expires.
+	// Once started, the fsync/rename transaction cannot be canceled.
 	if err = s.checkContext(ctx); err != nil {
 		return State{}, err
 	}
@@ -732,7 +723,7 @@ func (s *Store) FailBoot(ctx context.Context, bootID, token, reason string) (Sta
 		return State{}, err
 	}
 	defer unlock()
-	state, err := s.readState(ctx)
+	state, err := s.readJournal(ctx)
 	if err != nil {
 		return State{}, err
 	}

@@ -240,7 +240,9 @@ func TestActualReleaseStoreFencesControlCommitPrepareTrialAndConfirmation(t *tes
 	if _, err := e.Commit(ctx, req); !errors.Is(err, control.ErrConflict) {
 		t.Fatal("trial allowed commit", err)
 	}
-	if _, err := root.ConfirmConfiguration(ctx, "guard-kernel", boot.State.Attempt.Token, next.Digest, release.ConfigurationConfirmation{Adoption: *current.Startup, Revision: current.Revision}); err != nil {
+	if _, err := root.ConfirmConfiguration(ctx, "guard-kernel", boot.State.Attempt.Token, next.Digest, func(context.Context) (release.ConfigurationConfirmation, error) {
+		return release.ConfigurationConfirmation{Adoption: *current.Startup, Revision: current.Revision}, nil
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if s, err := e.Commit(ctx, req); err != nil || s.Revision != 5 {

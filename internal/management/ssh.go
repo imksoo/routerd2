@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"path/filepath"
@@ -118,6 +117,8 @@ func Serve(ctx context.Context, opts runtimeconfig.SSH, runtimeDir, stateDir str
 }
 
 func handle(ctx context.Context, raw net.Conn, cfg *ssh.ServerConfig, session cli.Session) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	defer raw.Close()
 	done := make(chan struct{})
 	defer close(done)
@@ -141,7 +142,7 @@ func handle(ctx context.Context, raw net.Conn, cfg *ssh.ServerConfig, session cl
 		}
 	}()
 	var wg sync.WaitGroup
-	defer wg.Wait()
+	defer func() { cancel(); wg.Wait() }()
 	active := make(chan struct{}, 4)
 	for next := range chans {
 		if next.ChannelType() != "session" {
@@ -181,7 +182,7 @@ func serveSession(ctx context.Context, ch ssh.Channel, requests <-chan *ssh.Requ
 			}
 			_ = r.Reply(true, nil)
 			go ssh.DiscardRequests(requests)
-			err := session.Execute(ctx, command.Command, io.LimitReader(ch, 2<<20+1), ch)
+			err := session.Execute(ctx, command.Command, ch, ch)
 			exit(ch, err)
 			return
 		case "shell":

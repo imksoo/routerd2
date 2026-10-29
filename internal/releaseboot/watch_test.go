@@ -3,14 +3,21 @@ package releaseboot
 import (
 	"context"
 	"errors"
+	"net"
+	"net/http"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/control"
+	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/release"
+	"github.com/imksoo/routerd2/internal/runtimeplan"
+	"github.com/imksoo/routerd2/internal/supervisor"
 )
 
-func TestContinuousHealthWindowAndBusyConfirmation(t *testing.T) {
+func TestContinuousHealthWindowAndChangedConfirmation(t *testing.T) {
 	t.Parallel()
 	checks, confirms, failures := 0, 0, 0
 	start := time.Now()
@@ -27,10 +34,13 @@ func TestContinuousHealthWindowAndBusyConfirmation(t *testing.T) {
 			if confirms == 1 {
 				return release.ErrBusy
 			}
+			if confirms == 2 {
+				return errTrialHealthChanged
+			}
 			return nil
 		},
 		func(context.Context) error { failures++; return nil })
-	if err != nil || confirms != 2 || failures != 0 || checks < 7 || time.Since(start) < 1500*time.Millisecond {
+	if err != nil || confirms != 3 || failures != 0 || checks < 7 || time.Since(start) < 1500*time.Millisecond {
 		t.Fatalf("unstable or busy trial incorrectly confirmed: checks=%d confirms=%d failures=%d elapsed=%s err=%v", checks, confirms, failures, time.Since(start), err)
 	}
 }
@@ -77,7 +87,7 @@ func TestStaleConfirmationIsNotRetriedAsCurrentBoot(t *testing.T) {
 	}
 }
 
-func TestConfirmationMayVerifyPayloadsBeyondSocketReadTimeout(t *testing.T) {
+func TestConfirmationUsesRemainingTrialBudget(t *testing.T) {
 	t.Parallel()
 	err := watch(context.Background(), 4*time.Second, time.Nanosecond,
 		func(context.Context) error { return nil },
@@ -121,5 +131,33 @@ func TestShutdownDuringConfirmationPreservesUnconfirmedTrial(t *testing.T) {
 		func(context.Context) error { t.Error("ordinary shutdown declared a failed boot"); return nil })
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestTrialReportsUnhealthyControlResponse(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	for socket, handler := range map[string]http.HandlerFunc{
+		supervisor.SocketName: func(w http.ResponseWriter, r *http.Request) {
+			localapi.JSON(w, http.StatusOK, supervisor.Status{Ready: true, Lifecycle: supervisor.Running, PID: 1, Platform: "appliance", ReleaseID: "selected"})
+		},
+		control.SocketName: func(w http.ResponseWriter, r *http.Request) {
+			localapi.JSON(w, http.StatusServiceUnavailable, control.Health{Revision: 3, Services: &runtimeplan.HealthStatus{Revision: 3, Phase: "applying", LastError: "supervisor status validity expired"}})
+		},
+	} {
+		listener, err := net.Listen("unix", filepath.Join(dir, socket))
+		if err != nil {
+			t.Fatal(err)
+		}
+		server := &http.Server{Handler: handler}
+		go server.Serve(listener)
+		t.Cleanup(func() { server.Close() })
+	}
+	trial := Trial{RuntimeDir: dir, Release: release.Ref{ReleaseID: "selected"}}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err := trial.witness(ctx)
+	if err == nil || !strings.Contains(err.Error(), "supervisor status validity expired") {
+		t.Fatalf("unhealthy control reason lost: %v", err)
 	}
 }

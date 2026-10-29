@@ -16,6 +16,7 @@ import re
 import runpy
 from pathlib import Path
 import signal
+import sqlite3
 import subprocess
 import time
 
@@ -222,6 +223,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
                 "dns": {
                     "listen_interface": "lan0",
                     "spec": {
+                        "queryLog": {"enabled": True},
                         "listen": [
                             {"name": "lan", "addresses": ["::"], "port": 53}
                         ],
@@ -389,7 +391,13 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             "capture",
         )
         pd_capture = start(router, ["tcpdump", "--immediate-mode", "-Z", "root", "-n", "-U",
-                                   "-i", "wan0", "-w", str(stage / "pd.pcap"), "udp port 546"], "pd-capture")
+                                   "-i", "any", "-w", str(stage / "pd.pcap"), "udp port 546"], "pd-capture")
+        def pd_capture_ready():
+            if pd_capture.poll() is not None:
+                raise RuntimeError((stage / "pd-capture.log").read_text())
+            path = stage / "pd.pcap"
+            return path.exists() and path.stat().st_size >= 24
+        wait(pd_capture_ready)
         daemon = start(
             router,
             [str(stage / "routerd"), "boot", "--file", str(stage / "boot.json")],
@@ -598,7 +606,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
                             print("Failed tailnet peer state", {k: status.get(k) for k in ("BackendState", "Health")},
                                   [{k: p.get(k) for k in ("HostName", "ExitNode", "ExitNodeOption", "AllowedIPs", "PrimaryRoutes", "RxBytes", "TxBytes")} for p in status.get("Peer", {}).values()], flush=True)
                             for path in (*stage.glob("wan.pcap*"), stage / "peer.pcap"):
-                                print("Failed tailnet packets", run(["tcpdump", "-nn", "-r", str(path), "-c", "30", ("ip6" if family == 6 else "ip") + " and (tcp port 18080 or udp port 18081)"]), flush=True)
+                                print("Failed tailnet packets", run(["tcpdump", "-nn", "-r", str(path), ("ip6" if family == 6 else "ip") + " and (tcp port 18080 or udp port 18081)"]).splitlines()[-40:], flush=True)
                             print("Failed tailnet peer log", "\n".join((stage / "tailnet-peer.log").read_text().splitlines()[-20:]), flush=True)
                             raise
                 for family, address in (("-4", "1.1.1.1"), ("-6", "[2606:4700:4700::1111]")):
@@ -918,6 +926,11 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
                 print("Failed uplink client IPv6", run(["ip", "-n", automatic, "-j", "-6", "address", "show", "dev", "client1"]), flush=True)
                 print("Failed uplink client routes", run(["ip", "-n", automatic, "-j", "-6", "route", "show"]), flush=True)
             if (stage / "run/control.sock").exists():
+                for endpoint in ("/v1/status", "/v1/events"):
+                    try:
+                        print("Failed uplink DNS", endpoint, json.dumps(query("services/dns.dns.sock", endpoint)), flush=True)
+                    except Exception as diagnostic_error:
+                        print("DNS inspection failed", endpoint, diagnostic_error, flush=True)
                 status = query("control.sock", "/v1/services")
                 print("Failed uplink projection", status.get("phase"), status.get("last_error"), flush=True)
                 for instance in status.get("instances", []):
@@ -930,6 +943,13 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             for path in stage.glob("wan.pcap*"):
                 packets = run(["tcpdump", "-nn", "-vv", "-r", str(path), "-c", "20", "icmp6 or udp port 546 or udp port 547 or udp port 67 or udp port 68"])
                 print("Failed uplink wire", packets, flush=True)
+                packets = run(["tcpdump", "-nn", "-tttt", "-r", str(path), "tcp port 443 or port 53"])
+                print("Failed uplink DNS/HTTPS packets", "\n".join(packets.splitlines()[-30:]), flush=True)
+            path = stage / "state/services/dns/dns-queries.db"
+            if path.exists():
+                with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as database:
+                    rows = database.execute("SELECT ts, question_name, question_type, response_code, upstream, duration_us FROM dns_queries ORDER BY id DESC LIMIT 10").fetchall()
+                print("Failed uplink DNS query history", rows, flush=True)
         except Exception as diagnostic_error:
             print("Uplink diagnostics failed", diagnostic_error, flush=True)
         raise

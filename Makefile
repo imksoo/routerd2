@@ -226,7 +226,7 @@ build-linux: licenses
 release-built-test:
 	ROUTERD2_INTEGRATION_REQUIRED=1 ROUTERD2_RELEASE_BUILT_DIR='$(abspath $(RELEASE_BUILT_DIR))' ROUTERD2_RELEASE_BUILT_ID='$(RELEASE_ID)' $(GO) test -race -tags integration -run '^Test(BuiltRuntimeCatalog|PublishBuiltRelease)$$' -count=1 -v ./internal/release ./internal/releasepublish
 
-container: pppoe-engine dnsmasq-engine
+container: pppoe-engine dnsmasq-engine conntrack-engine tailscale-engine
 	$(DOCKER) build $(BUILD_ARGS) -t $(CONTAINER_TAG) .
 
 container-multi:
@@ -234,16 +234,22 @@ container-multi:
 	$(MAKE) pppoe-engine PPP_ARCH=arm64 PPP_DIR=dist/ppp-arm64
 	$(MAKE) dnsmasq-engine DNSMASQ_ARCH=amd64
 	$(MAKE) dnsmasq-engine DNSMASQ_ARCH=arm64 DNSMASQ_DIR=dist/arm64
+	$(MAKE) conntrack-engine CONNTRACK_ARCH=amd64 CONNTRACK_DIR=dist
+	$(MAKE) conntrack-engine CONNTRACK_ARCH=arm64 CONNTRACK_DIR=dist/arm64
+	$(MAKE) tailscale-engine TAILSCALE_ARCH=amd64 TAILSCALE_DIR=dist
+	$(MAKE) tailscale-engine TAILSCALE_ARCH=arm64 TAILSCALE_DIR=dist/arm64
 	mkdir -p dist
 	$(DOCKER) buildx build $(BUILD_ARGS) --platform linux/amd64,linux/arm64 --output type=oci,dest=dist/routerd2.oci.tar .
 
 container-smoke: container
 	$(PYTHON) images/container-smoke.py --engine '$(DOCKER)' --image $(CONTAINER_TAG)
 
-apk: pppoe-engine dnsmasq-engine
+apk: pppoe-engine dnsmasq-engine conntrack-engine tailscale-engine
+	mkdir -p dist/apk
 	$(DOCKER) build $(BUILD_ARGS) -f packaging/alpine/Dockerfile --target apk-output --output type=local,dest=dist/apk .
 
-image: pppoe-engine dnsmasq-engine
+image: pppoe-engine dnsmasq-engine conntrack-engine tailscale-engine
+	mkdir -p $(IMAGE_DIR)
 	$(DOCKER) build $(BUILD_ARGS) --build-arg IMAGE_CONFIG=$(IMAGE_CONFIG) --build-arg SSH_AUTHORIZED_KEY -f packaging/alpine/Dockerfile --target appliance-output --output type=local,dest=$(IMAGE_DIR) .
 
 qemu-smoke:
@@ -251,8 +257,11 @@ qemu-smoke:
 
 .PHONY: qemu-pppoe
 QEMU_POWER_ACTION ?= poweroff
+QEMU_UPDATE_BINARIES ?=
+QEMU_PROFILE ?=
+QEMU_OUTPUT ?= dist/pppoe-appliance$(if $(QEMU_PROFILE),-$(QEMU_PROFILE))
 qemu-pppoe:
-	$(PYTHON) scripts/qemu-pppoe-peer.py --image-dir $(IMAGE_DIR) --dhcp6-server '$(DHCP6_SERVER)' --power-action $(QEMU_POWER_ACTION)
+	$(PYTHON) scripts/qemu-pppoe-peer.py --image-dir $(IMAGE_DIR) --dhcp6-server '$(DHCP6_SERVER)' --power-action $(QEMU_POWER_ACTION) --output '$(QEMU_OUTPUT)' $(if $(QEMU_UPDATE_BINARIES),--update-binaries '$(QEMU_UPDATE_BINARIES)') $(if $(QEMU_PROFILE),--profile '$(QEMU_PROFILE)')
 
 qemu-network:
 	$(PYTHON) scripts/qemu-network.py --go '$(GO)' --image-dir $(IMAGE_DIR) --timeout $(QEMU_TIMEOUT)
@@ -353,7 +362,11 @@ TAILSCALE_ARCH ?= $(shell $(GO) env GOARCH)
 TAILSCALE_DIR ?= dist
 .PHONY: tailscale-engine tailscale-peers check-tailscale
 tailscale-engine:
-	$(PYTHON) scripts/tailscale-image.py --go '$(GO)' --arch '$(TAILSCALE_ARCH)' --output '$(TAILSCALE_DIR)'
+	$(DOCKER) build --platform linux/$(TAILSCALE_ARCH) --build-arg GO_VERSION=$(GO_VERSION) -f packaging/alpine/tailscale-engine.Dockerfile -t routerd2-tailscale-engine:$(ALPINE_VERSION)-$(TAILSCALE_ARCH) .
+	mkdir -p $(TAILSCALE_DIR)
+	@set -eu; engine_id=$$($(DOCKER) create --network none routerd2-tailscale-engine:$(ALPINE_VERSION)-$(TAILSCALE_ARCH) /not-executed); \
+	  trap '$(DOCKER) rm "$$engine_id" >/dev/null' EXIT HUP INT TERM; \
+	  $(DOCKER) export "$$engine_id" | tar --no-same-owner -xf - -C $(TAILSCALE_DIR) tailscale-engine.tar tailscale-sources.tar
 
 tailscale-peers:
 	$(PYTHON) scripts/tailscale-peers.py

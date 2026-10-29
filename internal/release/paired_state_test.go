@@ -82,11 +82,11 @@ func TestPairedConfirmationRequiresExactReceiptAndPreparedRollback(t *testing.T)
 		bad := proof
 		bad.Adoption.Selection = proof.Adoption.Selection.Clone()
 		mutate(&bad)
-		if _, err := s.ConfirmConfiguration(ctx, "paired-confirm", b.State.Attempt.Token, second.Digest, bad); !errors.Is(err, ErrStale) {
+		if _, err := s.ConfirmConfiguration(ctx, "paired-confirm", b.State.Attempt.Token, second.Digest, func(context.Context) (ConfigurationConfirmation, error) { return bad, nil }); !errors.Is(err, ErrStale) {
 			t.Fatal("wrong or changed configuration confirmed", err)
 		}
 	}
-	c, err := s.ConfirmConfiguration(ctx, "paired-confirm", b.State.Attempt.Token, second.Digest, proof)
+	c, err := s.ConfirmConfiguration(ctx, "paired-confirm", b.State.Attempt.Token, second.Digest, func(context.Context) (ConfigurationConfirmation, error) { return proof, nil })
 	if err != nil {
 		t.Fatal(err)
 	}

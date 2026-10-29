@@ -14,6 +14,29 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
 )
 
+func TestLateAdvertiseDoesNotWaitForAnotherSolicitBackoff(t *testing.T) {
+	clock := clockAt(time.Unix(1700000000, 0))
+	now := time.Unix(0, clock.BoottimeNanoseconds)
+	c := client{cfg: dhcp6config.Config{IAID: 7, RequestPrefix: true, PrefixLength: 56}, duid: []byte{0, 3, 0, 1}}
+	if err := c.begin(solicit, now); err != nil {
+		t.Fatal(err)
+	}
+	// The independent ISC peer recovered after six Solicit transmissions.
+	c.lease.attempts = 6
+	c.lease.next = now.Add(32 * time.Second)
+	m := message{kind: advertise, xid: c.lease.xid, client: c.duid, server: []byte{0, 3, 0, 2},
+		pd: &association{iaid: 7, leases: []assignment{{netip.MustParsePrefix("2001:db8:100::/56"), 12, 18}}}}
+	if err := c.accept(m, clock); err != nil {
+		t.Fatal(err)
+	}
+	if c.lease.kind != request || c.lease.next.After(now) || !bytes.Equal(c.server, m.server) {
+		t.Fatal("late Advertise left Request waiting for the Solicit backoff", c.lease)
+	}
+	if len(c.snapshot.Prefixes) != 0 {
+		t.Fatal("Advertise installed a grant before Reply")
+	}
+}
+
 func TestDeclineNoBindingCompletesWithoutLosingDelegation(t *testing.T) {
 	clock := clockAt(time.Unix(1700000000, 0))
 	prefix := dhcp6config.Prefix{Prefix: "2001:db8:100::/56", PreferredUntil: lifetime.After(clock, 20), ValidUntil: lifetime.After(clock, 30)}

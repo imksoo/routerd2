@@ -274,7 +274,9 @@ func (c *client) accept(m message, clock boottime.Clock) error {
 		if e.offer == nil || m.preference > e.offer.preference {
 			e.offer = &m
 		}
-		if m.preference == 255 {
+		// RFC 8415 18.2.1 collects offers only during the first RT. A
+		// server recovered later must not wait through another long backoff.
+		if m.preference == 255 || e.attempts > 1 {
 			return c.selectOffer(now)
 		}
 		return nil

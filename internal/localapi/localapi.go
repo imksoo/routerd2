@@ -139,6 +139,21 @@ func (c *Client) Do(ctx context.Context, method, path string, in, out any) error
 	if in != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	return c.send(req, out)
+}
+
+// Upload streams caller-owned input. Its owner interrupts blocked reads on
+// cancellation; HTTP completion must not close a shared input/output channel.
+func (c *Client) Upload(ctx context.Context, path string, input io.Reader, out any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://routerd"+path, io.NopCloser(input))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/octet-stream")
+	return c.send(req, out)
+}
+
+func (c *Client) send(req *http.Request, out any) error {
 	r, err := c.HTTP.Do(req)
 	if err != nil {
 		return err

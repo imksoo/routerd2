@@ -5,6 +5,8 @@ ARG TARGETARCH
 
 FROM routerd2-pppoe-engine:${ALPINE_VERSION}-${TARGETARCH} AS ppp-artifacts
 FROM routerd2-dnsmasq-engine:${ALPINE_VERSION}-${TARGETARCH} AS dhcp-artifacts
+FROM routerd2-conntrack-engine:${ALPINE_VERSION}-${TARGETARCH} AS conntrack-artifacts
+FROM routerd2-tailscale-engine:${ALPINE_VERSION}-${TARGETARCH} AS tailscale-artifacts
 
 FROM golang:${GO_VERSION}-alpine3.24 AS toolchain
 
@@ -15,6 +17,10 @@ RUN apk add --no-cache alpine-sdk ca-certificates tar python3 \
  && adduser -D -G abuild builder \
  && mkdir -p /out \
  && chown builder:abuild /out
+COPY --from=conntrack-artifacts /conntrack-engine.tar /inputs/conntrack-engine.tar
+COPY --from=conntrack-artifacts /conntrack-sources.tar /out/conntrack-sources.tar
+COPY --from=tailscale-artifacts /tailscale-engine.tar /inputs/tailscale-engine.tar
+COPY --from=tailscale-artifacts /tailscale-sources.tar /out/tailscale-sources.tar
 COPY --from=dhcp-artifacts /dnsmasq-engine.tar /inputs/dnsmasq-engine.tar
 COPY --from=dhcp-artifacts /dnsmasq-sources.tar /out/dnsmasq-sources.tar
 COPY --from=ppp-artifacts /pppoe-engine.tar /inputs/pppoe-engine.tar
@@ -25,7 +31,9 @@ ARG RELEASE_ID=dev
 ARG SOURCE_DATE_EPOCH=0
 ENV ROUTERD_RELEASE_ID=$RELEASE_ID SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH
 USER builder
-RUN sh packaging/alpine/build.sh /src /out
+RUN --mount=type=cache,target=/home/builder/go/pkg/mod,uid=1000 \
+    --mount=type=cache,target=/home/builder/.cache/go-build,uid=1000 \
+    GOMAXPROCS=2 sh packaging/alpine/build.sh /src /out
 
 FROM scratch AS apk-output
 COPY --from=package-build /out/ /

@@ -36,8 +36,6 @@ func TestCheckedPrepareValidatesPinnedTargetUnderFileLockBeforePublication(t *te
 		if _, err := other.Status(ctx); !errors.Is(err, ErrBusy) {
 			t.Fatalf("file lock was not held during preflight: %v", err)
 		}
-		// Modifying callback metadata must never mutate the commit's own state.
-		state.Active.Digest = "modified callback view"
 		return want
 	}
 	if _, err := s.PrepareChecked(ctx, target, before.Generation, PrepareOptions{}, check); !errors.Is(err, want) {
@@ -72,7 +70,6 @@ func TestCheckedPrepareValidatesPinnedTargetUnderFileLockBeforePublication(t *te
 		if current.Active == nil || *current.Active != base || image.Release != target {
 			t.Fatal("wrong target or active state")
 		}
-		current.Active.Digest = "changed copy"
 		return nil
 	})
 	if err != nil || state.Active == nil || *state.Active != base || state.Pending == nil || state.Pending.Release != target || state.Generation != before.Generation+1 {
@@ -111,7 +108,6 @@ func TestCheckedRollbackUsesVerifiedPreviousRuntimeAndFrozenPairIntent(t *testin
 		if current.Active == nil || *current.Active != next || current.Previous == nil || *current.Previous != base || target.Release != base {
 			t.Fatal("rollback validated wrong runtime")
 		}
-		current.Previous.Digest = "changed view"
 		opts.Startup.Generation = 100
 		opts.KnownGood.Digest = "changed caller reference"
 		return nil

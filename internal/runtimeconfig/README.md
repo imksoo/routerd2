@@ -7,9 +7,13 @@ effect at process startup.
 This describes the current unreleased boot schema. The accepted next architecture separates
 image extraction, selection of a versioned runtime directory, and loading its
 startup configuration; see [ADR 0001](../../docs/adr/0001-boot-runtime-startup-config.md).
-The current `config` field seeds an empty config store. An existing committed
-record remains authoritative; the new explicit startup-revision selection is not implemented by this schema yet. The worker catalog is now explicit;
-signed runtime selection replaces it with the verified manifest role bindings.
+The `config` field seeds an empty config store. Ordinary restarts retain its
+committed record. A signed update selects the runtime and startup configuration
+together; the selected supervisor passes that configuration selection to control
+and confirms the pair only after live process and configuration checks. See
+[release operations](../../docs/releases.md) for the implemented commands and
+remaining acceptance limits. The worker catalog is explicit; signed runtime
+selection replaces it with the verified manifest role bindings.
 This prototype has no deployed users: its boot and serialized configuration
 formats may be replaced directly, without a compatibility reader or migration.
 

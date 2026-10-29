@@ -120,13 +120,23 @@ func (e *Engine) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/version", func(w http.ResponseWriter, r *http.Request) { localapi.JSON(w, 200, buildinfo.Current()) })
 	e.configurationViewRoutes(mux)
 	e.snapshotRoutes(mux)
+	e.releaseRoutes(mux)
 	e.observationRoutes(mux)
 	e.eventStoreRoutes(mux)
 	e.derivedRoutes(mux)
 	e.protocolEventRoutes(mux)
 	mux.HandleFunc("GET /v1/config", func(w http.ResponseWriter, r *http.Request) { e.writeConfigurationState(w, e.State(), false) })
 	mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, r *http.Request) {
+		var readiness error
+		if e.runtime != nil {
+			readiness = e.runtime.CheckReady(r.Context())
+		}
 		s := e.health()
+		if readiness != nil {
+			s.Healthy = false
+			s.LastError = stateText(readiness.Error(), 4096)
+			s.LastErrorTruncated = len(readiness.Error()) > 4096
+		}
 		code := 200
 		if !s.Healthy {
 			code = 503

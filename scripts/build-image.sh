@@ -12,6 +12,10 @@ engine_image="$project_dir/dist/pppoe-engine.tar"
 engine_sources="$project_dir/dist/pppoe-sources.tar"
 dhcp_image="$project_dir/dist/dnsmasq-engine.tar"
 dhcp_sources="$project_dir/dist/dnsmasq-sources.tar"
+conntrack_image="$project_dir/dist/conntrack-engine.tar"
+conntrack_sources="$project_dir/dist/conntrack-sources.tar"
+tailscale_image="$project_dir/dist/tailscale-engine.tar"
+tailscale_sources="$project_dir/dist/tailscale-sources.tar"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -46,6 +50,8 @@ if [ -n "$package_dir" ]; then
   package_file=$1
   engine_sources="$package_dir/pppoe-sources.tar"
   dhcp_sources="$package_dir/dnsmasq-sources.tar"
+  conntrack_sources="$package_dir/conntrack-sources.tar"
+  tailscale_sources="$package_dir/tailscale-sources.tar"
   # The APK is generated in the same build. --no-scripts prevents packaging hooks
   # from introducing runtime init or service-manager dependencies.
   apk --root "$package_root" --initdb --no-scripts --no-network --allow-untrusted add "$package_file"
@@ -55,6 +61,8 @@ else
   mkdir -p "$package_root/usr/sbin" "$package_root/usr/libexec" "$package_root/usr/share/licenses/routerd2" "$package_root/usr/lib/routerd"
   cp "$engine_image" "$package_root/usr/lib/routerd/pppoe-engine.tar"
   cp "$dhcp_image" "$package_root/usr/lib/routerd/dnsmasq-engine.tar"
+  cp "$conntrack_image" "$package_root/usr/lib/routerd/conntrack-engine.tar"
+  cp "$tailscale_image" "$package_root/usr/lib/routerd/tailscale-engine.tar"
   cp "$binary_dir/routerd" "$package_root/usr/sbin/routerd"
   cp "$binary_dir/routerd-modules" "$package_root/usr/libexec/routerd-modules"
   cp "$binary_dir/routerd-logging" "$package_root/usr/libexec/routerd-logging"
@@ -79,6 +87,10 @@ cp "$package_root/usr/lib/routerd/pppoe-engine.tar" "$rootfs/usr/lib/routerd/ppp
 cp "$engine_sources" "$output_dir/pppoe-sources.tar"
 cp "$package_root/usr/lib/routerd/dnsmasq-engine.tar" "$rootfs/usr/lib/routerd/dnsmasq-engine.tar"
 cp "$dhcp_sources" "$output_dir/dnsmasq-sources.tar"
+cp "$package_root/usr/lib/routerd/conntrack-engine.tar" "$rootfs/usr/lib/routerd/conntrack-engine.tar"
+cp "$conntrack_sources" "$output_dir/conntrack-sources.tar"
+cp "$package_root/usr/lib/routerd/tailscale-engine.tar" "$rootfs/usr/lib/routerd/tailscale-engine.tar"
+cp "$tailscale_sources" "$output_dir/tailscale-sources.tar"
 cp "$package_root/usr/share/licenses/routerd2/LICENSE" "$rootfs/usr/share/licenses/routerd2/LICENSE"
 cp -a "$package_root/usr/share/licenses/routerd2/dependencies" "$rootfs/usr/share/licenses/routerd2/"
 cp "$config_file" "$rootfs/etc/routerd/config.json"
@@ -186,17 +198,14 @@ manifest = {
     ).hexdigest(),
     "init": "/usr/sbin/routerd",
     "programs": ["/usr/sbin/routerd", "/usr/libexec/routerd-modules", "/usr/libexec/routerd-logging"],
-    "pppoe_engine": {
-        "path": "/usr/lib/routerd/pppoe-engine.tar",
-        "sha256": hashlib.sha256((root / "usr/lib/routerd/pppoe-engine.tar").read_bytes()).hexdigest(),
-        "sources_file": "pppoe-sources.tar",
-        "sources_sha256": hashlib.sha256((output / "pppoe-sources.tar").read_bytes()).hexdigest(),
-    },
-    "dhcp_engine": {
-        "path": "/usr/lib/routerd/dnsmasq-engine.tar",
-        "sha256": hashlib.sha256((root / "usr/lib/routerd/dnsmasq-engine.tar").read_bytes()).hexdigest(),
-        "sources_file": "dnsmasq-sources.tar",
-        "sources_sha256": hashlib.sha256((output / "dnsmasq-sources.tar").read_bytes()).hexdigest(),
+    "engines": {
+        role: {
+            "path": "/usr/lib/routerd/" + name + "-engine.tar",
+            "sha256": hashlib.sha256((root / "usr/lib/routerd" / (name + "-engine.tar")).read_bytes()).hexdigest(),
+            "sources_file": name + "-sources.tar",
+            "sources_sha256": hashlib.sha256((output / (name + "-sources.tar")).read_bytes()).hexdigest(),
+        }
+        for role, name in (("pppoe", "pppoe"), ("dhcp_server", "dnsmasq"), ("vrrp", "conntrack"), ("tailscale", "tailscale"))
     },
     "platform": boot["platform"],
     "kernel_modules": boot["kernel_modules"],
@@ -216,6 +225,6 @@ PY
 python3 "$project_dir/images/mkinitramfs.py" "$rootfs" "$output_dir/initramfs.cpio.gz" --epoch "${SOURCE_DATE_EPOCH:-0}"
 (
   cd "$output_dir"
-  sha256sum vmlinuz initramfs.cpio.gz manifest.json pppoe-sources.tar > SHA256SUMS
+  sha256sum vmlinuz initramfs.cpio.gz manifest.json pppoe-sources.tar dnsmasq-sources.tar conntrack-sources.tar tailscale-sources.tar > SHA256SUMS
 )
 printf 'Built kernel %s and routerd initramfs in %s\n' "$kernel_version" "$output_dir"

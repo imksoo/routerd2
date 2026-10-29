@@ -8,7 +8,8 @@ Native static ELF and regular data are supported; discarded manifest versions ar
 Appliance boot
 executes the verified entrypoint inode and pins each declared worker role.
 Image staging, boot selection and explicit startup-configuration selection
-remain separate contracts; the latter is still pending. See
+remain separate contracts. Update preparation binds the runtime to a committed
+configuration snapshot and reserves its recovery selection. See
 [ADR 0001](adr/0001-boot-runtime-startup-config.md).
 
 ## Native format declarations
@@ -40,9 +41,9 @@ The release identity record remains V1; its format is independent of manifest
 version and the runtime ABI record envelope.
 
 The current declaration has configuration schema 2 and semantics contract
-`resource-program-native-28`. Boot ABI is 1 and worker ABI is 4. PPP observations
-include negotiated IPv6 link-local readiness; the writer derives finite default
-routes only for negotiated address families. DHCPv6 on non-Ethernet links
+`resource-program-native-58`. Boot ABI is 1 and worker ABI is 5. PPP observations
+include negotiated IPv6 link-local readiness; the writer derives default
+routes for negotiated address families, retaining them for the PPP unit lifetime. DHCPv6 on non-Ethernet links
 persists DUID-UUID identities. PPP route intent stays outside the worker
 configuration, so route-only changes do not replace the session. Explicit
 multihop BFD uses committed local sources and routed UDP 4784 endpoint pairs;
@@ -51,7 +52,7 @@ resolves declared resource IDs, shares finite Health/BFD/BGP observations, and
 uses explicit healthy/unhealthy/neutral/unknown decisions. Its wire/configuration
 contract replaces the discarded service-only tracking form. DHCP server and DNS
 lease projections retain original boot-scoped deadlines without receipt leases. Its named formats
-are configuration journal 1, events SQLite 6, network journal 9, release journal
+are configuration journal 1, events SQLite 6, network journal 15, release journal
 1, snapshot 1 and SSH identity 1. Configuration journal and SSH identity numbers
 name codec contracts; they are not extra fields inserted into existing files. A persistent-format or
 breaking input-semantics change must update the declaration and qualification.
@@ -71,7 +72,7 @@ owner or revocation state.
 These are publisher declarations bound to executable bytes, not a proof that
 code implements them correctly. Release qualification, actual state inspection,
 target compiler/kernel/engine capability checks and revocation policy remain
-required. No paired loader or operator migration workflow is activated here.
+required. The appliance loader and SSH preparation bind runtime/configuration selections; format-changing migration is not implemented.
 
 This updates userland only. Kernel, root filesystem, bootloader, persistent
 data-partition provisioning and configuration-schema migration are separate
@@ -181,11 +182,30 @@ failure leaves selection unchanged and calls for explicit cleanup with
 `release prune`. Commands, initial baseline setup and rollback semantics are
 described in [releasecli](../internal/releasecli/README.md).
 
-The incoming local bundle must be provisioned by the operator or image-builder.
-The current embedded SSH CLI does not provide a bundle-upload/SFTP subsystem.
-Preparing a release changes next-boot selection, not the running processes,
-and does not itself reboot. The local commands are available as routerd command
-invocations; they are not arbitrary shell commands through the SSH CLI.
+The embedded SSH CLI accepts a signed bundle on exec stdin. It streams to
+temporary disk storage, permits one transfer at a time, bounds bytes by the
+release store's bundle limit, and limits an idle sender to 30 seconds. A
+progressing upload has no fixed total duration; verification has a separate
+five-minute budget after the request body arrives. Prepare is also bounded
+to five minutes. Receipt, payload storage and publication are logged separately.
+An interrupted transfer leaves boot selection unchanged. It provides neither
+SFTP nor an arbitrary shell or operator-selected installation paths.
+
+```sh
+ssh admin@router 'update status'
+ssh admin@router 'update stage' < routerd2-linux-amd64-42.tar
+ssh admin@router 'update prepare' < prepare.json
+ssh admin@router reboot
+```
+
+`prepare.json` contains the actual `release` object returned by stage,
+`expected_generation` from update status, and `expected_revision` from
+`show config`. Preparation validates the committed configuration using the
+verified target executable and binds its snapshot to the next boot. Staging
+and preparation leave the running processes unchanged; reboot is explicit.
+`update cancel` accepts `expected_generation` on stdin to cancel a pending
+selection. These commands require an already provisioned signed appliance
+runtime and the configured SSH authentication.
 
 Enable signed boot selection in the appliance's existing boot JSON:
 
@@ -265,10 +285,10 @@ Neither an arbitrary old runtime nor the factory executable can replace those
 checks. A pending update without a baseline records failure and returns no
 image. A separate storage fixture mode, `--corrupt-trial`, changes the signed
 trial payload before its second boot while another attempt remains; the normal
-attempt-limit gate remains separate. Configuration adoption and all-state
-migration are not activated by this recovery path.
+attempt-limit gate remains separate. Paired boot passes the selected conditional recovery input to the control writer.
+This does not implement all-state format migration.
 
-## Runtime/configuration journal primitives (not an activated boot flow)
+## Runtime/configuration selection
 
 The internal release store can prepare an explicit `Startup` selection with a
 `KnownGood` configuration reference. It publishes the candidate runtime, exact
@@ -281,15 +301,16 @@ compatibility and live configuration revision before invoking it.
 `BeginBoot` keeps the same intent across exec handoff and bounded attempts.
 `FailBoot` selects the previous runtime and its prepared conditional recovery
 together. A paired trial cannot use runtime-only confirmation:
-`ConfirmConfiguration` requires the exact adoption receipt and unchanged actual
-configuration revision. It is a caller-observed assertion, not an internal
-health probe. `PrepareRollback` queues a new paired trial for the known previous
+`ConfirmConfiguration` obtains the exact adoption receipt and actual revision
+after payload verification. The appliance monitor rechecks live process
+generations and local configuration health at that point; a changed witness
+restarts the stability window. `PrepareRollback` queues a new paired trial for the known previous
 runtime, keeping both high watermarks; direct confirmed-pair rollback is refused.
 
-These are library/state-machine primitives. There are no corresponding CLI or
-SSH prepare flags yet, and the current appliance command explicitly refuses a
-selected paired intent rather than booting its runtime without its configuration.
-The coordinated loader, profile/kernel/state compatibility checks and full
+The product loader takes startup intent only from the selected release journal,
+passes it with the release authority to the control writer, and confirms that
+exact adoption. The SSH preparation path invokes the verified target compiler.
+Profile/kernel/state compatibility qualification and full
 runtime/configuration health confirmation remain to be wired and accepted.
 Existing runtime-only prototype gates do not qualify this flow.
 
@@ -340,18 +361,18 @@ validating the pair's reference/generation bounds, running preflight and
 publishing the candidate. Rollback supplies the actual previous runtime to the
 callback. A malformed pair is rejected before invoking preflight.
 
-The callback receives an independent copy of the current state and borrowed
-target descriptors. Input startup/known-good references are frozen before it
-runs; modifying callback metadata cannot change the published pair. Callbacks
-must not recursively acquire the same store or retain/close borrowed descriptors.
+The callback borrows read-only current-state/target metadata and target
+descriptors. The coordinator keeps its input references read-only during the
+operation. Callbacks must not recursively acquire the store or retain/close the
+borrowed descriptors. Pending selections own the references they retain.
 Failure or cancellation before publication leaves both watermarks and selector
 unchanged; a canceled context is rechecked after the callback returns.
 
 This provides a place for the coordinator to verify the live configuration and
 actual immutable snapshots while its release lock excludes configuration writes.
 It does not supply the coordinator's target ABI, capability, state or revocation
-policy. The raw preparation methods remain lower-level primitives, and there
-are no new operator CLI/SSH flags or activated paired loader in this change.
+policy. The raw preparation methods remain lower-level primitives. The operator SSH
+path described above supplies the live writer fence and actual target compiler.
 Resolving a snapshot with the running compiler is not proof that the target
 runtime supports it.
 
@@ -361,8 +382,8 @@ observations without writing or syncing. Both candidate and conditional fallback
 inputs must be inspected while writers are excluded, and preparation must reject
 an already consumed candidate rather than interpreting replay as new authority.
 The signed PID 1 fixture inspects both inputs before preparation and cancels the
-pair before boot. This does not activate the paired loader or inspect target
-compiler behavior and other persistent state. See [startup configuration](startup-config.md).
+pair before boot; that specific gate does not test target compiler behavior or
+paired boot. The appliance SSH fixture exercises the product boot path. See [startup configuration](startup-config.md).
 
 The network writer now exposes bounded actual journal metadata through its
 private `GET /v1/journal` endpoint and `network.InspectJournal`. They share the
@@ -389,5 +410,6 @@ extra triggers/views. Its schema digest describes format, not event contents or
 lease freshness. The signed preparation fixture now checks observations for all
 six currently declared state families against both candidate and fallback input
 formats; it still cancels before boot. Protocol/engine-specific state, complete
-target policy and the operator paired workflow are separate unfinished work.
+target profile/kernel policy and complete state-family qualification remain
+unfinished.
 See the [event store contract](../internal/events/README.md).

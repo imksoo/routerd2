@@ -222,6 +222,9 @@ func serveRuntime(b runtimeconfig.Boot, trial *releaseboot.Trial, authority *rel
 			trialErr := trial.Watch(trialCtx)
 			trialDone <- trialErr
 			if trialErr != nil {
+				slog.Error("runtime update trial failed", "error", trialErr)
+				// The selected runtime is about to stop, including its log service.
+				fmt.Fprintf(os.Stderr, "runtime update trial failed: %v\n", trialErr)
 				cancel()
 			}
 		}()

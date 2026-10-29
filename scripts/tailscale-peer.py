@@ -63,8 +63,12 @@ while True:
 ECHO_CLIENT = r"""import ipaddress,json,socket,sys
 host,source=sys.argv[1:];family=socket.AF_INET6 if ':' in host else socket.AF_INET
 for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
- s=socket.socket(family,kind);s.settimeout(2);s.connect((host,port));s.sendall(b'actual-network')
- data=json.loads(s.recv(4096));assert data['payload']=='actual-network',data
+ s=socket.socket(family,kind);s.settimeout(2)
+ try:
+  s.connect((host,port));s.sendall(b'actual-network');data=json.loads(s.recv(4096))
+ except OSError as error:
+  raise RuntimeError(f'{"TCP" if kind==socket.SOCK_STREAM else "UDP"} {source} -> {host}:{port}: {error}') from error
+ assert data['payload']=='actual-network',data
  assert ipaddress.ip_address(data['source'])==ipaddress.ip_address(source),data
  s.close()
 """

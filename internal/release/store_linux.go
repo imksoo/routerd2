@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"runtime"
 	"sync"
@@ -197,7 +198,8 @@ func (s *Store) WithState(ctx context.Context, fn func(State) error) error {
 	return fn(state)
 }
 
-func (s *Store) bundleLimit() int64 {
+// BundleLimit bounds a complete incoming archive, including its tar framing.
+func (s *Store) BundleLimit() int64 {
 	return min(int64(MaxArtifacts)*s.options.MaxArtifactBytes, MaxRuntimeBytes) + MaxManifestBytes + MaxTrailerBytes + int64(MaxArtifacts+4)*1024
 }
 
@@ -215,13 +217,14 @@ func (s *Store) StageFile(ctx context.Context, path string) (Ref, error) {
 	if err != nil {
 		return Ref{}, err
 	}
-	if !stat.Mode().IsRegular() || stat.Size() <= 0 || stat.Size() > s.bundleLimit() {
+	if !stat.Mode().IsRegular() || stat.Size() <= 0 || stat.Size() > s.BundleLimit() {
 		return Ref{}, errors.New("release archive must be a bounded regular local file")
 	}
 	return s.Stage(ctx, f)
 }
 
 func (s *Store) Stage(ctx context.Context, input io.Reader) (Ref, error) {
+	started := time.Now()
 	unlock, err := s.acquire(ctx)
 	if err != nil {
 		return Ref{}, err
@@ -230,10 +233,14 @@ func (s *Store) Stage(ctx context.Context, input io.Reader) (Ref, error) {
 	if input == nil {
 		return Ref{}, errors.New("nil release bundle reader")
 	}
-	if _, err := s.readState(ctx); err != nil {
+	// Staging publishes an unselected candidate. Selection and boot verify the
+	// selected payloads; rereading them here neither validates this input nor
+	// changes the active choice. Authenticate the journal without hashing them.
+	if _, err := s.readJournal(ctx); err != nil {
 		return Ref{}, err
 	}
-	b := bundleReader{ctx: ctx, r: io.LimitReader(input, s.bundleLimit()+1)}
+	slog.Info("release stage started", "lock_seconds", time.Since(started).Seconds())
+	b := bundleReader{ctx: ctx, r: io.LimitReader(input, s.BundleLimit()+1)}
 	raw, err := b.metadata("manifest.json", MaxManifestBytes)
 	if err != nil {
 		return Ref{}, err
@@ -337,6 +344,7 @@ func (s *Store) Stage(ctx context.Context, input io.Reader) (Ref, error) {
 	if err = b.finish(); err != nil {
 		return Ref{}, err
 	}
+	slog.Info("release payload stored", "release", ref.ReleaseID, "seconds", time.Since(started).Seconds())
 	if err = dir.Chmod(0500); err != nil {
 		return Ref{}, err
 	}
@@ -367,6 +375,7 @@ func (s *Store) Stage(ctx context.Context, input io.Reader) (Ref, error) {
 	if err = s.releases.Sync(); err != nil {
 		return Ref{}, errors.Join(ErrUncertain, err)
 	}
+	slog.Info("release staged", "release", ref.ReleaseID, "digest", ref.Digest, "seconds", time.Since(started).Seconds())
 	return ref, nil
 }
 

@@ -151,9 +151,9 @@ type PrepareOptions struct {
 	MaxAttempts int
 }
 
-// Preflight runs under the release store lock, with an independent current-state
-// view and a verified target whose artifact descriptors are borrowed for this
-// call only. It must not recursively call this Store. The coordinator validates
+// Preflight runs under the release store lock. State and target metadata are
+// read-only; artifact descriptors are borrowed for this call only. It must not
+// recursively call this Store. The coordinator validates
 // live configuration/snapshots and target compatibility here before publication.
 type Preflight func(context.Context, State, *Image) error
 

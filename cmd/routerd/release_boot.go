@@ -21,11 +21,12 @@ func bootConfigured(path string, b runtimeconfig.Boot) error {
 	if b.Release == nil {
 		return serve(b)
 	}
+	policy := *b.Release
 	applianceRuntime = true
 	if err := bootstrapRuntime(context.Background(), b); err != nil {
 		return err
 	}
-	keys, err := release.LoadTrustFile(b.Release.TrustFile)
+	keys, err := release.LoadTrustFile(policy.TrustFile)
 	if err != nil {
 		return err
 	}
@@ -34,15 +35,12 @@ func bootConfigured(path string, b runtimeconfig.Boot) error {
 		return err
 	}
 	id := strings.TrimSpace(string(bootID))
-	store, selection, err := release.OpenForBoot(context.Background(), release.Options{Root: b.Release.Root, TrustedKeys: keys}, id)
+	store, selection, err := release.OpenForBoot(context.Background(), release.Options{Root: policy.Root, TrustedKeys: keys}, id)
 	if err != nil {
 		return err
 	}
 	defer store.Close()
 	defer selection.Image.Close()
-	if selection.State.Startup != nil {
-		return errors.New("paired runtime/configuration boot requires the coordinated loader and trial fence; not activated by the current command")
-	}
 	selected, err := selection.Image.Entrypoint().Stat()
 	if err != nil {
 		return err
@@ -71,6 +69,10 @@ func bootConfigured(path string, b runtimeconfig.Boot) error {
 	if !buildinfo.Current().RuntimeABI.Equal(selection.Image.Manifest.RuntimeABI) {
 		return errors.New("executing runtime ABI differs from its verified manifest")
 	}
+	b.Startup = selection.State.Startup
+	// Selection is complete. Runtime execution uses these verified descriptors
+	// and the selected startup input, not a second operator-supplied selector.
+	b.Release = nil
 	b.Workers = map[string]string{}
 	for _, binding := range selection.Image.Manifest.Roles {
 		f, err := selection.Image.Executable(binding.Role)
@@ -83,18 +85,18 @@ func bootConfigured(path string, b runtimeconfig.Boot) error {
 	for _, binding := range selection.Image.Manifest.Engines {
 		b.Engines[binding.Role] = fmt.Sprintf("/proc/self/fd/%d", selection.Image.Artifacts[binding.Artifact].Fd())
 	}
-	authority := &release.Authority{Root: b.Release.Root, TrustFile: b.Release.TrustFile, Digest: selection.Image.Release.Digest}
+	authority := &release.Authority{Root: policy.Root, TrustFile: policy.TrustFile, Digest: selection.Image.Release.Digest}
 	if !selection.Trial {
 		return serveRuntime(b, nil, authority)
 	}
-	timeout, stable := b.Release.ReadyTimeoutSeconds, b.Release.StableSeconds
+	timeout, stable := policy.ReadyTimeoutSeconds, policy.StableSeconds
 	if timeout == 0 {
 		timeout = 120
 	}
 	if stable == 0 {
 		stable = 10
 	}
-	trial := &releaseboot.Trial{Store: store, BootID: id, Token: selection.State.Attempt.Token, Release: selection.Image.Release, RuntimeDir: b.RuntimeDir, Timeout: time.Duration(timeout) * time.Second, Stable: time.Duration(stable) * time.Second}
+	trial := &releaseboot.Trial{Store: store, BootID: id, Token: selection.State.Attempt.Token, Release: selection.Image.Release, Startup: b.Startup, RuntimeDir: b.RuntimeDir, Timeout: time.Duration(timeout) * time.Second, Stable: time.Duration(stable) * time.Second}
 	err = serveRuntime(b, trial, authority)
 	if err != nil {
 		// Early failures before the watcher starts still leave an explicit
