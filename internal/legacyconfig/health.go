@@ -7,13 +7,14 @@ import (
 	"time"
 
 	"github.com/imksoo/routerd/pkg/api"
+	old "github.com/imksoo/routerd/pkg/healthcheck"
 	"github.com/imksoo/routerd2/internal/protocol/health"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
 
 func (c *compiler) healthCheck(r resource) string {
 	c.allow(r, "enabled", "type", "role", "addressFamily", "target", "targetSource", "interface", "protocol", "port", "interval", "timeout", "healthyThreshold", "unhealthyThreshold")
-	s := r.Spec.(api.HealthCheckSpec)
+	s := old.ResolveSpecForResource(&c.legacy, r.Metadata.Name, r.Spec.(api.HealthCheckSpec))
 	policy, explicit := c.options.HealthChecks[r.Kind+"/"+r.Metadata.Name]
 	if explicit {
 		c.usePolicy(r, "health_checks")
@@ -42,8 +43,15 @@ func (c *compiler) healthCheck(r resource) string {
 		c.reject(r, "role", "invalid_value", "unknown health classification")
 	}
 	name := ""
-	if s.Interface != "" {
-		name = c.interfaceName(r, "interface", s.Interface, false)
+	if source := first(s.SourceInterface, s.Interface); source != "" {
+		name = c.interfaceName(r, "interface", source, true)
+	}
+	if !explicit {
+		if s.FwMark < 0 || uint64(s.FwMark) > 1<<32-1 {
+			c.reject(r, "interface", "invalid_value", "derived probe mark must fit uint32")
+			return ""
+		}
+		policy.Mark, policy.SourceAddress = uint32(s.FwMark), s.SourceAddress
 	}
 	if explicit {
 		selected := c.interfaceName(r, "interface", policy.Interface, false)
@@ -56,7 +64,9 @@ func (c *compiler) healthCheck(r resource) string {
 		c.reject(r, "interface", "explicit_policy_required", "health_checks policy must select the probe's interface instead of following an unscoped default route")
 		return ""
 	}
-	c.ensureInterface(r, "interface", name)
+	if _, dynamic := c.dynamicTunnels[name]; !dynamic {
+		c.ensureInterface(r, "interface", name)
+	}
 	interval := c.healthDuration(r, "interval", s.Interval, 30*time.Second)
 	timeout := c.healthDuration(r, "timeout", s.Timeout, 3*time.Second)
 	service := c.serviceName(r, "health")
@@ -66,7 +76,7 @@ func (c *compiler) healthCheck(r resource) string {
 		IntervalMillis: interval, TimeoutMillis: timeout,
 		HealthyThreshold: s.HealthyThreshold, UnhealthyThreshold: s.UnhealthyThreshold,
 	}})
-	c.note(r, "The native worker uses routerd's probe and threshold engine. Empty intervals/timeouts retain routerd's 30s/3s defaults; thresholds retain 1/3. Probe interface, optional source and mark are explicit routing intent. Legacy role is classification, not activation policy. VRRP master/backup conditions use finite election facts; unsupported conditions and live target discovery are not silently dropped.")
+	c.note(r, "The native worker uses routerd's probe and threshold engine. Empty intervals/timeouts retain routerd's 30s/3s defaults; thresholds retain 1/3. Probe interface and mark are derived by routerd ResolveSpecForResource from declared routing references, or selected by explicit migration policy. Legacy role is classification, not activation policy. VRRP master/backup conditions use finite election facts; unsupported conditions and live target discovery are not silently dropped.")
 	return service
 }
 

@@ -460,11 +460,7 @@ func (c *compiler) staticDSLite(r resource) {
 // Materialize the necessary routing intent instead of relying on boot order or
 // a network manager's inherited defaults. Explicit operator values take precedence.
 func (c *compiler) routingDefaults() {
-	router := api.Router{}
-	for _, resource := range c.resources {
-		router.Spec.Resources = append(router.Spec.Resources, resource.Resource)
-	}
-	if !sysctlprofile.NeedsForwarding(&router) {
+	if !sysctlprofile.NeedsForwarding(&c.legacy) {
 		return
 	}
 	forwarding := &c.document.Network.Forwarding

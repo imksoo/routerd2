@@ -5,6 +5,19 @@
 [試験計画](test-plan.md)、[機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
+## 旧経路参照に従うHealth（2026-10-29、native-69）
+
+旧routerdのResolveSpecForResourceへ、境界でdecodeしたRouterを直接渡し、EgressRoutePolicy由来の
+監視interface・markを再利用した。同じRouterをroutingDefaultsにも渡す。DS-Lite上の監視は
+既存tunnel所有者のactive条件に接続し、生成前のinterfaceを無条件に作成しない。
+
+公開fixtureのHealth interfaceと補足policyを除去し、実CLI・製品worker・独立5 WANの
+TCP/UDP分散、障害切替、60秒抑制、既存接続維持、rollback、期限切れとworker交換が終了0。
+既存Health/PBR・ECMPと固定/RA学習host routeの実通信も終了0。
+全make check/Race/vet、CGO_ENABLED=0のLinux amd64/arm64 build、六ELFの署名検査が終了0。
+compiler contract69/journal17。homertの固定監視先に必要な解決であり、動的target discoveryや
+全homert設定の取込み・二台運用まで成立したとは扱わない。次は暗黙RA対象と全単体構成を接続する。
+
 ## 旧ルーター設定からのOS前提の導出（2026-10-29、native-68）
 
 旧sysctlprofile.NeedsForwardingを直接再利用し、routing構成からIPv4/IPv6転送とrp_filter=0を
@@ -18,8 +31,8 @@ OSのRA受信を再度有効にせず、既存Go RA workerと二重所有にし�
 同版の固定/RA学習host gatewayのIPv6・DNS・Health・IPv4継続、native/旧設定取込みの
 独立DHCP/DNS clientもすべて終了0。全make check（Race・vet）も終了0。
 Linux amd64/arm64のCGO_ENABLED=0 build、六ELFの署名catalog/publisher/stageも終了0。compiler contract68、journal17。全router-linuxの性能調整値を
-移植したとは主張しない。次は旧Healthの経路ポリシー由来のinterface/markを直接再利用し、
-暗黙RA対象と全homert単体構成を接続する。実HGWの自然PD更新観測はnative-67の同一stageで継続中。
+移植したとは主張しない。Healthの経路参照はnative-69で接続した。
+暗黙RA対象と全homert単体構成は未完了。native-67の実HGW試験は下記のとおり失敗した。
 全homert二台・k8s/pve/SAM等の全34項目は未完了である。
 
 ## IPv6 host経路と実HGW継続観測（2026-10-29、native-67）
@@ -40,11 +53,14 @@ peerのradvd最短広告間隔と、IPv4専用だったcapture照合も修正し
 最後のrouter_from追加後も、関連4packageのRace、全vet、両gatewayの実通信、amd64/arm64静的buildと
 六ELFの署名catalog/publisher/stage検査が終了0。ARM実行と対象NICの資格は示していない。
 
-同版の実HGW/二つの自動LAN client/Headscale・公式Tailscaleを14:06 UTCから7800秒で継続中。
+同版の実HGW/二つの自動LAN client/Headscale・公式Tailscaleを14:06 UTCから実行したが、
+14:35:46 UTC、DoHの再利用TLS接続が対向RSTを受け、LAN端末のDNSがSERVFAILとなり終了1。
+直前まで1687秒/151巡の通信が成立したが、継続安定性は不合格である。
 routerd SHA-256は`aa659481337c2ab880dbb0630eb6e5c743c4c636027fc8e67ddb70d4ec64b969`。
 初回のDHCPv4、RA連動DHCPv6/SLAAC、IPv4/IPv6 HTTPS・学習DNS・条件付きDNS・Tailscale通信が成立し、
 実kernelでWAN RA由来のhost source/table120と、PD DS-Lite送信元のmain迂回も照合している。
-実測T1残7179秒で自然更新は16:06 UTC頃、終了予定16:16 UTC頃。現時点で自然更新・完走の合格ではない。
+初期T1残7179秒だったが、自然更新前に終了した。従来の16:16 UTC終了予定は無効。
+その後の回復不能を示した結果ではない。旧DNSも同じ単発POSTで、この障害の修正を進めている。
 このHGW構成は一つのWAN MAC、固定対向網と追加IPv6 NATを含む。全homert二台・直接ONU・対象NICとは分ける。
 次は旧hostdepsのrouting用OS設定を明示native intentへ取り込み、動的Healthと全homert単体を接続する。
 全34項目と期限内完成は未達で、k8s/pve/SAM・配備/更新/復旧の全体受入も残る。

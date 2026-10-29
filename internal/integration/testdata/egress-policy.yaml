@@ -24,7 +24,6 @@ spec:
     metadata:
       name: health0
     spec:
-      interface: wan0
       target: 198.51.100.10
       protocol: tcp
       port: 18080
@@ -52,7 +51,6 @@ spec:
     metadata:
       name: health1
     spec:
-      interface: wan1
       target: 198.51.100.10
       protocol: tcp
       port: 18080
@@ -80,7 +78,6 @@ spec:
     metadata:
       name: health2
     spec:
-      interface: wan2
       target: 198.51.100.10
       protocol: tcp
       port: 18080
@@ -108,7 +105,6 @@ spec:
     metadata:
       name: health3
     spec:
-      interface: wan3
       target: 198.51.100.10
       protocol: tcp
       port: 18080
@@ -136,7 +132,6 @@ spec:
     metadata:
       name: health4
     spec:
-      interface: wan4
       target: 198.51.100.10
       protocol: tcp
       port: 18080

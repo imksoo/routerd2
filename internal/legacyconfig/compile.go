@@ -68,6 +68,7 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 		mappings: map[string]*Mapping{},
 	}
 	for i := range resources {
+		c.legacy.Spec.Resources = append(c.legacy.Spec.Resources, resources[i].Resource)
 		r := &resources[i]
 		ref := r.Kind + "/" + r.Metadata.Name
 		if c.byRef[ref] != nil {
@@ -253,6 +254,20 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 			}
 		}
 	}
+	// A probe bound to a generated tunnel starts only after the tunnel owner
+	// has a current endpoint. It must not create an unconditional interface.
+	for i := range program.Resources {
+		resource := &program.Resources[i]
+		if resource.Service == nil || resource.Service.Health == nil {
+			continue
+		}
+		for _, provider := range c.document.Services {
+			if provider.DSLite != nil && provider.DSLite.Tunnel == resource.Service.Health.Interface {
+				resource.When = egressAll(resource.When, &resourceprogram.FactCondition{Fact: provider.ModuleName() + ".active"})
+				break
+			}
+		}
+	}
 	// Information shares its PD client's socket and information lease. An
 	// unconditional alias or the same guard adds no independent lifetime.
 	for _, condition := range informationConditions {
@@ -297,6 +312,7 @@ type staticPrefix struct {
 type compiler struct {
 	*decoder
 	resources      []resource
+	legacy         api.Router
 	document       config.Native
 	byRef          map[string]*resource
 	aliases        map[string]string

@@ -1,6 +1,8 @@
+2026-10-29 native-69: 旧ResolveSpecForResourceでHealth interface/markを導き、補足指定のない旧設定から独立5 WANの実通信・障害復旧を確認した。全make check/Race/vet・両静的build・署名検査も終了0。全homertと全34項目は未達。[引き継ぎ](pve-codex-handoff.md)。
+
 2026-10-29 native-68: 旧Goのrouting判定から必要な転送/rp_filterを明示native intentへ導き、試験用Sysctl・転送resourceを除いた旧設定の実通信が成功した。全34項目は未達。[現在の範囲](pve-codex-handoff.md)。
 
-2026-10-29 native-67: 実RA取得値・通常DADを使うIPv6 host source/table、期限撤去・復帰、IPv4継続を独立radvd/dnsmasqと確認した。同版の実HGWは14:06 UTCから7800秒で継続中、自然PD更新は16:06 UTC頃の見込み。全homert・全34項目は未達。[成立範囲](pve-codex-handoff.md)。
+2026-10-29 native-67: 実RA取得値・通常DADを使うIPv6 host source/table、期限撤去・復帰、IPv4継続を独立radvd/dnsmasqと確認した。同版の実HGWは14:35:46 UTCに再利用DoH TLS接続のRST→LAN DNS SERVFAILで終了1。自然PD更新前であり、旧終了予定は無効。全homert・全34項目は未達。[成立範囲](pve-codex-handoff.md)。
 
 2026-10-29 native-66: 旧IPv4 EgressRoutePolicyを接続マーク・回線別tableへ接続した。実CLI取込みと独立5 WANのTCP/UDP、3出口・120/80/60・60秒抑制・旧接続維持・rollback・元期限/worker交換が終了0。固定IPv4の隔離試験で、IPv6 host経路と全homert受入は残る。[現在の範囲](pve-codex-handoff.md)。
 
