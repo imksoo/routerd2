@@ -173,6 +173,9 @@ func expiringRouteRequest(r *netlink.Route, remaining time.Duration) (*nl.Netlin
 	req.AddData(h)
 	req.AddData(nl.NewRtAttr(unix.RTA_DST, r.Dst.IP.To16()))
 	req.AddData(nl.NewRtAttr(unix.RTA_TABLE, nl.Uint32Attr(uint32(r.Table))))
+	if r.Src != nil {
+		req.AddData(nl.NewRtAttr(unix.RTA_PREFSRC, r.Src.To16()))
+	}
 	req.AddData(nl.NewRtAttr(unix.RTA_PRIORITY, nl.Uint32Attr(uint32(r.Priority))))
 	req.AddData(nl.NewRtAttr(unix.RTA_EXPIRES, nl.Uint32Attr(uint32((remaining+time.Second-1)/time.Second))))
 	if len(r.MultiPath) > 0 {

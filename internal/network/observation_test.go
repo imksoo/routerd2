@@ -472,7 +472,7 @@ func TestObservationIndexedOwnershipMatchesAuthoritativeSnapshot(t *testing.T) {
 		func(r *RouteState) { r.Protocol++ },
 		func(r *RouteState) { r.Type++ },
 		func(r *RouteState) { r.Advanced = true },
-		func(r *RouteState) { r.Source = "192.0.2.99" },
+		func(r *RouteState) { r.PreferredSource = "192.0.2.99" },
 		func(r *RouteState) { r.Interface = "foreign0" },
 		func(r *RouteState) { r.Table++ },
 		func(r *RouteState) { r.Metric++ },

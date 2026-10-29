@@ -5,6 +5,33 @@
 [試験計画](test-plan.md)、[機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
+## IPv6 host経路と実HGW継続観測（2026-10-29、native-67）
+
+`host-route-native67` は旧routerdのIPv6 host policyを読み、WANの適用済み・DAD完了済みGUAを
+preferred sourceへ指定し、`iif lo` と専用tableへ接続した。host source不在はそのresourceだけの
+未準備として扱い、IPv4の適用を続ける。RA/PDの元のpreferred/valid期限を経路とruleへ渡す。
+静的gatewayに加え、明示したRA clientの現在のdefault routerを使う`router_from`もある。
+PD由来DS-Liteの外側送信元は、宣言した先行ruleでmain tableへ送る。新workerは追加していない。
+
+独立radvd/dnsmasqと実CLI・製品workerで、homert相当の固定gatewayと、RA学習gatewayの両方が終了0。
+自動取得値・通常DADの実送信元で、ルーター自身のIPv6 TCP/UDP・学習DNSのUDP/TCP・Healthが成立した。
+観測元を停止しても元期限でhost route/ruleが撤去され、IPv4 TCPは継続し、RA再開後に通信が戻った。
+途中で期限付きnetlink送信がRTA_PREFSRCを落としていた不足を検出して修正した。
+peerのradvd最短広告間隔と、IPv4専用だったcapture照合も修正した。製品のDADは無効にしていない。
+
+実行版はcompiler contract67/network journal17。全make check（Race・vet）、既存RA/RA-AFTR実通信は終了0。
+最後のrouter_from追加後も、関連4packageのRace、全vet、両gatewayの実通信、amd64/arm64静的buildと
+六ELFの署名catalog/publisher/stage検査が終了0。ARM実行と対象NICの資格は示していない。
+
+同版の実HGW/二つの自動LAN client/Headscale・公式Tailscaleを14:06 UTCから7800秒で継続中。
+routerd SHA-256は`aa659481337c2ab880dbb0630eb6e5c743c4c636027fc8e67ddb70d4ec64b969`。
+初回のDHCPv4、RA連動DHCPv6/SLAAC、IPv4/IPv6 HTTPS・学習DNS・条件付きDNS・Tailscale通信が成立し、
+実kernelでWAN RA由来のhost source/table120と、PD DS-Lite送信元のmain迂回も照合している。
+実測T1残7179秒で自然更新は16:06 UTC頃、終了予定16:16 UTC頃。現時点で自然更新・完走の合格ではない。
+このHGW構成は一つのWAN MAC、固定対向網と追加IPv6 NATを含む。全homert二台・直接ONU・対象NICとは分ける。
+次は旧hostdepsのrouting用OS設定を明示native intentへ取り込み、動的Healthと全homert単体を接続する。
+全34項目と期限内完成は未達で、k8s/pve/SAM・配備/更新/復旧の全体受入も残る。
+
 ## 接続マークを使うIPv4候補グループ（2026-10-29、native-66）
 
 `egress-policy-native66` は旧routerdの候補順位と256バケットのrendezvous計算を取り込み、

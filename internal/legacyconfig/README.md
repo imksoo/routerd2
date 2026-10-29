@@ -159,8 +159,9 @@ IPv4 `EgressRoutePolicy` now imports priority/hash groups with static gateways
 or owned DS-Lite interfaces, and mark-only probe tables. Group weight/priority,
 HealthCheck conditions, source/destination prefixes, exclusions, routing marks,
 tables, per-target priorities and last-transition hysteresis become native
-`egress_policy` intent. Unsupported dynamic gateways, IPv6 hostTraffic and
-address sets still reject the complete import. Full HA input remains incomplete.
+`egress_policy` intent. IPv6 hostTraffic imports the homert single priority candidate with a static
+gateway and preferredSource=interface, plus delegated DS-Lite source bypasses.
+Other dynamic gateway forms and address sets still reject the complete import. Full HA input remains incomplete.
 `TestDaemonConnectionMarkedEgressPolicy` exercises the CLI and actual worker/kernel
 path with five independent WAN peers, established TCP/UDP, rollback and expiry.
 Required runtime Sysctl values, including interface-specific `rp_filter`, are

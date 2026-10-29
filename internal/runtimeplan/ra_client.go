@@ -28,6 +28,10 @@ func projectRAClient(p *projection, service serviceconfig.Service, snapshot racl
 	if !has || !snapshot.Active || snapshot.BootID != clock.BootID || snapshot.ObservedNanos > uint64(clock.BoottimeNanoseconds) {
 		return nil
 	}
+	if p.routers == nil {
+		p.routers = make(map[string][]raclient.Route)
+	}
+	p.routers[service.ModuleName()] = snapshot.Routes
 	for i := range p.network.Interfaces {
 		iface := &p.network.Interfaces[i]
 		if iface.Name != c.Interface {

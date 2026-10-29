@@ -18,7 +18,7 @@ import (
 var errLinkNotFound = errors.New("link not found")
 
 // JournalVersion is the persisted network ownership/BOOTTIME contract.
-const JournalVersion = 16
+const JournalVersion = 17
 
 type settingKey struct {
 	Kind      string `json:"kind"`
@@ -444,7 +444,7 @@ func routeMatches(live RouteState, saved ownedRoute) bool {
 	if !sameRouteTimer(live.kernelExpiry, saved.KernelExpiry) && (saved.AttemptedExpiry == nil || !sameRouteTimer(live.kernelExpiry, *saved.AttemptedExpiry)) {
 		return false
 	}
-	return sameKernelRoute(live.Route, saved.Route) && live.Protocol == RouteProtocol && live.Type == 1 && live.Source == "" && live.Multipath == (len(live.NextHops) > 0) && !live.Advanced
+	return sameKernelRoute(live.Route, saved.Route) && live.Protocol == RouteProtocol && live.Type == 1 && live.Multipath == (len(live.NextHops) > 0) && !live.Advanced
 }
 func (e *Engine) ownsRoute(r RouteState) bool {
 	for _, v := range e.state.Routes {

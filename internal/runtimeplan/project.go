@@ -37,6 +37,7 @@ type projection struct {
 	resources          map[string]resourceprogram.ResourceState
 	routeIssues        []RouteIssue
 	bgpStatus          map[string]bgpProjectionStatus
+	routers            map[string][]raclient.Route
 	network            network.Desired
 	instances          []binding
 	liveRA             map[string]ra.Config

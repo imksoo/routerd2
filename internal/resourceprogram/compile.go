@@ -151,6 +151,41 @@ func Compile(source Program) (Plan, error) {
 				err = claim(r, "route", routeKey(route))
 				node.egress = &route
 			}
+		case r.HostRoute != nil:
+			host, compileErr := prepareHostRoute(r.ID, *r.HostRoute)
+			err = compileErr
+			if host.RouterFrom != "" {
+				found := false
+				for _, provider := range source.Resources {
+					if provider.Service != nil && provider.Service.ModuleName() == host.RouterFrom && provider.Service.RAClient != nil && provider.Service.Interface() == host.Route.Interface {
+						found = true
+						break
+					}
+				}
+				if !found {
+					return Plan{}, fmt.Errorf("host route %s router_from requires an RA client on its interface", r.ID)
+				}
+			}
+			if err == nil {
+				err = errors.Join(claim(r, "route", routeKey(host.Route)), claim(r, "policy_rule", fmt.Sprintf("6/%d", host.Rule.Priority)))
+				for _, bypass := range host.Bypasses {
+					found := false
+					for _, provider := range source.Resources {
+						if provider.Service != nil && provider.Service.ModuleName() == bypass.Service && provider.Service.DSLite != nil {
+							found = true
+							break
+						}
+					}
+					if !found {
+						return Plan{}, fmt.Errorf("host route %s bypass requires a declared DS-Lite service", r.ID)
+					}
+					if bypass.Priority < 1 || bypass.Priority >= host.Rule.Priority {
+						return Plan{}, fmt.Errorf("host route %s bypass must precede its host rule", r.ID)
+					}
+					err = errors.Join(err, claim(r, "policy_rule", fmt.Sprintf("6/%d", bypass.Priority)))
+				}
+				plan.HostRoutes = append(plan.HostRoutes, host)
+			}
 		case r.EgressPolicy != nil:
 			policy, compileErr := prepareEgressPolicy(r.ID, *r.EgressPolicy)
 			err = compileErr

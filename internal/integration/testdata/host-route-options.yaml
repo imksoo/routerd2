@@ -1,0 +1,13 @@
+schema_version: 1
+ra_clients:
+  IPv6RAAddress/wan-ra:
+    interface: wan0
+    slaac: true
+    default_route: false
+    on_link: true
+    route_information: false
+    dns: true
+    allowed_routers:
+    - fe80::2
+    table: 254
+    metric: 200

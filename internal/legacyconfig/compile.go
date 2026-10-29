@@ -169,7 +169,11 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 		case "FirewallZone", "FirewallPolicy", "FirewallRule", "NAT44Rule":
 			// Compiled together to preserve ordered zone jumps and NAT-only hooks.
 		case "EgressRoutePolicy":
-			extra = append(extra, c.egressPolicy(r, vrrpNames))
+			if r.Spec.(api.EgressRoutePolicySpec).HostTraffic {
+				extra = append(extra, c.hostRoute(r, vrrpNames))
+			} else {
+				extra = append(extra, c.egressPolicy(r, vrrpNames))
+			}
 		case "VXLANSegment", "VXLANTunnel":
 			c.reject(r, "", "unsupported_semantics", "legacy VXLAN FDB peers, L2 filtering and outer-DF defaults require explicit native conversion; a single remote is not a lossless substitute")
 		case "NTPClient", "NTPServer":

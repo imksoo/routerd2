@@ -115,7 +115,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
         },
     )
     resources = [
-        {"id": "wan", "interface": {"name": "wan0"}},
+        {"id": "wan", "interface": {"name": "wan0", "ipv4_rp_filter": 0}},
         {"id": "lan", "interface": {"name": "lan0"}},
         {"id": "lan-ip", "address": {"interface": "lan0", "cidr": "198.18.0.1/24"}},
         {
@@ -250,6 +250,10 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
         source = resources[-1]["service"]["dns"]["spec"]["sources"][-1]
         source["upstreams"] = [dns_upstream]
         source["bootstrapResolverFrom"] = source.pop("upstreamFrom")
+    resources.append({"id": "host-wan", "host_route": {
+        "interface": "wan0", "router_from": "service.wan-ra", "table": 120, "priority": 10120,
+        "bypasses": [{"service": "service.internet", "priority": 10100}],
+    }})
     (stage / "boot.json").write_text(json.dumps(boot))
     (stage / "config.json").write_text(
         json.dumps({"schema_version": 2, "resources": resources})
@@ -638,6 +642,15 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
         print("PASS independent conditional DNS source, failure isolation and recovery over LAN IPv4/IPv6", flush=True)
 
         def check_traffic():
+            host_routes = json.loads(run(["ip", "-n", router, "-j", "-6", "route", "show", "table", "120", "default"]))
+            assert len(host_routes) == 1 and host_routes[0].get("prefsrc"), "IPv6 host route/source is unavailable"
+            learned = query("control.sock", "/v1/services/service.wan-ra")["snapshot"]["addresses"]
+            host_source = ipaddress.IPv6Address(host_routes[0]["prefsrc"])
+            assert any(ipaddress.ip_interface(a["address"]).ip == host_source and not a.get("deprecated") and not a.get("dad_failed") for a in learned), "host policy guessed an address instead of using its RA owner"
+            endpoint = query("control.sock", "/v1/services/service.internet")["snapshot"]
+            source_input = query("control.sock", "/v1/services/service.internet/aftr-input")["source"]["address"]
+            bypass = json.loads(run(["ip", "-n", router, "-j", "-6", "route", "get", endpoint["remote"], "from", source_input]))
+            assert bypass[0]["dev"] == "wan0" and bypass[0].get("table", "main") in (254, "main"), "delegated DS-Lite source did not bypass the physical host policy"
             for family, address in [
                 ("-4", "1.1.1.1"),
                 ("-6", "[2606:4700:4700::1111]"),

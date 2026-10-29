@@ -124,6 +124,10 @@ vet:
 
 check: fmt-check test test-dependencies test-tools race vet
 
+.PHONY: check-host-route
+check-host-route: build
+	$(PYTHON) scripts/daemon-tests.py host-route --go '$(GO)'
+
 check-health-pbr: build
 	$(PYTHON) scripts/daemon-tests.py health-pbr --go '$(GO)'
 

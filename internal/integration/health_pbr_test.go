@@ -920,20 +920,39 @@ func healthPBRCapture(t *testing.T, iface string) *healthPBRCaptureState {
 
 func htons(n uint16) uint16 { return n<<8 | n>>8 }
 
+// Count plain IPv4/IPv6 transport packets; extension-header layouts are not
+// decoded by this small capture check.
 func (c *healthPBRCaptureState) count(source, destination string, protocol byte, port uint16) int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	wantSource, wantDestination := net.ParseIP(source), net.ParseIP(destination)
 	count := 0
-	for _, p := range c.packets {
-		b := p.data
-		if len(b) < 38 || binary.BigEndian.Uint16(b[12:14]) != 0x0800 || b[14]>>4 != 4 || b[23] != protocol {
+	for _, packet := range c.packets {
+		b := packet.data
+		if len(b) < 14 {
 			continue
 		}
-		ihl := int(b[14]&15) * 4
-		if ihl < 20 || len(b) < 14+ihl+4 {
+		var from, to net.IP
+		var transport int
+		switch binary.BigEndian.Uint16(b[12:14]) {
+		case unix.ETH_P_IP:
+			if len(b) < 38 || b[14]>>4 != 4 || b[23] != protocol {
+				continue
+			}
+			ihl := int(b[14]&15) * 4
+			if ihl < 20 || len(b) < 14+ihl+4 {
+				continue
+			}
+			from, to, transport = net.IP(b[26:30]), net.IP(b[30:34]), 14+ihl
+		case unix.ETH_P_IPV6:
+			if len(b) < 58 || b[14]>>4 != 6 || b[20] != protocol {
+				continue
+			}
+			from, to, transport = net.IP(b[22:38]), net.IP(b[38:54]), 54
+		default:
 			continue
 		}
-		if net.IP(b[26:30]).String() == source && net.IP(b[30:34]).String() == destination && binary.BigEndian.Uint16(b[14+ihl+2:14+ihl+4]) == port {
+		if from.Equal(wantSource) && to.Equal(wantDestination) && binary.BigEndian.Uint16(b[transport+2:transport+4]) == port {
 			count++
 		}
 	}

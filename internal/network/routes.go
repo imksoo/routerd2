@@ -42,6 +42,12 @@ func validateRoutes(routes []Route) error {
 				add("route %s: invalid boot deadline", r.Destination)
 			}
 		}
+		if r.PreferredSource != "" {
+			source, err := netip.ParseAddr(r.PreferredSource)
+			if err != nil || source.Zone() != "" || source.Is4In6() || source.IsUnspecified() || source.IsMulticast() || source.Is4() != p.Addr().Is4() {
+				add("route %s: preferred_source must be a same-family unicast address", r.Destination)
+			}
+		}
 		if r.Metric < 0 || uint64(r.Metric) > uint64(^uint32(0)) {
 			add("route %s: invalid metric", r.Destination)
 		}
@@ -105,6 +111,9 @@ func normalizeRoute(r Route) Route {
 	if g, err := netip.ParseAddr(r.Gateway); err == nil {
 		r.Gateway = g.String()
 	}
+	if source, err := netip.ParseAddr(r.PreferredSource); err == nil {
+		r.PreferredSource = source.String()
+	}
 	r.NextHops = slices.Clone(r.NextHops)
 	for i := range r.NextHops {
 		if g, err := netip.ParseAddr(r.NextHops[i].Gateway); err == nil {
@@ -133,7 +142,7 @@ func normalizeRoute(r Route) Route {
 // Protocol authority can renew without replacing an unchanged kernel route.
 func sameKernelRoute(a, b Route) bool {
 	a, b = normalizeRoute(a), normalizeRoute(b)
-	return a.Destination == b.Destination && a.Gateway == b.Gateway && a.Interface == b.Interface && a.Metric == b.Metric && a.Table == b.Table && slices.Equal(a.NextHops, b.NextHops)
+	return a.PreferredSource == b.PreferredSource && a.Destination == b.Destination && a.Gateway == b.Gateway && a.Interface == b.Interface && a.Metric == b.Metric && a.Table == b.Table && slices.Equal(a.NextHops, b.NextHops)
 }
 
 func routeUsesInterface(r Route, name string) bool {

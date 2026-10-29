@@ -156,6 +156,21 @@ Linuxの逆引き経路検査はall/interfaceの大きい値を使う。必要�
 実行例は公開値の `internal/integration/testdata/egress-policy.yaml` と対応fixtureにある。
 compiler contract66/network journal16。IPv6 hostTrafficと全homert構成の受入は残る。
 
+### IPv6のルーター自身の経路
+
+`host_route` は `interface` の適用済みIPv6 GUAを、DAD完了と優先有効期間を確認して送信元に使う。
+`destination`（省略は`::/0`）、`table`、`priority`、`metric`（省略50）を持ち、
+固定`gateway`またはRA client module名の`router_from`を一つ指定する。
+`router_from`は、そのRA clientが学習した有効なdefault routerを使う。
+ルーター自身のpacketを `iif lo` ruleで専用tableへ送り、指定送信元をRTA_PREFSRCへ渡す。
+
+`bypasses: [{service: service.dslite, priority: 10100}]`はPD由来DS-Liteの外側送信元を
+先行するsource ruleでmain tableへ送る。指定したDS-Lite serviceとpriorityを事前検証し、
+そのsourceの元期限を超えて規則を残さない。送信元やrouterが無い間はhost resourceを未準備とし、
+無関係なIPv4経路を巻き戻さない。これは旧試作保存形式を読む機能ではない。
+compiler contract67/network journal17。実radvd/dnsmasqの固定/学習gatewayと期限・復旧を確認した。
+実HGWの自然更新観測は継続中で、全homert二台の受入は未完了である。
+
 ### IPv4 の送信元専用 hash
 
 `forwarding.ipv4_ecmp_hash: source` は、その network namespace の **全 IPv4 ECMP 経路**を

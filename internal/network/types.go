@@ -67,9 +67,10 @@ type Interface struct {
 }
 
 type Route struct {
-	Destination string `json:"destination"`
-	Gateway     string `json:"gateway,omitempty"`
-	Interface   string `json:"interface,omitempty"`
+	PreferredSource string `json:"preferred_source,omitempty"`
+	Destination     string `json:"destination"`
+	Gateway         string `json:"gateway,omitempty"`
+	Interface       string `json:"interface,omitempty"`
 	// NextHops installs one weighted multipath route. It is mutually exclusive
 	// with Gateway/Interface. A single next hop has no relative weight and is
 	// normalized to a scalar route, matching Linux's IPv6 representation.
@@ -190,12 +191,11 @@ type InterfaceState struct {
 type RouteState struct {
 	kernelExpiry routeTimer
 	Route
-	Protocol  int    `json:"protocol"`
-	Type      int    `json:"type"`
-	Source    string `json:"source,omitempty"`
-	Multipath bool   `json:"multipath,omitempty"`
-	Advanced  bool   `json:"advanced,omitempty"`
-	Owned     bool   `json:"owned"`
+	Protocol  int  `json:"protocol"`
+	Type      int  `json:"type"`
+	Multipath bool `json:"multipath,omitempty"`
+	Advanced  bool `json:"advanced,omitempty"`
+	Owned     bool `json:"owned"`
 }
 
 type ForwardingState struct {

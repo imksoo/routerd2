@@ -1,3 +1,5 @@
+2026-10-29 native-67: 実RA取得値・通常DADを使うIPv6 host source/table、期限撤去・復帰、IPv4継続を独立radvd/dnsmasqと確認した。同版の実HGWは14:06 UTCから7800秒で継続中、自然PD更新は16:06 UTC頃の見込み。全homert・全34項目は未達。[成立範囲](pve-codex-handoff.md)。
+
 2026-10-29 native-66: 旧IPv4 EgressRoutePolicyを接続マーク・回線別tableへ接続した。実CLI取込みと独立5 WANのTCP/UDP、3出口・120/80/60・60秒抑制・旧接続維持・rollback・元期限/worker交換が終了0。固定IPv4の隔離試験で、IPv6 host経路と全homert受入は残る。[現在の範囲](pve-codex-handoff.md)。
 
 2026-10-29 native-65: RAの自己DNS広告も実待受へ接続した。独立RA専用dhcpcdの取得DNSでPD喪失/再取得とUDP/TCP・固定TCP維持が成功し、同版の実HGW短期・全体再起動も終了0。旧native61の7800秒/自然PD更新1回も終了0。全homert二台と後続項目は未受入。[現在の成立範囲](pve-codex-handoff.md)。

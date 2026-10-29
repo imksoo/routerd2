@@ -1,0 +1,88 @@
+apiVersion: routerd.net/v1alpha1
+kind: Router
+metadata:
+  name: ipv6-host
+spec:
+  resources:
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: Interface
+    metadata:
+      name: wan
+    spec:
+      ifname: wan0
+      managed: true
+      adminUp: true
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: IPv4StaticAddress
+    metadata:
+      name: wan4
+    spec:
+      interface: wan
+      address: 192.0.2.2/24
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: IPv6RAAddress
+    metadata:
+      name: wan-ra
+    spec:
+      interface: wan
+      managed: true
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: EgressRoutePolicy
+    metadata:
+      name: host-ipv6
+    spec:
+      family: ipv6
+      mode: priority
+      hostTraffic: true
+      candidates:
+      - name: physical-wan-ra
+        interface: wan
+        gateway: fe80::2
+        gatewaySource: static
+        preferredSource: interface
+        table: 120
+        priority: 10120
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: HealthCheck
+    metadata:
+      name: internet6
+    spec:
+      interface: wan
+      target: 2001:db8:ffff::9
+      protocol: tcp
+      port: 18093
+      interval: 250ms
+      timeout: 250ms
+      healthyThreshold: 1
+      unhealthyThreshold: 1
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: DNSResolver
+    metadata:
+      name: resolver
+    spec:
+      listen:
+      - name: local
+        addresses:
+        - 127.0.0.1
+        port: 1053
+        sources:
+        - learned
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: DNSUpstream
+    metadata:
+      name: learned
+    spec:
+      protocol: udp
+      addressFrom:
+      - resource: IPv6RAAddress/wan-ra
+        field: dnsServers
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: DNSForwarder
+    metadata:
+      name: learned
+    spec:
+      resolver: DNSResolver/resolver
+      match:
+      - provider.test
+      upstreams:
+      - DNSUpstream/learned

@@ -45,6 +45,7 @@ type Resource struct {
 	Address      *Address               `json:"address,omitempty"`
 	Link         *network.Link          `json:"link,omitempty"`
 	Route        *network.Route         `json:"route,omitempty"`
+	HostRoute    *HostRoute             `json:"host_route,omitempty"`
 	EgressPolicy *EgressPolicy          `json:"egress_policy,omitempty"`
 	EgressRoute  *EgressRoute           `json:"egress_route,omitempty"`
 	PolicyRule   *network.PolicyRule    `json:"policy_rule,omitempty"`
@@ -99,6 +100,7 @@ type EventRule struct {
 type Plan struct {
 	nodes          []compiledResource
 	EgressPolicies []EgressPolicyPlan
+	HostRoutes     []HostRoutePlan
 	Native         Native              `json:"native"`
 	Order          []string            `json:"order"`
 	Dependencies   map[string][]string `json:"dependencies"`
@@ -131,7 +133,7 @@ func (r Resource) kind() (string, int) {
 		set  bool
 	}{
 		{"interface", r.Interface != nil}, {"address", r.Address != nil},
-		{"egress_policy", r.EgressPolicy != nil}, {"link", r.Link != nil}, {"route", r.Route != nil}, {"egress_route", r.EgressRoute != nil},
+		{"host_route", r.HostRoute != nil}, {"egress_policy", r.EgressPolicy != nil}, {"link", r.Link != nil}, {"route", r.Route != nil}, {"egress_route", r.EgressRoute != nil},
 		{"policy_rule", r.PolicyRule != nil}, {"forwarding", r.Forwarding != nil},
 		{"firewall", r.Firewall != nil},
 		{"vrrp_guard", r.VRRPGuard != nil}, {"wireguard", r.WireGuard != nil},
