@@ -6,8 +6,6 @@ import (
 	"errors"
 	"net/http/httptest"
 	"testing"
-
-	"github.com/imksoo/routerd2/internal/protocolevents"
 )
 
 func TestRetirementPendingSurvivesSourceErrorPruningAndMakesSuccessfulACKUnhealthy(t *testing.T) {
@@ -33,7 +31,7 @@ func TestRetirementPendingSurvivesSourceErrorPruningAndMakesSuccessfulACKUnhealt
 func TestNoHealthSourceDoesNotAllocateARelayRegistry(t *testing.T) {
 	e, _ := fixture(t)
 	journal := attachJournal(t, e, 0)
-	e.protocolRelays = protocolevents.NewRetirement(journal, e.store.Dir)
+	e.protocolRelays = newProtocolRelays(t, journal, e.store.Dir)
 	if err := e.registerProtocolRelaysLocked(context.Background(), e.state.Config); err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +43,7 @@ func TestNoHealthSourceDoesNotAllocateARelayRegistry(t *testing.T) {
 func TestRejectedCandidateRelayIsDeclaredRetiringAfterConfigurationRestore(t *testing.T) {
 	e, _ := fixture(t)
 	journal := attachJournal(t, e, 0)
-	e.protocolRelays = protocolevents.NewRetirement(journal, e.store.Dir)
+	e.protocolRelays = newProtocolRelays(t, journal, e.store.Dir)
 	// Registration precedes candidate worker/effect creation. Even if later
 	// application fails, this retained ownership must not disappear from health.
 	if err := e.protocolRelays.Register(context.Background(), []string{"candidate"}); err != nil {

@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/imksoo/routerd2/internal/localapi"
-	"github.com/imksoo/routerd2/internal/protocolevents"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
 	"github.com/imksoo/routerd2/internal/supervisor"
 )
@@ -20,7 +19,7 @@ func TestRecoveryOwnershipWaitDoesNotBlockControlAuthority(t *testing.T) {
 		t.Run(map[bool]string{false: "available_source", true: "busy_source"}[sourceBusy], func(t *testing.T) {
 			e, network := fixture(t)
 			journal := attachJournal(t, e, 0)
-			e.protocolRelays = protocolevents.NewRetirement(journal, e.store.Dir)
+			e.protocolRelays = newProtocolRelays(t, journal, e.store.Dir)
 			if err := e.protocolRelays.Register(context.Background(), []string{"wan"}); err != nil {
 				t.Fatal(err)
 			}

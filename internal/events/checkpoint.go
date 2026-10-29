@@ -54,7 +54,7 @@ func (s *Store) consumer(ctx context.Context, name string, stateful bool) (Check
 			}
 		}
 	} else {
-		if err = s.reserve(ctx, tx, "consumer_state", 2, s.options.MaxConsumers, s.options.MaxConsumerStateBytes); err != nil {
+		if err = s.reserve(ctx, tx, "consumer_state", 1, 2, s.options.MaxConsumers, s.options.MaxConsumerStateBytes); err != nil {
 			return result, err
 		}
 		result = Checkpoint{Cursor: tip, State: json.RawMessage(`{}`)}

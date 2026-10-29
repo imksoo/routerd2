@@ -36,7 +36,11 @@ func (e *Engine) registerProtocolRelaysLocked(ctx context.Context, source config
 		return errors.New("health relays require the durable journal")
 	}
 	if e.protocolRelays == nil {
-		e.protocolRelays = protocolevents.NewRetirement(e.journal, e.store.Dir)
+		relays, err := protocolevents.NewRetirement(ctx, e.journal, e.store.Dir)
+		if err != nil {
+			return err
+		}
+		e.protocolRelays = relays
 	}
 	return e.protocolRelays.Register(ctx, names)
 }
@@ -66,21 +70,26 @@ func (e *Engine) ProcessRetiredProtocolEvents(ctx context.Context) error {
 		return nil
 	}
 	if e.protocolRelays == nil {
-		e.protocolRelays = protocolevents.NewRetirement(e.journal, e.store.Dir)
+		relays, err := protocolevents.NewRetirement(ctx, e.journal, e.store.Dir)
+		if err != nil {
+			e.mu.Unlock()
+			return err
+		}
+		e.protocolRelays = relays
 	}
 	relays, runtime := e.protocolRelays, e.runtime
-	names, err := relays.RegisteredNames(ctx)
-	if err != nil || len(names) == 0 {
-		e.updateRetirementHealthLocked(err)
+	names := relays.RegisteredNames()
+	if len(names) == 0 {
+		e.updateRetirementHealthLocked(nil)
 		e.mu.Unlock()
-		return err
+		return nil
 	}
 	e.mu.Unlock()
 	// Waiting for runtime ownership must not block normal protocol publication
 	// on source authority. ApplyConfig takes source -> runtime, so the callback
 	// must try source authority and defer if busy, never invert that lock order.
 	processed := false
-	err = runtime.WithStoppedHealthRelays(ctx, names, func(allowed map[string]bool) error {
+	err := runtime.WithStoppedHealthRelays(ctx, names, func(allowed map[string]bool) error {
 		if !e.mu.TryLock() {
 			return nil
 		}
@@ -154,17 +163,20 @@ func (e *Engine) protocolEventRoutes(mux *http.ServeMux) {
 		}
 
 		e.mu.Lock()
-		defer e.mu.Unlock()
-		if e.protocolRelays == nil {
+		relays := e.protocolRelays
+		e.mu.Unlock()
+		if relays == nil {
 			localapi.Fail(w, 503, errors.New("protocol journal unavailable"))
 			return
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), time.Second)
 		defer cancel()
-		ack, err := e.protocolRelays.Deliver(ctx, batch)
-		if err == nil || !errors.Is(err, protocolevents.ErrInvalidBatch) && !errors.Is(err, protocolevents.ErrUnregistered) {
+		ack, err := relays.Deliver(ctx, batch)
+		e.mu.Lock()
+		if e.protocolRelays == relays && (err == nil || !errors.Is(err, protocolevents.ErrInvalidBatch) && !errors.Is(err, protocolevents.ErrUnregistered)) {
 			e.setProtocolErrorLocked("service."+batch.Resource, err)
 		}
+		e.mu.Unlock()
 		if err != nil {
 			code := http.StatusServiceUnavailable
 			if errors.Is(err, protocolevents.ErrUnregistered) {

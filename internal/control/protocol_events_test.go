@@ -23,13 +23,13 @@ import (
 func TestRegisteredHistoryCanDrainBeforeAnyCurrentWorkerObservation(t *testing.T) {
 	e, _ := fixture(t)
 	journal := attachJournal(t, e, 0)
-	e.protocolRelays = protocolevents.NewRetirement(journal, e.store.Dir)
+	e.protocolRelays = newProtocolRelays(t, journal, e.store.Dir)
 	if err := e.protocolRelays.Register(context.Background(), []string{"wan"}); err != nil {
 		t.Fatal(err)
 	}
 	// Control has restarted; neither a runtime nor a ready worker is needed
 	// to deliver history from a queue registered before the restart.
-	e.protocolRelays = protocolevents.NewRetirement(journal, e.store.Dir)
+	e.protocolRelays = newProtocolRelays(t, journal, e.store.Dir)
 	before := e.State()
 	batch := protocolevents.Batch{Resource: "wan", Events: []events.Event{protocolProbe("a")}}
 	body, err := json.Marshal(batch)
@@ -104,11 +104,11 @@ func TestProtocolFailureBlocksConfirmationButNotRollbackRemovingItsProducer(t *t
 	}
 }
 
-func TestProtocolBatchRetriesPartialStorageWithoutDuplicatingOrAcceptingForeignEvents(t *testing.T) {
+func TestProtocolBatchCapacityIsAtomicAndRejectsForeignEvents(t *testing.T) {
 	ctx := context.Background()
 	e, _ := fixture(t)
 	journal := attachJournal(t, e, 1)
-	relay := protocolevents.NewRetirement(journal, e.store.Dir)
+	relay := newProtocolRelays(t, journal, e.store.Dir)
 	if err := relay.Register(ctx, []string{"wan"}); err != nil {
 		t.Fatal(err)
 	}
@@ -117,15 +117,15 @@ func TestProtocolBatchRetriesPartialStorageWithoutDuplicatingOrAcceptingForeignE
 		t.Fatal("capacity failure was acknowledged")
 	}
 	rows, err := journal.List(ctx, 0, 16)
-	if err != nil || len(rows) != 1 || rows[0].Event.ID != page[0].ID {
-		t.Fatal(rows, err)
+	if err != nil || len(rows) != 0 {
+		t.Fatal("full batch partially published", rows, err)
 	}
 	if _, err = relay.Deliver(ctx, protocolevents.Batch{Resource: "wan", Events: page}); err == nil {
 		t.Fatal("retry bypassed capacity")
 	}
 	rows, err = journal.List(ctx, 0, 16)
-	if err != nil || len(rows) != 1 {
-		t.Fatal("retry duplicated saved prefix", rows, err)
+	if err != nil || len(rows) != 0 {
+		t.Fatal("retry partially published a rejected batch", rows, err)
 	}
 	ack, err := relay.Deliver(ctx, protocolevents.Batch{Resource: "wan", Events: page[:1]})
 	if err != nil || len(ack.IDs) != 1 || ack.IDs[0] != page[0].ID {
@@ -135,7 +135,7 @@ func TestProtocolBatchRetriesPartialStorageWithoutDuplicatingOrAcceptingForeignE
 	foreign.Topic = "configuration.committed"
 	other, _ := fixture(t)
 	roomy := attachJournal(t, other, 0)
-	otherRelay := protocolevents.NewRetirement(roomy, other.store.Dir)
+	otherRelay := newProtocolRelays(t, roomy, other.store.Dir)
 	if err := otherRelay.Register(ctx, []string{"wan"}); err != nil {
 		t.Fatal(err)
 	}
@@ -149,4 +149,13 @@ func TestProtocolBatchRetriesPartialStorageWithoutDuplicatingOrAcceptingForeignE
 	if err != nil || len(rows) != 0 {
 		t.Fatal(rows, err)
 	}
+}
+
+func newProtocolRelays(t *testing.T, journal *events.Store, root string) *protocolevents.Retirement {
+	t.Helper()
+	r, err := protocolevents.NewRetirement(context.Background(), journal, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
 }

@@ -20,7 +20,7 @@ func TestStoppedDeclaredRelayDrainsWithoutDiscardingFutureWorkerOwnership(t *tes
 		t.Fatal(err)
 	}
 	defer func() { _ = journal.Close() }()
-	c := NewRetirement(journal, root)
+	c := newRetirement(t, journal, root)
 	if err = c.Register(ctx, []string{"wan"}); err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestStoppedDeclaredRelayDrainsWithoutDiscardingFutureWorkerOwnership(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	c = NewRetirement(journal, root) // both source and queue survive control replacement
+	c = newRetirement(t, journal, root) // both source and queue survive control replacement
 	if err = c.Recover(ctx, []string{"wan"}, stoppedRelays); err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestStoppedDeclaredRecoveryRemainsPendingBetweenBoundedPages(t *testing.T) 
 		t.Fatal(err)
 	}
 	defer journal.Close()
-	c := NewRetirement(journal, root)
+	c := newRetirement(t, journal, root)
 	if err = c.Register(ctx, []string{"wan"}); err != nil {
 		t.Fatal(err)
 	}

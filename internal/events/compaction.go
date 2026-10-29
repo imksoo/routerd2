@@ -84,7 +84,7 @@ UNION ALL SELECT * FROM (SELECT 1,producer,key,state_version,payload FROM produc
 			return 0, errors.New("invalid completed work payload")
 		}
 		size := tombstoneOverhead + int64(len(c.name)+len(c.key))
-		err = s.reserve(ctx, tx, "dedup", size, s.options.MaxTombstones, s.options.MaxTombstoneBytes)
+		err = s.reserve(ctx, tx, "dedup", 1, size, s.options.MaxTombstones, s.options.MaxTombstoneBytes)
 		if errors.Is(err, ErrCapacity) && count > 0 {
 			break
 		}

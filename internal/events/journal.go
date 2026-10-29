@@ -25,27 +25,17 @@ func (s *Store) Append(ctx context.Context, e Event) (Record, error) {
 		return Record{}, err
 	}
 	defer tx.Rollback()
-	var cursor uint64
-	var previous, packed, digest []byte
-	var originalBytes int64
-	err = tx.QueryRowContext(ctx, `SELECT e.cursor,e.body,coalesce(a.body,X''),coalesce(a.original_bytes,0),coalesce(a.digest,X'') FROM events e LEFT JOIN event_archive a ON a.cursor=e.cursor WHERE e.event_id=?`, e.ID).Scan(&cursor, &previous, &packed, &originalBytes, &digest)
-	if err == nil {
-		previous, err = s.loadBody(cursor, previous, packed, originalBytes, digest)
-		if err != nil {
-			return Record{}, err
-		}
-		if !bytes.Equal(body, previous) {
-			return Record{}, ErrConflict
-		}
-		return decodeEvent(cursor, previous)
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
+	cursor, err := s.existingEvent(ctx, tx, e.ID, body)
+	if err != nil {
 		return Record{}, err
 	}
-	if err = s.reserve(ctx, tx, "events", int64(len(body)), s.options.MaxEvents, s.options.MaxEventBytes); err != nil {
+	if cursor != 0 {
+		return decodeEvent(cursor, body)
+	}
+	if err = s.reserve(ctx, tx, "events", 1, int64(len(body)), s.options.MaxEvents, s.options.MaxEventBytes); err != nil {
 		return Record{}, err
 	}
-	if err = s.reserve(ctx, tx, "history", int64(len(body)), s.options.MaxHistoryEvents, s.options.MaxHistoryBytes); err != nil {
+	if err = s.reserve(ctx, tx, "history", 1, int64(len(body)), s.options.MaxHistoryEvents, s.options.MaxHistoryBytes); err != nil {
 		return Record{}, err
 	}
 	result, err := tx.ExecContext(ctx, `INSERT INTO events(event_id,body) VALUES(?,?)`, e.ID, body)
@@ -62,15 +52,91 @@ func (s *Store) Append(ctx context.Context, e Event) (Record, error) {
 	return decodeEvent(uint64(id), body)
 }
 
-func (s *Store) reserve(ctx context.Context, tx *sql.Tx, kind string, size, maxRows, maxBytes int64) error {
+// AppendBatch publishes a bounded page with one durable transaction. A retry
+// reuses existing identities; a conflicting identity or full budget publishes
+// none of the new records. Every envelope is encoded before writing starts.
+func (s *Store) AppendBatch(ctx context.Context, batch []Event) error {
+	if len(batch) == 0 {
+		return nil
+	}
+	if len(batch) > 256 {
+		return errors.New("event batch exceeds 256 records")
+	}
+	bodies := make([][]byte, len(batch))
+	for i, event := range batch {
+		body, err := encodeEvent(event)
+		if err != nil {
+			return err
+		}
+		bodies[i] = body
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return ErrClosed
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var count, size int64
+	for i, event := range batch {
+		cursor, err := s.existingEvent(ctx, tx, event.ID, bodies[i])
+		if err != nil {
+			return err
+		}
+		if cursor != 0 {
+			continue
+		}
+		if _, err = tx.ExecContext(ctx, `INSERT INTO events(event_id,body) VALUES(?,?)`, event.ID, bodies[i]); err != nil {
+			return err
+		}
+		count++
+		size += int64(len(bodies[i]))
+	}
+	if count == 0 {
+		return nil
+	}
+	if err = s.reserve(ctx, tx, "events", count, size, s.options.MaxEvents, s.options.MaxEventBytes); err != nil {
+		return err
+	}
+	if err = s.reserve(ctx, tx, "history", count, size, s.options.MaxHistoryEvents, s.options.MaxHistoryBytes); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) existingEvent(ctx context.Context, tx *sql.Tx, id string, body []byte) (uint64, error) {
+	var cursor uint64
+	var previous, packed, digest []byte
+	var originalBytes int64
+	err := tx.QueryRowContext(ctx, `SELECT e.cursor,e.body,coalesce(a.body,X''),coalesce(a.original_bytes,0),coalesce(a.digest,X'') FROM events e LEFT JOIN event_archive a ON a.cursor=e.cursor WHERE e.event_id=?`, id).Scan(&cursor, &previous, &packed, &originalBytes, &digest)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	previous, err = s.loadBody(cursor, previous, packed, originalBytes, digest)
+	if err != nil {
+		return 0, err
+	}
+	if !bytes.Equal(body, previous) {
+		return 0, ErrConflict
+	}
+	return cursor, nil
+}
+
+func (s *Store) reserve(ctx context.Context, tx *sql.Tx, kind string, count, size, maxRows, maxBytes int64) error {
 	var rows, used int64
 	if err := tx.QueryRowContext(ctx, `SELECT rows_count,bytes_count FROM usage WHERE kind=?`, kind).Scan(&rows, &used); err != nil {
 		return err
 	}
-	if rows >= maxRows || size > maxBytes-used {
+	if count > maxRows-rows || size > maxBytes-used {
 		return ErrCapacity
 	}
-	_, err := tx.ExecContext(ctx, `UPDATE usage SET rows_count=rows_count+1,bytes_count=bytes_count+? WHERE kind=?`, size, kind)
+	_, err := tx.ExecContext(ctx, `UPDATE usage SET rows_count=rows_count+?,bytes_count=bytes_count+? WHERE kind=?`, count, size, kind)
 	return err
 }
 

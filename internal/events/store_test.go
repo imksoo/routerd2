@@ -216,3 +216,42 @@ func TestEventExpiryBoundaryRetainsFederationZeroExpiryContract(t *testing.T) {
 		t.Fatal("non-expiring event became a finite protocol lease")
 	}
 }
+
+func TestAppendBatchIsAtomicAndIdempotent(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(Options{Directory: filepath.Join(t.TempDir(), "events"), MaxEvents: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	prior := testEvent("prior")
+	if _, err := s.Append(ctx, prior); err != nil {
+		t.Fatal(err)
+	}
+	conflict := testEvent("prior")
+	conflict.Attributes["resource"] = "changed"
+	if err := s.AppendBatch(ctx, []Event{testEvent("new"), conflict}); !errors.Is(err, ErrConflict) {
+		t.Fatal(err)
+	}
+	rows, err := s.List(ctx, 0, 16)
+	if err != nil || len(rows) != 1 {
+		t.Fatal("conflicting batch partially published", rows, err)
+	}
+	batch := []Event{prior, testEvent("new"), prior}
+	for range 2 {
+		if err := s.AppendBatch(ctx, batch); err != nil {
+			t.Fatal(err)
+		}
+	}
+	capacity, err := s.Capacity(ctx)
+	if err != nil || capacity.Events.Rows != 2 || capacity.History.Rows != 2 {
+		t.Fatal("replay consumed another budget", capacity, err)
+	}
+	if err := s.AppendBatch(ctx, []Event{testEvent("over-capacity")}); !errors.Is(err, ErrCapacity) {
+		t.Fatal(err)
+	}
+	rows, err = s.List(ctx, 0, 16)
+	if err != nil || len(rows) != 2 {
+		t.Fatal("full batch partially published", rows, err)
+	}
+}

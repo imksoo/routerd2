@@ -9,6 +9,7 @@ import (
 	"io"
 	"slices"
 	"sort"
+	"sync"
 
 	"github.com/imksoo/routerd2/internal/events"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
@@ -34,6 +35,9 @@ type RetirementStatus struct {
 // The runtime's module reconciliation guard and the local store's exclusive
 // lock independently fence ownership. Declared relays retain registration.
 type Retirement struct {
+	// Historical delivery may run concurrently with configuration and recovery.
+	// This lock protects only its registration snapshot, never journal I/O.
+	namesMu   sync.RWMutex
 	journal   *events.Store
 	root      string
 	names     []string
@@ -45,8 +49,12 @@ type Retirement struct {
 	next      int
 }
 
-func NewRetirement(journal *events.Store, root string) *Retirement {
-	return &Retirement{journal: journal, root: root, errors: map[string]error{}, pending: map[string]bool{}}
+func NewRetirement(ctx context.Context, journal *events.Store, root string) (*Retirement, error) {
+	r := &Retirement{journal: journal, root: root, errors: map[string]error{}, pending: map[string]bool{}}
+	if _, _, err := r.load(ctx); err != nil {
+		return nil, err
+	}
+	return r, nil
 }
 
 func (r *Retirement) Status() RetirementStatus { return r.status }
@@ -55,15 +63,10 @@ func (r *Retirement) Status() RetirementStatus { return r.status }
 // in the latest pass. Only these may clear a former worker's delivery alarm.
 func (r *Retirement) Recovered() []string { return slices.Clone(r.recovered) }
 
-// RegisteredNames snapshots durable candidates before the caller releases
-// source authority to wait for runtime ownership. Recovery reloads the registry
-// after reacquiring source authority; a newly registered name is never granted
-// stopped ownership by an older snapshot.
-func (r *Retirement) RegisteredNames(ctx context.Context) ([]string, error) {
-	if _, _, err := r.load(ctx); err != nil {
-		return nil, err
-	}
-	return slices.Clone(r.names), nil
+// RegisteredNames snapshots the registry owned by this Retirement. Construction
+// restores it; registration and removal update it only after their durable write.
+func (r *Retirement) RegisteredNames() []string {
+	return slices.Clone(r.names)
 }
 
 // Deliver appends historical observations for a durably registered queue.
@@ -73,17 +76,17 @@ func (r *Retirement) Deliver(ctx context.Context, batch Batch) (Acknowledgement,
 	if err := batch.Validate(); err != nil {
 		return Acknowledgement{}, err
 	}
-	if _, _, err := r.load(ctx); err != nil {
-		return Acknowledgement{}, err
-	}
-	if !slices.Contains(r.names, batch.Resource) {
+	r.namesMu.RLock()
+	registered := slices.Contains(r.names, batch.Resource)
+	r.namesMu.RUnlock()
+	if !registered {
 		return Acknowledgement{}, ErrUnregistered
+	}
+	if err := r.journal.AppendBatch(ctx, batch.Events); err != nil {
+		return Acknowledgement{}, err
 	}
 	ack := Acknowledgement{IDs: make([]string, 0, len(batch.Events))}
 	for _, event := range batch.Events {
-		if _, err := r.journal.Append(ctx, event); err != nil {
-			return Acknowledgement{}, err
-		}
 		ack.IDs = append(ack.IDs, event.ID)
 	}
 	return ack, nil
@@ -131,7 +134,9 @@ func (r *Retirement) load(ctx context.Context) (events.ProducerState, bool, erro
 			}
 		}
 	}
+	r.namesMu.Lock()
 	r.names = registry.Names
+	r.namesMu.Unlock()
 	for name := range r.errors {
 		if !slices.Contains(r.names, name) {
 			delete(r.errors, name)
@@ -154,7 +159,9 @@ func (r *Retirement) save(ctx context.Context, cp events.ProducerState, names []
 	if err = r.journal.ProducerTransition(ctx, retirementProducer, cp, body, nil); err != nil {
 		return err
 	}
+	r.namesMu.Lock()
 	r.names = names
+	r.namesMu.Unlock()
 	r.refreshStatus()
 	return nil
 }
@@ -247,14 +254,7 @@ func (r *Retirement) recoverOne(ctx context.Context, name string) (bool, error) 
 	}
 	defer store.Close()
 	box := NewOutbox(store, name)
-	err = box.Flush(ctx, func(ctx context.Context, page []events.Event) error {
-		for _, event := range page {
-			if _, err := r.journal.Append(ctx, event); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
+	err = box.Flush(ctx, r.journal.AppendBatch)
 	if err != nil {
 		return false, err
 	}
@@ -274,9 +274,6 @@ func (r *Retirement) recoverOne(ctx context.Context, name string) (bool, error) 
 
 func (r *Retirement) Recover(ctx context.Context, declared []string, withStopped func(context.Context, []string, func(map[string]bool) error) error) error {
 	r.recovered = nil
-	if _, _, err := r.load(ctx); err != nil {
-		return err
-	}
 	r.Declare(declared)
 	if len(r.names) == 0 {
 		return nil

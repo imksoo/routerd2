@@ -29,7 +29,7 @@ func TestMissingRegisteredQueueIsNotReplacedByAnInventedEmptyStore(t *testing.T)
 		t.Fatal(err)
 	}
 	defer journal.Close()
-	c := NewRetirement(journal, root)
+	c := newRetirement(t, journal, root)
 	if err = c.Register(ctx, []string{"wan"}); err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestRetiredRelaySurvivesControlRestartAndDoesNotTouchActiveOrUnregisteredSt
 		t.Fatal(err)
 	}
 	defer journal.Close()
-	c := NewRetirement(journal, root)
+	c := newRetirement(t, journal, root)
 	if err = c.Register(ctx, []string{"wan"}); err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestRetiredRelaySurvivesControlRestartAndDoesNotTouchActiveOrUnregisteredSt
 	if err = worker.Close(); err != nil {
 		t.Fatal(err)
 	}
-	c = NewRetirement(journal, root) // no in-memory source history survives
+	c = newRetirement(t, journal, root) // no in-memory source history survives
 	if err = c.Recover(ctx, nil, stoppedRelays); err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +133,7 @@ func TestRetirementPartialTargetFailureKeepsRegistryAndOriginalPendingPrefix(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := NewRetirement(journal, root)
+	c := newRetirement(t, journal, root)
 	if err = c.Register(ctx, []string{"wan"}); err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +169,7 @@ func TestRetirementPartialTargetFailureKeepsRegistryAndOriginalPendingPrefix(t *
 		t.Fatal(err)
 	}
 	defer journal.Close()
-	c = NewRetirement(journal, root)
+	c = newRetirement(t, journal, root)
 	if err = c.Recover(ctx, nil, stoppedRelays); err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +187,7 @@ func TestRegistryRemovalFailureRetainsRecoveryWithoutReplayingAnAcknowledgedQueu
 		t.Fatal(err)
 	}
 	defer journal.Close()
-	c := NewRetirement(journal, root)
+	c := newRetirement(t, journal, root)
 	if err = c.Register(ctx, []string{"wan"}); err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +216,7 @@ func TestRegistryRemovalFailureRetainsRecoveryWithoutReplayingAnAcknowledgedQueu
 	if _, err = injector.Exec(`DROP TRIGGER fail_retirement_registry`); err != nil {
 		t.Fatal(err)
 	}
-	c = NewRetirement(journal, root)
+	c = newRetirement(t, journal, root)
 	if err = c.Recover(ctx, nil, stoppedRelays); err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +234,7 @@ func TestRetirementRotatesPastBusyQueuesWithinItsBatchBound(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer journal.Close()
-	c := NewRetirement(journal, root)
+	c := newRetirement(t, journal, root)
 	names := []string{}
 	for i := 0; i < 10; i++ {
 		names = append(names, fmt.Sprintf("wan%d", i))
@@ -271,4 +271,13 @@ func TestRetirementRotatesPastBusyQueuesWithinItsBatchBound(t *testing.T) {
 	if err != nil || len(rows) != 2 {
 		t.Fatal("busy first entries starved later queues", rows, err)
 	}
+}
+
+func newRetirement(t *testing.T, journal *events.Store, root string) *Retirement {
+	t.Helper()
+	r, err := NewRetirement(context.Background(), journal, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
 }

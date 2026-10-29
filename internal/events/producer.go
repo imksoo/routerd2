@@ -55,7 +55,7 @@ func (s *Store) ProducerCheckpoint(ctx context.Context, name string) (ProducerSt
 	var result ProducerState
 	err = tx.QueryRowContext(ctx, `SELECT version,body FROM producers WHERE name=?`, name).Scan(&result.Version, &result.State)
 	if errors.Is(err, sql.ErrNoRows) {
-		if err = s.reserve(ctx, tx, "consumer_state", 2, s.options.MaxConsumers, s.options.MaxConsumerStateBytes); err != nil {
+		if err = s.reserve(ctx, tx, "consumer_state", 1, 2, s.options.MaxConsumers, s.options.MaxConsumerStateBytes); err != nil {
 			return result, err
 		}
 		result.State = json.RawMessage(`{}`)
@@ -126,7 +126,7 @@ func (s *Store) ProducerTransition(ctx context.Context, name string, expected Pr
 		if !errors.Is(lookupErr, sql.ErrNoRows) {
 			return lookupErr
 		}
-		if err = s.reserve(ctx, tx, "outbox", int64(len(job.Payload)), s.options.MaxJobs, s.options.MaxJobBytes); err != nil {
+		if err = s.reserve(ctx, tx, "outbox", 1, int64(len(job.Payload)), s.options.MaxJobs, s.options.MaxJobBytes); err != nil {
 			return err
 		}
 		if _, err = tx.ExecContext(ctx, `INSERT INTO producer_outbox(producer,key,state_version,payload) VALUES(?,?,?,?)`, name, job.Key, version+1, []byte(job.Payload)); err != nil {

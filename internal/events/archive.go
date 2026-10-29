@@ -121,7 +121,7 @@ func (s *Store) ArchiveEvents(ctx context.Context, limit int) (int, error) {
 		if len(hot) == 0 {
 			continue
 		} // A concurrent archive already moved it.
-		if err = s.reserve(ctx, tx, "event_archive", int64(len(c.packed))+archivedEventOverhead, s.options.MaxArchivedEvents, s.options.MaxArchivedEventBytes); err != nil {
+		if err = s.reserve(ctx, tx, "event_archive", 1, int64(len(c.packed))+archivedEventOverhead, s.options.MaxArchivedEvents, s.options.MaxArchivedEventBytes); err != nil {
 			if errors.Is(err, ErrCapacity) && count > 0 {
 				break
 			}

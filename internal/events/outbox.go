@@ -99,7 +99,7 @@ func (s *Store) schedule(ctx context.Context, name string, expected, eventCursor
 		if !errors.Is(lookupErr, sql.ErrNoRows) {
 			return lookupErr
 		}
-		if err = s.reserve(ctx, tx, "outbox", int64(len(job.Payload)), s.options.MaxJobs, s.options.MaxJobBytes); err != nil {
+		if err = s.reserve(ctx, tx, "outbox", 1, int64(len(job.Payload)), s.options.MaxJobs, s.options.MaxJobBytes); err != nil {
 			return err
 		}
 		if _, err = tx.ExecContext(ctx, `INSERT INTO outbox(consumer,key,event_cursor,payload) VALUES(?,?,?,?)`, name, job.Key, eventCursor, []byte(job.Payload)); err != nil {
