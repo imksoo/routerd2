@@ -51,6 +51,12 @@ IPv4/IPv6 TCP/UDP・DNS・NTP・管理と、65.2秒/9巡の履歴進行・Health
 途中の設定healthy=false、設定変更中の履歴timeout、以前のworker起動10秒超過・DNS SERVFAILは未解消。
 一時計測を削除し、原因を隠す期限延長はしない。成立範囲と次の観測は[引き継ぎ](pve-codex-handoff.md)に残す。
 
+2026-10-29 native-60: 旧routerdのNTP client/server fragmentと選択規則を一つの時計所有者へ取り込んだ。
+固定先・条件付き学習/代替先を独立群にし、元情報期限と条件期限をworkerがそれぞれ失効する。
+実homertのNTP構造を公開値へ置換し、製品の取込・通常適用、独立peerとの期限・再取得・VRRP条件変化、
+同じchronydとLAN時刻/IPv4/IPv6 TCP/UDP/captureを確認した。全homert受入とは分け、DHCPv4実学習と
+監督情報の失効・起動遅延は未解消として[引き継ぎ](pve-codex-handoff.md)に残す。
+
 ## 実行順序
 
 全34 work packageの範囲は維持し、次の順で実際の運用を完成させる。

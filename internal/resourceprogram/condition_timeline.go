@@ -201,6 +201,11 @@ func resourceConditions(resource Resource) []*FactCondition {
 	if resource.Service != nil && resource.Service.VRRP != nil && resource.Service.VRRP.GracefulActivation != nil {
 		conditions = append(conditions, &resource.Service.VRRP.GracefulActivation.ReadyWhen)
 	}
+	if resource.Service != nil && resource.Service.NTP != nil {
+		for _, source := range resource.Service.NTP.Sources {
+			conditions = append(conditions, source.When)
+		}
+	}
 	return conditions
 }
 

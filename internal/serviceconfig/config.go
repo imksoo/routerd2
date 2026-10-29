@@ -452,16 +452,18 @@ func Validate(services []Service) error {
 		if service.NTP == nil {
 			continue
 		}
-		for _, name := range service.NTP.SourcesFrom {
-			found := false
-			for _, source := range services {
-				if source.Name == name && source.DHCP6 != nil {
-					found = true
-					break
+		for _, group := range service.NTP.Sources {
+			for _, name := range group.SourcesFrom {
+				found := false
+				for _, source := range services {
+					if source.Name == name && (source.DHCP6 != nil || source.DHCP4 != nil) {
+						found = true
+						break
+					}
 				}
-			}
-			if !found {
-				return fmt.Errorf("NTP service %s: source %s must name a DHCPv6 service", service.Name, name)
+				if !found {
+					return fmt.Errorf("NTP service %s: source %s must name a DHCP service", service.Name, name)
+				}
 			}
 		}
 	}

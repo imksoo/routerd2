@@ -5,6 +5,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/protocol/ntp"
 	"github.com/imksoo/routerd2/internal/protocol/ntpconfig"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
@@ -20,7 +21,7 @@ func (c *effectsClient) runNTP(ctx context.Context, instance serviceconfig.Insta
 	life, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var updates chan ntpconfig.Sources
-	if len(cfg.SourcesFrom) > 0 {
+	if cfg.NeedsInput() {
 		updates = make(chan ntpconfig.Sources, 1)
 		done := make(chan struct{})
 		defer func() { cancel(); <-done }()
@@ -31,9 +32,16 @@ func (c *effectsClient) runNTP(ctx context.Context, instance serviceconfig.Insta
 
 func (c *effectsClient) watchNTP(ctx context.Context, name string, updates chan ntpconfig.Sources) {
 	defer close(updates)
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
+	delay := time.Duration(0)
 	for {
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+		delay = time.Second
 		var sources ntpconfig.Sources
 		call, stop := context.WithTimeout(ctx, 2*time.Second)
 		err := c.client.Do(call, "GET", "/v1/services/"+name+"/ntp-sources", nil, &sources)
@@ -41,6 +49,15 @@ func (c *effectsClient) watchNTP(ctx context.Context, name string, updates chan 
 		if err == nil {
 			if sources.ConfigDigest != c.identity.ConfigDigest || sources.Generation != c.identity.Generation {
 				return
+			}
+			if clock, err := boottime.Read(); err == nil {
+				for _, group := range sources.Groups {
+					if group.ActiveUntil != nil {
+						if remaining := group.ActiveUntil.Remaining(clock); remaining > 0 {
+							delay = min(delay, max(50*time.Millisecond, remaining/2))
+						}
+					}
+				}
 			}
 			select {
 			case updates <- sources:
@@ -55,11 +72,6 @@ func (c *effectsClient) watchNTP(ctx context.Context, name string, updates chan 
 					return
 				}
 			}
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
 		}
 	}
 }

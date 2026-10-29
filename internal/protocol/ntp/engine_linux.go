@@ -176,7 +176,7 @@ func Run(ctx context.Context, cfg ntpconfig.Config, image *os.File, updates <-ch
 	client := chrony.Client{Connection: connection}
 	var sourceDone chan struct{}
 	var sourceErr error
-	if len(cfg.SourcesFrom) > 0 {
+	if cfg.NeedsInput() {
 		sourcePath := cfg.RuntimeDir + "/commands/sources.sock"
 		sourceConnection, err := dialCommand(base, sourcePath)
 		if err != nil {

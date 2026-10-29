@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/factcondition"
 	"github.com/imksoo/routerd2/internal/lifetime"
 	mdns "github.com/miekg/dns"
 )
@@ -22,12 +23,28 @@ type Server struct {
 	Port    uint16 `json:"port,omitempty"`
 }
 
+// Source keeps independently enabled client/server source intent in one clock engine.
+// Servers are used when SourcesFrom has no live learned values.
+type Source struct {
+	Servers     []Server                  `json:"servers"`
+	SourcesFrom []string                  `json:"sources_from,omitempty"`
+	When        *factcondition.Expression `json:"when,omitempty"`
+}
+
 type Node struct {
-	Servers     []Server       `json:"servers"`
-	SourcesFrom []string       `json:"sources_from,omitempty"`
-	DNS         []netip.Addr   `json:"dns,omitempty"`
-	Listen      []netip.Addr   `json:"listen,omitempty"`
-	Allow       []netip.Prefix `json:"allow,omitempty"`
+	Sources []Source       `json:"sources"`
+	DNS     []netip.Addr   `json:"dns,omitempty"`
+	Listen  []netip.Addr   `json:"listen,omitempty"`
+	Allow   []netip.Prefix `json:"allow,omitempty"`
+}
+
+func (n Node) NeedsInput() bool {
+	for _, source := range n.Sources {
+		if len(source.SourcesFrom) > 0 || source.When != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // LearnedServer retains the supplying protocol's original information lifetime.
@@ -36,10 +53,17 @@ type LearnedServer struct {
 	ValidUntil lifetime.Deadline `json:"valid_until"`
 }
 
+// A conditional source has authority only while ActiveUntil is present and live.
+// Learned server lifetimes remain independent of that activation.
+type SourceGrant struct {
+	ActiveUntil *lifetime.Deadline `json:"active_until,omitempty"`
+	Servers     []LearnedServer    `json:"servers"`
+}
+
 type Sources struct {
-	ConfigDigest string          `json:"config_digest"`
-	Generation   uint64          `json:"generation"`
-	Servers      []LearnedServer `json:"servers"`
+	ConfigDigest string        `json:"config_digest"`
+	Generation   uint64        `json:"generation"`
+	Groups       []SourceGrant `json:"groups"`
 }
 
 type Config struct {
@@ -68,12 +92,22 @@ type Snapshot struct {
 }
 
 func ValidateNode(n Node) error {
-	if len(n.Servers) > 32 || len(n.SourcesFrom) > 32 || len(n.DNS) > 8 || len(n.Allow) > 128 {
+	if len(n.Sources) > 32 || len(n.DNS) > 8 || len(n.Allow) > 128 {
 		return errors.New("NTP exceeds source, resolver or access-list bounds")
 	}
-	for _, server := range n.Servers {
-		if err := ValidateServer(server, len(n.DNS) > 0); err != nil {
-			return err
+	for _, source := range n.Sources {
+		if len(source.Servers) > 32 || len(source.SourcesFrom) > 32 {
+			return errors.New("NTP source exceeds server/reference bounds")
+		}
+		for _, server := range source.Servers {
+			if err := ValidateServer(server, len(n.DNS) > 0); err != nil {
+				return err
+			}
+		}
+		if source.When != nil {
+			if err := factcondition.Validate(*source.When); err != nil {
+				return err
+			}
 		}
 	}
 	families := map[bool]bool{}
@@ -133,8 +167,10 @@ func Validate(c Config) error {
 func Render(n Node) []byte {
 	var b bytes.Buffer
 	b.WriteString("driftfile /state/drift\ndumpdir /state\npidfile /run/chronyd.pid\nbindcmdaddress /run/chronyd.sock\ncmdport 0\nmakestep 1.0 3\nsourcedir /run/sources\n")
-	if len(n.SourcesFrom) == 0 {
-		b.Write(RenderServers(n.Servers))
+	for _, source := range n.Sources {
+		if source.When == nil && len(source.SourcesFrom) == 0 {
+			b.Write(RenderServers(source.Servers))
+		}
 	}
 	if len(n.Listen) == 0 {
 		b.WriteString("port 0\n")

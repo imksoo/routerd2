@@ -1,0 +1,5 @@
+schema_version: 1
+vrrp:
+  VirtualAddress/gateway:
+    source_address: 198.51.100.1
+    vip_interface: time-vip

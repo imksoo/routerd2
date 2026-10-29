@@ -5,7 +5,7 @@
 [試験計画](test-plan.md)、[機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
-## 現在の成立範囲と残作業（2026-10-29 07:25 UTC）
+## 現在の成立範囲と残作業（2026-10-29 08:01 UTC）
 
 - main `935369d`: native-58/network journal15。PPP default経路は実unitの寿命に従い、条件付きPolicyRuleは
   元のBOOTTIME期限をwriterが独立して撤去する。PAP/CHAP・二WANのHealth/PBR・元期限・旧通知409・
@@ -61,8 +61,27 @@
   前の`history-phased-native59`はNTP/DHCP workerの10秒startup timeoutで世代2になり終了2。
   計測版のNTPは両起動で世代1、設定読込52–61ms、helper開始からready4.23–4.37秒、展開1.47–1.54秒だった。
   前回の10秒超過は未再現・未解消。以前のDNS TCP SERVFAILも今回未再現で原因未確定。
-  次はhealthy=falseのサービス理由と起動超過時の同じ区間を観測する。単に期限を伸ばさない。
+  同じ計測版で理由採取を追加した追試も終了0（63.41秒/9巡、tip215/archive214）。
+  今回のhealthy=falseは`supervisor status validity expired`と特定した。状態取得・適用所要時間とop待ちを
+  250ms監視/1秒有効期間と照合し、起動超過時の区間も観測する。単に期限を伸ばさない。
   実通信版には起動計測ログを含み、最終差分から除去した。対象物理機器・ARM実行・全homert受入は別途必要。
+- `ntp-groups-native60-work` / native-60: 旧`chain/ntp.go`の独立client/server fragmentと
+  `resolveServers`・list分割を再利用し、一つのchronydの下で同期先群を独立させた。
+  常設serverの固定先を残し、clientのwhenはその学習/代替群だけを撤去する。学習情報と条件には別の
+  元BOOTTIME期限を持たせ、workerが独立失効する。DHCPv4も受理済みの型付きgrantからNTP optionを参照する。
+  旧NTPClient/NTPServerの取込は通常の`config migrate`→`config apply`へ接続。
+  DNS名は宣言済みのローカルDNS listenerを使い、開発ホストのresolverや外部service managerへ依存しない。
+- `make check-ntp-import`は、実homertのNTP構造を公開試験値へ置換したfixtureで終了0。
+  固定3先＋主系のみの学習/代替2先、DNS名の解決、元PD期限の失効・再取得、独立keepalivedとの
+  条件解除/復帰を同じchronydで確認し、独立LAN chronydの時刻採用とIPv4/IPv6 TCP/UDPも通った。
+  captureでは固定3endpointと学習endpointの実NTP通信を確認した。実supervisor/control/network/DNS/VRRP/PD/time
+  workerとISC/chronyd/Linux端末を使用し、ホスト時計は変更していない。旧形式を全部新規書換えした試験ではない。
+  先行する群形式の実試験では、元期限・fallback・再取得・control/supervisor停止中の独立失効も終了0。
+  停止からの復帰直後はwatchdogがworkerを交換し、設定適用を開始できなかったため、importを独立profileへ分けた。
+  停止後の全worker自動復旧そのものは今回未受入。適用受付とworker Readyを分けて確認する。
+  最終make check（Go/Python/Race/vet）とCGO_ENABLED=0のLinux amd64/arm64 buildは終了0。
+  DHCPv4 option42の実学習・失効、条件付きserver待受/動的allow prefix、IPv6 LAN拒否、slew/回線断、
+  時刻未同期時のTLS、全homert二台と実機の受入は残る。既存1秒監督情報の失効も未解消。
 - 実行版`hgw-dns-observation-f253575-work`の実HGW/Tailscale 7800秒試験は05:16 UTCに終了0。
   独立2端末693巡のIPv4/IPv6 HTTPS・学習DNS UDP/TCP、条件付きDNS、自然PD Renew/Reply一組、
   端末DHCP自然更新、PD SIGKILL復旧1.91秒・通常再起動3.72秒・全daemon復旧4.21秒が成立した。

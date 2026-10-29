@@ -1,33 +1,45 @@
 # Time service
 
-The Go worker owns one fixed foreground chronyd process, private mount/root,
-persistent drift directory and typed tracking observations. The engine archive
-contains chronyd 4.8-r7, its complete ELF closure, notices and corresponding
-sources. `make chrony-engine` builds it; the host needs no chrony service or
-service manager. The supervisor supplies the selected archive by descriptor.
+One Go worker owns one fixed foreground chronyd 4.8 process, its private mount
+namespace/root, persistent drift and typed tracking observations. The archive
+contains its complete ELF closure, notices and corresponding sources. The
+supervisor supplies the pinned archive by descriptor; systemd is not required.
+Host/container mode uses `-x`, while appliance mode owns clock discipline.
 
-The server/iburst, bindaddress and allow configuration follows routerd's
-`pkg/controller/chain/ntp.go`. The single time service avoids competing writers
-to the system clock. Host/container mode always supplies `-x`. Appliance mode
-allows clock discipline and initial `makestep`; that mode still needs VM and
-target-device acceptance.
+Client and server source groups share that clock owner. A group declares
+`servers`, optional DHCPv4/DHCPv6 `sources_from`, and an optional finite-fact
+`when`. Live learned sources replace that group's configured fallback; they do
+not replace other always-static groups. A condition removes only its group,
+not the LAN listener. This retains routerd's independent chrony fragments and
+`resolveServers` selection without a second clock writer. The legacy importer
+joins NTPClient/NTPServer declarations and uses declared local DNS listeners
+for hostname sources. Conditional server listeners and dynamic access-prefix
+imports remain unsupported and are rejected rather than silently changed.
 
-chronyd's command protocol requires filesystem Unix reply addresses. Queries
-enter the running engine's pinned root through the same executable boundary
-used for conntrack commands. Responses are decoded through the existing
-`github.com/facebook/time/ntp/chrony` package and immediately narrowed to the
-time service's typed snapshot. BOOTTIME observation/expiry and clock-adjustment
-mode are supplied by the owning worker, not inferred from the wall clock.
+Learned servers retain their original information/lease BOOTTIME deadlines.
+Conditional activation has its own original fact deadline. The worker expires
+both independently of status/control availability and reloads the source file
+through a directly owned Unix command connection. Static configuration is
+prepared once. Tracking uses a separate connection; no helper is executed per
+query/reload. Only the private reply directory is shared with the engine.
 
-`make check-ntp` passed on Linux/amd64 with the actual supervisor, control,
-network and time workers, an independent chronyd local-reference peer, a LAN
-chronyd `-Q` client and packet capture. It demonstrated upstream synchronization,
-stratum/source reporting, finite observations and LAN NTP replies. All peers
-ran in disposable namespaces, with host clock adjustment disabled.
+`make check-ntp-dhcp6` exercises independent ISC/chronyd/keepalived peers,
+original expiry, reacquisition, role changes and stopped-control expiry.
+`make check-ntp-import` additionally uses the product importer and normal apply
+path with the public homert-shaped fixture: three static peers, a conditional
+learned/fallback group, DNS hostname resolution, the same chronyd across
+expiry/role changes, independent LAN NTP and IPv4/IPv6 TCP/UDP with capture.
+These namespace checks disable host clock adjustment. `make qemu-ntp` uses the
+packaged Alpine/PID 1 image and a deliberately slow virtual RTC to check actual
+clock correction, client acceptance, persisted drift and reboot.
 
-Still required: DHCPv6/DHCPv4 learned time sources and expiration, source
-priority/fallback, conditional source withdrawal, worker/reboot drift recovery,
-access denial, IPv6 peers, real appliance clock step/slew and target hardware.
-For current homert intent, `wan-info` is already conditional on the LAN VRRP
-master role; its source selection must follow that existing ownership. Do not
-create a second clock writer or copy learned addresses into operator intent.
+Synchronization and client-acceptable time quality are different: tracking
+includes frequency uncertainty (`skew_ppm`), root delay and dispersion. A
+synchronized flag alone does not establish client acceptance. The standard LAN
+client's timeout and quality criteria are retained.
+
+Remaining acceptance includes real DHCPv4-learned NTP, IPv6 LAN access denial,
+slew/outage behavior, unsynchronized TLS policy, complete homert integration
+and target hardware. Intermittent supervisor-observation expiry and a previous
+appliance worker startup timeout are tracked in the handoff; a later passing
+run is not their cause fix.

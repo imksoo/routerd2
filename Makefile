@@ -51,6 +51,7 @@ help:
 	  'make check-tailscale   Verify signed Tailscale subnet/exit traffic, identity and revoke with independent peers' \
 	  'make check-ntp         Verify time synchronization and LAN NTP with independent chronyd' \
 	  'make check-ntp-dhcp6   Verify learned time sources, original expiry and VRRP conditions with independent peers' \
+	  'make check-ntp-import  Verify imported client/server time sources, conditions and LAN forwarding' \
 	  'make check-bfd         Verify BFD/BGP routing domains with real workers' \
 	  'make check-dhcp6-server Verify LAN information service and durable DUID with BusyBox' \
 	  'make check-dhcp6-ra-pd Verify shared IA_NA/PD, RA trigger and restart with ISC DHCP' \
@@ -395,8 +396,12 @@ check-ntp: build chrony-engine
 
 .PHONY: check-ntp-dhcp6
 check-ntp-dhcp6: build chrony-engine
-	$(PYTHON) scripts/ntp-peer.py --dhcp6-server '$(DHCP6_SERVER)' --output dist/ntp-dhcp6-peer
+	$(PYTHON) scripts/ntp-peer.py --profile learned --dhcp6-server '$(DHCP6_SERVER)' --output dist/ntp-dhcp6-peer
 
 .PHONY: qemu-ntp
 qemu-ntp:
 	$(MAKE) qemu-pppoe QEMU_PROFILE=time QEMU_POWER_ACTION=reboot QEMU_OUTPUT=dist/ntp-appliance
+
+.PHONY: check-ntp-import
+check-ntp-import: build chrony-engine
+	$(PYTHON) scripts/ntp-peer.py --profile import --dhcp6-server '$(DHCP6_SERVER)' --output dist/ntp-import-peer

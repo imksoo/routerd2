@@ -31,12 +31,20 @@ type guardGrant struct {
 	observedNanos                  uint64
 	bgp                            *bgpProvider
 	dhcpLease                      dhcp4.LeaseClock
+	dhcp4                          *dhcp4.Snapshot
 	health                         *health.Snapshot
 	dhcp6                          *dhcp6config.Snapshot
 }
 
 func dynamicProgram(source config.Document) bool {
 	for _, r := range source.Resources {
+		if r.Service != nil && r.Service.NTP != nil {
+			for _, group := range r.Service.NTP.Sources {
+				if group.When != nil {
+					return true
+				}
+			}
+		}
 		if r.When != nil || r.ReadyWhen != nil || r.EgressRoute != nil || r.Service != nil && r.Service.VRRP != nil && r.Service.VRRP.GracefulActivation != nil {
 			return true
 		}
@@ -82,7 +90,7 @@ func (r *Runtime) recordGuardGrantLocked(u serviceconfig.Update, now time.Time) 
 		if r.guardGrants == nil {
 			r.guardGrants = map[string]guardGrant{}
 		}
-		r.guardGrants[u.Name] = guardGrant{revision: r.config.revision, generation: u.Generation, sequence: u.Sequence, epoch: u.ProducerEpoch, bootID: s.BootID, value: s.Active, observedNanos: observed, untilNanos: until, dhcpLease: s.LeaseClock}
+		r.guardGrants[u.Name] = guardGrant{revision: r.config.revision, generation: u.Generation, sequence: u.Sequence, epoch: u.ProducerEpoch, bootID: s.BootID, value: s.Active, observedNanos: observed, untilNanos: until, dhcpLease: s.LeaseClock, dhcp4: &s}
 		return
 	}
 	if u.Role == "bgp" {

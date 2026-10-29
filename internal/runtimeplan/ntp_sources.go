@@ -7,8 +7,10 @@ import (
 	"time"
 
 	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/lifetime"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/protocol/ntpconfig"
+	"github.com/imksoo/routerd2/internal/resourceprogram"
 )
 
 func (r *Runtime) ntpSourceRoutes(mux *http.ServeMux) {
@@ -28,39 +30,76 @@ func (r *Runtime) ntpSourceRoutes(mux *http.ServeMux) {
 			localapi.Fail(w, http.StatusServiceUnavailable, errors.New("NTP process authority is unknown"))
 			return
 		}
-		input := ntpconfig.Sources{ConfigDigest: binding.digest, Generation: producer.Generation}
 		clock, err := boottime.Read()
 		if err != nil {
 			r.mu.Unlock()
-			localapi.Fail(w, http.StatusServiceUnavailable, err)
+			localapi.Fail(w, 503, err)
 			return
 		}
 		if !time.Now().Before(r.guardUntil) {
 			r.mu.Unlock()
-			localapi.Fail(w, http.StatusServiceUnavailable, errors.New("NTP source process observation is stale"))
+			localapi.Fail(w, 503, errors.New("NTP source process observation is stale"))
 			return
 		}
-		for _, ref := range node.SourcesFrom {
-			moduleName := "service." + ref
-			owner, active := r.bindings[moduleName]
-			module := r.guardStatus[moduleName]
-			record := r.records[moduleName]
-			snapshot := r.guardGrants[moduleName].dhcp6
-			if !active || snapshot == nil || !module.Ready || module.Generation != record.Generation || module.ConfigDigest != owner.digest || record.ConfigDigest != owner.digest || snapshot.ObservedNanos > uint64(clock.BoottimeNanoseconds) {
-				continue
-			}
-			until, live := snapshot.InformationUntil(clock)
-			if !live {
-				continue
-			}
-			for _, value := range snapshot.SNTPServers {
-				if address, err := netip.ParseAddr(value); err == nil && address.IsLinkLocalUnicast() && address.Zone() == "" {
-					value = address.WithZone(snapshot.Interface).String()
+		facts, err := r.conditionFactsLocked(r.config, time.Now())
+		if err != nil {
+			r.mu.Unlock()
+			localapi.Fail(w, 503, err)
+			return
+		}
+		input := ntpconfig.Sources{ConfigDigest: binding.digest, Generation: producer.Generation, Groups: make([]ntpconfig.SourceGrant, len(node.Sources))}
+		for i, group := range node.Sources {
+			grant := &input.Groups[i]
+			if group.When != nil {
+				truth, until := facts.ConditionAuthority(*group.When)
+				if truth != resourceprogram.True {
+					continue
 				}
-				input.Servers = append(input.Servers, ntpconfig.LearnedServer{Server: ntpconfig.Server{Address: value, Port: 123}, ValidUntil: until})
+				grant.ActiveUntil = &lifetime.Deadline{BootID: clock.BootID, Nanos: until}
+			}
+			for _, ref := range group.SourcesFrom {
+				moduleName := "service." + ref
+				owner, active := r.bindings[moduleName]
+				module := r.guardStatus[moduleName]
+				record := r.records[moduleName]
+				if !active || !module.Ready || module.Generation != record.Generation || module.ConfigDigest != owner.digest || record.ConfigDigest != owner.digest {
+					continue
+				}
+				var servers []string
+				var iface string
+				var until lifetime.Deadline
+				switch record.Role {
+				case "dhcp6":
+					snapshot := r.guardGrants[moduleName].dhcp6
+					if snapshot == nil || snapshot.ObservedNanos > uint64(clock.BoottimeNanoseconds) {
+						continue
+					}
+					var live bool
+					until, live = snapshot.InformationUntil(clock)
+					if !live {
+						continue
+					}
+					servers, iface = snapshot.SNTPServers, snapshot.Interface
+				case "dhcp4":
+					snapshot := r.guardGrants[moduleName].dhcp4
+					if snapshot == nil {
+						continue
+					}
+					until = lifetime.Deadline{BootID: snapshot.LeaseClock.BootID, Nanos: snapshot.LeaseClock.ExpiresNanos}
+					if !snapshot.Active || !until.Live(clock) {
+						continue
+					}
+					servers, iface = snapshot.NTPServers, snapshot.Interface
+				}
+				for _, value := range servers {
+					if address, err := netip.ParseAddr(value); err == nil && address.IsLinkLocalUnicast() && address.Zone() == "" {
+						value = address.WithZone(iface).String()
+					}
+					grant.Servers = append(grant.Servers, ntpconfig.LearnedServer{Server: ntpconfig.Server{Address: value, Port: 123}, ValidUntil: until})
+				}
 			}
 		}
 		r.mu.Unlock()
-		localapi.JSON(w, http.StatusOK, input)
+		localapi.JSON(w, 200, input)
 	})
 }

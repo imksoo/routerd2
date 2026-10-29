@@ -136,7 +136,7 @@ def peer(stage, power_action, updates, profile):
             'interval_ms': 500, 'timeout_ms': 300, 'healthy_threshold': 1, 'unhealthy_threshold': 2}}})
         start(ac,["dnsmasq","--keep-in-foreground","--conf-file=/dev/null","--no-hosts","--no-resolv","--bind-dynamic","--listen-address=192.0.2.1","--address=/ppp.example/198.51.100.20","--address=/ppp.example/2001:db8:ffff::20","--local-ttl=0"],"dns")
         if profile == 'time':
-            resources.append({'id': 'time', 'service': {'name': 'time', 'ntp': {'servers': [], 'sources_from': ['pd'], 'listen': ['10.42.0.1'], 'allow': ['10.42.0.0/24']}}})
+            resources.append({'id': 'time', 'service': {'name': 'time', 'ntp': {'sources': [{'servers': [], 'sources_from': ['pd']}], 'listen': ['10.42.0.1'], 'allow': ['10.42.0.0/24']}}})
             vendor = stage / 'chrony'
             with tarfile.open(stage / 'chrony-engine.tar') as archive:
                 archive.extractall(vendor, filter='data')
