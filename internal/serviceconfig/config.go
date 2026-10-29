@@ -448,6 +448,23 @@ func Validate(services []Service) error {
 	if count > 128 {
 		return errors.New("services plus delegated RA instances exceed 128")
 	}
+	for _, service := range services {
+		if service.NTP == nil {
+			continue
+		}
+		for _, name := range service.NTP.SourcesFrom {
+			found := false
+			for _, source := range services {
+				if source.Name == name && source.DHCP6 != nil {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return fmt.Errorf("NTP service %s: source %s must name a DHCPv6 service", service.Name, name)
+			}
+		}
+	}
 	if err := validateDSLiteSources(services); err != nil {
 		return err
 	}

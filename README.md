@@ -17,11 +17,12 @@ Alpineのパッケージをビルドとイメージ組み立てに利用しま�
 | logging | journald を使わない独立ログプロセス、構造化ログ、回転・復旧、bounded queue、console fallback、appliance の `/dev/kmsg` 収集。ログ障害を必須ルーティングプロセスの停止条件にしない |
 | network | Netlink による IPv4/IPv6、有限アドレス寿命、静的経路・ECMP、policy routing、bridge/VLAN/VRF/VXLAN/macvlan/dummy、MTU・リンク・forwarding。nftables の INPUT/OUTPUT/FORWARD ACL、DNAT/SNAT/masquerade とポート範囲 |
 | WAN | native DHCPv4、DHCPv6 IA_PD / Information-request、DUID/IAID とリースの永続化、renew/rebind/失効。WAN RA クライアント、SLAAC、default/RIO/on-link routes、RDNSS/DNSSL。PD から LAN /64 を割り当て、旧 prefix を deprecated で維持 |
-| DHCP server | stateless DHCPv6でDNS・検索ドメイン・SNTPを配布し、学習元の期限と永続DUIDを保持。native DHCPv4、scope・予約・sticky lease、ARP conflict probe、信頼する relay の限定、永続 journal を保存してから ACK。worker 再起動後の INIT-REBOOT / renew に対応 |
+| DHCP server | DHCPv4は固定dnsmasq engineとrouterd由来の設定描画・sticky保持を利用。scope・予約・relay・INIT-REBOOT/renewを扱う。stateless DHCPv6はGo実装でDNS・検索ドメイン・SNTPを配布し、学習元の期限と永続DUIDを保持 |
 | RA | native ICMPv6、RS 応答、RDNSS/DNSSL、絶対寿命、PD 更新時に同じプロセス・socket で prefix を変更。削除した prefix だけを withdraw |
 | DS-Lite | kernel IPv4-in-IPv6、B4 アドレス、IPv4 route。明示した RA/DHCPv6 依存から AFTR を IPv6 DNS で解決し、source・情報・DNS TTL の期限に従って接続・更新・撤去 |
 | VRRPv3 | native IPv4/IPv6 election、VMAC、GARP/NA、preempt、優先度、有限 ownership lease、NoDAD の明示 VIP、Accept_Mode の入力制御 |
 | DNS | 現行 routerd の resolver engine を再利用。UDP/TCP サーバー、cache、zones、query log、UDP/TCP/TLS/HTTPS/QUIC upstream。型付き DHCP リースによる A/PTR と PPP から学習した DNS 上流を、listener 再起動なしで更新・失効。虚偽の AD bit を防ぐため未実装の local DNSSEC signing は拒否 |
+| NTP | 固定chronydによるclient/server、型付きtracking、明示listen/allow、永続drift。DHCPv6学習先と元の情報期限、固定代替先を接続。hostモードは時計調整を無効化。applianceの時計調整・再起動を含む全受入は未完了 |
 | BGP | GoBGP v4 を独立 worker に統合。IPv4/IPv6 unicast、policy、選択経路の kernel 投影、recursive next hop、ECMP、期限付き FIB ownership。未解決 next hop は状態に表示し、未解決のまま FIB に入れない |
 | BFD | native IPv4/IPv6 single-hop・明示multihop asynchronous BFDとVRF scope。BGP の明示peerを管理し、受信期限・producer世代・Down counterで実セッションと学習経路を制御。旧profile/resource契約、認証・echoは未実装。VRF multihopの実通信試験はIPv4/IPv6 |
 | Health / events | ICMP/TCP/DNS/HTTPの有限Health snapshotと最小Health→PBR。probe履歴の永続queue・安定ID再送・永久削除・条件停止中の回収、EventRule、Health/BFD/BGPRouter参照DerivedEventと現在値表示。retention・他producer/providerは未完了 |
@@ -38,6 +39,10 @@ Alpineのパッケージをビルドとイメージ組み立てに利用しま�
 アプライアンスの通常起動には systemd、journald、sshd、OpenRC、`ip`、`nft`、シェルを使いません。
 パケット転送と IPv4/IPv6、conntrack、NAT、トンネルは Linux カーネルが処理します。
 routerd は設定、プロトコル、監視、ログ、管理とその整合性を受け持ちます。
+VRRPの選出・広告・VIP制御とDNSはGo実装で、keepalivedを製品に含めません。
+一方、DHCPv4のdnsmasq、PPPのpppd、接続状態同期のconntrackd、時刻同期のchronyd、
+公式Tailscale engineへの依存は残ります。PID 1が直接所有して起動・回収し、
+必要なengineと依存libraryを固定した署名runtimeとして配布します。Go中心の少数バイナリーで外部依存を減らす当初目標は未達です。
 
 詳細は [アーキテクチャ](docs/architecture.md)、[現行 routerd の機能棚卸し](docs/parity.md)、
 [全機能移植の実装計画](docs/implementation-plan.md)、
@@ -45,13 +50,14 @@ routerd は設定、プロトコル、監視、ログ、管理とその整合性
 [WAN と AFTR の契約](docs/wan.md)、[WireGuard](docs/wireguard.md)、[BFD と BGP](docs/bfd.md)、[署名付きユーザーランド更新](docs/releases.md)、[設定例](examples/) を参照してください。機能棚卸しの `semantic_parity` は個々の旧 resource 契約の互換性を示し、
 プロトコル実装やビルドの成功だけでは true にしません。
 
-今後の配布は、一つのイメージファイルを filesystem へ展開した複数バイナリーの束を runtime とし、
+配布では、一つのイメージファイルを filesystem へ展開した複数バイナリーの束を runtime とし、
 `boot config → load runtime → load startup-config` の順に起動する方針です。
 実行ファイル数は二つに固定しません。factoryの3 commandは最初の分割であり、全moduleの分割完了ではありません。
-manifest v4とverified role/PPP engine catalogを実装し、旧二ELF形式は受理しません。signed runtimeとstartup-configの同時選択、engine/kernel ABIの完全化は残っています。
+manifest v4とverified role/engine catalogを実装し、旧二ELF形式は受理しません。engine/kernel ABI全体の資格認定は残っています。
 設定store identityと確定済みrevisionの不変snapshot保存・検証も実装しました。
 `routerd config snapshot --expected-revision N` は保存のみです。固定runtimeのboot `startup` 参照は一度だけ採用し、後続commitを再起動で上書きしません。
-signed runtimeとの同時選択・組のconfirmation/fallbackは未実装で、`startup`と`release`の同時指定は拒否します。
+signed runtimeとstartup-configの組をSSH経由でstage/prepareし、採用・正常確定・破損候補の実行前拒否と既知正常版への復帰を実装しています。
+独立端末とのQEMU試験で通常更新と破損候補拒否後の通信を確認しました。採用後の異常終了・電源中断・対象実機の全受入は残ります。
 [保存契約と残作業](docs/startup-config.md)を参照してください。
 利用者のいない試作形式との後方互換は要求せず、新しい形式へ直接置換します。
 

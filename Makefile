@@ -387,3 +387,7 @@ chrony-engine:
 .PHONY: check-ntp
 check-ntp: build chrony-engine
 	$(PYTHON) scripts/ntp-peer.py
+
+.PHONY: check-ntp-dhcp6
+check-ntp-dhcp6: build chrony-engine
+	$(PYTHON) scripts/ntp-peer.py --dhcp6-server '$(DHCP6_SERVER)' --output dist/ntp-dhcp6-peer

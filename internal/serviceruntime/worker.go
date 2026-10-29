@@ -32,8 +32,6 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/dns"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
 	"github.com/imksoo/routerd2/internal/protocol/health"
-	"github.com/imksoo/routerd2/internal/protocol/ntp"
-	"github.com/imksoo/routerd2/internal/protocol/ntpconfig"
 	"github.com/imksoo/routerd2/internal/protocol/pppoe"
 	"github.com/imksoo/routerd2/internal/protocol/pppoeconfig"
 	"github.com/imksoo/routerd2/internal/protocol/ra"
@@ -108,13 +106,7 @@ func Run(ctx context.Context, runtimeDir, name, role, path, digest string, gener
 	}
 	switch role {
 	case "ntp":
-		var cfg ntpconfig.Config
-		if err := decode(instance.Config, &cfg); err != nil {
-			return err
-		}
-		image := os.NewFile(5, "chronyd-engine")
-		defer image.Close()
-		return ntp.Run(runCtx, cfg, image, func(ctx context.Context, snapshot ntpconfig.Snapshot) error { return c.update(ctx, snapshot) }, ready)
+		return c.runNTP(runCtx, instance, ready)
 	case "pppoe":
 		var cfg pppoeconfig.Config
 		if err := decode(instance.Config, &cfg); err != nil {

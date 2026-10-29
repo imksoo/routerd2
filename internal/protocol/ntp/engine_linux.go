@@ -6,7 +6,9 @@
 package ntp
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -57,7 +59,7 @@ func RunEngine() error {
 	if err := unix.Mount("tmpfs", root, "tmpfs", unix.MS_NOSUID|unix.MS_NODEV, "mode=700"); err != nil {
 		return fmt.Errorf("mount chronyd temporary root: %w", err)
 	}
-	for _, directory := range []string{"/run", "/state"} {
+	for _, directory := range []string{"/run/sources", "/state"} {
 		if err := os.MkdirAll(root+directory, 0700); err != nil {
 			return err
 		}
@@ -98,7 +100,7 @@ func RunEngine() error {
 	return syscall.Exec("/usr/sbin/chronyd", args, []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C"})
 }
 
-func Run(ctx context.Context, cfg ntpconfig.Config, image *os.File, publish func(context.Context, ntpconfig.Snapshot) error, ready func()) error {
+func Run(ctx context.Context, cfg ntpconfig.Config, image *os.File, updates <-chan ntpconfig.Sources, publish func(context.Context, ntpconfig.Snapshot) error, ready func()) error {
 	if err := ntpconfig.Validate(cfg); err != nil {
 		return err
 	}
@@ -157,6 +159,20 @@ func Run(ctx context.Context, cfg ntpconfig.Config, image *os.File, publish func
 		return err
 	}
 	defer root.Close()
+	var sourceDone chan struct{}
+	var sourceErr error
+	if len(cfg.SourcesFrom) > 0 {
+		sourceCtx, stop := context.WithCancel(ctx)
+		sourceDone = make(chan struct{})
+		defer func() { stop(); <-sourceDone }()
+		go func() {
+			sourceErr = runSources(sourceCtx, cfg, root, updates)
+			close(sourceDone)
+			if sourceErr != nil {
+				cancel()
+			}
+		}()
+	}
 	ready()
 	ticker.Reset(2 * time.Second)
 	for {
@@ -189,6 +205,8 @@ func Run(ctx context.Context, cfg ntpconfig.Config, image *os.File, publish func
 		select {
 		case <-ctx.Done():
 			return nil
+		case <-sourceDone:
+			return sourceErr
 		case <-done:
 			return errors.Join(errors.New("chronyd exited"), exitErr)
 		case <-ticker.C:
@@ -196,10 +214,17 @@ func Run(ctx context.Context, cfg ntpconfig.Config, image *os.File, publish func
 	}
 }
 
-// RunQuery enters the running engine's pinned root, as the conntrack command
+type Command uint8
+
+const (
+	Tracking Command = iota
+	ReloadSources
+)
+
+// RunCommand enters the running engine's pinned root, as the conntrack command
 // boundary does. chronyd requires filesystem Unix addresses; abstract reply
 // addresses are unsupported by its command protocol.
-func RunQuery() error {
+func RunCommand(command Command) error {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	if err := unix.Fchdir(3); err != nil {
@@ -224,6 +249,36 @@ func RunQuery() error {
 	defer connection.Close()
 	if err := connection.SetDeadline(time.Now().Add(time.Second)); err != nil {
 		return err
+	}
+	if command == ReloadSources {
+		// chrony 4.8 candm.h/pktlength.c: RELOAD_SOURCES has no body; the
+		// 20-byte request header is padded to the 28-byte NULL reply length.
+		request := struct {
+			chrony.RequestHead
+			Padding [8]byte
+		}{RequestHead: chrony.RequestHead{Version: 6, PKTType: 1, Command: 70, Sequence: 1}}
+		if err := binary.Write(connection, binary.BigEndian, request); err != nil {
+			return err
+		}
+		var packet [1024]byte
+		n, err := connection.Read(packet[:])
+		if err != nil {
+			return err
+		}
+		var reply chrony.ReplyHead
+		if err := binary.Read(bytes.NewReader(packet[:n]), binary.BigEndian, &reply); err != nil {
+			return err
+		}
+		if reply.Version != 6 || reply.PKTType != 2 || reply.Command != 70 || reply.Reply != 1 || reply.Sequence != 1 {
+			return errors.New("chronyd returned an unexpected source-reload response")
+		}
+		if reply.Status != 0 {
+			return fmt.Errorf("reload chronyd sources: %s", reply.Status)
+		}
+		return nil
+	}
+	if command != Tracking {
+		return errors.New("unsupported chronyd command")
 	}
 	client := chrony.Client{Connection: connection}
 	response, err := client.Communicate(chrony.NewTrackingPacket())

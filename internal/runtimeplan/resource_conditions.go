@@ -32,6 +32,7 @@ type guardGrant struct {
 	bgp                            *bgpProvider
 	dhcpLease                      dhcp4.LeaseClock
 	health                         *health.Snapshot
+	dhcp6                          *dhcp6config.Snapshot
 }
 
 func dynamicProgram(source config.Document) bool {
@@ -228,8 +229,8 @@ func (r *Runtime) conditionFactsLocked(cfg configuration, now time.Time) (result
 			continue
 		}
 		if record.Role == "dhcp6" {
-			var source dhcp6config.Snapshot
-			if json.Unmarshal(record.Snapshot, &source) != nil || !module.Ready || record.Generation != module.Generation || record.ConfigDigest != binding.digest || source.BootID != clock.BootID || source.ObservedNanos > ticks {
+			source := r.guardGrants[name].dhcp6
+			if source == nil || !module.Ready || record.Generation != module.Generation || record.ConfigDigest != binding.digest || source.BootID != clock.BootID || source.ObservedNanos > ticks {
 				continue
 			}
 			active := source.Active(clock)

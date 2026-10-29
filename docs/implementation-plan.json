@@ -475,7 +475,7 @@
       "title": "NTP client/server と時刻品質",
       "milestone": "M2",
       "track": "platform",
-      "status": "planned",
+      "status": "in_progress",
       "scope": "baseline_parity",
       "risk": "high",
       "depends_on": [
@@ -506,7 +506,16 @@
         "internal/serviceconfig",
         "internal/runtimeplan",
         "packaging/alpine"
-      ]
+      ],
+      "implementation_notes": {
+        "implemented": "time-sources/native-59: fixed chronyd 4.8 client/server with typed tracking and private source-reload command. Reuses routerd chain/ntp.go resolveServers semantics: live learned DHCPv6 SNTP sources, otherwise static fallback. Original information/lease BOOTTIME deadlines are owned by the time worker independently of control/status publication. Reload preserves the chronyd process and clock state. DHCPv6 observations are decoded once at their owning boundary and passed as typed immutable grants.",
+        "validation": "2026-10-29 PVE Linux6.8/amd64 make check-ntp-dhcp6 exited0 with actual supervisor/control/network/VRRP/DHCPv6/time workers and independent ISC4.4.3-P1/chronyd4.8/keepalived2.2.8 plus LAN chronyd -Q and packet capture. Normal DAD, learned IPv6 synchronization, original expiry while the NTP endpoint remained reachable, IPv4 fallback, DHCP reacquisition, conditional client stop/recovery during independent VRRP peer election, and original expiry while supervisor/control were stopped passed. The same chronyd PID and actual LAN response were checked throughout; host clock adjustment was disabled. Supporting make check (Go/Python/Race/vet), final affected-package Race/vet and CGO_ENABLED=0 Linux amd64/arm64 builds passed. Final-source real-peer rerun also exited0.",
+        "remaining": [
+          "DHCPv4 learned sources and legacy NTP resource import.",
+          "Appliance clock discipline, step/slew, persistent drift/reboot, IPv6 LAN access enforcement and NTP factory image inclusion.",
+          "Complete homert acceptance, physical-device qualification and all SYS-02 acceptance gates."
+        ]
+      }
     },
     {
       "id": "SYS-03",

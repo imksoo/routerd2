@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/lifetime"
 	mdns "github.com/miekg/dns"
 )
 
@@ -22,10 +23,23 @@ type Server struct {
 }
 
 type Node struct {
-	Servers []Server       `json:"servers"`
-	DNS     []netip.Addr   `json:"dns,omitempty"`
-	Listen  []netip.Addr   `json:"listen,omitempty"`
-	Allow   []netip.Prefix `json:"allow,omitempty"`
+	Servers     []Server       `json:"servers"`
+	SourcesFrom []string       `json:"sources_from,omitempty"`
+	DNS         []netip.Addr   `json:"dns,omitempty"`
+	Listen      []netip.Addr   `json:"listen,omitempty"`
+	Allow       []netip.Prefix `json:"allow,omitempty"`
+}
+
+// LearnedServer retains the supplying protocol's original information lifetime.
+type LearnedServer struct {
+	Server
+	ValidUntil lifetime.Deadline `json:"valid_until"`
+}
+
+type Sources struct {
+	ConfigDigest string          `json:"config_digest"`
+	Generation   uint64          `json:"generation"`
+	Servers      []LearnedServer `json:"servers"`
 }
 
 type Config struct {
@@ -53,21 +67,12 @@ type Snapshot struct {
 }
 
 func ValidateNode(n Node) error {
-	if len(n.Servers) > 32 || len(n.DNS) > 8 || len(n.Allow) > 128 {
+	if len(n.Servers) > 32 || len(n.SourcesFrom) > 32 || len(n.DNS) > 8 || len(n.Allow) > 128 {
 		return errors.New("NTP exceeds source, resolver or access-list bounds")
 	}
 	for _, server := range n.Servers {
-		if address, err := netip.ParseAddr(server.Address); err == nil {
-			if !usableAddress(address) {
-				return errors.New("NTP source must be unicast and link-local sources need an interface zone")
-			}
-		} else {
-			if _, ok := mdns.IsDomainName(server.Address); !ok || server.Address == "" || strings.ContainsAny(server.Address, "\x00 \t\r\n\\#;") {
-				return errors.New("NTP source must be an IP address or hostname")
-			}
-			if len(n.DNS) == 0 {
-				return errors.New("NTP hostname sources require explicit DNS resolvers for the private engine")
-			}
+		if err := ValidateServer(server, len(n.DNS) > 0); err != nil {
+			return err
 		}
 	}
 	families := map[bool]bool{}
@@ -93,6 +98,22 @@ func ValidateNode(n Node) error {
 	return nil
 }
 
+func ValidateServer(server Server, hasDNS bool) error {
+	if address, err := netip.ParseAddr(server.Address); err == nil {
+		if !usableAddress(address) {
+			return errors.New("NTP source must be unicast and link-local sources need an interface zone")
+		}
+		return nil
+	}
+	if _, ok := mdns.IsDomainName(server.Address); !ok || server.Address == "" || strings.ContainsAny(server.Address, "\x00 \t\r\n\\#;") {
+		return errors.New("NTP source must be an IP address or hostname")
+	}
+	if !hasDNS {
+		return errors.New("NTP hostname sources require explicit DNS resolvers for the private engine")
+	}
+	return nil
+}
+
 func Validate(c Config) error {
 	if err := ValidateNode(c.Node); err != nil {
 		return err
@@ -110,13 +131,9 @@ func Validate(c Config) error {
 // command socket; no service manager or remotely exposed command port is used.
 func Render(n Node) []byte {
 	var b bytes.Buffer
-	b.WriteString("driftfile /state/drift\ndumpdir /state\npidfile /run/chronyd.pid\nbindcmdaddress /run/chronyd.sock\ncmdport 0\nmakestep 1.0 3\n")
-	for _, server := range n.Servers {
-		port := server.Port
-		if port == 0 {
-			port = 123
-		}
-		fmt.Fprintf(&b, "server %s port %d iburst\n", server.Address, port)
+	b.WriteString("driftfile /state/drift\ndumpdir /state\npidfile /run/chronyd.pid\nbindcmdaddress /run/chronyd.sock\ncmdport 0\nmakestep 1.0 3\nsourcedir /run/sources\n")
+	if len(n.SourcesFrom) == 0 {
+		b.Write(RenderServers(n.Servers))
 	}
 	if len(n.Listen) == 0 {
 		b.WriteString("port 0\n")
@@ -126,6 +143,18 @@ func Render(n Node) []byte {
 	}
 	for _, prefix := range n.Allow {
 		fmt.Fprintf(&b, "allow %s\n", prefix.Masked())
+	}
+	return b.Bytes()
+}
+
+func RenderServers(servers []Server) []byte {
+	var b bytes.Buffer
+	for _, server := range servers {
+		port := server.Port
+		if port == 0 {
+			port = 123
+		}
+		fmt.Fprintf(&b, "server %s port %d iburst\n", server.Address, port)
 	}
 	return b.Bytes()
 }

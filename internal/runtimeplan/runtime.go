@@ -67,6 +67,7 @@ type binding struct {
 	instance serviceconfig.Instance
 	digest   string
 	encoded  []byte // canonical child-file bytes, owned by the immutable protocol plan
+	dhcp6    *dhcp6config.Config
 }
 type Status struct {
 	ProjectionGeneration uint64           `json:"projection_generation"`
@@ -363,6 +364,7 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 		}
 		break // cut over while still holding mu
 	}
+	previousGrants := r.guardGrants
 	if r.config.revision != revision || r.config.digest != sourceDigest {
 		if r.sourceEpoch == math.MaxUint64 {
 			r.mu.Unlock()
@@ -381,6 +383,14 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 	r.configured = true
 	r.records = retained
 	r.bindings = bindings
+	for name, record := range retained {
+		if record.Role == "dhcp6" {
+			if r.guardGrants == nil {
+				r.guardGrants = make(map[string]guardGrant)
+			}
+			r.guardGrants[name] = previousGrants[name]
+		}
+	}
 	for name := range r.dhcpServers {
 		if record, ok := retained[name]; !ok || record.Role != "dhcp_server" {
 			delete(r.dhcpServers, name)
@@ -433,7 +443,15 @@ func encodeInstance(v serviceconfig.Instance) (binding, error) {
 	}
 	b = append(b, '\n')
 	sum := sha256.Sum256(b)
-	return binding{instance: v, digest: hex.EncodeToString(sum[:]), encoded: b}, nil
+	bound := binding{instance: v, digest: hex.EncodeToString(sum[:]), encoded: b}
+	if v.Role == "dhcp6" {
+		var cfg dhcp6config.Config
+		if err := strict(v.Config, &cfg); err != nil {
+			return binding{}, err
+		}
+		bound.dhcp6 = &cfg
+	}
+	return bound, nil
 }
 
 // An instance set selects the current workers from the source's prepared plan.
@@ -610,6 +628,7 @@ func (r *Runtime) observe(ctx context.Context, u serviceconfig.Update) (*pending
 		}
 	}
 	var server dhcpserverconfig.Snapshot
+	var lease dhcp6config.Snapshot
 	if u.Role == "dhcp_server" {
 		var err error
 		server, err = r.validateDHCPServerSnapshotLocked(b, u)
@@ -618,6 +637,13 @@ func (r *Runtime) observe(ctx context.Context, u serviceconfig.Update) (*pending
 		}
 	} else if u.Role == "aftr" {
 		if err := r.validateAFTRSnapshotLocked(b, u.Snapshot); err != nil {
+			return nil, err
+		}
+	} else if u.Role == "dhcp6" {
+		if err := strict(u.Snapshot, &lease); err != nil {
+			return nil, err
+		}
+		if err := dhcp6config.ValidateSnapshot(*b.dhcp6, lease); err != nil {
 			return nil, err
 		}
 	} else if err := validateSnapshot(b.instance, u.Snapshot); err != nil {
@@ -647,16 +673,19 @@ func (r *Runtime) observe(ctx context.Context, u serviceconfig.Update) (*pending
 	if u.Role == "dhcp_server" {
 		r.dhcpServers[u.Name] = server
 	}
-	r.recordGuardGrantLocked(u, time.Now())
+	if u.Role == "dhcp6" {
+		if r.guardGrants == nil {
+			r.guardGrants = make(map[string]guardGrant)
+		}
+		r.guardGrants[u.Name] = guardGrant{dhcp6: &lease}
+	} else {
+		r.recordGuardGrantLocked(u, time.Now())
+	}
 	r.records[u.Name] = u
 	if u.Role == "vrrp" || u.Role == "bgp" {
 		effect = r.queueApplicationLocked(u)
 	} else if u.Role == "dhcp6" {
-		var snapshot dhcp6config.Snapshot
-		if err := json.Unmarshal(u.Snapshot, &snapshot); err != nil {
-			return nil, err
-		}
-		if snapshot.State == "stopped" {
+		if lease.State == "stopped" {
 			effect = r.queueApplicationLocked(u)
 		}
 	} else if u.Role == "ra_client" {
@@ -822,16 +851,6 @@ func validateSnapshot(instance serviceconfig.Instance, b json.RawMessage) error 
 			return err
 		}
 		return dhcp4.ValidateSnapshot(c, s)
-	case "dhcp6":
-		var c dhcp6config.Config
-		var s dhcp6config.Snapshot
-		if err := strict(instance.Config, &c); err != nil {
-			return err
-		}
-		if err := strict(b, &s); err != nil {
-			return err
-		}
-		return dhcp6config.ValidateSnapshot(c, s)
 	case "ra":
 		var c ra.Config
 		var s ra.Snapshot
@@ -901,6 +920,7 @@ func validateSnapshot(instance serviceconfig.Instance, b json.RawMessage) error 
 
 func (r *Runtime) Handler() http.Handler {
 	mux := http.NewServeMux()
+	r.ntpSourceRoutes(mux)
 	r.lifecycleRoutes(mux)
 	r.observationRoutes(mux)
 	r.aftrRoutes(mux)

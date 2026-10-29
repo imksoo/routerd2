@@ -5,6 +5,7 @@ import (
 
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/protocol/bgpconfig"
+	"github.com/imksoo/routerd2/internal/protocol/ntpconfig"
 	"github.com/imksoo/routerd2/internal/protocol/ra"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
@@ -13,6 +14,7 @@ import (
 // A protocol plan belongs to one immutable source configuration. Observations
 // select its workers and supply live data; they do not rebuild worker identity.
 type protocolPlan struct {
+	ntp          map[string]ntpconfig.Node
 	dhcp6Servers map[string]dhcp6ServerPlan
 	instances    map[string]binding
 	leaseHA      map[string]leaseHAPlan
@@ -34,6 +36,7 @@ type leaseHAPlan struct {
 // worker-name collisions and the service/instance limits.
 func prepareProtocols(doc config.Native, runtimeDir, stateDir string) (protocolPlan, error) {
 	plan := protocolPlan{
+		ntp:          make(map[string]ntpconfig.Node),
 		dhcp6Servers: make(map[string]dhcp6ServerPlan),
 		instances:    make(map[string]binding),
 		leaseHA:      make(map[string]leaseHAPlan),
@@ -67,6 +70,9 @@ func prepareProtocols(doc config.Native, runtimeDir, stateDir string) (protocolP
 			plan.serviceLinks[service.VRRP.VIPInterface] = true
 		}
 		name := service.ModuleName()
+		if service.NTP != nil {
+			plan.ntp[name] = *service.NTP
+		}
 		if service.DHCP6Server != nil {
 			refs := func(names []string) []string {
 				out := make([]string, len(names))

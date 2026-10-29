@@ -5,7 +5,7 @@
 [試験計画](test-plan.md)、[機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
-## 現在の成立範囲と残作業（2026-10-29 04:20 UTC）
+## 現在の成立範囲と残作業（2026-10-29 05:09 UTC）
 
 - main `935369d`: native-58/network journal15。PPP default経路は実unitの寿命に従い、条件付きPolicyRuleは
   元のBOOTTIME期限をwriterが独立して撤去する。PAP/CHAP・二WANのHealth/PBR・元期限・旧通知409・
@@ -24,10 +24,20 @@
 - 全4engine（PPP/DHCP/conntrack/Tailscale）のAPK/imageを固定同梱し、native-58のAlpineを構築した。
   実QEMU/PID 1起動は34.3秒で終了0。全engineの同時通信・arm64実行・対象実機・kernel/rootfs更新復旧は未受入。
   コアはCGO無効で両architectureを構築。署名試験の独立対向はRP-PPPoE/pppd・ISC DHCP・dhcpcdと実packet。
-- 静的NTP client/serverはnative-57で、独立chronyd・LAN chronyd -Q・実worker・captureまで成立した。
-  host時計調整は無効。`time-sources` worktreeでDHCPv6時刻源・元期限・代替先・主系条件を接続中。
-  chronyd 4.8のsource再読込で、engine再起動なしの代替先切替を実観測したが、製品の動的経路の受入はまだ。
-  DHCPv4時刻源・appliance clock discipline・NTP標準image同梱も残る。
+- `time-sources` / native-59/network journal15: DHCPv6学習NTPを接続した。旧routerdの
+  `chain/ntp.go resolveServers`と同じく、学習先があればそれを使い、無ければ固定代替先を選ぶ。
+  元の情報/lease BOOTTIME期限はtime workerが所有し、chronydのsource再読込で切替える。
+  通知ごとのengine再起動と、同じDHCPv6 snapshotの内部再decodeを除いた。
+  `make check-ntp-dhcp6`は独立ISC4.4.3-P1/chronyd4.8/keepalived2.2.8・通常DAD・実workerと
+  captureで終了0。学習IPv6先→LAN chronyd -Q、DHCP停止中の元期限→IPv4代替先、再取得、
+  対向VRRP主系化→条件付きclient停止/代替先→対向停止/学習復帰、supervisor/control停止中の
+  元期限撤去とLAN応答が成立した。全切替でchronydの同一PIDを確認した。host時計は調整しない。
+  初回の代替先待ち失敗は、常時併存させた代替先の64秒poll待ちだったため、旧処理と同じ選択方式へ修正した。
+  追加の観測コマンド失敗はPythonのfd3がexec時に閉じられる試験側の誤りで、明示継承へ修正した。
+  DHCPv4学習・旧NTP resource変換・appliance時計調整/step/slew/drift再起動・IPv6 LAN access制御・
+  NTP標準image同梱とhomert全体での受入は残る。make checkのGo/Python/Race/vetは終了0。
+  最終source確認後の関連Race/vetと両architecture CGO_ENABLED=0 buildも終了0。
+  stageした変更の秘密情報検査は検出0。最終sourceでの同じ実通信経路の再実行も終了0。
 - 先行固定版のHGW 7800秒は終了0。独立2端末728回・自然PD Renew/Reply・端末DHCP自然更新・
   PD交換/daemon再起動後の復旧が成立した。Tailscaleを含まない。最新固定版のHGW/Tailscale複合観測は継続中。
   直前の初期DoH期限切れ、以前の48分Tailscale障害・106分DNS障害は未解決。直接ONU・対象NICは未資格。

@@ -1,4 +1,4 @@
-2026-10-29 04:20 UTC: native-58の署名SSH通常更新・正常確定と、破損候補の実行前拒否・既知正常版での自動DNS/両family TCP/UDP/SSH/DUID復帰・正常電源断を確認した。全4engine同梱Alpineの構築/PID 1起動と、make check/Race/vet/両architecture静的buildも終了0。HGW/Tailscale長時間観測、NTP学習先・主系条件、全homert受入と対象実機・他対象・cloudを含む全体ゴールは未完了。現在の結果と限界は[引き継ぎ](pve-codex-handoff.md)の最新節を参照。
+2026-10-29 05:01 UTC: native-59のDHCPv6学習NTP→元期限で代替先→再取得、VRRP主系条件、control停止中の期限撤去とLAN応答を独立peerで確認した。chronydは同一PID。host時計調整は無効。署名更新と全4engine imageの成立範囲、未検証・全体残作業は[引き継ぎ](pve-codex-handoff.md)を参照。
 
 # 現行 routerd と同等の製品にするための実装計画
 
@@ -616,7 +616,14 @@ network intentのprotocol投影もJSON往復を除き、変更する集合だけ
 
 再利用・比較元: [pkg/controller/chain/ntp.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/controller/chain/ntp.go), [pkg/render/timesyncd.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/render/timesyncd.go), [pkg/api/specs.go](https://github.com/imksoo/routerd/blob/1329ef54f296507eda79bbbc3b853783dd27251e/pkg/api/specs.go)。
 
-実装先の案: `internal/protocol/ntp (新設予定)`, `internal/serviceconfig`, `internal/runtimeplan`, `packaging/alpine`。
+部分実装: `time-sources` / native-59。固定chronyd 4.8をPID 1配下のworkerが所有し、private command socketと型付きtrackingを使う。
+旧`resolveServers`の学習先優先/固定代替先選択を接続し、情報元のBOOTTIME期限でsourceだけを再読込する。
+`make check-ntp-dhcp6`は独立ISC/chronyd/keepalivedと実LANで終了0。学習IPv6先・元期限・代替IPv4先・再取得、
+VRRP主系条件でのclient停止/復帰、control/supervisor停止中の元期限とLAN応答を同一chronyd PIDで確認した。
+host時計調整は無効。DHCPv4学習、旧resource変換、appliance clock discipline/step/slew/drift再起動、
+IPv6 LAN access制御、NTP標準imageとhomert全体での受入は未完了。SYS-02を完了にはしない。
+
+実装先: `internal/protocol/ntp`, `internal/serviceconfig`, `internal/runtimeplan`, `packaging/alpine`。
 
 #### NET-01 — HealthCheck の native worker と経路証跡
 

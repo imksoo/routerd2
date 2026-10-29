@@ -5,6 +5,7 @@ Private network/mount namespaces and -x/-Q keep the host clock unchanged.
 This host-mode check does not qualify appliance clock adjustment.
 """
 import argparse
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -22,8 +23,9 @@ def run(args, timeout=10):
     return result.stdout
 
 
-def peer(stage):
+def peer(stage, learned=False):
     children = []
+    frozen = []
     namespaces = ['ntp-router', 'ntp-source', 'ntp-client']
     run(['mount', '--make-rprivate', '/'])
     Path('/run/netns').mkdir(exist_ok=True)
@@ -50,6 +52,8 @@ def peer(stage):
             run(['ip', 'link', 'add', device, 'netns', 'ntp-router', 'type', 'veth', 'peer', 'name', 'eth0', 'netns', ns])
             run(['ip', '-n', ns, 'link', 'set', 'eth0', 'up'])
             run(['ip', '-n', ns, 'address', 'add', address, 'dev', 'eth0'])
+        if learned:
+            run(['ip', '-n', 'ntp-source', '-6', 'address', 'add', '2001:db8:123::2/64', 'dev', 'eth0'])
         vendor = stage / 'vendor'
         vendor.mkdir()
         with tarfile.open(stage / 'chrony-engine.tar') as archive:
@@ -60,24 +64,48 @@ def peer(stage):
         source_state.mkdir(mode=0o700)
         source_config = stage / 'source.conf'
         source_config.write_text(f'local stratum 8\nbindaddress 192.0.2.2\nallow 192.0.2.0/24\ncmdport 0\nbindcmdaddress {source_state}/command.sock\npidfile {source_state}/pid\ndriftfile {source_state}/drift\ndumpdir {source_state}\nlogdir {source_state}\n')
-        start('ntp-source', command + ['-d', '-x', '-u', 'root', '-f', str(source_config)], 'source')
+        if learned:
+            with source_config.open('a') as out:
+                out.write('bindaddress 2001:db8:123::2\nallow 2001:db8:123::/64\n')
+            (stage / 'dhcp6.leases').touch()
+            (stage / 'dhcp6.conf').write_text('default-lease-time 18; preferred-lifetime 12; option dhcp-renewal-time 5; option dhcp-rebinding-time 9; option dhcp6.sntp-servers 2001:db8:123::2; subnet6 2001:db8:123::/64 { prefix6 2001:db8:400:: 2001:db8:400:f0:: /60; }\n')
+            provider_args = [str(stage / 'dhcpd'), '-6', '-f', '-d', '-cf', str(stage / 'dhcp6.conf'), '-lf', str(stage / 'dhcp6.leases'), '-pf', str(stage / 'dhcp6.pid'), 'eth0']
+        if not learned:
+            start('ntp-source', command + ['-d', '-x', '-u', 'root', '-f', str(source_config)], 'source')
         product = stage / 'routerd'
         modules = stage / 'routerd-modules'
         resources = []
         for device, address in [('wan0', '192.0.2.1/24'), ('lan0', '198.51.100.1/24')]:
             resources += [{'id': device, 'interface': {'name': device}}, {'id': device + '-address', 'depends_on': [device], 'address': {'interface': device, 'cidr': address}}]
-        resources.append({'id': 'time', 'service': {'name': 'time', 'ntp': {'servers': [{'address': '192.0.2.2'}], 'listen': ['198.51.100.1'], 'allow': ['198.51.100.0/24']}}})
+        time_node = {'servers': [{'address': '192.0.2.2'}], 'listen': ['198.51.100.1'], 'allow': ['198.51.100.0/24']}
+        resources.append({'id': 'time', 'service': {'name': 'time', 'ntp': time_node}})
+        if learned:
+            resources += [
+                {'id': 'wan6-address', 'address': {'interface': 'wan0', 'cidr': '2001:db8:123::1/64'}},
+                {'id': 'gateway', 'service': {'name': 'gateway', 'vrrp': {'interface': 'lan0', 'vip_interface': 'time-vip', 'family': 'ipv4', 'source_address': '198.51.100.1', 'unicast_peers': ['198.51.100.2'], 'virtual_router_id': 42, 'priority': 100, 'advert_interval_centiseconds': 100, 'ipv4_checksum': 'rfc5798', 'addresses': ['198.51.100.100/24'], 'accept_mode': True}}},
+                {'id': 'time-info', 'when': {'fact': 'service.gateway.active'}, 'depends_on': ['wan6-address'], 'service': {'name': 'time-info', 'dhcp6': {'interface': 'wan0', 'iaid': 1, 'request_prefix': True, 'prefix_length': 60}}},
+            ]
+            time_node['sources_from'] = ['time-info']
         configuration = stage / 'config.json'
         configuration.write_text(json.dumps({'schema_version': 2, 'resources': resources}))
         boot = {'platform': 'host', 'config': str(configuration), 'runtime_dir': str(stage / 'run'), 'state_dir': str(stage / 'state'),
                 'workers': {role: str(modules) for role in ('network', 'control', 'management', 'ntp')}, 'engines': {'ntp': str(stage / 'chrony-engine.tar')}}
         boot['workers']['logging'] = str(stage / 'routerd-logging')
+        if learned:
+            boot['workers']['dhcp6'] = str(modules)
+            boot['workers']['vrrp'] = str(modules)
         (stage / 'boot.json').write_text(json.dumps(boot))
-        capture = start('ntp-router', ['tcpdump', '-n', '-i', 'any', '-U', '-w', str(stage / 'ntp.pcap'), 'udp port 123'], 'capture')
-        start('ntp-router', [str(product), 'boot', '--file', str(stage / 'boot.json')], 'router')
-        def query(path):
-            return json.loads(run(inside('ntp-router', ['curl', '--fail-with-body', '--max-time', '3', '-sS', '--unix-socket', str(stage / 'run/control.sock'), 'http://routerd' + path])))
+        capture = start('ntp-router', ['tcpdump', '-Z', 'root', '-n', '-i', 'any', '-U', '-w', str(stage / 'ntp.pcap'), 'udp port 123 or udp port 546 or udp port 547 or ip proto 112'], 'capture')
+        router = start('ntp-router', [str(product), 'boot', '--file', str(stage / 'boot.json')], 'router')
+        if learned:
+            # The product brings up its WAN end before peer DAD can finish.
+            wait(lambda: any(a.get('local') == '2001:db8:123::2' and not a.get('tentative') for link in json.loads(run(['ip', '-n', 'ntp-source', '-j', '-6', 'address', 'show', 'dev', 'eth0'])) for a in link['addr_info']))
+            provider = start('ntp-source', provider_args, 'dhcp6')
+            start('ntp-source', command + ['-d', '-x', '-u', 'root', '-f', str(source_config)], 'source')
+        def query(path, socket='control.sock'):
+            return json.loads(run(inside('ntp-router', ['curl', '--fail-with-body', '--max-time', '3', '-sS', '--unix-socket', str(stage / 'run' / socket), 'http://routerd' + path])))
         observed = None
+        expected_source = '2001:db8:123::2' if learned else '192.0.2.2'
         def synchronized():
             nonlocal observed
             if not (stage / 'run/control.sock').exists():
@@ -89,22 +117,88 @@ def peer(stage):
             if current != observed:
                 print('Observed product time state', current, flush=True)
                 observed = current
-            return snapshot.get('synchronized', False)
+            return snapshot.get('synchronized', False) and ipaddress.ip_address(snapshot.get('source', '::')) == ipaddress.ip_address(expected_source)
         wait(synchronized)
         snapshot = query('/v1/services/service.time')['snapshot']
-        assert snapshot['source'] == '192.0.2.2' and not snapshot['adjusting_clock']
+        assert ipaddress.ip_address(snapshot['source']) == ipaddress.ip_address(expected_source) and not snapshot['adjusting_clock']
         assert snapshot['stratum'] == 9 and snapshot['expires_nanos'] > snapshot['observed_nanos']
         print('PASS actual supervisor/control/network/time worker: synchronized to independent stratum-8 chronyd, typed tracking and finite boot observation, host clock adjustment disabled', flush=True)
         client_config = stage / 'client.conf'
         client_config.write_text('server 198.51.100.1 iburst\ncmdport 0\n')
         output = run(inside('ntp-client', command + ['-Q', '-t', '8', '-u', 'root', '-f', str(client_config)]), 12)
         print('PASS independent chronyd -Q client received LAN NTP time without adjusting the host clock', flush=True)
+        if learned:
+            worker = next(module for module in query('/v1/status', 'supervisor.sock')['modules'] if module['name'] == 'service.time')
+            def engine_pid():
+                candidates = set()
+                for task in Path(f'/proc/{worker["pid"]}/task').iterdir():
+                    candidates.update((task / 'children').read_text().split())
+                return next(int(pid) for pid in candidates if Path(f'/proc/{pid}/cmdline').read_bytes().split(b'\0')[0] == b'chronyd')
+            chronyd_pid = engine_pid()
+            info = query('/v1/services/service.time-info')['snapshot']
+            print('Observed learned-source original deadline', info['prefixes'][0]['valid_until'], flush=True)
+            provider.send_signal(signal.SIGSTOP)
+            expected_source = '192.0.2.2'
+            wait(synchronized)
+            assert next(module for module in query('/v1/status', 'supervisor.sock')['modules'] if module['name'] == 'service.time')['pid'] == worker['pid']
+            assert engine_pid() == chronyd_pid
+            run(inside('ntp-client', command + ['-Q', '-t', '8', '-u', 'root', '-f', str(client_config)]), 12)
+            print('PASS original DHCPv6 information/lease expiry selected the static fallback while the learned NTP endpoint remained reachable; same time worker and LAN response', flush=True)
+            provider.send_signal(signal.SIGCONT)
+            expected_source = '2001:db8:123::2'
+            wait(synchronized)
+            run(inside('ntp-client', command + ['-Q', '-t', '8', '-u', 'root', '-f', str(client_config)]), 12)
+            assert engine_pid() == chronyd_pid
+            print('PASS independent DHCPv6 reacquisition restored the learned source and LAN time response without restarting chronyd', flush=True)
+            peer_config = stage / 'keepalived.conf'
+            peer_config.write_text('global_defs {\n router_id TIME_PEER\n}\nvrrp_instance TIME {\n state BACKUP\n interface eth0\n virtual_router_id 42\n priority 200\n advert_int 1\n version 3\n accept\n unicast_src_ip 198.51.100.2\n unicast_peer {\n 198.51.100.1\n }\n virtual_ipaddress {\n 198.51.100.100/24 dev eth0\n }\n}\n')
+            election_peer = start('ntp-client', [str(stage / 'keepalived'), '--dont-fork', '--dont-respawn', '--log-console', '--no-syslog', '--vrrp', '--use-file=' + str(peer_config), '--pid=' + str(stage / 'keepalived.pid'), '--vrrp_pid=' + str(stage / 'vrrp.pid')], 'vrrp')
+            wait(lambda: query('/v1/services/service.gateway')['snapshot']['state'] == 'BACKUP')
+            wait(lambda: all(module['name'] != 'service.time-info' for module in query('/v1/status', 'supervisor.sock')['modules']))
+            expected_source = '192.0.2.2'
+            wait(synchronized)
+            assert engine_pid() == chronyd_pid
+            run(inside('ntp-client', command + ['-Q', '-t', '8', '-u', 'root', '-f', str(client_config)]), 12)
+            election_peer.terminate()
+            election_peer.wait(timeout=5)
+            expected_source = '2001:db8:123::2'
+            wait(synchronized)
+            assert engine_pid() == chronyd_pid
+            print('PASS independent keepalived elected master: native VRRP backup stopped conditional DHCPv6, kept LAN time on fallback, then peer stop restored learning in the same chronyd', flush=True)
+            sources = query('/v1/services/service.time/ntp-sources')['servers']
+            deadline = min(server['valid_until']['nanos'] for server in sources)
+            assert deadline > time.clock_gettime_ns(time.CLOCK_BOOTTIME)
+            control = next(module for module in query('/v1/status', 'supervisor.sock')['modules'] if module['name'] == 'control')
+            # Freeze PID 1 too so its watchdog cannot replace the stopped
+            # coordinator. The time worker and clock engine continue running.
+            for pid in (router.pid, control['pid']):
+                os.kill(pid, signal.SIGSTOP)
+                frozen.append(pid)
+            def engine_fallback():
+                # Use the product's existing private command boundary because
+                # the coordinator's observation API is intentionally stopped.
+                script = 'import os,sys; fd=os.open(sys.argv[1],os.O_RDONLY); os.dup2(fd,3); os.set_inheritable(3,True); os.execv(sys.argv[2],[sys.argv[2],"chrony-query"])'
+                tracking = json.loads(run(inside('ntp-router', ['python3', '-c', script, f'/proc/{chronyd_pid}/root', str(modules)])))
+                return tracking['synchronized'] and ipaddress.ip_address(tracking['source']) == ipaddress.ip_address('192.0.2.2')
+            wait(engine_fallback)
+            assert time.clock_gettime_ns(time.CLOCK_BOOTTIME) >= deadline
+            assert engine_pid() == chronyd_pid
+            run(inside('ntp-client', command + ['-Q', '-t', '8', '-u', 'root', '-f', str(client_config)]), 12)
+            print('PASS stopped supervisor/control: original source deadline selected fallback in the same chronyd and independent LAN client still received time', flush=True)
+            for pid in reversed(frozen):
+                os.kill(pid, signal.SIGCONT)
+            frozen.clear()
+
         capture.send_signal(signal.SIGINT)
         capture.wait(timeout=3)
         packets = run(['tcpdump', '-nn', '-r', str(stage / 'ntp.pcap')])
         assert '192.0.2.2.123' in packets and '198.51.100.1.123' in packets
         print('PASS packet capture contains both upstream synchronization and LAN NTP requests/replies', flush=True)
     finally:
+        for pid in reversed(frozen):
+            os.kill(pid, signal.SIGCONT)
+        if learned and 'provider' in locals() and provider.poll() is None:
+            provider.send_signal(signal.SIGCONT)
         for child in reversed(children):
             if child.poll() is None:
                 child.terminate()
@@ -120,10 +214,11 @@ def peer(stage):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--inside', type=Path)
+    parser.add_argument('--dhcp6-server', type=Path)
     parser.add_argument('--output', type=Path, default=Path('dist/ntp-peer'))
     args = parser.parse_args()
     if args.inside:
-        peer(args.inside)
+        peer(args.inside, args.dhcp6_server is not None)
         return
     project = Path(__file__).resolve().parents[1]
     root = [] if os.geteuid() == 0 else ['sudo', '-n']
@@ -131,10 +226,15 @@ def main():
     try:
         for name, source in [('peer.py', Path(__file__)), ('chrony-engine.tar', project / 'dist/chrony-engine.tar')] + [(name, project / 'dist/bin' / name) for name in ('routerd', 'routerd-modules', 'routerd-logging')]:
             run(root + ['install', '-m', '755' if name.startswith('routerd') else '644', str(source), str(stage / name)])
-        result = subprocess.run(root + ['unshare', '--mount', '--net', '--fork', 'python3', str(stage / 'peer.py'), '--inside', str(stage)], capture_output=True, text=True, timeout=90)
+        extra = []
+        if args.dhcp6_server:
+            run(root + ['install', '-m', '500', str(args.dhcp6_server), str(stage / 'dhcpd')])
+            run(root + ['install', '-m', '500', shutil.which('keepalived'), str(stage / 'keepalived')])
+            extra = ['--dhcp6-server', str(stage / 'dhcpd')]
+        result = subprocess.run(root + ['unshare', '--mount', '--net', '--fork', 'python3', str(stage / 'peer.py'), '--inside', str(stage)] + extra, capture_output=True, text=True, timeout=210 if extra else 90)
         args.output.mkdir(parents=True, exist_ok=True)
         (args.output / 'peer.log').write_text(result.stdout + result.stderr)
-        for name in ('router.log', 'source.log', 'capture.log', 'ntp.pcap'):
+        for name in ('router.log', 'source.log', 'dhcp6.log', 'vrrp.log', 'capture.log', 'ntp.pcap'):
             artifact = subprocess.run(root + ['cat', str(stage / name)], capture_output=True)
             if artifact.returncode == 0:
                 (args.output / name).write_bytes(artifact.stdout)
