@@ -41,7 +41,7 @@ func TestEventCompactionFailurePersistsAcrossFreshInspectionUntilMaintenanceReco
 	if _, err = db.Exec(`CREATE TRIGGER fail_compaction BEFORE INSERT ON completed_jobs BEGIN SELECT RAISE(ABORT,'injected compaction failure'); END`); err != nil {
 		t.Fatal(err)
 	}
-	if err = e.MaintainEventStore(ctx); err == nil {
+	if err = e.maintainEventStore(ctx, compactEventWork); err == nil {
 		t.Fatal("maintenance failure hidden")
 	}
 	if h := e.health(); h.Healthy || h.EventJournal.Storage.CompactionError == "" || !strings.Contains(h.EventJournal.Storage.LastError, "compaction") {
@@ -59,7 +59,10 @@ func TestEventCompactionFailurePersistsAcrossFreshInspectionUntilMaintenanceReco
 	if _, err = db.Exec(`DROP TRIGGER fail_compaction`); err != nil {
 		t.Fatal(err)
 	}
-	if err = e.MaintainEventStore(ctx); err != nil {
+	if err = e.maintainEventStore(ctx, compactEventWork); err != nil {
+		t.Fatal(err)
+	}
+	if err = e.RefreshEventStore(ctx); err != nil {
 		t.Fatal(err)
 	}
 	h := e.health()

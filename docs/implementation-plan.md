@@ -45,6 +45,12 @@ RAのDNS満杯処理は最短期限の除去へ閉じ、経路更新を維持す
 実packetで切替/既存TCP/UDP、PD/RA、DNSとBFD→BGP→FIBを確認した。全経路の監査や
 HA-02/HA-03全体の完了ではなく、homertの残機能と相互接続を進めながら修正を継続する。
 
+2026-10-29 履歴処理: 空のwrite transactionを除き、整理・圧縮・容量取得を既存tickで一工程ずつ実行する。
+各処理の2秒期限と警報保持は維持した。512MiB/2 CPUの計測付き実APK/PID 1で設定保存・再起動後の
+IPv4/IPv6 TCP/UDP・DNS・NTP・管理と、65.2秒/9巡の履歴進行・Health履歴破棄0を確認し終了0。
+途中の設定healthy=false、設定変更中の履歴timeout、以前のworker起動10秒超過・DNS SERVFAILは未解消。
+一時計測を削除し、原因を隠す期限延長はしない。成立範囲と次の観測は[引き継ぎ](pve-codex-handoff.md)に残す。
+
 ## 実行順序
 
 全34 work packageの範囲は維持し、次の順で実際の運用を完成させる。

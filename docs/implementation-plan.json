@@ -344,7 +344,16 @@
         "internal/events",
         "internal/serviceconfig",
         "internal/runtimeplan"
-      ]
+      ],
+      "implementation_notes": {
+        "maintenance": "Empty compaction/archive passes no longer begin write transactions. Compaction holds the single SQLite connection through selection and atomic write. The existing monitor runs one independent operation per one-second tick with the original two-second bound, instead of making compaction, archive and capacity share one deadline. Alarms remain until the corresponding operation succeeds and fresh inspection clears the aggregate.",
+        "validation": "history-startup-observe-native59: real packaged Alpine/PID1,512MiB,2CPUs,ext4 and independent RP-PPPoE/ISC/chronyd/Linux LAN. Configuration commit9.56s,reboot51.4s;65.2s/9 rounds of IPv4/IPv6 TCP/UDP,DNS UDP/TCP,NTP and management while tip advanced to181,archive179,Health observations advanced,history dropped0 and delivery error empty. Actual persisted health events141-156 were read through show observations. Four management requests took at most2.97s combined. Instrumented real execution; temporary timing code removed from final production diff.",
+        "remaining": [
+          "One maintenance timeout during configuration change and a one-second Health-history delivery timeout after reboot recovered before the coexistence interval; their absence is not established.",
+          "Configuration health was false in two intermediate rounds despite continuing communication/history; capture the service health reason.",
+          "A previous run restarted NTP/DHCP workers at the ten-second startup bound; not reproduced in the instrumented successful run and not resolved. Prior TCP DNS SERVFAIL cause remains unknown."
+        ]
+      }
     },
     {
       "id": "CORE-05",
@@ -513,7 +522,7 @@
         "remaining": [
           "DHCPv4 learned sources and legacy NTP import, including always-static server sources coexisting with conditional client learning/fallback.",
           "IPv6 LAN access enforcement, infinite-lease peer qualification, slew/network outage, unsynchronized TLS policy and complete homert acceptance.",
-          "The event-maintenance shared two-second budget timed out in a prior appliance run; final success does not resolve it. Observe per-stage duration and SQLite connection waits before changing it."
+          "Shared maintenance deadlines and empty write transactions were removed after stage measurement; see CORE-04. Transient maintenance/Health-history timeouts, intermittent configuration unhealthy reports and the previous ten-second worker startup failure remain unresolved; do not count a later passing run as their cause fix."
         ],
         "appliance_validation": "ntp-quality-native59: make qemu-ntp exited0 with actual packaged Alpine/PID1,512MiB,2CPUs,ext4,independent ISC/chronyd/RP-PPPoE/Linux LAN client. Deliberately slow virtual RTC was corrected1201.110677s. Initial frequency uncertainty fell from1000000 to53.633ppm in64.72s; unchanged standard client accepted time at0.000152s offset. Second boot loaded Frequency1.552 +/-67.615ppm from /state/drift, corrected1200.474695s and served LAN time at0.000160s offset. Both-family TCP/UDP,DNS,management,DUID/config persistence and final poweroff passed. First boot31.87s,reboot64.35s. Second-boot WAN/LAN NTP capture was inspected. Host clock unchanged; physical NIC and ARM execution unqualified."
       }

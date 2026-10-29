@@ -81,6 +81,9 @@ func (s *Store) ArchiveEvents(ctx context.Context, limit int) (int, error) {
 	if err = errors.Join(err, rows.Err(), rows.Close()); err != nil {
 		return 0, err
 	}
+	if len(batch) == 0 {
+		return 0, nil
+	}
 	for i := range batch {
 		c := &batch[i]
 		if err = ctx.Err(); err != nil {

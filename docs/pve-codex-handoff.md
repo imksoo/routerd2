@@ -5,7 +5,7 @@
 [試験計画](test-plan.md)、[機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
-## 現在の成立範囲と残作業（2026-10-29 06:17 UTC）
+## 現在の成立範囲と残作業（2026-10-29 07:25 UTC）
 
 - main `935369d`: native-58/network journal15。PPP default経路は実unitの寿命に従い、条件付きPolicyRuleは
   元のBOOTTIME期限をwriterが独立して撤去する。PAP/CHAP・二WANのHealth/PBR・元期限・旧通知409・
@@ -46,8 +46,23 @@
   DHCPv4学習、旧NTP resource変換、IPv6 LAN access制御、無限leaseのpeer資格、時刻未同期時のTLS方針、
   全homert受入は残る。現行homertは常設NTPServerの静的3同期先と、主系NTPClientの学習/代替2先を
   別fragmentで併存させる。現nativeの一つの学習/代替setを、その全体の同等実装とは扱わない。
-  以前の配布試験では履歴処理の2秒共用予算によるtimeoutも観測した。最終経路は終了0だが未解消とし、
-  次の必要な観測は整理/圧縮/容量取得の所要時間とSQLiteの接続待ち。健全条件を緩めて隠してはいない。
+  履歴処理の段階計測・修正後の成立範囲と残る失敗は次項に記載する。
+- `history-startup-observe-native59` / 同じ512MiB・2 CPUの実APK/PID 1/ext4で、設定保存9.56秒、
+  再起動51.4秒、独立端末のIPv4/IPv6 TCP/UDP・DNS UDP/TCP・NTPと履歴の両立を終了0で確認。
+  再起動後65.2秒/9巡でtip181・archive179へ進み、Healthの観測時刻も進行、履歴破棄0・配送エラーなし。
+  保存済みHealthイベントcursor141–156を製品の`show observations`から読めた。管理4照会の合計最大2.97秒。
+  空の整理/圧縮はwrite transactionを作らず、整理のSELECTとwriteは同じ排他connectionで保持する。
+  整理・圧縮・容量取得は既存の1秒tickで一工程ずつ処理し、各2秒の期限を共有させない。
+  警報は該当処理が成功するまで保持し、残った警報を回復ログで隠さない。期限延長や健全条件の緩和はしていない。
+  最終コードのmake check（Go/Python/Race Detector/vet）とCGO_ENABLED=0のLinux amd64/arm64 buildは終了0。
+  計測専用の本番コードは削除。abuildの実際のGOCACHEを既存cache mountへ接続し、再ダウンロードも除いた。
+- この成功を全安定化には数えない。同実行の設定変更中に履歴の期限超過が一度あり、再起動直後には
+  Health履歴の1秒送信超過を観測した。継続確認時は回復していたが、途中2巡は設定healthy=falseで理由未確定。
+  前の`history-phased-native59`はNTP/DHCP workerの10秒startup timeoutで世代2になり終了2。
+  計測版のNTPは両起動で世代1、設定読込52–61ms、helper開始からready4.23–4.37秒、展開1.47–1.54秒だった。
+  前回の10秒超過は未再現・未解消。以前のDNS TCP SERVFAILも今回未再現で原因未確定。
+  次はhealthy=falseのサービス理由と起動超過時の同じ区間を観測する。単に期限を伸ばさない。
+  実通信版には起動計測ログを含み、最終差分から除去した。対象物理機器・ARM実行・全homert受入は別途必要。
 - 実行版`hgw-dns-observation-f253575-work`の実HGW/Tailscale 7800秒試験は05:16 UTCに終了0。
   独立2端末693巡のIPv4/IPv6 HTTPS・学習DNS UDP/TCP、条件付きDNS、自然PD Renew/Reply一組、
   端末DHCP自然更新、PD SIGKILL復旧1.91秒・通常再起動3.72秒・全daemon復旧4.21秒が成立した。

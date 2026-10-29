@@ -29,7 +29,7 @@ func TestArchiveWriteFailureCannotBeClearedByInspectionOrConfirmed(t *testing.T)
 	if _, err = db.Exec(`CREATE TRIGGER fail_archive BEFORE INSERT ON event_archive BEGIN SELECT RAISE(ABORT,'injected archive failure'); END`); err != nil {
 		t.Fatal(err)
 	}
-	if err = e.MaintainEventStore(ctx); err == nil {
+	if err = e.maintainEventStore(ctx, archiveEventWork); err == nil {
 		t.Fatal("archive write failure was hidden")
 	}
 	if err = e.RefreshEventStore(ctx); err != nil {
@@ -48,7 +48,10 @@ func TestArchiveWriteFailureCannotBeClearedByInspectionOrConfirmed(t *testing.T)
 	if _, err = db.Exec(`DROP TRIGGER fail_archive`); err != nil {
 		t.Fatal(err)
 	}
-	if err = e.MaintainEventStore(ctx); err != nil {
+	if err = e.maintainEventStore(ctx, archiveEventWork); err != nil {
+		t.Fatal(err)
+	}
+	if err = e.RefreshEventStore(ctx); err != nil {
 		t.Fatal(err)
 	}
 	h = e.health()

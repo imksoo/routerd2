@@ -13,7 +13,7 @@ FROM golang:${GO_VERSION}-alpine3.24 AS toolchain
 
 FROM alpine:${ALPINE_VERSION} AS package-build
 COPY --from=toolchain /usr/local/go /usr/local/go
-ENV PATH=/usr/local/go/bin:$PATH GOTOOLCHAIN=local
+ENV PATH=/usr/local/go/bin:$PATH GOTOOLCHAIN=local GOCACHE=/home/builder/.cache/go-build
 RUN apk add --no-cache alpine-sdk ca-certificates tar python3 \
  && adduser -D -G abuild builder \
  && mkdir -p /out \
@@ -34,8 +34,7 @@ ARG RELEASE_ID=dev
 ARG SOURCE_DATE_EPOCH=0
 ENV ROUTERD_RELEASE_ID=$RELEASE_ID SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH
 USER builder
-RUN --mount=type=cache,target=/home/builder/go/pkg/mod,uid=1000 \
-    --mount=type=cache,target=/home/builder/.cache/go-build,uid=1000 \
+RUN --mount=type=cache,target=/home/builder/.cache/go-build,uid=1000 \
     GOMAXPROCS=2 sh packaging/alpine/build.sh /src /out
 
 FROM scratch AS apk-output

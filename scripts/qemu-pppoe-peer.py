@@ -253,8 +253,9 @@ def peer(stage, power_action, updates, profile):
                 except Exception as error:
                     raise RuntimeError(f'LAN UDP {family} failed: {error}') from error
 
-            for transport in ([],["+tcp"]):
-                assert run(inside(lan,["dig","@"+client_dns,"peer.ppp.example","A","+tries=1","+time=2","+short"]+transport)).strip()=="198.51.100.20"
+            for transport in ([], ["+tcp"]):
+                response = run(inside(lan, ["dig", "@" + client_dns, "peer.ppp.example", "A", "+tries=1", "+time=2", "+noall", "+comments", "+answer"] + transport))
+                assert "status: NOERROR" in response and re.search(r"\sA\s+198\.51\.100\.20(?:\s|$)", response), response
 
         def ppp_ready():
             return bool([x for x in json.loads(run(['ip', '-n', ac, '-j', 'link', 'show'])) if x['ifname'].startswith('ppp')])
@@ -521,9 +522,37 @@ def peer(stage, power_action, updates, profile):
                 wait(time_ready, 180)
                 time_client()
                 console = (stage / 'serial.log').read_text(errors='replace')
-                assert next(m for m in query('show status')['modules'] if m['name'] == 'service.time')['generation'] == 1
+                time_generation = next(m for m in query('show status')['modules'] if m['name'] == 'service.time')['generation']
+                print('Observed second-boot time worker generation', time_generation, flush=True)
                 assert 'read from /state/drift' in console[console.rfind('Linux version '):], 'chronyd did not restore persisted drift on second boot'
                 print('PASS second appliance boot restored persisted chronyd drift, learned source, actual clock adjustment and LAN time', flush=True)
+                history_before = query('show event-store')['capacity']
+                health_before = query('show services uplink-health')['snapshot']
+                coexist_started = time.monotonic()
+                rounds = 0
+                max_management = 0
+                while time.monotonic() - coexist_started < 60:
+                    traffic()
+                    time_client()
+                    response_started = time.monotonic()
+                    current_status = query('show status')
+                    current_config = query('show config')
+                    current_health = query('show services uplink-health')['snapshot']
+                    current_store = query('show event-store')
+                    max_management = max(max_management, time.monotonic() - response_started)
+                    assert current_status['ready'] and current_health['active']
+                    if not current_config['healthy']:
+                        services = current_config['services']
+                        print('Observed configuration health alarm', {'errors': {key: current_config[key] for key in ('last_error', 'event_journal_error', 'event_store_error', 'event_rule_error', 'derived_error', 'protocol_event_error') if current_config.get(key)}, 'service_phase': services['phase'], 'service_error': services.get('last_error', '')}, flush=True)
+                    rounds += 1
+                    print('Observed history/communication coexistence', {'round': rounds, 'elapsed': round(time.monotonic() - coexist_started, 2), 'management_seconds': round(time.monotonic() - response_started, 2), 'configuration_healthy': current_config['healthy'], 'health_observed_nanos': current_health['observed_nanos'], 'tip': current_store['capacity']['tip_cursor'], 'archived_rows': current_store['capacity']['archived_events']['rows'], 'history_error': current_store.get('last_error', ''), 'health_history_dropped': current_health['history_dropped'], 'health_history_error': current_health.get('history_error', '')}, flush=True)
+                assert current_config['healthy'] and not current_store.get('last_error')
+                assert current_health['observed_nanos'] > health_before['observed_nanos']
+                assert current_health['history_dropped'] == health_before['history_dropped'] and not current_health.get('history_error'), current_health
+                assert current_store['capacity']['tip_cursor'] > history_before['tip_cursor']
+                assert current_store['capacity']['archived_events']['rows'] > history_before['archived_events']['rows']
+                print('PASS advancing archived history with independent IPv4/IPv6 TCP/UDP,DNS,NTP,current Health and management; rounds', rounds, 'maximum combined management seconds', round(max_management, 2), flush=True)
+                assert time_generation == 1, f'NTP worker restarted during startup: generation {time_generation}'
             if profile == 'update':
                 assert query('show status')['release_id'] == versions['next']
                 print('Observed selected trial supervisor: ' + json.dumps(query('show status')), flush=True)

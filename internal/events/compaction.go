@@ -43,19 +43,20 @@ func (s *Store) CompactCompleted(ctx context.Context, limit int) (int, error) {
 	if s.closed {
 		return 0, ErrClosed
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	connection, err := s.db.Conn(ctx)
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
-	// Existing indexes lead with done, so waiting work is not scanned. Read a
-	// bounded batch before writes; no database/sql reader holds the connection.
+	defer connection.Close()
+	// Existing indexes lead with done. Select completed immutable payloads
+	// on the exclusively held connection. Empty passes need no write transaction;
+	// nonempty passes keep the same connection through their atomic write.
 	consumerLimit := (limit + 1) / 2
 	producerLimit := limit - consumerLimit
 	if producerLimit == 0 {
 		producerLimit = 1
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT * FROM (SELECT 0,consumer,key,event_cursor,payload FROM outbox WHERE done=1 LIMIT ?)
+	rows, err := connection.QueryContext(ctx, `SELECT * FROM (SELECT 0,consumer,key,event_cursor,payload FROM outbox WHERE done=1 LIMIT ?)
 UNION ALL SELECT * FROM (SELECT 1,producer,key,state_version,payload FROM producer_outbox WHERE done=1 LIMIT ?) LIMIT ?`, consumerLimit, producerLimit, limit)
 	if err != nil {
 		return 0, err
@@ -78,6 +79,14 @@ UNION ALL SELECT * FROM (SELECT 1,producer,key,state_version,payload FROM produc
 	if err != nil {
 		return 0, err
 	}
+	if len(batch) == 0 {
+		return 0, nil
+	}
+	tx, err := connection.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
 	count := 0
 	for _, c := range batch {
 		if !token(c.name, 128) || !token(c.key, 256) || c.position == 0 || !validState(c.payload) {

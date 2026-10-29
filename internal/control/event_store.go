@@ -2,7 +2,6 @@ package control
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -62,31 +61,55 @@ func (e *Engine) RefreshEventStore(ctx context.Context) error {
 	return err
 }
 
-// MaintainEventStore runs bounded completed-work reclamation outside control's
-// configuration lock, then refreshes the public observation. A fresh read alone
-// cannot clear a failed write alarm; a successful maintenance pass can.
-func (e *Engine) MaintainEventStore(ctx context.Context) error {
+type eventStoreWork uint8
+
+const (
+	compactEventWork eventStoreWork = iota
+	archiveEventWork
+	inspectEventWork
+)
+
+// One bounded operation runs per tick. Reclamation, compression and inspection
+// are independent work; one operation must not consume the next one's deadline.
+func (e *Engine) maintainEventStore(ctx context.Context, work eventStoreWork) error {
+	if work == inspectEventWork {
+		return e.RefreshEventStore(ctx)
+	}
 	e.mu.Lock()
 	journal := e.journal
 	e.mu.Unlock()
 	if journal == nil {
 		return nil
 	}
-	_, compactErr := journal.CompactCompleted(ctx, 64)
-	_, archiveErr := journal.ArchiveEvents(ctx, 16)
-	e.mu.Lock()
-	if e.journal == journal {
-		e.eventStore.CompactionError = ""
-		e.eventStore.ArchiveError = ""
-		if archiveErr != nil {
-			e.eventStore.ArchiveError = stateText("event archive: "+archiveErr.Error(), 1024)
-		}
-		if compactErr != nil {
-			e.eventStore.CompactionError = stateText("completed work compaction: "+compactErr.Error(), 1024)
-		}
+	var err error
+	if work == compactEventWork {
+		_, err = journal.CompactCompleted(ctx, 64)
+	} else {
+		_, err = journal.ArchiveEvents(ctx, 16)
 	}
-	e.mu.Unlock()
-	return errors.Join(compactErr, archiveErr, e.RefreshEventStore(ctx))
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.journal != journal {
+		return err
+	}
+	message := ""
+	if err != nil {
+		operation := "event archive"
+		if work == compactEventWork {
+			operation = "completed work compaction"
+		}
+		message = stateText(operation+": "+err.Error(), 1024)
+		// Report a failed write immediately. Inspection will combine all
+		// current alarms; only the corresponding successful work clears one.
+		e.state.EventStoreError = message
+		e.eventStore.LastError = message
+	}
+	if work == compactEventWork {
+		e.eventStore.CompactionError = message
+	} else {
+		e.eventStore.ArchiveError = message
+	}
+	return err
 }
 
 func (e *Engine) eventStoreRoutes(mux *http.ServeMux) {
@@ -148,10 +171,12 @@ func (e *Engine) monitorEventStore(ctx context.Context) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	previous := ""
+	work := compactEventWork
 	for {
 		call, cancel := context.WithTimeout(ctx, 2*time.Second)
-		err := e.MaintainEventStore(call)
+		err := e.maintainEventStore(call, work)
 		cancel()
+		work = (work + 1) % 3
 		e.mu.Lock()
 		status := e.eventStore
 		e.mu.Unlock()
@@ -159,10 +184,14 @@ func (e *Engine) monitorEventStore(ctx context.Context) {
 		if status.Capacity != nil {
 			pressure = status.Capacity.Pressure
 		}
-		key := pressure + ":" + status.LastError
+		message := status.LastError
+		if err != nil {
+			message = err.Error()
+		}
+		key := pressure + ":" + message
 		if ctx.Err() == nil && key != previous {
-			if err != nil || pressure != "ok" {
-				slog.Warn("durable event storage pressure", "pressure", pressure, "error", status.LastError, "capacity", status.Capacity)
+			if message != "" || pressure != "ok" {
+				slog.Warn("durable event storage pressure", "pressure", pressure, "error", message, "capacity", status.Capacity)
 			} else if previous != "" {
 				slog.Info("durable event storage pressure recovered")
 			}
