@@ -151,7 +151,8 @@ controlが停止しても元期限で新規分類を遮断し、writer再起動�
 既存の所有経路を使うTCP/UDPは維持するが、WAN自体が失われたTCPの継続を保証するものではない。
 
 Linuxの逆引き経路検査はall/interfaceの大きい値を使う。必要な構成では
-`forwarding.ipv4_rp_filter: 0` と各 `interface.ipv4_rp_filter: 0` を明示する。
+`forwarding.ipv4_rp_filter: 0` を明示する。native-68ではall/defaultと管理対象interfaceへ適用し、
+個別 `interface.ipv4_rp_filter` があればそのinterfaceの選択値を上書きする。
 書込みと復元は既存のsetting ownerが行う。暗黙のOS修復や外部選択daemonは使わない。
 実行例は公開値の `internal/integration/testdata/egress-policy.yaml` と対応fixtureにある。
 compiler contract66/network journal16。IPv6 hostTrafficと全homert構成の受入は残る。

@@ -224,6 +224,7 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 			}
 		}
 	}
+	c.routingDefaults()
 	c.checkOptionsUsed()
 	c.checkAddressOverlap()
 	for _, iface := range c.interfaces {

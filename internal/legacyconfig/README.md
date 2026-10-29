@@ -164,8 +164,11 @@ gateway and preferredSource=interface, plus delegated DS-Lite source bypasses.
 Other dynamic gateway forms and address sets still reject the complete import. Full HA input remains incomplete.
 `TestDaemonConnectionMarkedEgressPolicy` exercises the CLI and actual worker/kernel
 path with five independent WAN peers, established TCP/UDP, rollback and expiry.
-Required runtime Sysctl values, including interface-specific `rp_filter`, are
-explicit intent. Automatic router-linux profile expansion remains unimplemented.
+The pinned routerd routing predicate supplies forwarding and disabled reverse-path
+filtering as explicit native output. Global rp_filter owns all/default and managed
+interface values; an explicit interface value overrides its selected value.
+The communication fixture needs no added Sysctl or forwarding resource.
+Full router-linux performance tuning and implicit RA target conversion remain open.
 
 ## Stateless DHCPv6 and delegated LAN RA
 

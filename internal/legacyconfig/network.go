@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/imksoo/routerd/pkg/api"
+	"github.com/imksoo/routerd/pkg/sysctlprofile"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
 )
@@ -453,4 +454,29 @@ func (c *compiler) staticDSLite(r resource) {
 	c.target(r, "network.links/"+name)
 	c.target(r, "network.interfaces/"+name+"/addresses")
 	c.note(r, "Preserves the legacy inner IPv4 peer and fixed 1460-byte default MTU; routes and NAT remain separately declared intent.")
+}
+
+// routerd's hostdeps derives router-linux when its resource graph forwards.
+// Materialize the necessary routing intent instead of relying on boot order or
+// a network manager's inherited defaults. Explicit operator values take precedence.
+func (c *compiler) routingDefaults() {
+	router := api.Router{}
+	for _, resource := range c.resources {
+		router.Spec.Resources = append(router.Spec.Resources, resource.Resource)
+	}
+	if !sysctlprofile.NeedsForwarding(&router) {
+		return
+	}
+	forwarding := &c.document.Network.Forwarding
+	enabled, disabled := true, 0
+	if forwarding.IPv4 == nil {
+		forwarding.IPv4 = &enabled
+	}
+	if forwarding.IPv6 == nil {
+		forwarding.IPv6 = &enabled
+	}
+	if forwarding.IPv4RPFilter == nil {
+		forwarding.IPv4RPFilter = &disabled
+	}
+	c.note(c.resources[0], "The pinned routerd router-linux derivation requires IPv4/IPv6 forwarding and disabled reverse-path filtering. These are explicit native intent; specified values override the defaults. Global rp_filter also owns the selected value on managed interfaces, including dynamic tunnel interfaces; unrelated interfaces are not changed.")
 }

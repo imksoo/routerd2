@@ -91,12 +91,11 @@ func TestDaemonConnectionMarkedEgressPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	forward := true
 	firewall := &network.Firewall{ForwardChain: &network.FirewallChain{Policy: "accept"}}
 	for i := range blocks {
 		firewall.Masquerade = append(firewall.Masquerade, network.Masquerade{Source: "198.18.0.0/24", OutInterface: fmt.Sprintf("wan%d", i)})
 	}
-	program.Resources = append(program.Resources, resourceprogram.Resource{ID: "forward", Forwarding: &network.Forwarding{IPv4: &forward}}, resourceprogram.Resource{ID: "firewall", Firewall: firewall})
+	program.Resources = append(program.Resources, resourceprogram.Resource{ID: "firewall", Firewall: firewall})
 	f := startFixtureDaemon(t, program)
 	ctx := context.Background()
 	t.Cleanup(func() {

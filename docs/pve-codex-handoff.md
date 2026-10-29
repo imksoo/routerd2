@@ -5,6 +5,23 @@
 [試験計画](test-plan.md)、[機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
+## 旧ルーター設定からのOS前提の導出（2026-10-29、native-68）
+
+旧sysctlprofile.NeedsForwardingを直接再利用し、routing構成からIPv4/IPv6転送とrp_filter=0を
+native設定へ明示する。明示した値を優先し、global rp_filterの指定はall/defaultと管理対象interfaceへ
+既存journalで適用・復元する。個別interfaceの明示値はその選択値を上書きする。
+後から生成するtunnelも同じ管理経路を使い、ほかのinterfaceは変更しない。
+OSのRA受信を再度有効にせず、既存Go RA workerと二重所有にしない。
+
+公開値の旧EgressRoutePolicy fixtureから、試験用Sysctlと追加の転送resourceを除去した。
+実CLI・製品worker・独立5 WANのTCP/UDP分散/切替/60秒/旧接続維持/rollback/元期限が終了0。
+同版の固定/RA学習host gatewayのIPv6・DNS・Health・IPv4継続、native/旧設定取込みの
+独立DHCP/DNS clientもすべて終了0。全make check（Race・vet）も終了0。
+Linux amd64/arm64のCGO_ENABLED=0 build、六ELFの署名catalog/publisher/stageも終了0。compiler contract68、journal17。全router-linuxの性能調整値を
+移植したとは主張しない。次は旧Healthの経路ポリシー由来のinterface/markを直接再利用し、
+暗黙RA対象と全homert単体構成を接続する。実HGWの自然PD更新観測はnative-67の同一stageで継続中。
+全homert二台・k8s/pve/SAM等の全34項目は未完了である。
+
 ## IPv6 host経路と実HGW継続観測（2026-10-29、native-67）
 
 `host-route-native67` は旧routerdのIPv6 host policyを読み、WANの適用済み・DAD完了済みGUAを

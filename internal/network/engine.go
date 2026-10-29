@@ -527,8 +527,12 @@ func (p *apply) reconcile(d Desired) error {
 		if l.MTU != 0 {
 			wantedSettings[settingKey{Kind: "mtu", Interface: l.Name}] = l.MTU
 		}
-		if l.IPv4RPFilter != nil {
-			wantedSettings[settingKey{Kind: "rp_filter", Interface: l.Name}] = *l.IPv4RPFilter
+		filter := l.IPv4RPFilter
+		if filter == nil {
+			filter = d.Forwarding.IPv4RPFilter
+		}
+		if filter != nil {
+			wantedSettings[settingKey{Kind: "rp_filter", Interface: l.Name}] = *filter
 		}
 		if l.IPv6AcceptRA != nil {
 			wantedSettings[settingKey{Kind: "accept_ra", Interface: l.Name}] = *l.IPv6AcceptRA
@@ -689,8 +693,9 @@ func (p *apply) reconcile(d Desired) error {
 		}
 	}
 	for _, iface := range d.Interfaces {
-		if iface.IPv4RPFilter != nil {
-			if err := p.set(settingKey{Kind: "rp_filter", Interface: iface.Name}, *iface.IPv4RPFilter); err != nil {
+		key := settingKey{Kind: "rp_filter", Interface: iface.Name}
+		if value, owned := wantedSettings[key]; owned {
+			if err := p.set(key, value); err != nil {
 				return err
 			}
 		}

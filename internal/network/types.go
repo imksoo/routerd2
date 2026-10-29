@@ -110,9 +110,9 @@ type Forwarding struct {
 	ConntrackTCPLiberal *bool `json:"conntrack_tcp_liberal,omitempty"`
 	IPv4                *bool `json:"ipv4,omitempty"`
 	IPv6                *bool `json:"ipv6,omitempty"`
-	// IPv4RPFilter sets Linux conf/all and conf/default rp_filter. Zero disables
-	// reverse-path filtering for policy-routed/asymmetric router paths. Existing
-	// interfaces keep their individual setting; new PPP units inherit default.
+	// IPv4RPFilter sets Linux conf/all, conf/default and managed interfaces.
+	// An explicit Interface value overrides the interface's selected value;
+	// Linux uses max(all, interface). New PPP units inherit default.
 	IPv4RPFilter *int `json:"ipv4_rp_filter,omitempty"`
 	// IPv4ECMPHash "source" selects source-address-only hashing for all IPv4
 	// multipath routes in this network namespace. Empty leaves it unmanaged.
