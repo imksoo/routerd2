@@ -5,7 +5,37 @@
 [試験計画](test-plan.md)、[機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
-## 現在の成立範囲と残作業（2026-10-29 08:01 UTC）
+## 現在の成立範囲と残作業（2026-10-29 09:47 UTC）
+
+最新作業版は`authority-history-native61`（worker ABI5、network journal15）。
+
+- **実装**: 認証で取得済みのsupervisor情報を共有し、問い合わせ開始時のBOOTTIMEから1秒で失効する。
+  遅い応答やlock待ちで更新せず、古い照会で新しい観測を上書きしない。確定成功の直前にも期限を確認する。
+  NTP入力は要求workerの実世代・PID・digestへ結び付け、旧世代や起動待ちの登録を渡さない。
+  履歴の再デコード・圧縮直後の再展開を除き、使用量は一つのtransactionで一括更新する。
+  保存上限・原子性・読出しの整合性検査は保持し、診断用計測は削除した。
+- **実通信**: 同版の実APK/PID 1・512MiB/2 CPU・ext4・独立RP-PPPoE/ISC/chronyd/Linux端末で終了0。
+  保存13.29秒、再起動65.24秒。再起動後63.56秒/9巡のIPv4/IPv6 TCP/UDP・DNS・NTP・管理、
+  進行するHealthと履歴（tip202/archive200）が成立した。全9巡healthy=true、履歴破棄0、
+  管理4照会の合計最大2.79秒、NTP世代1。DUID・SSH identity・構成・MTU・driftも保持した。
+- **実回線**: 同版の実HGW＋独立2端末＋Headscale/公式Tailscaleは75秒/7巡と全体再起動まで終了0。
+  自動取得、学習DNS UDP/TCP、条件付きDNS/DoH、IPv4/IPv6 HTTPS、双方向TCP/UDPとexitが復旧した。
+  全体再起動の復旧5.04秒。両homertの現設定にTailscaleNode自身のwhenは無い。
+- **補助検査**: make check、履歴変更後のevents/control Race Detector、全vet、両architectureの静的build、
+  実6 ELFの署名catalog/publisher/stage試験が終了0。実二WANHealth/PBRの交換・旧通知・期限・rollbackも終了0。
+  `archive-batch-native61`の取込試験は元PD期限・再取得・VRRP解除/復帰・同じchronydの起動一回、
+  独立LAN NTP/IPv4/IPv6 TCP/UDPとcaptureまで終了0。停止supervisor/control中の元期限失効も別実行で終了0。
+- **未受入**: 今回も起動直後に履歴整理の2秒期限超過があり、継続8巡目にはHealth履歴の1秒配送超過が一度あった。
+  次巡では回復し破棄0だが、全体安定化ではない。以前のDHCP/NTP起動10秒超過も解消扱いにしない。
+  HGWの自然PD更新は今回0回。固定対向網・追加IPv6 NATとhomertとの差、全homert二台、k8s/pve/SAM、
+  ONU直結・対象NIC・ARM実行・長期受入は残る。期限内に全34項目を完了する見通しは立っていない。
+
+準備上の失敗: `archive-batch`のVMは書出し完了前のinitramfsコピーで起動不能となった。
+完成後のgzip/hashは正常であり、製品不具合とは扱わない。イメージbuildの終了0を待ってから実行する。
+`release-built-test`は`RELEASE_BUILT_DIR=dist/bin`を指定する（architectureの子directoryではない）。
+入力の親directoryは他userが書込めないこと。旧計測image5個・計1.5GiBを削除した。
+
+以下は機能別の成立範囲。旧版の成功を最新版の受入へ置き換えない。
 
 - main `935369d`: native-58/network journal15。PPP default経路は実unitの寿命に従い、条件付きPolicyRuleは
   元のBOOTTIME期限をwriterが独立して撤去する。PAP/CHAP・二WANのHealth/PBR・元期限・旧通知409・

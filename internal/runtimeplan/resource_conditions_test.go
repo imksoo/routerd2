@@ -360,8 +360,8 @@ func TestConditionalSourceDigestCutoverRevokesSameRevisionFacts(t *testing.T) {
 }
 
 func (r *Runtime) refreshGuardStatus(ctx context.Context) {
-	status, err := r.manager.Status(ctx)
+	status, observed, err := r.supervisorStatus(ctx)
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.installGuardStatusLocked(status, err)
+	r.installGuardStatusLocked(status, observed, err)
 }

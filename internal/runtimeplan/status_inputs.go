@@ -49,13 +49,13 @@ func (r *Runtime) statusValuesLocked(facts resourceprogram.FactSnapshot, refs []
 			if target.Service != nil && target.Service.Health != nil && lifecycles[ref.Resource].Active {
 				name := target.Service.ModuleName()
 				binding, exists := r.bindings[name]
-				module, managed := r.guardStatus[name]
+				module, managed := r.guard.modules[name]
 				record := r.records[name]
 				grant, granted := r.guardGrants[name]
-				if exists && managed && granted && module.Ready && module.Generation == record.Generation && module.Generation == grant.generation && module.ConfigDigest == binding.digest && record.ConfigDigest == binding.digest && grant.revision == r.config.revision && grant.epoch == record.ProducerEpoch && grant.sequence == record.Sequence && clock.BootID == r.guardBootID && clock.BootID == grant.bootID && now < r.guardUntilNanos {
+				if exists && managed && granted && module.Ready && module.Generation == record.Generation && module.Generation == grant.generation && module.ConfigDigest == binding.digest && record.ConfigDigest == binding.digest && grant.revision == r.config.revision && grant.epoch == record.ProducerEpoch && grant.sequence == record.Sequence && clock.BootID == r.guard.bootID && clock.BootID == grant.bootID && now < r.guard.untilNanos {
 					if grant.health != nil && !grant.health.Stopped && grant.health.BootID == clock.BootID {
 						provider.snapshot = *grant.health
-						provider.until = min(provider.snapshot.ExpiresNanos, grant.untilNanos, r.guardUntilNanos)
+						provider.until = min(provider.snapshot.ExpiresNanos, grant.untilNanos, r.guard.untilNanos)
 						provider.known = provider.snapshot.ObservedNanos <= now && provider.until > now && provider.until > provider.snapshot.ObservedNanos
 						provider.origin = identity(clock.BootID, binding.digest, module.Generation, record.ProducerEpoch)
 					}
@@ -64,14 +64,14 @@ func (r *Runtime) statusValuesLocked(facts resourceprogram.FactSnapshot, refs []
 			if target.Service != nil && target.Service.BFD != nil && lifecycles[ref.Resource].Active {
 				name := target.Service.ModuleName()
 				binding, exists := r.bindings[name]
-				module, managed := r.guardStatus[name]
+				module, managed := r.guard.modules[name]
 				owner, cached := bfdSources[name]
 				record := owner.source.update
-				if exists && cached && owner.source.valid && managed && module.Ready && module.Generation == record.Generation && module.ConfigDigest == binding.digest && record.ConfigDigest == binding.digest && owner.binding.digest == binding.digest && clock.BootID == r.guardBootID && now < r.guardUntilNanos {
+				if exists && cached && owner.source.valid && managed && module.Ready && module.Generation == record.Generation && module.ConfigDigest == binding.digest && record.ConfigDigest == binding.digest && owner.binding.digest == binding.digest && clock.BootID == r.guard.bootID && now < r.guard.untilNanos {
 					provider.isBFD = true
 					provider.bfdConfig = owner.source.config
 					provider.bfdSnapshot = owner.source.snapshot
-					provider.until = r.guardUntilNanos
+					provider.until = r.guard.untilNanos
 					provider.known = true
 					provider.origin = identity(clock.BootID, binding.digest, module.Generation, record.ProducerEpoch)
 				}
@@ -79,18 +79,18 @@ func (r *Runtime) statusValuesLocked(facts resourceprogram.FactSnapshot, refs []
 			if target.Service != nil && target.Service.BGP != nil && lifecycles[ref.Resource].Active {
 				name := target.Service.ModuleName()
 				binding, exists := r.bindings[name]
-				module, managed := r.guardStatus[name]
+				module, managed := r.guard.modules[name]
 				record := r.records[name]
 				grant, granted := r.guardGrants[name]
 				applied, matched := r.bgpApplied[name]
 				// A matching BGP receipt survives unrelated kernel IO. A changed RIB
 				// matches this identity only after its own successful application.
-				if exists && managed && granted && grant.bgp != nil && matched && module.Ready && module.Generation == record.Generation && grant.generation == record.Generation && record.ConfigDigest == binding.digest && module.ConfigDigest == binding.digest && grant.revision == r.config.revision && grant.epoch == record.ProducerEpoch && grant.sequence == record.Sequence && clock.BootID == r.guardBootID && clock.BootID == grant.bootID && now < r.guardUntilNanos && applied.identity == grant.bgp.projection {
+				if exists && managed && granted && grant.bgp != nil && matched && module.Ready && module.Generation == record.Generation && grant.generation == record.Generation && record.ConfigDigest == binding.digest && module.ConfigDigest == binding.digest && grant.revision == r.config.revision && grant.epoch == record.ProducerEpoch && grant.sequence == record.Sequence && clock.BootID == r.guard.bootID && clock.BootID == grant.bootID && now < r.guard.untilNanos && applied.identity == grant.bgp.projection {
 					provider.isBGP, provider.known = true, true
 					provider.bgpSnapshot = grant.bgp.snapshot
 					provider.bgpConfig = r.config.protocols.bgp[name]
 					provider.unresolved = applied.unresolved
-					provider.until = min(grant.untilNanos, r.guardUntilNanos)
+					provider.until = min(grant.untilNanos, r.guard.untilNanos)
 					provider.origin = identity(clock.BootID, binding.digest, module.Generation, record.ProducerEpoch, provider.bgpSnapshot.Epoch)
 				}
 			}

@@ -102,7 +102,7 @@ func TestGracefulVRRPAdmissionReturnsAppliedOwnershipAndSurvivesReadinessLoss(t 
 		t.Fatal("readiness loss revoked an admitted election")
 	}
 	r.mu.Lock()
-	facts, factErr := r.conditionFactsLocked(r.config, time.Now())
+	facts, factErr := r.conditionFactsLocked(r.config)
 	r.mu.Unlock()
 	if factErr != nil || facts.Value("service.ha.active") != resourceprogram.True {
 		t.Fatal("applied ownership was hidden by the worker's earlier pending observation", factErr)

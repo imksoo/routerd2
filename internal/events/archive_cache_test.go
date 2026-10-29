@@ -76,8 +76,8 @@ func TestSteadyArchiveBatchesHaveBoundedCodecAllocation(t *testing.T) {
 		}
 	}
 	perBatch := allocated / 7
-	// Repeated maintenance must reuse its bounded compression and validation
-	// workspaces, rather than allocate fresh DEFLATE state every second.
+	// Repeated maintenance must reuse its bounded compression
+	// workspace, rather than allocate fresh DEFLATE state every second.
 	// Measure memory, not an environment-specific operation timeout.
 	if perBatch > 512<<10 {
 		t.Fatalf("steady sixteen-record archive batch allocated %d bytes; limit512KiB", perBatch)

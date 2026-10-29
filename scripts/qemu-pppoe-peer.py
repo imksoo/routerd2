@@ -531,6 +531,7 @@ def peer(stage, power_action, updates, profile):
                 coexist_started = time.monotonic()
                 rounds = 0
                 max_management = 0
+                unhealthy_samples = 0
                 while time.monotonic() - coexist_started < 60:
                     traffic()
                     time_client()
@@ -542,10 +543,13 @@ def peer(stage, power_action, updates, profile):
                     max_management = max(max_management, time.monotonic() - response_started)
                     assert current_status['ready'] and current_health['active']
                     if not current_config['healthy']:
+                        unhealthy_samples += 1
                         services = current_config['services']
                         print('Observed configuration health alarm', {'errors': {key: current_config[key] for key in ('last_error', 'event_journal_error', 'event_store_error', 'event_rule_error', 'derived_error', 'protocol_event_error') if current_config.get(key)}, 'service_phase': services['phase'], 'service_error': services.get('last_error', '')}, flush=True)
                     rounds += 1
-                    print('Observed history/communication coexistence', {'round': rounds, 'elapsed': round(time.monotonic() - coexist_started, 2), 'management_seconds': round(time.monotonic() - response_started, 2), 'configuration_healthy': current_config['healthy'], 'health_observed_nanos': current_health['observed_nanos'], 'tip': current_store['capacity']['tip_cursor'], 'archived_rows': current_store['capacity']['archived_events']['rows'], 'history_error': current_store.get('last_error', ''), 'health_history_dropped': current_health['history_dropped'], 'health_history_error': current_health.get('history_error', '')}, flush=True)
+                    print('Observed history/communication coexistence', {'utc': datetime.datetime.now(datetime.timezone.utc).isoformat(), 'round': rounds, 'elapsed': round(time.monotonic() - coexist_started, 2), 'management_seconds': round(time.monotonic() - response_started, 2), 'configuration_healthy': current_config['healthy'], 'health_observed_nanos': current_health['observed_nanos'], 'tip': current_store['capacity']['tip_cursor'], 'archived_rows': current_store['capacity']['archived_events']['rows'], 'history_error': current_store.get('last_error', ''), 'health_history_dropped': current_health['history_dropped'], 'health_history_error': current_health.get('history_error', '')}, flush=True)
+                (stage / 'control-records.json').write_text(json.dumps(query('show logs module control level WARN limit 200')))
+                assert unhealthy_samples == 0, f'{unhealthy_samples} unhealthy configuration observations during steady communication'
                 assert current_config['healthy'] and not current_store.get('last_error')
                 assert current_health['observed_nanos'] > health_before['observed_nanos']
                 assert current_health['history_dropped'] == health_before['history_dropped'] and not current_health.get('history_error'), current_health
@@ -712,7 +716,7 @@ def main():
         return subprocess.run(root + command, check=True, text=True, capture_output=True, timeout=10).stdout
     stage = run(["mktemp", "-d", "/tmp/routerd-pppoe-appliance.XXXXXX"]).strip()
     args.output.mkdir(parents=True, exist_ok=True)
-    artifacts = ("serial.log", "wan.pcap", "lan.pcap", "shutdown-wan.pcap", "shutdown-lan.pcap", "status.json", "ac.log", "dhcp6.log", "client-dhcp.log", "late-solicits.log", "time-source.log", "time-reboot-wan.pcap", "time-reboot-lan.pcap")
+    artifacts = ("control-records.json", "serial.log", "wan.pcap", "lan.pcap", "shutdown-wan.pcap", "shutdown-lan.pcap", "status.json", "ac.log", "dhcp6.log", "client-dhcp.log", "late-solicits.log", "time-source.log", "time-reboot-wan.pcap", "time-reboot-lan.pcap")
     for name in artifacts:
         (args.output / name).unlink(missing_ok=True)
     try:

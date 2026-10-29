@@ -168,7 +168,7 @@ def peer(stage, profile):
             wait(synchronized)
             assert engine_pid() == chronyd_pid
             print('PASS independent keepalived elected master: native VRRP backup stopped conditional DHCPv6, kept LAN time on fallback, then peer stop restored learning in the same chronyd', flush=True)
-            sources = query('/v1/services/service.time/ntp-sources')['groups'][0]['servers']
+            sources = query('/v1/services/service.time/ntp-sources?generation=' + str(worker['generation']))['groups'][0]['servers']
             deadline = min(server['valid_until']['nanos'] for server in sources)
             assert deadline > time.clock_gettime_ns(time.CLOCK_BOOTTIME)
             control = next(module for module in query('/v1/status', 'supervisor.sock')['modules'] if module['name'] == 'control')
@@ -177,7 +177,7 @@ def peer(stage, profile):
             os.kill(router.pid, signal.SIGSTOP)
             frozen.append(router.pid)
             time.sleep(2)
-            response = run(inside('ntp-router', ['curl', '--max-time', '3', '-sS', '--unix-socket', str(stage / 'run/control.sock'), '-o', '/dev/null', '-w', '%{http_code}', 'http://routerd/v1/services/service.time/ntp-sources']))
+            response = run(inside('ntp-router', ['curl', '--max-time', '3', '-sS', '--unix-socket', str(stage / 'run/control.sock'), '-o', '/dev/null', '-w', '%{http_code}', 'http://routerd/v1/services/service.time/ntp-sources?generation=' + str(worker['generation'])]))
             assert response == '503', 'unknown supervisor observation must not be reported as withdrawn sources'
             assert time.clock_gettime_ns(time.CLOCK_BOOTTIME) < deadline
             assert '2001:db8:123::2' in Path(f'/proc/{chronyd_pid}/root/run/sources/learned.sources').read_text()
@@ -212,6 +212,7 @@ def peer(stage, profile):
             migrated = run([str(product), 'config', 'migrate', '--policy', str(stage / 'time-import-policy.yaml'), str(stage / 'time-import.yaml')])
             (stage / 'time-native.yaml').write_text(migrated)
             revision = query('/v1/config')['revision']
+            apply_log_position = len((stage / 'router.log').read_text())
             run(inside('ntp-router', [str(product), 'config', 'apply', '--file', str(stage / 'time-native.yaml'), '--runtime-dir', str(stage / 'run'), '--expected-revision', str(revision), '--request-id', 'import-time-fragments']), 30)
             configured = query('/v1/config')['config']['resources']
             clock = next(r['service'] for r in configured if r.get('service', {}).get('ntp'))
@@ -265,6 +266,9 @@ def peer(stage, profile):
             election_peer.wait(timeout=5)
             wait(learned_present)
             imported_clients()
+            starts = (stage / 'router.log').read_text()[apply_log_position:].count('chronyd version ')
+            assert starts == 1, f'normal apply started chronyd {starts} times'
+            print('Observed first imported time worker', {'generation': worker['generation'], 'pid': worker['pid'], 'chronyd_pid': chronyd_pid, 'engine_starts': starts}, flush=True)
             print('PASS product legacy import kept three always-static sources and two conditional fallbacks, learned source expiry/reacquisition/VRRP withdrawal/recovery, same chronyd and independent LAN NTP/IPv4/IPv6 TCP/UDP', flush=True)
 
         capture.send_signal(signal.SIGINT)

@@ -3,6 +3,7 @@ package serviceruntime
 import (
 	"context"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/imksoo/routerd2/internal/boottime"
@@ -32,6 +33,7 @@ func (c *effectsClient) runNTP(ctx context.Context, instance serviceconfig.Insta
 
 func (c *effectsClient) watchNTP(ctx context.Context, name string, updates chan ntpconfig.Sources) {
 	defer close(updates)
+	path := "/v1/services/" + name + "/ntp-sources?generation=" + strconv.FormatUint(c.identity.Generation, 10)
 	delay := time.Duration(0)
 	for {
 		timer := time.NewTimer(delay)
@@ -44,7 +46,7 @@ func (c *effectsClient) watchNTP(ctx context.Context, name string, updates chan 
 		delay = time.Second
 		var sources ntpconfig.Sources
 		call, stop := context.WithTimeout(ctx, 2*time.Second)
-		err := c.client.Do(call, "GET", "/v1/services/"+name+"/ntp-sources", nil, &sources)
+		err := c.client.Do(call, "GET", path, nil, &sources)
 		stop()
 		if err == nil {
 			if sources.ConfigDigest != c.identity.ConfigDigest || sources.Generation != c.identity.Generation {

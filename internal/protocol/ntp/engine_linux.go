@@ -222,6 +222,9 @@ func Run(ctx context.Context, cfg ntpconfig.Config, image *os.File, updates <-ch
 		case <-sourceDone:
 			return sourceErr
 		case <-done:
+			if ctx.Err() != nil {
+				return nil
+			}
 			return errors.Join(errors.New("chronyd exited"), exitErr)
 		case <-ticker.C:
 		}

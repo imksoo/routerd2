@@ -127,7 +127,7 @@ func TestPrerequisitesAreRefreshedAfterKernelIO(t *testing.T) {
 				t.Fatal(err)
 			}
 			r.mu.Lock()
-			r.guardUntil = time.Now().Add(-time.Second)
+			r.guard.untilNanos = 1
 			r.mu.Unlock()
 			release()
 			if err := <-done; err != nil {

@@ -1,6 +1,6 @@
 package runtimeplan
 
-import "time"
+import "github.com/imksoo/routerd2/internal/boottime"
 
 // HealthStatus is intentionally independent of protocol snapshot sizes. Health
 // polling neither encodes instance snapshots nor copies route-issue details.
@@ -23,7 +23,14 @@ func (r *Runtime) Health() HealthStatus {
 
 func (r *Runtime) phaseLocked() (string, string) {
 	if r.phase == "ready" {
-		if !time.Now().Before(r.guardUntil) {
+		if !r.guard.ready {
+			return "applying", "required routerd modules are not ready"
+		}
+		clock, err := boottime.Read()
+		if err != nil {
+			return "applying", err.Error()
+		}
+		if r.guard.bootID != clock.BootID || uint64(clock.BoottimeNanoseconds) >= r.guard.untilNanos {
 			return "applying", "supervisor status validity expired"
 		}
 		if err := r.checkAppliedLocked(); err != nil {

@@ -68,7 +68,7 @@ func (r *Runtime) projectLocked(protocols protocolPlan, doc config.Native, recor
 		if record.Role == "pppoe" {
 			// The PPP worker owns the link itself. Its last finite observation
 			// cannot authorize adding routes after that owner starts stopping.
-			module, registered := r.guardStatus[name]
+			module, registered := r.guard.modules[name]
 			if !registered || !module.Ready || module.Role != record.Role || module.Generation != record.Generation || module.ConfigDigest != record.ConfigDigest {
 				continue
 			}
@@ -83,8 +83,8 @@ func (r *Runtime) projectLocked(protocols protocolPlan, doc config.Native, recor
 		if !bound || binding.digest != record.ConfigDigest {
 			continue
 		}
-		module, registered := r.guardStatus[name]
-		if registered && (module.Role != "vrrp" || module.Generation != record.Generation || module.ConfigDigest != record.ConfigDigest) || !registered && !r.guardUntil.IsZero() {
+		module, registered := r.guard.modules[name]
+		if registered && (module.Role != "vrrp" || module.Generation != record.Generation || module.ConfigDigest != record.ConfigDigest) || !registered && r.guard.modules != nil {
 			continue
 		}
 		ownedRecords[name] = record

@@ -4,7 +4,8 @@ import (
 	"errors"
 	"net/http"
 	"net/netip"
-	"time"
+	"net/url"
+	"strconv"
 
 	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/lifetime"
@@ -15,6 +16,12 @@ import (
 
 func (r *Runtime) ntpSourceRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/services/{name}/ntp-sources", func(w http.ResponseWriter, request *http.Request) {
+		query, queryErr := url.ParseQuery(request.URL.RawQuery)
+		generation, generationErr := strconv.ParseUint(query.Get("generation"), 10, 64)
+		if queryErr != nil || generationErr != nil || generation == 0 || len(query) != 1 || len(query["generation"]) != 1 {
+			localapi.Fail(w, 400, errors.New("NTP source request requires one positive worker generation"))
+			return
+		}
 		r.mu.Lock()
 		name := request.PathValue("name")
 		node, configured := r.config.protocols.ntp[name]
@@ -24,8 +31,8 @@ func (r *Runtime) ntpSourceRoutes(mux *http.ServeMux) {
 			localapi.Fail(w, http.StatusNotFound, errors.New("NTP service is not selected"))
 			return
 		}
-		producer := r.guardStatus[name]
-		if producer.Generation == 0 || producer.ConfigDigest != binding.digest {
+		producer := r.guard.modules[name]
+		if producer.Generation != generation || producer.PID == 0 || producer.ConfigDigest != binding.digest {
 			r.mu.Unlock()
 			localapi.Fail(w, http.StatusServiceUnavailable, errors.New("NTP process authority is unknown"))
 			return
@@ -36,16 +43,23 @@ func (r *Runtime) ntpSourceRoutes(mux *http.ServeMux) {
 			localapi.Fail(w, 503, err)
 			return
 		}
-		if !time.Now().Before(r.guardUntil) {
+		if r.guard.bootID != clock.BootID || uint64(clock.BoottimeNanoseconds) >= r.guard.untilNanos {
 			r.mu.Unlock()
 			localapi.Fail(w, 503, errors.New("NTP source process observation is stale"))
 			return
 		}
-		facts, err := r.conditionFactsLocked(r.config, time.Now())
-		if err != nil {
-			r.mu.Unlock()
-			localapi.Fail(w, 503, err)
-			return
+		var facts resourceprogram.FactSnapshot
+		for _, group := range node.Sources {
+			if group.When == nil {
+				continue
+			}
+			facts, err = r.conditionFactsLocked(r.config)
+			if err != nil {
+				r.mu.Unlock()
+				localapi.Fail(w, 503, err)
+				return
+			}
+			break
 		}
 		input := ntpconfig.Sources{ConfigDigest: binding.digest, Generation: producer.Generation, Groups: make([]ntpconfig.SourceGrant, len(node.Sources))}
 		for i, group := range node.Sources {
@@ -60,7 +74,7 @@ func (r *Runtime) ntpSourceRoutes(mux *http.ServeMux) {
 			for _, ref := range group.SourcesFrom {
 				moduleName := "service." + ref
 				owner, active := r.bindings[moduleName]
-				module := r.guardStatus[moduleName]
+				module := r.guard.modules[moduleName]
 				record := r.records[moduleName]
 				if !active || !module.Ready || module.Generation != record.Generation || module.ConfigDigest != owner.digest || record.ConfigDigest != owner.digest {
 					continue

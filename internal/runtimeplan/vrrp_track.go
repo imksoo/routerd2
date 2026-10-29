@@ -70,9 +70,9 @@ func (r *Runtime) advanceVRRPTracksLocked(facts resourceprogram.FactSnapshot) er
 			target := r.config.resources[track.Resource]
 			if target.When != nil {
 				truth, until := facts.ConditionAuthority(*target.When)
-				if truth == resourceprogram.False && until > now && r.guardBootID == clock.BootID && now < r.guardUntilNanos {
+				if truth == resourceprogram.False && until > now && r.guard.bootID == clock.BootID && now < r.guard.untilNanos {
 					state.status.Resource, state.status.State = track.Resource, vrrp.TrackNeutral
-					state.status.ExpiresNanos = min(until, r.guardUntilNanos)
+					state.status.ExpiresNanos = min(until, r.guard.untilNanos)
 					continue
 				}
 			}
@@ -147,7 +147,7 @@ func (r *Runtime) vrrpDecisionLocked(name string, active bool) (vrrp.Decision, e
 	if len(cfg.Track) == 0 {
 		return decision, nil
 	}
-	if _, err := r.conditionFactsLocked(r.config, time.Now()); err != nil {
+	if _, err := r.conditionFactsLocked(r.config); err != nil {
 		return decision, err
 	}
 	for _, state := range r.vrrpTracks[name] {

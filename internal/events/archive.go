@@ -57,7 +57,7 @@ func (s *Store) ArchiveEvents(ctx context.Context, limit int) (int, error) {
 	if s.closed {
 		return 0, ErrClosed
 	}
-	// Compression/verification runs without a SQLite writer transaction or
+	// Compression and hashing run without a SQLite writer transaction or
 	// pooled connection, so live publication can continue during CPU work.
 	rows, err := s.db.QueryContext(ctx, `SELECT cursor,event_id,body FROM events WHERE length(body)>0 ORDER BY cursor LIMIT ?`, limit)
 	if err != nil {
@@ -89,13 +89,6 @@ func (s *Store) ArchiveEvents(ctx context.Context, limit int) (int, error) {
 		if err = ctx.Err(); err != nil {
 			return 0, err
 		}
-		record, err := decodeEvent(c.cursor, c.body)
-		if err != nil {
-			return 0, err
-		}
-		if record.Event.ID != c.id {
-			return 0, errors.New("event archive source identity mismatch")
-		}
 		c.packed, err = s.archiveCodec.encode(c.body)
 		if err != nil {
 			return 0, err
@@ -107,7 +100,12 @@ func (s *Store) ArchiveEvents(ctx context.Context, limit int) (int, error) {
 		return 0, err
 	}
 	defer tx.Rollback()
+	var archiveRows, archiveBytes int64
+	if err = tx.QueryRowContext(ctx, `SELECT rows_count,bytes_count FROM usage WHERE kind='event_archive'`).Scan(&archiveRows, &archiveBytes); err != nil {
+		return 0, err
+	}
 	count := 0
+	var packedBytes, hotBytes int64
 	for _, c := range batch {
 		var hot, packed, digest []byte
 		var size int64
@@ -124,11 +122,12 @@ func (s *Store) ArchiveEvents(ctx context.Context, limit int) (int, error) {
 		if len(hot) == 0 {
 			continue
 		} // A concurrent archive already moved it.
-		if err = s.reserve(ctx, tx, "event_archive", 1, int64(len(c.packed))+archivedEventOverhead, s.options.MaxArchivedEvents, s.options.MaxArchivedEventBytes); err != nil {
-			if errors.Is(err, ErrCapacity) && count > 0 {
-				break
+		charge := int64(len(c.packed)) + archivedEventOverhead
+		if int64(count)+1 > s.options.MaxArchivedEvents-archiveRows || packedBytes+charge > s.options.MaxArchivedEventBytes-archiveBytes {
+			if count == 0 {
+				return 0, ErrCapacity
 			}
-			return 0, err
+			break
 		}
 		if _, err = tx.ExecContext(ctx, `INSERT INTO event_archive(cursor,body,original_bytes,digest) VALUES(?,?,?,?)`, c.cursor, c.packed, len(c.body), c.digest[:]); err != nil {
 			return 0, err
@@ -144,18 +143,25 @@ func (s *Store) ArchiveEvents(ctx context.Context, limit int) (int, error) {
 		if changed != 1 {
 			return 0, ErrConflict
 		}
-		result, err = tx.ExecContext(ctx, `UPDATE usage SET rows_count=rows_count-1,bytes_count=bytes_count-? WHERE kind='events' AND rows_count>=1 AND bytes_count>=?`, len(c.body), len(c.body))
+		count++
+		packedBytes += charge
+		hotBytes += int64(len(c.body))
+	}
+	if count > 0 {
+		if _, err = tx.ExecContext(ctx, `UPDATE usage SET rows_count=rows_count+?,bytes_count=bytes_count+? WHERE kind='event_archive'`, count, packedBytes); err != nil {
+			return 0, err
+		}
+		result, err := tx.ExecContext(ctx, `UPDATE usage SET rows_count=rows_count-?,bytes_count=bytes_count-? WHERE kind='events' AND rows_count>=? AND bytes_count>=?`, count, hotBytes, count, hotBytes)
 		if err != nil {
 			return 0, err
 		}
-		changed, err = result.RowsAffected()
+		changed, err := result.RowsAffected()
 		if err != nil {
 			return 0, err
 		}
 		if changed != 1 {
 			return 0, errors.New("event archive usage mismatch")
 		}
-		count++
 	}
 	if err = tx.Commit(); err != nil {
 		return 0, err

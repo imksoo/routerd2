@@ -109,6 +109,13 @@ type appliedProjection struct {
 	observationVersion uint64
 }
 
+type supervisorObservation struct {
+	modules    map[string]supervisor.ModuleStatus
+	ready      bool
+	bootID     string
+	untilNanos uint64
+}
+
 type Runtime struct {
 	config             configuration
 	applied            appliedProjection
@@ -127,10 +134,7 @@ type Runtime struct {
 	manager              moduleManager
 	sourceEpoch          uint64
 	resourceStates       map[string]resourceprogram.ResourceState
-	guardStatus          map[string]supervisor.ModuleStatus
-	guardUntil           time.Time
-	guardBootID          string
-	guardUntilNanos      uint64
+	guard                supervisorObservation
 	guardGrants          map[string]guardGrant
 	conditionTimeline    resourceprogram.ConditionTimeline
 	ruleContinuity       map[string]ruleContinuity
@@ -165,16 +169,16 @@ var errApplicationPending = errors.New("accepted protocol observations await net
 // successful configuration cannot be confirmed while one of its required
 // protocol processes has since crashed or entered restart backoff.
 func (r *Runtime) CheckReady(ctx context.Context) error {
-	s, err := r.manager.Status(ctx)
+	s, observed, err := r.supervisorStatus(ctx)
 	if err != nil {
 		return err
 	}
-	if !s.Ready {
-		return errors.New("required routerd modules are not ready")
-	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.installGuardStatusLocked(s, nil)
+	r.installGuardStatusLocked(s, observed, nil)
+	if !r.guard.ready {
+		return errors.New("required routerd modules are not ready")
+	}
 	if err := r.checkAppliedLocked(); err != nil {
 		return err
 	}
@@ -182,12 +186,8 @@ func (r *Runtime) CheckReady(ctx context.Context) error {
 	if len(r.routeIssues) > 0 {
 		return errors.New("some learned routes have unresolved next hops; inspect show services")
 	}
-	byName := map[string]supervisor.ModuleStatus{}
-	for _, module := range s.Modules {
-		byName[module.Name] = module
-	}
 	for name, binding := range r.bindings {
-		module, ok := byName[name]
+		module, ok := r.guard.modules[name]
 		if !ok || !module.Ready || module.ConfigDigest != binding.digest {
 			return fmt.Errorf("protocol %s is not ready for the committed configuration", name)
 		}
@@ -218,6 +218,13 @@ func (r *Runtime) CheckReady(ctx context.Context) error {
 				return errApplicationPending
 			}
 		}
+	}
+	clock, err := boottime.Read()
+	if err != nil {
+		return err
+	}
+	if r.guard.bootID != clock.BootID || uint64(clock.BoottimeNanoseconds) >= r.guard.untilNanos {
+		return errors.New("supervisor status validity expired")
 	}
 	return nil
 }
@@ -376,8 +383,7 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 		r.sourceEpoch++
 		r.guardGrants = nil
 		r.vrrpTracks = nil
-		r.guardStatus = nil
-		r.guardUntil = time.Time{}
+		r.guard = supervisorObservation{}
 	}
 	r.config = next
 	r.configured = true
@@ -574,11 +580,12 @@ func (r *Runtime) observe(ctx context.Context, u serviceconfig.Update) (*pending
 		return nil, r.acceptBFD(ctx, u)
 	}
 	var producerStatus *supervisor.Status
+	var producerClock boottime.Clock
 	if u.Role == "ntp" || u.Role == "bgp" || u.Role == "dhcp4" || u.Role == "dhcp6" || u.Role == "ra" || u.Role == "vrrp" || u.Role == "dhcp_server" || u.Role == "dhcp6_server" || u.Role == "pppoe" || u.Role == "aftr" {
 		// A restarted control has no remembered generations. Authenticate even
 		// its first publication against the current process-tree registry;
 		// initial publication precedes worker Ready, so Ready is not required.
-		status, err := r.manager.Status(ctx)
+		status, observed, err := r.supervisorStatus(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -594,15 +601,10 @@ func (r *Runtime) observe(ctx context.Context, u serviceconfig.Update) (*pending
 		if !matched {
 			return nil, ErrStale
 		}
-		if u.Role == "vrrp" {
-			producerStatus = &status
-		}
+		producerStatus, producerClock = &status, observed
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if producerStatus != nil {
-		r.installGuardStatusLocked(*producerStatus, nil)
-	}
 	b, ok := r.bindings[u.Name]
 	if !r.configured || !ok || b.instance.Role != u.Role || b.digest != u.ConfigDigest {
 		return nil, ErrStale
@@ -627,6 +629,10 @@ func (r *Runtime) observe(ctx context.Context, u serviceconfig.Update) (*pending
 			}
 		}
 	}
+	if producerStatus != nil {
+		r.installGuardStatusLocked(*producerStatus, producerClock, nil)
+	}
+
 	var server dhcpserverconfig.Snapshot
 	var lease dhcp6config.Snapshot
 	if u.Role == "dhcp_server" {
@@ -679,7 +685,7 @@ func (r *Runtime) observe(ctx context.Context, u serviceconfig.Update) (*pending
 		}
 		r.guardGrants[u.Name] = guardGrant{dhcp6: &lease}
 	} else {
-		r.recordGuardGrantLocked(u, time.Now())
+		r.recordGuardGrantLocked(u)
 	}
 	r.records[u.Name] = u
 	if u.Role == "vrrp" || u.Role == "bgp" {
@@ -699,7 +705,7 @@ func (r *Runtime) observe(ctx context.Context, u serviceconfig.Update) (*pending
 	}
 	r.observationVersion++
 	// Observe flaps when accepted; a periodic projection must not hide them.
-	if _, err := r.conditionFactsLocked(r.config, time.Now()); err != nil {
+	if _, err := r.conditionFactsLocked(r.config); err != nil {
 		return nil, err
 	}
 	r.wakeCoordinatorLocked()

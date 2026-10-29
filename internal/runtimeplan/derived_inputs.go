@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
-	"time"
 
 	"github.com/imksoo/routerd2/internal/derived"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
@@ -95,7 +94,7 @@ func (r *Runtime) DerivedInputs(revision uint64) ([]resourceprogram.DerivedEvent
 	if len(r.config.plan.Native.DerivedEvents) == 0 {
 		return nil, nil, nil
 	}
-	facts, err := r.conditionFactsLocked(r.config, time.Now())
+	facts, err := r.conditionFactsLocked(r.config)
 	if err != nil {
 		return nil, nil, err
 	}

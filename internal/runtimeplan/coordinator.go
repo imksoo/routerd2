@@ -116,7 +116,7 @@ func (r *Runtime) finishApplicationLocked(name string, err error) {
 // projection after its registered worker has gone away or been replaced.
 func (r *Runtime) fenceApplicationsLocked() {
 	for name, effect := range r.applications {
-		module, ok := r.guardStatus[name]
+		module, ok := r.guard.modules[name]
 		valid := ok && effect.sourceEpoch == r.sourceEpoch && module.Role == effect.update.Role && module.Generation == effect.update.Generation && module.ConfigDigest == effect.update.ConfigDigest
 		if valid {
 			continue
@@ -138,7 +138,7 @@ func (r *Runtime) finishApplicationsLocked(p projection, applications map[string
 		err := applyErr
 		current, ok := r.records[name]
 		binding, bound := r.bindings[name]
-		module, registered := r.guardStatus[name]
+		module, registered := r.guard.modules[name]
 		if !ok || !bound || !registered || module.Role != effect.update.Role || module.Generation != effect.update.Generation || module.ConfigDigest != effect.update.ConfigDigest || binding.digest != effect.update.ConfigDigest || effect.sourceEpoch != r.sourceEpoch || !sameUpdate(current, effect.update) {
 			err = ErrStale
 		}
@@ -235,9 +235,9 @@ func (r *Runtime) pendingWithdrawalLocked(name string) bool {
 // waits. Supervisor status is the process authority; no second installed set
 // predicts whether a worker has actually stopped.
 func (r *Runtime) reconcileStep(ctx context.Context, ceiling map[string]supervisor.DynamicModule) (bool, error) {
-	status, err := r.manager.Status(ctx)
+	status, observed, err := r.supervisorStatus(ctx)
 	r.mu.Lock()
-	r.installGuardStatusLocked(status, err)
+	r.installGuardStatusLocked(status, observed, err)
 	if err != nil {
 		r.mu.Unlock()
 		return false, err
@@ -350,12 +350,17 @@ func (r *Runtime) reconcileStep(ctx context.Context, ceiling map[string]supervis
 	// Kernel I/O can outlive the supervisor observation used to select this
 	// projection. Refresh that observation before rechecking prerequisites;
 	// an expired local receipt is not evidence that the PPP session went down.
-	refresh := !time.Now().Before(r.guardUntil)
+	clock, clockErr := boottime.Read()
+	if clockErr != nil {
+		r.mu.Unlock()
+		return false, clockErr
+	}
+	refresh := r.guard.bootID != clock.BootID || uint64(clock.BoottimeNanoseconds) >= r.guard.untilNanos
 	if refresh {
 		r.mu.Unlock()
-		status, statusErr := r.manager.Status(ctx)
+		status, observed, statusErr := r.supervisorStatus(ctx)
 		r.mu.Lock()
-		r.installGuardStatusLocked(status, statusErr)
+		r.installGuardStatusLocked(status, observed, statusErr)
 		if statusErr != nil {
 			r.mu.Unlock()
 			return false, statusErr

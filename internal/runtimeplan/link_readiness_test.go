@@ -4,6 +4,7 @@ package runtimeplan
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,7 +14,30 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/health"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
+	"github.com/imksoo/routerd2/internal/supervisor"
 )
+
+type delayedReadinessManager struct{ memoryManager }
+
+func (m *delayedReadinessManager) Status(ctx context.Context) (supervisor.Status, error) {
+	time.Sleep(1100 * time.Millisecond)
+	return m.memoryManager.Status(ctx)
+}
+
+func TestReadinessCannotRenewSupervisorAuthorityAfterSlowResponse(t *testing.T) {
+	r, _, manager := fixture(t, config.Native{Network: network.Desired{Interfaces: []network.Interface{{Name: "lan0", Addresses: []string{"192.0.2.1/24"}}}}})
+	if err := r.CheckReady(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	r.manager = &delayedReadinessManager{*manager}
+	if err := r.CheckReady(context.Background()); err == nil || !strings.Contains(err.Error(), "supervisor status validity expired") {
+		t.Fatal("delayed supervisor response confirmed a static configuration", err)
+	}
+	r.manager = manager
+	if err := r.CheckReady(context.Background()); err != nil {
+		t.Fatal("fresh supervisor observation did not restore readiness", err)
+	}
+}
 
 func TestReadinessRefreshDoesNotConfirmExpiredNetworkAuthority(t *testing.T) {
 	for name, resource := range map[string]resourceprogram.Resource{

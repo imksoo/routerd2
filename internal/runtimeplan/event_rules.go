@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
-	"time"
 
 	"github.com/imksoo/routerd2/internal/resourceprogram"
 )
@@ -55,7 +54,7 @@ func (r *Runtime) ActiveEventRules(revision uint64) ([]resourceprogram.EventRule
 	if !r.configured || r.config.revision != revision {
 		return nil, nil
 	}
-	facts, err := r.conditionFactsLocked(r.config, time.Now())
+	facts, err := r.conditionFactsLocked(r.config)
 	if err != nil {
 		return nil, err
 	}
