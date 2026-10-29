@@ -386,6 +386,19 @@ func (c *compiler) dslite(r resource) {
 		c.dynamicDSLite(r, policy)
 		return
 	}
+	source := r.Spec.(api.DSLiteTunnelSpec)
+	if source.LocalAddressSource == "delegatedAddress" {
+		policy := DSLitePolicy{Selection: "first", TimeoutSeconds: 2, RetrySeconds: 5}
+		if source.AFTRFQDN != "" || source.AFTRFrom.Resource != "" {
+			for _, candidate := range c.resources {
+				if pd, ok := candidate.Spec.(api.DHCPv6PrefixDelegationSpec); ok && pd.Interface == source.Interface {
+					policy.DNSFrom = append(policy.DNSFrom, candidate.Kind+"/"+candidate.Metadata.Name)
+				}
+			}
+		}
+		c.dynamicDSLite(r, policy)
+		return
+	}
 	c.staticDSLite(r)
 }
 

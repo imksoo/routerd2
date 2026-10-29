@@ -617,6 +617,12 @@ func (p *apply) reconcile(d Desired) error {
 			}
 		}
 	}
+	// Linux clears RTA_PREFSRC when its address is removed but retains the
+	// route. Withdraw obsolete owned routes first, while their full identity
+	// still matches the journal.
+	if err := p.removeRoutes(d.Routes); err != nil {
+		return err
+	}
 	if err := p.removeAddresses(wantedAddresses); err != nil {
 		return err
 	}
@@ -660,6 +666,9 @@ func (p *apply) reconcile(d Desired) error {
 	if err := p.removePolicyRules(d.PolicyRules); err != nil {
 		return err
 	}
+	// Address removal and link changes can change connected routes and clear
+	// source attributes. Route installation uses a new kernel observation.
+	p.routeTables = nil
 	if err := p.routes(d.Routes); err != nil {
 		return err
 	}
@@ -810,6 +819,24 @@ func (p *apply) removeAddresses(want map[addressKey]bool) error {
 	return nil
 }
 
+func (p *apply) removeRoutes(want []Route) error {
+	wanted := make(map[string]Route, len(want))
+	for _, r := range want {
+		wanted[routeSlot(r)] = r
+	}
+	for i := 0; i < len(p.e.state.Routes); {
+		old := p.e.state.Routes[i]
+		if next, ok := wanted[routeSlot(old.Route)]; ok && sameKernelRoute(old.Route, next) {
+			i++
+			continue
+		}
+		if err := p.removeRoute(i); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (p *apply) routes(want []Route) error {
 	linkBounds := make(map[string]lifetime.Deadline, len(p.e.state.Links))
 	for _, link := range p.e.state.Links {
@@ -820,25 +847,17 @@ func (p *apply) routes(want []Route) error {
 		wanted[routeSlot(r)] = r
 	}
 	owned := make(map[string]ownedRoute, len(p.e.state.Routes))
-	for i := 0; i < len(p.e.state.Routes); {
-		r := p.e.state.Routes[i]
-		key := routeSlot(r.Route)
-		if next, ok := wanted[key]; ok && sameKernelRoute(r.Route, next) {
-			if r.ValidUntil != next.ValidUntil || r.AttemptedExpiry != nil {
-				if err := p.refreshRoute(i, next); err != nil {
-					return err
-				}
+	for i := range p.e.state.Routes {
+		key := routeSlot(p.e.state.Routes[i].Route)
+		next := wanted[key] // removeRoutes already removed obsolete kernel identities.
+		if p.e.state.Routes[i].ValidUntil != next.ValidUntil || p.e.state.Routes[i].AttemptedExpiry != nil {
+			if err := p.refreshRoute(i, next); err != nil {
+				return err
 			}
-			// BootID/ExpiresNanos are writer authority, not kernel attributes.
-			// The final journal write persists them together before its ACK.
-			p.e.state.Routes[i].Route = next
-			owned[key] = p.e.state.Routes[i]
-			i++
-			continue
 		}
-		if err := p.removeRoute(i); err != nil {
-			return err
-		}
+		// BOOTTIME writer authority is committed together before the final ACK.
+		p.e.state.Routes[i].Route = next
+		owned[key] = p.e.state.Routes[i]
 	}
 	var additions []Route
 	for _, r := range want {

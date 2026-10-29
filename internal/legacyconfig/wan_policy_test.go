@@ -100,10 +100,10 @@ func editDS(options *Options, edit func(*DSLitePolicy)) {
 	options.DSLite["DSLiteTunnel/provider"] = p
 }
 
-func TestWANPolicyPreservesDelegatedDSLiteSourceAndHostSuffix(t *testing.T) {
+func TestDeclaredPDSourcePreservesDSLiteAllocationWithoutExtraPolicy(t *testing.T) {
 	data := changed(t, fixture(t, "wan-dynamic"), "localAddressSource: interface", "localAddressSource: delegatedAddress\n        localDelegatedAddress: lan-prefix\n        localAddressSuffix: '::100'")
 	options := wanPolicy(t)
-	editDS(&options, func(p *DSLitePolicy) { p.SourceFrom = "DHCPv6PrefixDelegation/wan-pd" })
+	delete(options.DSLite, "DSLiteTunnel/provider")
 	result := compiledPolicy(t, data, options)
 	pd, ds := service(t, result.Document, "dhcp6"), service(t, result.Document, "aftr")
 	if ds.DSLite.SourceFrom != pd.Name || len(pd.DHCP6.Delegations) != 2 {

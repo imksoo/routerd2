@@ -61,6 +61,7 @@ type daemon struct {
 	inputMu         sync.Mutex
 	zones           *zoneTable
 	sources         []runtimeSource
+	listenerSources [][]runtimeSource
 	listenSources   []dnsconfig.ListenSource
 	staticListeners map[string]listenBinding
 	report          func(context.Context, dnsconfig.Snapshot) error
@@ -157,6 +158,9 @@ func newDaemon(opts options, config dnsresolver.RuntimeConfig) (*daemon, error) 
 		return nil, err
 	}
 	d.sources = sources
+	for _, listener := range config.Spec.Listen {
+		d.listenerSources = append(d.listenerSources, sourcesForListen(sources, listener.Sources))
+	}
 	return d, nil
 }
 
@@ -404,7 +408,7 @@ func (d *daemon) handleDNS(listener int, w dns.ResponseWriter, req *dns.Msg) {
 }
 
 func (d *daemon) resolve(listener int, req *dns.Msg) (resolveResult, error) {
-	config, sources, zones, generation := d.runtimeSnapshot()
+	config, zones, generation := d.runtimeSnapshot()
 	if req.Opcode != dns.OpcodeQuery {
 		resp := new(dns.Msg)
 		resp.SetRcode(req, dns.RcodeNotImplemented)
@@ -426,7 +430,7 @@ func (d *daemon) resolve(listener int, req *dns.Msg) (resolveResult, error) {
 		}
 	}
 	question := req.Question[0]
-	for _, source := range sourcesForListen(sources, config.Spec.Listen[listener].Sources) {
+	for _, source := range d.listenerSources[listener] {
 		if !sourceMatches(source.Spec.Match, question.Name) {
 			continue
 		}
@@ -478,10 +482,10 @@ func (d *daemon) resolve(listener int, req *dns.Msg) (resolveResult, error) {
 	return resolveResult{Response: resp, ResponseCode: dns.RcodeToString[resp.Rcode]}, nil
 }
 
-func (d *daemon) runtimeSnapshot() (dnsresolver.RuntimeConfig, []runtimeSource, *zoneTable, uint64) {
+func (d *daemon) runtimeSnapshot() (dnsresolver.RuntimeConfig, *zoneTable, uint64) {
 	d.stateMu.RLock()
 	defer d.stateMu.RUnlock()
-	return d.config, append([]runtimeSource(nil), d.sources...), d.zones, d.generation
+	return d.config, d.zones, d.generation
 }
 
 func (d *daemon) listenerCount() int {
@@ -597,14 +601,13 @@ func sourcesForListen(sources []runtimeSource, selected []string) []runtimeSourc
 	if len(selected) == 0 {
 		return sources
 	}
-	allowed := map[string]bool{}
+	out := make([]runtimeSource, 0, len(selected))
 	for _, name := range selected {
-		allowed[name] = true
-	}
-	var out []runtimeSource
-	for _, source := range sources {
-		if allowed[source.Spec.Name] {
-			out = append(out, source)
+		for _, source := range sources {
+			if source.Spec.Name == name {
+				out = append(out, source)
+				break
+			}
 		}
 	}
 	return out
@@ -693,8 +696,7 @@ func (d *daemon) routes() http.Handler {
 		localapi.JSON(w, http.StatusOK, d.eventsSince(r.URL.Query().Get("since")))
 	})
 	mux.HandleFunc("GET /v1/config", func(w http.ResponseWriter, r *http.Request) {
-		config, _, _, _ := d.runtimeSnapshot()
-		localapi.JSON(w, http.StatusOK, config)
+		localapi.JSON(w, http.StatusOK, d.config)
 	})
 	return mux
 }

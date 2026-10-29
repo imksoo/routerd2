@@ -142,7 +142,7 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 	for _, r := range resources {
 		if r.Kind == "DSLiteTunnel" {
 			c.dslite(r)
-			if _, dynamic := c.options.DSLite[r.Kind+"/"+r.Metadata.Name]; dynamic {
+			if _, dynamic := c.dynamicTunnels[c.aliases[r.Kind+"/"+r.Metadata.Name]]; dynamic {
 				conditions = append(conditions, resourceCondition{id: "service/" + c.serviceName(r, "aftr"), source: r, when: r.Spec.(api.DSLiteTunnelSpec).When})
 			}
 		}
@@ -363,7 +363,7 @@ func (c *compiler) allow(r resource, fields ...string) {
 			case "EgressRoutePolicy", "HealthCheck", "DHCPv6PrefixDelegation", "DHCPv6Information", "NTPClient", "DHCPv6Server", "IPv6RouterAdvertisement":
 				continue
 			case "DSLiteTunnel":
-				if _, dynamic := c.options.DSLite[r.Kind+"/"+r.Metadata.Name]; dynamic {
+				if _, dynamic := c.options.DSLite[r.Kind+"/"+r.Metadata.Name]; dynamic || r.Spec.(api.DSLiteTunnelSpec).LocalAddressSource == "delegatedAddress" {
 					continue
 				}
 			case "VirtualAddress":
@@ -377,7 +377,7 @@ func (c *compiler) allow(r resource, fields ...string) {
 				continue // Checked against the allocation's PD owner.
 			}
 			if r.Kind == "DSLiteTunnel" {
-				if _, dynamic := c.options.DSLite[r.Kind+"/"+r.Metadata.Name]; dynamic {
+				if _, dynamic := c.options.DSLite[r.Kind+"/"+r.Metadata.Name]; dynamic || r.Spec.(api.DSLiteTunnelSpec).LocalAddressSource == "delegatedAddress" {
 					continue // Checked against the tunnel's actual source.
 				}
 			}

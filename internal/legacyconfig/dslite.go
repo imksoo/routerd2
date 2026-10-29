@@ -16,10 +16,13 @@ import (
 // The active Linux controller in the source pin differs from the FreeBSD/runtime
 // helper: it uses AFTRFrom, FQDN, IPv6 and RemoteAddress in that order, the local
 // DNS listener and first AAAA selection, and retains a pending tunnel indefinitely.
-// Every conversion to the native lifetime/ownership model requires policy.
+// Explicit migration policy may override resolution. A declared PD source
+// already supplies ownership; its native resolver uses bounded defaults.
 func (c *compiler) dynamicDSLite(r resource, policy DSLitePolicy) {
 	c.allow(r, "interface", "tunnelName", "enabled", "aftrFQDN", "aftrIPv6", "aftrDNSServers", "aftrAddressOrdinal", "aftrAddressSelection", "remoteAddress", "localAddress", "localAddressFrom", "localIPv6Source", "aftrFrom", "aftrSource", "localAddressSource", "localDelegatedAddress", "localAddressSuffix", "defaultRoute", "routeMetric", "mtu", "encapsulationLimit")
-	c.usePolicy(r, "ds_lite")
+	if _, explicit := c.options.DSLite[r.Kind+"/"+r.Metadata.Name]; explicit {
+		c.usePolicy(r, "ds_lite")
+	}
 	s := r.Spec.(api.DSLiteTunnelSpec)
 	if s.Enabled != nil && !*s.Enabled {
 		c.reject(r, "enabled", "unsupported_semantics", "disabled legacy tunnels cannot be activated by migration policy")
@@ -144,7 +147,7 @@ func (c *compiler) dynamicDSLite(r resource, policy DSLitePolicy) {
 	}
 	c.dynamicTunnels[name] = len(c.document.Services)
 	c.addService(r, service)
-	c.note(r, "Explicit migration policy replaces local-resolver lookup and indefinite pending-tunnel retention with scoped IPv6 DNS, finite DNS/dependency expiry, and withdrawal when the owned source is no longer preferred; this is deliberate new native intent, not automatic legacy parity.")
+	c.note(r, "Native ownership replaces local-resolver lookup and indefinite pending-tunnel retention with scoped IPv6 DNS, finite DNS/dependency expiry, and withdrawal when the owned source is no longer preferred; this is deliberate new native intent, not automatic legacy parity. Declared PD sources need no repeated source policy; their defaults are first selection, 2-second lookup and 5-second retry.")
 	c.note(r, "AFTR candidate precedence remains information aftrName, aftrFQDN, aftrIPv6, remoteAddress. The B4 /32 peer 192.0.0.1/32 and fixed 1460-byte default MTU are retained; only independent route resources can authorize a default route.")
 }
 

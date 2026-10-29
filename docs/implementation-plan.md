@@ -1,3 +1,5 @@
+2026-10-29 prefsrc-order-native71: 宣言済みPD→DS-Liteを補足policyなしで接続。DNS明示順と、送信元削除前の経路撤去を実失敗から修正。実HGW単体90秒/両端末/PD交換/全体再起動が終了0。自然更新・長期・全homertは未受入。[現在の範囲](pve-codex-handoff.md)。
+
 2026-10-29 implicit-ra-native70: 旧hostdepsのRA対象をGo workerへ接続。明示RAなしhost経路の実radvd通信、ISC対向PD/IA_NA/実DAD/端末通信と旧条件付きLANが成功。全make check/Race/vet、両静的build・署名も終了0。全homert通し構成は未達。[引き継ぎ](pve-codex-handoff.md)。
 
 2026-10-29 doh-reset-native69: 実HGWで観測した再利用DoH TLS切断へ元期限内一度の再送を追加。実TLS両HTTP版、製品daemon・LAN端末へのTCP resetと後続TCP/UDP DNSが成功。7300秒の実HGW観測は進行中、自然PD更新・完走は未判定。[現在の範囲](pve-codex-handoff.md)。

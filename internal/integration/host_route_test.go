@@ -279,6 +279,11 @@ func runHostRouteFixture(t *testing.T, mode string) {
 	}
 	traffic4()
 	traffic6()
+	f.stop()
+	f = f.restart()
+	until(t, 12*time.Second, func() bool { _, ok := hostRoute(); return ok })
+	traffic4()
+	traffic6()
 	var healthName string
 	for _, resource := range program.Resources {
 		if resource.Service != nil && resource.Service.Health != nil {

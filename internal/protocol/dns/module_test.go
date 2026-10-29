@@ -258,11 +258,11 @@ func TestLocalZonesRequireLabelBoundaryAndNeverInventAD(t *testing.T) {
 	}
 }
 
-func TestListenerKeepsSourceRestriction(t *testing.T) {
-	c := dnsresolver.RuntimeConfig{Spec: api.DNSResolverSpec{Listen: []api.DNSResolverListenSpec{{Addresses: []string{"0.0.0.0"}, Port: 53, Sources: []string{"private"}}}}}
-	s := []runtimeSource{{Spec: api.DNSResolverSourceSpec{Name: "private"}}, {Spec: api.DNSResolverSourceSpec{Name: "public"}}}
+func TestListenerKeepsSourceRestrictionAndOrder(t *testing.T) {
+	c := dnsresolver.RuntimeConfig{Spec: api.DNSResolverSpec{Listen: []api.DNSResolverListenSpec{{Addresses: []string{"0.0.0.0"}, Port: 53, Sources: []string{"private", "public"}}}}}
+	s := []runtimeSource{{Spec: api.DNSResolverSourceSpec{Name: "public"}}, {Spec: api.DNSResolverSourceSpec{Name: "excluded"}}, {Spec: api.DNSResolverSourceSpec{Name: "private"}}}
 	got := sourcesForListen(s, c.Spec.Listen[0].Sources)
-	if len(got) != 1 || got[0].Spec.Name != "private" {
+	if len(got) != 2 || got[0].Spec.Name != "private" || got[1].Spec.Name != "public" {
 		t.Fatalf("wildcard policy bypass: %v", got)
 	}
 }

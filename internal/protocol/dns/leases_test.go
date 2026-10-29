@@ -31,7 +31,7 @@ func answerNative(t *testing.T, d *daemon, name string, typ uint16) *mdns.Msg {
 	t.Helper()
 	q := new(mdns.Msg)
 	q.SetQuestion(name, typ)
-	_, _, zones, _ := d.runtimeSnapshot()
+	_, zones, _ := d.runtimeSnapshot()
 	out, ok := zones.Answer(q, nil)
 	if !ok {
 		return nil

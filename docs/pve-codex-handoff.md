@@ -5,6 +5,36 @@
 [試験計画](test-plan.md)、[機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
+## 宣言済みPD→DS-Liteと再起動（2026-10-29、prefsrc-order-native71）
+
+旧設定のdeclared delegatedAddressは、追加ds_lite policyがなくても、宣言済みPD割当と既存AFTR workerへ
+直接接続する。既定はfirst/照会2秒/再試行5秒。hostname/AFTR情報を使う場合だけ同じWANのPD DNSを使い、
+literal AFTRには不要なDNS依存を加えない。既存の元期限・DAD確認・唯一のnetwork writerを使う。
+DNS listenerが明示したsources順を起動時に準備するよう修正し、照会ごとの許可map作成と全sourceコピーを除いた。
+旧DNSも同じ許可集合処理だったが、明示順の条件付きsourceより全域sourceが先に選ばれる実失敗を修正した。
+
+実設定からPD/Information、subnet1のLAN割当とWANの::21/128、MTU1454のDS-Lite一本、LAN RA/DHCPv6を
+取り出し、実CLIで単体用native設定へ変換した。単体化ではwhenを外し、VMACの代わりに二つの既存試験linkを
+明示管理する。試験用の固有MAC/DUID、DoH/条件付きDNS、DHCPv4、NAT/MSS/firewallとhost policyを使用する。
+取込み結果のservice/割当名だけを既存通信fixtureの役割名へ結び、protocol値は保持した。全homert設定ではない。
+初回に元の固定DUIDを残していた試験設定を修正した。元の本番identityを試験で共有してはならない。
+
+途中、通常PD再起動後のLAN IPv6 DNS一照会がtimeoutし終了1。次の短期観測では通常再起動が通ったが、
+全体再起動でtable120/metric50が所有権競合となった。Linuxが送信元アドレスの削除時に経路を残してsrcだけ消す
+動作を隔離namespaceで再現した。不要な経路をアドレスより先に撤去し、アドレス/link変更後の経路を再観測してから
+更新する順序へ修正した。所有権の拒否条件は緩めていない。
+
+同版の実HGW・独立二端末で90秒/9巡の取得DNS・条件付きsource障害分離/復帰・IPv4/IPv6 HTTPSが終了0。
+PD SIGKILLから1.51秒、通常再起動から3.83秒、製品全体再起動から3.9秒で通信が戻り、DUID/IAID/prefixを保持した。
+停止時はzero-lifetime RA・kernel撤去・upstream Releaseなしを確認した。先の通常再起動DNS失敗の原因は未確定で、
+修正版90秒では再現しなかった範囲に留める。別の同版5秒観測/再起動試験でも終了0で、
+全体再起動後に自動LAN端末→公衆IPv4/IPv6 UDP DNSを追加確認した（全体復帰3.94秒）。
+自然PD更新0回、長期安定性、全homertの主従/複数WAN/管理、対象物理NIC、直接ONUは未受入。
+
+固定/学習/暗黙host gatewayの3試験へ全体再起動を加え、独立radvd/dnsmasqで全て終了0。
+全make check（Race/vet）、関連4package Race、両CGO0 Linux buildと署名六ELFも終了0。
+compiler contract71/journal17。次は同じ単体構成へ残るBGP/主従/複数WAN/管理を接続する。
+
 ## 明示RAのない旧WANの受信口（2026-10-29、implicit-ra-native70）
 
 旧hostdeps.DerivedSysctlResourcesForOSのRA受信対象を直接使い、PD/Informationと、LAN配布に使わない
@@ -37,10 +67,12 @@ native-67で再利用TLSへの対向RST→LAN SERVFAILを観測した。旧route
 native/旧設定DHCP-DNS実daemon、全vet、両CGO0 Linux build、署名六ELF検査も終了0。
 この局所切断の回復は、上流・実回線を含む長期無障害の証明ではない。
 
-同版の実HGW長期観測は14:50 UTC頃開始、二つの自動LAN clientとHeadscale/公式Tailscaleを併用。
-観測時間7300秒、実測T1残7182秒で自然更新は16:50 UTC頃の見込み。保存したDUID/MACを維持するが、
-更新待ち時間は短縮できなかった。自然更新後の通信とPD worker/全daemon再起動まで未完了。
-従来の130分試験と観測時間を区別する。全34項目の期限16:56:38 UTCは変更しない。
+同版の実HGW長期観測は14:50 UTC頃開始したが、15:24 UTC頃、Tailscale peer発の公衆IPv6 UDP DNS
+一照会が3秒以内に返らず終了1。直前1954秒/175巡でready、最後の照会は出口WANから送出され、
+対応する受信packetを確認できない。直前照会はWAN受信→逆NAT→peer受信まで通っていた。
+DoH再発・製品が返答を落とした結果とは判定しないが、長期合格でもない。原因は未確定。
+自然PD更新前に終了し、旧16:50更新/16:52頃終了の見込みは無効。保存DUID/MACは維持するが、
+再取得でT1が約2時間なら残る期限内に自然更新を観測できない。全34項目の期限16:56:38 UTCは変更しない。
 
 ## 旧経路参照に従うHealth（2026-10-29、native-69）
 
