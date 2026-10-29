@@ -42,6 +42,7 @@ check() {
 package() {
 	install -Dm755 routerd "$pkgdir/usr/sbin/routerd"
 	install -Dm755 routerd-modules "$pkgdir/usr/libexec/routerd-modules"
+	install -Dm644 chrony-engine.tar "$pkgdir/usr/lib/routerd/chrony-engine.tar"
 	install -Dm644 conntrack-engine.tar "$pkgdir/usr/lib/routerd/conntrack-engine.tar"
 	install -Dm644 tailscale-engine.tar "$pkgdir/usr/lib/routerd/tailscale-engine.tar"
 	install -Dm644 dnsmasq-engine.tar "$pkgdir/usr/lib/routerd/dnsmasq-engine.tar"

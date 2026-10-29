@@ -61,6 +61,7 @@ type Snapshot struct {
 	OffsetSeconds  float64    `json:"offset_seconds"`
 	RMSOffset      float64    `json:"rms_offset_seconds"`
 	FrequencyPPM   float64    `json:"frequency_ppm"`
+	SkewPPM        float64    `json:"skew_ppm"`
 	RootDelay      float64    `json:"root_delay_seconds"`
 	RootDispersion float64    `json:"root_dispersion_seconds"`
 	LastError      string     `json:"last_error,omitempty"`

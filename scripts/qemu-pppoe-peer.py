@@ -9,6 +9,7 @@ OpenSSH, dhcpcd, dnsmasq, dig, mke2fs and an independent ISC dhcpd supplied with
 --dhcp6-server. A fresh regular-file ext4 disk supplies explicit persistent state.
 """
 import argparse
+import datetime
 import importlib.util
 import ipaddress
 import json
@@ -19,6 +20,7 @@ import shutil
 import signal
 import subprocess
 import tempfile
+import tarfile
 import time
 
 
@@ -109,7 +111,9 @@ def peer(stage, power_action, updates, profile):
         # This fixture selects the PPP/DHCP profile; Tailscale/HA engines have
         # separate communication checks and are not part of these update bundles.
         boot['workers'].pop('tailscale', None)
-        boot['engines'] = {role: boot['engines'][role] for role in ('pppoe', 'dhcp_server')}
+        if profile != 'time':
+            boot['workers'].pop('ntp', None)
+        boot['engines'] = {role: boot['engines'][role] for role in (('pppoe', 'dhcp_server', 'ntp') if profile == 'time' else ('pppoe', 'dhcp_server'))}
         boot['kernel_modules'] = json.loads((stage / 'input/manifest.json').read_text())['kernel_modules']
         boot['ssh']['authorized_keys'] = [(stage / 'key.pub').read_text().strip()]
         boot['state_volume'] = {'device': '/dev/vda', 'wait_timeout_seconds': 10}
@@ -131,6 +135,15 @@ def peer(stage, power_action, updates, profile):
             'interface': 'ppp-wan', 'target': '198.51.100.20', 'protocol': 'tcp', 'port': 18080,
             'interval_ms': 500, 'timeout_ms': 300, 'healthy_threshold': 1, 'unhealthy_threshold': 2}}})
         start(ac,["dnsmasq","--keep-in-foreground","--conf-file=/dev/null","--no-hosts","--no-resolv","--bind-dynamic","--listen-address=192.0.2.1","--address=/ppp.example/198.51.100.20","--address=/ppp.example/2001:db8:ffff::20","--local-ttl=0"],"dns")
+        if profile == 'time':
+            resources.append({'id': 'time', 'service': {'name': 'time', 'ntp': {'servers': [], 'sources_from': ['pd'], 'listen': ['10.42.0.1'], 'allow': ['10.42.0.0/24']}}})
+            vendor = stage / 'chrony'
+            with tarfile.open(stage / 'chrony-engine.tar') as archive:
+                archive.extractall(vendor, filter='data')
+            chrony = [str(vendor / 'lib/ld-musl-x86_64.so.1'), '--library-path', str(vendor / 'lib') + ':' + str(vendor / 'usr/lib'), str(vendor / 'usr/sbin/chronyd')]
+            (stage / 'time-source').mkdir(mode=0o700)
+            (stage / 'time-source.conf').write_text('local stratum 8\nbindaddress 2001:db8:ffff::20\nallow ::/0\ncmdport 0\nbindcmdaddress ' + str(stage / 'time-source/command.sock') + '\npidfile ' + str(stage / 'time-source/pid') + '\n')
+            start(ac, chrony + ['-d', '-x', '-u', 'root', '-f', str(stage / 'time-source.conf')], 'time-source')
         (overlay / 'etc/routerd/config.json').write_text(json.dumps({'schema_version': 2, 'resources': resources}))
         mkfs = ['mke2fs', '-q', '-F', '-t', 'ext4', '-E', 'lazy_itable_init=0,lazy_journal_init=0']
         if updates:
@@ -181,7 +194,8 @@ def peer(stage, power_action, updates, profile):
             out.write((stage / 'overlay.gz').read_bytes())
         shutil.copyfile(stage / 'input/vmlinuz', stage / 'vmlinuz')
         boot_started = time.monotonic()
-        q = start(None, ['qemu-system-x86_64', '-machine', 'q35', '-accel', 'tcg', '-cpu', 'max', '-m', '512M', '-smp', '2', '-display', 'none', '-monitor', 'none', '-nodefaults', '-serial', 'file:' + str(stage / 'serial.log'), '-kernel', str(stage / 'vmlinuz'), '-initrd', str(stage / 'initrd.gz'), '-drive', 'file=' + str(disk) + ',if=virtio,format=raw', '-append', 'console=ttyS0,115200 panic=-1', '-netdev', 'tap,id=wan,ifname=tapwan,script=no,downscript=no', '-device', 'virtio-net-pci,netdev=wan,mac=52:54:00:12:34:56', '-netdev', 'tap,id=lan,ifname=taplan,script=no,downscript=no', '-device', 'virtio-net-pci,netdev=lan,mac=52:54:00:12:34:57'], 'qemu')
+        rtc = ['-rtc', 'base=' + (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=20)).strftime('%Y-%m-%dT%H:%M:%S') + ',clock=host'] if profile == 'time' else []
+        q = start(None, ['qemu-system-x86_64', '-machine', 'q35', '-accel', 'tcg', '-cpu', 'max', '-m', '512M', '-smp', '2', '-display', 'none', '-monitor', 'none', '-nodefaults', '-serial', 'file:' + str(stage / 'serial.log'), '-kernel', str(stage / 'vmlinuz'), '-initrd', str(stage / 'initrd.gz'), '-drive', 'file=' + str(disk) + ',if=virtio,format=raw', '-append', 'console=ttyS0,115200 panic=-1', '-netdev', 'tap,id=wan,ifname=tapwan,script=no,downscript=no', '-device', 'virtio-net-pci,netdev=wan,mac=52:54:00:12:34:56', '-netdev', 'tap,id=lan,ifname=taplan,script=no,downscript=no', '-device', 'virtio-net-pci,netdev=lan,mac=52:54:00:12:34:57'] + rtc, 'qemu')
         print('Private appliance peer stage', stage, flush=True)
         ssh = ['ssh', '-F', '/dev/null', '-i', str(stage / 'key'), '-o', 'BatchMode=yes', '-o', 'IdentitiesOnly=yes', '-o', 'StrictHostKeyChecking=accept-new', '-o', 'UserKnownHostsFile=' + str(stage / 'known-hosts'), '-o', 'ConnectTimeout=2', 'admin@10.42.0.1']
 
@@ -247,6 +261,9 @@ def peer(stage, power_action, updates, profile):
         wait(ppp_ready)
         dhcpd = str(stage / 'dhcpd')
         (stage / 'dhcp6.conf').write_text('default-lease-time 18; preferred-lifetime 12; option dhcp-renewal-time 5; option dhcp-rebinding-time 9; subnet6 2001:db8:ffff::/64 { prefix6 2001:db8:80:: 2001:db8:80:f0:: /60; }\n')
+        if profile == 'time':
+            with (stage / 'dhcp6.conf').open('a') as out:
+                out.write('option dhcp6.sntp-servers 2001:db8:ffff::20;\n')
         (stage / 'dhcp6.leases').touch()
         mac = json.loads(run(['ip', '-n', ac, '-j', 'link', 'show', 'dev', 'server0']))[0]['address']
         with (stage / 'dhcp6.conf').open('a') as out:
@@ -269,6 +286,38 @@ def peer(stage, power_action, updates, profile):
         wait(lambda: query('show services pd')['snapshot']['renew_at'] != before, 15)
         traffic()
         print('PASS appliance DHCPv6 Renew preserved forwarding', flush=True)
+        if profile == 'time':
+            (stage / 'time-client.conf').write_text('server 10.42.0.1 iburst\ncmdport 0\n')
+            time_observation = None
+            time_started = time.monotonic()
+            def time_ready():
+                nonlocal time_observation
+                snap = query('show services time').get('snapshot', {})
+                # Use the peer's unchanged maxdistance and the clock engine's
+                # maxupdateskew; initial synchronization alone is insufficient.
+                qualified = (snap.get('synchronized') and snap.get('adjusting_clock')
+                             and ipaddress.ip_address(snap['source']) == ipaddress.ip_address('2001:db8:ffff::20')
+                             and snap['root_delay_seconds'] / 2 + snap['root_dispersion_seconds'] < 3
+                             and snap['skew_ppm'] < 1000)
+                current = (snap.get('reference_time'), qualified)
+                if current != time_observation:
+                    print('Observed time quality', {'elapsed': round(time.monotonic() - time_started, 2), 'synchronized': snap.get('synchronized'), 'skew_ppm': snap.get('skew_ppm'), 'root_distance_seconds': snap.get('root_delay_seconds', 0) / 2 + snap.get('root_dispersion_seconds', 0), 'qualified': bool(qualified)}, flush=True)
+                    time_observation = current
+                return qualified
+            def time_client():
+                result = subprocess.run(inside(lan, chrony + ['-Q', '-t', '8', '-u', 'root', '-f', str(stage / 'time-client.conf')]), capture_output=True, text=True, timeout=12)
+                output = result.stdout + result.stderr
+                assert result.returncode == 0, output
+                match = re.search(r'System clock wrong by ([+-]?[0-9.]+) seconds', output)
+                assert match and abs(float(match[1])) < 1, output
+                print('Observed independent LAN NTP offset seconds', match[1], flush=True)
+            wait(time_ready, 180)
+            assert next(m for m in query('show status')['modules'] if m['name'] == 'service.time')['generation'] == 1
+            time_client()
+            serial = (stage / 'serial.log').read_text(errors='replace')
+            steps = re.findall(r'System clock was stepped by ([+-]?[0-9.]+) seconds', serial)
+            assert any(abs(float(value)) > 1000 for value in steps), 'no actual correction of the deliberately slow guest clock'
+            print('PASS packaged PID1 appliance learned ISC DHCPv6 NTP, corrected its clock by over1000 seconds, and served independent LAN time; host clock untouched', flush=True)
         if power_action == 'reboot':
             resources[1]['interface']['mtu'] = 1400
             request = {'expected_revision': query('show config')['revision'], 'request_id': 'appliance-persistent-mtu', 'config': {'schema_version': 2, 'resources': resources}}
@@ -428,6 +477,9 @@ def peer(stage, power_action, updates, profile):
         power_status = query('show status')
         power_index = next(x['ifindex'] for x in json.loads(run(['ip', '-n', ac, '-j', 'link', 'show'])) if x['ifname'].startswith('ppp'))
         power_started = time.monotonic()
+        if profile == 'time':
+            for interface, name in [('tapwan', 'wan'), ('taplan', 'lan')]:
+                start(None, ['tcpdump', '--immediate-mode', '-Z', 'root', '-U', '-n', '-i', interface, '-w', str(stage / ('time-reboot-' + name + '.pcap'))], 'time-reboot-' + name)
         assert query(power_action)['accepted']
         if power_action == 'poweroff':
             assert q.wait(timeout=40) == 0, 'QEMU failed during poweroff'
@@ -463,6 +515,15 @@ def peer(stage, power_action, updates, profile):
             assert next(r for r in config['config']['resources'] if r['id'] == 'lan')['interface']['mtu'] == 1400
             assert query('show services pd')['snapshot']['client_duid'] == duid
             print('PASS second appliance boot: ext4 persisted committed revision/MTU, DUID and pinned SSH host key; new PPP/PD restored both-family TCP/UDP/DNS', flush=True)
+            if profile == 'time':
+                time_observation = None
+                time_started = time.monotonic()
+                wait(time_ready, 180)
+                time_client()
+                console = (stage / 'serial.log').read_text(errors='replace')
+                assert next(m for m in query('show status')['modules'] if m['name'] == 'service.time')['generation'] == 1
+                assert 'read from /state/drift' in console[console.rfind('Linux version '):], 'chronyd did not restore persisted drift on second boot'
+                print('PASS second appliance boot restored persisted chronyd drift, learned source, actual clock adjustment and LAN time', flush=True)
             if profile == 'update':
                 assert query('show status')['release_id'] == versions['next']
                 print('Observed selected trial supervisor: ' + json.dumps(query('show status')), flush=True)
@@ -596,13 +657,15 @@ def main():
     parser.add_argument("--inside", type=Path)
     parser.add_argument("--power-action", choices=("poweroff", "reboot"), default="poweroff")
     parser.add_argument("--update-binaries", type=Path, help="base/next/damaged static command sets for signed SSH updates")
-    parser.add_argument("--profile", choices=("update", "worker-recovery", "corrupt-recovery"))
+    parser.add_argument("--profile", choices=("update", "worker-recovery", "corrupt-recovery", "time"))
     args = parser.parse_args()
     args.profile = args.profile or ("update" if args.update_binaries else "worker-recovery")
     if args.profile in ('update', 'corrupt-recovery') and not args.update_binaries:
         parser.error("update/recovery profile requires --update-binaries")
     if args.profile in ('update', 'corrupt-recovery') and args.power_action != 'reboot':
         parser.error('--update-binaries requires --power-action reboot')
+    if args.profile == 'time' and args.power_action != 'reboot':
+        parser.error('time profile requires --power-action reboot')
     if args.inside:
         def deadline(*_):
             raise TimeoutError("appliance PPP communication deadline")
@@ -610,7 +673,7 @@ def main():
             raise KeyboardInterrupt()
         signal.signal(signal.SIGALRM, deadline)
         signal.signal(signal.SIGTERM, terminated)
-        signal.alarm(1800 if args.update_binaries else 180)
+        signal.alarm(1800 if args.update_binaries else 600 if args.profile == 'time' else 180)
         peer(args.inside, args.power_action, args.update_binaries, args.profile)
         return
     if args.dhcp6_server is None or not args.dhcp6_server.is_file():
@@ -620,7 +683,7 @@ def main():
         return subprocess.run(root + command, check=True, text=True, capture_output=True, timeout=10).stdout
     stage = run(["mktemp", "-d", "/tmp/routerd-pppoe-appliance.XXXXXX"]).strip()
     args.output.mkdir(parents=True, exist_ok=True)
-    artifacts = ("serial.log", "wan.pcap", "lan.pcap", "shutdown-wan.pcap", "shutdown-lan.pcap", "status.json", "ac.log", "dhcp6.log", "client-dhcp.log", "late-solicits.log")
+    artifacts = ("serial.log", "wan.pcap", "lan.pcap", "shutdown-wan.pcap", "shutdown-lan.pcap", "status.json", "ac.log", "dhcp6.log", "client-dhcp.log", "late-solicits.log", "time-source.log", "time-reboot-wan.pcap", "time-reboot-lan.pcap")
     for name in artifacts:
         (args.output / name).unlink(missing_ok=True)
     try:
@@ -633,6 +696,8 @@ def main():
             *[(args.image_dir / name, "input/" + name) for name in ("vmlinuz", "initramfs.cpio.gz", "manifest.json")],
         ]:
             run(["install", "-m", "500", str(source.resolve()), stage + "/" + target])
+        if args.profile == 'time':
+            run(['install', '-m', '500', str((Path('dist') / 'chrony-engine.tar').resolve()), stage + '/chrony-engine.tar'])
         update_args = []
         if args.update_binaries:
             run(['mkdir', '-m', '700', stage + '/updates'])
@@ -645,14 +710,17 @@ def main():
                 run(['install', '-m', '500', str(source.resolve()), stage + '/' + target])
             update_args = ['--update-binaries', stage + '/updates']
         with (args.output / "peer.log").open("w") as output:
-            result = subprocess.run(root + ["unshare", "--mount", "--net", "--propagation", "private", "python3", "-I", stage + "/peer.py", "--inside", stage, "--power-action", args.power_action] + ["--profile", args.profile] + update_args, stdout=output, stderr=subprocess.STDOUT, timeout=1860 if args.update_binaries else 240)
+            result = subprocess.run(root + ["unshare", "--mount", "--net", "--propagation", "private", "python3", "-I", stage + "/peer.py", "--inside", stage, "--power-action", args.power_action] + ["--profile", args.profile] + update_args, stdout=output, stderr=subprocess.STDOUT, timeout=1860 if args.update_binaries else 660 if args.profile == 'time' else 240)
         for name in artifacts:
             artifact = subprocess.run(root + ["cat", stage + "/" + name], capture_output=True, timeout=10)
             if artifact.returncode == 0:
                 (args.output / name).write_bytes(artifact.stdout)
         if result.returncode:
             raise RuntimeError("appliance PPP failed; see " + str(args.output / "peer.log"))
-        print(("PASS appliance signed update and fallback; " if args.profile == "update" else "PASS appliance PPP/PD/TCP/UDP/Renew/session recovery; ") + str(args.output / "peer.log"))
+        if args.profile == 'time':
+            print('PASS appliance learned NTP, clock correction, LAN time, persisted drift and reboot; ' + str(args.output / 'peer.log'))
+        else:
+            print(("PASS appliance signed update and fallback; " if args.profile == "update" else "PASS appliance PPP/PD/TCP/UDP/Renew/session recovery; ") + str(args.output / "peer.log"))
     finally:
         run(["python3", "-I", "-c", "import shutil,sys;shutil.rmtree(sys.argv[1])", stage])
 

@@ -5,7 +5,7 @@
 [試験計画](test-plan.md)、[機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
-## 現在の成立範囲と残作業（2026-10-29 05:09 UTC）
+## 現在の成立範囲と残作業（2026-10-29 06:17 UTC）
 
 - main `935369d`: native-58/network journal15。PPP default経路は実unitの寿命に従い、条件付きPolicyRuleは
   元のBOOTTIME期限をwriterが独立して撤去する。PAP/CHAP・二WANのHealth/PBR・元期限・旧通知409・
@@ -24,23 +24,37 @@
 - 全4engine（PPP/DHCP/conntrack/Tailscale）のAPK/imageを固定同梱し、native-58のAlpineを構築した。
   実QEMU/PID 1起動は34.3秒で終了0。全engineの同時通信・arm64実行・対象実機・kernel/rootfs更新復旧は未受入。
   コアはCGO無効で両architectureを構築。署名試験の独立対向はRP-PPPoE/pppd・ISC DHCP・dhcpcdと実packet。
-- `time-sources` / native-59/network journal15: DHCPv6学習NTPを接続した。旧routerdの
-  `chain/ntp.go resolveServers`と同じく、学習先があればそれを使い、無ければ固定代替先を選ぶ。
-  元の情報/lease BOOTTIME期限はtime workerが所有し、chronydのsource再読込で切替える。
-  通知ごとのengine再起動と、同じDHCPv6 snapshotの内部再decodeを除いた。
-  `make check-ntp-dhcp6`は独立ISC4.4.3-P1/chronyd4.8/keepalived2.2.8・通常DAD・実workerと
-  captureで終了0。学習IPv6先→LAN chronyd -Q、DHCP停止中の元期限→IPv4代替先、再取得、
-  対向VRRP主系化→条件付きclient停止/代替先→対向停止/学習復帰、supervisor/control停止中の
-  元期限撤去とLAN応答が成立した。全切替でchronydの同一PIDを確認した。host時計は調整しない。
-  初回の代替先待ち失敗は、常時併存させた代替先の64秒poll待ちだったため、旧処理と同じ選択方式へ修正した。
-  追加の観測コマンド失敗はPythonのfd3がexec時に閉じられる試験側の誤りで、明示継承へ修正した。
-  DHCPv4学習・旧NTP resource変換・appliance時計調整/step/slew/drift再起動・IPv6 LAN access制御・
-  NTP標準image同梱とhomert全体での受入は残る。make checkのGo/Python/Race/vetは終了0。
-  最終source確認後の関連Race/vetと両architecture CGO_ENABLED=0 buildも終了0。
-  stageした変更の秘密情報検査は検出0。最終sourceでの同じ実通信経路の再実行も終了0。
-- 先行固定版のHGW 7800秒は終了0。独立2端末728回・自然PD Renew/Reply・端末DHCP自然更新・
-  PD交換/daemon再起動後の復旧が成立した。Tailscaleを含まない。最新固定版のHGW/Tailscale複合観測は継続中。
-  直前の初期DoH期限切れ、以前の48分Tailscale障害・106分DNS障害は未解決。直接ONU・対象NICは未資格。
+- `time-sources` / native-59/network journal15: DHCPv6学習NTP・元期限・代替先を接続。
+  独立ISC/chronyd/keepalivedと実worker/captureで、通常DAD、学習→元期限で代替先→再取得、
+  VRRP主系条件、supervisor/control停止中の元期限とLAN応答、同じchronyd PIDを確認し終了0。
+  観測取得不能は503とし、既に受信した元期限内の情報を「撤去済み」と偽って返さない。
+- 同じ512MiB/2 CPUの配布イメージで、毎回大きなGo補助をexecする2秒処理がchronydまで
+  再起動させる実障害を検出した。専用client socketディレクトリだけをengineへ共有し、
+  workerから直接Unix IPCする方式へ置換した。query/reload用の補助モードと繰返しexecを削除。
+- `ntp-quality-native59`の`make qemu-ntp`は終了0。固定chronyd4.8/独立ISC/RP-PPPoE/Linux client、
+  実APK/Alpine/PID 1とext4を使用。仮想RTCを20分遅らせ、DHCPv6学習先により
+  1201.110677秒補正した。初回の周波数推定誤差は1,000,000ppmから64.72秒後に53.63ppmへ収束し、
+  標準clientの採用基準を変えずLAN時刻差0.000152秒を確認。同期済みflagと品質は別で、skewも表示する。
+  再起動時は`Frequency 1.552 +/- 67.615 ppm read from /state/drift`を記録し、1200.474695秒補正。
+  二度目のLAN時刻差は0.000160秒。IPv4/IPv6 TCP/UDP・DNS・管理・DUID・設定保持と最後の電源断まで成立。
+  初回起動31.87秒・再起動64.35秒。二度目のWAN/LAN captureも保存し、NTP応答のstratum9と
+  root delay/dispersionも照合した。以前の8秒取得失敗は初期推定未収束と整合するが、当時の二度目の
+  captureが無いため、そのpacket上の不採用理由を断定しない。現在のclientの8秒/品質基準は不変。
+- PPP/DHCP/conntrack/Tailscale/chronyの5engineと対応sourceをAPK/image/OCIの構築経路へ接続。
+  native-59のAPK検査・イメージ構築、amd64/arm64のchronyd ELF照合、`ntp-quality-native59`のcontainer起動停止は終了0。
+  最終コードのmake check/Go/Python/Race/vetと両architecture CGO_ENABLED=0 buildは終了0。
+  DHCPv4学習、旧NTP resource変換、IPv6 LAN access制御、無限leaseのpeer資格、時刻未同期時のTLS方針、
+  全homert受入は残る。現行homertは常設NTPServerの静的3同期先と、主系NTPClientの学習/代替2先を
+  別fragmentで併存させる。現nativeの一つの学習/代替setを、その全体の同等実装とは扱わない。
+  以前の配布試験では履歴処理の2秒共用予算によるtimeoutも観測した。最終経路は終了0だが未解消とし、
+  次の必要な観測は整理/圧縮/容量取得の所要時間とSQLiteの接続待ち。健全条件を緩めて隠してはいない。
+- 実行版`hgw-dns-observation-f253575-work`の実HGW/Tailscale 7800秒試験は05:16 UTCに終了0。
+  独立2端末693巡のIPv4/IPv6 HTTPS・学習DNS UDP/TCP、条件付きDNS、自然PD Renew/Reply一組、
+  端末DHCP自然更新、PD SIGKILL復旧1.91秒・通常再起動3.72秒・全daemon復旧4.21秒が成立した。
+  全体再起動後も独立tailnet peerとの双方向TCP/UDPとInternet exitを確認し、最後のRA/kernel撤去と
+  private namespace回収まで終了した。観測期間中の全worker世代は1。固定作業版の結果であり、
+  今回のnative-59/main追加分の長期受入には数えない。対向underlay固定/明示IPv6 NATとhomertとの差も残る。
+  以前の初期DoH期限切れ、48分Tailscale障害・106分DNS障害の原因解消や、直接ONU/対象NICの資格は主張しない。
 - VRRPの選出/広告/VIPとDNSはGo実装。keepalivedやsystemdは使わない。DHCP=dnsmasq、PPP=pppd、
   接続状態同期=conntrackd、NTP=chronyd、Tailscale=公式engineの依存は残る。PID 1による所有・
   一括適用・署名runtime全体の固定/更新復旧と、外部依存削減の達成は区別する。
@@ -386,6 +400,8 @@ ONU 直結・物理 NIC・継続 TCP の資格認定は別である。ens20 の�
 2. 実HGWの完走結果と最新版の短期結果を区別し、変更に必要な実回線検証を続ける。
    ONU/HGW側のRA/DHCPv4/DHCPv6 PDからLAN・DNS・DS-Liteまで、実相手と対象版を区別して進める。
    仮想peerとの成功を、この回線や物理NICの合格に置き換えない。
-3. その後k8s-rt/pve-rtの実設定を確認し、Cloud SAMへ進む。
+3. k8s-rt/pve-rtの稼働VMから現設定を読み取り専用で取得し、構文解析済み。BGP/DNSに加え
+   SAMNodeSet/Transport/EnrollmentとMobilityPoolが使われる。秘密を含む原本は公開しない。
+   取得・解析を変換・通信受入とは区別し、homert成立後に実差分を解消してCloud SAMへ進む。
    SAMは旧docsの再設計目標を読み、認証/取消、構成配布、/32所有とNAT無し転送、移動・復旧を完成させる。
    新しい有料環境やproduction操作の許可を推定しない。

@@ -42,12 +42,6 @@ func main() {
 }
 
 func run(args []string) error {
-	if len(args) == 1 && args[0] == "chrony-query" {
-		return ntp.RunCommand(ntp.Tracking)
-	}
-	if len(args) == 1 && args[0] == "chrony-reload-sources" {
-		return ntp.RunCommand(ntp.ReloadSources)
-	}
 	if len(args) == 1 && args[0] == "chrony-engine" {
 		return ntp.RunEngine()
 	}

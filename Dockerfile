@@ -7,6 +7,7 @@ FROM routerd2-pppoe-engine:${ALPINE_VERSION}-${TARGETARCH} AS ppp-artifacts
 FROM routerd2-dnsmasq-engine:${ALPINE_VERSION}-${TARGETARCH} AS dhcp-artifacts
 FROM routerd2-conntrack-engine:${ALPINE_VERSION}-${TARGETARCH} AS conntrack-artifacts
 FROM routerd2-tailscale-engine:${ALPINE_VERSION}-${TARGETARCH} AS tailscale-artifacts
+FROM routerd2-chrony-engine:${ALPINE_VERSION}-${TARGETARCH} AS chrony-artifacts
 
 FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine3.24 AS toolchain
 
@@ -42,6 +43,8 @@ LABEL org.opencontainers.image.title="routerd2" \
 COPY --from=build /out/routerd /usr/sbin/routerd
 COPY --from=build /out/routerd-modules /usr/libexec/routerd-modules
 COPY --from=build /out/routerd-logging /usr/libexec/routerd-logging
+COPY --from=chrony-artifacts /chrony-engine.tar /usr/lib/routerd/chrony-engine.tar
+COPY --from=chrony-artifacts /chrony-sources.tar /usr/share/doc/routerd2/chrony-sources.tar
 COPY --from=conntrack-artifacts /conntrack-engine.tar /usr/lib/routerd/conntrack-engine.tar
 COPY --from=conntrack-artifacts /conntrack-sources.tar /usr/share/doc/routerd2/conntrack-sources.tar
 COPY --from=tailscale-artifacts /tailscale-engine.tar /usr/lib/routerd/tailscale-engine.tar

@@ -7,7 +7,8 @@
     "pppoe": "/usr/lib/routerd/pppoe-engine.tar",
     "dhcp_server": "/usr/lib/routerd/dnsmasq-engine.tar",
     "vrrp": "/usr/lib/routerd/conntrack-engine.tar",
-    "tailscale": "/usr/lib/routerd/tailscale-engine.tar"
+    "tailscale": "/usr/lib/routerd/tailscale-engine.tar",
+    "ntp": "/usr/lib/routerd/chrony-engine.tar"
   },
   "kernel_modules": [
     "virtio_pci",
@@ -63,6 +64,7 @@
     "bgp": "/usr/libexec/routerd-modules",
     "bfd": "/usr/libexec/routerd-modules",
     "dhcp6_server": "/usr/libexec/routerd-modules",
-    "tailscale": "/usr/libexec/routerd-modules"
+    "tailscale": "/usr/libexec/routerd-modules",
+    "ntp": "/usr/libexec/routerd-modules"
   }
 }

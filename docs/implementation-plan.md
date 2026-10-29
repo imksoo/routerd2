@@ -1,4 +1,4 @@
-2026-10-29 05:01 UTC: native-59のDHCPv6学習NTP→元期限で代替先→再取得、VRRP主系条件、control停止中の期限撤去とLAN応答を独立peerで確認した。chronydは同一PID。host時計調整は無効。署名更新と全4engine imageの成立範囲、未検証・全体残作業は[引き継ぎ](pve-codex-handoff.md)を参照。
+2026-10-29 06:17 UTC: native-59の実配布イメージで学習NTP・20分の実時計補正・品質収束・独立LAN応答・drift再読込と全体再起動後のIPv4/IPv6/DNS/管理復旧が終了0。実HGW/Tailscaleの固定作業版7800秒も自然PD更新と全体再起動まで終了0。版と未受入は[引き継ぎ](pve-codex-handoff.md)で区別する。
 
 # 現行 routerd と同等の製品にするための実装計画
 
@@ -620,8 +620,10 @@ network intentのprotocol投影もJSON往復を除き、変更する集合だけ
 旧`resolveServers`の学習先優先/固定代替先選択を接続し、情報元のBOOTTIME期限でsourceだけを再読込する。
 `make check-ntp-dhcp6`は独立ISC/chronyd/keepalivedと実LANで終了0。学習IPv6先・元期限・代替IPv4先・再取得、
 VRRP主系条件でのclient停止/復帰、control/supervisor停止中の元期限とLAN応答を同一chronyd PIDで確認した。
-host時計調整は無効。DHCPv4学習、旧resource変換、appliance clock discipline/step/slew/drift再起動、
-IPv6 LAN access制御、NTP標準imageとhomert全体での受入は未完了。SYS-02を完了にはしない。
+`ntp-quality-native59`の実APK/Alpine/PID 1では、仮想RTCの約1200秒補正、初回品質の64.72秒での収束、
+独立LAN時刻取得、ext4のdrift読込・再起動後の再補正とLAN応答・IPv4/IPv6/DNS/管理復旧まで終了0。
+固定5engineとsourceを配布へ接続した。DHCPv4学習、旧resourceの静的/条件付き同期先併存、IPv6 LAN access、
+無限lease、未同期時のTLS方針、slew/network断と全homert受入は未完了。SYS-02を完了にはしない。
 
 実装先: `internal/protocol/ntp`, `internal/serviceconfig`, `internal/runtimeplan`, `packaging/alpine`。
 

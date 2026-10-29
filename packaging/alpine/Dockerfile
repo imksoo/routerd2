@@ -7,6 +7,7 @@ FROM routerd2-pppoe-engine:${ALPINE_VERSION}-${TARGETARCH} AS ppp-artifacts
 FROM routerd2-dnsmasq-engine:${ALPINE_VERSION}-${TARGETARCH} AS dhcp-artifacts
 FROM routerd2-conntrack-engine:${ALPINE_VERSION}-${TARGETARCH} AS conntrack-artifacts
 FROM routerd2-tailscale-engine:${ALPINE_VERSION}-${TARGETARCH} AS tailscale-artifacts
+FROM routerd2-chrony-engine:${ALPINE_VERSION}-${TARGETARCH} AS chrony-artifacts
 
 FROM golang:${GO_VERSION}-alpine3.24 AS toolchain
 
@@ -17,6 +18,8 @@ RUN apk add --no-cache alpine-sdk ca-certificates tar python3 \
  && adduser -D -G abuild builder \
  && mkdir -p /out \
  && chown builder:abuild /out
+COPY --from=chrony-artifacts /chrony-engine.tar /inputs/chrony-engine.tar
+COPY --from=chrony-artifacts /chrony-sources.tar /out/chrony-sources.tar
 COPY --from=conntrack-artifacts /conntrack-engine.tar /inputs/conntrack-engine.tar
 COPY --from=conntrack-artifacts /conntrack-sources.tar /out/conntrack-sources.tar
 COPY --from=tailscale-artifacts /tailscale-engine.tar /inputs/tailscale-engine.tar

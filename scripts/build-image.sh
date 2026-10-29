@@ -16,6 +16,8 @@ conntrack_image="$project_dir/dist/conntrack-engine.tar"
 conntrack_sources="$project_dir/dist/conntrack-sources.tar"
 tailscale_image="$project_dir/dist/tailscale-engine.tar"
 tailscale_sources="$project_dir/dist/tailscale-sources.tar"
+chrony_image="$project_dir/dist/chrony-engine.tar"
+chrony_sources="$project_dir/dist/chrony-sources.tar"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -52,6 +54,7 @@ if [ -n "$package_dir" ]; then
   dhcp_sources="$package_dir/dnsmasq-sources.tar"
   conntrack_sources="$package_dir/conntrack-sources.tar"
   tailscale_sources="$package_dir/tailscale-sources.tar"
+  chrony_sources="$package_dir/chrony-sources.tar"
   # The APK is generated in the same build. --no-scripts prevents packaging hooks
   # from introducing runtime init or service-manager dependencies.
   apk --root "$package_root" --initdb --no-scripts --no-network --allow-untrusted add "$package_file"
@@ -63,6 +66,7 @@ else
   cp "$dhcp_image" "$package_root/usr/lib/routerd/dnsmasq-engine.tar"
   cp "$conntrack_image" "$package_root/usr/lib/routerd/conntrack-engine.tar"
   cp "$tailscale_image" "$package_root/usr/lib/routerd/tailscale-engine.tar"
+  cp "$chrony_image" "$package_root/usr/lib/routerd/chrony-engine.tar"
   cp "$binary_dir/routerd" "$package_root/usr/sbin/routerd"
   cp "$binary_dir/routerd-modules" "$package_root/usr/libexec/routerd-modules"
   cp "$binary_dir/routerd-logging" "$package_root/usr/libexec/routerd-logging"
@@ -91,6 +95,8 @@ cp "$package_root/usr/lib/routerd/conntrack-engine.tar" "$rootfs/usr/lib/routerd
 cp "$conntrack_sources" "$output_dir/conntrack-sources.tar"
 cp "$package_root/usr/lib/routerd/tailscale-engine.tar" "$rootfs/usr/lib/routerd/tailscale-engine.tar"
 cp "$tailscale_sources" "$output_dir/tailscale-sources.tar"
+cp "$package_root/usr/lib/routerd/chrony-engine.tar" "$rootfs/usr/lib/routerd/chrony-engine.tar"
+cp "$chrony_sources" "$output_dir/chrony-sources.tar"
 cp "$package_root/usr/share/licenses/routerd2/LICENSE" "$rootfs/usr/share/licenses/routerd2/LICENSE"
 cp -a "$package_root/usr/share/licenses/routerd2/dependencies" "$rootfs/usr/share/licenses/routerd2/"
 cp "$config_file" "$rootfs/etc/routerd/config.json"
@@ -205,7 +211,7 @@ manifest = {
             "sources_file": name + "-sources.tar",
             "sources_sha256": hashlib.sha256((output / (name + "-sources.tar")).read_bytes()).hexdigest(),
         }
-        for role, name in (("pppoe", "pppoe"), ("dhcp_server", "dnsmasq"), ("vrrp", "conntrack"), ("tailscale", "tailscale"))
+        for role, name in (("pppoe", "pppoe"), ("dhcp_server", "dnsmasq"), ("vrrp", "conntrack"), ("tailscale", "tailscale"), ("ntp", "chrony"))
     },
     "platform": boot["platform"],
     "kernel_modules": boot["kernel_modules"],
@@ -225,6 +231,6 @@ PY
 python3 "$project_dir/images/mkinitramfs.py" "$rootfs" "$output_dir/initramfs.cpio.gz" --epoch "${SOURCE_DATE_EPOCH:-0}"
 (
   cd "$output_dir"
-  sha256sum vmlinuz initramfs.cpio.gz manifest.json pppoe-sources.tar dnsmasq-sources.tar conntrack-sources.tar tailscale-sources.tar > SHA256SUMS
+  sha256sum vmlinuz initramfs.cpio.gz manifest.json pppoe-sources.tar dnsmasq-sources.tar conntrack-sources.tar tailscale-sources.tar chrony-sources.tar > SHA256SUMS
 )
 printf 'Built kernel %s and routerd initramfs in %s\n' "$kernel_version" "$output_dir"

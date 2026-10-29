@@ -55,11 +55,11 @@ func RunEngine() error {
 	if err := unix.Mount("", "/", "", unix.MS_REC|unix.MS_PRIVATE, ""); err != nil {
 		return fmt.Errorf("isolate chronyd mounts: %w", err)
 	}
-	root := settings.Config.RuntimeDir
+	root := settings.Config.RuntimeDir + "/root"
 	if err := unix.Mount("tmpfs", root, "tmpfs", unix.MS_NOSUID|unix.MS_NODEV, "mode=700"); err != nil {
 		return fmt.Errorf("mount chronyd temporary root: %w", err)
 	}
-	for _, directory := range []string{"/run/sources", "/state"} {
+	for _, directory := range []string{"/run/sources", "/state", settings.Config.RuntimeDir + "/commands"} {
 		if err := os.MkdirAll(root+directory, 0700); err != nil {
 			return err
 		}
@@ -68,6 +68,13 @@ func RunEngine() error {
 	// descriptor belongs to the parent's mount tree and cannot be bind-mounted.
 	if err := unix.Mount(settings.Config.StateDir, root+"/state", "", unix.MS_BIND, ""); err != nil {
 		return fmt.Errorf("bind chronyd persistent state: %w", err)
+	}
+	// chronyd replies to filesystem Unix addresses. Mirror only the private
+	// client directory at its original name so both mount namespaces resolve
+	// those addresses; the worker can then use the socket without chroot/exec.
+	clients := settings.Config.RuntimeDir + "/commands"
+	if err := unix.Mount(clients, root+clients, "", unix.MS_BIND, ""); err != nil {
+		return fmt.Errorf("bind chronyd command clients: %w", err)
 	}
 	if err := unix.Chroot(root); err != nil {
 		return fmt.Errorf("enter chronyd root: %w", err)
@@ -106,7 +113,7 @@ func Run(ctx context.Context, cfg ntpconfig.Config, image *os.File, updates <-ch
 	}
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
-	for _, path := range []string{cfg.StateDir, cfg.RuntimeDir} {
+	for _, path := range []string{cfg.StateDir, cfg.RuntimeDir + "/root", cfg.RuntimeDir + "/commands"} {
 		if err := os.MkdirAll(path, 0700); err != nil {
 			return err
 		}
@@ -159,14 +166,29 @@ func Run(ctx context.Context, cfg ntpconfig.Config, image *os.File, updates <-ch
 		return err
 	}
 	defer root.Close()
+	trackingPath := cfg.RuntimeDir + "/commands/tracking.sock"
+	connection, err := dialCommand(base, trackingPath)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(trackingPath)
+	defer connection.Close()
+	client := chrony.Client{Connection: connection}
 	var sourceDone chan struct{}
 	var sourceErr error
 	if len(cfg.SourcesFrom) > 0 {
+		sourcePath := cfg.RuntimeDir + "/commands/sources.sock"
+		sourceConnection, err := dialCommand(base, sourcePath)
+		if err != nil {
+			return err
+		}
+		defer os.Remove(sourcePath)
+		defer sourceConnection.Close()
 		sourceCtx, stop := context.WithCancel(ctx)
 		sourceDone = make(chan struct{})
 		defer func() { stop(); <-sourceDone }()
 		go func() {
-			sourceErr = runSources(sourceCtx, cfg, root, updates)
+			sourceErr = runSources(sourceCtx, cfg, root, sourceConnection, updates)
 			close(sourceDone)
 			if sourceErr != nil {
 				cancel()
@@ -176,18 +198,10 @@ func Run(ctx context.Context, cfg ntpconfig.Config, image *os.File, updates <-ch
 	ready()
 	ticker.Reset(2 * time.Second)
 	for {
-		call, stop := context.WithTimeout(ctx, 2*time.Second)
-		query := exec.CommandContext(call, "/proc/self/exe", "chrony-query")
-		query.ExtraFiles = []*os.File{root}
-		query.Stderr = os.Stderr
-		query.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
-		query.WaitDelay = time.Second
-		output, err := query.Output()
-		stop()
-		var snapshot ntpconfig.Snapshot
-		if err == nil {
-			err = json.Unmarshal(output, &snapshot)
+		if err := connection.SetDeadline(time.Now().Add(time.Second)); err != nil {
+			return err
 		}
+		snapshot, err := readTracking(&client)
 		if err != nil {
 			snapshot.LastError = err.Error()
 		}
@@ -214,87 +228,61 @@ func Run(ctx context.Context, cfg ntpconfig.Config, image *os.File, updates <-ch
 	}
 }
 
-type Command uint8
+func dialCommand(root, path string) (*net.UnixConn, error) {
+	// The worker exclusively owns these names, including leftovers after its
+	// previous generation was killed before closing the sockets.
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	return net.DialUnix("unixgram", &net.UnixAddr{Name: path, Net: "unixgram"}, &net.UnixAddr{Name: root + "/run/chronyd.sock", Net: "unixgram"})
+}
 
-const (
-	Tracking Command = iota
-	ReloadSources
-)
-
-// RunCommand enters the running engine's pinned root, as the conntrack command
-// boundary does. chronyd requires filesystem Unix addresses; abstract reply
-// addresses are unsupported by its command protocol.
-func RunCommand(command Command) error {
-	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
-	if err := unix.Fchdir(3); err != nil {
-		return err
-	}
-	if err := unix.Chroot("."); err != nil {
-		return err
-	}
-	if err := os.Chdir("/"); err != nil {
-		return err
-	}
-	if err := unix.Close(3); err != nil {
-		return err
-	}
-	local := &net.UnixAddr{Name: "/run/query-" + strconv.Itoa(os.Getpid()) + ".sock", Net: "unixgram"}
-	remote := &net.UnixAddr{Name: "/run/chronyd.sock", Net: "unixgram"}
-	connection, err := net.DialUnix("unixgram", local, remote)
-	if err != nil {
-		return err
-	}
-	defer os.Remove(local.Name)
-	defer connection.Close()
+func reloadSources(connection *net.UnixConn) error {
 	if err := connection.SetDeadline(time.Now().Add(time.Second)); err != nil {
 		return err
 	}
-	if command == ReloadSources {
-		// chrony 4.8 candm.h/pktlength.c: RELOAD_SOURCES has no body; the
-		// 20-byte request header is padded to the 28-byte NULL reply length.
-		request := struct {
-			chrony.RequestHead
-			Padding [8]byte
-		}{RequestHead: chrony.RequestHead{Version: 6, PKTType: 1, Command: 70, Sequence: 1}}
-		if err := binary.Write(connection, binary.BigEndian, request); err != nil {
-			return err
-		}
-		var packet [1024]byte
-		n, err := connection.Read(packet[:])
-		if err != nil {
-			return err
-		}
-		var reply chrony.ReplyHead
-		if err := binary.Read(bytes.NewReader(packet[:n]), binary.BigEndian, &reply); err != nil {
-			return err
-		}
-		if reply.Version != 6 || reply.PKTType != 2 || reply.Command != 70 || reply.Reply != 1 || reply.Sequence != 1 {
-			return errors.New("chronyd returned an unexpected source-reload response")
-		}
-		if reply.Status != 0 {
-			return fmt.Errorf("reload chronyd sources: %s", reply.Status)
-		}
-		return nil
+	// chrony 4.8 candm.h/pktlength.c: RELOAD_SOURCES has no body; the
+	// 20-byte request header is padded to the 28-byte NULL reply length.
+	request := struct {
+		chrony.RequestHead
+		Padding [8]byte
+	}{RequestHead: chrony.RequestHead{Version: 6, PKTType: 1, Command: 70, Sequence: 1}}
+	if err := binary.Write(connection, binary.BigEndian, request); err != nil {
+		return err
 	}
-	if command != Tracking {
-		return errors.New("unsupported chronyd command")
-	}
-	client := chrony.Client{Connection: connection}
-	response, err := client.Communicate(chrony.NewTrackingPacket())
+	var packet [1024]byte
+	n, err := connection.Read(packet[:])
 	if err != nil {
 		return err
 	}
+	var reply chrony.ReplyHead
+	if err := binary.Read(bytes.NewReader(packet[:n]), binary.BigEndian, &reply); err != nil {
+		return err
+	}
+	if reply.Version != 6 || reply.PKTType != 2 || reply.Command != 70 || reply.Reply != 1 || reply.Sequence != 1 {
+		return errors.New("chronyd returned an unexpected source-reload response")
+	}
+	if reply.Status != 0 {
+		return fmt.Errorf("reload chronyd sources: %s", reply.Status)
+	}
+	return nil
+}
+
+func readTracking(client *chrony.Client) (ntpconfig.Snapshot, error) {
+	response, err := client.Communicate(chrony.NewTrackingPacket())
+	if err != nil {
+		return ntpconfig.Snapshot{}, err
+	}
 	tracking, ok := response.(*chrony.ReplyTracking)
 	if !ok || tracking.Sequence != client.Sequence {
-		return errors.New("chronyd returned an unexpected tracking response")
+		return ntpconfig.Snapshot{}, errors.New("chronyd returned an unexpected tracking response")
 	}
 	source, _ := netip.AddrFromSlice(tracking.IPAddr)
 	snapshot := ntpconfig.Snapshot{
 		Synchronized: tracking.LeapStatus != 3 && tracking.Stratum > 0 && tracking.Stratum < 16,
 		Source:       source.Unmap(), Stratum: tracking.Stratum, LeapStatus: tracking.LeapStatus,
 		ReferenceTime: tracking.RefTime, OffsetSeconds: tracking.CurrentCorrection, RMSOffset: tracking.RMSOffset,
-		FrequencyPPM: tracking.FreqPPM, RootDelay: tracking.RootDelay, RootDispersion: tracking.RootDispersion,
+		FrequencyPPM: tracking.FreqPPM, SkewPPM: tracking.SkewPPM, RootDelay: tracking.RootDelay, RootDispersion: tracking.RootDispersion,
 	}
-	return json.NewEncoder(os.Stdout).Encode(snapshot)
+	return snapshot, nil
 }

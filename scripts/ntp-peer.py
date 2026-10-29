@@ -171,15 +171,19 @@ def peer(stage, learned=False):
             control = next(module for module in query('/v1/status', 'supervisor.sock')['modules'] if module['name'] == 'control')
             # Freeze PID 1 too so its watchdog cannot replace the stopped
             # coordinator. The time worker and clock engine continue running.
-            for pid in (router.pid, control['pid']):
-                os.kill(pid, signal.SIGSTOP)
-                frozen.append(pid)
+            os.kill(router.pid, signal.SIGSTOP)
+            frozen.append(router.pid)
+            time.sleep(2)
+            response = run(inside('ntp-router', ['curl', '--max-time', '3', '-sS', '--unix-socket', str(stage / 'run/control.sock'), '-o', '/dev/null', '-w', '%{http_code}', 'http://routerd/v1/services/service.time/ntp-sources']))
+            assert response == '503', 'unknown supervisor observation must not be reported as withdrawn sources'
+            assert time.clock_gettime_ns(time.CLOCK_BOOTTIME) < deadline
+            assert '2001:db8:123::2' in Path(f'/proc/{chronyd_pid}/root/run/sources/learned.sources').read_text()
+            print('PASS stale supervisor observation returned unavailable while the original learned source remained live', flush=True)
+            os.kill(control['pid'], signal.SIGSTOP)
+            frozen.append(control['pid'])
+            log_position = len((stage / 'router.log').read_text())
             def engine_fallback():
-                # Use the product's existing private command boundary because
-                # the coordinator's observation API is intentionally stopped.
-                script = 'import os,sys; fd=os.open(sys.argv[1],os.O_RDONLY); os.dup2(fd,3); os.set_inheritable(3,True); os.execv(sys.argv[2],[sys.argv[2],"chrony-query"])'
-                tracking = json.loads(run(inside('ntp-router', ['python3', '-c', script, f'/proc/{chronyd_pid}/root', str(modules)])))
-                return tracking['synchronized'] and ipaddress.ip_address(tracking['source']) == ipaddress.ip_address('192.0.2.2')
+                return 'Selected source 192.0.2.2' in (stage / 'router.log').read_text()[log_position:]
             wait(engine_fallback)
             assert time.clock_gettime_ns(time.CLOCK_BOOTTIME) >= deadline
             assert engine_pid() == chronyd_pid

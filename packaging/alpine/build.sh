@@ -15,6 +15,7 @@ cp "$engine_image" pppoe-engine.tar
 cp /inputs/dnsmasq-engine.tar dnsmasq-engine.tar
 cp /inputs/conntrack-engine.tar conntrack-engine.tar
 cp /inputs/tailscale-engine.tar tailscale-engine.tar
+cp /inputs/chrony-engine.tar chrony-engine.tar
 pkgver=$(sed -n 's/^pkgver=//p' APKBUILD)
 
 tar --sort=name --format=posix --pax-option=delete=atime,delete=ctime \
@@ -25,8 +26,9 @@ tar --sort=name --format=posix --pax-option=delete=atime,delete=ctime \
   --transform="s,^pppoe-engine.tar$,routerd2-$pkgver/pppoe-engine.tar," \
   --transform="s,^dnsmasq-engine.tar$,routerd2-$pkgver/dnsmasq-engine.tar," \
   --transform="s,^conntrack-engine.tar$,routerd2-$pkgver/conntrack-engine.tar," \
+  --transform="s,^chrony-engine.tar$,routerd2-$pkgver/chrony-engine.tar," \
   --transform="s,^tailscale-engine.tar$,routerd2-$pkgver/tailscale-engine.tar," \
-  -czf "routerd2-$pkgver.tar.gz" -C "$source_dir" . -C "$work_dir/aports/main/routerd2" pppoe-engine.tar dnsmasq-engine.tar conntrack-engine.tar tailscale-engine.tar
+  -czf "routerd2-$pkgver.tar.gz" -C "$source_dir" . -C "$work_dir/aports/main/routerd2" pppoe-engine.tar dnsmasq-engine.tar conntrack-engine.tar tailscale-engine.tar chrony-engine.tar
 
 export REPODEST="$work_dir/packages"
 export SRCDEST="$work_dir/distfiles"

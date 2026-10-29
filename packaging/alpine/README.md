@@ -18,7 +18,7 @@ The APK installs:
 - `/usr/sbin/routerd`
 - `/usr/libexec/routerd-modules`
 - `/usr/libexec/routerd-logging` (independently built logging worker)
-- `/usr/lib/routerd/{pppoe,dnsmasq,conntrack,tailscale}-engine.tar` with pinned
+- `/usr/lib/routerd/{pppoe,dnsmasq,conntrack,tailscale,chrony}-engine.tar` with pinned
   private engine filesystems; their matching source archives accompany the APK
 - `/etc/routerd/config.json` with an empty network configuration
 - `/etc/routerd/boot.json` for explicit appliance startup

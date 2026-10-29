@@ -7,10 +7,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
-	"os/exec"
-	"runtime"
-	"syscall"
 	"time"
 
 	"github.com/imksoo/routerd2/internal/boottime"
@@ -21,9 +19,7 @@ import (
 // runSources owns the learned-source file and its original deadlines. Status
 // publication and control requests cannot block expiry. Reloading the source
 // directory keeps the clock engine, its measurements and LAN service alive.
-func runSources(ctx context.Context, cfg ntpconfig.Config, root *os.File, updates <-chan ntpconfig.Sources) error {
-	runtime.LockOSThread() // Keep the creating thread alive through each helper's PDEATHSIG lifetime.
-	defer runtime.UnlockOSThread()
+func runSources(ctx context.Context, cfg ntpconfig.Config, root *os.File, connection *net.UnixConn, updates <-chan ntpconfig.Sources) error {
 	var sources []ntpconfig.LearnedServer
 	var applied []byte
 	timer := time.NewTimer(0)
@@ -83,15 +79,7 @@ func runSources(ctx context.Context, cfg ntpconfig.Config, root *os.File, update
 			if err := errors.Join(writeErr, file.Close()); err != nil {
 				return fmt.Errorf("write learned NTP sources: %w", err)
 			}
-			call, cancel := context.WithTimeout(ctx, 2*time.Second)
-			command := exec.CommandContext(call, "/proc/self/exe", "chrony-reload-sources")
-			command.ExtraFiles = []*os.File{root}
-			command.Stdout, command.Stderr = os.Stderr, os.Stderr
-			command.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
-			command.WaitDelay = time.Second
-			err = command.Run()
-			cancel()
-			if err != nil {
+			if err := reloadSources(connection); err != nil {
 				return fmt.Errorf("reload learned NTP sources: %w", err)
 			}
 			applied = body

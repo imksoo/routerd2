@@ -35,26 +35,29 @@ func (r *Runtime) ntpSourceRoutes(mux *http.ServeMux) {
 			localapi.Fail(w, http.StatusServiceUnavailable, err)
 			return
 		}
-		if time.Now().Before(r.guardUntil) {
-			for _, ref := range node.SourcesFrom {
-				moduleName := "service." + ref
-				owner, active := r.bindings[moduleName]
-				module := r.guardStatus[moduleName]
-				record := r.records[moduleName]
-				snapshot := r.guardGrants[moduleName].dhcp6
-				if !active || snapshot == nil || !module.Ready || module.Generation != record.Generation || module.ConfigDigest != owner.digest || record.ConfigDigest != owner.digest || snapshot.ObservedNanos > uint64(clock.BoottimeNanoseconds) {
-					continue
+		if !time.Now().Before(r.guardUntil) {
+			r.mu.Unlock()
+			localapi.Fail(w, http.StatusServiceUnavailable, errors.New("NTP source process observation is stale"))
+			return
+		}
+		for _, ref := range node.SourcesFrom {
+			moduleName := "service." + ref
+			owner, active := r.bindings[moduleName]
+			module := r.guardStatus[moduleName]
+			record := r.records[moduleName]
+			snapshot := r.guardGrants[moduleName].dhcp6
+			if !active || snapshot == nil || !module.Ready || module.Generation != record.Generation || module.ConfigDigest != owner.digest || record.ConfigDigest != owner.digest || snapshot.ObservedNanos > uint64(clock.BoottimeNanoseconds) {
+				continue
+			}
+			until, live := snapshot.InformationUntil(clock)
+			if !live {
+				continue
+			}
+			for _, value := range snapshot.SNTPServers {
+				if address, err := netip.ParseAddr(value); err == nil && address.IsLinkLocalUnicast() && address.Zone() == "" {
+					value = address.WithZone(snapshot.Interface).String()
 				}
-				until, live := snapshot.InformationUntil(clock)
-				if !live {
-					continue
-				}
-				for _, value := range snapshot.SNTPServers {
-					if address, err := netip.ParseAddr(value); err == nil && address.IsLinkLocalUnicast() && address.Zone() == "" {
-						value = address.WithZone(snapshot.Interface).String()
-					}
-					input.Servers = append(input.Servers, ntpconfig.LearnedServer{Server: ntpconfig.Server{Address: value, Port: 123}, ValidUntil: until})
-				}
+				input.Servers = append(input.Servers, ntpconfig.LearnedServer{Server: ntpconfig.Server{Address: value, Port: 123}, ValidUntil: until})
 			}
 		}
 		r.mu.Unlock()

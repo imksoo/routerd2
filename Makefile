@@ -49,6 +49,8 @@ help:
 	  'make check-health-pbr  Required two-WAN real-daemon TCP/UDP failover gate' \
 	  'make check-vrrp-unicast Verify VRRP peer failover and finite WAN identity' \
 	  'make check-tailscale   Verify signed Tailscale subnet/exit traffic, identity and revoke with independent peers' \
+	  'make check-ntp         Verify time synchronization and LAN NTP with independent chronyd' \
+	  'make check-ntp-dhcp6   Verify learned time sources, original expiry and VRRP conditions with independent peers' \
 	  'make check-bfd         Verify BFD/BGP routing domains with real workers' \
 	  'make check-dhcp6-server Verify LAN information service and durable DUID with BusyBox' \
 	  'make check-dhcp6-ra-pd Verify shared IA_NA/PD, RA trigger and restart with ISC DHCP' \
@@ -70,6 +72,7 @@ help:
 	  'make apk               Test and build the Alpine package with abuild' \
 	  'make image             Export Alpine kernel + routerd initramfs' \
 	  'make qemu-smoke        Boot the image in QEMU; optionally verify SSH' \
+	  'make qemu-ntp          Verify appliance clock correction, LAN time and drift recovery' \
 	  'make qemu-network      Run native network tests in a separate QEMU guest' \
 	  'make qemu-wireguard    Verify kernel WireGuard encrypted traffic and ownership' \
 	  'make qemu-ra-dns       Verify learned RA DNS expiry and live updates in QEMU' \
@@ -226,7 +229,7 @@ build-linux: licenses
 release-built-test:
 	ROUTERD2_INTEGRATION_REQUIRED=1 ROUTERD2_RELEASE_BUILT_DIR='$(abspath $(RELEASE_BUILT_DIR))' ROUTERD2_RELEASE_BUILT_ID='$(RELEASE_ID)' $(GO) test -race -tags integration -run '^Test(BuiltRuntimeCatalog|PublishBuiltRelease)$$' -count=1 -v ./internal/release ./internal/releasepublish
 
-container: pppoe-engine dnsmasq-engine conntrack-engine tailscale-engine
+container: pppoe-engine dnsmasq-engine conntrack-engine tailscale-engine chrony-engine
 	$(DOCKER) build $(BUILD_ARGS) -t $(CONTAINER_TAG) .
 
 container-multi:
@@ -238,17 +241,19 @@ container-multi:
 	$(MAKE) conntrack-engine CONNTRACK_ARCH=arm64 CONNTRACK_DIR=dist/arm64
 	$(MAKE) tailscale-engine TAILSCALE_ARCH=amd64 TAILSCALE_DIR=dist
 	$(MAKE) tailscale-engine TAILSCALE_ARCH=arm64 TAILSCALE_DIR=dist/arm64
+	$(MAKE) chrony-engine CHRONY_ARCH=amd64 CHRONY_DIR=dist
+	$(MAKE) chrony-engine CHRONY_ARCH=arm64 CHRONY_DIR=dist/arm64
 	mkdir -p dist
 	$(DOCKER) buildx build $(BUILD_ARGS) --platform linux/amd64,linux/arm64 --output type=oci,dest=dist/routerd2.oci.tar .
 
 container-smoke: container
 	$(PYTHON) images/container-smoke.py --engine '$(DOCKER)' --image $(CONTAINER_TAG)
 
-apk: pppoe-engine dnsmasq-engine conntrack-engine tailscale-engine
+apk: pppoe-engine dnsmasq-engine conntrack-engine tailscale-engine chrony-engine
 	mkdir -p dist/apk
 	$(DOCKER) build $(BUILD_ARGS) -f packaging/alpine/Dockerfile --target apk-output --output type=local,dest=dist/apk .
 
-image: pppoe-engine dnsmasq-engine conntrack-engine tailscale-engine
+image: pppoe-engine dnsmasq-engine conntrack-engine tailscale-engine chrony-engine
 	mkdir -p $(IMAGE_DIR)
 	$(DOCKER) build $(BUILD_ARGS) --build-arg IMAGE_CONFIG=$(IMAGE_CONFIG) --build-arg SSH_AUTHORIZED_KEY -f packaging/alpine/Dockerfile --target appliance-output --output type=local,dest=$(IMAGE_DIR) .
 
@@ -391,3 +396,7 @@ check-ntp: build chrony-engine
 .PHONY: check-ntp-dhcp6
 check-ntp-dhcp6: build chrony-engine
 	$(PYTHON) scripts/ntp-peer.py --dhcp6-server '$(DHCP6_SERVER)' --output dist/ntp-dhcp6-peer
+
+.PHONY: qemu-ntp
+qemu-ntp:
+	$(MAKE) qemu-pppoe QEMU_PROFILE=time QEMU_POWER_ACTION=reboot QEMU_OUTPUT=dist/ntp-appliance

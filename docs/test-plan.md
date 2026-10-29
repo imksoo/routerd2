@@ -212,6 +212,10 @@ DNS利用とIPv4/IPv6通信、自然DHCPv4更新、PD通常/強制交換と製�
   confirmed commitの期限切れ・明示確認・rollbackと、復旧中のkernel実状態を確認する。
 - logging/event/retention/export、時刻同期、clock step、disk full、worker停止、slow exporterを実環境で試し、
   forwardingを維持しながら欠落・失効・エラーを正しく表示する。DPIは実engineの分類結果で確認する。
+- NTPは配布イメージの仮想RTCを意図的に遅らせ、DHCPv6学習→実時計補正→独立LAN client→
+  再起動後のdrift読込と再取得を通す。同期済みflagと、端末が採用できる時刻品質を区別する。
+  初期周波数推定は既定のpollと標本数で実測し、clientのmaxdistanceや採用条件を緩めない。
+  二度目の起動のNTP packet、trackingのskew/root distanceと端末採用時刻も残す。
 - 権限境界、credential失効、管理外のkernel資源の保護、watchdog、停止順序、バックアップと復元を確認する。
 
 ## 6. 配布・対象機器・更新
