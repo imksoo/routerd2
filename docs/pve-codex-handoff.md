@@ -7,7 +7,7 @@
 
 ## 現在の候補版: journal-read-native76（2026-10-30 JST）
 
-main/originは`984b4c6`。その後の未コミット候補は契約76/journal18/worker ABI5。
+実装コードはmain/originの`e9d141d`。契約76/journal18/worker ABI5。
 VRRP/DNS/DoH/DHCPv6/RAはGo実装。dnsmasq/conntrackd/chronyd/pppd/tailscaledは残り、
 少数Goバイナリーによる外部依存削減は未達。PID1運用・kernel writer統一だけで製品完成とはしない。
 
@@ -17,7 +17,7 @@ VRRP/DNS/DoH/DHCPv6/RAはGo実装。dnsmasq/conntrackd/chronyd/pppd/tailscaled�
 Health履歴は既存HTTP clientの20秒制限に重ねていた送受信各1秒の制限を除いた。durable ACKと再送IDは維持する。
 5 WANは120→80→60・60秒復帰抑制・confirmed rollback後の復帰、元選出期限・writer交換と同じTCP/UDPまで85.01秒で終了0。
 署名PID1二台/独立ISC/4 Linux AFTRは旧主系の待機復帰、同じTCP/UDP変換、取得DNSと新規IPv4/IPv6、
-PD/DHCP再同期まで終了0。UDP損失0、TCP最長応答5.83秒。一つのTCP sequence spaceと実IPv4-in-IPv6を採取した。
+PD/DHCP再同期まで終了0。共通再送削除後の同じ候補も再確認し、UDP損失0、TCP最長応答5.41秒。一つのTCP sequence spaceと実IPv4-in-IPv6を採取した。
 これは共通LAN VMAC/LL・通常DAD・独立UDP DNS・同一kernelの隔離構成で、実二回線/全homert/DoH HA/対象物理機器ではない。
 
 実Alpine3.24.3/kernel6.18.59、512MiB/2 vCPU/TCGの署名選択PID1で、再適用12.84秒後の準備完了、
@@ -25,7 +25,7 @@ PD/DHCP再同期まで終了0。UDP損失0、TCP最長応答5.83秒。一つのT
 転送中に独立端末の取得resolverで両IP TCP/UDPを20巡確認し、別の読取ではHealth世代2・履歴欠落0/エラーなしだった。
 ただし`update prepare`中にIPv6 TCPが失敗。RAの有効9秒に対し次送信は約9.25秒後となり、
 端末がアドレスを削除・再DADし、リンクローカル送信元に対してrouterがbeyond-scopeを返した。上流はPDを更新していた。
-無停止の再適用、更新準備中の継続、更新採用・不良採用後の自動復旧は未受入。
+この前段の失敗後の修正結果は以下へ分ける。無停止再適用はまだ未受入。
 
 RAの次回予定は実送信時刻で決定し、状態応答待ちを加算しない。元PD残時間の1/3と3秒の最小間隔で上限を決める。
 この修正後も更新準備中にIPv6 UDP断が再発した。LANでは元予算が6→3→0秒となり、約4.5秒後に9秒へ復帰した。
@@ -41,7 +41,12 @@ network適用/liveRA公開06:56:03.413→RA受信04.751→送信06.787となり�
 生存期限や試験待ち時間を追加していない。`journal-read-native76`は同じ18秒PD/通常DADで、
 転送中断後の照会/通信、128209408 byteの完全転送と145.81秒の`update prepare`まで管理照会・取得DNS・
 両IP TCP/UDPを維持し通過した。転送164.19秒、保存/検証120.88秒。別の同じ独立端末観測も30巡/45.63秒で通過。
-新版起動/正常採用と採用後障害の自動復旧は実行中で未受入。
+新版起動/正常採用は終了0。再起動準備完了99.05秒、独立端末の取得DNS/両IP通信、DUID/SSH識別情報を保持した。
+完全な次候補の起動後にHealth先だけを止める試験は、起動途中のPD個別照会が404となり試験側で停止した。
+その時点の設定はrevision4/healthy=false、PD/Healthはstartingで、復旧の合否は未判定。
+未登録と失敗を混同しないよう`show services`一覧内の登録・実観測を待つ試験へ修正し、同じ90秒条件で再実行中。
+私有logは`/tmp/routerd-health-trial-registration-native76-update/peer.log`。実測から全巡約20〜25分の見込み。
+原因判定済みの旧失敗capture/旧候補154.1MiBを削除した。実行中のHGW観測と保存identityは継続する。
 factory bootstrapは直前の`dist/image-native76`で、署名選択する三ELFは現候補。bootstrap ABIは変えていない。
 最新版のfactoryイメージ全体/物理機器を合格したとは扱わない。
 同じno-replay/照会修正後の全`make check`、関連6 packageのRace、vet、両architecture CGO0 build、署名六ELF検査は終了0。
