@@ -17,12 +17,18 @@ type HealthStatus struct {
 func (r *Runtime) Health() HealthStatus {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return HealthStatus{ProjectionGeneration: r.projectionGeneration, Revision: r.config.revision, Phase: r.phaseLocked(), LastError: boundedText(r.lastError, 4096), LastErrorTruncated: len(r.lastError) > 4096, InstanceCount: len(r.bindings), RouteIssueCount: len(r.routeIssues)}
+	phase, lastError := r.phaseLocked()
+	return HealthStatus{ProjectionGeneration: r.projectionGeneration, Revision: r.config.revision, Phase: phase, LastError: boundedText(lastError, 4096), LastErrorTruncated: len(lastError) > 4096, InstanceCount: len(r.bindings), RouteIssueCount: len(r.routeIssues)}
 }
 
-func (r *Runtime) phaseLocked() string {
-	if r.phase == "ready" && (r.applied.hash == "" || r.applied.sourceEpoch != r.sourceEpoch || r.applied.observationVersion != r.observationVersion || !time.Now().Before(r.guardUntil)) {
-		return "applying"
+func (r *Runtime) phaseLocked() (string, string) {
+	if r.phase == "ready" {
+		if !time.Now().Before(r.guardUntil) {
+			return "applying", "supervisor status validity expired"
+		}
+		if err := r.checkAppliedLocked(); err != nil {
+			return "applying", err.Error()
+		}
 	}
-	return r.phase
+	return r.phase, r.lastError
 }

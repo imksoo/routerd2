@@ -1,4 +1,4 @@
-2026-10-29: NTPの静的client/serverを追加した（native-57）。独立chronyd・実supervisor/control/network/time worker・LAN chronyd -Q client・両側packet captureで同期とLAN配布を確認。host時計の調整は無効。DHCP由来の時刻源、主従条件、appliance時計調整、対象実機、全34項目の受入は未完了。実行手順と限界は internal/protocol/ntp/README.md を参照。
+2026-10-29 03:50 UTC: native-58/network journal15。PPP default経路の寿命を実sessionへ戻し、Health条件付きPolicyRuleには元の期限を渡してwriterで撤去する。独立RP-PPPoEのPAP/CHAP、Health/PBR切替・失効・制御停止・PPP強制終了/対向停止復帰、同じDNS TCP接続の保持が成立。二WANのHealth/PBR切替・複数経路も成立。隔離した変更単位のmake check・Race・vet・Linux両architecture buildは終了0。未commitの署名更新は正常確定まで成立したが、破損候補復帰は再検証中。HGW/Tailscale自然更新を含む長時間観測、NTPの学習先接続、全homert受入・対象実機・他対象・cloud等の全体ゴールは未完了。[引き継ぎ](pve-codex-handoff.md)を参照。
 
 # 現行 routerd と同等の製品にするための実装計画
 
@@ -29,7 +29,7 @@ TCP再接続なし、UDP損失0、最長応答待ち6.82秒。1秒広告の一�
 IPv4/IPv6、PD交換と全体再起動後の通信が成立した。詳細と未受入は [引き継ぎ](pve-codex-handoff.md)。
 同じnative-56で独立Headscale/公式Tailscaleとの署名PID 1試験と、実HGWの自動WAN/PD・LAN/DNS/DS-Liteに
 Tailscaleを合わせた75秒通信・PD交換・全体再起動も通った。対向underlay固定・LAN発IPv6 NAT追加を
-現行homertとの差分として記録する。19:44 UTC開始の7800秒・自然PD更新試験は進行中で未合格。
+現行homertとの差分として記録する。19:44 UTC開始の7800秒試験は21:31:52 UTCのLAN DNS SERVFAILで失敗した。約577回の通信が通ったが、自然PD更新前に終了し、原因は未確定。
 DNS/DHCPv6/RA/VRRP選出の一律外部化は決めていない。homert全体二台、Tailscaleの残機能、k8s/pve、Cloud SAM、
 配備更新復旧と対象実機を含む全34項目のゴールは未完了。旧版の130分試験は自然PD更新を観測したが、
 最終通常PD交換後の名前解決失敗で終了1。最新版の長時間安定性やONU直結の受入には数えない。
@@ -1724,6 +1724,11 @@ OS image/TUN setup統合・広い障害条件・対象実機受入は残る。EX
 前提: CORE-02, CORE-06, OPS-01, CORE-04。 設計判断: D-02, D-08, D-09。
 
 部分成果物の前提: SYS-03/runtime-authority。
+
+2026-10-28 `appliance-update`（未commit）: SSH転送・選択status・実target設定検査付きprepare/cancelを接続した。
+実PID1イメージで約124MB転送・署名検証とpaired prepareまで通ったが、再起動で製品bootの組起動拒否を
+発見した。選択Startupのcontrolへの伝達と、payload検証後の実採用・process世代再確認を実装した。
+bootstrapも再構築中で、更新先起動・正常確定・破損候補からの復帰はまだ未合格。
 
 2026-10-28 `startup-io-fixed`: 実署名catalog/PID1の起動で、旧b498dbdのOpen/WithStateが選択読取の度に
 全artifactを再取得・検証し、controlだけで約899MBを読んでいた。1 CPUで関連Race検査を並行すると

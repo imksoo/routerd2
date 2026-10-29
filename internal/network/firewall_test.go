@@ -66,7 +66,10 @@ func TestFirewallNewAPIJournalRestartAndNATOnly(t *testing.T) {
 	e, opts := engineFor(t, k)
 	f := &Firewall{DisableForward: true, Input: &FirewallChain{Rules: []FirewallRule{{Match: PacketMatch{Protocol: "ipv6-icmp", ICMPTypes: []int{135, 136}}, Action: "accept"}}}, NAT: []NATRule{{Type: "dnat", Match: PacketMatch{Family: 4, InInterface: "wan0", Protocol: "tcp", DestinationPorts: []PortRange{{Start: 8443}}}, Address: "192.0.2.2", Ports: &PortRange{Start: 443}}}}
 	d := Desired{Firewall: f}
-	s, err := e.Apply(context.Background(), 1, d)
+	if _, err := e.Apply(context.Background(), 1, d); err != nil {
+		t.Fatal(err)
+	}
+	s, err := e.Snapshot(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}

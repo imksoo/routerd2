@@ -256,7 +256,10 @@ func runKernelFixture(t *testing.T) {
 	tunneled.Interfaces[len(tunneled.Interfaces)-1].MTU = 1460
 	tunneled.Firewall.IPv4ClearDF = []IPv4ClearDF{{From: "lan0", To: "dslite0"}}
 	for range 2 {
-		state, err := e.Apply(context.Background(), 3, tunneled)
+		if _, err := e.Apply(context.Background(), 3, tunneled); err != nil {
+			t.Fatal(err)
+		}
+		state, err := e.Snapshot(context.Background())
 		if err != nil {
 			t.Fatal(err)
 		}

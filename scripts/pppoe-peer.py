@@ -555,21 +555,23 @@ def peer(stage, auth, dhcp6_server):
             run(inside(ns, ["ping", "-6", "-I", "ppp-wan", "-c", "1", "-W", "2", ll]))
             print("PASS actual IPv6CP peer link-local ping", flush=True)
         saved = modules()
+        dns_deadline = record()["snapshot"]["valid_until"]["nanos"]
         os.kill(pid1, signal.SIGSTOP)
         supervisor_frozen = True
         frozen = [saved["control"]["pid"], saved["service.internet"]["pid"]]
         for pid in frozen:
             signal_worker(pid, signal.SIGSTOP)
-        wait(lambda: not routed(), 8)
-        assert link() is not None
-        # The peer's connected PPP route remains usable after writer expiry.
+        wait(lambda: not selected(), 8)
+        wait(lambda: time.clock_gettime_ns(time.CLOCK_BOOTTIME) >= dns_deadline, 8)
+        assert routed() and link() is not None
+        # The PPP session and its default route remain usable after PBR expiry.
         # A SERVFAIL therefore demonstrates DNS input expiry, not path loss.
         assert run(inside(ns, ["dig", "@192.0.2.1", "direct.ppp.example", "A", "+tries=1", "+time=2", "+short"])).strip() == "198.51.100.77"
         expired = run(inside(lan, ["dig", "@10.42.0.1", "expired.ppp.example", "A", "+tries=1", "+time=2", "+noall", "+comments"]))
         assert "status: SERVFAIL" in expired
         assert "expired.ppp.example" not in (stage / "dns.log").read_text()
         print("PASS original DNS deadline stopped upstream queries while peer DNS and PPP remained reachable", flush=True)
-        print("PASS original observation expiry withdrew writer route with live PPP and frozen producers", flush=True)
+        print("PASS expired Health withdrew PBR while the live PPP session retained its default route", flush=True)
         for pid in frozen:
             signal_worker(pid, signal.SIGCONT)
         frozen = []
@@ -623,7 +625,7 @@ def peer(stage, auth, dhcp6_server):
         print("PASS new negotiated DNS address restored UDP/TCP queries without restarting the DNS worker", flush=True)
         print("PASS killed worker removed old PPP child; replacement restored LAN TCP/UDP", flush=True)
         stale = {k: initial[k] for k in ["supervisor_instance", "name", "role", "config_digest", "generation", "producer_epoch", "sequence", "snapshot"]}
-        assert "stale" in json.dumps(api("control.sock", "/v1/services/state", stale)).lower()
+        assert "stale" in json.dumps(api("control.sock", "/v1/services/state", stale, status=409)).lower()
         traffic()
         print("PASS old generation notification rejected", flush=True)
         (stage / "password").write_text("wrong-fixture\n")

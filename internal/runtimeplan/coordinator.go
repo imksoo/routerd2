@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"maps"
 	"math"
-	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -348,7 +347,21 @@ func (r *Runtime) reconcileStep(ctx context.Context, ceiling map[string]supervis
 		r.mu.Unlock()
 		return false, err
 	}
-	if p.observationVersion != r.observationVersion {
+	// Kernel I/O can outlive the supervisor observation used to select this
+	// projection. Refresh that observation before rechecking prerequisites;
+	// an expired local receipt is not evidence that the PPP session went down.
+	refresh := !time.Now().Before(r.guardUntil)
+	if refresh {
+		r.mu.Unlock()
+		status, statusErr := r.manager.Status(ctx)
+		r.mu.Lock()
+		r.installGuardStatusLocked(status, statusErr)
+		if statusErr != nil {
+			r.mu.Unlock()
+			return false, statusErr
+		}
+	}
+	if refresh || p.observationVersion != r.observationVersion {
 		// New observations can arrive during kernel I/O. Do not start workers
 		// against a projection that no longer describes their prerequisites.
 		current, projectErr := r.projectProgramLocked(r.config, r.observationsLocked(), time.Now())
@@ -356,7 +369,7 @@ func (r *Runtime) reconcileStep(ctx context.Context, ceiling map[string]supervis
 			r.mu.Unlock()
 			return false, projectErr
 		}
-		if !reflect.DeepEqual(current.network, p.network) || !sameInstances(current.instances, p.instances) {
+		if !networkCovered(p.network, current.network) || !sameInstances(current.instances, p.instances) {
 			r.wakeCoordinatorLocked()
 			r.mu.Unlock()
 			return false, nil
@@ -502,7 +515,7 @@ func (r *Runtime) applyProjectionLocked(ctx context.Context, p projection) (proj
 			}
 		}
 	} else {
-		r.applied.hash = ""
+		r.applied.network = nil
 	}
 	r.finishApplicationsLocked(p, applications, err)
 	return p, err

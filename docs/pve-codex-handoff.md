@@ -5,7 +5,7 @@
 [試験計画](test-plan.md)、[機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
-## 最新の成立範囲と残障害（2026-10-29 03:30 UTC）
+## 最新の成立範囲と残障害（2026-10-29 03:50 UTC）
 
 - main `f253575`: 小型Go DHCP通知コマンドと静的NTP client/serverを反映。
   NTPは独立chronyd・LAN chronyd -Q・実worker・captureで成立。host時計調整は無効。
@@ -26,12 +26,15 @@
   再起動でPPP unitが消える経路寿命と、Health条件の期限は区別する。
 - 破損候補の復帰は未合格。offline debugfs編集後の再起動でext4 bitmap checksum異常となった。
   PID 1はsync後に停止するが、ext4 journalは再生を要し得る。journal未再生のfilesystemへdebugfsを使う
-  試験前提を修正し、journalのみ再生した後と編集後のread-only fsckを追加した。再検証はまだ未実施。
+  試験前提を修正し、journalのみ再生した後と編集後のread-only fsckを追加した。この前後検査を入れた実VMの再検証を継続中。
 - 停止/交換の追加試験は、QEMU側では停止操作前のPD更新後UDPで失敗。まだ原因未確定。
   ホスト側では旧試験がPPPの架空の5秒route期限を要求していた。期待を実session寿命へ直す過程で、
   条件付きPolicyRule自体の期限がnetwork writerへ渡っていない不足も確認した。
-  元の条件期限を渡してwriterで撤去する未commit実装はnative-58/network journal15。関連Race検査は終了0、
-  独立RP-PPPoE/Health/PBRで再検証中。旧prototypeのreaderや移行は追加しない。
+  本変更のnative-58/network journal15では元の条件期限をwriterへ渡して撤去する。独立RP-PPPoEのPAP/CHAPで
+  制御停止中のPBR撤去とPPP route維持、DNS元期限の失効、同じDNS TCP接続の保持、旧通知409、
+  PPP強制終了とAC停止・認証失敗・復帰後のTCP/UDPまで終了0。PDを含まない試験であり両系PD復旧の合格ではない。
+  二WANの既存make check-health-pbrも失効/交換/rollback・複数経路が終了0。29 source fileを隔離した
+  make check・Race・vet・Linux両architecture buildとstaged秘密情報検査は終了0。旧readerや移行は追加しない。
 - 最新固定版のHGW/Tailscale複合試験は初期DNSでSERVFAILとなった。DoH要求のcontext deadlineを取得。
   問い合わせ履歴・DNS/HTTPS packetを追加した次の観測では初期DNS/Tailscale通信が成立し、長時間試験を継続中。以前の48分Tailscale障害・106分DNS障害も未解決。
 - VRRPの選出/広告/VIPはGo実装でkeepalived依存なし。DNSも旧routerd由来のGo実装。

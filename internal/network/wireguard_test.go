@@ -171,7 +171,10 @@ func TestWireGuardOwnershipSecretsRoamingAndRollback(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = e.Close() })
 	d := fixtureWireGuardDesired(t)
-	snapshot, err := e.Apply(ctx, 1, d)
+	if _, err := e.Apply(ctx, 1, d); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := e.Snapshot(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}

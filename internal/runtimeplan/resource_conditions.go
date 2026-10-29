@@ -188,7 +188,9 @@ func (r *Runtime) conditionFactsLocked(cfg configuration, now time.Time) (result
 			if session.Active {
 				value = resourceprogram.True
 			}
-			facts.Facts[name+".active"] = resourceprogram.Fact{Value: value, ObservedNanos: session.ObservedNanos, ExpiresNanos: min(session.ValidUntil.Nanos, r.guardUntilNanos), WorkerGeneration: module.Generation, ProducerEpoch: record.ProducerEpoch}
+			// The worker already bounds this session observation. A status poll
+			// must not replace its deadline with a new one-second kernel lease.
+			facts.Facts[name+".active"] = resourceprogram.Fact{Value: value, ObservedNanos: session.ObservedNanos, ExpiresNanos: session.ValidUntil.Nanos, WorkerGeneration: module.Generation, ProducerEpoch: record.ProducerEpoch}
 			continue
 		}
 		if record.Role == "dhcp_server" {

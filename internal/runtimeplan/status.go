@@ -26,7 +26,8 @@ const statusRouteLimit = 128
 func (r *Runtime) State() Status {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	s := Status{ProjectionGeneration: r.projectionGeneration, RouteIssueCount: len(r.routeIssues), RouteIssues: boundedIssues(r.routeIssues, 0, statusRouteLimit), Revision: r.config.revision, Phase: r.phaseLocked(), LastError: boundedText(r.lastError, 4096), Instances: []InstanceStatus{}}
+	phase, lastError := r.phaseLocked()
+	s := Status{ProjectionGeneration: r.projectionGeneration, RouteIssueCount: len(r.routeIssues), RouteIssues: boundedIssues(r.routeIssues, 0, statusRouteLimit), Revision: r.config.revision, Phase: phase, LastError: boundedText(lastError, 4096), Instances: []InstanceStatus{}}
 	for name, b := range r.bindings {
 		s.Instances = append(s.Instances, r.instanceStatusLocked(name, b, r.records[name], false))
 	}

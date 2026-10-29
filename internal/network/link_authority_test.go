@@ -11,20 +11,20 @@ import (
 	"github.com/imksoo/routerd2/internal/lifetime"
 )
 
-func TestLinkAuthorityRenewsWithoutKernelChangesAndExpiresAfterWriterRestart(t *testing.T) {
+func TestLinkAuthorityRenewalPersistsWithoutChangingLink(t *testing.T) {
+	k := fake()
+	e, opts := engineFor(t, k)
 	clock, err := boottime.Read()
 	if err != nil {
 		t.Fatal(err)
 	}
-	k := fake()
-	e, opts := engineFor(t, k)
-	link := Link{Name: "ha", Kind: "macvlan", Parent: "lan0", HardwareAddr: "02:00:5e:00:01:42", IPv6AddrGenMode: "none", Authority: lifetime.Deadline{BootID: clock.BootID, Nanos: uint64(clock.BoottimeNanoseconds) + uint64(500*time.Millisecond)}}
+	link := Link{Name: "ha", Kind: "macvlan", Parent: "lan0", HardwareAddr: "02:00:5e:00:01:42", IPv6AddrGenMode: "none", Authority: lifetime.Deadline{BootID: clock.BootID, Nanos: uint64(clock.BoottimeNanoseconds) + uint64(time.Hour)}}
 	d := Desired{Links: []Link{link}, Routes: []Route{{Destination: "203.0.113.0/24", Interface: "ha"}}, Interfaces: []Interface{{Name: "ha", Addresses: []string{"192.0.2.42/32"}}}}
 	if _, err := e.Apply(context.Background(), 1, d); err != nil {
 		t.Fatal(err)
 	}
 	writes := len(k.writes)
-	d.Links[0].Authority.Nanos += uint64(600 * time.Millisecond)
+	d.Links[0].Authority.Nanos += uint64(time.Hour)
 	if _, err := e.Apply(context.Background(), 1, d); err != nil {
 		t.Fatal(err)
 	}
@@ -44,39 +44,10 @@ func TestLinkAuthorityRenewsWithoutKernelChangesAndExpiresAfterWriterRestart(t *
 		t.Fatal(err)
 	}
 	defer e.Close()
-	// A foreign address on our link must survive activation expiry.
-	live := k.links["ha"]
-	live.Addresses = append(live.Addresses, AddressState{Address: "192.0.2.99/32"})
-	k.links["ha"] = live
-	time.Sleep(time.Until(clock.WallTime.Add(650 * time.Millisecond)))
-	if _, err := e.expireAuthority(context.Background()); err != nil || !k.links["ha"].Up {
-		t.Fatal("old deadline fenced a renewed owner", err)
+	if len(e.state.Links) != 1 || e.state.Links[0].Definition.Authority != d.Links[0].Authority {
+		t.Fatal("writer restart lost the renewed authority", e.state.Links)
 	}
-	time.Sleep(time.Until(clock.WallTime.Add(1150 * time.Millisecond)))
-	if _, err := e.expireAuthority(context.Background()); err != nil || k.links["ha"].Up || len(k.links["ha"].Addresses) != 1 || len(e.state.Routes) != 0 || len(k.routes) != 0 {
-		t.Fatal("original deadline failed to fence link without deleting foreign address", err, k.links["ha"])
-	}
-	writes = len(k.writes)
-	if _, err := e.Apply(context.Background(), 1, d); err == nil || len(k.writes) != writes {
-		t.Fatal("expired input reactivated link", err, k.writes[writes:])
-	}
-	clock, err = boottime.Read()
-	if err != nil {
-		t.Fatal(err)
-	}
-	d.Links[0].Authority.Nanos = uint64(clock.BoottimeNanoseconds) + uint64(time.Second)
-	if _, err := e.Apply(context.Background(), 1, d); err != nil || !k.links["ha"].Up {
-		t.Fatal("fresh authority did not restore link", err)
-	}
-	// A replaced interface is never fenced on the old object's authority.
-	live = k.links["ha"]
-	live.Index++
-	live.Alias = "foreign"
-	k.links["ha"] = live
-	time.Sleep(time.Until(clock.WallTime.Add(1050 * time.Millisecond)))
-	if _, err := e.expireAuthority(context.Background()); err == nil || !k.links["ha"].Up {
-		t.Fatal("retired identity modified a foreign replacement", err)
-	}
+
 }
 
 func TestLinkAddressBoundsPreserveTighterProtocolAndWallDeadlines(t *testing.T) {

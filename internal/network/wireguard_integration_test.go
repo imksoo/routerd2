@@ -128,7 +128,10 @@ func runWireGuardKernelFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = e.Close() }()
-	snapshot, err := e.Apply(ctx, 1, device)
+	if _, err := e.Apply(ctx, 1, device); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := e.Snapshot(ctx)
 	if err != nil {
 		t.Fatal("initial native WireGuard:", err)
 	}

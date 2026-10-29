@@ -42,7 +42,7 @@ func ServeNetwork(ctx context.Context, dir, stateDir string, ready func()) error
 }
 
 type nativeNetwork interface {
-	Apply(context.Context, uint64, network.Desired) (network.Snapshot, error)
+	Apply(context.Context, uint64, network.Desired) (network.ApplyResult, error)
 	Snapshot(context.Context) (network.Snapshot, error)
 }
 
@@ -105,7 +105,7 @@ func networkHandler(e nativeNetwork) http.Handler {
 			localapi.Fail(w, 422, err)
 			return
 		}
-		localapi.JSON(w, 200, ApplyResult{Revision: s.Revision, AttemptedRevision: s.AttemptedRevision, Status: s.Status})
+		localapi.JSON(w, 200, s)
 	})
 	return mux
 }

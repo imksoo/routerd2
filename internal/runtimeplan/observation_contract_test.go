@@ -3,6 +3,7 @@ package runtimeplan
 import (
 	"context"
 	"errors"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -43,86 +44,110 @@ func TestObservationReceiptDoesNotDependOnUnrelatedConditions(t *testing.T) {
 	}
 }
 
-func TestObservationProgressDuringNetworkIOCannotAcknowledgeNewerInput(t *testing.T) {
-	r, native, _ := fixture(t, wanDoc())
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	if err := r.Observe(ctx, update(t, r, "service.wan", 1, lease4(time.Now().Add(time.Hour)))); err != nil {
-		t.Fatal(err)
-	}
-	blocked, release := blockBFDNetwork(t, r, native, nil)
-	done := make(chan error, 1)
-	go func() { done <- r.reconcileDynamic(ctx) }()
-	select {
-	case <-blocked.entered:
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
-	}
-	newer := lease4(time.Now().Add(2 * time.Hour))
-	observed := make(chan error, 1)
-	publication := update(t, r, "service.wan", 2, newer)
-	go func() { observed <- r.Observe(ctx, publication) }()
-	select {
-	case err := <-observed:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-ctx.Done():
-		t.Fatal("network IO blocked observation acceptance")
-	}
-	if r.CheckReady(ctx) == nil {
-		t.Fatal("in-flight network transaction reported ready")
-	}
-	if page, err := r.resourceObservation(0, ""); err != nil || page.Phase == "ready" {
-		t.Fatal("resource view advertised in-flight projection as ready", page.Phase, err)
-	}
-	release()
-	if err := <-done; err != nil {
-		t.Fatal(err)
-	}
-	if r.CheckReady(ctx) == nil {
-		t.Fatal("older transaction acknowledged newer input")
-	}
-	if err := r.reconcileDynamic(ctx); err != nil || r.CheckReady(ctx) != nil {
-		t.Fatal("newer observation did not converge", err)
-	}
-	if native.applied.Interfaces[0].AddressOptions["192.0.2.10/24"].BootLifetime.ValidNanos != newer.LeaseClock.ExpiresNanos {
-		t.Fatal("newer lease was lost or its original deadline changed")
+func TestObservationProgressDuringNetworkIORequiresOnlyChangedEffects(t *testing.T) {
+	for _, change := range []string{"unchanged", "extended", "shortened"} {
+		t.Run(change, func(t *testing.T) {
+			r, native, _ := fixture(t, wanDoc())
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			first := lease4(time.Now().Add(time.Hour))
+			if err := r.Observe(ctx, update(t, r, "service.wan", 1, first)); err != nil {
+				t.Fatal(err)
+			}
+			blocked, release := blockBFDNetwork(t, r, native, nil)
+			done := make(chan error, 1)
+			go func() { done <- r.reconcileDynamic(ctx) }()
+			select {
+			case <-blocked.entered:
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+			newer := first
+			switch change {
+			case "extended":
+				newer = lease4(time.Now().Add(2 * time.Hour))
+			case "shortened":
+				newer = lease4(time.Now().Add(30 * time.Minute))
+			}
+			observed := make(chan error, 1)
+			publication := update(t, r, "service.wan", 2, newer)
+			go func() { observed <- r.Observe(ctx, publication) }()
+			select {
+			case err := <-observed:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-ctx.Done():
+				t.Fatal("network IO blocked observation acceptance")
+			}
+			if r.CheckReady(ctx) == nil {
+				t.Fatal("in-flight network transaction reported ready")
+			}
+			if page, err := r.resourceObservation(0, ""); err != nil || page.Phase == "ready" {
+				t.Fatal("resource view advertised in-flight projection as ready", page.Phase, err)
+			}
+			release()
+			if err := <-done; err != nil {
+				t.Fatal(err)
+			}
+			if err := r.CheckReady(ctx); (err != nil) != (change == "shortened") {
+				t.Fatal("readiness did not distinguish metadata from changed effects", err)
+			}
+			if err := r.reconcileDynamic(ctx); err != nil || r.CheckReady(ctx) != nil {
+				t.Fatal("newer observation did not converge", err)
+			}
+			if native.applied.Interfaces[0].AddressOptions["192.0.2.10/24"].BootLifetime.ValidNanos != newer.LeaseClock.ExpiresNanos {
+				t.Fatal("newer lease was lost or its original deadline changed")
+			}
+		})
 	}
 }
 
-func TestChangedPrerequisitesDuringKernelIODoNotStartAnObsoleteWorker(t *testing.T) {
-	r, n, m := conditionalFixture(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	if err := r.Observe(ctx, update(t, r, "service.wan", 1, lease4(time.Now().Add(time.Hour)))); err != nil {
-		t.Fatal(err)
-	}
-	blocked, release := blockBFDNetwork(t, r, n, nil)
-	done := make(chan error, 1)
-	go func() { done <- r.reconcileDynamic(ctx) }()
-	select {
-	case <-blocked.entered:
-	case <-ctx.Done():
-		t.Fatal("application did not reach the kernel writer")
-	}
-	down := lease4(time.Now().Add(time.Hour))
-	down.Active = false
-	if err := r.Observe(ctx, update(t, r, "service.wan", 2, down)); err != nil {
-		t.Fatal(err)
-	}
-	release()
-	if err := <-done; err != nil {
-		t.Fatal(err)
-	}
-	if len(m.modules) != 1 {
-		t.Fatal("worker started after its prerequisite observation changed", m.modules)
-	}
-	if err := r.reconcileDynamic(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if conditionalRoute(n) || len(m.modules) != 1 {
-		t.Fatal("latest withdrawal did not converge")
+func TestPrerequisitesAreRefreshedAfterKernelIO(t *testing.T) {
+	for _, live := range []bool{false, true} {
+		t.Run(strconv.FormatBool(live), func(t *testing.T) {
+			r, n, m := conditionalFixture(t)
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			lease := lease4(time.Now().Add(time.Hour))
+			if err := r.Observe(ctx, update(t, r, "service.wan", 1, lease)); err != nil {
+				t.Fatal(err)
+			}
+			blocked, release := blockBFDNetwork(t, r, n, nil)
+			done := make(chan error, 1)
+			go func() { done <- r.reconcileDynamic(ctx) }()
+			select {
+			case <-blocked.entered:
+			case <-ctx.Done():
+				t.Fatal("application did not reach the kernel writer")
+			}
+			down := lease4(time.Now().Add(time.Hour))
+			down.Active = live
+			if err := r.Observe(ctx, update(t, r, "service.wan", 2, down)); err != nil {
+				t.Fatal(err)
+			}
+			r.mu.Lock()
+			r.guardUntil = time.Now().Add(-time.Second)
+			r.mu.Unlock()
+			release()
+			if err := <-done; err != nil {
+				t.Fatal(err)
+			}
+			want := 1
+			if live {
+				want = 2
+			}
+			if len(m.modules) != want {
+				t.Fatal("worker set does not match the fresh supervisor and protocol observation", live, m.modules)
+			}
+			if err := r.reconcileDynamic(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if conditionalRoute(n) != live || len(m.modules) != want {
+				t.Fatal("latest withdrawal did not converge")
+			}
+
+		})
 	}
 }
 

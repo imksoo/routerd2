@@ -130,7 +130,10 @@ func TestOwnedAddressLifetimesDeprecateRenewExpireAndRestoreStatic(t *testing.T)
 	o.ValidUntil = now.Add(-time.Second)
 	o.PreferredUntil = now.Add(-2 * time.Second)
 	d.Interfaces[0].AddressOptions = map[string]AddressOptions{address: o}
-	s, err := e.Apply(context.Background(), 5, d)
+	if _, err := e.Apply(context.Background(), 5, d); err != nil {
+		t.Fatal(err)
+	}
+	s, err := e.Snapshot(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}

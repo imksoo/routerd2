@@ -46,7 +46,7 @@ func blockBFDNetwork(t *testing.T, r *Runtime, backend Network, failure error) (
 	t.Helper()
 	blocked := &blockedBFDNetwork{Network: backend, entered: make(chan struct{}), release: make(chan struct{}), failure: failure}
 	r.mu.Lock()
-	r.network, r.applied.hash = blocked, ""
+	r.network, r.applied.network = blocked, nil
 	r.mu.Unlock()
 	var release sync.Once
 	finish := func() { release.Do(func() { close(blocked.release) }) }

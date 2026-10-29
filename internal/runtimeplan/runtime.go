@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"time"
 
@@ -100,8 +101,8 @@ type configuration struct {
 }
 
 type appliedProjection struct {
-	untilNanos         uint64 // earliest original network deadline in the acknowledged projection
-	hash               string
+	untilNanos         uint64           // earliest original network deadline in the acknowledged projection
+	network            *network.Desired // immutable completed projection, shared read-only with Apply
 	at                 time.Time
 	sourceEpoch        uint64
 	observationVersion uint64
@@ -172,19 +173,11 @@ func (r *Runtime) CheckReady(ctx context.Context) error {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.applied.hash == "" || r.applied.sourceEpoch != r.sourceEpoch || r.applied.observationVersion != r.observationVersion {
-		return errApplicationPending
+	r.installGuardStatusLocked(s, nil)
+	if err := r.checkAppliedLocked(); err != nil {
+		return err
 	}
-	if r.applied.untilNanos != 0 {
-		clock, err := boottime.Read()
-		if err != nil {
-			return err
-		}
-		if uint64(clock.BoottimeNanoseconds) >= r.applied.untilNanos {
-			r.wakeCoordinatorLocked()
-			return errors.New("applied network authority expired; current projection awaits application")
-		}
-	}
+
 	if len(r.routeIssues) > 0 {
 		return errors.New("some learned routes have unresolved next hops; inspect show services")
 	}
@@ -205,7 +198,6 @@ func (r *Runtime) CheckReady(ctx context.Context) error {
 		}
 	}
 	if dynamicProgram(r.config.source) {
-		r.installGuardStatusLocked(s, nil)
 		p, err := r.projectProgramLocked(r.config, r.observationsLocked(), time.Now())
 		if err != nil {
 			return err
@@ -228,6 +220,47 @@ func (r *Runtime) CheckReady(ctx context.Context) error {
 	}
 	return nil
 }
+
+// A notification counter also advances for history and unchanged heartbeats.
+// Readiness depends on their effects, not on silence from every producer.
+func (r *Runtime) checkAppliedLocked() error {
+	if r.applied.network == nil || r.applied.sourceEpoch != r.sourceEpoch {
+		return errApplicationPending
+	}
+	if r.applied.observationVersion != r.observationVersion {
+		p, err := r.projectProgramLocked(r.config, r.observationsLocked(), time.Now())
+		if err != nil {
+			return err
+		}
+		if !networkCovered(*r.applied.network, p.network) || len(p.instances) != len(r.bindings) || len(p.resources) != len(r.resourceStates) {
+			return errApplicationPending
+		}
+		for _, b := range p.instances {
+			if r.bindings[b.instance.Name].digest != b.digest {
+				return errApplicationPending
+			}
+		}
+		for id, state := range p.resources {
+			applied, ok := r.resourceStates[id]
+			state.ActiveUntil = applied.ActiveUntil
+			if !ok || state != applied {
+				return errApplicationPending
+			}
+		}
+	}
+	if r.applied.untilNanos != 0 {
+		clock, err := boottime.Read()
+		if err != nil {
+			return err
+		}
+		if uint64(clock.BoottimeNanoseconds) >= r.applied.untilNanos {
+			r.wakeCoordinatorLocked()
+			return errors.New("applied network authority expired; current projection awaits application")
+		}
+	}
+	return nil
+}
+
 func (r *Runtime) failure(err error) error {
 	r.mu.Lock()
 	r.phase = "degraded"
@@ -474,29 +507,25 @@ func (r *Runtime) wait(ctx context.Context, ceiling map[string]supervisor.Dynami
 	}
 }
 func (r *Runtime) applyNetworkLocked(ctx context.Context, d network.Desired) error {
-	b, _ := json.Marshal(struct {
-		Revision uint64
-		Desired  network.Desired
-	}{r.config.revision, d})
-	h := sha256.Sum256(b)
-	digest := hex.EncodeToString(h[:])
-	if digest == r.applied.hash && time.Since(r.applied.at) < 5*time.Second {
+	matching := r.applied.sourceEpoch == r.sourceEpoch && reflect.DeepEqual(r.applied.network, &d)
+	if matching && time.Since(r.applied.at) < 5*time.Second {
 		return nil
 	}
-	previousHash := r.applied.hash
-	r.applied.hash = ""
+	// A refresh does not invalidate the completed projection's live authority.
+	// Readiness compares its effects with current intent until this call ends.
 	revision := r.config.revision
 	r.mu.Unlock()
 	err := r.network.Apply(ctx, revision, d)
 	r.mu.Lock()
 	if err != nil {
+		r.applied.network = nil
 		r.bgpApplied = nil
 		return err
 	}
-	if digest != previousHash {
+	if !matching {
 		r.projectionGeneration++
 	}
-	r.applied.hash = digest
+	r.applied.network = &d
 	r.applied.at = time.Now()
 	return nil
 }
@@ -987,6 +1016,7 @@ func (r *Runtime) reportReadiness(ctx context.Context) {
 	err := r.CheckReady(ctx)
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
 	switch {
 	case err == nil:
 		r.phase, r.lastError = "ready", ""

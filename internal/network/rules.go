@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"net/netip"
 	"reflect"
+
+	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/lifetime"
 )
 
 // PolicyRule selects a routing table. This API implements the to-table action;
@@ -12,16 +15,17 @@ import (
 // Family is 4 or 6. Each family/priority slot is exclusive to one rule and must
 // not collide with a rule installed by another controller.
 type PolicyRule struct {
-	Family       int     `json:"family"`
-	Priority     int     `json:"priority"`
-	Table        int     `json:"table"`
-	Source       string  `json:"source,omitempty"`
-	Destination  string  `json:"destination,omitempty"`
-	InInterface  string  `json:"in_interface,omitempty"`
-	OutInterface string  `json:"out_interface,omitempty"`
-	Mark         *uint32 `json:"mark,omitempty"`
-	Mask         *uint32 `json:"mask,omitempty"`
-	Invert       bool    `json:"invert,omitempty"`
+	Family       int               `json:"family"`
+	Priority     int               `json:"priority"`
+	Table        int               `json:"table"`
+	Source       string            `json:"source,omitempty"`
+	Destination  string            `json:"destination,omitempty"`
+	InInterface  string            `json:"in_interface,omitempty"`
+	OutInterface string            `json:"out_interface,omitempty"`
+	Mark         *uint32           `json:"mark,omitempty"`
+	Mask         *uint32           `json:"mask,omitempty"`
+	Invert       bool              `json:"invert,omitempty"`
+	Authority    lifetime.Deadline `json:"authority,omitzero"`
 }
 
 type PolicyRuleState struct {
@@ -34,6 +38,8 @@ type PolicyRuleState struct {
 
 func policyRuleSlot(r PolicyRule) string { return fmt.Sprintf("%d/%d", r.Family, r.Priority) }
 func samePolicyRule(a, b PolicyRule) bool {
+	// Authority belongs to the writer; it is not a Linux rule attribute.
+	a.Authority, b.Authority = lifetime.Deadline{}, lifetime.Deadline{}
 	return reflect.DeepEqual(normalizePolicyRule(a), normalizePolicyRule(b))
 }
 func policyRuleMatches(live PolicyRuleState, want PolicyRule) bool {
@@ -45,6 +51,9 @@ func validatePolicyRules(rules []PolicyRule) error {
 	add := func(format string, args ...any) { errs = append(errs, fmt.Errorf(format, args...)) }
 	seen := map[string]bool{}
 	for _, r := range rules {
+		if r.Authority != (lifetime.Deadline{}) && (!boottime.ValidBootID(r.Authority.BootID) || r.Authority.Nanos == 0 || r.Authority.Nanos > 1<<63-1 || !r.Authority.UTC.IsZero()) {
+			add("policy rule %d: invalid boot authority", r.Priority)
+		}
 		if r.Family != 4 && r.Family != 6 {
 			add("policy rule %d: family must be 4 or 6", r.Priority)
 		}
@@ -134,6 +143,7 @@ func (p *apply) removePolicyRules(want []PolicyRule) error {
 		keep := false
 		for _, w := range want {
 			if samePolicyRule(r, w) {
+				p.e.state.PolicyRules[i] = w
 				keep = true
 				break
 			}
@@ -142,33 +152,41 @@ func (p *apply) removePolicyRules(want []PolicyRule) error {
 			i++
 			continue
 		}
-		live, err := p.e.kernel.PolicyRules()
-		if err != nil {
-			return p.failure("policy rule remove read", err)
+		if err := p.removePolicyRule(i); err != nil {
+			return err
 		}
-		found := false
-		for _, v := range live {
-			if policyRuleSlot(v.PolicyRule) != policyRuleSlot(r) {
-				continue
-			}
-			if !policyRuleMatches(v, r) {
-				return p.failure("policy rule remove ownership", fmt.Errorf("family %d priority %d changed outside routerd2", r.Family, r.Priority))
-			}
-			if found {
-				return p.failure("policy rule remove ownership", fmt.Errorf("family %d priority %d has duplicate live rules", r.Family, r.Priority))
-			}
-			found = true
+	}
+	return nil
+}
+
+func (p *apply) removePolicyRule(i int) error {
+	r := p.e.state.PolicyRules[i]
+	live, err := p.e.kernel.PolicyRules()
+	if err != nil {
+		return p.failure("policy rule remove read", err)
+	}
+	found := false
+	for _, v := range live {
+		if policyRuleSlot(v.PolicyRule) != policyRuleSlot(r) {
+			continue
 		}
-		forget := func() { p.e.state.PolicyRules = append(p.e.state.PolicyRules[:i], p.e.state.PolicyRules[i+1:]...) }
+		if !policyRuleMatches(v, r) {
+			return p.failure("policy rule remove ownership", fmt.Errorf("family %d priority %d changed outside routerd2", r.Family, r.Priority))
+		}
 		if found {
-			if err := p.change("policy rule remove", func() error { return p.e.kernel.DeletePolicyRule(r) }, forget); err != nil {
-				return err
-			}
-		} else {
-			forget()
-			if err := p.checkpoint("forget absent policy rule"); err != nil {
-				return err
-			}
+			return p.failure("policy rule remove ownership", fmt.Errorf("family %d priority %d has duplicate live rules", r.Family, r.Priority))
+		}
+		found = true
+	}
+	forget := func() { p.e.state.PolicyRules = append(p.e.state.PolicyRules[:i], p.e.state.PolicyRules[i+1:]...) }
+	if found {
+		if err := p.change("policy rule remove", func() error { return p.e.kernel.DeletePolicyRule(r) }, forget); err != nil {
+			return err
+		}
+	} else {
+		forget()
+		if err := p.checkpoint("forget absent policy rule"); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -200,7 +218,16 @@ func (p *apply) policyRules(want []PolicyRule) error {
 				}
 			}
 		}
-		if err := p.change("policy rule add", func() error { return p.e.kernel.AddPolicyRule(r) }, func() {
+		if err := p.change("policy rule add", func() error {
+			clock, err := boottime.Read()
+			if err != nil {
+				return err
+			}
+			if !r.Authority.Live(clock) {
+				return errors.New("policy rule authority expired before installation")
+			}
+			return p.e.kernel.AddPolicyRule(r)
+		}, func() {
 			for _, old := range p.e.state.PolicyRules {
 				if samePolicyRule(old, r) {
 					return

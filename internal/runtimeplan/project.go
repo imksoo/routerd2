@@ -154,9 +154,13 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 				return p, err
 			}
 			if snapshot.Active && snapshot.ValidUntil.Live(facts.bfdClock) && (s.PPPoE.DefaultRoute == nil || *s.PPPoE.DefaultRoute) {
+				// PPP has no leased route lifetime. pppd owns this unit and
+				// destroying it removes its kernel routes. The producer fence
+				// above prevents a stopping worker from installing them again.
+				// A delayed control heartbeat must not expire a working session.
 				for _, address := range []struct{ local, destination string }{{snapshot.Address, "0.0.0.0/0"}, {snapshot.IPv6Address, "::/0"}} {
 					if address.local != "" {
-						p.network.Routes = append(p.network.Routes, network.Route{Destination: address.destination, Interface: s.PPPoE.PPPInterface, Metric: s.PPPoE.Metric, Table: s.PPPoE.Table, BootID: snapshot.ValidUntil.BootID, ExpiresNanos: snapshot.ValidUntil.Nanos})
+						p.network.Routes = append(p.network.Routes, network.Route{Destination: address.destination, Interface: s.PPPoE.PPPInterface, Metric: s.PPPoE.Metric, Table: s.PPPoE.Table})
 					}
 				}
 			}

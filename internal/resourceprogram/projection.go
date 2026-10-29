@@ -155,7 +155,7 @@ func (p Plan) Project(facts FactSnapshot) (Native, map[string]ResourceState) {
 		interfaces[iface.Name] = iface
 	}
 	clock := boottime.Clock{BootID: facts.Scope.BootID, BoottimeNanoseconds: int64(facts.NowNanos), WallTime: facts.WallTime}
-	linkIndex, routeIndex := 0, 0
+	linkIndex, routeIndex, ruleIndex := 0, 0, 0
 	for _, node := range selected {
 		authority := states[node.source.ID].ActiveUntil
 		switch {
@@ -170,6 +170,9 @@ func (p Plan) Project(facts FactSnapshot) (Native, map[string]ResourceState) {
 				route.BootID, route.ExpiresNanos = authority.BootID, authority.Nanos
 			}
 			routeIndex++
+		case node.source.PolicyRule != nil:
+			native.Network.PolicyRules[ruleIndex].Authority = authority
+			ruleIndex++
 		case node.source.Address != nil && authority != (lifetime.Deadline{}):
 			address := node.source.Address
 			iface := interfaces[address.Interface]

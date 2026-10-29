@@ -163,6 +163,24 @@ func (e *Engine) expireAuthority(ctx context.Context) (time.Duration, error) {
 			return 0, errors.Join(err, e.save())
 		}
 	}
+	for i := 0; i < len(e.state.PolicyRules); {
+		authority := e.state.PolicyRules[i].Authority
+		if authority == (lifetime.Deadline{}) {
+			i++
+			continue
+		}
+		if authority.Live(clock.Clock) {
+			if remaining := authority.Remaining(clock.Clock); delay == 0 || remaining < delay {
+				delay = remaining
+			}
+			i++
+			continue
+		}
+		if err := p.removePolicyRule(i); err != nil {
+			e.state.Status, e.state.LastError = "degraded", err.Error()
+			return 0, errors.Join(err, e.save())
+		}
+	}
 	keep := make(map[addressKey]bool, len(e.state.Addresses))
 	expiredAddresses := false
 	for _, address := range e.state.Addresses {

@@ -2,7 +2,7 @@ package network
 
 import "github.com/imksoo/routerd2/internal/boottime"
 
-// ProjectLifetimes removes expired addresses and routes at one paired clock.
+// ProjectLifetimes removes expired addresses, routes and rules at one paired clock.
 // The caller owns the slices and address-option maps: projection mutates these
 // collections. Control uses it before computing the expected application;
 // the writer rechecks after transport and other intervening work.
@@ -32,5 +32,12 @@ func ProjectLifetimes(d Desired, clock boottime.Clock) Desired {
 		}
 	}
 	d.Routes = kept
+	rules := d.PolicyRules[:0]
+	for _, rule := range d.PolicyRules {
+		if rule.Authority.Live(clock) {
+			rules = append(rules, rule)
+		}
+	}
+	d.PolicyRules = rules
 	return d
 }

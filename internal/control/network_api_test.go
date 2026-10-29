@@ -21,10 +21,10 @@ type observedNetwork struct {
 func (n *observedNetwork) Snapshot(context.Context) (network.Snapshot, error) {
 	return n.snapshot, nil
 }
-func (n *observedNetwork) Apply(_ context.Context, revision uint64, _ network.Desired) (network.Snapshot, error) {
+func (n *observedNetwork) Apply(_ context.Context, revision uint64, _ network.Desired) (network.ApplyResult, error) {
 	n.called++
 	n.snapshot.Revision, n.snapshot.AttemptedRevision, n.snapshot.Status = revision, revision, "applied"
-	return n.snapshot, nil
+	return network.ApplyResult{Revision: revision, AttemptedRevision: revision, Status: "applied"}, nil
 }
 
 func TestNetworkApplyAcknowledgementDoesNotEchoLargeObservations(t *testing.T) {
@@ -51,7 +51,7 @@ func TestNetworkApplyAcknowledgementDoesNotEchoLargeObservations(t *testing.T) {
 	if recorder.Code != http.StatusOK || n.called != 1 || recorder.Body.Len() > 512 {
 		t.Fatalf("apply acknowledgement status=%d called=%d bytes=%d", recorder.Code, n.called, recorder.Body.Len())
 	}
-	var result ApplyResult
+	var result network.ApplyResult
 	if err := json.Unmarshal(recorder.Body.Bytes(), &result); err != nil || result.Revision != 7 || result.AttemptedRevision != 7 || result.Status != "applied" {
 		t.Fatalf("invalid acknowledgement: %+v, %v", result, err)
 	}

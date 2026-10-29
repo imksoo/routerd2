@@ -18,7 +18,7 @@ import (
 var errLinkNotFound = errors.New("link not found")
 
 // JournalVersion is the persisted network ownership/BOOTTIME contract.
-const JournalVersion = 14
+const JournalVersion = 15
 
 type settingKey struct {
 	Kind      string `json:"kind"`
@@ -200,10 +200,18 @@ func cloneDesired(d Desired) Desired {
 	return out
 }
 
+// ApplyResult acknowledges the durable projection. Kernel observations belong
+// to Snapshot and are not collected as an unused side effect of applying it.
+type ApplyResult struct {
+	Revision          uint64 `json:"revision"`
+	AttemptedRevision uint64 `json:"attempted_revision"`
+	Status            string `json:"status"`
+}
+
 // Apply accepts older and equal revisions so the control plane can reconcile a
 // committed revision after a failed candidate or worker restart. The caller is
 // responsible for revision concurrency. A failure never implies rollback.
-func (e *Engine) Apply(ctx context.Context, revision uint64, desired Desired) (Snapshot, error) {
+func (e *Engine) Apply(ctx context.Context, revision uint64, desired Desired) (ApplyResult, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	defer func() {
@@ -213,29 +221,29 @@ func (e *Engine) Apply(ctx context.Context, revision uint64, desired Desired) (S
 		}
 	}()
 	if e.lock == nil {
-		return Snapshot{}, errors.New("network engine is closed")
+		return ApplyResult{}, errors.New("network engine is closed")
 	}
 	if err := Validate(desired); err != nil {
-		return e.snapshotLocked(ctx), err
+		return ApplyResult{}, err
 	}
 	if err := ctx.Err(); err != nil {
-		return e.snapshotLocked(ctx), err
+		return ApplyResult{}, err
 	}
 	clock, err := boottime.Read()
 	if err != nil {
-		return e.snapshotLocked(ctx), err
+		return ApplyResult{}, err
 	}
 	d := ProjectLifetimes(normalized(cloneDesired(desired)), clock)
 	for _, link := range d.Links {
 		if !link.Authority.Live(clock) {
-			return e.snapshotLocked(ctx), &ApplyError{Stage: "link authority", Err: fmt.Errorf("link %s original authority expired", link.Name)}
+			return ApplyResult{}, &ApplyError{Stage: "link authority", Err: fmt.Errorf("link %s original authority expired", link.Name)}
 		}
 	}
 	boundLinkAddresses(&d, clock)
 	e.state.AttemptedRevision, e.state.Attempted = revision, &d
 	e.state.Status, e.state.LastError = "applying", ""
 	if err := e.save(); err != nil {
-		return e.snapshotLocked(ctx), &ApplyError{Stage: "journal", Err: err}
+		return ApplyResult{}, &ApplyError{Stage: "journal", Err: err}
 	}
 	p := &apply{e: e, ctx: ctx}
 	err = p.reconcile(d)
@@ -255,7 +263,7 @@ func (e *Engine) Apply(ctx context.Context, revision uint64, desired Desired) (S
 			err = errors.Join(err, fmt.Errorf("persist degraded state: %w", saveErr))
 		}
 	}
-	return e.snapshotLocked(ctx), err
+	return ApplyResult{Revision: e.state.Revision, AttemptedRevision: e.state.AttemptedRevision, Status: e.state.Status}, err
 }
 
 func (e *Engine) Snapshot(ctx context.Context) (Snapshot, error) {
