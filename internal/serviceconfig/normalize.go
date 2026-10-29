@@ -16,6 +16,17 @@ func Normalize(s Service) Service {
 		}
 		return v
 	}
+	if s.NTP != nil {
+		c := *s.NTP
+		c.Servers = slices.Clone(c.Servers)
+		for i := range c.Servers {
+			c.Servers[i].Address = address(c.Servers[i].Address)
+			if c.Servers[i].Port == 0 {
+				c.Servers[i].Port = 123
+			}
+		}
+		s.NTP = &c
+	}
 	if s.BFD != nil {
 		c := bfd.Normalize(*s.BFD)
 		s.BFD = &c

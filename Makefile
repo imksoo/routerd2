@@ -360,3 +360,17 @@ tailscale-peers:
 
 check-tailscale: build build-publisher tailscale-engine tailscale-peers
 	$(PYTHON) scripts/tailscale-peer.py
+
+CHRONY_ARCH ?= $(shell $(GO) env GOARCH)
+CHRONY_DIR ?= dist
+.PHONY: chrony-engine
+chrony-engine:
+	$(DOCKER) build --platform linux/$(CHRONY_ARCH) --build-arg ALPINE_VERSION=$(ALPINE_VERSION) -f packaging/alpine/chrony-engine.Dockerfile -t routerd2-chrony-engine:$(ALPINE_VERSION)-$(CHRONY_ARCH) .
+	mkdir -p $(CHRONY_DIR)
+	@set -eu; engine_id=$$($(DOCKER) create --network none routerd2-chrony-engine:$(ALPINE_VERSION)-$(CHRONY_ARCH) /not-executed); \
+	  trap '$(DOCKER) rm "$$engine_id" >/dev/null' EXIT HUP INT TERM; \
+	  $(DOCKER) export "$$engine_id" | tar --no-same-owner -xf - -C $(CHRONY_DIR) chrony-engine.tar chrony-sources.tar
+
+.PHONY: check-ntp
+check-ntp: build chrony-engine
+	$(PYTHON) scripts/ntp-peer.py

@@ -33,6 +33,7 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6serverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/health"
+	"github.com/imksoo/routerd2/internal/protocol/ntpconfig"
 	"github.com/imksoo/routerd2/internal/protocol/pppoeconfig"
 	"github.com/imksoo/routerd2/internal/protocol/ra"
 	"github.com/imksoo/routerd2/internal/protocol/raclient"
@@ -526,7 +527,7 @@ func (r *Runtime) observe(ctx context.Context, u serviceconfig.Update) (*pending
 		return nil, r.acceptBFD(ctx, u)
 	}
 	var producerStatus *supervisor.Status
-	if u.Role == "bgp" || u.Role == "dhcp4" || u.Role == "dhcp6" || u.Role == "ra" || u.Role == "vrrp" || u.Role == "dhcp_server" || u.Role == "dhcp6_server" || u.Role == "pppoe" || u.Role == "aftr" {
+	if u.Role == "ntp" || u.Role == "bgp" || u.Role == "dhcp4" || u.Role == "dhcp6" || u.Role == "ra" || u.Role == "vrrp" || u.Role == "dhcp_server" || u.Role == "dhcp6_server" || u.Role == "pppoe" || u.Role == "aftr" {
 		// A restarted control has no remembered generations. Authenticate even
 		// its first publication against the current process-tree registry;
 		// initial publication precedes worker Ready, so Ready is not required.
@@ -699,6 +700,15 @@ func strict(b []byte, v any) error {
 }
 func validateSnapshot(instance serviceconfig.Instance, b json.RawMessage) error {
 	switch instance.Role {
+	case "ntp":
+		var snapshot ntpconfig.Snapshot
+		if err := strict(b, &snapshot); err != nil {
+			return err
+		}
+		if !boottime.ValidBootID(snapshot.BootID) || snapshot.ObservedNanos == 0 || snapshot.ExpiresNanos <= snapshot.ObservedNanos {
+			return errors.New("NTP observation requires a finite boot interval")
+		}
+		return nil
 	case "tailscale":
 		var cfg tailscaleconfig.Config
 		var snapshot tailscaleconfig.Snapshot

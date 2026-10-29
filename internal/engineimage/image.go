@@ -20,9 +20,11 @@ const PPPCommand = "usr/sbin/pppd"
 const Plugin = "usr/lib/pppd/2.5.3/pppoe.so"
 const legacyProvider = "usr/lib/ossl-modules/legacy.so"
 
-// commandPath identifies the executable required by each supported engine role.
-func commandPath(role string) string {
+// Command identifies the executable required by each supported engine role.
+func Command(role string) string {
 	switch role {
+	case "ntp":
+		return "usr/sbin/chronyd"
 	case "pppoe":
 		return PPPCommand
 	case "vrrp":
@@ -96,7 +98,7 @@ func Validate(file *os.File, arch, role string) error {
 	} else if arch != "amd64" {
 		return errors.New("unsupported engine image architecture")
 	}
-	command := commandPath(role)
+	command := Command(role)
 	if command == "" {
 		return errors.New("unsupported engine role")
 	}

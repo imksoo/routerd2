@@ -1,3 +1,5 @@
+2026-10-29: NTPの静的client/serverを追加した（native-57）。独立chronyd・実supervisor/control/network/time worker・LAN chronyd -Q client・両側packet captureで同期とLAN配布を確認。host時計の調整は無効。DHCP由来の時刻源、主従条件、appliance時計調整、対象実機、全34項目の受入は未完了。実行手順と限界は internal/protocol/ntp/README.md を参照。
+
 # 現行 routerd と同等の製品にするための実装計画
 
 作成日: 2026-10-24。更新日: 2026-10-28。開発中。全体ゴールは継続中。

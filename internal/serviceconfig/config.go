@@ -20,6 +20,7 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
 	"github.com/imksoo/routerd2/internal/protocol/health"
+	"github.com/imksoo/routerd2/internal/protocol/ntpconfig"
 	"github.com/imksoo/routerd2/internal/protocol/pppoeconfig"
 	"github.com/imksoo/routerd2/internal/protocol/ra"
 	"github.com/imksoo/routerd2/internal/protocol/raclient"
@@ -28,6 +29,7 @@ import (
 )
 
 type Service struct {
+	NTP         *ntpconfig.Node         `json:"ntp,omitempty"`
 	Tailscale   *tailscaleconfig.Node   `json:"tailscale,omitempty"`
 	DHCP6Server *DHCP6Server            `json:"dhcp6_server,omitempty"`
 	PPPoE       *PPPoE                  `json:"pppoe,omitempty"`
@@ -122,6 +124,9 @@ var safeName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,23}$`)
 var interfaceName = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]{0,14}$`)
 
 func (s Service) Role() string {
+	if s.NTP != nil {
+		return "ntp"
+	}
 	if s.Tailscale != nil {
 		return "tailscale"
 	}
@@ -225,7 +230,7 @@ func Validate(services []Service) error {
 		}
 		names[s.Name] = true
 		n := 0
-		for _, set := range []bool{s.Tailscale != nil, s.PPPoE != nil, s.Health != nil, s.BFD != nil, s.DSLite != nil, s.RAClient != nil, s.DHCPServer != nil, s.DHCP6Server != nil, s.DHCPRelay != nil, s.DHCP4 != nil, s.DHCP6 != nil, s.RA != nil, s.DNS != nil, s.VRRP != nil, s.BGP != nil} {
+		for _, set := range []bool{s.NTP != nil, s.Tailscale != nil, s.PPPoE != nil, s.Health != nil, s.BFD != nil, s.DSLite != nil, s.RAClient != nil, s.DHCPServer != nil, s.DHCP6Server != nil, s.DHCPRelay != nil, s.DHCP4 != nil, s.DHCP6 != nil, s.RA != nil, s.DNS != nil, s.VRRP != nil, s.BGP != nil} {
 			if set {
 				n++
 			}
@@ -233,7 +238,7 @@ func Validate(services []Service) error {
 		if n != 1 {
 			return fmt.Errorf("service %s must select exactly one protocol", s.Name)
 		}
-		if s.DNS == nil && s.BGP == nil && s.DHCPRelay == nil && !(s.BFD != nil && s.BFD.Multihop) && !interfaceName.MatchString(s.Interface()) {
+		if s.NTP == nil && s.DNS == nil && s.BGP == nil && s.DHCPRelay == nil && !(s.BFD != nil && s.BFD.Multihop) && !interfaceName.MatchString(s.Interface()) {
 			return fmt.Errorf("service %s has an invalid interface", s.Name)
 		}
 		key := s.Role() + ":" + s.Interface()
@@ -281,6 +286,10 @@ func Validate(services []Service) error {
 		}
 		sockets[key] = s.Name
 		switch s.Role() {
+		case "ntp":
+			if err := ntpconfig.ValidateNode(*s.NTP); err != nil {
+				return err
+			}
 		case "tailscale":
 			if err := tailscaleconfig.ValidateNode(*s.Tailscale); err != nil {
 				return err
@@ -488,6 +497,8 @@ func (s Service) Instance(runtimeDir, stateDir string) (Instance, error) {
 	var b []byte
 	var err error
 	switch s.Role() {
+	case "ntp":
+		b, err = json.Marshal(ntpconfig.Config{Node: *s.NTP, StateDir: filepath.Join(stateDir, "services", "ntp"), RuntimeDir: filepath.Join(runtimeDir, "services", "ntp")})
 	case "tailscale":
 		b, err = json.Marshal(tailscaleconfig.Config{Node: *s.Tailscale, Resource: s.Name, StateDir: filepath.Join(stateDir, "services", "tailscale"), RuntimeDir: filepath.Join(runtimeDir, "services", "tailscale")})
 	case "pppoe":

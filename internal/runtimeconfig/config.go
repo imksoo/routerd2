@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/imksoo/routerd2/internal/configref"
+	"github.com/imksoo/routerd2/internal/engineimage"
 	"io"
 	"net"
 	"os"
@@ -128,9 +129,12 @@ func (b Boot) Validate() error {
 		}
 	}
 	for role, path := range b.Engines {
-		if role != "tailscale" && role != "pppoe" && role != "vrrp" && role != "dhcp_server" || b.Workers[role] == "" || !filepath.IsAbs(path) || filepath.Clean(path) != path {
+		if engineimage.Command(role) == "" || b.Workers[role] == "" || !filepath.IsAbs(path) || filepath.Clean(path) != path {
 			return errors.New("engine requires its declared role and a clean absolute archive path")
 		}
+	}
+	if b.Release == nil && b.Workers["ntp"] != "" && b.Engines["ntp"] == "" {
+		return errors.New("NTP requires its bundled chronyd engine archive")
 	}
 	if b.Release == nil && b.Workers["tailscale"] != "" && b.Engines["tailscale"] == "" {
 		return errors.New("Tailscale requires its bundled engine archive")

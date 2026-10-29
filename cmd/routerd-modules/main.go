@@ -23,6 +23,7 @@ import (
 	"github.com/imksoo/routerd2/internal/management"
 	"github.com/imksoo/routerd2/internal/protocol/conntracksync"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserver"
+	"github.com/imksoo/routerd2/internal/protocol/ntp"
 	"github.com/imksoo/routerd2/internal/protocol/pppoe"
 	"github.com/imksoo/routerd2/internal/protocol/tailscale"
 	"github.com/imksoo/routerd2/internal/release"
@@ -41,6 +42,12 @@ func main() {
 }
 
 func run(args []string) error {
+	if len(args) == 1 && args[0] == "chrony-query" {
+		return ntp.RunQuery()
+	}
+	if len(args) == 1 && args[0] == "chrony-engine" {
+		return ntp.RunEngine()
+	}
 	if len(args) == 1 && args[0] == "dnsmasq-engine" {
 		return dhcpserver.RunEngine()
 	}
@@ -102,7 +109,7 @@ func run(args []string) error {
 	}
 	return worker.Run(ctx, *role, buildinfo.ReleaseID, func(ctx context.Context, ready func()) error {
 		switch *role {
-		case "tailscale", "bfd", "health", "pppoe", "dhcp4", "dhcp6", "dhcp6_server", "dhcp_server", "dhcp_relay", "ra", "ra_client", "aftr", "dns", "vrrp", "bgp":
+		case "ntp", "tailscale", "bfd", "health", "pppoe", "dhcp4", "dhcp6", "dhcp6_server", "dhcp_server", "dhcp_relay", "ra", "ra_client", "aftr", "dns", "vrrp", "bgp":
 			return serviceruntime.Run(ctx, dir, *name, *role, *instancePath, *configDigest, generation, ready)
 		case "logging":
 			return logging.Run(ctx, logging.Options{RuntimeDir: dir, StateDir: state, ReleaseID: buildinfo.ReleaseID, CaptureKernel: os.Getenv("ROUTERD_PLATFORM") == "appliance"}, ready)

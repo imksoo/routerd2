@@ -107,7 +107,7 @@ func Run(parent context.Context, options Options) (PowerAction, error) {
 	}
 	engines := map[string]*os.File{}
 	for role, path := range o.Engines {
-		if role != "tailscale" && role != "pppoe" && role != "vrrp" && role != "dhcp_server" || images[role] == nil {
+		if engineimage.Command(role) == "" || images[role] == nil {
 			return PowerOff, errors.New("engine archive requires its fixed engine role")
 		}
 		f, err := os.Open(path)
@@ -119,6 +119,9 @@ func Run(parent context.Context, options Options) (PowerAction, error) {
 			return PowerOff, fmt.Errorf("%s engine: %w", role, err)
 		}
 		engines[role] = f
+	}
+	if images["ntp"] != nil && engines["ntp"] == nil {
+		return PowerOff, errors.New("NTP requires its bundled chronyd engine archive")
 	}
 	if images["tailscale"] != nil && engines["tailscale"] == nil {
 		return PowerOff, errors.New("Tailscale requires its bundled engine archive")
@@ -489,7 +492,7 @@ func normalize(o Options) (Options, error) {
 	o.Executables = paths
 	engines := map[string]string{}
 	for role, path := range o.Engines {
-		if role != "tailscale" && role != "pppoe" && role != "vrrp" && role != "dhcp_server" || paths[role] == "" || !filepath.IsAbs(path) || filepath.Clean(path) != path {
+		if engineimage.Command(role) == "" || paths[role] == "" || !filepath.IsAbs(path) || filepath.Clean(path) != path {
 			return o, errors.New("invalid engine role binding")
 		}
 		engines[role] = path

@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/imksoo/routerd2/internal/engineimage"
 	"io"
 	"regexp"
 	"strings"
@@ -106,10 +107,13 @@ func ValidateManifest(m Manifest, maxArtifact int64) error {
 	for _, binding := range m.Engines {
 		image, exists := artifacts[binding.Artifact]
 		source, hasSource := artifacts[binding.Sources]
-		if binding.Role != "tailscale" && binding.Role != "pppoe" && binding.Role != "vrrp" && binding.Role != "dhcp_server" || !roles[binding.Role] || engines[binding.Role] || !exists || image.Kind != "data" || !hasSource || source.Kind != "data" || binding.Artifact == binding.Sources {
+		if engineimage.Command(binding.Role) == "" || !roles[binding.Role] || engines[binding.Role] || !exists || image.Kind != "data" || !hasSource || source.Kind != "data" || binding.Artifact == binding.Sources {
 			return errors.New("engine requires one supported role binding, data image and corresponding source artifact")
 		}
 		engines[binding.Role] = true
+	}
+	if roles["ntp"] && !engines["ntp"] {
+		return errors.New("NTP role requires its bundled chronyd engine archive")
 	}
 	if roles["dhcp_server"] && !engines["dhcp_server"] {
 		return errors.New("DHCP server role has no signed dnsmasq engine and sources")

@@ -506,7 +506,8 @@
         "internal/serviceconfig",
         "internal/runtimeplan",
         "packaging/alpine"
-      ]
+      ],
+      "implementation_status": "Partial native-57 implementation: fixed foreground chronyd and typed tracking, independent source and LAN chronyd -Q communication/capture passed with host clock adjustment disabled. Learned DHCP sources, conditional selection, appliance discipline, recovery and target hardware remain unaccepted."
     },
     {
       "id": "SYS-03",
