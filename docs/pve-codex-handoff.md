@@ -33,6 +33,13 @@ DHCPv4は実VIPをgatewayとして配り、VIP interfaceの転送/MSSも設定�
 最終RA lifetime 0も確認した。自然PD更新0。単一uplink/一出口・独立MAC/DUID・役割名の置換を含む。
 全設定/複数WAN/二台をこのHGW構成へ接続した受入ではない。私の補助設定のfield名/依存指定誤りは
 設定検証で修正し、全体再起動時に条件付きPDの起動を待たずsnapshotを読んだ試験も実取得待ちへ修正した。
+追加HGW構成と再実行用スクリプトは私有の`/tmp/routerd-homert-single-native73-program.json`と
+`/tmp/routerd-homert-single-native73-uplink.py`（600）。実回線値を含むため公開対象にしない。
+同じソースの`make qemu-release-boot`も128.37秒で終了0。Alpine kernel/QEMU TCG、1GiB/2 CPU、
+NICなしで署名pairのPID 1実行・自動health確認・更新中commit排他/古いrevision拒否・正常電源断を確認した。
+これは実APKで全ルーター機能を通した試験やdisk/kernel A/B復旧、対象実機の受入ではない。
+`make apk RELEASE_ID=admission-native73`も終了0。開発用APKは`dist/apk/routerd2-0.1.0-r0.apk`。
+Go/ELF検査とengine同梱を確認したが、全Go・最少バイナリーという依存削減の目標達成とは扱わない。
 自然PD更新、全homert/管理/複数WAN、対象NIC/直接ONU、k8s/pve、Cloud SAM等の全34項目は未受入。
 
 ## 旧BGP設定と独立FRR（2026-10-29、bgp-import-native72）
