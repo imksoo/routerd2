@@ -1,0 +1,39 @@
+apiVersion: routerd.net/v1alpha1
+kind: Router
+metadata: {name: frr-interoperability}
+spec:
+  resources:
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: Interface
+    metadata: {name: wan}
+    spec: {ifname: wan0, managed: true, adminUp: true}
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: Interface
+    metadata: {name: lan}
+    spec: {ifname: lan0, managed: true, adminUp: true}
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: IPv4StaticAddress
+    metadata: {name: wan}
+    spec: {interface: wan, address: 192.0.2.1/24}
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: IPv4StaticAddress
+    metadata: {name: lan}
+    spec: {interface: lan, address: 198.18.0.1/24}
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: BGPRouter
+    metadata: {name: edge}
+    spec:
+      asn: 64512
+      routerID: 192.0.2.1
+      listen: {address: 192.0.2.1, port: 179}
+      importPolicy: {allowedPrefixes: [203.0.113.0/24]}
+      redistribute: {connected: {allowedPrefixes: [198.18.0.0/24]}}
+      gracefulRestart: {enabled: false}
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: BGPPeer
+    metadata: {name: provider}
+    spec:
+      routerRef: BGPRouter/edge
+      peerASN: 64513
+      peers: [192.0.2.2]
+      timers: {profile: fast}

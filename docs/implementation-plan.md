@@ -1,3 +1,5 @@
+2026-10-29 bgp-import-native72: 旧BGPRouter/BGPPeer→既存GoBGP workerの実CLI取込みで、独立FRRの広告/学習/FIB→LAN TCP/UDP、全体停止/再起動後の撤回/再学習/復帰が成功。全make check/Race/vet・両署名buildも終了0。IPv4一対向の確認で、全homertは未受入。[現在の範囲](pve-codex-handoff.md)。
+
 2026-10-29 prefsrc-order-native71: 宣言済みPD→DS-Liteを補足policyなしで接続。DNS明示順と、送信元削除前の経路撤去を実失敗から修正。実HGW単体90秒/両端末/PD交換/全体再起動が終了0。自然更新・長期・全homertは未受入。[現在の範囲](pve-codex-handoff.md)。
 
 2026-10-29 implicit-ra-native70: 旧hostdepsのRA対象をGo workerへ接続。明示RAなしhost経路の実radvd通信、ISC対向PD/IA_NA/実DAD/端末通信と旧条件付きLANが成功。全make check/Race/vet、両静的build・署名も終了0。全homert通し構成は未達。[引き継ぎ](pve-codex-handoff.md)。

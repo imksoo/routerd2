@@ -5,6 +5,24 @@
 [試験計画](test-plan.md)、[機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
+## 旧BGP設定と独立FRR（2026-10-29、bgp-import-native72）
+
+旧pkg/controller/bgpのpolicy継承、広告prefix集合、peerとgraceful restartを既存GoBGP workerへ接続した。
+redistributeの許可prefixも旧実装では静的広告であり、kernelの接続経路を観測した結果とは区別する。
+VRF/table・IPv6 family・RR情報の型変換はあるが、今回の実相互接続はIPv4・一対向・GR無効である。
+BFD参照・外部password参照・peer別community変換は未接続の宣言を拒否する。新外部BGP daemonは追加していない。
+
+公開値の旧Router/BGPRouter/BGPPeerを実CLIで取り込み、製品supervisor/control/network/BGPと独立FRRで
+LAN広告、FRRから学習した経路のkernel反映、LAN端末のTCP/UDP、停止時の広告撤回、製品全体再起動後の
+再学習とTCP/UDPが終了0。WAN/LAN captureも照合した。標準TCP179で試している。
+最初は対向bgpdだけでZebraなしだったため、FRRがNHT待ちでOPENを拒否した。送信OPENと対向状態を観測し、
+通常のfrr accountと専用一時dirでZebraを対向namespaceへ追加した。bgpd -nで対向のkernel route書込みを止める。
+FRR/Zebraは試験対向だけであり配布製品へ含めない。license/noticeは保持した。
+
+全make check（Race/vet）、CGO_ENABLED=0のLinux amd64/arm64 build・署名六ELFが終了0。
+compiler contract72/journal17。全homertと他環境を組み合わせた受入、IPv6/VRF/RR/GRの取込設定の実相互接続は残る。
+次は同じ単体構成へ主従条件・複数WAN・管理を接続する。全34項目は未完了。
+
 ## 宣言済みPD→DS-Liteと再起動（2026-10-29、prefsrc-order-native71）
 
 旧設定のdeclared delegatedAddressは、追加ds_lite policyがなくても、宣言済みPD割当と既存AFTR workerへ

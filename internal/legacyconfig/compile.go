@@ -180,6 +180,8 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 			c.reject(r, "", "unsupported_semantics", "legacy VXLAN FDB peers, L2 filtering and outer-DF defaults require explicit native conversion; a single remote is not a lossless substitute")
 		case "NTPClient", "NTPServer":
 			// Joined below into the one clock owner.
+		case "BGPRouter", "BGPPeer":
+			// Compiled together with inherited routing policies below.
 		case "DNSResolver", "DNSForwarder", "DNSUpstream", "DNSZone":
 			// Compiled together below so graph references are checked.
 		case "DHCPv4Server", "DHCPv4Reservation", "DHCPv4Relay", "DHCPv6Server":
@@ -199,6 +201,7 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 	c.dhcpServers()
 	c.dhcpRelays()
 	c.dns()
+	conditions = append(conditions, c.bgp()...)
 	c.ntp(vrrpNames)
 	c.firewall()
 	c.firewallServices()
@@ -360,7 +363,7 @@ func (c *compiler) allow(r resource, fields ...string) {
 	for _, field := range []string{"when", "dependsOn", "ready_when"} {
 		if field == "when" {
 			switch r.Kind {
-			case "EgressRoutePolicy", "HealthCheck", "DHCPv6PrefixDelegation", "DHCPv6Information", "NTPClient", "DHCPv6Server", "IPv6RouterAdvertisement":
+			case "BGPRouter", "EgressRoutePolicy", "HealthCheck", "DHCPv6PrefixDelegation", "DHCPv6Information", "NTPClient", "DHCPv6Server", "IPv6RouterAdvertisement":
 				continue
 			case "DSLiteTunnel":
 				if _, dynamic := c.options.DSLite[r.Kind+"/"+r.Metadata.Name]; dynamic || r.Spec.(api.DSLiteTunnelSpec).LocalAddressSource == "delegatedAddress" {

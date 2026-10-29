@@ -28,8 +28,11 @@ structural changes. Service identities are deterministic, bounded names derived
 from the original kind/name. Cross-kind name collisions therefore do not silently
 merge services.
 
-`Compile` never guesses a host network manager's RA defaults or silently adopts
-the new AFTR or DHCP-derived DNS lifetime contracts. `CompileWithOptions` permits
+`Compile` translates routerd hostdeps WAN RA targets to native owned receivers,
+with documented native defaults and one receiver per interface. A declared
+PD-derived DS-Lite source needs no repeated source policy. Explicit RA and
+AFTR policy can replace those defaults; this does not claim every historical
+network-manager default. DHCP-derived DNS still selects its finite source contract. `CompileWithOptions` permits
 **explicit replacement intent** for individual `IPv6RAAddress`, `DSLiteTunnel`,
 DHCP-consuming `DNSResolver`, stateless `DHCPv6Server`, `HealthCheck`, VRRP `VirtualAddress`, and `TailscaleNode` resources. Each such mapping says which behavior
 changes; a successful replacement is not a claim of
@@ -785,3 +788,20 @@ For MagicDNS, add an explicit native DNS source referring to the imported native
 service name with `TailscaleNode/NAME` and `field: dnsServers`; see
 [DNS forwarding](../protocol/dns/README.md). This does not import the old
 `acceptDNS:true` OS resolver mutation, global/split resolvers or search domains.
+
+## BGP
+
+`BGPRouter` and `BGPPeer` feed the existing GoBGP worker and sole kernel writer.
+The import preserves peer/global import-policy inheritance, the union of declared
+advertised prefixes, export restrictions, address families and graceful restart.
+As in the pinned controller, redistribute allowlists form static advertisements;
+they are not a scan of currently connected kernel routes. BFD, external password
+references and per-peer community transformations require their native bindings.
+Unsupported declarations remain errors.
+
+`make check-bgp-frr` imports a public old-schema configuration using the real CLI,
+then checks FRR advertisements, learned kernel routes, LAN TCP/UDP, withdrawal
+and restart. Its independent peer requires `bgpd`, sibling `zebra` and the normal
+`frr` account. Zebra supplies actual interface/next-hop observations; FRR is not
+included in the product runtime. The imported IPv4 fixture does not establish
+IPv6, route-reflector, VRF or full homert acceptance.

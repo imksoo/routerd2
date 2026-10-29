@@ -3,7 +3,9 @@
 package integration
 
 import (
+	"bytes"
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -14,14 +16,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/imksoo/routerd/pkg/bgpdaemon"
 	"github.com/imksoo/routerd2/internal/config"
-	"github.com/imksoo/routerd2/internal/network"
-	"github.com/imksoo/routerd2/internal/protocol/bgpconfig"
-	"github.com/imksoo/routerd2/internal/serviceconfig"
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netns"
 )
+
+//go:embed testdata/bgp-frr.yaml
+var legacyBGPFRR []byte
 
 // FRR is a separate BGP implementation. The product must advertise the LAN
 // prefix and install FRR's route before the client can reach the peer.
@@ -47,7 +48,14 @@ func TestDaemonBGPWithFRR(t *testing.T) {
 	}
 	setup(peer, []string{"address", "add", "192.0.2.2/24", "dev", "peer0"}, []string{"address", "add", "203.0.113.50/32", "dev", "lo"}, []string{"route", "add", "198.18.0.0/24", "via", "192.0.2.1"})
 	setup(client, []string{"address", "add", "198.18.0.2/24", "dev", "client0"}, []string{"route", "add", "default", "via", "198.18.0.1"})
-	root := t.TempDir()
+	root, err := os.MkdirTemp("", "routerd-frr-peer.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	if output, err := exec.Command("chown", "frr:frr", root).CombinedOutput(); err != nil {
+		t.Fatal(string(output), err)
+	}
 	configPath := filepath.Join(root, "frr.conf")
 	frrConfig := "hostname independent\nlog stdout\nrouter bgp 64513\n bgp router-id 192.0.2.2\n no bgp ebgp-requires-policy\n no bgp network import-check\n neighbor 192.0.2.1 remote-as 64512\n address-family ipv4 unicast\n  network 203.0.113.0/24\n  neighbor 192.0.2.1 activate\n exit-address-family\n"
 	if err := os.WriteFile(configPath, []byte(frrConfig), 0600); err != nil {
@@ -62,7 +70,32 @@ func TestDaemonBGPWithFRR(t *testing.T) {
 	if frrPath == "" {
 		frrPath = "/usr/lib/frr/bgpd"
 	}
-	frr := exec.Command(frrPath, "-S", "-n", "-Z", "-p", "1179", "--vty_socket", root, "-i", filepath.Join(root, "bgpd.pid"), "-f", configPath, "--log", "stdout")
+	// Standard-port FRR needs Zebra's actual interface/NHT observations.
+	// bgpd -n still keeps route installation out of this independent peer.
+	zebraConfig := filepath.Join(root, "zebra.conf")
+	if err := os.WriteFile(zebraConfig, []byte("hostname independent\nlog stdout\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	zebraLog, err := os.Create(filepath.Join(root, "zebra.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = zebraLog.Close() })
+	zebraSocket := filepath.Join(root, "zserv.api")
+	zebra := exec.Command(filepath.Join(filepath.Dir(frrPath), "zebra"), "-u", "frr", "-g", "frr", "-z", zebraSocket, "--vty_socket", root, "-i", filepath.Join(root, "zebra.pid"), "-f", zebraConfig, "--log", "stdout")
+	zebra.Stdout, zebra.Stderr = zebraLog, zebraLog
+	if err := fixtureInsideNamespace(peer, zebra.Start); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = zebra.Process.Kill(); _ = zebra.Wait() })
+	t.Cleanup(func() {
+		if t.Failed() {
+			data, _ := os.ReadFile(filepath.Join(root, "zebra.log"))
+			t.Logf("Zebra: %s", data)
+		}
+	})
+	until(t, 5*time.Second, func() bool { info, err := os.Stat(zebraSocket); return err == nil && info.Mode()&os.ModeSocket != 0 })
+	frr := exec.Command(frrPath, "-S", "-n", "-z", zebraSocket, "-p", "179", "--vty_socket", root, "-i", filepath.Join(root, "bgpd.pid"), "-f", configPath, "--log", "stdout")
 	frr.Stdout, frr.Stderr = log, log
 	if err := fixtureInsideNamespace(peer, frr.Start); err != nil {
 		t.Fatal(err)
@@ -72,6 +105,10 @@ func TestDaemonBGPWithFRR(t *testing.T) {
 		if t.Failed() {
 			data, _ := os.ReadFile(filepath.Join(root, "frr.log"))
 			t.Logf("FRR: %s", data)
+			for _, command := range []string{"show interface", "show bgp neighbors"} {
+				output, err := exec.Command("vtysh", "--vty_socket", root, "-d", "bgpd", "-c", command).CombinedOutput()
+				t.Logf("FRR %s: %s %v", command, output, err)
+			}
 		}
 	})
 	server := exec.Command("python3", "-u", "-c", `import socket, threading
@@ -87,14 +124,22 @@ while True:
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = server.Process.Kill(); _ = server.Wait() })
-	yes := true
-	bgp := serviceconfig.BGP{Runtime: bgpdaemon.AppliedConfig{
-		Global: bgpdaemon.AppliedGlobal{ASN: 64512, RouterID: "192.0.2.1", ListenPort: -1},
-		Peers:  map[string]bgpdaemon.AppliedPeer{"192.0.2.2": {Address: "192.0.2.2", ASN: 64513, TimersProfile: "fast", ImportPolicy: bgpdaemon.AppliedImportPolicy{AllowedPrefixes: []string{"203.0.113.0/24"}}}},
-		Paths:  []bgpdaemon.AppliedPath{{Source: "StaticRoute/lan", Prefix: "198.18.0.0/24", Attrs: bgpdaemon.AppliedPathAttrs{NextHop: "192.0.2.1"}}},
-	}, PeerTransports: map[string]bgpconfig.PeerTransport{"192.0.2.2": {LocalAddress: "192.0.2.1", RemotePort: 1179, BindInterface: "wan0"}}}
-	doc := config.Native{Network: network.Desired{Interfaces: []network.Interface{{Name: "wan0", Addresses: []string{"192.0.2.1/24"}}, {Name: "lan0", Addresses: []string{"198.18.0.1/24"}}}, Forwarding: network.Forwarding{IPv4: &yes}}, Services: []serviceconfig.Service{{Name: "edge", BGP: &bgp}}}
-	fixture := startFixtureDaemon(t, config.FromNative(doc))
+	source := filepath.Join(root, "legacy.yaml")
+	if err := os.WriteFile(source, legacyBGPFRR, 0600); err != nil {
+		t.Fatal(err)
+	}
+	command := exec.CommandContext(t.Context(), filepath.Join(os.Getenv("ROUTERD2_TEST_BIN_DIR"), "routerd"), "config", "migrate", source)
+	var diagnostics bytes.Buffer
+	command.Stderr = &diagnostics
+	body, err := command.Output()
+	if err != nil {
+		t.Fatal(err, diagnostics.String())
+	}
+	document, err := config.Parse(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture := startFixtureDaemon(t, document)
 	show := func() (bool, bool) {
 		out, err := exec.Command("vtysh", "--vty_socket", root, "-d", "bgpd", "-c", "show bgp ipv4 unicast 198.18.0.0/24 json").Output()
 		var view struct {
@@ -138,7 +183,7 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
 		t.Fatal(err)
 	}
 	until(t, 3*time.Second, func() bool {
-		return wanCapture.count("192.0.2.1", "192.0.2.2", 6, 1179) > 0 &&
+		return wanCapture.count("192.0.2.1", "192.0.2.2", 6, 179) > 0 &&
 			lanCapture.count("198.18.0.2", "203.0.113.50", 6, 18080) > 0 &&
 			lanCapture.count("198.18.0.2", "203.0.113.50", 17, 18081) > 0
 	})

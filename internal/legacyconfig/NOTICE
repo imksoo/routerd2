@@ -2,7 +2,7 @@ Source schema and behavior adaptation: imksoo/routerd
 Commit: 1329ef54f296507eda79bbbc3b853783dd27251e
 Paths: pkg/api, pkg/controller/dnsresolver, pkg/controller/chain/derive.go,
        pkg/controller/chain/phase2.go, pkg/controller/chain/chain.go,
-       pkg/controller/nat44,
+       pkg/controller/nat44, pkg/controller/bgp,
        pkg/controller/firewall, pkg/render, pkg/tailscale
 URL: https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e
 
