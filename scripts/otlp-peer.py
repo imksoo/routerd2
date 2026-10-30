@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
-"""Receive actual product OTLP/gRPC logs with OpenTelemetry Collector in private namespaces.
+"""Receive product OTLP/gRPC logs and real Health measurements in private namespaces.
 
 Worker lifecycle records prove the product-to-receiver path. One explicitly
 labelled synthetic DEBUG input checks only severity filtering, not log origin.
-The independent client exercises IPv4 UDP forwarding, not physical hardware,
-TCP continuity, automatic address acquisition, or metrics/traces, TLS qualification, or reliable log delivery during outages.
+An independent TCP endpoint proves Health success, failure, and recovery in logs,
+metrics, and traces. An independent client exercises IPv4 UDP forwarding. This
+does not qualify physical hardware, TCP forwarding continuity, automatic address
+acquisition, TLS, other signal producers, or reliable delivery during outages.
 """
 import argparse
 import datetime
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import socket
 import subprocess
@@ -27,6 +30,17 @@ def run(command, timeout=10, input=None):
 
 
 def endpoint(mode, output, port):
+    if mode == 'tcp':
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.bind(('192.0.2.2', port))
+            sock.listen()
+            with output.open('a', buffering=1) as log:
+                while True:
+                    connection, peer = sock.accept()
+                    with connection:
+                        log.write(json.dumps({'peer': peer, 'accepted_at_ns': time.time_ns()})+'\n')
+        return
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
         if mode == 'client':
             sock.settimeout(1)
@@ -145,6 +159,101 @@ def peer(stage):
             return True
         return False
 
+    def attributes(item):
+        return {entry['key']: value(entry['value']) for entry in item.get('attributes', [])}
+
+    def nanos(stamp):
+        parsed = datetime.datetime.fromisoformat(stamp.replace('Z', '+00:00'))
+        fraction = re.search(r'\.(\d+)', stamp)
+        return int(parsed.replace(microsecond=0).timestamp())*1_000_000_000+int(fraction.group(1).ljust(9, '0') if fraction else '0')
+
+    def health_record(result, phase, after):
+        found = []
+        def completed():
+            entries = api('logging.sock', '/v1/logs?module=service.probe&tail=true&limit=100')['records']
+            found[:] = [entry for entry in entries if entry['message'] == 'health probe completed'
+                        and entry.get('attributes', {}).get('result') == result
+                        and entry['attributes'].get('phase') == phase
+                        and nanos(entry['attributes']['probe_started_at']) >= after]
+            return bool(found)
+        wait(completed, 'actual TCP probe '+result+'/'+phase, 15)
+        original = found[-1]
+        details = original['attributes']
+        assert details['resource'] == 'probe' and details['interface'] == 'wan0', details
+        assert details['target'] == '192.0.2.2' and details['protocol'] == 'tcp', details
+        assert nanos(details['probe_finished_at']) >= nanos(details['probe_started_at']), details
+        print('Actual Health measurement', json.dumps(original), flush=True)
+        return original
+
+    def span_received(name, original):
+        for batch in rows(name):
+            for resource in batch.get('resourceSpans', []):
+                for scope in resource.get('scopeSpans', []):
+                    for span in scope.get('spans', []):
+                        tags = attributes(span)
+                        if tags.get('routerd.log.epoch') != original['epoch'] or tags.get('routerd.log.sequence') != original['sequence']:
+                            continue
+                        details = original['attributes']
+                        assert span['name'] == 'healthcheck.probe', span
+                        for key, source in [('routerd.resource.name', 'resource'), ('network.interface.name', 'interface'),
+                                            ('server.address', 'target'), ('network.protocol.name', 'protocol'),
+                                            ('routerd.healthcheck.result', 'result')]:
+                            assert tags[key] == details[source], tags
+                        assert int(span['startTimeUnixNano']) == nanos(details['probe_started_at']), span
+                        assert int(span['endTimeUnixNano']) == nanos(details['probe_finished_at']), span
+                        resource_tags = attributes(resource.get('resource', {}))
+                        assert resource_tags['service.name'] == 'routerd2' and resource_tags['service.namespace'] == 'acceptance', resource_tags
+                        return True
+        return False
+
+    def metric_points(name, metric_name, kind):
+        for batch in rows(name):
+            for resource in batch.get('resourceMetrics', []):
+                for scope in resource.get('scopeMetrics', []):
+                    for metric in scope.get('metrics', []):
+                        if metric.get('name') == metric_name:
+                            resource_tags = attributes(resource.get('resource', {}))
+                            assert resource_tags['service.name'] == 'routerd2' and resource_tags['service.namespace'] == 'acceptance', resource_tags
+                            yield from metric[kind].get('dataPoints', [])
+
+    def measured(original, previous_count=0):
+        details = original['attributes']
+        finished = nanos(details['probe_finished_at'])
+        counts = []
+        def delivered():
+            if not received('receiver-a.jsonl', original) or not span_received('receiver-a.jsonl', original):
+                return False
+            counts[:] = [int(point['asInt']) for point in metric_points('receiver-a.jsonl', 'routerd.healthcheck.probes', 'sum')
+                         if attributes(point) == {'routerd.resource.name': 'probe', 'routerd.healthcheck.result': details['result'],
+                                                  'server.address': '192.0.2.2', 'network.protocol.name': 'tcp'}
+                         and int(point['timeUnixNano']) >= finished and int(point['asInt']) > previous_count]
+            # Phase is part of the metric identity; an older Healthy series may
+            # coexist with Unhealthy. Require a new collection after this probe.
+            phases = [point for point in metric_points('receiver-a.jsonl', 'routerd.healthcheck.phase', 'gauge')
+                      if attributes(point) == {'routerd.resource.name': 'probe', 'routerd.healthcheck.phase': details['phase']}
+                      and int(point['timeUnixNano']) >= finished]
+            expected = {'Healthy': 2, 'Unhealthy': -2}[details['phase']]
+            assert all(int(point['asInt']) == expected for point in phases), phases
+            return bool(counts and phases)
+        # The product uses the SDK PeriodicReader at 30 seconds; this permits
+        # one export interval without changing the actual probe timing.
+        wait(delivered, 'log/span/metrics for '+details['result']+'/'+details['phase'], 45)
+        count = max(counts)
+        print('PASS real TCP probe log/span/metrics', json.dumps({'epoch': original['epoch'], 'sequence': original['sequence'],
+              'result': details['result'], 'phase': details['phase'], 'counter': count,
+              'started_at': details['probe_started_at'], 'finished_at': details['probe_finished_at']}), flush=True)
+        return count
+
+    def probe_peer():
+        process = start('otlp-peer', ['python3', '-I', str(stage/'peer.py'), '--mode', 'tcp', '--port', '18082',
+                                    '--output', str(stage/'tcp-probe.jsonl')], 'tcp-probe')
+        def listening():
+            if process.poll() is not None:
+                raise RuntimeError('independent TCP probe endpoint exited')
+            return bool(run(inside('otlp-peer', ['ss', '-H', '-ltn', 'sport = :18082'])))
+        wait(listening, 'independent TCP probe endpoint', 10)
+        return process
+
     def commit(resources, label):
         current = api('control.sock', '/v1/config')
         api('control.sock', '/v1/config/commit', {'expected_revision': current['revision'], 'request_id': label, 'config': {'schema_version': 2, 'resources': resources}})
@@ -154,7 +263,7 @@ def peer(stage):
         config = {'receivers': {'otlp': {'protocols': {'grpc': {'endpoint': '192.0.2.2:'+str(port)}}}},
                   'exporters': {'file': {'path': str(stage/name), 'append': True, 'flush_interval': '100ms'}},
                   'service': {'telemetry': {'logs': {'level': 'error'}, 'metrics': {'level': 'none'}},
-                              'pipelines': {'logs': {'receivers': ['otlp'], 'exporters': ['file']}}}}
+                              'pipelines': {signal: {'receivers': ['otlp'], 'exporters': ['file']} for signal in ('logs', 'metrics', 'traces')}}}
         path = stage/(name+'.collector.json')
         path.write_text(json.dumps(config))
         process = start('otlp-peer', [os.environ['ROUTERD_OTLP_COLLECTOR'], '--config', str(path)], name)
@@ -177,9 +286,12 @@ def peer(stage):
         resources = [{'id': device, 'interface': {'name': device}} for device in ('wan0', 'lan0')]
         resources += [{'id': device+'-address', 'depends_on': [device], 'address': {'interface': device, 'cidr': address}} for device, address in [('wan0', '192.0.2.1/24'), ('lan0', '198.51.100.1/24')]]
         resources += [{'id': 'forward', 'forwarding': {'ipv4': True, 'ipv4_rp_filter': 0}}]
+        resources += [{'id': 'probe', 'depends_on': ['wan0-address'], 'service': {'name': 'probe', 'health': {
+            'interface': 'wan0', 'source_address': '192.0.2.1', 'target': '192.0.2.2', 'protocol': 'tcp', 'port': 18082,
+            'interval_ms': 500, 'timeout_ms': 500, 'healthy_threshold': 2, 'unhealthy_threshold': 2}}}]
         legacy = {'apiVersion': 'routerd.net/v1alpha1', 'kind': 'Router', 'metadata': {'name': 'otlp-acceptance'}, 'spec': {'resources': [
             {'apiVersion': 'observability.routerd.net/v1alpha1', 'kind': 'Telemetry', 'metadata': {'name': 'collector'}, 'spec': {
-                'otlp': {'endpoint': 'http://192.0.2.2:4317', 'insecure': True}, 'serviceNamespace': 'acceptance', 'signals': ['logs']}},
+                'otlp': {'endpoint': 'http://192.0.2.2:4317', 'insecure': True}, 'serviceNamespace': 'acceptance', 'signals': ['logs', 'metrics', 'traces']}},
             {'apiVersion': 'system.routerd.net/v1alpha1', 'kind': 'LogSink', 'metadata': {'name': 'otlp'}, 'spec': {
                 'type': 'otlp', 'minLevel': 'info', 'otlp': {'telemetryRef': 'Telemetry/collector'}}}]}}
         (stage/'legacy.json').write_text(json.dumps(legacy))
@@ -191,12 +303,13 @@ def peer(stage):
         sink = imported['resources'][0]
         sender = 'service.'+sink['service']['name']
         (stage/'config.json').write_text(json.dumps({'schema_version': 2, 'resources': resources+[sink]}))
-        boot = {'platform': 'host', 'config': str(stage/'config.json'), 'runtime_dir': str(stage/'run'), 'state_dir': str(stage/'state'), 'workers': {role: str(stage/('routerd-logging' if role == 'logging' else 'routerd-modules')) for role in ('logging', 'network', 'control', 'management', 'otlp_logs')}}
+        boot = {'platform': 'host', 'config': str(stage/'config.json'), 'runtime_dir': str(stage/'run'), 'state_dir': str(stage/'state'), 'workers': {role: str(stage/('routerd-logging' if role == 'logging' else 'routerd-modules')) for role in ('logging', 'network', 'control', 'management', 'health', 'otlp_logs')}}
         (stage/'boot.json').write_text(json.dumps(boot))
         receiver(4317, 'receiver-a.jsonl')
         second = receiver(4318, 'receiver-b.jsonl')
         start('otlp-peer', ['python3', '-I', str(stage/'peer.py'), '--mode', 'echo', '--port', '18081', '--output', str(stage/'echo.jsonl')], 'echo')
         wait(lambda: rows('echo.jsonl'), 'independent UDP echo receiver')
+        tcp_peer = probe_peer()
         start('otlp-router', [str(stage/'routerd'), 'boot', '--file', str(stage/'boot.json')], 'router')
         wait(lambda: (stage/'run/control.sock').exists(), 'control socket')
         wait(lambda: api('control.sock', '/v1/config')['healthy'] and modules().get(sender, {}).get('ready'), 'configured otlp worker')
@@ -217,6 +330,22 @@ def peer(stage):
         assert all(r.get('body', {}).get('stringValue') != marker for _, r in records('receiver-a.jsonl'))
         print('PASS auxiliary DEBUG input retained locally and excluded remotely at info threshold', flush=True)
 
+        healthy = health_record('passed', 'Healthy', time.time_ns())
+        first_count = measured(healthy)
+        assert any(row['peer'][0] == '192.0.2.1' for row in rows('tcp-probe.jsonl')), 'no independent TCP accept'
+        tcp_peer.terminate()
+        tcp_peer.wait(timeout=5)
+        stopped_at = time.time_ns()
+        unhealthy = health_record('failed', 'Unhealthy', stopped_at)
+        measured(unhealthy)
+        accepted_before = len(rows('tcp-probe.jsonl'))
+        tcp_peer = probe_peer()
+        healthy = health_record('passed', 'Healthy', time.time_ns())
+        measured(healthy, first_count)
+        assert len(rows('tcp-probe.jsonl')) > accepted_before, 'no independent TCP accept after recovery'
+        assert all(row['ok'] for row in rows('forwarding.jsonl'))
+        print('PASS independent TCP stop/recovery changed actual Health measurements; routed UDP continued', flush=True)
+
         sink['service']['otlp_logs']['endpoint'] = 'http://192.0.2.2:4318'
         commit(resources+[sink], 'change-otlp-destination')
         record = restart_management()
@@ -227,12 +356,19 @@ def peer(stage):
         second.terminate()
         second.wait(timeout=5)
         before_disk = api('logging.sock', '/v1/status')['disk_written']
+        before_probe = api('control.sock', '/v1/services/service.probe')
         before_forwarding = len(rows('forwarding.jsonl'))
         for _ in range(3):
             record = restart_management()
         wait(lambda: api('logging.sock', '/v1/status')['disk_written'] > before_disk, 'local disk records during receiver outage')
         wait(lambda: len(rows('forwarding.jsonl')) >= before_forwarding+10, 'forwarding during receiver outage')
         assert all(row['ok'] for row in rows('forwarding.jsonl'))
+        def probing():
+            current = api('control.sock', '/v1/services/service.probe')
+            assert current['generation'] == before_probe['generation'], 'collector outage restarted Health producer'
+            return current['snapshot']['observed_nanos'] > before_probe['snapshot']['observed_nanos']
+        wait(probing, 'actual Health observation during collector outage')
+        print('PASS Health observations advanced without restarting during collector outage', flush=True)
         old = modules()[sender]
         sink['service']['otlp_logs']['attributes'] = {'phase': 'replacement-with-collector-offline'}
         replacement_started = time.monotonic()
@@ -305,7 +441,7 @@ def peer(stage):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--inside', type=Path)
-    parser.add_argument('--mode', choices=('echo', 'client'))
+    parser.add_argument('--mode', choices=('echo', 'client', 'tcp'))
     parser.add_argument('--port', type=int, default=18081)
     parser.add_argument('--collector', type=Path, default=Path('/usr/local/bin/otelcol-contrib'))
     parser.add_argument('--binary-dir', type=Path, default=Path('dist/bin'))
@@ -328,9 +464,11 @@ def main():
     (args.output/'binaries.json').write_text(json.dumps(hashes, indent=2)+'\n')
     print('Private stage', stage, flush=True)
     parent_netns = os.readlink('/proc/self/ns/net')
+    # Three distinct Health phases each await the 30-second metric reader,
+    # in addition to the existing lifecycle and collector-outage acceptance.
     with (args.output/'peer.log').open('w') as output:
-        result = subprocess.run(root+['env', 'ROUTERD_OTLP_PARENT_NETNS='+parent_netns, 'ROUTERD_OTLP_COLLECTOR='+str(args.collector.resolve()), 'unshare', '--mount', '--net', '--pid', '--fork', '--mount-proc', '--kill-child=SIGKILL', '--propagation', 'private', 'python3', '-I', str(stage/'peer.py'), '--inside', str(stage)], stdout=output, stderr=subprocess.STDOUT, timeout=150)
-    for name in ('router.log', 'receiver-a.jsonl', 'receiver-b.jsonl', 'forwarding.jsonl'):
+        result = subprocess.run(root+['env', 'ROUTERD_OTLP_PARENT_NETNS='+parent_netns, 'ROUTERD_OTLP_COLLECTOR='+str(args.collector.resolve()), 'unshare', '--mount', '--net', '--pid', '--fork', '--mount-proc', '--kill-child=SIGKILL', '--propagation', 'private', 'python3', '-I', str(stage/'peer.py'), '--inside', str(stage)], stdout=output, stderr=subprocess.STDOUT, timeout=240)
+    for name in ('router.log', 'receiver-a.jsonl', 'receiver-b.jsonl', 'forwarding.jsonl', 'tcp-probe.jsonl'):
         artifact = subprocess.run(root+['cat', str(stage/name)], capture_output=True)
         if artifact.returncode == 0:
             (args.output/name).write_bytes(artifact.stdout)

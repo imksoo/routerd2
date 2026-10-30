@@ -9,6 +9,7 @@ import (
 	"maps"
 	"net"
 	"net/url"
+	"slices"
 	"strings"
 )
 
@@ -20,6 +21,7 @@ type Config struct {
 	ServiceNamespace string            `json:"service_namespace,omitempty"`
 	Attributes       map[string]string `json:"attributes,omitempty"`
 	MinLevel         string            `json:"min_level,omitempty"`
+	Signals          []string          `json:"signals,omitempty"`
 }
 
 func Normalize(c Config) Config {
@@ -33,6 +35,11 @@ func Normalize(c Config) Config {
 	}
 	if c.MinLevel == "warn" {
 		c.MinLevel = "warning"
+	}
+	if len(c.Signals) == 0 {
+		c.Signals = []string{"logs"}
+	} else {
+		c.Signals = slices.Clone(c.Signals)
 	}
 	c.Headers = maps.Clone(c.Headers)
 	c.Attributes = maps.Clone(c.Attributes)
@@ -55,6 +62,11 @@ func Validate(c Config) error {
 	}
 	if p, err := net.LookupPort("tcp", port); err != nil || p == 0 {
 		return errors.New("invalid OTLP/gRPC port")
+	}
+	for _, signal := range c.Signals {
+		if signal != "logs" && signal != "metrics" && signal != "traces" {
+			return fmt.Errorf("unsupported OTLP signal %q", signal)
+		}
 	}
 	switch c.MinLevel {
 	case "debug", "info", "warning", "error":

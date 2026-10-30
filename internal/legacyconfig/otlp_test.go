@@ -3,12 +3,12 @@
 package legacyconfig
 
 import (
-	"errors"
+	"slices"
 	"strings"
 	"testing"
 )
 
-func TestOTLPLogsImportPreservesDestinationAndRejectsMissingSignals(t *testing.T) {
+func TestTelemetryImportPreservesDestinationAndSignalSelection(t *testing.T) {
 	result := compiled(t, "otlp")
 	got := service(t, result.Document, "otlp_logs").OTLPLogs
 	if len(result.Document.Resources) != 1 {
@@ -20,9 +20,13 @@ func TestOTLPLogsImportPreservesDestinationAndRejectsMissingSignals(t *testing.T
 	for _, signals := range []string{"", "        signals: [logs, metrics, traces]"} {
 		input := strings.Replace(string(fixture(t, "otlp")), "        signals: [logs]", signals, 1)
 		result, err := Compile([]byte(input))
-		var unsupported *UnsupportedError
-		if !errors.As(err, &unsupported) || len(result.Document.Resources) != 0 {
-			t.Fatalf("unimplemented signals were discarded: %v", err)
+		if err != nil {
+			t.Fatal(err)
 		}
+		got := service(t, result.Document, "otlp_logs").OTLPLogs
+		if !slices.Equal(got.Signals, []string{"logs", "metrics", "traces"}) {
+			t.Fatalf("signals changed: %v", got.Signals)
+		}
+
 	}
 }

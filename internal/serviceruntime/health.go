@@ -17,6 +17,7 @@ import (
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/health"
 	"github.com/imksoo/routerd2/internal/protocolevents"
+	"github.com/imksoo/routerd2/internal/telemetry"
 )
 
 func (c *effectsClient) runHealth(ctx context.Context, dir, eventDir string, cfg health.Config, ready func()) error {
@@ -28,8 +29,11 @@ func (c *effectsClient) runHealth(ctx context.Context, dir, eventDir string, cfg
 	defer func() { cancel(); <-done }()
 
 	networkClient := localapi.NewClient(filepath.Join(dir, "network.sock"))
+	var probeStarted, probeFinished time.Time
 	probe := func(ctx context.Context, cfg health.Config) old.ProbeResult {
+		probeStarted = time.Now()
 		result := health.Probe(ctx, cfg)
+		probeFinished = time.Now()
 		// Evidence is best effort, and cannot turn a successful scoped probe into
 		// failure. The network worker alone performs the Netlink route lookup.
 		evidenceCtx, cancel := context.WithTimeout(ctx, 150*time.Millisecond)
@@ -49,6 +53,9 @@ func (c *effectsClient) runHealth(ctx context.Context, dir, eventDir string, cfg
 	var dropped uint64
 	return health.RunWithProbe(ctx, cfg, func(ctx context.Context, s health.Snapshot) error {
 		if s.ProbeEvent != nil {
+			// The existing log handler only queues: receiver/disk failure cannot
+			// delay a probe or change the authority carried by its observation.
+			telemetry.HealthProbe{Resource: cfg.Resource, Interface: cfg.Interface, Target: cfg.Target, Protocol: cfg.Protocol, Result: s.State.LastResult, Phase: s.State.Phase, StartedAt: probeStarted, FinishedAt: probeFinished}.Record(ctx)
 			c.mu.Lock()
 			identity := c.identity
 			c.mu.Unlock()

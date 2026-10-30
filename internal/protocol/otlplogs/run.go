@@ -6,11 +6,13 @@ package otlplogs
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -55,14 +57,6 @@ func Run(ctx context.Context, cfg otlplogconfig.Config, runtimeDir string, ready
 		return err
 	}
 	defer conn.Close()
-	exporter, err := otlploggrpc.New(ctx,
-		otlploggrpc.WithGRPCConn(conn), otlploggrpc.WithEndpoint(endpoint),
-		otlploggrpc.WithHeaders(cfg.Headers), otlploggrpc.WithCompressor("none"),
-		otlploggrpc.WithTimeout(operationTimeout), otlploggrpc.WithRetry(otlploggrpc.RetryConfig{Enabled: false}),
-	)
-	if err != nil {
-		return err
-	}
 	attrs := []attribute.KeyValue{attribute.String("service.name", cfg.ServiceName), attribute.String("service.version", buildinfo.ReleaseID)}
 	if cfg.ServiceNamespace != "" {
 		attrs = append(attrs, attribute.String("service.namespace", cfg.ServiceNamespace))
@@ -73,21 +67,43 @@ func Run(ctx context.Context, cfg otlplogconfig.Config, runtimeDir string, ready
 	for key, value := range cfg.Attributes {
 		attrs = append(attrs, attribute.String(key, value))
 	}
-	provider := sdklog.NewLoggerProvider(
-		sdklog.WithResource(resource.NewSchemaless(attrs...)),
-		sdklog.WithAttributeCountLimit(128), sdklog.WithAttributeValueLengthLimit(-1),
-		sdklog.WithProcessor(sdklog.NewBatchProcessor(exporter,
-			sdklog.WithMaxQueueSize(1024), sdklog.WithExportMaxBatchSize(logging.MaxQuery),
-			sdklog.WithExportInterval(250*time.Millisecond), sdklog.WithExportTimeout(operationTimeout), sdklog.WithExportBufferSize(1))),
-	)
+	res := resource.NewSchemaless(attrs...)
+	var logger log.Logger
+	var provider *sdklog.LoggerProvider
+	var probes *probeSignals
 	defer func() {
 		stop, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		if err := provider.Shutdown(stop); err != nil {
-			slog.Warn("OTLP log export shutdown failed", "error", err)
+		err := probes.close(stop)
+		if provider != nil {
+			err = errors.Join(err, provider.Shutdown(stop))
+		}
+		if err != nil {
+			slog.Warn("OTLP export shutdown failed", "error", err)
 		}
 	}()
-	logger := provider.Logger("routerd2.local-log")
+	if slices.Contains(cfg.Signals, "logs") {
+		exporter, err := otlploggrpc.New(ctx,
+			otlploggrpc.WithGRPCConn(conn), otlploggrpc.WithEndpoint(endpoint),
+			otlploggrpc.WithHeaders(cfg.Headers), otlploggrpc.WithCompressor("none"),
+			otlploggrpc.WithTimeout(operationTimeout), otlploggrpc.WithRetry(otlploggrpc.RetryConfig{Enabled: false}),
+		)
+		if err != nil {
+			return err
+		}
+		provider = sdklog.NewLoggerProvider(
+			sdklog.WithResource(res),
+			sdklog.WithAttributeCountLimit(128), sdklog.WithAttributeValueLengthLimit(-1),
+			sdklog.WithProcessor(sdklog.NewBatchProcessor(exporter,
+				sdklog.WithMaxQueueSize(1024), sdklog.WithExportMaxBatchSize(logging.MaxQuery),
+				sdklog.WithExportInterval(250*time.Millisecond), sdklog.WithExportTimeout(operationTimeout), sdklog.WithExportBufferSize(1))),
+		)
+		logger = provider.Logger("routerd2.local-log")
+	}
+	probes, err = newProbeSignals(ctx, cfg, conn, res)
+	if err != nil {
+		return err
+	}
 	client := localapi.NewClient(filepath.Join(runtimeDir, logging.SocketName))
 	defer client.HTTP.CloseIdleConnections()
 	var cursor logging.Cursor
@@ -100,7 +116,11 @@ func Run(ctx context.Context, cfg otlplogconfig.Config, runtimeDir string, ready
 			return nil
 		case <-timer.C:
 		}
-		page, err := query(ctx, client, cfg.MinLevel, cursor)
+		level := cfg.MinLevel
+		if probes != nil && level != "debug" {
+			level = "info"
+		}
+		page, err := query(ctx, client, level, cursor)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil
@@ -128,7 +148,12 @@ func Run(ctx context.Context, cfg otlplogconfig.Config, runtimeDir string, ready
 				if entry.PID == os.Getpid() {
 					continue
 				}
-				logger.Emit(ctx, record(entry))
+				if probes != nil {
+					probes.record(ctx, entry)
+				}
+				if logger != nil && logLevel(entry.Level) >= logLevel(cfg.MinLevel) {
+					logger.Emit(ctx, record(entry))
+				}
 			}
 			cursor = page.Cursor
 		}
@@ -200,4 +225,18 @@ func record(entry logging.Record) log.Record {
 		r.AddAttributes(log.Map("routerd.attributes", attrs...))
 	}
 	return r
+}
+
+func logLevel(level string) int {
+	switch strings.ToLower(level) {
+	case "debug":
+		return 0
+	case "info":
+		return 1
+	case "warn", "warning":
+		return 2
+	case "error":
+		return 3
+	}
+	return 1
 }
