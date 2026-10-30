@@ -119,8 +119,8 @@ func checkUpdateView(t *testing.T, ctx context.Context, endpoint string, state r
 	}
 	// /v1/version is served by this fixture's real control handler in-process.
 	running := buildinfo.Current()
-	if fields["running"] != fmt.Sprintf("%s （%s / %s）", running.ReleaseID, running.GOOS, running.GOARCH) {
-		t.Fatal("update view differs from the control handler's executing version")
+	if fields["running"] != fmt.Sprintf("%s（%s / %s）", running.ReleaseID, running.GOOS, running.GOARCH) {
+		t.Fatalf("update view running version=%q; control executing version=%q", fields["running"], fmt.Sprintf("%s（%s / %s）", running.ReleaseID, running.GOOS, running.GOARCH))
 	}
 	expected := map[string]*release.Ref{"active": state.Active, "previous": state.Previous}
 	if state.Pending != nil {
