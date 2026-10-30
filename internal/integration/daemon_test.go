@@ -8,8 +8,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/ed25519"
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"html"
@@ -126,11 +124,43 @@ spec:
 	if err = config.AtomicJSON(configPath, doc); err != nil {
 		t.Fatal(err)
 	}
-	_, private, err := ed25519.GenerateKey(rand.Reader)
+	// The source identity exists before routerd2 starts. Pin its public key,
+	// never a key learned from the new server, in the independent client.
+	legacyKey, clientKey := filepath.Join(dir, "legacy_host_key"), filepath.Join(dir, "client_key")
+	for _, path := range []string{legacyKey, clientKey} {
+		if output, err := exec.Command("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", path).CombinedOutput(); err != nil {
+			t.Fatalf("generate independent OpenSSH key: %v %s", err, output)
+		}
+	}
+	hostBytes, err := os.ReadFile(legacyKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	signer, err := ssh.NewSignerFromKey(private)
+	hostPublic, err := os.ReadFile(legacyKey + ".pub")
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, _, _, _, err := ssh.ParseAuthorizedKey(hostPublic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(stateDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	hostPath := filepath.Join(stateDir, "ssh_host_ed25519_key")
+	if err := os.WriteFile(hostPath, hostBytes, 0600); err != nil {
+		t.Fatal(err)
+	}
+	knownHosts := filepath.Join(dir, "known_hosts")
+	if err := os.WriteFile(knownHosts, append([]byte(fmt.Sprintf("[198.18.0.1]:%d ", sshPort)), hostPublic...), 0600); err != nil {
+		t.Fatal(err)
+	}
+	private, err := os.ReadFile(clientKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := ssh.ParsePrivateKey(private)
+	clear(private)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,29 +177,43 @@ spec:
 		t.Fatal(err)
 	}
 	defer log.Close()
-	daemon := exec.Command(filepath.Join(os.Getenv("ROUTERD2_TEST_BIN_DIR"), "routerd"), "boot", "--file="+boot)
-	daemon.Stdout = log
-	daemon.Stderr = log
-	if err = daemon.Start(); err != nil {
-		t.Fatal(err)
-	}
-	exited := make(chan error, 1)
-	go func() { exited <- daemon.Wait() }()
-	defer func() {
-		if t.Failed() {
-			t.Logf("executable FD diagnostics before shutdown:\n%s", executableFDReport(map[string]string{"modules": b.Workers["network"], "logging": b.Workers["logging"]}, daemon.Process.Pid))
+	startDaemon := func() (*exec.Cmd, chan error) {
+		t.Helper()
+		daemon := exec.Command(filepath.Join(os.Getenv("ROUTERD2_TEST_BIN_DIR"), "routerd"), "boot", "--file="+boot)
+		daemon.Stdout = log
+		daemon.Stderr = log
+		if err := daemon.Start(); err != nil {
+			t.Fatal(err)
 		}
-		_ = daemon.Process.Signal(syscall.SIGTERM)
+		exited := make(chan error, 1)
+		go func() { exited <- daemon.Wait() }()
+		return daemon, exited
+	}
+	daemon, exited := startDaemon()
+	stopDaemon := func() {
+		t.Helper()
+		if daemon == nil {
+			return
+		}
+		process := daemon.Process
+		daemon = nil
+		_ = process.Signal(syscall.SIGTERM)
 		select {
 		case err := <-exited:
 			if err != nil {
-				t.Errorf("daemon exit: %v", err)
+				t.Fatalf("daemon exit: %v", err)
 			}
 		case <-time.After(12 * time.Second):
-			_ = daemon.Process.Kill()
+			_ = process.Kill()
 			<-exited
-			t.Error("daemon failed to drain its workers")
+			t.Fatal("daemon failed to drain its workers")
 		}
+	}
+	defer func() {
+		if t.Failed() && daemon != nil {
+			t.Logf("executable FD diagnostics before shutdown:\n%s", executableFDReport(map[string]string{"modules": b.Workers["network"], "logging": b.Workers["logging"]}, daemon.Process.Pid))
+		}
+		stopDaemon()
 		if t.Failed() {
 			data, _ := os.ReadFile(logPath)
 			t.Logf("console: %s", data)
@@ -344,18 +388,36 @@ esac
 	t.Logf("independent BusyBox acquired %s (%s); independent HTTP client saw hostname, MAC, actual IP and deadline, renewed deadline and removed released lease", address, clientMAC)
 	answer(t, dnsPort, "192.0.2.1")
 	// The SSH channel drives the real candidate editor and control transaction.
-	hostBytes, err := os.ReadFile(filepath.Join(stateDir, "ssh_host_ed25519_key"))
-	if err != nil {
-		t.Fatal(err)
+	openSSHState := func() control.State {
+		t.Helper()
+		var output []byte
+		err := fixtureInsideNamespace(peer, func() error {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			var err error
+			output, err = exec.CommandContext(ctx, "ssh", "-F", "/dev/null", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "UserKnownHostsFile="+knownHosts, "-o", "GlobalKnownHostsFile=/dev/null", "-o", "UpdateHostKeys=no", "-o", "IdentityAgent=none", "-o", "IdentitiesOnly=yes", "-o", "ConnectTimeout=3", "-i", clientKey, "-p", fmt.Sprint(sshPort), "admin@198.18.0.1", "show config").CombinedOutput()
+			return err
+		})
+		var state control.State
+		if err != nil || json.Unmarshal(output, &state) != nil || state.Revision == 0 {
+			t.Fatalf("independent OpenSSH pinned to the source identity: %v %s", err, output)
+		}
+		current, err := os.ReadFile(hostPath)
+		if err != nil || !bytes.Equal(current, hostBytes) {
+			t.Fatal("migration changed the source host key encoding", err)
+		}
+		info, err := os.Stat(hostPath)
+		if err != nil || info.Mode().Perm() != 0600 {
+			t.Fatal("migration changed private host key permissions", err)
+		}
+		return state
 	}
-	host, err := ssh.ParsePrivateKey(hostBytes)
-	if err != nil {
-		t.Fatal(err)
-	}
+	_ = openSSHState()
+	t.Logf("independent OpenSSH authenticated with the source host identity %s after initial provisioning; original OpenSSH bytes and mode 0600 retained", ssh.FingerprintSHA256(host))
 	var client *ssh.Client
 	err = fixtureInsideNamespace(peer, func() error {
 		var dialErr error
-		client, dialErr = ssh.Dial("tcp", fmt.Sprintf("198.18.0.1:%d", sshPort), &ssh.ClientConfig{User: "admin", Auth: []ssh.AuthMethod{ssh.PublicKeys(signer)}, HostKeyCallback: ssh.FixedHostKey(host.PublicKey()), Timeout: 3 * time.Second})
+		client, dialErr = ssh.Dial("tcp", fmt.Sprintf("198.18.0.1:%d", sshPort), &ssh.ClientConfig{User: "admin", Auth: []ssh.AuthMethod{ssh.PublicKeys(signer)}, HostKeyCallback: ssh.FixedHostKey(host), Timeout: 3 * time.Second})
 		return dialErr
 	})
 	if err != nil {
@@ -760,6 +822,22 @@ esac
 		t.Fatalf("SSH current derived view: %v %s", err, derivedOutput)
 	}
 	t.Log("real SSH show derived returned current finite status for a resource ID containing slash")
+	beforeRestart := openSSHState()
+	previousPID := daemon.Process.Pid
+	_ = client.Close()
+	stopDaemon()
+	daemon, exited = startDaemon()
+	until(t, 15*time.Second, func() bool { return status().Ready })
+	until(t, 5*time.Second, func() bool {
+		var health control.Health
+		return ctl.Do(ctx, "GET", "/v1/health", nil, &health) == nil && health.Healthy
+	})
+	afterRestart := openSSHState()
+	if afterRestart.Revision != beforeRestart.Revision {
+		t.Fatalf("whole-product restart lost configuration: revision %d -> %d", beforeRestart.Revision, afterRestart.Revision)
+	}
+	peerAnswer("192.0.2.2")
+	t.Logf("whole-product restart %d -> %d: independent OpenSSH reauthenticated against the unchanged source host identity; revision %d and independent UDP/TCP DNS retained", previousPID, daemon.Process.Pid, afterRestart.Revision)
 	// Removal must release the actual bound sockets, not merely hide status.
 	state = control.State{}
 	if err = ctl.Do(ctx, "GET", "/v1/config", nil, &state); err != nil {

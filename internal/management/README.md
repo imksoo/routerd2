@@ -43,3 +43,37 @@ publication boundaries are separate from write-time power-cut/ENOSPC/fsync tests
 
 Scratch key encodings are cleared where practical. This is not encrypted storage
 or a guarantee that Go runtime and crypto-library copies are erased.
+
+## Initial migration from OpenSSH
+
+Before the first routerd2 boot, place the selected source host private key at
+`StateDir/ssh_host_ed25519_key` in an otherwise new state directory. Preserve the
+unencrypted OpenSSH bytes, use a worker-owned regular file with mode 0600 (0400
+also works), and satisfy the directory ownership rules above. Provision
+`SSH.User` and one plain public key per `SSH.AuthorizedKeys` entry in the boot
+configuration. Existing OS accounts and `authorized_keys` options are not
+imported automatically. This moves the selected SSH identity and public-key
+access to the routerd2 management CLI; it does not provide an OS shell or SFTP.
+
+Use the source public key in the client's `known_hosts` before the first
+connection. Keep `StrictHostKeyChecking=yes`; accepting a newly observed key
+would not demonstrate preservation of identity. The normal management check is:
+
+```sh
+python3 scripts/daemon-tests.py management --binary-dir dist/bin
+```
+
+It needs `ssh` and `ssh-keygen` from OpenSSH in addition to the existing management
+fixture dependencies and `dist/dnsmasq-engine.tar`. The fixture generates disposable
+source and client Ed25519 keys using `ssh-keygen`, initializes the state file
+before product startup, and uses an independent OpenSSH client from the separate
+LAN namespace to read the committed configuration. After a graceful whole-product
+stop and restart, it authenticates again against the unchanged source public key,
+checks the same committed revision and UDP/TCP DNS, and verifies that the private
+key bytes and permissions were not changed. It does not read production keys.
+
+Captured homert Router configurations identify management access and the web
+console, but do not contain the operating-system SSH account, authorized-key
+options, or selected host key. Those actual migration inputs and target physical
+restart remain unverified; this check establishes the isolated initial migration
+path for one configured user with a plain public key.
