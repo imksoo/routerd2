@@ -52,6 +52,7 @@
   "workers": {
     "logging": "/usr/libexec/routerd-logging",
     "firewall_log": "/usr/libexec/routerd-modules",
+    "traffic_flow": "/usr/libexec/routerd-modules",
     "syslog": "/usr/libexec/routerd-modules",
     "otlp_logs": "/usr/libexec/routerd-modules",
     "network": "/usr/libexec/routerd-modules",
