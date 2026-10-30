@@ -259,7 +259,9 @@ FirewallEventLogは旧logstore.RecordBatch/ApplyRetentionを再利用して、�
 端末のDNS問い合わせ先は受信値を使用するが、OS標準resolver統合の試験ではない。署名更新・失敗復旧、
 homert全engineのイメージ、対象実機の受入は別に残る。
 
-- `CGO_ENABLED=0` のamd64/arm64製品ビルドと署名catalogを検査し、実bootで必要worker・engineを起動する。
+- amd64/arm64の通常配布ビルドと署名付き一覧を検査し、実起動で必要な担当プロセスとエンジンを起動する。
+  `routerd` と `routerd-logging` は `CGO_ENABLED=0`、nDPIを組み込む `routerd-modules` は
+  `CGO_ENABLED=1` とし、いずれも静的リンクを確認する。
   コンパイル・署名成功と対象architectureでの実行は別に記録する。
 - 実SSH upload、検証、stage、明示reboot、health確認、更新失敗とfallback、電源断、disk full、署名改竄、
   kernel/module不一致、read-only rootfs、persistent stateと再起動後の管理到達を確認する。
