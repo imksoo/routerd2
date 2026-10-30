@@ -69,7 +69,7 @@ func TestDaemonDHCPv4DelayedACK(t *testing.T) {
 	if err := peer.FilterAdd(&netlink.Flower{FilterAttrs: netlink.FilterAttrs{LinkIndex: link.Attrs().Index, Parent: netlink.MakeHandle(1, 0), Protocol: unix.ETH_P_IP, Priority: 1}, ClassId: netlink.MakeHandle(1, 3), EthType: unix.ETH_P_IP, IPProto: &udp, SrcPort: 67, DestPort: 68}); err != nil {
 		t.Fatal(err)
 	}
-	startFixtureDNSMasq(t, peerNS, []string{"--port=0", "--dhcp-range=192.0.2.10,192.0.2.20,255.255.255.0,60s"})
+	startFixtureDNSMasq(t, peerNS, "server0", []string{"--port=0", "--dhcp-range=192.0.2.10,192.0.2.20,255.255.255.0,60s"})
 	capture := healthPBRCapture(t, "wan0")
 	f := startFixtureDaemon(t, config.FromNative(config.Native{Network: network.Desired{Interfaces: []network.Interface{{Name: "wan0"}}}, Services: []serviceconfig.Service{{Name: "wan", DHCP4: &serviceconfig.DHCP4{Interface: "wan0"}}}}))
 	snapshot := func() dhcp4.Snapshot {

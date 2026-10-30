@@ -127,3 +127,28 @@ spec:
               interface: lan-extra
               macAddress: '02:00:5E:00:42:02'
               linkLocalAddress: fe80::42:2
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: DNSResolver
+      metadata: {name: election-dns}
+      spec:
+        listen: [{name: local, addresses: [192.0.2.2], port: 1053, sources: [wan-dns, local-dns]}]
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: DNSUpstream
+      metadata: {name: learned-wan}
+      spec:
+        protocol: udp
+        addressFrom: [{resource: DHCPv6Information/wan-info, field: dnsServers}]
+        sourceInterface: wan-identity
+        when: {state: {VirtualAddress/gateway.role: {equals: master}}}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: DNSForwarder
+      metadata: {name: wan-dns}
+      spec: {resolver: DNSResolver/election-dns, match: [wan.test], upstreams: [DNSUpstream/learned-wan]}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: DNSZone
+      metadata: {name: local-dns}
+      spec: {zone: home.arpa, records: [{hostname: router, ipv4: 192.0.2.254}]}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: DNSForwarder
+      metadata: {name: local-dns}
+      spec: {resolver: DNSResolver/election-dns, match: [home.arpa], zoneRefs: [DNSZone/local-dns]}

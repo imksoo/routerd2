@@ -98,7 +98,7 @@ func TestDaemonDHCP6RAIndependentPeers(t *testing.T) {
 		}
 		return ready
 	})
-	server := startFixtureDNSMasq(t, provider, []string{"--dhcp-range=2001:db8:42::100,2001:db8:42::110,64,120s", "--dhcp-option=option6:dns-server,[fe80::2]", "--dhcp-option=option6:domain-search,wan.test", "--port=53", "--no-resolv", "--no-hosts", "--address=/wan.test/2001:db8:ffff::9"})
+	server := startFixtureDNSMasq(t, provider, "server0", []string{"--dhcp-range=2001:db8:42::100,2001:db8:42::110,64,120s", "--dhcp-option=option6:dns-server,[fe80::2]", "--dhcp-option=option6:domain-search,wan.test", "--port=53", "--no-resolv", "--no-hosts", "--address=/wan.test/2001:db8:ffff::9"})
 	ctx := context.Background()
 	snapshot := func() (dhcp6config.Snapshot, uint64) {
 		t.Helper()
@@ -502,7 +502,7 @@ func TestDaemonDHCP6RAIndependentPeers(t *testing.T) {
 		}
 		return ready
 	})
-	server = startFixtureDNSMasq(t, provider, []string{"--dhcp-range=2001:db8:43::100,2001:db8:43::110,64,120s", "--dhcp-option=option6:dns-server,[fe80::2]", "--dhcp-option=option6:domain-search,wan.test", "--port=53", "--no-resolv", "--no-hosts", "--address=/wan.test/2001:db8:ffff::9"})
+	server = startFixtureDNSMasq(t, provider, "server0", []string{"--dhcp-range=2001:db8:43::100,2001:db8:43::110,64,120s", "--dhcp-option=option6:dns-server,[fe80::2]", "--dhcp-option=option6:domain-search,wan.test", "--port=53", "--no-resolv", "--no-hosts", "--address=/wan.test/2001:db8:ffff::9"})
 	advertisedPrefix = "2001:db8:43::/64"
 	advertise(false, false)
 	if err := router.Process.Signal(unix.SIGHUP); err != nil {

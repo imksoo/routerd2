@@ -9,6 +9,14 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
 )
 
+// DNSUpstreamOwner limits a learned endpoint to the named elected router.
+// The endpoint retains the earlier of its protocol and election deadlines.
+type DNSUpstreamOwner struct {
+	Source   string `json:"source"`
+	Provider string `json:"provider"`
+	VRRP     string `json:"vrrp"`
+}
+
 func validateDNSSources(services []Service) error {
 	servers := map[string]dhcpserverconfig.Config{}
 	for _, s := range services {
@@ -77,6 +85,31 @@ func validateDNSSources(services []Service) error {
 				if !found {
 					return fmt.Errorf("DNS service %s requires configured DNS provider %s", s.Name, name)
 				}
+			}
+		}
+
+		seenOwners := map[[2]string]bool{}
+		for _, owner := range s.DNS.UpstreamOwners {
+			key := [2]string{owner.Source, owner.Provider}
+			if seenOwners[key] {
+				return fmt.Errorf("DNS service %s has duplicate learned upstream ownership", s.Name)
+			}
+			seenOwners[key] = true
+			foundSource, foundOwner := false, false
+			for _, source := range s.DNS.Spec.Sources {
+				if source.Name != owner.Source {
+					continue
+				}
+				for _, ref := range append(append([]api.StatusValueSourceSpec(nil), source.UpstreamFrom...), source.BootstrapResolverFrom...) {
+					name, _, _ := dnsconfig.UpstreamProvider(ref)
+					foundSource = foundSource || name == owner.Provider
+				}
+			}
+			for _, provider := range services {
+				foundOwner = foundOwner || provider.Name == owner.VRRP && provider.VRRP != nil
+			}
+			if !foundSource || !foundOwner {
+				return fmt.Errorf("DNS service %s upstream owner requires a declared learned provider and VRRP election", s.Name)
 			}
 		}
 		sets, records := 0, 0

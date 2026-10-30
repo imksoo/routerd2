@@ -222,7 +222,7 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 	c.dhcpServers(vrrpNames)
 	c.leaseSync(vrrpNames)
 	c.dhcpRelays()
-	c.dns()
+	c.dns(vrrpNames)
 	conditions = append(conditions, c.bgp()...)
 	transports, bgpDependencies := c.ipipTransports()
 	extra = append(extra, transports...)
@@ -408,7 +408,7 @@ func (c *compiler) allow(r resource, fields ...string) {
 	for _, field := range []string{"when", "dependsOn", "ready_when"} {
 		if field == "when" {
 			switch r.Kind {
-			case "DHCPv4Server", "DHCPv4Reservation", "DHCPv4ServerLeaseSync", "DHCPv6PrefixDelegationLeaseSync", "DHCPv6ServerLeaseSync", "IPv4StaticAddress", "NAT44Rule", "BGPRouter", "EgressRoutePolicy", "HealthCheck", "DHCPv6PrefixDelegation", "DHCPv6Information", "NTPClient", "DHCPv6Server", "IPv6RouterAdvertisement":
+			case "DNSUpstream", "DHCPv4Server", "DHCPv4Reservation", "DHCPv4ServerLeaseSync", "DHCPv6PrefixDelegationLeaseSync", "DHCPv6ServerLeaseSync", "IPv4StaticAddress", "NAT44Rule", "BGPRouter", "EgressRoutePolicy", "HealthCheck", "DHCPv6PrefixDelegation", "DHCPv6Information", "NTPClient", "DHCPv6Server", "IPv6RouterAdvertisement":
 				continue
 			case "DSLiteTunnel":
 				if _, dynamic := c.options.DSLite[r.Kind+"/"+r.Metadata.Name]; dynamic || r.Spec.(api.DSLiteTunnelSpec).LocalAddressSource == "delegatedAddress" {

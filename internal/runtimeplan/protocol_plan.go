@@ -136,7 +136,7 @@ func prepareProtocols(doc config.Native, runtimeDir, stateDir string) (protocolP
 			if err != nil {
 				return protocolPlan{}, err
 			}
-			prepared, prepareErr := prepareDNS(cfg.Runtime)
+			prepared, prepareErr := prepareDNS(cfg.Runtime, service.DNS.UpstreamOwners)
 			if prepareErr != nil {
 				return protocolPlan{}, prepareErr
 			}

@@ -18,6 +18,7 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/pppoeconfig"
 	"github.com/imksoo/routerd2/internal/protocol/raclient"
 	"github.com/imksoo/routerd2/internal/protocol/tailscaleconfig"
+	"github.com/imksoo/routerd2/internal/protocol/vrrp"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
 
@@ -35,6 +36,7 @@ type dnsProvider struct {
 }
 
 type dnsTarget struct {
+	owner     string
 	provider  int
 	source    string
 	bootstrap bool
@@ -42,7 +44,7 @@ type dnsTarget struct {
 
 // Bind intent once. A provider shared by forwarding and bootstrap sources is
 // decoded once per observation view, then delivered to its configured targets.
-func prepareDNS(runtime dnsconfig.RuntimeConfig) (dnsPlan, error) {
+func prepareDNS(runtime dnsconfig.RuntimeConfig, owners []serviceconfig.DNSUpstreamOwner) (dnsPlan, error) {
 	plan := dnsPlan{runtime: runtime}
 	var err error
 	plan.listeners, err = dnsconfig.ListenSources(runtime)
@@ -66,6 +68,12 @@ func prepareDNS(runtime dnsconfig.RuntimeConfig) (dnsPlan, error) {
 			plan.providers = append(plan.providers, dnsProvider{name: name, role: role})
 		}
 		target := dnsTarget{provider: index, source: source, bootstrap: bootstrap}
+		for _, owner := range owners {
+			if owner.Source == source && owner.Provider == name {
+				target.owner = "service." + owner.VRRP
+				break
+			}
+		}
 		for _, old := range plan.targets {
 			if old == target {
 				return nil
@@ -303,7 +311,25 @@ func (r *Runtime) DNSInput(moduleName string) (dnsconfig.Input, error) {
 		}
 	}
 	for _, target := range cfg.targets {
+		var ownerUntil lifetime.Deadline
+		if target.owner != "" {
+			update, found := r.records[target.owner]
+			var election vrrp.Snapshot
+			if !found {
+				continue
+			}
+			if err := json.Unmarshal(update.Snapshot, &election); err != nil {
+				return out, err
+			}
+			if !vrrp.CurrentElection(election, clock) || election.State != vrrp.StateActive {
+				continue
+			}
+			ownerUntil = lifetime.Deadline{BootID: election.BootID, Nanos: election.ExpiresNanos}
+		}
 		for _, server := range learned[target.provider] {
+			if target.owner != "" && ownerUntil.Remaining(clock) < server.until.Remaining(clock) {
+				server.until = ownerUntil
+			}
 			endpoint := dnsconfig.LearnedUpstream{Source: target.source, Provider: cfg.providers[target.provider].name, Address: server.address, ValidUntil: server.until}
 			if target.bootstrap {
 				out.Bootstraps = append(out.Bootstraps, endpoint)

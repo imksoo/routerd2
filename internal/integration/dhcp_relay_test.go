@@ -64,7 +64,7 @@ func TestDaemonDHCPRelayIndependentClientsAndServer(t *testing.T) {
 		{Name: "lan1", Addresses: []string{"203.0.113.1/24"}},
 	}, Forwarding: network.Forwarding{IPv4: &forward}}, Services: []serviceconfig.Service{{Name: "relay", DHCPRelay: &relay}}}))
 	captures := []*healthPBRCaptureState{healthPBRCapture(t, "wan0"), healthPBRCapture(t, "lan0"), healthPBRCapture(t, "lan1")}
-	startFixtureDNSMasq(t, provider, []string{"--port=0", "--dhcp-range=set:lan0,192.0.2.100,192.0.2.110,255.255.255.0,60s", "--dhcp-option=tag:lan0,3,192.0.2.1",
+	startFixtureDNSMasq(t, provider, "server0", []string{"--port=0", "--dhcp-range=set:lan0,192.0.2.100,192.0.2.110,255.255.255.0,60s", "--dhcp-option=tag:lan0,3,192.0.2.1",
 		"--dhcp-range=set:lan1,203.0.113.100,203.0.113.110,255.255.255.0,60s", "--dhcp-option=tag:lan1,3,203.0.113.1",
 		"--dhcp-vendorclass=set:large,relay-large", "--dhcp-option-force=tag:large,224," + strings.Repeat("A", 200), "--dhcp-option-force=tag:large,225," + strings.Repeat("B", 200)})
 	acquire := func(i int, requested string) string {
@@ -317,7 +317,7 @@ func TestDaemonDHCPRelayIndependentClientsAndServer(t *testing.T) {
 	t.Log("independent clients acquired both remote scopes; large unicast/broadcast DHCPINFORM reassembled across MTU 600 with intact options, packet fragment checks, giaddr/hops, hop-limit discard, TCP/UDP and worker restart passed")
 }
 
-func startFixtureDNSMasq(t *testing.T, namespace netns.NsHandle, args []string) *exec.Cmd {
+func startFixtureDNSMasq(t *testing.T, namespace netns.NsHandle, iface string, args []string) *exec.Cmd {
 	t.Helper()
 	dnsmasq, err := exec.LookPath("dnsmasq")
 	if err != nil {
@@ -331,7 +331,7 @@ func startFixtureDNSMasq(t *testing.T, namespace netns.NsHandle, args []string) 
 	t.Cleanup(func() { log.Close() })
 	ctx, cancel := context.WithCancel(context.Background())
 	// Debug mode avoids setgroups() in this isolated user namespace.
-	base := []string{"--no-daemon", "--conf-file=/dev/null", "--interface=server0", "--bind-interfaces", "--dhcp-authoritative", "--log-dhcp", "--log-facility=-", "--pid-file=", "--dhcp-leasefile=" + filepath.Join(work, "leases")}
+	base := []string{"--no-daemon", "--conf-file=/dev/null", "--interface=" + iface, "--bind-interfaces", "--dhcp-authoritative", "--log-dhcp", "--log-facility=-", "--pid-file=", "--dhcp-leasefile=" + filepath.Join(work, "leases")}
 	command := exec.CommandContext(ctx, dnsmasq, append(base, args...)...)
 	command.Stdout, command.Stderr = log, log
 	if err := fixtureInsideNamespace(namespace, command.Start); err != nil {

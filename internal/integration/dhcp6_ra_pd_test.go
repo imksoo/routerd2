@@ -197,7 +197,7 @@ func TestDaemonDHCP6RAAddsAddressToPD(t *testing.T) {
 	if err := os.WriteFile(leases, nil, 0600); err != nil {
 		t.Fatal(err)
 	}
-	startFixtureDNSMasq(t, provider, []string{"--port=53", "--no-resolv", "--no-hosts", "--address=/wan.test/2001:db8:ffff::9"})
+	startFixtureDNSMasq(t, provider, "server0", []string{"--port=53", "--no-resolv", "--no-hosts", "--address=/wan.test/2001:db8:ffff::9"})
 	server := start("isc", isc, "-6", "-f", "-d", "-cf", cf, "-lf", leases, "-pf", filepath.Join(work, "dhcp6.pid"), "server0")
 	raPath := filepath.Join(work, "radvd.conf")
 	advertise := func(managed bool) {

@@ -55,6 +55,7 @@ type Service struct {
 }
 
 type DNS struct {
+	UpstreamOwners []DNSUpstreamOwner        `json:"upstream_owners,omitempty"`
 	QueryRetention *dnsconfig.QueryRetention `json:"query_log_retention,omitempty"`
 	dnsconfig.RuntimeConfig
 	ListenInterface string `json:"listen_interface,omitempty"`

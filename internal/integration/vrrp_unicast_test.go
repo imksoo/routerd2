@@ -33,6 +33,7 @@ import (
 	"github.com/imksoo/routerd2/internal/runtimeplan"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 	"github.com/imksoo/routerd2/internal/supervisor"
+	"github.com/miekg/dns"
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netns"
 	"golang.org/x/sys/unix"
@@ -220,6 +221,7 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 		program.Resources = append(program.Resources, resourceprogram.Resource{ID: "wan-ra", When: &resourceprogram.FactCondition{Fact: haName + ".active"}, Service: &serviceconfig.Service{Name: "wan-ra", RA: &serviceconfig.RouterAdvertisement{Config: ra.Config{Interface: "wan-ha", SourceAddress: vrrpWANLL, MinIntervalSeconds: 3, MaxIntervalSeconds: 4, RouterLifetimeSeconds: 12}}}})
 		if spec.migrate {
 			pdPeer = startVRRPPDPeer(t, wan.client)
+			startFixtureDNSMasq(t, wan.client, "client0", []string{"--no-hosts", "--no-resolv", "--address=/wan.test/203.0.113.77", "--local-ttl=0"})
 			if err := pdPeer.Process.Signal(syscall.SIGSTOP); err != nil {
 				t.Fatal(err)
 			}
@@ -287,6 +289,7 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 		return false
 	}
 	var pdDUID string
+	querySequence := 0
 	waitOwner := func(router bool) {
 		t.Helper()
 		until(t, 8*time.Second, func() bool {
@@ -409,6 +412,36 @@ func runVRRPPeer(t *testing.T, spec vrrpPeerTest) {
 				}
 				return true
 			})
+			// Query through the unchanged node address so backup withdrawal is
+			// checked independently from loss of the virtual address. Uncached
+			// names require a real trip to the learned WAN resolver.
+			for _, transport := range []string{"udp", "tcp"} {
+				until(t, 8*time.Second, func() bool {
+					querySequence++
+					var forwarded, local *dns.Msg
+					err := fixtureInsideNamespace(peerNS, func() error {
+						client := dns.Client{Net: transport, Timeout: time.Second}
+						var err error
+						local, _, err = client.Exchange(new(dns.Msg).SetQuestion("router.home.arpa.", dns.TypeA), net.JoinHostPort("192.0.2.2", "1053"))
+						if err != nil {
+							return err
+						}
+						forwarded, _, err = client.Exchange(new(dns.Msg).SetQuestion(fmt.Sprintf("query-%d.wan.test.", querySequence), dns.TypeA), net.JoinHostPort("192.0.2.2", "1053"))
+						return err
+					})
+					if err != nil || local == nil || local.Rcode != dns.RcodeSuccess || len(local.Answer) != 1 {
+						return false
+					}
+					if !router {
+						return forwarded != nil && len(forwarded.Answer) == 0 && forwarded.Rcode == dns.RcodeServerFailure
+					}
+					if forwarded == nil || forwarded.Rcode != dns.RcodeSuccess || len(forwarded.Answer) != 1 {
+						return false
+					}
+					a, ok := forwarded.Answer[0].(*dns.A)
+					return ok && a.A.String() == "203.0.113.77"
+				})
+			}
 		}
 	}
 	targets := []string{vip}

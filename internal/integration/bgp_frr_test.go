@@ -212,7 +212,7 @@ while True:
 		if err := os.WriteFile(dhcpHostFile, []byte(dhcpMAC+",192.0.2.1\n"), 0600); err != nil {
 			t.Fatal(err)
 		}
-		dhcpServer = startFixtureDNSMasq(t, peer, []string{"--port=0", "--dhcp-range=192.0.2.1,192.0.2.3,255.255.255.0,120s", "--dhcp-hostsfile=" + dhcpHostFile})
+		dhcpServer = startFixtureDNSMasq(t, peer, "server0", []string{"--port=0", "--dhcp-range=192.0.2.1,192.0.2.3,255.255.255.0,120s", "--dhcp-hostsfile=" + dhcpHostFile})
 		for _, resource := range document.Resources {
 			if resource.Service != nil && resource.Service.DHCP4 != nil {
 				dhcpModule = resource.Service.ModuleName()

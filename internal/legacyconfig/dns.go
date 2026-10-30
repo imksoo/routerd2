@@ -9,16 +9,18 @@ import (
 	"net"
 	"net/netip"
 	"net/url"
+	"reflect"
 	"strconv"
 	"strings"
 
 	"github.com/imksoo/routerd/pkg/api"
 	"github.com/imksoo/routerd/pkg/dnsresolver"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
+	"github.com/imksoo/routerd2/internal/resourceprogram"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
 
-func (c *compiler) dns() {
+func (c *compiler) dns(vrrpNames map[string]string) {
 	var resolvers, forwarders, zones []resource
 	upstreams := map[string]resource{}
 	usedForwarders, usedUpstreams := map[string]bool{}, map[string]bool{}
@@ -39,6 +41,7 @@ func (c *compiler) dns() {
 		}
 	}
 	for _, r := range resolvers {
+		var owners []serviceconfig.DNSUpstreamOwner
 		spec := r.Spec.(api.DNSResolverSpec)
 		spec.Listen = append([]api.DNSResolverListenSpec(nil), spec.Listen...)
 		if spec.QueryLog.Path != "" {
@@ -117,7 +120,26 @@ func (c *compiler) dns() {
 					} else if len(us.AddressFrom) == 0 {
 						c.reject(*upstream, "address", "required", "DNS upstream requires an address or learned DNS source")
 					}
-					source.UpstreamFrom = append(source.UpstreamFrom, c.dnsLearnedSources(*upstream, "addressFrom", us.AddressFrom)...)
+					learned := c.dnsLearnedSources(*upstream, "addressFrom", us.AddressFrom)
+					source.UpstreamFrom = append(source.UpstreamFrom, learned...)
+					if when := c.when(*upstream, us.When, vrrpNames); when != nil {
+						owner := ""
+						for _, name := range vrrpNames {
+							if reflect.DeepEqual(when, &resourceprogram.FactCondition{Fact: "service." + name + ".elected"}) {
+								owner = name
+								break
+							}
+						}
+						if owner == "" || us.Address != "" || len(us.Bootstrap) != 0 || len(us.BootstrapFrom) != 0 || len(learned) == 0 {
+							c.reject(*upstream, "when", "unsupported_semantics", "conditional DNS upstream requires learned DNS addresses and one elected VRRP owner")
+						} else {
+							for _, ref := range learned {
+								provider, _, _ := dnsconfig.UpstreamProvider(ref)
+								owners = append(owners, serviceconfig.DNSUpstreamOwner{Source: source.Name, Provider: provider, VRRP: owner})
+							}
+							c.note(*upstream, "Learned DNS endpoints are available only while their VRRP owner is elected. DNS retains the earlier original protocol/election expiry; loss of ownership withdraws this upstream without stopping other DNS sources.")
+						}
+					}
 					var bootstrap []api.StatusValueSourceSpec
 					for _, ref := range us.BootstrapFrom {
 						bootstrap = append(bootstrap, ref.StatusValueSourceSpec())
@@ -193,7 +215,7 @@ func (c *compiler) dns() {
 				c.note(r, "Explicit DHCP DNS replacement: only leases from each zone's named native DHCP sources are published. Producer loss or lease expiry removes records; global lease events, sticky host recovery and lease-file import are not retained.")
 			}
 		}
-		service := serviceconfig.Service{Name: runtime.Resource, DNS: &serviceconfig.DNS{RuntimeConfig: runtime}}
+		service := serviceconfig.Service{Name: runtime.Resource, DNS: &serviceconfig.DNS{RuntimeConfig: runtime, UpstreamOwners: owners}}
 		if runtime.Spec.QueryLog.Enabled {
 			service.DNS.QueryRetention = c.queryRetention
 		}

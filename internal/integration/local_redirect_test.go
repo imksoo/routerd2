@@ -64,7 +64,7 @@ func TestDaemonLocalDNSRedirect(t *testing.T) {
 		}
 	}
 	writeHosts("198.51.100.20", "2001:db8:2::20")
-	peer := startFixtureDNSMasq(t, wan, []string{"--no-hosts", "--no-resolv", "--addn-hosts=" + hosts, "--local-ttl=2", "--host-record=who.probe.test,203.0.113.99"})
+	peer := startFixtureDNSMasq(t, wan, "server0", []string{"--no-hosts", "--no-resolv", "--addn-hosts=" + hosts, "--local-ttl=2", "--host-record=who.probe.test,203.0.113.99"})
 	wanCapture := healthPBRCapture(t, "wan0")
 	_ = healthPBRCapture(t, "lan0")
 	result, err := legacyconfig.Compile([]byte(`apiVersion: routerd.net/v1alpha1

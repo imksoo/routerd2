@@ -938,3 +938,10 @@ and continues answering DNS; UDP archival submission has no remote delivery
 acknowledgement. `make check-dns-retention` exercises the imported configuration
 with real DNS clients, an independent receiver, destination-path failure,
 recovery, worker restart and policy removal.
+
+Learned `DNSUpstream.addressFrom` entries can be conditional on one elected
+VRRP owner. The compiled DNS source/provider binding retains the earlier
+original DNS-provider and election deadline. Losing that election withdraws
+only the bound learned endpoints; other DNS sources and listeners remain.
+Conditional literal upstreams and conditional bootstrap entries are rejected
+until their distinct lifetime semantics are implemented.
