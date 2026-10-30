@@ -133,7 +133,6 @@ def peer(stage, homert=False):
             assert value in page, "VPN console omitted an observed address, peer or advertised prefix"
         for private in (auth["key"], str(authfile), "https://control.test", "tskey-", "/register/"):
             assert private not in page, "VPN console exposed private enrollment data"
-        return page
 
     def pingable(host):
         return subprocess.run(inside("ts-b", ["ping", "-c", "1", "-W", "1", host]), capture_output=True).returncode == 0
