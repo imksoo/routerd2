@@ -240,3 +240,18 @@ configuration bodies or credentials are returned in the listing.
 usable recovery references. Discovery changes neither the saved files nor the
 current configuration. An empty new store has an empty list. There is no
 additional snapshot catalog, mutable cache or automatic retention policy.
+
+## DNS query history
+
+`show dns-queries NAME` reads the existing resolver history through the control
+API in SSH exec and the local/SSH interactive shell, including candidate mode.
+The service name accepts either `dns` or `service.dns`. Optional key/value
+filters are `client`, `name`, `response`, `since`, `until` and `limit`.
+Client addresses, RFC3339 timestamps and limits are validated by the existing
+history API. The default limit is 100; the maximum is 1000. `name` retains the
+history owner's SQL LIKE pattern semantics. Use an exact name when no wildcard
+is wanted. Output preserves `service`, `read_at`, `limit`, `truncated` and the
+original records, including their time, client, question, response and duration.
+A truncated page is not a complete history. Disabled or unavailable storage is
+an error, not an empty successful result. This command adds no collection,
+retention, direct database access or configuration change.

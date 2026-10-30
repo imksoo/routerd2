@@ -58,6 +58,7 @@ func TestDaemonConfigurationAndRecovery(t *testing.T) {
 	dns := dnsconfig.RuntimeConfig{Resource: "dns", Spec: api.DNSResolverSpec{Listen: []api.DNSResolverListenSpec{{Name: "local", Addresses: []string{"127.0.0.1", "198.18.0.1"}, Port: dnsPort}}, Sources: []api.DNSResolverSourceSpec{{Name: "zones", Kind: "zone", Match: []string{"lab.example"}, ZoneRef: []string{"DNSZone/lan-zone"}}}}, Zones: []dnsconfig.RuntimeZone{{Name: "lan-zone", Spec: api.DNSZoneSpec{Zone: "lab.example", Records: []api.DNSZoneRecordSpec{{Hostname: "router", IPv4: "192.0.2.1"}}}}}}
 	leases := serviceconfig.DHCPServer{Interface: "mgmt0", ServerAddress: "198.18.0.1", Authoritative: true,
 		Primary: dhcpserverconfig.Scope{Prefix: "198.18.0.0/24", Start: "198.18.0.100", End: "198.18.0.110", Router: "198.18.0.1", LeaseSeconds: 120}}
+	dns.Spec.QueryLog = api.DNSResolverQueryLogSpec{Enabled: true, Path: filepath.Join(dir, "dns-history.db")}
 	doc := config.FromNative(config.Native{Services: []serviceconfig.Service{{Name: "dns", DNS: &serviceconfig.DNS{RuntimeConfig: dns}}, {Name: "leases", DHCPServer: &leases}}})
 	// Exercise the imported management zone through a separate client namespace.
 	// ManagementAccess is an admission check, not a source-prefix firewall rule.
@@ -362,6 +363,45 @@ esac
 	}
 	defer client.Close()
 	t.Log("imported ManagementAccess/mgmt FirewallZone: real SSH from isolated client accepted")
+
+	querySince := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := fixtureInsideNamespace(peer, func() error {
+		answerAddress(t, fmt.Sprintf("198.18.0.1:%d", dnsPort), "192.0.2.1")
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var originalHistory runtimeplan.DNSHistory
+	until(t, 3*time.Second, func() bool {
+		return ctl.Do(ctx, "GET", "/v1/services/service.dns/dns-history?client=198.18.0.2&limit=10", nil, &originalHistory) == nil && len(originalHistory.Queries) >= 2
+	})
+	dnsCommand := "show dns-queries dns client ::ffff:198.18.0.2 name router.lab.example. response NOERROR since " + querySince + " limit 1"
+	historySession, err := client.NewSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	historyOutput, err := historySession.CombinedOutput(dnsCommand)
+	_ = historySession.Close()
+	var history runtimeplan.DNSHistory
+	if err != nil || json.Unmarshal(historyOutput, &history) != nil || history.Service != "service.dns" || history.Limit != 1 || !history.Truncated || len(history.Queries) != 1 {
+		t.Fatalf("SSH DNS history lost result metadata: %v %s", err, historyOutput)
+	}
+	record := history.Queries[0]
+	if record.ID != originalHistory.Queries[0].ID || record.Timestamp != originalHistory.Queries[0].Timestamp || record.ClientAddress != "198.18.0.2" || record.QuestionName != "router.lab.example." || record.ResponseCode != "NOERROR" {
+		t.Fatalf("SSH DNS history changed original record: %+v %+v", record, originalHistory.Queries[0])
+	}
+	failedHistory, err := client.NewSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var failedOutput bytes.Buffer
+	failedHistory.Stdout = &failedOutput
+	err = failedHistory.Run("show dns-queries dns client invalid-address")
+	_ = failedHistory.Close()
+	if err == nil || failedOutput.Len() != 0 {
+		t.Fatalf("invalid DNS filter became successful history: %v %s", err, failedOutput.String())
+	}
+	t.Log("independent UDP/TCP DNS generated stored records; real SSH history kept original values/truncation and normalized mapped IPv4; invalid filter failed without successful output")
 	session, err := client.NewSession()
 	if err != nil {
 		t.Fatal(err)
@@ -379,7 +419,7 @@ esac
 	if err = session.Shell(); err != nil {
 		t.Fatal(err)
 	}
-	_, err = io.WriteString(input, "configure\rset resources[service/dns].service.dns.zones[lan-zone].spec.records[0].ipv4 \"192.0.2.2\"\rvalidate\rcommit confirmed 5\rconfirm\rexit\rexit\r")
+	_, err = io.WriteString(input, "configure\r"+dnsCommand+"\rset resources[service/dns].service.dns.zones[lan-zone].spec.records[0].ipv4 \"192.0.2.2\"\rvalidate\rcommit confirmed 5\rconfirm\rexit\rexit\r")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -398,6 +438,9 @@ esac
 	if strings.Contains(transcript.String(), "Error:") || stderr.Len() != 0 {
 		t.Fatalf("SSH editing failed: %s %s", transcript.String(), stderr.String())
 	}
+	if !strings.Contains(transcript.String(), `"truncated": true`) || !strings.Contains(transcript.String(), `"questionName": "router.lab.example."`) {
+		t.Fatal("DNS history unavailable in candidate mode", transcript.String())
+	}
 	var state control.State
 	if err = ctl.Do(ctx, "GET", "/v1/config", nil, &state); err != nil {
 		t.Fatal(err)
@@ -414,6 +457,41 @@ esac
 	if err != nil || json.Unmarshal(snapshotOutput, &saved) != nil || saved.Validate() != nil || saved.StoreID != state.StoreID || saved.Revision != 2 {
 		t.Fatalf("actual snapshot CLI did not capture confirmed revision: %v %s", err, snapshotOutput)
 	}
+	snapshotShell, err := client.NewSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snapshotTranscript, snapshotErrors bytes.Buffer
+	snapshotShell.Stdout, snapshotShell.Stderr = &snapshotTranscript, &snapshotErrors
+	snapshotShell.Stdin = strings.NewReader("configure\rshow snapshots\rabort\rexit\r")
+	if err := snapshotShell.RequestPty("xterm", 24, 100, ssh.TerminalModes{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := snapshotShell.Shell(); err != nil {
+		t.Fatal(err)
+	}
+	snapshotDone := make(chan error, 1)
+	go func() { snapshotDone <- snapshotShell.Wait() }()
+	select {
+	case err := <-snapshotDone:
+		if err != nil {
+			t.Fatal(err, snapshotTranscript.String(), snapshotErrors.String())
+		}
+	case <-time.After(10 * time.Second):
+		_ = snapshotShell.Close()
+		t.Fatal("snapshot shell timed out")
+	}
+	_ = snapshotShell.Close()
+	if snapshotErrors.Len() != 0 || strings.Contains(snapshotTranscript.String(), "Error:") || !strings.Contains(snapshotTranscript.String(), saved.Digest) {
+		t.Fatal("candidate mode did not expose immutable saved references", snapshotTranscript.String(), snapshotErrors.String())
+	}
+	localHistory := exec.Command(filepath.Join(os.Getenv("ROUTERD2_TEST_BIN_DIR"), "routerd"), "cli", "--runtime-dir="+runDir)
+	localHistory.Stdin = strings.NewReader(dnsCommand + "\rexit\r")
+	localOutput, err := localHistory.CombinedOutput()
+	if err != nil || bytes.Contains(localOutput, []byte("Error:")) || !bytes.Contains(localOutput, []byte(`"questionName": "router.lab.example."`)) {
+		t.Fatalf("local shell DNS history: %v %s", err, localOutput)
+	}
+	t.Log("candidate-mode DNS history preserved the subsequent configuration commit; candidate-mode snapshot listing and local shell DNS history both succeeded")
 	savedPath := filepath.Join(dir, "saved-reference.json")
 	if err := os.WriteFile(savedPath, snapshotOutput, 0600); err != nil {
 		t.Fatal(err)
