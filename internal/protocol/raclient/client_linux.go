@@ -231,6 +231,23 @@ func Run(ctx context.Context, cfg Config, effects Effects, ready func()) (result
 				p.ifindex = int(binary.NativeEndian.Uint32(cm.Data[16:]))
 			}
 		}
+		// Raw ICMPv6 also receives our own advertisements. Match the kernel's
+		// default accept_ra_from_local=0 behavior using current link ownership;
+		// an additional local address need not be our solicitation source.
+		addresses, err := netlink.AddrList(&netlink.Device{LinkAttrs: netlink.LinkAttrs{Index: link.index}}, netlink.FAMILY_V6)
+		if err != nil {
+			return fmt.Errorf("inspect RA source ownership: %w", err)
+		}
+		self := false
+		for _, address := range addresses {
+			if address.IP.Equal(p.source.AsSlice()) {
+				self = true
+				break
+			}
+		}
+		if self {
+			continue
+		}
 		now, err = boottime.Read()
 		if err != nil {
 			return err

@@ -252,7 +252,7 @@ func sendAdvertisement(t *testing.T, fd, index, hop int, packet packet) {
 	if err := unix.SetsockoptInt(fd, unix.IPPROTO_IPV6, unix.IPV6_MULTICAST_HOPS, hop); err != nil {
 		t.Fatal(err)
 	}
-	info := unix.PktInfo6(&unix.Inet6Pktinfo{Ifindex: uint32(index), Addr: netip.MustParseAddr("fe80::2").As16()})
+	info := unix.PktInfo6(&unix.Inet6Pktinfo{Ifindex: uint32(index), Addr: packet.source.As16()})
 	to := &unix.SockaddrInet6{ZoneId: uint32(index), Addr: netip.MustParseAddr("ff02::1").As16()}
 	if _, err := unix.SendmsgN(fd, packet.payload, info, to, 0); err != nil {
 		t.Fatal(err)
@@ -261,7 +261,7 @@ func sendAdvertisement(t *testing.T, fd, index, hop int, packet packet) {
 
 func nativeRAClient(t *testing.T) {
 	client, fd, index := raPair(t)
-	cfg := Config{Resource: "test-ra", Interface: "rawan", StatePath: filepath.Join(t.TempDir(), "ra.json"), SourceAddress: "fe80::1", InterfaceID: "::1234", AllowedRouters: []string{"fe80::2"}}
+	cfg := Config{Resource: "test-ra", Interface: "rawan", StatePath: filepath.Join(t.TempDir(), "ra.json"), SourceAddress: "fe80::1", InterfaceID: "::1234"}
 	start := func() (<-chan Snapshot, <-chan error, context.CancelFunc) {
 		ctx, cancel := context.WithCancel(context.Background())
 		updates := make(chan Snapshot, 64)
@@ -342,6 +342,21 @@ func nativeRAClient(t *testing.T) {
 		t.Fatal("ready claimed unobserved addresses or routes")
 	}
 	readSolicitation(t, fd)
+	// The socket must ignore its own multicast RA, including an address added
+	// after readiness, while still accepting the independent peer below.
+	localFD, err := unix.Socket(unix.AF_INET6, unix.SOCK_RAW|unix.SOCK_CLOEXEC, unix.IPPROTO_ICMPV6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { unix.Close(localFD) })
+	localAddress, _ := netlink.ParseAddr("fe80::3/64")
+	localAddress.Flags = unix.IFA_F_NODAD
+	if err := netlink.AddrAdd(client, localAddress); err != nil {
+		t.Fatal(err)
+	}
+	for _, source := range []string{"fe80::1", "fe80::3"} {
+		sendAdvertisement(t, localFD, client.Attrs().Index, 255, advert(source, 120, 0))
+	}
 	sendAdvertisement(t, fd, index, 254, advert("fe80::2", 0, 0, pio("2001:db8:bad::/64", 0xc0, 50, 30)))
 	rejected := wait(updates, done, func(s Snapshot) bool { return s.Rejected > 0 })
 	if rejected.Received != 0 || len(rejected.Addresses)+len(rejected.Routes) != 0 {
