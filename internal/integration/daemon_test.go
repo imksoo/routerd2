@@ -58,7 +58,7 @@ func TestDaemonConfigurationAndRecovery(t *testing.T) {
 	dns := dnsconfig.RuntimeConfig{Resource: "dns", Spec: api.DNSResolverSpec{Listen: []api.DNSResolverListenSpec{{Name: "local", Addresses: []string{"127.0.0.1", "198.18.0.1"}, Port: dnsPort}}, Sources: []api.DNSResolverSourceSpec{{Name: "zones", Kind: "zone", Match: []string{"lab.example"}, ZoneRef: []string{"DNSZone/lan-zone"}}}}, Zones: []dnsconfig.RuntimeZone{{Name: "lan-zone", Spec: api.DNSZoneSpec{Zone: "lab.example", Records: []api.DNSZoneRecordSpec{{Hostname: "router", IPv4: "192.0.2.1"}}}}}}
 	leases := serviceconfig.DHCPServer{Interface: "mgmt0", ServerAddress: "198.18.0.1", Authoritative: true,
 		Primary: dhcpserverconfig.Scope{Prefix: "198.18.0.0/24", Start: "198.18.0.100", End: "198.18.0.110", Router: "198.18.0.1", LeaseSeconds: 120}}
-	dns.Spec.QueryLog = api.DNSResolverQueryLogSpec{Enabled: true, Path: filepath.Join(dir, "dns-history.db")}
+	dns.Spec.QueryLog = api.DNSResolverQueryLogSpec{Enabled: true}
 	doc := config.FromNative(config.Native{Services: []serviceconfig.Service{{Name: "dns", DNS: &serviceconfig.DNS{RuntimeConfig: dns}}, {Name: "leases", DHCPServer: &leases}}})
 	// Exercise the imported management zone through a separate client namespace.
 	// ManagementAccess is an admission check, not a source-prefix firewall rule.
