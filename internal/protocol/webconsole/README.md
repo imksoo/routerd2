@@ -225,3 +225,23 @@ read the previously selected database while its configuration is changing.
 The existing DNS retention acceptance exercises actual DNS requests and a
 separate LAN HTTP client. Query recording and retention keep their original
 behavior; reading history does not hold the DNS worker's write lock.
+
+
+On 2026-10-30 at 21:34:33-21:34:49 JST, standard product `4f429de`
+(`wsl-dns-history`) passed this check in 15.34 seconds on the separate WSL
+machine. The fixture was committed as `b744037`. Actual UDP/TCP DNS answers,
+NXDOMAIN, exact stored row IDs and client/name/response/time filters matched
+an independent LAN HTTP client. The original two-second retention window was
+unchanged. Expired rows remained searchable during archive unreachability and
+a DNS worker restart, then disappeared after archive recovery. Policy removal
+left query recording working. Concurrent routed UDP completed 142 round trips
+with no failures. The three distribution executables were statically linked.
+
+Evidence: `dist/wsl-dns-history-peer/{peer.log,execution.json,binaries.json,
+forwarding.jsonl,dns-console.html}`. Reproduce with `python3
+scripts/retention-peer.py --dns-queries --binary-dir dist/bin --output
+ dist/wsl-dns-history-peer` in the isolated development environment. The saved
+real HTML response was also rendered offline at 1280 pixels and inspected for
+Japanese text, table visibility and overlapping elements. This result covers
+the DNS history operator path; it does not establish homert full-configuration
+natural renewal, two-node acceptance or target-hardware qualification.
