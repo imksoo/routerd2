@@ -599,8 +599,21 @@ esac
 	if err := ctl.Do(ctx, "POST", "/v1/config/restore", restoreRequest, &replayed); err != nil || replayed.Revision != restored.Revision || replayed.Confirmation == nil || !replayed.Confirmation.Deadline.Equal(restored.Confirmation.Deadline) {
 		t.Fatal("restore replay changed revision or original confirmation deadline", err, replayed.Revision)
 	}
+	var observedRevision uint64
 	until(t, 12*time.Second, func() bool {
-		return ctl.Do(ctx, "GET", "/v1/config", nil, &state) == nil && state.Revision == restored.Revision+1 && state.Confirmation == nil && state.Healthy
+		state = control.State{}
+		if err := ctl.Do(ctx, "GET", "/v1/config", nil, &state); err != nil {
+			return false
+		}
+		if state.Revision != observedRevision {
+			var deadline time.Time
+			if state.Confirmation != nil {
+				deadline = state.Confirmation.Deadline
+			}
+			t.Logf("restore confirmation transition: revision=%d pending=%v deadline=%s healthy=%v last_error=%q", state.Revision, state.Confirmation != nil, deadline, state.Healthy, state.LastError)
+			observedRevision = state.Revision
+		}
+		return state.Revision == restored.Revision+1 && state.Confirmation == nil && state.Healthy
 	})
 	peerAnswer("192.0.2.3")
 	restoreRevision := state.Revision
