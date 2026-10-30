@@ -5,6 +5,14 @@
 [試験計画](test-plan.md)、[機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
+## 2026-10-30 17:33 JST: 起動の実測と経路読取り削減
+
+`policy-read-native85`は一括適用するpolicy ruleのカーネル一覧取得を各ruleごとから一回へ削減した。全構成は13件。所有権と書込み前の元期限検査は維持する。network Race 31.026秒、vet、CGO0両architecture、署名六ELF/catalog/publisherは終了0。実daemonの5WAN選択、Health→PBR切替・復旧/古い通知/期限/worker交換/confirmed rollback、二WAN weighted ECMPが通過した。
+
+既存の期限試験には二つの誤りがあった。主経路の許可が残り2.4秒あるのにwriter交換から2秒で撤去を要求し、短いmax_ageを指定していない予備経路も同時に消えるとした。ECMPも長いproducer期限を待つ間にsupervisorが停止producerを交換していた。試験の両候補に2500msのconsumer期限を明示し、writer起動と実際の元期限による撤去を分けた。製品の期限・heartbeatを変更していない。修正後の実通信は35.38秒/18.99秒で終了0。
+
+同版の通常factory 512MiB/2CPU/TCG全構成は起動不合格で、クライアント未受入。一時計測付きの別イメージでも起動に失敗したが、二回目のnetwork Applyは9.589秒で正常に戻り、保存3回の符号化840ms/書込み485ms、interfaceConfig 2.330秒、routes 2.590秒、firewall 1.616秒だった。最終保存の停止・循環lockを確認したとはしない。経路処理はtableごとに同じ全FIB dumpを繰り返すため、次は一操作の読み取りへまとめ、実通信と通常起動で確認する。小さい私有結果は`/tmp/routerd-{policy-read,startup-phase}-native85-failure/`。診断コードは私有worktreeだけに置き、停止済VM stage二組を削除した。
+
 ## 2026-10-30 16:33 JST: native85統合候補
 
 `80c5892`の設定ACK保存削減と、入口サービス`71e6be2`/`2c6c232`を統合。契約native85/network journal25。`make check-ingress RELEASE_ID=integrated-native85`は実HTTPS対向/端末・kernelによる転送先切替、VIP/port限定hairpin、全宛先不健全時のDNAT撤去とICMP拒否、VRRP優先度150→90→150を通過した。関連7 packageのRace、vet、CGO0 amd64/arm64ビルド、署名六ELF・catalog・publisher検査も終了0。`make check-ingress`へコマンドを集約した。静的端末の入口通信だけの検査であり、全k8s構成・二台・ARM実行の受入ではない。[入口の範囲](ingress-acceptance.md)。

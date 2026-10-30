@@ -95,8 +95,8 @@ func TestDaemonEgressRouteHealthyMultipath(t *testing.T) {
 	}
 	group := resourceprogram.EgressRoute{Destination: "0.0.0.0/0", Table: 100, Metric: 100,
 		Candidates: []resourceprogram.EgressCandidate{
-			{Preference: 120, When: &resourceprogram.FactCondition{Fact: healthA + ".active", For: "300ms"}, NextHop: network.NextHop{Interface: "wan0", Gateway: "192.0.2.1", Weight: 1}},
-			{Preference: 120, When: &resourceprogram.FactCondition{Fact: healthB + ".active"}, NextHop: network.NextHop{Interface: "wan1", Gateway: "203.0.113.1", Weight: 2}},
+			{Preference: 120, When: &resourceprogram.FactCondition{Fact: healthA + ".active", MaxAge: "2500ms", For: "300ms"}, NextHop: network.NextHop{Interface: "wan0", Gateway: "192.0.2.1", Weight: 1}},
+			{Preference: 120, When: &resourceprogram.FactCondition{Fact: healthB + ".active", MaxAge: "2500ms"}, NextHop: network.NextHop{Interface: "wan1", Gateway: "203.0.113.1", Weight: 2}},
 		}}
 	program.Resources = append(resources, resourceprogram.Resource{ID: "egress", EgressRoute: &group})
 	f := startFixtureDaemon(t, program)

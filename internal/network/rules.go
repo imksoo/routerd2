@@ -215,11 +215,14 @@ func (p *apply) removePolicyRule(i int) error {
 }
 
 func (p *apply) policyRules(want []PolicyRule) error {
+	if len(want) == 0 {
+		return nil
+	}
+	live, err := p.e.kernel.PolicyRules()
+	if err != nil {
+		return p.failure("policy rule read", err)
+	}
 	for _, r := range want {
-		live, err := p.e.kernel.PolicyRules()
-		if err != nil {
-			return p.failure("policy rule read", err)
-		}
 		found := false
 		for _, v := range live {
 			if policyRuleSlot(v.PolicyRule) != policyRuleSlot(r) {

@@ -560,8 +560,11 @@ func TestDaemonHealthPBRFailoverAndRecovery(t *testing.T) {
 		t.Cleanup(func() { _ = syscall.Kill(process.PID, syscall.SIGCONT) })
 		frozen = append(frozen, process)
 	}
-	var original health.Snapshot
+	var original, backup health.Snapshot
 	if err := json.Unmarshal(instance(healthA).Snapshot, &original); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(instance(healthB).Snapshot, &backup); err != nil {
 		t.Fatal(err)
 	}
 	controller, writer := module("control"), module("network")
@@ -579,9 +582,11 @@ func TestDaemonHealthPBRFailoverAndRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	checked := 0
+	var addressUntil, routeUntil uint64
 	for _, iface := range desired.Interfaces {
 		if iface.Name == "wan0" {
 			deadline := iface.AddressOptions["192.0.2.42/32"].BootLifetime
+			addressUntil = deadline.ValidNanos
 			if deadline.BootID != original.BootID || deadline.ValidNanos == 0 || deadline.ValidNanos > original.ObservedNanos+uint64(2500*time.Millisecond)+1 {
 				t.Fatal("address did not retain original consumer authority", deadline)
 			}
@@ -589,26 +594,46 @@ func TestDaemonHealthPBRFailoverAndRecovery(t *testing.T) {
 		}
 	}
 	for _, route := range desired.Routes {
-		if route.Table == 100 && route.Metric == 100 {
-			if route.BootID != original.BootID || route.ExpiresNanos == 0 || route.ExpiresNanos > original.ObservedNanos+uint64(2500*time.Millisecond)+1 {
+		if route.Table == 100 {
+			sample := original
+			if route.Metric == 200 {
+				sample = backup
+			}
+			routeUntil = max(routeUntil, route.ExpiresNanos)
+			if route.BootID != sample.BootID || route.ExpiresNanos == 0 || route.ExpiresNanos > sample.ObservedNanos+uint64(2500*time.Millisecond)+1 {
 				t.Fatal("PBR route did not retain original consumer authority", route)
 			}
 			checked++
 		}
 	}
-	if checked != 2 || len(desired.Links) != 0 {
+	if checked != 3 || len(desired.Links) != 0 {
 		t.Fatal("fixture did not use independent conditional address and route on a physical link", desired)
 	}
+	clock, err = bfd.ReadClock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("writer replacement original authority: now=%d addressUntil=%d routeUntil=%d addressRemaining=%s routeRemaining=%s", clock.BoottimeNanoseconds, addressUntil, routeUntil, time.Duration(int64(addressUntil)-clock.BoottimeNanoseconds), time.Duration(int64(routeUntil)-clock.BoottimeNanoseconds))
 	if err := syscall.Kill(writer.PID, syscall.SIGKILL); err != nil {
 		t.Fatal(err)
 	}
 	until(t, 2*time.Second, func() bool {
 		current := module("network")
+		return current.Ready && current.Generation > writer.Generation
+	})
+	clock, err = bfd.ReadClock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The original grant may still be live after a fast writer replacement.
+	// Keep the existing observation budget after that actual deadline.
+	remaining := max(time.Duration(int64(max(addressUntil, routeUntil))-clock.BoottimeNanoseconds), 0)
+	until(t, remaining+2*time.Second, func() bool {
 		routes, err := netlink.RouteListFiltered(unix.AF_INET, &netlink.Route{Table: 100}, netlink.RT_FILTER_TABLE)
 		if err != nil {
 			t.Fatal(err)
 		}
-		return current.Ready && current.Generation > writer.Generation && len(routes) == 0 && !resourceProgramAddress(t, wan, "192.0.2.42/32")
+		return len(routes) == 0 && !resourceProgramAddress(t, wan, "192.0.2.42/32")
 	})
 	for _, before := range frozen {
 		if current := module(before.Name); current.PID != before.PID || current.Generation != before.Generation || !current.Ready {
@@ -1085,7 +1110,7 @@ resources:
     address: {interface: wan0, cidr: 192.0.2.42/32}
   - id: backup
     depends_on: [address-b]
-    when: {fact: service.health-b.active}
+    when: {fact: service.health-b.active, max_age: 2500ms}
     route: {destination: 0.0.0.0/0, gateway: 203.0.113.1, interface: wan1, table: 100, metric: 200}
   - id: application-policy
     policy_rule: {family: 4, priority: 1000, table: 100, source: 198.18.0.0/24}
