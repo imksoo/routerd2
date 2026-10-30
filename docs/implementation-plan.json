@@ -11206,12 +11206,11 @@
       "restart_all_dns_and_dual_ip_transactions_seconds": 12.69,
       "natural_original_dhcp_lease_seconds": 43200,
       "natural_dhcp_t1_seconds": 21600,
-      "natural_renewal": "running_original_43200s_lease_not_accepted",
-      "remaining": "Original DHCP natural renewal and WAN recovery on normal92; router-originated IPv6 with the declared static peer gateway; full normal Alpine/PID1/update/recovery, target HGW/ONU/NIC, deployment profiles and remaining work packages.",
+      "natural_renewal": "failed_before_T1_after_1958.882s_64_rounds; effects_timeout_triggered_leftover_diagnostic_stop",
+      "remaining": "Fix measured effects timeout; restart original DHCP natural renewal without diagnostic process signals. Verify WAN recovery, router-originated IPv6, full normal Alpine/PID1/update/recovery, target HGW/ONU/NIC, deployment profiles and remaining work packages.",
       "core_implementation_commit": "0e7012e",
       "normal_runtime": "full-homert-address-native92/native92/network27",
       "temporary_diagnostics_removed": true,
-      "natural_dhcp_t1_utc": "2026-10-30T18:32:30Z",
       "diagnostic_untraced_600s": "passed20_rounds_with_temporary_phase_logging_not_normal_release_acceptance",
       "restart_with_reacquired_ipv6_dns_seconds": 11.715,
       "two_node_normal": "passed_both_directions_with_three_links_disconnected_and_conntrack_flushed; same_TCP_and_NAT; not_VM_power_cut",
@@ -11236,7 +11235,7 @@
     {
       "stage": 1,
       "profile": "homert02/03",
-      "next": "Normal full-homert-address-native92 is observing the original43200s DHCP lease; T1 expected2026-10-30T18:32:30Z. Same normal binary passed both full-input HA directions within the unchanged60s budget and original BGP timers, preserving the same TCP/NAT with measured losses. Complete router-originated IPv6 with the explicitly configured peer gateway, natural renewal/WAN recovery, normal Alpine full-input image/update/recovery and target qualification, then k8s/pve and Cloud SAM. Main c5f93a5 separately integrates independently accepted DNS history and DHCPv6 telemetry; running normal92 does not contain those later additions. No all34 completion claim.",
+      "next": "Normal full-homert-address-native92 stopped before T1 after1958.882s/64rounds when effects timeout triggered a mistakenly retained diagnostic stop in the fixture. The earlier T1 schedule is invalid. Correct the fixture and diagnose the actual timeout before claiming natural renewal. Same normal binary passed both full-input HA directions within the unchanged60s budget and original BGP timers, preserving the same TCP/NAT with measured losses. Complete router-originated IPv6 with the explicitly configured peer gateway, natural renewal/WAN recovery, normal Alpine full-input image/update/recovery and target qualification, then k8s/pve and Cloud SAM. Main c5f93a5 separately integrates independently accepted DNS history and DHCPv6 telemetry; running normal92 does not contain those later additions. No all34 completion claim.",
       "required_focus": [
         "WAN/LAN IPv4/IPv6, DS-Lite, actual route selection/backup WAN, DHCP/PD/RA, learned DNS resolution/distribution, firewall/NAT/MTU/MSS, BGP and management",
         "HA-01 current election/track dependencies, HA-02 DHCP/PD synchronization, HA-03 NAT/connection synchronization and EXT-02 Tailscale used by this deployment"
