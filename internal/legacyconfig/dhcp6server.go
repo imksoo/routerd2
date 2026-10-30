@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/imksoo/routerd/pkg/api"
+	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/ra"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
@@ -64,6 +65,17 @@ func (c *compiler) dhcp6Servers(vrrpNames map[string]string) map[string]*resourc
 		}
 		allocation := c.serviceName(*delegated, "lan")
 		cfg := &serviceconfig.DHCP6Server{Interface: ifname, LogDHCP: s.LogDHCP, ServerDUID: policy.ServerDUID, DomainSearch: append([]string(nil), s.DomainSearch...)}
+		// dnsmasq uses the stateless range's lease time for option 32 too.
+		if s.LeaseTime == "infinite" {
+			cfg.RefreshSeconds = ^uint32(0)
+		} else {
+			seconds, err := dhcpserverconfig.ParseLeaseTime(s.LeaseTime, 0)
+			if err != nil {
+				c.reject(r, "leaseTime", "invalid_value", err.Error())
+				continue
+			}
+			cfg.RefreshSeconds = uint32(max(600, seconds))
+		}
 		cfg.DNSServers = c.dhcp6ServerAddresses(r, "dnsServers", s.DNSServers)
 		cfg.SNTPServers = c.dhcp6ServerAddresses(r, "sntpServers", s.SNTPServers)
 		cfg.SNTPFrom = c.dhcp6ServerSources(r, "sntpServerFrom", "sntpServers", s.SNTPServerFrom)
@@ -152,7 +164,7 @@ func (c *compiler) dhcp6Servers(vrrpNames map[string]string) map[string]*resourc
 			when = c.appliedDelegationCondition(r, *delegated, s.DependsOn, when)
 		}
 		conditions["service/"+name] = when
-		c.note(r, "Explicit replacement: the selected PD allocation owns LAN RA with O set and configured router lifetime, retaining original PD PIO budgets. Stateless DHCPv6 allocates no address leases; leaseTime and stickyHoldDays do not create an IA_NA allocator. The explicit RA service owns its own conditions and packet template. RA RDNSS/DNSSL retain independently selected static/DHCPv6 options and original information deadlines. Static and learned DHCPv6 options are independent; missing/expired information removes only that source's values instead of stopping all serving. No interface-prefix scan, status snapshot or dnsmasq lease file is imported. The policy's explicit server_duid selects the serving identity; when omitted, a persistent native server DUID is created before serving.")
+		c.note(r, "Explicit replacement: the selected PD allocation owns LAN RA with O set and configured router lifetime, retaining original PD PIO budgets. Stateless DHCPv6 allocates no address leases. leaseTime retains dnsmasq's Information Refresh Time with its 600-second minimum; stickyHoldDays does not create an IA_NA allocator. The explicit RA service owns its own conditions and packet template. RA RDNSS/DNSSL retain independently selected static/DHCPv6 options and original information deadlines. Static and learned DHCPv6 options are independent; missing/expired information removes only that source's values instead of stopping all serving. No interface-prefix scan, status snapshot or dnsmasq lease file is imported. The policy's explicit server_duid selects the serving identity; when omitted, a persistent native server DUID is created before serving.")
 	}
 	return conditions
 }

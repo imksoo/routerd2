@@ -120,12 +120,17 @@ func TestLegacyAdapterPreservesDefaultsProfilesAndOptions(t *testing.T) {
 	if err != nil || c.Primary.Router != seed.ServerAddress || !reflect.DeepEqual(c.Primary.DNSServers, []string{seed.ServerAddress}) {
 		t.Fatalf("scope-style defaults: %+v %v", c, err)
 	}
+	if _, err := FromSpec(seed, spec, []api.DHCPv4ReservationSpec{{MACAddress: "02:00:00:00:00:01", IPAddress: "192.0.2.10", LeaseTime: "4294967295"}}); err == nil {
+		t.Fatal("DHCPv4 reservation accepted an infinite lease")
+	}
 	for _, edit := range []func(*api.DHCPv4ServerSpec){
 		func(s *api.DHCPv4ServerSpec) { s.DNS.Enabled = true },
 		func(s *api.DHCPv4ServerSpec) { s.LeaseFile = "/var/lib/misc/dnsmasq.leases" },
 		func(s *api.DHCPv4ServerSpec) { s.GatewayFrom.Resource = "VirtualAddress/router" },
 		func(s *api.DHCPv4ServerSpec) { s.Server = "kea" },
 		func(s *api.DHCPv4ServerSpec) { s.Role = "transit" },
+		func(s *api.DHCPv4ServerSpec) { s.AddressPool.LeaseTime = "4294967295" },
+		func(s *api.DHCPv4ServerSpec) { s.Profiles[0].AddressPool.LeaseTime = "4294967295" },
 		func(s *api.DHCPv4ServerSpec) { s.Scopes[0].Gateway = "192.0.2.1" },
 	} {
 		b, _ := json.Marshal(spec)

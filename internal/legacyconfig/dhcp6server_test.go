@@ -28,6 +28,21 @@ func TestDHCP6ImportBindsServingAndRAToSelectedPD(t *testing.T) {
 		t.Fatal(err)
 	}
 	pd, server := service(t, result.Document, "dhcp6"), service(t, result.Document, "dhcp6_server")
+	if server.DHCP6Server.RefreshSeconds != 43200 {
+		t.Fatal("stateless leaseTime lost its information refresh meaning", server.DHCP6Server.RefreshSeconds)
+	}
+	for _, item := range []struct {
+		lease string
+		want  uint32
+	}{{"0", 600}, {"30s", 600}, {"infinite", ^uint32(0)}, {"4294967295", ^uint32(0)}} {
+		changed, err := CompileWithOptions(bytes.Replace(data, []byte("leaseTime: 12h"), []byte("leaseTime: "+item.lease), 1), options)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := service(t, changed.Document, "dhcp6_server").DHCP6Server.RefreshSeconds; got != item.want {
+			t.Fatalf("leaseTime %s: refresh %d, want %d", item.lease, got, item.want)
+		}
+	}
 	if server.DHCP6Server.ServerDUID != "00030001020000000042" {
 		t.Fatal("migration changed selected server DUID", server.DHCP6Server.ServerDUID)
 	}

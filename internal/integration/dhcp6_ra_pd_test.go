@@ -403,6 +403,29 @@ subnet6 2001:db8:42::/64 {
 		}
 	}
 	information()
+	lan.mu.Lock()
+	var refresh uint32
+	for _, packet := range lan.packets {
+		b := packet.data
+		if len(b) < 66 || b[20] != 17 || binary.BigEndian.Uint16(b[54:]) != 547 || binary.BigEndian.Uint16(b[56:]) != 546 || b[62] != 7 {
+			continue
+		}
+		opts, err := dhcp6FixtureOptions(b[66:])
+		if err != nil {
+			lan.mu.Unlock()
+			t.Fatal(err)
+		}
+		for _, option := range opts {
+			if option.code == 32 && len(option.value) == 4 {
+				refresh = binary.BigEndian.Uint32(option.value)
+			}
+		}
+	}
+	lan.mu.Unlock()
+	if refresh != 12*60*60 {
+		t.Fatalf("Information Reply refresh = %d seconds; legacy leaseTime 12h requires 43200", refresh)
+	}
+	t.Log("Information Reply retained legacy leaseTime as refresh seconds", refresh)
 	changed := time.Now()
 	advertise(true)
 	if err := router.Process.Signal(unix.SIGHUP); err != nil {

@@ -55,7 +55,7 @@ func FromSpec(seed Config, s api.DHCPv4ServerSpec, reservations []api.DHCPv4Rese
 	c.StickyHoldDays = s.StickyHoldDays
 	c.Primary.Start = first(s.AddressPool.Start, s.RangeStart, c.Primary.Start)
 	c.Primary.End = first(s.AddressPool.End, s.RangeEnd, c.Primary.End)
-	lease, e := ParseLeaseTime(first(s.AddressPool.LeaseTime, s.LeaseTime))
+	lease, e := ParseLeaseTime(first(s.AddressPool.LeaseTime, s.LeaseTime), 60)
 	if e != nil {
 		return Config{}, e
 	}
@@ -138,7 +138,7 @@ func FromSpec(seed Config, s api.DHCPv4ServerSpec, reservations []api.DHCPv4Rese
 		if e != nil || !start.Is4() {
 			return Config{}, errors.New("DHCP scope requires a pool start")
 		}
-		l, e := ParseLeaseTime(p.AddressPool.LeaseTime)
+		l, e := ParseLeaseTime(p.AddressPool.LeaseTime, 60)
 		if e != nil {
 			return Config{}, e
 		}
@@ -156,7 +156,7 @@ func FromSpec(seed Config, s api.DHCPv4ServerSpec, reservations []api.DHCPv4Rese
 		l := 0
 		if r.LeaseTime != "" {
 			var e error
-			l, e = ParseLeaseTime(r.LeaseTime)
+			l, e = ParseLeaseTime(r.LeaseTime, 60)
 			if e != nil {
 				return Config{}, e
 			}
@@ -170,7 +170,7 @@ func FromSpec(seed Config, s api.DHCPv4ServerSpec, reservations []api.DHCPv4Rese
 	return c, nil
 }
 
-func ParseLeaseTime(s string) (int, error) {
+func ParseLeaseTime(s string, minimumSeconds int) (int, error) {
 	if s == "" {
 		return DefaultLeaseSeconds, nil
 	}
@@ -178,8 +178,8 @@ func ParseLeaseTime(s string) (int, error) {
 		return 0, errors.New("native DHCP does not silently convert infinite leases to finite leases")
 	}
 	if n, e := strconv.ParseUint(s, 10, 32); e == nil {
-		if n < 60 || n == uint64(^uint32(0)) {
-			return 0, errors.New("DHCP lease duration must be 60..4294967294 seconds")
+		if n < uint64(minimumSeconds) {
+			return 0, fmt.Errorf("DHCP lease duration must be %d..4294967295 seconds", minimumSeconds)
 		}
 		return int(n), nil
 	}
@@ -190,7 +190,7 @@ func ParseLeaseTime(s string) (int, error) {
 		}
 	}
 	d, e := time.ParseDuration(s)
-	if e != nil || d < 60*time.Second || d%time.Second != 0 || uint64(d/time.Second) >= uint64(^uint32(0)) {
+	if e != nil || d < time.Duration(minimumSeconds)*time.Second || d%time.Second != 0 || uint64(d/time.Second) > uint64(^uint32(0)) {
 		return 0, fmt.Errorf("unsupported DHCP lease duration %q", s)
 	}
 	return int(d / time.Second), nil

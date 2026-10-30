@@ -275,7 +275,10 @@ The reference must select the serving interface's compiled allocation. A declare
 `sendRA`/`announce` declarations require this explicit selecting policy; the
 selected RA implements that intent. Router lifetime must be
 zero or 10..9000 seconds. PIO and learned DNS lifetimes retain their original
-PD/information deadlines; `leaseTime` overrides are not imported. Static
+PD/information deadlines. Stateless DHCPv6 `leaseTime` sets the Information
+Refresh Time, as in dnsmasq: the default is `12h` (43200 seconds), finite values
+have a 600-second minimum, and `infinite` means no periodic refresh. It does not
+create an address lease or extend the original PD/information deadlines. Static
 `dnsServers`, `sntpServers`, `domainSearch` and exact PD/Information
 `dnsServerFrom`, `sntpServerFrom`, `domainSearchFrom` are converted. RA DNS/search
 references must use this selected PD; native serving can independently select

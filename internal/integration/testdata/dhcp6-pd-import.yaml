@@ -30,6 +30,7 @@ spec:
         server: dnsmasq
         interface: lan
         mode: stateless
+        leaseTime: 12h
         domainSearch: [local.test]
         dnsServerFrom: [{resource: DHCPv6Information/wan-info, field: dnsServers}]
         sntpServerFrom: [{resource: DHCPv6PrefixDelegation/wan-pd, field: sntpServers}]
