@@ -144,6 +144,37 @@ func TestKernelRAWriterInterruptedApplyAndRestoreKeepBeforeImage(t *testing.T) {
 	}
 }
 
+func TestSettingWriteAheadIntentRecoversBeforeFinalJournalSave(t *testing.T) {
+	k := fake()
+	e, options := engineFor(t, k)
+	key := settingKey{Kind: "accept_ra", Interface: "wan0"}
+	p := apply{e: e, ctx: context.Background()}
+	if err := p.set(key, 0); err != nil {
+		t.Fatal(err)
+	}
+	// Stop between the kernel write and the next checkpoint, as a process
+	// failure would. Close releases the lock without flushing in-memory state.
+	if err := e.Close(); err != nil {
+		t.Fatal(err)
+	}
+	e, err := newEngine(options, k)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	saved := e.settingRecord(key)
+	if saved == nil || saved.Before != 1 || saved.Attempted == nil || *saved.Attempted != 0 {
+		t.Fatalf("kernel write lost its original value or durable intent: %+v", saved)
+	}
+	if _, err := e.Apply(context.Background(), 1, Desired{}); err != nil {
+		t.Fatal(err)
+	}
+	value, err := k.ReadSetting(key)
+	if err != nil || value != 1 || len(e.state.Settings) != 0 {
+		t.Fatalf("restart did not restore the original value: %d, %v, %+v", value, err, e.state.Settings)
+	}
+}
+
 func TestKernelRASettingValidation(t *testing.T) {
 	for _, invalid := range []int{-1, 3} {
 		l := raWriterDisabled()

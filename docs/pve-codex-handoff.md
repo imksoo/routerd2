@@ -44,6 +44,14 @@ mainの公開済み基準は`f196880`。次の変更は統合・公開済みで�
 
 Tailscaleはイメージ展開からsocket生成までの5秒期限、VRRP/BGPは適用応答3秒期限を持つ。期限超過で再起動が反復する観測と照合中。期限延長だけで合格にしない。同じ通常83・512MiBでCPUだけ2→4へ変更した一回も終了1。controlの元60秒期限超過、networkはgeneration1 appliedだが全projection applying、両端末はDISCOVER12件に対し応答0/lease無しで、DNS/TCPUDPへ未到達。MemAvailable最小153704KiB、major fault0、PSIはguestでENOENT。CPU増加では解消しておらず、空きメモリーだけで原因も断定しない。observerの付加負荷と退場worker/helperの未採取も区別する。重い停止済stageを削除し、小さい測定値だけ保持した。
 
+## 2026-10-30 16:27 JST: 設定の重複保存削減と、残る起動失敗
+
+`setting-journal-native84`では、カーネル設定のBefore/Index/Attemptedを変更前に保存し、成功ACKだけの全journal再保存を次checkpointまたはApplyの最終保存へまとめた。他資源とrestoreの保存は維持した。新しい状態形式・移行reader・猶予期間はない。成功直後・次保存前の停止から元値を復元する検査、network Race、vet、両architecture CGO0 build、署名六ELFと通常Make/APKイメージ生成が終了0。実Alpine kernelの既存通信fixtureは51.63秒で終了0。
+
+ただし同じ全構成・512MiB/2CPU/TCGでは依然起動不合格。networkはrevision1 applied、全projectionはapplying、controlは第2世代・serviceは第8世代へ再起動し、両端末のDHCP request12件に応答0でDNS/両IP通信へ未到達。複数workerの起動期限とTS socket5秒の超過が残る。保存時間の改善値は測っておらず、保存回数を減らしたことから起動改善を推定しない。私有の小さい原因記録は`/tmp/routerd-setting-native84-startup-failure/`、重い停止済VMは削除した。
+
+二台の83通信profileは初回全DNS/両IP/二FRR/特殊IX/NTP/TSを通り、片方向切替では同じTCP/UDP対応も継続したが、切替直後のTS通信失敗を検出した。別走行ではBのeffects応答が繰り返し期限切れとなり同じTCPが失敗。全HA受入ではない。旧compilerによるzone全組と旧ignoreIPv4全項目へ私有設定を揃えた後の結果である。次は受入反復を止め、最初のeffects失敗直後のcontrol/network同時stack採取を準備してから一度だけ診断する。担当者がidleのときはmessageだけでは作業が起動しないため、捕捉準備完了を確認してから開始する。
+
 ## 実上流と自然更新: 版を区別する
 
 `d525792` / `dynamic-dns-bounded-native79`は、ens18上の別MAC・隔離router/LAN namespaceから実HGWへ接続し、7800秒/724巡の取得DNS UDP/TCP・IPv4/IPv6 HTTPSを終了0で通過した。両LAN端末の自然DHCP更新と自然PD Renew/対応Reply一組を観測。Reply送信元UDP49153、自然Renewは元T1から0.091秒後、Replyは24.623ms後。返答のT1/T2/接頭辞寿命と更新後BOOTTIME期限を照合した。

@@ -485,7 +485,7 @@ type partialMutationError struct{ error }
 func (p *apply) failure(stage string, err error) error {
 	return &ApplyError{Stage: stage, Partial: p.changed > 0, Err: err}
 }
-func (p *apply) change(stage string, fn func() error, record func()) error {
+func (p *apply) mutate(stage string, fn func() error) error {
 	if err := p.ctx.Err(); err != nil {
 		return p.failure(stage, err)
 	}
@@ -497,6 +497,13 @@ func (p *apply) change(stage string, fn func() error, record func()) error {
 		return p.failure(stage, err)
 	}
 	p.changed++
+	return nil
+}
+
+func (p *apply) change(stage string, fn func() error, record func()) error {
+	if err := p.mutate(stage, fn); err != nil {
+		return err
+	}
 	if record != nil {
 		record()
 	}

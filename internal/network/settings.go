@@ -192,12 +192,16 @@ func (p *apply) set(key settingKey, value int) error {
 	if err := p.checkpoint("setting intent"); err != nil {
 		return err
 	}
-	return p.change("set "+key.Kind, func() error { return p.e.kernel.WriteSetting(key, value) }, func() {
-		old.Last, old.Index, old.Attempted = value, index, nil
-		if coupled != nil {
-			coupled.Last, coupled.Attempted = value, nil
-		}
-	})
+	if err := p.mutate("set "+key.Kind, func() error { return p.e.kernel.WriteSetting(key, value) }); err != nil {
+		return err
+	}
+	// The durable intent already covers a crash after the write. The next
+	// checkpoint or Apply's final save includes this acknowledgement too.
+	old.Last, old.Index, old.Attempted = value, index, nil
+	if coupled != nil {
+		coupled.Last, coupled.Attempted = value, nil
+	}
+	return nil
 }
 
 func (p *apply) restoreSettings(want map[settingKey]int) error {
