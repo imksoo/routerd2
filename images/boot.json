@@ -32,6 +32,7 @@
     "nft_masq",
     "nft_redir",
     "nft_hash",
+    "nft_numgen",
     "nft_nat",
     "nft_reject_inet",
     "nft_log",

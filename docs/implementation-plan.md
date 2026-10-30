@@ -70,6 +70,8 @@ IPv4/IPv6 TCP/UDP・DNS・NTP・管理と、65.2秒/9巡の履歴進行・Health
 2026-10-30 JST dns-input-native76候補: DNS入力を状態報告待ちから分離した。18秒PDの実Alpineで署名更新準備・正常確定と、候補の設定取り込み後のHealth異常から旧版/旧設定への自動復旧・自動DNS/両IP通信が終了0。復旧253.49秒。sourceCIDRsは実daemonのTCP/UDP許可・拒否まで通過。全homert取込は91件で拒否。全make checkは終了0。併行中の二台再参加はVRRP適用要求timeoutで失敗し未解決。別診断版では130分/724巡と自然PD更新一回・全daemon再起動後の復帰が終了0。全34項目・期限達成は未完了。[現在の結果と残作業](pve-codex-handoff.md)。
 
 
+2026-10-30 16:00 JST: 旧DNS query保持とNFLOG readerを既存workerへ統合したnative84は、独立端末との履歴障害/復旧、両IPのpacket許可/破棄/拒否・再起動・撤去が通過。関連Race/vet/CGO0両architecture/署名六ELFも成功。実SSHのrollback予約/取消とFRR四経路のcommunity設定も確認。通常83イメージの全設定起動障害は別に残り、最新版factoryと全34項目は未受入。[現在の状態](pve-codex-handoff.md)。
+
 ## 2026-10-30 11:05 JSTの実行分担と見通し
 
 単体構成は10:30 JST起算の6〜12時間を暫定枠として維持する。主担当が動的ローカルDNSと全homertの統合を進め、補助担当が二台の3秒適用応答timeout、別担当がIPIP→BGP→端末通信を別worktreeで進める。単体候補をまとめた後の約130分自然更新観測中にも独立作業を継続する。二台受入の4〜8時間は単体完成後の目安であり、未特定のtimeout修正時間は含められていない。固定期限は既に超過し、これらは期限延長や全体完成の約束ではない。
