@@ -123,6 +123,7 @@ func (e *Engine) expireAuthority(ctx context.Context) (time.Duration, error) {
 		}
 		expiredLinks[link.Name] = true
 	}
+	var renewals map[string]Route
 	for i := 0; i < len(e.state.Routes); {
 		r := e.state.Routes[i]
 		expired := expiredLinks[r.Interface] || !r.ValidUntil.Live(clock.Clock)
@@ -143,11 +144,10 @@ func (e *Engine) expireAuthority(ctx context.Context) (time.Duration, error) {
 			if timer := r.KernelExpiry; timer.BootID == clock.BootID {
 				renewIn := time.Duration(int64(timer.Nanos)-clock.monotonicNanos) - routeKernelRenewBefore
 				if r.ValidUntil.Remaining(clock.Clock) > time.Duration(int64(timer.Nanos)-clock.monotonicNanos)+2*time.Second && renewIn <= 0 {
-					if err := p.refreshRoute(i, r.Route); err != nil {
-						return 0, err
+					if renewals == nil {
+						renewals = make(map[string]Route)
 					}
-					i++
-					continue
+					renewals[routeSlot(r.Route)] = r.Route
 				}
 				if renewIn > 0 && (delay == 0 || renewIn < delay) {
 					delay = renewIn
@@ -163,6 +163,10 @@ func (e *Engine) expireAuthority(ctx context.Context) (time.Duration, error) {
 			e.state.Status, e.state.LastError = "degraded", err.Error()
 			return 0, errors.Join(err, e.save())
 		}
+	}
+	if err := p.refreshRoutes(renewals); err != nil {
+		e.state.Status, e.state.LastError = "degraded", err.Error()
+		return 0, errors.Join(err, e.save())
 	}
 	for i := 0; i < len(e.state.PolicyRules); {
 		authority := e.state.PolicyRules[i].Authority
@@ -249,7 +253,7 @@ func (e *Engine) expireAuthority(ctx context.Context) (time.Duration, error) {
 			return 0, errors.Join(err, e.save())
 		}
 	}
-	if len(e.state.Routes) != before {
+	if len(e.state.Routes) != before || len(renewals) > 0 {
 		if err := e.save(); err != nil {
 			return 0, err
 		}

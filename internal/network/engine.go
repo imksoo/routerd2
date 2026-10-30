@@ -857,17 +857,22 @@ func (p *apply) routes(want []Route) error {
 	for _, r := range want {
 		wanted[routeSlot(r)] = r
 	}
+	refresh := make(map[string]Route)
+	for _, saved := range p.e.state.Routes {
+		key := routeSlot(saved.Route)
+		next := wanted[key] // removeRoutes already removed obsolete kernel identities.
+		if saved.ValidUntil != next.ValidUntil || saved.AttemptedExpiry != nil {
+			refresh[key] = next
+		}
+	}
+	if err := p.refreshRoutes(refresh); err != nil {
+		return err
+	}
 	owned := make(map[string]ownedRoute, len(p.e.state.Routes))
 	for i := range p.e.state.Routes {
 		key := routeSlot(p.e.state.Routes[i].Route)
-		next := wanted[key] // removeRoutes already removed obsolete kernel identities.
-		if p.e.state.Routes[i].ValidUntil != next.ValidUntil || p.e.state.Routes[i].AttemptedExpiry != nil {
-			if err := p.refreshRoute(i, next); err != nil {
-				return err
-			}
-		}
 		// BOOTTIME writer authority is committed together before the final ACK.
-		p.e.state.Routes[i].Route = next
+		p.e.state.Routes[i].Route = wanted[key]
 		owned[key] = p.e.state.Routes[i]
 	}
 	var additions []Route
@@ -892,60 +897,93 @@ func (p *apply) routes(want []Route) error {
 	return p.addRoutes(additions, linkBounds)
 }
 
-// A renewed RA/RIO lifetime changes the kernel timer in place. Removing the
-// working route first creates real ip6tnl host-unreachable errors between the
-// netlink messages. Keep both expected timers until the update is acknowledged.
-func (p *apply) refreshRoute(i int, next Route) error {
-	saved := p.e.state.Routes[i]
-	live, err := p.routeTable(routeTable(saved.Route))
-	if err != nil {
-		return p.failure("route refresh read", err)
-	}
-	key := routeSlot(saved.Route)
-	found := false
-	for _, observed := range live[key] {
-		if !routeMatches(observed, saved) {
-			return p.failure("route refresh ownership", errors.New("route changed outside routerd2"))
-		}
-		found = true
+// A renewed RA/RIO lifetime changes the kernel timer in place. Prepare the
+// complete batch before saving one intent containing both old and new timers.
+// The operation owner saves the acknowledged results, including partial failure.
+func (p *apply) refreshRoutes(wanted map[string]Route) error {
+	if len(wanted) == 0 {
+		return nil
 	}
 	clock, err := readRouteClock()
 	if err != nil {
 		return p.failure("route refresh clock", err)
 	}
-	timer, err := newRouteTimer(next.ValidUntil, clock)
-	if err != nil {
-		return p.failure("route refresh lifetime", fmt.Errorf("route %s table %d metric %d: %w", next.Destination, routeTable(next), next.Metric, err))
+	type refresh struct {
+		index     int
+		oldTimer  routeTimer
+		installed ownedRoute
+		found     bool
 	}
-	p.e.state.Routes[i].Route = next
-	p.e.state.Routes[i].AttemptedExpiry = &timer
+	updates := make([]refresh, 0, len(wanted))
+	for i, saved := range p.e.state.Routes {
+		key := routeSlot(saved.Route)
+		next, ok := wanted[key]
+		if !ok {
+			continue
+		}
+		live, err := p.routeTable(routeTable(saved.Route))
+		if err != nil {
+			return p.failure("route refresh read", err)
+		}
+		update := refresh{index: i, oldTimer: saved.KernelExpiry}
+		for _, observed := range live[key] {
+			if !routeMatches(observed, saved) {
+				return p.failure("route refresh ownership", errors.New("route changed outside routerd2"))
+			}
+			update.found = true
+			// A previous ACK may have been lost. Preserve the current readback
+			// before replacing its pending intent with another timer.
+			update.oldTimer = observed.kernelExpiry
+		}
+		timer, err := newRouteTimer(next.ValidUntil, clock)
+		if err != nil {
+			return p.failure("route refresh lifetime", fmt.Errorf("route %s table %d metric %d: %w", next.Destination, routeTable(next), next.Metric, err))
+		}
+		update.installed = ownedRoute{Route: next, KernelExpiry: timer}
+		updates = append(updates, update)
+	}
+	for i := range updates {
+		update := &updates[i]
+		saved := &p.e.state.Routes[update.index]
+		saved.Route, saved.KernelExpiry = update.installed.Route, update.oldTimer
+		saved.AttemptedExpiry = &update.installed.KernelExpiry
+	}
 	if err := p.checkpoint("route refresh intent"); err != nil {
 		return err
 	}
-	installed := ownedRoute{Route: next, KernelExpiry: timer}
-	return p.change("route refresh", func() error {
-		// The journal write may outlast an authority or a UTC cutoff.
+	for _, update := range updates {
+		next := update.installed.Route
+		if err := p.ctx.Err(); err != nil {
+			return p.failure("route refresh", err)
+		}
+		// The intent write and earlier updates may outlast the original grant.
 		clock, err := boottime.Read()
 		if err != nil {
-			return err
+			return p.failure("route refresh", err)
 		}
 		if !next.ValidUntil.Live(clock) || next.BootID != "" && (next.BootID != clock.BootID || next.ExpiresNanos <= uint64(clock.BoottimeNanoseconds)) {
-			return errors.New("route authority expired before refresh")
+			return p.failure("route refresh", errors.New("route authority expired before refresh"))
 		}
 		for _, link := range p.e.state.Links {
 			if routeUsesInterface(next, link.Definition.Name) && !link.Definition.Authority.Live(clock) {
-				return errors.New("route link authority expired before refresh")
+				return p.failure("route refresh", errors.New("route link authority expired before refresh"))
 			}
 		}
-		if found {
-			return p.e.kernel.UpdateRoute(installed)
+		if update.found {
+			err = p.e.kernel.UpdateRoute(update.installed)
+		} else {
+			err = p.e.kernel.AddRoute(update.installed)
 		}
-		return p.e.kernel.AddRoute(installed)
-	}, func() {
-		p.e.state.Routes[i] = installed
-		// Preserve the one-dump-per-table operation cache after this write.
-		live[key] = []RouteState{{Route: next, kernelExpiry: timer, Protocol: RouteProtocol, Type: 1, Multipath: len(next.NextHops) > 0}}
-	})
+		if err != nil {
+			return p.failure("route refresh", err)
+		}
+		p.changed++
+		p.e.state.Routes[update.index] = update.installed
+		// Preserve the operation's existing per-table readback cache.
+		live := p.routeTables[routeTable(next)]
+		live[routeSlot(next)] = []RouteState{{Route: next, kernelExpiry: update.installed.KernelExpiry, Protocol: RouteProtocol, Type: 1, Multipath: len(next.NextHops) > 0}}
+	}
+	return nil
 }
 
 func (p *apply) addRoutes(additions []Route, linkBounds map[string]lifetime.Deadline) error {

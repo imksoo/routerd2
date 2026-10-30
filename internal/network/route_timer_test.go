@@ -121,3 +121,81 @@ func TestRouteTimerUpdateKeepsForwardingRouteAcrossWriterRestart(t *testing.T) {
 		})
 	}
 }
+
+func TestPendingRouteTimerRetainsCurrentKernelTimerBeforeAnotherIntent(t *testing.T) {
+	clock, err := readRouteClock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	k := fake()
+	e, opts := engineFor(t, k)
+	route := Route{Destination: "2001:db8::/64", Interface: "wan0", ValidUntil: lifetime.After(clock.Clock, 100*365*24*3600)}
+	if _, err := e.Apply(context.Background(), 1, Desired{Routes: []Route{route}}); err != nil {
+		t.Fatal(err)
+	}
+	// The previous update reached the kernel, but the writer stopped before
+	// recording its ACK. Another intent must retain that actual timer.
+	currentTimer := e.state.Routes[0].KernelExpiry
+	e.state.Routes[0].KernelExpiry.Nanos = uint64(clock.monotonicNanos) + uint64(time.Hour)
+	e.state.Routes[0].AttemptedExpiry = &currentTimer
+	if err := e.save(); err != nil {
+		t.Fatal(err)
+	}
+	route.ValidUntil = lifetime.After(clock.Clock, 3*24*3600)
+	k.fail = "route-update"
+	if _, err := e.Apply(context.Background(), 2, Desired{Routes: []Route{route}}); err == nil {
+		t.Fatal("kernel update failure was ignored")
+	}
+	if err := e.Close(); err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := newEngine(opts, k)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restarted.Close()
+	if !restarted.ownsRoute(k.routes[0]) {
+		t.Fatal("new intent lost the prior acknowledged kernel timer")
+	}
+	k.fail, k.writes = "", nil
+	if _, err := restarted.Apply(context.Background(), 2, Desired{Routes: []Route{route}}); err != nil {
+		t.Fatal(err)
+	}
+	if restarted.state.Routes[0].AttemptedExpiry != nil || !restarted.ownsRoute(k.routes[0]) {
+		t.Fatal("writer did not finish the pending refresh")
+	}
+	for _, operation := range k.writes {
+		if operation == "route-delete" {
+			t.Fatal("pending timer recovery withdrew the forwarding route")
+		}
+	}
+}
+
+func TestRouteRefreshBatchChecksAllOwnershipBeforeUpdates(t *testing.T) {
+	clock, err := boottime.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	k := fake()
+	e, _ := engineFor(t, k)
+	d := Desired{Routes: []Route{
+		{Destination: "2001:db8:1::/64", Interface: "wan0", ValidUntil: lifetime.After(clock, 60)},
+		{Destination: "2001:db8:2::/64", Interface: "wan0", ValidUntil: lifetime.After(clock, 60)},
+	}}
+	if _, err := e.Apply(context.Background(), 1, d); err != nil {
+		t.Fatal(err)
+	}
+	k.routes[1].Protocol = 99
+	k.writes = nil
+	for i := range d.Routes {
+		d.Routes[i].ValidUntil = lifetime.After(clock, 120)
+	}
+	if _, err := e.Apply(context.Background(), 2, d); err == nil {
+		t.Fatal("changed foreign route was adopted")
+	}
+	for _, operation := range k.writes {
+		if operation == "route-update" {
+			t.Fatal("batch updated a route before discovering the ownership conflict")
+		}
+	}
+}
