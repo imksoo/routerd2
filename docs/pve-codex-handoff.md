@@ -295,3 +295,20 @@ main `c5f93a5` は独立端末の通常版で検証されたDNS履歴とDHCPv6�
 関連Race Detector・全vet・両archの通常静的六ELF・署名catalogは通過。publisherの初回はworkspace rootが0775だったため入力の信頼境界で拒否され、0755へ直した同じ検査は通過した。製品の安全検査を緩和していない。実HGWでは一つ前の同一protocol実装`full-homert-event-native92`を使い、標準Makeの隔離試験で端末の自動DHCPv4/DHCPv6/SLAAC・両IP HTTPS/DNS・実DoH・条件付きDNS・独立Headscale/公式TSとInternet出口、WAN遮断/復帰0.96秒が成立した。7800秒観測中で、自然PD更新は未受入。これは全57resourceの実HGW資格やONU直結ではない。
 
 完了した7stageの重複ELF/capture、統合済みRA/address作業tree、古い5つの診断nDPI image tagを削除した。未解決のhost上effects timeoutは約628KiBの最小情報を`/tmp/routerd-effects-native92-unresolved/`へ残す。通常長期試験からSIGSTOP/SIGQUITと強制停止を削除済み。次はIPv6 DNS再取得を含む通常Alpineの元リース自然更新、同版の二guest電源断HA、管理/更新/復旧、対象環境とk8s/pve/Cloud SAM。全34項目と固定期限達成は未完了。
+
+
+## 2026-10-30 23:55 JST: 通常Alpine二台の電源断と残る条件
+
+実行イメージは通常Make/APKの `full-homert-loopback-native92` / `8cc420d`、native92/network27、Alpine3.24.3/Linux6.18.59-0-lts。隔離KVM各4CPU/4096MiB、独立ISC・四AFTR・二FRR・IX代替・DNS/DoH・chrony・Headscale/公式Tailscaleと自動取得端末を使用。`qm stop`→同じ永続diskで再起動し、両guestのkernel起動は各2回。既存PVE bridge/本番NICは変更していない。
+
+元設定の両ノードが個別WANアドレスをBGP next-hopとして広告すると、独立FRRのECMPが応答を待機系へ返し、新規TCPが成立しなかった。旧routerdと同じFTFW外部cacheは昇格時だけkernelへcommitされる。Firewallを緩和せず、静的広告のnext-hopを既存の共有WAN IPv4へ明示変更した。さらに共有アドレスを物理WANから既存WAN VMACへ配置し、二つのMACによるARP応答を解消した。元設定の無変更受入ではない。`43a6487`の明示`bgp_next_hops`方針と変更済み入力を通常CLIで変換し、両方の110→57resource結果が実行candidateと一致することも確認した。
+
+双方で二BGP peerのESTABLISHEDと四prefixを実観測してから、それぞれ現用guestを電源断した。60秒の元判定内で全確認が23.620544/21.086965秒、同じTCP sequence space/NAT対応を保持。TCP最大応答待ち14.956663秒、UDP4228送信/3939受信/289期限切れ/残0、最長無応答8.260245秒。DNS2528件中16失敗、取得IPv6 DNSへの実UDP/TCPも確認。Tailscaleも初期失敗13/27件・12/21件があり、無損失ではない。copy assertionとeffects timeoutは0。TCPは15秒の端末期限に近く、十分な余裕を持つ安定性まで示していない。
+
+先行試行では復帰途中のbackupのBGPがACTIVE/IDLE・受信経路0の時点で現用を停止し、60秒内の全経路復旧に失敗した。`snapshot.active`は広告所有でありpeer確立を意味しない。この追加障害条件は未受入のまま。成功試行の前提を明記し、失敗を取り消さない。NTPは元の300秒初回採用観測と1回8秒の独立chronyd問い合わせを使用し、切替判定60秒・製品poll・client maxdistanceは緩めていない。
+
+私有再現手順は `/tmp/routerd-full-homert-kvm-ha92-ready-pair.py`、変換は `/tmp/routerd-shared-gateway-migrate.py`。結果の当初の`version`はguestでなくローカル設定CLIの版だったため`configuration_tool_version`に訂正した。実guest版は変更していない通常image manifest/ELF SHA256で同定した。ローカルCLIの `bgp-next-hop-native92` をguest実行版として数えない。guest三ELFのSHA256は順に `47e6c8a198040b5bbec6788cbeb30c0b968624917aa7d186274aecf827419dbe`、`b998ea871b3d1073f685a0538295f23636ca1174bf3a61fa1a5fff16843188ae`、`6f53e696871ae80a1a45850dc022e4178a5a6b63a9db05b70f0d7352b3403c79`。
+
+単体の同じ通常imageでは再起動後の取得IPv6 DNSへのUDP/TCPも通過した。元43200秒/T1=21600秒の二端末観測は継続中。T1は10月31日04:42:16 JST、終了予定04:49:37 JSTで、自然LAN更新はまだ合格にしない。実HGWの標準7800秒版も継続中で自然PD更新待ち。ただし14:06:51 UTC、`service.leases`が`POST /v1/services/state: context deadline exceeded`で終了し、generation2が再起動後に両端末へ実DHCPACKを返した。原因は未解明であり安定稼働の受入にはしない。観測環境と保持DUIDは継続中のため削除しない。
+
+`74e4b3d`はDNS履歴の実SSH/ローカルCLI照会とcandidate編集を維持する変更を統合した。独立WSLの標準静的配布物 `wsl-dns-cli-4e14466` / `4e14466` でUDP/TCP DNS→保存→SSH照会、filter拒否、snapshot一覧を確認済み。これは上記8cc420d guestへ差し替えた結果ではない。次は長時間観測と並行して全構成の管理/更新/復旧を通し、未解決timeout、復帰途中の追加障害、対象実機、k8s/pve、Cloud SAMと全34項目の残りを進める。
