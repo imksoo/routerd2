@@ -362,8 +362,9 @@ def peer(stage, dhcp6_server, pd_dslite, stale_owner, preparation, delegated_dns
             run([str(stage / "routerd"), "release", "initialize", *selector, "--digest", packed["digest"]])
             boot.update(platform="appliance", workers={}, engines={}, release={"root": str(directory / "releases"), "trust_file": str(stage / "trust.json")})
             (directory / "boot.json").write_text(json.dumps(boot))
-        run(inside("ha-client", ["ip", "address", "add", "198.18.0.50/24", "dev", "lan0"]))
-        run(inside("ha-client", ["ip", "route", "add", "default", "via", "198.18.0.1"]))
+        if not initial_leases:
+            run(inside("ha-client", ["ip", "address", "add", "198.18.0.50/24", "dev", "lan0"]))
+            run(inside("ha-client", ["ip", "route", "add", "default", "via", "198.18.0.1"]))
         run(inside("ha-server", ["ip", "address", "add", "203.0.113.50/32" if pd_dslite else "203.0.113.50/24", "dev", "lo" if pd_dslite else "wan0"]))
         server = r'''
 import socket, threading
@@ -487,7 +488,8 @@ except socket.timeout:
             return expected_dns()
 
         hook = stage / "dhcp-hook.sh"
-        hook.write_text('#!/bin/sh\ncase "$1" in\n bound|renew) ip address replace "$ip/$subnet" dev "$interface"; printf "%s %s %s %s %s %s\\n" "$1" "$ip" "$subnet" "$router" "$dns" "$serverid" >> "' + str(stage) + '/$interface.progress";;\nesac\n')
+        route = 'ip route replace default via "$router" dev "$interface"; ' if initial_leases else ''
+        hook.write_text('#!/bin/sh\ncase "$1" in\n bound|renew) ip address replace "$ip/$subnet" dev "$interface"; ' + route + 'printf "%s %s %s %s %s %s\\n" "$1" "$ip" "$subnet" "$router" "$dns" "$serverid" >> "' + str(stage) + '/$interface.progress";;\nesac\n')
         hook.chmod(0o500)
 
         def lease_client(number, requested=None, await_lease=True, mac=None):
@@ -676,8 +678,8 @@ for protocol,port in ((socket.SOCK_STREAM,18082),(socket.SOCK_DGRAM,18083)):
             wait(lambda: active("b") and not active("a"))
             wait(imported_dns)
             assert saved("b")["leases"] == expected, "takeover changed the unrenewed imported binding"
-            # A disconnected promotion deliberately renews known bindings but
-            # defers new allocations until the authenticated peer reconciles.
+            # Keep the former owner absent through known renewal and new
+            # allocation. A synchronized survivor must serve new clients too.
             before = len(lease_events(0))
             first_client.send_signal(signal.SIGCONT)
             first_client.send_signal(signal.SIGUSR1)
@@ -686,16 +688,26 @@ for protocol,port in ((socket.SOCK_STREAM,18082),(socket.SOCK_DGRAM,18083)):
             wait(imported_dns)
             first_client.send_signal(signal.SIGSTOP)
             run(inside("ha-client", ["ip", "address", "del", first_address + "/" + acquired[2], "dev", "lease0"]))
-            lease_client(1, first_address, await_lease=False)
-            wait(lambda: api("b", "control.sock", "/v1/services/service.leases")["snapshot"].get("sync", {}).get("allocation_blocked"))
-            wait(lambda: (stage / "lease1.log").read_text().count("broadcasting discover") >= 2)
-            assert not (stage / "lease1.progress").exists(), "disconnected owner allocated an unknown client"
+            lease_client(1, first_address)
+            second = lease_events(1)[-1].split()
+            assert second[1] != first_address, "disconnected takeover duplicated the imported address"
+            assert second[3:5] == acquired[3:5], "new client did not receive the migrated gateway and DNS"
+            assert not run(["ip", "netns", "pids", "ha-a"]).split(), "former owner returned before new-client acceptance"
+            for transport in ("+notcp", "+tcp"):
+                answer = run(inside("ha-client", ["dig", "-b", second[1], "@" + second[4], "lease0.lab.example", "A", "+short", "+time=1", "+tries=1", transport]))
+                assert answer.strip() == first_address, "new client could not use its acquired DNS"
+            traffic = r'''
+import socket,sys
+for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
+ with socket.socket(socket.AF_INET,kind) as connection:
+  connection.settimeout(2);connection.bind((sys.argv[1],0));connection.connect(('203.0.113.50',port))
+  connection.sendall(b'new-client\n');reply=connection.recv(2048)
+  assert reply.startswith(b'new-client') and b'203.0.113.1' in reply, reply
+'''
+            run(inside("ha-client", ["python3", "-c", traffic, second[1]]))
+            print("PASS former owner absent: new client acquired a distinct address, route and DNS; actual DNS UDP/TCP and routed IPv4 TCP/UDP passed", flush=True)
             restarted = start("ha-a", ["unshare", "--pid", "--fork", "--mount-proc", "--kill-child=SIGTERM", str(stage / "routerd"), "boot", "--file", str(stage / "a/boot.json")], "a")
             wait(lambda: daemon_ready(restarted, "a"), timeout=30)
-            wait(lambda: (stage / "lease1.progress").exists(), timeout=30)
-            second = lease_events(1)[-1].split()
-            assert second[1] != first_address, "reconciled takeover duplicated the imported address"
-            assert second[3:5] == acquired[3:5], "new client did not receive the migrated gateway and DNS"
             before = len(lease_events(0))
             first_client.send_signal(signal.SIGCONT)
             first_client.send_signal(signal.SIGUSR1)
@@ -705,7 +717,7 @@ for protocol,port in ((socket.SOCK_STREAM,18082),(socket.SOCK_DGRAM,18083)):
             for number in (0, 1):
                 fields = lease_events(number)[-1].split()
                 run(inside("ha-client", ["ping", "-I", "lease" + str(number), "-c", "1", "-W", "2", fields[3]]))
-            print("PASS initial two-node lease migration: unchanged expiry through authenticated synchronization and takeover; acquired DNS UDP/TCP before re-DHCP; known renewal during disconnection, distinct new client after peer reconciliation, IPv4 reachable", flush=True)
+            print("PASS initial two-node lease migration: unchanged expiry through authenticated synchronization and takeover; acquired DNS UDP/TCP before re-DHCP; known renewal and distinct new client during disconnection; acquired DNS and routed IPv4 before former-owner return, original client retained after reconciliation", flush=True)
             return
         if dhcp6_server:
             wait(lambda: modules("a").get("service.pd", {}).get("ready") and modules("b").get("service.pd", {}).get("ready"))
