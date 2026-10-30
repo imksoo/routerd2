@@ -28,8 +28,7 @@ def main():
     materials = {"nDPI-4.2.tar.gz": source}
     with tarfile.open(source) as archive:
         (notices / "nDPI-COPYING").write_bytes(archive.extractfile("nDPI-4.2/COPYING").read())
-    gpl = Path("/sources/GPL-3.0.txt")
-    fetch("https://www.gnu.org/licenses/gpl-3.0.txt", gpl)
+    gpl = Path(__file__).resolve().parents[1] / "packaging/alpine/licenses/GPL-3.0.txt"
     if hashlib.sha256(gpl.read_bytes()).hexdigest() != "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986":
         raise ValueError("GPL-3.0 notice checksum mismatch")
     (notices / "GPL-3.0.txt").write_bytes(gpl.read_bytes())
