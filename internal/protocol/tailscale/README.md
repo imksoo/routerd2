@@ -141,6 +141,32 @@ peer went offline with a nonzero last-seen time. Evidence is in
 selection of another exit by the product was not exercised. This isolated
 acceptance does not qualify the production tailnet, real HGW or physical NIC.
 
+The homert profile also enables routerd management SSH with a disposable
+Ed25519 authorized key and accepts TCP22 only from `tailscale0`; a real WAN
+connection is denied. The captured homert configuration places Tailscale in a
+trusted input zone and has no activation condition. This profile therefore
+omits the ordinary fixture's short-lived Health gate; the ordinary profile
+still checks its original authority expiry.
+
+An official Tailscale peer keeps one OpenSSH multiplexed TCP connection while
+only control is paused for three seconds, below the unchanged five-second
+supervisor heartbeat limit. Existing-session `help` and `show version`, plus a
+new authenticated SSH connection, must work after the Tailscale worker's
+two-second control-request timeout. `show services` must remain pending and
+complete on the same connection after control resumes. The TCP endpoints and
+control, management and Tailscale process identities must remain unchanged.
+The later whole-product restart must accept SSH with the already trusted host
+key. This exercises ordinary routerd management SSH, not Tailscale SSH or
+production tailnet authorization.
+
+On 2026-10-31 01:15:40–01:17:11 JST, unchanged product `a0b091b`
+(release `independent-a0b091b`) passed the homert profile in 90.848 seconds.
+The measured control pause was 3.035 seconds. All SSH checks above, service
+removal/reapply, the three site paths and both exit address families passed.
+The first run's later whole-product restart failed because the new fixture's
+SSH loop overwrote its startup command variable. Renaming that loop variable
+fixed the fixture; no product, authorization or timeout change was made.
+
 Legacy `TailscaleNode` import requires explicit enrollment and kernel/bootstrap
 ownership policy; see [the importer](../../legacyconfig/README.md). The actual
 CLI-to-PID1 fixture also checks stopped external-daemon state provisioning,

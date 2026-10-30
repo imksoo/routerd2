@@ -307,6 +307,8 @@ def peer(stage, homert=False):
         firewall["input"]["rules"] += [{"match": {"in_interface": "lan0", "protocol": protocol, "destination_ports": [{"start": 53}]}, "action": "accept"} for protocol in ("udp", "tcp")]
         firewall["input"]["rules"].append({"match": {"in_interface": "lan0", "protocol": "tcp", "destination_ports": [{"start": 8088}]}, "action": "accept"})
         firewall["input"]["rules"] += [{"match": {"in_interface": "tailscale0", "protocol": protocol, "destination_ports": [{"start": port}]}, "action": "accept"} for protocol, port in (("tcp", 18080), ("udp", 18081))]
+        if homert:
+            firewall["input"]["rules"].append({"match": {"in_interface": "tailscale0", "protocol": "tcp", "destination_ports": [{"start": 22}]}, "action": "accept"})
         firewall["forward"] = [{"from": "tailscale0", "to": "lan0"}, {"from": "tailscale0", "to": "uplink0"}, {"from": "lan0", "to": "tailscale0"}]
         module = "service." + imported["name"]
         resources = [
@@ -329,6 +331,10 @@ def peer(stage, homert=False):
         for i, (interface, address) in enumerate((("uplink0", "192.0.2.2/24"), ("uplink0", "fd0::2/64"), ("lan0", "10.42.0.1/24"), ("lan0", "fd42::1/64"))):
             resources.append({"id": "address" + str(i), "address": {"interface": interface, "cidr": address}})
         if homert:
+            # The actual homert Tailscale service is not conditional on this
+            # fixture's short-lived Health gate. Keep that expiry test below
+            # in the ordinary profile only.
+            next(r for r in resources if r["id"] == "tailnet").pop("when")
             for i, address in enumerate(("172.20.0.1/24", "192.168.50.1/24")):
                 resources.append({"id": "site-lan" + str(i), "address": {"interface": "lan0", "cidr": address}})
         # WAN source policies follow upstream's lookup5270, preserving the
@@ -344,6 +350,10 @@ def peer(stage, homert=False):
         boot = {"platform": "host", "config": str(configfile), "runtime_dir": str(stage / "product-run"), "state_dir": str(stage / "product-state"), "ssh": {"user": "admin"},
                 "workers": {role: str(PRODUCT / ("routerd-logging" if role == "logging" else "routerd-modules")) for role in ("logging", "network", "control", "management", "health", "tailscale", "dns", "web_console")},
                 "engines": {"tailscale": str(PRODUCT.parent / "tailscale-engine.tar")}}
+        if homert:
+            ssh_key = stage / "management-client"
+            run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(ssh_key)])
+            boot["ssh"].update(listen="0.0.0.0:22", authorized_keys=[ssh_key.with_suffix(".pub").read_text().strip()])
         # Exercise the signed catalog's actual role/image/source binding. These
         # private input copies and extracted runtime are removed with the stage.
         inputs = stage / "release-input"
@@ -464,6 +474,63 @@ def peer(stage, homert=False):
             exit_traffic()
             print("PASS homert: IPv4/IPv6 exit TCP/UDP through declared WAN NAT; no LAN-to-tailnet IPv6 NAT", flush=True)
             wait(lambda: operational_status(True))
+            ssh_target = "admin@" + next(ip for ip in original["addresses"] if ipaddress.ip_address(ip).version == 4)
+            ssh = ["ssh", "-F", "/dev/null", "-i", str(ssh_key), "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes",
+                   "-o", "StrictHostKeyChecking=accept-new", "-o", "UserKnownHostsFile=" + str(stage / "management-known-hosts"),
+                   "-o", "ConnectTimeout=2", "-o", "ConnectionAttempts=1", "-o", "LogLevel=ERROR"]
+            ssh_socket = stage / "management-master.sock"
+            master = start("ts-b", ssh + ["-M", "-N", "-S", str(ssh_socket), ssh_target], "management-ssh")
+            wait(ssh_socket.exists)
+            shared_ssh = ssh + ["-S", str(ssh_socket), ssh_target]
+            assert "show services" in run(inside("ts-b", shared_ssh + ["help"]))
+            ssh_version = json.loads(run(inside("ts-b", shared_ssh + ["show version"])))
+            assert ssh_version["release_id"] == json.loads(run([str(inputs / "routerd"), "version"]))["release_id"]
+
+            def ssh_connection():
+                rows = run(inside("ts-b", ["ss", "-Hnt", "state", "established", "( dport = :22 )"])).splitlines()
+                assert len(rows) == 1, "expected the one retained management SSH TCP connection"
+                return rows[0].split()[-2:]
+
+            connection = ssh_connection()
+            before = modules()
+            control = before["control"]
+            signal_worker(control["pid"], signal.SIGSTOP)
+            frozen.append(control["pid"])
+            paused_at = time.monotonic()
+            waiting = subprocess.Popen(inside("ts-b", shared_ssh + ["show services"]), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            children.append(waiting)
+            try:
+                # Exceed the worker's two-second control request timeout while
+                # remaining inside the supervisor's five-second heartbeat limit.
+                time.sleep(2.2)
+                for ssh_command in (shared_ssh + ["help"], shared_ssh + ["show version"], ssh + ["-S", "none", ssh_target, "help"]):
+                    result = subprocess.run(inside("ts-b", ssh_command), capture_output=True, text=True, timeout=max(0.01, 3 - (time.monotonic() - paused_at)))
+                    assert result.returncode == 0, "management SSH failed while control was paused"
+                    if ssh_command[-1] == "help":
+                        assert "show services" in result.stdout
+                    else:
+                        assert json.loads(result.stdout)["release_id"] == ssh_version["release_id"]
+                assert waiting.poll() is None, "control-dependent command did not remain pending during control pause"
+                assert master.poll() is None and ssh_connection() == connection, "the retained SSH TCP connection changed"
+                time.sleep(max(0, 3 - (time.monotonic() - paused_at)))
+            finally:
+                signal_worker(control["pid"], signal.SIGCONT)
+                paused_seconds = time.monotonic() - paused_at
+                frozen.remove(control["pid"])
+            output, _ = waiting.communicate(timeout=10)
+            assert waiting.returncode == 0 and "instances" in json.loads(output), "control-dependent command did not recover on the retained SSH connection"
+            after = modules()
+            assert daemon.poll() is None and int(child_file.read_text().split()[0]) == pid1, "supervisor process changed during control pause"
+            for name in ("control", "management", module):
+                assert (after[name]["pid"], after[name]["generation"]) == (before[name]["pid"], before[name]["generation"]), name + " restarted during the short control pause"
+            assert master.poll() is None and ssh_connection() == connection
+            assert "show services" in run(inside("ts-b", shared_ssh + ["help"]))
+            blocked_ssh = "import socket\ns=socket.socket();s.settimeout(1)\ntry:s.connect(('192.0.2.2',22))\nexcept OSError:pass\nelse:raise AssertionError('WAN reached management SSH')\nfinally:s.close()"
+            run(inside("ts-control", ["python3", "-c", blocked_ssh]))
+            print("Observed retained SSH connection:", {"master_pid": master.pid, "tcp_endpoints": connection, "control_pause_seconds": round(paused_seconds, 3)}, flush=True)
+            print("PASS homert: official peer retained one OpenSSH master/TCP connection across a 3s control pause; help/version and new SSH worked, show services waited then recovered; worker identities unchanged; WAN SSH denied", flush=True)
+            run(inside("ts-b", ssh + ["-S", str(ssh_socket), "-O", "exit", ssh_target]))
+            master.wait(timeout=3)
             old = modules()[module]
             signal_worker(old["pid"], signal.SIGKILL)
             wait(lambda: modules()[module]["generation"] > old["generation"] and observation().get("backend_state") == "Running", 30)
@@ -492,6 +559,8 @@ def peer(stage, homert=False):
             site_traffic()
             exit_traffic()
             print("PASS homert: worker and whole PID1 restart retained identity, three LAN paths and both exit families without enrollment file", flush=True)
+            assert json.loads(run(inside("ts-b", ssh + ["-S", "none", ssh_target, "show version"]))) == ssh_version
+            print("PASS homert: official peer reached routerd management SSH after whole product restart with the same trusted host key", flush=True)
             console_status("稼働中・制御接続あり", original["addresses"] + advertised)
             print("PASS homert: VPN console retained actual membership and advertisement display after whole restart", flush=True)
             run(inside("ts-b", cli + ["set", "--exit-node="]))
