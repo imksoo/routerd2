@@ -699,6 +699,9 @@ func (p *apply) reconcile(d Desired) error {
 			return err
 		}
 	}
+	if err := p.addressConfigs(d.Interfaces); err != nil {
+		return err
+	}
 	if err := p.removePolicyRules(d.PolicyRules); err != nil {
 		return err
 	}
@@ -801,7 +804,7 @@ func (p *apply) interfaceConfig(l Interface) error {
 			return err
 		}
 	}
-	return p.addressConfigs(l)
+	return nil
 }
 
 func (p *apply) removeAddresses(want map[addressKey]bool) error {
@@ -1100,5 +1103,12 @@ func (p *apply) firewall(want *Firewall) error {
 		p.e.state.FirewallOwned = false
 		return p.checkpoint("forget absent firewall")
 	}
-	return p.change("firewall atomic replace", func() error { return p.e.kernel.ReplaceFirewall(p.e.resolvedFirewall(want)) }, func() { p.e.state.FirewallOwned = want != nil })
+	if err := p.mutate("firewall atomic replace", func() error { return p.e.kernel.ReplaceFirewall(p.e.resolvedFirewall(want)) }); err != nil {
+		return err
+	}
+	if owned := want != nil; p.e.state.FirewallOwned != owned {
+		p.e.state.FirewallOwned = owned
+		return p.checkpoint("firewall ownership")
+	}
+	return nil
 }
