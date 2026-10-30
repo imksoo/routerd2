@@ -358,4 +358,51 @@ func TestBuiltRuntimeSSHRollback(t *testing.T) {
 		t.Fatal(err)
 	}
 	checkUpdateView(t, ctx, view, recovered, "確定版を選択中", current.Digest)
+
+	// A crashed stage can leave an empty manifest before it writes any payload.
+	// Recover the occupied store slot through SSH, without repairing its files.
+	prune(control.ReleasePruneRequest{ExpectedGeneration: recovered.Generation, ReleaseDigests: []string{nextRef.Digest}}, false)
+	freshBundle := bundle(5)
+	stageTrace := filepath.Join(t.TempDir(), "stage.strace")
+	staging := exec.CommandContext(ctx, "strace", "-f", "-qq", "-o", stageTrace,
+		"-e", "trace=openat,write,fsync", "-e", "signal=SIGKILL", "-e", "inject=write:signal=SIGKILL:when=2",
+		filepath.Join(binaryDir, "routerd"), "release", "stage", "--root", releaseDir,
+		"--trust-file", trust, "--target-arch", runtime.GOARCH, "--file", freshBundle.Name())
+	staging.Env = append(os.Environ(), "GOMAXPROCS=1")
+	stageOutput, stageErr := staging.CombinedOutput()
+	stageTraceBytes, stageTraceErr := os.ReadFile(stageTrace)
+	if stageErr == nil || stageTraceErr != nil || !strings.Contains(string(stageTraceBytes), "killed by SIGKILL") {
+		t.Fatalf("stage was not interrupted: %v %v %s %s", stageErr, stageTraceErr, stageOutput, stageTraceBytes)
+	}
+	for _, line := range strings.Split(string(stageTraceBytes), "\n") {
+		if strings.Contains(line, "manifest.json") || strings.Contains(line, "write(") || strings.Contains(line, "killed by SIGKILL") {
+			t.Logf("interrupted stage: %s", line)
+		}
+	}
+	orphans, err := filepath.Glob(filepath.Join(releaseDir, "releases", ".stage-*"))
+	if err != nil || len(orphans) != 1 {
+		t.Fatalf("expected one interrupted stage: %v %v", orphans, err)
+	}
+	metadata, err := os.ReadFile(filepath.Join(orphans[0], "manifest.json"))
+	if err != nil || len(metadata) != 0 {
+		t.Fatalf("stage did not stop before writing manifest data: %v %q", err, metadata)
+	}
+	if _, err := root.Stage(ctx, freshBundle); !errors.Is(err, release.ErrCapacity) {
+		t.Fatalf("interrupted stage did not occupy the store's last slot: %v", err)
+	}
+	cleaned := prune(control.ReleasePruneRequest{ExpectedGeneration: recovered.Generation}, false)
+	if !slices.Equal(cleaned.RemovedReleases, []string{filepath.Base(orphans[0])}) {
+		t.Fatal("SSH cleanup did not remove the incomplete stage", cleaned)
+	}
+	afterStageCleanup := command("update status", nil, false)
+	if afterStageCleanup.Generation != recovered.Generation || afterStageCleanup.Active == nil || *afterStageCleanup.Active != current || afterStageCleanup.HighWatermark != recovered.HighWatermark {
+		t.Fatal("incomplete stage cleanup changed confirmed selection or publisher fence")
+	}
+	if _, err := freshBundle.Seek(0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := root.Stage(ctx, freshBundle); err != nil {
+		t.Fatal("SSH cleanup did not recover staging capacity", err)
+	}
+	t.Log("SSH recovery: interrupted stage left empty manifest; full store refused next stage; SSH cleanup removed only the abandoned stage; confirmed selection and publisher fence preserved; next signed stage succeeded")
 }

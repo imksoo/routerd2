@@ -444,11 +444,10 @@ func (s *Store) cleanupRuntimeEntries(name string) (map[string]bool, error) {
 		return nil, err
 	}
 	var m Manifest
-	if err = decodeCanonical(raw, &m); err != nil {
-		return nil, err
-	}
-	if err = ValidateManifest(m, s.options.MaxArtifactBytes); err != nil {
-		return nil, err
+	if decodeCanonical(raw, &m) != nil || ValidateManifest(m, s.options.MaxArtifactBytes) != nil {
+		// Stage writes metadata before any artifact. An interrupted manifest
+		// permits metadata cleanup only; unknown payloads still block removal.
+		m = Manifest{}
 	}
 	return runtimeEntries(m), nil
 }

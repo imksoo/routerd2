@@ -563,3 +563,46 @@ func TestStageCandidateDoesNotRequireSelectedPayload(t *testing.T) {
 	}
 	image.Close()
 }
+
+func TestPruneIncompleteManifestRejectsUnknownPayload(t *testing.T) {
+	for name, manifest := range map[string]string{"empty": "", "partial": `{"schema_version":`} {
+		t.Run(name, func(t *testing.T) {
+			store := newTestStore(t)
+			first := initializeFixture(t, store)
+			orphan := filepath.Join(store.options.Root, "releases", ".stage-"+strings.Repeat("a", 32))
+			if err := os.Mkdir(orphan, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(orphan, "manifest.json"), []byte(manifest), 0600); err != nil {
+				t.Fatal(err)
+			}
+			unknown := filepath.Join(orphan, "unexpected-payload")
+			if err := os.WriteFile(unknown, []byte("preserve"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := store.Prune(context.Background(), 1, nil); err == nil {
+				t.Fatal("cleanup accepted an unknown payload")
+			}
+			if data, err := os.ReadFile(unknown); err != nil || string(data) != "preserve" {
+				t.Fatal("refused cleanup changed the unknown payload", err)
+			}
+			if data, err := os.ReadFile(filepath.Join(orphan, "manifest.json")); err != nil || string(data) != manifest {
+				t.Fatal("refused cleanup changed metadata", err)
+			}
+			if err := os.Remove(unknown); err != nil {
+				t.Fatal(err)
+			}
+			result, err := store.Prune(context.Background(), 1, nil)
+			if err != nil || len(result.RemovedReleases) != 1 || result.RemovedReleases[0] != filepath.Base(orphan) {
+				t.Fatalf("incomplete metadata was not reclaimed: %+v %v", result, err)
+			}
+			if _, err := os.Stat(orphan); !errors.Is(err, os.ErrNotExist) {
+				t.Fatal("abandoned stage remains", err)
+			}
+			current := mustState(t, store)
+			if current.Generation != 1 || current.Active == nil || *current.Active != first {
+				t.Fatal("metadata cleanup changed confirmed selection")
+			}
+		})
+	}
+}
