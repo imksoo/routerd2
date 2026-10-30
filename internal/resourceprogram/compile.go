@@ -264,7 +264,7 @@ func Compile(source Program) (Plan, error) {
 		case r.PolicyRule != nil:
 			err = claim(r, "policy_rule", fmt.Sprintf("%d/%d", r.PolicyRule.Family, r.PolicyRule.Priority))
 		case r.Forwarding != nil:
-			if r.Forwarding.IPv4 == nil && r.Forwarding.IPv6 == nil && r.Forwarding.IPv4RPFilter == nil && r.Forwarding.ConntrackTCPLiberal == nil && r.Forwarding.IPv4ECMPHash == "" {
+			if r.Forwarding.IPv4 == nil && r.Forwarding.IPv6 == nil && r.Forwarding.IPv4RPFilter == nil && r.Forwarding.ConntrackTCPLiberal == nil && r.Forwarding.ConntrackAccounting == nil && r.Forwarding.IPv4ECMPHash == "" {
 				err = fmt.Errorf("resource %s: forwarding requires at least one setting", r.ID)
 			}
 			if r.Forwarding.IPv4 != nil {
@@ -272,6 +272,9 @@ func Compile(source Program) (Plan, error) {
 			}
 			if r.Forwarding.IPv6 != nil {
 				err = errors.Join(err, claim(r, "forwarding", "ipv6"))
+			}
+			if r.Forwarding.ConntrackAccounting != nil {
+				err = errors.Join(err, claim(r, "forwarding", "conntrack_accounting"))
 			}
 			if r.Forwarding.ConntrackTCPLiberal != nil {
 				err = errors.Join(err, claim(r, "forwarding", "conntrack_tcp_liberal"))

@@ -28,6 +28,7 @@
     "nf_tables",
     "nft_fib_inet",
     "nft_ct",
+    "nf_conntrack_netlink",
     "nft_chain_nat",
     "nft_masq",
     "nft_redir",

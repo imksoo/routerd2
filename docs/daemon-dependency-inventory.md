@@ -4,25 +4,31 @@ Scope: all functional daemon families and relevant utility dependencies identifi
 
 Evidence: [routerd commands](https://github.com/imksoo/routerd/tree/main/cmd), [controller packages](https://github.com/imksoo/routerd/tree/main/pkg/controller), [implementation plan](implementation-plan.md), [current parity inventory](parity.md). Source tree enumerated on 2026-10-24. Inventory covers runtime engines, supervisors, service dependencies, and ancillary diagnostics; build-only commands are not runtime requirements.
 
+## Current choices (2026-10-30)
+
+At native86, VRRP, DNS, DHCP/PD/RA clients, stateless DHCPv6 serving and BFD run in Go workers. VRRP does not use keepalived. DHCPv4 serving uses pinned dnsmasq with DNS disabled; NTP uses chronyd; full NAT-state synchronization uses conntrackd; Tailscale uses bundled tailscaled. The signed runtime includes these executables and their library closure, and routerd2 owns their process lifetime without systemd. This has not achieved the original goal of a small runtime composed of only a few Go binaries.
+
+The ordinary Alpine image passed cold startup, simultaneous client traffic and guest reboot in a dedicated 4CPU/4GiB PVE KVM guest. This establishes that tested profile, not all engines, physical NICs or the full product. See [current results and limits](pve-codex-handoff.md). Rows below also retain unselected candidates from the original source inventory; their existence does not make them runtime dependencies or mandatory test targets.
+
 | Family / representative engine | Integration choice | systemd/journald risk | Other dependencies / ownership conflict | Required gate |
 |---|---|---|---|---|
-| NTP: chronyd, ntpd/ntpsec | External foreground chronyd candidate | Low, upstream verification pending | clock stepping/slewing, CAP_SYS_TIME, source state, DNS | Ready, log, reload, time correction, no systemd |
-| DHCPv4 server: dnsmasq, Kea, ISC dhcpd | Native worker currently; Kea optional | Low to medium, Kea hooks/logging unverified | lease DB, hooks, DNS, sockets, interface ownership | lease recovery, failover, DNS, no shell |
+| NTP: chronyd | Bundled foreground chronyd 4.8 | No systemd in tested Alpine PID1 profile | clock stepping/slewing, CAP_SYS_TIME, source state, DNS | Ready, log, reload, time correction, no systemd |
+| DHCPv4 server: dnsmasq | Bundled dnsmasq 2.92_p2, DHCP only | No systemd in tested Alpine PID1 profile | lease DB, hooks, DNS, sockets, interface ownership | lease recovery, failover, DNS, no shell |
 | DHCPv6 server / relay | Native or maintained engine | Unverified | PD, IA_NA, relay sockets, persistent leases | protocol and restart tests |
 | DHCPv4/v6 client, PD, RA | Native workers | None for native | address, route, resolver ownership | lease expiry and worker death |
 | DNS: dnsmasq, Unbound, CoreDNS, current Go resolver | Native Go worker; external optional | Low to medium | dynamic lease records, DNSSEC, TLS/QUIC, cache | bind, reload, log, crash tests |
 | PPPoE: pppd / rp-pppoe | Native PPP controller or supervised pppd | Low | plugins, privileged PPP device, secrets, ip-up/down scripts, route/DNS ownership | foreground, no scripts, reconnection |
-| BGP: GoBGP, FRR/bgpd/zebra | Embedded GoBGP preferred | Low for GoBGP; FRR multi-daemon risk | RIB/FIB writer conflict, sockets, watchfrr, BFD | peer/FIB ownership and restart |
+| BGP: GoBGP (FRR is an independent test peer) | Embedded GoBGP | Low for GoBGP; FRR multi-daemon risk | RIB/FIB writer conflict, sockets, watchfrr, BFD | peer/FIB ownership and restart |
 | BFD | Native worker | None | timer scheduling, BGP gating | latency, restart, stale fact |
-| VRRP: keepalived | Native worker | Low for native | VIP, GARP/NA, track scripts, fencing | crash and split-brain safety |
+| VRRP (keepalived is an independent test peer) | Native Go worker | None | VIP, GARP/NA, track scripts, fencing | crash and split-brain safety |
 | IPsec/IKE: strongSwan charon, charon-systemd | Plain charon + VICI candidate | High for charon-systemd, avoid | plugins, XFRM, route/VIP ownership, secrets | foreground, private VICI, kernel conflict |
 | WireGuard | Native kernel adapter | None | key storage, netlink, routes, marks | restart/rollback and traffic |
-| Tailscale: tailscaled/tsnet | Dedicated adapter, choice pending | Medium | state, control plane, TUN, route/DNS/SSH ownership | subnet/exit/identity, no init dependency |
+| Tailscale: tailscaled | Bundled daemon with typed adapter | No systemd in tested Alpine PID1 profile | state, control plane, TUN, route/DNS/SSH ownership | subnet/exit/identity, no init dependency |
 | DPI: nDPI / classifier | Isolated native/CGo worker | Low for engine; packaging high | libndpi ABI, protocol datasets, licenses, flow input | Alpine musl, capture throughput |
 | Packet capture: tcpdump/libpcap | On-demand tool plus bounded capture worker | None | CAP_NET_RAW, BPF, disk quotas, pcapng | filters/export, stop, privilege |
 | Firewall log: NFLOG/pflog | Native logging worker | None for Linux native | kernel log stream, queue loss | overload and kernel log restart |
 | Health checks: ICMP/TCP/DNS/HTTP | Native worker | None | source route/VRF, failure isolation | WAN-specific probe and timeout |
-| conntrack observer/sync: conntrack-tools/conntrackd | Native adapter or managed engine | Low to medium | netfilter netlink, replication transport, session ownership | existing TCP/UDP flow continuity |
+| conntrack observer/sync | Native netlink observation, bundled conntrackd for full state sync | No systemd | netfilter netlink, replication transport, session ownership | existing TCP/UDP flow continuity |
 | Event daemon, event relay, federation | Native workers | None | durable outbox/cursor, replay, retry | restart and idempotence |
 | DHCP fingerprint/ARP/RA observers | Native workers | None | raw sockets, AF_PACKET, event loss | packet and restart tests |
 | SAM/mobility, RR/leaf, FOU, cloud provider actions | Native workers plus provider SDK | Medium, cloud guest agents variable | metadata, NIC/route APIs, credentials, cloud-init | no guest-agent assumptions |

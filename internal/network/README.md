@@ -22,6 +22,9 @@ arbitrary Linux networking command interface.
   even when supervisor, control and BGP cannot progress. Refreshing only that
   authority updates the journal without deleting/readding the kernel route.
 - Enable or disable IPv4 and IPv6 forwarding only when requested explicitly.
+- Set `forwarding.conntrack_accounting` when byte and packet counters are
+  required for new connections. Withdrawal restores the observed original
+  `net.netfilter.nf_conntrack_acct` value; existing connections do not gain counters retroactively.
 - Replace only the `inet routerd2` nftables table in one kernel batch. The
   legacy forwarding chain drops invalid connections, accepts established/related
   traffic, then accepts explicit ingress/egress pairs. Its default policy is

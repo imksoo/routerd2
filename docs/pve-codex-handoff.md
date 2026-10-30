@@ -5,6 +5,16 @@
 [試験計画](test-plan.md)、[機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
+## 2026-10-30 18:31 JST: 明示的な接続計数と二台daemon試験
+
+`accounting-native87`（契約87/network26）は旧`SysctlProfile/router-linux`の`nf_conntrack_acct`を`forwarding.conntrack_accounting`へ接続する。既存network writerが変更前値を保存し、撤去時に復元する。collection workerがsysctlを変更する経路は作らない。新しい接続だけにpacket/byte計数が付く。配布物から欠けていた`nf_conntrack_netlink`を通常bootとkernel試験の依存へ追加した。旧86 imageのままではnetlink dumpがEINVAL、module追加後の旧image使用もmodule不足で試験開始前に停止したため、87通常imageを生成して確認した。
+
+配布Linux6.18.59の実TCPでIPv4の往路6packet/324byte・復路5packet/272byte、IPv6は両方向5packet/372byteを取得し、撤去後に元の0へ復元した。`make qemu-network IMAGE_DIR=dist/image-accounting-native87`は42.14秒/終了0。関連4 packageのRace、全vet、CGO0両arch・署名六ELF/catalog/publisherと通常Make/APK image生成も終了0。使い捨てnetwork stateを再生成し、旧試作形式readerは加えていない。
+
+同じ87・明示accounting付き51resource/NAT26件ずつのLinux名前空間二台で、ISC/四AFTR/二FRR/IX代替/DoH/chrony/Headscale・公式TS/普通・特殊dhcpcdの初回同時通信、両方向のdaemon喪失切替と再参加を完走した。同じTCP sequence spaceとUDP NAT対応を保持。再参加後までのUDPは1344送信/1216受信/128期限切れ、成功間最大3.789秒、TCP最大3.736秒、DNS843件中84失敗。TSは各方向9件の初期失敗を記録した。損失ゼロではない。
+
+これはhost名前空間のdaemon喪失であり、旧kernel/NICも停止する二guest KVM/物理機器の切替ではない。NTPは`-x`/時計権限無しの問い合わせ試験。native86単体KVMの時計補正・guest再起動結果と混同しない。IX既存session/TS出口/自然長期更新/実二回線/全homertと全34項目は未受入。小さい私有結果`/tmp/routerd-ha87-combined-success/`を残し、完了stageは削除する。次は計数を使う通信量記録とDNS/RA/OTLP変更を統合し、同時利用・二台受入へ進む。
+
 ## 2026-10-30 18:11 JST: 通常配布物の隔離KVM起動・通信・再起動
 
 公開`2d9d4a0`相当の`route-read-flat-native86`通常Make/APK image（Alpine3.24.3/Linux6.18.59）を、PVE管理下の専用4CPU/4096MiB/KVM guestで完走した。独立ISC・四Linux AFTR・二FRR・IX代替Linux・DNS/DoH・chrony・Headscale/公式Tailscaleと、自動取得する普通/特殊dhcpcd端末を使用。製品はPID1。PVE既存VM/bridge/NICは変更せず、試験EthernetはQEMU hub/streamとSSHで隔離接続した。試験VMは停止・削除済み。

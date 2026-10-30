@@ -219,10 +219,14 @@ func runKernelFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer e.Close()
+	accountingBefore, err := e.kernel.ReadSetting(settingKey{Kind: "conntrack_accounting"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	d := Desired{
 		Interfaces: []Interface{{Name: "lan0", Addresses: []string{"192.0.2.1/24", "2001:db8:1::1/64"}}, {Name: "wan0", Addresses: []string{"198.51.100.1/24", "2001:db8:2::1/64"}}},
 		Routes:     []Route{{Destination: "203.0.113.0/24", Gateway: "198.51.100.2", Interface: "wan0", Metric: 100}, {Destination: "2001:db8:3::/64", Gateway: "2001:db8:2::2", Interface: "wan0"}},
-		Forwarding: Forwarding{IPv4: yes(), IPv6: yes()},
+		Forwarding: Forwarding{IPv4: yes(), IPv6: yes(), ConntrackAccounting: yes()},
 		Firewall:   &Firewall{Forward: []Forward{{From: "lan0", To: "wan0"}}, NAT: []NATRule{{Type: "masquerade", Match: PacketMatch{Family: 4, Source: "192.0.2.0/24", OutInterface: "wan0"}}, {Type: "masquerade", Match: PacketMatch{Family: 6, Source: "2001:db8:1::/64", OutInterface: "wan0"}}}},
 	}
 	if _, err := e.Apply(context.Background(), 1, d); err != nil {
@@ -234,6 +238,25 @@ func runKernelFixture(t *testing.T) {
 	}
 	tcpExchange(t, clientNS, serverNS, "tcp4", "203.0.113.2", "198.51.100.1")
 	tcpExchange(t, clientNS, serverNS, "tcp6", "2001:db8:3::2", "2001:db8:2::1")
+	for family, target := range map[netlink.InetFamily]string{unix.AF_INET: "203.0.113.2", unix.AF_INET6: "2001:db8:3::2"} {
+		flows, err := netlink.ConntrackTableList(netlink.ConntrackTable, family)
+		if err != nil {
+			t.Fatal(err)
+		}
+		counted := false
+		for _, flow := range flows {
+			if flow.Forward.DstIP.Equal(net.ParseIP(target)) {
+				if flow.Forward.Bytes == 0 || flow.Forward.Packets == 0 || flow.Reverse.Bytes == 0 || flow.Reverse.Packets == 0 {
+					t.Fatal("forwarded TCP exchange lacked conntrack counters", flow)
+				}
+				t.Logf("family %d conntrack counters: forward %d packets/%d bytes, reverse %d packets/%d bytes", family, flow.Forward.Packets, flow.Forward.Bytes, flow.Reverse.Packets, flow.Reverse.Bytes)
+				counted = true
+			}
+		}
+		if !counted {
+			t.Fatal("forwarded TCP connection missing from conntrack", target)
+		}
+	}
 	runNativePolicyFixture(t, e, d, clientNS, serverNS)
 	runNativeECMPFixture(t, e, d, clientNS, serverNS)
 	peerRoute(t, server, "server0", "192.0.2.0/24", "198.51.100.1")
@@ -302,6 +325,10 @@ func runKernelFixture(t *testing.T) {
 	if _, err := e.Apply(context.Background(), 0, Desired{}); err != nil {
 		t.Fatalf("restore original network: %v", err)
 	}
+	if restored, err := e.kernel.ReadSetting(settingKey{Kind: "conntrack_accounting"}); err != nil || restored != accountingBefore {
+		t.Fatal("withdrawal did not restore conntrack accounting", accountingBefore, restored, err)
+	}
+	t.Logf("conntrack accounting enabled for new flows and restored original value %d", accountingBefore)
 	addresses, err := netlink.AddrList(lan, netlink.FAMILY_V4)
 	if err != nil {
 		t.Fatal(err)

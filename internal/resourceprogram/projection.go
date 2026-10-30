@@ -243,6 +243,9 @@ func renderNative(nodes []compiledResource) Native {
 		case r.PolicyRule != nil:
 			out.Network.PolicyRules = append(out.Network.PolicyRules, *r.PolicyRule)
 		case r.Forwarding != nil:
+			if r.Forwarding.ConntrackAccounting != nil {
+				out.Network.Forwarding.ConntrackAccounting = r.Forwarding.ConntrackAccounting
+			}
 			if r.Forwarding.ConntrackTCPLiberal != nil {
 				out.Network.Forwarding.ConntrackTCPLiberal = r.Forwarding.ConntrackTCPLiberal
 			}

@@ -387,12 +387,14 @@ func (c *compiler) sysctl(r resource) {
 		return
 	}
 	if s.Value != "0" && s.Value != "1" {
-		c.reject(r, "value", "invalid_value", "forwarding value must be the string 0 or 1")
+		c.reject(r, "value", "invalid_value", "network setting value must be the string 0 or 1")
 		return
 	}
 	value := s.Value == "1"
 	var target **bool
 	switch s.Key {
+	case "net.netfilter.nf_conntrack_acct":
+		target = &c.document.Network.Forwarding.ConntrackAccounting
 	case "net.netfilter.nf_conntrack_tcp_be_liberal":
 		target = &c.document.Network.Forwarding.ConntrackTCPLiberal
 	case "net.ipv4.ip_forward":

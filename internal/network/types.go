@@ -117,6 +117,8 @@ type NextHop struct {
 // previously changed by this engine becomes nil, its recorded original value is
 // restored, unless another actor changed the live value in the meantime.
 type Forwarding struct {
+	// ConntrackAccounting records byte and packet counters for new connections.
+	ConntrackAccounting *bool `json:"conntrack_accounting,omitempty"`
 	// ConntrackTCPLiberal permits in-flight TCP segments during stateful handoff.
 	ConntrackTCPLiberal *bool `json:"conntrack_tcp_liberal,omitempty"`
 	IPv4                *bool `json:"ipv4,omitempty"`
