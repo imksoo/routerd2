@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -559,6 +560,37 @@ esac
 	if !bytes.Equal(a, c2) {
 		t.Fatal("SSH observations differ from durable API history after control recovery")
 	}
+	// Discover the saved intent on the router after losing the operator's
+	// reference file. The three management entrypoints return the same refs.
+	if err := os.Remove(savedPath); err != nil {
+		t.Fatal(err)
+	}
+	listSession, err := client.NewSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	listOutput, err := listSession.CombinedOutput("show snapshots")
+	_ = listSession.Close()
+	var listed config.SnapshotList
+	if err != nil || json.Unmarshal(listOutput, &listed) != nil || len(listed.Unreadable) != 0 || len(listed.Snapshots) != 1 || listed.Snapshots[0] != saved {
+		t.Fatalf("SSH saved configuration discovery differs from captured intent: %v %s", err, listOutput)
+	}
+	discovered := listed.Snapshots[0]
+	var apiSnapshots config.SnapshotList
+	if err := ctl.Do(ctx, "GET", "/v1/config/snapshots", nil, &apiSnapshots); err != nil || len(apiSnapshots.Unreadable) != 0 || !slices.Equal(apiSnapshots.Snapshots, listed.Snapshots) {
+		t.Fatal("snapshot API differs from SSH discovery", err, apiSnapshots)
+	}
+	listCommand := exec.Command(filepath.Join(os.Getenv("ROUTERD2_TEST_BIN_DIR"), "routerd"), "config", "snapshots", "--runtime-dir="+runDir)
+	localListOutput, err := listCommand.CombinedOutput()
+	var localSnapshots config.SnapshotList
+	if err != nil || json.Unmarshal(localListOutput, &localSnapshots) != nil || len(localSnapshots.Unreadable) != 0 || !slices.Equal(localSnapshots.Snapshots, listed.Snapshots) {
+		t.Fatalf("local snapshot listing differs from SSH discovery: %v %s", err, localListOutput)
+	}
+	discoveredJSON, _ := json.Marshal(discovered)
+	if err := os.WriteFile(savedPath, discoveredJSON, 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("SSH show snapshots, API and local CLI rediscovered saved revision %d after control restart and loss of the local reference file", discovered.Revision)
 	// A saved reference remains usable after the real control restart. Restore
 	// through the same transaction owner, never by replacing its journal file.
 	peerAnswer := func(want string) {
@@ -574,7 +606,7 @@ esac
 		t.Fatal(err)
 	}
 	peerAnswer("192.0.2.3")
-	restoreRequest := control.RestoreRequest{Snapshot: saved, ExpectedRevision: recovered.Revision, RequestID: "fixture-stale-restore"}
+	restoreRequest := control.RestoreRequest{Snapshot: discovered, ExpectedRevision: recovered.Revision, RequestID: "fixture-stale-restore"}
 	if err := ctl.Do(ctx, "POST", "/v1/config/restore", restoreRequest, nil); !localapi.IsHTTPStatus(err, http.StatusConflict) {
 		t.Fatal("restore accepted stale current revision", err)
 	}
