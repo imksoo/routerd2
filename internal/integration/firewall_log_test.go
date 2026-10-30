@@ -3,12 +3,18 @@
 package integration
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
+	"net/url"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -84,10 +90,11 @@ func TestDaemonFirewallPacketLogs(t *testing.T) {
 	// configuration; no DHCP/PD setup is needed to test packet logging.
 	imported.Document.Resources = append(imported.Document.Resources, resourceprogram.Resource{ID: "address/router-v6", Address: &resourceprogram.Address{Interface: "wan0", CIDR: "2001:db8:1::1/64"}})
 	work := t.TempDir()
-	var historyPath string
+	var historyPath, historyService string
 	for _, resource := range imported.Document.Resources {
 		if resource.Service != nil && resource.Service.FirewallLog != nil {
 			cfg := resource.Service.FirewallLog
+			historyService = resource.Service.ModuleName()
 			if cfg.Retention == nil || cfg.Retention.MaxAgeSeconds != 8 || cfg.Retention.IntervalSeconds != 86400 || len(cfg.Retention.Syslog) != 1 {
 				t.Fatal("missing imported firewall retention", cfg)
 			}
@@ -113,6 +120,66 @@ func TestDaemonFirewallPacketLogs(t *testing.T) {
 			t.Fatal(err)
 		}
 		return rows
+	}
+	console := func(query url.Values) string {
+		t.Helper()
+		query.Set("service", historyService)
+		query.Set("limit", "200")
+		var connection net.Conn
+		if err := fixtureInsideNamespace(peer, func() error {
+			var err error
+			connection, err = net.DialTimeout("tcp4", "198.51.100.1:8080", time.Second)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		defer connection.Close()
+		if err := connection.SetDeadline(time.Now().Add(3 * time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		request, err := http.NewRequest(http.MethodGet, "http://198.51.100.1:8080/ops/firewall-events?"+query.Encode(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := request.Write(connection); err != nil {
+			t.Fatal(err)
+		}
+		response, err := http.ReadResponse(bufio.NewReader(connection), request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		body, err := io.ReadAll(response.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("firewall console HTTP %d: %s", response.StatusCode, body)
+		}
+		return string(body)
+	}
+	eventID := regexp.MustCompile(`data-event="([0-9]+)"`)
+	checkEvents := func(query url.Values, wanted []logstore.FirewallLogEntry) {
+		t.Helper()
+		body := console(query)
+		ids := eventID.FindAllStringSubmatch(body, -1)
+		if len(ids) != len(wanted) {
+			t.Fatalf("firewall console %v: got %d rows, want %d: %s", query, len(ids), len(wanted), body)
+		}
+		seen := make(map[string]bool, len(ids))
+		for _, id := range ids {
+			seen[id[1]] = true
+		}
+		for _, row := range wanted {
+			if !seen[strconv.FormatInt(row.ID, 10)] {
+				t.Fatalf("firewall console omitted stored event %d: %s", row.ID, body)
+			}
+			for _, value := range []string{row.SrcAddress, row.DstAddress, row.Protocol, row.RuleName, row.InIface} {
+				if !strings.Contains(body, value) {
+					t.Fatalf("firewall console omitted event field %q: %s", value, body)
+				}
+			}
+		}
 	}
 	echo, err := net.ListenPacket("udp", ":18081")
 	if err != nil {
@@ -282,6 +349,30 @@ func TestDaemonFirewallPacketLogs(t *testing.T) {
 		}
 		return false
 	})
+	rows := history()
+	checkEvents(url.Values{}, rows)
+	for _, source := range []string{"198.51.100.2", "2001:db8:1::2"} {
+		for _, action := range []string{"drop", "reject"} {
+			var matching []logstore.FirewallLogEntry
+			for _, row := range rows {
+				if row.SrcAddress == source && row.Action == action {
+					matching = append(matching, row)
+				}
+			}
+			checkEvents(url.Values{"source": {source}, "action": {action}}, matching)
+		}
+	}
+	cutoff := rows[len(rows)/2].Timestamp
+	var recent []logstore.FirewallLogEntry
+	for _, row := range rows {
+		if !row.Timestamp.Before(cutoff) {
+			recent = append(recent, row)
+		}
+	}
+	checkEvents(url.Values{"since": {cutoff.Format(time.RFC3339Nano)}}, recent)
+	checkEvents(url.Values{"source": {"198.51.100.99"}}, nil)
+	checkEvents(url.Values{"since": {time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano)}}, nil)
+	t.Log("independent HTTP client matched actual IPv4/IPv6 firewall history IDs and source/action/time filters")
 	f = f.restart()
 	persisted := false
 	for _, row := range history() {
@@ -289,6 +380,9 @@ func TestDaemonFirewallPacketLogs(t *testing.T) {
 	}
 	if !persisted {
 		t.Fatal("firewall history was not retained through product restart")
+	}
+	if body := console(url.Values{}); !strings.Contains(body, fmt.Sprintf(`data-event="%d"`, original.ID)) {
+		t.Fatal("firewall console lost stored event after whole-product restart", original.ID, body)
 	}
 	exercise("restart")
 	// Isolate only the archive destination. A silent UDP receiver loss can
@@ -323,6 +417,9 @@ func TestDaemonFirewallPacketLogs(t *testing.T) {
 		if !preserved || !newer {
 			t.Fatal("archive failure deleted old rows or prevented new history")
 		}
+	}
+	if body := console(url.Values{}); !strings.Contains(body, fmt.Sprintf(`data-event="%d"`, original.ID)) {
+		t.Fatal("firewall console lost expired event while archive delivery failed", original.ID, body)
 	}
 	t.Log("real archive send failure preserved expired history while both IP families kept allow/drop/reject and new history recording")
 	if err := netlink.RouteDel(&blocked); err != nil {
@@ -375,6 +472,10 @@ func TestDaemonFirewallPacketLogs(t *testing.T) {
 		}
 		return false
 	})
+	if body := console(url.Values{}); strings.Contains(body, fmt.Sprintf(`data-event="%d"`, original.ID)) || !eventID.MatchString(body) {
+		t.Fatal("firewall console did not reflect archived expiry with newer events retained", original.ID, body)
+	}
+	t.Log("independent HTTP history retained events through restart/archive failure and removed expired events only after archive recovery")
 	t.Logf("firewall history survived restart, expired at its original packet age, and reached independent UDP archive before deletion; newer rows retained; IPv4/IPv6 allow/drop/reject held for %d maintenance rounds", rounds)
 
 	// Remove only logging through the same import boundary; packet verdicts stay.
@@ -463,6 +564,14 @@ spec:
         path: /var/log/routerd/firewall-events.db
         nflogGroup: 1
         log: {acceptSampleRate: 0, dropSampleRate: 1, copyRange: 2048, reject: true}
+    - apiVersion: system.routerd.net/v1alpha1
+      kind: WebConsole
+      metadata: {name: history}
+      spec: {enabled: true, listenAddress: 198.51.100.1, port: 8080, basePath: /ops/}
+    - apiVersion: firewall.routerd.net/v1alpha1
+      kind: FirewallRule
+      metadata: {name: allow-console}
+      spec: {fromZone: outside, toZone: self, protocol: tcp, port: 8080, action: accept}
 `
 
 const firewallHistoryPolicy = `

@@ -22,7 +22,8 @@ filters exported logs without suppressing selected measurements.
 Native `signals` defaults to logs only. The former `Telemetry` resource defaults
 to all three signals, matching its previous selection behavior. Its importer
 reports the remaining source gap: metrics and traces currently cover actual
-Health probes and DHCPv6 client exchanges. Controller, PPPoE, firewall and other former
+Health probes, DHCPv6 client exchanges and observed firewall denies. Controller,
+PPPoE and other former
 instrumentation is not migrated by selecting these signals.
 
 The existing local log owner remains authoritative. This worker reads its Unix
@@ -66,6 +67,19 @@ interval includes retransmissions and offer selection, not a per-packet round
 trip. A protocol timeout, lease expiry, NoBinding response, superseding state,
 cancellation or local error is recorded separately. No DUID, assigned address,
 authentication data or server identity is exported as a measurement attribute.
+
+The existing `firewall packet` log producer also supplies
+`routerd.firewall.deny.total`, in packets, grouped by rule, action, transport and
+address family. It counts only actual `drop` and `reject` NFLOG observations;
+`accept` and unknown verdicts are not denies. This retains the old firewall
+logger's observed-deny counting path. It does not estimate unsampled packets or
+reconstruct records lost by the kernel, local queue, retention or exporter.
+The homert configurations use deny sampling one and accepted-packet sampling
+zero. A one-in-N logging rule therefore yields sampled observation counts,
+not the firewall's total packet counter. The old DPI application, expired-flow correlation attributes and conntrack
+tuning measurements are not produced by this path. Packet source/destination,
+ports and payload do not become metric attributes. This path adds no packet span
+and leaves firewall verdicts and packet-history storage unchanged.
 
 Counters reset when this exporter restarts, and phase series can coexist because
 phase is an attribute. They describe observed records, not a durable audit of
@@ -125,6 +139,34 @@ The three executed SHA-256 values were:
 - `routerd`: `1da234264bc90a942342d3ca21fa52faa7550f65fe07a965c914ed00f75c7244`
 - `routerd-modules`: `9d5b7af154ce60fc590428e620ab785c11dc78781855eca732fd39d44b03bce0`
 - `routerd-logging`: `1167ce8e5a1decbb7ff98f94bf661148dad8e5557d5ae9277cb2c5c8ad5f4a91`
+
+On 2026-10-30 22:12:19-22:14:29 JST, the extended firewall measurement
+acceptance passed in 129.97 seconds with combined product `ffffd46`, release
+`wsl-firewall-ffffd46`. The two measurement files match product commit `9baee18`
+(integrated as `cefdc42`); the acceptance script was uncommitted during this run.
+Real IPv4 UDP packets exercised allow, silent drop and ICMP rejection. The
+original NFLOG records and Collector counters agreed at one and then two
+observed drops/rejections per rule. A dedicated logged allow rule proved that
+accepted packets were excluded; ordinary allowed forwarding remained unlogged.
+This explicit allow log is a test condition, unlike homert's accepted-packet
+sampling zero. The deny logging divisor was one, matching homert.
+
+With the Collector stopped, the same NFLOG worker retained all three verdicts
+and recorded the packets. After exporter replacement and Collector recovery,
+fresh drops/rejections produced new counters starting at one, without replaying
+old records. All 1,269 concurrent allowed UDP exchanges succeeded. Existing
+Health and DHCPv6 measurement checks also passed. Evidence is in
+`dist/firewall-otlp-peer/peer.log`, `binaries.json`, Collector JSONL and
+`firewall-probes.jsonl`. No product or script changed during this run.
+Executed SHA-256 values:
+
+- `routerd`: `f0e45fe4ed30c84d88abc1ac39ec47c459a9881daa5fb6c98fd6e764216fc8e3`
+- `routerd-modules`: `0934174f00f28450eae0b3b162eca68b65ce6c6458f5b5f3a3dd504afcb3f11b`
+- `routerd-logging`: `55209bf884f664b196a43568dfbf6683ca2e477cf833a1c0fb6b2fd20ff23c88`
+
+The firewall metric acceptance covers IPv4 and logging divisor one. It does not
+establish IPv6 measurements, sampled-rate accuracy, loss-free export, old DPI
+classification/correlation or target-appliance acceptance.
 
 This acceptance covers OTLP/gRPC plaintext and the exercised lifecycle. It does
 not qualify other signal producers, archive-on-delete forwarding, automatic

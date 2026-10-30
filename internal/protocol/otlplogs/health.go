@@ -31,6 +31,7 @@ type operationSignals struct {
 	exchanges        metric.Int64Counter
 	exchangeDuration metric.Float64Histogram
 	dhcp6Tracer      trace.Tracer
+	deniedPackets    metric.Int64Counter
 }
 
 func newOperationSignals(ctx context.Context, cfg otlplogconfig.Config, conn *grpc.ClientConn, res *resource.Resource) (p *operationSignals, err error) {
@@ -60,6 +61,10 @@ func newOperationSignals(ctx context.Context, cfg otlplogconfig.Config, conn *gr
 			return p, err
 		}
 		p.exchangeDuration, err = dhcp6Meter.Float64Histogram("routerd.dhcpv6.client.exchange.duration", metric.WithUnit("s"))
+		if err != nil {
+			return p, err
+		}
+		p.deniedPackets, err = p.metrics.Meter("routerd2.firewall").Int64Counter("routerd.firewall.deny.total", metric.WithUnit("{packet}"))
 		if err != nil {
 			return p, err
 		}
@@ -96,6 +101,8 @@ func (p *operationSignals) record(ctx context.Context, entry logging.Record) {
 		p.recordHealth(ctx, entry)
 	case telemetry.DHCPv6ExchangeMessage:
 		p.recordDHCPv6(ctx, entry)
+	case "firewall packet":
+		p.recordFirewall(ctx, entry)
 	}
 }
 

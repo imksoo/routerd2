@@ -253,3 +253,38 @@ history check at 21:50:29-21:50:44 JST in 15.31 seconds. The source tree was
 clean. The concurrent DHCPv6/Collector check used byte-identical executables;
 evidence and SHA-256 values are under `dist/observability-integrated/dns/`.
 The API error wording is Japanese in this tested version.
+
+
+## Saved firewall event search
+
+`<base_path>firewall-events` reads `GET /v1/services/{name}/firewall-history`
+for a configured `firewall_log` service. The runtime releases its state lock
+before opening the collector-owned database through the existing routerd
+`OpenFirewallLogReadOnly` and `List` functions. The NFLOG collector remains the
+sole writer and retention owner; the reader starts no process or database.
+
+Filters retain the old console's query capability: exact source IP and action,
+an inclusive RFC3339 start time, and a newest-first limit of 100 by default,
+maximum 1000. Equivalent IP spellings are normalized. The old store caps each
+read at 1000, so `at_limit` says only that the requested limit was reached; it
+does not assert that another matching event exists. End-time filtering, paging,
+destination filtering, address-set enrichment and connection correlation are
+not implemented by this route. The table shows the original packet timestamp,
+rule, action, family/protocol/TCP flags, addresses/ports, interfaces and size.
+These are stored sampled events, not current rules or total traffic counts.
+An unavailable database or failed query is an HTTP error rather than empty
+history. The old stored event type and query code are reused directly.
+
+The firewall history path was accepted on 2026-10-30 22:12:44-22:13:04 JST
+using the standard `wsl-firewall-ffffd46` build (source `ffffd46`).
+`TestDaemonFirewallPacketLogs` completed in 14.55 seconds through the existing
+`daemon-tests.py firewall` runner. An independent HTTP client matched stored
+IPv4/IPv6 UDP drop/reject and TCP SYN observations by row ID and the source,
+action and time filters. The same UI retained records across whole-product
+restart and real archive-send failure, then reflected expiry only after archive
+recovery. The original eight-second retention and one-second maintenance period
+were unchanged. A six-row HTML response was saved and rendered at 1280x1400;
+Japanese labels and packet fields were legible without overlap. These are
+isolated Linux namespace results on WSL, not target hardware qualification or
+acceptance of the complete homert configuration. Evidence is in
+`dist/firewall-integrated/` (execution metadata, log and captured HTML).
