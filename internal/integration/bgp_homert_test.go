@@ -24,6 +24,7 @@ import (
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netns"
+	"golang.org/x/sys/unix"
 )
 
 // The homert operation uses two same-AS peers, peer-address next-hop rewriting,
@@ -51,6 +52,7 @@ func TestDaemonBGPTwoFRRPeers(t *testing.T) {
 		{ID: "lan-address", Address: &resourceprogram.Address{Interface: "lan0", CIDR: "198.18.0.1/24"}},
 	}}
 	type peer struct {
+		namespace     netns.NsHandle
 		local, remote string
 		prefixes      []string
 		addresses     []string
@@ -65,9 +67,9 @@ func TestDaemonBGPTwoFRRPeers(t *testing.T) {
 		namespace := fixturePeerNamespace(t, iface, "peer0")
 		prefixes := []string{imports[i], learned[i]}
 		addresses := []string{strings.TrimSuffix(prefixes[0], "0/24") + "50", strings.TrimSuffix(prefixes[1], "0/24") + "50"}
-		setupBGPAddresses(t, namespace, []string{"address", "add", remote + "/24", "dev", "peer0"}, []string{"address", "add", addresses[0] + "/32", "dev", "lo"}, []string{"address", "add", addresses[1] + "/32", "dev", "lo"}, []string{"route", "add", "198.18.0.0/24", "via", local})
+		setupBGPAddresses(t, namespace, []string{"address", "add", remote + "/24", "dev", "peer0"}, []string{"address", "add", addresses[0] + "/32", "dev", "lo"}, []string{"address", "add", addresses[1] + "/32", "dev", "lo"})
 		vty, stop, start := startIndependentFRR(t, namespace, local, remote, prefixes)
-		peers = append(peers, peer{local, remote, prefixes, addresses, vty, stop, start, healthPBRCapture(t, iface)})
+		peers = append(peers, peer{namespace, local, remote, prefixes, addresses, vty, stop, start, healthPBRCapture(t, iface)})
 		document.Resources = append(document.Resources,
 			resourceprogram.Resource{ID: iface, Interface: &network.Interface{Name: iface}},
 			resourceprogram.Resource{ID: iface + "-address", Address: &resourceprogram.Address{Interface: iface, CIDR: local + "/24"}})
@@ -98,7 +100,23 @@ threading.Event().wait()`, addresses[0], addresses[1])
 			Paths []json.RawMessage `json:"paths"`
 		}
 		out, err := p.vty("show bgp ipv4 unicast 198.18.0.0/24 json")
-		return err == nil && json.Unmarshal(out, &view) == nil && (len(view.Paths) > 0) == present
+		if err != nil || json.Unmarshal(out, &view) != nil || (len(view.Paths) > 0) != present {
+			return false
+		}
+		return fixtureInsideNamespace(p.namespace, func() error {
+			_, dst, _ := net.ParseCIDR("198.18.0.0/24")
+			routes, err := netlink.RouteListFiltered(netlink.FAMILY_V4, &netlink.Route{Dst: dst}, netlink.RT_FILTER_DST)
+			if err != nil {
+				return err
+			}
+			if (len(routes) > 0) != present {
+				return fmt.Errorf("FRR LAN FIB: %v", routes)
+			}
+			if present && (!routes[0].Gw.Equal(net.ParseIP(p.local)) || int(routes[0].Protocol) != unix.RTPROT_BGP) {
+				return fmt.Errorf("LAN route was not learned through BGP: %v", routes)
+			}
+			return nil
+		}) == nil
 	}
 	installed := func(p peer, present bool) bool {
 		for _, prefix := range p.prefixes {
@@ -150,6 +168,9 @@ for addr in sys.argv[1:]:
 	if err := forward(peers[1]); err != nil {
 		t.Fatal(err)
 	}
+	if !advertised(peers[1], true) {
+		t.Fatal("unaffected peer lost the BGP LAN return route")
+	}
 	for _, prefix := range first.prefixes {
 		if out, err := first.vty("configure terminal", "router bgp 64521", "address-family ipv4 unicast", "network "+prefix); err != nil {
 			t.Fatal(string(out), err)
@@ -183,6 +204,9 @@ for addr in sys.argv[1:]:
 	}
 	if err := forward(peers[1]); err != nil {
 		t.Fatal(err)
+	}
+	if !advertised(peers[1], true) {
+		t.Fatal("live peer lost the BGP LAN return route during peer shutdown")
 	}
 	t.Log("stopped FRR routes observed stale and still forwarding while the other peer remained usable")
 	first.start()
@@ -276,7 +300,7 @@ func startIndependentFRR(t *testing.T, namespace netns.NsHandle, local, remote s
 	start("zebra", "-u", "frr", "-g", "frr", "-z", socket, "--vty_socket", root, "-i", filepath.Join(root, "zebra.pid"), "-f", filepath.Join(root, "zebra.conf"), "--log", "stdout")
 	until(t, 5*time.Second, func() bool { info, err := os.Stat(socket); return err == nil && info.Mode()&os.ModeSocket != 0 })
 	startBGP := func() *exec.Cmd {
-		return start("bgpd", "-S", "-n", "-z", socket, "-p", "179", "--vty_socket", root, "-i", filepath.Join(root, "bgpd.pid"), "-f", filepath.Join(root, "frr.conf"), "--log", "stdout")
+		return start("bgpd", "-S", "-z", socket, "-p", "179", "--vty_socket", root, "-i", filepath.Join(root, "bgpd.pid"), "-f", filepath.Join(root, "frr.conf"), "--log", "stdout")
 	}
 	bgp := startBGP()
 	t.Cleanup(func() {
