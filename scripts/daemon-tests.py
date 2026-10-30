@@ -15,7 +15,7 @@ SUITES = {
     "management": (("TestDaemonConfigurationAndRecovery", ("mgmt0",), 100),),
     "local-redirect": (("TestDaemonLocalDNSRedirect", ("wan0", "lan0"), 85),),
     "blackhole": (("TestDaemonBlackholeRoute", ("wan0", "lan0"), 55),),
-    "firewall": (("TestDaemonFirewallSourceCIDRs", ("wan0",), 55),),
+    "firewall": (("TestDaemonFirewallSourceCIDRs", ("wan0",), 55), ("TestDaemonFirewallPacketLogs", ("wan0",), 75)),
     "host-route": (("TestDaemonImportedIPv6HostRoute", ("wan0",), 75), ("TestDaemonRAHostRoute", ("wan0",), 75), ("TestDaemonImplicitIPv6HostRoute", ("wan0",), 75)),
     "health-pbr": (
         ("TestDaemonConnectionMarkedEgressPolicy", ("wan0", "wan1", "wan2", "wan3", "wan4", "lan0"), 165),

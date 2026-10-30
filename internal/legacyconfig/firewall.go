@@ -42,6 +42,7 @@ func (c *compiler) resourcesOfKind(kind string) []resource {
 }
 
 func (c *compiler) firewall(vrrpNames map[string]string) []resourceprogram.Resource {
+	logging := c.firewallLog()
 	zrs, prs, rrs, nrs := c.resourcesOfKind("FirewallZone"), c.resourcesOfKind("FirewallPolicy"), c.resourcesOfKind("FirewallRule"), c.resourcesOfKind("NAT44Rule")
 	if len(zrs)+len(prs)+len(rrs)+len(nrs) == 0 {
 		return nil
@@ -122,7 +123,7 @@ func (c *compiler) firewall(vrrpNames map[string]string) []resourceprogram.Resou
 		if s.ToZone != "self" && !zoneNames[s.ToZone] {
 			c.reject(r, "toZone", "reference", "destination zone is missing")
 		}
-		acls = append(acls, migrationACL{resource: r, from: s.FromZone, to: s.ToZone, rules: c.acl(r)})
+		acls = append(acls, migrationACL{resource: r, from: s.FromZone, to: s.ToZone, rules: c.acl(r, logging)})
 		c.target(r, "network.firewall")
 	}
 	if len(zones) > 0 || len(acls) > 0 {
@@ -135,7 +136,9 @@ func (c *compiler) firewall(vrrpNames map[string]string) []resourceprogram.Resou
 			{Match: network.PacketMatch{Family: 6, Protocol: "icmpv6"}, Action: "accept"},
 		}}
 		if logDeny {
-			f.Input.LogPrefix, f.ForwardChain.LogPrefix = "routerd firewall input deny ", "routerd firewall forward deny "
+			inputLog, forwardLog := logging, logging
+			inputLog.Prefix, forwardLog.Prefix = "routerd firewall input deny ", "routerd firewall forward deny "
+			f.Input.Log, f.ForwardChain.Log = &inputLog, &forwardLog
 		}
 		count := 3
 		appendRule := func(chain *network.FirewallChain, rule network.FirewallRule) bool {
@@ -168,14 +171,14 @@ func (c *compiler) firewall(vrrpNames map[string]string) []resourceprogram.Resou
 				}
 			}
 			for _, in := range from.ifnames {
-				if !c.firewallPair(from, migrationZone{resource: resource{Resource: api.Resource{Metadata: api.ObjectMeta{Name: "self"}}}, role: "self"}, in, "", acls, logDeny, f.Input, appendRule) {
+				if !c.firewallPair(from, migrationZone{resource: resource{Resource: api.Resource{Metadata: api.ObjectMeta{Name: "self"}}}, role: "self"}, in, "", acls, logDeny, logging, f.Input, appendRule) {
 					return nil
 				}
 			}
 			for _, to := range zones {
 				for _, in := range from.ifnames {
 					for _, out := range to.ifnames {
-						if !c.firewallPair(from, to, in, out, acls, logDeny, f.ForwardChain, appendRule) {
+						if !c.firewallPair(from, to, in, out, acls, logDeny, logging, f.ForwardChain, appendRule) {
 							return nil
 						}
 					}
@@ -202,7 +205,7 @@ func (c *compiler) firewall(vrrpNames map[string]string) []resourceprogram.Resou
 	return translations
 }
 
-func (c *compiler) firewallPair(from, to migrationZone, in, out string, rules []migrationACL, logDeny bool, chain *network.FirewallChain, appendRule func(*network.FirewallChain, network.FirewallRule) bool) bool {
+func (c *compiler) firewallPair(from, to migrationZone, in, out string, rules []migrationACL, logDeny bool, logging network.PacketLog, chain *network.FirewallChain, appendRule func(*network.FirewallChain, network.FirewallRule) bool) bool {
 	for _, acl := range rules {
 		if acl.from != from.resource.Metadata.Name || acl.to != to.resource.Metadata.Name {
 			continue
@@ -224,7 +227,8 @@ func (c *compiler) firewallPair(from, to migrationZone, in, out string, rules []
 	}
 	rule := network.FirewallRule{Match: network.PacketMatch{InInterface: in, OutInterface: out}, Action: action}
 	if action == "drop" && logDeny {
-		rule.LogPrefix = "routerd firewall " + from.resource.Metadata.Name + "-to-" + to.resource.Metadata.Name + " deny "
+		logging.Prefix = "routerd firewall " + from.resource.Metadata.Name + "-to-" + to.resource.Metadata.Name + " deny "
+		rule.Log = &logging
 	}
 	return appendRule(chain, rule)
 }
@@ -282,7 +286,7 @@ func (c *compiler) filterInterface(r resource, field, ref string) string {
 	}
 }
 
-func (c *compiler) acl(r resource) []network.FirewallRule {
+func (c *compiler) acl(r resource, logging network.PacketLog) []network.FirewallRule {
 	c.allow(r, "fromZone", "toZone", "srcCIDRs", "destinationCIDRs", "protocol", "port", "sourcePorts", "destinationPorts", "icmpType", "icmp-type", "icmpv6Type", "icmpv6-type", "action", "log")
 	s := r.Spec.(api.FirewallRuleSpec)
 	base := network.PacketMatch{Protocol: s.Protocol}
@@ -370,7 +374,9 @@ func (c *compiler) acl(r resource) []network.FirewallRule {
 			}
 			rule := network.FirewallRule{Match: m, Action: s.Action}
 			if s.Log {
-				rule.LogPrefix = "routerd firewall " + r.Metadata.Name + " "
+				log := logging
+				log.Prefix, log.Every = "routerd firewall "+r.Metadata.Name+" ", 0
+				rule.Log = &log
 			}
 			out = append(out, rule)
 		}

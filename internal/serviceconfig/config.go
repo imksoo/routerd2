@@ -19,6 +19,7 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/dhcprelayconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
+	"github.com/imksoo/routerd2/internal/protocol/firewalllogconfig"
 	"github.com/imksoo/routerd2/internal/protocol/health"
 	"github.com/imksoo/routerd2/internal/protocol/ntpconfig"
 	"github.com/imksoo/routerd2/internal/protocol/otlplogconfig"
@@ -31,25 +32,26 @@ import (
 )
 
 type Service struct {
-	OTLPLogs    *otlplogconfig.Config   `json:"otlp_logs,omitempty"`
-	Syslog      *syslogconfig.Config    `json:"syslog,omitempty"`
-	NTP         *ntpconfig.Node         `json:"ntp,omitempty"`
-	Tailscale   *tailscaleconfig.Node   `json:"tailscale,omitempty"`
-	DHCP6Server *DHCP6Server            `json:"dhcp6_server,omitempty"`
-	PPPoE       *PPPoE                  `json:"pppoe,omitempty"`
-	Health      *health.Config          `json:"health,omitempty"`
-	BFD         *bfd.Config             `json:"bfd,omitempty"`
-	DSLite      *DSLite                 `json:"ds_lite,omitempty"`
-	RAClient    *RAClient               `json:"ra_client,omitempty"`
-	DHCPServer  *DHCPServer             `json:"dhcp_server,omitempty"`
-	DHCPRelay   *dhcprelayconfig.Config `json:"dhcp_relay,omitempty"`
-	BGP         *BGP                    `json:"bgp,omitempty"`
-	Name        string                  `json:"name"`
-	DHCP4       *DHCP4                  `json:"dhcp4,omitempty"`
-	DHCP6       *DHCP6                  `json:"dhcp6,omitempty"`
-	RA          *RouterAdvertisement    `json:"ra,omitempty"`
-	DNS         *DNS                    `json:"dns,omitempty"`
-	VRRP        *vrrp.Config            `json:"vrrp,omitempty"`
+	FirewallLog *firewalllogconfig.Config `json:"firewall_log,omitempty"`
+	OTLPLogs    *otlplogconfig.Config     `json:"otlp_logs,omitempty"`
+	Syslog      *syslogconfig.Config      `json:"syslog,omitempty"`
+	NTP         *ntpconfig.Node           `json:"ntp,omitempty"`
+	Tailscale   *tailscaleconfig.Node     `json:"tailscale,omitempty"`
+	DHCP6Server *DHCP6Server              `json:"dhcp6_server,omitempty"`
+	PPPoE       *PPPoE                    `json:"pppoe,omitempty"`
+	Health      *health.Config            `json:"health,omitempty"`
+	BFD         *bfd.Config               `json:"bfd,omitempty"`
+	DSLite      *DSLite                   `json:"ds_lite,omitempty"`
+	RAClient    *RAClient                 `json:"ra_client,omitempty"`
+	DHCPServer  *DHCPServer               `json:"dhcp_server,omitempty"`
+	DHCPRelay   *dhcprelayconfig.Config   `json:"dhcp_relay,omitempty"`
+	BGP         *BGP                      `json:"bgp,omitempty"`
+	Name        string                    `json:"name"`
+	DHCP4       *DHCP4                    `json:"dhcp4,omitempty"`
+	DHCP6       *DHCP6                    `json:"dhcp6,omitempty"`
+	RA          *RouterAdvertisement      `json:"ra,omitempty"`
+	DNS         *DNS                      `json:"dns,omitempty"`
+	VRRP        *vrrp.Config              `json:"vrrp,omitempty"`
 }
 
 type DNS struct {
@@ -120,6 +122,9 @@ var safeName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,23}$`)
 var interfaceName = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]{0,14}$`)
 
 func (s Service) Role() string {
+	if s.FirewallLog != nil {
+		return "firewall_log"
+	}
 	if s.OTLPLogs != nil {
 		return "otlp_logs"
 	}
@@ -230,7 +235,7 @@ func Validate(services []Service) error {
 		}
 		names[s.Name] = true
 		n := 0
-		for _, set := range []bool{s.OTLPLogs != nil, s.Syslog != nil, s.NTP != nil, s.Tailscale != nil, s.PPPoE != nil, s.Health != nil, s.BFD != nil, s.DSLite != nil, s.RAClient != nil, s.DHCPServer != nil, s.DHCP6Server != nil, s.DHCPRelay != nil, s.DHCP4 != nil, s.DHCP6 != nil, s.RA != nil, s.DNS != nil, s.VRRP != nil, s.BGP != nil} {
+		for _, set := range []bool{s.FirewallLog != nil, s.OTLPLogs != nil, s.Syslog != nil, s.NTP != nil, s.Tailscale != nil, s.PPPoE != nil, s.Health != nil, s.BFD != nil, s.DSLite != nil, s.RAClient != nil, s.DHCPServer != nil, s.DHCP6Server != nil, s.DHCPRelay != nil, s.DHCP4 != nil, s.DHCP6 != nil, s.RA != nil, s.DNS != nil, s.VRRP != nil, s.BGP != nil} {
 			if set {
 				n++
 			}
@@ -238,10 +243,13 @@ func Validate(services []Service) error {
 		if n != 1 {
 			return fmt.Errorf("service %s must select exactly one protocol", s.Name)
 		}
-		if s.OTLPLogs == nil && s.Syslog == nil && s.NTP == nil && s.DNS == nil && s.BGP == nil && s.DHCPRelay == nil && !(s.BFD != nil && s.BFD.Multihop) && !interfaceName.MatchString(s.Interface()) {
+		if s.FirewallLog == nil && s.OTLPLogs == nil && s.Syslog == nil && s.NTP == nil && s.DNS == nil && s.BGP == nil && s.DHCPRelay == nil && !(s.BFD != nil && s.BFD.Multihop) && !interfaceName.MatchString(s.Interface()) {
 			return fmt.Errorf("service %s has an invalid interface", s.Name)
 		}
 		key := s.Role() + ":" + s.Interface()
+		if s.FirewallLog != nil {
+			key = fmt.Sprintf("firewall_log:%d", s.FirewallLog.Group)
+		}
 		if s.Tailscale != nil {
 			key = "tailscale"
 		}
@@ -286,6 +294,10 @@ func Validate(services []Service) error {
 		}
 		sockets[key] = s.Name
 		switch s.Role() {
+		case "firewall_log":
+			if err := firewalllogconfig.Validate(*s.FirewallLog); err != nil {
+				return err
+			}
 		case "otlp_logs":
 			if err := otlplogconfig.Validate(*s.OTLPLogs); err != nil {
 				return err
@@ -494,6 +506,8 @@ func (s Service) Instance(runtimeDir, stateDir string) (Instance, error) {
 	var b []byte
 	var err error
 	switch s.Role() {
+	case "firewall_log":
+		b, err = json.Marshal(*s.FirewallLog)
 	case "otlp_logs":
 		b, err = json.Marshal(*s.OTLPLogs)
 	case "syslog":

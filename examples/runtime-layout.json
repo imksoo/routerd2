@@ -4,6 +4,10 @@
   "entrypoint": "supervisor",
   "roles": [
     {
+      "role": "firewall_log",
+      "artifact": "native-workers"
+    },
+    {
       "role": "otlp_logs",
       "artifact": "native-workers"
     },

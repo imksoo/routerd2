@@ -81,7 +81,7 @@ func TestFirewallMigrationPreservesActualPacketDecisions(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := nativeProgram(t, result.Document).Network.Firewall
-	if f == nil || f.Input == nil || f.ForwardChain == nil || f.DisableForward || f.Output != nil || f.Input.LogPrefix != "routerd firewall input deny " || f.ForwardChain.LogPrefix != "routerd firewall forward deny " {
+	if f == nil || f.Input == nil || f.ForwardChain == nil || f.DisableForward || f.Output != nil || f.Input.Log == nil || f.Input.Log.Prefix != "routerd firewall input deny " || f.ForwardChain.Log == nil || f.ForwardChain.Log.Prefix != "routerd firewall forward deny " {
 		t.Fatal("filter hooks/default logging changed")
 	}
 	cases := []struct {

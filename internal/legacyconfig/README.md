@@ -352,7 +352,7 @@ serving, custom lease/RA settings and full deployed-router import remain open.
 | `DSLiteTunnel` | Fixed outer IPv6 endpoints, inner IPv4 /32 **peer 192.0.0.1/32**, explicit tunnel identity, no encapsulation-limit option and original fixed default MTU of **1460**. The default inner address is 192.0.0.2. `localAddressFrom` means the **inner IPv4** source in the pinned controller, not the outer IPv6 endpoint. |
 | `DSLiteTunnel` with explicit policy | One native `ds_lite` service, preserving candidate precedence and B4/MTU identity while explicitly changing DNS bootstrap, source ownership/selection and endpoint expiry. Accepts an owned static IPv6 source or the policy's compiled RA source. Information references map to their existing PD service. One independently declared IPv4 default route can join the dynamic tunnel's lifetime owner. PD-derived/HA/suffix sources remain rejected. |
 | `DNSResolver` + `DNSForwarder` + `DNSUpstream` + `DNSZone` | Resolves the static resource graph into native DNS runtime intent. Preserves source order, listener selection, transport/TLS identity, bootstrap servers, interface binding, cache/timeouts/health checks, query-log enablement, zones and static records/reverse zones. Statically known address references are resolved; learned/delegated references are rejected. DHCP-derived zones require successfully migrated DHCP producers and an explicit per-resolver `dhcp_dns` replacement policy. |
-| `FirewallZone` + `FirewallPolicy` + `FirewallRule` | Native INPUT/FORWARD hooks with the original conntrack precedence, loopback/ICMPv6 acceptance, explicit ordered ACLs and role-based terminal actions. Retains source/destination CIDRs, TCP/UDP port sets/ranges, ICMP types, accept/drop/reject and unsampled kernel logging. Does not invent an OUTPUT hook. Overlapping zones, dynamic sets, rate/connection limits and NFLOG are rejected. |
+| `FirewallZone` + `FirewallPolicy` + `FirewallRule` | Native INPUT/FORWARD hooks with the original conntrack precedence, loopback/ICMPv6 acceptance, explicit ordered ACLs and role-based terminal actions. Retains source/destination CIDRs, TCP/UDP port sets/ranges, ICMP types, accept/drop/reject and kernel logging and explicit NFLOG deny collection. Does not invent an OUTPUT hook. Overlapping zones, dynamic sets and rate/connection limits are rejected. |
 | `NAT44Rule` in standard form | Explicit `type: masquerade` or `snat`, `egressInterface`, `sourceRanges`, positive destination CIDRs and destination exclusions. Resolves provably static SNAT address references. NAT-only configurations retain **no filter hook**. Exclusions remain negated destination matches within each source/destination rule, without expanding their CIDR complements. |
 
 DS-Lite retains the old tunnel-name fallback order: `tunnelName`, then the literal
@@ -697,8 +697,12 @@ rejected rather than guessed.
 The pinned firewall renderer always enables same-role forwarding: setting
 `sameRoleAccept: false` never disables it. The compiler requires this ambiguity
 to be resolved by explicit `true` or explicit deny rules. It does not silently
-turn an ineffective legacy field into a new security policy. Kernel logs remain
-kernel log events and do not imply NFLOG sampling or old log-retention behavior.
+turn an ineffective legacy field into a new security policy. Without `FirewallEventLog`, logs remain kernel events. An enabled declaration
+imports NFLOG group, copy range and policy-deny sampling into a `firewall_log`
+service. Explicit rule logging remains unsampled, and logging cannot change
+the packet verdict. Records enter the normal local product log owner. This
+does not recreate the old dedicated SQLite history, DPI classification, or
+retention policy; see [firewall packet logging](../protocol/firewalllog/README.md).
 
 ## Explicitly incompatible areas
 
@@ -708,7 +712,7 @@ kernel log events and do not imply NFLOG sampling or old log-retention behavior.
   and depend on that owner's Bound phase. Other conditions/dependencies,
   `ready_when`, metadata ownership, dynamic annotations and observed `status`
   are rejected; conditional intent must not become an always-on resource.
-- Firewall address sets, flow pinholes, connection/rate limits, NFLOG sampling,
+- Firewall address sets, flow pinholes, connection/rate limits, accepted-packet DPI sampling,
   client policy, packet marks, NAT pools/persistent port mappings, port-forward
   and hairpin composition are not migration rules yet. Self-originating ACLs
   are rejected because the original Linux renderer has no OUTPUT hook.

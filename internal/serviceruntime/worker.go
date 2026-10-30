@@ -31,6 +31,8 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserver"
 	"github.com/imksoo/routerd2/internal/protocol/dns"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
+	"github.com/imksoo/routerd2/internal/protocol/firewalllog"
+	"github.com/imksoo/routerd2/internal/protocol/firewalllogconfig"
 	"github.com/imksoo/routerd2/internal/protocol/health"
 	"github.com/imksoo/routerd2/internal/protocol/otlplogconfig"
 	"github.com/imksoo/routerd2/internal/protocol/otlplogs"
@@ -102,6 +104,12 @@ func Run(ctx context.Context, runtimeDir, name, role, path, digest string, gener
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	switch role {
+	case "firewall_log":
+		var cfg firewalllogconfig.Config
+		if err := decode(instance.Config, &cfg); err != nil {
+			return err
+		}
+		return firewalllog.Run(runCtx, cfg, ready)
 	case "otlp_logs":
 		var cfg otlplogconfig.Config
 		if err := decode(instance.Config, &cfg); err != nil {

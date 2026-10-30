@@ -13,21 +13,31 @@ import (
 // and related flows, then evaluates Rules in order. The forward chain next
 // evaluates legacy Forward pairs, then applies Policy. Existing connections
 // survive table replacements and a more restrictive policy for new flows.
-// Policy is accept/drop; empty means drop. LogPrefix logs packets reaching the
-// terminal policy through the kernel logger; empty disables terminal logging.
+// Policy is accept/drop; empty means drop. Log records packets reaching the
+// terminal policy. A nil Log disables terminal logging.
 // Loopback and ICMPv6 are never implicitly accepted: declare those rules when
 // enabling an input/output policy. The legacy compiler preserves its own
 // historical defaults explicitly in its rule projection.
 type FirewallChain struct {
-	Policy    string         `json:"policy,omitempty"`
-	Rules     []FirewallRule `json:"rules,omitempty"`
-	LogPrefix string         `json:"log_prefix,omitempty"`
+	Policy string         `json:"policy,omitempty"`
+	Rules  []FirewallRule `json:"rules,omitempty"`
+	Log    *PacketLog     `json:"log,omitempty"`
 }
 
 type FirewallRule struct {
-	Match     PacketMatch `json:"match,omitempty"`
-	Action    string      `json:"action"`
-	LogPrefix string      `json:"log_prefix,omitempty"`
+	Match  PacketMatch `json:"match,omitempty"`
+	Action string      `json:"action"`
+	Log    *PacketLog  `json:"log,omitempty"`
+}
+
+// PacketLog selects the kernel logger (Group zero) or an NFLOG group.
+// Every zero/one records each matching packet; larger values sample one in N.
+// Logging never changes the packet verdict. CopyRange zero uses the receiver limit.
+type PacketLog struct {
+	Prefix    string `json:"prefix,omitempty"`
+	Group     uint16 `json:"group,omitempty"`
+	CopyRange uint32 `json:"copy_range,omitempty"`
+	Every     uint32 `json:"every,omitempty"`
 }
 
 // AddressSet is a collection of host addresses. Names are resolved by the
@@ -254,8 +264,15 @@ func validatePacketMatch(m PacketMatch, hook string) error {
 	return errors.Join(errs...)
 }
 
-func validLogPrefix(prefix string) bool {
-	return len(prefix) <= 127 && !strings.ContainsAny(prefix, "\x00\n\r")
+func validPacketLog(log *PacketLog) bool {
+	if log == nil {
+		return true
+	}
+	limit := 127
+	if log.Group != 0 {
+		limit -= len("reject ")
+	}
+	return len(log.Prefix) <= limit && !strings.ContainsAny(log.Prefix, "\x00\n\r") && (log.Group != 0 || log.CopyRange == 0)
 }
 
 func validateFirewall(f *Firewall) error {
@@ -302,8 +319,8 @@ func validateFirewall(f *Firewall) error {
 		if chain.Policy != "" && chain.Policy != "accept" && chain.Policy != "drop" {
 			errs = append(errs, fmt.Errorf("firewall %s: policy must be accept/drop", item.name))
 		}
-		if !validLogPrefix(chain.LogPrefix) {
-			errs = append(errs, fmt.Errorf("firewall %s: invalid log prefix", item.name))
+		if !validPacketLog(chain.Log) {
+			errs = append(errs, fmt.Errorf("firewall %s: invalid packet log prefix or copy range", item.name))
 		}
 		for i, rule := range chain.Rules {
 			if err := validatePacketMatch(rule.Match, item.name); err != nil {
@@ -312,8 +329,8 @@ func validateFirewall(f *Firewall) error {
 			if rule.Action != "accept" && rule.Action != "drop" && rule.Action != "reject" {
 				errs = append(errs, fmt.Errorf("firewall %s rule %d: action must be accept/drop/reject", item.name, i))
 			}
-			if !validLogPrefix(rule.LogPrefix) {
-				errs = append(errs, fmt.Errorf("firewall %s rule %d: invalid log prefix", item.name, i))
+			if !validPacketLog(rule.Log) {
+				errs = append(errs, fmt.Errorf("firewall %s rule %d: invalid packet log prefix or copy range", item.name, i))
 			}
 		}
 	}

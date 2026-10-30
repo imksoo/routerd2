@@ -183,7 +183,7 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 			conditions = append(conditions, resourceCondition{id: "service/" + name, source: r, when: r.Spec.(api.HealthCheckSpec).When})
 		case "IPv6RouterAdvertisement":
 			// Compiled with delegated LAN advertisements below.
-		case "FirewallZone", "FirewallPolicy", "FirewallRule", "NAT44Rule", "IPAddressSet", "LocalServiceRedirect":
+		case "FirewallEventLog", "FirewallZone", "FirewallPolicy", "FirewallRule", "NAT44Rule", "IPAddressSet", "LocalServiceRedirect":
 			// Compiled together to preserve ordered zone jumps and NAT-only hooks.
 		case "EgressRoutePolicy":
 			if r.Spec.(api.EgressRoutePolicySpec).HostTraffic {

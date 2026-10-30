@@ -271,7 +271,10 @@ func buildFilterChain(c *nftables.Conn, table *nftables.Table, name string, hook
 	add(stateVerdict(expr.CtStateBitESTABLISHED|expr.CtStateBitRELATED, expr.VerdictAccept))
 	for _, rule := range config.Rules {
 		for _, es := range packetExpressions(rule.Match) {
-			es = append(es, logExpressions(rule.LogPrefix)...)
+			if rule.Log != nil {
+				log := append([]expr.Any(nil), es...)
+				add(append(log, logExpressions(rule.Log, rule.Action)...))
+			}
 			es = append(es, &expr.Counter{})
 			switch rule.Action {
 			case "accept":
@@ -290,16 +293,35 @@ func buildFilterChain(c *nftables.Conn, table *nftables.Table, name string, hook
 		es = append(es, &expr.Counter{}, &expr.Verdict{Kind: expr.VerdictAccept})
 		add(es)
 	}
-	es := logExpressions(config.LogPrefix)
-	es = append(es, &expr.Counter{}, &expr.Verdict{Kind: verdict})
-	add(es)
+	if config.Log != nil {
+		action := "drop"
+		if verdict == expr.VerdictAccept {
+			action = "accept"
+		}
+		add(logExpressions(config.Log, action))
+	}
+	add([]expr.Any{&expr.Counter{}, &expr.Verdict{Kind: verdict}})
 }
 
-func logExpressions(prefix string) []expr.Any {
-	if prefix == "" {
-		return nil
+func logExpressions(config *PacketLog, action string) []expr.Any {
+	var es []expr.Any
+	if config.Every > 1 {
+		es = append(es, &expr.Numgen{Register: 1, Modulus: config.Every, Type: unix.NFT_NG_RANDOM}, &expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{0, 0, 0, 0}})
 	}
-	return []expr.Any{&expr.Log{Key: 1<<unix.NFTA_LOG_PREFIX | 1<<unix.NFTA_LOG_LEVEL, Level: expr.LogLevelInfo, Data: []byte(prefix)}}
+	log := &expr.Log{Key: 1 << unix.NFTA_LOG_PREFIX, Data: []byte(config.Prefix)}
+	if config.Group == 0 {
+		log.Key |= 1 << unix.NFTA_LOG_LEVEL
+		log.Level = expr.LogLevelInfo
+	} else {
+		log.Key |= 1<<unix.NFTA_LOG_GROUP | 1<<unix.NFTA_LOG_QTHRESHOLD
+		log.Group, log.QThreshold = config.Group, 1
+		log.Data = []byte(action + " " + config.Prefix)
+		if config.CopyRange > 0 {
+			log.Key |= 1 << unix.NFTA_LOG_SNAPLEN
+			log.Snaplen = config.CopyRange
+		}
+	}
+	return append(es, log)
 }
 
 func stateVerdict(mask uint32, verdict expr.VerdictKind) []expr.Any {
