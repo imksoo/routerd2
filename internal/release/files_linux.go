@@ -205,13 +205,28 @@ func removeFlatDirectory(parent *os.File, name string, allowed map[string]bool) 
 	if err = dir.Chmod(0700); err != nil {
 		return err
 	}
+	manifest := false
 	for _, child := range names {
+		if child == "manifest.json" {
+			manifest = true
+			continue
+		}
 		if err = unix.Unlinkat(int(dir.Fd()), child, 0); err != nil {
 			return err
 		}
 	}
+	// Cleanup reconstructs allowed artifact names from the manifest. Keep it
+	// until all other deletions are durable so an interrupted prune can resume.
 	if err = dir.Sync(); err != nil {
 		return err
+	}
+	if manifest {
+		if err = unix.Unlinkat(int(dir.Fd()), "manifest.json", 0); err != nil {
+			return err
+		}
+		if err = dir.Sync(); err != nil {
+			return err
+		}
 	}
 	if err = unix.Unlinkat(int(parent.Fd()), name, unix.AT_REMOVEDIR); err != nil {
 		return err

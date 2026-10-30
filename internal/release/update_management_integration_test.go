@@ -11,13 +11,16 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -70,11 +73,16 @@ func TestBuiltRuntimeSSHRollback(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer f.Close()
-		files[name] = f
-		artifacts = append(artifacts, release.Artifact{Name: name, Kind: "native", Command: name})
+		// Signed artifact names need not match their executable commands.
+		artifact := name
+		if name == "routerd-modules" {
+			artifact = "routerd-services"
+		}
+		files[artifact] = f
+		artifacts = append(artifacts, release.Artifact{Name: artifact, Kind: "native", Command: name})
 	}
 	var roles []release.RoleBinding
-	for role, artifact := range runtimeconfig.NativeWorkers("routerd-modules") {
+	for role, artifact := range runtimeconfig.NativeWorkers("routerd-services") {
 		if role == "logging" {
 			artifact = "routerd-logging"
 		}
@@ -293,8 +301,32 @@ func TestBuiltRuntimeSSHRollback(t *testing.T) {
 	for _, protected := range []release.Ref{current, previous} {
 		prune(control.ReleasePruneRequest{ExpectedGeneration: canceled.Generation, ReleaseDigests: []string{protected.Digest}}, true)
 	}
+	// Interrupt the real local CLI during removal, then recover through the
+	// already running SSH management path. Remove old journal entries first so
+	// the fifth unlink belongs to the unselected runtime, not its journal.
+	journals := prune(control.ReleasePruneRequest{ExpectedGeneration: canceled.Generation}, false)
+	if len(journals.RemovedGenerations) == 0 || len(journals.RemovedReleases) != 0 {
+		t.Fatal("journal cleanup did not preserve stored runtimes", journals)
+	}
+	trust := filepath.Join(t.TempDir(), "trust.json")
+	if err := config.AtomicJSON(trust, map[string][]byte{release.KeyID(pub): pub}); err != nil {
+		t.Fatal(err)
+	}
+	trace := filepath.Join(t.TempDir(), "prune.strace")
+	interrupted := exec.CommandContext(ctx, "strace", "-f", "-qq", "-o", trace,
+		"-e", "trace=unlinkat,fsync", "-e", "signal=SIGKILL", "-e", "inject=unlinkat:signal=SIGKILL:when=5",
+		filepath.Join(binaryDir, "routerd"), "release", "prune", "--root", releaseDir,
+		"--trust-file", trust, "--target-arch", runtime.GOARCH,
+		"--expected-generation", fmt.Sprint(canceled.Generation), "--digest", unused.Digest)
+	interrupted.Env = append(os.Environ(), "GOMAXPROCS=1")
+	output, interruptionErr := interrupted.CombinedOutput()
+	traceBytes, traceErr := os.ReadFile(trace)
+	if interruptionErr == nil || traceErr != nil || !strings.Contains(string(traceBytes), "killed by SIGKILL") {
+		t.Fatalf("prune was not interrupted: %v %v %s %s", interruptionErr, traceErr, output, traceBytes)
+	}
+	t.Logf("local prune interrupted during deletion: %s", traceBytes)
 	cleanup := prune(control.ReleasePruneRequest{ExpectedGeneration: canceled.Generation, ReleaseDigests: []string{unused.Digest}}, false)
-	if !slices.Equal(cleanup.RemovedReleases, []string{unused.Digest}) || len(cleanup.RemovedGenerations) == 0 {
+	if !slices.Equal(cleanup.RemovedReleases, []string{unused.Digest}) {
 		t.Fatal("SSH prune did not report the removed unused runtime and old journal generations", cleanup)
 	}
 	afterCleanup := command("update status", nil, false)
@@ -308,7 +340,7 @@ func TestBuiltRuntimeSSHRollback(t *testing.T) {
 	if err != nil {
 		t.Fatal("explicit SSH cleanup did not free capacity for the next signed runtime", err)
 	}
-	t.Log("SSH prune: stale generation and current/previous runtimes refused; explicit unused runtime and old generations removed; unchanged selection/watermarks and next signed runtime staging succeeded")
+	t.Log("SSH prune: stale generation and protected runtimes refused; local CLI killed during unused runtime removal; SSH retry reclaimed capacity; unchanged selection/watermarks and next signed runtime staging succeeded")
 	t.Log("SSH rollback: verified previous product compiler accepted current configuration; stale revision/generation and duplicate rejected; active runtime/configuration unchanged; cancellation preserved watermarks")
 	// Arrange actual journal transitions for the read-only console. The control
 	// handler remains on its original executable; this is not a reboot trial.

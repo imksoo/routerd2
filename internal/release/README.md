@@ -161,6 +161,11 @@ may already be visible, and the caller must read status before deciding what to
 do next. Successful fsync depends on filesystem and storage-device guarantees;
 process-crash tests are not a claim of hardware power-loss certification.
 
+Runtime cleanup retains `manifest.json` until removal of every other entry has
+been synced. A process interrupted during pruning can therefore reconstruct the
+remaining artifact names and resume the explicit cleanup without changing the
+selected runtime or its rollback target.
+
 `Verify` and `BeginBoot` return an `Image` with every declared artifact pinned open.
 Launchers must use those descriptors, rather than independently resolving role
 paths through a selector that may change. Installed payloads are never modified
@@ -270,6 +275,12 @@ capacity, pruning and corrupt or missing state.
 Process-crash fixtures exit abruptly without running defers at seven journal
 publication boundaries and five bundle staging boundaries. They reopen the
 store, verify the selected generation, and clean incomplete transactions.
+The existing `make check-update-rollback` gate also requires `strace`: it kills
+the real `routerd release prune` process before its fifth deletion, then uses
+the running SSH management path to resume cleanup and stage the next signed
+runtime. It checks that the selected runtime, rollback target and generation
+fences remain unchanged. This demonstrates process interruption recovery, not
+physical power-loss durability.
 
 `TestBuiltRuntimeCatalog` additionally checks the actual project build's six
 ELFs (amd64 and arm64 native catalogs), writes signed bundles, stages them, looks them up,
