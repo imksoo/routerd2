@@ -321,3 +321,14 @@ main `c5f93a5` は独立端末の通常版で検証されたDNS履歴とDHCPv6�
 SSH転送17.077秒/通信7巡、prepare3.072秒/2巡で、その間も全構成の端末通信を確認。実再起動・正常確定と全経路再確認は36.535892秒。旧版復帰の準備4.968秒/通信4巡、その実再起動・全経路再確認は35.723233秒。実guestと全必須workerのrelease IDを照合し、revision1→2→3、設定内容・DUID・Tailscale NodeIDと同じSSH鍵による到達を確認した。取得DNSの実IPv4/IPv6 UDP/TCP、両IP TCP/UDP、BGP/IX、特殊端末、実NTP採用、Tailscaleを各段階で再確認して終了0。これは操作による旧版復帰であり、障害時の自動復旧は次の独立試行で実行中。
 
 私有手順は`/tmp/routerd-full-homert-update92.py`と`/tmp/routerd-full-update92-helper.py`。初回はroot publisherに別所有者の入力を直接渡したため、署名前に信頼境界で拒否された。標準fixtureと同じくroot所有の試験stageへ入力をコピーし、所有権を明確にして同じ検査を通した。製品の検査は緩めていない。受入結果を短く残して完了stageの重複ELF/カタログ/captureは削除する。関連CLIのRace76.361秒、全vet、通常amd64ビルドは通過。arm64での実行と全体の利用可能性は引き続き別の未完了条件である。
+
+
+## 2026-10-31 00:20 JST: 全構成の更新失敗から自動復旧が完走
+
+前節と同じ実行版・通常イメージ・全57resource・独立peer群を使い、別のKVMで候補版の実行と自動復帰を確認して終了0。初期設定で既存DS-Lite Healthのactiveを追加の`ready_when`として明示し、更新予約後に独立Health対向のTCP listenerを停止した。候補版の実release ID、元のPDと実Health観測、`healthy:false`、その間の端末DNS/両IP TCP/UDPを確認。90秒/継続2秒の元条件のまま、`2026-10-30T15:18:41.511483291Z`に`release readiness deadline exceeded`を永続記録し、自動再起動した。対向を復旧し、選択が既知正常版でpending/attemptなし、実guest版が旧版、設定とDUID/NodeID/SSH身元を保持していることを確認した。再起動開始から全経路再確認まで136.338876秒。特殊端末、両BGP、取得IPv4/IPv6 DNSのUDP/TCP、NTP実採用とTailscaleも復旧後に確認した。
+
+私有手順は`/tmp/routerd-full-homert-auto-recovery92.py`と`/tmp/routerd-full-auto-recovery92-helper.py`。先行走行は条件付きHealth workerの生成前に個別照会してHTTP404で中断した。全service一覧から実生成・観測を待つよう試験側を修正し、同じ期限・判定で完走した。初回を自動復旧成功に数えない。実行中の自然更新VMは変更していない。通常amd64/arm64の静的六ELFと署名catalog/publisherも通過した。
+
+`bb38c6e`に実SSHの未使用release整理、更新・復旧画面とTailscaleの実状態表示を統合した。独立WSLの標準製品`f93be4c / wsl-operations-f93be4c`で、旧世代・使用中/予約中/前版の削除拒否と不要版削除後の格納、HTTP表示の実storeとの一致、三広告LANと両IP出口のTCP/UDP・再起動/撤去再適用を確認した。表示の状態変更検査は実再起動の成功へ拡張せず、上記全設定の旧実行版へ取り込まれた結果とも混同しない。
+
+実HGW長期試験では15:15:10.910241033 UTCにも`service.leases`の同じ状態通知timeoutが発生し、generation3が起動した。両端末への応答は再開し定期通信は続いているが、原因は未解明。稼働中controlへの10秒の外部perf観測では処理中のstackを取得し、cgroupのCPU制限/抑制とswapはなかった。過去の2秒の待ちを特定したものではない。自然PD更新を維持して観測し、状態通知のsupervisor照会・runtime mutex/投影・応答のどこが遅れるかを次に切り分ける。期限延長や無根拠なretryは追加していない。

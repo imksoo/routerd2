@@ -11231,8 +11231,8 @@
       "two_node_limits": "Same TCP sequence space and NAT mapping retained. Losses occurred; TCP reply nearly reaches15s client deadline. Additional primary failure while rejoining backup BGP was ACTIVE/IDLE failed60s and remains unaccepted. Physical IX existing-flow synchronization is not declared by original intent.",
       "normal_alpine_copy_assertions": 0,
       "normal_alpine_effects_timeouts": 0,
-      "hgw_normal": "Previous same-protocol full-homert-event-native92, standard7800s isolated real-HGW run continues. Automatic clients, both-IP HTTPS/DNS, DoH/TS and WAN recovery0.96s passed. Natural PD renewal pending. DHCP service.leases generation1 exited14:06:51 UTC with services/state context deadline; generation2 resumed actual DHCPACK. Cause unresolved; not stable-runtime acceptance or full57 profile.",
-      "remaining": "Original LAN natural renewal; real-HGW PD renewal and state-publication timeout diagnosis; warming-backup fault and HA margin; full-profile automatic failed-update recovery and remaining management acceptance; target hardware/NIC and k8s/pve/Cloud SAM; all remaining work packages.",
+      "hgw_normal": "Previous same-protocol full-homert-event-native92, standard7800s isolated real-HGW run continues. Automatic clients, both-IP HTTPS/DNS, DoH/TS and WAN recovery0.96s passed. Natural PD renewal pending. DHCP service.leases generation1 exited14:06:51 UTC and generation2 exited15:15:10 UTC with services/state context deadline; subsequent generations resumed actual DHCPACK. Cause unresolved; not stable-runtime acceptance or full57 profile.",
+      "remaining": "Original LAN natural renewal; real-HGW PD renewal and state-publication timeout diagnosis; warming-backup fault and HA margin; remaining management acceptance and target deployment qualification; target hardware/NIC and k8s/pve/Cloud SAM; all remaining work packages.",
       "full_profile_signed_update": {
         "base": "8cc420d / full-homert-loopback-native92",
         "candidate": "00969ca / full-homert-operations-native92",
@@ -11243,15 +11243,22 @@
         "updated_all_path_recovery_seconds": 36.5358917,
         "rollback_prepare_seconds": 4.968,
         "explicit_rollback_all_path_recovery_seconds": 35.7232328,
-        "result": "Exited0. Real SSH update stage/prepare/reboot and update rollback/reboot; normal confirmation, actual acquired DNS both transports, IPv4/IPv6 TCPUDP, special client, NTP, Tailscale, retained configuration/DUID/NodeID and pinned SSH identity. Revisions1->2->3; actual guest releases and all required worker release IDs checked. Automatic failed-trial recovery is a separate running trial."
-      }
+        "result": "Exited0. Real SSH update stage/prepare/reboot and update rollback/reboot; normal confirmation, actual acquired DNS both transports, IPv4/IPv6 TCPUDP, special client, NTP, Tailscale, retained configuration/DUID/NodeID and pinned SSH identity. Revisions1->2->3; actual guest releases and all required worker release IDs checked. Automatic failed-trial recovery also passed as a separate trial; timing and fault are recorded separately.",
+        "automatic_recovery": {
+          "seconds": 136.3388759,
+          "trial_seconds": 90,
+          "stable_seconds": 2,
+          "result": "Full57 candidate actually executed and forwarded; stopping independent Health listener withheld confirmation. Failure persisted at2026-10-30T15:18:41.511483291Z, automatic reboot selected the known-good8cc420d release. Acquired DNS/IPv4IPv6 TCPUDP/special client/NTP/Tailscale/management and original configuration/DUID/NodeID/SSH identity recovered. Exit0."
+        }
+      },
+      "operations_integration": "bb38c6e integrated actual-SSH release pruning, read-only update/recovery page and actual Tailscale routing/exit/peer observations. Independent standard WSL product f93be4c / wsl-operations-f93be4c passed existing checks; not the source executed in the8cc420d->00969ca full-profile update trial."
     }
   },
   "execution_order": [
     {
       "stage": 1,
       "profile": "homert02/03",
-      "next": "Continue original43200s LAN renewal on the current normal Alpine full57 guest and actual-HGW PD renewal without interruption. Ordinary two-guest power-cut HA passed only with explicit shared-next-hop/VMAC configuration and both BGP peers ready; warming-backup additional fault remains failed. Diagnose real-HGW DHCP state-publication timeout independently. Integrate operational changes and exercise full-profile management/update/recovery, then target qualification and k8s/pve/Cloud SAM. All34 remain incomplete.",
+      "next": "Continue original43200s LAN renewal and actual-HGW PD renewal without interruption. Full57 signed update, explicit rollback and automatic failed-trial recovery passed with two actual source versions. Diagnose repeated actual-HGW DHCP state-publication timeout, warming-backup additional fault and HA margin. Complete remaining management/target deployment qualification, then k8s/pve and Cloud SAM. All34 remain incomplete.",
       "required_focus": [
         "WAN/LAN IPv4/IPv6, DS-Lite, actual route selection/backup WAN, DHCP/PD/RA, learned DNS resolution/distribution, firewall/NAT/MTU/MSS, BGP and management",
         "HA-01 current election/track dependencies, HA-02 DHCP/PD synchronization, HA-03 NAT/connection synchronization and EXT-02 Tailscale used by this deployment"
