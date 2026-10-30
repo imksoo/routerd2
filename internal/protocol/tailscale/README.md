@@ -130,6 +130,17 @@ fixture setup, not the real homert WAN or production tailnet. This profile
 does not advertise a delegated IPv6 LAN subnet or add LAN-to-tailnet IPv6 NAT,
 and does not qualify simultaneous use with the real HGW or physical NIC.
 
+On 2026-10-31 00:01:24–00:02:21 JST, release
+`wsl-operations-f93be4c` (product `f93be4c`, fixture `5dcf034`) passed this
+homert profile in 57.123 seconds. The real interactive CLI matched the running
+daemon's local permitted/primary routes and exit eligibility, and each peer's
+online/activity/last-seen/selected-exit/exit-eligibility values. This comparison
+passed during traffic, after service removal/reapply, and after the official
+peer went offline with a nonzero last-seen time. Evidence is in
+`dist/operations-acceptance/tailscale-homert/`. The product provided the exit;
+selection of another exit by the product was not exercised. This isolated
+acceptance does not qualify the production tailnet, real HGW or physical NIC.
+
 Legacy `TailscaleNode` import requires explicit enrollment and kernel/bootstrap
 ownership policy; see [the importer](../../legacyconfig/README.md). The actual
 CLI-to-PID1 fixture also checks stopped external-daemon state provisioning,
