@@ -233,6 +233,9 @@ func testDaemonDHCPDNSOwnership(t *testing.T, migrated bool) {
 		if err != nil || r.Id != q.Id {
 			t.Fatalf("DNS exchange failed: %v", err)
 		}
+		if r.Rcode != mdns.RcodeSuccess && r.Rcode != mdns.RcodeNameError {
+			t.Fatalf("DNS failure cannot establish lease withdrawal: %s", r)
+		}
 		return r.Answer
 	}
 	hasAddress := func(name, address string) bool {
