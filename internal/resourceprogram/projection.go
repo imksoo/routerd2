@@ -271,6 +271,9 @@ func renderNative(nodes []compiledResource) Native {
 			out.Network.WireGuard = append(out.Network.WireGuard, *r.WireGuard)
 		case r.Service != nil:
 			out.Services = append(out.Services, *r.Service)
+			if r.Service.TrafficFlow != nil {
+				out.Network.ConnectionTimestamps = true
+			}
 		case r.EventRule != nil:
 			out.EventRules = append(out.EventRules, node.rule)
 		case r.DerivedEvent != nil:

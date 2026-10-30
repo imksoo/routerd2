@@ -350,6 +350,8 @@ func settingPath(key settingKey) (string, error) {
 	switch key.Kind {
 	case "conntrack_accounting":
 		return "/proc/sys/net/netfilter/nf_conntrack_acct", nil
+	case "conntrack_timestamp":
+		return "/proc/sys/net/netfilter/nf_conntrack_timestamp", nil
 	case "conntrack_tcp_liberal":
 		return "/proc/sys/net/netfilter/nf_conntrack_tcp_be_liberal", nil
 	case "multipath_hash_fields4":

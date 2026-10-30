@@ -36,7 +36,7 @@ func validateSettingRecord(s ownedSetting) error {
 		maximum, global = math.MaxUint32, true
 	case "multipath_hash_policy4":
 		maximum, global = 3, true
-	case "forwarding4", "forwarding6", "conntrack_tcp_liberal", "conntrack_accounting":
+	case "forwarding4", "forwarding6", "conntrack_tcp_liberal", "conntrack_accounting", "conntrack_timestamp":
 		global = true
 	default:
 		return fmt.Errorf("unknown setting kind %q", s.Key.Kind)

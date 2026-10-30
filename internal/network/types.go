@@ -22,14 +22,17 @@ const (
 )
 
 type Desired struct {
-	Links       []Link       `json:"links,omitempty"`
-	Interfaces  []Interface  `json:"interfaces,omitempty"`
-	Routes      []Route      `json:"routes,omitempty"`
-	PolicyRules []PolicyRule `json:"policy_rules,omitempty"`
-	Forwarding  Forwarding   `json:"forwarding,omitempty"`
-	Firewall    *Firewall    `json:"firewall,omitempty"`
-	VRRPGuards  []VRRPGuard  `json:"vrrp_guards,omitempty"`
-	WireGuard   []WireGuard  `json:"wireguard,omitempty"`
+	// ConnectionTimestamps is derived from selected traffic-history services.
+	// The network owner enables kernel start times before their collection begins.
+	ConnectionTimestamps bool         `json:"connection_timestamps,omitempty"`
+	Links                []Link       `json:"links,omitempty"`
+	Interfaces           []Interface  `json:"interfaces,omitempty"`
+	Routes               []Route      `json:"routes,omitempty"`
+	PolicyRules          []PolicyRule `json:"policy_rules,omitempty"`
+	Forwarding           Forwarding   `json:"forwarding,omitempty"`
+	Firewall             *Firewall    `json:"firewall,omitempty"`
+	VRRPGuards           []VRRPGuard  `json:"vrrp_guards,omitempty"`
+	WireGuard            []WireGuard  `json:"wireguard,omitempty"`
 }
 
 type AdminState string

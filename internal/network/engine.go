@@ -18,7 +18,7 @@ import (
 var errLinkNotFound = errors.New("link not found")
 
 // JournalVersion is the persisted network ownership/BOOTTIME contract.
-const JournalVersion = 26
+const JournalVersion = 27
 
 type settingKey struct {
 	Kind      string `json:"kind"`
@@ -581,6 +581,9 @@ func (p *apply) reconcile(d Desired) error {
 			}
 		}
 	}
+	if d.ConnectionTimestamps {
+		wantedSettings[settingKey{Kind: "conntrack_timestamp"}] = 1
+	}
 	if d.Forwarding.ConntrackAccounting != nil {
 		wantedSettings[settingKey{Kind: "conntrack_accounting"}] = boolInt(*d.Forwarding.ConntrackAccounting)
 	}
@@ -607,14 +610,14 @@ func (p *apply) reconcile(d Desired) error {
 		wantedSettings[settingKey{Kind: "multipath_hash_policy4"}] = 3
 	}
 	// Keep RA/SLAAC writers disabled and shared VIP ARP restricted until the
-	// corresponding addresses have been removed. Accounting must likewise outlive
-	// the packet-observation rules that require it. Restore them afterwards.
+	// corresponding addresses have been removed. Connection accounting and start
+	// times must likewise outlive their observation rules. Restore them afterwards.
 	earlySettings := make(map[settingKey]int, len(wantedSettings))
 	for key, value := range wantedSettings {
 		earlySettings[key] = value
 	}
 	for _, old := range p.e.state.Settings {
-		if raSetting(old.Key) || old.Key.Kind == "arp_ignore" || old.Key.Kind == "arp_announce" || old.Key.Kind == "conntrack_accounting" {
+		if raSetting(old.Key) || old.Key.Kind == "arp_ignore" || old.Key.Kind == "arp_announce" || old.Key.Kind == "conntrack_accounting" || old.Key.Kind == "conntrack_timestamp" {
 			earlySettings[old.Key] = old.Last
 		}
 	}
@@ -712,11 +715,13 @@ func (p *apply) reconcile(d Desired) error {
 		return err
 	}
 	// Capture the original value before nftables implicitly enables accounting.
-	// Retired accounting is restored only after its observation rules are gone.
-	key := settingKey{Kind: "conntrack_accounting"}
-	if value, wanted := wantedSettings[key]; wanted {
-		if err := p.set(key, value); err != nil {
-			return err
+	// Start times distinguish new connections that reuse the same endpoints.
+	for _, kind := range []string{"conntrack_accounting", "conntrack_timestamp"} {
+		key := settingKey{Kind: kind}
+		if value, wanted := wantedSettings[key]; wanted {
+			if err := p.set(key, value); err != nil {
+				return err
+			}
 		}
 	}
 	if err := p.firewall(d.Firewall); err != nil {
