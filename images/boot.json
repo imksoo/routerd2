@@ -51,6 +51,7 @@
     "authorized_keys": []
   },
   "workers": {
+    "web_console": "/usr/libexec/routerd-modules",
     "logging": "/usr/libexec/routerd-logging",
     "firewall_log": "/usr/libexec/routerd-modules",
     "traffic_flow": "/usr/libexec/routerd-modules",

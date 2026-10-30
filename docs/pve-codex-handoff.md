@@ -192,3 +192,15 @@ PD worker SIGKILL後1.52秒、通常交換10.99秒、全daemon再起動11.08秒�
 実際の両homert入力へ、VRRPのlocal/VMAC、停止したTailscaleの保存identity利用、有限lease由来DNS、stateless DHCPv6と相互TLS同期の置換policyを私有ファイルで明示した。両方の実CLIは、WebConsoleとincludeApplicationLayerの未対応2件だけで拒否する。出力は原子的に空で、設定を削って変換成功と扱っていない。policyの証明書pathと保存identityはまだ配備しておらず、本番適用やtailnet再登録もしていない。これは変換診断の結果で、全設定の起動・通信の合格ではない。
 
 同じ版の実supervisor/control/network/worker・独立ISC/keepalived/Linux clientによる既存の取込LAN試験は71.71秒で終了0。短いPD名、ownerRefs、roleを持つ入力からSLAAC/default/DNS、DNS UDP/TCP・IPv6 TCP/UDP、役割変更・元権限期限の撤去、PD喪失/再取得、既存DNS TCPを確認した。静的route前提と同名tunnel aliasは関連compiler検査で確認した範囲であり、両homertの全経路の通信結果へ拡張しない。関連Race、全vet、CGO0両architecture build、署名配布物検査が終了0。
+
+## 2026-10-30 19:41 JST: 最初のnative WebConsole実経路
+
+`web-console-native91`は1def991上のnative91/network26。既存Go module内の設定されたworkerがHTTP listenerを所有する。旧routerdのcmd_serve/webconsoleで実際の待受・停止、読み取り専用method、base path、title/linksを照合し、現行の型付きcontrol APIへ接続した。旧resource storeを再現するadapter、別HTTPサーバー実行物、JavaScript buildは作らない。現在は稼働状態、実kernelのinterface/route、設定資源の条件、設定確定/rollback期限の4ページ。旧履歴・client/connection・VPN/SAM等の全画面は未実装で、WebConsole全体の同等性を受け入れた結果ではない。
+
+通常ビルドの実supervisor/control/network/worker、別network namespaceの独立HTTP/SSH client、実mgmt FirewallZoneで最終版が終了0。HTTPの4ページ、title escape、POST405、private API404、SSH編集・確定・5秒rollback、logging/control/console workerのSIGKILLと復帰、DNS継続を確認した。最初の試験はsupervisor.Ready直後のcontrol未準備を同一視してHTTP503で失敗し、fixtureを実control.Healthy待ちへ修正した。製品は不健康な観測を503と異常表示のまま維持した。初回の署名publisherは新作業treeの親directoryが775だったため拒否。作業tree rootを755に直し、製品側の権限条件を緩めず最終両architecture検査で成功した。関連Race、全vet、CGO0 amd64/arm64 build、署名六ELF/publisher/stagingが終了0。
+
+両homertの全入力と明示policyによる実CLIは、includeApplicationLayerの1件だけを拒否し出力は空。管理画面の全機能を満たしたという意味ではない。別担当のnative90/network27のnDPI・接続時刻所有と、native91/network27として統合する必要がある。実設定全体の単体試験開始には、その統合実行物、通常engine archive、既存の独立ISC/4 AFTR/2 FRR/IX/DNS-DoH/NTP/Headscale、私有のpeer証明書と独立tailnet用identityを揃え、元入力の各外部endpoint/物理interface/addressを隔離環境の対応先へ明示的に割り当てる。生成されたservice名・role参照をfixtureの固定名と混同しない。元の稼働identity・本番endpointへは接続しない。既存51resource profileを全109resource入力の受入へ置き換えない。
+
+準備としてapplication分類の宣言1件だけをfalseにした私有コピーは、両機とも実CLIで109→55resourceに変換できた。4 AFTR、2 DNS、6 Health、WebConsole、DHCPv4/v6、PD、RA、BGP、NTP、Tailscaleと各履歴/配送workerを含む。元入力の合格ではなく、未統合機能を除いた構成を調べるためのコピーである。元入力は変更していない。
+
+全設定単体の前提に追加の差がある。元homertの物理WAN/LANと管理interfaceは外部OS管理で、管理用IP自体の宣言はRouter入力にない。最小Alpineでは外部設定の残存を前提にできないため、3本目の管理リンク、物理linkのUP所有、読取りで確かめた管理address/prefixをnative構成の明示的な追加intentとして用意する。元のunmanagedを黙ってUPへ変えたり、試験手順の手動修復を隠して合格にしない。既存二link fixtureをそのまま全入力へ使うことはできない。

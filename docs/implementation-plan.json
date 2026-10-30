@@ -1415,7 +1415,7 @@
       "title": "WebConsole と運用 CLI の全 surface",
       "milestone": "M5",
       "track": "operations",
-      "status": "planned",
+      "status": "in_progress",
       "scope": "baseline_parity",
       "risk": "medium",
       "depends_on": [
@@ -1456,8 +1456,11 @@
         "internal/control",
         "internal/cli",
         "internal/management",
-        "internal/web (新設予定)"
-      ]
+        "internal/protocol/webconsole"
+      ],
+      "implementation_notes": {
+        "web_console_native91": "Initial read-only native HTTP console imports explicit listener/base path/title/links and reads typed live health, scoped kernel interfaces/routes, paged resource conditions and confirmation metadata. Independent namespace HTTP/SSH clients passed actual supervisor/control/network/worker startup, confirmed rollback and logging/control/console worker recovery. Old history, clients/connections, protocol detail and VPN/SAM UI surface remains incomplete; full homert and target-device qualification are not established."
+      }
     },
     {
       "id": "OPS-03",

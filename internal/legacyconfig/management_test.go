@@ -45,25 +45,26 @@ func TestManagementAccessChecksTheDeclaredPathWithoutInventingAnACL(t *testing.T
 	}
 }
 
-func TestManagementAccessDoesNotHideUnimplementedWebConsole(t *testing.T) {
+func TestManagementAccessRequiresConsoleBinding(t *testing.T) {
 	input := string(fixture(t, "management")) + `    - apiVersion: system.routerd.net/v1alpha1
       kind: WebConsole
       metadata: {name: console}
       spec: {enabled: true, listenAddress: 0.0.0.0, port: 8080}
 `
-	for _, address := range []string{"0.0.0.0", "198.18.0.1"} {
-		_, err := Compile([]byte(strings.Replace(input, "listenAddress: 0.0.0.0", "listenAddress: "+address, 1)))
-		var unsupported *UnsupportedError
-		if !errors.As(err, &unsupported) {
-			t.Fatal("unimplemented console accepted", err)
+	if _, err := Compile([]byte(input)); err == nil || !strings.Contains(err.Error(), "management_access") {
+		t.Fatal("wildcard management console accepted", err)
+	}
+	result, err := Compile([]byte(strings.Replace(input, "listenAddress: 0.0.0.0", "listenAddress: 198.18.0.1", 1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, service := range nativeProgram(t, result.Document).Services {
+		if service.WebConsole != nil {
+			found = service.WebConsole.Listen.String() == "198.18.0.1:8080"
 		}
-		var missingConsole, unbound bool
-		for _, issue := range unsupported.Issues {
-			missingConsole = missingConsole || issue.Code == "unsupported_kind"
-			unbound = unbound || issue.Code == "management_access"
-		}
-		if !missingConsole || unbound != (address == "0.0.0.0") {
-			t.Fatalf("console availability and binding were conflated: %v", err)
-		}
+	}
+	if !found {
+		t.Fatal("management console listener missing")
 	}
 }

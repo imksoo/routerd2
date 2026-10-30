@@ -47,6 +47,8 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/trafficflow"
 	"github.com/imksoo/routerd2/internal/protocol/trafficflowconfig"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
+	"github.com/imksoo/routerd2/internal/protocol/webconsole"
+	"github.com/imksoo/routerd2/internal/protocol/webconsoleconfig"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 	"github.com/imksoo/routerd2/internal/worker"
 )
@@ -106,6 +108,12 @@ func Run(ctx context.Context, runtimeDir, name, role, path, digest string, gener
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	switch role {
+	case "web_console":
+		var cfg webconsoleconfig.Config
+		if err := decode(instance.Config, &cfg); err != nil {
+			return err
+		}
+		return webconsole.Run(runCtx, cfg, runtimeDir, ready)
 	case "traffic_flow":
 		var cfg trafficflowconfig.Config
 		if err := decode(instance.Config, &cfg); err != nil {
