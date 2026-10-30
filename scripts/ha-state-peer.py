@@ -98,7 +98,7 @@ def import_lease_sync(stage, directory, resources, dhcp_scopes=False):
             continue
         add(kind, name, {"source": {"resource": source}, "interval": "15s", "targets": [{"name": "partner", "host": "partner.example.test", "user": "routerd", "sshOptions": ["-o", "BatchMode=yes"]}], "when": when})
     policy = {"schema_version": 1, "vrrp": {"VirtualAddress/gateway": {"source_address": vrrp["source_address"], "vip_interface": vrrp["vip_interface"]}}, "lease_sync": {
-        "DHCPv4ServerLeaseSync/leases": {"replication": dhcp["ha"]["replication"], "bootstrap": dhcp["ha"]["bootstrap"]}}}
+        "DHCPv4ServerLeaseSync/leases": {"replication": dhcp["ha"]["replication"]}}}
     if pd:
         policy["lease_sync"]["DHCPv6PrefixDelegationLeaseSync/pd"] = {"replication": pd["dhcp6"]["ha"]["replication"]}
     source, intent = directory / "legacy.json", directory / "migration-policy.json"
@@ -258,7 +258,7 @@ def peer(stage, dhcp6_server, pd_dslite, stale_owner, preparation, delegated_dns
                 {"id": "leases", "service": {"name": "leases", "dhcp_server": {
                     "interface": "lan-ha", "server_address": "198.18.0.1", "authoritative": True, "sticky_hold_days": 3,
                     "primary": {"prefix": "198.18.0.0/24", "start": "198.18.0.100", "end": "198.18.0.103", "lease_seconds": 60, "router": "198.18.0.1"},
-                    "ha": {"owner": "ha", "bootstrap": node == "a", "replication": {"listen_address": "169.254.42." + str(index + 2) + ":8443", "peer_address": "169.254.42." + str(3 - index) + ":8443", "certificate_file": str(stage / (node + ".crt")), "private_key_file": str(stage / (node + ".key")), "peer_certificate_file": str(stage / (("b" if node == "a" else "a") + ".crt"))}}
+                    "ha": {"owner": "ha", "replication": {"listen_address": "169.254.42." + str(index + 2) + ":8443", "peer_address": "169.254.42." + str(3 - index) + ":8443", "certificate_file": str(stage / (node + ".crt")), "private_key_file": str(stage / (node + ".key")), "peer_certificate_file": str(stage / (("b" if node == "a" else "a") + ".crt"))}}
                 }}},
                 {"id": "wan-identity", "when": {"fact": "service.ha.elected"}, "link": {"name": "wan-ha", "kind": "macvlan", "parent": "wan0", "hardware_addr": "02:00:5e:00:01:43", "ipv6_addr_gen_mode": "none"}},
                 {"id": "wan-interface", "interface": {"name": "wan-ha"}},
@@ -550,7 +550,6 @@ except socket.timeout:
                     "--service", "leases", "--state-dir", str(directory / "state"), str(old_file)]))
                 assert result["leases"] == 1
                 assert Path(result["state_path"]).read_text() == original
-                assert not (directory / "state/services/leases/dnsmasq.leases.owner").exists()
             print("PASS stopped independent dnsmasq; CLI imported the original binding and absolute expiry into both fresh nodes", flush=True)
 
         for segment in segments:
@@ -663,8 +662,6 @@ for protocol,port in ((socket.SOCK_STREAM,18082),(socket.SOCK_DGRAM,18083)):
             expected = [line.split() for line in original.splitlines()]
             wait(lambda: saved("a")["leases"] == expected and saved("b")["leases"] == expected)
             wait(lambda: api("a", "control.sock", "/v1/services/service.leases")["snapshot"].get("sync", {}).get("synchronized"))
-            owner = (stage / "a/state/services/leases/dnsmasq.leases.owner").read_text()
-            assert owner == "169.254.42.2:8443" and (stage / "b/state/services/leases/dnsmasq.leases.owner").read_text() == owner
             print("PASS original finite binding synchronized before any renewal: " + original.strip(), flush=True)
             def imported_dns():
                 for transport in ("+notcp", "+tcp"):
@@ -688,7 +685,7 @@ for protocol,port in ((socket.SOCK_STREAM,18082),(socket.SOCK_DGRAM,18083)):
             wait(imported_dns)
             first_client.send_signal(signal.SIGSTOP)
             run(inside("ha-client", ["ip", "address", "del", first_address + "/" + acquired[2], "dev", "lease0"]))
-            lease_client(1, first_address)
+            second_client = lease_client(1, first_address)
             second = lease_events(1)[-1].split()
             assert second[1] != first_address, "disconnected takeover duplicated the imported address"
             assert second[3:5] == acquired[3:5], "new client did not receive the migrated gateway and DNS"
@@ -714,6 +711,14 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
             wait(lambda: len(lease_events(0)) > before)
             assert lease_events(0)[-1].split()[1] == first_address
             wait(imported_dns)
+            before = len(lease_events(1))
+            second_client.send_signal(signal.SIGUSR1)
+            wait(lambda: len(lease_events(1)) > before)
+            assert lease_events(1)[-1].split()[1] == second[1], "rejoin lost the lease allocated while the former owner was absent"
+            expected_addresses = {first_address, second[1]}
+            wait(lambda: all({fields[2] for fields in saved(node)["leases"]} == expected_addresses for node in ("a", "b")))
+            run(inside("ha-client", ["python3", "-c", traffic, second[1]]))
+            print("PASS both clients renewed unchanged addresses after former-owner rejoin; both members retained both leases and routed TCP/UDP still passed", flush=True)
             for number in (0, 1):
                 fields = lease_events(number)[-1].split()
                 run(inside("ha-client", ["ping", "-I", "lease" + str(number), "-c", "1", "-W", "2", fields[3]]))
@@ -1062,10 +1067,10 @@ while True:
             wait(lambda: active("a"), timeout=30)
             def lease_status():
                 return api("a", "control.sock", "/v1/services/service.leases")["snapshot"]
-            wait(lambda: lease_status().get("active") and lease_status().get("sync", {}).get("allocation_blocked"), timeout=30)
-            fourth_client = lease_client(3, third_address, False)
-            time.sleep(3)
-            assert not (stage / "lease3.progress").exists(), "stale owner allocated an unknown lease"
+            wait(lambda: lease_status().get("active"), timeout=30)
+            fourth_client = lease_client(3, third_address)
+            fourth_address = lease_events(3)[-1].split()[1]
+            assert fourth_address not in (first_address, second_address, third_address), "stale takeover duplicated a valid offline client lease"
             before_renew = len(lease_events(0))
             first_client.send_signal(signal.SIGUSR1)
             wait(lambda: len(lease_events(0)) > before_renew)
@@ -1073,8 +1078,10 @@ while True:
             generation = modules("a")["service.leases"]["generation"]
             api("a", "control.sock", "/v1/services/service.leases/restart", {})
             wait(lambda: modules("a").get("service.leases", {}).get("generation", 0) > generation and modules("a")["service.leases"]["ready"], timeout=30)
-            wait(lambda: lease_status().get("sync", {}).get("allocation_blocked"))
-            assert not (stage / "lease3.progress").exists(), "restart lost the stale-owner restriction"
+            before_fourth = len(lease_events(3))
+            fourth_client.send_signal(signal.SIGUSR1)
+            wait(lambda: len(lease_events(3)) > before_fourth)
+            assert lease_events(3)[-1].split()[1] == fourth_address
             start("ha-b", b_command, "b")
             def standby_ready():
                 try:
@@ -1085,7 +1092,7 @@ while True:
             run(["ip", "link", "set", "sync0", "up"])
             def reconciled():
                 status = lease_status().get("sync")
-                return status is not None and not status.get("allocation_blocked", False)
+                return status is not None and status.get("synchronized") and not status.get("error")
             wait(reconciled, timeout=45)
             wait(lambda: (stage / "lease3.progress").exists(), timeout=30)
             fourth_address = lease_events(3)[-1].split()[1]
@@ -1096,7 +1103,7 @@ while True:
             third_client.send_signal(signal.SIGUSR1)
             wait(lambda: len(lease_events(2)) > before, timeout=20)
             assert lease_events(2)[-1].split()[1] == third_address
-            print("PASS stale takeover blocked unknown leases, survived restart and preserved the offline client after reconciliation", flush=True)
+            print("PASS stale takeover allocated without duplicating the offline lease, survived restart and preserved both clients after reconciliation", flush=True)
             return
         if dhcp6_server:
             wait(lambda: bool(pd_observed("a").get("sync", {}).get("error")))

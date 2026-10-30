@@ -26,12 +26,10 @@ type DHCPServer struct {
 	HA                        *DHCPServerHA                  `json:"ha,omitempty"`
 }
 
-// DHCPServerHA designates which member may initialize an empty journal while
-// its peer is absent. The operator must configure this on only one member.
+// DHCPServerHA uses its VRRP owner for serving and authenticates lease transfer.
 type DHCPServerHA struct {
 	Owner       string         `json:"owner"`
 	Replication peertls.Config `json:"replication"`
-	Bootstrap   bool           `json:"bootstrap,omitempty"`
 }
 
 func validateDHCPHA(services []Service) error {
@@ -85,7 +83,7 @@ func (s Service) DHCPServerConfig(stateDir string) dhcpserverconfig.Config {
 	}
 	if c.HA != nil {
 		r := c.HA.Replication
-		cfg.Replication, cfg.Standby, cfg.Bootstrap = &r, true, c.HA.Bootstrap
+		cfg.Replication, cfg.Standby = &r, true
 	}
 	return dhcpserverconfig.Normalize(cfg)
 }

@@ -101,14 +101,31 @@ func TestDerivedBFDUsesOriginalPacketAgeAndExpiresWithoutInventingDown(t *testin
 func TestDerivedBFDCoalescedFailureBreaksUnpolledHoldAndWorkerIdentity(t *testing.T) {
 	r, m, p := derivedBFDSource(t, "150ms")
 	ctx := context.Background()
-	if err := r.Observe(ctx, update(t, r, "service.edge", 1, bfdDerivedSample(t, r, false, 0))); err != nil {
+	// This case checks continuity across coalesced transitions, not expiry.
+	// Negotiate a slower remote transmitter so the original packet remains
+	// live during the hold even when the race runner is heavily scheduled.
+	sample := func(up bool, cycle uint64) bfd.Snapshot {
+		s := bfdDerivedSample(t, r, up, cycle)
+		if up {
+			peer := &s.Peers[0]
+			peer.RemoteMinTxMicroseconds = 2000000
+			peer.DetectionTimeMicroseconds = 6000000
+			peer.DeadlineBootNanoseconds = peer.LastReceivedBootNanoseconds + int64(6*time.Second)
+			peer.ValidUntil = peer.LastReceivedAt.Add(6 * time.Second)
+			if err := bfd.ValidateSnapshot(bfdDocument().Services[0].BFDConfig(), s); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return s
+	}
+	if err := r.Observe(ctx, update(t, r, "service.edge", 1, sample(false, 0))); err != nil {
 		t.Fatal(err)
 	}
 	down, err := p.Advance(nil, bfdDerivedInputs(t, r), false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = r.Observe(ctx, update(t, r, "service.edge", 2, bfdDerivedSample(t, r, true, 0))); err != nil {
+	if err = r.Observe(ctx, update(t, r, "service.edge", 2, sample(true, 0))); err != nil {
 		t.Fatal(err)
 	}
 	pending, err := p.Advance(down.State, bfdDerivedInputs(t, r), false)
@@ -117,7 +134,7 @@ func TestDerivedBFDCoalescedFailureBreaksUnpolledHoldAndWorkerIdentity(t *testin
 	}
 	// The latest snapshot already returned to Up. No DerivedInputs callback
 	// ran while the native BFD mailbox coalesced the intervening failure.
-	if err = r.Observe(ctx, update(t, r, "service.edge", 3, bfdDerivedSample(t, r, true, 1))); err != nil {
+	if err = r.Observe(ctx, update(t, r, "service.edge", 3, sample(true, 1))); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(170 * time.Millisecond)
@@ -130,7 +147,7 @@ func TestDerivedBFDCoalescedFailureBreaksUnpolledHoldAndWorkerIdentity(t *testin
 	if err != nil || len(asserted.Emissions) != 1 || asserted.Status.Asserted == nil || !*asserted.Status.Asserted {
 		t.Fatal(asserted, err)
 	}
-	next := update(t, r, "service.edge", 1, bfdDerivedSample(t, r, true, 0))
+	next := update(t, r, "service.edge", 1, sample(true, 0))
 	next.Generation = 2
 	next.ProducerEpoch = strings.Repeat("b", 32)
 	if err = r.Observe(ctx, next); err != nil {

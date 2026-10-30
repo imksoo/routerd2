@@ -15,7 +15,6 @@ lease_sync:
       certificate_file: /keys/local.crt
       private_key_file: /keys/local.key
       peer_certificate_file: /keys/peer.crt
-    bootstrap: true
   DHCPv6PrefixDelegationLeaseSync/pd:
     replication:
       listen_address: 169.254.42.2:8444

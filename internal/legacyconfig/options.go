@@ -59,7 +59,6 @@ type Options struct {
 // stateless DHCPv6 server's formerly shared dnsmasq lease file.
 type LeaseSyncPolicy struct {
 	Replication *peertls.Config `json:"replication,omitempty"`
-	Bootstrap   *bool           `json:"bootstrap,omitempty"`
 	SharedWith  string          `json:"shared_with,omitempty"`
 }
 
@@ -212,7 +211,6 @@ func (c *compiler) initOptions(options Options, explicit bool) {
 		c.options.BGPNextHops[key] = value
 	}
 	for key, value := range options.LeaseSync {
-		value.Bootstrap = copyBool(value.Bootstrap)
 		if value.Replication != nil {
 			peer := *value.Replication
 			value.Replication = &peer

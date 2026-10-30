@@ -24,9 +24,8 @@ type Lease struct {
 // SyncStatus reports the last standby acknowledgement, independently of local
 // lease persistence and service availability.
 type SyncStatus struct {
-	Synchronized      bool   `json:"synchronized"`
-	AllocationBlocked bool   `json:"allocation_blocked,omitempty"`
-	Error             string `json:"error,omitempty"`
+	Synchronized bool   `json:"synchronized"`
+	Error        string `json:"error,omitempty"`
 }
 
 type Snapshot struct {

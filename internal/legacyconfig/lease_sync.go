@@ -121,8 +121,8 @@ func (c *compiler) leaseSync(vrrpNames map[string]string) {
 		}
 		peer := *policy.Replication
 		if service.DHCP6 != nil {
-			if policy.Bootstrap != nil || service.DHCP6.HA != nil {
-				c.policyIssue(r, "lease_sync", "bootstrap", "conflict", "PD has one synchronization owner and obtains its initial lease from the upstream server")
+			if service.DHCP6.HA != nil {
+				c.policyIssue(r, "lease_sync", "replication", "conflict", "PD has one synchronization owner and obtains its initial lease from the upstream server")
 				continue
 			}
 			if service.DHCP6.ClientDUID == "" {
@@ -131,8 +131,8 @@ func (c *compiler) leaseSync(vrrpNames map[string]string) {
 			}
 			service.DHCP6.HA = &serviceconfig.LeaseHA{Owner: owner.Name, Replication: peer}
 		} else {
-			if policy.Bootstrap == nil || service.DHCPServer.HA != nil {
-				c.policyIssue(r, "lease_sync", "bootstrap", "policy_required", "select bootstrap explicitly on each member, true on exactly one; each server has one synchronization owner")
+			if service.DHCPServer.HA != nil {
+				c.policyIssue(r, "lease_sync", "replication", "conflict", "each server has one synchronization owner")
 				continue
 			}
 			vip := owner.VRRPConfig()
@@ -144,7 +144,7 @@ func (c *compiler) leaseSync(vrrpNames map[string]string) {
 			}
 			service.DHCPServer.Interface = vip.VIPInterface
 			service.DHCPServer.ServerAddress = address.Addr().String()
-			service.DHCPServer.HA = &serviceconfig.DHCPServerHA{Owner: owner.Name, Replication: peer, Bootstrap: *policy.Bootstrap}
+			service.DHCPServer.HA = &serviceconfig.DHCPServerHA{Owner: owner.Name, Replication: peer}
 		}
 		c.target(r, "services/"+service.Name+"/ha")
 		c.note(r, "Explicit lease_sync policy replaces rsync/SSH identity, destination and interval with the native mutually authenticated two-node protocol. No old keys or lease files are read or imported. The VRRP owner selects serving versus standby synchronization; original lease deadlines and DHCPv4 sticky history belong to the existing protocol engine.")
@@ -195,7 +195,7 @@ func (c *compiler) sharedStatelessLeaseSync(r resource, vrrpNames map[string]str
 	if !exists {
 		return
 	}
-	if policy.SharedWith == "" || policy.Replication != nil || policy.Bootstrap != nil {
+	if policy.SharedWith == "" || policy.Replication != nil {
 		c.policyIssue(r, "lease_sync", "shared_with", "policy_required", "a stateless server has no IPv6 bindings; explicitly identify the DHCPv4 sync owning its formerly shared dnsmasq lease file")
 		return
 	}

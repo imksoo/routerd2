@@ -107,12 +107,20 @@ bindings remain reserved until their original hold deadline; reacquisition
 uses dnsmasq's host entry (routerd used a 12-hour held-host lease). This history
 uses UTC, as dnsmasq's lease file does; cross-node UTC skew is not qualified.
 
-Before takeover, the worker reconciles and durably transfers ownership, then
-starts serving. Known leases can renew during a disconnected promotion, while
-unknown dynamic allocations stay blocked until the peer can be reconciled.
-An interrupted transfer leaves ownership unknown. Only the explicitly
-configured bootstrap member may initialize missing state without its partner.
-A recorded established owner continues through a sync-link outage.
+VRRP selects serving authority; the lease synchronization link is not a second
+ownership election. When reachable, the standby's retained bindings and history
+are merged before startup. An unavailable peer is reported in sync status while
+local DHCP continues with the configured pool. When synchronization returns,
+the engine stops before its lease file is merged and resumes with both members'
+received facts. Unsupported domains and a positively identified concurrently
+serving peer are rejected.
+
+Like routerd's asynchronous file synchronization, this cannot reconstruct a
+binding never received from a failed member. In the observed sync-link outage,
+the former active allocated to a client that then slept; after that member was
+lost, the stale survivor assigned the same requested IP to another client. ARP
+probing does not protect an offline client. This condition remains a limitation;
+there is no automatic pool split or separate ownership journal.
 
 Cancellation starts bounded notification draining. The worker remains the
 subreaper and history writer until dnsmasq and its script children finish;

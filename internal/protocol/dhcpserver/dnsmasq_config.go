@@ -3,7 +3,6 @@
 package dhcpserver
 
 import (
-	"encoding/hex"
 	"fmt"
 	"net"
 	"net/netip"
@@ -66,10 +65,6 @@ func dnsmasqConfig(settings engineSettings) []byte {
 			if strings.HasPrefix(line, "dhcp-range=") {
 				at := strings.LastIndexByte(line, ',')
 				line = line[:at] + "," + mask + line[at:]
-				if settings.Restricted {
-					start := strings.Index(line, ","+scope.Start+",")
-					line = line[:start] + "," + prefix.Masked().Addr().String() + ",static," + mask + "," + strconv.Itoa(scope.LeaseSeconds) + "s"
-				}
 				if len(scope.Match.MACAddresses)+len(scope.Match.OUIPrefixes) > 0 {
 					line = strings.Replace(line, "dhcp-range=", "dhcp-range=tag:"+selector+",", 1)
 				}
@@ -83,31 +78,6 @@ func dnsmasqConfig(settings engineSettings) []byte {
 		}
 		if len(scope.DNSServers) == 0 && !hasOption(scope.Options, 6, "dns-server") {
 			lines = append(lines, "dhcp-option=tag:"+tag+",option:dns-server")
-		}
-	}
-	if settings.Restricted {
-		for _, lease := range settings.Bindings {
-			reserved := false
-			for _, r := range c.Reservations {
-				if r.MACAddress == lease.MACAddress {
-					reserved = true
-					break
-				}
-			}
-			if reserved {
-				continue
-			}
-			parts := []string{lease.MACAddress}
-			if lease.ClientID != "" {
-				id, _ := hex.DecodeString(lease.ClientID)
-				octets := make([]string, len(id))
-				for i, b := range id {
-					octets[i] = fmt.Sprintf("%02x", b)
-				}
-				parts = append(parts, "id:"+strings.Join(octets, ":"))
-			}
-			parts = append(parts, lease.IPAddress)
-			lines = append(lines, "dhcp-host="+strings.Join(parts, ","))
 		}
 	}
 	for i, reservation := range c.Reservations {

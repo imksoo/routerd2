@@ -31,10 +31,8 @@ import (
 )
 
 type engineSettings struct {
-	Intent      Config  `json:"intent"`
-	Restricted  bool    `json:"restricted,omitempty"`
-	Bindings    []Lease `json:"bindings,omitempty"`
-	EventSocket string  `json:"event_socket,omitempty"`
+	Intent      Config `json:"intent"`
+	EventSocket string `json:"event_socket,omitempty"`
 }
 
 type engineProcess struct {
@@ -239,28 +237,6 @@ func Run(ctx context.Context, cfg Config, image *os.File, publish func(context.C
 			events.close()
 		}
 	}()
-	claim := func(peer leaseTransfer) error {
-		state, err := readTransfer(ctx, cfg)
-		if err != nil {
-			return err
-		}
-		state.History = mergeHistory(state.History, peer.History)
-		state.Leases, err = mergeLeases(state.Leases, peer.Leases, state.History, time.Now())
-		if err != nil {
-			return err
-		}
-		state.Owner = cfg.Replication.ListenAddress.String()
-		if _, err := replica.exchange(ctx, http.MethodPut, state); err != nil {
-			return err
-		}
-		if err := saveTransfer(ctx, cfg, state); err != nil {
-			return err
-		}
-		syncStatus.Synchronized = true
-		syncStatus.AllocationBlocked = false
-		syncStatus.Error = ""
-		return nil
-	}
 	start := func() error {
 		if events != nil {
 			events.close()
@@ -275,39 +251,51 @@ func Run(ctx context.Context, cfg Config, image *os.File, publish func(context.C
 		if _, err := updateHeldHosts(ctx, cfg); err != nil {
 			return err
 		}
-		bindings, err := readDNSMasqLeases(cfg, time.Now())
+		_, err := readDNSMasqLeases(cfg, time.Now())
 		if err != nil {
 			return err
 		}
-		settings := engineSettings{Intent: cfg, Restricted: syncStatus.AllocationBlocked, Bindings: bindings}
+		settings := engineSettings{Intent: cfg}
 		if events != nil {
 			settings.EventSocket = "/state/" + events.name
 		}
 		child, err = startEngine(ctx, settings, image, events)
 		return err
 	}
+	mergePeer := func(peer leaseTransfer) error {
+		state, err := readTransfer(ctx, cfg)
+		if err != nil {
+			return err
+		}
+		state.History = mergeHistory(state.History, peer.History)
+		state.Leases, err = mergeLeases(state.Leases, peer.Leases, state.History, time.Now())
+		if err != nil {
+			return err
+		}
+		return saveTransfer(ctx, cfg, state)
+	}
 	if !cfg.Standby {
 		if replica != nil {
 			peer, exchangeErr := replica.exchange(ctx, http.MethodGet, leaseTransfer{})
+			if errors.Is(exchangeErr, errPeerActive) {
+				return exchangeErr
+			}
 			if exchangeErr == nil {
-				if err := claim(peer); err != nil {
+				if err := mergePeer(peer); err != nil {
 					return err
 				}
-			} else {
 				state, err := readTransfer(ctx, cfg)
 				if err != nil {
 					return err
 				}
-				syncStatus.Error = exchangeErr.Error()
-				syncStatus.AllocationBlocked = state.Owner != cfg.Replication.ListenAddress.String()
-				_, stateErr := os.Stat(cfg.StatePath)
-				if errors.Is(stateErr, os.ErrNotExist) && cfg.Bootstrap {
-					state.Owner = cfg.Replication.ListenAddress.String()
-					if err := saveTransfer(ctx, cfg, state); err != nil {
-						return err
-					}
-					syncStatus.AllocationBlocked = false
+				_, exchangeErr = replica.exchange(ctx, http.MethodPut, state)
+				if errors.Is(exchangeErr, errPeerActive) {
+					return exchangeErr
 				}
+			}
+			syncStatus.Synchronized = exchangeErr == nil
+			if exchangeErr != nil {
+				syncStatus.Error = exchangeErr.Error()
 			}
 		}
 		if err := start(); err != nil {
@@ -398,43 +386,50 @@ func Run(ctx context.Context, cfg Config, image *os.File, publish func(context.C
 				}
 			}
 			if replica != nil && !cfg.Standby {
-				if syncStatus.AllocationBlocked {
-					peer, exchangeErr := replica.exchange(ctx, http.MethodGet, leaseTransfer{})
-					if exchangeErr == nil {
-						// Only handoff changes the file or serving mode; ordinary link
-						// outages leave the known-client engine running.
-						cleanup, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-						err := child.close(cleanup, cfg, events)
-						cancel()
-						child = nil
-						if err != nil {
-							return err
-						}
-						if err := claim(peer); err != nil {
-							return err
-						}
-						if err := start(); err != nil {
-							return err
-						}
-						childDone = child.done
-						if events != nil {
-							eventRequests, eventDone = events.requests, events.done
-						}
-					} else {
-						syncStatus.Error = exchangeErr.Error()
+				// A recovered standby may retain leases this member never saw.
+				// Stop the sole file writer before merging them, then resume serving.
+				if !syncStatus.Synchronized {
+					peer, err := replica.exchange(ctx, http.MethodGet, leaseTransfer{})
+					if errors.Is(err, errPeerActive) {
+						return err
 					}
-
-				} else {
-					state, err := readTransfer(ctx, cfg)
+					if err != nil {
+						syncStatus.Error = err.Error()
+						if err := update(); err != nil {
+							return err
+						}
+						continue
+					}
+					cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 20*time.Second)
+					err = child.close(cleanup, cfg, events)
+					cancel()
+					child = nil
 					if err != nil {
 						return err
 					}
-					_, err = replica.exchange(ctx, http.MethodPut, state)
-					syncStatus.Synchronized = err == nil
-					syncStatus.Error = ""
-					if err != nil {
-						syncStatus.Error = err.Error()
+					if err := mergePeer(peer); err != nil {
+						return err
 					}
+					if err := start(); err != nil {
+						return err
+					}
+					childDone = child.done
+					if events != nil {
+						eventRequests, eventDone = events.requests, events.done
+					}
+				}
+				state, err := readTransfer(ctx, cfg)
+				if err != nil {
+					return err
+				}
+				_, err = replica.exchange(ctx, http.MethodPut, state)
+				if errors.Is(err, errPeerActive) {
+					return err
+				}
+				syncStatus.Synchronized = err == nil
+				syncStatus.Error = ""
+				if err != nil {
+					syncStatus.Error = err.Error()
 				}
 			}
 			if err := update(); err != nil {

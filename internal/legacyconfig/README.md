@@ -914,7 +914,8 @@ The source and sync declaration must select the same VRRP master condition.
 The native `ha.owner` enforces that condition while keeping standby state
 reception running. The DHCPv4 server binds the owner's VIP interface and shared
 server address; pool options and reservations retain their declared values.
-DHCPv4 `bootstrap` must be explicit on both members and true on exactly one.
+VRRP alone selects the serving member; no DHCP-specific bootstrap owner is required.
+A missing synchronization peer is reported without disabling the configured pool.
 PD retains its explicitly shared DUID, IAID and original lease deadlines.
 Historical files are not imported.
 

@@ -45,7 +45,6 @@ type Config struct {
 	EffectTimeoutMilliseconds int               `json:"effect_timeout_milliseconds,omitempty"`
 	StatePath                 string            `json:"state_path"`
 	Replication               *peertls.Config   `json:"replication,omitempty"`
-	Bootstrap                 bool              `json:"bootstrap,omitempty"`
 	// Standby owns the lease file and replication listener, without DHCP sockets.
 	Standby bool `json:"standby,omitempty"`
 }
@@ -137,8 +136,8 @@ func cloneScope(s Scope) Scope {
 
 func Validate(c Config) error {
 	c = Normalize(c)
-	if (c.Standby || c.Bootstrap) && c.Replication == nil {
-		return errors.New("DHCP standby or bootstrap requires replication")
+	if c.Standby && c.Replication == nil {
+		return errors.New("DHCP standby requires replication")
 	}
 	if c.Replication != nil {
 		if err := peertls.Validate(*c.Replication); err != nil {

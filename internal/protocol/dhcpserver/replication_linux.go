@@ -29,10 +29,11 @@ import (
 const replicaTimeout = 2 * time.Second
 const maxLeaseFile = 8 << 20
 
-// The lease file remains dnsmasq's format and allocation authority. The owner
-// marker records only who may continue allocating during a sync-link outage.
+var errPeerActive = errors.New("DHCP peer is also serving this allocation domain")
+
+// VRRP selects serving authority. This transfers dnsmasq allocation facts
+// and sticky history; peer availability never elects a second owner.
 type leaseTransfer struct {
-	Owner   string         `json:"owner"`
 	Leases  string         `json:"leases"`
 	History []leaseHistory `json:"history,omitempty"`
 }
@@ -79,11 +80,6 @@ func readTransfer(ctx context.Context, cfg Config) (leaseTransfer, error) {
 		return state, err
 	}
 	state.Leases = string(data)
-	owner, err := os.ReadFile(cfg.StatePath + ".owner")
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return state, err
-	}
-	state.Owner = string(owner)
 	state.History, err = readHistory(ctx, cfg, time.Now())
 	if err == nil {
 		state.History = mergeHistory(state.History, expiredHistory(cfg, state.Leases, time.Now()))
@@ -96,21 +92,15 @@ func saveTransfer(ctx context.Context, cfg Config, state leaseTransfer) error {
 	if err != nil {
 		return err
 	}
-	if current.Owner == state.Owner && current.Leases == state.Leases && slices.Equal(current.History, state.History) {
+	if current.Leases == state.Leases && slices.Equal(current.History, state.History) {
 		return nil
 	}
-	// A crash between the two files must leave ownership unknown, rather than
-	// allowing allocation from a different owner's incomplete transfer.
-	if err := replaceFile(cfg.StatePath+".owner", nil); err != nil {
-		return err
-	}
-	if err := replaceFile(cfg.StatePath, []byte(state.Leases)); err != nil {
-		return err
-	}
+	// Persist removals and holds before the lease file. On an interrupted
+	// transfer, startup can exclude old bindings using the retained history.
 	if err := saveHistory(ctx, cfg, state.History); err != nil {
 		return err
 	}
-	return replaceFile(cfg.StatePath+".owner", []byte(state.Owner))
+	return replaceFile(cfg.StatePath, []byte(state.Leases))
 }
 
 // Like routerd's file-sync path, this transfers the engine's own lease file.
@@ -139,8 +129,13 @@ func startReplication(ctx context.Context, cfg Config) (*replication, error) {
 			http.NotFound(w, req)
 			return
 		}
-		if !cfg.Standby || req.Header.Get("X-Routerd-DHCP-Domain") != r.domain {
-			http.Error(w, "not standby or different allocation domain", http.StatusConflict)
+		w.Header().Set("X-Routerd-DHCP-Domain", r.domain)
+		if req.Header.Get("X-Routerd-DHCP-Domain") != r.domain {
+			http.Error(w, "different allocation domain", http.StatusPreconditionFailed)
+			return
+		}
+		if !cfg.Standby {
+			http.Error(w, "peer is serving", http.StatusConflict)
 			return
 		}
 		r.mu.Lock()
@@ -165,9 +160,6 @@ func startReplication(ctx context.Context, cfg Config) (*replication, error) {
 			err := decoder.Decode(&incoming)
 			if err == nil {
 				err = normalizeHistory(incoming.History)
-			}
-			if err == nil && incoming.Owner != cfg.Replication.PeerAddress.String() {
-				err = errors.New("lease owner differs from authenticated peer")
 			}
 			if err == nil {
 				incoming.History = mergeHistory(state.History, incoming.History)
@@ -227,6 +219,9 @@ func (r *replication) exchange(ctx context.Context, method string, state leaseTr
 		return result, err
 	}
 	defer resp.Body.Close()
+	if resp.Header.Get("X-Routerd-DHCP-Domain") == r.domain && resp.StatusCode == http.StatusConflict {
+		return result, errPeerActive
+	}
 	if resp.Header.Get("X-Routerd-DHCP-Domain") != r.domain || resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		return result, fmt.Errorf("DHCP standby: HTTP %d", resp.StatusCode)
 	}
