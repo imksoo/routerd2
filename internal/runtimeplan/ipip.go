@@ -7,13 +7,13 @@ import (
 	"github.com/imksoo/routerd2/internal/resourceprogram"
 )
 
-func projectIPIPs(plans []resourceprogram.IPIPPlan, clock boottime.Clock, p *projection) {
+func projectIPIPs(plans []resourceprogram.IPIPPlan, addresses map[string]leasedIPv4, clock boottime.Clock, p *projection) {
 	for _, plan := range plans {
 		state := p.resources[plan.ID]
 		if !state.Active {
 			continue
 		}
-		source, ok := p.dhcp4Addresses[plan.Source]
+		source, ok := addresses[plan.Source]
 		if !ok || !source.validUntil.Live(clock) {
 			continue
 		}

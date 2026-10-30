@@ -1,3 +1,13 @@
+## 統合候補: homert-dns-prebind-native80（2026-10-30 12:38 JST）
+
+旧routerdの論理VIP名とfreebind待受を再利用し、VIP名・待受を設定準備時に束縛する。所有通知後のDNS入力を待つ分岐を削除した。kernelがVIPを公開してからDNSがbindする間の接続拒否を、実二段DNSの切替で再現して修正した。委譲LANアドレスは元PDと元選出期限以内に準備し、既存DAD観測後にDNSへ渡す。RAと貸出の公開はactive条件を維持する。
+
+署名PID 1二台・独立ISC/Linux AFTR/LANで、LAN DNS→loopback core DNS、両DNSの個別SIGSTOP/再起動、両方向装置切替・元機の待機復帰が終了0。切替後の初回A/AAAAをUDP/TCPで現在値と比較し、自動取得端末のIPv4/IPv6新規通信、同じTCPの一つのsequence space、UDPの同じNAT対応、PD/DHCP再同期を確認した。独立50ms送信UDPは985送信・810受信・175期限切れ、最大無応答4.543秒。TCP最大応答待ち4.575秒。損失ゼロではない。私有log `/tmp/routerd-homert-two-dns-prebind-native80-peer.log`。上流は独立UDP DNSへ明示置換しており、この一巡で実DoH・全homert同時運用や物理機器を受入したとは扱わない。以前のTCP応答後だけ送るUDPの損失0は、TCP停止中の連続UDP測定ではなかった。
+
+同じnative80統合系列でDHCPv4由来IPIP→独立FRR→実TCP/UDPが152秒で終了0。実貸出120秒の元期限失効、control/supervisor停止中のwriter撤去、再取得・WANアドレス変更・再起動・設定撤去を確認した。二FRRのhomert BGP経路・next-hop書換・LAN経路の実kernel学習とTailscale三経路広告/双方向TCPUDP/両IP出口/再起動/撤去復帰は、それぞれ独立native79構成で成立し、全設定同時の成果へ読み替えない。Tailscaleに追加LAN→tailnet IPv6 NATは使わない。
+
+最後のfreebind修正前の統合native80全`make check`、修正後のruntimeplan/control/DNS/serviceconfig Raceとvet、CGO0両architecture build、署名六ELF/catalog/publisher検査は終了0。配布directoryも既存0775から0755へbuildが揃え、製品の拒否条件は緩めない。旧BACKUP適用3秒timeoutは原因未確定で別に残す。次は全homert単体構成の同時利用と全体再起動、二台全設定、k8s/pve、Cloud SAM。固定期限は超過、全34項目・実機資格は未完了。
+
 ## 固定候補の自然更新観測中（2026-10-30 11:34 JST開始）
 
 `d525792` / `dynamic-dns-bounded-native79`を固定し、実HGW `ens18`・同じ保存WAN identity・隔離Linux・起動前からの独立端末で7800秒観測を開始した。初回IPv4/IPv6 DNS NOERRORとHTTPS200、現VIP/PD名、条件付きDNSの障害分離・復帰が通り、定期通信を継続中。開始時の自然T1まで約7182秒。完走・自然PD更新・末尾の全daemon再起動はまだ未判定。後から統合する別候補の成功へ読み替えない。私有log `/tmp/routerd-dynamic-dns-bounded-native79-natural.log`。

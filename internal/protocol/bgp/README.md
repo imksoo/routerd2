@@ -18,8 +18,9 @@ and [library documentation](https://github.com/osrg/gobgp/blob/v4.7.0/docs/sourc
 `bgpd` and checks BGP exchange, client TCP/UDP forwarding, withdrawal and
 restart. It requires FRR `bgpd` and `vtysh`; set `FRR_BGPD` if the daemon is
 not installed at `/usr/lib/frr/bgpd`. Each isolated FRR peer runs Zebra for
-interface and next-hop observations, while `bgpd -n` leaves the fixture's
-explicit client return route in place.
+interface and next-hop observations. The single-peer fixtures use an explicit
+client return route and `bgpd -n`. The two-peer fixture instead requires Zebra
+to install the advertised LAN route into both peers' actual kernel FIBs.
 
 The suite includes two same-AS FRR peers and the homert policy shape, with
 public lab addresses replacing private configuration. It checks all four

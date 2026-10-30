@@ -132,7 +132,7 @@ func prepareProtocols(doc config.Native, runtimeDir, stateDir string) (protocolP
 			plan.leaseHA[name] = leaseHAPlan{owner: "service." + service.DHCPServer.HA.Owner, serving: bound}
 		case service.DNS != nil:
 			cfg := service.DNSConfig(runtimeDir, stateDir)
-			cfg.Runtime, err = bindDNSRecordVIPs(cfg.Runtime, doc.Services)
+			cfg.Runtime, err = bindDNSVIPs(cfg.Runtime, doc.Services)
 			if err != nil {
 				return protocolPlan{}, err
 			}
@@ -172,27 +172,6 @@ func prepareProtocols(doc config.Native, runtimeDir, stateDir string) (protocolP
 			from := *service.RA.From
 			plan.lanRA[name] = advertisementPlan{config: cfg, from: from, allocation: from.Service + "/" + from.Delegation}
 		}
-	}
-	for name, resolver := range plan.dns {
-		resolver.vips = make(map[string][]netip.Addr)
-		for _, source := range resolver.listeners {
-			owner := source.VRRP
-			if owner == "" {
-				continue
-			}
-			module := "service." + owner
-			if _, prepared := resolver.vips[module]; prepared {
-				continue
-			}
-			for _, value := range plan.vrrp[module].Addresses {
-				address, err := netip.ParsePrefix(value)
-				if err != nil {
-					return protocolPlan{}, err
-				}
-				resolver.vips[module] = append(resolver.vips[module], address.Addr())
-			}
-		}
-		plan.dns[name] = resolver
 	}
 	for name, server := range plan.dhcp6Servers {
 		if server.dnsDelegation == "" {

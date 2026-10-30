@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/netip"
 	"slices"
+	"strings"
 
 	"github.com/imksoo/routerd/pkg/api"
 	"github.com/imksoo/routerd2/internal/boottime"
@@ -17,13 +18,11 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/pppoeconfig"
 	"github.com/imksoo/routerd2/internal/protocol/raclient"
 	"github.com/imksoo/routerd2/internal/protocol/tailscaleconfig"
-	"github.com/imksoo/routerd2/internal/protocol/vrrp"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
 
 type dnsPlan struct {
 	listenInterface string
-	vips            map[string][]netip.Addr
 	listeners       []dnsconfig.ListenSource
 	records         []dnsconfig.RecordSource
 	runtime         dnsconfig.RuntimeConfig
@@ -90,13 +89,43 @@ func prepareDNS(runtime dnsconfig.RuntimeConfig) (dnsPlan, error) {
 	return plan, nil
 }
 
-// VIP names describe the router group's configured address, regardless of
-// which member currently owns its local interface. Bind that configuration
-// once; only delegated addresses need protocol observations and deadlines.
-func bindDNSRecordVIPs(runtime dnsconfig.RuntimeConfig, services []serviceconfig.Service) (dnsconfig.RuntimeConfig, error) {
+// VIP names and sockets use the group's configured addresses. Existing Linux
+// freebind prepares sockets before takeover; kernel address ownership controls
+// delivery. Delegated addresses still need live protocol observations.
+func bindDNSVIPs(runtime dnsconfig.RuntimeConfig, services []serviceconfig.Service) (dnsconfig.RuntimeConfig, error) {
 	sources, err := dnsconfig.RecordSources(runtime)
 	if err != nil {
 		return runtime, err
+	}
+	vips := make(map[string][]netip.Addr)
+	for _, owner := range services {
+		if owner.VRRP == nil {
+			continue
+		}
+		for _, value := range owner.VRRP.Addresses {
+			prefix, err := netip.ParsePrefix(value)
+			if err != nil {
+				return runtime, err
+			}
+			vips[owner.Name] = append(vips[owner.Name], prefix.Addr())
+		}
+	}
+	runtime.Spec.Listen = slices.Clone(runtime.Spec.Listen)
+	for index := range runtime.Spec.Listen {
+		listener := &runtime.Spec.Listen[index]
+		listener.Addresses = slices.Clone(listener.Addresses)
+		refs := make([]api.StatusValueSourceSpec, 0, len(listener.AddressFrom))
+		for _, ref := range listener.AddressFrom {
+			owner, virtual := strings.CutPrefix(ref.Resource, "VirtualAddress/")
+			if !virtual {
+				refs = append(refs, ref)
+				continue
+			}
+			for _, address := range vips[owner] {
+				listener.Addresses = append(listener.Addresses, address.String())
+			}
+		}
+		listener.AddressFrom = refs
 	}
 	runtime.Zones = slices.Clone(runtime.Zones)
 	for index := range runtime.Zones {
@@ -107,21 +136,11 @@ func bindDNSRecordVIPs(runtime dnsconfig.RuntimeConfig, services []serviceconfig
 			continue
 		}
 		var address netip.Addr
-		for _, owner := range services {
-			if owner.Name != source.VRRP || owner.VRRP == nil {
-				continue
+		for _, value := range vips[source.VRRP] {
+			if value.Is6() == source.IPv6 {
+				address = value
+				break
 			}
-			for _, value := range owner.VRRP.Addresses {
-				prefix, err := netip.ParsePrefix(value)
-				if err != nil {
-					return runtime, err
-				}
-				if prefix.Addr().Is6() == source.IPv6 {
-					address = prefix.Addr()
-					break
-				}
-			}
-			break
 		}
 		if !address.IsValid() {
 			return runtime, fmt.Errorf("DNS record %s: virtual address %s has no address of the requested family", runtime.Zones[source.Zone].Spec.Records[source.Record].Hostname, source.VRRP)
@@ -161,29 +180,7 @@ func (r *Runtime) DNSInput(moduleName string) (dnsconfig.Input, error) {
 		return out, err
 	}
 	if r.applied.sourceEpoch == r.sourceEpoch {
-		vips := make(map[string][]dnsEndpoint, len(cfg.vips))
-		for module, addresses := range cfg.vips {
-			update, found := r.records[module]
-			if !found {
-				continue
-			}
-			var state vrrp.Snapshot
-			if err := json.Unmarshal(update.Snapshot, &state); err != nil {
-				return out, err
-			}
-			// Kernel admission precedes the worker's next Active publication.
-			if !vrrp.CurrentElection(state, clock) || !r.ownsVRRPLocked(update, state) {
-				continue
-			}
-			until := lifetime.Deadline{BootID: state.BootID, Nanos: state.ExpiresNanos}
-			for _, address := range addresses {
-				vips[module] = append(vips[module], dnsEndpoint{address: address, until: until})
-			}
-		}
 		for index, source := range cfg.listeners {
-			for _, endpoint := range vips["service."+source.VRRP] {
-				out.Listeners = append(out.Listeners, dnsconfig.ListenAddress{Source: index, Address: endpoint.address, ValidUntil: endpoint.until})
-			}
 			if source.Service != "" {
 				for _, entry := range r.delegatedDNS[source.Service+"/"+source.Delegation] {
 					if entry.address.ValidUntil.Live(clock) {

@@ -111,8 +111,9 @@ func TestDNSLeaseSourceDependenciesAreValidatedBeforeApply(t *testing.T) {
 
 func TestDNSRecordVIPBindingPreservesIntentAndDelegatedSource(t *testing.T) {
 	original := dnsconfig.RuntimeConfig{Zones: []dnsconfig.RuntimeZone{{Name: "lan", Spec: api.DNSZoneSpec{Zone: "home.arpa", Records: []api.DNSZoneRecordSpec{{Hostname: "router", IPv4From: api.StatusValueSourceSpec{Resource: "VirtualAddress/ha", Field: "address"}, IPv6From: api.StatusValueSourceSpec{Resource: "IPv6DelegatedAddress/pd/lan", Field: "address"}}}}}}}
+	original.Spec.Listen = []api.DNSResolverListenSpec{{Addresses: []string{"198.18.0.2"}, AddressFrom: []api.StatusValueSourceSpec{{Resource: "VirtualAddress/ha", Field: "address"}, {Resource: "IPv6DelegatedAddress/pd/lan", Field: "address"}}}}
 	owners := []serviceconfig.Service{{Name: "ha", VRRP: &vrrp.Config{Addresses: []string{"198.18.0.254/24"}}}}
-	bound, err := bindDNSRecordVIPs(original, owners)
+	bound, err := bindDNSVIPs(original, owners)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,8 +124,15 @@ func TestDNSRecordVIPBindingPreservesIntentAndDelegatedSource(t *testing.T) {
 	if original.Zones[0].Spec.Records[0].IPv4 != "" || original.Zones[0].Spec.Records[0].IPv4From.Resource != "VirtualAddress/ha" {
 		t.Fatal("binding changed operator intent", original)
 	}
+	listener := bound.Spec.Listen[0]
+	if len(listener.Addresses) != 2 || listener.Addresses[1] != "198.18.0.254" || len(listener.AddressFrom) != 1 || listener.AddressFrom[0] != original.Spec.Listen[0].AddressFrom[1] {
+		t.Fatal("VIP listener was not prepared independently of live PD", listener)
+	}
+	if len(original.Spec.Listen[0].Addresses) != 1 || len(original.Spec.Listen[0].AddressFrom) != 2 {
+		t.Fatal("listener binding changed operator intent", original.Spec.Listen)
+	}
 	owners[0].VRRP.Addresses = []string{"198.18.0.253/24"}
-	changed, err := bindDNSRecordVIPs(original, owners)
+	changed, err := bindDNSVIPs(original, owners)
 	if err != nil || changed.Zones[0].Spec.Records[0].IPv4 != "198.18.0.253" || bound.Zones[0].Spec.Records[0].IPv4 != "198.18.0.254" {
 		t.Fatal("configuration change retained or mutated the old VIP", changed, err)
 	}

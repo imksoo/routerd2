@@ -1,3 +1,5 @@
+2026-10-30 12:38 JST native80統合候補: 二段DNSのVIP公開後の待受遅れを旧routerdのfreebind設計で解消。両DNS停止復旧・両方向切替・初回DNS/両IP新規通信・同一TCP/UDP対応が成立。独立UDPは175/985件失効、最大無応答4.543秒であり損失0ではない。全homert同時利用・全体再起動、旧3秒timeout、全34項目は未完了。[実行版と限界](pve-codex-handoff.md)。
+
 2026-10-30 JST dynamic-dns-native79候補: PD/VIPローカルDNS記録を元期限付きの既存入力へ接続。実HGWの初回両IP DNS/HTTPS・動的名・再起動、隔離kernel/digの変更・失効・再取得を確認。最終候補の自然更新と二段DNS・全homert/二台受入は残る。IPIP/FRRの静的経路通信は`0722611`で公開済み。[実行版と限界](pve-codex-handoff.md)。
 
 2026-10-30 JST local-redirect-native78: 宛先集合を製品内DNSで解決し、単一network writerへローカルDNS転送を接続。準備完了後の両IP/TCPUDP・集合変更・再起動・撤去は実通信で通過。初期端末を起動前からつなぐ単体受入とHA timeoutは残る。旧YAMLの取込件数を機能の未実装数にせず、現在の製品設定で全homertの通信・運用を成立させる。[結果と限界](pve-codex-handoff.md)。
