@@ -9,8 +9,8 @@
 {{if .LastError}}<p class="error">最後の観測エラー: {{.LastError}}</p><p>この観測では時刻源と品質の値を取得できませんでした。</p>{{else}}
 <dl>
 <dt>観測時の同期</dt><dd>{{if .Synchronized}}同期済み{{else}}未同期{{end}}</dd>
-<dt>選択された時刻源</dt><dd data-time-field="source">{{if and .Source.IsValid (not .Source.IsUnspecified)}}{{.Source}}{{else}}未選択{{end}}</dd>
-<dt>時刻源の階層</dt><dd data-time-field="stratum">{{.Stratum}}</dd>
+<dt>選択された時刻源</dt><dd data-time-field="source">{{if and .Source.IsValid (not .Source.IsUnspecified)}}{{.Source}}{{else}}アドレス未取得{{end}}</dd>
+<dt>この装置の階層</dt><dd data-time-field="stratum">{{.Stratum}}</dd>
 <dt>参照時刻</dt><dd>{{if .ReferenceTime.IsZero}}未取得{{else}}{{.ReferenceTime}}{{end}}</dd>
 <dt>システム時計の補正</dt><dd>{{if .AdjustingClock}}有効{{else}}無効{{end}}</dd>
 <dt>時計の残り補正量（秒）</dt><dd data-time-field="offset_seconds">{{.OffsetSeconds}}</dd>
