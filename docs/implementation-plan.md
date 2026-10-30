@@ -55,6 +55,8 @@ IPv4/IPv6 TCP/UDP・DNS・NTP・管理と、65.2秒/9巡の履歴進行・Health
 同じchronydとLAN時刻/IPv4/IPv6 TCP/UDP/captureを確認した。全homert受入とは分け、DHCPv4実学習と
 監督情報の失効・起動遅延は未解消として[引き継ぎ](pve-codex-handoff.md)に残す。
 
+2026-10-30 18:31 JST: native87/network26へ明示conntrack計数を接続し、配布kernelのnetlink module不足を修正。実IPv4/IPv6 TCPのpacket/byte取得と元値0への撤回復元、関連Race/vet/両arch/署名と通常imageが通過。同版の二台daemon両方向切替・再参加も完走し、UDP128/1344件期限切れ/TCP最大3.736秒を保持した。二guest KVM/物理機器の停止と同一視せず、通信量記録等との統合へ進む。[実行版と限界](pve-codex-handoff.md)。
+
 2026-10-30 18:11 JST: 公開2d9d4a0相当native86の通常Alpine配布物が、専用4CPU/4GiB/PVE KVM guestで冷起動→自動取得DNS/両IP通信/二BGP/特殊端末/TS双方向/配布NTP→guest再起動後の同じ通信・DUID/NodeIDを完走した。NTPは既定の初期周波数推定を待ち、独立端末の採用を確認。TCG失敗は保持し、物理NIC/ONU/全homert/全34項目へ拡張しない。[実行版・条件・限界](pve-codex-handoff.md)。
 
 2026-10-30 17:55 JST: native86へ旧OTLP LogSink/DHCP名/Firewall履歴を統合し、経路一覧の重複取得とtable別mapを除去。最終実行物のmake check/Race/vet/両arch/署名、実3経路fixture、実HGW90秒/9巡・全daemon再起動、独立DNS名/履歴/OTLPが通過。通常factoryの512MiB/2CPU/TCGは起動不合格のまま。実homertは4CPU/約4GiB/KVMと確認し、既存PVEの隔離KVMで同じ配布物を受け入れる準備へ進む。自然PD更新/ONU直結/物理機器/全34項目は未完了。[版・結果・限界](pve-codex-handoff.md)。
