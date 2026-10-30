@@ -385,7 +385,7 @@ check-ha-dhcp-failover: build build-publisher conntrack-engine dnsmasq-engine
 
 TAILSCALE_ARCH ?= $(shell $(GO) env GOARCH)
 TAILSCALE_DIR ?= dist
-.PHONY: tailscale-engine tailscale-peers check-tailscale
+.PHONY: tailscale-engine tailscale-peers check-tailscale check-tailscale-homert
 tailscale-engine:
 	$(DOCKER) build --platform linux/$(TAILSCALE_ARCH) --build-arg GO_VERSION=$(GO_VERSION) -f packaging/alpine/tailscale-engine.Dockerfile -t routerd2-tailscale-engine:$(ALPINE_VERSION)-$(TAILSCALE_ARCH) .
 	mkdir -p $(TAILSCALE_DIR)
@@ -398,6 +398,9 @@ tailscale-peers:
 
 check-tailscale: build build-publisher tailscale-engine tailscale-peers
 	$(PYTHON) scripts/tailscale-peer.py
+
+check-tailscale-homert: build build-publisher tailscale-engine tailscale-peers
+	$(PYTHON) scripts/tailscale-peer.py --homert
 
 CHRONY_ARCH ?= $(shell $(GO) env GOARCH)
 CHRONY_DIR ?= dist

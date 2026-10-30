@@ -61,9 +61,10 @@ while True:
  body,a=u.recvfrom(4096);u.sendto(json.dumps({'source':a[0],'payload':body.decode()}).encode(),a)
 """
 ECHO_CLIENT = r"""import ipaddress,json,socket,sys
-host,source=sys.argv[1:];family=socket.AF_INET6 if ':' in host else socket.AF_INET
+host,source,*bind=sys.argv[1:];family=socket.AF_INET6 if ':' in host else socket.AF_INET
 for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
  s=socket.socket(family,kind);s.settimeout(2)
+ if bind:s.bind((bind[0],0))
  try:
   s.connect((host,port));s.sendall(b'actual-network');data=json.loads(s.recv(4096))
  except OSError as error:
@@ -86,11 +87,13 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
 """
 
 
-def peer(stage):
+def peer(stage, homert=False):
     children, namespaces = [], []
     frozen = []
     pid1 = 0
     module = ""
+    advertised = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"] if homert else ["10.42.0.0/24", "fd42::/64"]
+    lan_hosts = ["10.42.0.2", "172.20.0.2", "192.168.50.2"]
 
     def signal_worker(pid, sig):
         run(["nsenter", "-t", str(pid1), "-m", "-p", "python3", "-c", "import os,sys;os.kill(int(sys.argv[1]),int(sys.argv[2]))", str(pid), str(int(sig))])
@@ -121,8 +124,8 @@ def peer(stage):
     def pingable(host):
         return subprocess.run(inside("ts-b", ["ping", "-c", "1", "-W", "1", host]), capture_output=True).returncode == 0
 
-    def traffic(host, source, namespace="ts-b"):
-        run(inside(namespace, ["python3", "-c", ECHO_CLIENT, host, source]))
+    def traffic(host, source, namespace="ts-b", bind=None):
+        run(inside(namespace, ["python3", "-c", ECHO_CLIENT, host, source] + ([bind] if bind else [])))
 
     def resolve_peer():
         for transport in ("+notcp", "+tcp"):
@@ -210,6 +213,9 @@ def peer(stage):
         run(inside("ts-lan", ["ip", "link", "set", "client0", "up"]))
         for address in ("10.42.0.2/24", "fd42::2/64"):
             run(inside("ts-lan", ["ip", "addr", "add", address, "dev", "client0"]))
+        if homert:
+            for address in ("172.20.0.2/24", "192.168.50.2/24"):
+                run(inside("ts-lan", ["ip", "addr", "add", address, "dev", "client0"]))
         run(inside("ts-lan", ["ip", "route", "add", "default", "via", "10.42.0.1"]))
         run(inside("ts-lan", ["ip", "-6", "route", "add", "default", "via", "fd42::1"]))
         for name in ("product-run", "product-state"):
@@ -225,7 +231,7 @@ def peer(stage):
         run(inside("ts-a", ["ip", "addr", "add", "192.0.2.2/24", "dev", "uplink0"]))
         external = start("ts-a", ["env", "TS_LOGS_DIR=" + str(seed), "SSL_CERT_FILE=" + str(cert), str(PEERS / "tailscaled"), "--state=" + str(seed / "tailscaled.state"), "--statedir=" + str(seed), "--socket=" + str(seed_socket), "--tun=tailscale0", "--port=41641", "--no-logs-no-support"], "external-daemon")
         wait(seed_socket.exists)
-        run(inside("ts-a", ["env", "SSL_CERT_FILE=" + str(cert), str(PEERS/"tailscale"), "--socket="+str(seed_socket), "up", "--timeout=15s", "--login-server=https://control.test:8443", "--hostname=product-a", "--auth-key=file:"+str(authfile), "--accept-dns=false", "--netfilter-mode=off", "--advertise-exit-node", "--advertise-routes=10.42.0.0/24,fd42::/64"]))
+        run(inside("ts-a", ["env", "SSL_CERT_FILE=" + str(cert), str(PEERS/"tailscale"), "--socket="+str(seed_socket), "up", "--timeout=15s", "--login-server=https://control.test:8443", "--hostname=product-a", "--auth-key=file:"+str(authfile), "--accept-dns=false", "--netfilter-mode=off", "--advertise-exit-node", "--advertise-routes=" + ",".join(advertised)]))
         wait(lambda: vendor_api(seed_socket,"status").get("BackendState")=="Running",30)
         seed_identity = vendor_api(seed_socket,"status")["Self"]
         external.terminate()
@@ -236,6 +242,10 @@ def peer(stage):
         shutil.copyfile(seed / "tailscaled.state", target / "tailscaled.state")
         (target / "tailscaled.state").chmod(0o600)
         legacy = PRODUCT.parents[1] / "internal/integration/testdata/tailscale-import.yaml"
+        if homert:
+            source = stage / "homert-tailscale.yaml"
+            source.write_text(legacy.read_text().replace('advertiseRoutes: [10.42.0.0/24, "fd42::/64"]', "advertiseRoutes: [" + ", ".join(advertised) + "]"))
+            legacy = source
         policyfile = stage / "import-policy.json"
         policy = {"schema_version": 1, "tailscale": {"TailscaleNode/overlay": {
             "interface": "tailscale0", "bootstrap_dns": ["192.0.2.1"], "control_ca_file": str(cert),
@@ -272,6 +282,9 @@ def peer(stage):
         ]
         for i, (interface, address) in enumerate((("uplink0", "192.0.2.2/24"), ("uplink0", "fd0::2/64"), ("lan0", "10.42.0.1/24"), ("lan0", "fd42::1/64"))):
             resources.append({"id": "address" + str(i), "address": {"interface": interface, "cidr": address}})
+        if homert:
+            for i, address in enumerate(("172.20.0.1/24", "192.168.50.1/24")):
+                resources.append({"id": "site-lan" + str(i), "address": {"interface": "lan0", "cidr": address}})
         # WAN source policies follow upstream's lookup5270, preserving the
         # subnet client's return path to tailnet peers in both address families.
         for family, prefix, gateway in ((4, "0.0.0.0/0", "192.0.2.1"), (6, "::/0", "fd0::1")):
@@ -359,11 +372,100 @@ def peer(stage):
         run(inside("ts-control", head + ["nodes", "approve-routes", "-i", str(remote["id"]), "-r", "10.43.0.0/24,fd43::/64"]))
         for family,prefix in (("-4","10.43.0.0/24"),("-6","fd43::/64")):
             assert not any(route.get("dst")==prefix for route in json.loads(run(inside("ts-a",["ip",family,"-j","route","show","table","52"]))))
-        run(inside("ts-control", head + ["nodes", "approve-routes", "-i", str(router["id"]), "-r", "10.42.0.0/24,fd42::/64,0.0.0.0/0,::/0"]))
-        for namespace, host in (("ts-lan", "10.42.0.2"), ("ts-lan", "fd42::2"), ("ts-control", "198.51.100.20"), ("ts-control", "2001:db8:ffff::20"), ("ts-b", "10.43.0.1"), ("ts-b", "fd43::1"), ("ts-a", original["addresses"][0]), ("ts-a", original["addresses"][1])):
+        run(inside("ts-control", head + ["nodes", "approve-routes", "-i", str(router["id"]), "-r", ",".join(advertised + ["0.0.0.0/0", "::/0"])]))
+        servers = [("ts-lan", "10.42.0.2"), ("ts-lan", "fd42::2"), ("ts-control", "198.51.100.20"), ("ts-control", "2001:db8:ffff::20"), ("ts-b", "10.43.0.1"), ("ts-b", "fd43::1"), ("ts-a", original["addresses"][0]), ("ts-a", original["addresses"][1])]
+        if homert:
+            servers += [("ts-lan", host) for host in lan_hosts[1:]] + [("ts-b", peer_ips[4])]
+        for namespace, host in servers:
             name="app-" + host.replace(":", "_")
             start(namespace, ["python3", "-u", "-c", ECHO_SERVER, host], name)
             wait(lambda: "READY" in (stage/(name+".log")).read_text())
+        if homert:
+            cli = [str(PEERS / "tailscale"), "--socket=" + str(socket)]
+
+            def peer_routes():
+                entry = next((p for p in vendor_api(socket, "status").get("Peer", {}).values() if p["ID"] == original["node_id"]), {})
+                return entry.get("AllowedIPs") or []
+
+            def route_present(prefix):
+                return any(route.get("dst") == prefix and route.get("dev") == "tailscale0" for route in json.loads(run(inside("ts-b", ["ip", "-j", "route", "show", "table", "52"]))))
+
+            def site_traffic():
+                for host in lan_hosts:
+                    traffic(host, peer_ips[4])
+                    traffic(peer_ips[4], host, "ts-lan", bind=host)
+
+            def exit_traffic():
+                traffic("198.51.100.20", "192.0.2.2")
+                traffic("2001:db8:ffff::20", "fd0::2")
+
+            wait(lambda: all(prefix in peer_routes() and route_present(prefix) for prefix in advertised))
+            assert set(imported["tailscale"]["advertise_routes"]) == set(advertised)
+            assert not imported["tailscale"].get("accept_routes", False)
+            prefs = vendor_api(stage / "product-run/services/tailscale/local.sock", "prefs")
+            assert not prefs["CorpDNS"] and not prefs["RouteAll"]
+            assert set(prefs["AdvertiseRoutes"]) == set(advertised + ["0.0.0.0/0", "::/0"])
+            del prefs  # Do not retain or print upstream identity fields.
+            site_traffic()
+            assert Path("/etc/resolv.conf").read_text() == "nameserver 192.0.2.1\n"
+            print("PASS homert: three declared RFC1918 advertisements installed at peer; LAN TCP/UDP in both directions without subnet NAT or manual return routes; acceptDNS/acceptRoutes=false", flush=True)
+            run(inside("ts-b", cli + ["set", "--exit-node=" + original["addresses"][0], "--exit-node-allow-lan-access=true"]))
+            wait(lambda: pingable("198.51.100.20"))
+            exit_traffic()
+            print("PASS homert: IPv4/IPv6 exit TCP/UDP through declared WAN NAT; no LAN-to-tailnet IPv6 NAT", flush=True)
+            old = modules()[module]
+            signal_worker(old["pid"], signal.SIGKILL)
+            wait(lambda: modules()[module]["generation"] > old["generation"] and observation().get("backend_state") == "Running", 30)
+            assert observation()["node_id"] == original["node_id"]
+            wait(lambda: pingable(lan_hosts[0]))
+            site_traffic()
+            exit_traffic()
+            saved = copy.deepcopy(document)
+            policy["tailscale"]["TailscaleNode/overlay"].update(enrollment="saved_identity")
+            policy["tailscale"]["TailscaleNode/overlay"].pop("auth_key_file")
+            next(r for r in saved["resources"] if r["id"] == "tailnet")["service"] = next(s for s in imported_native()["services"] if "tailscale" in s)
+            product_api("control.sock", "/v1/config/commit", {"expected_revision": 1, "request_id": "homert-saved-identity", "config": saved}, timeout=12)
+            wait(lambda: observation().get("backend_state") == "Running", 30)
+            authfile.unlink()
+            assert json.loads(run([str(inputs / "routerd"), "poweroff", "--runtime-dir", str(stage / "product-run")]))["accepted"]
+            daemon.wait(timeout=12)
+            assert daemon.returncode == -signal.SIGINT
+            daemon = start("ts-a", command, "product")
+            child_file = Path(f"/proc/{daemon.pid}/task/{daemon.pid}/children")
+            wait(lambda: child_file.read_text().strip())
+            pid1 = int(child_file.read_text().split()[0])
+            wait(lambda: (stage / "product-run/control.sock").exists())
+            wait(lambda: observation().get("backend_state") == "Running", 30)
+            assert observation()["node_id"] == original["node_id"] and observation()["addresses"] == original["addresses"]
+            wait(lambda: pingable(lan_hosts[0]))
+            site_traffic()
+            exit_traffic()
+            print("PASS homert: worker and whole PID1 restart retained identity, three LAN paths and both exit families without enrollment file", flush=True)
+            run(inside("ts-b", cli + ["set", "--exit-node="]))
+            withdrawn = copy.deepcopy(saved)
+            withdrawn["resources"] = [r for r in withdrawn["resources"] if r["id"] not in ("tailnet", "resolver")]
+            product_api("control.sock", "/v1/config/commit", {"expected_revision": 2, "request_id": "homert-remove-tailnet", "config": withdrawn}, timeout=12)
+            wait(lambda: not any(link["ifname"] == "tailscale0" for link in json.loads(run(inside("ts-a", ["ip", "-j", "link"])))))
+            wait(lambda: not any(prefix in peer_routes() or route_present(prefix) for prefix in advertised), 30)
+            for host in lan_hosts:
+                assert not pingable(host)
+            product_api("control.sock", "/v1/config/commit", {"expected_revision": 3, "request_id": "homert-restore-tailnet", "config": saved}, timeout=12)
+            wait(lambda: observation().get("backend_state") == "Running", 30)
+            assert observation()["node_id"] == original["node_id"]
+            wait(lambda: all(prefix in peer_routes() and route_present(prefix) for prefix in advertised))
+            site_traffic()
+            run(inside("ts-b", cli + ["set", "--exit-node=" + original["addresses"][0], "--exit-node-allow-lan-access=true"]))
+            wait(lambda: pingable("198.51.100.20"))
+            exit_traffic()
+            capture.send_signal(signal.SIGINT)
+            capture.wait(timeout=3)
+            packets = run(["tcpdump", "-Z", "root", "-nn", "-r", str(stage / "tailnet.pcap")])
+            for host in lan_hosts + ["198.51.100.20", "2001:db8:ffff::20"]:
+                for port in (18080, 18081):
+                    assert host + "." + str(port) in packets
+            assert Path("/etc/resolv.conf").read_text() == "nameserver 192.0.2.1\n"
+            print("PASS homert: config removal withdrew peer kernel routes and LAN access; reapply restored three paths and IPv4/IPv6 exit; packet capture checked", flush=True)
+            return
         wait(lambda: pingable("10.42.0.2"))
         traffic("10.42.0.2", peer_ips[4])
         traffic("fd42::2", peer_ips[6])
@@ -646,11 +748,11 @@ def peer(stage):
 
 
 if __name__ == "__main__":
-    if sys.argv[1:] == ["--inside"]:
+    if sys.argv[1:] in (["--inside"], ["--inside", "--homert"]):
         with tempfile.TemporaryDirectory(prefix="routerd-tailscale-") as directory:
-            peer(Path(directory))
-    elif sys.argv[1:]:
-        raise SystemExit("usage: tailscale-peer.py")
+            peer(Path(directory), homert="--homert" in sys.argv)
+    elif sys.argv[1:] not in ([], ["--homert"]):
+        raise SystemExit("usage: tailscale-peer.py [--homert]")
     else:
         prefix = [] if os.geteuid() == 0 else ["sudo", "-n"]
-        raise SystemExit(subprocess.run(prefix + ["unshare", "--mount", "--net", "--pid", "--fork", "--mount-proc", "--kill-child=SIGKILL", "--propagation", "private", "python3", "-I", str(Path(__file__).resolve()), "--inside"]).returncode)
+        raise SystemExit(subprocess.run(prefix + ["unshare", "--mount", "--net", "--pid", "--fork", "--mount-proc", "--kill-child=SIGKILL", "--propagation", "private", "python3", "-I", str(Path(__file__).resolve()), "--inside"] + sys.argv[1:]).returncode)
