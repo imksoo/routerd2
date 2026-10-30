@@ -90,6 +90,13 @@ Lease files, recovered sticky records and arbitrary lease injection are not
 accepted: the DHCP worker owns leases and their original observation/client
 expiry. DNS does not create a second lease journal or revive old addresses.
 
+The positive cache `minTTL` does not extend an empty negative answer beyond
+`negativeTTL` or an earlier SOA deadline. `TestDaemonDNSNegativeCacheExpiresAtConfiguredTTL`
+uses homert's 60-second positive minimum and 30-second negative lifetime, adds a
+name to an independent dnsmasq after both product resolvers cached NXDOMAIN, and
+checks each resolver after the original negative lifetime expires. Run it with
+`python3 scripts/daemon-tests.py dns-upstream --test TestDaemonDNSNegativeCacheExpiresAtConfiguredTTL --binary-dir dist/bin`.
+
 UDP replies use the client's EDNS payload size, or 512 bytes without EDNS.
 The existing DNS library truncates oversized answers and sets TC so clients can
 retry over TCP. TCP retains the complete answer, including after a cached UDP

@@ -15,6 +15,7 @@ SUITES = {
     "dns-upstream": (
         ("TestDaemonDNSProbeTimeoutIndependentOfQueries", ("wan0", "lan0"), 60),
         ("TestDaemonDNSResponseFitsClientUDPSize", ("wan0", "lan0"), 60),
+        ("TestDaemonDNSNegativeCacheExpiresAtConfiguredTTL", ("wan0", "lan0"), 75),
     ),
     "traffic-flow": (("TestDaemonTrafficFlowHistory", ("wan0", "lan0"), 85), ("TestDaemonTrafficFlowNDPI", ("wan0", "lan0"), 85)),
     "management": (("TestDaemonConfigurationAndRecovery", ("mgmt0",), 100),),

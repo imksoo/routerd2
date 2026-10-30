@@ -432,7 +432,8 @@ func dnsMessageTTL(msg *dns.Msg, spec api.DNSResolverCacheSpec) time.Duration {
 			}
 		}
 	}
-	if spec.MinTTL != "" {
+	// The positive-answer minimum must not extend the negative cache lifetime.
+	if len(msg.Answer) > 0 && spec.MinTTL != "" {
 		if minimum, err := time.ParseDuration(spec.MinTTL); err == nil && out < minimum {
 			out = minimum
 		}
