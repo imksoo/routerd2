@@ -356,8 +356,9 @@ type staticPrefix struct {
 }
 
 type compiler struct {
-	retention      *retention.Config
-	queryRetention *dnsconfig.QueryRetention
+	retention         *retention.Config
+	queryRetention    *dnsconfig.QueryRetention
+	firewallRetention *retention.Config
 	*decoder
 	resources      []resource
 	legacy         api.Router

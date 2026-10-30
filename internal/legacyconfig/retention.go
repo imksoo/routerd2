@@ -37,7 +37,7 @@ func (c *compiler) logRetention(r resource) {
 	if len(signals) == 0 {
 		signals = []string{"events", "accessLogs", "pluginRuns", "dnsQueries", "trafficFlows", "firewallEvents", "dhcpFingerprints"}
 	}
-	events, queries := false, false
+	events, queries, firewall := false, false, false
 	for _, signal := range signals {
 		if signal == "events" {
 			events = true
@@ -46,18 +46,30 @@ func (c *compiler) logRetention(r resource) {
 		switch signal {
 		case "dnsQueries":
 			queries = true
-		case "accessLogs", "pluginRuns", "trafficFlows", "firewallEvents", "dhcpFingerprints":
+		case "firewallEvents":
+			firewall = true
+		case "accessLogs", "pluginRuns", "trafficFlows", "dhcpFingerprints":
 			c.reject(r, "signals", "unsupported_semantics", "operational history dataset "+signal+" has no native retention owner")
 		default:
 			c.reject(r, "signals", "unsupported_semantics", "unknown operational history dataset")
 			return
 		}
 	}
-	if !events && !queries {
+	if firewall {
+		enabled := false
+		for _, logger := range c.resourcesOfKind("FirewallEventLog") {
+			enabled = enabled || logger.Spec.(api.FirewallEventLogSpec).Enabled
+		}
+		if !enabled {
+			c.reject(r, "signals", "unsupported_semantics", "firewallEvents requires an enabled FirewallEventLog history owner")
+			return
+		}
+	}
+	if !events && !queries && !firewall {
 		c.reject(r, "signals", "unsupported_semantics", "requested datasets have no native history owner; event retention is not substituted")
 		return
 	}
-	if events && c.retention != nil || queries && c.queryRetention != nil {
+	if events && c.retention != nil || queries && c.queryRetention != nil || firewall && c.firewallRetention != nil {
 		c.reject(r, "", "unsupported_semantics", "each history dataset has one retention policy; combine policies explicitly")
 		return
 	}
@@ -69,6 +81,10 @@ func (c *compiler) logRetention(r resource) {
 		}
 		sink := target.Spec.(api.LogSinkSpec)
 		if sink.Enabled != nil && !*sink.Enabled {
+			continue
+		}
+		if sink.Type == "otlp" {
+			c.note(r, "The legacy OTLP LogSink performed no send; it is not counted as an archive destination. Telemetry remains the independent SDK sender.")
 			continue
 		}
 		if sink.Type != "syslog" || sink.Syslog.Network != "udp" {
@@ -85,6 +101,11 @@ func (c *compiler) logRetention(r resource) {
 			continue
 		}
 		policy.Syslog = append(policy.Syslog, destination)
+	}
+	if firewall {
+		c.firewallRetention = &policy
+		c.target(r, "services/*/firewall_log/retention")
+		c.note(r, "Firewall packet history retains the configured age and daily sweep in the existing NFLOG service. Before-delete UDP archive failure preserves expired rows; UDP submission is not receiver acknowledgement. Other requested datasets are not substituted.")
 	}
 	if events {
 		c.retention = &policy
