@@ -801,12 +801,7 @@ func (p *apply) interfaceConfig(l Interface) error {
 			return err
 		}
 	}
-	for _, a := range l.Addresses {
-		if err := p.addressConfig(l, a); err != nil {
-			return err
-		}
-	}
-	return nil
+	return p.addressConfigs(l)
 }
 
 func (p *apply) removeAddresses(want map[addressKey]bool) error {
