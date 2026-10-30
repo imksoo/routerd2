@@ -19,10 +19,13 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/protocol/dhcpevent"
+	"github.com/imksoo/routerd2/internal/protocol/dhcpfingerprint"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 	"golang.org/x/sys/unix"
 )
@@ -210,6 +213,19 @@ func Run(ctx context.Context, cfg Config, image *os.File, publish func(context.C
 		runtime.LockOSThread()
 		defer runtime.UnlockOSThread()
 	}
+	var fingerprints chan dhcpevent.Event
+	var dropped atomic.Uint64
+	if cfg.FingerprintRetention != nil {
+		fingerprints = make(chan dhcpevent.Event, 128)
+		historyCtx, stop := context.WithCancel(context.WithoutCancel(ctx))
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			dhcpfingerprint.Run(historyCtx, filepath.Join(filepath.Dir(cfg.StatePath), "dhcp-fingerprints.db"), *cfg.FingerprintRetention, fingerprints, &dropped)
+		}()
+		// Registered before engine cleanup: drain its hook children first.
+		defer func() { stop(); <-done }()
+	}
 	var events *leaseEvents
 	defer func() {
 		if child != nil {
@@ -250,8 +266,8 @@ func Run(ctx context.Context, cfg Config, image *os.File, publish func(context.C
 			events.close()
 			events = nil
 		}
-		if cfg.StickyHoldDays > 0 {
-			events, err = listenLeaseEvents(ctx, cfg)
+		if cfg.StickyHoldDays > 0 || cfg.FingerprintRetention != nil {
+			events, err = listenLeaseEvents(ctx, cfg, fingerprints, &dropped)
 			if err != nil {
 				return err
 			}

@@ -109,3 +109,30 @@ func TestFirewallHistoryRetentionImportsIntoCollector(t *testing.T) {
 		t.Fatal("firewall retention was not scoped to its collector")
 	}
 }
+
+func TestDHCPFingerprintRetentionImportsIntoTheLeaseOwner(t *testing.T) {
+	source := string(fixture(t, "dhcp-server")) + `
+    - apiVersion: system.routerd.net/v1alpha1
+      kind: LogRetention
+      metadata: {name: client-identities}
+      spec: {retention: 7d, schedule: daily, vacuum: true, signals: [dhcpFingerprints]}
+`
+	result, err := Compile([]byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, resource := range result.Document.Resources {
+		if resource.Service == nil || resource.Service.DHCPServer == nil {
+			continue
+		}
+		found = true
+		policy := resource.Service.DHCPServer.FingerprintRetention
+		if policy == nil || policy.MaxAgeSeconds != 604800 || policy.IntervalSeconds != 86400 || !policy.Vacuum {
+			t.Fatal(policy)
+		}
+	}
+	if !found || result.Document.Retention != nil {
+		t.Fatal("DHCP fingerprint retention was not scoped to the lease owner")
+	}
+}

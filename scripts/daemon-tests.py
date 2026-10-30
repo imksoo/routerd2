@@ -57,6 +57,7 @@ SUITES = {
         ("TestDaemonDHCPRelayVRFIsolation", ("wan0", "lan0", "wan1", "lan1", "wan2", "lan2"), 120),
     ),
     "dhcp-server": (
+        ("TestDaemonDHCPFingerprints", (), 75),
         ("TestDaemonMigratedDHCPUnmanagedLAN", (), 75),
         ("TestDaemonMigratedDHCPLogs", (), 75),
         ("TestDaemonDHCPDNSAndOwnershipExpiry", (), 120),

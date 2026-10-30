@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/imksoo/routerd2/internal/protocol/dhcpevent"
@@ -24,16 +25,19 @@ type leaseEventCall struct {
 }
 
 type leaseEvents struct {
-	listener net.Listener
-	dir      *os.File
-	name     string
-	requests chan leaseEventCall
-	cancel   context.CancelFunc
-	done     chan struct{}
-	err      error // written before done closes
+	listener     net.Listener
+	dir          *os.File
+	name         string
+	requests     chan leaseEventCall
+	cancel       context.CancelFunc
+	done         chan struct{}
+	fingerprints chan<- dhcpevent.Event
+	dropped      *atomic.Uint64
+	sticky       bool
+	err          error // written before done closes
 }
 
-func listenLeaseEvents(ctx context.Context, cfg Config) (*leaseEvents, error) {
+func listenLeaseEvents(ctx context.Context, cfg Config, fingerprints chan<- dhcpevent.Event, dropped *atomic.Uint64) (*leaseEvents, error) {
 	dir, err := os.Open(filepath.Dir(cfg.StatePath))
 	if err != nil {
 		return nil, err
@@ -54,7 +58,7 @@ func listenLeaseEvents(ctx context.Context, cfg Config) (*leaseEvents, error) {
 	// The worker closes this listener after draining the engine's children.
 	// Parent cancellation starts that drain; it must not discard queued events.
 	ctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	r := &leaseEvents{listener: listener, dir: dir, name: name, requests: make(chan leaseEventCall), cancel: cancel, done: make(chan struct{})}
+	r := &leaseEvents{fingerprints: fingerprints, dropped: dropped, sticky: cfg.StickyHoldDays > 0, listener: listener, dir: dir, name: name, requests: make(chan leaseEventCall), cancel: cancel, done: make(chan struct{})}
 	go func() { defer close(r.done); r.err = r.serve(ctx) }()
 	return r, nil
 }
@@ -86,9 +90,16 @@ func (r *leaseEvents) receive(ctx context.Context, conn net.Conn) {
 	err := conn.SetDeadline(time.Now().Add(6 * time.Second))
 	var event dhcpevent.Event
 	if err == nil {
-		err = json.NewDecoder(io.LimitReader(conn, 2048)).Decode(&event)
+		err = json.NewDecoder(io.LimitReader(conn, 4096)).Decode(&event)
 	}
-	if err == nil {
+	if err == nil && r.fingerprints != nil && !event.FromFile && (event.Action == "add" || event.Action == "old") {
+		select {
+		case r.fingerprints <- event:
+		default:
+			r.dropped.Add(1)
+		}
+	}
+	if err == nil && r.sticky {
 		call := leaseEventCall{event: event, done: make(chan error, 1)}
 		select {
 		case r.requests <- call:
