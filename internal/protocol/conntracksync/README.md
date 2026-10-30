@@ -46,6 +46,11 @@ coordinator, peer registry, shell hook or alternate host executable is used.
 `dist/conntrack-engine.tar` and `dist/conntrack-sources.tar`. The pinned Alpine
 3.24.3 package inputs supply exact versions and source checksums. conntrackd
 1.4.9 is rebuilt with the small GPL-2.0-or-later completion-result patch. The
+libnetfilter_conntrack 1.1.1 copy table is also patched to retain
+`ATTR_TIMESTAMP_EVENT`. Its parser accepts that kernel attribute but the
+upstream copy table omits it; updating a cached connection would otherwise
+abort conntrackd in `nfct_copy(NFCT_CP_META)`. Both patches and the exact
+upstream sources accompany the runtime library.
 archive includes the loader/library closure, protocol database and licenses;
 the corresponding-source artifact includes upstream sources, APKBUILDs,
 patches and build scripts. `CONNTRACK_ARCH` selects the target; a foreign C

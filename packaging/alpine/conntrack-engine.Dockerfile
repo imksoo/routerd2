@@ -14,10 +14,16 @@ RUN case "$TARGETARCH" in amd64) arch=x86_64 ;; arm64) arch=aarch64 ;; *) exit 2
       libnetfilter_cthelper=1.0.1-r2 libnetfilter_cttimeout=1.0.1-r2 \
       libnetfilter_queue=1.0.5-r2
 COPY scripts/engine_sources.py scripts/conntrack-image.py /build/
-COPY packaging/alpine/conntrack-commit-result.patch packaging/alpine/conntrack-engine.Dockerfile /build/
+COPY packaging/alpine/conntrack-commit-result.patch packaging/alpine/conntrack-copy-event.patch packaging/alpine/conntrack-engine.Dockerfile /build/
 RUN python3 /build/conntrack-image.py --root /engine-root --arch "$TARGETARCH" \
  && mkdir /src \
  && tar -xf /out/conntrack-sources.tar -C /src \
+ && tar -xf /src/libnetfilter_conntrack/libnetfilter_conntrack-1.1.1.tar.xz -C /src \
+ && cd /src/libnetfilter_conntrack-1.1.1 \
+ && patch -p1 < /build/conntrack-copy-event.patch \
+ && ./configure --prefix=/usr \
+ && make -j2 \
+ && make install DESTDIR=/engine-root \
  && tar -xf /src/conntrack-tools/conntrack-tools-1.4.9.tar.xz -C /src \
  && cd /src/conntrack-tools-1.4.9 \
  && patch -p1 < /build/conntrack-commit-result.patch \

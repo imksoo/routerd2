@@ -1,0 +1,23 @@
+--- a/src/conntrack/copy.c
++++ b/src/conntrack/copy.c
+@@ -514,6 +514,12 @@
+ 				     const struct nf_conntrack *orig)
+ {
+ 	dest->synproxy.tsoff = orig->synproxy.tsoff;
++}
++
++static void copy_attr_timestamp_event(struct nf_conntrack *dest,
++				      const struct nf_conntrack *orig)
++{
++	dest->timestamp_event = orig->timestamp_event;
+ }
+ 
+ const copy_attr copy_attr_array[ATTR_MAX] = {
+@@ -592,6 +598,7 @@
+ 	[ATTR_SYNPROXY_ITS]		= copy_attr_synproxy_its,
+ 	[ATTR_SYNPROXY_ISN]		= copy_attr_synproxy_isn,
+ 	[ATTR_SYNPROXY_TSOFF]		= copy_attr_synproxy_tsoff,
++	[ATTR_TIMESTAMP_EVENT]		= copy_attr_timestamp_event,
+ };
+ 
+ /* this is used by nfct_copy() with the NFCT_CP_OVERRIDE flag set. */

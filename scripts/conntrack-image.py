@@ -42,7 +42,7 @@ def main():
             packages.append({"name": fields["P"], "version": fields["V"], "origin": fields["o"], "aports_commit": fields["c"], "license": fields["L"]})
     if len(packages) != 8:
         raise ValueError("missing conntrackd package provenance")
-    materials = {"routerd/" + name: Path(__file__).parent / name for name in ("conntrack-image.py", "engine_sources.py", "conntrack-engine.Dockerfile", "conntrack-commit-result.patch")}
+    materials = {"routerd/" + name: Path(__file__).parent / name for name in ("conntrack-image.py", "engine_sources.py", "conntrack-engine.Dockerfile", "conntrack-commit-result.patch", "conntrack-copy-event.patch")}
     for package in packages:
         origin = package["origin"]
         version = package["version"].rsplit("-r", 1)[0]
@@ -75,7 +75,7 @@ def main():
         notice = "COPYRIGHT" if origin == "musl" else "COPYING"
         with tarfile.open(archive) as source:
             runtime["usr/share/licenses/conntrack-engine/" + origin + "/" + notice] = source.extractfile(origin + "-" + version + "/" + notice).read()
-    inventory = (json.dumps({"format": 1, "architecture": args.arch, "packages": packages, "conntrackd_control_contract": "kernel-commit-result-v1", "local_build": "routerd/conntrack-engine.Dockerfile"}, sort_keys=True, indent=2) + "\n").encode()
+    inventory = (json.dumps({"format": 1, "architecture": args.arch, "packages": packages, "conntrackd_control_contract": "kernel-commit-result-v1", "local_build": "routerd/conntrack-engine.Dockerfile", "local_patches": ["routerd/conntrack-commit-result.patch", "routerd/conntrack-copy-event.patch"]}, sort_keys=True, indent=2) + "\n").encode()
     runtime["usr/share/routerd/conntrack-image.json"] = inventory
     runtime["etc/protocols"] = b"icmp 1 ICMP\ntcp 6 TCP\nudp 17 UDP\nipv6-icmp 58 IPv6-ICMP\n"
     args.output.mkdir(parents=True, exist_ok=True)
