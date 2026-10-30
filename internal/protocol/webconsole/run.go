@@ -56,6 +56,7 @@ type page struct {
 	FirewallEvents *firewallEventPage
 	Logs           *logPage
 	Time           *timePage
+	Update         *updatePage
 }
 
 type clientPage struct {
@@ -79,7 +80,7 @@ func Run(ctx context.Context, cfg webconsoleconfig.Config, runtimeDir string, re
 		default:
 			return "不明"
 		}
-	}}).Parse(pageHTML + flowsHTML + vpnHTML + dnsQueriesHTML + firewallEventsHTML + logsHTML + timeHTML)
+	}}).Parse(pageHTML + flowsHTML + vpnHTML + dnsQueriesHTML + firewallEventsHTML + logsHTML + timeHTML + updateHTML)
 	if err != nil {
 		return err
 	}
@@ -178,6 +179,9 @@ func Run(ctx context.Context, cfg webconsoleconfig.Config, runtimeDir string, re
 		case "time":
 			p.Heading = "時刻同期"
 			p.Time, err = loadTime(r.Context(), client, r.URL.Query().Get("service"))
+		case "updates":
+			p.Heading = "更新・復旧"
+			p.Update, err = loadUpdate(r.Context(), client)
 		case "logs":
 			p.Heading = "運用ログ"
 			p.Logs, err = loadLogs(r.Context(), logClient, r.URL.Query(), cfg.BasePath)
