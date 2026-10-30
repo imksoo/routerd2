@@ -135,6 +135,21 @@ func TestFirewallMigrationPreservesActualPacketDecisions(t *testing.T) {
 	}
 }
 
+func TestFirewallSourceCIDRsFromDeployedIntent(t *testing.T) {
+	data := strings.ReplaceAll(string(fixture(t, "firewall")), "srcCIDRs:", "sourceCIDRs:")
+	result, err := Compile([]byte(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonical, err := Compile(fixture(t, "firewall"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(result.Document, canonical.Document) {
+		t.Fatal("sourceCIDRs changed the compiled packet filter")
+	}
+}
+
 func TestNATOnlyDoesNotInventFilterPolicy(t *testing.T) {
 	d, err := Migrate(routerWith("    - apiVersion: net.routerd.net/v1alpha1\n      kind: NAT44Rule\n      metadata: {name: outbound}\n      spec: {type: masquerade, egressInterface: eth0, sourceRanges: [192.0.2.0/24]}\n"))
 	if err != nil {

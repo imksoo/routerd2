@@ -204,6 +204,15 @@ func decode(data []byte) (rawRouter, []resource, *decoder) {
 			d.issue(n, path+".spec", "yaml_type", "resource spec must be a mapping")
 			continue
 		}
+		// Deployed firewall intent uses sourceCIDRs as well as the pinned
+		// API's srcCIDRs tag. Normalize before decoding the shared Go type.
+		if rr.Kind == "FirewallRule" {
+			for j := 0; j < len(n.Content); j += 2 {
+				if n.Content[j].Value == "sourceCIDRs" {
+					n.Content[j].Value = "srcCIDRs"
+				}
+			}
+		}
 		before := len(d.issues)
 		d.checkType(n, t, path+".spec")
 		if len(d.issues) != before {
