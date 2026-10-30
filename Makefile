@@ -138,7 +138,7 @@ check: fmt-check test test-dependencies test-tools race vet
 
 .PHONY: check-otlp
 check-otlp: build
-	$(PYTHON) scripts/otlp-peer.py --collector $(OTELCOL)
+	$(PYTHON) scripts/otlp-peer.py --collector $(OTELCOL) --dhcp6-server '$(DHCP6_SERVER)'
 
 .PHONY: check-dns-upstream
 check-dns-upstream: build

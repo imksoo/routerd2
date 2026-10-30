@@ -1,13 +1,13 @@
 # routerd2 開発引き継ぎ
 
-更新: 2026-10-31 01:55 JST。全34 work packageのゴールは継続中。
+更新: 2026-10-31 03:14 JST。全34 work packageのゴールは継続中。
 [実装計画](implementation-plan.md)、[機械可読台帳](implementation-plan.json)、[試験計画](test-plan.md)、[AGENTS.md](../AGENTS.md)を読む。
 各試験前に試験計画の実行手順と対象項目を再確認する。対象本番の置換は実施していない。
 過去の成功や試作形式を設計制約にしない。ここには現在の実行条件・結果・残作業だけを残す。
 
 ## 現在のコード
 
-main実装は`551c00c` / native92 / network27。実行中の通常image/HGWは`9a57c8a` / `network-ownership-batch-native92`。
+main実装は`3033181` / native92 / network27。直近二台受入は通常`ntp-drift-native92`、実HGW長期試験は`bgp-gr-families-native92`。
 routerd/loggingはCGO0、ユーザー承認済みのrouterd-modulesだけCGO1静的リンク。
 旧routerdの実装・実際の失敗を参照して取り込み、単一network writerと明示した設定・状態の所有へ接続する。
 
@@ -38,11 +38,21 @@ routerd/loggingはCGO0、ユーザー承認済みのrouterd-modulesだけCGO1静
 `43a6487`の`bgp_next_hops`方針で通常CLI変換し、両方110→57resourceが実行設定と一致した。
 個別WAN next-hopのECMP応答が待機系へ入る問題と、共有アドレスの二重ARP応答を取り除いた変更であり、元設定の無変更合格ではない。
 
-9a57c8aの通常Alpine二台も両方向電源断・再参加を完走した。全経路再確認26.744/21.253秒、同じTCP/NAT保持、最大TCP待ち7.398秒、独立UDP4430送信/4213受信/216期限切れ/最終標本時1未確定、最大無応答5.933秒。DNS2696件中19失敗。各guest実kernel起動2回、effects timeoutなし。
+## 直近の二台・運用受入
 
-別の予備系復帰途中への追加断は、新規通信が61.200秒で戻り、元60秒を超えた。packetで独立FRRから繰り返すCease/Connection Collision Resolutionを特定した。GR capabilityと保存済みpeer復元を照合して修正する。最初の走行は対向listen前の接続拒否でfault前に停止したため、独立対向のlisten完了を確認する手順へ訂正し、切替失敗には数えていない。
+`9436850` はBGPの確定したアドレス族を一度だけ組み立て、各族のGR capabilityを保持する。実OPENはIPv4 AFI1/SAFI1、転送状態保持flagなし。旧版では空のGR capabilityのため独立FRRが古い接続を維持し、新規接続をCease/Connection Collision Resolutionで拒否していた。復帰途中の予備系への追加断で、新規DNS/両IP TCPUDPは61.200秒から7.914/9.568秒に改善した。ただしこの走行はNTPの再採用待ち58.427秒を含めた全体60秒を超えた。
 
-組合せ版の条件付きLANでは、制御の短い停止・元authority期限失効・復帰、役割変更、PD喪失/再取得、実DNS/IPv6 TCPUDPと同じ固定DNS TCP接続が76.22秒で完走した。ソケットが残ってもVIPは撤去され得るため、元10秒内で実kernelアドレスも待つよう既存試験を訂正した。先行走行のDNS timeout/10秒VIP未復帰は残る間欠失敗であり、原因解決とはしない。同じ観測方法の修正前通常9a57c8aも72.37秒で通過。次は失敗時の選出/適用状態を取り、復旧成立と間欠原因を分ける。
+`3033181` はchronydの補正周波数を最短1分ごとに保存し、起動直後の電源断でも学習値を使えるようにした。読み込まない測定履歴のdumpdirは撤去した。問い合わせ周期、時刻品質の判定、元60秒/端末15秒は変えていない。通常`ntp-drift-native92`はcd62d89と同じ本体にこのNTP変更を加えたimageである。後述する新しいDNS/OTLP変更を含む全体受入には読み替えない。
+
+同じ全57resource・独立peer群・4CPU/4GiB Alpine二台で、両方向の実電源断と再参加が終了0。二度目は復帰途中のbackupがBGP未確立のまま現用を停止し、BGP/NTP準備を待っていない。実再起動後に`Frequency 6.423 +/- 377.327 ppm read from /state/drift`を確認し、独立LAN端末のNTP採用は4.283秒。全経路再確認22.428/19.421秒で元60秒内。同じTCP/SYN/NATを保持したが最大TCP待ちは14.506秒（判定15秒）、UDP1515送信/1263受信/252期限切れ、最大無応答7.249秒、DNS831件中20失敗。各guest起動2回、effects timeoutなし。物理機器・性能・全34項目の完成ではない。
+
+`make check`（Race/vet含む）、BGP関連Race6.503秒、両arch静的六ELF・署名catalog/publisherが9436850で成功。NTP/runtimeplanのRace37.909秒、全vet、通常ビルドと実上記通信も成功した。統合通常版`integrated-ntp-native92`の両arch静的六ELF・署名catalog/publisherも成功した。
+
+運用の追加経路も実通信済み。a2d959fの旧sticky履歴取込はroot通常版で10.87秒、元日時・期限、別MACへの保持IP配布防止、元MAC再取得と取得DNS UDP/TCP/IPv4を確認した。b2d8b59の初期二台lease取込は独立29.144秒で既存端末の期限/更新/DNSが成立したが、旧owner停止中の新規端末は`allocation_blocked`で配布されず、復帰後だけ成功した。これは次の製品修正であり、正常運用の必要条件にしない。
+
+28aaf16のDNS監視3秒/通常問い合わせ1秒の分離は独立dnsmasq1.5秒遅延で確認し、root通常`integrated-ntp-native92`でも通過。1d96d87の実設定適用計測→既存ログ→OTLPは、同じroot通常版と独立Collectorで障害・復帰・重複なしを確認し、並行UDP1246件/失敗0。これらの通常版は上記ntp-drift imageとは別の実行物である。
+
+条件付きLANのVIP復旧には先行走行で間欠失敗があり、実kernelアドレスも待つ同じ元10秒の観測では組合せ版76.22秒・修正前baseline72.37秒が通過した。先行失敗時の選出/適用状態は未採取であり、原因解決とはしていない。
 
 ## 継続中の試験と保護する状態
 
@@ -60,9 +70,9 @@ Ethernetは隔離hub/streamで独立peerへ接続する。管理経路・回復�
 
 ## 次に実行すること
 
-1. 実行中の9a57c8a通常Make/APK imageで二つの独立KVMを起動し、既存TCP/UDPと新規DNS/両IP通信・BGP・Tailscaleの両方向電源断復旧を元60秒/端末15秒で確認する。復帰途上のbackupへの追加障害を別途解決する。
-2. 同じ9a57c8a通常製品で実HGW標準7800秒を継続し、自然PD更新、DHCP通知遅延修正と端末の継続利用を確認する。元LAN6時間待ちと並行して進める。
-3. 既存LAN lease初期取込など独立の不足機能を実装し、実端末で使う。対象設定・運用・更新と物理NIC/ONUの受入を完了する。
+1. 選出済み生存機が旧owner停止中の新規端末へDHCP配布し、取得DNS/IPv4を使えるようにする。分断と古いowner復帰時の重複防止を実通信で確認し、全体二台の切替・移行・復旧へ統合する。
+2. bgp-gr-families-native92通常製品で実HGW標準7800秒を継続し、自然PD更新、DHCP通知遅延修正と端末の継続利用を確認する。元LAN6時間待ちと並行して進める。
+3. 自然LAN/HGW更新を完了し、実homertのSSH条件・移行/復旧手順、対象設定・運用・更新と物理NIC/ONUの条件を確定して受け入れる。
 4. k8s/pveの認証参加から動的IPIP/BGPと/32通信までを旧実装から取り込み、実peerへ通す。続いてCloud SAMの実装・許可された環境の受入を進める。
 
 全34項目、対象ハードウェアの資格確認・性能、ARM実行、実ONU直結、Cloud SAMは完了していない。
