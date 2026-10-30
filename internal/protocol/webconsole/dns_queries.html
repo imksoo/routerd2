@@ -1,0 +1,21 @@
+{{define "dns-queries"}}{{with .DNSQueries}}
+<p>DNSサービスが保存した問い合わせ履歴です。過去の回答は現在の名前解決や疎通を保証しません。</p>
+{{if .Services}}<form method="get" action="{{$.Config.BasePath}}dns-queries">
+<label>DNSサービス <select name="service">{{range .Services}}<option value="{{.}}" {{if eq . $.DNSQueries.Selected}}selected{{end}}>{{.}}</option>{{end}}</select></label>
+<label>端末IP <input name="client" value="{{.Client}}" placeholder="192.0.2.2"></label>
+<label>問い合わせ名 <input name="name" value="{{.Name}}" placeholder="%.example.test"></label>
+<label>応答コード <input name="response" value="{{.Response}}" placeholder="NOERROR / NXDOMAIN"></label>
+<label>日時以降 <input name="since" value="{{.Since}}" placeholder="2026-10-30T00:00:00+09:00" size="32"></label>
+<label>日時以前 <input name="until" value="{{.Until}}" placeholder="2026-10-31T00:00:00+09:00" size="32"></label>
+<label>表示上限 <input type="number" min="1" max="1000" name="limit" value="{{.Limit}}"></label>
+<button type="submit">検索</button></form>
+<p>日時には時差を含めます。問い合わせ名は大文字・小文字を区別せず、% は任意の長さ、_ は1文字に一致します。結果は新しい順です。</p>
+{{else}}<p>DNSサービスは選択されていません。</p>{{end}}
+{{with .History}}<p>読取時刻: {{.ReadAt}} / 表示 {{len .Queries}}件</p>
+{{if .Truncated}}<p class="notice">表示上限を超える履歴があります。日時・端末・問い合わせ名で絞り込んでください。</p>{{end}}
+<div class="scroll"><table><thead><tr><th>時刻・端末</th><th>問い合わせ・応答</th><th>回答</th><th>応答元・所要時間</th></tr></thead><tbody>
+{{range .Queries}}<tr data-query="{{.ID}}"><td><div>{{.Timestamp}}</div><code>{{.ClientAddress}}</code></td>
+<td><div><code>{{.QuestionName}}</code></div><div>{{.QuestionType}} / {{.ResponseCode}}</div></td>
+<td>{{range .Answers}}<div><code>{{.}}</code></div>{{else}}回答なし{{end}}</td>
+<td><div>{{if .CacheHit}}キャッシュ利用{{else}}キャッシュ未使用{{end}}</div>{{if .Upstream}}<div>上流: <code>{{.Upstream}}</code></div>{{end}}<div>{{.Duration}}</div></td></tr>
+{{else}}<tr><td colspan="4">条件に一致する保存済み問い合わせはありません。</td></tr>{{end}}</tbody></table></div>{{end}}{{end}}{{end}}

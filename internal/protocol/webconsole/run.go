@@ -40,17 +40,18 @@ var pageHTML string
 var flowsHTML string
 
 type page struct {
-	Config    webconsoleconfig.Config
-	Heading   string
-	Error     string
-	Health    *control.Health
-	Network   *network.ObservationView
-	Resources *runtimeplan.ResourceObservationPage
-	Metadata  *control.ConfigurationMetadata
-	Next      string
-	Clients   *clientPage
-	Flows     *flowPage
-	VPN       *vpnPage
+	Config     webconsoleconfig.Config
+	Heading    string
+	Error      string
+	Health     *control.Health
+	Network    *network.ObservationView
+	Resources  *runtimeplan.ResourceObservationPage
+	Metadata   *control.ConfigurationMetadata
+	Next       string
+	Clients    *clientPage
+	Flows      *flowPage
+	VPN        *vpnPage
+	DNSQueries *dnsQueryPage
 }
 
 type clientPage struct {
@@ -74,7 +75,7 @@ func Run(ctx context.Context, cfg webconsoleconfig.Config, runtimeDir string, re
 		default:
 			return "不明"
 		}
-	}}).Parse(pageHTML + flowsHTML + vpnHTML)
+	}}).Parse(pageHTML + flowsHTML + vpnHTML + dnsQueriesHTML)
 	if err != nil {
 		return err
 	}
@@ -158,6 +159,9 @@ func Run(ctx context.Context, cfg webconsoleconfig.Config, runtimeDir string, re
 		case "flows":
 			p.Heading = "通信履歴"
 			p.Flows, err = loadFlows(r.Context(), client, r.URL.Query())
+		case "dns-queries":
+			p.Heading = "DNS問い合わせ履歴"
+			p.DNSQueries, err = loadDNSQueries(r.Context(), client, r.URL.Query())
 		case "vpn":
 			p.Heading = "VPN状態"
 			p.VPN, err = loadVPN(r.Context(), client, r.URL.Query().Get("service"))

@@ -120,6 +120,7 @@ type RouteIssuePage struct {
 func (r *Runtime) observationRoutes(mux *http.ServeMux) {
 	r.resourceObservationRoutes(mux)
 	r.trafficHistoryRoute(mux)
+	r.dnsHistoryRoute(mux)
 	mux.HandleFunc("GET /v1/services/{name}", func(w http.ResponseWriter, req *http.Request) {
 		name := req.PathValue("name")
 		if out, exists := r.bfdInstanceStatus(name, true); exists {

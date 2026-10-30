@@ -201,3 +201,27 @@ inspection tool stopped because it could not identify the current URL; the
 offline renderer opened only the saved local responses. A subsequent wording
 correction changed Japanese labels/errors only, without changing data access,
 protocol handling or the acceptance conditions.
+
+## Saved DNS query search
+
+`<base_path>dns-queries` reads the selected DNS service through the typed control
+endpoint `GET /v1/services/{name}/dns-history`. The runtime resolves the prepared
+query-log path and releases its lock before the old routerd read-only
+`logstore.OpenDNSQueryLogReadOnly` and `List` calls. The resolver remains the sole
+writer and retention owner. No new database, background collector, listener or
+command polling is introduced.
+
+Search supports exact client IP, query-name patterns, response code and inclusive
+RFC3339 time bounds. The old query-name matching is retained: case-insensitive
+LIKE matching, optional final dot, `%` for any length and `_` for one character.
+Results are newest first, default 100 and maximum 1000, with an explicit notice
+when another matching row exists. This is bounded search rather than pagination
+or complete export. The page displays original query time, client, name/type,
+response code, answers, upstream, cache use and duration. Historical results do
+not assert present reachability. Disabled logging, an absent database and a
+failed read are reported as errors, not successful empty history. A request may
+read the previously selected database while its configuration is changing.
+
+The existing DNS retention acceptance exercises actual DNS requests and a
+separate LAN HTTP client. Query recording and retention keep their original
+behavior; reading history does not hold the DNS worker's write lock.

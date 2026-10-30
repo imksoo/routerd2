@@ -7,7 +7,6 @@ import (
 	"errors"
 	"net/http"
 	"net/netip"
-	"strconv"
 	"strings"
 	"time"
 
@@ -84,27 +83,7 @@ func trafficHistoryFilter(req *http.Request) (logstore.TrafficFlowFilter, error)
 			*field.value = address.Unmap().String()
 		}
 	}
-	for _, field := range []struct {
-		name  string
-		value *time.Time
-	}{{"since", &f.Since}, {"until", &f.Until}} {
-		if raw := q.Get(field.name); raw != "" {
-			value, err := time.Parse(time.RFC3339Nano, raw)
-			if err != nil || !time.Unix(0, value.UnixNano()).Equal(value) {
-				return f, errors.New("time must be an RFC3339 timestamp within the stored range")
-			}
-			*field.value = value
-		}
-	}
-	if !f.Since.IsZero() && !f.Until.IsZero() && f.Until.Before(f.Since) {
-		return f, errors.New("until must not precede since")
-	}
-	if raw := q.Get("limit"); raw != "" {
-		limit, err := strconv.Atoi(raw)
-		if err != nil || limit < 1 || limit > 1000 {
-			return f, errors.New("limit must be between 1 and 1000")
-		}
-		f.Limit = limit
-	}
-	return f, nil
+	var err error
+	f.Since, f.Until, f.Limit, err = historyRange(q)
+	return f, err
 }
