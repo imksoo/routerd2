@@ -888,13 +888,13 @@ and restart. Its independent peer requires `bgpd`, sibling `zebra` and the norma
 included in the product runtime. The imported IPv4 fixture does not establish
 IPv6, route-reflector, VRF or full homert acceptance.
 
-An explicit `Telemetry` resource with `signals: [logs]` imports the old active
-SDK export path as an independent `otlp_logs` service. Endpoint, insecure flag,
-namespace and resource attributes are preserved. Omitted signals mean all three
-signals in routerd, so omission and any metrics/traces request are rejected rather
-than silently reduced to logs. The old `LogSink` OTLPSink had no send operation;
-its archive-on-delete semantics and ObservabilityPipeline options are not claimed
-as migrated by this logs-only path.
+An explicit `Telemetry` resource imports the old active SDK export path as an
+independent `otlp_logs` service. Endpoint, transport security, namespace and
+resource attributes are preserved. Omitted signals select logs, metrics and
+traces as in routerd. Metrics and traces currently cover actual Health probes;
+other former instrument sources remain unimplemented. The old `LogSink`
+OTLPSink had no send operation. Its archive-on-delete semantics and
+ObservabilityPipeline options are not supplied by this telemetry path.
 
 ## DHCP and delegated-prefix state between two members
 
