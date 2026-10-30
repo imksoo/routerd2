@@ -19,7 +19,7 @@ RUN case "$TARGETARCH" in amd64) arch=x86_64 ;; arm64) arch=aarch64 ;; *) exit 2
 RUN --mount=type=cache,target=/root/.cache/zig mkdir -p /sources \
  && wget -qO /sources/nDPI-4.2.tar.gz https://codeload.github.com/ntop/nDPI/tar.gz/refs/tags/4.2 \
  && echo 'e54ce8fe13adc5d747be7553513657fae78f796e0bd459e122c280cc06ce4daf  /sources/nDPI-4.2.tar.gz' | sha256sum -c - \
- && mkdir /build/ndpi \
+ && mkdir -p /build/ndpi \
  && tar -xzf /sources/nDPI-4.2.tar.gz --strip-components=1 -C /build/ndpi \
  && cd /build/ndpi \
  && case "$TARGETARCH" in amd64) target=x86_64-linux-musl ;; arm64) target=aarch64-linux-musl ;; esac \
