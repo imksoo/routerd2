@@ -51,6 +51,14 @@ func (e *Engine) Restore(ctx context.Context, r RestoreRequest) (State, error) {
 }
 
 func (e *Engine) snapshotRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /v1/config/snapshots", func(w http.ResponseWriter, r *http.Request) {
+		result, err := e.store.ListSnapshots()
+		if err != nil {
+			localapi.Fail(w, 503, err)
+			return
+		}
+		localapi.JSON(w, 200, result)
+	})
 	mux.HandleFunc("POST /v1/config/restore", func(w http.ResponseWriter, r *http.Request) {
 		var req RestoreRequest
 		if err := config.Decode(http.MaxBytesReader(w, r.Body, config.MaxSize), &req); err != nil {

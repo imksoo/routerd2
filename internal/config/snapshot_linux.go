@@ -140,11 +140,22 @@ func (s *Store) ResolveSnapshot(ref SnapshotRef) (Snapshot, error) {
 }
 
 func readSnapshot(dir *os.File, ref SnapshotRef) (Snapshot, error) {
-	fd, err := unix.Openat(int(dir.Fd()), ref.Digest+".json", unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
+	snapshot, err := readSnapshotFile(dir, ref.Digest)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	f := os.NewFile(uintptr(fd), ref.Digest+".json")
+	if snapshot.StoreID != ref.StoreID || snapshot.Revision != ref.Revision {
+		return Snapshot{}, errors.New("snapshot provenance differs from its reference")
+	}
+	return snapshot, nil
+}
+
+func readSnapshotFile(dir *os.File, digest string) (Snapshot, error) {
+	fd, err := unix.Openat(int(dir.Fd()), digest+".json", unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	f := os.NewFile(uintptr(fd), digest+".json")
 	defer f.Close()
 	var st unix.Stat_t
 	if err := unix.Fstat(fd, &st); err != nil {
@@ -160,15 +171,15 @@ func readSnapshot(dir *os.File, ref SnapshotRef) (Snapshot, error) {
 	if len(raw) > MaxSnapshotBytes {
 		return Snapshot{}, errors.New("snapshot exceeds byte budget")
 	}
-	digest := sha256.Sum256(raw)
-	if hex.EncodeToString(digest[:]) != ref.Digest {
+	actual := sha256.Sum256(raw)
+	if hex.EncodeToString(actual[:]) != digest {
 		return Snapshot{}, errors.New("configuration snapshot digest mismatch")
 	}
 	var snapshot Snapshot
 	if err := decodeStrictJSON(raw, &snapshot, maxDocumentNodes+32); err != nil {
 		return Snapshot{}, err
 	}
-	if snapshot.Version != SnapshotVersion || snapshot.StoreID != ref.StoreID || snapshot.Revision != ref.Revision {
+	if snapshot.Version != SnapshotVersion {
 		return Snapshot{}, errors.New("snapshot provenance differs from its reference")
 	}
 	canonical, err := json.Marshal(snapshot)

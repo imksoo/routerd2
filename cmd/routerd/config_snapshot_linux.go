@@ -36,3 +36,17 @@ func snapshotConfig(args []string, out io.Writer) error {
 	}
 	return cli.WriteJSON(out, ref)
 }
+
+func listSnapshots(args []string, out io.Writer) error {
+	f := flags("config snapshots")
+	dir := f.String("runtime-dir", "/run/routerd", "runtime directory")
+	if err := f.Parse(args); err != nil {
+		return err
+	}
+	if f.NArg() != 0 {
+		return errors.New("config snapshots takes no positional arguments")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return (cli.Session{RuntimeDir: *dir}).Execute(ctx, "show snapshots", nil, out)
+}

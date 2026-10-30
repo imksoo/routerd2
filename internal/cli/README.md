@@ -226,3 +226,17 @@ the command never generates a new mutation to retry an uncertain response.
 Local restore generates an ID only when none is supplied, as `config apply`
 does, and includes it in any failure message. Snapshot files and their existing
 validation/ownership remain under the configuration store.
+
+### Find saved configurations after losing a reference file
+
+`show snapshots` through SSH or the local management shell, and local
+`routerd config snapshots`, read the same `GET /v1/config/snapshots` result.
+`snapshots` contains verified references from this configuration store, newest
+revision first. Pass the chosen reference to the existing restore command; the
+current expected revision and request ID still fence the actual change. No
+configuration bodies or credentials are returned in the listing.
+
+`unreadable` reports saved files that could not be verified without hiding other
+usable recovery references. Discovery changes neither the saved files nor the
+current configuration. An empty new store has an empty list. There is no
+additional snapshot catalog, mutable cache or automatic retention policy.
