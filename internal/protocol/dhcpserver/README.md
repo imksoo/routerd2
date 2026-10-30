@@ -37,8 +37,19 @@ reservation conflicts are rejected before creating state. The command does
 not extend a lease, manufacture request history, or create HA ownership.
 
 HA ownership remains subject to the normal authenticated peer reconciliation;
-the import does not permit unsynchronized new allocations. Initial two-member
-migration, DHCPv6/PD state and physical migration require separate acceptance.
+the import does not permit unsynchronized new allocations. The initial two-member IPv4 lease path is exercised by
+`make check-ha-dhcp-initial`: an independent dnsmasq grants a real binding,
+then stops before both fresh members import the same final file. Authenticated
+synchronization and takeover retain the original expiry. The client uses its
+acquired DNS over UDP/TCP before sending DHCP again and renews its known lease
+while the former owner is unavailable. New allocation remains blocked until
+that peer returns and reconciles; a different client then receives a distinct
+address. Both clients use their acquired gateway for IPv4 traffic.
+
+This check records the current disconnected-allocation restriction; it does
+not establish that restriction as acceptable for homert replacement. It does
+not import sticky history or PD, or qualify physical migration, Internet
+forwarding, NAT connection continuity or a power cut.
 
 When sticky holds are configured, also import the stopped old routerd server's
 sticky database before starting the new service:

@@ -45,6 +45,7 @@ help:
 	  'make check-dslite-pmtu Verify IPv4 PMTU feedback and same-socket UDP recovery over DS-Lite' \
 	  'make check-pppoe        Verify real PPPoE PAP/CHAP, LAN forwarding and recovery' \
 	  'make check-pppoe-pd     Verify PPP PD recovery, WAN replacement and LAN IPv6 with independent ISC DHCP' \
+	  'make check-ha-dhcp-initial Verify old live lease import, takeover and peer reconciliation' \
 	  'make check-ha-import   Verify imported NAT synchronization across two-router handoff' \
 	  'make check-ha-dhcp-scopes Verify shared secondary DHCP ranges across HA handoff' \
 	  'make check-ha-state    Preserve DHCP/TCP/UDP state across two native routers' \
@@ -415,6 +416,10 @@ dnsmasq-engine:
 	  $(DOCKER) export "$$engine_id" | tar --no-same-owner -xf - -C $(DNSMASQ_DIR) dnsmasq-engine.tar dnsmasq-sources.tar
 
 # The imported graph shares the existing isolated two-router state-handoff peer.
+.PHONY: check-ha-dhcp-initial
+check-ha-dhcp-initial: build build-publisher conntrack-engine dnsmasq-engine
+	$(PYTHON) scripts/ha-state-peer.py --initial-leases
+
 .PHONY: check-ha-import
 check-ha-import: build build-publisher conntrack-engine dnsmasq-engine
 	$(PYTHON) scripts/ha-state-peer.py --import-conntrack

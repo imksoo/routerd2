@@ -120,7 +120,7 @@ def import_lease_sync(stage, directory, resources, dhcp_scopes=False):
     print("PASS old lease declarations and explicit TLS policy compiled into existing HA engines", flush=True)
 
 
-def peer(stage, dhcp6_server, pd_dslite, stale_owner, preparation, delegated_dns, release_holds, import_conntrack, lease_sync_import, dhcp_scopes):
+def peer(stage, dhcp6_server, pd_dslite, stale_owner, preparation, delegated_dns, release_holds, import_conntrack, lease_sync_import, dhcp_scopes, initial_leases):
     def deadline(*_):
         raise TimeoutError("HA connection-state communication deadline")
     signal.signal(signal.SIGALRM, deadline)
@@ -224,7 +224,7 @@ def peer(stage, dhcp6_server, pd_dslite, stale_owner, preparation, delegated_dns
         publisher = str(stage / "routerd-bundle")
         (stage / "trust.json").write_text(run([publisher, "trust", "--private-key-file", str(key)]))
         (stage / "trust.json").chmod(0o600)
-        roles = ("logging", "network", "control", "management", "vrrp", "dhcp_server") + (("dhcp6", "dhcp6_server", "ra") if dhcp6_server else ()) + (("aftr", "health") if pd_dslite else ()) + (("dns",) if delegated_dns else ())
+        roles = ("logging", "network", "control", "management", "vrrp", "dhcp_server") + (("dhcp6", "dhcp6_server", "ra") if dhcp6_server else ()) + (("aftr", "health") if pd_dslite else ()) + (("dns",) if delegated_dns or initial_leases else ())
         layout = {"boot_abi": 1, "worker_abi": 5, "entrypoint": "routerd",
                   "roles": [{"role": role, "artifact": "routerd-logging" if role == "logging" else "routerd-modules"} for role in roles],
                   "engines": [{"role": "vrrp", "artifact": "ct-image", "sources": "ct-sources"}, {"role": "dhcp_server", "artifact": "dhcp-image", "sources": "dhcp-sources"}],
@@ -346,6 +346,14 @@ def peer(stage, dhcp6_server, pd_dslite, stale_owner, preparation, delegated_dns
                 if dhcp_scopes:
                     next(r["service"]["vrrp"] for r in resources if r.get("service", {}).get("vrrp"))["addresses"] = ["198.18.0.1/32"]
                 import_lease_sync(stage, directory, resources, dhcp_scopes)
+            if initial_leases:
+                server = next(r["service"]["dhcp_server"] for r in resources if r["id"] == "leases")
+                server["primary"].update(lease_seconds=1200, dns_servers=["198.18.0.1"])
+                resources.append({"id": "dns", "when": {"fact": "service.ha.active"}, "service": {"name": "dns", "dns": {
+                    "spec": {"listen": [{"name": "lan", "addresses": ["198.18.0.1"], "port": 53}],
+                             "sources": [{"name": "zone", "kind": "zone", "match": ["lab.example"], "zoneRef": ["DNSZone/lan"]}]},
+                    "zones": [{"name": "lan", "spec": {"zone": "lab.example", "dhcpDerived": {"sources": ["DHCPv4Server/leases"]}}}]
+                }}})
             (directory / "config.json").write_text(json.dumps({"schema_version": 2, "resources": resources}))
             workers = {role: str(stage / ("routerd-logging" if role == "logging" else "routerd-modules")) for role in roles}
             boot = {"platform": "host", "config": str(directory / "config.json"), "runtime_dir": str(directory / "run"), "state_dir": str(directory / "state"), "workers": workers, "engines": {"vrrp": str(stage / "conntrack-engine.tar")}, "ssh": {"user": "admin"}}
@@ -478,6 +486,71 @@ except socket.timeout:
                     raise RuntimeError("delegated DNS query failed")
             return expected_dns()
 
+        hook = stage / "dhcp-hook.sh"
+        hook.write_text('#!/bin/sh\ncase "$1" in\n bound|renew) ip address replace "$ip/$subnet" dev "$interface"; printf "%s %s %s %s %s %s\\n" "$1" "$ip" "$subnet" "$router" "$dns" "$serverid" >> "' + str(stage) + '/$interface.progress";;\nesac\n')
+        hook.chmod(0o500)
+
+        def lease_client(number, requested=None, await_lease=True, mac=None):
+            name = "lease" + str(number)
+            port = "dhcp" + str(number)
+            run(["ip", "link", "add", port, "type", "veth", "peer", "name", name])
+            run(["ip", "link", "set", port, "master", "lan"])
+            run(["ip", "link", "set", port, "up"])
+            run(["ip", "link", "set", name, "netns", "ha-client"])
+            # These are IPv4-only extra clients in the same namespace. Their
+            # RA routes must not compete with the separate IPv6 test client.
+            run(inside("ha-client", ["sysctl", "-w", "net.ipv6.conf." + name + ".accept_ra=0"]))
+            if mac:
+                run(inside("ha-client", ["ip", "link", "set", name, "address", mac]))
+            run(inside("ha-client", ["ip", "link", "set", name, "up"]))
+            command = ["busybox", "udhcpc", "-f", "-i", name, "-s", str(hook), "-p", str(stage / (name + ".pid")), "-t", "3", "-T", "1", "-A", "1"]
+            if initial_leases:
+                command += ["-x", "hostname:" + name]
+            if requested:
+                command += ["-r", requested]
+            process = start("ha-client", command, name)
+            if await_lease:
+                wait(lambda: (stage / (name + ".progress")).exists())
+            return process
+
+        def lease_events(number):
+            return (stage / ("lease" + str(number) + ".progress")).read_text().splitlines()
+
+        def saved(node):
+            path = stage / node / "state/services/leases/dnsmasq.leases"
+            if not path.exists():
+                return {"leases": []}
+            return {"leases": sorted([line.split() for line in path.read_text().splitlines() if len(line.split()) == 5 and int(line.split()[0]) > time.time()])}
+
+        if initial_leases:
+            run(["ip", "address", "add", "198.18.0.1/24", "dev", "lan"])
+            old_file = stage / "old.leases"
+            old_log = (stage / "old-dnsmasq.log").open("w")
+            old = subprocess.Popen(["dnsmasq", "--no-daemon", "--conf-file=/dev/null", "--interface=lan",
+                "--bind-interfaces", "--port=0", "--dhcp-authoritative", "--pid-file=", "--log-dhcp",
+                "--dhcp-leasefile=" + str(old_file), "--dhcp-range=198.18.0.100,198.18.0.103,255.255.255.0,1200s",
+                "--dhcp-option=option:router,198.18.0.1", "--dhcp-option=option:dns-server,198.18.0.1"], stdout=old_log, stderr=old_log)
+            old_log.close()
+            children.append(old)
+            first_client = lease_client(0)
+            first_client.send_signal(signal.SIGSTOP)
+            acquired = lease_events(0)[-1].split()
+            first_address = acquired[1]
+            assert acquired[3:5] == ["198.18.0.1", "198.18.0.1"], acquired
+            old.terminate()
+            old.wait(timeout=5)
+            original = old_file.read_text()
+            assert first_address in original
+            run(["ip", "address", "del", "198.18.0.1/24", "dev", "lan"])
+            for node in ("a", "b"):
+                directory = stage / node
+                result = json.loads(run([str(stage / "routerd"), "dhcp", "import-leases", "--config", str(directory / "config.json"),
+                    "--service", "leases", "--state-dir", str(directory / "state"), str(old_file)]))
+                assert result["leases"] == 1
+                assert Path(result["state_path"]).read_text() == original
+                assert not (directory / "state/services/leases/dnsmasq.leases.owner").exists()
+            print("PASS stopped independent dnsmasq; CLI imported the original binding and absolute expiry into both fresh nodes", flush=True)
+
         for segment in segments:
             log = (stage / (segment + "-capture.log")).open("w")
             process = subprocess.Popen(["tcpdump", "--immediate-mode", "-U", "-n", "-i", segment, "-w", str(stage / (segment + ".pcap"))], stdout=log, stderr=log)
@@ -488,7 +561,7 @@ except socket.timeout:
             pd_server.send_signal(signal.SIGSTOP)
         if pd_dslite:
             run(inside("ha-backup", ["ip", "link", "set", "backup0", "down"]))
-        start("ha-a", ["unshare", "--pid", "--fork", "--mount-proc", "--kill-child=SIGTERM", str(stage / "routerd"), "boot", "--file", str(stage / "a/boot.json")], "a")
+        a_daemon = start("ha-a", ["unshare", "--pid", "--fork", "--mount-proc", "--kill-child=SIGTERM", str(stage / "routerd"), "boot", "--file", str(stage / "a/boot.json")], "a")
         wait(lambda: (stage / "a/run/supervisor.sock").exists())
         wait(lambda: modules("a").get(ha_module, {}).get("ready") is True)
         if dhcp6_server:
@@ -560,40 +633,6 @@ for protocol,port in ((socket.SOCK_STREAM,18082),(socket.SOCK_DGRAM,18083)):
                 print("PASS both WANs unavailable withheld VIP; PD and forwarding recovered after peers resumed", flush=True)
             else:
                 print("PASS elected WAN acquired PD before graceful VIP publication; timeout withheld VIP until ISC resumed", flush=True)
-        hook = stage / "dhcp-hook.sh"
-        hook.write_text('#!/bin/sh\ncase "$1" in\n bound|renew) ip address replace "$ip/$subnet" dev "$interface"; printf "%s %s %s %s %s %s\\n" "$1" "$ip" "$subnet" "$router" "$dns" "$serverid" >> "' + str(stage) + '/$interface.progress";;\nesac\n')
-        hook.chmod(0o500)
-
-        def lease_client(number, requested=None, await_lease=True, mac=None):
-            name = "lease" + str(number)
-            port = "dhcp" + str(number)
-            run(["ip", "link", "add", port, "type", "veth", "peer", "name", name])
-            run(["ip", "link", "set", port, "master", "lan"])
-            run(["ip", "link", "set", port, "up"])
-            run(["ip", "link", "set", name, "netns", "ha-client"])
-            # These are IPv4-only extra clients in the same namespace. Their
-            # RA routes must not compete with the separate IPv6 test client.
-            run(inside("ha-client", ["sysctl", "-w", "net.ipv6.conf." + name + ".accept_ra=0"]))
-            if mac:
-                run(inside("ha-client", ["ip", "link", "set", name, "address", mac]))
-            run(inside("ha-client", ["ip", "link", "set", name, "up"]))
-            command = ["busybox", "udhcpc", "-f", "-i", name, "-s", str(hook), "-p", str(stage / (name + ".pid")), "-t", "3", "-T", "1", "-A", "1"]
-            if requested:
-                command += ["-r", requested]
-            process = start("ha-client", command, name)
-            if await_lease:
-                wait(lambda: (stage / (name + ".progress")).exists())
-            return process
-
-        def lease_events(number):
-            return (stage / ("lease" + str(number) + ".progress")).read_text().splitlines()
-
-        def saved(node):
-            path = stage / node / "state/services/leases/dnsmasq.leases"
-            if not path.exists():
-                return {"leases": []}
-            return {"leases": sorted([line.split() for line in path.read_text().splitlines() if len(line.split()) == 5 and int(line.split()[0]) > time.time()])}
-
         wait(lambda: modules("a").get("service.leases", {}).get("ready") is True and api("a", "control.sock", "/v1/services/service.leases")["snapshot"]["active"] is True)
         special_clients = []
         def check_special(number, expected=None):
@@ -608,15 +647,66 @@ for protocol,port in ((socket.SOCK_STREAM,18082),(socket.SOCK_DGRAM,18083)):
                 special_clients.append((number, process, check_special(number)))
             assert len({address for _, _, address in special_clients}) == 3, "selectors sharing a pool duplicated a lease"
             print("PASS imported shared special range: OUI and two MAC clients received distinct addresses, explicit mask/router/DNS and the VRRP server ID", flush=True)
-        first_client = lease_client(0)
+        if not initial_leases:
+            first_client = lease_client(0)
         first_address = lease_events(0)[-1].split()[1]
         assert first_address in ("198.18.0.100", "198.18.0.101", "198.18.0.102", "198.18.0.103")
-        print("PASS elected DHCP server started and allocated a lease while its partner was absent", flush=True)
+        print("PASS elected DHCP server retained the imported lease while its partner was absent" if initial_leases else "PASS elected DHCP server started and allocated a lease while its partner was absent", flush=True)
         b_command = ["unshare"] + (["--time", "--boottime", "7200"] if dhcp6_server else []) + ["--pid", "--fork", "--mount-proc", "--kill-child=SIGTERM", str(stage / "routerd"), "boot", "--file", str(stage / "b/boot.json")]
         b_daemon = start("ha-b", b_command, "b")
         wait(lambda: (stage / "b/run/supervisor.sock").exists())
         wait(lambda: modules("b").get(ha_module, {}).get("ready") is True)
         wait(lambda: modules("a").get("service.leases", {}).get("ready") is True and modules("b").get("service.leases", {}).get("ready") is True)
+        if initial_leases:
+            expected = [line.split() for line in original.splitlines()]
+            wait(lambda: saved("a")["leases"] == expected and saved("b")["leases"] == expected)
+            wait(lambda: api("a", "control.sock", "/v1/services/service.leases")["snapshot"].get("sync", {}).get("synchronized"))
+            owner = (stage / "a/state/services/leases/dnsmasq.leases.owner").read_text()
+            assert owner == "169.254.42.2:8443" and (stage / "b/state/services/leases/dnsmasq.leases.owner").read_text() == owner
+            print("PASS original finite binding synchronized before any renewal: " + original.strip(), flush=True)
+            def imported_dns():
+                for transport in ("+notcp", "+tcp"):
+                    query = subprocess.run(inside("ha-client", ["dig", "@" + acquired[4], "lease0.lab.example", "A", "+short", "+time=1", "+tries=1", transport]), capture_output=True, text=True)
+                    if query.returncode or query.stdout.strip() != first_address:
+                        return False
+                return True
+            wait(imported_dns)
+            os.kill(product_pid(a_daemon), signal.SIGTERM)
+            a_daemon.wait(timeout=35)
+            wait(lambda: active("b") and not active("a"))
+            wait(imported_dns)
+            assert saved("b")["leases"] == expected, "takeover changed the unrenewed imported binding"
+            # A disconnected promotion deliberately renews known bindings but
+            # defers new allocations until the authenticated peer reconciles.
+            before = len(lease_events(0))
+            first_client.send_signal(signal.SIGCONT)
+            first_client.send_signal(signal.SIGUSR1)
+            wait(lambda: len(lease_events(0)) > before)
+            assert lease_events(0)[-1].split()[1] == first_address
+            wait(imported_dns)
+            first_client.send_signal(signal.SIGSTOP)
+            run(inside("ha-client", ["ip", "address", "del", first_address + "/" + acquired[2], "dev", "lease0"]))
+            lease_client(1, first_address, await_lease=False)
+            wait(lambda: api("b", "control.sock", "/v1/services/service.leases")["snapshot"].get("sync", {}).get("allocation_blocked"))
+            wait(lambda: (stage / "lease1.log").read_text().count("broadcasting discover") >= 2)
+            assert not (stage / "lease1.progress").exists(), "disconnected owner allocated an unknown client"
+            restarted = start("ha-a", ["unshare", "--pid", "--fork", "--mount-proc", "--kill-child=SIGTERM", str(stage / "routerd"), "boot", "--file", str(stage / "a/boot.json")], "a")
+            wait(lambda: daemon_ready(restarted, "a"), timeout=30)
+            wait(lambda: (stage / "lease1.progress").exists(), timeout=30)
+            second = lease_events(1)[-1].split()
+            assert second[1] != first_address, "reconciled takeover duplicated the imported address"
+            assert second[3:5] == acquired[3:5], "new client did not receive the migrated gateway and DNS"
+            before = len(lease_events(0))
+            first_client.send_signal(signal.SIGCONT)
+            first_client.send_signal(signal.SIGUSR1)
+            wait(lambda: len(lease_events(0)) > before)
+            assert lease_events(0)[-1].split()[1] == first_address
+            wait(imported_dns)
+            for number in (0, 1):
+                fields = lease_events(number)[-1].split()
+                run(inside("ha-client", ["ping", "-I", "lease" + str(number), "-c", "1", "-W", "2", fields[3]]))
+            print("PASS initial two-node lease migration: unchanged expiry through authenticated synchronization and takeover; acquired DNS UDP/TCP before re-DHCP; known renewal during disconnection, distinct new client after peer reconciliation, IPv4 reachable", flush=True)
+            return
         if dhcp6_server:
             wait(lambda: modules("a").get("service.pd", {}).get("ready") and modules("b").get("service.pd", {}).get("ready"))
             pd_traffic("a")
@@ -1206,6 +1296,7 @@ while True:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--inside", type=Path)
+    parser.add_argument("--initial-leases", action="store_true", help="Import an independent old server lease into two fresh members and verify takeover")
     parser.add_argument("--dhcp-scopes", action="store_true", help="Import ordinary and shared secondary pools and renew across both HA directions")
     parser.add_argument("--import-conntrack", action="store_true", help="Import the VRRP/NAT/conntrack graph through the product CLI")
     parser.add_argument("--dhcp6-server", type=Path)
@@ -1218,9 +1309,11 @@ def main():
     parser.add_argument("--release-holds", action="store_true", help="Exercise client RELEASE before sticky recovery; otherwise wait for natural lease expiry")
     args = parser.parse_args()
     if args.inside:
-        peer(args.inside, args.dhcp6_server, args.pd_dslite, args.stale_owner, args.preparation, args.delegated_dns, args.release_holds, args.import_conntrack, args.lease_sync_import, args.dhcp_scopes)
+        peer(args.inside, args.dhcp6_server, args.pd_dslite, args.stale_owner, args.preparation, args.delegated_dns, args.release_holds, args.import_conntrack, args.lease_sync_import, args.dhcp_scopes, args.initial_leases)
         return
     os.chdir(Path(__file__).resolve().parent.parent)
+    if args.initial_leases and any((args.dhcp6_server, args.pd_dslite, args.stale_owner, args.preparation, args.delegated_dns, args.import_conntrack, args.lease_sync_import, args.dhcp_scopes, args.release_holds)):
+        parser.error("--initial-leases is the direct IPv4 initial migration path")
     if args.lease_sync_import and not args.dhcp6_server:
         parser.error("--lease-sync-import requires --dhcp6-server")
     if args.pd_dslite and not args.dhcp6_server:
@@ -1238,7 +1331,7 @@ def main():
     try:
         for source, name in [(Path(__file__), "peer.py"), (Path("dist/conntrack-engine.tar"), "conntrack-engine.tar"), (Path("dist/conntrack-sources.tar"), "conntrack-sources.tar"), (Path("dist/dnsmasq-engine.tar"), "dnsmasq-engine.tar"), (Path("dist/dnsmasq-sources.tar"), "dnsmasq-sources.tar"), *[(args.binary_dir / name, name) for name in ("routerd", "routerd-modules", "routerd-logging", "routerd-bundle")]]:
             run(root + ["install", "-m", "500", str(source.resolve()), stage + "/" + name])
-        peer_args = []
+        peer_args = ["--initial-leases"] if args.initial_leases else []
         if args.import_conntrack:
             run(root + ["install", "-m", "400", str(Path("internal/legacyconfig/testdata/conntrack.yaml").resolve()), stage + "/conntrack.yaml"])
             peer_args.append("--import-conntrack")
