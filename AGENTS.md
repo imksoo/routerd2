@@ -176,7 +176,7 @@ Current explicit user instructions and existing task authorization take preceden
 - Operator configuration expresses intent. Reapplying it should converge on the intended managed state without duplicate effects or manual repairs.
 - Distinguish managed kernel resources from other resources. Do not adopt or remove resources without ownership; choose a clear ownership mechanism for the design.
 - Base actions needing current state on current observations. Represent missing, stale, and unknown information honestly instead of reporting healthy state.
-- Build Linux release artifacts through the project build path. Keep `routerd` and `routerd-logging` at `CGO_ENABLED=0`; build `routerd-modules` with `CGO_ENABLED=1` only for the reused native nDPI engine. Verify static linking for all three artifacts, including native dependencies and their source/license notices. Update this path with the design instead of deploying unrelated ad hoc builds.
+- Build Linux Go release artifacts through the project build path with `CGO_ENABLED=0`. Update that path with the design instead of deploying unrelated ad hoc builds.
 - Keep externally active behavior under explicit product configuration. A coding task does not by itself authorize changes to production or cloud environments.
 - Use the authorized environment and scope. Check management access and recovery before real network changes; do not ask again for permission already provided.
 - Protect concurrent work. Use isolated worktrees when concurrent code changes would conflict, and stage explicit paths rather than `git add -A` or `git add .`.
