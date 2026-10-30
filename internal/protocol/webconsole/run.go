@@ -23,9 +23,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/control"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/network"
+	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/webconsoleconfig"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
@@ -43,6 +45,14 @@ type page struct {
 	Resources *runtimeplan.ResourceObservationPage
 	Metadata  *control.ConfigurationMetadata
 	Next      string
+	Clients   *clientPage
+}
+
+type clientPage struct {
+	Servers  []string
+	Selected runtimeplan.InstanceStatus
+	Snapshot *dhcpserverconfig.Snapshot
+	Current  bool
 }
 
 func Run(ctx context.Context, cfg webconsoleconfig.Config, runtimeDir string, ready func()) error {
@@ -50,7 +60,7 @@ func Run(ctx context.Context, cfg webconsoleconfig.Config, runtimeDir string, re
 	if err := webconsoleconfig.Validate(cfg); err != nil {
 		return err
 	}
-	view, err := template.New("console").Funcs(template.FuncMap{"truth": func(t resourceprogram.Truth) string {
+	view, err := template.New("console").Funcs(template.FuncMap{"leaseLive": func(t time.Time) bool { return t.IsZero() || t.After(time.Now()) }, "truth": func(t resourceprogram.Truth) string {
 		switch t {
 		case resourceprogram.True:
 			return "有効"
@@ -106,6 +116,40 @@ func Run(ctx context.Context, cfg webconsoleconfig.Config, runtimeDir string, re
 				next := url.Values{"offset": {strconv.Itoa(*p.Resources.NextOffset)}, "observation_id": {p.Resources.ObservationID}}
 				p.Next = cfg.BasePath + "resources?" + next.Encode()
 			}
+		case "clients":
+			p.Heading = "DHCP端末"
+			p.Clients = new(clientPage)
+			var services runtimeplan.Status
+			err = client.Do(r.Context(), http.MethodGet, "/v1/services", nil, &services)
+			selected := r.URL.Query().Get("service")
+			found := false
+			for _, instance := range services.Instances {
+				if instance.Role != "dhcp_server" {
+					continue
+				}
+				p.Clients.Servers = append(p.Clients.Servers, instance.Name)
+				if selected == "" {
+					selected = instance.Name
+				}
+				found = found || selected == instance.Name
+			}
+			if err == nil && selected != "" {
+				if !found {
+					err = errors.New("指定したDHCPサービスはありません")
+					status = http.StatusNotFound
+				} else {
+					err = client.Do(r.Context(), http.MethodGet, "/v1/services/"+url.PathEscape(selected), nil, &p.Clients.Selected)
+					if err == nil && len(p.Clients.Selected.Snapshot) > 0 {
+						p.Clients.Snapshot = new(dhcpserverconfig.Snapshot)
+						err = json.Unmarshal(p.Clients.Selected.Snapshot, p.Clients.Snapshot)
+						if err == nil {
+							var clock boottime.Clock
+							clock, err = boottime.Read()
+							p.Clients.Current = err == nil && dhcpserverconfig.CurrentObservation(*p.Clients.Snapshot, clock)
+						}
+					}
+				}
+			}
 		case "configuration":
 			p.Heading = "設定の確定状態"
 			p.Metadata = new(control.ConfigurationMetadata)
@@ -116,7 +160,9 @@ func Run(ctx context.Context, cfg webconsoleconfig.Config, runtimeDir string, re
 		}
 		if err != nil {
 			p.Error = err.Error()
-			status = http.StatusServiceUnavailable
+			if status == http.StatusOK {
+				status = http.StatusServiceUnavailable
+			}
 			var remote *localapi.HTTPError
 			if errors.As(err, &remote) {
 				status = remote.StatusCode

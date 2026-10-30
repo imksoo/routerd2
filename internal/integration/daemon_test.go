@@ -11,8 +11,8 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"html"
 	"io"
 	"net"
 	"net/http"
@@ -31,57 +31,21 @@ import (
 	"github.com/imksoo/routerd2/internal/events"
 	"github.com/imksoo/routerd2/internal/legacyconfig"
 	"github.com/imksoo/routerd2/internal/localapi"
+	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
 	"github.com/imksoo/routerd2/internal/runtimeconfig"
+	"github.com/imksoo/routerd2/internal/runtimeplan"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 	"github.com/imksoo/routerd2/internal/supervisor"
 	mdns "github.com/miekg/dns"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/crypto/ssh"
-	"golang.org/x/sys/unix"
 )
 
 func TestDaemonConfigurationAndRecovery(t *testing.T) {
-	if os.Getenv("ROUTERD2_DAEMON_CHILD") != "1" {
-		binaryDir := os.Getenv("ROUTERD2_TEST_BIN_DIR")
-		if binaryDir == "" {
-			if os.Getenv("ROUTERD2_INTEGRATION_REQUIRED") == "1" {
-				t.Fatal("ROUTERD2_TEST_BIN_DIR must point to freshly built binaries")
-			}
-			t.Skip("set ROUTERD2_TEST_BIN_DIR to run the real process tree")
-		}
-		parent, err := os.Readlink("/proc/self/ns/net")
-		if err != nil {
-			t.Fatal(err)
-		}
-		exe, err := os.Executable()
-		if err != nil {
-			t.Fatal(err)
-		}
-		cmd := exec.Command(exe, "-test.run=^TestDaemonConfigurationAndRecovery$", "-test.v", "-test.timeout=75s")
-		cmd.Env = append(os.Environ(), "ROUTERD2_DAEMON_CHILD=1", "ROUTERD2_DAEMON_PARENT="+parent)
-		cmd.SysProcAttr = &syscall.SysProcAttr{Cloneflags: unix.CLONE_NEWUSER | unix.CLONE_NEWNET, UidMappings: []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getuid(), Size: 1}}, GidMappings: []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getgid(), Size: 1}}, GidMappingsEnableSetgroups: false}
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			if (errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES)) && os.Getenv("ROUTERD2_INTEGRATION_REQUIRED") != "1" {
-				t.Skipf("namespace isolation unavailable: %v", err)
-			}
-			t.Fatalf("isolated daemon fixture: %v\n%s", err, out)
-		}
-		t.Logf("%s", out)
+	if !isolateFixture(t, t.Name()) {
 		return
-	}
-	current, err := os.Readlink("/proc/self/ns/net")
-	if err != nil || current == os.Getenv("ROUTERD2_DAEMON_PARENT") || os.Getenv("ROUTERD2_DAEMON_PARENT") == "" {
-		t.Fatal("refusing daemon fixture outside isolated network namespace")
-	}
-	loop, err := netlink.LinkByName("lo")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = netlink.LinkSetUp(loop); err != nil {
-		t.Fatal(err)
 	}
 	dir, err := os.MkdirTemp("", "r2-e2e-")
 	if err != nil {
@@ -91,7 +55,9 @@ func TestDaemonConfigurationAndRecovery(t *testing.T) {
 	runDir, stateDir := filepath.Join(dir, "run"), filepath.Join(dir, "state")
 	dnsPort, sshPort := port(t), port(t)
 	dns := dnsconfig.RuntimeConfig{Resource: "dns", Spec: api.DNSResolverSpec{Listen: []api.DNSResolverListenSpec{{Name: "local", Addresses: []string{"127.0.0.1"}, Port: dnsPort}}, Sources: []api.DNSResolverSourceSpec{{Name: "zones", Kind: "zone", Match: []string{"lab.example"}, ZoneRef: []string{"DNSZone/lan-zone"}}}}, Zones: []dnsconfig.RuntimeZone{{Name: "lan-zone", Spec: api.DNSZoneSpec{Zone: "lab.example", Records: []api.DNSZoneRecordSpec{{Hostname: "router", IPv4: "192.0.2.1"}}}}}}
-	doc := config.FromNative(config.Native{Services: []serviceconfig.Service{{Name: "dns", DNS: &serviceconfig.DNS{RuntimeConfig: dns}}}})
+	leases := serviceconfig.DHCPServer{Interface: "mgmt0", ServerAddress: "198.18.0.1", Authoritative: true,
+		Primary: dhcpserverconfig.Scope{Prefix: "198.18.0.0/24", Start: "198.18.0.100", End: "198.18.0.110", Router: "198.18.0.1", LeaseSeconds: 120}}
+	doc := config.FromNative(config.Native{Services: []serviceconfig.Service{{Name: "dns", DNS: &serviceconfig.DNS{RuntimeConfig: dns}}, {Name: "leases", DHCPServer: &leases}}})
 	// Exercise the imported management zone through a separate client namespace.
 	// ManagementAccess is an admission check, not a source-prefix firewall rule.
 	peer := fixturePeerNamespace(t, "mgmt0", "client0")
@@ -167,6 +133,8 @@ spec:
 		t.Fatal(err)
 	}
 	b := runtimeconfig.Boot{Platform: "host", Config: configPath, Workers: runtimeconfig.NativeWorkers(filepath.Join(os.Getenv("ROUTERD2_TEST_BIN_DIR"), "routerd-modules")), RuntimeDir: runDir, StateDir: stateDir, SSH: runtimeconfig.SSH{Listen: fmt.Sprintf("0.0.0.0:%d", sshPort), User: "admin", AuthorizedKeys: []string{string(ssh.MarshalAuthorizedKey(signer.PublicKey()))}}}
+	b.Workers["dhcp_server"] = filepath.Join(os.Getenv("ROUTERD2_TEST_BIN_DIR"), "routerd-modules")
+	b.Engines = map[string]string{"dhcp_server": filepath.Join(os.Getenv("ROUTERD2_TEST_BIN_DIR"), "dnsmasq-engine.tar")}
 	boot := filepath.Join(dir, "boot.json")
 	if err = config.AtomicJSON(boot, b); err != nil {
 		t.Fatal(err)
@@ -216,7 +184,8 @@ spec:
 		return s
 	}
 	until(t, 15*time.Second, func() bool { return status().Ready })
-	console := func(method, path string, want int, contains string) {
+	console := func(method, path string, want int, contains string) string {
+		var content string
 		t.Helper()
 		err := fixtureInsideNamespace(peer, func() error {
 			connection, err := net.DialTimeout("tcp", "198.18.0.1:8080", 3*time.Second)
@@ -243,6 +212,7 @@ spec:
 			if err != nil {
 				return err
 			}
+			content = string(body)
 			if response.StatusCode != want || !bytes.Contains(body, []byte(contains)) {
 				return fmt.Errorf("console %s %s: HTTP %d: %s", method, path, response.StatusCode, body)
 			}
@@ -251,6 +221,7 @@ spec:
 		if err != nil {
 			t.Fatal(err)
 		}
+		return content
 	}
 	until(t, 5*time.Second, func() bool {
 		var health control.Health
@@ -263,6 +234,112 @@ spec:
 	console("POST", "configuration", 405, "read-only console")
 	console("GET", "v1/config/commit", 404, "404")
 	t.Log("imported WebConsole: independent HTTP client read live health, kernel address/routes, resource conditions and confirmation metadata under /ops/; escaped title, read-only methods and private API isolation checked")
+	console("GET", "clients", 200, "観測された貸出はありません。")
+	console("GET", "clients?service=service.dns", 404, "指定したDHCPサービスはありません")
+	// A second interface starts without an address; its actual DHCP lease is
+	// compared with the independently fetched console, never a fixed pool slot.
+	const clientMAC = "02:bb:00:00:02:01"
+	for _, args := range [][]string{
+		{"link", "add", "lease0", "link", "client0", "address", clientMAC, "type", "macvlan", "mode", "bridge"},
+		{"link", "set", "lease0", "up"},
+	} {
+		cmd := exec.Command("ip", args...)
+		if err := fixtureInsideNamespace(peer, cmd.Run); err != nil {
+			t.Fatal(err)
+		}
+	}
+	report, hook := filepath.Join(dir, "client-lease.txt"), filepath.Join(dir, "client-lease.sh")
+	if err := os.WriteFile(hook, []byte(fmt.Sprintf(`#!/bin/sh
+case "$1" in
+bound|renew)
+  busybox ifconfig "$interface" "$ip" netmask "$subnet"
+  printf '%%s %%s\n' "$1" "$ip" >> %s
+  ;;
+esac
+`, report)), 0700); err != nil {
+		t.Fatal(err)
+	}
+	dhcp := exec.Command("busybox", "udhcpc", "-f", "-i", "lease0", "-x", "hostname:console-client", "-s", hook, "-p", filepath.Join(dir, "client.pid"))
+	output, err := os.Create(filepath.Join(dir, "client.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer output.Close()
+	dhcp.Stdout, dhcp.Stderr = output, output
+	if err := fixtureInsideNamespace(peer, dhcp.Start); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = dhcp.Process.Kill(); _ = dhcp.Wait() }()
+	var address string
+	until(t, 10*time.Second, func() bool {
+		data, _ := os.ReadFile(report)
+		fields := strings.Fields(string(data))
+		if len(fields) != 2 || fields[0] != "bound" {
+			return false
+		}
+		address = fields[1]
+		return true
+	})
+	observeLease := func() dhcpserverconfig.Snapshot {
+		t.Helper()
+		var instance runtimeplan.InstanceStatus
+		if err := ctl.Do(ctx, "GET", "/v1/services/service.leases", nil, &instance); err != nil {
+			t.Fatal(err)
+		}
+		var snapshot dhcpserverconfig.Snapshot
+		if err := json.Unmarshal(instance.Snapshot, &snapshot); err != nil {
+			t.Fatal(err)
+		}
+		return snapshot
+	}
+	var expiry time.Time
+	until(t, 5*time.Second, func() bool {
+		for _, lease := range observeLease().Leases {
+			if lease.MACAddress == clientMAC && lease.IPAddress == address && lease.Hostname == "console-client" {
+				expiry = lease.ExpiresAt
+				return true
+			}
+		}
+		return false
+	})
+	body := console("GET", "clients?service=service.leases", 200, address)
+	for _, value := range []string{clientMAC, "console-client", expiry.String(), "貸出期限内"} {
+		if !strings.Contains(html.UnescapeString(body), value) {
+			t.Fatalf("console missing acquired lease value %q: %s", value, body)
+		}
+	}
+	// dnsmasq lease files have whole-second precision: wait for the next
+	// second before requesting renewal so the displayed deadline must change.
+	time.Sleep(time.Until(time.Now().Truncate(time.Second).Add(time.Second)))
+	if err := dhcp.Process.Signal(syscall.SIGUSR1); err != nil {
+		t.Fatal(err)
+	}
+	until(t, 5*time.Second, func() bool {
+		data, _ := os.ReadFile(report)
+		if !strings.Contains(string(data), "renew "+address+"\n") {
+			return false
+		}
+		for _, lease := range observeLease().Leases {
+			if lease.MACAddress == clientMAC && lease.ExpiresAt.After(expiry) {
+				expiry = lease.ExpiresAt
+				return true
+			}
+		}
+		return false
+	})
+	body = console("GET", "clients?service=service.leases", 200, address)
+	if !strings.Contains(html.UnescapeString(body), expiry.String()) {
+		t.Fatal("renewed deadline missing from console", body)
+	}
+	if err := dhcp.Process.Signal(syscall.SIGUSR2); err != nil {
+		t.Fatal(err)
+	}
+	until(t, 5*time.Second, func() bool { return len(observeLease().Leases) == 0 })
+	body = console("GET", "clients?service=service.leases", 200, "観測された貸出はありません。")
+	if strings.Contains(body, clientMAC) || strings.Contains(body, "console-client") {
+		t.Fatal("released client remains in console", body)
+	}
+	t.Logf("independent BusyBox acquired %s (%s); independent HTTP client saw hostname, MAC, actual IP and deadline, renewed deadline and removed released lease", address, clientMAC)
 	answer(t, dnsPort, "192.0.2.1")
 	// The SSH channel drives the real candidate editor and control transaction.
 	hostBytes, err := os.ReadFile(filepath.Join(stateDir, "ssh_host_ed25519_key"))

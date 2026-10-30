@@ -138,7 +138,7 @@ check-otlp: build
 	$(PYTHON) scripts/otlp-peer.py --collector $(OTELCOL)
 
 .PHONY: check-management
-check-management: build
+check-management: build dnsmasq-engine
 	$(PYTHON) scripts/daemon-tests.py management --go '$(GO)'
 
 .PHONY: check-syslog
