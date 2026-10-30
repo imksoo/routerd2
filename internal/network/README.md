@@ -103,12 +103,18 @@ cached memory. The signed boot preflight fixture compares this response with a
 direct inspection of the actual journal before preparing a pair; operator paired
 prepare/boot and qualification of other state families remain separate work.
 
-Ownership journal format 7 records controller-generated boot-scoped address
+Ownership journal format 27 records controller-generated boot-scoped address
 lifetimes, route deadlines and virtual-link activation deadlines. Earlier unreleased formats are refused without rewriting their contents; no
 prototype format migration or mixed-version rollback is supported. Operator
 configuration cannot declare `boot_lifetime`, link `authority`, or route `boot_id`
 and `expires_nanos`. It is the internal projection
 of an accepted finite protocol grant.
+
+Address lifetime renewal reads each interface once and prepares all pending
+timers on that interface in one durable intent before updating them. Completion
+or partial failure saves the acknowledged results; restart can match either
+timer for an interrupted update. This avoids per-address journal writes on every
+VRRP heartbeat without extending any lease.
 
 For such addresses, boot ID and absolute preferred/valid BOOTTIME deadlines
 remain unchanged through writer restart and replay. Ownership checks and the

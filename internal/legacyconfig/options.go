@@ -255,7 +255,7 @@ func (c *compiler) initOptions(options Options, explicit bool) {
 			path := fmt.Sprintf("$policy.%s[%d]", section, i)
 			c.policyPaths[id] = path
 			resource := c.byRef[key]
-			if resource == nil || !strings.HasPrefix(key, resource.Kind+"/") || strings.Count(key, "/") != 1 || resource.Kind != kind && !(section == "lease_sync" && leaseSyncKind(resource.Kind)) {
+			if resource == nil || !strings.HasPrefix(key, resource.Kind+"/") || strings.Count(key, "/") != 1 || resource.Kind != kind && !(section == "lease_sync" && leaseSyncKind(resource.Kind)) && !(section == "ra_clients" && resource.Kind == "EgressRoutePolicy") {
 				c.issue(nil, path, "policy_reference", "policy key must identify one existing resource of the policy's kind using its exact Kind/name")
 				c.policyUsed[id] = true // invalid, not a second unused-entry issue
 			}

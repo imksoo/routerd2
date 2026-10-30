@@ -604,3 +604,49 @@ func TestDeclaredInterfaceAliasesItsDynamicTunnel(t *testing.T) {
 		t.Fatal("observed interface alias changed the tunnel owner")
 	}
 }
+
+func TestHostIPv6RoutePolicyRetainsPhysicalWANRAMetric(t *testing.T) {
+	data := []byte(`apiVersion: routerd.net/v1alpha1
+kind: Router
+metadata: {name: physical-ra}
+spec:
+  resources:
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: Interface
+      metadata: {name: wan}
+      spec: {ifname: eth0, managed: true, adminUp: true}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: EgressRoutePolicy
+      metadata: {name: host-ipv6}
+      spec:
+        family: ipv6
+        hostTraffic: true
+        mode: priority
+        candidates:
+          - name: physical
+            interface: wan
+            gateway: fe80::1
+            gatewaySource: static
+            preferredSource: interface
+            table: 120
+            priority: 10120
+`)
+	// The physical host route can need an RA metric different from a shared
+	// WAN VMAC. The operational homert02 physical host used metric 100.
+	yes := true
+	result := compiledPolicy(t, data, Options{SchemaVersion: 1, RAClients: map[string]serviceconfig.RAClient{
+		"EgressRoutePolicy/host-ipv6": {Interface: "eth0", SLAAC: &yes, DefaultRoute: &yes, OnLink: &yes, RouteInformation: &yes, DNS: &yes, UseMTU: true, UseHopLimit: true, Table: 254, Metric: 100},
+	}})
+	count := 0
+	for _, resource := range result.Document.Resources {
+		if resource.Service != nil && resource.Service.RAClient != nil {
+			count++
+			if resource.Service.RAClient.Metric != 100 || resource.Service.RAClient.Interface != "eth0" {
+				t.Fatal("physical WAN did not retain the declared RA behavior", resource.Service.RAClient)
+			}
+		}
+	}
+	if count != 1 {
+		t.Fatal("the shared receive interface needs one RA worker", count)
+	}
+}
