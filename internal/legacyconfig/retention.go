@@ -37,7 +37,7 @@ func (c *compiler) logRetention(r resource) {
 	if len(signals) == 0 {
 		signals = []string{"events", "accessLogs", "pluginRuns", "dnsQueries", "trafficFlows", "firewallEvents", "dhcpFingerprints"}
 	}
-	events, queries, firewall := false, false, false
+	events, queries, firewall, access := false, false, false, false
 	for _, signal := range signals {
 		if signal == "events" {
 			events = true
@@ -48,7 +48,10 @@ func (c *compiler) logRetention(r resource) {
 			queries = true
 		case "firewallEvents":
 			firewall = true
-		case "accessLogs", "pluginRuns", "trafficFlows", "dhcpFingerprints":
+		case "accessLogs":
+			access = true
+			c.note(r, "Legacy access_logs had no producer; retention of that empty dataset creates no native history owner. Existing database contents are not imported.")
+		case "pluginRuns", "trafficFlows", "dhcpFingerprints":
 			c.reject(r, "signals", "unsupported_semantics", "operational history dataset "+signal+" has no native retention owner")
 		default:
 			c.reject(r, "signals", "unsupported_semantics", "unknown operational history dataset")
@@ -65,7 +68,7 @@ func (c *compiler) logRetention(r resource) {
 			return
 		}
 	}
-	if !events && !queries && !firewall {
+	if !events && !queries && !firewall && !access {
 		c.reject(r, "signals", "unsupported_semantics", "requested datasets have no native history owner; event retention is not substituted")
 		return
 	}
@@ -101,6 +104,9 @@ func (c *compiler) logRetention(r resource) {
 			continue
 		}
 		policy.Syslog = append(policy.Syslog, destination)
+	}
+	if access && !events && !queries && !firewall {
+		c.target(r, "inactive")
 	}
 	if firewall {
 		c.firewallRetention = &policy

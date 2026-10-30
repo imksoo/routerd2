@@ -945,3 +945,13 @@ original DNS-provider and election deadline. Losing that election withdraws
 only the bound learned endpoints; other DNS sources and listeners remain.
 Conditional literal upstreams and conditional bootstrap entries are rejected
 until their distinct lifetime semantics are implemented.
+
+## Inactive legacy access history
+
+The old `access_logs` table was created and named by `LogRetention`, but no
+management, SSH or HTTP path wrote records to it. `signals: [accessLogs]` is
+therefore accepted with an explicit inactive mapping and creates no native
+history owner. When combined with other signals, their retention behavior is
+unchanged. This is not an access-audit implementation or an import of historical
+database contents. `pluginRuns` and `dhcpFingerprints` have actual old write
+paths and remain unsupported until their own histories are implemented.
