@@ -150,3 +150,33 @@ source to the intended tailnet domain; this is not automatic installation of
 control-server global/split resolvers or search domains. Host DNS and other
 native sources keep their own configuration. Allow LAN UDP/TCP 53 explicitly
 when the native INPUT policy drops other traffic.
+
+## Query history retention
+
+The resolver service can set `query_log_retention` with `max_age_seconds`,
+`interval_seconds` (default one day), `vacuum` and UDP `syslog` destinations.
+It requires query logging. The existing DNS worker owns both recording and
+retention; no service, daemon or second history file is added. The old routerd
+`logstore.ApplyRetention` supplies expiry, before-delete archive and vacuum.
+Maintenance uses a separate SQLite connection without holding the query-writer
+lock. DNS answers continue when archival submission fails; expired rows remain
+for the next sweep. A UDP write is not an acknowledgement by the destination,
+and a failed sweep can retransmit rows already submitted before that failure.
+The resolver status exposes `queryRetentionDeleted` and `queryRetentionError`.
+
+`LogRetention` imports `dnsQueries` into each query-logging resolver using its
+configured age, daily schedule, archive destinations and vacuum setting. Old
+query-log filenames are deliberately relocated below each native service's
+state directory, with the change recorded in the migration mapping; existing
+legacy database contents are not read or imported. Event retention remains
+with its existing owner. Other unimplemented history datasets are still
+reported as unsupported rather than silently receiving event retention.
+
+`make check-dns-retention` runs the actual product in private namespaces with
+an independent UDP receiver and real UDP/TCP `dig` queries. It imports a legacy
+DNS/LogRetention document, uses a short natural-expiry window, checks original
+archived columns and deletion, and makes only the log destination unreachable.
+It verifies retained rows and continuing DNS/forwarding during that failure,
+recovery, resolver restart, and removal of the retention policy. Temporary
+stages are removed after success. This is protocol/OS acceptance, not long-run
+storage-load or physical-device qualification.

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/imksoo/routerd/pkg/api"
+	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
 	"github.com/imksoo/routerd2/internal/protocol/syslogconfig"
 	"github.com/imksoo/routerd2/internal/retention"
 )
@@ -14,10 +15,6 @@ import (
 func (c *compiler) logRetention(r resource) {
 	c.allow(r, "retention", "signals", "sinks", "vacuum", "schedule")
 	spec := r.Spec.(api.LogRetentionSpec)
-	if c.retention != nil {
-		c.reject(r, "", "unsupported_semantics", "native event history has one retention owner; combine policies explicitly")
-		return
-	}
 	value := strings.TrimSpace(spec.Retention)
 	if strings.HasSuffix(value, "d") {
 		days, err := strconv.ParseInt(strings.TrimSuffix(value, "d"), 10, 64)
@@ -40,22 +37,28 @@ func (c *compiler) logRetention(r resource) {
 	if len(signals) == 0 {
 		signals = []string{"events", "accessLogs", "pluginRuns", "dnsQueries", "trafficFlows", "firewallEvents", "dhcpFingerprints"}
 	}
-	events := false
+	events, queries := false, false
 	for _, signal := range signals {
 		if signal == "events" {
 			events = true
 			continue
 		}
 		switch signal {
-		case "accessLogs", "pluginRuns", "dnsQueries", "trafficFlows", "firewallEvents", "dhcpFingerprints":
+		case "dnsQueries":
+			queries = true
+		case "accessLogs", "pluginRuns", "trafficFlows", "firewallEvents", "dhcpFingerprints":
 			c.reject(r, "signals", "unsupported_semantics", "operational history dataset "+signal+" has no native retention owner")
 		default:
 			c.reject(r, "signals", "unsupported_semantics", "unknown operational history dataset")
 			return
 		}
 	}
-	if !events {
+	if !events && !queries {
 		c.reject(r, "signals", "unsupported_semantics", "requested datasets have no native history owner; event retention is not substituted")
+		return
+	}
+	if events && c.retention != nil || queries && c.queryRetention != nil {
+		c.reject(r, "", "unsupported_semantics", "each history dataset has one retention policy; combine policies explicitly")
 		return
 	}
 	policy := retention.Config{MaxAgeSeconds: int64(age / time.Second), IntervalSeconds: 86400, Vacuum: spec.Vacuum}
@@ -83,7 +86,16 @@ func (c *compiler) logRetention(r resource) {
 		}
 		policy.Syslog = append(policy.Syslog, destination)
 	}
-	c.retention = &policy
-	c.target(r, "retention")
-	c.note(r, "Operational events retain the configured age and daily sweep. Pending consumers/work and current state are protected. Deleted-history deduplication ends with that history. Before-delete UDP archive is local submission, not a receiver acknowledgement. Diagnostic NDJSON logs retain their separate finite rotation.")
+	if events {
+		c.retention = &policy
+		c.target(r, "retention")
+	}
+	if queries {
+		c.queryRetention = &dnsconfig.QueryRetention{MaxAgeSeconds: policy.MaxAgeSeconds, IntervalSeconds: policy.IntervalSeconds, Vacuum: policy.Vacuum, Syslog: policy.Syslog}
+		c.target(r, "services/*/dns/query_log_retention")
+		c.note(r, "Each enabled resolver retains its own query database using the configured age, daily sweep, before-delete UDP archive and vacuum. Archive failure leaves expired rows for a later sweep and does not stop DNS replies. UDP submission is not receiver acknowledgement.")
+	}
+	if events {
+		c.note(r, "Operational events retain the configured age and daily sweep. Pending consumers/work and current state are protected. Deleted-history deduplication ends with that history. Before-delete UDP archive is local submission, not a receiver acknowledgement. Diagnostic NDJSON logs retain their separate finite rotation.")
+	}
 }

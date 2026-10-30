@@ -73,6 +73,9 @@ type daemon struct {
 	queryLogMu      sync.Mutex
 	queryLog        *logstore.DNSQueryLog
 
+	retentionDeleted int64
+	retentionError   string
+
 	// Native lease snapshots are serialized by inputMu. Receipt deadlines
 	// retain monotonic time and are never extended by a duplicate sequence.
 	nativeInput   *dnsconfig.Input
@@ -733,6 +736,8 @@ func (d *daemon) observedStatus() map[string]string {
 	observed := map[string]string{"inputSnapshotsRejected": fmt.Sprint(d.inputRejected.Load()), "listeners": fmt.Sprint(listenerCount), "zones": fmt.Sprint(zones.ZoneCount()), "queryOverloads": fmt.Sprint(d.queryOverloads.Load()), "queryLogDropped": fmt.Sprint(d.queryLogDrops.Load()), "queryLogErrors": fmt.Sprint(d.queryLogErrors.Load()), "eventPersistenceErrors": fmt.Sprint(d.eventErrors.Load())}
 	d.mu.Lock()
 	observed["cacheEntries"], observed["cacheBytes"] = fmt.Sprint(len(d.cache)), fmt.Sprint(d.cacheBytes)
+	observed["queryRetentionDeleted"] = fmt.Sprint(d.retentionDeleted)
+	observed["queryRetentionError"] = d.retentionError
 	d.mu.Unlock()
 	d.queryLogMu.Lock()
 	queryLog := d.queryLog

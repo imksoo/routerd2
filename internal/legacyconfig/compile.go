@@ -13,6 +13,7 @@ import (
 	"github.com/imksoo/routerd/pkg/api"
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/network"
+	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
 	"github.com/imksoo/routerd2/internal/retention"
@@ -352,7 +353,8 @@ type staticPrefix struct {
 }
 
 type compiler struct {
-	retention *retention.Config
+	retention      *retention.Config
+	queryRetention *dnsconfig.QueryRetention
 	*decoder
 	resources      []resource
 	legacy         api.Router

@@ -120,5 +120,14 @@ func Run(ctx context.Context, cfg Config, updates <-chan dnsconfig.Input, report
 			}
 		}
 	})
+	if cfg.QueryRetention != nil {
+		workers.Go(func() {
+			select {
+			case <-d.apiReady:
+				d.retainQueries(runCtx, *cfg.QueryRetention)
+			case <-runCtx.Done():
+			}
+		})
+	}
 	return normalizeDaemonExit(ctx, d.Run(runCtx))
 }

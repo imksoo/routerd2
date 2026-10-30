@@ -24,6 +24,7 @@ type RuntimeZone = dnsresolver.RuntimeZone
 // Config contains immutable intent and module-owned paths. Learned protocol
 // observations arrive through Input; no external configuration file is reread.
 type Config struct {
+	QueryRetention  *QueryRetention           `json:"query_log_retention,omitempty"`
 	Runtime         dnsresolver.RuntimeConfig `json:"runtime"`
 	ListenInterface string                    `json:"listen_interface,omitempty"`
 	SocketPath      string                    `json:"socket_path"`
@@ -54,6 +55,14 @@ func NormalizeRuntime(cfg dnsresolver.RuntimeConfig, statePath string) dnsresolv
 }
 
 func Validate(c Config) error {
+	if c.QueryRetention != nil {
+		if !c.Runtime.Spec.QueryLog.Enabled {
+			return errors.New("DNS query retention requires query logging")
+		}
+		if err := c.QueryRetention.Validate(); err != nil {
+			return err
+		}
+	}
 	if c.ListenInterface != "" && (len(c.ListenInterface) > 15 || strings.ContainsAny(c.ListenInterface, "/\x00 \t\r\n")) {
 		return errors.New("DNS listen interface must be a valid Linux interface name")
 	}

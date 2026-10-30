@@ -53,6 +53,7 @@ type Service struct {
 }
 
 type DNS struct {
+	QueryRetention *dnsconfig.QueryRetention `json:"query_log_retention,omitempty"`
 	dnsconfig.RuntimeConfig
 	ListenInterface string `json:"listen_interface,omitempty"`
 }
@@ -487,7 +488,7 @@ func (s Service) DNSConfig(runtimeDir, stateDir string) dnsconfig.Config {
 	// Normalization deep-copies slices before assigning module-owned paths.
 	state := filepath.Join(stateDir, "services", s.Name, "dns.json")
 	c = dnsconfig.NormalizeRuntime(c, state)
-	return dnsconfig.Config{Runtime: c, ListenInterface: s.DNS.ListenInterface, SocketPath: filepath.Join(runtimeDir, "services", s.Name+".dns.sock"), StatePath: state, EventPath: filepath.Join(stateDir, "services", s.Name, "dns-events.jsonl")}
+	return dnsconfig.Config{QueryRetention: s.DNS.QueryRetention, Runtime: c, ListenInterface: s.DNS.ListenInterface, SocketPath: filepath.Join(runtimeDir, "services", s.Name+".dns.sock"), StatePath: state, EventPath: filepath.Join(stateDir, "services", s.Name, "dns-events.jsonl")}
 }
 func (s Service) Instance(runtimeDir, stateDir string) (Instance, error) {
 	var b []byte

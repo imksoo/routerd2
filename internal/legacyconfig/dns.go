@@ -42,7 +42,8 @@ func (c *compiler) dns() {
 		spec := r.Spec.(api.DNSResolverSpec)
 		spec.Listen = append([]api.DNSResolverListenSpec(nil), spec.Listen...)
 		if spec.QueryLog.Path != "" {
-			c.reject(r, "queryLog.path", "unsupported_semantics", "query-log storage is owned by the native service state directory; an explicit legacy file path cannot be retained")
+			c.note(r, "Query logging is preserved in the resolver-owned native state directory; the legacy file path and existing history are not imported.")
+			spec.QueryLog.Path = ""
 		}
 		for i := range spec.Listen {
 			listen := &spec.Listen[i]
@@ -193,6 +194,9 @@ func (c *compiler) dns() {
 			}
 		}
 		service := serviceconfig.Service{Name: runtime.Resource, DNS: &serviceconfig.DNS{RuntimeConfig: runtime}}
+		if runtime.Spec.QueryLog.Enabled {
+			service.DNS.QueryRetention = c.queryRetention
+		}
 		services := append(append([]serviceconfig.Service(nil), c.document.Services...), service)
 		if err := serviceconfig.Validate(services); err != nil {
 			c.reject(r, "", "native_validation", "composed DNS listeners, sources, zones or cache settings fail native DNS validation")

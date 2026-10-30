@@ -667,7 +667,7 @@ generation/fencing behavior.
 DNS uses the same original resource composition rules and transport defaults:
 UDP/TCP 53, DoT 853, DoH 443 and `/dns-query`. A path omitted from a query-log
 declaration stays omitted in public intent; the native service compiler assigns
-the private database path. Explicit legacy query-log paths are rejected. Local
+the private database path. Explicit legacy query-log paths are relocated into the resolver-owned native state directory and recorded in the migration mapping; old database contents are not imported. Local
 zone DNSSEC is rejected because the native engine does not sign or cryptographically
 validate those zones. DHCP-derived zones require an actual migrated lease source
 and recovery contract; their settings are not discarded. Unused upstreams and
@@ -734,7 +734,7 @@ kernel log events and do not imply NFLOG sampling or old log-retention behavior.
 - VXLAN FDB peers, L2 filtering, outer-DF defaults, PPPoE, stateful/both/RA-only DHCPv6 servers, DHCPv6 relays
   and unsupported DHCPv4 server modes, dynamic route protocols, other
   tunnel/VPN types, cluster synchronization, plugins,
-  cloud/federation/mobility resources, logging/retention/system services and
+  cloud/federation/mobility resources, unmapped logging/history datasets/system services and
   other unmapped kinds are rejected with a resource path.
 
 These are **compiler restrictions**, not a statement that every named native
@@ -922,3 +922,11 @@ output into the existing two-router peer trial (this optional profile requires P
 TCP/UDP, synchronized PD takeover across different boot clocks, original
 expiration, and recovery against ISC DHCP. It is an isolated kernel trial,
 not qualification of deployed credentials or physical routers.
+
+`LogRetention.signals: [dnsQueries]` now assigns the age, daily sweep, archive
+sinks and vacuum request to each enabled DNS query-log owner. It does not
+implicitly enable event retention. The resolver keeps failed-archive rows
+and continues answering DNS; UDP archival submission has no remote delivery
+acknowledgement. `make check-dns-retention` exercises the imported configuration
+with real DNS clients, an independent receiver, destination-path failure,
+recovery, worker restart and policy removal.

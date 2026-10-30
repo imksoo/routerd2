@@ -57,7 +57,7 @@ def endpoint(mode, output, port):
                         log.write(json.dumps({'time': time.time(), 'peer': peer, 'message': message.decode('utf-8')})+'\n')
 
 
-def peer(stage):
+def peer(stage, dns_queries=False):
     children = []
     namespaces = ('retention-router', 'retention-peer', 'retention-client')
     assert os.readlink('/proc/self/ns/net') != os.environ['ROUTERD_RETENTION_PARENT_NETNS'], 'requires private network namespace'
@@ -167,8 +167,29 @@ def peer(stage):
         run(['ip', '-n', 'retention-peer', 'address', 'add', '192.0.2.3/24', 'dev', 'eth0'])
         destination = {'address': '192.0.2.3:5514', 'facility': 'local0', 'tag': 'routerd', 'min_level': 'info'}
         policy = {'max_age_seconds': 3600, 'max_records': 3, 'interval_seconds': 1, 'vacuum': True, 'syslog': [destination]}
-        (stage/'config.json').write_text(json.dumps({'schema_version': 2, 'resources': resources, 'retention': policy}))
-        boot = {'platform': 'host', 'config': str(stage/'config.json'), 'runtime_dir': str(stage/'run'), 'state_dir': str(stage/'state'), 'workers': {role: str(stage/('routerd-logging' if role == 'logging' else 'routerd-modules')) for role in ('logging', 'network', 'control', 'management')}}
+        if dns_queries:
+            import yaml
+            source = {"apiVersion": "routerd.net/v1alpha1", "kind": "Router", "metadata": {"name": "dns-retention"}, "spec": {"resources": []}}
+            def add(version, kind, name, spec):
+                source["spec"]["resources"].append({"apiVersion": version+".routerd.net/v1alpha1", "kind": kind, "metadata": {"name": name}, "spec": spec})
+            add("net", "DNSResolver", "resolver", {"listen": [{"name": "lan", "addresses": ["198.51.100.1"], "port": 53, "sources": ["local"]}], "queryLog": {"enabled": True, "path": "/legacy/dns-queries.db"}})
+            add("net", "DNSZone", "home", {"zone": "home.arpa", "records": [{"hostname": "*.lab", "ipv4": "203.0.113.25"}]})
+            add("net", "DNSForwarder", "local", {"resolver": "DNSResolver/resolver", "match": ["home.arpa"], "zoneRefs": ["DNSZone/home"]})
+            add("system", "LogSink", "archive", {"type": "syslog", "syslog": {"network": "udp", "address": destination['address'], "facility": "local0", "tag": "routerd"}})
+            add("system", "LogRetention", "queries", {"retention": "2s", "schedule": "daily", "vacuum": True, "signals": ["dnsQueries"], "sinks": ["LogSink/archive"]})
+            (stage/'legacy.json').write_text(json.dumps(source))
+            imported = yaml.safe_load(run([str(stage/'routerd'), 'config', 'migrate', str(stage/'legacy.json')]))
+            dns_service = next(r['service'] for r in imported['resources'] if r.get('service', {}).get('dns'))
+            dns_name = dns_service['name']
+            dns_policy = dns_service['dns']['query_log_retention']
+            assert dns_policy['max_age_seconds'] == 2 and dns_policy['interval_seconds'] == 86400 and dns_policy['vacuum']
+            dns_policy['interval_seconds'] = 1  # Short natural-expiry acceptance window.
+            resources.extend(imported['resources'])
+        document = {'schema_version': 2, 'resources': resources}
+        if not dns_queries:
+            document['retention'] = policy
+        (stage/'config.json').write_text(json.dumps(document))
+        boot = {'platform': 'host', 'config': str(stage/'config.json'), 'runtime_dir': str(stage/'run'), 'state_dir': str(stage/'state'), 'workers': {role: str(stage/('routerd-logging' if role == 'logging' else 'routerd-modules')) for role in ('logging', 'network', 'control', 'management', 'dns', 'syslog')}}
         (stage/'boot.json').write_text(json.dumps(boot))
         receive = receiver(5514, 'receiver-a.jsonl')
         start('retention-peer', ['python3', '-I', str(stage/'peer.py'), '--mode', 'echo', '--port', '18081', '--output', str(stage/'echo.jsonl')], 'echo')
@@ -178,6 +199,67 @@ def peer(stage):
         wait(lambda: api('control.sock', '/v1/config')['healthy'], 'product ready')
         start('retention-client', ['python3', '-I', str(stage/'peer.py'), '--mode', 'client', '--output', str(stage/'forwarding.jsonl')], 'client')
         wait(lambda: len(rows('forwarding.jsonl')) >= 3, 'independent routed UDP replies')
+        if dns_queries:
+            query_path = stage/'state/services'/dns_name/'dns-queries.db'
+            def query_records():
+                with sqlite3.connect('file:'+str(query_path)+'?mode=ro', uri=True) as db:
+                    db.row_factory = sqlite3.Row
+                    return {(r['ts'], r['question_name']): dict(r) for r in db.execute('SELECT * FROM dns_queries')}
+            def query(label):
+                for transport in ('+notcp', '+tcp'):
+                    answer = run(inside('retention-client', ['dig', '@198.51.100.1', label+'.lab.home.arpa', 'A', '+short', '+tries=1', '+time=1', transport]))
+                    assert answer.strip() == '203.0.113.25', answer
+                wait(lambda: len([key for key in query_records() if key[1] == label+'.lab.home.arpa']) >= 2, 'real UDP/TCP queries recorded', 2)
+            def query_status():
+                return api('services/'+dns_name+'.dns.sock', '/v1/status')['resources'][0]['observed']
+            def archived_queries():
+                result = {}
+                for row in rows('receiver-a.jsonl'):
+                    wire = row.get('message', '')
+                    if ': info dnsQueries ' in wire:
+                        record, _ = json.JSONDecoder().raw_decode(wire.split(': info dnsQueries ', 1)[1])
+                        result[(record['ts'], record['question_name'])] = record
+                return result
+            query('before-expiry')
+            original_queries = query_records()
+            wait(lambda: not query_records(), 'original DNS query expiry and vacuum')
+            assert all(archived_queries().get(key) == value for key, value in original_queries.items()), 'archive changed or lost original query columns'
+            print('PASS imported query logging, natural expiry, original-column UDP archive and vacuum', flush=True)
+
+            receive.terminate()
+            receive.wait(timeout=5)
+            run(['ip', '-n', 'retention-router', 'route', 'add', 'unreachable', '192.0.2.3/32'])
+            query('archive-unreachable')
+            protected = query_records()
+            wait(lambda: bool(query_status().get('queryRetentionError')), 'visible query archive failure')
+            for number in range(3):
+                query('while-unreachable-'+str(number))
+            assert protected.items() <= query_records().items(), 'archive failure deleted expired queries'
+            assert all(r['ok'] for r in rows('forwarding.jsonl'))
+            print('PASS unreachable archive retained expired rows while real UDP/TCP DNS and routed UDP continued', flush=True)
+
+            receive = receiver(5514, 'receiver-a.jsonl')
+            run(['ip', '-n', 'retention-router', 'route', 'delete', 'unreachable', '192.0.2.3/32'])
+            wait(lambda: not query_records() and not query_status().get('queryRetentionError'), 'query archive recovery')
+            assert all(archived_queries().get(key) == value for key, value in protected.items()), 'recovery changed or lost protected rows'
+            before = modules()['service.'+dns_name]['generation']
+            api('control.sock', '/v1/services/service.'+dns_name+'/restart', {})
+            wait(lambda: modules()['service.'+dns_name]['generation'] > before and modules()['service.'+dns_name]['ready'], 'DNS worker restart')
+            query('after-restart')
+            wait(lambda: not query_records(), 'retention after resolver restart')
+            print('PASS receiver recovery and resolver restart retained the policy and restored expiry', flush=True)
+
+            dns_service['dns'].pop('query_log_retention')
+            current = api('control.sock', '/v1/config')
+            api('control.sock', '/v1/config/commit', {'expected_revision': current['revision'], 'request_id': 'remove-dns-retention', 'config': document})
+            wait(lambda: api('control.sock', '/v1/config')['healthy'], 'retention removal')
+            query('after-policy-removal')
+            retained = query_records()
+            time.sleep(3)
+            query('after-removal-deadline')
+            assert retained.items() <= query_records().items(), 'removed policy still deleted query history'
+            print('PASS policy removal stopped expiry without stopping DNS or query recording', flush=True)
+            return
         original = {}
         for number in range(8):
             policy['max_age_seconds'] = 3600+number
@@ -270,6 +352,7 @@ def peer(stage):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--inside', type=Path)
+    parser.add_argument('--dns-queries', action='store_true', help='Exercise imported DNS query retention instead of event history')
     parser.add_argument('--mode', choices=('receive', 'echo', 'client'))
     parser.add_argument('--port', type=int, default=5514)
     parser.add_argument('--binary-dir', type=Path, default=Path('dist/bin'))
@@ -279,7 +362,7 @@ def main():
         endpoint(args.mode, args.output, args.port)
         return
     if args.inside:
-        peer(args.inside)
+        peer(args.inside, args.dns_queries)
         return
     root = [] if os.geteuid() == 0 else ['sudo', '-n']
     args.output.mkdir(parents=True, exist_ok=True)
@@ -291,7 +374,7 @@ def main():
     print('Private stage', stage, flush=True)
     parent_netns = os.readlink('/proc/self/ns/net')
     with (args.output/'peer.log').open('w') as output:
-        result = subprocess.run(root+['env', 'ROUTERD_RETENTION_PARENT_NETNS='+parent_netns, 'unshare', '--mount', '--net', '--pid', '--fork', '--mount-proc', '--kill-child=SIGKILL', '--propagation', 'private', 'python3', '-I', str(stage/'peer.py'), '--inside', str(stage)], stdout=output, stderr=subprocess.STDOUT, timeout=150)
+        result = subprocess.run(root+['env', 'ROUTERD_RETENTION_PARENT_NETNS='+parent_netns, 'unshare', '--mount', '--net', '--pid', '--fork', '--mount-proc', '--kill-child=SIGKILL', '--propagation', 'private', 'python3', '-I', str(stage/'peer.py'), '--inside', str(stage)]+(['--dns-queries'] if args.dns_queries else []), stdout=output, stderr=subprocess.STDOUT, timeout=150)
     for name in ('router.log', 'receiver-a.jsonl', 'forwarding.jsonl'):
         artifact = subprocess.run(root+['cat', str(stage/name)], capture_output=True)
         if artifact.returncode == 0:
