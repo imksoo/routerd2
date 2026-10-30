@@ -4,6 +4,10 @@
   "entrypoint": "supervisor",
   "roles": [
     {
+      "role": "syslog",
+      "artifact": "native-workers"
+    },
+    {
       "role": "logging",
       "artifact": "logger"
     },

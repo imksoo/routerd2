@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/imksoo/routerd2/internal/protocol/bfd"
+	"github.com/imksoo/routerd2/internal/protocol/syslogconfig"
 )
 
 // Normalize owns the fields it changes. Operator IP spelling is not a network
@@ -15,6 +16,10 @@ func Normalize(s Service) Service {
 			return a.String()
 		}
 		return v
+	}
+	if s.Syslog != nil {
+		c := syslogconfig.Normalize(*s.Syslog)
+		s.Syslog = &c
 	}
 	if s.NTP != nil {
 		c := *s.NTP

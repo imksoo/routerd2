@@ -1,0 +1,11 @@
+apiVersion: routerd.net/v1alpha1
+kind: Router
+metadata: {name: migration-syslog}
+spec:
+  resources:
+    - apiVersion: system.routerd.net/v1alpha1
+      kind: LogSink
+      metadata: {name: receiver}
+      spec:
+        type: syslog
+        syslog: {network: udp, address: "127.0.0.1:5514"}

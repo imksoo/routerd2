@@ -167,6 +167,8 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 			// Compiled before routes so dynamic tunnel ownership can be joined.
 		case "TailscaleNode":
 			c.tailscale(r)
+		case "LogSink":
+			c.logSink(r)
 		case "HealthCheck":
 			name := c.healthCheck(r)
 			conditions = append(conditions, resourceCondition{id: "service/" + name, source: r, when: r.Spec.(api.HealthCheckSpec).When})

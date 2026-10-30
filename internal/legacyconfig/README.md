@@ -54,6 +54,25 @@ adopts live resources from the old daemon.
 The CLI entry point is `routerd config migrate [--policy FILE] FILE`. It emits native YAML on
 success. Code that also needs the mapping report should use `Compile`.
 
+## UDP syslog delivery
+
+An enabled `LogSink` of type `syslog` with explicit `network: udp` becomes a
+native `syslog` service. Address, facility, tag and minimum severity retain the
+routerd meanings, including defaults `local6`, `routerd` and `info`.
+`enabled: false` creates no sender and is recorded as disabled in the mapping.
+An omitted network means local Unix delivery in routerd, so it is not silently
+converted to UDP. Other transports and sink types remain unsupported.
+
+The existing modules binary sends the native local log stream independently of
+local ingestion, storage and network application. Changing the destination or
+removing the service uses the normal worker replacement/stop path. UDP is
+best-effort delivery, not a durable acknowledged export. A newly started sender
+begins at the current local cursor; it does not export records from before its
+start. A local logger epoch change also resumes at its current cursor instead
+of replaying restored history. Failed UDP sends do not hold up newer records.
+`make check-syslog` exercises product logs with an independent UDP receiver and
+LAN forwarding.
+
 ## VRRP election and VIP identity
 
 Basic `VirtualAddress` VRRP elections retain the original Keepalived defaults:

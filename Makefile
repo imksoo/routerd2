@@ -49,6 +49,7 @@ help:
 	  'make check-health-pbr  Required two-WAN real-daemon TCP/UDP failover gate' \
 	  'make check-vrrp-unicast Verify VRRP peer failover and finite WAN identity' \
 	  'make check-tailscale   Verify signed Tailscale subnet/exit traffic, identity and revoke with independent peers' \
+	  'make check-syslog      Verify UDP log delivery, replacement and receiver outage with forwarding' \
 	  'make check-ntp         Verify time synchronization and LAN NTP with independent chronyd' \
 	  'make check-ntp-dhcp6   Verify learned time sources, original expiry and VRRP conditions with independent peers' \
 	  'make check-ntp-import  Verify imported client/server time sources, conditions and LAN forwarding' \
@@ -123,6 +124,10 @@ vet:
 	$(GO) vet ./internal/releaseboot/testdata/guest
 
 check: fmt-check test test-dependencies test-tools race vet
+
+.PHONY: check-syslog
+check-syslog: build
+	$(PYTHON) scripts/syslog-peer.py
 
 .PHONY: check-firewall
 check-firewall: build

@@ -36,6 +36,8 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/pppoeconfig"
 	"github.com/imksoo/routerd2/internal/protocol/ra"
 	"github.com/imksoo/routerd2/internal/protocol/raclient"
+	"github.com/imksoo/routerd2/internal/protocol/syslog"
+	"github.com/imksoo/routerd2/internal/protocol/syslogconfig"
 	"github.com/imksoo/routerd2/internal/protocol/tailscale"
 	"github.com/imksoo/routerd2/internal/protocol/tailscaleconfig"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
@@ -98,6 +100,12 @@ func Run(ctx context.Context, runtimeDir, name, role, path, digest string, gener
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	switch role {
+	case "syslog":
+		var cfg syslogconfig.Config
+		if err := decode(instance.Config, &cfg); err != nil {
+			return err
+		}
+		return syslog.Run(runCtx, cfg, runtimeDir, ready)
 	case "ntp":
 		return c.runNTP(runCtx, instance, ready)
 	case "pppoe":
