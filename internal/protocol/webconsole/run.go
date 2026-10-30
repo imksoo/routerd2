@@ -50,6 +50,7 @@ type page struct {
 	Next      string
 	Clients   *clientPage
 	Flows     *flowPage
+	VPN       *vpnPage
 }
 
 type clientPage struct {
@@ -73,7 +74,7 @@ func Run(ctx context.Context, cfg webconsoleconfig.Config, runtimeDir string, re
 		default:
 			return "不明"
 		}
-	}}).Parse(pageHTML + flowsHTML)
+	}}).Parse(pageHTML + flowsHTML + vpnHTML)
 	if err != nil {
 		return err
 	}
@@ -157,6 +158,9 @@ func Run(ctx context.Context, cfg webconsoleconfig.Config, runtimeDir string, re
 		case "flows":
 			p.Heading = "通信履歴"
 			p.Flows, err = loadFlows(r.Context(), client, r.URL.Query())
+		case "vpn":
+			p.Heading = "VPNの状態"
+			p.VPN, err = loadVPN(r.Context(), client, r.URL.Query().Get("service"))
 		case "configuration":
 			p.Heading = "設定の確定状態"
 			p.Metadata = new(control.ConfigurationMetadata)
