@@ -54,6 +54,7 @@ help:
 	  'make check-tailscale   Verify signed Tailscale subnet/exit traffic, identity and revoke with independent peers' \
 	  'make check-otlp        Verify OTLP/gRPC logs, collector outage and bounded replacement' \
 	  'make check-management  Verify imported management access and SSH configuration/recovery' \
+	  'make check-ingress     Verify ingress forwarding, hairpin NAT and VRRP tracking' \
 	  'make check-syslog      Verify UDP log delivery, replacement and receiver outage with forwarding' \
 	  'make check-ntp         Verify time synchronization and LAN NTP with independent chronyd' \
 	  'make check-ntp-dhcp6   Verify learned time sources, original expiry and VRRP conditions with independent peers' \
@@ -145,6 +146,10 @@ check-syslog: build
 .PHONY: check-firewall
 check-firewall: build
 	$(PYTHON) scripts/daemon-tests.py firewall --go '$(GO)'
+
+.PHONY: check-ingress
+check-ingress: build
+	$(PYTHON) scripts/daemon-tests.py ingress --go '$(GO)'
 
 .PHONY: check-local-redirect
 check-local-redirect: build
