@@ -7,7 +7,7 @@ Only fixture configuration/password/SSH public key are added to the initramfs.
 Requires root/sudo, QEMU x86_64, pppoe-server, pppd, iproute2, tcpdump, curl,
 OpenSSH, dhcpcd, dnsmasq, dig, mke2fs and an independent ISC dhcpd supplied with
 --dhcp6-server. A fresh regular-file ext4 disk supplies explicit persistent state.
-The update profile accepts --pve-host for an isolated 4 CPU/4 GiB KVM guest.
+The update and corrupt-recovery profiles accept --pve-host for an isolated 4 CPU/4 GiB KVM guest.
 Only its newly created VM is managed; Ethernet uses private SSH UNIX sockets.
 """
 import argparse
@@ -369,9 +369,14 @@ def peer(stage, power_action, updates, profile):
         d = server()
 
         def client_ready():
-            addresses = json.loads(run(['ip', '-n', lan, '-j', '-6', 'addr', 'show', 'dev', 'client0']))
-            routes = json.loads(run(['ip', '-n', lan, '-j', '-6', 'route', 'show', 'default']))
-            return any(a.get('scope') == 'global' and not a.get('tentative') and not a.get('deprecated') for link in addresses for a in link['addr_info']) and any(route.get('dev') == 'client0' and route.get('gateway') for route in routes)
+            addresses = json.loads(run(['ip', '-n', lan, '-j', 'addr', 'show', 'dev', 'client0']))
+            for family, flag in (('inet', '-4'), ('inet6', '-6')):
+                routes = json.loads(run(['ip', '-n', lan, '-j', flag, 'route', 'show', 'default']))
+                if not any(a.get('family') == family and a.get('scope') == 'global' and not a.get('tentative') and not a.get('deprecated') for link in addresses for a in link['addr_info']):
+                    return False
+                if not any(route.get('dev') == 'client0' and route.get('gateway') for route in routes):
+                    return False
+            return 'nameserver ' + client_dns in resolver.read_text()
         wait(client_ready)
         traffic()
         print('PASS factory appliance: CHAP, IPv4/IPv6 TCP/UDP, ISC PD and independent Linux SLAAC client', flush=True)
@@ -804,6 +809,15 @@ def peer(stage, power_action, updates, profile):
                 assert query('poweroff')['accepted']
                 assert q.wait(timeout=40) == 0
             if profile == 'corrupt-recovery':
+                if (stage / 'kvm.json').exists():
+                    assert run(control + ['qm status ' + str(meta['vmid'])]).strip() == 'status: stopped'
+                    # Edit only this stopped guest's private disk using the
+                    # same local filesystem tools as the local QEMU path.
+                    with subprocess.Popen(control + ['gzip -c ' + shlex.quote(str(remote / 'state.ext4'))], stdout=subprocess.PIPE, stderr=subprocess.PIPE) as transfer:
+                        with disk.open('wb') as output:
+                            subprocess.run(['gzip', '-d'], stdin=transfer.stdout, stdout=output, stderr=subprocess.PIPE, check=True, timeout=120)
+                        transfer.stdout.close()
+                        assert transfer.wait(timeout=10) == 0, transfer.stderr.read().decode()
                 # PID 1 syncs before poweroff; ext4 may still need journal
                 # replay. debugfs must not edit blocks that a later replay
                 # would overwrite. Replay only the journal, then require a
@@ -824,27 +838,36 @@ def peer(stage, power_action, updates, profile):
                 run(['debugfs', '-w', '-R', 'set_inode_field ' + path + ' mode 0100500', str(disk)], 30)
                 run(['e2fsck', '-f', '-n', str(disk)], 30)
                 (stage / 'serial.log').unlink()
-                q = start(None, q.args, 'qemu-recovery')
+                if (stage / 'kvm.json').exists():
+                    with subprocess.Popen(['gzip', '-c', str(disk)], stdout=subprocess.PIPE) as compressed:
+                        subprocess.run(control + ['umask 077\ngzip -d > ' + shlex.quote(str(remote / 'state.ext4'))], stdin=compressed.stdout, capture_output=True, check=True, timeout=120)
+                        compressed.stdout.close()
+                        assert compressed.wait(timeout=10) == 0
+                q = boot_product()
                 wait(booted, 180)
                 wait(ppp_ready)
                 d.terminate()
                 d.wait(timeout=5)
                 d = server()
                 wait(pd_ready, 90)
-                wait(client_ready)
-                traffic()
                 recovered = query('update status')
                 print('Observed rejected-candidate selection: ' + json.dumps(recovered), flush=True)
-                assert recovered['active'] == known_good and recovered.get('pending') is None
-                assert recovered.get('last_failure'), 'corrupt trial left no durable failure'
+                assert recovered['active'] == known_good and recovered.get('pending') is None and recovered.get('attempt') is None
+                assert recovered['last_failure']['release']['digest'] == damaged['digest']
+                assert recovered['last_failure']['reason'] == 'prepared runtime failed verification before execution'
                 assert query('show status')['release_id'] == known_release
                 assert query('show services pd')['snapshot']['client_duid'] == duid
                 # Rejection precedes candidate execution and startup adoption.
                 # The already adopted known-good configuration stays unchanged.
-                assert query('show config')['revision'] == recovery_revision
+                restored_config = query('show config')
+                assert restored_config['revision'] == recovery_revision
+                assert restored_config['config'] == recovery_config['config']
+                print('PASS rejected the corrupted candidate before execution and restored the confirmed runtime, unchanged configuration, DUID and pinned SSH identity', flush=True)
+                wait(client_ready)
+                traffic()
                 assert query('poweroff')['accepted']
                 assert q.wait(timeout=40) == 0
-                print('PASS corrupt signed trial automatically fell back to the confirmed runtime/configuration; SSH identity, DUID and automatic DNS/IPv4/IPv6 TCP/UDP recovered', flush=True)
+                print('PASS corrupted prepared candidate was rejected; confirmed runtime/configuration, SSH identity, DUID and automatic DNS/IPv4/IPv6 TCP/UDP recovered', flush=True)
 
     except Exception as failure:
         print('FAIL appliance communication: ' + repr(failure), flush=True)
@@ -891,7 +914,7 @@ def peer(stage, power_action, updates, profile):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--pve-host', help='SSH target for one temporary isolated PVE VM; update profile only')
+    parser.add_argument('--pve-host', help='SSH target for one temporary isolated PVE VM; update/corrupt-recovery profiles')
     parser.add_argument('--pve-jump', help='SSH jump target for --pve-host')
     parser.add_argument('--pve-identity', type=Path, help='SSH private-key path for --pve-host')
     parser.add_argument("--image-dir", type=Path, default=Path("dist/image"))
@@ -921,8 +944,8 @@ def main():
         return
     if args.dhcp6_server is None or not args.dhcp6_server.is_file():
         parser.error("--dhcp6-server must name an independent ISC dhcpd executable")
-    if args.pve_host and args.profile != 'update':
-        parser.error('--pve-host is supported only for --profile update')
+    if args.pve_host and args.profile not in ('update', 'corrupt-recovery'):
+        parser.error('--pve-host requires --profile update or corrupt-recovery')
     if (args.pve_jump or args.pve_identity) and not args.pve_host:
         parser.error('--pve-jump/--pve-identity require --pve-host')
     root = [] if os.geteuid() == 0 else ["sudo", "-n"]
