@@ -10,14 +10,17 @@ TCP continuity, automatic address acquisition, or reliable UDP log delivery.
 import argparse
 import datetime
 import hashlib
+import html
 import json
 import os
 from pathlib import Path
+import re
 import signal
 import socket
 import sqlite3
 import subprocess
 import time
+from urllib.parse import urlencode
 
 
 def run(command, timeout=10, input=None):
@@ -185,11 +188,18 @@ def peer(stage, dns_queries=False):
             assert dns_policy['max_age_seconds'] == 2 and dns_policy['interval_seconds'] == 86400 and dns_policy['vacuum']
             dns_policy['interval_seconds'] = 1  # Short natural-expiry acceptance window.
             resources.extend(imported['resources'])
+            resources.append({'id': 'console', 'service': {'name': 'console', 'web_console': {'listen': '198.51.100.1:8088', 'base_path': '/ops/', 'title': 'routerd2'}}})
+            resources.append({'id': 'console-input', 'firewall': {'disable_forward': True, 'input': {'policy': 'drop', 'rules': [
+                {'match': {'in_interface': 'lo'}, 'action': 'accept'},
+                *[{'match': {'in_interface': 'lan0', 'protocol': protocol, 'destination_ports': [{'start': port}]}, 'action': 'accept'} for protocol, port in (('udp', 53), ('tcp', 53), ('tcp', 8088))],
+            ]}}})
         document = {'schema_version': 2, 'resources': resources}
         if not dns_queries:
             document['retention'] = policy
         (stage/'config.json').write_text(json.dumps(document))
         boot = {'platform': 'host', 'config': str(stage/'config.json'), 'runtime_dir': str(stage/'run'), 'state_dir': str(stage/'state'), 'workers': {role: str(stage/('routerd-logging' if role == 'logging' else 'routerd-modules')) for role in ('logging', 'network', 'control', 'management', 'dns', 'syslog')}}
+        if dns_queries:
+            boot['workers']['web_console'] = str(stage/'routerd-modules')
         (stage/'boot.json').write_text(json.dumps(boot))
         receive = receiver(5514, 'receiver-a.jsonl')
         start('retention-peer', ['python3', '-I', str(stage/'peer.py'), '--mode', 'echo', '--port', '18081', '--output', str(stage/'echo.jsonl')], 'echo')
@@ -210,6 +220,17 @@ def peer(stage, dns_queries=False):
                     answer = run(inside('retention-client', ['dig', '@198.51.100.1', label+'.lab.home.arpa', 'A', '+short', '+tries=1', '+time=1', transport]))
                     assert answer.strip() == '203.0.113.25', answer
                 wait(lambda: len([key for key in query_records() if key[1] == label+'.lab.home.arpa']) >= 2, 'real UDP/TCP queries recorded', 2)
+            def console(expected, save=False, **filters):
+                params = {'service': 'service.'+dns_name, 'limit': 100, **filters}
+                page = run(inside('retention-client', ['curl', '--fail-with-body', '--max-time', '3', '-sS', 'http://198.51.100.1:8088/ops/dns-queries?'+urlencode(params)]))
+                found = set(re.findall(r'data-query="([0-9]+)"', page))
+                assert found == {str(row['id']) for row in expected.values()}, ('DNS console returned different records', filters, found, expected)
+                content = html.unescape(page)
+                for row in expected.values():
+                    for value in (row['client_address'], row['question_name'], row['question_type'], row['response_code'], *(json.loads(row['answers_json'] or '[]') or [])):
+                        assert value in content, ('DNS console omitted recorded value', value)
+                if save:
+                    (stage/'dns-console.html').write_text(page)
             def query_status():
                 return api('services/'+dns_name+'.dns.sock', '/v1/status')['resources'][0]['observed']
             def archived_queries():
@@ -220,9 +241,23 @@ def peer(stage, dns_queries=False):
                         record, _ = json.JSONDecoder().raw_decode(wire.split(': info dnsQueries ', 1)[1])
                         result[(record['ts'], record['question_name'])] = record
                 return result
+            since = datetime.datetime.now(datetime.timezone.utc).isoformat()
             query('before-expiry')
+            negative = run(inside('retention-client', ['dig', '@198.51.100.1', 'missing.home.arpa', 'A', '+comments', '+answer', '+tries=1', '+time=1']))
+            assert 'status: NXDOMAIN' in negative, negative
+            wait(lambda: any(row['response_code'] == 'NXDOMAIN' for row in query_records().values()), 'negative DNS query recorded', 2)
             original_queries = query_records()
+            until = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            successful = {key: row for key, row in original_queries.items() if row['response_code'] == 'NOERROR'}
+            failed = {key: row for key, row in original_queries.items() if row['response_code'] == 'NXDOMAIN'}
+            console(original_queries, save=True)
+            console(successful, client='198.51.100.2', name='%.lab.home.arpa', response='NOERROR', since=since, until=until)
+            console(failed, response='NXDOMAIN')
+            console({}, client='198.51.100.99')
+            console({}, since=until)
             wait(lambda: not query_records(), 'original DNS query expiry and vacuum')
+            console({})
+            print('PASS independent HTTP client filtered actual DNS client, name, response and time; natural expiry removed displayed rows', flush=True)
             assert all(archived_queries().get(key) == value for key, value in original_queries.items()), 'archive changed or lost original query columns'
             print('PASS imported query logging, natural expiry, original-column UDP archive and vacuum', flush=True)
 
@@ -235,12 +270,19 @@ def peer(stage, dns_queries=False):
             for number in range(3):
                 query('while-unreachable-'+str(number))
             assert protected.items() <= query_records().items(), 'archive failure deleted expired queries'
+            console(protected, name='archive-unreachable.lab.home.arpa')
+            before = modules()['service.'+dns_name]['generation']
+            api('control.sock', '/v1/services/service.'+dns_name+'/restart', {})
+            wait(lambda: modules()['service.'+dns_name]['generation'] > before and modules()['service.'+dns_name]['ready'], 'DNS restart during archive outage')
+            console(protected, name='archive-unreachable.lab.home.arpa')
             assert all(r['ok'] for r in rows('forwarding.jsonl'))
+            print('PASS independent HTTP client read protected DNS rows before and after resolver restart', flush=True)
             print('PASS unreachable archive retained expired rows while real UDP/TCP DNS and routed UDP continued', flush=True)
 
             receive = receiver(5514, 'receiver-a.jsonl')
             run(['ip', '-n', 'retention-router', 'route', 'delete', 'unreachable', '192.0.2.3/32'])
             wait(lambda: not query_records() and not query_status().get('queryRetentionError'), 'query archive recovery')
+            console({})
             assert all(archived_queries().get(key) == value for key, value in protected.items()), 'recovery changed or lost protected rows'
             before = modules()['service.'+dns_name]['generation']
             api('control.sock', '/v1/services/service.'+dns_name+'/restart', {})
@@ -375,7 +417,7 @@ def main():
     parent_netns = os.readlink('/proc/self/ns/net')
     with (args.output/'peer.log').open('w') as output:
         result = subprocess.run(root+['env', 'ROUTERD_RETENTION_PARENT_NETNS='+parent_netns, 'unshare', '--mount', '--net', '--pid', '--fork', '--mount-proc', '--kill-child=SIGKILL', '--propagation', 'private', 'python3', '-I', str(stage/'peer.py'), '--inside', str(stage)]+(['--dns-queries'] if args.dns_queries else []), stdout=output, stderr=subprocess.STDOUT, timeout=150)
-    for name in ('router.log', 'receiver-a.jsonl', 'forwarding.jsonl'):
+    for name in ('router.log', 'receiver-a.jsonl', 'forwarding.jsonl', 'dns-console.html'):
         artifact = subprocess.run(root+['cat', str(stage/name)], capture_output=True)
         if artifact.returncode == 0:
             (args.output/name).write_bytes(artifact.stdout)
