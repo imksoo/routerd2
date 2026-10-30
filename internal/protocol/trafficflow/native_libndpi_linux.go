@@ -36,13 +36,6 @@ static ndpi_protocol routerd_ndpi_giveup(struct ndpi_detection_module_struct *mo
  return ndpi_detection_giveup(mod, flow, 1, &guessed);
 }
 
-static int routerd_ndpi_tcp_start(const unsigned char *packet, unsigned short length) {
- const u_int8_t *l4;
- u_int16_t l4len;
- u_int8_t protocol;
- if(ndpi_detection_get_l4(packet, length, &l4, &l4len, &protocol, 0) != 0 || protocol != 6 || l4len < 20) return 0;
- return (l4[13] & 0x12) == 0x02; // SYN without ACK, including retransmission.
-}
 */
 import "C"
 
@@ -55,10 +48,9 @@ import (
 	"time"
 
 	"github.com/imksoo/routerd/pkg/dpi"
-	"github.com/imksoo/routerd/pkg/logstore"
 )
 
-// The packet reader alone owns the module and its C flows. These are routerd's
+// The traffic worker alone owns the module and its C flows. These are routerd's
 // libndpi API calls and result conversion, without its agent process/HTTP layer.
 type nativeClassifier struct {
 	mod        *C.struct_ndpi_detection_module_struct
@@ -69,10 +61,11 @@ type nativeClassifier struct {
 }
 
 type nativeFlow struct {
-	value    *C.struct_ndpi_flow_struct
-	packets  int
-	lastSeen time.Time
-	result   dpi.ClassifyResult
+	value     *C.struct_ndpi_flow_struct
+	packets   int
+	lastSeen  time.Time
+	startedAt time.Time
+	result    dpi.ClassifyResult
 }
 
 func newNativeClassifier(dropped *atomic.Uint64) (*nativeClassifier, error) {
@@ -94,14 +87,11 @@ func (c *nativeClassifier) close() {
 	C.ndpi_exit_detection_module(c.mod)
 }
 
-func (c *nativeClassifier) classify(packet []byte, result dpi.ClassifyResult, now time.Time) (dpi.ClassifyResult, error) {
+func (c *nativeClassifier) classify(sample capturedPacket, result dpi.ClassifyResult, now time.Time) (dpi.ClassifyResult, error) {
+	key, packet := sample.Key, sample.Payload
 	if len(packet) == 0 || len(packet) > 0xffff || result.SrcAddress == "" || result.DstAddress == "" {
 		return result, nil
 	}
-	// Both directions of the same copied connection use one nDPI flow state.
-	a := logstore.FlowKey(result.TransportProtocol, result.SrcAddress, result.SrcPort, result.DstAddress, result.DstPort)
-	b := logstore.FlowKey(result.TransportProtocol, result.DstAddress, result.DstPort, result.SrcAddress, result.SrcPort)
-	key := min(a, b)
 	if !now.Before(c.nextExpiry) {
 		for key, flow := range c.flows {
 			if now.Sub(flow.lastSeen) >= time.Hour {
@@ -116,8 +106,10 @@ func (c *nativeClassifier) classify(packet []byte, result dpi.ClassifyResult, no
 	raw := C.CBytes(packet)
 	defer C.free(raw)
 	flow := c.flows[key]
-	if flow != nil && C.routerd_ndpi_tcp_start((*C.uchar)(raw), C.ushort(len(packet))) != 0 {
-		// A new connection may reuse every address/port before idle expiry.
+	// Confirmation assigns the timestamp after the first FORWARD observation.
+	// Promote that same nDPI state from zero; a new unconfirmed connection or
+	// a different established timestamp cannot inherit an earlier classification.
+	if flow != nil && (sample.Unconfirmed || (!sample.StartedAt.IsZero() && !flow.startedAt.IsZero() && !sample.StartedAt.Equal(flow.startedAt))) {
 		if flow.value != nil {
 			C.ndpi_free_flow(flow.value)
 		}
@@ -147,6 +139,9 @@ func (c *nativeClassifier) classify(packet []byte, result dpi.ClassifyResult, no
 			return result, errors.New("libndpi flow allocation failed")
 		}
 		c.flows[key] = flow
+	}
+	if !sample.StartedAt.IsZero() {
+		flow.startedAt = sample.StartedAt
 	}
 	flow.lastSeen = now
 	if flow.value != nil {
@@ -219,11 +214,13 @@ func (c *nativeClassifier) resultFromProtocol(flow *C.struct_ndpi_flow_struct, p
 	}
 	host := C.GoString(&flow.host_server_name[0])
 	if host != "" {
-		switch result.AppName {
-		case "http":
-			result.HTTPHost = host
-		default:
+		switch {
+		case masterProto == C.NDPI_PROTOCOL_TLS || appProto == C.NDPI_PROTOCOL_TLS || masterProto == C.NDPI_PROTOCOL_DTLS || appProto == C.NDPI_PROTOCOL_DTLS || masterProto == C.NDPI_PROTOCOL_QUIC || appProto == C.NDPI_PROTOCOL_QUIC:
 			result.TLSSNI = host
+		case masterProto == C.NDPI_PROTOCOL_HTTP || appProto == C.NDPI_PROTOCOL_HTTP:
+			result.HTTPHost = host
+		case masterProto == C.NDPI_PROTOCOL_DNS || appProto == C.NDPI_PROTOCOL_DNS || masterProto == C.NDPI_PROTOCOL_MDNS || appProto == C.NDPI_PROTOCOL_MDNS:
+			result.DNSQuery = host
 		}
 	}
 	result.Reason = "libndpi_protocol_detection"

@@ -28,6 +28,7 @@ import (
 	"github.com/imksoo/routerd/pkg/logstore"
 	"github.com/imksoo/routerd2/internal/control"
 	"github.com/imksoo/routerd2/internal/legacyconfig"
+	"github.com/miekg/dns"
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netns"
 )
@@ -74,12 +75,16 @@ func testDaemonTrafficFlowHistory(t *testing.T, native bool) {
 	}
 	// Start with accounting disabled in this isolated namespace. The imported
 	// product setting must enable it before the first connection is created.
-	for key, value := range map[string]string{"nf_conntrack_acct": "0", "nf_conntrack_udp_timeout": "3", "nf_conntrack_udp_timeout_stream": "3"} {
+	initialTimestamp := "0"
+	if native {
+		initialTimestamp = "1"
+	}
+	for key, value := range map[string]string{"nf_conntrack_acct": "0", "nf_conntrack_timestamp": initialTimestamp, "nf_conntrack_udp_timeout": "3", "nf_conntrack_udp_timeout_stream": "3"} {
 		if err := os.WriteFile("/proc/sys/net/netfilter/"+key, []byte(value), 0600); err != nil {
 			t.Fatal(err)
 		}
 	}
-	var udp, archive net.PacketConn
+	var udp, archive, dnsPackets net.PacketConn
 	var tcp net.Listener
 	if err := fixtureInsideNamespace(wan, func() error {
 		var err error
@@ -91,12 +96,46 @@ func testDaemonTrafficFlowHistory(t *testing.T, native bool) {
 		if err != nil {
 			return err
 		}
+		dnsPackets, err = net.ListenPacket("udp4", "198.51.100.2:53")
+		if err != nil {
+			return err
+		}
 		tcp, err = net.Listen("tcp4", "198.51.100.2:18081")
 		return err
 	}); err != nil {
 		t.Fatal(err)
 	}
 	defer udp.Close()
+	var dnsRequests, stunPackets atomic.Int32
+	defer dnsPackets.Close()
+	go func() {
+		var payload [2048]byte
+		for {
+			n, peer, err := dnsPackets.ReadFrom(payload[:])
+			if err != nil {
+				return
+			}
+			if n >= 20 && payload[4] == 0x21 && payload[5] == 0x12 && payload[6] == 0xa4 && payload[7] == 0x42 {
+				stunPackets.Add(1)
+				continue
+			}
+			request := new(dns.Msg)
+			if err := request.Unpack(payload[:n]); err != nil || len(request.Question) == 0 {
+				continue
+			}
+			dnsRequests.Add(1)
+			if request.Question[0].Name != "single.routerd.test." {
+				continue
+			}
+			answer := new(dns.Msg)
+			answer.SetReply(request)
+			answer.Answer = []dns.RR{&dns.A{Hdr: dns.RR_Header{Name: request.Question[0].Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 30}, A: net.ParseIP("192.0.2.123")}}
+			wire, err := answer.Pack()
+			if err == nil {
+				_, _ = dnsPackets.WriteTo(wire, peer)
+			}
+		}
+	}()
 	defer tcp.Close()
 	// Use the standard TLS implementation, not a synthetic ClientHello. X25519
 	// keeps its hello inside the old classifier's single-packet parsing boundary.
@@ -188,8 +227,10 @@ func testDaemonTrafficFlowHistory(t *testing.T, native bool) {
 		t.Fatal(err)
 	}
 	f := startFixtureDaemonAt(t, imported.Document, work)
-	if value, err := os.ReadFile("/proc/sys/net/netfilter/nf_conntrack_acct"); err != nil || strings.TrimSpace(string(value)) != "1" {
-		t.Fatal("product did not enable connection accounting", string(value), err)
+	for _, key := range []string{"nf_conntrack_acct", "nf_conntrack_timestamp"} {
+		if value, err := os.ReadFile("/proc/sys/net/netfilter/" + key); err != nil || strings.TrimSpace(string(value)) != "1" {
+			t.Fatal("product did not enable connection observation", key, string(value), err)
+		}
 	}
 	connect := func(proto string) net.Conn {
 		t.Helper()
@@ -258,7 +299,7 @@ func testDaemonTrafficFlowHistory(t *testing.T, native bool) {
 		historyCreated = true
 		return rows
 	}
-	var first logstore.TrafficFlow
+	var first, firstTLS logstore.TrafficFlow
 	until(t, 6*time.Second, func() bool {
 		probe(udpClient)
 		probe(tcpClient)
@@ -271,11 +312,105 @@ func testDaemonTrafficFlowHistory(t *testing.T, native bool) {
 				protocols[row.Protocol] = true
 				if row.Protocol == "udp" {
 					first = row
+				} else if row.Protocol == "tcp" {
+					firstTLS = row
 				}
 			}
 		}
 		return protocols["tcp"] && protocols["udp"]
 	})
+	// One real DNS request and one response must survive connection confirmation;
+	// neither the client nor this assertion retransmits the application request.
+	var dnsClient net.Conn
+	if err := fixtureInsideNamespace(lan, func() error { var err error; dnsClient, err = net.Dial("udp4", "198.51.100.2:53"); return err }); err != nil {
+		t.Fatal(err)
+	}
+	defer dnsClient.Close()
+	if err := dnsClient.SetDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	question := new(dns.Msg)
+	question.SetQuestion("single.routerd.test.", dns.TypeA)
+	exchange := &dns.Conn{Conn: dnsClient}
+	if err := exchange.WriteMsg(question); err != nil {
+		t.Fatal(err)
+	}
+	answer, err := exchange.ReadMsg()
+	if err != nil || len(answer.Answer) != 1 {
+		t.Fatal("single DNS response", err)
+	}
+	until(t, 5*time.Second, func() bool {
+		for _, row := range history() {
+			if row.Protocol == "udp" && row.PeerPort == 53 && row.DNSQuery == "single.routerd.test" && row.Engine == engine && row.Source == source {
+				if row.TLSSNI != "" || row.Metadata["tls.sni"] != "" {
+					t.Fatalf("DNS incorrectly stored TLS SNI: engine=%s sni=%q metadata_sni=%q", row.Engine, row.TLSSNI, row.Metadata["tls.sni"])
+				}
+				return true
+			}
+		}
+		return false
+	})
+	if dnsRequests.Load() != 1 {
+		t.Fatal("DNS acceptance retransmitted", dnsRequests.Load())
+	}
+	t.Log("one independent DNS request/response retained its application and query metadata")
+	// A single forwarded DNS request with no reply still creates its classification.
+	// Once the kernel expires it, the same UDP socket sends a different application.
+	var oneWay net.Conn
+	if err := fixtureInsideNamespace(lan, func() error { var err error; oneWay, err = net.Dial("udp4", "198.51.100.2:53"); return err }); err != nil {
+		t.Fatal(err)
+	}
+	defer oneWay.Close()
+	question.SetQuestion("oneway.routerd.test.", dns.TypeA)
+	if err := (&dns.Conn{Conn: oneWay}).WriteMsg(question); err != nil {
+		t.Fatal(err)
+	}
+	var oneWayDNS logstore.TrafficFlow
+	until(t, 5*time.Second, func() bool {
+		probe(udpClient)
+		for _, row := range history() {
+			if row.ClientPort == oneWay.LocalAddr().(*net.UDPAddr).Port && row.Protocol == "udp" && row.DNSQuery == "oneway.routerd.test" && row.Engine == engine && row.Source == source && row.PacketsOut == 1 && row.PacketsIn == 0 {
+				if row.TLSSNI != "" || row.Metadata["tls.sni"] != "" {
+					t.Fatal("one-way DNS has TLS metadata", row.TLSSNI, row.Metadata["tls.sni"])
+				}
+				oneWayDNS = row
+				return true
+			}
+		}
+		return false
+	})
+	until(t, 5*time.Second, func() bool {
+		probe(udpClient)
+		for _, row := range history() {
+			if row.FlowKey == oneWayDNS.FlowKey {
+				return !row.EndedAt.IsZero()
+			}
+		}
+		return false
+	})
+	// STUN Binding request, one datagram and no response or retransmission.
+	binding := []byte{0, 1, 0, 0, 0x21, 0x12, 0xa4, 0x42, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}
+	if _, err := oneWay.Write(binding); err != nil {
+		t.Fatal(err)
+	}
+	var nextUDP logstore.TrafficFlow
+	until(t, 5*time.Second, func() bool {
+		probe(udpClient)
+		for _, row := range history() {
+			if row.ClientPort == oneWay.LocalAddr().(*net.UDPAddr).Port && row.Protocol == "udp" && row.AppName == "stun" && row.FlowKey != oneWayDNS.FlowKey && row.StartedAt.After(oneWayDNS.StartedAt) && row.DNSQuery == "" && row.Metadata["dns.query"] == "" && row.PacketsOut == 1 && row.PacketsIn == 0 {
+				if row.TLSSNI != "" || row.Metadata["tls.sni"] != "" {
+					t.Fatal("STUN has TLS metadata", row.TLSSNI, row.Metadata["tls.sni"])
+				}
+				nextUDP = row
+				return true
+			}
+		}
+		return false
+	})
+	if dnsRequests.Load() != 2 || stunPackets.Load() != 1 {
+		t.Fatal("single direction classification retransmitted", dnsRequests.Load(), stunPackets.Load())
+	}
+	t.Logf("one-way DNS retained its sole request; same UDP endpoints became STUN engine=%s source=%s without old DNS metadata", nextUDP.Engine, nextUDP.Source)
 	// The observation budget is a connection packet count, not a permanent
 	// copy of all established traffic. Force this TLS connection beyond it.
 	for i := 0; i < 20; i++ {
@@ -289,12 +424,17 @@ func testDaemonTrafficFlowHistory(t *testing.T, native bool) {
 			t.Fatal(err)
 		}
 		var count uint64
+		found := false
 		for _, rule := range rules {
 			for _, e := range rule.Exprs {
 				if counter, ok := e.(*expr.Counter); ok {
+					found = true
 					count += counter.Packets
 				}
 			}
+		}
+		if !found {
+			t.Fatal("packet observation counter is missing")
 		}
 		return count
 	}
@@ -302,7 +442,7 @@ func testDaemonTrafficFlowHistory(t *testing.T, native bool) {
 	for i := 0; i < 8; i++ {
 		probe(tcpClient)
 	}
-	if after := observed(); after != before || before == 0 {
+	if after := observed(); after != before {
 		t.Fatalf("packet observation did not stop at its connection budget: %d -> %d", before, after)
 	}
 	t.Logf("TLS classification engine=%s source=%s; established traffic no longer generated packet observations", engine, source)
@@ -369,19 +509,23 @@ func testDaemonTrafficFlowHistory(t *testing.T, native bool) {
 		}
 		response.Body.Close()
 		until(t, 5*time.Second, func() bool {
+			oldEnded, newHTTP := false, false
 			for _, row := range history() {
+				if row.FlowKey == firstTLS.FlowKey {
+					oldEnded = !row.EndedAt.IsZero() && row.TLSSNI == "flow.routerd.test"
+				}
 				if row.ClientPort == local.Port && row.Protocol == "tcp" && row.PeerPort == 18081 && row.AppName == "http" && row.Engine == "ndpi" && row.HTTPHost == "changed.routerd.test" {
-					return true
+					newHTTP = row.FlowKey != firstTLS.FlowKey && row.StartedAt.After(firstTLS.StartedAt) && row.EndedAt.IsZero() && row.TLSSNI == "" && row.Metadata["tls.sni"] == ""
 				}
 			}
-			return false
+			return oldEnded && newHTTP
 		})
 		next.Close()
 		plainHTTP.Store(false)
 		tcpClient = connect("tcp4")
 		defer tcpClient.Close()
 		probe(tcpClient)
-		t.Log("same TCP endpoints changed from TLS to real HTTP; nDPI did not reuse the previous application")
+		t.Log("same TCP endpoints created a separate HTTP history row, without old TLS metadata; the earlier TLS row ended and retained its original start")
 	}
 	f = f.restart()
 	probe(udpClient)
@@ -491,8 +635,10 @@ func testDaemonTrafficFlowHistory(t *testing.T, native bool) {
 		}
 		return true
 	})
-	if value, err := os.ReadFile("/proc/sys/net/netfilter/nf_conntrack_acct"); err != nil || strings.TrimSpace(string(value)) != "0" {
-		t.Fatal("removal did not restore original accounting", string(value), err)
+	for key, original := range map[string]string{"nf_conntrack_acct": "0", "nf_conntrack_timestamp": initialTimestamp} {
+		if value, err := os.ReadFile("/proc/sys/net/netfilter/" + key); err != nil || strings.TrimSpace(string(value)) != original {
+			t.Fatal("removal did not restore original observation setting", key, string(value), err)
+		}
 	}
 	chains, err := (&nftables.Conn{}).ListChainsOfTableFamily(nftables.TableFamilyINet)
 	if err != nil {
@@ -507,7 +653,7 @@ func testDaemonTrafficFlowHistory(t *testing.T, native bool) {
 	probe(c)
 	c.Close()
 	f.stop()
-	t.Log("product enabled conntrack accounting; removal restored zero and stopped collection while new TCP forwarding remained usable")
+	t.Logf("product enabled accounting and timestamps; removal restored accounting=0 timestamp=%s while new TCP forwarding remained usable", initialTimestamp)
 }
 
 const trafficFlowFixture = `apiVersion: routerd.net/v1alpha1

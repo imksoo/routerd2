@@ -16,6 +16,6 @@ func newNativeClassifier(*atomic.Uint64) (*nativeClassifier, error) {
 	return nil, errors.New("application_layer requires routerd-modules built with libndpi")
 }
 func (*nativeClassifier) close() {}
-func (*nativeClassifier) classify(_ []byte, result dpi.ClassifyResult, _ time.Time) (dpi.ClassifyResult, error) {
+func (*nativeClassifier) classify(_ capturedPacket, result dpi.ClassifyResult, _ time.Time) (dpi.ClassifyResult, error) {
 	return result, nil
 }

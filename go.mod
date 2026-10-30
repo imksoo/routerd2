@@ -5,6 +5,8 @@ go 1.27.0
 toolchain go1.27.3
 
 require (
+	github.com/florianl/go-conntrack v0.7.0
+	github.com/florianl/go-nflog/v2 v2.3.0
 	github.com/facebook/time v0.0.0-20261028182048-956c8cce511a
 	github.com/google/nftables v0.3.0
 	github.com/google/uuid v1.6.0
@@ -51,8 +53,8 @@ require (
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.28.0 // indirect
 	github.com/k-sone/critbitgo v1.4.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
-	github.com/mdlayher/netlink v1.7.3-0.20250113171957-fbb4dce95f42 // indirect
-	github.com/mdlayher/socket v0.5.0 // indirect
+	github.com/mdlayher/netlink v1.9.1-0.20260312172110-2a932c0fc1ae // indirect
+	github.com/mdlayher/socket v0.5.1 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/orcaman/concurrent-map/v2 v2.0.1 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.3 // indirect

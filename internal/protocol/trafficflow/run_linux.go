@@ -12,11 +12,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/imksoo/routerd/pkg/dpi"
+	"github.com/florianl/go-conntrack"
+	"github.com/florianl/go-nflog/v2"
 	"github.com/imksoo/routerd/pkg/logstore"
-	"github.com/imksoo/routerd/pkg/nflog"
 	"github.com/imksoo/routerd2/internal/protocol/trafficflowconfig"
-	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netlink/nl"
 	"golang.org/x/sys/unix"
 )
@@ -28,24 +27,21 @@ func Run(ctx context.Context, cfg trafficflowconfig.Config, ready func()) error 
 	if cfg.HistoryPath == "" {
 		return errors.New("traffic flow history path is required")
 	}
-	reader, err := netlink.NewHandle(unix.NETLINK_NETFILTER)
+	reader, err := conntrack.Open(&conntrack.Config{WriteTimeout: 2 * time.Second})
 	if err != nil {
 		return err
 	}
 	defer reader.Close()
-	if err := reader.SetSocketTimeout(2 * time.Second); err != nil {
-		return err
-	}
 	var db *sql.DB
 	defer func() {
 		if db != nil {
 			db.Close()
 		}
 	}()
-	var classified <-chan dpi.ClassifyResult
+	var packets <-chan capturedPacket
 	var packetErrors chan error
 	var dropped atomic.Uint64
-	pending := make(map[string]dpi.ClassifyResult)
+	pending := make(map[string]classification)
 	var native *nativeClassifier
 	if cfg.ApplicationLayer {
 		native, err = newNativeClassifier(&dropped)
@@ -55,21 +51,20 @@ func Run(ctx context.Context, cfg trafficflowconfig.Config, ready func()) error 
 		defer native.close()
 	}
 	if cfg.PacketGroup != 0 {
-		packets, err := nflog.Open(int(cfg.PacketGroup))
+		packetReader, err := nflog.Open(&nflog.Config{Group: cfg.PacketGroup, Copymode: nflog.CopyPacket, Bufsize: 2048, QThresh: 1, Flags: nflog.FlagConntrack})
 		if err != nil {
 			return err
 		}
 		packetCtx, stopPackets := context.WithCancel(ctx)
-		results := make(chan dpi.ClassifyResult, 512)
-		done := make(chan struct{})
+		defer func() { stopPackets(); packetReader.Close() }()
+		observations := make(chan capturedPacket, 512)
 		packetErrors = make(chan error, 1)
-		go func() {
-			defer close(done)
-			packetErrors <- collectClassifications(packetCtx, packets, results, &dropped, native)
-		}()
-		defer func() { stopPackets(); <-done; packets.Close() }()
-		classified = results
+		if err := capturePackets(packetCtx, packetReader, observations, packetErrors, &dropped); err != nil {
+			return err
+		}
+		packets = observations
 	}
+
 	var nextExpiry time.Time
 	ready()
 	timer := time.NewTimer(0)
@@ -78,13 +73,22 @@ func Run(ctx context.Context, cfg trafficflowconfig.Config, ready func()) error 
 		select {
 		case <-ctx.Done():
 			return nil
-		case result, ok := <-classified:
-			if !ok {
-				return <-packetErrors
+		case err := <-packetErrors:
+			return err
+		case packet := <-packets:
+			if packet.Unconfirmed {
+				delete(pending, packet.Key)
 			}
-			key := logstore.FlowKey(result.TransportProtocol, result.SrcAddress, result.SrcPort, result.DstAddress, result.DstPort)
-			if _, exists := pending[key]; exists || len(pending) < 10000 {
-				pending[key] = result
+			result, err := classifyPacket(packet, native)
+			if err != nil {
+				return err
+			}
+			// A port-based guess is not application evidence from copied packets.
+			if (result.Source != "builtin-payload" && result.Source != "libndpi") || result.AppName == "unknown" {
+				continue
+			}
+			if _, exists := pending[packet.Key]; exists || len(pending) < 10000 {
+				pending[packet.Key] = classification{Result: result, StartedAt: packet.StartedAt}
 			} else {
 				dropped.Add(1)
 			}
@@ -96,7 +100,10 @@ func Run(ctx context.Context, cfg trafficflowconfig.Config, ready func()) error 
 		}
 		// Each sweep is independent. A partial/failed kernel dump must never mark
 		// unobserved connections as ended. Disk failure cannot stop forwarding.
-		entries, err := reader.ConntrackTableList(netlink.ConntrackTable, unix.AF_UNSPEC)
+		if err := reader.Con.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+			return err
+		}
+		entries, err := reader.Dump(conntrack.Conntrack, conntrack.Family(unix.AF_UNSPEC))
 		if ctx.Err() != nil {
 			return nil
 		}
@@ -108,12 +115,23 @@ func Run(ctx context.Context, cfg trafficflowconfig.Config, ready func()) error 
 		now := time.Now().UTC()
 		flows := make([]logstore.TrafficFlow, 0, len(entries))
 		active := make([]string, 0, len(entries))
+		observed := make(map[string]struct{}, len(pending))
 		for _, entry := range entries {
 			flow := trafficFlow(entry, now)
 			if flow.FlowKey == "" {
 				continue
 			}
-			applyClassification(&flow, entry, pending)
+			key := connectionKey(entry)
+			if sample, ok := pending[key]; ok {
+				observed[key] = struct{}{}
+				if entry.Timestamp != nil && entry.Timestamp.Start != nil && entry.Timestamp.Start.UnixNano() != 0 && sample.StartedAt.IsZero() {
+					sample.StartedAt = *entry.Timestamp.Start
+					pending[key] = sample
+				}
+				if sample.StartedAt.IsZero() || sample.StartedAt.Equal(flow.StartedAt) {
+					applyClassification(&flow, sample.Result)
+				}
+			}
 			flows = append(flows, flow)
 			active = append(active, flow.FlowKey)
 		}
@@ -126,7 +144,19 @@ func Run(ctx context.Context, cfg trafficflowconfig.Config, ready func()) error 
 		}
 		cancel()
 		if err == nil {
-			clear(pending)
+			for key, sample := range pending {
+				if _, ok := observed[key]; ok {
+					delete(pending, key)
+				} else if sample.Missed {
+					// The first dump can precede confirmation. A second complete sample
+					// without that connection cannot persist these transient observations.
+					delete(pending, key)
+					dropped.Add(1)
+				} else {
+					sample.Missed = true
+					pending[key] = sample
+				}
+			}
 		}
 		if err != nil {
 			slog.Warn("traffic flow history failed", "error", err)
@@ -145,25 +175,71 @@ func Run(ctx context.Context, cfg trafficflowconfig.Config, ready func()) error 
 	}
 }
 
-// Retain routerd's original/reply direction and stable tuple identity. The
-// existing logstore preserves first observation time and cumulative counters.
-func trafficFlow(entry *netlink.ConntrackFlow, now time.Time) logstore.TrafficFlow {
-	original, reply := entry.Forward, entry.Reverse
-	protocol := nl.L4ProtoMap[original.Protocol]
+// The kernel identity exists before confirmation. The timestamp additionally
+// separates persisted rows across restarts; absent timestamps stay unknown.
+func connectionKey(entry conntrack.Con) string {
+	if entry.ID == nil || entry.Origin == nil || entry.Origin.Src == nil || entry.Origin.Dst == nil || entry.Origin.Proto == nil || entry.Origin.Proto.Number == nil {
+		return ""
+	}
+	original := entry.Origin
+	var source, destination uint16
+	if original.Proto.SrcPort != nil {
+		source = *original.Proto.SrcPort
+	}
+	if original.Proto.DstPort != nil {
+		destination = *original.Proto.DstPort
+	}
+	var zone uint16
+	if entry.Zone != nil {
+		zone = *entry.Zone
+	} else if original.Zone != nil {
+		zone = *original.Zone
+	}
+	return logstore.FlowKey(strconv.Itoa(int(*original.Proto.Number)), original.Src.String(), int(source), original.Dst.String(), int(destination)) + "|" + strconv.FormatUint(uint64(zone), 10) + "|" + strconv.FormatUint(uint64(*entry.ID), 10)
+}
+
+func trafficFlow(entry conntrack.Con, now time.Time) logstore.TrafficFlow {
+	key := connectionKey(entry)
+	if key == "" {
+		return logstore.TrafficFlow{}
+	}
+	original, reply := entry.Origin, entry.Reply
+	protocol := nl.L4ProtoMap[*original.Proto.Number]
 	if protocol == "" {
-		protocol = strconv.Itoa(int(original.Protocol))
+		protocol = strconv.Itoa(int(*original.Proto.Number))
 	}
-	flow := logstore.TrafficFlow{
-		StartedAt:     now,
-		ClientAddress: original.SrcIP.String(), ClientPort: int(original.SrcPort),
-		PeerAddress: original.DstIP.String(), PeerPort: int(original.DstPort), Protocol: protocol,
-		Accounting: original.Packets != 0 || reply.Packets != 0,
-		BytesOut:   int64(original.Bytes), BytesIn: int64(reply.Bytes),
-		PacketsOut: int64(original.Packets), PacketsIn: int64(reply.Packets),
+	flow := logstore.TrafficFlow{StartedAt: now, ClientAddress: original.Src.String(), PeerAddress: original.Dst.String(), Protocol: protocol}
+	if original.Proto.SrcPort != nil {
+		flow.ClientPort = int(*original.Proto.SrcPort)
 	}
-	if len(reply.DstIP) != 0 && !reply.DstIP.Equal(original.SrcIP) {
-		flow.NATTranslatedAddress = reply.DstIP.String()
+	if original.Proto.DstPort != nil {
+		flow.PeerPort = int(*original.Proto.DstPort)
 	}
-	flow.FlowKey = logstore.FlowKey(flow.Protocol, flow.ClientAddress, flow.ClientPort, flow.PeerAddress, flow.PeerPort)
+	if c := entry.CounterOrigin; c != nil {
+		if c.Packets != nil {
+			flow.PacketsOut = int64(*c.Packets)
+		}
+		if c.Bytes != nil {
+			flow.BytesOut = int64(*c.Bytes)
+		}
+	}
+	if c := entry.CounterReply; c != nil {
+		if c.Packets != nil {
+			flow.PacketsIn = int64(*c.Packets)
+		}
+		if c.Bytes != nil {
+			flow.BytesIn = int64(*c.Bytes)
+		}
+	}
+	flow.Accounting = flow.PacketsOut != 0 || flow.PacketsIn != 0
+	if reply != nil && reply.Dst != nil && !reply.Dst.Equal(*original.Src) {
+		flow.NATTranslatedAddress = reply.Dst.String()
+	}
+	var started int64
+	if entry.Timestamp != nil && entry.Timestamp.Start != nil && entry.Timestamp.Start.UnixNano() != 0 {
+		flow.StartedAt = entry.Timestamp.Start.UTC()
+		started = flow.StartedAt.UnixNano()
+	}
+	flow.FlowKey = key + "|" + strconv.FormatInt(started, 10)
 	return flow
 }
