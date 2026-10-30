@@ -139,16 +139,19 @@ type Forwarding struct {
 // Directed forwarding pairs and accept rules also clamp TCP MSS in both
 // directions to the current interface MTUs, without granting extra traffic.
 type Firewall struct {
-	AddressSets    []AddressSet    `json:"address_sets,omitempty"`
-	LocalRedirects []LocalRedirect `json:"local_redirects,omitempty"`
-	FlowRoutes     []FlowRoute     `json:"flow_routes,omitempty"`
-	FlowMarks      []uint32        `json:"flow_marks,omitempty"`
-	Forward        []Forward       `json:"forward,omitempty"`
-	Input          *FirewallChain  `json:"input,omitempty"`
-	Output         *FirewallChain  `json:"output,omitempty"`
-	ForwardChain   *FirewallChain  `json:"forward_chain,omitempty"`
-	MSSClamp       []MSSClamp      `json:"mss_clamp,omitempty"`
-	IPv4ClearDF    []IPv4ClearDF   `json:"ipv4_clear_df,omitempty"`
+	// FlowObservationGroup copies the first packets of accepted forwarded
+	// connections to one NFLOG consumer. Zero disables packet observation.
+	FlowObservationGroup uint16          `json:"flow_observation_group,omitempty"`
+	AddressSets          []AddressSet    `json:"address_sets,omitempty"`
+	LocalRedirects       []LocalRedirect `json:"local_redirects,omitempty"`
+	FlowRoutes           []FlowRoute     `json:"flow_routes,omitempty"`
+	FlowMarks            []uint32        `json:"flow_marks,omitempty"`
+	Forward              []Forward       `json:"forward,omitempty"`
+	Input                *FirewallChain  `json:"input,omitempty"`
+	Output               *FirewallChain  `json:"output,omitempty"`
+	ForwardChain         *FirewallChain  `json:"forward_chain,omitempty"`
+	MSSClamp             []MSSClamp      `json:"mss_clamp,omitempty"`
+	IPv4ClearDF          []IPv4ClearDF   `json:"ipv4_clear_df,omitempty"`
 	// DisableForward omits the forwarding filter hook, for example for NAT-only
 	// or MSS-only use. Explicit MSS, DF and NAT rules retain their own hooks.
 	// It cannot be combined with Forward pairs or ForwardChain.

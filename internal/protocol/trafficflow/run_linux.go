@@ -9,9 +9,12 @@ import (
 	"errors"
 	"log/slog"
 	"strconv"
+	"sync/atomic"
 	"time"
 
+	"github.com/imksoo/routerd/pkg/dpi"
 	"github.com/imksoo/routerd/pkg/logstore"
+	"github.com/imksoo/routerd/pkg/nflog"
 	"github.com/imksoo/routerd2/internal/protocol/trafficflowconfig"
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netlink/nl"
@@ -39,6 +42,26 @@ func Run(ctx context.Context, cfg trafficflowconfig.Config, ready func()) error 
 			db.Close()
 		}
 	}()
+	var classified <-chan dpi.ClassifyResult
+	var packetErrors chan error
+	var dropped atomic.Uint64
+	pending := make(map[string]dpi.ClassifyResult)
+	if cfg.PacketGroup != 0 {
+		packets, err := nflog.Open(int(cfg.PacketGroup))
+		if err != nil {
+			return err
+		}
+		packetCtx, stopPackets := context.WithCancel(ctx)
+		results := make(chan dpi.ClassifyResult, 512)
+		done := make(chan struct{})
+		packetErrors = make(chan error, 1)
+		go func() {
+			defer close(done)
+			packetErrors <- collectClassifications(packetCtx, packets, results, &dropped)
+		}()
+		defer func() { stopPackets(); <-done; packets.Close() }()
+		classified = results
+	}
 	var nextExpiry time.Time
 	ready()
 	timer := time.NewTimer(0)
@@ -47,7 +70,21 @@ func Run(ctx context.Context, cfg trafficflowconfig.Config, ready func()) error 
 		select {
 		case <-ctx.Done():
 			return nil
+		case result, ok := <-classified:
+			if !ok {
+				return <-packetErrors
+			}
+			key := logstore.FlowKey(result.TransportProtocol, result.SrcAddress, result.SrcPort, result.DstAddress, result.DstPort)
+			if _, exists := pending[key]; exists || len(pending) < 10000 {
+				pending[key] = result
+			} else {
+				dropped.Add(1)
+			}
+			continue
 		case <-timer.C:
+		}
+		if count := dropped.Swap(0); count != 0 {
+			slog.Warn("traffic packet classifications dropped", "count", count)
 		}
 		// Each sweep is independent. A partial/failed kernel dump must never mark
 		// unobserved connections as ended. Disk failure cannot stop forwarding.
@@ -68,6 +105,7 @@ func Run(ctx context.Context, cfg trafficflowconfig.Config, ready func()) error 
 			if flow.FlowKey == "" {
 				continue
 			}
+			applyClassification(&flow, entry, pending)
 			flows = append(flows, flow)
 			active = append(active, flow.FlowKey)
 		}
@@ -79,6 +117,9 @@ func Run(ctx context.Context, cfg trafficflowconfig.Config, ready func()) error 
 			err = syncActive(call, db, flows, active, now)
 		}
 		cancel()
+		if err == nil {
+			clear(pending)
+		}
 		if err != nil {
 			slog.Warn("traffic flow history failed", "error", err)
 		} else if cfg.Retention != nil && !now.Before(nextExpiry) {

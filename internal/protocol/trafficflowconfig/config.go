@@ -12,6 +12,9 @@ import (
 )
 
 type Config struct {
+	// PacketGroup enables routerd's built-in packet metadata extraction from NFLOG.
+	// It does not select the external nDPI application classifier.
+	PacketGroup     uint16            `json:"packet_group,omitempty"`
 	IntervalSeconds int64             `json:"interval_seconds,omitempty"`
 	Retention       *retention.Config `json:"retention,omitempty"`
 	// HistoryPath belongs to the service compiler, not operator configuration.

@@ -235,6 +235,7 @@ func Validate(services []Service) error {
 	names := map[string]bool{}
 	sockets := map[string]string{}
 	dhcpListeners := map[string]string{}
+	nflogOwners := map[uint16]string{}
 	for _, s := range services {
 		if !safeName.MatchString(s.Name) || names[s.Name] {
 			return fmt.Errorf("invalid or duplicate service name %q (lowercase letters, digits and hyphens; max 24)", s.Name)
@@ -251,6 +252,19 @@ func Validate(services []Service) error {
 		}
 		if s.TrafficFlow == nil && s.FirewallLog == nil && s.OTLPLogs == nil && s.Syslog == nil && s.NTP == nil && s.DNS == nil && s.BGP == nil && s.DHCPRelay == nil && !(s.BFD != nil && s.BFD.Multihop) && !interfaceName.MatchString(s.Interface()) {
 			return fmt.Errorf("service %s has an invalid interface", s.Name)
+		}
+		var group uint16
+		if s.FirewallLog != nil {
+			group = s.FirewallLog.Group
+		}
+		if s.TrafficFlow != nil {
+			group = s.TrafficFlow.PacketGroup
+		}
+		if group != 0 {
+			if other := nflogOwners[group]; other != "" {
+				return fmt.Errorf("services %s and %s compete for NFLOG group %d", other, s.Name, group)
+			}
+			nflogOwners[group] = s.Name
 		}
 		key := s.Role() + ":" + s.Interface()
 		if s.FirewallLog != nil {

@@ -4,9 +4,17 @@ package integration
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
 	"database/sql"
 	"encoding/json"
+	"github.com/google/nftables"
+	"github.com/google/nftables/expr"
 	"io"
+	"math/big"
 	"net"
 	"os"
 	"path/filepath"
@@ -78,6 +86,18 @@ func TestDaemonTrafficFlowHistory(t *testing.T) {
 	}
 	defer udp.Close()
 	defer tcp.Close()
+	// Use the standard TLS implementation, not a synthetic ClientHello. X25519
+	// keeps its hello inside the old classifier's single-packet parsing boundary.
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert := &x509.Certificate{SerialNumber: big.NewInt(1), DNSNames: []string{"flow.routerd.test"}, NotBefore: time.Now().Add(-time.Minute), NotAfter: time.Now().Add(time.Hour), KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
+	der, err := x509.CreateCertificate(rand.Reader, cert, cert, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tcp = tls.NewListener(tcp, &tls.Config{Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: key}}})
 	defer archive.Close()
 	go func() {
 		var b [4096]byte
@@ -112,7 +132,7 @@ func TestDaemonTrafficFlowHistory(t *testing.T) {
 			}
 		}
 	}()
-	imported, err := legacyconfig.Compile([]byte(trafficFlowFixture))
+	imported, err := legacyconfig.Compile([]byte(strings.Replace(trafficFlowFixture, "source: conntrack}", "source: conntrack, includeTLSSNI: true}", 1)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,6 +170,17 @@ func TestDaemonTrafficFlowHistory(t *testing.T) {
 			return err
 		}); err != nil {
 			t.Fatal(err)
+		}
+		if strings.HasPrefix(proto, "tcp") {
+			secure := tls.Client(c, &tls.Config{ServerName: "flow.routerd.test", InsecureSkipVerify: true, CurvePreferences: []tls.CurveID{tls.X25519}})
+			if err := secure.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
+				t.Fatal(err)
+			}
+			if err := secure.Handshake(); err != nil {
+				c.Close()
+				t.Fatal(err)
+			}
+			c = secure
 		}
 		return c
 	}
@@ -204,6 +235,9 @@ func TestDaemonTrafficFlowHistory(t *testing.T) {
 		protocols := map[string]bool{}
 		for _, row := range history() {
 			if row.ClientAddress == "192.0.2.2" && row.PeerAddress == "198.51.100.2" && row.PeerPort == 18081 && row.NATTranslatedAddress == "198.51.100.1" && row.Accounting && row.BytesOut > 0 && row.BytesIn > 0 {
+				if row.Protocol == "tcp" && (row.TLSSNI != "flow.routerd.test" || row.Engine != "builtin" || row.Source != "builtin-payload") {
+					continue
+				}
 				protocols[row.Protocol] = true
 				if row.Protocol == "udp" {
 					first = row
@@ -212,6 +246,36 @@ func TestDaemonTrafficFlowHistory(t *testing.T) {
 		}
 		return protocols["tcp"] && protocols["udp"]
 	})
+	// The observation budget is a connection packet count, not a permanent
+	// copy of all established traffic. Force this TLS connection beyond it.
+	for i := 0; i < 20; i++ {
+		probe(tcpClient)
+	}
+	observed := func() uint64 {
+		t.Helper()
+		table := &nftables.Table{Name: "routerd2", Family: nftables.TableFamilyINet}
+		rules, err := (&nftables.Conn{}).GetRules(table, &nftables.Chain{Name: "flow_observation", Table: table})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var count uint64
+		for _, rule := range rules {
+			for _, e := range rule.Exprs {
+				if counter, ok := e.(*expr.Counter); ok {
+					count += counter.Packets
+				}
+			}
+		}
+		return count
+	}
+	before := observed()
+	for i := 0; i < 8; i++ {
+		probe(tcpClient)
+	}
+	if after := observed(); after != before || before == 0 {
+		t.Fatalf("packet observation did not stop at its connection budget: %d -> %d", before, after)
+	}
+	t.Log("TLS metadata came from copied payload; established traffic no longer generated packet observations")
 	lock, err := sql.Open("sqlite", historyPath)
 	if err != nil {
 		t.Fatal(err)
@@ -237,16 +301,21 @@ func TestDaemonTrafficFlowHistory(t *testing.T) {
 		}
 		return false
 	})
-	t.Log("history recovered from a locked database; counters advanced without splitting the connection or blocking traffic")
+	t.Log("real TLS/SNI classification was stored with source NAT counters; history recovered from a locked database; counters advanced without splitting the connection or blocking traffic")
 	f = f.restart()
 	probe(udpClient)
+	probe(tcpClient)
 	until(t, 4*time.Second, func() bool {
+		udpRetained, tlsRetained := false, false
 		for _, row := range history() {
 			if row.FlowKey == first.FlowKey && row.StartedAt.Equal(first.StartedAt) {
-				return true
+				udpRetained = true
+			}
+			if row.Protocol == "tcp" && row.ClientAddress == "192.0.2.2" && row.PeerPort == 18081 && row.TLSSNI == "flow.routerd.test" && row.Source == "builtin-payload" {
+				tlsRetained = true
 			}
 		}
-		return false
+		return udpRetained && tlsRetained
 	})
 	udpClient.Close()
 	tcpClient.Close()
@@ -290,6 +359,11 @@ func TestDaemonTrafficFlowHistory(t *testing.T) {
 	disabled := imported.Document
 	disabled.Resources = nil
 	for _, res := range imported.Document.Resources {
+		if res.Firewall != nil {
+			next := *res.Firewall
+			next.FlowObservationGroup = 0
+			res.Firewall = &next
+		}
 		if res.Service == nil || res.Service.TrafficFlow == nil {
 			if res.Forwarding != nil {
 				forwarding := *res.Forwarding
@@ -320,6 +394,15 @@ func TestDaemonTrafficFlowHistory(t *testing.T) {
 	})
 	if value, err := os.ReadFile("/proc/sys/net/netfilter/nf_conntrack_acct"); err != nil || strings.TrimSpace(string(value)) != "0" {
 		t.Fatal("removal did not restore original accounting", string(value), err)
+	}
+	chains, err := (&nftables.Conn{}).ListChainsOfTableFamily(nftables.TableFamilyINet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, chain := range chains {
+		if chain.Table.Name == "routerd2" && chain.Name == "flow_observation" {
+			t.Fatal("removed observation chain is still present")
+		}
 	}
 	c := connect("tcp4")
 	probe(c)

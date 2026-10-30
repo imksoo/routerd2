@@ -131,8 +131,8 @@ func syncActive(ctx context.Context, db *sql.DB, flows []logstore.TrafficFlow, a
 		return err
 	}
 	defer tx.Rollback()
-	stmt, err := tx.PrepareContext(ctx, `INSERT INTO flows(flow_key,ts_started,client_address,client_port,peer_address,peer_port,protocol,nat_translated_address,accounting,bytes_out,bytes_in,packets_out,packets_in)
-VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+	stmt, err := tx.PrepareContext(ctx, `INSERT INTO flows(flow_key,ts_started,client_address,client_port,peer_address,peer_port,protocol,nat_translated_address,accounting,bytes_out,bytes_in,packets_out,packets_in,app_name,app_category,app_confidence,detected_protocol,master_protocol,application_protocol,category,confidence,metadata_json,engine,source,tls_sni,http_host,dns_query,resolved_hostname)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(flow_key) DO UPDATE SET
  ts_ended = NULL,
  client_address = excluded.client_address,
@@ -145,13 +145,36 @@ ON CONFLICT(flow_key) DO UPDATE SET
  bytes_out = excluded.bytes_out,
  bytes_in = excluded.bytes_in,
  packets_out = excluded.packets_out,
- packets_in = excluded.packets_in`)
+ packets_in = excluded.packets_in,
+ app_name = COALESCE(NULLIF(excluded.app_name,''),flows.app_name),
+ app_category = COALESCE(NULLIF(excluded.app_category,''),flows.app_category),
+ app_confidence = COALESCE(NULLIF(excluded.app_confidence,0),flows.app_confidence),
+ detected_protocol = COALESCE(NULLIF(excluded.detected_protocol,''),flows.detected_protocol),
+ master_protocol = COALESCE(NULLIF(excluded.master_protocol,''),flows.master_protocol),
+ application_protocol = COALESCE(NULLIF(excluded.application_protocol,''),flows.application_protocol),
+ category = COALESCE(NULLIF(excluded.category,''),flows.category),
+ confidence = COALESCE(NULLIF(excluded.confidence,0),flows.confidence),
+ metadata_json = COALESCE(NULLIF(excluded.metadata_json,''),flows.metadata_json),
+ engine = COALESCE(NULLIF(excluded.engine,''),flows.engine),
+ source = COALESCE(NULLIF(excluded.source,''),flows.source),
+ tls_sni = COALESCE(NULLIF(excluded.tls_sni,''),flows.tls_sni),
+ http_host = COALESCE(NULLIF(excluded.http_host,''),flows.http_host),
+ dns_query = COALESCE(NULLIF(excluded.dns_query,''),flows.dns_query),
+ resolved_hostname = COALESCE(NULLIF(excluded.resolved_hostname,''),flows.resolved_hostname)`)
 	if err != nil {
 		return err
 	}
 	defer stmt.Close()
 	for _, flow := range flows {
-		if _, err := stmt.ExecContext(ctx, flow.FlowKey, flow.StartedAt.UnixNano(), flow.ClientAddress, flow.ClientPort, flow.PeerAddress, flow.PeerPort, flow.Protocol, flow.NATTranslatedAddress, flow.Accounting, flow.BytesOut, flow.BytesIn, flow.PacketsOut, flow.PacketsIn); err != nil {
+		metadata := ""
+		if len(flow.Metadata) > 0 {
+			data, err := json.Marshal(flow.Metadata)
+			if err != nil {
+				return err
+			}
+			metadata = string(data)
+		}
+		if _, err := stmt.ExecContext(ctx, flow.FlowKey, flow.StartedAt.UnixNano(), flow.ClientAddress, flow.ClientPort, flow.PeerAddress, flow.PeerPort, flow.Protocol, flow.NATTranslatedAddress, flow.Accounting, flow.BytesOut, flow.BytesIn, flow.PacketsOut, flow.PacketsIn, flow.AppName, flow.AppCategory, flow.AppConfidence, flow.DetectedProtocol, flow.MasterProtocol, flow.ApplicationProtocol, flow.Category, flow.Confidence, metadata, flow.Engine, flow.Source, flow.TLSSNI, flow.HTTPHost, flow.DNSQuery, flow.ResolvedHostname); err != nil {
 			return err
 		}
 	}

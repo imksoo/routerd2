@@ -319,6 +319,16 @@ func validateFirewall(f *Firewall) error {
 			continue
 		}
 		chain := item.chain
+		if f.FlowObservationGroup != 0 {
+			if chain.Log != nil && chain.Log.Group == f.FlowObservationGroup {
+				errs = append(errs, errors.New("flow observation group conflicts with firewall packet logging"))
+			}
+			for _, rule := range chain.Rules {
+				if rule.Log != nil && rule.Log.Group == f.FlowObservationGroup {
+					errs = append(errs, errors.New("flow observation group conflicts with firewall packet logging"))
+				}
+			}
+		}
 		if chain.Policy != "" && chain.Policy != "accept" && chain.Policy != "drop" {
 			errs = append(errs, fmt.Errorf("firewall %s: policy must be accept/drop", item.name))
 		}

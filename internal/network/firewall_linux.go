@@ -176,6 +176,26 @@ func buildFirewall(c *nftables.Conn, f *Firewall) error {
 		}
 		buildFilterChain(c, t, "forward", nftables.ChainHookForward, policy, f.Forward)
 	}
+	if f.FlowObservationGroup != 0 {
+		accept := nftables.ChainPolicyAccept
+		chain := c.AddChain(&nftables.Chain{Name: "flow_observation", Table: t, Type: nftables.ChainTypeFilter, Hooknum: nftables.ChainHookForward, Priority: nftables.ChainPriorityRef(1), Policy: &accept})
+		// Preserve routerd's post-filter observation: accepted new/established
+		// connections, fewer than ten packets, and a 2048-byte packet copy.
+		mask := expr.CtStateBitNEW | expr.CtStateBitESTABLISHED
+		es := []expr.Any{
+			&expr.Ct{Register: 1, Key: expr.CtKeySTATE},
+			&expr.Bitwise{SourceRegister: 1, DestRegister: 1, Len: 4, Mask: binaryutil.NativeEndian.PutUint32(mask), Xor: make([]byte, 4)},
+			&expr.Cmp{Op: expr.CmpOpNeq, Register: 1, Data: make([]byte, 4)},
+			&expr.Ct{Register: 1, Key: expr.CtKeyPKTS},
+			// Conntrack counters are host-order; ordered nft comparisons are bytewise.
+			&expr.Byteorder{SourceRegister: 1, DestRegister: 1, Op: expr.ByteorderHton, Len: 8, Size: 8},
+			&expr.Cmp{Op: expr.CmpOpGt, Register: 1, Data: make([]byte, 8)},
+			&expr.Cmp{Op: expr.CmpOpLt, Register: 1, Data: binaryutil.BigEndian.PutUint64(10)},
+		}
+		es = append(es, &expr.Counter{})
+		es = append(es, logExpressions(&PacketLog{Group: f.FlowObservationGroup, CopyRange: 2048, Prefix: "flow observation"}, "accept")...)
+		c.AddRule(&nftables.Rule{Table: t, Chain: chain, Exprs: es})
+	}
 	if len(f.MSSClamp) > 0 {
 		buildMSSClamp(c, t, f.MSSClamp)
 	}
