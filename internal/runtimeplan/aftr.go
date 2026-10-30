@@ -286,36 +286,11 @@ func projectDSLite(p *projection, doc config.Native, protocols protocolPlan, rec
 		if input.ConfigDigest != digest {
 			continue
 		}
-		current, err := aftrDependencies(protocols.aftr[service.ModuleName()], records, digest, clock)
+		snap, until, usable, err := currentAFTR(protocols.aftr[service.ModuleName()], input, u, records, clock)
 		if err != nil {
 			return err
 		}
-		// An input without a usable observed source cannot install a tunnel.
-		if input.Source.Address == "" {
-			continue
-		}
-		if !aftr.SameQuery(input, current) {
-			continue
-		}
-		var snap aftr.Snapshot
-		if err := strict(u.Snapshot, &snap); err != nil {
-			return err
-		}
-		if !snap.Active || !snap.Available || snap.Generation != input.Generation || snap.BootID != clock.BootID || !snap.ValidUntil.Live(clock) {
-			continue
-		}
-		cfg := service.AFTRConfig()
-		cfg.ConfigDigest = digest
-		if err := aftr.ValidateSnapshot(cfg, input, snap); err != nil {
-			return err
-		}
-		// Use current source budgets immediately, including shortening, without
-		// waiting for the resolver to republish an unchanged DNS endpoint.
-		until := lifetime.Minimum(clock, snap.ValidUntil, current.Source.PreferredUntil, current.Source.ValidUntil, current.Candidates[snap.CandidateIndex].ValidUntil)
-		if snap.ResolverIndex >= 0 {
-			until = lifetime.Minimum(clock, until, current.Resolvers[snap.ResolverIndex].ValidUntil)
-		}
-		if !until.Live(clock) {
+		if !usable {
 			continue
 		}
 		p.network.Links = append(p.network.Links, network.Link{Name: c.Tunnel, Kind: "ip6tnl", Parent: c.Interface, Local: snap.Local, Remote: snap.Remote, Authority: until})
@@ -351,4 +326,34 @@ func (r *Runtime) validateAFTRSnapshotLocked(b binding, raw json.RawMessage) err
 	}
 	private.Protocol.ConfigDigest = b.digest
 	return aftr.ValidateSnapshot(private.Protocol, in, snap)
+}
+
+// currentAFTR is the endpoint's current authority, shared by its active fact
+// and kernel projection. An old endpoint observation cannot outlive a changed
+// source or resolver input.
+func currentAFTR(definition aftrDefinition, input aftr.Input, u serviceconfig.Update, records map[string]serviceconfig.Update, clock boottime.Clock) (aftr.Snapshot, lifetime.Deadline, bool, error) {
+	var snap aftr.Snapshot
+	if err := strict(u.Snapshot, &snap); err != nil {
+		return snap, lifetime.Deadline{}, false, err
+	}
+	if input.Source.Address == "" {
+		return snap, lifetime.Deadline{}, false, nil
+	}
+	current, err := aftrDependencies(definition, records, input.ConfigDigest, clock)
+	if err != nil {
+		return snap, lifetime.Deadline{}, false, err
+	}
+	if !aftr.SameQuery(input, current) || !snap.Active || !snap.Available || snap.Generation != input.Generation || snap.BootID != clock.BootID || !snap.ValidUntil.Live(clock) {
+		return snap, lifetime.Deadline{}, false, nil
+	}
+	cfg := definition.service.AFTRConfig()
+	cfg.ConfigDigest = input.ConfigDigest
+	if err := aftr.ValidateSnapshot(cfg, input, snap); err != nil {
+		return snap, lifetime.Deadline{}, false, err
+	}
+	until := lifetime.Minimum(clock, snap.ValidUntil, current.Source.PreferredUntil, current.Source.ValidUntil, current.Candidates[snap.CandidateIndex].ValidUntil)
+	if snap.ResolverIndex >= 0 {
+		until = lifetime.Minimum(clock, until, current.Resolvers[snap.ResolverIndex].ValidUntil)
+	}
+	return snap, until, until.Live(clock), nil
 }

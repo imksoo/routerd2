@@ -325,10 +325,6 @@ func (r *Runtime) reconcileStep(ctx context.Context, ceiling map[string]supervis
 		if err := r.manager.Reconcile(ctx, keep); err != nil {
 			return false, err
 		}
-		return false, nil // consume a new supervisor observation before effects
-	}
-	if blocked {
-		return false, nil
 	}
 	r.mu.Lock()
 	if !r.configured {
@@ -342,6 +338,12 @@ func (r *Runtime) reconcileStep(ctx context.Context, ceiling map[string]supervis
 	}
 	if !sameInstances(latest.instances, p.instances) {
 		r.wakeCoordinatorLocked()
+		r.mu.Unlock()
+		return false, nil
+	}
+	// Stopping consumers still protect resource removal. Existing owners can
+	// renew the same resources using their original protocol deadlines.
+	if (retire || blocked) && (r.applied.network == nil || !networkCovered(*r.applied.network, latest.network)) {
 		r.mu.Unlock()
 		return false, nil
 	}
@@ -401,6 +403,10 @@ func (r *Runtime) reconcileStep(ctx context.Context, ceiling map[string]supervis
 			r.mu.Unlock()
 			return false, err
 		}
+	}
+	if retire || blocked {
+		r.mu.Unlock()
+		return false, nil
 	}
 	if changed {
 		r.bindings = set.bindings

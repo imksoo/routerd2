@@ -7,7 +7,6 @@ import (
 	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/lifetime"
-	"github.com/imksoo/routerd2/internal/protocol/aftr"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp4"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
@@ -192,21 +191,34 @@ func (r *Runtime) conditionFactsLocked(cfg configuration) (result resourceprogra
 			continue
 		}
 		if record.Role == "aftr" {
-			var endpoint aftr.Snapshot
-			if !module.Ready || record.Generation != module.Generation || record.ConfigDigest != binding.digest || json.Unmarshal(record.Snapshot, &endpoint) != nil || endpoint.BootID != clock.BootID || endpoint.ObservedNanos > ticks {
+			if !module.Ready || record.Generation != module.Generation || record.ConfigDigest != binding.digest {
+				continue
+			}
+			input, exists := r.aftrInputs[name]
+			if !exists {
+				continue
+			}
+			endpoint, authority, usable, err := currentAFTR(cfg.protocols.aftr[name], input, record, r.records, clock)
+			if err != nil {
+				return facts, err
+			}
+			if endpoint.BootID != clock.BootID || endpoint.ObservedNanos > ticks {
 				continue
 			}
 			value := resourceprogram.False
-			if endpoint.Active && endpoint.Available && endpoint.ValidUntil.Live(clock) {
+			if usable {
 				value = resourceprogram.True
+			} else {
+				authority = endpoint.ValidUntil
 			}
 			until := ^uint64(0)
-			if endpoint.ValidUntil != (lifetime.Deadline{}) {
-				until = ticks + uint64(endpoint.ValidUntil.Remaining(clock))
+			if authority != (lifetime.Deadline{}) {
+				until = ticks + uint64(authority.Remaining(clock))
 			}
 			facts.Facts[name+".active"] = resourceprogram.Fact{Value: value, ObservedNanos: endpoint.ObservedNanos, ExpiresNanos: until, WorkerGeneration: module.Generation, ProducerEpoch: record.ProducerEpoch}
 			continue
 		}
+
 		if record.Role == "pppoe" {
 			var session pppoeconfig.Snapshot
 			if !module.Ready || record.Generation != module.Generation || record.ConfigDigest != binding.digest || json.Unmarshal(record.Snapshot, &session) != nil || session.ValidUntil.BootID != clock.BootID || session.ObservedNanos > ticks {

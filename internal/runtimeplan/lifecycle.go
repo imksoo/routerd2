@@ -19,9 +19,9 @@ func (r *Runtime) drainDependenciesLocked(ceiling map[string]supervisor.DynamicM
 		resource := r.config.resources[id]
 		if resource.Service != nil {
 			name := resource.Service.ModuleName()
-			old := r.config.protocols.instances[name]
+			old, bound := r.bindings[name]
 			desired, retained := ceiling[name]
-			draining[id] = !retained || old.digest != desired.ConfigDigest
+			draining[id] = !retained || bound && old.digest != desired.ConfigDigest
 		}
 		for _, dependency := range r.config.plan.Dependencies[id] {
 			draining[id] = draining[id] || draining[dependency]
