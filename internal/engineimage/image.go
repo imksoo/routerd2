@@ -41,56 +41,55 @@ func Command(role string) string {
 const maxBytes = 64 << 20
 
 type entry struct {
-	name string
 	mode os.FileMode
 	data []byte
 }
 
-func read(file *os.File) ([]entry, error) {
+func walk(file *os.File, visit func(string, os.FileMode, io.Reader) error) error {
 	stat, err := file.Stat()
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if !stat.Mode().IsRegular() || stat.Size() < 1024 || stat.Size() > maxBytes {
-		return nil, errors.New("engine image must be a bounded regular tar archive")
+		return errors.New("engine image must be a bounded regular tar archive")
 	}
 	r := tar.NewReader(io.NewSectionReader(file, 0, stat.Size()))
-	var entries []entry
 	seen := map[string]bool{}
 	var total int64
 	for {
 		h, err := r.Next()
 		if err == io.EOF {
-			return entries, nil
+			return nil
 		}
 		if err != nil {
-			return nil, err
+			return err
 		}
 		name := h.Name
-		if h.Typeflag != tar.TypeReg || name == "" || name == "." || path.IsAbs(name) || path.Clean(name) != name || name == ".." || strings.HasPrefix(name, "../") || seen[name] || len(entries) >= 128 || h.Size < 0 || h.Size > maxBytes-total {
-			return nil, errors.New("invalid engine image file, path, duplicate or size")
+		if h.Typeflag != tar.TypeReg || name == "" || name == "." || path.IsAbs(name) || path.Clean(name) != name || name == ".." || strings.HasPrefix(name, "../") || seen[name] || len(seen) >= 128 || h.Size < 0 || h.Size > maxBytes-total {
+			return errors.New("invalid engine image file, path, duplicate or size")
 		}
 		seen[name] = true
-		e := entry{name: name, mode: os.FileMode(h.Mode & 0777)}
-		e.data, err = io.ReadAll(r)
-		if err != nil {
-			return nil, err
+		if err := visit(name, os.FileMode(h.Mode&0777), r); err != nil {
+			return err
 		}
 		total += h.Size
-		entries = append(entries, e)
 	}
 }
 
 // Validate checks the actual ELF loader/library/plugin closure before a role
 // is advertised. The archive is immutable and pinned by its owning catalog.
 func Validate(file *os.File, arch, role string) error {
-	entries, err := read(file)
+	files := make(map[string]entry)
+	err := walk(file, func(name string, mode os.FileMode, r io.Reader) error {
+		data, err := io.ReadAll(r)
+		if err != nil {
+			return err
+		}
+		files[name] = entry{mode: mode, data: data}
+		return nil
+	})
 	if err != nil {
 		return err
-	}
-	files := make(map[string]entry, len(entries))
-	for _, e := range entries {
-		files[e.name] = e
 	}
 	machine := elf.EM_X86_64
 	if arch == "arm64" {
@@ -174,19 +173,22 @@ func Validate(file *os.File, arch, role string) error {
 }
 
 // Extract runs after the engine helper has entered an empty private chroot.
-// It accepts only the regular-file image produced by the build path.
+// The owning helper discards this root on failure and executes the engine only
+// after extraction succeeds, so file contents need not be retained in memory.
 func Extract(file *os.File) error {
-	entries, err := read(file)
-	if err != nil {
-		return err
-	}
-	for _, e := range entries {
-		if err := os.MkdirAll(path.Dir(e.name), 0700); err != nil {
+	return walk(file, func(name string, mode os.FileMode, r io.Reader) error {
+		if err := os.MkdirAll(path.Dir(name), 0700); err != nil {
 			return err
 		}
-		if err := os.WriteFile(e.name, e.data, e.mode); err != nil {
+		out, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
+		if err != nil {
 			return err
 		}
-	}
-	return nil
+		_, err = io.Copy(out, r)
+		closeErr := out.Close()
+		if err != nil {
+			return err
+		}
+		return closeErr
+	})
 }

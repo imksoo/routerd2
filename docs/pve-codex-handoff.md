@@ -950,3 +950,13 @@ ONU 直結・物理 NIC・継続 TCP の資格認定は別である。ens20 の�
    取得・解析を変換・通信受入とは区別し、homert成立後に実差分を解消してCloud SAMへ進む。
    SAMは旧docsの再設計目標を読み、認証/取消、構成配布、/32所有とNAT無し転送、移動・復旧を完成させる。
    新しい有料環境やproduction操作の許可を推定しない。
+
+## 追加候補: engine-stream-native80（2026-10-30）
+
+`engineimage.Extract`は、私有tmpfs/chrootで検査済みtarを逐次コピーし、全ファイルの内容をGo heapへ二重保持しない。path・通常ファイル・重複・件数・サイズ・modeの検査、catalogのELF検証を維持する。5種類のhelperは成功後だけexecし、失敗時はprocess終了で私有rootを破棄する。起動期限とreadyの意味は変更しない。
+
+`make build build-publisher build-linux RELEASE_ID=engine-stream-native80`後、`python3 scripts/ntp-peer.py`と`python3 scripts/tailscale-peer.py --homert`が終了0。前者はhost modeの実chronydと独立source/LAN chronyd・captureで時計非変更の同期/配信を確認。後者は署名PID 1と独立Headscale/公式Tailscaleで三広告・双方向TCP/UDP・両IP出口、worker/PID 1再起動と鍵無しidentity維持、撤去/再設定まで通った。
+
+同じ約29MBのpinned Tailscale tarを私有mount/net/PID namespaceの実helperで一回ずつ起動し、socket作成と正常終了を確認した。`wait4`の最大RSSは旧`homert-dns-prebind-native80`の95,232 KiBから新候補31,616 KiBへ減った。socket作成は各0.1376/0.0771秒だったが、性能評価や512MiB/2CPU/TCG全homert同時起動の合格へ読み替えない。後者と旧BACKUP3秒障害は未解決の別受入である。
+
+engineimage/release/supervisor/engine callersの関連Race、vet、CGO0両arch、`make release-built-test RELEASE_ID=engine-stream-native80`、秘密情報検査が終了0。最初のpublisher拒否は専用worktreeルート0775で、0755に直した同じ生成物で再検査した。検査条件は緩めていない。全`make check`はこの局所変更では再実行していない。
