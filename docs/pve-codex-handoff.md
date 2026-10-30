@@ -1,3 +1,11 @@
+## 固定候補の自然更新観測中（2026-10-30 11:34 JST開始）
+
+`d525792` / `dynamic-dns-bounded-native79`を固定し、実HGW `ens18`・同じ保存WAN identity・隔離Linux・起動前からの独立端末で7800秒観測を開始した。初回IPv4/IPv6 DNS NOERRORとHTTPS200、現VIP/PD名、条件付きDNSの障害分離・復帰が通り、定期通信を継続中。開始時の自然T1まで約7182秒。完走・自然PD更新・末尾の全daemon再起動はまだ未判定。後から統合する別候補の成功へ読み替えない。私有log `/tmp/routerd-dynamic-dns-bounded-native79-natural.log`。
+
+HTTPがrequest終了後にも接続用Dialを継続するGoの動作により、上流名の解決が元問い合わせ後に残ることを実UDP/TLSで再現し、既存QueryTimeoutをDialerにも設定した。上流復帰後の同名解決まで通過。関連DNS全Race/vet・CGO0両arch build・署名六ELF/catalog/publisher検査が終了0。初回のartifact権限拒否は、umask002による書込可能な実行ファイルをGoの再buildが再利用したためで、build targetがumask022と最終mode0755を所有するよう揃えた。製品の鍵・成果物保護は変更しない。
+
+旧生成イメージ五組（archive計測、authority履歴、native73/74、約1.51GB）を削除した。現実行のstage・保存DUID・必要な独立peerは保持している。全homertの二段DNS/二対向BGP同時利用、二台・動的IPIPの統合候補、対象実機と全34項目は引き続き未完了。
+
 ## 追加候補: dynamic-dns-native79（2026-10-30 JST）
 
 旧routerdの`expandZoneSpec`で使うPD/VIP由来のローカル記録を、既存の型付きDNS入力へ接続した。設定には所有者を残し、適用済みPDと現VRRP所有権から現アドレス・元期限を渡す。DHCPの架空producerや設定再生成は設けない。DNSは問い合わせ時にも期限を確認する。動的記録だけの構成で入力購読を開始しない接続漏れは、実daemon試験で検出して修正した。
