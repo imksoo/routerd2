@@ -37,7 +37,7 @@ func (c *compiler) logRetention(r resource) {
 	if len(signals) == 0 {
 		signals = []string{"events", "accessLogs", "pluginRuns", "dnsQueries", "trafficFlows", "firewallEvents", "dhcpFingerprints"}
 	}
-	events, queries, firewall, access, flows := false, false, false, false, false
+	events, queries, firewall, inactive, flows, fingerprints := false, false, false, false, false, false
 	for _, signal := range signals {
 		if signal == "events" {
 			events = true
@@ -49,16 +49,27 @@ func (c *compiler) logRetention(r resource) {
 		case "firewallEvents":
 			firewall = true
 		case "accessLogs":
-			access = true
+			inactive = true
 			c.note(r, "Legacy access_logs had no producer; retention of that empty dataset creates no native history owner. Existing database contents are not imported.")
 		case "trafficFlows":
 			flows = true
-		case "pluginRuns", "dhcpFingerprints":
-			c.reject(r, "signals", "unsupported_semantics", "operational history dataset "+signal+" has no native retention owner")
+		case "dhcpFingerprints":
+			fingerprints = true
+		case "pluginRuns":
+			if len(c.resourcesOfKind("Plugin")) > 0 || len(c.resourcesOfKind("EventSubscription")) > 0 {
+				c.reject(r, "signals", "unsupported_semantics", "pluginRuns has configured producers but no native execution or retention owner")
+				return
+			}
+			inactive = true
+			c.note(r, "This input declares neither Plugin nor EventSubscription, so pluginRuns has no configured producer. No native history owner is created and existing database contents are not imported.")
 		default:
 			c.reject(r, "signals", "unsupported_semantics", "unknown operational history dataset")
 			return
 		}
+	}
+	if fingerprints && len(c.resourcesOfKind("DHCPv4Server")) == 0 {
+		c.reject(r, "signals", "unsupported_semantics", "dhcpFingerprints requires a DHCPv4Server producer")
+		return
 	}
 	if flows {
 		enabled := false
@@ -80,11 +91,11 @@ func (c *compiler) logRetention(r resource) {
 			return
 		}
 	}
-	if !events && !queries && !firewall && !access && !flows {
+	if !events && !queries && !firewall && !inactive && !flows && !fingerprints {
 		c.reject(r, "signals", "unsupported_semantics", "requested datasets have no native history owner; event retention is not substituted")
 		return
 	}
-	if events && c.retention != nil || queries && c.queryRetention != nil || firewall && c.firewallRetention != nil || flows && c.flowRetention != nil {
+	if events && c.retention != nil || queries && c.queryRetention != nil || firewall && c.firewallRetention != nil || flows && c.flowRetention != nil || fingerprints && c.fingerprintRetention != nil {
 		c.reject(r, "", "unsupported_semantics", "each history dataset has one retention policy; combine policies explicitly")
 		return
 	}
@@ -117,8 +128,13 @@ func (c *compiler) logRetention(r resource) {
 		}
 		policy.Syslog = append(policy.Syslog, destination)
 	}
-	if access && !events && !queries && !firewall && !flows {
+	if inactive && !events && !queries && !firewall && !flows && !fingerprints {
 		c.target(r, "inactive")
+	}
+	if fingerprints {
+		c.fingerprintRetention = &policy
+		c.target(r, "services/*/dhcp_server/fingerprint_retention")
+		c.note(r, "DHCPv4 fingerprint history uses actual dnsmasq lease notifications with vendor class and requested options. Each DHCP service owns its database and daily age-based retention; storage or archive failure does not gate DHCP replies. Former watcher auto-start is not assumed and existing history is not imported.")
 	}
 	if flows {
 		c.flowRetention = &policy

@@ -15,6 +15,7 @@ import (
 
 	"github.com/imksoo/routerd/pkg/api"
 	"github.com/imksoo/routerd2/internal/peertls"
+	"github.com/imksoo/routerd2/internal/retention"
 )
 
 type Option = api.DHCPv4OptionSpec
@@ -30,20 +31,21 @@ const (
 // The network writer provisions ServerAddress and interface topology before
 // serving. The engine never creates addresses or changes routing.
 type Config struct {
-	Resource                  string          `json:"resource"`
-	Interface                 string          `json:"interface"`
-	ServerAddress             string          `json:"server_address"`
-	Primary                   Scope           `json:"primary"`
-	Scopes                    []Scope         `json:"scopes,omitempty"`
-	Reservations              []Reservation   `json:"reservations,omitempty"`
-	Authoritative             bool            `json:"authoritative,omitempty"`
-	StickyHoldDays            int             `json:"sticky_hold_days,omitempty"`
-	LogDHCP                   bool            `json:"log_dhcp,omitempty"`
-	MaxLeases                 int             `json:"max_leases,omitempty"`
-	EffectTimeoutMilliseconds int             `json:"effect_timeout_milliseconds,omitempty"`
-	StatePath                 string          `json:"state_path"`
-	Replication               *peertls.Config `json:"replication,omitempty"`
-	Bootstrap                 bool            `json:"bootstrap,omitempty"`
+	Resource                  string            `json:"resource"`
+	Interface                 string            `json:"interface"`
+	ServerAddress             string            `json:"server_address"`
+	Primary                   Scope             `json:"primary"`
+	Scopes                    []Scope           `json:"scopes,omitempty"`
+	Reservations              []Reservation     `json:"reservations,omitempty"`
+	Authoritative             bool              `json:"authoritative,omitempty"`
+	StickyHoldDays            int               `json:"sticky_hold_days,omitempty"`
+	FingerprintRetention      *retention.Config `json:"fingerprint_retention,omitempty"`
+	LogDHCP                   bool              `json:"log_dhcp,omitempty"`
+	MaxLeases                 int               `json:"max_leases,omitempty"`
+	EffectTimeoutMilliseconds int               `json:"effect_timeout_milliseconds,omitempty"`
+	StatePath                 string            `json:"state_path"`
+	Replication               *peertls.Config   `json:"replication,omitempty"`
+	Bootstrap                 bool              `json:"bootstrap,omitempty"`
 	// Standby owns the lease file and replication listener, without DHCP sockets.
 	Standby bool `json:"standby,omitempty"`
 }
@@ -159,6 +161,14 @@ func Validate(c Config) error {
 	}
 	if c.EffectTimeoutMilliseconds < 10 || c.EffectTimeoutMilliseconds > 4000 {
 		return errors.New("DHCP effect timeout must be 10..4000 ms")
+	}
+	if c.FingerprintRetention != nil {
+		if err := c.FingerprintRetention.Validate(); err != nil {
+			return err
+		}
+		if c.FingerprintRetention.MaxAgeSeconds == 0 || c.FingerprintRetention.MaxRecords != 0 || c.FingerprintRetention.MaxBytes != 0 {
+			return errors.New("DHCP fingerprint retention supports an age limit")
+		}
 	}
 	if len(c.Scopes) > 64 || len(c.Reservations) > c.MaxLeases {
 		return errors.New("DHCP scope, reservation or relay limit exceeded")

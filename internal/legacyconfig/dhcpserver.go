@@ -277,6 +277,7 @@ func (c *compiler) dhcpServer(r resource, reservations []resource, vrrpNames map
 	service.DHCPServer.Primary, service.DHCPServer.Scopes, service.DHCPServer.Reservations = cfg.Primary, cfg.Scopes, cfg.Reservations
 	service.DHCPServer.StickyHoldDays = cfg.StickyHoldDays
 	service.DHCPServer.LogDHCP = cfg.LogDHCP
+	service.DHCPServer.FingerprintRetention = c.fingerprintRetention
 	c.addService(r, service)
 	c.note(r, "Static DHCP intent follows the pinned active chain. One worker supervises the pinned dnsmasq engine and observes its lease file; old lease/sticky/HA state is not imported. The dnsmasq router, DNS and broadcast defaults and 1000-lease limit are explicit.")
 	for _, item := range reservations {

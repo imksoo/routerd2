@@ -39,7 +39,22 @@ func TestRetentionImportPreservesEventPolicyAndRejectsMissingDatasets(t *testing
 	if !strings.Contains(note, "access_logs had no producer") {
 		t.Fatal("missing explanation for the inactive access history", note)
 	}
-	for _, signal := range []string{"pluginRuns", "trafficFlows", "firewallEvents", "dhcpFingerprints"} {
+	for _, signals := range []string{"events, pluginRuns", "pluginRuns"} {
+		inactivePlugin, err := Compile([]byte(strings.Replace(source, "signals: [events, accessLogs]", "signals: ["+signals+"]", 1)))
+		if err != nil || (inactivePlugin.Document.Retention != nil) != strings.Contains(signals, "events") {
+			t.Fatal("inactive plugin history must preserve only requested active owners", signals, inactivePlugin, err)
+		}
+		note = ""
+		for _, mapping := range inactivePlugin.Mappings {
+			if mapping.Resource == "LogRetention/default" {
+				note = strings.Join(mapping.Notes, " ")
+			}
+		}
+		if !strings.Contains(note, "neither Plugin nor EventSubscription") || !strings.Contains(note, "existing database contents are not imported") {
+			t.Fatal("missing input-specific inactive plugin explanation", note)
+		}
+	}
+	for _, signal := range []string{"trafficFlows", "firewallEvents", "dhcpFingerprints"} {
 		result, err = Compile([]byte(strings.Replace(source, "signals: [events, accessLogs]", "signals: [events, "+signal+"]", 1)))
 		var unsupported *UnsupportedError
 		if !errors.As(err, &unsupported) || len(result.Document.Resources) != 0 || result.Document.Retention != nil || !strings.Contains(err.Error(), signal) {
@@ -107,5 +122,32 @@ func TestFirewallHistoryRetentionImportsIntoCollector(t *testing.T) {
 	}
 	if !found || result.Document.Retention != nil {
 		t.Fatal("firewall retention was not scoped to its collector")
+	}
+}
+
+func TestDHCPFingerprintRetentionImportsIntoTheLeaseOwner(t *testing.T) {
+	source := string(fixture(t, "dhcp-server")) + `
+    - apiVersion: system.routerd.net/v1alpha1
+      kind: LogRetention
+      metadata: {name: client-identities}
+      spec: {retention: 7d, schedule: daily, vacuum: true, signals: [dhcpFingerprints]}
+`
+	result, err := Compile([]byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, resource := range result.Document.Resources {
+		if resource.Service == nil || resource.Service.DHCPServer == nil {
+			continue
+		}
+		found = true
+		policy := resource.Service.DHCPServer.FingerprintRetention
+		if policy == nil || policy.MaxAgeSeconds != 604800 || policy.IntervalSeconds != 86400 || !policy.Vacuum {
+			t.Fatal(policy)
+		}
+	}
+	if !found || result.Document.Retention != nil {
+		t.Fatal("DHCP fingerprint retention was not scoped to the lease owner")
 	}
 }

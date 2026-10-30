@@ -171,3 +171,16 @@ PD worker SIGKILL後1.52秒、通常交換10.99秒、全daemon再起動11.08秒�
 実際のhomertにあるPackage/conntrackdは、設定済みNAT同期の署名engineが実行物を供給する前提へ対応させた。hostのaptや任意package管理は実装しない。出力は同じ既存のNAT同期設定で、新しいruntime形式や互換readerはない。
 
 `owner-import-native88`の実supervisor/control/network/workerと独立ISC・keepalived・Linux clientで、所有情報を持つ取込fixtureが71.61秒で終了0。SLAAC/default/DNS取得、DNS UDP/TCP、IPv6 TCP/UDP、役割変更・本来の権限期限による撤去、PD喪失/再取得を確認した。最初はfixture指定のISC実行物がhostの既定pathに無く、製品起動前に失敗。既存の独立ISCを明示した再実行で成功した。最終Package追加後のlegacyconfig Race、全vet、CGO0両architecture build、署名配布物検査は終了0。Package追加はcompilerの前提解決だけで、実通信はその直前の版である。全homert設定の取込・実通信、SAM BGP、管理画面、対象物理機器の受入は未完了。
+### 2026-10-30 19:12 JST: DHCP端末識別の統合と未使用プラグイン履歴
+
+- `232f23f`（native89/network26、製品識別子 `homert-native89-dhcp-fingerprints`）で、本体と通知エンジンを再作成した。
+  `dist/native89-dhcp-fingerprint-peer/` に実行物のSHA-256と実通信ログを保持している。
+  独立したBusyBox端末のアドレス・経路取得と疎通、実通知の端末識別情報保存、保存先の書込みロック中の別端末の取得・疎通、解除後の保存復帰、保持期限での削除、設定撤去後の配布継続を確認した（内側28.85秒、全体29.90秒）。
+- 履歴の生成元は実際のdnsmasq通知で、旧routerdの端末推定・保存処理を再利用した。
+  DHCP通知の受付から履歴保存を分離し、エンジンと通知受付が終了してから履歴を停止する。
+  関連する取込・DHCP・設定・形式契約の競合検査も通過した。対象実機、二台切替、削除前の外部配送はこの試験の対象ではない。
+- `pluginRuns` は、保存済みの両homert設定に `Plugin` と `EventSubscription` がないことを確認した。
+  旧実装の実生成元は手動プラグイン実行と購読からの実行だけであり、この入力には生成元がない。
+  その場合だけ非稼働の保持分類として明示し、不要な保存処理は生成しない。宣言がある場合は未対応診断を維持する。
+  過去のデータベースが空とは仮定せず、既存内容を移行しないことも通知する。この取込変更は上記の実通信試験後に追加し、取込試験を通過した。
+- nDPI分類と通常配布は独立担当で継続中。上記を全設定の起動、自然更新、同一版の二台運用や本番置換の合格として扱わない。

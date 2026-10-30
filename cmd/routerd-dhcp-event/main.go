@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/imksoo/routerd2/internal/protocol/dhcpevent"
@@ -28,6 +30,12 @@ func run(args []string) error {
 	event := dhcpevent.Event{Action: args[0], MAC: args[1], IP: args[2], At: time.Now().UTC(), FromFile: os.Getenv("DNSMASQ_DATA_MISSING") == "1"}
 	if len(args) > 3 && args[3] != "*" {
 		event.Hostname = args[3]
+	}
+	event.VendorClass = os.Getenv("DNSMASQ_VENDOR_CLASS")
+	for _, value := range strings.FieldsFunc(os.Getenv("DNSMASQ_REQUESTED_OPTIONS"), func(r rune) bool { return r == ',' || r == ' ' }) {
+		if option, err := strconv.Atoi(value); err == nil && option > 0 {
+			event.RequestedOptions = append(event.RequestedOptions, option)
+		}
 	}
 	conn, err := net.DialTimeout("unix", os.Getenv("ROUTERD_DHCP_EVENT_SOCKET"), time.Second)
 	if err != nil {

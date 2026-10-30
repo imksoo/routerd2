@@ -7,6 +7,7 @@ import (
 
 	"github.com/imksoo/routerd2/internal/peertls"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
+	"github.com/imksoo/routerd2/internal/retention"
 )
 
 // DHCPServer exposes protocol intent; the runtime owns the lease file and engine lifetime.
@@ -18,6 +19,7 @@ type DHCPServer struct {
 	Reservations              []dhcpserverconfig.Reservation `json:"reservations,omitempty"`
 	Authoritative             bool                           `json:"authoritative,omitempty"`
 	StickyHoldDays            int                            `json:"sticky_hold_days,omitempty"`
+	FingerprintRetention      *retention.Config              `json:"fingerprint_retention,omitempty"`
 	LogDHCP                   bool                           `json:"log_dhcp,omitempty"`
 	MaxLeases                 int                            `json:"max_leases,omitempty"`
 	EffectTimeoutMilliseconds int                            `json:"effect_timeout_milliseconds,omitempty"`
@@ -77,7 +79,7 @@ func (s Service) DHCPServerConfig(stateDir string) dhcpserverconfig.Config {
 	cfg := dhcpserverconfig.Config{
 		Resource: s.Name, Interface: c.Interface, ServerAddress: c.ServerAddress,
 		Primary: c.Primary, Scopes: c.Scopes, Reservations: c.Reservations, Authoritative: c.Authoritative,
-		LogDHCP: c.LogDHCP, StickyHoldDays: c.StickyHoldDays,
+		FingerprintRetention: c.FingerprintRetention, LogDHCP: c.LogDHCP, StickyHoldDays: c.StickyHoldDays,
 		MaxLeases: c.MaxLeases, EffectTimeoutMilliseconds: c.EffectTimeoutMilliseconds,
 		StatePath: filepath.Join(stateDir, "services", s.Name, "dnsmasq.leases"),
 	}

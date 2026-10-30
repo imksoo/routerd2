@@ -105,3 +105,38 @@ DHCP acceptance on a VRRP ownership notification timeout; that separate
 intermittent failure is not claimed resolved here. This check verifies DHCP
 assignment and renewal, not forwarding through the special profile's external
 gateway or DNS resolver, a complete homert deployment, or physical hardware.
+
+DHCP fingerprint history is enabled explicitly with
+`dhcp_server.fingerprint_retention`. The legacy importer connects
+`LogRetention.signals: [dhcpFingerprints]` to each DHCPv4 service. The existing
+bundled dnsmasq notification helper carries the client hostname, vendor class
+and requested option list from dnsmasq's own environment. `script-on-renewal`
+keeps actual renewals observable; startup lease-file replay and removals do not
+refresh an observation. Collection does not require sticky reservations or
+verbose DHCP text logs.
+
+The DHCP worker owns `state/services/<name>/dhcp-fingerprints.db`, reusing
+routerd's inference and SQLite schema. It stores the latest observation per MAC
+with its original notification time. Its finite in-memory queue does not wait
+for storage; overflow is counted and logged. Failed writes are reported and
+are not retried as a durable delivery queue. DHCP replies, lease notification
+acknowledgments and replication continue independently. Shutdown first drains
+the existing dnsmasq hook, then gives queued fingerprint records two seconds.
+Removing this setting stops collection and retention without deleting retained
+history or stopping DHCP service.
+
+Age retention and optional export-before-deletion reuse the existing retention
+implementation. Configured UDP syslog export runs before deletion; a send error
+keeps the affected rows for the next sweep. UDP send success cannot prove
+receiver storage. The old fingerprint watcher parsed dnsmasq text logs, but its
+automatic startup was not found in the inspected old repository. Migration
+therefore enables the connected producer explicitly; it does not claim prior
+watcher operation or import an old database.
+
+`make check-dhcp-dns` includes `TestDaemonDHCPFingerprints`. On 2026-10-30,
+independent BusyBox clients acquired and used distinct pool addresses while
+SQLite writes were locked. Real storage errors did not stop their gateway
+communication. New observations were saved after the lock was released, age
+retention removed them, and removing collection allowed another client to
+acquire and communicate without adding history. This does not establish
+fingerprint replication, a traffic-load limit, or physical-device qualification.
