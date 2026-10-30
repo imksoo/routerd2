@@ -42,6 +42,7 @@ type TailscalePolicy struct {
 // Map keys are exact legacy Kind/name identities. Each entry must be consumed by
 // that one resource; unqualified aliases and extra entries are rejected.
 type Options struct {
+	BGPNextHops   map[string]netip.Addr             `json:"bgp_next_hops,omitempty"`
 	LeaseSync     map[string]LeaseSyncPolicy        `json:"lease_sync,omitempty"`
 	VRRP          map[string]VRRPPolicy             `json:"vrrp,omitempty"`
 	HealthChecks  map[string]HealthCheckPolicy      `json:"health_checks,omitempty"`
@@ -194,7 +195,7 @@ func validateOptionsShape(d *decoder, options Options, explicit bool) {
 	if explicit && options.SchemaVersion != OptionsSchemaVersion {
 		d.issue(nil, "$policy.schema_version", "policy_version", "migration policy schema_version must be 1")
 	}
-	if len(options.LeaseSync)+len(options.RAClients)+len(options.DSLite)+len(options.DHCPDNS)+len(options.DHCP6Servers)+len(options.Tailscale)+len(options.HealthChecks)+len(options.VRRP) > 4096 {
+	if len(options.LeaseSync)+len(options.RAClients)+len(options.DSLite)+len(options.DHCPDNS)+len(options.DHCP6Servers)+len(options.Tailscale)+len(options.HealthChecks)+len(options.VRRP)+len(options.BGPNextHops) > 4096 {
 		d.issue(nil, "$policy", "policy_limit", "migration policy accepts at most 4096 resource entries")
 	}
 }
@@ -202,11 +203,14 @@ func validateOptionsShape(d *decoder, options Options, explicit bool) {
 func (c *compiler) initOptions(options Options, explicit bool) {
 	validateOptionsShape(c.decoder, options, explicit)
 	c.policyPaths, c.policyUsed = map[string]string{}, map[string]bool{}
-	if len(options.LeaseSync)+len(options.RAClients)+len(options.DSLite)+len(options.DHCPDNS)+len(options.DHCP6Servers)+len(options.Tailscale)+len(options.HealthChecks)+len(options.VRRP) > 4096 {
+	if len(options.LeaseSync)+len(options.RAClients)+len(options.DSLite)+len(options.DHCPDNS)+len(options.DHCP6Servers)+len(options.Tailscale)+len(options.HealthChecks)+len(options.VRRP)+len(options.BGPNextHops) > 4096 {
 		return
 	}
 	// Do not let a caller's later edit mutate a successfully compiled document.
-	c.options = Options{LeaseSync: map[string]LeaseSyncPolicy{}, SchemaVersion: options.SchemaVersion, RAClients: map[string]serviceconfig.RAClient{}, DSLite: map[string]DSLitePolicy{}, DHCPDNS: map[string]DHCPDNSPolicy{}, DHCP6Servers: map[string]DHCP6ServerPolicy{}, Tailscale: map[string]TailscalePolicy{}, HealthChecks: map[string]HealthCheckPolicy{}, VRRP: map[string]VRRPPolicy{}}
+	c.options = Options{BGPNextHops: map[string]netip.Addr{}, LeaseSync: map[string]LeaseSyncPolicy{}, SchemaVersion: options.SchemaVersion, RAClients: map[string]serviceconfig.RAClient{}, DSLite: map[string]DSLitePolicy{}, DHCPDNS: map[string]DHCPDNSPolicy{}, DHCP6Servers: map[string]DHCP6ServerPolicy{}, Tailscale: map[string]TailscalePolicy{}, HealthChecks: map[string]HealthCheckPolicy{}, VRRP: map[string]VRRPPolicy{}}
+	for key, value := range options.BGPNextHops {
+		c.options.BGPNextHops[key] = value
+	}
 	for key, value := range options.LeaseSync {
 		value.Bootstrap = copyBool(value.Bootstrap)
 		if value.Replication != nil {
@@ -266,6 +270,11 @@ func (c *compiler) initOptions(options Options, explicit bool) {
 		keys = append(keys, key)
 	}
 	check("ra_clients", "IPv6RAAddress", keys)
+	keys = make([]string, 0, len(options.BGPNextHops))
+	for key := range options.BGPNextHops {
+		keys = append(keys, key)
+	}
+	check("bgp_next_hops", "BGPRouter", keys)
 	keys = make([]string, 0, len(options.DSLite))
 	for key := range options.DSLite {
 		keys = append(keys, key)

@@ -61,9 +61,18 @@ func (c *compiler) bgp() []resourceCondition {
 				}
 			}
 		}
+		attrs := bgpdaemon.AppliedPathAttrs{Communities: s.Communities.Set.Out}
+		if nextHop, ok := c.options.BGPNextHops[r.Kind+"/"+r.Metadata.Name]; ok {
+			c.usePolicy(r, "bgp_next_hops")
+			if !nextHop.IsValid() {
+				c.policyIssue(r, "bgp_next_hops", "", "policy_validation", "BGP next hop must be an IP address")
+			} else {
+				attrs.NextHop = nextHop.String()
+			}
+		}
 		slices.Sort(prefixes)
 		for _, prefix := range prefixes {
-			intent.Runtime.Paths = append(intent.Runtime.Paths, bgpdaemon.AppliedPath{Source: bgpdaemon.AppliedPathSourceStatic, Prefix: prefix, Attrs: bgpdaemon.AppliedPathAttrs{Communities: s.Communities.Set.Out}})
+			intent.Runtime.Paths = append(intent.Runtime.Paths, bgpdaemon.AppliedPath{Source: bgpdaemon.AppliedPathSourceStatic, Prefix: prefix, Attrs: attrs})
 		}
 		ipv6 := false
 		for _, prefix := range append(slices.Clone(prefixes), s.ImportPolicy.AllowedPrefixes...) {

@@ -956,3 +956,25 @@ history owner. When combined with other signals, their retention behavior is
 unchanged. This is not an access-audit implementation or an import of historical
 database contents. `pluginRuns` and `dhcpFingerprints` have actual old write
 paths and remain unsupported until their own histories are implemented.
+
+## Explicit BGP advertisement next hop
+
+A migration policy can select the next hop of a router's static LAN
+advertisements. The address is normalized once and passed through the existing
+GoBGP path attributes:
+
+```yaml
+schema_version: 1
+bgp_next_hops:
+  BGPRouter/edge: 192.0.2.254
+```
+
+This is a deliberate configuration change. Without it the original default
+next-hop selection is retained. Two stateful active/backup routers advertising
+the same LAN through their physical addresses allow an upstream ECMP router to
+send replies to the standby, whose external conntrack cache is not installed in
+the kernel. A shared next hop can keep replies with the elected forwarding
+owner. Declare that shared address on the WAN VMAC, with its existing ownership
+condition, to keep its ARP identity with that owner. Do not weaken the firewall
+to conceal asymmetric return traffic. This configuration does not by itself
+qualify failover time or the complete two-router deployment.
