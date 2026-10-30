@@ -1,19 +1,19 @@
 # routerd2 開発引き継ぎ
 
-更新: 2026-10-31 05:23 JST。全34 work packageのゴールは継続中。
+更新: 2026-10-31 05:50 JST。全34 work packageのゴールは継続中。
 [実装計画](implementation-plan.md)、[機械可読台帳](implementation-plan.json)、[試験計画](test-plan.md)、[AGENTS.md](../AGENTS.md)を読む。
 各試験前に試験計画の実行手順と対象項目を再確認する。対象本番の置換は実施していない。
 
 ## 現在の実装と通常配布物
 
-主な実装は`421d126`（送信元`27fbad2`、DHCP`b9fe727`）、最新通常配布物は`dns-negative-native97` / native92 / network27。
-全設定二台の実行版はnative93、送信元修正の専用実HGW試験はnative94であり、実行版を区別する。
+主な実装は`61840d9`（DNS別名`e5b14d4`、送信元`27fbad2`、DHCP`b9fe727`）。NTP二台受入の通常配布物は`ntp-calibration-native99` / native92 / network27で、DNS別名修正を含む最終統合版の通信確認は別に行う。
+全設定二台の最新実行版はnative99、継続中の元LAN自然更新はnative93、実HGW自然更新はnative95であり、実行版を区別する。
 `make build image`のAlpine3.24.3/Linux6.18.59-ltsを実行した。routerd/loggingはCGO0、承認済みrouterd-modulesだけCGO1静的リンク。
 旧routerdのdnsmasq配布と非同期同期を使用し、VRRPが配布役を選ぶ。DHCP独自の`.owner`・`bootstrap`・新規配布保留を除いた。
 同期断も指定poolを維持する。復帰時はengineを停止して受信済みlease・削除・保持履歴を併合し、再開する。
 相互認証、domain照合と同時配布中peerの拒否を保持する。poolの暗黙分割や別の所有者台帳はない。
 
-BGPは確定したアドレス族を一度だけ構築し、GR capabilityを保持する。chronydは補正周波数を最短1分で保存する。
+BGPは確定したアドレス族を一度だけ構築し、GR capabilityを保持する。chronydは時計更新ごとに補正周波数・誤差を保存する。
 networkは全interfaceの期限更新intentを一括保存し、所有が変わらないFirewall boolの再保存を省く。
 AFTRのnetwork問い合わせは共有lockの外で行い、待機後に現在の設定と送信元を再確認する。
 DHCPの状態通知失敗はengineを停止させない。元の適用・観測・通信の期限は延長していない。
@@ -51,7 +51,7 @@ DHCPの状態通知失敗はengineを停止させない。元の適用・観測�
 `12962f2`は既存の型付きページAPIからkernel経路・規則・multipathを運用画面へ表示する。
 統合版native96の実DNS二試験・管理/SSH/再起動、関連4packageのRace、vet、amd64/arm64静的六ELFと署名publisherは終了0。
 `421d126`は正回答のminTTL60秒でnegativeTTL30秒を延長する不具合を修正した。独立dnsmasqへ名前を登録した比較版は31秒後もNXDOMAIN、修正版では両段が31秒後にAを取得した。統合版native97でも同じ実daemon通信検査・DNS Race・vetが終了0。
-対象homertの実鍵・保存状態・配備条件の受入は残る。
+対象homertの実鍵・保存状態・配備条件の受入は残る。実稼働二台は4CPU/4GiB、管理NIC名は二台で異なる。PVEの読み取りで現在interfaceを確認したが、既存鍵でのroot SSHは拒否され、実秘密状態は未取得。本番の設定・稼働は変更していない。
 
 ## 経路欠落の原因修正と未解決
 
@@ -65,6 +65,11 @@ DHCPの状態通知失敗はengineを停止させない。元の適用・観測�
   この注入は再開した7800秒コホートを誤って転用しており、自然再発・自然更新の結果には数えない。以後は別stageの180秒専用試験に限定した。
   native94の専用180秒試験では同じ注入後も38秒706回の欠落0。取得DNS・両IP通信、PD SIGKILL2.07秒/通常交換4.63秒、全daemon交換4.33秒と両端末復帰まで終了0。自然PD Renewは0件であり短時間の結果だけとする。
   元100分走行で適用応答が遅れた発生契機は未採取。短い再現で経路を消す製品側の原因は修正したが、長時間安定の受入は残る。
+- native99は同じ全57設定・通常Alpine二台で両方向電源断と再参加まで終了0。全経路30.107/18.288秒、NTP採用4.314/4.269秒。BGP確立待ちなしの追加断、別の新端末の取得DNS・両IP TCP/UDP、同じTCP/SYN/NATを保持した。
+  TCP最大7.713秒、UDP1690/1495/195期限切れ・最大無応答5.047秒、DNS16/933失敗。停止ディスクのコピーでjournalを再生し、保存済み誤差291.39/306.48ppmを確認した。元60秒・15秒・採用条件は変更していない。
+  `driftfile interval 0`はchrony4.8の時計更新時だけ保存する。60秒制限で校正直後の値を保存し損ねる窓を除いた。別writer・周期処理・source poll変更はない。
+  関連Race・vet・通常Make build/imageと、amd64/arm64静的六ELF・署名catalog/publisher（22.856秒）は終了0。配布物検査の統合ソースはDNS別名修正を含み、二台image99はその前の版である。
+  比較native97は断前55.94ppm、再起動時1000000ppm、NTP採用130.537秒で元60秒を失敗した。自然更新・物理性能の受入に拡張しない。
 - 通常native95の全57設定二台試験では、両方向の端末DHCP/SLAAC・DNS・TCP/UDPは復帰したが、二度目のNTP採用が約58秒を要し、合計60秒を超えて不合格。
   再起動時にchronydは`Frequency 0.000 +/- 1000000.000 ppm`を読んだ。packetのroot dispersionは約53秒から参照元の更新後に約0.0036秒へ低下し、その後端末が採用した。
   未校正値を保存・読込した事実であり、同期済みの精度を破壊したとは未確認。同期flagだけで品質を判断せず、次は電源断前後のtrackingも採取する。元60秒と端末の採用条件は維持する。

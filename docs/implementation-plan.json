@@ -11209,7 +11209,7 @@
     "physical_target_profile": "awaiting user target hardware/NIC and performance requirements; independent implementation and isolated VM tests continue",
     "validation_reporting": "Record current behavior, executed checks and untested scope concisely. Discard historical checkpoint ledgers as acceptance authority; no compatibility obligation to their code, APIs or formats.",
     "current_acceptance": {
-      "implementation_head": "421d126",
+      "implementation_head": "61840d9",
       "single_node_full_input_runtime": "full-homert-loopback-native92 / 8cc420d / native92 / network27",
       "normal_alpine_runtime": "Alpine3.24.3 Linux6.18.59-0-lts; isolated PVE KVM4CPU4096MiB; normal Make/APK image",
       "original_input_resources_per_node": 109,
@@ -11219,17 +11219,17 @@
       "natural_original_dhcp_lease_seconds": 43200,
       "natural_dhcp_t1_seconds": 21600,
       "natural_renewal": "Current native93/original43200s LAN lease cohort; ordinary/special actual T1 deadlines2026-10-31T01:20:47Z. No fault injection or replacement. Prior8cc cohort stopped5h17m with requestACK->echo response30.43s; cause/IX choice not established.",
-      "two_node_normal": "b9fe727 / dhcp-reconcile-native93 normal Alpine/KVM4CPU4096MiB full57: both actual power cuts/rejoins and fresh automatic DHCP/SLAAC client passed. Fresh client used acquired DNS UDP/TCP and both-IP TCP/UDP with former owner absent, then renewed unchanged address after each rejoin. Additional cut preceded backup BGP readiness. All paths37.401/25.390s within original60s.",
+      "two_node_normal": "61840d9 clock-update persistence / ntp-calibration-native99 normal Alpine full57, both actual power cuts/rejoins and fresh automatic clients exit0. All paths30.106623/18.288321s; independent NTP adoption4.314/4.269s; additional cut before backup BGP readiness. DNS alias fix e5b14d4 was not in this image.",
       "two_node_configuration_changes": [
         "Explicit shared WAN IPv4 next hop for static BGP advertisements",
         "Shared VirtualAddress assigned to existing WAN VMAC instead of physical WAN"
       ],
       "migration_policy": "43a6487 exposes bgp_next_hops. Full CLI migration of both110-resource sources produces57-resource programs identical to executed HA candidates. Interface relocation is an explicit source configuration change.",
-      "two_node_limits": "Same TCP/SYN/NAT retained. TCP max14.945s near original15s; UDP1103/935/168 expired, max gap13.216s; DNS45/659 failed. Explicit shared WAN BGP next hop and WAN VMAC relocation. Not zero loss, long-term stability, original-input-without-change or physical/performance qualification.",
+      "two_node_limits": "Same TCP/SYN/NAT retained. TCP max7.712826s; UDP1690/1495/195 expired, max gap5.047210s; DNS16/933 failed. Explicit shared WAN BGP next hop and WAN VMAC relocation. Not zero loss, long-term stability, unchanged original input or physical/performance qualification.",
       "normal_alpine_copy_assertions": 0,
       "normal_alpine_effects_timeouts": 0,
       "hgw_normal": "New no-injection integrated-host-source-native95 / standard7800s, real HGW/independent automatic clients, original saved DUID. Natural PD T1 observed deadline2026-10-30T21:45:46Z; completion with recovery approximately21:57Z. One startup AFTR restart on stale-observation HTTP409; steady phase began generation2. Keep trial untouched.",
-      "remaining": "Complete no-injection original LAN/real-HGW natural renewals and integrated normal Alpine two-node acceptance after27fbad2. Retain original I/O delay trigger as unmeasured; then same-contract migration/update recovery, target homert conditions, k8s/pve dynamic SAM and Cloud SAM/all34. Unknown never-received DHCP bindings remain limited.",
+      "remaining": "Complete unchanged original LAN/native93 and real-HGW/native95 natural renewals; integrated DNS alias/DHCPv6 refresh and same-contract update recovery, target homert conditions, k8s/pve dynamic SAM and Cloud SAM/all34. Original long I/O delay trigger unmeasured; unknown never-received DHCP bindings limited.",
       "full_profile_signed_update": {
         "base": "8cc420d / full-homert-loopback-native92",
         "candidate": "00969ca / full-homert-operations-native92",
@@ -11319,7 +11319,14 @@
         "remaining": "Original100min run cause of prolonged apply I/O is unmeasured. Complete no-injection long renewal and normal Alpine integrated two-node acceptance."
       },
       "integrated_normal95_failure": "Both-direction DHCP/SLAAC/DNS/TCP/UDP recovered, but rebooted NTP adoption took58.366s and total original60s handoff failed. Reboot read0ppm +/-1000000ppm; packet root dispersion53s fell to0.0036s after next reference. Cold calibration/persistence timing not yet resolved; keep client quality and60s.",
-      "integrated_normal96_checks": "DNS UDP-size and query/probe daemon communication, management/SSH/restart, related DNS/webconsole/release/releasecli race, vet, both-arch static sixELF and signed publisher all exit0. Natural trials remain native95/native93 unchanged."
+      "integrated_normal96_checks": "DNS UDP-size and query/probe daemon communication, management/SSH/restart, related DNS/webconsole/release/releasecli race, vet, both-arch static sixELF and signed publisher all exit0. Natural trials remain native95/native93 unchanged.",
+      "ntp_clock_update_persistence": {
+        "commit": "61840d9",
+        "before": "Native97 cut-before skew55.94ppm, reboot read0ppm +/-1000000ppm; NTP adoption130.537s, original60s full handoff failed.",
+        "change": "chrony4.8 driftfile interval0 writes only on clock updates; no second writer, timer, source polling change or relaxed client quality.",
+        "after": "Native99 full57 two-node pass30.107/18.288s. Stopped-disk copy journal replay recovered saved skew291.392793/306.475167ppm, exact values read on real guest reboots. Original60s and client15s retained.",
+        "checks": "Normal Make build/image, related runtimeplan race, vet and actual PVE KVM two-node all exit0. Both-arch static sixELF, signed catalog and publisher exit0 (publisher22.856s). Artifact batch includes e5b14d4 alias TTL fix; full-profile image99 predates it."
+      }
     }
   },
   "execution_order": [
