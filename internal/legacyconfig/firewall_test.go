@@ -30,6 +30,11 @@ func packetMatches(m network.PacketMatch, p testPacket) bool {
 	if m.Source != "" && !netip.MustParsePrefix(m.Source).Contains(src) || m.Destination != "" && !netip.MustParsePrefix(m.Destination).Contains(dst) {
 		return false
 	}
+	for _, excluded := range m.ExcludeDestinations {
+		if excluded.Contains(dst) {
+			return false
+		}
+	}
 	for _, pair := range []struct {
 		ranges []network.PortRange
 		port   int
@@ -113,8 +118,8 @@ func TestFirewallMigrationPreservesActualPacketDecisions(t *testing.T) {
 			}
 		})
 	}
-	if f.NAT[0].Type != "snat" || f.NAT[0].Address != "203.0.113.9" {
-		t.Fatal("name-sorted SNAT priority or static address source was lost")
+	if len(f.NAT) != 2 || f.NAT[0].Type != "snat" || f.NAT[0].Address != "203.0.113.9" {
+		t.Fatal("compact NAT rules, name-sorted SNAT priority or static address source was lost")
 	}
 	for _, tc := range []struct{ destination, source, want string }{
 		{"198.51.100.12", "192.0.2.42", "snat"}, {"198.51.100.12", "192.0.2.43", "masquerade"},
@@ -193,38 +198,5 @@ func TestFirewallAmbiguitiesAndUnsupportedControlsFailAtomically(t *testing.T) {
 	_, err = Migrate([]byte(base))
 	if !hasIssue(err, "resources", "unsupported_semantics") || !strings.Contains(err.Error(), "derives trust-to-untrust") {
 		t.Fatalf("implicit NAT disagreement was not diagnosed: %v", err)
-	}
-}
-
-func TestIPv4ExclusionProjectionBoundariesAndLimit(t *testing.T) {
-	original := netip.MustParsePrefix("192.0.2.0/24")
-	excluded := []netip.Prefix{netip.MustParsePrefix("192.0.2.16/28"), netip.MustParsePrefix("192.0.2.64/27"), netip.MustParsePrefix("198.51.100.0/24")}
-	set := []netip.Prefix{original}
-	for _, e := range excluded {
-		var exceeded bool
-		set, exceeded = subtractIPv4Prefixes(set, e, 100)
-		if exceeded {
-			t.Fatal("unexpected overflow")
-		}
-	}
-	for i := range 256 {
-		a := netip.AddrFrom4([4]byte{192, 0, 2, byte(i)})
-		want := !(i >= 16 && i < 32 || i >= 64 && i < 96)
-		got, matches := false, 0
-		for _, p := range set {
-			if p.Contains(a) {
-				got = true
-				matches++
-			}
-		}
-		if got != want || matches > 1 {
-			t.Fatalf("address %s: result=%t matches=%d want=%t", a, got, matches, want)
-		}
-	}
-	if got, exceeded := subtractIPv4Prefixes([]netip.Prefix{original}, netip.MustParsePrefix("0.0.0.0/0"), 1); exceeded || len(got) != 0 {
-		t.Fatal("superset exclusion must yield no destination")
-	}
-	if _, exceeded := subtractIPv4Prefixes([]netip.Prefix{netip.MustParsePrefix("0.0.0.0/0")}, netip.MustParsePrefix("192.0.2.1/32"), 1); !exceeded {
-		t.Fatal("expansion limit was not enforced")
 	}
 }

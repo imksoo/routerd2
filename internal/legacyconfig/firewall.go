@@ -3,7 +3,6 @@
 package legacyconfig
 
 import (
-	"encoding/binary"
 	"net/netip"
 	"sort"
 	"strconv"
@@ -518,18 +517,6 @@ func (c *compiler) nat44(r resource, elections map[string]string) resourceprogra
 		destinations = []netip.Prefix{netip.MustParsePrefix("0.0.0.0/0")}
 	}
 	exclusions := c.packetCIDRs(r, "excludeDestinationCIDRs", s.ExcludeDestinationCIDRs, 4, false)
-	if len(exclusions) > 128 {
-		c.reject(r, "excludeDestinationCIDRs", "resource_limit", "at most 128 unique destination exclusions can be projected")
-		return resourceprogram.Resource{}
-	}
-	var err bool
-	for _, excluded := range exclusions {
-		destinations, err = subtractIPv4Prefixes(destinations, excluded, maxFirewallProjection)
-		if err {
-			c.reject(r, "excludeDestinationCIDRs", "resource_limit", "CIDR subtraction exceeds 8192 destination prefixes")
-			return resourceprogram.Resource{}
-		}
-	}
 	if len(sources)*len(destinations) > maxFirewallProjection {
 		c.reject(r, "sourceRanges", "resource_limit", "NAT expansion exceeds 8192 native packet rules")
 		return resourceprogram.Resource{}
@@ -559,45 +546,10 @@ func (c *compiler) nat44(r resource, elections map[string]string) resourceprogra
 	}
 	for _, source := range sources {
 		for _, destination := range destinations {
-			out.NAT = append(out.NAT, network.NATRule{Type: s.Type, Match: network.PacketMatch{Family: 4, Source: source.String(), Destination: destination.String(), OutInterface: ifname}, Address: address})
+			out.NAT = append(out.NAT, network.NATRule{Type: s.Type, Match: network.PacketMatch{Family: 4, Source: source.String(), Destination: destination.String(), ExcludeDestinations: exclusions, OutInterface: ifname}, Address: address})
 		}
 	}
 	c.target(r, "nat/"+r.Metadata.Name)
-	c.note(r, "Preserves explicit source NAT without adding filter hooks to NAT-only configurations; destination exclusions are compiled into bounded positive CIDRs.")
-	if len(destinations) == 0 {
-		c.note(r, "Destination exclusions cover the complete destination set, so this rule matches no packets.")
-	}
+	c.note(r, "Preserves explicit source NAT without adding filter hooks to NAT-only configurations; destination exclusions remain negated matches within each rule.")
 	return out
-}
-
-// subtractIPv4Prefixes returns the same address set minus excluded. Splitting
-// CIDRs avoids negated nft expressions and preserves exclusion semantics even
-// when multiple positive and negative ranges overlap.
-func subtractIPv4Prefixes(prefixes []netip.Prefix, excluded netip.Prefix, limit int) ([]netip.Prefix, bool) {
-	var out []netip.Prefix
-	var subtract func(netip.Prefix) bool
-	subtract = func(p netip.Prefix) bool {
-		if excluded.Contains(p.Addr()) && excluded.Bits() <= p.Bits() {
-			return true
-		}
-		if !p.Contains(excluded.Addr()) || p.Bits() >= excluded.Bits() {
-			if len(out) == limit {
-				return false
-			}
-			out = append(out, p)
-			return true
-		}
-		bits := p.Bits() + 1
-		a := p.Addr().As4()
-		n := binary.BigEndian.Uint32(a[:])
-		var right [4]byte
-		binary.BigEndian.PutUint32(right[:], n|uint32(1)<<(32-bits))
-		return subtract(netip.PrefixFrom(p.Addr(), bits)) && subtract(netip.PrefixFrom(netip.AddrFrom4(right), bits))
-	}
-	for _, p := range prefixes {
-		if !subtract(p) {
-			return nil, true
-		}
-	}
-	return out, false
 }
