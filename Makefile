@@ -143,6 +143,10 @@ check-management: build
 check-syslog: build
 	$(PYTHON) scripts/syslog-peer.py
 
+.PHONY: check-traffic-flow
+check-traffic-flow: build
+	$(PYTHON) scripts/daemon-tests.py traffic-flow --go '$(GO)'
+
 .PHONY: check-firewall
 check-firewall: build
 	$(PYTHON) scripts/daemon-tests.py firewall --go '$(GO)'

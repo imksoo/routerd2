@@ -12,6 +12,7 @@ import tempfile
 # Each fixture verifies its disposable user/network namespace before mutation.
 # Timeout is the outer harness budget, not a protocol or client deadline.
 SUITES = {
+    "traffic-flow": (("TestDaemonTrafficFlowHistory", ("wan0", "lan0"), 85),),
     "management": (("TestDaemonConfigurationAndRecovery", ("mgmt0",), 100),),
     "local-redirect": (("TestDaemonLocalDNSRedirect", ("wan0", "lan0"), 85),),
     "blackhole": (("TestDaemonBlackholeRoute", ("wan0", "lan0"), 55),),

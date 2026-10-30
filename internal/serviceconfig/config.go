@@ -28,10 +28,12 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/raclient"
 	"github.com/imksoo/routerd2/internal/protocol/syslogconfig"
 	"github.com/imksoo/routerd2/internal/protocol/tailscaleconfig"
+	"github.com/imksoo/routerd2/internal/protocol/trafficflowconfig"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
 )
 
 type Service struct {
+	TrafficFlow *trafficflowconfig.Config `json:"traffic_flow,omitempty"`
 	FirewallLog *firewalllogconfig.Config `json:"firewall_log,omitempty"`
 	OTLPLogs    *otlplogconfig.Config     `json:"otlp_logs,omitempty"`
 	Syslog      *syslogconfig.Config      `json:"syslog,omitempty"`
@@ -123,6 +125,9 @@ var safeName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,23}$`)
 var interfaceName = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]{0,14}$`)
 
 func (s Service) Role() string {
+	if s.TrafficFlow != nil {
+		return "traffic_flow"
+	}
 	if s.FirewallLog != nil {
 		return "firewall_log"
 	}
@@ -236,7 +241,7 @@ func Validate(services []Service) error {
 		}
 		names[s.Name] = true
 		n := 0
-		for _, set := range []bool{s.FirewallLog != nil, s.OTLPLogs != nil, s.Syslog != nil, s.NTP != nil, s.Tailscale != nil, s.PPPoE != nil, s.Health != nil, s.BFD != nil, s.DSLite != nil, s.RAClient != nil, s.DHCPServer != nil, s.DHCP6Server != nil, s.DHCPRelay != nil, s.DHCP4 != nil, s.DHCP6 != nil, s.RA != nil, s.DNS != nil, s.VRRP != nil, s.BGP != nil} {
+		for _, set := range []bool{s.TrafficFlow != nil, s.FirewallLog != nil, s.OTLPLogs != nil, s.Syslog != nil, s.NTP != nil, s.Tailscale != nil, s.PPPoE != nil, s.Health != nil, s.BFD != nil, s.DSLite != nil, s.RAClient != nil, s.DHCPServer != nil, s.DHCP6Server != nil, s.DHCPRelay != nil, s.DHCP4 != nil, s.DHCP6 != nil, s.RA != nil, s.DNS != nil, s.VRRP != nil, s.BGP != nil} {
 			if set {
 				n++
 			}
@@ -244,7 +249,7 @@ func Validate(services []Service) error {
 		if n != 1 {
 			return fmt.Errorf("service %s must select exactly one protocol", s.Name)
 		}
-		if s.FirewallLog == nil && s.OTLPLogs == nil && s.Syslog == nil && s.NTP == nil && s.DNS == nil && s.BGP == nil && s.DHCPRelay == nil && !(s.BFD != nil && s.BFD.Multihop) && !interfaceName.MatchString(s.Interface()) {
+		if s.TrafficFlow == nil && s.FirewallLog == nil && s.OTLPLogs == nil && s.Syslog == nil && s.NTP == nil && s.DNS == nil && s.BGP == nil && s.DHCPRelay == nil && !(s.BFD != nil && s.BFD.Multihop) && !interfaceName.MatchString(s.Interface()) {
 			return fmt.Errorf("service %s has an invalid interface", s.Name)
 		}
 		key := s.Role() + ":" + s.Interface()
@@ -295,6 +300,13 @@ func Validate(services []Service) error {
 		}
 		sockets[key] = s.Name
 		switch s.Role() {
+		case "traffic_flow":
+			if s.TrafficFlow.HistoryPath != "" {
+				return errors.New("traffic flow history path is managed below the routerd state directory")
+			}
+			if err := trafficflowconfig.Validate(*s.TrafficFlow); err != nil {
+				return err
+			}
 		case "firewall_log":
 			if s.FirewallLog.HistoryPath != "" {
 				return errors.New("firewall history path is managed below the routerd state directory")
@@ -510,6 +522,10 @@ func (s Service) Instance(runtimeDir, stateDir string) (Instance, error) {
 	var b []byte
 	var err error
 	switch s.Role() {
+	case "traffic_flow":
+		cfg := *s.TrafficFlow
+		cfg.HistoryPath = filepath.Join(stateDir, "services", s.Name, "traffic-flows.db")
+		b, err = json.Marshal(cfg)
 	case "firewall_log":
 		cfg := *s.FirewallLog
 		cfg.HistoryPath = filepath.Join(stateDir, "services", s.Name, "firewall-events.db")

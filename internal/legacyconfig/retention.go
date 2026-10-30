@@ -37,7 +37,7 @@ func (c *compiler) logRetention(r resource) {
 	if len(signals) == 0 {
 		signals = []string{"events", "accessLogs", "pluginRuns", "dnsQueries", "trafficFlows", "firewallEvents", "dhcpFingerprints"}
 	}
-	events, queries, firewall, access := false, false, false, false
+	events, queries, firewall, access, flows := false, false, false, false, false
 	for _, signal := range signals {
 		if signal == "events" {
 			events = true
@@ -51,10 +51,22 @@ func (c *compiler) logRetention(r resource) {
 		case "accessLogs":
 			access = true
 			c.note(r, "Legacy access_logs had no producer; retention of that empty dataset creates no native history owner. Existing database contents are not imported.")
-		case "pluginRuns", "trafficFlows", "dhcpFingerprints":
+		case "trafficFlows":
+			flows = true
+		case "pluginRuns", "dhcpFingerprints":
 			c.reject(r, "signals", "unsupported_semantics", "operational history dataset "+signal+" has no native retention owner")
 		default:
 			c.reject(r, "signals", "unsupported_semantics", "unknown operational history dataset")
+			return
+		}
+	}
+	if flows {
+		enabled := false
+		for _, logger := range c.resourcesOfKind("TrafficFlowLog") {
+			enabled = enabled || logger.Spec.(api.TrafficFlowLogSpec).Enabled
+		}
+		if !enabled {
+			c.reject(r, "signals", "unsupported_semantics", "trafficFlows requires an enabled TrafficFlowLog history owner")
 			return
 		}
 	}
@@ -68,11 +80,11 @@ func (c *compiler) logRetention(r resource) {
 			return
 		}
 	}
-	if !events && !queries && !firewall && !access {
+	if !events && !queries && !firewall && !access && !flows {
 		c.reject(r, "signals", "unsupported_semantics", "requested datasets have no native history owner; event retention is not substituted")
 		return
 	}
-	if events && c.retention != nil || queries && c.queryRetention != nil || firewall && c.firewallRetention != nil {
+	if events && c.retention != nil || queries && c.queryRetention != nil || firewall && c.firewallRetention != nil || flows && c.flowRetention != nil {
 		c.reject(r, "", "unsupported_semantics", "each history dataset has one retention policy; combine policies explicitly")
 		return
 	}
@@ -105,8 +117,12 @@ func (c *compiler) logRetention(r resource) {
 		}
 		policy.Syslog = append(policy.Syslog, destination)
 	}
-	if access && !events && !queries && !firewall {
+	if access && !events && !queries && !firewall && !flows {
 		c.target(r, "inactive")
+	}
+	if flows {
+		c.flowRetention = &policy
+		c.target(r, "services/*/traffic_flow/retention")
 	}
 	if firewall {
 		c.firewallRetention = &policy

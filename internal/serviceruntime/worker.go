@@ -44,6 +44,8 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/syslogconfig"
 	"github.com/imksoo/routerd2/internal/protocol/tailscale"
 	"github.com/imksoo/routerd2/internal/protocol/tailscaleconfig"
+	"github.com/imksoo/routerd2/internal/protocol/trafficflow"
+	"github.com/imksoo/routerd2/internal/protocol/trafficflowconfig"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 	"github.com/imksoo/routerd2/internal/worker"
@@ -104,6 +106,12 @@ func Run(ctx context.Context, runtimeDir, name, role, path, digest string, gener
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	switch role {
+	case "traffic_flow":
+		var cfg trafficflowconfig.Config
+		if err := decode(instance.Config, &cfg); err != nil {
+			return err
+		}
+		return trafficflow.Run(runCtx, cfg, ready)
 	case "firewall_log":
 		var cfg firewalllogconfig.Config
 		if err := decode(instance.Config, &cfg); err != nil {

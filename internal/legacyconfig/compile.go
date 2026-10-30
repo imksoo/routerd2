@@ -183,7 +183,7 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 			conditions = append(conditions, resourceCondition{id: "service/" + name, source: r, when: r.Spec.(api.HealthCheckSpec).When})
 		case "IPv6RouterAdvertisement":
 			// Compiled with delegated LAN advertisements below.
-		case "FirewallEventLog", "FirewallZone", "FirewallPolicy", "FirewallRule", "NAT44Rule", "IPAddressSet", "LocalServiceRedirect":
+		case "TrafficFlowLog", "FirewallEventLog", "FirewallZone", "FirewallPolicy", "FirewallRule", "NAT44Rule", "IPAddressSet", "LocalServiceRedirect":
 			// Compiled together to preserve ordered zone jumps and NAT-only hooks.
 		case "IngressService":
 			// Compiled after the existing filter and NAT intent below.
@@ -231,6 +231,7 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 	c.conntrackSync(extra)
 	c.localServiceRedirects()
 	c.firewallServices()
+	c.trafficFlows()
 	c.vpnListenerFirewall()
 	extra = append(extra, c.ingressServices(vrrpNames)...)
 	// Admission references can name a PD declared after its VRRP election.
@@ -359,6 +360,7 @@ type compiler struct {
 	retention         *retention.Config
 	queryRetention    *dnsconfig.QueryRetention
 	firewallRetention *retention.Config
+	flowRetention     *retention.Config
 	*decoder
 	resources      []resource
 	legacy         api.Router
