@@ -79,6 +79,9 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 			c.byRef[ref] = r
 		}
 		c.mappings[r.ID()] = &Mapping{Resource: r.Kind + "/" + r.Metadata.Name}
+		if len(r.Metadata.OwnerRefs) != 0 {
+			c.note(*r, "Source ownerRefs describe attribution. Native withdrawal follows typed source references and the network ownership journal; metadata does not add an activation condition.")
+		}
 	}
 	c.initOptions(options, explicit)
 	c.collectAliases()
@@ -195,6 +198,8 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 			}
 		case "VXLANSegment", "VXLANTunnel":
 			c.reject(r, "", "unsupported_semantics", "legacy VXLAN FDB peers, L2 filtering and outer-DF defaults require explicit native conversion; a single remote is not a lossless substitute")
+		case "Package":
+			// The configured conntrack engine supplies its package prerequisite.
 		case "NAT44SessionSync":
 			// Joined to the single IPv4 election after NAT conditions are compiled.
 		case "NTPClient", "NTPServer":
@@ -229,6 +234,7 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 	c.ntp(vrrpNames)
 	extra = append(extra, c.firewall(vrrpNames)...)
 	c.conntrackSync(extra)
+	c.conntrackPackages()
 	c.localServiceRedirects()
 	c.firewallServices()
 	c.trafficFlows()

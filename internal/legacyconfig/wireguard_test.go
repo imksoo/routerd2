@@ -203,9 +203,7 @@ func TestWireGuardMigrationRejectsUnsupportedOrAmbiguousIntentAtomically(t *test
 		{"ready-when", "ready_when", "unknown_field", func(r []map[string]any) {
 			r[0]["spec"].(map[string]any)["ready_when"] = "phase == Ready"
 		}},
-		{"owner-lifecycle", "ownerRefs", "unsupported_semantics", func(r []map[string]any) {
-			r[1]["metadata"].(map[string]any)["ownerRefs"] = []any{map[string]any{"kind": "Plugin", "name": "dynamic"}}
-		}},
+
 		{"metadata-annotation", "annotations", "unsupported_metadata", func(r []map[string]any) {
 			r[0]["metadata"].(map[string]any)["annotations"] = map[string]string{"dynamic": secret}
 		}},

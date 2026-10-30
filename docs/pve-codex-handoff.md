@@ -163,3 +163,11 @@ PD worker SIGKILL後1.52秒、通常交換10.99秒、全daemon再起動11.08秒�
 - `make check`は補助検査。実workerと独立ISC/radvd/dnsmasq/BusyBox/Linux端末、
   実Health→PBR二WAN、conntrackd/VRRPと実TCP/UDPのfixtureを必要な変更に合わせて使う。
   コマンドは`make help`と対応scriptを読む。過去の成功は今回の実行成功として転記しない。
+
+## 2026-10-30: 実設定の所有情報と実行物の前提を取り込む
+
+`owner-package-native88`はdb12658上の取り込み修正。旧routerdのlifecycle/statusとchain/phase2を読み、`ownerRefs`を一律の起動・削除条件として拒否していた処理を除去した。DHCPv6Informationは旧実装と同じPD owner参照またはliteral interfaceで、既存の一つのUDP546 clientを選ぶ。旧Interface decoderが読まない`role`はFirewallZoneの代わりに採用せず、取り込み注記へ残す。SAM所有BGPの固有policyは未実装として拒否する。
+
+実際のhomertにあるPackage/conntrackdは、設定済みNAT同期の署名engineが実行物を供給する前提へ対応させた。hostのaptや任意package管理は実装しない。出力は同じ既存のNAT同期設定で、新しいruntime形式や互換readerはない。
+
+`owner-import-native88`の実supervisor/control/network/workerと独立ISC・keepalived・Linux clientで、所有情報を持つ取込fixtureが71.61秒で終了0。SLAAC/default/DNS取得、DNS UDP/TCP、IPv6 TCP/UDP、役割変更・本来の権限期限による撤去、PD喪失/再取得を確認した。最初はfixture指定のISC実行物がhostの既定pathに無く、製品起動前に失敗。既存の独立ISCを明示した再実行で成功した。最終Package追加後のlegacyconfig Race、全vet、CGO0両architecture build、署名配布物検査は終了0。Package追加はcompilerの前提解決だけで、実通信はその直前の版である。全homert設定の取込・実通信、SAM BGP、管理画面、対象物理機器の受入は未完了。

@@ -121,3 +121,40 @@ func natRequiresElection(when *resourceprogram.FactCondition, election string) b
 	}
 	return true
 }
+
+// A signed engine replaces the host package recipe for its actual consumer.
+func (c *compiler) conntrackPackages() {
+	for _, r := range c.resourcesOfKind("Package") {
+		c.allow(r, "state", "packages")
+		spec := r.Spec.(api.PackageSpec)
+		if spec.State != "" && spec.State != "present" {
+			c.reject(r, "state", "unsupported_semantics", "native runtime components cannot be removed by a package declaration")
+			continue
+		}
+		needed := false
+		for _, group := range spec.Packages {
+			for _, name := range group.Names {
+				if name != "conntrackd" {
+					c.reject(r, "packages", "unsupported_semantics", "only the configured conntrackd engine supplies a package prerequisite")
+					continue
+				}
+				needed = true
+			}
+		}
+		if !needed {
+			continue
+		}
+		provided := false
+		for _, service := range c.document.Services {
+			if service.VRRP != nil && service.VRRP.ConntrackSync != nil {
+				provided = true
+				c.target(r, "services/"+service.Name)
+			}
+		}
+		if !provided {
+			c.reject(r, "packages", "unsupported_semantics", "conntrackd requires a configured native NAT synchronization consumer; arbitrary host package installation is not implemented")
+			continue
+		}
+		c.note(r, "The conntrackd prerequisite is supplied by the election's signed conntrack engine. Its runtime image replaces the host OS package recipe.")
+	}
+}

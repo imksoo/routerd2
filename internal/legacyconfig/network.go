@@ -94,7 +94,10 @@ func (c *compiler) ensureInterface(name string) *network.Interface {
 }
 
 func (c *compiler) iface(r resource) {
-	c.allow(r, "ifname", "adminUp", "managed", "owner", "mtu")
+	c.allow(r, "ifname", "adminUp", "managed", "owner", "mtu", "role")
+	if child(r.node, "role") != nil {
+		c.note(r, "The pinned Interface decoder does not read spec.role. Native firewall roles come from FirewallZone membership.")
+	}
 	s := r.Spec.(api.InterfaceSpec)
 	if s.Owner != "" && s.Owner != "routerd" && s.Owner != "external" {
 		c.reject(r, "owner", "invalid_value", "owner must be routerd or external")
