@@ -5,6 +5,22 @@
 [試験計画](test-plan.md)、[機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
+## 2026-10-30 16:33 JST: native85統合候補
+
+`80c5892`の設定ACK保存削減と、入口サービス`71e6be2`/`2c6c232`を統合。契約native85/network journal25。`make check-ingress RELEASE_ID=integrated-native85`は実HTTPS対向/端末・kernelによる転送先切替、VIP/port限定hairpin、全宛先不健全時のDNAT撤去とICMP拒否、VRRP優先度150→90→150を通過した。関連7 packageのRace、vet、CGO0 amd64/arm64ビルド、署名六ELF・catalog・publisher検査も終了0。`make check-ingress`へコマンドを集約した。静的端末の入口通信だけの検査であり、全k8s構成・二台・ARM実行の受入ではない。[入口の範囲](ingress-acceptance.md)。
+
+通常配布イメージの全構成起動は直前の`setting-journal-native84`で不合格のまま。保存回数削減を起動改善とは報告しない。二台83/85の通信一巡と、別の83走行のeffects期限超過/TCP断を区別する。今回、最初のeffects失敗を捕捉する準備を付けた走行では失敗を再現しなかった。並行担当の容量制限で作業が停止したため主担当が引き継いだ。未採取のstackを採取済みにせず、診断用signal後の動作は受入に使わない。
+
+## 最新85の二台通信profile: 両方向切替・再参加
+
+`integrated-native85`（契約85/network25、保存削減・入口変更込み）のLinux/2CPU二台profileは、独立ISC/四AFTR/二FRR/IX代替/DoH/chrony/Headscale・公式TS/普通と特殊のdhcpcdで両方向切替・再参加を一巡通過した。自動取得、初回DNS四種と条件付き24件、IPv4/IPv6 TCPUDP、二BGPの四prefix、IX特殊端末、両機NTP、TS三広告LANの双方向通信を同じ構成で確認した。
+
+同じTCP接続とUDP NAT対応を両方向で保持した。TCP最大応答待ち4.366秒。再参加後を含む最終の独立50ms UDPは1351送信/1228受信/123期限切れ、成功間最大4.198秒。DNSは837試行/78失敗。TSのTCP/UDPは各切替後の初回成功が約11.1/12.6秒で、各方向9試行の失敗を記録。全経路再確認は各約17.7/17.5秒。損失ゼロや即時復旧ではない。通常DAD、共有DUID、再参加した両NodeID、non-preempt、実packetの一TCP sequence spaceを照合した。IX既存session、TS出口、自然長期更新、分断/全異常組合せ、物理機器は未受入。
+
+完走走行は`/tmp/routerd-homert-ha85.xV01jJ`。最初のeffects失敗を捕捉する準備も付けたが失敗を再現せず、診断signalは送っていない。直前の83も一巡通過したが別走行ではeffects期限超過/TCP断を検出しており、今回の成功を間欠障害の解消とはしない。85の最初の二試行は私が実行版定数と旧`log_prefix`を私有fixtureへ残したため、製品起動前に停止した。現行compilerでzone全体を再生成し、51resource/NAT26件ずつを85で事前検証した後の実行である。旧形式readerは作らない。切替失敗時も観測threadを終了する私有パッチも反映済み。
+
+83の小さい結果は`/tmp/routerd-ha83-combined-success/`、85は`/tmp/routerd-ha85-combined-success/`へ残し、完了した大きなstageは削除する。これは通常factoryの全構成起動を受け入れた結果ではない。次の起動診断は実際に期限を消費する処理の特定に絞り、同じ全体起動を修正/新たな観測なしに反復しない。
+
 ## 2026-10-30 15:30 JST: 単体の同時利用と全daemon再起動
 
 `route-policy-native83`（契約83/network journal23）は、隔離Linuxの実supervisor/control/network/全workerと独立ISC・FRR二台・IX代替Linux・dnsmasq/dnsdist・chrony・Headscale/公式Tailscaleで、次の経路が通過した。
@@ -27,7 +43,7 @@ OTLPログworker `874bc22`、ManagementAccess/CLI `341c5cd`、履歴保持 `d824
 
 ## 2026-10-30 16:10 JST: 統合済みの管理・観測機能
 
-mainの公開済み基準は`f196880`。次の変更は統合・公開済みであり、全体受入の完了ではない。
+直前の公開済み基準は`c158998`。次の変更は統合・公開済みであり、全体受入の完了ではない。
 
 - SSHの`update rollback`を既存の検証済み旧版予約処理へ接続。`4f22e00`で実SSH操作・予約・取消・設定revision/generation照合が38.86秒で成功。再起動後の旧版復帰はこの操作試験の対象外。
 - `18f36d4`で旧BGPの`communities.send: standard`を受理し、旧実装と同じ送信設定へ変換。独立FRRの通常BGP、IPIP、DHCPv4由来IPIP、二peerの実通信が全て成功。関連Race、vet、両architecture buildと署名六ELF検査も終了0。

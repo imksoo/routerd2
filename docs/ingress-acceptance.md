@@ -100,6 +100,16 @@ Evidence is retained in `dist/ingress-native85-acceptance/`,
 `dist/ingress-native85-check.log`, `dist/ingress-native85-signed.log` and
 `dist/ingress-native85-publish-recheck.log` in the integration worktree.
 
+## Integration with setting journal coalescing
+
+`integrated-native85` additionally includes `80c5892`, which preserves setting
+write-ahead intent while deferring success-only acknowledgement saves.
+`make check-ingress RELEASE_ID=integrated-native85` passed the same real HTTPS,
+NAT and VRRP path. Related seven-package race checks, vet, both static Linux
+builds and signed six-ELF/catalog/publisher checks passed. This does not qualify
+whole-profile appliance startup; the preceding `setting-journal-native84`
+factory image still failed before client address acquisition.
+
 ## Scope
 
 The fixture declares static LAN addresses instead of exercising the deployed
