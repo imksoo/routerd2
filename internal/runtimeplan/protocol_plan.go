@@ -132,6 +132,10 @@ func prepareProtocols(doc config.Native, runtimeDir, stateDir string) (protocolP
 			plan.leaseHA[name] = leaseHAPlan{owner: "service." + service.DHCPServer.HA.Owner, serving: bound}
 		case service.DNS != nil:
 			cfg := service.DNSConfig(runtimeDir, stateDir)
+			cfg.Runtime, err = bindDNSRecordVIPs(cfg.Runtime, doc.Services)
+			if err != nil {
+				return protocolPlan{}, err
+			}
 			prepared, prepareErr := prepareDNS(cfg.Runtime)
 			if prepareErr != nil {
 				return protocolPlan{}, prepareErr
@@ -171,14 +175,8 @@ func prepareProtocols(doc config.Native, runtimeDir, stateDir string) (protocolP
 	}
 	for name, resolver := range plan.dns {
 		resolver.vips = make(map[string][]netip.Addr)
-		vrrpSources := make([]string, 0, len(resolver.listeners)+len(resolver.records))
 		for _, source := range resolver.listeners {
-			vrrpSources = append(vrrpSources, source.VRRP)
-		}
-		for _, source := range resolver.records {
-			vrrpSources = append(vrrpSources, source.VRRP)
-		}
-		for _, owner := range vrrpSources {
+			owner := source.VRRP
 			if owner == "" {
 				continue
 			}

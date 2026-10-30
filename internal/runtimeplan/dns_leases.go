@@ -3,7 +3,9 @@ package runtimeplan
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/netip"
+	"slices"
 
 	"github.com/imksoo/routerd/pkg/api"
 	"github.com/imksoo/routerd2/internal/boottime"
@@ -88,6 +90,54 @@ func prepareDNS(runtime dnsconfig.RuntimeConfig) (dnsPlan, error) {
 	return plan, nil
 }
 
+// VIP names describe the router group's configured address, regardless of
+// which member currently owns its local interface. Bind that configuration
+// once; only delegated addresses need protocol observations and deadlines.
+func bindDNSRecordVIPs(runtime dnsconfig.RuntimeConfig, services []serviceconfig.Service) (dnsconfig.RuntimeConfig, error) {
+	sources, err := dnsconfig.RecordSources(runtime)
+	if err != nil {
+		return runtime, err
+	}
+	runtime.Zones = slices.Clone(runtime.Zones)
+	for index := range runtime.Zones {
+		runtime.Zones[index].Spec.Records = slices.Clone(runtime.Zones[index].Spec.Records)
+	}
+	for _, source := range sources {
+		if source.VRRP == "" {
+			continue
+		}
+		var address netip.Addr
+		for _, owner := range services {
+			if owner.Name != source.VRRP || owner.VRRP == nil {
+				continue
+			}
+			for _, value := range owner.VRRP.Addresses {
+				prefix, err := netip.ParsePrefix(value)
+				if err != nil {
+					return runtime, err
+				}
+				if prefix.Addr().Is6() == source.IPv6 {
+					address = prefix.Addr()
+					break
+				}
+			}
+			break
+		}
+		if !address.IsValid() {
+			return runtime, fmt.Errorf("DNS record %s: virtual address %s has no address of the requested family", runtime.Zones[source.Zone].Spec.Records[source.Record].Hostname, source.VRRP)
+		}
+		record := &runtime.Zones[source.Zone].Spec.Records[source.Record]
+		if source.IPv6 {
+			record.IPv6 = address.String()
+			record.IPv6From = api.StatusValueSourceSpec{}
+		} else {
+			record.IPv4 = address.String()
+			record.IPv4From = api.StatusValueSourceSpec{}
+		}
+	}
+	return runtime, nil
+}
+
 type dnsEndpoint struct {
 	address netip.Addr
 	until   lifetime.Deadline
@@ -121,7 +171,8 @@ func (r *Runtime) DNSInput(moduleName string) (dnsconfig.Input, error) {
 			if err := json.Unmarshal(update.Snapshot, &state); err != nil {
 				return out, err
 			}
-			if !state.Active || !vrrp.CurrentElection(state, clock) || !r.ownsVRRPLocked(update, state) {
+			// Kernel admission precedes the worker's next Active publication.
+			if !vrrp.CurrentElection(state, clock) || !r.ownsVRRPLocked(update, state) {
 				continue
 			}
 			until := lifetime.Deadline{BootID: state.BootID, Nanos: state.ExpiresNanos}
@@ -142,15 +193,9 @@ func (r *Runtime) DNSInput(moduleName string) (dnsconfig.Input, error) {
 			}
 		}
 		for _, source := range cfg.records {
-			endpoints := vips["service."+source.VRRP]
-			if source.Service != "" {
-				for _, entry := range r.delegatedDNS[source.Service+"/"+source.Delegation] {
-					endpoints = append(endpoints, dnsEndpoint{address: entry.address.Address, until: entry.address.ValidUntil})
-				}
-			}
-			for _, endpoint := range endpoints {
-				if endpoint.address.Is6() == source.IPv6 && endpoint.until.Live(clock) {
-					out.Records = append(out.Records, dnsconfig.RecordAddress{Zone: source.Zone, Record: source.Record, Address: endpoint.address, ValidUntil: endpoint.until})
+			for _, entry := range r.delegatedDNS[source.Service+"/"+source.Delegation] {
+				if entry.address.ValidUntil.Live(clock) {
+					out.Records = append(out.Records, dnsconfig.RecordAddress{Zone: source.Zone, Record: source.Record, Address: entry.address.Address, ValidUntil: entry.address.ValidUntil})
 				}
 			}
 		}

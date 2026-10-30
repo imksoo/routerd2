@@ -13,6 +13,7 @@ import (
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
+	"github.com/imksoo/routerd2/internal/protocol/vrrp"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
@@ -105,5 +106,26 @@ func TestDNSLeaseSourceDependenciesAreValidatedBeforeApply(t *testing.T) {
 	}
 	if err := config.Validate(config.FromNative(doc)); err == nil || !strings.Contains(err.Error(), "4096") {
 		t.Fatalf("unbounded combined lease projection was accepted: %v", err)
+	}
+}
+
+func TestDNSRecordVIPBindingPreservesIntentAndDelegatedSource(t *testing.T) {
+	original := dnsconfig.RuntimeConfig{Zones: []dnsconfig.RuntimeZone{{Name: "lan", Spec: api.DNSZoneSpec{Zone: "home.arpa", Records: []api.DNSZoneRecordSpec{{Hostname: "router", IPv4From: api.StatusValueSourceSpec{Resource: "VirtualAddress/ha", Field: "address"}, IPv6From: api.StatusValueSourceSpec{Resource: "IPv6DelegatedAddress/pd/lan", Field: "address"}}}}}}}
+	owners := []serviceconfig.Service{{Name: "ha", VRRP: &vrrp.Config{Addresses: []string{"198.18.0.254/24"}}}}
+	bound, err := bindDNSRecordVIPs(original, owners)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := bound.Zones[0].Spec.Records[0]
+	if record.IPv4 != "198.18.0.254" || record.IPv4From != (api.StatusValueSourceSpec{}) || record.IPv6From != original.Zones[0].Spec.Records[0].IPv6From {
+		t.Fatal("VIP and delegated record ownership were conflated", record)
+	}
+	if original.Zones[0].Spec.Records[0].IPv4 != "" || original.Zones[0].Spec.Records[0].IPv4From.Resource != "VirtualAddress/ha" {
+		t.Fatal("binding changed operator intent", original)
+	}
+	owners[0].VRRP.Addresses = []string{"198.18.0.253/24"}
+	changed, err := bindDNSRecordVIPs(original, owners)
+	if err != nil || changed.Zones[0].Spec.Records[0].IPv4 != "198.18.0.253" || bound.Zones[0].Spec.Records[0].IPv4 != "198.18.0.254" {
+		t.Fatal("configuration change retained or mutated the old VIP", changed, err)
 	}
 }

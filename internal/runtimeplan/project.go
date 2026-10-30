@@ -283,9 +283,6 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 						break
 					}
 				}
-				if preparing && !dsliteSource {
-					continue
-				}
 				ensureInterface(&p.network, lan.Interface)
 				var prefixes []ra.Prefix
 				var routerDNS []dnsEndpoint
@@ -313,8 +310,12 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 					if err := addAddressWithOptions(&p.network, lan.Interface, address.String(), options); err != nil {
 						return p, err
 					}
-					if !preparing && needsDNS {
-						entry := delegatedDNSAddress{interfaceName: lan.Interface, address: dhcp6serverconfig.Address{Address: address.Addr(), ValidUntil: lease.ValidUntil}}
+					if needsDNS {
+						until := lease.ValidUntil
+						if preparing {
+							until = lifetime.Minimum(facts.bfdClock, until, lifetime.Deadline{BootID: snap.BootID, Nanos: preparationUntil})
+						}
+						entry := delegatedDNSAddress{interfaceName: lan.Interface, address: dhcp6serverconfig.Address{Address: address.Addr(), ValidUntil: until}}
 						for module, advertisement := range protocols.lanRA {
 							if advertisement.allocation == dnsKey && advertisement.from.RDNSSRouter {
 								entry.raModule = module
