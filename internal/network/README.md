@@ -25,6 +25,12 @@ arbitrary Linux networking command interface.
 - Set `forwarding.conntrack_accounting` when byte and packet counters are
   required for new connections. Withdrawal restores the observed original
   `net.netfilter.nf_conntrack_acct` value; existing connections do not gain counters retroactively.
+- Selected traffic-history services derive `connection_timestamps` in the
+  network projection. The existing network writer owns
+  `net.netfilter.nf_conntrack_timestamp` before collection starts and restores
+  its prior value after withdrawal. This is a service prerequisite, not a
+  separate operator sysctl requirement; connections that already existed do
+  not acquire a start timestamp retroactively.
 - Replace only the `inet routerd2` nftables table in one kernel batch. The
   legacy forwarding chain drops invalid connections, accepts established/related
   traffic, then accepts explicit ingress/egress pairs. Its default policy is
