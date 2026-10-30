@@ -5,6 +5,16 @@
 [試験計画](test-plan.md)、[機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
+## 2026-10-30 18:11 JST: 通常配布物の隔離KVM起動・通信・再起動
+
+公開`2d9d4a0`相当の`route-read-flat-native86`通常Make/APK image（Alpine3.24.3/Linux6.18.59）を、PVE管理下の専用4CPU/4096MiB/KVM guestで完走した。独立ISC・四Linux AFTR・二FRR・IX代替Linux・DNS/DoH・chrony・Headscale/公式Tailscaleと、自動取得する普通/特殊dhcpcd端末を使用。製品はPID1。PVE既存VM/bridge/NICは変更せず、試験EthernetはQEMU hub/streamとSSHで隔離接続した。試験VMは停止・削除済み。
+
+通常DAD、自動取得DNSのA/AAAA UDP/TCPと両IP TCP/UDP、条件付きDNS、両BGPの四prefix、特殊端末の取得gateway/resolver、TS三広告LANとの双方向TCP/UDP、配布NTP二台を確認した。guest全体再起動後に同じ経路とDUID/NodeIDを確認し終了0。起動後4.049秒の観測でsupervisor readyだったが、端末の最短接続時刻を測った値ではない。自然PD更新/既存TCP連続/物理NIC/ONU直結/全homert設定と全34項目の受入ではない。
+
+NTPは同期flagだけではLAN端末が採用しなかった。初期skew1,000,000ppm/大きいroot dispersionの実packetと独立chronydの拒否を確認。既定poll/iburstの周波数推定後、最初の採用検査開始から40.942秒・5回目で製品NTPを採用し、再起動後は4.344秒・初回で採用した。もう一つの配布先も両起動で採用した。製品timeout、poll、client maxdistanceを緩めず、実採用を最大300秒観測した結果である。
+
+先行KVM走行は試験SSHのpipe待ちと中継QEMUの`-S`指定で停止した。後者は独立Linux二端末のpingで、一時停止中失敗/通常実行成功を確認して修正した。製品未起動・未接続を起動成功に数えない。完走前のNTP初回8秒失敗も合格とはしない。大きいstageは削除し、現在必要な小さい私有結果は`/tmp/routerd-kvm-native86-success/`、実行logは`/tmp/routerd-kvm-native86-vm-fourth.log`。旧image5組と完了harness7組約1.7GiBも削除した。次は明示設定によるconntrack計数と履歴の接続を進め、同時構成の二台/実運用受入へ戻る。
+
 ## 2026-10-30 17:55 JST: native86統合・実HGWと起動環境
 
 `90f9d96`の旧OTLP LogSink取込、DHCP由来DNS、Firewall履歴を統合した（契約86/network25）。旧OTLPSink.Emitは送信していなかったため既存Telemetry senderだけを使う。DHCP名は有限な貸出所有者へ渡し、更新・実RELEASEでA/PTRを変更/撤去する。Firewall履歴は旧logstore.RecordBatch/ApplyRetentionを使い、保存障害がpacket収集を待たせない。新しい外部daemonは追加していない。
@@ -66,7 +76,7 @@ OTLPログworker `874bc22`、ManagementAccess/CLI `341c5cd`、履歴保持 `d824
 
 通常Make/APKの`history-native84`イメージ生成は終了0。配布kernelで既存の実通信fixtureへNFLOG group1・抽選divisor2を接続し、許可/破棄が抽選に左右されないことと、routes/ACL/NAT/DS-Lite/links/HA/RA期限を確認した。`make qemu-network IMAGE_DIR=dist/image-native84`は44.41秒で終了0。サンプリング比率の精度や全設定の起動を受け入れた結果ではない。
 
-## 通常配布イメージの起動: 未解決
+## 512MiB/2CPU/TCGで残る起動失敗（KVMの結果と区別）
 
 `dist/image-native83`は通常のMake/APK経路で生成したAlpine3.24.3/Linux6.18.59、製品`route-policy-native83`。512MiB/2CPU/TCGで全構成起動が失敗し、まだクライアント通信を受け入れていない。このCPU/メモリー指定は私有fixtureの条件で、製品の最小要件ではない。hostには`/dev/kvm`と仮想化CPU拡張がなく、勝手にhost設定を変更しない。
 

@@ -227,7 +227,7 @@
         "internal/legacyconfig",
         "internal/compatibility (新設予定)"
       ],
-      "current_limit": "2026-10-30: route-policy-native83 isolated Linux combined single-node profile passed acquired DNS/dual-IP TCP+UDP, both BGP peers,24 conditional DNS queries,special DHCP,NTP queries and3 advertised Tailscale LANs bidirectionally; whole-daemon restart retained DUID/NodeID. DNS55 queries/12 failures, all4 variants recovered8.932s, serving election/PD/listeners8.701s. Separate same83 run recovered all8 DNS/dual-IP TCP+UDP loops9.540s; DNS12/67 and newTCPUDP27/69 transaction failures retained. Same83 APK factory built but512MiB/2CPU TCG startup failed: network applied, whole projection applying, effects timeouts/worker churn before client acceptance. No timing-fix claim. No physical/directONU/realdual-uplink/fullhomert or34-package completion."
+      "current_limit": "2026-10-30 18:11 JST: normal Make/APK route-read-flat-native86 corresponding to published2d9d4a0, Alpine3.24.3/Linux6.18.59, PID1 in dedicated4CPU/4096MiB PVE KVM guest passed cold startup, ordinary/special automatic dhcpcd, acquired A/AAAA UDP/TCP DNS/conditionalDNS, IPv4/IPv6 TCP/UDP, independent ISC/four kernel AFTR/two FRR/IX replacement,3 advertised Tailscale LANs bidirectionally, both acquired NTP servers, guest reboot and same communication/DUID/NodeID. No existing VM/bridge/NIC changes; Ethernet transported by QEMU hub/stream over SSH, dedicated guest removed. Supervisor ready observed4.049s is not earliest client connectivity latency. Independent chronyd first adopted product NTP40.942s/attempt5 after checking started; after reboot4.344s/attempt1. Default polls/timeouts/client maxdistance unchanged, actual startup adoption observed up to300s. Earlier8s NTP failure and TCG startup failure retained. Not naturalPD renewal/continuousTCP/ONU/physicalNIC/fullhomert/all34 qualification."
     },
     {
       "id": "CORE-02",
@@ -1895,7 +1895,10 @@
         "DIST-02",
         "DIST-03",
         "DIST-04"
-      ]
+      ],
+      "implementation_notes": {
+        "single_kvm_native86": "2026-10-30 18:11 JST: normal Make/APK route-read-flat-native86 corresponding to published2d9d4a0, Alpine3.24.3/Linux6.18.59, PID1 in dedicated4CPU/4096MiB PVE KVM guest passed cold startup, ordinary/special automatic dhcpcd, acquired A/AAAA UDP/TCP DNS/conditionalDNS, IPv4/IPv6 TCP/UDP, independent ISC/four kernel AFTR/two FRR/IX replacement,3 advertised Tailscale LANs bidirectionally, both acquired NTP servers, guest reboot and same communication/DUID/NodeID. No existing VM/bridge/NIC changes; Ethernet transported by QEMU hub/stream over SSH, dedicated guest removed. Supervisor ready observed4.049s is not earliest client connectivity latency. Independent chronyd first adopted product NTP40.942s/attempt5 after checking started; after reboot4.344s/attempt1. Default polls/timeouts/client maxdistance unchanged, actual startup adoption observed up to300s. Earlier8s NTP failure and TCG startup failure retained. Not naturalPD renewal/continuousTCP/ONU/physicalNIC/fullhomert/all34 qualification."
+      }
     }
   ],
   "module_assignments": [
