@@ -5,6 +5,30 @@
 [試験計画](test-plan.md)、[機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
+## 2026-10-30 18:11 JST: 通常配布物の隔離KVM起動・通信・再起動
+
+公開`2d9d4a0`相当の`route-read-flat-native86`通常Make/APK image（Alpine3.24.3/Linux6.18.59）を、PVE管理下の専用4CPU/4096MiB/KVM guestで完走した。独立ISC・四Linux AFTR・二FRR・IX代替Linux・DNS/DoH・chrony・Headscale/公式Tailscaleと、自動取得する普通/特殊dhcpcd端末を使用。製品はPID1。PVE既存VM/bridge/NICは変更せず、試験EthernetはQEMU hub/streamとSSHで隔離接続した。試験VMは停止・削除済み。
+
+通常DAD、自動取得DNSのA/AAAA UDP/TCPと両IP TCP/UDP、条件付きDNS、両BGPの四prefix、特殊端末の取得gateway/resolver、TS三広告LANとの双方向TCP/UDP、配布NTP二台を確認した。guest全体再起動後に同じ経路とDUID/NodeIDを確認し終了0。起動後4.049秒の観測でsupervisor readyだったが、端末の最短接続時刻を測った値ではない。自然PD更新/既存TCP連続/物理NIC/ONU直結/全homert設定と全34項目の受入ではない。
+
+NTPは同期flagだけではLAN端末が採用しなかった。初期skew1,000,000ppm/大きいroot dispersionの実packetと独立chronydの拒否を確認。既定poll/iburstの周波数推定後、最初の採用検査開始から40.942秒・5回目で製品NTPを採用し、再起動後は4.344秒・初回で採用した。もう一つの配布先も両起動で採用した。製品timeout、poll、client maxdistanceを緩めず、実採用を最大300秒観測した結果である。
+
+先行KVM走行は試験SSHのpipe待ちと中継QEMUの`-S`指定で停止した。後者は独立Linux二端末のpingで、一時停止中失敗/通常実行成功を確認して修正した。製品未起動・未接続を起動成功に数えない。完走前のNTP初回8秒失敗も合格とはしない。大きいstageは削除し、現在必要な小さい私有結果は`/tmp/routerd-kvm-native86-success/`、実行logは`/tmp/routerd-kvm-native86-vm-fourth.log`。旧image5組と完了harness7組約1.7GiBも削除した。次は明示設定によるconntrack計数と履歴の接続を進め、同時構成の二台/実運用受入へ戻る。
+
+## 2026-10-30 17:55 JST: native86統合・実HGWと起動環境
+
+`90f9d96`の旧OTLP LogSink取込、DHCP由来DNS、Firewall履歴を統合した（契約86/network25）。旧OTLPSink.Emitは送信していなかったため既存Telemetry senderだけを使う。DHCP名は有限な貸出所有者へ渡し、更新・実RELEASEでA/PTRを変更/撤去する。Firewall履歴は旧logstore.RecordBatch/ApplyRetentionを使い、保存障害がpacket収集を待たせない。新しい外部daemonは追加していない。
+
+`route-read-flat-native86`では、policy ruleの登録段階で一覧を一回、経路一覧を一操作で一回取得する。事前の所有確認は維持する。routeSlotはtableを含むため、重複したtable別mapと引数を削除した。アドレス/リンク変更後は新しい観測を取得し、所有・元期限・書込み前の検査を維持する。`make check`（Race/vet含む）、CGO0両arch、署名六ELF/catalog/publisher、通常Make/APK image生成が終了0。実5WAN選択、Health→PBR切替/期限/再起動/rollback、weighted ECMPの全三fixtureも通過。期限試験は両候補の2500ms max_ageを明示し、writer起動と実際の元期限撤去を分けた。製品の期限を変更していない。全体Raceの初回は大設定CLI確認の60秒期限超過で失敗（96.53秒）。同じ試験は単独49.76秒、再実行の全体checkも変更せず通過。負荷下での性能改善とはしない。
+
+同じ最終実行物で、独立dhcpcd/BusyBoxと実HGWを90秒/9巡使い、自動DHCPv4・RA起動のDHCPv6情報・SLAAC、取得DNSの両IP UDP/TCP、条件付きDNS障害分離/復旧、両IP HTTPS、両端末の自然DHCPv4更新が通過した。PD SIGKILL後1.49秒、通常交換4.06秒、全daemon交換5.32秒で通信が復帰しDUID/IAIDを保持。停止時RAゼロ・kernel撤去も通過。自然PD Renewは0組（元T1まで約7187秒）であり、自然更新・ONU直結・物理NIC・連続TCPの受入ではない。保存identityは維持した。logは私有`/tmp/routerd-route-read-flat-native86-hgw.log`。
+
+同じ実行物のDHCP名更新/実解放、Firewall履歴の両IP通信/保存/転送失敗と回復、OTLPの独立collector/重複配送防止も通過。OTLP中の並行UDPは69往復/失敗0。各fixtureのログは作業treeの`dist/route-read-flat-native86-*`に一時保持し、不要な生capture/VM stageは削除する。全homert同時構成・全34項目の完了ではない。
+
+通常factory `route-read-native86`（最終map平坦化前）の512MiB/2CPU/TCG全profileは依然不合格。network revision1 applied、projection3 applyingで適用応答timeout、端末DHCP未取得。経路取得削減だけで起動解消とはしない。小さい私有記録`/tmp/routerd-route-read-native86-failure/`を残し停止stageを削除した。以前の診断付きnative85はApply9.589秒が正常帰還し、interface2.330/routes2.590/firewall1.616秒、保存3回840+485msを観測した。最終保存の停止や循環lockを確認した結果ではない。
+
+実homertの読取りで両機は4CPU/約4GiB/KVMと確認した。512MiB/2CPU/TCGはsmoke fixtureの条件で最小要件ではない。rootから既存PVEへ信頼済み鍵で読取り接続し、KVMと空き約48GiBを確認した。本番VM/NICは変更していない。次は4CPU/4GiB/KVMの隔離guestへ同じ通常配布物と独立peer構成を接続し、起動・端末通信を判定する。単純な期限延長候補は採用しない。
+
 ## 2026-10-30 16:33 JST: native85統合候補
 
 `80c5892`の設定ACK保存削減と、入口サービス`71e6be2`/`2c6c232`を統合。契約native85/network journal25。`make check-ingress RELEASE_ID=integrated-native85`は実HTTPS対向/端末・kernelによる転送先切替、VIP/port限定hairpin、全宛先不健全時のDNAT撤去とICMP拒否、VRRP優先度150→90→150を通過した。関連7 packageのRace、vet、CGO0 amd64/arm64ビルド、署名六ELF・catalog・publisher検査も終了0。`make check-ingress`へコマンドを集約した。静的端末の入口通信だけの検査であり、全k8s構成・二台・ARM実行の受入ではない。[入口の範囲](ingress-acceptance.md)。
@@ -52,7 +76,7 @@ OTLPログworker `874bc22`、ManagementAccess/CLI `341c5cd`、履歴保持 `d824
 
 通常Make/APKの`history-native84`イメージ生成は終了0。配布kernelで既存の実通信fixtureへNFLOG group1・抽選divisor2を接続し、許可/破棄が抽選に左右されないことと、routes/ACL/NAT/DS-Lite/links/HA/RA期限を確認した。`make qemu-network IMAGE_DIR=dist/image-native84`は44.41秒で終了0。サンプリング比率の精度や全設定の起動を受け入れた結果ではない。
 
-## 通常配布イメージの起動: 未解決
+## 512MiB/2CPU/TCGで残る起動失敗（KVMの結果と区別）
 
 `dist/image-native83`は通常のMake/APK経路で生成したAlpine3.24.3/Linux6.18.59、製品`route-policy-native83`。512MiB/2CPU/TCGで全構成起動が失敗し、まだクライアント通信を受け入れていない。このCPU/メモリー指定は私有fixtureの条件で、製品の最小要件ではない。hostには`/dev/kvm`と仮想化CPU拡張がなく、勝手にhost設定を変更しない。
 
