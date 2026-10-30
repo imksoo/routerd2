@@ -11196,7 +11196,7 @@
     "physical_target_profile": "awaiting user target hardware/NIC and performance requirements; independent implementation and isolated VM tests continue",
     "validation_reporting": "Record current behavior, executed checks and untested scope concisely. Discard historical checkpoint ledgers as acceptance authority; no compatibility obligation to their code, APIs or formats.",
     "current_acceptance": {
-      "implementation_head": "c5f93a5",
+      "implementation_head": "8cc420d",
       "single_node_full_input_runtime": "supervisor-native91/native91/network27",
       "original_input_resources_per_node": 109,
       "explicit_appliance_input_resources_per_node": 110,
@@ -11207,7 +11207,7 @@
       "natural_original_dhcp_lease_seconds": 43200,
       "natural_dhcp_t1_seconds": 21600,
       "natural_renewal": "failed_before_T1_after_1958.882s_64_rounds; effects_timeout_triggered_leftover_diagnostic_stop",
-      "remaining": "Fix measured effects timeout; restart original DHCP natural renewal without diagnostic process signals. Verify WAN recovery, router-originated IPv6, full normal Alpine/PID1/update/recovery, target HGW/ONU/NIC, deployment profiles and remaining work packages.",
+      "remaining": "IPv6 DNS reacquisition and transport, original43200s DHCP renewal on normal Alpine; diagnose host effects timeout independently; current two-guest power-cut HA and update/recovery, target HGW/ONU/NIC, deployment profiles and remaining work packages.",
       "core_implementation_commit": "0e7012e",
       "normal_runtime": "full-homert-address-native92/native92/network27",
       "temporary_diagnostics_removed": true,
@@ -11228,14 +11228,19 @@
       "two_node_dns": {
         "queries": 1024,
         "failed": 23
-      }
+      },
+      "normal_alpine_full_input": "passed_cold_boot_and_real_reboot_with_independent_clients_and_peers; IPv6_DNS_reacquisition_and_transport_after_reboot_not_yet_accepted",
+      "normal_alpine_runtime": "full-homert-loopback-native92/native92/network27; Alpine3.24.3 Linux6.18.59-0-lts KVM4CPU4096MiB",
+      "normal_alpine_copy_assertions": 0,
+      "normal_alpine_effects_timeouts": 0,
+      "hgw_normal": "full-homert-event-native92; standard Make7800s observation running; automatic clients/dual-IP/DoH/TS and WAN recovery0.96s passed; natural PD renewal pending; not full57 input"
     }
   },
   "execution_order": [
     {
       "stage": 1,
       "profile": "homert02/03",
-      "next": "Normal full-homert-address-native92 stopped before T1 after1958.882s/64rounds when effects timeout triggered a mistakenly retained diagnostic stop in the fixture. The earlier T1 schedule is invalid. Correct the fixture and diagnose the actual timeout before claiming natural renewal. Same normal binary passed both full-input HA directions within the unchanged60s budget and original BGP timers, preserving the same TCP/NAT with measured losses. Complete router-originated IPv6 with the explicitly configured peer gateway, natural renewal/WAN recovery, normal Alpine full-input image/update/recovery and target qualification, then k8s/pve and Cloud SAM. Main c5f93a5 separately integrates independently accepted DNS history and DHCPv6 telemetry; running normal92 does not contain those later additions. No all34 completion claim.",
+      "next": "Current normal Alpine full-homert-loopback-native92 passed full-input cold boot and real reboot/automatic-client DNS, dual-IP TCPUDP, BGP, IX, NTP and Tailscale after fixing conntrack timestamp copying and PID1 loopback setup. Add actual reacquired IPv6 DNS UDP/TCP after reboot and observe original43200s lease natural renewal; then same-version two-guest power-cut HA, management/update/recovery and target qualification, followed by k8s/pve and Cloud SAM. The host effects timeout remains unresolved; its stopped earlier T1 schedule is invalid. Standard actual HGW7800s on previous same-protocol full-homert-event-native92 continues with natural PD renewal pending. No all34 completion claim.",
       "required_focus": [
         "WAN/LAN IPv4/IPv6, DS-Lite, actual route selection/backup WAN, DHCP/PD/RA, learned DNS resolution/distribution, firewall/NAT/MTU/MSS, BGP and management",
         "HA-01 current election/track dependencies, HA-02 DHCP/PD synchronization, HA-03 NAT/connection synchronization and EXT-02 Tailscale used by this deployment"

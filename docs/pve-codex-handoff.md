@@ -280,3 +280,18 @@ main `c5f93a5` は独立端末の通常版で検証されたDNS履歴とDHCPv6�
 ### 22:10 JST 訂正: 自然更新観測は停止、T1予定を撤回
 
 上記の継続中という状態は更新する。`RPdvwV`は最後の通信成功1958.882秒/64巡後、13:05:54 UTCからのBGP/VRRP effects timeoutを記録した。fixtureに私が診断用SIGSTOP/SIGQUITと停止処理を残しており、13:06:12 UTCのstack採取後に終了1。通信が自然T1まで続いた事実はなく、10月31日03:32予定は無効。新しい静的IPv6 gateway peerを加えた短時間試験も同じ期限超過で初回取得中に停止し、router発のTCP/UDPは未実行。並行して通常imageのビルド中だったが、負荷だけを原因と断定しない。stack採取時はnetworkの適用が終わっており、これだけでは2秒の待ち時間の内訳を確定できない。診断信号と強制停止を通常受入手順から削除し、通常Alpine全入力の実行と要求待ち/適用時間の観測へ進む。元のリースや製品の期限は短縮・延長しない。
+
+
+## 2026-10-30 22:38 JST: 通常Alpine全入力の起動・再起動を修正
+
+`3944a77`はlibnetfilter_conntrack1.1.1の`ATTR_TIMESTAMP_EVENT`コピー欠落を修正した。元parserはこの属性を設定するが`NFCT_CP_META`のcopy tableには関数がなく、通常Alpine/Linux6.18.59で`conntrackd`がassertしてVRRP/DHCPが再起動を繰り返した。属性を捨てず、対応する64bit値のコピーを追加し、通常エンジンのビルドへ接続した。固定された元ソース・両patch・ライブラリlicenseとパッケージ由来を配布物へ同梱する。
+
+次にDNSのSERVFAILを検出した。製品の運用ログはLAN→coreの`127.0.0.1:53`がnetwork unreachable、kernel観測はlo DOWNだった。名前空間fixtureが手動UPしていたため隠れていた製品起動の不足であり、旧routerdの`ensureLoopbackUp`にも同じ必要処理があった。`8cc420d`で明示appliance/PID1のbootstrapがloをUPにした。外部ipコマンドやprotocol engineをbootへ追加せず、既存unix ioctlを使う。host/containerモードはそのOSの所有を維持する。
+
+通常Make/APKの`full-homert-loopback-native92`、Alpine3.24.3/Linux6.18.59-0-lts、隔離PVE KVM4CPU/4096MiBと独立peer群で、元の全109入力＋明示appliance所有→57resourceの初期取得・DNS・両IP TCP/UDP・条件付きDNS/DoH・二FRR四prefix・特殊IX・NTP・Tailscaleが終了0。実reboot後も同じ経路・DUID/NodeIDを確認し、poweroff後に所有VMを削除した。serialには実kernel起動2回、copy assertion0、effects timeout0。これは短時間の一台でありVM二台の電源断切替や全体の安定稼働の受入ではない。
+
+取得リースは両端末とも元の43200秒/T1=21600/T2=37800秒。初期resolverはIPv4と委譲IPv6を取得したが、再起動直後の再確認時点はIPv4 resolverだけで、IPv6 DNSの再取得とそのserverへのUDP/TCP問い合わせまで待っていない。今回のAAAA名前解決をIPv6 DNS transportの合格に置き換えず、次の自然更新観測へ両方を明示して追加する。実行手順は私有`/tmp/routerd-full-homert-loopback-kvm92.py`、完走stageは`/tmp/routerd-homert-kvm92.cHxBYC`。旧版のまま独立peerへ静的host IPv6 gatewayを宣言した別の短時間試験では、router発IPv6 TCP/UDPとtable120/prefsrcの一致も成立した。
+
+関連Race Detector・全vet・両archの通常静的六ELF・署名catalogは通過。publisherの初回はworkspace rootが0775だったため入力の信頼境界で拒否され、0755へ直した同じ検査は通過した。製品の安全検査を緩和していない。実HGWでは一つ前の同一protocol実装`full-homert-event-native92`を使い、標準Makeの隔離試験で端末の自動DHCPv4/DHCPv6/SLAAC・両IP HTTPS/DNS・実DoH・条件付きDNS・独立Headscale/公式TSとInternet出口、WAN遮断/復帰0.96秒が成立した。7800秒観測中で、自然PD更新は未受入。これは全57resourceの実HGW資格やONU直結ではない。
+
+完了した7stageの重複ELF/capture、統合済みRA/address作業tree、古い5つの診断nDPI image tagを削除した。未解決のhost上effects timeoutは約628KiBの最小情報を`/tmp/routerd-effects-native92-unresolved/`へ残す。通常長期試験からSIGSTOP/SIGQUITと強制停止を削除済み。次はIPv6 DNS再取得を含む通常Alpineの元リース自然更新、同版の二guest電源断HA、管理/更新/復旧、対象環境とk8s/pve/Cloud SAM。全34項目と固定期限達成は未完了。
