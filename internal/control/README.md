@@ -325,3 +325,53 @@ post-commit lifecycle save failure must not report that the committed source
 was rolled back. At most 128 live rule declarations are accepted before any
 effects; durable registrations/tombstones still share store capacity limits.
 Retention/archive/capacity operations remain required for long-running use.
+
+## Restoring an explicitly saved configuration
+
+`POST /v1/config/restore` accepts a `RestoreRequest` containing the immutable
+`snapshot` reference, `expected_revision`, `request_id` and optional
+`confirm_timeout_seconds`. `Store.ResolveSnapshot` verifies the saved content
+and its store identity. `Engine.Restore` then passes only its configuration to
+`Engine.Commit`; it creates a new current revision instead of replaying the old
+revision, runtime observations, release selection or journal. Resolution does
+not hold the writer lock. The normal commit path still owns revision conflicts,
+idempotent replay, release preparation fencing, network application, persistence
+and failure recovery. A confirmed restore uses the ordinary confirmation and
+automatic rollback path. The HTTP acknowledgment has the same bounded complete
+or explicit-omission form as a normal commit.
+
+This follows the old routerctl rollback behavior of reading saved intent and
+submitting it through the existing apply owner. It restores one verified local
+configuration snapshot; it does not restore an entire appliance or import a
+snapshot from another configuration store.
+
+### Saved configuration and operational log acceptance (2026-10-30)
+
+Product source `a627c6e`, release `wsl-management-a627c6e`, passed the existing
+`TestDaemonConfigurationAndRecovery` on an independent WSL Linux 6.18.33.1
+machine at 22:39:19-22:39:45 JST (20.51 seconds in the integration runner).
+The standard three executables were statically linked. Independent network
+namespaces used real SSH/HTTP and UDP/TCP DNS clients against the product.
+SSH snapshot capture matched the local saved reference. After control restart,
+the restore API rejected a stale revision; SSH restored the saved DNS answer
+as a new revision, and an identical API retry preserved that revision
+or five-second confirmation deadline. Expiration restored the previous answer;
+the local restore command then selected the saved answer permanently.
+
+The same run checked operational log filtering and continuation against the
+original records, logging-worker SIGKILL/recovery, visible cursor reset and
+potential gaps, and continuation from the new epoch. An actual HTTP response
+was rendered offline and inspected for Japanese text and layout. This does not
+qualify physical disk failure, appliance reboot of this added command, target
+routers or the complete two-router configuration.
+
+The first run failed because the new fixture decoded successive JSON responses
+into the same State: an omitted confirmation field retained the earlier pointer.
+The fixture now clears the response before decoding, like its existing expiry
+check. The successful run used identical product binaries and unchanged
+five-second protocol and twelve-second observation bounds. Temporary diagnostic
+and HTML-capture lines were removed afterward; product code was unchanged.
+
+Reproduce from this source with the standard `make build`, then
+`python3 scripts/daemon-tests.py management --test TestDaemonConfigurationAndRecovery
+--go /path/to/go --binary-dir dist/bin` in the authorized isolated Linux setup.

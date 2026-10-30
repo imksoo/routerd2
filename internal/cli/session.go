@@ -36,7 +36,7 @@ func (s Session) Execute(ctx context.Context, command string, input io.Reader, o
 		return nil
 	}
 	if len(a) == 1 && a[0] == "help" {
-		_, err := fmt.Fprintln(out, "show status\nshow network [SECTION [FILTER VALUE ...]] (show network help for details)\nshow resources\nshow derived RESOURCE_ID\nshow observations [after CURSOR] [limit 1..16]\nshow event-store\nshow services [NAME]\nshow route-issues [offset N]\nshow config\nshow running-config\nshow logs [module NAME] [level INFO] [limit 100]\nshow logging\nshow version\nrestart <module>\npoweroff\nreboot\nconfigure (exec: CommitRequest YAML/JSON on stdin; shell: candidate mode)\nconfirm\nupdate status|stage|prepare|rollback|cancel (exec stdin: signed tar or JSON)\nhelp\nexit")
+		_, err := fmt.Fprintln(out, "show status\nshow network [SECTION [FILTER VALUE ...]] (show network help for details)\nshow resources\nshow derived RESOURCE_ID\nshow observations [after CURSOR] [limit 1..16]\nshow event-store\nshow services [NAME]\nshow route-issues [offset N]\nshow config\nshow running-config\nshow logs [module NAME] [level INFO] [limit 100]\nshow logging\nshow version\nrestart <module>\npoweroff\nreboot\nconfigure (exec: CommitRequest YAML/JSON on stdin; shell: candidate mode)\nconfirm\nsnapshot (exec stdin: SnapshotRequest JSON/YAML)\nrestore (exec stdin: RestoreRequest JSON/YAML)\nupdate status|stage|prepare|rollback|cancel (exec stdin: signed tar or JSON)\nhelp\nexit")
 		return err
 	}
 	var result json.RawMessage
@@ -45,6 +45,21 @@ func (s Session) Execute(ctx context.Context, command string, input io.Reader, o
 	logClient := localapi.NewClient(filepath.Join(s.RuntimeDir, logging.SocketName))
 	var err error
 	switch {
+	case len(a) == 1 && a[0] == "snapshot":
+		return snapshotConfiguration(ctx, ctl, input, out)
+	case len(a) == 1 && a[0] == "restore":
+		if input == nil {
+			return errors.New("restore requires RestoreRequest JSON/YAML on stdin")
+		}
+		var request control.RestoreRequest
+		if err := config.Decode(input, &request); err != nil {
+			return err
+		}
+		state, err := s.RestoreConfiguration(ctx, request)
+		if err != nil {
+			return fmt.Errorf("request_id=%s: %w", request.RequestID, err)
+		}
+		return WriteConfigurationState(out, state)
 	case a[0] == "update":
 		return update(ctx, ctl, a[1:], input, out)
 	case len(a) >= 2 && a[0] == "show" && a[1] == "event-store":

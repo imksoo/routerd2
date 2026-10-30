@@ -1,0 +1,36 @@
+{{define "logs"}}{{with .Logs}}
+<p>製品が生成した運用ログを検索します。対象はメモリー内の保持範囲です。起動時に読み戻した末尾を含みますが、保存ファイル全体の検索ではありません。</p>
+<form method="get" action="{{$.Config.BasePath}}logs">
+<label>発生元（完全一致）<input name="module" value="{{.Module}}" placeholder="例: control"></label>
+<label>最低重要度<select name="level"><option value=""{{if eq .Level ""}} selected{{end}}>全レベル</option><option value="DEBUG"{{if eq .Level "DEBUG"}} selected{{end}}>診断以上</option><option value="INFO"{{if eq .Level "INFO"}} selected{{end}}>情報以上</option><option value="WARN"{{if eq .Level "WARN"}} selected{{end}}>警告以上</option><option value="ERROR"{{if eq .Level "ERROR"}} selected{{end}}>エラー</option></select></label>
+<label>取得件数（1～200）<input name="limit" type="number" min="1" max="200" value="{{.Limit}}"></label>
+<button type="submit">最新から検索</button>
+</form>
+{{with .Result}}
+{{if .Reset}}<p class="notice" role="status">継続位置を切り替えました。</p>{{end}}
+{{if .Gap}}<p class="error" role="alert">ログに欠損がある可能性があります。表示範囲だけで全履歴がそろっているとは判断できません。</p>{{end}}
+{{if .GapReasons}}<ul class="notice">{{range .GapReasons}}<li>{{logGapReason .}}（<code>{{.}}</code>）</li>{{end}}</ul>{{end}}
+<p>保持範囲の連番: {{.OldestSequence}}～{{.LatestSequence}} / 表示: {{len .Records}}件 / ログ担当の世代: <code>{{.Status.Epoch}}</code></p>
+{{with .Status}}
+<p>永続保存: {{if .DiskEnabled}}稼働{{else}}停止{{end}} / 保存待ち: {{.DiskQueueDepth}} / {{.DiskQueueLimit}}件</p>
+{{if .DiskDegraded}}<p class="error" role="alert">保存の劣化が記録されています。欠落と最後の保存エラーを確認してください。</p>{{end}}
+{{if .DiskRecoveryRequired}}<p class="error" role="alert">保存履歴の修復後にログ担当の再起動が必要です。</p>{{end}}
+{{if .LastDiskError}}<p class="error">最後の保存エラー: {{.LastDiskError}}</p>{{end}}
+{{with .LastDiskSuccess}}<p>最後の保存成功: {{.}}</p>{{end}}
+<details><summary>保持・欠損・保存の詳細</summary><dl>
+<dt>メモリー保持</dt><dd>{{.MemoryEntries}} / {{.MemoryLimit}}件、保持件数の上限による除外 {{.MemoryEvicted}}件</dd>
+<dt>受理・拒否</dt><dd>受理 {{.Accepted}}件 / 拒否 {{.Rejected}}件</dd>
+<dt>発生元の欠損</dt><dd>{{.ProducerGaps}}件 / 発生元の継続位置の除外 {{.ProducerStateEvicted}}件</dd>
+<dt>保存</dt><dd>書込 {{.DiskWritten}}件 / 欠落 {{.DiskDropped}}件 / エラー {{.DiskErrors}}回</dd>
+<dt>読み戻し時の異常</dt><dd>破損 {{.CorruptRecords}}件 / 連番の欠損 {{.RecoveredGaps}}件</dd>
+</dl></details>
+{{end}}
+<div class="scroll"><table><thead><tr><th>時刻・位置</th><th>発生元</th><th>重要度</th><th>内容</th></tr></thead><tbody>
+{{range .Records}}<tr data-log-epoch="{{.Epoch}}" data-log-sequence="{{.Sequence}}"><td>{{.Timestamp}}<br>連番 {{.Sequence}}</td><td><code>{{.Module}}</code><br>プロセス {{.PID}} / 世代 {{.Generation}}</td><td><code>{{.Level}}</code></td><td>{{.Message}}
+{{if .ProducerGap}}<p class="notice">この記録の前に発生元の欠損 {{.ProducerGap}}件</p>{{end}}{{if .ProducerDropped}}<p class="notice">発生元が報告した累積欠落 {{.ProducerDropped}}件</p>{{end}}
+{{if .Attributes}}<details><summary>属性</summary><dl>{{range $key, $value := .Attributes}}<dt><code>{{$key}}</code></dt><dd>{{$value}}</dd>{{end}}</dl></details>{{end}}
+</td></tr>{{else}}<tr><td colspan="4">指定した条件に一致するログはありません。</td></tr>{{end}}
+</tbody></table></div>
+<a rel="next" href="{{$.Logs.Next}}">{{if .More}}続きのログ{{else}}この位置以降を取得{{end}}</a>
+{{end}}
+{{end}}{{end}}

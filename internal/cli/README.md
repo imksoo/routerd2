@@ -199,3 +199,30 @@ inactive resources expose no asserted boolean. Historical last-transition
 times are not proof of current Up, and there is no journal/file fallback when
 the current evaluator is unavailable. See the
 [resource contract](../../docs/resource-program.md#derivedevent).
+
+## Saved configuration capture and restore
+
+The SSH exec command `snapshot` takes a `control.SnapshotRequest` as JSON/YAML
+on stdin and returns an immutable `config.SnapshotRef`. The exec command
+`restore` takes `control.RestoreRequest` with that `snapshot`, the current
+`expected_revision`, a stable `request_id` and optional
+`confirm_timeout_seconds` (5..3600). `confirm` accepts the restored candidate;
+without confirmation it reverts to the configuration that was active before
+the restore. These two commands require exec input, not the interactive
+candidate editor.
+
+The local commands provide the same flow:
+
+```
+routerd config snapshot --expected-revision 7 > saved-reference.json
+routerd config restore --snapshot saved-reference.json --expected-revision 9 --request-id recover-lan --confirmed 60
+routerd config confirm
+```
+
+A saved reference identifies immutable content in the same configuration store;
+it is not the configuration file itself. A restore commits saved intent as a
+new revision. On timeout, retain and reuse the same request ID and parameters;
+the command never generates a new mutation to retry an uncertain response.
+Local restore generates an ID only when none is supplied, as `config apply`
+does, and includes it in any failure message. Snapshot files and their existing
+validation/ownership remain under the configuration store.

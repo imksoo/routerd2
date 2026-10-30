@@ -288,3 +288,27 @@ Japanese labels and packet fields were legible without overlap. These are
 isolated Linux namespace results on WSL, not target hardware qualification or
 acceptance of the complete homert configuration. Evidence is in
 `dist/firewall-integrated/` (execution metadata, log and captured HTML).
+
+
+## 運用ログの検索
+
+`<base_path>logs` は、ログ担当の `logging.sock` にある `GET /v1/logs` を直接読み取ります。
+旧画面のイベント検索と継続取得の用途を、既存の型付き `QueryResult` と `Status` へ接続しました。
+新しい保存先、配信処理、ログ変換器は作りません。検索時にネットワークの適用処理を呼び出しません。
+
+発生元の完全一致、最低重要度、取得件数で検索します。既定は最新100件、上限は200件です。
+検索範囲はメモリー内の保持範囲で、起動時に保存から読み戻した末尾を含みます。
+保存ファイル全体の検索ではありません。各記録の元の時刻、発生元、世代、連番、重要度、本文、属性を表示します。
+HTMLの引用処理を維持し、機密属性の除去は既存のログ担当が所有します。
+
+継続リンクはAPIが返した `Cursor` をそのまま使い、検索条件を保持します。
+途中で条件に合わない記録があっても、表示行の連番から継続位置を作り直しません。
+初回は最新の一致範囲、継続取得は返された位置以降の古い順です。
+ログ担当の再起動による `Reset`、保持範囲や発生元などに由来する `Gap` とその理由を表示します。
+一致する記録がない場合と、取得できなかった場合を区別します。
+
+保存状態は検索と同じ応答の `Status` を表示します。
+保存の稼働・停止、保存待ち件数、欠落件数、最後の保存エラーと成功時刻を確認できます。
+`DiskDegraded` は劣化が記録されたことを示すため、現在も保存できないと決めつけません。
+`DiskRecoveryRequired` は修復後の再起動が必要であることを明示します。
+物理ディスク障害中の画面確認は、この画面追加の受入では未確認です。

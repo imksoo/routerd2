@@ -54,7 +54,7 @@ func TestDaemonConfigurationAndRecovery(t *testing.T) {
 	defer os.RemoveAll(dir)
 	runDir, stateDir := filepath.Join(dir, "run"), filepath.Join(dir, "state")
 	dnsPort, sshPort := port(t), port(t)
-	dns := dnsconfig.RuntimeConfig{Resource: "dns", Spec: api.DNSResolverSpec{Listen: []api.DNSResolverListenSpec{{Name: "local", Addresses: []string{"127.0.0.1"}, Port: dnsPort}}, Sources: []api.DNSResolverSourceSpec{{Name: "zones", Kind: "zone", Match: []string{"lab.example"}, ZoneRef: []string{"DNSZone/lan-zone"}}}}, Zones: []dnsconfig.RuntimeZone{{Name: "lan-zone", Spec: api.DNSZoneSpec{Zone: "lab.example", Records: []api.DNSZoneRecordSpec{{Hostname: "router", IPv4: "192.0.2.1"}}}}}}
+	dns := dnsconfig.RuntimeConfig{Resource: "dns", Spec: api.DNSResolverSpec{Listen: []api.DNSResolverListenSpec{{Name: "local", Addresses: []string{"127.0.0.1", "198.18.0.1"}, Port: dnsPort}}, Sources: []api.DNSResolverSourceSpec{{Name: "zones", Kind: "zone", Match: []string{"lab.example"}, ZoneRef: []string{"DNSZone/lan-zone"}}}}, Zones: []dnsconfig.RuntimeZone{{Name: "lan-zone", Spec: api.DNSZoneSpec{Zone: "lab.example", Records: []api.DNSZoneRecordSpec{{Hostname: "router", IPv4: "192.0.2.1"}}}}}}
 	leases := serviceconfig.DHCPServer{Interface: "mgmt0", ServerAddress: "198.18.0.1", Authoritative: true,
 		Primary: dhcpserverconfig.Scope{Prefix: "198.18.0.0/24", Start: "198.18.0.100", End: "198.18.0.110", Router: "198.18.0.1", LeaseSeconds: 120}}
 	doc := config.FromNative(config.Native{Services: []serviceconfig.Service{{Name: "dns", DNS: &serviceconfig.DNS{RuntimeConfig: dns}}, {Name: "leases", DHCPServer: &leases}}})
@@ -413,6 +413,22 @@ esac
 	if err != nil || json.Unmarshal(snapshotOutput, &saved) != nil || saved.Validate() != nil || saved.StoreID != state.StoreID || saved.Revision != 2 {
 		t.Fatalf("actual snapshot CLI did not capture confirmed revision: %v %s", err, snapshotOutput)
 	}
+	savedPath := filepath.Join(dir, "saved-reference.json")
+	if err := os.WriteFile(savedPath, snapshotOutput, 0600); err != nil {
+		t.Fatal(err)
+	}
+	snapshotSession, err := client.NewSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshotBody, _ := json.Marshal(control.SnapshotRequest{ExpectedRevision: 2})
+	snapshotSession.Stdin = bytes.NewReader(snapshotBody)
+	sshSnapshotOutput, err := snapshotSession.CombinedOutput("snapshot")
+	_ = snapshotSession.Close()
+	var sshSaved config.SnapshotRef
+	if err != nil || json.Unmarshal(sshSnapshotOutput, &sshSaved) != nil || sshSaved != saved {
+		t.Fatalf("SSH snapshot differs from local confirmed capture: %v %s", err, sshSnapshotOutput)
+	}
 	configStore := &config.Store{Dir: stateDir}
 	originalSnapshot, err := configStore.ResolveSnapshot(saved)
 	if err != nil {
@@ -460,6 +476,9 @@ esac
 			t.Fatalf("unexpected durable lifecycle: %+v", durableBefore)
 		}
 	}
+	logClient := localapi.NewClient(filepath.Join(runDir, "logging.sock"))
+	defer logClient.HTTP.CloseIdleConnections()
+	oldLogCursor := checkConsoleLogsBeforeRestart(t, logClient, console)
 	for _, name := range []string{"logging", "control", consoleModule} {
 		old := status()
 		var victim supervisor.ModuleStatus
@@ -496,6 +515,9 @@ esac
 		})
 		console("GET", "", 200, "routerd2 &lt;lab&gt;")
 		console("GET", "network", 200, "198.18.0.1/24")
+		if name == "logging" {
+			checkConsoleLogsAfterRestart(t, logClient, console, oldLogCursor)
+		}
 	}
 	var durableAfter struct {
 		Records []events.Record `json:"records"`
@@ -537,6 +559,71 @@ esac
 	if !bytes.Equal(a, c2) {
 		t.Fatal("SSH observations differ from durable API history after control recovery")
 	}
+	// A saved reference remains usable after the real control restart. Restore
+	// through the same transaction owner, never by replacing its journal file.
+	peerAnswer := func(want string) {
+		t.Helper()
+		if err := fixtureInsideNamespace(peer, func() error {
+			answerAddress(t, fmt.Sprintf("198.18.0.1:%d", dnsPort), want)
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := ctl.Do(ctx, "POST", "/v1/config/commit", control.CommitRequest{ExpectedRevision: recovered.Revision, RequestID: "fixture-before-restore", Config: changed}, &state); err != nil {
+		t.Fatal(err)
+	}
+	peerAnswer("192.0.2.3")
+	restoreRequest := control.RestoreRequest{Snapshot: saved, ExpectedRevision: recovered.Revision, RequestID: "fixture-stale-restore"}
+	if err := ctl.Do(ctx, "POST", "/v1/config/restore", restoreRequest, nil); !localapi.IsHTTPStatus(err, http.StatusConflict) {
+		t.Fatal("restore accepted stale current revision", err)
+	}
+	peerAnswer("192.0.2.3")
+	restoreRequest.ExpectedRevision = state.Revision
+	restoreRequest.RequestID = "fixture-restore"
+	restoreRequest.ConfirmTimeoutSeconds = 5
+	restoreSession, err := client.NewSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	restoreBody, _ := json.Marshal(restoreRequest)
+	restoreSession.Stdin = bytes.NewReader(restoreBody)
+	restoreOutput, err := restoreSession.CombinedOutput("restore")
+	_ = restoreSession.Close()
+	var restored control.State
+	if err != nil || json.Unmarshal(restoreOutput, &restored) != nil || restored.Revision != state.Revision+1 || restored.Confirmation == nil {
+		t.Fatalf("SSH restore did not apply saved configuration as a new confirmed trial: %v %s", err, restoreOutput)
+	}
+	peerAnswer("192.0.2.2")
+	var replayed control.State
+	if err := ctl.Do(ctx, "POST", "/v1/config/restore", restoreRequest, &replayed); err != nil || replayed.Revision != restored.Revision || replayed.Confirmation == nil || !replayed.Confirmation.Deadline.Equal(restored.Confirmation.Deadline) {
+		t.Fatal("restore replay changed revision or original confirmation deadline", err, replayed.Revision)
+	}
+	var observedRevision uint64
+	until(t, 12*time.Second, func() bool {
+		state = control.State{}
+		if err := ctl.Do(ctx, "GET", "/v1/config", nil, &state); err != nil {
+			return false
+		}
+		if state.Revision != observedRevision {
+			var deadline time.Time
+			if state.Confirmation != nil {
+				deadline = state.Confirmation.Deadline
+			}
+			t.Logf("restore confirmation transition: revision=%d pending=%v deadline=%s healthy=%v last_error=%q", state.Revision, state.Confirmation != nil, deadline, state.Healthy, state.LastError)
+			observedRevision = state.Revision
+		}
+		return state.Revision == restored.Revision+1 && state.Confirmation == nil && state.Healthy
+	})
+	peerAnswer("192.0.2.3")
+	restoreRevision := state.Revision
+	restoreCommand := exec.Command(filepath.Join(os.Getenv("ROUTERD2_TEST_BIN_DIR"), "routerd"), "config", "restore", "--snapshot="+savedPath, "--runtime-dir="+runDir, "--expected-revision="+fmt.Sprint(restoreRevision), "--request-id=fixture-restore-confirmed")
+	finalRestoreOutput, err := restoreCommand.CombinedOutput()
+	if err != nil || json.Unmarshal(finalRestoreOutput, &state) != nil || state.Revision != restoreRevision+1 || state.Confirmation != nil {
+		t.Fatalf("local restore CLI could not restore confirmed intent: %v %s", err, finalRestoreOutput)
+	}
+	peerAnswer("192.0.2.2")
+	t.Logf("SSH snapshot/restore, API replay and local restore CLI: saved revision %d restored after control restart as current revision %d; stale revision refused; unchanged five-second confirmation deadline reverted the trial; independent UDP/TCP DNS matched each transition", saved.Revision, state.Revision)
 	// The operator reads current finite DerivedEvent state through real SSH;
 	// it must not fetch the producer's durable historical asserted value.
 	state = control.State{}
@@ -609,10 +696,14 @@ func until(t *testing.T, d time.Duration, condition func() bool) {
 }
 func answer(t *testing.T, port int, want string) {
 	t.Helper()
+	answerAddress(t, fmt.Sprintf("127.0.0.1:%d", port), want)
+}
+func answerAddress(t *testing.T, address, want string) {
+	t.Helper()
 	q := new(mdns.Msg)
 	q.SetQuestion("router.lab.example.", mdns.TypeA)
 	for _, transport := range []string{"udp", "tcp"} {
-		r, _, e := (&mdns.Client{Net: transport, Timeout: time.Second}).Exchange(q, fmt.Sprintf("127.0.0.1:%d", port))
+		r, _, e := (&mdns.Client{Net: transport, Timeout: time.Second}).Exchange(q, address)
 		if e != nil || r == nil || len(r.Answer) != 1 {
 			t.Fatalf("DNS %s answer: %v %v", transport, r, e)
 		}
