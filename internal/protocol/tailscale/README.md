@@ -89,6 +89,22 @@ counters, each peer's DNS name and assigned tags. The node snapshot exposes
 observations; `advertise_tags` stays in configuration as a request. Cached
 metadata in a NeedsLogin or expired snapshot does not establish permission.
 
+`show services NAME` also preserves the daemon's operational values rather than
+inferring them from configured advertisements. On the local node,
+`allowed_prefixes` contains routes permitted by the control plane,
+`primary_routes` contains the subnet routes assigned to this node as primary,
+and `exit_node_option` indicates an offered and approved exit node. These are
+observations, separate from `advertise_routes` and `advertise_exit_node` intent.
+For each peer, `active` reports recent traffic (the pinned daemon currently uses
+recent sends), while `online` reports its observed control-plane presence.
+`last_seen`, when supplied and nonzero, is the last online time known to the
+control plane, normally supplied for an offline peer. It is not the last packet
+or handshake time. `exit_node` identifies the exit selected by this router;
+`exit_node_option` only identifies a peer offered and approved as an exit.
+These fields do not prove current end-to-end reachability or identify which
+remote peers are using this router as their exit. Observation expiry still uses
+the original boot clock; a historical `last_seen` never extends that expiry.
+
 Run `make check-tailscale` with Linux root/sudo, TUN, iproute2, nft, curl,
 OpenSSL, tcpdump, dig, dnsmasq and Python 3. `make tailscale-peers` downloads checksum-pinned
 Headscale 0.29.6 and official Tailscale 1.104.2 Linux/amd64 peers into

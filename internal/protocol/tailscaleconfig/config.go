@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/imksoo/routerd2/internal/lifetime"
 )
@@ -46,6 +47,10 @@ type Peer struct {
 	DNSName         string         `json:"dns_name,omitempty"`
 	Tags            []string       `json:"tags,omitempty"`
 	Online          bool           `json:"online"`
+	Active          bool           `json:"active"`
+	LastSeen        time.Time      `json:"last_seen,omitzero"`
+	ExitNode        bool           `json:"exit_node"`
+	ExitNodeOption  bool           `json:"exit_node_option"`
 	Addresses       []netip.Addr   `json:"addresses,omitempty"`
 	AllowedPrefixes []netip.Prefix `json:"allowed_prefixes,omitempty"`
 	HomeDERP        string         `json:"home_derp,omitempty"`
@@ -62,19 +67,22 @@ type Tailnet struct {
 }
 
 type Snapshot struct {
-	Resource      string       `json:"resource"`
-	Interface     string       `json:"interface"`
-	BackendState  string       `json:"backend_state"`
-	NodeID        string       `json:"node_id,omitempty"`
-	DNSName       string       `json:"dns_name,omitempty"`
-	Tags          []string     `json:"tags,omitempty"`
-	Tailnet       *Tailnet     `json:"tailnet,omitempty"`
-	Online        bool         `json:"online"`
-	Addresses     []netip.Addr `json:"addresses,omitempty"`
-	Peers         []Peer       `json:"peers,omitempty"`
-	BootID        string       `json:"boot_id"`
-	ObservedNanos uint64       `json:"observed_nanos"`
-	ExpiresNanos  uint64       `json:"expires_nanos"`
+	Resource        string         `json:"resource"`
+	Interface       string         `json:"interface"`
+	BackendState    string         `json:"backend_state"`
+	NodeID          string         `json:"node_id,omitempty"`
+	DNSName         string         `json:"dns_name,omitempty"`
+	Tags            []string       `json:"tags,omitempty"`
+	Tailnet         *Tailnet       `json:"tailnet,omitempty"`
+	Online          bool           `json:"online"`
+	AllowedPrefixes []netip.Prefix `json:"allowed_prefixes,omitempty"`
+	PrimaryRoutes   []netip.Prefix `json:"primary_routes,omitempty"`
+	ExitNodeOption  bool           `json:"exit_node_option"`
+	Addresses       []netip.Addr   `json:"addresses,omitempty"`
+	Peers           []Peer         `json:"peers,omitempty"`
+	BootID          string         `json:"boot_id"`
+	ObservedNanos   uint64         `json:"observed_nanos"`
+	ExpiresNanos    uint64         `json:"expires_nanos"`
 }
 
 func ValidateNode(n Node) error {

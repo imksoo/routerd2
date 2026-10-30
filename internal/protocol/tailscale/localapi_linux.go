@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/netip"
 	"sort"
+	"time"
 
 	"github.com/imksoo/routerd2/internal/protocol/tailscaleconfig"
 )
@@ -48,17 +49,22 @@ func startOptions(n tailscaleconfig.Node, key string) startRequest {
 }
 
 type peerStatus struct {
-	ID           string
-	HostName     string
-	DNSName      string
-	Tags         []string
-	Online       bool
-	TailscaleIPs []netip.Addr
-	AllowedIPs   []netip.Prefix
-	Relay        string
-	CurAddr      string
-	RxBytes      int64
-	TxBytes      int64
+	ID             string
+	HostName       string
+	DNSName        string
+	Tags           []string
+	Online         bool
+	Active         bool
+	LastSeen       time.Time
+	ExitNode       bool
+	ExitNodeOption bool
+	TailscaleIPs   []netip.Addr
+	AllowedIPs     []netip.Prefix
+	PrimaryRoutes  []netip.Prefix
+	Relay          string
+	CurAddr        string
+	RxBytes        int64
+	TxBytes        int64
 }
 type status struct {
 	BackendState   string
@@ -85,10 +91,20 @@ func parseStatus(data []byte) (tailscaleconfig.Snapshot, error) {
 		out.DNSName = state.Self.DNSName
 		out.Tags = state.Self.Tags
 		out.Online = state.Self.Online
+		out.AllowedPrefixes = state.Self.AllowedIPs
+		out.PrimaryRoutes = state.Self.PrimaryRoutes
+		out.ExitNodeOption = state.Self.ExitNodeOption
 		out.Addresses = state.Self.TailscaleIPs
 	}
 	for _, peer := range state.Peer {
-		out.Peers = append(out.Peers, tailscaleconfig.Peer{ID: peer.ID, Hostname: peer.HostName, DNSName: peer.DNSName, Tags: peer.Tags, Online: peer.Online, Addresses: peer.TailscaleIPs, AllowedPrefixes: peer.AllowedIPs, HomeDERP: peer.Relay, DirectAddress: peer.CurAddr, RxBytes: peer.RxBytes, TxBytes: peer.TxBytes})
+		out.Peers = append(out.Peers, tailscaleconfig.Peer{
+			ID: peer.ID, Hostname: peer.HostName, DNSName: peer.DNSName, Tags: peer.Tags,
+			Online: peer.Online, Active: peer.Active, LastSeen: peer.LastSeen,
+			ExitNode: peer.ExitNode, ExitNodeOption: peer.ExitNodeOption,
+			Addresses: peer.TailscaleIPs, AllowedPrefixes: peer.AllowedIPs,
+			HomeDERP: peer.Relay, DirectAddress: peer.CurAddr,
+			RxBytes: peer.RxBytes, TxBytes: peer.TxBytes,
+		})
 	}
 	sort.Slice(out.Peers, func(i, j int) bool { return out.Peers[i].ID < out.Peers[j].ID })
 	return out, nil
