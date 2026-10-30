@@ -152,25 +152,7 @@ func (c *compiler) dhcpServer(r resource, reservations []resource) (dhcpserverco
 		}
 	}
 	s.ListenInterfaces = nil
-	var source netip.Prefix
-	count := 0
-	for _, static := range c.static {
-		if static.iface == ifname && !meaningful(child(static.resource.node, "when")) {
-			source = static.prefix
-			count++
-		}
-	}
-	if count != 1 || !source.IsValid() || source.Bits() > 30 {
-		c.reject(r, "interface", "ambiguous_reference", "server address and subnet require exactly one unconditional owned IPv4StaticAddress with a /1../30 prefix on the interface")
-	}
-	if iface != nil {
-		for _, address := range iface.Addresses {
-			p, err := netip.ParsePrefix(address)
-			if err == nil && p.Addr().Is4() && p != source {
-				c.reject(r, "interface", "ambiguous_reference", "additional IPv4 addresses make the old implicit server address/subnet ambiguous")
-			}
-		}
-	}
+	source := c.dhcpSubnet(r, "addressPool", ifname, dhcpFirst(s.AddressPool.Start, s.RangeStart), dhcpFirst(s.AddressPool.End, s.RangeEnd))
 	for _, other := range c.document.Services {
 		if other.DHCP4 != nil && other.DHCP4.Interface == ifname {
 			c.reject(r, "interface", "unsupported_semantics", "a DHCP client can change this interface's address; a local server requires an exclusively static IPv4 source")
@@ -231,9 +213,13 @@ func (c *compiler) dhcpServer(r resource, reservations []resource) (dhcpserverco
 		}
 		c.dhcpOptions(r, path+".options", p.Options)
 		p.AddressPool.LeaseTime = dhcpFirst(p.AddressPool.LeaseTime, s.AddressPool.LeaseTime)
-		p.Gateway = dhcpFirst(p.Gateway, source.Addr().String())
-		if len(p.DNSServers) == 0 {
-			p.DNSServers = []string{source.Addr().String()}
+		scopeSource := c.dhcpSubnet(r, path+".addressPool", ifname, p.AddressPool.Start, p.AddressPool.End)
+		if scopeSource.IsValid() {
+			p.Gateway = dhcpFirst(p.Gateway, scopeSource.Addr().String())
+			p.Netmask = dhcpFirst(p.Netmask, net.IP(net.CIDRMask(scopeSource.Bits(), 32)).String())
+			if len(p.DNSServers) == 0 {
+				p.DNSServers = []string{scopeSource.Addr().String()}
+			}
 		}
 	}
 	for i := range s.Scopes {
@@ -242,9 +228,13 @@ func (c *compiler) dhcpServer(r resource, reservations []resource) (dhcpserverco
 		c.dhcpOptions(r, path+".options", scope.Options)
 		if scope.ProfileRef == "" {
 			scope.AddressPool.LeaseTime = dhcpFirst(scope.AddressPool.LeaseTime, s.AddressPool.LeaseTime)
-			scope.Gateway = dhcpFirst(scope.Gateway, source.Addr().String())
-			if len(scope.DNSServers) == 0 {
-				scope.DNSServers = []string{source.Addr().String()}
+			scopeSource := c.dhcpSubnet(r, path+".addressPool", ifname, scope.AddressPool.Start, scope.AddressPool.End)
+			if scopeSource.IsValid() {
+				scope.Gateway = dhcpFirst(scope.Gateway, scopeSource.Addr().String())
+				scope.Netmask = dhcpFirst(scope.Netmask, net.IP(net.CIDRMask(scopeSource.Bits(), 32)).String())
+				if len(scope.DNSServers) == 0 {
+					scope.DNSServers = []string{scopeSource.Addr().String()}
+				}
 			}
 		}
 	}
@@ -290,6 +280,33 @@ func (c *compiler) dhcpServer(r resource, reservations []resource) (dhcpserverco
 		c.target(item, "services/"+service.Name+"/dhcp_server/reservations")
 	}
 	return cfg, true
+}
+
+// dnsmasq selects a local subnet from the address range, not from the number
+// of IPv4 addresses on the link. Keep that selection in configured intent.
+func (c *compiler) dhcpSubnet(r resource, field, ifname, first, last string) netip.Prefix {
+	start, startErr := netip.ParseAddr(first)
+	end, endErr := netip.ParseAddr(last)
+	if startErr != nil || endErr != nil || !start.Is4() || !end.Is4() {
+		c.reject(r, field, "invalid_value", "DHCP range requires IPv4 start and end addresses")
+		return netip.Prefix{}
+	}
+	var source netip.Prefix
+	for _, static := range c.static {
+		if static.iface != ifname || meaningful(child(static.resource.node, "when")) || !static.prefix.Contains(start) || !static.prefix.Contains(end) {
+			continue
+		}
+		if source.IsValid() && source != static.prefix {
+			c.reject(r, "interface", "ambiguous_reference", "multiple owned addresses cover the DHCP pool; select an unambiguous server identity")
+			return netip.Prefix{}
+		}
+		source = static.prefix
+	}
+	if !source.IsValid() || source.Bits() < 1 || source.Bits() > 30 {
+		c.reject(r, "interface", "ambiguous_reference", "DHCP pool requires an unconditional owned IPv4 address on its interface with a /1../30 prefix")
+		return netip.Prefix{}
+	}
+	return source
 }
 
 func (c *compiler) dhcpStaticSource(r resource, path string, source api.StatusValueSourceSpec) string {
@@ -360,16 +377,24 @@ func (c *compiler) dhcpScopeBoundaries(r resource, cfg dhcpserverconfig.Config) 
 		if i != 0 {
 			path = "scopes[" + strconv.Itoa(i-1) + "]"
 		}
-		if scope.Prefix != cfg.Primary.Prefix {
-			c.reject(r, path, "unsupported_semantics", "selector pools must use the sole owned interface subnet; secondary subnets and relay inference require explicit native topology")
+		source := c.dhcpSubnet(r, path, cfg.Interface, scope.Start, scope.End)
+		if source.IsValid() && scope.Prefix != source.Masked().String() {
+			c.reject(r, path, "unsupported_semantics", "DHCP netmask must match the owned interface subnet containing the pool")
 		}
 		start, _ := netip.ParseAddr(scope.Start)
 		end, _ := netip.ParseAddr(scope.End)
-		for _, earlier := range scopes[:i] {
+		for j, earlier := range scopes[:i] {
 			a, _ := netip.ParseAddr(earlier.Start)
 			b, _ := netip.ParseAddr(earlier.End)
 			if start.Compare(b) <= 0 && a.Compare(end) <= 0 {
-				c.reject(r, path, "ambiguous_value", "overlapping legacy DHCP pools cannot be assigned an inferred native allocation priority")
+				// Different device selectors may share the same profile/range in
+				// dnsmasq. No allocation priority is inferred for identical intent.
+				left, right := earlier, scope
+				left.Name, right.Name = "", ""
+				left.Match, right.Match = dhcpserverconfig.Match{}, dhcpserverconfig.Match{}
+				if j == 0 || !reflect.DeepEqual(left, right) {
+					c.reject(r, path, "ambiguous_value", "overlapping DHCP pools with different intent cannot be assigned an inferred allocation priority")
+				}
 			}
 			if i > 0 && dhcpSelectorsOverlap(earlier.Match, scope.Match) {
 				c.reject(r, path+".match", "ambiguous_value", "a client matching different legacy scopes has no portable allocation priority; make selectors disjoint")

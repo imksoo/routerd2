@@ -106,10 +106,14 @@ func testDaemonDHCPDNSOwnership(t *testing.T, migrated bool) {
 		t.Fatal(err)
 	}
 	requested := ""
-	acquire := func() clientLease {
+	acquire := func(ifname string) clientLease {
 		t.Helper()
-		args := []string{"udhcpc", "-f", "-n", "-q", "-i", "client0", "-x", "hostname:workstation", "-s", script}
-		if requested != "" {
+		hostname := "workstation"
+		if ifname != "client0" {
+			hostname = ifname
+		}
+		args := []string{"udhcpc", "-f", "-n", "-q", "-i", ifname, "-x", "hostname:" + hostname, "-s", script}
+		if ifname == "client0" && requested != "" {
 			args = append(args, "-r", requested)
 		}
 		cmd := exec.Command("busybox", args...)
@@ -129,7 +133,9 @@ func testDaemonDHCPDNSOwnership(t *testing.T, migrated bool) {
 		if err := json.Unmarshal(data, &lease); err != nil {
 			t.Fatal(err)
 		}
-		requested = lease.CurrentAddress
+		if ifname == "client0" {
+			requested = lease.CurrentAddress
+		}
 		return lease
 	}
 
@@ -145,9 +151,40 @@ func testDaemonDHCPDNSOwnership(t *testing.T, migrated bool) {
 			time.Sleep(100 * time.Millisecond)
 		}
 	}
-	lease := acquire()
+	lease := acquire("client0")
 	if (lease.CurrentAddress != "192.0.2.100" && lease.CurrentAddress != "192.0.2.101" && lease.CurrentAddress != "192.0.2.102") || lease.ServerID != "192.0.2.1" || lease.LeaseTimeSeconds <= 0 || lease.DNS != "192.0.2.1" {
 		t.Fatalf("unexpected DHCP lease: %+v", lease)
+	}
+	if migrated {
+		// A second MAC behind the same LAN exercises the deployed special-device
+		// profile without manually assigning an address to either client.
+		for _, args := range [][]string{
+			{"link", "add", "special0", "link", "client0", "address", "02:bb:00:00:00:01", "type", "macvlan", "mode", "bridge"},
+			{"link", "set", "special0", "up"},
+		} {
+			cmd := exec.Command("ip", args...)
+			if err := fixtureInsideNamespace(clientNS, cmd.Run); err != nil {
+				t.Fatal(err)
+			}
+		}
+		special := acquire("special0")
+		if (special.CurrentAddress != "198.51.100.160" && special.CurrentAddress != "198.51.100.161") || special.DNS != "198.51.100.129" {
+			t.Fatalf("special client did not receive its own subnet and DNS: %+v", special)
+		}
+		for _, args := range [][]string{
+			{"link", "add", "special1", "link", "client0", "address", "02:bb:00:00:00:02", "type", "macvlan", "mode", "bridge"},
+			{"link", "set", "special1", "up"},
+		} {
+			cmd := exec.Command("ip", args...)
+			if err := fixtureInsideNamespace(clientNS, cmd.Run); err != nil {
+				t.Fatal(err)
+			}
+		}
+		other := acquire("special1")
+		if (other.CurrentAddress != "198.51.100.160" && other.CurrentAddress != "198.51.100.161") || other.CurrentAddress == special.CurrentAddress || other.DNS != special.DNS {
+			t.Fatalf("device selectors sharing a pool did not allocate distinct addresses: %+v %+v", special, other)
+		}
+		t.Log("ordinary and special clients acquired distinct configured subnets and DNS; two device selectors shared a pool without duplicate allocation")
 	}
 	conn, err := net.DialTimeout("tcp4", fmt.Sprintf("127.0.0.1:%d", dnsPort), time.Second)
 	if err != nil {
@@ -260,8 +297,17 @@ func testDaemonDHCPDNSOwnership(t *testing.T, migrated bool) {
 		t.Fatal(err)
 	}
 	var original dhcpserverconfig.Snapshot
-	if err := json.Unmarshal(expired.Snapshot, &original); err != nil || !expired.OwnershipExpired || !original.Active || len(original.Leases) != 1 || !time.Now().Before(original.Leases[0].ExpiresAt) {
+	if err := json.Unmarshal(expired.Snapshot, &original); err != nil || !expired.OwnershipExpired || !original.Active {
 		t.Fatal("current DNS eligibility and the publisher's last observation were not distinguished", err, expired, original)
+	}
+	leaseStillValid := false
+	for _, saved := range original.Leases {
+		if saved.IPAddress == lease.CurrentAddress && time.Now().Before(saved.ExpiresAt) {
+			leaseStillValid = true
+		}
+	}
+	if !leaseStillValid {
+		t.Fatal("ownership expiry was not distinguished from the tested address lease deadline")
 	}
 	if err := syscall.Kill(serverPID, syscall.SIGKILL); err != nil {
 		t.Fatal(err)
@@ -272,7 +318,7 @@ func testDaemonDHCPDNSOwnership(t *testing.T, migrated bool) {
 	})
 	// The independent client requests its previous address after server restart.
 	// The server must retain the binding and the DNS process must stay running.
-	recovered := acquire()
+	recovered := acquire("client0")
 	if recovered.CurrentAddress != lease.CurrentAddress || pid(status(), dnsName) != dnsPID {
 		t.Fatal("DHCP/DNS restart did not preserve the lease and unaffected worker")
 	}
@@ -301,6 +347,10 @@ spec:
       metadata: {name: gateway}
       spec: {interface: lan, address: 192.0.2.1/24}
     - apiVersion: net.routerd.net/v1alpha1
+      kind: IPv4StaticAddress
+      metadata: {name: special-subnet}
+      spec: {interface: lan, address: 198.51.100.129/25}
+    - apiVersion: net.routerd.net/v1alpha1
       kind: DHCPv4Server
       metadata: {name: leases}
       spec:
@@ -308,6 +358,13 @@ spec:
         addressPool: {start: 192.0.2.100, end: 192.0.2.102, leaseTime: 60s}
         gateway: 192.0.2.1
         dnsServers: [192.0.2.1]
+        scopes:
+          - name: special
+            match: {macAddresses: ["02:bb:00:00:00:01"]}
+            addressPool: {start: 198.51.100.160, end: 198.51.100.161, leaseTime: 60s}
+          - name: special-other
+            match: {macAddresses: ["02:bb:00:00:00:02"]}
+            addressPool: {start: 198.51.100.160, end: 198.51.100.161, leaseTime: 60s}
     - apiVersion: net.routerd.net/v1alpha1
       kind: DNSResolver
       metadata: {name: dns}

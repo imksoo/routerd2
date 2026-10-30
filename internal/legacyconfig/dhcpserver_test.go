@@ -185,7 +185,7 @@ func TestDHCPMigrationRejectsAmbiguousAddressProfilesAndSelectors(t *testing.T) 
 			s["scopes"].([]any)[1].(map[string]any)["match"] = map[string]any{"macAddresses": []string{"02:aa:bb:00:00:01"}}
 			return rs
 		}},
-		{"secondary-subnet", "scopes", "unsupported_semantics", func(rs []map[string]any) []map[string]any {
+		{"secondary-subnet-without-owned-address", "interface", "ambiguous_reference", func(rs []map[string]any) []map[string]any {
 			s := dhcpTestSpec(t, rs, "DHCPv4Server")
 			p := s["profiles"].([]any)[0].(map[string]any)
 			p["addressPool"], p["gateway"] = map[string]any{"start": "198.51.100.160", "end": "198.51.100.169"}, "198.51.100.1"
@@ -246,5 +246,37 @@ func TestDHCPGlobalCapacityIncludesReservationsOutsidePools(t *testing.T) {
 	})
 	if _, err := Compile(ambiguous); !hasIssue(err, "server", "ambiguous_reference") {
 		t.Fatal("global reservation acquired an arbitrary new worker owner", err)
+	}
+}
+
+func TestDHCPSelectsEachPoolFromMultipleOwnedSubnets(t *testing.T) {
+	input := mutateDHCPInput(t, fixture(t, "dhcp-server"), func(rs []map[string]any) []map[string]any {
+		profile := dhcpTestSpec(t, rs, "DHCPv4Server")["profiles"].([]any)[0].(map[string]any)
+		profile["addressPool"] = map[string]any{"start": "198.51.100.160", "end": "198.51.100.169"}
+		delete(profile, "gateway")
+		delete(profile, "dnsServers")
+		delete(profile, "netmask")
+		server := dhcpTestSpec(t, rs, "DHCPv4Server")
+		server["scopes"] = append(server["scopes"].([]any), map[string]any{"name": "other-phones", "profileRef": "voice", "match": map[string]any{"macAddresses": []string{"02:dd:00:00:00:01"}}})
+		return append(rs, map[string]any{"apiVersion": "net.routerd.net/v1alpha1", "kind": "IPv4StaticAddress", "metadata": map[string]any{"name": "legacy-subnet"}, "spec": map[string]any{"interface": "lan", "address": "198.51.100.1/25"}})
+	})
+	// The first secondary range is deliberately outside /25. Matching the
+	// interface alone must not conceal a pool with no configured subnet.
+	if _, err := Compile(input); !hasIssue(err, "interface", "ambiguous_reference") {
+		t.Fatal("accepted a secondary pool outside every owned subnet", err)
+	}
+	input = []byte(strings.ReplaceAll(string(input), "198.51.100.1/25", "198.51.100.129/25"))
+	result, err := Compile(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := service(t, result.Document, "dhcp_server").DHCPServer
+	if cfg.ServerAddress != "192.0.2.1" || cfg.Primary.Prefix != "192.0.2.0/24" {
+		t.Fatal("secondary address changed the primary server identity")
+	}
+	for _, scope := range cfg.Scopes {
+		if scope.Name == "phones" && (scope.Prefix != "198.51.100.128/25" || scope.Router != "198.51.100.129" || !reflect.DeepEqual(scope.DNSServers, []string{"198.51.100.129"})) {
+			t.Fatal("secondary scope lost its own subnet defaults", scope)
+		}
 	}
 }
