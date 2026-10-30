@@ -8,7 +8,7 @@
 </form>
 {{with .Result}}
 {{if .Reset}}<p class="notice" role="status">継続位置を切り替えました。</p>{{end}}
-{{if .Gap}}<p class="error" role="alert">ログに欠損があります。表示範囲だけで全履歴がそろっているとは判断できません。</p>{{end}}
+{{if .Gap}}<p class="error" role="alert">ログに欠損がある可能性があります。表示範囲だけで全履歴がそろっているとは判断できません。</p>{{end}}
 {{if .GapReasons}}<ul class="notice">{{range .GapReasons}}<li>{{logGapReason .}}（<code>{{.}}</code>）</li>{{end}}</ul>{{end}}
 <p>保持範囲の連番: {{.OldestSequence}}～{{.LatestSequence}} / 表示: {{len .Records}}件 / ログ担当の世代: <code>{{.Status.Epoch}}</code></p>
 {{with .Status}}

@@ -144,7 +144,7 @@ func checkConsoleLogsAfterRestart(t *testing.T, logs *localapi.Client, console f
 	if !reset.Reset || !reset.Gap || !slices.Contains(reset.GapReasons, "logger_restart") || reset.Cursor.Epoch == old.Epoch {
 		t.Fatalf("actual logger restart did not reset the old cursor: %+v", reset)
 	}
-	for _, message := range []string{"ログ担当が再起動しました", "ログに欠損があります"} {
+	for _, message := range []string{"ログ担当が再起動しました", "ログに欠損がある可能性があります"} {
 		if !strings.Contains(body, message) {
 			t.Fatalf("console hid actual restart/gap: missing %q", message)
 		}
