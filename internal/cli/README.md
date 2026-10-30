@@ -305,3 +305,14 @@ runtime store, refuses stale/protected cleanup, removes an explicitly unused
 runtime and stages the next signed runtime without changing current selection.
 The fixture arranges initial selection through the store. It does not establish
 kernel reboot, automatic trial confirmation or packet forwarding.
+
+On 2026-10-31 00:03:56-00:04:01 JST, product `f93be4c`, release
+`wsl-operations-f93be4c`, and fixture `bcd58c6` passed this real SSH/control
+integration on independent WSL Linux. The run took 5.453 seconds including
+preparation (2.87 seconds in the fixture). Stale generation, active, pending
+and previous runtime deletion were refused. Explicit unused-runtime cleanup
+made room for the next signed runtime while selection and rollback watermarks
+remained unchanged. The same fixture compared real HTTP update views against
+confirmed, pending, cancelled, trial and failed-trial states. An initial
+fixture-only expectation of an absent separator space was corrected; product
+behavior and deadlines were unchanged.
