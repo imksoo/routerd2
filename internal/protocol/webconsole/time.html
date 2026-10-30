@@ -4,7 +4,7 @@
 {{if .Selected}}<h3>{{.Selected}}</h3>
 {{with .Observation}}
 <section data-time-observed="{{.ObservedNanos}}" data-time-expires="{{.ExpiresNanos}}" data-time-current="{{$.Time.Current}}">
-<dl><dt>現在の同期状態</dt><dd>{{$.Time.State}}</dd></dl>
+<dl><dt>現在の同期状態</dt><dd data-time-field="state">{{$.Time.State}}</dd></dl>
 {{if not $.Time.Current}}<p class="notice">観測期限が切れています。以下は最後に取得した情報です。現在の同期状態は未確認です。</p>{{end}}
 {{if .LastError}}<p class="error">最後の観測エラー: {{.LastError}}</p><p>この観測では時刻源と品質の値を取得できませんでした。</p>{{else}}
 <dl>
