@@ -166,7 +166,9 @@ func Validate(c Config) error {
 // command socket; no service manager or remotely exposed command port is used.
 func Render(n Node) []byte {
 	var b bytes.Buffer
-	b.WriteString("driftfile /state/drift\ndumpdir /state\npidfile /run/chronyd.pid\nbindcmdaddress /run/chronyd.sock\ncmdport 0\nmakestep 1.0 3\nsourcedir /run/sources\n")
+	// Retain early frequency calibration across power loss instead of waiting
+	// for chronyd's one-hour default. Only chronyd writes this recovery state.
+	b.WriteString("driftfile /state/drift interval 60\npidfile /run/chronyd.pid\nbindcmdaddress /run/chronyd.sock\ncmdport 0\nmakestep 1.0 3\nsourcedir /run/sources\n")
 	for _, source := range n.Sources {
 		if source.When == nil && len(source.SourcesFrom) == 0 {
 			b.Write(RenderServers(source.Servers))
