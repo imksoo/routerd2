@@ -52,6 +52,7 @@ type page struct {
 	Clients        *clientPage
 	Flows          *flowPage
 	VPN            *vpnPage
+	BGP            *bgpPage
 	DNSQueries     *dnsQueryPage
 	FirewallEvents *firewallEventPage
 	Logs           *logPage
@@ -71,7 +72,7 @@ func Run(ctx context.Context, cfg webconsoleconfig.Config, runtimeDir string, re
 	if err := webconsoleconfig.Validate(cfg); err != nil {
 		return err
 	}
-	view, err := template.New("console").Funcs(template.FuncMap{"logGapReason": logGapReason, "leaseLive": func(t time.Time) bool { return t.IsZero() || t.After(time.Now()) }, "truth": func(t resourceprogram.Truth) string {
+	view, err := template.New("console").Funcs(template.FuncMap{"logGapReason": logGapReason, "bgpPeerState": bgpPeerState, "bgpAdminState": bgpAdminState, "leaseLive": func(t time.Time) bool { return t.IsZero() || t.After(time.Now()) }, "truth": func(t resourceprogram.Truth) string {
 		switch t {
 		case resourceprogram.True:
 			return "有効"
@@ -80,7 +81,7 @@ func Run(ctx context.Context, cfg webconsoleconfig.Config, runtimeDir string, re
 		default:
 			return "不明"
 		}
-	}}).Parse(pageHTML + flowsHTML + vpnHTML + dnsQueriesHTML + firewallEventsHTML + logsHTML + timeHTML + updateHTML)
+	}}).Parse(pageHTML + flowsHTML + vpnHTML + dnsQueriesHTML + firewallEventsHTML + logsHTML + timeHTML + updateHTML + bgpHTML)
 	if err != nil {
 		return err
 	}
@@ -173,6 +174,9 @@ func Run(ctx context.Context, cfg webconsoleconfig.Config, runtimeDir string, re
 		case "dns-queries":
 			p.Heading = "DNS問い合わせ履歴"
 			p.DNSQueries, err = loadDNSQueries(r.Context(), client, r.URL.Query())
+		case "bgp":
+			p.Heading = "BGP経路交換"
+			p.BGP, err = loadBGP(r.Context(), client, r.URL.Query().Get("service"))
 		case "vpn":
 			p.Heading = "VPN状態"
 			p.VPN, err = loadVPN(r.Context(), client, r.URL.Query().Get("service"))

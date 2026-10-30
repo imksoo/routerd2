@@ -1,0 +1,19 @@
+{{define "bgp"}}{{with .BGP}}
+<p>BGP（経路交換プロトコル）の相手と、学習した選択経路の観測です。接続確立と経路のカーネル適用・端末通信は別々に確認します。</p>
+<nav aria-label="BGPサービス">{{range .Services}}<a href="{{$.Config.BasePath}}bgp?service={{.}}">{{.}}</a>{{else}}<p>現在の実行構成にBGPサービスはありません。条件により停止している設定は一覧に含みません。</p>{{end}}</nav>
+{{if .Selected}}<h3>{{.Selected}}</h3>{{with .Observation}}
+<section data-bgp-current="{{$.BGP.Current}}" data-bgp-sequence="{{.Sequence}}">
+<p>観測時刻: {{.ObservedAt}} / 観測された選択経路: {{len .Routes}}件</p>
+{{if not $.BGP.Current}}<p class="notice">現在の接続状態は未確認です。以下は停止時または期限切れの観測です。</p>{{end}}
+{{if .Error}}<p class="error">最後の観測エラー: {{.Error}}</p>{{end}}
+<h4>経路交換の相手</h4>
+<div class="scroll"><table><thead><tr><th>相手アドレス</th><th>自律システム番号</th><th>接続状態</th><th>観測時の管理状態</th><th>接続元アドレス</th></tr></thead><tbody>
+{{range .Peers}}<tr data-bgp-peer="{{.Address}}"><td><code>{{.Address}}</code></td><td>{{.ASN}}</td><td>{{if $.BGP.Current}}{{bgpPeerState .State}}{{else}}未確認（直近: {{bgpPeerState .State}}）{{end}}</td><td>{{bgpAdminState .AdminState}}</td><td><code>{{.LocalAddress}}</code></td></tr>{{else}}<tr><td colspan="5">相手の観測はありません。</td></tr>{{end}}
+</tbody></table></div>
+<h4>学習した選択経路</h4>
+<p>再起動待ちで保持された経路は、その状態を併記します。実際の転送状態は<a href="{{$.Config.BasePath}}network">ネットワーク</a>で確認します。</p>
+<div class="scroll"><table><thead><tr><th>宛先</th><th>次ホップ</th><th>学習元</th><th>経路表</th><th>優先度</th><th>保持状態</th></tr></thead><tbody>
+{{range .Routes}}<tr data-bgp-prefix="{{.Prefix}}"><td><code>{{.Prefix}}</code></td><td><code>{{.NextHop}}</code>{{if .Interface}} / {{.Interface}}{{end}}</td><td><code>{{.PeerAddress}}</code></td><td>{{.Table}}</td><td>{{.Metric}}</td><td>{{if .Stale}}相手の再起動を待って保持{{else}}通常{{end}}</td></tr>{{else}}<tr><td colspan="6">学習した選択経路はありません。</td></tr>{{end}}
+</tbody></table></div>
+</section>{{else}}<p class="notice">BGPサービスの観測はまだありません。</p>{{end}}{{end}}
+{{end}}{{end}}

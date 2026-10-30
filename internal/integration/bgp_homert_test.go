@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +20,7 @@ import (
 	"github.com/imksoo/routerd2/internal/control"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/bgpconfig"
+	"github.com/imksoo/routerd2/internal/protocol/webconsoleconfig"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
@@ -94,7 +96,31 @@ threading.Event().wait()`, addresses[0], addresses[1])
 		t.Cleanup(func() { _ = server.Process.Kill(); _ = server.Wait() })
 	}
 	document.Resources = append(document.Resources, resourceprogram.Resource{ID: "bgp", Service: &serviceconfig.Service{Name: "edge", BGP: &intent}})
+	document.Resources = append(document.Resources, resourceprogram.Resource{ID: "console", Service: &serviceconfig.Service{Name: "console", WebConsole: &webconsoleconfig.Config{Listen: netip.MustParseAddrPort("198.18.0.1:8080"), BasePath: "/ops/"}}})
 	fixture := startFixtureDaemon(t, document)
+	console := func(expected ...string) bool {
+		var body []byte
+		err := fixtureInsideNamespace(client, func() error {
+			var err error
+			body, err = exec.Command("curl", "--fail", "--silent", "--show-error", "--max-time", "3", "http://198.18.0.1:8080/ops/bgp?service=service.edge").CombinedOutput()
+			return err
+		})
+		if err != nil {
+			return false
+		}
+		for _, value := range expected {
+			if !strings.Contains(string(body), value) {
+				return false
+			}
+		}
+		if output := os.Getenv("ROUTERD2_TEST_EVIDENCE_DIR"); output != "" {
+			if err := os.WriteFile(filepath.Join(output, "bgp-console.html"), body, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return true
+	}
+
 	advertised := func(p peer, present bool) bool {
 		var view struct {
 			Paths []json.RawMessage `json:"paths"`
@@ -154,7 +180,10 @@ for addr in sys.argv[1:]:
 			t.Fatalf("GR was not negotiated with %s: %s", p.remote, neighbor)
 		}
 	}
-	t.Log("both peers established and forwarding; GR negotiated")
+	until(t, 5*time.Second, func() bool {
+		return console(`data-bgp-current="true"`, `data-bgp-peer="192.0.2.2"`, `data-bgp-peer="192.0.3.2"`, "接続確立", `data-bgp-prefix="10.64.1.0/24"`, `data-bgp-prefix="10.128.1.0/24"`)
+	})
+	t.Log("both peers established and forwarding; GR negotiated; independent LAN HTTP client read both BGP peers and selected routes")
 	first := peers[0]
 	for _, prefix := range first.prefixes {
 		if out, err := first.vty("configure terminal", "router bgp 64521", "address-family ipv4 unicast", "no network "+prefix); err != nil {
@@ -208,7 +237,10 @@ for addr in sys.argv[1:]:
 	if !advertised(peers[1], true) {
 		t.Fatal("live peer lost the BGP LAN return route during peer shutdown")
 	}
-	t.Log("stopped FRR routes observed stale and still forwarding while the other peer remained usable")
+	until(t, 5*time.Second, func() bool {
+		return console(`data-bgp-current="true"`, "相手の再起動を待って保持", `data-bgp-peer="192.0.3.2"`)
+	})
+	t.Log("stopped FRR routes observed stale and still forwarding while the other peer remained usable; console showed retained routes")
 	first.start()
 	until(t, 25*time.Second, func() bool { return advertised(first, true) && installed(first, true) && forward(first) == nil })
 	if err := forward(peers[1]); err != nil {
@@ -226,6 +258,9 @@ for addr in sys.argv[1:]:
 			}
 		}
 	}
+	until(t, 5*time.Second, func() bool {
+		return console(`data-bgp-current="true"`, `data-bgp-prefix="10.64.1.0/24"`, `data-bgp-prefix="10.128.1.0/24"`)
+	})
 	if err := fixture.control.Do(t.Context(), "POST", "/v1/config/commit", control.CommitRequest{ExpectedRevision: 1, RequestID: "remove-bgp", Config: config.Document{SchemaVersion: config.SchemaVersion}}, nil); err != nil {
 		t.Fatal(err)
 	}

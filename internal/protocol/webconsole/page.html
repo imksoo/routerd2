@@ -3,7 +3,7 @@
 <style>
 /* SPDX-License-Identifier: BSD-3-Clause. Dark palette follows routerd's console. */
 html{color-scheme:dark;background:#0f0f0f;font:16px system-ui,sans-serif;color:#eee}body{margin:0}header,main{padding:1rem 2rem}header{background:#202020;border-bottom:1px solid #444}h1{font-size:1.4rem}nav{display:flex;flex-wrap:wrap;gap:1rem}a{color:#75baff}table{border-collapse:collapse;width:100%;margin:1rem 0}td,th{text-align:left;vertical-align:top;border-bottom:1px solid #444;padding:.6rem;overflow-wrap:anywhere}dt{font-weight:bold;margin-top:.8rem}dd{margin:.25rem 0}.error{color:#ffb0b0;border-left:4px solid #f77;padding:1rem}.notice{color:#ffc670}code{overflow-wrap:anywhere}form{display:flex;flex-wrap:wrap;gap:.7rem}label{display:flex;flex-direction:column;gap:.2rem}input,select,button{font:inherit;max-width:100%;padding:.4rem}button{align-self:end}.scroll{overflow-x:auto}@media(max-width:640px){header,main{padding:1rem}nav a{min-height:44px}th,td{padding:.4rem}}
-</style></head><body><header><h1>{{.Config.Title}}</h1><nav><a href="{{.Config.BasePath}}">稼働状態</a><a href="{{.Config.BasePath}}network">ネットワーク</a><a href="{{.Config.BasePath}}resources">設定資源</a><a href="{{.Config.BasePath}}clients">DHCP端末</a><a href="{{.Config.BasePath}}flows">通信履歴</a><a href="{{.Config.BasePath}}firewall-events">ファイアウォール履歴</a><a href="{{.Config.BasePath}}dns-queries">DNS履歴</a><a href="{{.Config.BasePath}}vpn">VPN</a><a href="{{.Config.BasePath}}time">時刻同期</a><a href="{{.Config.BasePath}}updates">更新・復旧</a><a href="{{.Config.BasePath}}logs">運用ログ</a><a href="{{.Config.BasePath}}configuration">設定の確定</a>{{range .Config.Links}}<a href="{{.URL}}" title="{{.Description}}" rel="noreferrer">{{.Label}}</a>{{end}}</nav></header>
+</style></head><body><header><h1>{{.Config.Title}}</h1><nav><a href="{{.Config.BasePath}}">稼働状態</a><a href="{{.Config.BasePath}}network">ネットワーク</a><a href="{{.Config.BasePath}}resources">設定資源</a><a href="{{.Config.BasePath}}clients">DHCP端末</a><a href="{{.Config.BasePath}}flows">通信履歴</a><a href="{{.Config.BasePath}}firewall-events">ファイアウォール履歴</a><a href="{{.Config.BasePath}}dns-queries">DNS履歴</a><a href="{{.Config.BasePath}}bgp">BGP</a><a href="{{.Config.BasePath}}vpn">VPN</a><a href="{{.Config.BasePath}}time">時刻同期</a><a href="{{.Config.BasePath}}updates">更新・復旧</a><a href="{{.Config.BasePath}}logs">運用ログ</a><a href="{{.Config.BasePath}}configuration">設定の確定</a>{{range .Config.Links}}<a href="{{.URL}}" title="{{.Description}}" rel="noreferrer">{{.Label}}</a>{{end}}</nav></header>
 <main><h2>{{.Heading}}</h2><p>表示は要求時の観測です。<a href="">再取得</a></p>
 {{if .Error}}<p class="error" role="alert">観測できません: {{.Error}}</p>{{else}}
 {{with .Health}}<dl><dt>状態</dt><dd>{{if .Healthy}}正常{{else}}異常{{end}}</dd><dt>設定リビジョン</dt><dd>{{.Revision}}</dd><dt>制御プロセスの世代</dt><dd>{{.ProducerEpoch}}</dd>{{if .LastError}}<dt>異常</dt><dd class="error">{{.LastError}}</dd>{{end}}{{with .Services}}<dt>適用状態</dt><dd>{{.Phase}}</dd><dt>実行中のサービス数</dt><dd>{{.InstanceCount}}</dd>{{end}}{{with .Confirmation}}<dt>確定待ちの期限</dt><dd>{{.Deadline}}</dd>{{end}}</dl>{{end}}
@@ -20,6 +20,7 @@ html{color-scheme:dark;background:#0f0f0f;font:16px system-ui,sans-serif;color:#
 {{end}}
 {{template "flows" .}}
 {{template "vpn" .}}
+{{template "bgp" .}}
 {{template "time" .}}
 {{template "update" .}}
 {{template "dns-queries" .}}
