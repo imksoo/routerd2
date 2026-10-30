@@ -23,6 +23,7 @@ type dnsPlan struct {
 	listenInterface string
 	vips            map[string][]netip.Addr
 	listeners       []dnsconfig.ListenSource
+	records         []dnsconfig.RecordSource
 	runtime         dnsconfig.RuntimeConfig
 	providers       []dnsProvider
 	targets         []dnsTarget
@@ -44,6 +45,10 @@ func prepareDNS(runtime dnsconfig.RuntimeConfig) (dnsPlan, error) {
 	plan := dnsPlan{runtime: runtime}
 	var err error
 	plan.listeners, err = dnsconfig.ListenSources(runtime)
+	if err != nil {
+		return plan, err
+	}
+	plan.records, err = dnsconfig.RecordSources(runtime)
 	if err != nil {
 		return plan, err
 	}
@@ -106,29 +111,46 @@ func (r *Runtime) DNSInput(moduleName string) (dnsconfig.Input, error) {
 		return out, err
 	}
 	if r.applied.sourceEpoch == r.sourceEpoch {
+		vips := make(map[string][]dnsEndpoint, len(cfg.vips))
+		for module, addresses := range cfg.vips {
+			update, found := r.records[module]
+			if !found {
+				continue
+			}
+			var state vrrp.Snapshot
+			if err := json.Unmarshal(update.Snapshot, &state); err != nil {
+				return out, err
+			}
+			if !state.Active || !vrrp.CurrentElection(state, clock) || !r.ownsVRRPLocked(update, state) {
+				continue
+			}
+			until := lifetime.Deadline{BootID: state.BootID, Nanos: state.ExpiresNanos}
+			for _, address := range addresses {
+				vips[module] = append(vips[module], dnsEndpoint{address: address, until: until})
+			}
+		}
 		for index, source := range cfg.listeners {
-			if source.VRRP != "" {
-				module := "service." + source.VRRP
-				update, found := r.records[module]
-				var state vrrp.Snapshot
-				if found {
-					if err := json.Unmarshal(update.Snapshot, &state); err != nil {
-						return out, err
-					}
-					if state.Active && vrrp.CurrentElection(state, clock) && r.ownsVRRPLocked(update, state) {
-						until := lifetime.Deadline{BootID: state.BootID, Nanos: state.ExpiresNanos}
-						for _, address := range cfg.vips[module] {
-							out.Listeners = append(out.Listeners, dnsconfig.ListenAddress{Source: index, Address: address, ValidUntil: until})
-						}
+			for _, endpoint := range vips["service."+source.VRRP] {
+				out.Listeners = append(out.Listeners, dnsconfig.ListenAddress{Source: index, Address: endpoint.address, ValidUntil: endpoint.until})
+			}
+			if source.Service != "" {
+				for _, entry := range r.delegatedDNS[source.Service+"/"+source.Delegation] {
+					if entry.address.ValidUntil.Live(clock) {
+						out.Listeners = append(out.Listeners, dnsconfig.ListenAddress{Source: index, Address: entry.address.Address, ValidUntil: entry.address.ValidUntil})
 					}
 				}
 			}
-			if source.Service == "" {
-				continue
+		}
+		for _, source := range cfg.records {
+			endpoints := vips["service."+source.VRRP]
+			if source.Service != "" {
+				for _, entry := range r.delegatedDNS[source.Service+"/"+source.Delegation] {
+					endpoints = append(endpoints, dnsEndpoint{address: entry.address.Address, until: entry.address.ValidUntil})
+				}
 			}
-			for _, entry := range r.delegatedDNS[source.Service+"/"+source.Delegation] {
-				if entry.address.ValidUntil.Live(clock) {
-					out.Listeners = append(out.Listeners, dnsconfig.ListenAddress{Source: index, Address: entry.address.Address, ValidUntil: entry.address.ValidUntil})
+			for _, endpoint := range endpoints {
+				if endpoint.address.Is6() == source.IPv6 && endpoint.until.Live(clock) {
+					out.Records = append(out.Records, dnsconfig.RecordAddress{Zone: source.Zone, Record: source.Record, Address: endpoint.address, ValidUntil: endpoint.until})
 				}
 			}
 		}

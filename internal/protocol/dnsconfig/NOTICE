@@ -1,6 +1,6 @@
 Source adaptation: imksoo/routerd
 Commit: 1329ef54f296507eda79bbbc3b853783dd27251e
-Paths: cmd/routerd-dns-resolver (Linux engine and tests)
+Paths: cmd/routerd-dns-resolver (Linux engine and tests), pkg/controller/dnsresolver/controller.go (dynamic record expansion behavior)
 URL: https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e/cmd/routerd-dns-resolver
 
 BSD 3-Clause License

@@ -257,6 +257,9 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 					needsDNS = needsDNS || advertisement.allocation == dnsKey && advertisement.from.RDNSSRouter
 				}
 				for _, resolver := range protocols.dns {
+					for _, source := range resolver.records {
+						needsDNS = needsDNS || source.Service+"/"+source.Delegation == dnsKey
+					}
 					for _, source := range resolver.listeners {
 						needsDNS = needsDNS || source.Service+"/"+source.Delegation == dnsKey
 					}

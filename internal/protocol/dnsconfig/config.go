@@ -121,6 +121,9 @@ func ValidateRuntime(c dnsresolver.RuntimeConfig) error {
 	if c.Spec.QueryLog.Enabled && (!filepath.IsAbs(c.Spec.QueryLog.Path) || filepath.Clean(c.Spec.QueryLog.Path) != c.Spec.QueryLog.Path || c.Spec.QueryLog.Path == "/") {
 		return errors.New("DNS query log path must be a clean absolute file path")
 	}
+	if _, err := RecordSources(c); err != nil {
+		return err
+	}
 	zones := map[string]bool{}
 	zoneNames := map[string]bool{}
 	for _, zone := range c.Zones {
@@ -141,9 +144,6 @@ func ValidateRuntime(c dnsresolver.RuntimeConfig) error {
 		for _, record := range zone.Spec.Records {
 			if !ValidHostname(record.Hostname) {
 				return fmt.Errorf("DNS zone %q has an invalid hostname", zone.Name)
-			}
-			if record.IPv4From.Resource != "" || record.IPv6From.Resource != "" {
-				return fmt.Errorf("DNS zone %q has unresolved address sources", zone.Name)
 			}
 			if record.IPv4 != "" && net.ParseIP(record.IPv4).To4() == nil {
 				return fmt.Errorf("DNS zone %q has invalid IPv4 %q", zone.Name, record.IPv4)

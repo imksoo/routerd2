@@ -107,6 +107,11 @@ func NeedsInput(c RuntimeConfig) bool {
 		}
 	}
 	for _, zone := range c.Zones {
+		for _, record := range zone.Spec.Records {
+			if record.IPv4From.Resource != "" || record.IPv6From.Resource != "" {
+				return true
+			}
+		}
 		if len(zone.Spec.DHCPDerived.Sources) != 0 {
 			return true
 		}

@@ -15,19 +15,23 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"os/exec"
 	"slices"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/imksoo/routerd/pkg/api"
 	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/clocktest"
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/dhcp6config"
+	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 	"github.com/imksoo/routerd2/internal/supervisor"
@@ -180,8 +184,19 @@ func runPDRAFixture(t *testing.T, clockClient *clocktest.Client) {
 		Forwarding: network.Forwarding{IPv6: &forward},
 		Routes:     []network.Route{{Destination: "2001:db8:ffff::9/128", Gateway: "fe80::2", Interface: "wan0"}},
 	}, Services: []serviceconfig.Service{{Name: "pd", DHCP6: &serviceconfig.DHCP6{RequestAddress: true, RequestPrefix: true, Interface: "wan0", IAID: 7, PrefixLength: 56, Delegations: []serviceconfig.Delegation{{Name: "lan", Interface: "lan0", SubnetID: 3}}}}, {Name: "pd-lan-ra", RA: &serviceconfig.RouterAdvertisement{Config: ra.Config{Interface: "lan0", RouterLifetimeSeconds: 1800, DNSSLifetimeSeconds: 1800, MinIntervalSeconds: 3, MaxIntervalSeconds: 10}, From: &serviceconfig.RADelegation{Service: "pd", Delegation: "lan", UseLearnedRDNSS: true, UseLearnedDNSSL: true}}}}}
+	doc.Services = append(doc.Services, serviceconfig.Service{Name: "dns", DNS: &serviceconfig.DNS{ListenInterface: "lan0", RuntimeConfig: dnsconfig.RuntimeConfig{Resource: "dns", Spec: api.DNSResolverSpec{
+		Listen: []api.DNSResolverListenSpec{{Name: "lan", Addresses: []string{"::"}, Port: 1053}}, Sources: []api.DNSResolverSourceSpec{{Name: "home", Kind: "zone", Match: []string{"home.arpa"}, ZoneRef: []string{"home"}}},
+	}, Zones: []dnsconfig.RuntimeZone{{Name: "home", Spec: api.DNSZoneSpec{Zone: "home.arpa", Records: []api.DNSZoneRecordSpec{{Hostname: "router", IPv6From: api.StatusValueSourceSpec{Resource: "IPv6DelegatedAddress/pd/lan"}}}}}}}}})
 	started := time.Now()
 	f := startFixtureDaemon(t, config.FromNative(doc))
+	t.Cleanup(func() {
+		if !t.Failed() {
+			return
+		}
+		var input dnsconfig.Input
+		err := f.control.Do(context.Background(), "GET", "/v1/services/service.dns/dns-input", nil, &input)
+		t.Logf("DNS address input at failure: %+v error %v", input, err)
+	})
 	module := func(name string) (supervisor.ModuleStatus, bool) {
 		t.Helper()
 		var status supervisor.Status
@@ -231,8 +246,30 @@ func runPDRAFixture(t *testing.T, clockClient *clocktest.Client) {
 		})
 		return worker
 	}
+	routerRecords := func() []netip.Addr {
+		t.Helper()
+		var output []byte
+		err := fixtureInsideNamespace(client, func() error {
+			var err error
+			output, err = exec.Command("dig", "-6", "@fe80::1%client0", "-p", "1053", "router.home.arpa", "AAAA", "+short", "+time=2", "+tries=1").CombinedOutput()
+			return err
+		})
+		if err != nil {
+			t.Fatal("independent client local DNS query", err, string(output))
+		}
+		var addresses []netip.Addr
+		for _, line := range strings.Fields(string(output)) {
+			address, err := netip.ParseAddr(line)
+			if err != nil {
+				t.Fatal("invalid authoritative answer", string(output))
+			}
+			addresses = append(addresses, address)
+		}
+		return addresses
+	}
 	traffic := func(prefix string) {
 		t.Helper()
+		until(t, 3*time.Second, func() bool { return slices.Contains(routerRecords(), netip.MustParseAddr(prefix+"1")) })
 		address := prefix + "2/64"
 		configure(client, "client0", address)
 		if err := fixtureInsideNamespace(client, func() error {
@@ -555,6 +592,9 @@ func runPDRAFixture(t *testing.T, clockClient *clocktest.Client) {
 		}
 		return true
 	})
+	if addresses := routerRecords(); len(addresses) != 0 {
+		t.Fatal("expired PD still answered by DNS", addresses)
+	}
 	reacquiring := time.Now()
 	enabled.Store(true)
 	recovered := waitRA("2001:db8:1300:3::/64", "", reacquiring)
@@ -564,6 +604,7 @@ func runPDRAFixture(t *testing.T, clockClient *clocktest.Client) {
 	if current, _ := module("service.pd"); current.PID != pdWorker.PID || current.Generation != pdWorker.Generation {
 		t.Fatal("lease expiry replaced the DHCPv6 worker", pdWorker, current)
 	}
+	until(t, 3*time.Second, func() bool { return slices.Contains(routerRecords(), netip.MustParseAddr("2001:db8:1300:3::1")) })
 	wanCapture.mu.Lock()
 	packets := len(wanCapture.packets)
 	wanCapture.mu.Unlock()

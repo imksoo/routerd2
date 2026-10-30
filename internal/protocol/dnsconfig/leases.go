@@ -25,6 +25,7 @@ const MaxLeaseRecords = 4096
 // lease does not replace the listener or upstream pools. ConfigDigest fences an
 // old worker from consuming a different committed DNS instance's projection.
 type Input struct {
+	Records      []RecordAddress   `json:"records"`
 	Listeners    []ListenAddress   `json:"listeners"`
 	Resource     string            `json:"resource"`
 	ConfigDigest string            `json:"config_digest"`
@@ -93,6 +94,7 @@ func ValidLeaseHostname(name string) bool {
 // never repairs an invalid identity or deadline; validation still rejects it.
 func NormalizeInput(p Input) Input {
 	out := p
+	out.Records = slices.Clone(p.Records)
 	out.Listeners = slices.Clone(p.Listeners)
 	out.Upstreams = slices.Clone(p.Upstreams)
 	out.Bootstraps = slices.Clone(p.Bootstraps)
@@ -176,6 +178,9 @@ func ValidateInput(c RuntimeConfig, p Input, clock boottime.Clock) error {
 				return errors.New("DNS lease record requires a valid hostname and finite expiry")
 			}
 		}
+	}
+	if err := validateRecordInput(c, p.Records, clock); err != nil {
+		return err
 	}
 	if err := validateUpstreams(c, p, clock); err != nil {
 		return err

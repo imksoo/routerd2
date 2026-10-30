@@ -5,8 +5,12 @@ package dns
 import (
 	"errors"
 	"slices"
+	"strings"
+
+	"github.com/miekg/dns"
 
 	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/lifetime"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
 )
 
@@ -45,16 +49,12 @@ func (d *daemon) applyInput(raw dnsconfig.Input) error {
 			return errors.New("DNS lease source reused an observation with changed contents or deadline")
 		}
 	}
-	if d.nativeInput == nil || !slices.Equal(d.nativeInput.Listeners, p.Listeners) {
-		if err := d.updateListeners(p.Listeners, clock); err != nil {
-			return err
-		}
-	}
+	listenersChanged := d.nativeInput == nil || !slices.Equal(d.nativeInput.Listeners, p.Listeners)
 
 	d.stateMu.RLock()
 	zones := d.zones
 	d.stateMu.RUnlock()
-	leaseUpdate := len(p.Sets) > 0 || d.nativeInput != nil && len(d.nativeInput.Sets) > 0
+	leaseUpdate := len(p.Sets)+len(p.Records) > 0 || d.nativeInput != nil && len(d.nativeInput.Sets)+len(d.nativeInput.Records) > 0
 	if leaseUpdate {
 		zones = newZoneTable(cfg.Zones)
 	}
@@ -100,6 +100,9 @@ func (d *daemon) applyInput(raw dnsconfig.Input) error {
 		d.cacheBytes = 0
 		d.mu.Unlock()
 	}
+	if listenersChanged {
+		return d.updateListeners(p.Listeners, clock)
+	}
 	return nil
 }
 
@@ -108,6 +111,26 @@ func (d *daemon) applyInput(raw dnsconfig.Input) error {
 func (d *daemon) populateNativeZones(table *zoneTable, clock boottime.Clock) {
 	if d.nativeInput == nil {
 		return
+	}
+	for _, address := range d.nativeInput.Records {
+		if !address.ValidUntil.Live(clock) {
+			continue
+		}
+		declaredZone := d.config.Zones[address.Zone]
+		declared := declaredZone.Spec.Records[address.Record]
+		zone := table.zones[strings.ToLower(dns.Fqdn(firstNonEmpty(declaredZone.Spec.Zone, declaredZone.Name)))]
+		name := zone.recordName(declared.Hostname)
+		record := zone.Records[name]
+		if address.Address.Is4() {
+			record.IPv4 = append(record.IPv4, address.Address.String())
+		} else {
+			record.IPv6 = append(record.IPv6, address.Address.String())
+		}
+		if record.AddressLifetimes == nil {
+			record.AddressLifetimes = make(map[string]lifetime.Deadline)
+		}
+		record.AddressLifetimes[address.Address.String()] = address.ValidUntil
+		zone.mergeRecord(record)
 	}
 	for _, set := range d.nativeInput.Sets {
 		if uint64(clock.BoottimeNanoseconds) >= set.ExpiresNanos {
@@ -135,7 +158,9 @@ func (d *daemon) populateNativeZones(table *zoneTable, clock boottime.Clock) {
 
 // Heartbeat deadlines change without changing answers or cached RR content.
 func sameInputContent(a, b dnsconfig.Input) bool {
-	return slices.EqualFunc(a.Listeners, b.Listeners, func(a, b dnsconfig.ListenAddress) bool { return a.Source == b.Source && a.Address == b.Address }) && slices.EqualFunc(a.Sets, b.Sets, func(a, b dnsconfig.LeaseSet) bool {
+	return slices.EqualFunc(a.Records, b.Records, func(a, b dnsconfig.RecordAddress) bool {
+		return a.Zone == b.Zone && a.Record == b.Record && a.Address == b.Address
+	}) && slices.EqualFunc(a.Listeners, b.Listeners, func(a, b dnsconfig.ListenAddress) bool { return a.Source == b.Source && a.Address == b.Address }) && slices.EqualFunc(a.Sets, b.Sets, func(a, b dnsconfig.LeaseSet) bool {
 		return a.Zone == b.Zone && a.Source == b.Source && slices.Equal(a.Records, b.Records)
 	}) && sameServers(a.Upstreams, b.Upstreams) && sameServers(a.Bootstraps, b.Bootstraps)
 }

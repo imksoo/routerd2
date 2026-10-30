@@ -171,11 +171,18 @@ func prepareProtocols(doc config.Native, runtimeDir, stateDir string) (protocolP
 	}
 	for name, resolver := range plan.dns {
 		resolver.vips = make(map[string][]netip.Addr)
+		vrrpSources := make([]string, 0, len(resolver.listeners)+len(resolver.records))
 		for _, source := range resolver.listeners {
-			if source.VRRP == "" {
+			vrrpSources = append(vrrpSources, source.VRRP)
+		}
+		for _, source := range resolver.records {
+			vrrpSources = append(vrrpSources, source.VRRP)
+		}
+		for _, owner := range vrrpSources {
+			if owner == "" {
 				continue
 			}
-			module := "service." + source.VRRP
+			module := "service." + owner
 			if _, prepared := resolver.vips[module]; prepared {
 				continue
 			}

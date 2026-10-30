@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"net"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/imksoo/routerd/pkg/api"
 	"github.com/imksoo/routerd/pkg/dnsresolver"
 	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/lifetime"
 )
 
 type zoneTable struct {
@@ -33,11 +35,12 @@ type zoneData struct {
 }
 
 type zoneRecord struct {
-	Hostname string
-	IPv4     []string
-	IPv6     []string
-	TTL      uint32
-	Source   zoneRecordSource
+	Hostname         string
+	IPv4             []string
+	IPv6             []string
+	TTL              uint32
+	AddressLifetimes map[string]lifetime.Deadline
+	Source           zoneRecordSource
 	// Native leases retain client UTC expiry and the original server boot
 	// deadline. Query, polling and reload never extend either.
 	ExpiresAt    time.Time
@@ -188,14 +191,21 @@ func (z *zoneData) answer(req *dns.Msg, q dns.Question) (*dns.Msg, bool) {
 	if q.Qtype == dns.TypePTR && (strings.HasSuffix(name, ".in-addr.arpa.") || strings.HasSuffix(name, ".ip6.arpa.")) {
 		target := z.PTR[name]
 		record, active := z.liveRecord(strings.ToLower(dns.Fqdn(target)))
-		if target == "" || !active {
+		hasAddress := false
+		for _, ip := range append(slices.Clone(record.IPv4), record.IPv6...) {
+			if ptr, err := dns.ReverseAddr(ip); err == nil && strings.EqualFold(ptr, name) {
+				hasAddress = true
+				break
+			}
+		}
+		if target == "" || !active || !hasAddress {
 			return nil, false
 		}
 		msg := new(dns.Msg)
 		msg.SetReply(req)
 		msg.Authoritative = true
 		ttl := z.TTL
-		if record.Source == zoneRecordSourceTypedLease && record.TTL < ttl {
+		if record.TTL < ttl {
 			ttl = record.TTL
 		}
 		msg.Answer = append(msg.Answer, &dns.PTR{Hdr: dns.RR_Header{Name: q.Name, Rrtype: dns.TypePTR, Class: dns.ClassINET, Ttl: ttl}, Ptr: target})
@@ -206,8 +216,37 @@ func (z *zoneData) answer(req *dns.Msg, q dns.Question) (*dns.Msg, bool) {
 
 func (z *zoneData) liveRecord(name string) (zoneRecord, bool) {
 	r, ok := z.Records[name]
-	if !ok || r.Source != zoneRecordSourceTypedLease {
-		return r, ok
+	if !ok {
+		return r, false
+	}
+	if len(r.AddressLifetimes) > 0 {
+		clock, err := boottime.Read()
+		if err != nil {
+			return zoneRecord{}, false
+		}
+		r.IPv4 = slices.Clone(r.IPv4)
+		r.IPv6 = slices.Clone(r.IPv6)
+		filter := func(addresses []string) []string {
+			return slices.DeleteFunc(addresses, func(address string) bool {
+				until, learned := r.AddressLifetimes[address]
+				if !learned {
+					return false
+				}
+				if !until.Live(clock) {
+					return true
+				}
+				r.TTL = until.Seconds(r.TTL, clock)
+				return false
+			})
+		}
+		r.IPv4 = filter(r.IPv4)
+		r.IPv6 = filter(r.IPv6)
+		if len(r.IPv4)+len(r.IPv6) == 0 {
+			return zoneRecord{}, false
+		}
+	}
+	if r.Source != zoneRecordSourceTypedLease {
+		return r, true
 	}
 	clock, err := boottime.Read()
 	if err != nil || r.BootID != clock.BootID || uint64(clock.BoottimeNanoseconds) >= r.ExpiresNanos || !clock.WallTime.Before(r.ExpiresAt) {

@@ -1,3 +1,5 @@
+2026-10-30 JST dynamic-dns-native79候補: PD/VIPローカルDNS記録を元期限付きの既存入力へ接続。実HGWの初回両IP DNS/HTTPS・動的名・再起動、隔離kernel/digの変更・失効・再取得を確認。最終候補の自然更新と二段DNS・全homert/二台受入は残る。IPIP/FRRの静的経路通信は`0722611`で公開済み。[実行版と限界](pve-codex-handoff.md)。
+
 2026-10-30 JST local-redirect-native78: 宛先集合を製品内DNSで解決し、単一network writerへローカルDNS転送を接続。準備完了後の両IP/TCPUDP・集合変更・再起動・撤去は実通信で通過。初期端末を起動前からつなぐ単体受入とHA timeoutは残る。旧YAMLの取込件数を機能の未実装数にせず、現在の製品設定で全homertの通信・運用を成立させる。[結果と限界](pve-codex-handoff.md)。
 
 2026-10-30 JST blackhole-native77: homertで使うIPv4破棄経路を旧routerdと照合し、単一network writerへ取り込んだ。実二端末のTCP/UDP破棄・対象外通信・再起動保持・具体経路・撤去復帰・管理外経路保持は終了0。関連Race/vet/両architecture build/署名六ELFは終了0。全設定取込は89件で拒否。HA timeoutと全homert/全34項目は未完了。
@@ -60,6 +62,14 @@ IPv4/IPv6 TCP/UDP・DNS・NTP・管理と、65.2秒/9巡の履歴進行・Health
 実homertのNTP構造を公開値へ置換し、製品の取込・通常適用、独立peerとの期限・再取得・VRRP条件変化、
 同じchronydとLAN時刻/IPv4/IPv6 TCP/UDP/captureを確認した。全homert受入とは分け、DHCPv4実学習と
 監督情報の失効・起動遅延は未解消として[引き継ぎ](pve-codex-handoff.md)に残す。
+
+## 2026-10-30 11:05 JSTの実行分担と見通し
+
+単体構成は10:30 JST起算の6〜12時間を暫定枠として維持する。主担当が動的ローカルDNSと全homertの統合を進め、補助担当が二台の3秒適用応答timeout、別担当がIPIP→BGP→端末通信を別worktreeで進める。単体候補をまとめた後の約130分自然更新観測中にも独立作業を継続する。二台受入の4〜8時間は単体完成後の目安であり、未特定のtimeout修正時間は含められていない。固定期限は既に超過し、これらは期限延長や全体完成の約束ではない。
+
+Cloud SAMは旧routerdの型付きPoolPlan（配置・address・BGP・provider action・local dataplane・FIB判定）と所有権/fence規則を再利用する。旧controllerのSQLite動的statusやresource再生成を丸ごと移植せず、現在の単一writerとBGPへ接続する。旧AWS/Azure/OCI実行部はそれぞれ外部CLIを呼ぶ。少数Goバイナリーという目標に沿うprovider API/auth、保存・再実行、transport/enrollmentとの接続は未実装で、配線だけでは完了しない。
+
+ローカルに各providerの設定ファイルとCLIはあるが資格情報の有効性は未確認。現行の14guest（router10/client4）環境は配置されておらず、新規課金環境の契約も未確認である。既存の旧受入契約の予算を今回の作成許可と解釈しない。対象実機、Cloud SAM、OS A/B、UI等を含む全34項目の実装・環境待ちには裏付けた上限時刻がまだない。CLIの存在や旧版の成功を現行製品の完成に数えない。
 
 ## 実行順序
 

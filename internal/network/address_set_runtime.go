@@ -114,7 +114,7 @@ func (e *Engine) MaintainAddressSets(ctx context.Context) error {
 			}
 			if lookupErr != nil {
 				slog.Warn("address set resolution failed", "set", set.intent.Name, "error", lookupErr)
-				interval = min(interval, time.Minute)
+				interval = min(interval, time.Second)
 			}
 			e.mu.Lock()
 			current, exists := e.addressSets[set.intent.Name]

@@ -25,6 +25,13 @@ func validateDNSSources(services []Service) error {
 		if err != nil {
 			return err
 		}
+		recordSources, err := dnsconfig.RecordSources(s.DNS.RuntimeConfig)
+		if err != nil {
+			return err
+		}
+		for _, record := range recordSources {
+			listeners = append(listeners, dnsconfig.ListenSource{VRRP: record.VRRP, Service: record.Service, Delegation: record.Delegation})
+		}
 		for _, ref := range listeners {
 			if ref.VRRP != "" {
 				found := false

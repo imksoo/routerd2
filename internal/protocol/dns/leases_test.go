@@ -5,7 +5,10 @@ package dns
 import (
 	"context"
 	"fmt"
+	"github.com/imksoo/routerd/pkg/api"
+	"github.com/imksoo/routerd2/internal/lifetime"
 	"net"
+	"net/netip"
 	"strconv"
 	"strings"
 	"testing"
@@ -224,5 +227,51 @@ func TestNativeLeaseUpdatesKeepTCPConnectionAndExpireWhenInputCloses(t *testing.
 	out, err = query("router.lab.example.")
 	if err != nil || len(out.Answer) != 1 {
 		t.Fatal(fmt.Errorf("lease expiration affected static DNS: %v %v", out, err))
+	}
+}
+
+func TestNativeAddressRecordsFollowOwnersAndExpireIndependently(t *testing.T) {
+	cfg := testResolverConfig(t, nil)
+	cfg.Zones[0].Spec.Records = append(cfg.Zones[0].Spec.Records, api.DNSZoneRecordSpec{Hostname: "self", IPv4From: api.StatusValueSourceSpec{Resource: "VirtualAddress/gateway"}, IPv6From: api.StatusValueSourceSpec{Resource: "IPv6DelegatedAddress/wan/lan"}})
+	d := newTestDaemon(t, cfg)
+	clock, err := boottime.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := len(cfg.Zones[0].Spec.Records) - 1
+	p := dnsconfig.Input{Resource: "lab", ConfigDigest: strings.Repeat("a", 64), Records: []dnsconfig.RecordAddress{
+		{Zone: 0, Record: record, Address: netip.MustParseAddr("192.0.2.254"), ValidUntil: lifetime.Deadline{BootID: clock.BootID, Nanos: uint64(clock.BoottimeNanoseconds) + uint64(5*time.Second)}},
+		{Zone: 0, Record: record, Address: netip.MustParseAddr("2001:db8::1"), ValidUntil: lifetime.Deadline{BootID: clock.BootID, Nanos: uint64(clock.BoottimeNanoseconds) + uint64(200*time.Millisecond)}},
+	}}
+	if err := d.applyInput(p); err != nil {
+		t.Fatal(err)
+	}
+	answer := answerNative(t, d, "self.lab.example.", mdns.TypeAAAA)
+	if answer == nil || len(answer.Answer) != 1 || answer.Answer[0].(*mdns.AAAA).AAAA.String() != "2001:db8::1" || answer.Answer[0].Header().Ttl != 0 {
+		t.Fatal("delegated record lacks original lifetime", answer)
+	}
+	time.Sleep(250 * time.Millisecond)
+	if answer := answerNative(t, d, "self.lab.example.", mdns.TypeAAAA); answer == nil || len(answer.Answer) != 0 {
+		t.Fatal("expired PD address still answered", answer)
+	}
+	if answer := answerNative(t, d, "self.lab.example.", mdns.TypeA); answer == nil || len(answer.Answer) != 1 {
+		t.Fatal("PD expiry withdrew live IPv4 owner", answer)
+	}
+	p.Records[1].Address = netip.MustParseAddr("2001:db8:1::1")
+	p.Records[1].ValidUntil = p.Records[0].ValidUntil
+	if err := d.applyInput(p); err != nil {
+		t.Fatal(err)
+	}
+	if answer := answerNative(t, d, "self.lab.example.", mdns.TypeAAAA); answer == nil || len(answer.Answer) != 1 || answer.Answer[0].(*mdns.AAAA).AAAA.String() != "2001:db8:1::1" {
+		t.Fatal("new delegated address not applied", answer)
+	}
+	p.Records = nil
+	if err := d.applyInput(p); err != nil {
+		t.Fatal(err)
+	}
+	for _, typ := range []uint16{mdns.TypeA, mdns.TypeAAAA} {
+		if answer := answerNative(t, d, "self.lab.example.", typ); answer == nil || len(answer.Answer) != 0 {
+			t.Fatal("withdrawn owner still answered", answer)
+		}
 	}
 }

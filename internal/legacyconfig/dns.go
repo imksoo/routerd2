@@ -168,15 +168,13 @@ func (c *compiler) dns() {
 					if record.IPv4 != "" {
 						c.reject(zone, path+".ipv4From", "unsupported_semantics", "literal plus status-source fallback must be made explicit before migration")
 					}
-					record.IPv4 = c.resolveStaticAddress(zone, path+".ipv4From", record.IPv4From, true)
-					record.IPv4From = api.StatusValueSourceSpec{}
+					record.IPv4, record.IPv4From = c.dnsRecordAddress(zone, path+".ipv4From", record.IPv4From, true)
 				}
 				if record.IPv6From.Resource != "" {
 					if record.IPv6 != "" {
 						c.reject(zone, path+".ipv6From", "unsupported_semantics", "literal plus status-source fallback must be made explicit before migration")
 					}
-					record.IPv6 = c.resolveStaticAddress(zone, path+".ipv6From", record.IPv6From, false)
-					record.IPv6From = api.StatusValueSourceSpec{}
+					record.IPv6, record.IPv6From = c.dnsRecordAddress(zone, path+".ipv6From", record.IPv6From, false)
 				}
 			}
 			runtime.Zones = append(runtime.Zones, dnsconfig.RuntimeZone{Name: zone.Metadata.Name, Spec: zs})
@@ -390,4 +388,21 @@ func (c *compiler) dnsLearnedSources(r resource, path string, sources []api.Stat
 		}
 	}
 	return result
+}
+
+// Keep dynamic address ownership in DNS intent; observations never become literals.
+func (c *compiler) dnsRecordAddress(r resource, path string, source api.StatusValueSourceSpec, ipv4 bool) (string, api.StatusValueSourceSpec) {
+	ref := c.byRef[source.Resource]
+	if ref != nil && !source.Optional && (source.Field == "" || source.Field == "address") {
+		if ref.Kind == "VirtualAddress" && ref.Spec.(api.VirtualAddressSpec).Mode == "vrrp" {
+			return "", api.StatusValueSourceSpec{Resource: "VirtualAddress/" + c.serviceName(*ref, "vrrp"), Field: "address"}
+		}
+		if ref.Kind == "IPv6DelegatedAddress" && !ipv4 {
+			spec := ref.Spec.(api.IPv6DelegatedAddressSpec)
+			if index, ok := c.pd[spec.PrefixDelegation]; ok {
+				return "", api.StatusValueSourceSpec{Resource: "IPv6DelegatedAddress/" + c.document.Services[index].Name + "/" + c.serviceName(*ref, "lan"), Field: "address"}
+			}
+		}
+	}
+	return c.resolveStaticAddress(r, path, source, ipv4), api.StatusValueSourceSpec{}
 }

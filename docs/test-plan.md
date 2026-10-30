@@ -168,6 +168,8 @@ DNS利用とIPv4/IPv6通信、自然DHCPv4更新、PD通常/強制交換と製�
 現行homert設定と同一とはしない。広告IPv4 LAN着信・LAN発両family・両familyの出口が対象である。
 19:44 UTC開始の7800秒版は21:31:52 UTCのDNS SERVFAILで終了1。自然PD更新・完走を合格に数えない。
 
+直近候補`dynamic-dns-native79`は実HGWの起動前端末接続から90秒/9巡、初回両IP DNS/HTTPS、VIP/PD動的名、LAN更新と全daemon再起動を通過。動的記録のみの入力購読漏れも修正し、既存PD/kernel/dig試験で変更・失効・再取得を確認した。自然PD更新と二段DNSを含む全homert同時受入は残る。詳細・実行版差は[引き継ぎ](pve-codex-handoff.md)。
+
 ## 1. 単体の基本ルーター: homert02/03
 
 **環境**: 実HGWまたはNTT ONUと隔離された実routerd2、独立した有線端末またはLinux/BusyBox端末。

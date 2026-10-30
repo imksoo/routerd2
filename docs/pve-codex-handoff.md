@@ -1,3 +1,21 @@
+## 追加候補: dynamic-dns-native79（2026-10-30 JST）
+
+旧routerdの`expandZoneSpec`で使うPD/VIP由来のローカル記録を、既存の型付きDNS入力へ接続した。設定には所有者を残し、適用済みPDと現VRRP所有権から現アドレス・元期限を渡す。DHCPの架空producerや設定再生成は設けない。DNSは問い合わせ時にも期限を確認する。動的記録だけの構成で入力購読を開始しない接続漏れは、実daemon試験で検出して修正した。
+
+実HGW `ens18`、隔離Linux macvlan、製品全worker、起動前から接続する独立Busybox/dhcpcd端末で90秒/9巡が終了0。最初のIPv4/IPv6 DNS NOERRORとHTTPS200、現VIP/PDの名前、LAN自然更新、PD SIGKILL復旧2.02秒・通常交換、全daemon再起動後の自動DNS/両IP通信（受入11.52秒）、LAN向け応答のWAN流出0、停止時RAゼロと撤去を確認した。私有log `/tmp/routerd-dynamic-dns-native79-cold.log`。このHGW一巡後に、動的入力不要判定と同一所有者の重複decodeを修正したため、後続の最終候補の全体合格へ読み替えない。
+
+既存`make check-pd-ra`は、新しい動的記録のみの構成で現在のAAAA・PD変更・期限切れで旧回答停止・再取得の追従が終了0。製品とkernel・独立digを使うが、上流は既存の小さなwire peer、link-localは明示NoDADであり、ISC/通常DADの相互接続資格へ拡張しない。私有log `/tmp/routerd-dynamic-dns-native79-pd-peer-fixed.log`。元期限の単体回帰と関連Raceは終了0。最終全`make check`（Race/vetを含む）、CGO0 amd64/arm64 build、署名六ELF/catalog/publisher検査は終了0。publisher検査はumask002で作られた一時親directoryを拒否したため、既存checkと同じumask022をMakefileの当該targetにも設定して再実行した。鍵の安全条件は緩めていない。
+
+契約79/journal20。現候補の自然PD更新、実homertの二段DNS全条件付き転送・二対向BGP等の同時利用、二台停止障害、対象実機、全34項目は未完了。先の初回IPv6 SERVFAILのpacketはHGWの応答あり・一部送信元不一致で、待受公開順序の原因とは断定しない。問い合わせ後に残るHTTP接続先名解決は別担当が実ソケットで再現・修正中。
+
+## 2026-10-30 11:05 JST: 起動前接続と分担
+
+`local-redirect-native78`を正しいHGW uplink `ens18`で実行し、起動前から接続した独立Busybox/dhcpcd端末の最初のIPv6/IPv4 DNSがNOERROR、両HTTPSが200だった。LAN自然更新、PD worker復旧、全daemon再起動の一巡は終了0。再起動受入62.38秒には準備判定待ちを含み、通信断時間とは同一視しない。自然PD更新は未観測。私有logは`/tmp/routerd-homert-four-native78-cold-correct-uplink.log`。
+
+集合解決の失敗後待ちを1分から1秒へ変えた未公開候補`dns-set-retry-native78`の次の一巡では、最初のIPv6 DNSがSERVFAILとなり必須判定で終了1。IPv4 DNSと両HTTPSは成功したが、初期接続受入には不合格。DNS入力反映と待受公開の順序を調べる。私有logは`/tmp/routerd-dns-set-retry-native78-cold.log`。関連Race/vet/両architecture buildは終了0で、これを実通信合格の代替にしない。
+
+先の`ens20`試験は異なるネットワークを選んだ誤りで、HGWのRA未応答や製品RA不良の根拠にしない。管理経路は変更していない。保存WAN MAC/DUIDは一つの試験所有者だけが使用する。主担当はDNSと単体統合、補助担当は二台timeout、IPIP/BGPを別treeで実行。全体の見通しとCloud SAMの未接続範囲は既存[実装計画](implementation-plan.md)へ記した。
+
 # routerd2 開発引き継ぎ
 
 2026-10-30 JST。全34 work packageのゴールは継続中。homert本番の置換は未実施であり、

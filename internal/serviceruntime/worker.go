@@ -372,6 +372,11 @@ func (c *effectsClient) watchDNSInput(ctx context.Context, name string, current 
 					delay = min(delay, max(50*time.Millisecond, remaining/2))
 				}
 			}
+			for _, record := range current.Records {
+				if remaining := record.ValidUntil.Remaining(clock); remaining > 0 {
+					delay = min(delay, max(50*time.Millisecond, remaining/2))
+				}
+			}
 			for _, servers := range [][]dnsconfig.LearnedUpstream{current.Upstreams, current.Bootstraps} {
 				for _, server := range servers {
 					if remaining := server.ValidUntil.Remaining(clock); remaining > 0 {
