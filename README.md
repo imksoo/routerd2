@@ -107,6 +107,12 @@ PYWORKERS
 ネットワークの変更には対象namespaceの権限が必要です。空の設定はインターフェースを設定しません。
 既存設定があるホストのnetwork namespaceで、ルーター用のサンプルを不用意に適用しないでください。
 
+DNS 上流の監視には `healthcheck.timeout`、通常問い合わせには `queryTimeout` をそれぞれ適用します。
+DoH の接続と初期名前解決には両者の長い方を上限とし、各要求の期限と学習情報の元期限も維持します。
+`make check-dns-upstream` では、独立した dnsmasq の応答を 1.5 秒遅延させます。
+監視 3 秒・問い合わせ 1 秒の区別と、遅延撤去後の UDP/TCP 名前解決を確認します。
+これは静的アドレスを使う隔離試験であり、端末の自動設定や実 HGW の受入を代替しません。
+
 ## Appliance and container
 
 ```sh

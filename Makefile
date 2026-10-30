@@ -64,6 +64,7 @@ help:
 	  'make check-ntp-dhcp6   Verify learned time sources, original expiry and VRRP conditions with independent peers' \
 	  'make check-ntp-import  Verify imported client/server time sources, conditions and LAN forwarding' \
 	  'make check-bfd         Verify BFD/BGP routing domains with real workers' \
+	  'make check-dns-upstream Verify independent probe/query deadlines with dnsmasq' \
 	  'make check-dhcp6-server Verify LAN information service and durable DUID with BusyBox' \
 	  'make check-dhcp6-ra-pd Verify shared IA_NA/PD, RA trigger and restart with ISC DHCP' \
 	  'make check-dhcp6       Verify RA-triggered IA_NA, kernel parameters and restart with radvd/dnsmasq' \
@@ -138,6 +139,10 @@ check: fmt-check test test-dependencies test-tools race vet
 .PHONY: check-otlp
 check-otlp: build
 	$(PYTHON) scripts/otlp-peer.py --collector $(OTELCOL)
+
+.PHONY: check-dns-upstream
+check-dns-upstream: build
+	$(PYTHON) scripts/daemon-tests.py dns-upstream --go '$(GO)'
 
 .PHONY: check-management
 check-management: build dnsmasq-engine

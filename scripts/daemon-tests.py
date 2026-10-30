@@ -12,6 +12,7 @@ import tempfile
 # Each fixture verifies its disposable user/network namespace before mutation.
 # Timeout is the outer harness budget, not a protocol or client deadline.
 SUITES = {
+    "dns-upstream": (("TestDaemonDNSProbeTimeoutIndependentOfQueries", ("wan0", "lan0"), 60),),
     "traffic-flow": (("TestDaemonTrafficFlowHistory", ("wan0", "lan0"), 85), ("TestDaemonTrafficFlowNDPI", ("wan0", "lan0"), 85)),
     "management": (("TestDaemonConfigurationAndRecovery", ("mgmt0",), 100),),
     "local-redirect": (("TestDaemonLocalDNSRedirect", ("wan0", "lan0"), 85),),
@@ -103,7 +104,7 @@ def main():
         harness = output / "integration.test"
         subprocess.run([args.go, "test", "-race", "-tags", "integration", "-c", "-o", str(harness), "./internal/integration"], check=True)
         root = [] if os.geteuid() == 0 else ["sudo", "-n"]
-        if any(name == "TestDaemonDHCPv4DelayedACK" for name, _, _ in tests):
+        if any(name in ("TestDaemonDHCPv4DelayedACK", "TestDaemonDNSProbeTimeoutIndependentOfQueries") for name, _, _ in tests):
             subprocess.run(root + ["modprobe", "-a", "sch_netem", "sch_prio", "cls_flower"], check=True)
         stage = subprocess.check_output(root + ["mktemp", "-d", "/tmp/routerd-daemon.XXXXXX"], text=True).strip()
         try:

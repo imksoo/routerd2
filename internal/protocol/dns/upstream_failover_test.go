@@ -202,25 +202,42 @@ func TestUpstreamQueryTimeoutFallsBackWithoutWaitingForProbeTimeout(t *testing.T
 	}
 }
 
-func TestUpstreamQueryTimeoutCanExceedProbeTimeout(t *testing.T) {
-	// The response arrives after the health-probe deadline, but within the
-	// separate query deadline. A Client.Timeout tied to probes would reject it.
-	server := failoverDoHServer(t, func(w http.ResponseWriter, r *http.Request, query *dns.Msg) {
-		timer := time.NewTimer(100 * time.Millisecond)
-		defer timer.Stop()
-		select {
-		case <-timer.C:
-			failoverWriteDNS(t, w, failoverSuccessfulReply(query))
-		case <-r.Context().Done():
-		}
-	})
-	pool := failoverDoHPool(t, upstreamPoolConfig{QueryTimeout: time.Second, ProbeTimeout: 20 * time.Millisecond}, server)
-	if _, err := pool.Exchange(context.Background(), dnsProbeQuery(), nil); err != nil {
-		t.Fatalf("query was limited by health-probe timeout: %v", err)
-	}
-	pool.probe(context.Background(), pool.snapshotPointers()[0], nil)
-	if got := pool.Snapshot()[0]; got.LastError == "" || got.LastFailure.IsZero() {
-		t.Fatalf("health probe did not retain its shorter deadline: %+v", got)
+func TestUpstreamQueryAndProbeTimeoutsAreIndependent(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		query, probe  time.Duration
+		querySucceeds bool
+	}{
+		{"QueryLonger", time.Second, 20 * time.Millisecond, true},
+		{"ProbeLonger", 20 * time.Millisecond, time.Second, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// The response fits only the longer operation deadline. Neither
+			// operation may inherit the other's timeout through the transport.
+			server := failoverDoHServer(t, func(w http.ResponseWriter, r *http.Request, query *dns.Msg) {
+				timer := time.NewTimer(100 * time.Millisecond)
+				defer timer.Stop()
+				select {
+				case <-timer.C:
+					failoverWriteDNS(t, w, failoverSuccessfulReply(query))
+				case <-r.Context().Done():
+				}
+			})
+			pool := failoverDoHPool(t, upstreamPoolConfig{QueryTimeout: tc.query, ProbeTimeout: tc.probe}, server)
+			_, err := pool.Exchange(context.Background(), dnsProbeQuery(), nil)
+			if (err == nil) != tc.querySucceeds {
+				t.Fatalf("query result does not match its own deadline: %v", err)
+			}
+			pool.probe(context.Background(), pool.snapshotPointers()[0], nil)
+			got := pool.Snapshot()[0]
+			if tc.querySucceeds {
+				if got.LastError == "" || got.LastFailure.IsZero() {
+					t.Fatalf("health probe did not retain its shorter deadline: %+v", got)
+				}
+			} else if got.LastError != "" || got.LastSuccess.IsZero() {
+				t.Fatalf("health probe inherited the shorter query deadline: %+v", got)
+			}
+		})
 	}
 }
 
@@ -454,7 +471,7 @@ func TestDoHBootstrapTimeoutAllowsNextLookup(t *testing.T) {
 	pool, err := newUpstreamPool(api.DNSResolverSourceSpec{
 		Upstreams:         []string{"https://bootstrap-timeout.test:" + port + "/dns-query"},
 		BootstrapResolver: []string{bootstrap},
-	}, upstreamPoolConfig{QueryTimeout: 100 * time.Millisecond, RootCAs: roots})
+	}, upstreamPoolConfig{QueryTimeout: 100 * time.Millisecond, ProbeTimeout: 100 * time.Millisecond, RootCAs: roots})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -478,6 +495,47 @@ func TestDoHBootstrapTimeoutAllowsNextLookup(t *testing.T) {
 	answerBootstrap.Store(true)
 	if _, err := pool.Exchange(context.Background(), dnsProbeQuery(), nil); err != nil {
 		t.Fatalf("query after bootstrap recovery: %v", err)
+	}
+}
+
+func TestDoHProbeBootstrapCanOutlastQueryTimeout(t *testing.T) {
+	var bootstrapCalls atomic.Int32
+	bootstrap := failoverDualDNSServer(t, dns.HandlerFunc(func(w dns.ResponseWriter, query *dns.Msg) {
+		bootstrapCalls.Add(1)
+		time.Sleep(100 * time.Millisecond)
+		response := new(dns.Msg)
+		response.SetReply(query)
+		if query.Question[0].Qtype == dns.TypeA {
+			response.Answer = []dns.RR{&dns.A{
+				Hdr: dns.RR_Header{Name: query.Question[0].Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
+				A:   net.ParseIP("127.0.0.1"),
+			}}
+		}
+		if err := w.WriteMsg(response); err != nil {
+			t.Errorf("write delayed bootstrap reply: %v", err)
+		}
+	}))
+	server := failoverDoHServer(t, func(w http.ResponseWriter, _ *http.Request, query *dns.Msg) {
+		failoverWriteDNS(t, w, failoverSuccessfulReply(query))
+	})
+	_, port, err := net.SplitHostPort(strings.TrimPrefix(server.URL, "https://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	roots := x509.NewCertPool()
+	roots.AddCert(server.Certificate())
+	pool, err := newUpstreamPool(api.DNSResolverSourceSpec{
+		Upstreams:         []string{"https://probe-bootstrap.test:" + port + "/dns-query"},
+		BootstrapResolver: []string{bootstrap},
+	}, upstreamPoolConfig{QueryTimeout: 20 * time.Millisecond, ProbeTimeout: time.Second, PassThreshold: 1, RootCAs: roots})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool.client.Transport.(*http.Transport).TLSClientConfig.ServerName = "example.com"
+	t.Cleanup(pool.client.CloseIdleConnections)
+	pool.probe(context.Background(), pool.snapshotPointers()[0], nil)
+	if got := pool.Snapshot()[0]; bootstrapCalls.Load() == 0 || got.Phase != upstreamHealthy || got.LastSuccess.IsZero() {
+		t.Fatalf("first DoH probe did not complete bootstrap within its own deadline: calls=%d status=%+v", bootstrapCalls.Load(), got)
 	}
 }
 

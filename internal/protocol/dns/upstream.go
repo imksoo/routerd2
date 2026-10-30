@@ -183,8 +183,9 @@ func newUpstreamPool(spec api.DNSResolverSourceSpec, cfg upstreamPoolConfig) (*u
 		p.resolver = &net.Resolver{PreferGo: true, Dial: p.dialBootstrap}
 	}
 	// HTTP can keep a dial alive after its request expires. Bound the whole dial,
-	// including bootstrap resolution, so later queries can resolve afresh.
-	p.client = &http.Client{Transport: &http.Transport{DialContext: (&net.Dialer{Timeout: cfg.QueryTimeout, Resolver: p.resolver, Control: interfaceControl(spec.ViaInterface)}).DialContext, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: cfg.RootCAs}, ForceAttemptHTTP2: true, MaxIdleConns: 32, MaxIdleConnsPerHost: 4, IdleConnTimeout: 30 * time.Second}}
+	// including bootstrap resolution, while allowing either configured operation.
+	// Each HTTP request still carries its own query or probe deadline.
+	p.client = &http.Client{Transport: &http.Transport{DialContext: (&net.Dialer{Timeout: max(cfg.QueryTimeout, cfg.ProbeTimeout), Resolver: p.resolver, Control: interfaceControl(spec.ViaInterface)}).DialContext, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: cfg.RootCAs}, ForceAttemptHTTP2: true, MaxIdleConns: 32, MaxIdleConnsPerHost: 4, IdleConnTimeout: 30 * time.Second}}
 	return p, nil
 }
 
@@ -293,14 +294,14 @@ func (p *upstreamPool) setLearned(sets, bootstrap []dnsconfig.LearnedUpstream) {
 	p.bootstrap = fixed
 }
 
-func (p *upstreamPool) queryBudget(upstream *dnsUpstream) (time.Duration, error) {
+func (p *upstreamPool) requestBudget(upstream *dnsUpstream, timeout time.Duration) (time.Duration, error) {
 	p.mu.Lock()
 	for _, current := range p.upstreams {
 		if current == upstream {
 			deadline := current.ValidUntil
 			p.mu.Unlock()
 			if deadline == (lifetime.Deadline{}) {
-				return p.config.QueryTimeout, nil
+				return timeout, nil
 			}
 			clock, err := boottime.Read()
 			if err != nil {
@@ -310,7 +311,7 @@ func (p *upstreamPool) queryBudget(upstream *dnsUpstream) (time.Duration, error)
 			if remaining <= 0 {
 				return 0, errors.New("DNS upstream observation expired")
 			}
-			return min(p.config.QueryTimeout, remaining), nil
+			return min(timeout, remaining), nil
 		}
 	}
 	p.mu.Unlock()
@@ -318,17 +319,17 @@ func (p *upstreamPool) queryBudget(upstream *dnsUpstream) (time.Duration, error)
 }
 
 func (p *upstreamPool) probe(ctx context.Context, upstream *dnsUpstream, publish func(string, string, string, string, map[string]string)) {
-	budget, err := p.queryBudget(upstream)
+	budget, err := p.requestBudget(upstream, p.config.ProbeTimeout)
 	if err != nil {
 		return
 	}
-	queryCtx, cancel := context.WithTimeout(ctx, min(p.config.ProbeTimeout, budget))
+	queryCtx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	_, err = p.exchangeOne(queryCtx, upstream, dnsProbeQuery())
 	if ctx.Err() != nil {
 		return
 	}
-	if _, err := p.queryBudget(upstream); err != nil {
+	if _, err := p.requestBudget(upstream, p.config.ProbeTimeout); err != nil {
 		return
 	}
 	if err != nil {
@@ -350,7 +351,7 @@ func (p *upstreamPool) Exchange(ctx context.Context, query []byte, publish func(
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		budget, budgetErr := p.queryBudget(upstream)
+		budget, budgetErr := p.requestBudget(upstream, p.config.QueryTimeout)
 		if budgetErr != nil {
 			errs = append(errs, budgetErr.Error())
 			continue
@@ -362,7 +363,7 @@ func (p *upstreamPool) Exchange(ctx context.Context, query []byte, publish func(
 			return nil, err
 		}
 		if err == nil {
-			if _, err := p.queryBudget(upstream); err != nil {
+			if _, err := p.requestBudget(upstream, p.config.QueryTimeout); err != nil {
 				errs = append(errs, err.Error())
 				continue
 			}
@@ -584,7 +585,7 @@ func (p *upstreamPool) dialBootstrap(ctx context.Context, network, _ string) (ne
 		return nil, errors.New("no live DNS bootstrap resolver")
 	}
 	server := live[(p.nextBootstrap.Add(1)-1)%uint64(len(live))]
-	budget := min(p.config.QueryTimeout, server.ValidUntil.Remaining(clock))
+	budget := min(max(p.config.QueryTimeout, p.config.ProbeTimeout), server.ValidUntil.Remaining(clock))
 	call, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	conn, err := (&net.Dialer{Control: interfaceControl(p.spec.ViaInterface)}).DialContext(call, network, server.Address)
