@@ -25,7 +25,12 @@ SUITES = {
         ("TestDaemonBGPFIBAndOwnershipExpiry", (), 120),
         ("TestDaemonBGPRecursivePrerequisiteExpiry", (), 120),
     ),
-    "bgp-frr": (("TestDaemonBGPWithFRR", ("wan0", "lan0"), 110), ("TestDaemonIPIPBGPWithFRR", ("wan0", "lan0"), 110), ("TestDaemonDHCP4IPIPBGPWithFRR", ("wan0", "lan0"), 260)),
+    "bgp-frr": (
+        ("TestDaemonBGPWithFRR", ("wan0", "lan0"), 110),
+        ("TestDaemonIPIPBGPWithFRR", ("wan0", "lan0"), 110),
+        ("TestDaemonDHCP4IPIPBGPWithFRR", ("wan0", "lan0"), 260),
+        ("TestDaemonBGPTwoFRRPeers", ("wan0", "wan1", "lan0"), 140),
+    ),
     "bfd": (
         ("TestDaemonBFDControlsBGPSessionAndExpiry", (), 120),
         ("TestDaemonMultihopBFDControlsBGPSessionAndExpiry", ("wan0",), 120),

@@ -17,8 +17,20 @@ and [library documentation](https://github.com/osrg/gobgp/blob/v4.7.0/docs/sourc
 `make check-bgp-frr` exercises the real daemon against an independent FRR
 `bgpd` and checks BGP exchange, client TCP/UDP forwarding, withdrawal and
 restart. It requires FRR `bgpd` and `vtysh`; set `FRR_BGPD` if the daemon is
-not installed at `/usr/lib/frr/bgpd`. The isolated FRR peer uses a static
-return route to the client and does not run zebra.
+not installed at `/usr/lib/frr/bgpd`. Each isolated FRR peer runs Zebra for
+interface and next-hop observations, while `bgpd -n` leaves the fixture's
+explicit client return route in place.
+
+The suite includes two same-AS FRR peers and the homert policy shape, with
+public lab addresses replacing private configuration. It checks all four
+imported routes (including more-specific routes within /12 and /16 allowlists),
+peer-address next-hop rewriting, LAN advertisement, and client TCP/UDP. A
+withdrawal on one peer leaves the other usable. With the configured 120/360
+second Graceful Restart timers, an abruptly stopped peer's routes are observed
+as stale and still forward before the peer rejoins. Product restart and complete
+configuration withdrawal are also checked. The fixture uses separate peer
+subnets; it does not qualify the physical homert deployment, a full GR timer
+expiry, or simultaneous use with the real HGW.
 
 ```go
 err := bgp.Run(ctx, cfg, bgp.EffectsFunc(func(ctx context.Context, s bgp.Snapshot) error {
