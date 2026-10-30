@@ -584,6 +584,11 @@ func (p *apply) reconcile(d Desired) error {
 	if d.Forwarding.ConntrackAccounting != nil {
 		wantedSettings[settingKey{Kind: "conntrack_accounting"}] = boolInt(*d.Forwarding.ConntrackAccounting)
 	}
+	// Creating a ct-packets expression enables accounting in the kernel.
+	// Own that side effect even when no explicit sysctl resource is present.
+	if d.Firewall != nil && d.Firewall.FlowObservationGroup != 0 {
+		wantedSettings[settingKey{Kind: "conntrack_accounting"}] = 1
+	}
 	if d.Forwarding.ConntrackTCPLiberal != nil {
 		wantedSettings[settingKey{Kind: "conntrack_tcp_liberal"}] = boolInt(*d.Forwarding.ConntrackTCPLiberal)
 	}
@@ -602,13 +607,14 @@ func (p *apply) reconcile(d Desired) error {
 		wantedSettings[settingKey{Kind: "multipath_hash_policy4"}] = 3
 	}
 	// Keep RA/SLAAC writers disabled and shared VIP ARP restricted until the
-	// corresponding addresses have been removed. Restore them afterwards.
+	// corresponding addresses have been removed. Accounting must likewise outlive
+	// the packet-observation rules that require it. Restore them afterwards.
 	earlySettings := make(map[settingKey]int, len(wantedSettings))
 	for key, value := range wantedSettings {
 		earlySettings[key] = value
 	}
 	for _, old := range p.e.state.Settings {
-		if raSetting(old.Key) || old.Key.Kind == "arp_ignore" || old.Key.Kind == "arp_announce" {
+		if raSetting(old.Key) || old.Key.Kind == "arp_ignore" || old.Key.Kind == "arp_announce" || old.Key.Kind == "conntrack_accounting" {
 			earlySettings[old.Key] = old.Last
 		}
 	}
@@ -705,6 +711,14 @@ func (p *apply) reconcile(d Desired) error {
 	if err := p.removeLinks(d); err != nil {
 		return err
 	}
+	// Capture the original value before nftables implicitly enables accounting.
+	// Retired accounting is restored only after its observation rules are gone.
+	key := settingKey{Kind: "conntrack_accounting"}
+	if value, wanted := wantedSettings[key]; wanted {
+		if err := p.set(key, value); err != nil {
+			return err
+		}
+	}
 	if err := p.firewall(d.Firewall); err != nil {
 		return err
 	}
@@ -720,7 +734,7 @@ func (p *apply) reconcile(d Desired) error {
 		}
 	}
 	// Apply after ip_forward, before protocol workers can create their units.
-	for _, kind := range []string{"rp_filter_all", "rp_filter_default", "conntrack_tcp_liberal", "conntrack_accounting", "multipath_hash_fields4", "multipath_hash_policy4"} {
+	for _, kind := range []string{"rp_filter_all", "rp_filter_default", "conntrack_tcp_liberal", "multipath_hash_fields4", "multipath_hash_policy4"} {
 		key := settingKey{Kind: kind}
 		if v, ok := wantedSettings[key]; ok {
 			if err := p.set(key, v); err != nil {

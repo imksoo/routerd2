@@ -356,7 +356,25 @@ func TestDaemonTrafficFlowHistory(t *testing.T) {
 		}
 	})
 	t.Log("closed connection was marked ended, survived restart and reached the UDP archive before age-based deletion")
-	disabled := imported.Document
+	// Packet observation owns its required accounting after the explicit
+	// setting is withdrawn, then restores the original value when removed.
+	observationOnly := imported.Document
+	observationOnly.Resources = nil
+	for _, res := range imported.Document.Resources {
+		if res.Forwarding != nil {
+			forwarding := *res.Forwarding
+			forwarding.ConntrackAccounting = nil
+			res.Forwarding = &forwarding
+		}
+		observationOnly.Resources = append(observationOnly.Resources, res)
+	}
+	if err := f.control.Do(context.Background(), "POST", "/v1/config/commit", control.CommitRequest{ExpectedRevision: 1, RequestID: "accounting-owned-by-observation", Config: observationOnly}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if value, err := os.ReadFile("/proc/sys/net/netfilter/nf_conntrack_acct"); err != nil || strings.TrimSpace(string(value)) != "1" {
+		t.Fatal("observation lost required accounting", string(value), err)
+	}
+	disabled := observationOnly
 	disabled.Resources = nil
 	for _, res := range imported.Document.Resources {
 		if res.Firewall != nil {
@@ -373,7 +391,7 @@ func TestDaemonTrafficFlowHistory(t *testing.T) {
 			disabled.Resources = append(disabled.Resources, res)
 		}
 	}
-	if err := f.control.Do(context.Background(), "POST", "/v1/config/commit", control.CommitRequest{ExpectedRevision: 1, RequestID: "remove-flow-history", Config: disabled}, nil); err != nil {
+	if err := f.control.Do(context.Background(), "POST", "/v1/config/commit", control.CommitRequest{ExpectedRevision: 2, RequestID: "remove-flow-history", Config: disabled}, nil); err != nil {
 		t.Fatal(err)
 	}
 	until(t, 5*time.Second, func() bool {

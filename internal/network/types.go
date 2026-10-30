@@ -258,6 +258,9 @@ func validName(s string) bool { return interfaceName.MatchString(s) && s != "." 
 // Validate is side-effect free and does not require Linux or privileges.
 func Validate(d Desired) error {
 	var errs []error
+	if d.Firewall != nil && d.Firewall.FlowObservationGroup != 0 && d.Forwarding.ConntrackAccounting != nil && !*d.Forwarding.ConntrackAccounting {
+		errs = append(errs, errors.New("flow observation requires conntrack accounting"))
+	}
 	if d.Forwarding.IPv4ECMPHash != "" && d.Forwarding.IPv4ECMPHash != "source" {
 		errs = append(errs, errors.New("ipv4_ecmp_hash must be source or empty"))
 	}
