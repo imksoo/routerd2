@@ -22,9 +22,29 @@ filters exported logs without suppressing selected measurements.
 Native `signals` defaults to logs only. The former `Telemetry` resource defaults
 to all three signals, matching its previous selection behavior. Its importer
 reports the remaining source gap: metrics and traces currently cover actual
-Health probes, DHCPv6 client exchanges and observed firewall denies. Controller,
-PPPoE and other former
-instrumentation is not migrated by selecting these signals.
+Health probes, DHCPv6 client exchanges, observed firewall denies and configuration
+application operations. Other controller loops, PPPoE and other former
+instrumentation are not migrated by selecting these signals.
+
+Configuration application records the actual entry and return of
+`control.Engine.apply` through the same nonblocking local log handler. It emits:
+
+- `routerd.config.apply.operations`, a cumulative operation counter grouped by
+  `routerd.config.apply.result` (`success` or `error`);
+- `routerd.config.apply.duration`, a seconds histogram from the original
+  monotonic elapsed time, with the same result grouping;
+- `config.apply`, a span with the original start/end timestamps, result,
+  configuration revision and local log identity. Errors carry a generic status,
+  not configuration contents or potentially sensitive error strings.
+
+An operation includes configuration preparation and its synchronous application
+path. It does not measure later protocol acquisition, every coordinator pass,
+configuration persistence or confirmed-commit completion. A failed operation and
+its recovery application are separate measurements. No polling interval is
+invented for this event-driven operation. Revisions are span/log attributes only,
+not unbounded metric dimensions. Collector acknowledgments never gate application.
+Startup and exporter replacement keep the existing no-replay behavior; these
+counters describe consumed measurements, not a durable lifetime total.
 
 The existing local log owner remains authoritative. This worker reads its Unix
 HTTP API and retains the original timestamp, severity, message, producer, local
@@ -188,3 +208,37 @@ same three executable SHA-256 values. Relevant Race Detector and vet checks
 passed. Evidence: `dist/observability-integrated/{build.json,dhcp6/}` including
 `execution.json`, `binaries.json`, actual receiver records and `peer.log`.
 This remains a private-namespace functional check, not full homert acceptance.
+
+### Configuration application acceptance (2026-10-31 JST)
+
+The dedicated `a2d959f` checkout plus this change used the normal `make build`
+path, release `control-telemetry-a2d959f`, and three inspected static amd64 ELF
+binaries. The existing `scripts/otlp-peer.py` completed with exit 0 at
+02:42:16–02:44:28 JST (about 132 seconds), using OpenTelemetry Collector Contrib
+0.151.0 and an independent ISC DHCPv6 server in private namespaces.
+
+A real configuration commit produced revision 2 with `success` and monotonic
+elapsed time 191827752 ns. Its original local record and exported `config.apply`
+span agreed on revision, result, identity and both timestamps. The operation
+counter was 2, including the captured startup application; the duration histogram
+sum 0.811852889 seconds matched those two original measurements. No fabricated
+measurement or HTTP response time supplied these values. The existing independent
+Health, DHCPv6 and NFLOG checks passed as well. Collector interruption, destination
+replacement, recovery and removal preserved 1238 routed UDP replies with zero
+failures. This does not establish loss-free telemetry under saturation.
+
+Repeat with `make check-otlp`, or reuse normal build outputs and provide the
+existing ISC executable explicitly when it is outside `/usr/sbin`:
+
+```
+python3 scripts/otlp-peer.py --binary-dir dist/bin --dhcp6-server /path/to/dhcpd --output dist/otlp-peer
+```
+
+The peer check matched successful application measurements. Actual failed
+application export, wall-clock correction during application, target hardware
+and every controller loop remain outside this acceptance. The selected control
+and legacy-import Race Detector checks and `go vet` passed. Initial unprivileged
+control checks stopped at existing private-state directory validation; the same
+checks passed with administrator privileges. A first peer invocation stopped
+before starting any product because the default ISC executable was absent;
+using the existing peer-environment executable resolved that prerequisite.

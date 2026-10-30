@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Receive product OTLP/gRPC logs and real Health/DHCPv6 measurements in private namespaces.
+"""Receive product OTLP/gRPC logs and real control/Health/DHCPv6 measurements in private namespaces.
 
-Worker lifecycle records prove the product-to-receiver path. One explicitly
+Configuration commits prove measured application time and result, distinct from
+subsequent protocol readiness. Worker lifecycle records prove the product-to-receiver path. One explicitly
 labelled synthetic DEBUG input checks only severity filtering, not log origin.
 An independent TCP endpoint proves Health success, failure, and recovery in logs,
 metrics, and traces. ISC dhcpd proves prefix acquisition, natural renewal, and
@@ -222,7 +223,13 @@ def peer(stage):
                             continue
                         details = original['attributes']
                         fields = [('routerd.resource.name', 'resource'), ('network.interface.name', 'interface')]
-                        if original['message'] == 'dhcpv6 exchange completed':
+                        if original['message'] == 'configuration apply completed':
+                            assert span['name'] == 'config.apply', span
+                            fields = [('routerd.config.revision', 'revision'), ('routerd.config.apply.result', 'result')]
+                            if details['result'] == 'error':
+                                assert span.get('status', {}).get('code') == 2, span
+                            started, finished = details['apply_started_at'], details['apply_finished_at']
+                        elif original['message'] == 'dhcpv6 exchange completed':
                             assert span['name'] == 'dhcpv6.exchange', span
                             fields += [('routerd.dhcpv6.operation', 'operation'), ('routerd.dhcpv6.result', 'result'),
                                        ('routerd.dhcpv6.transmissions', 'transmissions')]
@@ -283,6 +290,52 @@ def peer(stage):
               'result': details['result'], 'phase': details['phase'], 'counter': count,
               'started_at': details['probe_started_at'], 'finished_at': details['probe_finished_at']}), flush=True)
         return count
+
+    def control_measured(revision):
+        found = []
+        def recorded():
+            entries = api('logging.sock', '/v1/logs?module=control&tail=true&limit=100')['records']
+            found[:] = [entry for entry in entries if entry['message'] == 'configuration apply completed'
+                        and entry.get('attributes', {}).get('revision') == str(revision)
+                        and entry['attributes'].get('result') == 'success']
+            return bool(found)
+        wait(recorded, 'actual configuration apply measurement')
+        assert len(found) == 1, 'configuration apply recorded more than once'
+        original = found[0]
+        details = original['attributes']
+        assert details['apply_duration_ns'] >= 0, details
+        evidence = []
+        def delivered():
+            if not received('receiver-a.jsonl', original) or not span_received('receiver-a.jsonl', original):
+                return False
+            tags = {'routerd.config.apply.result': 'success'}
+            counts = [point for point in metric_points('receiver-a.jsonl', 'routerd.config.apply.operations', 'sum')
+                      if attributes(point) == tags]
+            for point in metric_points('receiver-a.jsonl', 'routerd.config.apply.duration', 'histogram', 's'):
+                if attributes(point) != tags or int(point['timeUnixNano']) < nanos(details['apply_finished_at']):
+                    continue
+                count = int(point['count'])
+                if not any(int(item['asInt']) == count and int(item['timeUnixNano']) >= nanos(details['apply_finished_at']) for item in counts):
+                    continue
+                # Startup may finish after the exporter begins reading. Include
+                # exactly the original measurements exported before this sample.
+                measurements = [attributes(entry)['routerd.attributes'] for _, entry in records('receiver-a.jsonl')
+                                if entry.get('body', {}).get('stringValue') == 'configuration apply completed'
+                                and attributes(entry)['routerd.attributes']['result'] == 'success'
+                                and int(entry['timeUnixNano']) <= int(point['timeUnixNano'])]
+                if len(measurements) != count:
+                    continue
+                measured_seconds = sum(item['apply_duration_ns'] for item in measurements)/1_000_000_000
+                assert abs(float(point['sum'])-measured_seconds) < 1e-9, point
+                evidence[:] = [count, point['sum']]
+                return True
+            return False
+        wait(delivered, 'configuration apply log/span/count/measured duration', 45)
+        print('PASS real configuration apply log/span/count/duration', json.dumps({
+              'revision': revision, 'result': details['result'], 'epoch': original['epoch'],
+              'sequence': original['sequence'], 'started_at': details['apply_started_at'],
+              'finished_at': details['apply_finished_at'], 'duration_ns': details['apply_duration_ns'],
+              'counter': evidence[0], 'duration_sum_seconds': evidence[1]}), flush=True)
 
     def dhcp6_record(operation, result, after):
         found = []
@@ -404,8 +457,9 @@ def peer(stage):
 
     def commit(resources, label):
         current = api('control.sock', '/v1/config')
-        api('control.sock', '/v1/config/commit', {'expected_revision': current['revision'], 'request_id': label, 'config': {'schema_version': 2, 'resources': resources}})
+        committed = api('control.sock', '/v1/config/commit', {'expected_revision': current['revision'], 'request_id': label, 'config': {'schema_version': 2, 'resources': resources}})
         wait(lambda: api('control.sock', '/v1/config')['healthy'], label+' ready')
+        return committed['revision']
 
     def receiver(port, name):
         config = {'receivers': {'otlp': {'protocols': {'grpc': {'endpoint': '192.0.2.2:'+str(port)}}}},
@@ -504,13 +558,14 @@ def peer(stage):
         acquisition_started = time.time_ns()
         resources += [{'id': 'pd', 'depends_on': ['wan6-address'], 'service': {'name': 'pd', 'dhcp6': {
             'interface': 'wan0', 'iaid': 1, 'request_prefix': True, 'prefix_length': 60}}}]
-        commit(resources+[sink], 'start-dhcp6-with-collector-ready')
+        applied_revision = commit(resources+[sink], 'start-dhcp6-with-collector-ready')
         solicitation = dhcp6_record('solicit', 'reply', acquisition_started)
         acquisition = dhcp6_record('request', 'reply', acquisition_started)
         wait(lambda: api('control.sock', '/v1/services/service.pd')['snapshot'].get('prefixes'), 'delegated prefix acquired')
         renewal = dhcp6_record('renew', 'reply', nanos(acquisition['attributes']['exchange_finished_at']))
         healthy = health_record('passed', 'Healthy', time.time_ns())
         first_count = measured(healthy)
+        control_measured(applied_revision)
         firewall_measured('receiver-a.jsonl', firewall_first, 1)
         for observation in (solicitation, acquisition, renewal):
             dhcp6_measured(observation)

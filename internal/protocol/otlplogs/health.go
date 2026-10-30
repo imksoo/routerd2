@@ -23,15 +23,18 @@ import (
 )
 
 type operationSignals struct {
-	metrics          *sdkmetric.MeterProvider
-	traces           *sdktrace.TracerProvider
-	probes           metric.Int64Counter
-	phase            metric.Int64Gauge
-	tracer           trace.Tracer
-	exchanges        metric.Int64Counter
-	exchangeDuration metric.Float64Histogram
-	dhcp6Tracer      trace.Tracer
-	deniedPackets    metric.Int64Counter
+	metrics             *sdkmetric.MeterProvider
+	traces              *sdktrace.TracerProvider
+	probes              metric.Int64Counter
+	phase               metric.Int64Gauge
+	tracer              trace.Tracer
+	exchanges           metric.Int64Counter
+	exchangeDuration    metric.Float64Histogram
+	dhcp6Tracer         trace.Tracer
+	deniedPackets       metric.Int64Counter
+	configApplies       metric.Int64Counter
+	configApplyDuration metric.Float64Histogram
+	configTracer        trace.Tracer
 }
 
 func newOperationSignals(ctx context.Context, cfg otlplogconfig.Config, conn *grpc.ClientConn, res *resource.Resource) (p *operationSignals, err error) {
@@ -64,6 +67,15 @@ func newOperationSignals(ctx context.Context, cfg otlplogconfig.Config, conn *gr
 		if err != nil {
 			return p, err
 		}
+		configMeter := p.metrics.Meter("routerd2.control")
+		p.configApplies, err = configMeter.Int64Counter("routerd.config.apply.operations")
+		if err != nil {
+			return p, err
+		}
+		p.configApplyDuration, err = configMeter.Float64Histogram("routerd.config.apply.duration", metric.WithUnit("s"))
+		if err != nil {
+			return p, err
+		}
 		p.deniedPackets, err = p.metrics.Meter("routerd2.firewall").Int64Counter("routerd.firewall.deny.total", metric.WithUnit("{packet}"))
 		if err != nil {
 			return p, err
@@ -77,6 +89,7 @@ func newOperationSignals(ctx context.Context, cfg otlplogconfig.Config, conn *gr
 		p.traces = sdktrace.NewTracerProvider(sdktrace.WithResource(res), sdktrace.WithSampler(sdktrace.AlwaysSample()), sdktrace.WithBatcher(exporter, sdktrace.WithMaxQueueSize(1024), sdktrace.WithMaxExportBatchSize(256), sdktrace.WithBatchTimeout(250*time.Millisecond), sdktrace.WithExportTimeout(operationTimeout)))
 		p.tracer = p.traces.Tracer("routerd2.healthcheck")
 		p.dhcp6Tracer = p.traces.Tracer("routerd2.dhcpv6")
+		p.configTracer = p.traces.Tracer("routerd2.control")
 	}
 	return p, nil
 }
@@ -97,6 +110,8 @@ func (p *operationSignals) close(ctx context.Context) error {
 
 func (p *operationSignals) record(ctx context.Context, entry logging.Record) {
 	switch entry.Message {
+	case telemetry.ConfigurationApplyMessage:
+		p.recordConfigurationApply(ctx, entry)
 	case telemetry.HealthProbeMessage:
 		p.recordHealth(ctx, entry)
 	case telemetry.DHCPv6ExchangeMessage:

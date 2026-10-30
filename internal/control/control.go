@@ -25,6 +25,7 @@ import (
 	"github.com/imksoo/routerd2/internal/release"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
+	"github.com/imksoo/routerd2/internal/telemetry"
 )
 
 const SocketName = "control.sock"
@@ -161,7 +162,15 @@ func (e *Engine) State() State {
 	}
 	return s
 }
-func (e *Engine) apply(ctx context.Context, revision uint64, doc config.Document) error {
+func (e *Engine) apply(ctx context.Context, revision uint64, doc config.Document) (err error) {
+	started := time.Now()
+	defer func() {
+		result := "success"
+		if err != nil {
+			result = "error"
+		}
+		telemetry.ConfigurationApply{Revision: revision, Result: result, StartedAt: started, FinishedAt: time.Now()}.Record(ctx)
+	}()
 	if e.runtime != nil {
 		if err := e.registerProtocolRelaysLocked(ctx, doc); err != nil {
 			return err

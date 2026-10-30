@@ -34,5 +34,5 @@ func (c *compiler) telemetry(r resource) {
 		return
 	}
 	c.addService(r, serviceconfig.Service{Name: c.serviceName(r, "otlp"), OTLPLogs: &cfg})
-	c.note(r, "The former active OTLP SDK path exports native local logs through an independent gRPC worker. Endpoint, transport security, namespace and resource attributes are retained. Selected metrics/traces export actual Health probe and DHCPv6 exchange measurements. Firewall metrics count observed denied NFLOG records, not unsampled traffic; controller, PPPoE and other former instrument sources are not yet migrated. Archive-on-delete OTLP LogSink behavior is not supplied.")
+	c.note(r, "The former active OTLP SDK path exports native local logs through an independent gRPC worker. Endpoint, transport security, namespace and resource attributes are retained. Selected metrics/traces export actual Health probe, DHCPv6 exchange and configuration application measurements. Firewall metrics count observed denied NFLOG records, not unsampled traffic; other controller loops, PPPoE and other former instrument sources are not yet migrated. Archive-on-delete OTLP LogSink behavior is not supplied.")
 }
