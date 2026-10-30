@@ -237,7 +237,7 @@ func nativeRouteState(r netlink.Route, names map[int]string) RouteState {
 	// forwarding policy. ONLINK and all other unmodeled flags remain foreign.
 	const healthFlags = unix.RTNH_F_DEAD | unix.RTNH_F_LINKDOWN
 	advanced := r.ILinkIndex != 0 || r.Tos != 0 || r.Flags & ^healthFlags != 0 || r.MPLSDst != nil || r.NewDst != nil || r.Encap != nil || r.Via != nil || r.Realm != 0 || r.MTU != 0 || r.MTULock || r.Window != 0 || r.Rtt != 0 || r.RttVar != 0 || r.Ssthresh != 0 || r.Cwnd != 0 || r.AdvMSS != 0 || r.Reordering != 0 || r.Hoplimit != 0 || r.InitCwnd != 0 || r.Features != 0 || r.RtoMin != 0 || r.RtoMinLock || r.InitRwnd != 0 || r.QuickACK != 0 || r.Congctl != "" || r.FastOpenNoCookie != 0
-	definition := Route{PreferredSource: src, Destination: dst, Gateway: g, Interface: names[r.LinkIndex], Metric: r.Priority, Table: r.Table}
+	definition := Route{Blackhole: r.Type == unix.RTN_BLACKHOLE, PreferredSource: src, Destination: dst, Gateway: g, Interface: names[r.LinkIndex], Metric: r.Priority, Table: r.Table}
 	for _, h := range r.MultiPath {
 		if h == nil {
 			advanced = true
@@ -272,6 +272,10 @@ func linuxRoute(r Route) (*netlink.Route, error) {
 		result.Family = netlink.FAMILY_V6
 	}
 	result.Src = net.ParseIP(r.PreferredSource)
+	if r.Blackhole {
+		result.Type = unix.RTN_BLACKHOLE
+		return result, nil
+	}
 	result.Scope = netlink.SCOPE_LINK
 	if len(r.NextHops) > 0 {
 		for _, h := range r.NextHops {

@@ -67,6 +67,8 @@ type Interface struct {
 }
 
 type Route struct {
+	// Blackhole discards matching traffic without a next hop or ICMP response.
+	Blackhole       bool   `json:"blackhole,omitempty"`
 	PreferredSource string `json:"preferred_source,omitempty"`
 	Destination     string `json:"destination"`
 	Gateway         string `json:"gateway,omitempty"`

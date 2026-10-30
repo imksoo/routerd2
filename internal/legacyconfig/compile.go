@@ -156,11 +156,11 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 		case "IPv4StaticRoute":
 			s := r.Spec.(api.IPv4StaticRouteSpec)
 			c.allow(r, "destination", "via", "interface", "metric")
-			c.route(r, s.Destination, s.Via, s.Interface, s.Metric, 4, false)
+			c.route(r, network.Route{Destination: s.Destination, Gateway: s.Via, Interface: s.Interface, Metric: s.Metric}, 4, false)
 		case "IPv6StaticRoute":
 			s := r.Spec.(api.IPv6StaticRouteSpec)
 			c.allow(r, "destination", "via", "interface", "metric")
-			c.route(r, s.Destination, s.Via, s.Interface, s.Metric, 6, false)
+			c.route(r, network.Route{Destination: s.Destination, Gateway: s.Via, Interface: s.Interface, Metric: s.Metric}, 6, false)
 		case "IPv4Route":
 			c.ipv4Route(r)
 		case "DSLiteTunnel":

@@ -274,15 +274,15 @@ func (c *compiler) virtualAddress(r resource) (string, []resourceprogram.Resourc
 	return "", nil
 }
 
-func (c *compiler) route(r resource, destination, gateway, dev string, metric, family int, literal bool) {
-	if destination == "default" {
+func (c *compiler) route(r resource, route network.Route, family int, literal bool) {
+	if route.Destination == "default" {
 		if family == 4 {
-			destination = "0.0.0.0/0"
+			route.Destination = "0.0.0.0/0"
 		} else {
-			destination = "::/0"
+			route.Destination = "::/0"
 		}
 	}
-	prefix, err := netip.ParsePrefix(destination)
+	prefix, err := netip.ParsePrefix(route.Destination)
 	if err != nil || prefix.Addr().Is4() != (family == 4) || prefix.Addr().Is4In6() {
 		c.reject(r, "destination", "invalid_value", "route destination must be a prefix of the declared family")
 		return
@@ -290,28 +290,40 @@ func (c *compiler) route(r resource, destination, gateway, dev string, metric, f
 	if prefix != prefix.Masked() {
 		c.reject(r, "destination", "invalid_value", "route destination must be a canonical network prefix")
 	}
-	if gateway != "" {
-		a, err := netip.ParseAddr(gateway)
+	if route.Gateway != "" {
+		a, err := netip.ParseAddr(route.Gateway)
 		if err != nil || a.Is4() != (family == 4) || a.Is4In6() {
 			c.reject(r, "gateway", "invalid_value", "gateway must be an address of the route family")
 			return
 		}
-		gateway = a.String()
+		route.Gateway = a.String()
 	}
-	name := c.interfaceName(r, "interface", dev, literal)
-	if index, ok := c.dynamicTunnels[name]; ok {
-		c.dynamicDSLiteRoute(r, index, prefix, gateway, metric, family)
-		return
+	if !route.Blackhole {
+		route.Interface = c.interfaceName(r, "interface", route.Interface, literal)
+		if index, ok := c.dynamicTunnels[route.Interface]; ok {
+			c.dynamicDSLiteRoute(r, index, prefix, route.Gateway, route.Metric, family)
+			return
+		}
 	}
-	c.document.Network.Routes = append(c.document.Network.Routes, network.Route{Destination: prefix.String(), Gateway: gateway, Interface: name, Metric: metric})
+	route.Destination = prefix.String()
+	c.document.Network.Routes = append(c.document.Network.Routes, route)
 	c.target(r, "network.routes")
 }
 
 func (c *compiler) ipv4Route(r resource) {
 	c.allow(r, "destination", "type", "device", "deviceFrom", "gateway", "gatewayFrom", "preferredSource", "metric")
 	s := r.Spec.(api.IPv4RouteSpec)
+	if s.Type == "blackhole" {
+		if s.Device != "" || meaningful(child(r.node, "deviceFrom")) || s.Gateway != "" || meaningful(child(r.node, "gatewayFrom")) || s.PreferredSource != "" {
+			c.reject(r, "type", "invalid_value", "blackhole routes have no next hop or preferred source")
+			return
+		}
+		c.route(r, network.Route{Blackhole: true, Destination: s.Destination, Metric: s.Metric}, 4, true)
+		return
+	}
 	if s.Type != "" && s.Type != "unicast" {
-		c.reject(r, "type", "unsupported_semantics", "native routes currently implement unicast only")
+		c.reject(r, "type", "invalid_value", "route type must be unicast or blackhole")
+		return
 	}
 	if meaningful(child(r.node, "deviceFrom")) {
 		if s.Device != "" {
@@ -336,7 +348,7 @@ func (c *compiler) ipv4Route(r resource) {
 	if s.PreferredSource != "" {
 		c.reject(r, "preferredSource", "unsupported_semantics", "native routes do not yet set RTA_PREFSRC")
 	}
-	c.route(r, s.Destination, s.Gateway, s.Device, s.Metric, 4, true)
+	c.route(r, network.Route{Destination: s.Destination, Gateway: s.Gateway, Interface: s.Device, Metric: s.Metric}, 4, true)
 }
 
 func (c *compiler) sysctl(r resource) {

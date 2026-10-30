@@ -65,7 +65,11 @@ func validateRoutes(routes []Route) error {
 				}
 			}
 		}
-		if len(r.NextHops) == 0 {
+		if r.Blackhole {
+			if r.Gateway != "" || r.Interface != "" || len(r.NextHops) != 0 || r.PreferredSource != "" {
+				add("route %s: blackhole routes have no next hop or preferred source", r.Destination)
+			}
+		} else if len(r.NextHops) == 0 {
 			validateHop(r.Gateway, r.Interface)
 		} else {
 			if r.Gateway != "" || r.Interface != "" {
@@ -142,7 +146,7 @@ func normalizeRoute(r Route) Route {
 // Protocol authority can renew without replacing an unchanged kernel route.
 func sameKernelRoute(a, b Route) bool {
 	a, b = normalizeRoute(a), normalizeRoute(b)
-	return a.PreferredSource == b.PreferredSource && a.Destination == b.Destination && a.Gateway == b.Gateway && a.Interface == b.Interface && a.Metric == b.Metric && a.Table == b.Table && slices.Equal(a.NextHops, b.NextHops)
+	return a.Blackhole == b.Blackhole && a.PreferredSource == b.PreferredSource && a.Destination == b.Destination && a.Gateway == b.Gateway && a.Interface == b.Interface && a.Metric == b.Metric && a.Table == b.Table && slices.Equal(a.NextHops, b.NextHops)
 }
 
 func routeUsesInterface(r Route, name string) bool {

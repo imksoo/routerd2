@@ -145,7 +145,7 @@ func decodeNativeRoute(raw []byte, names map[int]string, now routeClock) (RouteS
 	out.Advanced = out.Advanced || advanced
 	// IPv6 always dumps universe scope; IPv4 preserves the configured scope.
 	expectedScope := uint8(unix.RT_SCOPE_UNIVERSE)
-	if h.Family == unix.AF_INET && len(r.Gw) == 0 {
+	if h.Family == unix.AF_INET && h.Type == unix.RTN_UNICAST && len(r.Gw) == 0 {
 		expectedScope = unix.RT_SCOPE_LINK
 		for _, next := range r.MultiPath {
 			if len(next.Gw) != 0 {
