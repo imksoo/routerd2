@@ -354,8 +354,11 @@ func (c *compiler) ipv4Route(r resource) {
 func (c *compiler) sysctl(r resource) {
 	c.allow(r, "key", "value", "expectedValue", "compare", "runtime", "persistent", "optional")
 	s := r.Spec.(api.SysctlSpec)
-	if s.Persistent || s.Optional || s.Runtime != nil && !*s.Runtime {
-		c.reject(r, "", "unsupported_semantics", "only required runtime forwarding sysctls are represented; persistent host files and optional application are not")
+	if s.Persistent {
+		c.note(r, "Persistence is supplied by the committed native configuration and reapplied by the network worker at product startup; no host sysctl.d file is created. Removal restores the value saved before native ownership.")
+	}
+	if s.Optional || s.Runtime != nil && !*s.Runtime {
+		c.reject(r, "", "unsupported_semantics", "native network settings require runtime application; optional or runtime-disabled application is not represented")
 	}
 	if s.Compare != "" && s.Compare != "exact" || s.ExpectedValue != "" && s.ExpectedValue != s.Value {
 		c.reject(r, "compare", "unsupported_semantics", "native forwarding does not implement non-exact observed-value policies")
@@ -398,7 +401,7 @@ func (c *compiler) sysctl(r resource) {
 	case "net.ipv6.conf.all.forwarding":
 		target = &c.document.Network.Forwarding.IPv6
 	default:
-		c.reject(r, "key", "unsupported_semantics", "only net.ipv4.ip_forward and net.ipv6.conf.all.forwarding have native ownership")
+		c.reject(r, "key", "unsupported_semantics", "this sysctl has no native network owner")
 		return
 	}
 	if *target != nil {

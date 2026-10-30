@@ -85,6 +85,8 @@
 
 ## 現在の状況
 
+- `persistent-sysctl-ba46e40`: homert両機の永続conntrack設定を実CLIで取り込み、隔離Linux名前空間の実製品で設定確定・通信適用プロセス再起動・製品全体再起動からの再適用・撤去時の元値復元が成功。空の初期設定より保存済み設定が優先されたことを確認。カーネル初期値への戻しは隔離試験内の明示操作であり、物理再起動やHA通信の受入ではない。証跡は `dist/sysctl-acceptance/`。
+
 - `local-redirect-native78`: 実製品内DNSでA/AAAA宛先集合を更新し、両IP/TCPUDPの該当・非該当、集合変更、全daemon再起動、撤去復帰が終了0。
   製品health成功後に通信を開始した静的端末の局所試験。起動直後の集合未解決中のWAN流出を修正済みとは扱わず、起動前からの自動取得・最初のDNSを次に確認する。
   全make check/Race/vet/両architecture build/署名六ELFは終了0。全homert通信・運用の代替とHA timeoutは未受入。
