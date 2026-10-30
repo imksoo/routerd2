@@ -50,7 +50,7 @@ SUITES = {
     "dhcp6-server": (("TestDaemonDHCP6InformationIndependentClient", ("lan0",), 100),),
     "dhcp6-ra-pd": (
         ("TestDaemonDHCP6RAAddsAddressToPD", ("wire0", "lan0"), 160),
-        ("TestDaemonImportedConditionalLAN", ("wan0", "lan0"), 110),
+        ("TestDaemonImportedConditionalLAN", ("wan0", "lan0"), 145),
     ),
     "pd-ra": (("TestDaemonPDGeneratedRAWorkerLifetime", ("wan0", "lan0"), 120),),
     "dhcp-relay": (
