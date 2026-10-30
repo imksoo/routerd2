@@ -485,7 +485,7 @@ func (d *daemon) resolve(listener int, req *dns.Msg) (resolveResult, error) {
 				return result, fmt.Errorf("DNS source %q: DNSSEC validation failed", result.Upstream)
 			}
 			if config.Spec.Cache.Enabled {
-				d.cacheSet(cacheKey, out, dnsMessageTTL(&resp, config.Spec.Cache), config.Spec.Cache.MaxEntries, generation)
+				d.cacheSet(cacheKey, out, dnsMessageTTL(&resp, question.Qtype, config.Spec.Cache), config.Spec.Cache.MaxEntries, generation)
 			}
 			return resolveResult{Response: &resp, Upstream: sourceName(source.Spec), ResponseCode: dns.RcodeToString[resp.Rcode]}, nil
 		}

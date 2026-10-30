@@ -229,13 +229,13 @@ func TestMinimumRRAndNegativeSOATTL(t *testing.T) {
 	second := mdns.Copy(m.Answer[0])
 	second.Header().Ttl = 7
 	m.Answer = append(m.Answer, second)
-	if got := dnsMessageTTL(m, api.DNSResolverCacheSpec{}); got != 7*time.Second {
+	if got := dnsMessageTTL(m, mdns.TypeA, api.DNSResolverCacheSpec{}); got != 7*time.Second {
 		t.Fatal(got)
 	}
-	m.Answer = nil
+	m.Answer = []mdns.RR{&mdns.CNAME{Hdr: mdns.RR_Header{Name: "cached.example.", Rrtype: mdns.TypeCNAME, Class: mdns.ClassINET, Ttl: 120}, Target: "absent.example."}}
 	m.Rcode = mdns.RcodeNameError
 	m.Ns = []mdns.RR{&mdns.SOA{Hdr: mdns.RR_Header{Name: "example.", Rrtype: mdns.TypeSOA, Class: mdns.ClassINET, Ttl: 60}, Minttl: 7}}
-	if got := dnsMessageTTL(m, api.DNSResolverCacheSpec{NegativeTTL: "30s"}); got != 7*time.Second {
+	if got := dnsMessageTTL(m, mdns.TypeA, api.DNSResolverCacheSpec{MinTTL: "60s", NegativeTTL: "30s"}); got != 7*time.Second {
 		t.Fatal(got)
 	}
 }
@@ -282,3 +282,14 @@ func TestModuleRejectsPathCollisionAndUnownedLeaseFile(t *testing.T) {
 }
 
 func discardDNSObservation(context.Context, dnsconfig.Snapshot) error { return nil }
+
+func TestDNSCNAMEQuestionKeepsPositiveTTL(t *testing.T) {
+	q := new(mdns.Msg)
+	q.SetQuestion("alias.example.", mdns.TypeCNAME)
+	m := new(mdns.Msg)
+	m.SetReply(q)
+	m.Answer = []mdns.RR{&mdns.CNAME{Hdr: mdns.RR_Header{Name: "alias.example.", Rrtype: mdns.TypeCNAME, Class: mdns.ClassINET, Ttl: 7}, Target: "target.example."}}
+	if got := dnsMessageTTL(m, mdns.TypeCNAME, api.DNSResolverCacheSpec{MinTTL: "60s", NegativeTTL: "30s"}); got != time.Minute {
+		t.Fatal(got)
+	}
+}

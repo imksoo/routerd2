@@ -198,3 +198,11 @@ It verifies retained rows and continuing DNS/forwarding during that failure,
 recovery, resolver restart, and removal of the retention policy. Temporary
 stages are removed after success. This is protocol/OS acceptance, not long-run
 storage-load or physical-device qualification.
+
+Negative cache lifetime also applies when a CNAME answer leads to NXDOMAIN or
+has no record of the requested type. A CNAME query that receives a CNAME is
+positive; referrals remain separate (RFC 2308 sections 2.1 and 2.2).
+The existing negative-cache communication check uses independent dnsmasq and
+dig to exercise both a missing name and an IPv6-only alias target acquiring
+an IPv4 address. Both resolver stages must return the new address after the
+configured 30-second negative lifetime, retaining the 60-second positive minimum.

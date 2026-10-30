@@ -403,9 +403,29 @@ func dnsCacheKey(localAddr string, req *dns.Msg) string {
 	return fmt.Sprintf("%s|%x", localAddr, sum)
 }
 
-func dnsMessageTTL(msg *dns.Msg, spec api.DNSResolverCacheSpec) time.Duration {
+func dnsMessageTTL(msg *dns.Msg, qtype uint16, spec api.DNSResolverCacheSpec) time.Duration {
 	if msg == nil || msg.Truncated || (msg.Rcode != dns.RcodeSuccess && msg.Rcode != dns.RcodeNameError) {
 		return 0
+	}
+	// A CNAME can accompany NXDOMAIN or NODATA. Its presence does not
+	// answer the requested type (RFC 2308 sections 2.1 and 2.2).
+	negative := msg.Rcode == dns.RcodeNameError
+	if !negative {
+		answered := false
+		for _, rr := range msg.Answer {
+			if qtype == dns.TypeANY || rr.Header().Rrtype == qtype {
+				answered = true
+				break
+			}
+		}
+		if !answered {
+			var soa, referral bool
+			for _, rr := range msg.Ns {
+				soa = soa || rr.Header().Rrtype == dns.TypeSOA
+				referral = referral || rr.Header().Rrtype == dns.TypeNS
+			}
+			negative = soa || !referral
+		}
 	}
 	ttl, found := uint32(60), false
 	for _, section := range [][]dns.RR{msg.Answer, msg.Ns, msg.Extra} {
@@ -414,7 +434,7 @@ func dnsMessageTTL(msg *dns.Msg, spec api.DNSResolverCacheSpec) time.Duration {
 				continue
 			}
 			candidate := rr.Header().Ttl
-			if len(msg.Answer) == 0 {
+			if negative {
 				if soa, ok := rr.(*dns.SOA); ok {
 					candidate = min(candidate, soa.Minttl)
 				}
@@ -425,7 +445,7 @@ func dnsMessageTTL(msg *dns.Msg, spec api.DNSResolverCacheSpec) time.Duration {
 		}
 	}
 	out := time.Duration(ttl) * time.Second
-	if len(msg.Answer) == 0 && spec.NegativeTTL != "" {
+	if negative && spec.NegativeTTL != "" {
 		if negative, err := time.ParseDuration(spec.NegativeTTL); err == nil {
 			if !found || negative < out {
 				out = negative
@@ -433,7 +453,7 @@ func dnsMessageTTL(msg *dns.Msg, spec api.DNSResolverCacheSpec) time.Duration {
 		}
 	}
 	// The positive-answer minimum must not extend the negative cache lifetime.
-	if len(msg.Answer) > 0 && spec.MinTTL != "" {
+	if !negative && spec.MinTTL != "" {
 		if minimum, err := time.ParseDuration(spec.MinTTL); err == nil && out < minimum {
 			out = minimum
 		}

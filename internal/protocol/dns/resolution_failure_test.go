@@ -201,7 +201,7 @@ func TestDNSMessageTTLDoesNotCacheErrorResponses(t *testing.T) {
 	for _, rcode := range []int{dns.RcodeServerFailure, dns.RcodeFormatError, dns.RcodeRefused, dns.RcodeNotImplemented} {
 		msg := new(dns.Msg)
 		msg.SetRcode(failureTestRequest(), rcode)
-		if ttl := dnsMessageTTL(msg, cache); ttl != 0 {
+		if ttl := dnsMessageTTL(msg, dns.TypeA, cache); ttl != 0 {
 			t.Errorf("rcode %d cached for %v", rcode, ttl)
 		}
 	}
