@@ -6,6 +6,7 @@ Headscale/Tailscale peers below dist/peer-env/tailscale. No host network or DNS
 settings are used. Peer credentials, logs and captures are temporary.
 """
 import copy
+import html
 import json
 import ipaddress
 import os
@@ -16,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from urllib.parse import quote
 
 PEERS = Path(__file__).resolve().parents[1] / "dist/peer-env/tailscale"
 PRODUCT = Path(__file__).resolve().parents[1] / "dist/bin"
@@ -120,6 +122,18 @@ def peer(stage, homert=False):
     def observation():
         instances = product_api("control.sock", "/v1/services")["instances"]
         return next((x.get("snapshot", {}) for x in instances if x["name"] == module), {})
+
+    def console_status(expected, values=(), selected=True):
+        url = "http://10.42.0.1:8088/ops/vpn"
+        if selected:
+            url += "?service=" + quote(module, safe="")
+        page = html.unescape(run(inside("ts-lan", ["curl", "--max-time", "3", "-fsS", url])))
+        assert expected in page, "VPN console did not show the observed state"
+        for value in values:
+            assert value in page, "VPN console omitted an observed address, peer or advertised prefix"
+        for private in (auth["key"], str(authfile), "https://control.test", "tskey-", "/register/"):
+            assert private not in page, "VPN console exposed private enrollment data"
+        return page
 
     def pingable(host):
         return subprocess.run(inside("ts-b", ["ping", "-c", "1", "-W", "1", host]), capture_output=True).returncode == 0
@@ -261,6 +275,7 @@ def peer(stage, homert=False):
         firewall = migrated["network"]["firewall"]
         # New LAN DNS listener: authorize only its declared transport/port.
         firewall["input"]["rules"] += [{"match": {"in_interface": "lan0", "protocol": protocol, "destination_ports": [{"start": 53}]}, "action": "accept"} for protocol in ("udp", "tcp")]
+        firewall["input"]["rules"].append({"match": {"in_interface": "lan0", "protocol": "tcp", "destination_ports": [{"start": 8088}]}, "action": "accept"})
         firewall["input"]["rules"] += [{"match": {"in_interface": "tailscale0", "protocol": protocol, "destination_ports": [{"start": port}]}, "action": "accept"} for protocol, port in (("tcp", 18080), ("udp", 18081))]
         firewall["forward"] = [{"from": "tailscale0", "to": "lan0"}, {"from": "tailscale0", "to": "uplink0"}, {"from": "lan0", "to": "tailscale0"}]
         module = "service." + imported["name"]
@@ -271,6 +286,7 @@ def peer(stage, homert=False):
             {"id": "firewall", "firewall": firewall},
             {"id": "exit-nat", "nat": [{"type": "masquerade", "match": {"family": family, "in_interface": "tailscale0", "out_interface": "uplink0"}} for family in (4, 6)]},
             {"id": "gate", "service": {"name": "gate", "health": {"interface": "uplink0", "target": "192.0.2.1", "protocol": "tcp", "port": 8443, "interval_ms": 200, "timeout_ms": 100, "healthy_threshold": 1, "unhealthy_threshold": 1}}},
+            {"id": "console", "service": {"name": "console", "web_console": {"listen": "10.42.0.1:8088", "base_path": "/ops/", "title": "routerd2"}}},
             {"id": "tailnet", "when": {"fact": "service.gate.active", "max_age": "2s"}, "service": imported},
             {"id": "resolver", "service": {"name": "resolver", "dns": {"resource": "resolver", "spec": {
                 "listen": [{"name": "lan", "addresses": ["10.42.0.1"], "port": 53}],
@@ -296,7 +312,7 @@ def peer(stage, homert=False):
         configfile = stage / "product.json"
         configfile.write_text(json.dumps(document))
         boot = {"platform": "host", "config": str(configfile), "runtime_dir": str(stage / "product-run"), "state_dir": str(stage / "product-state"), "ssh": {"user": "admin"},
-                "workers": {role: str(PRODUCT / ("routerd-logging" if role == "logging" else "routerd-modules")) for role in ("logging", "network", "control", "management", "health", "tailscale", "dns")},
+                "workers": {role: str(PRODUCT / ("routerd-logging" if role == "logging" else "routerd-modules")) for role in ("logging", "network", "control", "management", "health", "tailscale", "dns", "web_console")},
                 "engines": {"tailscale": str(PRODUCT.parent / "tailscale-engine.tar")}}
         # Exercise the signed catalog's actual role/image/source binding. These
         # private input copies and extracted runtime are removed with the stage.
@@ -364,6 +380,10 @@ def peer(stage, homert=False):
         vendor_api(socket, "start", {"AuthKey": auth["key"], "UpdatePrefs": {"ControlURL": "https://control.test:8443", "Hostname": "independent-peer", "WantRunning": True, "CorpDNS": False, "RouteAll": True, "NetfilterMode": 0, "AdvertiseRoutes": ["10.43.0.0/24", "fd43::/64"]}})
         wait(lambda: vendor_api(socket, "status").get("BackendState") == "Running", 30)
         peer_ips = {ipaddress.ip_address(value).version: value for value in vendor_api(socket, "status")["TailscaleIPs"]}
+        wait(lambda: any(p.get("hostname") == "independent-peer" for p in observation().get("peers", [])))
+        wait(lambda: modules().get("service.console", {}).get("ready"))
+        console_status("稼働中・制御接続あり", original["addresses"] + list(peer_ips.values()) + advertised + ["independent-peer", "広告する経路は設定値"])
+        print("PASS independent LAN HTTP client read real Tailscale membership, addresses, peer and separate advertisement intent without enrollment data", flush=True)
         for address in ("10.43.0.1/32", "fd43::1/128"):
             run(inside("ts-b", ["ip", "addr", "add", address, "dev", "lo"]))
         nodes = json.loads(run(inside("ts-control", head + ["nodes", "list", "-o", "json"])))
@@ -441,12 +461,15 @@ def peer(stage, homert=False):
             site_traffic()
             exit_traffic()
             print("PASS homert: worker and whole PID1 restart retained identity, three LAN paths and both exit families without enrollment file", flush=True)
+            console_status("稼働中・制御接続あり", original["addresses"] + advertised)
+            print("PASS homert: VPN console retained actual membership and advertisement display after whole restart", flush=True)
             run(inside("ts-b", cli + ["set", "--exit-node="]))
             withdrawn = copy.deepcopy(saved)
             withdrawn["resources"] = [r for r in withdrawn["resources"] if r["id"] not in ("tailnet", "resolver")]
             product_api("control.sock", "/v1/config/commit", {"expected_revision": 2, "request_id": "homert-remove-tailnet", "config": withdrawn}, timeout=12)
             wait(lambda: not any(link["ifname"] == "tailscale0" for link in json.loads(run(inside("ts-a", ["ip", "-j", "link"])))))
             wait(lambda: not any(prefix in peer_routes() or route_present(prefix) for prefix in advertised), 30)
+            console_status("Tailscaleサービスは構成されていません", selected=False)
             for host in lan_hosts:
                 assert not pingable(host)
             product_api("control.sock", "/v1/config/commit", {"expected_revision": 3, "request_id": "homert-restore-tailnet", "config": saved}, timeout=12)
@@ -464,6 +487,8 @@ def peer(stage, homert=False):
                 for port in (18080, 18081):
                     assert host + "." + str(port) in packets
             assert Path("/etc/resolv.conf").read_text() == "nameserver 192.0.2.1\n"
+            console_status("稼働中・制御接続あり", original["addresses"] + advertised)
+            print("PASS homert: VPN console reflected removal and restored real observation", flush=True)
             print("PASS homert: config removal withdrew peer kernel routes and LAN access; reapply restored three paths and IPv4/IPv6 exit; packet capture checked", flush=True)
             return
         wait(lambda: pingable("10.42.0.2"))
@@ -560,6 +585,8 @@ def peer(stage, homert=False):
         wait(lambda: pingable("10.42.0.2"))
         traffic("10.42.0.2", peer_ips[4])
         print("PASS control and whole-daemon restart retained identity and real forwarding without an auth key file", flush=True)
+        console_status("稼働中・制御接続あり", original["addresses"] + advertised)
+        print("PASS VPN console showed retained membership after control and whole product restart", flush=True)
         # Stop control while the worker keeps running; the last applied
         # condition deadline must expire without a new control notification.
         authority = product_api("control.sock", "/v1/services/" + module + "/tailscale-input")["authority"]
@@ -593,6 +620,8 @@ def peer(stage, homert=False):
         wait(lambda: modules()[module]["generation"] > old["generation"] and observation().get("backend_state") == "NeedsLogin", 30)
         assert not pingable("10.42.0.2")
         print("PASS revoked node cannot restore old forwarding by restarting its worker without enrollment material", flush=True)
+        console_status("再認証が必要です")
+        print("PASS independent HTTP client saw revoked-node reauthentication state without an authentication URL", flush=True)
         # Reauthenticate an expired existing identity with a newly issued key.
         # No vendor state file is deleted, edited or replaced.
         renewed = json.loads(run(inside("ts-control", head + ["preauthkeys", "create", "--user", str(user["id"]), "--reusable", "-o", "json"])))
@@ -615,6 +644,8 @@ def peer(stage, homert=False):
         wait(dns_ready)
         resolve_peer()
         print("PASS new enrollment key restored the same identity, forwarding and LAN DNS", flush=True)
+        console_status("稼働中・制御接続あり", original["addresses"] + advertised)
+        print("PASS VPN console reflected real forwarding recovery after reauthentication", flush=True)
         for family,prefix in (("-4","10.43.0.0/24"),("-6","fd43::/64")):
             wait(lambda: any(route.get("dst")==prefix for route in json.loads(run(inside("ts-a",["ip",family,"-j","route","show","table","52"])))))
         traffic("10.43.0.1", "10.42.0.2", "ts-lan")
