@@ -38,9 +38,9 @@ func (c *compiler) firewallLog() network.PacketLog {
 			continue
 		}
 		logging = network.PacketLog{Group: uint16(group), CopyRange: uint32(s.Log.CopyRange), Every: uint32(s.Log.DropSampleRate)}
-		cfg := firewalllogconfig.Config{Group: uint16(group)}
+		cfg := firewalllogconfig.Config{Group: uint16(group), Retention: c.firewallRetention}
 		c.addService(r, serviceconfig.Service{Name: c.serviceName(r, "firewall-log"), FirewallLog: &cfg})
-		c.note(r, "Existing rule logs and policy deny logs retain NFLOG group, packet copy range and deny sampling. Collection writes structured packet records to the native local log owner; the old dedicated file is not recreated. The old logger ignored sinks and log.reject; native log forwarding remains independently configured. DPI classification and dedicated firewall history retention are not implied.")
+		c.note(r, "Existing rule logs and policy deny logs retain NFLOG group, packet copy range and deny sampling. Collection preserves structured records in the native log stream and the service-owned firewall history database; the legacy file and previous rows are not imported. The old logger ignored sinks and log.reject; native log forwarding remains independently configured. The declared firewallEvents retention policy applies to that history. DPI classification is not implied.")
 	}
 	return logging
 }

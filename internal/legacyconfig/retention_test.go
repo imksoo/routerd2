@@ -65,3 +65,34 @@ func TestDNSQueryRetentionImportsIntoTheResolverOwner(t *testing.T) {
 		t.Fatal("missing resolver")
 	}
 }
+
+func TestFirewallHistoryRetentionImportsIntoCollector(t *testing.T) {
+	source := string(fixture(t, "firewall")) + `
+    - apiVersion: firewall.routerd.net/v1alpha1
+      kind: FirewallEventLog
+      metadata: {name: packets}
+      spec: {enabled: true, path: /legacy/firewall.db, nflogGroup: 1}
+    - apiVersion: system.routerd.net/v1alpha1
+      kind: LogRetention
+      metadata: {name: packets}
+      spec: {retention: 7d, schedule: daily, vacuum: true, signals: [firewallEvents]}
+`
+	result, err := Compile([]byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, resource := range result.Document.Resources {
+		if resource.Service == nil || resource.Service.FirewallLog == nil {
+			continue
+		}
+		cfg := resource.Service.FirewallLog
+		found = true
+		if cfg.HistoryPath != "" || cfg.Retention == nil || cfg.Retention.MaxAgeSeconds != 604800 || cfg.Retention.IntervalSeconds != 86400 || !cfg.Retention.Vacuum {
+			t.Fatal(cfg)
+		}
+	}
+	if !found || result.Document.Retention != nil {
+		t.Fatal("firewall retention was not scoped to its collector")
+	}
+}

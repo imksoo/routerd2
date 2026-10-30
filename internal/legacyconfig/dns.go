@@ -153,8 +153,8 @@ func (c *compiler) dns() {
 			if zs.DNSSEC.Enabled || zs.DNSSEC.Mode != "" {
 				c.reject(zone, "dnssec", "unsupported_semantics", "native local zones do not sign or validate DNSSEC and will not assert unverified AD")
 			}
+			hasDHCP = hasDHCP || len(zs.DHCPDerived.Sources) > 0 || zs.DHCPDerived.LeaseFile != ""
 			zs.DHCPDerived = c.dnsDHCPDerived(zone, zs.DHCPDerived)
-			hasDHCP = hasDHCP || len(zs.DHCPDerived.Sources) > 0
 			for i := range zs.Records {
 				record := &zs.Records[i]
 				path := "records[" + strconv.Itoa(i) + "]"
@@ -222,10 +222,20 @@ func (c *compiler) dns() {
 
 func (c *compiler) dnsDHCPDerived(zone resource, spec api.DNSZoneDHCPDerivedSpec) api.DNSZoneDHCPDerivedSpec {
 	if spec.LeaseFile != "" {
-		c.reject(zone, "dhcpDerived.leaseFile", "unsupported_semantics", "legacy lease and sticky-host files cannot be imported as native source-owned records")
+		if len(spec.Sources) == 0 {
+			c.reject(zone, "dhcpDerived.leaseFile", "unsupported_semantics", "a legacy lease file without named DHCP producers cannot become source-owned observations")
+		} else {
+			c.note(zone, "The named DHCP producers replace the legacy leaseFile through the resolver's explicit finite-source policy. The old path is not read or retained; released, expired or unavailable bindings do not reappear from sticky-host files.")
+			spec.LeaseFile = ""
+		}
 	}
-	if spec.DDNS || spec.HostnameSuffix != "" {
-		c.reject(zone, "dhcpDerived", "unsupported_semantics", "DDNS and hostnameSuffix are not implemented by the pinned active resolver; the migration will not silently ignore or activate them")
+	if spec.DDNS {
+		// routerd's active resolver never consulted this flag or accepted DNS
+		// UPDATE. Preserve DHCP lease publication without inventing a DDNS service.
+		c.note(zone, "The old ddns flag did not enable DNS UPDATE or change DHCP lease publication. Named DHCP producers still publish A/PTR records; no DNS UPDATE listener is added.")
+	}
+	if spec.HostnameSuffix != "" {
+		c.reject(zone, "dhcpDerived.hostnameSuffix", "unsupported_semantics", "the deployed resolver does not implement hostnameSuffix; DHCP names use the declared DNS zone")
 	}
 	if len(spec.Sources) == 0 && spec.TTL != 0 {
 		c.reject(zone, "dhcpDerived.ttl", "unreferenced_resource", "DHCP-derived TTL requires a declared lease producer")
@@ -234,6 +244,18 @@ func (c *compiler) dnsDHCPDerived(zone resource, spec api.DNSZoneDHCPDerivedSpec
 	seen := map[string]bool{}
 	for i, ref := range spec.Sources {
 		path := "dhcpDerived.sources[" + strconv.Itoa(i) + "]"
+		if strings.HasPrefix(ref, "DHCPv6Server/") {
+			server := c.getRef(zone, path, ref, "DHCPv6Server")
+			if server == nil {
+				continue
+			}
+			if mode := server.Spec.(api.DHCPv6ServerSpec).Mode; mode != "" && mode != "stateless" {
+				c.reject(zone, path, "unsupported_semantics", "address-allocating DHCPv6 DNS sources are not implemented")
+				continue
+			}
+			c.note(zone, "The stateless DHCPv6 source allocates no address leases and therefore contributes no DHCP-derived A/AAAA/PTR records. SLAAC addresses are not inferred from this reference.")
+			continue
+		}
 		server := c.getRef(zone, path, ref, "DHCPv4Server")
 		if server == nil {
 			continue

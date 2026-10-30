@@ -16,6 +16,8 @@ import socket
 import subprocess
 import time
 
+import yaml
+
 
 def run(command, timeout=10, input=None):
     result = subprocess.run(command, input=input, capture_output=True, text=True, timeout=timeout)
@@ -139,7 +141,7 @@ def peer(stage):
             assert attributes['routerd.attributes'] == original['attributes'], attributes
             expected_time = int(datetime.datetime.fromisoformat(original['timestamp'].replace('Z', '+00:00')).timestamp()*1e9)
             assert abs(int(record['timeUnixNano'])-expected_time) < 2000, record
-            assert resource_attributes['service.name'] == 'routerd2-edge' and resource_attributes['service.namespace'] == 'acceptance', resource_attributes
+            assert resource_attributes['service.name'] == 'routerd2' and resource_attributes['service.namespace'] == 'acceptance', resource_attributes
             return True
         return False
 
@@ -175,7 +177,19 @@ def peer(stage):
         resources = [{'id': device, 'interface': {'name': device}} for device in ('wan0', 'lan0')]
         resources += [{'id': device+'-address', 'depends_on': [device], 'address': {'interface': device, 'cidr': address}} for device, address in [('wan0', '192.0.2.1/24'), ('lan0', '198.51.100.1/24')]]
         resources += [{'id': 'forward', 'forwarding': {'ipv4': True, 'ipv4_rp_filter': 0}}]
-        sink = {'id': 'log-forward', 'service': {'name': 'remote-log', 'otlp_logs': {'endpoint': 'http://192.0.2.2:4317', 'service_name': 'routerd2-edge', 'service_namespace': 'acceptance', 'min_level': 'info'}}}
+        legacy = {'apiVersion': 'routerd.net/v1alpha1', 'kind': 'Router', 'metadata': {'name': 'otlp-acceptance'}, 'spec': {'resources': [
+            {'apiVersion': 'observability.routerd.net/v1alpha1', 'kind': 'Telemetry', 'metadata': {'name': 'collector'}, 'spec': {
+                'otlp': {'endpoint': 'http://192.0.2.2:4317', 'insecure': True}, 'serviceNamespace': 'acceptance', 'signals': ['logs']}},
+            {'apiVersion': 'system.routerd.net/v1alpha1', 'kind': 'LogSink', 'metadata': {'name': 'otlp'}, 'spec': {
+                'type': 'otlp', 'minLevel': 'info', 'otlp': {'telemetryRef': 'Telemetry/collector'}}}]}}
+        (stage/'legacy.json').write_text(json.dumps(legacy))
+        migration = subprocess.run([str(stage/'routerd'), 'config', 'migrate', str(stage/'legacy.json')], capture_output=True, text=True, timeout=10)
+        assert migration.returncode == 0, migration.stderr
+        print('Migration review', migration.stderr, flush=True)
+        imported = yaml.safe_load(migration.stdout)
+        assert len(imported['resources']) == 1, 'legacy OTLP LogSink created an additional sender'
+        sink = imported['resources'][0]
+        sender = 'service.'+sink['service']['name']
         (stage/'config.json').write_text(json.dumps({'schema_version': 2, 'resources': resources+[sink]}))
         boot = {'platform': 'host', 'config': str(stage/'config.json'), 'runtime_dir': str(stage/'run'), 'state_dir': str(stage/'state'), 'workers': {role: str(stage/('routerd-logging' if role == 'logging' else 'routerd-modules')) for role in ('logging', 'network', 'control', 'management', 'otlp_logs')}}
         (stage/'boot.json').write_text(json.dumps(boot))
@@ -185,7 +199,7 @@ def peer(stage):
         wait(lambda: rows('echo.jsonl'), 'independent UDP echo receiver')
         start('otlp-router', [str(stage/'routerd'), 'boot', '--file', str(stage/'boot.json')], 'router')
         wait(lambda: (stage/'run/control.sock').exists(), 'control socket')
-        wait(lambda: api('control.sock', '/v1/config')['healthy'] and modules().get('service.remote-log', {}).get('ready'), 'configured otlp worker')
+        wait(lambda: api('control.sock', '/v1/config')['healthy'] and modules().get(sender, {}).get('ready'), 'configured otlp worker')
         print('Product status', json.dumps(api('supervisor.sock', '/v1/status')), flush=True)
         client = start('otlp-client', ['python3', '-I', str(stage/'peer.py'), '--mode', 'client', '--output', str(stage/'forwarding.jsonl')], 'client')
         wait(lambda: len(rows('forwarding.jsonl')) >= 3, 'independent routed UDP replies')
@@ -219,11 +233,11 @@ def peer(stage):
         wait(lambda: api('logging.sock', '/v1/status')['disk_written'] > before_disk, 'local disk records during receiver outage')
         wait(lambda: len(rows('forwarding.jsonl')) >= before_forwarding+10, 'forwarding during receiver outage')
         assert all(row['ok'] for row in rows('forwarding.jsonl'))
-        old = modules()['service.remote-log']
+        old = modules()[sender]
         sink['service']['otlp_logs']['attributes'] = {'phase': 'replacement-with-collector-offline'}
         replacement_started = time.monotonic()
         commit(resources+[sink], 'replace-otlp-while-collector-down')
-        wait(lambda: modules()['service.remote-log']['generation'] > old['generation'], 'replacement without collector')
+        wait(lambda: modules()[sender]['generation'] > old['generation'], 'replacement without collector')
         assert time.monotonic()-replacement_started < 6, 'collector outage blocked replacement'
         assert not Path('/proc/'+str(old['pid'])).exists(), 'old exporter survived replacement'
         print('PASS configuration replacement while collector stopped; old worker exited', flush=True)
@@ -244,10 +258,10 @@ def peer(stage):
         second.terminate()
         second.wait(timeout=5)
         record = restart_management()
-        old = modules()['service.remote-log']
+        old = modules()[sender]
         removed_at = time.monotonic()
         commit(resources, 'remove-otlp-destination')
-        wait(lambda: 'service.remote-log' not in modules(), 'otlp worker removed')
+        wait(lambda: sender not in modules(), 'otlp worker removed')
         assert time.monotonic()-removed_at < 6, 'collector outage blocked shutdown'
         assert not Path('/proc/'+str(old['pid'])).exists(), 'removed exporter survived shutdown'
         receiver(4318, 'receiver-b.jsonl')
@@ -260,6 +274,14 @@ def peer(stage):
         client.terminate()
         client.wait(timeout=5)
         print('PASS removal: later product records stayed local and UDP forwarding continued', flush=True)
+        identities = set()
+        for name in ('receiver-a.jsonl', 'receiver-b.jsonl'):
+            for _, exported in records(name):
+                attributes = {item['key']: value(item['value']) for item in exported.get('attributes', [])}
+                identity = (attributes['routerd.log.epoch'], attributes['routerd.log.sequence'])
+                assert identity not in identities, 'duplicate delivery from legacy LogSink and Telemetry'
+                identities.add(identity)
+        print('PASS imported Telemetry and legacy OTLP LogSink produced one delivery per received event', flush=True)
         print('Forwarding result', json.dumps({'replies': len(rows('forwarding.jsonl')), 'failures': sum(not row['ok'] for row in rows('forwarding.jsonl'))}), flush=True)
     except Exception:
         for name in ('router.log', 'receiver-a.jsonl', 'receiver-b.jsonl'):

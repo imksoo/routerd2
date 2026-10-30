@@ -295,6 +295,9 @@ func Validate(services []Service) error {
 		sockets[key] = s.Name
 		switch s.Role() {
 		case "firewall_log":
+			if s.FirewallLog.HistoryPath != "" {
+				return errors.New("firewall history path is managed below the routerd state directory")
+			}
 			if err := firewalllogconfig.Validate(*s.FirewallLog); err != nil {
 				return err
 			}
@@ -507,7 +510,9 @@ func (s Service) Instance(runtimeDir, stateDir string) (Instance, error) {
 	var err error
 	switch s.Role() {
 	case "firewall_log":
-		b, err = json.Marshal(*s.FirewallLog)
+		cfg := *s.FirewallLog
+		cfg.HistoryPath = filepath.Join(stateDir, "services", s.Name, "firewall-events.db")
+		b, err = json.Marshal(cfg)
 	case "otlp_logs":
 		b, err = json.Marshal(*s.OTLPLogs)
 	case "syslog":

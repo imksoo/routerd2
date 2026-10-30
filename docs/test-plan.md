@@ -237,6 +237,10 @@ DNS利用とIPv4/IPv6通信、自然DHCPv4更新、PD通常/強制交換と製�
 
 2026-10-30: UDP syslog、OTLP/gRPCログ、operational event保持、DNS query保持、NFLOG packet記録を実製品と独立receiver/clientで確認した。転送先障害・復旧、並行通信、元の保持記録、worker再起動と撤去を機能ごとに確認している。DNS保持/NFLOGは統合版native84でも通過。OTLP metrics/traces、残る履歴datasetとDPIは未完成。各機能の成功を全homertや通常factory全設定起動の受入へ読み替えない。現在版・範囲と未解決は[引き継ぎ](pve-codex-handoff.md)を読む。
 
+2026-10-30 追加: homertの実設定にある旧OTLP LogSinkとDHCP由来DNSの取込を修正した。旧OTLPSink.Emitは送信せず、Telemetryだけが送信を所有する。独立Collectorで送信先変更・停止復旧・重複なしと並行UDP通信を確認した。旧DDNS表記はDNS UPDATEを有効にしない。名前付きDHCP生成元と明示した有限リース方針から、端末の名前変更、A/PTR、実DHCPRELEASEによる消失を確認した。BusyBox 1.36.1の`-q -R`で解放パケットを送信せず失敗する試験前提を修正し、ACKで取得したアドレスとマスクだけを端末へ適用した。固定の返却アドレスや追加経路に依存しない。
+
+FirewallEventLogは旧logstore.RecordBatch/ApplyRetentionを再利用して、同じ収集処理が保存と期限削除を所有する。独立端末の両IP通信、TCPフラグ、製品再起動後の保持、実送信エラー中の期限切れ行保持・新規記録、復帰後の削除前UDP転送を確認した。試験では7日保持/日次巡回を8秒/1秒へ縮めた。7日間の経過、過負荷時の無損失保存、実機受入を示すものではない。新たな外部デーモンは追加していない。
+
 - API/CLI/UIから設定、表示、削除、認可、失敗応答、secret非表示を確認。表示された状態を実worker・kernel・通信と照合する。
 - 設定を再適用し重複なく収束すること、複数operator/旧revision/重複request/遅延通知、適用途中の中断を確認する。
   confirmed commitの期限切れ・明示確認・rollbackと、復旧中のkernel実状態を確認する。

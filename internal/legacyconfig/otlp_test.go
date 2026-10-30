@@ -11,6 +11,9 @@ import (
 func TestOTLPLogsImportPreservesDestinationAndRejectsMissingSignals(t *testing.T) {
 	result := compiled(t, "otlp")
 	got := service(t, result.Document, "otlp_logs").OTLPLogs
+	if len(result.Document.Resources) != 1 {
+		t.Fatalf("legacy OTLP LogSink created an additional sender: %+v", result.Document.Resources)
+	}
 	if got.Endpoint != "http://127.0.0.1:4317" || !got.Insecure || got.ServiceNamespace != "edge" || got.Attributes["site"] != "laboratory" {
 		t.Fatalf("collector intent changed: %+v", got)
 	}

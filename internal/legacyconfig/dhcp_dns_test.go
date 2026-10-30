@@ -35,7 +35,7 @@ func TestDHCPDNSReplacementRetainsStaticGraphAndScopedProducerIdentity(t *testin
 		t.Fatal("source reference did not join the compiled DHCP producer", dns.DNS)
 	}
 	zone := dns.DNS.Zones[0].Spec
-	if zone.Zone != "home.arpa" || zone.DHCPDerived.TTL != 45 || zone.TTL != 120 || len(zone.Records) != 1 || zone.Records[0].Hostname != "gateway" || len(zone.ReverseZones) != 1 {
+	if zone.DHCPDerived.LeaseFile != "" || !zone.DHCPDerived.DDNS || zone.Zone != "home.arpa" || zone.DHCPDerived.TTL != 45 || zone.TTL != 120 || len(zone.Records) != 1 || zone.Records[0].Hostname != "gateway" || len(zone.ReverseZones) != 1 {
 		t.Fatal("joining dynamic leases changed static records, reverse zones or TTLs", zone)
 	}
 	if dhcp.DHCPServer.Primary.Domain != "home.arpa" || dhcp.DHCPServer.Primary.Router != "192.0.2.1" || !reflect.DeepEqual(dhcp.DHCPServer.Primary.DNSServers, []string{"192.0.2.1"}) {
@@ -76,11 +76,7 @@ func TestDHCPDNSRejectsUnmigratedSourcesAndIgnoredFields(t *testing.T) {
 			return rs
 		}},
 		{"legacy-file", "dhcpDerived.leaseFile", "unsupported_semantics", func(rs []map[string]any) []map[string]any {
-			dhcpTestSpec(t, rs, "DNSZone")["dhcpDerived"].(map[string]any)["leaseFile"] = "/private/legacy.leases"
-			return rs
-		}},
-		{"ddns-ignored-upstream", "dhcpDerived", "unsupported_semantics", func(rs []map[string]any) []map[string]any {
-			dhcpTestSpec(t, rs, "DNSZone")["dhcpDerived"].(map[string]any)["ddns"] = true
+			dhcpTestSpec(t, rs, "DNSZone")["dhcpDerived"] = map[string]any{"leaseFile": "/private/legacy.leases"}
 			return rs
 		}},
 		{"suffix-ignored-upstream", "dhcpDerived", "unsupported_semantics", func(rs []map[string]any) []map[string]any {
