@@ -61,6 +61,8 @@ SUITES = {
         ("TestDaemonMigratedDHCPUnmanagedLAN", (), 75),
         ("TestDaemonMigratedDHCPLogs", (), 75),
         ("TestDaemonDHCPDNSAndOwnershipExpiry", (), 120),
+        ("TestDaemonDHCPDNSWithDelayedNetworkObservation", (), 120),
+        ("TestDaemonDHCPDNSWithDelayedStatePublication", (), 120),
         ("TestDaemonMigratedDHCPDNSAndOwnershipExpiry", (), 120),
     ),
     "dhcp4": (

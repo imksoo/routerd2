@@ -23,6 +23,7 @@ import (
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/legacyconfig"
 	"github.com/imksoo/routerd2/internal/network"
+	"github.com/imksoo/routerd2/internal/protocol/aftr"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
@@ -41,20 +42,37 @@ func TestDaemonDHCPDNSAndOwnershipExpiry(t *testing.T) {
 	if !isolateFixture(t, "TestDaemonDHCPDNSAndOwnershipExpiry") {
 		return
 	}
-	testDaemonDHCPDNSOwnership(t, false)
+	testDaemonDHCPDNSOwnership(t, false, "")
 }
 
 func TestDaemonMigratedDHCPDNSAndOwnershipExpiry(t *testing.T) {
 	if !isolateFixture(t, "TestDaemonMigratedDHCPDNSAndOwnershipExpiry") {
 		return
 	}
-	testDaemonDHCPDNSOwnership(t, true)
+	testDaemonDHCPDNSOwnership(t, true, "")
 }
 
-func testDaemonDHCPDNSOwnership(t *testing.T, migrated bool) {
+func TestDaemonDHCPDNSWithDelayedNetworkObservation(t *testing.T) {
+	if !isolateFixture(t, "TestDaemonDHCPDNSWithDelayedNetworkObservation") {
+		return
+	}
+	testDaemonDHCPDNSOwnership(t, false, "network")
+}
+
+func TestDaemonDHCPDNSWithDelayedStatePublication(t *testing.T) {
+	if !isolateFixture(t, "TestDaemonDHCPDNSWithDelayedStatePublication") {
+		return
+	}
+	testDaemonDHCPDNSOwnership(t, false, "control")
+}
+
+func testDaemonDHCPDNSOwnership(t *testing.T, migrated bool, pausedProcess string) {
 	t.Helper()
 	clientNS := fixturePeerNamespace(t, "lan0", "client0")
 	dnsPort := port(t)
+	if pausedProcess != "" {
+		dnsPort = 53
+	}
 	server := serviceconfig.DHCPServer{Interface: "lan0", ServerAddress: "192.0.2.1", Authoritative: true,
 		Primary: dhcpserverconfig.Scope{Prefix: "192.0.2.0/24", Start: "192.0.2.100", End: "192.0.2.102", Router: "192.0.2.1", LeaseSeconds: 60, Options: []dhcpserverconfig.Option{{Name: "dns-server", Value: "192.0.2.1"}}},
 	}
@@ -62,9 +80,17 @@ func testDaemonDHCPDNSOwnership(t *testing.T, migrated bool) {
 		Spec:  api.DNSResolverSpec{Listen: []api.DNSResolverListenSpec{{Name: "local", Addresses: []string{"127.0.0.1"}, Port: dnsPort}}, Sources: []api.DNSResolverSourceSpec{{Name: "zones", Kind: "zone", Match: []string{"lab.example", "2.0.192.in-addr.arpa"}, ZoneRef: []string{"DNSZone/lan"}}}},
 		Zones: []dnsconfig.RuntimeZone{{Name: "lan", Spec: api.DNSZoneSpec{Zone: "lab.example", Records: []api.DNSZoneRecordSpec{{Hostname: "router", IPv4: "192.0.2.1"}}, DHCPDerived: api.DNSZoneDHCPDerivedSpec{Sources: []string{"DHCPv4Server/leases"}}}}},
 	}
+	if pausedProcess != "" {
+		dns.Spec.Listen[0].Addresses = append(dns.Spec.Listen[0].Addresses, "192.0.2.1")
+	}
 	native := config.Native{
 		Network:  network.Desired{Interfaces: []network.Interface{{Name: "lan0", Addresses: []string{"192.0.2.1/24"}}}},
 		Services: []serviceconfig.Service{{Name: "leases", DHCPServer: &server}, {Name: "dns", DNS: &serviceconfig.DNS{RuntimeConfig: dns}}},
+	}
+	if pausedProcess == "network" {
+		native.Network.Interfaces[0].Addresses = append(native.Network.Interfaces[0].Addresses, "2001:db8:42::1/64")
+		defaultRoute := false
+		native.Services = append(native.Services, serviceconfig.Service{Name: "dslite", DSLite: &serviceconfig.DSLite{Interface: "lan0", Tunnel: "dslite0", LocalAddress: "2001:db8:42::1", Candidates: []string{"2001:db8:42::2"}, DefaultRoute: &defaultRoute}})
 	}
 	doc := config.FromNative(native)
 	if migrated {
@@ -266,6 +292,82 @@ func testDaemonDHCPDNSOwnership(t *testing.T, migrated bool) {
 	serverPID, dnsPID := pid(before, serverName), pid(before, dnsName)
 	if serverPID == 0 || dnsPID == 0 {
 		t.Fatalf("native service processes missing: %+v", before)
+	}
+	if mode := pausedProcess; mode != "" {
+		clientDNS := func(current clientLease) {
+			t.Helper()
+			for _, transport := range []string{"+notcp", "+tcp"} {
+				var output []byte
+				err := fixtureInsideNamespace(clientNS, func() error {
+					var err error
+					output, err = exec.Command("dig", "@"+current.DNS, "workstation.lab.example.", "A", "+short", "+time=1", "+tries=1", transport).CombinedOutput()
+					return err
+				})
+				if err != nil || strings.TrimSpace(string(output)) != current.CurrentAddress {
+					t.Fatalf("client failed to use DHCP-provided DNS over %s: %v %s", transport, err, output)
+				}
+			}
+		}
+		clientDNS(lease)
+		controlPID := pid(before, "control")
+		if controlPID == 0 {
+			t.Fatal("missing control process")
+		}
+		pausedPID := controlPID
+		if mode == "network" {
+			pausedPID = pid(before, "network")
+			var input aftr.Input
+			if err := f.control.Do(context.Background(), "GET", "/v1/services/service.dslite/aftr-input", nil, &input); err != nil || input.Source.Address == "" {
+				t.Fatal("AFTR source was not present before delay", err, input)
+			}
+		}
+		if err := syscall.Kill(pausedPID, syscall.SIGSTOP); err != nil {
+			t.Fatal(err)
+		}
+		defer syscall.Kill(pausedPID, syscall.SIGCONT)
+		started := time.Now()
+		// Resume independently so a failed client cannot leave a paused worker.
+		resumed := make(chan error, 1)
+		timer := time.AfterFunc(3250*time.Millisecond, func() {
+			resumed <- syscall.Kill(pausedPID, syscall.SIGCONT)
+		})
+		defer timer.Stop()
+		if mode == "network" {
+			pending := make(chan error, 1)
+			go func() {
+				var input aftr.Input
+				call, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+				defer cancel()
+				pending <- f.control.Do(call, "GET", "/v1/services/service.dslite/aftr-input", nil, &input)
+			}()
+			defer func() { t.Logf("AFTR observation result after network resume: %v", <-pending) }()
+		}
+		time.Sleep(2200 * time.Millisecond)
+		current := acquire("client0", "workstation", false)
+		clientDNS(current)
+		if current.CurrentAddress != lease.CurrentAddress {
+			t.Fatal("notification delay lost the existing DHCP binding")
+		}
+		select {
+		case <-resumed:
+			t.Fatal("client communication did not finish while the worker was paused")
+		default:
+		}
+		if err := <-resumed; err != nil {
+			t.Fatal(err)
+		}
+		wait(8*time.Second, func() bool {
+			return pid(status(), serverName) != 0 && pid(status(), "control") != 0
+		})
+		recovered := acquire("client0", "workstation", false)
+		clientDNS(recovered)
+		after := status()
+		t.Logf("%s pause=%s DHCP PID=%d->%d control PID=%d->%d DNS PID=%d->%d ACK address=%s preserved=%t", mode, time.Since(started), serverPID, pid(after, serverName), controlPID, pid(after, "control"), dnsPID, pid(after, dnsName), recovered.CurrentAddress, recovered.CurrentAddress == lease.CurrentAddress)
+		if pid(after, serverName) != serverPID || pid(after, dnsName) != dnsPID || pid(after, "control") != controlPID {
+			t.Fatal("notification delay restarted an unaffected DHCP, DNS or control process")
+		}
+		t.Log("client retained its lease and used DHCP-provided DNS over UDP and TCP during the delay and after recovery")
+		return
 	}
 	if err := syscall.Kill(serverPID, syscall.SIGSTOP); err != nil {
 		t.Fatal(err)

@@ -332,3 +332,16 @@ SSH転送17.077秒/通信7巡、prepare3.072秒/2巡で、その間も全構成�
 `bb38c6e`に実SSHの未使用release整理、更新・復旧画面とTailscaleの実状態表示を統合した。独立WSLの標準製品`f93be4c / wsl-operations-f93be4c`で、旧世代・使用中/予約中/前版の削除拒否と不要版削除後の格納、HTTP表示の実storeとの一致、三広告LANと両IP出口のTCP/UDP・再起動/撤去再適用を確認した。表示の状態変更検査は実再起動の成功へ拡張せず、上記全設定の旧実行版へ取り込まれた結果とも混同しない。
 
 実HGW長期試験では15:15:10.910241033 UTCにも`service.leases`の同じ状態通知timeoutが発生し、generation3が起動した。両端末への応答は再開し定期通信は続いているが、原因は未解明。稼働中controlへの10秒の外部perf観測では処理中のstackを取得し、cgroupのCPU制限/抑制とswapはなかった。過去の2秒の待ちを特定したものではない。自然PD更新を維持して観測し、状態通知のsupervisor照会・runtime mutex/投影・応答のどこが遅れるかを次に切り分ける。期限延長や無根拠なretryは追加していない。
+
+
+## 2026-10-31 00:54 JST: 実HGW自然更新を完走、通知待ちとDHCP終了の因果を修正
+
+`3944a77 / full-homert-event-native92`の標準実HGW7800秒が終了0。両IP HTTPSと取得DNSのUDP/TCPは683巡、自然PDのRenew/一致するReplyは1組で応答24.714ms。PD worker SIGKILL1.58秒、通常交換3.80秒、全daemon再起動4.65秒、TailscaleとInternet出口を含む両端末の通信が復旧した。DUID/IAID/prefixを保持し、終了時に元grantをReleaseせずゼロRAとkernel撤去を確認。専用namespaceとstageは削除済み、保持DUIDは削除しない。この走行中にDHCP担当が状態通知timeoutで二度再起動した事実は残す。
+
+全設定host診断では、DHCPの通知認証1.057ms・投影1.058msに対し共有mutex待ち1.004秒を観測し、DNS/Healthも同じロックに待っていた。`AFTRInput`が`network.SourceAddress`の実IPCをmutex保持中に呼んでいた。`bc3d2a7`は待機中にロックを解放し、戻った時点で設定と選出送信元を再確認する。設定/送信元が変われば古い結果を捨て、同じ送信元なら現時点の元期限・候補を使用する。独立の設定変更を待たせることもなくした。
+
+旧routerdの`chain.ensureDnsmasq`と`phase2.saveDHCPv4ServerStatuses`も本体を照合した。状態保存失敗は既存dnsmasqの終了理由ではなかった。新実装の`publish`失敗も警告にし、既存周期で新しい実観測を送る。配布の寿命は設定撤去・supervisor取消・engineの実故障が所有する。成功を捏造せず、受信側は届かなかった元観測を元5秒で失効させる。通知の元2秒、観測5秒、1秒周期を延長せず、追加retry/待機queueも作っていない。
+
+確定コード`bc3d2a7`の通常静的製品`aftr-observation-unlock-source-native92`三ELFをSHA256照合して独立WSLへ渡し、network担当とcontrol担当をそれぞれ3.25秒停止して確認した。DHCP PIDは各3402/3623のまま、DNS/controlも同じ。停止中に実BusyBox端末が既存割当を再取得し、取得したDNSへUDP/TCP問い合わせが成功、復帰後も成功。元の観測失効・lease保持・再起動復帰も通過した。旧版で同条件のDHCP PID変更を先に実再現しており、単に新しい期待値へ変えた試験ではない。恒久回帰2件は既存`dhcp_dns_test.go`と`make check-dhcp-dns`へ追加する。
+
+rootでも既存DHCP/DNS5件、実AFTR解決/期限、関連Race36.785秒、全vet、amd64/arm64の静的六ELFと署名catalog/publisherが成功した。診断ログは専用worktreeと診断版だけに置き、製品mainへ持ち込まない。残る全設定hostのBGP/VRRP effects timeoutとTailscale中断を同じ修正の完了へ含めない。別の診断版で送信完了後の応答待ちとkernel適用時間を計測中。元リース自然更新の通常Alpine VMは変更せず継続している。

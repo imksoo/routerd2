@@ -11196,7 +11196,7 @@
     "physical_target_profile": "awaiting user target hardware/NIC and performance requirements; independent implementation and isolated VM tests continue",
     "validation_reporting": "Record current behavior, executed checks and untested scope concisely. Discard historical checkpoint ledgers as acceptance authority; no compatibility obligation to their code, APIs or formats.",
     "current_acceptance": {
-      "implementation_head": "74e4b3d",
+      "implementation_head": "bc3d2a7",
       "single_node_full_input_runtime": "full-homert-loopback-native92 / 8cc420d / native92 / network27",
       "normal_alpine_runtime": "Alpine3.24.3 Linux6.18.59-0-lts; isolated PVE KVM4CPU4096MiB; normal Make/APK image",
       "original_input_resources_per_node": 109,
@@ -11231,8 +11231,8 @@
       "two_node_limits": "Same TCP sequence space and NAT mapping retained. Losses occurred; TCP reply nearly reaches15s client deadline. Additional primary failure while rejoining backup BGP was ACTIVE/IDLE failed60s and remains unaccepted. Physical IX existing-flow synchronization is not declared by original intent.",
       "normal_alpine_copy_assertions": 0,
       "normal_alpine_effects_timeouts": 0,
-      "hgw_normal": "Previous same-protocol full-homert-event-native92, standard7800s isolated real-HGW run continues. Automatic clients, both-IP HTTPS/DNS, DoH/TS and WAN recovery0.96s passed. Natural PD renewal pending. DHCP service.leases generation1 exited14:06:51 UTC and generation2 exited15:15:10 UTC with services/state context deadline; subsequent generations resumed actual DHCPACK. Cause unresolved; not stable-runtime acceptance or full57 profile.",
-      "remaining": "Original LAN natural renewal; real-HGW PD renewal and state-publication timeout diagnosis; warming-backup fault and HA margin; remaining management acceptance and target deployment qualification; target hardware/NIC and k8s/pve/Cloud SAM; all remaining work packages.",
+      "hgw_normal": "3944a77 / full-homert-event-native92; standard7800s real-HGW run exited0 after683 periodic both-IP HTTPS/acquired UDP-TCP DNS rounds; natural PD Renew/Reply1, reply24.714ms; PD SIGKILL1.58s, graceful replacement3.80s, full daemon restart4.65s and Tailscale/Internet exit recovered. DHCP state-publication deadlines caused two unexpected lease-worker restarts; not a zero-restart run or full57 input.",
+      "remaining": "Original43200s LAN natural renewal; current full-HGW/normal-image acceptance after DHCP fix; remaining full-host BGP/VRRP effects latency and warming-backup fault/HA margin; remaining management and target deployment qualification; k8s/pve SAM enrollment/dynamic transport and Cloud SAM/all remaining work packages.",
       "full_profile_signed_update": {
         "base": "8cc420d / full-homert-loopback-native92",
         "candidate": "00969ca / full-homert-operations-native92",
@@ -11251,7 +11251,14 @@
           "result": "Full57 candidate actually executed and forwarded; stopping independent Health listener withheld confirmation. Failure persisted at2026-10-30T15:18:41.511483291Z, automatic reboot selected the known-good8cc420d release. Acquired DNS/IPv4IPv6 TCPUDP/special client/NTP/Tailscale/management and original configuration/DUID/NodeID/SSH identity recovered. Exit0."
         }
       },
-      "operations_integration": "bb38c6e integrated actual-SSH release pruning, read-only update/recovery page and actual Tailscale routing/exit/peer observations. Independent standard WSL product f93be4c / wsl-operations-f93be4c passed existing checks; not the source executed in the8cc420d->00969ca full-profile update trial."
+      "operations_integration": "bb38c6e integrated actual-SSH release pruning, read-only update/recovery page and actual Tailscale routing/exit/peer observations. Independent standard WSL product f93be4c / wsl-operations-f93be4c passed existing checks; not the source executed in the8cc420d->00969ca full-profile update trial.",
+      "dhcp_state_publication_fix": {
+        "commit": "bc3d2a7",
+        "runtime": "aftr-observation-unlock-source-native92",
+        "cause": "Full-host timing observed1.004s runtime mutex wait versus authentication1ms/projection1ms. AFTRInput held that mutex while awaiting network.SourceAddress. Unlock during RPC and recheck config/source after wait. Separately keep dnsmasq lifetime with configuration/supervisor rather than state-publication success, matching old routerd. Existing2s publication/5s observation deadlines and cadence unchanged.",
+        "independent_acceptance": "Exact three normal-build binary hashes matched in independent WSL. During separate3.25s network-worker and control-worker pauses, same DHCP/DNS/control PIDs persisted; BusyBox reacquired its actual lease and used learned DNS over UDP/TCP before resume and after recovery. Original observation expiry and lease/restart checks passed. Root existing5 DHCP/DNS fixtures and AFTR resolution/expiry passed; related Race36.785s, vet, both-arch static sixELF and signed catalog/publisher passed.",
+        "remaining": "Full-host combined57 profile still exhibited BGP/VRRP effects deadlines and interrupted Tailscale traffic; investigate independently. Current long Alpine original-lease cohort still executes8cc420d. New normal-image/real-HGW acceptance of this fix remains."
+      }
     }
   },
   "execution_order": [
