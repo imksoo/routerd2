@@ -274,3 +274,17 @@ rule, action, family/protocol/TCP flags, addresses/ports, interfaces and size.
 These are stored sampled events, not current rules or total traffic counts.
 An unavailable database or failed query is an HTTP error rather than empty
 history. The old stored event type and query code are reused directly.
+
+The firewall history path was accepted on 2026-10-30 22:12:44-22:13:04 JST
+using the standard `wsl-firewall-ffffd46` build (source `ffffd46`).
+`TestDaemonFirewallPacketLogs` completed in 14.55 seconds through the existing
+`daemon-tests.py firewall` runner. An independent HTTP client matched stored
+IPv4/IPv6 UDP drop/reject and TCP SYN observations by row ID and the source,
+action and time filters. The same UI retained records across whole-product
+restart and real archive-send failure, then reflected expiry only after archive
+recovery. The original eight-second retention and one-second maintenance period
+were unchanged. A six-row HTML response was saved and rendered at 1280x1400;
+Japanese labels and packet fields were legible without overlap. These are
+isolated Linux namespace results on WSL, not target hardware qualification or
+acceptance of the complete homert configuration. Evidence is in
+`dist/firewall-integrated/` (execution metadata, log and captured HTML).
