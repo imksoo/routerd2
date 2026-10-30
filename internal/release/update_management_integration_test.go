@@ -10,11 +10,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"testing"
 	"time"
@@ -47,7 +49,7 @@ func TestBuiltRuntimeSSHRollback(t *testing.T) {
 	}
 	digest := sha256.Sum256(pub)
 	releaseDir := filepath.Join(t.TempDir(), "releases")
-	root, err := release.Open(release.Options{Root: releaseDir, TrustedKeys: map[string]ed25519.PublicKey{hex.EncodeToString(digest[:]): pub}})
+	root, err := release.Open(release.Options{Root: releaseDir, TrustedKeys: map[string]ed25519.PublicKey{hex.EncodeToString(digest[:]): pub}, MaxStoredReleases: 3})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,13 +81,13 @@ func TestBuiltRuntimeSSHRollback(t *testing.T) {
 		roles = append(roles, release.RoleBinding{Role: role, Artifact: artifact})
 	}
 	sort.Slice(roles, func(i, j int) bool { return roles[i].Role < roles[j].Role })
-	stage := func(sequence uint64) release.Ref {
+	bundle := func(sequence uint64) *os.File {
 		t.Helper()
 		file, err := os.CreateTemp(t.TempDir(), "runtime-*.tar")
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer file.Close()
+		t.Cleanup(func() { file.Close() })
 		_, err = release.WriteBundle(ctx, file, release.BundleOptions{ReleaseID: id, Sequence: sequence, GOOS: "linux", GOARCH: runtime.GOARCH, BootABI: 1, WorkerABI: 5, Entrypoint: "routerd", Artifacts: artifacts, Roles: roles}, key, files)
 		if err != nil {
 			t.Fatal(err)
@@ -93,13 +95,18 @@ func TestBuiltRuntimeSSHRollback(t *testing.T) {
 		if _, err := file.Seek(0, 0); err != nil {
 			t.Fatal(err)
 		}
-		ref, err := root.Stage(ctx, file)
+		return file
+	}
+	stage := func(sequence uint64) release.Ref {
+		t.Helper()
+		ref, err := root.Stage(ctx, bundle(sequence))
 		if err != nil {
 			t.Fatal(err)
 		}
 		return ref
 	}
 	previous, current := stage(1), stage(2)
+	unused := stage(3)
 	state, err := root.Initialize(ctx, previous)
 	if err != nil {
 		t.Fatal(err)
@@ -242,5 +249,60 @@ func TestBuiltRuntimeSSHRollback(t *testing.T) {
 	if canceled.Pending != nil || canceled.Active == nil || *canceled.Active != current || canceled.ConfigHighWatermark != pending.ConfigHighWatermark {
 		t.Fatal("cancel changed active selection or reserved authority")
 	}
+	prune := func(request control.ReleasePruneRequest, wantFailure bool) release.CleanupResult {
+		t.Helper()
+		session, err := client.NewSession()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer session.Close()
+		raw, err := json.Marshal(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		session.Stdin = bytes.NewReader(raw)
+		var output, diagnostic bytes.Buffer
+		session.Stdout, session.Stderr = &output, &diagnostic
+		err = session.Run("update prune")
+		if wantFailure {
+			if err == nil || output.Len() != 0 {
+				t.Fatalf("refused prune reported success: %v %s", err, output.String())
+			}
+			return release.CleanupResult{}
+		}
+		if err != nil {
+			t.Fatalf("SSH prune: %v: %s", err, diagnostic.String())
+		}
+		var result release.CleanupResult
+		if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	// A bounded store must be recoverable through the same remote management
+	// path without deleting the running runtime or its rollback target.
+	nextBundle := bundle(4)
+	if _, err := root.Stage(ctx, nextBundle); !errors.Is(err, release.ErrCapacity) {
+		t.Fatalf("full runtime store: %v", err)
+	}
+	prune(control.ReleasePruneRequest{ExpectedGeneration: canceled.Generation - 1, ReleaseDigests: []string{unused.Digest}}, true)
+	for _, protected := range []release.Ref{current, previous} {
+		prune(control.ReleasePruneRequest{ExpectedGeneration: canceled.Generation, ReleaseDigests: []string{protected.Digest}}, true)
+	}
+	cleanup := prune(control.ReleasePruneRequest{ExpectedGeneration: canceled.Generation, ReleaseDigests: []string{unused.Digest}}, false)
+	if !slices.Equal(cleanup.RemovedReleases, []string{unused.Digest}) || len(cleanup.RemovedGenerations) == 0 {
+		t.Fatal("SSH prune did not report the removed unused runtime and old journal generations", cleanup)
+	}
+	afterCleanup := command("update status", nil, false)
+	if afterCleanup.Generation != canceled.Generation || afterCleanup.Active == nil || *afterCleanup.Active != current || afterCleanup.Previous == nil || *afterCleanup.Previous != previous || afterCleanup.HighWatermark != canceled.HighWatermark {
+		t.Fatal("cleanup changed the selected runtimes or rollback fence")
+	}
+	if _, err := nextBundle.Seek(0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := root.Stage(ctx, nextBundle); err != nil {
+		t.Fatal("explicit SSH cleanup did not free capacity for the next signed runtime", err)
+	}
+	t.Log("SSH prune: stale generation and current/previous runtimes refused; explicit unused runtime and old generations removed; unchanged selection/watermarks and next signed runtime staging succeeded")
 	t.Log("SSH rollback: verified previous product compiler accepted current configuration; stale revision/generation and duplicate rejected; active runtime/configuration unchanged; cancellation preserved watermarks")
 }

@@ -35,6 +35,11 @@ type ReleaseCancelRequest struct {
 	ExpectedGeneration uint64 `json:"expected_generation"`
 }
 
+type ReleasePruneRequest struct {
+	ExpectedGeneration uint64   `json:"expected_generation"`
+	ReleaseDigests     []string `json:"release_digests"`
+}
+
 func (e *Engine) releaseRoutes(parent *http.ServeMux) {
 	if e.releaseStore == nil {
 		parent.HandleFunc("/v1/releases/", func(w http.ResponseWriter, r *http.Request) {
@@ -168,6 +173,19 @@ func (e *Engine) releaseRoutes(parent *http.ServeMux) {
 			return
 		}
 		localapi.JSON(w, http.StatusOK, state)
+	})
+	mux.HandleFunc("POST /v1/releases/prune", func(w http.ResponseWriter, r *http.Request) {
+		var request ReleasePruneRequest
+		if err := localapi.Decode(w, r, &request); err != nil {
+			localapi.Fail(w, http.StatusBadRequest, err)
+			return
+		}
+		result, err := e.releaseStore.Prune(r.Context(), request.ExpectedGeneration, request.ReleaseDigests)
+		if err != nil {
+			releaseFailure(w, err)
+			return
+		}
+		localapi.JSON(w, http.StatusOK, result)
 	})
 }
 
