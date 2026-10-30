@@ -235,9 +235,6 @@ func (r *Runtime) pendingWithdrawalLocked(name string) bool {
 // waits. Supervisor status is the process authority; no second installed set
 // predicts whether a worker has actually stopped.
 func (r *Runtime) reconcileStep(ctx context.Context, ceiling map[string]supervisor.DynamicModule) (bool, error) {
-	if err := r.observeHostSources(ctx); err != nil {
-		return false, err
-	}
 	status, err := r.manager.Status(ctx)
 	r.mu.Lock()
 	r.installGuardStatusLocked(status, err)
@@ -286,7 +283,11 @@ func (r *Runtime) reconcileStep(ctx context.Context, ceiling map[string]supervis
 			changed = true
 		}
 	}
+	epoch := r.sourceEpoch
 	r.mu.Unlock()
+	if err := r.observeHostSources(ctx, epoch, p.network.Interfaces); err != nil {
+		return false, err
+	}
 	var sources map[string]bfdBinding
 	var recipients map[string]bfdRecipient
 	if changed {

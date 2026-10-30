@@ -11,46 +11,46 @@ import (
 	"github.com/imksoo/routerd2/internal/resourceprogram"
 )
 
-// The existing coordinator observes DAD on addresses in its acknowledged
-// projection. These are kernel observations, not a second address allocator.
+// The coordinator observes DAD for addresses in current intent. A failed apply
+// acknowledgement does not remove those candidates; the network owner checks
+// actual presence, ownership and DAD before any address can supply a route.
 // The network RPC runs outside mu; cutover discards the old source scope.
-func (r *Runtime) observeHostSources(ctx context.Context) error {
+func (r *Runtime) observeHostSources(ctx context.Context, epoch uint64, interfaces []network.Interface) error {
 	r.mu.Lock()
-	epoch := r.sourceEpoch
+	if epoch != r.sourceEpoch {
+		r.mu.Unlock()
+		return nil
+	}
 	if len(r.config.plan.HostRoutes) == 0 {
 		r.hostSources = nil
 		r.mu.Unlock()
 		return nil
 	}
 	candidates := make(map[string][]string)
-	if r.applied.network != nil {
-		for _, host := range r.config.plan.HostRoutes {
-			if _, seen := candidates[host.Route.Interface]; seen {
+	for _, host := range r.config.plan.HostRoutes {
+		if _, seen := candidates[host.Route.Interface]; seen {
+			continue
+		}
+		candidates[host.Route.Interface] = nil
+		for _, iface := range interfaces {
+			if iface.Name != host.Route.Interface {
 				continue
 			}
-			candidates[host.Route.Interface] = nil
-			for _, iface := range r.applied.network.Interfaces {
-				if iface.Name != host.Route.Interface {
-					continue
-				}
-				for _, cidr := range iface.Addresses {
-					prefix, _ := netip.ParsePrefix(cidr)
-					if prefix.IsValid() && prefix.Addr().Is6() && prefix.Addr().IsGlobalUnicast() {
-						candidates[iface.Name] = append(candidates[iface.Name], prefix.Addr().String())
-					}
+			for _, cidr := range iface.Addresses {
+				prefix, _ := netip.ParsePrefix(cidr)
+				if prefix.IsValid() && prefix.Addr().Is6() && prefix.Addr().IsGlobalUnicast() {
+					candidates[iface.Name] = append(candidates[iface.Name], prefix.Addr().String())
 				}
 			}
 		}
 	}
 	r.mu.Unlock()
 	observed := make(map[string]network.SourceObservation, len(candidates))
-	var observeErr error
 	for iface, addresses := range candidates {
 		for _, address := range addresses {
 			source, err := r.network.SourceAddress(ctx, iface, address)
 			if err != nil {
-				observeErr = fmt.Errorf("observe IPv6 host source on %s: %w", iface, err)
-				break
+				return fmt.Errorf("observe IPv6 host source on %s: %w", iface, err)
 			}
 			if sourceInstalled(iface, address, source, false) {
 				observed[iface] = source
@@ -71,7 +71,7 @@ func (r *Runtime) observeHostSources(ctx context.Context) error {
 		r.hostSources = observed
 	}
 	r.mu.Unlock()
-	return observeErr
+	return nil
 }
 
 func hostSourceDeadline(options network.AddressOptions, clock boottime.Clock) (lifetime.Deadline, bool) {
