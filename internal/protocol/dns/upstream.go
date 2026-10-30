@@ -182,7 +182,9 @@ func newUpstreamPool(spec api.DNSResolverSourceSpec, cfg upstreamPoolConfig) (*u
 	if len(spec.BootstrapResolver) != 0 || len(spec.BootstrapResolverFrom) != 0 {
 		p.resolver = &net.Resolver{PreferGo: true, Dial: p.dialBootstrap}
 	}
-	p.client = &http.Client{Transport: &http.Transport{DialContext: (&net.Dialer{Resolver: p.resolver, Control: interfaceControl(spec.ViaInterface)}).DialContext, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: cfg.RootCAs}, ForceAttemptHTTP2: true, MaxIdleConns: 32, MaxIdleConnsPerHost: 4, IdleConnTimeout: 30 * time.Second}}
+	// HTTP can keep a dial alive after its request expires. Bound the whole dial,
+	// including bootstrap resolution, so later queries can resolve afresh.
+	p.client = &http.Client{Transport: &http.Transport{DialContext: (&net.Dialer{Timeout: cfg.QueryTimeout, Resolver: p.resolver, Control: interfaceControl(spec.ViaInterface)}).DialContext, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: cfg.RootCAs}, ForceAttemptHTTP2: true, MaxIdleConns: 32, MaxIdleConnsPerHost: 4, IdleConnTimeout: 30 * time.Second}}
 	return p, nil
 }
 

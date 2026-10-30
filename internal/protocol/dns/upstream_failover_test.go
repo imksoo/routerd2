@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httptrace"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -420,6 +421,63 @@ func TestBootstrapResolverConcurrentSelection(t *testing.T) {
 	wg.Wait()
 	if firstCalls.Load() != 16 || secondCalls.Load() != 16 {
 		t.Fatalf("bootstrap selection counts=%d/%d, want 16/16", firstCalls.Load(), secondCalls.Load())
+	}
+}
+
+func TestDoHBootstrapTimeoutAllowsNextLookup(t *testing.T) {
+	var answerBootstrap atomic.Bool
+	bootstrap := failoverDualDNSServer(t, dns.HandlerFunc(func(w dns.ResponseWriter, query *dns.Msg) {
+		if !answerBootstrap.Load() {
+			return
+		}
+		response := new(dns.Msg)
+		response.SetReply(query)
+		if query.Question[0].Qtype == dns.TypeA {
+			response.Answer = []dns.RR{&dns.A{
+				Hdr: dns.RR_Header{Name: query.Question[0].Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
+				A:   net.ParseIP("127.0.0.1"),
+			}}
+		}
+		if err := w.WriteMsg(response); err != nil {
+			t.Errorf("write bootstrap reply: %v", err)
+		}
+	}))
+	server := failoverDoHServer(t, func(w http.ResponseWriter, _ *http.Request, query *dns.Msg) {
+		failoverWriteDNS(t, w, failoverSuccessfulReply(query))
+	})
+	_, port, err := net.SplitHostPort(strings.TrimPrefix(server.URL, "https://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	roots := x509.NewCertPool()
+	roots.AddCert(server.Certificate())
+	pool, err := newUpstreamPool(api.DNSResolverSourceSpec{
+		Upstreams:         []string{"https://bootstrap-timeout.test:" + port + "/dns-query"},
+		BootstrapResolver: []string{bootstrap},
+	}, upstreamPoolConfig{QueryTimeout: 100 * time.Millisecond, RootCAs: roots})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool.client.Transport.(*http.Transport).TLSClientConfig.ServerName = "example.com"
+	t.Cleanup(pool.client.CloseIdleConnections)
+	resolved := make(chan httptrace.DNSDoneInfo, 1)
+	ctx := httptrace.WithClientTrace(context.Background(), &httptrace.ClientTrace{
+		DNSDone: func(info httptrace.DNSDoneInfo) { resolved <- info },
+	})
+	if _, err := pool.Exchange(ctx, dnsProbeQuery(), nil); err == nil {
+		t.Fatal("unanswered bootstrap lookup succeeded")
+	}
+	select {
+	case result := <-resolved:
+		if result.Err == nil {
+			t.Fatal("unanswered bootstrap lookup resolved")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("watchdog: DoH connection kept resolving after its query timeout")
+	}
+	answerBootstrap.Store(true)
+	if _, err := pool.Exchange(context.Background(), dnsProbeQuery(), nil); err != nil {
+		t.Fatalf("query after bootstrap recovery: %v", err)
 	}
 }
 
