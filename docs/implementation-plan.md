@@ -1,3 +1,5 @@
+2026-10-30 14:50 JST: 隔離Linuxの全構成で取得DNS/両IP TCPUDP・二BGP・条件付きDNS24件・特殊DHCP・NTP問い合わせが成立。LAN→Tailscaleは製品の出口固定guardで誤破棄と確認し修正中。全daemon再起動、全設定VM起動、二台全構成は未受入。全34項目は未完了。[実行版と限界](pve-codex-handoff.md)。
+
 2026-10-30 13:46 JST: 固定native79の実HGW 7800秒・724巡、自然PD更新と全daemon再起動が終了0。別のnative80全設定512MiB/2CPU VMは起動失敗、route期限と適用/ACK遅延を調査中。全34項目の完了には数えない。[現状と範囲](pve-codex-handoff.md)。
 
 2026-10-30 12:38 JST native80統合候補: 二段DNSのVIP公開後の待受遅れを旧routerdのfreebind設計で解消。両DNS停止復旧・両方向切替・初回DNS/両IP新規通信・同一TCP/UDP対応が成立。独立UDPは175/985件失効、最大無応答4.543秒であり損失0ではない。全homert同時利用・全体再起動、旧3秒timeout、全34項目は未完了。[実行版と限界](pve-codex-handoff.md)。

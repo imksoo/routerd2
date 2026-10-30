@@ -227,7 +227,7 @@
         "internal/legacyconfig",
         "internal/compatibility (新設予定)"
       ],
-      "current_limit": "2026-10-30: full homert 512MiB/2CPU TCG appliance has VRRP/BGP effects timeouts, Tailscale5s socket timeout and control60s startup timeout. Four CPU comparison also failed. Network route lifetime expiry observed; circular lock not established. Distribution now includes nft_redir/nft_hash. NAT reduction and temporary application timing are under real-VM diagnosis; all34 completion and fixed deadline unmet."
+      "current_limit": "2026-10-30: isolated full-profile Linux with retention-integrated-native81 passed acquired DNS/dual-IP TCP+UDP, both BGP peers, 24 conditional DNS queries, special DHCP client and NTP queries. LAN-to-Tailscale failed: higher-priority table52 selects tailscale0, but global flow_path_guard dropped its SYN (1 packet/60 bytes). Whole-daemon restart pending. Separate 512MiB/2CPU TCG appliance startup remains failed; measured initial network apply4443ms includes27 saves/2755ms, later10777ms apply includes1637ms saves and firewall cancellation. No circular-lock conclusion or physical qualification."
     },
     {
       "id": "CORE-02",
@@ -448,7 +448,7 @@
       "title": "system resource と capability 要求",
       "milestone": "M2",
       "track": "platform",
-      "status": "planned",
+      "status": "in_progress",
       "scope": "baseline_parity",
       "risk": "medium",
       "depends_on": [
@@ -480,7 +480,10 @@
         "internal/boot",
         "internal/kmod",
         "internal/legacyconfig"
-      ]
+      ],
+      "implementation_notes": {
+        "persistent_sysctl": "b9ec90a: actual CLI import, commit, worker/whole-daemon restart and withdrawal restoration passed in isolated Linux; physical reboot and whole homert acceptance remain unqualified."
+      }
     },
     {
       "id": "SYS-02",
@@ -680,7 +683,8 @@
         "pd_dslite_single_path": "prefsrc-order-native71/journal17: declared PD-derived source needs no duplicate ds_lite policy. Native first/2s lookup/5s retry; literal AFTR has no added DNS dependency. Preserve original grants/DAD/sole writer. Explicit DNS listener source order is prepared once; removed per-query allowed map/all-source copy. Real wrong-source NXDOMAIN reproduced old permit-set order. Real HGW single path derived from actual PD/Information/LAN allocation/subnet1/WAN::21/128/MTU1454/RA/DHCP6; removes election conditions/VMAC, explicitly manages test links, uses unique test MAC/DUID plus fixture DHCP4/DNS/NAT/MSS/firewall/host policy and role-name binding. Not full homert. Full restart exposed kernel retaining default route while deleting its src when address removed: isolated OS reproduction confirmed; remove obsolete routes before addresses and reread after address/link effects, preserving ownership rejection. Fixed/learned/implicit host tests with whole restart passed. HGW90s/9 rounds/DNS/conditional isolation/IPv4IPv6HTTPS, PD SIGKILL1.51s/graceful3.83s/full restart3.9s, identity/prefix/withdrawal passed. Earlier graceful-restart IPv6 DNS timeout origin remains unconfirmed; not reproduced in fixed90s run. Additional fixed-version5s/restart run passed public Internet UDP DNS from automatic LAN client in both families after whole restart3.94s. Full make check/Race/vet, related4-packageRace, both CGO0 builds and signed sixELF passed. No natural renewal, long stability/full homert/physical acceptance.",
         "imported_bgp": "bgp-import-native72/journal17: adapt pinned controller BGP peer/global import inheritance, declared static advertisement union, export restrictions and GR into existing GoBGP worker/sole kernel writer. Real CLI import of public old-schema Router/BGPRouter/BGPPeer with independent FRR on TCP179 passed LAN advertisement, learned FIB route, client TCP/UDP, whole-product stop/withdrawal and restart/relearn/forwarding; WAN/LAN packets checked. FRR-only initial peer lacked interface/NHT state and rejected OPEN: confirmed capture/neighbor state; normal frr account and isolated Zebra ZAPI fixed peer setup, bgpd -n prevents peer kernel route writes. FRR/Zebra are not product engines. Full make check/Race/vet, both CGO0 builds and signed six ELF passed. IPv4 single peer, GR disabled; imported IPv6/VRF/RR/GR and full homert combination remain unaccepted. BFD/external-password/per-peer-community bindings remain rejected when unimplemented.",
         "original_egress_native76": "2026-10-30 JST: AFTR facts retain source lifetime rather than a one-second status query. Signed PID1 four-Linux-AFTR HA passed fresh IPv4/IPv6 and existing TCP/UDP; full homert/IX/physical two-WAN remains unaccepted.",
-        "blackhole_native77": "2026-10-30 JST: compared routerd phase2.go IPv4Route blackhole install/delete with actual saved homert02/03 10/8 metric20 intent. Existing network writer now owns RTN_BLACKHOLE, normalizes its universe scope and removes it through existing route ownership; no external engine. make check-blackhole passed real supervisor/control/network plus independent Linux LAN/WAN clients: TCP/UDP silent discard, unaffected other traffic, whole-daemon restart retention, LAN receipt/WAN escape0, more-specific route reachability, withdrawal recovery and foreign blackhole retention. Contract77/network journal19; disposable prerelease state recreated without migration. Related Race/vet/CGO0 amd64+arm64 build passed; signed sixELF check passed. Full homert import89 diagnostics remains rejected. HA effect timeout remains unresolved, IPv6 blackhole and physical target unqualified."
+        "blackhole_native77": "2026-10-30 JST: compared routerd phase2.go IPv4Route blackhole install/delete with actual saved homert02/03 10/8 metric20 intent. Existing network writer now owns RTN_BLACKHOLE, normalizes its universe scope and removes it through existing route ownership; no external engine. make check-blackhole passed real supervisor/control/network plus independent Linux LAN/WAN clients: TCP/UDP silent discard, unaffected other traffic, whole-daemon restart retention, LAN receipt/WAN escape0, more-specific route reachability, withdrawal recovery and foreign blackhole retention. Contract77/network journal19; disposable prerelease state recreated without migration. Related Race/vet/CGO0 amd64+arm64 build passed; signed sixELF check passed. Full homert import89 diagnostics remains rejected. HA effect timeout remains unresolved, IPv6 blackhole and physical target unqualified.",
+        "full_profile_failure": "2026-10-30 retention-integrated-native81: independent Tailscale peer-to-LAN TCP/UDP passed; LAN-to-peer SYN was dropped by global flow_path_guard despite higher-priority table52/tailscale0. Captured during-send counter1/60bytes and correct marked FIB. Fix must preserve WAN expiry isolation without overriding earlier route decisions; whole-profile restart and physical target pending."
       },
       "authority_validation": "2026-10-29 native-58/network journal15: carry each conditional PolicyRule original BOOTTIME authority to the writer; renew metadata without deleting a matching kernel rule and expire it independently while control is stopped. Real two-WAN Health/PBR failover/recovery, expiry/replacement/confirmed rollback and healthy multipath passed. Isolated staged-source make check/race/vet/static Linux amd64+arm64 builds passed; complete homert acceptance remains pending."
     },
@@ -1446,7 +1450,7 @@
       "title": "観測・retention・export・native DPI",
       "milestone": "M5",
       "track": "operations",
-      "status": "planned",
+      "status": "in_progress",
       "scope": "baseline_parity",
       "risk": "high",
       "depends_on": [
@@ -1485,7 +1489,11 @@
         "internal/observability (新設予定)",
         "internal/control",
         "packaging/alpine"
-      ]
+      ],
+      "implementation_notes": {
+        "log_export": "2945daa UDP syslog and874bc22 OTLP/gRPC logs use independent workers and actual independent receivers. Collector replacement/outage/recovery passed in isolated acceptance; metrics/traces and other surfaces remain incomplete.",
+        "event_retention": "d824c8a: integrated actual-product peer passed original-body before-delete archive, receiver route failure/recovery, protected current/pending state, control restart, and342 UDP replies/0 failures. Operational events only; six other requested historical datasets and native DPI remain unimplemented."
+      }
     },
     {
       "id": "EXT-01",
@@ -1588,7 +1596,8 @@
         "tags_and_shields": "native-43: 旧status/controller/renderを比較し、node/peerのDNS名・付与済みtagsと現在のtailnet設定を観測へ公開。実PID1/独立Headscale/公式peerでCLI importしたshieldsUp:trueによるhost/subnet両family新規TCP/UDP遮断、LAN発の新規通信と返信、confirmed rollback後の着信復旧を確認。personal keyの広告だけではtagが付かず、承認済みtagged key登録でserverと観測が一致し実転送した。要求とkey削除後も保存identityはserver付与tagsを保持し、独立peerのDNS名/管理者付与tagsも実観測と両family通信で確認。管理者失効後のkey無し再起動で転送/DNSは復活しない。初回control socket待機timeoutはDIST-01 selection_readsで旧版再現と原因修正・比較を確認した。",
         "combined_hgw": "2026-10-28 lan-reuse/native-56: signed PID1 independent Headscale0.29.6/official Tailscale1.104.2 suite passed. One actual HGW router then combined automatic WAN DHCPv4/RA/PD, LAN DHCPv4/SLAAC/DHCPv6 information/DNS/DS-Lite and Tailscale for75s. Advertised IPv4 LAN inbound, LAN-originated IPv4/IPv6 TCP/UDP and both-family Internet exit HTTPS/UDP DNS passed, including full-daemon restart with the same node identity. PD SIGKILL1.27s, graceful4.09s, whole-daemon4.06s restored client traffic. Dedicated peer/control underlay192.0.2.0/24 is fixed. Explicit LAN-to-tailnet IPv6 masquerade is an added fixture policy absent from observed homert intent; this is not identical-configuration replacement acceptance. Upstream excludes unadvertised local LAN destinations from exit filtering; packet/source comparison diagnosed initial IPv6 expectations. No inbound delegated-IPv6 LAN criterion was added. make check passed. The7800s combined run started19:44UTC and failed21:31:52UTC on a LAN A-query SERVFAIL before natural PD renewal.577 rounds and worker generations1 were observed before failure; cause remains undiagnosed. Next capture existing DNS worker status/events at failure.",
         "combined_hgw_current": "Combined HGW/Tailscale run failed after 48 minutes / 253 rounds with LAN-to-peer IPv4 timeout, before natural PD renewal. Reporting/storage timeouts also observed; cause and complete remedy remain unqualified. The independent basic-router 7800-second observation continues; its result cannot establish combined recovery.",
-        "reporting_failure": "2026-10-29 main f7a3adc: observation transport failure no longer terminates an engine before its original activation authority expires. No authority extension. appliance-reporting passed the existing independent Headscale/official Tailscale signed PID1 communication/restart/expiry/revoke suite. Does not establish resolution of the 48-minute combined HGW failure."
+        "reporting_failure": "2026-10-29 main f7a3adc: observation transport failure no longer terminates an engine before its original activation authority expires. No authority extension. appliance-reporting passed the existing independent Headscale/official Tailscale signed PID1 communication/restart/expiry/revoke suite. Does not establish resolution of the 48-minute combined HGW failure.",
+        "full_profile_failure": "2026-10-30 retention-integrated-native81: independent Tailscale peer-to-LAN TCP/UDP passed; LAN-to-peer SYN was dropped by global flow_path_guard despite higher-priority table52/tailscale0. Captured during-send counter1/60bytes and correct marked FIB. Fix must preserve WAN expiry isolation without overriding earlier route decisions; whole-profile restart and physical target pending."
       }
     },
     {

@@ -1,3 +1,15 @@
+## 2026-10-30 14:50 JST: 全構成Linuxの通信とTailscale誤破棄
+
+`d824c8a` / `retention-integrated-native81` を隔離Linuxの実supervisor/control/network/全workerで実行し、独立ISC・FRR二台・IX代替Linux・dnsmasq/dnsdist・chrony・Headscale/公式Tailscaleへ接続した。普通端末のDHCP取得値による最初のA/AAAA UDP/TCP、IPv4/IPv6 TCP/UDP、両FRRの4接頭辞への通信、条件付きDNS24件、特殊DHCP端末の取得gateway/自動DNSによるIX通信、配布NTP二台への問い合わせが通過。NTPはhost profileの`-x`でホスト時計を変更しない。ONU直結・物理NIC・時計補正の受入ではない。
+
+試験側の製品起動前NIC UPがOS SLAACを先行させたため、router側をDOWNで渡すよう修正した。IX対向に共通Internet宛先がなく循環した問題と、同じ試験名がIX DNS/製品経由RDNSSで異なる宛先を返した問題も、対向を修正した。resolver固定、IPv6無効化、製品のweight変更やNoDADは使わない。
+
+**製品不合格**: Tailscale peer→LANのTCP/UDPは通ったが、LAN→peerの新規TCP SYNがTUNへ届かない。実`ip route get ... mark 276`は優先table52/tailscale0を選ぶ一方、送信中の`flow_path_guard`が`ct mark 0x114; oifname != lan0`で1 packet/60 bytesを破棄した。旧routerdにはこのglobal guardはない。WAN経路失効時の誤転送防止を適切な経路所有へ直し、同じ全構成・全daemon再起動を再確認する。私有の短い結果は`/tmp/routerd-homert-host-result-summary.json`。全構成の受入完了とはしない。
+
+別の512MiB/2CPU/TCG VMは起動未完了。一時計測版`route-cost-trace-native81`で初回適用4443msのうち保存27回、encode901ms/write1854ms。次の適用は10777ms（保存2回、計1637ms）でfirewallのcontext cancellationになり、保存以外にも遅延が残る。計測コードは共有sourceから撤去済み。通常版9666562の関連Race/vet/両arch build・署名検査と、d824c8aの全`make check`・両arch build・署名検査は終了0。これらをVM起動の合格へ置き換えない。
+
+独立機能: OTLPログworker `874bc22`、ManagementAccess/CLI修正 `341c5cd`、履歴保持 `d824c8a` を統合。履歴保持は統合版実peerで保存先障害/復旧・control再起動・元記録照合、並行端末UDP342往復失敗0。実装対象はoperational eventのみで、DNS/flow等の別履歴は未実装。NAT/DHCP/PD同期取込 `b582270`/`29338cc` は既存二台試験で確認された接続を統合したが、この全設定二台では未受入。全34項目と固定期限達成は未完了。
+
 ## 2026-10-30 14:08 JST: NAT展開削除と実適用時間
 
 旧routerdの同一規則内の宛先prefix除外を取り込み、補集合の再帰展開を削除した。私有の同じhomert構成はNAT636件から26件。独立kernel peerとのIPv4/IPv6 TCPで、複数除外先への元送信元保持と撤去後のNAT復帰を確認。既存の実QEMU kernel検査全体（routes/ACL/NAT/DS-Lite/HA/RA期限）が38.12秒で終了0。初回は試験の戻り経路重複、次は試験全体45秒の時間切れであり合格には数えず、追加した通信を既存適用場面へまとめて不要な二回の適用を除去した。製品・試験の期限を延長していない。通常版の全`make check`（Race/vetを含む）とMake経路のCGO0 amd64/arm64ビルドが終了0。設定契約native81、network journal21。旧試作形式のreaderやmigrationは追加せず、使い捨てVM設定を再生成する。
