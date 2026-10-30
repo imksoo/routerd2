@@ -25,6 +25,7 @@ spec:
     spec:
       asn: 64512
       routerID: 192.0.2.1
+      communities: {send: standard, set: {out: ["64512:46248"]}}
       listen: {address: 192.0.2.1, port: 179}
       importPolicy: {allowedPrefixes: [203.0.113.0/24]}
       redistribute: {connected: {allowedPrefixes: [198.18.0.0/24]}}

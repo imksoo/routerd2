@@ -25,8 +25,11 @@ func (c *compiler) bgp() []resourceCondition {
 		if s.Backend != "" && s.Backend != "gobgp" {
 			c.reject(r, "backend", "unsupported_semantics", "BGP uses the bundled GoBGP worker")
 		}
-		if len(s.Communities.Accept) != 0 || len(s.Communities.Set.In) != 0 || s.Communities.Send != "" && s.Communities.Send != "both" {
-			c.reject(r, "communities", "unsupported_semantics", "community import transformations require explicit native policy; the worker sends both community families")
+		if len(s.Communities.Accept) != 0 || len(s.Communities.Set.In) != 0 || s.Communities.Send != "" && s.Communities.Send != "both" && s.Communities.Send != "standard" {
+			c.reject(r, "communities", "unsupported_semantics", "community send modes and import transformations require explicit native policy; the worker sends both community families")
+		}
+		if s.Communities.Send == "standard" {
+			c.note(r, "The routerd GoBGP backend sends both standard and extended communities even when communities.send is standard; this effective behavior is preserved.")
 		}
 		name := c.serviceName(r, "bgp")
 		global := bgpdaemon.AppliedGlobal{ASN: s.ASN, RouterID: s.RouterID, ListenPort: 179, Families: []string{"ipv4-unicast"}, UseMultiplePaths: true, ImportPolicy: bgpImport(s.ImportPolicy), GracefulRestart: c.bgpRestart(r, s.GracefulRestart, s.ConvergenceProfile)}

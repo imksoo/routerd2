@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -150,7 +151,7 @@ func daemonBGPWithFRR(t *testing.T, ipip, learned bool) {
 		if t.Failed() {
 			data, _ := os.ReadFile(filepath.Join(root, "frr.log"))
 			t.Logf("FRR: %s", data)
-			for _, command := range []string{"show interface", "show bgp neighbors"} {
+			for _, command := range []string{"show interface", "show bgp neighbors", "show bgp ipv4 unicast 198.18.0.0/24 json"} {
 				output, err := exec.Command("vtysh", "--vty_socket", root, "-d", "bgpd", "-c", command).CombinedOutput()
 				t.Logf("FRR %s: %s %v", command, output, err)
 			}
@@ -222,12 +223,26 @@ while True:
 		}
 	}
 	fixture := startFixtureDaemon(t, document)
+	// This is pve-rt-06's configured standard community. Inspect the
+	// independent receiver, not the product's configured or local RIB view.
 	show := func() (bool, bool) {
 		out, err := exec.Command("vtysh", "--vty_socket", root, "-d", "bgpd", "-c", "show bgp ipv4 unicast 198.18.0.0/24 json").Output()
 		var view struct {
-			Paths []json.RawMessage `json:"paths"`
+			Paths []struct {
+				Community struct {
+					List []string `json:"list"`
+				} `json:"community"`
+			} `json:"paths"`
 		}
 		valid := err == nil && json.Unmarshal(out, &view) == nil
+		if !learned && len(view.Paths) > 0 {
+			for _, path := range view.Paths {
+				if slices.Contains(path.Community.List, "64512:46248") {
+					return true, valid
+				}
+			}
+			return true, false
+		}
 		return len(view.Paths) > 0, valid
 	}
 	until(t, 25*time.Second, func() bool { present, valid := show(); return valid && present })
@@ -328,6 +343,9 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
 			lanCapture.count("198.18.0.2", "203.0.113.50", 6, 18080) > 0 &&
 			lanCapture.count("198.18.0.2", "203.0.113.50", 17, 18081) > 0
 	})
+	if !learned {
+		t.Log("imported communities.send=standard: independent FRR received 64512:46248 before and after daemon restart; LAN TCP and UDP passed")
+	}
 	if learned {
 		var instance runtimeplan.InstanceStatus
 		if err := fixture.control.Do(t.Context(), "GET", "/v1/services/"+dhcpModule, nil, &instance); err != nil {
