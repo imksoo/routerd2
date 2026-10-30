@@ -40,6 +40,7 @@ type exchange struct {
 	kind          byte
 	xid           uint32
 	started, next time.Time
+	sentAt        time.Time
 	timeout       time.Duration
 	attempts      int
 	offer         *message
@@ -163,6 +164,9 @@ func (c *client) transmit(conn *net.UDPConn, e *exchange, now time.Time) error {
 	}
 	if err := conn.SetWriteDeadline(time.Now().Add(time.Second)); err != nil {
 		return err
+	}
+	if e.attempts == 0 {
+		e.sentAt = time.Now()
 	}
 	if _, err := conn.WriteToUDP(c.packet(e, now), &net.UDPAddr{IP: net.ParseIP("ff02::1:2"), Port: 547, Zone: c.cfg.Interface}); err != nil {
 		return err
@@ -583,6 +587,14 @@ func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, updates <
 		return err
 	}
 	defer conn.Close()
+	defer func() {
+		outcome := "error"
+		if ctx.Err() != nil {
+			outcome = "cancelled"
+		}
+		c.recordExchange(ctx, c.lease, exchange{}, outcome)
+		c.recordExchange(ctx, c.info, exchange{}, outcome)
+	}()
 	clock, err = boottime.ReadForBoot(c.snapshot.BootID)
 	if err != nil {
 		return err
@@ -610,6 +622,7 @@ func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, updates <
 			return err
 		}
 		now = time.Unix(0, clock.BoottimeNanoseconds)
+		previousLease := c.lease
 		select {
 		case flags, open := <-updates:
 			if !open {
@@ -619,9 +632,20 @@ func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, updates <
 			}
 		default:
 		}
+		c.recordExchange(ctx, previousLease, c.lease, "superseded")
+		previousLease, previousInfo := c.lease, c.info
 		if err := c.advance(clock); err != nil {
 			return err
 		}
+		outcome := "timeout"
+		if previousLease.kind == solicit && c.lease.kind == request {
+			outcome = "reply"
+		}
+		if (previousLease.kind == renew || previousLease.kind == rebind) && c.lease.kind == solicit {
+			outcome = "expired"
+		}
+		c.recordExchange(ctx, previousLease, c.lease, outcome)
+		c.recordExchange(ctx, previousInfo, c.info, "superseded")
 		if cfg.RequestAddress {
 			failed, err := dadFailures(ctx, dadFD, ifi.Index, c.snapshot.Addresses, buf)
 			if err != nil {
@@ -638,9 +662,11 @@ func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, updates <
 					}
 					return false
 				})
+				previousLease := c.lease
 				if err := c.begin(decline, now); err != nil {
 					return err
 				}
+				c.recordExchange(ctx, previousLease, c.lease, "superseded")
 			}
 		}
 		if err := publish(); err != nil {
@@ -679,9 +705,19 @@ func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, updates <
 		if err != nil {
 			return err
 		}
+		previousLease, previousInfo = c.lease, c.info
 		if err := c.accept(m, clock); err != nil {
 			return err
 		}
+		outcome = "reply"
+		if (previousLease.kind == renew || previousLease.kind == rebind) && c.lease.kind == request {
+			outcome = "no_binding"
+		}
+		c.recordExchange(ctx, previousLease, c.lease, outcome)
+		if m.xid != previousInfo.xid {
+			outcome = "superseded"
+		}
+		c.recordExchange(ctx, previousInfo, c.info, outcome)
 	}
 }
 
