@@ -244,3 +244,21 @@ DoH対向のTLSとDNS応答は製品起動前に独立curlで確認した。製�
 同じ91実行物で元のDHCPv4リース43200秒/T1=21600秒を変えず22000秒の自然更新観測を開始したが、観測約154秒の取得resolverへのUDP DNS timeoutで終了1。自然更新前に停止しており、短時間の通信成立を安定稼働とは扱わない。captureは一interfaceあたり16MB×2本。失敗時はRA workerが同じIPv6 destination/table/metricの重複をHTTP422で拒否されて再起動を繰り返し、後にBGP/VRRPのeffects期限超過とVIP/PD側の不準備を観測した。因果は切り分け中で、二つの独立RA interfaceの扱いを旧routerdと実kernelに照合してから修正・再開する。両方の全入力による二台切替も未受入。
 
 mainは`8a85fdb`へ進めてpush済み（native92/network27、許可済modulesのみCGO1静的リンク、nDPI/接続開始時刻、更新受入手順）。単体全入力と失敗した自然更新観測の実行版は91で、92・通常appliance image・03側単体・二台停止/切替・物理ONU/NIC・全34項目へ合格を移さない。
+
+## 2026-10-30 21:35 JST: RA優先度とアドレス更新を修正、通常版の自然更新を再開
+
+main `93cc25e`へ`0e7012e`（RAポリシー・アドレス期限更新）と`1fb2dde`（通常ビルドの依存ソース取得位置）を統合・pushした。利用者の未コミット`AGENTS.md`追記10行は保持した。一時的な`DIAG`計測は製品コードから削除済み。mainの通信・取込・ビルド実装と`0e7012e`の差はなく、後続の管理画面の日本語表示修正は別端末で確認された範囲として区別する。
+
+実homert02の読取りで物理WANのRA経路metric100、WAN VMACは1024と確認した。取込は両方を1024へ固定していた。既存`ra_clients`ポリシーをIPv6 host-trafficの`EgressRoutePolicy`から生成するRA受信者にも接続し、applianceコピーで物理100/VMAC1024を明示した。元のIPv4 prefix/pool/除外やDUIDは変えていない。RA workerの経路重複422は解消した範囲で、後続の適用期限超過を同一原因で解消したとは扱わない。
+
+その後の実製品では、先行適用開始後に到着したBGP要求が約1.21秒待ち、次の適用約0.98秒も待って2秒期限を越えることを一時計測で確認した。システムコール追跡も付けた走行は遅延へ影響するため、性能や通信の合否には使わない。同一interfaceを各addressで再読取りし、期限更新の前後に個別同期保存していた処理を、一度のinterface観測・全更新予定の一括保存・完了または失敗時の保存へ変更した。既存のold/pending timerを維持し、新しい状態管理や再試行、期限延長は追加していない。
+
+計測ログあり・システムコール追跡なしの`diagnose-address-batch-native92`では、全57resourceの初回通信、製品全体再起動後のDNS/両IP/二FRR/IX/NTP/Tailscale、続く600秒20巡が終了0。再起動後の端末IPv6 DNS再取得と、そのIPv6 serverへのUDP/TCP DNSも含めた再成立は11.715秒、DNS19件失敗を記録した。最初の修正後走行は、端末がIPv6 DNSを再取得する前にfixtureが復旧と判定したため停止した。wire上のDNSなしRAを確認し、判定を実際の再取得とIPv6 DNS通信まで待つよう修正した。nameserverの比較はIP値で行う。これは自然DHCP更新の成功や通常版の長期安定性ではない。
+
+関連Race Detector、全`go vet`、通常`make build`/`make build-linux`、静的六ELFと署名・展開・公開処理の検査は終了0。既存の実kernel BOOTTIME address試験は6.65秒で、writerを閉じた間の自然失効と再起動時の元期限・foreign address保持を確認した。最初の非root user namespaceでは親directoryの所有権条件を満たさず、製品処理に入る前に停止した。rootで独立user/net namespaceへ入る同じ検査を再実行した。ソース取得のTLS timeoutはビルド失敗として分離し、固定ソース・noticeの取得をapplication COPY前へ移し、次回の通常ビルドで既存Docker layerの再利用を確認した。
+
+通常版`full-homert-address-native92`（native92/network27、計測コードなし）のSHA256は、`routerd=083446cec3802015b0beac32b1d576ed65b083e903433d73894cceda34099186`、`routerd-modules=aa9e7469e83fa4bc83750d002e8ca8536ac4344c229f24a8d71f17ccd97702c3`、`routerd-logging=b98b25457239d53cc932a490e7d24aaf08e527b0bc43b30deb8d7d4b41659387`。同じ全設定・元の43200秒DHCPリースで22000秒観測を再開し、初期取得・再起動後の通信と`healthy=true`が継続中。普通端末の実取得T1は2026-10-30 18:32:30 UTC（10月31日03:32:30 JST）予定。T1到達と完走は未検証。`/tmp/routerd-full-homert-address-native92-natural.log`、私有stage `/tmp/routerd-homert-full91.RPdvwV` を使用中。
+
+同じ通常版による両方の全入力二台は、元の相互TLS・PD/DHCP同期、両端末・全単体経路から開始した。停止対象の3物理linkを切断し全workerを喪失させ、そのnamespaceのconntrackも消去した。旧kernelが転送を続けるdaemon停止だけの試験とは異なるが、VM電源断ではない。A→Bで同一TCP/NAT対応と独立UDPを保持し、最長TCP待ち6.563秒、途中のUDP252送信/130受信/122期限切れを記録した。B→Aでは新規BGP向けTCPが失敗し、二方向完走は未合格。packetでは要求がA→FRRへ届く一方、返信は停止済みBのMACへ向かっていた。OPENは製品90秒・FRR180秒のHoldtimeで、元設定のGR120秒/stale360秒も有効。元のpeer設定と経路保持による復旧時間を次に測り、fixtureの3秒問い合わせや一律60秒を実際のBGP動作と混同しない。GRやpeer timerを黙って変更して成功とはしない。
+
+残作業は通常版の自然更新・回線断復旧、全入力の二方向切替、同版の通常Alpine image/PID1と更新復旧、実HGW/ONU・対象NIC、k8s/pveとCloud SAMを含む全34項目。今回のhost platformはホスト時計を変更せず、通常imageや物理回線の資格へ合格を移さない。完了した管理画面作業treeと過去の重複試行binary/多数stageは削除した。現在の通常実行物・必要なengine、実行中の自然観測、未解決BGP経路のpacketと最小の診断データは残す。

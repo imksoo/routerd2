@@ -11196,7 +11196,7 @@
     "physical_target_profile": "awaiting user target hardware/NIC and performance requirements; independent implementation and isolated VM tests continue",
     "validation_reporting": "Record current behavior, executed checks and untested scope concisely. Discard historical checkpoint ledgers as acceptance authority; no compatibility obligation to their code, APIs or formats.",
     "current_acceptance": {
-      "implementation_head": "8a85fdb",
+      "implementation_head": "93cc25e",
       "single_node_full_input_runtime": "supervisor-native91/native91/network27",
       "original_input_resources_per_node": 109,
       "explicit_appliance_input_resources_per_node": 110,
@@ -11206,15 +11206,22 @@
       "restart_all_dns_and_dual_ip_transactions_seconds": 12.69,
       "natural_original_dhcp_lease_seconds": 43200,
       "natural_dhcp_t1_seconds": 21600,
-      "natural_renewal": "failed_before_renewal_on_dns_timeout_after_about154s",
-      "remaining": "Resolve observed duplicate RA destination/table/metric and later BGP/VRRP effects timeouts; re-establish long-running communication. Full03 startup, current92 communication, full-input HA, individual DoH URL response separation, full normal image update/recovery, deployment profiles, physical ONU/NIC and all remaining work packages."
+      "natural_renewal": "running_original_43200s_lease_not_accepted",
+      "remaining": "Observe original DHCP renewal and WAN recovery on normal92. Resolve measured return routing to dead BGP peer under original90s hold/GR configuration; complete both full-input handoffs. Full normal Alpine/PID1/update/recovery, target HGW/ONU/NIC, deployment profiles and remaining work packages.",
+      "core_implementation_commit": "0e7012e",
+      "normal_runtime": "full-homert-address-native92/native92/network27",
+      "temporary_diagnostics_removed": true,
+      "natural_dhcp_t1_utc": "2026-10-30T18:32:30Z",
+      "diagnostic_untraced_600s": "passed20_rounds_with_temporary_phase_logging_not_normal_release_acceptance",
+      "restart_with_reacquired_ipv6_dns_seconds": 11.715,
+      "two_node_normal": "A_to_B_preserved_same_TCP_and_NAT; B_to_A_failed_new_BGP_TCP; not_accepted"
     }
   },
   "execution_order": [
     {
       "stage": 1,
       "profile": "homert02/03",
-      "next": "Full original109-resource inputs both compile with application classification enabled and explicit appliance link/management ownership (110 inputs ->57 native resources). Actual02 single-node supervisor-native91/network27 with independent peers and automatic ordinary/special clients passed DNS/conditional24, dual-IP TCP/UDP, four BGP prefixes, IX, distributed NTP, Tailscale to acquired LAN and full daemon restart; all client paths restored12.690s with failures recorded. Native91 original43200s DHCP lease/T1=21600s natural observation failed before renewal on DNS timeout after about154s. Duplicate RA routes cause HTTP422 worker restarts; later BGP/VRRP effects timeouts and lost VIP readiness are under investigation. Main8a85fdb is native92/network27 with approved modules-only CGO1 static nDPI; no automatic transfer of91 acceptance. Next resolve the observed single-node instability and resume natural renewal while preparing full-input HA, then full normal image/update/recovery and k8s/pve/Cloud SAM. Direct ONU, physical qualification and all34 remain incomplete.",
+      "next": "Main93cc25e includes explicit physical-WAN RA policy and batched address lifetime renewal without temporary probes. Untraced600s/20rounds with phase-logging binary passed automatic-client DNS including reacquired IPv6 DNS, dual-IP, two FRR peers, IX, NTP, Tailscale and daemon restart; not a normal-release natural-renewal acceptance. Normal full-homert-address-native92 is observing original43200s DHCP lease, primary T1 expected2026-10-30T18:32:30Z. Same normal binary full-input HA passed A_to_B same TCP/NAT with losses, but B_to_A new BGP TCP failed: peer sends replies to dead B; original negotiated hold90s and GR120/stale360 are under observation. Complete natural renewal/recovery and both full-input handoffs, normal Alpine image/update and target qualification, then k8s/pve and Cloud SAM. No all34 completion claim.",
       "required_focus": [
         "WAN/LAN IPv4/IPv6, DS-Lite, actual route selection/backup WAN, DHCP/PD/RA, learned DNS resolution/distribution, firewall/NAT/MTU/MSS, BGP and management",
         "HA-01 current election/track dependencies, HA-02 DHCP/PD synchronization, HA-03 NAT/connection synchronization and EXT-02 Tailscale used by this deployment"
