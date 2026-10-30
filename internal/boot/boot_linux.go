@@ -31,11 +31,38 @@ type mountSpec struct {
 	flags                    uintptr
 }
 
-// Bootstrap mounts kernel interfaces only when appliance mode is explicitly
-// selected and the caller is PID 1. Container PID 1 is never inferred to mean
-// appliance mode. Repeated calls recognize already mounted filesystems.
+// Bootstrap mounts kernel filesystems and enables loopback only when appliance
+// mode is explicitly selected and the caller is PID 1. Container PID 1 is never
+// inferred to mean appliance mode. Repeated calls retain the prepared state.
 func Bootstrap(o Options) error {
-	return bootstrap(o, os.Getpid(), mountBasic, makeDirectories)
+	if err := bootstrap(o, os.Getpid(), mountBasic, makeDirectories); err != nil {
+		return err
+	}
+	if o.Platform == Appliance {
+		if err := enableLoopback(); err != nil {
+			return fmt.Errorf("enable appliance loopback: %w", err)
+		}
+	}
+	return nil
+}
+
+// PID 1 supplies the local transport used by services such as chained DNS.
+// Host and container networking remain with their enclosing system.
+func enableLoopback() error {
+	fd, err := unix.Socket(unix.AF_INET, unix.SOCK_DGRAM|unix.SOCK_CLOEXEC, 0)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(fd)
+	request, err := unix.NewIfreq("lo")
+	if err != nil {
+		return err
+	}
+	if err := unix.IoctlIfreq(fd, unix.SIOCGIFFLAGS, request); err != nil {
+		return err
+	}
+	request.SetUint16(request.Uint16() | unix.IFF_UP)
+	return unix.IoctlIfreq(fd, unix.SIOCSIFFLAGS, request)
 }
 
 func bootstrap(o Options, pid int, mount func() error, directories func(Options) error) error {

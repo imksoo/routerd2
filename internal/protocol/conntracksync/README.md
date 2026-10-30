@@ -51,7 +51,7 @@ libnetfilter_conntrack 1.1.1 copy table is also patched to retain
 upstream copy table omits it; updating a cached connection would otherwise
 abort conntrackd in `nfct_copy(NFCT_CP_META)`. Both patches and the exact
 upstream sources accompany the runtime library.
-archive includes the loader/library closure, protocol database and licenses;
+The archive includes the loader/library closure, protocol database and licenses;
 the corresponding-source artifact includes upstream sources, APKBUILDs,
 patches and build scripts. `CONNTRACK_ARCH` selects the target; a foreign C
 build requires a native builder or configured instruction emulation.
