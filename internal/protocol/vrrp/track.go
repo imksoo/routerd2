@@ -8,11 +8,14 @@ import (
 // Track names a declared resource. Confirmation advances on distinct accepted
 // source observations; polling and replay never create extra confirmations.
 type Track struct {
-	Resource           string `json:"resource"`
-	Penalty            int    `json:"penalty,omitempty"`
-	HealthyThreshold   int    `json:"healthy_threshold,omitempty"`
-	UnhealthyThreshold int    `json:"unhealthy_threshold,omitempty"`
-	MaxAgeMillis       int    `json:"max_age_millis"`
+	Resource string `json:"resource"`
+	// IngressHealth groups backend Health resources for one ingress service.
+	// All backends must be healthy for full priority; degraded ingress still forwards.
+	IngressHealth      []string `json:"ingress_health,omitempty"`
+	Penalty            int      `json:"penalty,omitempty"`
+	HealthyThreshold   int      `json:"healthy_threshold,omitempty"`
+	UnhealthyThreshold int      `json:"unhealthy_threshold,omitempty"`
+	MaxAgeMillis       int      `json:"max_age_millis"`
 }
 
 type TrackState string

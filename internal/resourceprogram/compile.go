@@ -138,6 +138,17 @@ func Compile(source Program) (Plan, error) {
 			continue
 		}
 		for _, track := range r.Service.VRRP.Track {
+			if len(track.IngressHealth) > 0 {
+				seen := map[string]bool{}
+				for _, id := range track.IngressHealth {
+					target, exists := byID[id]
+					if !exists || target.Service == nil || target.Service.Health == nil || seen[id] {
+						return Plan{}, fmt.Errorf("VRRP %s ingress track %s requires distinct declared Health providers", r.ID, track.Resource)
+					}
+					seen[id] = true
+				}
+				continue
+			}
 			target, exists := byID[track.Resource]
 			if !exists || target.Service == nil || target.Service.Health == nil && target.Service.BFD == nil && target.Service.BGP == nil {
 				return Plan{}, fmt.Errorf("VRRP %s track %s requires a declared Health, BFD or BGP status provider", r.ID, track.Resource)

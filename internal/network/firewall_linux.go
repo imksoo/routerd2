@@ -219,6 +219,12 @@ func buildFirewall(c *nftables.Conn, f *Firewall) error {
 			chain = post
 		}
 		for _, match := range packetExpressions(rule.Match) {
+			if rule.OriginalDestination != "" {
+				match = append(match, &expr.Ct{Register: 1, Key: expr.CtKeyDST, Direction: 0}, &expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: netip.MustParseAddr(rule.OriginalDestination).AsSlice()})
+			}
+			if rule.OriginalPort != 0 {
+				match = append(match, &expr.Ct{Register: 1, Key: expr.CtKeyPROTODST, Direction: 0}, &expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: binaryutil.BigEndian.PutUint16(uint16(rule.OriginalPort))})
+			}
 			es := append(match, &expr.Counter{})
 			if rule.ConnectionMark != 0 {
 				es = append(es, &expr.Immediate{Register: 1, Data: binaryutil.NativeEndian.PutUint32(rule.ConnectionMark)}, &expr.Ct{Register: 1, SourceRegister: true, Key: expr.CtKeyMARK})

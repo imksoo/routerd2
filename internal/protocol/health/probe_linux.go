@@ -24,6 +24,9 @@ func Probe(ctx context.Context, raw Config) old.ProbeResult {
 	if err := Validate(c); err != nil {
 		return old.ProbeResult{Message: err.Error()}
 	}
+	if c.Protocol == "https" || c.HTTP != nil {
+		return probeHTTP(ctx, c)
+	}
 	// TCP/DNS/HTTP retain the pinned implementation, including HTTP 2xx..4xx
 	// reachability and DNS example.com lookup. Literal targets avoid unscoped
 	// bootstrap DNS. Do not call EnrichEvidence: it invokes external ip(8).

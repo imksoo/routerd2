@@ -102,6 +102,9 @@ type NATRule struct {
 	Address        string            `json:"address,omitempty"`
 	Ports          *PortRange        `json:"ports,omitempty"`
 	ConnectionMark uint32            `json:"connection_mark,omitempty"`
+	// Restrict hairpin source NAT to connections originally addressed to this VIP.
+	OriginalDestination string `json:"original_destination,omitempty"`
+	OriginalPort        int    `json:"original_port,omitempty"`
 }
 
 // MSSClamp lowers an existing TCP MSS option on SYN/SYN-ACK packets crossing
@@ -367,6 +370,15 @@ func validateFirewall(f *Firewall) error {
 		}
 		if rule.Ports != nil && (!validPortRange(*rule.Ports) || rule.Match.Protocol != "tcp" && rule.Match.Protocol != "udp") {
 			errs = append(errs, fmt.Errorf("NAT rule %d: translated ports require a valid range and tcp/udp", i))
+		}
+		if rule.OriginalDestination != "" {
+			address, err := netip.ParseAddr(rule.OriginalDestination)
+			if err != nil || address.IsUnspecified() || address.IsMulticast() || address.Zone() != "" || address.Is4In6() || address.Is4() != (rule.Match.Family == 4) {
+				errs = append(errs, fmt.Errorf("NAT rule %d: original destination must be a same-family unicast address", i))
+			}
+		}
+		if rule.OriginalPort < 0 || rule.OriginalPort > 65535 || rule.OriginalPort != 0 && rule.Match.Protocol != "tcp" && rule.Match.Protocol != "udp" {
+			errs = append(errs, fmt.Errorf("NAT rule %d: original port requires TCP/UDP and a valid port", i))
 		}
 		if rule.ConnectionMark != 0 {
 			prefix, err := netip.ParsePrefix(rule.Match.Source)

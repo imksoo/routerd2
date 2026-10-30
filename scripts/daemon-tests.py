@@ -22,6 +22,7 @@ SUITES = {
         ("TestDaemonHealthPBRFailoverAndRecovery", ("wan0", "wan1"), 195),
         ("TestDaemonEgressRouteHealthyMultipath", ("wan0", "wan1"), 120),
     ),
+    "ingress": (("TestDaemonImportedIngressHTTPS", ("lan0",), 165),),
     "bgp": (
         ("TestDaemonBGPFIBAndOwnershipExpiry", (), 120),
         ("TestDaemonBGPRecursivePrerequisiteExpiry", (), 120),

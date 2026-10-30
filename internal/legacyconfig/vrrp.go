@@ -29,9 +29,6 @@ func (c *compiler) vrrp(r resource, s api.VirtualAddressSpec) (string, []resourc
 	if meaningful(child(r.node, "addressFrom")) {
 		c.reject(r, "addressFrom", "unsupported_semantics", "dynamic VIP sources require their complete native producer binding")
 	}
-	if len(s.Track) != 0 {
-		c.reject(r, "track", "unsupported_semantics", "tracking needs its complete native source graph; it cannot be dropped")
-	}
 	if s.VRRP.AuthenticationFrom.File != "" || s.VRRP.AuthenticationFrom.Env != "" || s.VRRP.AuthenticationFrom.Base64 {
 		c.reject(r, "vrrp.authenticationFrom", "unsupported_semantics", "secret references are not read or converted to inline authentication by migration")
 	}

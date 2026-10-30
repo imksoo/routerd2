@@ -17,17 +17,26 @@ import (
 )
 
 type Config struct {
-	Resource           string `json:"resource"`
-	Interface          string `json:"interface"`
-	SourceAddress      string `json:"source_address,omitempty"`
-	Mark               uint32 `json:"mark,omitempty"`
-	Target             string `json:"target"`
-	Protocol           string `json:"protocol"`
-	Port               int    `json:"port,omitempty"`
-	IntervalMillis     int    `json:"interval_ms,omitempty"`
-	TimeoutMillis      int    `json:"timeout_ms,omitempty"`
-	HealthyThreshold   int    `json:"healthy_threshold,omitempty"`
-	UnhealthyThreshold int    `json:"unhealthy_threshold,omitempty"`
+	Resource           string     `json:"resource"`
+	Interface          string     `json:"interface"`
+	SourceAddress      string     `json:"source_address,omitempty"`
+	Mark               uint32     `json:"mark,omitempty"`
+	Target             string     `json:"target"`
+	Protocol           string     `json:"protocol"`
+	Port               int        `json:"port,omitempty"`
+	HTTP               *HTTPCheck `json:"http,omitempty"`
+	IntervalMillis     int        `json:"interval_ms,omitempty"`
+	TimeoutMillis      int        `json:"timeout_ms,omitempty"`
+	HealthyThreshold   int        `json:"healthy_threshold,omitempty"`
+	UnhealthyThreshold int        `json:"unhealthy_threshold,omitempty"`
+}
+
+// HTTPCheck retains the IngressService HTTP request and response contract.
+type HTTPCheck struct {
+	Path           string `json:"path,omitempty"`
+	Host           string `json:"host,omitempty"`
+	ExpectedStatus []int  `json:"expected_status,omitempty"`
+	TLSSkipVerify  bool   `json:"tls_skip_verify,omitempty"`
 }
 
 func Normalize(c Config) Config {
@@ -67,9 +76,19 @@ func Validate(raw Config) error {
 		}
 	}
 	switch c.Protocol {
-	case "icmp", "tcp", "dns", "http":
+	case "icmp", "tcp", "dns", "http", "https":
 	default:
 		return errors.New("unsupported health protocol")
+	}
+	if c.HTTP != nil {
+		if c.Protocol != "http" && c.Protocol != "https" {
+			return errors.New("HTTP request settings require http or https")
+		}
+		for _, status := range c.HTTP.ExpectedStatus {
+			if status < 100 || status > 599 {
+				return errors.New("invalid expected HTTP status")
+			}
+		}
 	}
 	if c.Port < 0 || c.Port > 65535 || c.Protocol == "icmp" && c.Port != 0 {
 		return errors.New("invalid health port")

@@ -1,0 +1,48 @@
+apiVersion: routerd.net/v1alpha1
+kind: Router
+metadata: {name: ingress-interoperability}
+spec:
+  resources:
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: Interface
+    metadata: {name: lan}
+    spec: {ifname: lan0, managed: true, adminUp: true}
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: IPv4StaticAddress
+    metadata: {name: local}
+    spec: {interface: lan, address: 192.0.2.38/24}
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: VirtualAddress
+    metadata: {name: k8s-routerd-vip}
+    spec:
+      family: ipv4
+      interface: lan
+      address: 192.0.2.248/32
+      mode: vrrp
+      vrrp: {virtualRouterID: 50, priority: 150, preempt: true, peers: [192.0.2.53]}
+      track:
+      - resource: IngressService/kubernetes-api
+        unhealthyPenalty: 60
+        confirmConsecutiveUnhealthy: 3
+        confirmConsecutiveHealthy: 2
+  - apiVersion: firewall.routerd.net/v1alpha1
+    kind: IngressService
+    metadata: {name: kubernetes-api}
+    spec:
+      listen: {interface: lan, address: 192.0.2.248, protocol: tcp, port: 6443}
+      hairpin: {enabled: true, mode: auto, interfaces: [lan]}
+      backends:
+      - {name: cp-01, address: 192.0.2.62, port: 6443}
+      - {name: cp-02, address: 192.0.2.63, port: 6443}
+      - {name: cp-03, address: 192.0.2.64, port: 6443}
+      healthCheck:
+        protocol: https
+        path: /readyz
+        host: k8s-api.lain.local
+        expectedStatus: [200]
+        tlsSkipVerify: true
+        interval: 5s
+        timeout: 1s
+        healthyThreshold: 2
+        unhealthyThreshold: 2
+      policy: {selection: failover, onNoHealthyBackends: reject}

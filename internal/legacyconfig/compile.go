@@ -185,6 +185,8 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 			// Compiled with delegated LAN advertisements below.
 		case "FirewallEventLog", "FirewallZone", "FirewallPolicy", "FirewallRule", "NAT44Rule", "IPAddressSet", "LocalServiceRedirect":
 			// Compiled together to preserve ordered zone jumps and NAT-only hooks.
+		case "IngressService":
+			// Compiled after the existing filter and NAT intent below.
 		case "EgressRoutePolicy":
 			if r.Spec.(api.EgressRoutePolicySpec).HostTraffic {
 				extra = append(extra, c.hostRoute(r, vrrpNames))
@@ -230,6 +232,7 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 	c.localServiceRedirects()
 	c.firewallServices()
 	c.vpnListenerFirewall()
+	extra = append(extra, c.ingressServices(vrrpNames)...)
 	// Admission references can name a PD declared after its VRRP election.
 	for _, r := range resources {
 		s, ok := r.Spec.(api.VirtualAddressSpec)

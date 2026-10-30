@@ -1,6 +1,7 @@
 package runtimeplan
 
 import (
+	"strings"
 	"time"
 
 	"github.com/imksoo/routerd2/internal/derived"
@@ -38,6 +39,13 @@ func (r *Runtime) advanceVRRPTracksLocked(facts resourceprogram.FactSnapshot) er
 	refs := map[string]derived.Reference{}
 	for _, cfg := range r.config.protocols.vrrp {
 		for _, track := range cfg.Track {
+			if len(track.IngressHealth) > 0 {
+				for _, source := range track.IngressHealth {
+					ref := r.trackReference(source)
+					refs[ref.Key()] = ref
+				}
+				continue
+			}
 			ref := r.trackReference(track.Resource)
 			refs[ref.Key()] = ref
 		}
@@ -67,8 +75,9 @@ func (r *Runtime) advanceVRRPTracksLocked(facts resourceprogram.FactSnapshot) er
 		}
 		for i, track := range cfg.Track {
 			state := &states[i]
+			ingress := len(track.IngressHealth) > 0
 			target := r.config.resources[track.Resource]
-			if target.When != nil {
+			if !ingress && target.When != nil {
 				truth, until := facts.ConditionAuthority(*target.When)
 				if truth == resourceprogram.False && until > now && r.guard.bootID == clock.BootID && now < r.guard.untilNanos {
 					state.status.Resource, state.status.State = track.Resource, vrrp.TrackNeutral
@@ -76,7 +85,14 @@ func (r *Runtime) advanceVRRPTracksLocked(facts resourceprogram.FactSnapshot) er
 					continue
 				}
 			}
-			value := values[r.trackReference(track.Resource).Key()]
+			var value derived.Value
+			var observedThrough uint64
+			if ingress {
+				value, observedThrough = r.ingressTrackValue(track.IngressHealth, values)
+			} else {
+				value = values[r.trackReference(track.Resource).Key()]
+				observedThrough = value.ObservedNanos
+			}
 			until := min(value.ExpiresNanos, value.ObservedNanos+uint64(track.MaxAgeMillis)*uint64(time.Millisecond))
 			if !value.Known || value.Origin == "" || value.ObservedNanos > now || until <= now {
 				state.unknown(track.Resource)
@@ -84,7 +100,7 @@ func (r *Runtime) advanceVRRPTracksLocked(facts resourceprogram.FactSnapshot) er
 			}
 			healthy := value.Text == "Healthy" || value.Text == "Up" || value.Text == "Established"
 			var passed, failed int
-			if target.Service.Health != nil {
+			if !ingress && target.Service != nil && target.Service.Health != nil {
 				sample := r.guardGrants[target.Service.ModuleName()].health
 				passed, failed = sample.State.ConsecutivePassed, sample.State.ConsecutiveFailed
 				if passed == 0 && failed == 0 {
@@ -101,12 +117,12 @@ func (r *Runtime) advanceVRRPTracksLocked(facts resourceprogram.FactSnapshot) er
 				state.unknown(track.Resource)
 				state.healthyFloor = max(0, passed-1)
 			}
-			if value.ObservedNanos < state.observed {
+			if !ingress && value.ObservedNanos < state.observed {
 				continue
 			}
 			if value.ObservedNanos > state.observed {
-				state.observed = value.ObservedNanos
-				if target.Service.Health != nil {
+				state.observed = observedThrough
+				if !ingress && target.Service != nil && target.Service.Health != nil {
 					if passed < state.lastPassed {
 						state.healthyFloor = 0
 					}
@@ -154,4 +170,39 @@ func (r *Runtime) vrrpDecisionLocked(name string, active bool) (vrrp.Decision, e
 		decision.Track = append(decision.Track, state.status)
 	}
 	return decision, nil
+}
+
+// One confirmation represents a new round of backend observations: its oldest
+// timestamp must pass the newest timestamp consumed last time. Polls or three
+// reports from one round cannot create three confirmations. The existing Health
+// workers have already applied each backend's thresholds.
+func (r *Runtime) ingressTrackValue(sources []string, values map[string]derived.Value) (derived.Value, uint64) {
+	var out derived.Value
+	var newest uint64
+	var origins []string
+	healthy, unknown := true, false
+	for _, source := range sources {
+		value := values[r.trackReference(source).Key()]
+		origins = append(origins, value.Origin)
+		if !value.Known {
+			unknown = true
+			continue
+		}
+		sample := r.guardGrants[r.config.resources[source].Service.ModuleName()].health
+		healthy = healthy && sample.Active
+		newest = max(newest, value.ObservedNanos)
+		if out.ObservedNanos == 0 || value.ObservedNanos < out.ObservedNanos {
+			out.ObservedNanos = value.ObservedNanos
+		}
+		if out.ExpiresNanos == 0 || value.ExpiresNanos < out.ExpiresNanos {
+			out.ExpiresNanos = value.ExpiresNanos
+		}
+	}
+	out.Known = !unknown
+	out.Origin = strings.Join(origins, "/")
+	out.Text = "Unhealthy"
+	if healthy {
+		out.Text = "Healthy"
+	}
+	return out, newest
 }

@@ -117,6 +117,7 @@ func Normalize(c Config) Config {
 	if c.Track != nil {
 		c.Track = append([]Track(nil), c.Track...)
 		for i := range c.Track {
+			c.Track[i].IngressHealth = append([]string(nil), c.Track[i].IngressHealth...)
 			if c.Track[i].Penalty == 0 {
 				c.Track[i].Penalty = 50
 			}
