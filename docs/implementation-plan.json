@@ -11194,13 +11194,27 @@
     "evidence_required": true,
     "do_not_complete_at_partial_checkpoint": true,
     "physical_target_profile": "awaiting user target hardware/NIC and performance requirements; independent implementation and isolated VM tests continue",
-    "validation_reporting": "Record current behavior, executed checks and untested scope concisely. Discard historical checkpoint ledgers as acceptance authority; no compatibility obligation to their code, APIs or formats."
+    "validation_reporting": "Record current behavior, executed checks and untested scope concisely. Discard historical checkpoint ledgers as acceptance authority; no compatibility obligation to their code, APIs or formats.",
+    "current_acceptance": {
+      "implementation_head": "8a85fdb",
+      "single_node_full_input_runtime": "supervisor-native91/native91/network27",
+      "original_input_resources_per_node": 109,
+      "explicit_appliance_input_resources_per_node": 110,
+      "native_resources_per_node": 57,
+      "executed_node": "02",
+      "single_node_communication_and_daemon_restart": "passed_with_observed_restart_losses",
+      "restart_all_dns_and_dual_ip_transactions_seconds": 12.69,
+      "natural_original_dhcp_lease_seconds": 43200,
+      "natural_dhcp_t1_seconds": 21600,
+      "natural_renewal": "failed_before_renewal_on_dns_timeout_after_about154s",
+      "remaining": "Resolve observed duplicate RA destination/table/metric and later BGP/VRRP effects timeouts; re-establish long-running communication. Full03 startup, current92 communication, full-input HA, individual DoH URL response separation, full normal image update/recovery, deployment profiles, physical ONU/NIC and all remaining work packages."
+    }
   },
   "execution_order": [
     {
       "stage": 1,
       "profile": "homert02/03",
-      "next": "handoff-stop/native-56 completed signed two-node PD/DS-Lite/backup-WAN handoff and original PD expiry/recovery, same TCP/UDP, sync-outage DHCP restart and retained sticky history; UDP loss0 and max TCP reply6.82s. Factory Alpine3.24.3/Linux6.18.59-0-lts QEMU/amd64 also supplied automatic LAN DHCP/DNS with PPP/PD/SLAAC, both-family traffic, worker/control recovery and ordinary poweroff. Next use the existing management SSH signed-update/rollback path with actual client communication, close remaining current homert intent/whole-image differences, then k8s/pve and Cloud SAM. Fixed peer underlay and added outbound IPv6 NAT remain declared differences. The7800s HGW run using preceding lan-reuse failed21:31:52UTC on LAN DNS SERVFAIL before natural PD update; cause undiagnosed. Natural PD update/completion, direct ONU and hardware remain unqualified.",
+      "next": "Full original109-resource inputs both compile with application classification enabled and explicit appliance link/management ownership (110 inputs ->57 native resources). Actual02 single-node supervisor-native91/network27 with independent peers and automatic ordinary/special clients passed DNS/conditional24, dual-IP TCP/UDP, four BGP prefixes, IX, distributed NTP, Tailscale to acquired LAN and full daemon restart; all client paths restored12.690s with failures recorded. Native91 original43200s DHCP lease/T1=21600s natural observation failed before renewal on DNS timeout after about154s. Duplicate RA routes cause HTTP422 worker restarts; later BGP/VRRP effects timeouts and lost VIP readiness are under investigation. Main8a85fdb is native92/network27 with approved modules-only CGO1 static nDPI; no automatic transfer of91 acceptance. Next resolve the observed single-node instability and resume natural renewal while preparing full-input HA, then full normal image/update/recovery and k8s/pve/Cloud SAM. Direct ONU, physical qualification and all34 remain incomplete.",
       "required_focus": [
         "WAN/LAN IPv4/IPv6, DS-Lite, actual route selection/backup WAN, DHCP/PD/RA, learned DNS resolution/distribution, firewall/NAT/MTU/MSS, BGP and management",
         "HA-01 current election/track dependencies, HA-02 DHCP/PD synchronization, HA-03 NAT/connection synchronization and EXT-02 Tailscale used by this deployment"

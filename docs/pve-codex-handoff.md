@@ -223,3 +223,24 @@ PD worker SIGKILL後1.52秒、通常交換10.99秒、全daemon再起動11.08秒�
 `440a674` の既存カーネル試験は24.90秒で、両IPの実TCP開始時刻、DS-Lite転送、撤去後の元値復元を確認した。`dist/supervisor-native91-kernel/kernel.log` に保存した。この試験は形式宣言へ依存せず、`eb66441` とのネットワーク実装差分もない。タグを指定しなかった別試行の「no tests to run」は検証結果に含めない。
 
 更新・明示旧版復帰の受入変更 `bf06f26` も取り込んだ。実起動の成功は `1def991` の署名付き三版による結果で、今回の設定形式92の全構成を更新・復旧した証拠ではない。時間・条件・未受入範囲と再現方法は `docs/test-plan.md` と `docs/releases.md` に記載した。家庭用ルーターの全設定、自然更新、二台運用、対象実機とARM64実行の受入は別に追う。
+
+## 2026-10-30 20:32 JST: 全入力から起動した単体の端末通信と再起動
+
+`96d7d3f`の通常実行物`supervisor-native91`（native91/network27）を隔離Linuxの実supervisor/control/network/全workerとして起動し、全設定の単体利用経路が終了0。元homert02/03の各109resourceを削らず取り込み、application分類も有効のままとした。外部OSが所有していた物理3interfaceのUPと管理IPv4を、最小appliance向けの明示intentとして追加したため、入力110→native57resource。今回実行したのは02側で、03側の変換成功を起動成功とはしない。物理名だけを隔離3linkへ対応させ、IPv4の元prefix/pool/除外規則は維持した。独立Headscaleの新規identity、試験用HA証明書、DNS/DoHの隔離endpointを明示し、本番peer・保存identityへ接続しなかった。
+
+独立ISC DHCPv6、radvd、Linux AFTR四本、FRR二台、IX相当Linux、dnsmasq/dnsdist、chrony、Headscale/公式Tailscaleと、起動前から接続した普通/特殊dhcpcd端末を使用した。端末の実取得値で次を確認した。
+
+- DHCPv4の動的割当とgateway/DNS/NTP配布、SLAACとstateless DHCPv6、取得resolverによるUDP/TCPのA/AAAA、IPv4/IPv6 TCP/UDP。
+- 条件付きDNS24問い合わせ、両FRRの四prefixへの実TCP/UDP、特殊MAC scopeの自動DNS・IX経由HTTP、配布された両NTPサーバーへの独立時刻問い合わせ。
+- 設定されたTailscale三prefixの広告と、実際にDHCP取得したLAN端末・独立Tailscale端末間の双方向TCP/UDP。三prefixすべてに端末を配置した結果ではない。
+- 製品全体の停止・起動後の同じ通信、DUID/NodeID保持。新規DNS/両IP TCP/UDPが全部再成立するまで12.690秒。DNS58件中20件失敗、両IP TCP/UDPの失敗後の再成立は11.376〜12.277秒。再起動中の損失を除外せず記録した。既存の同一TCP socket継続を主張しない。
+
+DoH対向のTLSとDNS応答は製品起動前に独立curlで確認した。製品のdefault sourceは二つのHTTPS URLのみなので、端末のdefault名前解決成功は少なくとも一つの実DoH応答を通っている。各URLを個別に使った成功は未分離で、ClientHelloの二hostname観測だけから両方の応答成功とはしない。host platformのchronydは`-x`であり、ホスト時計を変更しない。時刻採用の実guest試験とは区別する。
+
+最初の失敗は対向dnsmasqの旧bind address、次はdnsdistの旧subnet ACL、次はlistener起動前の対向問い合わせ。修正後、AFTRの確認と再読取りの間の観測変化でもfixtureが停止した。一つの有効endpoint観測を用いるよう直して全経路を再実行した。これらを製品の成功や製品修正として数えない。通常DADと製品の不健康表示・期限は緩めていない。
+
+実行物SHA256は`routerd=deb5324e3cdd4e036ccea9487199040a671907414a2aa6db500fcda6d0fb3fb4`、`routerd-modules=b05c3b09233c3bf6d7ec65e7885238de70790888443c98a327a2235048361cac`、`routerd-logging=e09a546f31e7e6296ef90777126e66976d2986f6a7f8c603201b0c0fa16a1604`。実行手順は、元入力と明示policyを`routerd config migrate --policy <policy> <source>`で変換し、上記独立peerと3linkを隔離名前空間へ配置、試験CAを専用trust bundleへ追加、通常3binaryと同梱engineから`platform=host`で起動する。端末の取得hookからresolverを実際に設定し、dig・echo TCP/UDP・chrony・公式Tailscaleで確認した後、同じstate directoryで製品を停止・起動する。私有の準備・実行scriptは`/tmp/routerd-full-homert-{prepare,host-prepare,natural-prepare}.py`。入力・鍵は公開せず、再使用が終わるまで必要な小さいfixtureを保持する。
+
+同じ91実行物で元のDHCPv4リース43200秒/T1=21600秒を変えず22000秒の自然更新観測を開始したが、観測約154秒の取得resolverへのUDP DNS timeoutで終了1。自然更新前に停止しており、短時間の通信成立を安定稼働とは扱わない。captureは一interfaceあたり16MB×2本。失敗時はRA workerが同じIPv6 destination/table/metricの重複をHTTP422で拒否されて再起動を繰り返し、後にBGP/VRRPのeffects期限超過とVIP/PD側の不準備を観測した。因果は切り分け中で、二つの独立RA interfaceの扱いを旧routerdと実kernelに照合してから修正・再開する。両方の全入力による二台切替も未受入。
+
+mainは`8a85fdb`へ進めてpush済み（native92/network27、許可済modulesのみCGO1静的リンク、nDPI/接続開始時刻、更新受入手順）。単体全入力と失敗した自然更新観測の実行版は91で、92・通常appliance image・03側単体・二台停止/切替・物理ONU/NIC・全34項目へ合格を移さない。
