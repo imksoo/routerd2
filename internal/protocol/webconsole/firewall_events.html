@@ -1,0 +1,18 @@
+{{define "firewall-events"}}{{with .FirewallEvents}}
+<p>ファイアウォールが記録したパケットの履歴です。記録対象の通信だけを表示するため、件数は通信総数ではありません。</p>
+{{if .Services}}<form method="get" action="{{$.Config.BasePath}}firewall-events">
+<label>記録サービス <select name="service">{{range .Services}}<option value="{{.}}" {{if eq . $.FirewallEvents.Selected}}selected{{end}}>{{.}}</option>{{end}}</select></label>
+<label>送信元IP <input name="source" value="{{.Source}}" placeholder="192.0.2.2"></label>
+<label>判定 <select name="action"><option value="">すべて</option><option value="drop" {{if eq .Action "drop"}}selected{{end}}>破棄</option><option value="reject" {{if eq .Action "reject"}}selected{{end}}>拒否応答</option><option value="accept" {{if eq .Action "accept"}}selected{{end}}>許可</option><option value="unknown" {{if eq .Action "unknown"}}selected{{end}}>不明</option></select></label>
+<label>日時以降 <input name="since" value="{{.Since}}" placeholder="2026-10-30T00:00:00+09:00" size="32"></label>
+<label>表示上限 <input type="number" min="1" max="1000" name="limit" value="{{.Limit}}"></label><button type="submit">検索</button></form>
+<p>日時には時差を含めます。結果は新しい順です。過去の判定は現在の規則や疎通を保証しません。</p>
+{{else}}<p>ファイアウォール記録サービスは構成されていません。</p>{{end}}
+{{with .History}}<p>読取時刻: {{.ReadAt}} / 表示 {{len .Entries}}件</p>
+{{if .AtLimit}}<p class="notice">表示上限に達しました。さらに履歴がある場合は、日時・送信元・判定で絞り込んでください。</p>{{end}}
+<div class="scroll"><table><thead><tr><th>時刻・規則</th><th>判定・プロトコル</th><th>送信元 → 宛先</th><th>入出力・サイズ</th></tr></thead><tbody>
+{{range .Entries}}<tr data-event="{{.ID}}"><td><div>{{.Timestamp}}</div><code>{{.RuleName}}</code></td>
+<td><div>{{if eq .Action "drop"}}破棄{{else if eq .Action "reject"}}拒否応答{{else if eq .Action "accept"}}許可{{else}}不明{{end}} <code>{{.Action}}</code></div><div>{{.L3Proto}} / {{.Protocol}}</div>{{if .TCPFlags}}<div>TCPフラグ: {{.TCPFlags}}</div>{{end}}</td>
+<td><div><code>{{.SrcAddress}}</code>{{if .SrcPort}} / ポート {{.SrcPort}}{{end}}</div><div>→ <code>{{.DstAddress}}</code>{{if .DstPort}} / ポート {{.DstPort}}{{end}}</div></td>
+<td>{{if .InIface}}<div>入力: <code>{{.InIface}}</code></div>{{end}}{{if .OutIface}}<div>出力: <code>{{.OutIface}}</code></div>{{end}}<div>{{.PacketBytes}} バイト</div></td></tr>
+{{else}}<tr><td colspan="4">条件に一致する保存済みパケットはありません。</td></tr>{{end}}</tbody></table></div>{{end}}{{end}}{{end}}

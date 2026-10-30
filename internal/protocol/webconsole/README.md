@@ -253,3 +253,24 @@ history check at 21:50:29-21:50:44 JST in 15.31 seconds. The source tree was
 clean. The concurrent DHCPv6/Collector check used byte-identical executables;
 evidence and SHA-256 values are under `dist/observability-integrated/dns/`.
 The API error wording is Japanese in this tested version.
+
+
+## Saved firewall event search
+
+`<base_path>firewall-events` reads `GET /v1/services/{name}/firewall-history`
+for a configured `firewall_log` service. The runtime releases its state lock
+before opening the collector-owned database through the existing routerd
+`OpenFirewallLogReadOnly` and `List` functions. The NFLOG collector remains the
+sole writer and retention owner; the reader starts no process or database.
+
+Filters retain the old console's query capability: exact source IP and action,
+an inclusive RFC3339 start time, and a newest-first limit of 100 by default,
+maximum 1000. Equivalent IP spellings are normalized. The old store caps each
+read at 1000, so `at_limit` says only that the requested limit was reached; it
+does not assert that another matching event exists. End-time filtering, paging,
+destination filtering, address-set enrichment and connection correlation are
+not implemented by this route. The table shows the original packet timestamp,
+rule, action, family/protocol/TCP flags, addresses/ports, interfaces and size.
+These are stored sampled events, not current rules or total traffic counts.
+An unavailable database or failed query is an HTTP error rather than empty
+history. The old stored event type and query code are reused directly.
