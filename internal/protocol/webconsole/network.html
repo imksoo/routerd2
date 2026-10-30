@@ -1,0 +1,19 @@
+{{define "network-detail"}}{{with .NetworkPage}}
+<nav aria-label="ネットワークの詳細"><a href="{{$.Config.BasePath}}network">概要</a><a href="{{$.Config.BasePath}}routes">経路</a><a href="{{$.Config.BasePath}}policy-rules">経路選択規則</a></nav>
+<p>観測時刻: {{.ObservedAt}} / リビジョン: {{.Revision}} / 適用: {{.Status}} / 試行リビジョン: {{.AttemptedRevision}} / 全{{.Total}}件、開始位置 {{.Offset}}</p>
+<p>ページごとにカーネルを観測します。同じ適用識別子でも同時点の一括観測ではありません。設定の切替で継続取得が拒否された場合は、<a href="{{.Start}}">先頭から再取得</a>してください。</p>
+{{if eq .Section "routes"}}
+<form method="get" action="{{$.Config.BasePath}}routes"><label>経路表（空欄はすべて）<input type="number" name="table" min="0" max="4294967295" value="{{.Table}}"></label><button type="submit">表示</button></form>
+<div class="scroll network-detail"><table><thead><tr><th>宛先</th><th>次ホップ・インターフェース</th><th>優先送信元</th><th>経路表 / 優先度</th><th>種類 / プロトコル</th><th>管理対象</th></tr></thead><tbody>
+{{range .Routes}}<tr data-route="{{.Destination}}"><td><code>{{.Destination}}</code>{{if .Blackhole}} / 破棄{{end}}</td><td>{{if .NextHopCount}}<a href="{{$.Config.BasePath}}route-next-hops?table={{.Table}}&amp;route_id={{.RouteID}}&amp;projection_id={{$.NetworkPage.ProjectionID}}">次ホップ {{.NextHopCount}}件</a>{{else}}<code>{{.Gateway}}</code> {{.Interface}}{{end}}</td><td><code>{{.PreferredSource}}</code></td><td>{{.Table}} / {{.Metric}}</td><td>{{.Type}} / {{.Protocol}}{{if .Advanced}} / 追加属性あり{{end}}</td><td>{{if .Owned}}対象{{else}}対象外{{end}}</td></tr>{{else}}<tr><td colspan="6">該当する経路はありません。</td></tr>{{end}}
+</tbody></table></div>
+{{else if eq .Section "policy-rules"}}
+<p>優先度の小さい順に評価される経路選択規則です。管理対象外の規則も併記します。追加属性がある規則の全条件は、この表示だけでは判断できません。</p>
+<div class="scroll network-detail"><table><thead><tr><th>IP / 優先度</th><th>送信元 → 宛先</th><th>入力 / 出力</th><th>印 / マスク</th><th>動作 / 経路表</th><th>追加条件 / 管理対象</th></tr></thead><tbody>
+{{range .Rules}}<tr data-rule-priority="{{.Priority}}"><td>IPv{{.Family}} / {{.Priority}}</td><td><code>{{.Source}}</code> → <code>{{.Destination}}</code></td><td>{{.InInterface}} / {{.OutInterface}}</td><td>{{if .Mark}}{{.Mark}}{{else}}指定なし{{end}} / {{if .Mask}}{{.Mask}}{{else}}指定なし{{end}}</td><td>{{if .Blackhole}}破棄{{else if eq .Action 1}}経路表 {{.Table}}{{else}}動作番号 {{.Action}}{{end}}</td><td>{{if .Invert}}条件反転 / {{end}}{{if .SuppressPrefixLength}}抑制するプレフィックス長 {{.SuppressPrefixLength}} / {{end}}{{if .Advanced}}追加属性あり / {{end}}{{if .Owned}}対象{{else}}対象外{{end}}</td></tr>{{else}}<tr><td colspan="6">経路選択規則はありません。</td></tr>{{end}}
+</tbody></table></div>
+{{else}}
+<h3>経路の次ホップ</h3><div class="scroll network-detail"><table><thead><tr><th>次ホップ</th><th>インターフェース</th><th>重み</th></tr></thead><tbody>{{range .NextHops}}<tr><td><code>{{.Gateway}}</code></td><td>{{.Interface}}</td><td>{{.Weight}}</td></tr>{{else}}<tr><td colspan="3">次ホップはありません。</td></tr>{{end}}</tbody></table></div>
+{{end}}
+{{if .Next}}<a rel="next" href="{{.Next}}">次のページ</a>{{end}}
+{{end}}{{end}}

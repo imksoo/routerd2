@@ -46,6 +46,7 @@ type page struct {
 	Error          string
 	Health         *control.Health
 	Network        *network.ObservationView
+	NetworkPage    *networkPage
 	Resources      *runtimeplan.ResourceObservationPage
 	Metadata       *control.ConfigurationMetadata
 	Next           string
@@ -81,7 +82,7 @@ func Run(ctx context.Context, cfg webconsoleconfig.Config, runtimeDir string, re
 		default:
 			return "不明"
 		}
-	}}).Parse(pageHTML + flowsHTML + vpnHTML + dnsQueriesHTML + firewallEventsHTML + logsHTML + timeHTML + updateHTML + bgpHTML)
+	}}).Parse(pageHTML + flowsHTML + vpnHTML + dnsQueriesHTML + firewallEventsHTML + logsHTML + timeHTML + updateHTML + bgpHTML + networkHTML)
 	if err != nil {
 		return err
 	}
@@ -121,6 +122,9 @@ func Run(ctx context.Context, cfg webconsoleconfig.Config, runtimeDir string, re
 			p.Heading = "ネットワーク"
 			p.Network = new(network.ObservationView)
 			err = client.Do(r.Context(), http.MethodGet, "/v1/network", nil, p.Network)
+		case "routes", "policy-rules", "route-next-hops":
+			p.Heading = "ネットワークの詳細"
+			p.NetworkPage, err = loadNetworkPage(r.Context(), client, strings.TrimPrefix(r.URL.Path, cfg.BasePath), r.URL.Query(), cfg.BasePath)
 		case "resources":
 			p.Heading = "設定資源の適用状態"
 			p.Resources = new(runtimeplan.ResourceObservationPage)

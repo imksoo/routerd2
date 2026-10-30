@@ -419,3 +419,32 @@ BGP担当の完全な `bgpconfig.Snapshot` を読み取ります。独自の観�
 
 再現は標準ビルド後に `python3 scripts/daemon-tests.py bgp-frr --test TestDaemonBGPTwoFRRPeers` を実行します。
 独立対向には既定の `/usr/lib/frr/bgpd` を使用します。
+
+## Kernel route and policy-rule detail
+
+The network page links to `/routes`, `/policy-rules`, and `/route-next-hops`.
+Each HTTP request reads one bounded page from the existing network observation
+API. Table filters, offsets and the projection identity survive continuation;
+a changed projection remains HTTP 409 with a fresh-page recovery link. Pages are separate kernel observations,
+not an atomic snapshot. An empty route-table filter means all tables.
+
+The view includes preferred sources, routing tables, metrics, ownership and
+additional-attribute flags. Multipath routes link to all next hops and weights.
+Policy rules show IP family, priority, selectors, marks/masks, actions and
+additional conditions. Unsupported attributes remain explicitly incomplete.
+No new network reader, writer, history store or external process is introduced.
+
+On 2026-10-31 JST, `TestDaemonConfigurationAndRecovery` passed through an
+independent namespace HTTP client against the standard three-binary build
+`network-console-d2bb7ce` (base d2bb7ce plus this change). Route continuation,
+table filtering, preferred sources, rule rows, both multipath next hops and
+HTTP 400/409 propagation passed. Existing SSH configuration, DHCP, DNS,
+control-worker recovery and whole-product restart checks also passed in
+21.68 seconds with the unchanged 100-second harness limit. The fixture requires
+the bundled dnsmasq archive, as provided by `scripts/daemon-tests.py management`;
+the first direct invocation omitted that archive and failed before readiness.
+
+Web console race checks and vet passed. Actual returned HTML was visually
+reviewed in Edge at 1400 and 500 pixels; narrow tables scroll horizontally. This proves the isolated management path, not physical homert
+acceptance or multipath forwarding under load. Reproduce with `make build
+dnsmasq-engine` followed by `python3 scripts/daemon-tests.py management`.

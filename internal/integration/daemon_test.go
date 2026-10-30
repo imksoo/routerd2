@@ -30,6 +30,7 @@ import (
 	"github.com/imksoo/routerd2/internal/events"
 	"github.com/imksoo/routerd2/internal/legacyconfig"
 	"github.com/imksoo/routerd2/internal/localapi"
+	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
@@ -119,6 +120,10 @@ spec:
 		t.Fatal("imported console service missing")
 	}
 	doc.Resources = append(doc.Resources, management.Document.Resources...)
+	doc.Resources = append(doc.Resources, resourceprogram.Resource{ID: "console-multipath", Route: &network.Route{
+		Destination: "203.0.113.0/24", Table: 333, NextHops: []network.NextHop{{Gateway: "198.18.0.2", Interface: "mgmt0", Weight: 1}, {Gateway: "198.18.0.3", Interface: "mgmt0", Weight: 2}},
+	}})
+
 	_ = healthPBRCapture(t, "mgmt0")
 	configPath := filepath.Join(dir, "config.json")
 	if err = config.AtomicJSON(configPath, doc); err != nil {
@@ -201,7 +206,8 @@ spec:
 		select {
 		case err := <-exited:
 			if err != nil {
-				t.Fatalf("daemon exit: %v", err)
+				data, _ := os.ReadFile(logPath)
+				t.Fatalf("daemon exit: %v\n%s", err, data)
 			}
 		case <-time.After(12 * time.Second):
 			_ = process.Kill()
@@ -275,6 +281,57 @@ spec:
 	})
 	console("GET", "", 200, "routerd2 &lt;lab&gt;")
 	console("GET", "network", 200, "198.18.0.1/24")
+	// Follow the real kernel's continuation link from an independent HTTP client.
+	routes := console("GET", "routes?table=254&limit=1", 200, `data-route=`)
+	start := strings.Index(routes, `rel="next" href="`)
+	if start < 0 {
+		t.Fatal("route continuation link missing", routes)
+	}
+	tail := routes[start+len(`rel="next" href="`):]
+	end := strings.IndexByte(tail, '"')
+	if end < 0 {
+		t.Fatal("route continuation link unterminated", tail)
+	}
+	next := html.UnescapeString(tail[:end])
+	if !strings.HasPrefix(next, "/ops/routes?") || !strings.Contains(next, "table=254") || !strings.Contains(next, "limit=1") || !strings.Contains(next, "projection_id=") {
+		t.Fatal("route continuation lost its scope", next)
+	}
+	console("GET", strings.TrimPrefix(next, "/ops/"), 200, "開始位置 1")
+	detail := console("GET", "routes?table=255", 200, "優先送信元")
+	if !strings.Contains(detail, "198.18.0.1") {
+		t.Fatal("local kernel route missing", detail)
+	}
+	console("GET", "routes?table=", 200, "経路表（空欄はすべて）")
+	console("GET", "policy-rules?limit=1", 200, `data-rule-priority=`)
+	multipath := console("GET", "routes?table=333", 200, "次ホップ 2件")
+	hopStart := strings.Index(multipath, `/ops/route-next-hops?`)
+	if hopStart < 0 {
+		t.Fatal("next-hop link missing", multipath)
+	}
+	hopTail := multipath[hopStart:]
+	hopEnd := strings.IndexByte(hopTail, '"')
+	if hopEnd < 0 {
+		t.Fatal("next-hop link unterminated", hopTail)
+	}
+	hopPath := html.UnescapeString(hopTail[:hopEnd])
+	hops := console("GET", strings.TrimPrefix(hopPath, "/ops/"), 200, "198.18.0.2")
+	if !strings.Contains(hops, "198.18.0.3") {
+		t.Fatal("second kernel next hop missing", hops)
+	}
+
+	console("GET", "routes?table=-1", 400, "outside its permitted range")
+	conflict := console("GET", "routes?table=254&limit=1&offset=1&projection_id="+strings.Repeat("0", 64), 409, "network projection changed")
+	if !strings.Contains(conflict, `href="/ops/routes?limit=1&amp;table=254">先頭から再取得`) {
+		t.Fatal("changed projection lost its fresh-page link", conflict)
+	}
+	console("GET", "routes?limit=1&table=254", 200, `data-route=`)
+	if output := os.Getenv("ROUTERD2_TEST_EVIDENCE_DIR"); output != "" {
+		if err := os.WriteFile(filepath.Join(output, "network-routes.html"), []byte(detail), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Log("independent console client read kernel route pages with table/projection scope, preferred sources and policy rules; changed projections rejected")
+
 	console("GET", "resources", 200, "service/console-")
 	console("GET", "configuration", 200, "設定のSHA-256")
 	console("POST", "configuration", 405, "read-only console")
@@ -656,6 +713,7 @@ esac
 		})
 		console("GET", "", 200, "routerd2 &lt;lab&gt;")
 		console("GET", "network", 200, "198.18.0.1/24")
+
 		if name == "logging" {
 			checkConsoleLogsAfterRestart(t, logClient, console, oldLogCursor)
 		}
