@@ -352,6 +352,37 @@ func TestDaemonConnectionMarkedEgressPolicy(t *testing.T) {
 	probes[3].Close()
 	waitMarks(276)
 	traffic("E")
+	// The direct final fallback models the homert IX path. Small path replies
+	// do not establish that TCP can carry data through its migrated ACL/NAT.
+	bulk := dial("tcp4", 2)
+	if err := bulk.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := bulk.(*net.TCPConn).SyscallConn()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mss int
+	var socketErr error
+	if err := raw.Control(func(fd uintptr) { mss, socketErr = unix.GetsockoptInt(int(fd), unix.IPPROTO_TCP, unix.TCP_MAXSEG) }); err != nil || socketErr != nil {
+		t.Fatal("TCP MSS", err, socketErr)
+	}
+	exitLink, err := netlink.LinkByName("wan4")
+	if err != nil || mss <= 0 || mss > exitLink.Attrs().MTU-40 {
+		t.Fatal("direct exit MSS", mss, err)
+	}
+	if _, err := bulk.Write([]byte("bulk")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.Copy(bulk, bytes.NewReader(bytes.Repeat([]byte{'u'}, 1<<20))); err != nil {
+		t.Fatal("direct exit upload", err)
+	}
+	reply := make([]byte, 1<<20)
+	if _, err := io.ReadFull(bulk, reply); err != nil || !bytes.Equal(reply, bytes.Repeat([]byte{'E'}, len(reply))) {
+		t.Fatal("direct exit download", err)
+	}
+	t.Logf("direct final fallback: 1 MiB upload/download with exact payload, TCP_MAXSEG=%d, link MTU=%d, endpoints=%s -> %s", mss, exitLink.Attrs().MTU, bulk.LocalAddr(), bulk.RemoteAddr())
+	bulk.Close()
 	priorTraffic := func() {
 		for _, protocol := range []string{"tcp4", "udp4"} {
 			port := "18095"
@@ -660,9 +691,21 @@ func egressTCPPeer(t *testing.T, ns netns.NsHandle, reply byte) {
 				defer conn.Close()
 				stop := context.AfterFunc(ctx, func() { conn.Close() })
 				defer stop()
-				var b [16]byte
+				var b [4]byte
 				for {
-					if _, err := conn.Read(b[:]); err != nil {
+					if _, err := io.ReadFull(conn, b[:]); err != nil {
+						return
+					}
+					if string(b[:]) == "bulk" {
+						body := make([]byte, 1<<20)
+						if _, err := io.ReadFull(conn, body); err != nil {
+							return
+						}
+						if !bytes.Equal(body, bytes.Repeat([]byte{'u'}, len(body))) {
+							t.Error("direct exit peer received different upload data")
+							return
+						}
+						_, _ = io.Copy(conn, bytes.NewReader(bytes.Repeat([]byte{reply}, len(body))))
 						return
 					}
 					if _, err := conn.Write([]byte{reply}); err != nil {
