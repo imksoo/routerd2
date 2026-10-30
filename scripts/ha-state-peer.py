@@ -19,11 +19,53 @@ import re
 import sqlite3
 
 
+
 def run(command):
     return subprocess.run(command, check=True, capture_output=True, text=True, timeout=10).stdout
 
 
-def peer(stage, dhcp6_server, pd_dslite, stale_owner, preparation, delegated_dns, release_holds):
+def imported_conntrack(stage, directory, index):
+    import yaml
+
+    source = yaml.safe_load((stage / "conntrack.yaml").read_text())
+    resources = source["spec"]["resources"]
+    for resource in resources:
+        spec = resource["spec"]
+        if resource["kind"] == "VirtualAddress":
+            spec["vrrp"].update(priority=150-index*50, peers=["198.18.0."+str(3-index)],
+                failoverVMAC={"interface": "wan-ha", "parentInterface": "wan", "macAddress": "02:00:5e:00:01:43"})
+        elif resource["kind"] == "IPv4StaticAddress":
+            spec.update(interface="wan-ha", address="203.0.113.1/24", allowOverlap=True, allowOverlapReason="Shared WAN subnet during VRRP ownership")
+        elif resource["kind"] == "NAT44Rule":
+            spec["egressInterface"] = "wan-ha"
+        elif resource["kind"] == "NAT44SessionSync":
+            spec["conntrackd"].update(localAddress="169.254.42."+str(index+2), peerAddress="169.254.42."+str(3-index))
+    resources.append({"apiVersion": "net.routerd.net/v1alpha1", "kind": "Interface", "metadata": {"name": "wan"},
+                      "spec": {"ifname": "wan0", "managed": True, "adminUp": True}})
+    resources.append({"apiVersion": "net.routerd.net/v1alpha1", "kind": "Interface", "metadata": {"name": "wan-ha"},
+                      "spec": {"ifname": "wan-ha", "managed": True, "adminUp": True}})
+    for name, address in (("lan", "198.18.0."+str(index+2)+"/24"), ("wan", "203.0.113."+str(index+2)+"/24"), ("sync", "169.254.42."+str(index+2)+"/16")):
+        resources.append({"apiVersion": "net.routerd.net/v1alpha1", "kind": "IPv4StaticAddress", "metadata": {"name": name+"-local"},
+                          "spec": {"interface": name, "address": address, "allowOverlap": name == "wan", "allowOverlapReason": "Shared WAN subnet during VRRP ownership" if name == "wan" else ""}})
+    # homert has stateful zone filtering as well as NAT. A NAT-only legacy
+    # document intentionally creates no FORWARD hook, unlike this HA profile.
+    for name, role, interfaces in (("lan", "trust", ["Interface/lan"]), ("wan", "untrust", ["Interface/wan", "Interface/wan-ha"]), ("sync", "mgmt", ["Interface/sync"])):
+        resources.append({"apiVersion": "firewall.routerd.net/v1alpha1", "kind": "FirewallZone", "metadata": {"name": name},
+                          "spec": {"role": role, "interfaces": interfaces}})
+    source_file, policy_file = directory / "legacy.json", directory / "policy.json"
+    source_file.write_text(json.dumps(source))
+    policy_file.write_text(json.dumps({"schema_version": 1, "vrrp": {"VirtualAddress/gateway": {
+        "source_address": "198.18.0."+str(index+2), "vip_interface": "lan-ha"}}}))
+    migration = subprocess.run([str(stage / "routerd"), "config", "migrate", "--policy", str(policy_file), str(source_file)], capture_output=True, text=True, timeout=10)
+    if migration.returncode:
+        raise RuntimeError("HA fixture migration failed: " + migration.stderr)
+    document = yaml.safe_load(migration.stdout)
+    elections = [r["service"] for r in document["resources"] if r.get("service", {}).get("vrrp", {}).get("conntrack_sync")]
+    assert len(elections) == 1, "migration did not give connection state exactly one election owner"
+    return document["resources"], elections[0]
+
+
+def peer(stage, dhcp6_server, pd_dslite, stale_owner, preparation, delegated_dns, release_holds, import_conntrack):
     def deadline(*_):
         raise TimeoutError("HA connection-state communication deadline")
     signal.signal(signal.SIGALRM, deadline)
@@ -37,6 +79,7 @@ def peer(stage, dhcp6_server, pd_dslite, stale_owner, preparation, delegated_dns
     segments = ("lan", "wan", "sync", "backup") if pd_dslite else ("lan", "wan", "sync")
     children = []
     captures = []
+    ha_module, sync_port = "service.ha", 3780
 
     def inside(ns, command):
         return ["ip", "netns", "exec", ns] + command
@@ -236,6 +279,14 @@ def peer(stage, dhcp6_server, pd_dslite, stale_owner, preparation, delegated_dns
                 # profile's IPv4 route around the tunnel during handoff.
                 resources = [r for r in resources if r["id"] not in ("wan-base", "wan-route")]
                 next(r["address"] for r in resources if r["id"] == "wan-address")["cidr"] = "203.0.113.1/32"
+            if import_conntrack:
+                migrated, election = imported_conntrack(stage, directory, index)
+                ha_module = "service." + election["name"]
+                sync_port = election["vrrp"]["conntrack_sync"]["port"]
+                leases = next(r for r in resources if r["id"] == "leases")
+                leases["service"]["dhcp_server"]["ha"]["owner"] = election["name"]
+                resources = migrated + [leases] + [r for r in resources if r["id"] == "wan-route"]
+                print("PASS migrated NAT44SessionSync into one IPv4 election on " + node, flush=True)
             (directory / "config.json").write_text(json.dumps({"schema_version": 2, "resources": resources}))
             workers = {role: str(stage / ("routerd-logging" if role == "logging" else "routerd-modules")) for role in roles}
             boot = {"platform": "host", "config": str(directory / "config.json"), "runtime_dir": str(directory / "run"), "state_dir": str(directory / "state"), "workers": workers, "engines": {"vrrp": str(stage / "conntrack-engine.tar")}, "ssh": {"user": "admin"}}
@@ -380,18 +431,18 @@ except socket.timeout:
             run(inside("ha-backup", ["ip", "link", "set", "backup0", "down"]))
         start("ha-a", ["unshare", "--pid", "--fork", "--mount-proc", "--kill-child=SIGTERM", str(stage / "routerd"), "boot", "--file", str(stage / "a/boot.json")], "a")
         wait(lambda: (stage / "a/run/supervisor.sock").exists())
-        wait(lambda: modules("a").get("service.ha", {}).get("ready") is True)
+        wait(lambda: modules("a").get(ha_module, {}).get("ready") is True)
         if dhcp6_server:
             if pd_dslite:
                 def admission_timed_out():
                     services = api("a", "control.sock", "/v1/services")["instances"]
-                    ha = next(i for i in services if i["name"] == "service.ha")["snapshot"]
+                    ha = next(i for i in services if i["name"] == ha_module)["snapshot"]
                     if ha.get("active"):
                         raise AssertionError("VIP published without an available WAN")
                     return ha.get("activation_state") == "ReadinessTimeout"
                 wait(admission_timed_out)
             else:
-                wait(lambda: api("a", "control.sock", "/v1/services/service.ha")["snapshot"].get("activation_state") == "ReadinessTimeout")
+                wait(lambda: api("a", "control.sock", "/v1/services/" + ha_module)["snapshot"].get("activation_state") == "ReadinessTimeout")
             wait(lambda: pd_observed("a").get("state") == "soliciting")
             addresses = {a["local"] for link in json.loads(run(inside("ha-a", ["ip", "-j", "address", "show"]))) for a in link.get("addr_info", [])}
             assert "203.0.113.1" in addresses and "198.18.0.1" not in addresses, "PD preparation did not retain WAN election separately from VIP publication"
@@ -490,7 +541,7 @@ for protocol,port in ((socket.SOCK_STREAM,18082),(socket.SOCK_DGRAM,18083)):
         b_command = ["unshare"] + (["--time", "--boottime", "7200"] if dhcp6_server else []) + ["--pid", "--fork", "--mount-proc", "--kill-child=SIGTERM", str(stage / "routerd"), "boot", "--file", str(stage / "b/boot.json")]
         b_daemon = start("ha-b", b_command, "b")
         wait(lambda: (stage / "b/run/supervisor.sock").exists())
-        wait(lambda: modules("b").get("service.ha", {}).get("ready") is True)
+        wait(lambda: modules("b").get(ha_module, {}).get("ready") is True)
         wait(lambda: modules("a").get("service.leases", {}).get("ready") is True and modules("b").get("service.leases", {}).get("ready") is True)
         if dhcp6_server:
             wait(lambda: modules("a").get("service.pd", {}).get("ready") and modules("b").get("service.pd", {}).get("ready"))
@@ -637,7 +688,7 @@ while True:
         if pd_dslite:
             check_backup_arp("a")
         if preparation:
-            api("a", "control.sock", "/v1/services/service.ha/restart", {})
+            api("a", "control.sock", "/v1/services/" + ha_module + "/restart", {})
             def preparing():
                 try:
                     return api("b", "control.sock", "/v1/services/service.pd")["snapshot"].get("state") == "preparing"
@@ -652,7 +703,7 @@ while True:
             assert preparing(), "B4 was added only after DHCP serving began"
             addresses = {a.get("local"): a for link in prepared_addresses() for a in link.get("addr_info", [])}
             assert addresses.get("fe80::1", {}).get("tentative") and addresses["2001:db8:80:f1::21"].get("tentative"), "link-local and B4 DAD did not overlap"
-            api("b", "control.sock", "/v1/services/service.ha/restart", {})
+            api("b", "control.sock", "/v1/services/" + ha_module + "/restart", {})
             wait(lambda: active("a"), timeout=30)
             wait(lambda: modules("b").get("service.pd", {}).get("ready") is True, timeout=30)
             pd_traffic("a")
@@ -661,11 +712,11 @@ while True:
             assert progress(latest()) == mapping
             print("PASS overlapping DAD, interrupted preparation, B4 withdrawal and real TCP/UDP recovery", flush=True)
 
-            api("a", "control.sock", "/v1/services/service.ha/restart", {})
+            api("a", "control.sock", "/v1/services/" + ha_module + "/restart", {})
             wait(preparing, timeout=30)
             wait(lambda: any(a.get("local") == "2001:db8:80:f1::21" for link in prepared_addresses() for a in link.get("addr_info", [])), timeout=3)
             assert preparing() and "service.pd-lan-ra" not in modules("b"), "preparation started serving before the control-stop test"
-            authority = api("b", "control.sock", "/v1/services/service.ha")["snapshot"]["expires_nanos"]
+            authority = api("b", "control.sock", "/v1/services/" + ha_module)["snapshot"]["expires_nanos"]
             controller = host_pid("b", modules("b")["control"]["pid"])
             os.kill(controller, signal.SIGSTOP)
             try:
@@ -684,7 +735,7 @@ while True:
             addresses = json.loads(run(inside("ha-a", ["ip", "-j", "-6", "address", "show", "dev", "lan0"])))
             target = next(a["local"] for link in addresses for a in link["addr_info"] if a["scope"] == "link" and not a.get("tentative"))
             direct_information(target, True)
-            authority = api("a", "control.sock", "/v1/services/service.ha")["snapshot"]["expires_nanos"]
+            authority = api("a", "control.sock", "/v1/services/" + ha_module)["snapshot"]["expires_nanos"]
             os.kill(controller, signal.SIGSTOP)
             try:
                 time.sleep(max(0, (authority - time.clock_gettime_ns(time.CLOCK_BOOTTIME)) / 1_000_000_000) + 0.3)
@@ -698,7 +749,7 @@ while True:
             progress_before = latest()
             assert progress(progress_before) == mapping, "control loss replaced the established connection"
             if owner != "a":
-                api("b", "control.sock", "/v1/services/service.ha/restart", {})
+                api("b", "control.sock", "/v1/services/" + ha_module + "/restart", {})
                 wait(lambda: active("a"))
                 pd_traffic("a")
                 information("a")
@@ -714,10 +765,10 @@ while True:
                 retained = pd_saved(previous)
                 old_pd_record = api(previous, "control.sock", "/v1/services/service.pd")
                 old_information = api(previous, "control.sock", "/v1/services/service.lan-info")
-            before = modules(previous)["service.ha"]["generation"]
-            api(previous, "control.sock", "/v1/services/service.ha/restart", {})
+            before = modules(previous)[ha_module]["generation"]
+            api(previous, "control.sock", "/v1/services/" + ha_module + "/restart", {})
             wait(lambda: active(owner))
-            wait(lambda: modules(previous).get("service.ha", {}).get("generation", 0) > before and modules(previous).get("service.ha", {}).get("ready"))
+            wait(lambda: modules(previous).get(ha_module, {}).get("generation", 0) > before and modules(previous).get(ha_module, {}).get("ready"))
             if dhcp6_server:
                 pd_traffic(owner)
                 information(owner)
@@ -764,13 +815,13 @@ while True:
             assert progress(latest()) == mapping
         # A real engine crash must revoke this owner's publication and move
         # traffic before a new worker/engine is admitted.
-        before = modules("a")["service.ha"]["generation"]
+        before = modules("a")[ha_module]["generation"]
         pids = run(["ip", "netns", "pids", "ha-a"]).split()
         engines = [int(pid) for pid in pids if Path("/proc/" + pid + "/comm").read_text().strip() == "conntrackd"]
         assert len(engines) == 1, "expected exactly one engine owned by VRRP"
         os.kill(engines[0], signal.SIGKILL)
         wait(lambda: active("b"))
-        wait(lambda: modules("a").get("service.ha", {}).get("generation", 0) > before and modules("a").get("service.ha", {}).get("ready"))
+        wait(lambda: modules("a").get(ha_module, {}).get("generation", 0) > before and modules("a").get(ha_module, {}).get("ready"))
         progress_before = latest()
         assert progress(progress_before) == mapping
         print("PASS engine SIGKILL: withdrawal, peer takeover and actual worker/engine recovery", flush=True)
@@ -956,10 +1007,10 @@ while True:
             pd_server.wait(timeout=5)
             wait(lambda: pd_saved("a").get("epoch") == pd_saved("b").get("epoch") and pd_saved("a").get("revision") == pd_saved("b").get("revision"))
             original = pd_saved(owner)
-            before = modules(owner)["service.ha"]["generation"]
-            api(owner, "control.sock", "/v1/services/service.ha/restart", {})
+            before = modules(owner)[ha_module]["generation"]
+            api(owner, "control.sock", "/v1/services/" + ha_module + "/restart", {})
             wait(lambda: active(successor))
-            wait(lambda: modules(owner).get("service.ha", {}).get("generation", 0) > before and modules(owner).get("service.ha", {}).get("ready"))
+            wait(lambda: modules(owner).get(ha_module, {}).get("generation", 0) > before and modules(owner).get(ha_module, {}).get("ready"))
             pd_traffic(successor)
             restored = pd_saved(successor)["snapshot"]
             original_deadline = original["snapshot"]["prefixes"][0]["valid_until"]["nanos"] - owner_offset
@@ -1008,7 +1059,7 @@ while True:
         api("a", "control.sock", "/v1/config/commit", {"expected_revision": 1, "request_id": "retire-ha", "config": retired})
         assert run(inside("ha-a", ["sysctl", "-n", "net.netfilter.nf_conntrack_tcp_be_liberal"])).strip() == "0", "retired managed sysctl was not restored"
         assert run(inside("ha-a", ["sysctl", "-n", "net.ipv4.conf.lan0.arp_ignore"])).strip() == "0", "retired VRRP ARP setting was not restored"
-        assert "service.ha" not in modules("a"), "retired sync worker remains registered"
+        assert ha_module not in modules("a"), "retired sync worker remains registered"
         print("PASS configuration removal reaped sync worker and restored original conntrack sysctl", flush=True)
         for process in captures:
             process.send_signal(signal.SIGINT)
@@ -1016,7 +1067,7 @@ while True:
         segment, source = ("lan", "198.18.0.50") if pd_dslite else ("wan", "203.0.113.1")
         syn = run(["tcpdump", "-nn", "-r", str(stage / (segment + ".pcap")), "src host " + source + " and dst port 18080 and tcp[tcpflags] & tcp-syn != 0"])
         assert len(syn.splitlines()) == 1, "TCP connection was restarted or never established: " + syn
-        sync = run(["tcpdump", "-nn", "-r", str(stage / "sync.pcap"), "src net 169.254.0.0/16 and dst net 169.254.0.0/16 and udp port 3780"])
+        sync = run(["tcpdump", "-nn", "-r", str(stage / "sync.pcap"), "src net 169.254.0.0/16 and dst net 169.254.0.0/16 and udp port " + str(sync_port)])
         assert len(sync.splitlines()) > 0, "No actual conntrackd replication packets"
         assert (stage / "server.log").read_text().count("accepted") == 1, "server accepted a replacement TCP socket"
         dhcp = run(["tcpdump", "-tt", "-nn", "-vvv", "-r", str(stage / "lan.pcap"), "udp port 67 or udp port 68"])
@@ -1071,6 +1122,7 @@ while True:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--inside", type=Path)
+    parser.add_argument("--import-conntrack", action="store_true", help="Import the VRRP/NAT/conntrack graph through the product CLI")
     parser.add_argument("--dhcp6-server", type=Path)
     parser.add_argument("--pd-dslite", action="store_true")
     parser.add_argument("--stale-owner", action="store_true")
@@ -1080,7 +1132,7 @@ def main():
     parser.add_argument("--release-holds", action="store_true", help="Exercise client RELEASE before sticky recovery; otherwise wait for natural lease expiry")
     args = parser.parse_args()
     if args.inside:
-        peer(args.inside, args.dhcp6_server, args.pd_dslite, args.stale_owner, args.preparation, args.delegated_dns, args.release_holds)
+        peer(args.inside, args.dhcp6_server, args.pd_dslite, args.stale_owner, args.preparation, args.delegated_dns, args.release_holds, args.import_conntrack)
         return
     os.chdir(Path(__file__).resolve().parent.parent)
     if args.pd_dslite and not args.dhcp6_server:
@@ -1089,6 +1141,8 @@ def main():
         parser.error("--preparation requires --pd-dslite")
     if args.delegated_dns and not args.dhcp6_server:
         parser.error("--delegated-dns requires --dhcp6-server")
+    if args.import_conntrack and args.dhcp6_server:
+        parser.error("--import-conntrack uses the direct IPv4 profile")
     root = [] if os.geteuid() == 0 else ["sudo", "-n"]
     for module in ("nf_conntrack", "nf_conntrack_netlink"):
         run(root + ["modprobe", module])
@@ -1097,6 +1151,9 @@ def main():
         for source, name in [(Path(__file__), "peer.py"), (Path("dist/conntrack-engine.tar"), "conntrack-engine.tar"), (Path("dist/conntrack-sources.tar"), "conntrack-sources.tar"), (Path("dist/dnsmasq-engine.tar"), "dnsmasq-engine.tar"), (Path("dist/dnsmasq-sources.tar"), "dnsmasq-sources.tar"), *[(args.binary_dir / name, name) for name in ("routerd", "routerd-modules", "routerd-logging", "routerd-bundle")]]:
             run(root + ["install", "-m", "500", str(source.resolve()), stage + "/" + name])
         peer_args = []
+        if args.import_conntrack:
+            run(root + ["install", "-m", "400", str(Path("internal/legacyconfig/testdata/conntrack.yaml").resolve()), stage + "/conntrack.yaml"])
+            peer_args.append("--import-conntrack")
         if args.dhcp6_server:
             run(root + ["install", "-m", "500", str(args.dhcp6_server.resolve()), stage + "/dhcpd"])
             peer_args = ["--dhcp6-server", stage + "/dhcpd"]

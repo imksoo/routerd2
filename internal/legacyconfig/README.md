@@ -73,6 +73,33 @@ of replaying restored history. Failed UDP sends do not hold up newer records.
 `make check-syslog` exercises product logs with an independent UDP receiver and
 LAN forwarding.
 
+## NAT connection-state synchronization
+
+`NAT44SessionSync` with explicit `mode: conntrackd` joins the existing native
+IPv4 VRRP service; it does not create a separate service or a second kernel
+connection-table owner. Every referenced `NAT44Rule` must require the same single
+IPv4 election, including conditions inherited from its SNAT address. An absent
+or ambiguous owner, multiple sync declarations, event-stream mode and unsupported
+legacy fields are diagnosed rather than guessed or discarded.
+
+The sync interface alias, local/peer IPv4 addresses, port and `ignoreIPv4` retain
+the old conntrackd renderer meanings. As in routerd's conntrackd mode, `natRules`
+identifies the owning election; it is not a per-rule replication filter. The
+engine runs on both members, and the election commits received state before
+publishing its elected links. Keep the explicit
+`net.netfilter.nf_conntrack_tcp_be_liberal: 1` Sysctl declaration required by the
+native handoff contract; the importer does not invent it.
+
+`make check-ha-import` passes the old VRRP/NAT/sync graph through the product's
+`config migrate` command and uses the existing isolated two-router peer, including
+the declared stateful firewall zones. This does not qualify a NAT-only topology
+without filter hooks. The
+DHCP service in that peer remains explicit native intent. The independent client
+keeps one TCP socket and one UDP socket through both handoff directions, worker
+and engine restart, and configuration removal. Captures check for one TCP SYN,
+unchanged UDP translation and actual FTFW replication traffic. PyYAML is required
+by this imported configuration profile.
+
 ## ManagementAccess admission
 
 `ManagementAccess` retains routerd's pre-apply checks at the import boundary:

@@ -42,6 +42,7 @@ help:
 	  'make check-dual-wan    Verify PPPoE/DS-Lite Health/PBR and TCP MSS with independent peers' \
 	  'make check-pppoe        Verify real PPPoE PAP/CHAP, LAN forwarding and recovery' \
 	  'make check-pppoe-pd     Verify PPP PD recovery, WAN replacement and LAN IPv6 with independent ISC DHCP' \
+	  'make check-ha-import   Verify imported NAT synchronization across two-router handoff' \
 	  'make check-ha-state    Preserve DHCP/TCP/UDP state across two native routers' \
 	  'make check-ha-pd       Verify shared PD across two routers with different BOOTTIME clocks' \
 	  'make check-ha-pd-preparation Verify interrupted B4 preparation and overlapping DAD' \
@@ -381,6 +382,11 @@ dnsmasq-engine:
 	@set -eu; engine_id=$$($(DOCKER) create --network none routerd2-dnsmasq-engine:$(ALPINE_VERSION)-$(DNSMASQ_ARCH) /not-executed); \
 	  trap '$(DOCKER) rm "$$engine_id" >/dev/null' EXIT HUP INT TERM; \
 	  $(DOCKER) export "$$engine_id" | tar --no-same-owner -xf - -C $(DNSMASQ_DIR) dnsmasq-engine.tar dnsmasq-sources.tar
+
+# The imported graph shares the existing isolated two-router state-handoff peer.
+.PHONY: check-ha-import
+check-ha-import: build build-publisher conntrack-engine dnsmasq-engine
+	$(PYTHON) scripts/ha-state-peer.py --import-conntrack
 
 .PHONY: check-ha-state
 check-ha-state: build build-publisher conntrack-engine dnsmasq-engine

@@ -192,6 +192,8 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 			}
 		case "VXLANSegment", "VXLANTunnel":
 			c.reject(r, "", "unsupported_semantics", "legacy VXLAN FDB peers, L2 filtering and outer-DF defaults require explicit native conversion; a single remote is not a lossless substitute")
+		case "NAT44SessionSync":
+			// Joined to the single IPv4 election after NAT conditions are compiled.
 		case "NTPClient", "NTPServer":
 			// Joined below into the one clock owner.
 		case "SAMNodeSet", "SAMTransportProfile":
@@ -222,6 +224,7 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 	extra = append(extra, transports...)
 	c.ntp(vrrpNames)
 	extra = append(extra, c.firewall(vrrpNames)...)
+	c.conntrackSync(extra)
 	c.localServiceRedirects()
 	c.firewallServices()
 	c.vpnListenerFirewall()

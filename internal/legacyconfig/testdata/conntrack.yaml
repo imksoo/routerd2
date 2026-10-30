@@ -1,0 +1,54 @@
+apiVersion: routerd.net/v1alpha1
+kind: Router
+metadata: {name: imported-conntrack}
+spec:
+  resources:
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: Interface
+      metadata: {name: lan}
+      spec: {ifname: lan0, managed: true, adminUp: true}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: Interface
+      metadata: {name: sync}
+      spec: {ifname: sync0, managed: true, adminUp: true}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: VirtualAddress
+      metadata: {name: gateway}
+      spec:
+        family: ipv4
+        interface: lan
+        address: 198.18.0.1/24
+        mode: vrrp
+        vrrp: {virtualRouterID: 42, priority: 150, peers: [198.18.0.3]}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: IPv4StaticAddress
+      metadata: {name: public}
+      spec:
+        interface: lan
+        address: 203.0.113.1/32
+        when: {state: {VirtualAddress/gateway.role: {equals: master}}}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: NAT44Rule
+      metadata: {name: outgoing}
+      spec:
+        type: snat
+        egressInterface: lan
+        sourceRanges: [198.18.0.0/24]
+        snatAddressFrom: {resource: IPv4StaticAddress/public, field: address}
+        when: {state: {VirtualAddress/gateway.role: {equals: master}}}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: NAT44SessionSync
+      metadata: {name: state}
+      spec:
+        mode: conntrackd
+        natRules: [NAT44Rule/outgoing]
+        conntrackd:
+          interface: sync
+          localAddress: 169.254.42.2
+          peerAddress: 169.254.42.3
+          port: 3781
+          ignoreIPv4: [198.18.0.2]
+    - apiVersion: system.routerd.net/v1alpha1
+      kind: Sysctl
+      metadata: {name: tcp-window}
+      spec: {key: net.netfilter.nf_conntrack_tcp_be_liberal, value: "1", expectedValue: "1", runtime: true, persistent: true}
