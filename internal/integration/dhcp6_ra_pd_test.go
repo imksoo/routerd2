@@ -191,7 +191,23 @@ func TestDaemonDHCP6RAAddsAddressToPD(t *testing.T) {
 		t.Fatal("independent ISC DHCP server required")
 	}
 	cf, leases := filepath.Join(work, "dhcp6.conf"), filepath.Join(work, "dhcp6.leases")
-	if err := os.WriteFile(cf, []byte("default-lease-time 30; preferred-lifetime 20; option dhcp-renewal-time 10; option dhcp-rebinding-time 20; option dhcp6.name-servers 2001:db8:42::1; option dhcp6.domain-search \"wan.test\"; option dhcp6.sntp-servers 2001:db8:42::1; subnet6 2001:db8:42::/64 { range6 2001:db8:42::100 2001:db8:42::101; prefix6 2001:db8:80:: 2001:db8:80:f0:: /60; }\n"), 0600); err != nil {
+	// ISC supplies DNS with IA_PD, but serves the remaining requested options
+	// through Information-request. One option in the PD Reply is not the whole
+	// information exchange declared by the migrated configuration.
+	if err := os.WriteFile(cf, []byte(`default-lease-time 30; preferred-lifetime 20;
+option dhcp-renewal-time 10; option dhcp-rebinding-time 20;
+option dhcp6.aftr-name code 64 = text;
+option dhcp6.name-servers 2001:db8:42::1;
+if not exists dhcp6.ia-pd {
+  option dhcp6.domain-search "wan.test";
+  option dhcp6.sntp-servers 2001:db8:42::1;
+  option dhcp6.aftr-name "\004aftr\004test\000";
+}
+subnet6 2001:db8:42::/64 {
+  range6 2001:db8:42::100 2001:db8:42::101;
+  prefix6 2001:db8:80:: 2001:db8:80:f0:: /60;
+}
+`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(leases, nil, 0600); err != nil {
@@ -231,6 +247,42 @@ func TestDaemonDHCP6RAAddsAddressToPD(t *testing.T) {
 	if len(first.Addresses) != 0 || first.RAStarted.Managed {
 		t.Fatal("clear M unexpectedly requested IA_NA", first)
 	}
+	until(t, 5*time.Second, func() bool {
+		first = read()
+		return first.AFTRName == "aftr.test" && len(first.DNSServers) == 1 && len(first.SNTPServers) == 1 && slices.Contains(first.DomainSearch, "wan.test")
+	})
+	wan.mu.Lock()
+	informationXIDs := map[string]bool{}
+	pdDNS, informationReply := false, false
+	for _, packet := range wan.packets {
+		b := packet.data
+		if len(b) < 66 || b[20] != 17 {
+			continue
+		}
+		src, dst := binary.BigEndian.Uint16(b[54:56]), binary.BigEndian.Uint16(b[56:58])
+		if src == 546 && dst == 547 && b[62] == 11 {
+			informationXIDs[string(b[63:66])] = true
+		}
+		if src != 547 || dst != 546 || b[62] != 7 {
+			continue
+		}
+		opts, err := dhcp6FixtureOptions(b[66:])
+		if err != nil {
+			wan.mu.Unlock()
+			t.Fatal(err)
+		}
+		codes := map[uint16]bool{}
+		for _, o := range opts {
+			codes[o.code] = true
+		}
+		pdDNS = pdDNS || codes[25] && codes[23] && !codes[24] && !codes[31] && !codes[64]
+		informationReply = informationReply || informationXIDs[string(b[63:66])] && codes[23] && codes[24] && codes[31] && codes[64]
+	}
+	wan.mu.Unlock()
+	if !pdDNS || !informationReply {
+		t.Fatal("missing actual DNS-only PD Reply or matching supplementary Information Reply", pdDNS, informationReply)
+	}
+	t.Log("ISC DNS-only PD Reply and separate Information-request/Reply supplied AFTR, SNTP and search")
 	generation := state.Generation
 	// ISC supplies the grant; the independent delegating router supplies its
 	// return route, just as the PPP peer does through its point-to-point link.

@@ -219,6 +219,10 @@ func (c *client) accept(m message, clock boottime.Clock) error {
 	if c.info.kind != 0 && m.xid == c.info.xid && m.kind == reply {
 		if m.status == 0 {
 			c.information(m, clock)
+			c.info = exchange{}
+			if c.snapshot.InformationRefreshAt.Nanos != 0 {
+				c.info.next = time.Unix(0, int64(c.snapshot.InformationRefreshAt.Nanos))
+			}
 		}
 		return nil
 	}
@@ -289,6 +293,7 @@ func (c *client) accept(m message, clock boottime.Clock) error {
 	if m.na == nil && m.pd == nil {
 		return nil
 	}
+	informationUntil, hasInformation := c.snapshot.InformationUntil(clock)
 	next := c.snapshot
 	var renewAt, rebindAt lifetime.Deadline
 	for _, ia := range []*association{m.na, m.pd} {
@@ -354,11 +359,31 @@ func (c *client) accept(m message, clock boottime.Clock) error {
 	if m.maxInformation != 0 {
 		c.maxInformation = time.Duration(m.maxInformation) * time.Second
 	}
-	if len(m.dns)+len(m.domains)+len(m.sntp) > 0 || m.aftr != "" {
+	retained := len(m.dns) == 0 && len(c.snapshot.DNSServers) > 0 ||
+		len(m.domains) == 0 && len(c.snapshot.DomainSearch) > 0 ||
+		len(m.sntp) == 0 && len(c.snapshot.SNTPServers) > 0 ||
+		m.aftr == "" && c.snapshot.AFTRName != ""
+	if hasInformation && retained {
+		// Apply supplied changes without erasing omitted options or
+		// extending their original deadline before Information replies.
+		if len(m.dns) > 0 {
+			c.snapshot.DNSServers = m.dns
+		}
+		if len(m.domains) > 0 {
+			c.snapshot.DomainSearch = m.domains
+		}
+		if len(m.sntp) > 0 {
+			c.snapshot.SNTPServers = m.sntp
+		}
+		if m.aftr != "" {
+			c.snapshot.AFTRName = m.aftr
+		}
+		c.snapshot.InformationRefreshAt = lifetime.Minimum(clock, informationUntil, lifetime.After(clock, m.refresh))
+	} else if len(m.dns)+len(m.domains)+len(m.sntp) > 0 || m.aftr != "" {
 		c.information(m, clock)
-		return nil
 	}
-	// Information has its own transaction: it cannot replace or postpone renew.
+	// Servers may supply the remaining requested options only in an
+	// Information Reply. This exchange cannot replace or postpone renew.
 	if c.info.kind == 0 {
 		return c.info.begin(information, now)
 	}
@@ -381,10 +406,6 @@ func (c *client) information(m message, clock boottime.Clock) {
 	c.snapshot.InfoReceivedNanos = uint64(clock.BoottimeNanoseconds)
 	c.snapshot.InformationRefreshSeconds = m.refresh
 	c.snapshot.InformationRefreshAt = lifetime.After(clock, m.refresh)
-	c.info = exchange{}
-	if c.snapshot.InformationRefreshAt.Nanos != 0 {
-		c.info.next = time.Unix(0, int64(c.snapshot.InformationRefreshAt.Nanos))
-	}
 	if m.maxInformation != 0 {
 		c.maxInformation = time.Duration(m.maxInformation) * time.Second
 	}

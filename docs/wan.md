@@ -236,7 +236,26 @@ configuration because an explicit policy records a deliberate change of
 semantics, not automatic compatibility.
 
 A same-interface `DHCPv6Information` resource can share the original PD client's
-socket and lease context. The compiler preserves the original B4 peer and the
+socket and lease context. After a PD Reply, the client also performs an
+Information-request even when the PD Reply already contains an information
+option. Some servers return DNS with IA_PD and provide AFTR, SNTP and search
+options only through the separate information exchange. A partial PD Reply
+updates the supplied values while preserving omitted live information. It
+does not extend that information's original deadline or replace an information
+transaction already in progress. Information Replies
+may themselves be partial; no optional option is required for acceptance.
+
+`make check-dhcp6-ra-pd` exercises this split using independent ISC DHCP:
+the packet capture must contain a DNS-only PD Reply and a separate matching
+Information-request/Reply carrying DNS, AFTR, SNTP and search. The same test
+uses BusyBox for LAN information acquisition and verifies actual DNS and
+forwarded traffic, renewal, restart and expiry. This is an isolated peer
+condition; the same split has not been reproduced on the physical HGW.
+The `dhcp6-information-original-expiry-native92` build passed this test on
+2026-10-31 at 01:57 JST (67.22 seconds). The unmodified client had failed the
+same ISC split because no supplementary Information-request was sent.
+
+The compiler preserves the original B4 peer and the
 independent IPv4 default route when it can represent the complete graph. It
 rejects unsupported HA and delegated-source selection rather than dropping them.
 See the [migration contract](../internal/legacyconfig/README.md) and its

@@ -308,3 +308,62 @@ func TestConfirmNotOnLinkDiscardsGrantAtEndOfReplyWindow(t *testing.T) {
 		t.Fatal("NotOnLink did not discard the old grant and discover again", err, c.snapshot)
 	}
 }
+
+func TestPDInformationDoesNotReplaceSupplementaryExchange(t *testing.T) {
+	clock := clockAt(time.Unix(1000, 0))
+	c := client{
+		cfg:  dhcp6config.Config{IAID: 7, RequestPrefix: true},
+		duid: []byte{0, 3, 0, 1}, server: []byte{0, 3, 0, 2},
+		snapshot: dhcp6config.Snapshot{BootID: clock.BootID},
+	}
+	dns := []string{"2001:db8::53"}
+	receivePD := func() {
+		t.Helper()
+		if err := c.begin(renew, time.Unix(0, clock.BoottimeNanoseconds)); err != nil {
+			t.Fatal(err)
+		}
+		m := message{kind: reply, xid: c.lease.xid, client: c.duid, server: c.server,
+			dns: dns, refresh: 600,
+			pd: &association{iaid: 7, t1: 10, t2: 20, leases: []assignment{{netip.MustParsePrefix("2001:db8:100::/56"), 20, 30}}}}
+		if err := c.accept(m, clock); err != nil {
+			t.Fatal(err)
+		}
+	}
+	receivePD()
+	if c.info.kind != information || len(c.snapshot.DNSServers) != 1 {
+		t.Fatal("DNS-only PD Reply skipped supplementary Information-request", c.info, c.snapshot)
+	}
+	xid := c.info.xid
+	m := message{kind: reply, xid: xid, client: c.duid, server: c.server,
+		dns: []string{"2001:db8::53"}, sntp: []string{"2001:db8::123"},
+		domains: []string{"wan.test"}, aftr: "aftr.test", refresh: 600}
+	if err := c.accept(m, clock); err != nil {
+		t.Fatal(err)
+	}
+	received := c.snapshot.InfoReceivedNanos
+	deadline, _ := c.snapshot.InformationUntil(clock)
+	clock.BoottimeNanoseconds += int64(10 * time.Second)
+	dns = nil
+	receivePD()
+	xid = c.info.xid
+	clock.BoottimeNanoseconds += int64(time.Second)
+	dns = []string{"2001:db8::54"}
+	receivePD()
+	// A subsequent PD-only Reply must not revive omitted information through
+	// its extended prefix lifetime, either.
+	dns = nil
+	clock.BoottimeNanoseconds += int64(time.Second)
+	receivePD()
+	if c.info.kind != information || c.info.xid != xid || c.snapshot.AFTRName != "aftr.test" || len(c.snapshot.SNTPServers) != 1 || len(c.snapshot.DNSServers) != 1 || c.snapshot.DNSServers[0] != "2001:db8::54" || c.snapshot.InfoReceivedNanos != received || c.snapshot.InformationRefreshAt != deadline || c.snapshot.Prefixes[0].ValidUntil.Nanos <= deadline.Nanos {
+		t.Fatal("partial PD Reply erased information, extended its deadline or replaced its pending exchange", c.info, c.snapshot)
+	}
+	// A matching partial Information Reply is still useful; absent optional
+	// options must not turn the whole reply into a required-options failure.
+	m.xid, m.aftr, m.sntp = xid, "", nil
+	if err := c.accept(m, clock); err != nil {
+		t.Fatal(err)
+	}
+	if c.info.kind != 0 || len(c.snapshot.DNSServers) != 1 || c.snapshot.AFTRName != "" || c.snapshot.InfoReceivedNanos == received {
+		t.Fatal("partial Information Reply was rejected or left its exchange running", c.info, c.snapshot)
+	}
+}
