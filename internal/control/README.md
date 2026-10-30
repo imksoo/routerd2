@@ -325,3 +325,22 @@ post-commit lifecycle save failure must not report that the committed source
 was rolled back. At most 128 live rule declarations are accepted before any
 effects; durable registrations/tombstones still share store capacity limits.
 Retention/archive/capacity operations remain required for long-running use.
+
+## Restoring an explicitly saved configuration
+
+`POST /v1/config/restore` accepts a `RestoreRequest` containing the immutable
+`snapshot` reference, `expected_revision`, `request_id` and optional
+`confirm_timeout_seconds`. `Store.ResolveSnapshot` verifies the saved content
+and its store identity. `Engine.Restore` then passes only its configuration to
+`Engine.Commit`; it creates a new current revision instead of replaying the old
+revision, runtime observations, release selection or journal. Resolution does
+not hold the writer lock. The normal commit path still owns revision conflicts,
+idempotent replay, release preparation fencing, network application, persistence
+and failure recovery. A confirmed restore uses the ordinary confirmation and
+automatic rollback path. The HTTP acknowledgment has the same bounded complete
+or explicit-omission form as a normal commit.
+
+This follows the old routerctl rollback behavior of reading saved intent and
+submitting it through the existing apply owner. It restores one verified local
+configuration snapshot; it does not restore an entire appliance or import a
+snapshot from another configuration store.
