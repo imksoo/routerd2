@@ -159,6 +159,7 @@ func TestBuiltRuntimeSSHRollback(t *testing.T) {
 			t.Error(err)
 		}
 	}()
+	view := startUpdateView(t, ctx, dir)
 	sshKey, err := ssh.NewSignerFromKey(key)
 	if err != nil {
 		t.Fatal(err)
@@ -230,6 +231,7 @@ func TestBuiltRuntimeSSHRollback(t *testing.T) {
 	if unchanged.Generation != state.Generation || unchanged.Pending != nil {
 		t.Fatal("refused rollback changed selection")
 	}
+	checkUpdateView(t, ctx, view, unchanged, "確定版を選択中", current.Digest)
 	raw, _ = json.Marshal(request)
 	pending := command("update rollback", raw, false)
 	if pending.Active == nil || *pending.Active != current || pending.Pending == nil || pending.Pending.Release != previous || pending.Operation != "prepare-rollback" || pending.HighWatermark != current.Sequence {
@@ -239,6 +241,7 @@ func TestBuiltRuntimeSSHRollback(t *testing.T) {
 	if snapshot.StoreID != committed.StoreID || snapshot.Revision != committed.Revision {
 		t.Fatal("rollback did not preserve current configuration")
 	}
+	checkUpdateView(t, ctx, view, pending, "次回起動待ち", current.Digest)
 	saved, err := cfg.Load()
 	if err != nil || saved.Revision != committed.Revision {
 		t.Fatal("preparation changed running configuration", err)
@@ -249,6 +252,7 @@ func TestBuiltRuntimeSSHRollback(t *testing.T) {
 	if canceled.Pending != nil || canceled.Active == nil || *canceled.Active != current || canceled.ConfigHighWatermark != pending.ConfigHighWatermark {
 		t.Fatal("cancel changed active selection or reserved authority")
 	}
+	checkUpdateView(t, ctx, view, canceled, "確定版を選択中", current.Digest)
 	prune := func(request control.ReleasePruneRequest, wantFailure bool) release.CleanupResult {
 		t.Helper()
 		session, err := client.NewSession()
@@ -300,9 +304,26 @@ func TestBuiltRuntimeSSHRollback(t *testing.T) {
 	if _, err := nextBundle.Seek(0, 0); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := root.Stage(ctx, nextBundle); err != nil {
+	nextRef, err := root.Stage(ctx, nextBundle)
+	if err != nil {
 		t.Fatal("explicit SSH cleanup did not free capacity for the next signed runtime", err)
 	}
 	t.Log("SSH prune: stale generation and current/previous runtimes refused; explicit unused runtime and old generations removed; unchanged selection/watermarks and next signed runtime staging succeeded")
 	t.Log("SSH rollback: verified previous product compiler accepted current configuration; stale revision/generation and duplicate rejected; active runtime/configuration unchanged; cancellation preserved watermarks")
+	// Arrange actual journal transitions for the read-only console. The control
+	// handler remains on its original executable; this is not a reboot trial.
+	raw, _ = json.Marshal(control.ReleasePrepareRequest{ExpectedGeneration: afterCleanup.Generation, ExpectedRevision: committed.Revision, Release: nextRef})
+	prepared := command("update prepare", raw, false)
+	prune(control.ReleasePruneRequest{ExpectedGeneration: prepared.Generation, ReleaseDigests: []string{nextRef.Digest}}, true)
+	trial, err := root.BeginBoot(ctx, "update-view-arranged-boot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	trial.Image.Close()
+	checkUpdateView(t, ctx, view, trial.State, "試行中（正常確定待ち）", current.Digest)
+	recovered, err := root.FailBoot(ctx, trial.State.Attempt.BootID, trial.State.Attempt.Token, "recorded trial failure <unconfirmed>")
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkUpdateView(t, ctx, view, recovered, "確定版を選択中", current.Digest)
 }

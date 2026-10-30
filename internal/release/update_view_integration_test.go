@@ -57,7 +57,7 @@ func startUpdateView(t *testing.T, ctx context.Context, runtimeDir string) strin
 
 // The existing fixture supplies states produced by the real signed store and
 // control API. HTTP rendering does not establish a reboot or successful trial.
-func checkUpdateView(t *testing.T, ctx context.Context, endpoint string, state release.State) {
+func checkUpdateView(t *testing.T, ctx context.Context, endpoint string, state release.State, wantState, knownGoodDigest string) {
 	t.Helper()
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
@@ -143,16 +143,7 @@ func checkUpdateView(t *testing.T, ctx context.Context, endpoint string, state r
 	if state.Pending != nil && state.Pending.Startup != nil && !strings.Contains(selections["pending"], state.Pending.Startup.Snapshot.Digest) {
 		t.Fatal("update view differs from the reserved configuration snapshot")
 	}
-	knownGood := state.Active
-	wantState := "起動する版が未選択"
-	if state.Active != nil {
-		wantState = "確定版を選択中"
-	}
-	if state.Pending != nil {
-		wantState = "次回起動待ち"
-	}
 	if state.Attempt != nil {
-		wantState, knownGood = "試行中（正常確定待ち）", state.Previous
 		if fields["attempt"] != fmt.Sprintf("%d / %d", state.Attempt.Number, state.Pending.MaxAttempts) {
 			t.Fatal("update view differs from the actual trial attempt")
 		}
@@ -162,7 +153,7 @@ func checkUpdateView(t *testing.T, ctx context.Context, endpoint string, state r
 	if fields["state"] != wantState {
 		t.Fatalf("update view state=%q, want %q", fields["state"], wantState)
 	}
-	if knownGood != nil && !strings.Contains(fields["known-good"], knownGood.Digest) {
+	if knownGoodDigest != "" && !strings.Contains(fields["known-good"], knownGoodDigest) {
 		t.Fatal("update view misidentifies the stored known-good version")
 	}
 	if state.LastFailure != nil {
