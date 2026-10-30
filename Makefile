@@ -51,6 +51,7 @@ help:
 	  'make check-vrrp-unicast Verify VRRP peer failover and finite WAN identity' \
 	  'make check-tailscale   Verify signed Tailscale subnet/exit traffic, identity and revoke with independent peers' \
 	  'make check-otlp        Verify OTLP/gRPC logs, collector outage and bounded replacement' \
+	  'make check-management  Verify imported management access and SSH configuration/recovery' \
 	  'make check-syslog      Verify UDP log delivery, replacement and receiver outage with forwarding' \
 	  'make check-ntp         Verify time synchronization and LAN NTP with independent chronyd' \
 	  'make check-ntp-dhcp6   Verify learned time sources, original expiry and VRRP conditions with independent peers' \
@@ -130,6 +131,10 @@ check: fmt-check test test-dependencies test-tools race vet
 .PHONY: check-otlp
 check-otlp: build
 	$(PYTHON) scripts/otlp-peer.py --collector $(OTELCOL)
+
+.PHONY: check-management
+check-management: build
+	$(PYTHON) scripts/daemon-tests.py management --go '$(GO)'
 
 .PHONY: check-syslog
 check-syslog: build

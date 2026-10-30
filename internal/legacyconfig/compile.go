@@ -80,6 +80,7 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 	}
 	c.initOptions(options, explicit)
 	c.collectAliases()
+	c.managementAccess()
 	var extra []resourceprogram.Resource
 	var conditions []resourceCondition
 	var informationConditions []resourceCondition
@@ -171,6 +172,8 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 			c.telemetry(r)
 		case "LogSink":
 			c.logSink(r)
+		case "ManagementAccess":
+			// Checked together at the import boundary above.
 		case "HealthCheck":
 			name := c.healthCheck(r)
 			conditions = append(conditions, resourceCondition{id: "service/" + name, source: r, when: r.Spec.(api.HealthCheckSpec).When})

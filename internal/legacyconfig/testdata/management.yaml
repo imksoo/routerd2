@@ -1,0 +1,23 @@
+apiVersion: routerd.net/v1alpha1
+kind: Router
+metadata: {name: management}
+spec:
+  resources:
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: Interface
+      metadata: {name: management}
+      spec: {ifname: mgmt0, managed: true, adminUp: true}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: IPv4StaticAddress
+      metadata: {name: management}
+      spec: {interface: management, address: 198.18.0.1/24}
+    - apiVersion: firewall.routerd.net/v1alpha1
+      kind: FirewallZone
+      metadata: {name: management}
+      spec: {role: mgmt, interfaces: [Interface/management]}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: ManagementAccess
+      metadata: {name: management}
+      spec:
+        interfaces: [Interface/management]
+        allowSourceCIDRs: [198.18.0.0/24]

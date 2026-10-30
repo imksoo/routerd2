@@ -27,6 +27,7 @@ import (
 	"github.com/imksoo/routerd2/internal/control"
 	"github.com/imksoo/routerd2/internal/derivedcontroller"
 	"github.com/imksoo/routerd2/internal/events"
+	"github.com/imksoo/routerd2/internal/legacyconfig"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
@@ -89,6 +90,49 @@ func TestDaemonConfigurationAndRecovery(t *testing.T) {
 	dnsPort, sshPort := port(t), port(t)
 	dns := dnsconfig.RuntimeConfig{Resource: "dns", Spec: api.DNSResolverSpec{Listen: []api.DNSResolverListenSpec{{Name: "local", Addresses: []string{"127.0.0.1"}, Port: dnsPort}}, Sources: []api.DNSResolverSourceSpec{{Name: "zones", Kind: "zone", Match: []string{"lab.example"}, ZoneRef: []string{"DNSZone/lan-zone"}}}}, Zones: []dnsconfig.RuntimeZone{{Name: "lan-zone", Spec: api.DNSZoneSpec{Zone: "lab.example", Records: []api.DNSZoneRecordSpec{{Hostname: "router", IPv4: "192.0.2.1"}}}}}}
 	doc := config.FromNative(config.Native{Services: []serviceconfig.Service{{Name: "dns", DNS: &serviceconfig.DNS{RuntimeConfig: dns}}}})
+	// Exercise the imported management zone through a separate client namespace.
+	// ManagementAccess is an admission check, not a source-prefix firewall rule.
+	peer := fixturePeerNamespace(t, "mgmt0", "client0")
+	if err := fixtureInsideNamespace(peer, func() error {
+		link, err := netlink.LinkByName("client0")
+		if err != nil {
+			return err
+		}
+		address, err := netlink.ParseAddr("198.18.0.2/24")
+		if err != nil {
+			return err
+		}
+		return netlink.AddrAdd(link, address)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	management, err := legacyconfig.Compile([]byte(`apiVersion: routerd.net/v1alpha1
+kind: Router
+metadata: {name: management}
+spec:
+  resources:
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: Interface
+      metadata: {name: management}
+      spec: {ifname: mgmt0, managed: true, adminUp: true}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: IPv4StaticAddress
+      metadata: {name: management}
+      spec: {interface: management, address: 198.18.0.1/24}
+    - apiVersion: firewall.routerd.net/v1alpha1
+      kind: FirewallZone
+      metadata: {name: management}
+      spec: {role: mgmt, interfaces: [Interface/management]}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: ManagementAccess
+      metadata: {name: management}
+      spec: {interfaces: [Interface/management], allowSourceCIDRs: [198.18.0.0/24]}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc.Resources = append(doc.Resources, management.Document.Resources...)
+	_ = healthPBRCapture(t, "mgmt0")
 	configPath := filepath.Join(dir, "config.json")
 	if err = config.AtomicJSON(configPath, doc); err != nil {
 		t.Fatal(err)
@@ -101,7 +145,7 @@ func TestDaemonConfigurationAndRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b := runtimeconfig.Boot{Platform: "host", Config: configPath, Workers: runtimeconfig.NativeWorkers(filepath.Join(os.Getenv("ROUTERD2_TEST_BIN_DIR"), "routerd-modules")), RuntimeDir: runDir, StateDir: stateDir, SSH: runtimeconfig.SSH{Listen: fmt.Sprintf("127.0.0.1:%d", sshPort), User: "admin", AuthorizedKeys: []string{string(ssh.MarshalAuthorizedKey(signer.PublicKey()))}}}
+	b := runtimeconfig.Boot{Platform: "host", Config: configPath, Workers: runtimeconfig.NativeWorkers(filepath.Join(os.Getenv("ROUTERD2_TEST_BIN_DIR"), "routerd-modules")), RuntimeDir: runDir, StateDir: stateDir, SSH: runtimeconfig.SSH{Listen: fmt.Sprintf("0.0.0.0:%d", sshPort), User: "admin", AuthorizedKeys: []string{string(ssh.MarshalAuthorizedKey(signer.PublicKey()))}}}
 	boot := filepath.Join(dir, "boot.json")
 	if err = config.AtomicJSON(boot, b); err != nil {
 		t.Fatal(err)
@@ -161,11 +205,17 @@ func TestDaemonConfigurationAndRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client, err := ssh.Dial("tcp", b.SSH.Listen, &ssh.ClientConfig{User: "admin", Auth: []ssh.AuthMethod{ssh.PublicKeys(signer)}, HostKeyCallback: ssh.FixedHostKey(host.PublicKey()), Timeout: 3 * time.Second})
+	var client *ssh.Client
+	err = fixtureInsideNamespace(peer, func() error {
+		var dialErr error
+		client, dialErr = ssh.Dial("tcp", fmt.Sprintf("198.18.0.1:%d", sshPort), &ssh.ClientConfig{User: "admin", Auth: []ssh.AuthMethod{ssh.PublicKeys(signer)}, HostKeyCallback: ssh.FixedHostKey(host.PublicKey()), Timeout: 3 * time.Second})
+		return dialErr
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer client.Close()
+	t.Log("imported ManagementAccess/mgmt FirewallZone: real SSH from isolated client accepted")
 	session, err := client.NewSession()
 	if err != nil {
 		t.Fatal(err)
@@ -199,8 +249,10 @@ func TestDaemonConfigurationAndRecovery(t *testing.T) {
 		t.Fatal("SSH editor timed out")
 	}
 	session.Close()
+	if strings.Contains(transcript.String(), "Error:") || stderr.Len() != 0 {
+		t.Fatalf("SSH editing failed: %s %s", transcript.String(), stderr.String())
+	}
 	var state control.State
-	state = control.State{}
 	if err = ctl.Do(ctx, "GET", "/v1/config", nil, &state); err != nil {
 		t.Fatal(err)
 	}

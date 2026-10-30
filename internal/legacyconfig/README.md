@@ -73,6 +73,22 @@ of replaying restored history. Failed UDP sends do not hold up newer records.
 `make check-syslog` exercises product logs with an independent UDP receiver and
 LAN forwarding.
 
+## ManagementAccess admission
+
+`ManagementAccess` retains routerd's pre-apply checks at the import boundary:
+its interfaces must name declared `Interface` resources, and when firewall zones
+exist each management interface must belong to a `mgmt` or `trust` zone. Unless
+all declarations disable `requireWebConsoleBound`, an enabled `WebConsole`
+listening on `0.0.0.0` or `::` is rejected. `WebConsole` itself still has no native
+migration; passing the binding check does not make that resource supported.
+
+The mapping records `configuration-validation`, not a new listener or firewall
+rule. Legacy `allowSourceCIDRs` was checked for CIDR syntax but never enforced;
+the importer records that fact and does not invent an ACL from it. Actual
+management access remains with the imported firewall and explicit native boot
+SSH configuration. `make check-management` exercises that imported management
+zone from an isolated SSH client, including confirmed configuration and recovery.
+
 ## VRRP election and VIP identity
 
 Basic `VirtualAddress` VRRP elections retain the original Keepalived defaults:

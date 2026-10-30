@@ -499,28 +499,57 @@ func dereferenceType(t reflect.Type) reflect.Type {
 	return t
 }
 
-func jsonField(t reflect.Type, name string) (int, error) {
-	t = dereferenceType(t)
-	if t.Kind() != reflect.Struct {
-		return 0, errors.New("path continues through a non-object value")
-	}
-	for i := 0; i < t.NumField(); i++ {
-		field := t.Field(i)
-		if field.IsExported() && strings.Split(field.Tag.Get("json"), ",")[0] == name {
-			return i, nil
+// jsonFields follows promoted fields of anonymous configuration structs. An
+// explicit JSON name (or "-") keeps an embedded object from being flattened.
+func jsonFields(t reflect.Type) []reflect.StructField {
+	var fields []reflect.StructField
+	for _, field := range reflect.VisibleFields(t) {
+		name := strings.Split(field.Tag.Get("json"), ",")[0]
+		if !field.IsExported() || name == "-" || field.Anonymous && name == "" && dereferenceType(field.Type).Kind() == reflect.Struct {
+			continue
+		}
+		owner := t
+		promoted := true
+		for _, index := range field.Index[:len(field.Index)-1] {
+			parent := owner.Field(index)
+			if strings.Split(parent.Tag.Get("json"), ",")[0] != "" {
+				promoted = false
+				break
+			}
+			owner = dereferenceType(parent.Type)
+		}
+		if promoted {
+			fields = append(fields, field)
 		}
 	}
-	return 0, fmt.Errorf("unknown configuration field %q", name)
+	return fields
 }
 
-func namedList(t reflect.Type) (int, bool) {
+func jsonField(t reflect.Type, name string) ([]int, error) {
+	t = dereferenceType(t)
+	if t.Kind() != reflect.Struct {
+		return nil, errors.New("path continues through a non-object value")
+	}
+	for _, field := range jsonFields(t) {
+		key := strings.Split(field.Tag.Get("json"), ",")[0]
+		if key == "" {
+			key = field.Name
+		}
+		if key == name {
+			return field.Index, nil
+		}
+	}
+	return nil, fmt.Errorf("unknown configuration field %q", name)
+}
+
+func namedList(t reflect.Type) ([]int, bool) {
 	for _, key := range []string{"id", "name"} {
 		index, err := jsonField(t, key)
-		if err == nil && dereferenceType(t).Field(index).Type.Kind() == reflect.String {
+		if err == nil && dereferenceType(t).FieldByIndex(index).Type.Kind() == reflect.String {
 			return index, true
 		}
 	}
-	return 0, false
+	return nil, false
 }
 
 func pathType(t reflect.Type, parts []pathPart) (reflect.Type, error) {
@@ -530,7 +559,7 @@ func pathType(t reflect.Type, parts []pathPart) (reflect.Type, error) {
 		if err != nil {
 			return nil, err
 		}
-		t = t.Field(index).Type
+		t = t.FieldByIndex(index).Type
 		if part.selected {
 			if t.Kind() != reflect.Slice {
 				return nil, fmt.Errorf("%s is not a list", part.field)
@@ -557,7 +586,7 @@ func listNumber(selector string) (int, error) {
 func listIndex(v reflect.Value, selector string, create bool) (int, error) {
 	if key, named := namedList(v.Type().Elem()); named {
 		for i := 0; i < v.Len(); i++ {
-			if v.Index(i).Field(key).String() == selector {
+			if v.Index(i).FieldByIndex(key).String() == selector {
 				return i, nil
 			}
 		}
@@ -565,7 +594,7 @@ func listIndex(v reflect.Value, selector string, create bool) (int, error) {
 			return 0, fmt.Errorf("list entry %q is not configured", selector)
 		}
 		entry := reflect.New(v.Type().Elem()).Elem()
-		entry.Field(key).SetString(selector)
+		entry.FieldByIndex(key).SetString(selector)
 		v.Set(reflect.Append(v, entry))
 		return v.Len() - 1, nil
 	}
@@ -625,7 +654,7 @@ func mutatePath(v reflect.Value, parts []pathPart, value string, remove bool) er
 	if err != nil {
 		return err
 	}
-	field := v.Field(index)
+	field := v.FieldByIndex(index)
 	target := field
 	selected := -1
 	if part.selected {
@@ -660,7 +689,7 @@ func mutatePath(v reflect.Value, parts []pathPart, value string, remove bool) er
 	}
 	if selected >= 0 {
 		if key, named := namedList(target.Type()); named {
-			name := decoded.Elem().Field(key)
+			name := decoded.Elem().FieldByIndex(key)
 			if name.String() != "" && name.String() != part.selector {
 				return errors.New("entry identity must match its list selector")
 			}
@@ -683,16 +712,16 @@ func readPath(v reflect.Value, parts []pathPart) (reflect.Value, error) {
 		if err != nil {
 			return reflect.Value{}, err
 		}
-		v = v.Field(index)
+		v = v.FieldByIndex(index)
 		if part.selected {
 			if v.Kind() != reflect.Slice {
 				return reflect.Value{}, fmt.Errorf("%s is not a list", part.field)
 			}
-			index, err = listIndex(v, part.selector, false)
+			entryIndex, err := listIndex(v, part.selector, false)
 			if err != nil {
 				return reflect.Value{}, err
 			}
-			v = v.Index(index)
+			v = v.Index(entryIndex)
 		}
 	}
 	return v, nil
@@ -861,11 +890,13 @@ func collectPaths(t reflect.Type, v reflect.Value, prefix string, depth int, out
 	if t.Kind() != reflect.Struct {
 		return
 	}
-	for i := 0; i < t.NumField() && len(*out) < 2000; i++ {
-		field := t.Field(i)
+	for _, field := range jsonFields(t) {
+		if len(*out) >= 2000 {
+			break
+		}
 		name := strings.Split(field.Tag.Get("json"), ",")[0]
-		if !field.IsExported() || name == "" || name == "-" {
-			continue
+		if name == "" {
+			name = field.Name
 		}
 		path := prefix + name
 		if !strings.HasPrefix(target, path) && !strings.HasPrefix(path, target) {
@@ -874,7 +905,7 @@ func collectPaths(t reflect.Type, v reflect.Value, prefix string, depth int, out
 		*out = append(*out, path)
 		value := reflect.Zero(field.Type)
 		if v.IsValid() {
-			value = v.Field(i)
+			value = v.FieldByIndex(field.Index)
 		}
 		if field.Type.Kind() != reflect.Slice {
 			collectPaths(field.Type, value, path+".", depth+1, out, target)
@@ -884,7 +915,7 @@ func collectPaths(t reflect.Type, v reflect.Value, prefix string, depth int, out
 		for j := 0; j < value.Len() && len(*out) < 2000; j++ {
 			selector := strconv.Itoa(j)
 			if named {
-				selector = value.Index(j).Field(key).String()
+				selector = value.Index(j).FieldByIndex(key).String()
 			}
 			entry := path + "[" + selector + "]"
 			if !strings.HasPrefix(target, entry) && !strings.HasPrefix(entry, target) {

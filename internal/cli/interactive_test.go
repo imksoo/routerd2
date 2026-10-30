@@ -168,6 +168,26 @@ func TestCandidateIsolationNamedPathsAndCommit(t *testing.T) {
 	}
 }
 
+func TestEmbeddedDNSFieldsUsePublicJSONPaths(t *testing.T) {
+	s, _ := fixtureShell()
+	command(t, s, "configure")
+	command(t, s, `set resources[service/dns] {"service":{"name":"dns","dns":{"resource":"dns","zones":[{"name":"lan-zone","spec":{"zone":"lan.test","records":[{"hostname":"router","ipv4":"192.0.2.1"}]}}]}}}`)
+	path := "resources[service/dns].service.dns.zones[lan-zone].spec.records[0].ipv4"
+	command(t, s, `set `+path+` "192.0.2.2"`)
+	if got := strings.TrimSpace(command(t, s, "show "+path)); got != `"192.0.2.2"` {
+		t.Fatalf("embedded DNS field was not edited: %s", got)
+	}
+	input := "set resources[service/dns].service.dns.zo"
+	if line, _, ok := s.complete(input, len(input), '\t'); !ok || line != input+"nes" {
+		t.Fatalf("embedded DNS completion: %q, handled=%t", line, ok)
+	}
+	commandError(t, s, "set resources[service/dns].service.dns.RuntimeConfig.name true")
+	command(t, s, "delete "+path)
+	if got := cliResource(t, s.candidate.document, "service/dns").Service.DNS.Zones[0].Spec.Records[0].IPv4; got != "" {
+		t.Fatalf("embedded DNS field was not removed: %q", got)
+	}
+}
+
 func TestTypedMutationRejectsInvalidValuesAtomically(t *testing.T) {
 	s, _ := fixtureShell()
 	command(t, s, "configure")
