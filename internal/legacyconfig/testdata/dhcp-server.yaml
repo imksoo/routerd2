@@ -16,6 +16,7 @@ spec:
       metadata: {name: lan-v4}
       spec:
         server: dnsmasq
+        logDHCP: true
         interface: lan
         addressPool: {start: 192.0.2.100, end: 192.0.2.119, leaseTime: 2h}
         gateway: 192.0.2.254

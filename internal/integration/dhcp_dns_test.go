@@ -355,6 +355,7 @@ spec:
       metadata: {name: leases}
       spec:
         interface: lan
+        logDHCP: true
         addressPool: {start: 192.0.2.100, end: 192.0.2.102, leaseTime: 60s}
         gateway: 192.0.2.1
         dnsServers: [192.0.2.1]

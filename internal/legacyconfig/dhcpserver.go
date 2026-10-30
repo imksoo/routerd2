@@ -122,7 +122,7 @@ func (c *compiler) dhcpServer(r resource, reservations []resource) (dhcpserverco
 	for field, active := range map[string]bool{
 		"managed": s.Managed, "routerSource": s.RouterSource != "", "router": s.Router != "",
 		"dnsSource": s.DNSSource != "", "dnsInterface": s.DNSInterface != "",
-		"authoritative": s.Authoritative, "logDHCP": s.LogDHCP,
+		"authoritative": s.Authoritative,
 	} {
 		if active {
 			c.reject(r, field, "unsupported_semantics", "this field is ignored or interpreted differently by the pinned active DHCP chain and standalone renderer; select explicit native intent before migration")
@@ -274,6 +274,7 @@ func (c *compiler) dhcpServer(r resource, reservations []resource) (dhcpserverco
 	}
 	service.DHCPServer.Primary, service.DHCPServer.Scopes, service.DHCPServer.Reservations = cfg.Primary, cfg.Scopes, cfg.Reservations
 	service.DHCPServer.StickyHoldDays = cfg.StickyHoldDays
+	service.DHCPServer.LogDHCP = cfg.LogDHCP
 	c.addService(r, service)
 	c.note(r, "Static DHCP intent follows the pinned active chain. One worker supervises the pinned dnsmasq engine and observes its lease file; old lease/sticky/HA state is not imported. The dnsmasq router, DNS and broadcast defaults and 1000-lease limit are explicit.")
 	for _, item := range reservations {

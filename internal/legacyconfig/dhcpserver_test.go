@@ -47,7 +47,7 @@ func TestDHCPStaticServerProfilesReservationsAndWireOptions(t *testing.T) {
 	result := compiled(t, "dhcp-server")
 	s := service(t, result.Document, "dhcp_server")
 	c := s.DHCPServerConfig("/var/lib/routerd")
-	if c.Interface != "eth1" || c.ServerAddress != "192.0.2.1" || c.Primary.Prefix != "192.0.2.0/24" || c.MaxLeases != 1000 || c.Authoritative {
+	if c.Interface != "eth1" || c.ServerAddress != "192.0.2.1" || c.Primary.Prefix != "192.0.2.0/24" || c.MaxLeases != 1000 || c.Authoritative || !c.LogDHCP {
 		t.Fatalf("server identity, subnet or old daemon defaults changed: %+v", c)
 	}
 	if c.Primary.Start != "192.0.2.100" || c.Primary.End != "192.0.2.119" || c.Primary.LeaseSeconds != 7200 || c.Primary.Router != "192.0.2.254" || c.Primary.Domain != "lab.example" || !reflect.DeepEqual(c.Primary.NTPServers, []string{"192.0.2.1"}) || !reflect.DeepEqual(c.Primary.DNSServers, []string{"192.0.2.53"}) {
@@ -106,7 +106,6 @@ func TestDHCPMigrationRejectsIgnoredDynamicOrBackendFields(t *testing.T) {
 	}{
 		{"managed", "DHCPv4Server", "managed", "managed", "unsupported_semantics", true},
 		{"authoritative", "DHCPv4Server", "authoritative", "authoritative", "unsupported_semantics", true},
-		{"log", "DHCPv4Server", "logDHCP", "logDHCP", "unsupported_semantics", true},
 		{"router-source", "DHCPv4Server", "routerSource", "routerSource", "unsupported_semantics", "none"},
 		{"router", "DHCPv4Server", "router", "router", "unsupported_semantics", "192.0.2.1"},
 		{"dns-source", "DHCPv4Server", "dnsSource", "dnsSource", "unsupported_semantics", "none"},
