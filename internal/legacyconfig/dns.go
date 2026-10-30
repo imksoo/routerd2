@@ -225,7 +225,7 @@ func (c *compiler) dns(vrrpNames map[string]string) {
 		}
 		services := append(append([]serviceconfig.Service(nil), c.document.Services...), service)
 		if err := serviceconfig.Validate(services); err != nil {
-			c.reject(r, "", "native_validation", "composed DNS listeners, sources, zones or cache settings fail native DNS validation")
+			c.reject(r, "", "native_validation", err.Error())
 		}
 		c.addService(r, service)
 	}
