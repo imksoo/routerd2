@@ -1,12 +1,12 @@
 # routerd2 開発引き継ぎ
 
-更新: 2026-10-31 04:59 JST。全34 work packageのゴールは継続中。
+更新: 2026-10-31 05:23 JST。全34 work packageのゴールは継続中。
 [実装計画](implementation-plan.md)、[機械可読台帳](implementation-plan.json)、[試験計画](test-plan.md)、[AGENTS.md](../AGENTS.md)を読む。
 各試験前に試験計画の実行手順と対象項目を再確認する。対象本番の置換は実施していない。
 
 ## 現在の実装と通常配布物
 
-主な実装は`27fbad2`（DHCPは`b9fe727`）、最新通常配布物は`integrated-host-source-native95` / native92 / network27。
+主な実装は`421d126`（送信元`27fbad2`、DHCP`b9fe727`）、最新通常配布物は`dns-negative-native97` / native92 / network27。
 全設定二台の実行版はnative93、送信元修正の専用実HGW試験はnative94であり、実行版を区別する。
 `make build image`のAlpine3.24.3/Linux6.18.59-ltsを実行した。routerd/loggingはCGO0、承認済みrouterd-modulesだけCGO1静的リンク。
 旧routerdのdnsmasq配布と非同期同期を使用し、VRRPが配布役を選ぶ。DHCP独自の`.owner`・`bootstrap`・新規配布保留を除いた。
@@ -46,6 +46,11 @@ DHCPの状態通知失敗はengineを停止させない。元の適用・観測�
 `6716b17`は未実行候補の1byte破損を拒否し、確認済み版・設定本文/revision・DUID・固定SSH identity・端末の自動DNS/両IP通信へ復帰した。
 この破損試験はknown-good `full-homert-loopback-native92`と候補native93の同ABI・限定構成であり、全57設定の更新や既実行trial破損の受入ではない。
 `d2bb7ce`はruntime削除中断時にmanifestを最後まで残し、SSHでの削除再開と次版保存が成功した。`460a405`は既存の型付きBGP観測を運用画面へ接続し、`ad35015`は直接退避経路で1MiB双方向・両SYN MSS1460を確認した。
+`e9f0f96`はstage書込中断で不完全なmanifestだけが残った場合の削除を可能にし、未知のpayloadは削除前に拒否する。
+`ee99734`は各DNS端末のUDP受信サイズに応じてTCを返し、TCPと完全なcacheを保持する。
+`12962f2`は既存の型付きページAPIからkernel経路・規則・multipathを運用画面へ表示する。
+統合版native96の実DNS二試験・管理/SSH/再起動、関連4packageのRace、vet、amd64/arm64静的六ELFと署名publisherは終了0。
+`421d126`は正回答のminTTL60秒でnegativeTTL30秒を延長する不具合を修正した。独立dnsmasqへ名前を登録した比較版は31秒後もNXDOMAIN、修正版では両段が31秒後にAを取得した。統合版native97でも同じ実daemon通信検査・DNS Race・vetが終了0。
 対象homertの実鍵・保存状態・配備条件の受入は残る。
 
 ## 経路欠落の原因修正と未解決
@@ -60,6 +65,9 @@ DHCPの状態通知失敗はengineを停止させない。元の適用・観測�
   この注入は再開した7800秒コホートを誤って転用しており、自然再発・自然更新の結果には数えない。以後は別stageの180秒専用試験に限定した。
   native94の専用180秒試験では同じ注入後も38秒706回の欠落0。取得DNS・両IP通信、PD SIGKILL2.07秒/通常交換4.63秒、全daemon交換4.33秒と両端末復帰まで終了0。自然PD Renewは0件であり短時間の結果だけとする。
   元100分走行で適用応答が遅れた発生契機は未採取。短い再現で経路を消す製品側の原因は修正したが、長時間安定の受入は残る。
+- 通常native95の全57設定二台試験では、両方向の端末DHCP/SLAAC・DNS・TCP/UDPは復帰したが、二度目のNTP採用が約58秒を要し、合計60秒を超えて不合格。
+  再起動時にchronydは`Frequency 0.000 +/- 1000000.000 ppm`を読んだ。packetのroot dispersionは約53秒から参照元の更新後に約0.0036秒へ低下し、その後端末が採用した。
+  未校正値を保存・読込した事実であり、同期済みの精度を破壊したとは未確認。同期flagだけで品質を判断せず、次は電源断前後のtrackingも採取する。元60秒と端末の採用条件は維持する。
 - 注入なしの元7800秒をnative95で新規開始した。現在logは管理端末の`/tmp/routerd-integrated-host-source-hgw95.log`、保存DUIDは`.local/state/routerd2-homert-four`。
   実PDの自然T1は2026-10-30 21:45:46 UTC（10月31日06:45:46 JST）。標準観測と終了時復旧は約06:57 JSTまでの見込み。長時間コホートを停止・交換・故障注入しない。
   起動時にAFTRの旧観測HTTP409で1回再起動した。運用観測開始時はgeneration2、以後の変化を監視し、再起動0とは記録しない。

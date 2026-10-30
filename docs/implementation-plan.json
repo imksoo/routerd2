@@ -11209,7 +11209,7 @@
     "physical_target_profile": "awaiting user target hardware/NIC and performance requirements; independent implementation and isolated VM tests continue",
     "validation_reporting": "Record current behavior, executed checks and untested scope concisely. Discard historical checkpoint ledgers as acceptance authority; no compatibility obligation to their code, APIs or formats.",
     "current_acceptance": {
-      "implementation_head": "27fbad2",
+      "implementation_head": "421d126",
       "single_node_full_input_runtime": "full-homert-loopback-native92 / 8cc420d / native92 / network27",
       "normal_alpine_runtime": "Alpine3.24.3 Linux6.18.59-0-lts; isolated PVE KVM4CPU4096MiB; normal Make/APK image",
       "original_input_resources_per_node": 109,
@@ -11317,7 +11317,9 @@
         "after": "Native94 dedicated180s fixture, same22s delay:706 observations/38s,0 missing routes. Acquired DNS/both-IP traffic and PD SIGKILL2.07s, graceful restart4.63s, whole daemon4.33s recovery completed0;0 natural PD Renew in the short window.",
         "checks": "Runtimeplan normal30.217s/Race35.158s; webconsole Race1.065s; three existing real host-route daemon fixtures passed; full make check Race/vet and integrated95 normal build/both-arch static sixELF/catalog/publisher passed.",
         "remaining": "Original100min run cause of prolonged apply I/O is unmeasured. Complete no-injection long renewal and normal Alpine integrated two-node acceptance."
-      }
+      },
+      "integrated_normal95_failure": "Both-direction DHCP/SLAAC/DNS/TCP/UDP recovered, but rebooted NTP adoption took58.366s and total original60s handoff failed. Reboot read0ppm +/-1000000ppm; packet root dispersion53s fell to0.0036s after next reference. Cold calibration/persistence timing not yet resolved; keep client quality and60s.",
+      "integrated_normal96_checks": "DNS UDP-size and query/probe daemon communication, management/SSH/restart, related DNS/webconsole/release/releasecli race, vet, both-arch static sixELF and signed publisher all exit0. Natural trials remain native95/native93 unchanged."
     }
   },
   "execution_order": [
