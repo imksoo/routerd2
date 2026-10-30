@@ -294,6 +294,11 @@ def peer(stage, homert=False):
         policy = {"schema_version": 1, "tailscale": {"TailscaleNode/overlay": {
             "interface": "tailscale0", "bootstrap_dns": ["192.0.2.1"], "control_ca_file": str(cert),
             "enrollment": "key_file", "auth_key_file": str(authfile)}}}
+        if homert:
+            # Existing homert nodes have identity, not a fresh enrollment key.
+            authfile.unlink()
+            policy["tailscale"]["TailscaleNode/overlay"].update(enrollment="saved_identity")
+            policy["tailscale"]["TailscaleNode/overlay"].pop("auth_key_file")
         def imported_native():
             policyfile.write_text(json.dumps(policy))
             file = stage / "imported.yaml"
@@ -302,6 +307,8 @@ def peer(stage, homert=False):
             return plan["native"]
         migrated = imported_native()
         imported = next(s for s in migrated["services"] if "tailscale" in s)
+        if homert:
+            assert not authfile.exists() and not imported["tailscale"].get("auth_key_file")
         firewall = migrated["network"]["firewall"]
         # New LAN DNS listener: authorize only its declared transport/port.
         firewall["input"]["rules"] += [{"match": {"in_interface": "lan0", "protocol": protocol, "destination_ports": [{"start": 53}]}, "action": "accept"} for protocol in ("udp", "tcp")]
@@ -405,7 +412,8 @@ def peer(stage, homert=False):
         assert original["dns_name"] == "product-a.test.invalid."
         assert original["tailnet"]["dns_domain"] == "test.invalid" and original["tailnet"]["magic_dns_enabled"]
         assert original["node_id"]==seed_identity["ID"] and original["addresses"]==seed_identity["TailscaleIPs"]
-        print("PASS externally enrolled official daemon identity retained after stopped-state provisioning",flush=True)
+        print("PASS externally enrolled official daemon identity retained after stopped-state provisioning" +
+              ("; first product boot used saved_identity without an enrollment key file" if homert else ""), flush=True)
         # The kernel scope has one owner even across different identity dirs.
         lock_probe = "import errno,socket\ns=socket.socket(socket.AF_UNIX,socket.SOCK_DGRAM)\ntry:s.bind('\\0routerd2.tailscale-owner')\nexcept OSError as e:assert e.errno==errno.EADDRINUSE\nelse:raise AssertionError('Tailscale kernel namespace was not claimed')"
         run(inside("ts-a",["python3","-c",lock_probe]))
@@ -539,12 +547,7 @@ def peer(stage, homert=False):
             site_traffic()
             exit_traffic()
             saved = copy.deepcopy(document)
-            policy["tailscale"]["TailscaleNode/overlay"].update(enrollment="saved_identity")
-            policy["tailscale"]["TailscaleNode/overlay"].pop("auth_key_file")
-            next(r for r in saved["resources"] if r["id"] == "tailnet")["service"] = next(s for s in imported_native()["services"] if "tailscale" in s)
-            product_api("control.sock", "/v1/config/commit", {"expected_revision": 1, "request_id": "homert-saved-identity", "config": saved}, timeout=12)
-            wait(lambda: observation().get("backend_state") == "Running", 30)
-            authfile.unlink()
+            assert not authfile.exists() and not imported["tailscale"].get("auth_key_file")
             assert json.loads(run([str(inputs / "routerd"), "poweroff", "--runtime-dir", str(stage / "product-run")]))["accepted"]
             daemon.wait(timeout=12)
             assert daemon.returncode == -signal.SIGINT
@@ -566,13 +569,13 @@ def peer(stage, homert=False):
             run(inside("ts-b", cli + ["set", "--exit-node="]))
             withdrawn = copy.deepcopy(saved)
             withdrawn["resources"] = [r for r in withdrawn["resources"] if r["id"] not in ("tailnet", "resolver")]
-            product_api("control.sock", "/v1/config/commit", {"expected_revision": 2, "request_id": "homert-remove-tailnet", "config": withdrawn}, timeout=12)
+            product_api("control.sock", "/v1/config/commit", {"expected_revision": 1, "request_id": "homert-remove-tailnet", "config": withdrawn}, timeout=12)
             wait(lambda: not any(link["ifname"] == "tailscale0" for link in json.loads(run(inside("ts-a", ["ip", "-j", "link"])))))
             wait(lambda: not any(prefix in peer_routes() or route_present(prefix) for prefix in advertised), 30)
             console_status("Tailscaleサービスは構成されていません", selected=False)
             for host in lan_hosts:
                 assert not pingable(host)
-            product_api("control.sock", "/v1/config/commit", {"expected_revision": 3, "request_id": "homert-restore-tailnet", "config": saved}, timeout=12)
+            product_api("control.sock", "/v1/config/commit", {"expected_revision": 2, "request_id": "homert-restore-tailnet", "config": saved}, timeout=12)
             wait(lambda: observation().get("backend_state") == "Running", 30)
             assert observation()["node_id"] == original["node_id"]
             wait(lambda: all(prefix in peer_routes() and route_present(prefix) for prefix in advertised))

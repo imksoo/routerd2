@@ -167,6 +167,17 @@ The first run's later whole-product restart failed because the new fixture's
 SSH loop overwrote its startup command variable. Renaming that loop variable
 fixed the fixture; no product, authorization or timeout change was made.
 
+On 2026-10-31 03:54:24-03:55:56 JST, fixed release
+`dhcp-reconcile-native93` passed the homert profile in 92.045 seconds with
+`saved_identity` selected before the first product boot. The external official
+daemon's enrollment key file was deleted after it stopped and its opaque state
+was provisioned. Native intent contained no `auth_key_file`. The original node
+ID and addresses, three bidirectional site paths, both exit address families
+and management SSH worked through worker and whole-product restart, followed
+by service removal/reapply. No product implementation change was needed.
+This qualifies the isolated official 1.104.2 state transition, not the actual
+homert state path, hardware-sealed state or production tailnet migration.
+
 Legacy `TailscaleNode` import requires explicit enrollment and kernel/bootstrap
 ownership policy; see [the importer](../../legacyconfig/README.md). The actual
 CLI-to-PID1 fixture also checks stopped external-daemon state provisioning,
