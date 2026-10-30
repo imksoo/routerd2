@@ -1,0 +1,28 @@
+{{define "time"}}{{with .Time}}
+<p>chronydから取得した時刻同期の観測です。同期済みという表示だけで、端末が採用できる時刻品質やLANへの配布成功を保証するものではありません。</p>
+<nav aria-label="時刻サービス">{{range .Services}}<a href="{{$.Config.BasePath}}time?service={{.}}">{{.}}</a>{{else}}<p>現在の実行構成に時刻サービスはありません。条件により停止している設定も、この一覧には含みません。</p>{{end}}</nav>
+{{if .Selected}}<h3>{{.Selected}}</h3>
+{{with .Observation}}
+<section data-time-observed="{{.ObservedNanos}}" data-time-expires="{{.ExpiresNanos}}" data-time-current="{{$.Time.Current}}">
+<dl><dt>現在の同期状態</dt><dd data-time-field="state">{{$.Time.State}}</dd></dl>
+{{if not $.Time.Current}}<p class="notice">観測期限が切れています。以下は最後に取得した情報です。現在の同期状態は未確認です。</p>{{end}}
+{{if .LastError}}<p class="error">最後の観測エラー: {{.LastError}}</p><p>この観測では時刻源と品質の値を取得できませんでした。</p>{{else}}
+<dl>
+<dt>観測時の同期</dt><dd>{{if .Synchronized}}同期済み{{else}}未同期{{end}}</dd>
+<dt>選択された時刻源</dt><dd data-time-field="source">{{if and .Source.IsValid (not .Source.IsUnspecified)}}{{.Source}}{{else}}アドレス未取得{{end}}</dd>
+<dt>この装置の階層</dt><dd data-time-field="stratum">{{.Stratum}}</dd>
+<dt>参照時刻</dt><dd>{{if .ReferenceTime.IsZero}}未取得{{else}}{{.ReferenceTime}}{{end}}</dd>
+<dt>システム時計の補正</dt><dd>{{if .AdjustingClock}}有効{{else}}無効{{end}}</dd>
+<dt>時計の残り補正量（秒）</dt><dd data-time-field="offset_seconds">{{.OffsetSeconds}}</dd>
+<dt>時刻偏差の二乗平均平方根（秒）</dt><dd data-time-field="rms_offset_seconds">{{.RMSOffset}}</dd>
+<dt>周波数補正（ppm、100万分の1）</dt><dd data-time-field="frequency_ppm">{{.FrequencyPPM}}</dd>
+<dt>推定周波数の不確かさ（ppm）</dt><dd data-time-field="skew_ppm">{{.SkewPPM}}</dd>
+<dt>基準時刻源までの往復遅延（秒）</dt><dd data-time-field="root_delay_seconds">{{.RootDelay}}</dd>
+<dt>基準時刻源までの時刻誤差の推定値（秒）</dt><dd data-time-field="root_dispersion_seconds">{{.RootDispersion}}</dd>
+<dt>うるう秒状態</dt><dd data-time-field="leap_status">{{.LeapStatus}}</dd>
+</dl>
+<p>うるう秒状態: 0は通常、1は挿入予定、2は削除予定、3は未同期です。各数値は元の観測値です。</p>
+{{end}}
+</section>
+{{else}}<p class="notice">時刻サービスの観測はまだありません。設定やプロセスの存在だけで同期済みとは判定しません。</p>{{end}}
+{{end}}{{end}}{{end}}

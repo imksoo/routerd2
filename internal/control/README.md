@@ -375,3 +375,25 @@ and HTML-capture lines were removed afterward; product code was unchanged.
 Reproduce from this source with the standard `make build`, then
 `python3 scripts/daemon-tests.py management --test TestDaemonConfigurationAndRecovery
 --go /path/to/go --binary-dir dist/bin` in the authorized isolated Linux setup.
+
+### Saved reference discovery acceptance (2026-10-30)
+
+Product source `a646df6`, release `wsl-operations-a646df6`, passed the same
+management integration on independent WSL Linux 6.18.33.1 at
+23:08:00-23:08:27 JST (20.66 seconds in the integration runner). After control
+restart, the fixture deleted the operator's saved-reference file. SSH
+`show snapshots`, `GET /v1/config/snapshots` and local `routerd config snapshots`
+rediscovered the same immutable saved revision. The discovered reference then
+completed the existing SSH/API/local restore, stale-revision rejection,
+idempotent replay and unchanged five-second confirmation rollback flow.
+Independent UDP/TCP DNS confirmed the actual answer at each transition.
+The existing real log-search and logging-restart checks also passed.
+
+Discovery reads the original immutable files through the same bounded
+ownership, digest, strict-format and configuration validation used by restore;
+it introduces no catalog or second configuration writer. The focused real-file
+test additionally confirmed empty-store handling and that a corrupted saved
+file is reported while another verified reference remains usable.
+Race detection and vet passed for configuration, control, CLI and the routerd
+command. The standard three executables are static. The same target/appliance
+qualification limits stated above still apply.

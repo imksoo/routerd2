@@ -36,7 +36,7 @@ func (s Session) Execute(ctx context.Context, command string, input io.Reader, o
 		return nil
 	}
 	if len(a) == 1 && a[0] == "help" {
-		_, err := fmt.Fprintln(out, "show status\nshow network [SECTION [FILTER VALUE ...]] (show network help for details)\nshow resources\nshow derived RESOURCE_ID\nshow observations [after CURSOR] [limit 1..16]\nshow event-store\nshow services [NAME]\nshow route-issues [offset N]\nshow config\nshow running-config\nshow logs [module NAME] [level INFO] [limit 100]\nshow logging\nshow version\nrestart <module>\npoweroff\nreboot\nconfigure (exec: CommitRequest YAML/JSON on stdin; shell: candidate mode)\nconfirm\nsnapshot (exec stdin: SnapshotRequest JSON/YAML)\nrestore (exec stdin: RestoreRequest JSON/YAML)\nupdate status|stage|prepare|rollback|cancel (exec stdin: signed tar or JSON)\nhelp\nexit")
+		_, err := fmt.Fprintln(out, "show status\nshow network [SECTION [FILTER VALUE ...]] (show network help for details)\nshow resources\nshow derived RESOURCE_ID\nshow observations [after CURSOR] [limit 1..16]\nshow event-store\nshow services [NAME]\nshow route-issues [offset N]\nshow config\nshow snapshots\nshow running-config\nshow logs [module NAME] [level INFO] [limit 100]\nshow logging\nshow version\nrestart <module>\npoweroff\nreboot\nconfigure (exec: CommitRequest YAML/JSON on stdin; shell: candidate mode)\nconfirm\nsnapshot (exec stdin: SnapshotRequest JSON/YAML)\nrestore (exec stdin: RestoreRequest JSON/YAML)\nupdate status|stage|prepare|rollback|cancel (exec stdin: signed tar or JSON)\nhelp\nexit")
 		return err
 	}
 	var result json.RawMessage
@@ -127,6 +127,12 @@ func (s Session) Execute(ctx context.Context, command string, input io.Reader, o
 			err = ctl.Do(ctx, http.MethodGet, "/v1/services", nil, &result)
 		case "logging":
 			err = logClient.Do(ctx, http.MethodGet, "/v1/status", nil, &result)
+		case "snapshots":
+			var listing config.SnapshotList
+			if err := ctl.Do(ctx, http.MethodGet, "/v1/config/snapshots", nil, &listing); err != nil {
+				return err
+			}
+			return WriteJSON(out, listing)
 		case "config":
 			state, err := readConfiguration(ctx, ctl, true)
 			if err != nil {
