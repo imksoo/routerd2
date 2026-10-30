@@ -46,6 +46,14 @@ func Run(ctx context.Context, cfg trafficflowconfig.Config, ready func()) error 
 	var packetErrors chan error
 	var dropped atomic.Uint64
 	pending := make(map[string]dpi.ClassifyResult)
+	var native *nativeClassifier
+	if cfg.ApplicationLayer {
+		native, err = newNativeClassifier(&dropped)
+		if err != nil {
+			return err
+		}
+		defer native.close()
+	}
 	if cfg.PacketGroup != 0 {
 		packets, err := nflog.Open(int(cfg.PacketGroup))
 		if err != nil {
@@ -57,7 +65,7 @@ func Run(ctx context.Context, cfg trafficflowconfig.Config, ready func()) error 
 		packetErrors = make(chan error, 1)
 		go func() {
 			defer close(done)
-			packetErrors <- collectClassifications(packetCtx, packets, results, &dropped)
+			packetErrors <- collectClassifications(packetCtx, packets, results, &dropped, native)
 		}()
 		defer func() { stopPackets(); <-done; packets.Close() }()
 		classified = results

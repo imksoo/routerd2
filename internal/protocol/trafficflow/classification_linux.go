@@ -5,6 +5,7 @@ package trafficflow
 import (
 	"context"
 	"sync/atomic"
+	"time"
 
 	"github.com/imksoo/routerd/pkg/dpi"
 	"github.com/imksoo/routerd/pkg/logstore"
@@ -14,7 +15,7 @@ import (
 
 // Packet decoding/classification remains routerd's implementation. The worker
 // owns this reader; its bounded queue never holds the forwarding path or disk.
-func collectClassifications(ctx context.Context, reader *nflog.Reader, out chan<- dpi.ClassifyResult, dropped *atomic.Uint64) error {
+func collectClassifications(ctx context.Context, reader *nflog.Reader, out chan<- dpi.ClassifyResult, dropped *atomic.Uint64, native *nativeClassifier) error {
 	defer close(out)
 	for ctx.Err() == nil {
 		packet, err := reader.Read(ctx)
@@ -25,8 +26,14 @@ func collectClassifications(ctx context.Context, reader *nflog.Reader, out chan<
 			return err
 		}
 		result := dpi.Classify(dpi.ClassifyRequest{Packet: packet.Payload})
+		if native != nil {
+			result, err = native.classify(packet.Payload, result, time.Now())
+			if err != nil {
+				return err
+			}
+		}
 		// A transport port alone is not packet-derived application evidence.
-		if result.Source != "builtin-payload" || result.AppName == "unknown" {
+		if (result.Source != "builtin-payload" && result.Source != "libndpi") || result.AppName == "unknown" {
 			continue
 		}
 		select {

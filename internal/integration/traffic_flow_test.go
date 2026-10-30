@@ -29,7 +29,16 @@ import (
 	"github.com/vishvananda/netns"
 )
 
-func TestDaemonTrafficFlowHistory(t *testing.T) {
+func TestDaemonTrafficFlowHistory(t *testing.T) { testDaemonTrafficFlowHistory(t, false) }
+func TestDaemonTrafficFlowNDPI(t *testing.T)    { testDaemonTrafficFlowHistory(t, true) }
+
+func testDaemonTrafficFlowHistory(t *testing.T, native bool) {
+	engine, source := "builtin", "builtin-payload"
+	flags := "source: conntrack, includeTLSSNI: true}"
+	if native {
+		engine, source = "ndpi", "libndpi"
+		flags = "source: conntrack, includeTLSSNI: true, includeApplicationLayer: true}"
+	}
 	if !isolateFixture(t, t.Name()) {
 		return
 	}
@@ -132,7 +141,7 @@ func TestDaemonTrafficFlowHistory(t *testing.T) {
 			}
 		}
 	}()
-	imported, err := legacyconfig.Compile([]byte(strings.Replace(trafficFlowFixture, "source: conntrack}", "source: conntrack, includeTLSSNI: true}", 1)))
+	imported, err := legacyconfig.Compile([]byte(strings.Replace(trafficFlowFixture, "source: conntrack}", flags, 1)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +244,7 @@ func TestDaemonTrafficFlowHistory(t *testing.T) {
 		protocols := map[string]bool{}
 		for _, row := range history() {
 			if row.ClientAddress == "192.0.2.2" && row.PeerAddress == "198.51.100.2" && row.PeerPort == 18081 && row.NATTranslatedAddress == "198.51.100.1" && row.Accounting && row.BytesOut > 0 && row.BytesIn > 0 {
-				if row.Protocol == "tcp" && (row.TLSSNI != "flow.routerd.test" || row.Engine != "builtin" || row.Source != "builtin-payload") {
+				if row.Protocol == "tcp" && (row.TLSSNI != "flow.routerd.test" || row.Engine != engine || row.Source != source || (native && (row.Metadata["libndpi.version"] == "" || row.AppConfidence < 85))) {
 					continue
 				}
 				protocols[row.Protocol] = true
@@ -275,7 +284,7 @@ func TestDaemonTrafficFlowHistory(t *testing.T) {
 	if after := observed(); after != before || before == 0 {
 		t.Fatalf("packet observation did not stop at its connection budget: %d -> %d", before, after)
 	}
-	t.Log("TLS metadata came from copied payload; established traffic no longer generated packet observations")
+	t.Logf("TLS classification engine=%s source=%s; established traffic no longer generated packet observations", engine, source)
 	lock, err := sql.Open("sqlite", historyPath)
 	if err != nil {
 		t.Fatal(err)
@@ -311,7 +320,7 @@ func TestDaemonTrafficFlowHistory(t *testing.T) {
 			if row.FlowKey == first.FlowKey && row.StartedAt.Equal(first.StartedAt) {
 				udpRetained = true
 			}
-			if row.Protocol == "tcp" && row.ClientAddress == "192.0.2.2" && row.PeerPort == 18081 && row.TLSSNI == "flow.routerd.test" && row.Source == "builtin-payload" {
+			if row.Protocol == "tcp" && row.ClientAddress == "192.0.2.2" && row.PeerPort == 18081 && row.TLSSNI == "flow.routerd.test" && row.Source == source {
 				tlsRetained = true
 			}
 		}

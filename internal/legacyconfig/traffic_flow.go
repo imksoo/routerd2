@@ -20,12 +20,8 @@ func (c *compiler) trafficFlows() {
 			c.reject(r, "source", "unsupported_semantics", "only kernel conntrack observation is supported")
 			continue
 		}
-		if spec.IncludeApplicationLayer {
-			c.reject(r, "includeApplicationLayer", "unsupported_semantics", "legacy nDPI application classification is not replaced by built-in packet metadata extraction")
-			continue
-		}
-		cfg := trafficflowconfig.Config{Retention: c.flowRetention}
-		if spec.IncludeTLSSNI {
+		cfg := trafficflowconfig.Config{Retention: c.flowRetention, ApplicationLayer: spec.IncludeApplicationLayer}
+		if spec.IncludeTLSSNI || spec.IncludeApplicationLayer {
 			group := uint16(2)
 			for _, service := range c.document.Services {
 				if service.FirewallLog != nil && service.FirewallLog.Group == group {
@@ -38,9 +34,9 @@ func (c *compiler) trafficFlows() {
 			}
 			c.document.Network.Firewall.FlowObservationGroup = group
 			c.target(r, "network.firewall.flow_observation_group")
-			c.note(r, "TLS SNI and other built-in packet metadata reuse routerd pkg/dpi directly in the collector. This does not supply external nDPI application classification, TLS decryption, or TCP stream reassembly.")
+			c.note(r, "TLS SNI and other built-in packet metadata reuse routerd pkg/dpi directly in the collector. Application classification requires the statically linked libndpi module build. It does not decrypt TLS.")
 		}
 		c.addService(r, serviceconfig.Service{Name: c.serviceName(r, "traffic-flow"), TrafficFlow: &cfg})
-		c.note(r, "The existing kernel connection table is sampled every 30 seconds through Go netlink. The old FlowKey/SyncActive transaction and history schema and configured retention are reused without an external conntrack command. Counts require explicitly enabled kernel conntrack accounting for new connections. Short connections between samples can be missed, as in the old observer. Legacy files and earlier rows are not imported; external nDPI application classification is not supplied.")
+		c.note(r, "The existing kernel connection table is sampled every 30 seconds through Go netlink. The old FlowKey/SyncActive transaction and history schema and configured retention are reused without an external conntrack command. Counts require explicitly enabled kernel conntrack accounting for new connections. Short connections between samples can be missed, as in the old observer. Legacy files and earlier rows are not imported.")
 	}
 }

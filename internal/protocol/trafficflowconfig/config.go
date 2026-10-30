@@ -12,11 +12,11 @@ import (
 )
 
 type Config struct {
-	// PacketGroup enables routerd's built-in packet metadata extraction from NFLOG.
-	// It does not select the external nDPI application classifier.
-	PacketGroup     uint16            `json:"packet_group,omitempty"`
-	IntervalSeconds int64             `json:"interval_seconds,omitempty"`
-	Retention       *retention.Config `json:"retention,omitempty"`
+	// PacketGroup supplies copied packets to the single classifier owner.
+	ApplicationLayer bool              `json:"application_layer,omitempty"`
+	PacketGroup      uint16            `json:"packet_group,omitempty"`
+	IntervalSeconds  int64             `json:"interval_seconds,omitempty"`
+	Retention        *retention.Config `json:"retention,omitempty"`
 	// HistoryPath belongs to the service compiler, not operator configuration.
 	HistoryPath string `json:"history_path,omitempty"`
 }
@@ -29,6 +29,9 @@ func (c Config) Interval() time.Duration {
 }
 
 func Validate(c Config) error {
+	if c.ApplicationLayer && c.PacketGroup == 0 {
+		return errors.New("application classification requires a packet group")
+	}
 	if c.IntervalSeconds < 0 || c.IntervalSeconds > int64((1<<63-1)/time.Second) {
 		return errors.New("traffic flow sampling requires a positive interval")
 	}

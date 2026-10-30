@@ -5,7 +5,7 @@ existing Go netlink code. It reuses routerd `pkg/logstore.FlowKey`,
 the `SyncActive` transaction/schema and retention processing.
 The sample transaction uses one JSON array for missing-connection detection so
 large tables cannot exceed SQLite's per-statement parameter count. It adds no external
-conntrack command, classifier or daemon. The private database is below
+conntrack command or classifier daemon. The private database is below
 `state/services/<name>/traffic-flows.db`; operator configuration cannot choose a
 runtime path or adopt an old database.
 
@@ -32,7 +32,7 @@ the first nine new/established packets, at most 2048 bytes each, as in routerd.
 The observer never grants forwarding and disappears with that firewall setting.
 A group cannot also be owned by a firewall-log service or used by its rule logs.
 Only payload-derived results enter history; a known port is not classification
-evidence. The engine/source columns explicitly report `builtin`/`builtin-payload`.
+evidence. The engine/source columns report `builtin`/`builtin-payload` for Go extraction, or `ndpi`/`libndpi` for a native nDPI result.
 Original/reply conntrack tuples correlate metadata across source/destination NAT.
 A later counter-only sample and process restart preserve stored metadata.
 
@@ -44,17 +44,34 @@ packet reader returns through the existing worker supervisor for restart; it
 never changes forwarding.
 
 `TrafficFlowLog` imports enabled `source: conntrack` (or the old empty-source
-default), including `includeTLSSNI` through this built-in path. This parses TLS
-ClientHello SNI, HTTP Host and DNS messages already recognized by the old Go
-implementation. It does not decrypt traffic or reassemble fragmented TCP/TLS
-messages. External nDPI provides broader application classification and has real
-homert operating evidence; `includeApplicationLayer` therefore remains an
-explicit unsupported request. Saved homert02/03 settings enable both flags, so
-this module does not yet complete their configurations or physical acceptance.
+default), `includeTLSSNI`, and `includeApplicationLayer`. Both metadata options
+use the same packet reader. TLS metadata reuses the old Go parser; application
+classification uses routerd's native nDPI C API calls and result conversion in
+that reader's goroutine. The module is initialized before readiness and freed
+after the reader stops. No classifier agent, HTTP socket, extra daemon or new
+forwarding owner is introduced.
+
+The module binary must be built with `CGO_ENABLED=1 -tags libndpi,netgo,osusergo`
+and statically linked nDPI and its dependencies. A build without nDPI explicitly
+rejects `application_layer` on worker startup; it does not satisfy the request
+with built-in classification. Native result metadata includes `libndpi.version`.
+Unrecognized native packets may still yield explicitly labelled built-in packet
+metadata; port-only fallback remains excluded. nDPI state is shared between
+both packet directions. It reuses routerd's bounded flow tracking, one-hour idle
+expiry and oldest-entry eviction, at this collector's 10000-tuple capacity.
+Completed classification frees the C flow while retaining its result for later
+packets. Unknown C flows are freed at the existing nine-packet observation limit.
+The entire state is freed on worker exit.
+
+Both parsers receive the existing bounded packet copies; this is not TLS
+decryption or an unbounded stream capture. The old Go parser does not reassemble
+fragmented TLS messages. Native classification is limited by nDPI's supported
+protocols and the copied packet budget. Saved homert02/03 settings enable both
+options. Isolated acceptance does not establish their physical-device acceptance.
 
 `make check-traffic-flow` uses the existing isolated daemon fixture. Two
-independent peers exchange TCP and UDP through the product's source NAT. The
-gate checks recorded counters and SNI from a real standard-library TLS handshake,
+independent peers exchange TCP and UDP through the product's source NAT. The built-in and native nDPI cases each
+check recorded counters, classification provenance and SNI from a real standard-library TLS handshake,
 a bad history path, a locked database, recovery, restart, natural UDP conntrack
 expiry, retention/UDP archive and collector/observation-chain removal without
 interrupting forwarding. The TLS peer uses X25519 so its ClientHello fits the old

@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestTrafficFlowImportRetainsHistoryAndRejectsMissingClassification(t *testing.T) {
+func TestTrafficFlowImportRetainsHistoryAndClassificationIntent(t *testing.T) {
 	source := `apiVersion: routerd.net/v1alpha1
 kind: Router
 metadata: {name: flows}
@@ -31,7 +31,16 @@ spec:
 	}
 	for _, flag := range []string{"includeApplicationLayer"} {
 		result, err := Compile([]byte(strings.Replace(source, "source: conntrack", "source: conntrack, "+flag+": true", 1)))
-		if err == nil || len(result.Document.Resources) != 0 || !strings.Contains(err.Error(), "nDPI") {
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, r := range result.Document.Resources {
+			if r.Service != nil && r.Service.TrafficFlow != nil {
+				found = r.Service.TrafficFlow.ApplicationLayer && r.Service.TrafficFlow.PacketGroup != 0
+			}
+		}
+		if !found {
 			t.Fatal("classification request was discarded", flag, err)
 		}
 	}
