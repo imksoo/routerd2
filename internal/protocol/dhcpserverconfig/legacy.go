@@ -27,7 +27,7 @@ func FromSpec(seed Config, s api.DHCPv4ServerSpec, reservations []api.DHCPv4Rese
 		return Config{}, errors.New("legacy kea/dhcpd backend semantics require explicit migration to native DHCP intent")
 	}
 	if s.LeaseFile != "" {
-		return Config{}, errors.New("legacy leaseFile is not a native journal; import leases explicitly before migration")
+		return Config{}, errors.New("legacy leaseFile path is not reused; run routerd dhcp import-leases before startup")
 	}
 	if !reflect.DeepEqual(s.When, api.ResourceWhenSpec{}) {
 		return Config{}, errors.New("DHCP when must be resolved by the service compiler")

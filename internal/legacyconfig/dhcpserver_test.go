@@ -71,7 +71,8 @@ func TestDHCPStaticServerProfilesReservationsAndWireOptions(t *testing.T) {
 		t.Fatal("reservation option override lost", c.Reservations[0].Options)
 	}
 
-	if len(mapping(t, result, "DHCPv4Reservation/printer").Targets) != 1 || !strings.Contains(strings.Join(mapping(t, result, "DHCPv4Server/lan-v4").Notes, " "), "not imported") {
+	notes := strings.Join(mapping(t, result, "DHCPv4Server/lan-v4").Notes, " ")
+	if len(mapping(t, result, "DHCPv4Reservation/printer").Targets) != 1 || !strings.Contains(notes, "Configuration migration does not import state") || !strings.Contains(notes, "routerd dhcp import-leases") {
 		t.Fatal("reservation ownership and lease state boundary were not reported")
 	}
 }

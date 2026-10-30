@@ -151,6 +151,10 @@ func run(args []string) error {
 		}
 	case "config":
 		return configure(args[1:])
+	case "dhcp":
+		if len(args) > 1 && args[1] == "import-leases" {
+			return importDHCPLeases(args[2:], os.Stdout)
+		}
 	case "help", "--help", "-h":
 		return usage()
 	}
@@ -178,6 +182,7 @@ func usage() error {
   routerd config validate FILE
   routerd config plan FILE
   routerd config migrate [--policy FILE] FILE
+  routerd dhcp import-leases --config FILE --service NAME --state-dir DIR LEASE_FILE
   routerd config apply --file FILE --expected-revision N [--request-id ID --confirmed SECONDS --runtime-dir ...]
   routerd release help
   routerd version

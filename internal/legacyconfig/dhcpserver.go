@@ -136,7 +136,7 @@ func (c *compiler) dhcpServer(r resource, reservations []resource, vrrpNames map
 		c.reject(r, "role", "unsupported_semantics", "transit/relay behavior is not a local DHCP server")
 	}
 	if s.LeaseFile != "" {
-		c.reject(r, "leaseFile", "unsupported_semantics", "a legacy lease file is not a native journal; importing active or HA-replicated leases is a separate migration")
+		c.reject(r, "leaseFile", "unsupported_semantics", "the legacy leaseFile path is not reused; initialize active IPv4 bindings explicitly with routerd dhcp import-leases before startup")
 	}
 
 	if !reflect.DeepEqual(s.DNS, api.DHCPv4ServerDNSSpec{}) {
@@ -279,7 +279,7 @@ func (c *compiler) dhcpServer(r resource, reservations []resource, vrrpNames map
 	service.DHCPServer.LogDHCP = cfg.LogDHCP
 	service.DHCPServer.FingerprintRetention = c.fingerprintRetention
 	c.addService(r, service)
-	c.note(r, "Static DHCP intent follows the pinned active chain. One worker supervises the pinned dnsmasq engine and observes its lease file; old lease/sticky/HA state is not imported. The dnsmasq router, DNS and broadcast defaults and 1000-lease limit are explicit.")
+	c.note(r, "Static DHCP intent follows the pinned active chain. One worker supervises the pinned dnsmasq engine and observes its lease file. Configuration migration does not import state; routerd dhcp import-leases can initialize active IPv4 bindings before startup. Sticky history and HA ownership are separate. The dnsmasq router, DNS and broadcast defaults and 1000-lease limit are explicit.")
 	for _, item := range reservations {
 		c.target(item, "services/"+service.Name+"/dhcp_server/reservations")
 	}

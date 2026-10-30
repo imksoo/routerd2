@@ -45,7 +45,7 @@ func ValidateSnapshot(c Config, s Snapshot) error {
 	}
 	ips := map[string]bool{}
 	for _, l := range s.Leases {
-		if err := validateLease(l, s.ObservedAt); err != nil {
+		if err := ValidateLease(l, s.ObservedAt); err != nil {
 			return fmt.Errorf("DHCP snapshot lease: %w", err)
 		}
 		if ips[l.IPAddress] {
@@ -58,7 +58,7 @@ func ValidateSnapshot(c Config, s Snapshot) error {
 
 // Only externally consumed lease facts cross this boundary. Pool selection
 // and reservation policy belong to dnsmasq, not a second Go allocator.
-func validateLease(l Lease, observed time.Time) error {
+func ValidateLease(l Lease, observed time.Time) error {
 	mac, err := net.ParseMAC(l.MACAddress)
 	if err != nil || len(mac) != 6 || mac[0]&1 != 0 || mac.String() != l.MACAddress {
 		return errors.New("invalid Ethernet client identity")

@@ -19,6 +19,35 @@ renewal timestamps are invented. dnsmasq currently clamps leases below 120
 seconds to 120 seconds. Option values retain dnsmasq syntax; the old native
 wire encoder and its option restrictions have been removed.
 
+Before first startup, active IPv4 bindings from a stopped old dnsmasq server
+can be initialized explicitly:
+
+```
+routerd dhcp import-leases --config /path/to/router.yaml --service leases --state-dir /path/to/new-state /path/to/old-dnsmasq.leases
+```
+
+Use the compiled native service name and the new router's actual state path.
+Stop the old DHCP server before copying its final lease file and starting the
+new server. The command reads the configuration without applying it. It shares
+the worker's exclusive state lock, requires an unused service directory, and
+atomically installs the dnsmasq file without overwriting an existing file.
+Expired bindings and DHCPv6 entries are omitted; live client identifiers and
+absolute deadlines are retained. Conflicting bindings, foreign subnets and
+reservation conflicts are rejected before creating state. The command does
+not extend a lease, manufacture request history, or create HA ownership.
+
+HA ownership remains subject to the normal authenticated peer reconciliation;
+the import does not permit unsynchronized new allocations. Initial two-member
+migration, old sticky holds, DHCPv6/PD state and physical migration require
+separate acceptance.
+
+`TestDaemonImportedDHCPLeases` obtains a real lease from an independent dnsmasq,
+stops that server, imports its final file and starts the normal routerd build.
+It checks DNS before the client sends DHCP again, the original client's retained
+address, refusal to give that address to another client, acquired DNS over UDP
+and TCP, and both clients' IPv4 reachability to the router. Run it with
+`python3 scripts/daemon-tests.py dhcp-server --test TestDaemonImportedDHCPLeases`.
+
 Periodic lease observations do not own the engine's serving lifetime. A failed
 state publication is logged; the existing bounded periodic publication continues
 with a fresh observation, while consumers expire the last accepted observation
