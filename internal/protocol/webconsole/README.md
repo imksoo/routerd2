@@ -169,3 +169,28 @@ SHA-256 of the product used by both checks:
 | `routerd` | `dd5a345ced5192c09b0bfcb73e9ab5e4cb33070b340d995f916e77fa852ab678` |
 | `routerd-modules` | `61230e7c61ac672f6621d3ca9ff934d0d5162ba2547a8002229624b6862e3eeb` |
 | `routerd-logging` | `4be6777af1a9daf85b4a2c4017120949428ebbcdb8ad6fadc8e889591fc6c798` |
+
+### History search communication acceptance on a separate machine
+
+On 2026-10-30 at 21:14–21:16 JST, the standard product build `b32a43c`
+(`wsl-console-b32a43c`) passed both existing traffic-flow checks on Ubuntu
+26.04 under WSL 2, Linux 6.18.33.1, on a separate Windows computer. The fixture
+was `735682a`; each check completed in 22.15 seconds with the race detector.
+The three product SHA-256 values are identical to the Tailscale checks above.
+The same build also passed the existing management check in 14.41 seconds.
+
+Independent LAN TCP/UDP traffic crossed source NAT, and an independent HTTP
+client searched the collector's real stored rows by client address, protocol
+and original start time. Built-in and reused nDPI classification both retained
+real TLS names and counters. The console returned unavailable, rather than an
+empty success, while storage was unusable; actual forwarding continued. After
+whole-product restart the original connection was still searchable. After
+closure its original end time appeared, and retention removal disappeared
+from the HTTP result. The existing UDP archive check also passed.
+
+Reproduce through `make check-traffic-flow` after the standard build. The
+recorded output was `dist/wsl-flow-console/`. A later nDPI run captured one real
+HTTP response for local layout review using a temporary test-only write; that
+write was removed and the fixture restored exactly. These results establish
+the saved-history operator path, not full homert natural renewal, HA, hardware
+qualification, or the remaining client-inventory and protocol UI features.
