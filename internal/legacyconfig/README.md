@@ -836,3 +836,11 @@ and restart. Its independent peer requires `bgpd`, sibling `zebra` and the norma
 `frr` account. Zebra supplies actual interface/next-hop observations; FRR is not
 included in the product runtime. The imported IPv4 fixture does not establish
 IPv6, route-reflector, VRF or full homert acceptance.
+
+An explicit `Telemetry` resource with `signals: [logs]` imports the old active
+SDK export path as an independent `otlp_logs` service. Endpoint, insecure flag,
+namespace and resource attributes are preserved. Omitted signals mean all three
+signals in routerd, so omission and any metrics/traces request are rejected rather
+than silently reduced to logs. The old `LogSink` OTLPSink had no send operation;
+its archive-on-delete semantics and ObservabilityPipeline options are not claimed
+as migrated by this logs-only path.

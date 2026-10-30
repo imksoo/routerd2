@@ -1,6 +1,7 @@
 GO ?= go
 DOCKER ?= docker
 PYTHON ?= python3
+OTELCOL ?= /usr/local/bin/otelcol-contrib
 RELEASE_ID ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || printf 'dev')
 GO_VERSION ?= 1.27.3
 ALPINE_VERSION ?= 3.24.3
@@ -49,6 +50,7 @@ help:
 	  'make check-health-pbr  Required two-WAN real-daemon TCP/UDP failover gate' \
 	  'make check-vrrp-unicast Verify VRRP peer failover and finite WAN identity' \
 	  'make check-tailscale   Verify signed Tailscale subnet/exit traffic, identity and revoke with independent peers' \
+	  'make check-otlp        Verify OTLP/gRPC logs, collector outage and bounded replacement' \
 	  'make check-syslog      Verify UDP log delivery, replacement and receiver outage with forwarding' \
 	  'make check-ntp         Verify time synchronization and LAN NTP with independent chronyd' \
 	  'make check-ntp-dhcp6   Verify learned time sources, original expiry and VRRP conditions with independent peers' \
@@ -124,6 +126,10 @@ vet:
 	$(GO) vet ./internal/releaseboot/testdata/guest
 
 check: fmt-check test test-dependencies test-tools race vet
+
+.PHONY: check-otlp
+check-otlp: build
+	$(PYTHON) scripts/otlp-peer.py --collector $(OTELCOL)
 
 .PHONY: check-syslog
 check-syslog: build

@@ -167,6 +167,8 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 			// Compiled before routes so dynamic tunnel ownership can be joined.
 		case "TailscaleNode":
 			c.tailscale(r)
+		case "Telemetry":
+			c.telemetry(r)
 		case "LogSink":
 			c.logSink(r)
 		case "HealthCheck":

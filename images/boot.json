@@ -50,6 +50,7 @@
   "workers": {
     "logging": "/usr/libexec/routerd-logging",
     "syslog": "/usr/libexec/routerd-modules",
+    "otlp_logs": "/usr/libexec/routerd-modules",
     "network": "/usr/libexec/routerd-modules",
     "control": "/usr/libexec/routerd-modules",
     "management": "/usr/libexec/routerd-modules",

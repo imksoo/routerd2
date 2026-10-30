@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/imksoo/routerd2/internal/protocol/bfd"
+	"github.com/imksoo/routerd2/internal/protocol/otlplogconfig"
 	"github.com/imksoo/routerd2/internal/protocol/syslogconfig"
 )
 
@@ -16,6 +17,10 @@ func Normalize(s Service) Service {
 			return a.String()
 		}
 		return v
+	}
+	if s.OTLPLogs != nil {
+		c := otlplogconfig.Normalize(*s.OTLPLogs)
+		s.OTLPLogs = &c
 	}
 	if s.Syslog != nil {
 		c := syslogconfig.Normalize(*s.Syslog)

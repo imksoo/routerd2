@@ -21,6 +21,7 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
 	"github.com/imksoo/routerd2/internal/protocol/health"
 	"github.com/imksoo/routerd2/internal/protocol/ntpconfig"
+	"github.com/imksoo/routerd2/internal/protocol/otlplogconfig"
 	"github.com/imksoo/routerd2/internal/protocol/pppoeconfig"
 	"github.com/imksoo/routerd2/internal/protocol/ra"
 	"github.com/imksoo/routerd2/internal/protocol/raclient"
@@ -30,6 +31,7 @@ import (
 )
 
 type Service struct {
+	OTLPLogs    *otlplogconfig.Config   `json:"otlp_logs,omitempty"`
 	Syslog      *syslogconfig.Config    `json:"syslog,omitempty"`
 	NTP         *ntpconfig.Node         `json:"ntp,omitempty"`
 	Tailscale   *tailscaleconfig.Node   `json:"tailscale,omitempty"`
@@ -117,6 +119,9 @@ var safeName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,23}$`)
 var interfaceName = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]{0,14}$`)
 
 func (s Service) Role() string {
+	if s.OTLPLogs != nil {
+		return "otlp_logs"
+	}
 	if s.Syslog != nil {
 		return "syslog"
 	}
@@ -224,7 +229,7 @@ func Validate(services []Service) error {
 		}
 		names[s.Name] = true
 		n := 0
-		for _, set := range []bool{s.Syslog != nil, s.NTP != nil, s.Tailscale != nil, s.PPPoE != nil, s.Health != nil, s.BFD != nil, s.DSLite != nil, s.RAClient != nil, s.DHCPServer != nil, s.DHCP6Server != nil, s.DHCPRelay != nil, s.DHCP4 != nil, s.DHCP6 != nil, s.RA != nil, s.DNS != nil, s.VRRP != nil, s.BGP != nil} {
+		for _, set := range []bool{s.OTLPLogs != nil, s.Syslog != nil, s.NTP != nil, s.Tailscale != nil, s.PPPoE != nil, s.Health != nil, s.BFD != nil, s.DSLite != nil, s.RAClient != nil, s.DHCPServer != nil, s.DHCP6Server != nil, s.DHCPRelay != nil, s.DHCP4 != nil, s.DHCP6 != nil, s.RA != nil, s.DNS != nil, s.VRRP != nil, s.BGP != nil} {
 			if set {
 				n++
 			}
@@ -232,7 +237,7 @@ func Validate(services []Service) error {
 		if n != 1 {
 			return fmt.Errorf("service %s must select exactly one protocol", s.Name)
 		}
-		if s.Syslog == nil && s.NTP == nil && s.DNS == nil && s.BGP == nil && s.DHCPRelay == nil && !(s.BFD != nil && s.BFD.Multihop) && !interfaceName.MatchString(s.Interface()) {
+		if s.OTLPLogs == nil && s.Syslog == nil && s.NTP == nil && s.DNS == nil && s.BGP == nil && s.DHCPRelay == nil && !(s.BFD != nil && s.BFD.Multihop) && !interfaceName.MatchString(s.Interface()) {
 			return fmt.Errorf("service %s has an invalid interface", s.Name)
 		}
 		key := s.Role() + ":" + s.Interface()
@@ -258,7 +263,7 @@ func Validate(services []Service) error {
 			}
 			dhcpListeners[iface] = s.Name
 		}
-		if s.Syslog != nil || s.DNS != nil || s.BGP != nil || s.DSLite != nil || s.Health != nil {
+		if s.OTLPLogs != nil || s.Syslog != nil || s.DNS != nil || s.BGP != nil || s.DSLite != nil || s.Health != nil {
 			key = s.Role() + ":" + s.Name
 		}
 		if s.VRRP != nil {
@@ -280,6 +285,10 @@ func Validate(services []Service) error {
 		}
 		sockets[key] = s.Name
 		switch s.Role() {
+		case "otlp_logs":
+			if err := otlplogconfig.Validate(*s.OTLPLogs); err != nil {
+				return err
+			}
 		case "syslog":
 			if err := syslogconfig.Validate(*s.Syslog); err != nil {
 				return err
@@ -484,6 +493,8 @@ func (s Service) Instance(runtimeDir, stateDir string) (Instance, error) {
 	var b []byte
 	var err error
 	switch s.Role() {
+	case "otlp_logs":
+		b, err = json.Marshal(*s.OTLPLogs)
 	case "syslog":
 		b, err = json.Marshal(*s.Syslog)
 	case "ntp":
