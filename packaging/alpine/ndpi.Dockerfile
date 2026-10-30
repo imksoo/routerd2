@@ -37,11 +37,14 @@ RUN --mount=type=cache,target=/root/.cache/zig mkdir -p /sources \
 
 FROM libraries AS build
 WORKDIR /src
+ARG TARGETARCH
+COPY scripts/ndpi-sources.py scripts/engine_sources.py ./scripts/
+COPY packaging/alpine/licenses/GPL-3.0.txt ./packaging/alpine/licenses/
+RUN python3 scripts/ndpi-sources.py --root /target --arch "$TARGETARCH"
 COPY go.mod go.sum ./
 COPY third_party/google-nftables/ ./third_party/google-nftables/
 RUN go mod download
 COPY . .
-ARG TARGETARCH
 ARG RELEASE_ID=dev
 RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/root/.cache/zig \
     case "$TARGETARCH" in amd64) target=x86_64-linux-musl ;; arm64) target=aarch64-linux-musl ;; *) exit 2 ;; esac \
@@ -50,8 +53,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/r
       go build -buildmode=exe -tags=libndpi,netgo,osusergo -trimpath -buildvcs=false \
       -ldflags "-s -w -linkmode external -extldflags -static -X github.com/imksoo/routerd2/internal/buildinfo.Identity=ROUTERD2-RELEASE-V1:$RELEASE_ID:END" \
       -o /out/routerd-modules ./cmd/routerd-modules
-RUN python3 scripts/ndpi-sources.py --root /target --arch "$TARGETARCH" \
- && tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
+RUN tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
       --transform='s,^\.,routerd2,' -rf /out/ndpi-sources.tar -C /src .
 
 FROM scratch AS artifacts
