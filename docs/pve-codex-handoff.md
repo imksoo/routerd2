@@ -262,3 +262,16 @@ main `93cc25e`へ`0e7012e`（RAポリシー・アドレス期限更新）と`1fb
 同じ通常版による両方の全入力二台は、元の相互TLS・PD/DHCP同期、両端末・全単体経路から開始した。停止対象の3物理linkを切断し全workerを喪失させ、そのnamespaceのconntrackも消去した。旧kernelが転送を続けるdaemon停止だけの試験とは異なるが、VM電源断ではない。A→Bで同一TCP/NAT対応と独立UDPを保持し、最長TCP待ち6.563秒、途中のUDP252送信/130受信/122期限切れを記録した。B→Aでは新規BGP向けTCPが失敗し、二方向完走は未合格。packetでは要求がA→FRRへ届く一方、返信は停止済みBのMACへ向かっていた。OPENは製品90秒・FRR180秒のHoldtimeで、元設定のGR120秒/stale360秒も有効。元のpeer設定と経路保持による復旧時間を次に測り、fixtureの3秒問い合わせや一律60秒を実際のBGP動作と混同しない。GRやpeer timerを黙って変更して成功とはしない。
 
 残作業は通常版の自然更新・回線断復旧、全入力の二方向切替、同版の通常Alpine image/PID1と更新復旧、実HGW/ONU・対象NIC、k8s/pveとCloud SAMを含む全34項目。今回のhost platformはホスト時計を変更せず、通常imageや物理回線の資格へ合格を移さない。完了した管理画面作業treeと過去の重複試行binary/多数stageは削除した。現在の通常実行物・必要なengine、実行中の自然観測、未解決BGP経路のpacketと最小の診断データは残す。
+
+
+## 2026-10-30 22:05 JST: 通常92・全入力二台の両方向切替
+
+同じ通常 `full-homert-address-native92` と両機の109件を元にした57resourceで、両方向のNIC切断・全worker喪失・conntrack消去から再参加まで終了0。ISC/radvd・四AFTR・二FRR・IX代替・DNS/DoH・chrony・Headscale/公式Tailscaleと普通/特殊dhcpcd端末を使用した。相互認証によるPD/DHCP引継ぎ、端末の取得DNSによる両IPのUDP/TCP問い合わせ、新規両IP通信、BGP四prefixと特殊IX、NTP/Tailscaleを再確認した。全経路再確認はA→B30.219秒、B→A22.569秒。元のBGP Hold90秒/GR120秒/stale360秒と60秒の受入枠を変更していない。
+
+同じTCP socket/sequence spaceとNAT対応を保持した。TCP最大応答待ち13.332秒、独立50ms UDPは1696送信/1411受信/285期限切れ、成功間最大7.626秒。DNS1024件中23失敗、Tailscale初期失敗は各方向6/119件・9/48件。無停止でも損失ゼロでもない。停止nodeの全3物理linkを切断し、conntrackを消したため旧kernelによる転送継続に頼っていないが、同じbootのnamespaceを保持する試験でありVM電源断ではない。IX既存接続、Tailscale出口、全異常組合せ、物理機器の資格は未受入。
+
+前走行ではB→A後、FRRの返信が停止済みBのMACへ向かうpacketを確認したが、fixtureが最初の3秒TCP失敗で即停止していた。失敗を記録したまま元の60秒枠で新規接続の復旧を観測するよう修正した。今回は枠内で両方向が復旧し、製品のBGP修正やtimer緩和による成功ではない。再現手順は私有 `/tmp/routerd-full-homert-ha92-observe.py`、結果は同名 `.log` と完走stage `2x6BE0` の集計。必要な手順と集計を残して終了済capture/実行物を削除する。
+
+通常92の元12時間リース観測は継続し、1836秒/60巡時点でhealthy=true・route issue0。T1は10月31日03:32:30 JST、観測終了は03:39頃の予定で未受入。DoH peer証明書は11月1日03:55 UTCまで有効で、この観測枠を含む。現在のfixtureは静的host IPv6 gatewayと異なるlink-localをpeerに与えているため、LANの成功をrouter自身のIPv6通信の合格にはしない。別の短時間試験で元のgatewayを独立peerへ明示して確認する。
+
+main `c5f93a5` は独立端末の通常版で検証されたDNS履歴とDHCPv6交換計測の統合を含む。DNS履歴検索・保存障害・再起動・保持期限は15.31秒、ISC取得/自然更新/T2断/Rebind復旧/collector断は98.42秒、並行UDP962往復失敗0。実関数と旧routerdの読取り経路・交換状態遷移を照合した。稼働中の通常92試験へ後続の画面/計測変更の成功を移さない。全設定の通常Alpine imageは同じnetwork/import版でビルド中。全体ゴールと期限達成は未完了。

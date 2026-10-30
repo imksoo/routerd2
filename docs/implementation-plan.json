@@ -11196,7 +11196,7 @@
     "physical_target_profile": "awaiting user target hardware/NIC and performance requirements; independent implementation and isolated VM tests continue",
     "validation_reporting": "Record current behavior, executed checks and untested scope concisely. Discard historical checkpoint ledgers as acceptance authority; no compatibility obligation to their code, APIs or formats.",
     "current_acceptance": {
-      "implementation_head": "93cc25e",
+      "implementation_head": "c5f93a5",
       "single_node_full_input_runtime": "supervisor-native91/native91/network27",
       "original_input_resources_per_node": 109,
       "explicit_appliance_input_resources_per_node": 110,
@@ -11207,21 +11207,36 @@
       "natural_original_dhcp_lease_seconds": 43200,
       "natural_dhcp_t1_seconds": 21600,
       "natural_renewal": "running_original_43200s_lease_not_accepted",
-      "remaining": "Observe original DHCP renewal and WAN recovery on normal92. Resolve measured return routing to dead BGP peer under original90s hold/GR configuration; complete both full-input handoffs. Full normal Alpine/PID1/update/recovery, target HGW/ONU/NIC, deployment profiles and remaining work packages.",
+      "remaining": "Original DHCP natural renewal and WAN recovery on normal92; router-originated IPv6 with the declared static peer gateway; full normal Alpine/PID1/update/recovery, target HGW/ONU/NIC, deployment profiles and remaining work packages.",
       "core_implementation_commit": "0e7012e",
       "normal_runtime": "full-homert-address-native92/native92/network27",
       "temporary_diagnostics_removed": true,
       "natural_dhcp_t1_utc": "2026-10-30T18:32:30Z",
       "diagnostic_untraced_600s": "passed20_rounds_with_temporary_phase_logging_not_normal_release_acceptance",
       "restart_with_reacquired_ipv6_dns_seconds": 11.715,
-      "two_node_normal": "A_to_B_preserved_same_TCP_and_NAT; B_to_A_failed_new_BGP_TCP; not_accepted"
+      "two_node_normal": "passed_both_directions_with_three_links_disconnected_and_conntrack_flushed; same_TCP_and_NAT; not_VM_power_cut",
+      "two_node_recovery_seconds": [
+        30.219,
+        22.569
+      ],
+      "two_node_max_tcp_reply_seconds": 13.332,
+      "two_node_udp": {
+        "sent": 1696,
+        "received": 1411,
+        "expired": 285,
+        "max_gap_seconds": 7.626
+      },
+      "two_node_dns": {
+        "queries": 1024,
+        "failed": 23
+      }
     }
   },
   "execution_order": [
     {
       "stage": 1,
       "profile": "homert02/03",
-      "next": "Main93cc25e includes explicit physical-WAN RA policy and batched address lifetime renewal without temporary probes. Untraced600s/20rounds with phase-logging binary passed automatic-client DNS including reacquired IPv6 DNS, dual-IP, two FRR peers, IX, NTP, Tailscale and daemon restart; not a normal-release natural-renewal acceptance. Normal full-homert-address-native92 is observing original43200s DHCP lease, primary T1 expected2026-10-30T18:32:30Z. Same normal binary full-input HA passed A_to_B same TCP/NAT with losses, but B_to_A new BGP TCP failed: peer sends replies to dead B; original negotiated hold90s and GR120/stale360 are under observation. Complete natural renewal/recovery and both full-input handoffs, normal Alpine image/update and target qualification, then k8s/pve and Cloud SAM. No all34 completion claim.",
+      "next": "Normal full-homert-address-native92 is observing the original43200s DHCP lease; T1 expected2026-10-30T18:32:30Z. Same normal binary passed both full-input HA directions within the unchanged60s budget and original BGP timers, preserving the same TCP/NAT with measured losses. Complete router-originated IPv6 with the explicitly configured peer gateway, natural renewal/WAN recovery, normal Alpine full-input image/update/recovery and target qualification, then k8s/pve and Cloud SAM. Main c5f93a5 separately integrates independently accepted DNS history and DHCPv6 telemetry; running normal92 does not contain those later additions. No all34 completion claim.",
       "required_focus": [
         "WAN/LAN IPv4/IPv6, DS-Lite, actual route selection/backup WAN, DHCP/PD/RA, learned DNS resolution/distribution, firewall/NAT/MTU/MSS, BGP and management",
         "HA-01 current election/track dependencies, HA-02 DHCP/PD synchronization, HA-03 NAT/connection synchronization and EXT-02 Tailscale used by this deployment"
