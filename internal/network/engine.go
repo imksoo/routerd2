@@ -475,7 +475,7 @@ type apply struct {
 	ctx             context.Context
 	changed         int
 	wireGuardWanted map[string]wireGuardRecorded
-	routeTables     map[int]map[string][]RouteState
+	routeStates     map[string][]RouteState
 }
 
 // A native multi-attribute update may fail after changing some attributes.
@@ -692,7 +692,7 @@ func (p *apply) reconcile(d Desired) error {
 	}
 	// Address removal and link changes can change connected routes and clear
 	// source attributes. Route installation uses a new kernel observation.
-	p.routeTables = nil
+	p.routeStates = nil
 	if err := p.routes(d.Routes); err != nil {
 		return err
 	}
@@ -892,7 +892,7 @@ func (p *apply) routes(want []Route) error {
 	}
 	var additions []Route
 	for _, r := range want {
-		live, err := p.routeTable(routeTable(r))
+		live, err := p.readRoutes()
 		if err != nil {
 			return p.failure("route read", err)
 		}
@@ -936,7 +936,7 @@ func (p *apply) refreshRoutes(wanted map[string]Route) error {
 		if !ok {
 			continue
 		}
-		live, err := p.routeTable(routeTable(saved.Route))
+		live, err := p.readRoutes()
 		if err != nil {
 			return p.failure("route refresh read", err)
 		}
@@ -994,9 +994,8 @@ func (p *apply) refreshRoutes(wanted map[string]Route) error {
 		}
 		p.changed++
 		p.e.state.Routes[update.index] = update.installed
-		// Preserve the operation's existing per-table readback cache.
-		live := p.routeTables[routeTable(next)]
-		live[routeSlot(next)] = []RouteState{{Route: next, kernelExpiry: update.installed.KernelExpiry, Protocol: RouteProtocol, Type: 1, Multipath: len(next.NextHops) > 0}}
+		// Preserve this operation's readback after each acknowledged refresh.
+		p.routeStates[routeSlot(next)] = []RouteState{{Route: next, kernelExpiry: update.installed.KernelExpiry, Protocol: RouteProtocol, Type: 1, Multipath: len(next.NextHops) > 0}}
 	}
 	return nil
 }

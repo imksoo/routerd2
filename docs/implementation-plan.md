@@ -55,7 +55,7 @@ IPv4/IPv6 TCP/UDP・DNS・NTP・管理と、65.2秒/9巡の履歴進行・Health
 同じchronydとLAN時刻/IPv4/IPv6 TCP/UDP/captureを確認した。全homert受入とは分け、DHCPv4実学習と
 監督情報の失効・起動遅延は未解消として[引き継ぎ](pve-codex-handoff.md)に残す。
 
-2026-10-30 17:33 JST: native85のpolicy rule一覧を一括適用につき一回へ削減。実5WAN、Health→PBRの切替/期限/再起動/rollback、二WAN ECMP、関連Race/vet/両arch/署名検査は通過。試験の元期限と短いconsumer期限の未指定を修正した。通常factory全構成は依然起動不合格。別の一時計測で正常帰還するApply9.589秒中interface2.330秒/routes2.590秒を観測し、全FIB重複取得を次に除く。[実行版と限界](pve-codex-handoff.md)。
+2026-10-30 17:55 JST: native86へ旧OTLP LogSink/DHCP名/Firewall履歴を統合し、経路一覧の重複取得とtable別mapを除去。最終実行物のmake check/Race/vet/両arch/署名、実3経路fixture、実HGW90秒/9巡・全daemon再起動、独立DNS名/履歴/OTLPが通過。通常factoryの512MiB/2CPU/TCGは起動不合格のまま。実homertは4CPU/約4GiB/KVMと確認し、既存PVEの隔離KVMで同じ配布物を受け入れる準備へ進む。自然PD更新/ONU直結/物理機器/全34項目は未完了。[版・結果・限界](pve-codex-handoff.md)。
 
 2026-10-30 15:30 JST: native83の単体同時構成でDNS/DHCP・両IP TCPUDP・二BGP・条件付きDNS24件・特殊端末・NTP・TS双方向と全daemon再起動が成立。継続観測では9.540秒で全8種が復旧し、DNS12/67件、新規TCPUDP27/69件の失敗を保持。空候補時も先行経路を保つ修正を統合。同じ版の512MiB/2CPU/TCG VM起動は不合格。実二回線・全設定二台・実機・他の製品機能は未受入。全34項目は未完了。[実行版と限界](pve-codex-handoff.md)。
 

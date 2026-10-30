@@ -268,7 +268,7 @@ func (e *Engine) expireAuthority(ctx context.Context) (time.Duration, error) {
 // check and durable removal. A changed or replaced foreign route is left alone.
 func (p *apply) removeRoute(i int) error {
 	r := p.e.state.Routes[i]
-	live, err := p.routeTable(routeTable(r.Route))
+	live, err := p.readRoutes()
 	if err != nil {
 		return p.failure("route remove read", err)
 	}
@@ -299,24 +299,20 @@ func (p *apply) removeRoute(i int) error {
 	return nil
 }
 
-// One kernel dump per table and operation avoids a complete FIB walk for each
-// renewed or expired route. Removals update this operation's observation.
-func (p *apply) routeTable(table int) (map[string][]RouteState, error) {
-	if live, ok := p.routeTables[table]; ok {
-		return live, nil
+// The kernel dump covers all tables. Read it once per operation and keep
+// removals and renewals in this operation's observation.
+func (p *apply) readRoutes() (map[string][]RouteState, error) {
+	if p.routeStates != nil {
+		return p.routeStates, nil
 	}
-	routes, err := p.e.kernel.Routes(table)
+	routes, err := p.e.kernel.Routes(0)
 	if err != nil {
 		return nil, err
 	}
-	live := make(map[string][]RouteState, len(routes))
+	p.routeStates = make(map[string][]RouteState, len(routes))
 	for _, r := range routes {
 		key := routeSlot(r.Route)
-		live[key] = append(live[key], r)
+		p.routeStates[key] = append(p.routeStates[key], r)
 	}
-	if p.routeTables == nil {
-		p.routeTables = make(map[int]map[string][]RouteState)
-	}
-	p.routeTables[table] = live
-	return live, nil
+	return p.routeStates, nil
 }

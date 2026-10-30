@@ -5,13 +5,19 @@
 [試験計画](test-plan.md)、[機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
-## 2026-10-30 17:33 JST: 起動の実測と経路読取り削減
+## 2026-10-30 17:55 JST: native86統合・実HGWと起動環境
 
-`policy-read-native85`は一括適用するpolicy ruleのカーネル一覧取得を各ruleごとから一回へ削減した。全構成は13件。所有権と書込み前の元期限検査は維持する。network Race 31.026秒、vet、CGO0両architecture、署名六ELF/catalog/publisherは終了0。実daemonの5WAN選択、Health→PBR切替・復旧/古い通知/期限/worker交換/confirmed rollback、二WAN weighted ECMPが通過した。
+`90f9d96`の旧OTLP LogSink取込、DHCP由来DNS、Firewall履歴を統合した（契約86/network25）。旧OTLPSink.Emitは送信していなかったため既存Telemetry senderだけを使う。DHCP名は有限な貸出所有者へ渡し、更新・実RELEASEでA/PTRを変更/撤去する。Firewall履歴は旧logstore.RecordBatch/ApplyRetentionを使い、保存障害がpacket収集を待たせない。新しい外部daemonは追加していない。
 
-既存の期限試験には二つの誤りがあった。主経路の許可が残り2.4秒あるのにwriter交換から2秒で撤去を要求し、短いmax_ageを指定していない予備経路も同時に消えるとした。ECMPも長いproducer期限を待つ間にsupervisorが停止producerを交換していた。試験の両候補に2500msのconsumer期限を明示し、writer起動と実際の元期限による撤去を分けた。製品の期限・heartbeatを変更していない。修正後の実通信は35.38秒/18.99秒で終了0。
+`route-read-flat-native86`では、policy ruleの登録段階で一覧を一回、経路一覧を一操作で一回取得する。事前の所有確認は維持する。routeSlotはtableを含むため、重複したtable別mapと引数を削除した。アドレス/リンク変更後は新しい観測を取得し、所有・元期限・書込み前の検査を維持する。`make check`（Race/vet含む）、CGO0両arch、署名六ELF/catalog/publisher、通常Make/APK image生成が終了0。実5WAN選択、Health→PBR切替/期限/再起動/rollback、weighted ECMPの全三fixtureも通過。期限試験は両候補の2500ms max_ageを明示し、writer起動と実際の元期限撤去を分けた。製品の期限を変更していない。全体Raceの初回は大設定CLI確認の60秒期限超過で失敗（96.53秒）。同じ試験は単独49.76秒、再実行の全体checkも変更せず通過。負荷下での性能改善とはしない。
 
-同版の通常factory 512MiB/2CPU/TCG全構成は起動不合格で、クライアント未受入。一時計測付きの別イメージでも起動に失敗したが、二回目のnetwork Applyは9.589秒で正常に戻り、保存3回の符号化840ms/書込み485ms、interfaceConfig 2.330秒、routes 2.590秒、firewall 1.616秒だった。最終保存の停止・循環lockを確認したとはしない。経路処理はtableごとに同じ全FIB dumpを繰り返すため、次は一操作の読み取りへまとめ、実通信と通常起動で確認する。小さい私有結果は`/tmp/routerd-{policy-read,startup-phase}-native85-failure/`。診断コードは私有worktreeだけに置き、停止済VM stage二組を削除した。
+同じ最終実行物で、独立dhcpcd/BusyBoxと実HGWを90秒/9巡使い、自動DHCPv4・RA起動のDHCPv6情報・SLAAC、取得DNSの両IP UDP/TCP、条件付きDNS障害分離/復旧、両IP HTTPS、両端末の自然DHCPv4更新が通過した。PD SIGKILL後1.49秒、通常交換4.06秒、全daemon交換5.32秒で通信が復帰しDUID/IAIDを保持。停止時RAゼロ・kernel撤去も通過。自然PD Renewは0組（元T1まで約7187秒）であり、自然更新・ONU直結・物理NIC・連続TCPの受入ではない。保存identityは維持した。logは私有`/tmp/routerd-route-read-flat-native86-hgw.log`。
+
+同じ実行物のDHCP名更新/実解放、Firewall履歴の両IP通信/保存/転送失敗と回復、OTLPの独立collector/重複配送防止も通過。OTLP中の並行UDPは69往復/失敗0。各fixtureのログは作業treeの`dist/route-read-flat-native86-*`に一時保持し、不要な生capture/VM stageは削除する。全homert同時構成・全34項目の完了ではない。
+
+通常factory `route-read-native86`（最終map平坦化前）の512MiB/2CPU/TCG全profileは依然不合格。network revision1 applied、projection3 applyingで適用応答timeout、端末DHCP未取得。経路取得削減だけで起動解消とはしない。小さい私有記録`/tmp/routerd-route-read-native86-failure/`を残し停止stageを削除した。以前の診断付きnative85はApply9.589秒が正常帰還し、interface2.330/routes2.590/firewall1.616秒、保存3回840+485msを観測した。最終保存の停止や循環lockを確認した結果ではない。
+
+実homertの読取りで両機は4CPU/約4GiB/KVMと確認した。512MiB/2CPU/TCGはsmoke fixtureの条件で最小要件ではない。rootから既存PVEへ信頼済み鍵で読取り接続し、KVMと空き約48GiBを確認した。本番VM/NICは変更していない。次は4CPU/4GiB/KVMの隔離guestへ同じ通常配布物と独立peer構成を接続し、起動・端末通信を判定する。単純な期限延長候補は採用しない。
 
 ## 2026-10-30 16:33 JST: native85統合候補
 
