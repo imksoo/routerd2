@@ -36,7 +36,7 @@ func (r *Runtime) dnsHistoryRoute(mux *http.ServeMux) {
 		if raw := strings.TrimSpace(q.Get("client")); raw != "" {
 			address, err := netip.ParseAddr(raw)
 			if err != nil || address.Zone() != "" {
-				localapi.Fail(w, http.StatusBadRequest, errors.New("client must be an IP address"))
+				localapi.Fail(w, http.StatusBadRequest, errors.New("端末にはゾーン指定のないIPアドレスを指定してください"))
 				return
 			}
 			filter.Client = address.Unmap().String()
@@ -46,7 +46,7 @@ func (r *Runtime) dnsHistoryRoute(mux *http.ServeMux) {
 		bound, ok := r.bindings[name]
 		r.mu.Unlock()
 		if !ok || bound.instance.Role != "dns" {
-			localapi.Fail(w, http.StatusNotFound, errors.New("unknown DNS service"))
+			localapi.Fail(w, http.StatusNotFound, errors.New("指定したDNSサービスはありません"))
 			return
 		}
 		var cfg dnsconfig.Config
