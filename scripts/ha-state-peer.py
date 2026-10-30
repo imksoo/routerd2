@@ -4,6 +4,8 @@
 All links, sysctls, peers and packet captures live in private namespaces.
 The TCP client never reconnects. tcp_loose=0 prevents picking up a midstream
 flow without the replicated ESTABLISHED state; conntrack_tcp_liberal intent matches homert.
+UDP uses the same socket with an independent 50ms sender and a 200ms reply budget.
+UDP lost counts expired replies; maximum no-reply time includes an ongoing gap.
 Completed diagnostics are deleted with the private stage.
 """
 import argparse
@@ -539,24 +541,51 @@ for protocol,port in ((socket.SOCK_STREAM,18082),(socket.SOCK_DGRAM,18083)):
         wait(lambda: saved("a")["leases"] == saved("b")["leases"] and bool(saved("a")["leases"]))
         print("PASS independent BusyBox DORA; authenticated standby has the original dnsmasq leases", flush=True)
         client_code = r'''
-import socket,time,json
+import socket,time,json,threading,select
 s=socket.create_connection(('203.0.113.50',18080),timeout=5);f=s.makefile('rwb',buffering=0)
 s.settimeout(15)
-u=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);u.bind(('198.18.0.50',30001));u.connect(('203.0.113.50',18081))
-sequence=0;udp_sequence=0;udp_peer='';lost=0;longest=0
+state={'sequence':0,'tcp_peer':'','longest_tcp_reply_seconds':0,'tcp_source_port':s.getsockname()[1]}
+lock=threading.Lock()
+def udp():
+ u=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);u.bind(('198.18.0.50',30001));u.connect(('203.0.113.50',18081));u.setblocking(False)
+ sent=received=lost=udp_sequence=0;udp_peer='';pending={};next_send=time.monotonic();last_reply=next_send;longest_gap=0
+ def publish(error=''):
+  with lock:report=state.copy()
+  report.update(udp_sequence=udp_sequence,udp_peer=udp_peer,udp_sent=sent,udp_received=received,udp_lost=lost,udp_pending=len(pending),longest_udp_no_reply_seconds=max(longest_gap,time.monotonic()-last_reply),udp_source_port=u.getsockname()[1])
+  if error:report['udp_error']=error
+  print(json.dumps(report),flush=True)
+ try:
+  while True:
+   now=time.monotonic()
+   if now>=next_send:
+    sent+=1;u.send(str(sent).encode());pending[sent]=now;next_send=now+0.05
+   # Keep the original 200ms response budget. Received counts timely replies;
+   # lost counts expired sequences, even if an old response arrives later.
+   for number,began in list(pending.items()):
+    if now-began>=0.2:del pending[number];lost+=1
+   readable,_,_=select.select([u],[],[],max(0,min(next_send-now,0.05)))
+   if readable:
+    while True:
+     try:reply=u.recv(2048)
+     except BlockingIOError:break
+     number,separator,remote=reply.partition(b' ')
+     number=int(number)
+     began=pending.pop(number,None)
+     if not separator or began is None:continue
+     now=time.monotonic()
+     if now-began>0.2:lost+=1;continue
+     received+=1;udp_sequence=max(udp_sequence,number);udp_peer=remote.decode()
+     longest_gap=max(longest_gap,now-last_reply);last_reply=now
+   publish()
+ except Exception as error:
+  publish(str(error));raise
+threading.Thread(target=udp,daemon=True).start()
+sequence=0;longest=0
 while True:
  sequence+=1;data=str(sequence).encode();prefix=data+b' '
  began=time.monotonic();f.write(data+b'\n');tcp=f.readline().strip();longest=max(longest,time.monotonic()-began)
  if not tcp.startswith(prefix):raise RuntimeError('TCP stream closed or changed')
- u.send(data);end=time.monotonic()+0.2
- while True:
-  remaining=end-time.monotonic()
-  if remaining<=0:lost+=1;break
-  u.settimeout(remaining)
-  try:reply=u.recv(2048)
-  except socket.timeout:lost+=1;break
-  if reply.startswith(prefix):udp_peer=reply[len(prefix):].decode();udp_sequence=sequence;break
- print(json.dumps({'sequence':sequence,'udp_sequence':udp_sequence,'tcp_peer':tcp[len(prefix):].decode(),'udp_peer':udp_peer,'udp_lost':lost,'longest_tcp_reply_seconds':longest}),flush=True)
+ with lock:state.update(sequence=sequence,tcp_peer=tcp[len(prefix):].decode(),longest_tcp_reply_seconds=longest)
  time.sleep(0.05)
 '''
         with (stage / "client.progress").open("w") as output, (stage / "client.log").open("w") as diagnostic:
@@ -567,22 +596,25 @@ while True:
             if client.poll() is not None:
                 raise RuntimeError("continuous same-socket client exited")
             complete = (stage / "client.progress").read_text().rpartition("\n")[0].splitlines()
-            return json.loads(complete[-1]) if complete else {"sequence": 0, "udp_sequence": 0}
+            observed = json.loads(complete[-1]) if complete else {"sequence": 0, "udp_sequence": 0}
+            if observed.get("udp_error"):
+                raise RuntimeError("independent UDP client failed: " + observed["udp_error"])
+            return observed
 
         def progress(previous):
-            wait(lambda: latest()["sequence"] > previous + 3 and latest()["udp_sequence"] > previous)
+            wait(lambda: latest()["sequence"] > previous["sequence"] + 3 and latest()["udp_sequence"] > previous["udp_sequence"] + 3)
             observed = latest()
             assert "203.0.113.1" in observed["tcp_peer"] and "203.0.113.1" in observed["udp_peer"]
             return (observed["tcp_peer"], observed["udp_peer"])
 
         for node in ("a","b"):
             assert run(inside("ha-"+node,["sysctl","-n","net.netfilter.nf_conntrack_tcp_be_liberal"])).strip() == "1", "product did not apply conntrack handoff intent"
-        mapping = progress(0)
+        mapping = progress({"sequence": 0, "udp_sequence": 0})
         if pd_dslite:
             entries = run(inside("ha-a", ["conntrack", "-L", "-p", "tcp", "--orig-src", "198.18.0.50", "--dport", "18080"]))
             assert "mark=41 " in entries, "established primary TCP has no primary connection mark"
         run(inside("ha-client", ["ip", "-4", "neigh", "flush", "to", "198.18.0.1", "dev", "lan0"]))
-        assert progress(latest()["sequence"]) == mapping
+        assert progress(latest()) == mapping
         neighbor = run(inside("ha-client", ["ip", "-4", "neigh", "show", "198.18.0.1", "dev", "lan0"]))
         assert "00:00:5e:00:01:2a" in neighbor.lower(), "client learned a physical MAC for the shared VIP: " + neighbor
         for link in ("lan0", "lan-ha"):
@@ -626,7 +658,7 @@ while True:
             pd_traffic("a")
             assert not any(a.get("local") == "2001:db8:80:f1::21" for link in prepared_addresses() for a in link.get("addr_info", [])), "cancelled preparation retained the B4 address"
             assert "service.pd-lan-ra" not in modules("b"), "cancelled preparation left an RA worker"
-            assert progress(latest()["sequence"]) == mapping
+            assert progress(latest()) == mapping
             print("PASS overlapping DAD, interrupted preparation, B4 withdrawal and real TCP/UDP recovery", flush=True)
 
             api("a", "control.sock", "/v1/services/service.ha/restart", {})
@@ -663,15 +695,15 @@ while True:
             owner = "a" if active("a") else "b"
             pd_traffic(owner)
             information(owner)
-            sequence = latest()["sequence"]
-            assert progress(sequence) == mapping, "control loss replaced the established connection"
+            progress_before = latest()
+            assert progress(progress_before) == mapping, "control loss replaced the established connection"
             if owner != "a":
                 api("b", "control.sock", "/v1/services/service.ha/restart", {})
                 wait(lambda: active("a"))
                 pd_traffic("a")
                 information("a")
-                sequence = latest()["sequence"]
-                assert progress(sequence) == mapping, "return to the original owner did not restore the established connection"
+                progress_before = latest()
+                assert progress(progress_before) == mapping, "return to the original owner did not restore the established connection"
             print("PASS original conditional serving authority expired on the stopped-control node; peer serving and the same TCP/UDP mapping recovered", flush=True)
         print("PASS continuous actual VRRP/NAT TCP and UDP; tcp_loose=0", flush=True)
         for previous, owner in (("a", "b"), ("b", "a")):
@@ -707,13 +739,13 @@ while True:
                 pd_traffic(owner)
                 information(owner)
                 print("PASS " + previous + " -> " + owner + " PD handoff with ISC paused, same DUID/IAID/prefix and bounded original deadlines, then Rebind/Reply", flush=True)
-            sequence = latest()["sequence"]
-            assert progress(sequence) == mapping, "existing connection mapping changed during takeover"
+            progress_before = latest()
+            assert progress(progress_before) == mapping, "existing connection mapping changed during takeover"
             if pd_dslite:
                 entries = run(inside("ha-" + owner, ["conntrack", "-L", "-p", "tcp", "--orig-src", "198.18.0.50", "--dport", "18080"]))
                 assert "mark=41 " in entries, "takeover lost the primary TCP connection mark"
             run(inside("ha-client", ["ip", "-4", "neigh", "flush", "to", "198.18.0.1", "dev", "lan0"]))
-            assert progress(latest()["sequence"]) == mapping
+            assert progress(latest()) == mapping
             neighbor = run(inside("ha-client", ["ip", "-4", "neigh", "show", "198.18.0.1", "dev", "lan0"]))
             assert "00:00:5e:00:01:2a" in neighbor.lower(), "new owner answered with a physical MAC: " + neighbor
             wait(lambda: run(inside("ha-" + previous, ["sysctl", "-n", "net.ipv4.conf.lan0.arp_ignore"])).strip() == "0")
@@ -729,7 +761,7 @@ while True:
             wait(lambda: saved("a")["leases"] == saved("b")["leases"])
             print("PASS continuous same TCP socket and UDP mapping after " + previous + " -> " + owner + " takeover and worker/engine restart", flush=True)
             print("PASS same BusyBox client renewed its replicated address after " + previous + " -> " + owner, flush=True)
-            assert progress(latest()["sequence"]) == mapping
+            assert progress(latest()) == mapping
         # A real engine crash must revoke this owner's publication and move
         # traffic before a new worker/engine is admitted.
         before = modules("a")["service.ha"]["generation"]
@@ -739,8 +771,8 @@ while True:
         os.kill(engines[0], signal.SIGKILL)
         wait(lambda: active("b"))
         wait(lambda: modules("a").get("service.ha", {}).get("generation", 0) > before and modules("a").get("service.ha", {}).get("ready"))
-        sequence = latest()["sequence"]
-        assert progress(sequence) == mapping
+        progress_before = latest()
+        assert progress(progress_before) == mapping
         print("PASS engine SIGKILL: withdrawal, peer takeover and actual worker/engine recovery", flush=True)
         wait(lambda: modules("b").get("service.leases", {}).get("ready") is True and api("b", "control.sock", "/v1/services/service.leases")["snapshot"]["active"] is True)
         second_client = lease_client(1, first_address)
@@ -899,7 +931,7 @@ while True:
             restarted = start("ha-b", b_command, "b")
             wait(lambda: daemon_ready(restarted, "b"), timeout=30)
             wait(lambda: holds("a") == holds("b") == retained_holds)
-        assert progress(latest()["sequence"]) == mapping
+        assert progress(latest()) == mapping
         assert holds("a") == retained_holds, "whole-daemon restart or handoff extended the hold deadlines"
         before_reconnect = len(lease_events(0))
         first_client = start("ha-client", ["busybox", "udhcpc", "-f", "-i", "lease0", "-s", str(hook), "-p", str(stage / "lease0.pid"), "-r", first_address, "-t", "3", "-T", "1", "-A", "1"], "lease0")
@@ -910,7 +942,7 @@ while True:
 
         final_observation = None
         if pd_dslite:
-            assert progress(latest()["sequence"]) == mapping
+            assert progress(latest()) == mapping
             final_observation = latest()
             client.terminate()
             client.wait(timeout=3)
@@ -961,8 +993,9 @@ while True:
             else:
                 pd_traffic(successor)
             print("PASS server-absent cross-clock PD takeover expired at original deadline on router/SLAAC client; restart did not revive PD and ISC recovery restored TCP/UDP", flush=True)
-        print("Observed UDP datagrams lost during transitions:", (final_observation or latest())["udp_lost"], flush=True)
-        print("Longest TCP reply wait across transitions:", (final_observation or latest())["longest_tcp_reply_seconds"], "seconds", flush=True)
+        observed = final_observation or latest()
+        print("Independent UDP observations (50ms sends, 200ms reply budget):", {key: observed[key] for key in ("udp_sent", "udp_received", "udp_lost", "udp_pending", "longest_udp_no_reply_seconds", "udp_source_port")}, flush=True)
+        print("Longest TCP reply wait across transitions:", observed["longest_tcp_reply_seconds"], "seconds", flush=True)
         if client.poll() is None:
             client.terminate()
             client.wait(timeout=3)
