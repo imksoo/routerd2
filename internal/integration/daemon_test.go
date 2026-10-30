@@ -387,7 +387,7 @@ esac
 		t.Fatalf("SSH DNS history lost result metadata: %v %s", err, historyOutput)
 	}
 	record := history.Queries[0]
-	if record.ID != originalHistory.Queries[0].ID || record.Timestamp != originalHistory.Queries[0].Timestamp || record.ClientAddress != "198.18.0.2" || record.QuestionName != "router.lab.example." || record.ResponseCode != "NOERROR" {
+	if record.ID != originalHistory.Queries[0].ID || record.Timestamp != originalHistory.Queries[0].Timestamp || record.ClientAddress != "198.18.0.2" || record.QuestionName != originalHistory.Queries[0].QuestionName || strings.TrimSuffix(record.QuestionName, ".") != "router.lab.example" || record.ResponseCode != "NOERROR" {
 		t.Fatalf("SSH DNS history changed original record: %+v %+v", record, originalHistory.Queries[0])
 	}
 	failedHistory, err := client.NewSession()
@@ -438,7 +438,7 @@ esac
 	if strings.Contains(transcript.String(), "Error:") || stderr.Len() != 0 {
 		t.Fatalf("SSH editing failed: %s %s", transcript.String(), stderr.String())
 	}
-	if !strings.Contains(transcript.String(), `"truncated": true`) || !strings.Contains(transcript.String(), `"questionName": "router.lab.example."`) {
+	if !strings.Contains(transcript.String(), `"truncated": true`) || !strings.Contains(transcript.String(), `"questionName": "`+record.QuestionName+`"`) {
 		t.Fatal("DNS history unavailable in candidate mode", transcript.String())
 	}
 	var state control.State
@@ -488,7 +488,7 @@ esac
 	localHistory := exec.Command(filepath.Join(os.Getenv("ROUTERD2_TEST_BIN_DIR"), "routerd"), "cli", "--runtime-dir="+runDir)
 	localHistory.Stdin = strings.NewReader(dnsCommand + "\rexit\r")
 	localOutput, err := localHistory.CombinedOutput()
-	if err != nil || bytes.Contains(localOutput, []byte("Error:")) || !bytes.Contains(localOutput, []byte(`"questionName": "router.lab.example."`)) {
+	if err != nil || bytes.Contains(localOutput, []byte("Error:")) || !bytes.Contains(localOutput, []byte(`"questionName": "`+record.QuestionName+`"`)) {
 		t.Fatalf("local shell DNS history: %v %s", err, localOutput)
 	}
 	t.Log("candidate-mode DNS history preserved the subsequent configuration commit; candidate-mode snapshot listing and local shell DNS history both succeeded")
