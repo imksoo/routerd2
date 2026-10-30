@@ -396,6 +396,15 @@ func (d *daemon) handleDNS(listener int, w dns.ResponseWriter, req *dns.Msg) {
 		result.Response = resp
 		result.ResponseCode = dns.RcodeToString[resp.Rcode]
 	}
+	if w.RemoteAddr().Network() == "udp" {
+		size := dns.MinMsgSize
+		if opt := req.IsEdns0(); opt != nil {
+			size = int(opt.UDPSize())
+		}
+		// A complete upstream TCP answer may exceed this client's UDP size.
+		// Truncate also applies the EDNS minimum of 512 bytes.
+		resp.Truncate(size)
+	}
 	_ = w.WriteMsg(resp)
 	if err != nil && len(req.Question) > 0 {
 		client := w.RemoteAddr().String()

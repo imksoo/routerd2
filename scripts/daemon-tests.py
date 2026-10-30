@@ -12,7 +12,10 @@ import tempfile
 # Each fixture verifies its disposable user/network namespace before mutation.
 # Timeout is the outer harness budget, not a protocol or client deadline.
 SUITES = {
-    "dns-upstream": (("TestDaemonDNSProbeTimeoutIndependentOfQueries", ("wan0", "lan0"), 60),),
+    "dns-upstream": (
+        ("TestDaemonDNSProbeTimeoutIndependentOfQueries", ("wan0", "lan0"), 60),
+        ("TestDaemonDNSResponseFitsClientUDPSize", ("wan0", "lan0"), 60),
+    ),
     "traffic-flow": (("TestDaemonTrafficFlowHistory", ("wan0", "lan0"), 85), ("TestDaemonTrafficFlowNDPI", ("wan0", "lan0"), 85)),
     "management": (("TestDaemonConfigurationAndRecovery", ("mgmt0",), 100),),
     "local-redirect": (("TestDaemonLocalDNSRedirect", ("wan0", "lan0"), 85),),

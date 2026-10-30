@@ -90,6 +90,17 @@ Lease files, recovered sticky records and arbitrary lease injection are not
 accepted: the DHCP worker owns leases and their original observation/client
 expiry. DNS does not create a second lease journal or revive old addresses.
 
+UDP replies use the client's EDNS payload size, or 512 bytes without EDNS.
+The existing DNS library truncates oversized answers and sets TC so clients can
+retry over TCP. TCP retains the complete answer, including after a cached UDP
+reply was truncated. This also applies when the worker obtained a complete
+answer by retrying a truncated upstream UDP reply over TCP.
+
+Reproduce this boundary with independent dnsmasq and dig through two product
+resolvers using `python3 scripts/daemon-tests.py dns-upstream --test
+TestDaemonDNSResponseFitsClientUDPSize --binary-dir dist/bin`. The isolated peers
+use static addresses; this check does not qualify DHCP startup or a physical LAN.
+
 The private socket exposes `GET /v1/healthz`, `/v1/status`, `/v1/events` and
 `/v1/config`. Query logging and bounded event history remain module-owned.
 PAP/CHAP communication is reproduced with `make check-pppoe`; PD with
