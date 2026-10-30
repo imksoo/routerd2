@@ -36,9 +36,10 @@ func runNativeACLNATFixture(t *testing.T, e *Engine, base Desired, clientNS, ser
 	held.exchange(t)
 	d := cloneDesired(base)
 	nd := FirewallRule{Match: PacketMatch{Protocol: "icmpv6", ICMPTypes: []int{133, 134, 135, 136}}, Action: "accept"}
-	d.Firewall.Input = &FirewallChain{Policy: "drop", Log: &PacketLog{Prefix: "routerd2 test input deny "}, Rules: []FirewallRule{
+	// NFLOG sampling must not gate the independent accept/drop verdicts.
+	d.Firewall.Input = &FirewallChain{Policy: "drop", Log: &PacketLog{Prefix: "routerd2 test input deny ", Group: 1, Every: 2}, Rules: []FirewallRule{
 		{Match: PacketMatch{InInterface: "lo"}, Action: "accept"}, nd,
-		{Match: PacketMatch{Family: 4, InInterface: "lan0", Source: "192.0.2.0/24", Destination: "192.0.2.1/32", Protocol: "tcp", SourcePorts: []PortRange{{Start: 20000, End: 65535}}, DestinationPorts: []PortRange{{Start: 41000, End: 41002}}}, Action: "accept", Log: &PacketLog{Prefix: "routerd2 test management "}},
+		{Match: PacketMatch{Family: 4, InInterface: "lan0", Source: "192.0.2.0/24", Destination: "192.0.2.1/32", Protocol: "tcp", SourcePorts: []PortRange{{Start: 20000, End: 65535}}, DestinationPorts: []PortRange{{Start: 41000, End: 41002}}}, Action: "accept", Log: &PacketLog{Prefix: "routerd2 test management ", Group: 1, Every: 2}},
 		{Match: PacketMatch{Family: 6, InInterface: "lan0", Source: "2001:db8:1::/64", Destination: "2001:db8:1::1/128", Protocol: "tcp", SourcePorts: []PortRange{{Start: 20000, End: 65535}}, DestinationPorts: []PortRange{{Start: 41000, End: 41002}}}, Action: "accept"},
 		{Match: PacketMatch{InInterface: "lan0", Protocol: "udp", SourcePorts: []PortRange{{Start: 43000, End: 43002}}, DestinationPorts: []PortRange{{Start: 42000, End: 42002}}}, Action: "accept"},
 		{Match: PacketMatch{InInterface: "lan0", Protocol: "tcp", DestinationPorts: []PortRange{{Start: 41003}}}, Action: "reject"},

@@ -14,9 +14,11 @@
   "nft_masq",
   "nft_redir",
   "nft_hash",
+  "nft_numgen",
   "nft_nat",
   "nft_reject_inet",
   "nft_log",
   "nf_log_syslog",
+  "nfnetlink_log",
   "ip6_tunnel"
 ]

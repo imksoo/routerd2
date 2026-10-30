@@ -25,14 +25,16 @@ DHCPでは`891af85`のVirtualAddress参照と既存HA owner、`292e5ee`のdnsmas
 
 OTLPログworker `874bc22`、ManagementAccess/CLI `341c5cd`、履歴保持 `d824c8a` は統合済み。履歴保持は統合版実peerで保存先障害/復旧・control再起動・元記録照合、端末UDP342往復失敗0。対象はoperational eventのみで他の履歴・native DPIは未実装。全34項目と固定期限達成は未完了。
 
-## 2026-10-30 16:00 JST: 統合中の管理・観測機能
+## 2026-10-30 16:10 JST: 統合済みの管理・観測機能
 
-mainの公開済み基準は`f2f3bfc`。次の変更は作業treeで統合中であり、全体受入の完了ではない。
+mainの公開済み基準は`f196880`。次の変更は統合・公開済みであり、全体受入の完了ではない。
 
 - SSHの`update rollback`を既存の検証済み旧版予約処理へ接続。`4f22e00`で実SSH操作・予約・取消・設定revision/generation照合が38.86秒で成功。再起動後の旧版復帰はこの操作試験の対象外。
 - `18f36d4`で旧BGPの`communities.send: standard`を受理し、旧実装と同じ送信設定へ変換。独立FRRの通常BGP、IPIP、DHCPv4由来IPIP、二peerの実通信が全て成功。関連Race、vet、両architecture buildと署名六ELF検査も終了0。
 - `671038f`のDNS query履歴保持は旧`logstore.ApplyRetention`を既存resolverへ接続する。before-delete UDP archiveの失敗でDNS応答を止めない。`09a3f6a`のFirewallEventLogは旧NFLOG readerを再利用し、既存ログ所有者へ構造化packet記録を渡す。独立端末による各元版の障害・復旧・再起動・撤去は通過。統合版`history-native84`でも実peerは成功。関連Race、vet、CGO0両architecture buildと署名六ELF検査が終了0。最初の直接Race実行は`umask 022`付け忘れで一時保存先の権限検査に失敗し、指定条件の再実行で成功した。製品の権限検査は緩めていない。
 - factoryのkernel moduleへNFLOG受信とsamplingに必要な`nfnetlink_log`/`nft_numgen`を明示した。新しい設定は契約84/network journal24。旧試作向けのreaderやmigrationは追加せず、使い捨て設定・stateを再生成する。既存の83で実行中の受入と版を混ぜない。
+
+通常Make/APKの`history-native84`イメージ生成は終了0。配布kernelで既存の実通信fixtureへNFLOG group1・抽選divisor2を接続し、許可/破棄が抽選に左右されないことと、routes/ACL/NAT/DS-Lite/links/HA/RA期限を確認した。`make qemu-network IMAGE_DIR=dist/image-native84`は44.41秒で終了0。サンプリング比率の精度や全設定の起動を受け入れた結果ではない。
 
 ## 通常配布イメージの起動: 未解決
 
@@ -40,7 +42,7 @@ mainの公開済み基準は`f2f3bfc`。次の変更は作業treeで統合中で
 
 通常の83実行物のスタックを私有起動wrapperから採取した。実routerdはPID1のまま。worker起動約27秒時点で、controlはnetworkのHTTP応答待ち、networkは適用後の最終journal JSON符号化中だった。CPU時間は起動以来累計でcontrol7.32秒/network5.11秒、RSS約36.3/31.6MiB、major faultは両方0。単一標本であり、CPU飽和・メモリー不足・循環lock・総遅延の主因の確定とはしない。meminfo/圧迫指標は未採取。SIGSTOP/QUIT後の動作は受入には使わない。重い診断VMと一時ELFを削除し、私有の小さいsplit stackと測定値だけ残した。
 
-Tailscaleはイメージ展開からsocket生成までの5秒期限、VRRP/BGPは適用応答3秒期限を持つ。期限超過で再起動が反復する観測と照合中。期限延長だけで合格にしない。次は同じ通常83・512MiBでCPUだけ2→4へ変更し、実対向/端末とCPU・メモリー観測で切り分ける。以前の4CPU失敗はNAT636件のnative80で、現在83の比較ではない。
+Tailscaleはイメージ展開からsocket生成までの5秒期限、VRRP/BGPは適用応答3秒期限を持つ。期限超過で再起動が反復する観測と照合中。期限延長だけで合格にしない。同じ通常83・512MiBでCPUだけ2→4へ変更した一回も終了1。controlの元60秒期限超過、networkはgeneration1 appliedだが全projection applying、両端末はDISCOVER12件に対し応答0/lease無しで、DNS/TCPUDPへ未到達。MemAvailable最小153704KiB、major fault0、PSIはguestでENOENT。CPU増加では解消しておらず、空きメモリーだけで原因も断定しない。observerの付加負荷と退場worker/helperの未採取も区別する。重い停止済stageを削除し、小さい測定値だけ保持した。
 
 ## 実上流と自然更新: 版を区別する
 
@@ -53,9 +55,9 @@ PD worker SIGKILL後1.52秒、通常交換10.99秒、全daemon再起動11.08秒�
 ## 二台構成と残る受入
 
 - native80の二段DNS・共有VMAC/PD/DHCP・conntrack同期では、独立ISC/Linux AFTR/端末と両方向切替・復旧・同一TCP sequence space・同じUDP対応を確認した。独立50ms UDPは985送信/810受信/175期限切れ、成功間最大間隔4.543秒。TCP最大応答待ち4.575秒。DNSは独立UDP上流へ置換した版であり、実DoHや全設定の成功へ拡張しない。
-- 現在は単体83のISC/四AFTR/二FRR/IX代替/DoH/chrony/Headscale・公式TS/二DHCP端末を二台構成へ拡張中。originalのWAN/LAN VMAC、共通DUID/IAID、物理LAN上の認証同期、priority150/100・preempt falseを使う。旧intentのNAT同期対象はDS-Lite四本だけでIXを含まない。IXの物理送信元を変更して既存session継続を成立させない。
+- 現在は単体83のISC/四AFTR/二FRR/IX代替/DoH/chrony/Headscale・公式TS/二DHCP端末を二台構成へ拡張中。初回はhost上でもAのeffects期限超過で起動不合格。追加観測ではA ACTIVE/PD/四AFTRまで進み、初回の原因未確定のまま端末通信を確認中。originalのWAN/LAN VMAC、共通DUID/IAID、物理LAN上の認証同期、priority150/100・preempt falseを使う。旧intentのNAT同期対象はDS-Lite四本だけでIXを含まない。IXの物理送信元を変更して既存session継続を成立させない。
 - 通常のfactoryイメージで単体起動と全クライアント通信を完成させ、二台全設定の既存/新規通信・回線断・分断・再参加を受け入れる。独立Linux対向は実二回線/対象物理NICの代わりではない。本番homertの置換は未実施。
-- 全homert取込、残る履歴・native DPI、管理surface、Tailscale残機能、権限分離、IPsec、kernel/rootfs A/B、installer、ARM実行、対象実機、k8s/pve、Cloud SAM等が残る。全34項目の状態はJSONを参照。部分成功で完了にしない。
+- 全homert取込（84の元設定は両機とも75件で拒否。必要な明示置換policyも未指定なので純粋な未実装数とは異なる）、残る履歴・native DPI、管理surface、Tailscale残機能、権限分離、IPsec、kernel/rootfs A/B、installer、ARM実行、対象実機、k8s/pve、Cloud SAM等が残る。全34項目の状態はJSONを参照。部分成功で完了にしない。
 - k8s-rt/pve-rtの実設定は読取り済みで、SAMNodeSet/Transport/Enrollment/MobilityPoolも使われる。原本は秘密を含むため公開しない。取得・解析は変換/通信受入ではない。旧SAM目標文書を読み、認証/取消・配布・/32所有・NAT無し転送・移動/復旧へ進む。CLIの存在や旧版の受入を現行製品の成功へ置換しない。課金環境の新規作成許可を推定しない。
 
 ## 開発環境と保護するもの
