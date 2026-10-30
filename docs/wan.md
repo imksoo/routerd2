@@ -242,3 +242,26 @@ rejects unsupported HA and delegated-source selection rather than dropping them.
 See the [migration contract](../internal/legacyconfig/README.md) and its
 [source](../internal/legacyconfig/testdata/wan-dynamic.yaml) and
 [policy](../internal/legacyconfig/testdata/wan-dynamic-policy.yaml) fixtures.
+
+## IPv4-in-IPv4 tunnel
+
+A native `link` resource with `kind: ipip`, IPv4 `local`/`remote` and optional
+`parent` creates a kernel IPIP interface through the network writer. `ttl`
+defaults to 64, matching routerd; path MTU discovery is enabled. A separate
+address resource configures the inner address, and routes or BGP use that
+interface normally. No external tunnel command or daemon is required.
+With an explicit parent, its current MTU minus the 20-byte outer header caps
+the tunnel MTU, including later parent MTU changes. An interface `mtu` can set
+a lower ceiling. Without a parent, Linux selects the underlay from routing;
+set the tunnel MTU explicitly when it needs a fixed limit.
+
+`make check-bgp-frr` includes `TestDaemonIPIPBGPWithFRR`: private Linux network
+namespaces, independent FRR and TCP/UDP LAN clients, actual product processes,
+and WAN/LAN packet capture. The `ipip-bgp-native78` candidate passed exchange,
+forwarding, FRR route withdrawal/recovery, TTL and parent MTU changes, complete
+process restart, and owned tunnel removal. FRR uses Zebra for interface and
+next-hop observations but `bgpd -n` does not install routes; the peer's return
+route to the LAN is explicitly configured by the fixture. This establishes
+kernel interoperability, not acceptance of a physical router, Kubernetes/PVE
+deployment, or other encapsulations. Legacy `TunnelInterface` importing is
+not part of this path; use the native link declaration.

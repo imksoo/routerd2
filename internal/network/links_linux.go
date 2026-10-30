@@ -22,6 +22,11 @@ func parentIndex(l netlink.Link) int {
 		return l.Attrs().ParentIndex
 	case *netlink.Vxlan:
 		return v.VtepDevIndex
+	case *netlink.Iptun:
+		if v.Link != 0 {
+			return int(v.Link)
+		}
+		return v.Attrs().ParentIndex
 	case *netlink.Ip6tnl:
 		if v.Link != 0 {
 			return int(v.Link)
@@ -52,6 +57,13 @@ func nativeLinkState(l netlink.Link) (InterfaceState, error) {
 	switch v := l.(type) {
 	case *netlink.Dummy:
 	case *netlink.Wireguard:
+		definition.HardwareAddr = ""
+	case *netlink.Iptun:
+		if v.PMtuDisc != 1 || v.Tos != 0 || v.FlowBased || v.EncapType != 0 || v.Proto != 0 {
+			return out, nil
+		}
+		definition.Local, definition.Remote = v.Local.String(), v.Remote.String()
+		definition.TTL = int(v.Ttl)
 		definition.HardwareAddr = ""
 	case *netlink.Ip6tnl:
 		// Linux adds CAP_XMIT/RCV/PER_PACKET to the configured flags. They
@@ -158,6 +170,8 @@ func nativeLink(l Link, alias string) (netlink.Link, error) {
 		return &netlink.Dummy{LinkAttrs: a}, nil
 	case "wireguard":
 		return &netlink.Wireguard{LinkAttrs: a}, nil
+	case "ipip":
+		return &netlink.Iptun{LinkAttrs: a, Link: uint32(a.ParentIndex), Local: net.ParseIP(l.Local), Remote: net.ParseIP(l.Remote), Ttl: uint8(l.TTL), PMtuDisc: 1}, nil
 	case "ip6tnl":
 		return &netlink.Ip6tnl{LinkAttrs: a, Link: uint32(a.ParentIndex), Local: net.ParseIP(l.Local), Remote: net.ParseIP(l.Remote), Proto: unix.IPPROTO_IPIP, Ttl: 64, Flags: 1}, nil
 	case "bridge":
@@ -241,7 +255,7 @@ func (k *linuxKernel) UpdateLink(l Link, alias string) (result error) {
 		}
 	}
 	switch l.Kind {
-	case "ip6tnl":
+	case "ipip", "ip6tnl":
 		updated, err := nativeLink(l, alias)
 		if err != nil {
 			return err
@@ -249,7 +263,7 @@ func (k *linuxKernel) UpdateLink(l Link, alias string) (result error) {
 		updated.Attrs().Index = live.Attrs().Index
 		mutationAttempted = true
 		if err := netlink.LinkModify(updated); err != nil {
-			return fmt.Errorf("ip6tnl %s endpoints: %w", l.Name, err)
+			return fmt.Errorf("%s %s endpoints: %w", l.Kind, l.Name, err)
 		}
 	case "bridge":
 		// Do not pass the observed Bridge back to LinkModify: that would replay

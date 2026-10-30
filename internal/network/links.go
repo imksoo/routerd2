@@ -89,11 +89,14 @@ func validateLinks(d Desired) error {
 		if l.Kind != "vrf" && l.VRFTable != 0 {
 			add("link %s: vrf_table is valid only for vrf", l.Name)
 		}
-		if l.Kind != "ip6tnl" && l.Kind != "vxlan" && (l.Local != "" || l.Remote != "") {
-			add("link %s: endpoints require kind vxlan or ip6tnl", l.Name)
+		if l.Kind != "ipip" && l.Kind != "ip6tnl" && l.Kind != "vxlan" && (l.Local != "" || l.Remote != "") {
+			add("link %s: endpoints require kind vxlan, ipip or ip6tnl", l.Name)
 		}
-		if l.Kind != "vxlan" && (l.VXLANID != 0 || l.Group != "" || l.Port != 0 || l.TTL != 0 || l.Learning != nil) {
+		if l.Kind != "vxlan" && (l.VXLANID != 0 || l.Group != "" || l.Port != 0 || l.Learning != nil) {
 			add("link %s: VXLAN options require kind vxlan", l.Name)
+		}
+		if l.TTL < 0 || l.TTL > 255 || l.TTL != 0 && l.Kind != "ipip" && l.Kind != "vxlan" {
+			add("link %s: TTL must be 0..255 and requires kind ipip or vxlan", l.Name)
 		}
 		if l.Kind != "macvlan" && l.MACVLANMode != "" {
 			add("link %s: macvlan_mode requires kind macvlan", l.Name)
@@ -120,6 +123,22 @@ func validateLinks(d Desired) error {
 			}
 			if l.VRFTable < 1 || uint64(l.VRFTable) > uint64(^uint32(0)) || l.VRFTable >= 253 && l.VRFTable <= 255 {
 				add("VRF %s: vrf_table must be a non-reserved routing table", l.Name)
+			}
+		case "ipip":
+			if l.Parent != "" && (!validName(l.Parent) || l.Parent == l.Name) || l.HardwareAddr != "" {
+				add("ipip %s: parent must be distinct and hardware_addr is not supported", l.Name)
+			}
+			var endpoints [2]netip.Addr
+			for i, endpoint := range []string{l.Local, l.Remote} {
+				a, err := netip.ParseAddr(endpoint)
+				a = a.Unmap()
+				if err != nil || !a.Is4() || a.IsUnspecified() || a.IsMulticast() {
+					add("ipip %s: endpoint %q must be an IPv4 unicast address", l.Name, endpoint)
+				}
+				endpoints[i] = a
+			}
+			if endpoints[0] == endpoints[1] {
+				add("ipip %s: local and remote must differ", l.Name)
 			}
 		case "ip6tnl":
 			if !validName(l.Parent) || l.Parent == l.Name || l.HardwareAddr != "" {
@@ -262,10 +281,13 @@ func normalizeLink(l Link) Link {
 			l.BridgeMulticastSnooping = boolPointer(true)
 		}
 	}
-	if l.Kind == "ip6tnl" {
+	if l.Kind == "ipip" || l.Kind == "ip6tnl" {
 		local, _ := netip.ParseAddr(l.Local)
 		remote, _ := netip.ParseAddr(l.Remote)
-		l.Local, l.Remote = local.String(), remote.String()
+		l.Local, l.Remote = local.Unmap().String(), remote.Unmap().String()
+		if l.Kind == "ipip" && l.TTL == 0 {
+			l.TTL = 64
+		}
 	}
 	if l.Kind == "vxlan" {
 		if l.Port == 0 {

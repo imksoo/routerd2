@@ -1,7 +1,7 @@
-Address-set lookup and local redirect behavior adapted from imksoo/routerd
+Address-set lookup, local redirect and IPIP tunnel behavior adapted from imksoo/routerd
 Commit: 1329ef54f296507eda79bbbc3b853783dd27251e
 Paths: pkg/controller/chain/ipaddressset.go, pkg/render/local_service_redirect.go,
-       pkg/render/firewall_holes.go
+       pkg/render/firewall_holes.go, pkg/controller/chain/tunnel.go
 URL: https://github.com/imksoo/routerd/tree/1329ef54f296507eda79bbbc3b853783dd27251e
 
 BSD 3-Clause License

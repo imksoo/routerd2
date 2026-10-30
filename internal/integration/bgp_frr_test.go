@@ -17,6 +17,9 @@ import (
 	"time"
 
 	"github.com/imksoo/routerd2/internal/config"
+	"github.com/imksoo/routerd2/internal/control"
+	"github.com/imksoo/routerd2/internal/network"
+	"github.com/imksoo/routerd2/internal/resourceprogram"
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netns"
 )
@@ -26,8 +29,12 @@ var legacyBGPFRR []byte
 
 // FRR is a separate BGP implementation. The product must advertise the LAN
 // prefix and install FRR's route before the client can reach the peer.
-func TestDaemonBGPWithFRR(t *testing.T) {
-	if !isolateFixtureTimeout(t, "TestDaemonBGPWithFRR", 90*time.Second) {
+func TestDaemonBGPWithFRR(t *testing.T) { daemonBGPWithFRR(t, false) }
+
+func TestDaemonIPIPBGPWithFRR(t *testing.T) { daemonBGPWithFRR(t, true) }
+
+func daemonBGPWithFRR(t *testing.T, ipip bool) {
+	if !isolateFixtureTimeout(t, t.Name(), 90*time.Second) {
 		return
 	}
 	peer := fixturePeerNamespace(t, "wan0", "peer0")
@@ -46,7 +53,16 @@ func TestDaemonBGPWithFRR(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	setup(peer, []string{"address", "add", "192.0.2.2/24", "dev", "peer0"}, []string{"address", "add", "203.0.113.50/32", "dev", "lo"}, []string{"route", "add", "198.18.0.0/24", "via", "192.0.2.1"})
+	local, remote := "192.0.2.1", "192.0.2.2"
+	if ipip {
+		local, remote = "10.0.0.1", "10.0.0.2"
+		setup(peer, []string{"address", "add", "192.0.2.2/24", "dev", "peer0"}, []string{"link", "add", "tun0", "type", "ipip", "local", "192.0.2.2", "remote", "192.0.2.1", "ttl", "64"}, []string{"link", "set", "tun0", "up"}, []string{"address", "add", remote + "/30", "dev", "tun0"})
+	}
+	peerAddress := []string{"address", "add", "192.0.2.2/24", "dev", "peer0"}
+	if ipip {
+		peerAddress = []string{"link", "set", "peer0", "up"}
+	}
+	setup(peer, peerAddress, []string{"address", "add", "203.0.113.50/32", "dev", "lo"}, []string{"route", "add", "198.18.0.0/24", "via", local})
 	setup(client, []string{"address", "add", "198.18.0.2/24", "dev", "client0"}, []string{"route", "add", "default", "via", "198.18.0.1"})
 	root, err := os.MkdirTemp("", "routerd-frr-peer.")
 	if err != nil {
@@ -58,6 +74,7 @@ func TestDaemonBGPWithFRR(t *testing.T) {
 	}
 	configPath := filepath.Join(root, "frr.conf")
 	frrConfig := "hostname independent\nlog stdout\nrouter bgp 64513\n bgp router-id 192.0.2.2\n no bgp ebgp-requires-policy\n no bgp network import-check\n neighbor 192.0.2.1 remote-as 64512\n address-family ipv4 unicast\n  network 203.0.113.0/24\n  neighbor 192.0.2.1 activate\n exit-address-family\n"
+	frrConfig = strings.ReplaceAll(strings.ReplaceAll(frrConfig, "192.0.2.1", local), "192.0.2.2", remote)
 	if err := os.WriteFile(configPath, []byte(frrConfig), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +142,13 @@ while True:
 	}
 	t.Cleanup(func() { _ = server.Process.Kill(); _ = server.Wait() })
 	source := filepath.Join(root, "legacy.yaml")
-	if err := os.WriteFile(source, legacyBGPFRR, 0600); err != nil {
+	legacy := legacyBGPFRR
+	if ipip {
+		legacy = bytes.ReplaceAll(legacy, []byte("routerID: 192.0.2.1"), []byte("routerID: "+local))
+		legacy = bytes.ReplaceAll(legacy, []byte("address: 192.0.2.1, port: 179"), []byte("address: "+local+", port: 179"))
+		legacy = bytes.ReplaceAll(legacy, []byte("peers: [192.0.2.2]"), []byte("peers: ["+remote+"]"))
+	}
+	if err := os.WriteFile(source, legacy, 0600); err != nil {
 		t.Fatal(err)
 	}
 	command := exec.CommandContext(t.Context(), filepath.Join(os.Getenv("ROUTERD2_TEST_BIN_DIR"), "routerd"), "config", "migrate", source)
@@ -138,6 +161,11 @@ while True:
 	document, err := config.Parse(body)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if ipip {
+		document.Resources = append(document.Resources,
+			resourceprogram.Resource{ID: "tunnel", Link: &network.Link{Name: "tun0", Kind: "ipip", Parent: "wan0", Local: "192.0.2.1", Remote: "192.0.2.2"}},
+			resourceprogram.Resource{ID: "tunnel-address", Address: &resourceprogram.Address{Interface: "tun0", CIDR: local + "/30"}})
 	}
 	fixture := startFixtureDaemon(t, document)
 	show := func() (bool, bool) {
@@ -171,6 +199,49 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
 	if err := forward(); err != nil {
 		t.Fatal(err)
 	}
+	if ipip {
+		// Withdraw the independent speaker's route while leaving the tunnel up.
+		vty := func(command string) {
+			t.Helper()
+			out, err := exec.Command("vtysh", "--vty_socket", root, "-d", "bgpd", "-c", "configure terminal", "-c", "router bgp 64513", "-c", "address-family ipv4 unicast", "-c", command).CombinedOutput()
+			if err != nil {
+				t.Fatal(string(out), err)
+			}
+		}
+		vty("no network 203.0.113.0/24")
+		until(t, 10*time.Second, func() bool {
+			routes, err := netlink.RouteListFiltered(netlink.FAMILY_V4, &netlink.Route{Dst: destination}, netlink.RT_FILTER_DST)
+			return err == nil && len(routes) == 0
+		})
+		if err := forward(); err == nil {
+			t.Fatal("withdrawn BGP route still forwards")
+		}
+		vty("network 203.0.113.0/24")
+		until(t, 10*time.Second, func() bool { return forward() == nil })
+		for i := range document.Resources {
+			resource := &document.Resources[i]
+			if resource.Link != nil && resource.Link.Name == "tun0" {
+				resource.Link.TTL = 42
+			}
+			if resource.Interface != nil && resource.Interface.Name == "wan0" {
+				resource.Interface.MTU = 1400
+			}
+		}
+		if err := fixture.control.Do(t.Context(), "POST", "/v1/config/commit", control.CommitRequest{ExpectedRevision: 1, RequestID: "tunnel-ttl-mtu", Config: document}, nil); err != nil {
+			t.Fatal(err)
+		}
+		until(t, 5*time.Second, func() bool {
+			link, err := netlink.LinkByName("tun0")
+			if err != nil {
+				return false
+			}
+			tunnel, ok := link.(*netlink.Iptun)
+			return ok && tunnel.Ttl == 42 && tunnel.Attrs().MTU == 1380
+		})
+		if err := forward(); err != nil {
+			t.Fatal(err)
+		}
+	}
 	fixture.stop()
 	until(t, 15*time.Second, func() bool { present, valid := show(); return valid && !present })
 	fixture = fixture.restart()
@@ -183,8 +254,34 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
 		t.Fatal(err)
 	}
 	until(t, 3*time.Second, func() bool {
-		return wanCapture.count("192.0.2.1", "192.0.2.2", 6, 179) > 0 &&
+		outer := false
+		if !ipip {
+			outer = wanCapture.count(local, remote, 6, 179) > 0 || wanCapture.count(remote, local, 6, 179) > 0
+		}
+		if ipip {
+			wanCapture.mu.Lock()
+			for _, packet := range wanCapture.packets {
+				b := packet.data
+				if len(b) >= 54 && b[14] == 0x45 && b[23] == 4 && b[22] == 42 && bytes.Equal(b[26:30], []byte{192, 0, 2, 1}) && bytes.Equal(b[30:34], []byte{192, 0, 2, 2}) {
+					outer = true
+					break
+				}
+			}
+			wanCapture.mu.Unlock()
+		}
+		return outer &&
 			lanCapture.count("198.18.0.2", "203.0.113.50", 6, 18080) > 0 &&
 			lanCapture.count("198.18.0.2", "203.0.113.50", 17, 18081) > 0
 	})
+	if ipip {
+		if err := fixture.control.Do(t.Context(), "POST", "/v1/config/commit", control.CommitRequest{ExpectedRevision: 2, RequestID: "remove-tunnel", Config: config.Document{SchemaVersion: config.SchemaVersion}}, nil); err != nil {
+			t.Fatal(err)
+		}
+		until(t, 10*time.Second, func() bool { _, err := netlink.LinkByName("tun0"); return err != nil })
+		until(t, 10*time.Second, func() bool { present, valid := show(); return valid && !present })
+		if err := forward(); err == nil {
+			t.Fatal("removed tunnel still forwards")
+		}
+		t.Log("IPIP/BGP: independent FRR TCP+UDP, route withdrawal/recovery, TTL/MTU update, process restart, owned tunnel removal passed")
+	}
 }

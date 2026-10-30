@@ -88,13 +88,13 @@ func settingValueOwned(s ownedSetting, value int) bool {
 	return value == s.Before || value == s.Last || s.Attempted != nil && value == *s.Attempted
 }
 
-// Apply underlay MTUs before owned IPv4-in-IPv6 tunnels. Linux derives their
-// MTU on creation but does not track later underlay changes. The explicit tunnel
-// MTU is a ceiling; the outer IPv6 header needs another 40 bytes on its parent.
+// Apply underlay MTUs before owned tunnels with explicit parents. Linux
+// derives tunnel MTUs on creation but does not track later underlay changes.
+// The configured tunnel MTU is a ceiling after reserving the outer IP header.
 func (p *apply) interfaceMTUs(d Desired) error {
 	limits := make(map[string]int)
 	for _, link := range d.Links {
-		if link.Kind == "ip6tnl" {
+		if (link.Kind == "ip6tnl" || link.Kind == "ipip") && link.Parent != "" {
 			limits[link.Name] = 0
 		}
 	}
@@ -108,7 +108,7 @@ func (p *apply) interfaceMTUs(d Desired) error {
 		}
 	}
 	for _, link := range orderedLinks(d.Links) {
-		if link.Kind != "ip6tnl" {
+		if link.Kind != "ip6tnl" && link.Kind != "ipip" || link.Parent == "" {
 			continue
 		}
 		parent, err := p.e.kernel.Interface(link.Parent)
@@ -122,7 +122,11 @@ func (p *apply) interfaceMTUs(d Desired) error {
 		if err := verifyOwnedLink(live, *p.e.linkRecord(link.Name)); err != nil {
 			return p.failure("tunnel MTU ownership", err)
 		}
-		mtu := min(parent.MTU, 65535) - 40
+		overhead := 20
+		if link.Kind == "ip6tnl" {
+			overhead = 40
+		}
+		mtu := min(parent.MTU, 65535) - overhead
 		if limit := limits[link.Name]; limit != 0 {
 			mtu = min(mtu, limit)
 		}
