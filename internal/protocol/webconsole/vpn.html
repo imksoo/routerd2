@@ -1,0 +1,31 @@
+{{define "vpn"}}{{with .VPN}}
+<p>Tailscaleの設定と観測を表示します。稼働表示だけで対向との疎通や経路の承認を保証するものではありません。</p>
+<nav aria-label="Tailscaleサービス">{{range .Services}}<a href="{{$.Config.BasePath}}vpn?service={{.}}">{{.}}</a>{{else}}<p>Tailscaleサービスは構成されていません。</p>{{end}}</nav>
+{{if .Selected}}<h3>{{.Selected}}</h3>
+<dl><dt>状態</dt><dd>{{.State}}</dd><dt>設定リビジョン</dt><dd>{{.Revision}}</dd></dl>
+{{with .Intent}}
+<h4>設定</h4><dl><dt>インターフェース</dt><dd>{{.Interface}}</dd><dt>端末名</dt><dd>{{if .Hostname}}{{.Hostname}}{{else}}指定なし{{end}}</dd>
+<dt>広告する経路</dt><dd>{{range .AdvertiseRoutes}}<div><code>{{.}}</code></div>{{else}}指定なし{{end}}</dd>
+<dt>出口としての広告</dt><dd>{{if .AdvertiseExitNode}}有効{{else}}無効{{end}}</dd>
+<dt>対向経路の受入</dt><dd>{{if .AcceptRoutes}}有効{{else}}無効{{end}}</dd>
+<dt>外部からの新規接続を遮断</dt><dd>{{if .ShieldsUp}}有効{{else}}無効{{end}}</dd></dl>
+<p>広告する経路は設定値です。制御サーバーによる承認状況は、この観測には含まれていません。</p>
+{{end}}
+{{with .Observation}}
+<h4>観測された所属とアドレス</h4>
+{{if not $.VPN.Current}}<p class="notice">観測期限が切れています。以下は最後に取得した情報です。現在の接続状態は未確認です。</p>{{end}}
+<dl><dt>DNS名</dt><dd>{{if .DNSName}}{{.DNSName}}{{else}}未取得{{end}}</dd>
+<dt>アドレス</dt><dd>{{range .Addresses}}<div><code>{{.}}</code></div>{{else}}未取得{{end}}</dd>
+{{with .Tailnet}}<dt>所属ネットワーク</dt><dd>{{.Name}}</dd><dt>DNSドメイン</dt><dd>{{.DNSDomain}}</dd><dt>MagicDNS</dt><dd>{{if .MagicDNSEnabled}}有効{{else}}無効{{end}}</dd>{{end}}</dl>
+<h4>対向の観測</h4>
+<p>以下の接続表示と経路は同じ観測時点の情報です。疎通試験の結果ではありません。</p>
+<div class="scroll"><table><thead><tr><th>端末</th><th>接続</th><th>アドレス</th><th>許可された経路</th><th>通信量</th></tr></thead><tbody>
+{{range .Peers}}<tr><td>{{if .Hostname}}{{.Hostname}}{{else}}{{.DNSName}}{{end}}</td>
+<td>{{if not $.VPN.Current}}未確認{{else if .Online}}接続あり{{else}}接続なし{{end}}</td>
+<td>{{range .Addresses}}<div><code>{{.}}</code></div>{{else}}未取得{{end}}</td>
+<td>{{range .AllowedPrefixes}}<div><code>{{.}}</code></div>{{else}}未取得{{end}}</td>
+<td>受信 {{.RxBytes}} バイト<br>送信 {{.TxBytes}} バイト</td></tr>
+{{else}}<tr><td colspan="5">対向は観測されていません。</td></tr>{{end}}
+</tbody></table></div>
+{{else}}<p class="notice">このサービスの接続状態はまだ観測されていません。設定されているだけで、稼働しているとは判定しません。</p>{{end}}
+{{end}}{{end}}{{end}}

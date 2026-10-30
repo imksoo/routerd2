@@ -101,3 +101,27 @@ DNS/TLS/HTTP names, accounting availability and packet/byte counters. A missing
 end observation is not labelled as current connectivity. The existing
 `make check-traffic-flow` fixture includes independent HTTP requests against
 the actual product while real TLS/UDP traffic populates the existing database.
+
+## Tailscale observation view
+
+The VPN page uses the revision returned by `/v1/services` to read the existing
+typed configuration document. Only interface, hostname, advertisement intent,
+route acceptance and inbound-blocking policy enter its template. Control server
+URLs, authentication files and persisted engine state are not display data.
+The selected canonical service name reads `/v1/services/{name}` so a truncated
+list observation does not hide peer details. No CLI polling or second store is
+introduced.
+
+Membership, addresses, peers, allowed peer prefixes and byte counters come from
+the existing Tailscale observation. Its original boot-clock deadline applies to
+the whole observation, including peers. Expired data is labelled as the last
+observation, with current connectivity unconfirmed. A configured but inactive
+service remains unobserved. Known authentication states are shown without an
+authentication URL. Advertised local routes are explicitly configuration intent,
+not a claim that the control server approved them or that forwarding works.
+
+`go test -race ./internal/protocol/webconsole` checks actual Unix HTTP reads and
+escaped HTTP rendering for current, expired, authentication-required and missing
+observations. These focused checks use recorded observation inputs and do not
+establish real Tailscale forwarding; the existing `check-tailscale` and
+`check-tailscale-homert` communication checks own that acceptance.
