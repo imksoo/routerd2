@@ -137,25 +137,41 @@ func addressOptionsMatch(live AddressState, want AddressOptions, now time.Time) 
 	return err == nil && live.Peer == want.Peer && (live.Flags&addressNoDADFlag != 0) == want.NoDAD && lifetimeClose(live.PreferredLifetime, p) && lifetimeClose(live.ValidLifetime, v)
 }
 
-func (p *apply) addressConfig(l Interface, address string) error {
-	key := addressKey{l.Name, address}
-	options := l.AddressOptions[address]
+// Read each interface once and persist all pending lifetime changes before
+// updating its addresses. Apply's completion (or failure) saves the acknowledged
+// results; a restart can still match either timer for an interrupted update.
+func (p *apply) addressConfigs(l Interface) error {
+	if len(l.Addresses) == 0 {
+		return nil
+	}
 	live, err := p.e.kernel.Interface(l.Name)
 	if err != nil {
 		return p.failure("address read", err)
 	}
-	old := p.e.addressRecord(key)
-	if old != nil && old.Index > 0 && old.Index != live.Index && !p.e.ownsLink(live) {
-		return p.failure("address ownership", fmt.Errorf("interface %s was replaced", l.Name))
+	type update struct {
+		address string
+		options AddressOptions
+		owned   *ownedAddress
 	}
-	var observed *AddressState
-	for i := range live.Addresses {
-		if live.Addresses[i].Address == address {
-			observed = &live.Addresses[i]
-			break
+	var updates []update
+	var additions []string
+	for _, address := range l.Addresses {
+		options := l.AddressOptions[address]
+		old := p.e.addressRecord(addressKey{l.Name, address})
+		if old != nil && old.Index > 0 && old.Index != live.Index && !p.e.ownsLink(live) {
+			return p.failure("address ownership", fmt.Errorf("interface %s was replaced", l.Name))
 		}
-	}
-	if observed != nil {
+		var observed *AddressState
+		for i := range live.Addresses {
+			if live.Addresses[i].Address == address {
+				observed = &live.Addresses[i]
+				break
+			}
+		}
+		if observed == nil {
+			additions = append(additions, address)
+			continue
+		}
 		if old == nil {
 			return p.failure("address ownership", fmt.Errorf("%s on %s already exists without ownership journal; refusing to adopt", address, l.Name))
 		}
@@ -166,40 +182,58 @@ func (p *apply) addressConfig(l Interface, address string) error {
 			return p.failure("address peer", fmt.Errorf("remove and apply address %s before changing its peer", address))
 		}
 		now := time.Now()
-		if !addressOptionsMatch(*observed, old.Options, now) && (old.Attempted == nil || !addressOptionsMatch(*observed, *old.Attempted, now)) {
+		matches := addressOptionsMatch(*observed, old.Options, now)
+		if !matches && (old.Attempted == nil || !addressOptionsMatch(*observed, *old.Attempted, now)) {
 			return p.failure("address option ownership", fmt.Errorf("lifetimes, DAD flags or peer for %s on %s changed outside routerd2", address, l.Name))
 		}
-		// Kernel lifetimes are rounded to seconds. Ownership comparison allows
-		// that rounding, but a new absolute deadline must renew the kernel
-		// timer even when its remaining seconds appear unchanged.
-		if sameAddressOptions(old.Options, options) && addressOptionsMatch(*observed, options, now) {
-			if old.Attempted != nil || old.Index != live.Index {
-				old.Attempted = nil
-				old.Index = live.Index
-				return p.checkpoint("address options ownership")
-			}
-			return nil
-		}
-		if !addressOptionsMatch(*observed, old.Options, now) && old.Attempted != nil {
-			// Preserve the previously acknowledged interrupted lifetime before
-			// replacing its intent with this candidate or rollback.
-			old.Options = *old.Attempted
-		}
-		old.Attempted = &options
-		if err := p.checkpoint("address lifetime intent"); err != nil {
-			return err
-		}
-		return p.change("address lifetime update", func() error { return p.e.kernel.UpdateAddress(l.Name, address, options) }, func() { old.Options = options; old.Attempted = nil; old.Index = live.Index })
-	}
-	return p.change("address add", func() error { return p.e.kernel.AddAddress(l.Name, address, options) }, func() {
-		if old != nil {
-			old.Options = options
+		// Rounded kernel lifetimes do not make different absolute deadlines equal.
+		if sameAddressOptions(old.Options, options) && matches {
 			old.Attempted = nil
 			old.Index = live.Index
-			return
+			continue
 		}
-		p.e.state.Addresses = append(p.e.state.Addresses, ownedAddress{Interface: l.Name, Address: address, Index: live.Index, Options: options})
-	})
+		if !matches && old.Attempted != nil {
+			old.Options = *old.Attempted
+		}
+		updates = append(updates, update{address: address, options: options, owned: old})
+	}
+	if len(updates) > 0 {
+		for i := range updates {
+			updates[i].owned.Attempted = &updates[i].options
+		}
+		if err := p.checkpoint("address lifetime intents"); err != nil {
+			return err
+		}
+		for _, update := range updates {
+			if err := p.mutate("address lifetime update", func() error {
+				return p.e.kernel.UpdateAddress(l.Name, update.address, update.options)
+			}); err != nil {
+				return err
+			}
+			update.owned.Options = update.options
+			update.owned.Attempted = nil
+			update.owned.Index = live.Index
+		}
+	}
+	// Additions can grow the ownership slice. Complete updates using its old
+	// records first, then look up each new address after any previous append.
+	for _, address := range additions {
+		options := l.AddressOptions[address]
+		if err := p.change("address add", func() error {
+			return p.e.kernel.AddAddress(l.Name, address, options)
+		}, func() {
+			if old := p.e.addressRecord(addressKey{l.Name, address}); old != nil {
+				old.Options = options
+				old.Attempted = nil
+				old.Index = live.Index
+			} else {
+				p.e.state.Addresses = append(p.e.state.Addresses, ownedAddress{Interface: l.Name, Address: address, Index: live.Index, Options: options})
+			}
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // A lease on a virtual link also bounds addresses managed on that link. Keep

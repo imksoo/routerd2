@@ -56,13 +56,18 @@ func (c *compiler) ensureRAClient(r resource, iface string) {
 	if c.ensureInterface(iface) == nil {
 		return
 	}
-	yes := true
-	service := serviceconfig.Service{Name: c.serviceName(r, "ra-auto"), RAClient: &serviceconfig.RAClient{
-		Interface: iface, SLAAC: &yes, DefaultRoute: &yes, OnLink: &yes, RouteInformation: &yes, DNS: &yes,
-		UseMTU: true, UseHopLimit: true, Table: 254, Metric: 1024,
-	}}
+	name := c.serviceName(r, "ra-auto")
+	policy, exists := c.raClientPolicy(r, iface, name)
+	if !exists {
+		yes := true
+		policy = serviceconfig.RAClient{
+			Interface: iface, SLAAC: &yes, DefaultRoute: &yes, OnLink: &yes, RouteInformation: &yes, DNS: &yes,
+			UseMTU: true, UseHopLimit: true, Table: 254, Metric: 1024,
+		}
+	}
+	service := serviceconfig.Service{Name: name, RAClient: &policy}
 	c.addService(r, service)
-	c.note(r, "routerd hostdeps WAN RA reception is owned by one native worker per interface: SLAAC, default/on-link/RIO routes, DNS, MTU and hop limit; main table metric1024. Explicit RA policy takes precedence; kernel autoconf remains disabled.")
+	c.note(r, "routerd hostdeps WAN RA reception is owned by one native worker per interface. Without explicit policy it uses SLAAC, default/on-link/RIO routes, DNS, MTU and hop limit at main table metric1024. Resource-scoped RA policy selects the host route's actual interface behavior; kernel autoconf remains disabled.")
 }
 
 func (c *compiler) dhcp4(r resource) {
@@ -115,12 +120,6 @@ func (c *compiler) dhcp6(r resource) string {
 func (c *compiler) raClient(r resource) {
 	c.allow(r, "interface", "managed", "required")
 	s := r.Spec.(api.IPv6RAAddressSpec)
-	policy, exists := c.options.RAClients[r.Kind+"/"+r.Metadata.Name]
-	if !exists {
-		c.reject(r, "", "unsupported_semantics", "legacy managed RA delegates SLAAC, route metrics, DNS, MTU and DHCPv6 triggers to host-network-manager defaults; an explicit resource-scoped ra_clients migration policy is required")
-		return
-	}
-	c.usePolicy(r, "ra_clients")
 	if s.Managed != nil && !*s.Managed {
 		c.reject(r, "managed", "unsupported_semantics", "an observe-only RA resource cannot become a native socket/address/route owner through migration policy")
 	}
@@ -129,19 +128,13 @@ func (c *compiler) raClient(r resource) {
 	}
 	name := c.interfaceName(r, "interface", s.Interface, false)
 	c.ensureInterface(name)
-	if policy.Interface != name {
-		c.policyIssue(r, "ra_clients", "interface", "policy_interface", "RA policy interface must equal the kernel interface resolved from this legacy resource")
+	serviceName := c.serviceName(r, "ra-wan")
+	policy, exists := c.raClientPolicy(r, name, serviceName)
+	if !exists {
+		c.reject(r, "", "unsupported_semantics", "legacy managed RA delegates SLAAC, route metrics, DNS, MTU and DHCPv6 triggers to host-network-manager defaults; an explicit resource-scoped ra_clients migration policy is required")
+		return
 	}
-	if policy.SLAAC == nil || policy.DefaultRoute == nil || policy.OnLink == nil || policy.RouteInformation == nil || policy.DNS == nil {
-		c.policyIssue(r, "ra_clients", "", "policy_required", "RA policy must explicitly set slaac, default_route, on_link, route_information and dns; OS defaults are not inferred")
-	}
-	if policy.Table <= 0 || policy.Metric <= 0 {
-		c.policyIssue(r, "ra_clients", "", "policy_required", "RA policy must explicitly select positive table and metric values; host route priorities are not inferred")
-	}
-	service := serviceconfig.Service{Name: c.serviceName(r, "ra-wan"), RAClient: &policy}
-	if err := serviceconfig.Validate([]serviceconfig.Service{service}); err != nil {
-		c.policyIssue(r, "ra_clients", "", "policy_validation", "RA policy does not satisfy the native address, interface-ID, router-filter or route restrictions")
-	}
+	service := serviceconfig.Service{Name: serviceName, RAClient: &policy}
 	for _, index := range c.raClients {
 		if c.document.Services[index].Interface() == name {
 			c.reject(r, "interface", "socket_owner", "one native RA client must own each interface; multiple legacy RA resources cannot acquire independent sockets there")
@@ -152,6 +145,28 @@ func (c *compiler) raClient(r resource) {
 	c.note(r, "Explicit migration policy replaces host-network-manager RA defaults with native SLAAC, default/on-link/RIO route, DNS and route-metric/table intent; this is a deliberate behavior change, not automatic legacy parity.")
 	c.note(r, "The sole network writer disables kernel RA/autoconf before the native receiver starts. Learned DNS remains bounded typed state; it does not update resolv.conf. Native use_mtu/use_hop_limit and DHCPv6 ra_from are explicit optional policies; this import does not infer them from host-network-manager defaults.")
 	c.note(r, "An omitted native interface_id uses EUI-64; an omitted source_address selects the interface link-local address. Required-address readiness and legacy observed addresses are not imported.")
+}
+
+func (c *compiler) raClientPolicy(r resource, iface, name string) (serviceconfig.RAClient, bool) {
+	policy, exists := c.options.RAClients[r.Kind+"/"+r.Metadata.Name]
+	if !exists {
+		return policy, false
+	}
+	c.usePolicy(r, "ra_clients")
+	if policy.Interface != iface {
+		c.policyIssue(r, "ra_clients", "interface", "policy_interface", "RA policy interface must equal the kernel interface resolved from this legacy resource")
+	}
+	if policy.SLAAC == nil || policy.DefaultRoute == nil || policy.OnLink == nil || policy.RouteInformation == nil || policy.DNS == nil {
+		c.policyIssue(r, "ra_clients", "", "policy_required", "RA policy must explicitly set slaac, default_route, on_link, route_information and dns; OS defaults are not inferred")
+	}
+	if policy.Table <= 0 || policy.Metric <= 0 {
+		c.policyIssue(r, "ra_clients", "", "policy_required", "RA policy must explicitly select positive table and metric values; host route priorities are not inferred")
+	}
+	service := serviceconfig.Service{Name: name, RAClient: &policy}
+	if err := serviceconfig.Validate([]serviceconfig.Service{service}); err != nil {
+		c.policyIssue(r, "ra_clients", "", "policy_validation", "RA policy does not satisfy the native address, interface-ID, router-filter or route restrictions")
+	}
+	return policy, true
 }
 
 func (c *compiler) dhcp6Information(r resource) string {
