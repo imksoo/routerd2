@@ -38,8 +38,30 @@ not extend a lease, manufacture request history, or create HA ownership.
 
 HA ownership remains subject to the normal authenticated peer reconciliation;
 the import does not permit unsynchronized new allocations. Initial two-member
-migration, old sticky holds, DHCPv6/PD state and physical migration require
-separate acceptance.
+migration, DHCPv6/PD state and physical migration require separate acceptance.
+
+When sticky holds are configured, also import the stopped old routerd server's
+sticky database before starting the new service:
+
+```
+routerd dhcp import-sticky --config /path/to/router.yaml --service leases --state-dir /path/to/new-state /path/to/old-dhcp-sticky.db
+```
+
+Run `import-leases` first when live IPv4 leases exist, then `import-sticky`,
+and start the service only after both operations succeed. The sticky operation
+also supports an installation with no live leases. Keep the old SQLite database
+and its `-wal`/`-shm` siblings together when copying the stopped source; the
+read-only SQLite connection includes committed WAL records. The operation uses
+routerd's existing schema and retains allocation, request, release and hold
+timestamps exactly. It selects only IPv4 history in this service's declared
+subnets from the old shared database. It does not replay events at migration
+time or extend the original holding period. Operator reservations retain
+their normal precedence.
+
+The two commands initialize separate files; they do not constitute one atomic
+two-file migration. Sticky import holds the same worker lock, preserves an
+already imported lease file, rejects existing history or initialized service
+state, and atomically publishes the new SQLite file without sidecar dependencies.
 
 `TestDaemonImportedDHCPLeases` obtains a real lease from an independent dnsmasq,
 stops that server, imports its final file and starts the normal routerd build.

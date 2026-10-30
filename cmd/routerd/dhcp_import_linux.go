@@ -3,17 +3,19 @@
 package main
 
 import (
-	"errors"
+	"context"
+	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/imksoo/routerd2/internal/cli"
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/dhcplease"
 )
 
-func importDHCPLeases(args []string, output io.Writer) error {
-	f := flags("dhcp import-leases")
+func importDHCPState(operation string, args []string, output io.Writer) error {
+	f := flags("dhcp " + operation)
 	path := f.String("config", "", "native configuration for the new router")
 	service := f.String("service", "", "DHCP service name")
 	stateDir := f.String("state-dir", "", "new router's persistent state directory")
@@ -21,7 +23,7 @@ func importDHCPLeases(args []string, output io.Writer) error {
 		return err
 	}
 	if f.NArg() != 1 || *path == "" || *service == "" || *stateDir == "" {
-		return errors.New("usage: routerd dhcp import-leases --config FILE --service NAME --state-dir DIR LEASE_FILE")
+		return fmt.Errorf("usage: routerd dhcp %s --config FILE --service NAME --state-dir DIR SOURCE_FILE", operation)
 	}
 	doc, err := config.Read(*path)
 	if err != nil {
@@ -35,6 +37,18 @@ func importDHCPLeases(args []string, output io.Writer) error {
 		if s.Name != *service || s.DHCPServer == nil {
 			continue
 		}
+		cfg := s.DHCPServerConfig(*stateDir)
+		if operation == "import-sticky" {
+			count, err := dhcplease.ImportSticky(context.Background(), cfg, f.Arg(0))
+			if err != nil {
+				return err
+			}
+			return cli.WriteJSON(output, struct {
+				Service   string `json:"service"`
+				Records   int    `json:"records"`
+				StatePath string `json:"state_path"`
+			}{s.Name, count, filepath.Join(filepath.Dir(cfg.StatePath), "dhcp-sticky.db")})
+		}
 		input, err := os.Open(f.Arg(0))
 		if err != nil {
 			return err
@@ -44,7 +58,6 @@ func importDHCPLeases(args []string, output io.Writer) error {
 		if err != nil {
 			return err
 		}
-		cfg := s.DHCPServerConfig(*stateDir)
 		count, err := dhcplease.Import(cfg, data)
 		if err != nil {
 			return err
@@ -55,5 +68,5 @@ func importDHCPLeases(args []string, output io.Writer) error {
 			StatePath string `json:"state_path"`
 		}{s.Name, count, cfg.StatePath})
 	}
-	return errors.New("configuration has no DHCP server with the selected name")
+	return fmt.Errorf("configuration has no DHCP server named %q", *service)
 }

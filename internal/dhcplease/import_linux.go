@@ -86,20 +86,13 @@ func Import(cfg dhcpserverconfig.Config, data []byte) (int, error) {
 	if count == 0 {
 		return 0, errors.New("lease file contains no unexpired IPv4 bindings")
 	}
-	dir, name, err := statefs.OpenParent(cfg.StatePath, true)
+	dir, lock, err := lockState(cfg.StatePath)
 	if err != nil {
 		return 0, err
 	}
 	defer dir.Close()
-	fd, err := unix.Openat(int(dir.Fd()), name+".lock", unix.O_CREAT|unix.O_RDWR|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0600)
-	if err != nil {
-		return 0, err
-	}
-	lock := os.NewFile(uintptr(fd), "DHCP lease migration lock")
 	defer lock.Close()
-	if err := unix.Flock(fd, unix.LOCK_EX|unix.LOCK_NB); err != nil {
-		return 0, fmt.Errorf("DHCP service is running or another import owns its state: %w", err)
-	}
+	name := filepath.Base(cfg.StatePath)
 	entries, err := dir.ReadDir(-1)
 	if err != nil {
 		return 0, err
@@ -125,4 +118,25 @@ func Import(cfg dhcpserverconfig.Config, data []byte) (int, error) {
 		return 0, err
 	}
 	return count, dir.Sync()
+}
+
+// Both initial imports exclude the running worker and peer replication using
+// the same lock that Run holds for the complete engine lifetime.
+func lockState(path string) (*os.File, *os.File, error) {
+	dir, name, err := statefs.OpenParent(path, true)
+	if err != nil {
+		return nil, nil, err
+	}
+	fd, err := unix.Openat(int(dir.Fd()), name+".lock", unix.O_CREAT|unix.O_RDWR|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0600)
+	if err != nil {
+		dir.Close()
+		return nil, nil, err
+	}
+	lock := os.NewFile(uintptr(fd), "DHCP migration lock")
+	if err := unix.Flock(fd, unix.LOCK_EX|unix.LOCK_NB); err != nil {
+		lock.Close()
+		dir.Close()
+		return nil, nil, fmt.Errorf("DHCP service is running or another import owns its state: %w", err)
+	}
+	return dir, lock, nil
 }

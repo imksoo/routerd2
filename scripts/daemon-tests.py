@@ -58,6 +58,7 @@ SUITES = {
     ),
     "dhcp-server": (
         ("TestDaemonImportedDHCPLeases", (), 90),
+        ("TestDaemonImportedDHCPStickyHistory", (), 90),
         ("TestDaemonDHCPFingerprints", (), 75),
         ("TestDaemonMigratedDHCPUnmanagedLAN", (), 75),
         ("TestDaemonMigratedDHCPLogs", (), 75),
