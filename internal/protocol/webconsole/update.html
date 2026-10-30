@@ -1,0 +1,20 @@
+{{define "update"}}{{with .Update}}
+<p>署名付き実行版の起動選択と復旧記録です。予約や復帰先の選択だけでは、実行中の版は切り替わりません。</p>
+<section data-update-generation="{{.Generation}}">
+<dl>
+<dt>保存された選択の状態</dt><dd data-update-field="state">{{.State}}</dd>
+<dt>制御担当の実行版</dt><dd data-update-field="running"><code>{{.Running.ReleaseID}}</code>（{{.Running.GOOS}} / {{.Running.GOARCH}}）</dd>
+<dt>選択記録の世代</dt><dd>{{.Generation}}</dd>
+<dt>最後の選択操作</dt><dd data-update-field="operation">{{.Operation}}</dd>
+<dt>選択記録の更新時刻</dt><dd>{{.ChangedAt}}</dd>
+<dt>保存された正常版</dt><dd data-update-field="known-good">{{with .KnownGood}}<code>{{.ReleaseID}}</code> / 連番 {{.Sequence}} / SHA-256 <code>{{.Digest}}</code>{{else}}なし{{end}}</dd>
+</dl>
+<p>正常版は導入時に登録した基準版、または正常確定した版です。現在の全サービスの正常性を保証する表示ではありません。実行版と選択記録は別々の要求で取得しています。</p>
+<div class="scroll"><table><thead><tr><th>用途</th><th>版</th><th>連番 / SHA-256</th><th>組み合わせる保存設定</th></tr></thead><tbody>
+{{range .Releases}}<tr data-update-selection="{{.Kind}}"><td>{{.Label}}</td><td><code>{{.Release.ReleaseID}}</code><br>{{.Release.GOOS}} / {{.Release.GOARCH}}</td><td>{{.Release.Sequence}}<br><code>{{.Release.Digest}}</code></td><td>{{with .Startup}}リビジョン {{.Snapshot.Revision}}<br>SHA-256 <code>{{.Snapshot.Digest}}</code>{{else}}選択記録なし{{end}}</td></tr>{{else}}<tr><td colspan="4">保存された版の選択はありません。</td></tr>{{end}}
+</tbody></table></div>
+{{with .Trial}}<h3>未確定の試行</h3><dl><dt>試行回数 / 上限</dt><dd data-update-field="attempt">{{.Number}} / {{.MaxAttempts}}</dd><dt>試行開始時刻</dt><dd>{{.StartedAt}}</dd><dt>試行期限</dt><dd>状態APIでは取得できません。開始時刻から残り時間を推定していません。</dd></dl>{{end}}
+{{with .Failure}}<h3>直近の失敗記録</h3><p>過去の記録です。現在の障害や復旧完了を示すものではありません。</p><dl><dt>失敗した版</dt><dd><code>{{.Release.ReleaseID}}</code> / 連番 {{.Release.Sequence}} / SHA-256 <code>{{.Release.Digest}}</code></dd><dt>失敗時刻</dt><dd>{{.At}}</dd><dt>理由</dt><dd class="error" data-update-field="failure">{{.Reason}}</dd></dl>{{else}}<p>保存された失敗記録はありません。</p>{{end}}
+</section>
+<p>更新、予約取消、復帰、整理は認証済みCLIで操作します。この画面から状態は変更しません。</p>
+{{end}}{{end}}

@@ -274,7 +274,45 @@ Two earlier fixture failures were corrected without changing these binaries:
 the first supplied a database path instead of letting the product own it; the
 second assumed a trailing dot even though the reused logstore normalizes saved
 question names. The successful run uses the original API record and DNS name
-meaning. No timeout or result condition was relaxed. Evidence is in
-`dist/dns-cli-integrated/management`, with failed runs in `management-attempt1`
-and `management-attempt2`. This is isolated management/DNS acceptance, not
+meaning. No timeout or result condition was relaxed. Repeat through
+`make build` and `scripts/daemon-tests.py management --test TestDaemonConfigurationAndRecovery`
+using the built product. Detailed temporary logs were removed after integration;
+the reusable fixture preserves these checks. This is isolated management/DNS acceptance, not
 physical-router, full-homert or two-router qualification.
+
+## Recover signed update storage capacity
+
+SSH exec `update prune` accepts `control.ReleasePruneRequest` on stdin:
+
+```json
+{"expected_generation":7,"release_digests":[]}
+```
+
+Read the current generation with `update status`. An empty digest list removes
+only superseded journal generations and incomplete private transactions. To
+remove an unused runtime, explicitly include its full digest returned by
+`update stage`; the product never selects old runtimes for automatic eviction.
+The existing release store rejects a stale generation and protects the active,
+pending and previous runtimes before removing anything. The command returns
+the store's `removed_generations` and `removed_releases` lists. It neither
+changes the selected runtime/configuration nor resets the rollback watermarks.
+As with the store's existing operation, an I/O failure can follow partial cleanup;
+it is an error, not a successful result. No new deletion owner or policy is added.
+
+`make check-update-rollback` exercises actual SSH, the control Unix socket,
+signed product artifacts and target configuration validation. It fills a bounded
+runtime store, refuses stale/protected cleanup, removes an explicitly unused
+runtime and stages the next signed runtime without changing current selection.
+The fixture arranges initial selection through the store. It does not establish
+kernel reboot, automatic trial confirmation or packet forwarding.
+
+On 2026-10-31 00:03:56-00:04:01 JST, product `f93be4c`, release
+`wsl-operations-f93be4c`, and fixture `bcd58c6` passed this real SSH/control
+integration on independent WSL Linux. The run took 5.453 seconds including
+preparation (2.87 seconds in the fixture). Stale generation, active, pending
+and previous runtime deletion were refused. Explicit unused-runtime cleanup
+made room for the next signed runtime while selection and rollback watermarks
+remained unchanged. The same fixture compared real HTTP update views against
+confirmed, pending, cancelled, trial and failed-trial states. An initial
+fixture-only expectation of an absent separator space was corrected; product
+behavior and deadlines were unchanged.

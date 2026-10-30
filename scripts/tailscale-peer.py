@@ -123,6 +123,37 @@ def peer(stage, homert=False):
         instances = product_api("control.sock", "/v1/services")["instances"]
         return next((x.get("snapshot", {}) for x in instances if x["name"] == module), {})
 
+    def operational_status(online):
+        upstream = vendor_api(stage / "product-run/services/tailscale/local.sock", "status")
+        result = subprocess.run([str(inputs / "routerd"), "cli", "--runtime-dir=" + str(stage / "product-run")],
+            input="show services " + module + "\nexit\n", capture_output=True, text=True, timeout=5)
+        assert result.returncode == 0, result.stderr
+        # The interactive shell prints its banner and prompt before the JSON.
+        observed = json.JSONDecoder().raw_decode(result.stdout[result.stdout.index("{"):])[0]["snapshot"]
+        own = upstream["Self"]
+        if (observed.get("allowed_prefixes", []) != own.get("AllowedIPs", []) or
+                observed.get("primary_routes", []) != own.get("PrimaryRoutes", []) or
+                observed.get("exit_node_option") != own["ExitNodeOption"]):
+            return False
+        actual = next(p for p in upstream["Peer"].values() if p["HostName"] == "independent-peer")
+        current = next(p for p in observed["peers"] if p["id"] == actual["ID"])
+        for field, vendor in (("online", "Online"), ("active", "Active"), ("exit_node", "ExitNode"), ("exit_node_option", "ExitNodeOption")):
+            if current.get(field) != actual[vendor]:
+                return False
+        seen = actual.get("LastSeen")
+        if seen and not seen.startswith("0001-"):
+            if current.get("last_seen") != seen:
+                return False
+        elif "last_seen" in current:
+            return False
+        if current["online"] != online or (online and not current["active"]) or (not online and "last_seen" not in current):
+            return False
+        assert set(advertised).issubset(observed["allowed_prefixes"])
+        assert observed["exit_node_option"] and not current["exit_node"]
+        print("PASS CLI observed Tailscale state matches live upstream: online=" + str(online) +
+            "; recent activity, last seen, selected/candidate exit and approved local routes", flush=True)
+        return True
+
     def console_status(expected, values=(), selected=True):
         url = "http://10.42.0.1:8088/ops/vpn"
         if selected:
@@ -432,6 +463,7 @@ def peer(stage, homert=False):
             wait(lambda: pingable("198.51.100.20"))
             exit_traffic()
             print("PASS homert: IPv4/IPv6 exit TCP/UDP through declared WAN NAT; no LAN-to-tailnet IPv6 NAT", flush=True)
+            wait(lambda: operational_status(True))
             old = modules()[module]
             signal_worker(old["pid"], signal.SIGKILL)
             wait(lambda: modules()[module]["generation"] > old["generation"] and observation().get("backend_state") == "Running", 30)
@@ -489,6 +521,9 @@ def peer(stage, homert=False):
             console_status("稼働中・制御接続あり", original["addresses"] + advertised)
             print("PASS homert: VPN console reflected removal and restored real observation", flush=True)
             print("PASS homert: config removal withdrew peer kernel routes and LAN access; reapply restored three paths and IPv4/IPv6 exit; packet capture checked", flush=True)
+            wait(lambda: operational_status(True))
+            run(inside("ts-b", cli + ["down"]))
+            wait(lambda: operational_status(False))
             return
         wait(lambda: pingable("10.42.0.2"))
         traffic("10.42.0.2", peer_ips[4])

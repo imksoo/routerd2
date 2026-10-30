@@ -89,6 +89,22 @@ counters, each peer's DNS name and assigned tags. The node snapshot exposes
 observations; `advertise_tags` stays in configuration as a request. Cached
 metadata in a NeedsLogin or expired snapshot does not establish permission.
 
+`show services NAME` also preserves the daemon's operational values rather than
+inferring them from configured advertisements. On the local node,
+`allowed_prefixes` contains routes permitted by the control plane,
+`primary_routes` contains the subnet routes assigned to this node as primary,
+and `exit_node_option` indicates an offered and approved exit node. These are
+observations, separate from `advertise_routes` and `advertise_exit_node` intent.
+For each peer, `active` reports recent traffic (the pinned daemon currently uses
+recent sends), while `online` reports its observed control-plane presence.
+`last_seen`, when supplied and nonzero, is the last online time known to the
+control plane, normally supplied for an offline peer. It is not the last packet
+or handshake time. `exit_node` identifies the exit selected by this router;
+`exit_node_option` only identifies a peer offered and approved as an exit.
+These fields do not prove current end-to-end reachability or identify which
+remote peers are using this router as their exit. Observation expiry still uses
+the original boot clock; a historical `last_seen` never extends that expiry.
+
 Run `make check-tailscale` with Linux root/sudo, TUN, iproute2, nft, curl,
 OpenSSL, tcpdump, dig, dnsmasq and Python 3. `make tailscale-peers` downloads checksum-pinned
 Headscale 0.29.6 and official Tailscale 1.104.2 Linux/amd64 peers into
@@ -113,6 +129,17 @@ application traffic. The fixed private access network and Headscale here are
 fixture setup, not the real homert WAN or production tailnet. This profile
 does not advertise a delegated IPv6 LAN subnet or add LAN-to-tailnet IPv6 NAT,
 and does not qualify simultaneous use with the real HGW or physical NIC.
+
+On 2026-10-31 00:01:24–00:02:21 JST, release
+`wsl-operations-f93be4c` (product `f93be4c`, fixture `5dcf034`) passed this
+homert profile in 57.123 seconds. The real interactive CLI matched the running
+daemon's local permitted/primary routes and exit eligibility, and each peer's
+online/activity/last-seen/selected-exit/exit-eligibility values. This comparison
+passed during traffic, after service removal/reapply, and after the official
+peer went offline with a nonzero last-seen time. Evidence is in
+`dist/operations-acceptance/tailscale-homert/`. The product provided the exit;
+selection of another exit by the product was not exercised. This isolated
+acceptance does not qualify the production tailnet, real HGW or physical NIC.
 
 Legacy `TailscaleNode` import requires explicit enrollment and kernel/bootstrap
 ownership policy; see [the importer](../../legacyconfig/README.md). The actual
