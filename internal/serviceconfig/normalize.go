@@ -7,11 +7,16 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/bfd"
 	"github.com/imksoo/routerd2/internal/protocol/otlplogconfig"
 	"github.com/imksoo/routerd2/internal/protocol/syslogconfig"
+	"github.com/imksoo/routerd2/internal/protocol/webconsoleconfig"
 )
 
 // Normalize owns the fields it changes. Operator IP spelling is not a network
 // identity; compiled services and their references use the parsed address.
 func Normalize(s Service) Service {
+	if s.WebConsole != nil {
+		c := webconsoleconfig.Normalize(*s.WebConsole)
+		s.WebConsole = &c
+	}
 	address := func(v string) string {
 		if a, err := netip.ParseAddr(v); err == nil {
 			return a.String()

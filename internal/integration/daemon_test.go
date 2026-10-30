@@ -5,6 +5,7 @@
 package integration
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/ed25519"
@@ -14,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -127,9 +129,28 @@ spec:
       kind: ManagementAccess
       metadata: {name: management}
       spec: {interfaces: [Interface/management], allowSourceCIDRs: [198.18.0.0/24]}
+    - apiVersion: system.routerd.net/v1alpha1
+      kind: WebConsole
+      metadata: {name: management}
+      spec:
+        enabled: true
+        listenAddress: 198.18.0.1
+        port: 8080
+        basePath: /ops
+        title: "routerd2 <lab>"
+        links: [{label: documentation, url: https://example.net/routerd2}]
 `))
 	if err != nil {
 		t.Fatal(err)
+	}
+	consoleModule := ""
+	for _, resource := range management.Document.Resources {
+		if resource.Service != nil && resource.Service.WebConsole != nil {
+			consoleModule = resource.Service.ModuleName()
+		}
+	}
+	if consoleModule == "" {
+		t.Fatal("imported console service missing")
 	}
 	doc.Resources = append(doc.Resources, management.Document.Resources...)
 	_ = healthPBRCapture(t, "mgmt0")
@@ -195,6 +216,53 @@ spec:
 		return s
 	}
 	until(t, 15*time.Second, func() bool { return status().Ready })
+	console := func(method, path string, want int, contains string) {
+		t.Helper()
+		err := fixtureInsideNamespace(peer, func() error {
+			connection, err := net.DialTimeout("tcp", "198.18.0.1:8080", 3*time.Second)
+			if err != nil {
+				return err
+			}
+			defer connection.Close()
+			if err := connection.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+				return err
+			}
+			request, err := http.NewRequest(method, "http://198.18.0.1:8080/ops/"+path, nil)
+			if err != nil {
+				return err
+			}
+			if err := request.Write(connection); err != nil {
+				return err
+			}
+			response, err := http.ReadResponse(bufio.NewReader(connection), request)
+			if err != nil {
+				return err
+			}
+			defer response.Body.Close()
+			body, err := io.ReadAll(io.LimitReader(response.Body, 2<<20))
+			if err != nil {
+				return err
+			}
+			if response.StatusCode != want || !bytes.Contains(body, []byte(contains)) {
+				return fmt.Errorf("console %s %s: HTTP %d: %s", method, path, response.StatusCode, body)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	until(t, 5*time.Second, func() bool {
+		var health control.Health
+		return ctl.Do(ctx, "GET", "/v1/health", nil, &health) == nil && health.Healthy
+	})
+	console("GET", "", 200, "routerd2 &lt;lab&gt;")
+	console("GET", "network", 200, "198.18.0.1/24")
+	console("GET", "resources", 200, "service/console-")
+	console("GET", "configuration", 200, "設定のSHA-256")
+	console("POST", "configuration", 405, "read-only console")
+	console("GET", "v1/config/commit", 404, "404")
+	t.Log("imported WebConsole: independent HTTP client read live health, kernel address/routes, resource conditions and confirmation metadata under /ops/; escaped title, read-only methods and private API isolation checked")
 	answer(t, dnsPort, "192.0.2.1")
 	// The SSH channel drives the real candidate editor and control transaction.
 	hostBytes, err := os.ReadFile(filepath.Join(stateDir, "ssh_host_ed25519_key"))
@@ -286,6 +354,7 @@ spec:
 		t.Fatal(err)
 	}
 	answer(t, dnsPort, "192.0.2.3")
+	console("GET", "configuration", 200, "確定待ちの期限")
 	if err := ctl.Do(ctx, "POST", "/v1/config/snapshots", control.SnapshotRequest{ExpectedRevision: 3}, nil); !localapi.IsHTTPStatus(err, 409) {
 		t.Fatal("actual control accepted unconfirmed snapshot", err)
 	}
@@ -295,6 +364,7 @@ spec:
 		return state.Revision == 4 && state.Confirmation == nil && state.Healthy
 	})
 	answer(t, dnsPort, "192.0.2.2")
+	console("GET", "configuration", 200, "<dd>4</dd>")
 	// Killing logging cannot interrupt DNS. Killing control reacquires workers
 	// from the committed revision and does not lose the confirmed configuration.
 	var durableBefore []events.Record
@@ -313,7 +383,7 @@ spec:
 			t.Fatalf("unexpected durable lifecycle: %+v", durableBefore)
 		}
 	}
-	for _, name := range []string{"logging", "control"} {
+	for _, name := range []string{"logging", "control", consoleModule} {
 		old := status()
 		var victim supervisor.ModuleStatus
 		for _, m := range old.Modules {
@@ -343,6 +413,12 @@ spec:
 			return false
 		})
 		answer(t, dnsPort, "192.0.2.2")
+		until(t, 5*time.Second, func() bool {
+			var health control.Health
+			return ctl.Do(ctx, "GET", "/v1/health", nil, &health) == nil && health.Healthy
+		})
+		console("GET", "", 200, "routerd2 &lt;lab&gt;")
+		console("GET", "network", 200, "198.18.0.1/24")
 	}
 	var durableAfter struct {
 		Records []events.Record `json:"records"`

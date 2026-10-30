@@ -85,6 +85,7 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 	}
 	c.initOptions(options, explicit)
 	c.collectAliases()
+	c.webConsoles()
 	c.managementAccess()
 	var extra []resourceprogram.Resource
 	var conditions []resourceCondition
@@ -198,6 +199,8 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 			}
 		case "VXLANSegment", "VXLANTunnel":
 			c.reject(r, "", "unsupported_semantics", "legacy VXLAN FDB peers, L2 filtering and outer-DF defaults require explicit native conversion; a single remote is not a lossless substitute")
+		case "WebConsole":
+		// Compiled after management binding checks.
 		case "Package":
 			// The configured conntrack engine supplies its package prerequisite.
 		case "NAT44SessionSync":

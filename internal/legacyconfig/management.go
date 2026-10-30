@@ -64,7 +64,6 @@ func (c *compiler) managementAccess() {
 		if listen == "0.0.0.0" || listen == "::" {
 			c.reject(r, "listenAddress", "management_access", "ManagementAccess requires WebConsole to bind a specific address")
 		}
-		// WebConsole has no native migration. Its independent unsupported-kind
-		// diagnostic remains even when this management check passes.
+		// The listener is compiled independently; this checks its management path.
 	}
 }
