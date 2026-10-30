@@ -25,7 +25,7 @@ import yaml
 def run(args, timeout=10):
     result = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
     if result.returncode:
-        raise RuntimeError(f'{args[0]}: {result.stderr[-2000:]}')
+        raise subprocess.CalledProcessError(result.returncode, args, result.stdout, result.stderr)
     return result.stdout
 
 
@@ -173,18 +173,27 @@ def peer(stage, profile):
 
         observed = None
         expected_source = '2001:db8:123::2' if learned else '192.0.2.2'
-        def synchronized():
+        def synchronized(after=0):
             nonlocal observed
             if not (stage / 'run/control.sock').exists():
                 return False
-            status = query('/v1/services')
+            try:
+                status = query('/v1/services')
+            except subprocess.CalledProcessError as error:
+                # The supervisor can replace control after the deliberate pause.
+                # Only curl's observed connection failure returns to the same wait.
+                if error.returncode == 7:
+                    return False
+                raise
             instance = next((s for s in status['instances'] if s['name'] == 'service.time'), None)
             snapshot = instance.get('snapshot', {}) if instance is not None else {}
             current = (snapshot.get('synchronized'), snapshot.get('source'), snapshot.get('stratum'), snapshot.get('last_error'))
             if current != observed:
                 print('Observed product time state', current, flush=True)
                 observed = current
-            return snapshot.get('synchronized', False) and ipaddress.ip_address(snapshot.get('source', '::')) == ipaddress.ip_address(expected_source)
+            return (snapshot.get('synchronized', False)
+                    and ipaddress.ip_address(snapshot.get('source', '::')) == ipaddress.ip_address(expected_source)
+                    and snapshot.get('observed_nanos', 0) > after)
         wait(synchronized)
         snapshot = query('/v1/services/service.time')['snapshot']
         assert ipaddress.ip_address(snapshot['source']) == ipaddress.ip_address(expected_source) and not snapshot['adjusting_clock']
@@ -205,7 +214,7 @@ def peer(stage, profile):
         for pid in reversed(frozen):
             os.kill(pid, signal.SIGCONT)
         frozen.clear()
-        wait(lambda: synchronized() and query('/v1/services/service.time')['snapshot']['observed_nanos'] > expired_observation)
+        wait(lambda: synchronized(expired_observation))
         resumed_time = next(module for module in query('/v1/status', 'supervisor.sock')['modules'] if module['name'] == 'service.time')
         console_time()
         print('PASS original time observation expired while its worker and supervisor stopped; HTTP recovered with a fresh observation',
