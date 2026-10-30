@@ -239,3 +239,8 @@ func (n *NetworkClient) SourceAddress(ctx context.Context, name, address string)
 	err = n.client.Do(ctx, http.MethodGet, "/v1/source?"+query.Encode(), nil, &value)
 	return
 }
+
+func (n *NetworkClient) AddressSets(ctx context.Context) (value network.AddressSetSnapshot, err error) {
+	err = n.client.Do(ctx, "GET", "/v1/address-sets", nil, &value)
+	return value, err
+}

@@ -147,7 +147,7 @@ func (d *daemon) reportListening() error {
 	return nil
 }
 
-// The input loop is the sole reporter. It sends a complete current observation;
+// The reporting loop is the sole reporter. It sends a complete current observation;
 // replaying a previous snapshot cannot extend its finite lifetime.
 func (d *daemon) publishListeners(ctx context.Context) error {
 	select {
@@ -159,7 +159,7 @@ func (d *daemon) publishListeners(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	out := dnsconfig.Snapshot{Resource: d.config.Resource, BootID: clock.BootID, ObservedNanos: uint64(clock.BoottimeNanoseconds), ExpiresNanos: uint64(clock.BoottimeNanoseconds) + uint64(dnsconfig.ObservationLifetime)}
+	out := dnsconfig.Snapshot{Resource: d.config.Resource, BootID: clock.BootID, ObservedNanos: uint64(clock.BoottimeNanoseconds), ExpiresNanos: uint64(clock.BoottimeNanoseconds) + uint64(dnsconfig.ObservationLifetime), QueryOverloads: d.queryOverloads.Load()}
 	d.stateMu.RLock()
 	for _, listener := range d.listeners {
 		if listener.until.Live(clock) {

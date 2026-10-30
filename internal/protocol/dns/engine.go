@@ -399,6 +399,7 @@ func (d *daemon) handleDNS(listener int, w dns.ResponseWriter, req *dns.Msg) {
 		if host, _, splitErr := net.SplitHostPort(client); splitErr == nil {
 			client = host
 		}
+		slog.Warn("DNS query failed", "resource", d.opts.resource, "source", result.Upstream, "error", err)
 		d.publish("routerd.dns.query.failed", daemonapi.SeverityWarning, "DNSResolutionFailed", err.Error(), map[string]string{
 			"source": result.Upstream, "qname": req.Question[0].Name,
 			"qtype": dns.TypeToString[req.Question[0].Qtype], "clientAddress": client,

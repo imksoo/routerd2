@@ -5,6 +5,28 @@
 [試験計画](test-plan.md)、[機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
+## 追加実装: local-redirect-native78（2026-10-30 JST）
+
+旧routerdのIPAddressSetのA/AAAA取得・更新とLocalServiceRedirect/INPUT例外を読み、
+既存network workerの所有するfirewall transactionへ接続した。名前解決はmutex外、kernel操作は同じ所有者が直列化する。
+宣言したローカルDNSを集合の解決先とし、resolv.confや新しい外部daemonへ依存しない。
+既存のDNS入力と状態報告の待ち依存を外す変更も含む。契約78/network journal20、旧試作形式の移行処理はない。
+
+`make check-local-redirect`は実supervisor/control/network/DNSと独立dnsmasq、Linux LAN/WAN端末で終了0。
+IPv4/IPv6のTCP/UDP、該当だけの内部DNS応答・非該当の外部DNS、名前の応答変更、全daemon再起動、撤去復帰を確認した。
+staticな端末アドレスと経路を明示した局所試験であり、DHCPでの初期接続受入ではない。
+当初の製品内DNS試験は起動直後・集合未解決中のWAN流出で失敗した。
+未解決・更新失敗を準備状態と確定判定へ反映した後、試験は**製品health成功後**に端末通信を始めて通過した。
+準備完了前の転送を禁止した修正ではなく、起動中からの初期端末・最初のDNSは未受入。
+私有logは`/tmp/routerd-local-redirect-native78-product-ready-peer.log`。
+全make check/Race/vet、CGO0 amd64/arm64 buildと署名六ELF検査は終了0。QEMU更新復旧の既受入は下記の契約76であり最新版へ拡張しない。
+
+次は実homertの通信・運用意図を現在の製品設定へ接続し、起動前から独立端末を接続して、
+自動取得直後の最初のDNS・両IP通信、自然更新・再起動へ進む。旧YAMLの無損失取込を完成の前提にしない。
+ownerRefsやqueryLog.path等の形式上の拒否を製品機能未実装の件数として数えない。必要な寿命・停止・記録の意味は明示的に対応づける。
+HAの3秒適用応答timeoutは原因未特定で残す。受理→kernel→保存→応答を失敗の同時刻で照合する。
+全34項目・実機資格・最初の製品完成と固定期限達成は未完了。
+
 ## 追加実装: blackhole-native77（2026-10-30 JST）
 
 旧routerdの`IPv4Route type:blackhole`適用・削除と、保存済みhomert両機の`10.0.0.0/8 metric20`を照合し、

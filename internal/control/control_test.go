@@ -235,3 +235,7 @@ func TestConfirmedCommitSurvivesOnlyAfterConfirmation(t *testing.T) {
 		}
 	}
 }
+
+func (n *fakeNetwork) AddressSets(context.Context) (network.AddressSetSnapshot, error) {
+	return network.AddressSetSnapshot{}, nil
+}

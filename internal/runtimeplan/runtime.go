@@ -47,6 +47,7 @@ import (
 )
 
 type Network interface {
+	AddressSets(context.Context) (network.AddressSetSnapshot, error)
 	Apply(context.Context, uint64, network.Desired) error
 	SourceAddress(context.Context, string, string) (network.SourceObservation, error)
 }
@@ -173,12 +174,55 @@ var errApplicationPending = errors.New("accepted protocol observations await net
 // successful configuration cannot be confirmed while one of its required
 // protocol processes has since crashed or entered restart backoff.
 func (r *Runtime) CheckReady(ctx context.Context) error {
+	r.mu.Lock()
+	epoch, revision := r.sourceEpoch, r.config.revision
+	var namedSets []string
+	if r.applied.network != nil && r.applied.network.Firewall != nil {
+		firewall := r.applied.network.Firewall
+		for _, set := range firewall.AddressSets {
+			if len(set.Names) == 0 {
+				continue
+			}
+			for _, redirect := range firewall.LocalRedirects {
+				if redirect.DestinationSet == set.Name {
+					namedSets = append(namedSets, set.Name)
+					break
+				}
+			}
+		}
+	}
+	r.mu.Unlock()
+	var membership network.AddressSetSnapshot
+	if len(namedSets) > 0 {
+		var err error
+		membership, err = r.network.AddressSets(ctx)
+		if err != nil {
+			return err
+		}
+	}
 	s, err := r.manager.Status(ctx)
 	if err != nil {
 		return err
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if len(namedSets) > 0 {
+		if epoch != r.sourceEpoch || revision != membership.Revision {
+			return errApplicationPending
+		}
+		for _, name := range namedSets {
+			found := false
+			for _, set := range membership.Sets {
+				if set.Name == name {
+					found = !set.ResolvedAt.IsZero() && set.Error == ""
+					break
+				}
+			}
+			if !found {
+				return fmt.Errorf("address set %s membership is unresolved or stale; inspect network address sets", name)
+			}
+		}
+	}
 	r.installGuardStatusLocked(s, nil)
 	if !r.guard.ready {
 		return errors.New("required routerd modules are not ready")

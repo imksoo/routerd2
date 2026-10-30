@@ -188,6 +188,23 @@ func buildFirewall(c *nftables.Conn, f *Firewall) error {
 	buildNATAffinity(c, t, f.NAT)
 	var pre, post *nftables.Chain
 	accept := nftables.ChainPolicyAccept
+	if len(f.LocalRedirects) > 0 {
+		pre = c.AddChain(&nftables.Chain{Name: "prerouting", Table: t, Type: nftables.ChainTypeNAT, Hooknum: nftables.ChainHookPrerouting, Priority: nftables.ChainPriorityNATDest, Policy: &accept})
+		sets := make(map[string][]netip.Addr, len(f.AddressSets))
+		for _, set := range f.AddressSets {
+			sets[set.Name] = set.Addresses
+		}
+		for _, rule := range f.LocalRedirects {
+			for _, host := range sets[rule.DestinationSet] {
+				a := host.Unmap()
+				match := PacketMatch{InInterface: rule.Interface, Destination: netip.PrefixFrom(a, a.BitLen()).String(), Protocol: rule.Protocol, DestinationPorts: []PortRange{{Start: rule.DestinationPort}}}
+				for _, expressions := range packetExpressions(match) {
+					expressions = append(expressions, &expr.Counter{}, &expr.Immediate{Register: 1, Data: binaryutil.BigEndian.PutUint16(uint16(rule.Port))}, &expr.Redir{RegisterProtoMin: 1})
+					c.AddRule(&nftables.Rule{Table: t, Chain: pre, Exprs: expressions})
+				}
+			}
+		}
+	}
 	for _, rule := range f.NAT {
 		chain := post
 		if rule.Type == "dnat" {

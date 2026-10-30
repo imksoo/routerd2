@@ -136,6 +136,11 @@ def peer(stage, power_action, updates, profile):
         resources.append({'id': 'uplink-health', 'depends_on': ['internet'], 'when': {'fact': 'service.internet.active'}, 'service': {'name': 'uplink-health', 'health': {
             'interface': 'ppp-wan', 'target': '198.51.100.20', 'protocol': 'tcp', 'port': 18080,
             'interval_ms': 500, 'timeout_ms': 300, 'healthy_threshold': 1, 'unhealthy_threshold': 2}}})
+        if profile == 'update':
+            resources[-1]['ready_when'] = {'fact': 'service.uplink-health.active'}
+            resources[-1]['service']['health']['port'] = 18082
+            health_command = ['python3', '-u', '-m', 'http.server', '18082', '--bind', '198.51.100.20']
+            health_peer = start(ac, health_command, 'trial-health')
         start(ac,["dnsmasq","--keep-in-foreground","--conf-file=/dev/null","--no-hosts","--no-resolv","--bind-dynamic","--listen-address=192.0.2.1","--address=/ppp.example/198.51.100.20","--address=/ppp.example/2001:db8:ffff::20","--local-ttl=0"],"dns")
         if profile == 'time':
             resources.append({'id': 'time', 'service': {'name': 'time', 'ntp': {'sources': [{'servers': [], 'sources_from': ['pd']}], 'listen': ['10.42.0.1'], 'allow': ['10.42.0.0/24']}}})
@@ -601,13 +606,64 @@ def peer(stage, power_action, updates, profile):
                 selection = query('update status')
                 known_good = selection['active']
                 known_release = query('show status')['release_id']
-                recovery_revision = query('show config')['revision']
+                recovery_config = query('show config')
+                recovery_revision = recovery_config['revision']
                 request = {'release': damaged, 'expected_generation': selection['generation'], 'expected_revision': recovery_revision}
                 json.loads(run(ssh + ['update prepare'], 300, json.dumps(request)))
             assert query('poweroff')['accepted']
             assert q.wait(timeout=40) == 0
             assert 'Power down' in (stage / 'serial.log').read_text(errors='replace')
-            if profile in ('update', 'corrupt-recovery'):
+            if profile == 'update':
+                health_peer.terminate()
+                health_peer.wait(timeout=5)
+                (stage / 'serial.log').unlink()
+                for interface, name in [('tapwan', 'trial-wan.pcap'), ('taplan', 'trial-lan.pcap')]:
+                    start(None, ['tcpdump', '--immediate-mode', '-Z', 'root', '-U', '-n', '-i', interface, '-w', str(stage / name)], name)
+                recovery_started = time.monotonic()
+                q = start(None, q.args, 'qemu-health-trial')
+                wait(ppp_ready, 90)
+                d.terminate()
+                d.wait(timeout=5)
+                d = server()
+
+                def unhealthy_adoption():
+                    probe = subprocess.run(ssh + ['show status'], capture_output=True, text=True, timeout=12)
+                    if probe.returncode == 255:
+                        return False
+                    assert probe.returncode == 0, probe.stderr
+                    assert json.loads(probe.stdout)['release_id'] == versions['damaged']
+                    current = query('show config')
+                    instances = {item['name']: item for item in query('show services').get('instances') or []}
+                    pd = instances.get('service.pd', {}).get('snapshot') or {}
+                    health = instances.get('service.uplink-health', {}).get('snapshot') or {}
+                    return (current['revision'] > recovery_revision and not current['healthy']
+                            and pd.get('state') == 'bound' and health.get('observed_nanos', 0) > 0
+                            and health.get('active') is False and client_ready())
+
+                wait(unhealthy_adoption, 90)
+                traffic()
+                print('PASS signed candidate executed and adopted its configuration; independent Health outage withheld confirmation while client traffic still worked', flush=True)
+                wait(lambda: 'runtime update trial failed: release readiness deadline exceeded' in (stage / 'serial.log').read_text(errors='replace'), 120)
+                health_peer = start(ac, health_command, 'trial-health-recovered')
+                wait(rebooted, 180)
+                wait(ppp_ready)
+                d.terminate()
+                d.wait(timeout=5)
+                d = server()
+                wait(pd_ready, 90)
+                wait(client_ready)
+                traffic()
+                recovered = query('update status')
+                assert recovered['active'] == known_good and recovered.get('pending') is None and recovered.get('attempt') is None
+                assert recovered['last_failure']['release']['digest'] == damaged['digest']
+                assert recovered['last_failure']['reason'] == 'release readiness deadline exceeded'
+                assert query('show status')['release_id'] == known_release
+                assert query('show services pd')['snapshot']['client_duid'] == duid
+                assert query('show config')['config'] == recovery_config['config']
+                print('PASS adopted unhealthy trial automatically rebooted into confirmed runtime/configuration; pinned SSH management, retained DHCP/DUID and automatic IPv4/IPv6/DNS recovered in', round(time.monotonic() - recovery_started, 2), 'seconds', flush=True)
+                assert query('poweroff')['accepted']
+                assert q.wait(timeout=40) == 0
+            if profile == 'corrupt-recovery':
                 # PID 1 syncs before poweroff; ext4 may still need journal
                 # replay. debugfs must not edit blocks that a later replay
                 # would overwrite. Replay only the journal, then require a
@@ -658,7 +714,7 @@ def peer(stage, power_action, updates, profile):
             except Exception as error:
                 print('Failure client kernel unavailable: ' + str(error), flush=True)
         if 'query' in locals() and q.poll() is None:
-            for command in ('show network routes', 'show network interfaces', 'show status', 'show config', 'show services', 'show logs module supervisor level INFO limit 60', 'show logs module kernel level WARN limit 60', 'show logs module control level INFO limit 30', 'show logs module service.pd level INFO limit 40', 'show logs module service.leases level INFO limit 30'):
+            for command in ('show network routes', 'show network interfaces', 'show status', 'show config', 'show services', 'show services uplink-health', 'show logs module service.uplink-health level INFO limit 40', 'show logs module service.dns level INFO limit 30', 'show logs module supervisor level INFO limit 60', 'show logs module kernel level WARN limit 60', 'show logs module control level INFO limit 30', 'show logs module service.pd level INFO limit 40', 'show logs module service.pd-lan-ra level INFO limit 60', 'show logs module service.leases level INFO limit 30'):
                 try:
                     print('Failure diagnostic ' + command + ': ' + json.dumps(query(command)), flush=True)
                 except Exception as error:
@@ -727,7 +783,7 @@ def main():
         return subprocess.run(root + command, check=True, text=True, capture_output=True, timeout=10).stdout
     stage = run(["mktemp", "-d", "/tmp/routerd-pppoe-appliance.XXXXXX"]).strip()
     args.output.mkdir(parents=True, exist_ok=True)
-    artifacts = ("control-records.json", "serial.log", "wan.pcap", "lan.pcap", "shutdown-wan.pcap", "shutdown-lan.pcap", "status.json", "ac.log", "dhcp6.log", "client-dhcp.log", "late-solicits.log", "time-source.log", "time-reboot-wan.pcap", "time-reboot-lan.pcap")
+    artifacts = ("control-records.json", "serial.log", "wan.pcap", "lan.pcap", "shutdown-wan.pcap", "shutdown-lan.pcap", "status.json", "ac.log", "dhcp6.log", "client-dhcp.log", "late-solicits.log", "time-source.log", "time-reboot-wan.pcap", "time-reboot-lan.pcap", "trial-wan.pcap", "trial-lan.pcap")
     for name in artifacts:
         (args.output / name).unlink(missing_ok=True)
     try:

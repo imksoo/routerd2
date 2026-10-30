@@ -391,3 +391,7 @@ func TestDSLiteRejectsUnownedAndCyclicDependencies(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func (n *aftrNetwork) AddressSets(context.Context) (network.AddressSetSnapshot, error) {
+	return network.AddressSetSnapshot{}, nil
+}

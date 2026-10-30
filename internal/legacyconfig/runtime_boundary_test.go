@@ -348,3 +348,7 @@ func TestMigratedWANGraphThroughPublicRuntimeProjection(t *testing.T) {
 		t.Fatal("removing migrated configuration retained native ownership")
 	}
 }
+
+func (n *migrationNetwork) AddressSets(context.Context) (network.AddressSetSnapshot, error) {
+	return network.AddressSetSnapshot{}, nil
+}

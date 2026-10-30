@@ -45,6 +45,22 @@ func (c *compiler) firewallServices() {
 			zones[ref] = r
 		}
 	}
+	// The original pair renderer adds these holes only on untrust interfaces.
+	// Trust/mgmt INPUT ACLs remain authoritative.
+	for _, r := range c.resourcesOfKind("LocalServiceRedirect") {
+		spec := r.Spec.(api.LocalServiceRedirectSpec)
+		zone, exists := zones[legacyRefName(spec.Interface)]
+		if !exists || zone.Spec.(api.FirewallZoneSpec).Role != "untrust" {
+			continue
+		}
+		for _, iface := range c.firewallServiceInterfaces(r, zone, spec.Interface) {
+			for _, rule := range spec.Rules {
+				for _, protocol := range rule.Protocols {
+					f.Input.Rules = append([]network.FirewallRule{{Action: "accept", Match: network.PacketMatch{InInterface: iface, Protocol: strings.ToLower(strings.TrimSpace(protocol)), DestinationPorts: []network.PortRange{{Start: rule.RedirectPort}}}}}, f.Input.Rules...)
+				}
+			}
+		}
+	}
 	pending := map[string][]network.PacketMatch{}
 	for _, r := range c.resources {
 		var iface string

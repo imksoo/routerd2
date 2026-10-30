@@ -1,3 +1,5 @@
+2026-10-30 JST local-redirect-native78: 宛先集合を製品内DNSで解決し、単一network writerへローカルDNS転送を接続。準備完了後の両IP/TCPUDP・集合変更・再起動・撤去は実通信で通過。初期端末を起動前からつなぐ単体受入とHA timeoutは残る。旧YAMLの取込件数を機能の未実装数にせず、現在の製品設定で全homertの通信・運用を成立させる。[結果と限界](pve-codex-handoff.md)。
+
 2026-10-30 JST blackhole-native77: homertで使うIPv4破棄経路を旧routerdと照合し、単一network writerへ取り込んだ。実二端末のTCP/UDP破棄・対象外通信・再起動保持・具体経路・撤去復帰・管理外経路保持は終了0。関連Race/vet/両architecture build/署名六ELFは終了0。全設定取込は89件で拒否。HA timeoutと全homert/全34項目は未完了。
 
 2026-10-30 JST dns-input-native76候補: DNS入力を状態報告待ちから分離した。18秒PDの実Alpineで署名更新準備・正常確定と、候補の設定取り込み後のHealth異常から旧版/旧設定への自動復旧・自動DNS/両IP通信が終了0。復旧253.49秒。sourceCIDRsは実daemonのTCP/UDP許可・拒否まで通過。全homert取込は91件で拒否。全make checkは終了0。併行中の二台再参加はVRRP適用要求timeoutで失敗し未解決。別診断版では130分/724巡と自然PD更新一回・全daemon再起動後の復帰が終了0。全34項目・期限達成は未完了。[現在の結果と残作業](pve-codex-handoff.md)。

@@ -128,6 +128,10 @@ check: fmt-check test test-dependencies test-tools race vet
 check-firewall: build
 	$(PYTHON) scripts/daemon-tests.py firewall --go '$(GO)'
 
+.PHONY: check-local-redirect
+check-local-redirect: build
+	$(PYTHON) scripts/daemon-tests.py local-redirect --go '$(GO)'
+
 .PHONY: check-blackhole
 check-blackhole: build
 	$(PYTHON) scripts/daemon-tests.py blackhole --go '$(GO)'

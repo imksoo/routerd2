@@ -127,7 +127,22 @@ func TestNativeLeaseUpdatesKeepTCPConnectionAndExpireWhenInputCloses(t *testing.
 	updates <- p
 	ctx, cancel := context.WithCancel(context.Background())
 	ready, done := make(chan struct{}), make(chan error, 1)
-	go func() { done <- Run(ctx, cfg, updates, discardDNSObservation, func() { close(ready) }) }()
+	reportStarted, resumeReport := make(chan struct{}), make(chan struct{})
+	report := func(ctx context.Context, _ dnsconfig.Snapshot) error {
+		select {
+		case <-reportStarted:
+			return nil
+		default:
+			close(reportStarted)
+		}
+		select {
+		case <-resumeReport:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	go func() { done <- Run(ctx, cfg, updates, report, func() { close(ready) }) }()
 	defer func() {
 		cancel()
 		select {
@@ -160,6 +175,11 @@ func TestNativeLeaseUpdatesKeepTCPConnectionAndExpireWhenInputCloses(t *testing.
 	if err != nil || len(out.Answer) != 1 || out.Answer[0].(*mdns.A).A.String() != "192.0.2.73" {
 		t.Fatalf("initial leased answer: %v %v", out, err)
 	}
+	select {
+	case <-reportStarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("DNS listener report did not start")
+	}
 	p.Sets[0].Records[0].Address = "192.0.2.74"
 	p.Sets[0].Sequence++
 	clock, err := boottime.Read()
@@ -182,9 +202,10 @@ func TestNativeLeaseUpdatesKeepTCPConnectionAndExpireWhenInputCloses(t *testing.
 		if time.Now().After(deadline) {
 			t.Fatal("updated lease did not reach the existing DNS connection")
 		}
-		time.Sleep(5 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 	}
 
+	close(resumeReport)
 	close(updates)
 	deadline = time.Now().Add(3 * time.Second)
 	for {

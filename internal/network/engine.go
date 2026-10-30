@@ -18,7 +18,7 @@ import (
 var errLinkNotFound = errors.New("link not found")
 
 // JournalVersion is the persisted network ownership/BOOTTIME contract.
-const JournalVersion = 19
+const JournalVersion = 20
 
 type settingKey struct {
 	Kind      string `json:"kind"`
@@ -87,15 +87,17 @@ type kernel interface {
 }
 
 type Engine struct {
-	mu             sync.Mutex
-	opts           Options
-	kernel         kernel
-	state          journal
-	lock           *os.File
-	directory      *os.File
-	journalName    string
-	journalPresent bool
-	authorityWake  chan struct{}
+	mu              sync.Mutex
+	opts            Options
+	kernel          kernel
+	state           journal
+	lock            *os.File
+	directory       *os.File
+	journalName     string
+	journalPresent  bool
+	authorityWake   chan struct{}
+	addressSets     map[string]resolvedAddressSet
+	addressSetsWake chan struct{}
 }
 
 // New locks the ownership journal and reads it. It makes no kernel changes.
@@ -134,7 +136,8 @@ func newEngine(opts Options, k kernel) (*Engine, error) {
 		state.Status = "degraded"
 		state.LastError = "previous apply was interrupted; reconcile the committed configuration"
 	}
-	e := &Engine{opts: opts, kernel: k, lock: f, directory: dir, journalName: name, journalPresent: inspection.Present, state: state, authorityWake: make(chan struct{}, 1)}
+	e := &Engine{opts: opts, kernel: k, lock: f, directory: dir, journalName: name, journalPresent: inspection.Present, state: state, authorityWake: make(chan struct{}, 1), addressSetsWake: make(chan struct{}, 1)}
+	e.prepareAddressSets(state.Desired.Firewall)
 
 	return e, nil
 }
@@ -262,6 +265,9 @@ func (e *Engine) Apply(ctx context.Context, revision uint64, desired Desired) (A
 		if saveErr := e.save(); saveErr != nil {
 			err = errors.Join(err, fmt.Errorf("persist degraded state: %w", saveErr))
 		}
+	}
+	if err == nil {
+		e.prepareAddressSets(d.Firewall)
 	}
 	return ApplyResult{Revision: e.state.Revision, AttemptedRevision: e.state.AttemptedRevision, Status: e.state.Status}, err
 }
@@ -1025,5 +1031,5 @@ func (p *apply) firewall(want *Firewall) error {
 		p.e.state.FirewallOwned = false
 		return p.checkpoint("forget absent firewall")
 	}
-	return p.change("firewall atomic replace", func() error { return p.e.kernel.ReplaceFirewall(want) }, func() { p.e.state.FirewallOwned = want != nil })
+	return p.change("firewall atomic replace", func() error { return p.e.kernel.ReplaceFirewall(p.e.resolvedFirewall(want)) }, func() { p.e.state.FirewallOwned = want != nil })
 }

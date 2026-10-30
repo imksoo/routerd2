@@ -321,3 +321,7 @@ func TestDHCPLeaseCannotReplaceStaticAddressOwnership(t *testing.T) {
 		t.Fatal("rejected dynamic lease changed committed ownership")
 	}
 }
+
+func (n *memoryNetwork) AddressSets(context.Context) (network.AddressSetSnapshot, error) {
+	return network.AddressSetSnapshot{}, nil
+}

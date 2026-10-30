@@ -301,3 +301,7 @@ func TestNetworkClientSmallSnapshotPreservesLegacyFields(t *testing.T) {
 		t.Fatal("legacy complete Snapshot fields changed", got, err)
 	}
 }
+
+func (n *detailNetwork) AddressSets(context.Context) (network.AddressSetSnapshot, error) {
+	return network.AddressSetSnapshot{}, nil
+}

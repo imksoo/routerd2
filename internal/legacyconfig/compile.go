@@ -172,7 +172,7 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 			conditions = append(conditions, resourceCondition{id: "service/" + name, source: r, when: r.Spec.(api.HealthCheckSpec).When})
 		case "IPv6RouterAdvertisement":
 			// Compiled with delegated LAN advertisements below.
-		case "FirewallZone", "FirewallPolicy", "FirewallRule", "NAT44Rule":
+		case "FirewallZone", "FirewallPolicy", "FirewallRule", "NAT44Rule", "IPAddressSet", "LocalServiceRedirect":
 			// Compiled together to preserve ordered zone jumps and NAT-only hooks.
 		case "EgressRoutePolicy":
 			if r.Spec.(api.EgressRoutePolicySpec).HostTraffic {
@@ -208,6 +208,7 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 	conditions = append(conditions, c.bgp()...)
 	c.ntp(vrrpNames)
 	extra = append(extra, c.firewall(vrrpNames)...)
+	c.localServiceRedirects()
 	c.firewallServices()
 	c.vpnListenerFirewall()
 	// Admission references can name a PD declared after its VRRP election.

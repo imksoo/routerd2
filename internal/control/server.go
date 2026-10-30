@@ -32,22 +32,36 @@ func ServeNetwork(ctx context.Context, dir, stateDir string, ready func()) error
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	expiryDone := make(chan error, 1)
+	setsDone := make(chan error, 1)
 	go func() {
 		expiryDone <- e.MaintainAuthority(runCtx)
 		cancel()
 	}()
+	go func() {
+		setsDone <- e.MaintainAddressSets(runCtx)
+		cancel()
+	}()
 	err = localapi.Serve(runCtx, filepath.Join(dir, NetworkSocketName), networkHandler(e), ready)
 	cancel()
-	return errors.Join(err, <-expiryDone)
+	return errors.Join(err, <-expiryDone, <-setsDone)
 }
 
 type nativeNetwork interface {
+	AddressSets(context.Context) (network.AddressSetSnapshot, error)
 	Apply(context.Context, uint64, network.Desired) (network.ApplyResult, error)
 	Snapshot(context.Context) (network.Snapshot, error)
 }
 
 func networkHandler(e nativeNetwork) http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/address-sets", func(w http.ResponseWriter, r *http.Request) {
+		value, err := e.AddressSets(r.Context())
+		if err != nil {
+			localapi.Fail(w, 503, err)
+			return
+		}
+		localapi.JSON(w, 200, value)
+	})
 	mux.HandleFunc("GET /v1/journal", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.RawQuery != "" {
 			localapi.Fail(w, 400, errors.New("journal inspection accepts no query parameters"))

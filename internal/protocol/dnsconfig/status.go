@@ -10,14 +10,15 @@ import (
 
 const ObservationLifetime = 2 * time.Second
 
-// Snapshot reports sockets actually owned by the DNS worker. DHCP serving can
-// depend on them without guessing that input delivery already opened a socket.
+// Snapshot reports owned sockets and query admission failures. DHCP serving
+// depends on actual sockets, independently of upstream input delivery.
 type Snapshot struct {
-	Resource      string           `json:"resource"`
-	BootID        string           `json:"boot_id"`
-	ObservedNanos uint64           `json:"observed_nanos"`
-	ExpiresNanos  uint64           `json:"expires_nanos"`
-	Listeners     []netip.AddrPort `json:"listeners"`
+	Resource       string           `json:"resource"`
+	BootID         string           `json:"boot_id"`
+	ObservedNanos  uint64           `json:"observed_nanos"`
+	ExpiresNanos   uint64           `json:"expires_nanos"`
+	Listeners      []netip.AddrPort `json:"listeners"`
+	QueryOverloads uint64           `json:"query_overloads"`
 }
 
 func ValidateSnapshot(s Snapshot) error {

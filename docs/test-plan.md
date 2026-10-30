@@ -85,6 +85,9 @@
 
 ## 現在の状況
 
+- `local-redirect-native78`: 実製品内DNSでA/AAAA宛先集合を更新し、両IP/TCPUDPの該当・非該当、集合変更、全daemon再起動、撤去復帰が終了0。
+  製品health成功後に通信を開始した静的端末の局所試験。起動直後の集合未解決中のWAN流出を修正済みとは扱わず、起動前からの自動取得・最初のDNSを次に確認する。
+  全make check/Race/vet/両architecture build/署名六ELFは終了0。全homert通信・運用の代替とHA timeoutは未受入。
 - `blackhole-native77`: 実homertのIPv4破棄経路を単一network writerへ追加。
   `make check-blackhole`で実daemon・独立LAN/WAN端末のTCP/UDP破棄、対象外通信、全プロセス再起動後の保持、
   LAN受信/WAN流出0、具体経路の到達、設定撤去後復帰・管理外経路保持が終了0。関連Race/vet/両architecture build/署名六ELFも終了0。

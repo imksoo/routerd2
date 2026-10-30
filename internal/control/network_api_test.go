@@ -59,3 +59,7 @@ func TestNetworkApplyAcknowledgementDoesNotEchoLargeObservations(t *testing.T) {
 		t.Fatal("acknowledgement echoed observations or desired configuration")
 	}
 }
+
+func (n *observedNetwork) AddressSets(context.Context) (network.AddressSetSnapshot, error) {
+	return network.AddressSetSnapshot{}, nil
+}

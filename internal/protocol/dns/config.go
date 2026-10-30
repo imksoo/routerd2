@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/imksoo/routerd/pkg/dnsresolver"
@@ -78,10 +79,29 @@ func Run(ctx context.Context, cfg Config, updates <-chan dnsconfig.Input, report
 			return nil
 		}
 	}
-	done := make(chan struct{})
-	defer func() { cancel(); <-done }()
-	go func() {
-		defer close(done)
+	var workers sync.WaitGroup
+	defer func() { cancel(); workers.Wait() }()
+	if updates != nil {
+		workers.Go(func() {
+			for {
+				select {
+				case <-runCtx.Done():
+					return
+				case projection, ok := <-updates:
+					if !ok {
+						return
+					}
+					if err := d.applyInput(projection); err != nil {
+						d.inputRejected.Add(1)
+						slog.Warn("DNS input rejected", "resource", cfg.Runtime.Resource, "error", err)
+					}
+				}
+			}
+		})
+	}
+	// Reporting to control can wait on another process. Learned inputs must
+	// advance independently, before their originating protocol deadlines.
+	workers.Go(func() {
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
 		for {
@@ -89,27 +109,16 @@ func Run(ctx context.Context, cfg Config, updates <-chan dnsconfig.Input, report
 			case <-runCtx.Done():
 				return
 			case <-ticker.C:
-				if len(d.listenSources) > 0 {
-					if err := d.refreshListeners(); err != nil {
-						slog.Warn("DNS listener observation failed", "resource", cfg.Runtime.Resource, "error", err)
-					}
-				}
-			case projection, ok := <-updates:
-				if !ok {
-					updates = nil
-					continue
-				}
-				if err := d.applyInput(projection); err != nil {
-					d.inputRejected.Add(1)
-					slog.Warn("DNS input rejected", "resource", cfg.Runtime.Resource, "error", err)
+			}
+			if len(d.listenSources) > 0 {
+				if err := d.refreshListeners(); err != nil {
+					slog.Warn("DNS listener observation failed", "resource", cfg.Runtime.Resource, "error", err)
 				}
 			}
 			if err := d.publishListeners(runCtx); err != nil && runCtx.Err() == nil {
-				// The consumer's original observation expires on delivery failure.
-				// Static DNS sockets remain owned by configured intent during control loss.
 				slog.Warn("DNS listener observation delivery failed", "resource", cfg.Runtime.Resource, "error", err)
 			}
 		}
-	}()
+	})
 	return normalizeDaemonExit(ctx, d.Run(runCtx))
 }

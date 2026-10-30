@@ -30,6 +30,26 @@ type FirewallRule struct {
 	LogPrefix string      `json:"log_prefix,omitempty"`
 }
 
+// AddressSet is a collection of host addresses. Names are resolved by the
+// network worker; operator addresses remain separate from learned answers.
+type AddressSet struct {
+	Name            string       `json:"name"`
+	Addresses       []netip.Addr `json:"addresses,omitempty"`
+	Names           []string     `json:"names,omitempty"`
+	RefreshInterval string       `json:"refresh_interval,omitempty"`
+	Resolvers       []string     `json:"resolvers,omitempty"`
+}
+
+// LocalRedirect preserves the client's destination in conntrack while sending
+// matching LAN traffic to a local service. It does not authorize INPUT traffic.
+type LocalRedirect struct {
+	Interface       string `json:"interface"`
+	DestinationSet  string `json:"destination_set"`
+	Protocol        string `json:"protocol"`
+	DestinationPort int    `json:"destination_port"`
+	Port            int    `json:"port"`
+}
+
 // PacketMatch fields are ANDed. Port ranges and ICMP types are alternatives
 // within their field. Family zero matches both families unless a prefix or
 // ICMP protocol narrows it. Protocol is empty/tcp/udp/icmp/icmpv6/ipip/vrrp.
@@ -221,6 +241,9 @@ func validateFirewall(f *Firewall) error {
 		return nil
 	}
 	var errs []error
+	if err := validateLocalRedirects(f); err != nil {
+		errs = append(errs, err)
+	}
 	if err := validateFlowRoutes(*f); err != nil {
 		errs = append(errs, err)
 	}
