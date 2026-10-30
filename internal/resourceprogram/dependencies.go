@@ -19,6 +19,8 @@ func inferredDependencies(resources []Resource) map[string][]string {
 			conntrackSetting = r.ID
 		case r.Interface != nil:
 			interfaces[r.Interface.Name] = r.ID
+		case r.IPIP != nil:
+			links[r.IPIP.Name] = r.ID
 		case r.Link != nil:
 			links[r.Link.Name] = r.ID
 		case r.Address != nil:

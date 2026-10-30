@@ -105,6 +105,27 @@ func Compile(source Program) (Plan, error) {
 		}
 		byID[r.ID] = r
 	}
+	preparedIPIPs := make(map[string]IPIPPlan)
+	for i, r := range source.Resources {
+		if r.IPIP == nil {
+			continue
+		}
+		ipip, provider, err := prepareIPIP(r.ID, *r.IPIP, source.Resources)
+		if err != nil {
+			return Plan{}, err
+		}
+		preparedIPIPs[r.ID] = ipip
+		lease := FactCondition{Fact: ipip.Source + ".active"}
+		if r.When == nil {
+			r.When = &lease
+		} else {
+			r.When = &FactCondition{All: []FactCondition{*r.When, lease}}
+		}
+		if !slices.Contains(r.DependsOn, provider) {
+			r.DependsOn = append(slices.Clone(r.DependsOn), provider)
+		}
+		source.Resources[i], byID[r.ID] = r, r
+	}
 	// Tracks are observations, not hard readiness dependencies. Resolve them
 	// against declarations so conditional removal does not invalidate the VIP.
 	for _, r := range source.Resources {
@@ -153,6 +174,10 @@ func Compile(source Program) (Plan, error) {
 		case r.Address != nil:
 			key := canonicalPrefix(r.Address.CIDR)
 			err = claim(r, "address", r.Address.Interface+"/"+key)
+		case r.IPIP != nil:
+			ipip := preparedIPIPs[r.ID]
+			err = errors.Join(claim(r, "interface", ipip.Link.Name), claim(r, "link", ipip.Link.Name), claim(r, "address", ipip.Link.Name+"/"+ipip.Address.String()))
+			plan.IPIPs = append(plan.IPIPs, ipip)
 		case r.Link != nil:
 			err = claim(r, "link", r.Link.Name)
 		case r.Route != nil:

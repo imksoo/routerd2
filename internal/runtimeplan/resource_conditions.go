@@ -46,7 +46,7 @@ func dynamicProgram(source config.Document) bool {
 				}
 			}
 		}
-		if r.When != nil || r.ReadyWhen != nil || r.EgressRoute != nil || r.EgressPolicy != nil || r.HostRoute != nil || r.Service != nil && r.Service.VRRP != nil && r.Service.VRRP.GracefulActivation != nil {
+		if r.When != nil || r.ReadyWhen != nil || r.EgressRoute != nil || r.EgressPolicy != nil || r.HostRoute != nil || r.IPIP != nil || r.Service != nil && r.Service.VRRP != nil && r.Service.VRRP.GracefulActivation != nil {
 			return true
 		}
 		if r.Address != nil && r.Address.Options != nil && !r.Address.Options.ValidUntil.IsZero() || r.Route != nil && r.Route.ValidUntil != (lifetime.Deadline{}) {
@@ -341,7 +341,7 @@ func (r *Runtime) projectProgramLocked(cfg configuration, records map[string]ser
 	// Preserve the existing static fast path. Runtime readiness edges are opt-in
 	// through ready_when; process readiness is not protocol readiness.
 	if !dynamicProgram(cfg.source) {
-		p, err := r.projectLocked(cfg.protocols, cfg.plan.Native, records, now, resourceprogram.FactSnapshot{})
+		p, err := r.projectLocked(cfg.protocols, cfg.plan.Native, records, now, resourceprogram.FactSnapshot{}, nil, nil)
 		p.observationVersion = r.observationVersion
 		p.resources = make(map[string]resourceprogram.ResourceState, len(cfg.source.Resources))
 		for _, resource := range cfg.source.Resources {
@@ -354,9 +354,8 @@ func (r *Runtime) projectProgramLocked(cfg configuration, records map[string]ser
 		return projection{}, err
 	}
 	native, states := cfg.plan.Project(facts)
-	p, err := r.projectLocked(cfg.protocols, native, records, now, facts)
+	p, err := r.projectLocked(cfg.protocols, native, records, now, facts, cfg.plan.IPIPs, states)
 	p.observationVersion = r.observationVersion
-	p.resources = states
 	r.projectEgressPoliciesLocked(cfg, facts, &p)
 	r.projectHostRoutesLocked(cfg, facts, &p)
 	clock := boottime.Clock{BootID: facts.Scope.BootID, BoottimeNanoseconds: int64(facts.NowNanos), WallTime: facts.WallTime}

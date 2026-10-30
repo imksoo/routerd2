@@ -736,7 +736,7 @@ func (r *Runtime) observe(ctx context.Context, u serviceconfig.Update) (*pending
 	}
 	candidateRecords := r.observationsLocked()
 	candidateRecords[u.Name] = u
-	if _, err := r.projectLocked(r.config.protocols, r.config.plan.Native, candidateRecords, time.Now(), resourceprogram.FactSnapshot{}); err != nil {
+	if _, err := r.projectLocked(r.config.protocols, r.config.plan.Native, candidateRecords, time.Now(), resourceprogram.FactSnapshot{}, nil, nil); err != nil {
 		return nil, err
 	}
 	if u.Role == "dhcp_server" {

@@ -13,13 +13,18 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
+	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/config"
 	"github.com/imksoo/routerd2/internal/control"
 	"github.com/imksoo/routerd2/internal/network"
+	"github.com/imksoo/routerd2/internal/protocol/dhcp4"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
+	"github.com/imksoo/routerd2/internal/runtimeplan"
+	"github.com/imksoo/routerd2/internal/supervisor"
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netns"
 )
@@ -27,17 +32,30 @@ import (
 //go:embed testdata/bgp-frr.yaml
 var legacyBGPFRR []byte
 
+//go:embed testdata/ipip-dhcp4-bgp-frr.yaml
+var legacyDHCP4IPIPBGPFRR []byte
+
 // FRR is a separate BGP implementation. The product must advertise the LAN
 // prefix and install FRR's route before the client can reach the peer.
-func TestDaemonBGPWithFRR(t *testing.T) { daemonBGPWithFRR(t, false) }
+func TestDaemonBGPWithFRR(t *testing.T) { daemonBGPWithFRR(t, false, false) }
 
-func TestDaemonIPIPBGPWithFRR(t *testing.T) { daemonBGPWithFRR(t, true) }
+func TestDaemonIPIPBGPWithFRR(t *testing.T) { daemonBGPWithFRR(t, true, false) }
 
-func daemonBGPWithFRR(t *testing.T, ipip bool) {
-	if !isolateFixtureTimeout(t, t.Name(), 90*time.Second) {
+func TestDaemonDHCP4IPIPBGPWithFRR(t *testing.T) { daemonBGPWithFRR(t, true, true) }
+
+func daemonBGPWithFRR(t *testing.T, ipip, learned bool) {
+	budget := 90 * time.Second
+	if learned {
+		budget = 240 * time.Second
+	}
+	if !isolateFixtureTimeout(t, t.Name(), budget) {
 		return
 	}
-	peer := fixturePeerNamespace(t, "wan0", "peer0")
+	peerName := "peer0"
+	if learned {
+		peerName = "server0"
+	}
+	peer := fixturePeerNamespace(t, "wan0", peerName)
 	client := fixturePeerNamespace(t, "lan0", "client0")
 	wanCapture, lanCapture := healthPBRCapture(t, "wan0"), healthPBRCapture(t, "lan0")
 	setup := func(ns netns.NsHandle, commands ...[]string) {
@@ -56,11 +74,18 @@ func daemonBGPWithFRR(t *testing.T, ipip bool) {
 	local, remote := "192.0.2.1", "192.0.2.2"
 	if ipip {
 		local, remote = "10.0.0.1", "10.0.0.2"
-		setup(peer, []string{"address", "add", "192.0.2.2/24", "dev", "peer0"}, []string{"link", "add", "tun0", "type", "ipip", "local", "192.0.2.2", "remote", "192.0.2.1", "ttl", "64"}, []string{"link", "set", "tun0", "up"}, []string{"address", "add", remote + "/30", "dev", "tun0"})
+		if learned {
+			local, remote = "10.0.0.0", "10.0.0.1"
+		}
+		peerPrefix := remote + "/30"
+		if learned {
+			peerPrefix = remote + "/31"
+		}
+		setup(peer, []string{"address", "add", "192.0.2.2/24", "dev", peerName}, []string{"link", "add", "tun0", "type", "ipip", "local", "192.0.2.2", "remote", "192.0.2.1", "ttl", "64"}, []string{"link", "set", "tun0", "up"}, []string{"address", "add", peerPrefix, "dev", "tun0"})
 	}
-	peerAddress := []string{"address", "add", "192.0.2.2/24", "dev", "peer0"}
+	peerAddress := []string{"address", "add", "192.0.2.2/24", "dev", peerName}
 	if ipip {
-		peerAddress = []string{"link", "set", "peer0", "up"}
+		peerAddress = []string{"link", "set", peerName, "up"}
 	}
 	setup(peer, peerAddress, []string{"address", "add", "203.0.113.50/32", "dev", "lo"}, []string{"route", "add", "198.18.0.0/24", "via", local})
 	setup(client, []string{"address", "add", "198.18.0.2/24", "dev", "client0"}, []string{"route", "add", "default", "via", "198.18.0.1"})
@@ -74,6 +99,9 @@ func daemonBGPWithFRR(t *testing.T, ipip bool) {
 	}
 	configPath := filepath.Join(root, "frr.conf")
 	frrConfig := "hostname independent\nlog stdout\nrouter bgp 64513\n bgp router-id 192.0.2.2\n no bgp ebgp-requires-policy\n no bgp network import-check\n neighbor 192.0.2.1 remote-as 64512\n address-family ipv4 unicast\n  network 203.0.113.0/24\n  neighbor 192.0.2.1 activate\n exit-address-family\n"
+	if learned {
+		frrConfig = strings.Replace(frrConfig, "log stdout\n", "log stdout critical\n", 1)
+	}
 	frrConfig = strings.ReplaceAll(strings.ReplaceAll(frrConfig, "192.0.2.1", local), "192.0.2.2", remote)
 	if err := os.WriteFile(configPath, []byte(frrConfig), 0600); err != nil {
 		t.Fatal(err)
@@ -143,6 +171,9 @@ while True:
 	t.Cleanup(func() { _ = server.Process.Kill(); _ = server.Wait() })
 	source := filepath.Join(root, "legacy.yaml")
 	legacy := legacyBGPFRR
+	if learned {
+		legacy = legacyDHCP4IPIPBGPFRR
+	}
 	if ipip {
 		legacy = bytes.ReplaceAll(legacy, []byte("routerID: 192.0.2.1"), []byte("routerID: "+local))
 		legacy = bytes.ReplaceAll(legacy, []byte("address: 192.0.2.1, port: 179"), []byte("address: "+local+", port: 179"))
@@ -162,10 +193,33 @@ while True:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ipip {
+	if ipip && !learned {
 		document.Resources = append(document.Resources,
 			resourceprogram.Resource{ID: "tunnel", Link: &network.Link{Name: "tun0", Kind: "ipip", Parent: "wan0", Local: "192.0.2.1", Remote: "192.0.2.2"}},
 			resourceprogram.Resource{ID: "tunnel-address", Address: &resourceprogram.Address{Interface: "tun0", CIDR: local + "/30"}})
+	}
+	productTunnel := "tun0"
+	var dhcpServer *exec.Cmd
+	var dhcpHostFile, dhcpMAC, dhcpModule string
+	if learned {
+		wan, err := netlink.LinkByName("wan0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		dhcpMAC = wan.Attrs().HardwareAddr.String()
+		dhcpHostFile = filepath.Join(root, "dhcp-hosts")
+		if err := os.WriteFile(dhcpHostFile, []byte(dhcpMAC+",192.0.2.1\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		dhcpServer = startFixtureDNSMasq(t, peer, []string{"--port=0", "--dhcp-range=192.0.2.1,192.0.2.3,255.255.255.0,120s", "--dhcp-hostsfile=" + dhcpHostFile})
+		for _, resource := range document.Resources {
+			if resource.Service != nil && resource.Service.DHCP4 != nil {
+				dhcpModule = resource.Service.ModuleName()
+			}
+			if resource.IPIP != nil {
+				productTunnel = resource.IPIP.Name
+			}
+		}
 	}
 	fixture := startFixtureDaemon(t, document)
 	show := func() (bool, bool) {
@@ -220,8 +274,11 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
 		until(t, 10*time.Second, func() bool { return forward() == nil })
 		for i := range document.Resources {
 			resource := &document.Resources[i]
-			if resource.Link != nil && resource.Link.Name == "tun0" {
+			if resource.Link != nil && resource.Link.Name == productTunnel {
 				resource.Link.TTL = 42
+			}
+			if resource.IPIP != nil {
+				resource.IPIP.TTL = 42
 			}
 			if resource.Interface != nil && resource.Interface.Name == "wan0" {
 				resource.Interface.MTU = 1400
@@ -231,16 +288,14 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
 			t.Fatal(err)
 		}
 		until(t, 5*time.Second, func() bool {
-			link, err := netlink.LinkByName("tun0")
+			link, err := netlink.LinkByName(productTunnel)
 			if err != nil {
 				return false
 			}
 			tunnel, ok := link.(*netlink.Iptun)
 			return ok && tunnel.Ttl == 42 && tunnel.Attrs().MTU == 1380
 		})
-		if err := forward(); err != nil {
-			t.Fatal(err)
-		}
+		until(t, 10*time.Second, func() bool { return forward() == nil })
 	}
 	fixture.stop()
 	until(t, 15*time.Second, func() bool { present, valid := show(); return valid && !present })
@@ -273,11 +328,124 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
 			lanCapture.count("198.18.0.2", "203.0.113.50", 6, 18080) > 0 &&
 			lanCapture.count("198.18.0.2", "203.0.113.50", 17, 18081) > 0
 	})
+	if learned {
+		var instance runtimeplan.InstanceStatus
+		if err := fixture.control.Do(t.Context(), "GET", "/v1/services/"+dhcpModule, nil, &instance); err != nil {
+			t.Fatal(err)
+		}
+		var lease dhcp4.Snapshot
+		if err := json.Unmarshal(instance.Snapshot, &lease); err != nil {
+			t.Fatal(err)
+		}
+		var status supervisor.Status
+		if err := fixture.supervisor.Do(t.Context(), "GET", "/v1/status", nil, &status); err != nil {
+			t.Fatal(err)
+		}
+		paused := []int{fixture.pid, dhcpServer.Process.Pid}
+		for _, module := range status.Modules {
+			if module.Name == "control" {
+				paused = append(paused, module.PID)
+			}
+		}
+		if len(paused) != 3 {
+			t.Fatal("control PID unavailable")
+		}
+		for _, pid := range paused {
+			if err := syscall.Kill(pid, syscall.SIGSTOP); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGCONT) })
+		}
+		var page network.DesiredPage
+		if err := fixture.network.Do(t.Context(), "GET", "/v1/observations/desired", nil, &page); err != nil || page.NextOffset != nil {
+			t.Fatal("writer desired", err)
+		}
+		var applied network.Desired
+		if err := json.Unmarshal(page.Data, &applied); err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, link := range applied.Links {
+			if link.Name == productTunnel {
+				found = true
+				if link.Authority.BootID != lease.BootID || link.Authority.Nanos != lease.LeaseClock.ExpiresNanos {
+					t.Fatal("IPIP did not retain the original DHCP deadline", link.Authority, lease.LeaseClock)
+				}
+			}
+		}
+		if !found {
+			t.Fatal("leased tunnel missing")
+		}
+		t.Cleanup(func() {
+			if !t.Failed() {
+				return
+			}
+			link, err := netlink.LinkByName(productTunnel)
+			if err != nil {
+				t.Log("expiry link", err)
+				return
+			}
+			addresses, addressErr := netlink.AddrList(link, netlink.FAMILY_V4)
+			routes, routeErr := netlink.RouteListFiltered(netlink.FAMILY_V4, &netlink.Route{Dst: destination}, netlink.RT_FILTER_DST)
+			t.Logf("expiry kernel: link=%+v addresses=%+v err=%v routes=%+v err=%v", link, addresses, addressErr, routes, routeErr)
+			call, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			var page network.DesiredPage
+			err = fixture.network.Do(call, "GET", "/v1/observations/desired", nil, &page)
+			t.Logf("expiry writer desired: %s err=%v", page.Data, err)
+		})
+		clock, err := boottime.Read()
+		if err != nil {
+			t.Fatal(err)
+		}
+		remaining := time.Duration(lease.LeaseClock.ExpiresNanos) - time.Duration(clock.BoottimeNanoseconds)
+		t.Logf("actual DHCP lease=%s remaining=%s", time.Duration(lease.LeaseClock.ExpiresNanos-lease.LeaseClock.AcquiredNanos), remaining)
+		until(t, remaining+3*time.Second, func() bool {
+			link, err := netlink.LinkByName(productTunnel)
+			if err != nil {
+				return true
+			}
+			addresses, err := netlink.AddrList(link, netlink.FAMILY_V4)
+			routes, routeErr := netlink.RouteListFiltered(netlink.FAMILY_V4, &netlink.Route{Dst: destination}, netlink.RT_FILTER_DST)
+			return err == nil && routeErr == nil && link.Attrs().Flags&net.FlagUp == 0 && len(addresses) == 0 && len(routes) == 0
+		})
+		if err := forward(); err == nil {
+			t.Fatal("expired DHCP endpoint still forwards with control suspended")
+		}
+		for i := len(paused) - 1; i >= 0; i-- {
+			if err := syscall.Kill(paused[i], syscall.SIGCONT); err != nil {
+				t.Fatal(err)
+			}
+		}
+		until(t, 30*time.Second, func() bool { return forward() == nil })
+		// Change the independent DHCP server's reservation; the unchanged
+		// product IPIP intent must follow its next server-assigned endpoint.
+		if err := os.WriteFile(dhcpHostFile, []byte(dhcpMAC+",192.0.2.3\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := dhcpServer.Process.Signal(syscall.SIGHUP); err != nil {
+			t.Fatal(err)
+		}
+		if err := fixture.control.Do(t.Context(), "POST", "/v1/services/"+dhcpModule+"/restart", struct{}{}, nil); err != nil {
+			t.Fatal(err)
+		}
+		until(t, 20*time.Second, func() bool {
+			link, err := netlink.LinkByName(productTunnel)
+			if err != nil {
+				return false
+			}
+			tunnel, ok := link.(*netlink.Iptun)
+			return ok && tunnel.Local.Equal(net.ParseIP("192.0.2.3"))
+		})
+		setup(peer, []string{"link", "set", "tun0", "type", "ipip", "remote", "192.0.2.3"})
+		until(t, 20*time.Second, func() bool { return forward() == nil })
+		t.Log("DHCPv4/IPIP: original lease deadline retained; network independently fenced link/address/BGP route while control and supervisor were suspended; fresh DHCP restored forwarding; new server address changed tunnel local without intent rewrite")
+	}
 	if ipip {
 		if err := fixture.control.Do(t.Context(), "POST", "/v1/config/commit", control.CommitRequest{ExpectedRevision: 2, RequestID: "remove-tunnel", Config: config.Document{SchemaVersion: config.SchemaVersion}}, nil); err != nil {
 			t.Fatal(err)
 		}
-		until(t, 10*time.Second, func() bool { _, err := netlink.LinkByName("tun0"); return err != nil })
+		until(t, 10*time.Second, func() bool { _, err := netlink.LinkByName(productTunnel); return err != nil })
 		until(t, 10*time.Second, func() bool { present, valid := show(); return valid && !present })
 		if err := forward(); err == nil {
 			t.Fatal("removed tunnel still forwards")

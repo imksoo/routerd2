@@ -265,3 +265,51 @@ route to the LAN is explicitly configured by the fixture. This establishes
 kernel interoperability, not acceptance of a physical router, Kubernetes/PVE
 deployment, or other encapsulations. Legacy `TunnelInterface` importing is
 not part of this path; use the native link declaration.
+
+For a DHCPv4 underlay, the native `ipip` resource binds the local endpoint to
+one declared DHCPv4 service rather than saving the learned address as intent:
+
+```yaml
+- id: transport
+  ipip:
+    name: ipip0
+    local_from_dhcp4: wan
+    remote: 192.0.2.2
+    address: 10.0.0.0/31
+- id: remote-endpoint
+  depends_on: [transport]
+  route: {destination: 192.0.2.2/32, interface: wan0}
+```
+
+The parent comes from the selected DHCPv4 service. The tunnel, inner address,
+and dependent route/service use the resource's original lease authority;
+BGP services using the tunnel must depend on this resource. The existing
+network worker fences the link down and withdraws owned addresses/routes at
+expiry even when control cannot make progress. A fresh source address or
+lease updates the existing managed tunnel through the same network writer.
+
+The configuration importer accepts static `SAMNodeSet` endpoints and IPIP
+`SAMTransportProfile` with `addressingMode: pair-stable` and a DHCPv4
+`currentAddress` source. It reuses routerd's pair slot calculation, collision
+handling, /31 orientation and reflector identity policy; it emits native
+IPIP, endpoint routes and BGP peers once during configuration conversion.
+Enrollment, remote learned endpoints, peer-group publication, signed ownership
+and mobility placement remain separate unfinished functions. A current
+k8s/PVE configuration containing those functions is not fully supported by
+this static transport conversion.
+
+`TestDaemonDHCP4IPIPBGPWithFRR`, included in `make check-bgp-frr`, uses an
+independent dnsmasq server with an explicit MAC reservation and a 120-second
+lease. The fixture derives its expiry wait from the actual DHCP lease clock.
+It also exercises a changed server reservation; client values are observed
+rather than assuming all DHCP assignments are fixed. The physical k8s/PVE
+routers are not modified by this check.
+
+The `ipip-dhcp-native78` candidate passed this complete fixture: DHCP
+acquisition, FRR BGP/FIB and client TCP/UDP, advertisement withdrawal/recovery,
+TTL/MTU changes, process restart, original-lease expiry with control and
+supervisor suspended, fresh lease recovery, server assignment change, and
+configuration removal. Relevant Race Detector, vet and CGO-free Linux
+amd64/arm64 builds passed. This isolated candidate predates integration with
+later DNS and effective-fact contract changes; rerun the affected communication
+path after integrating those changes.

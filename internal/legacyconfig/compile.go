@@ -184,6 +184,8 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 			c.reject(r, "", "unsupported_semantics", "legacy VXLAN FDB peers, L2 filtering and outer-DF defaults require explicit native conversion; a single remote is not a lossless substitute")
 		case "NTPClient", "NTPServer":
 			// Joined below into the one clock owner.
+		case "SAMNodeSet", "SAMTransportProfile":
+			// Static IPIP topology is joined to native DHCP/BGP ownership below.
 		case "BGPRouter", "BGPPeer":
 			// Compiled together with inherited routing policies below.
 		case "DNSResolver", "DNSForwarder", "DNSUpstream", "DNSZone":
@@ -206,6 +208,8 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 	c.dhcpRelays()
 	c.dns()
 	conditions = append(conditions, c.bgp()...)
+	transports, bgpDependencies := c.ipipTransports()
+	extra = append(extra, transports...)
 	c.ntp(vrrpNames)
 	extra = append(extra, c.firewall(vrrpNames)...)
 	c.localServiceRedirects()
@@ -246,6 +250,11 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 	sort.Slice(c.document.Services, func(i, j int) bool { return c.document.Services[i].Name < c.document.Services[j].Name })
 	program := config.FromNative(c.document)
 	program.Resources = append(program.Resources, extra...)
+	for i := range program.Resources {
+		if deps := bgpDependencies[program.Resources[i].ID]; len(deps) > 0 {
+			program.Resources[i].DependsOn = append(program.Resources[i].DependsOn, deps...)
+		}
+	}
 	for i := range program.Resources {
 		if when := servingConditions[program.Resources[i].ID]; when != nil {
 			program.Resources[i].When = when

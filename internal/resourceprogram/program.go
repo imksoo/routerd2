@@ -43,6 +43,7 @@ type Resource struct {
 
 	Interface    *network.Interface     `json:"interface,omitempty"`
 	Address      *Address               `json:"address,omitempty"`
+	IPIP         *IPIP                  `json:"ipip,omitempty"`
 	Link         *network.Link          `json:"link,omitempty"`
 	Route        *network.Route         `json:"route,omitempty"`
 	HostRoute    *HostRoute             `json:"host_route,omitempty"`
@@ -102,6 +103,7 @@ type Plan struct {
 	nodes          []compiledResource
 	EgressPolicies []EgressPolicyPlan
 	HostRoutes     []HostRoutePlan
+	IPIPs          []IPIPPlan
 	Native         Native              `json:"native"`
 	Order          []string            `json:"order"`
 	Dependencies   map[string][]string `json:"dependencies"`
@@ -133,7 +135,7 @@ func (r Resource) kind() (string, int) {
 		name string
 		set  bool
 	}{
-		{"interface", r.Interface != nil}, {"address", r.Address != nil},
+		{"ipip", r.IPIP != nil}, {"interface", r.Interface != nil}, {"address", r.Address != nil},
 		{"host_route", r.HostRoute != nil}, {"egress_policy", r.EgressPolicy != nil}, {"link", r.Link != nil}, {"route", r.Route != nil}, {"egress_route", r.EgressRoute != nil},
 		{"policy_rule", r.PolicyRule != nil}, {"forwarding", r.Forwarding != nil},
 		{"firewall", r.Firewall != nil}, {"nat", r.NAT != nil},

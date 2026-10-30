@@ -45,6 +45,12 @@ type projection struct {
 	liveDHCP6          map[string]dhcp6config.RouterFlags
 	delegatedDNS       map[string][]delegatedDNSAddress
 	delegatedLAN       map[string]delegatedLAN
+	dhcp4Addresses     map[string]leasedIPv4
+}
+
+type leasedIPv4 struct {
+	address    netip.Addr
+	validUntil lifetime.Deadline
 }
 
 type delegatedLAN struct {
@@ -60,14 +66,16 @@ type delegatedDNSAddress struct {
 }
 
 type projectionFacts struct {
-	aftr     map[string]aftr.Input
-	bfdClock bfd.Clock
+	aftr           map[string]aftr.Input
+	bfdClock       bfd.Clock
+	ipips          []resourceprogram.IPIPPlan
+	resourceStates map[string]resourceprogram.ResourceState
 	// A zero deadline means this election is already admitted.
 	vrrpActivation map[string]uint64
 }
 
-func (r *Runtime) projectLocked(protocols protocolPlan, doc config.Native, records map[string]serviceconfig.Update, now time.Time, policy resourceprogram.FactSnapshot) (projection, error) {
-	facts := projectionFacts{aftr: r.aftrInputs, vrrpActivation: make(map[string]uint64)}
+func (r *Runtime) projectLocked(protocols protocolPlan, doc config.Native, records map[string]serviceconfig.Update, now time.Time, policy resourceprogram.FactSnapshot, ipips []resourceprogram.IPIPPlan, states map[string]resourceprogram.ResourceState) (projection, error) {
+	facts := projectionFacts{ipips: ipips, resourceStates: states, aftr: r.aftrInputs, vrrpActivation: make(map[string]uint64)}
 	var err error
 	facts.bfdClock, err = bfd.ReadClock()
 	if err != nil {
@@ -128,7 +136,7 @@ func (r *Runtime) projectLocked(protocols protocolPlan, doc config.Native, recor
 // Pure projection combines active intent with the source's immutable workers
 // and current protocol evidence. Producers cannot submit arbitrary effects.
 func projectWithFacts(doc config.Native, protocols protocolPlan, records map[string]serviceconfig.Update, now time.Time, facts projectionFacts) (projection, error) {
-	p := projection{network: doc.Network, liveRA: map[string]ra.Config{}, liveDHCP6: make(map[string]dhcp6config.RouterFlags), delegatedDNS: make(map[string][]delegatedDNSAddress), delegatedLAN: make(map[string]delegatedLAN), native: doc, vrrpOwners: make(map[string]vrrpOwnership)}
+	p := projection{resources: facts.resourceStates, dhcp4Addresses: make(map[string]leasedIPv4), network: doc.Network, liveRA: map[string]ra.Config{}, liveDHCP6: make(map[string]dhcp6config.RouterFlags), delegatedDNS: make(map[string][]delegatedDNSAddress), delegatedLAN: make(map[string]delegatedLAN), native: doc, vrrpOwners: make(map[string]vrrpOwnership)}
 	// Own the collections changed by protocol projection and lifetime removal.
 	// Links and guards are only appended; all other intent is read-only.
 	p.network.Links = slices.Clip(p.network.Links)
@@ -208,6 +216,7 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 			if err != nil || !a.Is4() || a.IsUnspecified() || a.IsMulticast() || snap.PrefixLength < 0 || snap.PrefixLength > 32 {
 				return p, errors.New("invalid active DHCPv4 address")
 			}
+			p.dhcp4Addresses[s.ModuleName()] = leasedIPv4{address: a, validUntil: lifetime.Deadline{BootID: snap.BootID, Nanos: snap.LeaseClock.ExpiresNanos}}
 			prefix := netip.PrefixFrom(a, snap.PrefixLength)
 			if err := addAddressWithOptions(&p.network, s.Interface(), prefix.String(), network.AddressOptions{BootLifetime: network.BootLifetime{BootID: snap.BootID, PreferredNanos: snap.LeaseClock.ExpiresNanos, ValidNanos: snap.LeaseClock.ExpiresNanos}}); err != nil {
 				return p, err
@@ -383,6 +392,7 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 			}
 		}
 	}
+	projectIPIPs(facts.ipips, facts.bfdClock, &p)
 	if err := projectBGP(&p, doc, protocols.bgp, records, now, facts.bfdClock); err != nil {
 		return p, err
 	}
