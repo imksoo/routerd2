@@ -229,6 +229,44 @@ sequences; it does not qualify cross-version compatibility or a reboot. The
 existing appliance update/recovery tests cover their own boot conditions.
 
 
+The appliance acceptance path additionally checks real reboot, explicit rollback
+into the previous signed runtime with the current configuration, and automatic
+recovery after the configured Health requirement stays false. It retains the
+DHCPv6 identity, pinned SSH identity and independent client DNS/IPv4/IPv6 traffic.
+The fixture explicitly requires `service.internet.active`: conditional downstream
+PD/Health resources alone are not required while their `when` condition is false.
+The trial still uses 90 seconds and a 2 second continuous readiness window.
+
+To reproduce on an authorized Linux development machine, provide the independent
+ISC `dhcpd` binary and the dependencies in `scripts/qemu-pppoe-peer.py`. Prepare
+an ordinary appliance image, engine archives and publisher with the existing
+`make image pppoe-engine dnsmasq-engine build-publisher` targets. Build the three
+static command sets with distinct release identities:
+
+```sh
+for label in base next damaged; do
+  make build RELEASE_ID="update-check-$label"
+  mkdir -p "dist/update-binaries/$label"
+  cp dist/bin/routerd dist/bin/routerd-modules dist/bin/routerd-logging "dist/update-binaries/$label/"
+done
+make qemu-pppoe QEMU_PROFILE=update QEMU_POWER_ACTION=reboot \
+  QEMU_UPDATE_BINARIES=dist/update-binaries DHCP6_SERVER=/path/to/isc/dhcpd \
+  QEMU_PVE_HOST=root@authorized-pve QEMU_PVE_JUMP=authorized-jump \
+  QEMU_PVE_IDENTITY=/path/to/ssh-key QEMU_OUTPUT=dist/update-acceptance
+```
+
+Omit the PVE options to use the existing local QEMU path. The PVE update path
+creates one 4 CPU/4096 MiB KVM guest, with no host bridge or existing VM NICs.
+Both Ethernet segments use private UNIX sockets forwarded through SSH. Cleanup
+checks the newly created VM's exact name before stopping and removing it; an
+ownership mismatch is an error. SSH trust and creation permission must already
+be configured. Remove the output after diagnosis and integration, retaining the
+source, procedure and concise result. The `damaged` label in this profile means
+an executed candidate that fails configured Health, not altered executable bytes.
+Payload-corruption recovery is a separate `corrupt-recovery` profile and is not
+supported by this PVE path. Same-source release identities do not qualify a
+future version's compatibility, full homert configuration or physical hardware.
+
 Enable signed boot selection in the appliance's existing boot JSON:
 
 ```json

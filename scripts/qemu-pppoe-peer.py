@@ -7,6 +7,8 @@ Only fixture configuration/password/SSH public key are added to the initramfs.
 Requires root/sudo, QEMU x86_64, pppoe-server, pppd, iproute2, tcpdump, curl,
 OpenSSH, dhcpcd, dnsmasq, dig, mke2fs and an independent ISC dhcpd supplied with
 --dhcp6-server. A fresh regular-file ext4 disk supplies explicit persistent state.
+The update profile accepts --pve-host for an isolated 4 CPU/4 GiB KVM guest.
+Only its newly created VM is managed; Ethernet uses private SSH UNIX sockets.
 """
 import argparse
 import datetime
@@ -22,6 +24,52 @@ import subprocess
 import tempfile
 import tarfile
 import time
+import shlex
+import pwd
+
+
+def run(command, timeout=10):
+    result = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
+    if result.returncode:
+        raise RuntimeError(result.stderr)
+    return result.stdout
+
+def prepare_kvm(stage, root, args):
+    ssh = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=yes"]
+    if args.pve_jump:
+        ssh += ["-J", args.pve_jump]
+    if args.pve_identity:
+        ssh += ["-o", "IdentitiesOnly=yes", "-i", str(args.pve_identity.resolve())]
+    ssh += [args.pve_host]
+    def pve_command(command):
+        return ssh + [command]
+    remote = run(pve_command('mktemp -d /tmp/routerd2-kvm.XXXXXX')).strip()
+    vmid = int(json.loads(run(pve_command('pvesh get /cluster/nextid --output-format json'))))
+    control_dir = Path(tempfile.mkdtemp(prefix='routerd-kvm-ssh.'))
+    meta = {'remote':remote, 'vmid':vmid, 'ssh':ssh, 'target':args.pve_host, 'user':pwd.getpwuid(os.getuid()).pw_name, 'name':'routerd2-update-rollback-'+str(int(time.time())), 'control':str(control_dir/'master'), 'wan':str(control_dir/'wan.sock'), 'lan':str(control_dir/'lan.sock')}
+    metadata = control_dir/'kvm.json'
+    metadata.write_text(json.dumps(meta)); metadata.chmod(0o600)
+    run(root+['install','-m','600',str(metadata),str(stage/'kvm.json')])
+    print('Owned PVE test VM',vmid,meta['name'],'metadata',metadata,flush=True)
+    run(pve_command(shlex.join(['qm','create',str(vmid),'--name',meta['name'],'--tags','routerd2-test','--description','Temporary isolated routerd2 signed update and rollback acceptance; no host bridges or production NICs','--machine','q35','--cpu','host','--cores','4','--sockets','1','--memory','4096','--balloon','0','--kvm','1','--ostype','l26','--vga','none','--tablet','0','--onboot','0'])),60)
+    master = pve_command('')[:-1]
+    master[-1:-1] = ['-M','-N','-f','-S',meta['control'],'-o','ExitOnForwardFailure=yes','-o','ServerAliveInterval=15','-L',meta['wan']+':'+remote+'/wan.sock','-L',meta['lan']+':'+remote+'/lan.sock']
+    with (control_dir/'master.log').open('ab') as log:
+        subprocess.run(master,stdout=log,stderr=subprocess.STDOUT,check=True,timeout=30)
+
+def remove_kvm(stage, root):
+    raw = run(root+['cat',str(stage/'kvm.json')])
+    meta = json.loads(raw)
+    def pve_command(command):
+        return meta['ssh'] + [command]
+    config = run(pve_command('qm config '+str(meta['vmid'])))
+    assert 'name: '+meta['name']+'\n' in config, 'test VM ownership changed; preserve for inspection'
+    run(pve_command('qm stop '+str(meta['vmid'])),60)
+    run(pve_command('qm destroy '+str(meta['vmid'])),60)
+    run(pve_command('rm -r -- '+shlex.quote(meta['remote'])),30)
+    run(['ssh','-S',meta['control'],'-O','exit',meta['target']],15)
+    shutil.rmtree(Path(meta['control']).parent)
+    print('Removed owned PVE test VM',meta['vmid'],flush=True)
 
 
 def peer(stage, power_action, updates, profile):
@@ -124,8 +172,10 @@ def peer(stage, power_action, updates, profile):
         (overlay / 'etc/routerd/boot.json').write_text(json.dumps(boot))
         (overlay / 'etc/routerd/password').write_text('routerd2-fixture\n')
         (overlay / 'etc/routerd/password').chmod(0o600)
+        # Require the WAN session before accepting this forwarding configuration.
+        # Conditional PD/Health resources alone do not block startup confirmation.
         service = dict(interface='eth0', ppp_interface='ppp-wan', username='routerd2', password_file='/etc/routerd/password', auth_method='chap', ipv6=True, service_name='ROUTERD2-LAB', ac_name='ROUTERD2-AC', mtu=1454, mru=1454, lcp_echo_interval=1, lcp_echo_failure=3)
-        resources = [{'id': 'wan', 'interface': {'name': 'eth0'}}, {'id': 'lan', 'interface': {'name': 'eth1'}}, {'id': 'lan-address', 'address': {'interface': 'eth1', 'cidr': '10.42.0.1/24'}}, {'id': 'forwarding', 'forwarding': {'ipv4': True, 'ipv6': True, 'ipv4_rp_filter': 0}}, {'id': 'firewall', 'firewall': {'forward': [{'from': 'eth1', 'to': 'ppp-wan'}]}}, {'id': 'internet', 'service': {'name': 'internet', 'pppoe': service}}, {'id': 'pd', 'depends_on': ['internet', 'lan'], 'when': {'fact': 'service.internet.active'}, 'ready_when': {'fact': 'service.pd.active'}, 'service': {'name': 'pd', 'dhcp6': {'interface': 'ppp-wan', 'iaid': 1, 'request_prefix': True, 'prefix_length': 60, 'delegations': [{'name': 'lan', 'interface': 'eth1', 'subnet_id': 1}]}}}]
+        resources = [{'id': 'wan', 'interface': {'name': 'eth0'}}, {'id': 'lan', 'interface': {'name': 'eth1'}}, {'id': 'lan-address', 'address': {'interface': 'eth1', 'cidr': '10.42.0.1/24'}}, {'id': 'forwarding', 'forwarding': {'ipv4': True, 'ipv6': True, 'ipv4_rp_filter': 0}}, {'id': 'firewall', 'firewall': {'forward': [{'from': 'eth1', 'to': 'ppp-wan'}]}}, {'id': 'internet', 'ready_when': {'fact': 'service.internet.active'}, 'service': {'name': 'internet', 'pppoe': service}}, {'id': 'pd', 'depends_on': ['internet', 'lan'], 'when': {'fact': 'service.internet.active'}, 'ready_when': {'fact': 'service.pd.active'}, 'service': {'name': 'pd', 'dhcp6': {'interface': 'ppp-wan', 'iaid': 1, 'request_prefix': True, 'prefix_length': 60, 'delegations': [{'name': 'lan', 'interface': 'eth1', 'subnet_id': 1}]}}}]
         resources.append({'id': 'nat', 'nat': [{'type': 'masquerade', 'match': {'family': 4, 'source': '10.42.0.0/24', 'out_interface': 'ppp-wan'}}]})
         resources.append({'id': 'pd-lan-ra', 'when': {'fact': 'service.pd.active'}, 'service': {'name': 'pd-lan-ra', 'ra': {'interface': 'eth1', 'router_lifetime_seconds': 1800, 'dns_lifetime_seconds': 1800, 'min_interval_seconds': 3, 'max_interval_seconds': 10, 'from': {'service': 'pd', 'delegation': 'lan'}}}})
         resources.append({"id":"dns","service":{"name":"dns","dns":{"spec":{"listen":[{"name":"lan","addresses":["10.42.0.1"],"port":53}],"sources":[{"name":"provider","kind":"forward","match":["."],"upstreamFrom":[{"resource":"PPPoESession/internet","field":"dnsServers"}],"queryTimeout":"1s"}]}}}})
@@ -202,7 +252,40 @@ def peer(stage, power_action, updates, profile):
         shutil.copyfile(stage / 'input/vmlinuz', stage / 'vmlinuz')
         boot_started = time.monotonic()
         rtc = ['-rtc', 'base=' + (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=20)).strftime('%Y-%m-%dT%H:%M:%S') + ',clock=host'] if profile == 'time' else []
-        q = start(None, ['qemu-system-x86_64', '-machine', 'q35', '-accel', 'tcg', '-cpu', 'max', '-m', '512M', '-smp', '2', '-display', 'none', '-monitor', 'none', '-nodefaults', '-serial', 'file:' + str(stage / 'serial.log'), '-kernel', str(stage / 'vmlinuz'), '-initrd', str(stage / 'initrd.gz'), '-drive', 'file=' + str(disk) + ',if=virtio,format=raw', '-append', 'console=ttyS0,115200 panic=-1', '-netdev', 'tap,id=wan,ifname=tapwan,script=no,downscript=no', '-device', 'virtio-net-pci,netdev=wan,mac=52:54:00:12:34:56', '-netdev', 'tap,id=lan,ifname=taplan,script=no,downscript=no', '-device', 'virtio-net-pci,netdev=lan,mac=52:54:00:12:34:57'] + rtc, 'qemu')
+        if (stage / 'kvm.json').exists():
+            meta = json.loads((stage / 'kvm.json').read_text())
+            remote = Path(meta['remote'])
+            control = ['runuser', '-u', meta['user'], '--', 'ssh', '-S', meta['control'], '-o', 'BatchMode=yes', meta['target']]
+            for local, target in ((stage / 'vmlinuz', 'vmlinuz'), (stage / 'initrd.gz', 'initrd.gz')):
+                with local.open('rb') as body:
+                    subprocess.run(control + ['umask 077\ncat > ' + shlex.quote(str(remote / target))], stdin=body, capture_output=True, check=True, timeout=120)
+            with subprocess.Popen(['gzip', '-c', str(disk)], stdout=subprocess.PIPE) as compressed:
+                subprocess.run(control + ['umask 077\ngzip -d > ' + shlex.quote(str(remote / 'state.ext4'))], stdin=compressed.stdout, capture_output=True, check=True, timeout=120)
+                compressed.stdout.close()
+                assert compressed.wait(timeout=10) == 0
+            qargs = ['-kernel', str(remote / 'vmlinuz'), '-initrd', str(remote / 'initrd.gz'), '-append', 'console=ttyS0,115200 panic=-1', '-serial', 'file:' + str(remote / 'serial.log'), '-drive', 'file=' + str(remote / 'state.ext4') + ',if=virtio,format=raw']
+            for name, mac in (('wan', '52:54:00:12:34:56'), ('lan', '52:54:00:12:34:57')):
+                qargs += ['-netdev', 'stream,id=' + name + ',server=on,addr.type=unix,addr.path=' + str(remote / (name + '.sock')), '-device', 'virtio-net-pci,netdev=' + name + ',mac=' + mac]
+            run(control + [shlex.join(['qm', 'set', str(meta['vmid']), '--args', shlex.join(qargs)])], 30)
+            relay = None
+            def boot_product():
+                nonlocal relay
+                if relay is not None:
+                    relay.terminate()
+                    relay.wait(timeout=10)
+                boot_command = 'set -eu\nqm start ' + str(meta['vmid']) + '\nguest_pid=$(cat /run/qemu-server/' + str(meta['vmid']) + '.pid)\nexec tail --pid="$guest_pid" -c +1 -f ' + shlex.quote(str(remote / 'serial.log'))
+                product = start(None, control + [boot_command], 'serial')
+                wait(lambda: subprocess.run(control + ['test -S ' + str(remote / 'wan.sock') + ' -a -S ' + str(remote / 'lan.sock')], capture_output=True, timeout=5).returncode == 0, 30)
+                hub = ['/usr/bin/qemu-system-x86_64', '-machine', 'none', '-display', 'none', '-monitor', 'none', '-nodefaults']
+                for index, name in enumerate(('wan', 'lan')):
+                    hub += ['-netdev', 'tap,id=' + name + 'tap,ifname=tap' + name + ',script=no,downscript=no', '-netdev', 'stream,id=' + name + 'wire,server=off,addr.type=unix,addr.path=' + meta[name], '-netdev', 'hubport,id=' + name + 'local,hubid=' + str(index) + ',netdev=' + name + 'tap', '-netdev', 'hubport,id=' + name + 'remote,hubid=' + str(index) + ',netdev=' + name + 'wire']
+                relay = start(None, hub, 'ethernet-transport')
+                return product
+            print('Product guest: isolated PVE KVM, 4 CPU, 4096 MiB; same DHCP and traffic deadlines', flush=True)
+        else:
+            def boot_product():
+                return start(None, ['qemu-system-x86_64', '-machine', 'q35', '-accel', 'tcg', '-cpu', 'max', '-m', '512M', '-smp', '2', '-display', 'none', '-monitor', 'none', '-nodefaults', '-serial', 'file:' + str(stage / 'serial.log'), '-kernel', str(stage / 'vmlinuz'), '-initrd', str(stage / 'initrd.gz'), '-drive', 'file=' + str(disk) + ',if=virtio,format=raw', '-append', 'console=ttyS0,115200 panic=-1', '-netdev', 'tap,id=wan,ifname=tapwan,script=no,downscript=no', '-device', 'virtio-net-pci,netdev=wan,mac=52:54:00:12:34:56', '-netdev', 'tap,id=lan,ifname=taplan,script=no,downscript=no', '-device', 'virtio-net-pci,netdev=lan,mac=52:54:00:12:34:57'] + rtc, 'qemu')
+        q = boot_product()
         print('Private appliance peer stage', stage, flush=True)
         ssh = ['ssh', '-F', '/dev/null', '-i', str(stage / 'key'), '-o', 'BatchMode=yes', '-o', 'IdentitiesOnly=yes', '-o', 'StrictHostKeyChecking=accept-new', '-o', 'UserKnownHostsFile=' + str(stage / 'known-hosts'), '-o', 'ConnectTimeout=2', 'admin@10.42.0.1']
 
@@ -598,6 +681,63 @@ def peer(stage, power_action, updates, profile):
                 assert query('update status').get('pending') is None
                 assert query('update status')['active']['digest'] == staged['digest']
                 print('PASS SSH-prepared signed update booted and confirmed with automatic client DNS, IPv4/IPv6 traffic and retained DUID/SSH identity', flush=True)
+
+                rollback_from = query('update status')
+                rollback_config = query('show config')
+                rollback_status = query('show status')
+                assert rollback_from['previous']['digest'] == packed['base']['digest']
+                request = {'expected_generation': rollback_from['generation'], 'expected_revision': rollback_config['revision']}
+                rollback_started = time.monotonic()
+                with tempfile.TemporaryFile(mode='w+') as preparation:
+                    json.dump(request, preparation)
+                    preparation.seek(0)
+                    rolling_back = subprocess.Popen(ssh + ['update rollback'], stdin=preparation, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    children.append(rolling_back)
+                    while rolling_back.poll() is None:
+                        if time.monotonic() - rollback_started > 300:
+                            raise RuntimeError('signed rollback preparation deadline')
+                        assert query('show config')['revision'] == rollback_config['revision']
+                        traffic()
+                        time.sleep(1)
+                    output, diagnostic = rolling_back.communicate(timeout=5)
+                assert rolling_back.returncode == 0, diagnostic
+                queued = json.loads(output)
+                assert queued['pending']['release'] == rollback_from['previous'] and queued['active'] == rollback_from['active']
+                assert queued['high_watermark'] == rollback_from['high_watermark']
+                traffic()
+                boot_count = (stage / 'serial.log').read_text(errors='replace').count('Linux version ')
+                peer_index = next(x['ifindex'] for x in json.loads(run(['ip', '-n', ac, '-j', 'link', 'show'])) if x['ifname'].startswith('ppp'))
+                assert query('reboot')['accepted']
+                def rollback_booted():
+                    if q.poll() is not None:
+                        raise RuntimeError('QEMU exited during explicit rollback')
+                    console = (stage / 'serial.log').read_text(errors='replace')
+                    assert 'Kernel panic' not in console
+                    return console.count('Linux version ') > boot_count and console.rfind('ROUTERD_READY') > console.rfind('Linux version ')
+                wait(rollback_booted, 180)
+                wait(lambda: any(x['ifname'].startswith('ppp') and x['ifindex'] != peer_index for x in json.loads(run(['ip', '-n', ac, '-j', 'link', 'show']))))
+                d.terminate()
+                d.wait(timeout=5)
+                d = server()
+                wait(pd_ready, 90)
+                wait(client_ready)
+                traffic()
+                def rollback_confirmed():
+                    state = query('update status')
+                    return state.get('pending') is None and state.get('attempt') is None and state['active'] == rollback_from['previous']
+                wait(rollback_confirmed, 120)
+                selected = query('update status')
+                assert selected['previous'] == rollback_from['active']
+                assert selected['high_watermark'] == rollback_from['high_watermark']
+                status = query('show status')
+                assert status['release_id'] == versions['base'] and status['instance_id'] != rollback_status['instance_id']
+                assert all(m['release_id'] == versions['base'] for m in status['modules'] if m['required'])
+                current_config = query('show config')
+                assert current_config['config'] == rollback_config['config']
+                assert current_config['revision'] == rollback_config['revision'] + 1
+                assert query('show services pd')['snapshot']['client_duid'] == duid
+                traffic()
+                print('PASS explicit SSH rollback rebooted and confirmed the previous runtime with current configuration, retained DUID/SSH identity and automatic DNS/IPv4/IPv6 TCP/UDP in', round(time.monotonic() - rollback_started, 2), 'seconds', flush=True)
             if profile in ('update', 'corrupt-recovery'):
                 with bundles['damaged'].open('rb') as source:
                     uploaded = subprocess.run(ssh + ['update stage'], stdin=source, capture_output=True, text=True, timeout=330)
@@ -620,7 +760,7 @@ def peer(stage, power_action, updates, profile):
                 for interface, name in [('tapwan', 'trial-wan.pcap'), ('taplan', 'trial-lan.pcap')]:
                     start(None, ['tcpdump', '--immediate-mode', '-Z', 'root', '-U', '-n', '-i', interface, '-w', str(stage / name)], name)
                 recovery_started = time.monotonic()
-                q = start(None, q.args, 'qemu-health-trial')
+                q = boot_product()
                 wait(ppp_ready, 90)
                 d.terminate()
                 d.wait(timeout=5)
@@ -751,6 +891,9 @@ def peer(stage, power_action, updates, profile):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--pve-host', help='SSH target for one temporary isolated PVE VM; update profile only')
+    parser.add_argument('--pve-jump', help='SSH jump target for --pve-host')
+    parser.add_argument('--pve-identity', type=Path, help='SSH private-key path for --pve-host')
     parser.add_argument("--image-dir", type=Path, default=Path("dist/image"))
     parser.add_argument("--output", type=Path, default=Path("dist/pppoe-appliance"))
     parser.add_argument("--dhcp6-server", type=Path)
@@ -778,6 +921,10 @@ def main():
         return
     if args.dhcp6_server is None or not args.dhcp6_server.is_file():
         parser.error("--dhcp6-server must name an independent ISC dhcpd executable")
+    if args.pve_host and args.profile != 'update':
+        parser.error('--pve-host is supported only for --profile update')
+    if (args.pve_jump or args.pve_identity) and not args.pve_host:
+        parser.error('--pve-jump/--pve-identity require --pve-host')
     root = [] if os.geteuid() == 0 else ["sudo", "-n"]
     def run(command):
         return subprocess.run(root + command, check=True, text=True, capture_output=True, timeout=10).stdout
@@ -787,6 +934,8 @@ def main():
     for name in artifacts:
         (args.output / name).unlink(missing_ok=True)
     try:
+        if args.pve_host:
+            prepare_kvm(Path(stage), root, args)
         run(["mkdir", "-m", "700", stage + "/input"])
         for source, target in [
             (Path(__file__), "peer.py"),
@@ -822,6 +971,8 @@ def main():
         else:
             print(("PASS appliance signed update and fallback; " if args.profile == "update" else "PASS appliance PPP/PD/TCP/UDP/Renew/session recovery; ") + str(args.output / "peer.log"))
     finally:
+        if args.pve_host and subprocess.run(root + ["test", "-f", stage + "/kvm.json"]).returncode == 0:
+            remove_kvm(Path(stage), root)
         run(["python3", "-I", "-c", "import shutil,sys;shutil.rmtree(sys.argv[1])", stage])
 
 

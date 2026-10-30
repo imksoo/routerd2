@@ -254,6 +254,15 @@ FirewallEventLogは旧logstore.RecordBatch/ApplyRetentionを再利用して、�
 
 ## 6. 配布・対象機器・更新
 
+2026-10-30 20:12〜20:16 JST: `1def991` の署名付き三版を使い、隔離した4 CPU・4 GiBのKVMで更新と復旧を確認した。
+独立ISC・PPPoE対向・Linux端末で、DHCP取得値による標準resolver、両IPのTCP/UDP、18秒リースの自然PD更新、
+アップロード中断と並行通信、正常更新、明示した旧版への復帰20.68秒、Health障害による自動復旧112.14秒が通過した。
+旧版へ戻した後も現設定・DUID・SSHの身元を保持した。候補の試行開始から90秒で失敗を記録し、既知正常版へ戻った。
+先行試行は必須WANの`ready_when`指定がなく、条件付きPD/Healthの起動前に正常確定して失敗した。
+既存の準備条件を明示し、90秒の期限と2秒の継続条件は変更していない。512MiB・2CPU・TCGでは短いDNS観測期限切れと
+端末のSERVFAILが残り、解消扱いにしない。同じソースの別識別子による受入であり、実homert全設定、異なる製品版間、
+対象機器、長時間自然更新、破損した実行ファイルの復旧は未受入。[再現手順](releases.md)を残し、専用VMは削除した。
+
 `handoff-stop`はAlpine3.24.3/Linux6.18.59-0-ltsの実QEMU/amd64起動で、同梱DHCP engine→独立端末の
 自動IPv4/gateway/DNS→PPPoE/PD/SLAAC→両family TCP/UDPとDNS、PPP/control交換、通常電源断まで通った。
 端末のDNS問い合わせ先は受信値を使用するが、OS標準resolver統合の試験ではない。署名更新・失敗復旧、
