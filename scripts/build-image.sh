@@ -18,6 +18,7 @@ tailscale_image="$project_dir/dist/tailscale-engine.tar"
 tailscale_sources="$project_dir/dist/tailscale-sources.tar"
 chrony_image="$project_dir/dist/chrony-engine.tar"
 chrony_sources="$project_dir/dist/chrony-sources.tar"
+ndpi_sources="$project_dir/dist/ndpi-sources.tar"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -55,6 +56,7 @@ if [ -n "$package_dir" ]; then
   conntrack_sources="$package_dir/conntrack-sources.tar"
   tailscale_sources="$package_dir/tailscale-sources.tar"
   chrony_sources="$package_dir/chrony-sources.tar"
+  ndpi_sources="$package_dir/ndpi-sources.tar"
   # The APK is generated in the same build. --no-scripts prevents packaging hooks
   # from introducing runtime init or service-manager dependencies.
   apk --root "$package_root" --initdb --no-scripts --no-network --allow-untrusted add "$package_file"
@@ -97,6 +99,7 @@ cp "$package_root/usr/lib/routerd/tailscale-engine.tar" "$rootfs/usr/lib/routerd
 cp "$tailscale_sources" "$output_dir/tailscale-sources.tar"
 cp "$package_root/usr/lib/routerd/chrony-engine.tar" "$rootfs/usr/lib/routerd/chrony-engine.tar"
 cp "$chrony_sources" "$output_dir/chrony-sources.tar"
+cp "$ndpi_sources" "$output_dir/ndpi-sources.tar"
 cp "$package_root/usr/share/licenses/routerd2/LICENSE" "$rootfs/usr/share/licenses/routerd2/LICENSE"
 cp -a "$package_root/usr/share/licenses/routerd2/dependencies" "$rootfs/usr/share/licenses/routerd2/"
 cp "$config_file" "$rootfs/etc/routerd/config.json"
@@ -204,6 +207,8 @@ manifest = {
     ).hexdigest(),
     "init": "/usr/sbin/routerd",
     "programs": ["/usr/sbin/routerd", "/usr/libexec/routerd-modules", "/usr/libexec/routerd-logging"],
+    "native_libraries": {"sources_file": "ndpi-sources.tar",
+                         "sources_sha256": hashlib.sha256((output / "ndpi-sources.tar").read_bytes()).hexdigest()},
     "engines": {
         role: {
             "path": "/usr/lib/routerd/" + name + "-engine.tar",
@@ -231,6 +236,6 @@ PY
 python3 "$project_dir/images/mkinitramfs.py" "$rootfs" "$output_dir/initramfs.cpio.gz" --epoch "${SOURCE_DATE_EPOCH:-0}"
 (
   cd "$output_dir"
-  sha256sum vmlinuz initramfs.cpio.gz manifest.json pppoe-sources.tar dnsmasq-sources.tar conntrack-sources.tar tailscale-sources.tar chrony-sources.tar > SHA256SUMS
+  sha256sum vmlinuz initramfs.cpio.gz manifest.json pppoe-sources.tar dnsmasq-sources.tar conntrack-sources.tar tailscale-sources.tar chrony-sources.tar ndpi-sources.tar > SHA256SUMS
 )
 printf 'Built kernel %s and routerd initramfs in %s\n' "$kernel_version" "$output_dir"

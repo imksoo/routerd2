@@ -10,6 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
+	"strings"
 
 	"github.com/imksoo/routerd2/internal/buildinfo"
 	"github.com/imksoo/routerd2/internal/runtimeabi"
@@ -146,7 +148,8 @@ func inspectELF(r io.ReaderAt, size int64, artifact, releaseID, targetOS, target
 		}
 		settings[setting.Key] = setting.Value
 	}
-	if settings["GOOS"] != targetOS || settings["GOARCH"] != targetArch || settings["CGO_ENABLED"] != "0" || settings["-buildmode"] != "exe" {
+	cgoOK := settings["CGO_ENABLED"] == "0" || (artifact == "routerd-modules" && settings["CGO_ENABLED"] == "1" && slices.Contains(strings.Split(settings["-tags"], ","), "libndpi"))
+	if settings["GOOS"] != targetOS || settings["GOARCH"] != targetArch || !cgoOK || settings["-buildmode"] != "exe" {
 		return errors.New("ELF Go build settings are not the static target profile")
 	}
 	if targetArch == "amd64" && settings["GOAMD64"] != "v1" {

@@ -2,7 +2,9 @@
 ARG GO_VERSION=1.27.3
 ARG ALPINE_VERSION=3.24.3
 ARG TARGETARCH
+ARG RELEASE_ID=dev
 
+FROM --platform=$BUILDPLATFORM routerd2-ndpi-modules:${RELEASE_ID}-${TARGETARCH} AS ndpi-artifacts
 FROM routerd2-pppoe-engine:${ALPINE_VERSION}-${TARGETARCH} AS ppp-artifacts
 FROM routerd2-dnsmasq-engine:${ALPINE_VERSION}-${TARGETARCH} AS dhcp-artifacts
 FROM routerd2-conntrack-engine:${ALPINE_VERSION}-${TARGETARCH} AS conntrack-artifacts
@@ -18,6 +20,9 @@ RUN apk add --no-cache alpine-sdk ca-certificates tar python3 \
  && adduser -D -G abuild builder \
  && mkdir -p /out \
  && chown builder:abuild /out
+COPY --from=ndpi-artifacts /routerd-modules /inputs/routerd-modules
+COPY --from=ndpi-artifacts /ndpi-notices/ /inputs/ndpi-notices/
+COPY --from=ndpi-artifacts /ndpi-sources.tar /out/ndpi-sources.tar
 COPY --from=chrony-artifacts /chrony-engine.tar /inputs/chrony-engine.tar
 COPY --from=chrony-artifacts /chrony-sources.tar /out/chrony-sources.tar
 COPY --from=conntrack-artifacts /conntrack-engine.tar /inputs/conntrack-engine.tar

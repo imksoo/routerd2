@@ -98,7 +98,7 @@ class LicenseCollectionTest(unittest.TestCase):
 
             with mock.patch.object(licenses, "run_go", side_effect=fake_go):
                 with self.assertRaisesRegex(RuntimeError, "root license notice missing for: example.com/dependency@v1.0.0"):
-                    licenses.collect(types.SimpleNamespace(go="go", target=["linux/amd64"]), root / "output")
+                    licenses.collect(types.SimpleNamespace(go="go", target=["linux/amd64"], native_notices=[]), root / "output")
 
     def test_failed_collection_preserves_previous_complete_bundle(self):
         with tempfile.TemporaryDirectory() as temporary:

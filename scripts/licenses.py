@@ -162,11 +162,18 @@ def collect(args, staging):
         parts = target.split("/")
         if len(parts) != 2 or not all(re.fullmatch(r"[a-z0-9_]+", part) for part in parts):
             raise RuntimeError(f"invalid target {target!r}; use GOOS/GOARCH")
-        environment = dict(os.environ, CGO_ENABLED="0", GOOS=parts[0], GOARCH=parts[1])
-        packages = list(json_stream(run_go(
-            args.go, "list", "-deps", "-json", "./cmd/routerd", "./cmd/routerd-modules",
-            environment=environment,
-        )))
+        profiles = [
+            {"commands": ["./cmd/routerd", "./cmd/routerd-logging"], "cgo_enabled": False, "tags": []},
+            {"commands": ["./cmd/routerd-modules"], "cgo_enabled": True, "tags": ["libndpi", "netgo", "osusergo"]},
+        ]
+        packages = []
+        for profile in profiles:
+            environment = dict(os.environ, CGO_ENABLED="1" if profile["cgo_enabled"] else "0",
+                               GOOS=parts[0], GOARCH=parts[1])
+            packages.extend(json_stream(run_go(
+                args.go, "list", "-deps", "-json", "-tags=" + ",".join(profile["tags"]),
+                *profile["commands"], environment=environment,
+            )))
         by_module = {}
         standard = []
         for package in packages:
@@ -177,10 +184,9 @@ def collect(args, staging):
             elif package.get("Module"):
                 by_module.setdefault(package["Module"]["Path"], []).append(package["ImportPath"])
         imported[target] = {
-            "cgo_enabled": False,
-            "commands": ["./cmd/routerd", "./cmd/routerd-modules"],
-            "modules": {name: sorted(values) for name, values in sorted(by_module.items())},
-            "standard_packages": sorted(standard),
+            "command_profiles": profiles,
+            "modules": {name: sorted(set(values)) for name, values in sorted(by_module.items())},
+            "standard_packages": sorted(set(standard)),
         }
 
     entries = []
@@ -243,6 +249,20 @@ def collect(args, staging):
         "version": go_environment["GOVERSION"], "notice_directory": "go",
         "notices": copy_notices(go_root, staging / "go", sorted(set(go_notices), key=str)),
     }
+    native = []
+    native_paths = args.native_notices
+    if not native_paths:
+        native_paths = sorted(Path("dist").glob("ndpi-*/ndpi-notices"))
+    for source in native_paths:
+        source = source.resolve(strict=True)
+        declaration = json.loads((source / "manifest.json").read_text())
+        architecture = declaration["architecture"]
+        if architecture not in {"amd64", "arm64"}:
+            raise RuntimeError(f"unknown native library architecture: {architecture}")
+        notices = copy_notices(source, staging / "native" / architecture,
+                              sorted(path.relative_to(source) for path in source.iterdir() if path.is_file()))
+        native.append({"architecture": architecture, "packages": declaration["packages"],
+                       "notice_directory": "native/" + architecture, "notices": notices})
     manifest = {
         "schema_version": 1,
         "scope": "build-module-graph",
@@ -252,18 +272,21 @@ def collect(args, staging):
         "toolchain": toolchain,
         "modules": entries,
         "runtime_package_inventory": imported,
+        "native_libraries": native,
     }
     (staging / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
     lines = [
         "routerd2 dependency source notices", "=================================", "",
-        "Scope: complete selected Go build module graph, plus Go toolchain notices.",
+        "Scope: selected Go module graph, Go toolchain, and included native library notices.",
         "This collection preserves upstream notice text; it does not classify licenses",
         "or assert that every listed module is linked into a runtime binary.",
         "manifest.json records module versions, checksums, notice hashes, and the",
         "packages imported by static command builds for: " + ", ".join(imported) + ".",
         "Local replacements record their source tree digest separately from the",
         "declared upstream version/checksum; an upstream checksum does not verify a local patch.",
-        "Linux kernel and Alpine package notices are separate from this Go inventory.", "",
+        "Linked nDPI and crypto notices are under native/ when their build artifacts are supplied.",
+        "Native corresponding sources are shipped separately as ndpi-sources.tar.",
+        "Linux kernel and other Alpine package notices are separate from this inventory.", "",
         f"Go toolchain: {toolchain['version']} (go/)", "",
     ]
     for entry in entries:
@@ -286,6 +309,8 @@ def main():
     parser.add_argument("--go", default=os.environ.get("GO", "go"))
     parser.add_argument("--output", type=Path, default=Path("dist/licenses"))
     parser.add_argument("--target", action="append", help="GOOS/GOARCH; repeatable (default: linux/amd64 and linux/arm64)")
+    parser.add_argument("--native-notices", action="append", type=Path, default=[],
+                        help="nDPI artifact notice directory; repeatable")
     args = parser.parse_args()
     output = args.output.absolute()
     current = Path.cwd().resolve()

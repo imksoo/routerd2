@@ -21,6 +21,8 @@ CONNTRACK_ARCH ?= $(shell $(GO) env GOARCH)
 CONNTRACK_DIR ?= dist
 DNSMASQ_ARCH ?= $(shell $(GO) env GOARCH)
 DNSMASQ_DIR ?= dist
+NDPI_ARCH ?= $(shell $(GO) env GOARCH)
+NDPI_DIR ?= dist/ndpi-$(NDPI_ARCH)
 UPLINK_INTERFACE ?=
 UPLINK_AFTR ?=
 UPLINK_SECONDS ?= 7800
@@ -251,11 +253,13 @@ check-dhcp-relay: build
 licenses:
 	$(PYTHON) scripts/licenses.py --go '$(GO)' --output dist/licenses
 
-build: licenses
+build: ndpi-modules
+	$(PYTHON) scripts/licenses.py --go '$(GO)' --output dist/licenses --native-notices $(NDPI_DIR)/ndpi-notices
 	mkdir -p dist/bin
 	chmod 755 dist dist/bin
 	umask 022; CGO_ENABLED=0 $(GO) build -trimpath -buildvcs=false -ldflags '$(LDFLAGS)' -o dist/bin/routerd ./cmd/routerd
-	umask 022; CGO_ENABLED=0 $(GO) build -trimpath -buildvcs=false -ldflags '$(LDFLAGS)' -o dist/bin/routerd-modules ./cmd/routerd-modules
+	cp $(NDPI_DIR)/routerd-modules dist/bin/routerd-modules
+	cp $(NDPI_DIR)/ndpi-sources.tar dist/ndpi-sources.tar
 	umask 022; CGO_ENABLED=0 $(GO) build -trimpath -buildvcs=false -ldflags '$(LDFLAGS)' -o dist/bin/routerd-logging ./cmd/routerd-logging
 	chmod 755 dist/bin/routerd dist/bin/routerd-modules dist/bin/routerd-logging
 
@@ -266,15 +270,17 @@ build-publisher: licenses
 	umask 022; CGO_ENABLED=0 $(GO) build -trimpath -buildvcs=false -ldflags '$(LDFLAGS)' -o dist/bin/routerd-bundle ./cmd/routerd-bundle
 	chmod 755 dist/bin/routerd-bundle
 
-build-linux: licenses
+build-linux:
 	@set -eu; umask 022; mkdir -p dist/bin; chmod 755 dist dist/bin; for arch in amd64 arm64; do \
 	  mkdir -p "dist/bin/linux-$$arch"; \
 	  chmod 755 "dist/bin/linux-$$arch"; \
 	  CGO_ENABLED=0 GOOS=linux GOARCH=$$arch $(GO) build -trimpath -buildvcs=false -ldflags '$(LDFLAGS)' -o "dist/bin/linux-$$arch/routerd" ./cmd/routerd; \
-	  CGO_ENABLED=0 GOOS=linux GOARCH=$$arch $(GO) build -trimpath -buildvcs=false -ldflags '$(LDFLAGS)' -o "dist/bin/linux-$$arch/routerd-modules" ./cmd/routerd-modules; \
+	  $(MAKE) ndpi-modules NDPI_ARCH=$$arch NDPI_DIR="dist/ndpi-$$arch"; \
+	  cp "dist/ndpi-$$arch/routerd-modules" "dist/bin/linux-$$arch/routerd-modules"; \
 	  CGO_ENABLED=0 GOOS=linux GOARCH=$$arch $(GO) build -trimpath -buildvcs=false -ldflags '$(LDFLAGS)' -o "dist/bin/linux-$$arch/routerd-logging" ./cmd/routerd-logging; \
 	  chmod 755 "dist/bin/linux-$$arch/routerd" "dist/bin/linux-$$arch/routerd-modules" "dist/bin/linux-$$arch/routerd-logging"; \
 	done
+	$(MAKE) licenses
 
 # Real embedded SSH to the actual signed product compiler and paired selector.
 .PHONY: check-update-rollback
@@ -284,10 +290,12 @@ check-update-rollback: build
 release-built-test:
 	umask 022; ROUTERD2_INTEGRATION_REQUIRED=1 ROUTERD2_RELEASE_BUILT_DIR='$(abspath $(RELEASE_BUILT_DIR))' ROUTERD2_RELEASE_BUILT_ID='$(RELEASE_ID)' $(GO) test -race -tags integration -run '^Test(BuiltRuntimeCatalog|PublishBuiltRelease)$$' -count=1 -v ./internal/release ./internal/releasepublish
 
-container: pppoe-engine dnsmasq-engine conntrack-engine tailscale-engine chrony-engine
+container: ndpi-modules pppoe-engine dnsmasq-engine conntrack-engine tailscale-engine chrony-engine
 	$(DOCKER) build $(BUILD_ARGS) -t $(CONTAINER_TAG) .
 
 container-multi:
+	$(MAKE) ndpi-modules NDPI_ARCH=amd64
+	$(MAKE) ndpi-modules NDPI_ARCH=arm64
 	$(MAKE) pppoe-engine PPP_ARCH=amd64 PPP_DIR=dist/ppp-amd64
 	$(MAKE) pppoe-engine PPP_ARCH=arm64 PPP_DIR=dist/ppp-arm64
 	$(MAKE) dnsmasq-engine DNSMASQ_ARCH=amd64
@@ -304,11 +312,11 @@ container-multi:
 container-smoke: container
 	$(PYTHON) images/container-smoke.py --engine '$(DOCKER)' --image $(CONTAINER_TAG)
 
-apk: pppoe-engine dnsmasq-engine conntrack-engine tailscale-engine chrony-engine
+apk: ndpi-modules pppoe-engine dnsmasq-engine conntrack-engine tailscale-engine chrony-engine
 	mkdir -p dist/apk
 	$(DOCKER) build $(BUILD_ARGS) -f packaging/alpine/Dockerfile --target apk-output --output type=local,dest=dist/apk .
 
-image: pppoe-engine dnsmasq-engine conntrack-engine tailscale-engine chrony-engine
+image: ndpi-modules pppoe-engine dnsmasq-engine conntrack-engine tailscale-engine chrony-engine
 	mkdir -p $(IMAGE_DIR)
 	$(DOCKER) build $(BUILD_ARGS) --build-arg IMAGE_CONFIG=$(IMAGE_CONFIG) --build-arg SSH_AUTHORIZED_KEY -f packaging/alpine/Dockerfile --target appliance-output --output type=local,dest=$(IMAGE_DIR) .
 
@@ -483,3 +491,12 @@ check-dns-retention: build
 .PHONY: check-retention
 check-retention: build
 	$(PYTHON) scripts/retention-peer.py
+
+# Native packet classification is linked into routerd-modules, not a daemon.
+.PHONY: ndpi-modules
+ndpi-modules:
+	$(DOCKER) build --platform linux/$(shell $(GO) env GOHOSTARCH) $(BUILD_ARGS) --build-arg TARGETARCH=$(NDPI_ARCH) -f packaging/alpine/ndpi.Dockerfile -t routerd2-ndpi-modules:$(RELEASE_ID)-$(NDPI_ARCH) .
+	mkdir -p $(NDPI_DIR)
+	@set -eu; artifact_id=$$($(DOCKER) create --network none routerd2-ndpi-modules:$(RELEASE_ID)-$(NDPI_ARCH) /not-executed); \
+	  trap '$(DOCKER) rm "$$artifact_id" >/dev/null' EXIT HUP INT TERM; \
+	  $(DOCKER) export "$$artifact_id" | tar --no-same-owner -xf - -C $(NDPI_DIR) routerd-modules ndpi-sources.tar ndpi-notices

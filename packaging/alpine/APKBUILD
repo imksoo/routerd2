@@ -5,7 +5,7 @@ pkgrel=0
 pkgdesc="Linux router supervisor and isolated protocol workers"
 url="https://github.com/imksoo/routerd2"
 arch="x86_64 aarch64"
-license="BSD-3-Clause AND BSD-4-Clause AND BSD-4-Clause-Shortened AND GPL-2.0-or-later AND LGPL-2.0-or-later AND Public-Domain AND RSA-MD AND Apache-2.0 AND MIT"
+license="BSD-3-Clause AND BSD-4-Clause AND BSD-4-Clause-Shortened AND GPL-2.0-or-later AND LGPL-3.0-or-later AND LGPL-2.1-or-later AND LGPL-2.0-or-later AND Public-Domain AND RSA-MD AND Apache-2.0 AND MIT"
 depends=""
 makedepends="go>=1.27.3 python3"
 options="net !strip"
@@ -18,9 +18,10 @@ build() {
 	local ldflags="-s -w -X github.com/imksoo/routerd2/internal/buildinfo.Identity=ROUTERD2-RELEASE-V1:${ROUTERD_RELEASE_ID:-dev}:END"
 	# Override Alpine's default -buildmode=pie: the appliance has no ELF loader.
 	go build -buildmode=exe -trimpath -buildvcs=false -ldflags "$ldflags" -o routerd ./cmd/routerd || return 1
-	go build -buildmode=exe -trimpath -buildvcs=false -ldflags "$ldflags" -o routerd-modules ./cmd/routerd-modules || return 1
+	# routerd-modules was cross-linked with pinned nDPI/musl by ndpi.Dockerfile.
+	test -x routerd-modules || return 1
  go build -buildmode=exe -trimpath -buildvcs=false -ldflags "$ldflags" -o routerd-logging ./cmd/routerd-logging || return 1
-	python3 scripts/licenses.py --output dist/licenses || return 1
+	python3 scripts/licenses.py --output dist/licenses --native-notices ndpi-notices || return 1
 }
 
 check() {
