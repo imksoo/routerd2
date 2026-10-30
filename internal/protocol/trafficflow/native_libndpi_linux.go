@@ -9,70 +9,39 @@ package trafficflow
 #include <stdlib.h>
 #include <ndpi_api.h>
 
+// nDPI 4.2, matching the version used by the old homert deployment.
 static struct ndpi_detection_module_struct* routerd_ndpi_init(void) {
-#if defined(NDPI_MAJOR) && NDPI_MAJOR >= 5
-	struct ndpi_detection_module_struct *mod = ndpi_init_detection_module(NULL);
-#else
-	NDPI_PROTOCOL_BITMASK all;
-	struct ndpi_detection_module_struct *mod = ndpi_init_detection_module(ndpi_no_prefs);
-#endif
-	if(mod == NULL) return NULL;
-#if !defined(NDPI_MAJOR) || NDPI_MAJOR < 5
-	NDPI_BITMASK_SET_ALL(all);
-	ndpi_set_protocol_detection_bitmask2(mod, &all);
-#endif
-	ndpi_finalize_initialization(mod);
-	return mod;
+ NDPI_PROTOCOL_BITMASK all;
+ struct ndpi_detection_module_struct *mod = ndpi_init_detection_module(ndpi_no_prefs);
+ if(mod == NULL) return NULL;
+ NDPI_BITMASK_SET_ALL(all);
+ ndpi_set_protocol_detection_bitmask2(mod, &all);
+ ndpi_finalize_initialization(mod);
+ return mod;
 }
 
 static struct ndpi_flow_struct* routerd_ndpi_new_flow(void) {
-	return (struct ndpi_flow_struct*)calloc(1, sizeof(struct ndpi_flow_struct));
+ return (struct ndpi_flow_struct*)calloc(1, sizeof(struct ndpi_flow_struct));
 }
 
 static ndpi_protocol routerd_ndpi_process(struct ndpi_detection_module_struct *mod,
-					  struct ndpi_flow_struct *flow,
-					  const unsigned char *packet,
-					  unsigned short packetlen,
-					  unsigned long long now_ms) {
-#if defined(NDPI_MAJOR) && NDPI_MAJOR >= 5
-	return ndpi_detection_process_packet(mod, flow, packet, packetlen, now_ms, NULL);
-#else
-	return ndpi_detection_process_packet(mod, flow, packet, packetlen, now_ms);
-#endif
+ struct ndpi_flow_struct *flow, const unsigned char *packet,
+ unsigned short packetlen, unsigned long long now_ms) {
+ return ndpi_detection_process_packet(mod, flow, packet, packetlen, now_ms);
 }
 
 static ndpi_protocol routerd_ndpi_giveup(struct ndpi_detection_module_struct *mod,
-					 struct ndpi_flow_struct *flow) {
-#if defined(NDPI_MAJOR) && NDPI_MAJOR >= 5
-	return ndpi_detection_giveup(mod, flow);
-#else
-	u_int8_t guessed = 0;
-	return ndpi_detection_giveup(mod, flow, 1, &guessed);
-#endif
+ struct ndpi_flow_struct *flow) {
+ u_int8_t guessed = 0;
+ return ndpi_detection_giveup(mod, flow, 1, &guessed);
 }
 
-static u_int16_t routerd_ndpi_master_protocol(ndpi_protocol proto) {
-#if defined(NDPI_MAJOR) && NDPI_MAJOR >= 5
-	return proto.proto.master_protocol;
-#else
-	return proto.master_protocol;
-#endif
-}
-
-static u_int16_t routerd_ndpi_app_protocol(ndpi_protocol proto) {
-#if defined(NDPI_MAJOR) && NDPI_MAJOR >= 5
-	return proto.proto.app_protocol;
-#else
-	return proto.app_protocol;
-#endif
-}
-
-static int routerd_ndpi_confidence(struct ndpi_flow_struct *flow) {
-	return (int)flow->confidence;
-}
-
-static const char* routerd_ndpi_hostname(struct ndpi_flow_struct *flow) {
-	return flow->host_server_name;
+static int routerd_ndpi_tcp_start(const unsigned char *packet, unsigned short length) {
+ const u_int8_t *l4;
+ u_int16_t l4len;
+ u_int8_t protocol;
+ if(ndpi_detection_get_l4(packet, length, &l4, &l4len, &protocol, 0) != 0 || protocol != 6 || l4len < 20) return 0;
+ return (l4[13] & 0x12) == 0x02; // SYN without ACK, including retransmission.
 }
 */
 import "C"
@@ -144,7 +113,17 @@ func (c *nativeClassifier) classify(packet []byte, result dpi.ClassifyResult, no
 		}
 		c.nextExpiry = now.Add(time.Minute)
 	}
+	raw := C.CBytes(packet)
+	defer C.free(raw)
 	flow := c.flows[key]
+	if flow != nil && C.routerd_ndpi_tcp_start((*C.uchar)(raw), C.ushort(len(packet))) != 0 {
+		// A new connection may reuse every address/port before idle expiry.
+		if flow.value != nil {
+			C.ndpi_free_flow(flow.value)
+		}
+		delete(c.flows, key)
+		flow = nil
+	}
 	if flow == nil {
 		// Reuse routerd's oldest-flow eviction at the collector's bounded capacity.
 		// Eviction frees unfinished C state; later traffic can still be classified.
@@ -159,9 +138,9 @@ func (c *nativeClassifier) classify(packet []byte, result dpi.ClassifyResult, no
 			victim := c.flows[oldestKey]
 			if victim.value != nil {
 				C.ndpi_free_flow(victim.value)
+				c.dropped.Add(1)
 			}
 			delete(c.flows, oldestKey)
-			c.dropped.Add(1)
 		}
 		flow = &nativeFlow{value: C.routerd_ndpi_new_flow()}
 		if flow.value == nil {
@@ -172,11 +151,9 @@ func (c *nativeClassifier) classify(packet []byte, result dpi.ClassifyResult, no
 	flow.lastSeen = now
 	if flow.value != nil {
 		flow.packets++
-		raw := C.CBytes(packet)
 		proto := C.routerd_ndpi_process(c.mod, flow.value, (*C.uchar)(raw), C.ushort(len(packet)), C.ulonglong(now.UnixMilli()))
-		C.free(raw)
 		// The existing observation rule copies at most nine packets per connection.
-		if flow.packets >= 9 && C.routerd_ndpi_app_protocol(proto) == C.NDPI_PROTOCOL_UNKNOWN && C.routerd_ndpi_master_protocol(proto) == C.NDPI_PROTOCOL_UNKNOWN {
+		if flow.packets >= 9 && proto.app_protocol == C.NDPI_PROTOCOL_UNKNOWN && proto.master_protocol == C.NDPI_PROTOCOL_UNKNOWN {
 			proto = C.routerd_ndpi_giveup(c.mod, flow.value)
 		}
 		detected := c.resultFromProtocol(flow.value, proto)
@@ -211,8 +188,8 @@ func (c *nativeClassifier) classify(packet []byte, result dpi.ClassifyResult, no
 
 func (c *nativeClassifier) resultFromProtocol(flow *C.struct_ndpi_flow_struct, proto C.ndpi_protocol) dpi.ClassifyResult {
 	result := dpi.ClassifyResult{AppName: "unknown", Engine: "ndpi", Source: "libndpi", Metadata: map[string]string{"libndpi.version": c.version}}
-	masterProto := C.routerd_ndpi_master_protocol(proto)
-	appProto := C.routerd_ndpi_app_protocol(proto)
+	masterProto := proto.master_protocol
+	appProto := proto.app_protocol
 	if masterProto != C.NDPI_PROTOCOL_UNKNOWN {
 		result.MasterProtocol = strings.ToLower(C.GoString(C.ndpi_get_proto_name(c.mod, C.u_int16_t(masterProto))))
 	}
@@ -230,7 +207,7 @@ func (c *nativeClassifier) resultFromProtocol(flow *C.struct_ndpi_flow_struct, p
 	result.DetectedProtocol = strings.ToLower(C.GoString(C.ndpi_get_proto_name(c.mod, C.u_int16_t(detectedProto))))
 	result.AppName = result.DetectedProtocol
 	result.AppCategory = strings.ToLower(C.GoString(C.ndpi_category_get_name(c.mod, C.ndpi_get_proto_category(c.mod, proto))))
-	switch int(C.routerd_ndpi_confidence(flow)) {
+	switch int(flow.confidence) {
 	case int(C.NDPI_CONFIDENCE_DPI):
 		result.AppConfidence = 95
 	case int(C.NDPI_CONFIDENCE_DPI_CACHE):
@@ -240,7 +217,7 @@ func (c *nativeClassifier) resultFromProtocol(flow *C.struct_ndpi_flow_struct, p
 	case int(C.NDPI_CONFIDENCE_MATCH_BY_PORT):
 		result.AppConfidence = 45
 	}
-	host := C.GoString(C.routerd_ndpi_hostname(flow))
+	host := C.GoString(&flow.host_server_name[0])
 	if host != "" {
 		switch result.AppName {
 		case "http":

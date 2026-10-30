@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"bufio"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -16,9 +17,11 @@ import (
 	"io"
 	"math/big"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -106,7 +109,8 @@ func testDaemonTrafficFlowHistory(t *testing.T, native bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tcp = tls.NewListener(tcp, &tls.Config{Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: key}}})
+	tlsConfig := &tls.Config{Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: key}}}
+	var plainHTTP atomic.Bool
 	defer archive.Close()
 	go func() {
 		var b [4096]byte
@@ -124,7 +128,24 @@ func testDaemonTrafficFlowHistory(t *testing.T, native bool) {
 			if err != nil {
 				return
 			}
-			go func() { defer c.Close(); _, _ = io.Copy(c, c) }()
+			httpMode := plainHTTP.Load()
+			go func() {
+				defer c.Close()
+				if httpMode {
+					request, err := http.ReadRequest(bufio.NewReader(c))
+					if err != nil {
+						return
+					}
+					request.Body.Close()
+					response := &http.Response{StatusCode: 200, ProtoMajor: 1, ProtoMinor: 1, ContentLength: 2, Body: io.NopCloser(strings.NewReader("OK"))}
+					if err := response.Write(c); err != nil {
+						return
+					}
+				} else {
+					c = tls.Server(c, tlsConfig)
+				}
+				_, _ = io.Copy(c, c)
+			}()
 		}
 	}()
 	archived := make(chan string, 128)
@@ -311,6 +332,57 @@ func testDaemonTrafficFlowHistory(t *testing.T, native bool) {
 		return false
 	})
 	t.Log("real TLS/SNI classification was stored with source NAT counters; history recovered from a locked database; counters advanced without splitting the connection or blocking traffic")
+	if native {
+		// Reuse the exact endpoints for a new application. Abortive close avoids
+		// TIME_WAIT without changing any shared TCP settings in the fixture.
+		local := tcpClient.LocalAddr().(*net.TCPAddr)
+		if err := tcpClient.(*tls.Conn).NetConn().(*net.TCPConn).SetLinger(0); err != nil {
+			t.Fatal(err)
+		}
+		tcpClient.Close()
+		plainHTTP.Store(true)
+		var next net.Conn
+		if err := fixtureInsideNamespace(lan, func() error {
+			var err error
+			next, err = (&net.Dialer{LocalAddr: local, Timeout: time.Second}).Dial("tcp4", "198.51.100.2:18081")
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		defer next.Close()
+		if err := next.SetDeadline(time.Now().Add(4 * time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		request, err := http.NewRequest("GET", "http://changed.routerd.test/", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := request.Write(next); err != nil {
+			t.Fatal(err)
+		}
+		response, err := http.ReadResponse(bufio.NewReader(next), request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if body, err := io.ReadAll(response.Body); err != nil || string(body) != "OK" {
+			t.Fatal("reused TCP HTTP response", err)
+		}
+		response.Body.Close()
+		until(t, 5*time.Second, func() bool {
+			for _, row := range history() {
+				if row.ClientPort == local.Port && row.Protocol == "tcp" && row.PeerPort == 18081 && row.AppName == "http" && row.Engine == "ndpi" && row.HTTPHost == "changed.routerd.test" {
+					return true
+				}
+			}
+			return false
+		})
+		next.Close()
+		plainHTTP.Store(false)
+		tcpClient = connect("tcp4")
+		defer tcpClient.Close()
+		probe(tcpClient)
+		t.Log("same TCP endpoints changed from TLS to real HTTP; nDPI did not reuse the previous application")
+	}
 	f = f.restart()
 	probe(udpClient)
 	probe(tcpClient)

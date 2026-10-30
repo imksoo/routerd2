@@ -57,7 +57,8 @@ rejects `application_layer` on worker startup; it does not satisfy the request
 with built-in classification. Native result metadata includes `libndpi.version`.
 Unrecognized native packets may still yield explicitly labelled built-in packet
 metadata; port-only fallback remains excluded. nDPI state is shared between
-both packet directions. It reuses routerd's bounded flow tracking, one-hour idle
+both packet directions. A new TCP SYN discards prior state for reused endpoints,
+using nDPI's IP/transport decoding. It reuses routerd's bounded flow tracking, one-hour idle
 expiry and oldest-entry eviction, at this collector's 10000-tuple capacity.
 Completed classification frees the C flow while retaining its result for later
 packets. Unknown C flows are freed at the existing nine-packet observation limit.
