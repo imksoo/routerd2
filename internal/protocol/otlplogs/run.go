@@ -70,11 +70,11 @@ func Run(ctx context.Context, cfg otlplogconfig.Config, runtimeDir string, ready
 	res := resource.NewSchemaless(attrs...)
 	var logger log.Logger
 	var provider *sdklog.LoggerProvider
-	var probes *probeSignals
+	var signals *operationSignals
 	defer func() {
 		stop, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		err := probes.close(stop)
+		err := signals.close(stop)
 		if provider != nil {
 			err = errors.Join(err, provider.Shutdown(stop))
 		}
@@ -100,7 +100,7 @@ func Run(ctx context.Context, cfg otlplogconfig.Config, runtimeDir string, ready
 		)
 		logger = provider.Logger("routerd2.local-log")
 	}
-	probes, err = newProbeSignals(ctx, cfg, conn, res)
+	signals, err = newOperationSignals(ctx, cfg, conn, res)
 	if err != nil {
 		return err
 	}
@@ -117,7 +117,7 @@ func Run(ctx context.Context, cfg otlplogconfig.Config, runtimeDir string, ready
 		case <-timer.C:
 		}
 		level := cfg.MinLevel
-		if probes != nil && level != "debug" {
+		if signals != nil && level != "debug" {
 			level = "info"
 		}
 		page, err := query(ctx, client, level, cursor)
@@ -148,8 +148,8 @@ func Run(ctx context.Context, cfg otlplogconfig.Config, runtimeDir string, ready
 				if entry.PID == os.Getpid() {
 					continue
 				}
-				if probes != nil {
-					probes.record(ctx, entry)
+				if signals != nil {
+					signals.record(ctx, entry)
 				}
 				if logger != nil && logLevel(entry.Level) >= logLevel(cfg.MinLevel) {
 					logger.Emit(ctx, record(entry))

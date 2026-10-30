@@ -22,20 +22,23 @@ import (
 	"google.golang.org/grpc"
 )
 
-type probeSignals struct {
-	metrics *sdkmetric.MeterProvider
-	traces  *sdktrace.TracerProvider
-	probes  metric.Int64Counter
-	phase   metric.Int64Gauge
-	tracer  trace.Tracer
+type operationSignals struct {
+	metrics          *sdkmetric.MeterProvider
+	traces           *sdktrace.TracerProvider
+	probes           metric.Int64Counter
+	phase            metric.Int64Gauge
+	tracer           trace.Tracer
+	exchanges        metric.Int64Counter
+	exchangeDuration metric.Float64Histogram
+	dhcp6Tracer      trace.Tracer
 }
 
-func newProbeSignals(ctx context.Context, cfg otlplogconfig.Config, conn *grpc.ClientConn, res *resource.Resource) (p *probeSignals, err error) {
+func newOperationSignals(ctx context.Context, cfg otlplogconfig.Config, conn *grpc.ClientConn, res *resource.Resource) (p *operationSignals, err error) {
 	metrics, traces := slices.Contains(cfg.Signals, "metrics"), slices.Contains(cfg.Signals, "traces")
 	if !metrics && !traces {
 		return nil, nil
 	}
-	p = &probeSignals{}
+	p = &operationSignals{}
 	if metrics {
 		exporter, e := otlpmetricgrpc.New(ctx, otlpmetricgrpc.WithGRPCConn(conn), otlpmetricgrpc.WithTemporalitySelector(sdkmetric.DefaultTemporalitySelector), otlpmetricgrpc.WithEndpoint(conn.Target()), otlpmetricgrpc.WithHeaders(cfg.Headers), otlpmetricgrpc.WithCompressor("none"), otlpmetricgrpc.WithTimeout(operationTimeout), otlpmetricgrpc.WithRetry(otlpmetricgrpc.RetryConfig{Enabled: false}))
 		if e != nil {
@@ -51,6 +54,15 @@ func newProbeSignals(ctx context.Context, cfg otlplogconfig.Config, conn *grpc.C
 		if err != nil {
 			return p, err
 		}
+		dhcp6Meter := p.metrics.Meter("routerd2.dhcpv6")
+		p.exchanges, err = dhcp6Meter.Int64Counter("routerd.dhcpv6.client.exchanges")
+		if err != nil {
+			return p, err
+		}
+		p.exchangeDuration, err = dhcp6Meter.Float64Histogram("routerd.dhcpv6.client.exchange.duration", metric.WithUnit("s"))
+		if err != nil {
+			return p, err
+		}
 	}
 	if traces {
 		exporter, e := otlptracegrpc.New(ctx, otlptracegrpc.WithGRPCConn(conn), otlptracegrpc.WithEndpoint(conn.Target()), otlptracegrpc.WithHeaders(cfg.Headers), otlptracegrpc.WithCompressor("none"), otlptracegrpc.WithTimeout(operationTimeout), otlptracegrpc.WithRetry(otlptracegrpc.RetryConfig{Enabled: false}))
@@ -59,11 +71,12 @@ func newProbeSignals(ctx context.Context, cfg otlplogconfig.Config, conn *grpc.C
 		}
 		p.traces = sdktrace.NewTracerProvider(sdktrace.WithResource(res), sdktrace.WithSampler(sdktrace.AlwaysSample()), sdktrace.WithBatcher(exporter, sdktrace.WithMaxQueueSize(1024), sdktrace.WithMaxExportBatchSize(256), sdktrace.WithBatchTimeout(250*time.Millisecond), sdktrace.WithExportTimeout(operationTimeout)))
 		p.tracer = p.traces.Tracer("routerd2.healthcheck")
+		p.dhcp6Tracer = p.traces.Tracer("routerd2.dhcpv6")
 	}
 	return p, nil
 }
 
-func (p *probeSignals) close(ctx context.Context) error {
+func (p *operationSignals) close(ctx context.Context) error {
 	if p == nil {
 		return nil
 	}
@@ -77,10 +90,16 @@ func (p *probeSignals) close(ctx context.Context) error {
 	return err
 }
 
-func (p *probeSignals) record(ctx context.Context, entry logging.Record) {
-	if entry.Message != telemetry.HealthProbeMessage {
-		return
+func (p *operationSignals) record(ctx context.Context, entry logging.Record) {
+	switch entry.Message {
+	case telemetry.HealthProbeMessage:
+		p.recordHealth(ctx, entry)
+	case telemetry.DHCPv6ExchangeMessage:
+		p.recordDHCPv6(ctx, entry)
 	}
+}
+
+func (p *operationSignals) recordHealth(ctx context.Context, entry logging.Record) {
 	// Narrow the existing JSON-scalar logging boundary to the actual measurement.
 	text := func(key string) string { value, _ := entry.Attributes[key].(string); return value }
 	probe := telemetry.HealthProbe{Resource: text("resource"), Interface: text("interface"), Target: text("target"), Protocol: text("protocol"), Result: text("result"), Phase: text("phase")}

@@ -201,3 +201,55 @@ inspection tool stopped because it could not identify the current URL; the
 offline renderer opened only the saved local responses. A subsequent wording
 correction changed Japanese labels/errors only, without changing data access,
 protocol handling or the acceptance conditions.
+
+## Saved DNS query search
+
+`<base_path>dns-queries` reads the selected DNS service through the typed control
+endpoint `GET /v1/services/{name}/dns-history`. The runtime resolves the prepared
+query-log path and releases its lock before the old routerd read-only
+`logstore.OpenDNSQueryLogReadOnly` and `List` calls. The resolver remains the sole
+writer and retention owner. No new database, background collector, listener or
+command polling is introduced.
+
+Search supports exact client IP, query-name patterns, response code and inclusive
+RFC3339 time bounds. The old query-name matching is retained: case-insensitive
+LIKE matching, optional final dot, `%` for any length and `_` for one character.
+Results are newest first, default 100 and maximum 1000, with an explicit notice
+when another matching row exists. This is bounded search rather than pagination
+or complete export. The page displays original query time, client, name/type,
+response code, answers, upstream, cache use and duration. Historical results do
+not assert present reachability. Disabled logging, an absent database and a
+failed read are reported as errors, not successful empty history. A request may
+read the previously selected database while its configuration is changing.
+
+The existing DNS retention acceptance exercises actual DNS requests and a
+separate LAN HTTP client. Query recording and retention keep their original
+behavior; reading history does not hold the DNS worker's write lock.
+
+
+On 2026-10-30 at 21:34:33-21:34:49 JST, standard product `4f429de`
+(`wsl-dns-history`) passed this check in 15.34 seconds on the separate WSL
+machine. The fixture was committed as `b744037`. Actual UDP/TCP DNS answers,
+NXDOMAIN, exact stored row IDs and client/name/response/time filters matched
+an independent LAN HTTP client. The original two-second retention window was
+unchanged. Expired rows remained searchable during archive unreachability and
+a DNS worker restart, then disappeared after archive recovery. Policy removal
+left query recording working. Concurrent routed UDP completed 142 round trips
+with no failures. The three distribution executables were statically linked.
+
+Evidence: `dist/wsl-dns-history-peer/{peer.log,execution.json,binaries.json,
+forwarding.jsonl,dns-console.html}`. Reproduce with `python3
+scripts/retention-peer.py --dns-queries --binary-dir dist/bin --output
+ dist/wsl-dns-history-peer` in the isolated development environment. The saved
+real HTML response was also rendered offline at 1280 pixels and inspected for
+Japanese text, table visibility and overlapping elements. This result covers
+the DNS history operator path; it does not establish homert full-configuration
+natural renewal, two-node acceptance or target-hardware qualification.
+
+
+The combined source `3342df0` includes main `93cc25e`, DNS history and DHCPv6
+telemetry. Its standard `wsl-observability-3342df0` build passed the same DNS
+history check at 21:50:29-21:50:44 JST in 15.31 seconds. The source tree was
+clean. The concurrent DHCPv6/Collector check used byte-identical executables;
+evidence and SHA-256 values are under `dist/observability-integrated/dns/`.
+The API error wording is Japanese in this tested version.
