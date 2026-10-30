@@ -48,12 +48,12 @@ type vpnPage struct {
 func loadVPN(ctx context.Context, client *localapi.Client, serviceName string) (*vpnPage, error) {
 	var services runtimeplan.Status
 	if err := client.Do(ctx, http.MethodGet, "/v1/services", nil, &services); err != nil {
-		return nil, fmt.Errorf("VPNのサービス情報を取得できません: %w", err)
+		return nil, fmt.Errorf("VPNサービス情報を取得できません: %w", err)
 	}
 	var document config.Document
 	path := "/v1/config/document?revision=" + strconv.FormatUint(services.Revision, 10)
 	if err := client.Do(ctx, http.MethodGet, path, nil, &document); err != nil {
-		return nil, fmt.Errorf("VPNの設定を取得できません: %w", err)
+		return nil, fmt.Errorf("VPN設定を取得できません: %w", err)
 	}
 	intents := make(map[string]vpnIntent)
 	page := &vpnPage{Revision: services.Revision, State: "未観測"}
@@ -95,18 +95,18 @@ func loadVPN(ctx context.Context, client *localapi.Client, serviceName string) (
 	}
 	var instance runtimeplan.InstanceStatus
 	if err := client.Do(ctx, http.MethodGet, "/v1/services/"+url.PathEscape(serviceName), nil, &instance); err != nil {
-		return nil, fmt.Errorf("Tailscaleの観測を取得できません: %w", err)
+		return nil, fmt.Errorf("VPNサービスの観測を取得できません: %w", err)
 	}
 	if len(instance.Snapshot) == 0 {
 		return page, nil
 	}
 	page.Observation = new(tailscaleconfig.Snapshot)
 	if err := json.Unmarshal(instance.Snapshot, page.Observation); err != nil {
-		return nil, fmt.Errorf("Tailscaleの観測を解釈できません: %w", err)
+		return nil, fmt.Errorf("VPNサービスの観測を解釈できません: %w", err)
 	}
 	clock, err := boottime.Read()
 	if err != nil {
-		return nil, fmt.Errorf("Tailscaleの観測期限を確認できません: %w", err)
+		return nil, fmt.Errorf("VPNサービスの観測期限を確認できません: %w", err)
 	}
 	observation := page.Observation
 	now := uint64(clock.BoottimeNanoseconds)

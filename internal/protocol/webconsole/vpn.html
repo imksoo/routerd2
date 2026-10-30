@@ -1,5 +1,5 @@
 {{define "vpn"}}{{with .VPN}}
-<p>Tailscaleの設定と観測を表示します。稼働表示だけで対向との疎通や経路の承認を保証するものではありません。</p>
+<p>VPNサービスの設定と観測を表示します。稼働表示だけで対向との疎通や経路の承認を保証するものではありません。</p>
 <nav aria-label="Tailscaleサービス">{{range .Services}}<a href="{{$.Config.BasePath}}vpn?service={{.}}">{{.}}</a>{{else}}<p>Tailscaleサービスは構成されていません。</p>{{end}}</nav>
 {{if .Selected}}<h3>{{.Selected}}</h3>
 <dl><dt>状態</dt><dd>{{.State}}</dd><dt>設定リビジョン</dt><dd>{{.Revision}}</dd></dl>

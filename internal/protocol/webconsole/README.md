@@ -194,3 +194,10 @@ HTTP response for local layout review using a temporary test-only write; that
 write was removed and the fixture restored exactly. These results establish
 the saved-history operator path, not full homert natural renewal, HA, hardware
 qualification, or the remaining client-inventory and protocol UI features.
+
+Both real HTTP responses were rendered offline in a dedicated browser profile
+and inspected at a desktop width of 1280 pixels. The initial existing-browser
+inspection tool stopped because it could not identify the current URL; the
+offline renderer opened only the saved local responses. A subsequent wording
+correction changed Japanese labels/errors only, without changing data access,
+protocol handling or the acceptance conditions.

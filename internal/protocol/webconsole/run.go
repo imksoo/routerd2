@@ -159,7 +159,7 @@ func Run(ctx context.Context, cfg webconsoleconfig.Config, runtimeDir string, re
 			p.Heading = "通信履歴"
 			p.Flows, err = loadFlows(r.Context(), client, r.URL.Query())
 		case "vpn":
-			p.Heading = "VPNの状態"
+			p.Heading = "VPN状態"
 			p.VPN, err = loadVPN(r.Context(), client, r.URL.Query().Get("service"))
 		case "configuration":
 			p.Heading = "設定の確定状態"
