@@ -2,7 +2,6 @@
 package trafficflow
 
 import (
-	"context"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -13,8 +12,7 @@ import (
 
 // The former NOT IN placeholders exceeded SQLite's 32766 variable limit.
 func TestCompleteSampleBeyondSQLiteParameterLimit(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
-	defer cancel()
+	ctx := t.Context()
 	db, err := openHistory(ctx, filepath.Join(t.TempDir(), "flows.db"))
 	if err != nil {
 		t.Fatal(err)

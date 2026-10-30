@@ -52,10 +52,9 @@ func TestDaemonTrafficFlowHistory(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// Accounting is an explicit fixture prerequisite until the network owner
-	// supports the corresponding old Sysctl. These writes are in the verified
-	// private network namespace; the collector never changes these settings.
-	for key, value := range map[string]string{"nf_conntrack_acct": "1", "nf_conntrack_udp_timeout": "3", "nf_conntrack_udp_timeout_stream": "3"} {
+	// Start with accounting disabled in this isolated namespace. The imported
+	// product setting must enable it before the first connection is created.
+	for key, value := range map[string]string{"nf_conntrack_acct": "0", "nf_conntrack_udp_timeout": "3", "nf_conntrack_udp_timeout_stream": "3"} {
 		if err := os.WriteFile("/proc/sys/net/netfilter/"+key, []byte(value), 0600); err != nil {
 			t.Fatal(err)
 		}
@@ -139,6 +138,9 @@ func TestDaemonTrafficFlowHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := startFixtureDaemonAt(t, imported.Document, work)
+	if value, err := os.ReadFile("/proc/sys/net/netfilter/nf_conntrack_acct"); err != nil || strings.TrimSpace(string(value)) != "1" {
+		t.Fatal("product did not enable connection accounting", string(value), err)
+	}
 	connect := func(proto string) net.Conn {
 		t.Helper()
 		var c net.Conn
@@ -289,6 +291,11 @@ func TestDaemonTrafficFlowHistory(t *testing.T) {
 	disabled.Resources = nil
 	for _, res := range imported.Document.Resources {
 		if res.Service == nil || res.Service.TrafficFlow == nil {
+			if res.Forwarding != nil {
+				forwarding := *res.Forwarding
+				forwarding.ConntrackAccounting = nil
+				res.Forwarding = &forwarding
+			}
 			disabled.Resources = append(disabled.Resources, res)
 		}
 	}
@@ -311,11 +318,14 @@ func TestDaemonTrafficFlowHistory(t *testing.T) {
 		}
 		return true
 	})
+	if value, err := os.ReadFile("/proc/sys/net/netfilter/nf_conntrack_acct"); err != nil || strings.TrimSpace(string(value)) != "0" {
+		t.Fatal("removal did not restore original accounting", string(value), err)
+	}
 	c := connect("tcp4")
 	probe(c)
 	c.Close()
 	f.stop()
-	t.Log("removing collection stopped its worker while new TCP forwarding remained usable")
+	t.Log("product enabled conntrack accounting; removal restored zero and stopped collection while new TCP forwarding remained usable")
 }
 
 const trafficFlowFixture = `apiVersion: routerd.net/v1alpha1
@@ -343,6 +353,10 @@ spec:
       kind: Sysctl
       metadata: {name: forwarding}
       spec: {key: net.ipv4.ip_forward, value: "1", runtime: true}
+    - apiVersion: system.routerd.net/v1alpha1
+      kind: Sysctl
+      metadata: {name: connection-counters}
+      spec: {key: net.netfilter.nf_conntrack_acct, value: "1", runtime: true}
     - apiVersion: net.routerd.net/v1alpha1
       kind: NAT44Rule
       metadata: {name: outgoing}
