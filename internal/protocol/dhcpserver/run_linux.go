@@ -334,7 +334,13 @@ func Run(ctx context.Context, cfg Config, image *os.File, publish func(context.C
 		}
 		call, cancel := context.WithTimeout(ctx, time.Duration(cfg.EffectTimeoutMilliseconds)*time.Millisecond)
 		defer cancel()
-		return publish(call, snapshot)
+		// Reporting lease observations does not own the serving lifetime.
+		// Configuration withdrawal and supervisor cancellation stop the engine;
+		// consumers independently expire observations they cannot refresh.
+		if err := publish(call, snapshot); err != nil && ctx.Err() == nil {
+			slog.Warn("DHCP state publication failed", "resource", cfg.Resource, "error", err)
+		}
+		return nil
 	}
 	if err := update(); err != nil {
 		return err

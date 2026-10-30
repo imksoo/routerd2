@@ -57,6 +57,59 @@ func aftrDocument() config.Native {
 	return config.Native{Network: network.Desired{Interfaces: []network.Interface{{Name: "wan0", Addresses: []string{"2001:db8:42::1/64"}}}}, Services: []serviceconfig.Service{{Name: "dslite", DSLite: &serviceconfig.DSLite{Interface: "wan0", Tunnel: "dslite0", LocalAddress: "2001:db8:42::1", Candidates: []string{"2001:db8:42::2"}}}}}
 }
 
+type waitingAFTRNetwork struct {
+	aftrNetwork
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (n *waitingAFTRNetwork) SourceAddress(ctx context.Context, name, address string) (network.SourceObservation, error) {
+	close(n.entered)
+	select {
+	case <-n.release:
+		return n.aftrNetwork.SourceAddress(ctx, name, address)
+	case <-ctx.Done():
+		return network.SourceObservation{}, ctx.Err()
+	}
+}
+
+func TestAFTRSourceWaitAllowsStateAndRejectsReplacedConfiguration(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	n := &waitingAFTRNetwork{entered: make(chan struct{}), release: make(chan struct{})}
+	r := New(t.TempDir(), t.TempDir(), n, testSupervisorInstance)
+	r.manager = &memoryManager{}
+	doc := aftrDocument()
+	if err := r.ApplyConfig(ctx, 1, config.FromNative(doc)); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { _, err := r.AFTRInput(ctx, "service.dslite"); done <- err }()
+	select {
+	case <-n.entered:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	stateRead := make(chan Status, 1)
+	go func() { stateRead <- r.State() }()
+	select {
+	case state := <-stateRead:
+		if state.Revision != 1 {
+			t.Fatal(state)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("network observation blocked unrelated service state")
+	}
+	doc.Services[0].DSLite.Candidates = []string{"2001:db8:42::3"}
+	if err := r.ApplyConfig(ctx, 2, config.FromNative(doc)); err != nil {
+		t.Fatal(err)
+	}
+	close(n.release)
+	if err := <-done; !errors.Is(err, ErrStale) {
+		t.Fatalf("replaced configuration accepted an old kernel observation: %v", err)
+	}
+}
+
 func TestAFTRObservedSourceGenerationAndProjection(t *testing.T) {
 	ctx := context.Background()
 	doc := aftrDocument()

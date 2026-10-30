@@ -230,12 +230,31 @@ func (r *Runtime) AFTRInput(ctx context.Context, name string) (aftr.Input, error
 		return in, err
 	}
 	if in.Source.Address != "" {
-		// Unrelated routing tables and WireGuard peers cannot invalidate this
-		// dependency merely by exceeding the operator observation response cap.
+		// Kernel observation can wait behind network application. Do not hold
+		// the protocol-state mutex while another process completes that work.
+		epoch := r.sourceEpoch
+		r.mu.Unlock()
 		observed, err := r.network.SourceAddress(ctx, definition.sourceInterface, in.Source.Address)
+		r.mu.Lock()
 		if err != nil {
 			return aftr.Input{}, fmt.Errorf("observe AFTR source: %w", err)
 		}
+		current, selected := r.bindings[name]
+		if r.sourceEpoch != epoch || !selected || current.digest != b.digest {
+			return aftr.Input{}, ErrStale
+		}
+		clock, err = boottime.Read()
+		if err != nil {
+			return aftr.Input{}, err
+		}
+		latest, err := aftrDependencies(definition, r.observationsLocked(), b.digest, clock)
+		if err != nil {
+			return aftr.Input{}, err
+		}
+		if in.Source.Address != latest.Source.Address {
+			return aftr.Input{}, ErrStale
+		}
+		in = latest
 		allowDeprecated := definition.delegation != nil && definition.delegation.PrefixLength == 128
 		if !sourceInstalled(definition.sourceInterface, in.Source.Address, observed, allowDeprecated) {
 			in.Source = aftr.Source{}

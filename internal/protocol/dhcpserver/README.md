@@ -19,6 +19,13 @@ renewal timestamps are invented. dnsmasq currently clamps leases below 120
 seconds to 120 seconds. Option values retain dnsmasq syntax; the old native
 wire encoder and its option restrictions have been removed.
 
+Periodic lease observations do not own the engine's serving lifetime. A failed
+state publication is logged; the existing bounded periodic publication continues
+with a fresh observation, while consumers expire the last accepted observation
+at its original deadline. Configuration withdrawal, worker cancellation and
+engine failures still stop serving. This retains routerd's separation between
+status persistence and the existing dnsmasq process without extending deadlines.
+
 HA uses the configured VRRP owner. A standby opens no DHCP socket. Both
 members exchange the engine's lease records and routerd's actual request and
 removal history over the existing mutually authenticated TLS link. The active
