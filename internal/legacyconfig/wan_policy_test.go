@@ -583,3 +583,24 @@ spec:
 		t.Fatal("legacy attribution changed interface activation or ownership", err)
 	}
 }
+
+func TestDeclaredInterfaceAliasesItsDynamicTunnel(t *testing.T) {
+	input := fixture(t, "wan-dynamic")
+	options := wanPolicy(t)
+	before, err := CompileWithOptions(input, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input = append(input, []byte(`    - apiVersion: net.routerd.net/v1alpha1
+      kind: Interface
+      metadata: {name: provider}
+      spec: {ifname: ds0, managed: false}
+`)...)
+	after, err := CompileWithOptions(input, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before.Document, after.Document) {
+		t.Fatal("observed interface alias changed the tunnel owner")
+	}
+}

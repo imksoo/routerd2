@@ -184,3 +184,11 @@ PD worker SIGKILL後1.52秒、通常交換10.99秒、全daemon再起動11.08秒�
   その場合だけ非稼働の保持分類として明示し、不要な保存処理は生成しない。宣言がある場合は未対応診断を維持する。
   過去のデータベースが空とは仮定せず、既存内容を移行しないことも通知する。この取込変更は上記の実通信試験後に追加し、取込試験を通過した。
 - nDPI分類と通常配布は独立担当で継続中。上記を全設定の起動、自然更新、同一版の二台運用や本番置換の合格として扱わない。
+
+## 2026-10-30 19:26 JST: homert全入力を妨げた参照解決を修正
+
+`homert-import-native89`（7e4bf94上）では、観測用InterfaceとDSLiteTunnelが同じkernel名を指す宣言を一つのaliasとして解決する。異なるkernel名への同名aliasは拒否する。委譲先DNS listener/AAAAのPD参照も、既存の参照解決でKind/nameへ揃える。元設定の短い`wan-pd`名を直接内部indexで探して失敗していた。unconditionalなIPv4StaticAddressのAppliedを要するIPv4Routeは、既存network writerのaddress→routeの適用順序へ対応する。新しい待機workerや重複状態は作らない。
+
+実際の両homert入力へ、VRRPのlocal/VMAC、停止したTailscaleの保存identity利用、有限lease由来DNS、stateless DHCPv6と相互TLS同期の置換policyを私有ファイルで明示した。両方の実CLIは、WebConsoleとincludeApplicationLayerの未対応2件だけで拒否する。出力は原子的に空で、設定を削って変換成功と扱っていない。policyの証明書pathと保存identityはまだ配備しておらず、本番適用やtailnet再登録もしていない。これは変換診断の結果で、全設定の起動・通信の合格ではない。
+
+同じ版の実supervisor/control/network/worker・独立ISC/keepalived/Linux clientによる既存の取込LAN試験は71.71秒で終了0。短いPD名、ownerRefs、roleを持つ入力からSLAAC/default/DNS、DNS UDP/TCP・IPv6 TCP/UDP、役割変更・元権限期限の撤去、PD喪失/再取得、既存DNS TCPを確認した。静的route前提と同名tunnel aliasは関連compiler検査で確認した範囲であり、両homertの全経路の通信結果へ拡張しない。関連Race、全vet、CGO0両architecture build、署名配布物検査が終了0。

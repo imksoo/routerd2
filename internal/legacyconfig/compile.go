@@ -430,6 +430,9 @@ func (c *compiler) allow(r resource, fields ...string) {
 			}
 		}
 		if field == "dependsOn" {
+			if r.Kind == "IPv4Route" {
+				continue // Checked against unconditional addresses below.
+			}
 			if r.Kind == "DHCPv6Information" || r.Kind == "IPv6DelegatedAddress" || r.Kind == "DHCPv6Server" || r.Kind == "IPv6RouterAdvertisement" {
 				continue // Checked against the allocation's PD owner.
 			}

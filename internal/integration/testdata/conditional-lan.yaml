@@ -42,7 +42,7 @@ spec:
       kind: IPv6DelegatedAddress
       metadata: {name: lan-address, ownerRefs: [{kind: DHCPv6PrefixDelegation, name: wan-pd}]}
       spec:
-        prefixDelegation: DHCPv6PrefixDelegation/wan-pd
+        prefixDelegation: wan-pd
         interface: lan
         subnetID: "0"
         addressSuffix: "::1"
