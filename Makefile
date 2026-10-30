@@ -226,6 +226,7 @@ licenses:
 
 build: licenses
 	mkdir -p dist/bin
+	chmod 755 dist dist/bin
 	umask 022; CGO_ENABLED=0 $(GO) build -trimpath -buildvcs=false -ldflags '$(LDFLAGS)' -o dist/bin/routerd ./cmd/routerd
 	umask 022; CGO_ENABLED=0 $(GO) build -trimpath -buildvcs=false -ldflags '$(LDFLAGS)' -o dist/bin/routerd-modules ./cmd/routerd-modules
 	umask 022; CGO_ENABLED=0 $(GO) build -trimpath -buildvcs=false -ldflags '$(LDFLAGS)' -o dist/bin/routerd-logging ./cmd/routerd-logging
@@ -234,12 +235,14 @@ build: licenses
 .PHONY: build-publisher
 build-publisher: licenses
 	mkdir -p dist/bin
+	chmod 755 dist dist/bin
 	umask 022; CGO_ENABLED=0 $(GO) build -trimpath -buildvcs=false -ldflags '$(LDFLAGS)' -o dist/bin/routerd-bundle ./cmd/routerd-bundle
 	chmod 755 dist/bin/routerd-bundle
 
 build-linux: licenses
-	@set -eu; umask 022; for arch in amd64 arm64; do \
+	@set -eu; umask 022; mkdir -p dist/bin; chmod 755 dist dist/bin; for arch in amd64 arm64; do \
 	  mkdir -p "dist/bin/linux-$$arch"; \
+	  chmod 755 "dist/bin/linux-$$arch"; \
 	  CGO_ENABLED=0 GOOS=linux GOARCH=$$arch $(GO) build -trimpath -buildvcs=false -ldflags '$(LDFLAGS)' -o "dist/bin/linux-$$arch/routerd" ./cmd/routerd; \
 	  CGO_ENABLED=0 GOOS=linux GOARCH=$$arch $(GO) build -trimpath -buildvcs=false -ldflags '$(LDFLAGS)' -o "dist/bin/linux-$$arch/routerd-modules" ./cmd/routerd-modules; \
 	  CGO_ENABLED=0 GOOS=linux GOARCH=$$arch $(GO) build -trimpath -buildvcs=false -ldflags '$(LDFLAGS)' -o "dist/bin/linux-$$arch/routerd-logging" ./cmd/routerd-logging; \
