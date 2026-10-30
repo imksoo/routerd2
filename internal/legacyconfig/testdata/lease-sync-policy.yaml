@@ -1,0 +1,27 @@
+schema_version: 1
+vrrp:
+  VirtualAddress/gateway:
+    source_address: 192.0.2.2
+    vip_interface: lan-ha
+dhcp6_servers:
+  DHCPv6Server/lan-v6:
+    delegated_address: IPv6DelegatedAddress/lan-base
+    router_lifetime_seconds: 10
+lease_sync:
+  DHCPv4ServerLeaseSync/v4:
+    replication:
+      listen_address: 169.254.42.2:8443
+      peer_address: 169.254.42.3:8443
+      certificate_file: /keys/local.crt
+      private_key_file: /keys/local.key
+      peer_certificate_file: /keys/peer.crt
+    bootstrap: true
+  DHCPv6PrefixDelegationLeaseSync/pd:
+    replication:
+      listen_address: 169.254.42.2:8444
+      peer_address: 169.254.42.3:8444
+      certificate_file: /keys/local.crt
+      private_key_file: /keys/local.key
+      peer_certificate_file: /keys/peer.crt
+  DHCPv6ServerLeaseSync/v6:
+    shared_with: DHCPv4ServerLeaseSync/v4

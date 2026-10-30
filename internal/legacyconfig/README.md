@@ -342,7 +342,7 @@ serving, custom lease/RA settings and full deployed-router import remain open.
 | `HealthCheck` | Literal scoped ICMP/TCP/DNS/HTTP probes retain routerd's engine, thresholds and 30s/3s timing defaults. Explicit `health_checks` policy supplies missing interface/source/mark intent. VRRP master/backup conditions use finite producer facts; other selectors and dynamic targets remain unsupported. |
 | `DHCPv4Client` | Native wire identity, requested address, hostname/class/client ID, default-route policy and metric. Requires `useDNS: false` because the old default of true changes the host resolver. Native learned DNS is status data rather than a substitute for that side effect. |
 | `NTPClient` + `NTPServer` | One bundled chronyd owns clock discipline and LAN service. Independent source groups retain static/auto/learned/fallback selection; client `when` gates only its group. Imports DHCPv4 ntpServers/DHCPv6 sntpServers, static server listeners/allow prefixes and declared local DNS for hostname sources. Conditional server listeners, dynamic allow-prefix sources and unmanaged observation are rejected rather than discarded. |
-| `DHCPv4Server` + `DHCPv4Reservation` | Static local servers become separate native DHCP workers with owned journals. Retains finite pool leases, disjoint MAC/OUI profile scopes, explicit/static-source gateway/DNS/NTP/domain options, and MAC/IP/hostname reservations with typed options. Requires one owned static IPv4 address per interface; no live lease import, HA conditions or ambiguous backend directives. The active-chain/default distinctions are detailed below. |
+| `DHCPv4Server` + `DHCPv4Reservation` | Static local servers become separate native DHCP workers with owned journals. Retains finite pool leases, disjoint MAC/OUI profile scopes, explicit/static-source gateway/DNS/NTP/domain options, and MAC/IP/hostname reservations with typed options. Requires one owned static IPv4 address per interface; no live lease import or ambiguous backend directives. HA requires the explicit lease_sync policy below. The active-chain/default distinctions are detailed below. |
 | `DHCPv4Relay` | Explicit `interfaces` and numeric IPv4 `upstream` become one native relay service. Each client interface requires one unconditional owned static IPv4 address for `giaddr`. Multiple relay declarations retain per-interface upstream sets. Conditional/dynamic source selection and ambiguous legacy VRF binding remain unsupported. |
 | `DHCPv6PrefixDelegation` | Native IA_PD service, pinned DUID-LL/IAID 1 defaults, explicit DUID, provider profile, prefix-length preference and finite role guards. Explicit external clients and required-prefix readiness semantics are rejected. |
 | `DHCPv6Information` with one matching PD | An alias of that PD service, sharing its DUID/IAID, UDP 546 socket and supplementary Information-Request. The original **literal interface reference** must match exactly; merely resolving two different aliases to the same NIC does not reproduce the old association. Standalone and ambiguous owners are rejected. `request` may name dns-servers, domain-search, sntp-servers and aftr-name, all already present in the fixed client request set. |
@@ -887,3 +887,38 @@ signals in routerd, so omission and any metrics/traces request are rejected rath
 than silently reduced to logs. The old `LogSink` OTLPSink had no send operation;
 its archive-on-delete semantics and ObservabilityPipeline options are not claimed
 as migrated by this logs-only path.
+
+## DHCP and delegated-prefix state between two members
+
+`lease_sync` is an explicit, resource-scoped replacement policy for
+`DHCPv4ServerLeaseSync` and `DHCPv6PrefixDelegationLeaseSync`. Each entry supplies
+`replication` using the existing native peer contract: `listen_address`,
+`peer_address`, `certificate_file`, `private_key_file`, and
+`peer_certificate_file`. The operator supplies each member's certificate and
+private key and pins its partner's certificate. The importer never reads those
+files, converts SSH keys, resolves the old target hostname, or provisions trust.
+Credentials and reachable endpoints must exist before the workers start.
+
+This deliberately replaces periodic rsync/SSH copies, including their interval
+and SSH options, with the existing authenticated two-member lease protocol.
+The source and sync declaration must select the same VRRP master condition.
+The native `ha.owner` enforces that condition while keeping standby state
+reception running. The DHCPv4 server binds the owner's VIP interface and shared
+server address; pool options and reservations retain their declared values.
+DHCPv4 `bootstrap` must be explicit on both members and true on exactly one.
+PD retains its explicitly shared DUID, IAID and original lease deadlines.
+Historical files are not imported.
+
+A stateless `DHCPv6ServerLeaseSync` can explicitly select `shared_with:
+DHCPv4ServerLeaseSync/name` when the old default dnsmasq file, peer and owner
+were shared. The existing DHCPv4 protocol then owns that file's lease/history
+meaning. Stateless DHCPv6 has no IPv6 address bindings to replicate; this
+mapping is recorded rather than silently discarding the declaration. Stateful
+IPv6 server leases remain unsupported.
+
+See `testdata/lease-sync.yaml` and `testdata/lease-sync-policy.yaml`.
+`make check-ha-lease-import DHCP6_SERVER=/path/to/isc/dhcpd` feeds migration
+output into the existing two-router peer trial (this optional profile requires Python PyYAML). It checks real DHCP, persistent
+TCP/UDP, synchronized PD takeover across different boot clocks, original
+expiration, and recovery against ISC DHCP. It is an isolated kernel trial,
+not qualification of deployed credentials or physical routers.

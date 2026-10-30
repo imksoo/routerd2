@@ -65,7 +65,45 @@ def imported_conntrack(stage, directory, index):
     return document["resources"], elections[0]
 
 
-def peer(stage, dhcp6_server, pd_dslite, stale_owner, preparation, delegated_dns, release_holds, import_conntrack):
+def import_lease_sync(stage, directory, resources):
+    """Use the migration CLI for the lease owners; retain this fixture's topology."""
+    import yaml
+    election = next(r["service"] for r in resources if r.get("service", {}).get("vrrp"))
+    server = next(r["service"] for r in resources if r.get("service", {}).get("dhcp_server"))
+    pd = next(r["service"] for r in resources if r.get("service", {}).get("dhcp6"))
+    vrrp, dhcp = election["vrrp"], server["dhcp_server"]
+    declared = []
+    def add(kind, name, spec):
+        declared.append({"apiVersion": "net.routerd.net/v1alpha1", "kind": kind, "metadata": {"name": name}, "spec": spec})
+    when = {"state": {"VirtualAddress/gateway.role": {"equals": "master"}}}
+    add("Interface", "lan", {"ifname": vrrp["interface"], "managed": True, "adminUp": True})
+    add("Interface", "wan", {"ifname": pd["dhcp6"]["interface"], "managed": True, "adminUp": True})
+    add("IPv4StaticAddress", "local", {"interface": "lan", "address": vrrp["source_address"] + "/24"})
+    add("VirtualAddress", "gateway", {"interface": "lan", "family": "ipv4", "address": vrrp["addresses"][0], "mode": "vrrp", "vrrp": {"virtualRouterID": vrrp["virtual_router_id"], "priority": vrrp["priority"], "peers": vrrp["unicast_peers"], "preempt": vrrp["preempt"]}})
+    pool = dhcp["primary"]
+    add("DHCPv4Server", "leases", {"interface": "lan", "addressPool": {"start": pool["start"], "end": pool["end"], "leaseTime": str(pool["lease_seconds"]) + "s"}, "gateway": pool["router"], "dnsServers": [dhcp["server_address"]], "stickyHoldDays": dhcp["sticky_hold_days"], "when": when})
+    add("DHCPv6PrefixDelegation", "pd", {"interface": "wan", "prefixLength": pd["dhcp6"]["prefix_length"], "clientDUID": pd["dhcp6"]["client_duid"], "when": when})
+    for kind, name, source in (("DHCPv4ServerLeaseSync", "leases", "DHCPv4Server/leases"), ("DHCPv6PrefixDelegationLeaseSync", "pd", "DHCPv6PrefixDelegation/pd")):
+        add(kind, name, {"source": {"resource": source}, "interval": "15s", "targets": [{"name": "partner", "host": "partner.example.test", "user": "routerd", "sshOptions": ["-o", "BatchMode=yes"]}], "when": when})
+    policy = {"schema_version": 1, "vrrp": {"VirtualAddress/gateway": {"source_address": vrrp["source_address"], "vip_interface": vrrp["vip_interface"]}}, "lease_sync": {
+        "DHCPv4ServerLeaseSync/leases": {"replication": dhcp["ha"]["replication"], "bootstrap": dhcp["ha"]["bootstrap"]},
+        "DHCPv6PrefixDelegationLeaseSync/pd": {"replication": pd["dhcp6"]["ha"]["replication"]}}}
+    source, intent = directory / "legacy.json", directory / "migration-policy.json"
+    source.write_text(json.dumps({"apiVersion": "routerd.net/v1alpha1", "kind": "Router", "metadata": {"name": "imported-ha"}, "spec": {"resources": declared}}))
+    intent.write_text(json.dumps(policy))
+    imported = yaml.safe_load(run([str(stage / "routerd"), "config", "migrate", "--policy", str(intent), str(source)]))
+    for role, destination in (("dhcp_server", server), ("dhcp6", pd)):
+        imported_resource = next(r for r in imported["resources"] if r.get("service", {}).get(role))
+        assert not imported_resource.get("when"), "import must keep the standby synchronization worker alive"
+        config = imported_resource["service"][role]
+        config["ha"]["owner"] = election["name"]  # Existing fixture service names.
+        if role == "dhcp6":
+            config["delegations"] = destination[role]["delegations"]
+        destination[role] = config
+    print("PASS old DHCP/PD declarations and explicit TLS policy compiled into both existing HA engines", flush=True)
+
+
+def peer(stage, dhcp6_server, pd_dslite, stale_owner, preparation, delegated_dns, release_holds, import_conntrack, lease_sync_import):
     def deadline(*_):
         raise TimeoutError("HA connection-state communication deadline")
     signal.signal(signal.SIGALRM, deadline)
@@ -287,6 +325,8 @@ def peer(stage, dhcp6_server, pd_dslite, stale_owner, preparation, delegated_dns
                 leases["service"]["dhcp_server"]["ha"]["owner"] = election["name"]
                 resources = migrated + [leases] + [r for r in resources if r["id"] == "wan-route"]
                 print("PASS migrated NAT44SessionSync into one IPv4 election on " + node, flush=True)
+            if lease_sync_import:
+                import_lease_sync(stage, directory, resources)
             (directory / "config.json").write_text(json.dumps({"schema_version": 2, "resources": resources}))
             workers = {role: str(stage / ("routerd-logging" if role == "logging" else "routerd-modules")) for role in roles}
             boot = {"platform": "host", "config": str(directory / "config.json"), "runtime_dir": str(directory / "run"), "state_dir": str(directory / "state"), "workers": workers, "engines": {"vrrp": str(stage / "conntrack-engine.tar")}, "ssh": {"user": "admin"}}
@@ -1129,12 +1169,15 @@ def main():
     parser.add_argument("--preparation", action="store_true")
     parser.add_argument("--delegated-dns", action="store_true")
     parser.add_argument("--binary-dir", type=Path, default=Path("dist/bin"))
+    parser.add_argument("--lease-sync-import", action="store_true", help="Compile old lease synchronization declarations with explicit peer identities")
     parser.add_argument("--release-holds", action="store_true", help="Exercise client RELEASE before sticky recovery; otherwise wait for natural lease expiry")
     args = parser.parse_args()
     if args.inside:
-        peer(args.inside, args.dhcp6_server, args.pd_dslite, args.stale_owner, args.preparation, args.delegated_dns, args.release_holds, args.import_conntrack)
+        peer(args.inside, args.dhcp6_server, args.pd_dslite, args.stale_owner, args.preparation, args.delegated_dns, args.release_holds, args.import_conntrack, args.lease_sync_import)
         return
     os.chdir(Path(__file__).resolve().parent.parent)
+    if args.lease_sync_import and not args.dhcp6_server:
+        parser.error("--lease-sync-import requires --dhcp6-server")
     if args.pd_dslite and not args.dhcp6_server:
         parser.error("--pd-dslite requires --dhcp6-server")
     if args.preparation and not args.pd_dslite:
@@ -1157,6 +1200,8 @@ def main():
         if args.dhcp6_server:
             run(root + ["install", "-m", "500", str(args.dhcp6_server.resolve()), stage + "/dhcpd"])
             peer_args = ["--dhcp6-server", stage + "/dhcpd"]
+        if args.lease_sync_import:
+            peer_args.append("--lease-sync-import")
         if args.pd_dslite:
             peer_args.append("--pd-dslite")
         if args.stale_owner:

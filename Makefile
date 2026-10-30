@@ -392,6 +392,10 @@ check-ha-import: build build-publisher conntrack-engine dnsmasq-engine
 check-ha-state: build build-publisher conntrack-engine dnsmasq-engine
 	$(PYTHON) scripts/ha-state-peer.py
 
+.PHONY: check-ha-lease-import
+check-ha-lease-import: build build-publisher conntrack-engine dnsmasq-engine
+	$(PYTHON) scripts/ha-state-peer.py --dhcp6-server '$(DHCP6_SERVER)' --lease-sync-import
+
 .PHONY: check-ha-pd
 check-ha-pd: build build-publisher conntrack-engine dnsmasq-engine
 	$(PYTHON) scripts/ha-state-peer.py --dhcp6-server '$(DHCP6_SERVER)'

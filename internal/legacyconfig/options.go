@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/imksoo/routerd2/internal/config"
+	"github.com/imksoo/routerd2/internal/peertls"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 	"gopkg.in/yaml.v3"
 )
@@ -41,6 +42,7 @@ type TailscalePolicy struct {
 // Map keys are exact legacy Kind/name identities. Each entry must be consumed by
 // that one resource; unqualified aliases and extra entries are rejected.
 type Options struct {
+	LeaseSync     map[string]LeaseSyncPolicy        `json:"lease_sync,omitempty"`
 	VRRP          map[string]VRRPPolicy             `json:"vrrp,omitempty"`
 	HealthChecks  map[string]HealthCheckPolicy      `json:"health_checks,omitempty"`
 	Tailscale     map[string]TailscalePolicy        `json:"tailscale,omitempty"`
@@ -49,6 +51,15 @@ type Options struct {
 	DSLite        map[string]DSLitePolicy           `json:"ds_lite,omitempty"`
 	DHCPDNS       map[string]DHCPDNSPolicy          `json:"dhcp_dns,omitempty"`
 	DHCP6Servers  map[string]DHCP6ServerPolicy      `json:"dhcp6_servers,omitempty"`
+}
+
+// LeaseSyncPolicy explicitly replaces SSH file copies with the existing native
+// two-node protocol. SharedWith identifies the DHCPv4 sync that already owns a
+// stateless DHCPv6 server's formerly shared dnsmasq lease file.
+type LeaseSyncPolicy struct {
+	Replication *peertls.Config `json:"replication,omitempty"`
+	Bootstrap   *bool           `json:"bootstrap,omitempty"`
+	SharedWith  string          `json:"shared_with,omitempty"`
 }
 
 // VRRPPolicy selects explicit local identities for the native election and
@@ -183,7 +194,7 @@ func validateOptionsShape(d *decoder, options Options, explicit bool) {
 	if explicit && options.SchemaVersion != OptionsSchemaVersion {
 		d.issue(nil, "$policy.schema_version", "policy_version", "migration policy schema_version must be 1")
 	}
-	if len(options.RAClients)+len(options.DSLite)+len(options.DHCPDNS)+len(options.DHCP6Servers)+len(options.Tailscale)+len(options.HealthChecks)+len(options.VRRP) > 4096 {
+	if len(options.LeaseSync)+len(options.RAClients)+len(options.DSLite)+len(options.DHCPDNS)+len(options.DHCP6Servers)+len(options.Tailscale)+len(options.HealthChecks)+len(options.VRRP) > 4096 {
 		d.issue(nil, "$policy", "policy_limit", "migration policy accepts at most 4096 resource entries")
 	}
 }
@@ -191,11 +202,19 @@ func validateOptionsShape(d *decoder, options Options, explicit bool) {
 func (c *compiler) initOptions(options Options, explicit bool) {
 	validateOptionsShape(c.decoder, options, explicit)
 	c.policyPaths, c.policyUsed = map[string]string{}, map[string]bool{}
-	if len(options.RAClients)+len(options.DSLite)+len(options.DHCPDNS)+len(options.DHCP6Servers)+len(options.Tailscale)+len(options.HealthChecks)+len(options.VRRP) > 4096 {
+	if len(options.LeaseSync)+len(options.RAClients)+len(options.DSLite)+len(options.DHCPDNS)+len(options.DHCP6Servers)+len(options.Tailscale)+len(options.HealthChecks)+len(options.VRRP) > 4096 {
 		return
 	}
 	// Do not let a caller's later edit mutate a successfully compiled document.
-	c.options = Options{SchemaVersion: options.SchemaVersion, RAClients: map[string]serviceconfig.RAClient{}, DSLite: map[string]DSLitePolicy{}, DHCPDNS: map[string]DHCPDNSPolicy{}, DHCP6Servers: map[string]DHCP6ServerPolicy{}, Tailscale: map[string]TailscalePolicy{}, HealthChecks: map[string]HealthCheckPolicy{}, VRRP: map[string]VRRPPolicy{}}
+	c.options = Options{LeaseSync: map[string]LeaseSyncPolicy{}, SchemaVersion: options.SchemaVersion, RAClients: map[string]serviceconfig.RAClient{}, DSLite: map[string]DSLitePolicy{}, DHCPDNS: map[string]DHCPDNSPolicy{}, DHCP6Servers: map[string]DHCP6ServerPolicy{}, Tailscale: map[string]TailscalePolicy{}, HealthChecks: map[string]HealthCheckPolicy{}, VRRP: map[string]VRRPPolicy{}}
+	for key, value := range options.LeaseSync {
+		value.Bootstrap = copyBool(value.Bootstrap)
+		if value.Replication != nil {
+			peer := *value.Replication
+			value.Replication = &peer
+		}
+		c.options.LeaseSync[key] = value
+	}
 	for key, value := range options.VRRP {
 		c.options.VRRP[key] = value
 	}
@@ -236,7 +255,7 @@ func (c *compiler) initOptions(options Options, explicit bool) {
 			path := fmt.Sprintf("$policy.%s[%d]", section, i)
 			c.policyPaths[id] = path
 			resource := c.byRef[key]
-			if resource == nil || resource.Kind != kind || !strings.HasPrefix(key, kind+"/") || strings.Count(key, "/") != 1 {
+			if resource == nil || !strings.HasPrefix(key, resource.Kind+"/") || strings.Count(key, "/") != 1 || resource.Kind != kind && !(section == "lease_sync" && leaseSyncKind(resource.Kind)) {
 				c.issue(nil, path, "policy_reference", "policy key must identify one existing resource of the policy's kind using its exact Kind/name")
 				c.policyUsed[id] = true // invalid, not a second unused-entry issue
 			}
@@ -277,6 +296,11 @@ func (c *compiler) initOptions(options Options, explicit bool) {
 		keys = append(keys, key)
 	}
 	check("vrrp", "VirtualAddress", keys)
+	keys = make([]string, 0, len(options.LeaseSync))
+	for key := range options.LeaseSync {
+		keys = append(keys, key)
+	}
+	check("lease_sync", "", keys)
 }
 
 func copyBool(value *bool) *bool {

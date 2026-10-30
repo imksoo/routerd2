@@ -1,0 +1,178 @@
+apiVersion: routerd.net/v1alpha1
+kind: Router
+metadata:
+  name: lease-sync
+spec:
+  resources:
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: Interface
+    metadata:
+      name: lan
+    spec:
+      ifname: lan0
+      managed: true
+      adminUp: true
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: Interface
+    metadata:
+      name: wan
+    spec:
+      ifname: wan0
+      managed: true
+      adminUp: true
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: IPv4StaticAddress
+    metadata:
+      name: local
+    spec:
+      interface: lan
+      address: 192.0.2.2/24
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: VirtualAddress
+    metadata:
+      name: gateway
+    spec:
+      interface: lan
+      family: ipv4
+      address: 192.0.2.1/24
+      mode: vrrp
+      vrrp:
+        virtualRouterID: 42
+        priority: 150
+        peers:
+        - 192.0.2.3
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: DHCPv6PrefixDelegation
+    metadata:
+      name: wan-pd
+    spec:
+      interface: wan
+      prefixLength: 60
+      clientDUID: 0003000102005e000143
+      when:
+        state:
+          VirtualAddress/gateway.role:
+            equals: master
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: DHCPv6Information
+    metadata:
+      name: wan-info
+    spec:
+      interface: wan
+      request:
+      - dns-servers
+      when:
+        state:
+          VirtualAddress/gateway.role:
+            equals: master
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: IPv6DelegatedAddress
+    metadata:
+      name: lan-base
+    spec:
+      interface: lan
+      prefixDelegation: DHCPv6PrefixDelegation/wan-pd
+      subnetID: '1'
+      addressSuffix: ::1
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: DHCPv4Server
+    metadata:
+      name: lan-v4
+    spec:
+      interface: lan
+      addressPool:
+        start: 192.0.2.100
+        end: 192.0.2.103
+        leaseTime: 60s
+      gateway: 192.0.2.1
+      dnsServers:
+      - 192.0.2.1
+      stickyHoldDays: 3
+      when:
+        state:
+          VirtualAddress/gateway.role:
+            equals: master
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: DHCPv4Reservation
+    metadata:
+      name: printer
+    spec:
+      server: lan-v4
+      macAddress: 02:00:00:00:00:50
+      ipAddress: 192.0.2.20
+      hostname: printer
+      when:
+        state:
+          VirtualAddress/gateway.role:
+            equals: master
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: DHCPv6Server
+    metadata:
+      name: lan-v6
+    spec:
+      interface: lan
+      mode: stateless
+      dnsServerFrom:
+      - resource: DHCPv6Information/wan-info
+        field: dnsServers
+      when:
+        state:
+          VirtualAddress/gateway.role:
+            equals: master
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: DHCPv4ServerLeaseSync
+    metadata:
+      name: v4
+    spec:
+      source:
+        resource: DHCPv4Server/lan-v4
+      targets:
+      - name: peer
+        host: peer.example.test
+        user: routerd
+        sshOptions:
+        - -o
+        - BatchMode=yes
+      interval: 15s
+      when:
+        state:
+          VirtualAddress/gateway.role:
+            equals: master
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: DHCPv6PrefixDelegationLeaseSync
+    metadata:
+      name: pd
+    spec:
+      source:
+        resource: DHCPv6PrefixDelegation/wan-pd
+      targets:
+      - name: peer
+        host: peer.example.test
+        user: routerd
+        sshOptions:
+        - -o
+        - BatchMode=yes
+      interval: 15s
+      when:
+        state:
+          VirtualAddress/gateway.role:
+            equals: master
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: DHCPv6ServerLeaseSync
+    metadata:
+      name: v6
+    spec:
+      source:
+        resource: DHCPv6Server/lan-v6
+      targets:
+      - name: peer
+        host: peer.example.test
+        user: routerd
+        sshOptions:
+        - -o
+        - BatchMode=yes
+      interval: 15s
+      when:
+        state:
+          VirtualAddress/gateway.role:
+            equals: master

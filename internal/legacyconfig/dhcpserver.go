@@ -250,12 +250,15 @@ func (c *compiler) dhcpServer(r resource, reservations []resource) (dhcpserverco
 	}
 	var inputReservations []api.DHCPv4ReservationSpec
 	for _, item := range reservations {
-		inputReservations = append(inputReservations, item.Spec.(api.DHCPv4ReservationSpec))
+		reservation := item.Spec.(api.DHCPv4ReservationSpec)
+		reservation.When = api.ResourceWhenSpec{} // leaseSync validates the original owner condition.
+		inputReservations = append(inputReservations, reservation)
 	}
 	service := serviceconfig.Service{Name: c.serviceName(r, "dhcp"), DHCPServer: &serviceconfig.DHCPServer{Interface: ifname, ServerAddress: source.Addr().String(), Primary: dhcpserverconfig.Scope{Prefix: source.Masked().String()}, MaxLeases: 1000}}
 	if len(c.issues) != before {
 		return dhcpserverconfig.Config{}, false
 	}
+	s.When = api.ResourceWhenSpec{} // leaseSync keeps the original condition on the HA owner.
 	cfg, err := dhcpserverconfig.FromSpec(service.DHCPServerConfig("/var/lib/routerd"), s, inputReservations)
 	if err != nil {
 		c.reject(r, "", "native_validation", "DHCP pool, scope, reservation, option or duration cannot be represented by the native server")

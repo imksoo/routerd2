@@ -202,7 +202,7 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 			// Compiled together with inherited routing policies below.
 		case "DNSResolver", "DNSForwarder", "DNSUpstream", "DNSZone":
 			// Compiled together below so graph references are checked.
-		case "DHCPv4Server", "DHCPv4Reservation", "DHCPv4Relay", "DHCPv6Server":
+		case "DHCPv4Server", "DHCPv4Reservation", "DHCPv4Relay", "DHCPv6Server", "DHCPv4ServerLeaseSync", "DHCPv6PrefixDelegationLeaseSync", "DHCPv6ServerLeaseSync":
 			// Compile the complete static server/reservation graph before DNS.
 		case "Interface", "Link", "VRF", "Bridge", "Sysctl", "IPv4StaticAddress",
 			"WireGuardInterface", "WireGuardPeer",
@@ -217,6 +217,7 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 		servingConditions[id] = when
 	}
 	c.dhcpServers()
+	c.leaseSync(vrrpNames)
 	c.dhcpRelays()
 	c.dns()
 	conditions = append(conditions, c.bgp()...)
@@ -314,6 +315,14 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 			}
 		}
 	}
+	// HA ownership chooses serving versus receiving state. Keep the worker
+	// running on backup; aliases above still compare the original conditions.
+	for i := range program.Resources {
+		service := program.Resources[i].Service
+		if service != nil && (service.DHCP6 != nil && service.DHCP6.HA != nil || service.DHCPServer != nil && service.DHCPServer.HA != nil) {
+			program.Resources[i].When = nil
+		}
+	}
 	if len(c.issues) == 0 {
 		if err := config.Validate(program); err != nil {
 			// Native validators sometimes include the invalid value. The
@@ -393,7 +402,7 @@ func (c *compiler) allow(r resource, fields ...string) {
 	for _, field := range []string{"when", "dependsOn", "ready_when"} {
 		if field == "when" {
 			switch r.Kind {
-			case "IPv4StaticAddress", "NAT44Rule", "BGPRouter", "EgressRoutePolicy", "HealthCheck", "DHCPv6PrefixDelegation", "DHCPv6Information", "NTPClient", "DHCPv6Server", "IPv6RouterAdvertisement":
+			case "DHCPv4Server", "DHCPv4Reservation", "DHCPv4ServerLeaseSync", "DHCPv6PrefixDelegationLeaseSync", "DHCPv6ServerLeaseSync", "IPv4StaticAddress", "NAT44Rule", "BGPRouter", "EgressRoutePolicy", "HealthCheck", "DHCPv6PrefixDelegation", "DHCPv6Information", "NTPClient", "DHCPv6Server", "IPv6RouterAdvertisement":
 				continue
 			case "DSLiteTunnel":
 				if _, dynamic := c.options.DSLite[r.Kind+"/"+r.Metadata.Name]; dynamic || r.Spec.(api.DSLiteTunnelSpec).LocalAddressSource == "delegatedAddress" {
