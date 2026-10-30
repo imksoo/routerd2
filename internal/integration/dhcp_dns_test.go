@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -58,7 +59,7 @@ func testDaemonDHCPDNSOwnership(t *testing.T, migrated bool) {
 		Primary: dhcpserverconfig.Scope{Prefix: "192.0.2.0/24", Start: "192.0.2.100", End: "192.0.2.102", Router: "192.0.2.1", LeaseSeconds: 60, Options: []dhcpserverconfig.Option{{Name: "dns-server", Value: "192.0.2.1"}}},
 	}
 	dns := dnsconfig.RuntimeConfig{Resource: "dns",
-		Spec:  api.DNSResolverSpec{Listen: []api.DNSResolverListenSpec{{Name: "local", Addresses: []string{"127.0.0.1"}, Port: dnsPort}}, Sources: []api.DNSResolverSourceSpec{{Name: "zones", Kind: "zone", Match: []string{"lab.example"}, ZoneRef: []string{"DNSZone/lan"}}}},
+		Spec:  api.DNSResolverSpec{Listen: []api.DNSResolverListenSpec{{Name: "local", Addresses: []string{"127.0.0.1"}, Port: dnsPort}}, Sources: []api.DNSResolverSourceSpec{{Name: "zones", Kind: "zone", Match: []string{"lab.example", "2.0.192.in-addr.arpa"}, ZoneRef: []string{"DNSZone/lan"}}}},
 		Zones: []dnsconfig.RuntimeZone{{Name: "lan", Spec: api.DNSZoneSpec{Zone: "lab.example", Records: []api.DNSZoneRecordSpec{{Hostname: "router", IPv4: "192.0.2.1"}}, DHCPDerived: api.DNSZoneDHCPDerivedSpec{Sources: []string{"DHCPv4Server/leases"}}}}},
 	}
 	native := config.Native{
@@ -101,29 +102,58 @@ func testDaemonDHCPDNSOwnership(t *testing.T, migrated bool) {
 	}
 	script := filepath.Join(work, "lease.sh")
 	report := filepath.Join(work, "lease.json")
-	body := "#!/bin/sh\ncase \"$1\" in bound|renew) printf '{\"CurrentAddress\":\"%s\",\"ServerID\":\"%s\",\"LeaseTimeSeconds\":%s,\"DNS\":\"%s\"}\\n' \"$ip\" \"$serverid\" \"$lease\" \"$dns\" > " + report + ";; esac\n"
+	// Apply only the ACK-provided address and mask to the independent client.
+	// DHCPRELEASE uses this source address and the resulting connected route.
+	body := "#!/bin/sh\ncase \"$1\" in bound|renew) ip -4 addr replace \"$ip/$subnet\" dev \"$interface\" || exit 1; printf '{\"CurrentAddress\":\"%s\",\"ServerID\":\"%s\",\"LeaseTimeSeconds\":%s,\"DNS\":\"%s\"}\\n' \"$ip\" \"$serverid\" \"$lease\" \"$dns\" > " + report + ";; esac\n"
 	if err := os.WriteFile(script, []byte(body), 0700); err != nil {
 		t.Fatal(err)
 	}
 	requested := ""
-	acquire := func(ifname string) clientLease {
+	acquire := func(ifname, hostname string, release bool) clientLease {
 		t.Helper()
-		hostname := "workstation"
-		if ifname != "client0" {
-			hostname = ifname
+		args := []string{"udhcpc", "-f", "-n", "-i", ifname, "-x", "hostname:" + hostname, "-s", script}
+		if release {
+			args = append(args, "-R")
+		} else {
+			args = append(args, "-q")
 		}
-		args := []string{"udhcpc", "-f", "-n", "-q", "-i", ifname, "-x", "hostname:" + hostname, "-s", script}
 		if ifname == "client0" && requested != "" {
 			args = append(args, "-r", requested)
 		}
 		cmd := exec.Command("busybox", args...)
 		var output bytes.Buffer
 		cmd.Stdout, cmd.Stderr = &output, &output
+		if err := os.Remove(report); err != nil && !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
 		if err := fixtureInsideNamespace(clientNS, cmd.Start); err != nil {
 			t.Fatal(err)
 		}
+		if release {
+			// BusyBox -q -R exits before entering BOUND and sends no RELEASE.
+			// Let the normal event loop enter BOUND, then terminate with -R.
+			defer cmd.Process.Kill()
+			deadline := time.Now().Add(10 * time.Second)
+			for {
+				if _, err := os.Stat(report); err == nil {
+					break
+				}
+				if time.Now().After(deadline) {
+					_ = cmd.Process.Kill()
+					_ = cmd.Wait()
+					t.Fatalf("Release client did not acquire a lease: %s", output.String())
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+			if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+				t.Fatal(err)
+			}
+		}
 		if err := cmd.Wait(); err != nil {
 			t.Fatalf("independent BusyBox DHCP client: %v\n%s", err, output.String())
+		}
+		if release {
+			t.Logf("real Release client: %s", output.String())
 		}
 		data, err := os.ReadFile(report)
 		if err != nil {
@@ -151,7 +181,7 @@ func testDaemonDHCPDNSOwnership(t *testing.T, migrated bool) {
 			time.Sleep(100 * time.Millisecond)
 		}
 	}
-	lease := acquire("client0")
+	lease := acquire("client0", "workstation", false)
 	if (lease.CurrentAddress != "192.0.2.100" && lease.CurrentAddress != "192.0.2.101" && lease.CurrentAddress != "192.0.2.102") || lease.ServerID != "192.0.2.1" || lease.LeaseTimeSeconds <= 0 || lease.DNS != "192.0.2.1" {
 		t.Fatalf("unexpected DHCP lease: %+v", lease)
 	}
@@ -167,7 +197,7 @@ func testDaemonDHCPDNSOwnership(t *testing.T, migrated bool) {
 				t.Fatal(err)
 			}
 		}
-		special := acquire("special0")
+		special := acquire("special0", "special0", false)
 		if (special.CurrentAddress != "198.51.100.160" && special.CurrentAddress != "198.51.100.161") || special.DNS != "198.51.100.129" {
 			t.Fatalf("special client did not receive its own subnet and DNS: %+v", special)
 		}
@@ -180,7 +210,7 @@ func testDaemonDHCPDNSOwnership(t *testing.T, migrated bool) {
 				t.Fatal(err)
 			}
 		}
-		other := acquire("special1")
+		other := acquire("special1", "special1", false)
 		if (other.CurrentAddress != "198.51.100.160" && other.CurrentAddress != "198.51.100.161") || other.CurrentAddress == special.CurrentAddress || other.DNS != special.DNS {
 			t.Fatalf("device selectors sharing a pool did not allocate distinct addresses: %+v %+v", special, other)
 		}
@@ -318,7 +348,7 @@ func testDaemonDHCPDNSOwnership(t *testing.T, migrated bool) {
 	})
 	// The independent client requests its previous address after server restart.
 	// The server must retain the binding and the DNS process must stay running.
-	recovered := acquire("client0")
+	recovered := acquire("client0", "workstation", false)
 	if recovered.CurrentAddress != lease.CurrentAddress || pid(status(), dnsName) != dnsPID {
 		t.Fatal("DHCP/DNS restart did not preserve the lease and unaffected worker")
 	}
@@ -326,6 +356,65 @@ func testDaemonDHCPDNSOwnership(t *testing.T, migrated bool) {
 		t.Fatal("renewed lease disappeared from the existing DNS TCP connection")
 	}
 	t.Log("real DHCP ACK and persistent DNS TCP: original boot deadline removed DNS answers while server, control and supervisor were paused; journal recovery restored the lease on the same DNS connection")
+	// The same real client changes its name without changing its MAC or binding.
+	renamed := acquire("client0", "renamed-workstation", false)
+	if renamed.CurrentAddress != recovered.CurrentAddress {
+		t.Fatal("hostname change lost the same client's DHCP binding")
+	}
+	name := "renamed-workstation.lab.example."
+	reverse, err := mdns.ReverseAddr(renamed.CurrentAddress)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var newA, oldA, newPTR []mdns.RR
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("last hostname-change answers: new A=%v old A=%v PTR=%v", newA, oldA, newPTR)
+			var input dnsconfig.Input
+			err := f.control.Do(context.Background(), "GET", "/v1/services/"+dnsName+"/dns-input", nil, &input)
+			t.Logf("last DHCP DNS sources: err=%v sets=%+v", err, input.Sets)
+		}
+	})
+	wait(5*time.Second, func() bool {
+		newA = query(name, mdns.TypeA)
+		oldA = query("workstation.lab.example.", mdns.TypeA)
+		newPTR = query(reverse, mdns.TypePTR)
+		if len(newA) != 1 || len(oldA) != 0 {
+			return false
+		}
+		address, ok := newA[0].(*mdns.A)
+		if !ok || address.A.String() != renamed.CurrentAddress {
+			return false
+		}
+		for _, rr := range newPTR {
+			if ptr, ok := rr.(*mdns.PTR); ok && ptr.Ptr == name {
+				return true
+			}
+		}
+		return false
+	})
+	t.Logf("hostname change: A=%v old A=%v PTR=%v", newA, oldA, newPTR)
+	for _, check := range []struct{ name, kind, want string }{
+		{name, "A", renamed.CurrentAddress},
+		{reverse, "PTR", name},
+	} {
+		answer, err := exec.Command("dig", "@127.0.0.1", "-p", fmt.Sprint(dnsPort), check.name, check.kind, "+short", "+time=2", "+tries=1").CombinedOutput()
+		if err != nil || strings.TrimSpace(string(answer)) != check.want {
+			t.Fatalf("independent dig %s %s: %v\n%s", check.name, check.kind, err, answer)
+		}
+	}
+	// Only this final acquisition sends a real DHCPRELEASE when udhcpc exits.
+	released := acquire("client0", "renamed-workstation", true)
+	if released.CurrentAddress != renamed.CurrentAddress {
+		t.Fatal("release client acquired a different DHCP binding")
+	}
+	wait(5*time.Second, func() bool {
+		return len(query(name, mdns.TypeA)) == 0 && len(query(reverse, mdns.TypePTR)) == 0
+	})
+	if !hasAddress("router.lab.example.", "192.0.2.1") || pid(status(), dnsName) != dnsPID {
+		t.Fatal("DHCP hostname update or Release interrupted static DNS or replaced its TCP listener")
+	}
+	t.Log("same-MAC BusyBox hostname change replaced A/PTR and removed the old name; independent dig agreed; real Release removed A/PTR while static DNS and the original TCP connection survived")
 	if migrated {
 		t.Log("legacy resource YAML and explicit finite-source policy: real DHCP ACK, DNS publication, stopped-producer expiry and journal recovery passed")
 	}
@@ -377,11 +466,11 @@ spec:
       spec:
         zone: lab.example
         records: [{hostname: router, ipv4: 192.0.2.1}]
-        dhcpDerived: {sources: [DHCPv4Server/leases]}
+        dhcpDerived: {sources: [DHCPv4Server/leases], leaseFile: /var/lib/routerd/dnsmasq/dnsmasq.leases, ddns: true, ttl: 60}
     - apiVersion: net.routerd.net/v1alpha1
       kind: DNSForwarder
       metadata: {name: local-zone}
-      spec: {resolver: DNSResolver/dns, match: [lab.example], zoneRefs: [DNSZone/lan-zone]}
+      spec: {resolver: DNSResolver/dns, match: [lab.example, 2.0.192.in-addr.arpa], zoneRefs: [DNSZone/lan-zone]}
     - apiVersion: firewall.routerd.net/v1alpha1
       kind: FirewallZone
       metadata: {name: isolated-lan}

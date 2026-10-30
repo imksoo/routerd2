@@ -36,7 +36,7 @@ spec:
         zone: home.arpa
         ttl: 120
         records: [{hostname: gateway, ipv4: 192.0.2.1}]
-        dhcpDerived: {sources: [DHCPv4Server/lan-v4], ttl: 45}
+        dhcpDerived: {sources: [DHCPv4Server/lan-v4], leaseFile: /var/lib/routerd/dnsmasq/dnsmasq.leases, ddns: true, ttl: 45}
         reverseZones: [{name: 2.0.192.in-addr.arpa}]
     - apiVersion: net.routerd.net/v1alpha1
       kind: DNSForwarder

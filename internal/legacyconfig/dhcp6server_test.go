@@ -77,3 +77,47 @@ func TestDHCP6ImportBindsServingAndRAToSelectedPD(t *testing.T) {
 		}
 	}
 }
+
+func TestStatelessDHCP6DNSReferenceDoesNotInventAddressLeases(t *testing.T) {
+	data, err := os.ReadFile("../integration/testdata/dhcp6-pd-import.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy, err := os.ReadFile("../integration/testdata/dhcp6-pd-import-policy.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	options, err := DecodeOptions(bytes.NewReader(policy))
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = append(data, []byte(`
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: DNSResolver
+      metadata: {name: local-dns}
+      spec: {listen: [{name: local, addresses: [127.0.0.1], port: 5353, sources: [local]}]}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: DNSZone
+      metadata: {name: home}
+      spec:
+        zone: home.internal
+        dhcpDerived: {sources: [DHCPv6Server/lan-info], leaseFile: /var/lib/routerd/dnsmasq/dnsmasq.leases, ddns: true, ttl: 60}
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: DNSForwarder
+      metadata: {name: local}
+      spec: {resolver: DNSResolver/local-dns, match: [home.internal], zoneRefs: [DNSZone/home]}
+`)...)
+	if _, err := CompileWithOptions(data, options); err == nil {
+		t.Fatal("discarding the legacy lease file bypassed the explicit finite-source policy")
+	}
+	consent := true
+	options.DHCPDNS = map[string]DHCPDNSPolicy{"DNSResolver/local-dns": {SourceScopedFiniteLeases: &consent}}
+	result, err := CompileWithOptions(data, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver := service(t, result.Document, "dns").DNS
+	if len(resolver.Zones) != 1 || len(resolver.Zones[0].Spec.DHCPDerived.Sources) != 0 {
+		t.Fatal("stateless DHCPv6 reference invented an address lease source", resolver.Zones)
+	}
+}
