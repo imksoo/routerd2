@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -294,6 +295,15 @@ exec "$@"
 				t.Fatalf("inspect DNS sockets: %v: %s", err, bound)
 			}
 			if len(bytes.TrimSpace(bound)) == 0 {
+				return false
+			}
+			// A bound socket survives temporary VIP withdrawal. After control
+			// authority expires, wait for the actual address to be reapplied.
+			v4, err := netlink.AddrList(nil, netlink.FAMILY_V4)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.ContainsFunc(v4, func(a netlink.Addr) bool { return a.IP.Equal(net.ParseIP("192.0.2.254")) }) {
 				return false
 			}
 			var routes []netlink.Route

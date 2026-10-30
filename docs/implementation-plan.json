@@ -957,7 +957,18 @@
         "bounded_dns_observation": "2026-10-30 13:45 JST: fixed d525792/dynamic-dns-bounded-native79 completed actual HGW 7800s and 724 rounds of acquired DNS UDP/TCP plus IPv4/IPv6 HTTPS. Natural Renew at original T1+0.091s and matched Reply advanced original BOOTTIME deadlines; both LAN leases renewed. PD SIGKILL/ordinary replacement recovered in1.52/10.99s; all-daemon restart restored both clients in11.08s. No full two-resolver/BGP/NTP/Tailscale profile, continuous TCP, direct ONU or physical NIC qualification. DNS dial uses the original QueryTimeout; independent UDP/TLS failure/recovery and supporting Race/vet/CGO0 both-architecture/signed distribution checks passed on this fixed version.",
         "owned_dns_records_native80": "homert-dns-prebind-native80: bind logical VIP records/listeners once using existing Linux freebind, preserving operator intent. Kernel VIP ownership controls delivery; remove owner-notification/polling dependency that caused immediate post-takeover connection refusal. Prepare PD LAN addresses within original PD/election deadlines and observe DAD before DNS; RA/leases remain active-only. Signed PID1 pair, independent ISC/Linux AFTR/LAN: both DNS workers stopped/restarted, bidirectional takeover/rejoin, first UDP/TCP A/AAAA, acquired IPv4/IPv6 new communication, same TCP/NAT mappings passed. Independently paced UDP:985 sent/810 received/175 expired,max no reply4.543s; TCP max4.575s. Previous TCP-coupled UDP zero-loss claims do not measure traffic during TCP stalls. Full homert simultaneous integration, physical ONU/NIC and old3s apply timeout remain unqualified.",
         "dhcp_names_native86": "Imported actual routerd ddns/leaseFile/stateless-DHCPv6 references into source-owned finite DHCP names; no compatibility reader or extra DNS daemon. Final route-read-flat-native86 independent client name change, A/PTR, actual RELEASE withdrawal passed. Same final build actual HGW90s/9rounds automatic DHCPv4, RA-triggered DHCPv6 information/SLAAC, acquired DNS both families UDP/TCP, conditional-source failure/recovery, IPv4/IPv6 HTTPS and both LAN DHCPv4 renewals passed. PD SIGKILL1.49s/graceful4.06s/full daemon5.32s recovered with DUID/IAID; shutdown RA zero/kernel withdrawal. Natural PD renew0, nextT1~7187s, not direct ONU/physical/continuousTCP qualification.",
-        "homert_import_native89": "2026-10-30 homert-import-native89: owner attribution/PD selection, shared Interface+DSLite kernel aliases, short PD references in dynamic DNS and static address prerequisites are imported. Independent ISC/keepalived/Linux client test passed in 71.71s. Both full private homert inputs with explicit replacement policy still reject WebConsole and nDPI application classification; no full-profile acceptance is claimed."
+        "homert_import_native89": "2026-10-30 homert-import-native89: owner attribution/PD selection, shared Interface+DSLite kernel aliases, short PD references in dynamic DNS and static address prerequisites are imported. Independent ISC/keepalived/Linux client test passed in 71.71s. Both full private homert inputs with explicit replacement policy still reject WebConsole and nDPI application classification; no full-profile acceptance is claimed.",
+        "initial_lease_import": {
+          "commit": "b6c774e",
+          "runtime": "lease-import-native92",
+          "result": "Root isolated Linux normal product passed independent dnsmasq stop -> explicit initial import -> DNS before re-DHCP -> original lease retained, another client distinct, learned DNS UDP/TCP and both clients IPv4 gateway communication (9.42s). Parent independent normal product also passed. Original finite expiries retained; no HA ownership imported. Related Race/vet passed.",
+          "remaining": "Sticky history, two-node initial migration and target-device qualification."
+        },
+        "supplementary_information": {
+          "commit": "551c00c",
+          "result": "Restores old routerd supplementary Information-request after PD Reply even when DNS is already present. Partial PD updates retain omitted live information only through its original deadline. Parent normal dhcp6-information-original-expiry-native92 passed independent ISC split response, LAN DNS/dual-IP TCPUDP, renewal/restart/original expiry67.22s; related Race/vet passed. Root combined build/acceptance in progress.",
+          "limit": "This particular split is an independent ISC condition, not reproduced on physical HGW."
+        }
       }
     },
     {
@@ -11196,7 +11207,7 @@
     "physical_target_profile": "awaiting user target hardware/NIC and performance requirements; independent implementation and isolated VM tests continue",
     "validation_reporting": "Record current behavior, executed checks and untested scope concisely. Discard historical checkpoint ledgers as acceptance authority; no compatibility obligation to their code, APIs or formats.",
     "current_acceptance": {
-      "implementation_head": "9a57c8a",
+      "implementation_head": "551c00c",
       "single_node_full_input_runtime": "full-homert-loopback-native92 / 8cc420d / native92 / network27",
       "normal_alpine_runtime": "Alpine3.24.3 Linux6.18.59-0-lts; isolated PVE KVM4CPU4096MiB; normal Make/APK image",
       "original_input_resources_per_node": 109,
@@ -11267,7 +11278,44 @@
         "checks": "Network Race32.815s; vet; real isolated-kernel boot-lifetime and forwarding/NAT/DS-Lite tests with Race; amd64/arm64 static artifacts and signed catalog/publisher passed.",
         "normal_alpine": "Addresses-only predecessor passed cold boot and actual whole-guest reboot (two kernel boots, one reboot marker), full57 client paths and identities. Final9a57c8a normal image and two-guest acceptance next."
       },
-      "operations_peer_acceptance": "f470989 /7fc1e1d integrate independent official-Tailscale management SSH during control pause and whole restart, and all-upstream NTP communication loss/recovery. Actual normal binaries independent-a0b091b; same SSH connection survived3.035s control pause. NTP30.041s outage/27 drops, fresh upstream sample and LAN adoption recovered57.905s after restore; same chronyd. Not clock-adjustment/physical-link qualification."
+      "operations_peer_acceptance": "f470989 /7fc1e1d integrate independent official-Tailscale management SSH during control pause and whole restart, and all-upstream NTP communication loss/recovery. Actual normal binaries independent-a0b091b; same SSH connection survived3.035s control pause. NTP30.041s outage/27 drops, fresh upstream sample and LAN adoption recovered57.905s after restore; same chronyd. Not clock-adjustment/physical-link qualification.",
+      "lease_import": {
+        "commit": "b6c774e",
+        "runtime": "lease-import-native92",
+        "result": "Root isolated Linux normal product passed independent dnsmasq stop -> explicit initial import -> DNS before re-DHCP -> original lease retained, another client distinct, learned DNS UDP/TCP and both clients IPv4 gateway communication (9.42s). Parent independent normal product also passed. Original finite expiries retained; no HA ownership imported. Related Race/vet passed.",
+        "remaining": "Sticky history, two-node initial migration and target-device qualification."
+      },
+      "supplementary_dhcp6_information": {
+        "commit": "551c00c",
+        "result": "Restores old routerd supplementary Information-request after PD Reply even when DNS is already present. Partial PD updates retain omitted live information only through its original deadline. Parent normal dhcp6-information-original-expiry-native92 passed independent ISC split response, LAN DNS/dual-IP TCPUDP, renewal/restart/original expiry67.22s; related Race/vet passed. Root combined build/acceptance in progress.",
+        "limit": "This particular split is an independent ISC condition, not reproduced on physical HGW.",
+        "root_acceptance": "combined-information-native92: split ISC PD/information actual communication passed. Related Race/vet, normal build, both-arch static sixELF/catalog/publisher passed. Conditional LAN control expiry/role/PD withdrawal and recovery passed76.22s with actual VIP readiness; precursor runs failed DNS or10s VIP readiness. Same readiness check on normal9a57c8a baseline passed72.37s. One pass does not resolve the intermittent combined readiness failures."
+      },
+      "current_runs": "9a57c8a normal real-HGW7800s continues with all initial generations retained through917s/79 rounds; original8cc420d43200s LAN lease continues unchanged. Combined551c00c normal Alpine image generated. These are distinct executed versions.",
+      "two_node_network_batch": {
+        "source": "9a57c8a",
+        "runtime": "network-ownership-batch-native92",
+        "environment": "Two independent normal Alpine KVM4CPU4096MiB; each booted twice; same explicit shared-next-hop/VMAC intent as prior trial.",
+        "recovery_seconds": [
+          26.743775367736816,
+          21.253299713134766
+        ],
+        "tcp_max_reply_seconds": 7.397799259051681,
+        "udp": {
+          "sent": 4430,
+          "received": 4213,
+          "expired": 216,
+          "pending_at_sample": 1,
+          "max_gap_seconds": 5.933033493347466
+        },
+        "dns": {
+          "queries": 2696,
+          "failed": 19
+        },
+        "effects_deadlines": 0,
+        "limits": "Same original TCP SYN/sequence space and NAT mapping retained. Loss occurred. Warm-backup additional failure still failed60s; no physical qualification."
+      },
+      "warming_backup": "9a57c8a actual extra power cut with rejoined backup BGP not established: same-socket client survived, but full new-client recovery61.200s exceeded unchanged60s. Capture shows repeated FRR Cease/Connection Collision Resolution; no effects deadlines. Investigate graceful-restart capability/restore behavior. First attempt before fault was a peer listen race, corrected by waiting for independent listeners."
     }
   },
   "execution_order": [

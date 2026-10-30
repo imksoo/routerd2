@@ -7,13 +7,16 @@
 
 ## 現在のコード
 
-`9a57c8a` / native92 / network27。通常ビルド名 `network-ownership-batch-native92`。
+main実装は`551c00c` / native92 / network27。実行中の通常image/HGWは`9a57c8a` / `network-ownership-batch-native92`。
 routerd/loggingはCGO0、ユーザー承認済みのrouterd-modulesだけCGO1静的リンク。
 旧routerdの実装・実際の失敗を参照して取り込み、単一network writerと明示した設定・状態の所有へ接続する。
 
 - `8cc420d` は実PID1で必要なloopback起動を復元した。`3944a77` は配布libnetfilter_conntrackのevent timestampコピー欠落を修正した。通常Alpineでの実障害に基づく変更。
 - `bc3d2a7` はAFTRInputが共有lockを保持してnetwork IPCを待つ原因を除去した。待機後は現在の設定と送信元を再確認する。旧routerdと同じく、状態通知失敗で稼働中のDHCP engineを停止しない。元2秒通知・5秒観測期限と周期は維持する。
 - `9a57c8a` は全interfaceの期限更新intentをkernel更新前に一括保存する。Firewallの所有が変わらなければ同じboolの保存を省く。所有確認・atomic置換・完了保存は維持する。観測したfsync頻度は22.84/sから13.36/sへ減ったが、対象機器の性能保証ではない。
+
+- `b6c774e` は初回起動前に旧dnsmasqの有効IPv4 leaseを明示取込する。既存HAのlease結合を共用し、元期限と割当を保持する。通常製品`lease-import-native92`と独立サーバー/端末で、再DHCP前のDNS、旧端末の割当保持、別端末への重複防止、取得DNS UDP/TCP・両端末IPv4 gatewayが9.42秒で成功。sticky履歴・二台初期移行は別の残作業。
+- `551c00c` は旧routerdの情報取得呼出しを照合し、PD ReplyにDNSがあっても独立Information-requestを完了させる。部分PDで省略された情報を元期限より延命しない。独立ISCの分割応答で変更前の不送信を再現し、専用通常版でLAN実DNS/両IP TCPUDP・更新・再起動・元期限失効まで67.22秒で成功。組合せ通常版`combined-information-native92`も分割ISC実通信と関連Race/vet・両arch静的六ELF/署名検査が成功した。
 
 ## 実行済みと範囲
 
@@ -35,6 +38,12 @@ routerd/loggingはCGO0、ユーザー承認済みのrouterd-modulesだけCGO1静
 `43a6487`の`bgp_next_hops`方針で通常CLI変換し、両方110→57resourceが実行設定と一致した。
 個別WAN next-hopのECMP応答が待機系へ入る問題と、共有アドレスの二重ARP応答を取り除いた変更であり、元設定の無変更合格ではない。
 
+9a57c8aの通常Alpine二台も両方向電源断・再参加を完走した。全経路再確認26.744/21.253秒、同じTCP/NAT保持、最大TCP待ち7.398秒、独立UDP4430送信/4213受信/216期限切れ/最終標本時1未確定、最大無応答5.933秒。DNS2696件中19失敗。各guest実kernel起動2回、effects timeoutなし。
+
+別の予備系復帰途中への追加断は、新規通信が61.200秒で戻り、元60秒を超えた。packetで独立FRRから繰り返すCease/Connection Collision Resolutionを特定した。GR capabilityと保存済みpeer復元を照合して修正する。最初の走行は対向listen前の接続拒否でfault前に停止したため、独立対向のlisten完了を確認する手順へ訂正し、切替失敗には数えていない。
+
+組合せ版の条件付きLANでは、制御の短い停止・元authority期限失効・復帰、役割変更、PD喪失/再取得、実DNS/IPv6 TCPUDPと同じ固定DNS TCP接続が76.22秒で完走した。ソケットが残ってもVIPは撤去され得るため、元10秒内で実kernelアドレスも待つよう既存試験を訂正した。先行走行のDNS timeout/10秒VIP未復帰は残る間欠失敗であり、原因解決とはしない。同じ観測方法の修正前通常9a57c8aも72.37秒で通過。次は失敗時の選出/適用状態を取り、復旧成立と間欠原因を分ける。
+
 ## 継続中の試験と保護する状態
 
 通常Alpine `full-homert-loopback-native92` / 8cc420d の元LAN lease43200秒/T1=21600秒を継続観測中。
@@ -51,8 +60,8 @@ Ethernetは隔離hub/streamで独立peerへ接続する。管理経路・回復�
 
 ## 次に実行すること
 
-1. 最新9a57c8aの通常Make/APK imageで二つの独立KVMを起動し、既存TCP/UDPと新規DNS/両IP通信・BGP・Tailscaleの両方向電源断復旧を元60秒/端末15秒で確認する。復帰途上のbackupへの追加障害を別途解決する。
-2. 同じ最新通常製品で実HGW標準7800秒を実行し、自然PD更新、DHCP通知遅延修正と端末の継続利用を確認する。元LAN6時間待ちと並行して進める。
+1. 実行中の9a57c8a通常Make/APK imageで二つの独立KVMを起動し、既存TCP/UDPと新規DNS/両IP通信・BGP・Tailscaleの両方向電源断復旧を元60秒/端末15秒で確認する。復帰途上のbackupへの追加障害を別途解決する。
+2. 同じ9a57c8a通常製品で実HGW標準7800秒を継続し、自然PD更新、DHCP通知遅延修正と端末の継続利用を確認する。元LAN6時間待ちと並行して進める。
 3. 既存LAN lease初期取込など独立の不足機能を実装し、実端末で使う。対象設定・運用・更新と物理NIC/ONUの受入を完了する。
 4. k8s/pveの認証参加から動的IPIP/BGPと/32通信までを旧実装から取り込み、実peerへ通す。続いてCloud SAMの実装・許可された環境の受入を進める。
 
