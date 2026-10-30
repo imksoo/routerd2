@@ -78,6 +78,28 @@ runtimeplan and network. The final group-tracking changes also passed the scoped
 VRRP/Ingress checks. These checks support, but do not replace, the communication
 acceptance above.
 
+## Integrated candidate
+
+Base `f196880` plus ingress `67b4a29`, configuration contract
+`resource-program-native-85`, network journal 25; release `ingress-native85`.
+The network contract changes because original-destination matching is part of the
+persisted NAT intent; an older reader must not silently drop that restriction.
+
+The combined actual-process/kernel acceptance passed in 69.31 seconds on
+2026-10-30 JST. All-unhealthy withdrawal reached applied DNAT empty plus matching
+ICMP refusal in 292.31 ms, with no reset or accepted connection in that check.
+Related runtime/network/importer/Health/VRRP/program checks passed under the race
+detector, and scoped vet passed. All three CGO-free binaries built for amd64 and
+arm64; their embedded contracts, signed catalogs and publisher bundles passed.
+This is not an arm64 execution or physical-device acceptance claim.
+
+The first publisher check correctly rejected the dedicated worktree's group-
+writable directory. Its mode was corrected from 0775 to 0755, and only the failed
+publisher check was repeated. Product permission validation was unchanged.
+Evidence is retained in `dist/ingress-native85-acceptance/`,
+`dist/ingress-native85-check.log`, `dist/ingress-native85-signed.log` and
+`dist/ingress-native85-publish-recheck.log` in the integration worktree.
+
 ## Scope
 
 The fixture declares static LAN addresses instead of exercising the deployed
