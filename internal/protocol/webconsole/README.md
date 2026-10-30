@@ -245,3 +245,11 @@ real HTML response was also rendered offline at 1280 pixels and inspected for
 Japanese text, table visibility and overlapping elements. This result covers
 the DNS history operator path; it does not establish homert full-configuration
 natural renewal, two-node acceptance or target-hardware qualification.
+
+
+The combined source `3342df0` includes main `93cc25e`, DNS history and DHCPv6
+telemetry. Its standard `wsl-observability-3342df0` build passed the same DNS
+history check at 21:50:29-21:50:44 JST in 15.31 seconds. The source tree was
+clean. The concurrent DHCPv6/Collector check used byte-identical executables;
+evidence and SHA-256 values are under `dist/observability-integrated/dns/`.
+The API error wording is Japanese in this tested version.

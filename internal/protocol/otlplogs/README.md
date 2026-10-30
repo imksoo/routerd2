@@ -130,3 +130,19 @@ This acceptance covers OTLP/gRPC plaintext and the exercised lifecycle. It does
 not qualify other signal producers, archive-on-delete forwarding, automatic
 LAN client address acquisition, physical-device performance, mutual TLS or
 deployment-specific TLS trust.
+
+
+### Combined-source verification
+
+At 21:50:29-21:52:07 JST on 2026-10-30, clean source `3342df0` combined main
+`93cc25e`, DNS history and DHCPv6 telemetry. The standard static amd64 build
+`wsl-observability-3342df0` passed the same ISC/Collector acceptance in 98.42
+seconds. Acquisition, natural renewal, T2 timeout, Rebind recovery and exact
+original timestamps were received. During Collector outage the same DHCPv6
+worker renewed its actual prefix deadline; routed UDP completed 962 round
+trips with no failures. Configuration replacement, removal and fresh receiver
+recovery also passed. The DNS history acceptance ran concurrently with the
+same three executable SHA-256 values. Relevant Race Detector and vet checks
+passed. Evidence: `dist/observability-integrated/{build.json,dhcp6/}` including
+`execution.json`, `binaries.json`, actual receiver records and `peer.log`.
+This remains a private-namespace functional check, not full homert acceptance.
