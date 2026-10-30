@@ -6,7 +6,11 @@ labelled synthetic DEBUG input checks only severity filtering, not log origin.
 An independent TCP endpoint proves Health success, failure, and recovery in logs,
 metrics, and traces. ISC dhcpd proves prefix acquisition, natural renewal, and
 recovery after the server stops. An independent client exercises IPv4 UDP
-forwarding during Collector outages. This does not qualify physical hardware,
+forwarding during Collector outages. Real IPv4 allow/drop/reject rules exercise
+NFLOG records and their deny counters, including an explicitly logged allow
+probe to check exclusion. Ordinary allowed forwarding remains unlogged. These
+counters describe observed NFLOG records, not loss-free packet totals. This does
+not qualify physical hardware, IPv6 firewall measurements,
 LAN prefix distribution, TCP forwarding continuity, TLS, other signal producers,
 or reliable delivery during outages.
 """
@@ -32,6 +36,27 @@ def run(command, timeout=10, input=None):
 
 
 def endpoint(mode, output, port):
+    if mode == 'firewall':
+        results = []
+        for action, target_port in [('drop', 18080), ('reject', 18083), ('accept', 18084)]:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                sock.settimeout(.4)
+                sock.connect(('192.0.2.2', target_port))
+                message = ('firewall-'+action).encode()
+                sock.send(message)
+                try:
+                    assert sock.recv(1024) == message, 'unexpected firewall echo payload'
+                    observed = 'accept'
+                except TimeoutError:
+                    observed = 'drop'
+                except ConnectionRefusedError:
+                    observed = 'reject'
+                assert observed == action, f'{target_port}: expected {action}, observed {observed}'
+                results.append({'action': action, 'port': target_port, 'observed_at_ns': time.time_ns()})
+        with output.open('a') as log:
+            log.write(json.dumps(results)+'\n')
+        print(json.dumps(results), flush=True)
+        return
     if mode == 'tcp':
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -309,6 +334,54 @@ def peer(stage):
               'started_at': details['exchange_started_at'], 'finished_at': details['exchange_finished_at'],
               'counter': evidence[0], 'duration_sum_seconds': evidence[1]}), flush=True)
 
+    def firewall_exercise(total):
+        run(inside('otlp-client', ['python3', '-I', str(stage/'peer.py'), '--mode', 'firewall',
+                                 '--output', str(stage/'firewall-probes.jsonl')]))
+        found = []
+        def recorded():
+            entries = api('logging.sock', '/v1/logs?module=service.packets&tail=true&limit=100')['records']
+            found[:] = [entry for entry in entries if entry['message'] == 'firewall packet']
+            counts = {action: 0 for action in ('drop', 'reject', 'accept')}
+            for entry in found:
+                packet = entry['attributes']
+                action = packet['action']
+                assert action in counts, packet
+                assert packet['rule'] == 'otlp-'+action and packet['group'] == 1, packet
+                assert packet['protocol'] == 'udp' and packet['family'] == 'ipv4', packet
+                assert packet['source_address'] == '198.51.100.2' and packet['destination_address'] == '192.0.2.2', packet
+                assert packet['in_interface'] == 'lan0' and packet['out_interface'] == 'wan0', packet
+                assert packet['destination_port'] == {'drop': 18080, 'reject': 18083, 'accept': 18084}[action], packet
+                assert packet['packet_bytes'] > 0, packet
+                counts[action] += 1
+            assert all(count <= total for count in counts.values()), counts
+            return all(count == total for count in counts.values())
+        wait(recorded, 'real IPv4 allow/drop/reject NFLOG records', 5)
+        print('PASS real IPv4 UDP echo/drop timeout/reject ICMP and original NFLOG records',
+              json.dumps({'records_per_action': total, 'sequences': [entry['sequence'] for entry in found]}), flush=True)
+        return list(found)
+
+    def firewall_measured(receiver_name, originals, total):
+        after = max(nanos(entry['timestamp']) for entry in originals)
+        expected = [{'routerd.firewall.rule': 'otlp-'+action, 'routerd.firewall.action': action,
+                     'network.transport': 'udp', 'network.type': 'ipv4'} for action in ('drop', 'reject')]
+        def delivered():
+            if not all(received(receiver_name, entry) for entry in originals):
+                return False
+            seen = []
+            for point in metric_points(receiver_name, 'routerd.firewall.deny.total', 'sum', '{packet}'):
+                if int(point['timeUnixNano']) < after:
+                    continue
+                tags = attributes(point)
+                assert tags in expected, 'non-denied packet entered deny counter: '+str(tags)
+                count = int(point['asInt'])
+                assert 0 < count <= total, point
+                if count == total:
+                    seen.append(tags)
+            return all(tags in seen for tags in expected)
+        wait(delivered, 'NFLOG logs and exact cumulative firewall deny counters', 45)
+        print('PASS firewall deny counter equals observed drop/reject records; logged accept excluded',
+              json.dumps({'drop': total, 'reject': total, 'logged_accept': total}), flush=True)
+
     def dhcp6_peer():
         process = start('otlp-peer', [str(stage/'dhcpd'), '-6', '-f', '-d', '-cf', str(stage/'dhcp6.conf'),
                                     '-lf', str(stage/'dhcp6.leases'), '-pf', str(stage/'dhcp6.pid'), 'eth0'], 'dhcp6')
@@ -365,6 +438,15 @@ def peer(stage):
         resources += [{'id': 'wan6-address', 'depends_on': ['wan0'], 'address': {'interface': 'wan0', 'cidr': '2001:db8:123::1/64'}}]
         resources += [{'id': device+'-address', 'depends_on': [device], 'address': {'interface': device, 'cidr': address}} for device, address in [('wan0', '192.0.2.1/24'), ('lan0', '198.51.100.1/24')]]
         resources += [{'id': 'forward', 'forwarding': {'ipv4': True, 'ipv4_rp_filter': 0}}]
+        # Denied packets use the real NFLOG owner. Only the dedicated allow probe
+        # is logged to verify counter exclusion; normal forwarding is unlogged.
+        resources += [{'id': 'packet-filter', 'firewall': {'forward_chain': {'policy': 'accept', 'rules': [
+            {'match': {'family': 4, 'in_interface': 'lan0', 'out_interface': 'wan0', 'protocol': 'udp',
+                       'destination_ports': [{'start': port}]}, 'action': action,
+             'log': {'prefix': 'otlp-'+action, 'group': 1, 'every': 1, 'copy_range': 2048}}
+            for action, port in [('drop', 18080), ('reject', 18083), ('accept', 18084)]]}}},
+            {'id': 'packets', 'service': {'name': 'packets', 'firewall_log': {'group': 1}}}]
+
         resources += [{'id': 'probe', 'depends_on': ['wan0-address'], 'service': {'name': 'probe', 'health': {
             'interface': 'wan0', 'source_address': '192.0.2.1', 'target': '192.0.2.2', 'protocol': 'tcp', 'port': 18082,
             'interval_ms': 500, 'timeout_ms': 500, 'healthy_threshold': 2, 'unhealthy_threshold': 2}}}]
@@ -382,12 +464,17 @@ def peer(stage):
         sink = imported['resources'][0]
         sender = 'service.'+sink['service']['name']
         (stage/'config.json').write_text(json.dumps({'schema_version': 2, 'resources': resources+[sink]}))
-        boot = {'platform': 'host', 'config': str(stage/'config.json'), 'runtime_dir': str(stage/'run'), 'state_dir': str(stage/'state'), 'workers': {role: str(stage/('routerd-logging' if role == 'logging' else 'routerd-modules')) for role in ('logging', 'network', 'control', 'management', 'health', 'dhcp6', 'otlp_logs')}}
+        boot = {'platform': 'host', 'config': str(stage/'config.json'), 'runtime_dir': str(stage/'run'), 'state_dir': str(stage/'state'), 'workers': {role: str(stage/('routerd-logging' if role == 'logging' else 'routerd-modules')) for role in ('logging', 'network', 'control', 'management', 'health', 'dhcp6', 'firewall_log', 'otlp_logs')}}
         (stage/'boot.json').write_text(json.dumps(boot))
         receiver(4317, 'receiver-a.jsonl')
         second = receiver(4318, 'receiver-b.jsonl')
         start('otlp-peer', ['python3', '-I', str(stage/'peer.py'), '--mode', 'echo', '--port', '18081', '--output', str(stage/'echo.jsonl')], 'echo')
         wait(lambda: rows('echo.jsonl'), 'independent UDP echo receiver')
+        for port in (18080, 18083, 18084):
+            name = 'firewall-echo-'+str(port)
+            start('otlp-peer', ['python3', '-I', str(stage/'peer.py'), '--mode', 'echo', '--port', str(port),
+                                '--output', str(stage/(name+'.jsonl'))], name)
+            wait(lambda: rows(name+'.jsonl'), 'independent firewall echo receiver '+str(port))
         tcp_peer = probe_peer()
         start('otlp-router', [str(stage/'routerd'), 'boot', '--file', str(stage/'boot.json')], 'router')
         wait(lambda: (stage/'run/control.sock').exists(), 'control socket')
@@ -413,6 +500,7 @@ def peer(stage):
                          for link in json.loads(run(['ip', '-n', 'otlp-peer', '-j', '-6', 'address', 'show', 'dev', 'eth0']))
                          for a in link['addr_info']), 'DHCPv6 peer address DAD')
         dhcp_peer = dhcp6_peer()
+        firewall_first = firewall_exercise(1)
         acquisition_started = time.time_ns()
         resources += [{'id': 'pd', 'depends_on': ['wan6-address'], 'service': {'name': 'pd', 'dhcp6': {
             'interface': 'wan0', 'iaid': 1, 'request_prefix': True, 'prefix_length': 60}}}]
@@ -423,9 +511,11 @@ def peer(stage):
         renewal = dhcp6_record('renew', 'reply', nanos(acquisition['attributes']['exchange_finished_at']))
         healthy = health_record('passed', 'Healthy', time.time_ns())
         first_count = measured(healthy)
+        firewall_measured('receiver-a.jsonl', firewall_first, 1)
         for observation in (solicitation, acquisition, renewal):
             dhcp6_measured(observation)
         assert any(row['peer'][0] == '192.0.2.1' for row in rows('tcp-probe.jsonl')), 'no independent TCP accept'
+        firewall_second = firewall_exercise(2)
         tcp_peer.terminate()
         tcp_peer.wait(timeout=5)
         stopped_at = time.time_ns()
@@ -437,6 +527,7 @@ def peer(stage):
         rebound = dhcp6_record('rebind', 'reply', stopped_at)
         wait(lambda: api('control.sock', '/v1/services/service.pd')['snapshot'].get('state') == 'bound', 'PD recovered after server outage')
         measured(unhealthy)
+        firewall_measured('receiver-a.jsonl', firewall_second, 2)
         for observation in (timed_out, rebound):
             dhcp6_measured(observation)
         print('PASS ISC DHCPv6 acquisition, natural renewal, T2 timeout and rebind recovery', flush=True)
@@ -460,8 +551,12 @@ def peer(stage):
         before_disk = api('logging.sock', '/v1/status')['disk_written']
         before_probe = api('control.sock', '/v1/services/service.probe')
         before_pd = api('control.sock', '/v1/services/service.pd')
+        before_packets = modules()['service.packets']['generation']
         collector_stopped_at = time.time_ns()
         before_forwarding = len(rows('forwarding.jsonl'))
+        firewall_offline = firewall_exercise(3)
+        assert modules()['service.packets']['generation'] == before_packets, 'collector outage restarted NFLOG reader'
+        print('PASS Collector outage preserved real allow/drop/reject and NFLOG recording', flush=True)
         for _ in range(3):
             record = restart_management()
         wait(lambda: api('logging.sock', '/v1/status')['disk_written'] > before_disk, 'local disk records during receiver outage')
@@ -505,6 +600,12 @@ def peer(stage):
                 break
         assert recovered, 'no fresh product lifecycle record after receiver recovery'
         print('PASS receiver outage: local records/disk and independent routed UDP continued; fresh delivery recovered', flush=True)
+        # Exporter replacement starts a new counter and does not replay history.
+        # Prove that fresh real denies reach the recovered destination as well.
+        previous_sequence = max(entry['sequence'] for entry in firewall_offline)
+        fresh_firewall = [entry for entry in firewall_exercise(4) if entry['sequence'] > previous_sequence]
+        firewall_measured('receiver-b.jsonl', fresh_firewall, 1)
+        print('PASS fresh firewall deny metrics resumed after Collector recovery and exporter replacement', flush=True)
 
         second.terminate()
         second.wait(timeout=5)
@@ -556,7 +657,7 @@ def peer(stage):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--inside', type=Path)
-    parser.add_argument('--mode', choices=('echo', 'client', 'tcp'))
+    parser.add_argument('--mode', choices=('echo', 'client', 'tcp', 'firewall'))
     parser.add_argument('--port', type=int, default=18081)
     parser.add_argument('--collector', type=Path, default=Path('/usr/local/bin/otelcol-contrib'))
     parser.add_argument('--binary-dir', type=Path, default=Path('dist/bin'))
@@ -588,7 +689,7 @@ def main():
     # DHCPv6 acquisition/renewal/server recovery share these collection periods.
     with (args.output/'peer.log').open('w') as output:
         result = subprocess.run(root+['env', 'ROUTERD_OTLP_PARENT_NETNS='+parent_netns, 'ROUTERD_OTLP_COLLECTOR='+str(args.collector.resolve()), 'unshare', '--mount', '--net', '--pid', '--fork', '--mount-proc', '--kill-child=SIGKILL', '--propagation', 'private', 'python3', '-I', str(stage/'peer.py'), '--inside', str(stage)], stdout=output, stderr=subprocess.STDOUT, timeout=240)
-    for name in ('router.log', 'receiver-a.jsonl', 'receiver-b.jsonl', 'forwarding.jsonl', 'tcp-probe.jsonl', 'dhcp6.log'):
+    for name in ('router.log', 'receiver-a.jsonl', 'receiver-b.jsonl', 'forwarding.jsonl', 'tcp-probe.jsonl', 'dhcp6.log', 'firewall-probes.jsonl'):
         artifact = subprocess.run(root+['cat', str(stage/name)], capture_output=True)
         if artifact.returncode == 0:
             (args.output/name).write_bytes(artifact.stdout)
