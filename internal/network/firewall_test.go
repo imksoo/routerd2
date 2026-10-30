@@ -4,6 +4,7 @@ package network
 
 import (
 	"context"
+	"net/netip"
 	"strings"
 	"testing"
 )
@@ -32,6 +33,7 @@ func TestFirewallValidationRejectsAmbiguousHooksAndTranslations(t *testing.T) {
 		{Input: &FirewallChain{Rules: []FirewallRule{{Match: PacketMatch{OutInterface: "wan0"}, Action: "accept"}}}},
 		{Output: &FirewallChain{Rules: []FirewallRule{{Match: PacketMatch{InInterface: "lan0"}, Action: "accept"}}}},
 		{Input: &FirewallChain{Rules: []FirewallRule{{Match: PacketMatch{Family: 4, Destination: "2001:db8::/64"}, Action: "accept"}}}},
+		{Input: &FirewallChain{Rules: []FirewallRule{{Match: PacketMatch{Family: 4, ExcludeDestinations: []netip.Prefix{netip.MustParsePrefix("2001:db8::/64")}}, Action: "accept"}}}},
 		{Input: &FirewallChain{Rules: []FirewallRule{{Match: PacketMatch{Protocol: "udp", ICMPTypes: []int{8}}, Action: "accept"}}}},
 		{Input: &FirewallChain{Rules: []FirewallRule{{Match: PacketMatch{Family: 6, Protocol: "icmp"}, Action: "accept"}}}},
 		{Input: &FirewallChain{Rules: []FirewallRule{{Match: PacketMatch{DestinationPorts: []PortRange{{Start: 53}}}, Action: "accept"}}}},

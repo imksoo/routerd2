@@ -316,9 +316,9 @@ func interfaceMatch(key expr.MetaKey, name string) []expr.Any {
 	return []expr.Any{&expr.Meta{Key: key, Register: 1}, &expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: b}}
 }
 func prefixMatch(prefix netip.Prefix) []expr.Any {
-	return prefixFieldMatch(prefix, true)
+	return prefixFieldMatch(prefix, true, expr.CmpOpEq)
 }
-func prefixFieldMatch(prefix netip.Prefix, source bool) []expr.Any {
+func prefixFieldMatch(prefix netip.Prefix, source bool, op expr.CmpOp) []expr.Any {
 	proto, offset, length := byte(unix.NFPROTO_IPV6), uint32(8), uint32(16)
 	if prefix.Addr().Is4() {
 		proto, offset, length = unix.NFPROTO_IPV4, 12, 4
@@ -335,7 +335,7 @@ func prefixFieldMatch(prefix netip.Prefix, source bool) []expr.Any {
 		&expr.Meta{Key: expr.MetaKeyNFPROTO, Register: 1}, &expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{proto}},
 		&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseNetworkHeader, Offset: offset, Len: length},
 		&expr.Bitwise{SourceRegister: 1, DestRegister: 1, Len: length, Mask: mask, Xor: make([]byte, length)},
-		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: address},
+		&expr.Cmp{Op: op, Register: 1, Data: address},
 	}
 }
 

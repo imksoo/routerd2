@@ -18,7 +18,7 @@ import (
 var errLinkNotFound = errors.New("link not found")
 
 // JournalVersion is the persisted network ownership/BOOTTIME contract.
-const JournalVersion = 20
+const JournalVersion = 21
 
 type settingKey struct {
 	Kind      string `json:"kind"`
@@ -915,7 +915,7 @@ func (p *apply) refreshRoute(i int, next Route) error {
 	}
 	timer, err := newRouteTimer(next.ValidUntil, clock)
 	if err != nil {
-		return p.failure("route refresh lifetime", err)
+		return p.failure("route refresh lifetime", fmt.Errorf("route %s table %d metric %d: %w", next.Destination, routeTable(next), next.Metric, err))
 	}
 	p.e.state.Routes[i].Route = next
 	p.e.state.Routes[i].AttemptedExpiry = &timer
@@ -964,7 +964,7 @@ func (p *apply) addRoutes(additions []Route, linkBounds map[string]lifetime.Dead
 	for _, r := range additions {
 		timer, err := newRouteTimer(r.ValidUntil, clock)
 		if err != nil {
-			return p.failure("route lifetime", err)
+			return p.failure("route lifetime", fmt.Errorf("route %s table %d metric %d: %w", r.Destination, routeTable(r), r.Metric, err))
 		}
 		saved := ownedRoute{Route: r, KernelExpiry: timer}
 		if i, ok := positions[routeSlot(r)]; ok {

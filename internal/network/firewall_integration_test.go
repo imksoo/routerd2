@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"net/netip"
 	"os"
 	"strconv"
 	"strings"
@@ -54,6 +55,10 @@ func runNativeACLNATFixture(t *testing.T, e *Engine, base Desired, clientNS, ser
 		{Match: PacketMatch{InInterface: "lan0", OutInterface: "wan0", Protocol: "tcp", DestinationPorts: []PortRange{{Start: 41401}}}, Action: "reject"},
 		{Match: PacketMatch{InInterface: "lan0", OutInterface: "wan0", Protocol: "tcp", DestinationPorts: []PortRange{{Start: 41402}}}, Action: "drop"},
 	}}
+	// Multiple exclusions are ANDed in one NAT rule; peers have explicit
+	// return routes for the untranslated client sources.
+	d.Firewall.NAT[0].Match.ExcludeDestinations = []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8"), netip.MustParsePrefix("203.0.113.0/24")}
+	d.Firewall.NAT[1].Match.ExcludeDestinations = []netip.Prefix{netip.MustParsePrefix("2001:db8:ffff::/48"), netip.MustParsePrefix("2001:db8:3::/64")}
 	if _, err := e.Apply(context.Background(), 30, d); err != nil {
 		t.Fatalf("native ACL install: %v", err)
 	}
@@ -81,6 +86,9 @@ func runNativeACLNATFixture(t *testing.T, e *Engine, base Desired, clientNS, ser
 	}
 	held.exchange(t)
 	t.Log("INPUT/OUTPUT IPv4/IPv6 CIDR/interface/TCP/UDP port-range ACLs, drop/reject, ordered FORWARD rules and established-flow preservation passed")
+
+	tcpExchange(t, clientNS, serverNS, "tcp4", "203.0.113.2", "192.0.2.2")
+	tcpExchange(t, clientNS, serverNS, "tcp6", "2001:db8:3::2", "2001:db8:1::2")
 
 	nat := cloneDesired(d)
 	defaultNAT := nat.Firewall.NAT
@@ -152,6 +160,9 @@ func runNativeACLNATFixture(t *testing.T, e *Engine, base Desired, clientNS, ser
 	if _, err := e.Apply(context.Background(), 1, base); err != nil {
 		t.Fatalf("restore ACL/NAT fixture: %v", err)
 	}
+	tcpExchange(t, clientNS, serverNS, "tcp4", "203.0.113.2", "198.51.100.1")
+	tcpExchange(t, clientNS, serverNS, "tcp6", "2001:db8:3::2", "2001:db8:2::1")
+	t.Log("IPv4/IPv6 TCP preserves source for excluded destinations and resumes NAT after removal")
 	t.Log("IPv4/IPv6 DNAT+SNAT TCP, translated source port ranges, UDP masquerade ranges, NAT-only hooks and existing NAT-session preservation passed")
 }
 

@@ -27,11 +27,14 @@ func packetExpressions(m PacketMatch) [][]expr.Any {
 	}
 	if m.Source != "" {
 		p, _ := netip.ParsePrefix(m.Source)
-		base = append(base, prefixFieldMatch(p, true)...)
+		base = append(base, prefixFieldMatch(p, true, expr.CmpOpEq)...)
 	}
 	if m.Destination != "" {
 		p, _ := netip.ParsePrefix(m.Destination)
-		base = append(base, prefixFieldMatch(p, false)...)
+		base = append(base, prefixFieldMatch(p, false, expr.CmpOpEq)...)
+	}
+	for _, prefix := range m.ExcludeDestinations {
+		base = append(base, prefixFieldMatch(prefix, false, expr.CmpOpNeq)...)
 	}
 	if m.Protocol != "" {
 		proto := map[string]byte{"tcp": unix.IPPROTO_TCP, "udp": unix.IPPROTO_UDP, "icmp": unix.IPPROTO_ICMP, "icmpv6": unix.IPPROTO_ICMPV6, "ipv6-icmp": unix.IPPROTO_ICMPV6, "ipip": unix.IPPROTO_IPIP, "vrrp": 112}[m.Protocol]

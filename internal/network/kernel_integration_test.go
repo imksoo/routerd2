@@ -236,11 +236,12 @@ func runKernelFixture(t *testing.T) {
 	tcpExchange(t, clientNS, serverNS, "tcp6", "2001:db8:3::2", "2001:db8:2::1")
 	runNativePolicyFixture(t, e, d, clientNS, serverNS)
 	runNativeECMPFixture(t, e, d, clientNS, serverNS)
+	peerRoute(t, server, "server0", "192.0.2.0/24", "198.51.100.1")
+	peerRoute(t, server, "server0", "2001:db8:1::/64", "2001:db8:2::1")
 	runNativeACLNATFixture(t, e, d, clientNS, serverNS)
 	runNativeIPv4FragmentFixture(t, e, d, clientNS, serverNS)
 	runNativeRAStateFixture(t, e, d, clientNS, serverNS)
 	runNativeAddressLifetimeFixture(t, e, d)
-	peerRoute(t, server, "server0", "192.0.2.0/24", "198.51.100.1")
 	assertNewReverseConnectionDropped(t, serverNS, clientNS)
 	// A symmetric AFTR-side kernel tunnel makes this a real IPv4-in-IPv6
 	// exchange, not just a tunnel-link existence assertion.

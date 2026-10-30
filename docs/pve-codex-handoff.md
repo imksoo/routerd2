@@ -1,3 +1,17 @@
+## 2026-10-30 14:08 JST: NAT展開削除と実適用時間
+
+旧routerdの同一規則内の宛先prefix除外を取り込み、補集合の再帰展開を削除した。私有の同じhomert構成はNAT636件から26件。独立kernel peerとのIPv4/IPv6 TCPで、複数除外先への元送信元保持と撤去後のNAT復帰を確認。既存の実QEMU kernel検査全体（routes/ACL/NAT/DS-Lite/HA/RA期限）が38.12秒で終了0。初回は試験の戻り経路重複、次は試験全体45秒の時間切れであり合格には数えず、追加した通信を既存適用場面へまとめて不要な二回の適用を除去した。製品・試験の期限を延長していない。通常版の全`make check`（Race/vetを含む）とMake経路のCGO0 amd64/arm64ビルドが終了0。設定契約native81、network journal21。旧試作形式のreaderやmigrationは追加せず、使い捨てVM設定を再生成する。
+
+`nat-direct-timing-native81`の全設定512MiB/2CPU/TCG起動は依然失敗。一時的な既存ログへの時刻記録でnetwork適用5.568/6.674/8.434秒、effects受理約0.09〜0.56秒と、その後のACK待ち中のrequest取消を観測した。期限更新ごとのjournal同期書込をまとめる修正中。NAT縮小だけを旧二台3秒timeoutの解消と数えない。一時計測は保存した私有imageと小さい診断記録だけに残し、共有sourceから除去済み。条件付きDNSの全24問い合わせは端末取得前のため未実施。
+
+UDP syslog `2945daa` は独立受信先で製品記録、宛先変更/撤去、受信停止時のローカル記録保持/復帰、並行IPv4 UDP54往復失敗0。永続Sysctl `b9ec90a` は実CLI取込→設定確定→network/全製品再起動→元値撤去復元が成立。これらは全LogSink/OTLPや全homert受入ではない。失敗済みVM三組を削除し、保存DUIDと稼働環境は変更していない。
+
+## 2026-10-30 13:46 JST: 固定版の自然更新完走と全設定VMの起動失敗
+
+`d525792` / `dynamic-dns-bounded-native79` の実HGW・隔離Linux・独立端末による7800秒観測は終了0。724巡の取得DNS UDP/TCPとIPv4/IPv6 HTTPS、両端末の自然DHCP更新、元T1から0.091秒後の自然PD Renewと対応Reply一組を確認した。ReplyのT1/T2/接頭辞寿命と、更新後のBOOTTIME期限も照合した。PD worker SIGKILL後1.52秒、通常交換後10.99秒、全daemon再起動後11.08秒で端末通信が復帰した。現在VIP/PDのDNS記録、条件付き転送の障害分離と復帰、停止時RAゼロ・kernel撤去まで成立。元の私有実行logは `/tmp/routerd-dynamic-dns-bounded-native79-natural.log`。最小の自然更新照合記録は私有のまま保持し、WAN識別子・実接頭辞を公開しない。二段DNS/BGP/NTP/Tailscale全設定の同時利用、連続TCP、ONU直結、対象物理NICの資格へ拡張しない。
+
+`06412e5` と `nft_redir`/`nft_hash` 追加の配布候補 `homert-stream-kernel-native80` はMake経路のAPK検査・イメージ生成が終了0。512MiB/2CPU/TCGの全設定起動は失敗。初期networkはgeneration1のまま、VRRP/BGPのeffects要求timeout、Tailscale socketの5秒timeout、control起動60秒timeoutを観測した。失敗状態にはkernel適用中のroute寿命切れが残る。循環lockは未確認で、全適用の遅延と元期限/ACKの関係を調査中。先行のnetwork firewall ENOENTはこの走行では観測しなかったが、端末DHCP/DNS取得前に止まり、全通信合格には数えない。試験側のserial.log生成競合を修正し、起動待ちをkernel起動時間と製品60秒期限を観測できる110秒に変更した。製品deadlineは変更していない。同じイメージ・512MiB/4CPUでも起動は失敗し、CPU数変更で解消したとは扱わない。旧routerdの同一rule内AND否定を取り込み、補集合へのCIDR展開を除去したnative81を次に比較する。私有の同じ設定はNAT636件から26件になった。
+
 ## 統合候補: homert-dns-prebind-native80（2026-10-30 12:38 JST）
 
 旧routerdの論理VIP名とfreebind待受を再利用し、VIP名・待受を設定準備時に束縛する。所有通知後のDNS入力を待つ分岐を削除した。kernelがVIPを公開してからDNSがbindする間の接続拒否を、実二段DNSの切替で再現して修正した。委譲LANアドレスは元PDと元選出期限以内に準備し、既存DAD観測後にDNSへ渡す。RAと貸出の公開はactive条件を維持する。

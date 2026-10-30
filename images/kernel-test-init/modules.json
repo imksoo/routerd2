@@ -12,6 +12,8 @@
   "nft_ct",
   "nft_chain_nat",
   "nft_masq",
+  "nft_redir",
+  "nft_hash",
   "nft_nat",
   "nft_reject_inet",
   "nft_log",

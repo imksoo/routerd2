@@ -51,20 +51,22 @@ type LocalRedirect struct {
 }
 
 // PacketMatch fields are ANDed. Port ranges and ICMP types are alternatives
-// within their field. Family zero matches both families unless a prefix or
+// within their field. ExcludeDestinations excludes each prefix from the match.
+// Family zero matches both families unless a prefix or
 // ICMP protocol narrows it. Protocol is empty/tcp/udp/icmp/icmpv6/ipip/vrrp.
 // The native L4 matcher handles IPv6 extension headers; it does not assume the
 // transport header immediately follows the fixed IPv6 header.
 type PacketMatch struct {
-	Family           int         `json:"family,omitempty"`
-	Source           string      `json:"source,omitempty"`
-	Destination      string      `json:"destination,omitempty"`
-	InInterface      string      `json:"in_interface,omitempty"`
-	OutInterface     string      `json:"out_interface,omitempty"`
-	Protocol         string      `json:"protocol,omitempty"`
-	SourcePorts      []PortRange `json:"source_ports,omitempty"`
-	DestinationPorts []PortRange `json:"destination_ports,omitempty"`
-	ICMPTypes        []int       `json:"icmp_types,omitempty"`
+	Family              int            `json:"family,omitempty"`
+	Source              string         `json:"source,omitempty"`
+	Destination         string         `json:"destination,omitempty"`
+	ExcludeDestinations []netip.Prefix `json:"exclude_destinations,omitempty"`
+	InInterface         string         `json:"in_interface,omitempty"`
+	OutInterface        string         `json:"out_interface,omitempty"`
+	Protocol            string         `json:"protocol,omitempty"`
+	SourcePorts         []PortRange    `json:"source_ports,omitempty"`
+	DestinationPorts    []PortRange    `json:"destination_ports,omitempty"`
+	ICMPTypes           []int          `json:"icmp_types,omitempty"`
 }
 
 // PortRange is inclusive. End zero means a single port equal to Start.
@@ -137,6 +139,12 @@ func matchFamily(m PacketMatch) int {
 			return 6
 		}
 	}
+	if len(m.ExcludeDestinations) > 0 {
+		if m.ExcludeDestinations[0].Addr().Is4() {
+			return 4
+		}
+		return 6
+	}
 	switch m.Protocol {
 	case "icmp":
 		return 4
@@ -168,6 +176,20 @@ func validatePacketMatch(m PacketMatch, hook string) error {
 		}
 		if family != 0 && family != current {
 			add("source, destination and family must agree")
+		}
+		family = current
+	}
+	for _, p := range m.ExcludeDestinations {
+		if !p.IsValid() || p.Addr().Is4In6() || p != p.Masked() {
+			add("invalid excluded destination network %q", p)
+			continue
+		}
+		current := 6
+		if p.Addr().Is4() {
+			current = 4
+		}
+		if family != 0 && family != current {
+			add("excluded destinations and match family must agree")
 		}
 		family = current
 	}

@@ -1,3 +1,5 @@
+2026-10-30 13:46 JST: 固定native79の実HGW 7800秒・724巡、自然PD更新と全daemon再起動が終了0。別のnative80全設定512MiB/2CPU VMは起動失敗、route期限と適用/ACK遅延を調査中。全34項目の完了には数えない。[現状と範囲](pve-codex-handoff.md)。
+
 2026-10-30 12:38 JST native80統合候補: 二段DNSのVIP公開後の待受遅れを旧routerdのfreebind設計で解消。両DNS停止復旧・両方向切替・初回DNS/両IP新規通信・同一TCP/UDP対応が成立。独立UDPは175/985件失効、最大無応答4.543秒であり損失0ではない。全homert同時利用・全体再起動、旧3秒timeout、全34項目は未完了。[実行版と限界](pve-codex-handoff.md)。
 
 2026-10-30 JST dynamic-dns-native79候補: PD/VIPローカルDNS記録を元期限付きの既存入力へ接続。実HGWの初回両IP DNS/HTTPS・動的名・再起動、隔離kernel/digの変更・失効・再取得を確認。最終候補の自然更新と二段DNS・全homert/二台受入は残る。IPIP/FRRの静的経路通信は`0722611`で公開済み。[実行版と限界](pve-codex-handoff.md)。
