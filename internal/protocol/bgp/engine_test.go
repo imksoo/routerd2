@@ -413,6 +413,17 @@ func assertAppliedPolicyStatementNamesUnique(t *testing.T, req *gobgpapi.SetPoli
 	}
 }
 
+func TestConfiguredPeerKeepsGracefulRestartForSelectedFamily(t *testing.T) {
+	peer := configuredPeer(bgpdaemon.AppliedPeer{
+		Address: "192.0.2.2", ASN: 64513,
+		GracefulRestart: &bgpdaemon.AppliedGracefulRestart{Enabled: true, RestartTime: 120},
+	}, bgpdaemon.AppliedGlobal{ASN: 64512, Families: []string{"ipv4-unicast"}}, PeerTransport{})
+	if len(peer.AfiSafis) != 1 || peer.AfiSafis[0].Config.Family.Afi != gobgpapi.Family_AFI_IP ||
+		!peer.AfiSafis[0].MpGracefulRestart.GetConfig().GetEnabled() {
+		t.Fatal("committed family selection lost graceful restart capability", peer)
+	}
+}
+
 func TestAppliedPeerRestoresInternalRouteReflectorClient(t *testing.T) {
 	peer := appliedPeer(bgpdaemon.AppliedPeer{
 		Address:                 "10.99.0.2",

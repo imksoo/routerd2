@@ -44,17 +44,6 @@ func configuredPeer(peer bgpdaemon.AppliedPeer, global bgpdaemon.AppliedGlobal, 
 		p.Transport.RemotePort = uint32(tr.RemotePort)
 		p.Transport.BindInterface = tr.BindInterface
 	}
-	// The process enables only the families in committed global intent.
-	if len(global.Families) > 0 {
-		p.AfiSafis = nil
-		for _, family := range global.Families {
-			if family == "ipv6-unicast" {
-				p.AfiSafis = append(p.AfiSafis, afiSafi(ipv6Family()))
-			} else {
-				p.AfiSafis = append(p.AfiSafis, afiSafi(ipv4Family()))
-			}
-		}
-	}
 	return p
 }
 

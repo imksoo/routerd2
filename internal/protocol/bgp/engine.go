@@ -361,15 +361,25 @@ func appliedPeer(peer bgpdaemon.AppliedPeer, global bgpdaemon.AppliedGlobal) *go
 			Type:            peerType,
 			SendCommunity:   3,
 		},
-		Timers: &gobgpapi.Timers{Config: timers(peer.TimersProfile)},
-		AfiSafis: []*gobgpapi.AfiSafi{
-			afiSafi(ipv4Family()),
-			afiSafi(ipv6Family()),
-		},
+		Timers:    &gobgpapi.Timers{Config: timers(peer.TimersProfile)},
 		Transport: appliedPeerTransport(peer.PassiveMode),
+	}
+	families := global.Families
+	if len(families) == 0 {
+		families = []string{"ipv4-unicast", "ipv6-unicast"}
+	}
+	for _, family := range families {
+		if family == "ipv6-unicast" {
+			out.AfiSafis = append(out.AfiSafis, afiSafi(ipv6Family()))
+		} else {
+			out.AfiSafis = append(out.AfiSafis, afiSafi(ipv4Family()))
+		}
 	}
 	if gr := peer.GracefulRestart; gr != nil && gr.Enabled {
 		out.GracefulRestart = &gobgpapi.GracefulRestart{Enabled: true, RestartTime: gr.RestartTime, StaleRoutesTime: gr.StaleRoutesTime}
+		for _, family := range out.AfiSafis {
+			family.MpGracefulRestart = &gobgpapi.MpGracefulRestart{Config: &gobgpapi.MpGracefulRestartConfig{Enabled: true}}
+		}
 	}
 	if peer.EbgpMultihop > 1 {
 		out.EbgpMultihop = &gobgpapi.EbgpMultihop{Enabled: true, MultihopTtl: uint32(peer.EbgpMultihop)}
