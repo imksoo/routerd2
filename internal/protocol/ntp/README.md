@@ -38,6 +38,14 @@ includes frequency uncertainty (`skew_ppm`), root delay and dispersion. A
 synchronized flag alone does not establish client acceptance. The standard LAN
 client's timeout and quality criteria are retained.
 
+Chronyd saves frequency and uncertainty on each clock update (`driftfile
+interval 0`). A 60-second write throttle left an untrained estimate on disk
+after the live clock had calibrated; an actual KVM power cut then restored
+1000000 ppm uncertainty and the independent client rejected NTP until a new
+reference arrived. This uses chronyd's own update and atomic rename, with no
+second state writer or polling loop. It does not change source polling or
+claim that synchronization alone establishes time quality.
+
 Remaining acceptance includes real DHCPv4-learned NTP, IPv6 LAN access denial,
 long-outage holdover/slew, unsynchronized TLS policy, complete homert integration
 and target hardware. Intermittent supervisor-observation expiry and a previous
