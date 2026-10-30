@@ -36,6 +36,9 @@ import (
 //go:embed page.html
 var pageHTML string
 
+//go:embed flows.html
+var flowsHTML string
+
 type page struct {
 	Config    webconsoleconfig.Config
 	Heading   string
@@ -46,6 +49,7 @@ type page struct {
 	Metadata  *control.ConfigurationMetadata
 	Next      string
 	Clients   *clientPage
+	Flows     *flowPage
 }
 
 type clientPage struct {
@@ -69,7 +73,7 @@ func Run(ctx context.Context, cfg webconsoleconfig.Config, runtimeDir string, re
 		default:
 			return "不明"
 		}
-	}}).Parse(pageHTML)
+	}}).Parse(pageHTML + flowsHTML)
 	if err != nil {
 		return err
 	}
@@ -79,7 +83,7 @@ func Run(ctx context.Context, cfg webconsoleconfig.Config, runtimeDir string, re
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			w.Header().Set("Allow", "GET, HEAD")
 			http.Error(w, "read-only console", http.StatusMethodNotAllowed)
@@ -150,6 +154,9 @@ func Run(ctx context.Context, cfg webconsoleconfig.Config, runtimeDir string, re
 					}
 				}
 			}
+		case "flows":
+			p.Heading = "通信履歴"
+			p.Flows, err = loadFlows(r.Context(), client, r.URL.Query())
 		case "configuration":
 			p.Heading = "設定の確定状態"
 			p.Metadata = new(control.ConfigurationMetadata)

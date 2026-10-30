@@ -18,6 +18,8 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"net/netip"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,6 +30,9 @@ import (
 	"github.com/imksoo/routerd/pkg/logstore"
 	"github.com/imksoo/routerd2/internal/control"
 	"github.com/imksoo/routerd2/internal/legacyconfig"
+	"github.com/imksoo/routerd2/internal/protocol/webconsoleconfig"
+	"github.com/imksoo/routerd2/internal/resourceprogram"
+	"github.com/imksoo/routerd2/internal/serviceconfig"
 	"github.com/miekg/dns"
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netns"
@@ -206,10 +211,11 @@ func testDaemonTrafficFlowHistory(t *testing.T, native bool) {
 		t.Fatal(err)
 	}
 	work := t.TempDir()
-	var historyPath string
+	var historyPath, historyService string
 	for _, res := range imported.Document.Resources {
 		if res.Service != nil && res.Service.TrafficFlow != nil {
 			cfg := res.Service.TrafficFlow
+			historyService = res.Service.ModuleName()
 			if cfg.IntervalSeconds != 0 || cfg.Retention == nil || cfg.Retention.IntervalSeconds != 86400 {
 				t.Fatal("legacy defaults changed", cfg)
 			}
@@ -226,7 +232,43 @@ func testDaemonTrafficFlowHistory(t *testing.T, native bool) {
 	if err := os.MkdirAll(historyPath, 0700); err != nil {
 		t.Fatal(err)
 	}
+	imported.Document.Resources = append(imported.Document.Resources, resourceprogram.Resource{
+		ID: "service/history-console", Service: &serviceconfig.Service{Name: "history-console", WebConsole: &webconsoleconfig.Config{Listen: netip.MustParseAddrPort("192.0.2.1:8080"), BasePath: "/ops/", Title: "Communication history"}},
+	})
 	f := startFixtureDaemonAt(t, imported.Document, work)
+	console := func(query url.Values) (int, string) {
+		t.Helper()
+		query.Set("service", historyService)
+		var connection net.Conn
+		if err := fixtureInsideNamespace(lan, func() error {
+			var err error
+			connection, err = net.DialTimeout("tcp4", "192.0.2.1:8080", time.Second)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		defer connection.Close()
+		if err := connection.SetDeadline(time.Now().Add(3 * time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		request, err := http.NewRequest(http.MethodGet, "http://192.0.2.1:8080/ops/flows?"+query.Encode(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = request.Write(connection); err != nil {
+			t.Fatal(err)
+		}
+		response, err := http.ReadResponse(bufio.NewReader(connection), request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		body, err := io.ReadAll(response.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response.StatusCode, string(body)
+	}
 	for _, key := range []string{"nf_conntrack_acct", "nf_conntrack_timestamp"} {
 		if value, err := os.ReadFile("/proc/sys/net/netfilter/" + key); err != nil || strings.TrimSpace(string(value)) != "1" {
 			t.Fatal("product did not enable connection observation", key, string(value), err)
@@ -275,6 +317,11 @@ func testDaemonTrafficFlowHistory(t *testing.T, native bool) {
 	probe(udpClient)
 	probe(tcpClient)
 	t.Log("TCP/UDP forwarded through source NAT while the history path was unusable")
+	if status, _ := console(url.Values{}); status != http.StatusServiceUnavailable {
+		t.Fatal("unreadable history must not look empty", status)
+	}
+	probe(udpClient)
+	probe(tcpClient)
 	if err := os.Remove(historyPath); err != nil {
 		t.Fatal(err)
 	}
@@ -319,6 +366,18 @@ func testDaemonTrafficFlowHistory(t *testing.T, native bool) {
 		}
 		return protocols["tcp"] && protocols["udp"]
 	})
+	// The operator uses the real HTTP console and the existing collector database.
+	status, body := console(url.Values{"client": {"192.0.2.2"}, "protocol": {"TCP"}, "since": {firstTLS.StartedAt.Format(time.RFC3339Nano)}})
+	if status != http.StatusOK || !strings.Contains(body, firstTLS.FlowKey) || strings.Contains(body, first.FlowKey) || !strings.Contains(body, "flow.routerd.test") || !strings.Contains(body, "<form") {
+		t.Fatal("operator could not search classified TCP history", status, body)
+	}
+	if status, body := console(url.Values{"client": {"203.0.113.99"}}); status != http.StatusOK || strings.Contains(body, firstTLS.FlowKey) || strings.Contains(body, first.FlowKey) {
+		t.Fatal("client filter returned unrelated history", status, body)
+	}
+	if status, _ := console(url.Values{"until": {"bad-timestamp"}}); status != http.StatusBadRequest {
+		t.Fatal("invalid time accepted", status)
+	}
+	t.Log("independent HTTP client searched the real classified history by address, protocol and start time")
 	// One real DNS request and one response must survive connection confirmation;
 	// neither the client nor this assertion retransmits the application request.
 	var dnsClient net.Conn

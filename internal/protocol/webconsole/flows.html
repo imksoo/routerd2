@@ -1,0 +1,21 @@
+{{define "flows"}}{{with .Flows}}
+<p>保存済みの通信履歴です。終了が未観測でも、現在の接続や疎通を保証するものではありません。</p>
+{{if .Services}}<form method="get" action="{{$.Config.BasePath}}flows">
+<label>履歴サービス <select name="service">{{range .Services}}<option value="{{.}}" {{if eq . $.Flows.Selected}}selected{{end}}>{{.}}</option>{{end}}</select></label>
+<label>端末IP <input name="client" value="{{.Client}}" placeholder="192.0.2.2"></label>
+<label>相手IP <input name="peer" value="{{.Peer}}"></label>
+<label>通信方式 <input name="protocol" value="{{.Protocol}}" placeholder="tcp / udp"></label>
+<label>開始日時以降 <input name="since" value="{{.Since}}" placeholder="2026-10-30T00:00:00+09:00"></label>
+<label>開始日時以前 <input name="until" value="{{.Until}}" placeholder="2026-10-31T00:00:00+09:00"></label>
+<label>表示上限 <input type="number" min="1" max="1000" name="limit" value="{{.Limit}}"></label>
+<button type="submit">検索</button></form><p>日時には時差を含めます。検索結果は開始日時の新しい順です。</p>
+{{else}}<p>通信履歴サービスは選択されていません。</p>{{end}}
+{{with .History}}<p>読取時刻: {{.ReadAt}} / 表示 {{len .Flows}}件</p>
+{{if .Truncated}}<p class="notice">表示上限を超える履歴があります。日時やIPアドレスで絞り込んでください。</p>{{end}}
+<div class="scroll"><table><thead><tr><th>開始・終了</th><th>端末・相手</th><th>通信方式・分類</th><th>名前の観測</th><th>通信量</th></tr></thead><tbody>
+{{range .Flows}}<tr data-flow="{{.FlowKey}}"><td><div>{{.StartedAt}}</div><div>{{if .EndedAt.IsZero}}終了未観測{{else}}{{.EndedAt}}{{end}}</div></td>
+<td><div><code>{{.ClientAddress}}</code>:{{.ClientPort}}</div><div>→ <code>{{.PeerAddress}}</code>:{{.PeerPort}}</div>{{if .NATTranslatedAddress}}<div>変換後: <code>{{.NATTranslatedAddress}}</code></div>{{end}}</td>
+<td>{{.Protocol}}<div>{{if .AppName}}{{.AppName}}{{else}}未分類{{end}}</div>{{if .Engine}}<div>分類エンジン: {{.Engine}}</div>{{end}}</td>
+<td>{{if .DNSQuery}}<div>DNS: <code>{{.DNSQuery}}</code></div>{{end}}{{if .TLSSNI}}<div>TLS: <code>{{.TLSSNI}}</code></div>{{end}}{{if .HTTPHost}}<div>HTTP: <code>{{.HTTPHost}}</code></div>{{end}}</td>
+<td>{{if .Accounting}}<div>送信 {{.BytesOut}}バイト / {{.PacketsOut}}パケット</div><div>受信 {{.BytesIn}}バイト / {{.PacketsIn}}パケット</div>{{else}}未計測{{end}}</td></tr>
+{{else}}<tr><td colspan="5">条件に一致する保存済み履歴はありません。</td></tr>{{end}}</tbody></table></div>{{end}}{{end}}{{end}}

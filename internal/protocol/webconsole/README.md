@@ -37,7 +37,7 @@ removed by the DHCP owner, and this page does not store or invent a history.
 The old console's title, base path, links, escaped HTML and read-only method
 handling are retained. Its resource-store adapter and React status model are
 replaced by the current typed control APIs. This is an initial management path:
-history search, correlated client inventory, connections, protocol detail, VPN/SAM pages,
+correlated client inventory, protocol detail, VPN/SAM pages,
 and the old complete UI surface are still outstanding. Configuration documents,
 mutations, and private worker APIs are not exposed by this listener.
 
@@ -78,3 +78,26 @@ wrapped without overlap. Historical connection search, correlated client history
 HA synchronization display under failure, and physical homert acceptance remain
 separate work. This short client-requested renewal does not establish natural
 lease renewal over the normal operating interval.
+
+## Saved communication search
+
+The communication page reads the collector-owned SQLite history through
+`GET /v1/services/{name}/traffic-history`. The runtime resolves the configured
+service path and releases its mutex before opening the database read-only.
+It reuses routerd's `OpenTrafficFlowLogReadOnly` and `TrafficFlowLog.List`;
+there is no second writer, copied history, or query process.
+
+Searches accept exact client/peer IPs, protocol, and inclusive RFC3339 start-time
+bounds. Equivalent IPv6 spellings are normalized. The default is the newest
+100 rows, with a requested maximum of 1000; one extra row determines whether
+the result was truncated. A visible notice asks the operator to narrow the
+search when necessary. This is a bounded search, not a stable paged export.
+The query has the original console's 1500 ms database budget, independently of
+network application. Missing or unreadable history returns HTTP 503 instead
+of pretending that no communication occurred.
+
+The page shows original endpoints, translated address, classification engine,
+DNS/TLS/HTTP names, accounting availability and packet/byte counters. A missing
+end observation is not labelled as current connectivity. The existing
+`make check-traffic-flow` fixture includes independent HTTP requests against
+the actual product while real TLS/UDP traffic populates the existing database.
