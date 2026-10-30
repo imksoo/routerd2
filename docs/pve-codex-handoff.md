@@ -13,7 +13,7 @@
 
 ## 最新85の二台通信profile: 両方向切替・再参加
 
-`integrated-native85`（契約85/network25、保存削減・入口変更込み）のLinux/2CPU二台profileは、独立ISC/四AFTR/二FRR/IX代替/DoH/chrony/Headscale・公式TS/普通と特殊のdhcpcdで両方向切替・再参加を一巡通過した。自動取得、初回DNS四種と条件付き24件、IPv4/IPv6 TCPUDP、二BGPの四prefix、IX特殊端末、両機NTP、TS三広告LANの双方向通信を同じ構成で確認した。
+`integrated-native85`（契約85/network25、保存削減・入口変更込み）の隔離Linux名前空間の二台profileは、独立ISC/四AFTR/二FRR/IX代替/DoH/chrony/Headscale・公式TS/普通と特殊のdhcpcdで両方向切替・再参加を一巡通過した。自動取得、初回DNS四種と条件付き24件、IPv4/IPv6 TCPUDP、二BGPの四prefix、IX特殊端末、両機NTP、TS三広告LANの双方向通信を同じ構成で確認した。
 
 同じTCP接続とUDP NAT対応を両方向で保持した。TCP最大応答待ち4.366秒。再参加後を含む最終の独立50ms UDPは1351送信/1228受信/123期限切れ、成功間最大4.198秒。DNSは837試行/78失敗。TSのTCP/UDPは各切替後の初回成功が約11.1/12.6秒で、各方向9試行の失敗を記録。全経路再確認は各約17.7/17.5秒。損失ゼロや即時復旧ではない。通常DAD、共有DUID、再参加した両NodeID、non-preempt、実packetの一TCP sequence spaceを照合した。IX既存session、TS出口、自然長期更新、分断/全異常組合せ、物理機器は未受入。
 
