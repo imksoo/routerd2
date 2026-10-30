@@ -601,6 +601,9 @@ func testDaemonTrafficFlowHistory(t *testing.T, native bool) {
 		}
 		return udpRetained && tlsRetained
 	})
+	if status, body := console(url.Values{"client": {"192.0.2.2"}, "protocol": {"udp"}}); status != http.StatusOK || !strings.Contains(body, first.FlowKey) {
+		t.Fatal("saved history missing after product restart", status, body)
+	}
 	udpClient.Close()
 	tcpClient.Close()
 	until(t, 7*time.Second, func() bool {
@@ -611,6 +614,10 @@ func testDaemonTrafficFlowHistory(t *testing.T, native bool) {
 		}
 		return false
 	})
+	exactStart := url.Values{"since": {first.StartedAt.Format(time.RFC3339Nano)}, "until": {first.StartedAt.Format(time.RFC3339Nano)}, "protocol": {"udp"}}
+	if status, body := console(exactStart); status != http.StatusOK || !strings.Contains(body, first.FlowKey) || strings.Contains(body, "終了未観測") {
+		t.Fatal("closed connection was not displayed as ended", status, body)
+	}
 	var archiveMatch bool
 	until(t, 25*time.Second, func() bool {
 		fresh := connect("udp4")
@@ -639,7 +646,10 @@ func testDaemonTrafficFlowHistory(t *testing.T, native bool) {
 			}
 		}
 	})
-	t.Log("closed connection was marked ended, survived restart and reached the UDP archive before age-based deletion")
+	if status, body := console(exactStart); status != http.StatusOK || strings.Contains(body, first.FlowKey) {
+		t.Fatal("expired history remained in the console", status, body)
+	}
+	t.Log("closed connection was marked ended, survived restart and reached the UDP archive before age-based deletion; HTTP reflected restart, closure and retention")
 	// Packet observation owns its required accounting after the explicit
 	// setting is withdrawn, then restores the original value when removed.
 	observationOnly := imported.Document
