@@ -255,3 +255,26 @@ original records, including their time, client, question, response and duration.
 A truncated page is not a complete history. Disabled or unavailable storage is
 an error, not an empty successful result. This command adds no collection,
 retention, direct database access or configuration change.
+
+### DNS history and candidate-mode operations acceptance (2026-10-30)
+
+Product `4e14466`, release `wsl-dns-cli-4e14466`, passed the existing management
+integration on independent WSL Linux at 23:34:02-23:34:29 JST (19.61 seconds in
+the isolated fixture, 26.039 seconds including preparation). Independent UDP
+and TCP DNS queries produced actual stored rows. SSH history filtering kept
+original IDs, timestamps, question/response values and truncation metadata;
+the existing API normalized mapped IPv4 client addresses. An invalid client
+filter failed without successful output. The local shell read the same history.
+Reading DNS history inside candidate mode preserved the subsequent commit.
+`configure` followed by `show snapshots` and `abort` exposed the saved reference
+without changing the candidate. The existing restore, confirmation expiry,
+control restart and logging restart checks also passed.
+
+Two earlier fixture failures were corrected without changing these binaries:
+the first supplied a database path instead of letting the product own it; the
+second assumed a trailing dot even though the reused logstore normalizes saved
+question names. The successful run uses the original API record and DNS name
+meaning. No timeout or result condition was relaxed. Evidence is in
+`dist/dns-cli-integrated/management`, with failed runs in `management-attempt1`
+and `management-attempt2`. This is isolated management/DNS acceptance, not
+physical-router, full-homert or two-router qualification.
