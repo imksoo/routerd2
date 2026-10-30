@@ -11,3 +11,10 @@ spec:
         serviceNamespace: edge
         attributes: {site: laboratory}
         signals: [logs]
+    - apiVersion: system.routerd.net/v1alpha1
+      kind: LogSink
+      metadata: {name: otlp}
+      spec:
+        type: otlp
+        minLevel: info
+        otlp: {telemetryRef: Telemetry/collector}

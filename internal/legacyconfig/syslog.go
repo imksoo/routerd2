@@ -3,6 +3,8 @@
 package legacyconfig
 
 import (
+	"strings"
+
 	"github.com/imksoo/routerd/pkg/api"
 	"github.com/imksoo/routerd2/internal/protocol/syslogconfig"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
@@ -12,15 +14,26 @@ import (
 // Delivery runs separately from the local log owner so a receiver outage cannot
 // block local recording or network application.
 func (c *compiler) logSink(r resource) {
-	c.allow(r, "type", "enabled", "minLevel", "syslog")
+	c.allow(r, "type", "enabled", "minLevel", "syslog", "otlp")
 	s := r.Spec.(api.LogSinkSpec)
-	if s.Type != "syslog" {
-		c.reject(r, "type", "unsupported_semantics", "only UDP syslog delivery is implemented; other log destinations are not discarded")
-		return
-	}
 	if s.Enabled != nil && !*s.Enabled {
 		c.target(r, "disabled")
 		c.note(r, "Disabled LogSink retains no running delivery service, as in routerd eventlog.NewSelected.")
+		return
+	}
+	if s.Type == "otlp" {
+		if strings.TrimSpace(s.OTLP.TelemetryRef) == "" && strings.TrimSpace(s.OTLP.Endpoint) == "" {
+			c.reject(r, "otlp", "invalid_value", "otlp.telemetryRef or otlp.endpoint is required")
+			return
+		}
+		// routerd eventlog.OTLPSink.Emit performed no delivery. Telemetry owns
+		// the SDK exporter; adding another sender here would duplicate logs.
+		c.target(r, "inactive")
+		c.note(r, "Legacy eventlog.OTLPSink.Emit did not send events or retention archives. This LogSink creates no sender; active OTLP log delivery is configured by the separate Telemetry resource.")
+		return
+	}
+	if s.Type != "syslog" {
+		c.reject(r, "type", "unsupported_semantics", "only UDP syslog delivery and the legacy inactive OTLP LogSink are implemented; other log destinations are not discarded")
 		return
 	}
 	// Omission selects the local Unix syslog in routerd, not UDP.

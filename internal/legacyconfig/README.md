@@ -61,7 +61,11 @@ native `syslog` service. Address, facility, tag and minimum severity retain the
 routerd meanings, including defaults `local6`, `routerd` and `info`.
 `enabled: false` creates no sender and is recorded as disabled in the mapping.
 An omitted network means local Unix delivery in routerd, so it is not silently
-converted to UDP. Other transports and sink types remain unsupported.
+converted to UDP. Other transports and active sink types remain unsupported. The legacy OTLP
+`LogSink` is accepted with an explicit inactive mapping: its old `OTLPSink.Emit`
+performed no delivery. It creates no second sender beside `Telemetry` and does
+not claim to archive retained records. A `Telemetry` resource still requires
+explicit supported signals; metrics and traces are not silently removed.
 
 The existing modules binary sends the native local log stream independently of
 local ingestion, storage and network application. Changing the destination or
