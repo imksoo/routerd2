@@ -8,10 +8,18 @@ import (
 	"github.com/imksoo/routerd2/internal/lifetime"
 )
 
+// These are owned by the configured egress policies. The terminal rule runs
+// immediately before Linux's default main lookup, after earlier route owners.
+const (
+	NoPathMark     uint32 = 0xffffffff
+	NoPathPriority        = 32765
+)
+
 // FlowRoute assigns new forwarded IPv4 connections to a routing mark. Buckets
-// contain one fixed mark or the prepared rendezvous map; no buckets blocks new
-// connections when no path has current authority. Established original
-// direction packets retain their conntrack mark across policy replacement.
+// contain one fixed mark or the prepared rendezvous map. No buckets gives an
+// untracked packet NoPathMark. Earlier routes remain usable and the terminal
+// rule prevents fallthrough to main. Established original-direction packets
+// retain their conntrack mark across policy replacement.
 type FlowRoute struct {
 	Match               PacketMatch       `json:"match"`
 	ExcludeDestinations []string          `json:"exclude_destinations,omitempty"`
@@ -21,26 +29,16 @@ type FlowRoute struct {
 	Authority           lifetime.Deadline `json:"authority,omitzero"`
 }
 
-// FlowPath prevents an established marked connection from falling through a
-// missing policy-table route to another WAN with the old translated source.
-type FlowPath struct {
-	Mark      uint32 `json:"mark"`
-	Interface string `json:"interface"`
-}
-
 func validateFlowRoutes(f Firewall) error {
-	if len(f.FlowRoutes) > 256 || len(f.FlowPaths) > 256 {
-		return errors.New("flow routing exceeds 256 rules or paths")
+	if len(f.FlowRoutes) > 256 || len(f.FlowMarks) > 256 {
+		return errors.New("flow routing exceeds 256 rules or marks")
 	}
-	marks := make(map[uint32]string)
-	for _, path := range f.FlowPaths {
-		if path.Mark == 0 || !validName(path.Interface) {
-			return errors.New("flow path requires a mark and interface")
+	marks := make(map[uint32]bool, len(f.FlowMarks))
+	for _, mark := range f.FlowMarks {
+		if mark == 0 || marks[mark] {
+			return errors.New("flow marks must be distinct and nonzero")
 		}
-		if previous, found := marks[path.Mark]; found && previous != path.Interface {
-			return errors.New("one flow mark cannot select different interfaces")
-		}
-		marks[path.Mark] = path.Interface
+		marks[mark] = true
 	}
 	for _, route := range f.FlowRoutes {
 		if err := validatePacketMatch(route.Match, "flow route"); err != nil {
@@ -53,8 +51,8 @@ func validateFlowRoutes(f Firewall) error {
 			return err
 		}
 		for _, mark := range route.Buckets {
-			if _, found := marks[mark]; !found {
-				return fmt.Errorf("flow mark %d has no owned output path", mark)
+			if !marks[mark] {
+				return fmt.Errorf("flow mark %d has no owned routing mark", mark)
 			}
 		}
 		for _, value := range route.ExcludeDestinations {

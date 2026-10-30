@@ -53,7 +53,7 @@ func (c *compiler) ensureRAClient(r resource, iface string) {
 			return
 		}
 	}
-	if c.ensureInterface(r, "interface", iface) == nil {
+	if c.ensureInterface(iface) == nil {
 		return
 	}
 	yes := true
@@ -72,7 +72,7 @@ func (c *compiler) dhcp4(r resource) {
 		c.reject(r, "useDNS", "unsupported_semantics", "legacy useDNS defaults to true and updates the host resolver; native learned DNS is status only, so useDNS:false is required")
 	}
 	name := c.interfaceName(r, "interface", s.Interface, false)
-	c.ensureInterface(r, "interface", name)
+	c.ensureInterface(name)
 	c.addService(r, serviceconfig.Service{
 		Name: c.serviceName(r, "dhcp4"),
 		DHCP4: &serviceconfig.DHCP4{
@@ -98,7 +98,7 @@ func (c *compiler) dhcp6(r resource) string {
 		c.reject(r, "required", "unsupported_semantics", "legacy required-prefix readiness policy is not represented by native service readiness")
 	}
 	name := c.interfaceName(r, "interface", s.Interface, false)
-	c.ensureInterface(r, "interface", name)
+	c.ensureInterface(name)
 	service := serviceconfig.Service{
 		Name: c.serviceName(r, "pd"),
 		DHCP6: &serviceconfig.DHCP6{RequestPrefix: true,
@@ -128,7 +128,7 @@ func (c *compiler) raClient(r resource) {
 		c.reject(r, "required", "unsupported_semantics", "legacy required-address readiness is not represented by native socket readiness")
 	}
 	name := c.interfaceName(r, "interface", s.Interface, false)
-	c.ensureInterface(r, "interface", name)
+	c.ensureInterface(name)
 	if policy.Interface != name {
 		c.policyIssue(r, "ra_clients", "interface", "policy_interface", "RA policy interface must equal the kernel interface resolved from this legacy resource")
 	}
@@ -266,7 +266,7 @@ func (c *compiler) delegation(r resource) {
 		return
 	}
 	name := c.interfaceName(r, "interface", s.Interface, false)
-	c.ensureInterface(r, "interface", name)
+	c.ensureInterface(name)
 	delegation := serviceconfig.Delegation{Name: c.serviceName(r, "lan"), Interface: name, SubnetID: subnet, HostID: host, PrefixLength: s.PrefixLength}
 	pd.Delegations = append(pd.Delegations, delegation)
 	c.target(r, "services/"+c.document.Services[index].Name+"/delegations/"+delegation.Name)

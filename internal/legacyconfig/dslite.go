@@ -37,7 +37,7 @@ func (c *compiler) dynamicDSLite(r resource, policy DSLitePolicy) api.ResourceWh
 		c.reject(r, "aftrSource", "unsupported_semantics", "this removed status-expression field cannot replace an explicit aftrFrom reference")
 	}
 	underlay := c.interfaceName(r, "interface", s.Interface, false)
-	c.ensureInterface(r, "interface", underlay)
+	c.ensureInterface(underlay)
 	name := c.aliases[r.Kind+"/"+r.Metadata.Name]
 	if _, exists := c.dynamicTunnels[name]; exists || c.interfaces[name] != nil {
 		c.reject(r, "tunnelName", "ownership_conflict", "a dynamic tunnel cannot share its kernel interface with another static or dynamic owner")

@@ -300,7 +300,6 @@ func TestUnknownFieldsAndMissingPoliciesAreReportedTogether(t *testing.T) {
 
 func TestSemanticRestrictionsAndDNSFailureAreAtomic(t *testing.T) {
 	cases := []struct{ name, fixture, old, replacement, path, code string }{
-		{"unmanaged-address", "static", "ifname: eth1, managed: true", "ifname: eth1, managed: false", "members", "administrative_state"},
 		{"exclusive-address", "static", "exclusive: false", "exclusive: true", "exclusive", "unsupported_semantics"},
 		{"bridge-default-stp", "static", "        stp: false\n", "", "stp", "unsupported_semantics"},
 		{"zero-host", "wan", `addressSuffix: "::1234"`, `addressSuffix: "::"`, "addressSuffix", "unsupported_semantics"},

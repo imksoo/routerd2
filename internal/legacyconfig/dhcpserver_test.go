@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 	"gopkg.in/yaml.v3"
 )
@@ -154,10 +155,6 @@ func TestDHCPMigrationRejectsAmbiguousAddressProfilesAndSelectors(t *testing.T) 
 		name, path, code string
 		edit             func([]map[string]any) []map[string]any
 	}{
-		{"unmanaged", "interface", "administrative_state", func(rs []map[string]any) []map[string]any {
-			dhcpTestSpec(t, rs, "Interface")["managed"] = false
-			return rs
-		}},
 		{"no-static-source", "interface", "ambiguous_reference", func(rs []map[string]any) []map[string]any {
 			return append(rs[:1], rs[2:]...)
 		}},
@@ -277,5 +274,23 @@ func TestDHCPSelectsEachPoolFromMultipleOwnedSubnets(t *testing.T) {
 		if scope.Name == "phones" && (scope.Prefix != "198.51.100.128/25" || scope.Router != "198.51.100.129" || !reflect.DeepEqual(scope.DNSServers, []string{"198.51.100.129"})) {
 			t.Fatal("secondary scope lost its own subnet defaults", scope)
 		}
+	}
+}
+
+func TestDHCPUnmanagedInterfaceRetainsAddressAndServingIntent(t *testing.T) {
+	data := mutateDHCPInput(t, fixture(t, "dhcp-server"), func(rs []map[string]any) []map[string]any {
+		dhcpTestSpec(t, rs, "Interface")["managed"] = false
+		return rs
+	})
+	result, err := Compile(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lan := iface(t, result.Document, "eth1")
+	if lan.AdminState != network.AdminUnmanaged || lan.MTU != 0 || lan.Master != nil || !reflect.DeepEqual(lan.Addresses, []string{"192.0.2.1/24"}) {
+		t.Fatal("unmanaged link acquired administrative ownership or lost explicit address intent", lan)
+	}
+	if service(t, result.Document, "dhcp_server").DHCPServer.Interface != "eth1" {
+		t.Fatal("DHCP lost its existing LAN binding")
 	}
 }

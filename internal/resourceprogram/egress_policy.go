@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"math"
 	"net/netip"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -57,7 +58,13 @@ type EgressSelection struct {
 }
 
 type EgressPolicyPlan struct {
-	ID         string
+	ID string
+	// Fallbacks, Rules and Marks are configuration-owned. They remain when
+	// observations withdraw a live path, so marked traffic cannot use main.
+	Fallbacks  []network.Route
+	Rules      []network.PolicyRule
+	Marks      []uint32
+	Flows      []network.FlowRoute
 	spec       EgressPolicy
 	seed       uint32
 	scores     [][][]uint64
@@ -67,9 +74,7 @@ type EgressPolicyPlan struct {
 type EgressPolicyProjection struct {
 	Selection EgressSelection
 	Routes    []network.Route
-	Rules     []network.PolicyRule
 	Flows     []network.FlowRoute
-	Paths     []network.FlowPath
 }
 
 func prepareEgressPolicy(id string, spec EgressPolicy) (EgressPolicyPlan, error) {
@@ -138,17 +143,27 @@ func prepareEgressPolicy(id string, spec EgressPolicy) (EgressPolicyPlan, error)
 	validation.Firewall = &network.Firewall{}
 	for _, group := range p.spec.Groups {
 		for _, target := range group.Targets {
+			if uint64(target.Metric) >= math.MaxUint32 {
+				return p, errors.New("egress target metric leaves no lower-priority metric for its blackhole fallback")
+			}
 			mark := target.Mark
+			p.Fallbacks = append(p.Fallbacks, network.Route{Destination: "0.0.0.0/0", Table: target.Table, Metric: target.Metric + 1, Blackhole: true})
+			p.Rules = append(p.Rules, network.PolicyRule{Family: 4, Table: target.Table, Priority: target.Priority, Mark: &mark})
+			p.Marks = append(p.Marks, target.Mark)
 			validation.Routes = append(validation.Routes, network.Route{Destination: "0.0.0.0/0", Interface: target.Interface, Gateway: target.Gateway, Table: target.Table, Metric: target.Metric})
-			validation.PolicyRules = append(validation.PolicyRules, network.PolicyRule{Family: 4, Table: target.Table, Priority: target.Priority, Mark: &mark})
-			validation.Firewall.FlowPaths = append(validation.Firewall.FlowPaths, network.FlowPath{Interface: target.Interface, Mark: target.Mark})
 		}
 	}
-	for _, source := range p.spec.Sources {
-		for _, destination := range p.spec.Destinations {
-			validation.Firewall.FlowRoutes = append(validation.Firewall.FlowRoutes, network.FlowRoute{Match: network.PacketMatch{Family: 4, Source: source, Destination: destination, InInterface: p.spec.InInterface}, ExcludeDestinations: p.spec.ExcludeDestinations})
+	validation.Routes = append(validation.Routes, p.Fallbacks...)
+	validation.PolicyRules = p.Rules
+	validation.Firewall.FlowMarks = p.Marks
+	if !p.spec.MarkOnly {
+		for _, source := range p.spec.Sources {
+			for _, destination := range p.spec.Destinations {
+				p.Flows = append(p.Flows, network.FlowRoute{Match: network.PacketMatch{Family: 4, Source: source, Destination: destination, InInterface: p.spec.InInterface}, ExcludeDestinations: p.spec.ExcludeDestinations, Seed: p.seed, HashDestination: p.spec.HashDestination})
+			}
 		}
 	}
+	validation.Firewall.FlowRoutes = p.Flows
 	if err := network.Validate(validation); err != nil {
 		return p, err
 	}
@@ -187,7 +202,7 @@ func (p EgressPolicy) available(facts FactSnapshot) bool {
 // a previous selection while it remains ready. Failed paths never wait out the
 // recovery hysteresis. Prepared scores avoid hashing static identities on ticks.
 func (p EgressPolicyPlan) Project(facts FactSnapshot, previous EgressSelection) EgressPolicyProjection {
-	out := EgressPolicyProjection{}
+	out := EgressPolicyProjection{Flows: slices.Clone(p.Flows)}
 	ready := make([][]int, len(p.spec.Groups))
 	bounds := make([]uint64, len(p.spec.Groups))
 	selected, old := -1, -1
@@ -202,10 +217,7 @@ func (p EgressPolicyPlan) Project(facts FactSnapshot, previous EgressSelection) 
 					deadline = lifetime.Deadline{}
 				}
 				out.Routes = append(out.Routes, network.Route{Destination: "0.0.0.0/0", Interface: target.Interface, Gateway: target.Gateway, Table: target.Table, Metric: target.Metric, BootID: deadline.BootID, ExpiresNanos: deadline.Nanos})
-				mark := target.Mark
-				out.Rules = append(out.Rules, network.PolicyRule{Family: 4, Priority: target.Priority, Table: target.Table, Mark: &mark, Authority: deadline})
 			}
-			out.Paths = append(out.Paths, network.FlowPath{Mark: target.Mark, Interface: target.Interface})
 			healthy, healthUntil := policyCondition(facts, target.When)
 			if active && owned && healthy {
 				ready[gi] = append(ready[gi], ti)
@@ -226,11 +238,6 @@ func (p EgressPolicyPlan) Project(facts FactSnapshot, previous EgressSelection) 
 		return out
 	}
 	if selected < 0 {
-		for _, source := range p.spec.Sources {
-			for _, destination := range p.spec.Destinations {
-				out.Flows = append(out.Flows, network.FlowRoute{Match: network.PacketMatch{Family: 4, Source: source, Destination: destination, InInterface: p.spec.InInterface}, ExcludeDestinations: p.spec.ExcludeDestinations})
-			}
-		}
 		return out
 	}
 	if old >= 0 && old != selected && previous.bootID == facts.Scope.BootID && facts.NowNanos >= previous.sinceNanos && facts.NowNanos-previous.sinceNanos < uint64(time.Duration(p.spec.HysteresisMillis)*time.Millisecond) {
@@ -259,10 +266,9 @@ func (p EgressPolicyPlan) Project(facts FactSnapshot, previous EgressSelection) 
 	if bounds[selected] == math.MaxUint64 {
 		authority = lifetime.Deadline{}
 	}
-	for _, source := range p.spec.Sources {
-		for _, destination := range p.spec.Destinations {
-			out.Flows = append(out.Flows, network.FlowRoute{Match: network.PacketMatch{Family: 4, Source: source, Destination: destination, InInterface: p.spec.InInterface}, ExcludeDestinations: p.spec.ExcludeDestinations, Buckets: buckets, Seed: p.seed, HashDestination: p.spec.HashDestination, Authority: authority})
-		}
+	for i := range out.Flows {
+		out.Flows[i].Buckets = buckets
+		out.Flows[i].Authority = authority
 	}
 	return out
 }

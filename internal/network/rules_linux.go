@@ -56,6 +56,7 @@ func decodeNativePolicyRule(raw []byte) (PolicyRuleState, error) {
 		return out, nil
 	}
 	out.Action = int(header.Type)
+	out.Blackhole = header.Type == nl.FR_ACT_BLACKHOLE
 	out.Table = int(header.Table)
 	out.Invert = header.Flags&netlink.FibRuleInvert != 0
 	out.Advanced = header.Flags & ^uint32(netlink.FibRuleInvert) != 0 || header.Tos != 0
@@ -145,7 +146,7 @@ func nativePolicyRule(r PolicyRule) (*netlink.Rule, error) {
 	out.Priority = r.Priority
 	out.Table = r.Table
 	out.Protocol = RouteProtocol
-	out.Type = unix.RTN_UNICAST
+	out.Type = uint8(r.action())
 	out.IifName = r.InInterface
 	out.OifName = r.OutInterface
 	out.Invert = r.Invert

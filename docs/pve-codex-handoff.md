@@ -1,14 +1,29 @@
-## 2026-10-30 14:50 JST: 全構成Linuxの通信とTailscale誤破棄
+# routerd2 開発引き継ぎ
 
-`d824c8a` / `retention-integrated-native81` を隔離Linuxの実supervisor/control/network/全workerで実行し、独立ISC・FRR二台・IX代替Linux・dnsmasq/dnsdist・chrony・Headscale/公式Tailscaleへ接続した。普通端末のDHCP取得値による最初のA/AAAA UDP/TCP、IPv4/IPv6 TCP/UDP、両FRRの4接頭辞への通信、条件付きDNS24件、特殊DHCP端末の取得gateway/自動DNSによるIX通信、配布NTP二台への問い合わせが通過。NTPはhost profileの`-x`でホスト時計を変更しない。ONU直結・物理NIC・時計補正の受入ではない。
+2026-10-30 JST。全34 work packageのゴールは継続中。homert本番の置換は未実施であり、
+対象実機で利用可能とはまだ判断していない。[実装計画](implementation-plan.md)、
+[試験計画](test-plan.md)、[機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
+過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
-試験側の製品起動前NIC UPがOS SLAACを先行させたため、router側をDOWNで渡すよう修正した。IX対向に共通Internet宛先がなく循環した問題と、同じ試験名がIX DNS/製品経由RDNSSで異なる宛先を返した問題も、対向を修正した。resolver固定、IPv6無効化、製品のweight変更やNoDADは使わない。
+## 2026-10-30 15:30 JST: 単体の同時利用と全daemon再起動
 
-**製品不合格**: Tailscale peer→LANのTCP/UDPは通ったが、LAN→peerの新規TCP SYNがTUNへ届かない。実`ip route get ... mark 276`は優先table52/tailscale0を選ぶ一方、送信中の`flow_path_guard`が`ct mark 0x114; oifname != lan0`で1 packet/60 bytesを破棄した。旧routerdにはこのglobal guardはない。WAN経路失効時の誤転送防止を適切な経路所有へ直し、同じ全構成・全daemon再起動を再確認する。私有の短い結果は`/tmp/routerd-homert-host-result-summary.json`。全構成の受入完了とはしない。
+`route-policy-native83`（契約83/network journal23）は、隔離Linuxの実supervisor/control/network/全workerと独立ISC・FRR二台・IX代替Linux・dnsmasq/dnsdist・chrony・Headscale/公式Tailscaleで、次の経路が通過した。
 
-別の512MiB/2CPU/TCG VMは起動未完了。一時計測版`route-cost-trace-native81`で初回適用4443msのうち保存27回、encode901ms/write1854ms。次の適用は10777ms（保存2回、計1637ms）でfirewallのcontext cancellationになり、保存以外にも遅延が残る。計測コードは共有sourceから撤去済み。通常版9666562の関連Race/vet/両arch build・署名検査と、d824c8aの全`make check`・両arch build・署名検査は終了0。これらをVM起動の合格へ置き換えない。
+- 取得resolverによるA/AAAA UDP/TCP、IPv4/IPv6 TCP/UDP、両FRRの4接頭辞、条件付きDNS24件。
+- 特殊DHCP端末の取得gateway/自動DNSによるIX通信、配布NTP二台、Tailscale三広告LANとの双方向TCP/UDP。
+- 全daemon再起動後の同じ経路、DUID/NodeID保持。DNSは55件中12件失敗を記録し、全4種の復旧は8.932秒。VIP ACTIVE/PD/取得resolverのlistener反映は8.701秒。BACKUPのnode-readyを通信復旧と同一視しない。
 
-独立機能: OTLPログworker `874bc22`、ManagementAccess/CLI修正 `341c5cd`、履歴保持 `d824c8a` を統合。履歴保持は統合版実peerで保存先障害/復旧・control再起動・元記録照合、並行端末UDP342往復失敗0。実装対象はoperational eventのみで、DNS/flow等の別履歴は未実装。NAT/DHCP/PD同期取込 `b582270`/`29338cc` は既存二台試験で確認された接続を統合したが、この全設定二台では未受入。全34項目と固定期限達成は未完了。
+私有の最初の実行は`/tmp/routerd-homert-host.jPYng9`、logは`/tmp/routerd-homert-native83-host.log`。別の同版走行`/tmp/routerd-homert-host.XvDqsv`では停止前からDNS4種と両IP TCP/UDPを独立測定し、9.540秒で全8種が復旧した。DNSは67件中12失敗、新規TCP/UDP transactionは69件中27失敗を保持。IPv4 TCP/UDPの成功間最大間隔は6.510/7.944秒、IPv6は6.417/6.399秒。同じ既存socketの保持試験ではない。再起動後の全経路・取得値・DUID/NodeID、IPv4の意図したSNATとIPv6送信元維持も通過。最初の8.932秒の走行とは別結果である。NTPは両世代ともhost profileの`-x`で時計を変更しない。独立TS peerとの経路広告とLAN通信までで、同時構成のTS出口、長期自然更新、実二回線、ONU直結、物理NIC、Alpine時計補正の受入ではない。全homertの未実装履歴等と全34項目も残る。
+
+**実装の修正**: 実送信時の1 packet/60 bytesで先行table52へのSYNを捨てた`flow_path_guard`を削除。候補WAN表の静的blackholeと設定所有ruleへ移した。空bucketでもPREROUTINGで捨てず、packetだけのNoPath markとmain直前のblackhole ruleを使う。全候補障害・期限失効時も先行経路を維持し、mainへの誤転送を止める。NoPathをconntrackへ固定しない。独立Linuxの実daemon経路試験86.89秒で、全5候補断中の先行TCP/UDP、到達可能なmain宛への識別payload漏出0、同じUDP socketの復帰、選択/60秒復帰hold/confirmed rollback/元期限失効/network再起動が成立。これは単独で公式TS全障害や物理機器を受入した証拠ではない。
+
+DHCPでは`891af85`のVirtualAddress参照と既存HA owner、`292e5ee`のdnsmasq shared-networkによる仮想待受/二次範囲を再利用し、`6836afb`の非管理interface状態を取り込んだ。旧詳細ログも接続。各元版の独立端末/二台試験は成功したが、今回の83単体を全設定二台へ拡張しない。設定intentからの必要な所有を保ち、アドレス複製・別daemon・systemdは追加しない。
+
+試験側の起動前NIC UP、IX対向の共通Internet宛先不足、取得RDNSS経由だけ異なる試験名、手動移植で欠けたlan-ha↔tailscale0のtrust-zone許可も修正した。製品のweight変更、resolver固定、IPv6無効化、NoDADや固定待ちによる補修は行わない。
+
+83の全`make check`（Race/vetを含む）、CGO0両architecture build、署名六ELF/catalog/publisher検査、通常Make/APK factory image生成は終了0。通常factory83の512MiB/2CPU/TCG VMは起動不合格。networkはappliedになったが全projectionはapplying、短いVRRP等の適用要求timeoutとworker交換を繰り返し、端末通信へ到達しない。私有log`/tmp/routerd-route-policy-native83-vm.log`。循環lockや性能原因の特定・解消とはしない。以前の一時計測の初回Apply4443ms中、保存27回/2755ms、次10777ms中保存1637msだった。計測コードは撤去済み。停止済み旧VM4組約665MiBと専用作業tree等を削除し、現在必要な小さい診断だけ残した。
+
+OTLPログworker `874bc22`、ManagementAccess/CLI `341c5cd`、履歴保持 `d824c8a` は統合済み。履歴保持は統合版実peerで保存先障害/復旧・control再起動・元記録照合、端末UDP342往復失敗0。対象はoperational eventのみで他の履歴・native DPIは未実装。全34項目と固定期限達成は未完了。
 
 ## 2026-10-30 14:08 JST: NAT展開削除と実適用時間
 
@@ -60,12 +75,6 @@ HTTPがrequest終了後にも接続用Dialを継続するGoの動作により、
 
 先の`ens20`試験は異なるネットワークを選んだ誤りで、HGWのRA未応答や製品RA不良の根拠にしない。管理経路は変更していない。保存WAN MAC/DUIDは一つの試験所有者だけが使用する。主担当はDNSと単体統合、補助担当は二台timeout、IPIP/BGPを別treeで実行。全体の見通しとCloud SAMの未接続範囲は既存[実装計画](implementation-plan.md)へ記した。
 
-# routerd2 開発引き継ぎ
-
-2026-10-30 JST。全34 work packageのゴールは継続中。homert本番の置換は未実施であり、
-対象実機で利用可能とはまだ判断していない。[実装計画](implementation-plan.md)、
-[試験計画](test-plan.md)、[機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
-過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
 ## 追加実装: local-redirect-native78（2026-10-30 JST）
 

@@ -18,7 +18,7 @@ import (
 var errLinkNotFound = errors.New("link not found")
 
 // JournalVersion is the persisted network ownership/BOOTTIME contract.
-const JournalVersion = 21
+const JournalVersion = 23
 
 type settingKey struct {
 	Kind      string `json:"kind"`
@@ -302,7 +302,9 @@ func (e *Engine) snapshotLocked(ctx context.Context) Snapshot {
 			names[wireguard.Interface] = true
 		}
 		for _, r := range d.PolicyRules {
-			tables[r.Table] = true
+			if !r.Blackhole {
+				tables[r.Table] = true
+			}
 			if r.InInterface != "" {
 				names[r.InInterface] = true
 			}
@@ -349,7 +351,9 @@ func (e *Engine) snapshotLocked(ctx context.Context) Snapshot {
 		tables[routeTable(r.Route)] = true
 	}
 	for _, r := range e.state.PolicyRules {
-		tables[r.Table] = true
+		if !r.Blackhole {
+			tables[r.Table] = true
+		}
 	}
 	ordered := make([]string, 0, len(names))
 	for n := range names {
@@ -534,7 +538,9 @@ func (p *apply) reconcile(d Desired) error {
 				ipv4Interfaces[l.Name] = true
 			}
 		}
-		wantedSettings[settingKey{Kind: "up", Interface: l.Name}] = 1
+		if l.AdminState != AdminUnmanaged {
+			wantedSettings[settingKey{Kind: "up", Interface: l.Name}] = 1
+		}
 		if l.MTU != 0 {
 			wantedSettings[settingKey{Kind: "mtu", Interface: l.Name}] = l.MTU
 		}
@@ -761,8 +767,10 @@ func (p *apply) interfaceConfig(l Interface) error {
 			return err
 		}
 	}
-	if err := p.set(settingKey{Kind: "up", Interface: l.Name}, 1); err != nil {
-		return err
+	if l.AdminState != AdminUnmanaged {
+		if err := p.set(settingKey{Kind: "up", Interface: l.Name}, 1); err != nil {
+			return err
+		}
 	}
 	for _, a := range l.Addresses {
 		if err := p.addressConfig(l, a); err != nil {

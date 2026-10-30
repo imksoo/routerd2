@@ -46,7 +46,7 @@ func (c *compiler) vrrp(r resource, s api.VirtualAddressSpec) (string, []resourc
 		return "", nil
 	}
 	name := c.interfaceName(r, "interface", s.Interface, false)
-	c.ensureInterface(r, "interface", name)
+	c.ensureInterface(name)
 	service := c.serviceName(r, "vrrp")
 	preempt := false // The original Keepalived renderer emits nopreempt by default.
 	if s.VRRP.Preempt != nil {
@@ -75,8 +75,8 @@ func (c *compiler) vrrp(r resource, s api.VirtualAddressSpec) (string, []resourc
 	var nodes []resourceprogram.Resource
 	for _, v := range failoverVMACs(s.VRRP) {
 		parent := c.interfaceName(r, "vrrp.failoverVMAC.parentInterface", v.ParentInterface, false)
-		c.ensureInterface(r, "vrrp.failoverVMAC.parentInterface", parent)
-		c.ensureInterface(r, "vrrp.failoverVMAC.interface", v.Interface)
+		c.ensureInterface(parent)
+		c.ensureInterface(v.Interface)
 		mac, err := net.ParseMAC(v.MACAddress)
 		if err != nil {
 			c.reject(r, "vrrp.failoverVMAC.macAddress", "invalid_value", "VMAC requires an Ethernet MAC address")

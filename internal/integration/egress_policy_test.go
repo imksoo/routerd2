@@ -56,6 +56,11 @@ func TestDaemonConnectionMarkedEgressPolicy(t *testing.T) {
 		egressTCPPeer(t, peer, byte('A'+i))
 		captures = append(captures, healthPBRCapture(t, fmt.Sprintf("wan%d", i)))
 	}
+	// An independent peer behind an earlier RPDB lookup models a route owned
+	// by another routing engine. PBR must not reject its selected interface.
+	tail := healthPBRPeer(t, "tailscale0", "tailpeer", "100.64.0.1/24", "100.64.0.2")
+	vrrpVIPResponders(t, tail, "4", []string{"100.64.0.1"}, "T")
+	healthPBRListener(t, tail, "100.64.0.1:18095", "T")
 	lan := fixturePeerNamespace(t, "lan0", "client0")
 	h, err := netlink.NewHandleAt(lan, unix.NETLINK_ROUTE)
 	if err != nil {
@@ -93,6 +98,25 @@ func TestDaemonConnectionMarkedEgressPolicy(t *testing.T) {
 	program, err := config.Parse(body)
 	if err != nil {
 		t.Fatal(err)
+	}
+	program.Resources = append(program.Resources,
+		resourceprogram.Resource{ID: "prior-route-interface", Interface: &network.Interface{Name: "tailscale0"}},
+		resourceprogram.Resource{ID: "prior-route-address", Address: &resourceprogram.Address{Interface: "tailscale0", CIDR: "100.64.0.2/24"}},
+		resourceprogram.Resource{ID: "prior-route", Route: &network.Route{Destination: "100.64.0.1/32", Interface: "tailscale0", Table: 52}},
+		resourceprogram.Resource{ID: "prior-rule", PolicyRule: &network.PolicyRule{Family: 4, Priority: 5270, Table: 52}},
+		resourceprogram.Resource{ID: "main-fallthrough", Route: &network.Route{Destination: "198.51.100.20/32", Interface: "wan4", Gateway: "198.19.3.1"}},
+	)
+	for i := range program.Resources {
+		if original := program.Resources[i].Firewall; original != nil {
+			f := *original
+			chain := *f.ForwardChain
+			chain.Rules = append(append([]network.FirewallRule(nil), chain.Rules...),
+				network.FirewallRule{Match: network.PacketMatch{InInterface: "lan0", OutInterface: "tailscale0"}, Action: "accept"},
+				network.FirewallRule{Match: network.PacketMatch{InInterface: "lan-ha", OutInterface: "tailscale0"}, Action: "accept"},
+			)
+			f.ForwardChain = &chain
+			program.Resources[i].Firewall = &f
+		}
 	}
 	// A real election with no reachable WAN must wait for an applied egress.
 	for _, probe := range probes {
@@ -327,8 +351,78 @@ func TestDaemonConnectionMarkedEgressPolicy(t *testing.T) {
 	}
 	probes[3].Close()
 	waitMarks(276)
-	transition := time.Now()
 	traffic("E")
+	priorTraffic := func() {
+		for _, protocol := range []string{"tcp4", "udp4"} {
+			port := "18095"
+			var source net.Addr = &net.TCPAddr{IP: net.ParseIP("198.18.0.2")}
+			if protocol == "udp4" {
+				port = "18094"
+				source = &net.UDPAddr{IP: net.ParseIP("198.18.0.2")}
+			}
+			var conn net.Conn
+			if err := fixtureInsideNamespace(lan, func() error {
+				var err error
+				conn, err = (&net.Dialer{Timeout: time.Second, LocalAddr: source}).Dial(protocol, "100.64.0.1:"+port)
+				return err
+			}); err != nil {
+				t.Fatal("earlier RPDB route", protocol, err)
+			}
+			if got := read(conn, protocol == "udp4"); got != "T" {
+				t.Fatal("earlier RPDB route", protocol, got)
+			}
+			conn.Close()
+		}
+	}
+	priorTraffic()
+	probes[4].Close()
+	waitMarks()
+	priorTraffic()
+	blockedUDP := dial("udp4", 65)
+	defer blockedUDP.Close()
+	payload := []byte("routerd-no-path-main-probe")
+	if err := blockedUDP.SetDeadline(time.Now().Add(300 * time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := blockedUDP.Write(payload); err != nil {
+		t.Fatal(err)
+	}
+	var blockedReply [64]byte
+	if _, err := blockedUDP.Read(blockedReply[:]); err == nil {
+		t.Fatal("no-WAN UDP escaped through main")
+	} else if failure, ok := err.(net.Error); !ok || !failure.Timeout() {
+		t.Fatal(err)
+	}
+	if err := fixtureInsideNamespace(lan, func() error {
+		conn, err := (&net.Dialer{Timeout: 300 * time.Millisecond, LocalAddr: &net.TCPAddr{IP: net.ParseIP("198.18.0.65")}}).Dial("tcp4", "198.51.100.20:18095")
+		if err == nil {
+			conn.Close()
+			return fmt.Errorf("no-WAN TCP escaped through main")
+		}
+		if failure, ok := err.(net.Error); !ok || !failure.Timeout() {
+			return err
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for i, capture := range captures {
+		capture.mu.Lock()
+		for _, packet := range capture.packets {
+			if bytes.Contains(packet.data, payload) {
+				capture.mu.Unlock()
+				t.Fatalf("no-path probe leaked onto WAN%d", i)
+			}
+		}
+		capture.mu.Unlock()
+	}
+	probes[4] = healthPBRListener(t, peers[4], "198.51.100.10:18080", "restored")
+	waitMarks(276)
+	if got := read(blockedUDP, true); got != "E" {
+		t.Fatal("no-path packet mark prevented recovery of the same UDP socket", got)
+	}
+	transition := time.Now()
+	t.Log("earlier table52 TCP/UDP survived all WAN failures; main leaked no UDP probe; same socket recovered")
 	for i := 0; i < 4; i++ {
 		probes[i] = healthPBRListener(t, peers[i], "198.51.100.10:18080", "restored")
 	}
@@ -456,6 +550,17 @@ func TestDaemonConnectionMarkedEgressPolicy(t *testing.T) {
 		}
 		return link.Attrs().Flags&net.FlagUp == 0
 	})
+	// The main route remains usable, but every expired candidate must stop a
+	// restored connection mark within its own table rather than fall through.
+	if routes, err := netlink.RouteGet(net.ParseIP("198.51.100.20")); err != nil || len(routes) != 1 {
+		t.Fatalf("main fallback setup: %+v %v", routes, err)
+	}
+	for mark := 272; mark <= 276; mark++ {
+		if routes, err := netlink.RouteGetWithOptions(net.ParseIP("198.51.100.20"), &netlink.RouteGetOptions{Mark: uint32(mark)}); err == nil {
+			t.Fatalf("expired mark %d escaped to main: %+v", mark, routes)
+		}
+	}
+	t.Log("expired WAN marks stopped at their blackholes while an unmarked main route remained")
 	t.Logf("gateway fenced at boottime=%d, original applied expiry=%d", clock.BoottimeNanoseconds, authority.Nanos)
 	if err := syscall.Kill(writer.PID, syscall.SIGKILL); err != nil {
 		t.Fatal(err)

@@ -103,7 +103,7 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 		}
 	}
 	// All interface ownership declarations have been collected before any
-	// address or member can request a native Interface (which always brings it up).
+	// address or member can request its independently owned native settings.
 	for _, r := range resources {
 		switch r.Kind {
 		case "IPv4StaticAddress":
@@ -216,7 +216,7 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 	for id, when := range c.dhcp6Servers(vrrpNames) {
 		servingConditions[id] = when
 	}
-	c.dhcpServers()
+	c.dhcpServers(vrrpNames)
 	c.leaseSync(vrrpNames)
 	c.dhcpRelays()
 	c.dns()

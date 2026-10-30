@@ -12,21 +12,14 @@ import (
 )
 
 func buildFlowRoutes(c *nftables.Conn, table *nftables.Table, f *Firewall) error {
-	if len(f.FlowRoutes) == 0 && len(f.FlowPaths) == 0 {
+	if len(f.FlowRoutes) == 0 && len(f.FlowMarks) == 0 {
 		return nil
 	}
 	accept := nftables.ChainPolicyAccept
 	pre := c.AddChain(&nftables.Chain{Name: "flow_routes", Table: table, Type: nftables.ChainTypeFilter, Hooknum: nftables.ChainHookPrerouting, Priority: nftables.ChainPriorityRef(-150), Policy: &accept})
-	guard := c.AddChain(&nftables.Chain{Name: "flow_path_guard", Table: table, Type: nftables.ChainTypeFilter, Hooknum: nftables.ChainHookForward, Priority: nftables.ChainPriorityRef(-151), Policy: &accept})
-	for _, path := range f.FlowPaths {
-		mark := binaryutil.NativeEndian.PutUint32(path.Mark)
-		original := []expr.Any{&expr.Ct{Register: 1, Key: expr.CtKeyDIRECTION}, &expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{0}}, &expr.Ct{Register: 1, Key: expr.CtKeyMARK}, &expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: mark}}
-		restore := append(append([]expr.Any(nil), original...), &expr.Meta{Key: expr.MetaKeyMARK, Register: 1, SourceRegister: true})
+	for _, mark := range f.FlowMarks {
+		restore := []expr.Any{&expr.Ct{Register: 1, Key: expr.CtKeyDIRECTION}, &expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{0}}, &expr.Ct{Register: 1, Key: expr.CtKeyMARK}, &expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: binaryutil.NativeEndian.PutUint32(mark)}, &expr.Meta{Key: expr.MetaKeyMARK, Register: 1, SourceRegister: true}}
 		c.AddRule(&nftables.Rule{Table: table, Chain: pre, Exprs: restore})
-		name := make([]byte, 16)
-		copy(name, path.Interface)
-		protect := append(append([]expr.Any(nil), original...), &expr.Meta{Key: expr.MetaKeyOIFNAME, Register: 1}, &expr.Cmp{Op: expr.CmpOpNeq, Register: 1, Data: name}, &expr.Counter{}, &expr.Verdict{Kind: expr.VerdictDrop})
-		c.AddRule(&nftables.Rule{Table: table, Chain: guard, Exprs: protect})
 	}
 	for i, route := range f.FlowRoutes {
 		var buckets *nftables.Set
@@ -52,7 +45,7 @@ func buildFlowRoutes(c *nftables.Conn, table *nftables.Table, f *Firewall) error
 			}
 			es := append(match, &expr.Ct{Register: 1, Key: expr.CtKeyDIRECTION}, &expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{0}}, &expr.Ct{Register: 1, Key: expr.CtKeyMARK}, &expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: make([]byte, 4)})
 			if len(route.Buckets) == 0 {
-				es = append(es, &expr.Counter{}, &expr.Verdict{Kind: expr.VerdictDrop})
+				es = append(es, &expr.Immediate{Register: 1, Data: binaryutil.NativeEndian.PutUint32(NoPathMark)}, &expr.Meta{Key: expr.MetaKeyMARK, Register: 1, SourceRegister: true}, &expr.Counter{}, &expr.Verdict{Kind: expr.VerdictReturn})
 				c.AddRule(&nftables.Rule{Table: table, Chain: pre, Exprs: es})
 				continue
 			}

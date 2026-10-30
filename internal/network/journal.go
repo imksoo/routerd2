@@ -122,7 +122,7 @@ func (r journalContextReader) Read(p []byte) (int, error) {
 }
 
 func encodeNetworkJournal(state journal) ([]byte, error) {
-	raw, err := json.MarshalIndent(state, "", "  ")
+	raw, err := json.Marshal(state)
 	if err != nil {
 		return nil, err
 	}

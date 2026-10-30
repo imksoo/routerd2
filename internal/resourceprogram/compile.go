@@ -156,6 +156,7 @@ func Compile(source Program) (Plan, error) {
 	claimed := map[string]string{}
 	derivedRefs := map[string]bool{}
 	ruleCount, derivedCount := 0, 0
+	noPathOwned := false
 	claim := func(r Resource, kind, key string) error {
 		identity := kind + "\x00" + key
 		if previous, exists := claimed[identity]; exists {
@@ -237,6 +238,15 @@ func Compile(source Program) (Plan, error) {
 					for _, target := range group.Targets {
 						err = errors.Join(err, claim(r, "route", routeKey(network.Route{Destination: "0.0.0.0/0", Table: target.Table, Metric: target.Metric})), claim(r, "policy_rule", fmt.Sprintf("4/%d", target.Priority)), claim(r, "flow_mark", fmt.Sprint(target.Mark)))
 					}
+				}
+				for _, fallback := range policy.Fallbacks {
+					err = errors.Join(err, claim(r, "route", routeKey(fallback)))
+				}
+				if len(policy.Flows) != 0 && !noPathOwned {
+					err = errors.Join(err, claim(r, "policy_rule", fmt.Sprintf("4/%d", network.NoPathPriority)), claim(r, "flow_mark", fmt.Sprint(network.NoPathMark)))
+					mark := network.NoPathMark
+					policy.Rules = append(policy.Rules, network.PolicyRule{Family: 4, Priority: network.NoPathPriority, Mark: &mark, Blackhole: true})
+					noPathOwned = true
 				}
 				plan.EgressPolicies = append(plan.EgressPolicies, policy)
 			}

@@ -10,14 +10,15 @@ import (
 	"github.com/imksoo/routerd2/internal/lifetime"
 )
 
-// PolicyRule selects a routing table. This API implements the to-table action;
-// goto, l3mdev, uid/port ranges and other actions are not inferred.
+// PolicyRule selects a routing table or terminates lookup with a blackhole.
+// Goto, l3mdev, uid/port ranges and other actions are not inferred.
 // Family is 4 or 6. Each family/priority slot is exclusive to one rule and must
 // not collide with a rule installed by another controller.
 type PolicyRule struct {
 	Family               int               `json:"family"`
 	Priority             int               `json:"priority"`
-	Table                int               `json:"table"`
+	Table                int               `json:"table,omitempty"`
+	Blackhole            bool              `json:"blackhole,omitempty"`
 	Source               string            `json:"source,omitempty"`
 	Destination          string            `json:"destination,omitempty"`
 	InInterface          string            `json:"in_interface,omitempty"`
@@ -43,8 +44,15 @@ func samePolicyRule(a, b PolicyRule) bool {
 	a.Authority, b.Authority = lifetime.Deadline{}, lifetime.Deadline{}
 	return reflect.DeepEqual(normalizePolicyRule(a), normalizePolicyRule(b))
 }
+func (r PolicyRule) action() int {
+	if r.Blackhole {
+		return 6 // FR_ACT_BLACKHOLE
+	}
+	return 1 // FR_ACT_TO_TBL
+}
+
 func policyRuleMatches(live PolicyRuleState, want PolicyRule) bool {
-	return live.Protocol == RouteProtocol && live.Action == 1 && !live.Advanced && samePolicyRule(live.PolicyRule, want)
+	return live.Protocol == RouteProtocol && live.Action == want.action() && !live.Advanced && samePolicyRule(live.PolicyRule, want)
 }
 
 func validatePolicyRules(rules []PolicyRule) error {
@@ -61,7 +69,11 @@ func validatePolicyRules(rules []PolicyRule) error {
 		if r.Priority < 1 || uint64(r.Priority) > uint64(^uint32(0)>>1) || r.Priority == 32766 || r.Priority == 32767 {
 			add("policy rule: priority %d is invalid or reserved", r.Priority)
 		}
-		if r.Table < 1 || uint64(r.Table) > uint64(^uint32(0)) || r.Table == 255 {
+		if r.Blackhole {
+			if r.Table != 0 || r.SuppressPrefixLength != nil {
+				add("policy rule %d: blackhole has no table or prefix suppression", r.Priority)
+			}
+		} else if r.Table < 1 || uint64(r.Table) > uint64(^uint32(0)) || r.Table == 255 {
 			add("policy rule %d: invalid or reserved route table", r.Priority)
 		}
 		for _, s := range []string{r.Source, r.Destination} {

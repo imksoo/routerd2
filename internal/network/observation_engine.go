@@ -157,7 +157,9 @@ func (e *Engine) observationTargetsLocked() ([]string, []int) {
 			names[w.Interface] = true
 		}
 		for _, r := range d.PolicyRules {
-			tables[r.Table] = true
+			if !r.Blackhole {
+				tables[r.Table] = true
+			}
 			if r.InInterface != "" {
 				names[r.InInterface] = true
 			}
@@ -204,7 +206,9 @@ func (e *Engine) observationTargetsLocked() ([]string, []int) {
 		tables[routeTable(r.Route)] = true
 	}
 	for _, r := range e.state.PolicyRules {
-		tables[r.Table] = true
+		if !r.Blackhole {
+			tables[r.Table] = true
+		}
 	}
 	ordered, tableIDs := make([]string, 0, len(names)), make([]int, 0, len(tables))
 	for name := range names {

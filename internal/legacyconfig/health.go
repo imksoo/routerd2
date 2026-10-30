@@ -65,7 +65,7 @@ func (c *compiler) healthCheck(r resource) string {
 		return ""
 	}
 	if _, dynamic := c.dynamicTunnels[name]; !dynamic {
-		c.ensureInterface(r, "interface", name)
+		c.ensureInterface(name)
 	}
 	interval := c.healthDuration(r, "interval", s.Interval, 30*time.Second)
 	timeout := c.healthDuration(r, "timeout", s.Timeout, 3*time.Second)

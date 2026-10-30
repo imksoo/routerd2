@@ -82,3 +82,26 @@ exercised automatic client DNS and IPv4/IPv6 TCP/UDP, prefix renewal, PPP worker
 replacement and control replacement with retained DUID and restored client
 communication. This establishes that profile, not normal signed-update
 confirmation, the full homert configuration, or physical-device qualification.
+
+`make check-ha-dhcp-scopes` checks imported ordinary and secondary IPv4 pools
+with two signed PID 1 product instances and independent BusyBox clients in
+private namespaces. A /32 VRRP address identifies the server; each physical
+LAN keeps its own secondary /16 address. One profile is selected by an OUI
+and two exact MAC addresses, with all three selectors sharing its pool.
+The clients must receive distinct addresses and the explicit mask, router,
+DNS and virtual server identifier, then renew the same leases after both
+handoff directions. The existing TCP connection and UDP mapping also remain.
+The test needs the standard HA peer dependencies and bundled engines; it does
+not need an ISC DHCPv6 server. Its isolated stages are removed on exit.
+
+On 2026-10-30, base `7fc4d7c` gave a matching special client the ordinary pool
+and ordinary options. dnsmasq selects ranges from the receiving interface's
+subnets; HA had moved the listener to the VIP interface. The engine renderer
+now uses dnsmasq's existing `shared-network` setting to associate other
+configured subnets with the server address, without duplicating addresses or
+changing lease ownership. The corrected profile passed at 06:01 UTC, including
+all three selectors and both handoffs. An earlier corrected run stopped before
+DHCP acceptance on a VRRP ownership notification timeout; that separate
+intermittent failure is not claimed resolved here. This check verifies DHCP
+assignment and renewal, not forwarding through the special profile's external
+gateway or DNS resolver, a complete homert deployment, or physical hardware.

@@ -32,12 +32,21 @@ type Desired struct {
 	WireGuard   []WireGuard  `json:"wireguard,omitempty"`
 }
 
-// Interface brings an existing link up. MTU zero leaves a preexisting link's
+type AdminState string
+
+const (
+	AdminUp        AdminState = "up"
+	AdminUnmanaged AdminState = "unmanaged"
+)
+
+// Interface configures an existing link. AdminState empty or up owns its UP
+// setting; unmanaged leaves that setting to another owner. MTU zero leaves the link's
 // MTU unchanged. An owned IPv4-in-IPv6 link derives its MTU from its parent;
 // an explicit MTU is an additional ceiling on that tunnel.
 // Addresses are host/prefix values (for example 192.0.2.1/24, not the subnet).
 // Only addresses created and recorded by this engine are ever removed.
 type Interface struct {
+	AdminState AdminState `json:"admin_state,omitempty"`
 	// IPv4RPFilter explicitly owns this interface's reverse-path filter.
 	// Linux uses max(conf/all, conf/interface); all=0 alone is insufficient.
 	IPv4RPFilter *int     `json:"ipv4_rp_filter,omitempty"`
@@ -131,7 +140,7 @@ type Firewall struct {
 	AddressSets    []AddressSet    `json:"address_sets,omitempty"`
 	LocalRedirects []LocalRedirect `json:"local_redirects,omitempty"`
 	FlowRoutes     []FlowRoute     `json:"flow_routes,omitempty"`
-	FlowPaths      []FlowPath      `json:"flow_paths,omitempty"`
+	FlowMarks      []uint32        `json:"flow_marks,omitempty"`
 	Forward        []Forward       `json:"forward,omitempty"`
 	Input          *FirewallChain  `json:"input,omitempty"`
 	Output         *FirewallChain  `json:"output,omitempty"`
@@ -278,6 +287,9 @@ func Validate(d Desired) error {
 			add("duplicate interface %q", l.Name)
 		}
 		links[l.Name] = l
+		if l.AdminState != "" && l.AdminState != AdminUp && l.AdminState != AdminUnmanaged {
+			add("interface %s: admin_state must be up or unmanaged", l.Name)
+		}
 		if l.MTU != 0 && (l.MTU < 68 || l.MTU > 65535) {
 			add("interface %s: MTU must be 68..65535 or zero", l.Name)
 		}

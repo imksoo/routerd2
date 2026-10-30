@@ -19,7 +19,7 @@ func (f *fakeKernel) AddPolicyRule(r PolicyRule) error {
 	if err := f.op("rule-add"); err != nil {
 		return err
 	}
-	f.rules = append(f.rules, PolicyRuleState{PolicyRule: r, Protocol: RouteProtocol, Action: 1})
+	f.rules = append(f.rules, PolicyRuleState{PolicyRule: r, Protocol: RouteProtocol, Action: r.action()})
 	return nil
 }
 func (f *fakeKernel) DeletePolicyRule(r PolicyRule) error {
@@ -41,7 +41,7 @@ func TestPolicyRuleRestartUpdateRemovePreservesForeignRules(t *testing.T) {
 	foreign := PolicyRuleState{PolicyRule: PolicyRule{Family: 4, Priority: 9000, Table: 200}, Protocol: 4, Action: 1}
 	k.rules = []PolicyRuleState{foreign}
 	e, opts := engineFor(t, k)
-	d := Desired{PolicyRules: []PolicyRule{{Family: 4, Priority: 12000, Table: 100, Source: "192.0.2.0/24", InInterface: "lan0", Mark: uint32Pointer(16), Mask: uint32Pointer(255)}, {Family: 6, Priority: 12000, Table: 101, Destination: "2001:db8::/32"}}}
+	d := Desired{PolicyRules: []PolicyRule{{Family: 4, Priority: 12000, Table: 100, Source: "192.0.2.0/24", InInterface: "lan0", Mark: uint32Pointer(16), Mask: uint32Pointer(255)}, {Family: 6, Priority: 12000, Table: 101, Destination: "2001:db8::/32"}, {Family: 4, Priority: NoPathPriority, Blackhole: true, Mark: uint32Pointer(NoPathMark)}}}
 	if _, err := e.Apply(context.Background(), 1, d); err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestPolicyRuleRestartUpdateRemovePreservesForeignRules(t *testing.T) {
 	if _, err := e.Apply(context.Background(), 2, d); err != nil {
 		t.Fatal(err)
 	}
-	if len(k.rules) != 3 {
+	if len(k.rules) != 4 {
 		t.Fatalf("duplicate rule after update: %+v", k.rules)
 	}
 	if _, err := e.Apply(context.Background(), 0, Desired{}); err != nil {

@@ -80,16 +80,15 @@ func (c *compiler) interfaceName(r resource, field, value string, literal bool) 
 	return ""
 }
 
-func (c *compiler) ensureInterface(r resource, field, name string) *network.Interface {
+func (c *compiler) ensureInterface(name string) *network.Interface {
 	if name == "" {
-		return nil
-	}
-	if !c.upAllowed[name] {
-		c.reject(r, field, "administrative_state", "native address/membership management brings the link up; declare a managed adminUp interface to authorize that behavior")
 		return nil
 	}
 	if c.interfaces[name] == nil {
 		c.interfaces[name] = &network.Interface{Name: name}
+		if !c.upAllowed[name] {
+			c.interfaces[name].AdminState = network.AdminUnmanaged
+		}
 	}
 	return c.interfaces[name]
 }
@@ -107,7 +106,7 @@ func (c *compiler) iface(r resource) {
 		c.note(r, "Existing interface is observed by name; administrative state is left unmanaged.")
 		return
 	}
-	if iface := c.ensureInterface(r, "ifname", s.IfName); iface != nil {
+	if iface := c.ensureInterface(s.IfName); iface != nil {
 		if iface.MTU != 0 && s.MTU != 0 && iface.MTU != s.MTU {
 			c.reject(r, "mtu", "conflict", "conflicting MTU declarations for the same kernel interface")
 		}
@@ -120,7 +119,7 @@ func (c *compiler) iface(r resource) {
 
 func (c *compiler) member(r resource, member, master string) {
 	name := c.interfaceName(r, "members", member, false)
-	if iface := c.ensureInterface(r, "members", name); iface != nil {
+	if iface := c.ensureInterface(name); iface != nil {
 		if iface.Master != nil && *iface.Master != master {
 			c.reject(r, "members", "conflict", "interface is assigned to more than one master")
 			return
@@ -135,7 +134,7 @@ func (c *compiler) vrf(r resource) {
 	s := r.Spec.(api.VRFSpec)
 	name := c.aliases[r.Kind+"/"+r.Metadata.Name]
 	c.document.Network.Links = append(c.document.Network.Links, network.Link{Name: name, Kind: "vrf", VRFTable: s.RouteTable})
-	c.ensureInterface(r, "ifname", name)
+	c.ensureInterface(name)
 	c.target(r, "network.links/"+name)
 	for _, m := range s.Members {
 		c.member(r, m, name)
@@ -160,7 +159,7 @@ func (c *compiler) bridge(r resource) {
 	}
 	name := c.aliases[r.Kind+"/"+r.Metadata.Name]
 	c.document.Network.Links = append(c.document.Network.Links, network.Link{Name: name, Kind: "bridge", HardwareAddr: s.MACAddress, BridgeMulticastSnooping: &snooping})
-	if iface := c.ensureInterface(r, "ifname", name); iface != nil {
+	if iface := c.ensureInterface(name); iface != nil {
 		iface.MTU = s.MTU
 	}
 	for _, m := range s.Members {
@@ -199,7 +198,7 @@ func (c *compiler) static4(r resource) []resourceprogram.Resource {
 			return nil
 		}
 	}
-	if iface := c.ensureInterface(r, "interface", name); iface != nil {
+	if iface := c.ensureInterface(name); iface != nil {
 		if meaningful(child(r.node, "when")) {
 			id := "address/" + c.serviceName(r, "static4")
 			c.target(r, "resources/"+id)
@@ -261,7 +260,7 @@ func (c *compiler) virtualAddress(r resource) (string, []resourceprogram.Resourc
 		return "", nil
 	}
 	name := c.interfaceName(r, "interface", s.Interface, false)
-	iface := c.ensureInterface(r, "interface", name)
+	iface := c.ensureInterface(name)
 	if meaningful(child(r.node, "when")) {
 		id := "address/" + c.serviceName(r, "vip")
 		c.target(r, "resources/"+id)
@@ -377,7 +376,7 @@ func (c *compiler) sysctl(r resource) {
 				return
 			}
 			c.document.Network.Forwarding.IPv4RPFilter = &value
-		} else if iface := c.ensureInterface(r, "key", c.interfaceName(r, "key", name, true)); iface != nil {
+		} else if iface := c.ensureInterface(c.interfaceName(r, "key", name, true)); iface != nil {
 			if iface.IPv4RPFilter != nil {
 				c.reject(r, "key", "duplicate_sysctl", "each interface reverse-path filter must have one owner")
 				return
@@ -485,7 +484,7 @@ func (c *compiler) staticDSLite(r resource) {
 		c.reject(r, "mtu", "invalid_value", "MTU must satisfy both the pinned DSLiteTunnel range and the native IPv6 encapsulation limit")
 	}
 	c.document.Network.Links = append(c.document.Network.Links, network.Link{Name: name, Kind: "ip6tnl", Parent: underlay, Local: local, Remote: remote})
-	if iface := c.ensureInterface(r, "tunnelName", name); iface != nil {
+	if iface := c.ensureInterface(name); iface != nil {
 		iface.MTU = mtu
 		address := innerIP.String() + "/32"
 		iface.Addresses = append(iface.Addresses, address)

@@ -43,6 +43,7 @@ help:
 	  'make check-pppoe        Verify real PPPoE PAP/CHAP, LAN forwarding and recovery' \
 	  'make check-pppoe-pd     Verify PPP PD recovery, WAN replacement and LAN IPv6 with independent ISC DHCP' \
 	  'make check-ha-import   Verify imported NAT synchronization across two-router handoff' \
+	  'make check-ha-dhcp-scopes Verify shared secondary DHCP ranges across HA handoff' \
 	  'make check-ha-state    Preserve DHCP/TCP/UDP state across two native routers' \
 	  'make check-ha-pd       Verify shared PD across two routers with different BOOTTIME clocks' \
 	  'make check-ha-pd-preparation Verify interrupted B4 preparation and overlapping DAD' \
@@ -387,6 +388,10 @@ dnsmasq-engine:
 .PHONY: check-ha-import
 check-ha-import: build build-publisher conntrack-engine dnsmasq-engine
 	$(PYTHON) scripts/ha-state-peer.py --import-conntrack
+
+.PHONY: check-ha-dhcp-scopes
+check-ha-dhcp-scopes: build build-publisher conntrack-engine dnsmasq-engine
+	$(PYTHON) scripts/ha-state-peer.py --dhcp-scopes
 
 .PHONY: check-ha-state
 check-ha-state: build build-publisher conntrack-engine dnsmasq-engine

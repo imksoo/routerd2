@@ -84,9 +84,8 @@ spec:
         start: 192.0.2.100
         end: 192.0.2.103
         leaseTime: 60s
-      gateway: 192.0.2.1
-      dnsServers:
-      - 192.0.2.1
+      gatewayFrom: {resource: VirtualAddress/gateway, field: address}
+      dnsServerFrom: [{resource: VirtualAddress/gateway, field: address}]
       stickyHoldDays: 3
       when:
         state:

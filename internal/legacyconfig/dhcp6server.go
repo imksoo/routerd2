@@ -33,7 +33,7 @@ func (c *compiler) dhcp6Servers(vrrpNames map[string]string) map[string]*resourc
 			c.policyIssue(r, "dhcp6_servers", "router_lifetime_seconds", "policy_required", "choose zero or a router lifetime of 10..9000 seconds; native PIO lifetimes retain the original PD budgets")
 		}
 		ifname := c.interfaceName(r, "interface", s.Interface, false)
-		c.ensureInterface(r, "interface", ifname)
+		c.ensureInterface(ifname)
 		for i, ref := range s.ListenInterfaces {
 			if c.interfaceName(r, "listenInterfaces["+strconv.Itoa(i)+"]", ref, false) != ifname {
 				c.reject(r, "listenInterfaces", "unsupported_semantics", "additional listening interfaces need independent serving intent")

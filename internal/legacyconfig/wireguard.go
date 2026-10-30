@@ -67,7 +67,7 @@ func (c *compiler) wireguard() {
 		c.aliases[r.Metadata.Name], c.aliases[r.Kind+"/"+r.Metadata.Name] = name, name
 		c.upAllowed[name] = true
 		c.document.Network.Links = append(c.document.Network.Links, network.Link{Name: name, Kind: "wireguard"})
-		c.ensureInterface(r, "ifname", name).MTU = s.MTU
+		c.ensureInterface(name).MTU = s.MTU
 		byName[r.Metadata.Name] = len(c.document.Network.WireGuard)
 		c.document.Network.WireGuard = append(c.document.Network.WireGuard, network.WireGuard{Interface: name, PrivateKeyFile: s.PrivateKeyFile, GeneratePrivateKey: true, ListenPort: s.ListenPort})
 		c.target(r, "network.links/"+name)

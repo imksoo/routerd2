@@ -38,7 +38,7 @@ func (c *compiler) routerAdvertisements(vrrpNames map[string]string) map[string]
 		if c.interfaceName(*delegated, "interface", ds.Interface, false) != iface || ds.PrefixLength == 128 {
 			c.reject(r, "prefixFrom", "reference", "RA requires a delegated LAN on its interface")
 		}
-		c.ensureInterface(r, "interface", iface)
+		c.ensureInterface(iface)
 		from := &serviceconfig.RADelegation{Service: c.document.Services[index].Name, Delegation: c.serviceName(*delegated, "lan"), ValidLifetimeSeconds: c.advertisementLifetime(r, "validLifetime", s.ValidLifetime), PreferredLifetimeSeconds: c.advertisementLifetime(r, "preferredLifetime", s.PreferredLifetime)}
 		lifetime := 1800
 		if from.ValidLifetimeSeconds != nil {

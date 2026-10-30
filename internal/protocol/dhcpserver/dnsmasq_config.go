@@ -31,6 +31,8 @@ func dnsmasqConfig(settings engineSettings) []byte {
 	}
 	// Keep the profile ranges before the catch-all, as routerd's active LAN
 	// controller does. The selector tag and allocated-range tag are distinct.
+	server := netip.MustParseAddr(c.ServerAddress)
+	shared := make(map[netip.Prefix]bool)
 	for _, scope := range append(append([]Scope(nil), c.Scopes...), c.Primary) {
 		name := c.Resource + "-" + scope.Name
 		tag := strings.NewReplacer("_", "-", ".", "-").Replace(name)
@@ -47,6 +49,12 @@ func dnsmasqConfig(settings engineSettings) []byte {
 			Gateway:     scope.Router, DNSServers: scope.DNSServers, NTPServers: scope.NTPServers, Domain: scope.Domain, Options: scope.Options,
 		})
 		prefix := netip.MustParsePrefix(scope.Prefix)
+		// HA listens on the VIP interface; other LAN subnets remain on its
+		// parent. Make those configured ranges available without moving addresses.
+		if !prefix.Contains(server) && !shared[prefix] {
+			lines = append(lines, "shared-network="+c.ServerAddress+","+scope.Start)
+			shared[prefix] = true
+		}
 		mask := net.IP(net.CIDRMask(prefix.Bits(), 32)).String()
 		for _, line := range rendered {
 			if strings.HasPrefix(line, "dhcp-range=") {

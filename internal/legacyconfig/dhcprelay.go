@@ -31,7 +31,7 @@ func (c *compiler) dhcpRelays() {
 		}
 		for _, ref := range spec.Interfaces {
 			name := c.dhcpInterface(r, "interfaces", ref)
-			iface := c.ensureInterface(r, "interfaces", name)
+			iface := c.ensureInterface(name)
 			if iface != nil && iface.Master != nil && *iface.Master != "" {
 				c.reject(r, "interfaces", "unsupported_semantics", "legacy relay VRF binding is ambiguous; declare the native routing domain explicitly")
 			}

@@ -47,7 +47,7 @@ func TestLeaseSyncImportKeepsStandbyAndOriginalOwner(t *testing.T) {
 		}
 		if c := service.DHCPServer; c != nil {
 			dhcp = true
-			if resource.When != nil || c.HA == nil || c.HA.Owner != owner || !c.HA.Bootstrap || c.Interface != "lan-ha" || c.ServerAddress != "192.0.2.1" || c.StickyHoldDays != 3 || len(c.Reservations) != 1 {
+			if resource.When != nil || c.HA == nil || c.HA.Owner != owner || !c.HA.Bootstrap || c.Interface != "lan-ha" || c.ServerAddress != "192.0.2.1" || c.StickyHoldDays != 3 || len(c.Reservations) != 1 || c.Primary.Router != "192.0.2.1" || len(c.Primary.DNSServers) != 1 || c.Primary.DNSServers[0] != "192.0.2.1" {
 				t.Fatal("lost DHCP state ownership or standby synchronization")
 			}
 		}

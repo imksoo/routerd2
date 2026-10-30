@@ -265,9 +265,6 @@ func TestPolicyRefusalsAreResourceScopedAndAtomic(t *testing.T) {
 		{"ra-required", ".required", "unsupported_semantics", func(t *testing.T, d []byte, _ *Options) []byte {
 			return changed(t, d, "required: false", "required: true")
 		}},
-		{"underlay-unmanaged", ".interface", "administrative_state", func(t *testing.T, d []byte, _ *Options) []byte {
-			return changed(t, d, "ifname: eth0, managed: true", "ifname: eth0, managed: false")
-		}},
 		{"source-different-kind", "$policy.ds_lite", "policy_reference", func(_ *testing.T, d []byte, o *Options) []byte {
 			editDS(o, func(p *DSLitePolicy) { p.SourceFrom = "DHCPv6PrefixDelegation/wan-pd" })
 			return d

@@ -65,34 +65,51 @@ def imported_conntrack(stage, directory, index):
     return document["resources"], elections[0]
 
 
-def import_lease_sync(stage, directory, resources):
+def import_lease_sync(stage, directory, resources, dhcp_scopes=False):
     """Use the migration CLI for the lease owners; retain this fixture's topology."""
     import yaml
     election = next(r["service"] for r in resources if r.get("service", {}).get("vrrp"))
     server = next(r["service"] for r in resources if r.get("service", {}).get("dhcp_server"))
-    pd = next(r["service"] for r in resources if r.get("service", {}).get("dhcp6"))
+    pd = next((r["service"] for r in resources if r.get("service", {}).get("dhcp6")), None)
     vrrp, dhcp = election["vrrp"], server["dhcp_server"]
     declared = []
     def add(kind, name, spec):
         declared.append({"apiVersion": "net.routerd.net/v1alpha1", "kind": kind, "metadata": {"name": name}, "spec": spec})
     when = {"state": {"VirtualAddress/gateway.role": {"equals": "master"}}}
     add("Interface", "lan", {"ifname": vrrp["interface"], "managed": True, "adminUp": True})
-    add("Interface", "wan", {"ifname": pd["dhcp6"]["interface"], "managed": True, "adminUp": True})
+    if pd:
+        add("Interface", "wan", {"ifname": pd["dhcp6"]["interface"], "managed": True, "adminUp": True})
     add("IPv4StaticAddress", "local", {"interface": "lan", "address": vrrp["source_address"] + "/24"})
     add("VirtualAddress", "gateway", {"interface": "lan", "family": "ipv4", "address": vrrp["addresses"][0], "mode": "vrrp", "vrrp": {"virtualRouterID": vrrp["virtual_router_id"], "priority": vrrp["priority"], "peers": vrrp["unicast_peers"], "preempt": vrrp["preempt"]}})
     pool = dhcp["primary"]
-    add("DHCPv4Server", "leases", {"interface": "lan", "addressPool": {"start": pool["start"], "end": pool["end"], "leaseTime": str(pool["lease_seconds"]) + "s"}, "gateway": pool["router"], "dnsServers": [dhcp["server_address"]], "stickyHoldDays": dhcp["sticky_hold_days"], "when": when})
-    add("DHCPv6PrefixDelegation", "pd", {"interface": "wan", "prefixLength": pd["dhcp6"]["prefix_length"], "clientDUID": pd["dhcp6"]["client_duid"], "when": when})
+    server_spec = {"interface": "lan", "addressPool": {"start": pool["start"], "end": pool["end"], "leaseTime": str(pool["lease_seconds"]) + "s"}, "gatewayFrom": {"resource": "VirtualAddress/gateway", "field": "address"}, "dnsServerFrom": [{"resource": "VirtualAddress/gateway", "field": "address"}], "stickyHoldDays": dhcp["sticky_hold_days"], "when": when}
+    add("DHCPv4Server", "leases", server_spec)
+    if dhcp_scopes:
+        address = "198.19.0." + vrrp["source_address"].rsplit(".", 1)[1] + "/16"
+        add("IPv4StaticAddress", "secondary", {"interface": "lan", "address": address})
+        server_spec.update(profiles=[{"name": "special", "addressPool": {"start": "198.19.0.100", "end": "198.19.0.103"}, "netmask": "255.255.0.0", "gateway": "198.19.0.1", "dnsServers": ["198.19.0.53"]}], scopes=[
+            {"name": "special-oui", "profileRef": "special", "match": {"ouiPrefixes": ["02:aa:bb"]}},
+            {"name": "special-mac1", "profileRef": "special", "match": {"macAddresses": ["02:cc:dd:00:00:01"]}},
+            {"name": "special-mac2", "profileRef": "special", "match": {"macAddresses": ["02:cc:dd:00:00:02"]}}])
+    if pd:
+        add("DHCPv6PrefixDelegation", "pd", {"interface": "wan", "prefixLength": pd["dhcp6"]["prefix_length"], "clientDUID": pd["dhcp6"]["client_duid"], "when": when})
     for kind, name, source in (("DHCPv4ServerLeaseSync", "leases", "DHCPv4Server/leases"), ("DHCPv6PrefixDelegationLeaseSync", "pd", "DHCPv6PrefixDelegation/pd")):
+        if name == "pd" and not pd:
+            continue
         add(kind, name, {"source": {"resource": source}, "interval": "15s", "targets": [{"name": "partner", "host": "partner.example.test", "user": "routerd", "sshOptions": ["-o", "BatchMode=yes"]}], "when": when})
     policy = {"schema_version": 1, "vrrp": {"VirtualAddress/gateway": {"source_address": vrrp["source_address"], "vip_interface": vrrp["vip_interface"]}}, "lease_sync": {
-        "DHCPv4ServerLeaseSync/leases": {"replication": dhcp["ha"]["replication"], "bootstrap": dhcp["ha"]["bootstrap"]},
-        "DHCPv6PrefixDelegationLeaseSync/pd": {"replication": pd["dhcp6"]["ha"]["replication"]}}}
+        "DHCPv4ServerLeaseSync/leases": {"replication": dhcp["ha"]["replication"], "bootstrap": dhcp["ha"]["bootstrap"]}}}
+    if pd:
+        policy["lease_sync"]["DHCPv6PrefixDelegationLeaseSync/pd"] = {"replication": pd["dhcp6"]["ha"]["replication"]}
     source, intent = directory / "legacy.json", directory / "migration-policy.json"
     source.write_text(json.dumps({"apiVersion": "routerd.net/v1alpha1", "kind": "Router", "metadata": {"name": "imported-ha"}, "spec": {"resources": declared}}))
     intent.write_text(json.dumps(policy))
     imported = yaml.safe_load(run([str(stage / "routerd"), "config", "migrate", "--policy", str(intent), str(source)]))
+    if dhcp_scopes:
+        resources.append({"id": "lan-secondary", "address": {"interface": vrrp["interface"], "cidr": address}})
     for role, destination in (("dhcp_server", server), ("dhcp6", pd)):
+        if destination is None:
+            continue
         imported_resource = next(r for r in imported["resources"] if r.get("service", {}).get(role))
         assert not imported_resource.get("when"), "import must keep the standby synchronization worker alive"
         config = imported_resource["service"][role]
@@ -100,10 +117,10 @@ def import_lease_sync(stage, directory, resources):
         if role == "dhcp6":
             config["delegations"] = destination[role]["delegations"]
         destination[role] = config
-    print("PASS old DHCP/PD declarations and explicit TLS policy compiled into both existing HA engines", flush=True)
+    print("PASS old lease declarations and explicit TLS policy compiled into existing HA engines", flush=True)
 
 
-def peer(stage, dhcp6_server, pd_dslite, stale_owner, preparation, delegated_dns, release_holds, import_conntrack, lease_sync_import):
+def peer(stage, dhcp6_server, pd_dslite, stale_owner, preparation, delegated_dns, release_holds, import_conntrack, lease_sync_import, dhcp_scopes):
     def deadline(*_):
         raise TimeoutError("HA connection-state communication deadline")
     signal.signal(signal.SIGALRM, deadline)
@@ -325,8 +342,10 @@ def peer(stage, dhcp6_server, pd_dslite, stale_owner, preparation, delegated_dns
                 leases["service"]["dhcp_server"]["ha"]["owner"] = election["name"]
                 resources = migrated + [leases] + [r for r in resources if r["id"] == "wan-route"]
                 print("PASS migrated NAT44SessionSync into one IPv4 election on " + node, flush=True)
-            if lease_sync_import:
-                import_lease_sync(stage, directory, resources)
+            if lease_sync_import or dhcp_scopes:
+                if dhcp_scopes:
+                    next(r["service"]["vrrp"] for r in resources if r.get("service", {}).get("vrrp"))["addresses"] = ["198.18.0.1/32"]
+                import_lease_sync(stage, directory, resources, dhcp_scopes)
             (directory / "config.json").write_text(json.dumps({"schema_version": 2, "resources": resources}))
             workers = {role: str(stage / ("routerd-logging" if role == "logging" else "routerd-modules")) for role in roles}
             boot = {"platform": "host", "config": str(directory / "config.json"), "runtime_dir": str(directory / "run"), "state_dir": str(directory / "state"), "workers": workers, "engines": {"vrrp": str(stage / "conntrack-engine.tar")}, "ssh": {"user": "admin"}}
@@ -542,10 +561,10 @@ for protocol,port in ((socket.SOCK_STREAM,18082),(socket.SOCK_DGRAM,18083)):
             else:
                 print("PASS elected WAN acquired PD before graceful VIP publication; timeout withheld VIP until ISC resumed", flush=True)
         hook = stage / "dhcp-hook.sh"
-        hook.write_text('#!/bin/sh\ncase "$1" in\n bound|renew) ip address replace "$ip/24" dev "$interface"; printf "%s %s\\n" "$1" "$ip" >> "' + str(stage) + '/$interface.progress";;\nesac\n')
+        hook.write_text('#!/bin/sh\ncase "$1" in\n bound|renew) ip address replace "$ip/$subnet" dev "$interface"; printf "%s %s %s %s %s %s\\n" "$1" "$ip" "$subnet" "$router" "$dns" "$serverid" >> "' + str(stage) + '/$interface.progress";;\nesac\n')
         hook.chmod(0o500)
 
-        def lease_client(number, requested=None, await_lease=True):
+        def lease_client(number, requested=None, await_lease=True, mac=None):
             name = "lease" + str(number)
             port = "dhcp" + str(number)
             run(["ip", "link", "add", port, "type", "veth", "peer", "name", name])
@@ -555,6 +574,8 @@ for protocol,port in ((socket.SOCK_STREAM,18082),(socket.SOCK_DGRAM,18083)):
             # These are IPv4-only extra clients in the same namespace. Their
             # RA routes must not compete with the separate IPv6 test client.
             run(inside("ha-client", ["sysctl", "-w", "net.ipv6.conf." + name + ".accept_ra=0"]))
+            if mac:
+                run(inside("ha-client", ["ip", "link", "set", name, "address", mac]))
             run(inside("ha-client", ["ip", "link", "set", name, "up"]))
             command = ["busybox", "udhcpc", "-f", "-i", name, "-s", str(hook), "-p", str(stage / (name + ".pid")), "-t", "3", "-T", "1", "-A", "1"]
             if requested:
@@ -574,6 +595,19 @@ for protocol,port in ((socket.SOCK_STREAM,18082),(socket.SOCK_DGRAM,18083)):
             return {"leases": sorted([line.split() for line in path.read_text().splitlines() if len(line.split()) == 5 and int(line.split()[0]) > time.time()])}
 
         wait(lambda: modules("a").get("service.leases", {}).get("ready") is True and api("a", "control.sock", "/v1/services/service.leases")["snapshot"]["active"] is True)
+        special_clients = []
+        def check_special(number, expected=None):
+            fields = lease_events(number)[-1].split()
+            assert fields[1] in ("198.19.0.100", "198.19.0.101", "198.19.0.102", "198.19.0.103"), "special client received the ordinary range: " + str(fields)
+            assert fields[2:] == ["255.255.0.0", "198.19.0.1", "198.19.0.53", "198.18.0.1"], "special DHCP options changed: " + str(fields)
+            assert expected is None or fields[1] == expected, "takeover changed the special client's address"
+            return fields[1]
+        if dhcp_scopes:
+            for number, mac in enumerate(("02:aa:bb:00:00:01", "02:cc:dd:00:00:01", "02:cc:dd:00:00:02"), 10):
+                process = lease_client(number, mac=mac)
+                special_clients.append((number, process, check_special(number)))
+            assert len({address for _, _, address in special_clients}) == 3, "selectors sharing a pool duplicated a lease"
+            print("PASS imported shared special range: OUI and two MAC clients received distinct addresses, explicit mask/router/DNS and the VRRP server ID", flush=True)
         first_client = lease_client(0)
         first_address = lease_events(0)[-1].split()[1]
         assert first_address in ("198.18.0.100", "198.18.0.101", "198.18.0.102", "198.18.0.103")
@@ -851,8 +885,18 @@ while True:
             assert lease_events(0)[-1].split()[1] == first_address, "takeover changed the client's lease"
             wait(lambda: saved("a")["leases"] == saved("b")["leases"])
             print("PASS continuous same TCP socket and UDP mapping after " + previous + " -> " + owner + " takeover and worker/engine restart", flush=True)
+            for number, process, address in special_clients:
+                before_special = len(lease_events(number))
+                process.send_signal(signal.SIGUSR1)
+                wait(lambda: len(lease_events(number)) > before_special)
+                check_special(number, address)
+            if dhcp_scopes:
+                print("PASS special OUI/MAC leases and explicit options survived " + previous + " -> " + owner, flush=True)
             print("PASS same BusyBox client renewed its replicated address after " + previous + " -> " + owner, flush=True)
             assert progress(latest()) == mapping
+        if dhcp_scopes:
+            print("PASS imported ordinary and shared secondary DHCP ranges across both HA directions", flush=True)
+            return
         # A real engine crash must revoke this owner's publication and move
         # traffic before a new worker/engine is admitted.
         before = modules("a")[ha_module]["generation"]
@@ -1140,7 +1184,7 @@ while True:
         for node in ("a", "b"):
             if not (stage / node / "run/control.sock").exists():
                 continue
-            for socket, path in (("supervisor.sock", "/v1/status"), ("control.sock", "/v1/services"), ("control.sock", "/v1/network")):
+            for socket, path in (("supervisor.sock", "/v1/status"), ("control.sock", "/v1/services"), ("control.sock", "/v1/network"), ("logging.sock", "/v1/logs?limit=80&tail=true")):
                 result = subprocess.run(["curl", "--max-time", "2", "-sS", "--unix-socket", str(stage / node / "run" / socket), "http://localhost" + path], capture_output=True, text=True)
                 print("failure", node, path, result.stdout, flush=True)
         raise
@@ -1162,6 +1206,7 @@ while True:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--inside", type=Path)
+    parser.add_argument("--dhcp-scopes", action="store_true", help="Import ordinary and shared secondary pools and renew across both HA directions")
     parser.add_argument("--import-conntrack", action="store_true", help="Import the VRRP/NAT/conntrack graph through the product CLI")
     parser.add_argument("--dhcp6-server", type=Path)
     parser.add_argument("--pd-dslite", action="store_true")
@@ -1173,7 +1218,7 @@ def main():
     parser.add_argument("--release-holds", action="store_true", help="Exercise client RELEASE before sticky recovery; otherwise wait for natural lease expiry")
     args = parser.parse_args()
     if args.inside:
-        peer(args.inside, args.dhcp6_server, args.pd_dslite, args.stale_owner, args.preparation, args.delegated_dns, args.release_holds, args.import_conntrack, args.lease_sync_import)
+        peer(args.inside, args.dhcp6_server, args.pd_dslite, args.stale_owner, args.preparation, args.delegated_dns, args.release_holds, args.import_conntrack, args.lease_sync_import, args.dhcp_scopes)
         return
     os.chdir(Path(__file__).resolve().parent.parent)
     if args.lease_sync_import and not args.dhcp6_server:
@@ -1200,6 +1245,8 @@ def main():
         if args.dhcp6_server:
             run(root + ["install", "-m", "500", str(args.dhcp6_server.resolve()), stage + "/dhcpd"])
             peer_args = ["--dhcp6-server", stage + "/dhcpd"]
+        if args.dhcp_scopes:
+            peer_args.append("--dhcp-scopes")
         if args.lease_sync_import:
             peer_args.append("--lease-sync-import")
         if args.pd_dslite:

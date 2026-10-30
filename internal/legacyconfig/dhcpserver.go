@@ -15,6 +15,7 @@ import (
 
 	"github.com/imksoo/routerd/pkg/api"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
+	"github.com/imksoo/routerd2/internal/resourceprogram"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
 
@@ -23,7 +24,7 @@ import (
 // The active legacy chain shares one dnsmasq process; disjoint pools and a
 // combined capacity <= its default 1000 leases avoid inventing cross-worker
 // pool selection, reservation ownership or a larger lease budget.
-func (c *compiler) dhcpServers() {
+func (c *compiler) dhcpServers(vrrpNames map[string]string) {
 	var servers, reservations []resource
 	for _, r := range c.resources {
 		switch r.Kind {
@@ -94,7 +95,7 @@ func (c *compiler) dhcpServers() {
 	var compiled []compiledServer
 	var capacity uint64
 	for _, r := range servers {
-		cfg, ok := c.dhcpServer(r, attached[r.ID()])
+		cfg, ok := c.dhcpServer(r, attached[r.ID()], vrrpNames)
 		if !ok {
 			continue
 		}
@@ -115,7 +116,7 @@ func (c *compiler) dhcpServers() {
 	}
 }
 
-func (c *compiler) dhcpServer(r resource, reservations []resource) (dhcpserverconfig.Config, bool) {
+func (c *compiler) dhcpServer(r resource, reservations []resource, vrrpNames map[string]string) (dhcpserverconfig.Config, bool) {
 	before := len(c.issues)
 	c.allow(r, "server", "managed", "role", "listenInterfaces", "logDHCP", "stickyHoldDays", "dns", "interface", "addressPool", "profiles", "scopes", "rangeStart", "rangeEnd", "leaseTime", "routerSource", "router", "gateway", "gatewayFrom", "dnsSource", "dnsInterface", "dnsServers", "dnsServerFrom", "ntpServers", "ntpServerFrom", "domain", "domainFrom", "options", "authoritative", "leaseFile")
 	s := r.Spec.(api.DHCPv4ServerSpec)
@@ -142,7 +143,7 @@ func (c *compiler) dhcpServer(r resource, reservations []resource) (dhcpserverco
 		c.reject(r, "dns", "unsupported_semantics", "embedded dnsmasq forwarding/cache settings require a separate explicitly compiled DNSResolver")
 	}
 	ifname := c.dhcpInterface(r, "interface", s.Interface)
-	iface := c.ensureInterface(r, "interface", ifname)
+	iface := c.ensureInterface(ifname)
 	if iface != nil && iface.Master != nil && *iface.Master != "" {
 		c.reject(r, "interface", "unsupported_semantics", "DHCP on a bridge port or VRF member requires explicit native binding intent; a master binding is not inferred from old dnsmasq")
 	}
@@ -173,15 +174,16 @@ func (c *compiler) dhcpServer(r resource, reservations []resource) (dhcpserverco
 	s.AddressPool.LeaseTime = dhcpFirst(s.AddressPool.LeaseTime, s.LeaseTime, "12h")
 	s.RangeStart, s.RangeEnd, s.LeaseTime = "", "", ""
 	s.Interface = ifname
+	servingWhen := c.when(r, s.When, vrrpNames)
 	if !reflect.DeepEqual(s.GatewayFrom, api.StatusValueSourceSpec{}) {
 		if s.Gateway != "" {
 			c.reject(r, "gatewayFrom", "unsupported_semantics", "literal gateway plus status fallback must be resolved explicitly before migration")
 		}
-		s.Gateway = c.dhcpStaticSource(r, "gatewayFrom", s.GatewayFrom)
+		s.Gateway = c.dhcpAddressSource(r, "gatewayFrom", s.GatewayFrom, servingWhen)
 		s.GatewayFrom = api.StatusValueSourceSpec{}
 	}
-	s.DNSServers = c.dhcpServerSources(r, "dnsServerFrom", s.DNSServers, s.DNSServerFrom)
-	s.NTPServers = c.dhcpServerSources(r, "ntpServerFrom", s.NTPServers, s.NTPServerFrom)
+	s.DNSServers = c.dhcpServerSources(r, "dnsServerFrom", s.DNSServers, s.DNSServerFrom, servingWhen)
+	s.NTPServers = c.dhcpServerSources(r, "ntpServerFrom", s.NTPServers, s.NTPServerFrom, servingWhen)
 	s.DNSServerFrom, s.NTPServerFrom = nil, nil
 	if !reflect.DeepEqual(s.DomainFrom, api.StatusValueSourceSpec{}) {
 		if s.Domain != "" {
@@ -310,10 +312,24 @@ func (c *compiler) dhcpSubnet(r resource, field, ifname, first, last string) net
 	return source
 }
 
-func (c *compiler) dhcpStaticSource(r resource, path string, source api.StatusValueSourceSpec) string {
+func (c *compiler) dhcpAddressSource(r resource, path string, source api.StatusValueSourceSpec, servingWhen *resourceprogram.FactCondition) string {
 	if source.Resource == "" || source.Field == "" {
 		c.reject(r, path, "required", "a DHCP address source must explicitly name a resource and address field")
 		return ""
+	}
+	if ref := c.byRef[source.Resource]; ref != nil && ref.Kind == "VirtualAddress" {
+		vip := ref.Spec.(api.VirtualAddressSpec)
+		if vip.Mode == "vrrp" && source.Field == "address" && !source.Optional {
+			owner := c.leaseService(*ref, "vrrp")
+			if owner == nil || owner.VRRP.Family != "ipv4" || !reflect.DeepEqual(servingWhen, &resourceprogram.FactCondition{Fact: owner.ModuleName() + ".elected"}) {
+				c.reject(r, path, "unsupported_semantics", "the DHCP server must serve under the referenced IPv4 virtual address's master condition")
+				return ""
+			}
+			// The address is fixed intent; only its publication changes. The
+			// same HA owner gates DHCP serving after installing this address.
+			address, _ := netip.ParsePrefix(owner.VRRP.Addresses[0])
+			return address.Addr().String()
+		}
 	}
 	return c.resolveStaticAddress(r, path, source, true)
 }
@@ -337,10 +353,10 @@ func (c *compiler) dhcpInterface(r resource, field, ref string) string {
 	return ""
 }
 
-func (c *compiler) dhcpServerSources(r resource, path string, literal []string, sources []api.StatusValueSourceSpec) []string {
+func (c *compiler) dhcpServerSources(r resource, path string, literal []string, sources []api.StatusValueSourceSpec, servingWhen *resourceprogram.FactCondition) []string {
 	result := append([]string(nil), literal...)
 	for i, source := range sources {
-		if address := c.dhcpStaticSource(r, path+"["+strconv.Itoa(i)+"]", source); address != "" {
+		if address := c.dhcpAddressSource(r, path+"["+strconv.Itoa(i)+"]", source, servingWhen); address != "" {
 			result = append(result, address)
 		}
 	}

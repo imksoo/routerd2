@@ -1,17 +1,3 @@
-2026-10-30 14:50 JST: 隔離Linuxの全構成で取得DNS/両IP TCPUDP・二BGP・条件付きDNS24件・特殊DHCP・NTP問い合わせが成立。LAN→Tailscaleは製品の出口固定guardで誤破棄と確認し修正中。全daemon再起動、全設定VM起動、二台全構成は未受入。全34項目は未完了。[実行版と限界](pve-codex-handoff.md)。
-
-2026-10-30 13:46 JST: 固定native79の実HGW 7800秒・724巡、自然PD更新と全daemon再起動が終了0。別のnative80全設定512MiB/2CPU VMは起動失敗、route期限と適用/ACK遅延を調査中。全34項目の完了には数えない。[現状と範囲](pve-codex-handoff.md)。
-
-2026-10-30 12:38 JST native80統合候補: 二段DNSのVIP公開後の待受遅れを旧routerdのfreebind設計で解消。両DNS停止復旧・両方向切替・初回DNS/両IP新規通信・同一TCP/UDP対応が成立。独立UDPは175/985件失効、最大無応答4.543秒であり損失0ではない。全homert同時利用・全体再起動、旧3秒timeout、全34項目は未完了。[実行版と限界](pve-codex-handoff.md)。
-
-2026-10-30 JST dynamic-dns-native79候補: PD/VIPローカルDNS記録を元期限付きの既存入力へ接続。実HGWの初回両IP DNS/HTTPS・動的名・再起動、隔離kernel/digの変更・失効・再取得を確認。最終候補の自然更新と二段DNS・全homert/二台受入は残る。IPIP/FRRの静的経路通信は`0722611`で公開済み。[実行版と限界](pve-codex-handoff.md)。
-
-2026-10-30 JST local-redirect-native78: 宛先集合を製品内DNSで解決し、単一network writerへローカルDNS転送を接続。準備完了後の両IP/TCPUDP・集合変更・再起動・撤去は実通信で通過。初期端末を起動前からつなぐ単体受入とHA timeoutは残る。旧YAMLの取込件数を機能の未実装数にせず、現在の製品設定で全homertの通信・運用を成立させる。[結果と限界](pve-codex-handoff.md)。
-
-2026-10-30 JST blackhole-native77: homertで使うIPv4破棄経路を旧routerdと照合し、単一network writerへ取り込んだ。実二端末のTCP/UDP破棄・対象外通信・再起動保持・具体経路・撤去復帰・管理外経路保持は終了0。関連Race/vet/両architecture build/署名六ELFは終了0。全設定取込は89件で拒否。HA timeoutと全homert/全34項目は未完了。
-
-2026-10-30 JST dns-input-native76候補: DNS入力を状態報告待ちから分離した。18秒PDの実Alpineで署名更新準備・正常確定と、候補の設定取り込み後のHealth異常から旧版/旧設定への自動復旧・自動DNS/両IP通信が終了0。復旧253.49秒。sourceCIDRsは実daemonのTCP/UDP許可・拒否まで通過。全homert取込は91件で拒否。全make checkは終了0。併行中の二台再参加はVRRP適用要求timeoutで失敗し未解決。別診断版では130分/724巡と自然PD更新一回・全daemon再起動後の復帰が終了0。全34項目・期限達成は未完了。[現在の結果と残作業](pve-codex-handoff.md)。
-
 # 現行 routerd と同等の製品にするための実装計画
 
 作成日: 2026-10-24。更新日: 2026-10-30。開発中。全体ゴールは継続中。
@@ -68,6 +54,21 @@ IPv4/IPv6 TCP/UDP・DNS・NTP・管理と、65.2秒/9巡の履歴進行・Health
 実homertのNTP構造を公開値へ置換し、製品の取込・通常適用、独立peerとの期限・再取得・VRRP条件変化、
 同じchronydとLAN時刻/IPv4/IPv6 TCP/UDP/captureを確認した。全homert受入とは分け、DHCPv4実学習と
 監督情報の失効・起動遅延は未解消として[引き継ぎ](pve-codex-handoff.md)に残す。
+
+2026-10-30 15:30 JST: native83の単体同時構成でDNS/DHCP・両IP TCPUDP・二BGP・条件付きDNS24件・特殊端末・NTP・TS双方向と全daemon再起動が成立。継続観測では9.540秒で全8種が復旧し、DNS12/67件、新規TCPUDP27/69件の失敗を保持。空候補時も先行経路を保つ修正を統合。同じ版の512MiB/2CPU/TCG VM起動は不合格。実二回線・全設定二台・実機・他の製品機能は未受入。全34項目は未完了。[実行版と限界](pve-codex-handoff.md)。
+
+2026-10-30 13:46 JST: 固定native79の実HGW 7800秒・724巡、自然PD更新と全daemon再起動が終了0。別のnative80全設定512MiB/2CPU VMは起動失敗、route期限と適用/ACK遅延を調査中。全34項目の完了には数えない。[現状と範囲](pve-codex-handoff.md)。
+
+2026-10-30 12:38 JST native80統合候補: 二段DNSのVIP公開後の待受遅れを旧routerdのfreebind設計で解消。両DNS停止復旧・両方向切替・初回DNS/両IP新規通信・同一TCP/UDP対応が成立。独立UDPは175/985件失効、最大無応答4.543秒であり損失0ではない。全homert同時利用・全体再起動、旧3秒timeout、全34項目は未完了。[実行版と限界](pve-codex-handoff.md)。
+
+2026-10-30 JST dynamic-dns-native79候補: PD/VIPローカルDNS記録を元期限付きの既存入力へ接続。実HGWの初回両IP DNS/HTTPS・動的名・再起動、隔離kernel/digの変更・失効・再取得を確認。最終候補の自然更新と二段DNS・全homert/二台受入は残る。IPIP/FRRの静的経路通信は`0722611`で公開済み。[実行版と限界](pve-codex-handoff.md)。
+
+2026-10-30 JST local-redirect-native78: 宛先集合を製品内DNSで解決し、単一network writerへローカルDNS転送を接続。準備完了後の両IP/TCPUDP・集合変更・再起動・撤去は実通信で通過。初期端末を起動前からつなぐ単体受入とHA timeoutは残る。旧YAMLの取込件数を機能の未実装数にせず、現在の製品設定で全homertの通信・運用を成立させる。[結果と限界](pve-codex-handoff.md)。
+
+2026-10-30 JST blackhole-native77: homertで使うIPv4破棄経路を旧routerdと照合し、単一network writerへ取り込んだ。実二端末のTCP/UDP破棄・対象外通信・再起動保持・具体経路・撤去復帰・管理外経路保持は終了0。関連Race/vet/両architecture build/署名六ELFは終了0。全設定取込は89件で拒否。HA timeoutと全homert/全34項目は未完了。
+
+2026-10-30 JST dns-input-native76候補: DNS入力を状態報告待ちから分離した。18秒PDの実Alpineで署名更新準備・正常確定と、候補の設定取り込み後のHealth異常から旧版/旧設定への自動復旧・自動DNS/両IP通信が終了0。復旧253.49秒。sourceCIDRsは実daemonのTCP/UDP許可・拒否まで通過。全homert取込は91件で拒否。全make checkは終了0。併行中の二台再参加はVRRP適用要求timeoutで失敗し未解決。別診断版では130分/724巡と自然PD更新一回・全daemon再起動後の復帰が終了0。全34項目・期限達成は未完了。[現在の結果と残作業](pve-codex-handoff.md)。
+
 
 ## 2026-10-30 11:05 JSTの実行分担と見通し
 
