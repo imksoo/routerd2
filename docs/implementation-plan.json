@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "document_type": "implementation_plan",
-  "as_of": "2026-10-30",
+  "as_of": "2026-10-31",
   "timezone": "Asia/Tokyo",
   "status": "implementation_in_progress",
   "user_deadline_utc": "2026-10-29T16:56:38Z",
@@ -1118,9 +1118,9 @@
         "D-05"
       ],
       "deliverables": [
-        "v4/v6 server leaseとPD client identity/leaseのsnapshot+delta、cursor、owner epoch、再同期を実装する。",
-        "rsync/SSH/shでのファイル移送からsemantic journal同期へ移す。旧nodeとの混在期間の要否と変換方式を先に決める。",
-        "complete snapshot cutover、gap検出、expiry、永続化とACKの順序を保持する。"
+        "DHCPv4はdnsmasqのleaseファイルと実際の削除・保持履歴を相互認証TLSで転送し、受信済みの事実を再同期する。",
+        "PDは共有DUID/IAIDと元期限を持つ既存checkpointを転送する。未公開形式の変換層や別の割当journalは作らない。",
+        "workerのファイル所有、atomic置換、削除履歴の先行保存とACKの順序を保持する。旧機停止を伴う明示取込で移行する。"
       ],
       "acceptance_gates": [
         "二台切替時にleaseを再配布せず、DUID/IAID/PDと予約・stickyの意味を維持する。",
@@ -1139,10 +1139,10 @@
       ],
       "implementation_notes": {
         "current_homert_observation": "2026-10-27 current homert active config/status: DHCPv4 and PD sync report Synced at15s. PD uses one explicit shared DUID and role-gated WAN VMAC. DHCPv6 server is stateless with PD-derived DNS/domain-search; it is WhenFalse on backup, so full stateful IPv6 pools are not a prerequisite for this profile. Native DHCPv4 checkpoint transfer is partially implemented; native-33 now implements periodic authenticated PD checkpoint transfer; complete HA acceptance remains open.",
-        "implemented": "native-56: mutual peer TLS transfers dnsmasq lease records and routerd request/removal history. One Go worker writes history; engine-specific Unix hook lifetime rejects retired notifications. File replay does not manufacture a request. Actual later requests clear removal facts; stale file rows do not. Recorded owner, acknowledged handoff and known-only disconnected serving use the existing VRRP projection. The worker drains final script notifications and reaps all engine children before closing the listener; an interrupted file/owner transfer leaves ownership unknown.",
-        "validation": "lan-dnsmasq-history signed PID1 pair with independent clients/kernel NAT/capture: both-way takeover, same TCP/UDP, renewal, new distinct allocations, sync outage/recovery, 3-day held-host reacquisition, and queued RELEASE plus sync outage and normal whole-product shutdown. Original hold deadlines survived synchronization/restart, old peer leases did not revive removals, and the returning client reacquired its address. Observed UDP loss0 and max TCP reply wait about1.86s in that run; these are not arbitrary-partition or performance guarantees. Preceding implementations passed natural expiry and a stale-owner/offline-client case; the full latest combination is not inferred.",
+        "implemented": "b9fe727 / dhcp-reconcile-native93: VRRP alone selects serving. Remove separate .owner/bootstrap and unknown-only serving restriction; keep configured pool and report sync failure. Merge retained received lease/history facts while dnsmasq is stopped on peer reconnection; one history writer and existing bounded hook drain remain. Pinned mutual TLS, domain conflict and concurrently serving peer rejection remain.",
+        "validation": "Root check-ha-state and check-ha-dhcp-initial exited0; independent same-binary rejoin passed both client renewals/forwarding. Full57 normal Alpine/KVM fresh-client, both power cuts/rejoins also exited0. b9fe727 / dhcp-reconcile-native93 normal Alpine/KVM4CPU4096MiB full57: both actual power cuts/rejoins and fresh automatic DHCP/SLAAC client passed. Fresh client used acquired DNS UDP/TCP and both-IP TCP/UDP with former owner absent, then renewed unchanged address after each rejoin. Additional cut preceded backup BGP readiness. All paths37.401/25.390s within original60s.",
         "remaining": [
-          "Wider DHCPv4 partitions, UTC skew, persistent-state loss, bootstrap misconfiguration, conflicting histories, full stale-owner combinations and maintenance cutover/target-device qualification. A 200ms handoff re-election remains unresolved; current successful cases use1s.",
+          "Unknown, never-synchronized offline-client leases remain a demonstrated asynchronous-replication limitation, also absent from the old guarantee. Wider partitions, UTC skew, persistent-state loss, conflicting histories and maintenance cutover/target-device qualification remain. No implicit pool split or new owner ledger.",
           "PD periodic-snapshot unreplicated window, disconnected-peer return and partition fencing, delta/gap recovery and explicit pair-wide Release. Separate-kernel/boot-ID reboot qualification and required remaining IPv6 serving contracts; homert stateless DHCPv6 does not require stateful pools as a prerequisite. Direct stale/conflicting PD replica response replay remains untested; the current409 check exercises retired worker notifications.",
           "Clock-skew/load/power/NIC, ARM64 execution and target-hardware/ONU acceptance; validate a maintenance cutover rather than claim unsupported mixed old/new rollout."
         ],
@@ -11209,7 +11209,7 @@
     "physical_target_profile": "awaiting user target hardware/NIC and performance requirements; independent implementation and isolated VM tests continue",
     "validation_reporting": "Record current behavior, executed checks and untested scope concisely. Discard historical checkpoint ledgers as acceptance authority; no compatibility obligation to their code, APIs or formats.",
     "current_acceptance": {
-      "implementation_head": "3033181",
+      "implementation_head": "27fbad2",
       "single_node_full_input_runtime": "full-homert-loopback-native92 / 8cc420d / native92 / network27",
       "normal_alpine_runtime": "Alpine3.24.3 Linux6.18.59-0-lts; isolated PVE KVM4CPU4096MiB; normal Make/APK image",
       "original_input_resources_per_node": 109,
@@ -11218,18 +11218,18 @@
       "single_node": "Cold boot and actual reboot passed independent clients, acquired IPv4/IPv6 DNS transports UDP/TCP, both-IP TCP/UDP, conditional DNS/DoH, BGP/IX, NTP and Tailscale. Not physical NIC/ONU qualification.",
       "natural_original_dhcp_lease_seconds": 43200,
       "natural_dhcp_t1_seconds": 21600,
-      "natural_renewal": "Running; both original LAN leases due 2026-10-31 04:42:16 JST; observation ends approximately04:49:37 JST. No completion claim.",
-      "two_node_normal": "ntp-drift-native92 normal Alpine/KVM full57: real power cuts both directions and rejoin completed; additional cut occurred before backup BGP established, without waiting for backup BGP or NTP. All required forwarding/management/time paths restored within original60s. Source base cd62d89 plus3033181 NTP change; later DNS/control-telemetry integrations were not in this image.",
+      "natural_renewal": "Current native93/original43200s LAN lease cohort; ordinary/special actual T1 deadlines2026-10-31T01:20:47Z. No fault injection or replacement. Prior8cc cohort stopped5h17m with requestACK->echo response30.43s; cause/IX choice not established.",
+      "two_node_normal": "b9fe727 / dhcp-reconcile-native93 normal Alpine/KVM4CPU4096MiB full57: both actual power cuts/rejoins and fresh automatic DHCP/SLAAC client passed. Fresh client used acquired DNS UDP/TCP and both-IP TCP/UDP with former owner absent, then renewed unchanged address after each rejoin. Additional cut preceded backup BGP readiness. All paths37.401/25.390s within original60s.",
       "two_node_configuration_changes": [
         "Explicit shared WAN IPv4 next hop for static BGP advertisements",
         "Shared VirtualAddress assigned to existing WAN VMAC instead of physical WAN"
       ],
       "migration_policy": "43a6487 exposes bgp_next_hops. Full CLI migration of both110-resource sources produces57-resource programs identical to executed HA candidates. Interface relocation is an explicit source configuration change.",
-      "two_node_limits": "Same TCP SYN/sequence space and NAT mapping retained; losses occurred and TCP maximum was near unchanged15s client deadline. Two nodes booted twice, no effects deadline failure. Actual original LAN6h renewals, target physical qualification and new DHCP allocations while former owner is absent are separate requirements.",
+      "two_node_limits": "Same TCP/SYN/NAT retained. TCP max14.945s near original15s; UDP1103/935/168 expired, max gap13.216s; DNS45/659 failed. Explicit shared WAN BGP next hop and WAN VMAC relocation. Not zero loss, long-term stability, original-input-without-change or physical/performance qualification.",
       "normal_alpine_copy_assertions": 0,
       "normal_alpine_effects_timeouts": 0,
-      "hgw_normal": "3944a77 / full-homert-event-native92; standard7800s real-HGW run exited0 after683 periodic both-IP HTTPS/acquired UDP-TCP DNS rounds; natural PD Renew/Reply1, reply24.714ms; PD SIGKILL1.58s, graceful replacement3.80s, full daemon restart4.65s and Tailscale/Internet exit recovered. DHCP state-publication deadlines caused two unexpected lease-worker restarts; not a zero-restart run or full57 input.",
-      "remaining": "Fix selected survivor DHCP new-client allocation during former-owner outage; verify partition/rejoin duplicate prevention and intermittent conditional-LAN VIP recovery. Then integrated two-node full profile and initial state migration/recovery; finish natural LAN/HGW renewals and actual target SSH/deployment conditions; k8s/pve dynamic SAM transport and Cloud SAM/all remaining work packages.",
+      "hgw_normal": "New no-injection integrated-host-source-native95 / standard7800s, real HGW/independent automatic clients, original saved DUID. Natural PD T1 observed deadline2026-10-30T21:45:46Z; completion with recovery approximately21:57Z. One startup AFTR restart on stale-observation HTTP409; steady phase began generation2. Keep trial untouched.",
+      "remaining": "Complete no-injection original LAN/real-HGW natural renewals and integrated normal Alpine two-node acceptance after27fbad2. Retain original I/O delay trigger as unmeasured; then same-contract migration/update recovery, target homert conditions, k8s/pve dynamic SAM and Cloud SAM/all34. Unknown never-received DHCP bindings remain limited.",
       "full_profile_signed_update": {
         "base": "8cc420d / full-homert-loopback-native92",
         "candidate": "00969ca / full-homert-operations-native92",
@@ -11278,34 +11278,53 @@
         "limit": "This particular split is an independent ISC condition, not reproduced on physical HGW.",
         "root_acceptance": "combined-information-native92: split ISC PD/information actual communication passed. Related Race/vet, normal build, both-arch static sixELF/catalog/publisher passed. Conditional LAN control expiry/role/PD withdrawal and recovery passed76.22s with actual VIP readiness; precursor runs failed DNS or10s VIP readiness. Same readiness check on normal9a57c8a baseline passed72.37s. One pass does not resolve the intermittent combined readiness failures."
       },
-      "current_runs": "Original8cc420d normal Alpine43200s LAN leases still running, T1 2026-10-30T19:42:16Z. Actual-HGW bgp-gr-families-native92 with cd62d89-equivalent fixture uses real tunnel local address for route check and is running standard7800s, all initial worker generations retained through2214s/187 rounds. Prior9a HGW stopped after1256s when an unnecessary AFTR-input GET timed out4s; do not claim completed natural renewal or fixed management latency.",
-      "warming_backup": "9436850 fixed empty per-family GR capability and removed later family reconstruction that erased it. Actual IPv4 AFI1/SAFI1 in OPEN, forwarding-preserved false. Previously full new-client traffic recovered61.200s; corrected forwarding7.914/9.568s. That trial still failed full60s because restarted NTP required58.427s after its own query start.3033181 persisted native chronyd drift calibration at60s minimum write interval; next actual power-cut trial read6.423+/-377.327ppm from drift and NTP adopted4.283s, full22.428/19.421s passed.",
+      "current_runs": {
+        "hgw": "New no-injection integrated-host-source-native95 / standard7800s, real HGW/independent automatic clients, original saved DUID. Natural PD T1 observed deadline2026-10-30T21:45:46Z; completion with recovery approximately21:57Z. One startup AFTR restart on stale-observation HTTP409; steady phase began generation2. Keep trial untouched.",
+        "original_lan": "Current native93/original43200s LAN lease cohort; ordinary/special actual T1 deadlines2026-10-31T01:20:47Z. No fault injection or replacement. Prior8cc cohort stopped5h17m with requestACK->echo response30.43s; cause/IX choice not established."
+      },
+      "warming_backup": "Current full57 native93 fresh-client pair passed additional cut before BGP-ready; full37.401/25.390s. Prior NTP frequency persistence fix remains included; original60s and TCP15s limits unchanged.",
       "two_node_recovery_seconds": [
-        22.42824912071228,
-        19.420949459075928
+        37.4008207321167,
+        25.389928579330444
       ],
-      "two_node_max_tcp_reply_seconds": 14.506115798838437,
+      "two_node_max_tcp_reply_seconds": 14.945046945475042,
       "two_node_udp": {
-        "sent": 1515,
-        "received": 1263,
-        "expired": 252,
+        "sent": 1103,
+        "received": 935,
+        "expired": 168,
         "pending": 0,
-        "max_gap_seconds": 7.249182173982263
+        "maximum_no_reply_seconds": 13.215941091068089
       },
       "two_node_dns": {
-        "queries": 831,
-        "failed": 20
+        "queries": 659,
+        "failed": 45
       },
       "dns_probe_deadlines": "28aaf16: query1s and probe3s retain independent deadlines and original source expiry, including DoH bootstrap/dial. Independent dnsmasq delayed1.5s: old code never healthy; corrected probe healthy, ordinary query1.033s timeout, restored UDP/TCP. Root integrated-ntp-native92 actual check-dns-upstream passed; related Race8.921s and vet passed.",
       "control_operation_telemetry": "1d96d87: actual Engine.apply start/end/result -> existing logging path -> independent OTLP Collector metrics/traces. Root integrated-ntp-native92 passed Collector outage/recovery, config application and legacy nonduplicate delivery, concurrent UDP1246 replies/0 failures. Related control Race82.698s and vet passed. Not all historical instrument sources.",
-      "integrated_checks": "integrated-ntp-native92: DNS/control/OTLP/legacy related Race passed, vet passed, normal build and actual DNS/Collector paths passed; both-arch static sixELF/catalog/publisher passed (publisher38.579s)."
+      "integrated_checks": "integrated-ntp-native92: DNS/control/OTLP/legacy related Race passed, vet passed, normal build and actual DNS/Collector paths passed; both-arch static sixELF/catalog/publisher passed (publisher38.579s).",
+      "dhcp_serving_candidate": {
+        "runtime": "b9fe727 / dhcp-reconcile-native93; normal Make/APK image",
+        "result": "Root check-ha-state and check-ha-dhcp-initial exited0; independent same-binary rejoin passed both client renewals/forwarding. Full57 normal Alpine/KVM fresh-client, both power cuts/rejoins also exited0.",
+        "allocation": "Original configured pool retained; no implicit split or separate owner ledger. VRRP selects serving; sync failure does not block new clients.",
+        "limit": "A valid offline-client lease never received from the failed former member was reassigned in the sync-partition test. The old asynchronous15s file copy also provided no guarantee for this unseen fact. This is not qualified as protected.",
+        "checks": "make check including full Race Detector and vet passed after correcting the coalesced-BFD test to use a valid slower remote transmitter; expiry regression retains original packet deadline. Normal build/image, amd64+arm64 static sixELF and signed catalog/publisher passed.",
+        "full_profile": "b9fe727 / dhcp-reconcile-native93 normal Alpine/KVM4CPU4096MiB full57: both actual power cuts/rejoins and fresh automatic DHCP/SLAAC client passed. Fresh client used acquired DNS UDP/TCP and both-IP TCP/UDP with former owner absent, then renewed unchanged address after each rejoin. Additional cut preceded backup BGP readiness. All paths37.401/25.390s within original60s. Same TCP/SYN/NAT retained. TCP max14.945s near original15s; UDP1103/935/168 expired, max gap13.216s; DNS45/659 failed. Explicit shared WAN BGP next hop and WAN VMAC relocation. Not zero loss, long-term stability, original-input-without-change or physical/performance qualification."
+      },
+      "host_route_ack_recovery": {
+        "commit": "27fbad2",
+        "cause": "Apply acknowledgement loss clears the completed projection cache; deriving source candidates from that cache then removed a live IPv6 host route. Candidates now come from current intent and are checked by the existing network owner for kernel presence/ownership/DAD; observation batch errors do not replace prior observations. No timeout extension/retry/second owner.",
+        "before": "Native93 real HGW:22s fsync delay reproduced table120 deletion;11 missing among473 observations. The7800s cohort was improperly repurposed for injection and interrupted; this is not a natural failure or natural-renewal acceptance.",
+        "after": "Native94 dedicated180s fixture, same22s delay:706 observations/38s,0 missing routes. Acquired DNS/both-IP traffic and PD SIGKILL2.07s, graceful restart4.63s, whole daemon4.33s recovery completed0;0 natural PD Renew in the short window.",
+        "checks": "Runtimeplan normal30.217s/Race35.158s; webconsole Race1.065s; three existing real host-route daemon fixtures passed; full make check Race/vet and integrated95 normal build/both-arch static sixELF/catalog/publisher passed.",
+        "remaining": "Original100min run cause of prolonged apply I/O is unmeasured. Complete no-injection long renewal and normal Alpine integrated two-node acceptance."
+      }
     }
   },
   "execution_order": [
     {
       "stage": 1,
       "profile": "homert02/03",
-      "next": "Keep original LAN and real-HGW natural renewals running. Complete selected-survivor DHCP new-client allocation with peer absent, verify learned DNS/IPv4 and partition/stale-owner rejoin; then integrated two-node full-profile/migration/recovery and target deployment. BGP/NTP warm-backup extra power cut passed full22.428/19.421s at ntp-drift-native92. Continue k8s/pve and Cloud SAM after homert criteria. All34 remain incomplete.",
+      "next": "Complete no-injection original LAN/real-HGW natural renewals and integrated normal Alpine two-node acceptance after27fbad2. Retain original I/O delay trigger as unmeasured; then same-contract migration/update recovery, target homert conditions, k8s/pve dynamic SAM and Cloud SAM/all34. Unknown never-received DHCP bindings remain limited.",
       "required_focus": [
         "WAN/LAN IPv4/IPv6, DS-Lite, actual route selection/backup WAN, DHCP/PD/RA, learned DNS resolution/distribution, firewall/NAT/MTU/MSS, BGP and management",
         "HA-01 current election/track dependencies, HA-02 DHCP/PD synchronization, HA-03 NAT/connection synchronization and EXT-02 Tailscale used by this deployment"
