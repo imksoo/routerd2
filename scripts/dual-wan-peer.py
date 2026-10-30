@@ -7,6 +7,8 @@ Packet capture includes both real WAN paths and the separate LAN client.
 The independent AC negotiates MRU 1400 against product MTU 1454.
 WAN providers route to separate MTU-1500 application hosts and suppress IPv4
 fragmentation-needed messages. Check 1 MiB TCP in both directions and small MSS.
+--ipv4-pmtu instead preserves DF, permits feedback and verifies one LAN UDP
+socket learns local/remote PMTU over DS-Lite before reducing its payload.
 """
 
 import argparse
@@ -32,7 +34,7 @@ def terminated(*_):
     raise KeyboardInterrupt()
 
 
-def peer(stage, bridge_wan):
+def peer(stage, bridge_wan, ipv4_pmtu):
     signal.signal(signal.SIGALRM, deadline)
     signal.signal(signal.SIGTERM, terminated)
     signal.alarm(150)
@@ -167,6 +169,36 @@ s.connect(('198.51.100.20',18081));body=b'm'*1430;s.send(body);assert s.recv(409
         print(
             "PASS marked1458-byte DF UDP selected PPP while source-policy selected DSL", flush=True
         )
+
+    def udp4_pmtu():
+        # Use one independent socket throughout both local and remote feedback.
+        # Payload sizes after the first probe come from the learned kernel PMTU.
+        code = r"""import errno,select,socket,struct
+s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.settimeout(2)
+s.setsockopt(socket.IPPROTO_IP,11,1) # IP_RECVERR
+s.setsockopt(socket.IPPROTO_IP,10,3) # IP_MTU_DISCOVER, PROBE
+s.connect(('198.51.100.20',18081))
+def feedback(body,expected):
+    s.send(body)
+    poll=select.poll();poll.register(s,select.POLLERR)
+    assert poll.poll(2000),'missing ICMP fragmentation-needed'
+    _,control,_,_=s.recvmsg(4096,256,socket.MSG_ERRQUEUE)
+    e=next(struct.unpack('=IBBBBII',v[:16]) for level,kind,v in control if level==socket.IPPROTO_IP and kind==11)
+    learned=s.getsockopt(socket.IPPROTO_IP,14) # IP_MTU
+    assert e[0]==errno.EMSGSIZE and e[1:4]==(2,3,4) and e[5]==expected,e
+    assert learned==e[5],(learned,e)
+    print('ICMP type3/code4 received; same socket learned PMTU',learned,'after payload',len(body),flush=True)
+    return learned
+mtu=feedback(b'u'*1450,1454)
+s.setsockopt(socket.IPPROTO_IP,10,2) # DO: use the kernel's learned PMTU
+mtu=feedback(b'u'*(mtu-28),1400)
+body=b'u'*(mtu-28-len(b'DSL:'))
+s.send(body);assert s.recv(4096)==b'DSL:'+body
+print('PASS same UDP socket: local1454 then AFTR1400 feedback through NAT; learned-MTU payload',len(body),'and reply',len(body)+4,flush=True)
+"""
+        result = subprocess.run(inside(lan, ["python3", "-u", "-c", code]), capture_output=True, text=True, timeout=8)
+        print(result.stdout, result.stderr, flush=True)
+        assert result.returncode == 0
 
     def udp6_mtu():
         code = r"""import errno,select,socket,struct
@@ -549,6 +581,22 @@ print('PASS actual IPv6 UDP Packet Too Big MTU1280 and subsequent 1200-byte UDP 
         a = probe(ppp, "probe-ppp")
         b = probe(dsl, "probe-dsl")
         wait(lambda: selected(1000, 101) and selected(1100, 102))
+        if ipv4_pmtu:
+            a.terminate()
+            a.wait(timeout=3)
+            wait(lambda: not selected(1000, 101))
+            trial = copy.deepcopy(configuration)
+            next(r for r in trial["resources"] if r["id"] == "internet-dsl")["service"]["ds_lite"]["mtu"] = 1454
+            next(r for r in trial["resources"] if r["id"] == "firewall")["firewall"]["ipv4_clear_df"] = []
+            current = api("control.sock", "/v1/config")
+            api("control.sock", "/v1/config/commit", dict(expected_revision=current["revision"], request_id="dslite-pmtu", config=trial))
+            wait(lambda: selected(1100, 102) and json.loads(run(["ip", "-n", ns, "-j", "link", "show", "dslite0"]))[0]["mtu"] == 1454)
+            # Restore PMTU feedback only in this fixture's independent AFTR.
+            run(inside(dsl, ["nft", "delete", "table", "inet", "peer"]))
+            run(["ip", "-n", dsl, "link", "set", "backend0", "mtu", "1400"])
+            traffic("DSL")
+            udp4_pmtu()
+            return
         traffic("PPP")
         large_transfer("198.51.100.20", 1400)
         udp_mtu("PPP")
@@ -739,9 +787,12 @@ def main():
     parser.add_argument("--output", type=Path, default=Path("dist/dual-wan"))
     parser.add_argument("--engine-image", type=Path, default=Path("dist/pppoe-engine.tar"))
     parser.add_argument("--bridge-wan", action="store_true", help="use an owned bridge WAN with an MTU-1400 member")
+    parser.add_argument("--ipv4-pmtu", action="store_true", help="verify ICMP fragmentation-needed and same-socket UDP recovery over DS-Lite MTU1454")
     args = parser.parse_args()
+    if args.ipv4_pmtu and args.bridge_wan:
+        parser.error("--ipv4-pmtu uses the direct MTU-1500 underlay")
     if args.inside:
-        peer(args.inside, args.bridge_wan)
+        peer(args.inside, args.bridge_wan, args.ipv4_pmtu)
         return
     args.output.mkdir(parents=True, exist_ok=True)
     root = [] if os.geteuid() == 0 else ["sudo", "-n"]
@@ -773,7 +824,7 @@ def main():
                     stage + "/peer.py",
                     "--inside",
                     stage,
-                ] + (["--bridge-wan"] if args.bridge_wan else []),
+                ] + (["--bridge-wan"] if args.bridge_wan else []) + (["--ipv4-pmtu"] if args.ipv4_pmtu else []),
                 stdout=output,
                 stderr=subprocess.STDOUT,
                 timeout=180,

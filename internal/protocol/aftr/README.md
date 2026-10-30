@@ -234,3 +234,33 @@ Protocol references: [RFC 6333](https://www.rfc-editor.org/rfc/rfc6333.html),
 [RFC 1035](https://www.rfc-editor.org/rfc/rfc1035.html),
 [RFC 2181](https://www.rfc-editor.org/rfc/rfc2181.html), and
 [RFC 3596](https://www.rfc-editor.org/rfc/rfc3596.html).
+
+## IPv4 の要断片化通知と端末の通信継続
+
+`make check-dslite-pmtu` は既存の二回線試験の独立 AFTR・LAN 端末を使い、
+DS-Lite の MTU を homert の設定と同じ 1454 にします。
+DF ビットを保持し、独立 AFTR が生成する ICMP 通知を許可します。
+AFTR の先の転送先インターフェースには MTU1400 を設定します。
+
+一つの UDP ソケットで、ルーター生成の MTU1454 通知と AFTR 生成の MTU1400 通知を受信します。
+通知は ICMP type3/code4 として確認し、`IP_MTU` が通知値へ更新されたことも照合します。
+続く送信量は期待値を直接使わず、OS が学習した経路 MTU から算出します。
+最後の送信1368バイト・応答1372バイトが、同じソケットで往復することを必要条件にします。
+パケット記録には AFTR 側の通知が IPv4-in-IPv6 と NAT の復路を通って LAN 端末へ届く様子が残ります。
+
+2026年10月31日02:11:12～02:11:20 JST、Linux `6.8.0-136-generic` で終了0を確認しました。
+使用した製品は `combined-information-native92`、確認したソースは `551c00c` です。
+製品コードは変更していません。
+初回の1450バイト送信は IPv4 ヘッダーと UDP ヘッダーを含め1478バイトとなり、MTU1454 の通知を受けました。
+学習した1454からヘッダー28バイトを引いた1426バイト送信で、次に MTU1400 の通知を受けました。
+再度学習した1400からヘッダー28バイトと応答識別子4バイトを引き、1368バイトを送信しました。
+1372バイトの応答を同じソケットで受信できました。
+
+既存試験の準備に PPPoE の対向機能も使いますが、この受入の通信対象は DS-Lite です。
+端末と外側回線のアドレス・経路は試験用の静的設定です。
+DHCP・PD の自動取得、対象 homert 実機、QUIC、二台切替の成立を示すものではありません。
+構築済みの実行物を使う場合は、次のコマンドで同じ経路だけを実行できます。
+
+```sh
+python3 scripts/dual-wan-peer.py --ipv4-pmtu --binary-dir dist/bin --engine-image dist/pppoe-engine.tar --output dist/dslite-pmtu
+```

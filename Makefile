@@ -42,6 +42,7 @@ help:
 	@printf '%s\n' \
 	  'make check             Format, unit tests, race detector, and vet' \
 	  'make check-dual-wan    Verify PPPoE/DS-Lite Health/PBR and TCP MSS with independent peers' \
+	  'make check-dslite-pmtu Verify IPv4 PMTU feedback and same-socket UDP recovery over DS-Lite' \
 	  'make check-pppoe        Verify real PPPoE PAP/CHAP, LAN forwarding and recovery' \
 	  'make check-pppoe-pd     Verify PPP PD recovery, WAN replacement and LAN IPv6 with independent ISC DHCP' \
 	  'make check-ha-import   Verify imported NAT synchronization across two-router handoff' \
@@ -178,6 +179,10 @@ check-dhcp4: build
 
 check-dual-wan: build pppoe-engine
 	$(PYTHON) scripts/dual-wan-peer.py
+
+.PHONY: check-dslite-pmtu
+check-dslite-pmtu: build pppoe-engine
+	$(PYTHON) scripts/dual-wan-peer.py --ipv4-pmtu --output dist/dslite-pmtu
 
 .PHONY: check-dual-wan-bridge
 check-dual-wan-bridge: build pppoe-engine
