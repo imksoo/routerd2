@@ -1022,7 +1022,8 @@ const interactiveHelp = `Operational commands:
   show observations [after CURSOR] [limit 1..16]
   show event-store
   show snapshots             list verified saved configuration references
-  show dns-queries NAME [FILTER VALUE ...] (exec help lists filters)
+  show dns-queries NAME [client IP] [name PATTERN] [response RCODE]
+                       [since RFC3339] [until RFC3339] [limit 1..1000]
   show derived RESOURCE_ID
   restart <module>
   poweroff / reboot           drain workers, then power off or reboot appliance
