@@ -7,6 +7,7 @@ service observation, including its original expiry and fresh acquisition after r
 This host-mode check does not qualify appliance clock adjustment.
 """
 import argparse
+from datetime import datetime
 import ipaddress
 from html.parser import HTMLParser
 import json
@@ -25,6 +26,7 @@ import yaml
 def run(args, timeout=10):
     result = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
     if result.returncode:
+        print(result.stdout + result.stderr, end="", flush=True)
         raise subprocess.CalledProcessError(result.returncode, args, result.stdout, result.stderr)
     return result.stdout
 
@@ -103,6 +105,7 @@ def peer(stage, profile):
         boot['workers']['logging'] = str(stage / 'routerd-logging')
         if learned:
             boot['workers']['dhcp6'] = str(modules)
+            boot['workers']['ra_client'] = str(modules)
             boot['workers']['vrrp'] = str(modules)
             boot['workers']['dns'] = str(modules)
         (stage / 'boot.json').write_text(json.dumps(boot))
@@ -377,6 +380,43 @@ def peer(stage, profile):
             print('Observed first imported time worker', {'generation': worker['generation'], 'pid': worker['pid'], 'chronyd_pid': chronyd_pid, 'engine_starts': starts}, flush=True)
             print('PASS product legacy import kept three always-static sources and two conditional fallbacks, learned source expiry/reacquisition/VRRP withdrawal/recovery, same chronyd and independent LAN NTP/IPv4/IPv6 TCP/UDP', flush=True)
 
+            # All fixed, learned and fallback endpoints are in this isolated
+            # peer. Drop both IP families without deleting its static routes
+            # or IPv6 addresses, as an administrative link-down would do.
+            before_outage = query('/v1/services/' + time_name)['snapshot']
+            outage_started = time.monotonic()
+            outage_rules = stage / 'outage.nft'
+            outage_rules.write_text('table inet ntp_outage {\n chain input { type filter hook input priority 0; policy accept; iifname "eth0" counter drop; }\n chain output { type filter hook output priority 0; policy accept; oifname "eth0" counter drop; }\n}\n')
+            run(inside('ntp-source', ['nft', '-f', str(outage_rules)]))
+            try:
+                time.sleep(30)
+                counters = json.loads(run(inside('ntp-source', ['nft', '-j', 'list', 'table', 'inet', 'ntp_outage'])))
+                dropped = sum(expr['counter']['packets'] for item in counters['nftables'] for expr in item.get('rule', {}).get('expr', []) if 'counter' in expr)
+                assert dropped > 0, 'upstream outage did not drop any packets'
+                during_outage = query('/v1/services/' + time_name)['snapshot']
+                assert during_outage['observed_nanos'] > before_outage['observed_nanos']
+                assert engine_pid() == chronyd_pid
+                print('Observed 30-second upstream outage', dropped, 'dropped packets', json.dumps({
+                    key: during_outage[key] for key in ('synchronized', 'reference_time', 'skew_ppm', 'root_delay_seconds', 'root_dispersion_seconds')}), flush=True)
+            finally:
+                run(inside('ntp-source', ['nft', 'delete', 'table', 'inet', 'ntp_outage']))
+            restored_at = time.time()
+            restored_started = time.monotonic()
+            def fresh_upstream_sample():
+                snapshot = query('/v1/services/' + time_name)['snapshot']
+                return snapshot['synchronized'] and datetime.fromisoformat(snapshot['reference_time'].replace('Z', '+00:00')).timestamp() > restored_at
+            # Bound this recovery observation without changing the engine
+            # polling schedule or forcing a burst.
+            wait(fresh_upstream_sample, 150)
+            imported_clients()
+            console_time(time_name)
+            recovered = query('/v1/services/' + time_name)['snapshot']
+            print('PASS all upstream NTP endpoints lost and restored: fresh upstream sample, same chronyd and independent LAN chronyd adoption', json.dumps({
+                'outage_seconds': round(restored_started - outage_started, 3),
+                'recovery_and_client_seconds': round(time.monotonic() - restored_started, 3),
+                'chronyd_pid': chronyd_pid, 'before_reference_time': before_outage['reference_time'],
+                'recovered_reference_time': recovered['reference_time']}), flush=True)
+
         capture.send_signal(signal.SIGINT)
         capture.wait(timeout=3)
         packets = run(['tcpdump', '-nn', '-r', str(stage / 'ntp.pcap')])
@@ -385,6 +425,9 @@ def peer(stage, profile):
             recent = run(['tcpdump', '-nn', '-tt', '-r', str(stage / 'ntp.pcap')])
             recent = '\n'.join(line for line in recent.splitlines() if line and line[0].isdigit() and float(line.split()[0]) >= phase_started)
             assert all(address + '.123' in recent for address in ('192.0.2.2', '192.0.2.4', '2001:db8:123::2', '2001:db8:123::3')), recent
+            replies = run(['tcpdump', '-nn', '-tt', '-r', str(stage / 'ntp.pcap'),
+                           'udp src port 123 and (src host 192.0.2.2 or src host 192.0.2.4 or src host 2001:db8:123::2 or src host 2001:db8:123::3)'])
+            assert any(float(line.split()[0]) > restored_at for line in replies.splitlines() if line and line[0].isdigit()), 'no upstream NTP reply after network recovery'
         print('PASS packet capture contains both upstream synchronization and LAN NTP requests/replies', flush=True)
     finally:
         for pid in reversed(frozen):
@@ -426,7 +469,7 @@ def main():
             run(root + ['install', '-m', '500', str(args.dhcp6_server), str(stage / 'dhcpd')])
             run(root + ['install', '-m', '500', shutil.which('keepalived'), str(stage / 'keepalived')])
             extra = ['--dhcp6-server', str(stage / 'dhcpd')]
-        result = subprocess.run(root + ['unshare', '--mount', '--net', '--fork', 'python3', str(stage / 'peer.py'), '--inside', str(stage), '--profile', args.profile] + extra, capture_output=True, text=True, timeout=210 if extra else 90)
+        result = subprocess.run(root + ['unshare', '--mount', '--net', '--fork', 'python3', str(stage / 'peer.py'), '--inside', str(stage), '--profile', args.profile] + extra, capture_output=True, text=True, timeout=390 if args.profile == 'import' else 210 if extra else 90)
         args.output.mkdir(parents=True, exist_ok=True)
         (args.output / 'peer.log').write_text(result.stdout + result.stderr)
         for name in ('router.log', 'source.log', 'dhcp6.log', 'vrrp.log', 'capture.log', 'ntp.pcap'):
