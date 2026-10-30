@@ -26,6 +26,11 @@ type ReleasePrepareRequest struct {
 	ExpectedRevision   uint64      `json:"expected_revision"`
 }
 
+type ReleaseRollbackRequest struct {
+	ExpectedGeneration uint64 `json:"expected_generation"`
+	ExpectedRevision   uint64 `json:"expected_revision"`
+}
+
 type ReleaseCancelRequest struct {
 	ExpectedGeneration uint64 `json:"expected_generation"`
 }
@@ -131,7 +136,20 @@ func (e *Engine) releaseRoutes(parent *http.ServeMux) {
 			localapi.Fail(w, http.StatusBadRequest, err)
 			return
 		}
-		state, err := e.prepareRelease(r.Context(), request)
+		state, err := e.prepareRuntime(r.Context(), request.ExpectedGeneration, request.ExpectedRevision, &request.Release)
+		if err != nil {
+			releaseFailure(w, err)
+			return
+		}
+		localapi.JSON(w, http.StatusOK, state)
+	})
+	mux.HandleFunc("POST /v1/releases/rollback", func(w http.ResponseWriter, r *http.Request) {
+		var request ReleaseRollbackRequest
+		if err := localapi.Decode(w, r, &request); err != nil {
+			localapi.Fail(w, http.StatusBadRequest, err)
+			return
+		}
+		state, err := e.prepareRuntime(r.Context(), request.ExpectedGeneration, request.ExpectedRevision, nil)
 		if err != nil {
 			releaseFailure(w, err)
 			return
@@ -153,16 +171,18 @@ func (e *Engine) releaseRoutes(parent *http.ServeMux) {
 	})
 }
 
-func (e *Engine) prepareRelease(ctx context.Context, request ReleasePrepareRequest) (release.State, error) {
+// A nil target selects the previously confirmed runtime under the release lock.
+// Both directions validate the current configuration before queuing a trial.
+func (e *Engine) prepareRuntime(ctx context.Context, expectedGeneration, expectedRevision uint64, target *release.Ref) (release.State, error) {
 	e.mu.Lock()
-	if !e.state.Healthy || e.state.Confirmation != nil || request.ExpectedRevision != e.state.Revision {
+	if !e.state.Healthy || e.state.Confirmation != nil || expectedRevision != e.state.Revision {
 		e.mu.Unlock()
 		return release.State{}, ErrConflict
 	}
 	current := e.state.Committed
 	var generation uint64
 	if err := e.releaseStore.WithState(ctx, func(state release.State) error {
-		if state.Generation != request.ExpectedGeneration {
+		if state.Generation != expectedGeneration {
 			return release.ErrStale
 		}
 		if err := selectedConfiguration(state, e.releaseDigest, current); err != nil {
@@ -174,7 +194,7 @@ func (e *Engine) prepareRelease(ctx context.Context, request ReleasePrepareReque
 		e.mu.Unlock()
 		return release.State{}, err
 	}
-	snapshot, err := e.store.Snapshot(request.ExpectedRevision)
+	snapshot, err := e.store.Snapshot(expectedRevision)
 	if err != nil {
 		e.mu.Unlock()
 		return release.State{}, err
@@ -184,7 +204,7 @@ func (e *Engine) prepareRelease(ctx context.Context, request ReleasePrepareReque
 	if err != nil {
 		return release.State{}, err
 	}
-	selection := configref.Selection{Generation: generation, ExpectedRevision: request.ExpectedRevision, Snapshot: snapshot}
+	selection := configref.Selection{Generation: generation, ExpectedRevision: expectedRevision, Snapshot: snapshot}
 	file, err := unlinkedInput(e.store.Dir)
 	if err != nil {
 		return release.State{}, err
@@ -206,7 +226,7 @@ func (e *Engine) prepareRelease(ctx context.Context, request ReleasePrepareReque
 		if _, err := e.store.InspectStartup(selection); err != nil {
 			return err
 		}
-		fallback := configref.Selection{Generation: generation + 1, ExpectedRevision: request.ExpectedRevision, Snapshot: snapshot,
+		fallback := configref.Selection{Generation: generation + 1, ExpectedRevision: expectedRevision, Snapshot: snapshot,
 			Recovery: &configref.Recovery{FailedGeneration: generation, FailedSnapshot: snapshot}}
 		if _, err := e.store.InspectStartup(fallback); err != nil {
 			return err
@@ -220,8 +240,11 @@ func (e *Engine) prepareRelease(ctx context.Context, request ReleasePrepareReque
 		}
 		return nil
 	}
-	return e.releaseStore.PrepareChecked(ctx, request.Release, request.ExpectedGeneration,
-		release.PrepareOptions{Startup: &selection, KnownGood: &snapshot}, check)
+	options := release.PrepareOptions{Startup: &selection, KnownGood: &snapshot}
+	if target == nil {
+		return e.releaseStore.PrepareRollbackChecked(ctx, expectedGeneration, options, check)
+	}
+	return e.releaseStore.PrepareChecked(ctx, *target, expectedGeneration, options, check)
 }
 
 // The filesystem supplies storage without retaining an orphan after a crash.

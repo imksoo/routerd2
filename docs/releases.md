@@ -207,6 +207,28 @@ and preparation leave the running processes unchanged; reboot is explicit.
 selection. These commands require an already provisioned signed appliance
 runtime and the configured SSH authentication.
 
+`update rollback` accepts `expected_generation` and `expected_revision` on
+exec stdin. It queues the previously confirmed runtime with a snapshot of the
+current committed configuration, after verifying that the previous executable
+accepts it. It preserves publisher and configuration watermarks and does not
+restore an older configuration, credential, lease or identity snapshot. A
+missing previous runtime or an incompatible current configuration is an error.
+The pending rollback can be canceled; an explicit `reboot` is required to
+activate it, and normal trial confirmation/failure recovery still applies.
+
+```sh
+ssh admin@router 'update rollback' < rollback.json
+ssh admin@router reboot
+```
+
+`make check-update-rollback` exercises the embedded SSH and control API using
+actual signed product executables. It checks previous-runtime selection,
+current-configuration preflight, stale/duplicate refusal and cancellation.
+Its two publications use the same executable build with different publisher
+sequences; it does not qualify cross-version compatibility or a reboot. The
+existing appliance update/recovery tests cover their own boot conditions.
+
+
 Enable signed boot selection in the appliance's existing boot JSON:
 
 ```json

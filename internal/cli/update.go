@@ -14,7 +14,7 @@ import (
 
 func update(ctx context.Context, client *localapi.Client, args []string, input io.Reader, out io.Writer) error {
 	if len(args) != 1 {
-		return errors.New("usage: update status|stage|prepare|cancel (stage: signed tar; prepare/cancel: JSON on stdin)")
+		return errors.New("usage: update status|stage|prepare|rollback|cancel (stage: signed tar; prepare/rollback/cancel: JSON on stdin)")
 	}
 	if args[0] != "status" && input == nil {
 		return errors.New("update mutation requires an exec request with input on stdin")
@@ -44,6 +44,16 @@ func update(ctx context.Context, client *localapi.Client, args []string, input i
 		}
 		var state release.State
 		if err := client.Do(ctx, http.MethodPost, "/v1/releases/prepare", request, &state); err != nil {
+			return err
+		}
+		return WriteJSON(out, state)
+	case "rollback":
+		var request control.ReleaseRollbackRequest
+		if err := config.Decode(input, &request); err != nil {
+			return err
+		}
+		var state release.State
+		if err := client.Do(ctx, http.MethodPost, "/v1/releases/rollback", request, &state); err != nil {
 			return err
 		}
 		return WriteJSON(out, state)

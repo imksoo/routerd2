@@ -36,7 +36,7 @@ func (s Session) Execute(ctx context.Context, command string, input io.Reader, o
 		return nil
 	}
 	if len(a) == 1 && a[0] == "help" {
-		_, err := fmt.Fprintln(out, "show status\nshow network [SECTION [FILTER VALUE ...]] (show network help for details)\nshow resources\nshow derived RESOURCE_ID\nshow observations [after CURSOR] [limit 1..16]\nshow event-store\nshow services [NAME]\nshow route-issues [offset N]\nshow config\nshow running-config\nshow logs [module NAME] [level INFO] [limit 100]\nshow logging\nshow version\nrestart <module>\npoweroff\nreboot\nconfigure (exec: CommitRequest YAML/JSON on stdin; shell: candidate mode)\nconfirm\nupdate status|stage|prepare|cancel (exec stdin: signed tar or JSON)\nhelp\nexit")
+		_, err := fmt.Fprintln(out, "show status\nshow network [SECTION [FILTER VALUE ...]] (show network help for details)\nshow resources\nshow derived RESOURCE_ID\nshow observations [after CURSOR] [limit 1..16]\nshow event-store\nshow services [NAME]\nshow route-issues [offset N]\nshow config\nshow running-config\nshow logs [module NAME] [level INFO] [limit 100]\nshow logging\nshow version\nrestart <module>\npoweroff\nreboot\nconfigure (exec: CommitRequest YAML/JSON on stdin; shell: candidate mode)\nconfirm\nupdate status|stage|prepare|rollback|cancel (exec stdin: signed tar or JSON)\nhelp\nexit")
 		return err
 	}
 	var result json.RawMessage

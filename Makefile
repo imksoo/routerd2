@@ -267,6 +267,11 @@ build-linux: licenses
 	  chmod 755 "dist/bin/linux-$$arch/routerd" "dist/bin/linux-$$arch/routerd-modules" "dist/bin/linux-$$arch/routerd-logging"; \
 	done
 
+# Real embedded SSH to the actual signed product compiler and paired selector.
+.PHONY: check-update-rollback
+check-update-rollback: build
+	umask 022; ROUTERD2_INTEGRATION_REQUIRED=1 ROUTERD2_RELEASE_BUILT_DIR='$(abspath dist/bin)' ROUTERD2_RELEASE_BUILT_ID='$(RELEASE_ID)' $(GO) test -race -tags integration -run '^TestBuiltRuntimeSSHRollback$$' -count=1 -v ./internal/release
+
 release-built-test:
 	umask 022; ROUTERD2_INTEGRATION_REQUIRED=1 ROUTERD2_RELEASE_BUILT_DIR='$(abspath $(RELEASE_BUILT_DIR))' ROUTERD2_RELEASE_BUILT_ID='$(RELEASE_ID)' $(GO) test -race -tags integration -run '^Test(BuiltRuntimeCatalog|PublishBuiltRelease)$$' -count=1 -v ./internal/release ./internal/releasepublish
 
