@@ -5,6 +5,24 @@
 [試験計画](test-plan.md)、[機械可読台帳](implementation-plan.json)、[AGENTS.md](../AGENTS.md)を読む。
 過去の試験記録を互換性・設計の制約にしない。ここには現在必要な操作条件と残作業を残す。
 
+## 2026-10-30 18:56 JST: DNS・観測・通信履歴の統合と計数の所有順序
+
+`9c6c53d` は `22d1d7f` を統合した専用作業ツリーの実装です。契約は native88 / network26 です。
+この段階では対象の homert 実機受入と設定全体の移行は未完了です。期限の2026-10-30 01:56:38 JSTは超過しています。
+
+- DNSは旧 `DNSUpstream.when` の選出条件を設定変換時に結び付け、学習元と選出元の元期限を保持します。待機系では該当上流だけを撤去します。RAの受信処理は旧 `raobserver` と同じ自己広告の除外を復元しました。
+- Healthの実測時刻・結果を既存の非同期記録へ渡し、公式SDKでOTLPの計測値とトレースへ送ります。配送先の停止が現在の監視を止めない構成です。他の旧計測機能を移行済みとはしません。
+- 通信履歴は旧 `logstore.FlowKey`・保存形式と `dpi.Classify` の実処理を再利用します。既存接続の計数、TLS接続先名、保存障害からの回復、再起動後の保持、期限削除と収集撤去を接続しました。新規の外部デーモンは追加していません。nDPI全分類とDHCP端末識別は別の専用ツリーで実装中です。
+- 統合試験で、Linuxの `nft_ct_get_init` が `NFT_CT_PKTS` 規則の作成時に計数を有効化し、元値の保存を飛ばす欠陥を発見しました。`network.apply.reconcile` が規則作成前に計数を所有し、規則撤去後に元値を戻す順序へ修正しました。暗黙の必要設定も同じ所有者が扱います。明示的な無効化との矛盾は設定検査で拒否します。
+
+版別の実通信証拠は次のとおりです。異なる実行物の結果を一つの全体合格にはしません。
+
+- `a2c2248` / `homert-native88-a2c2248`: DNS主従・独立keepalived・元期限切れと復旧が46.45秒で合格。`dist/native88-dns-peer/additional-import.log`。同版のOTLPは独立TCPの成功・断・復帰、実測時刻と計測値、配送先断中の監視継続を確認しました。UDPは949受信・失敗0。`dist/native88-telemetry-peer/peer.log` と受信JSONL、`binaries.json`。
+- `a2c2248` に `9c6c53d` の計数順序修正を加えた `homert-native88-accounting-order`: 通信履歴試験が24.04秒で合格。計数0から製品設定で有効化し、実TLS/SNI・TCP/UDP・保存先障害とロック・製品再起動・元の記録保持を確認しました。明示計数設定だけを撤去しても観測は継続し、観測を撤去すると元0へ復元、新規TLSも成功しました。`dist/native88-flow-order-peer/TestDaemonTrafficFlowHistory.log` と同ディレクトリの実行物ハッシュ。
+- `9c6c53d`: networkの競合検査、全vet、amd64/arm64の静的ビルド、両形式の署名付き配布物検査、秘密情報検査が成功しました。`/tmp/routerd-native88-final-checks.log`。SQL変数上限を超える履歴の整合性検査は通常約1.8秒、競合検査付き約56.6秒でした。試験だけの30秒制限を外し、製品の期限は変えていません。
+
+次は実設定全体の未対応部分、二台での現行版の受入、自然更新・管理・更新復旧です。k8s-rt/pve-rt、Cloud SAMの順序は維持します。nDPIの静的配布依存と対象環境の観測条件が未確定のため、完成日時は見積もれません。
+
 ## 2026-10-30 18:31 JST: 明示的な接続計数と二台daemon試験
 
 `accounting-native87`（契約87/network26）は旧`SysctlProfile/router-linux`の`nf_conntrack_acct`を`forwarding.conntrack_accounting`へ接続する。既存network writerが変更前値を保存し、撤去時に復元する。collection workerがsysctlを変更する経路は作らない。新しい接続だけにpacket/byte計数が付く。配布物から欠けていた`nf_conntrack_netlink`を通常bootとkernel試験の依存へ追加した。旧86 imageのままではnetlink dumpがEINVAL、module追加後の旧image使用もmodule不足で試験開始前に停止したため、87通常imageを生成して確認した。
