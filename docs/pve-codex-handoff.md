@@ -204,3 +204,11 @@ PD worker SIGKILL後1.52秒、通常交換10.99秒、全daemon再起動11.08秒�
 準備としてapplication分類の宣言1件だけをfalseにした私有コピーは、両機とも実CLIで109→55resourceに変換できた。4 AFTR、2 DNS、6 Health、WebConsole、DHCPv4/v6、PD、RA、BGP、NTP、Tailscaleと各履歴/配送workerを含む。元入力の合格ではなく、未統合機能を除いた構成を調べるためのコピーである。元入力は変更していない。
 
 全設定単体の前提に追加の差がある。元homertの物理WAN/LANと管理interfaceは外部OS管理で、管理用IP自体の宣言はRouter入力にない。最小Alpineでは外部設定の残存を前提にできないため、3本目の管理リンク、物理linkのUP所有、読取りで確かめた管理address/prefixをnative構成の明示的な追加intentとして用意する。元のunmanagedを黙ってUPへ変えたり、試験手順の手動修復を隠して合格にしない。既存二link fixtureをそのまま全入力へ使うことはできない。
+
+## 2026-10-30 20:04 JST: 通信履歴・nDPI・管理画面の統合候補
+
+`96d7d3f` の通常ビルド `supervisor-native91`（native91/network27）で、独立端末による管理画面・設定復旧が8.84秒、内蔵分類が21.86秒、nDPI分類が21.90秒で成功した。同じUDP端点の自然失効後の再利用、同じTCP端点のTLSからHTTPへの再利用、DNSへの誤ったTLS情報の混入防止、保存障害中の転送、復旧・再起動・保持と撤去後の元のカーネル設定への復元を確認した。STUNの分類は内蔵処理の結果で、nDPIによる分類とはしない。接続開始時刻はネットワーク適用担当が収集前に有効化し、観測の撤去後に元へ戻す。既存の設定所有・保存処理を使い、新たな管理処理や外部デーモンは追加していない。
+
+同じ製品コードのAMD64・ARM64向け通常ビルド、静的ELF検査、署名付き一覧・展開・公開処理の隔離試験、関連する競合検出検査と全体の `go vet` も成功した。再現手順は `make build RELEASE_ID=<識別子>`、`make check-management`、`make check-traffic-flow`、`make build-linux` と `make release-built-test`。同じ `RELEASE_ID` を指定し、Docker実行権限と通常の同梱エンジンを用意する。既存の `scripts/daemon-tests.py` で生成済みの `dist/bin` を指定すれば、同一実行物を再ビルドせず検査できる。
+
+この候補の `routerd-modules` はnDPI 4.2と依存ライブラリーを静的リンクするためCGOを有効にしている。現行のCGO無効という配布条件を満たしたとは扱わない。方針の変更案は取り下げ、主担当が利用者へ送った確認の回答を待つ。機能の成功、配布方針への適合、本番置換の受入は別である。全homert入力の同時起動・自然更新・二台運用、対象機器、ARM64での実行はこの結果に含まれない。
