@@ -262,10 +262,9 @@ func (s *interactiveShell) execute(ctx context.Context, line string, out io.Writ
 		if rest == "" || rest == "candidate" {
 			return false, writeYAML(out, c.document)
 		}
-		if rest == "event-store" || rest == "observations" || strings.HasPrefix(rest, "observations ") || rest == "derived" || strings.HasPrefix(rest, "derived ") {
-			return false, s.session.Execute(ctx, "show "+rest, nil, out)
-		}
-		if rest == "status" || rest == "network" || strings.HasPrefix(rest, "network ") || rest == "version" || rest == "config" || rest == "services" || strings.HasPrefix(rest, "services ") || rest == "route-issues" || strings.HasPrefix(rest, "route-issues ") || rest == "logging" || rest == "running-config" || rest == "logs" || strings.HasPrefix(rest, "logs ") {
+		operation, _ := firstWord(rest)
+		switch operation {
+		case "status", "network", "version", "config", "services", "route-issues", "logging", "running-config", "logs", "event-store", "observations", "derived", "snapshots", "dns-queries":
 			return false, s.session.Execute(ctx, "show "+rest, nil, out)
 		}
 		parts, err := parsePath(c.absolutePath(rest))
@@ -788,7 +787,7 @@ func (s *interactiveShell) complete(line string, pos int, key rune) (string, int
 	case 1:
 		switch words[0] {
 		case "show":
-			choices = []string{"status", "network", "resources", "derived", "observations", "event-store", "services", "route-issues", "logging", "logs", "version", "config", "running-config"}
+			choices = []string{"status", "network", "resources", "derived", "observations", "event-store", "services", "route-issues", "logging", "logs", "version", "config", "running-config", "snapshots", "dns-queries"}
 			if s.candidate != nil {
 				choices = append(choices, "candidate")
 				choices = append(choices, s.pathChoices(token)...)
@@ -1022,6 +1021,9 @@ const interactiveHelp = `Operational commands:
   show network help           list paged network observation commands
   show observations [after CURSOR] [limit 1..16]
   show event-store
+  show snapshots             list verified saved configuration references
+  show dns-queries NAME [client IP] [name PATTERN] [response RCODE]
+                       [since RFC3339] [until RFC3339] [limit 1..1000]
   show derived RESOURCE_ID
   restart <module>
   poweroff / reboot           drain workers, then power off or reboot appliance

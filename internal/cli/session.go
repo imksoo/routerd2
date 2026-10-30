@@ -36,7 +36,7 @@ func (s Session) Execute(ctx context.Context, command string, input io.Reader, o
 		return nil
 	}
 	if len(a) == 1 && a[0] == "help" {
-		_, err := fmt.Fprintln(out, "show status\nshow network [SECTION [FILTER VALUE ...]] (show network help for details)\nshow resources\nshow derived RESOURCE_ID\nshow observations [after CURSOR] [limit 1..16]\nshow event-store\nshow services [NAME]\nshow route-issues [offset N]\nshow config\nshow snapshots\nshow running-config\nshow logs [module NAME] [level INFO] [limit 100]\nshow logging\nshow version\nrestart <module>\npoweroff\nreboot\nconfigure (exec: CommitRequest YAML/JSON on stdin; shell: candidate mode)\nconfirm\nsnapshot (exec stdin: SnapshotRequest JSON/YAML)\nrestore (exec stdin: RestoreRequest JSON/YAML)\nupdate status|stage|prepare|rollback|cancel (exec stdin: signed tar or JSON)\nhelp\nexit")
+		_, err := fmt.Fprintln(out, "show status\nshow network [SECTION [FILTER VALUE ...]] (show network help for details)\nshow resources\nshow derived RESOURCE_ID\nshow observations [after CURSOR] [limit 1..16]\nshow event-store\nshow services [NAME]\nshow route-issues [offset N]\nshow config\nshow snapshots\nshow running-config\nshow logs [module NAME] [level INFO] [limit 100]\nshow dns-queries NAME [client IP] [name PATTERN] [response RCODE] [since RFC3339] [until RFC3339] [limit 1..1000]\nshow logging\nshow version\nrestart <module>\npoweroff\nreboot\nconfigure (exec: CommitRequest YAML/JSON on stdin; shell: candidate mode)\nconfirm\nsnapshot (exec stdin: SnapshotRequest JSON/YAML)\nrestore (exec stdin: RestoreRequest JSON/YAML)\nupdate status|stage|prepare|rollback|cancel (exec stdin: signed tar or JSON)\nhelp\nexit")
 		return err
 	}
 	var result json.RawMessage
@@ -72,6 +72,8 @@ func (s Session) Execute(ctx context.Context, command string, input io.Reader, o
 		return showResources(ctx, ctl, out)
 	case len(a) >= 2 && a[0] == "show" && a[1] == "network":
 		return showNetwork(ctx, ctl, a[2:], out)
+	case len(a) >= 2 && a[0] == "show" && a[1] == "dns-queries":
+		return showDNSHistory(ctx, ctl, a[2:], out)
 	case len(a) >= 2 && a[0] == "show" && a[1] == "logs":
 		q := url.Values{"tail": {"true"}, "limit": {"100"}}
 		if len(a)%2 != 0 {
