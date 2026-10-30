@@ -10,89 +10,13 @@
 過去のcheckpoint列挙を削除した。過去の試験・API・保存形式の維持を実装制約にしない。
 [AGENTS.md](../AGENTS.md) に従い、機能と実通信を満たす簡潔な構造へ作り直す。
 現在の変更・実行結果・残作業は [引き継ぎ](pve-codex-handoff.md) を参照する。
-2026-10-30 23:55 JST: 通常Alpine `full-homert-loopback-native92`（`8cc420d`）の全57resourceで、
-実再起動後のIPv6 DNS再取得とUDP/TCP transportまで確認した。元12時間リースの自然T1は
-10月31日04:42:16 JST予定で観測中。二つの独立KVMを実際に電源断する両方向HAは23.621/21.087秒で通過した。
-共有WAN IPv4のBGP next-hop指定と既存WAN VMACへの共有アドレス配置を明示変更した構成である。
-双方のBGP確立を確認してから停止した。未確立の復帰途上で追加障害を起こす条件は60秒内に復旧せず、未受入。
-同じTCP/NATを保持したが最大待ち14.957秒、UDP289/4228件・DNS16/2528件の損失がある。
-実HGWの別の標準7800秒試験は自然PD更新待ちで、DHCP workerに状態通知timeoutによる再起動1回を観測した。
-原因は未解明。全体の安定稼働、全設定の更新復旧、対象実機と残る全34項目は未完了。
-2026-10-31 00:08 JST: 全57resourceと全engineを含む署名付き504MiBカタログで、実SSH更新と旧版復帰が終了0。
-修正版で全経路再確認36.536秒、操作による旧版復帰35.723秒、設定・DUID・NodeID・SSHの身元を保持した。
-別の障害試験も終了0。候補版の実起動中に独立Health対向を停止し、元90秒で確定を拒否して旧版へ自動復帰、
-全経路の再確認136.339秒。設定・DUID・NodeID・SSHの身元も保持した。
-2026-10-31 00:54 JST: 実HGW7800秒は683巡・自然PD Renew/Reply1組と各再起動復旧を完走。
-その間のDHCP通知遅延2回を調べ、`bc3d2a7`でAFTR照会中の共有ロック保持と、通知失敗による不要なDHCP終了を修正した。
-独立環境で確定版のnetwork/control各3.25秒停止中も同じDHCP PID・実再取得・取得DNSのUDP/TCPが成立した。
-全設定host環境のBGP/VRRP適用期限とTailscale中断は別の未解決項目として調査中。
-機能範囲と作業単位は以下とJSONの台帳で管理し、既存試験の成功を全体完了に数えない。
-実端末からの単体通信を先に確認する全体の [試験計画](test-plan.md) を参照する。
-各試験前に同計画のゴール実行手順と対象項目を必ず読み直し、失敗時も同じ手順で観測・切り分け・修正する。
-
-旧routerdの作者による作り直しであり、実装全体を取り込んでよい。各機能を新規に書くことは要件ではない。
-動作実績のある関数・package・外部engineと修正を先に再利用し、routerd2の所有権・寿命・設定との接続に
-必要な変更を加える。旧実装の呼出経路と実設定を照合してから変更し、既存のrouterd2実装があることも
-再利用を避ける理由にしない。必要な第三者のlicense・noticeは保持する。
-
-現在はnative-56で旧routerdのDHCPv4描画・保持履歴と固定dnsmasqを取り込み、独自割当器と台帳を削除した。
-`handoff-stop`では停止時の不要なpeer通信待ちを除き、同期断中の再起動でVRRP適用を止める実障害を修正した。
-署名二台・ISC/AFTR・二WANで双方向切替、同じTCP/UDP、保持、元PD期限の失効と上流復旧を完走した。
-TCP再接続なし、UDP損失0、最長応答待ち6.82秒。1秒広告の一構成で、全homert受入ではない。
-実署名PID 1二台と独立端末で切替・更新・保持・停止中通知の保存・再取得、実HGWで自動取得とDNS利用、
-IPv4/IPv6、PD交換と全体再起動後の通信が成立した。詳細と未受入は [引き継ぎ](pve-codex-handoff.md)。
-同じnative-56で独立Headscale/公式Tailscaleとの署名PID 1試験と、実HGWの自動WAN/PD・LAN/DNS/DS-Liteに
-Tailscaleを合わせた75秒通信・PD交換・全体再起動も通った。対向underlay固定・LAN発IPv6 NAT追加を
-現行homertとの差分として記録する。19:44 UTC開始の7800秒試験は21:31:52 UTCのLAN DNS SERVFAILで失敗した。約577回の通信が通ったが、自然PD更新前に終了し、原因は未確定。
-DNS/DoH/条件付き転送、stateless DHCPv6、RAとVRRPは既存Go workerを使う。dnsmasqはDNS無効のDHCPv4 engineであり、systemdを介さずworkerが所有する。外部依存削減の当初目標を達成したとは扱わず、VRRP等を一律外部化する方針にも変えていない。homert全体二台、Tailscaleの残機能、k8s/pve、Cloud SAM、
-配備更新復旧と対象実機を含む全34項目のゴールは未完了。旧版の130分試験は自然PD更新を観測したが、
-最終通常PD交換後の名前解決失敗で終了1。最新版の長時間安定性やONU直結の受入には数えない。
-
-2026-10-27 `dhcp-request-clock` / native-31: 独立dnsmasqと実5.2秒遅延でDHCPv4の期限延長を
-再現し、元のREQUEST時刻へ修正した。通常取得/再起動再取得/自然更新と、QEMUの実UTC補正・
-元期限失効・worker/control交換後のTCP/UDPも通った。生ログ・capture・試験binaryは削除する。
-直前の`ha-dhcp` / native-31ではDHCPv4貸出の相互TLS認証付きcheckpoint同期を追加した。
-実PID1二台と独立端末で切替・更新・同期断復旧を確認し、PD同期とpartner-down継続は残る。
-直前の`peer-receive` / native-30では、旧routerd/依存engineと比較し、IPv4リンクローカルの
-conntrack同期/B4対向、正当なIPv6表記、残存ciaddr、独立RA/IA/AAAA情報の受理を修正した。
-RAのDNS満杯処理は最短期限の除去へ閉じ、経路更新を維持する。既存の実worker・独立peer・
-実packetで切替/既存TCP/UDP、PD/RA、DNSとBFD→BGP→FIBを確認した。全経路の監査や
-HA-02/HA-03全体の完了ではなく、homertの残機能と相互接続を進めながら修正を継続する。
-
-2026-10-29 履歴処理: 空のwrite transactionを除き、整理・圧縮・容量取得を既存tickで一工程ずつ実行する。
-各処理の2秒期限と警報保持は維持した。512MiB/2 CPUの計測付き実APK/PID 1で設定保存・再起動後の
-IPv4/IPv6 TCP/UDP・DNS・NTP・管理と、65.2秒/9巡の履歴進行・Health履歴破棄0を確認し終了0。
-途中の設定healthy=false、設定変更中の履歴timeout、以前のworker起動10秒超過・DNS SERVFAILは未解消。
-一時計測を削除し、原因を隠す期限延長はしない。成立範囲と次の観測は[引き継ぎ](pve-codex-handoff.md)に残す。
-
-2026-10-29 native-60: 旧routerdのNTP client/server fragmentと選択規則を一つの時計所有者へ取り込んだ。
-固定先・条件付き学習/代替先を独立群にし、元情報期限と条件期限をworkerがそれぞれ失効する。
-実homertのNTP構造を公開値へ置換し、製品の取込・通常適用、独立peerとの期限・再取得・VRRP条件変化、
-同じchronydとLAN時刻/IPv4/IPv6 TCP/UDP/captureを確認した。全homert受入とは分け、DHCPv4実学習と
-監督情報の失効・起動遅延は未解消として[引き継ぎ](pve-codex-handoff.md)に残す。
-
-2026-10-30 18:31 JST: native87/network26へ明示conntrack計数を接続し、配布kernelのnetlink module不足を修正。実IPv4/IPv6 TCPのpacket/byte取得と元値0への撤回復元、関連Race/vet/両arch/署名と通常imageが通過。同版の二台daemon両方向切替・再参加も完走し、UDP128/1344件期限切れ/TCP最大3.736秒を保持した。二guest KVM/物理機器の停止と同一視せず、通信量記録等との統合へ進む。[実行版と限界](pve-codex-handoff.md)。
-
-2026-10-30 18:11 JST: 公開2d9d4a0相当native86の通常Alpine配布物が、専用4CPU/4GiB/PVE KVM guestで冷起動→自動取得DNS/両IP通信/二BGP/特殊端末/TS双方向/配布NTP→guest再起動後の同じ通信・DUID/NodeIDを完走した。NTPは既定の初期周波数推定を待ち、独立端末の採用を確認。TCG失敗は保持し、物理NIC/ONU/全homert/全34項目へ拡張しない。[実行版・条件・限界](pve-codex-handoff.md)。
-
-2026-10-30 17:55 JST: native86へ旧OTLP LogSink/DHCP名/Firewall履歴を統合し、経路一覧の重複取得とtable別mapを除去。最終実行物のmake check/Race/vet/両arch/署名、実3経路fixture、実HGW90秒/9巡・全daemon再起動、独立DNS名/履歴/OTLPが通過。通常factoryの512MiB/2CPU/TCGは起動不合格のまま。実homertは4CPU/約4GiB/KVMと確認し、既存PVEの隔離KVMで同じ配布物を受け入れる準備へ進む。自然PD更新/ONU直結/物理機器/全34項目は未完了。[版・結果・限界](pve-codex-handoff.md)。
-
-2026-10-30 15:30 JST: native83の単体同時構成でDNS/DHCP・両IP TCPUDP・二BGP・条件付きDNS24件・特殊端末・NTP・TS双方向と全daemon再起動が成立。継続観測では9.540秒で全8種が復旧し、DNS12/67件、新規TCPUDP27/69件の失敗を保持。空候補時も先行経路を保つ修正を統合。同じ版の512MiB/2CPU/TCG VM起動は不合格。実二回線・全設定二台・実機・他の製品機能は未受入。全34項目は未完了。[実行版と限界](pve-codex-handoff.md)。
-
-2026-10-30 13:46 JST: 固定native79の実HGW 7800秒・724巡、自然PD更新と全daemon再起動が終了0。別のnative80全設定512MiB/2CPU VMは起動失敗、route期限と適用/ACK遅延を調査中。全34項目の完了には数えない。[現状と範囲](pve-codex-handoff.md)。
-
-2026-10-30 12:38 JST native80統合候補: 二段DNSのVIP公開後の待受遅れを旧routerdのfreebind設計で解消。両DNS停止復旧・両方向切替・初回DNS/両IP新規通信・同一TCP/UDP対応が成立。独立UDPは175/985件失効、最大無応答4.543秒であり損失0ではない。全homert同時利用・全体再起動、旧3秒timeout、全34項目は未完了。[実行版と限界](pve-codex-handoff.md)。
-
-2026-10-30 JST dynamic-dns-native79候補: PD/VIPローカルDNS記録を元期限付きの既存入力へ接続。実HGWの初回両IP DNS/HTTPS・動的名・再起動、隔離kernel/digの変更・失効・再取得を確認。最終候補の自然更新と二段DNS・全homert/二台受入は残る。IPIP/FRRの静的経路通信は`0722611`で公開済み。[実行版と限界](pve-codex-handoff.md)。
-
-2026-10-30 JST local-redirect-native78: 宛先集合を製品内DNSで解決し、単一network writerへローカルDNS転送を接続。準備完了後の両IP/TCPUDP・集合変更・再起動・撤去は実通信で通過。初期端末を起動前からつなぐ単体受入とHA timeoutは残る。旧YAMLの取込件数を機能の未実装数にせず、現在の製品設定で全homertの通信・運用を成立させる。[結果と限界](pve-codex-handoff.md)。
-
-2026-10-30 JST blackhole-native77: homertで使うIPv4破棄経路を旧routerdと照合し、単一network writerへ取り込んだ。実二端末のTCP/UDP破棄・対象外通信・再起動保持・具体経路・撤去復帰・管理外経路保持は終了0。関連Race/vet/両architecture build/署名六ELFは終了0。全設定取込は89件で拒否。HA timeoutと全homert/全34項目は未完了。
-
-2026-10-30 JST dns-input-native76候補: DNS入力を状態報告待ちから分離した。18秒PDの実Alpineで署名更新準備・正常確定と、候補の設定取り込み後のHealth異常から旧版/旧設定への自動復旧・自動DNS/両IP通信が終了0。復旧253.49秒。sourceCIDRsは実daemonのTCP/UDP許可・拒否まで通過。全homert取込は91件で拒否。全make checkは終了0。併行中の二台再参加はVRRP適用要求timeoutで失敗し未解決。別診断版では130分/724巡と自然PD更新一回・全daemon再起動後の復帰が終了0。全34項目・期限達成は未完了。[現在の結果と残作業](pve-codex-handoff.md)。
-
-
-2026-10-30 16:00 JST: 旧DNS query保持とNFLOG readerを既存workerへ統合したnative84は、独立端末との履歴障害/復旧、両IPのpacket許可/破棄/拒否・再起動・撤去が通過。関連Race/vet/CGO0両architecture/署名六ELFも成功。実SSHのrollback予約/取消とFRR四経路のcommunity設定も確認。通常83イメージの全設定起動障害は別に残り、最新版factoryと全34項目は未受入。[現在の状態](pve-codex-handoff.md)。
+2026-10-31 01:55 JST: `9a57c8a` はアドレス期限更新の事前保存を一括化し、変更しないFirewall所有状態の重複保存を除いた。
+通常製品の全57resourceで初回通信と全daemon再起動、関連Race・実kernel転送/NAT/DS-Lite・vet・両arch静的ビルド・署名検査が成功した。
+通常Alpineの最新imageと二台電源断は次に実施する。元43200秒LAN leaseの自然T1は10月31日04:42:16 JST予定で観測中。
+先行8cc420d二台の両方向電源断は23.621/21.087秒で通過したが、復帰途上のbackupへの追加障害は未受入。
+実HGW7800秒は自然PD更新を含め完走したが、DHCP状態通知timeoutによる二度の再起動を観測した。
+`bc3d2a7` が共有lock越しのIPCと通知失敗によるDHCP終了を修正し、独立端末の実再取得で原因修正を確認した。
+最新HGWの長時間再試験、対象機器、k8s/pve、Cloud SAMと全34項目の残りを進める。
 
 ## 2026-10-30 11:05 JSTの実行分担と見通し
 

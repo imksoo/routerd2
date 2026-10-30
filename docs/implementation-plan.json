@@ -11196,7 +11196,7 @@
     "physical_target_profile": "awaiting user target hardware/NIC and performance requirements; independent implementation and isolated VM tests continue",
     "validation_reporting": "Record current behavior, executed checks and untested scope concisely. Discard historical checkpoint ledgers as acceptance authority; no compatibility obligation to their code, APIs or formats.",
     "current_acceptance": {
-      "implementation_head": "bc3d2a7",
+      "implementation_head": "9a57c8a",
       "single_node_full_input_runtime": "full-homert-loopback-native92 / 8cc420d / native92 / network27",
       "normal_alpine_runtime": "Alpine3.24.3 Linux6.18.59-0-lts; isolated PVE KVM4CPU4096MiB; normal Make/APK image",
       "original_input_resources_per_node": 109,
@@ -11232,7 +11232,7 @@
       "normal_alpine_copy_assertions": 0,
       "normal_alpine_effects_timeouts": 0,
       "hgw_normal": "3944a77 / full-homert-event-native92; standard7800s real-HGW run exited0 after683 periodic both-IP HTTPS/acquired UDP-TCP DNS rounds; natural PD Renew/Reply1, reply24.714ms; PD SIGKILL1.58s, graceful replacement3.80s, full daemon restart4.65s and Tailscale/Internet exit recovered. DHCP state-publication deadlines caused two unexpected lease-worker restarts; not a zero-restart run or full57 input.",
-      "remaining": "Original43200s LAN natural renewal; current full-HGW/normal-image acceptance after DHCP fix; remaining full-host BGP/VRRP effects latency and warming-backup fault/HA margin; remaining management and target deployment qualification; k8s/pve SAM enrollment/dynamic transport and Cloud SAM/all remaining work packages.",
+      "remaining": "Original43200s LAN natural renewal; latest normal image two-guest power-cut and warming-backup fault; latest real-HGW7800s after DHCP fix; target deployment/physical qualification; k8s/pve dynamic SAM transport and Cloud SAM/all remaining work packages.",
       "full_profile_signed_update": {
         "base": "8cc420d / full-homert-loopback-native92",
         "candidate": "00969ca / full-homert-operations-native92",
@@ -11258,14 +11258,23 @@
         "cause": "Full-host timing observed1.004s runtime mutex wait versus authentication1ms/projection1ms. AFTRInput held that mutex while awaiting network.SourceAddress. Unlock during RPC and recheck config/source after wait. Separately keep dnsmasq lifetime with configuration/supervisor rather than state-publication success, matching old routerd. Existing2s publication/5s observation deadlines and cadence unchanged.",
         "independent_acceptance": "Exact three normal-build binary hashes matched in independent WSL. During separate3.25s network-worker and control-worker pauses, same DHCP/DNS/control PIDs persisted; BusyBox reacquired its actual lease and used learned DNS over UDP/TCP before resume and after recovery. Original observation expiry and lease/restart checks passed. Root existing5 DHCP/DNS fixtures and AFTR resolution/expiry passed; related Race36.785s, vet, both-arch static sixELF and signed catalog/publisher passed.",
         "remaining": "Full-host combined57 profile still exhibited BGP/VRRP effects deadlines and interrupted Tailscale traffic; investigate independently. Current long Alpine original-lease cohort still executes8cc420d. New normal-image/real-HGW acceptance of this fix remains."
-      }
+      },
+      "network_apply_batch": {
+        "commit": "9a57c8a",
+        "change": "Persist all pending address lifetime intents once before kernel lifetime updates across interfaces. Persist firewall ownership immediately only when that ownership changes; still verify ownership, atomically replace rules and save final Apply result. No deadline changes.",
+        "normal_host": "network-ownership-batch-native92: full57 cold boot and whole-daemon restart passed independent acquired DNS, both-IP TCP/UDP, BGP/IX, NTP, Tailscale and retained identities.",
+        "diagnosis": "Separate instrumented build,600s/20 rounds: maximum Apply0.827881289s, transport1.795225037s, no effects deadline failures. Earlier addresses-only run failed with3.385518612s Apply; not counted as acceptance.",
+        "checks": "Network Race32.815s; vet; real isolated-kernel boot-lifetime and forwarding/NAT/DS-Lite tests with Race; amd64/arm64 static artifacts and signed catalog/publisher passed.",
+        "normal_alpine": "Addresses-only predecessor passed cold boot and actual whole-guest reboot (two kernel boots, one reboot marker), full57 client paths and identities. Final9a57c8a normal image and two-guest acceptance next."
+      },
+      "operations_peer_acceptance": "f470989 /7fc1e1d integrate independent official-Tailscale management SSH during control pause and whole restart, and all-upstream NTP communication loss/recovery. Actual normal binaries independent-a0b091b; same SSH connection survived3.035s control pause. NTP30.041s outage/27 drops, fresh upstream sample and LAN adoption recovered57.905s after restore; same chronyd. Not clock-adjustment/physical-link qualification."
     }
   },
   "execution_order": [
     {
       "stage": 1,
       "profile": "homert02/03",
-      "next": "Continue original43200s LAN renewal and actual-HGW PD renewal without interruption. Full57 signed update, explicit rollback and automatic failed-trial recovery passed with two actual source versions. Diagnose repeated actual-HGW DHCP state-publication timeout, warming-backup additional fault and HA margin. Complete remaining management/target deployment qualification, then k8s/pve and Cloud SAM. All34 remain incomplete.",
+      "next": "Keep original43200s LAN renewal running. Run latest normal Alpine image in two independent guests with existing TCP/UDP, new clients and power-cut recovery, then diagnose warming-backup additional failure without changing deadlines. Repeat real-HGW7800s on current fix while continuing independent missing functionality, k8s/pve and Cloud SAM. All34 remain incomplete.",
       "required_focus": [
         "WAN/LAN IPv4/IPv6, DS-Lite, actual route selection/backup WAN, DHCP/PD/RA, learned DNS resolution/distribution, firewall/NAT/MTU/MSS, BGP and management",
         "HA-01 current election/track dependencies, HA-02 DHCP/PD synchronization, HA-03 NAT/connection synchronization and EXT-02 Tailscale used by this deployment"
