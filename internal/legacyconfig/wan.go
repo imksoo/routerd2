@@ -170,7 +170,14 @@ func (c *compiler) dhcp6Information(r resource) string {
 	var providers []int
 	for _, candidate := range c.resources {
 		pd, ok := candidate.Spec.(api.DHCPv6PrefixDelegationSpec)
-		if !ok || pd.Interface != s.Interface {
+		if !ok {
+			continue
+		}
+		matches := pd.Interface == s.Interface
+		for _, owner := range r.Metadata.OwnerRefs {
+			matches = matches || owner.Kind == candidate.Kind && owner.Name == candidate.Metadata.Name
+		}
+		if !matches {
 			continue
 		}
 		if index, ok := c.pd[candidate.Kind+"/"+candidate.Metadata.Name]; ok {
@@ -178,7 +185,7 @@ func (c *compiler) dhcp6Information(r resource) string {
 		}
 	}
 	if len(providers) != 1 {
-		c.reject(r, "interface", "information_provider", "information requires exactly one compiled PD resource with the same literal interface reference, matching the pinned Linux controller; standalone information and ambiguous PD ownership are not activated")
+		c.reject(r, "interface", "information_provider", "information requires exactly one compiled PD resource selected by its owner reference or literal interface, matching the pinned Linux controller")
 		return ""
 	}
 	index := providers[0]

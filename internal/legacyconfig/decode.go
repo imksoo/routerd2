@@ -239,9 +239,6 @@ func (d *decoder) metadata(m api.ObjectMeta, node *yaml.Node, path string) {
 	if strings.TrimSpace(m.Name) == "" {
 		d.issue(node, path+".name", "required", "metadata.name is required")
 	}
-	if len(m.OwnerRefs) != 0 {
-		d.issue(node, path+".ownerRefs", "unsupported_semantics", "resource ownership and garbage collection references have no native equivalent")
-	}
 	if len(m.Annotations) != 0 {
 		d.issue(node, path+".annotations", "unsupported_metadata", "annotations are not stored by the native document; retain them outside the migration")
 	}
@@ -316,6 +313,10 @@ func (d *decoder) checkType(n *yaml.Node, t reflect.Type, path string) {
 		fields := yamlFields(t)
 		for i := 0; i+1 < len(n.Content); i += 2 {
 			key, value := n.Content[i], n.Content[i+1]
+			// The pinned Interface decoder ignores role; zone membership supplies it.
+			if t == reflect.TypeFor[api.InterfaceSpec]() && key.Value == "role" {
+				continue
+			}
 			next := path + "." + safeField(key.Value)
 			ft, ok := fields[key.Value]
 			if !ok {

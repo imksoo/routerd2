@@ -195,6 +195,15 @@ func TestPDInformationUsesOneIdentityAndExactLegacyInterfaceMatch(t *testing.T) 
 	if !reflect.DeepEqual(mapping(t, result, "DHCPv6Information/info").Targets, []string{"services/" + pd.Name}) {
 		t.Fatal("information did not alias PD")
 	}
+	owned := strings.Replace(addition, "metadata: {name: info}", "metadata: {name: info, ownerRefs: [{kind: DHCPv6PrefixDelegation, name: ipv6-provider}]}", 1)
+	owned = strings.Replace(owned, "interface: wan", "interface: Interface/wan", 1)
+	selected, err := Compile(append(fixture(t, "wan"), []byte(owned)...))
+	if err != nil {
+		t.Fatal("legacy owner reference did not select its PD socket", err)
+	}
+	if len(nativeProgram(t, selected.Document).Services) != len(nativeProgram(t, result.Document).Services) || !reflect.DeepEqual(mapping(t, selected, "DHCPv6Information/info").Targets, []string{"services/" + pd.Name}) {
+		t.Fatal("owner-selected information created a separate client")
+	}
 	for _, mismatch := range []string{"Interface/wan", "eth0", "lan"} {
 		t.Run(mismatch, func(t *testing.T) {
 			bad := append(fixture(t, "wan"), []byte(strings.Replace(addition, "interface: wan", "interface: "+mismatch, 1))...)
@@ -550,4 +559,48 @@ func FuzzWANPolicyCompilationRemainsAtomic(f *testing.F) {
 			t.Fatal("accepted policy produced invalid native intent", err)
 		}
 	})
+}
+
+func TestInterfaceRoleAndOwnerAttributionLeaveKernelIntentUnchanged(t *testing.T) {
+	source := `apiVersion: routerd.net/v1alpha1
+kind: Router
+metadata: {name: interface-attribution}
+spec:
+  resources:
+    - apiVersion: net.routerd.net/v1alpha1
+      kind: Interface
+      metadata: {name: wan}
+      spec: {ifname: eth0, managed: true, adminUp: true}
+`
+	before, err := Compile([]byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decorated := strings.Replace(source, "metadata: {name: wan}", "metadata: {name: wan, ownerRefs: [{kind: Plugin, name: source}]}", 1)
+	decorated = strings.Replace(decorated, "managed: true", "managed: true, role: wan", 1)
+	after, err := Compile([]byte(decorated))
+	if err != nil || !reflect.DeepEqual(before.Document, after.Document) {
+		t.Fatal("legacy attribution changed interface activation or ownership", err)
+	}
+}
+
+func TestDeclaredInterfaceAliasesItsDynamicTunnel(t *testing.T) {
+	input := fixture(t, "wan-dynamic")
+	options := wanPolicy(t)
+	before, err := CompileWithOptions(input, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input = append(input, []byte(`    - apiVersion: net.routerd.net/v1alpha1
+      kind: Interface
+      metadata: {name: provider}
+      spec: {ifname: ds0, managed: false}
+`)...)
+	after, err := CompileWithOptions(input, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before.Document, after.Document) {
+		t.Fatal("observed interface alias changed the tunnel owner")
+	}
 }

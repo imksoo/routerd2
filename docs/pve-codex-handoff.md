@@ -164,6 +164,13 @@ PD worker SIGKILL後1.52秒、通常交換10.99秒、全daemon再起動11.08秒�
   実Health→PBR二WAN、conntrackd/VRRPと実TCP/UDPのfixtureを必要な変更に合わせて使う。
   コマンドは`make help`と対応scriptを読む。過去の成功は今回の実行成功として転記しない。
 
+## 2026-10-30: 実設定の所有情報と実行物の前提を取り込む
+
+`owner-package-native88`はdb12658上の取り込み修正。旧routerdのlifecycle/statusとchain/phase2を読み、`ownerRefs`を一律の起動・削除条件として拒否していた処理を除去した。DHCPv6Informationは旧実装と同じPD owner参照またはliteral interfaceで、既存の一つのUDP546 clientを選ぶ。旧Interface decoderが読まない`role`はFirewallZoneの代わりに採用せず、取り込み注記へ残す。SAM所有BGPの固有policyは未実装として拒否する。
+
+実際のhomertにあるPackage/conntrackdは、設定済みNAT同期の署名engineが実行物を供給する前提へ対応させた。hostのaptや任意package管理は実装しない。出力は同じ既存のNAT同期設定で、新しいruntime形式や互換readerはない。
+
+`owner-import-native88`の実supervisor/control/network/workerと独立ISC・keepalived・Linux clientで、所有情報を持つ取込fixtureが71.61秒で終了0。SLAAC/default/DNS取得、DNS UDP/TCP、IPv6 TCP/UDP、役割変更・本来の権限期限による撤去、PD喪失/再取得を確認した。最初はfixture指定のISC実行物がhostの既定pathに無く、製品起動前に失敗。既存の独立ISCを明示した再実行で成功した。最終Package追加後のlegacyconfig Race、全vet、CGO0両architecture build、署名配布物検査は終了0。Package追加はcompilerの前提解決だけで、実通信はその直前の版である。全homert設定の取込・実通信、SAM BGP、管理画面、対象物理機器の受入は未完了。
 ### 2026-10-30 19:12 JST: DHCP端末識別の統合と未使用プラグイン履歴
 
 - `232f23f`（native89/network26、製品識別子 `homert-native89-dhcp-fingerprints`）で、本体と通知エンジンを再作成した。
@@ -177,3 +184,11 @@ PD worker SIGKILL後1.52秒、通常交換10.99秒、全daemon再起動11.08秒�
   その場合だけ非稼働の保持分類として明示し、不要な保存処理は生成しない。宣言がある場合は未対応診断を維持する。
   過去のデータベースが空とは仮定せず、既存内容を移行しないことも通知する。この取込変更は上記の実通信試験後に追加し、取込試験を通過した。
 - nDPI分類と通常配布は独立担当で継続中。上記を全設定の起動、自然更新、同一版の二台運用や本番置換の合格として扱わない。
+
+## 2026-10-30 19:26 JST: homert全入力を妨げた参照解決を修正
+
+`homert-import-native89`（7e4bf94上）では、観測用InterfaceとDSLiteTunnelが同じkernel名を指す宣言を一つのaliasとして解決する。異なるkernel名への同名aliasは拒否する。委譲先DNS listener/AAAAのPD参照も、既存の参照解決でKind/nameへ揃える。元設定の短い`wan-pd`名を直接内部indexで探して失敗していた。unconditionalなIPv4StaticAddressのAppliedを要するIPv4Routeは、既存network writerのaddress→routeの適用順序へ対応する。新しい待機workerや重複状態は作らない。
+
+実際の両homert入力へ、VRRPのlocal/VMAC、停止したTailscaleの保存identity利用、有限lease由来DNS、stateless DHCPv6と相互TLS同期の置換policyを私有ファイルで明示した。両方の実CLIは、WebConsoleとincludeApplicationLayerの未対応2件だけで拒否する。出力は原子的に空で、設定を削って変換成功と扱っていない。policyの証明書pathと保存identityはまだ配備しておらず、本番適用やtailnet再登録もしていない。これは変換診断の結果で、全設定の起動・通信の合格ではない。
+
+同じ版の実supervisor/control/network/worker・独立ISC/keepalived/Linux clientによる既存の取込LAN試験は71.71秒で終了0。短いPD名、ownerRefs、roleを持つ入力からSLAAC/default/DNS、DNS UDP/TCP・IPv6 TCP/UDP、役割変更・元権限期限の撤去、PD喪失/再取得、既存DNS TCPを確認した。静的route前提と同名tunnel aliasは関連compiler検査で確認した範囲であり、両homertの全経路の通信結果へ拡張しない。関連Race、全vet、CGO0両architecture build、署名配布物検査が終了0。

@@ -64,7 +64,11 @@ func (c *compiler) dns(vrrpNames map[string]string) {
 					dynamic = append(dynamic, api.StatusValueSourceSpec{Resource: "VirtualAddress/" + c.serviceName(*ref, "vrrp"), Field: source.Field, Optional: source.Optional})
 				} else if ref != nil && ref.Kind == "IPv6DelegatedAddress" {
 					ds := ref.Spec.(api.IPv6DelegatedAddressSpec)
-					if index, ok := c.pd[ds.PrefixDelegation]; ok {
+					provider := c.getRef(*ref, "prefixDelegation", ds.PrefixDelegation, "DHCPv6PrefixDelegation")
+					if provider == nil {
+						continue
+					}
+					if index, ok := c.pd[provider.Kind+"/"+provider.Metadata.Name]; ok {
 						dynamic = append(dynamic, api.StatusValueSourceSpec{Resource: "IPv6DelegatedAddress/" + c.document.Services[index].Name + "/" + c.serviceName(*ref, "lan"), Field: source.Field, Optional: source.Optional})
 					} else {
 						c.reject(r, path, "reference", "delegated DNS listener requires a compiled PD provider")
@@ -447,7 +451,11 @@ func (c *compiler) dnsRecordAddress(r resource, path string, source api.StatusVa
 		}
 		if ref.Kind == "IPv6DelegatedAddress" && !ipv4 {
 			spec := ref.Spec.(api.IPv6DelegatedAddressSpec)
-			if index, ok := c.pd[spec.PrefixDelegation]; ok {
+			provider := c.getRef(*ref, "prefixDelegation", spec.PrefixDelegation, "DHCPv6PrefixDelegation")
+			if provider == nil {
+				return "", api.StatusValueSourceSpec{}
+			}
+			if index, ok := c.pd[provider.Kind+"/"+provider.Metadata.Name]; ok {
 				return "", api.StatusValueSourceSpec{Resource: "IPv6DelegatedAddress/" + c.document.Services[index].Name + "/" + c.serviceName(*ref, "lan"), Field: "address"}
 			}
 		}

@@ -6,7 +6,7 @@ spec:
     - apiVersion: net.routerd.net/v1alpha1
       kind: Interface
       metadata: {name: wan}
-      spec: {ifname: wan0, managed: true, adminUp: true}
+      spec: {ifname: wan0, role: wan, managed: true, adminUp: true}
     - apiVersion: net.routerd.net/v1alpha1
       kind: Interface
       metadata: {name: lan}
@@ -40,9 +40,9 @@ spec:
       spec: {interface: wan, client: routerd, prefixLength: 60}
     - apiVersion: net.routerd.net/v1alpha1
       kind: IPv6DelegatedAddress
-      metadata: {name: lan-address}
+      metadata: {name: lan-address, ownerRefs: [{kind: DHCPv6PrefixDelegation, name: wan-pd}]}
       spec:
-        prefixDelegation: DHCPv6PrefixDelegation/wan-pd
+        prefixDelegation: wan-pd
         interface: lan
         subnetID: "0"
         addressSuffix: "::1"
@@ -50,7 +50,7 @@ spec:
         dependsOn: [{resource: DHCPv6PrefixDelegation/wan-pd, phase: Bound}]
     - apiVersion: net.routerd.net/v1alpha1
       kind: IPv6RouterAdvertisement
-      metadata: {name: announcement}
+      metadata: {name: announcement, ownerRefs: [{kind: IPv6DelegatedAddress, name: lan-address}]}
       spec:
         interface: lan
         prefixFrom: {resource: IPv6DelegatedAddress/lan-address, field: address}
@@ -66,7 +66,7 @@ spec:
         dependsOn: [{resource: IPv6DelegatedAddress/lan-address, phase: Applied}]
     - apiVersion: net.routerd.net/v1alpha1
       kind: DHCPv6Server
-      metadata: {name: information}
+      metadata: {name: information, ownerRefs: [{kind: IPv6DelegatedAddress, name: lan-address}]}
       spec:
         interface: lan
         mode: stateless
@@ -79,7 +79,7 @@ spec:
         dependsOn: [{resource: IPv6DelegatedAddress/lan-address, phase: Applied}]
     - apiVersion: net.routerd.net/v1alpha1
       kind: DNSResolver
-      metadata: {name: resolver}
+      metadata: {name: resolver, ownerRefs: [{kind: IPv6DelegatedAddress, name: lan-address}]}
       spec:
         listen:
           - name: local

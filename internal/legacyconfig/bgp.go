@@ -87,6 +87,11 @@ func (c *compiler) bgp() []resourceCondition {
 			if ps.Communities.Send != "" || len(ps.Communities.Accept) != 0 || len(ps.Communities.Set.In) != 0 || len(ps.Communities.Set.Out) != 0 {
 				c.reject(peer, "communities", "unsupported_semantics", "per-peer community transformations need native policy")
 			}
+			for _, owner := range peer.Metadata.OwnerRefs {
+				if owner.Kind == "SAMTransportProfile" {
+					c.issue(peer.node, peer.path+".metadata.ownerRefs", "unsupported_semantics", "SAM-derived BGP policy requires the native SAM transport owner")
+				}
+			}
 			policy := ps.ImportPolicy
 			if len(policy.AllowedPrefixes) == 0 && len(policy.RequiredCommunities) == 0 && len(policy.ForbiddenCommunities) == 0 && policy.NextHopRewrite == "" && policy.LocalPreference == 0 {
 				policy = s.ImportPolicy

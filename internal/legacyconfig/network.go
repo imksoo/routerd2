@@ -39,8 +39,8 @@ func (c *compiler) collectAliases() {
 			c.reject(r, "ifname", "required", "kernel interface name is required")
 			continue
 		}
-		if previous, exists := c.aliasOwner[r.Metadata.Name]; exists && previous != r.ID() {
-			c.reject(r, "", "alias_collision", "interface resource names must be unambiguous across kinds")
+		if previous, exists := c.aliases[r.Metadata.Name]; exists && previous != name {
+			c.reject(r, "", "alias_collision", "interface aliases with the same resource name must select the same kernel interface")
 			continue
 		}
 		c.aliasOwner[r.Metadata.Name] = r.ID()
@@ -94,7 +94,10 @@ func (c *compiler) ensureInterface(name string) *network.Interface {
 }
 
 func (c *compiler) iface(r resource) {
-	c.allow(r, "ifname", "adminUp", "managed", "owner", "mtu")
+	c.allow(r, "ifname", "adminUp", "managed", "owner", "mtu", "role")
+	if child(r.node, "role") != nil {
+		c.note(r, "The pinned Interface decoder does not read spec.role. Native firewall roles come from FirewallZone membership.")
+	}
 	s := r.Spec.(api.InterfaceSpec)
 	if s.Owner != "" && s.Owner != "routerd" && s.Owner != "external" {
 		c.reject(r, "owner", "invalid_value", "owner must be routerd or external")
@@ -312,6 +315,17 @@ func (c *compiler) route(r resource, route network.Route, family int, literal bo
 func (c *compiler) ipv4Route(r resource) {
 	c.allow(r, "destination", "type", "device", "deviceFrom", "gateway", "gatewayFrom", "preferredSource", "metric")
 	s := r.Spec.(api.IPv4RouteSpec)
+	for _, dependency := range s.DependsOn {
+		address := c.getRef(r, "dependsOn", dependency.Resource, "IPv4StaticAddress")
+		if address == nil {
+			continue
+		}
+		if dependency.Optional || dependency.NotEmpty || !dependencyPhase(dependency, "Applied") || meaningful(child(address.node, "when")) {
+			c.reject(r, "dependsOn", "unsupported_semantics", "static routes require unconditional configured addresses to be Applied; conditional address readiness needs a native route condition")
+			continue
+		}
+		c.note(r, "The network writer applies all unconditional configured addresses before routes and stops on address failure; it supplies the referenced Applied prerequisite within the same operation.")
+	}
 	if s.Type == "blackhole" {
 		if s.Device != "" || meaningful(child(r.node, "deviceFrom")) || s.Gateway != "" || meaningful(child(r.node, "gatewayFrom")) || s.PreferredSource != "" {
 			c.reject(r, "type", "invalid_value", "blackhole routes have no next hop or preferred source")

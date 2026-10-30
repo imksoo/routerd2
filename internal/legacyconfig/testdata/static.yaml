@@ -43,9 +43,14 @@ spec:
       metadata: {name: local-v6}
       spec: {interface: wan, family: ipv6, address: "2001:db8::1/128", mode: static}
     - apiVersion: net.routerd.net/v1alpha1
-      kind: IPv4StaticRoute
+      kind: IPv4Route
       metadata: {name: edge4}
-      spec: {destination: 203.0.113.0/24, via: 192.0.2.254, interface: access, metric: 42}
+      spec:
+        destination: 203.0.113.0/24
+        gateway: 192.0.2.254
+        device: access
+        metric: 42
+        dependsOn: [{resource: IPv4StaticAddress/blue-ipv4, phase: Applied}]
     - apiVersion: net.routerd.net/v1alpha1
       kind: IPv6StaticRoute
       metadata: {name: edge6}

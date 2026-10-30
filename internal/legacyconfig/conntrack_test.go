@@ -3,6 +3,7 @@
 package legacyconfig
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -13,6 +14,15 @@ func TestNAT44SyncUsesItsNATRulesSingleIPv4Election(t *testing.T) {
 	result, err := CompileWithOptions(input, options)
 	if err != nil {
 		t.Fatal(err)
+	}
+	withPackage := append(append([]byte(nil), input...), []byte(`    - apiVersion: system.routerd.net/v1alpha1
+      kind: Package
+      metadata: {name: conntrackd}
+      spec: {state: present, packages: [{os: ubuntu, manager: apt, names: [conntrackd]}]}
+`)...)
+	provided, err := CompileWithOptions(withPackage, options)
+	if err != nil || !reflect.DeepEqual(provided.Document, result.Document) {
+		t.Fatal("the configured signed engine did not fulfill its package prerequisite", err)
 	}
 	count := 0
 	for _, service := range nativeProgram(t, result.Document).Services {
