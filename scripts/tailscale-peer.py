@@ -51,12 +51,19 @@ def vendor_api(socket, path, body=None):
     return json.loads(data) if data else None
 
 
-ECHO_SERVER = r"""import json,socket,sys,threading
+ECHO_SERVER = r"""import json,socket,sys,threading,time
 host=sys.argv[1];family=socket.AF_INET6 if ':' in host else socket.AF_INET
 t=socket.socket(family,socket.SOCK_STREAM);t.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1);t.bind((host,18080));t.listen()
+def reply(c,a):
+ with c:
+  body=c.recv(1024)
+  print("TCP received",time.time_ns(),a,len(body),flush=True)
+  c.sendall(json.dumps({'source':a[0],'payload':body.decode()}).encode())
+  print("TCP sent",time.time_ns(),a,flush=True)
 def tcp():
  while True:
-  c,a=t.accept();body=c.recv(1024);c.sendall(json.dumps({'source':a[0],'payload':body.decode()}).encode());c.close()
+  c,a=t.accept()
+  threading.Thread(target=reply,args=(c,a),daemon=True).start()
 threading.Thread(target=tcp,daemon=True).start()
 u=socket.socket(family,socket.SOCK_DGRAM);u.bind((host,18081));print("READY",flush=True)
 while True:

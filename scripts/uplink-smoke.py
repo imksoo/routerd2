@@ -648,9 +648,11 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
         wait(lambda: subprocess.run(inside(client, ["dig", "@" + lease[3], "recovered.split.test", "A", "+short", "+time=2", "+tries=1"]), capture_output=True, text=True).stdout.strip() == "192.0.2.77")
         print("PASS independent conditional DNS source, failure isolation and recovery over LAN IPv4/IPv6", flush=True)
 
+        start(router, ["ip", "-ts", "monitor", "route"], "router-routes")
+
         def check_traffic():
             host_routes = json.loads(run(["ip", "-n", router, "-j", "-6", "route", "show", "table", "120", "default"]))
-            assert len(host_routes) == 1 and host_routes[0].get("prefsrc"), "IPv6 host route/source is unavailable"
+            assert len(host_routes) == 1 and host_routes[0].get("prefsrc"), "IPv6 host route/source is unavailable: " + json.dumps(host_routes)
             learned = query("control.sock", "/v1/services/service.wan-ra")["snapshot"]["addresses"]
             host_source = ipaddress.IPv6Address(host_routes[0]["prefsrc"])
             assert any(ipaddress.ip_interface(a["address"]).ip == host_source and not a.get("deprecated") and not a.get("dad_failed") for a in learned), "host policy guessed an address instead of using its RA owner"
@@ -946,7 +948,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
         )
     except Exception:
         try:
-            for name in ("automatic-client-events", "automatic-resolv.conf"):
+            for name in ("automatic-client-events", "automatic-resolv.conf", "router-routes.log"):
                 path = stage / name
                 if path.exists():
                     print("Failed uplink", name, "\n".join(path.read_text(errors="replace").splitlines()[-25:]), flush=True)
@@ -956,9 +958,17 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             if (stage / "run/control.sock").exists():
                 for endpoint in ("/v1/status", "/v1/events"):
                     try:
-                        print("Failed uplink DNS", endpoint, json.dumps(query("services/dns.dns.sock", endpoint)), flush=True)
+                        data = query("services/dns.dns.sock", endpoint)
+                        if endpoint == "/v1/events":
+                            data["events"] = data.get("events", [])[-20:]
+                        print("Failed uplink DNS", endpoint, json.dumps(data), flush=True)
                     except Exception as diagnostic_error:
                         print("DNS inspection failed", endpoint, diagnostic_error, flush=True)
+                for endpoint in ("/v1/network", "/v1/network/routes?table=120&limit=64"):
+                    try:
+                        print("Failed uplink network", endpoint, json.dumps(query("control.sock", endpoint)), flush=True)
+                    except Exception as diagnostic_error:
+                        print("Network inspection failed", endpoint, diagnostic_error, flush=True)
                 status = query("control.sock", "/v1/services")
                 print("Failed uplink projection", status.get("phase"), status.get("last_error"), flush=True)
                 for instance in status.get("instances", []):
