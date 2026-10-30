@@ -312,3 +312,12 @@ main `c5f93a5` は独立端末の通常版で検証されたDNS履歴とDHCPv6�
 単体の同じ通常imageでは再起動後の取得IPv6 DNSへのUDP/TCPも通過した。元43200秒/T1=21600秒の二端末観測は継続中。T1は10月31日04:42:16 JST、終了予定04:49:37 JSTで、自然LAN更新はまだ合格にしない。実HGWの標準7800秒版も継続中で自然PD更新待ち。ただし14:06:51 UTC、`service.leases`が`POST /v1/services/state: context deadline exceeded`で終了し、generation2が再起動後に両端末へ実DHCPACKを返した。原因は未解明であり安定稼働の受入にはしない。観測環境と保持DUIDは継続中のため削除しない。
 
 `74e4b3d`はDNS履歴の実SSH/ローカルCLI照会とcandidate編集を維持する変更を統合した。独立WSLの標準静的配布物 `wsl-dns-cli-4e14466` / `4e14466` でUDP/TCP DNS→保存→SSH照会、filter拒否、snapshot一覧を確認済み。これは上記8cc420d guestへ差し替えた結果ではない。次は長時間観測と並行して全構成の管理/更新/復旧を通し、未解決timeout、復帰途中の追加障害、対象実機、k8s/pve、Cloud SAMと全34項目の残りを進める。
+
+
+## 2026-10-31 00:08 JST: 全57resourceの署名付き更新と操作による復帰が完走
+
+通常imageの`8cc420d / full-homert-loopback-native92`から、`00969ca / full-homert-operations-native92`へ実SSHで更新し、正常確定後に`update rollback`で旧版へ戻した。通常Makeの三つの静的ELF、五engineと対応source、nDPI sourceを署名した504MiBカタログを使用。隔離4CPU/4096MiB KVM、Alpine3.24.3/Linux6.18.59-0-lts、専用4GiB ext4 stateと既存の独立peer/自動端末群。設定は全57resourceを保ち、更新の正常確定に必要なPD activeとVRRP electedの`ready_when`を明示した。試行90秒・継続2秒は既存の値を維持した。
+
+SSH転送17.077秒/通信7巡、prepare3.072秒/2巡で、その間も全構成の端末通信を確認。実再起動・正常確定と全経路再確認は36.535892秒。旧版復帰の準備4.968秒/通信4巡、その実再起動・全経路再確認は35.723233秒。実guestと全必須workerのrelease IDを照合し、revision1→2→3、設定内容・DUID・Tailscale NodeIDと同じSSH鍵による到達を確認した。取得DNSの実IPv4/IPv6 UDP/TCP、両IP TCP/UDP、BGP/IX、特殊端末、実NTP採用、Tailscaleを各段階で再確認して終了0。これは操作による旧版復帰であり、障害時の自動復旧は次の独立試行で実行中。
+
+私有手順は`/tmp/routerd-full-homert-update92.py`と`/tmp/routerd-full-update92-helper.py`。初回はroot publisherに別所有者の入力を直接渡したため、署名前に信頼境界で拒否された。標準fixtureと同じくroot所有の試験stageへ入力をコピーし、所有権を明確にして同じ検査を通した。製品の検査は緩めていない。受入結果を短く残して完了stageの重複ELF/カタログ/captureは削除する。関連CLIのRace76.361秒、全vet、通常amd64ビルドは通過。arm64での実行と全体の利用可能性は引き続き別の未完了条件である。

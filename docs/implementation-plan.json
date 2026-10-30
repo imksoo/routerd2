@@ -11232,7 +11232,19 @@
       "normal_alpine_copy_assertions": 0,
       "normal_alpine_effects_timeouts": 0,
       "hgw_normal": "Previous same-protocol full-homert-event-native92, standard7800s isolated real-HGW run continues. Automatic clients, both-IP HTTPS/DNS, DoH/TS and WAN recovery0.96s passed. Natural PD renewal pending. DHCP service.leases generation1 exited14:06:51 UTC with services/state context deadline; generation2 resumed actual DHCPACK. Cause unresolved; not stable-runtime acceptance or full57 profile.",
-      "remaining": "Original LAN natural renewal; real-HGW PD renewal and state-publication timeout diagnosis; warming-backup fault and HA margin; full-profile management/update/recovery; target hardware/NIC and k8s/pve/Cloud SAM; all remaining work packages."
+      "remaining": "Original LAN natural renewal; real-HGW PD renewal and state-publication timeout diagnosis; warming-backup fault and HA margin; full-profile automatic failed-update recovery and remaining management acceptance; target hardware/NIC and k8s/pve/Cloud SAM; all remaining work packages.",
+      "full_profile_signed_update": {
+        "base": "8cc420d / full-homert-loopback-native92",
+        "candidate": "00969ca / full-homert-operations-native92",
+        "environment": "Same normal Alpine/KVM4CPU4096MiB; private4GiB ext4 state; full57 resources and all five engines plus corresponding sources and nDPI sources in signed504MiB catalog",
+        "readiness": "Explicit PD active and VRRP elected ready_when; unchanged90s trial and2s stability",
+        "upload_seconds": 17.077,
+        "prepare_seconds": 3.072,
+        "updated_all_path_recovery_seconds": 36.5358917,
+        "rollback_prepare_seconds": 4.968,
+        "explicit_rollback_all_path_recovery_seconds": 35.7232328,
+        "result": "Exited0. Real SSH update stage/prepare/reboot and update rollback/reboot; normal confirmation, actual acquired DNS both transports, IPv4/IPv6 TCPUDP, special client, NTP, Tailscale, retained configuration/DUID/NodeID and pinned SSH identity. Revisions1->2->3; actual guest releases and all required worker release IDs checked. Automatic failed-trial recovery is a separate running trial."
+      }
     }
   },
   "execution_order": [
