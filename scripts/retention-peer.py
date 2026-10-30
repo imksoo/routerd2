@@ -1,0 +1,312 @@
+#!/usr/bin/env python3
+"""Exercise product event retention with independent UDP receipt and forwarding.
+
+Actual configuration commits supply the retained records. A separate receiver
+observes before-delete archives. A receiver outage plus an unreachable log-only
+route makes UDP submission fail; a silent UDP loss alone has no acknowledgement.
+The independent client exercises IPv4 UDP forwarding, not physical hardware,
+TCP continuity, automatic address acquisition, or reliable UDP log delivery.
+"""
+import argparse
+import datetime
+import hashlib
+import json
+import os
+from pathlib import Path
+import signal
+import socket
+import sqlite3
+import subprocess
+import time
+
+
+def run(command, timeout=10, input=None):
+    result = subprocess.run(command, input=input, capture_output=True, text=True, timeout=timeout)
+    if result.returncode:
+        raise RuntimeError(f'{command[0]}: {result.stdout[-2000:]}{result.stderr[-2000:]}')
+    return result.stdout
+
+
+def endpoint(mode, output, port):
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        if mode == 'client':
+            sock.settimeout(1)
+            sock.connect(('192.0.2.2', 18081))
+            with output.open('a', buffering=1) as log:
+                sequence = 0
+                while True:
+                    sequence += 1
+                    message = f'syslog-forwarding-{sequence}'.encode()
+                    start = time.monotonic()
+                    try:
+                        sock.send(message)
+                        ok = sock.recv(1024) == message
+                    except OSError:
+                        ok = False
+                    log.write(json.dumps({'sequence': sequence, 'ok': ok, 'seconds': time.monotonic()-start})+'\n')
+                    time.sleep(.1)
+        else:
+            sock.bind(('192.0.2.2' if mode == 'echo' else '192.0.2.3', port))
+            with output.open('a', buffering=1) as log:
+                log.write(json.dumps({'ready': True})+'\n')
+                while True:
+                    message, peer = sock.recvfrom(65535)
+                    if mode == 'echo':
+                        sock.sendto(message, peer)
+                    else:
+                        log.write(json.dumps({'time': time.time(), 'peer': peer, 'message': message.decode('utf-8')})+'\n')
+
+
+def peer(stage):
+    children = []
+    namespaces = ('retention-router', 'retention-peer', 'retention-client')
+    assert os.readlink('/proc/self/ns/net') != os.environ['ROUTERD_RETENTION_PARENT_NETNS'], 'requires private network namespace'
+    run(['mount', '--make-rprivate', '/'])
+    Path('/run/netns').mkdir(exist_ok=True)
+    run(['mount', '-t', 'tmpfs', '-o', 'mode=700', 'tmpfs', '/run/netns'])
+
+    def inside(namespace, command):
+        return ['ip', 'netns', 'exec', namespace]+command
+
+    def start(namespace, command, name):
+        with (stage/(name+'.log')).open('a') as log:
+            process = subprocess.Popen(inside(namespace, command), stdout=log, stderr=subprocess.STDOUT)
+        children.append(process)
+        return process
+
+    def wait(condition, description, seconds=30):
+        deadline = time.monotonic()+seconds
+        while time.monotonic() < deadline:
+            if condition():
+                return
+            time.sleep(.1)
+        raise RuntimeError('timed out: '+description)
+
+    def rows(name):
+        path = stage/name
+        if not path.exists():
+            return []
+        # A running receiver may be appending its last line.
+        return [json.loads(line) for line in path.read_text().splitlines(keepends=True) if line.endswith('\n')]
+
+    def api(socket_name, path, body=None):
+        command = ['curl', '--fail-with-body', '--max-time', '5', '-sS', '--unix-socket', str(stage/'run'/socket_name), 'http://routerd'+path]
+        if body is not None:
+            command += ['-H', 'Content-Type: application/json', '--data-binary', json.dumps(body)]
+        return json.loads(run(inside('retention-router', command), 8))
+
+    def modules():
+        return {item['name']: item for item in api('supervisor.sock', '/v1/status')['modules']}
+
+    def observations():
+        result, after = [], 0
+        while True:
+            page = api('control.sock', '/v1/observations?after_cursor='+str(after)+'&limit=16')
+            result.extend(page['records'] or [])
+            if not page['more']:
+                return result
+            after = page['next_cursor']
+
+    def capacity():
+        return api('control.sock', '/v1/event-store')
+
+    def commit(policy, label, healthy=True):
+        current = api('control.sock', '/v1/config')
+        current_cursor = max((r['cursor'] for r in observations()), default=0)
+        api('control.sock', '/v1/config/commit', {'expected_revision': current['revision'], 'request_id': label, 'config': {'schema_version': 2, 'resources': resources, 'retention': policy}})
+        if healthy:
+            wait(lambda: api('control.sock', '/v1/config')['healthy'], label+' ready')
+        wait(lambda: any(r['event']['topic'] == 'routerd.retention.observed' and r['cursor'] > current_cursor for r in observations()), label+' rule consumed commit')
+        for record in observations():
+            original[record['event']['id']] = record['event']
+        print('Product commit', label, 'revision', api('control.sock', '/v1/config')['revision'], flush=True)
+
+    def retained_ids():
+        return {record['event']['id'] for record in observations()}
+
+    def reclaimed():
+        # Read only this fixture's owned database. Current state/work and the
+        # latest registration anchor may legitimately exceed a history target.
+        with sqlite3.connect('file:'+str(stage/'state/events/journal.sqlite3')+'?mode=ro', uri=True) as database:
+            referenced = {row[0] for row in database.execute('SELECT state_cursor FROM consumers WHERE stateful=1 UNION SELECT event_cursor FROM outbox UNION SELECT max(cursor) FROM events')}
+            remaining = {row[0] for row in database.execute('SELECT cursor FROM events')}
+            return remaining <= referenced
+
+    def delivered():
+        found = {}
+        for row in rows('receiver-a.jsonl'):
+            wire = row.get('message', '')
+            if ': info retained event ' not in wire:
+                continue
+            payload = wire.split(': info retained event ', 1)[1]
+            event, _ = json.JSONDecoder().raw_decode(payload)
+            if event['id'] in original:
+                assert event == original[event['id']], 'archive changed original event'
+                found[event['id']] = event
+        return found
+
+    def receiver(port, name):
+        ready_count = sum(bool(row.get('ready')) for row in rows(name))
+        process = start('retention-peer', ['python3', '-I', str(stage/'peer.py'), '--mode', 'receive', '--port', str(port), '--output', str(stage/name)], name)
+        wait(lambda: sum(bool(row.get('ready')) for row in rows(name)) > ready_count, 'receiver bound to UDP '+str(port), 5)
+        return process
+
+    try:
+        for name in namespaces:
+            run(['ip', 'netns', 'add', name])
+            run(['ip', '-n', name, 'link', 'set', 'lo', 'up'])
+        for device, ns, address, gateway in [('wan0', 'retention-peer', '192.0.2.2/24', '192.0.2.1'), ('lan0', 'retention-client', '198.51.100.2/24', '198.51.100.1')]:
+            run(['ip', 'link', 'add', device, 'netns', 'retention-router', 'type', 'veth', 'peer', 'name', 'eth0', 'netns', ns])
+            run(['ip', '-n', ns, 'link', 'set', 'eth0', 'up'])
+            run(['ip', '-n', ns, 'address', 'add', address, 'dev', 'eth0'])
+            run(['ip', '-n', ns, 'route', 'add', 'default', 'via', gateway])
+        resources = [{'id': device, 'interface': {'name': device}} for device in ('wan0', 'lan0')]
+        resources += [{'id': device+'-address', 'depends_on': [device], 'address': {'interface': device, 'cidr': address}} for device, address in [('wan0', '192.0.2.1/24'), ('lan0', '198.51.100.1/24')]]
+        resources += [{'id': 'forward', 'forwarding': {'ipv4': True, 'ipv4_rp_filter': 0}}]
+        resources += [{'id': 'observe-commits', 'event_rule': {'pattern': {'operator': 'count', 'topic': 'configuration.committed', 'threshold': 1}, 'emit': {'topic': 'routerd.retention.observed'}}}]
+        run(['ip', '-n', 'retention-peer', 'address', 'add', '192.0.2.3/24', 'dev', 'eth0'])
+        destination = {'address': '192.0.2.3:5514', 'facility': 'local0', 'tag': 'routerd', 'min_level': 'info'}
+        policy = {'max_age_seconds': 3600, 'max_records': 3, 'interval_seconds': 1, 'vacuum': True, 'syslog': [destination]}
+        (stage/'config.json').write_text(json.dumps({'schema_version': 2, 'resources': resources, 'retention': policy}))
+        boot = {'platform': 'host', 'config': str(stage/'config.json'), 'runtime_dir': str(stage/'run'), 'state_dir': str(stage/'state'), 'workers': {role: str(stage/('routerd-logging' if role == 'logging' else 'routerd-modules')) for role in ('logging', 'network', 'control', 'management')}}
+        (stage/'boot.json').write_text(json.dumps(boot))
+        receive = receiver(5514, 'receiver-a.jsonl')
+        start('retention-peer', ['python3', '-I', str(stage/'peer.py'), '--mode', 'echo', '--port', '18081', '--output', str(stage/'echo.jsonl')], 'echo')
+        wait(lambda: bool(rows('echo.jsonl')), 'independent echo receiver')
+        product = start('retention-router', [str(stage/'routerd'), 'boot', '--file', str(stage/'boot.json')], 'router')
+        wait(lambda: (stage/'run/control.sock').exists(), 'control socket')
+        wait(lambda: api('control.sock', '/v1/config')['healthy'], 'product ready')
+        start('retention-client', ['python3', '-I', str(stage/'peer.py'), '--mode', 'client', '--output', str(stage/'forwarding.jsonl')], 'client')
+        wait(lambda: len(rows('forwarding.jsonl')) >= 3, 'independent routed UDP replies')
+        original = {}
+        for number in range(8):
+            policy['max_age_seconds'] = 3600+number
+            commit(policy, 'record-limit-'+str(number))
+        wait(lambda: capacity()['capacity']['history']['rows'] <= 3, 'record-count limit')
+        assert len(delivered()) >= 5
+        assert all(identity in delivered() for identity in original if identity not in retained_ids())
+        print('PASS count limit and original event receipt before deletion', json.dumps(capacity()), flush=True)
+
+        policy.pop('max_records')
+        policy['max_bytes'] = 1
+        commit(policy, 'byte-limit')
+        wait(lambda: reclaimed(), 'event-body byte limit')
+        print('PASS body-byte limit', flush=True)
+
+        policy.pop('max_bytes')
+        policy['max_age_seconds'] = 2
+        commit(policy, 'age-limit')
+        wait(lambda: reclaimed(), 'age limit')
+        print('PASS observed-time expiry and incremental vacuum', json.dumps(capacity()), flush=True)
+
+        receive.terminate()
+        receive.wait(timeout=5)
+        # This log-only route affects neither the echo peer nor client traffic.
+        # UDP silence itself cannot prove remote failure, so exercise a real
+        # sender error separately from stopping the receiver.
+        run(['ip', '-n', 'retention-router', 'route', 'add', 'unreachable', '192.0.2.3/32'])
+        commit(policy, 'archive-unreachable')
+        protected = retained_ids()
+        wait(lambda: bool(capacity().get('retention_error')), 'visible UDP submission error')
+        for _ in range(2):
+            status = capacity()
+            assert status.get('last_error') and status.get('retention_error'), status
+        before = len(rows('forwarding.jsonl'))
+        cursor = max(r['cursor'] for r in observations())
+        for number in range(3):
+            policy['max_age_seconds'] = 2+number
+            commit(policy, 'accepted-during-outage-'+str(number), healthy=False)
+        assert max(r['cursor'] for r in observations()) > cursor
+        assert protected <= retained_ids(), 'failed archive deleted retained evidence'
+        wait(lambda: len(rows('forwarding.jsonl')) >= before+10, 'forwarding while archive fails')
+        assert all(r['ok'] for r in rows('forwarding.jsonl'))
+        print('PASS submission error remained visible; old candidates retained; new product records and routed UDP progressed', flush=True)
+
+        receive = receiver(5514, 'receiver-a.jsonl')
+        run(['ip', '-n', 'retention-router', 'route', 'delete', 'unreachable', '192.0.2.3/32'])
+        wait(lambda: reclaimed() and not capacity().get('retention_error'), 'receiver-path recovery and retained backlog deletion')
+        assert protected <= delivered().keys()
+        wait(lambda: api('control.sock', '/v1/config')['healthy'], 'storage alarm recovery')
+        print('PASS archive recovery delivered retained originals and cleared the alarm', flush=True)
+
+        policy['max_age_seconds'] = 2
+        commit(policy, 'before-restart')
+        old_generation = modules()['control']['generation']
+        api('supervisor.sock', '/v1/modules/control/restart', {})
+        wait(lambda: modules()['control']['generation'] > old_generation and modules()['control']['ready'], 'control restart')
+        wait(lambda: api('control.sock', '/v1/config')['healthy'], 'restarted persisted configuration')
+        assert api('control.sock', '/v1/config')['config']['retention'] == policy
+        commit(policy, 'after-restart')
+        wait(lambda: reclaimed(), 'restarted retention')
+        assert all(r['ok'] for r in rows('forwarding.jsonl'))
+        print('PASS restart retained policy, accepted fresh product events and expired their history', flush=True)
+        destination['min_level'] = 'warning'
+        commit(policy, 'archive-info-filtered-by-warning')
+        filtered = retained_ids()
+        assert filtered
+        wait(lambda: reclaimed(), 'filtered archive expiry')
+        assert not filtered.intersection(delivered()), 'INFO archive bypassed warning threshold'
+        print('PASS archive INFO respects warning threshold while original history expires', flush=True)
+        print('Forwarding result', json.dumps({'replies': len(rows('forwarding.jsonl')), 'failures': sum(not row['ok'] for row in rows('forwarding.jsonl'))}), flush=True)
+    except Exception:
+        for name in ('router.log', 'receiver-a.jsonl'):
+            path = stage/name
+            if path.exists():
+                print(name+' tail\n'+'\n'.join(path.read_text(errors='replace').splitlines()[-12:]), flush=True)
+        raise
+    finally:
+        for child in reversed(children):
+            if child.poll() is None:
+                child.terminate()
+                try:
+                    child.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    child.kill()
+                    child.wait(timeout=5)
+        for name in reversed(namespaces):
+            subprocess.run(['ip', 'netns', 'delete', name], capture_output=True)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--inside', type=Path)
+    parser.add_argument('--mode', choices=('receive', 'echo', 'client'))
+    parser.add_argument('--port', type=int, default=5514)
+    parser.add_argument('--binary-dir', type=Path, default=Path('dist/bin'))
+    parser.add_argument('--output', type=Path, default=Path('dist/retention-peer'))
+    args = parser.parse_args()
+    if args.mode:
+        endpoint(args.mode, args.output, args.port)
+        return
+    if args.inside:
+        peer(args.inside)
+        return
+    root = [] if os.geteuid() == 0 else ['sudo', '-n']
+    args.output.mkdir(parents=True, exist_ok=True)
+    stage = Path(run(root+['mktemp', '-d', '/tmp/routerd-retention.XXXXXX']).strip())
+    for name, source in [('peer.py', Path(__file__))]+[(name, args.binary_dir.resolve()/name) for name in ('routerd', 'routerd-modules', 'routerd-logging')]:
+        run(root+['install', '-m', '755', str(source), str(stage/name)])
+    hashes = {name: hashlib.sha256((args.binary_dir/name).read_bytes()).hexdigest() for name in ('routerd', 'routerd-modules', 'routerd-logging')}
+    (args.output/'binaries.json').write_text(json.dumps(hashes, indent=2)+'\n')
+    print('Private stage', stage, flush=True)
+    parent_netns = os.readlink('/proc/self/ns/net')
+    with (args.output/'peer.log').open('w') as output:
+        result = subprocess.run(root+['env', 'ROUTERD_RETENTION_PARENT_NETNS='+parent_netns, 'unshare', '--mount', '--net', '--pid', '--fork', '--mount-proc', '--kill-child=SIGKILL', '--propagation', 'private', 'python3', '-I', str(stage/'peer.py'), '--inside', str(stage)], stdout=output, stderr=subprocess.STDOUT, timeout=150)
+    for name in ('router.log', 'receiver-a.jsonl', 'forwarding.jsonl'):
+        artifact = subprocess.run(root+['cat', str(stage/name)], capture_output=True)
+        if artifact.returncode == 0:
+            (args.output/name).write_bytes(artifact.stdout)
+    print((args.output/'peer.log').read_text(), end='')
+    if result.returncode:
+        # Keep the small state/log evidence, not duplicate release binaries.
+        prune = 'from pathlib import Path; import sys; p=Path(sys.argv[1]); assert p.parent==Path("/tmp") and p.name.startswith("routerd-retention.") and p.resolve()==p; [(p/n).unlink() for n in ("routerd","routerd-modules","routerd-logging")]'
+        run(root+['python3', '-I', '-c', prune, str(stage)])
+        raise RuntimeError('retention acceptance failed; retained small evidence '+str(stage))
+    # Only remove the exact disposable directory created above; artifacts were copied.
+    cleanup = 'from pathlib import Path; import shutil,sys; p=Path(sys.argv[1]); assert p.parent==Path("/tmp") and p.name.startswith("routerd-retention.") and p.resolve()==p; shutil.rmtree(p)'
+    run(root+['python3', '-I', '-c', cleanup, str(stage)])
+    print('PASS retention acceptance; evidence '+str(args.output))
+
+
+if __name__ == '__main__':
+    main()

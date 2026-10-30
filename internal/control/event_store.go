@@ -13,11 +13,13 @@ import (
 )
 
 type EventStoreHealth struct {
-	Capacity        *events.Capacity `json:"capacity,omitempty"`
-	ObservedAt      time.Time        `json:"observed_at,omitempty"`
-	ArchiveError    string           `json:"archive_error,omitempty"`
-	CompactionError string           `json:"compaction_error,omitempty"`
-	LastError       string           `json:"last_error,omitempty"`
+	RetentionError   string           `json:"retention_error,omitempty"`
+	RetentionDeleted uint64           `json:"retention_deleted"`
+	Capacity         *events.Capacity `json:"capacity,omitempty"`
+	ObservedAt       time.Time        `json:"observed_at,omitempty"`
+	ArchiveError     string           `json:"archive_error,omitempty"`
+	CompactionError  string           `json:"compaction_error,omitempty"`
+	LastError        string           `json:"last_error,omitempty"`
 }
 
 // RefreshEventStore never holds control authority while querying SQLite or
@@ -38,7 +40,7 @@ func (e *Engine) RefreshEventStore(ctx context.Context) error {
 	if err != nil {
 		e.eventStore.LastError = stateText(err.Error(), 1024)
 	} else {
-		e.eventStore = EventStoreHealth{Capacity: &capacity, ObservedAt: time.Now().UTC(), CompactionError: e.eventStore.CompactionError, ArchiveError: e.eventStore.ArchiveError}
+		e.eventStore = EventStoreHealth{Capacity: &capacity, ObservedAt: time.Now().UTC(), CompactionError: e.eventStore.CompactionError, ArchiveError: e.eventStore.ArchiveError, RetentionError: e.eventStore.RetentionError, RetentionDeleted: e.eventStore.RetentionDeleted}
 		if capacity.Pressure == "exhausted" {
 			e.eventStore.LastError = "event store capacity exhausted: " + strings.Join(capacity.Reasons, ",")
 		}
@@ -57,6 +59,13 @@ func (e *Engine) RefreshEventStore(ctx context.Context) error {
 			e.eventStore.LastError = stateText(e.eventStore.LastError+"; "+e.eventStore.ArchiveError, 1024)
 		}
 	}
+	if e.eventStore.RetentionError != "" {
+		if e.eventStore.LastError == "" {
+			e.eventStore.LastError = e.eventStore.RetentionError
+		} else if e.eventStore.LastError != e.eventStore.RetentionError {
+			e.eventStore.LastError = stateText(e.eventStore.LastError+"; "+e.eventStore.RetentionError, 1024)
+		}
+	}
 	e.state.EventStoreError = e.eventStore.LastError
 	return err
 }
@@ -67,11 +76,15 @@ const (
 	compactEventWork eventStoreWork = iota
 	archiveEventWork
 	inspectEventWork
+	retainEventWork
 )
 
 // One bounded operation runs per tick. Reclamation, compression and inspection
 // are independent work; one operation must not consume the next one's deadline.
 func (e *Engine) maintainEventStore(ctx context.Context, work eventStoreWork) error {
+	if work == retainEventWork {
+		return e.retainEvents(ctx)
+	}
 	if work == inspectEventWork {
 		return e.RefreshEventStore(ctx)
 	}
@@ -176,7 +189,7 @@ func (e *Engine) monitorEventStore(ctx context.Context) {
 		call, cancel := context.WithTimeout(ctx, 2*time.Second)
 		err := e.maintainEventStore(call, work)
 		cancel()
-		work = (work + 1) % 3
+		work = (work + 1) % 4
 		e.mu.Lock()
 		status := e.eventStore
 		e.mu.Unlock()

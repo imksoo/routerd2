@@ -212,3 +212,26 @@ func severity(level string) int {
 		return 6
 	}
 }
+
+// Send archives a bounded historical batch using the same best-effort UDP wire
+// format. Successful Write is local submission, never a remote acknowledgement.
+func Send(ctx context.Context, cfg syslogconfig.Config, records []logging.Record) error {
+	cfg = syslogconfig.Normalize(cfg)
+	host, err := os.Hostname()
+	if err != nil {
+		return err
+	}
+	output := sender{config: cfg, hostname: host}
+	defer output.close()
+	minimum := severity(strings.ToUpper(cfg.MinLevel))
+	if cfg.MinLevel == "warning" {
+		minimum = 4
+	}
+	selected := make([]logging.Record, 0, len(records))
+	for _, record := range records {
+		if severity(record.Level) <= minimum {
+			selected = append(selected, record)
+		}
+	}
+	return output.send(ctx, selected)
+}

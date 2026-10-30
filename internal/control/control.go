@@ -115,22 +115,25 @@ func (n *NetworkClient) Snapshot(ctx context.Context) (s network.Snapshot, err e
 }
 
 type Engine struct {
-	plan           resourceprogram.Plan
-	mu             sync.Mutex
-	store          *config.Store
-	releaseStore   *release.Store
-	releaseDigest  string
-	network        Network
-	state          State
-	events         []Event
-	runtime        *runtimeplan.Runtime
-	journal        *events.Store
-	eventStore     EventStoreHealth
-	eventFlushMu   sync.Mutex
-	rules          *eventcontroller.Controller
-	derived        *derivedcontroller.Controller
-	protocolErrors map[string]string
-	protocolRelays *protocolevents.Retirement
+	retentionRevision uint64
+	retentionAfter    uint64
+	retentionNext     time.Time
+	plan              resourceprogram.Plan
+	mu                sync.Mutex
+	store             *config.Store
+	releaseStore      *release.Store
+	releaseDigest     string
+	network           Network
+	state             State
+	events            []Event
+	runtime           *runtimeplan.Runtime
+	journal           *events.Store
+	eventStore        EventStoreHealth
+	eventFlushMu      sync.Mutex
+	rules             *eventcontroller.Controller
+	derived           *derivedcontroller.Controller
+	protocolErrors    map[string]string
+	protocolRelays    *protocolevents.Retirement
 }
 
 func New(store *config.Store, current config.Committed, n Network) *Engine {

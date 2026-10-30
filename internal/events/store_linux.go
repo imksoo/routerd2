@@ -214,6 +214,11 @@ func openStore(options Options, existingOnly bool) (_ *Store, result error) {
 		return nil, errors.New("unsupported event database schema")
 	}
 	// Inspect ownership/schema before any pragma that can modify the database.
+	if id == 0 {
+		if _, err = s.db.Exec(`PRAGMA auto_vacuum=INCREMENTAL`); err != nil {
+			return nil, err
+		}
+	}
 	var journal string
 	if err = s.db.QueryRow(`PRAGMA journal_mode=WAL`).Scan(&journal); err != nil || journal != "wal" {
 		return nil, errors.Join(errors.New("durable event store requires WAL"), err)

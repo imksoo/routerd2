@@ -38,7 +38,7 @@ func RemoveOwned(source Program, id string) (Program, []string, error) {
 			}
 		}
 	}
-	out := Program{SchemaVersion: source.SchemaVersion, Resources: make([]Resource, 0, len(source.Resources)-len(removed))}
+	out := Program{SchemaVersion: source.SchemaVersion, Retention: source.Retention, Resources: make([]Resource, 0, len(source.Resources)-len(removed))}
 	ids := make([]string, 0, len(removed))
 	for _, r := range source.Resources {
 		if removed[r.ID] {

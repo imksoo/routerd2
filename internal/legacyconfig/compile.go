@@ -15,6 +15,7 @@ import (
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
+	"github.com/imksoo/routerd2/internal/retention"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
 
@@ -174,6 +175,8 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 			c.logSink(r)
 		case "ManagementAccess":
 			// Checked together at the import boundary above.
+		case "LogRetention":
+			c.logRetention(r)
 		case "HealthCheck":
 			name := c.healthCheck(r)
 			conditions = append(conditions, resourceCondition{id: "service/" + name, source: r, when: r.Spec.(api.HealthCheckSpec).When})
@@ -256,6 +259,7 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 	})
 	sort.Slice(c.document.Services, func(i, j int) bool { return c.document.Services[i].Name < c.document.Services[j].Name })
 	program := config.FromNative(c.document)
+	program.Retention = c.retention
 	program.Resources = append(program.Resources, extra...)
 	for i := range program.Resources {
 		if deps := bgpDependencies[program.Resources[i].ID]; len(deps) > 0 {
@@ -336,6 +340,7 @@ type staticPrefix struct {
 }
 
 type compiler struct {
+	retention *retention.Config
 	*decoder
 	resources      []resource
 	legacy         api.Router

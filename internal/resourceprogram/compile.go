@@ -33,6 +33,11 @@ func ValidResourceID(id string) bool { return resourceID.MatchString(id) }
 // preserved. The caller keeps source payloads immutable for the lifetime of the plan;
 // compilation does not serialize typed configuration to clone it.
 func Compile(source Program) (Plan, error) {
+	if source.Retention != nil {
+		if err := source.Retention.Validate(); err != nil {
+			return Plan{}, err
+		}
+	}
 	for _, r := range source.Resources {
 		for _, guard := range []struct {
 			name  string

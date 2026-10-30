@@ -8,6 +8,7 @@ import (
 	"github.com/imksoo/routerd2/internal/derived"
 	"github.com/imksoo/routerd2/internal/eventrule"
 	"github.com/imksoo/routerd2/internal/network"
+	"github.com/imksoo/routerd2/internal/retention"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
 
@@ -16,8 +17,9 @@ const SchemaVersion = 2
 // Program is the operator's source of truth. Generated worker configurations
 // and kernel projections are derived values, never an alternative input format.
 type Program struct {
-	SchemaVersion int        `json:"schema_version"`
-	Resources     []Resource `json:"resources"`
+	SchemaVersion int               `json:"schema_version"`
+	Retention     *retention.Config `json:"retention,omitempty"`
+	Resources     []Resource        `json:"resources"`
 }
 
 // Provenance records where a declaration came from. It grants no authority and

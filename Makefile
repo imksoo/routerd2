@@ -446,3 +446,7 @@ qemu-ntp:
 .PHONY: check-ntp-import
 check-ntp-import: build chrony-engine
 	$(PYTHON) scripts/ntp-peer.py --profile import --dhcp6-server '$(DHCP6_SERVER)' --output dist/ntp-import-peer
+
+.PHONY: check-retention
+check-retention: build
+	$(PYTHON) scripts/retention-peer.py

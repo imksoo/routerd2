@@ -164,3 +164,57 @@ not import discarded, unreleased version-1/2/3/4/5 prototype state. Unsupported 
 identity is rejected through the read-only probe before SQLite recovery/writes.
 This is not a promise that different released versions can share or roll back
 this database. A production migration/fallback contract remains DIST-01 work.
+
+
+## Configured operational event retention
+
+The native document's optional `retention` object configures `max_age_seconds`,
+`max_records` and `max_bytes` (original encoded event body bytes). At least one
+limit is required. `interval_seconds` defaults to 86400; `vacuum` optionally
+reclaims free pages; `syslog` is a list of UDP destinations using the same
+address/facility/tag/min_level configuration as log forwarding.
+
+The existing storage monitor examines at most 64 records on a retention turn.
+Age is measured from the original `observed_at`. Count and byte budgets remove
+oldest eligible records first. The latest event is retained as the source for
+a newly registered stateful consumer; each existing stateful consumer also keeps
+its current source event for time-triggered work. These are reclamation targets, not hard physical
+file limits: unread consumer inputs and events referenced by outstanding work
+are retained even if they exceed a target. Producer/consumer state, pending work,
+completed-work identities and SQLite's monotonic cursor allocation remain.
+Event-ID deduplication lasts while that event's history remains; retention does
+not create an indefinite second identity ledger.
+
+Before deleting a candidate, its original event JSON is sent as an INFO archive
+notification to the configured syslog destinations. The original severity stays
+inside that JSON. A warning/error destination filters this INFO notification,
+matching routerd's prior LogRetention behavior. UDP submission is not a receiver
+acknowledgement. Detected send failures preserve the candidate, remain visible in
+`retention_error` and overall storage health, and do not hold control authority or
+a SQLite transaction while waiting for the network. Current ingestion and rule
+consumption continue. Recovery retries that retained candidate; partial delivery
+to multiple destinations can produce duplicate archive notifications.
+
+New stores enable incremental vacuum before their schema/WAL is created.
+Each vacuum turn returns at most 64 free pages; SQLite can also reuse freed pages.
+Existing disposable prototype stores without incremental vacuum can still prune
+with `vacuum: false`; requesting vacuum reports an explicit error. Recreate such
+disposable state to use incremental vacuum. No in-service full database rewrite
+or migration layer is added.
+
+The legacy importer accepts events-only LogRetention with daily scheduling and
+UDP LogSink references. It rejects the deployed multi-dataset request atomically
+with `unsupported_semantics` until accessLogs, pluginRuns, dnsQueries,
+trafficFlows, firewallEvents and dhcpFingerprints have native history owners.
+Those datasets are not silently dropped. Diagnostic NDJSON logs remain under
+their existing finite rotation; this policy does not pretend they are those
+operational datasets.
+
+Run `make check-retention` for an isolated product acceptance. Actual
+configuration commits and an EventRule exercise original records and consumers;
+an independent receiver checks original content before deletion. The script
+covers count/bytes/age, archive errors with concurrent records/rule consumption
+and routed UDP, recovery, persisted configuration after control restart and
+severity filtering. Its log-only unreachable route makes UDP submission fail;
+merely stopping a UDP receiver cannot establish reliable delivery or failure.
+It does not qualify physical appliances or the unimplemented datasets.
