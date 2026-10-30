@@ -26,6 +26,7 @@ import (
 	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/control"
 	"github.com/imksoo/routerd2/internal/localapi"
+	"github.com/imksoo/routerd2/internal/logging"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/webconsoleconfig"
@@ -53,6 +54,7 @@ type page struct {
 	VPN            *vpnPage
 	DNSQueries     *dnsQueryPage
 	FirewallEvents *firewallEventPage
+	Logs           *logPage
 }
 
 type clientPage struct {
@@ -67,7 +69,7 @@ func Run(ctx context.Context, cfg webconsoleconfig.Config, runtimeDir string, re
 	if err := webconsoleconfig.Validate(cfg); err != nil {
 		return err
 	}
-	view, err := template.New("console").Funcs(template.FuncMap{"leaseLive": func(t time.Time) bool { return t.IsZero() || t.After(time.Now()) }, "truth": func(t resourceprogram.Truth) string {
+	view, err := template.New("console").Funcs(template.FuncMap{"logGapReason": logGapReason, "leaseLive": func(t time.Time) bool { return t.IsZero() || t.After(time.Now()) }, "truth": func(t resourceprogram.Truth) string {
 		switch t {
 		case resourceprogram.True:
 			return "有効"
@@ -76,13 +78,16 @@ func Run(ctx context.Context, cfg webconsoleconfig.Config, runtimeDir string, re
 		default:
 			return "不明"
 		}
-	}}).Parse(pageHTML + flowsHTML + vpnHTML + dnsQueriesHTML + firewallEventsHTML)
+	}}).Parse(pageHTML + flowsHTML + vpnHTML + dnsQueriesHTML + firewallEventsHTML + logsHTML)
 	if err != nil {
 		return err
 	}
 	client := localapi.NewClient(filepath.Join(runtimeDir, control.SocketName))
 	client.HTTP.Timeout = 5 * time.Second
 	defer client.HTTP.CloseIdleConnections()
+	logClient := localapi.NewClient(filepath.Join(runtimeDir, logging.SocketName))
+	logClient.HTTP.Timeout = 5 * time.Second
+	defer logClient.HTTP.CloseIdleConnections()
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -169,6 +174,9 @@ func Run(ctx context.Context, cfg webconsoleconfig.Config, runtimeDir string, re
 		case "vpn":
 			p.Heading = "VPN状態"
 			p.VPN, err = loadVPN(r.Context(), client, r.URL.Query().Get("service"))
+		case "logs":
+			p.Heading = "運用ログ"
+			p.Logs, err = loadLogs(r.Context(), logClient, r.URL.Query(), cfg.BasePath)
 		case "configuration":
 			p.Heading = "設定の確定状態"
 			p.Metadata = new(control.ConfigurationMetadata)
