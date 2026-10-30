@@ -37,7 +37,7 @@ removed by the DHCP owner, and this page does not store or invent a history.
 The old console's title, base path, links, escaped HTML and read-only method
 handling are retained. Its resource-store adapter and React status model are
 replaced by the current typed control APIs. This is an initial management path:
-correlated client inventory, protocol detail, VPN/SAM pages,
+correlated client inventory, further protocol detail, WireGuard/SAM pages,
 and the old complete UI surface are still outstanding. Configuration documents,
 mutations, and private worker APIs are not exposed by this listener.
 
@@ -125,3 +125,47 @@ escaped HTTP rendering for current, expired, authentication-required and missing
 observations. These focused checks use recorded observation inputs and do not
 establish real Tailscale forwarding; the existing `check-tailscale` and
 `check-tailscale-homert` communication checks own that acceptance.
+
+### Tailscale console communication acceptance
+
+On 2026-10-30, the integrated product at `b32a43c` with release identity
+`wsl-console-b32a43c` passed the existing Tailscale communication checks on a
+separate Windows machine running Ubuntu under WSL. The normal run completed at
+21:11:18–21:13:30 JST (132.4 seconds); the homert advertisement run completed at
+21:13:57–21:14:43 JST (45.9 seconds). Both exited successfully. The acceptance
+script change was integrated as `305fbc2`; removing an unused helper return in
+`735682a` did not change the product or acceptance conditions.
+
+The standard signed product bundle ran as PID 1 in its own mount, network and
+process namespaces. The independently checked peers were Tailscale 1.104.2 and
+Headscale 0.29.6. An independent LAN client read the actual product console and
+matched its observed membership, both address families, peer and configured
+advertisements. The console did not expose enrollment keys, their file paths,
+control URLs or registration URLs. Whole-product restart retained both the
+actual communication and displayed membership. Revocation displayed the need
+for reauthentication; reauthentication restored traffic and the observed view.
+
+The homert case advertised all three configured RFC1918 prefixes. The peer's
+kernel routes and both-direction LAN TCP/UDP worked without subnet NAT or
+manual return routes. Both IP families also passed exit traffic through the
+declared WAN NAT. Removing the Tailscale configuration withdrew routes and
+connectivity and displayed no configured Tailscale service. Reapplying it
+restored routes, communication and the console view. Packet captures backed the
+existing communication checks. Physical homert02/03 acceptance, physical WAN
+switching and long-duration operation remain separate work.
+
+Use the existing `make check-tailscale` and `make check-tailscale-homert` targets.
+With the same standard build, engine and peer prerequisites already present,
+run `python3 scripts/tailscale-peer.py` and the same command with `--homert`.
+The scripts create and remove their own isolated network, process and mount
+namespaces. The recorded outputs were `dist/vpn-accept.log` and
+`dist/vpn-homert-accept.log`; one actual HTTP response was retained temporarily
+as `dist/vpn-live.html` for layout review.
+
+SHA-256 of the product used by both checks:
+
+| Artifact | SHA-256 |
+| --- | --- |
+| `routerd` | `dd5a345ced5192c09b0bfcb73e9ab5e4cb33070b340d995f916e77fa852ab678` |
+| `routerd-modules` | `61230e7c61ac672f6621d3ca9ff934d0d5162ba2547a8002229624b6862e3eeb` |
+| `routerd-logging` | `4be6777af1a9daf85b4a2c4017120949428ebbcdb8ad6fadc8e889591fc6c798` |
