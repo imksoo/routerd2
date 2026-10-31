@@ -17,6 +17,7 @@ import (
 	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/protocol/tailscaleconfig"
 	"github.com/imksoo/routerd2/internal/statefs"
+	"github.com/imksoo/routerd2/internal/telemetry"
 	"golang.org/x/sys/unix"
 )
 
@@ -101,6 +102,7 @@ func Run(ctx context.Context, cfg tailscaleconfig.Config, image *os.File, input 
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	var current tailscaleconfig.Input
+	var nextPeerMeasurement uint64
 	for {
 		if ctx.Err() != nil {
 			return nil
@@ -178,6 +180,18 @@ func Run(ctx context.Context, cfg tailscaleconfig.Config, image *os.File, input 
 				snapshot.BootID = clock.BootID
 				snapshot.ObservedNanos = uint64(clock.BoottimeNanoseconds)
 				snapshot.ExpiresNanos = snapshot.ObservedNanos + uint64(min(3*time.Second, current.Authority.Remaining(clock)))
+				// Periodic successful samples also restore an unchanged gauge after
+				// the exporter restarts. Reuse this observation; export owns no polling.
+				if snapshot.ObservedNanos >= nextPeerMeasurement {
+					count := 0
+					for _, peer := range snapshot.Peers {
+						if peer.Online {
+							count++
+						}
+					}
+					telemetry.TailscalePeers{Resource: cfg.Resource, OnlinePeers: count}.Record(ctx)
+					nextPeerMeasurement = snapshot.ObservedNanos + uint64(10*time.Second)
+				}
 				call, cancel := context.WithTimeout(ctx, min(2*time.Second, current.Authority.Remaining(clock)))
 				err = observe(call, snapshot)
 				cancel()
