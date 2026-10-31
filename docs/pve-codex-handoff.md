@@ -35,7 +35,7 @@ main統合版126のハッシュ一致3実行物でも、通常125の起動イメ
 
 両homertのTailscale1.104.2と保存先`/var/lib/tailscale/tailscaled.state`（root:root、0600通常ファイル）は読取専用メタデータで確定した。状態本文は未取得で、実状態移行の合格には数えない。製品/VMを除く同じSSH Ethernet伝送自体の対照は102.259/131.067 Mbpsであり、旧候補の130〜149 Mbpsは製品上限の証拠ではない。
 
-今回の生成物・ログ等823.2MiBと専用Docker imageを削除した。実行中の自然更新コホート・他作業treeと既存`AGENTS.md`変更は保持した。
+今回の生成物・ログ等823.2MiBと専用Docker imageに続き、終了した二台試験のstage約612MiB（capture・一時鍵・state・disk）を削除した。main統合・未変更・稼働参照なしを確認した完了済みworktree二つも `git worktree remove` で撤去し、約1,012MiBの重複出力を解放した。稼働参照がある別tree、自然更新コホート、次の受入に使う126版image/runnerと既存`AGENTS.md`変更は保持した。空きは約38GiB。
 
 ## 直近の実行
 

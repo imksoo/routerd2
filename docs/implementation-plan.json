@@ -11399,7 +11399,8 @@
             "routerd-logging": "845a00d766205fa31c747f56e2601fbbe076dc6f019f3bcd1982105a23584cb7"
           },
           "limits": "This run uses newly built APK image binaries, distinct from the earlier Make build overlay hashes. Not zero loss, natural original renewal, actual production-state migration, target WAN/LAN/load or Cloud SAM qualification. IX physical SNAT existing flow is outside the declared old sync intent; another exit identity is not automatically selected."
-        }
+        },
+        "cleanup_after_two_node126": "Removed the finished612MiB private two-node stage (logs, captures, disposable keys/state and sparse disks). Removed two clean linked worktrees with git worktree remove after confirming both heads are integrated into main and no process referenced their files. Their ignored output totaled about1012MiB. Preserved a third tree referenced by live processes, natural cohorts,126 image/runner needed for next acceptance and original AGENTS.md changes. Filesystem available about38GiB."
       },
       "target_state_metadata": {
         "tailscale_version": "1.104.2",
