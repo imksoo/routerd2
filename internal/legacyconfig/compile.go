@@ -67,7 +67,8 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 		interfaces: map[string]*network.Interface{}, names: map[string]string{},
 		pd: map[string]int{}, raClients: map[string]int{}, information: map[string]int{},
 		dynamicTunnels: map[string]int{}, dynamicRoutes: map[string]bool{},
-		mappings: map[string]*Mapping{},
+		healthReady: map[string]bool{},
+		mappings:    map[string]*Mapping{},
 	}
 	for i := range resources {
 		c.legacy.Spec.Resources = append(c.legacy.Spec.Resources, resources[i].Resource)
@@ -280,6 +281,12 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 	program.Retention = c.retention
 	program.Resources = append(program.Resources, extra...)
 	for i := range program.Resources {
+		resource := &program.Resources[i]
+		if resource.Service != nil && resource.Service.Health != nil && c.healthReady[resource.Service.Name] {
+			resource.ReadyWhen = &resourceprogram.FactCondition{Fact: "service." + resource.Service.Name + ".active"}
+		}
+	}
+	for i := range program.Resources {
 		if deps := bgpDependencies[program.Resources[i].ID]; len(deps) > 0 {
 			program.Resources[i].DependsOn = append(program.Resources[i].DependsOn, deps...)
 		}
@@ -386,6 +393,7 @@ type compiler struct {
 	information    map[string]int
 	dynamicTunnels map[string]int
 	dynamicRoutes  map[string]bool
+	healthReady    map[string]bool
 	options        Options
 	policyPaths    map[string]string
 	policyUsed     map[string]bool

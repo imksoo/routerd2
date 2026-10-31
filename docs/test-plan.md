@@ -24,7 +24,7 @@
 この節と対象機能の試験項目を、**各試験を開始する前に必ず読み直す**。長時間試験の開始時だけでなく、
 失敗後に条件を変えて再実行する場合も同じとする。ユーザーの明示指示と `AGENTS.md` を優先する。
 既存のゴールは全34項目を含む最初の製品完成であり、単体・HAの一部成功で完了にしない。
-ゴール開始は2026-10-24 11:28:25 UTC。2026-10-30 09:33 JST時点で約5日13時間5分が経過した。
+ゴール開始は2026-10-24 11:28:25 UTC。2026-10-31 11:56 JST時点で約6日15時間28分が経過した。
 進捗判断では経過日数と、未完了の機能・実環境を意識する。
 
 1. **対象と結果を決める。** 実際のhomert設定・旧 routerd・現行の本番経路を読み、端末、peer、必要な動作、
@@ -85,6 +85,8 @@
 端末の必要動作、実障害からの復旧、未検証の範囲で判断する。ゴールは全範囲の受入まで継続する。
 
 ## 現在の状況
+
+- `health-ready-native105`: `make check-health-pbr` は独立二 WAN namespace peer と実 supervisor/control/network/Health worker で、Health→PBR の障害切替・復旧、worker/supervisor 再起動、古い通知・期限切れ、confirmed rollback、TCP/UDP と packet capture を確認した。対象回線・対象機器は未受入。
 
 - `dhcp-ingress-native105`: 隔離 PVE（4 CPU/4 GiB）の実 appliance で、ハッシュ・release ID を照合した三実行物と20 Ready moduleを使い、cold boot/reboot 後の DNS UDP/TCP（IPv4/IPv6）、TCP/UDP、BGP、NTP、Tailscale、および通常・特殊端末それぞれの120秒 DHCPv4自然T1 unicast/同一XID ACK/option 54=`172.18.0.1` を確認した。PVE kernel 試験であり、12時間の元lease、ONU/HGW・対象機器、全34 package は引き続き未受入。
 

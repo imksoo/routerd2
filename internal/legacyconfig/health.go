@@ -76,6 +76,10 @@ func (c *compiler) healthCheck(r resource) string {
 		IntervalMillis: interval, TimeoutMillis: timeout,
 		HealthyThreshold: s.HealthyThreshold, UnhealthyThreshold: s.UnhealthyThreshold,
 	}})
+	if policy.RequireActiveForReady {
+		c.healthReady[service] = true
+		c.note(r, "The explicit require_active_for_ready policy makes this probe's finite active observation a configuration readiness requirement. It does not prevent the probe itself from starting.")
+	}
 	c.note(r, "The native worker uses routerd's probe and threshold engine. Empty intervals/timeouts retain routerd's 30s/3s defaults; thresholds retain 1/3. Probe interface and mark are derived by routerd ResolveSpecForResource from declared routing references, or selected by explicit migration policy. Legacy role is classification, not activation policy. VRRP master/backup conditions use finite election facts; unsupported conditions and live target discovery are not silently dropped.")
 	return service
 }

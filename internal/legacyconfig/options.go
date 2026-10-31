@@ -73,9 +73,10 @@ type VRRPPolicy struct {
 // HealthCheckPolicy makes probe routing scope explicit. An old unscoped check
 // could follow the application's selected route and hide a failed WAN.
 type HealthCheckPolicy struct {
-	Interface     string `json:"interface"`
-	SourceAddress string `json:"source_address,omitempty"`
-	Mark          uint32 `json:"mark,omitempty"`
+	Interface             string `json:"interface"`
+	SourceAddress         string `json:"source_address,omitempty"`
+	Mark                  uint32 `json:"mark,omitempty"`
+	RequireActiveForReady bool   `json:"require_active_for_ready,omitempty"`
 }
 
 // DHCP6ServerPolicy replaces dnsmasq's implicit interface-prefix constructor

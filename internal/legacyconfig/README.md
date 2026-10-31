@@ -228,9 +228,14 @@ health_checks:
     interface: Interface/wan
     source_address: 192.0.2.2
     mark: 42
+    require_active_for_ready: true
 ```
 
 The example source and mark must match the intended address and probe route.
+`require_active_for_ready` is opt-in: the probe still starts normally, while a
+current successful probe becomes a native configuration-readiness requirement.
+Use it for the particular path an operator requires before confirming a boot or
+signed runtime update; it is not inferred from a legacy role.
 Activation can follow the VRRP role guards above. Hostname/automatic targets,
 other conditions and live gateway/DS-Lite target discovery remain unsupported; they reject the whole migration rather
 than losing their meaning. Disabled checks create no healthy observation.

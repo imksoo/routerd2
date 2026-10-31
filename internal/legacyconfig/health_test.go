@@ -60,3 +60,35 @@ func TestHealthImportRetainsProbeScopeAndOriginalTimingDefaults(t *testing.T) {
 		t.Fatal("unscoped probe migration must reject the complete batch", err)
 	}
 }
+
+func TestHealthPolicyCanRequireActiveForConfigurationReadiness(t *testing.T) {
+	input, err := os.ReadFile("../integration/testdata/health-import.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile("../integration/testdata/health-import-policy.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	options, err := DecodeOptions(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := options.HealthChecks["HealthCheck/health-a"]
+	policy.RequireActiveForReady = true
+	options.HealthChecks["HealthCheck/health-a"] = policy
+	result, err := CompileWithOptions(input, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, resource := range result.Document.Resources {
+		if resource.Service == nil || resource.Service.Health == nil || resource.Service.Health.Target != "198.51.100.10" {
+			continue
+		}
+		if resource.ReadyWhen == nil || resource.ReadyWhen.Fact != "service."+resource.Service.Name+".active" {
+			t.Fatalf("health readiness was not compiled from explicit policy: %#v", resource.ReadyWhen)
+		}
+		return
+	}
+	t.Fatal("configured health probe is missing")
+}
