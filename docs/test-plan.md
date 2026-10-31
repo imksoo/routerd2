@@ -332,6 +332,7 @@ homert全engineのイメージ、対象実機の受入は別に残る。
 - federationのproducer/consumer、順序逆転、重複、停止、revokeと復旧を実node間で確認する。
 - SAMのenrollment・claim・revoke・identity・placement、RR/leaf構成、WG/BGP、/32所有、NATなし双方向通信、
   移動・分断・古い通知・計画drainを実peerで確認する。各providerのlive受入を別々に記録する。
+- 2026-10-31 `sam-transport-release`: 実routerd2 supervisor/control/network/SAM worker、独立routerd RR、FRR、root Linux netnsの二端末で、動的RR admissionからIPIPとBGPを生成し、NATなしTCP/UDP双方向転送とpacket captureを確認。明示revokeおよび元admission期限切れの各試験でIPIP/FIB routeが撤去され、通信が停止した。実行版の三バイナリーは同一release ID。WireGuard暗号化FOU、/32 mobilityとprovider API、leaf/drain/分断復旧、PVE/実機・クラウドlive受入は未確認で、CLOUD-04全体の合格ではない。
 - KubernetesはPod netnsとhostNetworkを別々に、実traffic、reschedule、node障害、旧owner撤去、管理、update/rollbackとCNI資源保護を確認する。
 
 ## 8. 全34 work packageとの対応

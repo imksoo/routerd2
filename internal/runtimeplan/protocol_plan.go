@@ -9,23 +9,25 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/ntpconfig"
 	"github.com/imksoo/routerd2/internal/protocol/ra"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
+	"github.com/imksoo/routerd2/internal/resourceprogram"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
 
 // A protocol plan belongs to one immutable source configuration. Observations
 // select its workers and supply live data; they do not rebuild worker identity.
 type protocolPlan struct {
-	ntp          map[string]ntpconfig.Node
-	dhcp6Servers map[string]dhcp6ServerPlan
-	instances    map[string]binding
-	leaseHA      map[string]leaseHAPlan
-	dhcp6RA      map[string]string
-	dns          map[string]dnsPlan
-	bgp          map[string]bgpconfig.Config
-	vrrp         map[string]vrrp.Config
-	lanRA        map[string]advertisementPlan
-	aftr         map[string]aftrDefinition
-	serviceLinks map[string]bool
+	ntp           map[string]ntpconfig.Node
+	dhcp6Servers  map[string]dhcp6ServerPlan
+	instances     map[string]binding
+	leaseHA       map[string]leaseHAPlan
+	dhcp6RA       map[string]string
+	dns           map[string]dnsPlan
+	bgp           map[string]bgpconfig.Config
+	vrrp          map[string]vrrp.Config
+	lanRA         map[string]advertisementPlan
+	samTransports []resourceprogram.SAMTransport
+	aftr          map[string]aftrDefinition
+	serviceLinks  map[string]bool
 }
 
 type advertisementPlan struct {
@@ -44,17 +46,18 @@ type leaseHAPlan struct {
 // ownership and service limits.
 func prepareProtocols(doc config.Native, runtimeDir, stateDir string) (protocolPlan, error) {
 	plan := protocolPlan{
-		ntp:          make(map[string]ntpconfig.Node),
-		dhcp6Servers: make(map[string]dhcp6ServerPlan),
-		instances:    make(map[string]binding),
-		leaseHA:      make(map[string]leaseHAPlan),
-		dhcp6RA:      make(map[string]string),
-		dns:          make(map[string]dnsPlan),
-		bgp:          make(map[string]bgpconfig.Config),
-		vrrp:         make(map[string]vrrp.Config),
-		lanRA:        make(map[string]advertisementPlan),
-		aftr:         make(map[string]aftrDefinition),
-		serviceLinks: make(map[string]bool),
+		ntp:           make(map[string]ntpconfig.Node),
+		dhcp6Servers:  make(map[string]dhcp6ServerPlan),
+		instances:     make(map[string]binding),
+		leaseHA:       make(map[string]leaseHAPlan),
+		dhcp6RA:       make(map[string]string),
+		dns:           make(map[string]dnsPlan),
+		bgp:           make(map[string]bgpconfig.Config),
+		vrrp:          make(map[string]vrrp.Config),
+		lanRA:         make(map[string]advertisementPlan),
+		samTransports: append([]resourceprogram.SAMTransport(nil), doc.SAMTransports...),
+		aftr:          make(map[string]aftrDefinition),
+		serviceLinks:  make(map[string]bool),
 	}
 	add := func(instance serviceconfig.Instance) error {
 		bound, err := encodeInstance(instance)

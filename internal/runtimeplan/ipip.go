@@ -18,6 +18,10 @@ func projectIPIPs(plans []resourceprogram.IPIPPlan, addresses map[string]leasedI
 			continue
 		}
 		until := lifetime.Minimum(clock, source.validUntil, state.ActiveUntil)
+		outer, ok := outerIPv4Route(p.network, plan.Link.Remote, plan.Link.Parent, &source, clock, until)
+		if !ok {
+			continue
+		}
 		link := plan.Link
 		link.Local, link.Authority = source.address.String(), until
 		p.network.Links = append(p.network.Links, link)
@@ -37,6 +41,9 @@ func projectIPIPs(plans []resourceprogram.IPIPPlan, addresses map[string]leasedI
 				iface.AddressOptions[address] = options
 				break
 			}
+		}
+		if outer.Destination != "" {
+			p.network.Routes = append(p.network.Routes, outer)
 		}
 	}
 }

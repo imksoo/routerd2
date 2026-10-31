@@ -948,6 +948,14 @@ func htons(n uint16) uint16 { return n<<8 | n>>8 }
 // Count plain IPv4/IPv6 transport packets; extension-header layouts are not
 // decoded by this small capture check.
 func (c *healthPBRCaptureState) count(source, destination string, protocol byte, port uint16) int {
+	return c.countPort(source, destination, protocol, port, false)
+}
+
+func (c *healthPBRCaptureState) countSourcePort(source, destination string, protocol byte, port uint16) int {
+	return c.countPort(source, destination, protocol, port, true)
+}
+
+func (c *healthPBRCaptureState) countPort(source, destination string, protocol byte, port uint16, sourcePort bool) int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	wantSource, wantDestination := net.ParseIP(source), net.ParseIP(destination)
@@ -977,7 +985,11 @@ func (c *healthPBRCaptureState) count(source, destination string, protocol byte,
 		default:
 			continue
 		}
-		if from.Equal(wantSource) && to.Equal(wantDestination) && binary.BigEndian.Uint16(b[transport+2:transport+4]) == port {
+		portOffset := transport + 2
+		if sourcePort {
+			portOffset = transport
+		}
+		if from.Equal(wantSource) && to.Equal(wantDestination) && binary.BigEndian.Uint16(b[portOffset:portOffset+2]) == port {
 			count++
 		}
 	}

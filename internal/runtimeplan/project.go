@@ -49,6 +49,7 @@ type projection struct {
 
 type leasedIPv4 struct {
 	address    netip.Addr
+	gateway    netip.Addr
 	validUntil lifetime.Deadline
 }
 
@@ -216,17 +217,21 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 			if err != nil || !a.Is4() || a.IsUnspecified() || a.IsMulticast() || snap.PrefixLength < 0 || snap.PrefixLength > 32 {
 				return p, errors.New("invalid active DHCPv4 address")
 			}
-			dhcp4Addresses[s.ModuleName()] = leasedIPv4{address: a, validUntil: lifetime.Deadline{BootID: snap.BootID, Nanos: snap.LeaseClock.ExpiresNanos}}
+			lease := leasedIPv4{address: a, validUntil: lifetime.Deadline{BootID: snap.BootID, Nanos: snap.LeaseClock.ExpiresNanos}}
+			if snap.DefaultGateway != "" {
+				gateway, err := netip.ParseAddr(snap.DefaultGateway)
+				if err != nil || !gateway.Is4() || gateway.IsUnspecified() || gateway.IsMulticast() {
+					return p, errors.New("invalid DHCPv4 gateway")
+				}
+				lease.gateway = gateway
+			}
+			dhcp4Addresses[s.ModuleName()] = lease
 			prefix := netip.PrefixFrom(a, snap.PrefixLength)
 			if err := addAddressWithOptions(&p.network, s.Interface(), prefix.String(), network.AddressOptions{BootLifetime: network.BootLifetime{BootID: snap.BootID, PreferredNanos: snap.LeaseClock.ExpiresNanos, ValidNanos: snap.LeaseClock.ExpiresNanos}}); err != nil {
 				return p, err
 			}
 			if (s.DHCP4.DefaultRoute == nil || *s.DHCP4.DefaultRoute) && snap.DefaultGateway != "" {
-				gw, err := netip.ParseAddr(snap.DefaultGateway)
-				if err != nil || !gw.Is4() || gw.IsUnspecified() || gw.IsMulticast() {
-					return p, errors.New("invalid DHCPv4 gateway")
-				}
-				p.network.Routes = append(p.network.Routes, network.Route{Destination: "0.0.0.0/0", Gateway: gw.String(), Interface: s.Interface(), Metric: s.DHCP4.Metric, Table: s.DHCP4.Table})
+				p.network.Routes = append(p.network.Routes, network.Route{Destination: "0.0.0.0/0", Gateway: lease.gateway.String(), Interface: s.Interface(), Metric: s.DHCP4.Metric, Table: s.DHCP4.Table})
 			}
 		case "dhcp6":
 			if !has {
@@ -394,7 +399,11 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 		}
 	}
 	projectIPIPs(facts.ipips, dhcp4Addresses, facts.bfdClock, &p)
-	if err := projectBGP(&p, doc, protocols.bgp, records, now, facts.bfdClock); err != nil {
+	bgpConfigs := cloneBGPConfigs(protocols.bgp)
+	if err := projectSAMTransports(&p, protocols.samTransports, records, dhcp4Addresses, facts.bfdClock, bgpConfigs); err != nil {
+		return p, err
+	}
+	if err := projectBGP(&p, doc, bgpConfigs, records, now, facts.bfdClock); err != nil {
 		return p, err
 	}
 	if facts.aftr != nil {

@@ -295,6 +295,9 @@ func (r *Runtime) reconcileStep(ctx context.Context, ceiling map[string]supervis
 		if err != nil {
 			return false, err
 		}
+		if err := r.writeBindings(set.bindings); err != nil {
+			return false, err
+		}
 	}
 	keep := make([]supervisor.DynamicModule, 0, len(status.Modules))
 	retire, blocked, matching := false, false, true

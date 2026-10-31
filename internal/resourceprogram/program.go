@@ -46,6 +46,7 @@ type Resource struct {
 	Interface    *network.Interface     `json:"interface,omitempty"`
 	Address      *Address               `json:"address,omitempty"`
 	IPIP         *IPIP                  `json:"ipip,omitempty"`
+	SAMTransport *SAMTransport          `json:"sam_transport,omitempty"`
 	Link         *network.Link          `json:"link,omitempty"`
 	Route        *network.Route         `json:"route,omitempty"`
 	HostRoute    *HostRoute             `json:"host_route,omitempty"`
@@ -76,6 +77,7 @@ type Address struct {
 type Native struct {
 	Network       network.Desired         `json:"network"`
 	Services      []serviceconfig.Service `json:"services,omitempty"`
+	SAMTransports []SAMTransport          `json:"sam_transports,omitempty"`
 	EventRules    []EventRule             `json:"event_rules,omitempty"`
 	DerivedEvents []DerivedEvent          `json:"derived_events,omitempty"`
 }
@@ -137,7 +139,7 @@ func (r Resource) kind() (string, int) {
 		name string
 		set  bool
 	}{
-		{"ipip", r.IPIP != nil}, {"interface", r.Interface != nil}, {"address", r.Address != nil},
+		{"ipip", r.IPIP != nil}, {"sam_transport", r.SAMTransport != nil}, {"interface", r.Interface != nil}, {"address", r.Address != nil},
 		{"host_route", r.HostRoute != nil}, {"egress_policy", r.EgressPolicy != nil}, {"link", r.Link != nil}, {"route", r.Route != nil}, {"egress_route", r.EgressRoute != nil},
 		{"policy_rule", r.PolicyRule != nil}, {"forwarding", r.Forwarding != nil},
 		{"firewall", r.Firewall != nil}, {"nat", r.NAT != nil},

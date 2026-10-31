@@ -49,7 +49,7 @@ func (c *compiler) samClients() {
 		name := c.serviceName(r, "sam")
 		c.addService(r, serviceconfig.Service{Name: name, SAMClient: &n})
 		c.target(*claim, "services/"+name+"/sam_client/claim")
-		c.note(r, "Leaf enrollment submits the configured signed identity, fetches typed RR/direct topology with its original admission deadline, and supports explicit withdrawal. Token files are provisioned separately and not read by import. This does not yet apply learned topology to native IPIP/BGP or implement the RR enrollment server.")
+		c.note(r, "Leaf enrollment submits the configured signed identity, fetches typed RR/direct topology with its original admission deadline, and supports explicit withdrawal. A matching RR IPIP profile is lowered by the native runtime; token files are provisioned separately and not read by import.")
 	}
 	for _, r := range c.resourcesOfKind("SAMEnrollmentClaim") {
 		if !used[r.ID()] {

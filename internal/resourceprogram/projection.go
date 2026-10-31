@@ -236,6 +236,8 @@ func renderNative(nodes []compiledResource) Native {
 			}
 		case r.Link != nil:
 			out.Network.Links = append(out.Network.Links, *r.Link)
+		case r.SAMTransport != nil:
+			out.SAMTransports = append(out.SAMTransports, *r.SAMTransport)
 		case r.Route != nil:
 			out.Network.Routes = append(out.Network.Routes, *r.Route)
 		case r.EgressRoute != nil:
