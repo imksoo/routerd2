@@ -39,6 +39,7 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/pppoeconfig"
 	"github.com/imksoo/routerd2/internal/protocol/ra"
 	"github.com/imksoo/routerd2/internal/protocol/raclient"
+	"github.com/imksoo/routerd2/internal/protocol/samclientconfig"
 	"github.com/imksoo/routerd2/internal/protocol/tailscaleconfig"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
@@ -867,6 +868,19 @@ func validateSnapshot(instance serviceconfig.Instance, b json.RawMessage) error 
 			return errors.New("Tailscale observation requires a finite boot interval")
 		}
 		return nil
+	case "sam_client":
+		var cfg samclientconfig.Config
+		var snapshot samclientconfig.Snapshot
+		if err := strict(instance.Config, &cfg); err != nil {
+			return err
+		}
+		if err := strict(b, &snapshot); err != nil {
+			return err
+		}
+		if snapshot.ClaimRef != "SAMEnrollmentClaim/"+cfg.ClaimName {
+			return errors.New("SAM enrollment snapshot identity mismatch")
+		}
+		return samclientconfig.ValidateSnapshot(snapshot)
 	case "pppoe":
 		var cfg pppoeconfig.Config
 		var snapshot pppoeconfig.Snapshot

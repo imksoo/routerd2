@@ -26,6 +26,7 @@ type enrollmentPeer struct {
 	claim                                     api.SAMEnrollmentClaimSpec
 	admitted, revoked, unavailable, badDirect bool
 	submits, revokes                          int
+	ttl                                       time.Duration
 }
 
 func (p *enrollmentPeer) handler() http.Handler {
@@ -47,7 +48,11 @@ func (p *enrollmentPeer) handler() http.Handler {
 			p.admitted = true
 			p.submits++
 			now := time.Now().UTC()
-			result := controlapi.NewSAMEnrollmentClaimSubmitResult("SAMEnrollmentClaim/leaf", "SAMEnrollmentClaim/leaf", 1, now, now.Add(3*time.Second))
+			ttl := p.ttl
+			if ttl == 0 {
+				ttl = 3 * time.Second
+			}
+			result := controlapi.NewSAMEnrollmentClaimSubmitResult("SAMEnrollmentClaim/leaf", "SAMEnrollmentClaim/leaf", 1, now, now.Add(ttl))
 			return &result, nil
 		},
 		GetSAMEnrollmentTopology: func(r *http.Request, request controlapi.SAMEnrollmentTopologyGetRequest) (*controlapi.SAMEnrollmentTopologyGetResult, error) {
@@ -93,6 +98,191 @@ func (p *enrollmentPeer) handler() http.Handler {
 			return
 		}
 		h.ServeHTTP(w, r)
+	})
+}
+
+func TestEnrollmentDoesNotSubmitWhenAnotherRRRevoked(t *testing.T) {
+	var peers [2]enrollmentPeer
+	peers[1].revoked = true
+	a := httptest.NewServer(peers[0].handler())
+	defer a.Close()
+	b := httptest.NewServer(peers[1].handler())
+	defer b.Close()
+	dir := t.TempDir()
+	token := filepath.Join(dir, "token")
+	if err := os.WriteFile(token, []byte("test-control-token\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	claim := api.SAMEnrollmentClaimSpec{PolicyRef: "SAMEnrollmentPolicy/leaves", RRSetRef: "SAMRRSet/rrs", LeafID: "leaf-a", TunnelAddress: "10.255.0.2", Endpoint: "192.0.2.2", DirectMesh: true, JoinNonce: "test-nonce", JoinTimestamp: time.Now().UTC().Format(time.RFC3339)}
+	claim.JoinHMAC = samenrollment.JoinHMAC([]byte("test-join-token"), claim)
+	cfg := samclientconfig.Config{Node: samclientconfig.Node{ClaimName: "leaf", Claim: claim, Endpoints: []string{a.URL, b.URL}, TokenFile: token, RefreshBeforeSeconds: 10, RetryMinSeconds: 1, RetryMaxSeconds: 1}, SocketPath: filepath.Join(dir, "sam.sock"), StatePath: filepath.Join(dir, "sam.json")}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	ready := make(chan struct{})
+	go func() { done <- Run(ctx, cfg, nil, func() { close(ready) }) }()
+	select {
+	case <-ready:
+	case err := <-done:
+		t.Fatal(err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("service not ready")
+	}
+	defer func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Error(err)
+		}
+	}()
+	local := localapi.NewClient(cfg.SocketPath)
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		var snapshot samclientconfig.Snapshot
+		if err := local.Do(context.Background(), "GET", "/v1/status", nil, &snapshot); err != nil {
+			t.Fatal(err)
+		}
+		if snapshot.Phase == "unavailable" && snapshot.LastError != "" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("worker did not report the revoked RR")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	peers[0].mu.Lock()
+	submits := peers[0].submits
+	peers[0].mu.Unlock()
+	if submits != 0 {
+		t.Fatalf("submitted a claim to the empty RR before observing another RR's revoke: %d", submits)
+	}
+}
+
+func TestEnrollmentRecoversWhenOneRRLosesRecord(t *testing.T) {
+	var peers [2]enrollmentPeer
+	a := httptest.NewServer(peers[0].handler())
+	defer a.Close()
+	b := httptest.NewServer(peers[1].handler())
+	defer b.Close()
+	dir := t.TempDir()
+	token := filepath.Join(dir, "token")
+	if err := os.WriteFile(token, []byte("test-control-token\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	claim := api.SAMEnrollmentClaimSpec{PolicyRef: "SAMEnrollmentPolicy/leaves", RRSetRef: "SAMRRSet/rrs", LeafID: "leaf-a", TunnelAddress: "10.255.0.2", Endpoint: "192.0.2.2", DirectMesh: true, JoinNonce: "test-nonce", JoinTimestamp: time.Now().UTC().Format(time.RFC3339)}
+	claim.JoinHMAC = samenrollment.JoinHMAC([]byte("test-join-token"), claim)
+	peers[0].claim = claim
+	peers[0].admitted = true
+	cfg := samclientconfig.Config{Node: samclientconfig.Node{ClaimName: "leaf", Claim: claim, Endpoints: []string{a.URL, b.URL}, TokenFile: token, RefreshBeforeSeconds: 10, RetryMinSeconds: 1, RetryMaxSeconds: 1}, SocketPath: filepath.Join(dir, "sam.sock"), StatePath: filepath.Join(dir, "sam.json")}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	ready := make(chan struct{})
+	go func() { done <- Run(ctx, cfg, nil, func() { close(ready) }) }()
+	select {
+	case <-ready:
+	case err := <-done:
+		t.Fatal(err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("service not ready")
+	}
+	defer func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Error(err)
+		}
+	}()
+	local := localapi.NewClient(cfg.SocketPath)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var snapshot samclientconfig.Snapshot
+		if err := local.Do(context.Background(), "GET", "/v1/status", nil, &snapshot); err != nil {
+			t.Fatal(err)
+		}
+		if snapshot.RRSet != nil && snapshot.PeerGroup != nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("re-admission did not converge: %+v", snapshot)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	peers[0].mu.Lock()
+	first := peers[0].submits
+	peers[0].mu.Unlock()
+	peers[1].mu.Lock()
+	second := peers[1].submits
+	peers[1].mu.Unlock()
+	if first == 0 || second == 0 {
+		t.Fatalf("expected safe all-RR re-admission after preflight, got RR1=%d RR2=%d", first, second)
+	}
+}
+
+func TestEnrollmentRestoresRRFallbackUntilOriginalExpiry(t *testing.T) {
+	peer := enrollmentPeer{ttl: 15 * time.Second}
+	server := httptest.NewServer(peer.handler())
+	defer server.Close()
+	dir := t.TempDir()
+	token := filepath.Join(dir, "token")
+	if err := os.WriteFile(token, []byte("test-control-token\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	claim := api.SAMEnrollmentClaimSpec{PolicyRef: "SAMEnrollmentPolicy/leaves", RRSetRef: "SAMRRSet/rrs", LeafID: "leaf-a", TunnelAddress: "10.255.0.2", Endpoint: "192.0.2.2", DirectMesh: true, JoinNonce: "test-nonce", JoinTimestamp: time.Now().UTC().Format(time.RFC3339)}
+	claim.JoinHMAC = samenrollment.JoinHMAC([]byte("test-join-token"), claim)
+	cfg := samclientconfig.Config{Node: samclientconfig.Node{ClaimName: "leaf", Claim: claim, Endpoints: []string{server.URL}, TokenFile: token, RefreshBeforeSeconds: 10, RetryMinSeconds: 1, RetryMaxSeconds: 1}, SocketPath: filepath.Join(dir, "sam.sock"), StatePath: filepath.Join(dir, "sam.json")}
+	start := func() (func(), *localapi.Client) {
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		ready := make(chan struct{})
+		go func() { done <- Run(ctx, cfg, nil, func() { close(ready) }) }()
+		select {
+		case <-ready:
+		case err := <-done:
+			t.Fatal(err)
+		case <-time.After(5 * time.Second):
+			t.Fatal("service not ready")
+		}
+		return func() {
+			cancel()
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Error(err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Error("service did not stop")
+			}
+		}, localapi.NewClient(cfg.SocketPath)
+	}
+	get := func(local *localapi.Client) samclientconfig.Snapshot {
+		var snapshot samclientconfig.Snapshot
+		if err := local.Do(context.Background(), "GET", "/v1/status", nil, &snapshot); err != nil {
+			t.Fatal(err)
+		}
+		return snapshot
+	}
+	wait := func(local *localapi.Client, check func(samclientconfig.Snapshot) bool) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			if check(get(local)) {
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		t.Fatalf("condition did not become true: %+v", get(local))
+	}
+	stop, local := start()
+	wait(local, func(snapshot samclientconfig.Snapshot) bool {
+		return snapshot.RRSet != nil && snapshot.PeerGroup != nil
+	})
+	stop()
+	peer.mu.Lock()
+	peer.unavailable = true
+	peer.mu.Unlock()
+	stop, local = start()
+	defer stop()
+	wait(local, func(snapshot samclientconfig.Snapshot) bool {
+		return snapshot.Phase == "degraded" && snapshot.RRSet != nil && snapshot.PeerGroup == nil
 	})
 }
 

@@ -576,7 +576,7 @@ func (s Service) Instance(runtimeDir, stateDir string) (Instance, error) {
 	case "otlp_logs":
 		b, err = json.Marshal(*s.OTLPLogs)
 	case "sam_client":
-		b, err = json.Marshal(samclientconfig.Config{Node: samclientconfig.Normalize(*s.SAMClient), SocketPath: filepath.Join(runtimeDir, "services", s.Name+".sam.sock"), StatePath: filepath.Join(stateDir, "services", s.Name, "revoked-identity")})
+		b, err = json.Marshal(samclientconfig.Config{Node: samclientconfig.Normalize(*s.SAMClient), SocketPath: filepath.Join(runtimeDir, "services", s.Name+".sam.sock"), StatePath: filepath.Join(stateDir, "services", s.Name, "sam.json")})
 	case "syslog":
 		b, err = json.Marshal(*s.Syslog)
 	case "ntp":
