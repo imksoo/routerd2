@@ -423,3 +423,10 @@ The command neither opens the database nor alters collection or retention.
 ログ担当の強制終了と自動再起動後の欠損表示・継続再開を確認しました。
 原レコードとカーソルは保存担当のAPI応答と一致しました。既存の管理受入試験は21.59秒で成功しました。
 対象のhomert実機での受入は未実施です。
+
+`show dhcp-fingerprints NAME [mac ADDRESS] [since RFC3339] [limit 1..1000]`
+reads the DHCP service's existing retained client observations. SSH exec, the
+interactive shell and candidate mode return the same records, observation times,
+inferred device information and truncation flag as the read-only history API.
+The command does not capture packets, rewrite lease state or change a candidate.
+Unavailable history is reported as an error rather than an empty successful list.

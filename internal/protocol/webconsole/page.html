@@ -16,7 +16,21 @@ html{color-scheme:dark;background:#0f0f0f;font:16px system-ui,sans-serif;color:#
 {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
 <p>{{if .Standby}}待機系が保持する貸出{{else if .Active}}DHCP配布中{{else}}DHCP配布停止{{end}}{{with .Sync}} / 同期: {{if .Synchronized}}完了{{else}}未完了{{end}}{{if .AllocationBlocked}} / 新規割当を停止{{end}}{{if .Error}} / {{.Error}}{{end}}{{end}}</p>
 <div class="scroll"><table><thead><tr><th>端末名</th><th>MACアドレス</th><th>IPv4アドレス</th><th>貸出期限</th><th>状態</th></tr></thead><tbody>{{range .Leases}}<tr><td>{{if .Hostname}}{{.Hostname}}{{else}}未取得{{end}}</td><td><code>{{.MACAddress}}</code></td><td><code>{{.IPAddress}}</code></td><td>{{if .ExpiresAt.IsZero}}期限なし{{else}}{{.ExpiresAt}}{{end}}</td><td>{{if leaseLive .ExpiresAt}}貸出期限内{{else}}期限切れ{{end}}</td></tr>{{else}}<tr><td colspan="5">観測された貸出はありません。</td></tr>{{end}}</tbody></table></div>
-{{else}}<p class="notice">このサービスの貸出情報はまだ観測されていません。</p>{{end}}{{end}}
+{{else}}<p class="notice">このサービスの貸出情報はまだ観測されていません。</p>{{end}}
+<h3>DHCP端末識別記録</h3>
+<p>端末から受信した情報と、その情報による推定です。端末の機種やOSを確定するものではありません。保存停止後に残った記録も含みます。</p>
+<form method="get" action="{{$.Config.BasePath}}clients"><input type="hidden" name="service" value="{{.Selected.Name}}">
+<label>MACアドレス <input name="mac" value="{{.MAC}}"></label>
+<label>日時以降 <input name="since" value="{{.Since}}" placeholder="2026-10-31T00:00:00+09:00" size="32"></label>
+<label>表示上限 <input type="number" min="1" max="1000" name="limit" value="{{.Limit}}"></label><button type="submit">検索</button></form>
+{{if .FingerprintError}}<p class="notice">端末識別記録を取得できません: {{.FingerprintError}}</p>{{end}}
+{{with .Fingerprints}}<p>読取時刻: {{.ReadAt}} / 表示 {{len .Entries}}件。端末ごとの最新の記録を、新しい順に表示します。</p>
+{{if .Truncated}}<p class="notice">表示上限を超える記録があります。日時・MACアドレスで絞り込んでください。</p>{{end}}
+<div class="scroll"><table><thead><tr><th>観測時刻・端末</th><th>受信した識別情報</th><th>推定結果</th></tr></thead><tbody>
+{{range .Entries}}<tr data-fingerprint="{{.MAC}}"><td><div>{{.ObservedAt}}</div><div><code>{{.MAC}}</code></div><div>{{.Hostname}}</div></td>
+<td><div>ベンダークラス: <code>{{.VendorClass}}</code></div><div>要求オプション: <code>{{.RequestedOptions}}</code></div><div>記録元: <code>{{.Source}}</code></div></td>
+<td>{{if .OSFamily}}<div>OS系列: {{.OSFamily}}</div>{{end}}{{if .DeviceClass}}<div>端末分類: {{.DeviceClass}}</div>{{end}}{{if .DeviceName}}<div>機種名: {{.DeviceName}}</div>{{end}}<div>推定の信頼度: {{.Confidence}} / 100</div>{{if .Signal}}<div>推定根拠: <code>{{.Signal}}</code></div>{{end}}</td></tr>
+{{else}}<tr><td colspan="3">条件に一致する保存済み端末識別記録はありません。</td></tr>{{end}}</tbody></table></div>{{end}}{{end}}
 {{end}}
 {{template "flows" .}}
 {{template "vpn" .}}

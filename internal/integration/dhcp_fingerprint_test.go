@@ -6,10 +6,14 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"net/netip"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -22,7 +26,10 @@ import (
 	"github.com/imksoo/routerd2/internal/logging"
 	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
+	"github.com/imksoo/routerd2/internal/protocol/webconsoleconfig"
 	"github.com/imksoo/routerd2/internal/retention"
+	"github.com/imksoo/routerd2/internal/runtimeconfig"
+	"github.com/imksoo/routerd2/internal/runtimeplan"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
 
@@ -53,11 +60,64 @@ func TestDaemonDHCPFingerprints(t *testing.T) {
 		FingerprintRetention: &retention.Config{MaxAgeSeconds: 12, IntervalSeconds: 1},
 	}
 	native := config.Native{
-		Network:  network.Desired{Interfaces: []network.Interface{{Name: "lan0", Addresses: []string{"192.0.2.1/24"}}}},
-		Services: []serviceconfig.Service{{Name: "leases", DHCPServer: &server}},
+		Network: network.Desired{Interfaces: []network.Interface{{Name: "lan0", Addresses: []string{"192.0.2.1/24"}}}},
+		Services: []serviceconfig.Service{{Name: "leases", DHCPServer: &server},
+			{Name: "console", WebConsole: &webconsoleconfig.Config{Listen: netip.MustParseAddrPort("192.0.2.1:8080")}}},
 	}
 	work := t.TempDir()
-	f := startFixtureDaemonAt(t, config.FromNative(native), work)
+	stateDir := filepath.Join(work, "state")
+	if err := os.Mkdir(stateDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	clientKey, hostKey := filepath.Join(work, "client_key"), filepath.Join(stateDir, "ssh_host_ed25519_key")
+	for _, path := range []string{clientKey, hostKey} {
+		if output, err := exec.Command("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", path).CombinedOutput(); err != nil {
+			t.Fatalf("independent SSH key: %v %s", err, output)
+		}
+	}
+	clientPublic, err := os.ReadFile(clientKey + ".pub")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostPublic, err := os.ReadFile(hostKey + ".pub")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sshPort := port(t)
+	knownHosts := filepath.Join(work, "known_hosts")
+	if err := os.WriteFile(knownHosts, append([]byte(fmt.Sprintf("[192.0.2.1]:%d ", sshPort)), hostPublic...), 0600); err != nil {
+		t.Fatal(err)
+	}
+	f := startFixtureDaemonConfigured(t, config.FromNative(native), work, nil, runtimeconfig.SSH{
+		Listen: fmt.Sprintf("192.0.2.1:%d", sshPort), User: "admin", AuthorizedKeys: []string{string(clientPublic)},
+	})
+	sshRead := func(command, input string) []byte {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		args := []string{"-T", "-F", "/dev/null", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "UserKnownHostsFile=" + knownHosts, "-o", "GlobalKnownHostsFile=/dev/null", "-o", "UpdateHostKeys=no", "-o", "IdentityAgent=none", "-o", "IdentitiesOnly=yes", "-o", "ConnectTimeout=3", "-i", clientKey, "-p", fmt.Sprint(sshPort), "admin@192.0.2.1"}
+		if command != "" {
+			args = append(args, command)
+		}
+		cmd := exec.CommandContext(ctx, "ssh", args...)
+		cmd.Stdin = strings.NewReader(input)
+		var output []byte
+		if err := fixtureInsideNamespace(peer, func() error { var err error; output, err = cmd.CombinedOutput(); return err }); err != nil {
+			t.Fatalf("independent OpenSSH: %v %s", err, output)
+		}
+		return output
+	}
+	console := func(query string) string {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "curl", "--fail", "--silent", "--show-error", "--max-time", "4", "http://192.0.2.1:8080/clients?service=service.leases"+query)
+		var output []byte
+		if err := fixtureInsideNamespace(peer, func() error { var err error; output, err = cmd.CombinedOutput(); return err }); err != nil {
+			t.Fatalf("independent HTTP client: %v %s", err, output)
+		}
+		return string(output)
+	}
 	historyPath := filepath.Join(work, "state", "services", "leases", "dhcp-fingerprints.db")
 	report, script := filepath.Join(work, "lease.txt"), filepath.Join(work, "lease.sh")
 	hook := fmt.Sprintf(`#!/bin/sh
@@ -115,26 +175,13 @@ esac
 		t.Logf("independent BusyBox %s acquired %s and reached learned gateway %s in %s", hostname, lease[0], lease[1], time.Since(started))
 		return lease[0]
 	}
-	historyAvailable := false
 	history := func() []logstore.DHCPFingerprint {
 		t.Helper()
-		db, err := logstore.OpenDHCPFingerprintLogReadOnly(historyPath)
-		if err != nil {
-			if historyAvailable {
-				t.Fatal("read previously created fingerprint history", err)
-			}
-			return nil
+		var page runtimeplan.DHCPFingerprintHistory
+		if err := f.control.Do(t.Context(), "GET", "/v1/services/service.leases/dhcp-fingerprints", nil, &page); err != nil {
+			t.Fatal(err)
 		}
-		defer db.Close()
-		rows, err := db.List(t.Context(), logstore.DHCPFingerprintFilter{Limit: 100})
-		if err != nil {
-			if historyAvailable {
-				t.Fatal("query previously created fingerprint history", err)
-			}
-			return nil
-		}
-		historyAvailable = true
-		return rows
+		return page.Entries
 	}
 	recorded := func(mac, hostname string) bool {
 		t.Helper()
@@ -150,6 +197,48 @@ esac
 	}
 	firstAddress := acquire(clients[0].iface, "fingerprint-first")
 	until(t, 5*time.Second, func() bool { return recorded(clients[0].mac, "fingerprint-first") })
+
+	// Compare the real DHCP observation across the read-only DB, API, independent
+	// OpenSSH command and console. None of those consumers writes history.
+	initialRows := history()
+	db, err := logstore.OpenDHCPFingerprintLogReadOnly(historyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := db.List(t.Context(), logstore.DHCPFingerprintFilter{Limit: 100})
+	db.Close()
+	if err != nil || !reflect.DeepEqual(initialRows, stored) {
+		t.Fatalf("API changed stored fingerprint information: %v", err)
+	}
+	var sshPage runtimeplan.DHCPFingerprintHistory
+	command := "show dhcp-fingerprints leases mac " + strings.ReplaceAll(strings.ToUpper(clients[0].mac), ":", "-") + " since " + initialRows[0].ObservedAt.Format(time.RFC3339Nano) + " limit 1"
+	if err := json.Unmarshal(sshRead(command, ""), &sshPage); err != nil || !reflect.DeepEqual(sshPage.Entries, initialRows) || sshPage.Truncated {
+		t.Fatalf("SSH read differs from actual DHCP observation: %v %+v", err, sshPage)
+	}
+	var html string
+	// The DHCP notification is persisted before the periodic lease observation
+	// reaches control. Wait for that observation, not an arbitrary fixed delay.
+	until(t, 5*time.Second, func() bool {
+		html = console("&mac=" + url.QueryEscape(clients[0].mac))
+		return strings.Contains(html, firstAddress)
+	})
+	for _, text := range []string{firstAddress, clients[0].mac, vendor, "fingerprint-first", "[1 3 6 15 119]", initialRows[0].Source, "推定結果"} {
+		if !strings.Contains(html, text) {
+			t.Fatalf("console omitted real lease/fingerprint value %q", text)
+		}
+	}
+	if output := string(sshRead("", "configure\r"+command+"\rabort\rexit\r")); strings.Contains(output, "Error:") || !strings.Contains(output, vendor) {
+		t.Fatal("fingerprint query failed in candidate mode", output)
+	}
+	var unchanged control.State
+	if err := f.control.Do(t.Context(), "GET", "/v1/config", nil, &unchanged); err != nil || unchanged.Revision != 1 {
+		t.Fatal("read-only fingerprint query changed configuration", err, unchanged.Revision)
+	}
+	html = console("&limit=0")
+	if !strings.Contains(html, "端末識別記録を取得できません") || !strings.Contains(html, firstAddress) {
+		t.Fatal("history read error hid current lease information")
+	}
+	t.Log("read-only API and independent OpenSSH/HTTP preserved actual DHCP observation fields; candidate-mode query left revision unchanged; history error kept lease display")
 
 	// A separate connection owns the write lock while product readers and the
 	// independent DHCP client remain live. It never changes history rows.
@@ -201,6 +290,9 @@ esac
 	until(t, 16*time.Second, func() bool { return len(history()) == 0 })
 	t.Log("configured retention removed real client observations after their age limit")
 
+	acquire(clients[0].iface, "fingerprint-retained")
+	until(t, 5*time.Second, func() bool { return recorded(clients[0].mac, "fingerprint-retained") })
+	retained := history()
 	server.FingerprintRetention = nil
 	if err := f.control.Do(t.Context(), "POST", "/v1/config/commit",
 		control.CommitRequest{ExpectedRevision: 1, RequestID: "disable-dhcp-fingerprints", Config: config.FromNative(native)}, nil); err != nil {
@@ -214,10 +306,14 @@ esac
 	})
 	acquire(clients[2].iface, "fingerprint-disabled")
 	for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); {
-		if rows := history(); len(rows) != 0 {
-			t.Fatal("fingerprint history continued after collection was removed", rows)
+		if rows := history(); !reflect.DeepEqual(rows, retained) {
+			t.Fatal("retained history changed after collection was removed", rows)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	t.Log("removing fingerprint retention stopped collection while a new MAC still acquired DHCP and reached its gateway")
+	html = console("")
+	if !strings.Contains(html, "fingerprint-retained") || strings.Contains(html, `data-fingerprint="`+clients[2].mac+`"`) {
+		t.Fatal("console did not retain stopped history or invented a new observation")
+	}
+	t.Log("removing collection preserved original retained observations for API/console while a new MAC acquired DHCP and reached its gateway")
 }
