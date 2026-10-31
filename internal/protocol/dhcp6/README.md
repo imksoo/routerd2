@@ -47,7 +47,10 @@ The checkpoint `state/leases/NAME.dhcp6.json` stores the full typed
 snapshot, including DUID/IAID, server identity and original BOOTTIME deadlines.
 Atomic rename and file/directory fsync precede publication and the first packet.
 On the same boot, matching interface/IAID/DUID and live assignments restore
-their original remaining budgets. A client requesting PD uses Rebind; an
+their original remaining budgets. A local PD checkpoint from an earlier boot
+uses its saved wall-clock observation to retain only still-live prefixes, then
+starts Rebind; IA_NA and supplementary DHCP information are acquired again.
+A client requesting PD uses Rebind; an
 address-only client uses Confirm, following
 [RFC 9915 sections 18.2.3/18.2.12](https://www.rfc-editor.org/rfc/rfc9915.html#section-18.2.3).
 Both have a random initial delay and a ten-second verification window measured
@@ -57,9 +60,10 @@ changes the assignment, original T1/T2, expiry or saved lease server. Success
 from any matching-transaction server wins over earlier NotOnLink replies.
 Only NotOnLink replies through the window discard old IA_NA and trigger fresh
 discovery. Silence retains only still-valid original grants; expiry during
-confirmation starts discovery immediately. Different boots, changed
-identity/interface/IAID and expired grants use fresh acquisition. No UTC lease
-rebasing or cross-boot restoration is implemented.
+confirmation starts discovery immediately. Changed resource, identity,
+interface or IAID, absent wall-clock observation, and expired grants use fresh
+acquisition. A received replicated checkpoint retains its monotonic-clock
+mapping and is not recovered across a local reboot.
 Graceful shutdown acknowledges kernel/RA withdrawal without sending Release.
 The saved grant remains available for restart until its original expiry; SIGKILL
 also leaves the last saved grant for recovery. An explicit Release operation is

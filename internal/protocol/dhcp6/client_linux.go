@@ -522,7 +522,7 @@ func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, updates <
 	}
 	c := client{cfg: cfg, duid: duid, maxSolicit: 3600 * time.Second, maxInformation: 3600 * time.Second, snapshot: dhcp6config.Snapshot{BootID: clock.BootID, Resource: cfg.Resource, Interface: cfg.Interface, IAID: cfg.IAID, ClientDUID: hex.EncodeToString(duid)}}
 	now := time.Unix(0, clock.BoottimeNanoseconds)
-	restored, err := c.restoreLease(saved.localSnapshot(clock, cfg.Interface), clock)
+	restored, err := c.restoreLease(saved.snapshotForBoot(clock, cfg.Interface), clock)
 	if err != nil {
 		return err
 	}
@@ -552,6 +552,7 @@ func Run(ctx context.Context, cfg dhcp6config.Config, effects Effects, updates <
 		saved.Revision++
 		saved.Snapshot = c.snapshot
 		saved.Mapping = nil
+		saved.ObservedAt = clock.WallTime
 		if err := writeState(cfg.StatePath, saved); err != nil {
 			return fmt.Errorf("persist DHCPv6 assignments: %w", err)
 		}

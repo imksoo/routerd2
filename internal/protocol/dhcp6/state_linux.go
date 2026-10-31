@@ -31,12 +31,13 @@ type clockMapping struct {
 }
 
 type checkpoint struct {
-	Epoch    uint64               `json:"epoch,omitempty"`
-	Source   string               `json:"source,omitempty"`
-	Revision uint64               `json:"revision,omitempty"`
-	Mapping  *clockMapping        `json:"mapping,omitempty"`
-	Version  int                  `json:"version"`
-	Snapshot dhcp6config.Snapshot `json:"snapshot"`
+	Epoch      uint64               `json:"epoch,omitempty"`
+	Source     string               `json:"source,omitempty"`
+	Revision   uint64               `json:"revision,omitempty"`
+	Mapping    *clockMapping        `json:"mapping,omitempty"`
+	ObservedAt time.Time            `json:"observed_at,omitzero"`
+	Version    int                  `json:"version"`
+	Snapshot   dhcp6config.Snapshot `json:"snapshot"`
 }
 
 func readState(ctx context.Context, cfg dhcp6config.Config) (checkpoint, error) {
@@ -68,7 +69,10 @@ func decodeState(cfg dhcp6config.Config, raw []byte) (checkpoint, error) {
 	}
 	s := saved.Snapshot
 	if s.Resource != cfg.Resource {
-		return checkpoint{}, errors.New("DHCPv6 checkpoint belongs to another resource")
+		// The checkpoint is a learned observation, not operator intent. A state
+		// path reused for another resource must discover instead of stopping its
+		// DHCPv6 client before it can send Solicit.
+		return checkpoint{}, nil
 	}
 	// Validate the stored facts independently of changed operator intent.
 	previous := dhcp6config.Config{Resource: s.Resource, Interface: s.Interface, IAID: s.IAID, RequestAddress: len(s.Addresses) > 0, RequestPrefix: len(s.Prefixes) > 0}
@@ -116,6 +120,64 @@ func (c *client) restoreLease(saved dhcp6config.Snapshot, clock boottime.Clock) 
 		c.info.next = time.Unix(0, int64(saved.InformationRefreshAt.Nanos))
 	}
 	return true, nil
+}
+
+// snapshotForBoot keeps the normal same-boot and replicated-clock paths. A
+// local PD checkpoint from a previous boot has no usable monotonic clock, so
+// rebuild only its still-live prefix deadlines from the persisted wall-clock
+// observation. IA_NA and supplementary DHCP information must be learned again.
+func (s checkpoint) snapshotForBoot(clock boottime.Clock, iface string) dhcp6config.Snapshot {
+	local := s.localSnapshot(clock, iface)
+	if local.BootID == clock.BootID {
+		return local
+	}
+	if s.Mapping != nil || s.ObservedAt.IsZero() || s.Snapshot.BootID == clock.BootID || clock.WallTime.IsZero() || clock.BoottimeNanoseconds <= 0 {
+		return dhcp6config.Snapshot{}
+	}
+
+	deadline := func(d lifetime.Deadline) (lifetime.Deadline, bool) {
+		if d.BootID != s.Snapshot.BootID || d.Nanos == 0 || d.Nanos < s.Snapshot.ObservedNanos {
+			return lifetime.Deadline{}, false
+		}
+		remaining := s.ObservedAt.Add(time.Duration(d.Nanos - s.Snapshot.ObservedNanos)).Sub(clock.WallTime)
+		if remaining <= 0 || remaining > time.Duration(math.MaxInt64-clock.BoottimeNanoseconds) {
+			return lifetime.Deadline{}, false
+		}
+		return lifetime.Deadline{BootID: clock.BootID, Nanos: uint64(clock.BoottimeNanoseconds + int64(remaining))}, true
+	}
+
+	out := s.Snapshot
+	out.BootID = clock.BootID
+	out.ObservedNanos = uint64(clock.BoottimeNanoseconds)
+	out.RAStarted = dhcp6config.RouterFlags{}
+	out.Sync = nil
+	out.Addresses = nil
+	out.RenewAt = lifetime.Deadline{}
+	out.RebindAt = lifetime.Deadline{}
+	out.DNSServers = nil
+	out.DomainSearch = nil
+	out.SNTPServers = nil
+	out.AFTRName = ""
+	out.InfoReceivedNanos = 0
+	out.InformationRefreshSeconds = 0
+	out.InformationRefreshAt = lifetime.Deadline{}
+	out.Prefixes = nil
+	for _, p := range s.Snapshot.Prefixes {
+		valid, live := deadline(p.ValidUntil)
+		if !live {
+			continue
+		}
+		preferred, preferredLive := deadline(p.PreferredUntil)
+		if !preferredLive {
+			preferred = lifetime.Deadline{BootID: clock.BootID, Nanos: uint64(clock.BoottimeNanoseconds)}
+		}
+		p.PreferredUntil, p.ValidUntil = preferred, valid
+		out.Prefixes = append(out.Prefixes, p)
+	}
+	if len(out.Prefixes) == 0 {
+		return dhcp6config.Snapshot{}
+	}
+	return out
 }
 
 func writeState(path string, s checkpoint) error {

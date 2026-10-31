@@ -1,7 +1,8 @@
 //go:build linux
 
-// Package boottime reads a boot-scoped Linux elapsed clock. WallTime is display
-// metadata; it never defines a lease. CLOCK_BOOTTIME includes suspend time.
+// Package boottime reads a boot-scoped Linux elapsed clock. CLOCK_BOOTTIME
+// includes suspend time. DHCPv6 uses WallTime only to evaluate a saved PD
+// expiry after a new boot has invalidated that elapsed clock.
 package boottime
 
 import (
