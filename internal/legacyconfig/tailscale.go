@@ -67,5 +67,5 @@ func (c *compiler) tailscale(r resource) {
 		node.AdvertiseRoutes = append(node.AdvertiseRoutes, prefix.Masked())
 	}
 	c.addService(r, serviceconfig.Service{Name: c.serviceName(r, "tail"), Tailscale: node})
-	c.note(r, "Explicit replacement: a fixed private daemon owns its TUN/table52 with netfilter off. Declare forwarding, FW/NAT and WAN rule ordering as native network intent; external daemon/host rules are not imported. Legacy inline keys and systemd EnvironmentFile values are replaced by the selected enrollment policy. Provision a stopped daemon's saved identity separately for saved_identity; import neither reads nor changes it. acceptDNS:false is retained and Tailscale SSH is not enabled.")
+	c.note(r, "Explicit replacement: a fixed private daemon owns its TUN/table52 and upstream Tailscale netfilter chains, preserving the legacy Linux netfilter-on and subnet SNAT defaults. Declare WAN routing and operator firewall intent separately; external OS routes are not imported. Legacy inline keys and systemd EnvironmentFile values are replaced by the selected enrollment policy. Provision a stopped daemon's saved identity separately for saved_identity; import neither reads nor changes it. acceptDNS:false is retained and Tailscale SSH is not enabled.")
 }

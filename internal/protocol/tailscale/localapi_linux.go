@@ -38,7 +38,9 @@ type preferences struct {
 }
 
 func startOptions(n tailscaleconfig.Node, key string) startRequest {
-	p := preferences{ControlURL: n.ServerURL, Hostname: n.Hostname, WantRunning: true, RouteAll: n.AcceptRoutes, ShieldsUp: n.ShieldsUp, AdvertiseTags: n.AdvertiseTags, NetfilterMode: 0}
+	// Preserve tailscale up on Linux: the upstream router owns its netfilter
+	// chains and SNAT for subnet and exit traffic, including IPv6.
+	p := preferences{ControlURL: n.ServerURL, Hostname: n.Hostname, WantRunning: true, RouteAll: n.AcceptRoutes, ShieldsUp: n.ShieldsUp, AdvertiseTags: n.AdvertiseTags, NetfilterMode: 2}
 	for _, prefix := range n.AdvertiseRoutes {
 		p.AdvertiseRoutes = append(p.AdvertiseRoutes, prefix.Masked())
 	}

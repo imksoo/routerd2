@@ -392,7 +392,6 @@ def peer(stage, homert=False, collector=None):
             {"id": "lan", "interface": {"name": "lan0"}},
             {"id": "forwarding", "forwarding": {"ipv4": True, "ipv6": True, "ipv4_rp_filter": 0}},
             {"id": "firewall", "firewall": firewall},
-            {"id": "exit-nat", "nat": [{"type": "masquerade", "match": {"family": family, "in_interface": "tailscale0", "out_interface": "uplink0"}} for family in (4, 6)]},
             {"id": "gate", "service": {"name": "gate", "health": {"interface": "uplink0", "target": "192.0.2.1", "protocol": "tcp", "port": 8443, "interval_ms": 200, "timeout_ms": 100, "healthy_threshold": 1, "unhealthy_threshold": 1}}},
             {"id": "console", "service": {"name": "console", "web_console": {"listen": "10.42.0.1:8088", "base_path": "/ops/", "title": "routerd2"}}},
             {"id": "tailnet", "when": {"fact": "service.gate.active", "max_age": "2s"}, "service": imported},
@@ -534,7 +533,7 @@ def peer(stage, homert=False, collector=None):
 
             def site_traffic():
                 for host in lan_hosts:
-                    traffic(host, peer_ips[4])
+                    traffic(host, str(ipaddress.ip_address(host) - 1))
                     traffic(peer_ips[4], host, "ts-lan", bind=host)
 
             def exit_traffic():
@@ -549,15 +548,16 @@ def peer(stage, homert=False, collector=None):
             assert not imported["tailscale"].get("accept_routes", False)
             prefs = vendor_api(stage / "product-run/services/tailscale/local.sock", "prefs")
             assert not prefs["CorpDNS"] and not prefs["RouteAll"]
+            assert prefs["NetfilterMode"] == 2 and not prefs["NoSNAT"]
             assert set(prefs["AdvertiseRoutes"]) == set(advertised + ["0.0.0.0/0", "::/0"])
             del prefs  # Do not retain or print upstream identity fields.
             site_traffic()
             assert Path("/etc/resolv.conf").read_text() == "nameserver 192.0.2.1\n"
-            print("PASS homert: three declared RFC1918 advertisements installed at peer; LAN TCP/UDP in both directions without subnet NAT or manual return routes; acceptDNS/acceptRoutes=false", flush=True)
+            print("PASS homert: three declared RFC1918 advertisements installed at peer; LAN TCP/UDP in both directions with upstream subnet SNAT and no manual return routes; acceptDNS/acceptRoutes=false", flush=True)
             run(inside("ts-b", cli + ["set", "--exit-node=" + original["addresses"][0], "--exit-node-allow-lan-access=true"]))
             wait(lambda: pingable("198.51.100.20"))
             exit_traffic()
-            print("PASS homert: IPv4/IPv6 exit TCP/UDP through declared WAN NAT; no LAN-to-tailnet IPv6 NAT", flush=True)
+            print("PASS homert: IPv4/IPv6 exit TCP/UDP through upstream standard SNAT; no fixture NAT resource", flush=True)
             wait(lambda: operational_status(True))
             ssh_target = "admin@" + next(ip for ip in original["addresses"] if ipaddress.ip_address(ip).version == 4)
             ssh = ["ssh", "-F", "/dev/null", "-i", str(ssh_key), "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes",
@@ -652,6 +652,10 @@ def peer(stage, homert=False, collector=None):
             product_api("control.sock", "/v1/config/commit", {"expected_revision": 1, "request_id": "homert-remove-tailnet", "config": withdrawn}, timeout=12)
             wait(lambda: not any(link["ifname"] == "tailscale0" for link in json.loads(run(inside("ts-a", ["ip", "-j", "link"])))))
             wait(lambda: not any(prefix in peer_routes() or route_present(prefix) for prefix in advertised), 30)
+            rules = json.loads(run(inside("ts-a", ["nft", "-j", "list", "ruleset"])))
+            assert not any(item.get("rule", {}).get("chain") in ("ts-forward", "ts-postrouting")
+                           for item in rules["nftables"]), "withdrawn upstream forwarding/SNAT rules remain"
+            print("PASS upstream forwarding and SNAT rules withdrawn with the service", flush=True)
             console_status("Tailscaleサービスは構成されていません", selected=False)
             for host in lan_hosts:
                 assert not pingable(host)
@@ -691,15 +695,21 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
             assert (current_worker["pid"], current_worker["generation"]) == (telemetry_worker["pid"], telemetry_worker["generation"]), "exporter restarted during metric withdrawal check"
             assert later_collection, "metric collection stopped during withdrawal check"
             print("PASS removed Tailnet stopped exporting its old peer count after the final collection interval", flush=True)
+            restoring = time.monotonic()
+            recovery_deadline = restoring + 30
             product_api("control.sock", "/v1/config/commit", {"expected_revision": 2, "request_id": "homert-restore-tailnet", "config": saved}, timeout=12)
-            wait(lambda: observation().get("backend_state") == "Running", 30)
+            wait(lambda: observation().get("backend_state") == "Running", max(0, recovery_deadline - time.monotonic()))
             assert observation()["node_id"] == original["node_id"]
-            wait(lambda: all(prefix in peer_routes() and route_present(prefix) for prefix in advertised))
+            wait(lambda: all(prefix in peer_routes() and route_present(prefix) for prefix in advertised), max(0, recovery_deadline - time.monotonic()))
+            # Running and installed routes precede the encrypted peer path.
+            # Use the same real LAN probe as the restart paths above.
+            wait(lambda: pingable(lan_hosts[0]), max(0, recovery_deadline - time.monotonic()))
             site_traffic()
             assert vendor_api(socket, "prefs")["ExitNodeID"] == original["node_id"]
-            wait(lambda: pingable("198.51.100.20"))
+            wait(lambda: pingable("198.51.100.20"), max(0, recovery_deadline - time.monotonic()))
             exit_traffic()
-            print("PASS IPv4/IPv6 TCP/UDP exit restored without changing the peer's selection", flush=True)
+            assert time.monotonic() <= recovery_deadline, "Tailnet communication recovery exceeded thirty seconds"
+            print("PASS IPv4/IPv6 TCP/UDP exit restored without changing the peer's selection; elapsed", round(time.monotonic() - restoring, 3), flush=True)
             capture.send_signal(signal.SIGINT)
             capture.wait(timeout=3)
             packets = run(["tcpdump", "-Z", "root", "-nn", "-r", str(stage / "tailnet.pcap")])
@@ -727,8 +737,8 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
             print("PASS homert: peer restart restored LAN and both-family exit communication; Collector observed online/offline/recovered counts", flush=True)
             return
         wait(lambda: pingable("10.42.0.2"))
-        traffic("10.42.0.2", peer_ips[4])
-        traffic("fd42::2", peer_ips[6])
+        traffic("10.42.0.2", "10.42.0.1")
+        traffic("fd42::2", "fd42::1")
         print("PASS independent peer -> product -> LAN IPv4/IPv6 TCP and UDP", flush=True)
         wait(lambda: len(dns_input()) == 1)
         wait(dns_ready)
@@ -753,8 +763,8 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
             result = subprocess.run(inside("ts-b", cli + ["ping", "--until-direct=false", "--c=1", "--timeout=1s", original["addresses"][0]]), capture_output=True, text=True, timeout=3)
             return result.returncode == 0 and "DERP(fixture)" in result.stdout
         wait(relayed, 25)
-        traffic("10.42.0.2", peer_ips[4])
-        traffic("fd42::2", peer_ips[6])
+        traffic("10.42.0.2", "10.42.0.1")
+        traffic("fd42::2", "fd42::1")
         traffic("198.51.100.20", "192.0.2.2")
         traffic("2001:db8:ffff::20", "fd0::2")
         run(inside("ts-b", ["nft", "delete", "table", "inet", "fixture"]))
@@ -764,7 +774,7 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
         wait(lambda: modules()[module]["generation"] > old["generation"] and observation().get("backend_state") == "Running", 30)
         assert observation()["node_id"] == original["node_id"] and observation()["addresses"] == original["addresses"]
         wait(lambda: pingable("10.42.0.2"))
-        traffic("10.42.0.2", peer_ips[4])
+        traffic("10.42.0.2", "10.42.0.1")
         traffic("2001:db8:ffff::20", "fd0::2")
         rules = json.loads(run(inside("ts-a", ["ip", "-j", "rule"])))
         assert sum(rule.get("priority") == 5270 for rule in rules) == 1
@@ -797,7 +807,7 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
         wait(lambda: "fd42::/64" in peer_routes() and "0.0.0.0/0" in peer_routes(), 30)
         wait(lambda: pingable("fd42::2"))
         assert observation()["node_id"] == original["node_id"]
-        traffic("fd42::2", peer_ips[6])
+        traffic("fd42::2", "fd42::1")
         print("PASS confirmed rollback restored independent peer routes and IPv6 traffic with the same identity", flush=True)
         old_control = modules()["control"]
         signal_worker(old_control["pid"], signal.SIGKILL)
@@ -805,7 +815,7 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
         wait(lambda: observation().get("backend_state") == "Running", 30)
         assert observation()["node_id"] == original["node_id"]
         wait(lambda: pingable("10.42.0.2"))
-        traffic("10.42.0.2", peer_ips[4])
+        traffic("10.42.0.2", "10.42.0.1")
         assert json.loads(run([str(inputs / "routerd"), "poweroff", "--runtime-dir", str(stage / "product-run")]))["accepted"]
         daemon.wait(timeout=12)
         assert daemon.returncode == -signal.SIGINT
@@ -818,7 +828,7 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
         wait(lambda: observation().get("backend_state") == "Running", 30)
         assert observation()["node_id"] == original["node_id"] and observation()["addresses"] == original["addresses"]
         wait(lambda: pingable("10.42.0.2"))
-        traffic("10.42.0.2", peer_ips[4])
+        traffic("10.42.0.2", "10.42.0.1")
         print("PASS control and whole-daemon restart retained identity and real forwarding without an auth key file", flush=True)
         console_status("稼働中・制御接続あり", original["addresses"] + advertised)
         print("PASS VPN console showed retained membership after control and whole product restart", flush=True)
@@ -840,7 +850,7 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
             frozen.remove(control["pid"])
         wait(lambda: observation().get("backend_state") == "Running", 30)
         wait(lambda: pingable("10.42.0.2"))
-        traffic("10.42.0.2", peer_ips[4])
+        traffic("10.42.0.2", "10.42.0.1")
         wait(dns_ready)
         resolve_peer()
         print("PASS original condition authority expired with control stopped, then actual forwarding and LAN DNS recovered", flush=True)
@@ -873,8 +883,8 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
         wait(lambda: observation().get("backend_state") == "Running" and observation().get("online"), 30)
         assert observation()["node_id"] == original["node_id"] and observation()["addresses"] == original["addresses"]
         wait(lambda: pingable("10.42.0.2"))
-        traffic("10.42.0.2", peer_ips[4])
-        traffic("fd42::2", peer_ips[6])
+        traffic("10.42.0.2", "10.42.0.1")
+        traffic("fd42::2", "fd42::1")
         wait(lambda: len(dns_input()) == 1)
         wait(dns_ready)
         resolve_peer()
@@ -904,8 +914,10 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
         wait(lambda: product_api("control.sock", "/v1/config")["revision"] == 7, 40)
         wait(lambda: observation().get("backend_state") == "Running" and observation().get("online"), 30)
         wait(lambda: pingable("10.42.0.2"))
-        for host in original["addresses"] + ["10.42.0.2", "fd42::2"]:
+        for host in original["addresses"]:
             traffic(host, peer_ips[ipaddress.ip_address(host).version])
+        traffic("10.42.0.2", "10.42.0.1")
+        traffic("fd42::2", "fd42::1")
         assert observation()["node_id"] == original["node_id"]
         print("PASS confirmed rollback restored inbound host/subnet traffic with the same identity", flush=True)
         legacy = accepted_source
@@ -937,8 +949,8 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
         assert tagged_node["tags"] == ["tag:router"], tagged_node
         run(inside("ts-control", head + ["nodes", "approve-routes", "-i", tagged_id, "-r", "10.42.0.0/24,fd42::/64,0.0.0.0/0,::/0"]))
         wait(lambda: pingable("10.42.0.2"))
-        traffic("10.42.0.2", peer_ips[4])
-        traffic("fd42::2", peer_ips[6])
+        traffic("10.42.0.2", "10.42.0.1")
+        traffic("fd42::2", "fd42::1")
         print("PASS approved tagged enrollment was exposed as observed tags with real IPv4/IPv6 forwarding", flush=True)
         # Removing a client request is not server-side tag revocation.
         legacy = accepted_source
@@ -952,7 +964,7 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
         wait(lambda: observation().get("backend_state") == "Running" and observation().get("tags") == ["tag:router"], 30)
         assert observation()["node_id"] == tagged_id
         wait(lambda: pingable("10.42.0.2"))
-        traffic("10.42.0.2", peer_ips[4])
+        traffic("10.42.0.2", "10.42.0.1")
         print("PASS saved identity retained server-assigned tags after removing the client request and enrollment files", flush=True)
         # Observe independent peer metadata too, not only the local node.
         run(inside("ts-control", head + ["nodes", "tag", "-i", str(remote["id"]), "-t", "tag:router"]))
@@ -985,6 +997,21 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
         assert Path("/etc/resolv.conf").read_text() == "nameserver 192.0.2.1\n"
         print("PASS capture: LAN and WAN TCP/UDP plus encrypted underlay packets", flush=True)
     except BaseException:
+        for namespace in ("ts-a", "ts-b"):
+            for args in (["ip", "-j", "route", "show", "table", "all"], ["nft", "-j", "list", "ruleset"]):
+                detail = subprocess.run(inside(namespace, args), capture_output=True, text=True, timeout=5)
+                print("FORWARDING FAILURE", namespace, args, detail.stdout or detail.stderr, flush=True)
+        for upstream_socket in (stage / "product-run/services/tailscale/local.sock", stage / "peer/tailscaled.sock"):
+            if upstream_socket.exists():
+                current = vendor_api(upstream_socket, "status")
+                print("TAILNET FAILURE", upstream_socket.name, current.get("BackendState"),
+                      {name: {key: value.get(key) for key in ("Online", "Active", "LastHandshake", "CurAddr", "Relay")}
+                       for name, value in current.get("Peer", {}).items()}, flush=True)
+        if "capture" in locals() and capture.poll() is None:
+            capture.send_signal(signal.SIGINT)
+            capture.wait(timeout=3)
+            packets = run(["tcpdump", "-Z", "root", "-nn", "-r", str(stage / "tailnet.pcap"), "port 41641 or host 10.42.0.2"])
+            print("LAST FORWARDING PACKETS", "\n".join(packets.splitlines()[-60:]), flush=True)
         supervisor = stage / "product-run/supervisor.sock"
         if supervisor.exists():
             status = subprocess.run(["curl", "--max-time", "2", "-fsS", "--unix-socket", str(supervisor), "http://localhost/v1/status"], capture_output=True, text=True)
