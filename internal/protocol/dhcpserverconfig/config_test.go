@@ -25,6 +25,9 @@ func TestConfigRejectsAmbiguousOrUnsupportedIntent(t *testing.T) {
 	}{
 		{"empty-identity", func(c *Config) { c.Resource = "" }},
 		{"bad-interface", func(c *Config) { c.Interface = "../lan" }},
+		{"bad-ingress-interface", func(c *Config) { c.IngressInterface = "../lan" }},
+		{"same-ingress-interface", func(c *Config) { c.IngressInterface = c.Interface }},
+		{"ingress-without-replication", func(c *Config) { c.IngressInterface = "lan1" }},
 		{"v6-server", func(c *Config) { c.ServerAddress = "2001:db8::1" }},
 		{"reverse-pool", func(c *Config) { c.Primary.Start = "192.0.2.201" }},
 		{"network-pool", func(c *Config) { c.Primary.Start = "192.0.2.0" }},

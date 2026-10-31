@@ -142,6 +142,7 @@ func (c *compiler) leaseSync(vrrpNames map[string]string) {
 				c.reject(r, "source.resource", "conflict", "the DHCP server must share its subnet and physical LAN with its IPv4 VRRP owner")
 				continue
 			}
+			service.DHCPServer.IngressInterface = service.DHCPServer.Interface
 			service.DHCPServer.Interface = vip.VIPInterface
 			service.DHCPServer.ServerAddress = address.Addr().String()
 			service.DHCPServer.HA = &serviceconfig.DHCPServerHA{Owner: owner.Name, Replication: peer}

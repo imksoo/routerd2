@@ -18,7 +18,14 @@ import (
 // another DHCP allocator or packet parser. Paths belong to the engine root.
 func dnsmasqConfig(settings engineSettings) []byte {
 	c := settings.Intent
-	lines := []string{"port=0", "no-resolv", "no-hosts", "bind-dynamic", "user=root", "group=root", "pid-file=/state/dnsmasq.pid", "dhcp-leasefile=/state/" + filepath.Base(c.StatePath), "log-facility=-", "dhcp-lease-max=" + strconv.Itoa(c.MaxLeases)}
+	lines := []string{"port=0", "no-resolv", "no-hosts", "bind-dynamic"}
+	if c.IngressInterface != "" {
+		// Including both interfaces leaves the DHCP socket unpinned. dnsmasq
+		// maps packets from the parent to the VIP before choosing a DHCP context.
+		lines = append(lines, "bridge-interface="+c.Interface+","+c.IngressInterface)
+		lines = append(lines, "interface="+c.IngressInterface)
+	}
+	lines = append(lines, "user=root", "group=root", "pid-file=/state/dnsmasq.pid", "dhcp-leasefile=/state/"+filepath.Base(c.StatePath), "log-facility=-", "dhcp-lease-max="+strconv.Itoa(c.MaxLeases))
 	if c.StickyHoldDays > 0 || c.FingerprintRetention != nil {
 		lines = append(lines, "dhcp-script=/usr/sbin/routerd-dhcp-event")
 	}

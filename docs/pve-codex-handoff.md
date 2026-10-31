@@ -1,6 +1,6 @@
 # routerd2 開発引き継ぎ
 
-更新: 2026-10-31 05:50 JST。全34 work packageのゴールは継続中。
+更新: 2026-10-31 11:52 JST。全34 work packageのゴールは継続中。
 [実装計画](implementation-plan.md)、[機械可読台帳](implementation-plan.json)、[試験計画](test-plan.md)、[AGENTS.md](../AGENTS.md)を読む。
 各試験前に試験計画の実行手順と対象項目を再確認する。対象本番の置換は実施していない。
 
@@ -19,6 +19,8 @@ AFTRのnetwork問い合わせは共有lockの外で行い、待機後に現在�
 DHCPの状態通知失敗はengineを停止させない。元の適用・観測・通信の期限は延長していない。
 
 ## 現候補で確認できた通信
+
+- `dhcp-ingress-native105`: 隔離した PVE の 4 CPU/4 GiB VM へ、ハッシュを照合した host overlay の `routerd`、`routerd-modules`、`routerd-logging`（release ID `dhcp-ingress-native105`）を投入し、20 module の Ready を確認した。cold boot と reboot の各経路で DNS UDP/TCP（IPv4/IPv6）、端末 TCP/UDP、BGP、NTP、Tailscale が通過した。独立した通常・特殊 DHCPv4 client は、120 秒 lease の自然 T1 でそれぞれ `172.18.0.1:67` 宛て unicast REQUEST に同一 XID の ACK を受信し、server identifier（option 54）は `172.18.0.1` だった。判定後に生 pcap を削除した。これは PVE の kernel と実 daemon の相互通信結果であり、元設定の12時間 lease による自然更新、ONU/HGW・対象 NIC/機器、全34 work package の受入は未実施である。
 
 - 全57resource、独立ISC・4 AFTR・2 FRR・IX代替・DNS/DoH・chrony・公式Tailscaleと独立LAN端末。通常Alpine二台、各4CPU/4GiB KVM。
   両方向の実電源断・再参加が終了0。旧主系不在中に新端末を接続し、DHCP/SLAAC・取得DNS UDP/TCP・両IP TCP/UDPが成功。

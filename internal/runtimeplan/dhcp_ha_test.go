@@ -19,7 +19,7 @@ import (
 
 func TestHADHCPStopsServingWhenVRRPOwnerLeavesProjection(t *testing.T) {
 	owner := serviceconfig.Service{Name: "ha", VRRP: &vrrp.Config{Interface: "lan0", VIPInterface: "vip0", Family: "ipv4", SourceAddress: "192.0.2.2", VirtualRouterID: 42, Addresses: []string{"192.0.2.1/24"}, AcceptMode: true}}
-	server := serviceconfig.Service{Name: "leases", DHCPServer: &serviceconfig.DHCPServer{Interface: "vip0", ServerAddress: "192.0.2.1", Primary: dhcpserverconfig.Scope{Prefix: "192.0.2.0/24", Start: "192.0.2.100", End: "192.0.2.110"}, HA: &serviceconfig.DHCPServerHA{Owner: "ha", Replication: peertls.Config{ListenAddress: netip.MustParseAddrPort("192.0.2.2:8443"), PeerAddress: netip.MustParseAddrPort("192.0.2.3:8443"), CertificateFile: "/keys/local.crt", PrivateKeyFile: "/keys/local.key", PeerCertificateFile: "/keys/peer.crt"}}}}
+	server := serviceconfig.Service{Name: "leases", DHCPServer: &serviceconfig.DHCPServer{Interface: "vip0", IngressInterface: "lan0", ServerAddress: "192.0.2.1", Primary: dhcpserverconfig.Scope{Prefix: "192.0.2.0/24", Start: "192.0.2.100", End: "192.0.2.110"}, HA: &serviceconfig.DHCPServerHA{Owner: "ha", Replication: peertls.Config{ListenAddress: netip.MustParseAddrPort("192.0.2.2:8443"), PeerAddress: netip.MustParseAddrPort("192.0.2.3:8443"), CertificateFile: "/keys/local.crt", PrivateKeyFile: "/keys/local.key", PeerCertificateFile: "/keys/peer.crt"}}}}
 	doc := config.Native{Network: network.Desired{Interfaces: []network.Interface{{Name: "lan0", Addresses: []string{"192.0.2.2/24"}}}}, Services: []serviceconfig.Service{server, owner}}
 	if _, err := config.Compile(config.FromNative(doc)); err != nil {
 		t.Fatal(err)
@@ -47,8 +47,8 @@ func TestHADHCPStopsServingWhenVRRPOwnerLeavesProjection(t *testing.T) {
 		for _, b := range p.instances {
 			if b.instance.Name == server.ModuleName() {
 				var cfg dhcpserverconfig.Config
-				if err := json.Unmarshal(b.instance.Config, &cfg); err != nil || cfg.Standby != wantStandby {
-					t.Fatal("HA DHCP mode did not follow the projected owner", cfg.Standby, err)
+				if err := json.Unmarshal(b.instance.Config, &cfg); err != nil || cfg.Standby != wantStandby || cfg.IngressInterface != "lan0" {
+					t.Fatal("HA DHCP configuration did not retain owner or ingress", cfg.Standby, cfg.IngressInterface, err)
 				}
 				return
 			}

@@ -1,6 +1,6 @@
 # routerd2 実通信・製品受入試験計画
 
-更新: 2026-10-30。対象は [実装計画](implementation-plan.md) と同 JSON の全34 work package。
+更新: 2026-10-31。対象は [実装計画](implementation-plan.md) と同 JSON の全34 work package。
 目的は、端末を接続しただけで必要な通信ができ、障害から復旧し、運用・更新できる最初の製品を完成させること。
 旧 routerd と homert02/03 の実設定・実装を先に読み、必要な機能と実際の制約を特定する。
 旧 routerd2 の試作 API・形式・過去のテストに互換性を設けない。
@@ -85,6 +85,8 @@
 端末の必要動作、実障害からの復旧、未検証の範囲で判断する。ゴールは全範囲の受入まで継続する。
 
 ## 現在の状況
+
+- `dhcp-ingress-native105`: 隔離 PVE（4 CPU/4 GiB）の実 appliance で、ハッシュ・release ID を照合した三実行物と20 Ready moduleを使い、cold boot/reboot 後の DNS UDP/TCP（IPv4/IPv6）、TCP/UDP、BGP、NTP、Tailscale、および通常・特殊端末それぞれの120秒 DHCPv4自然T1 unicast/同一XID ACK/option 54=`172.18.0.1` を確認した。PVE kernel 試験であり、12時間の元lease、ONU/HGW・対象機器、全34 package は引き続き未受入。
 
 - `persistent-sysctl-ba46e40`: homert両機の永続conntrack設定を実CLIで取り込み、隔離Linux名前空間の実製品で設定確定・通信適用プロセス再起動・製品全体再起動からの再適用・撤去時の元値復元が成功。空の初期設定より保存済み設定が優先されたことを確認。カーネル初期値への戻しは隔離試験内の明示操作であり、物理再起動やHA通信の受入ではない。証跡は `dist/sysctl-acceptance/`。
 

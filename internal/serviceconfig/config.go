@@ -287,6 +287,9 @@ func Validate(services []Service) error {
 		var dhcpInterfaces []string
 		if s.DHCPServer != nil {
 			dhcpInterfaces = append(dhcpInterfaces, s.DHCPServer.Interface)
+			if s.DHCPServer.IngressInterface != "" {
+				dhcpInterfaces = append(dhcpInterfaces, s.DHCPServer.IngressInterface)
+			}
 		}
 		if s.DHCPRelay != nil {
 			key = "dhcp_relay:" + s.DHCPRelay.VRF
@@ -512,6 +515,9 @@ func Validate(services []Service) error {
 		return err
 	}
 	if err := validateDHCPHA(services); err != nil {
+		return err
+	}
+	if err := validateDHCPIngress(services); err != nil {
 		return err
 	}
 	return validateDNSSources(services)

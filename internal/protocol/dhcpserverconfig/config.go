@@ -33,6 +33,7 @@ const (
 type Config struct {
 	Resource                  string            `json:"resource"`
 	Interface                 string            `json:"interface"`
+	IngressInterface          string            `json:"ingress_interface,omitempty"`
 	ServerAddress             string            `json:"server_address"`
 	Primary                   Scope             `json:"primary"`
 	Scopes                    []Scope           `json:"scopes,omitempty"`
@@ -139,6 +140,9 @@ func Validate(c Config) error {
 	if c.Standby && c.Replication == nil {
 		return errors.New("DHCP standby requires replication")
 	}
+	if c.IngressInterface != "" && c.Replication == nil {
+		return errors.New("DHCP ingress interface requires replication")
+	}
 	if c.Replication != nil {
 		if err := peertls.Validate(*c.Replication); err != nil {
 			return err
@@ -147,6 +151,9 @@ func Validate(c Config) error {
 
 	if !validName(c.Resource, 256) || !ValidInterface(c.Interface) {
 		return errors.New("DHCP server requires a bounded resource identity, interface")
+	}
+	if c.IngressInterface != "" && (!ValidInterface(c.IngressInterface) || c.IngressInterface == c.Interface) {
+		return errors.New("DHCP ingress interface must be a distinct bounded interface")
 	}
 	server, err := ipv4(c.ServerAddress)
 	if err != nil {
