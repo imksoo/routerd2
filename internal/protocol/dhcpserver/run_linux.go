@@ -169,6 +169,9 @@ func Run(ctx context.Context, cfg Config, image *os.File, publish func(context.C
 	if err := unix.Flock(int(lock.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
 		return fmt.Errorf("claim DHCP state: %w", err)
 	}
+	if err := pruneScopeMismatchedLeases(cfg); err != nil {
+		return err
+	}
 	if cfg.StickyHoldDays > 0 {
 		state, err := readTransfer(ctx, cfg)
 		if err != nil {

@@ -88,6 +88,10 @@ func readTransfer(ctx context.Context, cfg Config) (leaseTransfer, error) {
 }
 
 func saveTransfer(ctx context.Context, cfg Config, state leaseTransfer) error {
+	// A standby can retain a pre-migration lease until this authenticated
+	// exchange. This write runs only before serving or after the active engine
+	// has stopped, so the persisted file remains the sole allocation state.
+	state.Leases, _ = pruneScopeLeaseData(cfg, state.Leases)
 	current, err := readTransfer(ctx, cfg)
 	if err != nil {
 		return err
