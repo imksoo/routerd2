@@ -16,6 +16,7 @@ import (
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/metric"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
@@ -45,7 +46,7 @@ func newOperationSignals(ctx context.Context, cfg otlplogconfig.Config, conn *gr
 	}
 	p = &operationSignals{}
 	if metrics {
-		exporter, e := otlpmetricgrpc.New(ctx, otlpmetricgrpc.WithGRPCConn(conn), otlpmetricgrpc.WithTemporalitySelector(sdkmetric.DefaultTemporalitySelector), otlpmetricgrpc.WithEndpoint(conn.Target()), otlpmetricgrpc.WithHeaders(cfg.Headers), otlpmetricgrpc.WithCompressor("none"), otlpmetricgrpc.WithTimeout(operationTimeout), otlpmetricgrpc.WithRetry(otlpmetricgrpc.RetryConfig{Enabled: false}))
+		exporter, e := otlpmetricgrpc.New(ctx, otlpmetricgrpc.WithGRPCConn(conn), otlpmetricgrpc.WithTemporalitySelector(metricTemporality), otlpmetricgrpc.WithEndpoint(conn.Target()), otlpmetricgrpc.WithHeaders(cfg.Headers), otlpmetricgrpc.WithCompressor("none"), otlpmetricgrpc.WithTimeout(operationTimeout), otlpmetricgrpc.WithRetry(otlpmetricgrpc.RetryConfig{Enabled: false}))
 		if e != nil {
 			return p, e
 		}
@@ -161,4 +162,13 @@ func (p *operationSignals) recordHealth(ctx context.Context, entry logging.Recor
 			attribute.String("routerd.resource.kind", "HealthCheck"), attribute.String("routerd.resource.name", probe.Resource), attribute.String("network.protocol.name", probe.Protocol), attribute.String("server.address", probe.Target), attribute.String("network.interface.name", probe.Interface), attribute.String("routerd.healthcheck.result", probe.Result), attribute.String("routerd.log.epoch", entry.Epoch), attribute.Int64("routerd.log.sequence", int64(entry.Sequence))))
 		span.End(trace.WithTimestamp(probe.FinishedAt))
 	}
+}
+
+func metricTemporality(kind sdkmetric.InstrumentKind) metricdata.Temporality {
+	// A gauge describes a sample in this collection interval. Retaining it
+	// would report a stopped producer's last value with a new timestamp.
+	if kind == sdkmetric.InstrumentKindGauge {
+		return metricdata.DeltaTemporality
+	}
+	return sdkmetric.DefaultTemporalitySelector(kind)
 }

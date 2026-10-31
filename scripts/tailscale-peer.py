@@ -641,6 +641,8 @@ def peer(stage, homert=False, collector=None):
             console_status("稼働中・制御接続あり", original["addresses"] + advertised)
             print("PASS homert: VPN console retained actual membership and advertisement display after whole restart", flush=True)
             run(inside("ts-b", cli + ["set", "--exit-node="]))
+            measured_peers("before-removal", time.time_ns())
+            telemetry_worker = modules()["service.telemetry"]
             withdrawn = copy.deepcopy(saved)
             withdrawn["resources"] = [r for r in withdrawn["resources"] if r["id"] not in ("tailnet", "resolver")]
             product_api("control.sock", "/v1/config/commit", {"expected_revision": 1, "request_id": "homert-remove-tailnet", "config": withdrawn}, timeout=12)
@@ -649,6 +651,28 @@ def peer(stage, homert=False, collector=None):
             console_status("Tailscaleサービスは構成されていません", selected=False)
             for host in lan_hosts:
                 assert not pingable(host)
+            # A final queued sample can belong to the first collection after
+            # removal. After two normal intervals, it must not be re-exported.
+            withdrawn_at = time.time_ns()
+            time.sleep(65)
+            later_collection = False
+            for line in (stage / "tailnet-metrics.jsonl").read_text().splitlines(keepends=True):
+                if not line.endswith("\n"):
+                    continue
+                for resource in json.loads(line).get("resourceMetrics", []):
+                    for scope in resource.get("scopeMetrics", []):
+                        for metric in scope.get("metrics", []):
+                            if metric.get("name") == "routerd.healthcheck.probes":
+                                later_collection |= any(int(point["timeUnixNano"]) > withdrawn_at + 30_000_000_000
+                                                        for point in metric["sum"].get("dataPoints", []))
+                            if metric.get("name") == "routerd.tailscale.peer.count":
+                                assert all(int(point["timeUnixNano"]) <= withdrawn_at + 30_000_000_000
+                                           for point in metric["gauge"].get("dataPoints", [])), "removed node exported a stale peer count"
+            assert receiver.poll() is None, "Collector stopped during metric withdrawal check"
+            current_worker = modules()["service.telemetry"]
+            assert (current_worker["pid"], current_worker["generation"]) == (telemetry_worker["pid"], telemetry_worker["generation"]), "exporter restarted during metric withdrawal check"
+            assert later_collection, "metric collection stopped during withdrawal check"
+            print("PASS removed Tailnet stopped exporting its old peer count after the final collection interval", flush=True)
             product_api("control.sock", "/v1/config/commit", {"expected_revision": 2, "request_id": "homert-restore-tailnet", "config": saved}, timeout=12)
             wait(lambda: observation().get("backend_state") == "Running", 30)
             assert observation()["node_id"] == original["node_id"]
