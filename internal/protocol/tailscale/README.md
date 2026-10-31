@@ -62,8 +62,13 @@ state-file parser or prototype migration is used.
 The network worker owns forwarding and its `inet routerd2` firewall. Configure
 IPv4/IPv6 forwarding and directed TUN-to-LAN/WAN allow rules explicitly; accept
 UDP41641 and the required ICMPv6/input traffic when enabling an input policy.
-The daemon's netfilter is off. Exit service requires explicit IPv4/IPv6 NAT on
-the intended WAN (or real return routing). A WAN policy before priority5270 can
+The pinned daemon uses the upstream Linux netfilter-on and subnet-SNAT defaults.
+It owns the upstream Tailscale chains in the IPv4/IPv6 filter and NAT tables;
+the network worker continues to own only its separate `inet routerd2` table.
+The upstream router removes its rules during normal shutdown. Exit traffic
+still needs a usable WAN route: subnet LAN source selectors do not route
+Tailscale peer addresses. Preserve any OS-managed default route as explicit
+native configuration during migration. A WAN policy before priority5270 can
 bypass Tailscale's lookup; choose rules for the intended forwarding path.
 WireGuard cannot explicitly bind the same UDP41641 port.
 
