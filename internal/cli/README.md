@@ -404,3 +404,22 @@ traffic counters and available classification. The API normalizes addresses,
 validates time ranges and limits reads to 100 rows by default and 1000 at most.
 A missing or unreadable database reports an error; it is not an empty history.
 The command neither opens the database nor alters collection or retention.
+
+## SSHからの運用ログの継続取得
+
+コマンド `show logs` では、ログ担当の保持範囲を既存のカーソルで分割取得できます。
+引数を省くと従来どおり最新100件を返します。保持範囲の先頭から読む場合は
+`show logs module supervisor level INFO limit 1 tail false` を実行します。
+続きは返された `cursor.epoch` と `cursor.sequence` を使い、
+`show logs module supervisor level INFO limit 1 epoch EPOCH after SEQUENCE` で取得します。
+一度の上限は200件です。大量の結果を一括で読み込む処理は追加していません。
+
+カーソル、絞り込み、件数の検証は既存のログ担当が行います。コマンドの実装は
+`after` 指定時に末尾取得を強制せず、返された元のレコードと継続位置をそのまま返します。
+ログ担当の再起動や保持範囲外への移動は、既存の `reset`、`gap`、`gap_reasons` で分かります。
+新しいカーソルで再開できますが、欠損したレコードの復元や7日分の保存を保証するものではありません。
+
+隔離環境の通常製品 `ops-log-resume-0b85be0` で、実SSHとHTTPによる先頭取得・継続取得、
+ログ担当の強制終了と自動再起動後の欠損表示・継続再開を確認しました。
+原レコードとカーソルは保存担当のAPI応答と一致しました。既存の管理受入試験は21.59秒で成功しました。
+対象のhomert実機での受入は未実施です。

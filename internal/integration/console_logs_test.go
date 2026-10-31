@@ -4,8 +4,10 @@ package integration
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -14,25 +16,41 @@ import (
 
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/logging"
+	"golang.org/x/crypto/ssh"
 	"golang.org/x/net/html"
 )
 
-// Read the same real log query through the private API and an independent HTTP
-// client. Rows retain their original identity, including persisted old epochs.
-func checkConsoleLogPage(t *testing.T, logs *localapi.Client, console func(string, string, int, string) string, path string) (logging.QueryResult, string, string) {
+// Read the same real log query through the private API and independent HTTP/SSH
+// clients. Rows retain their original identity, including persisted old epochs.
+func checkConsoleLogPage(t *testing.T, logs *localapi.Client, shell *ssh.Client, console func(string, string, int, string) string, path string) (logging.QueryResult, string, string) {
 	t.Helper()
 	request, err := url.Parse(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	query := request.Query()
-	var result logging.QueryResult
+	var result, remote logging.QueryResult
+	command := "show logs"
+	for _, field := range []string{"module", "level", "limit", "epoch", "after", "tail"} {
+		if value := query.Get(field); value != "" {
+			command += " " + field + " " + value
+		}
+	}
 	var body string
 	until(t, 5*time.Second, func() bool {
 		if err := logs.Do(context.Background(), "GET", "/v1/logs?"+request.RawQuery, nil, &result); err != nil {
 			t.Fatal(err)
 		}
 		body = console("GET", path, 200, "運用ログ")
+		session, err := shell.NewSession()
+		if err != nil {
+			t.Fatal(err)
+		}
+		output, err := session.CombinedOutput(command)
+		_ = session.Close()
+		if err != nil || json.Unmarshal(output, &remote) != nil {
+			t.Fatalf("SSH log query: %v %s", err, output)
+		}
 		var after logging.QueryResult
 		if err := logs.Do(context.Background(), "GET", "/v1/logs?"+request.RawQuery, nil, &after); err != nil {
 			t.Fatal(err)
@@ -41,6 +59,10 @@ func checkConsoleLogPage(t *testing.T, logs *localapi.Client, console func(strin
 		// Compare only while its cursor is stable; never inject a synthetic record.
 		return after.Cursor == result.Cursor
 	})
+	if !reflect.DeepEqual(remote.Records, result.Records) || remote.Cursor != result.Cursor ||
+		remote.Reset != result.Reset || remote.Gap != result.Gap || remote.More != result.More || !slices.Equal(remote.GapReasons, result.GapReasons) {
+		t.Fatalf("SSH changed original log records or continuation/gap metadata: SSH=%+v API=%+v", remote, result)
+	}
 	document, err := html.Parse(strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
@@ -118,29 +140,29 @@ func checkConsoleLogPage(t *testing.T, logs *localapi.Client, console func(strin
 	return result, strings.TrimPrefix(continuation.RequestURI(), "/ops/"), body
 }
 
-func checkConsoleLogsBeforeRestart(t *testing.T, logs *localapi.Client, console func(string, string, int, string) string) logging.Cursor {
+func checkConsoleLogsBeforeRestart(t *testing.T, logs *localapi.Client, shell *ssh.Client, console func(string, string, int, string) string) logging.Cursor {
 	t.Helper()
 	const search = "logs?module=supervisor&level=INFO&limit=1"
-	latest, _, _ := checkConsoleLogPage(t, logs, console, search)
+	latest, _, _ := checkConsoleLogPage(t, logs, shell, console, search)
 	if len(latest.Records) != 1 {
 		t.Fatal("actual supervisor lifecycle log missing")
 	}
-	first, next, _ := checkConsoleLogPage(t, logs, console, search+"&epoch="+latest.Cursor.Epoch+"&after=0")
+	first, next, _ := checkConsoleLogPage(t, logs, shell, console, search+"&epoch="+latest.Cursor.Epoch+"&after=0")
 	if len(first.Records) != 1 || !first.More {
 		t.Fatal("actual supervisor logs do not provide a second page")
 	}
-	second, _, _ := checkConsoleLogPage(t, logs, console, next)
+	second, _, _ := checkConsoleLogPage(t, logs, shell, console, next)
 	if len(second.Records) != 1 || second.Cursor.Epoch != first.Cursor.Epoch || second.Records[0].Sequence <= first.Records[0].Sequence {
 		t.Fatalf("console log continuation repeated or skipped its epoch: first=%+v second=%+v", first.Cursor, second.Cursor)
 	}
-	t.Log("independent HTTP log search and continuation matched original supervisor records and API cursors; module/level/limit retained without duplicate rows")
+	t.Log("independent SSH and HTTP log search and continuation matched original supervisor records and API cursors; module/level/limit retained without duplicate rows")
 	return second.Cursor
 }
 
-func checkConsoleLogsAfterRestart(t *testing.T, logs *localapi.Client, console func(string, string, int, string) string, old logging.Cursor) {
+func checkConsoleLogsAfterRestart(t *testing.T, logs *localapi.Client, shell *ssh.Client, console func(string, string, int, string) string, old logging.Cursor) {
 	t.Helper()
 	path := fmt.Sprintf("logs?module=supervisor&level=INFO&limit=1&epoch=%s&after=%d", old.Epoch, old.Sequence)
-	reset, next, body := checkConsoleLogPage(t, logs, console, path)
+	reset, next, body := checkConsoleLogPage(t, logs, shell, console, path)
 	if !reset.Reset || !reset.Gap || !slices.Contains(reset.GapReasons, "logger_restart") || reset.Cursor.Epoch == old.Epoch {
 		t.Fatalf("actual logger restart did not reset the old cursor: %+v", reset)
 	}
@@ -149,12 +171,12 @@ func checkConsoleLogsAfterRestart(t *testing.T, logs *localapi.Client, console f
 			t.Fatalf("console hid actual restart/gap: missing %q", message)
 		}
 	}
-	continued, _, body := checkConsoleLogPage(t, logs, console, next)
+	continued, _, body := checkConsoleLogPage(t, logs, shell, console, next)
 	if continued.Reset || continued.Cursor.Epoch != reset.Cursor.Epoch || strings.Contains(body, "ログ担当が再起動しました") {
 		t.Fatalf("new cursor did not resume after logger restart: %+v", continued)
 	}
 	if len(reset.Records) != 1 || len(continued.Records) != 1 || continued.Records[0].Sequence <= reset.Records[0].Sequence {
 		t.Fatal("new cursor repeated the recovered log page")
 	}
-	t.Log("actual logging SIGKILL/restart produced Reset/Gap in HTTP; following the new epoch cursor resumed original records")
+	t.Log("actual logging SIGKILL/restart produced Reset/Gap in SSH and HTTP; following the new epoch cursor resumed original records")
 }

@@ -1021,6 +1021,8 @@ const interactiveHelp = `Operational commands:
   show network help           list paged network observation commands
   show observations [after CURSOR] [limit 1..16]
   show event-store
+  show logs [module NAME] [level INFO] [limit 1..200]
+            [epoch EPOCH] [after SEQUENCE] [tail true|false]
   show snapshots             list verified saved configuration references
   show traffic-flows NAME [client IP] [peer IP] [protocol NAME]
                           [since RFC3339] [until RFC3339] [limit 1..1000]
