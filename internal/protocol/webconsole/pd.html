@@ -1,0 +1,19 @@
+{{define "pd"}}{{with .PD}}
+<p>DHCPv6で取得したIPv6アドレス・委譲プレフィックス（PD）・DNS情報を表示します。有効期限内の割当と、LANへの適用・実通信は別々に確認します。</p>
+<nav aria-label="DHCPv6サービス">{{range .Services}}<a href="{{$.Config.BasePath}}pd?service={{.}}">{{.}}</a>{{else}}<p>現在の実行構成にDHCPv6クライアントはありません。条件により停止している設定は一覧に含みません。</p>{{end}}</nav>
+{{if .Selected}}<h3>{{.Selected}}</h3>{{with .Observation}}
+<section data-pd-active="{{$.PD.Active}}" data-pd-information-current="{{$.PD.InformationCurrent}}">
+<dl><dt>インターフェース</dt><dd>{{.Interface}}</dd><dt>直近の観測状態</dt><dd>{{pdState .State}}</dd><dt>サーバー識別子（DUID）</dt><dd><code>{{.ServerDUID}}</code></dd>
+{{if .RenewAt.BootID}}<dt>更新時刻まで</dt><dd>{{pdRemaining .RenewAt $.PD.Clock}}</dd>{{end}}
+{{if .RebindAt.BootID}}<dt>再取得時刻まで</dt><dd>{{pdRemaining .RebindAt $.PD.Clock}}</dd>{{end}}</dl>
+{{if not $.PD.Active}}<p class="notice">利用可能な割当・情報は確認できません。以下は直近の観測です。</p>{{end}}
+<h4>委譲プレフィックス</h4><div class="scroll"><table><thead><tr><th>プレフィックス</th><th>優先期限</th><th>有効期限</th></tr></thead><tbody>
+{{range .Prefixes}}<tr data-pd-prefix="{{.Prefix}}"><td><code>{{.Prefix}}</code></td><td>{{pdRemaining .PreferredUntil $.PD.Clock}}</td><td>{{pdRemaining .ValidUntil $.PD.Clock}}</td></tr>{{else}}<tr><td colspan="3">委譲の観測はありません。</td></tr>{{end}}</tbody></table></div>
+<h4>WANの割当アドレス</h4><div class="scroll"><table><thead><tr><th>アドレス</th><th>優先期限</th><th>有効期限</th></tr></thead><tbody>
+{{range .Addresses}}<tr><td><code>{{.Address}}</code></td><td>{{pdRemaining .PreferredUntil $.PD.Clock}}</td><td>{{pdRemaining .ValidUntil $.PD.Clock}}</td></tr>{{else}}<tr><td colspan="3">アドレス割当の観測はありません。</td></tr>{{end}}</tbody></table></div>
+<h4>取得した情報</h4>{{if not $.PD.InformationCurrent}}<p class="notice">以下の情報は未取得または期限切れです。</p>{{end}}
+<dl><dt>DNSサーバー</dt><dd>{{range .DNSServers}}<div><code>{{.}}</code></div>{{else}}未取得{{end}}</dd><dt>検索ドメイン</dt><dd>{{range .DomainSearch}}<div>{{.}}</div>{{else}}未取得{{end}}</dd><dt>時刻サーバー</dt><dd>{{range .SNTPServers}}<div><code>{{.}}</code></div>{{else}}未取得{{end}}</dd><dt>DS-Liteの接続先（AFTR）</dt><dd>{{if .AFTRName}}{{.AFTRName}}{{else}}未取得{{end}}</dd></dl>
+{{with .Sync}}<h4>待機系で保持する同期情報</h4><p>世代: {{.Epoch}} / リビジョン: {{.Revision}}</p>{{if .Error}}<p class="error">{{.Error}}</p>{{end}}{{end}}
+<p>LANへの割当と経路は<a href="{{$.Config.BasePath}}network">ネットワーク</a>で確認できます。</p>
+</section>{{else}}<p class="notice">DHCPv6サービスの観測はまだありません。</p>{{end}}{{end}}
+{{end}}{{end}}

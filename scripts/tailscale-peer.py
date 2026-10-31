@@ -3,8 +3,11 @@
 
 Requires Linux root/sudo, TUN, iproute2, nft, curl, OpenSSL, tcpdump, dig, and pinned
 Headscale/Tailscale peers below dist/peer-env/tailscale. No host network or DNS
-settings are used. Peer credentials, logs and captures are temporary.
+settings are used. Peer credentials, logs and captures are temporary. The homert
+profile also requires the existing official otelcol-contrib receiver (--collector)
+and compares its peer-count gauge with the live official LocalAPI.
 """
+import argparse
 import copy
 import html
 import json
@@ -96,7 +99,7 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
 """
 
 
-def peer(stage, homert=False):
+def peer(stage, homert=False, collector=None):
     children, namespaces = [], []
     frozen = []
     pid1 = 0
@@ -160,6 +163,49 @@ def peer(stage, homert=False):
         print("PASS CLI observed Tailscale state matches live upstream: online=" + str(online) +
             "; recent activity, last seen, selected/candidate exit and approved local routes", flush=True)
         return True
+
+    def measured_peers(label, after_ns):
+        upstream = vendor_api(stage / "product-run/services/tailscale/local.sock", "status")
+        expected = sum(bool(p.get("Online")) for p in upstream.get("Peer", {}).values())
+        received = []
+
+        def delivered():
+            path = stage / "tailnet-metrics.jsonl"
+            if not path.exists():
+                return False
+            points = []
+            # The official Collector can be appending its final line.
+            for line in path.read_text().splitlines(keepends=True):
+                if not line.endswith("\n"):
+                    continue
+                for resource in json.loads(line).get("resourceMetrics", []):
+                    for scope in resource.get("scopeMetrics", []):
+                        for metric in scope.get("metrics", []):
+                            if metric.get("name") != "routerd.tailscale.peer.count":
+                                continue
+                            tags = {a["key"]: a["value"].get("stringValue") for a in resource.get("resource", {}).get("attributes", [])}
+                            assert tags.get("service.name") == "routerd2" and tags.get("service.namespace") == "acceptance", "unexpected metric resource"
+                            assert "gauge" in metric and metric.get("unit") == "{peer}", "peer count must use the peer gauge unit"
+                            for point in metric["gauge"].get("dataPoints", []):
+                                labels = {a["key"]: a["value"].get("stringValue") for a in point.get("attributes", [])}
+                                assert labels == {"routerd.tailscale.node": imported["name"]}, "unexpected peer count labels"
+                                points.append(point)
+            if not points:
+                return False
+            latest = max(points, key=lambda p: int(p["timeUnixNano"]))
+            if int(latest["timeUnixNano"]) <= after_ns or int(latest["asInt"]) != expected:
+                return False
+            current = vendor_api(stage / "product-run/services/tailscale/local.sock", "status")
+            if sum(bool(p.get("Online")) for p in current.get("Peer", {}).values()) != expected:
+                return False
+            received[:] = [latest]
+            return True
+
+        # Keep the product's existing 30-second collection interval unchanged.
+        wait(delivered, 45)
+        point = received[0]
+        print("PASS official LocalAPI online peer count matches independent OTLP gauge", label,
+              json.dumps({"online_peers": expected, "time_unix_nano": point["timeUnixNano"]}), flush=True)
 
     def console_status(expected, values=(), selected=True):
         url = "http://10.42.0.1:8088/ops/vpn"
@@ -228,6 +274,22 @@ def peer(stage, homert=False):
             run(inside(namespace, ["ip", "link", "set", "uplink0", "up"]))
             if namespace != "ts-a":
                 run(inside(namespace, ["ip", "addr", "add", "192.0.2." + str(i) + "/24", "dev", "uplink0"]))
+        if homert:
+            # Reuse the OTLP fixture's official gRPC receiver and file exporter.
+            # It shares the existing private control namespace, not the router.
+            metrics_config = {"receivers": {"otlp": {"protocols": {"grpc": {"endpoint": "192.0.2.1:4317"}}}},
+                "exporters": {"file": {"path": str(stage / "tailnet-metrics.jsonl"), "append": True, "flush_interval": "100ms"}},
+                "service": {"telemetry": {"logs": {"level": "error"}, "metrics": {"level": "none"}},
+                    "pipelines": {"metrics": {"receivers": ["otlp"], "exporters": ["file"]}}}}
+            metrics_path = stage / "collector.json"
+            metrics_path.write_text(json.dumps(metrics_config))
+            receiver = start("ts-control", [str(collector), "--config", str(metrics_path)], "collector")
+
+            def collector_ready():
+                assert receiver.poll() is None, "official Collector exited; see collector.log"
+                return bool(run(inside("ts-control", ["ss", "-H", "-ltn", "sport = :4317"])))
+
+            wait(collector_ready, 10)
         for address, device in (("fd0::1/64", "uplink0"), ("198.51.100.20/32", "lo"), ("2001:db8:ffff::20/128", "lo")):
             run(inside("ts-control", ["ip", "addr", "add", address, "dev", device]))
         cert, key = stage / "cert.pem", stage / "key.pem"
@@ -342,6 +404,10 @@ def peer(stage, homert=False):
             {"id": "exit4", "route": {"destination": "198.51.100.20/32", "interface": "uplink0", "gateway": "192.0.2.1"}},
             {"id": "exit6", "route": {"destination": "2001:db8:ffff::20/128", "interface": "uplink0", "gateway": "fd0::1"}},
         ]
+        if homert:
+            resources.append({"id": "telemetry", "service": {"name": "telemetry", "otlp_logs": {
+                "endpoint": "http://192.0.2.1:4317", "insecure": True,
+                "service_namespace": "acceptance", "signals": ["metrics"]}}})
         for i, (interface, address) in enumerate((("uplink0", "192.0.2.2/24"), ("uplink0", "fd0::2/64"), ("lan0", "10.42.0.1/24"), ("lan0", "fd42::1/64"))):
             resources.append({"id": "address" + str(i), "address": {"interface": interface, "cidr": address}})
         if homert:
@@ -365,6 +431,7 @@ def peer(stage, homert=False):
                 "workers": {role: str(PRODUCT / ("routerd-logging" if role == "logging" else "routerd-modules")) for role in ("logging", "network", "control", "management", "health", "tailscale", "dns", "web_console")},
                 "engines": {"tailscale": str(PRODUCT.parent / "tailscale-engine.tar")}}
         if homert:
+            boot["workers"]["otlp_logs"] = str(PRODUCT / "routerd-modules")
             ssh_key = stage / "management-client"
             run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(ssh_key)])
             boot["ssh"].update(listen="0.0.0.0:22", authorized_keys=[ssh_key.with_suffix(".pub").read_text().strip()])
@@ -574,6 +641,8 @@ def peer(stage, homert=False):
             console_status("稼働中・制御接続あり", original["addresses"] + advertised)
             print("PASS homert: VPN console retained actual membership and advertisement display after whole restart", flush=True)
             run(inside("ts-b", cli + ["set", "--exit-node="]))
+            measured_peers("before-removal", time.time_ns())
+            telemetry_worker = modules()["service.telemetry"]
             withdrawn = copy.deepcopy(saved)
             withdrawn["resources"] = [r for r in withdrawn["resources"] if r["id"] not in ("tailnet", "resolver")]
             product_api("control.sock", "/v1/config/commit", {"expected_revision": 1, "request_id": "homert-remove-tailnet", "config": withdrawn}, timeout=12)
@@ -582,6 +651,28 @@ def peer(stage, homert=False):
             console_status("Tailscaleサービスは構成されていません", selected=False)
             for host in lan_hosts:
                 assert not pingable(host)
+            # A final queued sample can belong to the first collection after
+            # removal. After two normal intervals, it must not be re-exported.
+            withdrawn_at = time.time_ns()
+            time.sleep(65)
+            later_collection = False
+            for line in (stage / "tailnet-metrics.jsonl").read_text().splitlines(keepends=True):
+                if not line.endswith("\n"):
+                    continue
+                for resource in json.loads(line).get("resourceMetrics", []):
+                    for scope in resource.get("scopeMetrics", []):
+                        for metric in scope.get("metrics", []):
+                            if metric.get("name") == "routerd.healthcheck.probes":
+                                later_collection |= any(int(point["timeUnixNano"]) > withdrawn_at + 30_000_000_000
+                                                        for point in metric["sum"].get("dataPoints", []))
+                            if metric.get("name") == "routerd.tailscale.peer.count":
+                                assert all(int(point["timeUnixNano"]) <= withdrawn_at + 30_000_000_000
+                                           for point in metric["gauge"].get("dataPoints", [])), "removed node exported a stale peer count"
+            assert receiver.poll() is None, "Collector stopped during metric withdrawal check"
+            current_worker = modules()["service.telemetry"]
+            assert (current_worker["pid"], current_worker["generation"]) == (telemetry_worker["pid"], telemetry_worker["generation"]), "exporter restarted during metric withdrawal check"
+            assert later_collection, "metric collection stopped during withdrawal check"
+            print("PASS removed Tailnet stopped exporting its old peer count after the final collection interval", flush=True)
             product_api("control.sock", "/v1/config/commit", {"expected_revision": 2, "request_id": "homert-restore-tailnet", "config": saved}, timeout=12)
             wait(lambda: observation().get("backend_state") == "Running", 30)
             assert observation()["node_id"] == original["node_id"]
@@ -601,8 +692,20 @@ def peer(stage, homert=False):
             print("PASS homert: VPN console reflected removal and restored real observation", flush=True)
             print("PASS homert: config removal withdrew peer kernel routes and LAN access; reapply restored three paths and IPv4/IPv6 exit; packet capture checked", flush=True)
             wait(lambda: operational_status(True))
+            measured_peers("online", time.time_ns())
+            stopped_at = time.time_ns()
             run(inside("ts-b", cli + ["down"]))
             wait(lambda: operational_status(False))
+            measured_peers("offline", stopped_at)
+            resumed_at = time.time_ns()
+            run(inside("ts-b", cli + ["up"]))
+            wait(lambda: vendor_api(socket, "status").get("BackendState") == "Running", 30)
+            wait(lambda: pingable(lan_hosts[0]))
+            site_traffic()
+            exit_traffic()
+            wait(lambda: operational_status(True))
+            measured_peers("recovered", resumed_at)
+            print("PASS homert: peer restart restored LAN and both-family exit communication; Collector observed online/offline/recovered counts", flush=True)
             return
         wait(lambda: pingable("10.42.0.2"))
         traffic("10.42.0.2", peer_ips[4])
@@ -892,11 +995,19 @@ def peer(stage, homert=False):
 
 
 if __name__ == "__main__":
-    if sys.argv[1:] in (["--inside"], ["--inside", "--homert"]):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--inside", action="store_true")
+    parser.add_argument("--homert", action="store_true")
+    parser.add_argument("--collector", type=Path, default=Path("/usr/local/bin/otelcol-contrib"))
+    args = parser.parse_args()
+    if args.homert:
+        args.collector = args.collector.resolve()
+        assert args.collector.is_file(), "provide the official otelcol-contrib binary with --collector"
+    if args.inside:
         with tempfile.TemporaryDirectory(prefix="routerd-tailscale-") as directory:
-            peer(Path(directory), homert="--homert" in sys.argv)
-    elif sys.argv[1:] not in ([], ["--homert"]):
-        raise SystemExit("usage: tailscale-peer.py [--homert]")
+            peer(Path(directory), homert=args.homert, collector=args.collector)
     else:
+        if args.homert:
+            print(run([str(args.collector), "--version"]).strip(), flush=True)
         prefix = [] if os.geteuid() == 0 else ["sudo", "-n"]
         raise SystemExit(subprocess.run(prefix + ["unshare", "--mount", "--net", "--pid", "--fork", "--mount-proc", "--kill-child=SIGKILL", "--propagation", "private", "python3", "-I", str(Path(__file__).resolve()), "--inside"] + sys.argv[1:]).returncode)

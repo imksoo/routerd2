@@ -448,3 +448,25 @@ Web console race checks and vet passed. Actual returned HTML was visually
 reviewed in Edge at 1400 and 500 pixels; narrow tables scroll horizontally. This proves the isolated management path, not physical homert
 acceptance or multipath forwarding under load. Reproduce with `make build
 dnsmasq-engine` followed by `python3 scripts/daemon-tests.py management`.
+
+## IPv6の取得・委譲
+
+`<base_path>pd` は既存の個別サービスAPIからDHCPv6の完全な観測を読み、
+委譲プレフィックス、WANの割当アドレス、元の優先・有効期限、更新・再取得までの残時間を表示します。
+取得したDNS・検索ドメイン・時刻サーバー・AFTRと、待機系で保持する同期情報も確認できます。
+判定には既存の `Snapshot.Active`、`InformationUntil`、`Deadline.Live` を使います。
+画面の読み取りで期限を延長せず、観測・保存・通信適用の担当も増やしていません。
+期限切れの割当と情報は直近の観測として表示し、実通信の成立とは区別します。
+
+2026年10月31日10:27 JSTに、標準ビルド `pd-console-native101` を使った
+`TestDaemonDHCP6RAAddsAddressToPD` が成功しました。隔離試験本体65.58秒、起動を含め66.61秒です。
+ISC DHCPとradvdに接続し、独立LAN端末がRAで取得したゲートウェイへHTTPでアクセスしました。
+取得時、元の割当期限が切れた時、再取得後の画面と、実際の委譲・DNS・検索ドメインを照合しています。
+既存のIPv6 TCP・UDP、取得したDNSを使うUDP・TCP問い合わせ、情報期限切れと復帰の確認も成功しました。
+最初の試行では情報期限と割当期限の同一視を修正し、次の試行では期限切れの旧割当を通さない復帰条件に修正しました。
+復帰は、停止前に捕捉した全割当の最終期限より新しいPDを受信し、端末通信が戻ったことを条件にしています。
+
+競合検査・静的検査・差分検査を実施しました。実HTTP応答をEdgeで描画し、幅1280と500ピクセルで
+日本語、期限切れの表示、表の配置を確認しました。対象実機・本番切替・長時間安定性の受入ではありません。
+再現は標準ビルド後に `python3 scripts/daemon-tests.py dhcp6-ra-pd --test TestDaemonDHCP6RAAddsAddressToPD` を実行します。
+ISC DHCPの配置が既定値と異なる場合は `--dhcp6-server` で指定します。

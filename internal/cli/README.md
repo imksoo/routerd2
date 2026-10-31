@@ -316,3 +316,52 @@ remained unchanged. The same fixture compared real HTTP update views against
 confirmed, pending, cancelled, trial and failed-trial states. An initial
 fixture-only expectation of an absent separator space was corrected; product
 behavior and deadlines were unchanged.
+
+## ファイアウォール履歴の照会
+
+`show firewall-events NAME` で、既存の保存済みパケット記録を照会できます。
+SSH接続の単発コマンドと、ローカル・SSH接続の対話操作で利用できます。設定の候補を編集中でも読み取れます。
+サービス名は `events` と `service.events` の両方を受け付けます。
+
+```text
+show firewall-events events source 192.0.2.10 action drop limit 50
+show firewall-events service.events since 2026-10-31T00:00:00Z limit 100
+```
+
+絞り込みは `source`、`action`、`since`、`limit` です。
+IPアドレス、RFC3339形式の開始日時、取得件数の検査は既存の履歴APIが担当します。
+標準では100件、最大1000件です。出力には元の記録と `service`、`read_at`、`limit`、`at_limit` が含まれます。
+`at_limit` は指定件数へ達したことを示し、続きの存在や全履歴の取得を保証しません。
+記録が利用できない場合はエラーとして返し、空の履歴として扱いません。
+このコマンドは収集、保存、期限管理、設定変更を行いません。
+
+2026年10月31日10:59〜11:00 JST、専用版 `firewall-cli-native103` で、既存の独立端末試験が成功しました。
+基点は `b28ee41` で、今回のCLI接続と受入変更を加えた版です。実行物の構築を含む所要時間は31.936秒でした。
+実際のIPv4・IPv6パケットから保存された記録をSSHで読み、元の全項目、上限到達表示、絞り込み結果を照合しました。
+製品再起動後の再接続、無効な入力の失敗、候補編集中の照会、中止後の確定済み設定不変も確認しました。
+既存試験の保持期間8秒、日次巡回を1秒へ短縮する条件は維持しています。
+本番の保持期間を経過させた試験や、対象機器の受入を示すものではありません。
+
+```sh
+python3 scripts/daemon-tests.py firewall --test TestDaemonFirewallPacketLogs --go /usr/bin/go --binary-dir dist/bin --output dist/firewall-cli-acceptance
+```
+
+## 管理・観測機能をまとめた版の受入
+
+2026年10月31日11:14〜11:19 JST、基点 `b28ee41` にSSH履歴、PD表示、Tailnet計測を
+統合した `ops-integrated-native104` で、同じ三つの製品実行物を使って各実通信を確認しました。
+三機能を一つの構成で同時運転する試験ではありません。主担当の未コミットDHCP修正は含みません。
+
+- SSH履歴: 実行物の準備を含め47.620秒で成功。再起動、検索、候補設定の保持・中止も確認しました。
+- PD表示: 再試験は準備を含め81.145秒で成功。取得済み、元期限での失効、再取得後の表示と通信を確認しました。
+- Tailnet: 配布ツールの準備を含め171.448秒で成功。対向のオンライン数 `1 → 0 → 1`、再起動、
+  三つのLAN経路、IPv4・IPv6の出口通信を確認しました。
+
+PDの初回試験は、期限切れ後にも既定経路を要求し、HTTPを送る前に失敗しました。
+最初に実際のルーター広告から取得したリンクローカル宛先を保持するよう、試験だけを修正しました。
+固定宛先や経路の追加、期限・待ち時間の変更はしていません。製品実行物のハッシュは全試験で同一です。
+
+再現には通常の `make build` と、上記のSSH履歴手順を使用します。
+PDの手順は [管理画面の説明](../protocol/webconsole/README.md)、
+Tailnetの手順は [計測転送の説明](../protocol/otlplogs/README.md) を参照してください。
+対象機器、通常リース期間、二台全体の受入はこの結果に含みません。

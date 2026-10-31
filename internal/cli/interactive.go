@@ -264,7 +264,7 @@ func (s *interactiveShell) execute(ctx context.Context, line string, out io.Writ
 		}
 		operation, _ := firstWord(rest)
 		switch operation {
-		case "status", "network", "version", "config", "services", "route-issues", "logging", "running-config", "logs", "event-store", "observations", "derived", "snapshots", "dns-queries":
+		case "status", "network", "version", "config", "services", "route-issues", "logging", "running-config", "logs", "event-store", "observations", "derived", "snapshots", "dns-queries", "firewall-events":
 			return false, s.session.Execute(ctx, "show "+rest, nil, out)
 		}
 		parts, err := parsePath(c.absolutePath(rest))
@@ -787,7 +787,7 @@ func (s *interactiveShell) complete(line string, pos int, key rune) (string, int
 	case 1:
 		switch words[0] {
 		case "show":
-			choices = []string{"status", "network", "resources", "derived", "observations", "event-store", "services", "route-issues", "logging", "logs", "version", "config", "running-config", "snapshots", "dns-queries"}
+			choices = []string{"status", "network", "resources", "derived", "observations", "event-store", "services", "route-issues", "logging", "logs", "version", "config", "running-config", "snapshots", "dns-queries", "firewall-events"}
 			if s.candidate != nil {
 				choices = append(choices, "candidate")
 				choices = append(choices, s.pathChoices(token)...)
@@ -1024,6 +1024,8 @@ const interactiveHelp = `Operational commands:
   show snapshots             list verified saved configuration references
   show dns-queries NAME [client IP] [name PATTERN] [response RCODE]
                        [since RFC3339] [until RFC3339] [limit 1..1000]
+  show firewall-events NAME [source IP] [action VALUE]
+                            [since RFC3339] [limit 1..1000]
   show derived RESOURCE_ID
   restart <module>
   poweroff / reboot           drain workers, then power off or reboot appliance

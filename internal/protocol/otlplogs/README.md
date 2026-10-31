@@ -23,7 +23,7 @@ Native `signals` defaults to logs only. The former `Telemetry` resource defaults
 to all three signals, matching its previous selection behavior. Its importer
 reports the remaining source gap: metrics and traces currently cover actual
 Health probes, DHCPv6 client exchanges, observed firewall denies and configuration
-application operations. Other controller loops, PPPoE and other former
+application operations, plus the official Tailscale online peer count. Other controller loops, PPPoE and other former
 instrumentation are not migrated by selecting these signals.
 
 Configuration application records the actual entry and return of
@@ -242,3 +242,61 @@ control checks stopped at existing private-state directory validation; the same
 checks passed with administrator privileges. A first peer invocation stopped
 before starting any product because the default ISC executable was absent;
 using the existing peer-environment executable resolved that prerequisite.
+
+
+### Tailscaleのオンライン対向数
+
+公式デーモンの既存の状態取得が成功した際に、`Peer.Online` が真の対向を数えます。
+自身は含めません。旧実装と同じ `routerd.tailscale.peer.count` を、単位 `{peer}` のゲージとして転送します。
+属性 `routerd.tailscale.node` には設定されたリソース名だけを使います。
+対向の名前、アドレス、認証情報は計測属性へ含めません。
+
+取得済みの状態から10秒間隔で記録し、既存の30秒間隔の転送処理へ渡します。
+新しい状態取得処理や外部デーモンは追加しません。転送先の応答を通信や状態報告の条件にしません。
+取得失敗や実行権限の期限切れは、対向数ゼロとして記録しません。
+同期ゲージは収集区間ごとに値を消去し、観測が止まった後に古い値へ新しい時刻を付けて再送しません。
+この扱いは死活監視の状態ゲージにも適用します。カウンターとヒストグラムの累積集計は維持します。
+この値は公式デーモンのオンライン判定です。接続数、通信成功数、鍵交換の成功数を表すものではありません。
+転送担当の再起動時には履歴を再送せず、次の成功した状態取得から値を再び記録します。
+
+受入は既存の独立した対向試験を使います。正規の製品と配布ツールを構築し、
+固定版のTailscaleエンジン・ソースと試験用の対向実装を用意した環境で実行します。
+
+```sh
+python3 scripts/tailscale-peer.py --homert --collector /usr/local/bin/otelcol-contrib
+```
+
+公式CLIで対向を停止・再開し、その後に収集された計測値を公式 LocalAPI の実状態と照合します。
+復帰後には三つのLAN経路とIPv4・IPv6の出口でTCP・UDPの応答を確認します。
+追加した停止・復帰区間の証拠は、実ソケットの応答と LocalAPI・Collector の照合です。
+対象実機の受入や、通信を継続できない時間の上限を保証する試験ではありません。
+
+2026年10月31日10:46〜10:49 JST、専用版 `tailnet-metrics-native102` で受入が成功しました。
+基点は `b28ee41` で、今回の計測処理と受入スクリプトを加えた版です。所要時間は175.556秒でした。
+独立した OpenTelemetry Collector Contrib 0.151.0 で、オンライン・停止・復帰の各操作後に
+新しい計測点 `1 → 0 → 1` を受信し、公式 LocalAPI の実値と照合しました。
+製品全体の再起動、設定の撤去・復元、管理用SSH、三つのLAN経路、IPv4・IPv6の出口通信も通りました。
+通常の製品と配布ツール、固定版エンジンとそのソース一式が必要です。
+初回の準備不足では配布ツール、次の試行ではエンジンのソースがなく、いずれも製品起動前に停止しました。
+依存物を用意した後は試験条件を変えていません。
+
+
+2026年10月31日11:48〜11:52 JST、統合候補 `a7d5c65` に同期ゲージの修正を加えた
+`ops-freshness-native106` で受入が終了0となりました。所要時間は238.156秒です。
+撤去前の対向数1を受信した後、Tailscale設定を撤去し、通常の30秒収集を2周期観測しました。
+同じ送出プロセスで死活監視の計測が続く間に、古い対向数が再送されないことを確認しました。
+再適用後の三つのLAN経路、IPv4・IPv6の出口通信、公式対向の停止・復帰後の値1→0→1も通りました。
+試験の初回実行は、収集周期の位相を無視した判定を見つけたため中断しました。
+判定だけを修正して同じ3実行物で再実行しました。中断した隔離環境は削除済みです。
+
+修正前には、SDKによる2回目の収集でも未更新の値1が残る不具合を再現しました。
+修正後は未更新のゲージが消え、カウンターの累積値2は保持されます。
+関連するRace Detector、vet、通常の静的リンクビルドも通過しました。
+再現手順は上記の対向試験です。通常ビルドと配布ツールに同じリリース識別子を指定します。
+この結果は隔離環境での管理・計測・通信の受入であり、homert対象機器や自然リース更新の受入ではありません。
+
+実行物のSHA-256:
+
+- `routerd`: `e74dcfc20ba04894872871dfd3a74329e0662513059e0da5a6f0f4e8102ea1ee`
+- `routerd-modules`: `3cd4fc8bbb025088273d6f1ac47596ae696512a8b0c035b78ee670bdb6087e0f`
+- `routerd-logging`: `f8d056b09d229e46a7e0fa1ab1166e4a9e4b0edbe893928c07c347834865f562`

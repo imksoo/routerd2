@@ -4,7 +4,10 @@ package integration
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,7 +15,9 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -27,7 +32,10 @@ import (
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/logging"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
+	"github.com/imksoo/routerd2/internal/runtimeconfig"
+	"github.com/imksoo/routerd2/internal/runtimeplan"
 	"github.com/vishvananda/netlink"
+	"golang.org/x/crypto/ssh"
 	"golang.org/x/sys/unix"
 )
 
@@ -107,7 +115,64 @@ func TestDaemonFirewallPacketLogs(t *testing.T) {
 	if historyPath == "" {
 		t.Fatal("missing firewall history owner")
 	}
-	f := startFixtureDaemonAt(t, imported.Document, work)
+	_, key, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := ssh.NewSignerFromKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := startFixtureDaemonConfigured(t, imported.Document, work, nil, runtimeconfig.SSH{
+		Listen: "0.0.0.0:2222", User: "admin", AuthorizedKeys: []string{string(ssh.MarshalAuthorizedKey(signer.PublicKey()))},
+	})
+	hostBytes, err := os.ReadFile(filepath.Join(work, "state", "ssh_host_ed25519_key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err := ssh.ParsePrivateKey(hostBytes)
+	clear(hostBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connectSSH := func() *ssh.Client {
+		t.Helper()
+		var client *ssh.Client
+		if err := fixtureInsideNamespace(peer, func() error {
+			var err error
+			client, err = ssh.Dial("tcp", "198.51.100.1:2222", &ssh.ClientConfig{
+				User: "admin", Auth: []ssh.AuthMethod{ssh.PublicKeys(signer)},
+				HostKeyCallback: ssh.FixedHostKey(host.PublicKey()), Timeout: 3 * time.Second,
+			})
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = client.Close() })
+		return client
+	}
+	var sshClient *ssh.Client
+	checkSSH := func(filters string, limit int, wanted []logstore.FirewallLogEntry) {
+		t.Helper()
+		session, err := sshClient.NewSession()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer session.Close()
+		output, err := session.CombinedOutput("show firewall-events " + historyService + " " + filters + " limit " + strconv.Itoa(limit))
+		var page runtimeplan.FirewallHistory
+		if err != nil || json.Unmarshal(output, &page) != nil {
+			t.Fatalf("SSH firewall history: %v %s", err, output)
+		}
+		if page.Service != historyService || page.ReadAt.IsZero() || page.Limit != limit || page.AtLimit != (len(wanted) == limit) || len(page.Entries) != len(wanted) {
+			t.Fatalf("SSH firewall history metadata changed: %+v, want %d rows and limit %d", page, len(wanted), limit)
+		}
+		for i := range wanted {
+			if !reflect.DeepEqual(page.Entries[i], wanted[i]) {
+				t.Fatalf("SSH firewall history changed stored row: %+v want %+v", page.Entries[i], wanted[i])
+			}
+		}
+	}
 	history := func() []logstore.FirewallLogEntry {
 		t.Helper()
 		db, err := logstore.OpenFirewallLogReadOnly(historyPath)
@@ -373,6 +438,9 @@ func TestDaemonFirewallPacketLogs(t *testing.T) {
 	checkEvents(url.Values{"source": {"198.51.100.99"}}, nil)
 	checkEvents(url.Values{"since": {time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano)}}, nil)
 	t.Log("independent HTTP client matched actual IPv4/IPv6 firewall history IDs and source/action/time filters")
+	sshClient = connectSSH()
+	checkSSH("", 200, rows)
+	_ = sshClient.Close()
 	f = f.restart()
 	persisted := false
 	for _, row := range history() {
@@ -422,6 +490,92 @@ func TestDaemonFirewallPacketLogs(t *testing.T) {
 		t.Fatal("firewall console lost expired event while archive delivery failed", original.ID, body)
 	}
 	t.Log("real archive send failure preserved expired history while both IP families kept allow/drop/reject and new history recording")
+	sshClient = connectSSH()
+	rows = history()
+	checkSSH("", 200, rows)
+	checkSSH("", 1, rows[:1])
+	for _, source := range []string{"198.51.100.2", "2001:db8:1::2"} {
+		for _, action := range []string{"drop", "reject"} {
+			var matching []logstore.FirewallLogEntry
+			for _, row := range rows {
+				if row.SrcAddress == source && row.Action == action {
+					matching = append(matching, row)
+				}
+			}
+			checkSSH("source "+source+" action "+action, 200, matching)
+		}
+	}
+	cutoff = rows[len(rows)/2].Timestamp
+	recent = nil
+	for _, row := range rows {
+		if !row.Timestamp.Before(cutoff) {
+			recent = append(recent, row)
+		}
+	}
+	checkSSH("since "+cutoff.Format(time.RFC3339Nano), 200, recent)
+	checkSSH("source 198.51.100.99", 200, nil)
+	failed, err := sshClient.NewSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var failedOutput bytes.Buffer
+	failed.Stdout = &failedOutput
+	err = failed.Run("show firewall-events " + historyService + " source invalid-address")
+	_ = failed.Close()
+	if err == nil || failedOutput.Len() != 0 {
+		t.Fatalf("invalid firewall history filter produced successful output: %v %s", err, failedOutput.String())
+	}
+	var consolePath string
+	for _, resource := range imported.Document.Resources {
+		if resource.Service != nil && resource.Service.WebConsole != nil {
+			consolePath = "resources[" + resource.ID + "].service.web_console.title"
+		}
+	}
+	if consolePath == "" {
+		t.Fatal("missing existing console candidate field")
+	}
+	var before control.State
+	if err := f.control.Do(t.Context(), http.MethodGet, "/v1/config", nil, &before); err != nil {
+		t.Fatal(err)
+	}
+	shell, err := sshClient.NewSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var transcript, shellErrors bytes.Buffer
+	shell.Stdout, shell.Stderr = &transcript, &shellErrors
+	shell.Stdin = strings.NewReader("configure\rset " + consolePath + " \"candidate-firewall-history\"\rshow firewall-events " + historyService + " limit 1\rshow " + consolePath + "\rabort\rexit\r")
+	if err := shell.RequestPty("xterm", 24, 100, ssh.TerminalModes{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := shell.Shell(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- shell.Wait() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err, transcript.String(), shellErrors.String())
+		}
+	case <-time.After(10 * time.Second):
+		_ = shell.Close()
+		t.Fatal("firewall history candidate shell timed out")
+	}
+	_ = shell.Close()
+	body := strings.ReplaceAll(transcript.String(), "\r\n", "\n")
+	if shellErrors.Len() != 0 || strings.Contains(body, "Error:") || !strings.Contains(body, fmt.Sprintf(`"id": %d,`, rows[0].ID)) || !strings.Contains(body, `"at_limit": true`) || !strings.Contains(body, "\n\"candidate-firewall-history\"\n") {
+		t.Fatal("candidate mode failed to retain its edited field while reading firewall history", body, shellErrors.String())
+	}
+	var unchanged control.State
+	if err := f.control.Do(t.Context(), http.MethodGet, "/v1/config", nil, &unchanged); err != nil {
+		t.Fatal(err)
+	}
+	if unchanged.Revision != before.Revision || unchanged.Confirmation != nil || !reflect.DeepEqual(unchanged.Config, before.Config) {
+		t.Fatal("read-only history or aborted candidate changed committed configuration")
+	}
+	_ = sshClient.Close()
+	t.Log("real SSH matched stored firewall rows/metadata before and after whole-product restart and source/action/time/limit filters; invalid filter failed; candidate retained its edit and abort left revision/configuration unchanged")
 	if err := netlink.RouteDel(&blocked); err != nil {
 		t.Fatal(err)
 	}
@@ -572,6 +726,10 @@ spec:
       kind: FirewallRule
       metadata: {name: allow-console}
       spec: {fromZone: outside, toZone: self, protocol: tcp, port: 8080, action: accept}
+    - apiVersion: firewall.routerd.net/v1alpha1
+      kind: FirewallRule
+      metadata: {name: allow-ssh}
+      spec: {fromZone: outside, toZone: self, protocol: tcp, port: 2222, action: accept}
 `
 
 const firewallHistoryPolicy = `

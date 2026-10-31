@@ -242,6 +242,61 @@ subnet6 2001:db8:42::/64 {
 		}
 		return s
 	}
+	// Retain the router learned from RA for same-link management. Expiry can
+	// remove its default route without making that link-local address unreachable.
+	var consoleRouter string
+	console := func(label string, active bool) {
+		t.Helper()
+		var body []byte
+		if err := fixtureInsideNamespace(client, func() error {
+			if consoleRouter == "" {
+				l, err := netlink.LinkByName("client0")
+				if err != nil {
+					return err
+				}
+				routes, err := netlink.RouteList(l, netlink.FAMILY_V6)
+				if err != nil {
+					return err
+				}
+				for _, route := range routes {
+					if (route.Dst == nil || route.Dst.String() == "::/0") && route.Gw.IsLinkLocalUnicast() {
+						consoleRouter = route.Gw.String()
+					}
+				}
+				if consoleRouter == "" {
+					return errors.New("LAN client has no acquired router for console access")
+				}
+			}
+			address := fmt.Sprintf("http://[%s%%25client0]:8080/ops/pd?service=%s", consoleRouter, wanName)
+			var err error
+			body, err = exec.Command("curl", "-g", "--noproxy", "*", "-fsS", "--max-time", "5", address).CombinedOutput()
+			return err
+		}); err != nil {
+			t.Fatalf("PD console %s: %v: %s", label, err, body)
+		}
+		for _, want := range []string{fmt.Sprintf(`data-pd-active="%t"`, active), fmt.Sprintf(`data-pd-information-current="%t"`, active), "IPv6取得・委譲"} {
+			if !bytes.Contains(body, []byte(want)) {
+				t.Fatalf("PD console %s missing %q: %s", label, want, body)
+			}
+		}
+		if active {
+			observed := read()
+			for _, prefix := range observed.Prefixes {
+				if !bytes.Contains(body, []byte(`data-pd-prefix="`+prefix.Prefix+`"`)) {
+					t.Fatal("console lost the actual delegated prefix", prefix.Prefix)
+				}
+			}
+			if !bytes.Contains(body, []byte("wan.test")) || !bytes.Contains(body, []byte("2001:db8:42::1")) {
+				t.Fatal("console lost learned DNS/search", string(body))
+			}
+		}
+		if dir := os.Getenv("ROUTERD2_TEST_EVIDENCE_DIR"); dir != "" {
+			if err := os.WriteFile(filepath.Join(dir, "pd-"+label+".html"), body, 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		t.Log("independent LAN HTTP read actual DHCPv6 observation", label, "active", active)
+	}
 	var first dhcp6config.Snapshot
 	until(t, 12*time.Second, func() bool { first = read(); return len(first.Prefixes) == 1 && first.State == "bound" })
 	if len(first.Addresses) != 0 || first.RAStarted.Managed {
@@ -403,6 +458,7 @@ subnet6 2001:db8:42::/64 {
 		}
 	}
 	information()
+	console("initial", true)
 	lan.mu.Lock()
 	var refresh uint32
 	for _, packet := range lan.packets {
@@ -603,6 +659,10 @@ subnet6 2001:db8:42::/64 {
 		}
 		return deadline.Nanos != 0 && uint64(clock.BoottimeNanoseconds)+uint64(2*time.Second) >= deadline.Nanos
 	})
+	leaseDeadline, found := read().LeaseUntil()
+	if !found {
+		t.Fatal("missing assignment deadline before console expiry check")
+	}
 	if err := unix.Kill(controlPID, unix.SIGSTOP); err != nil {
 		t.Fatal(err)
 	}
@@ -625,15 +685,26 @@ subnet6 2001:db8:42::/64 {
 	if err := unix.Kill(controlPID, unix.SIGCONT); err != nil {
 		t.Fatal(err)
 	}
+	// Information and assignments can have different original deadlines. The
+	// console's assignment assertion starts only after the last grant expires.
+	until(t, 5*time.Second, func() bool {
+		clock, err := boottime.Read()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return !leaseDeadline.Live(clock)
+	})
+	console("expired", false)
 	if err := unix.Kill(server.Process.Pid, unix.SIGCONT); err != nil {
 		t.Fatal(err)
 	}
 	until(t, 12*time.Second, func() bool {
 		current = read()
-		return len(current.Prefixes) > 0 && current.Prefixes[0].ValidUntil.Nanos > deadline.Nanos
+		return len(current.Prefixes) > 0 && current.Prefixes[0].ValidUntil.Nanos > leaseDeadline.Nanos
 	})
 	traffic()
 	information()
+	console("recovered", true)
 	lan.mu.Lock()
 	learnedSNTP, otherConfig, rdnss, dnssl, selectedIdentity := false, false, false, false, false
 	for _, p := range lan.packets {
