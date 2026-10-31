@@ -347,6 +347,19 @@ def peer(stage, power_action, updates, profile):
                 response = run(inside(lan, ["dig", "@" + client_dns, "peer.ppp.example", "A", "+tries=1", "+time=2", "+noall", "+comments", "+answer"] + transport))
                 assert "status: NOERROR" in response and re.search(r"\sA\s+198\.51\.100\.20(?:\s|$)", response), response
 
+        def dns_ready():
+            result = subprocess.run(
+                inside(lan, [
+                    "dig", "@" + client_dns, "peer.ppp.example", "A", "+tries=1", "+time=2",
+                    "+noall", "+comments", "+answer",
+                ]),
+                capture_output=True,
+                text=True,
+                timeout=4,
+            )
+            return (result.returncode == 0 and "status: NOERROR" in result.stdout
+                    and re.search(r"\sA\s+198\.51\.100\.20(?:\s|$)", result.stdout))
+
         def ppp_ready():
             return bool([x for x in json.loads(run(['ip', '-n', ac, '-j', 'link', 'show'])) if x['ifname'].startswith('ppp')])
         wait(ppp_ready)
@@ -380,6 +393,8 @@ def peer(stage, power_action, updates, profile):
         wait(client_ready)
         traffic()
         print('PASS factory appliance: CHAP, IPv4/IPv6 TCP/UDP, ISC PD and independent Linux SLAAC client', flush=True)
+        initial_pd = re.search(r'^Reply PD: address (\S+) to client with duid (\S+) iaid = (\d+) valid ', (stage / 'dhcp6.log').read_text(), re.MULTILINE)
+        assert initial_pd, 'ISC DHCPv6 did not record the initial PD Reply'
         before = query('show services pd')['snapshot']['renew_at']
         wait(lambda: query('show services pd')['snapshot']['renew_at'] != before, 15)
         traffic()
@@ -518,8 +533,8 @@ def peer(stage, power_action, updates, profile):
                 capture.send_signal(signal.SIGINT)
                 capture.wait(timeout=3)
         (stage / 'status.json').write_text(json.dumps(query('show status')))
-        shutdown_captures = [start(None, ['tcpdump', '--immediate-mode', '-Z', 'root', '-U', '-n', '-i', nic, '-w', str(stage / name)] + capture_filter, name)
-                             for nic, name, capture_filter in [('tapwan', 'shutdown-wan.pcap', []), ('taplan', 'shutdown-lan.pcap', ['icmp or icmp6 or port 53 or port 18080 or port 18081'])]]
+        shutdown_wan, shutdown_lan = [start(None, ['tcpdump', '--immediate-mode', '-Z', 'root', '-U', '-n', '-i', nic, '-w', str(stage / name)] + capture_filter, name)
+                                      for nic, name, capture_filter in [('tapwan', 'shutdown-wan.pcap', []), ('taplan', 'shutdown-lan.pcap', ['icmp or icmp6 or port 53 or port 18080 or port 18081'])]]
         wait(lambda: all((stage / name).exists() and (stage / name).stat().st_size >= 24 for name in ('shutdown-wan.pcap', 'shutdown-lan.pcap')))
         if profile == 'update':
             initial_selection = query('update status')
@@ -578,9 +593,13 @@ def peer(stage, power_action, updates, profile):
             assert prepared['pending']['release']['digest'] == staged['digest'] and prepared['active'] == selection['active']
             traffic()
             print('PASS signed SSH upload returned its result/exit status; forwarding/Health continued; target preflight prepared the next runtime/configuration pair', flush=True)
-        power_at = time.time()
         power_status = query('show status')
         power_index = next(x['ifindex'] for x in json.loads(run(['ip', '-n', ac, '-j', 'link', 'show'])) if x['ifname'].startswith('ppp'))
+        if profile == 'update':
+            d.terminate()
+            d.wait(timeout=5)
+            dhcp6_restart = (stage / 'dhcp6.log').stat().st_size
+        power_at = time.time()
         power_started = time.monotonic()
         if profile == 'time':
             for interface, name in [('tapwan', 'wan'), ('taplan', 'lan')]:
@@ -601,19 +620,43 @@ def peer(stage, power_action, updates, profile):
         assert 'Kernel panic' not in serial
         marker = 'Power down' if power_action == 'poweroff' else 'Restarting system'
         assert marker in serial, 'kernel did not perform requested ' + power_action
-        for capture in shutdown_captures:
-            capture.send_signal(signal.SIGINT)
-            capture.wait(timeout=3)
-        withdrawal_order('shutdown-wan.pcap', 'shutdown-lan.pcap', power_at)
-        print('PASS appliance CLI ' + power_action + ': RA withdrawal and PADT without Release before kernel power action', flush=True)
+        if profile == 'update':
+            shutdown_lan.send_signal(signal.SIGINT)
+            shutdown_lan.wait(timeout=3)
+        else:
+            for capture in (shutdown_wan, shutdown_lan):
+                capture.send_signal(signal.SIGINT)
+                capture.wait(timeout=3)
+            withdrawal_order('shutdown-wan.pcap', 'shutdown-lan.pcap', power_at)
+            print('PASS appliance CLI ' + power_action + ': RA withdrawal and PADT without Release before kernel power action', flush=True)
         if power_action == 'reboot':
             wait(lambda: any(x['ifname'].startswith('ppp') and x['ifindex'] != power_index for x in json.loads(run(['ip', '-n', ac, '-j', 'link', 'show']))))
-            d.terminate()
-            d.wait(timeout=5)
+            if profile != 'update':
+                d.terminate()
+                d.wait(timeout=5)
+                dhcp6_restart = (stage / 'dhcp6.log').stat().st_size
+            server_restarted_at = time.time()
             d = server()
             wait(pd_ready)
             wait(client_ready)
             traffic()
+            if profile == 'update':
+                shutdown_wan.send_signal(signal.SIGINT)
+                shutdown_wan.wait(timeout=3)
+                withdrawal_order('shutdown-wan.pcap', 'shutdown-lan.pcap', power_at)
+                print('PASS appliance CLI ' + power_action + ': RA withdrawal and PADT without Release before kernel power action', flush=True)
+                recovery = packets('shutdown-wan.pcap', server_restarted_at)
+                first_reply = next(((stamp, packet) for stamp, packet in recovery if 'dhcp6 reply' in packet and 'IA_PD' in packet), None)
+                assert first_reply, 'restarted ISC DHCPv6 did not reply to PD'
+                xid = re.search(r'dhcp6 reply \(xid=([0-9a-f]+)', first_reply[1])
+                assert xid, first_reply[1]
+                request = next((packet for stamp, packet in recovery if stamp < first_reply[0] and 'IA_PD' in packet and re.search(r'dhcp6 (solicit|rebind) \(xid=' + xid[1], packet)), None)
+                assert request and 'dhcp6 rebind' in request, 'first PD lease after ISC DHCPv6 restart was not Rebind'
+                assert not any('dhcp6 solicit' in packet and 'IA_PD' in packet for stamp, packet in recovery if stamp < first_reply[0]), 'PD Solicited after ISC DHCPv6 restart'
+                recovered_pd = re.search(r'^Rebind message .*\nReply PD: address (\S+) to client with duid (\S+) iaid = (\d+) valid ', (stage / 'dhcp6.log').read_text()[dhcp6_restart:], re.MULTILINE)
+                assert recovered_pd, 'ISC DHCPv6 did not record a Rebind PD Reply after restart'
+                assert recovered_pd.groups() == initial_pd.groups(), 'ISC DHCPv6 Rebind changed the initial PD DUID, IAID or prefix'
+                print('PASS rebooted ISC DHCPv6 acquired PD by Rebind with its initial DUID, IAID and prefix', flush=True)
             assert query('show status')['instance_id'] != power_status['instance_id']
             config = query('show config')
             assert config['revision'] == revision + (1 if profile == 'update' else 0)
@@ -726,6 +769,7 @@ def peer(stage, power_action, updates, profile):
                 d = server()
                 wait(pd_ready, 90)
                 wait(client_ready)
+                wait(dns_ready)
                 traffic()
                 def rollback_confirmed():
                     state = query('update status')
