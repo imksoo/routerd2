@@ -11341,7 +11341,7 @@
     {
       "stage": 1,
       "profile": "homert02/03",
-      "next": "Finish homert candidate integration and current native120 original LAN natural renewal, then target WAN/NIC/load and migration/update/recovery acceptance. Keep completed prior native95 HGW renewal separate from the current candidate. Proceed to observed k8s/pve differences and Cloud SAM after homert acceptance; original long I/O trigger and unknown never-received DHCP binding limits remain explicit.",
+      "next": "Integrate the six management paths into main and finish current native120 original LAN natural renewal independently. Candidate123 signed update, explicit rollback and failed-trial automatic recovery passed on isolated PVE. The current homert targets are 4-vCPU/4-GiB PVE guests with VirtIO NICs and VirtIO/SCSI disks: remaining target acceptance concerns actual WAN/LAN attachments, Ubuntu/Linux differences, existing identity/state migration and observed traffic load. Proceed to observed k8s/pve differences and Cloud SAM after homert acceptance; original long I/O trigger and unknown never-received DHCP binding limits remain explicit.",
       "required_focus": [
         "WAN/LAN IPv4/IPv6, DS-Lite, actual route selection/backup WAN, DHCP/PD/RA, learned DNS resolution/distribution, firewall/NAT/MTU/MSS, BGP and management",
         "HA-01 current election/track dependencies, HA-02 DHCP/PD synchronization, HA-03 NAT/connection synchronization and EXT-02 Tailscale used by this deployment"
