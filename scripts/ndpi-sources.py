@@ -50,7 +50,7 @@ def main():
         for checksum, name in re.findall(r'([0-9a-f]{128})  ([^"\s]+)', recipe.read_text()):
             path = cache / name
             is_source = name.startswith(origin+"-"+version+".tar.")
-            url = "https://www.gnupg.org/ftp/gcrypt/"+origin+"/"+name if is_source else base+name
+            url = "https://mirrors.dotsrc.org/gnupg/"+origin+"/"+name if is_source else base+name
             fetch(url, path)
             if hashlib.sha512(path.read_bytes()).hexdigest() != checksum:
                 raise ValueError("source checksum mismatch: "+name)
