@@ -11234,7 +11234,7 @@
       "normal_alpine_copy_assertions": 0,
       "normal_alpine_effects_timeouts": 0,
       "hgw_normal": "Historical native95 / standard7800-second actual-HGW result is recorded separately in the handoff. It is not a current126 execution or target-WAN qualification.",
-      "remaining": "Complete the unchanged native120 original43200-second LAN lease renewal and same-version126 two-node stop/rejoin acceptance. Close selected existing-state migration, target WAN/LAN peers and measured load, then k8s/pve profile differences and Cloud SAM/all34. Unknown never-received DHCP bindings and physical/load qualification remain limited.",
+      "remaining": "Complete unchanged native120 original43200-second LAN lease renewal. Same-version126 two-node power cut/rejoin passed with retained TCP and measured UDP/DNS loss. Next selected existing-state migration, target WAN/LAN and measured load, then k8s/pve differences and Cloud SAM/all34. Unknown never-received DHCP bindings and target-load qualification remain limited.",
       "full_profile_signed_update": {
         "base": "8cc420d / full-homert-loopback-native92",
         "candidate": "00969ca / full-homert-operations-native92",
@@ -11355,7 +11355,7 @@
           "result": "All 57 settings. DNS record change and snapshot restoration retained the same PD PID, generation, config digest, prefix and original preferred/valid deadlines. Acquired DNS, both-IP TCP/UDP, BGP, special client and Tailscale passed in 3.298831553198397 seconds after restoration. Whole-appliance reboot then recovered all paths and identities. Exit 0; dedicated VM removed."
         },
         "checks": "make check passed with full Race Detector, go vet and 36 Python checks. Normal amd64/arm64 builds and static linking of all six artifacts passed. Actual signed catalog and publisher/runtime bundle acceptance passed for both architectures; arm64 execution is not implied. The initial large-config Race attempt expired the original confirmation interval during concurrent builds; the unchanged interval passed on rerun. One UTC-address readiness attempt had no initial-grant trace; its diagnostic now asserts an installed finite grant while keeping the original 500 ms cutoff, and targeted/full Race checks passed.",
-        "remaining": "Natural original DHCP renewals, selected existing-state migration, target WAN/LAN peers and measured load; then k8s/pve profile differences and remaining Cloud SAM/provider implementation and acceptance. Full goal remains active.",
+        "remaining": "Original LAN natural renewals, selected existing-state migration and target WAN/LAN/load acceptance; then k8s/pve differences and remaining Cloud SAM/provider implementation and acceptance. Full goal remains active.",
         "pve_main126": {
           "release_id": "main-management-sam-126",
           "bootstrap_image_release": "ops-management-integrated-native125",
@@ -11365,7 +11365,41 @@
         },
         "source_commit": "25e7cf931644e77822c320cba275e07ab10902e5",
         "published_source_match": "All 29 frozen changed product-source files and the embedded HTML match published25e7cf9; all three tested126 artifact hashes were directly checked against the root normal-build outputs before cleanup.",
-        "cleanup": "Removed823.2MiB of completed local task binaries, archives, notices, logs and unused fixture output plus dedicated Docker image tags. Original AGENTS.md changes and concurrent worktrees/live cohorts were preserved."
+        "cleanup": "Removed823.2MiB of completed local task binaries, archives, notices, logs and unused fixture output plus dedicated Docker image tags. Original AGENTS.md changes and concurrent worktrees/live cohorts were preserved.",
+        "pve_two_node126": {
+          "source_commit": "25e7cf931644e77822c320cba275e07ab10902e5",
+          "release_id": "main-management-sam-126",
+          "finished_at": "2026-10-31T09:37:46.418909Z",
+          "environment": "New normal Make/APK126 image, two isolated Alpine KVM appliances,4CPU/4GiB each, BIOS VirtIO/SCSI disks and three VirtIO NICs; independent ISC,FRR,Headscale/official Tailscale, DNS/DoH,NTP and automatic clients. Actual qm stop removes all guest/kernel state.",
+          "result": "Exit0. Both power cuts/rejoins retained the same TCP socket/SYN/NAT mapping and original PD identity and client leases. Fresh DHCP/SLAAC clients used learned DNS UDP/TCP and both-IP TCP/UDP with the former owner absent and after rejoin. DNS/conditional forwarding/DoH, BGP/IX, NTP, Tailscale LAN and each explicitly selected exit passed.",
+          "full_handoff_seconds": [
+            25.881030559539795,
+            16.00969672203064
+          ],
+          "maximum_tcp_reply_seconds": 7.195570915006101,
+          "udp": {
+            "sent": 1675,
+            "received": 1449,
+            "expired": 226,
+            "pending": 0,
+            "maximum_no_reply_seconds": 5.723742445930839
+          },
+          "dns": {
+            "queries": 951,
+            "failed": 20
+          },
+          "tailscale_same_exit_recovery_seconds": [
+            2.7342708567157388,
+            2.0895474636927247
+          ],
+          "deadlines": "Original60s full handoff/selected-exit recovery and15s same-socket TCP budgets retained.",
+          "image_binary_sha256": {
+            "routerd": "2df5f39b6bc3942ab2df401ca2736a4eeed36b30b3f897e16cdc2a758d37c8fb",
+            "routerd-modules": "1f90fe173ad371fa495d48f28cea6b0e7a81a29220aa06b9394b7b367b02acd0",
+            "routerd-logging": "845a00d766205fa31c747f56e2601fbbe076dc6f019f3bcd1982105a23584cb7"
+          },
+          "limits": "This run uses newly built APK image binaries, distinct from the earlier Make build overlay hashes. Not zero loss, natural original renewal, actual production-state migration, target WAN/LAN/load or Cloud SAM qualification. IX physical SNAT existing flow is outside the declared old sync intent; another exit identity is not automatically selected."
+        }
       },
       "target_state_metadata": {
         "tailscale_version": "1.104.2",
@@ -11390,7 +11424,7 @@
     {
       "stage": 1,
       "profile": "homert02/03",
-      "next": "Complete unchanged native120 original LAN natural renewals and same-version126 two-node stop/rejoin acceptance, then selected existing-state migration and actual WAN/LAN/load acceptance. Continue with k8s/pve profile differences and Cloud SAM/all34 after homert replacement criteria. Keep original observation/traffic deadlines and report existing TCP continuity and UDP loss separately.",
+      "next": "Complete unchanged native120 original LAN natural renewals; same-version126 two-node power cut/rejoin acceptance passed. Next selected existing-state migration and target WAN/LAN/load acceptance, using a benchmark data path outside SSH. Then k8s/pve profile differences and remaining Cloud SAM/all34. Keep original observation and traffic deadlines.",
       "required_focus": [
         "WAN/LAN IPv4/IPv6, DS-Lite, actual route selection/backup WAN, DHCP/PD/RA, learned DNS resolution/distribution, firewall/NAT/MTU/MSS, BGP and management",
         "HA-01 current election/track dependencies, HA-02 DHCP/PD synchronization, HA-03 NAT/connection synchronization and EXT-02 Tailscale used by this deployment"
