@@ -1,6 +1,6 @@
 # routerd2 開発引き継ぎ
 
-更新: 2026-10-31 07:28 UTC。最初の製品は未完成であり、[実装計画](implementation-plan.md)、[機械可読台帳](implementation-plan.json)、[試験計画](test-plan.md)、[AGENTS.md](../AGENTS.md)を基準に進める。各実通信試験の直前に試験計画の実行手順と対象項目を読み直す。対象本番の置換はしていない。
+更新: 2026-10-31 08:00 UTC。最初の製品は未完成であり、[実装計画](implementation-plan.md)、[機械可読台帳](implementation-plan.json)、[試験計画](test-plan.md)、[AGENTS.md](../AGENTS.md)を基準に進める。各実通信試験の直前に試験計画の実行手順と対象項目を読み直す。対象本番の置換はしていない。
 
 ## 現在の実装
 
@@ -23,7 +23,11 @@ DHCP HA は VRRP が配布役を選び、dnsmasq に VIP と物理 ingress を�
 
 ## 直近の実行
 
-current HEAD の release build は成功している。元の 43,200 秒 DHCPv4 lease を通常・特殊 client で実時間観測中である。両者について、実際に受けた lease/T1 を使い、T1 の unicast REQUEST、同一 XID ACK、option 54、期限延長、REBIND がないこと、取得 DNS と IPv4/IPv6 通信の継続を確認する。capture は T1 周辺だけに限定し、判定後に削除する。
+統合候補 `20ea125` / `ops-management-integrated-native123` では、管理機能六経路の統合と隔離実通信、二台の通常APK/BIOSディスクによる双方向電源断切替・再起動が終了0だった。既存TCPを維持し、新規端末の取得DNSとIPv4・IPv6通信も復旧した。UDPは1,763送信中233欠落、DNSは1,017問い合わせ中17失敗であり、無損失ではない。詳細と限界は [試験計画](test-plan.md) の統合候補版の節に記録した。GitHubの `main` ブランチへの取り込みと対象実機の受入は別に残る。
+
+自然更新の現行環境は、版 `ops-management-combined-native120` を使う専用ジョブである。最初のACKは通常端末16:37:31.917 JST、特殊端末16:37:32.409 JSTで、元の43,200秒リース・21,600秒のT1を維持する。判定予定は22:39:02 JST。旧版108の観測経路は中断しており、その実行を待機中・合格とは扱わない。稼働中の二つの専用環境を変更しない。
+
+元の 43,200 秒 DHCPv4 lease を通常・特殊 client で実時間観測中である。両者について、実際に受けた lease/T1 を使い、T1 の unicast REQUEST、同一 XID ACK、option 54、期限延長、REBIND がないこと、取得 DNS と IPv4/IPv6 通信の継続を確認する。capture は T1 周辺だけに限定し、判定後に削除する。
 
 DHCPv6 PD の再起動後 Rebind と、不良 candidate から known-good runtime へ自動 rollback する PVE 経路は完了した。capture と一時 stage は削除済みであり、これは対象 ONU/HGW や実回線の受入ではない。
 
