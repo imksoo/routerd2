@@ -1,6 +1,6 @@
 # routerd2 開発引き継ぎ
 
-更新: 2026-10-31 09:01 UTC。最初の製品は未完成であり、[実装計画](implementation-plan.md)、[機械可読台帳](implementation-plan.json)、[試験計画](test-plan.md)、[AGENTS.md](../AGENTS.md)を基準に進める。各実通信試験の直前に試験計画の実行手順と対象項目を読み直す。対象本番の置換はしていない。
+更新: 2026-10-31 18:30 JST。最初の製品は未完成であり、[実装計画](implementation-plan.md)、[機械可読台帳](implementation-plan.json)、[試験計画](test-plan.md)、[AGENTS.md](../AGENTS.md)を基準に進める。各実通信試験の直前に試験計画の実行手順と対象項目を読み直す。対象本番の置換はしていない。
 
 ## 現在の実装
 
@@ -30,6 +30,12 @@ DHCP HA は VRRP が配布役を選び、dnsmasq に VIP と物理 ingress を�
 全57設定の別PVE受入版 `ops-management-integrated-native125` / `4fcdb89` は、DNS変更と保存設定復元の前後で同じPD worker・prefix・元期限を保持した。復元から取得DNS・IPv4/IPv6 TCP/UDP・BGP・特殊端末・Tailscaleの確認まで3.299秒、続く全体再起動後の復帰も終了0。修正前の現用HA版観測の破棄はこの条件で再現済み。専用VMは撤去し、自然更新の版120は変更していない。対象接続先、既存状態の移行、実測負荷、k8s/pve差分とCloud SAMは継続する。
 
 main統合版126のハッシュ一致3実行物でも、通常125の起動イメージを基底にした全57設定のPVE復元・全体再起動が終了0。PD worker・prefix・元期限を保持し、復元から全通信確認まで4.305秒だった。新規126イメージ全体の受入とは区別する。専用VMは撤去済み。
+
+公開は `25e7cf9`（PR #1統合済み）。PVEで固定した126版の変更対象Goソース29件・埋込みHTMLと一致し、試験した3実行物のハッシュも照合した。次の受入は同じ126版の二台停止/復帰。取得DNS・両IP通信、既存TCPとUDP損失を元条件で確認する。実状態移行・実経路負荷・対象WAN/LANを閉じてからk8s/pve差分、Cloud SAMへ進む。
+
+両homertのTailscale1.104.2と保存先`/var/lib/tailscale/tailscaled.state`（root:root、0600通常ファイル）は読取専用メタデータで確定した。状態本文は未取得で、実状態移行の合格には数えない。製品/VMを除く同じSSH Ethernet伝送自体の対照は102.259/131.067 Mbpsであり、旧候補の130〜149 Mbpsは製品上限の証拠ではない。
+
+今回の生成物・ログ等823.2MiBと専用Docker imageを削除した。実行中の自然更新コホート・他作業treeと既存`AGENTS.md`変更は保持した。
 
 ## 直近の実行
 
