@@ -316,3 +316,32 @@ remained unchanged. The same fixture compared real HTTP update views against
 confirmed, pending, cancelled, trial and failed-trial states. An initial
 fixture-only expectation of an absent separator space was corrected; product
 behavior and deadlines were unchanged.
+
+## ファイアウォール履歴の照会
+
+`show firewall-events NAME` で、既存の保存済みパケット記録を照会できます。
+SSH接続の単発コマンドと、ローカル・SSH接続の対話操作で利用できます。設定の候補を編集中でも読み取れます。
+サービス名は `events` と `service.events` の両方を受け付けます。
+
+```text
+show firewall-events events source 192.0.2.10 action drop limit 50
+show firewall-events service.events since 2026-10-31T00:00:00Z limit 100
+```
+
+絞り込みは `source`、`action`、`since`、`limit` です。
+IPアドレス、RFC3339形式の開始日時、取得件数の検査は既存の履歴APIが担当します。
+標準では100件、最大1000件です。出力には元の記録と `service`、`read_at`、`limit`、`at_limit` が含まれます。
+`at_limit` は指定件数へ達したことを示し、続きの存在や全履歴の取得を保証しません。
+記録が利用できない場合はエラーとして返し、空の履歴として扱いません。
+このコマンドは収集、保存、期限管理、設定変更を行いません。
+
+2026年10月31日10:59〜11:00 JST、専用版 `firewall-cli-native103` で、既存の独立端末試験が成功しました。
+基点は `b28ee41` で、今回のCLI接続と受入変更を加えた版です。実行物の構築を含む所要時間は31.936秒でした。
+実際のIPv4・IPv6パケットから保存された記録をSSHで読み、元の全項目、上限到達表示、絞り込み結果を照合しました。
+製品再起動後の再接続、無効な入力の失敗、候補編集中の照会、中止後の確定済み設定不変も確認しました。
+既存試験の保持期間8秒、日次巡回を1秒へ短縮する条件は維持しています。
+本番の保持期間を経過させた試験や、対象機器の受入を示すものではありません。
+
+```sh
+python3 scripts/daemon-tests.py firewall --test TestDaemonFirewallPacketLogs --go /usr/bin/go --binary-dir dist/bin --output dist/firewall-cli-acceptance
+```
