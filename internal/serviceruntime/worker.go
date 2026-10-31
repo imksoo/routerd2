@@ -40,6 +40,8 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/pppoeconfig"
 	"github.com/imksoo/routerd2/internal/protocol/ra"
 	"github.com/imksoo/routerd2/internal/protocol/raclient"
+	"github.com/imksoo/routerd2/internal/protocol/samclient"
+	"github.com/imksoo/routerd2/internal/protocol/samclientconfig"
 	"github.com/imksoo/routerd2/internal/protocol/syslog"
 	"github.com/imksoo/routerd2/internal/protocol/syslogconfig"
 	"github.com/imksoo/routerd2/internal/protocol/tailscale"
@@ -132,6 +134,12 @@ func Run(ctx context.Context, runtimeDir, name, role, path, digest string, gener
 			return err
 		}
 		return otlplogs.Run(runCtx, cfg, runtimeDir, ready)
+	case "sam_client":
+		var cfg samclientconfig.Config
+		if err := decode(instance.Config, &cfg); err != nil {
+			return err
+		}
+		return samclient.Run(runCtx, cfg, func(ctx context.Context, s samclientconfig.Snapshot) error { return c.update(ctx, s) }, ready)
 	case "syslog":
 		var cfg syslogconfig.Config
 		if err := decode(instance.Config, &cfg); err != nil {

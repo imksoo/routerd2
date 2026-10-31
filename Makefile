@@ -527,3 +527,8 @@ ndpi-modules:
 	@set -eu; artifact_id=$$($(DOCKER) create --network none routerd2-ndpi-modules:$(RELEASE_ID)-$(NDPI_ARCH) /not-executed); \
 	  trap '$(DOCKER) rm "$$artifact_id" >/dev/null' EXIT HUP INT TERM; \
 	  $(DOCKER) export "$$artifact_id" | tar --no-same-owner -xf - -C $(NDPI_DIR) routerd-modules ndpi-sources.tar ndpi-notices
+
+.PHONY: check-sam-enrollment
+check-sam-enrollment:
+	@test -n "$(OLD_ROUTERD)" || (echo "set OLD_ROUTERD to an independent Linux routerd server"; exit 1)
+	OLD_ROUTERD="$(OLD_ROUTERD)" go test -count=1 -v ./internal/protocol/samclient -run '^TestEnrollmentAgainstRouterd$$'

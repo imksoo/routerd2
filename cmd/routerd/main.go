@@ -238,7 +238,7 @@ func serveRuntime(b runtimeconfig.Boot, trial *releaseboot.Trial, authority *rel
 		}()
 	}
 	var dynamicRoles []string
-	for _, role := range []string{"web_console", "traffic_flow", "firewall_log", "otlp_logs", "syslog", "ntp", "tailscale", "health", "pppoe", "dhcp4", "dhcp6", "dhcp6_server", "dhcp_server", "dhcp_relay", "ra", "ra_client", "aftr", "dns", "vrrp", "bgp", "bfd"} {
+	for _, role := range []string{"sam_client", "web_console", "traffic_flow", "firewall_log", "otlp_logs", "syslog", "ntp", "tailscale", "health", "pppoe", "dhcp4", "dhcp6", "dhcp6_server", "dhcp_server", "dhcp_relay", "ra", "ra_client", "aftr", "dns", "vrrp", "bgp", "bfd"} {
 		if _, ok := b.Workers[role]; ok {
 			dynamicRoles = append(dynamicRoles, role)
 		}

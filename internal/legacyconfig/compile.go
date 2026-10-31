@@ -208,6 +208,8 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 			// Joined to the single IPv4 election after NAT conditions are compiled.
 		case "NTPClient", "NTPServer":
 			// Joined below into the one clock owner.
+		case "SAMEnrollmentClaim", "SAMEnrollmentClient":
+		// Joined into the native enrollment client below.
 		case "SAMNodeSet", "SAMTransportProfile":
 			// Static IPIP topology is joined to native DHCP/BGP ownership below.
 		case "BGPRouter", "BGPPeer":
@@ -236,6 +238,7 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 	transports, bgpDependencies := c.ipipTransports()
 	extra = append(extra, transports...)
 	c.ntp(vrrpNames)
+	c.samClients()
 	extra = append(extra, c.firewall(vrrpNames)...)
 	c.conntrackSync(extra)
 	c.conntrackPackages()

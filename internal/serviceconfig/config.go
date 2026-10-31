@@ -26,6 +26,7 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/pppoeconfig"
 	"github.com/imksoo/routerd2/internal/protocol/ra"
 	"github.com/imksoo/routerd2/internal/protocol/raclient"
+	"github.com/imksoo/routerd2/internal/protocol/samclientconfig"
 	"github.com/imksoo/routerd2/internal/protocol/syslogconfig"
 	"github.com/imksoo/routerd2/internal/protocol/tailscaleconfig"
 	"github.com/imksoo/routerd2/internal/protocol/trafficflowconfig"
@@ -34,6 +35,7 @@ import (
 )
 
 type Service struct {
+	SAMClient   *samclientconfig.Node     `json:"sam_client,omitempty"`
 	WebConsole  *webconsoleconfig.Config  `json:"web_console,omitempty"`
 	TrafficFlow *trafficflowconfig.Config `json:"traffic_flow,omitempty"`
 	FirewallLog *firewalllogconfig.Config `json:"firewall_log,omitempty"`
@@ -138,6 +140,9 @@ func (s Service) Role() string {
 	}
 	if s.OTLPLogs != nil {
 		return "otlp_logs"
+	}
+	if s.SAMClient != nil {
+		return "sam_client"
 	}
 	if s.Syslog != nil {
 		return "syslog"
@@ -247,7 +252,7 @@ func Validate(services []Service) error {
 		}
 		names[s.Name] = true
 		n := 0
-		for _, set := range []bool{s.WebConsole != nil, s.TrafficFlow != nil, s.FirewallLog != nil, s.OTLPLogs != nil, s.Syslog != nil, s.NTP != nil, s.Tailscale != nil, s.PPPoE != nil, s.Health != nil, s.BFD != nil, s.DSLite != nil, s.RAClient != nil, s.DHCPServer != nil, s.DHCP6Server != nil, s.DHCPRelay != nil, s.DHCP4 != nil, s.DHCP6 != nil, s.RA != nil, s.DNS != nil, s.VRRP != nil, s.BGP != nil} {
+		for _, set := range []bool{s.SAMClient != nil, s.WebConsole != nil, s.TrafficFlow != nil, s.FirewallLog != nil, s.OTLPLogs != nil, s.Syslog != nil, s.NTP != nil, s.Tailscale != nil, s.PPPoE != nil, s.Health != nil, s.BFD != nil, s.DSLite != nil, s.RAClient != nil, s.DHCPServer != nil, s.DHCP6Server != nil, s.DHCPRelay != nil, s.DHCP4 != nil, s.DHCP6 != nil, s.RA != nil, s.DNS != nil, s.VRRP != nil, s.BGP != nil} {
 			if set {
 				n++
 			}
@@ -255,7 +260,7 @@ func Validate(services []Service) error {
 		if n != 1 {
 			return fmt.Errorf("service %s must select exactly one protocol", s.Name)
 		}
-		if s.WebConsole == nil && s.TrafficFlow == nil && s.FirewallLog == nil && s.OTLPLogs == nil && s.Syslog == nil && s.NTP == nil && s.DNS == nil && s.BGP == nil && s.DHCPRelay == nil && !(s.BFD != nil && s.BFD.Multihop) && !interfaceName.MatchString(s.Interface()) {
+		if s.SAMClient == nil && s.WebConsole == nil && s.TrafficFlow == nil && s.FirewallLog == nil && s.OTLPLogs == nil && s.Syslog == nil && s.NTP == nil && s.DNS == nil && s.BGP == nil && s.DHCPRelay == nil && !(s.BFD != nil && s.BFD.Multihop) && !interfaceName.MatchString(s.Interface()) {
 			return fmt.Errorf("service %s has an invalid interface", s.Name)
 		}
 		var group uint16
@@ -303,7 +308,7 @@ func Validate(services []Service) error {
 			}
 			dhcpListeners[iface] = s.Name
 		}
-		if s.OTLPLogs != nil || s.Syslog != nil || s.DNS != nil || s.BGP != nil || s.DSLite != nil || s.Health != nil {
+		if s.SAMClient != nil || s.OTLPLogs != nil || s.Syslog != nil || s.DNS != nil || s.BGP != nil || s.DSLite != nil || s.Health != nil {
 			key = s.Role() + ":" + s.Name
 		}
 		if s.VRRP != nil {
@@ -346,6 +351,10 @@ func Validate(services []Service) error {
 		case "otlp_logs":
 			if err := otlplogconfig.Validate(*s.OTLPLogs); err != nil {
 				return err
+			}
+		case "sam_client":
+			if err := samclientconfig.Validate(*s.SAMClient); err != nil {
+				return fmt.Errorf("service %s: %w", s.Name, err)
 			}
 		case "syslog":
 			if err := syslogconfig.Validate(*s.Syslog); err != nil {
@@ -566,6 +575,8 @@ func (s Service) Instance(runtimeDir, stateDir string) (Instance, error) {
 		b, err = json.Marshal(cfg)
 	case "otlp_logs":
 		b, err = json.Marshal(*s.OTLPLogs)
+	case "sam_client":
+		b, err = json.Marshal(samclientconfig.Config{Node: samclientconfig.Normalize(*s.SAMClient), SocketPath: filepath.Join(runtimeDir, "services", s.Name+".sam.sock"), StatePath: filepath.Join(stateDir, "services", s.Name, "revoked-identity")})
 	case "syslog":
 		b, err = json.Marshal(*s.Syslog)
 	case "ntp":

@@ -987,3 +987,13 @@ owner. Declare that shared address on the WAN VMAC, with its existing ownership
 condition, to keep its ARP identity with that owner. Do not weaken the firewall
 to conceal asymmetric return traffic. This configuration does not by itself
 qualify failover time or the complete two-router deployment.
+
+### SAM enrollment client
+
+`SAMEnrollmentClient` plus its referenced `SAMEnrollmentClaim` become one
+`sam_client` service. The configured signed claim, HTTP(S) bootstrap endpoints,
+raw token file, TLS settings and refresh/retry durations are retained. A legacy
+Unix RR socket or environment/base64 token source needs explicit replacement and
+is rejected. Enrollment policies on a remote RR are not guessed or embedded.
+The worker exposes finite typed topology and explicit withdrawal; learned
+IPIP/BGP application and an RR-side enrollment server remain separate work.

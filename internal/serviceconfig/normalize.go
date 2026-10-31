@@ -6,6 +6,7 @@ import (
 
 	"github.com/imksoo/routerd2/internal/protocol/bfd"
 	"github.com/imksoo/routerd2/internal/protocol/otlplogconfig"
+	"github.com/imksoo/routerd2/internal/protocol/samclientconfig"
 	"github.com/imksoo/routerd2/internal/protocol/syslogconfig"
 	"github.com/imksoo/routerd2/internal/protocol/webconsoleconfig"
 )
@@ -26,6 +27,10 @@ func Normalize(s Service) Service {
 	if s.OTLPLogs != nil {
 		c := otlplogconfig.Normalize(*s.OTLPLogs)
 		s.OTLPLogs = &c
+	}
+	if s.SAMClient != nil {
+		c := samclientconfig.Normalize(*s.SAMClient)
+		s.SAMClient = &c
 	}
 	if s.Syslog != nil {
 		c := syslogconfig.Normalize(*s.Syslog)
