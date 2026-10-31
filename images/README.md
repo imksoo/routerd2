@@ -88,6 +88,15 @@ configuration. `DISK_AUTHORIZED_KEY` takes an OpenSSH public-key file, never
 a private key. Without these overrides the source image configuration and
 authorized keys are retained.
 
+`DISK_ETC_DIR=/path/to/provisioned-etc` copies operator configuration and trust
+files below `/etc`, retaining their file permissions. Use this for HA peer
+certificates, private keys, a Tailscale enrollment file, or a custom CA bundle.
+The directory layout mirrors `/etc` (for example `routerd/ha/node.key`).
+The builder then writes its boot document and applies `DISK_CONFIG`, if given.
+Keep this input and the resulting disk private; neither belongs in a public
+release artifact. This provisions files during image creation, without guest
+shell commands or a second runtime owner.
+
 The existing smoke check can boot the disk without QEMU's `-kernel` or
 `-initrd` shortcuts:
 

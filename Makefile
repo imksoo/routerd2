@@ -11,6 +11,7 @@ DISK_DIR ?= dist/disk
 DISK_STATE_DEVICE ?= /dev/vda2
 DISK_CONFIG ?=
 DISK_AUTHORIZED_KEY ?=
+DISK_ETC_DIR ?=
 CONTAINER_TAG ?= routerd2:dev
 QEMU_TIMEOUT ?= 90
 QEMU_DAEMON_TIMEOUT ?= 180
@@ -338,7 +339,7 @@ image: ndpi-modules pppoe-engine dnsmasq-engine conntrack-engine tailscale-engin
 
 .PHONY: disk-image
 disk-image:
-	$(PYTHON) scripts/build-disk-image.py --image-dir $(IMAGE_DIR) --output $(DISK_DIR) --state-device $(DISK_STATE_DEVICE) $(if $(DISK_CONFIG),--config $(DISK_CONFIG),) $(if $(DISK_AUTHORIZED_KEY),--authorized-key $(DISK_AUTHORIZED_KEY),)
+	$(PYTHON) scripts/build-disk-image.py --image-dir $(IMAGE_DIR) --output $(DISK_DIR) --state-device $(DISK_STATE_DEVICE) $(if $(DISK_CONFIG),--config $(DISK_CONFIG),) $(if $(DISK_AUTHORIZED_KEY),--authorized-key $(DISK_AUTHORIZED_KEY),) $(if $(DISK_ETC_DIR),--etc-dir $(DISK_ETC_DIR),)
 
 qemu-smoke:
 	$(PYTHON) scripts/qemu-smoke.py --image-dir $(IMAGE_DIR) --timeout $(QEMU_TIMEOUT) $(if $(QEMU_SSH_KEY),--ssh-key $(QEMU_SSH_KEY),)

@@ -33,6 +33,7 @@ def main():
     parser.add_argument("--state-device", default="/dev/vda2")
     parser.add_argument("--config", type=Path)
     parser.add_argument("--authorized-key", type=Path)
+    parser.add_argument("--etc-dir", type=Path, help="Provision configuration and trust files below /etc")
     args = parser.parse_args()
     if os.geteuid() != 0:
         parser.error("run as root in a private mount namespace (sudo unshare --mount --propagation private)")
@@ -77,10 +78,14 @@ def main():
     mounted = False
     try:
         overlay = work / "overlay"
-        (overlay / "etc/routerd").mkdir(parents=True)
+        if args.etc_dir:
+            shutil.copytree(args.etc_dir, overlay / "etc")
+        (overlay / "etc/routerd").mkdir(parents=True, exist_ok=True)
         (overlay / "etc/routerd/boot.json").write_text(json.dumps(boot, indent=2) + "\n")
         if args.config:
             shutil.copyfile(args.config, overlay / "etc/routerd/config.json")
+        selected_config = overlay / "etc/routerd/config.json"
+        config_hash = digest(selected_config) if selected_config.exists() else source_manifest["config_sha256"]
         mkinitramfs.write_archive(overlay, work / "boot-overlay.gz", 0)
         run(["sfdisk", str(disk)], input="label: dos\nstart=2048,size=2097152,type=83,bootable\ntype=83\n",
             stdout=subprocess.DEVNULL)
@@ -135,7 +140,7 @@ def main():
         "state_volume": boot["state_volume"],
         "boot_config_sha256": hashlib.sha256(json.dumps(boot, indent=2).encode() + b"\n").hexdigest(),
         "ssh_enabled": bool(boot.get("ssh", {}).get("authorized_keys")),
-        "config_sha256": digest(args.config) if args.config else source_manifest["config_sha256"],
+        "config_sha256": config_hash,
         "bootloader_ab_updates": False,
     }
     (output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
