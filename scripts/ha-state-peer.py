@@ -256,7 +256,7 @@ def peer(stage, dhcp6_server, pd_dslite, stale_owner, preparation, delegated_dns
                     "conntrack_sync": {"interface": "sync0", "local_address": "169.254.42." + str(index + 2), "peer_address": "169.254.42." + str(3 - index)}
                 }}},
                 {"id": "leases", "service": {"name": "leases", "dhcp_server": {
-                    "interface": "lan-ha", "server_address": "198.18.0.1", "authoritative": True, "sticky_hold_days": 3,
+                    "interface": "lan-ha", "ingress_interface": "lan0", "server_address": "198.18.0.1", "authoritative": True, "sticky_hold_days": 3,
                     "primary": {"prefix": "198.18.0.0/24", "start": "198.18.0.100", "end": "198.18.0.103", "lease_seconds": 60, "router": "198.18.0.1"},
                     "ha": {"owner": "ha", "replication": {"listen_address": "169.254.42." + str(index + 2) + ":8443", "peer_address": "169.254.42." + str(3 - index) + ":8443", "certificate_file": str(stage / (node + ".crt")), "private_key_file": str(stage / (node + ".key")), "peer_certificate_file": str(stage / (("b" if node == "a" else "a") + ".crt"))}}
                 }}},

@@ -210,6 +210,15 @@ DNS利用とIPv4/IPv6通信、自然DHCPv4更新、PD通常/強制交換と製�
 
 ## 3. HA: 単体の機能が動く構成を二台にする
 
+2026-10-31 12:05 JST: `ops-dhcp-integrated-native107`（`d327527`、`94d8b9a` と管理・計測の `caa99f3` を統合）を、通常のビルド経路で三つの静的実行物にした。
+隔離した Linux 名前空間で `scripts/ha-state-peer.py --dhcp-scopes --binary-dir dist/bin` が57.972秒で終了0。
+通常・特殊端末の配布、両方向の切替、同じTCP接続とUDP変換先の維持を確認した。
+直書きの試験設定に必要な `ingress_interface` を追加し、同じ実行物で `--initial-leases` も44.903秒で終了0。
+独立 dnsmasq のリースと元期限の取込、片系停止中の新規取得、取得DNSのUDP/TCP利用、再参加後のIPv4 TCP/UDPを確認した。
+更新はSIGUSR1で促しており、元の12時間リースの自然更新、IPv6・PD・DS-Liteを含む全構成、対象実機の受入には数えない。
+`5543d5b` の疎通確認に基づく設定確定の変更は、この実行物には含まない。
+関連する `serviceconfig`、`dhcpserver`、`runtimeplan` の Race Detector と `go vet`、Python構文検査も成功した。
+
 2026-10-30訂正: TCP応答後にだけUDPを送る旧試験の「UDP損失0」は、TCP停止中の連続UDPを測定していない。native80二段DNSの両方向切替では独立50ms送信を使い、985送信・810受信・175期限切れ、最大無応答4.543秒、同じTCP最大応答待ち4.575秒だった。新規通信と同じsocketの継続、損失と復旧時間を分けて判定する。
 
 `handoff-stop` / native-56は、同期断中のDHCP再起動が停止時の通信待ちでVRRP適用を止める経路を修正し、
