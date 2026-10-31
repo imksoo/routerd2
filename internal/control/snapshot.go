@@ -96,6 +96,22 @@ func (e *Engine) DeleteSnapshot(ctx context.Context, r SnapshotDeleteRequest) er
 }
 
 func (e *Engine) snapshotRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("POST /v1/config/snapshots/export", func(w http.ResponseWriter, r *http.Request) {
+		var ref config.SnapshotRef
+		if err := localapi.Decode(w, r, &ref); err != nil {
+			localapi.Fail(w, http.StatusBadRequest, err)
+			return
+		}
+		// Resolve the existing immutable copy without applying it or holding
+		// the live configuration writer while reading historical intent.
+		saved, err := e.store.ResolveSnapshot(ref)
+		if err != nil {
+			localapi.Fail(w, http.StatusUnprocessableEntity, err)
+			return
+		}
+		localapi.JSON(w, http.StatusOK, saved.Config)
+	})
+
 	mux.HandleFunc("POST /v1/config/snapshots/delete", func(w http.ResponseWriter, r *http.Request) {
 		var request SnapshotDeleteRequest
 		if err := localapi.Decode(w, r, &request); err != nil {

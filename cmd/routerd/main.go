@@ -178,6 +178,7 @@ func usage() error {
   routerd config confirm [--runtime-dir /run/routerd]
   routerd config snapshots [--runtime-dir /run/routerd]
   routerd config snapshot --expected-revision N [--runtime-dir /run/routerd]
+  routerd config export-snapshot --snapshot FILE [--runtime-dir /run/routerd]
   routerd config delete-snapshot --snapshot FILE --expected-revision N [--runtime-dir /run/routerd]
   routerd config restore --snapshot FILE --expected-revision N [--request-id ID] [--confirmed SECONDS] [--runtime-dir /run/routerd]
   routerd config validate FILE
@@ -330,7 +331,7 @@ func remote(args []string, command string) error {
 
 func configure(args []string) error {
 	if len(args) == 0 {
-		return errors.New("config requires show, export, validate, plan, migrate, apply, confirm, snapshot, snapshots, delete-snapshot, or restore")
+		return errors.New("config requires show, export, validate, plan, migrate, apply, confirm, snapshot, snapshots, export-snapshot, delete-snapshot, or restore")
 	}
 	if args[0] == "show" {
 		return remote(args[1:], "show config")
@@ -346,6 +347,9 @@ func configure(args []string) error {
 	}
 	if args[0] == "snapshot" {
 		return snapshotConfig(args[1:], os.Stdout)
+	}
+	if args[0] == "export-snapshot" {
+		return exportSnapshotConfig(args[1:], os.Stdout)
 	}
 	if args[0] == "delete-snapshot" {
 		return deleteSnapshotConfig(args[1:], os.Stdout)

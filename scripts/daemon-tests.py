@@ -19,7 +19,7 @@ SUITES = {
         ("TestDaemonDNSNegativeCacheExpiresAtConfiguredTTL", ("wan0", "lan0"), 75),
     ),
     "traffic-flow": (("TestDaemonTrafficFlowHistory", ("wan0", "lan0"), 85), ("TestDaemonTrafficFlowNDPI", ("wan0", "lan0"), 85)),
-    "management": (("TestDaemonConfigurationAndRecovery", ("mgmt0",), 100),),
+    "management": (("TestDaemonConfigurationAndRecovery", ("mgmt0",), 100), ("TestDaemonSnapshotExportAndApply", ("lan0",), 75)),
     "local-redirect": (("TestDaemonLocalDNSRedirect", ("wan0", "lan0"), 85),),
     "blackhole": (("TestDaemonBlackholeRoute", ("wan0", "lan0"), 55),),
     "firewall": (("TestDaemonFirewallSourceCIDRs", ("wan0",), 55), ("TestDaemonFirewallPacketLogs", ("wan0",), 75)),

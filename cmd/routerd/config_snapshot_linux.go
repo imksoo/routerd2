@@ -87,3 +87,23 @@ func deleteSnapshotConfig(args []string, out io.Writer) error {
 	}
 	return cli.WriteJSON(out, removed)
 }
+
+func exportSnapshotConfig(args []string, out io.Writer) error {
+	f := flags("config export-snapshot")
+	file := f.String("snapshot", "", "saved SnapshotRef JSON/YAML file (required)")
+	dir := f.String("runtime-dir", "/run/routerd", "runtime directory")
+	if err := f.Parse(args); err != nil {
+		return err
+	}
+	if f.NArg() != 0 || *file == "" {
+		return errors.New("--snapshot is required; no positional arguments")
+	}
+	input, err := os.Open(*file)
+	if err != nil {
+		return err
+	}
+	defer input.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return (cli.Session{RuntimeDir: *dir}).Execute(ctx, "snapshot export", input, out)
+}

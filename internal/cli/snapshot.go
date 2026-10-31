@@ -82,3 +82,26 @@ func deleteSnapshot(ctx context.Context, client *localapi.Client, input io.Reade
 	}
 	return WriteJSON(out, deleted)
 }
+
+func exportSnapshot(ctx context.Context, client *localapi.Client, input io.Reader, out io.Writer) error {
+	if input == nil {
+		return errors.New("snapshot export requires SnapshotRef JSON/YAML on stdin")
+	}
+	var ref config.SnapshotRef
+	if err := config.Decode(input, &ref); err != nil {
+		return err
+	}
+	if err := ref.Validate(); err != nil {
+		return err
+	}
+	var document config.Document
+	if err := client.Do(ctx, http.MethodPost, "/v1/config/snapshots/export", ref, &document); err != nil {
+		return err
+	}
+	data, err := config.YAML(document)
+	if err != nil {
+		return err
+	}
+	_, err = out.Write(data)
+	return err
+}
