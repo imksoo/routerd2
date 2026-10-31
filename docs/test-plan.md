@@ -333,6 +333,7 @@ homert全engineのイメージ、対象実機の受入は別に残る。
 - SAMのenrollment・claim・revoke・identity・placement、RR/leaf構成、WG/BGP、/32所有、NATなし双方向通信、
   移動・分断・古い通知・計画drainを実peerで確認する。各providerのlive受入を別々に記録する。
 - 2026-10-31 `sam-wireguard-final-release`: 実routerd2 supervisor/control/network/SAM worker、独立旧routerd RR、FRR、root Linux netnsの二端末で、admitted RRからWireGuard peer/AllowedIPs、endpoint route、IPIP/BGPを生成し、WireGuard handshakeとNATなしTCP/UDP双方向転送を確認。明示revokeと元admission期限切れの各試験でIPIP/FIB routeを撤去し、通信が停止した。期限切れ試験では、再投影ごとのFirewall rule追加が共有設定を増殖させBGP worker停止に至る不具合も修正し、同じ元期限で再通過した。三配布物は同一release IDで静的linkを確認済み。/32 mobility/provider action、planned leaf/drain、分断復旧、FOU、PVE/実機・クラウドlive受入は未確認で、CLOUD-04全体の合格ではない。
+- 2026-10-31 `sam-mobility-candidate`: 上記の実構成で、claimの`mobility.ownedAddresses`にある`203.0.113.51/32`をleaf BGP経路としてFRRで観測し、独立RRのadmission期限切れと明示revokeの両方でFRRからの撤回を確認した。IPIP/WireGuard経由のNATなしTCP/UDP、広告・撤回、kernel FIB/tunnel撤去を含む4ケース（暗号化有無×revoke/期限切れ）が終了0。`make check`も終了0。これは認可済み単一claimのIPv4 /32 BGP deliveryであり、leaf間移動、複数owner選定、provider capture、planned drain、分断復旧、実機/cloud受入は未確認。
 - KubernetesはPod netnsとhostNetworkを別々に、実traffic、reschedule、node障害、旧owner撤去、管理、update/rollbackとCNI資源保護を確認する。
 
 ## 8. 全34 work packageとの対応

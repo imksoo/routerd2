@@ -26,6 +26,7 @@ func TestSAMRRTransportUsesOriginalDeadlineAndWithdraws(t *testing.T) {
 			LeafID:        "leaf-a",
 			TunnelAddress: "10.255.0.2/32",
 			Endpoint:      "192.0.2.1",
+			Mobility:      api.SAMEnrollmentClaimMobilitySpec{OwnedAddresses: []string{"203.0.113.11/32"}},
 		},
 		Endpoints: []string{"http://192.0.2.2:65432"},
 	}
@@ -80,6 +81,17 @@ func TestSAMRRTransportUsesOriginalDeadlineAndWithdraws(t *testing.T) {
 	}
 	if bindingDigest(p.instances, "service.edge") == protocols.instances["service.edge"].digest {
 		t.Fatal("RR peer did not replace the BGP worker configuration")
+	}
+	var bgpRuntime bgpconfig.Config
+	for _, binding := range p.instances {
+		if binding.instance.Name == "service.edge" {
+			if err := json.Unmarshal(binding.instance.Config, &bgpRuntime); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if len(bgpRuntime.Runtime.Paths) != 1 || bgpRuntime.Runtime.Paths[0].Source != "MobilityPool/leaf/node/leaf-a" || bgpRuntime.Runtime.Paths[0].Prefix != "203.0.113.11/32" {
+		t.Fatalf("claim-owned /32 was not installed in the BGP worker config: %+v", bgpRuntime.Runtime.Paths)
 	}
 
 	snapshot.Phase, snapshot.RRSet = "revoked", nil

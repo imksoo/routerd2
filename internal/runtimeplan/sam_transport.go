@@ -77,6 +77,15 @@ func projectSAMTransports(p *projection, recipes []resourceprogram.SAMTransport,
 		if cfg.Runtime.Peers == nil {
 			cfg.Runtime.Peers = make(map[string]bgpdaemon.AppliedPeer)
 		}
+		claim, err := samClaim(p.instances, recipe.Client)
+		if err != nil {
+			return fmt.Errorf("SAM transport %s claim: %w", recipe.Name, err)
+		}
+		paths, err := samOwnedPaths(recipe, claim.Mobility.OwnedAddresses)
+		if err != nil {
+			return fmt.Errorf("SAM transport %s ownership: %w", recipe.Name, err)
+		}
+		cfg.Runtime.Paths = append(cfg.Runtime.Paths, paths...)
 		for _, peer := range peers {
 			outer, ok := outerIPv4Route(p.network, peer.endpoint.String(), recipe.Underlay, source, clock, until)
 			if !ok {
@@ -118,6 +127,46 @@ func projectSAMTransports(p *projection, recipes []resourceprogram.SAMTransport,
 		}
 	}
 	return nil
+}
+
+func samClaim(bindings []binding, module string) (api.SAMEnrollmentClaimSpec, error) {
+	for _, binding := range bindings {
+		if binding.instance.Name != module {
+			continue
+		}
+		var cfg samclientconfig.Config
+		if err := json.Unmarshal(binding.instance.Config, &cfg); err != nil {
+			return api.SAMEnrollmentClaimSpec{}, err
+		}
+		return cfg.Claim, nil
+	}
+	return api.SAMEnrollmentClaimSpec{}, fmt.Errorf("SAM client %s is not active", module)
+}
+
+func samOwnedPaths(recipe resourceprogram.SAMTransport, values []string) ([]bgpdaemon.AppliedPath, error) {
+	paths := make([]bgpdaemon.AppliedPath, 0, len(values))
+	seen := make(map[string]bool, len(values))
+	source := "MobilityPool/" + recipe.Name + "/node/" + recipe.Self
+	for _, raw := range values {
+		prefix, err := netip.ParsePrefix(raw)
+		if err != nil {
+			address, addressErr := netip.ParseAddr(raw)
+			if addressErr != nil || !address.Is4() {
+				return nil, fmt.Errorf("invalid owned address %q", raw)
+			}
+			prefix = netip.PrefixFrom(address, 32)
+		}
+		if !prefix.Addr().Is4() || prefix.Bits() != 32 {
+			return nil, fmt.Errorf("owned address %q is not an IPv4 /32", raw)
+		}
+		prefix = prefix.Masked()
+		if seen[prefix.String()] {
+			return nil, fmt.Errorf("owned address %s is repeated", prefix)
+		}
+		seen[prefix.String()] = true
+		paths = append(paths, bgpdaemon.AppliedPath{Source: source, Prefix: prefix.String(), Family: bgpdaemon.AppliedPathFamilyIPv4Unicast})
+	}
+	return paths, nil
 }
 
 func inheritSAMForwarding(desired *network.Desired, parent, child string) {

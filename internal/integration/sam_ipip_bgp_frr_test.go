@@ -230,6 +230,7 @@ func daemonSAMIPIPBGPWithFRR(t *testing.T, expire, encrypted bool) {
 		JoinTimestamp: time.Now().UTC().Format(time.RFC3339Nano),
 		TunnelAddress: leafInner.String() + "/32",
 		Endpoint:      "192.0.2.1",
+		Mobility:      api.SAMEnrollmentClaimMobilitySpec{OwnedAddresses: []string{"203.0.113.51/32"}},
 		BGP:           api.SAMEnrollmentClaimBGPSpec{ASN: 64512, RouterID: "192.0.2.1"},
 	}
 	if encrypted {
@@ -259,6 +260,7 @@ func daemonSAMIPIPBGPWithFRR(t *testing.T, expire, encrypted bool) {
   - apiVersion: mobility.routerd.net/v1alpha1
     kind: SAMTransportProfile`, filepath.Join(work, "leaf-wg.key")), 1)
 	} else {
+		legacy = strings.Replace(legacy, "interfaces: [Interface/lan, WireGuardInterface/wg-sam]", "interfaces: [Interface/lan]", 1)
 		legacy = strings.Replace(legacy, "      wireGuard: __LEAF_WG_CLAIM__\n", "", 1)
 	}
 	document, err := legacyconfig.Compile([]byte(legacy))
@@ -318,6 +320,7 @@ func daemonSAMIPIPBGPWithFRR(t *testing.T, expire, encrypted bool) {
 		return err == nil && json.Unmarshal(output, &view) == nil && len(view.Paths) != 0
 	}
 	until(t, 25*time.Second, func() bool { return showFRR("198.18.0.0/24") })
+	until(t, 25*time.Second, func() bool { return showFRR("203.0.113.51/32") })
 	destination := netip.MustParsePrefix("203.0.113.50/32")
 	until(t, 20*time.Second, func() bool { return samFixtureRoute(destination, tunnel, rrInner) })
 	if encrypted {
@@ -373,6 +376,7 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
 		if withdrawn.Phase != "revoked" || withdrawn.RRSet != nil {
 			t.Fatalf("local withdrawal retained transport topology: %+v", withdrawn)
 		}
+		until(t, 20*time.Second, func() bool { return !showFRR("203.0.113.51/32") })
 		until(t, 15*time.Second, func() bool { return !samFixtureRoute(destination, tunnel, rrInner) && samFixtureTunnelAbsent(tunnel) })
 		if err := forward(); err == nil {
 			t.Fatal("revoked SAM path still forwards")
@@ -381,16 +385,17 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
 		if _, err := client.GetSAMEnrollmentTopology(t.Context(), controlapi.SAMEnrollmentTopologyGetRequest{Name: "rrs", ClaimRef: "SAMEnrollmentClaim/leaf", ClaimDigest: samenrollment.ClaimDigest(claim), ClaimIdentityDigest: samenrollment.ClientIdentityDigest(claim)}); err == nil || !strings.Contains(err.Error(), "revoked") {
 			t.Fatalf("independent RR retained a revoked topology: %v", err)
 		}
-		t.Log("independent RR admission -> routerd2 SAM snapshot -> IPIP/BGP -> NAT-less TCP/UDP passed; explicit revoke withdrew kernel tunnel and FIB route")
+		t.Log("independent RR admission -> routerd2 SAM-owned /32 advertisement -> IPIP/BGP -> NAT-less TCP/UDP passed; explicit revoke withdrew kernel tunnel and FIB route")
 		return
 	}
 
 	stopRR()
+	until(t, 20*time.Second, func() bool { return !showFRR("203.0.113.51/32") })
 	until(t, 20*time.Second, func() bool { return !samFixtureRoute(destination, tunnel, rrInner) && samFixtureTunnelAbsent(tunnel) })
 	if err := forward(); err == nil {
 		t.Fatal("expired SAM path still forwards after its RR disappeared")
 	}
-	t.Log("independent RR admission -> routerd2 SAM snapshot -> IPIP/BGP -> NAT-less TCP/UDP passed; original RR admission expiry withdrew kernel tunnel and FIB route")
+	t.Log("independent RR admission -> routerd2 SAM-owned /32 advertisement -> IPIP/BGP -> NAT-less TCP/UDP passed; original RR admission expiry withdrew kernel tunnel and FIB route")
 }
 
 func samFixtureRRConfig(joinToken, rrWGPublic, rrWGPrivatePath string) string {

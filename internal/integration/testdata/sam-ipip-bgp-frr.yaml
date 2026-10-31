@@ -72,7 +72,7 @@ spec:
           allowedPrefixLengthMin: 32
           allowedPrefixLengthMax: 32
           nextHopRewrite: peer-address
-        exportPolicy: {allowedPrefixes: [198.18.0.0/24]}
+        exportPolicy: {allowedPrefixes: [198.18.0.0/24, 203.0.113.0/24]}
   - apiVersion: mobility.routerd.net/v1alpha1
     kind: SAMEnrollmentClaim
     metadata: {name: leaf}
@@ -87,6 +87,7 @@ spec:
       tunnelAddress: __LEAF_INNER__/32
       endpoint: 192.0.2.1
       wireGuard: __LEAF_WG_CLAIM__
+      mobility: {ownedAddresses: [203.0.113.51/32]}
       bgp: {asn: 64512, routerID: 192.0.2.1}
   - apiVersion: mobility.routerd.net/v1alpha1
     kind: SAMEnrollmentClient

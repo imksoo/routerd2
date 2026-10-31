@@ -1374,7 +1374,12 @@
         "internal/network",
         "internal/protocol/bgp",
         "internal/runtimeplan"
-      ]
+      ],
+      "latest_evidence": {
+        "runtime": "sam-mobility-candidate",
+        "result": "Implemented SAM claim-owned IPv4 /32 BGP delivery from the leaf. Four real daemon/kernel cases passed against an independent legacy routerd RR and FRR: IPIP and WireGuard, each with explicit revoke and original admission expiry. FRR observed 203.0.113.51/32 advertisement and withdrawal; independent LAN client TCP/UDP passed without NAT; tunnel and FIB route were removed after revoke/expiry. make check and release build passed.",
+        "remaining": "Single-claim route delivery only. Multi-leaf ownership movement, provider capture/action, planned drain, partition recovery, FOU, and PVE/physical/cloud acceptance remain unverified; CLOUD-04 remains incomplete."
+      }
     },
     {
       "id": "OPS-01",

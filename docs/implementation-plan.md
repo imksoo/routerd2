@@ -4,6 +4,8 @@
 
 2026-10-31: `sam-wireguard-final-release` で独立旧routerd RR・FRRと実routerd2 process/kernelによるSAM WireGuard→IPIP/BGPを確認。handshake、NATなしTCP/UDP双方向、revokeと元期限切れ後のkernel撤去を実通信で受け入れた。CLOUD-04の/32 mobility/provider action、planned drain、分断復旧、provider liveは継続。
 
+2026-10-31: `sam-mobility-candidate` でclaim所有のIPv4 `/32` をSAM leafのBGPへ投影し、独立FRRで広告と明示revoke/元admission期限切れによる撤回を確認した。暗号化有無を含む4つの実daemon/Linux kernelケースでNATなしTCP/UDPとtunnel/FIB撤去が通過し、`make check`も終了0。単一claimのBGP deliveryを実装した段階であり、claim間のowner移動、provider capture、planned drain、partition recovery、対象機器・cloud acceptanceは残る。
+
 ユーザー指定の完了期限: **2026-10-29 16:56:38 UTC**（2026-10-28 16:56:38 UTCから24時間）。
 全34項目と実環境での利用可能性が完了条件。部分成功へ縮小せず、期限時点でも未成立は未成立と報告する。
 旧routerdの実装を取り込み、独自のLAN配布エンジンを置換する。動く単体構成、二台運用、残る製品機能と
