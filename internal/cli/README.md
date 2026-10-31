@@ -385,3 +385,22 @@ running runtime. A repeated deletion of the same absent reference is successful.
 After freeing capacity, retry the original snapshot or update preparation with
 the current revision and release generation. Historical failure metadata does
 not retain an otherwise unused configuration file.
+
+### Saved traffic history
+
+`show traffic-flows NAME` queries the existing collector history through the
+control API. It is available in local and SSH exec sessions and from the
+interactive shell, including while editing an uncommitted candidate. `NAME`
+accepts the service name with or without its `service.` prefix.
+
+```text
+show traffic-flows flows client 192.0.2.10 peer 198.51.100.20 protocol tcp limit 25
+show traffic-flows service.flows since 2026-10-31T00:00:00Z until 2026-10-31T01:00:00Z
+```
+
+The JSON result includes the selected service, read time, applied limit,
+`truncated`, and the collector's saved rows, including their original timestamps,
+traffic counters and available classification. The API normalizes addresses,
+validates time ranges and limits reads to 100 rows by default and 1000 at most.
+A missing or unreadable database reports an error; it is not an empty history.
+The command neither opens the database nor alters collection or retention.

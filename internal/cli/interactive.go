@@ -264,7 +264,7 @@ func (s *interactiveShell) execute(ctx context.Context, line string, out io.Writ
 		}
 		operation, _ := firstWord(rest)
 		switch operation {
-		case "status", "network", "version", "config", "services", "route-issues", "logging", "running-config", "logs", "event-store", "observations", "derived", "snapshots", "dns-queries", "firewall-events":
+		case "status", "network", "version", "config", "services", "route-issues", "logging", "running-config", "logs", "event-store", "observations", "derived", "snapshots", "dns-queries", "firewall-events", "traffic-flows":
 			return false, s.session.Execute(ctx, "show "+rest, nil, out)
 		}
 		parts, err := parsePath(c.absolutePath(rest))
@@ -787,7 +787,7 @@ func (s *interactiveShell) complete(line string, pos int, key rune) (string, int
 	case 1:
 		switch words[0] {
 		case "show":
-			choices = []string{"status", "network", "resources", "derived", "observations", "event-store", "services", "route-issues", "logging", "logs", "version", "config", "running-config", "snapshots", "dns-queries", "firewall-events"}
+			choices = []string{"status", "network", "resources", "derived", "observations", "event-store", "services", "route-issues", "logging", "logs", "version", "config", "running-config", "snapshots", "dns-queries", "firewall-events", "traffic-flows"}
 			if s.candidate != nil {
 				choices = append(choices, "candidate")
 				choices = append(choices, s.pathChoices(token)...)
@@ -1022,6 +1022,8 @@ const interactiveHelp = `Operational commands:
   show observations [after CURSOR] [limit 1..16]
   show event-store
   show snapshots             list verified saved configuration references
+  show traffic-flows NAME [client IP] [peer IP] [protocol NAME]
+                          [since RFC3339] [until RFC3339] [limit 1..1000]
   show dns-queries NAME [client IP] [name PATTERN] [response RCODE]
                        [since RFC3339] [until RFC3339] [limit 1..1000]
   show firewall-events NAME [source IP] [action VALUE]
