@@ -144,6 +144,16 @@ func projectWithFacts(doc config.Native, protocols protocolPlan, records map[str
 	p.network.VRRPGuards = slices.Clip(p.network.VRRPGuards)
 	p.network.Routes = slices.Clone(p.network.Routes)
 	p.network.Interfaces = slices.Clone(p.network.Interfaces)
+	if p.network.Firewall != nil {
+		firewall := *p.network.Firewall
+		firewall.Forward = slices.Clone(firewall.Forward)
+		if firewall.ForwardChain != nil {
+			chain := *firewall.ForwardChain
+			chain.Rules = slices.Clone(chain.Rules)
+			firewall.ForwardChain = &chain
+		}
+		p.network.Firewall = &firewall
+	}
 	for i := range p.network.Interfaces {
 		iface := &p.network.Interfaces[i]
 		iface.Addresses = slices.Clone(iface.Addresses)

@@ -28,17 +28,21 @@ func (c *compiler) wireguard() {
 	for _, r := range interfaces {
 		c.allow(r, "ifname", "privateKey", "privateKeyFile", "listenPort", "mtu", "selfNodeRef", "peersFrom")
 		s := r.Spec.(api.WireGuardInterfaceSpec)
+		dynamicSAM := len(s.PeersFrom) == 1 && strings.HasPrefix(strings.TrimSpace(s.PeersFrom[0].Resource), "SAMRRSet/") && matchingSAMTransport(c, s)
 		if s.PrivateKey != "" {
 			c.reject(r, "privateKey", "unsupported_semantics", "inline private keys require secure provisioning to a versioned regular key file before migration; key values are never copied into native configuration")
 		}
 		if !wireGuardKeyPath(s.PrivateKeyFile) {
 			c.reject(r, "privateKeyFile", "required", "a clean absolute private-key file path is required; missing-key pending state cannot become an active native interface")
 		}
-		if s.SelfNodeRef != "" {
+		if s.SelfNodeRef != "" && !dynamicSAM {
 			c.reject(r, "selfNodeRef", "unsupported_semantics", "SAM identity and enrollment require an explicit native controller; only static peer resources are supported")
 		}
-		if len(s.PeersFrom) != 0 {
+		if len(s.PeersFrom) != 0 && !dynamicSAM {
 			c.reject(r, "peersFrom", "unsupported_semantics", "SAM identity, enrollment and dynamic peer sources require an explicit native controller; only static peer resources are supported")
+		}
+		if len(s.PeersFrom) != 0 && dynamicSAM && s.SelfNodeRef == "" {
+			c.reject(r, "selfNodeRef", "required", "an enrolled WireGuard interface must name its local SAM node")
 		}
 		if s.FwMark != 0 || s.Table != 0 {
 			c.reject(r, "", "unsupported_semantics", "public legacy WireGuard fwmark/table intent is not supported; no route table or mark is invented during migration")
@@ -147,6 +151,21 @@ func (c *compiler) wireguard() {
 		device := &c.document.Network.WireGuard[i]
 		sort.Slice(device.Peers, func(i, j int) bool { return device.Peers[i].PublicKey < device.Peers[j].PublicKey })
 	}
+}
+
+func matchingSAMTransport(c *compiler, wg api.WireGuardInterfaceSpec) bool {
+	self := strings.TrimSpace(wg.SelfNodeRef)
+	if self == "" || len(wg.PeersFrom) != 1 {
+		return false
+	}
+	rrSet := strings.TrimSpace(wg.PeersFrom[0].Resource)
+	for _, profile := range c.resourcesOfKind("SAMTransportProfile") {
+		spec := profile.Spec.(api.SAMTransportProfileSpec)
+		if strings.TrimSpace(spec.SelfNodeRef) == self && strings.EqualFold(strings.TrimSpace(spec.Encryption), "wireguard") && profileUsesRRSet(spec, rrSet) {
+			return true
+		}
+	}
+	return false
 }
 
 func wireGuardKeyPath(path string) bool {

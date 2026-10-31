@@ -15,6 +15,22 @@ spec:
     kind: DHCPv4Client
     metadata: {name: wan-lease}
     spec: {interface: wan, useRoutes: false, useDNS: false}
+  - apiVersion: firewall.routerd.net/v1alpha1
+    kind: FirewallZone
+    metadata: {name: wan}
+    spec: {role: untrust, interfaces: [Interface/wan]}
+  - apiVersion: firewall.routerd.net/v1alpha1
+    kind: FirewallZone
+    metadata: {name: z-lan}
+    spec: {role: untrust, interfaces: [Interface/lan, WireGuardInterface/wg-sam]}
+  - apiVersion: firewall.routerd.net/v1alpha1
+    kind: FirewallPolicy
+    metadata: {name: transit}
+    spec: {sameRoleAccept: true}
+  - apiVersion: firewall.routerd.net/v1alpha1
+    kind: FirewallRule
+    metadata: {name: allow-wireguard}
+    spec: {fromZone: wan, toZone: self, protocol: udp, port: 51820, action: accept}
   - apiVersion: net.routerd.net/v1alpha1
     kind: IPv4StaticAddress
     metadata: {name: lan}
@@ -70,6 +86,7 @@ spec:
       joinHMAC: "__JOIN_HMAC__"
       tunnelAddress: __LEAF_INNER__/32
       endpoint: 192.0.2.1
+      wireGuard: __LEAF_WG_CLAIM__
       bgp: {asn: 64512, routerID: 192.0.2.1}
   - apiVersion: mobility.routerd.net/v1alpha1
     kind: SAMEnrollmentClient

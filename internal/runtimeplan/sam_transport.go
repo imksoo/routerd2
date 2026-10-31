@@ -2,11 +2,13 @@ package runtimeplan
 
 import (
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/netip"
 	"sort"
 
+	"github.com/imksoo/routerd/pkg/api"
 	"github.com/imksoo/routerd/pkg/bgpdaemon"
 	"github.com/imksoo/routerd/pkg/mobilityconfig"
 	"github.com/imksoo/routerd2/internal/boottime"
@@ -47,6 +49,27 @@ func projectSAMTransports(p *projection, recipes []resourceprogram.SAMTransport,
 		if len(peers) == 0 {
 			continue
 		}
+		var wireguard *network.WireGuard
+		if recipe.WireGuardInterface != "" {
+			for i := range p.network.WireGuard {
+				if p.network.WireGuard[i].Interface == recipe.WireGuardInterface {
+					wireguard = &p.network.WireGuard[i]
+					break
+				}
+			}
+			if wireguard == nil {
+				return fmt.Errorf("SAM transport %s has no WireGuard device %s", recipe.Name, recipe.WireGuardInterface)
+			}
+			for _, peer := range peers {
+				found := false
+				for _, configured := range wireguard.Peers {
+					found = found || configured.PublicKey == peer.wireguard.PublicKey
+				}
+				if !found {
+					wireguard.Peers = append(wireguard.Peers, peer.wireguard)
+				}
+			}
+		}
 		cfg, ok := configs[recipe.BGP]
 		if !ok {
 			return fmt.Errorf("SAM transport %s has no BGP configuration", recipe.Name)
@@ -74,6 +97,7 @@ func projectSAMTransports(p *projection, recipes []resourceprogram.SAMTransport,
 				ExportPolicy:       recipe.ExportPolicy,
 			}
 			p.network.Links = append(p.network.Links, network.Link{Name: peer.link, Kind: "ipip", Parent: recipe.Underlay, Local: local.String(), Remote: peer.endpoint.String(), TTL: 64, Authority: until})
+			inheritSAMForwarding(&p.network, recipe.Underlay, peer.link)
 			if err := addAddressWithOptions(&p.network, peer.link, netip.PrefixFrom(peer.local, 31).String(), network.AddressOptions{BootLifetime: network.BootLifetime{BootID: until.BootID, PreferredNanos: until.Nanos, ValidNanos: until.Nanos}}); err != nil {
 				return err
 			}
@@ -96,11 +120,44 @@ func projectSAMTransports(p *projection, recipes []resourceprogram.SAMTransport,
 	return nil
 }
 
+func inheritSAMForwarding(desired *network.Desired, parent, child string) {
+	firewall := desired.Firewall
+	if firewall == nil {
+		return
+	}
+	for _, forward := range firewall.Forward {
+		if forward.From == parent {
+			firewall.Forward = append(firewall.Forward, network.Forward{From: child, To: forward.To})
+		}
+		if forward.To == parent {
+			firewall.Forward = append(firewall.Forward, network.Forward{From: forward.From, To: child})
+		}
+	}
+	if firewall.ForwardChain != nil {
+		for _, rule := range firewall.ForwardChain.Rules {
+			if rule.Action != "accept" {
+				continue
+			}
+			if rule.Match.InInterface == parent {
+				inherited := rule
+				inherited.Match.InInterface = child
+				firewall.ForwardChain.Rules = append(firewall.ForwardChain.Rules, inherited)
+			}
+			if rule.Match.OutInterface == parent {
+				inherited := rule
+				inherited.Match.OutInterface = child
+				firewall.ForwardChain.Rules = append(firewall.ForwardChain.Rules, inherited)
+			}
+		}
+	}
+}
+
 type samRRPeer struct {
-	endpoint netip.Addr
-	local    netip.Addr
-	remote   netip.Addr
-	link     string
+	endpoint  netip.Addr
+	local     netip.Addr
+	remote    netip.Addr
+	link      string
+	wireguard network.WireGuardPeer
 }
 
 func currentSAMRR(recipe resourceprogram.SAMTransport, snapshot samclientconfig.Snapshot, clock boottime.Clock) bool {
@@ -131,6 +188,7 @@ func samLocalEndpoint(recipe resourceprogram.SAMTransport, addresses map[string]
 
 func samRRPeers(recipe resourceprogram.SAMTransport, snapshot samclientconfig.Snapshot, local netip.Addr) ([]samRRPeer, error) {
 	byName := make(map[string]netip.Addr)
+	wireguardByName := make(map[string]network.WireGuardPeer)
 	for _, node := range snapshot.RRSet.Nodes {
 		name := node.NodeRef
 		if name == "" {
@@ -139,10 +197,19 @@ func samRRPeers(recipe resourceprogram.SAMTransport, snapshot samclientconfig.Sn
 		if name == recipe.Self {
 			continue
 		}
-		if node.SAMEndpointFrom.Resource != "" {
+		if recipe.WireGuardInterface == "" && node.SAMEndpointFrom.Resource != "" {
 			return nil, fmt.Errorf("RR node %q has an unresolved endpoint source", name)
 		}
-		endpoint, err := netip.ParseAddr(node.SAMEndpoint)
+		endpointText := node.SAMEndpoint
+		if recipe.WireGuardInterface != "" {
+			endpointText = node.WireGuard.TransportEndpoint
+			wireguard, err := samWireGuardPeer(node)
+			if err != nil {
+				return nil, fmt.Errorf("RR node %q WireGuard peer: %w", name, err)
+			}
+			wireguardByName[name] = wireguard
+		}
+		endpoint, err := netip.ParseAddr(endpointText)
 		if err != nil {
 			return nil, fmt.Errorf("RR node %q endpoint: %w", name, err)
 		}
@@ -180,9 +247,50 @@ func samRRPeers(recipe resourceprogram.SAMTransport, snapshot samclientconfig.Sn
 			return nil, fmt.Errorf("RR node %q endpoint equals local endpoint", name)
 		}
 		sum := sha256.Sum256([]byte(recipe.Name + "\x00" + recipe.Self + "\x00" + name))
-		peers = append(peers, samRRPeer{endpoint: byName[name], local: left, remote: right, link: fmt.Sprintf("ip%x", sum[:6])})
+		peers = append(peers, samRRPeer{endpoint: byName[name], local: left, remote: right, link: fmt.Sprintf("ip%x", sum[:6]), wireguard: wireguardByName[name]})
 	}
 	return peers, nil
+}
+
+func samWireGuardPeer(node api.SAMNodeSpec) (network.WireGuardPeer, error) {
+	spec := node.WireGuard
+	key, err := base64.StdEncoding.Strict().DecodeString(spec.PublicKey)
+	if err != nil || len(key) != 32 || base64.StdEncoding.EncodeToString(key) != spec.PublicKey {
+		return network.WireGuardPeer{}, fmt.Errorf("invalid public key")
+	}
+	var nonzero byte
+	for _, value := range key {
+		nonzero |= value
+	}
+	if nonzero == 0 {
+		return network.WireGuardPeer{}, fmt.Errorf("zero public key")
+	}
+	endpoint, err := netip.ParseAddrPort(spec.Endpoint)
+	if err != nil || endpoint.Port() == 0 || endpoint.Addr().IsUnspecified() || endpoint.Addr().IsMulticast() || endpoint.Addr().Zone() != "" || endpoint.Addr().Is4In6() {
+		return network.WireGuardPeer{}, fmt.Errorf("invalid UDP endpoint")
+	}
+	if spec.PersistentKeepalive < 0 || spec.PersistentKeepalive > 65535 || len(spec.AllowedIPs) > network.MaxWireGuardAllowedIPs {
+		return network.WireGuardPeer{}, fmt.Errorf("invalid peer limits")
+	}
+	peer := network.WireGuardPeer{PublicKey: spec.PublicKey, Endpoint: endpoint.String(), PersistentKeepalive: spec.PersistentKeepalive}
+	transport, err := netip.ParseAddr(spec.TransportEndpoint)
+	if err != nil || !transport.Is4() || transport.IsUnspecified() || transport.IsMulticast() {
+		return network.WireGuardPeer{}, fmt.Errorf("invalid inner transport endpoint")
+	}
+	var routed bool
+	for _, raw := range spec.AllowedIPs {
+		prefix, err := netip.ParsePrefix(raw)
+		if err != nil || prefix.Addr().Is4In6() {
+			return network.WireGuardPeer{}, fmt.Errorf("invalid allowed IP %q", raw)
+		}
+		prefix = prefix.Masked()
+		peer.AllowedIPs = append(peer.AllowedIPs, prefix.String())
+		routed = routed || prefix.Contains(transport)
+	}
+	if !routed {
+		return network.WireGuardPeer{}, fmt.Errorf("allowed IPs do not include the IPIP transport endpoint")
+	}
+	return peer, nil
 }
 
 func cloneBGPConfigs(source map[string]bgpconfig.Config) map[string]bgpconfig.Config {

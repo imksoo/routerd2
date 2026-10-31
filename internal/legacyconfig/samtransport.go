@@ -46,8 +46,8 @@ func (c *compiler) samTransports() []resourceprogram.Resource {
 			c.reject(client, "claimRef", "unsupported_semantics", "direct-leaf SAM topology needs its own bounded BGP policy; this native transport currently uses the RR fallback only")
 			continue
 		}
-		if s.Mode != "ipip" || s.Encryption != "" && s.Encryption != "none" || s.AddressingMode != "pair-stable" || s.PublishPeerGroup {
-			c.reject(profile, "mode", "unsupported_semantics", "native enrollment transport currently requires unencrypted pair-stable IPIP without peer-group publication")
+		if s.Mode != "ipip" || s.Encryption != "" && s.Encryption != "none" && s.Encryption != "wireguard" || s.AddressingMode != "pair-stable" || s.PublishPeerGroup {
+			c.reject(profile, "mode", "unsupported_semantics", "native enrollment transport requires pair-stable IPIP with optional WireGuard underlay and no peer-group publication")
 			continue
 		}
 		if s.BGP.GeneratePeers != nil && !*s.BGP.GeneratePeers || s.BGP.BFD.Enabled || s.BGP.RouteReflectorClient || s.BGP.DirectLocalPreference != 0 {
@@ -67,6 +67,26 @@ func (c *compiler) samTransports() []resourceprogram.Resource {
 		underlay := c.interfaceName(profile, "underlayInterface", s.UnderlayInterface, true)
 		if underlay == "" {
 			continue
+		}
+		wireguardInterface := ""
+		if s.Encryption == "wireguard" {
+			for _, candidate := range c.resourcesOfKind("WireGuardInterface") {
+				wg := candidate.Spec.(api.WireGuardInterfaceSpec)
+				self := first(strings.TrimSpace(wg.SelfNodeRef), strings.TrimSpace(c.legacy.Metadata.Name))
+				if self != claimSpec.LeafID || !wireGuardSourceUsesRRSet(wg, claimSpec.RRSetRef) {
+					continue
+				}
+				if wireguardInterface != "" {
+					c.reject(profile, "encryption", "ambiguous_wireguard", "encrypted transport requires one WireGuard interface receiving this claim's RR set")
+					wireguardInterface = ""
+					break
+				}
+				wireguardInterface = first(strings.TrimSpace(wg.IfName), candidate.Metadata.Name)
+			}
+			if wireguardInterface == "" || underlay != wireguardInterface {
+				c.reject(profile, "encryption", "missing_wireguard", "encrypted IPIP transport requires its claim-bound WireGuard peer source as the configured underlay")
+				continue
+			}
 		}
 		local, dhcp := "", ""
 		if s.LocalEndpoint != "" && s.LocalEndpointFrom.Resource != "" {
@@ -114,6 +134,7 @@ func (c *compiler) samTransports() []resourceprogram.Resource {
 			Underlay:           underlay,
 			LocalEndpoint:      local,
 			LocalFromDHCP4:     prefixedService(dhcp),
+			WireGuardInterface: wireguardInterface,
 			BGP:                "service." + bgp,
 			PeerASN:            s.BGP.PeerASN,
 			EbgpMultihop:       s.BGP.EbgpMultihop,
@@ -134,6 +155,15 @@ func (c *compiler) samTransports() []resourceprogram.Resource {
 		}
 	}
 	return out
+}
+
+func wireGuardSourceUsesRRSet(spec api.WireGuardInterfaceSpec, rrSet string) bool {
+	for _, source := range spec.PeersFrom {
+		if strings.TrimSpace(source.Resource) == strings.TrimSpace(rrSet) {
+			return true
+		}
+	}
+	return false
 }
 
 func profileUsesRRSet(profile api.SAMTransportProfileSpec, rrSet string) bool {

@@ -22,6 +22,7 @@ import (
 	"github.com/imksoo/routerd/pkg/mobilityconfig"
 	"github.com/imksoo/routerd/pkg/samenrollment"
 	"github.com/imksoo/routerd2/internal/config"
+	"github.com/imksoo/routerd2/internal/control"
 	"github.com/imksoo/routerd2/internal/legacyconfig"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/network"
@@ -35,14 +36,18 @@ import (
 //go:embed testdata/sam-ipip-bgp-frr.yaml
 var legacySAMIPIPBGPFRR []byte
 
-func TestDaemonSAMIPIPBGPWithFRR(t *testing.T) { daemonSAMIPIPBGPWithFRR(t, false) }
+func TestDaemonSAMIPIPBGPWithFRR(t *testing.T) { daemonSAMIPIPBGPWithFRR(t, false, false) }
 
-func TestDaemonSAMIPIPBGPExpiryWithFRR(t *testing.T) { daemonSAMIPIPBGPWithFRR(t, true) }
+func TestDaemonSAMIPIPBGPExpiryWithFRR(t *testing.T) { daemonSAMIPIPBGPWithFRR(t, true, false) }
+
+func TestDaemonSAMIPIPBGPWithWireGuardFRR(t *testing.T) { daemonSAMIPIPBGPWithFRR(t, false, true) }
+
+func TestDaemonSAMIPIPBGPExpiryWithWireGuardFRR(t *testing.T) { daemonSAMIPIPBGPWithFRR(t, true, true) }
 
 // This is a real three-plane check: routerd2 receives an RRSet from an
 // independent routerd HTTP server, uses it to create its kernel IPIP/BGP path,
 // and forwards a terminal client's TCP and UDP through an independent FRR.
-func daemonSAMIPIPBGPWithFRR(t *testing.T, expire bool) {
+func daemonSAMIPIPBGPWithFRR(t *testing.T, expire, encrypted bool) {
 	if !isolateFixtureTimeout(t, t.Name(), 90*time.Second) {
 		return
 	}
@@ -75,6 +80,10 @@ func daemonSAMIPIPBGPWithFRR(t *testing.T, expire bool) {
 		leafInner, rrInner = rrInner, leafInner
 	}
 	leafOuter, rrOuter := netip.MustParseAddr("192.0.2.1"), netip.MustParseAddr("192.0.2.2")
+	tunnelLocal, tunnelRemote := leafOuter, rrOuter
+	if encrypted {
+		tunnelLocal, tunnelRemote = netip.MustParseAddr("10.20.0.31"), netip.MustParseAddr("10.20.0.2")
+	}
 
 	rr := fixturePeerNamespace(t, "wan0", "rr0")
 	client := fixturePeerNamespace(t, "lan0", "client0")
@@ -92,19 +101,55 @@ func daemonSAMIPIPBGPWithFRR(t *testing.T, expire bool) {
 			t.Fatal(err)
 		}
 	}
-	setup(rr,
+	work, err := os.MkdirTemp("/tmp", "samwg-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(work) })
+	leafWGPrivate, leafWGPublic := "", ""
+	rrWGPrivate, rrWGPublic := "", ""
+	if encrypted {
+		leafWGPrivate, leafWGPublic = samFixtureWireGuardKey(t)
+		rrWGPrivate, rrWGPublic = samFixtureWireGuardKey(t)
+		if err := os.WriteFile(filepath.Join(work, "leaf-wg.key"), []byte(leafWGPrivate+"\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(work, "rr-wg.key"), []byte(rrWGPrivate+"\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rrTunnelLocal, rrTunnelRemote := rrOuter, leafOuter
+	rrSetup := [][]string{
 		[]string{"address", "add", "192.0.2.2/24", "dev", "rr0"},
 		[]string{"address", "add", "203.0.113.50/32", "dev", "lo"},
-		[]string{"link", "add", "rrtun0", "type", "ipip", "local", "192.0.2.2", "remote", "192.0.2.1", "ttl", "64"},
+	}
+	if encrypted {
+		rrTunnelLocal, rrTunnelRemote = netip.MustParseAddr("10.20.0.2"), netip.MustParseAddr("10.20.0.31")
+		rrSetup = append(rrSetup,
+			[]string{"link", "add", "wg-rr", "type", "wireguard"},
+			[]string{"address", "add", "10.20.0.2/32", "dev", "wg-rr"},
+			[]string{"link", "set", "wg-rr", "up"},
+			[]string{"route", "add", "10.20.0.31/32", "dev", "wg-rr"},
+		)
+	}
+	rrSetup = append(rrSetup,
+		[]string{"link", "add", "rrtun0", "type", "ipip", "local", rrTunnelLocal.String(), "remote", rrTunnelRemote.String(), "ttl", "64"},
 		[]string{"link", "set", "rrtun0", "up"},
 		[]string{"address", "add", rrInner.String() + "/31", "dev", "rrtun0"},
 	)
+	setup(rr, rrSetup...)
+	if encrypted {
+		if err := fixtureInsideNamespace(rr, func() error {
+			return exec.Command("wg", "set", "wg-rr", "listen-port", "51820", "private-key", filepath.Join(work, "rr-wg.key"), "peer", leafWGPublic, "endpoint", "192.0.2.1:51820", "allowed-ips", "10.20.0.31/32", "persistent-keepalive", "5").Run()
+		}); err != nil {
+			t.Fatalf("configure independent RR WireGuard peer: %v", err)
+		}
+	}
 	setup(client,
 		[]string{"address", "add", "198.18.0.2/24", "dev", "client0"},
 		[]string{"route", "add", "default", "via", "198.18.0.1"},
 	)
 
-	work := t.TempDir()
 	controlToken, joinToken := filepath.Join(work, "control-token"), filepath.Join(work, "join-token")
 	for path, value := range map[string]string{controlToken: "sam-fixture-control", joinToken: "sam-fixture-join"} {
 		if err := os.WriteFile(path, []byte(value), 0600); err != nil {
@@ -112,7 +157,7 @@ func daemonSAMIPIPBGPWithFRR(t *testing.T, expire bool) {
 		}
 	}
 	rrConfig := filepath.Join(work, "rr.yaml")
-	if err := os.WriteFile(rrConfig, []byte(samFixtureRRConfig(joinToken)), 0600); err != nil {
+	if err := os.WriteFile(rrConfig, []byte(samFixtureRRConfig(joinToken, rrWGPublic, filepath.Join(work, "rr-wg.key"))), 0600); err != nil {
 		t.Fatal(err)
 	}
 	rrLog, err := os.Create(filepath.Join(work, "rr.log"))
@@ -187,6 +232,9 @@ func daemonSAMIPIPBGPWithFRR(t *testing.T, expire bool) {
 		Endpoint:      "192.0.2.1",
 		BGP:           api.SAMEnrollmentClaimBGPSpec{ASN: 64512, RouterID: "192.0.2.1"},
 	}
+	if encrypted {
+		claim.WireGuard = api.SAMEnrollmentClaimWireGuardSpec{PublicKey: leafWGPublic, Endpoint: "192.0.2.1:51820", AllowedIPs: []string{"10.20.0.31/32"}, PersistentKeepalive: 5}
+	}
 	claim.JoinHMAC = samenrollment.JoinHMAC([]byte("sam-fixture-join"), claim)
 	legacy := strings.NewReplacer(
 		"__JOIN_TIMESTAMP__", claim.JoinTimestamp,
@@ -195,6 +243,24 @@ func daemonSAMIPIPBGPWithFRR(t *testing.T, expire bool) {
 		"__RR_ENDPOINT__", "http://192.0.2.2:16543",
 		"__CONTROL_TOKEN__", controlToken,
 	).Replace(string(legacySAMIPIPBGPFRR))
+	if encrypted {
+		legacy = strings.ReplaceAll(legacy, "encryption: none", "encryption: wireguard")
+		legacy = strings.ReplaceAll(legacy, "underlayInterface: wan", "underlayInterface: wg-sam")
+		legacy = strings.ReplaceAll(legacy, "localEndpointFrom: {resource: DHCPv4Client/wan-lease, field: currentAddress}", "localEndpoint: 10.20.0.31")
+		legacy = strings.Replace(legacy, "      wireGuard: __LEAF_WG_CLAIM__", fmt.Sprintf("      wireGuard: {publicKey: %q, endpoint: %q, allowedIPs: [10.20.0.31/32], persistentKeepalive: 5}", leafWGPublic, "192.0.2.1:51820"), 1)
+		legacy = strings.Replace(legacy, "  - apiVersion: mobility.routerd.net/v1alpha1\n    kind: SAMTransportProfile", fmt.Sprintf(`  - apiVersion: net.routerd.net/v1alpha1
+    kind: WireGuardInterface
+    metadata: {name: wg-sam}
+    spec: {ifname: wg-sam, selfNodeRef: leaf-a, privateKeyFile: %q, listenPort: 51820, mtu: 1420, peersFrom: [{resource: SAMRRSet/rrs}]}
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: IPv4StaticAddress
+    metadata: {name: wg-sam-address}
+    spec: {interface: WireGuardInterface/wg-sam, address: 10.20.0.31/32}
+  - apiVersion: mobility.routerd.net/v1alpha1
+    kind: SAMTransportProfile`, filepath.Join(work, "leaf-wg.key")), 1)
+	} else {
+		legacy = strings.Replace(legacy, "      wireGuard: __LEAF_WG_CLAIM__\n", "", 1)
+	}
 	document, err := legacyconfig.Compile([]byte(legacy))
 	if err != nil {
 		t.Fatal("compile SAM transport fixture", err)
@@ -243,7 +309,7 @@ func daemonSAMIPIPBGPWithFRR(t *testing.T, expire bool) {
 		lastSAMError = nil
 		return admitted.Phase == "ready" && admitted.RRSet != nil && len(admitted.RRSet.Nodes) == 1 && admitted.RRSet.Nodes[0].NodeRef == "rr-a"
 	})
-	tunnel := samFixtureTunnel(t, leafOuter, rrOuter, leafInner)
+	tunnel := samFixtureTunnel(t, tunnelLocal, tunnelRemote, leafInner)
 	showFRR := func(prefix string) bool {
 		output, err := exec.Command("vtysh", "--vty_socket", frrRoot, "-d", "bgpd", "-c", "show bgp ipv4 unicast "+prefix+" json").Output()
 		var view struct {
@@ -254,6 +320,19 @@ func daemonSAMIPIPBGPWithFRR(t *testing.T, expire bool) {
 	until(t, 25*time.Second, func() bool { return showFRR("198.18.0.0/24") })
 	destination := netip.MustParsePrefix("203.0.113.50/32")
 	until(t, 20*time.Second, func() bool { return samFixtureRoute(destination, tunnel, rrInner) })
+	if encrypted {
+		view, err := control.NewNetworkClient(filepath.Join(leafRoot, "run")).Observe(t.Context())
+		if err != nil {
+			t.Fatalf("observe WireGuard network: %v", err)
+		}
+		if len(view.Snapshot.WireGuard) != 1 {
+			t.Fatalf("WireGuard device count: %+v", view.Snapshot.WireGuard)
+		}
+		device := view.Snapshot.WireGuard[0]
+		if len(device.Peers) != 1 || device.Peers[0].PublicKey != rrWGPublic || device.Peers[0].LastHandshake.IsZero() {
+			t.Fatalf("independent RR WireGuard peer is not handshaking: %+v", device)
+		}
+	}
 	forward := func() error {
 		return fixtureInsideNamespace(client, func() error {
 			output, err := exec.Command("python3", "-c", `import socket
@@ -272,7 +351,11 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
 		t.Fatal(err)
 	}
 	until(t, 3*time.Second, func() bool {
-		return samFixtureIPIPCapture(wanCapture, "192.0.2.1", "192.0.2.2") &&
+		encapsulationSeen := samFixtureIPIPCapture(wanCapture, "192.0.2.1", "192.0.2.2")
+		if encrypted {
+			encapsulationSeen = wanCapture.count("192.0.2.1", "192.0.2.2", unix.IPPROTO_UDP, 51820) > 0 && samFixtureWireGuardHandshake("wg-sam")
+		}
+		return encapsulationSeen &&
 			lanCapture.count("198.18.0.2", "203.0.113.50", 6, 18080) > 0 &&
 			lanCapture.countSourcePort("203.0.113.50", "198.18.0.2", 6, 18080) > 0 &&
 			lanCapture.count("198.18.0.2", "203.0.113.50", 17, 18081) > 0 &&
@@ -310,8 +393,19 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
 	t.Log("independent RR admission -> routerd2 SAM snapshot -> IPIP/BGP -> NAT-less TCP/UDP passed; original RR admission expiry withdrew kernel tunnel and FIB route")
 }
 
-func samFixtureRRConfig(joinToken string) string {
-	return fmt.Sprintf(`apiVersion: routerd.net/v1alpha1
+func samFixtureRRConfig(joinToken, rrWGPublic, rrWGPrivatePath string) string {
+	nodeWG, policyWG, wireguardInterface, encryption, underlay, localEndpoint := "", "", "", "none", "underlay", "192.0.2.2"
+	if rrWGPublic != "" {
+		nodeWG = fmt.Sprintf(`, wireGuard: {publicKey: %q, endpoint: "192.0.2.2:51820", transportEndpoint: "10.20.0.2", allowedIPs: ["10.20.0.2/32"], persistentKeepalive: 5}`, rrWGPublic)
+		policyWG = "        wireGuard: {interface: wg-rr, endpointPrefixes: [192.0.2.0/24], allowedExtraIPPrefixes: [10.20.0.0/24], persistentKeepalive: 5}\n"
+		wireguardInterface = fmt.Sprintf(`    - apiVersion: net.routerd.net/v1alpha1
+      kind: WireGuardInterface
+      metadata: {name: wg-rr}
+      spec: {ifname: wg-rr, selfNodeRef: rr-a, privateKeyFile: %q, listenPort: 51820, peersFrom: [{resource: SAMEnrollmentPolicy/leaves}]}
+`, rrWGPrivatePath)
+		encryption, underlay, localEndpoint = "wireguard", "wg-rr", "10.20.0.2"
+	}
+	config := fmt.Sprintf(`apiVersion: routerd.net/v1alpha1
 kind: Router
 metadata: {name: sam-fixture-rr}
 spec:
@@ -324,21 +418,21 @@ spec:
       kind: BGPRouter
       metadata: {name: fabric}
       spec: {asn: 64513, routerID: 192.0.2.2}
-    - apiVersion: mobility.routerd.net/v1alpha1
+%s    - apiVersion: mobility.routerd.net/v1alpha1
       kind: SAMNodeSet
       metadata: {name: rrs}
-      spec: {nodes: [{nodeRef: rr-a, routeReflector: true, samEndpoint: 192.0.2.2}]}
+      spec: {nodes: [{nodeRef: rr-a, routeReflector: true, samEndpoint: 192.0.2.2%s}]}
     - apiVersion: mobility.routerd.net/v1alpha1
       kind: SAMTransportProfile
       metadata: {name: rr}
       spec:
         selfNodeRef: rr-a
         mode: ipip
-        encryption: none
+        encryption: %s
         addressingMode: pair-stable
         innerPrefix: 10.255.0.0/24
-        underlayInterface: underlay
-        localEndpoint: 192.0.2.2
+        underlayInterface: %s
+        localEndpoint: %s
         peersFrom: [{resource: SAMEnrollmentPolicy/leaves}]
         bgp: {routerRef: BGPRouter/fabric, peerASN: 64512, routeReflectorClient: true, importPolicy: {allowedPrefixes: [198.18.0.0/24]}}
     - apiVersion: mobility.routerd.net/v1alpha1
@@ -355,7 +449,9 @@ spec:
         endpointPrefixes: [192.0.2.0/24]
         mobilityPrefixes: [203.0.113.0/24]
         ttl: 8s
-`, joinToken)
+%s
+`, wireguardInterface, nodeWG, encryption, underlay, localEndpoint, joinToken, policyWG)
+	return config
 }
 
 func startSAMFixtureFRR(t *testing.T, namespace netns.NsHandle, frrPath string, leaf netip.Addr) string {
@@ -469,6 +565,35 @@ func samFixtureTunnel(t *testing.T, outerLocal, outerRemote, localInner netip.Ad
 func samFixtureTunnelAbsent(name string) bool {
 	_, err := netlink.LinkByName(name)
 	return err != nil
+}
+
+func samFixtureWireGuardKey(t *testing.T) (string, string) {
+	t.Helper()
+	private, err := exec.Command("wg", "genkey").Output()
+	if err != nil {
+		t.Fatal("generate isolated WireGuard private key:", err)
+	}
+	publicCommand := exec.Command("wg", "pubkey")
+	publicCommand.Stdin = bytes.NewReader(private)
+	public, err := publicCommand.Output()
+	if err != nil {
+		t.Fatal("derive isolated WireGuard public key:", err)
+	}
+	return strings.TrimSpace(string(private)), strings.TrimSpace(string(public))
+}
+
+func samFixtureWireGuardHandshake(ifname string) bool {
+	output, err := exec.Command("wg", "show", ifname, "latest-handshakes").Output()
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 2 && fields[1] != "0" {
+			return true
+		}
+	}
+	return false
 }
 
 func samFixtureRoute(destination netip.Prefix, tunnel string, gateway netip.Addr) bool {

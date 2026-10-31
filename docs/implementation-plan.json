@@ -11280,7 +11280,15 @@
       },
       "current_runs": {
         "hgw": "New no-injection integrated-host-source-native95 / standard7800s, real HGW/independent automatic clients, original saved DUID. Natural PD T1 observed deadline2026-10-30T21:45:46Z; completion with recovery approximately21:57Z. One startup AFTR restart on stale-observation HTTP409; steady phase began generation2. Keep trial untouched.",
-        "original_lan": "Current native93/original43200s LAN lease cohort; ordinary/special actual T1 deadlines2026-10-31T01:20:47Z. No fault injection or replacement. Prior8cc cohort stopped5h17m with requestACK->echo response30.43s; cause/IX choice not established."
+        "original_lan": "Current native93/original43200s LAN lease cohort; ordinary/special actual T1 deadlines2026-10-31T01:20:47Z. No fault injection or replacement. Prior8cc cohort stopped5h17m with requestACK->echo response30.43s; cause/IX choice not established.",
+        "sam_wireguard": {
+          "release_id": "sam-wireguard-final-release",
+          "environment": "isolated Linux netns; real routerd2 supervisor/control/network/SAM workers; independent legacy routerd RR; independent FRR; separate LAN client and RR terminal",
+          "result": "WireGuard handshake, dynamic peer/AllowedIPs and endpoint route, IPIP/BGP, NAT-free bidirectional TCP/UDP and packet capture passed. Explicit revoke and original admission expiry each removed IPIP/FIB and stopped forwarding.",
+          "failure_found_and_fixed": "Repeated SAM projection appended inherited forward rules into the source Firewall slice, eventually exceeding the local API body limit and stopping BGP on expiry. Projection now copies the firewall and forward chain before modifying them.",
+          "checks": "make check passed (Go packages, 34 Python checks, full Race Detector, go vet); after the final Firewall.Forward projection change, runtimeplan Race and go vet passed. Final static amd64 three-artifact build passed; real encrypted normal/revoke and original-expiry tests passed with this exact release ID.",
+          "remaining": "FOU, /32 mobility/provider actions, planned leaf/drain, partition recovery, PVE/physical hardware/cloud live acceptance."
+        }
       },
       "warming_backup": "Current full57 native93 fresh-client pair passed additional cut before BGP-ready; full37.401/25.390s. Prior NTP frequency persistence fix remains included; original60s and TCP15s limits unchanged.",
       "two_node_recovery_seconds": [
