@@ -1,7 +1,12 @@
 package runtimeplan
 
 import (
+	"context"
+	"reflect"
+
 	"encoding/json"
+	"github.com/imksoo/routerd2/internal/boottime"
+	"github.com/imksoo/routerd2/internal/lifetime"
 	"net/netip"
 	"testing"
 	"time"
@@ -137,4 +142,48 @@ func TestHAPDAcquiresWhileGracefulVIPPublicationAwaitsPrefix(t *testing.T) {
 	doc.Services = []serviceconfig.Service{pd, owner}
 	clock.BoottimeNanoseconds = int64(snapshot.ExpiresNanos)
 	check(true)
+}
+
+// Configuration edits unrelated to PD must not erase a lease whose producer
+// keeps running. Its original deadline must survive the configuration cutover.
+func TestHAPDLeaseSurvivesUnrelatedConfigChange(t *testing.T) {
+	owner := serviceconfig.Service{Name: "ha", VRRP: &vrrp.Config{Interface: "lan0", VIPInterface: "vip0", Family: "ipv4", SourceAddress: "192.0.2.2", VirtualRouterID: 42, Addresses: []string{"192.0.2.1/24"}, AcceptMode: true}}
+	pd := serviceconfig.Service{Name: "pd", DHCP6: &serviceconfig.DHCP6{Interface: "wan0", RequestPrefix: true, IAID: 1, ClientDUID: "00030001020000000042", Delegations: []serviceconfig.Delegation{{Name: "lan", Interface: "lan0"}}, HA: &serviceconfig.LeaseHA{Owner: "ha", Replication: peertls.Config{ListenAddress: netip.MustParseAddrPort("192.0.2.2:8444"), PeerAddress: netip.MustParseAddrPort("192.0.2.3:8444"), CertificateFile: "/keys/local.crt", PrivateKeyFile: "/keys/local.key", PeerCertificateFile: "/keys/peer.crt"}}}}
+	doc := config.Native{Network: network.Desired{Interfaces: []network.Interface{{Name: "lan0", Addresses: []string{"192.0.2.2/24"}}, {Name: "wan0"}}}, Services: []serviceconfig.Service{pd, owner}}
+	r, n, _ := fixture(t, doc)
+	ctx := context.Background()
+	if _, err := applyAndDrain(t, r, update(t, r, "service.ha", 1, bootVRRPSnapshot(t, owner.VRRPConfig()))); err != nil {
+		t.Fatal(err)
+	}
+	clock, err := boottime.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease := dhcp6config.Snapshot{BootID: clock.BootID, ObservedNanos: uint64(clock.BoottimeNanoseconds), Resource: "pd", Interface: "wan0", IAID: 1, ClientDUID: pd.DHCP6.ClientDUID, State: "bound", Prefixes: []dhcp6config.Prefix{{Prefix: "2001:db8:80::/56", PreferredUntil: lifetime.After(clock, 300), ValidUntil: lifetime.After(clock, 600)}}}
+	accepted := update(t, r, "service.pd", 1, lease)
+	if err := observeAndProject(ctx, r, accepted); err != nil {
+		t.Fatal(err)
+	}
+	before := n.applied
+	binding := r.bindings["service.pd"].digest
+	// Advance the source revision without altering PD. The same
+	// workers and network must remain usable without a new lease publication.
+	source := config.FromNative(doc)
+	if err := r.ApplyConfig(ctx, 2, source); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(r.records["service.pd"], accepted) {
+		t.Fatal("configuration cutover discarded or rewrote the current PD lease")
+	}
+	if r.bindings["service.pd"].digest != binding || !reflect.DeepEqual(n.applied, before) {
+		t.Fatal("unchanged PD worker or delegated network changed on cutover")
+	}
+	// A real change of the WAN association must discard the old observation.
+	pd.DHCP6.IAID++
+	if err := r.ApplyConfig(ctx, 3, config.FromNative(doc)); err != nil {
+		t.Fatal(err)
+	}
+	if _, retained := r.records["service.pd"]; retained {
+		t.Fatal("changed PD association retained the old lease")
+	}
 }
