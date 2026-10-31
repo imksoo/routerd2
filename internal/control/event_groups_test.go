@@ -100,7 +100,7 @@ func TestEventGroupWithIndependentRouterd(t *testing.T) {
 		child, stop := context.WithCancel(ctx)
 		ready := make(chan struct{})
 		done := make(chan error, 1)
-		go func() { done <- eventgroup.Run(child, cfg, dir, "federation", func() { close(ready) }) }()
+		go func() { done <- eventgroup.Run(child, cfg, dir, "service.federation", func() { close(ready) }) }()
 		select {
 		case <-ready:
 		case err := <-done:
@@ -199,7 +199,7 @@ func TestEventGroupWithIndependentRouterd(t *testing.T) {
 	}
 	emit := func(id string, expiry time.Time) {
 		event := federation.Event{ID: id, Type: "fixture.local", Subject: "192.0.2.7/32", Payload: map[string]string{"proof": "native"}, ObservedAt: time.Now().UTC(), ExpiresAt: expiry}
-		if err := local.Do(ctx, "POST", "/v1/event-groups/federation/emit", event, nil); err != nil {
+		if err := local.Do(ctx, "POST", "/v1/event-groups/service.federation/emit", event, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -308,7 +308,7 @@ func TestEventGroupWithIndependentRouterd(t *testing.T) {
 	// Allow the existing ten-second delivery tick after compaction releases a slot.
 	deadline := time.Now().Add(15 * time.Second)
 	for {
-		pending, err := journal.Pending(ctx, eventgroupconfig.Consumer("federation", "old"), 8)
+		pending, err := journal.Pending(ctx, eventgroupconfig.Consumer("service.federation", "old"), 8)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -346,7 +346,7 @@ func TestEventGroupWithIndependentRouterd(t *testing.T) {
 		if err := e.maintainEventStore(ctx, compactEventWork); err != nil {
 			t.Fatal(err)
 		}
-		if err := local.Do(ctx, "POST", "/v1/event-groups/federation/prune", nil, nil); err != nil {
+		if err := local.Do(ctx, "POST", "/v1/event-groups/service.federation/prune", nil, nil); err != nil {
 			t.Fatal(err)
 		}
 		rows, _ = journal.List(ctx, 0, 64)
@@ -387,12 +387,12 @@ func TestEventGroupCapacityRecoversAfterPeerRemoval(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return call("POST", "/v1/event-groups/group/emit", data)
+		return call("POST", "/v1/event-groups/service.group/emit", data)
 	}
 	if emit("one") != 200 || emit("two") != 200 {
 		t.Fatal("initial durable input rejected")
 	}
-	if code := call("GET", "/v1/event-groups/group/outbox/removed", nil); code != 200 {
+	if code := call("GET", "/v1/event-groups/service.group/outbox/removed", nil); code != 200 {
 		t.Fatal("could not schedule actual deliveries", code)
 	}
 	if emit("three") != 503 {
@@ -401,7 +401,7 @@ func TestEventGroupCapacityRecoversAfterPeerRemoval(t *testing.T) {
 	if code := call("GET", "/v1/version", nil); code != 200 {
 		t.Fatal("history capacity blocked independent control access", code)
 	}
-	pending, err := journal.Pending(ctx, eventgroupconfig.Consumer("group", "removed"), 8)
+	pending, err := journal.Pending(ctx, eventgroupconfig.Consumer("service.group", "removed"), 8)
 	if err != nil || len(pending) != 2 {
 		t.Fatal("capacity failure lost pending deliveries", len(pending), err)
 	}
@@ -418,7 +418,7 @@ func TestEventGroupCapacityRecoversAfterPeerRemoval(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if code := call("POST", "/v1/event-groups/group/prune", nil); code != 200 {
+	if code := call("POST", "/v1/event-groups/service.group/prune", nil); code != 200 {
 		t.Fatal("group retention failed", code)
 	}
 	if emit("three") != 200 {
@@ -444,7 +444,7 @@ func TestEventGroupReadditionSerializesRegistrationWithRetirement(t *testing.T) 
 	if _, err := e.Commit(ctx, req); err != nil {
 		t.Fatal(err)
 	}
-	consumer := eventgroupconfig.Consumer("group", "peer")
+	consumer := eventgroupconfig.Consumer("service.group", "peer")
 	if _, err := journal.Cursor(ctx, consumer); err != nil {
 		t.Fatal(err)
 	}
@@ -465,7 +465,7 @@ func TestEventGroupReadditionSerializesRegistrationWithRetirement(t *testing.T) 
 	go func() {
 		close(started)
 		w := httptest.NewRecorder()
-		e.Handler().ServeHTTP(w, httptest.NewRequest("POST", "/v1/event-groups/group/emit", bytes.NewBufferString(`{"id":"after-readd","type":"fixture.local"}`)))
+		e.Handler().ServeHTTP(w, httptest.NewRequest("POST", "/v1/event-groups/service.group/emit", bytes.NewBufferString(`{"id":"after-readd","type":"fixture.local"}`)))
 		done <- w.Code
 	}()
 	<-started
@@ -485,7 +485,7 @@ func TestEventGroupReadditionSerializesRegistrationWithRetirement(t *testing.T) 
 		t.Fatal("readded group did not accept its event", code)
 	}
 	w := httptest.NewRecorder()
-	e.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/v1/event-groups/group/outbox/peer", nil))
+	e.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/v1/event-groups/service.group/outbox/peer", nil))
 	if w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}

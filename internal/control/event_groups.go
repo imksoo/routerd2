@@ -20,7 +20,7 @@ func (e *Engine) eventGroup(name string) (eventgroupconfig.Config, *events.Store
 		return eventgroupconfig.Config{}, nil, errors.New("event journal is unavailable")
 	}
 	for _, r := range e.state.Config.Resources {
-		if r.Service != nil && r.Service.Name == name && r.Service.EventGroup != nil {
+		if r.Service != nil && r.Service.ModuleName() == name && r.Service.EventGroup != nil {
 			return *r.Service.EventGroup, e.journal, nil
 		}
 	}
@@ -214,7 +214,7 @@ func (e *Engine) retireEventGroupPeers(ctx context.Context) error {
 	for _, r := range e.state.Config.Resources {
 		if r.Service != nil && r.Service.EventGroup != nil {
 			for _, p := range r.Service.EventGroup.Peers {
-				keep = append(keep, eventgroupconfig.Consumer(r.Service.Name, p.NodeName))
+				keep = append(keep, eventgroupconfig.Consumer(r.Service.ModuleName(), p.NodeName))
 			}
 		}
 	}

@@ -544,3 +544,8 @@ check-event-group:
 	@test -n "$(OLD_EVENTD)" || (echo "set OLD_EVENTD to an independent Linux routerd-eventd executable"; exit 1)
 	@umask 022; OLD_EVENTD="$(OLD_EVENTD)" go test -race -count=1 -v ./internal/control -run '^TestEventGroup'
 	@umask 022; go test ./internal/legacyconfig -run '^TestEventGroup'
+
+.PHONY: check-event-group-product
+check-event-group-product: build
+	@test -n "$(OLD_EVENTD)" || (echo "set OLD_EVENTD to an independent Linux routerd-eventd executable"; exit 1)
+	$(PYTHON) scripts/daemon-tests.py event-group --go '$(GO)' --old-eventd '$(OLD_EVENTD)' --output dist/event-group-product
