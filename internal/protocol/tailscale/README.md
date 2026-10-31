@@ -123,9 +123,11 @@ preferences and unchanged OS resolver establish `acceptRoutes:false` and
 `acceptDNS:false`; a separately advertised peer route is not installed.
 IPv4/IPv6 exit traffic uses declared WAN NAT, distinct from subnet routing.
 Worker and whole PID1 restarts retain identity without an enrollment file.
-Removing the Tailscale service withdraws the peer routes and LAN connectivity;
-reapplying restores the three paths and both exit families. Captures check the
-application traffic. The fixed private access network and Headscale here are
+Removing the Tailscale service withdraws the peer routes and LAN connectivity.
+The peer keeps its selected exit: both IPv4/IPv6 TCP and UDP must stop during
+withdrawal, then recover after reapply without resetting the peer selection.
+Reapplying also restores the three site paths. Captures check the application
+traffic. The fixed private access network and Headscale here are
 fixture setup, not the real homert WAN or production tailnet. This profile
 does not advertise a delegated IPv6 LAN subnet or add LAN-to-tailnet IPv6 NAT,
 and does not qualify simultaneous use with the real HGW or physical NIC.
