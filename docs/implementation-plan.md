@@ -2,6 +2,8 @@
 
 作成日: 2026-10-24。更新日: 2026-10-31。開発中。全体ゴールは継続中。
 
+2026-10-31: `sam-wireguard-final-release` で独立旧routerd RR・FRRと実routerd2 process/kernelによるSAM WireGuard→IPIP/BGPを確認。handshake、NATなしTCP/UDP双方向、revokeと元期限切れ後のkernel撤去を実通信で受け入れた。CLOUD-04の/32 mobility/provider action、planned drain、分断復旧、provider liveは継続。
+
 ユーザー指定の完了期限: **2026-10-29 16:56:38 UTC**（2026-10-28 16:56:38 UTCから24時間）。
 全34項目と実環境での利用可能性が完了条件。部分成功へ縮小せず、期限時点でも未成立は未成立と報告する。
 旧routerdの実装を取り込み、独自のLAN配布エンジンを置換する。動く単体構成、二台運用、残る製品機能と

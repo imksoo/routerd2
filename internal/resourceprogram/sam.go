@@ -25,6 +25,7 @@ type SAMTransport struct {
 	Underlay                string                        `json:"underlay"`
 	LocalEndpoint           string                        `json:"local_endpoint,omitempty"`
 	LocalFromDHCP4          string                        `json:"local_from_dhcp4,omitempty"`
+	WireGuardInterface      string                        `json:"wireguard_interface,omitempty"`
 	BGP                     string                        `json:"bgp"`
 	PeerASN                 uint32                        `json:"peer_asn"`
 	EbgpMultihop            int                           `json:"ebgp_multihop,omitempty"`
@@ -46,6 +47,7 @@ func prepareSAMTransport(id string, spec SAMTransport, resources []Resource) (SA
 	spec.Underlay = strings.TrimSpace(spec.Underlay)
 	spec.LocalEndpoint = strings.TrimSpace(spec.LocalEndpoint)
 	spec.LocalFromDHCP4 = strings.TrimSpace(spec.LocalFromDHCP4)
+	spec.WireGuardInterface = strings.TrimSpace(spec.WireGuardInterface)
 	spec.BGP = strings.TrimSpace(spec.BGP)
 	spec.RouteReflectorClusterID = strings.TrimSpace(spec.RouteReflectorClusterID)
 	spec.TimersProfile = strings.TrimSpace(spec.TimersProfile)
@@ -89,6 +91,19 @@ func prepareSAMTransport(id string, spec SAMTransport, resources []Resource) (SA
 		return SAMTransport{}, nil, fmt.Errorf("SAM transport %s BGP service is missing", id)
 	}
 	dependencies := []string{client.ID, bgp.ID}
+	if spec.WireGuardInterface != "" {
+		wireguard := resourceByID(resources, "wireguard/"+spec.WireGuardInterface)
+		if wireguard == nil || wireguard.WireGuard == nil {
+			return SAMTransport{}, nil, fmt.Errorf("SAM transport %s WireGuard interface is missing", id)
+		}
+		if !resourceHasLink(resources, spec.WireGuardInterface, "wireguard") {
+			return SAMTransport{}, nil, fmt.Errorf("SAM transport %s WireGuard link is missing", id)
+		}
+		if spec.Underlay != spec.WireGuardInterface {
+			return SAMTransport{}, nil, fmt.Errorf("SAM transport %s WireGuard interface must be its IPIP underlay", id)
+		}
+		dependencies = append(dependencies, wireguard.ID, "link/"+spec.WireGuardInterface)
+	}
 	if spec.LocalEndpoint != "" {
 		address, err := netip.ParseAddr(spec.LocalEndpoint)
 		if err != nil || !address.Is4() || address.IsUnspecified() || address.IsMulticast() {
@@ -126,6 +141,20 @@ func prepareSAMTransport(id string, spec SAMTransport, resources []Resource) (SA
 		return SAMTransport{}, nil, fmt.Errorf("SAM transport %s BGP profile: %w", id, err)
 	}
 	return spec, slices.Compact(dependencies), nil
+}
+
+func resourceByID(resources []Resource, id string) *Resource {
+	for i := range resources {
+		if resources[i].ID == id {
+			return &resources[i]
+		}
+	}
+	return nil
+}
+
+func resourceHasLink(resources []Resource, name, kind string) bool {
+	link := resourceByID(resources, "link/"+name)
+	return link != nil && link.Link != nil && link.Link.Kind == kind
 }
 
 func ValidateSAMTransportPeer(spec SAMTransport, endpoint netip.Addr) error {

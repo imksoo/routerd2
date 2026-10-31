@@ -22,6 +22,9 @@ func outerIPv4Route(desired network.Desired, remoteText, underlay string, lease 
 	if endpointOnUnderlay(desired, remote, underlay) {
 		return finiteOuterRoute(network.Route{Destination: destination, Interface: underlay, Table: domain.Table}, until), true
 	}
+	if wireguardAllows(desired, remote, underlay) {
+		return finiteOuterRoute(network.Route{Destination: destination, Interface: underlay, Table: domain.Table}, until), true
+	}
 	if route, exact, ok := configuredUnderlayRoute(desired, remote, underlay, clock); ok {
 		if exact {
 			return network.Route{}, true
@@ -33,6 +36,23 @@ func outerIPv4Route(desired network.Desired, remoteText, underlay string, lease 
 		return finiteOuterRoute(network.Route{Destination: destination, Gateway: lease.gateway.String(), Interface: underlay, Table: domain.Table}, until), true
 	}
 	return network.Route{}, false
+}
+
+func wireguardAllows(desired network.Desired, remote netip.Addr, underlay string) bool {
+	for _, device := range desired.WireGuard {
+		if device.Interface != underlay {
+			continue
+		}
+		for _, peer := range device.Peers {
+			for _, raw := range peer.AllowedIPs {
+				prefix, err := netip.ParsePrefix(raw)
+				if err == nil && prefix.Contains(remote) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func finiteOuterRoute(route network.Route, until lifetime.Deadline) network.Route {
