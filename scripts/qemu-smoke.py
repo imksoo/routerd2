@@ -2,6 +2,7 @@
 """Boot routerd as PID 1 under a real Linux kernel and optionally query SSH."""
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import shutil
@@ -23,17 +24,35 @@ def main():
     parser.add_argument("--timeout", type=float, default=90)
     parser.add_argument("--ssh-key", type=Path)
     parser.add_argument("--qemu", default="qemu-system-x86_64")
+    parser.add_argument("--disk", type=Path, help="boot a generated BIOS disk instead of kernel/initramfs")
+    parser.add_argument("--disk-bus", choices=("virtio", "scsi"), default="virtio")
     args = parser.parse_args()
     image = args.image_dir.resolve()
-    for name in ("vmlinuz", "initramfs.cpio.gz", "manifest.json"):
+    names = ("manifest.json",) if args.disk else ("vmlinuz", "initramfs.cpio.gz", "manifest.json")
+    for name in names:
         if not (image / name).is_file():
             parser.error(f"missing image artifact: {image / name}")
+    disk_manifest = None
+    if args.disk:
+        args.disk = args.disk.resolve()
+        if not args.disk.is_file():
+            parser.error("disk image does not exist")
+        path = args.disk.parent / "manifest.json"
+        if not path.is_file():
+            parser.error("generated disk manifest does not exist")
+        try:
+            disk_manifest = json.loads(path.read_text())
+        except json.JSONDecodeError as error:
+            parser.error(f"generated disk manifest is invalid: {error}")
     if not shutil.which(args.qemu):
         parser.error(f"missing QEMU executable: {args.qemu}")
     if args.ssh_key and not args.ssh_key.is_file():
         parser.error("SSH private key does not exist")
     manifest = json.loads((image / "manifest.json").read_text())
-    if args.ssh_key and not manifest.get("ssh_enabled"):
+    if disk_manifest and disk_manifest.get("source_image_manifest_sha256") != hashlib.sha256((image / "manifest.json").read_bytes()).hexdigest():
+        parser.error("generated disk was not built from this image manifest")
+    ssh_enabled = disk_manifest.get("ssh_enabled") if disk_manifest else manifest.get("ssh_enabled")
+    if args.ssh_key and not ssh_enabled:
         parser.error("image has SSH disabled; rebuild with SSH_AUTHORIZED_KEY")
 
     port = free_port()
@@ -42,15 +61,21 @@ def main():
     # must not satisfy or fail a new boot attempt.
     log_path.unlink(missing_ok=True)
     command = [
-        args.qemu, "-machine", "q35", "-accel", "tcg", "-cpu", "max",
-        "-m", "512M", "-smp", "2", "-display", "none", "-monitor", "none",
+        args.qemu, "-machine", "pc" if args.disk else "q35", "-accel", "tcg", "-cpu", "max",
+        "-m", "4096M" if args.disk else "512M", "-smp", "4" if args.disk else "2", "-display", "none", "-monitor", "none",
         "-no-reboot", "-nodefaults", "-serial", f"file:{log_path}",
-        "-kernel", str(image / "vmlinuz"),
-        "-initrd", str(image / "initramfs.cpio.gz"),
-        "-append", "console=ttyS0,115200 panic=-1",
         "-netdev", f"user,id=wan,hostfwd=tcp:127.0.0.1:{port}-:22",
         "-device", "virtio-net-pci,netdev=wan,mac=52:54:00:12:34:56",
     ]
+    if args.disk:
+        command += ["-boot", "c", "-drive", f"file={args.disk.resolve()},format=raw,if=none,id=os"]
+        if args.disk_bus == "virtio":
+            command += ["-device", "virtio-blk-pci,drive=os"]
+        else:
+            command += ["-device", "virtio-scsi-pci,id=scsi", "-device", "scsi-hd,drive=os,bus=scsi.0"]
+    else:
+        command += ["-kernel", str(image / "vmlinuz"), "-initrd", str(image / "initramfs.cpio.gz"),
+                    "-append", "console=ttyS0,115200 panic=-1"]
     process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     started = time.monotonic()
     try:
@@ -130,6 +155,11 @@ def main():
                 if recovered["revision"] != network["revision"] or recovered["status"] != "applied":
                     raise RuntimeError("network worker did not recover the committed revision")
                 print("SSH network worker restart/recovery: OK")
+                if args.disk:
+                    subprocess.run(base + ["poweroff"], capture_output=True, text=True, timeout=10)
+                    process.wait(timeout=20)
+                    if process.returncode or "reboot: Power down" not in log_path.read_text(errors="replace"):
+                        raise RuntimeError("disk appliance did not power off cleanly")
         print(f"QEMU Linux/PID1 smoke: OK ({time.monotonic() - started:.1f}s)")
     except (RuntimeError, subprocess.TimeoutExpired, json.JSONDecodeError) as error:
         if log_path.exists():

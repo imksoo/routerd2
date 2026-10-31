@@ -15,6 +15,7 @@
     "virtio_net",
     "virtio_blk",
     "virtio_scsi",
+    "sd_mod",
     "ext4",
     "af_packet",
     "veth",

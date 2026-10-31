@@ -124,11 +124,14 @@ make qemu-smoke
 
 詳細は [images/README.md](images/README.md) と
 [packaging/alpine/README.md](packaging/alpine/README.md) を参照してください。
-現行のQEMUイメージはdirect boot用initramfsです。事前に用意した ext4 データ領域を
-[`boot.state_volume`](internal/runtimeconfig/README.md) で選び、設定 journal・SSH host key・リリース履歴を永続化できます。
-データ領域を指定せず initramfs だけで動かす場合、設定と SSH host key は再起動で消えます。
-A/B bootloader、データ領域の作成、AMIや各クラウドのGolden Imageはまだ含みません。
-コンテナでは `/var/lib/routerd` を永続volumeに置いてください。
+カーネルと初期 RAM ファイルシステム（initramfs）の成果物は、QEMU から直接起動できます。
+事前に用意した ext4 の状態領域を [`boot.state_volume`](internal/runtimeconfig/README.md) で選ぶと、
+設定の変更履歴・SSH ホスト鍵・リリース履歴を永続化できます。
+状態領域を指定しない場合、設定と SSH ホスト鍵は再起動で消えます。
+BIOS 用のディスク生成では、既存 GRUB と ext4 の状態領域を使います。
+手順は [イメージ生成](images/README.md#bios-disk-for-existing-x86-pve-machines) を参照してください。
+ブートローダーの A/B 更新、インストーラー、AMI などのクラウド用イメージはまだ含みません。
+コンテナでは `/var/lib/routerd` を永続領域に置いてください。
 
 Alpineのmuslがカーネル転送経路に挟まるわけではありません。両Goバイナリは `CGO_ENABLED=0` でビルドします。
 ただし、Ubuntuと同じ性能を測定済みという意味ではありません。NIC、カーネル設定、offload、IRQ、conntrack等を揃えた実機比較は別の検証項目です。

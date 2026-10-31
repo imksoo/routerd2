@@ -7,6 +7,10 @@ GO_VERSION ?= 1.27.3
 ALPINE_VERSION ?= 3.24.3
 IMAGE_CONFIG ?= empty
 IMAGE_DIR ?= dist/image
+DISK_DIR ?= dist/disk
+DISK_STATE_DEVICE ?= /dev/vda2
+DISK_CONFIG ?=
+DISK_AUTHORIZED_KEY ?=
 CONTAINER_TAG ?= routerd2:dev
 QEMU_TIMEOUT ?= 90
 QEMU_DAEMON_TIMEOUT ?= 180
@@ -84,6 +88,7 @@ help:
 	  'make release-built-test Verify actual amd64/arm64 release bundle identities' \
 	  'make apk               Test and build the Alpine package with abuild' \
 	  'make image             Export Alpine kernel + routerd initramfs' \
+	  'make disk-image        Create a BIOS disk from an existing APK image (root/private mount namespace)' \
 	  'make qemu-smoke        Boot the image in QEMU; optionally verify SSH' \
 	  'make qemu-ntp          Verify appliance clock correction, LAN time and drift recovery' \
 	  'make qemu-network      Run native network tests in a separate QEMU guest' \
@@ -330,6 +335,10 @@ apk: ndpi-modules pppoe-engine dnsmasq-engine conntrack-engine tailscale-engine 
 image: ndpi-modules pppoe-engine dnsmasq-engine conntrack-engine tailscale-engine chrony-engine
 	mkdir -p $(IMAGE_DIR)
 	$(DOCKER) build $(BUILD_ARGS) --build-arg IMAGE_CONFIG=$(IMAGE_CONFIG) --build-arg SSH_AUTHORIZED_KEY -f packaging/alpine/Dockerfile --target appliance-output --output type=local,dest=$(IMAGE_DIR) .
+
+.PHONY: disk-image
+disk-image:
+	$(PYTHON) scripts/build-disk-image.py --image-dir $(IMAGE_DIR) --output $(DISK_DIR) --state-device $(DISK_STATE_DEVICE) $(if $(DISK_CONFIG),--config $(DISK_CONFIG),) $(if $(DISK_AUTHORIZED_KEY),--authorized-key $(DISK_AUTHORIZED_KEY),)
 
 qemu-smoke:
 	$(PYTHON) scripts/qemu-smoke.py --image-dir $(IMAGE_DIR) --timeout $(QEMU_TIMEOUT) $(if $(QEMU_SSH_KEY),--ssh-key $(QEMU_SSH_KEY),)

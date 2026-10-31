@@ -50,6 +50,63 @@ x86_64 using virtio networking. Native amd64 and arm64 routerd binaries and OCI
 images are built separately; the arm64 appliance boot path and physical NIC
 drivers are not yet validated.
 
+## BIOS disk for existing x86 PVE machines
+
+`make image` still produces the kernel and initramfs. `make disk-image`
+places those standard APK-derived artifacts on a BIOS-bootable raw disk using
+the installed GRUB `i386-pc` implementation. It creates a new file only; it
+does not install onto an existing host device or modify an existing VM.
+
+Build requirements are Python 3, GRUB's BIOS installation tools, util-linux,
+e2fsprogs and cpio. Run the provisioning step as root inside a private mount
+namespace. The image manifest must identify an x86_64 kernel package.
+This path does not add UEFI, Secure Boot, arm64 firmware support or kernel A/B
+updates.
+
+```sh
+make image IMAGE_CONFIG=qemu
+sudo unshare --mount --propagation private make disk-image \
+  IMAGE_DIR=dist/image DISK_DIR=dist/disk-virtio \
+  DISK_STATE_DEVICE=/dev/vda2 \
+  DISK_AUTHORIZED_KEY=/path/to/operator.pub
+```
+
+The default disk is 32 GiB with an MBR partition table, a 1 GiB ext4 boot
+partition, and an ext4 state partition occupying the remaining space.
+The generated boot document selects the second partition through the existing
+`state_volume` contract. GRUB loads the kernel and initramfs from the first
+partition; routerd remains PID 1 and mounts the state partition before opening
+configuration, SSH identity and release state. The generated file is mode 0600
+because its embedded configuration may contain private values.
+
+Use `DISK_STATE_DEVICE=/dev/sda2` for the first VirtIO SCSI disk. The source
+image includes `virtio_scsi` and `sd_mod`; VirtIO block uses `/dev/vda2`.
+The device path is explicit: this builder does not discover or adopt other
+disks. Attach the resulting `routerd.raw` as the boot disk using the selected
+bus. Optional `DISK_CONFIG=/path/to/config.json` replaces only the embedded
+configuration. `DISK_AUTHORIZED_KEY` takes an OpenSSH public-key file, never
+a private key. Without these overrides the source image configuration and
+authorized keys are retained.
+
+The existing smoke check can boot the disk without QEMU's `-kernel` or
+`-initrd` shortcuts:
+
+```sh
+sudo python3 scripts/qemu-smoke.py --image-dir dist/image \
+  --disk dist/disk-virtio/routerd.raw --disk-bus virtio \
+  --ssh-key /path/to/operator --timeout 120
+```
+
+For SCSI, build a separate disk with `/dev/sda2` and select
+`--disk-bus scsi`. These disk checks use the BIOS/i440fx machine, four CPUs
+and 4 GiB RAM. They verify the real PID 1, authenticated management, network
+application and worker restart, then request normal poweroff. They do not
+qualify physical storage, production load, an installer or unattended upgrades
+of the boot partition. Keep the source image's license/source notices with the
+disk, and provide the installed GRUB package's license and corresponding source
+when distributing it.
+
+
 ## QEMU fixture with the embedded SSH CLI
 
 The QEMU fixture assigns `10.0.2.15/24` to `eth0` and uses QEMU's user-mode
@@ -275,13 +332,15 @@ deployment simply by building this OCI image.
 
 ## Current persistence and boot limits
 
-This image boots directly with a kernel plus initramfs. The default boot document
+The kernel/initramfs artifact boots directly; the BIOS disk builder above also
+places it on a new bootable disk. The default boot document
 has no state volume, so its state directory is in RAM and generated SSH host keys
 and other state are lost on reboot. A custom boot document can select an existing
 ext4 block device with [`state_volume`](../internal/runtimeconfig/README.md).
 The real PID 1 loads the configured storage drivers, mounts and verifies that
 device before opening state, and refuses startup if the volume cannot be used.
-The builder neither provisions nor formats the device.
+The kernel/initramfs builder neither provisions nor formats the device. The
+separate disk builder provisions only its newly created image file.
 
 The manifest distinguishes `volatile-initramfs` from
 `configured-ext4-state-volume`, records the declared volume and boot-document
@@ -292,9 +351,10 @@ SSH keys and fallback between signed userland generations. Configured signed
 userland selection includes trial/health confirmation and rollback; it is not
 a bootloader or kernel/rootfs A/B update.
 
-No disk image, installer ISO, cloud image or cloud-provider integration is
-produced. Firmware-specific boot, Secure Boot enrollment, bootloader slot
-selection and physical power-loss guarantees remain outside this builder.
+The BIOS raw disk is the only disk format currently produced. No installer ISO,
+cloud image or cloud-provider integration is produced. UEFI, Secure Boot
+enrollment, bootloader slot selection and physical power-loss guarantees remain
+outside this builder.
 `bootloader_ab_updates` remains false for both state-volume profiles.
 
 Alpine and Go patch versions are pinned in the build arguments. The kernel

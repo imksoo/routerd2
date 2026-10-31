@@ -176,6 +176,7 @@ for block in database.read_text().split("\n\n"):
             raise SystemExit("kernel APK metadata has no valid pinned source origin")
         kernel_package = {
             "name": fields["P"], "version": fields.get("V"),
+            "architecture": fields["A"],
             "license_expression_from_apk": fields.get("L"),
             "origin": origin, "aports_commit": commit,
             "source_recipe_url": f"https://github.com/alpinelinux/aports/blob/{commit}/main/{origin}/APKBUILD",
