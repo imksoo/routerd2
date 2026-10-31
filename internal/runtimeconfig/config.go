@@ -189,7 +189,7 @@ func pathContains(parent, child string) bool {
 // is a role catalog; there is no old module_path reader or implicit conversion.
 func NativeWorkers(path string) map[string]string {
 	out := map[string]string{}
-	for _, role := range []string{"sam_client", "web_console", "traffic_flow", "firewall_log", "otlp_logs", "syslog", "logging", "network", "control", "management", "health", "dhcp4", "dhcp6", "dhcp6_server", "dhcp_relay", "ra", "ra_client", "aftr", "dns", "vrrp", "bgp", "bfd"} {
+	for _, role := range []string{"sam_admission", "sam_client", "web_console", "traffic_flow", "firewall_log", "otlp_logs", "syslog", "logging", "network", "control", "management", "health", "dhcp4", "dhcp6", "dhcp6_server", "dhcp_relay", "ra", "ra_client", "aftr", "dns", "vrrp", "bgp", "bfd"} {
 		if role == "logging" {
 			out[role] = filepath.Join(filepath.Dir(path), "routerd-logging")
 		} else {

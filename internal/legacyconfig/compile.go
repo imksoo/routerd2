@@ -208,6 +208,8 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 			// Joined to the single IPv4 election after NAT conditions are compiled.
 		case "NTPClient", "NTPServer":
 			// Joined below into the one clock owner.
+		case "SAMEnrollmentPolicy", "ControlAPI":
+		// Resolved into the dedicated enrollment admission service below.
 		case "SAMEnrollmentClaim", "SAMEnrollmentClient":
 		// Joined into the native enrollment client below.
 		case "SAMNodeSet", "SAMTransportProfile":
@@ -239,6 +241,7 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 	extra = append(extra, transports...)
 	c.ntp(vrrpNames)
 	c.samClients()
+	c.samAdmission()
 	extra = append(extra, c.firewall(vrrpNames)...)
 	c.conntrackSync(extra)
 	c.conntrackPackages()

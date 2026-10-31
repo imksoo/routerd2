@@ -532,3 +532,8 @@ ndpi-modules:
 check-sam-enrollment:
 	@test -n "$(OLD_ROUTERD)" || (echo "set OLD_ROUTERD to an independent Linux routerd server"; exit 1)
 	OLD_ROUTERD="$(OLD_ROUTERD)" go test -count=1 -v ./internal/protocol/samclient -run '^TestEnrollmentAgainstRouterd$$'
+
+.PHONY: check-sam-admission
+check-sam-admission:
+	@test -n "$(OLD_ROUTERD)" || (echo "set OLD_ROUTERD to an independent Linux routerd executable"; exit 1)
+	@umask 022; OLD_ROUTERD="$(OLD_ROUTERD)" go test -count=1 -v ./internal/protocol/samadmission -run '^TestAdmissionAgainstRouterdClient$$'

@@ -26,6 +26,7 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/pppoeconfig"
 	"github.com/imksoo/routerd2/internal/protocol/ra"
 	"github.com/imksoo/routerd2/internal/protocol/raclient"
+	"github.com/imksoo/routerd2/internal/protocol/samadmissionconfig"
 	"github.com/imksoo/routerd2/internal/protocol/samclientconfig"
 	"github.com/imksoo/routerd2/internal/protocol/syslogconfig"
 	"github.com/imksoo/routerd2/internal/protocol/tailscaleconfig"
@@ -35,29 +36,30 @@ import (
 )
 
 type Service struct {
-	SAMClient   *samclientconfig.Node     `json:"sam_client,omitempty"`
-	WebConsole  *webconsoleconfig.Config  `json:"web_console,omitempty"`
-	TrafficFlow *trafficflowconfig.Config `json:"traffic_flow,omitempty"`
-	FirewallLog *firewalllogconfig.Config `json:"firewall_log,omitempty"`
-	OTLPLogs    *otlplogconfig.Config     `json:"otlp_logs,omitempty"`
-	Syslog      *syslogconfig.Config      `json:"syslog,omitempty"`
-	NTP         *ntpconfig.Node           `json:"ntp,omitempty"`
-	Tailscale   *tailscaleconfig.Node     `json:"tailscale,omitempty"`
-	DHCP6Server *DHCP6Server              `json:"dhcp6_server,omitempty"`
-	PPPoE       *PPPoE                    `json:"pppoe,omitempty"`
-	Health      *health.Config            `json:"health,omitempty"`
-	BFD         *bfd.Config               `json:"bfd,omitempty"`
-	DSLite      *DSLite                   `json:"ds_lite,omitempty"`
-	RAClient    *RAClient                 `json:"ra_client,omitempty"`
-	DHCPServer  *DHCPServer               `json:"dhcp_server,omitempty"`
-	DHCPRelay   *dhcprelayconfig.Config   `json:"dhcp_relay,omitempty"`
-	BGP         *BGP                      `json:"bgp,omitempty"`
-	Name        string                    `json:"name"`
-	DHCP4       *DHCP4                    `json:"dhcp4,omitempty"`
-	DHCP6       *DHCP6                    `json:"dhcp6,omitempty"`
-	RA          *RouterAdvertisement      `json:"ra,omitempty"`
-	DNS         *DNS                      `json:"dns,omitempty"`
-	VRRP        *vrrp.Config              `json:"vrrp,omitempty"`
+	SAMAdmission *samadmissionconfig.Node  `json:"sam_admission,omitempty"`
+	SAMClient    *samclientconfig.Node     `json:"sam_client,omitempty"`
+	WebConsole   *webconsoleconfig.Config  `json:"web_console,omitempty"`
+	TrafficFlow  *trafficflowconfig.Config `json:"traffic_flow,omitempty"`
+	FirewallLog  *firewalllogconfig.Config `json:"firewall_log,omitempty"`
+	OTLPLogs     *otlplogconfig.Config     `json:"otlp_logs,omitempty"`
+	Syslog       *syslogconfig.Config      `json:"syslog,omitempty"`
+	NTP          *ntpconfig.Node           `json:"ntp,omitempty"`
+	Tailscale    *tailscaleconfig.Node     `json:"tailscale,omitempty"`
+	DHCP6Server  *DHCP6Server              `json:"dhcp6_server,omitempty"`
+	PPPoE        *PPPoE                    `json:"pppoe,omitempty"`
+	Health       *health.Config            `json:"health,omitempty"`
+	BFD          *bfd.Config               `json:"bfd,omitempty"`
+	DSLite       *DSLite                   `json:"ds_lite,omitempty"`
+	RAClient     *RAClient                 `json:"ra_client,omitempty"`
+	DHCPServer   *DHCPServer               `json:"dhcp_server,omitempty"`
+	DHCPRelay    *dhcprelayconfig.Config   `json:"dhcp_relay,omitempty"`
+	BGP          *BGP                      `json:"bgp,omitempty"`
+	Name         string                    `json:"name"`
+	DHCP4        *DHCP4                    `json:"dhcp4,omitempty"`
+	DHCP6        *DHCP6                    `json:"dhcp6,omitempty"`
+	RA           *RouterAdvertisement      `json:"ra,omitempty"`
+	DNS          *DNS                      `json:"dns,omitempty"`
+	VRRP         *vrrp.Config              `json:"vrrp,omitempty"`
 }
 
 type DNS struct {
@@ -140,6 +142,9 @@ func (s Service) Role() string {
 	}
 	if s.OTLPLogs != nil {
 		return "otlp_logs"
+	}
+	if s.SAMAdmission != nil {
+		return "sam_admission"
 	}
 	if s.SAMClient != nil {
 		return "sam_client"
@@ -252,7 +257,7 @@ func Validate(services []Service) error {
 		}
 		names[s.Name] = true
 		n := 0
-		for _, set := range []bool{s.SAMClient != nil, s.WebConsole != nil, s.TrafficFlow != nil, s.FirewallLog != nil, s.OTLPLogs != nil, s.Syslog != nil, s.NTP != nil, s.Tailscale != nil, s.PPPoE != nil, s.Health != nil, s.BFD != nil, s.DSLite != nil, s.RAClient != nil, s.DHCPServer != nil, s.DHCP6Server != nil, s.DHCPRelay != nil, s.DHCP4 != nil, s.DHCP6 != nil, s.RA != nil, s.DNS != nil, s.VRRP != nil, s.BGP != nil} {
+		for _, set := range []bool{s.SAMAdmission != nil, s.SAMClient != nil, s.WebConsole != nil, s.TrafficFlow != nil, s.FirewallLog != nil, s.OTLPLogs != nil, s.Syslog != nil, s.NTP != nil, s.Tailscale != nil, s.PPPoE != nil, s.Health != nil, s.BFD != nil, s.DSLite != nil, s.RAClient != nil, s.DHCPServer != nil, s.DHCP6Server != nil, s.DHCPRelay != nil, s.DHCP4 != nil, s.DHCP6 != nil, s.RA != nil, s.DNS != nil, s.VRRP != nil, s.BGP != nil} {
 			if set {
 				n++
 			}
@@ -260,7 +265,7 @@ func Validate(services []Service) error {
 		if n != 1 {
 			return fmt.Errorf("service %s must select exactly one protocol", s.Name)
 		}
-		if s.SAMClient == nil && s.WebConsole == nil && s.TrafficFlow == nil && s.FirewallLog == nil && s.OTLPLogs == nil && s.Syslog == nil && s.NTP == nil && s.DNS == nil && s.BGP == nil && s.DHCPRelay == nil && !(s.BFD != nil && s.BFD.Multihop) && !interfaceName.MatchString(s.Interface()) {
+		if s.SAMAdmission == nil && s.SAMClient == nil && s.WebConsole == nil && s.TrafficFlow == nil && s.FirewallLog == nil && s.OTLPLogs == nil && s.Syslog == nil && s.NTP == nil && s.DNS == nil && s.BGP == nil && s.DHCPRelay == nil && !(s.BFD != nil && s.BFD.Multihop) && !interfaceName.MatchString(s.Interface()) {
 			return fmt.Errorf("service %s has an invalid interface", s.Name)
 		}
 		var group uint16
@@ -308,8 +313,11 @@ func Validate(services []Service) error {
 			}
 			dhcpListeners[iface] = s.Name
 		}
-		if s.SAMClient != nil || s.OTLPLogs != nil || s.Syslog != nil || s.DNS != nil || s.BGP != nil || s.DSLite != nil || s.Health != nil {
+		if s.SAMAdmission != nil || s.SAMClient != nil || s.OTLPLogs != nil || s.Syslog != nil || s.DNS != nil || s.BGP != nil || s.DSLite != nil || s.Health != nil {
 			key = s.Role() + ":" + s.Name
+		}
+		if s.SAMAdmission != nil {
+			key = "sam_admission:" + s.SAMAdmission.Listen.String()
 		}
 		if s.VRRP != nil {
 			key = fmt.Sprintf("vrrp:%s:%s:%s:%d", s.VRRP.VRF, s.VRRP.Interface, s.VRRP.Family, s.VRRP.VirtualRouterID)
@@ -351,6 +359,10 @@ func Validate(services []Service) error {
 		case "otlp_logs":
 			if err := otlplogconfig.Validate(*s.OTLPLogs); err != nil {
 				return err
+			}
+		case "sam_admission":
+			if err := samadmissionconfig.Validate(*s.SAMAdmission); err != nil {
+				return fmt.Errorf("service %s: %w", s.Name, err)
 			}
 		case "sam_client":
 			if err := samclientconfig.Validate(*s.SAMClient); err != nil {
@@ -575,6 +587,8 @@ func (s Service) Instance(runtimeDir, stateDir string) (Instance, error) {
 		b, err = json.Marshal(cfg)
 	case "otlp_logs":
 		b, err = json.Marshal(*s.OTLPLogs)
+	case "sam_admission":
+		b, err = json.Marshal(samadmissionconfig.Config{Node: *s.SAMAdmission, StatePath: filepath.Join(stateDir, "services", s.Name, "admissions.json")})
 	case "sam_client":
 		b, err = json.Marshal(samclientconfig.Config{Node: samclientconfig.Normalize(*s.SAMClient), SocketPath: filepath.Join(runtimeDir, "services", s.Name+".sam.sock"), StatePath: filepath.Join(stateDir, "services", s.Name, "sam.json")})
 	case "syslog":

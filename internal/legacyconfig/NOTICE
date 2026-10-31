@@ -1,3 +1,7 @@
+SAM enrollment listener and policy resolution additionally follows
+cmd/routerd/cmd_serve.go and cmd/routerd/sam_enrollment_submit.go at
+a0b1b3ba68f1a0210f3e9c4b6cb0483800a2a22c.
+
 Source schema and behavior adaptation: imksoo/routerd
 Commit: 1329ef54f296507eda79bbbc3b853783dd27251e
 Paths: pkg/api, pkg/controller/dnsresolver, pkg/controller/chain/derive.go,
