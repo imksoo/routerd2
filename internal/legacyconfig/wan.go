@@ -82,7 +82,7 @@ func (c *compiler) dhcp4(r resource) {
 		Name: c.serviceName(r, "dhcp4"),
 		DHCP4: &serviceconfig.DHCP4{
 			Interface: name, Hostname: s.Hostname, RequestedAddress: s.RequestedAddress,
-			ClassID: s.ClassID, ClientID: s.ClientID, DefaultRoute: s.UseRoutes, Metric: s.RouteMetric,
+			ClassID: s.ClassID, ClientID: []byte(s.ClientID), DefaultRoute: s.UseRoutes, Metric: s.RouteMetric,
 		},
 	})
 	c.note(r, "DHCP ownership starts from a new native journal; runtime lease files are not imported.")

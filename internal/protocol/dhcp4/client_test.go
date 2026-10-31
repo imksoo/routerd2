@@ -3,11 +3,14 @@
 package dhcp4
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"net"
 	"net/netip"
+	"os"
 	"testing"
 	"time"
 
@@ -263,5 +266,83 @@ func TestInitialFrameWorksWithoutIPv4RouteAndChecksums(t *testing.T) {
 	frame[24] ^= 1
 	if p, _ := reader.dhcpPayloadWithChecksumState(frame, true); len(p) != 0 {
 		t.Fatal("bad IP checksum accepted")
+	}
+}
+
+// systemd-networkd sends a binary IAID/DUID identity, including NUL and non-UTF8
+// octets. Configuration, Option 61 and the restart journal must agree exactly.
+func TestBinaryClientIdentitySurvivesWireAndRestart(t *testing.T) {
+	c, conn, now, _ := fixture(t)
+	c.config.ClientID = []byte{0xff, 0, 1, 2, 3, 0, 2, 0, 0, 0xab, 0x11, 0, 0x80, 0xfe, 6, 7, 8, 9, 10}
+	data, err := json.Marshal(c.config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg Config
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := Validate(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(cfg.ClientID, c.config.ClientID) {
+		t.Fatal("configuration changed binary identity")
+	}
+	c.config = cfg
+	bind(t, c)
+	*now = now.Add(40 * time.Second)
+	if err := c.tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, packet := range conn.sent {
+		message, err := wire.Decode(packet.data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(message.Options[wire.OptionClientID], cfg.ClientID) {
+			t.Fatalf("message %d changed binary client identity: %x", message.MessageType(), message.Options[wire.OptionClientID])
+		}
+	}
+	if err := writeSnapshot(cfg.StatePath, c.snapshot()); err != nil {
+		t.Fatal(err)
+	}
+	data, err = os.ReadFile(cfg.StatePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved Snapshot
+	if err := json.Unmarshal(data, &saved); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(saved.ClientIdentity, cfg.ClientID) {
+		t.Fatal("journal changed binary identity")
+	}
+	fresh, freshConn, _, _ := fixture(t)
+	fresh.config.ClientID = cfg.ClientID
+	if err := fresh.start(context.Background(), &saved); err != nil {
+		t.Fatal(err)
+	}
+	message, err := wire.Decode(freshConn.sent[0].data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if message.MessageType() != wire.MessageRequest || !bytes.Equal(message.Options[wire.OptionClientID], cfg.ClientID) {
+		t.Fatal("restart did not request the saved lease with its binary identity")
+	}
+	foreign, foreignConn, _, _ := fixture(t)
+	foreign.config.ClientID = append([]byte(nil), cfg.ClientID...)
+	foreign.config.ClientID[2]++
+	if err := ValidateSnapshot(foreign.config, saved); err == nil {
+		t.Fatal("accepted another client's observation")
+	}
+	if err := foreign.start(context.Background(), &saved); err != nil {
+		t.Fatal(err)
+	}
+	message, err = wire.Decode(foreignConn.sent[0].data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if message.MessageType() != wire.MessageDiscover {
+		t.Fatal("restored another client's lease")
 	}
 }

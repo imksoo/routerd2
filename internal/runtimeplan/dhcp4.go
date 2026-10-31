@@ -30,7 +30,7 @@ func validateDHCP4Transition(previous, next serviceconfig.Update) error {
 	if err := json.Unmarshal(previous.Snapshot, &old); err != nil {
 		return err
 	}
-	if old.BootID != s.BootID || old.Epoch != s.Epoch || s.Sequence < old.Sequence || s.ObservedNanos < old.ObservedNanos || old.Stopped && !s.Stopped || old.HardwareAddress != s.HardwareAddress || old.ClientIdentity != s.ClientIdentity {
+	if old.BootID != s.BootID || old.Epoch != s.Epoch || s.Sequence < old.Sequence || s.ObservedNanos < old.ObservedNanos || old.Stopped && !s.Stopped || old.HardwareAddress != s.HardwareAddress || !bytes.Equal(old.ClientIdentity, s.ClientIdentity) {
 		return errors.New("DHCPv4 observation rewound or crossed final fence")
 	}
 	if old.Sequence == s.Sequence && !bytes.Equal(previous.Snapshot, next.Snapshot) && !s.Stopped {

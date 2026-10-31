@@ -28,7 +28,7 @@ type Config struct {
 	Hostname         string `json:"hostname,omitempty"`
 	RequestedAddress string `json:"requested_address,omitempty"`
 	ClassID          string `json:"class_id,omitempty"`
-	ClientID         string `json:"client_id,omitempty"`
+	ClientID         []byte `json:"client_id,omitempty"`
 }
 
 type Snapshot struct {
@@ -40,7 +40,7 @@ type Snapshot struct {
 	LeaseClock      LeaseClock `json:"lease_clock,omitzero"`
 	Stopped         bool       `json:"stopped,omitempty"`
 	HardwareAddress string     `json:"hardware_address"`
-	ClientIdentity  string     `json:"client_identity"`
+	ClientIdentity  []byte     `json:"client_identity"`
 	Active          bool       `json:"active"`
 }
 type Effects interface {
@@ -60,10 +60,13 @@ func Validate(c Config) error {
 	if !filepath.IsAbs(c.StatePath) {
 		return errors.New("dhcp4 state_path must be absolute")
 	}
-	for name, v := range map[string]string{"hostname": c.Hostname, "class_id": c.ClassID, "client_id": c.ClientID} {
+	for name, v := range map[string]string{"hostname": c.Hostname, "class_id": c.ClassID} {
 		if len(v) > 255 || strings.ContainsRune(v, 0) {
 			return fmt.Errorf("dhcp4 %s must fit one DHCP option", name)
 		}
+	}
+	if len(c.ClientID) > 255 {
+		return errors.New("dhcp4 client_id must fit one DHCP option")
 	}
 	if c.RequestedAddress != "" {
 		a, err := netip.ParseAddr(c.RequestedAddress)
@@ -184,7 +187,7 @@ func (c *client) start(ctx context.Context, previous *Snapshot) error {
 	// Active describes current kernel intent, not whether the server's lease
 	// can be requested again. In particular INIT-REBOOT persists an inactive
 	// Requesting snapshot; another restart must not forget that lease.
-	if previous != nil && previous.Resource == c.config.Resource && previous.Interface == c.config.Interface && previous.HardwareAddress == c.hardware.String() && previous.ClientIdentity == c.config.ClientID {
+	if previous != nil && previous.Resource == c.config.Resource && previous.Interface == c.config.Interface && previous.HardwareAddress == c.hardware.String() && bytes.Equal(previous.ClientIdentity, c.config.ClientID) {
 		remaining := previous.ExpiresAt.Sub(now)
 		eligible := !previous.AcquiredAt.After(now) && remaining > 0
 		if previous.LeaseClock != (LeaseClock{}) {
@@ -231,7 +234,7 @@ func (c *client) send(ctx context.Context) error {
 	if err := c.refreshClock(); err != nil {
 		return err
 	}
-	cfg := wire.Config{Resource: c.config.Resource, Interface: c.config.Interface, HardwareAddr: c.hardware, Hostname: c.config.Hostname, ClassID: c.config.ClassID, ClientID: c.config.ClientID}
+	cfg := wire.Config{Resource: c.config.Resource, Interface: c.config.Interface, HardwareAddr: c.hardware, Hostname: c.config.Hostname, ClassID: c.config.ClassID, ClientID: string(c.config.ClientID)}
 	if c.state == wire.StateDiscovering {
 		cfg.RequestedAddress = c.config.RequestedAddress
 	}

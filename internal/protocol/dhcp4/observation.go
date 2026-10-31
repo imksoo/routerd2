@@ -1,6 +1,7 @@
 package dhcp4
 
 import (
+	"bytes"
 	"errors"
 	"math"
 	"net"
@@ -65,7 +66,7 @@ func ValidateObservation(s Snapshot) error {
 }
 
 func ValidateSnapshot(c Config, s Snapshot) error {
-	if s.Resource != c.Resource || s.Interface != c.Interface || s.ClientIdentity != c.ClientID {
+	if s.Resource != c.Resource || s.Interface != c.Interface || !bytes.Equal(s.ClientIdentity, c.ClientID) {
 		return errors.New("DHCPv4 snapshot identity mismatch")
 	}
 	return ValidateObservation(s)

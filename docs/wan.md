@@ -332,3 +332,11 @@ configuration removal. Relevant Race Detector, vet and CGO-free Linux
 amd64/arm64 builds passed. This isolated candidate predates integration with
 later DNS and effective-fact contract changes; rerun the affected communication
 path after integrating those changes.
+
+### DHCPv4クライアント識別子
+
+ネイティブ設定の `client_id` は、DHCPオプション61へ送るバイト列です。
+JSONとYAMLではBase64で指定し、未指定ならEthernetの種別とMACアドレスから生成します。
+取得済みリースの保存と再起動時の照合にも同じバイト列を使います。
+旧設定の `clientID` を変換する場合は、旧routerdと同じ文字列のバイト列を保持します。
+OSの管理用DHCP設定を移行する場合は、OSが実際に送信した識別子を入力へ明示してください。

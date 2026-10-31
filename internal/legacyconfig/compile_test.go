@@ -128,7 +128,7 @@ func TestStaticAddressRouteAndLinkMigration(t *testing.T) {
 func TestWANIdentityRoutesAndHexadecimalDelegation(t *testing.T) {
 	d := compiled(t, "wan").Document
 	v4 := service(t, d, "dhcp4").DHCP4
-	if v4.Interface != "eth0" || v4.DefaultRoute == nil || *v4.DefaultRoute || v4.Metric != 80 || v4.Hostname != "gateway" || v4.ClientID != "01020000000001" {
+	if v4.Interface != "eth0" || v4.DefaultRoute == nil || *v4.DefaultRoute || v4.Metric != 80 || v4.Hostname != "gateway" || string(v4.ClientID) != "01020000000001" {
 		t.Fatal("DHCPv4 wire identity or route suppression changed")
 	}
 	v6 := service(t, d, "dhcp6").DHCP6

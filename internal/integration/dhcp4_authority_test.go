@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -69,9 +70,10 @@ func TestDaemonDHCPv4DelayedACK(t *testing.T) {
 	if err := peer.FilterAdd(&netlink.Flower{FilterAttrs: netlink.FilterAttrs{LinkIndex: link.Attrs().Index, Parent: netlink.MakeHandle(1, 0), Protocol: unix.ETH_P_IP, Priority: 1}, ClassId: netlink.MakeHandle(1, 3), EthType: unix.ETH_P_IP, IPProto: &udp, SrcPort: 67, DestPort: 68}); err != nil {
 		t.Fatal(err)
 	}
-	startFixtureDNSMasq(t, peerNS, "server0", []string{"--port=0", "--dhcp-range=192.0.2.10,192.0.2.20,255.255.255.0,60s"})
+	clientID := []byte{0xff, 0, 1, 2, 3, 0, 2, 0, 0, 0xab, 0x11, 0, 0x80, 0xfe, 6, 7, 8, 9, 10}
+	startFixtureDNSMasq(t, peerNS, "server0", []string{"--port=0", "--dhcp-range=192.0.2.10,192.0.2.20,255.255.255.0,60s", "--dhcp-host=id:ff:00:01:02:03:00:02:00:00:ab:11:00:80:fe:06:07:08:09:0a,192.0.2.19"})
 	capture := healthPBRCapture(t, "wan0")
-	f := startFixtureDaemon(t, config.FromNative(config.Native{Network: network.Desired{Interfaces: []network.Interface{{Name: "wan0"}}}, Services: []serviceconfig.Service{{Name: "wan", DHCP4: &serviceconfig.DHCP4{Interface: "wan0"}}}}))
+	f := startFixtureDaemon(t, config.FromNative(config.Native{Network: network.Desired{Interfaces: []network.Interface{{Name: "wan0"}}}, Services: []serviceconfig.Service{{Name: "wan", DHCP4: &serviceconfig.DHCP4{Interface: "wan0", ClientID: clientID}}}}))
 	snapshot := func() dhcp4.Snapshot {
 		var status runtimeplan.InstanceStatus
 		if err := f.control.Do(ctx, "GET", "/v1/services/service.wan", nil, &status); err != nil {
@@ -87,6 +89,9 @@ func TestDaemonDHCPv4DelayedACK(t *testing.T) {
 	}
 	check := func(s dhcp4.Snapshot) {
 		t.Helper()
+		if s.CurrentAddress != "192.0.2.19" || !bytes.Equal(s.ClientIdentity, clientID) {
+			t.Fatal("independent server did not recognize binary client-ID reservation", s.CurrentAddress)
+		}
 		capture.mu.Lock()
 		packets := append([]healthPBRPacket(nil), capture.packets...)
 		capture.mu.Unlock()
@@ -109,6 +114,9 @@ func TestDaemonDHCPv4DelayedACK(t *testing.T) {
 			}
 			switch m.MessageType() {
 			case wire.MessageRequest:
+				if !bytes.Equal(m.Options[wire.OptionClientID], clientID) {
+					t.Fatal("captured request changed binary client identity")
+				}
 				counts[m.XID]++
 				if requests[m.XID].IsZero() {
 					requests[m.XID] = packet.at
@@ -146,7 +154,7 @@ func TestDaemonDHCPv4DelayedACK(t *testing.T) {
 		return s.Active && s.State == wire.StateBound && s.LeaseClock.AcquiredNanos > rebooted.LeaseClock.AcquiredNanos
 	})
 	check(snapshot())
-	t.Log("independent dnsmasq: initial acquisition, INIT-REBOOT and unicast renewal retain original REQUEST time despite 5.2-second kernel delay and retransmission")
+	t.Log("independent dnsmasq: binary client-ID reservation, initial acquisition, INIT-REBOOT and unicast renewal retain identity and original REQUEST time despite 5.2-second kernel delay and retransmission")
 }
 
 // The positive clock mutation is available only through the dedicated guest

@@ -79,7 +79,7 @@ type DHCP4 struct {
 	Hostname         string `json:"hostname,omitempty"`
 	RequestedAddress string `json:"requested_address,omitempty"`
 	ClassID          string `json:"class_id,omitempty"`
-	ClientID         string `json:"client_id,omitempty"`
+	ClientID         []byte `json:"client_id,omitempty"`
 	DefaultRoute     *bool  `json:"default_route,omitempty"`
 	Metric           int    `json:"metric,omitempty"`
 	Table            int    `json:"table,omitempty"`
