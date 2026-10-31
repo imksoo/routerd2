@@ -19,6 +19,7 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/dhcprelayconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserverconfig"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
+	"github.com/imksoo/routerd2/internal/protocol/eventgroupconfig"
 	"github.com/imksoo/routerd2/internal/protocol/firewalllogconfig"
 	"github.com/imksoo/routerd2/internal/protocol/health"
 	"github.com/imksoo/routerd2/internal/protocol/ntpconfig"
@@ -36,6 +37,7 @@ import (
 )
 
 type Service struct {
+	EventGroup   *eventgroupconfig.Config  `json:"event_group,omitempty"`
 	SAMAdmission *samadmissionconfig.Node  `json:"sam_admission,omitempty"`
 	SAMClient    *samclientconfig.Node     `json:"sam_client,omitempty"`
 	WebConsole   *webconsoleconfig.Config  `json:"web_console,omitempty"`
@@ -142,6 +144,9 @@ func (s Service) Role() string {
 	}
 	if s.OTLPLogs != nil {
 		return "otlp_logs"
+	}
+	if s.EventGroup != nil {
+		return "event_group"
 	}
 	if s.SAMAdmission != nil {
 		return "sam_admission"
@@ -257,7 +262,7 @@ func Validate(services []Service) error {
 		}
 		names[s.Name] = true
 		n := 0
-		for _, set := range []bool{s.SAMAdmission != nil, s.SAMClient != nil, s.WebConsole != nil, s.TrafficFlow != nil, s.FirewallLog != nil, s.OTLPLogs != nil, s.Syslog != nil, s.NTP != nil, s.Tailscale != nil, s.PPPoE != nil, s.Health != nil, s.BFD != nil, s.DSLite != nil, s.RAClient != nil, s.DHCPServer != nil, s.DHCP6Server != nil, s.DHCPRelay != nil, s.DHCP4 != nil, s.DHCP6 != nil, s.RA != nil, s.DNS != nil, s.VRRP != nil, s.BGP != nil} {
+		for _, set := range []bool{s.EventGroup != nil, s.SAMAdmission != nil, s.SAMClient != nil, s.WebConsole != nil, s.TrafficFlow != nil, s.FirewallLog != nil, s.OTLPLogs != nil, s.Syslog != nil, s.NTP != nil, s.Tailscale != nil, s.PPPoE != nil, s.Health != nil, s.BFD != nil, s.DSLite != nil, s.RAClient != nil, s.DHCPServer != nil, s.DHCP6Server != nil, s.DHCPRelay != nil, s.DHCP4 != nil, s.DHCP6 != nil, s.RA != nil, s.DNS != nil, s.VRRP != nil, s.BGP != nil} {
 			if set {
 				n++
 			}
@@ -265,7 +270,7 @@ func Validate(services []Service) error {
 		if n != 1 {
 			return fmt.Errorf("service %s must select exactly one protocol", s.Name)
 		}
-		if s.SAMAdmission == nil && s.SAMClient == nil && s.WebConsole == nil && s.TrafficFlow == nil && s.FirewallLog == nil && s.OTLPLogs == nil && s.Syslog == nil && s.NTP == nil && s.DNS == nil && s.BGP == nil && s.DHCPRelay == nil && !(s.BFD != nil && s.BFD.Multihop) && !interfaceName.MatchString(s.Interface()) {
+		if s.EventGroup == nil && s.SAMAdmission == nil && s.SAMClient == nil && s.WebConsole == nil && s.TrafficFlow == nil && s.FirewallLog == nil && s.OTLPLogs == nil && s.Syslog == nil && s.NTP == nil && s.DNS == nil && s.BGP == nil && s.DHCPRelay == nil && !(s.BFD != nil && s.BFD.Multihop) && !interfaceName.MatchString(s.Interface()) {
 			return fmt.Errorf("service %s has an invalid interface", s.Name)
 		}
 		var group uint16
@@ -313,8 +318,11 @@ func Validate(services []Service) error {
 			}
 			dhcpListeners[iface] = s.Name
 		}
-		if s.SAMAdmission != nil || s.SAMClient != nil || s.OTLPLogs != nil || s.Syslog != nil || s.DNS != nil || s.BGP != nil || s.DSLite != nil || s.Health != nil {
+		if s.EventGroup != nil || s.SAMAdmission != nil || s.SAMClient != nil || s.OTLPLogs != nil || s.Syslog != nil || s.DNS != nil || s.BGP != nil || s.DSLite != nil || s.Health != nil {
 			key = s.Role() + ":" + s.Name
+		}
+		if s.EventGroup != nil && s.EventGroup.Listen.IsValid() {
+			key = "event_group:" + s.EventGroup.Listen.String()
 		}
 		if s.SAMAdmission != nil {
 			key = "sam_admission:" + s.SAMAdmission.Listen.String()
@@ -358,6 +366,10 @@ func Validate(services []Service) error {
 			}
 		case "otlp_logs":
 			if err := otlplogconfig.Validate(*s.OTLPLogs); err != nil {
+				return err
+			}
+		case "event_group":
+			if err := eventgroupconfig.Validate(*s.EventGroup); err != nil {
 				return err
 			}
 		case "sam_admission":
@@ -587,6 +599,8 @@ func (s Service) Instance(runtimeDir, stateDir string) (Instance, error) {
 		b, err = json.Marshal(cfg)
 	case "otlp_logs":
 		b, err = json.Marshal(*s.OTLPLogs)
+	case "event_group":
+		b, err = json.Marshal(*s.EventGroup)
 	case "sam_admission":
 		b, err = json.Marshal(samadmissionconfig.Config{Node: *s.SAMAdmission, StatePath: filepath.Join(stateDir, "services", s.Name, "admissions.json")})
 	case "sam_client":

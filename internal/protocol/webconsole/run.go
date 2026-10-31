@@ -63,10 +63,15 @@ type page struct {
 }
 
 type clientPage struct {
-	Servers  []string
-	Selected runtimeplan.InstanceStatus
-	Snapshot *dhcpserverconfig.Snapshot
-	Current  bool
+	Servers          []string
+	Selected         runtimeplan.InstanceStatus
+	Snapshot         *dhcpserverconfig.Snapshot
+	Current          bool
+	MAC              string
+	Since            string
+	Limit            string
+	Fingerprints     *runtimeplan.DHCPFingerprintHistory
+	FingerprintError string
 }
 
 func Run(ctx context.Context, cfg webconsoleconfig.Config, runtimeDir string, ready func()) error {
@@ -166,6 +171,20 @@ func Run(ctx context.Context, cfg webconsoleconfig.Config, runtimeDir string, re
 							var clock boottime.Clock
 							clock, err = boottime.Read()
 							p.Clients.Current = err == nil && dhcpserverconfig.CurrentObservation(*p.Clients.Snapshot, clock)
+						}
+					}
+					if err == nil {
+						q := r.URL.Query()
+						p.Clients.MAC, p.Clients.Since, p.Clients.Limit = q.Get("mac"), q.Get("since"), q.Get("limit")
+						if p.Clients.Limit == "" {
+							p.Clients.Limit = "100"
+						}
+						values := url.Values{"mac": {p.Clients.MAC}, "since": {p.Clients.Since}, "limit": {p.Clients.Limit}}
+						history := new(runtimeplan.DHCPFingerprintHistory)
+						if historyErr := client.Do(r.Context(), http.MethodGet, "/v1/services/"+url.PathEscape(selected)+"/dhcp-fingerprints?"+values.Encode(), nil, history); historyErr != nil {
+							p.Clients.FingerprintError = historyErr.Error()
+						} else {
+							p.Clients.Fingerprints = history
 						}
 					}
 				}

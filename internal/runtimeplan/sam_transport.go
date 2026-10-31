@@ -11,6 +11,7 @@ import (
 	"github.com/imksoo/routerd/pkg/api"
 	"github.com/imksoo/routerd/pkg/bgpdaemon"
 	"github.com/imksoo/routerd/pkg/mobilityconfig"
+	"github.com/imksoo/routerd/pkg/samenrollment"
 	"github.com/imksoo/routerd2/internal/boottime"
 	"github.com/imksoo/routerd2/internal/lifetime"
 	"github.com/imksoo/routerd2/internal/network"
@@ -24,7 +25,7 @@ import (
 // operator intent; the RR observation contributes remote endpoints and its
 // original finite authority. Direct leaf groups have a different route-policy
 // boundary and are deliberately not consumed here.
-func projectSAMTransports(p *projection, recipes []resourceprogram.SAMTransport, records map[string]serviceconfig.Update, dhcp4Addresses map[string]leasedIPv4, clock boottime.Clock, configs map[string]bgpconfig.Config) error {
+func projectSAMTransports(p *projection, recipes []samTransportPlan, records map[string]serviceconfig.Update, dhcp4Addresses map[string]leasedIPv4, clock boottime.Clock, configs map[string]bgpconfig.Config) error {
 	dynamicBGP := make(map[string]bool)
 	for _, recipe := range recipes {
 		record, ok := records[recipe.Client]
@@ -35,14 +36,14 @@ func projectSAMTransports(p *projection, recipes []resourceprogram.SAMTransport,
 		if err := json.Unmarshal(record.Snapshot, &snapshot); err != nil {
 			return err
 		}
-		if !currentSAMRR(recipe, snapshot, clock) {
+		if !currentSAMRR(recipe.SAMTransport, snapshot, clock) {
 			continue
 		}
-		local, source, until, ok := samLocalEndpoint(recipe, dhcp4Addresses, clock, snapshot)
+		local, source, until, ok := samLocalEndpoint(recipe.SAMTransport, dhcp4Addresses, clock, snapshot)
 		if !ok {
 			continue
 		}
-		peers, err := samRRPeers(recipe, snapshot, local)
+		peers, err := samRRPeers(recipe.SAMTransport, snapshot, local)
 		if err != nil {
 			return fmt.Errorf("SAM transport %s: %w", recipe.Name, err)
 		}
@@ -77,15 +78,7 @@ func projectSAMTransports(p *projection, recipes []resourceprogram.SAMTransport,
 		if cfg.Runtime.Peers == nil {
 			cfg.Runtime.Peers = make(map[string]bgpdaemon.AppliedPeer)
 		}
-		claim, err := samClaim(p.instances, recipe.Client)
-		if err != nil {
-			return fmt.Errorf("SAM transport %s claim: %w", recipe.Name, err)
-		}
-		paths, err := samOwnedPaths(recipe, claim.Mobility.OwnedAddresses)
-		if err != nil {
-			return fmt.Errorf("SAM transport %s ownership: %w", recipe.Name, err)
-		}
-		cfg.Runtime.Paths = append(cfg.Runtime.Paths, paths...)
+		cfg.Runtime.Paths = append(cfg.Runtime.Paths, recipe.paths...)
 		for _, peer := range peers {
 			outer, ok := outerIPv4Route(p.network, peer.endpoint.String(), recipe.Underlay, source, clock, until)
 			if !ok {
@@ -129,18 +122,31 @@ func projectSAMTransports(p *projection, recipes []resourceprogram.SAMTransport,
 	return nil
 }
 
-func samClaim(bindings []binding, module string) (api.SAMEnrollmentClaimSpec, error) {
-	for _, binding := range bindings {
-		if binding.instance.Name != module {
-			continue
+type samTransportPlan struct {
+	resourceprogram.SAMTransport
+	paths []bgpdaemon.AppliedPath
+}
+
+func prepareSAMTransports(recipes []resourceprogram.SAMTransport, services []serviceconfig.Service) ([]samTransportPlan, error) {
+	plans := make([]samTransportPlan, 0, len(recipes))
+	for _, recipe := range recipes {
+		var client *samclientconfig.Node
+		for _, service := range services {
+			if service.ModuleName() == recipe.Client {
+				client = service.SAMClient
+				break
+			}
 		}
-		var cfg samclientconfig.Config
-		if err := json.Unmarshal(binding.instance.Config, &cfg); err != nil {
-			return api.SAMEnrollmentClaimSpec{}, err
+		if client == nil {
+			return nil, fmt.Errorf("SAM transport %s has no enrollment client %s", recipe.Name, recipe.Client)
 		}
-		return cfg.Claim, nil
+		paths, err := samOwnedPaths(recipe, client.Claim.Mobility.OwnedAddresses)
+		if err != nil {
+			return nil, fmt.Errorf("SAM transport %s ownership: %w", recipe.Name, err)
+		}
+		plans = append(plans, samTransportPlan{SAMTransport: recipe, paths: paths})
 	}
-	return api.SAMEnrollmentClaimSpec{}, fmt.Errorf("SAM client %s is not active", module)
+	return plans, nil
 }
 
 func samOwnedPaths(recipe resourceprogram.SAMTransport, values []string) ([]bgpdaemon.AppliedPath, error) {
@@ -148,18 +154,10 @@ func samOwnedPaths(recipe resourceprogram.SAMTransport, values []string) ([]bgpd
 	seen := make(map[string]bool, len(values))
 	source := "MobilityPool/" + recipe.Name + "/node/" + recipe.Self
 	for _, raw := range values {
-		prefix, err := netip.ParsePrefix(raw)
-		if err != nil {
-			address, addressErr := netip.ParseAddr(raw)
-			if addressErr != nil || !address.Is4() {
-				return nil, fmt.Errorf("invalid owned address %q", raw)
-			}
-			prefix = netip.PrefixFrom(address, 32)
-		}
-		if !prefix.Addr().Is4() || prefix.Bits() != 32 {
+		prefix, err := samenrollment.ParsePrefixOrAddress(raw)
+		if err != nil || !prefix.Addr().Is4() || prefix.Bits() != 32 {
 			return nil, fmt.Errorf("owned address %q is not an IPv4 /32", raw)
 		}
-		prefix = prefix.Masked()
 		if seen[prefix.String()] {
 			return nil, fmt.Errorf("owned address %s is repeated", prefix)
 		}

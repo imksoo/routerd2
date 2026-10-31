@@ -200,6 +200,18 @@ func TestSnapshotCapacityRetainsExistingAndAllowsIdempotentRetry(t *testing.T) {
 			t.Fatal("capacity evicted an existing reference", err)
 		}
 	}
+	if err := s.DeleteSnapshot(first); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteSnapshot(first); err != nil {
+		t.Fatal("repeated deletion did not preserve idempotence", err)
+	}
+	if _, err := s.Snapshot(c.Revision); err != nil {
+		t.Fatal("explicit deletion did not recover snapshot capacity", err)
+	}
+	if _, err := s.ResolveSnapshot(last); err != nil {
+		t.Fatal("deletion changed an unrelated saved configuration", err)
+	}
 }
 
 func TestJournalIdentityCannotBeReplacedByOrdinarySave(t *testing.T) {

@@ -36,7 +36,7 @@ func (s Session) Execute(ctx context.Context, command string, input io.Reader, o
 		return nil
 	}
 	if len(a) == 1 && a[0] == "help" {
-		_, err := fmt.Fprintln(out, "show status\nshow network [SECTION [FILTER VALUE ...]] (show network help for details)\nshow resources\nshow derived RESOURCE_ID\nshow observations [after CURSOR] [limit 1..16]\nshow event-store\nshow services [NAME]\nshow route-issues [offset N]\nshow config\nshow snapshots\nshow running-config\nshow logs [module NAME] [level INFO] [limit 100]\nshow dns-queries NAME [client IP] [name PATTERN] [response RCODE] [since RFC3339] [until RFC3339] [limit 1..1000]\nshow firewall-events NAME [source IP] [action VALUE] [since RFC3339] [limit 1..1000]\nshow logging\nshow version\nrestart <module>\npoweroff\nreboot\nconfigure (exec: CommitRequest YAML/JSON on stdin; shell: candidate mode)\nconfirm\nsnapshot (exec stdin: SnapshotRequest JSON/YAML)\nrestore (exec stdin: RestoreRequest JSON/YAML)\nupdate status|stage|prepare|rollback|cancel|prune (exec stdin: signed tar or JSON)\nhelp\nexit")
+		_, err := fmt.Fprintln(out, "show status\nshow network [SECTION [FILTER VALUE ...]] (show network help for details)\nshow resources\nshow derived RESOURCE_ID\nshow observations [after CURSOR] [limit 1..16]\nshow event-store\nshow services [NAME]\nshow route-issues [offset N]\nshow config\nshow snapshots\nshow running-config\nshow logs [module NAME] [level INFO] [limit 1..200] [epoch EPOCH] [after SEQUENCE] [tail true|false]\nshow dhcp-fingerprints NAME [mac ADDRESS] [since RFC3339] [limit 1..1000]\nshow traffic-flows NAME [client IP] [peer IP] [protocol NAME] [since RFC3339] [until RFC3339] [limit 1..1000]\nshow dns-queries NAME [client IP] [name PATTERN] [response RCODE] [since RFC3339] [until RFC3339] [limit 1..1000]\nshow firewall-events NAME [source IP] [action VALUE] [since RFC3339] [limit 1..1000]\nshow logging\nshow version\nrestart <module>\npoweroff\nreboot\nconfigure (exec: CommitRequest YAML/JSON on stdin; shell: candidate mode)\nconfirm\nsnapshot (exec stdin: SnapshotRequest JSON/YAML)\nsnapshot export (exec stdin: SnapshotRef JSON/YAML; output: configuration YAML)\nsnapshot delete (exec stdin: SnapshotDeleteRequest JSON/YAML)\nrestore (exec stdin: RestoreRequest JSON/YAML)\nupdate status|stage|prepare|rollback|cancel|prune (exec stdin: signed tar or JSON)\nhelp\nexit")
 		return err
 	}
 	var result json.RawMessage
@@ -45,6 +45,10 @@ func (s Session) Execute(ctx context.Context, command string, input io.Reader, o
 	logClient := localapi.NewClient(filepath.Join(s.RuntimeDir, logging.SocketName))
 	var err error
 	switch {
+	case len(a) == 2 && a[0] == "snapshot" && a[1] == "export":
+		return exportSnapshot(ctx, ctl, input, out)
+	case len(a) == 2 && a[0] == "snapshot" && a[1] == "delete":
+		return deleteSnapshot(ctx, ctl, input, out)
 	case len(a) == 1 && a[0] == "snapshot":
 		return snapshotConfiguration(ctx, ctl, input, out)
 	case len(a) == 1 && a[0] == "restore":
@@ -74,12 +78,16 @@ func (s Session) Execute(ctx context.Context, command string, input io.Reader, o
 		return showNetwork(ctx, ctl, a[2:], out)
 	case len(a) >= 2 && a[0] == "show" && a[1] == "firewall-events":
 		return showFirewallHistory(ctx, ctl, a[2:], out)
+	case len(a) >= 2 && a[0] == "show" && a[1] == "dhcp-fingerprints":
+		return showDHCPFingerprints(ctx, ctl, a[2:], out)
+	case len(a) >= 2 && a[0] == "show" && a[1] == "traffic-flows":
+		return showTrafficHistory(ctx, ctl, a[2:], out)
 	case len(a) >= 2 && a[0] == "show" && a[1] == "dns-queries":
 		return showDNSHistory(ctx, ctl, a[2:], out)
 	case len(a) >= 2 && a[0] == "show" && a[1] == "logs":
-		q := url.Values{"tail": {"true"}, "limit": {"100"}}
+		q := url.Values{"limit": {"100"}}
 		if len(a)%2 != 0 {
-			return errors.New("usage: show logs [module NAME] [level LEVEL] [limit 1..200]")
+			return errors.New("usage: show logs [module NAME] [level LEVEL] [limit 1..200] [epoch EPOCH] [after SEQUENCE] [tail true|false]")
 		}
 		seen := map[string]bool{}
 		for i := 2; i < len(a); i += 2 {
@@ -88,6 +96,9 @@ func (s Session) Execute(ctx context.Context, command string, input io.Reader, o
 			}
 			seen[a[i]] = true
 			switch a[i] {
+			case "epoch", "after", "tail":
+				// The log owner validates the cursor and selects the default direction.
+				q.Set(a[i], a[i+1])
 			case "module":
 				q.Set("module", a[i+1])
 			case "level":

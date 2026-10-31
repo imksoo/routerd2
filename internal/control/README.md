@@ -397,3 +397,15 @@ file is reported while another verified reference remains usable.
 Race detection and vet passed for configuration, control, CLI and the routerd
 command. The standard three executables are static. The same target/appliance
 qualification limits stated above still apply.
+
+A saved configuration can be copied off the appliance without restoring it:
+`routerd config export-snapshot --snapshot saved-reference.json` or SSH exec
+`snapshot export` with that `SnapshotRef` on stdin returns configuration YAML.
+`POST /v1/config/snapshots/export` resolves the same immutable reference and
+returns its `config.Document`. The existing store verifies the digest and
+provenance. Export does not change the current revision, release selection or
+network state, and does not require the saved revision to remain current.
+Protect redirected output with `umask 077`. The result can be submitted through
+ordinary configuration validation and application. It contains saved intent,
+not SSH identity, external credential files, leases, trust revocations or a
+release-store image; those remain separately owned recovery inputs.

@@ -1,15 +1,18 @@
 package control
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/imksoo/routerd2/internal/config"
+	"github.com/imksoo/routerd2/internal/network"
 )
 
 func TestSnapshotSerializesConfirmedRevisionWithoutKernelApply(t *testing.T) {
@@ -77,5 +80,33 @@ func TestSnapshotAPIRequiresCurrentRevision(t *testing.T) {
 				t.Fatal("bad snapshot acknowledgment", err)
 			}
 		}
+	}
+}
+
+func TestExportSavedConfigurationDoesNotApplyHistoricalIntent(t *testing.T) {
+	e, n := fixture(t)
+	original := e.State().Config
+	ref, err := e.Snapshot(SnapshotRequest{ExpectedRevision: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := request(e, "changed-after-snapshot")
+	r.Config = config.FromNative(config.Native{Network: network.Desired{Interfaces: []network.Interface{{Name: "eth0"}}}})
+	if _, err := e.Commit(t.Context(), r); err != nil {
+		t.Fatal(err)
+	}
+	before, calls := e.State().Committed, len(n.calls)
+	body, err := json.Marshal(ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	e.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/config/snapshots/export", bytes.NewReader(body)))
+	var document config.Document
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &document) != nil || !reflect.DeepEqual(document, original) {
+		t.Fatalf("saved export: status=%d body=%s", w.Code, w.Body.String())
+	}
+	if !reflect.DeepEqual(e.State().Committed, before) || len(n.calls) != calls {
+		t.Fatal("export changed committed intent or applied it to the network")
 	}
 }

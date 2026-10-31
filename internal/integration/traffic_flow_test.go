@@ -4,8 +4,10 @@ package integration
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/tls"
@@ -22,6 +24,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -32,10 +35,13 @@ import (
 	"github.com/imksoo/routerd2/internal/legacyconfig"
 	"github.com/imksoo/routerd2/internal/protocol/webconsoleconfig"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
+	"github.com/imksoo/routerd2/internal/runtimeconfig"
+	"github.com/imksoo/routerd2/internal/runtimeplan"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 	"github.com/miekg/dns"
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netns"
+	"golang.org/x/crypto/ssh"
 )
 
 func TestDaemonTrafficFlowHistory(t *testing.T) { testDaemonTrafficFlowHistory(t, false) }
@@ -235,7 +241,63 @@ func testDaemonTrafficFlowHistory(t *testing.T, native bool) {
 	imported.Document.Resources = append(imported.Document.Resources, resourceprogram.Resource{
 		ID: "service/history-console", Service: &serviceconfig.Service{Name: "history-console", WebConsole: &webconsoleconfig.Config{Listen: netip.MustParseAddrPort("192.0.2.1:8080"), BasePath: "/ops/", Title: "Communication history"}},
 	})
-	f := startFixtureDaemonAt(t, imported.Document, work)
+	_, clientKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := ssh.NewSignerFromKey(clientKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := startFixtureDaemonConfigured(t, imported.Document, work, nil, runtimeconfig.SSH{
+		Listen: "192.0.2.1:2222", User: "admin", AuthorizedKeys: []string{string(ssh.MarshalAuthorizedKey(signer.PublicKey()))},
+	})
+	hostBytes, err := os.ReadFile(filepath.Join(work, "state", "ssh_host_ed25519_key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err := ssh.ParsePrivateKey(hostBytes)
+	clear(hostBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connectSSH := func() *ssh.Client {
+		t.Helper()
+		var client *ssh.Client
+		if err := fixtureInsideNamespace(lan, func() error {
+			var err error
+			client, err = ssh.Dial("tcp", "192.0.2.1:2222", &ssh.ClientConfig{
+				User: "admin", Auth: []ssh.AuthMethod{ssh.PublicKeys(signer)},
+				HostKeyCallback: ssh.FixedHostKey(host.PublicKey()), Timeout: 3 * time.Second,
+			})
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = client.Close() })
+		return client
+	}
+	sshClient := connectSSH()
+	sshHistory := func(query url.Values) runtimeplan.TrafficHistory {
+		t.Helper()
+		session, err := sshClient.NewSession()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer session.Close()
+		command := "show traffic-flows " + strings.TrimPrefix(historyService, "service.")
+		for _, key := range []string{"client", "peer", "protocol", "since", "until", "limit"} {
+			if value := query.Get(key); value != "" {
+				command += " " + key + " " + value
+			}
+		}
+		output, err := session.CombinedOutput(command)
+		var page runtimeplan.TrafficHistory
+		if err != nil || json.Unmarshal(output, &page) != nil || page.Service != historyService || page.ReadAt.IsZero() {
+			t.Fatalf("SSH traffic history: %v %s", err, output)
+		}
+		return page
+	}
 	console := func(query url.Values) (int, string) {
 		t.Helper()
 		query.Set("service", historyService)
@@ -319,6 +381,17 @@ func testDaemonTrafficFlowHistory(t *testing.T, native bool) {
 	t.Log("TCP/UDP forwarded through source NAT while the history path was unusable")
 	if status, _ := console(url.Values{}); status != http.StatusServiceUnavailable {
 		t.Fatal("unreadable history must not look empty", status)
+	}
+	unavailable, err := sshClient.NewSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var unavailableOutput bytes.Buffer
+	unavailable.Stdout = &unavailableOutput
+	err = unavailable.Run("show traffic-flows " + historyService)
+	_ = unavailable.Close()
+	if err == nil || unavailableOutput.Len() != 0 {
+		t.Fatal("unreadable SSH history returned successful output", err, unavailableOutput.String())
 	}
 	probe(udpClient)
 	probe(tcpClient)
@@ -513,6 +586,78 @@ func testDaemonTrafficFlowHistory(t *testing.T, native bool) {
 	if _, err := lock.Exec("BEGIN IMMEDIATE"); err != nil {
 		t.Fatal(err)
 	}
+	// Compare the same stored rows while the existing write-lock check holds
+	// counters stable. The independent SSH client uses the product API, not SQL.
+	for _, query := range []url.Values{
+		{"client": {"::ffff:192.0.2.2"}, "peer": {"198.51.100.2"}, "protocol": {"TCP"}, "since": {firstTLS.StartedAt.Format(time.RFC3339Nano)}, "until": {firstTLS.StartedAt.Format(time.RFC3339Nano)}, "limit": {"1"}},
+		{"client": {"192.0.2.2"}, "peer": {"198.51.100.2"}, "protocol": {"udp"}, "since": {first.StartedAt.Format(time.RFC3339Nano)}, "until": {first.StartedAt.Format(time.RFC3339Nano)}},
+		{"limit": {"1"}},
+		{"client": {"203.0.113.99"}},
+		{"peer": {"203.0.113.99"}},
+	} {
+		var api runtimeplan.TrafficHistory
+		if err := f.control.Do(t.Context(), http.MethodGet, "/v1/services/"+url.PathEscape(historyService)+"/traffic-history?"+query.Encode(), nil, &api); err != nil {
+			t.Fatal(err)
+		}
+		page := sshHistory(query)
+		if page.Limit != api.Limit || page.Truncated != api.Truncated || !reflect.DeepEqual(page.Flows, api.Flows) {
+			t.Fatalf("SSH changed API history or counters/classification: %+v want %+v", page, api)
+		}
+		if query.Get("protocol") == "TCP" && (len(page.Flows) != 1 || page.Flows[0].FlowKey != firstTLS.FlowKey || page.Flows[0].TLSSNI != "flow.routerd.test") {
+			t.Fatal("SSH exact TCP search missed the real classified connection", page)
+		}
+		if query.Get("protocol") == "udp" && (len(page.Flows) != 1 || page.Flows[0].FlowKey != first.FlowKey) {
+			t.Fatal("SSH exact UDP search missed the original connection", page)
+		}
+		if len(query) == 1 && query.Get("limit") == "1" && (len(page.Flows) != 1 || !page.Truncated) {
+			t.Fatal("SSH limit did not report omitted history", page)
+		}
+		if (query.Get("client") == "203.0.113.99" || query.Get("peer") == "203.0.113.99") && len(page.Flows) != 0 {
+			t.Fatal("SSH filter returned unrelated history", page)
+		}
+	}
+	var beforeCandidate control.State
+	if err := f.control.Do(t.Context(), http.MethodGet, "/v1/config", nil, &beforeCandidate); err != nil {
+		t.Fatal(err)
+	}
+	shell, err := sshClient.NewSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var transcript, shellErrors bytes.Buffer
+	shell.Stdout, shell.Stderr = &transcript, &shellErrors
+	const titlePath = "resources[service/history-console].service.web_console.title"
+	shell.Stdin = strings.NewReader("configure\rset " + titlePath + " \"candidate-traffic-history\"\rshow traffic-flows " + historyService + " protocol TCP since " + firstTLS.StartedAt.Format(time.RFC3339Nano) + " until " + firstTLS.StartedAt.Format(time.RFC3339Nano) + " limit 1\rshow " + titlePath + "\rabort\rexit\r")
+	if err := shell.RequestPty("xterm", 24, 100, ssh.TerminalModes{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := shell.Shell(); err != nil {
+		t.Fatal(err)
+	}
+	shellDone := make(chan error, 1)
+	go func() { shellDone <- shell.Wait() }()
+	select {
+	case err := <-shellDone:
+		if err != nil {
+			t.Fatal(err, transcript.String(), shellErrors.String())
+		}
+	case <-time.After(10 * time.Second):
+		_ = shell.Close()
+		t.Fatal("traffic history candidate shell timed out")
+	}
+	_ = shell.Close()
+	candidateOutput := strings.ReplaceAll(transcript.String(), "\r\n", "\n")
+	if shellErrors.Len() != 0 || strings.Contains(candidateOutput, "Error:") || !strings.Contains(candidateOutput, `"flowKey": "`+firstTLS.FlowKey+`"`) || !strings.Contains(candidateOutput, "\n\"candidate-traffic-history\"\n") {
+		t.Fatal("candidate read lost history or its uncommitted edit", candidateOutput, shellErrors.String())
+	}
+	var afterCandidate control.State
+	if err := f.control.Do(t.Context(), http.MethodGet, "/v1/config", nil, &afterCandidate); err != nil {
+		t.Fatal(err)
+	}
+	if beforeCandidate.Revision != afterCandidate.Revision || afterCandidate.Confirmation != nil || !reflect.DeepEqual(beforeCandidate.Config, afterCandidate.Config) {
+		t.Fatal("read-only traffic search or aborted candidate changed committed configuration")
+	}
+	t.Log("real SSH and API returned identical original TLS/UDP rows, counters and classification with client/peer/protocol/time/limit filters; candidate mode retained its edit without committing")
 	for i := 0; i < 4; i++ {
 		probe(udpClient)
 		probe(tcpClient)
@@ -586,7 +731,9 @@ func testDaemonTrafficFlowHistory(t *testing.T, native bool) {
 		probe(tcpClient)
 		t.Log("same TCP endpoints created a separate HTTP history row, without old TLS metadata; the earlier TLS row ended and retained its original start")
 	}
+	_ = sshClient.Close()
 	f = f.restart()
+	sshClient = connectSSH()
 	probe(udpClient)
 	probe(tcpClient)
 	until(t, 4*time.Second, func() bool {
@@ -604,6 +751,11 @@ func testDaemonTrafficFlowHistory(t *testing.T, native bool) {
 	if status, body := console(url.Values{"client": {"192.0.2.2"}, "protocol": {"udp"}}); status != http.StatusOK || !strings.Contains(body, first.FlowKey) {
 		t.Fatal("saved history missing after product restart", status, body)
 	}
+	retained := sshHistory(url.Values{"client": {"192.0.2.2"}, "peer": {"198.51.100.2"}, "protocol": {"udp"}, "since": {first.StartedAt.Format(time.RFC3339Nano)}, "until": {first.StartedAt.Format(time.RFC3339Nano)}})
+	if len(retained.Flows) != 1 || retained.Flows[0].FlowKey != first.FlowKey || !retained.Flows[0].StartedAt.Equal(first.StartedAt) {
+		t.Fatal("SSH lost original stored history after whole-product restart", retained)
+	}
+	t.Log("independent SSH reauthenticated against the same host identity after whole-product restart and read the original UDP history")
 	udpClient.Close()
 	tcpClient.Close()
 	until(t, 7*time.Second, func() bool {

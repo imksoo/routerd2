@@ -120,6 +120,41 @@ func (s *Store) Snapshot(expectedRevision uint64) (SnapshotRef, error) {
 	return ref, nil
 }
 
+// DeleteSnapshot removes one explicitly selected immutable copy. The caller
+// holds the configuration writer lock and protects live boot references.
+func (s *Store) DeleteSnapshot(ref SnapshotRef) error {
+	if err := ref.Validate(); err != nil {
+		return err
+	}
+	current, err := s.Load()
+	if err != nil {
+		return err
+	}
+	if ref.StoreID != current.StoreID {
+		return errors.New("snapshot belongs to a different configuration store")
+	}
+	dir, err := s.snapshotDirectory(false)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	if _, err := readSnapshot(dir, ref); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := unix.Unlinkat(int(dir.Fd()), ref.Digest+".json", 0); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	// Sync even when already absent: retry establishes the durability of an
+	// earlier removal whose final directory sync could not be acknowledged.
+	if err := dir.Sync(); err != nil {
+		return fmt.Errorf("snapshot removed but directory durability unconfirmed; retry deletion: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) ResolveSnapshot(ref SnapshotRef) (Snapshot, error) {
 	if err := ref.Validate(); err != nil {
 		return Snapshot{}, err

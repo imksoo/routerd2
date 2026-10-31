@@ -11223,8 +11223,8 @@
       "single_node": "Cold boot and actual reboot passed independent clients, acquired IPv4/IPv6 DNS transports UDP/TCP, both-IP TCP/UDP, conditional DNS/DoH, BGP/IX, NTP and Tailscale. Not physical NIC/ONU qualification.",
       "natural_original_dhcp_lease_seconds": 43200,
       "natural_dhcp_t1_seconds": 21600,
-      "natural_renewal": "Current native93/original43200s LAN lease cohort; ordinary/special actual T1 deadlines2026-10-31T01:20:47Z. No fault injection or replacement. Prior8cc cohort stopped5h17m with requestACK->echo response30.43s; cause/IX choice not established.",
-      "two_node_normal": "61840d9 clock-update persistence / ntp-calibration-native99 normal Alpine full57, both actual power cuts/rejoins and fresh automatic clients exit0. All paths30.106623/18.288321s; independent NTP adoption4.314/4.269s; additional cut before backup BGP readiness. DNS alias fix e5b14d4 was not in this image.",
+      "natural_renewal": "2026-10-31 JST: native108 observation/SSH transport ended before original T1 while its guest remained running; direct termination cause unproven. Dedicated normal native120 cohort is isolated from chat turns in an OS service. New ordinary/special DHCPACK at16:37:31.917/16:37:32.409; unchanged43200s leases and21600s T1 due22:37:31.917/22:37:32.409; decision22:39:02.409. Cold boot, acquired DNS/IPv4IPv6/BGP/NTP/Tailscale and whole-product restart passed; natural T1 is still pending. No fault injection into either original or current cohort.",
+      "two_node_normal": "2026-10-31 16:56 JST: 20ea125 / ops-management-integrated-native123 integrates published07c55c9 and six management paths320f475. Normal APK/BIOS disks, full57 derived configuration, two isolated PVE guests, both actual power cuts/rejoins and fresh automatic clients exit0. Original TCP/NAT mapping retained; longest TCP reply7.204s, UDP233/1763 lost, DNS17/1017 failed. Both-IP acquired DNS/TCP/UDP, BGP/DS-Lite/NTP/Tailscale restored. Same selected exit after restart6.790/3.791s. No physical NIC/ONU qualification or natural T1 acceptance.",
       "two_node_configuration_changes": [
         "Explicit shared WAN IPv4 next hop for static BGP advertisements",
         "Shared VirtualAddress assigned to existing WAN VMAC instead of physical WAN"
@@ -11234,7 +11234,7 @@
       "normal_alpine_copy_assertions": 0,
       "normal_alpine_effects_timeouts": 0,
       "hgw_normal": "New no-injection integrated-host-source-native95 / standard7800s, real HGW/independent automatic clients, original saved DUID. Natural PD T1 observed deadline2026-10-30T21:45:46Z; completion with recovery approximately21:57Z. One startup AFTR restart on stale-observation HTTP409; steady phase began generation2. Keep trial untouched.",
-      "remaining": "Complete unchanged original LAN/native93 and real-HGW/native95 natural renewals; integrated DNS alias/DHCPv6 refresh and same-contract update recovery, target homert conditions, k8s/pve dynamic SAM and Cloud SAM/all34. Original long I/O delay trigger unmeasured; unknown never-received DHCP bindings limited.",
+      "remaining": "Complete native120 original LAN natural T1 (2026-10-31 22:39 JST decision), qualify the current candidate against target homert WAN/NIC/load and migration/update/recovery conditions, then k8s/pve dynamic SAM and Cloud SAM/all34. Prior native95 real-HGW natural renewal completed; that older result is not current-candidate qualification. Original long I/O delay trigger remains unmeasured; unknown never-received DHCP bindings remain limited.",
       "full_profile_signed_update": {
         "base": "8cc420d / full-homert-loopback-native92",
         "candidate": "00969ca / full-homert-operations-native92",
@@ -11285,7 +11285,7 @@
       },
       "current_runs": {
         "hgw": "New no-injection integrated-host-source-native95 / standard7800s, real HGW/independent automatic clients, original saved DUID. Natural PD T1 observed deadline2026-10-30T21:45:46Z; completion with recovery approximately21:57Z. One startup AFTR restart on stale-observation HTTP409; steady phase began generation2. Keep trial untouched.",
-        "original_lan": "Current native93/original43200s LAN lease cohort; ordinary/special actual T1 deadlines2026-10-31T01:20:47Z. No fault injection or replacement. Prior8cc cohort stopped5h17m with requestACK->echo response30.43s; cause/IX choice not established.",
+        "original_lan": "Verified live native120 cohort: original 43200-second DHCPv4 leases, T1 21600 seconds. Actual ordinary/special DHCPACK-derived T1: 2026-10-31T13:37:31.917617Z and 13:37:32.409511Z. No injection or replacement; not part of the shorter PVE restore result.",
         "sam_wireguard": {
           "release_id": "sam-wireguard-final-release",
           "environment": "isolated Linux netns; real routerd2 supervisor/control/network/SAM workers; independent legacy routerd RR; independent FRR; separate LAN client and RR terminal",
@@ -11339,6 +11339,30 @@
         "change": "chrony4.8 driftfile interval0 writes only on clock updates; no second writer, timer, source polling change or relaxed client quality.",
         "after": "Native99 full57 two-node pass30.107/18.288s. Stopped-disk copy journal replay recovered saved skew291.392793/306.475167ppm, exact values read on real guest reboots. Original60s and client15s retained.",
         "checks": "Normal Make build/image, related runtimeplan race, vet and actual PVE KVM two-node all exit0. Both-arch static sixELF, signed catalog and publisher exit0 (publisher22.856s). Artifact batch includes e5b14d4 alias TTL fix; full-profile image99 predates it."
+      },
+      "management_main_integration": {
+        "release_id": "main-management-sam-126",
+        "source_heads": [
+          "204c994",
+          "4fcdb89"
+        ],
+        "local_communication": "Normal static three-binary build passed; two management daemon checks and four SAM transport checks with independent legacy routerd RR/FRR passed. The preceding main-management-sam-125 passed all six management feature checks.",
+        "sam_preparation": "Fixed claim-owned /32 paths are built once with the immutable protocol plan using the existing enrollment address parser; observation projection no longer decodes the unchanged claim or parses its fixed addresses.",
+        "pve_restore": {
+          "source_commit": "4fcdb89",
+          "release_id": "ops-management-integrated-native125",
+          "fix": "30eaa27",
+          "result": "All 57 settings. DNS record change and snapshot restoration retained the same PD PID, generation, config digest, prefix and original preferred/valid deadlines. Acquired DNS, both-IP TCP/UDP, BGP, special client and Tailscale passed in 3.298831553198397 seconds after restoration. Whole-appliance reboot then recovered all paths and identities. Exit 0; dedicated VM removed."
+        },
+        "checks": "make check passed with full Race Detector, go vet and 36 Python checks. Normal amd64/arm64 builds and static linking of all six artifacts passed. Actual signed catalog and publisher/runtime bundle acceptance passed for both architectures; arm64 execution is not implied. The initial large-config Race attempt expired the original confirmation interval during concurrent builds; the unchanged interval passed on rerun. One UTC-address readiness attempt had no initial-grant trace; its diagnostic now asserts an installed finite grant while keeping the original 500 ms cutoff, and targeted/full Race checks passed.",
+        "remaining": "Natural original DHCP renewals, selected existing-state migration, target WAN/LAN peers and measured load; then k8s/pve profile differences and remaining Cloud SAM/provider implementation and acceptance. Full goal remains active.",
+        "pve_main126": {
+          "release_id": "main-management-sam-126",
+          "bootstrap_image_release": "ops-management-integrated-native125",
+          "artifact_match": "All three deployed product artifact SHA256 digests match the current root normal-build outputs. Source contains 204c994, 4fcdb89 and SAM immutable ownership-path preparation.",
+          "result": "All 57 settings: PD worker PID/generation/config digest, prefix and original preferred/valid deadlines remained identical across DNS-only edit and selected-snapshot restore. Original configuration restored; acquired DNS, both-IP TCP/UDP, BGP, special client and Tailscale passed in 4.305407498963177 seconds. Whole-product reboot recovered DNS, both-IP paths, BGP/IX/NTP/Tailscale and identities. Exit 0 at 2026-10-31T09:03:22Z; dedicated VM removed.",
+          "limit": "Uses normal125 kernel/initramfs plus normal126 product overlay, not a newly rebuilt complete126 image. Natural renewal, original-state migration, physical access peers and load qualification remain separate."
+        }
       }
     }
   },
@@ -11346,7 +11370,7 @@
     {
       "stage": 1,
       "profile": "homert02/03",
-      "next": "Complete no-injection original LAN/real-HGW natural renewals and integrated normal Alpine two-node acceptance after27fbad2. Retain original I/O delay trigger as unmeasured; then same-contract migration/update recovery, target homert conditions, k8s/pve dynamic SAM and Cloud SAM/all34. Unknown never-received DHCP bindings remain limited.",
+      "next": "Integrate the six management paths into main and finish current native120 original LAN natural renewal independently. Candidate123 signed update, explicit rollback and failed-trial automatic recovery passed on isolated PVE. The current homert targets are 4-vCPU/4-GiB PVE guests with VirtIO NICs and VirtIO/SCSI disks: remaining target acceptance concerns actual WAN/LAN attachments, Ubuntu/Linux differences, existing identity/state migration and observed traffic load. Proceed to observed k8s/pve differences and Cloud SAM after homert acceptance; original long I/O trigger and unknown never-received DHCP binding limits remain explicit.",
       "required_focus": [
         "WAN/LAN IPv4/IPv6, DS-Lite, actual route selection/backup WAN, DHCP/PD/RA, learned DNS resolution/distribution, firewall/NAT/MTU/MSS, BGP and management",
         "HA-01 current election/track dependencies, HA-02 DHCP/PD synchronization, HA-03 NAT/connection synchronization and EXT-02 Tailscale used by this deployment"

@@ -97,6 +97,18 @@ Keep this input and the resulting disk private; neither belongs in a public
 release artifact. This provisions files during image creation, without guest
 shell commands or a second runtime owner.
 
+`DISK_STATE_DIR=/path/to/selected-state` provisions an explicitly prepared native
+state tree into the new ext4 state partition before the first boot. Paths are
+relative to the boot document's `state_dir`: for example, place the selected
+OpenSSH host key at `ssh_host_ed25519_key`. File and directory modes are kept;
+regular files are copied as root. Select only the identities needed for this
+installation, using the existing [SSH identity](../internal/management/README.md)
+and [Tailscale saved identity](../internal/protocol/tailscale/README.md) contracts.
+Do not point this input at an entire old router state directory. Symbolic links
+and special files are rejected, so a staged link cannot pull in an unselected
+secret. These files are placed only in the state partition, not the initramfs.
+This option neither converts an old format nor writes an existing disk.
+
 The existing smoke check can boot the disk without QEMU's `-kernel` or
 `-initrd` shortcuts:
 

@@ -12,6 +12,7 @@ DISK_STATE_DEVICE ?= /dev/vda2
 DISK_CONFIG ?=
 DISK_AUTHORIZED_KEY ?=
 DISK_ETC_DIR ?=
+DISK_STATE_DIR ?=
 CONTAINER_TAG ?= routerd2:dev
 QEMU_TIMEOUT ?= 90
 QEMU_DAEMON_TIMEOUT ?= 180
@@ -339,7 +340,7 @@ image: ndpi-modules pppoe-engine dnsmasq-engine conntrack-engine tailscale-engin
 
 .PHONY: disk-image
 disk-image:
-	$(PYTHON) scripts/build-disk-image.py --image-dir $(IMAGE_DIR) --output $(DISK_DIR) --state-device $(DISK_STATE_DEVICE) $(if $(DISK_CONFIG),--config $(DISK_CONFIG),) $(if $(DISK_AUTHORIZED_KEY),--authorized-key $(DISK_AUTHORIZED_KEY),) $(if $(DISK_ETC_DIR),--etc-dir $(DISK_ETC_DIR),)
+	$(PYTHON) scripts/build-disk-image.py --image-dir $(IMAGE_DIR) --output $(DISK_DIR) --state-device $(DISK_STATE_DEVICE) $(if $(DISK_CONFIG),--config $(DISK_CONFIG),) $(if $(DISK_AUTHORIZED_KEY),--authorized-key $(DISK_AUTHORIZED_KEY),) $(if $(DISK_ETC_DIR),--etc-dir $(DISK_ETC_DIR),) $(if $(DISK_STATE_DIR),--state-dir "$(DISK_STATE_DIR)",)
 
 qemu-smoke:
 	$(PYTHON) scripts/qemu-smoke.py --image-dir $(IMAGE_DIR) --timeout $(QEMU_TIMEOUT) $(if $(QEMU_SSH_KEY),--ssh-key $(QEMU_SSH_KEY),)
@@ -538,3 +539,19 @@ check-sam-enrollment:
 check-sam-admission:
 	@test -n "$(OLD_ROUTERD)" || (echo "set OLD_ROUTERD to an independent Linux routerd executable"; exit 1)
 	@umask 022; OLD_ROUTERD="$(OLD_ROUTERD)" go test -count=1 -v ./internal/protocol/samadmission -run '^TestAdmissionAgainstRouterdClient$$'
+
+.PHONY: check-event-group
+check-event-group:
+	@test -n "$(OLD_EVENTD)" || (echo "set OLD_EVENTD to an independent Linux routerd-eventd executable"; exit 1)
+	@umask 022; OLD_EVENTD="$(OLD_EVENTD)" go test -race -count=1 -v ./internal/control -run '^TestEventGroup'
+	@umask 022; go test ./internal/legacyconfig -run '^TestEventGroup'
+
+.PHONY: check-event-group-product
+check-event-group-product: build
+	@test -n "$(OLD_EVENTD)" || (echo "set OLD_EVENTD to an independent Linux routerd-eventd executable"; exit 1)
+	$(PYTHON) scripts/daemon-tests.py event-group --go '$(GO)' --old-eventd '$(OLD_EVENTD)' --output dist/event-group-product
+
+.PHONY: check-sam-transport
+check-sam-transport: build
+	@test -n "$(OLD_ROUTERD)" || (echo "set OLD_ROUTERD to an independent Linux routerd RR executable"; exit 1)
+	$(PYTHON) scripts/daemon-tests.py sam-transport --go '$(GO)' --old-routerd '$(OLD_ROUTERD)'

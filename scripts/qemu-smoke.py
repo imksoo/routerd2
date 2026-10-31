@@ -23,6 +23,7 @@ def main():
     parser.add_argument("--image-dir", type=Path, default=Path("dist/image"))
     parser.add_argument("--timeout", type=float, default=90)
     parser.add_argument("--ssh-key", type=Path)
+    parser.add_argument("--ssh-host-key", type=Path, help="Expected host public key, pinned before the first SSH connection")
     parser.add_argument("--qemu", default="qemu-system-x86_64")
     parser.add_argument("--disk", type=Path, help="boot a generated BIOS disk instead of kernel/initramfs")
     parser.add_argument("--disk-bus", choices=("virtio", "scsi"), default="virtio")
@@ -48,6 +49,8 @@ def main():
         parser.error(f"missing QEMU executable: {args.qemu}")
     if args.ssh_key and not args.ssh_key.is_file():
         parser.error("SSH private key does not exist")
+    if args.ssh_host_key and (not args.ssh_key or not args.ssh_host_key.is_file()):
+        parser.error("ssh-host-key requires an existing host public key file and ssh-key")
     manifest = json.loads((image / "manifest.json").read_text())
     if disk_manifest and disk_manifest.get("source_image_manifest_sha256") != hashlib.sha256((image / "manifest.json").read_bytes()).hexdigest():
         parser.error("generated disk was not built from this image manifest")
@@ -93,11 +96,14 @@ def main():
 
         if args.ssh_key:
             with tempfile.TemporaryDirectory(prefix="routerd2-ssh-") as temp:
+                known_hosts = Path(temp) / "known_hosts"
+                if args.ssh_host_key:
+                    known_hosts.write_text(f"[127.0.0.1]:{port} {args.ssh_host_key.read_text().strip()}\n")
                 base = [
                     "ssh", "-F", "/dev/null", "-i", str(args.ssh_key.resolve()),
                     "-p", str(port), "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes",
-                    "-o", "StrictHostKeyChecking=accept-new",
-                    "-o", f"UserKnownHostsFile={temp}/known_hosts",
+                    "-o", "StrictHostKeyChecking=yes" if args.ssh_host_key else "StrictHostKeyChecking=accept-new",
+                    "-o", f"UserKnownHostsFile={known_hosts}",
                     "-o", "ConnectTimeout=2", "admin@127.0.0.1",
                 ]
                 # Readiness and SSH listen happen close together; retry connection
@@ -114,6 +120,8 @@ def main():
                     raise RuntimeError(f"unexpected supervisor state: {status}")
                 if status.get("release_id") != manifest["release_id"]:
                     raise RuntimeError("supervisor release does not match the image manifest")
+                if args.ssh_host_key:
+                    print("SSH pre-provisioned host identity: OK")
                 previous_network = next(module for module in status["modules"] if module["name"] == "network")
                 for module in status["modules"]:
                     if module["required"] and (not module["ready"] or module["release_id"] != manifest["release_id"]):

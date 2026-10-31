@@ -35,6 +35,7 @@ type Options struct {
 // Event is historical evidence, never a command or permission to mutate the
 // kernel. In particular, zero ExpiresAt is a non-expiring event, not a lease.
 type Event struct {
+	Federation *Federation       `json:"federation,omitempty"`
 	ID         string            `json:"id"`
 	Topic      string            `json:"topic"`
 	Source     string            `json:"source"`

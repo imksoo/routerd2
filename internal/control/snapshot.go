@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/imksoo/routerd2/internal/config"
+	"github.com/imksoo/routerd2/internal/configref"
 	"github.com/imksoo/routerd2/internal/events"
 	"github.com/imksoo/routerd2/internal/localapi"
 	"github.com/imksoo/routerd2/internal/release"
@@ -50,7 +51,86 @@ func (e *Engine) Restore(ctx context.Context, r RestoreRequest) (State, error) {
 		RequestID: r.RequestID, Config: saved.Config, ConfirmTimeoutSeconds: r.ConfirmTimeoutSeconds})
 }
 
+type SnapshotDeleteRequest struct {
+	ExpectedRevision uint64             `json:"expected_revision"`
+	Snapshot         config.SnapshotRef `json:"snapshot"`
+}
+
+var ErrSnapshotSelected = errors.New("configuration snapshot is in use by the current configuration or a boot selection")
+
+// Deletion uses the same writer/release lock order as configuration commits.
+// A prepare, boot, or rollback cannot select a reference while it is removed.
+func (e *Engine) DeleteSnapshot(ctx context.Context, r SnapshotDeleteRequest) error {
+	if err := r.Snapshot.Validate(); err != nil {
+		return err
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if r.ExpectedRevision == 0 || r.ExpectedRevision != e.state.Revision || e.state.Confirmation != nil {
+		return ErrConflict
+	}
+	if r.Snapshot.StoreID != e.state.StoreID {
+		return errors.New("snapshot belongs to a different configuration store")
+	}
+	selected := func(s *configref.Selection) bool {
+		return s != nil && (s.Snapshot == r.Snapshot || s.Recovery != nil && s.Recovery.FailedSnapshot == r.Snapshot)
+	}
+	if r.Snapshot.Revision == e.state.Revision || e.state.Startup != nil && selected(&e.state.Startup.Selection) {
+		return ErrSnapshotSelected
+	}
+	remove := func(state release.State) error {
+		if selected(state.Startup) || selected(state.PreviousStartup) || state.Pending != nil && (selected(state.Pending.Startup) || selected(state.Pending.Fallback)) {
+			return ErrSnapshotSelected
+		}
+		return e.store.DeleteSnapshot(r.Snapshot)
+	}
+	if e.releaseStore != nil {
+		return e.releaseStore.WithState(ctx, func(state release.State) error {
+			if err := selectedConfiguration(state, e.releaseDigest, e.state.Committed); err != nil {
+				return err
+			}
+			return remove(state)
+		})
+	}
+	return remove(release.State{})
+}
+
 func (e *Engine) snapshotRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("POST /v1/config/snapshots/export", func(w http.ResponseWriter, r *http.Request) {
+		var ref config.SnapshotRef
+		if err := localapi.Decode(w, r, &ref); err != nil {
+			localapi.Fail(w, http.StatusBadRequest, err)
+			return
+		}
+		// Resolve the existing immutable copy without applying it or holding
+		// the live configuration writer while reading historical intent.
+		saved, err := e.store.ResolveSnapshot(ref)
+		if err != nil {
+			localapi.Fail(w, http.StatusUnprocessableEntity, err)
+			return
+		}
+		localapi.JSON(w, http.StatusOK, saved.Config)
+	})
+
+	mux.HandleFunc("POST /v1/config/snapshots/delete", func(w http.ResponseWriter, r *http.Request) {
+		var request SnapshotDeleteRequest
+		if err := localapi.Decode(w, r, &request); err != nil {
+			localapi.Fail(w, http.StatusBadRequest, err)
+			return
+		}
+		if err := e.DeleteSnapshot(r.Context(), request); err != nil {
+			code := http.StatusUnprocessableEntity
+			if errors.Is(err, ErrConflict) || errors.Is(err, ErrSnapshotSelected) {
+				code = http.StatusConflict
+			} else if errors.Is(err, release.ErrBusy) {
+				code = http.StatusServiceUnavailable
+			}
+			localapi.Fail(w, code, err)
+			return
+		}
+		localapi.JSON(w, http.StatusOK, request.Snapshot)
+	})
+
 	mux.HandleFunc("GET /v1/config/snapshots", func(w http.ResponseWriter, r *http.Request) {
 		result, err := e.store.ListSnapshots()
 		if err != nil {

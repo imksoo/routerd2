@@ -9,7 +9,6 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/ntpconfig"
 	"github.com/imksoo/routerd2/internal/protocol/ra"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
-	"github.com/imksoo/routerd2/internal/resourceprogram"
 	"github.com/imksoo/routerd2/internal/serviceconfig"
 )
 
@@ -25,7 +24,7 @@ type protocolPlan struct {
 	bgp           map[string]bgpconfig.Config
 	vrrp          map[string]vrrp.Config
 	lanRA         map[string]advertisementPlan
-	samTransports []resourceprogram.SAMTransport
+	samTransports []samTransportPlan
 	aftr          map[string]aftrDefinition
 	serviceLinks  map[string]bool
 }
@@ -46,18 +45,17 @@ type leaseHAPlan struct {
 // ownership and service limits.
 func prepareProtocols(doc config.Native, runtimeDir, stateDir string) (protocolPlan, error) {
 	plan := protocolPlan{
-		ntp:           make(map[string]ntpconfig.Node),
-		dhcp6Servers:  make(map[string]dhcp6ServerPlan),
-		instances:     make(map[string]binding),
-		leaseHA:       make(map[string]leaseHAPlan),
-		dhcp6RA:       make(map[string]string),
-		dns:           make(map[string]dnsPlan),
-		bgp:           make(map[string]bgpconfig.Config),
-		vrrp:          make(map[string]vrrp.Config),
-		lanRA:         make(map[string]advertisementPlan),
-		samTransports: append([]resourceprogram.SAMTransport(nil), doc.SAMTransports...),
-		aftr:          make(map[string]aftrDefinition),
-		serviceLinks:  make(map[string]bool),
+		ntp:          make(map[string]ntpconfig.Node),
+		dhcp6Servers: make(map[string]dhcp6ServerPlan),
+		instances:    make(map[string]binding),
+		leaseHA:      make(map[string]leaseHAPlan),
+		dhcp6RA:      make(map[string]string),
+		dns:          make(map[string]dnsPlan),
+		bgp:          make(map[string]bgpconfig.Config),
+		vrrp:         make(map[string]vrrp.Config),
+		lanRA:        make(map[string]advertisementPlan),
+		aftr:         make(map[string]aftrDefinition),
+		serviceLinks: make(map[string]bool),
 	}
 	add := func(instance serviceconfig.Instance) error {
 		bound, err := encodeInstance(instance)
@@ -175,6 +173,11 @@ func prepareProtocols(doc config.Native, runtimeDir, stateDir string) (protocolP
 			from := *service.RA.From
 			plan.lanRA[name] = advertisementPlan{config: cfg, from: from, allocation: from.Service + "/" + from.Delegation}
 		}
+	}
+	var err error
+	plan.samTransports, err = prepareSAMTransports(doc.SAMTransports, doc.Services)
+	if err != nil {
+		return protocolPlan{}, err
 	}
 	for name, server := range plan.dhcp6Servers {
 		if server.dnsDelegation == "" {

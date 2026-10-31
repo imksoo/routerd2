@@ -383,7 +383,7 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 			return r.failure(err)
 		}
 		r.mu.Lock()
-		retained = r.retainedLocked(next.protocols.instances)
+		retained = r.retainedLocked(next.protocols)
 		p, err = r.projectProgramLocked(next, retained, time.Now())
 		r.mu.Unlock()
 		if err != nil {
@@ -408,7 +408,7 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 		r.mu.Lock()
 		// Preserve renewals received during preparation and stopping. Only a
 		// changed instance set needs new files and another stop pass.
-		retained = r.retainedLocked(next.protocols.instances)
+		retained = r.retainedLocked(next.protocols)
 		latest, err := r.projectProgramLocked(next, retained, time.Now())
 		if err != nil {
 			r.mu.Unlock()
@@ -468,11 +468,16 @@ func (r *Runtime) ApplyConfig(ctx context.Context, revision uint64, source confi
 }
 
 // Caller holds mu. Configuration equality includes all protocol-owned paths.
-func (r *Runtime) retainedLocked(expected map[string]binding) map[string]serviceconfig.Update {
+func (r *Runtime) retainedLocked(expected protocolPlan) map[string]serviceconfig.Update {
 	retained := map[string]serviceconfig.Update{}
 	effective := r.observationsLocked()
-	for name, desired := range expected {
-		if old, ok := r.bindings[name]; ok && old.digest == desired.digest {
+	for name, desired := range expected.instances {
+		old, present := r.bindings[name]
+		ha, shared := expected.leaseHA[name]
+		// HA workers can keep serving across an unrelated configuration edit.
+		// Keep their original observations when either prepared identity matches;
+		// the projection still selects the worker from the current election.
+		if present && (old.digest == desired.digest || shared && old.digest == ha.serving.digest) {
 			if value, ok := effective[name]; ok {
 				retained[name] = value
 			}

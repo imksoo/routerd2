@@ -6,6 +6,8 @@
 
 2026-10-31: `sam-mobility-candidate` でclaim所有のIPv4 `/32` をSAM leafのBGPへ投影し、独立FRRで広告と明示revoke/元admission期限切れによる撤回を確認した。暗号化有無を含む4つの実daemon/Linux kernelケースでNATなしTCP/UDPとtunnel/FIB撤去が通過し、`make check`も終了0。単一claimのBGP deliveryを実装した段階であり、claim間のowner移動、provider capture、planned drain、partition recovery、対象機器・cloud acceptanceは残る。
 
+2026-10-31: 管理PR #1、選択済み識別情報の初期ディスク入力、HA観測保持修正 `30eaa27` をmainのSAM実装へ統合した。全57設定のPVE版 `ops-management-integrated-native125` は、DNS変更→保存設定復元で同じPD worker・prefix・元期限を保持し、取得DNSと両IP通信ほかの確認まで3.299秒、続く全体再起動も終了0。main統合作業版 `main-management-sam-126` の管理2ケース・SAM4ケースも実daemonで通過した。同じ126のハッシュ一致3実行物を通常125のAlpine起動イメージへ配置した全57設定のPVE試験も、PDと元期限を保持して復元後4.305秒で全通信が成立し、全体再起動後の復帰まで終了0だった。固定SAM所有経路は設定準備時に生成する。既存状態移行、対象の接続先と実測負荷、k8s/pve差分、Cloud SAMの残実装を次に閉じる。
+
 ユーザー指定の完了期限: **2026-10-29 16:56:38 UTC**（2026-10-28 16:56:38 UTCから24時間）。
 全34項目と実環境での利用可能性が完了条件。部分成功へ縮小せず、期限時点でも未成立は未成立と報告する。
 旧routerdの実装を取り込み、独自のLAN配布エンジンを置換する。動く単体構成、二台運用、残る製品機能と

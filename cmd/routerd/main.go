@@ -178,6 +178,8 @@ func usage() error {
   routerd config confirm [--runtime-dir /run/routerd]
   routerd config snapshots [--runtime-dir /run/routerd]
   routerd config snapshot --expected-revision N [--runtime-dir /run/routerd]
+  routerd config export-snapshot --snapshot FILE [--runtime-dir /run/routerd]
+  routerd config delete-snapshot --snapshot FILE --expected-revision N [--runtime-dir /run/routerd]
   routerd config restore --snapshot FILE --expected-revision N [--request-id ID] [--confirmed SECONDS] [--runtime-dir /run/routerd]
   routerd config validate FILE
   routerd config plan FILE
@@ -238,7 +240,7 @@ func serveRuntime(b runtimeconfig.Boot, trial *releaseboot.Trial, authority *rel
 		}()
 	}
 	var dynamicRoles []string
-	for _, role := range []string{"sam_admission", "sam_client", "web_console", "traffic_flow", "firewall_log", "otlp_logs", "syslog", "ntp", "tailscale", "health", "pppoe", "dhcp4", "dhcp6", "dhcp6_server", "dhcp_server", "dhcp_relay", "ra", "ra_client", "aftr", "dns", "vrrp", "bgp", "bfd"} {
+	for _, role := range []string{"event_group", "sam_admission", "sam_client", "web_console", "traffic_flow", "firewall_log", "otlp_logs", "syslog", "ntp", "tailscale", "health", "pppoe", "dhcp4", "dhcp6", "dhcp6_server", "dhcp_server", "dhcp_relay", "ra", "ra_client", "aftr", "dns", "vrrp", "bgp", "bfd"} {
 		if _, ok := b.Workers[role]; ok {
 			dynamicRoles = append(dynamicRoles, role)
 		}
@@ -329,7 +331,7 @@ func remote(args []string, command string) error {
 
 func configure(args []string) error {
 	if len(args) == 0 {
-		return errors.New("config requires show, export, validate, plan, migrate, apply, confirm, snapshot, snapshots, or restore")
+		return errors.New("config requires show, export, validate, plan, migrate, apply, confirm, snapshot, snapshots, export-snapshot, delete-snapshot, or restore")
 	}
 	if args[0] == "show" {
 		return remote(args[1:], "show config")
@@ -345,6 +347,12 @@ func configure(args []string) error {
 	}
 	if args[0] == "snapshot" {
 		return snapshotConfig(args[1:], os.Stdout)
+	}
+	if args[0] == "export-snapshot" {
+		return exportSnapshotConfig(args[1:], os.Stdout)
+	}
+	if args[0] == "delete-snapshot" {
+		return deleteSnapshotConfig(args[1:], os.Stdout)
 	}
 	if args[0] == "restore" {
 		return restoreConfig(args[1:], os.Stdout)

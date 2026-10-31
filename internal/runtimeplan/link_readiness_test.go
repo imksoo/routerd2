@@ -48,11 +48,11 @@ func TestReadinessRefreshDoesNotConfirmExpiredNetworkAuthority(t *testing.T) {
 			r := New(t.TempDir(), t.TempDir(), n, testSupervisorInstance)
 			r.manager = &observedManager{generation: 1}
 			resource.ID, resource.DependsOn = "owned", []string{"probe"}
+			until := time.Now().Add(500 * time.Millisecond)
 			if name == "utc-route" {
-				resource.Route.ValidUntil = lifetime.Deadline{UTC: time.Now().Add(500 * time.Millisecond)}
+				resource.Route.ValidUntil = lifetime.Deadline{UTC: until}
 			}
 			if name == "utc-address" {
-				until := time.Now().Add(500 * time.Millisecond)
 				resource.Address.Options = &network.AddressOptions{PreferredUntil: until, ValidUntil: until}
 			}
 			source := config.Document{SchemaVersion: config.SchemaVersion, Resources: []resourceprogram.Resource{
@@ -70,6 +70,9 @@ func TestReadinessRefreshDoesNotConfirmExpiredNetworkAuthority(t *testing.T) {
 				if err := r.CheckReady(ctx); err != nil {
 					t.Fatal("fresh supervisor timestamps prevented convergence", err)
 				}
+			}
+			if !r.resourceStates["owned"].Active || r.applied.untilNanos == 0 {
+				t.Fatalf("finite network grant was not installed before its cutoff %s: now=%s state=%+v", until, time.Now(), r.resourceStates["owned"])
 			}
 			before := n.calls
 			time.Sleep(1100 * time.Millisecond)

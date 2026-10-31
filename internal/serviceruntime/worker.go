@@ -31,6 +31,8 @@ import (
 	"github.com/imksoo/routerd2/internal/protocol/dhcpserver"
 	"github.com/imksoo/routerd2/internal/protocol/dns"
 	"github.com/imksoo/routerd2/internal/protocol/dnsconfig"
+	"github.com/imksoo/routerd2/internal/protocol/eventgroup"
+	"github.com/imksoo/routerd2/internal/protocol/eventgroupconfig"
 	"github.com/imksoo/routerd2/internal/protocol/firewalllog"
 	"github.com/imksoo/routerd2/internal/protocol/firewalllogconfig"
 	"github.com/imksoo/routerd2/internal/protocol/health"
@@ -136,6 +138,12 @@ func Run(ctx context.Context, runtimeDir, name, role, path, digest string, gener
 			return err
 		}
 		return otlplogs.Run(runCtx, cfg, runtimeDir, ready)
+	case "event_group":
+		var cfg eventgroupconfig.Config
+		if err := decode(instance.Config, &cfg); err != nil {
+			return err
+		}
+		return eventgroup.Run(runCtx, cfg, runtimeDir, name, ready)
 	case "sam_admission":
 		var cfg samadmissionconfig.Config
 		if err := decode(instance.Config, &cfg); err != nil {

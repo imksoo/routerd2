@@ -676,7 +676,7 @@ esac
 	}
 	logClient := localapi.NewClient(filepath.Join(runDir, "logging.sock"))
 	defer logClient.HTTP.CloseIdleConnections()
-	oldLogCursor := checkConsoleLogsBeforeRestart(t, logClient, console)
+	oldLogCursor := checkConsoleLogsBeforeRestart(t, logClient, client, console)
 	for _, name := range []string{"logging", "control", consoleModule} {
 		old := status()
 		var victim supervisor.ModuleStatus
@@ -715,7 +715,7 @@ esac
 		console("GET", "network", 200, "198.18.0.1/24")
 
 		if name == "logging" {
-			checkConsoleLogsAfterRestart(t, logClient, console, oldLogCursor)
+			checkConsoleLogsAfterRestart(t, logClient, client, console, oldLogCursor)
 		}
 	}
 	var durableAfter struct {

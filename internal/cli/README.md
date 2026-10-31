@@ -365,3 +365,68 @@ PDの初回試験は、期限切れ後にも既定経路を要求し、HTTPを�
 PDの手順は [管理画面の説明](../protocol/webconsole/README.md)、
 Tailnetの手順は [計測転送の説明](../protocol/otlplogs/README.md) を参照してください。
 対象機器、通常リース期間、二台全体の受入はこの結果に含みません。
+
+### Removing an unused saved configuration
+
+Saved configurations are bounded to 128 immutable copies. To free capacity,
+select a reference from `show snapshots` and explicitly remove that copy:
+
+```sh
+routerd config delete-snapshot --snapshot old-reference.json --expected-revision 129
+```
+
+The SSH execution command `snapshot delete` accepts
+`{"expected_revision":129,"snapshot":{"store_id":"...","revision":2,"digest":"..."}}`
+on standard input. It uses the same `POST /v1/config/snapshots/delete` endpoint.
+The current configuration, adopted startup, and selected current/previous/pending
+boot and recovery references cannot be removed. Deletion holds the existing
+configuration and release locks; it does not apply configuration or change the
+running runtime. A repeated deletion of the same absent reference is successful.
+After freeing capacity, retry the original snapshot or update preparation with
+the current revision and release generation. Historical failure metadata does
+not retain an otherwise unused configuration file.
+
+### Saved traffic history
+
+`show traffic-flows NAME` queries the existing collector history through the
+control API. It is available in local and SSH exec sessions and from the
+interactive shell, including while editing an uncommitted candidate. `NAME`
+accepts the service name with or without its `service.` prefix.
+
+```text
+show traffic-flows flows client 192.0.2.10 peer 198.51.100.20 protocol tcp limit 25
+show traffic-flows service.flows since 2026-10-31T00:00:00Z until 2026-10-31T01:00:00Z
+```
+
+The JSON result includes the selected service, read time, applied limit,
+`truncated`, and the collector's saved rows, including their original timestamps,
+traffic counters and available classification. The API normalizes addresses,
+validates time ranges and limits reads to 100 rows by default and 1000 at most.
+A missing or unreadable database reports an error; it is not an empty history.
+The command neither opens the database nor alters collection or retention.
+
+## SSHからの運用ログの継続取得
+
+コマンド `show logs` では、ログ担当の保持範囲を既存のカーソルで分割取得できます。
+引数を省くと従来どおり最新100件を返します。保持範囲の先頭から読む場合は
+`show logs module supervisor level INFO limit 1 tail false` を実行します。
+続きは返された `cursor.epoch` と `cursor.sequence` を使い、
+`show logs module supervisor level INFO limit 1 epoch EPOCH after SEQUENCE` で取得します。
+一度の上限は200件です。大量の結果を一括で読み込む処理は追加していません。
+
+カーソル、絞り込み、件数の検証は既存のログ担当が行います。コマンドの実装は
+`after` 指定時に末尾取得を強制せず、返された元のレコードと継続位置をそのまま返します。
+ログ担当の再起動や保持範囲外への移動は、既存の `reset`、`gap`、`gap_reasons` で分かります。
+新しいカーソルで再開できますが、欠損したレコードの復元や7日分の保存を保証するものではありません。
+
+隔離環境の通常製品 `ops-log-resume-0b85be0` で、実SSHとHTTPによる先頭取得・継続取得、
+ログ担当の強制終了と自動再起動後の欠損表示・継続再開を確認しました。
+原レコードとカーソルは保存担当のAPI応答と一致しました。既存の管理受入試験は21.59秒で成功しました。
+対象のhomert実機での受入は未実施です。
+
+`show dhcp-fingerprints NAME [mac ADDRESS] [since RFC3339] [limit 1..1000]`
+reads the DHCP service's existing retained client observations. SSH exec, the
+interactive shell and candidate mode return the same records, observation times,
+inferred device information and truncation flag as the read-only history API.
+The command does not capture packets, rewrite lease state or change a candidate.
+Unavailable history is reported as an error rather than an empty successful list.

@@ -12,13 +12,20 @@ import tempfile
 # Each fixture verifies its disposable user/network namespace before mutation.
 # Timeout is the outer harness budget, not a protocol or client deadline.
 SUITES = {
+    "event-group": (("TestDaemonSignedEventGroup", (), 140),),
+    "sam-transport": (
+        ("TestDaemonSAMIPIPBGPWithFRR", ("wan0", "lan0"), 90),
+        ("TestDaemonSAMIPIPBGPExpiryWithFRR", ("wan0", "lan0"), 90),
+        ("TestDaemonSAMIPIPBGPWithWireGuardFRR", ("wan0", "lan0"), 90),
+        ("TestDaemonSAMIPIPBGPExpiryWithWireGuardFRR", ("wan0", "lan0"), 90),
+    ),
     "dns-upstream": (
         ("TestDaemonDNSProbeTimeoutIndependentOfQueries", ("wan0", "lan0"), 60),
         ("TestDaemonDNSResponseFitsClientUDPSize", ("wan0", "lan0"), 60),
         ("TestDaemonDNSNegativeCacheExpiresAtConfiguredTTL", ("wan0", "lan0"), 75),
     ),
     "traffic-flow": (("TestDaemonTrafficFlowHistory", ("wan0", "lan0"), 85), ("TestDaemonTrafficFlowNDPI", ("wan0", "lan0"), 85)),
-    "management": (("TestDaemonConfigurationAndRecovery", ("mgmt0",), 100),),
+    "management": (("TestDaemonConfigurationAndRecovery", ("mgmt0",), 100), ("TestDaemonSnapshotExportAndApply", ("lan0",), 75)),
     "local-redirect": (("TestDaemonLocalDNSRedirect", ("wan0", "lan0"), 85),),
     "blackhole": (("TestDaemonBlackholeRoute", ("wan0", "lan0"), 55),),
     "firewall": (("TestDaemonFirewallSourceCIDRs", ("wan0",), 55), ("TestDaemonFirewallPacketLogs", ("wan0",), 75)),
@@ -87,6 +94,8 @@ def main():
     parser.add_argument("suite", choices=SUITES)
     parser.add_argument("--test", help="Run one named fixture from the selected suite")
     parser.add_argument("--dhcp6-server", type=Path, default=Path("/usr/sbin/dhcpd"))
+    parser.add_argument("--old-eventd", type=Path, help="Independent routerd-eventd executable for event-group")
+    parser.add_argument("--old-routerd", type=Path, help="Independent routerd RR executable for sam-transport")
     parser.add_argument("--frr", type=Path, default=Path("/usr/lib/frr/bgpd"))
     parser.add_argument("--go", default="go")
     parser.add_argument("--binary-dir", type=Path, default=Path("dist/bin"))
@@ -119,13 +128,21 @@ def main():
                 subprocess.run(root + ["install", "-m", "644", str(Path("dist/dnsmasq-engine.tar").resolve()), stage + "/bin/dnsmasq-engine.tar"], check=True)
             if args.suite == "dhcp6-ra-pd":
                 subprocess.run(root + ["install", "-m", "755", str(args.dhcp6_server.resolve()), stage + "/bin/dhcpd"], check=True)
+            if args.suite == "event-group":
+                if args.old_eventd is None:
+                    parser.error("event-group requires --old-eventd")
+                subprocess.run(root + ["install", "-m", "755", str(args.old_eventd.resolve()), stage + "/bin/old-eventd"], check=True)
+            if args.suite == "sam-transport":
+                if args.old_routerd is None:
+                    parser.error("sam-transport requires --old-routerd")
+                subprocess.run(root + ["install", "-m", "755", str(args.old_routerd.resolve()), stage + "/bin/old-routerd"], check=True)
             subprocess.run(root + ["install", "-m", "755", str(harness), stage + "/integration.test"], check=True)
             for name, interfaces, timeout in tests:
                 packets = stage + "/" + name
                 subprocess.run(root + ["mkdir", packets], check=True)
                 log_path = output / (name + ".log")
                 with log_path.open("w") as log:
-                    result = subprocess.run(root + ["env", "ROUTERD2_INTEGRATION_REQUIRED=1", "ROUTERD2_DHCP6_SERVER=" + stage + "/bin/dhcpd", "ROUTERD2_FRR_BGPD=" + str(args.frr.resolve()), "ROUTERD2_TEST_BIN_DIR=" + stage + "/bin", "ROUTERD2_TEST_EVIDENCE_DIR=" + packets, stage + "/integration.test", "-test.run=^" + name + "$", "-test.v", "-test.timeout=" + str(timeout) + "s"], stdout=log, stderr=subprocess.STDOUT, timeout=timeout + 15)
+                    result = subprocess.run(root + ["env", "ROUTERD2_INTEGRATION_REQUIRED=1", "OLD_ROUTERD=" + stage + "/bin/old-routerd", "OLD_EVENTD=" + stage + "/bin/old-eventd", "ROUTERD2_DHCP6_SERVER=" + stage + "/bin/dhcpd", "ROUTERD2_FRR_BGPD=" + str(args.frr.resolve()), "ROUTERD2_TEST_BIN_DIR=" + stage + "/bin", "ROUTERD2_TEST_EVIDENCE_DIR=" + packets, stage + "/integration.test", "-test.run=^" + name + "$", "-test.v", "-test.timeout=" + str(timeout) + "s"], stdout=log, stderr=subprocess.STDOUT, timeout=timeout + 15)
                 content = log_path.read_text()
                 for interface in interfaces:
                     packet = subprocess.run(root + ["cat", packets + "/" + interface + ".pcap"], capture_output=True)

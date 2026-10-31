@@ -75,7 +75,7 @@ func (m *memoryManager) Status(_ context.Context) (supervisor.Status, error) {
 	s.BootID, s.ObservedNanos, s.ExpiresNanos = clock.BootID, uint64(clock.BoottimeNanoseconds), uint64(clock.BoottimeNanoseconds)+uint64(5*time.Second)
 	for _, v := range m.modules {
 		generation := uint64(0)
-		if v.Role == "aftr" {
+		if v.Role == "aftr" || v.Role == "dhcp6" {
 			generation = 1
 		}
 		if v.Role == "dhcp4" {

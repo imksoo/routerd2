@@ -220,3 +220,12 @@ communication. New observations were saved after the lock was released, age
 retention removed them, and removing collection allowed another client to
 acquire and communicate without adding history. This does not establish
 fingerprint replication, a traffic-load limit, or physical-device qualification.
+
+The existing per-MAC fingerprint records are available through
+`GET /v1/services/{name}/dhcp-fingerprints`, SSH `show dhcp-fingerprints`, and the
+WebConsole DHCP clients page. Reads use the original database in read-only mode,
+with optional `mac`, `since` (RFC3339), and `limit` (1–1000) filters. Each row is the
+last observation of that MAC, including the original observation time, received
+options, and inferred device information; it does not establish current connectivity
+or a confirmed device identity. Retained records remain readable after collection
+is disabled. An unavailable history does not hide the console's lease information.
