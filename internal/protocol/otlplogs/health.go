@@ -35,6 +35,7 @@ type operationSignals struct {
 	configApplies       metric.Int64Counter
 	configApplyDuration metric.Float64Histogram
 	configTracer        trace.Tracer
+	tailscalePeers      metric.Int64Gauge
 }
 
 func newOperationSignals(ctx context.Context, cfg otlplogconfig.Config, conn *grpc.ClientConn, res *resource.Resource) (p *operationSignals, err error) {
@@ -76,6 +77,10 @@ func newOperationSignals(ctx context.Context, cfg otlplogconfig.Config, conn *gr
 		if err != nil {
 			return p, err
 		}
+		p.tailscalePeers, err = p.metrics.Meter("routerd2.tailscale").Int64Gauge("routerd.tailscale.peer.count", metric.WithUnit("{peer}"))
+		if err != nil {
+			return p, err
+		}
 		p.deniedPackets, err = p.metrics.Meter("routerd2.firewall").Int64Counter("routerd.firewall.deny.total", metric.WithUnit("{packet}"))
 		if err != nil {
 			return p, err
@@ -110,6 +115,8 @@ func (p *operationSignals) close(ctx context.Context) error {
 
 func (p *operationSignals) record(ctx context.Context, entry logging.Record) {
 	switch entry.Message {
+	case telemetry.TailscalePeersMessage:
+		p.recordTailscalePeers(ctx, entry)
 	case telemetry.ConfigurationApplyMessage:
 		p.recordConfigurationApply(ctx, entry)
 	case telemetry.HealthProbeMessage:
