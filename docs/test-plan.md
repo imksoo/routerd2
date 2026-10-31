@@ -212,6 +212,8 @@ DNS利用とIPv4/IPv6通信、自然DHCPv4更新、PD通常/強制交換と製�
 
 ## 3. HA: 単体の機能が動く構成を二台にする
 
+2026-10-31: current `ops-native106` 配布物と実 fixture で、隔離 Linux namespace の二台 HA DHCP を実行した。`scripts/ha-state-peer.py --dhcp-scopes --binary-dir dist/bin` は通常・特殊端末の配布、両方向切替、同一 TCP 接続と UDP 変換先の維持を通過した。fixture は physical `ingress_interface: lan0` を明示する。`--initial-leases` は独立 dnsmasq の有限 lease と元期限の取込、片系停止中の新規取得、取得 DNS の UDP/TCP、再参加後の IPv4 TCP/UDP、両端末の更新と同期を通過した。更新は SIGUSR1 で促しており、43,200 秒 lease の自然更新、IPv6/PD/DS-Lite 全体、対象機器の受入には数えない。
+
 2026-10-30訂正: TCP応答後にだけUDPを送る旧試験の「UDP損失0」は、TCP停止中の連続UDPを測定していない。native80二段DNSの両方向切替では独立50ms送信を使い、985送信・810受信・175期限切れ、最大無応答4.543秒、同じTCP最大応答待ち4.575秒だった。新規通信と同じsocketの継続、損失と復旧時間を分けて判定する。
 
 `handoff-stop` / native-56は、同期断中のDHCP再起動が停止時の通信待ちでVRRP適用を止める経路を修正し、
