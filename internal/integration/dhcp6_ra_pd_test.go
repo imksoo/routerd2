@@ -242,28 +242,33 @@ subnet6 2001:db8:42::/64 {
 		}
 		return s
 	}
+	// Retain the router learned from RA for same-link management. Expiry can
+	// remove its default route without making that link-local address unreachable.
+	var consoleRouter string
 	console := func(label string, active bool) {
 		t.Helper()
 		var body []byte
 		if err := fixtureInsideNamespace(client, func() error {
-			l, err := netlink.LinkByName("client0")
-			if err != nil {
-				return err
-			}
-			routes, err := netlink.RouteList(l, netlink.FAMILY_V6)
-			if err != nil {
-				return err
-			}
-			var gateway string
-			for _, route := range routes {
-				if (route.Dst == nil || route.Dst.String() == "::/0") && route.Gw.IsLinkLocalUnicast() {
-					gateway = route.Gw.String()
+			if consoleRouter == "" {
+				l, err := netlink.LinkByName("client0")
+				if err != nil {
+					return err
+				}
+				routes, err := netlink.RouteList(l, netlink.FAMILY_V6)
+				if err != nil {
+					return err
+				}
+				for _, route := range routes {
+					if (route.Dst == nil || route.Dst.String() == "::/0") && route.Gw.IsLinkLocalUnicast() {
+						consoleRouter = route.Gw.String()
+					}
+				}
+				if consoleRouter == "" {
+					return errors.New("LAN client has no acquired router for console access")
 				}
 			}
-			if gateway == "" {
-				return errors.New("LAN client has no acquired router for console access")
-			}
-			address := fmt.Sprintf("http://[%s%%25client0]:8080/ops/pd?service=%s", gateway, wanName)
+			address := fmt.Sprintf("http://[%s%%25client0]:8080/ops/pd?service=%s", consoleRouter, wanName)
+			var err error
 			body, err = exec.Command("curl", "-g", "--noproxy", "*", "-fsS", "--max-time", "5", address).CombinedOutput()
 			return err
 		}); err != nil {
