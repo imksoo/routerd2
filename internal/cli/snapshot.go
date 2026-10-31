@@ -64,3 +64,21 @@ func (s Session) RestoreConfiguration(ctx context.Context, request control.Resto
 	}
 	return state, nil
 }
+
+func deleteSnapshot(ctx context.Context, client *localapi.Client, input io.Reader, out io.Writer) error {
+	if input == nil {
+		return errors.New("snapshot delete requires SnapshotDeleteRequest JSON/YAML on stdin")
+	}
+	var request control.SnapshotDeleteRequest
+	if err := config.Decode(input, &request); err != nil {
+		return err
+	}
+	var deleted config.SnapshotRef
+	if err := client.Do(ctx, http.MethodPost, "/v1/config/snapshots/delete", request, &deleted); err != nil {
+		return err
+	}
+	if deleted != request.Snapshot {
+		return errors.New("snapshot deletion acknowledgment does not match the selected reference")
+	}
+	return WriteJSON(out, deleted)
+}

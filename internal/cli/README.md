@@ -365,3 +365,23 @@ PDの初回試験は、期限切れ後にも既定経路を要求し、HTTPを�
 PDの手順は [管理画面の説明](../protocol/webconsole/README.md)、
 Tailnetの手順は [計測転送の説明](../protocol/otlplogs/README.md) を参照してください。
 対象機器、通常リース期間、二台全体の受入はこの結果に含みません。
+
+### Removing an unused saved configuration
+
+Saved configurations are bounded to 128 immutable copies. To free capacity,
+select a reference from `show snapshots` and explicitly remove that copy:
+
+```sh
+routerd config delete-snapshot --snapshot old-reference.json --expected-revision 129
+```
+
+The SSH execution command `snapshot delete` accepts
+`{"expected_revision":129,"snapshot":{"store_id":"...","revision":2,"digest":"..."}}`
+on standard input. It uses the same `POST /v1/config/snapshots/delete` endpoint.
+The current configuration, adopted startup, and selected current/previous/pending
+boot and recovery references cannot be removed. Deletion holds the existing
+configuration and release locks; it does not apply configuration or change the
+running runtime. A repeated deletion of the same absent reference is successful.
+After freeing capacity, retry the original snapshot or update preparation with
+the current revision and release generation. Historical failure metadata does
+not retain an otherwise unused configuration file.

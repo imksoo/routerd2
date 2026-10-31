@@ -36,7 +36,7 @@ func (s Session) Execute(ctx context.Context, command string, input io.Reader, o
 		return nil
 	}
 	if len(a) == 1 && a[0] == "help" {
-		_, err := fmt.Fprintln(out, "show status\nshow network [SECTION [FILTER VALUE ...]] (show network help for details)\nshow resources\nshow derived RESOURCE_ID\nshow observations [after CURSOR] [limit 1..16]\nshow event-store\nshow services [NAME]\nshow route-issues [offset N]\nshow config\nshow snapshots\nshow running-config\nshow logs [module NAME] [level INFO] [limit 100]\nshow dns-queries NAME [client IP] [name PATTERN] [response RCODE] [since RFC3339] [until RFC3339] [limit 1..1000]\nshow firewall-events NAME [source IP] [action VALUE] [since RFC3339] [limit 1..1000]\nshow logging\nshow version\nrestart <module>\npoweroff\nreboot\nconfigure (exec: CommitRequest YAML/JSON on stdin; shell: candidate mode)\nconfirm\nsnapshot (exec stdin: SnapshotRequest JSON/YAML)\nrestore (exec stdin: RestoreRequest JSON/YAML)\nupdate status|stage|prepare|rollback|cancel|prune (exec stdin: signed tar or JSON)\nhelp\nexit")
+		_, err := fmt.Fprintln(out, "show status\nshow network [SECTION [FILTER VALUE ...]] (show network help for details)\nshow resources\nshow derived RESOURCE_ID\nshow observations [after CURSOR] [limit 1..16]\nshow event-store\nshow services [NAME]\nshow route-issues [offset N]\nshow config\nshow snapshots\nshow running-config\nshow logs [module NAME] [level INFO] [limit 100]\nshow dns-queries NAME [client IP] [name PATTERN] [response RCODE] [since RFC3339] [until RFC3339] [limit 1..1000]\nshow firewall-events NAME [source IP] [action VALUE] [since RFC3339] [limit 1..1000]\nshow logging\nshow version\nrestart <module>\npoweroff\nreboot\nconfigure (exec: CommitRequest YAML/JSON on stdin; shell: candidate mode)\nconfirm\nsnapshot (exec stdin: SnapshotRequest JSON/YAML)\nsnapshot delete (exec stdin: SnapshotDeleteRequest JSON/YAML)\nrestore (exec stdin: RestoreRequest JSON/YAML)\nupdate status|stage|prepare|rollback|cancel|prune (exec stdin: signed tar or JSON)\nhelp\nexit")
 		return err
 	}
 	var result json.RawMessage
@@ -45,6 +45,8 @@ func (s Session) Execute(ctx context.Context, command string, input io.Reader, o
 	logClient := localapi.NewClient(filepath.Join(s.RuntimeDir, logging.SocketName))
 	var err error
 	switch {
+	case len(a) == 2 && a[0] == "snapshot" && a[1] == "delete":
+		return deleteSnapshot(ctx, ctl, input, out)
 	case len(a) == 1 && a[0] == "snapshot":
 		return snapshotConfiguration(ctx, ctl, input, out)
 	case len(a) == 1 && a[0] == "restore":
