@@ -538,6 +538,9 @@ def peer(stage, homert=False, collector=None):
                     traffic(peer_ips[4], host, "ts-lan", bind=host)
 
             def exit_traffic():
+                for host in ("198.51.100.20", "2001:db8:ffff::20"):
+                    routes = json.loads(run(inside("ts-b", ["ip", "-6" if ":" in host else "-4", "-j", "route", "get", host])))
+                    assert routes and routes[0].get("dev") == "tailscale0", routes
                 traffic("198.51.100.20", "192.0.2.2")
                 traffic("2001:db8:ffff::20", "fd0::2")
 
@@ -640,7 +643,8 @@ def peer(stage, homert=False, collector=None):
             print("PASS homert: official peer reached routerd management SSH after whole product restart with the same trusted host key", flush=True)
             console_status("稼働中・制御接続あり", original["addresses"] + advertised)
             print("PASS homert: VPN console retained actual membership and advertisement display after whole restart", flush=True)
-            run(inside("ts-b", cli + ["set", "--exit-node="]))
+            # Keep the peer's selected exit through product withdrawal and
+            # recovery; a peer-side reset would hide a broken exit lifecycle.
             measured_peers("before-removal", time.time_ns())
             telemetry_worker = modules()["service.telemetry"]
             withdrawn = copy.deepcopy(saved)
@@ -651,6 +655,20 @@ def peer(stage, homert=False, collector=None):
             console_status("Tailscaleサービスは構成されていません", selected=False)
             for host in lan_hosts:
                 assert not pingable(host)
+            assert vendor_api(socket, "prefs")["ExitNodeID"] == original["node_id"]
+            blocked_exit = r"""import socket,sys
+host=sys.argv[1];family=socket.AF_INET6 if ':' in host else socket.AF_INET
+for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
+ with socket.socket(family,kind) as connection:
+  connection.settimeout(1)
+  try:
+   connection.connect((host,port));connection.sendall(b'withdrawn-exit');reply=connection.recv(4096)
+  except OSError:continue
+  assert not reply, 'withdrawn product exit still forwarded application data'
+"""
+            for host in ("198.51.100.20", "2001:db8:ffff::20"):
+                run(inside("ts-b", ["python3", "-c", blocked_exit, host]))
+            print("PASS selected exit retained at peer; product removal stopped IPv4/IPv6 TCP/UDP", flush=True)
             # A final queued sample can belong to the first collection after
             # removal. After two normal intervals, it must not be re-exported.
             withdrawn_at = time.time_ns()
@@ -678,9 +696,10 @@ def peer(stage, homert=False, collector=None):
             assert observation()["node_id"] == original["node_id"]
             wait(lambda: all(prefix in peer_routes() and route_present(prefix) for prefix in advertised))
             site_traffic()
-            run(inside("ts-b", cli + ["set", "--exit-node=" + original["addresses"][0], "--exit-node-allow-lan-access=true"]))
+            assert vendor_api(socket, "prefs")["ExitNodeID"] == original["node_id"]
             wait(lambda: pingable("198.51.100.20"))
             exit_traffic()
+            print("PASS IPv4/IPv6 TCP/UDP exit restored without changing the peer's selection", flush=True)
             capture.send_signal(signal.SIGINT)
             capture.wait(timeout=3)
             packets = run(["tcpdump", "-Z", "root", "-nn", "-r", str(stage / "tailnet.pcap")])
