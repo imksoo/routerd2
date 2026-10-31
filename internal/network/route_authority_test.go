@@ -19,7 +19,9 @@ func TestBootRouteAuthorityRenewsWithoutKernelChangesAndSurvivesWriterRestart(t 
 	}
 	k := fake()
 	e, opts := engineFor(t, k)
-	r := Route{Destination: "203.0.113.0/24", Interface: "wan0", BootID: clock.BootID, ExpiresNanos: uint64(clock.BoottimeNanoseconds) + uint64(time.Second)}
+	const originalLifetime = 5 * time.Second
+	const renewal = time.Second
+	r := Route{Destination: "203.0.113.0/24", Interface: "wan0", BootID: clock.BootID, ExpiresNanos: uint64(clock.BoottimeNanoseconds) + uint64(originalLifetime)}
 	changed := r
 	changed.Destination = "198.51.100.0/24"
 	d := Desired{Routes: []Route{r, changed}}
@@ -28,10 +30,13 @@ func TestBootRouteAuthorityRenewsWithoutKernelChangesAndSurvivesWriterRestart(t 
 	}
 	writes := len(k.writes)
 	for i := range d.Routes {
-		d.Routes[i].ExpiresNanos += uint64(time.Second)
+		d.Routes[i].ExpiresNanos += uint64(renewal)
 	}
 	if _, err := e.Apply(context.Background(), 2, d); err != nil || len(k.writes) != writes {
 		t.Fatal("authority renewal changed kernel routes", err, k.writes[writes:])
+	}
+	if len(k.routes) != len(d.Routes) || len(e.state.Routes) != len(d.Routes) {
+		t.Fatal("route authority expired before external replacement", k.routes, e.state.Routes)
 	}
 	if err := e.Close(); err != nil {
 		t.Fatal(err)
@@ -41,16 +46,16 @@ func TestBootRouteAuthorityRenewsWithoutKernelChangesAndSurvivesWriterRestart(t 
 		t.Fatal(err)
 	}
 	defer e.Close()
-	if e.state.Routes[0].ExpiresNanos != d.Routes[0].ExpiresNanos {
-		t.Fatal("writer restart lost the original renewed deadline")
+	if len(e.state.Routes) != len(d.Routes) || len(k.routes) != len(d.Routes) || e.state.Routes[0].ExpiresNanos != d.Routes[0].ExpiresNanos {
+		t.Fatal("writer restart lost the renewed route authority", e.state.Routes, k.routes)
 	}
 	// An external writer replaced one recorded route. Expiry must preserve it.
 	k.routes[1].Protocol = 99
-	time.Sleep(time.Until(clock.WallTime.Add(1100 * time.Millisecond)))
+	time.Sleep(time.Until(clock.WallTime.Add(originalLifetime + 100*time.Millisecond)))
 	if _, err := e.expireAuthority(context.Background()); err != nil || len(k.routes) != 2 {
 		t.Fatal("the superseded deadline expired a renewed route", err)
 	}
-	time.Sleep(time.Until(clock.WallTime.Add(2100 * time.Millisecond)))
+	time.Sleep(time.Until(clock.WallTime.Add(originalLifetime + renewal + 100*time.Millisecond)))
 	if _, err := e.expireAuthority(context.Background()); err != nil || len(k.routes) != 1 || k.routes[0].Protocol != 99 || len(e.state.Routes) != 0 {
 		t.Fatal("expiry retained owned state or deleted the foreign replacement", err, k.routes)
 	}
