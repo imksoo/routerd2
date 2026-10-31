@@ -997,21 +997,6 @@ for kind,port in ((socket.SOCK_STREAM,18080),(socket.SOCK_DGRAM,18081)):
         assert Path("/etc/resolv.conf").read_text() == "nameserver 192.0.2.1\n"
         print("PASS capture: LAN and WAN TCP/UDP plus encrypted underlay packets", flush=True)
     except BaseException:
-        for namespace in ("ts-a", "ts-b"):
-            for args in (["ip", "-j", "route", "show", "table", "all"], ["nft", "-j", "list", "ruleset"]):
-                detail = subprocess.run(inside(namespace, args), capture_output=True, text=True, timeout=5)
-                print("FORWARDING FAILURE", namespace, args, detail.stdout or detail.stderr, flush=True)
-        for upstream_socket in (stage / "product-run/services/tailscale/local.sock", stage / "peer/tailscaled.sock"):
-            if upstream_socket.exists():
-                current = vendor_api(upstream_socket, "status")
-                print("TAILNET FAILURE", upstream_socket.name, current.get("BackendState"),
-                      {name: {key: value.get(key) for key in ("Online", "Active", "LastHandshake", "CurAddr", "Relay")}
-                       for name, value in current.get("Peer", {}).items()}, flush=True)
-        if "capture" in locals() and capture.poll() is None:
-            capture.send_signal(signal.SIGINT)
-            capture.wait(timeout=3)
-            packets = run(["tcpdump", "-Z", "root", "-nn", "-r", str(stage / "tailnet.pcap"), "port 41641 or host 10.42.0.2"])
-            print("LAST FORWARDING PACKETS", "\n".join(packets.splitlines()[-60:]), flush=True)
         supervisor = stage / "product-run/supervisor.sock"
         if supervisor.exists():
             status = subprocess.run(["curl", "--max-time", "2", "-fsS", "--unix-socket", str(supervisor), "http://localhost/v1/status"], capture_output=True, text=True)
