@@ -131,6 +131,7 @@ type Engine struct {
 	journal           *events.Store
 	eventStore        EventStoreHealth
 	eventFlushMu      sync.Mutex
+	eventGroupMu      sync.Mutex
 	rules             *eventcontroller.Controller
 	derived           *derivedcontroller.Controller
 	protocolErrors    map[string]string

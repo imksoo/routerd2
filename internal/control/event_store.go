@@ -96,7 +96,9 @@ func (e *Engine) maintainEventStore(ctx context.Context, work eventStoreWork) er
 	}
 	var err error
 	if work == compactEventWork {
-		_, err = journal.CompactCompleted(ctx, 64)
+		if err = e.retireEventGroupPeers(ctx); err == nil {
+			_, err = journal.CompactCompleted(ctx, 64)
+		}
 	} else {
 		_, err = journal.ArchiveEvents(ctx, 16)
 	}

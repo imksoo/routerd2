@@ -139,6 +139,7 @@ func (e *Engine) Handler() http.Handler {
 	e.eventStoreRoutes(mux)
 	e.derivedRoutes(mux)
 	e.protocolEventRoutes(mux)
+	e.eventGroupRoutes(mux)
 	mux.HandleFunc("GET /v1/config", func(w http.ResponseWriter, r *http.Request) { e.writeConfigurationState(w, e.State(), false) })
 	mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, r *http.Request) {
 		var readiness error

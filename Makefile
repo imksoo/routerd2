@@ -538,3 +538,9 @@ check-sam-enrollment:
 check-sam-admission:
 	@test -n "$(OLD_ROUTERD)" || (echo "set OLD_ROUTERD to an independent Linux routerd executable"; exit 1)
 	@umask 022; OLD_ROUTERD="$(OLD_ROUTERD)" go test -count=1 -v ./internal/protocol/samadmission -run '^TestAdmissionAgainstRouterdClient$$'
+
+.PHONY: check-event-group
+check-event-group:
+	@test -n "$(OLD_EVENTD)" || (echo "set OLD_EVENTD to an independent Linux routerd-eventd executable"; exit 1)
+	@umask 022; OLD_EVENTD="$(OLD_EVENTD)" go test -race -count=1 -v ./internal/control -run '^TestEventGroup'
+	@umask 022; go test ./internal/legacyconfig -run '^TestEventGroup'
