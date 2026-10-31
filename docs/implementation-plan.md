@@ -60,6 +60,8 @@ Cloud SAMは旧routerdの型付きPoolPlan（配置・address・BGP・provider a
 直近はcontrol交換・永続再起動・影響するHealth→PBRを収束させ、homertの不足へ進む。
 全機能の監査台帳や専用試験基盤を先に作らず、実際に必要な依存経路を小さく完成させる。
 
+2026-10-31 07:28 UTC: `sam-transport-release`で、実SAM admission結果を用いたIPIP/BGP runtime lowering、独立RR/FRRとLinux kernel経由の無NAT TCP/UDP双方向転送、packet capture、revoke/元期限切れ後のtunnel/FIB撤去を確認した。CLOUD-03のcomponent機能を超えて実データパスが一段進んだ。一方、WireGuard/FOU暗号化、/32 mobility/provider操作、計画drain、実機・cloud受入は残る。全34項目の完成とは扱わず、これを足場にSAM移動経路を続ける。
+
 ### homertの現状確認（2026-10-27、読み取り専用）
 
 現行設定とControl APIを両nodeで確認した。homert02はmaster/activation Ready、homert03は

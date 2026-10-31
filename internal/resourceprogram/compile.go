@@ -131,6 +131,22 @@ func Compile(source Program) (Plan, error) {
 		}
 		source.Resources[i], byID[r.ID] = r, r
 	}
+	for i, r := range source.Resources {
+		if r.SAMTransport == nil {
+			continue
+		}
+		transport, dependencies, err := prepareSAMTransport(r.ID, *r.SAMTransport, source.Resources)
+		if err != nil {
+			return Plan{}, err
+		}
+		r.SAMTransport = &transport
+		for _, dependency := range dependencies {
+			if !slices.Contains(r.DependsOn, dependency) {
+				r.DependsOn = append(r.DependsOn, dependency)
+			}
+		}
+		source.Resources[i], byID[r.ID] = r, r
+	}
 	// Tracks are observations, not hard readiness dependencies. Resolve them
 	// against declarations so conditional removal does not invalidate the VIP.
 	for _, r := range source.Resources {
@@ -195,6 +211,8 @@ func Compile(source Program) (Plan, error) {
 			ipip := preparedIPIPs[r.ID]
 			err = errors.Join(claim(r, "interface", ipip.Link.Name), claim(r, "link", ipip.Link.Name), claim(r, "address", ipip.Link.Name+"/"+ipip.Address.String()))
 			plan.IPIPs = append(plan.IPIPs, ipip)
+		case r.SAMTransport != nil:
+			err = claim(r, "sam_transport", r.SAMTransport.Client)
 		case r.Link != nil:
 			err = claim(r, "link", r.Link.Name)
 		case r.Route != nil:

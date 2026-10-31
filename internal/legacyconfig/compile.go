@@ -241,6 +241,7 @@ func compile(data []byte, options Options, explicit bool) (Result, error) {
 	extra = append(extra, transports...)
 	c.ntp(vrrpNames)
 	c.samClients()
+	extra = append(extra, c.samTransports()...)
 	c.samAdmission()
 	extra = append(extra, c.firewall(vrrpNames)...)
 	c.conntrackSync(extra)

@@ -536,20 +536,30 @@ func selectInstances(instances []binding, ceiling map[string]supervisor.DynamicM
 }
 
 func (r *Runtime) prepare(plan protocolPlan) error {
-	write := func(bound binding) error {
-		dir := filepath.Join(r.dir, "instances", bound.instance.Name)
-		if err := os.MkdirAll(dir, 0700); err != nil {
-			return err
-		}
-		return config.AtomicWrite(filepath.Join(dir, bound.digest+".json"), bound.encoded)
-	}
 	for _, bound := range plan.instances {
-		if err := write(bound); err != nil {
+		if err := r.writeBinding(bound); err != nil {
 			return err
 		}
 	}
 	for _, ha := range plan.leaseHA {
-		if err := write(ha.serving); err != nil {
+		if err := r.writeBinding(ha.serving); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *Runtime) writeBinding(bound binding) error {
+	dir := filepath.Join(r.dir, "instances", bound.instance.Name)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
+	return config.AtomicWrite(filepath.Join(dir, bound.digest+".json"), bound.encoded)
+}
+
+func (r *Runtime) writeBindings(bindings map[string]binding) error {
+	for _, bound := range bindings {
+		if err := r.writeBinding(bound); err != nil {
 			return err
 		}
 	}

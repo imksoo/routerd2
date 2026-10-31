@@ -32,6 +32,10 @@ func FromNative(native Native) Program {
 		v := original
 		add(Resource{ID: "link/" + v.Name, Link: &v})
 	}
+	for _, original := range native.SAMTransports {
+		v := original
+		add(Resource{ID: "sam_transport/" + identityHash(v.Name+"\x00"+v.Client), SAMTransport: &v})
+	}
 	for _, original := range native.Network.Interfaces {
 		v := original
 		v.Addresses = nil

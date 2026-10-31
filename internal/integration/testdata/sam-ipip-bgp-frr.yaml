@@ -1,0 +1,82 @@
+apiVersion: routerd.net/v1alpha1
+kind: Router
+metadata: {name: sam-ipip-frr}
+spec:
+  resources:
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: Interface
+    metadata: {name: wan}
+    spec: {ifname: wan0, managed: true, adminUp: true}
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: Interface
+    metadata: {name: lan}
+    spec: {ifname: lan0, managed: true, adminUp: true}
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: DHCPv4Client
+    metadata: {name: wan-lease}
+    spec: {interface: wan, useRoutes: false, useDNS: false}
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: IPv4StaticAddress
+    metadata: {name: lan}
+    spec: {interface: lan, address: 198.18.0.1/24}
+  - apiVersion: net.routerd.net/v1alpha1
+    kind: BGPRouter
+    metadata: {name: edge}
+    spec:
+      asn: 64512
+      routerID: 192.0.2.1
+      listen: {port: 179}
+      importPolicy:
+        allowedPrefixes: [203.0.113.50/32]
+        allowedPrefixLengthMin: 32
+        allowedPrefixLengthMax: 32
+        nextHopRewrite: peer-address
+      redistribute: {connected: {allowedPrefixes: [198.18.0.0/24]}}
+      gracefulRestart: {enabled: false}
+  # The leaf deliberately carries no local RR inventory or enrollment policy.
+  # It can obtain this peer only through its admitted SAMRRSet.
+  - apiVersion: mobility.routerd.net/v1alpha1
+    kind: SAMTransportProfile
+    metadata: {name: leaf}
+    spec:
+      selfNodeRef: leaf-a
+      mode: ipip
+      encryption: none
+      innerPrefix: 10.255.0.0/24
+      addressingMode: pair-stable
+      underlayInterface: wan
+      localEndpointFrom: {resource: DHCPv4Client/wan-lease, field: currentAddress}
+      peersFrom: [{resource: SAMRRSet/rrs}]
+      bgp:
+        routerRef: BGPRouter/edge
+        peerASN: 64513
+        timersPreset: fast
+        importPolicy:
+          allowedPrefixes: [203.0.113.50/32]
+          allowedPrefixLengthMin: 32
+          allowedPrefixLengthMax: 32
+          nextHopRewrite: peer-address
+        exportPolicy: {allowedPrefixes: [198.18.0.0/24]}
+  - apiVersion: mobility.routerd.net/v1alpha1
+    kind: SAMEnrollmentClaim
+    metadata: {name: leaf}
+    spec:
+      policyRef: SAMEnrollmentPolicy/leaves
+      rrSetRef: SAMRRSet/rrs
+      leafID: leaf-a
+      joinAudience: sam-ipip-fixture
+      joinNonce: sam-ipip-fixture-nonce
+      joinTimestamp: "__JOIN_TIMESTAMP__"
+      joinHMAC: "__JOIN_HMAC__"
+      tunnelAddress: __LEAF_INNER__/32
+      endpoint: 192.0.2.1
+      bgp: {asn: 64512, routerID: 192.0.2.1}
+  - apiVersion: mobility.routerd.net/v1alpha1
+    kind: SAMEnrollmentClient
+    metadata: {name: leaf}
+    spec:
+      claimRef: SAMEnrollmentClaim/leaf
+      bootstrapEndpoints: [__RR_ENDPOINT__]
+      controlAPITokenFrom: {file: __CONTROL_TOKEN__}
+      stateTTLRefreshBefore: 2s
+      retryBackoff: {min: 1s, max: 2s}

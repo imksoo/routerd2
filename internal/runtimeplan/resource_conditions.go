@@ -46,7 +46,7 @@ func dynamicProgram(source config.Document) bool {
 				}
 			}
 		}
-		if r.When != nil || r.ReadyWhen != nil || r.EgressRoute != nil || r.EgressPolicy != nil || r.HostRoute != nil || r.IPIP != nil || r.Service != nil && r.Service.VRRP != nil && r.Service.VRRP.GracefulActivation != nil {
+		if r.When != nil || r.ReadyWhen != nil || r.EgressRoute != nil || r.EgressPolicy != nil || r.HostRoute != nil || r.IPIP != nil || r.SAMTransport != nil || r.Service != nil && r.Service.VRRP != nil && r.Service.VRRP.GracefulActivation != nil {
 			return true
 		}
 		if r.Address != nil && r.Address.Options != nil && !r.Address.Options.ValidUntil.IsZero() || r.Route != nil && r.Route.ValidUntil != (lifetime.Deadline{}) {

@@ -82,6 +82,9 @@ func projectBGP(p *projection, doc config.Native, configs map[string]bgpconfig.C
 		if !ok {
 			continue
 		}
+		if !matchesBinding(p.instances, service.ModuleName(), u) {
+			continue
+		}
 		var s bgpconfig.Snapshot
 		if err := json.Unmarshal(u.Snapshot, &s); err != nil {
 			return err

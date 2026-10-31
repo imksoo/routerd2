@@ -1,6 +1,6 @@
 # routerd2 開発引き継ぎ
 
-更新: 2026-10-31 06:08 UTC。最初の製品は未完成であり、[実装計画](implementation-plan.md)、[機械可読台帳](implementation-plan.json)、[試験計画](test-plan.md)、[AGENTS.md](../AGENTS.md)を基準に進める。各実通信試験の直前に試験計画の実行手順と対象項目を読み直す。対象本番の置換はしていない。
+更新: 2026-10-31 07:28 UTC。最初の製品は未完成であり、[実装計画](implementation-plan.md)、[機械可読台帳](implementation-plan.json)、[試験計画](test-plan.md)、[AGENTS.md](../AGENTS.md)を基準に進める。各実通信試験の直前に試験計画の実行手順と対象項目を読み直す。対象本番の置換はしていない。
 
 ## 現在の実装
 
@@ -16,6 +16,7 @@ DHCP HA は VRRP が配布役を選び、dnsmasq に VIP と物理 ingress を�
 - `ops-native106`: 隔離 Linux namespace の二台 HA で、通常・特殊 DHCPv4、旧 lease と元期限の取込、片系停止中の新規端末、取得 DNS UDP/TCP、IPv4 TCP/UDP、両方向切替と復帰後の lease 同期を確認した。ここでの更新は明示的に促したものである。
 - `ops-tailnet-defaults-native111`: 隔離 PVE の二台 full-profile appliance と独立 Headscale/公式 Tailscale peer で、各機を IPv4/IPv6 exit node にした TCP/UDP、LAN 双方向通信、direct/relay、service 撤去・再適用、worker/PID 1 再起動を確認した。停止した同じ exit 選択は再起動後に 6.386 秒と 4.938 秒で回復した。停止中の DNS/UDP 損失と初期3失敗は記録し、無停止・無損失とは扱わない。
 - `sam-enrollment-native`: 隔離 Linux namespace で、独立した旧 routerd RR と current routerd2 の supervisor/control/SAM worker を接続した。署名済み claim の admission と control status の RR/direct snapshot、control API 経由 worker 再起動後の新 producer、RR 停止中の元期限を延長しない RR fallback、RR 復帰後の revoke と旧 RR による拒否を確認した。これは CLOUD-03 の component contract に限る。WG/BGP、/32、NAT なし端末通信、packet capture、CLOUD-04 は未確認である。
+- `sam-transport-release`: 同じ current product stack を独立旧 routerd RR と FRR に接続し、admitted dynamic RR endpointからIPIP/BGPを構成。root Linux netns内の独立端末間でNATなしTCP/UDP双方向通信とpacket captureを確認した。明示revoke試験および元admission期限切れ試験の双方でtunnel linkとkernel FIB routeが撤去され、転送が停止した。通常・期限切れとも実通信試験終了0。WG暗号化FOU、/32 mobility/provider action、leaf/drain/分断復旧、対象PVE・実機・クラウドではない。
 - `homert-disk-native113`: 通常 APK から作る BIOS disk を二台の隔離 PVE appliance で VirtIO/SCSI に接続し、通常の `DISK_ETC_DIR` 入力で設定と trust file を配備した。取得 DHCP/SLAAC/DNS、IPv4/IPv6 TCP/UDP、BGP、DS-Lite、NTP、Tailscale と電源断後の disk 再起動を確認した。切替中には通信損失を観測しており、これは disk boot/provisioning/recovery の受入であって無停止 HA の受入ではない。
 
 これらは実プロセス・独立 peer・Linux kernel/PVE の相互通信結果である。対象 ONU/HGW/NIC、対象 appliance、実回線、43,200 秒 lease の自然 T1、全34 work package の受入を表さない。

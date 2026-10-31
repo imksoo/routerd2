@@ -13,7 +13,6 @@ import (
 	bgpstate "github.com/imksoo/routerd/pkg/bgp"
 	"github.com/imksoo/routerd/pkg/bgpdaemon"
 	"github.com/imksoo/routerd/pkg/mobilityconfig"
-	"github.com/imksoo/routerd2/internal/network"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
 )
 
@@ -28,8 +27,21 @@ func (c *compiler) ipipTransports() ([]resourceprogram.Resource, map[string][]st
 		c.note(nodes, "Static transport node identity and endpoints are compiled into native IPIP/BGP intent; this does not implement enrollment or mobility ownership.")
 	}
 	for _, r := range c.resourcesOfKind("SAMTransportProfile") {
-		c.allow(r, "selfNodeRef", "mode", "encryption", "innerPrefix", "addressingMode", "underlayInterface", "localEndpointFrom", "bgp", "peersFrom", "publishPeerGroup")
+		c.allow(r, "selfNodeRef", "mode", "encryption", "innerPrefix", "addressingMode", "underlayInterface", "localEndpoint", "localEndpointFrom", "bgp", "peersFrom", "publishPeerGroup")
 		s := r.Spec.(api.SAMTransportProfileSpec)
+		dynamicSource := false
+		for _, source := range s.PeersFrom {
+			kind, _, dynamic := strings.Cut(strings.TrimSpace(source.Resource), "/")
+			if dynamic && (kind == "SAMRRSet" || kind == "SAMEnrollmentPolicy" || kind == "SAMPeerGroup") {
+				// A learned source is lowered by samTransports, which retains the
+				// admission deadline. Do not turn it into a guessed static peer.
+				dynamicSource = true
+				break
+			}
+		}
+		if dynamicSource {
+			continue
+		}
 		self := strings.TrimSpace(s.SelfNodeRef)
 		if self == "" {
 			c.reject(r, "selfNodeRef", "required", "transport requires its configured node identity")
@@ -137,7 +149,6 @@ func (c *compiler) ipipTransports() ([]resourceprogram.Resource, map[string][]st
 			name := fmt.Sprintf("ip%x", sum[:6])
 			id := "ipip/" + name
 			out = append(out, resourceprogram.Resource{ID: id, IPIP: &resourceprogram.IPIP{Name: name, LocalFromDHCP4: c.serviceName(*source, "dhcp4"), Remote: nodes[peer], Address: netip.PrefixFrom(local, 31)}})
-			out = append(out, resourceprogram.Resource{ID: id + "/endpoint", DependsOn: []string{id}, Route: &network.Route{Destination: nodes[peer].String() + "/32", Interface: parent}})
 			intent := c.document.Services[serviceIndex].BGP
 			address := remote.String()
 			if _, exists := intent.Runtime.Peers[address]; exists {
