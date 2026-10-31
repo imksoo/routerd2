@@ -1390,6 +1390,8 @@ DNS/IPv4 TCPUDPを使え、再参加後に新旧両端末が同じ割当を保�
 新端末を含む再参加まで37.401/25.390秒で終了0。最大TCP待ち14.945秒、UDP168/1103件、DNS45/659件の失敗を記録する。
 全34項目の完了や長期安定とはしない。
 
+`dhcp-ingress-native105` は、old routerd の physical LAN 受信を踏まえ、VRRP VIP に加えてその physical parent を dnsmasq の ingress として明示した。隔離 PVE の実 supervisor/control/network/DHCP worker、kernel、独立 ordinary/special client で、120秒 lease の両方の自然 T1 unicast REQUEST と同一XID ACK、option 54=`172.18.0.1` を確認した。cold boot/reboot の DNS UDP/TCP（IPv4/IPv6）、TCP/UDP、BGP、NTP、Tailscale も通過した。これは単体 PVE の実通信であり、二台切替、元12時間 lease、ONU/HGW・対象機器の受入は残る。
+
 同期断中に相手から一度も届かなかった休止端末の割当は、旧15秒非同期転送にも完全保護の保証がない。
 実際に古い生存機がその要求IPを別端末へ渡す失敗を確認した。既知leaseの保護と区別して制限を記す。
 追加保証のためにpoolを暗黙分割したり、別の所有者台帳を増設したりしない。

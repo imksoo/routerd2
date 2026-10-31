@@ -13,6 +13,7 @@ import (
 // DHCPServer exposes protocol intent; the runtime owns the lease file and engine lifetime.
 type DHCPServer struct {
 	Interface                 string                         `json:"interface"`
+	IngressInterface          string                         `json:"ingress_interface,omitempty"`
 	ServerAddress             string                         `json:"server_address"`
 	Primary                   dhcpserverconfig.Scope         `json:"primary"`
 	Scopes                    []dhcpserverconfig.Scope       `json:"scopes,omitempty"`
@@ -38,6 +39,9 @@ func validateDHCPHA(services []Service) error {
 		byName[s.Name] = s
 	}
 	for _, s := range services {
+		if s.DHCPServer != nil && s.DHCPServer.HA == nil && s.DHCPServer.IngressInterface != "" {
+			return fmt.Errorf("DHCP %s ingress interface requires HA", s.Name)
+		}
 		if s.DHCP6 != nil && s.DHCP6.HA != nil {
 			if byName[s.DHCP6.HA.Owner].VRRP == nil {
 				return fmt.Errorf("DHCPv6 %s HA requires a configured VRRP owner", s.Name)
@@ -52,8 +56,8 @@ func validateDHCPHA(services []Service) error {
 			return fmt.Errorf("DHCP %s HA requires a configured VRRP owner", s.Name)
 		}
 		owner := service.VRRPConfig()
-		if owner.Family != "ipv4" || owner.VIPInterface != c.Interface {
-			return fmt.Errorf("DHCP %s HA owner must be the IPv4 VRRP service for its VIP interface", s.Name)
+		if owner.Family != "ipv4" || owner.VIPInterface != c.Interface || owner.Interface != c.IngressInterface {
+			return fmt.Errorf("DHCP %s HA owner must provide its IPv4 VIP and physical ingress interfaces", s.Name)
 		}
 		found := false
 		for _, raw := range owner.Addresses {
@@ -67,6 +71,27 @@ func validateDHCPHA(services []Service) error {
 	return nil
 }
 
+// A bridged ingress makes dnsmasq listen on both the VRRP VIP and its physical
+// parent. Its UDP/67 socket must therefore be the only local DHCP server or
+// relay socket; normal single-interface DHCP services remain independent.
+func validateDHCPIngress(services []Service) error {
+	for _, service := range services {
+		if service.DHCPServer == nil || service.DHCPServer.IngressInterface == "" {
+			continue
+		}
+		for _, other := range services {
+			if other.Name == service.Name {
+				continue
+			}
+			if other.DHCPServer == nil && other.DHCPRelay == nil {
+				continue
+			}
+			return fmt.Errorf("DHCP %s physical ingress cannot share UDP/67 with %s", service.Name, other.Name)
+		}
+	}
+	return nil
+}
+
 type LeaseHA struct {
 	Owner       string         `json:"owner"`
 	Replication peertls.Config `json:"replication"`
@@ -75,7 +100,7 @@ type LeaseHA struct {
 func (s Service) DHCPServerConfig(stateDir string) dhcpserverconfig.Config {
 	c := s.DHCPServer
 	cfg := dhcpserverconfig.Config{
-		Resource: s.Name, Interface: c.Interface, ServerAddress: c.ServerAddress,
+		Resource: s.Name, Interface: c.Interface, IngressInterface: c.IngressInterface, ServerAddress: c.ServerAddress,
 		Primary: c.Primary, Scopes: c.Scopes, Reservations: c.Reservations, Authoritative: c.Authoritative,
 		FingerprintRetention: c.FingerprintRetention, LogDHCP: c.LogDHCP, StickyHoldDays: c.StickyHoldDays,
 		MaxLeases: c.MaxLeases, EffectTimeoutMilliseconds: c.EffectTimeoutMilliseconds,
