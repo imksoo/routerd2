@@ -55,6 +55,14 @@ spec:
       kind: FirewallZone
       metadata: {name: wan-peer}
       spec: {role: trust, interfaces: [Interface/wan]}
+    - apiVersion: system.routerd.net/v1alpha1
+      kind: WebConsole
+      metadata: {name: pd-console}
+      spec: {listenAddress: "::", port: 8080, basePath: /ops/}
+    - apiVersion: firewall.routerd.net/v1alpha1
+      kind: FirewallRule
+      metadata: {name: allow-lan-console}
+      spec: {fromZone: lan-edge, toZone: self, protocol: tcp, port: 8080, action: accept}
     - apiVersion: firewall.routerd.net/v1alpha1
       kind: FirewallRule
       metadata: {name: deny-lan-self}
