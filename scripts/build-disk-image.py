@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import tempfile
 
@@ -25,6 +26,19 @@ def digest(path):
     return value.hexdigest()
 
 
+def provision_state(source, target):
+    """Copy an explicitly prepared native state tree, preserving file modes."""
+    if not stat.S_ISDIR(source.lstat().st_mode):
+        raise ValueError("state-dir must name a prepared directory")
+    for directory, directories, files in os.walk(source):
+        for name in directories + files:
+            path = Path(directory) / name
+            mode = path.lstat().st_mode
+            if not (stat.S_ISREG(mode) or stat.S_ISDIR(mode)):
+                raise ValueError("state-dir accepts only regular files and directories")
+    shutil.copytree(source, target, dirs_exist_ok=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--image-dir", type=Path, default=Path("dist/image"))
@@ -34,6 +48,7 @@ def main():
     parser.add_argument("--config", type=Path)
     parser.add_argument("--authorized-key", type=Path)
     parser.add_argument("--etc-dir", type=Path, help="Provision configuration and trust files below /etc")
+    parser.add_argument("--state-dir", type=Path, help="Copy a prepared native state directory into the new state partition; stage only selected identities, not the old router state directory")
     args = parser.parse_args()
     if os.geteuid() != 0:
         parser.error("run as root in a private mount namespace (sudo unshare --mount --propagation private)")
@@ -75,7 +90,7 @@ def main():
     mkinitramfs = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mkinitramfs)
     work = Path(tempfile.mkdtemp(prefix="routerd2-disk-"))
-    mounted = False
+    mounted = None
     try:
         overlay = work / "overlay"
         if args.etc_dir:
@@ -96,8 +111,16 @@ def main():
             boot_root.mkdir()
             run(["mkfs.ext4", "-q", "-F", "-L", "routerd-boot", loop + "p1"])
             run(["mkfs.ext4", "-q", "-F", "-L", "routerd-state", loop + "p2"])
+            if args.state_dir:
+                state_root = work / "state-volume"
+                state_root.mkdir()
+                run(["mount", "-o", "nosuid,nodev", loop + "p2", str(state_root)])
+                mounted = state_root
+                provision_state(args.state_dir, state_root)
+                run(["umount", str(state_root)])
+                mounted = None
             run(["mount", "-o", "nosuid,nodev", loop + "p1", str(boot_root)])
-            mounted = True
+            mounted = boot_root
             grub = boot_root / "boot/grub"
             grub.mkdir(parents=True)
             shutil.copyfile(image / "vmlinuz", boot_root / "boot/vmlinuz")
@@ -120,8 +143,8 @@ def main():
         finally:
             try:
                 if mounted:
-                    run(["umount", str(boot_root)])
-                    mounted = False
+                    run(["umount", str(mounted)])
+                    mounted = None
             finally:
                 run(["losetup", "--detach", loop])
     finally:
@@ -138,6 +161,7 @@ def main():
         "boot_method": "bios-grub", "bootloader": run(["grub-install", "--version"], capture_output=True).stdout.strip(),
         "partitions": ["ext4 boot", "ext4 persistent state"],
         "state_volume": boot["state_volume"],
+        "initial_state_provisioned": args.state_dir is not None,
         "boot_config_sha256": hashlib.sha256(json.dumps(boot, indent=2).encode() + b"\n").hexdigest(),
         "ssh_enabled": bool(boot.get("ssh", {}).get("authorized_keys")),
         "config_sha256": config_hash,
