@@ -192,6 +192,8 @@ DNS利用とIPv4/IPv6通信、自然DHCPv4更新、PD通常/強制交換と製�
 同じ試験をhomert02/03の実intentに対応する構成で実施する。管理経路と復旧手段を先に確認し、hostの管理設定を変えない。
 実ONUの直結試験には、その回線と対象NICが必要。実HGW経由の結果はONU直結として扱わない。
 
+2026-11-02時点の開発hostには仮想NICしかなく、対象ONU/HGWへつながる専用物理経路がない。対象機受入の次の接続条件は、対象router/NICと独立clientを専用switch port/VLAN経由でONU/HGWへ接続し、WAN/LAN capture点を用意すること。共有本番経路を使う場合は計画停止と復旧手順が必要。homert02の現行設定差分も、既存読取専用guest-agent経路が利用できず未確認のままである。
+
 `ops-management-combined-native120` は通常・特殊端末の実際の43,200秒DHCPv4 leaseで、T1のunicast REQUEST、同一XIDのACK、option 54、期限延長、REBINDなしを確認した。全jobは、その後6時間休止していたTailscale経路の最初の新規TCPが固定2秒でtimeoutして終了1だった。snapshotにRunning/online・承認経路・転送規則は残っていたが、復帰時刻の実通信を採らなかったため、DHCP自然更新だけを成功としTailscale継続は未合格とする。次のTailscale試験は起点からの通信成功時刻を測り、固定の接続待機だけで継続性を判断しない。
 
 現mainの別の隔離実daemon試験では、独立Headscale/公式peerを使い、worker/PID 1再起動、peer停止/復帰、service撤去/再適用後のLAN/exit IPv4/IPv6 TCP/UDPを確認した。撤去から再適用後のexit復帰は6.344秒だった。これは休止後の再接続を時間計測したものではないので、native120のtimeoutを解消済みとは扱わない。

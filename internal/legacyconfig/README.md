@@ -260,11 +260,15 @@ Full router-linux performance tuning and implicit RA target conversion remain op
 
 The active routerd chain enables dnsmasq RA together with its stateless DHCPv6
 range. Importing only UDP/547 would lose SLAAC and DNS for RA-only clients.
-The explicit policy replaces the interface-prefix constructor and unbounded
-retained information with one managed PD allocation and original lease/option
-budgets. Static values remain independent when learned information expires;
-missing information no longer stops all serving. This is deliberate native
-replacement behavior, not byte-for-byte dnsmasq parity.
+The importer uses a same-interface `IPv6RouterAdvertisement.prefixFrom` when it
+already identifies one delegated LAN allocation. An explicit policy is needed
+only when no such unambiguous RA selects the prefix; when the server must create
+an implicit RA, that policy also supplies its router lifetime. This replaces
+the interface-prefix constructor and unbounded retained information with one
+managed PD allocation and original lease/option budgets. Static values remain
+independent when learned information expires; missing information no longer
+stops all serving. This is deliberate native replacement behavior, not
+byte-for-byte dnsmasq parity.
 
 ```yaml
 schema_version: 1
@@ -275,11 +279,12 @@ dhcp6_servers:
     server_duid: "00030001020000000042"
 ```
 
-The reference must select the serving interface's compiled allocation. A declared
-`delegatedAddress` or `defaultRoute` must agree with it. Delegated-address
-`sendRA`/`announce` declarations require this explicit selecting policy; the
-selected RA implements that intent. Router lifetime must be
-zero or 10..9000 seconds. PIO and learned DNS lifetimes retain their original
+The selected prefix must be a compiled allocation on the serving interface. A
+declared `delegatedAddress` or `defaultRoute` must agree with it. A same-interface
+RA resource may provide that selection directly; delegated-address
+`sendRA`/`announce` intent is represented by the selected RA. If no RA selects
+the allocation, the policy provides it and the implicit router lifetime. Router
+lifetime must be zero or 10..9000 seconds. PIO and learned DNS lifetimes retain their original
 PD/information deadlines. Stateless DHCPv6 `leaseTime` sets the Information
 Refresh Time, as in dnsmasq: the default is `12h` (43200 seconds), finite values
 have a 600-second minimum, and `infinite` means no periodic refresh. It does not
@@ -358,10 +363,10 @@ serving, custom lease/RA settings and full deployed-router import remain open.
 | `DHCPv4Relay` | Explicit `interfaces` and numeric IPv4 `upstream` become one native relay service. Each client interface requires one unconditional owned static IPv4 address for `giaddr`. Multiple relay declarations retain per-interface upstream sets. Conditional/dynamic source selection and ambiguous legacy VRF binding remain unsupported. |
 | `DHCPv6PrefixDelegation` | Native IA_PD service, pinned DUID-LL/IAID 1 defaults, explicit DUID, provider profile, prefix-length preference and finite role guards. Explicit external clients and required-prefix readiness semantics are rejected. |
 | `DHCPv6Information` with one matching PD | An alias of that PD service, sharing its DUID/IAID, UDP 546 socket and supplementary Information-Request. The original **literal interface reference** must match exactly; merely resolving two different aliases to the same NIC does not reproduce the old association. Standalone and ambiguous owners are rejected. `request` may name dns-servers, domain-search, sntp-servers and aftr-name, all already present in the fixed client request set. |
-| `DHCPv6Server` in stateless mode | Explicit `dhcp6_servers` policy selects one compiled PD LAN allocation and router lifetime. `dnsServerFrom` may select that `IPv6DelegatedAddress`'s `address`: DHCPv6 and RA then advertise its currently installed router address after DAD, without copying a status value into intent. Imports static DNS/SNTP/search and PD/information references, generates RA with O plus independently selected RDNSS/DNSSL, and preserves the original untrust UDP/547 INPUT exception. Learned RA DNS sources must be the selected PD; unsupported fields and HA conditions reject the entire input. |
+| `DHCPv6Server` in stateless mode | A same-interface `IPv6RouterAdvertisement.prefixFrom` may select the compiled PD LAN allocation; otherwise `dhcp6_servers` policy selects it and provides the router lifetime when RA is implicit. `dnsServerFrom` may select that `IPv6DelegatedAddress`'s `address`: DHCPv6 and RA then advertise its currently installed router address after DAD, without copying a status value into intent. Imports static DNS/SNTP/search and PD/information references, generates RA with O plus independently selected RDNSS/DNSSL, and preserves the original untrust UDP/547 INPUT exception. Learned RA DNS sources must be the selected PD; unsupported fields and HA conditions reject the entire input. |
 | `IPv6RAAddress` with explicit policy | One native `ra_client`, using the policy's same-interface SLAAC/default-route/on-link/RIO/DNS flags, source/IID/router filters and explicit route table/metric. Requires managed RA, independently managed/admin-up underlay, and `required: false`. Host defaults and learned state are not imported. |
 | IPv6 host-traffic `EgressRoutePolicy` with `ra_clients` policy | Its generated physical-interface RA client accepts the same resource-scoped RA policy as `IPv6RAAddress`. Set the observed host table/metric explicitly when it differs from the shared WAN VMAC; both defaulting to metric1024 can conflict. The host traffic route's own table/priority remain independent. |
-| `IPv6DelegatedAddress` | A /64 LAN address or /128 host endpoint under its PD service, retaining the installed mask, suffix and **hexadecimal** subnet ID. In the old schema, `subnetID: "10"` means hexadecimal 0x10, not decimal 10. IDs must fit within the provider prefix; zero host ID remains unsupported. LAN advertisement declarations require a `dhcp6_servers` policy selecting that /64 allocation. |
+| `IPv6DelegatedAddress` | A /64 LAN address or /128 host endpoint under its PD service, retaining the installed mask, suffix and **hexadecimal** subnet ID. In the old schema, `subnetID: "10"` means hexadecimal 0x10, not decimal 10. IDs must fit within the provider prefix; zero host ID remains unsupported. LAN advertisement declarations are selected by a same-interface RA `prefixFrom` or, when absent, a `dhcp6_servers` policy. |
 | `DSLiteTunnel` | Fixed outer IPv6 endpoints, inner IPv4 /32 **peer 192.0.0.1/32**, explicit tunnel identity, no encapsulation-limit option and original fixed default MTU of **1460**. The default inner address is 192.0.0.2. `localAddressFrom` means the **inner IPv4** source in the pinned controller, not the outer IPv6 endpoint. |
 | `DSLiteTunnel` with explicit policy | One native `ds_lite` service, preserving candidate precedence and B4/MTU identity while explicitly changing DNS bootstrap, source ownership/selection and endpoint expiry. Accepts an owned static IPv6 source or the policy's compiled RA source. Information references map to their existing PD service. One independently declared IPv4 default route can join the dynamic tunnel's lifetime owner. PD-derived/HA/suffix sources remain rejected. |
 | `DNSResolver` + `DNSForwarder` + `DNSUpstream` + `DNSZone` | Resolves the static resource graph into native DNS runtime intent. Preserves source order, listener selection, transport/TLS identity, bootstrap servers, interface binding, cache/timeouts/health checks, query-log enablement, zones and static records/reverse zones. Statically known address references are resolved; learned/delegated references are rejected. DHCP-derived zones require successfully migrated DHCP producers and an explicit per-resolver `dhcp_dns` replacement policy. |

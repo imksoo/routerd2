@@ -1,6 +1,6 @@
 # routerd2 開発引き継ぎ
 
-更新: 2026-11-02 03:20 JST。最初の製品は未完成であり、[実装計画](implementation-plan.md)、[機械可読台帳](implementation-plan.json)、[試験計画](test-plan.md)、[初回状態移行手順](initial-state-migration.md)、[AGENTS.md](../AGENTS.md)を基準に進める。各実通信試験の直前に試験計画の実行手順と対象項目を読み直す。対象本番の置換はしていない。
+更新: 2026-11-02 04:06 JST。最初の製品は未完成であり、[実装計画](implementation-plan.md)、[機械可読台帳](implementation-plan.json)、[試験計画](test-plan.md)、[初回状態移行手順](initial-state-migration.md)、[AGENTS.md](../AGENTS.md)を基準に進める。各実通信試験の直前に試験計画の実行手順と対象項目を読み直す。対象本番の置換はしていない。
 
 ## 現在の実装
 
@@ -57,7 +57,9 @@ main統合版126のハッシュ一致3実行物でも、通常125の起動イメ
 
 2026-11-01: homert02/03 の現行 router YAML を読取専用で取得し、隔離VMの明示NIC名へ置換して current main の migration/validation に通した。両方とも56 resource のnative設定になった。これは現行入力と変換器の組合せ確認であり、Tailscale保存状態、旧lease、実WAN、実VM起動の移行受入ではない。入力と変換出力は確認後に削除する。
 
-2026-11-02: 既存の読取専用PVE guest-agent経路で、稼働中homert03（VM 158）の最新router設定を再取得した。設定は109 resourceで、current mainのmigrationは全体39 issueで拒否された。同一interfaceの明示RAが選ぶ`prefixFrom`委譲prefixをstateless DHCPv6 information serverのLAN選択にも使う変更後、当該DHCPv6 serverの別途policy必須issueは消えた。全体変換・実機通信の合格ではなく、稼働VMやworkerは変更していない。homert02と対象ONU/NICの受入は未確認。
+2026-11-02: main `5508339`の読取専用PVE guest-agent経路で、稼働中homert03（VM 158）の最新router設定を再取得した。設定は109 resourceで、migrationは全体39 issueで拒否された。同一interfaceの明示RAが選ぶ`prefixFrom`委譲prefixをstateless DHCPv6 information serverのLAN選択にも使う変更後、当該DHCPv6 serverの別途policy必須issueは消えた。全体変換・実機通信の合格ではなく、稼働VMやworkerは変更していない。homert02と対象ONU/NICの受入は未確認。
+
+同日、homert02の現行設定取得に同じ読取専用guest-agent経路を使おうとしたが、既存ControlMaster socketを利用できず取得できなかった。新しいSSH接続やVM起動、設定変更はしていないため、homert02/03の設定差分は未確認のまま。次に必要なのは同じ読み取り専用経路の再利用可能化であり、試験器や代替設定は作らない。
 
 2026-11-01: 実HGW用macvlan fixtureはDS-Lite復路をcaptureするが、任意のIPv4 ICMP fragmentation-needed、IPv6 Packet Too Big、断片化を発生させる制御可能な実経路を持たない。そのため自然PD観測や隔離DS-Lite PMTU試験を再実行して物理PMTU受入と取り違えなかった。物理受入には、host管理経路から分離したL2、MTUを下げて両ICMPを返せる実対向、router/対向のcapture、試験前後の管理interfaceとhost経路の一致が必要である。
 
@@ -94,6 +96,8 @@ DHCPv6 PD の再起動後 Rebind と、不良 candidate から known-good runtim
 2026-11-01にhomert02/03、各PVE node、接続bridge、guest NIC、link state、経路、稼働routerd processを読取専用で確認した。両VMは稼働中の4 vCPU/4 GiB・三VirtIO NIC構成であり、現行routerdと実回線用workerが動作している。active uplinkは既存PVE bridgeと稼働guestに接続済みで、未接続の物理portはcarrierを持たない。稼働中のshared bridgeや現在のONU/HGW経路を変更せずに、独立した一台を実回線へ接続できる未使用L2 portは確認できなかった。
 
 物理試験を開始するには、専用switch VLAN/portとONU/HGWへ至る専用回線、または既存経路の計画停止のいずれかが必要である。前者なら、新規の隔離VMまたは専用機へ三NICを接続し、試験専用のIPv4/IPv6 address、DHCP identity、観測用LAN client、WAN/LAN capture点を割り当てる。開始直前と切戻し後に、対象VM設定、NIC link/route、routerd設定のSHA-256を読取比較する。後者ではhomert02/03停止または物理ケーブル差替えの範囲、予定時間、旧VM再起動と元bridge/NIC/route hash一致を切戻し条件として明示した承認が必要である。現時点ではいずれの変更も実施していない。
+
+2026-11-02: homert02設定取得に使う既存読取専用guest-agent経路はControlMaster socketを利用できず、ローカルにもPVE CLI/APIやVM一覧がないため、VM IDの特定と設定読取はできなかった。homert02/03差分は未確認であり、新しいSSH接続・VM起動・設定変更はしていない。現在の開発hostには仮想NICしかない。次の対象実機受入には、専用switch port/VLANとONU/HGWへの隔離回線、対象router/NIC、独立有線client、WAN/LAN capture点が必要。既存共有経路を使う場合は計画停止と具体的な復旧手順が必要。
 
 同日、管理hostの実HGW接続に、別MAC・private network namespace・独立LAN clientだけを作る`make check-uplink UPLINK_SECONDS=60`をcurrent `4dc020c`で実行した。WAN RA/DHCPv6 PD初回交換、実AFTR DS-LiteとIPv4復路、LAN DHCPv4/DHCPv6/SLAAC、IPv4/IPv6 HTTPS、学習DNS UDP/TCP、条件付きDNS障害/復帰、PD workerのSIGKILL/正常再起動、zero-lifetime RA撤去を確認した。自然PD Renewは既存の7,800秒受入結果を再利用し、この60秒試験では待たなかった。namespace、別MAC、capture、stateは終了時に削除した。本番homert02/03、管理address、IPv4/IPv6 route、resolver、PVE VM設定は操作しなかった。route/resolver/PVE設定のhashは開始前後で一致した。管理interfaceの生JSONにはDHCP lifetimeが含まれて毎秒変わるため、今後の比較はaddress本体のみを正規化してhash化する。これはONU直結、物理NIC MTU/PMTU、連続TCPまたは切替受入ではない。
 

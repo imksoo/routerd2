@@ -1136,8 +1136,8 @@ MTU 600のLANでは大きいunicast/broadcast DHCPINFORM応答をIPv4分割し�
 `make check-dhcp-relay`で再実行できる。HA・動的なVRF/interface変更の受入と、
 DHCPv6 server・残るresource契約は未完了であり、NET-06全体の完了とはしない。
 
-2026-11-02: 既存のPVE guest-agent読取経路で、稼働中homert03（VM 158）の現行router設定を読み取った。
-109 resourceの設定をcurrent mainのmigrationへ渡すと全体は39 issueで拒否されたが、同一interfaceの明示RAが
+2026-11-02: main `5508339`で、既存のPVE guest-agent読取経路から稼働中homert03（VM 158）の現行router設定を読み取った。
+109 resourceの設定をmain `5508339`のmigrationへ渡すと全体は39 issueで拒否されたが、同一interfaceの明示RAが
 `prefixFrom`で選ぶ委譲prefixをstateless DHCPv6 information serverのLAN選択にも使う修正後は、
 DHCPv6 server自身の別途policy必須issueは出なくなった。変換全体の成功や実機通信の合格ではない。
 稼働VM/workerは変更していない。homert02・対象ONU/NIC・全resource契約は未確認。
@@ -2012,11 +2012,11 @@ source fixture、isolated lab、engine PoC、provider simulator の実装は現�
 
 | 使用する段階 | 必要な入力 |
 | --- | --- |
-| CORE-01 / QUAL-01 | 2026-11-02、既存の読取専用PVE guest-agent経路から稼働中homert03（VM 158）の現行設定を取得した。109 resourceの設定全体はcurrent mainのmigrationで39 issueとなり未受入。homert02の現行設定、対象機の利用中engine版、期待するWAN/PBR/HA動作は引き続き確認対象。設定と稼働サービスは変更していない。 |
+| CORE-01 / QUAL-01 | 2026-11-02、homert03（VM 158）の現行設定は既存の読取専用PVE guest-agent経路で取得済み。109 resource全体はcurrent mainのmigrationで39 issueとなり未受入。homert02は同じ経路のControlMaster socketを利用できず、ローカルにPVE CLI/APIとVM一覧もないため現行設定を取得できなかった。homert02/03差分は未確認。新規SSH接続・VM起動・設定変更はしていない。homert02の読取専用経路、対象機のengine版、期待するWAN/PBR/HA動作は引き続き確認対象。 |
 | CORE-06 | 各engineの正確な版・plugin・配布条件。用途に必要な機能集合をPoCの合否にする。 |
 | HA-02 / HA-03 | 新旧node混在を必要とするか、maintenance切替を許すか。選んだ方式のfixtureと戻し手順を用意する。 |
 | CLOUD-01 / DIST-03 | 使い捨てcloud環境、許可範囲、費用/cleanup条件。実credentialをrepositoryやimageへ保存しない。 |
-| DIST-02 / QUAL-01 | 対象mini-PC/arm64、NIC/firmware、route/peer/pps/latency等の受入目標。 |
+| DIST-02 / QUAL-01 | 開発hostのNICは仮想NICで、対象ONUへつながる専用物理経路はない。対象機の実受入には、対象router/NIC、ONU/HGWへ至る専用switch portまたはVLAN、独立有線client、WAN/LAN capture点が必要。共有本番経路を使う場合は計画停止・接続変更範囲・復旧手順を先に確定する。mini-PC/arm64、NIC/firmware、route/peer/pps/latency等の受入目標も必要。 |
 
 将来の cloud 操作や本番切替のための情報が未入手でも、共通基盤の実装着手は止めない。
 有料環境の操作、本番 WAN/HA の切替、disk 初期化は、その具体的な対象と手順を扱う段階で実施条件を確認する。
