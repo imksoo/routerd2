@@ -137,8 +137,8 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
                 "mss_clamp": [
                     {"from": a, "to": b, "family": f, "mtu": mtu}
                     for a, b, f, mtu in [
-                        ("lan0", "dslite0", 4, 1460),
-                        ("dslite0", "lan0", 4, 1460),
+                        ("lan0", "dslite0", 4, 1454),
+                        ("dslite0", "lan0", 4, 1454),
                         ("lan0", "wan0", 6, 1500),
                         ("wan0", "lan0", 6, 1500),
                     ]
@@ -193,7 +193,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
                     "dns_from": ["wan-pd", "wan-ra"],
                     "b4_peer": "192.0.0.1/32",
                     "route_gateway": "192.0.0.1",
-                    "mtu": 1460,
+                    "mtu": 1454,
                     "metric": 200,
                 },
             },
