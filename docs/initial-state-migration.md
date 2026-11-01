@@ -40,6 +40,12 @@ Git にコミットしない。
 
 各ノードは同じ手順を独立に実施する。二台切替、既存 TCP/UDP 継続、実回線負荷は、この初回起動合格の後の別受入である。
 
+## 隔離 PVE の再現リハーサル
+
+`make check-initial-state-migration INITIAL_STATE_PVE_HOST=...` は、新しい bridge/NIC を持たない一時 PVE VM、独立 Headscale と公式 Tailscale peer、LAN/WAN の Linux namespace を作る。旧側を停止して table 52 と DHCP/UDP 待受が消えたことを確認してから、選択状態だけを新規 BIOS disk に入れる。disk の状態パーティションは読み取り専用で検査し、選択ファイルの通常ファイル性、root 所有、0600、複写一致を確認する。
+
+2026-11-01 に current main の正規 `make image` でこのリハーサルを終了0にした。旧 Tailscale ID の再出現と peer ping、旧 DHCP client の更新、別 MAC の新規 client の別アドレス、DNS UDP/TCP、LAN/WAN の IPv4/IPv6 TCP/UDP を実プロセスと capture で確認した。その後、新 PID 1 を停止して旧入力の一致を確認し、旧 owner を一台だけ復帰させた。この fixture は旧 routerd の SQLite table format を入力として生成するため、実 homert の state 内容や実 ONU/NIC、HA 切替の受入ではない。実行ごとの VM、disk、鍵、state、capture、raw log は終了時に削除する。
+
 ## 空の状態ディスクの確認
 
 2026-11-01 に `main` の`3e2a73a`で通常の `make image` 出力から、空の0700作業ディレクトリを指定して

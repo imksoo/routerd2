@@ -63,6 +63,8 @@ main統合版126のハッシュ一致3実行物でも、通常125の起動イメ
 
 2026-11-01: 初回状態移行の入力、停止境界、既存ディスクを置換しない新規ディスク作成、検査、失敗時の旧サービス復帰を[手順](initial-state-migration.md)として固定した。空の root 専用状態作業ディレクトリを新しい ext4 ディスクへ組み込み、読み取り専用マウントで`lost+found`以外がないこと、同じディスクの隔離 QEMU Linux PID 1起動（37.7秒）を確認した。旧状態本文・鍵・リースは取得していない。実状態移行、Tailscale 識別情報、リース/固定割当履歴の取込、対象機切替は未受入のままである。
 
+2026-11-01: current main の正規 image を使う `check-initial-state-migration` を隔離 PVE で終了0にした。停止済み旧 owner の選択 Tailscale state、SSH host key、DHCP lease/sticky 入力を新規 disk に取り込み、disk内stateを読取検査した。独立 Headscale/公式 peerで同じnode IDとping、旧DHCP更新・別MACの新規lease、DNS UDP/TCP、LAN/WAN IPv4/IPv6 TCP/UDPを実通信とcaptureで確認し、新 PID 1停止後に旧入力が未変更のまま単独復帰できた。旧 routerdのSQLite table formatをfixtureが生成したものであり、実homert state・ONU/NIC・HAの受入ではない。VM、disk、鍵、capture、raw logは削除済みである。
+
 2026-11-01: 通常126 APKから起動した隔離PVEの4CPU/4GiB実VMと、同じPVE内の独立LAN/WAN端末を直接接続した。SSHは管理・結果回収だけで、SSH転送に使える二つの別リンクでTCP/5201 packetが0なのをcaptureした。最小の静的IPv4 NAT/IPv6転送構成で15秒単一TCPは、IPv4 NAT受信1.275/1.280Gbps、IPv6受信1.228/1.243Gbpsだった。相手はIPv4でNAT後の`192.168.1.249`、IPv6で元のLAN端末を観測した。このため旧130〜149Mbpsを製品上限とする根拠はなくなった。DS-Lite、DHCP/SLAAC/DNS、HA、対象回線・NICの負荷合格には流用しない。VM、raw disk、capture、パッケージとremote stageは削除済み。
 
 今回の生成物・ログ等823.2MiBと専用Docker imageに続き、終了した二台試験のstage約612MiB（capture・一時鍵・state・disk）を削除した。main統合・未変更・稼働参照なしを確認した完了済みworktree二つも `git worktree remove` で撤去し、約1,012MiBの重複出力を解放した。稼働参照がある別tree、次の受入に使う126版image/runnerと既存`AGENTS.md`変更は保持した。native120の根拠を上記へ圧縮した後、同じくstageを削除する。空きは約38GiB。
