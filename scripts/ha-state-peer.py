@@ -1067,21 +1067,10 @@ while True:
             wait(lambda: active("a"), timeout=30)
             def lease_status():
                 return api("a", "control.sock", "/v1/services/service.leases")["snapshot"]
-            wait(lambda: lease_status().get("active"), timeout=30)
-            fourth_client = lease_client(3, third_address)
-            fourth_address = lease_events(3)[-1].split()[1]
-            assert fourth_address not in (first_address, second_address, third_address), "stale takeover duplicated a valid offline client lease"
-            before_renew = len(lease_events(0))
-            first_client.send_signal(signal.SIGUSR1)
-            wait(lambda: len(lease_events(0)) > before_renew)
-            assert lease_events(0)[-1].split()[1] == first_address
-            generation = modules("a")["service.leases"]["generation"]
-            api("a", "control.sock", "/v1/services/service.leases/restart", {})
-            wait(lambda: modules("a").get("service.leases", {}).get("generation", 0) > generation and modules("a")["service.leases"]["ready"], timeout=30)
-            before_fourth = len(lease_events(3))
-            fourth_client.send_signal(signal.SIGUSR1)
-            wait(lambda: len(lease_events(3)) > before_fourth)
-            assert lease_events(3)[-1].split()[1] == fourth_address
+            fourth_client = lease_client(3, third_address, await_lease=False)
+            time.sleep(3)
+            assert not (stage / "lease3.progress").exists(), "stale standby served DHCP without the former owner's lease state"
+            assert not lease_status().get("active"), "stale takeover did not withhold DHCP"
             start("ha-b", b_command, "b")
             def standby_ready():
                 try:
@@ -1094,9 +1083,21 @@ while True:
                 status = lease_status().get("sync")
                 return status is not None and status.get("synchronized") and not status.get("error")
             wait(reconciled, timeout=45)
+            wait(lambda: lease_status().get("active"), timeout=30)
             wait(lambda: (stage / "lease3.progress").exists(), timeout=30)
             fourth_address = lease_events(3)[-1].split()[1]
-            assert fourth_address != third_address, "reconciled owner duplicated the offline lease"
+            assert fourth_address not in (first_address, second_address, third_address), "reconciled owner duplicated a valid offline lease"
+            before_renew = len(lease_events(0))
+            first_client.send_signal(signal.SIGUSR1)
+            wait(lambda: len(lease_events(0)) > before_renew)
+            assert lease_events(0)[-1].split()[1] == first_address
+            generation = modules("a")["service.leases"]["generation"]
+            api("a", "control.sock", "/v1/services/service.leases/restart", {})
+            wait(lambda: modules("a").get("service.leases", {}).get("generation", 0) > generation and modules("a")["service.leases"]["ready"], timeout=30)
+            before_fourth = len(lease_events(3))
+            fourth_client.send_signal(signal.SIGUSR1)
+            wait(lambda: len(lease_events(3)) > before_fourth)
+            assert lease_events(3)[-1].split()[1] == fourth_address
             run(inside("ha-client", ["ip", "address", "replace", third_address + "/24", "dev", "lease2"]))
             run(inside("ha-client", ["ip", "link", "set", "lease2", "up"]))
             before = len(lease_events(2))

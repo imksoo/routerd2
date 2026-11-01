@@ -193,6 +193,22 @@ func Run(ctx context.Context, cfg Config, image *os.File, publish func(context.C
 	if err := unix.Prctl(unix.PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0); err != nil {
 		return err
 	}
+	previouslyStandby := false
+	if cfg.Replication != nil {
+		if cfg.Standby {
+			if _, err := os.Stat(servedMarker(cfg)); err == nil {
+				if err := markStandby(cfg); err != nil {
+					return err
+				}
+			} else if !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+		} else if _, err := os.Stat(standbyMarker(cfg)); err == nil {
+			previouslyStandby = true
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
 	var replica *replication
 	if cfg.Replication != nil {
 		replica, err = startReplication(ctx, cfg)
@@ -278,8 +294,10 @@ func Run(ctx context.Context, cfg Config, image *os.File, publish func(context.C
 		return saveTransfer(ctx, cfg, state)
 	}
 	if !cfg.Standby {
+		var peer leaseTransfer
+		var exchangeErr error
 		if replica != nil {
-			peer, exchangeErr := replica.exchange(ctx, http.MethodGet, leaseTransfer{})
+			peer, exchangeErr = replica.exchange(ctx, http.MethodGet, leaseTransfer{})
 			if errors.Is(exchangeErr, errPeerActive) {
 				return exchangeErr
 			}
@@ -301,8 +319,21 @@ func Run(ctx context.Context, cfg Config, image *os.File, publish func(context.C
 				syncStatus.Error = exchangeErr.Error()
 			}
 		}
-		if err := start(); err != nil {
-			return err
+		// A node that has previously been the standby cannot know about leases
+		// issued while its replication link was down. Keep its DHCP socket closed
+		// until the former owner supplies its current allocation state.
+		if !previouslyStandby || exchangeErr == nil {
+			if err := start(); err != nil {
+				return err
+			}
+			if err := markServed(cfg); err != nil {
+				return err
+			}
+			if previouslyStandby {
+				if err := clearStandby(cfg); err != nil {
+					return err
+				}
+			}
 		}
 	}
 
@@ -312,15 +343,15 @@ func Run(ctx context.Context, cfg Config, image *os.File, publish func(context.C
 			return err
 		}
 		sequence++
-		snapshot := Snapshot{Resource: cfg.Resource, Interface: cfg.Interface, ServerAddress: cfg.ServerAddress, Epoch: epochText, Sequence: sequence, Active: !cfg.Standby, Standby: cfg.Standby, ObservedAt: clock.WallTime, BootID: clock.BootID, ObservedNanos: uint64(clock.BoottimeNanoseconds), ExpiresNanos: uint64(clock.BoottimeNanoseconds) + uint64(dhcpserverconfig.ObservationLifetime)}
-		if !cfg.Standby {
+		snapshot := Snapshot{Resource: cfg.Resource, Interface: cfg.Interface, ServerAddress: cfg.ServerAddress, Epoch: epochText, Sequence: sequence, Active: !cfg.Standby && child != nil, Standby: cfg.Standby, ObservedAt: clock.WallTime, BootID: clock.BootID, ObservedNanos: uint64(clock.BoottimeNanoseconds), ExpiresNanos: uint64(clock.BoottimeNanoseconds) + uint64(dhcpserverconfig.ObservationLifetime)}
+		if !cfg.Standby && replica != nil {
+			copy := syncStatus
+			snapshot.Sync = &copy
+		}
+		if child != nil {
 			snapshot.Leases, err = readDNSMasqLeases(cfg, clock.WallTime)
 			if err != nil {
 				return err
-			}
-			if replica != nil {
-				copy := syncStatus
-				snapshot.Sync = &copy
 			}
 		}
 		call, cancel := context.WithTimeout(ctx, time.Duration(cfg.EffectTimeoutMilliseconds)*time.Millisecond)
@@ -403,17 +434,25 @@ func Run(ctx context.Context, cfg Config, image *os.File, publish func(context.C
 						}
 						continue
 					}
-					cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 20*time.Second)
-					err = child.close(cleanup, cfg, events)
-					cancel()
-					child = nil
-					if err != nil {
-						return err
+					if child != nil {
+						cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 20*time.Second)
+						err = child.close(cleanup, cfg, events)
+						cancel()
+						child = nil
+						if err != nil {
+							return err
+						}
 					}
 					if err := mergePeer(peer); err != nil {
 						return err
 					}
 					if err := start(); err != nil {
+						return err
+					}
+					if err := markServed(cfg); err != nil {
+						return err
+					}
+					if err := clearStandby(cfg); err != nil {
 						return err
 					}
 					childDone = child.done

@@ -38,8 +38,8 @@ func (r *Runtime) validateDHCPServerSnapshotLocked(b binding, u serviceconfig.Up
 		return s, nil
 	}
 	old := r.dhcpServers[u.Name]
-	if old.Epoch != s.Epoch || s.Sequence < old.Sequence || s.ObservedNanos < old.ObservedNanos || !old.Active && s.Active {
-		return s, errors.New("DHCP server rewound its observation or final fence")
+	if old.Epoch != s.Epoch || s.Sequence < old.Sequence || s.ObservedNanos < old.ObservedNanos {
+		return s, errors.New("DHCP server rewound its observation")
 	}
 	if old.Sequence == s.Sequence && !bytes.Equal(previous.Snapshot, u.Snapshot) || old.ObservedNanos == s.ObservedNanos && old.ExpiresNanos != s.ExpiresNanos {
 		return s, errors.New("DHCP server reused an observation with changed contents or deadline")
