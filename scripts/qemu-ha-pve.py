@@ -35,9 +35,15 @@ def main():
     parser.add_argument("--image-dir", type=Path, default=Path("dist/image"))
     parser.add_argument("--stability-seconds", type=int, default=0,
                         help="keep both recovered appliances under independent traffic for this duration")
+    parser.add_argument("--profile", choices=("ipv4", "egress"), default="ipv4")
+    parser.add_argument("--dhcp6-server", type=Path, default=Path("/usr/sbin/dhcpd"),
+                        help="independent ISC DHCPv6 server used by the egress profile")
     args = parser.parse_args()
     if args.stability_seconds < 0:
         parser.error("--stability-seconds must be non-negative")
+    if args.profile == "egress" and not args.dhcp6_server.is_file():
+        parser.error("--dhcp6-server must name an independent ISC dhcpd executable")
+    networks = ("wan", "lan", "sync", "backup") if args.profile == "egress" else ("wan", "lan", "sync")
     if os.geteuid() != 0:
         raise SystemExit("run through sudo so the fixture can create its private network")
     image = args.image_dir.resolve()
@@ -97,12 +103,14 @@ def main():
         other = "b" if node == "a" else "a"
         local = index + 2
         peer = 3 - index
+        replication = {"listen_address": f"169.254.42.{local}:8443", "peer_address": f"169.254.42.{peer}:8443",
+            "certificate_file": f"/etc/routerd/ha/{node}.crt", "private_key_file": f"/etc/routerd/ha/{node}.key",
+            "peer_certificate_file": f"/etc/routerd/ha/{other}.crt"}
         resources = [
             {"id": "lan", "interface": {"name": "eth1"}},
             {"id": "wan", "interface": {"name": "eth0"}},
             {"id": "sync", "interface": {"name": "eth2"}},
             {"id": "lan-base", "address": {"interface": "eth1", "cidr": f"198.18.0.{local}/24"}},
-            {"id": "wan-base", "address": {"interface": "eth0", "cidr": f"203.0.113.{local}/24"}},
             {"id": "sync-base", "address": {"interface": "eth2", "cidr": f"169.254.42.{local}/16"}},
             {"id": "forward", "forwarding": {"ipv4": True, "ipv4_rp_filter": 0, "conntrack_tcp_liberal": True}},
             {"id": "ha", "service": {"name": "ha", "vrrp": {
@@ -116,9 +124,7 @@ def main():
                 "interface": "lan-ha", "ingress_interface": "eth1", "server_address": "198.18.0.1", "authoritative": True,
                 "primary": {"prefix": "198.18.0.0/24", "start": "198.18.0.100", "end": "198.18.0.110", "lease_seconds": 60,
                             "router": "198.18.0.1", "dns_servers": ["198.18.0.1"]},
-                "ha": {"owner": "ha", "replication": {"listen_address": f"169.254.42.{local}:8443", "peer_address": f"169.254.42.{peer}:8443",
-                    "certificate_file": f"/etc/routerd/ha/{node}.crt", "private_key_file": f"/etc/routerd/ha/{node}.key",
-                    "peer_certificate_file": f"/etc/routerd/ha/{other}.crt"}}
+                "ha": {"owner": "ha", "replication": replication}
             }}},
             {"id": "wan-identity", "when": {"fact": "service.ha.elected"}, "link": {"name": "wan-ha", "kind": "macvlan", "parent": "eth0", "hardware_addr": "02:00:5e:00:01:43", "ipv6_addr_gen_mode": "none"}},
             {"id": "wan-interface", "interface": {"name": "wan-ha"}},
@@ -127,6 +133,56 @@ def main():
             {"id": "nat", "nat": [{"type": "snat", "match": {"family": 4, "source": "198.18.0.0/24", "out_interface": "wan-ha"}, "address": "203.0.113.1"}]},
             {"id": "wan-route", "route": {"destination": "203.0.113.50/32", "interface": "wan-ha"}},
         ]
+        if args.profile == "ipv4":
+            resources.insert(4, {"id": "wan-base", "address": {"interface": "eth0", "cidr": f"203.0.113.{local}/24"}})
+            return {"schema_version": 2, "resources": resources}
+        resources[5]["forwarding"].update(ipv6=True, ipv4_ecmp_hash="source")
+        resources[6]["service"]["vrrp"]["graceful_activation"] = {"ready_when": {"any": [
+            {"all": [{"fact": "service.pd.active"}, {"fact": "service.health-primary.active"}]},
+            {"fact": "service.health-backup.active"},
+        ]}, "timeout": "1s"}
+        pd_replication = dict(replication, listen_address=f"169.254.42.{local}:8444", peer_address=f"169.254.42.{peer}:8444")
+        resources += [
+            {"id": "wan-linklocal", "when": {"fact": "service.ha.elected"}, "address": {"interface": "wan-ha", "cidr": "fe80::1/64"}},
+            {"id": "wan6-route", "when": {"fact": "service.ha.elected"}, "route": {"destination": "2001:db8:ffff::/64", "interface": "wan-ha", "gateway": "fe80::2"}},
+            {"id": "pd", "service": {"name": "pd", "dhcp6": {"interface": "wan-ha", "request_prefix": True, "prefix_length": 60, "client_duid": "0003000102005e000143", "iaid": 7,
+                "ha": {"owner": "ha", "replication": pd_replication}, "delegations": [
+                    {"name": "lan", "interface": "eth1", "subnet_id": 1},
+                    {"name": "b4", "interface": "wan-ha", "subnet_id": 1, "host_id": 33, "prefix_length": 128},
+                ]}}},
+            {"id": "pd-lan-ra", "when": {"fact": "service.ha.active"}, "service": {"name": "pd-lan-ra", "ra": {"interface": "eth1", "other_config": True, "router_lifetime_seconds": 10, "dns_lifetime_seconds": 1800, "min_interval_seconds": 3, "max_interval_seconds": 10, "from": {"service": "pd", "delegation": "lan"}}}},
+            {"id": "lan-info", "when": {"fact": "service.ha.active"}, "service": {"name": "lan-info", "dhcp6_server": {
+                "interface": "eth1", "server_duid": "000400112233445546778899aabbccddeeff", "dns_from": ["pd"], "search_from": ["pd"], "domain_search": ["local.test"], "refresh_seconds": 600
+            }}},
+            {"id": "backup", "interface": {"name": "eth3"}},
+            {"id": "backup-parent-address", "address": {"interface": "eth3", "cidr": f"192.0.2.{local}/24"}},
+            {"id": "backup-identity", "when": {"fact": "service.ha.elected"}, "link": {"name": "backup-ha", "kind": "macvlan", "parent": "eth3", "hardware_addr": "02:00:5e:00:01:44"}},
+            {"id": "backup-interface", "interface": {"name": "backup-ha"}},
+            {"id": "backup-address", "address": {"interface": "backup-ha", "cidr": "192.0.2.1/24"}},
+            {"id": "internet", "when": {"fact": "service.pd.active"}, "ready_when": {"fact": "service.internet.active"}, "service": {"name": "internet", "ds_lite": {
+                "interface": "wan-ha", "tunnel": "dslite0", "source_from": "pd", "source_delegation": "b4", "candidates": ["2001:db8:ffff::20"],
+                "b4_peer": "192.0.0.1/32", "route_gateway": "192.0.0.1", "table": 110, "mtu": 1460}}},
+            {"id": "backup-default", "route": {"destination": "0.0.0.0/0", "gateway": "192.0.2.50", "interface": "backup-ha", "table": 120}},
+            {"id": "probe-primary", "policy_rule": {"family": 4, "priority": 110, "table": 110, "mark": 41}},
+            {"id": "probe-backup", "policy_rule": {"family": 4, "priority": 120, "table": 120, "mark": 42}},
+            {"id": "health-primary", "depends_on": ["internet", "probe-primary"], "when": {"fact": "service.internet.active"}, "service": {"name": "health-primary", "health": {
+                "interface": "dslite0", "source_address": "192.0.0.2", "target": "203.0.113.50", "protocol": "tcp", "port": 18082, "mark": 41,
+                "interval_ms": 200, "timeout_ms": 200, "healthy_threshold": 2, "unhealthy_threshold": 2}}},
+            {"id": "health-backup", "depends_on": ["probe-backup"], "service": {"name": "health-backup", "health": {
+                "interface": "backup-ha", "source_address": "192.0.2.1", "target": "203.0.113.50", "protocol": "tcp", "port": 18082, "mark": 42,
+                "interval_ms": 200, "timeout_ms": 200, "healthy_threshold": 2, "unhealthy_threshold": 2}}},
+            {"id": "egress", "egress_route": {"destination": "0.0.0.0/0", "table": 100, "metric": 100, "candidates": [
+                {"preference": 120, "when": {"fact": "service.health-primary.active"}, "next_hop": {"interface": "dslite0", "gateway": "192.0.0.1", "weight": 1}},
+                {"preference": 60, "when": {"fact": "service.health-backup.active"}, "next_hop": {"interface": "backup-ha", "gateway": "192.0.2.50", "weight": 1}},
+            ]}},
+            {"id": "lan-egress", "policy_rule": {"family": 4, "priority": 1000, "table": 100, "source": "198.18.0.0/24"}},
+        ]
+        next(resource for resource in resources if resource["id"] == "wan-address")["address"]["cidr"] = "203.0.113.1/32"
+        next(resource for resource in resources if resource["id"] == "nat")["nat"] = [
+            {"type": "snat", "match": {"family": 4, "source": "0.0.0.0/0", "out_interface": interface}, "address": address, "connection_mark": mark}
+            for interface, address, mark in (("dslite0", "203.0.113.1", 41), ("backup-ha", "192.0.2.1", 42))
+        ]
+        resources = [resource for resource in resources if resource["id"] != "wan-route"]
         return {"schema_version": 2, "resources": resources}
 
     def write_node(node, index):
@@ -138,7 +194,10 @@ def main():
         shutil.copyfile(stage / (("b" if node == "a" else "a") + ".crt"), root / "etc/routerd/ha" / (("b" if node == "a" else "a") + ".crt"))
         (root / "etc/routerd/ha" / (node + ".key")).chmod(0o600)
         boot = json.loads((Path("images/boot.json")).read_text())
-        boot["workers"] = {name: path for name, path in boot["workers"].items() if name in ("logging", "network", "control", "management", "vrrp", "dhcp_server")}
+        roles = ("logging", "network", "control", "management", "vrrp", "dhcp_server")
+        if args.profile == "egress":
+            roles += ("dhcp6", "dhcp6_server", "ra", "aftr", "health")
+        boot["workers"] = {name: path for name, path in boot["workers"].items() if name in roles}
         boot["engines"] = {name: boot["engines"][name] for name in ("vrrp", "dhcp_server")}
         boot["state_volume"] = {"device": "/dev/vda", "wait_timeout_seconds": 10}
         boot["ssh"]["authorized_keys"] = [(stage / "management.pub").read_text().strip()]
@@ -165,7 +224,7 @@ def main():
         relays[node] = []
         vmid = vmids[0 if node == "a" else 1]
         ssh_control("qm start " + str(vmid), 60)
-        paths = [remote_stage + "/" + node + "-" + network + ".sock" for network in ("wan", "lan", "sync")]
+        paths = [remote_stage + "/" + node + "-" + network + ".sock" for network in networks]
         def sockets_ready():
             result = subprocess.run(
                 ["ssh", "-S", str(master), "-o", "BatchMode=yes", args.pve_host,
@@ -175,7 +234,7 @@ def main():
             )
             return result.returncode == 0
         wait(sockets_ready, 45)
-        for network in ("wan", "lan", "sync"):
+        for network in networks:
             relay = start([sys.executable, "-I", "scripts/qemu-stream-tap.py", "--tap", "tap-" + node + "-" + network,
                            "--socket", str(control_dir / (node + "-" + network + ".sock"))], "relay-" + node + "-" + network)
             relays[node].append(relay)
@@ -204,7 +263,7 @@ def main():
         vmids = []
         forwards = []
         for node in ("a", "b"):
-            for network in ("wan", "lan", "sync"):
+            for network in networks:
                 forwards += ["-L", str(control_dir / (node + "-" + network + ".sock")) + ":" + remote_stage + "/" + node + "-" + network + ".sock"]
         command = ssh[:-1] + ["-M", "-N", "-f", "-S", str(master), "-o", "ExitOnForwardFailure=yes", "-o", "ServerAliveInterval=15", *forwards, args.pve_host]
         subprocess.run(command, check=True, timeout=30)
@@ -218,24 +277,29 @@ def main():
                     subprocess.run(["ssh", "-S", str(master), "-o", "BatchMode=yes", args.pve_host,
                                     "umask 077; cat > " + shlex.quote(remote_stage + "/" + target)], stdin=source, check=True, timeout=180)
             qargs = ["-kernel", remote_stage + "/vmlinuz", "-initrd", remote_stage + "/" + node + ".initrd.gz", "-append", "console=ttyS0,115200 panic=-1", "-serial", "file:" + remote_stage + "/" + node + ".serial.log", "-drive", "file=" + remote_stage + "/" + node + ".state.ext4,if=virtio,format=raw"]
-            for network, mac in (("wan", "52:54:00:42:" + ("01" if node == "a" else "02") + ":01"), ("lan", "52:54:00:42:" + ("01" if node == "a" else "02") + ":02"), ("sync", "52:54:00:42:" + ("01" if node == "a" else "02") + ":03")):
+            for network, suffix in (("wan", "01"), ("lan", "02"), ("sync", "03"), ("backup", "04")):
+                if network not in networks:
+                    continue
+                mac = "52:54:00:42:" + ("01" if node == "a" else "02") + ":" + suffix
                 qargs += ["-netdev", "stream,id=" + network + ",server=on,addr.type=unix,addr.path=" + remote_stage + "/" + node + "-" + network + ".sock", "-device", "virtio-net-pci,netdev=" + network + ",mac=" + mac]
             remote(shlex.join(["qm", "set", str(vmid), "--args", shlex.join(qargs)]), 60)
-        for bridge in ("ha-pve-lan", "ha-pve-wan", "ha-pve-sync"):
+        for bridge in ("ha-pve-" + network for network in networks):
             subprocess.run(["ip", "link", "del", bridge], capture_output=True)
             run(["ip", "link", "add", bridge, "type", "bridge"])
             run(["ip", "link", "set", bridge, "up"])
             bridges.append(bridge)
         for node in ("a", "b"):
-            for network in ("wan", "lan", "sync"):
+            for network in networks:
                 tap = "tap-" + node + "-" + network
                 bridge = "ha-pve-" + network
                 run(["ip", "tuntap", "add", tap, "mode", "tap"])
                 run(["ip", "link", "set", tap, "master", bridge])
                 run(["ip", "link", "set", tap, "up"])
                 taps.append(tap)
-        for namespace, bridge, device in (("ha-pve-client", "ha-pve-lan", "lan0"), ("ha-pve-server", "ha-pve-wan", "wan0")):
-            host = "hp" + ("c" if namespace.endswith("client") else "s") + "0"
+        peers = [("ha-pve-client", "ha-pve-lan", "lan0", "hpc0"), ("ha-pve-server", "ha-pve-wan", "wan0", "hps0")]
+        if args.profile == "egress":
+            peers.append(("ha-pve-backup", "ha-pve-backup", "backup0", "hpb0"))
+        for namespace, bridge, device, host in peers:
             subprocess.run(["ip", "link", "del", host], capture_output=True)
             subprocess.run(["ip", "netns", "del", namespace], capture_output=True)
             run(["ip", "netns", "add", namespace])
@@ -245,11 +309,53 @@ def main():
             run(["ip", "link", "set", host, "master", bridge])
             run(["ip", "link", "set", host, "up"])
             run(["ip", "-n", namespace, "link", "set", device, "up"])
-        run(ns("ha-pve-server", ["ip", "address", "add", "203.0.113.50/24", "dev", "wan0"]))
-        start(["tcpdump", "--immediate-mode", "-Z", "root", "-U", "-C", "64", "-W", "1", "-n", "-i", "tap-a-lan", "-w", str(stage / "lan.pcap")], "capture-lan")
-        start(["tcpdump", "--immediate-mode", "-Z", "root", "-U", "-C", "64", "-W", "1", "-n", "-i", "tap-a-sync", "-w", str(stage / "sync.pcap")], "capture-sync")
-        (stage / "echo.py").write_text('''import socket, threading\ndef stream():\n s=socket.socket(); s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1); s.bind(("203.0.113.50",18080)); s.listen()\n while True:\n  c,_=s.accept()\n  while True:\n   b=c.recv(4096)\n   if not b: break\n   c.sendall(b)\ndef udp():\n s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); s.bind(("203.0.113.50",18081))\n while True:\n  b,a=s.recvfrom(4096); s.sendto(b,a)\nthreading.Thread(target=stream,daemon=True).start(); udp()\n''')
-        start(ns("ha-pve-server", ["python3", "-u", str(stage / "echo.py")]), "peer")
+        if args.profile == "ipv4":
+            run(ns("ha-pve-server", ["ip", "address", "add", "203.0.113.50/24", "dev", "wan0"]))
+        else:
+            run(ns("ha-pve-server", ["ip", "address", "add", "203.0.113.50/32", "dev", "lo"]))
+            run(ns("ha-pve-server", ["ip", "-6", "address", "add", "fe80::2/64", "dev", "wan0"]))
+            run(ns("ha-pve-server", ["ip", "-6", "address", "add", "2001:db8:ffff::20/64", "dev", "wan0"]))
+            run(ns("ha-pve-server", ["ip", "-6", "route", "add", "2001:db8:80::/56", "via", "fe80::1", "dev", "wan0"]))
+            run(ns("ha-pve-backup", ["ip", "address", "add", "192.0.2.50/24", "dev", "backup0"]))
+            run(ns("ha-pve-backup", ["ip", "address", "add", "203.0.113.50/32", "dev", "lo"]))
+        for network in ("lan", "sync") + (("wan", "backup") if args.profile == "egress" else ()):
+            start(["tcpdump", "--immediate-mode", "-Z", "root", "-U", "-C", "64", "-W", "1", "-n", "-i", "tap-a-" + network,
+                   "-w", str(stage / (network + ".pcap"))], "capture-" + network)
+        (stage / "peer.py").write_text('''import socket,sys,threading
+label=sys.argv[1].encode()
+def echo(port, udp=False):
+ s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM if udp else socket.SOCK_STREAM)
+ s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1); s.bind(("203.0.113.50",port))
+ if udp:
+  while True:
+   message,peer=s.recvfrom(4096); s.sendto(message,peer)
+ s.listen()
+ while True:
+  client,_=s.accept()
+  while True:
+   message=client.recv(4096)
+   if not message: break
+   client.sendall(message)
+def marker(port, udp=False):
+ s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM if udp else socket.SOCK_STREAM)
+ s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1); s.bind(("203.0.113.50",port))
+ if udp:
+  while True:
+   _,peer=s.recvfrom(4096); s.sendto(label,peer)
+ s.listen()
+ while True:
+  client,_=s.accept(); client.sendall(label); client.close()
+for function,port,udp in ((echo,18080,False),(echo,18081,True),(marker,18082,False),(marker,18083,True)):
+ threading.Thread(target=function,args=(port,udp),daemon=True).start()
+threading.Event().wait()
+''')
+        start(ns("ha-pve-server", ["python3", "-u", str(stage / "peer.py"), "DSLite"]), "peer-primary")
+        if args.profile == "egress":
+            start(ns("ha-pve-backup", ["python3", "-u", str(stage / "peer.py"), "backup"]), "peer-backup")
+            mac = json.loads(run(ns("ha-pve-server", ["ip", "-j", "link", "show", "dev", "wan0"])))[0]["address"]
+            (stage / "dhcp6.conf").write_text("default-lease-time 60;\npreferred-lifetime 40;\noption dhcp-renewal-time 20;\noption dhcp-rebinding-time 40;\nsubnet6 2001:db8:ffff::/64 { prefix6 2001:db8:80:: 2001:db8:80:f0:: /60; }\nserver-duid LL ethernet " + mac + ";\n")
+            (stage / "dhcp6.leases").touch()
+            start(ns("ha-pve-server", [str(args.dhcp6_server), "-6", "-f", "-d", "-cf", str(stage / "dhcp6.conf"), "-lf", str(stage / "dhcp6.leases"), "-pf", str(stage / "dhcp6.pid"), "wan0"]), "dhcp6")
         start_node("a")
         start_node("b")
         wait(lambda: all("ROUTERD_READY" in (stage / ("serial-" + node + ".log")).read_text(errors="replace") for node in ("a", "b")), 120)
