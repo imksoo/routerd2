@@ -16,6 +16,8 @@ DHCP HA は VRRP が配布役を選び、dnsmasq に VIP と物理 ingress を�
 
 同じcurrent buildでDHCP/DNS実daemon suiteを再実行し、独立BusyBox clientによる`TestDaemonImportedDHCPLeases`、`TestDaemonImportedDHCPStickyHistory`、`TestDaemonDHCPFingerprints`、`TestDaemonMigratedDHCPUnmanagedLAN`、`TestDaemonMigratedDHCPLogs`、`TestDaemonDHCPDNSAndOwnershipExpiry`、`TestDaemonDHCPDNSWithDelayedNetworkObservation`、`TestDaemonDHCPDNSWithDelayedStatePublication`、`TestDaemonMigratedDHCPDNSAndOwnershipExpiry`が通過した。これは独立clientを使う単体router経路のDHCPv4/DNS確認であり、PVE full profile、DHCPv6/SLAAC、DoH、NATまたは実回線の合格ではない。raw log/stageは削除する。
 
+`fff1e29`では`make check-dhcp6`も実行し、独立dnsmasq/radvd/DHCPv6 peerとの`TestDaemonDHCP6RAIndependentPeers`と`TestDaemonDHCP6DuplicateAddressDecline`が通過した。DUID、RA、PDを含むworker交換を確認するが、PVE full profileや実HGW/ONUの受入ではない。raw log/stageは削除する。
+
 - `health-ready-native105`: 独立二 WAN namespace peer、実 supervisor/control/network/Health worker で Health→PBR の障害切替・復旧、worker と supervisor の再起動、古い通知・期限切れの拒否、confirmed rollback、TCP/UDP と packet capture を確認した。
 - `dslite-pmtu-main-1e317d4`: 本番NICから隔離した一台 Linux namespace の独立 PPPoE/DS-Lite 対向で、IPv4 DF の ICMP fragmentation-needed、同一 UDP socket の1454→1400 PMTU学習、NAT後1368-byte payload/replyを終了0で確認した。対象WAN/NICのPMTU・物理負荷受入ではない。
 - `hgw-short-main-20bc21c`: 実HGWへ隔離 macvlan を接続した current main と独立LAN端末二台で、DHCPv4/DHCPv6 information/SLAAC、委譲RDNSS/search domain、IPv4 DS-Lite/IPv6 HTTPS、学習DNS UDP/TCP、条件付きforwarder停止/復帰、WAN blackhole復帰、PD workerのSIGKILL/正常再起動、全daemon再起動後の通信を確認した。続く7,800秒観測は自然PD Renew/Reply 1回、二台の自然DHCP更新、DUID/IAID/prefix保持、zero-lifetime RA withdrawal、726周回のIPv4/IPv6 HTTPSと学習DNS UDP/TCPを終了0で確認した。ONU直結、対象NIC、継続TCP、Tailscale長時間条件、HA、実状態移行は未受入である。
