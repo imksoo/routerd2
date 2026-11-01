@@ -5,6 +5,7 @@ package statefs
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,18 +30,18 @@ func OpenDirectory(path string, create bool) (*os.File, error) {
 			current.Close()
 		}
 	}()
-	check := func(f *os.File) error {
+	check := func(f *os.File, component string) error {
 		var st unix.Stat_t
 		if err := unix.Fstat(int(f.Fd()), &st); err != nil {
 			return err
 		}
 		stickyRoot := st.Uid == 0 && st.Mode&unix.S_ISVTX != 0
 		if st.Mode&unix.S_IFMT != unix.S_IFDIR || st.Uid != 0 && st.Uid != uint32(os.Geteuid()) || st.Mode&0022 != 0 && !stickyRoot {
-			return errors.New("protected state path has an untrusted or writable directory")
+			return fmt.Errorf("protected state directory %q has untrusted component %q uid=%d mode=%#o", path, component, st.Uid, st.Mode)
 		}
 		return nil
 	}
-	if err := check(current); err != nil {
+	if err := check(current, "/"); err != nil {
 		return nil, err
 	}
 	if path != "/" {
@@ -56,7 +57,7 @@ func OpenDirectory(path string, create bool) (*os.File, error) {
 				return nil, err
 			}
 			next := os.NewFile(uintptr(fd), component)
-			if err := check(next); err != nil {
+			if err := check(next, component); err != nil {
 				next.Close()
 				return nil, err
 			}
