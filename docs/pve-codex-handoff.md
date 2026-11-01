@@ -47,6 +47,8 @@ main統合版126のハッシュ一致3実行物でも、通常125の起動イメ
 
 2026-11-01: 現行入力の56 resourceにappliance用の明示管理addressを加えた57 resource候補はcurrent mainで`config validate`を通った。通常APK由来の新規diskを外部へ接続しないQEMU三NIC（`eth0`/`eth1`/`eth2`）で起動し、PID 1、supervisor、network/control/managementと設定workerの起動を確認した。空stateにはHA鍵・独立Tailnet enrollment・独立peerを供給していないため依存workerが停止しreadyに達しなかった。この結果は設定変換後の隔離起動確認に限り、実状態移行・単体router・HA・対象機の受入には数えない。QEMU停止後にhost管理interfaceとIPv4/IPv6経路が同一であることを照合した。disk、image、console、設定コピーを削除した。
 
+同日に、この結果へ圧縮済みの旧full-profile disk/image、設定コピー、raw logを削除し、3.8 GiBを解放した。稼働中のプロセスが参照していないことを確認してから削除しており、実入力・鍵・captureは残していない。
+
 2026-11-01: 初回状態移行の入力、停止境界、既存ディスクを置換しない新規ディスク作成、検査、失敗時の旧サービス復帰を[手順](initial-state-migration.md)として固定した。空の root 専用状態作業ディレクトリを新しい ext4 ディスクへ組み込み、読み取り専用マウントで`lost+found`以外がないこと、同じディスクの隔離 QEMU Linux PID 1起動（37.7秒）を確認した。旧状態本文・鍵・リースは取得していない。実状態移行、Tailscale 識別情報、リース/固定割当履歴の取込、対象機切替は未受入のままである。
 
 2026-11-01: 通常126 APKから起動した隔離PVEの4CPU/4GiB実VMと、同じPVE内の独立LAN/WAN端末を直接接続した。SSHは管理・結果回収だけで、SSH転送に使える二つの別リンクでTCP/5201 packetが0なのをcaptureした。最小の静的IPv4 NAT/IPv6転送構成で15秒単一TCPは、IPv4 NAT受信1.275/1.280Gbps、IPv6受信1.228/1.243Gbpsだった。相手はIPv4でNAT後の`192.168.1.249`、IPv6で元のLAN端末を観測した。このため旧130〜149Mbpsを製品上限とする根拠はなくなった。DS-Lite、DHCP/SLAAC/DNS、HA、対象回線・NICの負荷合格には流用しない。VM、raw disk、capture、パッケージとremote stageは削除済み。
