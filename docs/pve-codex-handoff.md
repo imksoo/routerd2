@@ -10,6 +10,10 @@ DHCP HA は VRRP が配布役を選び、dnsmasq に VIP と物理 ingress を�
 
 ## 実通信で確認した範囲
 
+2026-11-01 current `1a3843b`: `make check`（Race Detector・vet を含む）、静的リンクした3実行物の build を完了した。新規4 CPU/4 GiB PVE VMを既存bridge/NICなしで起動し、現行homert03設定を隔離用に変換した実daemonで、Tailscaleの保護状態初期化まで確認した。最初の拒否は試験overlayが親`/etc`を`0775`で作ったことによるもので、製品imageの`/etc`は`0755`だった。overlayを`0755`/`0700`で作り直した再試行では同じ拒否は起きなかった。VM、設定、鍵、disk、serial logは削除済みである。これはWAN/LAN、DNS、PD、転送またはreadyの合格ではない。
+
+同じ`1a3843b`で`make check-health-pbr`を実行し、独立Linux peerと実supervisor/control/network/Health workerによる二WANの`TestDaemonConnectionMarkedEgressPolicy`、`TestDaemonHealthPBRFailoverAndRecovery`、`TestDaemonEgressRouteHealthyMultipath`が通過した。各試験はTCP/UDP、packet capture、Health worker復旧、失効とconfirmed rollbackを対象にする。PVEのfull homert03通信受入や実ONUの資格には流用しない。raw log/capture/stageは保持しない。
+
 - `health-ready-native105`: 独立二 WAN namespace peer、実 supervisor/control/network/Health worker で Health→PBR の障害切替・復旧、worker と supervisor の再起動、古い通知・期限切れの拒否、confirmed rollback、TCP/UDP と packet capture を確認した。
 - `dslite-pmtu-main-1e317d4`: 本番NICから隔離した一台 Linux namespace の独立 PPPoE/DS-Lite 対向で、IPv4 DF の ICMP fragmentation-needed、同一 UDP socket の1454→1400 PMTU学習、NAT後1368-byte payload/replyを終了0で確認した。対象WAN/NICのPMTU・物理負荷受入ではない。
 - `hgw-short-main-20bc21c`: 実HGWへ隔離 macvlan を接続した current main と独立LAN端末二台で、DHCPv4/DHCPv6 information/SLAAC、委譲RDNSS/search domain、IPv4 DS-Lite/IPv6 HTTPS、学習DNS UDP/TCP、条件付きforwarder停止/復帰、WAN blackhole復帰、PD workerのSIGKILL/正常再起動、全daemon再起動後の通信を確認した。続く7,800秒観測は自然PD Renew/Reply 1回、二台の自然DHCP更新、DUID/IAID/prefix保持、zero-lifetime RA withdrawal、726周回のIPv4/IPv6 HTTPSと学習DNS UDP/TCPを終了0で確認した。ONU直結、対象NIC、継続TCP、Tailscale長時間条件、HA、実状態移行は未受入である。
