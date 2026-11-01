@@ -56,15 +56,19 @@ func (r *Runtime) restart(ctx context.Context, name string) error {
 	delete(ceiling, name)
 	r.drainDependenciesLocked(ceiling)
 	r.mu.Unlock()
-	if err := r.wait(ctx, ceiling); err != nil {
+	modules := make([]supervisor.DynamicModule, 0, len(ceiling))
+	for _, module := range ceiling {
+		modules = append(modules, module)
+	}
+	if err := r.manager.Reconcile(ctx, modules); err != nil {
 		return r.failure(err)
 	}
-	// Re-request the configured workers. Protocol acquisition and readiness
-	// continue under the coordinator; this response acknowledges the request.
-	if _, err := r.reconcileStep(ctx, nil); err != nil {
-		return r.failure(err)
-	}
-	r.reportReadiness(ctx)
+	// This endpoint accepts a restart request. Waiting for the retired
+	// producer's withdrawal here can deadlock its effect callback behind this
+	// request, so the existing coordinator owns the subsequent reapply.
+	r.mu.Lock()
+	r.wakeCoordinatorLocked()
+	r.mu.Unlock()
 	return nil
 }
 
