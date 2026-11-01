@@ -11418,6 +11418,11 @@
         "result": "Read-only current homert02/03 router YAML inputs, after the explicit isolated-VM NIC substitution, each migrated and validated as56-resource native configurations with current main.",
         "limit": "This checks current operator intent against the converter only. It neither starts a target configuration nor migrates Tailscale state, leases or WAN state. The temporary raw inputs and outputs are removed after recording this result."
       },
+      "initial_state_disk": {
+        "procedure": "docs/initial-state-migration.md fixes selected inputs, the old-owner stop boundary, new-disk-only publication, pre-start checks and restoration. It never copies an old state directory wholesale or records opaque state contents and digests.",
+        "empty_disk_result": "Current main 3e2a73a built a fresh root-only ext4 /dev/vda2 state volume from an empty0700 stage. Read-only inspection found only lost+found; the same disk reached ROUTERD_READY as Linux PID1 in an isolated QEMU in37.7 seconds.",
+        "limit": "No legacy state body, key, lease or sticky DB was acquired. This does not accept target Tailscale identity, DHCP import, real target boot or cutover."
+      },
       "load_transport_control": {
         "product_used": false,
         "vm_used": false,

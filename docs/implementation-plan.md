@@ -12,6 +12,8 @@
 
 2026-11-01: 現main `20bc21c` を、実HGWに接続した専用 macvlan と独立LAN端末二台で90秒実行した。端末は手動設定なしに DHCPv4、DHCPv6 information、SLAAC、委譲prefixのRDNSS/search domainを取得した。IPv4 DS-Lite・IPv6 HTTPS、学習DNSのUDP/TCP、条件付きforwarderの停止/復帰、WAN blackholeからの両family復帰、PD workerのSIGKILL/正常再起動、全daemon再起動後の端末通信が終了0だった。PDの次回自然Renewは開始時点で約7,177秒先であり、今回の90秒実行は自然PD更新、ONU直結、対象NIC、長時間負荷の受入ではない。専用namespaceと一時stageは終了時に撤去した。
 
+2026-11-01: 初回状態移行は、旧 state directory をコピーせず、停止済み旧 owner から選択済みのopaque identityとDHCP入力だけを新しいdiskへ渡す手順に固定した。[空 state disk の実起動](initial-state-migration.md)は終了したが、対象homertのstate本文、lease/sticky、実機切替は未実施である。
+
 ユーザー指定の完了期限: **2026-10-29 16:56:38 UTC**（2026-10-28 16:56:38 UTCから24時間）。
 全34項目と実環境での利用可能性が完了条件。部分成功へ縮小せず、期限時点でも未成立は未成立と報告する。
 旧routerdの実装を取り込み、独自のLAN配布エンジンを置換する。動く単体構成、二台運用、残る製品機能と
