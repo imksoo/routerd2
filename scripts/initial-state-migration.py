@@ -53,12 +53,15 @@ def call(argv, timeout=30, input=None):
 
 def pve_prepare(stage, target, jump, identity):
     owner = os.environ.get("SUDO_USER") or pwd.getpwuid(os.getuid()).pw_name
-    known_hosts = Path(pwd.getpwnam(owner).pw_dir) / ".ssh" / "known_hosts"
-    ssh = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=yes", "-o", "UserKnownHostsFile=" + str(known_hosts), "-o", "GlobalKnownHostsFile=/dev/null"]
+    ssh_dir = Path(pwd.getpwnam(owner).pw_dir) / ".ssh"
+    known_hosts = ssh_dir / "known_hosts"
+    key = identity or ssh_dir / "id_ed25519"
+    ssh = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=yes", "-o", "UserKnownHostsFile=" + str(known_hosts), "-o", "GlobalKnownHostsFile=/dev/null", "-o", "IdentitiesOnly=yes", "-i", str(key)]
     if jump:
-        ssh += ["-J", jump]
-    if identity:
-        ssh += ["-o", "IdentitiesOnly=yes", "-i", str(identity)]
+        if "@" not in jump:
+            jump = owner + "@" + jump
+        proxy = "ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=" + shlex.quote(str(known_hosts)) + " -o GlobalKnownHostsFile=/dev/null -o IdentitiesOnly=yes -i " + shlex.quote(str(key)) + " -W %h:%p " + shlex.quote(jump)
+        ssh += ["-o", "ProxyCommand=" + proxy]
     ssh += [target]
     remote = call(ssh + ["mktemp -d /tmp/routerd2-migration.XXXXXX"]).strip()
     vmid = int(json.loads(call(ssh + ["pvesh get /cluster/nextid --output-format json"])))
