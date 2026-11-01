@@ -80,3 +80,5 @@ DHCPv6 PD の再起動後 Rebind と、不良 candidate から known-good runtim
 2026-11-01 の読取専用監査時点で、homert02/03 の置換は**不可**である。現行設定の変換と隔離ディスクの空状態起動、実HGWでの単体PD自然更新は確認済みだが、対象状態・lease/sticky の実移行、対象WAN/LAN、二台HA、既存接続、対象NIC/ONUの受入が未完了である。稼働中の旧サービスを停止せず、本番切替・本番配備を行わない。
 
 稼働中の試験資源だけを操作対象から外す。終了済み stage、生 capture、重複 image、詳細 log は結果と再現手順を短く記録後に削除する。秘密を含む実入力・鍵・identity・pcap・インフラ詳細は公開しない。
+
+2026-11-01: current main `4e70be1` で、homert03の現行設定を読取専用で取得し、現行migration policyと新規管理DHCP Option 61、隔離用HA証明書、独立Headscale enrollmentへ差し替えた。109入力resourceから57 native resourceを生成し、`routerd config validate`を通した。通常APKから作った新規BIOS diskを、PVEの新規4CPU/4GiB VM（ID 182、bridge/NICなし）で起動した。PID 1、supervisor、network/control/managementとworker起動までは実行したが、PVE UNIX socketとhost TAPを結ぶ既存QEMU `hubport`中継がEthernet frameを転送しておらず、管理DHCP、RA/DHCPv6-PD、Headscaleへpacketが到達しなかった。従ってready、LAN/DNS/forwarding、HA、Tailscaleの受入には数えない。VM、PVE remote stage、disk、鍵、capture/log、namespace、TAPを同じ作業で削除した。本番VM/NIC/WAN/Tailnet状態には変更していない。次はこの中継を実フレーム転送できる隔離L2へ置換してから、同じ57-resource current imageで再実行する。
