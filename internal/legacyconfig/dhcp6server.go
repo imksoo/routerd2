@@ -24,17 +24,24 @@ func (c *compiler) dhcp6Servers(vrrpNames map[string]string) map[string]*resourc
 		if s.Server != "" && s.Server != "dnsmasq" || s.Role != "" && s.Role != "server" || s.Mode != "" && s.Mode != "stateless" {
 			c.reject(r, "", "unsupported_semantics", "only the local stateless dnsmasq serving path is implemented; stateful, both and transit behavior cannot be dropped")
 		}
+		ifname := c.interfaceName(r, "interface", s.Interface, false)
+		c.ensureInterface(ifname)
 		policy, ok := c.options.DHCP6Servers[r.Kind+"/"+r.Metadata.Name]
-		if !ok {
-			c.reject(r, "", "explicit_policy_required", "dhcp6_servers policy must select a delegated_address and router_lifetime_seconds to replace implicit dnsmasq RA and retained option state")
+		if policy.DelegatedAddress == "" && (s.Mode == "" || s.Mode == "stateless") {
+			if delegated := c.delegatedAddressFromRA(ifname); delegated != nil {
+				policy.DelegatedAddress = delegated.ID()
+			}
+		}
+		if policy.DelegatedAddress == "" {
+			c.reject(r, "", "explicit_policy_required", "select a delegated_address when no same-interface IPv6RouterAdvertisement identifies the LAN prefix")
 			continue
 		}
-		c.usePolicy(r, "dhcp6_servers")
+		if ok {
+			c.usePolicy(r, "dhcp6_servers")
+		}
 		if policy.RouterLifetimeSeconds != nil && (*policy.RouterLifetimeSeconds < 0 || *policy.RouterLifetimeSeconds > 9000 || *policy.RouterLifetimeSeconds > 0 && *policy.RouterLifetimeSeconds < 10) {
 			c.policyIssue(r, "dhcp6_servers", "router_lifetime_seconds", "policy_required", "choose zero or a router lifetime of 10..9000 seconds; native PIO lifetimes retain the original PD budgets")
 		}
-		ifname := c.interfaceName(r, "interface", s.Interface, false)
-		c.ensureInterface(ifname)
 		for i, ref := range s.ListenInterfaces {
 			if c.interfaceName(r, "listenInterfaces["+strconv.Itoa(i)+"]", ref, false) != ifname {
 				c.reject(r, "listenInterfaces", "unsupported_semantics", "additional listening interfaces need independent serving intent")
@@ -164,9 +171,28 @@ func (c *compiler) dhcp6Servers(vrrpNames map[string]string) map[string]*resourc
 			when = c.appliedDelegationCondition(r, *delegated, s.DependsOn, when)
 		}
 		conditions["service/"+name] = when
-		c.note(r, "Explicit replacement: the selected PD allocation owns LAN RA with O set and configured router lifetime, retaining original PD PIO budgets. Stateless DHCPv6 allocates no address leases. leaseTime retains dnsmasq's Information Refresh Time with its 600-second minimum; stickyHoldDays does not create an IA_NA allocator. The explicit RA service owns its own conditions and packet template. RA RDNSS/DNSSL retain independently selected static/DHCPv6 options and original information deadlines. Static and learned DHCPv6 options are independent; missing/expired information removes only that source's values instead of stopping all serving. No interface-prefix scan, status snapshot or dnsmasq lease file is imported. The policy's explicit server_duid selects the serving identity; when omitted, a persistent native server DUID is created before serving.")
+		c.note(r, "Stateless DHCPv6 allocates no address leases. leaseTime retains dnsmasq's Information Refresh Time with its 600-second minimum; stickyHoldDays does not create an IA_NA allocator. An explicit RA service owns its own conditions and packet template; when present, its declared delegated prefix also selects the information server's LAN. RA RDNSS/DNSSL retain independently selected static/DHCPv6 options and original information deadlines. Static and learned DHCPv6 options are independent; missing/expired information removes only that source's values instead of stopping all serving. No interface-prefix scan, status snapshot or dnsmasq lease file is imported. An explicit server_duid selects the serving identity; when omitted, a persistent native server DUID is created before serving.")
 	}
 	return conditions
+}
+
+func (c *compiler) delegatedAddressFromRA(ifname string) *resource {
+	var selected *resource
+	for _, r := range c.resourcesOfKind("IPv6RouterAdvertisement") {
+		s := r.Spec.(api.IPv6RouterAdvertisementSpec)
+		if c.interfaceName(r, "interface", s.Interface, false) != ifname {
+			continue
+		}
+		delegated := c.getRef(r, "prefixFrom.resource", s.PrefixFrom.Resource, "IPv6DelegatedAddress")
+		if delegated == nil {
+			continue
+		}
+		if selected != nil && selected.ID() != delegated.ID() {
+			return nil
+		}
+		selected = delegated
+	}
+	return selected
 }
 
 func (c *compiler) dhcp6ServerAddresses(r resource, field string, values []string) []netip.Addr {

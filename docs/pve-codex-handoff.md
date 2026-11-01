@@ -57,6 +57,8 @@ main統合版126のハッシュ一致3実行物でも、通常125の起動イメ
 
 2026-11-01: homert02/03 の現行 router YAML を読取専用で取得し、隔離VMの明示NIC名へ置換して current main の migration/validation に通した。両方とも56 resource のnative設定になった。これは現行入力と変換器の組合せ確認であり、Tailscale保存状態、旧lease、実WAN、実VM起動の移行受入ではない。入力と変換出力は確認後に削除する。
 
+2026-11-02: 既存の読取専用PVE guest-agent経路で、稼働中homert03（VM 158）の最新router設定を再取得した。設定は109 resourceで、current mainのmigrationは全体39 issueで拒否された。同一interfaceの明示RAが選ぶ`prefixFrom`委譲prefixをstateless DHCPv6 information serverのLAN選択にも使う変更後、当該DHCPv6 serverの別途policy必須issueは消えた。全体変換・実機通信の合格ではなく、稼働VMやworkerは変更していない。homert02と対象ONU/NICの受入は未確認。
+
 2026-11-01: 実HGW用macvlan fixtureはDS-Lite復路をcaptureするが、任意のIPv4 ICMP fragmentation-needed、IPv6 Packet Too Big、断片化を発生させる制御可能な実経路を持たない。そのため自然PD観測や隔離DS-Lite PMTU試験を再実行して物理PMTU受入と取り違えなかった。物理受入には、host管理経路から分離したL2、MTUを下げて両ICMPを返せる実対向、router/対向のcapture、試験前後の管理interfaceとhost経路の一致が必要である。
 
 2026-11-01: 現行入力の56 resourceにappliance用の明示管理addressを加えた57 resource候補はcurrent mainで`config validate`を通った。通常APK由来の新規diskを外部へ接続しないQEMU三NIC（`eth0`/`eth1`/`eth2`）で起動し、PID 1、supervisor、network/control/managementと設定workerの起動を確認した。空stateにはHA鍵・独立Tailnet enrollment・独立peerを供給していないため依存workerが停止しreadyに達しなかった。この結果は設定変換後の隔離起動確認に限り、実状態移行・単体router・HA・対象機の受入には数えない。QEMU停止後にhost管理interfaceとIPv4/IPv6経路が同一であることを照合した。disk、image、console、設定コピーを削除した。

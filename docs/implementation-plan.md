@@ -1136,6 +1136,12 @@ MTU 600のLANでは大きいunicast/broadcast DHCPINFORM応答をIPv4分割し�
 `make check-dhcp-relay`で再実行できる。HA・動的なVRF/interface変更の受入と、
 DHCPv6 server・残るresource契約は未完了であり、NET-06全体の完了とはしない。
 
+2026-11-02: 既存のPVE guest-agent読取経路で、稼働中homert03（VM 158）の現行router設定を読み取った。
+109 resourceの設定をcurrent mainのmigrationへ渡すと全体は39 issueで拒否されたが、同一interfaceの明示RAが
+`prefixFrom`で選ぶ委譲prefixをstateless DHCPv6 information serverのLAN選択にも使う修正後は、
+DHCPv6 server自身の別途policy必須issueは出なくなった。変換全体の成功や実機通信の合格ではない。
+稼働VM/workerは変更していない。homert02・対象ONU/NIC・全resource契約は未確認。
+
 **受入条件**
 
 - 独立client/relayでDORA/renew、v6、decline/release、renumbering、restart/INIT-REBOOTを確認する。
@@ -2006,7 +2012,7 @@ source fixture、isolated lab、engine PoC、provider simulator の実装は現�
 
 | 使用する段階 | 必要な入力 |
 | --- | --- |
-| CORE-01 / QUAL-01 | サニタイズしたhomert02/03の最新設定、使用中の外部engine版、期待するWAN/PBR/HA動作。2026-11-01、nwadmin03からhomert02/03への名前解決は失敗。VM 158の読取専用guest-agent経路は過去の利用記録があるが、今回の実行環境にはPVE管理CLI/API接続がなく、現存確認・設定読取はできなかった。次の必要条件は既存の読取専用経路をこの実行環境へ戻すか、最新のサニタイズ済み設定を渡すこと。設定差分を根拠とする実装はこの入力待ちとし、推測で補わない。 |
+| CORE-01 / QUAL-01 | 2026-11-02、既存の読取専用PVE guest-agent経路から稼働中homert03（VM 158）の現行設定を取得した。109 resourceの設定全体はcurrent mainのmigrationで39 issueとなり未受入。homert02の現行設定、対象機の利用中engine版、期待するWAN/PBR/HA動作は引き続き確認対象。設定と稼働サービスは変更していない。 |
 | CORE-06 | 各engineの正確な版・plugin・配布条件。用途に必要な機能集合をPoCの合否にする。 |
 | HA-02 / HA-03 | 新旧node混在を必要とするか、maintenance切替を許すか。選んだ方式のfixtureと戻し手順を用意する。 |
 | CLOUD-01 / DIST-03 | 使い捨てcloud環境、許可範囲、費用/cleanup条件。実credentialをrepositoryやimageへ保存しない。 |
