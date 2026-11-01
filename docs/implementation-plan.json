@@ -11419,9 +11419,9 @@
         "limit": "This checks current operator intent against the converter only. It neither starts a target configuration nor migrates Tailscale state, leases or WAN state. The temporary raw inputs and outputs are removed after recording this result."
       },
       "initial_state_disk": {
-        "procedure": "docs/initial-state-migration.md fixes selected inputs, the old-owner stop boundary, new-disk-only publication, pre-start checks and restoration. It never copies an old state directory wholesale or records opaque state contents and digests.",
-        "empty_disk_result": "Current main 3e2a73a built a fresh root-only ext4 /dev/vda2 state volume from an empty0700 stage. Read-only inspection found only lost+found; the same disk reached ROUTERD_READY as Linux PID1 in an isolated QEMU in37.7 seconds.",
-        "limit": "No legacy state body, key, lease or sticky DB was acquired. This does not accept target Tailscale identity, DHCP import, real target boot or cutover."
+        "procedure": "docs/initial-state-migration.md は選択済み入力、旧所有者を停止する境界、新規ディスクだけへの公開、起動前検査、復旧を定める。旧状態ディレクトリ全体のコピー、内容を解釈しない状態本文や digest の記録は行わない。",
+        "empty_disk_result": "`main` の3e2a73aで、空の0700作業ディレクトリから root 専用の新規 ext4 `/dev/vda2` 状態ボリュームを作成した。読み取り専用検査は `lost+found` だけであり、同じディスクは隔離 QEMU の Linux PID 1 で37.7秒後に ROUTERD_READY へ到達した。",
+        "limit": "旧状態本文、鍵、リース、固定割当履歴 DB は取得していない。対象 Tailscale 識別情報、DHCP取込、対象機の起動・切替を合格とはしていない。"
       },
       "load_transport_control": {
         "product_used": false,
