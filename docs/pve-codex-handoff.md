@@ -11,6 +11,7 @@ DHCP HA は VRRP が配布役を選び、dnsmasq に VIP と物理 ingress を�
 ## 実通信で確認した範囲
 
 - `health-ready-native105`: 独立二 WAN namespace peer、実 supervisor/control/network/Health worker で Health→PBR の障害切替・復旧、worker と supervisor の再起動、古い通知・期限切れの拒否、confirmed rollback、TCP/UDP と packet capture を確認した。
+- `dslite-pmtu-main-1e317d4`: 本番NICから隔離した一台 Linux namespace の独立 PPPoE/DS-Lite 対向で、IPv4 DF の ICMP fragmentation-needed、同一 UDP socket の1454→1400 PMTU学習、NAT後1368-byte payload/replyを終了0で確認した。対象WAN/NICのPMTU・物理負荷受入ではない。
 - `hgw-short-main-20bc21c`: 実HGWへ隔離 macvlan を接続した current main と独立LAN端末二台で、DHCPv4/DHCPv6 information/SLAAC、委譲RDNSS/search domain、IPv4 DS-Lite/IPv6 HTTPS、学習DNS UDP/TCP、条件付きforwarder停止/復帰、WAN blackhole復帰、PD workerのSIGKILL/正常再起動、全daemon再起動後の通信を確認した。続く7,800秒観測は自然PD Renew/Reply 1回、二台の自然DHCP更新、DUID/IAID/prefix保持、zero-lifetime RA withdrawal、726周回のIPv4/IPv6 HTTPSと学習DNS UDP/TCPを終了0で確認した。ONU直結、対象NIC、継続TCP、Tailscale長時間条件、HA、実状態移行は未受入である。
 - `dhcp-ingress-native105`: 隔離 PVE の appliance で、通常・特殊 DHCPv4 client が 120 秒 lease の自然 T1 に VIP `172.18.0.1:67` 宛て unicast REQUEST を送り、同じ XID の ACK と option 54 を受信した。cold boot/reboot 後の DNS UDP/TCP（IPv4/IPv6）、TCP/UDP、BGP、NTP、Tailscale も通過した。
 - `pd-rebind-pve`: 隔離 PVE（4 CPU/4 GiB）の update/reboot で ISC DHCPv6 を appliance reboot 前に停止し、新しい PPP を観測後に再起動した。WAN capture の最初の復帰 PD 交換は Rebind で Solicit なし、初回観測の DUID/IAID/prefix と一致した。RA withdrawal/PADT、署名更新、明示 rollback、Health 障害による候補自動 rollback、復帰後の LAN DNS と IPv4/IPv6 TCP/UDP まで終了0で確認した。
