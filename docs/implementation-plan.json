@@ -11423,6 +11423,11 @@
         "empty_disk_result": "`main` の3e2a73aで、空の0700作業ディレクトリから root 専用の新規 ext4 `/dev/vda2` 状態ボリュームを作成した。読み取り専用検査は `lost+found` だけであり、同じディスクは隔離 QEMU の Linux PID 1 で37.7秒後に ROUTERD_READY へ到達した。",
         "limit": "旧状態本文、鍵、リース、固定割当履歴 DB は取得していない。対象 Tailscale 識別情報、DHCP取込、対象機の起動・切替を合格とはしていない。"
       },
+      "target_replacement_decision": {
+        "decision": "not accepted",
+        "basis": "Read-only audit confirms current-config conversion, empty state-disk boot and isolated real-HGW natural PD renewal only. Target state/lease/sticky migration, target WAN/LAN, HA, existing-flow, NIC and ONU acceptance remain open.",
+        "scope": "No legacy service stop, production cutover or production deployment was performed."
+      },
       "load_transport_control": {
         "product_used": false,
         "vm_used": false,

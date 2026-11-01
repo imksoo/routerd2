@@ -70,4 +70,6 @@ DHCPv6 PD の再起動後 Rebind と、不良 candidate から known-good runtim
 4. RR/leaf の実 WG/BGP、/32所有、NAT なし端末通信、移動・drain・revoke・capture を確認すること。
 5. 更新・復旧、対象 appliance/NIC/ONU、ARM、PVE/Kubernetes/Cloud の各環境をそれぞれ受け入れること。
 
+2026-11-01 の読取専用監査時点で、homert02/03 の置換は**不可**である。現行設定の変換と隔離ディスクの空状態起動、実HGWでの単体PD自然更新は確認済みだが、対象状態・lease/sticky の実移行、対象WAN/LAN、二台HA、既存接続、対象NIC/ONUの受入が未完了である。稼働中の旧サービスを停止せず、本番切替・本番配備を行わない。
+
 稼働中の試験資源だけを操作対象から外す。終了済み stage、生 capture、重複 image、詳細 log は結果と再現手順を短く記録後に削除する。秘密を含む実入力・鍵・identity・pcap・インフラ詳細は公開しない。
