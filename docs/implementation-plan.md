@@ -827,8 +827,9 @@ Release/Replyが成功した。Replyは送信元49153。管理address/MAC/defaul
 変更前`ha-pd-admission`の7800秒試験は自然更新前のDNS応答判定で失敗し、
 応答本文を採取する差分を加えた。ee50461再試行では約42分の実通信と途中のPD worker SIGKILL・
 同じDUID/PDでのRebind/49153 Reply・LAN通信復旧を確認し、自然更新前に意図して中断した。
-Rebindによる新しい期限を自然Renewと誤表示するfixtureを修正し、現在は3affd07/`health-import`で
-7800秒を再実行中。最後にworkerを交換し、その前の自然Renew/対応Replyをcaptureで判定する。
+Rebindによる新しい期限を自然Renewと誤表示するfixtureを修正し、当時は3affd07/`health-import`で
+7800秒を再実行した。後続のcurrent main独立basic-router実HGW観測は自然Renew/Replyをcaptureして終了0であり、
+ここで記録した当時のfixture実行と区別する。最後にworkerを交換し、その前の自然Renew/対応Replyをcaptureで判定する。
 30秒の自動試験はworker交換・DUID/IAID保持・Rebind/Replyと全通信・終了処理まで成功した。
 自然更新成功とはまだ扱わない。独立端末のpublic DNSへの
 IPv4 UDP/TCPも応答し、AFTR内の実packetを確認した。DHCPv4貸出の隔離WANへの適用も確認したが、

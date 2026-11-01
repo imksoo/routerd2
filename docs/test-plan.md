@@ -117,7 +117,7 @@
   ISC/Keepalived/dhcpcdの条件付きLAN、実VIPをgatewayに使う独立5 WAN、署名PID 1二台の双方向PD/DHCPと
   同じTCP/UDPの引継ぎ・元期限・自然失効・保持・障害復旧が終了0。自己DNS失効時は空Replyを要求せず、
   実BusyBoxの取得timeoutと旧DNS停止・別prefixでの復帰を確認した。全homert取込は119 issueで拒否される。
-  同じ最終版の実HGW+準備条件/VIPは90秒/9巡とPD交換・全体再起動後の両端末通信も終了0。単一出口の確認で、全34項目・全設定・対象実機・最新版の自然PD更新は未受入。
+  同じ最終版の実HGW+準備条件/VIPは90秒/9巡とPD交換・全体再起動後の両端末通信も終了0。当時の候補では単一出口の確認に留まり、全34項目・全設定・対象実機・自然PD更新は未受入だった。後続のcurrent main独立basic-router 7,800秒観測の自然PD更新完走とは別記録である。
 - `bgp-frr-e2364af` は隔離Linux上の独立FRRと、homertのLANプレフィックス広告に相当するIPv4 BGP交換を実施した。
   FRRの経路をLinux FIBに反映し、LAN端末のTCP/UDP転送、daemon停止時の広告撤回、再起動後の広告と通信復旧を
   確認し、BGP・端末通信のpacketを採取した。FRR側はzebraを使わず、端末への戻り経路を試験用に静的設定した。
