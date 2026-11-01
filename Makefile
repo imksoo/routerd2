@@ -356,13 +356,14 @@ QEMU_PROFILE ?=
 QEMU_PVE_HOST ?=
 QEMU_PVE_JUMP ?=
 QEMU_PVE_IDENTITY ?=
+QEMU_HA_STABILITY_SECONDS ?= 0
 QEMU_OUTPUT ?= dist/pppoe-appliance$(if $(QEMU_PROFILE),-$(QEMU_PROFILE))
 qemu-pppoe:
 	$(PYTHON) scripts/qemu-pppoe-peer.py --image-dir $(IMAGE_DIR) --dhcp6-server '$(DHCP6_SERVER)' --power-action $(QEMU_POWER_ACTION) --output '$(QEMU_OUTPUT)' $(if $(QEMU_UPDATE_BINARIES),--update-binaries '$(QEMU_UPDATE_BINARIES)') $(if $(QEMU_PROFILE),--profile '$(QEMU_PROFILE)') $(if $(QEMU_PVE_HOST),--pve-host '$(QEMU_PVE_HOST)') $(if $(QEMU_PVE_JUMP),--pve-jump '$(QEMU_PVE_JUMP)') $(if $(QEMU_PVE_IDENTITY),--pve-identity '$(QEMU_PVE_IDENTITY)')
 
 qemu-ha-pve: image
 	@test -n '$(QEMU_PVE_HOST)' || (echo 'QEMU_PVE_HOST is required' >&2; exit 2)
-	$(PYTHON) scripts/qemu-ha-pve.py --image-dir $(IMAGE_DIR) --pve-host '$(QEMU_PVE_HOST)' $(if $(QEMU_PVE_JUMP),--pve-jump '$(QEMU_PVE_JUMP)') $(if $(QEMU_PVE_IDENTITY),--pve-identity '$(QEMU_PVE_IDENTITY)')
+	$(PYTHON) scripts/qemu-ha-pve.py --image-dir $(IMAGE_DIR) --pve-host '$(QEMU_PVE_HOST)' --stability-seconds '$(QEMU_HA_STABILITY_SECONDS)' $(if $(QEMU_PVE_JUMP),--pve-jump '$(QEMU_PVE_JUMP)') $(if $(QEMU_PVE_IDENTITY),--pve-identity '$(QEMU_PVE_IDENTITY)')
 
 qemu-network:
 	$(PYTHON) scripts/qemu-network.py --go '$(GO)' --image-dir $(IMAGE_DIR) --timeout $(QEMU_TIMEOUT)

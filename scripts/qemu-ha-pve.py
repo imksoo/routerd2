@@ -33,7 +33,11 @@ def main():
     parser.add_argument("--pve-jump")
     parser.add_argument("--pve-identity", type=Path)
     parser.add_argument("--image-dir", type=Path, default=Path("dist/image"))
+    parser.add_argument("--stability-seconds", type=int, default=0,
+                        help="keep both recovered appliances under independent traffic for this duration")
     args = parser.parse_args()
+    if args.stability_seconds < 0:
+        parser.error("--stability-seconds must be non-negative")
     if os.geteuid() != 0:
         raise SystemExit("run through sudo so the fixture can create its private network")
     image = args.image_dir.resolve()
@@ -242,8 +246,8 @@ def main():
             run(["ip", "link", "set", host, "up"])
             run(["ip", "-n", namespace, "link", "set", device, "up"])
         run(ns("ha-pve-server", ["ip", "address", "add", "203.0.113.50/24", "dev", "wan0"]))
-        start(["tcpdump", "--immediate-mode", "-Z", "root", "-U", "-n", "-i", "tap-a-lan", "-w", str(stage / "lan.pcap")], "capture-lan")
-        start(["tcpdump", "--immediate-mode", "-Z", "root", "-U", "-n", "-i", "tap-a-sync", "-w", str(stage / "sync.pcap")], "capture-sync")
+        start(["tcpdump", "--immediate-mode", "-Z", "root", "-U", "-C", "64", "-W", "1", "-n", "-i", "tap-a-lan", "-w", str(stage / "lan.pcap")], "capture-lan")
+        start(["tcpdump", "--immediate-mode", "-Z", "root", "-U", "-C", "64", "-W", "1", "-n", "-i", "tap-a-sync", "-w", str(stage / "sync.pcap")], "capture-sync")
         (stage / "echo.py").write_text('''import socket, threading\ndef stream():\n s=socket.socket(); s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1); s.bind(("203.0.113.50",18080)); s.listen()\n while True:\n  c,_=s.accept()\n  while True:\n   b=c.recv(4096)\n   if not b: break\n   c.sendall(b)\ndef udp():\n s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); s.bind(("203.0.113.50",18081))\n while True:\n  b,a=s.recvfrom(4096); s.sendto(b,a)\nthreading.Thread(target=stream,daemon=True).start(); udp()\n''')
         start(ns("ha-pve-server", ["python3", "-u", str(stage / "echo.py")]), "peer")
         start_node("a")
@@ -261,7 +265,7 @@ def main():
             address = "198.18.0." + ("2" if node == "a" else "3")
             return json.loads(run(ns("ha-pve-client", ["ssh", "-F", "/dev/null", "-i", str(stage / "management"), "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-o", "StrictHostKeyChecking=accept-new", "-o", "UserKnownHostsFile=" + str(stage / "known-hosts"), "-o", "ConnectTimeout=3", "admin@" + address, command]), 10))
         wait(lambda: appliance("a", "show status")["ready"] and appliance("b", "show status")["ready"], 45)
-        (stage / "continuous.py").write_text('''import socket,time,sys\ns=socket.create_connection(("203.0.113.50",18080),4)\nu=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); u.settimeout(1); u.connect(("203.0.113.50",18081))\nwhile True:\n m=("p%f"%time.monotonic()).encode(); s.sendall(m); assert s.recv(len(m))==m; u.send(m)\n try: assert u.recv(100)==m\n except TimeoutError: pass\n print(time.monotonic(),flush=True); time.sleep(.2)\n''')
+        (stage / "continuous.py").write_text('''import socket,time,sys\ns=socket.create_connection(("203.0.113.50",18080),4); s.settimeout(15)\nu=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); u.settimeout(1); u.connect(("203.0.113.50",18081))\nwhile True:\n m=("p%f"%time.monotonic()).encode(); s.sendall(m); assert s.recv(len(m))==m; u.send(m)\n try: assert u.recv(100)==m\n except TimeoutError: pass\n print(time.monotonic(),flush=True); time.sleep(.2)\n''')
         flow = start(ns("ha-pve-client", ["python3", "-u", str(stage / "continuous.py")]), "continuous")
         def flow_lines():
             if not (stage / "continuous.log").exists():
@@ -290,6 +294,20 @@ def main():
         stop_node("b")
         wait(lambda: flow.poll() is None and len(flow_lines()) >= second + 8, 45)
         print("PASS PVE appliance b -> a power cut retained the independent TCP socket and UDP traffic", flush=True)
+        if args.stability_seconds:
+            a_resync = (stage / "serial-a.log").read_text(errors="replace").count("resync requested by other node")
+            start_node("b")
+            wait(lambda: "ROUTERD_READY" in (stage / "serial-b.log").read_text(errors="replace"), 120)
+            wait(lambda: (stage / "serial-a.log").read_text(errors="replace").count("resync requested by other node") > a_resync, 30)
+            stable = len(flow_lines())
+            until = time.monotonic() + args.stability_seconds
+            while time.monotonic() < until:
+                if flow.poll() is not None:
+                    raise RuntimeError("continuous traffic stopped during stability observation")
+                time.sleep(min(5, until - time.monotonic()))
+            if len(flow_lines()) <= stable or "renew" not in (stage / "dhcp-client.log").read_text():
+                raise RuntimeError("stability observation did not retain traffic and DHCP renewal")
+            print("PASS PVE appliance stability seconds " + str(args.stability_seconds), flush=True)
         for process in children:
             if process.poll() is not None and process is flow:
                 raise RuntimeError("continuous independent traffic failed")
