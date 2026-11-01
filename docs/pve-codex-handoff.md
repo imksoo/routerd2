@@ -1,6 +1,6 @@
 # routerd2 開発引き継ぎ
 
-更新: 2026-10-31 18:40 JST。最初の製品は未完成であり、[実装計画](implementation-plan.md)、[機械可読台帳](implementation-plan.json)、[試験計画](test-plan.md)、[AGENTS.md](../AGENTS.md)を基準に進める。各実通信試験の直前に試験計画の実行手順と対象項目を読み直す。対象本番の置換はしていない。
+更新: 2026-11-01 10:00 JST。最初の製品は未完成であり、[実装計画](implementation-plan.md)、[機械可読台帳](implementation-plan.json)、[試験計画](test-plan.md)、[AGENTS.md](../AGENTS.md)を基準に進める。各実通信試験の直前に試験計画の実行手順と対象項目を読み直す。対象本番の置換はしていない。
 
 ## 現在の実装
 
@@ -21,7 +21,9 @@ DHCP HA は VRRP が配布役を選び、dnsmasq に VIP と物理 ingress を�
 - `sam-mobility-candidate`: claimが所有する`203.0.113.51/32`をleaf BGPから独立FRRへ広告し、独立RRの明示revokeと元admission期限切れの両方で撤回する経路を追加・確認。IPIP/WireGuard、NATなしTCP/UDPとkernel撤去を含む4実通信ケースが通過し、`make check`も終了0。単一claimの経路広告までで、所有権移動・複数leaf・provider capture/drain・partition recovery・PVE/実機/cloudは未確認。
 - `homert-disk-native113`: 通常 APK から作る BIOS disk を二台の隔離 PVE appliance で VirtIO/SCSI に接続し、通常の `DISK_ETC_DIR` 入力で設定と trust file を配備した。取得 DHCP/SLAAC/DNS、IPv4/IPv6 TCP/UDP、BGP、DS-Lite、NTP、Tailscale と電源断後の disk 再起動を確認した。切替中には通信損失を観測しており、これは disk boot/provisioning/recovery の受入であって無停止 HA の受入ではない。
 
-これらは実プロセス・独立 peer・Linux kernel/PVE の相互通信結果である。対象 ONU/HGW/NIC、対象 appliance、実回線、43,200 秒 lease の自然 T1、全34 work package の受入を表さない。
+`ops-management-combined-native120` は通常・特殊端末の元の43,200秒 leaseについて、T1（21,600秒）でのVIP宛unicast REQUEST、同一XID・option 54を持つACK、期限延長、REBINDなしを実packetで確認した。取得済みDNSと両family通信も直後に通った。その後6時間休止していたTailscale経路の最初の新規TCPは、試験側の固定2秒待機で一度timeoutした。failure snapshotはTailscale Running/online、相手peer active、承認済み経路と転送規則を示すが、続く実通信を測らなかった。このためDHCP自然更新は成功、Tailscaleの長時間継続は未合格として分ける。生ログ、鍵、capture、stageはこの記録後に削除する。
+
+これらは実プロセス・独立 peer・Linux kernel/PVE の相互通信結果である。対象 ONU/HGW/NIC、対象 appliance、実回線、全34 work package の受入を表さない。
 
 ## main統合と保存設定復元
 
@@ -37,7 +39,7 @@ main統合版126のハッシュ一致3実行物でも、通常125の起動イメ
 
 2026-11-01: 通常126 APKから起動した隔離PVEの4CPU/4GiB実VMと、同じPVE内の独立LAN/WAN端末を直接接続した。SSHは管理・結果回収だけで、SSH転送に使える二つの別リンクでTCP/5201 packetが0なのをcaptureした。最小の静的IPv4 NAT/IPv6転送構成で15秒単一TCPは、IPv4 NAT受信1.275/1.280Gbps、IPv6受信1.228/1.243Gbpsだった。相手はIPv4でNAT後の`192.168.1.249`、IPv6で元のLAN端末を観測した。このため旧130〜149Mbpsを製品上限とする根拠はなくなった。DS-Lite、DHCP/SLAAC/DNS、HA、対象回線・NICの負荷合格には流用しない。VM、raw disk、capture、パッケージとremote stageは削除済み。
 
-今回の生成物・ログ等823.2MiBと専用Docker imageに続き、終了した二台試験のstage約612MiB（capture・一時鍵・state・disk）を削除した。main統合・未変更・稼働参照なしを確認した完了済みworktree二つも `git worktree remove` で撤去し、約1,012MiBの重複出力を解放した。稼働参照がある別tree、自然更新コホート、次の受入に使う126版image/runnerと既存`AGENTS.md`変更は保持した。空きは約38GiB。
+今回の生成物・ログ等823.2MiBと専用Docker imageに続き、終了した二台試験のstage約612MiB（capture・一時鍵・state・disk）を削除した。main統合・未変更・稼働参照なしを確認した完了済みworktree二つも `git worktree remove` で撤去し、約1,012MiBの重複出力を解放した。稼働参照がある別tree、次の受入に使う126版image/runnerと既存`AGENTS.md`変更は保持した。native120の根拠を上記へ圧縮した後、同じくstageを削除する。空きは約38GiB。
 
 ## 直近の実行
 
@@ -47,9 +49,7 @@ main統合版126のハッシュ一致3実行物でも、通常125の起動イメ
 
 本番対象は各4仮想CPU・4 GiBのPVE仮想機械である。次の対象受入は本番接続先、Ubuntu/Linux環境、既存状態の移行、実測負荷との差分を確認する。新しい物理機器の要件をhomert置換の前提へ追加しない。
 
-自然更新の現行環境は、版 `ops-management-combined-native120` を使う専用ジョブである。最初のACKは通常端末16:37:31.917 JST、特殊端末16:37:32.409 JSTで、元の43,200秒リース・21,600秒のT1を維持する。判定予定は22:39:02 JST。旧版108の観測経路は中断しており、その実行を待機中・合格とは扱わない。稼働中の二つの専用環境を変更しない。
-
-元の 43,200 秒 DHCPv4 lease を通常・特殊 client で実時間観測中である。両者について、実際に受けた lease/T1 を使い、T1 の unicast REQUEST、同一 XID ACK、option 54、期限延長、REBIND がないこと、取得 DNS と IPv4/IPv6 通信の継続を確認する。capture は T1 周辺だけに限定し、判定後に削除する。
+自然更新の専用job `ops-management-combined-native120` は終了した。通常端末は16:37:31.917 JST、特殊端末は16:37:32.409 JSTに、元の43,200秒lease・21,600秒T1のunicast REQUESTをVIPへ送り、同一XIDとoption 54を持つACKを受け、期限を延長した。job全体は後続Tailscale TCP timeoutのため終了1であり、Tailscale長時間継続の合格には数えない。
 
 DHCPv6 PD の再起動後 Rebind と、不良 candidate から known-good runtime へ自動 rollback する PVE 経路は完了した。capture と一時 stage は削除済みであり、これは対象 ONU/HGW や実回線の受入ではない。
 

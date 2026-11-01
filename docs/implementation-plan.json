@@ -11223,7 +11223,7 @@
       "single_node": "Cold boot and actual reboot passed independent clients, acquired IPv4/IPv6 DNS transports UDP/TCP, both-IP TCP/UDP, conditional DNS/DoH, BGP/IX, NTP and Tailscale. Not physical NIC/ONU qualification.",
       "natural_original_dhcp_lease_seconds": 43200,
       "natural_dhcp_t1_seconds": 21600,
-      "natural_renewal": "Verified live native120 cohort: original 43200-second DHCPv4 leases, T1 21600 seconds. Actual ordinary/special DHCPACK-derived T1: 2026-10-31T13:37:31.917617Z and 13:37:32.409511Z. No injection or replacement; not part of the shorter PVE restore result.",
+      "natural_renewal": "native120 completed real original 43200-second DHCPv4 T1 renewal: ordinary/special unicast REQUEST to the VIP received same-XID ACK with option54 and extended expiry at 2026-10-31T13:37:31.917617Z and 2026-10-31T13:37:32.409511Z. Neither REBINDed. Acquired DNS and both-family communication then passed. The whole job exited1 on one later Tailscale TCP timeout after six hours idle; this DHCP result is not Tailscale long-term acceptance.",
       "two_node_normal": "2026-10-31 16:56 JST: 20ea125 / ops-management-integrated-native123 integrates published07c55c9 and six management paths320f475. Normal APK/BIOS disks, full57 derived configuration, two isolated PVE guests, both actual power cuts/rejoins and fresh automatic clients exit0. Original TCP/NAT mapping retained; longest TCP reply7.204s, UDP233/1763 lost, DNS17/1017 failed. Both-IP acquired DNS/TCP/UDP, BGP/DS-Lite/NTP/Tailscale restored. Same selected exit after restart6.790/3.791s. No physical NIC/ONU qualification or natural T1 acceptance.",
       "two_node_configuration_changes": [
         "Explicit shared WAN IPv4 next hop for static BGP advertisements",
@@ -11234,7 +11234,7 @@
       "normal_alpine_copy_assertions": 0,
       "normal_alpine_effects_timeouts": 0,
       "hgw_normal": "Historical native95 / standard7800-second actual-HGW result is recorded separately in the handoff. It is not a current126 execution or target-WAN qualification.",
-      "remaining": "Complete unchanged native120 original43200-second LAN lease renewal. Same-version126 two-node power cut/rejoin passed with retained TCP and measured UDP/DNS loss. Next selected existing-state migration, target WAN/LAN and measured load, then k8s/pve differences and Cloud SAM/all34. Unknown never-received DHCP bindings and target-load qualification remain limited.",
+      "remaining": "Native120 original43200-second LAN lease renewal succeeded. Resolve its separate post-idle Tailscale TCP timeout with a measured reconnect test before accepting Tailscale long-term continuity. Same-version126 two-node power cut/rejoin passed with retained TCP and measured UDP/DNS loss. Next selected existing-state migration, target WAN/LAN and measured load, then k8s/pve differences and Cloud SAM/all34. Unknown never-received DHCP bindings and target-load qualification remain limited.",
       "full_profile_signed_update": {
         "base": "8cc420d / full-homert-loopback-native92",
         "candidate": "00969ca / full-homert-operations-native92",
@@ -11285,7 +11285,7 @@
       },
       "current_runs": {
         "hgw": "No current real-HGW long-renewal cohort was verified in this integration turn. Keep the historical native95 result separate from native120 LAN renewal and current126 product acceptance.",
-        "original_lan": "Verified live native120 cohort: original 43200-second DHCPv4 leases, T1 21600 seconds. Actual ordinary/special DHCPACK-derived T1: 2026-10-31T13:37:31.917617Z and 13:37:32.409511Z. No injection or replacement; not part of the shorter PVE restore result.",
+        "original_lan": "native120: original 43200-second DHCPv4 lease T1 completed for ordinary and special clients with unicast same-XID ACK, option54, extended expiry and no REBIND. Immediate learned-DNS/both-family communication passed. The enclosing job exited1 on a later post-idle Tailscale TCP timeout; it does not accept Tailscale continuity.",
         "sam_wireguard": {
           "release_id": "sam-wireguard-final-release",
           "environment": "isolated Linux netns; real routerd2 supervisor/control/network/SAM workers; independent legacy routerd RR; independent FRR; separate LAN client and RR terminal",
@@ -11442,7 +11442,7 @@
     {
       "stage": 1,
       "profile": "homert02/03",
-      "next": "Native120 original LAN DHCP T1 renewal succeeded; examine its one later Tailscale TCP timeout from retained observations without rerunning the six-hour cohort. Same-version126 two-node power cut/rejoin and direct PVE IPv4 NAT/IPv6 load paths passed. Next selected existing-state migration, full target WAN/LAN/DS-Lite load, then k8s/pve differences and remaining Cloud SAM/all34. Keep original observation and traffic deadlines.",
+      "next": "Native120 original LAN DHCP T1 renewal succeeded. Its one later Tailscale timeout used a fixed two-second first-connect wait after six idle hours; snapshot showed Running/online and installed forwarding, but no recovery-time communication was recorded. Run a focused measured reconnect case instead of repeating the cohort, then continue selected existing-state migration and full target WAN/LAN/DS-Lite load. Same-version126 two-node power cut/rejoin and direct PVE IPv4 NAT/IPv6 load paths passed. Keep original observation and traffic deadlines.",
       "required_focus": [
         "WAN/LAN IPv4/IPv6, DS-Lite, actual route selection/backup WAN, DHCP/PD/RA, learned DNS resolution/distribution, firewall/NAT/MTU/MSS, BGP and management",
         "HA-01 current election/track dependencies, HA-02 DHCP/PD synchronization, HA-03 NAT/connection synchronization and EXT-02 Tailscale used by this deployment"
