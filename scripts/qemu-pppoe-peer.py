@@ -267,19 +267,18 @@ def peer(stage, power_action, updates, profile):
             for name, mac in (('wan', '52:54:00:12:34:56'), ('lan', '52:54:00:12:34:57')):
                 qargs += ['-netdev', 'stream,id=' + name + ',server=on,addr.type=unix,addr.path=' + str(remote / (name + '.sock')), '-device', 'virtio-net-pci,netdev=' + name + ',mac=' + mac]
             run(control + [shlex.join(['qm', 'set', str(meta['vmid']), '--args', shlex.join(qargs)])], 30)
-            relay = None
+            relays = []
             def boot_product():
-                nonlocal relay
-                if relay is not None:
+                nonlocal relays
+                for relay in relays:
                     relay.terminate()
                     relay.wait(timeout=10)
+                relays = []
                 boot_command = 'set -eu\nqm start ' + str(meta['vmid']) + '\nguest_pid=$(cat /run/qemu-server/' + str(meta['vmid']) + '.pid)\nexec tail --pid="$guest_pid" -c +1 -f ' + shlex.quote(str(remote / 'serial.log'))
                 product = start(None, control + [boot_command], 'serial')
                 wait(lambda: subprocess.run(control + ['test -S ' + str(remote / 'wan.sock') + ' -a -S ' + str(remote / 'lan.sock')], capture_output=True, timeout=5).returncode == 0, 30)
-                hub = ['/usr/bin/qemu-system-x86_64', '-machine', 'none', '-display', 'none', '-monitor', 'none', '-nodefaults']
-                for index, name in enumerate(('wan', 'lan')):
-                    hub += ['-netdev', 'tap,id=' + name + 'tap,ifname=tap' + name + ',script=no,downscript=no', '-netdev', 'stream,id=' + name + 'wire,server=off,addr.type=unix,addr.path=' + meta[name], '-netdev', 'hubport,id=' + name + 'local,hubid=' + str(index) + ',netdev=' + name + 'tap', '-netdev', 'hubport,id=' + name + 'remote,hubid=' + str(index) + ',netdev=' + name + 'wire']
-                relay = start(None, hub, 'ethernet-transport')
+                for name in ('wan', 'lan'):
+                    relays.append(start(None, [sys.executable, '-I', str(Path(__file__).with_name('qemu-stream-tap.py')), '--tap', 'tap' + name, '--socket', meta[name]], 'ethernet-transport-' + name))
                 return product
             print('Product guest: isolated PVE KVM, 4 CPU, 4096 MiB; same DHCP and traffic deadlines', flush=True)
         else:
