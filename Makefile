@@ -44,7 +44,7 @@ INITIAL_STATE_PVE_JUMP ?=
 LDFLAGS = -s -w -X github.com/imksoo/routerd2/internal/buildinfo.Identity=ROUTERD2-RELEASE-V1:$(RELEASE_ID):END
 BUILD_ARGS = --build-arg GO_VERSION=$(GO_VERSION) --build-arg ALPINE_VERSION=$(ALPINE_VERSION) --build-arg RELEASE_ID=$(RELEASE_ID)
 
-.PHONY: help fmt fmt-check test test-dependencies test-tools race vet check check-pppoe check-dual-wan check-health-pbr check-vrrp-unicast check-bgp check-bfd check-pd-ra check-dhcp6 check-aftr check-ra-client check-ra-aftr check-dhcp-relay licenses build build-linux release-built-test container container-multi container-smoke apk image qemu-smoke qemu-network qemu-wireguard qemu-ra-dns qemu-daemon qemu-daemon-aftr qemu-dhcp4-clock qemu-dhcp6-clock qemu-ra-clock qemu-vrrp-daemon qemu-vrrp-activation qemu-vrrp-conditional qemu-vrrp-clock qemu-eventrule qemu-derived qemu-protocols qemu-release-boot qemu-storage qemu-health-power clean
+.PHONY: help fmt fmt-check test test-dependencies test-tools race vet check check-pppoe check-dual-wan check-health-pbr check-vrrp-unicast check-bgp check-bfd check-pd-ra check-dhcp6 check-aftr check-ra-client check-ra-aftr check-dhcp-relay licenses build build-linux release-built-test container container-multi container-smoke apk image qemu-smoke qemu-network qemu-wireguard qemu-ra-dns qemu-daemon qemu-daemon-aftr qemu-dhcp4-clock qemu-dhcp6-clock qemu-ra-clock qemu-vrrp-daemon qemu-vrrp-activation qemu-vrrp-conditional qemu-vrrp-clock qemu-eventrule qemu-derived qemu-protocols qemu-release-boot qemu-storage qemu-health-power qemu-ha-pve clean
 
 help:
 	@printf '%s\n' \
@@ -60,6 +60,7 @@ help:
 	  'make check-ha-pd       Verify shared PD across two routers with different BOOTTIME clocks' \
 	  'make check-ha-pd-preparation Verify interrupted B4 preparation and overlapping DAD' \
 	  'make check-ha-egress   Verify shared PD, DS-Lite and independent backup WAN handoff' \
+	  'make qemu-ha-pve QEMU_PVE_HOST=... Verify two isolated PVE appliance HA power cuts' \
 	  'make check-ha-dhcp-failover Verify stale-owner DHCP protection and reconciliation' \
 	  'make check-health-pbr  Required two-WAN real-daemon TCP/UDP failover gate' \
 	  'make check-vrrp-unicast Verify VRRP peer failover and finite WAN identity' \
@@ -358,6 +359,10 @@ QEMU_PVE_IDENTITY ?=
 QEMU_OUTPUT ?= dist/pppoe-appliance$(if $(QEMU_PROFILE),-$(QEMU_PROFILE))
 qemu-pppoe:
 	$(PYTHON) scripts/qemu-pppoe-peer.py --image-dir $(IMAGE_DIR) --dhcp6-server '$(DHCP6_SERVER)' --power-action $(QEMU_POWER_ACTION) --output '$(QEMU_OUTPUT)' $(if $(QEMU_UPDATE_BINARIES),--update-binaries '$(QEMU_UPDATE_BINARIES)') $(if $(QEMU_PROFILE),--profile '$(QEMU_PROFILE)') $(if $(QEMU_PVE_HOST),--pve-host '$(QEMU_PVE_HOST)') $(if $(QEMU_PVE_JUMP),--pve-jump '$(QEMU_PVE_JUMP)') $(if $(QEMU_PVE_IDENTITY),--pve-identity '$(QEMU_PVE_IDENTITY)')
+
+qemu-ha-pve: image
+	@test -n '$(QEMU_PVE_HOST)' || (echo 'QEMU_PVE_HOST is required' >&2; exit 2)
+	$(PYTHON) scripts/qemu-ha-pve.py --image-dir $(IMAGE_DIR) --pve-host '$(QEMU_PVE_HOST)' $(if $(QEMU_PVE_JUMP),--pve-jump '$(QEMU_PVE_JUMP)') $(if $(QEMU_PVE_IDENTITY),--pve-identity '$(QEMU_PVE_IDENTITY)')
 
 qemu-network:
 	$(PYTHON) scripts/qemu-network.py --go '$(GO)' --image-dir $(IMAGE_DIR) --timeout $(QEMU_TIMEOUT)
