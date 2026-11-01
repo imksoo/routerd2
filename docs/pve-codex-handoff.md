@@ -10,7 +10,7 @@ DHCP HA は VRRP が配布役を選び、dnsmasq に VIP と物理 ingress を�
 
 ## 実通信で確認した範囲
 
-`6cd2404` では、同期断中に待機側だった DHCP owner が昇格しても、元ownerからmTLSで現在のlease stateを受け取るまでdnsmasqを起動しないようにした。再同期後は重複しない新規leaseの配布、既存leaseの更新、DHCP worker再起動後の更新まで実行する。current mainで`make check-ha-dhcp-failover`と`make check-ha-state`を実行し、独立Linux namespaceの二台、実supervisor/control/network/DHCP/VRRP/Health worker、ISC DHCPv6、AFTR、独立TCP/UDP peerとpacket captureでこの遮断・再同期・両方向HA handoffを確認した。これはPVE二VM、homert実設定、対象ONU/HGW/NICの受入ではない。
+`6cd2404` では、同期断中に待機側だった DHCP owner が昇格しても、元ownerからmTLSで現在のlease stateを受け取るまでdnsmasqを起動しないようにした。current mainで`make check-ha-dhcp-failover`を実行し、独立Linux namespaceの二台、実supervisor/control/network/DHCP/VRRP/Health worker、ISC DHCPv6、AFTR、独立TCP/UDP peerとpacket captureで、遮断中に配布しないこと、再同期後の重複しない新規lease、既存leaseの更新、DHCP worker再起動後の更新を確認した。通常HA handoffの再実行は継続中である。これはPVE二VM、homert実設定、対象ONU/HGW/NICの受入ではない。
 
 2026-11-01 current `1a3843b`: `make check`（Race Detector・vet を含む）、静的リンクした3実行物の build を完了した。新規4 CPU/4 GiB PVE VMを既存bridge/NICなしで起動し、現行homert03設定を隔離用に変換した実daemonで、Tailscaleの保護状態初期化まで確認した。最初の拒否は試験overlayが親`/etc`を`0775`で作ったことによるもので、製品imageの`/etc`は`0755`だった。overlayを`0755`/`0700`で作り直した再試行では同じ拒否は起きなかった。VM、設定、鍵、disk、serial logは削除済みである。これはWAN/LAN、DNS、PD、転送またはreadyの合格ではない。
 
