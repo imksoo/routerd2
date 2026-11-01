@@ -69,6 +69,8 @@ def main():
 
     stage = Path(tempfile.mkdtemp(prefix="routerd2-pve-ha."))
     dhcp6_files = []
+    dhcp6_data_dir = None
+    dhcp6_host_targets = []
     control_dir = Path(tempfile.mkdtemp(prefix="routerd2-pve-ha-ssh."))
     children, namespaces, taps, bridges, vmids = [], [], [], [], []
     remote_stage = ""
@@ -357,26 +359,31 @@ threading.Event().wait()
             # ISC dhcpd is confined by the host AppArmor profile to its normal
             # configuration/state directories. Keep these files separate from
             # the private stage, which contains certificates and credentials.
-            dhcp_uid = pwd.getpwnam("dhcpd")
             config_fd, config_path = tempfile.mkstemp(prefix="routerd2-pve-dhcp6-", suffix=".conf", dir="/etc/dhcp")
             os.close(config_fd)
             dhcp6_config = Path(config_path)
             dhcp6_files.append(dhcp6_config)
-            dhcp6_config.write_text("default-lease-time 60;\npreferred-lifetime 40;\noption dhcp-renewal-time 20;\noption dhcp-rebinding-time 40;\nsubnet6 2001:db8:ffff::/64 { prefix6 2001:db8:80:: 2001:db8:80:f0:: /60; }\nserver-duid LL ethernet " + mac + ";\n")
+            dhcp6_config.write_text("default-lease-time 60;\npreferred-lifetime 40;\noption dhcp-renewal-time 20;\noption dhcp-rebinding-time 40;\nsubnet6 2001:db8:ffff::/64 { prefix6 2001:db8:80:: 2001:db8:80:: /60; }\nserver-duid LL ethernet " + mac + ";\n")
             dhcp6_config.chmod(0o644)
-            lease_fd, lease_path = tempfile.mkstemp(prefix="routerd2-pve-dhcp6-", suffix=".leases", dir="/var/lib/dhcp")
-            os.close(lease_fd)
-            dhcp6_leases = Path(lease_path)
-            dhcp6_files.append(dhcp6_leases)
-            os.chown(dhcp6_leases, dhcp_uid.pw_uid, dhcp_uid.pw_gid)
-            dhcp6_leases.chmod(0o640)
+            dhcp6_data_dir = Path(tempfile.mkdtemp(prefix="routerd2-pve-dhcp6-data-", dir="/var/lib/dhcp"))
+            dhcp6_data_dir.chmod(0o755)
+            dhcp6_leases = dhcp6_data_dir / "dhcpd6.leases"
+            dhcp6_leases.touch()
+            dhcp6_leases.chmod(0o644)
             pid_fd, pid_path = tempfile.mkstemp(prefix="routerd2-pve-dhcp6-", suffix=".pid", dir="/run")
             os.close(pid_fd)
             dhcp6_pid = Path(pid_path)
             dhcp6_files.append(dhcp6_pid)
-            os.chown(dhcp6_pid, dhcp_uid.pw_uid, dhcp_uid.pw_gid)
             dhcp6_pid.chmod(0o644)
-            start(ns("ha-pve-server", [str(args.dhcp6_server), "-6", "-f", "-d", "-cf", str(dhcp6_config), "-lf", str(dhcp6_leases), "-pf", str(dhcp6_pid), "wan0"]), "dhcp6")
+            for target in (Path("/var/lib/dhcp/dhcpd6.leases"), Path("/run/dhcpd6.pid")):
+                if not target.exists():
+                    target.touch()
+                    dhcp6_host_targets.append(target)
+            command = [str(args.dhcp6_server), "-6", "-f", "-d", "-cf", str(dhcp6_config),
+                       "-lf", "/var/lib/dhcp/dhcpd6.leases", "-pf", "/run/dhcpd6.pid", "wan0"]
+            mount_script = "mount --bind " + shlex.quote(str(dhcp6_data_dir)) + " /var/lib/dhcp && " \
+                "mount --bind " + shlex.quote(str(dhcp6_pid)) + " /run/dhcpd6.pid && exec " + shlex.join(command)
+            start(ns("ha-pve-server", ["unshare", "--mount", "--propagation", "private", "sh", "-c", mount_script]), "dhcp6")
         start_node("a")
         start_node("b")
         wait(lambda: all("ROUTERD_READY" in (stage / ("serial-" + node + ".log")).read_text(errors="replace") for node in ("a", "b")), 120)
@@ -495,6 +502,13 @@ threading.Event().wait()
             except Exception:
                 pass
         for path in dhcp6_files:
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+        if dhcp6_data_dir:
+            shutil.rmtree(dhcp6_data_dir, ignore_errors=True)
+        for path in dhcp6_host_targets:
             try:
                 path.unlink()
             except FileNotFoundError:
