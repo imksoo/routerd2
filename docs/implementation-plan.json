@@ -11234,7 +11234,7 @@
       "normal_alpine_copy_assertions": 0,
       "normal_alpine_effects_timeouts": 0,
       "hgw_normal": "Historical native95 / standard7800-second actual-HGW result is recorded separately in the handoff. It is not a current126 execution or target-WAN qualification.",
-      "remaining": "Native120 original43200-second LAN lease renewal succeeded. Resolve its separate post-idle Tailscale TCP timeout with a measured reconnect test before accepting Tailscale long-term continuity. Same-version126 two-node power cut/rejoin passed with retained TCP and measured UDP/DNS loss. Next selected existing-state migration, target WAN/LAN and measured load, then k8s/pve differences and Cloud SAM/all34. Unknown never-received DHCP bindings and target-load qualification remain limited.",
+    "remaining": "Native120 original43200-second LAN lease renewal succeeded. The separate isolated-peer measured reconnect case completed: worker/PID1 restart, peer restart and service reapply restored the selected exit in6.344 seconds. It did not reproduce native120's six-hour-idle first connection, so Tailscale long-term continuity remains unaccepted. Same-version126 two-node power cut/rejoin passed with retained TCP and measured UDP/DNS loss. Next selected existing-state migration, natural PD renewal, target WAN/LAN and measured load, then k8s/pve differences and Cloud SAM/all34. Unknown never-received DHCP bindings and target-load qualification remain limited.",
       "full_profile_signed_update": {
         "base": "8cc420d / full-homert-loopback-native92",
         "candidate": "00969ca / full-homert-operations-native92",
@@ -11413,6 +11413,10 @@
         "targets": "homert02 and homert03",
         "state_path": "/var/lib/tailscale/tailscaled.state",
         "metadata": "Owned root:root regular file, mode0600 on both; read-only guest-agent process/filesystem metadata only, no state body or keys collected. Actual-state migration acceptance remains open."
+      },
+      "target_config_conversion": {
+        "result": "Read-only current homert02/03 router YAML inputs, after the explicit isolated-VM NIC substitution, each migrated and validated as56-resource native configurations with current main.",
+        "limit": "This checks current operator intent against the converter only. It neither starts a target configuration nor migrates Tailscale state, leases or WAN state. The temporary raw inputs and outputs are removed after recording this result."
       },
       "load_transport_control": {
         "product_used": false,
