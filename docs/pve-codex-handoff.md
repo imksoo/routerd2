@@ -18,6 +18,10 @@ DHCP HA は VRRP が配布役を選び、dnsmasq に VIP と物理 ingress を�
 
 `fff1e29`では`make check-dhcp6`も実行し、独立dnsmasq/radvd/DHCPv6 peerとの`TestDaemonDHCP6RAIndependentPeers`と`TestDaemonDHCP6DuplicateAddressDecline`が通過した。DUID、RA、PDを含むworker交換を確認するが、PVE full profileや実HGW/ONUの受入ではない。raw log/stageは削除する。
 
+`d55486d`では`make check-dslite-pmtu`を実行した。独立PPPoE AC、AFTR、LAN/WAN peerを使い、DS-Lite確立、IPv4 NATと復路、1 MiB IPv4/IPv6 TCPのupload/download、MSS、IPv4 ICMP fragmentation-needed、同一UDP socketの1454→1400 PMTU学習、IPv6 ICMP Packet Too Bigと後続1200-byte UDPを確認した。これはLinux namespace内の対向であり、物理ONU/NIC/switchのMTUやPMTUは証明しない。
+
+同じ`d55486d`で`make check-tailscale-homert`を実行した。独立Headscaleと公式Tailscale peerで、IPv4/IPv6 LAN・subnet・exitのTCP/UDP、実経路とSNAT、保存identity、worker/PID 1再起動、service撤去/再適用、peer再起動、認証失効後の遮断、packet captureを通過した。PVE/実回線のTailscale受入には流用しない。各試験のraw log、capture、鍵、stageは削除済みである。
+
 - `health-ready-native105`: 独立二 WAN namespace peer、実 supervisor/control/network/Health worker で Health→PBR の障害切替・復旧、worker と supervisor の再起動、古い通知・期限切れの拒否、confirmed rollback、TCP/UDP と packet capture を確認した。
 - `dslite-pmtu-main-1e317d4`: 本番NICから隔離した一台 Linux namespace の独立 PPPoE/DS-Lite 対向で、IPv4 DF の ICMP fragmentation-needed、同一 UDP socket の1454→1400 PMTU学習、NAT後1368-byte payload/replyを終了0で確認した。対象WAN/NICのPMTU・物理負荷受入ではない。
 - `hgw-short-main-20bc21c`: 実HGWへ隔離 macvlan を接続した current main と独立LAN端末二台で、DHCPv4/DHCPv6 information/SLAAC、委譲RDNSS/search domain、IPv4 DS-Lite/IPv6 HTTPS、学習DNS UDP/TCP、条件付きforwarder停止/復帰、WAN blackhole復帰、PD workerのSIGKILL/正常再起動、全daemon再起動後の通信を確認した。続く7,800秒観測は自然PD Renew/Reply 1回、二台の自然DHCP更新、DUID/IAID/prefix保持、zero-lifetime RA withdrawal、726周回のIPv4/IPv6 HTTPSと学習DNS UDP/TCPを終了0で確認した。ONU直結、対象NIC、継続TCP、Tailscale長時間条件、HA、実状態移行は未受入である。
@@ -78,6 +82,12 @@ DHCPv6 PD の再起動後 Rebind と、不良 candidate から known-good runtim
 自然更新コホートは故障注入や設定交換に転用しない。故障・切替は別 stage で行う。終了済みの native93 と native95 は現在のコホートではなく、前者は終了1、後者は終了0である。過去の個別結果を current HEAD や実機の受入へ流用しない。
 
 ## 残る受入
+
+## 物理実機試験の読取専用事前調査
+
+2026-11-01にhomert02/03、各PVE node、接続bridge、guest NIC、link state、経路、稼働routerd processを読取専用で確認した。両VMは稼働中の4 vCPU/4 GiB・三VirtIO NIC構成であり、現行routerdと実回線用workerが動作している。active uplinkは既存PVE bridgeと稼働guestに接続済みで、未接続の物理portはcarrierを持たない。稼働中のshared bridgeや現在のONU/HGW経路を変更せずに、独立した一台を実回線へ接続できる未使用L2 portは確認できなかった。
+
+物理試験を開始するには、専用switch VLAN/portとONU/HGWへ至る専用回線、または既存経路の計画停止のいずれかが必要である。前者なら、新規の隔離VMまたは専用機へ三NICを接続し、試験専用のIPv4/IPv6 address、DHCP identity、観測用LAN client、WAN/LAN capture点を割り当てる。開始直前と切戻し後に、対象VM設定、NIC link/route、routerd設定のSHA-256を読取比較する。後者ではhomert02/03停止または物理ケーブル差替えの範囲、予定時間、旧VM再起動と元bridge/NIC/route hash一致を切戻し条件として明示した承認が必要である。現時点ではいずれの変更も実施していない。
 
 1. homert02/03 の単体構成で、独立端末が DHCPv4/DHCPv6/SLAAC、DNS（条件付き forwarder と DoH を含む）、IPv4 NAT、IPv6 native forwarding、WAN DHCPv4/PD、RA と自然更新を使ってインターネットへ到達すること。
 2. 二 WAN の Health/PBR、PPPoE、DS-Lite、firewall、既存 TCP と UDP mapping を実回線条件で確認すること。
