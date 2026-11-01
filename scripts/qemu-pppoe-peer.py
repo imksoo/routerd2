@@ -21,6 +21,7 @@ from pathlib import Path
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 import tarfile
 import time
@@ -35,11 +36,21 @@ def run(command, timeout=10):
     return result.stdout
 
 def prepare_kvm(stage, root, args):
-    ssh = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=yes"]
+    owner = os.environ.get("SUDO_USER") or pwd.getpwuid(os.getuid()).pw_name
+    ssh_dir = Path(pwd.getpwnam(owner).pw_dir) / ".ssh"
+    known_hosts = ssh_dir / "known_hosts"
+    key = args.pve_identity or ssh_dir / "id_ed25519"
+    ssh = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=yes",
+           "-o", "UserKnownHostsFile=" + str(known_hosts), "-o", "GlobalKnownHostsFile=/dev/null",
+           "-o", "IdentitiesOnly=yes", "-i", str(key)]
     if args.pve_jump:
-        ssh += ["-J", args.pve_jump]
-    if args.pve_identity:
-        ssh += ["-o", "IdentitiesOnly=yes", "-i", str(args.pve_identity.resolve())]
+        jump = args.pve_jump
+        if "@" not in jump:
+            jump = owner + "@" + jump
+        proxy = ("ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=" +
+                 shlex.quote(str(known_hosts)) + " -o GlobalKnownHostsFile=/dev/null -o IdentitiesOnly=yes -i " +
+                 shlex.quote(str(key)) + " -W %h:%p " + shlex.quote(jump))
+        ssh += ["-o", "ProxyCommand=" + proxy]
     ssh += [args.pve_host]
     def pve_command(command):
         return ssh + [command]
@@ -390,6 +401,7 @@ def peer(stage, power_action, updates, profile):
                     return False
             return 'nameserver ' + client_dns in resolver.read_text()
         wait(client_ready)
+        wait(dns_ready)
         traffic()
         print('PASS factory appliance: CHAP, IPv4/IPv6 TCP/UDP, ISC PD and independent Linux SLAAC client', flush=True)
         initial_pd = re.search(r'^Reply PD: address (\S+) to client with duid (\S+) iaid = (\d+) valid ', (stage / 'dhcp6.log').read_text(), re.MULTILINE)
@@ -472,6 +484,7 @@ def peer(stage, power_action, updates, profile):
             d = server()
             wait(lambda: any((x['name'] == 'service.pd' and x.get('generation', 0) > old_pd and (x.get('snapshot', {}).get('state') == 'bound') for x in query('show services')['instances'])) and query('show config')['healthy'])
             wait(client_ready)
+            wait(dns_ready)
             traffic()
             print('Observed PPP restart communication seconds', round(time.monotonic() - restart_started, 2), flush=True)
             print('PASS appliance PPP worker/session restart reacquired PD and restored IPv4/IPv6 TCP/UDP', flush=True)
@@ -503,6 +516,7 @@ def peer(stage, power_action, updates, profile):
             wait(lambda: any(x['name'] == 'control' and x['generation'] > before_control['control']['generation'] and x['ready'] for x in query('show status')['modules']))
             wait(pd_ready)
             wait(client_ready)
+            wait(dns_ready)
             recovered_at = time.time()
             # Cross a complete ISP lease while using the actual client route.
             # Waiting for an address alone hid withdrawal of the default router.
@@ -987,8 +1001,6 @@ def main():
         return
     if args.dhcp6_server is None or not args.dhcp6_server.is_file():
         parser.error("--dhcp6-server must name an independent ISC dhcpd executable")
-    if args.pve_host and args.profile not in ('update', 'corrupt-recovery'):
-        parser.error('--pve-host requires --profile update or corrupt-recovery')
     if (args.pve_jump or args.pve_identity) and not args.pve_host:
         parser.error('--pve-jump/--pve-identity require --pve-host')
     root = [] if os.geteuid() == 0 else ["sudo", "-n"]
@@ -1005,6 +1017,7 @@ def main():
         run(["mkdir", "-m", "700", stage + "/input"])
         for source, target in [
             (Path(__file__), "peer.py"),
+            (Path(__file__).with_name("qemu-stream-tap.py"), "qemu-stream-tap.py"),
             (Path(__file__).parent.parent / "images/mkinitramfs.py", "mkinitramfs.py"),
             (Path(__file__).parent.parent / "images/boot.json", "boot-base.json"),
             (args.dhcp6_server, "dhcpd"),

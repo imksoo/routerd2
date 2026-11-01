@@ -452,7 +452,9 @@ func Run(parent context.Context, options Options) (PowerAction, error) {
 
 func shutdownPhase(role string) int {
 	switch role {
-	case "dhcp6":
+	case "dhcp6", "ra":
+		// The LAN advertiser must send its zero-lifetime RA while its WAN
+		// provider still exists. The next phase stops PPP and its link.
 		return 1
 	case "control":
 		return 3
