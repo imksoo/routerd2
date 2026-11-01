@@ -90,7 +90,7 @@
 
 - `health-ready-native105`: `make check-health-pbr` は独立二 WAN namespace peer と実 supervisor/control/network/Health worker で、Health→PBR の障害切替・復旧、worker/supervisor 再起動、古い通知・期限切れ、confirmed rollback、TCP/UDP と packet capture を確認した。対象回線・対象機器は未受入。
 
-- `hgw-short-main-20bc21c`: 実HGWへ隔離 macvlan で接続した current main の実daemonと、独立 BusyBox/dhcpcd LAN端末二台で、DHCPv4、DHCPv6 information、SLAAC、委譲RDNSS/search domain、IPv4 DS-Lite/IPv6 HTTPS、学習DNSのUDP/TCP、条件付きforwarderの停止/復帰を確認した。WAN blackhole復帰は0.84秒、PD workerのSIGKILL/正常再起動後の端末通信は1.75/3.49秒、全daemon再起動後は4.04秒で復帰した。90秒でPDの自然Renew予定は約7,177秒先だったため、自然PD更新、ONU直結、対象NIC、長時間負荷の合格には数えない。namespace、一時stage、captureは終了時に撤去した。
+- `hgw-short-main-20bc21c`: 実HGWへ隔離 macvlan で接続した current main の実daemonと、独立 BusyBox/dhcpcd LAN端末二台で、DHCPv4、DHCPv6 information、SLAAC、委譲RDNSS/search domain、IPv4 DS-Lite/IPv6 HTTPS、学習DNSのUDP/TCP、条件付きforwarderの停止/復帰を確認した。WAN blackhole復帰は0.84秒、続く7,800秒観測では自然PD Renew/Reply 1回、二台の自然DHCP更新、PD worker SIGKILL/正常再起動後の端末通信1.36/3.88秒、DUID/IAID/prefix保持、zero-lifetime RA withdrawal、726周回のIPv4/IPv6 HTTPSと学習DNS UDP/TCPが終了0だった。ONU直結、対象NIC、継続TCP、Tailscale長時間条件、HA、対象構成全体は未受入である。namespace、一時stage、captureは終了時に撤去した。
 
 - `dhcp-ingress-native105`: 隔離 PVE（4 CPU/4 GiB）の実 appliance で、ハッシュ・release ID を照合した三実行物と20 Ready moduleを使い、cold boot/reboot 後の DNS UDP/TCP（IPv4/IPv6）、TCP/UDP、BGP、NTP、Tailscale、および通常・特殊端末それぞれの120秒 DHCPv4自然T1 unicast/同一XID ACK/option 54=`172.18.0.1` を確認した。PVE kernel 試験であり、12時間の元lease、ONU/HGW・対象機器、全34 package は引き続き未受入。
 
