@@ -8,7 +8,7 @@
 
 |入力|取得元|新しい配置|停止が必要な境界|扱い|
 |---|---|---|---|---|
-|Tailscale の保存済み識別情報|旧機の`/var/lib/tailscale/tailscaled.state`|`/var/lib/routerd/services/tailscale/tailscaled.state`|旧`tailscaled`停止、プロセス・TUN・ルーティングテーブル52 の消失確認後|内容を解釈しない通常ファイルとして一度だけ複写する|
+|Tailscale の保存済み識別情報|旧機の`/var/lib/tailscale/tailscaled.state`|`/var/lib/routerd/services/tailscale/tailscaled.state`|旧`tailscaled`停止、プロセス・`tailscale0`・ルーティングテーブル52 の消失確認後|内容を解釈しない通常ファイルとして一度だけ複写する|
 |SSH ホスト鍵|旧機の選択済み Ed25519 ホスト鍵|`/var/lib/routerd/ssh_host_ed25519_key`|管理接続の切替時|既存の管理ホスト識別情報を保持する必要がある場合だけ複写する|
 |DHCPv4 リース|停止済み旧 dnsmasq リースファイル|新ディスクのネイティブ DHCP サービス状態|旧 DHCP サーバー停止後|`routerd dhcp import-leases` で取り込む|
 |DHCP 固定割当履歴|停止済み旧 routerd SQLite DB と`-wal`/`-shm`|新ディスクのネイティブ DHCP サービス状態|旧 DHCP サーバー停止後|リース取込成功後に`routerd dhcp import-sticky`で取り込む|
@@ -16,7 +16,7 @@
 
 旧 routerd のリース・状態・データベース、Tailscale の状態ディレクトリ全体、鍵のない EnvironmentFile、
 実行時ソケット、カーネル状態は入力にしない。内容を解釈しない状態の内容、鍵、SHA-256 値は記録・出力・
-commit しない。
+Git にコミットしない。
 
 ## 一台の実行
 
@@ -33,7 +33,7 @@ commit しない。
    にだけ複写し、`services/tailscale` を Tailscale エンジンの状態ディレクトリとしてマウントする。リースと
    固定割当履歴は新ディスクの停止状態で、リース取込を先、固定割当履歴取込を後に実行する。
 6. 起動直前に作業ディレクトリのモードとファイル種別、複写の SHA-256 一致、ネイティブ設定の検証、ディスクマニフェストの
-   `initial_state_provisioned`、旧所有者不在を確認する。新しい PID 1 を一台だけ起動し、独立 peer から
+   `initial_state_provisioned`、旧所有者不在を確認する。新しい PID 1 を一台だけ起動し、独立した対向機から
    Tailscale ノード識別情報、IPv4/IPv6 TCP/UDP、DHCP 更新、新規 DHCP クライアント、DNS、WAN/LAN 通信を確認する。
 7. 失敗したら新 PID 1 を止めてから旧サービスを起動する。旧状態の再 SHA-256 が停止時の値と一致することを
    その場で確認し、専用ディスクと作業ディレクトリを削除する。二つの所有者を同時に起動して復旧しない。
