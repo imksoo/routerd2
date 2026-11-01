@@ -11418,6 +11418,23 @@
           131.06711556549325
         ],
         "result": "The same single-SSH Ethernet transport alone reached102.259/131.067Mbps. Earlier candidate130-149Mbps measurements cannot establish a product-specific ceiling. Exact transport/QEMU/scheduling bottleneck remains unisolated. Use a data path that does not carry benchmark packets through SSH for target-load qualification."
+      },
+      "pve_direct_product_load126": {
+        "source_commit": "25e7cf931644e77822c320cba275e07ab10902e5",
+        "release_id": "main-management-sam-126",
+        "finished_at": "2026-11-01T01:29:51Z",
+        "environment": "Fresh normal APK image on one isolated PVE 4CPU/4GiB BIOS VirtIO appliance and two independent PVE network-namespace peers. The product WAN/LAN NICs and both benchmark peers shared private PVE bridges. SSH carried management and result collection only; packet capture on the two separate SSH-forward-capable links observed zero TCP/5201 packets.",
+        "configuration": "Minimal current ResourceProgram with static WAN/LAN IPv4/IPv6, kernel forwarding, IPv4 masquerade and explicit forward pairs. This establishes the direct data-plane measurement only; it is not the full homert WAN/DS-Lite/DHCP/DNS profile.",
+        "tcp_streams": 1,
+        "seconds_per_direction": 15,
+        "measurements": [
+          {"name": "ipv4-nat-send", "receiver_mbps": 1274.7340040490274, "sender_mbps": 1276.093852164814, "retransmits": 28, "server_source": "192.168.1.249"},
+          {"name": "ipv4-nat-receive", "receiver_mbps": 1279.953749623169, "sender_mbps": 1281.8022976172772, "retransmits": 130, "server_source": "192.168.1.249"},
+          {"name": "ipv6-send", "receiver_mbps": 1228.3799388674283, "sender_mbps": 1230.3267351879708, "retransmits": 65, "server_source": "2001:db8:80::100"},
+          {"name": "ipv6-receive", "receiver_mbps": 1243.2482181027206, "sender_mbps": 1245.2665340306025, "retransmits": 97, "server_source": "2001:db8:80::100"}
+        ],
+        "result": "All four real PVE product forwarding directions passed. IPv4 receiver rate was1274.734/1279.954Mbps with the configured NAT source observed; IPv6 was1228.380/1243.248Mbps with the original LAN source observed. This removes the SSH transport as the explanation for the earlier130-149Mbps candidate measurements.",
+        "limits": "Not a DS-Lite, PPPoE, DHCP/SLAAC/DNS, HA, natural-renewal, physical WAN/NIC, or target-production-load qualification. The owned VM and remote stage, including raw captures, temporary disk and test packages, were removed after retaining this concise result."
       }
     }
   },
@@ -11425,7 +11442,7 @@
     {
       "stage": 1,
       "profile": "homert02/03",
-      "next": "Complete unchanged native120 original LAN natural renewals; same-version126 two-node power cut/rejoin acceptance passed. Next selected existing-state migration and target WAN/LAN/load acceptance, using a benchmark data path outside SSH. Then k8s/pve profile differences and remaining Cloud SAM/all34. Keep original observation and traffic deadlines.",
+      "next": "Native120 original LAN DHCP T1 renewal succeeded; examine its one later Tailscale TCP timeout from retained observations without rerunning the six-hour cohort. Same-version126 two-node power cut/rejoin and direct PVE IPv4 NAT/IPv6 load paths passed. Next selected existing-state migration, full target WAN/LAN/DS-Lite load, then k8s/pve differences and remaining Cloud SAM/all34. Keep original observation and traffic deadlines.",
       "required_focus": [
         "WAN/LAN IPv4/IPv6, DS-Lite, actual route selection/backup WAN, DHCP/PD/RA, learned DNS resolution/distribution, firewall/NAT/MTU/MSS, BGP and management",
         "HA-01 current election/track dependencies, HA-02 DHCP/PD synchronization, HA-03 NAT/connection synchronization and EXT-02 Tailscale used by this deployment"

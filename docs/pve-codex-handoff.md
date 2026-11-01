@@ -35,6 +35,8 @@ main統合版126のハッシュ一致3実行物でも、通常125の起動イメ
 
 両homertのTailscale1.104.2と保存先`/var/lib/tailscale/tailscaled.state`（root:root、0600通常ファイル）は読取専用メタデータで確定した。状態本文は未取得で、実状態移行の合格には数えない。製品/VMを除く同じSSH Ethernet伝送自体の対照は102.259/131.067 Mbpsであり、旧候補の130〜149 Mbpsは製品上限の証拠ではない。
 
+2026-11-01: 通常126 APKから起動した隔離PVEの4CPU/4GiB実VMと、同じPVE内の独立LAN/WAN端末を直接接続した。SSHは管理・結果回収だけで、SSH転送に使える二つの別リンクでTCP/5201 packetが0なのをcaptureした。最小の静的IPv4 NAT/IPv6転送構成で15秒単一TCPは、IPv4 NAT受信1.275/1.280Gbps、IPv6受信1.228/1.243Gbpsだった。相手はIPv4でNAT後の`192.168.1.249`、IPv6で元のLAN端末を観測した。このため旧130〜149Mbpsを製品上限とする根拠はなくなった。DS-Lite、DHCP/SLAAC/DNS、HA、対象回線・NICの負荷合格には流用しない。VM、raw disk、capture、パッケージとremote stageは削除済み。
+
 今回の生成物・ログ等823.2MiBと専用Docker imageに続き、終了した二台試験のstage約612MiB（capture・一時鍵・state・disk）を削除した。main統合・未変更・稼働参照なしを確認した完了済みworktree二つも `git worktree remove` で撤去し、約1,012MiBの重複出力を解放した。稼働参照がある別tree、自然更新コホート、次の受入に使う126版image/runnerと既存`AGENTS.md`変更は保持した。空きは約38GiB。
 
 ## 直近の実行

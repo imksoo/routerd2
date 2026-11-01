@@ -381,6 +381,8 @@ mainへの統合作業版 `main-management-sam-126` は、管理PR #1と上記�
 
 性能試験の対照として、製品とVMを除いた同じ単一SSH上のEthernet往復を、独立iperf3・単一TCP・各15秒で測定した。受信側は102.259/131.067 Mbpsだった。候補123の130〜149 Mbpsを製品上限と解釈できず、伝送・QEMU・スケジューリングのどこが律速かは未特定である。対象負荷の受入では、測定packetがSSHを通らない経路を用意する。
 
+2026-11-01 10:29 JST: `25e7cf9` の通常126 APK imageから隔離PVEの4CPU/4GiB実VMを一台起動し、WAN/LANの両側にPVE内の独立network namespace端末を直接接続した。IPv4 NATとIPv6 forwardingだけを明示した最小ResourceProgramで15秒単一TCPを両方向に実行した。IPv4 NATの受信は1,274.734/1,279.954Mbps（相手でNAT後送信元`192.168.1.249`）、IPv6は1,228.380/1,243.248Mbps（元LAN端末送信元）だった。管理・結果回収用SSHとは別の二つのリンクでTCP/5201 captureは全ケース0 packetであり、測定通信がSSHを通らないことを確認した。これはfull homert/DS-Lite、DHCP/SLAAC/DNS、HA、対象回線/NICの性能受入ではない。完了後に専用VM、remote stage、disk、capture、詳細iperf出力を削除した。
+
 対象両機のTailscaleは1.104.2、保存先は`/var/lib/tailscale/tailscaled.state`のroot:root・0600通常ファイルと、guest-agent経由の読取専用メタデータで確認した。状態本文と鍵は採取していない。選択した実状態の移行受入は別に残る。
 
 ## 7. Cloud・SAM・Kubernetes
