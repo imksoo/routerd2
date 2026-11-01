@@ -1,6 +1,6 @@
 # routerd2 開発引き継ぎ
 
-更新: 2026-11-01 17:36 JST。最初の製品は未完成であり、[実装計画](implementation-plan.md)、[機械可読台帳](implementation-plan.json)、[試験計画](test-plan.md)、[初回状態移行手順](initial-state-migration.md)、[AGENTS.md](../AGENTS.md)を基準に進める。各実通信試験の直前に試験計画の実行手順と対象項目を読み直す。対象本番の置換はしていない。
+更新: 2026-11-02 03:20 JST。最初の製品は未完成であり、[実装計画](implementation-plan.md)、[機械可読台帳](implementation-plan.json)、[試験計画](test-plan.md)、[初回状態移行手順](initial-state-migration.md)、[AGENTS.md](../AGENTS.md)を基準に進める。各実通信試験の直前に試験計画の実行手順と対象項目を読み直す。対象本番の置換はしていない。
 
 ## 現在の実装
 
@@ -130,3 +130,5 @@ DHCPv6 PD の再起動後 Rebind と、不良 candidate から known-good runtim
 同じ二台PVE経路の短い継続確認では、再参加後の両機と独立端末を65秒動かし、DHCP renewal、同一TCP/UDP、captureを終了0で確認した。`QEMU_HA_STABILITY_SECONDS`で同じ試験の継続時間を明示する。これは24時間安定性試験の開始前にrunnerのduration経路を確認した結果であり、24時間の合格ではない。
 
 2026-11-01: current `5072de5` で `sudo -n make check-uplink UPLINK_INTERFACE=ens18 UPLINK_AFTR=2404:8e00::feed:100 UPLINK_SECONDS=90 UPLINK_WAN_OUTAGE=1 UPLINK_FULL_RESTART=1` を実HGW接続に一度実行した。稼働homertの固定AFTR・MTU 1454に合わせた実daemonと独立Linux clientでWAN DHCPv4/PD/RA、LAN DHCPv4/DHCPv6/SLAAC、DNS UDP/TCPと条件付き転送の障害・復帰、DS-Lite/NAT IPv4、native IPv6、IPv4/IPv6 HTTPS、worker/daemon再起動を確認した。kernelの`dslite0` MTUは1454、実TCP SYNのpacket captureはMSS 1414、各familyで10 MB HTTPS転送に成功した。IPv4 DF 1426-byte payload（1454-byte packet）は2/3応答で、1 packetにLAN routerから`Destination Net Unreachable`が返った。同時刻のroute captureがなく原因は未確定で、この結果を完全なMTU受入とはしない。IPv6 1452-byte payload（1500-byte packet）は3/3応答。実PDのT1は試験開始時点で約7,186秒先、90秒試験で自然Renew/Replyは0件だった。これは自然更新の合格ではなく、既存の7,800秒実HGW結果とも合算しない。ランナーのPASS表示とnamespace/stage撤去を確認したが、実行セッションから数値終了statusは受け取れず、終了statusは未確認として記録する。full homert設定、対象router appliance/NICの実機資格、ONU直結は未受入。
+
+2026-11-02: current product build `e0ea27e` と、DHCP固定予約を除いた作業中runnerを使い、実HGW `ens18` で `sudo -n make check-uplink UPLINK_INTERFACE=ens18 UPLINK_AFTR=2404:8e00::feed:100 UPLINK_SECONDS=60` を一度実行、exit 0。DHCP client二台は手動の割当固定なしに`198.18.0.2`と`.7`を取得した（`.2`はpool先頭の通常割当）。条件付きDNS用peerはpool外の`.254`。kernel FIBはDHCP clientの送信元から`dslite0`を選び、実トンネルMTUは1454だった。独立LAN peerから1426-byte payload（IPv4 total 1454）のDF pingを3送信し3応答、RTT 4.67–5.26 ms。routerの既存`any` capture（Linux SLL2）は同じICMP id/sequence 1–3をLAN ifindex 8で受信、`dslite0` ifindex 9へNAT後送出、返信を同tunnelとLANへ戻す様子を示した。`dslite0`からの返信は実AFTR `2404:8e00::feed:100`のトンネル復号後である。新しい試験では前回の1/3 `Destination Net Unreachable` は再現せず、前回の原因は依然未確定。終了時にrunnerがstage/namespace/captureを削除したため、outer WAN上の同一ICMP sequenceの生記録は保持していない。自然PD T1は約7,184秒先で、自然Renew/Replyは0件。PD worker SIGKILL/正常停止後の端末通信は1.31/3.26秒で復帰した。WAN outage・全daemon再起動・ONU直結・対象NIC資格は今回の範囲外。

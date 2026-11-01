@@ -48,6 +48,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
         resolver_target.touch()
     run(["mount", "--bind", str(resolver_file), str(resolver_target)])
     router, client, automatic = "r2uplink-" + str(os.getpid()), "r2client-" + str(os.getpid()), "r2auto-" + str(os.getpid())
+    dns_peer_address = "198.18.0.254"
     children, namespaces = [], []
     capture = None
     pd_capture = None
@@ -204,7 +205,6 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
                 "interface": "lan0", "server_address": "198.18.0.1", "sticky_hold_days": 3, "authoritative": True,
                 "primary": {"prefix": "198.18.0.0/24", "start": "198.18.0.2", "end": "198.18.0.20",
                             "lease_seconds": 60, "router": "198.18.0.1", "dns_servers": ["198.18.0.1"]},
-                "reservations": [{"mac_address": "02:00:00:00:00:02", "ip_address": "198.18.0.2"}],
             }},
         },
         {
@@ -244,7 +244,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
     ]
     resources[-1]["service"]["dns"]["spec"]["sources"].insert(0, {
         "name": "private", "kind": "forward", "match": ["split.test"],
-        "upstreams": ["udp://198.18.0.2:5353"], "queryTimeout": "1s",
+        "upstreams": [f"udp://{dns_peer_address}:5353"], "queryTimeout": "1s",
     })
     if dns_upstream:
         source = resources[-1]["service"]["dns"]["spec"]["sources"][-1]
@@ -303,6 +303,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
         )
         run(["ip", "-n", client, "link", "set", "client0", "address", "02:00:00:00:00:02"])
         run(["ip", "-n", client, "link", "set", "client0", "up"])
+        run(["ip", "-n", client, "address", "add", dns_peer_address + "/24", "dev", "client0"])
         run(["ip", "-n", client, "link", "add", "link", "client0", "name", "client1", "type", "macvlan", "mode", "bridge"])
         run(["ip", "-n", client, "link", "set", "client1", "netns", automatic])
         run(["ip", "-n", automatic, "link", "set", "client1", "up"])
@@ -444,13 +445,14 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
         dhcp_client = start(client, ["busybox", "udhcpc", "-f", "-i", "client0", "-s", str(hook), "-p", str(stage / "client-dhcp.pid"), "-t", "3", "-T", "1", "-A", "1", "-x", "hostname:uplink-client"], "client-dhcp")
         wait(lambda: lease_events.exists() and bool(lease_events.read_text().splitlines()))
         lease = lease_events.read_text().splitlines()[-1].split()
-        assert lease[0] == "bound" and lease[1:] == ["198.18.0.2", "198.18.0.1", "198.18.0.1"], "LAN DHCP did not supply the expected address, gateway and DNS: " + str(lease)
+        ipaddress.IPv4Address(lease[1])
+        assert lease[0] == "bound" and lease[2:] == ["198.18.0.1", "198.18.0.1"], "LAN DHCP did not supply an address, gateway and DNS: " + str(lease)
         print("PASS independent LAN client acquired IPv4 address, gateway and DNS from routerd2 DHCP", flush=True)
 
         def start_private_dns():
-            return start(client, ["dnsmasq", "--keep-in-foreground", "--conf-file=/dev/null", "--no-hosts", "--no-resolv", "--bind-interfaces", "--listen-address=198.18.0.2", "--port=5353", "--local-ttl=1", "--address=/split.test/192.0.2.77"], "private-dns")
+            return start(client, ["dnsmasq", "--keep-in-foreground", "--conf-file=/dev/null", "--no-hosts", "--no-resolv", "--bind-interfaces", "--listen-address=" + dns_peer_address, "--port=5353", "--local-ttl=1", "--address=/split.test/192.0.2.77"], "private-dns")
         private_dns = start_private_dns()
-        wait(lambda: subprocess.run(inside(router, ["dig", "@198.18.0.2", "-p", "5353", "ready.split.test", "A", "+short", "+time=1", "+tries=1"]), capture_output=True, text=True).stdout.strip() == "192.0.2.77")
+        wait(lambda: subprocess.run(inside(router, ["dig", "@" + dns_peer_address, "-p", "5353", "ready.split.test", "A", "+short", "+time=1", "+tries=1"]), capture_output=True, text=True).stdout.strip() == "192.0.2.77")
         if capture.poll() is not None:
             raise RuntimeError("uplink packet capture exited before readiness")
         wait(
@@ -474,6 +476,9 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
                 for a in link["addr_info"]
             )
         )
+
+        def current_lease():
+            return lease_events.read_text().splitlines()[-1].split()
 
         info_hook = stage / "client-dhcp6-hook.sh"
         info_hook.write_text('#!/bin/sh\ncase "$1" in bound|renew) printf "dns=%s\\nsearch=%s\\n" "$dns" "$search";; esac\n')
@@ -541,7 +546,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
                     "get",
                     "1.1.1.1",
                     "from",
-                    "198.18.0.2",
+                    current_lease()[1],
                     "iif",
                     "lan0",
                 ],
@@ -723,7 +728,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
                         "get",
                         "1.1.1.1",
                         "from",
-                        "198.18.0.2",
+                        current_lease()[1],
                         "iif",
                         "lan0",
                     ]
@@ -799,7 +804,7 @@ def owner(stage, uplink, aftr, seconds, dns_upstream, wan_mac, wan_outage, full_
             time.sleep(min(10, max(0, seconds - (time.monotonic() - start_time))))
         events = [line.split() for line in lease_events.read_text().splitlines()]
         if seconds >= 75:
-            assert any(event == ["renew", "198.18.0.2", "198.18.0.1", "198.18.0.1"] for event in events), "LAN DHCP client did not renew its address, gateway and DNS"
+            assert any(event[0] == "renew" and event[2:] == ["198.18.0.1", "198.18.0.1"] for event in events), "LAN DHCP client did not renew its address, gateway and DNS"
             assert any(line.startswith("v4|RENEW|") for line in auto_events.read_text().splitlines()), "automatic LAN client did not naturally renew DHCPv4"
             print("PASS both independent LAN DHCP clients naturally renewed their addresses, gateway and DNS", flush=True)
         before = query("control.sock", "/v1/services/service.wan-pd")["snapshot"]

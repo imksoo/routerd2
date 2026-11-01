@@ -1,6 +1,8 @@
 # 現行 routerd と同等の製品にするための実装計画
 
-作成日: 2026-10-24。更新日: 2026-10-31。開発中。全体ゴールは継続中。
+作成日: 2026-10-24。更新日: 2026-11-02。開発中。全体ゴールは継続中。
+
+2026-11-02: 実HGW一台の短い実daemon試験で、DHCP試験の固定予約/固定IP期待を除き、独立clientが動的に取得した値で経路を検査するよう変更した。DHCPv4/DHCPv6/SLAAC/DNS、worker再起動、DS-Lite/NAT、各10 MB HTTPSとIPv4最大サイズDFを確認。前回のIPv4 `Destination Net Unreachable` は再現しなかったが原因確定ではない。全34 work packageと対象profileの受入は継続中。詳細と未保持packet範囲は[引き継ぎ](pve-codex-handoff.md)に記録する。
 
 2026-10-31: `sam-wireguard-final-release` で独立旧routerd RR・FRRと実routerd2 process/kernelによるSAM WireGuard→IPIP/BGPを確認。handshake、NATなしTCP/UDP双方向、revokeと元期限切れ後のkernel撤去を実通信で受け入れた。CLOUD-04の/32 mobility/provider action、planned drain、分断復旧、provider liveは継続。
 

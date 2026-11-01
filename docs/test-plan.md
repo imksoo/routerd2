@@ -1,6 +1,6 @@
 # routerd2 実通信・製品受入試験計画
 
-更新: 2026-10-31。対象は [実装計画](implementation-plan.md) と同 JSON の全34 work package。
+更新: 2026-11-02。対象は [実装計画](implementation-plan.md) と同 JSON の全34 work package。
 目的は、端末を接続しただけで必要な通信ができ、障害から復旧し、運用・更新できる最初の製品を完成させること。
 旧 routerd と homert02/03 の実設定・実装を先に読み、必要な機能と実際の制約を特定する。
 旧 routerd2 の試作 API・形式・過去のテストに互換性を設けない。
@@ -91,6 +91,7 @@
 - `health-ready-native105`: `make check-health-pbr` は独立二 WAN namespace peer と実 supervisor/control/network/Health worker で、Health→PBR の障害切替・復旧、worker/supervisor 再起動、古い通知・期限切れ、confirmed rollback、TCP/UDP と packet capture を確認した。対象回線・対象機器は未受入。
 
 - `hgw-short-main-20bc21c`: 実HGWへ隔離 macvlan で接続した current main の実daemonと、独立 BusyBox/dhcpcd LAN端末二台で、DHCPv4、DHCPv6 information、SLAAC、委譲RDNSS/search domain、IPv4 DS-Lite/IPv6 HTTPS、学習DNSのUDP/TCP、条件付きforwarderの停止/復帰を確認した。WAN blackhole復帰は0.84秒、続く7,800秒観測では自然PD Renew/Reply 1回、二台の自然DHCP更新、PD worker SIGKILL/正常再起動後の端末通信1.36/3.88秒、DUID/IAID/prefix保持、zero-lifetime RA withdrawal、726周回のIPv4/IPv6 HTTPSと学習DNS UDP/TCPが終了0だった。ONU直結、対象NIC、継続TCP、Tailscale長時間条件、HA、対象構成全体は未受入である。namespace、一時stage、captureは終了時に撤去した。
+- `dhcp-dynamic-dslite-mtu-main-e0ea27e`: 実HGW・current product build・独立Linux namespace clientsで`make check-uplink UPLINK_SECONDS=60`を終了0にした。固定予約を除いたDHCPv4 clientは`.2`、自動clientは`.7`を取得し、動的値から経路を確認した。DS-Lite MTU 1454で1426-byte DF payloadが3/3応答し、router captureの同じICMP id/sequenceをLANと`dslite0`の往復で確認した。前回の1/3 Unreachableは再現しなかったが、原因は未確定。自然PD renewal、outer WANの同一ICMP sequence保存、WAN outage、全daemon restart、実ONU/NIC受入ではない。raw stage/captureは終了時に削除した。
 
 - `dhcp-ingress-native105`: 隔離 PVE（4 CPU/4 GiB）の実 appliance で、ハッシュ・release ID を照合した三実行物と20 Ready moduleを使い、cold boot/reboot 後の DNS UDP/TCP（IPv4/IPv6）、TCP/UDP、BGP、NTP、Tailscale、および通常・特殊端末それぞれの120秒 DHCPv4自然T1 unicast/同一XID ACK/option 54=`172.18.0.1` を確認した。PVE kernel 試験であり、12時間の元lease、ONU/HGW・対象機器、全34 package は引き続き未受入。
 
