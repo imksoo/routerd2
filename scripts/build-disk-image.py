@@ -26,6 +26,16 @@ def digest(path):
     return value.hexdigest()
 
 
+def unpack_initramfs(source, target):
+    target.mkdir()
+    with gzip.open(source, "rb") as archive:
+        subprocess.run(["cpio", "--quiet", "--extract", "--make-directories", "--no-absolute-filenames"], cwd=target, input=archive.read(), check=True)
+    # write_archive provides the initial devices itself. They were decoded only
+    # because the source image is a complete initramfs.
+    for name in ("console", "null"):
+        (target / "dev" / name).unlink(missing_ok=True)
+
+
 def provision_state(source, target):
     """Copy an explicitly prepared native state tree, preserving file modes."""
     if not stat.S_ISDIR(source.lstat().st_mode):
@@ -101,7 +111,11 @@ def main():
             shutil.copyfile(args.config, overlay / "etc/routerd/config.json")
         selected_config = overlay / "etc/routerd/config.json"
         config_hash = digest(selected_config) if selected_config.exists() else source_manifest["config_sha256"]
-        mkinitramfs.write_archive(overlay, work / "boot-overlay.gz", 0)
+        root = work / "root"
+        unpack_initramfs(image / "initramfs.cpio.gz", root)
+        shutil.copytree(overlay, root, dirs_exist_ok=True)
+        merged_initramfs = work / "initramfs.cpio.gz"
+        mkinitramfs.write_archive(root, merged_initramfs, 0)
         run(["sfdisk", str(disk)], input="label: dos\nstart=2048,size=2097152,type=83,bootable\ntype=83\n",
             stdout=subprocess.DEVNULL)
         loop = run(["losetup", "--find", "--show", "--partscan", str(disk)],
@@ -125,9 +139,7 @@ def main():
             grub.mkdir(parents=True)
             shutil.copyfile(image / "vmlinuz", boot_root / "boot/vmlinuz")
             initramfs = boot_root / "boot/initramfs.cpio.gz"
-            shutil.copyfile(image / "initramfs.cpio.gz", initramfs)
-            with initramfs.open("ab") as target, (work / "boot-overlay.gz").open("rb") as extra:
-                shutil.copyfileobj(extra, target)
+            shutil.copyfile(merged_initramfs, initramfs)
             (grub / "grub.cfg").write_text(
                 "serial --unit=0 --speed=115200\n"
                 "terminal_input serial\nterminal_output serial\n"
