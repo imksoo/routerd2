@@ -52,7 +52,9 @@ def call(argv, timeout=30, input=None):
 
 
 def pve_prepare(stage, target, jump, identity):
-    ssh = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=yes"]
+    owner = os.environ.get("SUDO_USER") or pwd.getpwuid(os.getuid()).pw_name
+    known_hosts = Path(pwd.getpwnam(owner).pw_dir) / ".ssh" / "known_hosts"
+    ssh = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=yes", "-o", "UserKnownHostsFile=" + str(known_hosts), "-o", "GlobalKnownHostsFile=/dev/null"]
     if jump:
         ssh += ["-J", jump]
     if identity:
