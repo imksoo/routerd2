@@ -65,7 +65,6 @@ help:
 	  'make check-health-pbr  Required two-WAN real-daemon TCP/UDP failover gate' \
 	  'make check-vrrp-unicast Verify VRRP peer failover and finite WAN identity' \
 	  'make check-tailscale   Verify signed Tailscale subnet/exit traffic, identity and revoke with independent peers' \
-	  'make check-initial-state-migration INITIAL_STATE_PVE_HOST=... Verify selected stopped-owner state on a fresh isolated PVE disk' \
 	  'make check-otlp        Verify OTLP/gRPC logs, collector outage and bounded replacement' \
 	  'make check-management  Verify imported management access and SSH configuration/recovery' \
 	  'make check-ingress     Verify ingress forwarding, hairpin NAT and VRRP tracking' \
@@ -495,11 +494,6 @@ check-tailscale: build build-publisher tailscale-engine tailscale-peers
 
 check-tailscale-homert: build build-publisher tailscale-engine tailscale-peers
 	$(PYTHON) scripts/tailscale-peer.py --homert
-
-.PHONY: check-initial-state-migration
-check-initial-state-migration: image tailscale-peers
-	@test -n '$(INITIAL_STATE_PVE_HOST)' || { printf '%s\n' 'INITIAL_STATE_PVE_HOST is required'; exit 2; }
-	$(PYTHON) scripts/initial-state-migration.py --pve-host '$(INITIAL_STATE_PVE_HOST)' $(if $(INITIAL_STATE_PVE_JUMP),--pve-jump '$(INITIAL_STATE_PVE_JUMP)')
 
 CHRONY_ARCH ?= $(shell $(GO) env GOARCH)
 CHRONY_DIR ?= dist

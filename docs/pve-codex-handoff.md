@@ -1,6 +1,6 @@
 # routerd2 開発引き継ぎ
 
-更新: 2026-11-02 04:06 JST。最初の製品は未完成であり、[実装計画](implementation-plan.md)、[機械可読台帳](implementation-plan.json)、[試験計画](test-plan.md)、[初回状態移行手順](initial-state-migration.md)、[AGENTS.md](../AGENTS.md)を基準に進める。各実通信試験の直前に試験計画の実行手順と対象項目を読み直す。対象本番の置換はしていない。
+更新: 2026-11-02 04:06 JST。最初の製品は未完成であり、[実装計画](implementation-plan.md)、[機械可読台帳](implementation-plan.json)、[試験計画](test-plan.md)、[AGENTS.md](../AGENTS.md)を基準に進める。各実通信試験の直前に試験計画の実行手順と対象項目を読み直す。対象本番の置換はしていない。
 
 ## 現在の実装
 
@@ -26,7 +26,7 @@ DHCP HA は VRRP が配布役を選び、dnsmasq に VIP と物理 ingress を�
 
 - `health-ready-native105`: 独立二 WAN namespace peer、実 supervisor/control/network/Health worker で Health→PBR の障害切替・復旧、worker と supervisor の再起動、古い通知・期限切れの拒否、confirmed rollback、TCP/UDP と packet capture を確認した。
 - `dslite-pmtu-main-1e317d4`: 本番NICから隔離した一台 Linux namespace の独立 PPPoE/DS-Lite 対向で、IPv4 DF の ICMP fragmentation-needed、同一 UDP socket の1454→1400 PMTU学習、NAT後1368-byte payload/replyを終了0で確認した。対象WAN/NICのPMTU・物理負荷受入ではない。
-- `hgw-short-main-20bc21c`: 実HGWへ隔離 macvlan を接続した current main と独立LAN端末二台で、DHCPv4/DHCPv6 information/SLAAC、委譲RDNSS/search domain、IPv4 DS-Lite/IPv6 HTTPS、学習DNS UDP/TCP、条件付きforwarder停止/復帰、WAN blackhole復帰、PD workerのSIGKILL/正常再起動、全daemon再起動後の通信を確認した。続く7,800秒観測は自然PD Renew/Reply 1回、二台の自然DHCP更新、DUID/IAID/prefix保持、zero-lifetime RA withdrawal、726周回のIPv4/IPv6 HTTPSと学習DNS UDP/TCPを終了0で確認した。ONU直結、対象NIC、継続TCP、Tailscale長時間条件、HA、実状態移行は未受入である。
+- `hgw-short-main-20bc21c`: 実HGWへ隔離 macvlan を接続した current main と独立LAN端末二台で、DHCPv4/DHCPv6 information/SLAAC、委譲RDNSS/search domain、IPv4 DS-Lite/IPv6 HTTPS、学習DNS UDP/TCP、条件付きforwarder停止/復帰、WAN blackhole復帰、PD workerのSIGKILL/正常再起動、全daemon再起動後の通信を確認した。続く7,800秒観測は自然PD Renew/Reply 1回、二台の自然DHCP更新、DUID/IAID/prefix保持、zero-lifetime RA withdrawal、726周回のIPv4/IPv6 HTTPSと学習DNS UDP/TCPを終了0で確認した。ONU直結、対象NIC、継続TCP、Tailscale長時間条件、HAの受入は未完了である。
 - `dhcp-ingress-native105`: 隔離 PVE の appliance で、通常・特殊 DHCPv4 client が 120 秒 lease の自然 T1 に VIP `172.18.0.1:67` 宛て unicast REQUEST を送り、同じ XID の ACK と option 54 を受信した。cold boot/reboot 後の DNS UDP/TCP（IPv4/IPv6）、TCP/UDP、BGP、NTP、Tailscale も通過した。
 - `pd-rebind-pve`: 隔離 PVE（4 CPU/4 GiB）の update/reboot で ISC DHCPv6 を appliance reboot 前に停止し、新しい PPP を観測後に再起動した。WAN capture の最初の復帰 PD 交換は Rebind で Solicit なし、初回観測の DUID/IAID/prefix と一致した。RA withdrawal/PADT、署名更新、明示 rollback、Health 障害による候補自動 rollback、復帰後の LAN DNS と IPv4/IPv6 TCP/UDP まで終了0で確認した。
 - `ops-native106`: 隔離 Linux namespace の二台 HA で、通常・特殊 DHCPv4、旧 lease と元期限の取込、片系停止中の新規端末、取得 DNS UDP/TCP、IPv4 TCP/UDP、両方向切替と復帰後の lease 同期を確認した。ここでの更新は明示的に促したものである。
@@ -45,15 +45,14 @@ DHCP HA は VRRP が配布役を選び、dnsmasq に VIP と物理 ingress を�
 
 ## main統合と保存設定復元
 
-管理PR #1（`4fcdb89`まで）、選択済み初期状態のディスク入力、HA観測保持修正 `30eaa27` を統合した作業版 `main-management-sam-126` で、管理2ケースとSAM4ケースが実daemon/独立peerで終了0。SAM claimの固定所有経路は設定準備時に一度だけ生成し、観測更新ごとのJSON再読込み・固定アドレス解析を除いた。3配布物の通常buildと静的リンクも確認した。
+管理PR #1（`4fcdb89`まで）、新規状態ディスクの準備、HA観測保持修正 `30eaa27` を統合した作業版 `main-management-sam-126` で、管理2ケースとSAM4ケースが実daemon/独立peerで終了0。SAM claimの固定所有経路は設定準備時に一度だけ生成し、観測更新ごとのJSON再読込み・固定アドレス解析を除いた。3配布物の通常buildと静的リンクも確認した。
 
-全57設定の別PVE受入版 `ops-management-integrated-native125` / `4fcdb89` は、DNS変更と保存設定復元の前後で同じPD worker・prefix・元期限を保持した。復元から取得DNS・IPv4/IPv6 TCP/UDP・BGP・特殊端末・Tailscaleの確認まで3.299秒、続く全体再起動後の復帰も終了0。修正前の現用HA版観測の破棄はこの条件で再現済み。専用VMは撤去し、自然更新の版120は変更していない。対象接続先、既存状態の移行、実測負荷、k8s/pve差分とCloud SAMは継続する。
+全57設定の別PVE受入版 `ops-management-integrated-native125` / `4fcdb89` は、DNS変更と保存設定復元の前後で同じPD worker・prefix・元期限を保持した。復元から取得DNS・IPv4/IPv6 TCP/UDP・BGP・特殊端末・Tailscaleの確認まで3.299秒、続く全体再起動後の復帰も終了0。修正前の現用HA版観測の破棄はこの条件で再現済み。専用VMは撤去し、自然更新の版120は変更していない。対象接続先、実測負荷、k8s/pve差分とCloud SAMは継続する。
 
 main統合版126のハッシュ一致3実行物でも、通常125の起動イメージを基底にした全57設定のPVE復元・全体再起動が終了0。PD worker・prefix・元期限を保持し、復元から全通信確認まで4.305秒だった。新規126イメージ全体の受入とは区別する。専用VMは撤去済み。
 
-公開は `25e7cf9`（PR #1統合済み）。PVEで固定した126版の変更対象Goソース29件・埋込みHTMLと一致し、試験した3実行物のハッシュも照合した。通常APKから新規作成した同じ126版の二台BIOSディスクも、実電源断・再参加の両方向が終了0。全通信復旧25.881/16.010秒、同じTCP接続とNATを保持して最大応答待ち7.196秒。UDP1,675送信中226期限切れ、DNS951件中20失敗。元60秒/15秒を維持した。旧主系不在の新規自動端末も取得DNSと両IP通信を利用でき、同じTailscale exit選択も再起動後に復旧した。両試験VMは撤去済み。実状態移行・実経路負荷・対象WAN/LANを閉じてからk8s/pve差分、Cloud SAMへ進む。
+公開は `25e7cf9`（PR #1統合済み）。PVEで固定した126版の変更対象Goソース29件・埋込みHTMLと一致し、試験した3実行物のハッシュも照合した。通常APKから新規作成した同じ126版の二台BIOSディスクも、実電源断・再参加の両方向が終了0。全通信復旧25.881/16.010秒、同じTCP接続とNATを保持して最大応答待ち7.196秒。UDP1,675送信中226期限切れ、DNS951件中20失敗。元60秒/15秒を維持した。旧主系不在の新規自動端末も取得DNSと両IP通信を利用でき、同じTailscale exit選択も再起動後に復旧した。両試験VMは撤去済み。実経路負荷・対象WAN/LANを閉じてからk8s/pve差分、Cloud SAMへ進む。
 
-両homertのTailscale1.104.2と保存先`/var/lib/tailscale/tailscaled.state`（root:root、0600通常ファイル）は読取専用メタデータで確定した。状態本文は未取得で、実状態移行の合格には数えない。製品/VMを除く同じSSH Ethernet伝送自体の対照は102.259/131.067 Mbpsであり、旧候補の130〜149 Mbpsは製品上限の証拠ではない。
 
 2026-11-01: homert02/03 の現行 router YAML を読取専用で取得し、隔離VMの明示NIC名へ置換して current main の migration/validation に通した。両方とも56 resource のnative設定になった。これは現行入力と変換器の組合せ確認であり、Tailscale保存状態、旧lease、実WAN、実VM起動の移行受入ではない。入力と変換出力は確認後に削除する。
 
@@ -63,13 +62,11 @@ main統合版126のハッシュ一致3実行物でも、通常125の起動イメ
 
 2026-11-01: 実HGW用macvlan fixtureはDS-Lite復路をcaptureするが、任意のIPv4 ICMP fragmentation-needed、IPv6 Packet Too Big、断片化を発生させる制御可能な実経路を持たない。そのため自然PD観測や隔離DS-Lite PMTU試験を再実行して物理PMTU受入と取り違えなかった。物理受入には、host管理経路から分離したL2、MTUを下げて両ICMPを返せる実対向、router/対向のcapture、試験前後の管理interfaceとhost経路の一致が必要である。
 
-2026-11-01: 現行入力の56 resourceにappliance用の明示管理addressを加えた57 resource候補はcurrent mainで`config validate`を通った。通常APK由来の新規diskを外部へ接続しないQEMU三NIC（`eth0`/`eth1`/`eth2`）で起動し、PID 1、supervisor、network/control/managementと設定workerの起動を確認した。空stateにはHA鍵・独立Tailnet enrollment・独立peerを供給していないため依存workerが停止しreadyに達しなかった。この結果は設定変換後の隔離起動確認に限り、実状態移行・単体router・HA・対象機の受入には数えない。QEMU停止後にhost管理interfaceとIPv4/IPv6経路が同一であることを照合した。disk、image、console、設定コピーを削除した。
+2026-11-01: 現行入力の56 resourceにappliance用の明示管理addressを加えた57 resource候補はcurrent mainで`config validate`を通った。通常APK由来の新規diskを外部へ接続しないQEMU三NIC（`eth0`/`eth1`/`eth2`）で起動し、PID 1、supervisor、network/control/managementと設定workerの起動を確認した。空stateにはHA鍵・独立Tailnet enrollment・独立peerを供給していないため依存workerが停止しreadyに達しなかった。この結果は設定変換後の隔離起動確認に限り、単体router・HA・対象機の受入には数えない。QEMU停止後にhost管理interfaceとIPv4/IPv6経路が同一であることを照合した。disk、image、console、設定コピーを削除した。
 
 同日に、この結果へ圧縮済みの旧full-profile disk/image、設定コピー、raw logを削除し、3.8 GiBを解放した。稼働中のプロセスが参照していないことを確認してから削除しており、実入力・鍵・captureは残していない。
 
-2026-11-01: 初回状態移行の入力、停止境界、既存ディスクを置換しない新規ディスク作成、検査、失敗時の旧サービス復帰を[手順](initial-state-migration.md)として固定した。空の root 専用状態作業ディレクトリを新しい ext4 ディスクへ組み込み、読み取り専用マウントで`lost+found`以外がないこと、同じディスクの隔離 QEMU Linux PID 1起動（37.7秒）を確認した。旧状態本文・鍵・リースは取得していない。実状態移行、Tailscale 識別情報、リース/固定割当履歴の取込、対象機切替は未受入のままである。
 
-2026-11-01: current main の正規 image を使う `check-initial-state-migration` を隔離 PVE で終了0にした。停止済み旧 owner の選択 Tailscale state、SSH host key、DHCP lease/sticky 入力を新規 disk に取り込み、disk内stateを読取検査した。独立 Headscale/公式 peerで同じnode IDとping、旧DHCP更新・別MACの新規lease、DNS UDP/TCP、LAN/WAN IPv4/IPv6 TCP/UDPを実通信とcaptureで確認し、新 PID 1停止後に旧入力が未変更のまま単独復帰できた。旧 routerdのSQLite table formatをfixtureが生成したものであり、実homert state・ONU/NIC・HAの受入ではない。VM、disk、鍵、capture、raw logは削除済みである。
 
 2026-11-01: 通常126 APKから起動した隔離PVEの4CPU/4GiB実VMと、同じPVE内の独立LAN/WAN端末を直接接続した。SSHは管理・結果回収だけで、SSH転送に使える二つの別リンクでTCP/5201 packetが0なのをcaptureした。最小の静的IPv4 NAT/IPv6転送構成で15秒単一TCPは、IPv4 NAT受信1.275/1.280Gbps、IPv6受信1.228/1.243Gbpsだった。相手はIPv4でNAT後の`192.168.1.249`、IPv6で元のLAN端末を観測した。このため旧130〜149Mbpsを製品上限とする根拠はなくなった。DS-Lite、DHCP/SLAAC/DNS、HA、対象回線・NICの負荷合格には流用しない。VM、raw disk、capture、パッケージとremote stageは削除済み。
 
@@ -81,7 +78,7 @@ main統合版126のハッシュ一致3実行物でも、通常125の起動イメ
 
 同じ候補版123への署名付き更新、120への明示切戻し、正常性確認失敗による自動復旧も隔離PVEで終了0だった。通信確認までそれぞれ36.278秒、34.725秒、137.304秒で、最後は90秒の試行期限を含む。設定と既存の識別情報を保持した。公開済みSAM修正 `c85c7a1` を取り込んだ `79813e7` は関連パッケージの競合検査・静的検査が終了0であり、候補版123の実通信結果とは区別する。
 
-本番対象は各4仮想CPU・4 GiBのPVE仮想機械である。次の対象受入は本番接続先、Ubuntu/Linux環境、既存状態の移行、実測負荷との差分を確認する。新しい物理機器の要件をhomert置換の前提へ追加しない。
+本番対象は各4仮想CPU・4 GiBのPVE仮想機械である。次の対象受入は本番接続先、Ubuntu/Linux環境、実測負荷との差分を確認する。新しい物理機器の要件をhomert置換の前提へ追加しない。
 
 自然更新の専用job `ops-management-combined-native120` は終了した。通常端末は16:37:31.917 JST、特殊端末は16:37:32.409 JSTに、元の43,200秒lease・21,600秒T1のunicast REQUESTをVIPへ送り、同一XIDとoption 54を持つACKを受け、期限を延長した。job全体は後続Tailscale TCP timeoutのため終了1であり、Tailscale長時間継続の合格には数えない。
 
@@ -119,7 +116,6 @@ DHCPv6 PD の再起動後 Rebind と、不良 candidate から known-good runtim
 
 2026-11-01: `7c775a2`で新規diskを作り、閉域PVEの新規三NIC VMへQEMU stream/TAPだけで接続した。管理DHCP、routerd2固有SSH banner、pinしたhost key、公開鍵認証、PID 1、`ready=true`、全required worker ready、WAN RA受信、独立Headscale enrollmentまでを実通信で確認した。full homert03 profileのLAN DHCPはVRRPがVIPを公開せず開始しなかった。worker状態と設定を照合すると、firewallの`public-dns` address setは五つの公開DNS名を`127.0.0.1:53`へ問い合わせ、core resolverの既定upstreamは実DoH（NextDNS/Cloudflare）である。閉域の通常DNSだけではDoH TLS検証を満たせず、address setがunresolvedとなりVRRPは`ReadinessTimeout`を維持した。成功として扱わない。次回は実DoH到達性を持つ独立上流、または試験用CAと明示したDoH peerを構成してから同じ単体受入を再開する。VM、remote stage、disk、鍵、capture、namespace、bridge、TAP、relay、Headscaleを削除し、VM 182不在を確認した。
 
-2026-11-01: current main `1460bda` の `make check-initial-state-migration INITIAL_STATE_PVE_HOST=root@pve07.lain.local INITIAL_STATE_PVE_JUMP=chatty.lain.local` を実行した。新規 PVE VM `routerd2-initial-state-*`（4 vCPU、4 GiB、既存 bridge/NIC なし）を通常 build の disk で起動し、停止済み旧 owner の選択済み Tailscale state、SSH host key、DHCP lease/sticky record を新しい state disk に取り込んだ。独立 Headscale/公式 Tailscale peerで同一 node ID と ping、元 DHCP client の更新と別 MAC の新規 lease、DNS UDP/TCP、LAN/WAN の IPv4/IPv6 TCP/UDP を実通信・WAN capture で確認した。新 PID 1を停止して旧 owner を復帰し、同一 ID の単独所有も確認した。試験 VM、remote stage、local stage、capture、鍵、raw log は終了確認後に削除した。旧 routerd の SQLite table formatをfixtureで生成する移行経路であり、実homert state、二台HA、ONU/HGW/NICの受入ではない。
 
 2026-11-01: current main `f046419` で `sudo make check-health-pbr` を実行した。実supervisor/control/network/Health workerと独立二WAN/LAN namespace peerを使う `TestDaemonConnectionMarkedEgressPolicy`、`TestDaemonHealthPBRFailoverAndRecovery`、`TestDaemonEgressRouteHealthyMultipath` が通過した。各ケースはTCP/UDPとpacket capture、Health worker/supervisor再起動、古い通知、期限切れ、confirmed rollbackを含む。試験stageとraw logは終了後に削除した。対象PVE二VM、実ONU/HGW/NICの受入ではない。
 

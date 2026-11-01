@@ -14,7 +14,7 @@
 4. homert と独立して進められる routing、管理、更新、他 engine の実装と試験を並行して進める。単一の不具合に全体を止めない。
 5. 対象機器と cloud/Kubernetes の実環境をそれぞれ受け入れる。VM の合格を実機や別 provider の合格に置き換えない。
 
-初回ディスク/状態移行は [初回状態移行手順](initial-state-migration.md) の停止境界・入力表・復帰手順を使う。旧状態ディレクトリの丸ごとコピー、旧デーモンと新 PID 1 の併走は不合格とする。
+初回導入は新しい状態ディスクへ、あらかじめ routerd2 の native 形式に変換し `routerd config validate` を通した設定を投入して行う。変換にはAIや `routerd config migrate` を使えるが、これは導入前の準備であり、移行機能の試験を製品受入ゲートにしない。routerd 1.0 の実行状態（Tailscale identity、SSH host key、DHCP lease/sticky 履歴など）の移送や旧デーモンからのアップグレードは受入条件に含めない。routerd2 の初回リリース後に行う通常の更新・復旧試験は別に実施する。
 
 各試験は実装済み・実行済み・不合格・未実施を区別する。失敗時は、どの版・peer・設定で何が起きたかを特定し、
 製品、試験、環境のどこに原因があるか判明するまで不明として扱う。原因を修正して影響する試験を再実行する。
@@ -379,26 +379,24 @@ DNSは1,017問い合わせ中17失敗した。停止した同じTailscale出口�
 この統合ソースの補助検査と、前述のソース `20ea125` による実通信結果を区別する。
 
 本番のhomert02/03は各4仮想CPU・4 GiBのPVE仮想機械で、VirtIOの三つのNICとVirtIO/SCSIディスクを使用している。
-対象構成との差分は本番の接続先、Ubuntu/Linux環境、既存状態の移行、実際の負荷である。
+対象構成との差分は本番の接続先、Ubuntu/Linux環境、事前変換した設定での新規導入、実際の負荷である。
 読み取り専用で取得した直近24時間の記録では、忙しい側の受信最大は730.105 Mbps、送信最大は704.146 Mbpsだった。
 いずれも60秒平均値の最大であり、瞬間最大、パケット処理数、候補版の性能合格を表さない。
 
 2026-10-31 17:54 JST: `4fcdb89` / `ops-management-integrated-native125` の全57設定を隔離PVEで再実行した。修正前はDNSのAレコードだけの変更・保存設定の復元で、現用HA版のDHCPv6観測が破棄され、端末の取得済みIPv6 DNSが不通になった。`30eaa27`は準備済みの基底版または現用HA版との完全一致で観測を保持する。変更前・DNS変更後・復元後の3点で、同じPD workerのPID・世代・設定識別値、prefixと元の優先/有効期限が一致した。復元から取得DNS、IPv4/IPv6 TCP/UDP、BGP、特殊端末、Tailscaleの確認まで3.299秒。続く製品全体の再起動後もDNS/両IP/BGP/IX/NTP/Tailscaleと識別情報が復帰し、終了0だった。専用VMは撤去済みで、自然更新用の版120とは別の結果である。
 
-mainへの統合作業版 `main-management-sam-126` は、管理PR #1と上記修正、選択済み初期状態のディスク入力、SAM所有 `/32` の準備時生成を統合した。通常の `make build` による静的リンク3配布物で、管理の設定・復旧2ケースと、独立旧routerd RR/FRRとのSAM 4ケースが終了0。前段の `main-management-sam-125` では管理6機能の実daemon試験も終了0だった。固定claimのJSON再読込みとアドレス解析は観測更新から除き、設定準備時に一度だけ行う。SAM試験は `make check-sam-transport OLD_ROUTERD=/absolute/path/to/independent/routerd` で再実行できる。対象回線・既存状態移行・実測負荷、k8s/pve差分とCloud SAM全体は継続する。
+mainへの統合作業版 `main-management-sam-126` は、管理PR #1と上記修正、SAM所有 `/32` の準備時生成を統合した。通常の `make build` による静的リンク3配布物で、管理の設定・復旧2ケースと、独立旧routerd RR/FRRとのSAM 4ケースが終了0。前段の `main-management-sam-125` では管理6機能の実daemon試験も終了0だった。固定claimのJSON再読込みとアドレス解析は観測更新から除き、設定準備時に一度だけ行う。SAM試験は `make check-sam-transport OLD_ROUTERD=/absolute/path/to/independent/routerd` で再実行できる。対象回線・native設定での新規導入・実測負荷、k8s/pve差分とCloud SAM全体は継続する。
 同じ `main-management-sam-126` の3実行物をハッシュ照合して固定し、通常版125のAlpine起動イメージへ明示的に配置した隔離PVEの全57設定も終了0だった。DNS変更・保存設定復元の前後で同じPD worker・prefix・元期限を保持し、復元から全通信確認まで4.305秒。続く製品全体の再起動後も取得DNS・両IP・BGP/IX・NTP・Tailscaleと識別情報が復帰した。これは通常125のkernel/initramfsと通常126の全3製品バイナリーを使った条件であり、126の新規起動イメージ全体を作り直した試験ではない。専用VMは撤去した。
 
 最終の `make check` は全体のRace Detector・vet・Python 36チェックを含め終了0。amd64/arm64の通常build、静的リンク6実行物、両architectureの実catalog・署名bundle受入も終了0。arm64機での実行を示すものではない。初回の大量設定Raceでは、同時ビルド中に元の確定期限を超過した。期限を変更しない再実行は通過した。UTCアドレスreadinessの一試行には最初の適用状態の記録がなく、原因を断定しない。元の500ms期限を維持して期限付き状態の適用を先に確認する条件を加え、単独・全体Raceとも通過した。
 
 2026-10-31: 公開コミット `25e7cf9` と、PVEで固定した126版の変更対象Goソース29件・埋込みHTMLが一致した。試験した3実行物のハッシュも通常build出力と一致し、PR #1はmainへ統合済み。同じ126版の二台停止/復帰も、以下の通常APKイメージで確認した。
 
-2026-10-31 18:37 JST: `25e7cf9` / `main-management-sam-126` の通常 `make image` から、新しい二台のAlpine/KVM・4CPU/4GiB・BIOS VirtIO/SCSIディスクを起動した。独立ISC/FRR/Headscale・公式Tailscale/DNS・DoH/NTPと自動取得端末で、両方向の実電源断・再参加が終了0。全通信復旧25.881/16.010秒、同じTCP socket・SYN・NAT mappingを保持し最大応答待ち7.196秒。UDP1,675送信/1,449受信/226期限切れ、最大無応答5.724秒、DNS951件中20失敗。旧主系不在と再参加後の新規DHCP/SLAAC端末も、取得DNS UDP/TCPと両IP TCP/UDPを使用できた。同じexit選択は再起動後2.734/2.090秒で復旧した。元60秒/15秒の条件を維持し、設定した別exitへの自動変更は行っていない。起動イメージ内のAPK版実行物を使用し、先の通常build出力を重ねた試験とは区別する。両試験VMは撤去済み。自然更新・本番状態移行・対象接続先・実負荷とIX物理SNATの既存flow同期は、この結果に含めない。
+2026-10-31 18:37 JST: `25e7cf9` / `main-management-sam-126` の通常 `make image` から、新しい二台のAlpine/KVM・4CPU/4GiB・BIOS VirtIO/SCSIディスクを起動した。独立ISC/FRR/Headscale・公式Tailscale/DNS・DoH/NTPと自動取得端末で、両方向の実電源断・再参加が終了0。全通信復旧25.881/16.010秒、同じTCP socket・SYN・NAT mappingを保持し最大応答待ち7.196秒。UDP1,675送信/1,449受信/226期限切れ、最大無応答5.724秒、DNS951件中20失敗。旧主系不在と再参加後の新規DHCP/SLAAC端末も、取得DNS UDP/TCPと両IP TCP/UDPを使用できた。同じexit選択は再起動後2.734/2.090秒で復旧した。元60秒/15秒の条件を維持し、設定した別exitへの自動変更は行っていない。起動イメージ内のAPK版実行物を使用し、先の通常build出力を重ねた試験とは区別する。両試験VMは撤去済み。自然更新・対象接続先・実負荷とIX物理SNATの既存flow同期は、この結果に含めない。
 
 性能試験の対照として、製品とVMを除いた同じ単一SSH上のEthernet往復を、独立iperf3・単一TCP・各15秒で測定した。受信側は102.259/131.067 Mbpsだった。候補123の130〜149 Mbpsを製品上限と解釈できず、伝送・QEMU・スケジューリングのどこが律速かは未特定である。対象負荷の受入では、測定packetがSSHを通らない経路を用意する。
 
 2026-11-01 10:29 JST: `25e7cf9` の通常126 APK imageから隔離PVEの4CPU/4GiB実VMを一台起動し、WAN/LANの両側にPVE内の独立network namespace端末を直接接続した。IPv4 NATとIPv6 forwardingだけを明示した最小ResourceProgramで15秒単一TCPを両方向に実行した。IPv4 NATの受信は1,274.734/1,279.954Mbps（相手でNAT後送信元`192.168.1.249`）、IPv6は1,228.380/1,243.248Mbps（元LAN端末送信元）だった。管理・結果回収用SSHとは別の二つのリンクでTCP/5201 captureは全ケース0 packetであり、測定通信がSSHを通らないことを確認した。これはfull homert/DS-Lite、DHCP/SLAAC/DNS、HA、対象回線/NICの性能受入ではない。完了後に専用VM、remote stage、disk、capture、詳細iperf出力を削除した。
-
-対象両機のTailscaleは1.104.2、保存先は`/var/lib/tailscale/tailscaled.state`のroot:root・0600通常ファイルと、guest-agent経由の読取専用メタデータで確認した。状態本文と鍵は採取していない。選択した実状態の移行受入は別に残る。
 
 ## 7. Cloud・SAM・Kubernetes
 

@@ -8,13 +8,11 @@
 
 2026-10-31: `sam-mobility-candidate` でclaim所有のIPv4 `/32` をSAM leafのBGPへ投影し、独立FRRで広告と明示revoke/元admission期限切れによる撤回を確認した。暗号化有無を含む4つの実daemon/Linux kernelケースでNATなしTCP/UDPとtunnel/FIB撤去が通過し、`make check`も終了0。単一claimのBGP deliveryを実装した段階であり、claim間のowner移動、provider capture、planned drain、partition recovery、対象機器・cloud acceptanceは残る。
 
-2026-10-31: 管理PR #1、選択済み識別情報の初期ディスク入力、HA観測保持修正 `30eaa27` をmainのSAM実装へ統合した。全57設定のPVE版 `ops-management-integrated-native125` は、DNS変更→保存設定復元で同じPD worker・prefix・元期限を保持し、取得DNSと両IP通信ほかの確認まで3.299秒、続く全体再起動も終了0。main統合作業版 `main-management-sam-126` の管理2ケース・SAM4ケースも実daemonで通過した。同じ126のハッシュ一致3実行物を通常125のAlpine起動イメージへ配置した全57設定のPVE試験も、PDと元期限を保持して復元後4.305秒で全通信が成立し、全体再起動後の復帰まで終了0だった。固定SAM所有経路は設定準備時に生成する。既存状態移行、対象の接続先と実測負荷、k8s/pve差分、Cloud SAMの残実装を次に閉じる。
+2026-10-31: 管理PR #1とHA観測保持修正 `30eaa27` をmainのSAM実装へ統合した。全57設定のPVE版 `ops-management-integrated-native125` は、DNS変更→保存設定復元で同じPD worker・prefix・元期限を保持し、取得DNSと両IP通信ほかの確認まで3.299秒、続く全体再起動も終了0。main統合作業版 `main-management-sam-126` の管理2ケース・SAM4ケースも実daemonで通過した。同じ126のハッシュ一致3実行物を通常125のAlpine起動イメージへ配置した全57設定のPVE試験も、PDと元期限を保持して復元後4.305秒で全通信が成立し、全体再起動後の復帰まで終了0だった。固定SAM所有経路は設定準備時に生成する。native設定からの新規導入、対象の接続先と実測負荷、k8s/pve差分、Cloud SAMの残実装は継続する。
 
-管理・PD安全な復元・初期識別情報入力は `25e7cf9` としてmainへ公開した。通常APKから新規作成した126版の二台BIOSディスクでも、両方向の実電源断と再参加が終了0だった。全通信の復旧25.881/16.010秒、同じTCPの最大待ち7.196秒。UDPは1,675送信中226期限切れ、DNSは951件中20失敗。元60秒/15秒の条件を維持した。さらに同じ126版を隔離PVE上の実VMへ起動し、SSHを通らない独立端末との15秒単一TCPでIPv4 NAT受信1.275/1.280Gbps、IPv6転送1.228/1.243Gbpsを測定した。NAT送信元とIPv6端末送信元を相手で確認し、SSH用リンクの測定packetは0だった。元の43,200秒DHCPv4 leaseを使ったnative120では、通常・特殊端末がT1でunicast REQUEST/同一XID ACKを完了し、期限を延長した。直後の6時間休止後Tailscale新規TCPは固定2秒待機で一度timeoutした。製品snapshotはRunning/online、承認経路と転送規則を保っており、実通信の復帰時刻を採れていないためTailscale継続の合格には数えない。現mainの隔離実daemon/独立Headscale・公式peerでは、worker/PID 1再起動、peer停止/復帰、Tailscale撤去/再適用を通し、同じpeer選択のIPv4/IPv6 TCP/UDPが復帰した。撤去から再適用後のexit復帰は6.344秒だったが、6時間休止後の同じ条件ではない。これは最小の転送構成であり、DS-Lite・対象回線の負荷合格ではない。次は選択した実状態の移行と対象WAN/LAN/DS-Lite負荷である。全体ゴールは継続する。
+管理・PD安全な復元は `25e7cf9` としてmainへ公開した。通常APKから新規作成した126版の二台BIOSディスクでも、両方向の実電源断と再参加が終了0だった。全通信の復旧25.881/16.010秒、同じTCPの最大待ち7.196秒。UDPは1,675送信中226期限切れ、DNSは951件中20失敗。元60秒/15秒の条件を維持した。さらに同じ126版を隔離PVE上の実VMへ起動し、SSHを通らない独立端末との15秒単一TCPでIPv4 NAT受信1.275/1.280Gbps、IPv6転送1.228/1.243Gbpsを測定した。NAT送信元とIPv6端末送信元を相手で確認し、SSH用リンクの測定packetは0だった。元の43,200秒DHCPv4 leaseを使ったnative120では、通常・特殊端末がT1でunicast REQUEST/同一XID ACKを完了し、期限を延長した。直後の6時間休止後Tailscale新規TCPは固定2秒待機で一度timeoutした。製品snapshotはRunning/online、承認経路と転送規則を保っており、実通信の復帰時刻を採れていないためTailscale継続の合格には数えない。現mainの隔離実daemon/独立Headscale・公式peerでは、worker/PID 1再起動、peer停止/復帰、Tailscale撤去/再適用を通し、同じpeer選択のIPv4/IPv6 TCP/UDPが復帰した。撤去から再適用後のexit復帰は6.344秒だったが、6時間休止後の同じ条件ではない。これは最小の転送構成であり、DS-Lite・対象回線の負荷合格ではない。次はnative設定からの新規導入と対象WAN/LAN/DS-Lite負荷である。全体ゴールは継続する。
 
 2026-11-01: 現main `20bc21c` を、実HGWに接続した専用 macvlan と独立LAN端末二台で90秒実行した。端末は手動設定なしに DHCPv4、DHCPv6 information、SLAAC、委譲prefixのRDNSS/search domainを取得した。IPv4 DS-Lite・IPv6 HTTPS、学習DNSのUDP/TCP、条件付きforwarderの停止/復帰、WAN blackholeからの両family復帰、PD workerのSIGKILL/正常再起動、全daemon再起動後の端末通信が終了0だった。続く7,800秒観測では自然PD Renew/Replyを1回captureし、独立LAN端末二台の自然DHCP更新、PD worker SIGKILL後1.36秒と正常再起動後3.88秒のDUID/IAID/prefix保持、zero-lifetime RA withdrawal、726周回のIPv4/IPv6 HTTPSと学習DNS UDP/TCPを確認した。ONU直結、対象NIC、継続TCPは未受入である。専用namespaceと一時stageは終了時に撤去した。
-
-2026-11-01: 初回状態移行は、旧状態ディレクトリをコピーせず、停止済み旧所有者から選択済みの内容を解釈しない識別情報と DHCP 入力だけを新しいディスクへ渡す手順に固定した。[空状態ディスクの実起動](initial-state-migration.md)は終了したが、対象 homert の状態本文、リース/固定割当履歴、実機切替は未実施である。
 
 ユーザー指定の完了期限: **2026-10-29 16:56:38 UTC**（2026-10-28 16:56:38 UTCから24時間）。
 全34項目と実環境での利用可能性が完了条件。部分成功へ縮小せず、期限時点でも未成立は未成立と報告する。
@@ -342,7 +340,7 @@ Tailscale SSH の全契約を証明しない。routerd 自身の管理 SSH と T
 - executable、依存する .so、plugin、必要 data、固定 entry point と architecture。
 - kernel feature / module、IPC と設定・state schema の互換範囲。
 - 各 artifact の digest、source version、build flags、capability、配布資料。
-- userland の一組を選ぶ更新と、旧版でも安全に解釈できる state migration 方針。
+- userland の一組を選ぶ更新と、routerd2 のリリース間で使う state migration 方針。routerd 1.0 からの状態移行は初回導入の対象にしない。
 
 config snapshot、identity/鍵、rotation/revocation、durable event/cursor、有限 lease/fact の戻し方を分ける。
 旧 snapshot の復元で、失効済みの credential や古い所有権を復活させない。

@@ -11211,7 +11211,7 @@
     ],
     "evidence_required": true,
     "do_not_complete_at_partial_checkpoint": true,
-    "physical_target_profile": "homert02/03 are identified PVE guests with4vCPU/4GiB, three VirtIO NICs and VirtIO/SCSI disks. Matching isolated PVE product boot/recovery was exercised; actual WAN/LAN attachment, selected existing-state migration, measured load and any additional hardware/architecture qualification remain open.",
+    "physical_target_profile": "homert02/03 are identified PVE guests with4vCPU/4GiB, three VirtIO NICs and VirtIO/SCSI disks. Matching isolated PVE product boot/recovery was exercised; actual WAN/LAN attachment, clean installation from a preconverted native configuration, measured load and any additional hardware/architecture qualification remain open.",
     "validation_reporting": "Record current behavior, executed checks and untested scope concisely. Discard historical checkpoint ledgers as acceptance authority; no compatibility obligation to their code, APIs or formats.",
     "current_acceptance": {
       "implementation_head": "e0ea27e4ee8c8b2d542cccfb373d390a0279b168",
@@ -11234,7 +11234,7 @@
       "normal_alpine_copy_assertions": 0,
       "normal_alpine_effects_timeouts": 0,
       "hgw_normal": "Historical native95 / standard7800-second actual-HGW result is recorded separately in the handoff. It is not a current126 execution or target-WAN qualification.",
-      "remaining": "Native120 original43200-second LAN lease renewal and the separate real-HGW basic-router natural PD Renew/Reply completed. The isolated-peer reconnect case restored the selected exit in6.344 seconds but did not reproduce native120's six-hour-idle first connection, so Tailscale long-term continuity remains unaccepted. Same-version126 two-node power cut/rejoin passed with retained TCP and measured UDP/DNS loss. Unknown never-received DHCP bindings and target-load qualification remain limited. A new60-second actual-HGW run removed the fixture DHCP reservation and passed the dynamic DHCP and1454-byte IPv4 DF path, but the earlier2/3 Destination Net Unreachable cause remains unknown and the exact outer-WAN ICMP sequence was not retained. Natural PD renewal from this run is not claimed. Continue the selected existing-state migration, full target WAN/LAN/DS-Lite load and update/recovery acceptance, then remaining deployment and cloud work. Target hardware/NIC qualification and all34 work packages remain incomplete.",
+      "remaining": "Native120 original43200-second LAN lease renewal and the separate real-HGW basic-router natural PD Renew/Reply completed. The isolated-peer reconnect case restored the selected exit in6.344 seconds but did not reproduce native120's six-hour-idle first connection, so Tailscale long-term continuity remains unaccepted. Same-version126 two-node power cut/rejoin passed with retained TCP and measured UDP/DNS loss. Unknown never-received DHCP bindings and target-load qualification remain limited. A new60-second actual-HGW run removed the fixture DHCP reservation and passed the dynamic DHCP and1454-byte IPv4 DF path, but the earlier2/3 Destination Net Unreachable cause remains unknown and the exact outer-WAN ICMP sequence was not retained. Natural PD renewal from this run is not claimed. Continue full target WAN/LAN/DS-Lite load and update/recovery acceptance, then remaining deployment and cloud work. Target hardware/NIC qualification and all34 work packages remain incomplete.",
       "current_main_update_test": "2026-11-02 JST, current main44620b8: update/rollback acceptance not run. Host ens18/ens20 are virtio_net with no physical ONU/NIC. The existing full PID1 path is local QEMU or PVE; both were excluded by current direction and no guest was booted. Current-main Alpine image build succeeded and was removed before boot. Historical ops-management-integrated-native125/4fcdb89 networked update, explicit rollback and Health-failure recovery apply only to that earlier candidate. A non-production target with an independently recoverable management path and an authorized reboot window is required for current-main PID1 acceptance.",
       "tailscale_long_idle": "Current main has no Tailscale implementation changes after the b971ea6 independent Headscale/official-peer check, which covered worker/PID1 restart, peer stop/recovery, service removal/reapply and measured 6.344-second exit recovery. The separate six-hour idle case timed out at the test's fixed two-second first TCP wait and measured no retry, so product failure or recovery is unknown. The existing peer runner has no six-hour idle path; do not repeat the short check as a substitute.",
       "full_profile_signed_update": {
@@ -11374,13 +11374,13 @@
           "result": "All 57 settings. DNS record change and snapshot restoration retained the same PD PID, generation, config digest, prefix and original preferred/valid deadlines. Acquired DNS, both-IP TCP/UDP, BGP, special client and Tailscale passed in 3.298831553198397 seconds after restoration. Whole-appliance reboot then recovered all paths and identities. Exit 0; dedicated VM removed."
         },
         "checks": "make check passed with full Race Detector, go vet and 36 Python checks. Normal amd64/arm64 builds and static linking of all six artifacts passed. Actual signed catalog and publisher/runtime bundle acceptance passed for both architectures; arm64 execution is not implied. The initial large-config Race attempt expired the original confirmation interval during concurrent builds; the unchanged interval passed on rerun. One UTC-address readiness attempt had no initial-grant trace; its diagnostic now asserts an installed finite grant while keeping the original 500 ms cutoff, and targeted/full Race checks passed.",
-        "remaining": "Original LAN natural renewals, selected existing-state migration and target WAN/LAN/load acceptance; then k8s/pve differences and remaining Cloud SAM/provider implementation and acceptance. Full goal remains active.",
+        "remaining": "Original LAN natural renewals and target WAN/LAN/load acceptance; then k8s/pve differences and remaining Cloud SAM/provider implementation and acceptance. Full goal remains active.",
         "pve_main126": {
           "release_id": "main-management-sam-126",
           "bootstrap_image_release": "ops-management-integrated-native125",
           "artifact_match": "All three deployed product artifact SHA256 digests match the current root normal-build outputs. Source contains 204c994, 4fcdb89 and SAM immutable ownership-path preparation.",
           "result": "All 57 settings: PD worker PID/generation/config digest, prefix and original preferred/valid deadlines remained identical across DNS-only edit and selected-snapshot restore. Original configuration restored; acquired DNS, both-IP TCP/UDP, BGP, special client and Tailscale passed in 4.305407498963177 seconds. Whole-product reboot recovered DNS, both-IP paths, BGP/IX/NTP/Tailscale and identities. Exit 0 at 2026-10-31T09:03:22Z; dedicated VM removed.",
-          "limit": "Uses normal125 kernel/initramfs plus normal126 product overlay, not a newly rebuilt complete126 image. Natural renewal, original-state migration, physical access peers and load qualification remain separate."
+          "limit": "Uses normal125 kernel/initramfs plus normal126 product overlay, not a newly rebuilt complete126 image. Natural renewal, physical access peers and load qualification remain separate."
         },
         "source_commit": "25e7cf931644e77822c320cba275e07ab10902e5",
         "published_source_match": "All 29 frozen changed product-source files and the embedded HTML match published25e7cf9; all three tested126 artifact hashes were directly checked against the root normal-build outputs before cleanup.",
@@ -11417,28 +11417,13 @@
             "routerd-modules": "1f90fe173ad371fa495d48f28cea6b0e7a81a29220aa06b9394b7b367b02acd0",
             "routerd-logging": "845a00d766205fa31c747f56e2601fbbe076dc6f019f3bcd1982105a23584cb7"
           },
-          "limits": "This run uses newly built APK image binaries, distinct from the earlier Make build overlay hashes. Not zero loss, natural original renewal, actual production-state migration, target WAN/LAN/load or Cloud SAM qualification. IX physical SNAT existing flow is outside the declared old sync intent; another exit identity is not automatically selected."
+          "limits": "This run uses newly built APK image binaries, distinct from the earlier Make build overlay hashes. Not zero loss, natural original renewal, target WAN/LAN/load or Cloud SAM qualification. IX physical SNAT existing flow is outside the declared old sync intent; another exit identity is not automatically selected."
         },
         "cleanup_after_two_node126": "Removed the finished612MiB private two-node stage (logs, captures, disposable keys/state and sparse disks). Removed two clean linked worktrees with git worktree remove after confirming both heads are integrated into main and no process referenced their files. Their ignored output totaled about1012MiB. Preserved a third tree referenced by live processes, natural cohorts,126 image/runner needed for next acceptance and original AGENTS.md changes. Filesystem available about38GiB."
       },
-      "target_state_metadata": {
-        "tailscale_version": "1.104.2",
-        "targets": "homert02 and homert03",
-        "state_path": "/var/lib/tailscale/tailscaled.state",
-        "metadata": "Owned root:root regular file, mode0600 on both; read-only guest-agent process/filesystem metadata only, no state body or keys collected. Actual-state migration acceptance remains open."
-      },
-      "target_config_conversion": {
-        "result": "Read-only current homert02/03 router YAML inputs, after the explicit isolated-VM NIC substitution, each migrated and validated as56-resource native configurations with current main.",
-        "limit": "This checks current operator intent against the converter only. It neither starts a target configuration nor migrates Tailscale state, leases or WAN state. The temporary raw inputs and outputs are removed after recording this result."
-      },
-      "initial_state_disk": {
-        "procedure": "docs/initial-state-migration.md は選択済み入力、旧所有者を停止する境界、新規ディスクだけへの公開、起動前検査、復旧を定める。旧状態ディレクトリ全体のコピー、内容を解釈しない状態本文やハッシュ値の記録は行わない。",
-        "empty_disk_result": "`main` の3e2a73aで、空の0700作業ディレクトリから root 専用の新規 ext4 `/dev/vda2` 状態ボリュームを作成した。読み取り専用検査は `lost+found` だけであり、同じディスクは隔離 QEMU の Linux PID 1 で37.7秒後に ROUTERD_READY へ到達した。",
-        "limit": "旧状態本文、鍵、リース、固定割当履歴 DB は取得していない。対象 Tailscale 識別情報、DHCP取込、対象機の起動・切替を合格とはしていない。"
-      },
       "target_replacement_decision": {
         "decision": "not accepted",
-        "basis": "Read-only audit confirms current-config conversion, empty state-disk boot and isolated real-HGW natural PD renewal only. Target state/lease/sticky migration, target WAN/LAN, HA, existing-flow, NIC and ONU acceptance remain open.",
+        "basis": "Target acceptance remains open: clean installation from a preconverted native configuration, target WAN/LAN, HA, existing-flow, NIC and ONU qualification. Importing routerd 1.0 runtime state is not required.",
         "scope": "No legacy service stop, production cutover or production deployment was performed."
       },
       "load_transport_control": {
@@ -11481,7 +11466,7 @@
     {
       "stage": 1,
       "profile": "homert02/03",
-      "next": "Native120 original LAN DHCP T1 renewal and the current-main independent basic-router real-HGW natural PD Renew/Reply succeeded. A later six-hour-idle Tailscale first connection timed out after a fixed two-second wait without recovery-time communication, so long-term Tailscale continuity remains unaccepted. A separate focused reconnect case passed worker/PID1/peer restart and service reapply, not the six-hour condition. The latest60-second actual-HGW current-build run removes the fixture DHCP reservation and verifies dynamic leases; the1454-byte IPv4 DF ping returned3/3 through the LAN and DS-Lite tunnel. The earlier2/3 router-originated Destination Net Unreachable remains unexplained and this run is not a natural-PD or target-hardware acceptance. Continue selected existing-state migration, full target WAN/LAN/DS-Lite load and update/recovery without changing original traffic deadlines; then k8s/pve differences and Cloud SAM/all34. Same-version126 two-node power cut/rejoin and direct PVE IPv4 NAT/IPv6 load paths passed, with measured UDP/DNS loss retained in their separate results.",
+      "next": "Native120 original LAN DHCP T1 renewal and the current-main independent basic-router real-HGW natural PD Renew/Reply succeeded. A later six-hour-idle Tailscale first connection timed out after a fixed two-second wait without recovery-time communication, so long-term Tailscale continuity remains unaccepted. A separate focused reconnect case passed worker/PID1/peer restart and service reapply, not the six-hour condition. The latest60-second actual-HGW current-build run removes the fixture DHCP reservation and verifies dynamic leases; the1454-byte IPv4 DF ping returned3/3 through the LAN and DS-Lite tunnel. The earlier2/3 router-originated Destination Net Unreachable remains unexplained and this run is not a natural-PD or target-hardware acceptance. Continue full target WAN/LAN/DS-Lite load and update/recovery without changing original traffic deadlines; then k8s/pve differences and Cloud SAM/all34. Same-version126 two-node power cut/rejoin and direct PVE IPv4 NAT/IPv6 load paths passed, with measured UDP/DNS loss retained in their separate results.",
       "required_focus": [
         "WAN/LAN IPv4/IPv6, DS-Lite, actual route selection/backup WAN, DHCP/PD/RA, learned DNS resolution/distribution, firewall/NAT/MTU/MSS, BGP and management",
         "HA-01 current election/track dependencies, HA-02 DHCP/PD synchronization, HA-03 NAT/connection synchronization and EXT-02 Tailscale used by this deployment"

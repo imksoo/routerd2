@@ -61,8 +61,10 @@ configuration compiler into the declaration package or independent logger.
 
 Current prepare/boot/direct rollback/fallback require equal format declarations.
 Even a successful generic preflight callback cannot authorize a format-changing
-migration. Such runtimes can be staged for inspection; activation needs a
-qualified configuration/state migration workflow that is not implemented yet.
+migration between routerd2 releases. Such runtimes can be staged for inspection;
+activation needs a qualified configuration/state migration workflow. The first
+routerd2 installation starts on a fresh state disk with a configuration prepared
+in the current native format; importing routerd 1.0 runtime state is not required.
 The pure `runtimeabi.CheckTransition` helper additionally checks trusted observed
 versions, both runtimes' writers, required facts and configuration semantics.
 An explicit version zero fact means an inspected absent file, never an omitted
