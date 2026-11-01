@@ -1,6 +1,6 @@
 # routerd2 開発引き継ぎ
 
-更新: 2026-11-01 10:00 JST。最初の製品は未完成であり、[実装計画](implementation-plan.md)、[機械可読台帳](implementation-plan.json)、[試験計画](test-plan.md)、[初回状態移行手順](initial-state-migration.md)、[AGENTS.md](../AGENTS.md)を基準に進める。各実通信試験の直前に試験計画の実行手順と対象項目を読み直す。対象本番の置換はしていない。
+更新: 2026-11-01 17:36 JST。最初の製品は未完成であり、[実装計画](implementation-plan.md)、[機械可読台帳](implementation-plan.json)、[試験計画](test-plan.md)、[初回状態移行手順](initial-state-migration.md)、[AGENTS.md](../AGENTS.md)を基準に進める。各実通信試験の直前に試験計画の実行手順と対象項目を読み直す。対象本番の置換はしていない。
 
 ## 現在の実装
 
@@ -42,6 +42,10 @@ main統合版126のハッシュ一致3実行物でも、通常125の起動イメ
 両homertのTailscale1.104.2と保存先`/var/lib/tailscale/tailscaled.state`（root:root、0600通常ファイル）は読取専用メタデータで確定した。状態本文は未取得で、実状態移行の合格には数えない。製品/VMを除く同じSSH Ethernet伝送自体の対照は102.259/131.067 Mbpsであり、旧候補の130〜149 Mbpsは製品上限の証拠ではない。
 
 2026-11-01: homert02/03 の現行 router YAML を読取専用で取得し、隔離VMの明示NIC名へ置換して current main の migration/validation に通した。両方とも56 resource のnative設定になった。これは現行入力と変換器の組合せ確認であり、Tailscale保存状態、旧lease、実WAN、実VM起動の移行受入ではない。入力と変換出力は確認後に削除する。
+
+2026-11-01: 実HGW用macvlan fixtureはDS-Lite復路をcaptureするが、任意のIPv4 ICMP fragmentation-needed、IPv6 Packet Too Big、断片化を発生させる制御可能な実経路を持たない。そのため自然PD観測や隔離DS-Lite PMTU試験を再実行して物理PMTU受入と取り違えなかった。物理受入には、host管理経路から分離したL2、MTUを下げて両ICMPを返せる実対向、router/対向のcapture、試験前後の管理interfaceとhost経路の一致が必要である。
+
+2026-11-01: 現行入力の56 resourceにappliance用の明示管理addressを加えた57 resource候補はcurrent mainで`config validate`を通った。通常APK由来の新規diskを外部へ接続しないQEMU三NIC（`eth0`/`eth1`/`eth2`）で起動し、PID 1、supervisor、network/control/managementと設定workerの起動を確認した。空stateにはHA鍵・独立Tailnet enrollment・独立peerを供給していないため依存workerが停止しreadyに達しなかった。この結果は設定変換後の隔離起動確認に限り、実状態移行・単体router・HA・対象機の受入には数えない。QEMU停止後にhost管理interfaceとIPv4/IPv6経路が同一であることを照合した。disk、image、console、設定コピーを削除した。
 
 2026-11-01: 初回状態移行の入力、停止境界、既存ディスクを置換しない新規ディスク作成、検査、失敗時の旧サービス復帰を[手順](initial-state-migration.md)として固定した。空の root 専用状態作業ディレクトリを新しい ext4 ディスクへ組み込み、読み取り専用マウントで`lost+found`以外がないこと、同じディスクの隔離 QEMU Linux PID 1起動（37.7秒）を確認した。旧状態本文・鍵・リースは取得していない。実状態移行、Tailscale 識別情報、リース/固定割当履歴の取込、対象機切替は未受入のままである。
 
