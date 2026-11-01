@@ -10,6 +10,8 @@
 
 管理・PD安全な復元・初期識別情報入力は `25e7cf9` としてmainへ公開した。通常APKから新規作成した126版の二台BIOSディスクでも、両方向の実電源断と再参加が終了0だった。全通信の復旧25.881/16.010秒、同じTCPの最大待ち7.196秒。UDPは1,675送信中226期限切れ、DNSは951件中20失敗。元60秒/15秒の条件を維持した。さらに同じ126版を隔離PVE上の実VMへ起動し、SSHを通らない独立端末との15秒単一TCPでIPv4 NAT受信1.275/1.280Gbps、IPv6転送1.228/1.243Gbpsを測定した。NAT送信元とIPv6端末送信元を相手で確認し、SSH用リンクの測定packetは0だった。元の43,200秒DHCPv4 leaseを使ったnative120では、通常・特殊端末がT1でunicast REQUEST/同一XID ACKを完了し、期限を延長した。直後の6時間休止後Tailscale新規TCPは固定2秒待機で一度timeoutした。製品snapshotはRunning/online、承認経路と転送規則を保っており、実通信の復帰時刻を採れていないためTailscale継続の合格には数えない。現mainの隔離実daemon/独立Headscale・公式peerでは、worker/PID 1再起動、peer停止/復帰、Tailscale撤去/再適用を通し、同じpeer選択のIPv4/IPv6 TCP/UDPが復帰した。撤去から再適用後のexit復帰は6.344秒だったが、6時間休止後の同じ条件ではない。これは最小の転送構成であり、DS-Lite・対象回線の負荷合格ではない。次は選択した実状態の移行と対象WAN/LAN/DS-Lite負荷である。全体ゴールは継続する。
 
+2026-11-01: 現main `20bc21c` を、実HGWに接続した専用 macvlan と独立LAN端末二台で90秒実行した。端末は手動設定なしに DHCPv4、DHCPv6 information、SLAAC、委譲prefixのRDNSS/search domainを取得した。IPv4 DS-Lite・IPv6 HTTPS、学習DNSのUDP/TCP、条件付きforwarderの停止/復帰、WAN blackholeからの両family復帰、PD workerのSIGKILL/正常再起動、全daemon再起動後の端末通信が終了0だった。PDの次回自然Renewは開始時点で約7,177秒先であり、今回の90秒実行は自然PD更新、ONU直結、対象NIC、長時間負荷の受入ではない。専用namespaceと一時stageは終了時に撤去した。
+
 ユーザー指定の完了期限: **2026-10-29 16:56:38 UTC**（2026-10-28 16:56:38 UTCから24時間）。
 全34項目と実環境での利用可能性が完了条件。部分成功へ縮小せず、期限時点でも未成立は未成立と報告する。
 旧routerdの実装を取り込み、独自のLAN配布エンジンを置換する。動く単体構成、二台運用、残る製品機能と

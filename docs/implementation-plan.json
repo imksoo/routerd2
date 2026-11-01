@@ -11284,8 +11284,14 @@
         "root_acceptance": "combined-information-native92: split ISC PD/information actual communication passed. Related Race/vet, normal build, both-arch static sixELF/catalog/publisher passed. Conditional LAN control expiry/role/PD withdrawal and recovery passed76.22s with actual VIP readiness; precursor runs failed DNS or10s VIP readiness. Same readiness check on normal9a57c8a baseline passed72.37s. One pass does not resolve the intermittent combined readiness failures."
       },
       "current_runs": {
-        "hgw": "No current real-HGW long-renewal cohort was verified in this integration turn. Keep the historical native95 result separate from native120 LAN renewal and current126 product acceptance.",
+        "hgw": "Current main20bc21c passed a 90-second real-HGW run through an isolated macvlan with two independent LAN clients: automatic DHCPv4/DHCPv6 information/SLAAC, delegated RDNSS/search domain, IPv4 DS-Lite/IPv6 HTTPS, learned UDP/TCP DNS, conditional-forwarder outage/recovery, WAN blackhole recovery, PD worker SIGKILL/graceful restart and whole-daemon restart. Natural PD Renew was about7177 seconds away, so this is not long-renewal, direct-ONU, target-NIC or load acceptance.",
         "original_lan": "native120: original 43200-second DHCPv4 lease T1 completed for ordinary and special clients with unicast same-XID ACK, option54, extended expiry and no REBIND. Immediate learned-DNS/both-family communication passed. The enclosing job exited1 on a later post-idle Tailscale TCP timeout; it does not accept Tailscale continuity.",
+        "hgw_short_main_20bc21c": {
+          "source_commit": "20bc21c6f81838da167aca21ec604acf1a532f06",
+          "environment": "Actual HGW, isolated macvlan and router network namespace, independent BusyBox and dhcpcd LAN clients; host management network untouched.",
+          "result": "WAN blackhole IPv4/IPv6 recovery took0.84 seconds. PD SIGKILL and graceful restart restored client communication in1.75 and3.49 seconds; whole-daemon restart restored both clients in4.04 seconds. Periodic IPv4/IPv6 HTTPS and learned DNS UDP/TCP passed.",
+          "limit": "The 90-second run could not include the approximately7177-second natural PD Renew. Temporary namespaces, stage and packet capture were removed; private lease identity remains outside the repository for an explicitly selected later renewal run."
+        },
         "sam_wireguard": {
           "release_id": "sam-wireguard-final-release",
           "environment": "isolated Linux netns; real routerd2 supervisor/control/network/SAM workers; independent legacy routerd RR; independent FRR; separate LAN client and RR terminal",
@@ -11448,7 +11454,7 @@
     {
       "stage": 1,
       "profile": "homert02/03",
-      "next": "Native120 original LAN DHCP T1 renewal succeeded. Its one later Tailscale timeout used a fixed two-second first-connect wait after six idle hours; snapshot showed Running/online and installed forwarding, but no recovery-time communication was recorded. Run a focused measured reconnect case instead of repeating the cohort, then continue selected existing-state migration and full target WAN/LAN/DS-Lite load. Same-version126 two-node power cut/rejoin and direct PVE IPv4 NAT/IPv6 load paths passed. Keep original observation and traffic deadlines.",
+      "next": "Native120 original LAN DHCP T1 renewal succeeded. Its one later Tailscale timeout used a fixed two-second first-connect wait after six idle hours; snapshot showed Running/online and installed forwarding, but no recovery-time communication was recorded. A separate focused isolated-peer recovery run passed worker/PID1 restart, peer restart and service reapply, including6.344-second exit recovery, but does not accept the six-hour condition. Current main also passed a short real-HGW WAN/LAN/DS-Lite run. Continue selected existing-state migration, natural PD renewal and full target WAN/LAN/DS-Lite load without changing original observation or traffic deadlines. Same-version126 two-node power cut/rejoin and direct PVE IPv4 NAT/IPv6 load paths passed.",
       "required_focus": [
         "WAN/LAN IPv4/IPv6, DS-Lite, actual route selection/backup WAN, DHCP/PD/RA, learned DNS resolution/distribution, firewall/NAT/MTU/MSS, BGP and management",
         "HA-01 current election/track dependencies, HA-02 DHCP/PD synchronization, HA-03 NAT/connection synchronization and EXT-02 Tailscale used by this deployment"
