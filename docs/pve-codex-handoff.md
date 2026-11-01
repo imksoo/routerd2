@@ -23,6 +23,8 @@ DHCP HA は VRRP が配布役を選び、dnsmasq に VIP と物理 ingress を�
 
 `ops-management-combined-native120` は通常・特殊端末の元の43,200秒 leaseについて、T1（21,600秒）でのVIP宛unicast REQUEST、同一XID・option 54を持つACK、期限延長、REBINDなしを実packetで確認した。取得済みDNSと両family通信も直後に通った。その後6時間休止していたTailscale経路の最初の新規TCPは、試験側の固定2秒待機で一度timeoutした。failure snapshotはTailscale Running/online、相手peer active、承認済み経路と転送規則を示すが、続く実通信を測らなかった。このためDHCP自然更新は成功、Tailscaleの長時間継続は未合格として分ける。生ログ、鍵、capture、stageはこの記録後に削除する。
 
+現main `b971ea6` の隔離実daemon、独立Headscale、公式Tailscale peerでは、Tailscale workerのSIGKILL、PID 1再起動、peer停止/復帰、service撤去/再適用を実施した。同じpeerのexit選択を保ったままLANとexitのIPv4/IPv6 TCP/UDPが通り、撤去から再適用後のexit通信は6.344秒で復帰した。native120の6時間休止後timeoutと同一条件ではないため、長時間継続の合格には流用しない。試験で生成したengine、peer、鍵、capture、build出力は削除する。
+
 これらは実プロセス・独立 peer・Linux kernel/PVE の相互通信結果である。対象 ONU/HGW/NIC、対象 appliance、実回線、全34 work package の受入を表さない。
 
 ## main統合と保存設定復元

@@ -185,6 +185,8 @@ DNS利用とIPv4/IPv6通信、自然DHCPv4更新、PD通常/強制交換と製�
 
 `ops-management-combined-native120` は通常・特殊端末の実際の43,200秒DHCPv4 leaseで、T1のunicast REQUEST、同一XIDのACK、option 54、期限延長、REBINDなしを確認した。全jobは、その後6時間休止していたTailscale経路の最初の新規TCPが固定2秒でtimeoutして終了1だった。snapshotにRunning/online・承認経路・転送規則は残っていたが、復帰時刻の実通信を採らなかったため、DHCP自然更新だけを成功としTailscale継続は未合格とする。次のTailscale試験は起点からの通信成功時刻を測り、固定の接続待機だけで継続性を判断しない。
 
+現mainの別の隔離実daemon試験では、独立Headscale/公式peerを使い、worker/PID 1再起動、peer停止/復帰、service撤去/再適用後のLAN/exit IPv4/IPv6 TCP/UDPを確認した。撤去から再適用後のexit復帰は6.344秒だった。これは休止後の再接続を時間計測したものではないので、native120のtimeoutを解消済みとは扱わない。
+
 - 端末を初期状態で接続し、DHCPv4のDiscover/Offer/Request/ACK、アドレス、prefix、gateway、DNS、domain、leaseを受信し、
   人手による端末側アドレス・経路・DNS設定なしにIPv4へ到達する。複数端末・予約・アドレス競合・pool枯渇も確認する。
 - WANのRA・DHCPv6 PDの取得と、LANへのprefix/RA、通常のDAD、SLAAC、default route、RDNSS、O/Mフラグを実packetと端末状態で確認する。

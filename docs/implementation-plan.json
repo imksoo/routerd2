@@ -11435,6 +11435,12 @@
         ],
         "result": "All four real PVE product forwarding directions passed. IPv4 receiver rate was1274.734/1279.954Mbps with the configured NAT source observed; IPv6 was1228.380/1243.248Mbps with the original LAN source observed. This removes the SSH transport as the explanation for the earlier130-149Mbps candidate measurements.",
         "limits": "Not a DS-Lite, PPPoE, DHCP/SLAAC/DNS, HA, natural-renewal, physical WAN/NIC, or target-production-load qualification. The owned VM and remote stage, including raw captures, temporary disk and test packages, were removed after retaining this concise result."
+      },
+      "tailscale_reconnect_b971ea6": {
+        "source_commit": "b971ea6",
+        "environment": "Current isolated product daemon with independent Headscale and official Tailscale peer; no production node or target state was used.",
+        "result": "Worker SIGKILL, whole PID1 restart, independent peer down/up, and Tailnet service removal/reapply retained the same peer exit selection and restored LAN/exit IPv4/IPv6 TCP/UDP. Removal-to-reapply exit recovery was 6.344 seconds.",
+        "limit": "This is a separate recovery case. It did not reproduce the native120 six-hour idle first-connect timeout and does not accept long-term Tailscale continuity."
       }
     }
   },
