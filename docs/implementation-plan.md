@@ -2006,7 +2006,7 @@ source fixture、isolated lab、engine PoC、provider simulator の実装は現�
 
 | 使用する段階 | 必要な入力 |
 | --- | --- |
-| CORE-01 / QUAL-01 | サニタイズしたhomert02/03の最新設定、使用中の外部engine版、期待するWAN/PBR/HA動作。未入手でもsource fixtureとisolated labの実装は進める。 |
+| CORE-01 / QUAL-01 | サニタイズしたhomert02/03の最新設定、使用中の外部engine版、期待するWAN/PBR/HA動作。2026-11-01、nwadmin03からhomert02/03への名前解決は失敗。VM 158の読取専用guest-agent経路は過去の利用記録があるが、今回の実行環境にはPVE管理CLI/API接続がなく、現存確認・設定読取はできなかった。次の必要条件は既存の読取専用経路をこの実行環境へ戻すか、最新のサニタイズ済み設定を渡すこと。設定差分を根拠とする実装はこの入力待ちとし、推測で補わない。 |
 | CORE-06 | 各engineの正確な版・plugin・配布条件。用途に必要な機能集合をPoCの合否にする。 |
 | HA-02 / HA-03 | 新旧node混在を必要とするか、maintenance切替を許すか。選んだ方式のfixtureと戻し手順を用意する。 |
 | CLOUD-01 / DIST-03 | 使い捨てcloud環境、許可範囲、費用/cleanup条件。実credentialをrepositoryやimageへ保存しない。 |
