@@ -93,6 +93,10 @@
 - `hgw-short-main-20bc21c`: 実HGWへ隔離 macvlan で接続した current main の実daemonと、独立 BusyBox/dhcpcd LAN端末二台で、DHCPv4、DHCPv6 information、SLAAC、委譲RDNSS/search domain、IPv4 DS-Lite/IPv6 HTTPS、学習DNSのUDP/TCP、条件付きforwarderの停止/復帰を確認した。WAN blackhole復帰は0.84秒、続く7,800秒観測では自然PD Renew/Reply 1回、二台の自然DHCP更新、PD worker SIGKILL/正常再起動後の端末通信1.36/3.88秒、DUID/IAID/prefix保持、zero-lifetime RA withdrawal、726周回のIPv4/IPv6 HTTPSと学習DNS UDP/TCPが終了0だった。ONU直結、対象NIC、継続TCP、Tailscale長時間条件、HA、対象構成全体は未受入である。namespace、一時stage、captureは終了時に撤去した。
 - `dhcp-dynamic-dslite-mtu-main-e0ea27e`: 実HGW・current product build・独立Linux namespace clientsで`make check-uplink UPLINK_SECONDS=60`を終了0にした。固定予約を除いたDHCPv4 clientは`.2`、自動clientは`.7`を取得し、動的値から経路を確認した。DS-Lite MTU 1454で1426-byte DF payloadが3/3応答し、router captureの同じICMP id/sequenceをLANと`dslite0`の往復で確認した。前回の1/3 Unreachableは再現しなかったが、原因は未確定。自然PD renewal、outer WANの同一ICMP sequence保存、WAN outage、全daemon restart、実ONU/NIC受入ではない。raw stage/captureは終了時に削除した。
 
+- `current-main-44620b8-update`: 更新・切戻しの再受入は未実施。現在の開発hostの`ens18`/`ens20`はvirtio_netで、実NIC/ONUは接続されていない。全PID 1切替を行う既存経路はlocal QEMUかPVEで、今回どちらも使わない指示のため起動していない。current main向けAlpine image buildは成功したが、bootせず生成imageを削除した。旧`ops-management-integrated-native125`/`4fcdb89`のPVE更新・明示rollback・Health失敗復帰は過去候補の結果で、現mainの受入へ流用しない。現用homertを止めて代用もしない。
+
+- Tailscale長時間条件: `b971ea6`の独立Headscale/公式peer試験はworker/PID 1再起動、停止peer復帰、service撤去/再適用後の実通信を確認し、exit通信の再適用復帰は6.344秒だった。6時間無通信後の初回TCPは別の`native120`試験で2秒待ちの後にtimeoutしたが、その後の再試行通信は観測されていないため、製品障害とも復旧成功とも判定しない。current mainにTailscale実装変更はなく、既存peer runnerに6時間idle経路はないため同じ短時間試験は繰り返さない。
+
 - `dhcp-ingress-native105`: 隔離 PVE（4 CPU/4 GiB）の実 appliance で、ハッシュ・release ID を照合した三実行物と20 Ready moduleを使い、cold boot/reboot 後の DNS UDP/TCP（IPv4/IPv6）、TCP/UDP、BGP、NTP、Tailscale、および通常・特殊端末それぞれの120秒 DHCPv4自然T1 unicast/同一XID ACK/option 54=`172.18.0.1` を確認した。PVE kernel 試験であり、12時間の元lease、ONU/HGW・対象機器、全34 package は引き続き未受入。
 
 - `persistent-sysctl-ba46e40`: homert両機の永続conntrack設定を実CLIで取り込み、隔離Linux名前空間の実製品で設定確定・通信適用プロセス再起動・製品全体再起動からの再適用・撤去時の元値復元が成功。空の初期設定より保存済み設定が優先されたことを確認。カーネル初期値への戻しは隔離試験内の明示操作であり、物理再起動やHA通信の受入ではない。証跡は `dist/sysctl-acceptance/`。
