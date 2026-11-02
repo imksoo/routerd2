@@ -16,6 +16,13 @@ refer to that client. A second DHCPv6 service on the same interface would create
 a second socket/identity owner and is rejected; it is not needed to represent
 the two protocol exchanges. See [wan-dslite-pd.yaml](../examples/wan-dslite-pd.yaml).
 
+The combined [single-router profile](../examples/single-router-dslite-dhcp-dns.yaml)
+puts the common client-facing path in one native program: DHCPv4, stateless
+DHCPv6 information, SLAAC/RA from PD, conditional DNS with DoH fallback,
+DS-Lite/NAT for IPv4 and native IPv6 forwarding. Its example values are generic;
+it is not a conversion of either 109-resource homert file or evidence of a live
+router run.
+
 | homert intent | routerd2 native declaration | Example |
 | --- | --- | --- |
 | DHCPv6 PD plus AFTR/DNS/SNTP/domain information on one WAN | One `service.dhcp6` with `request_prefix`; consumers use `aftr_from` / `dns_from` | [wan-dslite-pd.yaml](../examples/wan-dslite-pd.yaml) |
@@ -27,8 +34,9 @@ the two protocol exchanges. See [wan-dslite-pd.yaml](../examples/wan-dslite-pd.y
 | BGP/BFD peering | `service.bgp` and one `service.bfd` per monitored peer | [bfd-bgp.yaml](../examples/bfd-bgp.yaml) |
 | VRRP virtual gateway | `service.vrrp` owns election and the virtual address | [vrrp-ipv4.yaml](../examples/vrrp-ipv4.yaml) |
 
-These are native examples for the listed paths, not a conversion of the complete
-109-resource homert configuration or acceptance of its full single/HA profile.
+The combined single-router example assembles the client-facing rows above.
+These examples do not convert the complete 109-resource homert configuration
+or accept its full single/HA profile.
 
 ## RA client
 

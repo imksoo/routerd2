@@ -1,0 +1,137 @@
+# Homert's common single-router path expressed as one native ResourceProgram.
+# Replace the example interfaces, delegated prefix consumers, LAN subnet,
+# conditional upstreams and resolver choice with the site's real values.
+schema_version: 2
+resources:
+  - id: interface/wan0
+    interface: {name: wan0}
+  - id: interface/lan0
+    interface: {name: lan0}
+  - id: address/lan
+    depends_on: [interface/lan0]
+    address: {interface: lan0, cidr: 192.0.2.1/24}
+  - id: forwarding
+    forwarding: {ipv4: true, ipv6: true}
+  - id: firewall
+    firewall:
+      forward:
+        - {from: lan0, to: dslite0}
+        - {from: lan0, to: wan0}
+  - id: lan-dslite-nat
+    nat:
+      - type: masquerade
+        match: {family: 4, source: 192.0.2.0/24, out_interface: dslite0}
+  - id: service/wan-ra
+    depends_on: [interface/wan0]
+    service:
+      name: wan-ra
+      ra_client:
+        interface: wan0
+        slaac: true
+        default_route: true
+        on_link: true
+        route_information: true
+        dns: true
+  - id: service/wan-pd
+    depends_on: [interface/wan0, interface/lan0]
+    service:
+      name: wan-pd
+      dhcp6:
+        interface: wan0
+        iaid: 1
+        request_prefix: true
+        prefix_length: 60
+        delegations:
+          - {name: lan, interface: lan0, host_id: 1}
+          - {name: b4-source, interface: lan0, host_id: 33}
+  - id: service/lan-ra
+    depends_on: [service/wan-pd]
+    service:
+      name: lan-ra
+      ra:
+        interface: lan0
+        managed: false
+        other_config: true
+        router_lifetime_seconds: 1800
+        from:
+          service: wan-pd
+          delegation: lan
+          use_learned_rdnss: true
+          use_learned_dnssl: true
+  - id: service/lan-info
+    depends_on: [service/wan-pd]
+    service:
+      name: lan-info
+      dhcp6_server:
+        interface: lan0
+        dns_delegation: {service: wan-pd, delegation: lan}
+        dns_from: [wan-pd]
+        sntp_from: [wan-pd]
+        search_from: [wan-pd]
+        refresh_seconds: 1800
+  - id: service/lan-leases
+    depends_on: [interface/lan0, address/lan]
+    service:
+      name: lan-leases
+      dhcp_server:
+        interface: lan0
+        server_address: 192.0.2.1
+        primary:
+          prefix: 192.0.2.0/24
+          start: 192.0.2.64
+          end: 192.0.2.191
+          lease_seconds: 43200
+          router: 192.0.2.1
+          dns_servers: [192.0.2.1]
+          domain: home.arpa
+        authoritative: true
+        max_leases: 200
+  - id: service/internet
+    depends_on: [interface/wan0]
+    ready_when: {fact: service.internet.active}
+    service:
+      name: internet
+      ds_lite:
+        interface: wan0
+        tunnel: dslite0
+        source_from: wan-pd
+        source_delegation: b4-source
+        aftr_from: wan-pd
+        dns_from: [wan-pd, wan-ra]
+        b4_address: 192.0.0.2/32
+        b4_peer: 192.0.0.1/32
+        route_gateway: 192.0.0.1
+        default_route: true
+        metric: 200
+  - id: service/resolver
+    depends_on: [interface/lan0, address/lan]
+    service:
+      name: resolver
+      dns:
+        listen_interface: lan0
+        spec:
+          listen:
+            - {name: lan, addresses: [192.0.2.1], port: 53}
+          sources:
+            - name: local
+              kind: zone
+              match: [home.arpa]
+              zoneRef: [home]
+            - name: site-forwarder
+              kind: forward
+              match: [office.example]
+              upstreams: [udp://192.0.2.53:53]
+            - name: encrypted-public
+              kind: forward
+              match: ["."]
+              upstreams: [https://cloudflare-dns.com/dns-query]
+              bootstrapResolverFrom:
+                - {resource: DHCPv6PrefixDelegation/wan-pd, field: dnsServers}
+        zones:
+          - name: home
+            spec:
+              zone: home.arpa
+              records:
+                - {hostname: router, ipv4: 192.0.2.1}
+              dhcpDerived:
+                sources: [DHCPv4Server/lan-leases]
