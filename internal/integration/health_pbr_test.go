@@ -5,17 +5,14 @@ package integration
 import (
 	"bytes"
 	"context"
-	_ "embed"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -36,12 +33,6 @@ import (
 	"github.com/vishvananda/netns"
 	"golang.org/x/sys/unix"
 )
-
-//go:embed testdata/health-import.yaml
-var legacyHealth []byte
-
-//go:embed testdata/health-import-policy.yaml
-var legacyHealthPolicy []byte
 
 // The router, LAN and two providers have independent network namespaces. Both
 // providers offer the same application address and probe address; a probe that
@@ -96,7 +87,11 @@ func TestDaemonHealthPBRFailoverAndRecovery(t *testing.T) {
 	if err := netlink.RuleAdd(foreignRule); err != nil {
 		t.Fatal(err)
 	}
-	program, healthA, healthB := importedHealthPBRProgram(t)
+	program, err := config.Parse([]byte(healthPBRProgram))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const healthA, healthB = "service.health-a", "service.health-b"
 	f := startFixtureDaemon(t, program)
 	routerNS, err := netns.Get()
 	if err != nil {
@@ -863,13 +858,22 @@ type healthPBRPacket struct {
 	data []byte
 }
 type healthPBRCaptureState struct {
-	mu      sync.Mutex
-	packets []healthPBRPacket
-	err     error
-	dropped bool
+	mu        sync.Mutex
+	packets   []healthPBRPacket
+	seenFlows map[string]struct{}
+	err       error
+	dropped   bool
 }
 
 func healthPBRCapture(t *testing.T, iface string) *healthPBRCaptureState {
+	return healthPBRCaptureFiltered(t, iface, nil)
+}
+
+func healthPBRPortsCapture(t *testing.T, iface string, ports []uint16) *healthPBRCaptureState {
+	return healthPBRCaptureFiltered(t, iface, ports)
+}
+
+func healthPBRCaptureFiltered(t *testing.T, iface string, ports []uint16) *healthPBRCaptureState {
 	t.Helper()
 	link, err := netlink.LinkByName(iface)
 	if err != nil {
@@ -884,6 +888,9 @@ func healthPBRCapture(t *testing.T, iface string) *healthPBRCaptureState {
 		t.Fatal(err)
 	}
 	c := &healthPBRCaptureState{}
+	if len(ports) > 0 {
+		c.seenFlows = make(map[string]struct{})
+	}
 	stop, done := make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(done)
@@ -906,6 +913,18 @@ func healthPBRCapture(t *testing.T, iface string) *healthPBRCaptureState {
 				return
 			}
 			c.mu.Lock()
+			if len(ports) > 0 {
+				key, ok := healthPBRFlowKey(buf[:n], ports)
+				if !ok {
+					c.mu.Unlock()
+					continue
+				}
+				if _, exists := c.seenFlows[key]; exists {
+					c.mu.Unlock()
+					continue
+				}
+				c.seenFlows[key] = struct{}{}
+			}
 			if len(c.packets) < 4096 {
 				c.packets = append(c.packets, healthPBRPacket{time.Now(), bytes.Clone(buf[:n])})
 			} else {
@@ -941,6 +960,27 @@ func healthPBRCapture(t *testing.T, iface string) *healthPBRCaptureState {
 		}
 	})
 	return c
+}
+
+func healthPBRFlowKey(packet []byte, ports []uint16) (string, bool) {
+	if len(packet) < 38 || binary.BigEndian.Uint16(packet[12:14]) != unix.ETH_P_IP || packet[14]>>4 != 4 {
+		return "", false
+	}
+	transport := 14 + int(packet[14]&15)*4
+	if transport < 34 || len(packet) < transport+4 || packet[23] != unix.IPPROTO_TCP && packet[23] != unix.IPPROTO_UDP {
+		return "", false
+	}
+	source, destination := binary.BigEndian.Uint16(packet[transport:transport+2]), binary.BigEndian.Uint16(packet[transport+2:transport+4])
+	for _, port := range ports {
+		if source == port || destination == port {
+			var key [13]byte
+			copy(key[:8], packet[26:34])
+			key[8] = packet[23]
+			copy(key[9:], packet[transport:transport+4])
+			return string(key[:]), true
+		}
+	}
+	return "", false
 }
 
 func htons(n uint16) uint16 { return n<<8 | n>>8 }
@@ -1009,67 +1049,6 @@ func (c *healthPBRCaptureState) assertTraffic(t *testing.T, source, target strin
 		}
 		t.Logf("capture %s -> %s protocol=%d port=%d packets=%d", expected.source, expected.target, expected.protocol, expected.port, n)
 	}
-}
-
-func importedHealthPBRProgram(t *testing.T) (config.Document, string, string) {
-	t.Helper()
-	work := t.TempDir()
-	input, policy := filepath.Join(work, "legacy.yaml"), filepath.Join(work, "policy.yaml")
-	if err := os.WriteFile(input, legacyHealth, 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(policy, legacyHealthPolicy, 0600); err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	command := exec.CommandContext(ctx, filepath.Join(os.Getenv("ROUTERD2_TEST_BIN_DIR"), "routerd"), "config", "migrate", "--policy", policy, input)
-	var review bytes.Buffer
-	command.Stderr = &review
-	body, err := command.Output()
-	if err != nil {
-		t.Fatal(err, review.String())
-	}
-	imported, err := config.Parse(body)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var a, b *serviceconfig.Service
-	for _, resource := range imported.Resources {
-		if resource.Service == nil || resource.Service.Health == nil {
-			continue
-		}
-		switch resource.Service.Health.Interface {
-		case "wan0":
-			a = resource.Service
-		case "wan1":
-			b = resource.Service
-		}
-	}
-	if a == nil || b == nil {
-		t.Fatal("migration omitted a scoped WAN probe")
-	}
-	healthA, healthB := a.ModuleName(), b.ModuleName()
-	source := strings.ReplaceAll(healthPBRProgram, "service.health-a.", healthA+".")
-	source = strings.ReplaceAll(source, "service.health-b.", healthB+".")
-	program, err := config.Parse([]byte(source))
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The CLI supplies the complete probe settings. Native resources supply
-	// this fixture's addresses, routes, marks and conditional failover policy.
-	for i := range program.Resources {
-		r := &program.Resources[i]
-		if r.Service == nil || r.Service.Health == nil {
-			continue
-		}
-		if r.Service.Health.Interface == "wan0" {
-			r.Service = a
-		} else {
-			r.Service = b
-		}
-	}
-	return program, healthA, healthB
 }
 
 const healthPBRProgram = `schema_version: 2

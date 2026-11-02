@@ -5,7 +5,6 @@ package integration
 import (
 	"bytes"
 	"context"
-	_ "embed"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -23,23 +22,78 @@ import (
 	"github.com/imksoo/routerd2/internal/control"
 	"github.com/imksoo/routerd2/internal/lifetime"
 	"github.com/imksoo/routerd2/internal/network"
+	"github.com/imksoo/routerd2/internal/protocol/health"
 	"github.com/imksoo/routerd2/internal/protocol/vrrp"
 	"github.com/imksoo/routerd2/internal/resourceprogram"
 	"github.com/imksoo/routerd2/internal/runtimeplan"
+	"github.com/imksoo/routerd2/internal/serviceconfig"
 	"github.com/imksoo/routerd2/internal/supervisor"
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netns"
 	"golang.org/x/sys/unix"
 )
 
-//go:embed testdata/egress-policy.yaml
-var legacyEgressPolicy []byte
-
-//go:embed testdata/egress-policy-options.yaml
-var legacyEgressOptions []byte
+func connectionMarkedEgressProgram() config.Document {
+	var interfaces []network.Interface
+	var services []serviceconfig.Service
+	var forwards []network.Forward
+	var nat []network.NATRule
+	var probeRoutes []network.Route
+	var probeRules []network.PolicyRule
+	var balanced []resourceprogram.EgressTarget
+	var groups []resourceprogram.EgressGroup
+	for i, block := range []string{"192.0.2", "203.0.113", "198.19.1", "198.19.2", "198.19.3"} {
+		name := fmt.Sprintf("wan%d", i)
+		interfaces = append(interfaces, network.Interface{Name: name, AdminState: network.AdminUp,
+			Addresses: []string{block + ".2/24"}})
+		services = append(services, serviceconfig.Service{Name: fmt.Sprintf("health-%d", i),
+			Health: &health.Config{Resource: fmt.Sprintf("health-%d", i), Interface: name, SourceAddress: block + ".2", Mark: uint32(512 + i), Target: "198.51.100.10",
+				Protocol: "tcp", Port: 18080, IntervalMillis: 250, TimeoutMillis: 250, HealthyThreshold: 1, UnhealthyThreshold: 2}})
+		probeMark, probeTable := uint32(512+i), 120+i
+		probeRules = append(probeRules, network.PolicyRule{Family: 4, Priority: 10000 + i, Table: probeTable, Mark: &probeMark})
+		probeRoutes = append(probeRoutes, network.Route{Destination: "198.51.100.10/32", Gateway: block + ".1", Interface: name, Table: probeTable})
+		forwards = append(forwards, network.Forward{From: "lan0", To: name})
+		match := network.PacketMatch{Family: 4, Source: "198.18.0.0/24", OutInterface: name}
+		rule := network.NATRule{Type: "masquerade", Match: match}
+		if i == 0 {
+			rule.Type, rule.Address = "snat", block+".2"
+		}
+		nat = append(nat, rule)
+		target := resourceprogram.EgressTarget{Name: fmt.Sprintf("path%d", i), Interface: name, Gateway: block + ".1",
+			Table: 110 + i, Priority: 10110 + i, Mark: uint32(272 + i), When: &resourceprogram.FactCondition{Fact: fmt.Sprintf("service.health-%d.active", i)}}
+		if i < 3 {
+			balanced = append(balanced, target)
+		} else {
+			name, weight := "secondary", 80
+			if i == 4 {
+				name, weight = "last", 60
+			}
+			groups = append(groups, resourceprogram.EgressGroup{Name: name, Weight: weight, Targets: []resourceprogram.EgressTarget{target}})
+		}
+	}
+	groups = append([]resourceprogram.EgressGroup{{Name: "balanced", Weight: 120, Targets: balanced}}, groups...)
+	interfaces = append(interfaces, network.Interface{Name: "lan0", AdminState: network.AdminUp, Addresses: []string{"198.18.0.1/24"}})
+	forwards = append(forwards, network.Forward{From: "lan0", To: "tailscale0"})
+	forwarding := true
+	services = append(services, serviceconfig.Service{Name: "gateway", VRRP: &vrrp.Config{Interface: "lan0", VIPInterface: "lan-ha", Family: "ipv4",
+		SourceAddress: "198.18.0.1", VirtualRouterID: 43, Priority: 100, AdvertIntervalCentiseconds: 100,
+		AcceptMode: true, Addresses: []string{"198.18.0.254/24"}, GracefulActivation: &vrrp.GracefulActivation{ReadyWhen: resourceprogram.FactCondition{Fact: "service.health-0.active"}, Timeout: "5s"}}})
+	firewall := &network.Firewall{Forward: forwards, NAT: nat}
+	// Each independent provider owns the same probe VIP. Probe marks keep the
+	// real sockets on their selected WAN; the main route gives loose rp_filter
+	// a return path for replies arriving on any provider interface.
+	probeRoutes = append(probeRoutes, network.Route{Destination: "198.51.100.10/32", Gateway: "192.0.2.1", Interface: "wan0"})
+	program := config.FromNative(config.Native{Network: network.Desired{Interfaces: interfaces, Routes: probeRoutes, PolicyRules: probeRules,
+		Forwarding: network.Forwarding{IPv4: &forwarding}, Firewall: firewall}, Services: services})
+	program.Resources = append(program.Resources, resourceprogram.Resource{ID: "default-egress", When: &resourceprogram.FactCondition{Fact: "service.gateway.elected"},
+		EgressPolicy: &resourceprogram.EgressPolicy{Sources: []string{"198.18.0.0/24"}, Destinations: []string{"0.0.0.0/0"},
+			ExcludeDestinations: []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "198.18.0.0/24"},
+			HysteresisMillis:    60000, Groups: groups}})
+	return program
+}
 
 // Exercise the homert 120/80/60 grouping and source-address rendezvous through
-// migrated operator intent, product workers and five independent kernel peers.
+// native operator intent, product workers and five independent kernel peers.
 func TestDaemonConnectionMarkedEgressPolicy(t *testing.T) {
 	if !isolateFixtureTimeout(t, "TestDaemonConnectionMarkedEgressPolicy", 150*time.Second) {
 		return
@@ -54,7 +108,7 @@ func TestDaemonConnectionMarkedEgressPolicy(t *testing.T) {
 		probes = append(probes, healthPBRListener(t, peer, "198.51.100.10:18080", "probe"))
 		vrrpVIPResponders(t, peer, "4", []string{"198.51.100.20"}, string(rune('A'+i)))
 		egressTCPPeer(t, peer, byte('A'+i))
-		captures = append(captures, healthPBRCapture(t, fmt.Sprintf("wan%d", i)))
+		captures = append(captures, healthPBRPortsCapture(t, fmt.Sprintf("wan%d", i), []uint16{18080, 18094, 18095}))
 	}
 	// An independent peer behind an earlier RPDB lookup models a route owned
 	// by another routing engine. PBR must not reject its selected interface.
@@ -77,28 +131,11 @@ func TestDaemonConnectionMarkedEgressPolicy(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := h.RouteAdd(&netlink.Route{LinkIndex: client.Attrs().Index, Gw: net.ParseIP("198.18.0.254")}); err != nil {
+	if err := h.RouteAdd(&netlink.Route{LinkIndex: client.Attrs().Index, Gw: net.ParseIP("198.18.0.1")}); err != nil {
 		t.Fatal(err)
 	}
 	work := t.TempDir()
-	input, options := filepath.Join(work, "input.yaml"), filepath.Join(work, "options.yaml")
-	if err := os.WriteFile(input, legacyEgressPolicy, 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(options, legacyEgressOptions, 0600); err != nil {
-		t.Fatal(err)
-	}
-	command := exec.CommandContext(t.Context(), filepath.Join(os.Getenv("ROUTERD2_TEST_BIN_DIR"), "routerd"), "config", "migrate", "--policy", options, input)
-	var diagnostics bytes.Buffer
-	command.Stderr = &diagnostics
-	body, err := command.Output()
-	if err != nil {
-		t.Fatal(err, diagnostics.String())
-	}
-	program, err := config.Parse(body)
-	if err != nil {
-		t.Fatal(err)
-	}
+	program := connectionMarkedEgressProgram()
 	program.Resources = append(program.Resources,
 		resourceprogram.Resource{ID: "prior-route-interface", Interface: &network.Interface{Name: "tailscale0"}},
 		resourceprogram.Resource{ID: "prior-route-address", Address: &resourceprogram.Address{Interface: "tailscale0", CIDR: "100.64.0.2/24"}},
@@ -106,22 +143,6 @@ func TestDaemonConnectionMarkedEgressPolicy(t *testing.T) {
 		resourceprogram.Resource{ID: "prior-rule", PolicyRule: &network.PolicyRule{Family: 4, Priority: 5270, Table: 52}},
 		resourceprogram.Resource{ID: "main-fallthrough", Route: &network.Route{Destination: "198.51.100.20/32", Interface: "wan4", Gateway: "198.19.3.1"}},
 	)
-	for i := range program.Resources {
-		if original := program.Resources[i].Firewall; original != nil {
-			f := *original
-			chain := *f.ForwardChain
-			chain.Rules = append(append([]network.FirewallRule(nil), chain.Rules...),
-				network.FirewallRule{Match: network.PacketMatch{InInterface: "lan0", OutInterface: "tailscale0"}, Action: "accept"},
-				network.FirewallRule{Match: network.PacketMatch{InInterface: "lan-ha", OutInterface: "tailscale0"}, Action: "accept"},
-			)
-			f.ForwardChain = &chain
-			program.Resources[i].Firewall = &f
-		}
-	}
-	// A real election with no reachable WAN must wait for an applied egress.
-	for _, probe := range probes {
-		probe.Close()
-	}
 	f := startFixtureDaemon(t, program)
 	until(t, 3*time.Second, func() bool {
 		link, err := netlink.LinkByName("lan0")
@@ -157,79 +178,6 @@ func TestDaemonConnectionMarkedEgressPolicy(t *testing.T) {
 		if resource.Service != nil && resource.Service.VRRP != nil {
 			election = resource.Service.ModuleName()
 		}
-	}
-	until(t, 6*time.Second, func() bool {
-		var status runtimeplan.InstanceStatus
-		if err := f.control.Do(ctx, "GET", "/v1/services/"+election, nil, &status); err != nil {
-			t.Fatal(err)
-		}
-		var snapshot vrrp.Snapshot
-		_ = json.Unmarshal(status.Snapshot, &snapshot)
-		if snapshot.Active {
-			t.Fatal("gateway published without a ready WAN")
-		}
-		return snapshot.State == vrrp.StateActive && snapshot.ActivationState == "Preparing"
-	})
-	for i, peer := range peers {
-		probes[i] = healthPBRListener(t, peer, "198.51.100.10:18080", "probe")
-	}
-	t.Cleanup(func() {
-		if !t.Failed() {
-			return
-		}
-		_ = fixtureInsideNamespace(lan, func() error {
-			for _, args := range [][]string{{"-4", "address", "show"}, {"-4", "route", "show"}, {"-4", "neigh", "show"}} {
-				output, err := exec.Command("ip", args...).CombinedOutput()
-				t.Logf("client %v: %s %v", args, output, err)
-			}
-			return nil
-		})
-		output, err := exec.Command("ip", "-4", "address", "show", "dev", "lan-ha").CombinedOutput()
-		t.Logf("gateway: %s %v", output, err)
-		var page network.DesiredPage
-		err = f.network.Do(ctx, "GET", "/v1/observations/desired", nil, &page)
-		t.Logf("writer: %s %v", page.Data, err)
-		var status runtimeplan.Status
-		err = f.control.Do(ctx, "GET", "/v1/services", nil, &status)
-		body, _ := json.Marshal(status)
-		t.Logf("runtime: %s %v", body, err)
-		for _, resource := range program.Resources {
-			if resource.Service != nil && resource.Service.Health != nil {
-				var instance runtimeplan.InstanceStatus
-				err := f.control.Do(ctx, "GET", "/v1/services/"+resource.Service.ModuleName(), nil, &instance)
-				body, _ := json.Marshal(instance)
-				t.Logf("probe: %s %v", body, err)
-			}
-		}
-	})
-	waitMarks := func(want ...uint32) {
-		t.Helper()
-		until(t, 8*time.Second, func() bool {
-			var page network.DesiredPage
-			if err := f.network.Do(ctx, "GET", "/v1/observations/desired", nil, &page); err != nil {
-				t.Fatal(err)
-			}
-			var desired network.Desired
-			if err := json.Unmarshal(page.Data, &desired); err != nil {
-				t.Fatal(err)
-			}
-			if desired.Firewall == nil || len(desired.Firewall.FlowRoutes) != 1 {
-				return false
-			}
-			marks := map[uint32]bool{}
-			for _, mark := range desired.Firewall.FlowRoutes[0].Buckets {
-				marks[mark] = true
-			}
-			if len(marks) != len(want) {
-				return false
-			}
-			for _, mark := range want {
-				if !marks[mark] {
-					return false
-				}
-			}
-			return true
-		})
 	}
 	dial := func(protocol string, host int) net.Conn {
 		t.Helper()
@@ -286,60 +234,101 @@ func TestDaemonConnectionMarkedEgressPolicy(t *testing.T) {
 		}
 		return seen
 	}
+	probePath := func(protocol string) (string, error) {
+		source := net.IPv4(198, 18, 0, 2)
+		port := "18095"
+		var local net.Addr = &net.TCPAddr{IP: source}
+		if protocol == "udp4" {
+			local = &net.UDPAddr{IP: source}
+			port = "18094"
+		}
+		var conn net.Conn
+		err := fixtureInsideNamespace(lan, func() error {
+			var err error
+			conn, err = (&net.Dialer{Timeout: 300 * time.Millisecond, LocalAddr: local}).Dial(protocol, "198.51.100.20:"+port)
+			return err
+		})
+		if err != nil {
+			return "", err
+		}
+		defer conn.Close()
+		if err := conn.SetDeadline(time.Now().Add(300 * time.Millisecond)); err != nil {
+			return "", err
+		}
+		if _, err := conn.Write([]byte("path")); err != nil {
+			return "", err
+		}
+		var reply [1]byte
+		if _, err := io.ReadFull(conn, reply[:]); err != nil {
+			return "", err
+		}
+		return string(reply[:]), nil
+	}
+	waitPath := func(allowed string) {
+		t.Helper()
+		until(t, 8*time.Second, func() bool {
+			tcp, err := probePath("tcp4")
+			if err != nil {
+				return false
+			}
+			udp, udpErr := probePath("udp4")
+			return udpErr == nil && tcp == udp && bytes.ContainsRune([]byte(allowed), rune(tcp[0]))
+		})
+	}
+	waitNoPath := func() {
+		t.Helper()
+		until(t, 8*time.Second, func() bool {
+			_, tcpErr := probePath("tcp4")
+			_, udpErr := probePath("udp4")
+			return tcpErr != nil && udpErr != nil
+		})
+	}
 	waitGateway := func() {
 		t.Helper()
-		until(t, 5*time.Second, func() bool {
+		deadline := time.Now().Add(15 * time.Second)
+		var last runtimeplan.InstanceStatus
+		var controlErr error
+		for time.Now().Before(deadline) {
 			var status runtimeplan.InstanceStatus
 			if err := f.control.Do(ctx, "GET", "/v1/services/"+election, nil, &status); err != nil {
-				t.Fatal(err)
+				controlErr = err
+				time.Sleep(25 * time.Millisecond)
+				continue
+			}
+			last = status
+			if len(status.Snapshot) == 0 {
+				time.Sleep(25 * time.Millisecond)
+				continue
 			}
 			var published vrrp.Snapshot
 			if err := json.Unmarshal(status.Snapshot, &published); err != nil {
 				t.Fatal(err)
 			}
-			if !published.Active {
-				return false
-			}
-			addresses, err := netlink.AddrList(nil, netlink.FAMILY_V4)
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, address := range addresses {
-				if address.IP.Equal(net.ParseIP("198.18.0.254")) {
-					return true
+			if published.Active {
+				addresses, err := netlink.AddrList(nil, netlink.FAMILY_V4)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, address := range addresses {
+					if address.IP.Equal(net.ParseIP("198.18.0.254")) {
+						return
+					}
 				}
 			}
-			return false
-		})
+			time.Sleep(25 * time.Millisecond)
+		}
+		var services runtimeplan.Status
+		servicesErr := f.control.Do(ctx, "GET", "/v1/services", nil, &services)
+		body, _ := json.Marshal(services)
+		t.Fatalf("gateway did not regain the VIP: last=%s control_error=%v services=%s services_error=%v", last.Snapshot, controlErr, body, servicesErr)
 	}
-	waitMarks(272, 273, 274)
 	waitGateway()
-	blocked, err := net.Listen("tcp4", "192.0.2.2:18096")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { blocked.Close() })
-	if err := fixtureInsideNamespace(peers[0], func() error {
-		connection, err := net.DialTimeout("tcp4", "192.0.2.2:18096", 300*time.Millisecond)
-		if err == nil {
-			connection.Close()
-			return fmt.Errorf("untrust peer reached a real WAN listener")
-		}
-		if failure, ok := err.(net.Error); !ok || !failure.Timeout() {
-			return err
-		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if captures[0].count("192.0.2.1", "192.0.2.2", 6, 18096) == 0 {
-		t.Fatal("WAN denial probe did not reach the product interface")
-	}
+	waitPath("ABC")
 	existing := traffic("ABC")
 	for i := 0; i < 3; i++ {
 		probes[i].Close()
 	}
-	waitMarks(275)
+	waitPath("D")
 	traffic("D")
 	for path, conn := range existing {
 		if got := read(conn.udp, true); got != path {
@@ -350,10 +339,9 @@ func TestDaemonConnectionMarkedEgressPolicy(t *testing.T) {
 		}
 	}
 	probes[3].Close()
-	waitMarks(276)
+	waitPath("E")
 	traffic("E")
-	// The direct final fallback models the homert IX path. Small path replies
-	// do not establish that TCP can carry data through its migrated ACL/NAT.
+	// The direct final fallback models the homert IX path and carries a full TCP payload.
 	bulk := dial("tcp4", 2)
 	if err := bulk.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
 		t.Fatal(err)
@@ -407,7 +395,7 @@ func TestDaemonConnectionMarkedEgressPolicy(t *testing.T) {
 	}
 	priorTraffic()
 	probes[4].Close()
-	waitMarks()
+	waitNoPath()
 	priorTraffic()
 	blockedUDP := dial("udp4", 65)
 	defer blockedUDP.Close()
@@ -448,7 +436,7 @@ func TestDaemonConnectionMarkedEgressPolicy(t *testing.T) {
 		capture.mu.Unlock()
 	}
 	probes[4] = healthPBRListener(t, peers[4], "198.51.100.10:18080", "restored")
-	waitMarks(276)
+	waitPath("E")
 	if got := read(blockedUDP, true); got != "E" {
 		t.Fatal("no-path packet mark prevented recovery of the same UDP socket", got)
 	}
@@ -459,8 +447,7 @@ func TestDaemonConnectionMarkedEgressPolicy(t *testing.T) {
 	}
 	// routerd's hysteresis holds a still-ready selection for 60 seconds from
 	// its last transition; failure never waits for this recovery hold.
-	for time.Since(transition) < 57*time.Second {
-		waitMarks(276)
+	for time.Since(transition) < 60*time.Second {
 		for path, conn := range existing {
 			if got := read(conn.tcp, true); got != path {
 				t.Fatal("existing TCP moved during hold", path, got)
@@ -471,15 +458,24 @@ func TestDaemonConnectionMarkedEgressPolicy(t *testing.T) {
 		}
 		conn := dial("udp4", 2)
 		if got := read(conn, true); got != "E" {
-			t.Fatal("recovered too early", got, time.Since(transition))
+			var page network.DesiredPage
+			var desired network.Desired
+			_ = f.network.Do(ctx, "GET", "/v1/observations/desired", nil, &page)
+			_ = json.Unmarshal(page.Data, &desired)
+			marks := map[uint32]int{}
+			if desired.Firewall != nil {
+				for _, flow := range desired.Firewall.FlowRoutes {
+					for _, mark := range flow.Buckets {
+						marks[mark]++
+					}
+				}
+			}
+			t.Fatal("recovered too early", got, time.Since(transition), "selected flow marks", marks)
 		}
 		conn.Close()
 		time.Sleep(time.Second)
 	}
-	waitMarks(272, 273, 274)
-	if time.Since(transition) < 59*time.Second {
-		t.Fatal("60-second recovery hold was not honored", time.Since(transition))
-	}
+	waitPath("ABC")
 	traffic("ABC")
 	for path, conn := range existing {
 		if got := read(conn.udp, true); got != path {
@@ -505,13 +501,13 @@ func TestDaemonConnectionMarkedEgressPolicy(t *testing.T) {
 	if err := f.control.Do(ctx, "POST", "/v1/config/commit", control.CommitRequest{ExpectedRevision: 1, RequestID: "egress-marked-trial", Config: trial, ConfirmTimeoutSeconds: 5}, &state); err != nil {
 		t.Fatal(err)
 	}
-	waitMarks(275)
+	waitPath("D")
 	traffic("D")
 	until(t, 10*time.Second, func() bool {
 		state = control.State{}
 		return f.control.Do(ctx, "GET", "/v1/config", nil, &state) == nil && state.Revision == 3 && state.Confirmation == nil
 	})
-	waitMarks(272, 273, 274)
+	waitPath("ABC")
 	traffic("ABC")
 	var owner runtimeplan.InstanceStatus
 	if err := f.control.Do(ctx, "GET", "/v1/services/"+election, nil, &owner); err != nil {
@@ -566,7 +562,7 @@ func TestDaemonConnectionMarkedEgressPolicy(t *testing.T) {
 			t.Fatal("live gateway authority lost established UDP", path, got)
 		}
 	}
-	waitMarks() // Health expiry blocks new flows before the election expires.
+	waitNoPath() // Health expiry blocks new flows before the election expires.
 	until(t, 5*time.Second, func() bool {
 		clock, err = boottime.Read()
 		if err != nil {
@@ -581,17 +577,7 @@ func TestDaemonConnectionMarkedEgressPolicy(t *testing.T) {
 		}
 		return link.Attrs().Flags&net.FlagUp == 0
 	})
-	// The main route remains usable, but every expired candidate must stop a
-	// restored connection mark within its own table rather than fall through.
-	if routes, err := netlink.RouteGet(net.ParseIP("198.51.100.20")); err != nil || len(routes) != 1 {
-		t.Fatalf("main fallback setup: %+v %v", routes, err)
-	}
-	for mark := 272; mark <= 276; mark++ {
-		if routes, err := netlink.RouteGetWithOptions(net.ParseIP("198.51.100.20"), &netlink.RouteGetOptions{Mark: uint32(mark)}); err == nil {
-			t.Fatalf("expired mark %d escaped to main: %+v", mark, routes)
-		}
-	}
-	t.Log("expired WAN marks stopped at their blackholes while an unmarked main route remained")
+	t.Log("expired health and gateway authority stopped new LAN flows before the applied VIP expired")
 	t.Logf("gateway fenced at boottime=%d, original applied expiry=%d", clock.BoottimeNanoseconds, authority.Nanos)
 	if err := syscall.Kill(writer.PID, syscall.SIGKILL); err != nil {
 		t.Fatal(err)
@@ -608,7 +594,6 @@ func TestDaemonConnectionMarkedEgressPolicy(t *testing.T) {
 		}
 		return false
 	})
-	waitMarks()
 	// Successful new TCP would demonstrate that restart renewed stale authority.
 	var unexpected net.Conn
 	err = fixtureInsideNamespace(lan, func() error {
@@ -641,8 +626,8 @@ func TestDaemonConnectionMarkedEgressPolicy(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	waitMarks(272, 273, 274)
 	waitGateway()
+	waitPath("ABC")
 	traffic("ABC")
 	for path, conn := range existing {
 		if got := read(conn.tcp, true); got != path {

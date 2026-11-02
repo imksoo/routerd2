@@ -24,7 +24,7 @@ func buildFlowRoutes(c *nftables.Conn, table *nftables.Table, f *Firewall) error
 	for i, route := range f.FlowRoutes {
 		var buckets *nftables.Set
 		if len(route.Buckets) > 1 {
-			buckets = &nftables.Set{Table: table, Name: fmt.Sprintf("flow_buckets_%d", i), IsMap: true, KeyType: nftables.TypeInteger, DataType: nftables.TypeMark}
+			buckets = &nftables.Set{Table: table, Name: fmt.Sprintf("flow_buckets_%d", i), IsMap: true, KeyType: nftables.TypeInteger, KeyByteOrder: binaryutil.NativeEndian, DataType: nftables.TypeMark}
 			elements := make([]nftables.SetElement, len(route.Buckets))
 			for key, mark := range route.Buckets {
 				elements[key] = nftables.SetElement{Key: binaryutil.NativeEndian.PutUint32(uint32(key)), Val: binaryutil.NativeEndian.PutUint32(mark)}

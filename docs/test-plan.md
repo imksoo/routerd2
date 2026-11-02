@@ -89,6 +89,8 @@ Race Detector・vet・build・秘密情報検査後にまとまりごとに comm
 
 - `health-ready-native105`: `make check-health-pbr` は独立二 WAN namespace peer と実 supervisor/control/network/Health worker で、Health→PBR の障害切替・復旧、worker/supervisor 再起動、古い通知・期限切れ、confirmed rollback、TCP/UDP と packet capture を確認した。対象回線・対象機器は未受入。
 
+- `connection-marked-egress`（2026-11-02）: flow-map keyをnative byte orderで生成していた一方、nftables setの`KeyByteOrder`が未指定だったため、実daemonのTCP/UDPがfallback `E` へ流れる不具合を修正した。`make check-health-pbr DOCKER='sudo -n docker'` で `TestDaemonConnectionMarkedEgressPolicy`、`TestDaemonHealthPBRFailoverAndRecovery`、`TestDaemonEgressRouteHealthyMultipath` の3本すべてが終了0。実supervisor/control/network/Health/VRRP worker、独立WAN Linux peer、kernel route/nftables、pcapで120→80→60の出口選択、即時障害切替、1 MiB TCP、WAN全断時の新規通信停止、既存TCP/UDP維持、60秒復旧保留、confirmed rollback、worker停止・再起動と期限切れ後のgateway/通信復旧を確認した。再開後の復旧待ちは、実際に観測したworker再起動・Health再通知と設定済み5秒graceful activationを含む15秒にした。隔離Linux namespace上の実kernel/実daemon試験であり、homert実機・ONU・NICの受入ではない。raw packet capture・ログ・試験バイナリは記録更新後に削除する。
+
 - `hgw-short-main-20bc21c`: 実HGWへ隔離 macvlan で接続した current main の実daemonと、独立 BusyBox/dhcpcd LAN端末二台で、DHCPv4、DHCPv6 information、SLAAC、委譲RDNSS/search domain、IPv4 DS-Lite/IPv6 HTTPS、学習DNSのUDP/TCP、条件付きforwarderの停止/復帰を確認した。WAN blackhole復帰は0.84秒、続く7,800秒観測では自然PD Renew/Reply 1回、二台の自然DHCP更新、PD worker SIGKILL/正常再起動後の端末通信1.36/3.88秒、DUID/IAID/prefix保持、zero-lifetime RA withdrawal、726周回のIPv4/IPv6 HTTPSと学習DNS UDP/TCPが終了0だった。ONU直結、対象NIC、継続TCP、Tailscale長時間条件、HA、対象構成全体は未受入である。namespace、一時stage、captureは終了時に撤去した。
 - `dhcp-dynamic-dslite-mtu-main-e0ea27e`: 実HGW・current product build・独立Linux namespace clientsで`make check-uplink UPLINK_SECONDS=60`を終了0にした。固定予約を除いたDHCPv4 clientは`.2`、自動clientは`.7`を取得し、動的値から経路を確認した。DS-Lite MTU 1454で1426-byte DF payloadが3/3応答し、router captureの同じICMP id/sequenceをLANと`dslite0`の往復で確認した。前回の1/3 Unreachableは再現しなかったが、原因は未確定。自然PD renewal、outer WANの同一ICMP sequence保存、WAN outage、全daemon restart、実ONU/NIC受入ではない。raw stage/captureは終了時に削除した。
 
@@ -191,7 +193,7 @@ DNS利用とIPv4/IPv6通信、自然DHCPv4更新、PD通常/強制交換と製�
 同じ試験をhomert02/03の実intentに対応する構成で実施する。管理経路と復旧手段を先に確認し、hostの管理設定を変えない。
 実ONUの直結試験には、その回線と対象NICが必要。実HGW経由の結果はONU直結として扱わない。
 
-2026-11-02時点の開発hostには仮想NICしかなく、対象ONU/HGWへつながる専用物理経路がない。対象機受入の次の接続条件は、対象router/NICと独立clientを専用switch port/VLAN経由でONU/HGWへ接続し、WAN/LAN capture点を用意すること。共有本番経路を使う場合は計画停止と復旧手順が必要。homert02の現行設定差分も、既存読取専用guest-agent経路が利用できず未確認のままである。
+2026-11-02時点の開発hostには仮想NICしかなく、対象ONU/HGWへつながる専用物理経路がない。対象機受入の次の接続条件は、対象router/NICと独立clientを専用switch port/VLAN経由でONU/HGWへ接続し、WAN/LAN capture点を用意すること。共有本番経路を使う場合は計画停止と復旧手順が必要。ユーザー指定の `chatty.lain.local:~/homert02/hosts/homert02/router.yaml` と `.../hosts/homert03/router.yaml` の作業コピーを読み取り専用で確認した。両方109 resourceで、DHCPv4のstart/end poolと2予約、DHCPv6 stateless、PD /60、RA O=1/M=0、条件付きDNS/DoH、DS-Lite、60秒の優先選択を含む。remote worktreeは未commitであり、これは宣言設定の確認で実機の稼働状態ではない。
 
 `ops-management-combined-native120` は通常・特殊端末の実際の43,200秒DHCPv4 leaseで、T1のunicast REQUEST、同一XIDのACK、option 54、期限延長、REBINDなしを確認した。全jobは、その後6時間休止していたTailscale経路の最初の新規TCPが固定2秒でtimeoutして終了1だった。snapshotにRunning/online・承認経路・転送規則は残っていたが、復帰時刻の実通信を採らなかったため、DHCP自然更新だけを成功としTailscale継続は未合格とする。次のTailscale試験は起点からの通信成功時刻を測り、固定の接続待機だけで継続性を判断しない。
 
