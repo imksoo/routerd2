@@ -25,9 +25,8 @@ DHCP clientの経路確認では、固定予約を試すケースを除き、実
 
 ## 実通信を判定する基準
 
-試験ごとにこの計画全体を読み直す手順や、調査を回数・経過時間で打ち切る規則は設けない。
-試験する機能の設定・実装・旧 routerd の該当経路を確認し、使う peer、実行版、期待する外部動作と観測点を決める。
-実機依存の動作は実機で受け入れる。実機が使えない間は、その制約を記録して独立して進められる実装を続ける。
+実通信試験の開始直前にこの計画書全体を読み直し、該当する受入項目・既知の失敗や未解決点・peer・実行版・環境・観測条件を確認する。
+計画が現在のコードや実機制約とずれていれば、試験を始める前に計画を直す。実機依存の動作は実機で受け入れ、実機が使えない間もその制約を記録して独立して進められる実装を続ける。
 
 合否は独立 client/peer から見た通信と、必要な packet・kernel 状態で決める。DHCPv4 の端末アドレスは取得した
 lease値を使う。fixture が明示設定した gateway、DNS、固定予約などは、その設定どおりかを確認する。
@@ -89,7 +88,7 @@ Race Detector・vet・build・秘密情報検査後にまとまりごとに comm
 
 ## 現在の状況
 
-2026-11-02に `chatty.lain.local:~/homert02` の homert02/03 設定を読み直した。両方109 resourcesで、WANのDHCPv6-PD `/60` とDHCPv6 Information、委譲LANのRA（M=0/O=1）・stateless DHCPv6、動的DHCPv4 poolとOUI/MAC scope、条件付きDNSとNextDNS/Cloudflare DoH、MTU 1454の4本のDS-Lite、Health付きIPv4出口選択、VRRP/貸出・接続状態同期を使う。二台差分は主に物理interface、node address、VRRP priority/peerである。現在の `scripts/uplink-smoke.py` は実HGWへ接続するが、単一DS-Liteと試験用LAN値を生成する別profileであり、この109-resource構成の受入ではない。次は互換converterを復活させず、この実設定の通信経路をnative ResourceProgramで表現して端末から通す。
+2026-11-02に 提供された homert02/03 設定を読み直した。両方109 resourcesで、WANのDHCPv6-PD `/60` とDHCPv6 Information、委譲LANのRA（M=0/O=1）・stateless DHCPv6、動的DHCPv4 poolとOUI/MAC scope、条件付きDNSとNextDNS/Cloudflare DoH、MTU 1454の4本のDS-Lite、Health付きIPv4出口選択、VRRP/貸出・接続状態同期を使う。二台差分は主に物理interface、node address、VRRP priority/peerである。現在の `scripts/uplink-smoke.py` は実HGWへ接続するが、単一DS-Liteと試験用LAN値を生成する別profileであり、この109-resource構成の受入ではない。次は互換converterを復活させず、この実設定の通信経路をnative ResourceProgramで表現して端末から通す。
 
 DHCPv6 clientの現行受信経路はUDP送信元を読まず、transaction/Client ID等で応答を処理する。比較した旧routerd `cmd/routerd-dhcpv6-client` も `ReadFromUDP` の送信元を捨てており、送信元ポート547固定の条件はない。実HGW runnerのclient addressもACKから読み、固定値とは比較しない。fixture自身が設定したgateway/DNSとの一致だけを確認する。なお、commit `5a652cc` でrunnerの3時間上限を除去し、観測時間を自然更新に合わせて指定できるようにした。長時間の再実行はまだ行っていない。
 
@@ -106,8 +105,10 @@ DHCPv6 clientの現行受信経路はUDP送信元を読まず、transaction/Clie
 - `hgw-short-main-20bc21c`: 実HGWへ隔離 macvlan で接続した current main の実daemonと、独立 BusyBox/dhcpcd LAN端末二台で、DHCPv4、DHCPv6 information、SLAAC、委譲RDNSS/search domain、IPv4 DS-Lite/IPv6 HTTPS、学習DNSのUDP/TCP、条件付きforwarderの停止/復帰を確認した。WAN blackhole復帰は0.84秒、続く7,800秒観測では自然PD Renew/Reply 1回、二台の自然DHCP更新、PD worker SIGKILL/正常再起動後の端末通信1.36/3.88秒、DUID/IAID/prefix保持、zero-lifetime RA withdrawal、726周回のIPv4/IPv6 HTTPSと学習DNS UDP/TCPが終了0だった。ONU直結、対象NIC、継続TCP、Tailscale長時間条件、HA、対象構成全体は未受入である。namespace、一時stage、captureは終了時に撤去した。
 - `dhcp-dynamic-dslite-mtu-main-e0ea27e`: 実HGW・current product build・独立Linux namespace clientsで`make check-uplink UPLINK_SECONDS=60`を終了0にした。固定予約を除いたDHCPv4 clientは`.2`、自動clientは`.7`を取得し、動的値から経路を確認した。DS-Lite MTU 1454で1426-byte DF payloadが3/3応答し、router captureの同じICMP id/sequenceをLANと`dslite0`の往復で確認した。前回の1/3 Unreachableは再現しなかったが、原因は未確定。自然PD renewal、outer WANの同一ICMP sequence保存、WAN outage、全daemon restart、実ONU/NIC受入ではない。raw stage/captureは終了時に削除した。
 
-- `current-main-44620b8-update`: 更新・切戻しの再受入は未実施。現在の開発hostの`ens18`/`ens20`はvirtio_netで、実NIC/ONUは接続されていない。全PID 1切替を行う既存経路はlocal QEMUかPVEで、今回どちらも使わない指示のため起動していない。current main向けAlpine image buildは成功したが、bootせず生成imageを削除した。旧`ops-management-integrated-native125`/`4fcdb89`のPVE更新・明示rollback・Health失敗復帰は過去候補の結果で、現mainの受入へ流用しない。現用homertを止めて代用もしない。
+- `previous-main-44620b8-update-checkpoint`: この過去checkpointでは更新・切戻しの再受入を実施していなかった。実行時の開発hostはvirtio_netのみで、実NIC/ONUは接続されていなかった。旧`ops-management-integrated-native125`/`4fcdb89`のPVE結果は別候補のため、現mainの受入へ流用しない。
 - `current-main-signed-update-rollback`（2026-11-02、release identity `7c1cb3619acb`）: `make check-update-rollback DOCKER='sudo -n docker'` が128.701秒で終了0。ビルドした実行物を使うSSH管理・独立HTTP観測、署名済み更新stage、古いrevision/generation拒否、cancel後のwatermark維持、途中停止したpruneのSSH再起動後回復、trial/recovery状態と再stageを確認した。再起動や自動boot確認はこの試験で実行していない。初回は試験全体の90秒contextが有効な`update prepare`中にfixture SSHを停止したため失敗し、全体期限をGo test管理のcontextへ置き換えて再実行した。
+- `homert-single-dhcp-scope-config`（2026-11-02、source c9d7055）: 旧routerdのDHCPv4 rendererとOUI/MAC scope loweringを確認し、文書用値で書いた単体profileへ通常pool、OUI別pool、2件の予約、DS-Lite MTU 1454/MSS clamp/IPv4 DF処理を反映した。`routerd config validate examples/single-router-dslite-dhcp-dns.yaml` は受理。`make check-dhcp-dns DOCKER='sudo -n docker'` では実supervisor/network/DHCPv4/DNS workerと独立BusyBox clientでDHCP/DNS、scope、owner expiry、fingerprint、unmanaged LAN、DHCP logの各通信試験が通った。実clientによるscope配布は検証されたが、この実行のselectorはMAC指定であり、追加したOUI selectorとprofile全体は実peer受入前である。raw captureは試験終了時に削除された。
+- `current-main-appliance-update-pve`（2026-11-02、release identity `c9d7055d2ed3`）: `make qemu-pppoe DOCKER='sudo -n docker' QEMU_PROFILE=update QEMU_POWER_ACTION=reboot QEMU_UPDATE_BINARIES=...` が終了0。隔離PVEの4 vCPU/4 GiB VM、独立RP-PPPoE AC、ISC DHCPv6、Linux LAN client、通常Alpine imageとPID 1を使用した。動的DHCPv4/gateway/DNS、CHAP、両family TCP/UDP、PD/Renew/RA/SLAAC、再起動後のRebindと同一DUID/IAID/prefix、ext4設定・SSH identity保持、通信中の中断・署名upload、7.68秒後の再起動Ready、確認済み更新、17.9秒の明示rollback、Healthを失わせた候補の自動rollback（113.06秒）とDHCP/DNS/両family通信の復旧を確認した。更新用base/next/damagedは同一sourceからrelease identityだけ変え、damagedはHealth失敗である。初回はrunnerにpublisher実行物がなく、VMをbootする前に止まった。`qemu-pppoe`はupdate binaries指定時に`build-publisher`を依存させるよう修正し、再実行で通過した。VM 151は撤去済み。homertの全native profile、ONU直結、対象NIC/実機は含まない。再実行条件は[更新・rollback試験手順](releases.md#health-and-failure-boundaries)にある。
 
 - Tailscale長時間条件: `b971ea6`の独立Headscale/公式peer試験はworker/PID 1再起動、停止peer復帰、service撤去/再適用後の実通信を確認し、exit通信の再適用復帰は6.344秒だった。6時間無通信後の初回TCPは別の`native120`試験で2秒待ちの後にtimeoutしたが、その後の再試行通信は観測されていないため、製品障害とも復旧成功とも判定しない。current mainにTailscale実装変更はない。`uplink-smoke.py` は長時間動作を指定できるようになったが、観測ループで周期的にWAN通信とtailnet通信を行うため6時間idleの代用にはならない。同じ短時間試験は繰り返さず、実製品と独立peer間を試験前後だけ通信させる実経路が必要である。
 
@@ -206,9 +207,9 @@ DNS利用とIPv4/IPv6通信、自然DHCPv4更新、PD通常/強制交換と製�
 同じ試験をhomert02/03の実intentに対応する構成で実施する。管理経路と復旧手段を先に確認し、hostの管理設定を変えない。
 実ONUの直結試験には、その回線と対象NICが必要。実HGW経由の結果はONU直結として扱わない。
 
-2026-11-02時点の開発hostには仮想NICしかなく、対象ONU/HGWへつながる専用物理経路がない。対象機受入の次の接続条件は、対象router/NICと独立clientを専用switch port/VLAN経由でONU/HGWへ接続し、WAN/LAN capture点を用意すること。共有本番経路を使う場合は計画停止と復旧手順が必要。`chatty.lain.local:~/homert02/hosts/{homert02,homert03}/router.yaml`の作業コピーは両方109 resourceで、node固有のaddress、interface、VRRP role/priority/peer、lease同期先が異なる。共通intentとしてDHCPv4のstart/end poolと2件の予約、DHCPv6 stateless、PD /60、RA O=1/M=0、条件付きDNS/DoH、DS-Lite、60秒の優先選択を確認した。設定ファイルはremote worktreeで未commitのためcommit baselineは固定しておらず、これは実機の適用状態やWAN/LAN通信の確認ではない。
+2026-11-02時点の開発hostには仮想NICしかなく、対象ONU/HGWへつながる専用物理経路がない。対象機受入の次の接続条件は、対象router/NICと独立clientを専用switch port/VLAN経由でONU/HGWへ接続し、WAN/LAN capture点を用意すること。共有本番経路を使う場合は計画停止と復旧手順が必要。`保存設定の hosts/{homert02,homert03}/router.yaml`の作業コピーは両方109 resourceで、node固有のaddress、interface、VRRP role/priority/peer、lease同期先が異なる。共通intentとしてDHCPv4のstart/end poolと2件の予約、DHCPv6 stateless、PD /60、RA O=1/M=0、条件付きDNS/DoH、DS-Lite、60秒の優先選択を確認した。設定ファイルはremote worktreeで未commitのためcommit baselineは固定しておらず、これは実機の適用状態やWAN/LAN通信の確認ではない。
 
-2026-11-02の読み取り専用NIC確認では、設定保管host `chatty.lain.local` に `virtio_net` の `ens18` のみを確認した。ここはONU/HGW試験端点ではない。共通する単体ルーターのintentを一つのnative ResourceProgramに組み合わせた `examples/single-router-dslite-dhcp-dns.yaml` を追加した。CLIで設定を検証する対象であり、実機通信の合格ではない。
+2026-11-02の読み取り専用NIC確認では、開発hostに`virtio_net`のみを確認した。ここはONU/HGW試験端点ではない。`examples/single-router-dslite-dhcp-dns.yaml` は実設定で使うDHCPv4特殊pool/予約、DS-Lite MTU 1454とMSS/DF処理を文書用値で表し、`routerd config validate` で受理された。実daemonと独立クライアントによるこのnative profile全体の通信受入はまだ行っていない。
 
 `ops-management-combined-native120` は通常・特殊端末の実際の43,200秒DHCPv4 leaseで、T1のunicast REQUEST、同一XIDのACK、option 54、期限延長、REBINDなしを確認した。全jobは、その後6時間休止していたTailscale経路の最初の新規TCPが固定2秒でtimeoutして終了1だった。snapshotにRunning/online・承認経路・転送規則は残っていたが、復帰時刻の実通信を採らなかったため、DHCP自然更新だけを成功としTailscale継続は未合格とする。次のTailscale試験は起点からの通信成功時刻を測り、固定の接続待機だけで継続性を判断しない。
 

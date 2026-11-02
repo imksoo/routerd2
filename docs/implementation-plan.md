@@ -1,97 +1,25 @@
-# 現行 routerd と同等の製品にするための実装計画
+# homert02/03の実運用を基準にしたrouterd2初回製品の実装・受入計画
 
-作成日: 2026-10-24。更新日: 2026-11-02。開発中。全体ゴールは継続中。
+更新: 2026-11-02 22:35 UTC。製品コードの基準mainは `c9d7055`。この棚卸し変更はMakefile・設定例・計画文書を更新し、製品コードは変更しない。
 
-2026-11-02: 実HGW一台の短い実daemon試験で、DHCP試験の固定予約/固定IP期待を除き、独立clientが動的に取得した値で経路を検査するよう変更した。DHCPv4/DHCPv6/SLAAC/DNS、worker再起動、DS-Lite/NAT、各10 MB HTTPSとIPv4最大サイズDFを確認。前回のIPv4 `Destination Net Unreachable` は再現しなかったが原因確定ではない。全34 work packageと対象profileの受入は継続中。詳細と未保持packet範囲は[引き継ぎ](pve-codex-handoff.md)に記録する。
+全体ゴールは2026-10-24 11:28:25 UTCに開始した。現時点で9日11時間06分が経過している。機械可読計画の34 work packageは `in_progress` 22件、`planned` 12件で、完了扱いはない。個別試験の成功だけを完成と数えない。
 
-2026-10-31: `sam-wireguard-final-release` で独立旧routerd RR・FRRと実routerd2 process/kernelによるSAM WireGuard→IPIP/BGPを確認。handshake、NATなしTCP/UDP双方向、revokeと元期限切れ後のkernel撤去を実通信で受け入れた。CLOUD-04の/32 mobility/provider action、planned drain、分断復旧、provider liveは継続。
+## 現在の棚卸し
 
-2026-10-31: `sam-mobility-candidate` でclaim所有のIPv4 `/32` をSAM leafのBGPへ投影し、独立FRRで広告と明示revoke/元admission期限切れによる撤回を確認した。暗号化有無を含む4つの実daemon/Linux kernelケースでNATなしTCP/UDPとtunnel/FIB撤去が通過し、`make check`も終了0。単一claimのBGP deliveryを実装した段階であり、claim間のowner移動、provider capture、planned drain、partition recovery、対象機器・cloud acceptanceは残る。
+- `make check` はGo/Python checks、Race Detector、vetを含め終了0。current-mainの署名付きSSH update/rollback統合試験は初回の試験全体90秒context切れを修正し、128.701秒で終了0。これは実SSH管理とrollback状態の受入であり、applianceの再起動受入ではない。
+- current-main `c9d7055` の通常Alpine/PID 1 applianceを隔離PVEで受け入れた。独立Linux LAN clientの動的DHCPv4、PPP/IPv4・IPv6 TCP/UDP、ISC DHCPv6 PD/Renew、再起動後のRebind、署名更新、明示rollback、Healthを失わせた候補の自動rollbackを確認した。自動復旧は113.06秒。試験VMは撤去済み。詳しい条件は[実通信試験計画](test-plan.md)に記録する。
+- 実HGWへ接続したmain由来product build `7c1cb3619acb` で、独立LAN client、DHCPv4/DHCPv6/SLAAC、条件付きDoH、IPv4 DS-Lite/IPv6通信、WAN outage復旧、worker/full restartを実行中。自然PD T1でのRenew/ReplyとDUID/IAID/prefix維持を待っている。現時点で全workerはreadyで、世代の変化はない。
+- このhostの`ens18`/`ens20`はvirtio NIC。実HGWとの通信は確認できるが、NTT ONU直結、対象NIC・実機資格は未受入である。native例の57 resourcesも、homertの109-resource設定全体の受入を意味しない。
 
-2026-10-31: 管理PR #1とHA観測保持修正 `30eaa27` をmainのSAM実装へ統合した。全57設定のPVE版 `ops-management-integrated-native125` は、DNS変更→保存設定復元で同じPD worker・prefix・元期限を保持し、取得DNSと両IP通信ほかの確認まで3.299秒、続く全体再起動も終了0。main統合作業版 `main-management-sam-126` の管理2ケース・SAM4ケースも実daemonで通過した。同じ126のハッシュ一致3実行物を通常125のAlpine起動イメージへ配置した全57設定のPVE試験も、PDと元期限を保持して復元後4.305秒で全通信が成立し、全体再起動後の復帰まで終了0だった。固定SAM所有経路は設定準備時に生成する。native設定からの新規導入、対象の接続先と実測負荷、k8s/pve差分、Cloud SAMの残実装は継続する。
+## 仕切り直した実行順
 
-管理・PD安全な復元は `25e7cf9` としてmainへ公開した。通常APKから新規作成した126版の二台BIOSディスクでも、両方向の実電源断と再参加が終了0だった。全通信の復旧25.881/16.010秒、同じTCPの最大待ち7.196秒。UDPは1,675送信中226期限切れ、DNSは951件中20失敗。元60秒/15秒の条件を維持した。さらに同じ126版を隔離PVE上の実VMへ起動し、SSHを通らない独立端末との15秒単一TCPでIPv4 NAT受信1.275/1.280Gbps、IPv6転送1.228/1.243Gbpsを測定した。NAT送信元とIPv6端末送信元を相手で確認し、SSH用リンクの測定packetは0だった。元の43,200秒DHCPv4 leaseを使ったnative120では、通常・特殊端末がT1でunicast REQUEST/同一XID ACKを完了し、期限を延長した。直後の6時間休止後Tailscale新規TCPは固定2秒待機で一度timeoutした。製品snapshotはRunning/online、承認経路と転送規則を保っており、実通信の復帰時刻を採れていないためTailscale継続の合格には数えない。現mainの隔離実daemon/独立Headscale・公式peerでは、worker/PID 1再起動、peer停止/復帰、Tailscale撤去/再適用を通し、同じpeer選択のIPv4/IPv6 TCP/UDPが復帰した。撤去から再適用後のexit復帰は6.344秒だったが、6時間休止後の同じ条件ではない。これは最小の転送構成であり、DS-Lite・対象回線の負荷合格ではない。次はnative設定からの新規導入と対象WAN/LAN/DS-Lite負荷である。全体ゴールは継続する。
+1. **実HGW自然T1を閉じる。** 現在の実daemon runでRenew/Reply、DUID/IAID/prefix、worker状態、端末通信を観測し、結果と未確認範囲を記録する。raw capture/log、staging、release buildを片付けてから次へ進む。
+2. **homert単体のnative profileを完成させる。** 提供されたhomert02/03設定と旧routerdの該当実装を読み直し、109 resourcesが表す運用動作をnative `ResourceProgram`へ直接記述する。自動変換器や旧prototype互換は作らない。各動作を `equivalent`、明示変更、未対応へ分け、実値のsecretはcommitしない。DHCPv4動的poolと特殊client、WAN DHCPv6-PD/Information、DUID/IAID、RA/SLAAC、条件付きDNS/DoH、DS-Lite/NAT/MTU、BGP、NTP、Tailscale、管理をひとつの一台構成で独立client/peerに通す。
+3. **そのnative profileを通常Alpine/PID 1 applianceで受け入れる。** 隔離PVEの実kernel、独立WAN peer、Linux LAN client、packet captureで初回取得、自然更新、障害/復旧、workerとappliance再起動を確認する。テスト計画のこのprofile項目と実設定を各試験前に読み直し、取得値は動的に観測する。
+4. **一台の結果を二台HAへ広げる。** 同じnative profileでactive/standby、lease/PD引継ぎ、Health→PBR、conntrack/NAT、既存TCPとUDP、新規接続、両方向handoffと復帰を測る。既に通った小さなnamespace試験を繰り返さず、未確認の相互作用だけを実PVE peerで進める。
+5. **残りの34 work packageを計画順に閉じる。** homertで使うCORE/SYS/NET/HA/OPS/EXTの未完了を先行し、その後にPVE/Kubernetes、Cloud SAM/provider、配布/物理qualificationを進める。provider課金・本番切替は既存authorizationの範囲内に限る。全work packageと対象profileが終わるまで完成とは報告しない。
 
-2026-11-01: 現main `20bc21c` を、実HGWに接続した専用 macvlan と独立LAN端末二台で90秒実行した。端末は手動設定なしに DHCPv4、DHCPv6 information、SLAAC、委譲prefixのRDNSS/search domainを取得した。IPv4 DS-Lite・IPv6 HTTPS、学習DNSのUDP/TCP、条件付きforwarderの停止/復帰、WAN blackholeからの両family復帰、PD workerのSIGKILL/正常再起動、全daemon再起動後の端末通信が終了0だった。続く7,800秒観測では自然PD Renew/Replyを1回captureし、独立LAN端末二台の自然DHCP更新、PD worker SIGKILL後1.36秒と正常再起動後3.88秒のDUID/IAID/prefix保持、zero-lifetime RA withdrawal、726周回のIPv4/IPv6 HTTPSと学習DNS UDP/TCPを確認した。ONU直結、対象NIC、継続TCPは未受入である。専用namespaceと一時stageは終了時に撤去した。
-
-ユーザー指定の完了期限: **2026-10-29 16:56:38 UTC**（2026-10-28 16:56:38 UTCから24時間）。
-全34項目と実環境での利用可能性が完了条件。部分成功へ縮小せず、期限時点でも未成立は未成立と報告する。
-旧routerdの実装を取り込み、独自のLAN配布エンジンを置換する。動く単体構成、二台運用、残る製品機能と
-配備・更新・復旧を順に通し、実通信を妨げる不足を優先する。全面的な新規実装や試験基盤の拡張を先行させない。
-
-過去のcheckpoint列挙を削除した。過去の試験・API・保存形式の維持を実装制約にしない。
-[AGENTS.md](../AGENTS.md) に従い、機能と実通信を満たす簡潔な構造へ作り直す。
-現在の変更・実行結果・残作業は [引き継ぎ](pve-codex-handoff.md) を参照する。
-2026-10-31 05:44 JST: 全57設定の通常Alpine二台で、chronydの校正値を時計更新ごとに保存し、両方向の実電源断から全経路が30.107/18.288秒で復帰した。NTP採用4.314/4.269秒、同じTCP/NATを保持した。最大TCP待ち7.713秒、UDP1690送信/1495受信/195期限切れ、最大無応答5.047秒、DNS933件中16失敗。元60秒・端末15秒・NTP採用条件は維持した。前版は校正済み55.94ppmから再起動時1000000ppmへ戻り、NTPだけで130.537秒を要した。自然更新の二系統は別版で継続しており、この短時間成功へ合算しない。
-2026-10-31 03:10 JST: BGPの確定アドレス族の再生成を除きGR通知を保持した。続いてchronydの実測補正値を最短1分で保存し、
-通常Alpine二台で予備系復帰途中の追加電源断まで全経路が22.428/19.421秒で復帰した。同じTCP/NATを保持し、NTP再採用4.283秒。
-TCP最大待ち14.506秒、UDP252/1515件、DNS20/831件の失敗は記録する。元60秒/端末15秒は変更していない。
-旧lease/sticky初期取込、DNS監視期限の独立、実設定適用のOTLP計測も通常製品と独立端末で確認した。
-2026-10-31 03:50 JST: DHCPの二重ownerを除く通常候補で、旧主系不在時の新端末自動取得・DNS/IPv4 TCPUDP、
-再参加後の新旧端末更新、同期断/復帰と既知のlease/保持履歴引継ぎが成立した。全設定二台へ統合する。
-相手から一度も受信しなかった休止端末の割当は、旧非同期転送と同じく完全保護を保証しない。poolの暗黙分割は行わない。
-旧LAN6時間観測と実HGW7800秒は途中失敗した。`27fbad2`は適用ACK喪失が送信元候補を消す依存を除き、
-専用実HGW180秒で同じ22秒保存遅延を与えても706回の経路欠落0、通信と再起動まで終了0。
-注入なしのnative95のPD自然T1は10月31日06:45:46 JST、元LAN/native93のT1は10:20:47 JST。
-7800秒コホートを再現へ転用した誤りを記録し、以後は別stageの短時間専用試験へ限定する。
-対象機器、k8s/pve、Cloud SAMと全34項目の残りを継続する。
-
-## 2026-10-30 11:05 JSTの実行分担と見通し
-
-単体構成は10:30 JST起算の6〜12時間を暫定枠として維持する。主担当が動的ローカルDNSと全homertの統合を進め、補助担当が二台の3秒適用応答timeout、別担当がIPIP→BGP→端末通信を別worktreeで進める。単体候補をまとめた後の約130分自然更新観測中にも独立作業を継続する。二台受入の4〜8時間は単体完成後の目安であり、未特定のtimeout修正時間は含められていない。固定期限は既に超過し、これらは期限延長や全体完成の約束ではない。
-
-Cloud SAMは旧routerdの型付きPoolPlan（配置・address・BGP・provider action・local dataplane・FIB判定）と所有権/fence規則を再利用する。旧controllerのSQLite動的statusやresource再生成を丸ごと移植せず、現在の単一writerとBGPへ接続する。旧AWS/Azure/OCI実行部はそれぞれ外部CLIを呼ぶ。少数Goバイナリーという目標に沿うprovider API/auth、保存・再実行、transport/enrollmentとの接続は未実装で、配線だけでは完了しない。
-
-ローカルに各providerの設定ファイルとCLIはあるが資格情報の有効性は未確認。現行の14guest（router10/client4）環境は配置されておらず、新規課金環境の契約も未確認である。既存の旧受入契約の予算を今回の作成許可と解釈しない。対象実機、Cloud SAM、OS A/B、UI等を含む全34項目の実装・環境待ちには裏付けた上限時刻がまだない。CLIの存在や旧版の成功を現行製品の完成に数えない。
-
-## 実行順序
-
-全34 work packageの範囲は維持し、次の順で実際の運用を完成させる。
-
-1. **homert02/03**: 最新の実設定・条件で変わる稼働状態と旧routerdを読み、一台分の通信を完成させ、
-   次に二台の切替・復旧を通す。WAN/LANのIPv4/IPv6、DS-Lite、実際の経路選択と代替回線、
-   DHCP/PD/RA、学習DNSから上流の名前解決と端末配布、filter/NAT/MTU/MSS、BGP・管理経路を対象とする。
-   HA-01の現行運用上の不足、HA-02のDHCP/PD同期、HA-03の接続状態同期、EXT-02のTailscaleを優先する。
-   大項目の全機能を形式的な着手条件にしない。確認した実設定にないPPP方式追加は先行させない。
-   通常更新・回線断/復帰・再起動・二台切替/復旧を実相手と端末で確認し、必要なaddress・PD・貸出・
-   接続状態を引き継ぐ。既存TCP/UDPの継続と新規接続の復旧を分ける。配備・負荷・管理・更新復旧・
-   戻し方を確認し、手動補修や残存設定へ依存しない。本番切替はこの順序指定では実行しない。
-2. **k8s-rt / pve-rt**: homertの置換条件を満たした後、実設定・経路・接続先・冗長化・配備条件を
-   調べて差分を実装する。順番は実際の依存関係で決める。名前からCNIや仮想化構成を推測しない。
-3. **Cloud SAM**: `routerd-labs`の`docs/concepts/cloudedge-sam.md`、
-   `docs/operations/cloud-sam-rearchitecture-goal.md`、`cloud-sam-representative-redundancy.md`、
-   `cloud-sam-full-topology-minimal.md`（確認版`a0b1b3b`）と旧baselineとの差を読む。
-   参加認証/取消と構成配布、RR/接続nodeのWireGuard/FOU・BGP、/32所有判断とローカル転送/計画移動、
-   クラウド観測/操作・実通信/引継ぎ/復旧の順にCLOUD-01〜04を進める。入力を一度正規化し、
-   所有判断を一度行い、型付き決定を適用する。状態表示や合成旧resourceへ戻さない。
-   選択したIPv4 /32をオンプレミス・AWS・Azure・OCI間で移し、NATなしで送信元/宛先を保つ双方向通信を確認する。
-   経路・所有者・実捕捉を一致させ、同優先度の奪い返し抑制、意図した優先度復帰、計画移動の順序、
-   参加取消と分断/復旧を通す。突然のnode喪失時の新規復旧と既存TCP継続を分ける。
-   新しい有料環境や本番操作の許可は推定しない。
-
-直近はcontrol交換・永続再起動・影響するHealth→PBRを収束させ、homertの不足へ進む。
-全機能の監査台帳や専用試験基盤を先に作らず、実際に必要な依存経路を小さく完成させる。
-
-2026-10-31 07:28 UTC: `sam-transport-release`で、実SAM admission結果を用いたIPIP/BGP runtime lowering、独立RR/FRRとLinux kernel経由の無NAT TCP/UDP双方向転送、packet capture、revoke/元期限切れ後のtunnel/FIB撤去を確認した。CLOUD-03のcomponent機能を超えて実データパスが一段進んだ。一方、WireGuard/FOU暗号化、/32 mobility/provider操作、計画drain、実機・cloud受入は残る。全34項目の完成とは扱わず、これを足場にSAM移動経路を続ける。
-
-### homertの現状確認（2026-10-27、読み取り専用）
-
-現行設定とControl APIを両nodeで確認した。homert02はmaster/activation Ready、homert03は
-backup/Standby。いずれもpreempt=falseで、優先度は150/100。主系はPD取得中で、選択経路は
-PDを使うDS-Liteの分散経路。待機系は代替経路を選んでいる。設定にPPPはない。
-両系でTailscaleはRunning/online、conntrackdのserviceはactive。conntrackdはFTFW、外部cache有効、
-起動時再同期、TCP window tracking無効、expectation同期有効という設定だった。
-表示上Runningであることを、同期内容や既存TCP継続の確認とは扱わない。
-主系のDHCPv4/PD同期はSyncedで15秒間隔。DHCPv6 serverはstatelessで、
-PD由来DNSとdomain-searchを配り、待機系ではWhenFalseにより停止する。
-この運用のためにstateful DHCPv6の全pool機能を先行条件へ追加しない。
-
-次の実装は、既存VRRP admissionとwriterの責任範囲に沿ったHA-03の接続状態引継ぎと、
-HA-02の貸出・PD identity/期限の引継ぎを対象とする。実績のあるconntrackdの実装・昇格経路と
-native workerを比較し、外部cacheのkernel適用を終えてからVIP/転送を公開する。
-同じTCP socketとUDP mappingで切替・復帰を確認し、新規接続の成功とは区別する。
-DNS配布・管理経路を保った一台分の通信、二nodeのWAN/LAN identityとPD、実際の
-standby時の停止条件も合わせて通す。routerd2による置換や本番切替はまだ行っていない。
+各実通信試験の直前に `docs/test-plan.md` 全体を読み直し、該当条件・既知の失敗・peer・実行版・観測点を確かめる。計画が現在の実装や環境とずれていれば開始前に直す。短いfixture値を製品要件にしない。独立作業は長時間lease観測と並行する。失敗は製品・fixture・環境に切り分け、修正後に同じ実通信を再確認する。終わった試験は要約と再実行手順だけを残し、不要なraw dataとbuild outputを削除する。
 
 ## 1. 基準と到達点
 

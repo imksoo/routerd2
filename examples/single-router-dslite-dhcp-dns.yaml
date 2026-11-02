@@ -17,6 +17,13 @@ resources:
       forward:
         - {from: lan0, to: dslite0}
         - {from: lan0, to: wan0}
+      mss_clamp:
+        - {from: lan0, to: dslite0, family: 4, mtu: 1454}
+        - {from: dslite0, to: lan0, family: 4, mtu: 1454}
+        - {from: lan0, to: wan0, family: 6, mtu: 1500}
+        - {from: wan0, to: lan0, family: 6, mtu: 1500}
+      ipv4_clear_df:
+        - {from: lan0, to: dslite0}
   - id: lan-dslite-nat
     nat:
       - type: masquerade
@@ -86,6 +93,19 @@ resources:
           domain: home.arpa
         authoritative: true
         max_leases: 200
+        scopes:
+          - name: special-devices
+            match: {ouiPrefixes: ["02:00:00"]}
+            prefix: 192.0.2.0/24
+            start: 192.0.2.32
+            end: 192.0.2.63
+            lease_seconds: 43200
+            router: 192.0.2.1
+            dns_servers: [192.0.2.1]
+            domain: home.arpa
+        reservations:
+          - {mac_address: "02:00:00:00:00:01", hostname: printer, ip_address: 192.0.2.10}
+          - {mac_address: "02:00:00:00:00:02", hostname: storage, ip_address: 192.0.2.11}
   - id: service/internet
     depends_on: [interface/wan0]
     ready_when: {fact: service.internet.active}
@@ -98,6 +118,7 @@ resources:
         source_delegation: b4-source
         aftr_from: wan-pd
         dns_from: [wan-pd, wan-ra]
+        mtu: 1454
         b4_address: 192.0.0.2/32
         b4_peer: 192.0.0.1/32
         route_gateway: 192.0.0.1

@@ -1,16 +1,22 @@
 # routerd2 開発引き継ぎ
 
-更新: 2026-11-03 06:34 JST。最初の製品は未完成であり、[実装計画](implementation-plan.md)、[機械可読台帳](implementation-plan.json)、[試験計画](test-plan.md)、[AGENTS.md](../AGENTS.md)を基準に進める。各実通信試験の直前に試験計画の実行手順と対象項目を読み直す。対象本番の置換はしていない。
+更新: 2026-11-02 UTC。製品コードの基準mainは `c9d7055`。製品は未完成で、全34 work packageと対象環境の受入が残る。この変更ではsigned update profileのpublisher build依存修正と、DHCPv4 special scope/reservationおよびDS-Lite MTU/MSSを含めた単体ルーター例を追加した。PVE更新受入、設定compile、独立BusyBox DHCP実通信を確認した。
 
-## 次の開発順序（2026-11-03）
+## 現在の結果
 
-作業起点はcurrent `main` の `10c2dd0`。`b508524` と `703aaf9` で追加した、homert02/03 と機能・安全性の意図を照合する native `ResourceProgram` 設定例と対応表も含まれる。旧 routerd 設定の自動変換、旧設定形式との互換読み込み、既存設定の自動適用は実装しない。対象機へ導入するときは、native 設定を新たに組み立てる。
+- current-main通常Alpine/PID 1 applianceを隔離PVEで起動。独立Linux LAN clientの動的DHCPv4、PPP、両family TCP/UDP、独立ISC DHCPv6のPD/Renew、再起動後のRebind、signed update、明示rollback、Health失敗時の自動rollbackを確認。VMは撤去済み。詳細と未確認範囲は[試験計画](test-plan.md)を参照。
+- 実HGWへ接続したcurrent-main product pathは独立clientと通信中。DHCPv4/DHCPv6/SLAAC、条件付きDoH、DS-Lite/IPv6通信、WAN outage/recovery、worker/full restartを通過し、自然PD T1のRenew/Replyを待っている。実行hostからNTT ONUへ直接接続した試験ではない。
+- `make check`、Race Detector、vetは通過済み。二WAN Health/PBRの実daemon・独立peer・TCP/UDP/packet-capture試験も完了記録あり。個別合格を全体受入に流用しない。
 
-1. 旧VM 151 `routerd2-dhcp-natural-1793418547` は2026-11-02 07:04 UTCに停止・削除済みで、元のdriver/logも残っていない。`/run/routerd/network.sock` がなかったという観測だけではworker停止原因を特定できない。再利用可能な `scripts/qemu-pppoe-peer.py` のPVE所有VM管理・cleanupを修正し、current main `10c2dd0` のapplianceを `make qemu-pppoe` で再構築・起動した。独立PPPoE/ISC DHCPv6 peerとLinux clientによるDHCPv4/DNS、PD/SLAAC、両family TCP/UDP、PPP/control/peer再起動復旧、正常停止を終了0で確認した。元のVM障害原因の解明とは区別する（結果は試験計画）。
-2. current `main` の一台構成を PVE の隔離 WAN・LAN・管理リンク、独立した WAN peer と LAN client で実行する。DHCPv4、DHCPv6 PD、RA、取得 DNS、DS-Lite、NAT、IPv6 転送、MTU/MSS、端末と WAN の自然更新、対象通信負荷を、実プロセス・kernel・packet capture で確認する。任意の試験時間や回数を新設せず、設定された lease と障害条件に従う。
-3. homert02/03 の保存設定を読み取り専用で再照合し、変換ではない native 設定を隔離 PVE で組み立てる。機能または安全性が対応しない項目は、対応済みと扱わず明記する。実状態移行は、単体構成の通信結果が得られてから隔離環境だけで予行する。
-4. 二 WAN、二台 HA、Tailscale の長時間接続、更新、明示切戻し、自動復旧を、この順に既存 PVE 手順で確認する。対象本番の切替、配備、稼働中サービス停止、共有 bridge の変更は、明示承認なしに行わない。
-5. 終了した各隔離試験では、結果要約と再実行手順を残し、VM、ディスク、鍵、packet capture、作業ディレクトリを撤去する。GitHub の `main` と作業ツリーの状態を照合してから次の段階へ進む。
+## 仕切り直した順序
+
+1. 実HGWの自然T1を観測し、終了後raw capture/log、stage、build outputを削除する。
+2. 保存中のhomert02/03実設定と旧routerdの実装を再照合し、109-resource運用を表すnative `ResourceProgram`を組む。設定変換器や旧prototype互換は作らない。secretはcommitしない。
+3. 通常Alpine/PID 1の一台構成を独立WAN peer・Linux LAN client・packet captureで受け入れ、次に同じprofileを二台HAで切替・復旧する。
+4. 残る34 work packageを依存順に閉じ、PVE/Kubernetes、Cloud SAM/provider、配布と物理 qualification へ進む。
+5. 各試験の直前に [実通信試験計画](test-plan.md) 全体を読み、peer・実行版・観測条件を揃える。計画と実環境がずれていれば開始前に修正する。終了後は要約・再実行手順だけを残す。
+
+現在のhostには直接ONU接続の物理NICがなく、実機 qualification は未実施。作業の全体順序と完了条件は[実装計画](implementation-plan.md)、各packageの詳細は[機械可読台帳](implementation-plan.json)を参照する。
 
 ## 現在の実装
 
@@ -98,7 +104,7 @@ DHCPv6 PD の再起動後 Rebind と、不良 candidate から known-good runtim
 
 物理試験を開始するには、専用switch VLAN/portとONU/HGWへ至る専用回線、または既存経路の計画停止のいずれかが必要である。前者なら、新規の隔離VMまたは専用機へ三NICを接続し、試験専用のIPv4/IPv6 address、DHCP identity、観測用LAN client、WAN/LAN capture点を割り当てる。開始直前と切戻し後に、対象VM設定、NIC link/route、routerd設定のSHA-256を読取比較する。後者ではhomert02/03停止または物理ケーブル差替えの範囲、予定時間、旧VM再起動と元bridge/NIC/route hash一致を切戻し条件として明示した承認が必要である。現時点ではいずれの変更も実施していない。
 
-2026-11-02: ユーザーが示した `chatty.lain.local:~/homert02` の設定を読み取り専用で確認した。homert02/03は各109 resourceで、NTPはDHCPv6 informationから学習するsourceと `ntp.jst.mfeed.ad.jp` / `ntp.nict.jp` の条件付きstatic fallbackを使う。続いてcurrent source treeから `make check-ntp-dhcp6 DHCP6_SERVER=/usr/sbin/dhcpd DOCKER='sudo -n docker'` をexit 0で実行した。実supervisor/control/network/NTP/DHCPv6/VRRP worker、ISC DHCPv6、Keepalived、chronyd、独立LAN chronyd、実DNS peerを使い、設定中の両hostnameをDNS照会し、実NTP packet drop後の復旧、learned source期限切れ/fallback/reacquisition、VRRP切替、supervisor/control停止中の期限切れと復旧、LAN NTP応答をpcapで確認した。これは独立Linux namespaceの実通信であり、homertのDoH/条件付きDNSサービスそのもの、通常PD lifetime、実ONU/NIC、全設定を載せたPVE VM受入ではない。リモートrepo/configは変更していない。PVE VM IDと実行時設定差分は未確認で、現在の開発hostには仮想NICしかない。対象機器での受入には、隔離L2接続先、独立有線client、WAN/LAN capture点が必要である。既存共有経路を使う場合は計画停止と復旧手順が必要。
+2026-11-02: ユーザー提供のhomert02/03設定を読み取り専用で確認した。homert02/03は各109 resourceで、NTPはDHCPv6 informationから学習するsourceと `ntp.jst.mfeed.ad.jp` / `ntp.nict.jp` の条件付きstatic fallbackを使う。続いてcurrent source treeから `make check-ntp-dhcp6 DHCP6_SERVER=/usr/sbin/dhcpd DOCKER='sudo -n docker'` をexit 0で実行した。実supervisor/control/network/NTP/DHCPv6/VRRP worker、ISC DHCPv6、Keepalived、chronyd、独立LAN chronyd、実DNS peerを使い、設定中の両hostnameをDNS照会し、実NTP packet drop後の復旧、learned source期限切れ/fallback/reacquisition、VRRP切替、supervisor/control停止中の期限切れと復旧、LAN NTP応答をpcapで確認した。これは独立Linux namespaceの実通信であり、homertのDoH/条件付きDNSサービスそのもの、通常PD lifetime、実ONU/NIC、全設定を載せたPVE VM受入ではない。リモートrepo/configは変更していない。PVE VM IDと実行時設定差分は未確認で、現在の開発hostには仮想NICしかない。対象機器での受入には、隔離L2接続先、独立有線client、WAN/LAN capture点が必要である。既存共有経路を使う場合は計画停止と復旧手順が必要。
 
 同日、管理hostの実HGW接続に、別MAC・private network namespace・独立LAN clientだけを作る`make check-uplink UPLINK_SECONDS=60`をcurrent `4dc020c`で実行した。WAN RA/DHCPv6 PD初回交換、実AFTR DS-LiteとIPv4復路、LAN DHCPv4/DHCPv6/SLAAC、IPv4/IPv6 HTTPS、学習DNS UDP/TCP、条件付きDNS障害/復帰、PD workerのSIGKILL/正常再起動、zero-lifetime RA撤去を確認した。自然PD Renewは既存の7,800秒受入結果を再利用し、この60秒試験では待たなかった。namespace、別MAC、capture、stateは終了時に削除した。本番homert02/03、管理address、IPv4/IPv6 route、resolver、PVE VM設定は操作しなかった。route/resolver/PVE設定のhashは開始前後で一致した。管理interfaceの生JSONにはDHCP lifetimeが含まれて毎秒変わるため、今後の比較はaddress本体のみを正規化してhash化する。これはONU直結、物理NIC MTU/PMTU、連続TCPまたは切替受入ではない。
 
@@ -121,7 +127,7 @@ DHCPv6 PD の再起動後 Rebind と、不良 candidate から known-good runtim
 
 2026-11-01: current main `f046419` で `sudo make check-health-pbr` を実行した。実supervisor/control/network/Health workerと独立二WAN/LAN namespace peerを使う `TestDaemonConnectionMarkedEgressPolicy`、`TestDaemonHealthPBRFailoverAndRecovery`、`TestDaemonEgressRouteHealthyMultipath` が通過した。各ケースはTCP/UDPとpacket capture、Health worker/supervisor再起動、古い通知、期限切れ、confirmed rollbackを含む。試験stageとraw logは終了後に削除した。対象PVE二VM、実ONU/HGW/NICの受入ではない。
 
-2026-11-01: current main `0d77003` の正規 appliance image（manifest `RELEASE_ID=0d770030664d`）で、`make qemu-pppoe QEMU_PVE_HOST=root@pve07.lain.local QEMU_PVE_JUMP=chatty.lain.local` を終了0にした。新規隔離 PVE VM（4 vCPU、4 GiB、既存 bridge/NIC なし）をPID 1として起動し、独立PPPoE AC・ISC DHCPv6 server・DNS peer・Linux LAN clientと接続した。LAN DHCPv4、CHAP、DHCPv6 PD/SLAAC、DNS UDP/TCP、IPv4/IPv6 TCP/UDP、PD Renew、PPP worker restart、control restart後の20秒継続通信を確認した。captureではzero-lifetime RAがPADTに先行し、DHCPv6 Releaseを送らず、DUID・設定revision・DNS worker generationを保持した。VM 182、PVE stage、raw capture、serial/peer log、local stageは結果記録後に削除済みである。これは実ONU/HGW/NICまたは二台HAの受入ではない。同じcommitで`make check`（test、全体Race Detector、vet、Python checks）は終了0である。
+2026-11-01: current main `0d77003` の正規 appliance image（manifest `RELEASE_ID=0d770030664d`）で、`make qemu-pppoe QEMU_PVE_HOST=root@authorized-pve QEMU_PVE_JUMP=authorized-jump` を終了0にした。新規隔離 PVE VM（4 vCPU、4 GiB、既存 bridge/NIC なし）をPID 1として起動し、独立PPPoE AC・ISC DHCPv6 server・DNS peer・Linux LAN clientと接続した。LAN DHCPv4、CHAP、DHCPv6 PD/SLAAC、DNS UDP/TCP、IPv4/IPv6 TCP/UDP、PD Renew、PPP worker restart、control restart後の20秒継続通信を確認した。captureではzero-lifetime RAがPADTに先行し、DHCPv6 Releaseを送らず、DUID・設定revision・DNS worker generationを保持した。VM 182、PVE stage、raw capture、serial/peer log、local stageは結果記録後に削除済みである。これは実ONU/HGW/NICまたは二台HAの受入ではない。同じcommitで`make check`（test、全体Race Detector、vet、Python checks）は終了0である。
 
 2026-11-01: current main `68846a3` の実HGW接続 `ens18` で、`make check-uplink UPLINK_SECONDS=90 UPLINK_WAN_OUTAGE=1 UPLINK_FULL_RESTART=1` を終了0にした。別MACのprivate namespace内で実daemonを起動し、独立LAN client二台のDHCPv4、DHCPv6、SLAAC、LAN IPv4/IPv6通信、条件付きDNSの障害分離と回復、実HGW WANの遮断・復帰、PD worker SIGKILL/通常再起動、daemon全体再起動、zero-lifetime RA、IPv4/IPv6 HTTPS、学習DNS UDP/TCPを確認した。上流grantはReleaseせず、DUID/IAID/prefixを保持した。namespace、別MAC、capture、raw log、stageは終了確認後に削除した。ONU直結、物理NIC MTU/PMTU、連続TCP、homert02/03本番切替、二WAN/HAの受入はこの結果に含めない。
 
